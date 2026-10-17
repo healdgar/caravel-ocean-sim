@@ -20,7 +20,7 @@ struct Frame {
   screen:   vec4f,     // w, h, 1/w, 1/h
   cascL:    array<vec4f, 2>,  // cascade patch sizes (m), index [c>>2][c&3]
   cascInvL: array<vec4f, 2>,
-  windP:    array<vec4f, 2>,  // [0].xy = wind direction (unit), [0].z = wind speed
+  windP:    array<vec4f, 2>,  // [0].xy = wind direction, [0].z = wind speed; [1] = hull heading, length, beam, reflection enable
   lodP:     vec4f,     // CDLOD base range, grid quads per node, -, -
   post:     vec4f,     // exposure, bloom strength, frame index, -
   atmo:     vec4f,     // haze (mie multiplier), camera altitude km, -, -

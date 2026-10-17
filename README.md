@@ -101,7 +101,7 @@ The WebGPU tests compare the fused FFT with analytical travelling waves across a
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The scene is open ocean only. There is no shoreline, surf, or objects in the water.
+- The scene is open ocean with an optional caravel foredeck. There is no shoreline, surf, or other vessels.
 - Clouds are two flat layers, not volumetric.
 
 ## How it was made
@@ -122,3 +122,74 @@ I built this with Claude Code (Opus 5.5). I asked for the most realistic water i
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Boat perspective
+
+Enable **Ride the boat** in the lower-left panel, or open `ocean.html?boat=1`.
+Set length and beam in metres, speed in knots, heading in degrees (0 along the
+original view, 90 to the right), and eye height above the mean waterline.
+The helm controls the rudder; mouse look is relative to the boat. **Look ahead**
+centres the view. Disable boat mode to return to the free camera.
+
+The camera follows a damped hull pose fitted to a 3 by 3 grid of heights sampled
+from the actual displaced FFT ocean. Larger footprints average over waves;
+length also slows the pitch/heave response and beam slows the roll response.
+Speed changes position and therefore the waves encountered. Live pitch, roll,
+and heave are shown in the panel. This is an approximate displacement-hull ride,
+without hull-specific mass/stability, wake, planing, or slamming physics.
+
+URL options: `boat=1&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=2.4`.
+Run `node --test tests/boat.test.mjs` for the hull-response math checks.
+
+### Caravel prow
+
+The boat view includes a 3D timber foredeck, curved bulwarks, bowsprit, rope stays,
+hatch grating, belaying pins, and iron fittings. Toggle **Show caravel prow** or
+use `prow=0` to hide it; **Hide** collapses the controls. Geometry scales with
+boat length and beam and follows the same hull transform as the camera.
+
+The PBR material uses the live atmospheric sunlight, cloud transmittance, sky
+environment, and current ocean HDR image for visible water reflections and
+approximate bounced light. Offscreen reflections use the environment cube;
+rail shadows are approximate. A separate near-field depth pass keeps wave crests
+from rendering through the foredeck. The neutral oak albedo texture has no
+intentional scene lighting and is embedded into both standalone HTML bundles. It was created
+with the built-in image generation tool using this prompt:
+
+> Seamless weathered oak ship timber base-color texture; fine vertical grain,
+> subtle salt-weathered brown-grey patina, tiny knots and fissures; orthographic,
+> flat unlit color only, no directional illumination, shadows, highlights,
+> ambient occlusion, perspective, plank seams, text, or borders.
+
+### Steering and rendering refinements
+
+Use **A / D** or **left / right arrows** to turn the wheel, **X** or **Centre rudder**
+to return it to neutral. The rudder stays where the wheel is left. The **Rudder**
+slider provides the same control. With mouse look released (Esc), drag the visible
+3D wheel clockwise for starboard or counterclockwise for port. The wheel rotates
+with the actual rudder angle, with a one-turn range in each direction. Turn rate
+builds gradually and decays after centering; rudder authority depends on boat speed
+and length. A stationary boat does not turn under rudder alone.
+
+This is an approximate steering response, without wind-driven sail forces or a
+hull-specific rudder/keel model. A wheel is included as requested rather than as a
+strict historical reconstruction of a caravel's tiller steering.
+
+Reflections now use a roughness-filtered HDR mip chain and blend continuously at
+screen edges. Timber grain follows the individual timbers, spokes, and wheel rim
+using stable local UV coordinates. Detail normals and rope fibres are filtered,
+overlapping plank faces have been removed,
+and cap rails are continuous beveled sweeps. Sea-state-dependent culling bounds
+retain rough-wave crests. Test the math and geometry with:
+
+```
+node --test tests/boat.test.mjs tests/caravel.test.mjs
+```
+
+The joint hotspot was caused by an out-of-range floating-point cosine reaching
+`pow(1 - cosine, 5)` in the caravel Fresnel calculation. On the active GPU this
+could produce invalid HDR values and a large white bloom. All BRDF cosines are
+now clamped to their physical ranges, and the fifth power uses multiplication.
+A 120-frame live capture under the 20 m/s wind / 4 m swell preset showed no white
+hotspot after the correction. This visual check supplements the steering and
+mesh tests; it is not a guarantee for every GPU or lighting configuration.

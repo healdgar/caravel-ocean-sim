@@ -16,6 +16,20 @@
   #panel label { display: grid; grid-template-columns: 1fr 110px 40px; gap: 6px; align-items: center; margin: 3px 0; }
   #panel input { width: 110px; accent-color: #e2a04e; }
   #panel output { text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
+  #boat-panel { position: fixed; left: 12px; bottom: 12px; width: min(290px, calc(100vw - 48px)); max-height: 65vh; overflow: auto;
+    padding: 14px; border: 1px solid #ffffff30; border-radius: 10px; color: #e8e2d6; background: #0b0f14e8; font: 13px/1.4 system-ui; }
+  #boat-panel label { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 12px; }
+  #boat-panel input[type=number] { width: 76px; background: #172532; color: #fff; border: 1px solid #71818d; border-radius: 4px; padding: 5px; }
+  #boat-panel input[type=checkbox] { width: 20px; height: 20px; accent-color: #e2a04e; }
+  #boat-rudder { width:100px; accent-color:#e2a04e; }
+  #boat-panel output { min-width:45px; font-size:11px; text-align:right; }
+  #boat-panel button { margin-right:6px; }
+  #boat-panel p { font-size: 11px; opacity: .8; margin: 8px 0 0; }
+  #boat-panel button { background: #e2a04e; border: 0; border-radius: 4px; padding: 7px 12px; cursor: pointer; }
+  #boat-panel .collapse { float: right; padding: 2px 8px; margin-left: 12px; background: #33424e; color: white; }
+  #boat-panel.compact { width: auto; }
+  #boat-panel.compact > :not(strong):not(.collapse):not(#helm-readout) { display: none; }
+  #panel { max-height: 65vh; overflow: auto; }
   #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
 </style>
 </head>
