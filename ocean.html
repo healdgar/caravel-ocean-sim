@@ -30,6 +30,11 @@
   #boat-panel.compact { width: auto; }
   #boat-panel.compact > :not(strong):not(.collapse):not(#helm-readout) { display: none; }
   #panel { max-height: 65vh; overflow: auto; }
+  #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
+    padding:6px; border-radius:8px; background:#0b0f14df; border:1px solid #ffffff25; }
+  #camera-dock[hidden] { display:none; }
+  #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
+  #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
   #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
 </style>
 </head>
@@ -1411,7 +1416,8 @@ const HEIGHT_PROBE = FRAME_WGSL + /* wgsl */ `
 @group(0) @binding(1) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var<storage, read_write> outH: array<f32, 16>;
-@group(0) @binding(4) var<uniform> boat: vec4f;
+struct ProbeBoat { config: vec4f, origin: vec4f };
+@group(0) @binding(4) var<uniform> boat: ProbeBoat;
 fn dispAt(xz: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
@@ -1419,14 +1425,14 @@ fn dispAt(xz: vec2f) -> vec3f {
   }
   return d;
 }
-@compute @workgroup_size(9)
+@compute @workgroup_size(10)
 fn main(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= 9u) { return; }
-  let forward = vec2f(sin(boat.x), -cos(boat.x));
-  let right = vec2f(cos(boat.x), sin(boat.x));
-  let f = (f32(id.x / 3u) - 1.0) * boat.y * 0.5;
-  let r = (f32(id.x % 3u) - 1.0) * boat.z * 0.5;
-  let goal = F.camPos.xz + forward * f + right * r;
+  if (id.x >= 10u) { return; }
+  let forward = vec2f(sin(boat.config.x), -cos(boat.config.x));
+  let right = vec2f(cos(boat.config.x), sin(boat.config.x));
+  let f = (f32(id.x / 3u) - 1.0) * boat.config.y * 0.5;
+  let r = (f32(id.x % 3u) - 1.0) * boat.config.z * 0.5;
+  let goal = select(boat.origin.xz + forward * f + right * r,F.camPos.xz,id.x == 9u);
   var x0 = goal;
   for (var i = 0; i < 4; i++) {
     let d = dispAt(x0);
@@ -1579,7 +1585,7 @@ const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var<storage, read> sunVis: array<f32, 4>;
-struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f };
+struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
 @group(0) @binding(6) var<uniform> hull: Hull;
 @group(0) @binding(7) var waterScene: texture_2d<f32>;
 @group(0) @binding(8) var dispTex: texture_2d_array<f32>;
@@ -1602,7 +1608,7 @@ fn rotateHull(p: vec3f) -> vec3f {
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f) -> BoatVertex {
   var scale = vec3f(hull.size.x / 3.6, 1.0, hull.size.y / 12.0);
   var local = position; var localN = normal;
-  if (material >= 7.0) {
+  if (material == 7.0 || material == 8.0) {
     scale = vec3f(1.0);
     let angle = -hull.size.w / 35.0 * 6.2831853;
     let c = cos(angle); let s = sin(angle);
@@ -1611,7 +1617,18 @@ fn rotateHull(p: vec3f) -> vec3f {
     local = vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+pivot;
     localN = vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
   }
-  let relative = rotateHull(local * scale - vec3f(0.0, hull.size.z, 0.0));
+  if (material == 14.0) {
+    let angle = -hull.size.w * 0.0174532925;
+    let c=cos(angle); let s=sin(angle); let pivot=vec3f(0.0,-0.6,5.68);
+    let q=position-pivot;
+    local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
+    localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
+  }
+  if (material == 9.0) {
+    let flutter=min(hull.rig.y*0.0015,0.035)*sin(hull.origin.w*2.5+position.x*3.0+position.y*4.0);
+    local.z+=flutter*sin(uv.x*3.14159265)*uv.y*uv.y;
+  }
+  let relative = rotateHull(local * scale) + hull.origin.xyz - F.camPos.xyz;
   var o: BoatVertex;
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
@@ -1669,15 +1686,33 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   // Fine end-grain joints, splits, and oxidised grain.
   let joint = abs(fract((p.z + fract(plank*0.413)*2.0)/2.3)-0.5);
   let jointAA = max(fwidth(joint),0.001);
+  let hullSeamAA=max(fwidth(in.uv.x*18.0),0.001);
+  let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
+  let clothAA=max(fwidth(clothSeam),0.001);
+  let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
   if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
   if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= 0.8; rough = 0.67; }
   let ropeAA=fwidth(p.x+p.y+p.z);
-  if(in.material == 2u) {
+  if(in.material == 2u || in.material == 12u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
     albedo = vec3f(0.28,0.20,0.11) * (0.8+0.2*twist); rough=0.87;
   }
   if(in.material == 4u) { albedo=vec3f(0.012,0.009,0.006); rough=0.92; }
   if(in.material == 3u || in.material == 8u) { albedo=vec3f(0.065,0.07,0.071); rough=0.38; metal=0.85; }
+  if(in.material == 9u) {
+    let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
+    let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
+    let seam=mix(0.78,1.0,smoothstep(0.004,0.013+clothAA,clothSeam));
+    albedo=vec3f(0.66,0.62,0.49)*aged*seam*(1.0+0.025*weave);
+    n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
+  }
+  if(in.material == 11u) { albedo=vec3f(0.018,0.035,0.033); rough=0.3; metal=0.25; }
+  if(in.material == 14u) { albedo*=0.6; rough=0.75; }
+  if(in.material == 15u) {
+    let hullSeam=abs(fract(in.uv.x*18.0)-0.5);
+    albedo*=mix(0.7,0.93,smoothstep(0.004,0.035+hullSeamAA,hullSeam)); rough=0.82;
+    let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.036,0.029,0.02),tar*0.65);
+  }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
   let nh=clamp(dot(n,h),0.0,1.0); let vh=clamp(dot(v,h),0.0,1.0);
@@ -1709,6 +1744,11 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let spec=d*g*fresnel/(4.0*nv*max(nl,0.001));
   var col=(albedo*(1.0-metal)/PI+spec)*direct*nl;
   col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*(f0+(1.0-f0)*(fv2*fv2*fv))*(1.0-rough*0.45);
+  if(in.material == 9u) {
+    let through=max(dot(-n,l),0.0);
+    col+=albedo*sunIlluminance()*sunVis[0]*through*0.28;
+    col+=albedo*sky*0.12;
+  }
   let fog=exp(-F.fogExt.rgb*length(in.world-F.camPos.xyz));
   col=col*fog+skyAtmo(normalize(vec3f(in.world.x-F.camPos.x,0.05,in.world.z-F.camPos.z)))*(1.0-fog);
   return vec4f(col,1.0);
@@ -1775,6 +1815,13 @@ function stepBoatSteering(boat, command, dt) {
   boat.heading = ((boat.heading + (previous + boat.yawRate) * 0.5 * dt * 180 / Math.PI) % 360 + 360) % 360;
 }
 
+// World-space eye anchor; keeping it separate from the vessel allows inspection.
+function boatEyePosition(out, boat) {
+  boatRotate(out, 0, boat.eye, 0, boat.heading * Math.PI / 180, boat.pitch, boat.roll);
+  out[0] += boat.x; out[1] += boat.heave; out[2] += boat.z;
+  return out;
+}
+
 // ---- js/caravel.js ----
 // Timber geometry in metres, authored for a 12 x 3.6 m hull.
 const WHEEL_CENTER = [0, 1.43, -1.7];
@@ -1828,15 +1875,15 @@ function createCaravelMesh() {
       quad(point(a,b),point(A,b),point(A,B),point(a,B),m,[normal(a,b),normal(A,b),normal(A,B),normal(a,B)],[[b/6.283, a*r],[b/6.283,A*r],[B/6.283,A*r],[B/6.283,a*r]]);
     }
   }
-  const width=z=>1.8*Math.sqrt(Math.max(0.0006,1-Math.pow(Math.max(0,-z)/6.4,2)));
-  const deck=z=>0.7+0.47*Math.pow(Math.max(0,-z)/6.4,3);
+  const width=z=>1.8*Math.sqrt(Math.max(0.0006,1-Math.pow(z<0?-z/6.4:z/7.4,2)));
+  const deck=z=>z<0?0.7+0.47*Math.pow(-z/6.4,3):0.7+0.18*Math.pow(z/5.6,2);
   // Fine individual deck boards with a recessed continuous caulk bed.
-  for(let x=-1.8;x<1.8;x+=0.145)for(let z=0.95;z>-6.4;z-=0.16){
+  for(let x=-1.8;x<1.8;x+=0.145)for(let z=5.6;z>-6.4;z-=0.16){
     const end=Math.max(-6.4,z-0.16),l=Math.max(x,-width(z)+0.04,-width(end)+0.04),r=Math.min(x+0.140,width(z)-0.04,width(end)-0.04);
     if(r>l)quad([l,deck(z),z],[r,deck(z),z],[r,deck(end),end],[l,deck(end),end],0);
   }
   for(let i=0;i<96;i++){
-    const z0=0.95-i*7.35/96,z1=0.95-(i+1)*7.35/96;
+    const z0=5.6-i*12/96,z1=5.6-(i+1)*12/96;
     quad([-width(z0),deck(z0)-0.025,z0],[width(z0),deck(z0)-0.025,z0],[width(z1),deck(z1)-0.025,z1],[-width(z1),deck(z1)-0.025,z1],4);
   }
   for(const side of [-1,1]){
@@ -1844,16 +1891,16 @@ function createCaravelMesh() {
     const railRing=[[-0.095,-0.035],[-0.08,-0.055],[0.08,-0.055],[0.105,-0.03],[0.105,0.035],[0.08,0.055],[-0.08,0.055],[-0.095,0.035]];
     const rail=(z,k)=>[side*(width(z)+railRing[k][0]),deck(z)+0.66+railRing[k][1],z];
     for(let i=0;i<96;i++){
-      const z0=0.95-i*7.35/96,z1=0.95-(i+1)*7.35/96,x0=side*width(z0),x1=side*width(z1);
+      const z0=5.6-i*12/96,z1=5.6-(i+1)*12/96,x0=side*width(z0),x1=side*width(z1);
       for(let j=0;j<8;j++)quad(rail(z0,j),rail(z1,j),rail(z1,(j+1)%8),rail(z0,(j+1)%8),1,null,[[j*0.1,z0*0.6],[j*0.1,z1*0.6],[(j+1)*0.1,z1*0.6],[(j+1)*0.1,z0*0.6]]);
       for(let row=0;row<5;row++){
         const a=deck(z0)+row*0.123,b=deck(z1)+row*0.123;
         quad([x0,a,z0],[x1,b,z1],[x1,b+0.119,z1],[x0,a+0.119,z0],1,null,[[a*1.7,z0*0.6],[b*1.7,z1*0.6],[(b+0.119)*1.7,z1*0.6],[(a+0.119)*1.7,z0*0.6]]);
         quad([x0+side*0.105,a,z0],[x0+side*0.105,a+0.119,z0],[x1+side*0.105,b+0.119,z1],[x1+side*0.105,b,z1],1);
       }
-      quad([x0+side*0.105,deck(z0)-0.01,z0],[x1+side*0.105,deck(z1)-0.01,z1],[x1*0.58,-0.85,z1],[x0*0.58,-0.85,z0],1);
+
     }
-    for(let z=0.5;z>-6.15;z-=0.82){
+    for(let z=5.3;z>-6.15;z-=0.82){
       const x=side*(width(z)-0.065),y=deck(z);
       beam([x,y+0.015,z],[x,y+0.71,z],0.095,0.11,5);
       for(const h of [0.16,0.48])tube([x-side*0.062,y+h,z],[x-side*0.07,y+h,z],0.014,3,0.014,10);
@@ -1893,7 +1940,104 @@ function createCaravelMesh() {
   }
   tube(add(c,[0,0,-0.04]),add(c,[0,0,0.06]),0.10,8,0.10,32);
   torus(add(c,[0,0,0.064]),0.07,0.009,8,'z',32);
+
+  // Full planked hull, from the sharp stem to the square transom.
+  const hullPoint=(z,a)=>[(width(z)+0.105)*Math.cos(a),deck(z)-(deck(z)+1.45)*Math.sin(a),z];
+  const hullNormal=(z,a)=>{
+    const tangent=sub(hullPoint(z,Math.min(Math.PI,a+0.001)),hullPoint(z,Math.max(0,a-0.001)));
+    const longitudinal=sub(hullPoint(Math.min(5.6,z+0.001),a),hullPoint(Math.max(-6.4,z-0.001),a));
+    const n=norm(cross(longitudinal,tangent)); return n[1]>0?mul(n,-1):n;
+  };
+  for(let j=0;j<112;j++)for(let k=0;k<24;k++){
+    const z0=-6.4+j*12/112,z1=-6.4+(j+1)*12/112,a=k*Math.PI/24,b=(k+1)*Math.PI/24;
+    quad(hullPoint(z0,a),hullPoint(z1,a),hullPoint(z1,b),hullPoint(z0,b),15,
+      [hullNormal(z0,a),hullNormal(z1,a),hullNormal(z1,b),hullNormal(z0,b)],
+      [[a*0.8,z0*0.6],[a*0.8,z1*0.6],[b*0.8,z1*0.6],[b*0.8,z0*0.6]]);
+  }
+  // Keel, transom planking, stern rail, and working rudder.
+  beam([0,-1.43,-6.1],[0,-1.43,5.55],0.13,0.18,1);
+  for(let k=0;k<24;k++){
+    const a=k*Math.PI/24,b=(k+1)*Math.PI/24;
+    tri([0,deck(5.6),5.6],hullPoint(5.6,a),hullPoint(5.6,b),1);
+  }
+  for(let row=0;row<5;row++)beam([-width(5.6),deck(5.6)+row*0.123+0.06,5.6],[width(5.6),deck(5.6)+row*0.123+0.06,5.6],0.12,0.12,6);
+  beam([-width(5.6)-0.1,deck(5.6)+0.66,5.6],[width(5.6)+0.1,deck(5.6)+0.66,5.6],0.18,0.1,6);
+  tube([0,-1.6,5.68],[0,0.95,5.68],0.055,3,0.055,16);
+  beam([0,-1.25,6.05],[0,-0.1,6.05],0.72,0.075,14);
+  for(const y of [-0.9,-0.1,0.45])beam([-0.12,y,5.64],[0.12,y,5.64],0.06,0.06,3);
+
+  // Stern cabin and raised quarterdeck, leaving a working passage at the helm.
+  const cabinX=1.08,zFront=3.05,zBack=5.5,roof=1.75;
+  quad([-cabinX,0.78,zFront],[cabinX,0.78,zFront],[cabinX,roof,zFront],[-cabinX,roof,zFront],1);
+  for(const side of [-1,1])quad([side*cabinX,0.78,zFront],[side*cabinX,0.85,zBack],[side*cabinX,roof,zBack],[side*cabinX,roof,zFront],1);
+  quad([-cabinX,0.85,zBack],[cabinX,0.85,zBack],[cabinX,roof,zBack],[-cabinX,roof,zBack],1);
+  for(let x=-cabinX;x<cabinX;x+=0.145)quad([x,roof,zFront],[Math.min(cabinX,x+0.14),roof,zFront],[Math.min(cabinX,x+0.14),roof,zBack],[x,roof,zBack],0);
+  // Door, carved framing, and dark glazed windows.
+  beam([-0.31,0.8,zFront-0.04],[-0.31,1.58,zFront-0.04],0.065,0.065,5);
+  beam([0.31,0.8,zFront-0.04],[0.31,1.58,zFront-0.04],0.065,0.065,5);
+  beam([-0.34,1.58,zFront-0.04],[0.34,1.58,zFront-0.04],0.065,0.065,6);
+  for(const x of [-0.74,0.74]){
+    quad([x-0.19,1.03,zFront-0.009],[x+0.19,1.03,zFront-0.009],[x+0.19,1.43,zFront-0.009],[x-0.19,1.43,zFront-0.009],11);
+    for(const dx of [-0.2,0,0.2])beam([x+dx,1.01,zFront-0.025],[x+dx,1.45,zFront-0.025],0.03,0.035,5);
+    for(const y of [1.01,1.23,1.45])beam([x-0.22,y,zFront-0.025],[x+0.22,y,zFront-0.025],0.03,0.035,6);
+  }
+  for(const side of [-1,1]){
+    for(let z=3.12;z<5.6;z+=0.48)beam([side*1.14,roof,z],[side*1.14,roof+0.48,z],0.065,0.065,5);
+    beam([side*1.14,roof+0.5,3.05],[side*1.14,roof+0.5,5.6],0.11,0.08,1);
+    beam([side*1.14,roof+0.23,3.05],[side*1.14,roof+0.23,5.6],0.06,0.05,1);
+  }
+  beam([-1.14,roof+0.5,5.6],[1.14,roof+0.5,5.6],0.11,0.08,6);
+  for(let i=0;i<4;i++){
+    const y=0.7+i*0.25,z=2.35+i*0.18;
+    beam([0.64,y,z],[1.08,y,z],0.14,0.045,6);
+  }
+
+  // Square rig: shaped canvas panels, yards, masts, stays, and shroud ladders.
+  function squareSail(z,top,w,h,belly){
+    const columns=28,rows=20;
+    const point=(u,v)=>{
+      const sideShape=1.0-0.08*Math.sin(v*Math.PI);
+      return [(u-0.5)*w*sideShape,top-v*h-0.16*Math.sin(u*Math.PI)*v*v,
+        z-belly*Math.sin(u*Math.PI)*Math.sin(v*Math.PI)];
+    };
+    const normal=(u,v)=>{
+      const du=sub(point(u+0.001,v),point(u-0.001,v)),dv=sub(point(u,v+0.001),point(u,v-0.001));
+      return norm(cross(du,dv));
+    };
+    for(let i=0;i<columns;i++)for(let j=0;j<rows;j++){
+      const u=i/columns,U=(i+1)/columns,v=j/rows,V=(j+1)/rows;
+      quad(point(u,v),point(U,v),point(U,V),point(u,V),9,[normal(u,v),normal(U,v),normal(U,V),normal(u,V)],[[u,v],[U,v],[U,V],[u,V]]);
+    }
+    tube([-w*0.56,top+0.035,z],[w*0.56,top+0.035,z],0.066,10,0.045,18);
+    for(const u of [0,1])for(let j=0;j<rows;j++)tube(point(u,j/rows),point(u,(j+1)/rows),0.013,12,0.013,8);
+    for(let i=0;i<columns;i++)tube(point(i/columns,1),point((i+1)/columns,1),0.014,12,0.014,8);
+    for(const side of [-1,1]){
+      tube([side*w*0.5,top-h,z],[side*1.5,1.1,z+1.3],0.013,12,0.013,8);
+      tube([side*w*0.56,top,z],[side*1.5,1.1,z+1.7],0.011,12,0.011,8);
+    }
+  }
+  const masts=[{z:-4.15,height:9.3,r:0.115},{z:0.85,height:11.5,r:0.15},{z:4.15,height:8.0,r:0.095}];
+  for(const {z,height,r} of masts){
+    tube([0,deck(z),z],[0,height,z],r,10,r*0.35,24);
+    for(let y=1.5;y<height;y+=1.4)torus([0,y,z],r*(1-(y/height)*0.6)+0.004,0.012,3,'y',24);
+    for(const side of [-1,1])for(const dz of [-0.65,0.65]){
+      const foot=[side*(width(z)-0.08),deck(z)+0.55,z+dz],head=[side*0.11,height*0.78,z];
+      tube(foot,head,0.017,12,0.012,10);
+    }
+    for(const side of [-1,1])for(let j=1;j<15;j++){
+      const t=j/16,y=(deck(z)+0.55)*(1-t)+height*0.78*t,x=side*((width(z)-0.08)*(1-t)+0.11*t),span=0.65*(1-t);
+      tube([x,y,z-span],[x,y,z+span],0.008,12,0.008,6);
+    }
+    tube([0,height*0.9,z],[0,1.3,z<0?-6.3:Math.min(5.6,z+3.0)],0.016,12,0.012,10);
+    tube([0,height*0.87,z],[0,1.1,z>3?0.8:z+3.7],0.014,12,0.011,10);
+  }
+  squareSail(-4.15,6.65,4.4,2.9,0.55);
+  squareSail(-4.15,8.85,3.05,1.85,0.36);
+  squareSail(0.85,8.0,5.25,3.25,0.7);
+  squareSail(0.85,10.9,3.7,2.45,0.45);
+  squareSail(4.15,7.3,2.85,2.45,0.4);
   return new Float32Array(out);
+
 }
 
 // ---- js/main.js ----
@@ -2217,8 +2361,8 @@ async function main() {
   oakPass.end(); device.queue.submit([oakEnc.finish()]); oakImage.close();
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
-  const hullUBO = mkBuf(64, GU.UNIFORM | GU.COPY_DST, 'hull transform');
-  const hullData = new Float32Array(16);
+  const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
+  const hullData = new Float32Array(24);
   let bgCaravel;
 
   const bgOcean = [0, 1].map((i) => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
@@ -2238,8 +2382,8 @@ async function main() {
   let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
   const onProbe = () => {
     const heights = new Float32Array(probeRead.getMappedRange(0, 64));
-    waterH = heights[4];
-    if (boat.enabled && probeRevision === boat.revision) {
+    waterH = heights[9];
+    if (probeRevision === boat.revision) {
       Object.assign(boat.target, boatTargets(heights.subarray(0, 9), probeLength, probeBeam));
     }
     probeRead.unmap();
@@ -2414,9 +2558,12 @@ async function main() {
     enabled: qs.get('boat') === '1', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
     beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', 0, 0, 360),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', 2.4, 1, 15),
-    rudderTarget: 0, rudder: 0, yawRate: 0,
+    x: cam.x, z: cam.z, rudderTarget: 0, rudder: 0, yawRate: 0,
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
   };
+  let cameraMode = boat.enabled ? 'boat' : 'free';
+  const shipOrbit = { yaw:1.0, elevation:0.25, distance:25 };
+  const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
   const keys = Object.create(null);
   addEventListener('keydown', (e) => {
@@ -2425,13 +2572,14 @@ async function main() {
     keys[e.code] = true;
     if (e.code === 'KeyH' && !e.repeat) togglePanel();
     if (e.code === 'KeyX') boat.rudderTarget = 0;
+    if (e.code === 'KeyB' && !e.repeat) setCameraMode(boat.enabled ? 'free' : 'boat');
   });
   addEventListener('keyup', (e) => { keys[e.code] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
   let wheelDrag = null, suppressLookClick = false;
   canvas.addEventListener('click', () => {
     if(suppressLookClick) { suppressLookClick=false; return; }
-    if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+    if (cameraMode !== 'ship' && document.pointerLockElement !== canvas) canvas.requestPointerLock();
   });
   const helmPoint = new Float32Array(3);
   function projectHelm(x,y,z) {
@@ -2459,32 +2607,49 @@ async function main() {
   const releaseWheel=()=>{wheelDrag=null;};
   canvas.addEventListener('pointerup',releaseWheel); canvas.addEventListener('pointercancel',releaseWheel);
   let dragging = false;
-  canvas.addEventListener('mousedown', (e) => { if (e.button === 2) dragging = true; });
+  canvas.addEventListener('mousedown', (e) => { if (e.button === 2 || (cameraMode === 'ship' && e.button === 0)) dragging = true; });
   addEventListener('mouseup', () => { dragging = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   addEventListener('mousemove', (e) => {
     if (!wheelDrag && (document.pointerLockElement === canvas || dragging)) {
-      cam.yaw += e.movementX * 0.0022;
-      cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - e.movementY * 0.0022));
+      if(cameraMode === 'ship') {
+        shipOrbit.yaw -= e.movementX * 0.005;
+        shipOrbit.elevation = Math.max(0.06,Math.min(1.25,shipOrbit.elevation+e.movementY*0.004));
+      } else {
+        cam.yaw += e.movementX * 0.0022;
+        cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - e.movementY * 0.0022));
+      }
     }
   });
   addEventListener('wheel', (e) => {
-    cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    if(cameraMode === 'ship') shipOrbit.distance=Math.max(10,Math.min(120,shipOrbit.distance*(e.deltaY<0?0.9:1/0.9)));
+    else cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
   }, { passive: true });
 
+  function updateBoat(dt) {
+    const steering = boat.enabled ? (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) : 0;
+    stepBoatSteering(boat, steering, dt);
+    const heading = boat.heading * D2R, distance = boat.speed * 0.514444 * dt;
+    boat.x += Math.sin(heading) * distance; boat.z -= Math.cos(heading) * distance;
+    const response = Math.max(0.65, 4.5 / Math.sqrt(boat.length / 6));
+    boatSpring(boat, 'heave', boat.target.heave, response, dt);
+    boatSpring(boat, 'pitch', boat.target.pitch, response, dt);
+    boatSpring(boat, 'roll', boat.target.roll, Math.max(0.8, 3 / Math.sqrt(boat.beam / 2)), dt);
+  }
   function updateCamera(dt) {
     if (boat.enabled) {
-      const steering = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-      stepBoatSteering(boat, steering, dt);
-      const heading = boat.heading * D2R;
-      const distance = boat.speed * 0.514444 * dt; // knots to metres/second
-      cam.x += Math.sin(heading) * distance;
-      cam.z -= Math.cos(heading) * distance;
-      const response = Math.max(0.65, 4.5 / Math.sqrt(boat.length / 6));
-      boatSpring(boat, 'heave', boat.target.heave, response, dt);
-      boatSpring(boat, 'pitch', boat.target.pitch, response, dt);
-      boatSpring(boat, 'roll', boat.target.roll, Math.max(0.8, 3 / Math.sqrt(boat.beam / 2)), dt);
-      cam.y = boat.heave + boat.eye * Math.cos(boat.pitch) * Math.cos(boat.roll);
+      boatEyePosition(eyePosition,boat);
+      cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
+      return;
+    }
+    if (cameraMode === 'ship') {
+      const radius=shipOrbit.distance * Math.max(0.7,Math.sqrt(boat.length/12));
+      const horizontal=radius*Math.cos(shipOrbit.elevation);
+      cam.x=boat.x+Math.sin(shipOrbit.yaw)*horizontal;
+      cam.z=boat.z+Math.cos(shipOrbit.yaw)*horizontal;
+      cam.y=4+radius*Math.sin(shipOrbit.elevation);
+      cam.yaw=Math.atan2(boat.x-cam.x,cam.z-boat.z);
+      cam.pitch=-shipOrbit.elevation;
       return;
     }
     const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
@@ -2614,7 +2779,7 @@ async function main() {
     for (let c = 0; c < C; c++) { f[40 + c] = CASC_L[c]; f[48 + c] = 1 / CASC_L[c]; }
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed;
     f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
-    f[63] = boat.enabled && boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
+    f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
     f[64] = R0; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure; f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001; f[74] = P.veil; f[75] = 0.9;
@@ -2638,7 +2803,6 @@ async function main() {
   const boatPanel = document.createElement('section');
   boatPanel.id = 'boat-panel';
   boatPanel.innerHTML = `<strong>Boat perspective</strong>
-    <label class="mode"><span>Ride the boat</span><input id="boat-enabled" type="checkbox"></label>
     <p>Heading: 0° along the original view, 90° to the right. A/D or arrows: turn the wheel. X: centre rudder. Drag the wheel with the mouse unlocked.</p>`;
   panel.before(boatPanel);
   const collapseBoat = document.createElement('button');
@@ -2647,24 +2811,42 @@ async function main() {
   collapseBoat.onclick = () => { const compact = boatPanel.classList.toggle('compact'); collapseBoat.textContent = compact ? 'Controls' : 'Hide'; };
   boatPanel.querySelector('strong').after(collapseBoat);
   const prowLabel = document.createElement('label');
-  prowLabel.textContent = 'Show caravel prow';
+  prowLabel.textContent = 'Show ship';
   const prowToggle = document.createElement('input');
   prowToggle.type = 'checkbox'; prowToggle.checked = boat.showProw;
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
   prowLabel.append(prowToggle); boatPanel.append(prowLabel);
+  const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
+  cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Camera mode');
+  const cameraButtons=new Map();
+  for(const [mode,label] of [['boat','Boat camera'],['free','Free camera'],['ship','View ship']]) {
+    const button=document.createElement('button'); button.textContent=label;
+    button.addEventListener('click',()=>setCameraMode(mode));
+    cameraDock.append(button); cameraButtons.set(mode,button);
+  }
+  panel.before(cameraDock);
   const updateHelp = () => {
     document.querySelector('#hud .help').textContent = boat.enabled
-      ? 'A/D or arrows: steer | X: centre rudder | drag wheel: steer | click sea: mouse look | Esc: release | H: sea settings'
-      : 'click: mouse look | WASD move | Space/E up | Q/C down | Shift fast | wheel speed | H panel';
+      ? 'A/D or arrows: steer | X: centre rudder | B: free camera | click sea: look | Esc: release | H: sea settings'
+      : cameraMode === 'ship' ? 'Drag: orbit ship | wheel: zoom | B: board ship | H: sea settings'
+      : 'WASD: fly | Space/E: up | Q/C: down | wheel: speed | B: board ship | H: sea settings';
+    for(const [mode,button] of cameraButtons) button.setAttribute('aria-pressed',String(mode===cameraMode));
   };
+  function setCameraMode(mode) {
+    if(mode===cameraMode) return;
+    if(boat.enabled) {
+      boatRotate(boatForward,Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw),boat.heading*D2R,boat.pitch,boat.roll);
+      cam.yaw=Math.atan2(boatForward[0],-boatForward[2]);
+      cam.pitch=Math.asin(Math.max(-1,Math.min(1,boatForward[1])));
+    }
+    cameraMode=mode; boat.enabled=mode==='boat';
+    if(boat.enabled) {cam.yaw=0;cam.pitch=-5.5*D2R;boat.showProw=true;prowToggle.checked=true;}
+    if(mode==='ship') {shipOrbit.yaw=boat.heading*D2R+1.0;boat.showProw=true;prowToggle.checked=true;}
+    if(document.pointerLockElement) document.exitPointerLock();
+    for(const k in keys) keys[k]=false;
+    updateHelp();
+  }
   updateHelp();
-  const boatToggle = boatPanel.querySelector('#boat-enabled');
-  boatToggle.checked = boat.enabled;
-  boatToggle.addEventListener('change', () => {
-    boat.enabled = boatToggle.checked; boat.revision++; updateHelp();
-    cam.yaw = 0; cam.pitch = -5.5 * D2R;
-    if (!boat.enabled) cam.y = Math.max(cam.y, waterH + 0.9);
-  });
   for (const [key, label, min, max, step] of [
     ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Speed (knots)', 0, 40, 0.5],
@@ -2691,7 +2873,7 @@ async function main() {
   centreRudder.onclick = ()=>{boat.rudderTarget=0;}; boatPanel.append(centreRudder);
   const helmReadout=document.createElement('p'); helmReadout.id='helm-readout'; boatPanel.append(helmReadout);
   const centerView = document.createElement('button'); centerView.textContent = 'Look ahead';
-  centerView.onclick = () => { cam.yaw = 0; cam.pitch = -5.5 * D2R; };
+  centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
   boatPanel.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatPanel.append(boatStatus);
   const note = document.createElement('p'); note.textContent = 'Approximate hull motion from wave samples. No wake, planing, or hull-specific hydrodynamics.'; boatPanel.append(note);
@@ -2728,7 +2910,7 @@ async function main() {
     row.append(name, inp, val);
     panel.appendChild(row);
   }
-  if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; }
+  if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; cameraDock.hidden=true; }
 
 
   const hudFps = document.getElementById('fps');
@@ -2806,7 +2988,7 @@ async function main() {
         (hasTS ? `  |  GPU ${gpuMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
-        : 'Free camera · enable boat to ride the waves';
+        : 'Ship continues to float while the camera explores';
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
       if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
       rudderValue.textContent=boat.rudder.toFixed(1)+' deg';
@@ -2814,6 +2996,7 @@ async function main() {
       fpsN = 0; fpsT = 0;
     }
     if (fixedDt) dt = fixedDt;
+    updateBoat(dt);
     updateCamera(dt);
     simTime += dt;
     if (simTime > LOOP) simTime -= LOOP;
@@ -2849,11 +3032,12 @@ async function main() {
       cp.dispatchWorkgroups(32 / 8, 32 / 8);
     }
     encodeSim(cp);
-    const doProbe = !probePending && (boat.enabled || (frameIndex & 7) === 0);
+    const doProbe = !probePending && (boat.showProw || (frameIndex & 7) === 0);
     if (doProbe) {
       probeLength = boat.length; probeBeam = boat.beam; probeRevision = boat.revision;
-      boatUniform[0] = boat.heading * D2R; boatUniform[1] = boat.enabled ? boat.length : 0;
-      boatUniform[2] = boat.enabled ? boat.beam : 0;
+      boatUniform[0] = boat.heading * D2R; boatUniform[1] = boat.length;
+      boatUniform[2] = boat.beam;
+      boatUniform[4]=boat.x; boatUniform[5]=boat.heave; boatUniform[6]=boat.z;
       device.queue.writeBuffer(boatUBO, 0, boatUniform);
       cp.setPipeline(probePipe);
       cp.setBindGroup(0, bgProbe);
@@ -2883,7 +3067,7 @@ async function main() {
     }
     cp.end();
 
-    const drawProw = boat.enabled && boat.showProw;
+    const drawProw = boat.showProw;
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
@@ -2904,6 +3088,8 @@ async function main() {
       boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
       boatRotate(hullData.subarray(8, 11), 0, 0, -1, boat.heading * D2R, boat.pitch, boat.roll);
       hullData[12] = boat.beam; hullData[13] = boat.length; hullData[14] = boat.eye; hullData[15] = boat.rudder;
+      hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
+      hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed;
       device.queue.writeBuffer(hullUBO, 0, hullData);
       enc.copyTextureToTexture({ texture: hdrTex }, { texture: waterCopy }, [W, H]);
       const filterPass = enc.beginComputePass(); filterPass.setPipeline(waterFilterPipe);
@@ -2915,7 +3101,7 @@ async function main() {
       const prowPass = enc.beginRenderPass({
         colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: mainPass.colorAttachments[0].resolveTarget,
           loadOp: 'load', storeOp: 'discard' }],
-        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'clear', depthStoreOp: 'discard' },
+        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: boat.enabled ? 'clear' : 'load', depthStoreOp: 'discard' },
       });
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9); prowPass.end();

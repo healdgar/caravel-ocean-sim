@@ -279,7 +279,8 @@ export const HEIGHT_PROBE = FRAME_WGSL + /* wgsl */ `
 @group(0) @binding(1) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var<storage, read_write> outH: array<f32, 16>;
-@group(0) @binding(4) var<uniform> boat: vec4f;
+struct ProbeBoat { config: vec4f, origin: vec4f };
+@group(0) @binding(4) var<uniform> boat: ProbeBoat;
 fn dispAt(xz: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
@@ -287,14 +288,14 @@ fn dispAt(xz: vec2f) -> vec3f {
   }
   return d;
 }
-@compute @workgroup_size(9)
+@compute @workgroup_size(10)
 fn main(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= 9u) { return; }
-  let forward = vec2f(sin(boat.x), -cos(boat.x));
-  let right = vec2f(cos(boat.x), sin(boat.x));
-  let f = (f32(id.x / 3u) - 1.0) * boat.y * 0.5;
-  let r = (f32(id.x % 3u) - 1.0) * boat.z * 0.5;
-  let goal = F.camPos.xz + forward * f + right * r;
+  if (id.x >= 10u) { return; }
+  let forward = vec2f(sin(boat.config.x), -cos(boat.config.x));
+  let right = vec2f(cos(boat.config.x), sin(boat.config.x));
+  let f = (f32(id.x / 3u) - 1.0) * boat.config.y * 0.5;
+  let r = (f32(id.x % 3u) - 1.0) * boat.config.z * 0.5;
+  let goal = select(boat.origin.xz + forward * f + right * r,F.camPos.xz,id.x == 9u);
   var x0 = goal;
   for (var i = 0; i < 4; i++) {
     let d = dispAt(x0);

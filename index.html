@@ -30,6 +30,11 @@
   #boat-panel.compact { width: auto; }
   #boat-panel.compact > :not(strong):not(.collapse):not(#helm-readout) { display: none; }
   #panel { max-height: 65vh; overflow: auto; }
+  #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
+    padding:6px; border-radius:8px; background:#0b0f14df; border:1px solid #ffffff25; }
+  #camera-dock[hidden] { display:none; }
+  #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
+  #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
   #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
 </style>
 </head>

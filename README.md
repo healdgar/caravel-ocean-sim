@@ -101,7 +101,7 @@ The WebGPU tests compare the fused FFT with analytical travelling waves across a
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The scene is open ocean with an optional caravel foredeck. There is no shoreline, surf, or other vessels.
+- The scene is open ocean with an optional fully modeled sailing ship. There is no shoreline, surf, or other vessels.
 - Clouds are two flat layers, not volumetric.
 
 ## How it was made
@@ -113,7 +113,10 @@ I built this with Claude Code (Opus 5.5). I asked for the most realistic water i
 | Path | Contents |
 |---|---|
 | `index.html` | Page shell, HUD, and settings panel styles |
-| `js/main.js` | Device setup, resources, camera, per-frame loop |
+| `js/main.js` | Device setup, resources, camera modes, per-frame loop |
+| `js/boat.js` | Wave response, steering, and world-space eye position |
+| `js/caravel.js` | Full hull, decks, cabin, rigging, square sails, and helm geometry |
+| `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
 | `js/wgsl/` | Shaders as JavaScript modules: `sim.js` (waves and foam), `sky.js` (atmosphere and clouds), `ocean.js` (surface and sky pass), `post.js` (bloom and tone mapping), `common.js` (shared structs) |
 | `server.mjs` | Tiny static server for development |
 | `build.mjs` | Builds `ocean.html` and `ocean.min.html` |
@@ -125,11 +128,13 @@ MIT. See [LICENSE](LICENSE).
 
 ## Boat perspective
 
-Enable **Ride the boat** in the lower-left panel, or open `ocean.html?boat=1`.
+Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
 Set length and beam in metres, speed in knots, heading in degrees (0 along the
 original view, 90 to the right), and eye height above the mean waterline.
 The helm controls the rudder; mouse look is relative to the boat. **Look ahead**
-centres the view. Disable boat mode to return to the free camera.
+centres the view. Choose **Free camera** or press **B** to leave the floating viewpoint.
+Choose **View ship** for a level exterior view that follows the ship: drag to orbit
+and use the mouse wheel to zoom. The vessel continues sailing in all camera modes.
 
 The camera follows a damped hull pose fitted to a 3 by 3 grid of heights sampled
 from the actual displaced FFT ocean. Larger footprints average over waves;
@@ -141,18 +146,25 @@ without hull-specific mass/stability, wake, planing, or slamming physics.
 URL options: `boat=1&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=2.4`.
 Run `node --test tests/boat.test.mjs` for the hull-response math checks.
 
-### Caravel prow
+### Full sailing ship
 
-The boat view includes a 3D timber foredeck, curved bulwarks, bowsprit, rope stays,
-hatch grating, belaying pins, and iron fittings. Toggle **Show caravel prow** or
-use `prow=0` to hide it; **Hide** collapses the controls. Geometry scales with
-boat length and beam and follows the same hull transform as the camera.
+The complete vessel includes a rounded planked hull and keel, square transom,
+stern cabin with windows, raised quarterdeck, bow and stern rails, bowsprit,
+hatch grating, cleats, fittings, and a rudder that moves with the helm. Three
+masts carry five shaped square sails, with yards, stays, shrouds, and ratlines.
+Canvas uses a two-sided cloth material and slight wind-driven flutter under the
+actual sun and sky. Speed is still manually controlled; sail forces are not
+integrated into propulsion. Toggle **Show ship** or use `prow=0` to hide it.
+**Hide** collapses the controls; camera selection remains visible. Geometry
+scales with boat length and beam. The ship has an independent world position
+and keeps its wave-following pose while the camera flies or orbits around it.
 
 The PBR material uses the live atmospheric sunlight, cloud transmittance, sky
 environment, and current ocean HDR image for visible water reflections and
 approximate bounced light. Offscreen reflections use the environment cube;
 rail shadows are approximate. A separate near-field depth pass keeps wave crests
-from rendering through the foredeck. The neutral oak albedo texture has no
+from rendering through the foredeck in Boat camera. Exterior views share the
+ocean depth buffer so the water correctly occludes the submerged hull. The neutral oak albedo texture has no
 intentional scene lighting and is embedded into both standalone HTML bundles. It was created
 with the built-in image generation tool using this prompt:
 
@@ -193,3 +205,8 @@ now clamped to their physical ranges, and the fifth power uses multiplication.
 A 120-frame live capture under the 20 m/s wind / 4 m swell preset showed no white
 hotspot after the correction. This visual check supplements the steering and
 mesh tests; it is not a guarantee for every GPU or lighting configuration.
+
+The full-ship checks cover finite geometry, submerged hull extent, stern cabin,
+five sail panels, mast height, rudder placement, and the world-space camera eye
+anchor. The independent camera and hull wave probes let Free camera remain
+level while the vessel continues floating and steering.

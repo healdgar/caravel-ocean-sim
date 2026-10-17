@@ -37,3 +37,10 @@ export function stepBoatSteering(boat, command, dt) {
   boat.yawRate = desired + (previous - desired) * Math.exp(-dt / (0.9 + boat.length * 0.06));
   boat.heading = ((boat.heading + (previous + boat.yawRate) * 0.5 * dt * 180 / Math.PI) % 360 + 360) % 360;
 }
+
+// World-space eye anchor; keeping it separate from the vessel allows inspection.
+export function boatEyePosition(out, boat) {
+  boatRotate(out, 0, boat.eye, 0, boat.heading * Math.PI / 180, boat.pitch, boat.roll);
+  out[0] += boat.x; out[1] += boat.heave; out[2] += boat.z;
+  return out;
+}

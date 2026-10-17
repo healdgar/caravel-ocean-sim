@@ -7,7 +7,7 @@ export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var<storage, read> sunVis: array<f32, 4>;
-struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f };
+struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
 @group(0) @binding(6) var<uniform> hull: Hull;
 @group(0) @binding(7) var waterScene: texture_2d<f32>;
 @group(0) @binding(8) var dispTex: texture_2d_array<f32>;
@@ -30,7 +30,7 @@ fn rotateHull(p: vec3f) -> vec3f {
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f) -> BoatVertex {
   var scale = vec3f(hull.size.x / 3.6, 1.0, hull.size.y / 12.0);
   var local = position; var localN = normal;
-  if (material >= 7.0) {
+  if (material == 7.0 || material == 8.0) {
     scale = vec3f(1.0);
     let angle = -hull.size.w / 35.0 * 6.2831853;
     let c = cos(angle); let s = sin(angle);
@@ -39,7 +39,18 @@ fn rotateHull(p: vec3f) -> vec3f {
     local = vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+pivot;
     localN = vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
   }
-  let relative = rotateHull(local * scale - vec3f(0.0, hull.size.z, 0.0));
+  if (material == 14.0) {
+    let angle = -hull.size.w * 0.0174532925;
+    let c=cos(angle); let s=sin(angle); let pivot=vec3f(0.0,-0.6,5.68);
+    let q=position-pivot;
+    local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
+    localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
+  }
+  if (material == 9.0) {
+    let flutter=min(hull.rig.y*0.0015,0.035)*sin(hull.origin.w*2.5+position.x*3.0+position.y*4.0);
+    local.z+=flutter*sin(uv.x*3.14159265)*uv.y*uv.y;
+  }
+  let relative = rotateHull(local * scale) + hull.origin.xyz - F.camPos.xyz;
   var o: BoatVertex;
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
@@ -97,15 +108,33 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   // Fine end-grain joints, splits, and oxidised grain.
   let joint = abs(fract((p.z + fract(plank*0.413)*2.0)/2.3)-0.5);
   let jointAA = max(fwidth(joint),0.001);
+  let hullSeamAA=max(fwidth(in.uv.x*18.0),0.001);
+  let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
+  let clothAA=max(fwidth(clothSeam),0.001);
+  let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
   if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
   if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= 0.8; rough = 0.67; }
   let ropeAA=fwidth(p.x+p.y+p.z);
-  if(in.material == 2u) {
+  if(in.material == 2u || in.material == 12u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
     albedo = vec3f(0.28,0.20,0.11) * (0.8+0.2*twist); rough=0.87;
   }
   if(in.material == 4u) { albedo=vec3f(0.012,0.009,0.006); rough=0.92; }
   if(in.material == 3u || in.material == 8u) { albedo=vec3f(0.065,0.07,0.071); rough=0.38; metal=0.85; }
+  if(in.material == 9u) {
+    let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
+    let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
+    let seam=mix(0.78,1.0,smoothstep(0.004,0.013+clothAA,clothSeam));
+    albedo=vec3f(0.66,0.62,0.49)*aged*seam*(1.0+0.025*weave);
+    n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
+  }
+  if(in.material == 11u) { albedo=vec3f(0.018,0.035,0.033); rough=0.3; metal=0.25; }
+  if(in.material == 14u) { albedo*=0.6; rough=0.75; }
+  if(in.material == 15u) {
+    let hullSeam=abs(fract(in.uv.x*18.0)-0.5);
+    albedo*=mix(0.7,0.93,smoothstep(0.004,0.035+hullSeamAA,hullSeam)); rough=0.82;
+    let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.036,0.029,0.02),tar*0.65);
+  }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
   let nh=clamp(dot(n,h),0.0,1.0); let vh=clamp(dot(v,h),0.0,1.0);
@@ -137,6 +166,11 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let spec=d*g*fresnel/(4.0*nv*max(nl,0.001));
   var col=(albedo*(1.0-metal)/PI+spec)*direct*nl;
   col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*(f0+(1.0-f0)*(fv2*fv2*fv))*(1.0-rough*0.45);
+  if(in.material == 9u) {
+    let through=max(dot(-n,l),0.0);
+    col+=albedo*sunIlluminance()*sunVis[0]*through*0.28;
+    col+=albedo*sky*0.12;
+  }
   let fog=exp(-F.fogExt.rgb*length(in.world-F.camPos.xyz));
   col=col*fog+skyAtmo(normalize(vec3f(in.world.x-F.camPos.x,0.05,in.world.z-F.camPos.z)))*(1.0-fog);
   return vec4f(col,1.0);
