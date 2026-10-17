@@ -1,4 +1,6 @@
-# web-ocean
+# web-ocean-optimized
+
+Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
 A real-time ocean renderer written from scratch on WebGPU, with no engine or rendering library. It draws a sunset sea with simulated waves, whitecaps, sun glitter, and a physically based sky with clouds. You fly around it with a free camera.
 
