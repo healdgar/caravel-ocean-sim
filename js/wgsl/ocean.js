@@ -48,6 +48,8 @@ export const OCEAN = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ 
 @group(0) @binding(9) var sampR: sampler;
 @group(0) @binding(10) var foamWorld: texture_2d_array<f32>;
 @group(0) @binding(11) var<storage, read> sunVis: array<f32, 4>;
+struct OceanHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
+@group(0) @binding(12) var<uniform> H: OceanHull;
 ` + SKY_RENDER_FUNCS + /* wgsl */ `
 const ENV_MAXMIP: f32 = ${ENV_MIPS - 1}.0;
 const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
@@ -268,6 +270,20 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let hz = normalize(vec3f(-V.x, 0.002, -V.z));
   let fogCol = skyAtmo(hz);
   col = col * T + fogCol * (1.0 - T);
+  // Remove water inside the solid vessel, after derivative-based shading.
+  // The same tilted world-space hull is used in every camera mode.
+  if(H.rig.z > 0.5) {
+    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
+    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+    if(q.z >= -6.4 && q.z <= 5.6 && q.y > -1.45) {
+      let ratio=select(q.z/7.4,-q.z/6.4,q.z<0.0);
+      let halfWidth=1.8*sqrt(max(0.0006,1.0-ratio*ratio))+0.105;
+      let deckHeight=select(0.7+0.18*(q.z/5.6)*(q.z/5.6),0.7+0.47*pow(max(0.0,-q.z/6.4),3.0),q.z<0.0);
+      let depth=clamp((deckHeight-q.y)/(deckHeight+1.45),0.0,1.0);
+      let section=halfWidth*sqrt(max(0.0,1.0-depth*depth));
+      if(abs(q.x)<section) { discard; }
+    }
+  }
   return vec4f(col, 1.0);
 }
 `;

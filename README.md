@@ -164,7 +164,9 @@ environment, and current ocean HDR image for visible water reflections and
 approximate bounced light. Offscreen reflections use the environment cube;
 rail shadows are approximate. A separate near-field depth pass keeps wave crests
 from rendering through the foredeck in Boat camera. Exterior views share the
-ocean depth buffer so the water correctly occludes the submerged hull. The neutral oak albedo texture has no
+ocean depth buffer so the water correctly occludes the submerged hull. A
+world-space hull volume also excludes water inside the vessel, keeping the
+decks dry while preserving the exterior waterline in all camera modes. The neutral oak albedo texture has no
 intentional scene lighting and is embedded into both standalone HTML bundles. It was created
 with the built-in image generation tool using this prompt:
 
@@ -210,3 +212,10 @@ The full-ship checks cover finite geometry, submerged hull extent, stern cabin,
 five sail panels, mast height, rudder placement, and the world-space camera eye
 anchor. The independent camera and hull wave probes let Free camera remain
 level while the vessel continues floating and steering.
+
+## GitHub Pages build
+
+`node build.mjs` also generates `docs/index.html`, a standalone minified demo
+with the oak material embedded. It starts in Boat camera unless the URL contains
+`boat=0`. Configure GitHub Pages to serve the `main` branch's `/docs` folder.
+The `.nojekyll` file preserves the generated static page without a Jekyll build.

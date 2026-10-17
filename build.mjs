@@ -84,3 +84,9 @@ const minPage = page
   .replace(/<style>([\s\S]*?)<\/style>/, (_, css) => `<style>${css.replace(/\s+/g, ' ').replace(/ ?([{}:;,>]) ?/g, '$1').trim()}</style>`)
   .replace(/>\s+</g, '><');
 write('ocean.min.html', minPage);
+
+// GitHub Pages serves a self-contained build from /docs and starts at the helm.
+const pagesBootstrap = '<script>const siteURL=new URL(location.href);if(!siteURL.searchParams.has("boat")){siteURL.searchParams.set("boat","1");history.replaceState(null,"",siteURL);}</script>';
+fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+write('docs/index.html', minPage.replace('<script type="module">', pagesBootstrap + '<script type="module">'));
+fs.writeFileSync(path.join(root, 'docs', '.nojekyll'), '');
