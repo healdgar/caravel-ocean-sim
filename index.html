@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ocean — WebGPU</title>
+<title>Seasick Simulator</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
@@ -15,6 +15,8 @@
   #panel.hidden { display: none; }
   #panel label { display: grid; grid-template-columns: 1fr 110px 40px; gap: 6px; align-items: center; margin: 3px 0; }
   #panel input { width: 110px; accent-color: #e2a04e; }
+  #panel > strong { display:inline-block; margin:0 12px 8px 0; }
+  #panel > button { color:#111; background:#e2a04e; border:0; border-radius:4px; padding:6px 10px; cursor:pointer; margin-bottom:8px; }
   #panel output { text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
   #boat-panel { position: fixed; left: 12px; bottom: 12px; width: min(290px, calc(100vw - 48px)); max-height: 65vh; overflow: auto;
     padding: 14px; border: 1px solid #ffffff30; border-radius: 10px; color: #e8e2d6; background: #0b0f14e8; font: 13px/1.4 system-ui; }
@@ -31,10 +33,16 @@
   #boat-panel.compact > :not(strong):not(.collapse):not(#helm-readout) { display: none; }
   #panel { max-height: 65vh; overflow: auto; }
   #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
-    padding:6px; border-radius:8px; background:#0b0f14df; border:1px solid #ffffff25; }
+    padding:6px; border-radius:8px; background:#0b0f14df; border:1px solid #ffffff25; z-index:2; box-sizing:border-box; }
   #camera-dock[hidden] { display:none; }
   #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
   #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
+  #share-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; flex:0 0 100%; width:min(540px,calc(100vw - 52px)); box-sizing:border-box; padding:5px 0; }
+  #share-panel[hidden] { display:none; }
+  #share-panel input { min-width:0; width:100%; box-sizing:border-box; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
+  #share-panel [role=status] { grid-column:1/-1; color:#e8e2d6; font:12px/1.4 system-ui,sans-serif; max-width:540px; }
+  @media (max-width:900px) { #panel { top:122px; max-height:calc(100dvh - 156px); } }
+  @media (max-width:600px) { #panel { top:168px; width:min(300px,calc(100vw - 48px)); max-height:calc(100dvh - 202px); } }
   #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
 </style>
 </head>

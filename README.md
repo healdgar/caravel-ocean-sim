@@ -1,8 +1,10 @@
-# web-ocean-optimized
+# Seasick Simulator
 
 Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time ocean renderer written from scratch on WebGPU, with no engine or rendering library. It draws a sunset sea with simulated waves, whitecaps, sun glitter, and a physically based sky with clouds. You fly around it with a free camera.
+A real-time WebGPU ocean with a wave-driven sailing ship, square sails, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
+
+[Open Seasick Simulator](https://healdgar.github.io/seasick-simulator/).
 
 ![Looking toward the sun from 2.4 m above the water](docs/front.jpg)
 
@@ -14,7 +16,7 @@ A real-time ocean renderer written from scratch on WebGPU, with no engine or ren
 
 You need a recent Chrome with WebGPU and a reasonably capable GPU. On a laptop, force Chrome onto the dedicated GPU in the Windows graphics settings, or it will fall back to the integrated one.
 
-Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified (about 60 KiB instead of 100 KiB). Both are self-contained and work from `file://`.
+Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both include the ship's oak material and are self-contained.
 
 To run from source:
 
@@ -40,6 +42,21 @@ After editing anything under `js/`, run `npm run build` to regenerate both bundl
 The camera keeps itself above the displaced water surface, so waves never pass through it.
 
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
+
+## Share your sea conditions
+
+Open **Sea settings** and adjust the waves and lighting, then select **Copy share
+link** in the top controls. The link includes every sea and lighting parameter,
+boat length, beam, heading, speed, eye height, rudder setting, ship visibility,
+and the selected camera mode. Opening it restores those settings. The address
+bar also receives the link; if copying is blocked, a selected text field lets
+you copy it manually. Each copy captures your latest settings.
+
+For crossing storm seas, select **Hella rough** in Sea settings: 28 m/s wind,
+8 m swell, and extra foam. The sliders allow up to 32 m/s wind and 10 m swell.
+[Try rough seas](https://healdgar.github.io/seasick-simulator/?boat=1&windSpeed=28&windDir=123&fetchKm=300&swellHs=8&swellLength=95&swellDir=236&choppy=1.6&foam=1.7).
+Links share the configuration; they do not freeze an animation frame or the
+boat's travelled position.
 
 ## How it works
 
@@ -215,14 +232,12 @@ level while the vessel continues floating and steering.
 
 ## GitHub Pages build
 
-[Open the live sailing demo](https://healdgar.github.io/web-ocean-demo/).
-The public deployment repository is
-[`healdgar/web-ocean-demo`](https://github.com/healdgar/web-ocean-demo).
-It contains the generated page and license; the source repository stays private.
+[Open the live sailing demo](https://healdgar.github.io/seasick-simulator/).
+Source and the published build now live together in the public
+[`healdgar/seasick-simulator`](https://github.com/healdgar/seasick-simulator) repository.
 
 `node build.mjs` also generates `docs/index.html`, a standalone minified demo
 with the oak material embedded. It starts in Boat camera unless the URL contains
-`boat=0`. To update the public demo, copy `docs/index.html`, `docs/.nojekyll`, and
-`LICENSE` to the deployment repository's root, commit, and push to `main`.
-GitHub Pages serves that branch's root folder. The `.nojekyll` file preserves
-the generated static page without a Jekyll build.
+`boat=0`. GitHub Pages serves the `main` branch's `/docs` folder. To update the
+demo, rebuild, commit the generated bundles with the source, and push to `main`.
+The `.nojekyll` file preserves the generated static page without a Jekyll build.

@@ -1,6 +1,7 @@
 import { createCaravelMesh, WHEEL_CENTER } from './caravel.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition } from './boat.js';
+import { cameraModeFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -512,15 +513,15 @@ async function main() {
     const value = Number(qs.get(key));
     return qs.has(key) && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
   };
+  let cameraMode = cameraModeFromLink(qs);
   const boat = {
-    enabled: qs.get('boat') === '1', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
+    enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
     beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', 0, 0, 360),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', 2.4, 1, 15),
-    x: cam.x, z: cam.z, rudderTarget: 0, rudder: 0, yawRate: 0,
+    x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
   };
-  let cameraMode = boat.enabled ? 'boat' : 'free';
-  const shipOrbit = { yaw:1.0, elevation:0.25, distance:25 };
+  const shipOrbit = { yaw:boat.heading*D2R+1.0, elevation:0.25, distance:25 };
   const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
   const keys = Object.create(null);
@@ -757,7 +758,10 @@ async function main() {
   // UI
   // --------------------------------------------------------------------------------------
   const panel = document.getElementById('panel');
-  function togglePanel() { panel.classList.toggle('hidden'); }
+  function togglePanel() {
+    panel.classList.toggle('hidden');
+    seaSettingsButton.setAttribute('aria-expanded', String(!panel.classList.contains('hidden')));
+  }
   const boatPanel = document.createElement('section');
   boatPanel.id = 'boat-panel';
   boatPanel.innerHTML = `<strong>Boat perspective</strong>
@@ -775,13 +779,42 @@ async function main() {
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
   prowLabel.append(prowToggle); boatPanel.append(prowLabel);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
-  cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Camera mode');
+  cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
   const cameraButtons=new Map();
   for(const [mode,label] of [['boat','Boat camera'],['free','Free camera'],['ship','View ship']]) {
     const button=document.createElement('button'); button.textContent=label;
     button.addEventListener('click',()=>setCameraMode(mode));
     cameraDock.append(button); cameraButtons.set(mode,button);
   }
+  const seaSettingsButton = document.createElement('button');
+  seaSettingsButton.textContent = 'Sea settings';
+  seaSettingsButton.setAttribute('aria-controls', 'panel');
+  seaSettingsButton.setAttribute('aria-expanded', 'false');
+  seaSettingsButton.onclick = togglePanel;
+  const shareButton = document.createElement('button');
+  shareButton.textContent = 'Copy share link';
+  const sharePanel = document.createElement('div'); sharePanel.id = 'share-panel'; sharePanel.hidden = true;
+  const shareInput = document.createElement('input');
+  shareInput.type = 'url'; shareInput.readOnly = true; shareInput.setAttribute('aria-label', 'Share link');
+  shareInput.addEventListener('click', () => shareInput.select());
+  const closeShare = document.createElement('button'); closeShare.textContent = 'Close';
+  closeShare.onclick = () => { sharePanel.hidden = true; shareButton.focus(); };
+  const shareStatus = document.createElement('span'); shareStatus.setAttribute('role', 'status');
+  sharePanel.append(shareInput, closeShare, shareStatus);
+  shareButton.onclick = async () => {
+    const url = createShareLink(location.href, P, boat, cameraMode);
+    sharePanel.hidden = false; shareInput.value = url;
+    // Also leave a shareable address in the browser if clipboard access is unavailable.
+    try { history.replaceState(null, '', url); } catch { /* standalone file */ }
+    try {
+      await navigator.clipboard.writeText(url);
+      shareStatus.textContent = 'Link copied. It includes the sea, lighting, boat, and camera mode settings.';
+    } catch {
+      shareInput.focus(); shareInput.select();
+      shareStatus.textContent = 'Select and copy this link to share your settings.';
+    }
+  };
+  cameraDock.append(seaSettingsButton, shareButton, sharePanel);
   panel.before(cameraDock);
   const updateHelp = () => {
     document.querySelector('#hud .help').textContent = boat.enabled
@@ -823,7 +856,7 @@ async function main() {
   const rudderRow = document.createElement('label');
   rudderRow.textContent = 'Rudder';
   const rudderInput = document.createElement('input');
-  Object.assign(rudderInput,{type:'range',min:-35,max:35,step:0.5,value:0,id:'boat-rudder'});
+  Object.assign(rudderInput,{type:'range',min:-35,max:35,step:0.5,value:boat.rudderTarget,id:'boat-rudder'});
   const rudderValue = document.createElement('output'); rudderValue.textContent='0 deg';
   rudderInput.addEventListener('input',()=>{boat.rudderTarget=Number(rudderInput.value);});
   rudderRow.append(rudderInput,rudderValue); boatPanel.append(rudderRow);
@@ -836,11 +869,21 @@ async function main() {
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatPanel.append(boatStatus);
   const note = document.createElement('p'); note.textContent = 'Approximate hull motion from wave samples. No wake, planing, or hull-specific hydrodynamics.'; boatPanel.append(note);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
+  const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
+  const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
+  roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
+  const seaSliders = new Map();
+  roughButton.onclick = () => {
+    Object.assign(P, ROUGH_SEAS);
+    for (const [key, { input, output }] of seaSliders) { input.value = P[key]; output.textContent = String(P[key]); }
+    needSpectrum = true; envFull = true;
+  };
+  panel.append(seaTitle, roughButton);
   const SLIDERS = [
-    ['windSpeed', 'Wind speed (m/s)', 2, 20, 0.1, 'spec'],
+    ['windSpeed', 'Wind speed (m/s)', 2, 32, 0.1, 'spec'],
     ['windDir', 'Wind direction (deg)', 0, 360, 1, 'spec'],
     ['fetchKm', 'Fetch (km)', 5, 800, 1, 'spec'],
-    ['swellHs', 'Swell height (m)', 0, 4, 0.05, 'spec'],
+    ['swellHs', 'Swell height (m)', 0, 10, 0.05, 'spec'],
     ['swellLength', 'Swell wavelength (m)', 30, 300, 1, 'spec'],
     ['swellDir', 'Swell direction (deg)', 0, 360, 1, 'spec'],
     ['choppy', 'Choppiness', 0, 1.6, 0.01, ''],
@@ -859,7 +902,9 @@ async function main() {
     const name = document.createElement('span'); name.textContent = label;
     const val = document.createElement('output'); val.textContent = String(P[key]);
     const inp = document.createElement('input');
-    Object.assign(inp, { type: 'range', min, max, step, value: P[key] });
+    Object.assign(inp, { type: 'range', min, max, step, value: P[key], id: 'sea-' + key });
+    inp.setAttribute('aria-label', label);
+    seaSliders.set(key, { input: inp, output: val });
     inp.addEventListener('input', () => {
       P[key] = Number(inp.value); val.textContent = inp.value;
       if (kind === 'spec') needSpectrum = true;
