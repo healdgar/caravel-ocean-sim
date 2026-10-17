@@ -1,10 +1,14 @@
-// FFT ocean simulation (Tessendorf) — 4 cascades of 256^2.
+// FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
 import { N, LOGN, CASCADES, NOISE_WGSL, PERIODIC_WGSL } from './common.js';
 
-const SIM_STRUCT = /* wgsl */ `
+const FFT_MATH = /* wgsl */ `
 const N: u32 = ${N}u;
 const LOGN: u32 = ${LOGN}u;
 const PI: f32 = 3.14159265358979;
+fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+`;
+
+const SIM_STRUCT = FFT_MATH + /* wgsl */ `
 const GRAV: f32 = 9.81;
 const SURF: f32 = 7.4e-5;   // surface tension / density
 
@@ -28,7 +32,6 @@ fn waveVec(x: u32, y: u32, L: f32) -> vec2f {
 }
 fn omegaOf(k: f32) -> f32 { return sqrt(GRAV * k + SURF * k * k * k); }
 fn dOmegaOf(k: f32) -> f32 { return (GRAV + 3.0 * SURF * k * k) / (2.0 * omegaOf(k)); }
-fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 fn mulI(a: vec2f) -> vec2f { return vec2f(-a.y, a.x); }
 `;
 
@@ -127,21 +130,16 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 }
 `;
 
-export const SIM_EVOLVE = SIM_STRUCT + /* wgsl */ `
+const EVOLVE = /* wgsl */ `
 @group(0) @binding(1) var<storage, read> h0: array<vec4f>;
-@group(0) @binding(2) var<storage, read_write> specA: array<vec4f>;
-@group(0) @binding(3) var<storage, read_write> specB: array<vec4f>;
+struct Spectrum { a: vec4f, b: vec4f };
 
-@compute @workgroup_size(16, 16, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let c = id.z;
-  let idx = (c * N + id.y) * N + id.x;
-  let k = waveVec(id.x, id.y, S.L[c >> 2u][c & 3u]);
+fn evolve(x: u32, y: u32, c: u32) -> Spectrum {
+  let idx = (c * N + y) * N + x;
+  let k = waveVec(x, y, S.L[c >> 2u][c & 3u]);
   let kl = length(k);
   if (kl < 1e-5) {
-    specA[idx] = vec4f(0.0);
-    specB[idx] = vec4f(0.0);
-    return;
+    return Spectrum(vec4f(0.0), vec4f(0.0));
   }
   let w0 = 2.0 * PI / S.misc.z;
   let w = floor(omegaOf(kl) / w0) * w0;
@@ -160,18 +158,14 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let sz = ih * k.y;
   let jxx = h * (-lam * k.x * k.x * ik);
   let jzz = h * (-lam * k.y * k.y * ik);
-  specA[idx] = vec4f(Dx + mulI(Dz), h + mulI(jxz));
-  specB[idx] = vec4f(sx + mulI(sz), jxx + mulI(jzz));
+  return Spectrum(vec4f(Dx + mulI(Dz), h + mulI(jxz)),
+                  vec4f(sx + mulI(sz), jxx + mulI(jzz)));
 }
 `;
 
 const FFT_CORE = /* wgsl */ `
-const N: u32 = ${N}u;
-const LOGN: u32 = ${LOGN}u;
-const PI: f32 = 3.14159265358979;
 var<workgroup> wa: array<vec4f, ${N}>;
 var<workgroup> wb: array<vec4f, ${N}>;
-fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 fn bitrev(i: u32) -> u32 { return reverseBits(i) >> (32u - LOGN); }
 // In-place radix-2 inverse FFT over shared memory (input already bit-reversed).
 fn butterflies(t: u32) {
@@ -193,9 +187,8 @@ fn butterflies(t: u32) {
 }
 `;
 
-export const FFT_ROWS = FFT_CORE + /* wgsl */ `
-@group(0) @binding(0) var<storage, read> inA: array<vec4f>;
-@group(0) @binding(1) var<storage, read> inB: array<vec4f>;
+// Evolve directly into workgroup memory, avoiding two full-size spectrum buffers.
+export const FFT_ROWS = SIM_STRUCT + EVOLVE + FFT_CORE + /* wgsl */ `
 @group(0) @binding(2) var<storage, read_write> outA: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> outB: array<vec4f>;
 
@@ -204,10 +197,12 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
   let base = (wg.z * N + wg.x) * N;
   let e0 = t;
   let e1 = t + N / 2u;
-  wa[bitrev(e0)] = inA[base + e0];
-  wa[bitrev(e1)] = inA[base + e1];
-  wb[bitrev(e0)] = inB[base + e0];
-  wb[bitrev(e1)] = inB[base + e1];
+  let s0 = evolve(e0, wg.x, wg.z);
+  let s1 = evolve(e1, wg.x, wg.z);
+  wa[bitrev(e0)] = s0.a;
+  wa[bitrev(e1)] = s1.a;
+  wb[bitrev(e0)] = s0.b;
+  wb[bitrev(e1)] = s1.b;
   workgroupBarrier();
   butterflies(t);
   outA[base + e0] = wa[e0];
@@ -218,7 +213,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u3
 `;
 
 // Column pass + final assembly (displacement / derivative / slope-moment textures).
-export const FFT_COLS = FFT_CORE + /* wgsl */ `
+export const FFT_COLS = FFT_MATH + FFT_CORE + /* wgsl */ `
 @group(0) @binding(0) var<storage, read> inA: array<vec4f>;
 @group(0) @binding(1) var<storage, read> inB: array<vec4f>;
 @group(0) @binding(2) var dispOut: texture_storage_2d_array<rgba16float, write>;

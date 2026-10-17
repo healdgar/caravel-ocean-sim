@@ -96,7 +96,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 }
 `;
 
-// Sky-view LUT, recomputed every frame (sun / camera altitude may change).
+// Sky-view LUT, recomputed when sun elevation, haze or camera altitude changes.
 export const SKYVIEW_LUT = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
@@ -443,15 +443,18 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 }
 `;
 
-export const CUBE_MIPS = /* wgsl */ `
+export const CUBE_MIPS = FRAME_WGSL + /* wgsl */ `
 @group(0) @binding(0) var src: texture_2d_array<f32>;
 @group(0) @binding(1) var dst: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(2) var<uniform> F: Frame;
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3u) {
   let size = textureDimensions(dst);
   if (id.x >= size.x || id.y >= size.y) { return; }
   let srcSize = vec2i(textureDimensions(src));
   let p = vec2i(id.xy) * 2;
+  // Match ENV_CUBE: untouched faces keep their existing mip chains.
+  let face = (u32(F.post.z) + id.z) % 6u;
   // 4x4 tent-ish filter for smoother roughness blur
   var acc = vec4f(0.0);
   var wsum = 0.0;
@@ -459,11 +462,11 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     for (var i = -1; i <= 2; i++) {
       let q = clamp(p + vec2i(i, j), vec2i(0), srcSize - 1);
       let w = select(1.0, 3.0, i == 0 || i == 1) * select(1.0, 3.0, j == 0 || j == 1);
-      acc += textureLoad(src, q, id.z, 0) * w;
+      acc += textureLoad(src, q, face, 0) * w;
       wsum += w;
     }
   }
-  textureStore(dst, id.xy, id.z, acc / wsum);
+  textureStore(dst, id.xy, face, acc / wsum);
 }
 `;
 

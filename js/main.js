@@ -1,9 +1,9 @@
 // WebGPU ocean — custom renderer.
-// FFT ocean (5 cascades) + CDLOD surface mesh + physically based sky + HDR post.
+// FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
 // apart from the unavoidable swap-chain view and command buffer objects).
 import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS } from './wgsl/common.js';
-import { SIM_INIT, SIM_EVOLVE, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
+import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
 import { OCEAN, SKY_BG, HEIGHT_PROBE } from './wgsl/ocean.js';
 import { BLOOM_DOWN, BLOOM_UP, COMPOSITE } from './wgsl/post.js';
@@ -107,8 +107,6 @@ async function main() {
   const mkBuf = (size, usage, label) => device.createBuffer({ size, usage, label });
   const simUBO = mkBuf(224, GU.UNIFORM | GU.COPY_DST, 'sim ubo');
   const h0Buf = mkBuf(specBytes, GU.STORAGE, 'h0');
-  const specA = mkBuf(specBytes, GU.STORAGE, 'specA');
-  const specB = mkBuf(specBytes, GU.STORAGE, 'specB');
   const tmpA = mkBuf(specBytes, GU.STORAGE, 'tmpA');
   const tmpB = mkBuf(specBytes, GU.STORAGE, 'tmpB');
 
@@ -122,10 +120,9 @@ async function main() {
   const lvl = (t, m, dim = '2d-array') => t.createView({ dimension: dim, baseMipLevel: m, mipLevelCount: 1 });
   const fullArr = (t) => t.createView({ dimension: '2d-array' });
 
-  const [initPipe, evolvePipe, rowsPipe, colsPipe, simMipPipe, foamGenPipe, rgba8MipPipe,
+  const [initPipe, rowsPipe, colsPipe, simMipPipe, foamGenPipe, rgba8MipPipe,
     transPipe, msPipe, skyViewPipe, envPipe, cubeMipPipe, foamUpdPipe, arr16MipPipe, sunVisPipe] = await Promise.all([
     computePipe(SIM_INIT, 'sim init'),
-    computePipe(SIM_EVOLVE, 'sim evolve'),
     computePipe(FFT_ROWS, 'fft rows'),
     computePipe(FFT_COLS, 'fft cols'),
     computePipe(SIM_MIPS, 'sim mips'),
@@ -146,8 +143,7 @@ async function main() {
     entries: entries.map((r, i) => ({ binding: i, resource: r })),
   });
   const bgInit = bg(initPipe, [{ buffer: simUBO }, { buffer: h0Buf }], 'init');
-  const bgEvolve = bg(evolvePipe, [{ buffer: simUBO }, { buffer: h0Buf }, { buffer: specA }, { buffer: specB }], 'evolve');
-  const bgRows = bg(rowsPipe, [{ buffer: specA }, { buffer: specB }, { buffer: tmpA }, { buffer: tmpB }], 'rows');
+  const bgRows = bg(rowsPipe, [{ buffer: simUBO }, { buffer: h0Buf }, { buffer: tmpA }, { buffer: tmpB }], 'rows');
   const bgCols = bg(colsPipe, [{ buffer: tmpA }, { buffer: tmpB },
     lvl(dispTex, 0), lvl(derivTex, 0), lvl(momTex, 0)], 'cols');
   const bgSimMips = [];
@@ -238,7 +234,7 @@ async function main() {
   const bgEnv = bg(envPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, lvl(envTex, 0)], 'env');
   const bgSunVis = bg(sunVisPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, { buffer: sunVisBuf }], 'sunvis');
   const bgCubeMips = [];
-  for (let m = 1; m < ENV_MIPS; m++) bgCubeMips.push(bg(cubeMipPipe, [lvl(envTex, m - 1), lvl(envTex, m)], 'cubemip' + m));
+  for (let m = 1; m < ENV_MIPS; m++) bgCubeMips.push(bg(cubeMipPipe, [lvl(envTex, m - 1), lvl(envTex, m), { buffer: frameUBO }], 'cubemip' + m));
 
   // --------------------------------------------------------------------------------------
   // Render pipelines
@@ -349,7 +345,7 @@ async function main() {
     colorAttachments: [{ view: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
     timestampWrites: undefined,
   };
-  let downPasses = [], upPasses = [], downBGs = [], upBGs = [], bgComp = null;
+  let bloomLevels = 0, bloomPasses = [], bgComp = null;
 
   function resize() {
     const fw = Number(qs.get('w')) || 0, fh = Number(qs.get('h')) || 0;
@@ -364,30 +360,37 @@ async function main() {
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
-    bloomTex = device.createTexture({ size: [bw, bh], format: HDR, mipLevelCount: BLOOM_LEVELS, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
+    bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
+    bloomTex = device.createTexture({ size: [bw, bh], format: HDR, mipLevelCount: bloomLevels, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     mainPass.colorAttachments[0].view = colorMS.createView();
     mainPass.colorAttachments[0].resolveTarget = hdrTex.createView();
     mainPass.depthStencilAttachment.view = depthMS.createView();
     const hdrView = hdrTex.createView();
     const bv = [];
-    for (let m = 0; m < BLOOM_LEVELS; m++) bv.push(bloomTex.createView({ baseMipLevel: m, mipLevelCount: 1 }));
-    downPasses = []; upPasses = []; downBGs = []; upBGs = [];
+    for (let m = 0; m < bloomLevels; m++) bv.push(bloomTex.createView({ baseMipLevel: m, mipLevelCount: 1 }));
+    bloomPasses = [];
     const tmp = new Float32Array(4);
-    for (let m = 0; m < BLOOM_LEVELS; m++) {
+    for (let m = 0; m < bloomLevels; m++) {
       const srcW = m === 0 ? W : Math.max(1, bw >> (m - 1));
       const srcH = m === 0 ? H : Math.max(1, bh >> (m - 1));
       tmp[0] = 1 / srcW; tmp[1] = 1 / srcH; tmp[2] = m === 0 ? 1 : 0; tmp[3] = 0;
       device.queue.writeBuffer(bloomUBOs[m], 0, tmp);
-      downBGs.push(bg(downPipe, [m === 0 ? hdrView : bv[m - 1], linSamp, { buffer: bloomUBOs[m] }]));
-      downPasses.push({ colorAttachments: [{ view: bv[m], clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
+      bloomPasses.push({
+        pipeline: downPipe,
+        bindGroup: bg(downPipe, [m === 0 ? hdrView : bv[m - 1], linSamp, { buffer: bloomUBOs[m] }]),
+        descriptor: { colorAttachments: [{ view: bv[m], clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] },
+      });
     }
-    for (let m = BLOOM_LEVELS - 1; m > 0; m--) {
+    for (let m = bloomLevels - 1; m > 0; m--) {
       const sw = Math.max(1, bw >> m), sh = Math.max(1, bh >> m);
       tmp[0] = 1 / sw; tmp[1] = 1 / sh; tmp[2] = 1.0; tmp[3] = 1.0;
       const ubo = bloomUBOs[BLOOM_LEVELS + m];
       device.queue.writeBuffer(ubo, 0, tmp);
-      upBGs.push(bg(upPipe, [bv[m], linSamp, { buffer: ubo }]));
-      upPasses.push({ colorAttachments: [{ view: bv[m - 1], loadOp: 'load', storeOp: 'store' }] });
+      bloomPasses.push({
+        pipeline: upPipe,
+        bindGroup: bg(upPipe, [bv[m], linSamp, { buffer: ubo }]),
+        descriptor: { colorAttachments: [{ view: bv[m - 1], loadOp: 'load', storeOp: 'store' }] },
+      });
     }
     bgComp = bg(compPipe, [hdrView, bv[0], linSamp, { buffer: compUBO }]);
   }
@@ -422,7 +425,8 @@ async function main() {
   const atmoF = new Float32Array(4);
   const proj = new Float32Array(16), view = new Float32Array(16), viewProj = new Float32Array(16);
   const LOOP = 600.0;  // s, spectrum time loop (frequencies quantised to it)
-  let needSpectrum = true, needLUT = true, envFull = 2;
+  let needSpectrum = true, envFull = true;
+  let skySun = NaN, skyHaze = NaN, skyHeight = NaN;
 
   function writeSimStatic() {
     for (let c = 0; c < C; c++) {
@@ -435,7 +439,7 @@ async function main() {
     simF[40] = P.windSpeed; simF[41] = P.windDir * D2R; simF[42] = P.fetchKm * 1000; simF[43] = 3.3;
     const ks = 2 * Math.PI / P.swellLength;
     simF[44] = P.swellHs; simF[45] = P.swellDir * D2R; simF[46] = Math.sqrt(9.81 * ks); simF[47] = P.swellSpread;
-    simF[48] = P.choppy; simF[49] = 0.0012; simF[50] = LOOP; simF[51] = 1;
+    simF[49] = 0.0012; simF[50] = LOOP; simF[51] = 1;
     simF[54] = 2.2; simF[55] = 1.0;
   }
 
@@ -611,12 +615,12 @@ async function main() {
     ['swellHs', 'Swell height (m)', 0, 4, 0.05, 'spec'],
     ['swellLength', 'Swell wavelength (m)', 30, 300, 1, 'spec'],
     ['swellDir', 'Swell direction (deg)', 0, 360, 1, 'spec'],
-    ['choppy', 'Choppiness', 0, 1.6, 0.01, 'spec'],
+    ['choppy', 'Choppiness', 0, 1.6, 0.01, ''],
     ['turbidity', 'Water turbidity', 0.2, 3, 0.01, ''],
     ['foam', 'Foam', 0, 3, 0.01, ''],
     ['sunElev', 'Sun elevation (deg)', -2, 60, 0.1, ''],
     ['sunAzim', 'Sun azimuth (deg)', -180, 180, 0.5, ''],
-    ['haze', 'Haze', 0.5, 15, 0.1, 'lut'],
+    ['haze', 'Haze', 0.5, 15, 0.1, ''],
     ['clouds', 'Low clouds', 0, 1, 0.01, ''],
     ['veil', 'Cloud deck', 0, 1, 0.01, ''],
     ['exposure', 'Exposure', 0.1, 4, 0.01, ''],
@@ -631,8 +635,7 @@ async function main() {
     inp.addEventListener('input', () => {
       P[key] = Number(inp.value); val.textContent = inp.value;
       if (kind === 'spec') needSpectrum = true;
-      if (kind === 'lut') needLUT = true;
-      envFull = 2;
+      envFull = true;
     });
     row.append(name, inp, val);
     panel.appendChild(row);
@@ -652,13 +655,10 @@ async function main() {
   let shotIdx = 0;
   const fixedDt = shotName ? 1 / 60 : 0;
   let last = performance.now();
-  let fpsAcc = 0, fpsN = 0, fpsT = 0;
+  let fpsN = 0, fpsT = 0;
   let shooting = false;
 
   function encodeSim(cp) {
-    cp.setPipeline(evolvePipe);
-    cp.setBindGroup(0, bgEvolve);
-    cp.dispatchWorkgroups(N / 16, N / 16, C);
     cp.setPipeline(rowsPipe);
     cp.setBindGroup(0, bgRows);
     cp.dispatchWorkgroups(N, 1, C);
@@ -711,12 +711,12 @@ async function main() {
     resize();
     let dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    fpsAcc += dt; fpsN++; fpsT += dt;
+    fpsN++; fpsT += dt;
     if (fpsT > 0.5) {
-      const fps = fpsN / fpsAcc;
+      const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${gpuMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      fpsAcc = 0; fpsN = 0; fpsT = 0;
+      fpsN = 0; fpsT = 0;
     }
     if (fixedDt) dt = fixedDt;
     updateCamera(dt);
@@ -725,7 +725,8 @@ async function main() {
     frameIndex++;
 
     writeFrame(simTime);
-    writeSimStatic();
+    if (needSpectrum) writeSimStatic();
+    simF[48] = P.choppy;
     simF[52] = simTime; simF[53] = dt;
     device.queue.writeBuffer(simUBO, 0, simF);
     writeFoamUniforms(dt);
@@ -740,7 +741,9 @@ async function main() {
       cp.dispatchWorkgroups(N / 16, N / 16, C);
       needSpectrum = false;
     }
-    if (needLUT) {
+    const hazeChanged = frameF[72] !== skyHaze;
+    const skyChanged = hazeChanged || frameF[33] !== skySun || frameF[73] !== skyHeight;
+    if (hazeChanged) {
       atmoF[0] = P.haze;
       device.queue.writeBuffer(atmoUBO, 0, atmoF);
       cp.setPipeline(transPipe);
@@ -749,28 +752,35 @@ async function main() {
       cp.setPipeline(msPipe);
       cp.setBindGroup(0, bgMS);
       cp.dispatchWorkgroups(32 / 8, 32 / 8);
-      needLUT = false;
     }
     encodeSim(cp);
-    cp.setPipeline(probePipe);
-    cp.setBindGroup(0, bgProbe);
-    cp.dispatchWorkgroups(1);
-    cp.setPipeline(skyViewPipe);
-    cp.setBindGroup(0, bgSkyView);
-    cp.dispatchWorkgroups(Math.ceil(SKY_W / 8), Math.ceil(SKY_H / 8));
+    const doProbe = !probePending && (frameIndex & 7) === 0;
+    if (doProbe) {
+      cp.setPipeline(probePipe);
+      cp.setBindGroup(0, bgProbe);
+      cp.dispatchWorkgroups(1);
+    }
+    // This LUT depends only on sun elevation, haze and effective camera altitude.
+    if (skyChanged) {
+      cp.setPipeline(skyViewPipe);
+      cp.setBindGroup(0, bgSkyView);
+      cp.dispatchWorkgroups(Math.ceil(SKY_W / 8), Math.ceil(SKY_H / 8));
+      skySun = frameF[33]; skyHaze = frameF[72]; skyHeight = frameF[73];
+    }
     cp.setPipeline(sunVisPipe);
     cp.setBindGroup(0, bgSunVis);
     cp.dispatchWorkgroups(1);
     cp.setPipeline(envPipe);
     cp.setBindGroup(0, bgEnv);
     // one cube face per frame (all six on start-up / after parameter changes)
-    cp.dispatchWorkgroups(ENV_SIZE / 8, ENV_SIZE / 8, envFull > 0 ? 6 : 1);
-    if (envFull > 0) envFull--;
+    const envFaces = envFull ? 6 : 1;
+    cp.dispatchWorkgroups(ENV_SIZE / 8, ENV_SIZE / 8, envFaces);
+    envFull = false;
     cp.setPipeline(cubeMipPipe);
     for (let m = 1; m < ENV_MIPS; m++) {
       const s = Math.max(1, ENV_SIZE >> m);
       cp.setBindGroup(0, bgCubeMips[m - 1]);
-      cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), 6);
+      cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), envFaces);
     }
     cp.end();
 
@@ -787,23 +797,18 @@ async function main() {
     rp.draw(3);
     rp.end();
 
-    for (let m = 0; m < BLOOM_LEVELS; m++) {
-      const p = enc.beginRenderPass(downPasses[m]);
-      p.setPipeline(downPipe);
-      p.setBindGroup(0, downBGs[m]);
-      p.draw(3);
-      p.end();
-    }
-    for (let i = 0; i < upPasses.length; i++) {
-      const p = enc.beginRenderPass(upPasses[i]);
-      p.setPipeline(upPipe);
-      p.setBindGroup(0, upBGs[i]);
-      p.draw(3);
-      p.end();
+    if (P.bloom > 0) {
+      for (const { descriptor, pipeline, bindGroup } of bloomPasses) {
+        const p = enc.beginRenderPass(descriptor);
+        p.setPipeline(pipeline);
+        p.setBindGroup(0, bindGroup);
+        p.draw(3);
+        p.end();
+      }
     }
 
     compData[0] = P.exposure; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
-    compData[4] = 1.05; compData[5] = 1.06; compData[6] = -0.19; compData[7] = 0;
+    compData[4] = 1.05; compData[5] = 1.06; compData[6] = -0.19; compData[7] = 1 / bloomLevels;
     device.queue.writeBuffer(compUBO, 0, compData);
     const swapTex = ctx.getCurrentTexture();
     compPass.colorAttachments[0].view = swapTex.createView();
@@ -813,11 +818,7 @@ async function main() {
     pc.draw(3);
     pc.end();
 
-    let doProbe = false;
-    if (!probePending && (frameIndex & 7) === 0) {
-      enc.copyBufferToBuffer(probeOut, 0, probeRead, 0, 16);
-      doProbe = true;
-    }
+    if (doProbe) enc.copyBufferToBuffer(probeOut, 0, probeRead, 0, 16);
     let doTs = false;
     if (hasTS && !tsPending && (frameIndex & 7) === 0) {
       enc.resolveQuerySet(tsQuery, 0, 2, tsResolve, 0);
@@ -830,17 +831,15 @@ async function main() {
       const bpr = Math.ceil(W * 4 / 256) * 256;
       readBuf = device.createBuffer({ size: bpr * H, usage: GU.MAP_READ | GU.COPY_DST });
       enc.copyTextureToBuffer({ texture: swapTex }, { buffer: readBuf, bytesPerRow: bpr }, [W, H]);
-      saveShot(readBuf, bpr);
     }
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
     if (doProbe) { probePending = true; probeRead.mapAsync(GPUMapMode.READ).then(onProbe, onProbeFail); }
     if (doTs) { tsPending = true; tsRead.mapAsync(GPUMapMode.READ).then(onTsMapped, onTsFail); }
-    if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256, true);
+    if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
   }
 
-  async function saveShot(buf, bpr, go) {
-    if (!go) return;
+  async function saveShot(buf, bpr) {
     await buf.mapAsync(GPUMapMode.READ);
     const src = new Uint8Array(buf.getMappedRange());
     const img = new ImageData(W, H);
@@ -855,6 +854,7 @@ async function main() {
       }
     }
     buf.unmap();
+    buf.destroy();
     const oc = new OffscreenCanvas(W, H);
     oc.getContext('2d').putImageData(img, 0, 0);
     const blob = await oc.convertToBlob({ type: 'image/png' });
