@@ -215,7 +215,14 @@ level while the vessel continues floating and steering.
 
 ## GitHub Pages build
 
+[Open the live sailing demo](https://healdgar.github.io/web-ocean-demo/).
+The public deployment repository is
+[`healdgar/web-ocean-demo`](https://github.com/healdgar/web-ocean-demo).
+It contains the generated page and license; the source repository stays private.
+
 `node build.mjs` also generates `docs/index.html`, a standalone minified demo
 with the oak material embedded. It starts in Boat camera unless the URL contains
-`boat=0`. Configure GitHub Pages to serve the `main` branch's `/docs` folder.
-The `.nojekyll` file preserves the generated static page without a Jekyll build.
+`boat=0`. To update the public demo, copy `docs/index.html`, `docs/.nojekyll`, and
+`LICENSE` to the deployment repository's root, commit, and push to `main`.
+GitHub Pages serves that branch's root folder. The `.nojekyll` file preserves
+the generated static page without a Jekyll build.
