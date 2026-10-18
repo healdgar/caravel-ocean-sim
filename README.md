@@ -85,6 +85,14 @@ The visible mesh and shadow casters share 107,914 unique vertex records through 
 
 The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
 
+### Crew preparation
+
+[Crew and decision-system design](CREW.md) separates captain's orders, individual
+decisions, shared task reservations, movement and actual rigging work. It proposes
+12 simulated people for the small default vessel, independently of the visible
+character budget, with a replaceable local decision policy. This is preparation;
+animated crew and crew-driven sail handling are not implemented yet.
+
 ### Wake, bow waves and spray
 
 Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Small droplets and broad translucent mist are secondary to the sheets, rather than constant streams.
