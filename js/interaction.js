@@ -1,5 +1,6 @@
 // GPU-owned bow contacts, a moving local wake grid, and fixed-capacity spray.
 import { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT, SHEET_UPDATE, WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
+import { boatForwardSpeed } from './boat.js';
 import { createDeckWash } from './deck.js';
 
 export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, sunVis, shader, computePipe }) {
@@ -54,7 +55,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
       const reset = resetSea || enabled !== wasEnabled || previousRevision !== boat.revision || extent !== previousExtent || Math.hypot(x - prevX, z - prevZ) > extent * 0.25;
       values[0] = x; values[1] = z; values[2] = extent; values[3] = dx;
       values[4] = prevX; values[5] = prevZ; values[6] = Math.max(0, Math.min(0.1, dt)); values[7] = reset ? 1 : 0;
-      values[8] = boat.speed * 0.514444; values[9] = enabled ? 1 : 0;
+      values[8] = boatForwardSpeed(boat); values[9] = enabled ? 1 : 0;
       values[10] = Math.cos(windDir) * windSpeed; values[11] = Math.sin(windDir) * windSpeed;
       values[12] = time; values[13] = frame; values[14]=boat.length/12;
       device.queue.writeBuffer(uniform, 0, values);

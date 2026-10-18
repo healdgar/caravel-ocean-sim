@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boatTargets, boatSpring, boatRotate } from '../js/boat.js';
+import { boatTargets, boatSpring, boatRotate, boatHydrodynamics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from '../js/boat.js';
 
 test('flat sea gives level hull and correct height', () => {
   assert.deepEqual(boatTargets(Array(9).fill(2), 10, 3), { heave: 2, pitch: 0, roll: 0 });
@@ -72,4 +72,109 @@ test('boarding uses the ship world position and eye height independently of a sp
   assert.ok(Math.abs(out[2]-previous[2]+5)<1e-12);
   boat.length=24;boat.pitch=boat.roll=boat.heading=0;boatEyePosition(out,boat);
   assert.ok(Math.abs(out[2]-boat.z-2*HELM_EYE_Z)<1e-12,'helm eye follows a resized stern');
+});
+
+const surgeBoat = (speed = 6) => ({ length: 12, beam: 3.6, speed, surgeVelocity: speed * KNOT_TO_MPS });
+test('displacement scales with submerged geometry and includes added water inertia', () => {
+  const base = boatHydrodynamics(12, 3.6), long = boatHydrodynamics(24, 3.6), wide = boatHydrodynamics(12, 7.2);
+  assert.ok(base.mass > 20000 && base.mass < 70000);
+  assert.equal(base.mass, base.volume * 1025);
+  assert.equal(long.mass, 2 * base.mass);
+  assert.equal(wide.mass, 2 * base.mass);
+  assert.ok(base.addedMass > 0 && base.drag > 0);
+});
+
+test('calm-water thrust holds the selected speed and distance without a speed clamp', () => {
+  for (const speed of [0, 6, 40]) for (const dt of [1 / 120, 1 / 30, 0.1]) {
+    const boat = surgeBoat(speed); let distance = 0;
+    for (let i = 0; i < Math.round(20 / dt); i++) distance += stepBoatSurge(boat, 0, dt);
+    assert.ok(Math.abs(boat.surgeVelocity - speed * KNOT_TO_MPS) < 1e-10);
+    assert.ok(Math.abs(distance - speed * KNOT_TO_MPS * 20) < 1e-8);
+  }
+});
+
+test('uphill pressure slows the ship; downhill pressure accelerates it independently of pitch', () => {
+  const uphill = { ...surgeBoat(), pitch: -0.5 }, downhill = { ...surgeBoat(), pitch: 0.5 };
+  stepBoatSurge(uphill, 0.08, 0.1); stepBoatSurge(downhill, -0.08, 0.1);
+  assert.ok(uphill.surgeVelocity < 6 * KNOT_TO_MPS);
+  assert.ok(downhill.surgeVelocity > 6 * KNOT_TO_MPS);
+  const drifting = surgeBoat(0); stepBoatSurge(drifting, 0.08, 0.1);
+  assert.ok(drifting.surgeVelocity < 0, 'wave force can move an unpowered hull astern');
+});
+
+test('equal applied force accelerates a larger inertia less; target edits preserve momentum', () => {
+  const a = surgeBoat(), b = surgeBoat();
+  a.hydrodynamics = boatHydrodynamics(12, 3.6);
+  b.hydrodynamics = { ...a.hydrodynamics, mass: a.hydrodynamics.mass * 2, addedMass: a.hydrodynamics.addedMass * 2 };
+  a.speed = b.speed = 12;
+  stepBoatSurge(a, 0, 0.1); stepBoatSurge(b, 0, 0.1);
+  assert.ok(a.surgeVelocity > b.surgeVelocity && b.surgeVelocity > 6 * KNOT_TO_MPS);
+  assert.ok(a.surgeVelocity < 6.1 * KNOT_TO_MPS, 'speed setting changes thrust, not current velocity');
+});
+
+test('unpowered drag dissipates kinetic energy in either direction without reversing it', () => {
+  for (const sign of [-1, 1]) {
+    const boat = { ...surgeBoat(0), surgeVelocity: sign * 8 };
+    let previous = Math.abs(boat.surgeVelocity);
+    for (let i = 0; i < 1200; i++) {
+      stepBoatSurge(boat, 0, 0.1);
+      assert.ok(Math.abs(boat.surgeVelocity) < previous);
+      assert.equal(Math.sign(boat.surgeVelocity), sign);
+      previous = Math.abs(boat.surgeVelocity);
+    }
+  }
+});
+
+test('undamped wave work equals the change in kinetic energy including added mass', () => {
+  for (const slope of [-0.08, 0.08]) {
+    const boat = { ...surgeBoat(0), surgeVelocity: 2 };
+    const hydro = boat.hydrodynamics = { ...boatHydrodynamics(12, 3.6), drag: 0 };
+    const inertia = hydro.mass + hydro.addedMass, start = 0.5 * inertia * boat.surgeVelocity ** 2;
+    let distance = 0;
+    for (let i = 0; i < 100; i++) distance += stepBoatSurge(boat, slope, 0.1);
+    const work = -1025 * 9.81 * hydro.volume * slope * distance;
+    const energy = 0.5 * inertia * boat.surgeVelocity ** 2 - start;
+    assert.ok(Math.abs(work - energy) < 1e-6);
+  }
+});
+
+test('travelling swell surge remains stable and consistent from 10 to 120 FPS', () => {
+  const run = dt => {
+    const boat = surgeBoat(); let distance = 0, min = boat.surgeVelocity, max = min;
+    for (let i = 0; i < Math.round(120 / dt); i++) {
+      const slope = 0.06 * Math.sin(2 * Math.PI * (distance / 120 - i * dt / 8.77));
+      distance += stepBoatSurge(boat, slope, dt);
+      min = Math.min(min, boat.surgeVelocity); max = Math.max(max, boat.surgeVelocity);
+      assert.ok(Number.isFinite(distance) && Math.abs(boat.surgeVelocity) < 20);
+    }
+    return { velocity: boat.surgeVelocity, distance, min, max };
+  };
+  const reference = run(1 / 120);
+  assert.ok(reference.max - reference.min > 1, 'waves produce meaningful velocity variation');
+  for (const dt of [1 / 30, 0.1]) {
+    const result = run(dt);
+    assert.ok(Math.abs(result.velocity - reference.velocity) < 0.06);
+    // The incident force is sampled once per frame, so its phase is quantized.
+    assert.ok(Math.abs(result.distance - reference.distance) / reference.distance < 0.005);
+  }
+});
+
+test('wave force projects onto heading and stale or superseded probes lose influence', () => {
+  const boat = { waveSlopeX: 0.1, waveSlopeZ: 0, waveSampleTime: 2, waveRevision: 4, revision: 4, heading: 90 };
+  assert.equal(boatWaveSlope(boat, 2.1), 0.1);
+  boat.heading = 270; assert.equal(boatWaveSlope(boat, 2.1), -0.1);
+  boat.heading = 0; assert.equal(boatWaveSlope(boat, 2.1), 0);
+  boat.heading = 90; assert.ok(Math.abs(boatWaveSlope(boat, 4)) < 0.0001);
+  assert.equal(boatWaveSlope(boat, 1), 0, 'looped simulation clock rejects old samples');
+  boat.revision++; assert.equal(boatWaveSlope(boat, 2.1), 0);
+});
+
+test('rudder authority follows actual surge speed including a reversal', () => {
+  const forward = { ...steeringBoat(6), surgeVelocity: 3 }, reverse = { ...steeringBoat(6), surgeVelocity: -3 };
+  const stopped = { ...steeringBoat(6), surgeVelocity: 0 };
+  advance(forward, 1, 4); advance(reverse, 1, 4); advance(stopped, 1, 4);
+  assert.ok(forward.heading > 0 && forward.heading < 90);
+  assert.ok(Math.abs(forward.heading + reverse.heading - 360) < 1e-8);
+  assert.equal(stopped.heading, 0);
+  assert.equal(boatForwardSpeed(stopped), 0);
 });

@@ -152,13 +152,14 @@ fn previousCell(q: vec2i) -> vec4f {
   let stern = exp(-pow((along + H.size.y * 0.44) / max(0.7, H.size.y * 0.1), 2.0) - pow(dot(delta, H.right.xz) / max(0.6, H.size.x * 0.45), 2.0));
   let sternWet = (contacts[0].flow.w + contacts[16].flow.w) * 0.5;
   let pulse = exp(-r*r*2.0)*(1.0-r*r*2.0)*smoothstep(-0.1,0.2,outside)*contact.axis.w;
-  let forcing = source*4.0+pulse*14.0-stern*sternWet*min(0.35,I.motion.x*0.025);
+  let forwardSpeed = max(0.0, I.motion.x);
+  let forcing = source*4.0+pulse*14.0-stern*sternWet*min(0.35,forwardSpeed*0.025);
   let dt = I.previous.z;
   // c=2.5 m/s and dx>=0.5 m remain CFL-stable at the host's maximum dt=0.1 s.
   let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 2.0) * dt) * exp(-dt * 1.25), -3.0, 3.0);
   let edge = 1.0 - smoothstep(0.43, 0.495, max(abs(p.x - I.domain.x), abs(p.y - I.domain.y)) / I.domain.z);
   let height = clamp(old.x + velocity * dt, -0.7, 1.1) * edge;
-  let foamSource = source*0.65+max(pulse,0.0)*1.4+stern*sternWet*min(0.5,I.motion.x*0.05);
+  let foamSource = source*0.65+max(pulse,0.0)*1.4+stern*sternWet*min(0.5,forwardSpeed*0.05);
   let foam = clamp(old.z * exp(-dt * 0.45) + foamSource * dt + deposited, 0.0, 1.0) * edge;
   textureStore(dstWake, q, vec4f(height, velocity * edge, foam, max(foamSource * dt, deposited)));
 }

@@ -653,13 +653,14 @@ fn previousCell(q: vec2i) -> vec4f {
   let stern = exp(-pow((along + H.size.y * 0.44) / max(0.7, H.size.y * 0.1), 2.0) - pow(dot(delta, H.right.xz) / max(0.6, H.size.x * 0.45), 2.0));
   let sternWet = (contacts[0].flow.w + contacts[16].flow.w) * 0.5;
   let pulse = exp(-r*r*2.0)*(1.0-r*r*2.0)*smoothstep(-0.1,0.2,outside)*contact.axis.w;
-  let forcing = source*4.0+pulse*14.0-stern*sternWet*min(0.35,I.motion.x*0.025);
+  let forwardSpeed = max(0.0, I.motion.x);
+  let forcing = source*4.0+pulse*14.0-stern*sternWet*min(0.35,forwardSpeed*0.025);
   let dt = I.previous.z;
   // c=2.5 m/s and dx>=0.5 m remain CFL-stable at the host's maximum dt=0.1 s.
   let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 2.0) * dt) * exp(-dt * 1.25), -3.0, 3.0);
   let edge = 1.0 - smoothstep(0.43, 0.495, max(abs(p.x - I.domain.x), abs(p.y - I.domain.y)) / I.domain.z);
   let height = clamp(old.x + velocity * dt, -0.7, 1.1) * edge;
-  let foamSource = source*0.65+max(pulse,0.0)*1.4+stern*sternWet*min(0.5,I.motion.x*0.05);
+  let foamSource = source*0.65+max(pulse,0.0)*1.4+stern*sternWet*min(0.5,forwardSpeed*0.05);
   let foam = clamp(old.z * exp(-dt * 0.45) + foamSource * dt + deposited, 0.0, 1.0) * edge;
   textureStore(dstWake, q, vec4f(height, velocity * edge, foam, max(foamSource * dt, deposited)));
 }
@@ -2611,6 +2612,8 @@ struct ProbeBoat { config: vec4f, origin: vec4f };
 @group(0) @binding(5) var<uniform> I: Interaction;
 @group(0) @binding(6) var wakeTex: texture_2d<f32>;
 @group(0) @binding(7) var wakeSamp: sampler;
+@group(0) @binding(8) var slopeTex: texture_2d_array<f32>;
+var<workgroup> pressureSlopes: array<vec2f, 10>;
 fn dispAt(xz: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
@@ -2618,9 +2621,20 @@ fn dispAt(xz: vec2f) -> vec3f {
   }
   return d;
 }
+fn pressureSlopeAt(xz: vec2f) -> vec2f {
+  var slope = vec2f(0.0);
+  // Hull-footprint filtering prevents sparse quadrature aliasing short chop.
+  // This is a shallow-draft, long-wave pressure approximation, not diffraction.
+  let footprint = max(max(boat.config.y, boat.config.z) / 3.0, 3.1);
+  for (var c = 0u; c < ${CASCADES}u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let lod = max(0.0, log2(max(1.0, footprint * invL * f32(textureDimensions(slopeTex).x))));
+    slope += textureSampleLevel(slopeTex, samp, xz * invL, c, lod).xy;
+  }
+  return slope;
+}
 @compute @workgroup_size(10)
 fn main(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= 10u) { return; }
   let forward = vec2f(sin(boat.config.x), -cos(boat.config.x));
   let right = vec2f(cos(boat.config.x), sin(boat.config.x));
   let f = (f32(id.x / 3u) - 1.0) * boat.config.y * 0.5;
@@ -2632,6 +2646,20 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     x0 = goal - d.xz;
   }
   outH[id.x] = dispAt(x0).y + wakeAt(goal).x;
+  pressureSlopes[id.x] = vec2f(0.0);
+  if (id.x < 9u) {
+    let wf = select(1.0, 4.0, id.x / 3u == 1u);
+    let wr = select(1.0, 4.0, id.x % 3u == 1u);
+    // Linear incident-wave gradient at the undisturbed world position. Exclude
+    // the ship's own wake and choppy horizontal displacement from propulsion.
+    pressureSlopes[id.x] = pressureSlopeAt(goal) * wf * wr / 36.0;
+  }
+  workgroupBarrier();
+  if (id.x == 0u) {
+    var meanSlope = vec2f(0.0);
+    for (var i = 0u; i < 9u; i++) { meanSlope += pressureSlopes[i]; }
+    outH[10] = meanSlope.x; outH[11] = meanSlope.y;
+  }
 }
 `;
 
@@ -2968,6 +2996,69 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
 // ---- js/boat.js ----
 
+const KNOT_TO_MPS = 0.514444;
+// Displacement of the canonical mesh below its mean waterline, in cubic metres.
+// Hull dimensions scale horizontally; its draft currently stays at HULL_DRAFT.
+const BOAT_VOLUME = (() => {
+  let volume = 0;
+  const dz = 12 / 96, dy = HULL_DRAFT / 32;
+  for (let z = 0; z < 96; z++) for (let y = 0; y < 32; y++) {
+    volume += 2 * hullHalfWidth(-6.4 + (z + 0.5) * dz, -HULL_DRAFT + (y + 0.5) * dy) * dz * dy;
+  }
+  return volume;
+})();
+
+function boatHydrodynamics(length, beam) {
+  const volume = BOAT_VOLUME * length / 12 * beam / 3.6;
+  const mass = 1025 * volume;
+  // Authored effective coefficients, not a calibrated resistance curve.
+  const wettedArea = 0.85 * length * (beam + 2 * HULL_DRAFT);
+  return { length, beam, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea };
+}
+
+function boatForwardSpeed(boat) {
+  return boat.surgeVelocity ?? boat.speed * KNOT_TO_MPS;
+}
+
+// World-space, incident-wave slopes arrive in the existing asynchronous probe.
+// Never hold an old force indefinitely after a stalled readback or a scene edit.
+function boatWaveSlope(boat, time) {
+  const age = time - boat.waveSampleTime;
+  if (boat.waveRevision !== boat.revision || !(age >= 0)) return 0;
+  const freshness = Math.exp(-Math.max(0, age - 0.25) / 0.25);
+  const heading = boat.heading * Math.PI / 180;
+  return (boat.waveSlopeX * Math.sin(heading) - boat.waveSlopeZ * Math.cos(heading)) * freshness;
+}
+
+// Long-wave Froude–Krylov approximation: F = -rho*g*volume*mean(wave slope).
+// Propulsive thrust balances calm-water drag at the selected target speed;
+// it does not cancel wave forces or force the actual velocity to that setting.
+function stepBoatSurge(boat, slope, dt) {
+  if (!(dt > 0) || !Number.isFinite(dt)) return 0;
+  let hydro = boat.hydrodynamics;
+  if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam) {
+    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam);
+  }
+  const inertia = hydro.mass + hydro.addedMass;
+  const target = boat.speed * KNOT_TO_MPS;
+  const thrust = hydro.drag * target * Math.abs(target);
+  const waveForce = -1025 * 9.81 * hydro.volume * slope;
+  const force = thrust + waveForce;
+  const initial = boatForwardSpeed(boat);
+  let velocity = initial, distance = 0;
+  const steps = Math.ceil(dt * 120), h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    const free = velocity + force / inertia * h;
+    // Implicit signed quadratic drag: stable through zero and during reversals.
+    const next = 2 * free / (1 + Math.sqrt(1 + 4 * hydro.drag / inertia * h * Math.abs(free)));
+    distance += (velocity + next) * 0.5 * h;
+    velocity = next;
+  }
+  boat.surgeVelocity = velocity;
+  boat.surgeAcceleration = (velocity - initial) / dt;
+  return distance;
+}
+
 // Approximate rigid hull response to a 3 x 3 grid of actual ocean heights.
 function boatTargets(heights, length, beam) {
   const mean = (a, b, c) => (heights[a] + heights[b] + heights[c]) / 3;
@@ -3002,7 +3093,7 @@ function boatRotate(out, x, y, z, heading, pitch, roll) {
 function stepBoatSteering(boat, command, dt) {
   boat.rudderTarget = Math.max(-35, Math.min(35, boat.rudderTarget + command * 28 * dt));
   boatSpring(boat, 'rudder', boat.rudderTarget, 9, dt);
-  const speed = boat.speed * 0.514444;
+  const speed = boatForwardSpeed(boat);
   const desired = speed / Math.max(boat.length, 3) * Math.tan(boat.rudder * Math.PI / 180) * 0.65;
   const previous = boat.yawRate || 0;
   boat.yawRate = desired + (previous - desired) * Math.exp(-dt / (0.9 + boat.length * 0.06));
@@ -3595,6 +3686,7 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
 // GPU-owned bow contacts, a moving local wake grid, and fixed-capacity spray.
 
 
+
 async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, sunVis, shader, computePipe }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
@@ -3647,7 +3739,7 @@ async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaS
       const reset = resetSea || enabled !== wasEnabled || previousRevision !== boat.revision || extent !== previousExtent || Math.hypot(x - prevX, z - prevZ) > extent * 0.25;
       values[0] = x; values[1] = z; values[2] = extent; values[3] = dx;
       values[4] = prevX; values[5] = prevZ; values[6] = Math.max(0, Math.min(0.1, dt)); values[7] = reset ? 1 : 0;
-      values[8] = boat.speed * 0.514444; values[9] = enabled ? 1 : 0;
+      values[8] = boatForwardSpeed(boat); values[9] = enabled ? 1 : 0;
       values[10] = Math.cos(windDir) * windSpeed; values[11] = Math.sin(windDir) * windSpeed;
       values[12] = time; values[13] = frame; values[14]=boat.length/12;
       device.queue.writeBuffer(uniform, 0, values);
@@ -4271,7 +4363,7 @@ async function main() {
   const probeRead = mkBuf(64, GU.MAP_READ | GU.COPY_DST, 'probe read');
   const boatUBO = mkBuf(32, GU.UNIFORM | GU.COPY_DST, 'boat probe');
   const boatUniform = new Float32Array(8);
-  const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'probe'));
+  const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler, fullArr(derivTex)], 'probe'));
   let probePending = false, waterH = 0;
   let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
   let probeTime=0, targetTime=-1, targetRevision=-1;
@@ -4294,6 +4386,8 @@ async function main() {
       }
       if(placed)boat.revision++; // a pose placement must not launch a false impact
       Object.assign(boat.target,next);targetTime=probeTime;targetRevision=boat.revision;
+      boat.waveSlopeX=heights[10]; boat.waveSlopeZ=heights[11];
+      boat.waveSampleTime=probeTime; boat.waveRevision=boat.revision;
     }
     probeRead.unmap();
     probePending = false;
@@ -4462,6 +4556,7 @@ async function main() {
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
+    waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
     elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',25,10,120) };
@@ -4533,8 +4628,10 @@ async function main() {
 
   function updateBoat(dt) {
     const steering = boat.enabled ? (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) : 0;
+    const distance = stepBoatSurge(boat, boatWaveSlope(boat, simTime), dt);
+    const previousHeading = boat.heading * D2R, previousYaw = boat.yawRate;
     stepBoatSteering(boat, steering, dt);
-    const heading = boat.heading * D2R, distance = boat.speed * 0.514444 * dt;
+    const heading = previousHeading + (previousYaw + boat.yawRate) * dt * 0.25;
     boat.x += Math.sin(heading) * distance; boat.z -= Math.cos(heading) * distance;
     const response = Math.max(0.65, 4.5 / Math.sqrt(boat.length / 6));
     // Follow the measured water velocity, including short readback latency. A
@@ -4794,7 +4891,7 @@ async function main() {
   updateHelp();
   for (const [key, label, min, max, step] of [
     ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
-    ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Speed (knots)', 0, 40, 0.5],
+    ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
     ['eye', 'Eye above water (m)', 1, 15, 0.1],
   ]) {
     const row = document.createElement('label');
@@ -4803,7 +4900,8 @@ async function main() {
     Object.assign(input, { type: 'number', min, max, step, value: boat[key], id: 'boat-' + key });
     input.addEventListener('input', () => {
       if (!input.validity.valid || input.value === '') return;
-      boat[key] = Number(input.value); boat.revision++;
+      boat[key] = Number(input.value);
+      if (key === 'length' || key === 'beam' || key === 'heading') boat.revision++;
     });
     row.append(name, input); boatPanel.append(row);
   }
@@ -4821,7 +4919,8 @@ async function main() {
   centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
   boatPanel.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatPanel.append(boatStatus);
-  const note = document.createElement('p'); note.textContent = 'Wave-driven hull motion, bow waves and impact spray. Speed is set manually.'; boatPanel.append(note);
+  const boatMotion = document.createElement('p'); boatMotion.id='boat-motion'; boatPanel.append(boatMotion);
+  const note = document.createElement('p'); note.textContent = 'Waves change speed and hull motion. Set the calm-water speed above.'; boatPanel.append(note);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
@@ -4954,6 +5053,7 @@ async function main() {
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
+      boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ≈ ${((boat.hydrodynamics?.mass || 0)/1000).toFixed(1)} t`;
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
       if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
       rudderValue.textContent=boat.rudder.toFixed(1)+' deg';
@@ -5009,7 +5109,7 @@ async function main() {
       cp.dispatchWorkgroups(32 / 8, 32 / 8);
     }
     encodeSim(cp);
-    const doProbe = !probePending && (boat.showProw || (frameIndex & 7) === 0);
+    const doProbe = !probePending && (boat.showProw || boat.enabled || (frameIndex & 7) === 0);
     if (doProbe) {
       probeLength = boat.length; probeBeam = boat.beam; probeRevision = boat.revision;
       probeTime=simTime;
@@ -5162,7 +5262,7 @@ async function main() {
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
     if(profilePanel){
       await profiler.settled();profilePanel.textContent=profileSummary+'\n'+profiler.text();
-      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,parameters:P,profile:profiler.snapshot()},null,2)});
+      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
     shotIdx++;

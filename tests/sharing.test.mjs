@@ -48,3 +48,9 @@ test('sharing preserves the wake and spray switch', () => {
     assert.equal(url.searchParams.get('effects'), effects ? '1' : '0');
   }
 });
+
+test('sharing keeps the calm-water target rather than a transient wave-driven speed', () => {
+  const url = new URL(createShareLink('https://example.com/', {}, { ...boat, surgeVelocity: 2.1 }, 'boat'));
+  assert.equal(Number(url.searchParams.get('boatSpeed')), boat.speed);
+  assert.equal(url.searchParams.has('surgeVelocity'), false);
+});

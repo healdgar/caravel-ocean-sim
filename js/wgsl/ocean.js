@@ -328,6 +328,8 @@ struct ProbeBoat { config: vec4f, origin: vec4f };
 @group(0) @binding(5) var<uniform> I: Interaction;
 @group(0) @binding(6) var wakeTex: texture_2d<f32>;
 @group(0) @binding(7) var wakeSamp: sampler;
+@group(0) @binding(8) var slopeTex: texture_2d_array<f32>;
+var<workgroup> pressureSlopes: array<vec2f, 10>;
 fn dispAt(xz: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
@@ -335,9 +337,20 @@ fn dispAt(xz: vec2f) -> vec3f {
   }
   return d;
 }
+fn pressureSlopeAt(xz: vec2f) -> vec2f {
+  var slope = vec2f(0.0);
+  // Hull-footprint filtering prevents sparse quadrature aliasing short chop.
+  // This is a shallow-draft, long-wave pressure approximation, not diffraction.
+  let footprint = max(max(boat.config.y, boat.config.z) / 3.0, 3.1);
+  for (var c = 0u; c < ${CASCADES}u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let lod = max(0.0, log2(max(1.0, footprint * invL * f32(textureDimensions(slopeTex).x))));
+    slope += textureSampleLevel(slopeTex, samp, xz * invL, c, lod).xy;
+  }
+  return slope;
+}
 @compute @workgroup_size(10)
 fn main(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= 10u) { return; }
   let forward = vec2f(sin(boat.config.x), -cos(boat.config.x));
   let right = vec2f(cos(boat.config.x), sin(boat.config.x));
   let f = (f32(id.x / 3u) - 1.0) * boat.config.y * 0.5;
@@ -349,5 +362,19 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     x0 = goal - d.xz;
   }
   outH[id.x] = dispAt(x0).y + wakeAt(goal).x;
+  pressureSlopes[id.x] = vec2f(0.0);
+  if (id.x < 9u) {
+    let wf = select(1.0, 4.0, id.x / 3u == 1u);
+    let wr = select(1.0, 4.0, id.x % 3u == 1u);
+    // Linear incident-wave gradient at the undisturbed world position. Exclude
+    // the ship's own wake and choppy horizontal displacement from propulsion.
+    pressureSlopes[id.x] = pressureSlopeAt(goal) * wf * wr / 36.0;
+  }
+  workgroupBarrier();
+  if (id.x == 0u) {
+    var meanSlope = vec2f(0.0);
+    for (var i = 0u; i < 9u; i++) { meanSlope += pressureSlopes[i]; }
+    outH[10] = meanSlope.x; outH[11] = meanSlope.y;
+  }
 }
 `;

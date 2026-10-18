@@ -169,9 +169,10 @@ npm run build
 npm test
 ```
 
-The suite contains 38 checks covering:
+The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
+- Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, forecastle and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
@@ -228,7 +229,7 @@ MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 ## Boat perspective
 
 Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
-Set length and beam in metres, speed in knots, heading in degrees (0 along the
+Set length and beam in metres, calm-water target speed in knots, heading in degrees (0 along the
 original view, 90 to the right), and eye height above the mean waterline.
 The default eye is 3.9 m above the waterline, standing behind the aft-quarterdeck wheel;
 its longitudinal position follows hull length. Older shared links with `boatEye=2.4`
@@ -245,10 +246,37 @@ The camera follows a damped hull pose fitted to a 3 by 3 grid of heights sampled
 from the actual displaced FFT ocean and local wake. Measured wave velocity and
 bounded readback prediction reduce lag on rising water. Larger footprints average over waves;
 length also slows the pitch/heave response and beam slows the roll response.
-Forward speed stays at the manually selected value: wave-driven slowing, acceleration,
-and surfing (surge) are not yet simulated. Speed changes position and therefore the waves encountered. Live pitch, roll,
-and heave are shown in the panel. This is an approximate displacement-hull ride,
-with visual wakes, impact spray, and retained deck wash, but without hull-specific mass/stability, planing, or slamming forces.
+Forward speed evolves under wave pressure, propulsion, quadratic resistance, and
+ship plus added-water inertia. **Calm-water speed** selects the propulsive thrust
+that balances resistance at that speed on flat water; it does not hold actual speed
+constant. The panel shows actual speed and estimated displacement. Setting the target
+to zero lets the ship coast and drift, including astern. Steering, wakes, and spray
+use actual speed, and share links retain the target setting. The ship starts at its
+selected speed; subsequent changes accelerate or decelerate it gradually.
+
+The surge model uses the long-wave pressure-gradient approximation
+`(mass + addedMass) * dv/dt = thrust - drag * v * abs(v) - rho * g * volume * slope`.
+It follows the structure of the [Froude–Krylov surge-force model](https://arxiv.org/html/2406.12853v1).
+The GPU averages incident-wave slopes over the hull footprint using all six FFT
+cascades and filtered texture mips. Force follows the encountered waves and heading,
+independently of the lagging pitch angle. The vessel's own wake affects buoyancy
+but is excluded from surge forcing. Two spare values in the existing 64-byte probe
+readback carry the mean world-space slope; no new texture, dispatch, or readback is
+needed. Stale forces fade if probing stalls. Integration uses substeps of at most
+1/120 second with implicit signed drag to remain stable at mobile frame rates.
+
+Displacement is integrated from the canonical submerged hull at its mean waterline:
+about **42.7 tonnes** for the default 12 × 3.6 m ship, using seawater density
+1025 kg/m³. Length and beam rescale this volume; draft remains 1.55 m as in the mesh.
+Added mass is an authored 8% of displacement; effective resistance uses coefficient
+0.012 and estimated wetted area. These coefficients are not calibrated to a historical
+caravel. Hull-footprint filtering approximates short-wave cancellation; the model
+does not solve diffraction, full depth-dependent pressure, sailing aerodynamics,
+wave-driven lateral motion, broaching, planing, or slamming.
+
+Speed changes position and therefore the waves encountered. Live pitch, roll, and
+heave remain visible in the panel. Their damped hull-pose model is unchanged; the
+new mass/inertia model applies to surge, with visual wakes, impact spray, and retained deck wash.
 
 URL options: `boat=1&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=2.4`.
 Run `node --test tests/boat.test.mjs` for the hull-response math checks.

@@ -1,4 +1,68 @@
-import { HELM_EYE_Z } from './hull.js';
+import { HELM_EYE_Z, HULL_DRAFT, hullHalfWidth } from './hull.js';
+
+export const KNOT_TO_MPS = 0.514444;
+// Displacement of the canonical mesh below its mean waterline, in cubic metres.
+// Hull dimensions scale horizontally; its draft currently stays at HULL_DRAFT.
+const BOAT_VOLUME = (() => {
+  let volume = 0;
+  const dz = 12 / 96, dy = HULL_DRAFT / 32;
+  for (let z = 0; z < 96; z++) for (let y = 0; y < 32; y++) {
+    volume += 2 * hullHalfWidth(-6.4 + (z + 0.5) * dz, -HULL_DRAFT + (y + 0.5) * dy) * dz * dy;
+  }
+  return volume;
+})();
+
+export function boatHydrodynamics(length, beam) {
+  const volume = BOAT_VOLUME * length / 12 * beam / 3.6;
+  const mass = 1025 * volume;
+  // Authored effective coefficients, not a calibrated resistance curve.
+  const wettedArea = 0.85 * length * (beam + 2 * HULL_DRAFT);
+  return { length, beam, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea };
+}
+
+export function boatForwardSpeed(boat) {
+  return boat.surgeVelocity ?? boat.speed * KNOT_TO_MPS;
+}
+
+// World-space, incident-wave slopes arrive in the existing asynchronous probe.
+// Never hold an old force indefinitely after a stalled readback or a scene edit.
+export function boatWaveSlope(boat, time) {
+  const age = time - boat.waveSampleTime;
+  if (boat.waveRevision !== boat.revision || !(age >= 0)) return 0;
+  const freshness = Math.exp(-Math.max(0, age - 0.25) / 0.25);
+  const heading = boat.heading * Math.PI / 180;
+  return (boat.waveSlopeX * Math.sin(heading) - boat.waveSlopeZ * Math.cos(heading)) * freshness;
+}
+
+// Long-wave Froude–Krylov approximation: F = -rho*g*volume*mean(wave slope).
+// Propulsive thrust balances calm-water drag at the selected target speed;
+// it does not cancel wave forces or force the actual velocity to that setting.
+export function stepBoatSurge(boat, slope, dt) {
+  if (!(dt > 0) || !Number.isFinite(dt)) return 0;
+  let hydro = boat.hydrodynamics;
+  if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam) {
+    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam);
+  }
+  const inertia = hydro.mass + hydro.addedMass;
+  const target = boat.speed * KNOT_TO_MPS;
+  const thrust = hydro.drag * target * Math.abs(target);
+  const waveForce = -1025 * 9.81 * hydro.volume * slope;
+  const force = thrust + waveForce;
+  const initial = boatForwardSpeed(boat);
+  let velocity = initial, distance = 0;
+  const steps = Math.ceil(dt * 120), h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    const free = velocity + force / inertia * h;
+    // Implicit signed quadratic drag: stable through zero and during reversals.
+    const next = 2 * free / (1 + Math.sqrt(1 + 4 * hydro.drag / inertia * h * Math.abs(free)));
+    distance += (velocity + next) * 0.5 * h;
+    velocity = next;
+  }
+  boat.surgeVelocity = velocity;
+  boat.surgeAcceleration = (velocity - initial) / dt;
+  return distance;
+}
+
 // Approximate rigid hull response to a 3 x 3 grid of actual ocean heights.
 export function boatTargets(heights, length, beam) {
   const mean = (a, b, c) => (heights[a] + heights[b] + heights[c]) / 3;
@@ -33,7 +97,7 @@ export function boatRotate(out, x, y, z, heading, pitch, roll) {
 export function stepBoatSteering(boat, command, dt) {
   boat.rudderTarget = Math.max(-35, Math.min(35, boat.rudderTarget + command * 28 * dt));
   boatSpring(boat, 'rudder', boat.rudderTarget, 9, dt);
-  const speed = boat.speed * 0.514444;
+  const speed = boatForwardSpeed(boat);
   const desired = speed / Math.max(boat.length, 3) * Math.tan(boat.rudder * Math.PI / 180) * 0.65;
   const previous = boat.yawRate || 0;
   boat.yawRate = desired + (previous - desired) * Math.exp(-dt / (0.9 + boat.length * 0.06));
