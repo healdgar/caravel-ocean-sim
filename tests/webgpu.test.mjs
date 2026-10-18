@@ -225,6 +225,39 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
   assert.deepEqual(captures[2],captures[0],'profiling must preserve pixels');
 });
 
+test('early hull exclusion preserves water edges and the complete ship image', {timeout:180000}, async()=>{
+  const ocean=await readFile(new URL('../js/wgsl/ocean.js',import.meta.url),'utf8');
+  const block=ocean.match(/  \/\/ BEGIN HULL EARLY EXIT[\s\S]*?  \/\/ END HULL EARLY EXIT/)[0];
+  const late=process.env.OCEAN_BASELINE?await readFile(process.env.OCEAN_BASELINE,'utf8'):
+    ocean.replace(block,'').replace('  return vec4f(col, 1.0);',block.replace('discard; return vec4f(0);','discard;')+'\n  return vec4f(col, 1.0);');
+  const main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
+  for(const view of ['boat','ship']){
+    const captures=[];
+    for(const shader of [late,ocean]){
+      const page=await browser.newPage({viewport:{width:96,height:72}});
+      try{
+        await page.addInitScript(instrumentRenderer);
+        await page.route('**/js/wgsl/ocean.js',route=>route.fulfill({contentType:'text/javascript',body:shader}));
+        // Expose the water cutout in the helm view, so the hull cannot hide a
+        // masking regression. The exterior view retains all visible geometry.
+        if(view==='boat')await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:main.replace('prowPass.drawIndexed(caravelIndices.length);','/* expose ocean cutout */')}));
+        await page.goto(`${origin}/?view=${view}&sunElev=35&sunAzim=30&clouds=0&shot=mask.png&frames=100000`);
+        await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
+        await step(page);
+        captures.push(await page.evaluate(async()=>{
+          const texture=check.target,row=Math.ceil(texture.width*4/256)*256;
+          const buffer=check.device.createBuffer({size:row*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+          const enc=check.device.createCommandEncoder();enc.copyTextureToBuffer({texture},{buffer,bytesPerRow:row},[texture.width,texture.height]);
+          check.device.queue.submit([enc.finish()]);await buffer.mapAsync(GPUMapMode.READ);
+          const pixels=Array.from(new Uint8Array(buffer.getMappedRange()));buffer.unmap();buffer.destroy();return pixels;
+        }));
+      }finally{await page.close();}
+    }
+    assert.ok(new Set(captures[0]).size>20);
+    assert.deepEqual(captures[1],captures[0],`${view}: moving the mask must preserve every pixel`);
+  }
+});
+
 test('GPU timing handles unsupported devices, query readback, and skipped passes', {timeout:30000}, async()=>{
   const page=await browser.newPage();
   try{

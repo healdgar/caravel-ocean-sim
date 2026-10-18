@@ -162,6 +162,27 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   cov += aa * min(1.0, 0.03 / max(max(aa.x, aa.y), 1e-8));
   let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
 
+  // Finish implicit texture gradients and quad derivatives before any lane
+  // exits. Remaining lighting uses explicit LODs and needs no neighbouring lane.
+  let fw0 = textureSample(foamWorld, sampR, xz / F.lodP.z, 0u);
+  let fw1 = textureSample(foamWorld, sampR, xz / F.lodP.w, 1u);
+  let wd = F.windP[0].xy;
+  let ws = vec2f(dot(xz, wd), dot(xz, vec2f(-wd.y, wd.x)));
+  let streak = textureSample(foamTex, sampR, ws * vec2f(0.035, 0.11)).a;
+  let pat = foamPattern(xz, F.camPos.w);
+  let fw = fwidth(pat) + 0.03;
+  let bub = textureSample(foamTex, sampR, xz * 1.9 + vec2f(0.21, 0.53)).g;
+
+  // BEGIN HULL EARLY EXIT
+  // Deck wash owns water inside the hull. Skip shadow filters, reflections and
+  // lighting for these discarded fragments; preserve unmasked debug views.
+  if(F.post.w <= 0.5 && H.rig.z > 0.5) {
+    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
+    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+    if(hullExcludesOcean(q)) { discard; return vec4f(0); }
+  }
+  // END HULL EARLY EXIT
+
   let sunlight = sunIlluminance() * sunVis[0];
   let sunE = sunlight * vesselShadow(in.rel+F.camPos.xyz,nrm);
   let waterSun = sunlight * waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y);
@@ -226,21 +247,14 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let cheb = max(dc.x, dc.y);
   let w0 = 1.0 - smoothstep(0.30 * F.lodP.z, 0.45 * F.lodP.z, cheb);
   let w1 = 1.0 - smoothstep(0.30 * F.lodP.w, 0.45 * F.lodP.w, cheb);
-  let fw0 = textureSample(foamWorld, sampR, xz / F.lodP.z, 0u);
-  let fw1 = textureSample(foamWorld, sampR, xz / F.lodP.w, 1u);
   let fwl = mix(fw1, fw0, w0) * w1;
   let fresh = breakingCompression(jxx,jzz,jxz,F.foamP.x);
   // The clipmaps age white water; they must not suppress a newly breaking crest
   // inside their footprint while their temporal accumulator is still catching up.
   var cover = clamp(max(max(fwl.r*0.75,fwl.g*0.95),fresh*0.8)*F.foamP.z,0.0,0.95);
   // aged foam breaks into wind-aligned streaks; fresh crest foam stays dense
-  let wd = F.windP[0].xy;
-  let ws = vec2f(dot(xz, wd), dot(xz, vec2f(-wd.y, wd.x)));
-  let streak = textureSample(foamTex, sampR, ws * vec2f(0.035, 0.11)).a;
   let freshK = clamp(fwl.g * 2.0 + fresh, 0.0, 1.0);
   cover *= mix(mix(0.35,1.0,smoothstep(0.25,0.75,streak)), 1.0, freshK);
-  let pat = foamPattern(xz, F.camPos.w);
-  let fw = fwidth(pat) + 0.03;
   // soft threshold: thin foam is a translucent film, dense foam is opaque white
   // dense foam has crisp edges, thin decaying foam a soft translucent margin
   let soft = 0.04 + 0.14 * (1.0 - clamp(cover, 0.0, 1.0));
@@ -254,7 +268,6 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   body += F.sssCol.rgb * (waterSun * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
   body += vec3f(0.10, 0.32, 0.30) * skyUp * fwl.g * 0.35;
   // bubbly brightness variation inside the foam
-  let bub = textureSample(foamTex, sampR, xz * 1.9 + vec2f(0.21, 0.53)).g;
   let foamAlb = vec3f(0.82, 0.87, 0.92) * (0.78 + 0.3 * bub);
   // diffuse: albedo * (sky irradiance / pi + sun * cos / pi); sky dominates at sunset
   // foam scatters light from the whole hemisphere (incl. the cool zenith): use a less saturated ambient
@@ -282,16 +295,6 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let hz = normalize(vec3f(-V.x, 0.002, -V.z));
   let fogCol = skyAtmo(hz);
   col = col * T + fogCol * (1.0 - T);
-  // Remove water inside the solid vessel, after derivative-based shading.
-  // The same tilted world-space hull is used in every camera mode.
-  if(H.rig.z > 0.5) {
-    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-    // Deck wash owns water inside the ship, including overtopping. Letting the
-    // unimpeded ocean reappear above rail height floods the interior instantly
-    // and draws a second surface over the transported deck water.
-    if(hullExcludesOcean(q)) { discard; }
-  }
   return vec4f(col, 1.0);
 }
 `;
