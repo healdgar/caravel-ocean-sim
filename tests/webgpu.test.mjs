@@ -649,6 +649,67 @@ test('volumetric clouds clear, occlude, advect, and invalidate temporal history'
   }finally{await page.close();}
 });
 
+test('clouds extinguish the HDR sun and surface light together', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__sun_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__sun_test`);
+    const result=await page.evaluate(async()=>{
+      const {SUN_VIS}=await import('/js/wgsl/sky.js');
+      const {SKY_BG}=await import('/js/wgsl/ocean.js');
+      const device=await (await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,T=GPUTextureUsage;
+      const buffer=(size,usage)=>device.createBuffer({size,usage});
+      const frame=buffer(384,B.UNIFORM|B.COPY_DST),cloud=buffer(128,B.UNIFORM|B.COPY_DST);
+      const sun=buffer(16,B.STORAGE|B.COPY_SRC);
+      const f=new Float32Array(96),c=new Float32Array(32);
+      f[17]=2;f.set([0,0.5,-Math.sqrt(0.75)],28);f.set([0,0.5,-Math.sqrt(0.75),14],32);
+      f.set([1,1,1,1/1024],36);f[72]=3;f[73]=0.01;
+      c[24]=1;c[25]=2;c[31]=1;
+      device.queue.writeBuffer(frame,0,f);
+      const density=device.createTexture({dimension:'3d',size:[8,8,8],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      device.queue.writeTexture({texture:density},new Uint16Array(8*8*8*4).fill(0x3c00),{bytesPerRow:64,rowsPerImage:8},[8,8,8]);
+      const lut=device.createTexture({size:[1,1],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      device.queue.writeTexture({texture:lut},new Uint16Array(4).fill(0x3c00),{bytesPerRow:8},[1,1]);
+      const screen=device.createTexture({size:[1,1],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      // Camera rays stop at <0.8% transmittance. That is adequate for cloud
+      // radiance, but must never be used to attenuate a 200,000-radiance sun.
+      device.queue.writeTexture({texture:screen},new Uint16Array([0x3400,0x3400,0x3400,0x3bf0]),{bytesPerRow:8},[1,1]);
+      const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
+      const vis=await device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code:SUN_VIS}),entryPoint:'main'}});
+      const module=device.createShaderModule({code:SKY_BG});
+      const sky=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format:'rgba32float'}]}});
+      const group=(pipe,index,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(index),entries:entries.map(([binding,resource])=>({binding,resource}))});
+      const vg=group(vis,0,[[0,{buffer:frame}],[4,{buffer:sun}]]);
+      const vc=group(vis,1,[[0,{buffer:cloud}],[1,density.createView()],[3,sampler]]);
+      const sg=group(sky,0,[[0,{buffer:frame}],[1,lut.createView()],[2,lut.createView()],[3,sampler],[4,{buffer:sun}]]);
+      const sc=group(sky,1,[[4,screen.createView()]]);
+      const target=device.createTexture({size:[1,1],format:'rgba32float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
+      const read=buffer(512,B.COPY_DST|B.MAP_READ),values=[];
+      for(const extinction of [0,0.4,8,30]){
+        c[26]=extinction;device.queue.writeBuffer(cloud,0,c);
+        const enc=device.createCommandEncoder(),cp=enc.beginComputePass();
+        cp.setPipeline(vis);cp.setBindGroup(0,vg);cp.setBindGroup(1,vc);cp.dispatchWorkgroups(1);cp.end();
+        const rp=enc.beginRenderPass({colorAttachments:[{view:target.createView(),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}]});
+        rp.setPipeline(sky);rp.setBindGroup(0,sg);rp.setBindGroup(1,sc);rp.draw(3);rp.end();
+        enc.copyBufferToBuffer(sun,0,read,0,16);enc.copyTextureToBuffer({texture:target},{buffer:read,offset:256,bytesPerRow:256},[1,1]);
+        device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const data=new Float32Array(read.getMappedRange());values.push({visibility:data[0],radiance:data[64]});read.unmap();
+      }
+      device.destroy();return {errors,values};
+    });
+    assert.deepEqual(result.errors,[]);
+    const [clear,thin,opaque,thicker]=result.values;
+    assert.equal(clear.visibility,1);assert.ok(clear.radiance>100000);
+    assert.ok(thin.visibility>0.15 && thin.visibility<0.25,'thin cloud follows Beer attenuation');
+    assert.ok(opaque.visibility<1e-8 && thicker.visibility<1e-8,'opaque clouds must not retain a sunlight floor');
+    assert.ok(opaque.radiance<1 && thicker.radiance<1,'opaque clouds must hide the HDR solar disc');
+    assert.ok(Math.abs((thin.radiance-opaque.radiance)/(clear.radiance-opaque.radiance)-thin.visibility)<1e-5,
+      'visible disc and surface sunlight must use identical attenuation');
+  }finally{await page.close();}
+});
+
 for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
   test(`${bundle} initializes all JavaScript and WGSL pipelines`, { timeout: 120000 }, async () => {
     const page = await browser.newPage();

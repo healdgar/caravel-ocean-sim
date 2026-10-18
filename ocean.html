@@ -1632,7 +1632,10 @@ fn volumeSunVisibility(ro:vec3f,rd:vec3f)->f32 {
   let step=(hit.y-hit.x)/64.0;var optical=0.0;
   for(var i=0u;i<64u;i++){
     optical+=cloudDensityAt(ro+rd*(hit.x+(f32(i)+0.5)*step),0.0).r*step*CF.shape.z;
-    if(optical>7.0){break;}
+    // The solar disc is ~200,000 times brighter than the sky. The camera
+    // march's 0.8% residual is invisible in clouds but becomes a false sun.
+    // Preserve HDR extinction for both the disc and surface illumination.
+    if(optical>20.0){return 0.0;}
   }
   return exp(-optical);
 }
@@ -1982,7 +1985,7 @@ fn skyRadiance(dirIn: vec3f, withSun: bool) -> vec3f {
   var L = skyAtmo(dir);
   let volume = marchClouds(F.camPos.xyz * 0.001, dir, 32u, 0.5, sunIlluminance(), skyAtmo(vec3f(0,1,0)));
   L = L * (1.0 - volume.color.a) + volume.color.rgb;
-  if (withSun) { L += sunDisk(dir) * (1.0 - volume.color.a); }
+  if (withSun) { L += sunDisk(dir) * volumeSunVisibility(F.camPos.xyz * 0.001, dir); }
   return L;
 }
 `;
@@ -2104,6 +2107,7 @@ const RENDER_BINDINGS = /* wgsl */ `
 
 // Full-resolution atmosphere with reconstructed volumetric cloud radiance.
 const SKY_BG = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + /* wgsl */ `
+@group(0) @binding(4) var<storage,read> sunVis:array<f32,4>;
 @group(1) @binding(4) var cloudScreen:texture_2d<f32>;
 struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
@@ -2119,7 +2123,9 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
   d2.y = max(d2.y, 0.0005);
   d2 = normalize(d2);
   let volume = textureSampleLevel(cloudScreen, sampC, in.pos.xy * F.screen.zw, 0.0);
-  let L = (skyAtmo(d2) + sunDisk(dir)) * (1.0 - volume.a) + volume.rgb;
+  // Reconstructed rgba16 cloud alpha lacks the dynamic range to occlude the
+  // HDR solar disc. Use the same full-precision solar visibility as the boat.
+  let L = skyAtmo(d2) * (1.0 - volume.a) + volume.rgb + sunDisk(dir) * sunVis[0];
   return vec4f(L, 1.0);
 }
 `;
@@ -3737,7 +3743,7 @@ async function main() {
   const bgOcean = [0, 1].map((i) => [0, 1].map(w => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
     fullArr(dispTex), fullArr(derivTex), fullArr(momTex), foamTex.createView(), envCubeView, sampRepeat,
     fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'ocean' + i)));
-  const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp], 'sky');
+  const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, { buffer: sunVisBuf }], 'sky');
   const clouds = await createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);

@@ -134,7 +134,10 @@ fn volumeSunVisibility(ro:vec3f,rd:vec3f)->f32 {
   let step=(hit.y-hit.x)/64.0;var optical=0.0;
   for(var i=0u;i<64u;i++){
     optical+=cloudDensityAt(ro+rd*(hit.x+(f32(i)+0.5)*step),0.0).r*step*CF.shape.z;
-    if(optical>7.0){break;}
+    // The solar disc is ~200,000 times brighter than the sky. The camera
+    // march's 0.8% residual is invisible in clouds but becomes a false sun.
+    // Preserve HDR extinction for both the disc and surface illumination.
+    if(optical>20.0){return 0.0;}
   }
   return exp(-optical);
 }

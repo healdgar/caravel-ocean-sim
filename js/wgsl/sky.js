@@ -251,7 +251,7 @@ fn skyRadiance(dirIn: vec3f, withSun: bool) -> vec3f {
   var L = skyAtmo(dir);
   let volume = marchClouds(F.camPos.xyz * 0.001, dir, 32u, 0.5, sunIlluminance(), skyAtmo(vec3f(0,1,0)));
   L = L * (1.0 - volume.color.a) + volume.color.rgb;
-  if (withSun) { L += sunDisk(dir) * (1.0 - volume.color.a); }
+  if (withSun) { L += sunDisk(dir) * volumeSunVisibility(F.camPos.xyz * 0.001, dir); }
   return L;
 }
 `;

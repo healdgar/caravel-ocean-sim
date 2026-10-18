@@ -13,6 +13,7 @@ const RENDER_BINDINGS = /* wgsl */ `
 
 // Full-resolution atmosphere with reconstructed volumetric cloud radiance.
 export const SKY_BG = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + /* wgsl */ `
+@group(0) @binding(4) var<storage,read> sunVis:array<f32,4>;
 @group(1) @binding(4) var cloudScreen:texture_2d<f32>;
 struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
@@ -28,7 +29,9 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
   d2.y = max(d2.y, 0.0005);
   d2 = normalize(d2);
   let volume = textureSampleLevel(cloudScreen, sampC, in.pos.xy * F.screen.zw, 0.0);
-  let L = (skyAtmo(d2) + sunDisk(dir)) * (1.0 - volume.a) + volume.rgb;
+  // Reconstructed rgba16 cloud alpha lacks the dynamic range to occlude the
+  // HDR solar disc. Use the same full-precision solar visibility as the boat.
+  let L = skyAtmo(d2) * (1.0 - volume.a) + volume.rgb + sunDisk(dir) * sunVis[0];
   return vec4f(L, 1.0);
 }
 `;
