@@ -445,7 +445,7 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
         const size=W*H*16,read=device.createBuffer({size,usage:B.COPY_DST|B.MAP_READ});
         const enc=device.createCommandEncoder();enc.copyTextureToBuffer({texture:deck.textures[0]},{buffer:read,bytesPerRow:W*16},[W,H]);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
         const a=new Float32Array(read.getMappedRange().slice(0));read.unmap();read.destroy();
-        let water=0,wet=0,drain=0,center=0,moment=0,roof=0,max=0,finite=true;
+        let water=0,wet=0,drain=0,center=0,moment=0,roof=0,forecastle=0,max=0,finite=true;
         for(let i=0;i<W*H;i++){
           const z=(Math.floor(i/W)+0.5)/H*11.9-6.3,x=i%W;
           const width=Math.max(0.04,1.8*Math.sqrt(Math.max(0.0006,1-(z<0?-z/6.4:z/7.4)**2))-0.04);
@@ -453,9 +453,10 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
           water+=volume;wet+=a[i*4+2];drain+=Math.max(0,a[i*4+3]);
           moment+=(x/(W-1)*2-1)*volume;max=Math.max(max,a[i*4]);
           if(x>10 && x<22)center+=volume;if(z>=2.7)roof+=volume;
+          if(z<=-3.9)forecastle+=volume;
         }
         for(const n of a)finite&&=Number.isFinite(n);
-        return{water,wet,drain,center,moment,roof,max,finite};
+        return{water,wet,drain,center,moment,roof,forecastle,max,finite};
       }
       await advance(1,1/60,true);seaHeight(0x3c00);await advance(60);const belowRail=await read();
       seaHeight(0x4000);await advance(120);const flooded=await read(); // two-metre crest
@@ -474,6 +475,7 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
     assert.equal(result.belowRail.water,0,'water below the bulwark must not seep through the hull');
     assert.ok(result.flooded.water>0.1 && result.flooded.center>0.01,'overtopping must travel into the deck');
     assert.equal(result.flooded.roof,0,'a lower crest must not flood the raised quarterdeck');
+    assert.equal(result.flooded.forecastle,0,'a two-metre crest stays below the forecastle bulwarks');
     assert.ok(result.retained.water>result.flooded.water*0.8,'the deck must retain wash after the sea recedes');
     assert.ok(result.tilted.drain>0,'scupper outflow drives runoff strips');
     assert.ok(result.tilted.moment<0,'wash moves toward the low port rail');

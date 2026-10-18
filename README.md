@@ -76,7 +76,9 @@ The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart 
 
 The native procedural mesh follows [this generated art reference](assets/caravel-design-reference.png): a fuller raked hull, dark swept wales, raised stern cabin with arched windows, four billowing square sails, a triangular lateen mizzen, anchors, and rigging. The [generation prompt](assets/caravel-design-reference-prompt.txt) is retained locally with the artwork. The reference was generated with the built-in image tool; it is art direction, not a historical reconstruction.
 
-The model uses roughly 80,000 triangles and retains the animated wheel, rudder, and canvas. `js/hull.js` defines the section used by the mesh; `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Water overtopping the bulwarks enters the deck-wash field. No imported model or Blender dependency is required.
+The model has 84,134 triangles, including substantial forestays, topmast stays and paired backstays, a railed mainmast crow's nest, and a low forecastle with a port-side ladder. Topsails clear the mast platforms. The helm sits on the aft quarterdeck, with the mizzen's foot raised above the standing viewpoint. All nine cabin windows occupy actual arched wall openings with recessed glazing and timber reveals; the obsolete bulwarks that crossed them have been removed.
+
+The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
 
 ### Bow waves and spray
 
@@ -146,11 +148,11 @@ npm run build
 npm test
 ```
 
-The suite contains 28 checks covering:
+The suite contains 30 checks covering:
 
-- Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings.
+- Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
-- Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
+- Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, forecastle and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
@@ -182,7 +184,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
 | `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
-| `js/caravel.js` | Hull, quarterdeck, cabin, rigging, square and lateen sails, and helm geometry |
+| `js/caravel.js` | Hull, forecastle, quarterdeck, recessed windows, lookout, rigging, sails, and helm geometry |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
@@ -202,10 +204,16 @@ MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
 Set length and beam in metres, speed in knots, heading in degrees (0 along the
 original view, 90 to the right), and eye height above the mean waterline.
+The default eye is 3.9 m above the waterline, standing behind the aft-quarterdeck wheel;
+its longitudinal position follows hull length. Older shared links with `boatEye=2.4`
+retain that explicit low eye height; raise **Eye above water** to 3.9 m for the new helm.
 The helm controls the rudder; mouse look is relative to the boat. **Look ahead**
 centres the view. Choose **Free camera** or press **B** to leave the floating viewpoint.
 Choose **View ship** for a level exterior view that follows the ship: drag to orbit
 and use the mouse wheel to zoom. The vessel continues sailing in all camera modes.
+For repeatable exterior captures, `orbitYaw`, `orbitElevation` (degrees), and
+`orbitDistance` (metres at the default hull size) set the initial orbit; ordinary
+shared links omit these capture controls.
 
 The camera follows a damped hull pose fitted to a 3 by 3 grid of heights sampled
 from the actual displaced FFT ocean and local wake. Measured wave velocity and
@@ -297,8 +305,9 @@ builds gradually and decays after centering; rudder authority depends on boat sp
 and length. A stationary boat does not turn under rudder alone.
 
 This is an approximate steering response, without wind-driven sail forces or a
-hull-specific rudder/keel model. A wheel is included as requested rather than as a
-strict historical reconstruction of a caravel's tiller steering.
+hull-specific rudder/keel model. The interactive wheel remains an artistic concession:
+[ships' wheels appeared around 1703](https://navyhistory.au/helm-orders/), after the
+caravel era. This model is not a strict historical reconstruction.
 
 Reflections now use a roughness-filtered HDR mip chain and blend continuously at
 screen edges. Timber grain follows the individual timbers, spokes, and wheel rim

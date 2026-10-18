@@ -1,3 +1,4 @@
+import { HELM_EYE_Z } from './hull.js';
 // Approximate rigid hull response to a 3 x 3 grid of actual ocean heights.
 export function boatTargets(heights, length, beam) {
   const mean = (a, b, c) => (heights[a] + heights[b] + heights[c]) / 3;
@@ -41,7 +42,7 @@ export function stepBoatSteering(boat, command, dt) {
 
 // World-space eye anchor; keeping it separate from the vessel allows inspection.
 export function boatEyePosition(out, boat) {
-  boatRotate(out, 0, boat.eye, 0, boat.heading * Math.PI / 180, boat.pitch, boat.roll);
+  boatRotate(out, 0, boat.eye, HELM_EYE_Z * boat.length / 12, boat.heading * Math.PI / 180, boat.pitch, boat.roll);
   out[0] += boat.x; out[1] += boat.heave; out[2] += boat.z;
   return out;
 }

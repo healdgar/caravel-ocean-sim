@@ -2,17 +2,21 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, NOISE_WGSL } from './common.js';
 import { SHADOW_SAMPLE } from './shadows.js';
 import { HULL_PROFILE } from './hull.js';
 import { INTERACTION_TYPES, INTERACTION_SEA } from './interaction.js';
+import { FORECASTLE_END, FORECASTLE_HEIGHT, QUARTERDECK_START, QUARTERDECK_HEIGHT } from '../hull.js';
 
 export const DECK_COLS = 32;
 export const DECK_ROWS = 96;
-// Same footprint and raised quarterdeck as the timber mesh. Coordinates are hull-local.
+// Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
 export const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
 fn deckWidth(z:f32)->f32 {
   let r=select(z/7.4,-z/6.4,z<0.0);
   return max(0.04,1.8*sqrt(max(0.0006,1.0-r*r))-0.04);
 }
-fn deckFloor(z:f32)->f32 { return select(hullDeck(z),2.3,z>=2.7); }
-fn deckRail(z:f32)->f32 { return select(0.66,0.16,z>=2.7); }
+fn deckFloor(z:f32)->f32 {
+  if(z<=${FORECASTLE_END}){return ${FORECASTLE_HEIGHT};}
+  return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});
+}
+fn deckRail(z:f32)->f32 { return select(0.66,0.16,z>=${QUARTERDECK_START}); }
 fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z+6.3)/11.9); }
 fn deckPoint(uv:vec2f)->vec3f {
   let z=uv.y*11.9-6.3;
@@ -87,7 +91,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
     let face=11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
     ingress=min(4.0,1.3*pow(over,1.5));
     // Scuppers between rail posts; quarterdeck railing is open underneath.
-    let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=2.7);
+    let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=${QUARTERDECK_START});
     drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)),1.5)),0.0,over>0.0);
     depth+=(ingress-drain)*face*dt/area;
   }

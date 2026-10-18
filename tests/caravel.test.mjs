@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCaravelMesh } from '../js/caravel.js';
-import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT } from '../js/hull.js';
+import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, WHEEL_CENTER, HELM_EYE_Z } from '../js/hull.js';
 test('caravel mesh has finite triangles, unit normals, and a forward bowsprit', () => {
   const mesh = createCaravelMesh();
   assert.equal(mesh.length % 27, 0);
@@ -27,7 +27,7 @@ test('complete vessel includes stern, submerged hull, five canvas panels, and a 
   assert.ok(bounds.get(15).minZ<=-6.39 && bounds.get(15).maxZ>=5.59);
   assert.ok(bounds.get(9).count>=4*28*20*6);
   assert.ok(bounds.get(9).maxY>10 && bounds.get(9).minZ<-4);
-  assert.ok(bounds.get(13).count>1000 && bounds.get(13).maxZ>6 && bounds.get(13).minY<3.3);
+  assert.ok(bounds.get(13).count>1000 && bounds.get(13).maxZ>6 && bounds.get(13).minY>4.1);
   assert.ok(bounds.get(16).count>100 && bounds.get(17).maxY>2.7);
   assert.ok(bounds.get(10).maxY>=11.49);
   assert.ok(bounds.get(14).maxZ>6 && bounds.get(14).minY<-1.2);
@@ -42,4 +42,53 @@ test('raked hull surface agrees with water-contact sections and stays within the
   assert.equal(hullHalfWidth(-6.4,-.5),0, 'raked stem clears the water ahead of the submerged bow');
   assert.equal(hullHalfWidth(0,-HULL_DRAFT-.1),0);
   assert.ok(createCaravelMesh().length/27<95000,'single ship stays below 95k triangles');
+});
+
+// Intersect actual triangles, so tests catch planking/trim occluding an opening.
+function firstHit(mesh,origin,direction){
+  const sub=(a,b)=>a.map((x,i)=>x-b[i]);
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+  let distance=Infinity,material=-1;
+  for(let i=0;i<mesh.length;i+=27){
+    const a=Array.from(mesh.slice(i,i+3)),b=Array.from(mesh.slice(i+9,i+12)),c=Array.from(mesh.slice(i+18,i+21));
+    const e1=sub(b,a),e2=sub(c,a),p=cross(direction,e2),det=dot(e1,p);
+    if(Math.abs(det)<1e-9)continue;
+    const t=sub(origin,a),u=dot(t,p)/det;if(u<0 || u>1)continue;
+    const q=cross(t,e1),v=dot(direction,q)/det;if(v<0 || u+v>1)continue;
+    const d=dot(e2,q)/det;
+    if(d>=0 && d<distance){distance=d;material=mesh[i+6];}
+  }
+  return {material,point:origin.map((x,i)=>x+direction[i]*distance)};
+}
+
+test('all nine cabin windows have unobstructed recessed glazing inside real wall openings',()=>{
+  const mesh=createCaravelMesh();
+  for(const x of [-.7,0,.7]){
+    const hit=firstHit(mesh,[x+.1,1.60,6.5],[0,0,-1]);
+    assert.equal(hit.material,11,'stern planking must not cross a pane');
+    assert.ok(hit.point[2]<5.55 && hit.point[2]>5.50,'glass sits behind the transom face');
+  }
+  for(const side of [-1,1])for(const z of [3.4,4.35,5.18]){
+    const hit=firstHit(mesh,[side*3,1.60,z+.1],[-side,0,0]);
+    assert.equal(hit.material,11,'side planking must not cross a pane');
+    assert.ok(Math.abs(Math.abs(hit.point[0])-hullHalfWidth(z+.1,1.6)+.08)<.001);
+    assert.equal(firstHit(mesh,[side*3,2.12,z+.1],[-side,0,0]).material,1,'wood closes above the arch');
+  }
+});
+
+test('raised decks and lookout have solid floors; the working helm sits aft on the quarterdeck',()=>{
+  const mesh=createCaravelMesh();
+  for(const z of [-5,-1.9,3.1]){
+    const hit=firstHit(mesh,[.3,3,z],[0,-1,0]);
+    assert.equal(hit.material,0);
+    assert.ok(Math.abs(hit.point[1]-vesselDeck(z))<.003,'visible deck agrees with the water floor');
+  }
+  const lookout=firstHit(mesh,[.5,9.2,1.0],[0,-1,0]);
+  assert.equal(lookout.material,0);assert.ok(lookout.point[1]>8.3);
+  assert.ok(WHEEL_CENTER[2]>4 && WHEEL_CENTER[2]<HELM_EYE_Z);
+  for(let i=0;i<mesh.length;i+=9)if(mesh[i+6]===7 || mesh[i+6]===8){
+    assert.ok(mesh[i+1]>vesselDeck(mesh[i+2]));
+    assert.ok(Math.abs(mesh[i+2]-WHEEL_CENTER[2])<.1);
+  }
 });

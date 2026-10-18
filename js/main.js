@@ -1,7 +1,8 @@
 import { createVolumetricClouds } from './clouds.js';
 import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
-import { createCaravelMesh, WHEEL_CENTER } from './caravel.js';
+import { createCaravelMesh } from './caravel.js';
+import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT } from './hull.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition } from './boat.js';
 import { cameraModeFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
@@ -549,11 +550,12 @@ async function main() {
   const boat = {
     effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
     beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', 0, 0, 360),
-    speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', 2.4, 1, 15),
+    speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
   };
-  const shipOrbit = { yaw:boat.heading*D2R+1.0, elevation:0.25, distance:25 };
+  const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
+    elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',25,10,120) };
   const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
   const keys = Object.create(null);
@@ -574,7 +576,10 @@ async function main() {
   });
   const helmPoint = new Float32Array(3);
   function projectHelm(x,y,z) {
-    boatRotate(helmPoint,x,y-boat.eye,z,boat.heading*D2R,boat.pitch,boat.roll);
+    // Wheel size stays fixed; its anchor and the eye follow hull length/beam.
+    const px=WHEEL_CENTER[0]*boat.beam/3.6+x-WHEEL_CENTER[0];
+    const pz=(WHEEL_CENTER[2]-HELM_EYE_Z)*boat.length/12+z-WHEEL_CENTER[2];
+    boatRotate(helmPoint,px,y-boat.eye,pz,boat.heading*D2R,boat.pitch,boat.roll);
     const m=viewProj,w=m[3]*helmPoint[0]+m[7]*helmPoint[1]+m[11]*helmPoint[2]+m[15];
     return {x:(0.5+0.5*(m[0]*helmPoint[0]+m[4]*helmPoint[1]+m[8]*helmPoint[2])/w)*canvas.clientWidth,
       y:(0.5-0.5*(m[1]*helmPoint[0]+m[5]*helmPoint[1]+m[9]*helmPoint[2])/w)*canvas.clientHeight,w};

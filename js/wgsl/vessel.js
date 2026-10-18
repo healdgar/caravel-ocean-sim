@@ -1,3 +1,4 @@
+import { WHEEL_CENTER } from '../hull.js';
 // Shared deformation keeps visible geometry and shadow casters coincident.
 export const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f };
@@ -7,10 +8,12 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
   var scale=vec3f(hull.size.x/3.6,1.0,hull.size.y/12.0);
   var local=position;var localN=normal;
   if(material==7.0 || material==8.0){
+    let pivot=vec3f(${WHEEL_CENTER.join(',')});
+    let anchor=pivot*scale;
     scale=vec3f(1.0);
     let angle=-hull.size.w/35.0*6.2831853;let c=cos(angle);let s=sin(angle);
-    let pivot=vec3f(0,1.43,-1.7);let q=position-pivot;
-    local=vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+pivot;
+    let q=position-pivot;
+    local=vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+anchor;
     localN=vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
   }
   if(material==14.0){

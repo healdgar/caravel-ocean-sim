@@ -60,13 +60,16 @@ test('centering rudder lets yaw decay and results stay stable at lower frame rat
 });
 
 import { boatEyePosition } from '../js/boat.js';
+import { HELM_EYE_Z, HELM_EYE_HEIGHT } from '../js/hull.js';
 test('boarding uses the ship world position and eye height independently of a spectator camera', () => {
-  const boat={x:100,z:-30,heave:2,eye:2.4,heading:90,pitch:0,roll:0};
+  const boat={x:100,z:-30,heave:2,eye:HELM_EYE_HEIGHT,length:12,heading:90,pitch:0,roll:0};
   const out=new Float64Array(3); boatEyePosition(out,boat);
-  assert.deepEqual(Array.from(out),[100,4.4,-30]);
+  assert.deepEqual(Array.from(out),[100-HELM_EYE_Z,2+HELM_EYE_HEIGHT,-30]);
   boat.pitch=0.2;boat.roll=-0.15;boatEyePosition(out,boat);
-  assert.ok(Math.abs(Math.hypot(out[0]-boat.x,out[1]-boat.heave,out[2]-boat.z)-boat.eye)<1e-12);
+  assert.ok(Math.abs(Math.hypot(out[0]-boat.x,out[1]-boat.heave,out[2]-boat.z)-Math.hypot(boat.eye,HELM_EYE_Z))<1e-12);
   const previous=Array.from(out);boat.x+=20;boat.z-=5;boatEyePosition(out,boat);
   assert.ok(Math.abs(out[0]-previous[0]-20)<1e-12);
   assert.ok(Math.abs(out[2]-previous[2]+5)<1e-12);
+  boat.length=24;boat.pitch=boat.roll=boat.heading=0;boatEyePosition(out,boat);
+  assert.ok(Math.abs(out[2]-boat.z-2*HELM_EYE_Z)<1e-12,'helm eye follows a resized stern');
 });
