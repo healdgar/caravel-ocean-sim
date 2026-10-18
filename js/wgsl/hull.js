@@ -12,4 +12,10 @@ fn hullHalfWidth(z: f32, y: f32) -> f32 {
   let ratio=select(z/aft*(5.6/7.4),-z/fore,z<0.0);
   return (1.8*sqrt(max(0.0006,1.0-ratio*ratio))+0.105)*pow(max(0.0,1.0-depth*depth),${HULL_SECTION_POWER});
 }
+// Extend the enclosed water footprint above the deck. The open-ocean wave field
+// cannot travel through solid bulwarks; overtopping is admitted at the rail by
+// the deck-water solver and then moves across the deck with finite flux.
+fn hullExcludesOcean(local:vec3f)->bool {
+  return abs(local.x)<hullHalfWidth(local.z,local.y);
+}
 `;

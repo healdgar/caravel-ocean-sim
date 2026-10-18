@@ -287,9 +287,10 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   if(H.rig.z > 0.5) {
     let relative=in.rel+F.camPos.xyz-H.origin.xyz;
     let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-    // Bulwarks protect the interior; crests overtopping the rail remain visible.
-    let solidTop=select(hullDeck(q.z)+0.66,2.3,q.z>=2.7);
-    if(q.y < solidTop && abs(q.x) < hullHalfWidth(q.z,q.y)) { discard; }
+    // Deck wash owns water inside the ship, including overtopping. Letting the
+    // unimpeded ocean reappear above rail height floods the interior instantly
+    // and draws a second surface over the transported deck water.
+    if(hullExcludesOcean(q)) { discard; }
   }
   return vec4f(col, 1.0);
 }

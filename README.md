@@ -43,7 +43,7 @@ After editing anything under `js/`, run `npm run build` to regenerate `ocean.htm
 | Drag in View ship | Orbit the vessel |
 | H | Settings panel: wind, swell, choppiness, turbidity, foam, sun, haze, clouds, exposure, bloom |
 
-The free camera stays above the sampled water. The boat camera follows the hull and can be overtopped in rough seas.
+The free camera stays above the sampled water. The boat camera follows the hull; rough seas can overtop the gunwales and wash across the deck.
 
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
 
@@ -76,7 +76,7 @@ The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart 
 
 The native procedural mesh follows [this generated art reference](assets/caravel-design-reference.png): a fuller raked hull, dark swept wales, raised stern cabin with arched windows, four billowing square sails, a triangular lateen mizzen, anchors, and rigging. The [generation prompt](assets/caravel-design-reference-prompt.txt) is retained locally with the artwork. The reference was generated with the built-in image tool; it is art direction, not a historical reconstruction.
 
-The model uses roughly 80,000 triangles and retains the animated wheel, rudder, and canvas. `js/hull.js` defines the section used by the mesh; `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Water overtopping the bulwarks remains visible. No imported model or Blender dependency is required.
+The model uses roughly 80,000 triangles and retains the animated wheel, rudder, and canvas. `js/hull.js` defines the section used by the mesh; `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Water overtopping the bulwarks enters the deck-wash field. No imported model or Blender dependency is required.
 
 ### Bow waves and spray
 
@@ -146,11 +146,11 @@ npm run build
 npm test
 ```
 
-The suite contains 27 checks covering:
+The suite contains 28 checks covering:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings.
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
-- Dry decks below the rails, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
+- Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
@@ -163,7 +163,7 @@ GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU o
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
 - The scene is open ocean with an optional fully modeled sailing ship. There is no shoreline, surf, or other vessels.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
-- Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing, or create separate runoff landing splashes. Severe crests can still overtop the hull and boat camera.
+- Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
 - Underwater vessel shadows use a bounded local-surface scattering approximation, with authored optical depth and spread. They do not simulate underwater caustics or full multiple scattering.
 
@@ -272,8 +272,12 @@ scattering. These inform the approximation, not a claim of calibrated optics.
 
 All camera modes share the ocean depth buffer, so
 water, hull, deck wash, bow sheets, and spray occlude each other consistently. A world-space
-hull volume excludes ocean water inside the bulwarks and stern cabin; overtopping
-crests remain visible. The neutral oak albedo texture has no
+hull volume excludes the open-ocean surface inside the bulwarks and stern cabin,
+including above rail height. Previously, crests above the rail could reappear
+inside the deck without crossing a boundary, bypassing the gunwales and drawing
+over the deck-wash field. Water aboard now comes from the deck solver's measured
+rail overtopping, finite flow across the deck, retention and drainage. Buoyancy,
+freeboard and sea presets are unchanged. The neutral oak albedo texture has no
 intentional scene lighting and is embedded into both standalone HTML bundles. It was created
 with the built-in image generation tool using this prompt:
 

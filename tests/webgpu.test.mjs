@@ -365,6 +365,44 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
   } finally { await page.close(); }
 });
 
+test('gunwales exclude the external wave field above the deck without hiding surrounding water', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__hull_mask_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__hull_mask_test`);
+    const result=await page.evaluate(async()=>{
+      const {HULL_PROFILE}=await import('/js/wgsl/hull.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const locations=[
+        [0,0,0], [0,1,0], [0,1.8,0], [1.7,1.8,0], // below/above rail, inside hull
+        [0,3,4], [0,1.8,-6], // quarterdeck and narrow bow
+        [2,1.8,0], [1,1.8,-6], [0,1.8,-6.5], [0,3,5.7], [0,-2,0],
+      ];
+      const B=GPUBufferUsage,size=locations.length*4;
+      const points=device.createBuffer({size:locations.length*16,usage:B.STORAGE|B.COPY_DST});
+      const output=device.createBuffer({size,usage:B.STORAGE|B.COPY_SRC});
+      const read=device.createBuffer({size,usage:B.COPY_DST|B.MAP_READ});
+      device.queue.writeBuffer(points,0,new Float32Array(locations.flatMap(p=>[...p,0])));
+      const module=device.createShaderModule({code:HULL_PROFILE+`
+        @group(0) @binding(0) var<storage,read> points:array<vec4f>;
+        @group(0) @binding(1) var<storage,read_write> result:array<u32>;
+        @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
+          result[id.x]=select(0u,1u,hullExcludesOcean(points[id.x].xyz));
+        }
+      `});
+      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
+      const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:points}},{binding:1,resource:{buffer:output}}]});
+      const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.dispatchWorkgroups(locations.length);cp.end();
+      enc.copyBufferToBuffer(output,0,read,0,size);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const mask=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();device.destroy();return{mask,errors};
+    });
+    assert.deepEqual(result.errors,[]);
+    assert.deepEqual(result.mask,[1,1,1,1,1,1,0,0,0,0,0],
+      'crests above the rail must enter via deck wash, not reappear as ocean inside the hull');
+  }finally{await page.close();}
+});
+
 test('deck overtopping retains water, flows downhill, drains, and dries independently', {timeout:120000}, async()=>{
   const page=await browser.newPage();
   try{
