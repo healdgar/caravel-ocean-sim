@@ -2,24 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Seasick Simulator</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
   #hud { position: fixed; left: 12px; top: 10px; font: 12px/1.45 ui-monospace, Consolas, monospace; color: #e8e2d6;
          text-shadow: 0 1px 2px #000a; pointer-events: none; user-select: none; }
   #hud .help { opacity: .7; }
-  #panel { position: fixed; right: 12px; top: 10px; width: 300px; padding: 10px 12px; border-radius: 8px;
-           background: #0b0f14c8; backdrop-filter: blur(6px); color: #e5e1d8; font: 12px/1.3 system-ui, sans-serif; }
+  #panel, #boat-panel { position: fixed; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden;
+    max-height:calc(100dvh - 24px); border:1px solid #ffffff30; border-radius:10px; color:#e8e2d6;
+    background:#0b0f14f0; font:13px/1.4 system-ui,sans-serif; z-index:6; }
+  #panel { right:12px; top:12px; width:340px; }
   #panel.hidden { display: none; }
-  #panel label { display: grid; grid-template-columns: 1fr 110px 40px; gap: 6px; align-items: center; margin: 3px 0; }
-  #panel input { width: 110px; accent-color: #e2a04e; }
-  #panel > strong { display:inline-block; margin:0 12px 8px 0; }
-  #panel > button { color:#111; background:#e2a04e; border:0; border-radius:4px; padding:6px 10px; cursor:pointer; margin-bottom:8px; }
+  .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px;
+    flex:none; border-bottom:1px solid #ffffff20; }
+  .panel-body { overflow-y:auto; min-height:0; padding:0 12px 12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+  #panel label { display:grid; grid-template-columns:minmax(0,1fr) 110px 40px; gap:6px; align-items:center; margin:3px 0; }
+  #panel input { width:110px; accent-color:#e2a04e; }
+  #panel button, #boat-panel button { color:#111; background:#e2a04e; border:0; border-radius:4px; padding:7px 12px; cursor:pointer; }
+  #panel .panel-header button, #boat-panel .collapse { background:#33424e; color:white; flex:none; margin:0; }
+  #panel .panel-body > button { margin:10px 0; }
   #panel output { text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
-  #boat-panel { position: fixed; left: 12px; bottom: 12px; width: min(290px, calc(100vw - 48px)); max-height: 65vh; overflow: auto;
-    padding: 14px; border: 1px solid #ffffff30; border-radius: 10px; color: #e8e2d6; background: #0b0f14e8; font: 13px/1.4 system-ui; }
+  #boat-panel { left:12px; bottom:12px; width:320px; max-height:65dvh; }
+  #boat-panel[hidden] { display:none; }
   #boat-panel label { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 12px; }
   #boat-panel input[type=number] { width: 76px; background: #172532; color: #fff; border: 1px solid #71818d; border-radius: 4px; padding: 5px; }
   #boat-panel input[type=checkbox] { width: 20px; height: 20px; accent-color: #e2a04e; }
@@ -27,13 +33,10 @@
   #boat-panel output { min-width:45px; font-size:11px; text-align:right; }
   #boat-panel button { margin-right:6px; }
   #boat-panel p { font-size: 11px; opacity: .8; margin: 8px 0 0; }
-  #boat-panel button { background: #e2a04e; border: 0; border-radius: 4px; padding: 7px 12px; cursor: pointer; }
-  #boat-panel .collapse { float: right; padding: 2px 8px; margin-left: 12px; background: #33424e; color: white; }
   #boat-panel.compact { width: auto; }
-  #boat-panel.compact > :not(strong):not(.collapse):not(#helm-readout) { display: none; }
-  #panel { max-height: 65vh; overflow: auto; }
+  #boat-panel.compact .panel-body { display:none; }
   #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
-    padding:6px; border-radius:8px; background:#0b0f14df; border:1px solid #ffffff25; z-index:2; box-sizing:border-box; }
+    padding:6px; border-radius:8px; background:#0b0f14ef; border:1px solid #ffffff25; z-index:5; box-sizing:border-box; }
   #camera-dock[hidden] { display:none; }
   #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
   #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
@@ -41,8 +44,48 @@
   #share-panel[hidden] { display:none; }
   #share-panel input { min-width:0; width:100%; box-sizing:border-box; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
   #share-panel [role=status] { grid-column:1/-1; color:#e8e2d6; font:12px/1.4 system-ui,sans-serif; max-width:540px; }
-  @media (max-width:900px) { #panel { top:122px; max-height:calc(100dvh - 156px); } }
-  @media (max-width:600px) { #panel { top:168px; width:min(300px,calc(100vw - 48px)); max-height:calc(100dvh - 202px); } }
+  #panel .resolution-control { display:flex; flex-wrap:wrap; justify-content:space-between; margin:12px 0 4px; }
+  #render-resolution { min-width:150px; max-width:100%; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
+  #resolution-status { font-size:11px; color:#c7cdd3; margin:0 0 10px; }
+  #gpu-profile { position:fixed; right:8px; top:8px; z-index:3; box-sizing:border-box; max-width:calc(100vw - 16px);
+    color:#fff; background:#07121ef0; border:1px solid #ffffff30; border-radius:6px; font:11px/1.5 monospace; }
+  #gpu-profile summary { padding:8px 12px; cursor:pointer; }
+  #gpu-profile pre { margin:0; padding:0 12px 12px; max-height:60dvh; overflow:auto; white-space:pre-wrap; overscroll-behavior:contain; }
+  button, input, select, summary { touch-action:manipulation; }
+  :focus-visible { outline:2px solid #f5bf77; outline-offset:2px; }
+  @media (max-width:900px), (pointer:coarse) {
+    :root { --controls-bottom:156px; --view-height:100dvh; --view-top:0px; --keyboard-inset:0px; }
+    #hud { left:max(8px,env(safe-area-inset-left)); top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:8px; font-size:10px; }
+    #hud .help { display:none; }
+    #fps { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    #camera-dock { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); top:calc(var(--view-top) + 32px + env(safe-area-inset-top));
+      max-width:none; display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:4px; padding:4px; }
+    #camera-dock > button { grid-column:span 2; min-width:0; padding:6px 3px; }
+    #camera-dock > button:nth-of-type(n+4) { grid-column:span 3; }
+    #camera-dock button, #panel button, #boat-panel button, #gpu-profile summary { min-height:44px; }
+    #panel, #boat-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
+      bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); top:auto; width:auto;
+      max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
+    #boat-panel.compact { right:auto; }
+    .sea-settings-open #boat-panel { visibility:hidden; }
+    #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
+    #panel input { width:100%; min-width:0; height:44px; }
+    #boat-panel label { min-height:44px; margin:6px 0; }
+    #boat-panel input[type=number], #render-resolution, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
+    #boat-panel input[type=number] { width:90px; }
+    #boat-rudder { height:44px; min-width:0; }
+    #boat-panel input[type=checkbox] { width:24px; height:24px; }
+    #share-panel { grid-column:1/-1; width:100%; max-height:30dvh; overflow:auto; }
+    #gpu-profile { grid-column:1/-1; position:static; width:100%; max-width:none; font-size:10px; }
+    #gpu-profile pre { max-height:min(24dvh,160px); padding:0 8px 8px; }
+    #gpu-profile summary { box-sizing:border-box; padding:12px 8px; }
+  }
+  @media (max-width:900px) and (orientation:landscape) {
+    #camera-dock { grid-template-columns:repeat(5,minmax(0,1fr)); }
+    #camera-dock > button, #camera-dock > button:nth-of-type(n+4) { grid-column:span 1; }
+    #boat-panel, #panel { width:min(420px,calc(100vw - 16px)); }
+    #gpu-profile pre { max-height:20dvh; }
+  }
   #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
 </style>
 </head>

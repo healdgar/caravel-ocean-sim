@@ -1108,6 +1108,77 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
   }finally{await page.close();}
 });
 
+test('mobile panels keep Hide reachable while scrolling, profiling and rotating', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:402,height:666}});
+  try {
+    await page.addInitScript(instrumentRenderer);
+    await page.goto(`${origin}/index.html?boat=1&profile=1`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    const reachable=async selector=>{
+      const box=await page.locator(selector).evaluate(el=>{
+        const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+        return {x:r.x,y:r.y,w:r.width,h:r.height,vw:innerWidth,vh:innerHeight,hit:el===hit||el.contains(hit),obstruction:hit?.outerHTML.slice(0,250),controlsBottom:getComputedStyle(document.documentElement).getPropertyValue('--controls-bottom')};
+      });
+      assert.ok(box.x>=0&&box.y>=0&&box.x+box.w<=box.vw+1&&box.y+box.h<=box.vh+1,`${selector} outside viewport: ${JSON.stringify(box)}`);
+      assert.ok(box.w>=44&&box.h>=44,`${selector} needs a touch target`);
+      assert.equal(box.hit,true,`${selector} is obstructed: ${JSON.stringify(box)}`);
+    };
+    assert.equal(await page.locator('#gpu-profile').getAttribute('open'),null,'phone profiler starts collapsed');
+    for(const [width,height] of [[320,568],[402,666],[390,844],[844,390],[768,1024],[320,360]]) {
+      await page.setViewportSize({width,height});
+      for(const expanded of [false,true]) {
+        const open=await page.locator('#gpu-profile').evaluate(el=>el.open);
+        if(open!==expanded)await page.locator('#gpu-profile summary').click();
+        // ResizeObserver places the panels after the disclosure/viewport layout.
+        await page.waitForFunction(()=>{
+          const css=getComputedStyle(document.documentElement);
+          return Math.abs(parseFloat(css.getPropertyValue('--view-height'))-innerHeight)<1 &&
+            Math.abs(parseFloat(css.getPropertyValue('--controls-bottom'))-document.querySelector('#camera-dock').getBoundingClientRect().bottom-8)<1;
+        },undefined,{polling:20,timeout:2000});
+        await page.locator('#boat-controls').evaluate(el=>el.scrollTop=el.scrollHeight);
+        await reachable('#boat-panel .collapse');
+        await page.getByRole('button',{name:'Toggle boat controls'}).click();
+        assert.equal(await page.locator('#boat-controls').isVisible(),false);
+        await reachable('#boat-panel .collapse');
+        await page.getByRole('button',{name:'Toggle boat controls'}).click();
+        await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+        assert.equal(await page.locator('#boat-panel').isVisible(),false,'mobile panels do not cover each other');
+        await page.locator('#panel .panel-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+        await reachable('#panel .panel-header button');
+        assert.equal(await page.locator('#panel .panel-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true,'settings have no horizontal overflow');
+        await page.getByRole('button',{name:'Hide sea settings'}).click();
+        assert.equal(await page.locator('#panel').isVisible(),false);
+        assert.equal(await page.locator('#boat-panel').isVisible(),true);
+      }
+    }
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
+test('resolution controls resize GPU targets and explicit dimensions stay fixed', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:320,height:360}});
+  try {
+    await page.addInitScript(instrumentRenderer);
+    await page.goto(`${origin}/index.html?boat=1`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    assert.equal(await page.getByLabel('Render resolution').inputValue(),'auto');
+    for(const [mode,width,height] of [['0.5',160,180],['native',320,360],['0.75',240,270]]) {
+      await page.getByLabel('Render resolution').selectOption(mode);
+      await step(page);
+      assert.deepEqual(await page.locator('#c').evaluate(el=>[el.width,el.height]),[width,height]);
+      assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+    }
+    await page.goto(`${origin}/index.html?boat=1&w=128&h=96`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.getByLabel('Render resolution').inputValue(),'fixed');
+    assert.equal(await page.getByLabel('Render resolution').isDisabled(),true);
+    await step(page);
+    assert.deepEqual(await page.locator('#c').evaluate(el=>[el.width,el.height]),[128,96]);
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
 for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
   test(`${bundle} initializes all JavaScript and WGSL pipelines`, { timeout: 120000 }, async () => {
     const page = await browser.newPage();

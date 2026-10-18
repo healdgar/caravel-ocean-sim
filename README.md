@@ -41,9 +41,12 @@ After editing anything under `js/`, run `npm run build` to regenerate `ocean.htm
 | Shift | 5x Free camera speed |
 | Mouse wheel | Change Free camera speed or View ship zoom |
 | Drag in View ship | Orbit the vessel |
+| Touch-drag the canvas | Look around or orbit in View ship |
 | H | Settings panel: wind, swell, choppiness, turbidity, foam, sun, haze, clouds, exposure, bloom |
 
 The free camera stays above the sampled water. The boat camera follows the hull; rough seas can overtop the gunwales and wash across the deck.
+
+On mobile, both settings panels keep their **Hide** button above the scrolling controls. Sea settings temporarily covers the boat controls. Buttons have 44 px touch targets, and the layout follows the visible viewport, safe areas and keyboard. The optional Performance monitor starts collapsed; expand it for detailed timings.
 
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
 
@@ -130,6 +133,12 @@ The render loop reuses large typed arrays and GPU resources, keeping most recurr
 
 Volumetric clouds add raymarching and reconstruction work. If frame rate drops at maximum **Cloud quality**, lower that setting or the render resolution. Cloud quality changes the screen ray resolution, while the cached density and lighting volumes remain fixed. The older RTX timing above predates these cloud and vessel effects and is not a current performance guarantee.
 
+**Render resolution** in Sea settings defaults to **Auto · 30+ FPS**. It measures delivered animation-frame cadence, lowers resolution after sustained frames slower than the 30 FPS target, and aims for roughly 33 FPS when reducing pixels. It waits two seconds after startup or a resize, ignores isolated stalls and hidden-tab time, and restores resolution in small steps only after sustained headroom above 42 FPS. The range is 35–100% of native width and height. Native, 75% and 50% overrides are also available.
+
+Auto mode trades screen sharpness for frame rate; wave simulation, vessel geometry, shadows, effects and 4× MSAA stay enabled. Screen-sized render targets, including cloud reconstruction, follow the selected resolution. CPU limits, fixed GPU work or thermal throttling can still prevent 30 FPS at the minimum scale; the status shows when that floor is reached. Physical-iPhone results remain to be measured.
+
+Use `resolution=native` for a fixed native-resolution comparison, or `resolution=0.75` / `resolution=0.5`. Explicit `w`, `h` or `shot` parameters disable automatic tuning so captures remain reproducible. Resolution is device-local and omitted from ordinary scene share links. The monitor and capture JSON record the active mode and scale.
+
 The optimized frame schedule also avoids redundant GPU work:
 
 - Fusing spectrum evolution with the row FFT removes two 6 MiB buffers, one dispatch, and 24 MiB of intermediate buffer reads/writes per frame.
@@ -156,7 +165,7 @@ For a reproducible local capture, use `?view=ship&profile=1&w=1280&h=720&shot=gp
 
 The initial October 2026 Mac comparison reported roughly 12 ms compute-to-composite endpoint intervals, incorrectly labelled whole-frame spans. Those figures are not comparable to the corrected sampled GPU window (capture format version 2). No sustained FPS improvement has been established. Confirmed benefits are reductions in buffer storage and scheduled GPU work. Waves, cloud quality, shadows, HDR, and antialiasing settings remain unchanged.
 
-User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabled at the helm, showed 6.5 FPS / 153.8 ms at 1206 × 1998 and 15.4 FPS / 64.9 ms at 603 × 999. Quartering pixel count improved FPS about 2.4×, indicating substantial resolution-dependent cost. After packed wave reads (`a85cb45`), the full-resolution screenshot showed 8.6 FPS / 116.6 ms: about 32% higher FPS, still too slow. With depth-first visibility (`ea22474`), the next full-resolution screenshot showed 17.3 FPS / 57.7 ms, about twice the previous FPS. Depth-first visibility is now the default. These are individual observations, not a controlled benchmark; overlapping pass spans cannot isolate exclusive ocean, ship, or bloom costs. Default resolution is unchanged.
+User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabled at the helm, showed 6.5 FPS / 153.8 ms at 1206 × 1998 and 15.4 FPS / 64.9 ms at 603 × 999. Quartering pixel count improved FPS about 2.4×, indicating substantial resolution-dependent cost. After packed wave reads (`a85cb45`), the full-resolution screenshot showed 8.6 FPS / 116.6 ms: about 32% higher FPS, still too slow. With depth-first visibility (`ea22474`), the next full-resolution screenshot showed 17.3 FPS / 57.7 ms, about twice the previous FPS. Depth-first visibility is now the default. These are individual observations, not a controlled benchmark; overlapping pass spans cannot isolate exclusive ocean, ship, or bloom costs. Those builds retained native resolution; Auto mode was added afterward.
 
 ## Validation
 
@@ -178,6 +187,7 @@ The suite covers:
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
+- Adaptive-resolution convergence, cautious recovery, bounded scale, manual overrides and background/resume handling; actual GPU target resizing and fixed capture dimensions. Mobile checks cover unobstructed Hide buttons while scrolling, collapsed/expanded profiling, and six portrait, landscape and tablet viewports.
 - Bit-exact indexed geometry and shadow partitions; pixel equality between the original copy/unindexed schedule, direct resolve/indexed rendering, and profiled rendering; actual slow-frame FPS, timestamp readback, overlapping/early render stages, stale disabled queries, quantized zero intervals, invalid timestamps, and unsupported-device fallback.
 - Pixel equality before/after early hull exclusion, both with the water cutout exposed at the helm and with the complete ship visible from outside.
 - Analytical cross-derivative values and pixel equality between separate and packed wave-texture reads, at sunset and in rough seas.
@@ -206,6 +216,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `index.html` | Page shell, HUD, and settings panel styles |
 | `js/main.js` | Device setup, resources, camera modes, per-frame loop |
 | `js/profiler.js` | Optional GPU pass spans, sampled frame timing, and local capture statistics |
+| `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |

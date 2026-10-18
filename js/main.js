@@ -1,5 +1,6 @@
 import { createVolumetricClouds } from './clouds.js';
 import { createGPUProfiler } from './profiler.js';
+import { createAdaptiveResolution } from './resolution.js';
 import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
@@ -443,6 +444,11 @@ async function main() {
   for (let i = 0; i < BLOOM_LEVELS * 2; i++) bloomUBOs.push(mkBuf(16, GU.UNIFORM | GU.COPY_DST, 'bloom ubo'));
 
   let W = 0, H = 0;
+  const forcedWidth = Math.max(0, Number(qs.get('w')) || 0), forcedHeight = Math.max(0, Number(qs.get('h')) || 0);
+  const fixedResolution = forcedWidth > 0 || forcedHeight > 0 || !!qs.get('shot');
+  const requestedResolution = qs.get('resolution') || 'auto';
+  const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto');
+  let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
   let waterMips = 1, waterMipGroups = [];
   const mainPass = {
@@ -456,10 +462,12 @@ async function main() {
   let bloomLevels = 0, bloomPasses = [], bgComp = null;
 
   function resize() {
-    const fw = Number(qs.get('w')) || 0, fh = Number(qs.get('h')) || 0;
     const dpr = window.devicePixelRatio || 1;
-    const w = fw || Math.max(1, Math.round(canvas.clientWidth * dpr));
-    const h = fh || Math.max(1, Math.round(canvas.clientHeight * dpr));
+    const nw = Math.max(1, Math.round(canvas.clientWidth * dpr)), nh = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    if (nw !== nativeWidth || nh !== nativeHeight) { nativeWidth=nw; nativeHeight=nh; resolution.reset(); }
+    const limit = device.limits.maxTextureDimension2D;
+    const w = Math.max(1, Math.min(limit, Math.round(forcedWidth || nw * resolution.scale)));
+    const h = Math.max(1, Math.min(limit, Math.round(forcedHeight || nh * resolution.scale)));
     if (w === W && h === H) return;
     W = w; H = h;
     canvas.width = W; canvas.height = H;
@@ -518,11 +526,14 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const profiler=createGPUProfiler(device,qs.get('profile')==='1');
   let profileSummary='Waiting for frame timing…';
-  let profilePanel=null;
+  let profilePanel=null, profileDetails=null, profileToggle=null;
   if(qs.get('profile')==='1'){
-    profilePanel=document.createElement('pre');profilePanel.id='gpu-profile';
-    profilePanel.style.cssText='position:fixed;right:8px;top:8px;margin:0;padding:12px;background:#07121ee8;color:#fff;font:11px/1.5 monospace;pointer-events:none;z-index:20;max-width:calc(100vw - 40px);white-space:pre-wrap';
-    profilePanel.textContent=profiler.text();document.body.append(profilePanel);
+    profileDetails=document.createElement('details');profileDetails.id='gpu-profile';
+    profileDetails.open=!matchMedia('(max-width:900px), (pointer:coarse)').matches;
+    profileToggle=document.createElement('summary');profileToggle.textContent='Performance';
+    profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
+    profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
+    document.body.append(profileDetails);
   }
 
   // --------------------------------------------------------------------------------------
@@ -591,7 +602,7 @@ async function main() {
   let wheelDrag = null, suppressLookClick = false;
   canvas.addEventListener('click', () => {
     if(suppressLookClick) { suppressLookClick=false; return; }
-    if (cameraMode !== 'ship' && document.pointerLockElement !== canvas) canvas.requestPointerLock();
+    if (cameraMode !== 'ship' && document.pointerLockElement !== canvas) canvas.requestPointerLock?.()?.catch?.(()=>{});
   });
   const helmPoint = new Float32Array(3);
   function projectHelm(x,y,z) {
@@ -625,18 +636,30 @@ async function main() {
   canvas.addEventListener('mousedown', (e) => { if (e.button === 2 || (cameraMode === 'ship' && e.button === 0)) dragging = true; });
   addEventListener('mouseup', () => { dragging = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  addEventListener('mousemove', (e) => {
-    if (!wheelDrag && (document.pointerLockElement === canvas || dragging)) {
-      if(cameraMode === 'ship') {
-        shipOrbit.yaw -= e.movementX * 0.005;
-        shipOrbit.elevation = Math.max(0.06,Math.min(1.25,shipOrbit.elevation+e.movementY*0.004));
-      } else {
-        cam.yaw += e.movementX * 0.0022;
-        cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - e.movementY * 0.0022));
-      }
+  function turnView(dx,dy) {
+    if(cameraMode === 'ship') {
+      shipOrbit.yaw -= dx * 0.005;
+      shipOrbit.elevation = Math.max(0.06,Math.min(1.25,shipOrbit.elevation+dy*0.004));
+    } else {
+      cam.yaw += dx * 0.0022;
+      cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - dy * 0.0022));
     }
+  }
+  addEventListener('mousemove', (e) => {
+    if (!wheelDrag && (document.pointerLockElement === canvas || dragging)) turnView(e.movementX,e.movementY);
   });
-  addEventListener('wheel', (e) => {
+  let touchLook=null;
+  canvas.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='mouse'||wheelDrag||e.defaultPrevented||touchLook)return;
+    e.preventDefault();suppressLookClick=true;touchLook={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove',e=>{
+    if(touchLook?.id!==e.pointerId)return;
+    turnView(e.clientX-touchLook.x,e.clientY-touchLook.y);touchLook.x=e.clientX;touchLook.y=e.clientY;
+  });
+  const releaseTouch=e=>{if(touchLook?.id===e.pointerId)touchLook=null;};
+  canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',releaseTouch);canvas.addEventListener('lostpointercapture',releaseTouch);
+  canvas.addEventListener('wheel', (e) => {
     if(cameraMode === 'ship') shipOrbit.distance=Math.max(10,Math.min(120,shipOrbit.distance*(e.deltaY<0?0.9:1/0.9)));
     else cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
   }, { passive: true });
@@ -820,30 +843,35 @@ async function main() {
   // UI
   // --------------------------------------------------------------------------------------
   const panel = document.getElementById('panel');
-  function togglePanel() {
-    panel.classList.toggle('hidden');
-    seaSettingsButton.setAttribute('aria-expanded', String(!panel.classList.contains('hidden')));
+  function setPanelOpen(open) {
+    panel.classList.toggle('hidden', !open);
+    document.body.classList.toggle('sea-settings-open', open);
+    seaSettingsButton.setAttribute('aria-expanded', String(open));
   }
+  function togglePanel() { setPanelOpen(panel.classList.contains('hidden')); }
   const boatPanel = document.createElement('section');
   boatPanel.id = 'boat-panel';
-  boatPanel.innerHTML = `<strong>Boat perspective</strong>
-    <p>Heading: 0° along the original view, 90° to the right. A/D or arrows: turn the wheel. X: centre rudder. Drag the wheel with the mouse unlocked.</p>`;
+  boatPanel.setAttribute('aria-labelledby','boat-title');
+  boatPanel.innerHTML = `<div class="panel-header"><strong id="boat-title">Boat perspective</strong></div>
+    <div class="panel-body" id="boat-controls"><p>Drag the wheel or use Rudder to steer. Heading 0° follows the original view; 90° turns right.</p></div>`;
+  const boatBody=boatPanel.querySelector('.panel-body');
   panel.before(boatPanel);
   const collapseBoat = document.createElement('button');
   collapseBoat.className = 'collapse'; collapseBoat.textContent = 'Hide';
   collapseBoat.setAttribute('aria-label', 'Toggle boat controls');
-  collapseBoat.onclick = () => { const compact = boatPanel.classList.toggle('compact'); collapseBoat.textContent = compact ? 'Controls' : 'Hide'; };
-  boatPanel.querySelector('strong').after(collapseBoat);
+  collapseBoat.setAttribute('aria-controls','boat-controls');collapseBoat.setAttribute('aria-expanded','true');
+  collapseBoat.onclick = () => { const compact = boatPanel.classList.toggle('compact'); collapseBoat.textContent = compact ? 'Controls' : 'Hide'; collapseBoat.setAttribute('aria-expanded',String(!compact)); };
+  boatPanel.querySelector('.panel-header').append(collapseBoat);
   const prowLabel = document.createElement('label');
   prowLabel.textContent = 'Show ship';
   const prowToggle = document.createElement('input');
   prowToggle.type = 'checkbox'; prowToggle.checked = boat.showProw;
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
-  prowLabel.append(prowToggle); boatPanel.append(prowLabel);
+  prowLabel.append(prowToggle); boatBody.append(prowLabel);
   const effectsLabel = document.createElement('label'); effectsLabel.textContent = 'Wakes & spray';
   const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
   effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
-  effectsLabel.append(effectsToggle); boatPanel.append(effectsLabel);
+  effectsLabel.append(effectsToggle); boatBody.append(effectsLabel);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
   cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
   const cameraButtons=new Map();
@@ -881,7 +909,21 @@ async function main() {
     }
   };
   cameraDock.append(seaSettingsButton, shareButton, sharePanel);
+  if(profileDetails)cameraDock.append(profileDetails);
   panel.before(cameraDock);
+  // Keep controls in the visible viewport, including browser bars and keyboards.
+  const layoutControls=()=>{
+    const viewport=window.visualViewport, top=viewport?.offsetTop || 0, height=viewport?.height || innerHeight;
+    if(profileDetails?.open && height<420 && innerHeight-height>100)profileDetails.open=false;
+    const css=document.documentElement.style;
+    css.setProperty('--view-top',top+'px');css.setProperty('--view-height',height+'px');
+    css.setProperty('--keyboard-inset',Math.max(0,innerHeight-top-height)+'px');
+    css.setProperty('--controls-bottom',(cameraDock.getBoundingClientRect().bottom+8)+'px');
+  };
+  new ResizeObserver(layoutControls).observe(cameraDock);
+  window.visualViewport?.addEventListener('resize',layoutControls);
+  window.visualViewport?.addEventListener('scroll',layoutControls);
+  addEventListener('resize',layoutControls);layoutControls();
   const updateHelp = () => {
     document.querySelector('#hud .help').textContent = boat.enabled
       ? 'A/D or arrows: steer | X: centre rudder | B: free camera | click sea: look | Esc: release | H: sea settings'
@@ -918,7 +960,7 @@ async function main() {
       boat[key] = Number(input.value);
       if (key === 'length' || key === 'beam' || key === 'heading') boat.revision++;
     });
-    row.append(name, input); boatPanel.append(row);
+    row.append(name, input); boatBody.append(row);
   }
   const rudderRow = document.createElement('label');
   rudderRow.textContent = 'Rudder';
@@ -926,18 +968,35 @@ async function main() {
   Object.assign(rudderInput,{type:'range',min:-35,max:35,step:0.5,value:boat.rudderTarget,id:'boat-rudder'});
   const rudderValue = document.createElement('output'); rudderValue.textContent='0 deg';
   rudderInput.addEventListener('input',()=>{boat.rudderTarget=Number(rudderInput.value);});
-  rudderRow.append(rudderInput,rudderValue); boatPanel.append(rudderRow);
+  rudderRow.append(rudderInput,rudderValue); boatBody.append(rudderRow);
   const centreRudder = document.createElement('button'); centreRudder.textContent = 'Centre rudder';
-  centreRudder.onclick = ()=>{boat.rudderTarget=0;}; boatPanel.append(centreRudder);
-  const helmReadout=document.createElement('p'); helmReadout.id='helm-readout'; boatPanel.append(helmReadout);
+  centreRudder.onclick = ()=>{boat.rudderTarget=0;}; boatBody.append(centreRudder);
+  const helmReadout=document.createElement('p'); helmReadout.id='helm-readout'; boatBody.append(helmReadout);
   const centerView = document.createElement('button'); centerView.textContent = 'Look ahead';
   centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
-  boatPanel.append(centerView);
-  const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatPanel.append(boatStatus);
-  const boatMotion = document.createElement('p'); boatMotion.id='boat-motion'; boatPanel.append(boatMotion);
-  const note = document.createElement('p'); note.textContent = 'Waves change speed and hull motion. Set the calm-water speed above.'; boatPanel.append(note);
+  boatBody.append(centerView);
+  const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
+  const boatMotion = document.createElement('p'); boatMotion.id='boat-motion'; boatBody.append(boatMotion);
+  const note = document.createElement('p'); note.textContent = 'Waves change speed and hull motion. Set the calm-water speed above.'; boatBody.append(note);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
+  seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
+  const seaHeader=document.createElement('div');seaHeader.className='panel-header';
+  const hideSea=document.createElement('button');hideSea.textContent='Hide';hideSea.setAttribute('aria-label','Hide sea settings');
+  hideSea.onclick=()=>{setPanelOpen(false);seaSettingsButton.focus();};seaHeader.append(seaTitle,hideSea);
+  const seaBody=document.createElement('div');seaBody.className='panel-body';panel.append(seaHeader,seaBody);
+  addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.classList.contains('hidden'))hideSea.click();});
+  const resolutionLabel=document.createElement('label');resolutionLabel.className='resolution-control';resolutionLabel.textContent='Render resolution';
+  const resolutionInput=document.createElement('select');resolutionInput.id='render-resolution';
+  for(const [value,label] of [['auto','Auto · 30+ FPS'],['native','Native (100%)'],['0.75','75%'],['0.5','50%'],...(fixedResolution?[['fixed','Fixed by URL']]:[])]) {
+    const option=document.createElement('option');option.value=value;option.textContent=label;resolutionInput.append(option);
+  }
+  resolutionInput.value=resolution.mode;resolutionInput.disabled=fixedResolution;
+  resolutionInput.addEventListener('change',()=>{resolution.setMode(resolutionInput.value);resize();updateResolutionStatus();});
+  resolutionLabel.append(resolutionInput);
+  const resolutionStatus=document.createElement('p');resolutionStatus.id='resolution-status';
+  const updateResolutionStatus=()=>{resolutionStatus.textContent=`${W} × ${H} · ${resolution.mode==='fixed'?'fixed by URL':Math.round(resolution.scale*100)+'%'}${resolution.mode==='auto'?' · target 30 FPS':''}${resolution.mode==='auto'&&resolution.scale===resolution.minimum?' · minimum resolution':''}`;};
+  seaBody.append(resolutionLabel,resolutionStatus);
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
   const seaSliders = new Map();
@@ -946,7 +1005,7 @@ async function main() {
     for (const [key, { input, output }] of seaSliders) { input.value = P[key]; output.textContent = String(P[key]); }
     needSpectrum = true; envFull = true;
   };
-  panel.append(seaTitle, roughButton);
+  seaBody.append(roughButton);
   const SLIDERS = [
     ['windSpeed', 'Wind speed (m/s)', 2, 32, 0.1, 'spec'],
     ['windDir', 'Wind direction (deg)', 0, 360, 1, 'spec'],
@@ -983,7 +1042,7 @@ async function main() {
       envFull = true;
     });
     row.append(name, inp, val);
-    panel.appendChild(row);
+    seaBody.appendChild(row);
   }
   if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; cameraDock.hidden=true; }
 
@@ -1002,6 +1061,7 @@ async function main() {
   let last = performance.now();
   let fpsN = 0, fpsT = 0;
   let shooting = false;
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -1054,8 +1114,9 @@ async function main() {
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     requestAnimationFrame(frame);
-    resize();
     const elapsed = Math.max(0, (now - last) / 1000);
+    resolution.sample(elapsed,!document.hidden);
+    resize();
     let dt = Math.min(0.1, elapsed);
     last = now;
     fpsN++; fpsT += elapsed;
@@ -1063,8 +1124,10 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target 30 FPS':''}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
+      if(profileToggle)profileToggle.textContent=`Performance · ${fps.toFixed(1)} FPS · ${Math.round(resolution.scale*100)}%`;
+      updateResolutionStatus();
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
@@ -1277,7 +1340,7 @@ async function main() {
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
     if(profilePanel){
       await profiler.settled();profilePanel.textContent=profileSummary+'\n'+profiler.text();
-      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
+      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,resolution:{mode:resolution.mode,scale:resolution.scale,targetFPS:resolution.targetFPS},parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
     shotIdx++;
@@ -1289,6 +1352,7 @@ async function main() {
   }
 
   resize();
+  updateResolutionStatus();
   addEventListener('resize', resize);
   requestAnimationFrame(frame);
 }

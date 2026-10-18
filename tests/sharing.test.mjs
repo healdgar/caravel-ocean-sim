@@ -19,11 +19,11 @@ test('share link carries the live storm, lighting, and boat configuration on a P
 });
 
 test('sharing replaces stale URL settings and strips capture, resolution, and hidden-UI flags', () => {
-  const link = new URL(createShareLink('http://localhost:8087/ocean.html?shot=frame.png&seq=120&dbg=1&w=4096&h=2160&ui=0&windSpeed=2#old', { windSpeed: 28, invalid: NaN }, { ...boat, speed: 0, showProw: false }, 'ship'));
+  const link = new URL(createShareLink('http://localhost:8087/ocean.html?shot=frame.png&seq=120&dbg=1&w=4096&h=2160&resolution=0.5&ui=0&windSpeed=2#old', { windSpeed: 28, invalid: NaN }, { ...boat, speed: 0, showProw: false }, 'ship'));
   assert.equal(link.origin, 'http://localhost:8087');
   assert.equal(link.pathname, '/ocean.html');
   assert.equal(link.hash, '');
-  for (const key of ['shot', 'seq', 'dbg', 'w', 'h', 'ui', 'invalid']) assert.equal(link.searchParams.has(key), false);
+  for (const key of ['shot', 'seq', 'dbg', 'w', 'h', 'resolution', 'ui', 'invalid']) assert.equal(link.searchParams.has(key), false);
   assert.equal(link.searchParams.get('windSpeed'), '28');
   assert.equal(link.searchParams.get('boatSpeed'), '0');
   assert.equal(link.searchParams.get('prow'), '0');
