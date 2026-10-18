@@ -1,5 +1,6 @@
 // Canonical hull section, in metres. Mesh, ocean mask, and spray use this profile.
 export const HULL_DRAFT = 1.55;
+export const HULL_UNIFORM_BYTES = 144; // transform, rig, sail set/trim/apparent wind
 export const HULL_BOW_RAKE = 0.9;
 export const HULL_STERN_RAKE = 0.25;
 export const HULL_SECTION_POWER = 0.42;

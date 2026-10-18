@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cameraModeFromLink, createShareLink, ROUGH_SEAS } from '../js/sharing.js';
+import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } from '../js/sharing.js';
 
 const boat = { length: 12, beam: 3.6, heading: 278.123456789, speed: 9.5, eye: 2.4, rudderTarget: -12.5, showProw: true };
 
@@ -53,4 +53,14 @@ test('sharing keeps the calm-water target rather than a transient wave-driven sp
   const url = new URL(createShareLink('https://example.com/', {}, { ...boat, surgeVelocity: 2.1 }, 'boat'));
   assert.equal(Number(url.searchParams.get('boatSpeed')), boat.speed);
   assert.equal(url.searchParams.has('surgeVelocity'), false);
+});
+
+test('sailing links preserve propulsion and individual sail targets; old speed links retain manual mode',()=>{
+  const ship={...boat,propulsion:'sail',sailFore:0,sailMain:.5,sailMizzen:1};
+  const url=new URL(createShareLink('https://example.com/',{},ship,'boat'));
+  assert.equal(propulsionFromLink(url.searchParams),'sail');
+  for(const key of ['sailFore','sailMain','sailMizzen'])assert.equal(Number(url.searchParams.get(key)),ship[key]);
+  assert.equal(propulsionFromLink(new URLSearchParams()),'sail');
+  assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6')),'manual');
+  assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6&propulsion=sail')),'sail');
 });

@@ -2,6 +2,7 @@
 const BOAT_LINK_KEYS = {
   length: 'boatLength', beam: 'boatBeam', heading: 'boatHeading',
   speed: 'boatSpeed', eye: 'boatEye', rudderTarget: 'boatRudder',
+  sailFore: 'sailFore', sailMain: 'sailMain', sailMizzen: 'sailMizzen',
 };
 
 export const ROUGH_SEAS = {
@@ -15,6 +16,12 @@ export function cameraModeFromLink(search) {
   return ['boat', 'free', 'ship'].includes(mode) ? mode : search.get('boat') === '1' ? 'boat' : 'free';
 }
 
+export function propulsionFromLink(search) {
+  const mode = search.get('propulsion');
+  if (mode === 'sail' || mode === 'manual') return mode;
+  return search.has('boatSpeed') ? 'manual' : 'sail'; // Preserve existing speed-controlled links.
+}
+
 export function createShareLink(href, settings, boat, cameraMode) {
   const url = new URL(href);
   url.search = ''; url.hash = '';
@@ -23,6 +30,7 @@ export function createShareLink(href, settings, boat, cameraMode) {
   };
   url.searchParams.set('boat', cameraMode === 'boat' ? '1' : '0');
   url.searchParams.set('view', cameraMode);
+  url.searchParams.set('propulsion', boat.propulsion === 'sail' ? 'sail' : 'manual');
   for (const [key, value] of Object.entries(settings)) setNumber(key, value);
   for (const [key, param] of Object.entries(BOAT_LINK_KEYS)) setNumber(param, boat[key]);
   url.searchParams.set('prow', boat.showProw ? '1' : '0');

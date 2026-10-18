@@ -2,12 +2,19 @@ import { SHADOW_CAST } from './wgsl/shadows.js';
 
 export function shadowMeshData(mesh,meshIndices=null) {
   const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity],solid=[],canvas=[];
+  let sailingRig=false;
   for(let i=0;i<mesh.length;i+=9)for(let axis=0;axis<3;axis++){
     bounds[axis]=Math.min(bounds[axis],mesh[i+axis]);bounds[axis+3]=Math.max(bounds[axis+3],mesh[i+axis]);
   }
   for(let i=0;i<(meshIndices?meshIndices.length:mesh.length/9);i+=3){
     const a=meshIndices?meshIndices[i]:i,b=meshIndices?meshIndices[i+1]:i+1,c=meshIndices?meshIndices[i+2]:i+2;
-    const material=mesh[a*9+6];(material===9 || material===13 ? canvas:solid).push(a,b,c);
+    const material=Math.floor(mesh[a*9+6]);(material===9 || material===13 ? canvas:solid).push(a,b,c);
+    if((material===9 || material===13) && mesh[a*9+6]!==material)sailingRig=true;
+  }
+  // Rotating yards and the lateen stay inside this conservative swept envelope.
+  if(sailingRig){
+    bounds[0]=Math.min(bounds[0],-3.8);bounds[3]=Math.max(bounds[3],3.8);
+    bounds[2]=Math.min(bounds[2],-7.5);bounds[5]=Math.max(bounds[5],7.5);
   }
   return {bounds,solid:new Uint32Array(solid),canvas:new Uint32Array(canvas)};
 }

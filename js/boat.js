@@ -1,4 +1,5 @@
 import { HELM_EYE_Z, HULL_DRAFT, hullHalfWidth } from './hull.js';
+import { advanceSails, sailForces } from './sailing.js';
 
 export const KNOT_TO_MPS = 0.514444;
 // Displacement of the canonical mesh below its mean waterline, in cubic metres.
@@ -21,7 +22,7 @@ export function boatHydrodynamics(length, beam) {
 }
 
 export function boatForwardSpeed(boat) {
-  return boat.surgeVelocity ?? boat.speed * KNOT_TO_MPS;
+  return boat.surgeVelocity ?? (boat.propulsion === 'sail' ? 0 : boat.speed * KNOT_TO_MPS);
 }
 
 // World-space, incident-wave slopes arrive in the existing asynchronous probe.
@@ -35,31 +36,47 @@ export function boatWaveSlope(boat, time) {
 }
 
 // Long-wave Froude–Krylov approximation: F = -rho*g*volume*mean(wave slope).
-// Propulsive thrust balances calm-water drag at the selected target speed;
-// it does not cancel wave forces or force the actual velocity to that setting.
-export function stepBoatSurge(boat, slope, dt) {
+// Sailing uses apparent-wind forces; manual mode retains the calm-water thrust.
+// Both integrate through vessel inertia, resistance and incident-wave pressure.
+export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0) {
+  boat.leewayDistance = 0;
+  boat.leewayVelocity ??= 0;
+  boat.sailHeel ??= 0;
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
   let hydro = boat.hydrodynamics;
   if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam) {
     hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam);
   }
   const inertia = hydro.mass + hydro.addedMass;
+  const sailing = boat.propulsion === 'sail';
+  advanceSails(boat, dt, windSpeed, windDirection);
   const target = boat.speed * KNOT_TO_MPS;
   const thrust = hydro.drag * target * Math.abs(target);
   const waveForce = -1025 * 9.81 * hydro.volume * slope;
-  const force = thrust + waveForce;
   const initial = boatForwardSpeed(boat);
-  let velocity = initial, distance = 0;
+  let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
+    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways) : null;
+    const force = (loads ? loads.forward : thrust) + waveForce;
     const free = velocity + force / inertia * h;
+    const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
+    const drag = hydro.drag * (sailing ? 1 + 80 * Math.max(0, froude - 0.28) ** 2 : 1);
     // Implicit signed quadratic drag: stable through zero and during reversals.
-    const next = 2 * free / (1 + Math.sqrt(1 + 4 * hydro.drag / inertia * h * Math.abs(free)));
+    const next = 2 * free / (1 + Math.sqrt(1 + 4 * drag / inertia * h * Math.abs(free)));
     distance += (velocity + next) * 0.5 * h;
     velocity = next;
+    // Keel/hull resistance bounds sideways drift instead of converting it into forward drive.
+    const lateralInertia = hydro.mass * 1.8, keelDrag = 0.5 * 1025 * boat.length * HULL_DRAFT * 0.8;
+    const lateralFree = sideways + (loads?.side ?? 0) / lateralInertia * h;
+    const nextSide = 2 * lateralFree / (1 + Math.sqrt(1 + 4 * keelDrag / lateralInertia * h * Math.abs(lateralFree)));
+    sidewaysDistance += (sideways + nextSide) * 0.5 * h; sideways = nextSide;
   }
   boat.surgeVelocity = velocity;
   boat.surgeAcceleration = (velocity - initial) / dt;
+  boat.leewayVelocity = sideways; boat.leewayDistance = sidewaysDistance;
+  const loads = sailForces(boat, windSpeed, windDirection, velocity, sideways);
+  boat.sailHeel = sailing ? -Math.max(-0.42, Math.min(0.42, Math.atan2(loads.side * 5, hydro.mass * 9.81 * boat.beam * 0.22))) : 0;
   return distance;
 }
 

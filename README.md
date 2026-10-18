@@ -198,6 +198,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; application checks exercise sail controls and propulsion switching.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, forecastle and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
@@ -234,6 +235,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/profiler.js` | Optional GPU pass spans, sampled frame timing, and local capture statistics |
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
+| `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and ribbon rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
@@ -257,7 +259,7 @@ MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 ## Boat perspective
 
 Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
-Set length and beam in metres, calm-water target speed in knots, heading in degrees (0 along the
+Set length and beam in metres, heading in degrees (0 along the
 original view, 90 to the right), and eye height above the mean waterline.
 The default eye is 3.9 m above the waterline, standing behind the aft-quarterdeck wheel;
 its longitudinal position follows hull length. Older shared links with `boatEye=2.4`
@@ -275,12 +277,38 @@ from the actual displaced FFT ocean and local wake. Measured wave velocity and
 bounded readback prediction reduce lag on rising water. Larger footprints average over waves;
 length also slows the pitch/heave response and beam slows the roll response.
 Forward speed evolves under wave pressure, propulsion, quadratic resistance, and
-ship plus added-water inertia. **Calm-water speed** selects the propulsive thrust
-that balances resistance at that speed on flat water; it does not hold actual speed
-constant. The panel shows actual speed and estimated displacement. Setting the target
-to zero lets the ship coast and drift, including astern. Steering, wakes, and spray
-use actual speed, and share links retain the target setting. The ship starts at its
-selected speed; subsequent changes accelerate or decelerate it gradually.
+ship plus added-water inertia. **Sailing** is the default: the ship starts from rest
+on a beam reach and accelerates under its sails. Heading, wind speed, apparent wind,
+trim and exposed canvas determine its drive. The panel shows actual speed and estimated
+displacement; steering, wakes and spray use that speed.
+
+**Fore sails**, **Main sails** and **Mizzen sail** independently set 0–100% canvas.
+**Full sail**, **Reef 50%** and **Lower all** change all three together. Handling takes
+about 5.6 seconds from fully set to fully furled. The percentage readouts show actual
+canvas while the sliders show the requested amount. Square sails gather at their yards;
+the lateen gathers along its diagonal yard. Yards brace and the mizzen changes tack
+automatically, with a short lag. Loaded sails fill; unloaded canvas luffs. Visible
+geometry, lighting normals, rigging and shadow casters share the deformation.
+Lowering sails removes drive gradually; momentum and waves keep moving the vessel.
+
+The sail readout reports the point of sail, apparent wind speed and its direction
+relative to the bow. Apparent wind subtracts the ship's forward and sideways velocity
+from the true wind. Lift and drag use dynamic pressure `0.5 * airDensity * windSpeed²`,
+exposed area and authored angle-dependent coefficients. Square sails lose drive near
+headwind; the lateen can work somewhat closer to the wind. Lateral force produces
+bounded leeway against hull/keel resistance and a damped heel. Sailing resistance rises
+above an authored Froude-number threshold. The basis is
+[relative air velocity](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/relative-velocity/),
+the [aerodynamic force equation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/)
+and [points of sail](https://www.rya.org.uk/training/do-you-know-your-points-of-sail/).
+This is an approximate sailing model, not a measured caravel polar or cloth/fluid simulation.
+It omits sail interference, weather helm, reefing penalties, gust loading and capsizing.
+
+Choose **Set speed** to retain the previous propulsion model. **Calm-water speed**
+sets the thrust that balances resistance at that speed on flat water; waves still
+change actual speed. A zero target lets the ship coast, including astern. Switching
+propulsion modes preserves momentum. Old links containing `boatSpeed` without an
+explicit propulsion mode retain this behavior and start at their selected speed.
 
 The surge model uses the long-wave pressure-gradient approximation
 `(mass + addedMass) * dv/dt = thrust - drag * v * abs(v) - rho * g * volume * slope`.
@@ -299,15 +327,19 @@ about **42.7 tonnes** for the default 12 × 3.6 m ship, using seawater density
 Added mass is an authored 8% of displacement; effective resistance uses coefficient
 0.012 and estimated wetted area. These coefficients are not calibrated to a historical
 caravel. Hull-footprint filtering approximates short-wave cancellation; the model
-does not solve diffraction, full depth-dependent pressure, sailing aerodynamics,
+does not solve diffraction, full depth-dependent pressure, detailed sailing aerodynamics,
 wave-driven lateral motion, broaching, planing, or slamming.
 
 Speed changes position and therefore the waves encountered. Live pitch, roll, and
 heave remain visible in the panel. Their damped hull-pose model is unchanged; the
 new mass/inertia model applies to surge, with visual wakes, impact spray, and retained deck wash.
 
-URL options: `boat=1&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=2.4`.
-Run `node --test tests/boat.test.mjs` for the hull-response math checks.
+Sailing URL options: `view=ship&propulsion=sail&sailFore=1&sailMain=1&sailMizzen=1`.
+Sail targets are fractions from 0 to 1; shared links preserve them and the propulsion mode.
+Manual example: `boat=1&propulsion=manual&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=3.9`.
+The legacy `windDir` parameter remains the wind's travel angle in the world's X/Z plane;
+its source bearing in boat-heading coordinates is `(windDir - 90 + 360) % 360`.
+Run `node --test tests/boat.test.mjs tests/sailing.test.mjs` for the motion checks.
 
 ### Full sailing ship
 
@@ -320,8 +352,8 @@ actual sun and sky. Thin-sheet transmission produces a soft, warm glow around
 the backlighting sun; seams, hems, folds, and grazing light paths transmit less.
 Cloud shadows attenuate the glow. The fabric coefficients are authored visual
 approximations, and the canvas retains depth occlusion rather than becoming
-transparent to background geometry. Speed is still manually controlled; sail forces are not
-integrated into propulsion. Toggle **Show ship** or use `prow=0` to hide it.
+transparent to background geometry. Apparent wind and deployed canvas drive propulsion
+in Sailing mode. Toggle **Show ship** or use `prow=0` to hide it.
 **Hide** collapses the controls; camera selection remains visible. Geometry
 scales with boat length and beam. The ship has an independent world position
 and keeps its wave-following pose while the camera flies or orbits around it.

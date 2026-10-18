@@ -1214,7 +1214,7 @@ test('GPU rudder trailing edge and wheel agree with port and starboard steering'
       const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
       const B = GPUBufferUsage, size = points.length * 16;
       const buffer = (size, usage) => device.createBuffer({ size, usage });
-      const hull = buffer(96, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
+      const hull = buffer(144, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
       const output = buffer(size, B.STORAGE | B.COPY_SRC), read = buffer(size, B.MAP_READ | B.COPY_DST);
       device.queue.writeBuffer(input, 0, new Float32Array(points.flat()));
       const module = device.createShaderModule({ code: VESSEL_RIG + `
@@ -1274,7 +1274,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const vertices=new Float32Array(mesh),vertexBuffer=buffer(vertices.byteLength,B.VERTEX|B.COPY_DST);
       device.queue.writeBuffer(vertexBuffer,0,vertices);
       const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
-      const hullUBO=buffer(96,B.UNIFORM|B.COPY_DST);
+      const hullUBO=buffer(144,B.UNIFORM|B.COPY_DST);
       const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256});
       const module=await shader(SHADOW_SAMPLE+`
         @group(0) @binding(0) var<storage,read> points:array<vec4f>;
@@ -1340,6 +1340,106 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
     assert.ok(result.waterHidden.every(v=>v===1),'hidden vessel skips water shadowing');
     for(let i=0;i<result.moved.length;i++)assert.ok(Math.abs(result.moved[i]-result.overhead[i])<0.005,'translation retains the shadow');
     for(const values of [result.hidden,result.night])assert.ok(values.every(v=>v===1),'hidden/night shadows are disabled');
+  }finally{await page.close();}
+});
+
+test('GPU canvas furls independently, braces with its yards and keeps finite lighting normals', {timeout:60000}, async()=>{
+  const page=await browser.newPage();
+  try {
+    await page.route('**/__sail_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__sail_test`);
+    const result=await page.evaluate(async()=>{
+      const {VESSEL_RIG}=await import('/js/wgsl/vessel.js');
+      const {createCaravelMesh}=await import('/js/caravel.js');
+      const mesh=createCaravelMesh(),points=[];
+      for(let i=0;i<mesh.length;i+=27)if(mesh[i+6]%1!==0)points.push(...mesh.subarray(i,i+27));
+      const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
+      const hull=buffer(144,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
+      const output=buffer(n*32,B.STORAGE|B.COPY_SRC),read=buffer(n*32,B.MAP_READ|B.COPY_DST);
+      device.queue.writeBuffer(input,0,new Float32Array(points));
+      const module=device.createShaderModule({code:VESSEL_RIG+`
+        @group(0) @binding(0) var<uniform> hull:Hull;
+        @group(0) @binding(1) var<storage,read> points:array<f32>;
+        @group(0) @binding(2) var<storage,read_write> result:array<vec4f>;
+        @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) gid:vec3u){
+          let i=gid.x*9u;if(i+8u>=arrayLength(&points)){return;}
+          let v=rigVertex(vec3f(points[i],points[i+1u],points[i+2u]),vec3f(points[i+3u],points[i+4u],points[i+5u]),points[i+6u],vec2f(points[i+7u],points[i+8u]));
+          result[gid.x*2u]=vec4f(v.position*v.scale,1);result[gid.x*2u+1u]=vec4f(v.normal,0);
+        }`});
+      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
+      const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
+      const h=new Float32Array(36);h[12]=3.6;h[13]=12;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
+      const samples=[];let full;
+      for(const [set,yaw,tack] of [[[1,1,1],0,1],[[.5,.5,.5],0,1],[[0,0,0],0,1],[[0,1,1],0,1],[[1,1,1],.6,-1]]){
+        h.set(set,24);h[28]=yaw;h[29]=-yaw;h[35]=tack;device.queue.writeBuffer(hull,0,h);
+        const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(pipe);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(n/64));pass.end();
+        enc.copyBufferToBuffer(output,0,read,0,n*32);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const v=new Float32Array(read.getMappedRange()).slice();read.unmap();
+        if(!full)full=v;
+        const area=[0,0,0],motion=[0,0,0];let normalError=0,fixedError=0,yardHeightError=0;
+        for(let i=0;i<n;i++){
+          const material=points[i*9+6],base=Math.floor(material),tag=Math.round(material%1*16),id=tag&7,mast=Math.min(2,Math.floor((id-1)/2));
+          normalError=Math.max(normalError,Math.abs(Math.hypot(...v.subarray(i*8+4,i*8+7))-1));
+          const d=Math.hypot(...[0,1,2].map(j=>v[i*8+j]-full[i*8+j]));
+          if(base===9||base===13)motion[mast]=Math.max(motion[mast],d);
+          if(base===10)yardHeightError=Math.max(yardHeightError,Math.abs(v[i*8+1]-full[i*8+1]));
+          if((tag&8)&&points[i*9+1]<3)fixedError=Math.max(fixedError,Math.hypot(...[0,1,2].map(j=>v[i*8+j]-points[i*9+j])));
+          if(i%3===0&&(base===9||base===13)){
+            const a=[0,1,2].map(j=>v[(i+1)*8+j]-v[i*8+j]),b=[0,1,2].map(j=>v[(i+2)*8+j]-v[i*8+j]);
+            area[mast]+=.5*Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]);
+          }
+        }
+        samples.push({area,motion,normalError,fixedError,yardHeightError,finite:v.every(Number.isFinite)});
+      }
+      device.destroy();return {samples,errors};
+    });
+    assert.deepEqual(result.errors,[]);
+    const [full,reef,bare,fore,tack]=result.samples;
+    for(const sample of result.samples){assert.equal(sample.finite,true);assert.ok(sample.normalError<.001);assert.ok(sample.fixedError<1e-6);assert.ok(sample.yardHeightError<1e-6);}
+    for(let mast=0;mast<3;mast++){
+      assert.ok(reef.area[mast]>full.area[mast]*.3&&reef.area[mast]<full.area[mast]*.65,'reef reduces exposed canvas');
+      assert.ok(bare.area[mast]<full.area[mast]*.12,'bare poles retain only gathered cloth');
+      assert.ok(tack.motion[mast]>.5,'wind change rotates each sail group');
+    }
+    assert.ok(fore.motion[0]>2);assert.equal(fore.motion[1],0);assert.equal(fore.motion[2],0);
+  }finally{await page.close();}
+});
+
+test('sailing controls drive finite hull uniforms through startup, lowering and mode changes', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      // Exercise the complete application loop/UI without rasterizing hundreds of test frames.
+      GPURenderPassEncoder.prototype.draw=function(){};GPURenderPassEncoder.prototype.drawIndexed=function(){};
+      GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...args){
+        if(buffer.label==='hull transform')check.hull=Array.from(data);
+        return write.call(this,buffer,offset,data,...args);
+      };
+    });
+    await page.goto(`${origin}/?view=ship&windSpeed=7&w=32&h=32`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail');
+    assert.equal(await page.locator('#boat-speed').isVisible(),false);
+    const advance=async count=>page.evaluate(async count=>{
+      check.now??=0;
+      for(let i=0;i<count;i++){check.callback(check.now);check.now+=100;await check.device.queue.onSubmittedWorkDone();}
+      return check.hull;
+    },count);
+    let hull=await advance(1);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[1,1,1]);
+    await page.getByRole('button',{name:'Lower all',exact:true}).click();
+    hull=await advance(2);assert.ok(hull[24]>0&&hull[24]<1,'canvas does not disappear instantly');
+    hull=await advance(60);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[0,0,0]);
+    await page.getByRole('button',{name:'Reef 50%',exact:true}).click();
+    hull=await advance(35);assert.deepEqual(hull.slice(24,27),[.5,.5,.5]);
+    await page.locator('#boat-propulsion').selectOption('manual');
+    assert.equal(await page.locator('#boat-speed').isVisible(),true);assert.equal(await page.locator('#sail-controls').isVisible(),false);
+    hull=await advance(3);assert.ok(hull.every(Number.isFinite));
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
   }finally{await page.close();}
 });
 

@@ -5,10 +5,11 @@ import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
-import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT } from './hull.js';
+import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES } from './hull.js';
+import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from './boat.js';
-import { cameraModeFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
+import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -347,8 +348,8 @@ async function main() {
   oakPass.end(); device.queue.submit([oakEnc.finish()]); oakImage.close();
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
-  const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
-  const hullData = new Float32Array(24);
+  const hullUBO = mkBuf(HULL_UNIFORM_BYTES, GU.UNIFORM | GU.COPY_DST, 'hull transform');
+  const hullData = new Float32Array(HULL_UNIFORM_BYTES / 4);
   const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader});
   const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let bgCaravel;
@@ -579,9 +580,11 @@ async function main() {
     return qs.has(key) && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
   };
   let cameraMode = cameraModeFromLink(qs);
+  const propulsion = propulsionFromLink(qs);
   const boat = {
     effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
-    beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', 0, 0, 360),
+    beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
@@ -669,11 +672,12 @@ async function main() {
 
   function updateBoat(dt) {
     const steering = boat.enabled ? (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) : 0;
-    const distance = stepBoatSurge(boat, boatWaveSlope(boat, simTime), dt);
+    const distance = stepBoatSurge(boat, boatWaveSlope(boat, simTime), dt, P.windSpeed, P.windDir * D2R);
     const previousHeading = boat.heading * D2R, previousYaw = boat.yawRate;
     stepBoatSteering(boat, steering, dt);
     const heading = previousHeading + (previousYaw + boat.yawRate) * dt * 0.25;
     boat.x += Math.sin(heading) * distance; boat.z -= Math.cos(heading) * distance;
+    boat.x += Math.cos(heading) * boat.leewayDistance; boat.z += Math.sin(heading) * boat.leewayDistance;
     const response = Math.max(0.65, 4.5 / Math.sqrt(boat.length / 6));
     // Follow the measured water velocity, including short readback latency. A
     // held-target spring alone lags a rising swell by roughly two time constants.
@@ -681,7 +685,7 @@ async function main() {
     for(const key of boatAxes){
       const rate=age<0.25 && targetRevision===boat.revision?targetRate[key]:0;
       const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):response;
-      boatSpring(boat,key,boat.target[key]+rate*Math.min(age,0.25),omega,dt,rate);
+      boatSpring(boat,key,boat.target[key]+rate*Math.min(age,0.25)+(key==='roll'?boat.sailHeel:0),omega,dt,rate);
     }
   }
   function updateCamera(dt) {
@@ -949,6 +953,31 @@ async function main() {
     updateHelp();
   }
   updateHelp();
+  const propulsionRow=document.createElement('label');propulsionRow.textContent='Propulsion';
+  const propulsionInput=document.createElement('select');propulsionInput.id='boat-propulsion';
+  for(const [value,label] of [['sail','Sailing'],['manual','Set speed']]){
+    const option=document.createElement('option');option.value=value;option.textContent=label;propulsionInput.append(option);
+  }
+  propulsionInput.value=boat.propulsion;propulsionRow.append(propulsionInput);boatBody.append(propulsionRow);
+  const boatMotion = document.createElement('p'); boatMotion.id='boat-motion'; boatBody.append(boatMotion);
+  const sailControls=document.createElement('div');sailControls.id='sail-controls';boatBody.append(sailControls);
+  const sailInputs=[];
+  for(const [i,key] of SAIL_KEYS.entries()){
+    const row=document.createElement('label'),name=document.createElement('span');name.textContent=['Fore sails','Main sails','Mizzen sail'][i];
+    const input=document.createElement('input');Object.assign(input,{type:'range',min:0,max:100,step:5,value:boat[key]*100,id:'boat-'+key});
+    input.setAttribute('aria-label',name.textContent);
+    const output=document.createElement('output');output.textContent=Math.round(boat[key]*100)+'%';
+    input.addEventListener('input',()=>{boat[key]=Number(input.value)/100;});
+    row.append(name,input,output);sailControls.append(row);sailInputs.push({input,output});
+  }
+  const sailButtons=document.createElement('div');sailButtons.className='sail-buttons';
+  for(const [name,set] of [['Full sail',1],['Reef 50%',0.5],['Lower all',0]]){
+    const button=document.createElement('button');button.textContent=name;
+    button.onclick=()=>{for(const [i,key] of SAIL_KEYS.entries()){boat[key]=set;sailInputs[i].input.value=set*100;}};sailButtons.append(button);
+  }
+  sailControls.append(sailButtons);
+  const sailStatus=document.createElement('p');sailStatus.id='sail-status';sailControls.append(sailStatus);
+  let speedRow;
   for (const [key, label, min, max, step] of [
     ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
@@ -964,7 +993,15 @@ async function main() {
       if (key === 'length' || key === 'beam' || key === 'heading') boat.revision++;
     });
     row.append(name, input); boatBody.append(row);
+    if(key==='speed')speedRow=row;
   }
+  function showPropulsionControls(){
+    speedRow.hidden=boat.propulsion==='sail';sailControls.hidden=boat.propulsion!=='sail';
+    note.textContent=boat.propulsion==='sail'
+      ? 'Sails trim automatically. Reef in strong wind; lower all to coast. Waves and inertia continue to affect motion.'
+      : 'Waves change speed and hull motion. Set the calm-water speed above.';
+  }
+  propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
   const rudderRow = document.createElement('label');
   rudderRow.textContent = 'Rudder';
   const rudderInput = document.createElement('input');
@@ -979,8 +1016,7 @@ async function main() {
   centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
   boatBody.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
-  const boatMotion = document.createElement('p'); boatMotion.id='boat-motion'; boatBody.append(boatMotion);
-  const note = document.createElement('p'); note.textContent = 'Waves change speed and hull motion. Set the calm-water speed above.'; boatBody.append(note);
+  const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
@@ -1010,7 +1046,7 @@ async function main() {
   };
   seaBody.append(roughButton);
   const SLIDERS = [
-    ['windSpeed', 'Wind speed (m/s)', 2, 32, 0.1, 'spec'],
+    ['windSpeed', 'Wind speed (m/s)', 0, 32, 0.1, 'spec'],
     ['windDir', 'Wind direction (deg)', 0, 360, 1, 'spec'],
     ['fetchKm', 'Fetch (km)', 5, 800, 1, 'spec'],
     ['swellHs', 'Swell height (m)', 0, 10, 0.05, 'spec'],
@@ -1137,6 +1173,9 @@ async function main() {
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
       boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ≈ ${((boat.hydrodynamics?.mass || 0)/1000).toFixed(1)} t`;
+      const sails=sailingState(boat),angle=sails.apparentAngle/D2R;
+      sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set`;
+      for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.set[i]*100)+'%';
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
       if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
       rudderValue.textContent=boat.rudder.toFixed(1)+' deg';
@@ -1159,6 +1198,10 @@ async function main() {
     hullData[12] = boat.beam; hullData[13] = boat.length; hullData[14] = boat.eye; hullData[15] = boat.rudder;
     hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
     hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
+    const sails=sailingState(boat);
+    hullData.set(sails.set,24);hullData[28]=sails.squareYaw;hullData[29]=sails.lateenYaw;
+    hullData[30]=sails.squareFill;hullData[31]=sails.lateenFill;
+    hullData[32]=sails.windSide;hullData[33]=-sails.windForward;hullData[34]=sails.apparentSpeed;hullData[35]=sails.canvasTack;
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);

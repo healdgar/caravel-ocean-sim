@@ -39,7 +39,7 @@ test('complete vessel includes stern, submerged hull, five canvas panels, and a 
   const mesh=createCaravelMesh();
   const bounds=new Map();
   for(let i=0;i<mesh.length;i+=9){
-    const material=mesh[i+6];
+    const material=Math.floor(mesh[i+6]);
     if(!bounds.has(material))bounds.set(material,{minY:Infinity,maxY:-Infinity,minZ:Infinity,maxZ:-Infinity,count:0});
     const b=bounds.get(material);b.minY=Math.min(b.minY,mesh[i+1]);b.maxY=Math.max(b.maxY,mesh[i+1]);
     b.minZ=Math.min(b.minZ,mesh[i+2]);b.maxZ=Math.max(b.maxZ,mesh[i+2]);b.count++;

@@ -1,5 +1,6 @@
 import { hullDeck, hullHalfWidth, hullSurfacePoint, vesselDeck, WHEEL_CENTER,
   FORECASTLE_END, FORECASTLE_HEIGHT, QUARTERDECK_START, QUARTERDECK_HEIGHT } from './hull.js';
+import { SAIL_PLAN, LATEEN_CORNERS } from './sailing.js';
 
 // Deduplicate complete vertex records by their float32 bits. Material, normal,
 // UV seams and triangle order remain exact, including signed zero components.
@@ -301,7 +302,9 @@ export function createCaravelMesh() {
   }
 
   // Square rig: shaped canvas panels, yards, masts, stays, and shroud ladders.
-  function squareSail(z,top,w,h,belly){
+  // Fractional material bits identify moving sails without widening the vertex buffer.
+  function squareSail({id,z,top,width:w,height:h,belly}){
+    const tag=id/16,anchored=(id+8)/16;
     const columns=28,rows=20;
     const point=(u,v)=>{
       const sideShape=1.0-0.11*Math.sin(v*Math.PI)+0.025*v;
@@ -314,14 +317,14 @@ export function createCaravelMesh() {
     };
     for(let i=0;i<columns;i++)for(let j=0;j<rows;j++){
       const u=i/columns,U=(i+1)/columns,v=j/rows,V=(j+1)/rows;
-      quad(point(u,v),point(U,v),point(U,V),point(u,V),9,[normal(u,v),normal(U,v),normal(U,V),normal(u,V)],[[u,v],[U,v],[U,V],[u,V]]);
+      quad(point(u,v),point(U,v),point(U,V),point(u,V),9+tag,[normal(u,v),normal(U,v),normal(U,V),normal(u,V)],[[u,v],[U,v],[U,V],[u,V]]);
     }
-    tube([-w*0.56,top+0.035,z],[w*0.56,top+0.035,z],0.066,10,0.045,18);
-    for(const u of [0,1])for(let j=0;j<rows;j++)tube(point(u,j/rows),point(u,(j+1)/rows),0.013,12,0.013,8);
-    for(let i=0;i<columns;i++)tube(point(i/columns,1),point((i+1)/columns,1),0.014,12,0.014,8);
+    tube([-w*0.56,top+0.035,z],[w*0.56,top+0.035,z],0.066,10+tag,0.045,18);
+    for(const u of [0,1])for(let j=0;j<rows;j++)tube(point(u,j/rows),point(u,(j+1)/rows),0.013,12+tag,0.013,8);
+    for(let i=0;i<columns;i++)tube(point(i/columns,1),point((i+1)/columns,1),0.014,12+tag,0.014,8);
     for(const side of [-1,1]){
-      tube([side*w*0.5,top-h,z],[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],0.013,12,0.013,8);
-      tube([side*w*0.56,top,z],[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],0.011,12,0.011,8);
+      tube([side*w*0.5,top-h,z],[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],0.013,12+anchored,0.013,8);
+      tube([side*w*0.56,top,z],[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],0.011,12+anchored,0.011,8);
     }
   }
   const masts=[{z:-4.15,height:9.3,r:0.115},{z:0.85,height:11.5,r:0.15},{z:4.15,height:8.0,r:0.095}];
@@ -382,28 +385,26 @@ export function createCaravelMesh() {
   }
   torus([0,nestFloor+.4,nestZ],.76,.025,16,'y',48);
   torus([0,nestFloor+.72,nestZ],.8,.035,17,'y',48);
-  squareSail(-4.15,6.65,4.9,2.9,0.7);
-  squareSail(-4.15,8.85,3.25,1.5,0.42);
-  squareSail(0.85,8.0,5.9,3.25,0.88);
-  squareSail(0.85,10.9,3.95,1.65,0.52);
+  for(const sail of SAIL_PLAN)squareSail(sail);
   // Lateen mizzen: the long oblique yard defines the triangular silhouette.
   // The foot clears a standing helmsman on the quarterdeck.
-  const la=[0,8.05,5.9],lb=[0,4.5,2.6],lc=[1.1,4.15,6.3],resolution=26;
+  const [la,lb,lc]=LATEEN_CORNERS,resolution=26,lateenTag=5/16;
   const lateen=(u,v)=>{
     const p=add(la,add(mul(sub(lb,la),u),mul(sub(lc,la),v)));
     p[0]+=.8*27*u*v*(1-u-v);
     return p;
   };
   const ln=(u,v)=>norm(cross(sub(lateen(u+.0001,v),lateen(u-.0001,v)),sub(lateen(u,v+.0001),lateen(u,v-.0001))));
-  function lateenTri(points){tri(...points.map(([u,v])=>lateen(u,v)),13,points.map(([u,v])=>ln(u,v)),points);}
+  function lateenTri(points){tri(...points.map(([u,v])=>lateen(u,v)),13+lateenTag,points.map(([u,v])=>ln(u,v)),points);}
   for(let i=0;i<resolution;i++)for(let j=0;j<resolution-i;j++){
     const u=i/resolution,v=j/resolution,d=1/resolution;
     lateenTri([[u,v],[u+d,v],[u,v+d]]);
     if(i+j<resolution-1)lateenTri([[u+d,v],[u+d,v+d],[u,v+d]]);
   }
-  tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10,.045,18);
-  for(const [a,b] of [[la,lb],[lb,lc],[lc,la]])tube(a,b,.015,12,.015,10);
-  tube(lc,[1.1,roof+.3,5.5],.016,12,.016,8);
-  tube([0,7.6,4.15],la,.014,12,.014,8);
+  tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10+lateenTag,.045,18);
+  for(const [a,b] of [[la,lb],[lb,lc],[lc,la]])tube(a,b,.015,12+lateenTag,.015,10);
+  tube(lc,[1.1,roof+.3,5.5],.016,12+13/16,.016,8);
+  // The halyard's mast end stays fixed; its yard end rotates with the lateen.
+  tube([0,7.6,4.15],la,.014,12+13/16,.014,8);
   return new Float32Array(out);
 }

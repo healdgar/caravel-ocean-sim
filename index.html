@@ -30,6 +30,11 @@
   #boat-panel input[type=number] { width: 76px; background: #172532; color: #fff; border: 1px solid #71818d; border-radius: 4px; padding: 5px; }
   #boat-panel input[type=checkbox] { width: 20px; height: 20px; accent-color: #e2a04e; }
   #boat-rudder { width:100px; accent-color:#e2a04e; }
+  #sail-controls input[type=range] { width:100px; min-width:0; accent-color:#e2a04e; }
+  #boat-propulsion { background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
+  #boat-panel [hidden] { display:none; }
+  .sail-buttons { display:flex; flex-wrap:wrap; gap:5px; }
+  #boat-panel .sail-buttons button { margin:0; flex:1; padding:7px 6px; }
   #boat-panel output { min-width:45px; font-size:11px; text-align:right; }
   #boat-panel button { margin-right:6px; }
   #boat-panel p { font-size: 11px; opacity: .8; margin: 8px 0 0; }
@@ -71,9 +76,10 @@
     #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
     #panel input { width:100%; min-width:0; height:44px; }
     #boat-panel label { min-height:44px; margin:6px 0; }
-    #boat-panel input[type=number], #render-resolution, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
+    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
     #boat-panel input[type=number] { width:90px; }
     #boat-rudder { height:44px; min-width:0; }
+    #sail-controls input[type=range], #boat-propulsion { min-height:44px; }
     #boat-panel input[type=checkbox] { width:24px; height:24px; }
     #share-panel { grid-column:1/-1; width:100%; max-height:30dvh; overflow:auto; }
     #gpu-profile { grid-column:1/-1; position:static; width:100%; max-width:none; font-size:10px; }
