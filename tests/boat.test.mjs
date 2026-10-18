@@ -21,6 +21,14 @@ test('damping is frame-rate independent for a held wave target', () => {
   assert.ok(Math.abs(a.heave - b.heave) < 1e-12);
   assert.ok(a.heave > 0 && a.heave < 2);
 });
+test('a rising water plane is followed without permanent spring lag', () => {
+  for(const dt of [1/30,1/120]){
+    const state={heave:0};
+    for(let i=0;i<Math.round(4/dt);i++)boatSpring(state,'heave',i*dt,3,dt,1);
+    assert.ok(Math.abs(state.heave-4)<0.001);
+    assert.ok(Math.abs(state.heaveVelocity-1)<0.001);
+  }
+});
 test('heading and pitch orient the camera along the boat', () => {
   const out = new Float64Array(3);
   boatRotate(out, 0, 0, -1, Math.PI / 2, 0, 0);

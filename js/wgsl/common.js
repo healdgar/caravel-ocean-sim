@@ -28,7 +28,7 @@ struct Frame {
   sssCol:   vec4f,     // sss colour rgb, sss strength
   foamP:    vec4f,     // J threshold, J gain, foam intensity, lace sharpness
   fogExt:   vec4f,     // rgb extinction per metre near sea level
-  cloudP:   vec4f,     // altitude km, coverage, optical density, wind time
+  reserved: vec4f,     // padding preserves the 384-byte frame layout
 };
 `;
 

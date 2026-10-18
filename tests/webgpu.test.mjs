@@ -365,6 +365,88 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
   } finally { await page.close(); }
 });
 
+test('deck overtopping retains water, flows downhill, drains, and dries independently', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__deck_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__deck_test`);
+    const result=await page.evaluate(async()=>{
+      const {createDeckWash}=await import('/js/deck.js');
+      const {DECK_COLS:W,DECK_ROWS:H}=await import('/js/wgsl/deck.js');
+      const {boatRotate}=await import('/js/boat.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,T=GPUTextureUsage;
+      const buffer=size=>device.createBuffer({size,usage:B.UNIFORM|B.COPY_DST});
+      const frameUBO=buffer(384),hullUBO=buffer(96),uniform=buffer(64);
+      const f=new Float32Array(96);f.fill(1,48,54);device.queue.writeBuffer(frameUBO,0,f);
+      const h=new Float32Array(24);h[0]=h[5]=1;h[10]=-1;h[12]=3.6;h[13]=12;h[22]=1;
+      const u=new Float32Array(16);u[9]=1;
+      const sea=device.createTexture({size:[1,1,6],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      const env=device.createTexture({size:[32,32,6],mipLevelCount:6,format:'rgba16float',usage:T.TEXTURE_BINDING});
+      const trans=device.createTexture({size:[1,1],format:'rgba16float',usage:T.TEXTURE_BINDING});
+      const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
+      const shader=async(code,label)=>{
+        const module=device.createShaderModule({code,label});
+        const info=await module.getCompilationInfo();
+        const bad=info.messages.filter(m=>m.type==='error');if(bad.length)throw new Error(bad.map(m=>m.message).join('\n'));
+        return module;
+      };
+      const computePipe=async(code,label)=>device.createComputePipelineAsync({layout:'auto',compute:{module:await shader(code,label),entryPoint:'main'}});
+      const deck=await createDeckWash({device,frameUBO,hullUBO,uniform,seaView:sea.createView({dimension:'2d-array'}),seaSampler:sampler,envView:env.createView({dimension:'cube'}),transView:trans.createView(),shader,computePipe});
+      const seaHeight=half=>device.queue.writeTexture({texture:sea},new Uint16Array([0,half,0,0]),{bytesPerRow:8},[1,1,1]);
+      async function advance(n,dt=1/60,reset=false){
+        u[6]=dt;u[7]=reset?1:0;device.queue.writeBuffer(uniform,0,u);device.queue.writeBuffer(hullUBO,0,h);
+        // Every submission advances exactly four bounded water substeps.
+        for(let i=0;i<n;i++){
+          const enc=device.createCommandEncoder(),cp=enc.beginComputePass();deck.encode(cp);cp.end();device.queue.submit([enc.finish()]);
+        }
+        await device.queue.onSubmittedWorkDone();
+      }
+      async function read(){
+        const size=W*H*16,read=device.createBuffer({size,usage:B.COPY_DST|B.MAP_READ});
+        const enc=device.createCommandEncoder();enc.copyTextureToBuffer({texture:deck.textures[0]},{buffer:read,bytesPerRow:W*16},[W,H]);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const a=new Float32Array(read.getMappedRange().slice(0));read.unmap();read.destroy();
+        let water=0,wet=0,drain=0,center=0,moment=0,roof=0,max=0,finite=true;
+        for(let i=0;i<W*H;i++){
+          const z=(Math.floor(i/W)+0.5)/H*11.9-6.3,x=i%W;
+          const width=Math.max(0.04,1.8*Math.sqrt(Math.max(0.0006,1-(z<0?-z/6.4:z/7.4)**2))-0.04);
+          const volume=a[i*4]*2*width/W*11.9/H;
+          water+=volume;wet+=a[i*4+2];drain+=Math.max(0,a[i*4+3]);
+          moment+=(x/(W-1)*2-1)*volume;max=Math.max(max,a[i*4]);
+          if(x>10 && x<22)center+=volume;if(z>=2.7)roof+=volume;
+        }
+        for(const n of a)finite&&=Number.isFinite(n);
+        return{water,wet,drain,center,moment,roof,max,finite};
+      }
+      await advance(1,1/60,true);seaHeight(0x3c00);await advance(60);const belowRail=await read();
+      seaHeight(0x4000);await advance(120);const flooded=await read(); // two-metre crest
+      seaHeight(0);await advance(1);const retained=await read();
+      boatRotate(h.subarray(0,3),1,0,0,0,0,0.22);boatRotate(h.subarray(4,7),0,1,0,0,0,0.22);boatRotate(h.subarray(8,11),0,0,-1,0,0,0.22);
+      await advance(90);const tilted=await read();
+      await advance(600);const drained=await read();
+      await advance(1800);const drying=await read();
+      u[9]=0;await advance(1);const disabled=await read();u[9]=1;
+      // The frame limit used during slow rendering still yields finite bounded water.
+      seaHeight(0x4800);await advance(30,0.1);const submerged=await read();
+      await advance(1,1/60,true);const reset=await read();
+      device.destroy();return{belowRail,flooded,retained,tilted,drained,drying,disabled,submerged,reset,errors};
+    });
+    assert.deepEqual(result.errors,[]);
+    assert.equal(result.belowRail.water,0,'water below the bulwark must not seep through the hull');
+    assert.ok(result.flooded.water>0.1 && result.flooded.center>0.01,'overtopping must travel into the deck');
+    assert.equal(result.flooded.roof,0,'a lower crest must not flood the raised quarterdeck');
+    assert.ok(result.retained.water>result.flooded.water*0.8,'the deck must retain wash after the sea recedes');
+    assert.ok(result.tilted.drain>0,'scupper outflow drives runoff strips');
+    assert.ok(result.tilted.moment<0,'wash moves toward the low port rail');
+    assert.ok(result.drained.water<result.retained.water*0.3,`water drains between encounters: ${JSON.stringify(result)}`);
+    assert.ok(result.drained.wet>10,'wet timber outlasts standing water');
+    assert.ok(result.drying.wet<result.drained.wet*0.9,'wetness must eventually dry instead of rounding to a permanent film');
+    assert.ok(result.submerged.finite && result.submerged.max<=1.201,'deep immersion stays bounded at low frame rates');
+    assert.equal(result.disabled.water,0);assert.equal(result.reset.water,0);assert.equal(result.reset.wet,0);
+  }finally{await page.close();}
+});
+
 test('foam forms at breaking compression, stays bounded, and clears between crests', {timeout:120000}, async()=>{
   const page=await browser.newPage();
   try{
@@ -377,8 +459,8 @@ test('foam forms at breaking compression, stays bounded, and clears between cres
       const code=FOAM_MODEL+`@group(0) @binding(0) var<storage,read_write> out:array<vec4f>;
       @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
         let dt=select(1.0/30.0,1.0/120.0,id.x==1u); let steps=u32(round(8.0/dt));
-        let calm=breakingCompression(-0.3,0.0,0.0,0.15);
-        let crest=breakingCompression(-1.5,0.0,0.0,0.15);
+        let calm=breakingCompression(-0.3,0.0,0.0,0.45);
+        let crest=breakingCompression(-1.5,0.0,0.0,0.45);
         var f=0.0;for(var i=0u;i<steps;i++){f=foamCoverage(f,crest,1.7,0.85,dt);}
         let peak=f;for(var i=0u;i<u32(round(3.0/dt));i++){f=foamCoverage(f,calm,1.7,0.85,dt);}
         out[id.x]=vec4f(calm,crest,peak,f);
@@ -403,12 +485,18 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
   const page = await browser.newPage({ viewport: { width: 64, height: 48 } });
   try {
     await page.addInitScript(instrumentRenderer);
-    await page.goto(`${origin}/?prow=0&cam=0,30,0,0,-5.5&shot=test.png&frames=100000`);
+    // Scheduling is checked with clear volumes; the focused cloud fixture below
+    // exercises populated raymarching without full 256px reflection faces on a CPU GPU.
+    await page.goto(`${origin}/?prow=0&clouds=0&cam=0,30,0,0,-5.5&shot=test.png&frames=100000`);
     await page.waitForFunction(() => check.callback, undefined, { polling: 100, timeout: 120000 });
     let frame = await step(page);
     assert.equal(frame.compute.skyview.length, 1);
     assert.equal(frame.compute['env cube'][0][2], 6);
     assert.ok(frame.compute['cube mips'].every(d => d[2] === 6));
+    assert.equal(frame.compute['cloud density'].length, 1);
+    assert.equal(frame.compute['cloud lighting'].length, 1);
+    assert.equal(frame.compute['cloud rays'].length, 1);
+    assert.equal(frame.compute['cloud resolve'].length, 1);
     assert.equal(frame.render['bloom down'], 6); // 32 x 24 supports six mip levels.
     assert.equal(frame.render['bloom up'], 5);
 
@@ -418,12 +506,17 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['sim init'], undefined);
     assert.equal(frame.compute['sim evolve'], undefined);
     assert.equal(frame.compute['height probe'], undefined);
+    assert.equal(frame.compute['cloud density'], undefined);
+    assert.equal(frame.compute['cloud lighting'], undefined);
+    assert.equal(frame.compute['cloud rays'].length, 1);
     assert.equal(frame.compute['env cube'][0][2], 1);
     assert.ok(frame.compute['cube mips'].every(d => d[2] === 1));
 
     await slider(page, 'Sun azimuth', 25);
     frame = await step(page);
     assert.equal(frame.compute.skyview, undefined); // The LUT is relative to the sun.
+    assert.equal(frame.compute['cloud density'], undefined);
+    assert.equal(frame.compute['cloud lighting'].length, 1);
     assert.equal(frame.compute['env cube'][0][2], 6);
 
     await slider(page, 'Sun elevation', 10);
@@ -454,6 +547,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     await page.setViewportSize({ width: 1, height: 1 });
     frame = await step(page);
     assert.equal(frame.compute['sim init'].length, 1);
+    assert.equal(frame.compute['cloud density'], undefined, 'wind advects the material instead of rebuilding it');
     assert.equal(frame.compute['height probe'].length, 1);
     assert.equal(frame.render['bloom down'], 1);
     assert.equal(frame.render['bloom up'], undefined);
@@ -472,7 +566,90 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
   } finally { await page.close(); }
 });
 
-for (const bundle of ['ocean.html', 'ocean.min.html']) {
+test('volumetric clouds clear, occlude, advect, and invalidate temporal history', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__cloud_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__cloud_test`);
+    const result=await page.evaluate(async()=>{
+      const {createVolumetricClouds}=await import('/js/clouds.js');
+      const {FRAME_WGSL,ATMO_CORE_WGSL}=await import('/js/wgsl/common.js');
+      const {SKY_RENDER_FUNCS}=await import('/js/wgsl/sky.js');
+      const {CLOUD_SAMPLE}=await import('/js/wgsl/clouds.js');
+      const device=await (await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const computePipe=async(code,label)=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:device.createShaderModule({code}),entryPoint:'main'}});
+      const frameUBO=device.createBuffer({size:384,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+      const lut=device.createTexture({size:[1,1],format:'rgba16float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
+      device.queue.writeTexture({texture:lut},new Uint16Array([0x3c00,0x3c00,0x3c00,0x3c00]),{bytesPerRow:8},[1,1]);
+      const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
+      const clouds=await createVolumetricClouds({device,frameUBO,transView:lut.createView(),skyView:lut.createView(),sampler,computePipe,fieldSize:[32,16,32]});
+      const settings={clouds:0,cloudBase:1,cloudDepth:2,cloudDensity:1,cloudAnvil:0.8,cloudQuality:0.5,haze:3};
+      const f=new Float32Array(96);f[17]=2;
+      // Look upward through the layer. A camera-relative projection supplies
+      // real history coordinates, including rotation and perspective divide.
+      f[0]=2;f[7]=1;f[9]=2;f[14]=0.1;
+      f[20]=0.5;f[26]=0.5;f[29]=1;f[33]=1;f[35]=14;
+      f[36]=64;f[37]=48;f[38]=1/64;f[39]=1/48;f[56]=1;f[58]=20;f[72]=3;f[73]=0.01;
+      const half=b=>{const e=(b>>10)&31,m=b&1023;return (b&32768?-1:1)*(e===31?(m?NaN:Infinity):e?(1+m/1024)*2**(e-15):m*2**-24);};
+      async function read(texture){
+        const row=Math.ceil(texture.width*8/256)*256;
+        const buffer=device.createBuffer({size:row*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+        const enc=device.createCommandEncoder();enc.copyTextureToBuffer({texture},{buffer,bytesPerRow:row},[texture.width,texture.height]);device.queue.submit([enc.finish()]);
+        await buffer.mapAsync(GPUMapMode.READ);const src=new Uint16Array(buffer.getMappedRange());const out=[];
+        for(let y=0;y<texture.height;y++)for(let x=0;x<texture.width;x++)for(let c=0;c<4;c++)out.push(half(src[y*row/2+x*4+c]));
+        buffer.unmap();buffer.destroy();return out;
+      }
+      async function advance(dt=1/60){
+        f[70]++;device.queue.writeBuffer(frameUBO,0,f);clouds.update(f,settings,dt);
+        const history=clouds.historyValid;const enc=device.createCommandEncoder(),pass=enc.beginComputePass();clouds.encode(pass);pass.end();device.queue.submit([enc.finish()]);
+        await device.queue.onSubmittedWorkDone();return history;
+      }
+      await advance();const clear=await read(clouds.output);
+      settings.clouds=0.9;const coverageReset=await advance();const cloudy=await read(clouds.output);
+      const accumulated=await advance();
+      settings.cloudDensity=2;const densityReset=await advance();const dense=await read(clouds.output);
+      await advance(20);const moved=await read(clouds.output);
+      // Same volume / optical law powers the sunlight and reflected rays.
+      const visibility=await computePipe(FRAME_WGSL+ATMO_CORE_WGSL+`
+        @group(0) @binding(0) var<uniform> F:Frame;
+        @group(0) @binding(1) var transLUT:texture_2d<f32>;
+        @group(0) @binding(2) var skyLUT:texture_2d<f32>;
+        @group(0) @binding(3) var sampC:sampler;
+        @group(0) @binding(4) var<storage,read_write> result:array<f32>;
+      `+SKY_RENDER_FUNCS+CLOUD_SAMPLE+`
+        @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
+          let origin=vec3f(f32(id.x%8u)*2.0-7.0,0.002,f32(id.x/8u)*2.0-3.0);
+          result[id.x]=volumeSunVisibility(origin,vec3f(0,1,0));
+        }
+      `,'test cloud sunlight');
+      const output=device.createBuffer({size:128,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+      const readback=device.createBuffer({size:128,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+      const visGroup=device.createBindGroup({layout:visibility.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:output}}]});
+      const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(visibility);pass.setBindGroup(0,visGroup);pass.setBindGroup(1,clouds.bindVolume(visibility,true));pass.dispatchWorkgroups(32);pass.end();enc.copyBufferToBuffer(output,0,readback,0,128);device.queue.submit([enc.finish()]);
+      await readback.mapAsync(GPUMapMode.READ);const sun=new Float32Array(readback.getMappedRange()).reduce((a,b)=>a+b,0)/32;readback.unmap();
+      f[36]=1;f[37]=1;const resized=await advance();const tiny=await read(clouds.output);
+      f[16]=1000;const teleported=await advance();settings.clouds=0;await advance();const cleared=await read(clouds.output);
+      const meanAlpha=v=>v.filter((_,i)=>i%4===3).reduce((a,b)=>a+b,0)/(v.length/4);
+      const diff=dense.reduce((sum,v,i)=>sum+Math.abs(v-moved[i]),0)/dense.length;
+      clouds.destroy();device.destroy();
+      return {errors,clear:meanAlpha(clear),cloudy:meanAlpha(cloudy),dense:meanAlpha(dense),cleared:meanAlpha(cleared),diff,sun,
+        coverageReset,densityReset,accumulated,resized,teleported,tiny:tiny.length,finite:[...clear,...cloudy,...dense,...moved,...tiny].every(Number.isFinite)};
+    });
+    assert.deepEqual(result.errors,[]);
+    assert.ok(result.finite);
+    assert.equal(result.clear,0);assert.equal(result.cleared,0);
+    assert.ok(result.cloudy>0.05,JSON.stringify(result));
+    assert.ok(result.dense>=result.cloudy,'greater optical density must not make clouds transparent');
+    assert.ok(result.diff>0.005,'wind changes the visible material');
+    assert.ok(result.sun>=0 && result.sun<1,'the same volume occludes direct sunlight');
+    assert.equal(result.accumulated,true);
+    for(const key of ['coverageReset','densityReset','resized','teleported'])assert.equal(result[key],false,key);
+    assert.equal(result.tiny,4);
+  }finally{await page.close();}
+});
+
+for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
   test(`${bundle} initializes all JavaScript and WGSL pipelines`, { timeout: 120000 }, async () => {
     const page = await browser.newPage();
     const errors = [];

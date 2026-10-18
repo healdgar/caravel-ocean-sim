@@ -1,6 +1,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
+import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
+export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -14,7 +15,8 @@ struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4
 @group(0) @binding(9) var repeatSamp: sampler;
 @group(0) @binding(10) var oakAlbedo: texture_2d<f32>;
 @group(0) @binding(11) var oakSampler: sampler;
-` + SKY_RENDER_FUNCS + /* wgsl */ `
+@group(0) @binding(12) var deckWater: texture_2d<f32>;
+` + SKY_RENDER_FUNCS + DECK_SAMPLING + /* wgsl */ `
 struct BoatVertex {
   @builtin(position) pos: vec4f,
   @location(0) world: vec3f,
@@ -106,6 +108,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   n = normalize(n - clamp(gradient,vec3f(-0.12),vec3f(0.12)) * select(1.0,0.1,in.material == 3u || in.material == 8u));
   var albedo = timber * vec3f(1.08,0.94,0.74);
   var rough = clamp(0.74 + (0.2-relief)*0.18,0.64,0.85); var metal = 0.0;
+  var canvasDepth=1.0;
   let plank = floor((p.x+1.8)/0.18);
   albedo *= 0.82 + 0.2 * fract(sin(plank*74.17)*4321.1);
   // Fine end-grain joints, splits, and oxidised grain.
@@ -115,6 +118,10 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
   let clothAA=max(fwidth(clothSeam),0.001);
   let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
+  let squareEdge=min(min(in.uv.x,1.0-in.uv.x),min(in.uv.y,1.0-in.uv.y));
+  let triangleEdge=min(min(in.uv.x,in.uv.y),(1.0-in.uv.x-in.uv.y)*0.70710678);
+  let clothEdge=select(squareEdge,triangleEdge,in.material==13u);
+  let edgeAA=max(fwidth(clothEdge),0.0005);
   if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
   if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= 0.8; rough = 0.67; }
   let ropeAA=fwidth(p.x+p.y+p.z);
@@ -127,8 +134,13 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   if(in.material == 9u || in.material == 13u) {
     let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
-    let seam=mix(0.78,1.0,smoothstep(0.004,0.013+clothAA,clothSeam));
-    albedo=vec3f(0.74,0.70,0.57)*aged*seam*(1.0+0.025*weave);
+    let seam=1.0-smoothstep(0.004,0.013+clothAA,clothSeam);
+    let hem=1.0-smoothstep(0.006,0.014+edgeAA,clothEdge);
+    let fold=pow(0.5+0.5*cos(in.uv.x*62.83185+sin(in.uv.y*9.0)*0.35),8.0);
+    // Optical depth: overlapped stitching and doubled edge cloth block more
+    // light. Broad folds and filtered weave avoid a uniformly luminous sheet.
+    canvasDepth=1.0+0.95*seam+0.85*hem+0.18*fold+0.035*weave;
+    albedo=vec3f(0.58,0.55,0.48)*aged*(1.0-0.12*seam-0.08*hem)*(1.0+0.025*weave);
     n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
   }
   if(in.material == 11u) { albedo=vec3f(0.018,0.035,0.033); rough=0.3; metal=0.25; }
@@ -140,6 +152,10 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   if(in.material == 16u) { albedo=timber*vec3f(0.13,0.12,0.10); rough=0.85; }
   if(in.material == 17u) { albedo=timber*vec3f(1.3,1.02,0.62); rough=0.62; }
+  if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){
+    let deckWet=sampleDeck(deckUV(p)).z;
+    albedo*=mix(1.0,0.52,deckWet);rough=mix(rough,0.28,deckWet);
+  }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
   let nh=clamp(dot(n,h),0.0,1.0); let vh=clamp(dot(v,h),0.0,1.0);
@@ -163,18 +179,33 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     shade=mix(1.0,0.05,smoothstep(edge-0.08,edge+0.04,abs(atRail)));
   }
   let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*shade;
-  let sky=textureSampleLevel(envCube,sampC,n,${ENV_MIPS - 1}.0).rgb;
+  // The last cube mip is a face average, not diffuse irradiance. Sampling it
+  // along a vertical timber normal mixes in the sea, then counts that green
+  // light again below. Use separate sky/sea hemispheres and their projected
+  // visibility instead; keep directional ocean reflections in the specular term.
+  let sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
   let reflected=waterLight(in.world,reflect(-v,n),rough);
   let bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9);
-  let ambient=sky*(0.65+0.35*max(n.y,0.0))+bounce*0.22*(1.0-max(n.y,0.0));
+  let skyVisibility=0.5+0.5*n.y;
+  let ambient=sky*skyVisibility+bounce*0.22*(1.0-skyVisibility);
   let ao=mix(0.65,1.0,smoothstep(0.72,1.5,p.y));
   let spec=d*g*fresnel/(4.0*nv*max(nl,0.001));
   var col=(albedo*(1.0-metal)/PI+spec)*direct*nl;
   col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*(f0+(1.0-f0)*(fv2*fv2*fv))*(1.0-rough*0.45);
   if(in.material == 9u || in.material == 13u) {
     let through=max(dot(-n,l),0.0);
-    col+=albedo*sunIlluminance()*sunVis[0]*through*0.28;
-    col+=albedo*sky*0.12;
+    // Thin canvas transmits light without revealing the background. Beer
+    // attenuation makes grazing rays and doubled cloth denser; blue absorption
+    // gives unbleached canvas a warm glow. These are authored, not measured,
+    // fabric coefficients. The view-facing normal makes both sides equivalent.
+    let opticalDepth=vec3f(0.90,1.15,1.60)*canvasDepth;
+    let transmitted=exp(-opticalDepth/max(through,0.12));
+    let alignment=max(dot(-v,l),0.0);
+    // A diffuse lobe plus a broad, normalized forward lobe around the sun.
+    let scatter=0.70/PI+0.30*(34.0/(2.0*PI))*pow(alignment,32.0);
+    col+=direct*transmitted*through*scatter;
+    let behind=sky*(1.0-skyVisibility)+bounce*0.22*skyVisibility;
+    col+=behind*exp(-opticalDepth)*0.7;
   }
   let fog=exp(-F.fogExt.rgb*length(in.world-F.camPos.xyz));
   col=col*fog+skyAtmo(normalize(vec3f(in.world.x-F.camPos.x,0.05,in.world.z-F.camPos.z)))*(1.0-fog);

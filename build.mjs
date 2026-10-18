@@ -11,14 +11,15 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/interaction.js', 'js/wgsl/sim.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js'];
-const order = ['js/hull.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/sharing.js', 'js/interaction.js', 'js/main.js'];
+const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/interaction.js', 'js/wgsl/deck.js', 'js/wgsl/sim.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js'];
+const order = ['js/hull.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/sharing.js', 'js/deck.js', 'js/interaction.js', 'js/clouds.js', 'js/main.js'];
 const stripModuleSyntax = (src) => src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
   .replaceAll("'assets/caravel-oak-albedo.webp'", () => JSON.stringify('data:image/webp;base64,' + fs.readFileSync(path.join(root, 'assets/caravel-oak-albedo.webp')).toString('base64')));
 
-const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const notices = fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8');
+const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace('</head>', () => '<!--\n' + notices + '\n-->\n</head>');
 const SCRIPT_TAG = '<script type="module" src="js/main.js"></script>';
 const write = (name, html) => {
   fs.writeFileSync(path.join(root, name), html);
@@ -58,7 +59,9 @@ for (const f of wgslModules) minJs += stripModuleSyntax(minifyTemplates(fs.readF
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/boat.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/caravel.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sharing.js'), 'utf8'));
+minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/deck.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/interaction.js'), 'utf8'));
+minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/clouds.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/main.js'), 'utf8'));
 
 function findEsbuild() {

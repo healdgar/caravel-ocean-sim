@@ -29,7 +29,7 @@ fn wakeAt(p: vec2f) -> vec4f {
   return textureSampleLevel(wakeTex, wakeSamp, uv, 0.0) * (1.0 - smoothstep(0.45, 0.495, edge)) * I.motion.y;
 }
 `;
-const INTERACTION_SEA = /* wgsl */ `
+export const INTERACTION_SEA = /* wgsl */ `
 fn interactionDisp(p: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {

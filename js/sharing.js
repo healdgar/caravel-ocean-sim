@@ -7,6 +7,7 @@ const BOAT_LINK_KEYS = {
 export const ROUGH_SEAS = {
   windSpeed: 28, windDir: 123, fetchKm: 300,
   swellHs: 8, swellLength: 95, swellDir: 236, choppy: 1.6, foam: 1.7,
+  clouds: 0.88, cloudBase: 0.85, cloudDepth: 4.2, cloudDensity: 1.3, cloudAnvil: 0.9, haze: 5,
 };
 
 export function cameraModeFromLink(search) {

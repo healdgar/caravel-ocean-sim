@@ -1,9 +1,11 @@
 // GPU-owned bow contacts, a moving local wake grid, and fixed-capacity spray.
 import { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT, SHEET_UPDATE, WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
+import { createDeckWash } from './deck.js';
 
-export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, shader, computePipe }) {
+export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, sunVis, shader, computePipe }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
+  const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe});
   const contacts = device.createBuffer({ label: 'hull contacts', size: 32 * 64, usage: bu.STORAGE | bu.COPY_SRC });
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
@@ -39,7 +41,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const values = new Float32Array(16);
   let current = 0, prevX = 0, prevZ = 0, previousExtent = 0, previousRevision = -1, wasEnabled = false, enabled = false, needsClear = true;
   return {
-    uniform, views, sampler, contacts, drops, sheets, textures, landings,
+    uniform, views, sampler, contacts, drops, sheets, textures, landings, deck,
     get current() { return current; },
     update(boat, dt, time, frame, windSpeed, windDir, resetSea = false) {
       enabled = boat.showProw && boat.effects !== false;
@@ -57,6 +59,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     encode(cp) {
       if (!enabled && !needsClear) return;
       needsClear = enabled;
+      deck.encode(cp);
       cp.setPipeline(contactPipe); cp.setBindGroup(0, contactGroup); cp.dispatchWorkgroups(1);
       cp.setPipeline(sheetPipe); cp.setBindGroup(0,sheetGroup); cp.dispatchWorkgroups(SHEET_COUNT/64);
       // Landing cells use the current domain and are consumed immediately by the wake pass.
@@ -66,6 +69,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     },
     draw(pass) {
       if (!enabled) return;
+      deck.draw(pass);
       pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[0]); pass.draw(8*10*6,SHEET_COUNT);
       pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[1]); pass.draw(6, SPRAY_COUNT);
     },

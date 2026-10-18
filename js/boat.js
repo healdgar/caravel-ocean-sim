@@ -9,13 +9,14 @@ export function boatTargets(heights, length, beam) {
 }
 
 // Exact critically damped spring step: stable even when frame rate varies.
-export function boatSpring(state, key, target, omega, dt) {
+export function boatSpring(state, key, target, omega, dt, targetVelocity = 0) {
   const velocity = key + 'Velocity';
   const offset = state[key] - target;
-  const c = (state[velocity] || 0) + omega * offset;
+  const relativeVelocity = (state[velocity] || 0) - targetVelocity;
+  const c = relativeVelocity + omega * offset;
   const decay = Math.exp(-omega * dt);
-  state[key] = target + (offset + c * dt) * decay;
-  state[velocity] = ((state[velocity] || 0) - omega * c * dt) * decay;
+  state[key] = target + targetVelocity * dt + (offset + c * dt) * decay;
+  state[velocity] = targetVelocity + (relativeVelocity - omega * c * dt) * decay;
 }
 
 // Transform a local look vector by hull roll, pitch, then compass heading.

@@ -1,3 +1,4 @@
+import { createVolumetricClouds } from './clouds.js';
 import { createWaterInteraction } from './interaction.js';
 import { createCaravelMesh, WHEEL_CENTER } from './caravel.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -37,8 +38,12 @@ export const P = {
   sunAzim: 4,          // deg (0 = straight ahead of the start view)
   exposure: 1.35,
   haze: 3.0,
-  clouds: 0.40,
-  veil: 0.36,
+  clouds: 0.55,
+  cloudBase: 1.5,     // km
+  cloudDepth: 2.2,    // km
+  cloudDensity: 1.0,
+  cloudAnvil: 0.15,
+  cloudQuality: 0.5, // ray resolution fraction, capped at 1280 x 720
   bloom: 0.10,
 };
 const CASC_L = [1103.0, 211.3, 39.7, 7.43, 1.393, 0.2617];
@@ -235,8 +240,10 @@ async function main() {
   const bgTrans = bg(transPipe, [{ buffer: atmoUBO }, transView], 'trans');
   const bgMS = bg(msPipe, [{ buffer: atmoUBO }, transView, sampClamp, msView], 'ms');
   const bgSkyView = bg(skyViewPipe, [{ buffer: frameUBO }, transView, msView, sampClamp, skyView], 'skyview');
-  const bgEnv = bg(envPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, lvl(envTex, 0)], 'env');
-  const bgSunVis = bg(sunVisPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, { buffer: sunVisBuf }], 'sunvis');
+  const bgEnv = bg(envPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, lvl(envTex, 0), { buffer: sunVisBuf }], 'env');
+  const bgSunVis = device.createBindGroup({ label:'sunvis', layout:sunVisPipe.getBindGroupLayout(0), entries:[
+    { binding:0, resource:{ buffer:frameUBO } }, { binding:4, resource:{ buffer:sunVisBuf } },
+  ] });
   const bgCubeMips = [];
   for (let m = 1; m < ENV_MIPS; m++) bgCubeMips.push(bg(cubeMipPipe, [lvl(envTex, m - 1), lvl(envTex, m), { buffer: frameUBO }], 'cubemip' + m));
 
@@ -322,7 +329,7 @@ async function main() {
   const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(24);
   let bgCaravel;
-  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, shader, computePipe });
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
@@ -330,6 +337,10 @@ async function main() {
     fullArr(dispTex), fullArr(derivTex), fullArr(momTex), foamTex.createView(), envCubeView, sampRepeat,
     fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'ocean' + i)));
   const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp], 'sky');
+  const clouds = await createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
+  clouds.setSkyPipeline(skyPipe);
+  const bgEnvClouds = clouds.bindVolume(envPipe);
+  const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
 
   // Water height under the camera (async readback, a few frames of latency) so the
   // floating camera rides above passing crests instead of clipping into them.
@@ -341,11 +352,26 @@ async function main() {
   const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'probe'));
   let probePending = false, waterH = 0;
   let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
+  let probeTime=0, targetTime=-1, targetRevision=-1;
+  const boatAxes=['heave','pitch','roll'];
+  const targetRate={heave:0,pitch:0,roll:0};
   const onProbe = () => {
     const heights = new Float32Array(probeRead.getMappedRange(0, 64));
     waterH = heights[9];
     if (probeRevision === boat.revision) {
-      Object.assign(boat.target, boatTargets(heights.subarray(0, 9), probeLength, probeBeam));
+      const next=boatTargets(heights.subarray(0,9),probeLength,probeBeam);
+      const elapsed=probeTime-targetTime;
+      const placed=targetTime<0;
+      for(const key of boatAxes){
+        const limit=key==='heave'?8:1.2;
+        const valid=targetRevision===probeRevision && elapsed>0 && elapsed<0.25;
+        const rate=valid?Math.max(-limit,Math.min(limit,(next[key]-boat.target[key])/elapsed)):0;
+        targetRate[key]=valid?targetRate[key]+(rate-targetRate[key])*(1-Math.exp(-elapsed*8)):0;
+        // Spawn on the sampled surface, including after a sea-preset change.
+        if(placed){boat[key]=next[key];boat[key+'Velocity']=0;}
+      }
+      if(placed)boat.revision++; // a pose placement must not launch a false impact
+      Object.assign(boat.target,next);targetTime=probeTime;targetRevision=boat.revision;
     }
     probeRead.unmap();
     probePending = false;
@@ -417,7 +443,7 @@ async function main() {
     for (let m=1;m<waterMips;m++) waterMipGroups.push(bg(waterFilterPipe,
       [lvl(waterCopy,m-1,'2d'),lvl(waterCopy,m,'2d')], 'water reflection mip'));
     bgCaravel = bg(caravelPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
-      envCubeView, { buffer: sunVisBuf }, { buffer: hullUBO }, waterCopy.createView(), fullArr(dispTex), samplerSim, oakTex.createView(), oakSampler], 'caravel');
+      envCubeView, { buffer: sunVisBuf }, { buffer: hullUBO }, waterCopy.createView(), fullArr(dispTex), samplerSim, oakTex.createView(), oakSampler, interaction.deck.view], 'caravel');
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
     bloomTex = device.createTexture({ size: [bw, bh], format: HDR, mipLevelCount: bloomLevels, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
@@ -593,9 +619,14 @@ async function main() {
     const heading = boat.heading * D2R, distance = boat.speed * 0.514444 * dt;
     boat.x += Math.sin(heading) * distance; boat.z -= Math.cos(heading) * distance;
     const response = Math.max(0.65, 4.5 / Math.sqrt(boat.length / 6));
-    boatSpring(boat, 'heave', boat.target.heave, response, dt);
-    boatSpring(boat, 'pitch', boat.target.pitch, response, dt);
-    boatSpring(boat, 'roll', boat.target.roll, Math.max(0.8, 3 / Math.sqrt(boat.beam / 2)), dt);
+    // Follow the measured water velocity, including short readback latency. A
+    // held-target spring alone lags a rising swell by roughly two time constants.
+    const age=Math.max(0,simTime-targetTime);
+    for(const key of boatAxes){
+      const rate=age<0.25 && targetRevision===boat.revision?targetRate[key]:0;
+      const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):response;
+      boatSpring(boat,key,boat.target[key]+rate*Math.min(age,0.25),omega,dt,rate);
+    }
   }
   function updateCamera(dt) {
     if (boat.enabled) {
@@ -743,16 +774,15 @@ async function main() {
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
     f[64] = R0; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure; f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
-    f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001; f[74] = P.veil; f[75] = 0.9;
+    f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
     // deep water body scatter colour (greenish coastal water), unresolved slope variance
     f[76] = 0.016 * P.turbidity; f[77] = 0.080 * P.turbidity; f[78] = 0.096 * P.turbidity; f[79] = 0.0024;
     f[80] = 0.035; f[81] = 0.120; f[82] = 0.085; f[83] = 2.6;
-    f[84] = 0.15; f[85] = 1.0; f[86] = Math.min(1,P.foam); f[87] = 1.0;
+    f[84] = 0.45; f[85] = 1.0; f[86] = Math.min(1,P.foam); f[87] = 1.0;
     f[88] = (5.802e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[91] = 1.1e-4;
-    f[92] = 1.5; f[93] = P.clouds; f[94] = 2.2; f[95] = time;
     device.queue.writeBuffer(frameUBO, 0, f);
   }
 
@@ -898,8 +928,12 @@ async function main() {
     ['sunElev', 'Sun elevation (deg)', -2, 60, 0.1, ''],
     ['sunAzim', 'Sun azimuth (deg)', -180, 180, 0.5, ''],
     ['haze', 'Haze', 0.5, 15, 0.1, ''],
-    ['clouds', 'Low clouds', 0, 1, 0.01, ''],
-    ['veil', 'Cloud deck', 0, 1, 0.01, ''],
+    ['clouds', 'Cloud coverage', 0, 1, 0.01, ''],
+    ['cloudBase', 'Cloud base (km)', 0.3, 5, 0.1, ''],
+    ['cloudDepth', 'Cloud depth (km)', 0.5, 5, 0.1, ''],
+    ['cloudDensity', 'Cloud density', 0.1, 3, 0.05, ''],
+    ['cloudAnvil', 'Storm development', 0, 1, 0.01, ''],
+    ['cloudQuality', 'Cloud quality', 0.25, 1, 0.05, ''],
     ['exposure', 'Exposure', 0.1, 4, 0.01, ''],
     ['bloom', 'Bloom', 0, 0.3, 0.001, ''],
   ];
@@ -978,7 +1012,7 @@ async function main() {
     }
     foamFirst = false;
     foamUF[10] = dt; foamUF[11] = 0.85;          // decay 1/s
-    foamUF[12] = 0.15; foamUF[13] = 1.0; foamUF[14] = P.foam; foamUF[15] = 0;
+    foamUF[12] = 0.45; foamUF[13] = 1.0; foamUF[14] = P.foam; foamUF[15] = 0;
     for (let c = 0; c < C; c++) { foamUF[16 + c] = CASC_L[c]; foamUF[24 + c] = 1 / CASC_L[c]; }
     const drift = 0.03 * P.windSpeed;
     foamUF[32] = Math.cos(P.windDir * D2R) * drift; foamUF[33] = Math.sin(P.windDir * D2R) * drift;
@@ -1006,6 +1040,7 @@ async function main() {
       fpsN = 0; fpsT = 0;
     }
     if (fixedDt) dt = fixedDt;
+    if(needSpectrum){boat.revision++;targetTime=-1;}
     updateBoat(dt);
     updateCamera(dt);
     simTime += dt;
@@ -1013,6 +1048,7 @@ async function main() {
     frameIndex++;
 
     writeFrame(simTime);
+    if (clouds.update(frameF,P,dt)) envFull = true;
     boatRotate(hullData.subarray(0, 3), 1, 0, 0, boat.heading * D2R, boat.pitch, boat.roll);
     boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
     boatRotate(hullData.subarray(8, 11), 0, 0, -1, boat.heading * D2R, boat.pitch, boat.roll);
@@ -1053,6 +1089,7 @@ async function main() {
     const doProbe = !probePending && (boat.showProw || (frameIndex & 7) === 0);
     if (doProbe) {
       probeLength = boat.length; probeBeam = boat.beam; probeRevision = boat.revision;
+      probeTime=simTime;
       boatUniform[0] = boat.heading * D2R; boatUniform[1] = boat.length;
       boatUniform[2] = boat.beam;
       boatUniform[4]=boat.x; boatUniform[5]=boat.heave; boatUniform[6]=boat.z;
@@ -1068,11 +1105,14 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(SKY_W / 8), Math.ceil(SKY_H / 8));
       skySun = frameF[33]; skyHaze = frameF[72]; skyHeight = frameF[73];
     }
+    clouds.encode(cp);
     cp.setPipeline(sunVisPipe);
     cp.setBindGroup(0, bgSunVis);
+    cp.setBindGroup(1, bgSunClouds);
     cp.dispatchWorkgroups(1);
     cp.setPipeline(envPipe);
     cp.setBindGroup(0, bgEnv);
+    cp.setBindGroup(1, bgEnvClouds);
     // one cube face per frame (all six on start-up / after parameter changes)
     const envFaces = envFull ? 6 : 1;
     cp.dispatchWorkgroups(ENV_SIZE / 8, ENV_SIZE / 8, envFaces);
@@ -1098,6 +1138,7 @@ async function main() {
     }
     rp.setPipeline(skyPipe);
     rp.setBindGroup(0, bgSky);
+    clouds.drawSky(rp);
     rp.draw(3);
     rp.end();
 
@@ -1130,7 +1171,8 @@ async function main() {
     }
 
     compData[0] = P.exposure; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
-    compData[4] = 1.05; compData[5] = 1.06; compData[6] = -0.19; compData[7] = 1 / bloomLevels;
+    // Neutral white balance: a fixed cool grade turned shaded oak green in daylight.
+    compData[4] = 1.05; compData[5] = 1.06; compData[6] = 0; compData[7] = 1 / bloomLevels;
     device.queue.writeBuffer(compUBO, 0, compData);
     const swapTex = ctx.getCurrentTexture();
     compPass.colorAttachments[0].view = swapTex.createView();

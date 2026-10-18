@@ -11,9 +11,9 @@ const RENDER_BINDINGS = /* wgsl */ `
 @group(0) @binding(3) var sampC: sampler;
 `;
 
-// Full-resolution sky + clouds. Cloud silhouettes are anti-aliased analytically: the
-// screen-space derivative of each layer's edge function sets the width of its opacity edge.
+// Full-resolution atmosphere with reconstructed volumetric cloud radiance.
 export const SKY_BG = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + /* wgsl */ `
+@group(1) @binding(4) var cloudScreen:texture_2d<f32>;
 struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;
@@ -24,19 +24,11 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 @fragment fn fs(in: VO) -> @location(0) vec4f {
   let dir = normalize(F.camFwd.xyz + in.ndc.x * F.camRight.xyz + in.ndc.y * F.camUp.xyz);
-  let pixAng = 2.0 * length(F.camUp.xyz) * F.screen.w;
   var d2 = dir;
   d2.y = max(d2.y, 0.0005);
   d2 = normalize(d2);
-  // edge functions at this pixel (uniform control flow, so fwidth is valid)
-  let hl = hitLayer(d2, F.cloudP.x);
-  let el = lowEdge(hl.q, hl.t * pixAng / hl.mu, 7);
-  let hh = hitLayer(d2, 4.5);
-  let eh = highEdge(hh.q, hh.t * pixAng / hh.mu, 6);
-  let aa = vec2f(fwidth(el), fwidth(eh));
-  var sunT = 1.0;
-  let cl = cloudLayers(d2, pixAng, aa, &sunT);
-  let L = skyAtmo(d2) * (1.0 - cl.a) + cl.rgb + sunDisk(dir) * sunT;
+  let volume = textureSampleLevel(cloudScreen, sampC, in.pos.xy * F.screen.zw, 0.0);
+  let L = (skyAtmo(d2) + sunDisk(dir)) * (1.0 - volume.a) + volume.rgb;
   return vec4f(L, 1.0);
 }
 `;
@@ -232,7 +224,9 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let fw1 = textureSample(foamWorld, sampR, xz / F.lodP.w, 1u);
   let fwl = mix(fw1, fw0, w0) * w1;
   let fresh = breakingCompression(jxx,jzz,jxz,F.foamP.x);
-  var cover = clamp(max(max(fwl.r*0.65,fwl.g*0.9),fresh*(1.0-w1)*0.65)*F.foamP.z,0.0,0.95);
+  // The clipmaps age white water; they must not suppress a newly breaking crest
+  // inside their footprint while their temporal accumulator is still catching up.
+  var cover = clamp(max(max(fwl.r*0.75,fwl.g*0.95),fresh*0.8)*F.foamP.z,0.0,0.95);
   // aged foam breaks into wind-aligned streaks; fresh crest foam stays dense
   let wd = F.windP[0].xy;
   let ws = vec2f(dot(xz, wd), dot(xz, vec2f(-wd.y, wd.x)));
@@ -248,6 +242,8 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   var foamMask = clamp(fm * smoothstep(0.0, 0.5, cover), 0.0, 1.0) * (0.68 + 0.32 * smoothstep(0.3, 0.9, cover));
   // freshly broken crests: dense, almost opaque core
   foamMask = max(foamMask, smoothstep(0.55,0.95,fwl.g)*smoothstep(0.35,0.75,pat)*0.85*F.foamP.z);
+  foamMask = max(foamMask, fresh*smoothstep(0.28,0.68,pat)*0.8*F.foamP.z);
+  foamMask = max(foamMask,cover*0.22*smoothstep(0.3,0.75,pat));
   // submerged bubbles brighten and tint the water just beneath foam
   body += F.sssCol.rgb * (sunE * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
   body += vec3f(0.10, 0.32, 0.30) * skyUp * fwl.g * 0.35;
@@ -286,7 +282,8 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
     let relative=in.rel+F.camPos.xyz-H.origin.xyz;
     let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
     // Bulwarks protect the interior; crests overtopping the rail remain visible.
-    if(q.y < hullDeck(q.z)+0.66 && abs(q.x) < hullHalfWidth(q.z,q.y)) { discard; }
+    let solidTop=select(hullDeck(q.z)+0.66,2.3,q.z>=2.7);
+    if(q.y < solidTop && abs(q.x) < hullHalfWidth(q.z,q.y)) { discard; }
   }
   return vec4f(col, 1.0);
 }

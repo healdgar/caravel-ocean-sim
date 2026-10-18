@@ -2,7 +2,7 @@
 
 Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU ocean with a wave-driven sailing ship, square sails and a lateen mizzen, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
+A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck wash, whitecaps, and volumetric weather. The caravel has square sails and a lateen mizzen, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
 
 [Open Seasick Simulator](https://healdgar.github.io/seasick-simulator/).
 
@@ -25,7 +25,7 @@ npm install
 npm start        # serves http://localhost:8080/
 ```
 
-After editing anything under `js/`, run `npm run build` to regenerate both bundles. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild.
+After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [GitHub Pages build](#github-pages-build).
 
 ## Controls
 
@@ -33,13 +33,17 @@ After editing anything under `js/`, run `npm run build` to regenerate both bundl
 |---|---|
 | Click the canvas | Capture the mouse (Esc releases it). Holding the right mouse button also works. |
 | Mouse | Look around |
-| W A S D | Move |
-| Space or E / Q or C | Up / down |
-| Shift | 5x speed |
-| Mouse wheel | Change base speed |
+| W A S D | Move in Free camera; A / D steer in Boat camera |
+| Left / right arrows | Steer in Boat camera |
+| X | Centre the rudder |
+| B | Switch between Boat camera and Free camera; board from View ship |
+| Space or E / Q or C | Up / down in Free camera |
+| Shift | 5x Free camera speed |
+| Mouse wheel | Change Free camera speed or View ship zoom |
+| Drag in View ship | Orbit the vessel |
 | H | Settings panel: wind, swell, choppiness, turbidity, foam, sun, haze, clouds, exposure, bloom |
 
-The camera keeps itself above the displaced water surface, so waves never pass through it.
+The free camera stays above the sampled water. The boat camera follows the hull and can be overtopped in rough seas.
 
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
 
@@ -48,7 +52,7 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 Open **Sea settings** and adjust the waves and lighting, then select **Copy share
 link** in the top controls. The link includes every sea and lighting parameter,
 boat length, beam, heading, speed, eye height, rudder setting, ship visibility,
-wake/spray visibility, and the selected camera mode. Opening it restores those settings. The address
+wake/spray/deck-wash visibility, and the selected camera mode. Opening it restores those settings. The address
 bar also receives the link; if copying is blocked, a selected text field lets
 you copy it manually. Each copy captures your latest settings.
 
@@ -84,19 +88,31 @@ A boat-centred 256 × 256 local wave grid adds displacement and slopes to the oc
 
 Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_demo) for curling sheets and separate spray populations; [booherbg/clean-room-fft-ocean](https://github.com/booherbg/clean-room-fft-ocean) for ocean/contact-driven spray; [bob6664569/open-water](https://github.com/bob6664569/open-water) for persistent world-space wakes. This implementation uses native WebGPU/WGSL and adds no runtime dependencies.
 
+### Deck wash and buoyancy
+
+A 32 × 96 hull-local water field samples the displaced sea at the rails. Overtopping adds water at the edges; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff strips share the scene lighting. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls deck wash.
+
+The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull on the sampled surface. Large crests can still overtop it.
+
 ### Shading
 
 - Mip-mapped first and second moments of the wave slopes (LEAN mapping) give the right anisotropic roughness at every distance. The sun glitter widens with distance and the far sea settles into a sheen without aliasing. Screen-space slope derivatives add specular anti-aliasing.
 - Sun glitter uses an anisotropic Gaussian slope distribution with Smith masking and the size of the solar disc.
 - The sky reflection comes from an environment cube map with roughness-filtered mips. One face and its mip chain refresh per frame; all six refresh on startup and after settings changes. At grazing angles the reflection direction is tilted to account for which wave facets the viewer can actually see.
 - The water body is turbid blue-green, lit by the whole sky hemisphere. Backlit crests get a subsurface glow, and wind-gust patches modulate the short ripples.
-- Whitecaps form at strong compression of the surface displacement field. Coverage follows bounded production and decay, so repeated crests cannot accumulate beyond full coverage. The Foam control changes production rather than lowering the breaking threshold. Two camera-centred world-space maps (128 m and 1 km wide) retain foam, which fades, drifts downwind, and breaks into streaks. A procedural bubble texture gives it structure.
+- Whitecaps form at strong compression of the surface displacement field. Fresh breaking crests appear immediately, including near the camera; two world-space maps (128 m and 1 km wide) retain their fading, drifting foam. Bounded production and decay prevent accumulation beyond full coverage. The Foam control changes production rather than lowering the breaking threshold. A procedural bubble texture gives dense foam structure while retaining thin translucent trails.
 
 ### Sky
 
-The atmosphere follows Hillaire's approach, with transmittance, multiple-scattering, and sky-view lookup tables plus aerosol haze. There are two cloud layers, a broken low cumulus and a fibrous altostratus deck. Each is shaded with self-shadowing toward the sun, lit rims, silver linings when backlit, and direction-dependent multiple scattering.
+The atmosphere follows Hillaire's approach, with transmittance, multiple-scattering, and sky-view lookup tables plus aerosol haze. All clouds use a native WGSL adaptation of [Joshbrew's volumetric renderer](https://github.com/joshbrew/webgpu_realtime_clouds), pinned to `bf7a48f949e25e09d463357149ec9d0009e97328`. The rounded cumulus/anvil density model and cached lighting are adapted from its shaders. [Provenance and MIT license](THIRD_PARTY_NOTICES.md) are retained locally and embedded in all standalone builds.
 
-Cloud noise octaves are filtered by pixel footprint, and silhouettes are anti-aliased analytically: the screen-space derivative of each layer's edge function sets the width of its opacity edge. Cloud transmittance along the sun direction dims the sunlight that reaches the water, and aerial perspective is applied over the sea.
+A periodic 128 × 64 × 128 density volume contains connected billows, eroded edges and developing anvils. A second volume stores sun visibility, surface lighting and ambient occlusion. Coverage, depth and storm development rebuild density; sunlight and optical density changes rebuild lighting. Wind continuously advects both fields together without rebuilding them or resetting at the FFT loop boundary. Four mip levels filter distant samples. These are procedural cloud forms, not a meteorological fluid simulation.
+
+The camera raymarches 64 intervals at reduced resolution, capped at 1280 × 720, and reconstructs the result over time. Reprojection accounts for camera translation, rotation and cloud advection; neighborhood clamping and depth rejection limit ghosting. Settings changes, resizing and camera jumps invalidate history. Fast camera movements can still reveal reconstruction noise, and the finite cloud field repeats over 16 km.
+
+Camera rays, the ocean environment cube and direct-sun visibility sample the same cloud material. Clouds receive the existing atmosphere's sun and sky colours, including sunset and distance haze. Reflection rays are evaluated independently at a lower ray budget. Sun occlusion is sampled near the camera and applied to the scene; this does not yet produce spatial cloud-shadow patches across the sea.
+
+**Sea settings** includes Cloud coverage, Cloud base, Cloud depth, Cloud density, Storm development and Cloud quality. Shared links preserve them. **Hella rough** also selects low, deep storm clouds. The quality control adjusts screen ray resolution; it does not change the cached volume resolution. The old flat cloud veil has been removed from the sky, reflections and sunlight occlusion. Zero cloud coverage clears the sky; legacy `veil` URL parameters are ignored.
 
 ### Post-processing
 
@@ -106,7 +122,9 @@ The scene renders in HDR with 4x MSAA. Post-processing adds up to 8 levels of bl
 
 The original renderer measured about 6 to 8 ms per frame at 2560 by 1440 on an RTX 5070 Ti, while other programs were also using the GPU. The HUD shows FPS and GPU time when the browser supports `timestamp-query`.
 
-The per-frame code reuses preallocated typed arrays and descriptors, so the garbage collector has almost nothing to do. The only recurring allocations are the objects WebGPU itself requires, such as the swap-chain view and command buffers.
+The render loop reuses large typed arrays and GPU resources, keeping most recurring allocations small.
+
+Volumetric clouds add raymarching and reconstruction work. If frame rate drops at maximum **Cloud quality**, lower that setting or the render resolution. Cloud quality changes the screen ray resolution, while the cached density and lighting volumes remain fixed. The older RTX timing above predates these cloud and vessel effects and is not a current performance guarantee.
 
 The optimized frame schedule also avoids redundant GPU work:
 
@@ -124,22 +142,31 @@ With Node.js 20 or newer:
 ```
 npm ci
 npx playwright install chromium
-npm test
 npm run build
+npm test
 ```
 
-The WebGPU tests compare the fused FFT with analytical travelling waves across all six cascades, and exercise sky invalidation, settings changes, bloom toggling, and resizing down to 1 × 1. Additional GPU fixtures check dry/stationary/moving and tilted hull contacts, impact emission, wake persistence and stability, matching buoyancy heights, particle retirement and landing foam, and effect toggling. They use SwiftShader and an offscreen GPU render target so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed.
+The suite contains 25 checks covering:
+
+- Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings.
+- Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
+- Dry decks below the rails, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
+- Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
+- JavaScript and WGSL initialization in all three standalone builds.
+
+GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks in native Chrome supplement these tests; software-GPU checks do not establish device frame rates or visual quality.
 
 ## Known limitations
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
 - The scene is open ocean with an optional fully modeled sailing ship. There is no shoreline, surf, or other vessels.
-- Clouds are two flat layers, not volumetric.
+- Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
+- Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing, or create separate runoff landing splashes. Severe crests can still overtop the hull and boat camera.
 
 ## How it was made
 
-I built this with Claude Code (Opus 5.5). I asked for the most realistic water it could produce, in WebGPU, with a floating camera, and left the architecture and implementation to it. It checked its own work by rendering screenshots in headless Chrome and having separate critic subagents review them, so it was not grading its own output. I gave feedback along the way, mainly on the clouds, which led to replacing the volumetric clouds with the flat layers and later fixing their edge aliasing.
+The upstream README credits Claude Code (Opus 5.5), with headless Chrome screenshots and separate critic reviews. Its account describes an earlier version that replaced volumetric clouds with flat layers. This fork retains the native WebGPU architecture and adds the caravel, steering, hull interactions, deck wash, and the Joshbrew-derived volumetric clouds described above.
 
 ## Repository layout
 
@@ -149,17 +176,22 @@ I built this with Claude Code (Opus 5.5). I asked for the most realistic water i
 | `js/main.js` | Device setup, resources, camera modes, per-frame loop |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
+| `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
+| `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
+| `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
 | `js/caravel.js` | Hull, quarterdeck, cabin, rigging, square and lateen sails, and helm geometry |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
-| `js/wgsl/` | Shaders as JavaScript modules: `sim.js` (waves and foam), `interaction.js` (bow sheets, wake, and spray), `sky.js` (atmosphere and clouds), `ocean.js` (surface and sky pass), `post.js` (bloom and tone mapping), `common.js` (shared structs) |
+| `js/wgsl/` | Shaders as JavaScript modules, including waves/foam, atmosphere, ocean, timber, and post-processing |
 | `server.mjs` | Tiny static server for development |
-| `build.mjs` | Builds `ocean.html` and `ocean.min.html` |
-| `docs/` | README images |
+| `build.mjs` | Builds all three standalone pages and embeds third-party notices |
+| `docs/` | Generated GitHub Pages demo, `.nojekyll`, and README images |
+| `tests/` | Boat math, geometry, sharing, GPU behavior, and standalone startup checks |
+| `THIRD_PARTY_NOTICES.md` | Joshbrew shader provenance and MIT license |
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Boat perspective
 
@@ -172,11 +204,12 @@ Choose **View ship** for a level exterior view that follows the ship: drag to or
 and use the mouse wheel to zoom. The vessel continues sailing in all camera modes.
 
 The camera follows a damped hull pose fitted to a 3 by 3 grid of heights sampled
-from the actual displaced FFT ocean. Larger footprints average over waves;
+from the actual displaced FFT ocean and local wake. Measured wave velocity and
+bounded readback prediction reduce lag on rising water. Larger footprints average over waves;
 length also slows the pitch/heave response and beam slows the roll response.
 Speed changes position and therefore the waves encountered. Live pitch, roll,
 and heave are shown in the panel. This is an approximate displacement-hull ride,
-with visual wakes and impact spray, but without hull-specific mass/stability, planing, or slamming forces.
+with visual wakes, impact spray, and retained deck wash, but without hull-specific mass/stability, planing, or slamming forces.
 
 URL options: `boat=1&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=2.4`.
 Run `node --test tests/boat.test.mjs` for the hull-response math checks.
@@ -186,9 +219,13 @@ Run `node --test tests/boat.test.mjs` for the hull-response math checks.
 The complete vessel includes a rounded planked hull and keel, square transom,
 stern cabin with windows, raised quarterdeck, bow and stern rails, bowsprit,
 hatch grating, cleats, fittings, and a rudder that moves with the helm. Three
-masts carry five shaped square sails, with yards, stays, shrouds, and ratlines.
+masts carry four shaped square sails and a triangular lateen mizzen, with yards, stays, shrouds, and ratlines.
 Canvas uses a two-sided cloth material and slight wind-driven flutter under the
-actual sun and sky. Speed is still manually controlled; sail forces are not
+actual sun and sky. Thin-sheet transmission produces a soft, warm glow around
+the backlighting sun; seams, hems, folds, and grazing light paths transmit less.
+Cloud shadows attenuate the glow. The fabric coefficients are authored visual
+approximations, and the canvas retains depth occlusion rather than becoming
+transparent to background geometry. Speed is still manually controlled; sail forces are not
 integrated into propulsion. Toggle **Show ship** or use `prow=0` to hide it.
 **Hide** collapses the controls; camera selection remains visible. Geometry
 scales with boat length and beam. The ship has an independent world position
@@ -197,9 +234,13 @@ and keeps its wave-following pose while the camera flies or orbits around it.
 The PBR material uses the live atmospheric sunlight, cloud transmittance, sky
 environment, and current ocean HDR image for visible water reflections and
 approximate bounced light. Offscreen reflections use the environment cube;
-rail shadows are approximate. All camera modes share the ocean depth buffer, so
-water, hull, bow sheets, and spray occlude each other consistently. A world-space
-hull volume excludes water inside the vessel below deck level; overtopping
+its sea fallback follows cloud shadows. Diffuse lighting weights separate sky
+and sea hemispheres by surface orientation, avoiding duplicate sea tint on
+vertical timber. Neutral white balance preserves the oak colour across sunlight
+settings; shaded and wet wood still pick up their surroundings. Rail shadows are
+approximate. All camera modes share the ocean depth buffer, so
+water, hull, deck wash, bow sheets, and spray occlude each other consistently. A world-space
+hull volume excludes ocean water inside the bulwarks and stern cabin; overtopping
 crests remain visible. The neutral oak albedo texture has no
 intentional scene lighting and is embedded into both standalone HTML bundles. It was created
 with the built-in image generation tool using this prompt:

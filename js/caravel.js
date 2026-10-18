@@ -72,6 +72,8 @@ export function createCaravelMesh() {
       const z0=5.6-i*12/96,z1=5.6-(i+1)*12/96,x0=side*width(z0),x1=side*width(z1);
       for(let j=0;j<8;j++)quad(rail(z0,j),rail(z1,j),rail(z1,(j+1)%8),rail(z0,(j+1)%8),1,null,[[j*0.1,z0*0.6],[j*0.1,z1*0.6],[(j+1)*0.1,z1*0.6],[(j+1)*0.1,z0*0.6]]);
       for(let row=0;row<5;row++){
+        // Open scuppers between posts, aligned with the deck-water drain field.
+        if(row===0 && Math.abs((((5.3-(z0+z1)*0.5)/0.82)%1+1)%1-0.5)<0.17)continue;
         const a=deck(z0)+row*0.123,b=deck(z1)+row*0.123;
         quad([x0,a,z0],[x1,b,z1],[x1,b+0.119,z1],[x0,a+0.119,z0],1,null,[[a*1.7,z0*0.6],[b*1.7,z1*0.6],[(b+0.119)*1.7,z1*0.6],[(a+0.119)*1.7,z0*0.6]]);
         quad([x0+side*0.105,a,z0],[x0+side*0.105,a+0.119,z0],[x1+side*0.105,b+0.119,z1],[x1+side*0.105,b,z1],1,null,[[a*1.7,z0*.6],[(a+.119)*1.7,z0*.6],[(b+.119)*1.7,z1*.6],[b*1.7,z1*.6]]);
