@@ -1,7 +1,8 @@
 import { createVolumetricClouds } from './clouds.js';
+import { createGPUProfiler } from './profiler.js';
 import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
-import { createCaravelMesh } from './caravel.js';
+import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
 import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT } from './hull.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition } from './boat.js';
@@ -311,9 +312,11 @@ async function main() {
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
     multisample: { count: MSAA },
   });
-  const caravelMesh = createCaravelMesh();
+  const {vertices:caravelMesh,indices:caravelIndices} = indexCaravelMesh(createCaravelMesh());
   const caravelBuffer = mkBuf(caravelMesh.byteLength, GU.VERTEX | GU.COPY_DST, 'caravel geometry');
   device.queue.writeBuffer(caravelBuffer, 0, caravelMesh);
+  const caravelIndexBuffer=mkBuf(caravelIndices.byteLength,GU.INDEX|GU.COPY_DST,'caravel indices');
+  device.queue.writeBuffer(caravelIndexBuffer,0,caravelIndices);
   const oakImage = await createImageBitmap(await (await fetch('assets/caravel-oak-albedo.webp')).blob());
   const oakMips = Math.floor(Math.log2(Math.max(oakImage.width, oakImage.height))) + 1;
   const oakTex = device.createTexture({ size: [oakImage.width, oakImage.height], format: 'rgba8unorm',
@@ -330,7 +333,7 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(24);
-  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,vertexBuffer:caravelBuffer,shader});
+  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader});
   const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
@@ -417,7 +420,7 @@ async function main() {
   for (let i = 0; i < BLOOM_LEVELS * 2; i++) bloomUBOs.push(mkBuf(16, GU.UNIFORM | GU.COPY_DST, 'bloom ubo'));
 
   let W = 0, H = 0;
-  let colorMS, depthMS, hdrTex, bloomTex, waterCopy;
+  let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
   let waterMips = 1, waterMipGroups = [];
   const mainPass = {
     colorAttachments: [{ view: null, resolveTarget: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'discard' }],
@@ -440,10 +443,10 @@ async function main() {
     for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy]) t && t.destroy();
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
-    hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC });
+    hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     waterMips = Math.min(8, Math.floor(Math.log2(Math.max(W,H)))+1);
     waterCopy = device.createTexture({ size: [W, H], format: HDR, mipLevelCount: waterMips,
-      usage: TU.COPY_DST | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });
+      usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });
     waterMipGroups = [];
     for (let m=1;m<waterMips;m++) waterMipGroups.push(bg(waterFilterPipe,
       [lvl(waterCopy,m-1,'2d'),lvl(waterCopy,m,'2d')], 'water reflection mip'));
@@ -453,9 +456,9 @@ async function main() {
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
     bloomTex = device.createTexture({ size: [bw, bh], format: HDR, mipLevelCount: bloomLevels, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     mainPass.colorAttachments[0].view = colorMS.createView();
-    mainPass.colorAttachments[0].resolveTarget = hdrTex.createView();
     mainPass.depthStencilAttachment.view = depthMS.createView();
-    const hdrView = hdrTex.createView();
+    hdrView = hdrTex.createView();
+    waterView = waterCopy.createView({baseMipLevel:0,mipLevelCount:1});
     const bv = [];
     for (let m = 0; m < bloomLevels; m++) bv.push(bloomTex.createView({ baseMipLevel: m, mipLevelCount: 1 }));
     bloomPasses = [];
@@ -467,6 +470,7 @@ async function main() {
       device.queue.writeBuffer(bloomUBOs[m], 0, tmp);
       bloomPasses.push({
         pipeline: downPipe,
+        timingName: `Bloom down ${m}`,
         bindGroup: bg(downPipe, [m === 0 ? hdrView : bv[m - 1], linSamp, { buffer: bloomUBOs[m] }]),
         descriptor: { colorAttachments: [{ view: bv[m], clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] },
       });
@@ -478,6 +482,7 @@ async function main() {
       device.queue.writeBuffer(ubo, 0, tmp);
       bloomPasses.push({
         pipeline: upPipe,
+        timingName: `Bloom up ${m}`,
         bindGroup: bg(upPipe, [bv[m], linSamp, { buffer: ubo }]),
         descriptor: { colorAttachments: [{ view: bv[m - 1], loadOp: 'load', storeOp: 'store' }] },
       });
@@ -488,24 +493,13 @@ async function main() {
   // --------------------------------------------------------------------------------------
   // GPU timing
   // --------------------------------------------------------------------------------------
-  let tsQuery = null, tsResolve = null, tsRead = null, tsPending = false, gpuMs = 0;
-  let firstPassTS = undefined;
-  if (hasTS) {
-    tsQuery = device.createQuerySet({ type: 'timestamp', count: 2 });
-    tsResolve = mkBuf(16, GU.QUERY_RESOLVE | GU.COPY_SRC, 'ts resolve');
-    tsRead = mkBuf(16, GU.MAP_READ | GU.COPY_DST, 'ts read');
-    firstPassTS = { querySet: tsQuery, beginningOfPassWriteIndex: 0 };
-    compPass.timestampWrites = { querySet: tsQuery, endOfPassWriteIndex: 1 };
+  const profiler=createGPUProfiler(device,qs.get('profile')==='1');
+  let profilePanel=null;
+  if(qs.get('profile')==='1'){
+    profilePanel=document.createElement('pre');profilePanel.id='gpu-profile';
+    profilePanel.style.cssText='position:fixed;right:8px;top:8px;margin:0;padding:12px;background:#07121ee8;color:#fff;font:11px/1.5 monospace;pointer-events:none;z-index:20;max-width:calc(100vw - 40px);white-space:pre-wrap';
+    profilePanel.textContent=profiler.text();document.body.append(profilePanel);
   }
-  const computeDesc = { timestampWrites: firstPassTS };
-  const onTsMapped = () => {
-    const t = new BigUint64Array(tsRead.getMappedRange());
-    const ms = Number(t[1] - t[0]) / 1e6;
-    if (ms > 0 && ms < 1000) gpuMs = gpuMs ? gpuMs * 0.8 + ms * 0.2 : ms;
-    tsRead.unmap();
-    tsPending = false;
-  };
-  const onTsFail = () => { tsPending = false; };
 
   // --------------------------------------------------------------------------------------
   // Uniform data
@@ -1038,7 +1032,8 @@ async function main() {
     if (fpsT > 0.5) {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
-        (hasTS ? `  |  GPU ${gpuMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
+        (hasTS ? `  |  GPU ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
+      if(profilePanel)profilePanel.textContent=profiler.text();
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
@@ -1076,7 +1071,8 @@ async function main() {
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 
     const enc = device.createCommandEncoder();
-    const cp = enc.beginComputePass(computeDesc);
+    profiler.beginFrame(frameIndex);
+    let cp = enc.beginComputePass({timestampWrites:profiler.writes('Waves + effects')});
     if (needSpectrum) {
       cp.setPipeline(initPipe);
       cp.setBindGroup(0, bgInit);
@@ -1108,6 +1104,7 @@ async function main() {
       cp.setBindGroup(0, bgProbe[interaction.current]);
       cp.dispatchWorkgroups(1);
     }
+    if(profiler.detailed){cp.end();cp=enc.beginComputePass({timestampWrites:profiler.writes('Sky + clouds')});}
     // This LUT depends only on sun elevation, haze and effective camera altitude.
     if (skyChanged) {
       cp.setPipeline(skyViewPipe);
@@ -1120,6 +1117,7 @@ async function main() {
     cp.setBindGroup(0, bgSunVis);
     cp.setBindGroup(1, bgSunClouds);
     cp.dispatchWorkgroups(1);
+    if(profiler.detailed){cp.end();cp=enc.beginComputePass({timestampWrites:profiler.writes('Reflections')});}
     cp.setPipeline(envPipe);
     cp.setBindGroup(0, bgEnv);
     cp.setBindGroup(1, bgEnvClouds);
@@ -1136,7 +1134,11 @@ async function main() {
     cp.end();
 
     const drawProw = boat.showProw;
-    shadows.encode(enc);
+    // Resolve the ocean straight into the reflection pyramid. The ship pass
+    // preserves MSAA color/depth and resolves the finished scene into hdrView.
+    mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
+    shadows.encode(enc,profiler);
+    mainPass.timestampWrites=profiler.writes('Ocean + sky');
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
@@ -1155,26 +1157,27 @@ async function main() {
     rp.end();
 
     if (drawProw) {
-      enc.copyTextureToTexture({ texture: hdrTex }, { texture: waterCopy }, [W, H]);
-      const filterPass = enc.beginComputePass(); filterPass.setPipeline(waterFilterPipe);
+      const filterPass = enc.beginComputePass({timestampWrites:profiler.writes('Water reflection filter')}); filterPass.setPipeline(waterFilterPipe);
       for(let m=1;m<waterMips;m++) {
         filterPass.setBindGroup(0,waterMipGroups[m-1]);
         filterPass.dispatchWorkgroups(Math.ceil(Math.max(1,W>>m)/8),Math.ceil(Math.max(1,H>>m)/8));
       }
       filterPass.end();
       const prowPass = enc.beginRenderPass({
-        colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: mainPass.colorAttachments[0].resolveTarget,
+        timestampWrites:profiler.writes('Ship + spray'),
+        colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: hdrView,
           loadOp: 'load', storeOp: 'discard' }],
         depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: 'discard' },
       });
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
       prowPass.setBindGroup(1,caravelShadows);
-      prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9);
+      prowPass.setVertexBuffer(0, caravelBuffer); prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);
       interaction.draw(prowPass); prowPass.end();
     }
 
     if (P.bloom > 0) {
-      for (const { descriptor, pipeline, bindGroup } of bloomPasses) {
+      for (const { descriptor, pipeline, bindGroup, timingName } of bloomPasses) {
+        descriptor.timestampWrites=profiler.writes(timingName);
         const p = enc.beginRenderPass(descriptor);
         p.setPipeline(pipeline);
         p.setBindGroup(0, bindGroup);
@@ -1189,6 +1192,7 @@ async function main() {
     device.queue.writeBuffer(compUBO, 0, compData);
     const swapTex = ctx.getCurrentTexture();
     compPass.colorAttachments[0].view = swapTex.createView();
+    compPass.timestampWrites=profiler.writes('Composite');
     const pc = enc.beginRenderPass(compPass);
     pc.setPipeline(compPipe);
     pc.setBindGroup(0, bgComp);
@@ -1196,12 +1200,7 @@ async function main() {
     pc.end();
 
     if (doProbe) enc.copyBufferToBuffer(probeOut, 0, probeRead, 0, 64);
-    let doTs = false;
-    if (hasTS && !tsPending && (frameIndex & 7) === 0) {
-      enc.resolveQuerySet(tsQuery, 0, 2, tsResolve, 0);
-      enc.copyBufferToBuffer(tsResolve, 0, tsRead, 0, 16);
-      doTs = true;
-    }
+    const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
       shooting = true;
@@ -1212,7 +1211,7 @@ async function main() {
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
     if (doProbe) { probePending = true; probeRead.mapAsync(GPUMapMode.READ).then(onProbe, onProbeFail); }
-    if (doTs) { tsPending = true; tsRead.mapAsync(GPUMapMode.READ).then(onTsMapped, onTsFail); }
+    if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
   }
 
@@ -1237,7 +1236,11 @@ async function main() {
     const blob = await oc.convertToBlob({ type: 'image/png' });
     const nm = shotSeq > 1 ? shotName.replace('.png', `_${shotIdx}.png`) : shotName;
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
-    log('shot saved ' + nm + ' gpu ' + gpuMs.toFixed(2) + 'ms nodes ' + nodeCount);
+    if(profilePanel){
+      await profiler.settled();profilePanel.textContent=profiler.text();
+      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,parameters:P,profile:profiler.snapshot()},null,2)});
+    }
+    log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
     shotIdx++;
     shooting = false;
     if (shotIdx < shotSeq) { requestAnimationFrame(frame); return; }

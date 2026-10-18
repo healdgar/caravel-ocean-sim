@@ -1,12 +1,13 @@
 import { SHADOW_CAST } from './wgsl/shadows.js';
 
-export function shadowMeshData(mesh) {
+export function shadowMeshData(mesh,meshIndices=null) {
   const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity],solid=[],canvas=[];
   for(let i=0;i<mesh.length;i+=9)for(let axis=0;axis<3;axis++){
     bounds[axis]=Math.min(bounds[axis],mesh[i+axis]);bounds[axis+3]=Math.max(bounds[axis+3],mesh[i+axis]);
   }
-  for(let i=0;i<mesh.length/9;i+=3){
-    const material=mesh[i*9+6];(material===9 || material===13 ? canvas:solid).push(i,i+1,i+2);
+  for(let i=0;i<(meshIndices?meshIndices.length:mesh.length/9);i+=3){
+    const a=meshIndices?meshIndices[i]:i,b=meshIndices?meshIndices[i+1]:i+1,c=meshIndices?meshIndices[i+2]:i+2;
+    const material=mesh[a*9+6];(material===9 || material===13 ? canvas:solid).push(a,b,c);
   }
   return {bounds,solid:new Uint32Array(solid),canvas:new Uint32Array(canvas)};
 }
@@ -39,9 +40,9 @@ export function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
   return out;
 }
 
-export async function createVesselShadows({device,hullUBO,mesh,vertexBuffer,shader,resolution=2048}) {
+export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
-  const data=new Float32Array(28),parts=shadowMeshData(mesh);
+  const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
   const uniform=device.createBuffer({label:'vessel shadow frame',size:112,usage:B.UNIFORM|B.COPY_DST});
   const depth=label=>device.createTexture({label,size:[resolution,resolution],format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
   const solid=depth('solid shadow'),canvas=depth('canvas shadow');
@@ -75,9 +76,10 @@ export async function createVesselShadows({device,hullUBO,mesh,vertexBuffer,shad
   const counts=[parts.solid.length,parts.canvas.length];
   return {
     update(hull,sun,enabled){fitVesselShadow(data,hull,sun,parts.bounds,resolution,enabled);device.queue.writeBuffer(uniform,0,data);},
-    encode(encoder){
+    encode(encoder,profiler){
       if(!data[19])return;
       for(let i=0;i<2;i++){
+        passes[i].timestampWrites=profiler?.writes(i?'Canvas shadows':'Solid shadows');
         const pass=encoder.beginRenderPass(passes[i]);pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
         pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);pass.end();
       }

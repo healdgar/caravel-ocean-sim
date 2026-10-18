@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
 
@@ -182,6 +183,83 @@ async function slider(page, label, value) {
     input.value = value; input.dispatchEvent(new Event('input'));
   }, String(value));
 }
+
+test('indexed ship and direct HDR resolve match the original pixels, including profiled rendering', {timeout:180000}, async()=>{
+  // Start on a sampled frame so the comparison also exercises timestamp writes.
+  const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace('let frameIndex = 0;','let frameIndex = 7;');
+  // Recreate the previous unindexed/copy schedule only inside this comparison.
+  const legacy=source
+    .replace('indexCaravelMesh(createCaravelMesh())','((vertices)=>({vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)}))(createCaravelMesh())')
+    .replace("prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);",'prowPass.draw(caravelMesh.length/9);')
+    .replace('drawProw?waterView:hdrView','hdrView')
+    .replace('format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });','format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC });')
+    .replace('usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });','usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST });')
+    .replace("const filterPass = enc.beginComputePass",'enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);\n      const filterPass = enc.beginComputePass');
+  const captures=[];
+  for(const mode of ['legacy','optimized','profiled']){
+    const page=await browser.newPage({viewport:{width:96,height:72}});
+    try{
+      const initErrors=[];
+      page.on('pageerror',e=>initErrors.push(e.message));
+      page.on('console',msg=>{if(msg.text().includes('init failed'))initErrors.push(msg.text());});
+      await page.addInitScript(instrumentRenderer);
+      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:source}));
+      await page.goto(`${origin}/?view=ship&sunElev=35&sunAzim=30&clouds=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
+      try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
+      catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
+      const frame=await step(page);
+      assert.equal(frame.render.caravel,1);
+      const pixels=await page.evaluate(async()=>{
+        const texture=check.target,bytesPerRow=Math.ceil(texture.width*4/256)*256;
+        const buffer=check.device.createBuffer({size:bytesPerRow*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+        const enc=check.device.createCommandEncoder();enc.copyTextureToBuffer({texture},{buffer,bytesPerRow},[texture.width,texture.height]);
+        check.device.queue.submit([enc.finish()]);await buffer.mapAsync(GPUMapMode.READ);
+        const result=Array.from(new Uint8Array(buffer.getMappedRange()));buffer.unmap();buffer.destroy();return result;
+      });
+      assert.ok(new Set(pixels).size>20,'render must contain actual shaded pixels');
+      captures.push(pixels);
+    }finally{await page.close();}
+  }
+  assert.deepEqual(captures[1],captures[0],'indexed/direct resolve pixels');
+  assert.deepEqual(captures[2],captures[0],'profiling must preserve pixels');
+});
+
+test('GPU timing handles unsupported devices, query readback, and skipped passes', {timeout:30000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__timing_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__timing_test`);
+    const result=await page.evaluate(async()=>{
+      const {createGPUProfiler}=await import('/js/profiler.js');
+      const unsupported=createGPUProfiler({features:new Set()},true);
+      unsupported.beginFrame(8);
+      const fallback={...unsupported.snapshot(),writes:unsupported.writes('Composite')===undefined,resolve:unsupported.resolve(null)};
+      unsupported.destroy();
+      const adapter=await navigator.gpu.requestAdapter();
+      if(!adapter.features.has('timestamp-query'))return {fallback,supported:false};
+      const device=await adapter.requestDevice({requiredFeatures:['timestamp-query']}),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const detailed=createGPUProfiler(device,true),normal=createGPUProfiler(device);
+      async function run(profiler,frame,optional){
+        profiler.beginFrame(frame);const enc=device.createCommandEncoder();
+        for(const name of ['Waves + effects',...(optional?['Sky + clouds']:[]),'Composite'])enc.beginComputePass({timestampWrites:profiler.writes(name)}).end();
+        const resolved=profiler.resolve(enc);device.queue.submit([enc.finish()]);if(resolved)await profiler.read();
+        return profiler.snapshot();
+      }
+      const enabled=await run(detailed,120,true),skipped=await run(detailed,128,false),total=await run(normal,8,true);
+      detailed.destroy();normal.destroy();device.destroy();return {fallback,supported:true,enabled,skipped,total,errors};
+    });
+    assert.equal(result.fallback.supported,false);assert.equal(result.fallback.detailed,false);
+    assert.equal(result.fallback.writes,true);assert.equal(result.fallback.resolve,false);
+    if(result.supported){
+      assert.deepEqual(result.errors,[]);
+      assert.equal(result.enabled.sampleCount,1);assert.equal(result.skipped.sampleCount,2);
+      assert.equal(result.skipped.latest['Sky + clouds'],0);
+      assert.equal(result.total.sampleCount,1);assert.ok(Number.isFinite(result.total.totalMs));
+      assert.equal(result.enabled.error,'');assert.equal(result.skipped.error,'');
+    }
+  }finally{await page.close();}
+});
 
 test('bow contacts, persistent wake, impact spray, landing foam, and resets agree on the GPU', { timeout: 180000 }, async () => {
   const page = await browser.newPage();
@@ -607,6 +685,14 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['spray update'], undefined);
     assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
     assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
+    await page.setViewportSize({width:32,height:24});
+    await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
+    frame=await step(page);
+    assert.equal(frame.render.caravel,undefined);assert.equal(frame.render.composite,1);
+    assert.equal(frame.render['solid shadows'],undefined);
+    await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
+    frame=await step(page);
+    assert.equal(frame.render.caravel,1);assert.equal(frame.render['solid shadows'],1);
   } finally { await page.close(); }
 });
 

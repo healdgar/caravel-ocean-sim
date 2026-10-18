@@ -1,5 +1,21 @@
 import { hullDeck, hullHalfWidth, hullSurfacePoint, vesselDeck, WHEEL_CENTER,
   FORECASTLE_END, FORECASTLE_HEIGHT, QUARTERDECK_START, QUARTERDECK_HEIGHT } from './hull.js';
+
+// Deduplicate complete vertex records by their float32 bits. Material, normal,
+// UV seams and triangle order remain exact, including signed zero components.
+export function indexCaravelMesh(mesh) {
+  const bits=new Uint32Array(mesh.buffer,mesh.byteOffset,mesh.length);
+  const compact=new Uint32Array(mesh.length),indices=new Uint32Array(mesh.length/9),seen=new Map();
+  let count=0;
+  for(let i=0;i<bits.length;i+=9){
+    const record=bits.subarray(i,i+9),key=record.join(',');
+    let index=seen.get(key);
+    if(index===undefined){index=count++;seen.set(key,index);compact.set(record,index*9);}
+    indices[i/9]=index;
+  }
+  return {vertices:new Float32Array(compact.slice(0,count*9).buffer),indices};
+}
+
 // Timber geometry in metres, authored for a 12 x 3.6 m hull.
 export function createCaravelMesh() {
   const out=[];

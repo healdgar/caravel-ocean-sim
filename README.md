@@ -78,6 +78,8 @@ The native procedural mesh follows [this generated art reference](assets/caravel
 
 The model has 84,134 triangles, including substantial forestays, topmast stays and paired backstays, a railed mainmast crow's nest, and a low forecastle with a port-side ladder. Topsails clear the mast platforms. The helm sits on the aft quarterdeck, with the mizzen's foot raised above the standing viewpoint. All nine cabin windows occupy actual arched wall openings with recessed glazing and timber reveals; the obsolete bulwarks that crossed them have been removed.
 
+The visible mesh and shadow casters share 107,914 unique vertex records through 32-bit indices. Deduplication compares all nine float32 components bit-for-bit, preserving triangle order, material boundaries, hard normals, and UV seams.
+
 The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
 
 ### Bow waves and spray
@@ -134,8 +136,20 @@ The optimized frame schedule also avoids redundant GPU work:
 - The sky-view LUT updates only when sun elevation, haze, or effective camera altitude changes. An unchanged sky skips 256 × 144 × 48 atmospheric integration steps.
 - Updating only the changed reflection face removes five-sixths of the steady-state cube mip filtering work.
 - The water-height probe runs only when its result will be read back, and disabled bloom skips all 15 blur passes at normal resolutions.
+- Exact caravel vertex reuse reduces its main vertex/index buffers from 9,086,472 to 4,894,512 bytes (46.1%). Including the unchanged-size shadow index buffers, total mesh-buffer storage falls 41.5%. All 84,134 triangles remain.
+- With the ship visible, the ocean pass resolves directly into the water-reflection texture. This removes one full-screen RGBA16F copy (8 bytes per pixel read and written), preserving 4× MSAA, HDR precision, and every reflection mip. With the ship hidden, it resolves directly into the final HDR texture.
 
 These are reductions in memory and scheduled work, not a measured hardware FPS improvement. GPU timing depends on the adapter and scene.
+
+### GPU profiling
+
+Add `profile=1` to any scene URL for an opt-in timing overlay. It samples waves/effects, sky/clouds, environment reflections, solid/canvas shadows, ocean, reflection filtering, ship/spray, bloom, and composite every eight frames when `timestamp-query` is supported. Normal mode retains the original single compute pass; detailed mode splits it into three for measurement. Unsupported devices render normally and report that timing is unavailable.
+
+Values are GPU **spans**, not exclusive costs: render stages can overlap or wait on earlier work, especially on tile GPUs. Pass times must not be added; bloom reports its enclosing span. Compare the measured whole-frame span between otherwise identical scenes and profiling modes. Browser timestamp quantization can round short passes to zero.
+
+For a reproducible local capture, use `?view=ship&profile=1&w=1280&h=720&shot=gpu-check.png&frames=600&sunElev=35&sunAzim=30&boatSpeed=6`. The development server saves the image and `shots/gpu-check.json`, containing scene parameters, per-pass samples, median and p95 frame spans. Samples start at frame 120 and retain at most 512 entries. Screenshot runs use a fixed simulation timestep; asynchronous hull readback can still produce slight pose differences between runs. Close other active GPU scenes before comparing. These diagnostics remain local; GitHub Pages cannot save captures.
+
+An October 2026 native Chrome check on an Apple M4 Max (40 GPU cores), using the above scene and two 600-frame runs per version, measured median GPU spans of 12.32–12.45 ms before vertex reuse/direct resolve and 12.06–12.12 ms after. However, p95 increased from 14.42–14.55 ms to 15.01–15.07 ms. Each run retained 61 samples with detailed profiling enabled. This small median improvement does not establish a sustained FPS gain or an iPhone result; the confirmed benefits are lower mesh storage and one less full-screen copy. Waves, cloud quality, shadows, HDR, and antialiasing settings remain unchanged.
 
 ## Validation
 
@@ -148,7 +162,7 @@ npm run build
 npm test
 ```
 
-The suite contains 30 checks covering:
+The suite contains 33 checks covering:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
@@ -156,6 +170,7 @@ The suite contains 30 checks covering:
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
+- Bit-exact indexed geometry and shadow partitions; pixel equality between the original copy/unindexed schedule, direct resolve/indexed rendering, and profiled rendering; timestamp readback, skipped passes, and unsupported-device fallback.
 
 GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks in native Chrome supplement these tests; software-GPU checks do not establish device frame rates or visual quality.
 
@@ -179,6 +194,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 |---|---|
 | `index.html` | Page shell, HUD, and settings panel styles |
 | `js/main.js` | Device setup, resources, camera modes, per-frame loop |
+| `js/profiler.js` | Optional GPU pass spans, sampled frame timing, and local capture statistics |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |

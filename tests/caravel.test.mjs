@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createCaravelMesh } from '../js/caravel.js';
+import { createCaravelMesh, indexCaravelMesh } from '../js/caravel.js';
+import { shadowMeshData } from '../js/shadows.js';
 import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, WHEEL_CENTER, HELM_EYE_Z } from '../js/hull.js';
+
+test('indexed caravel preserves every vertex bit, triangle, and shadow partition',()=>{
+  const raw=createCaravelMesh(),indexed=indexCaravelMesh(raw);
+  const bits=new Uint32Array(raw.buffer),compact=new Uint32Array(indexed.vertices.buffer);
+  function expand(mesh,indices){
+    const out=new Uint32Array(indices.length*9);
+    for(let i=0;i<indices.length;i++)out.set(mesh.subarray(indices[i]*9,indices[i]*9+9),i*9);
+    return out;
+  }
+  assert.deepEqual(expand(compact,indexed.indices),bits);
+  assert.ok(indexed.vertices.byteLength+indexed.indices.byteLength<raw.byteLength*.55);
+  const oldShadows=shadowMeshData(raw),newShadows=shadowMeshData(indexed.vertices,indexed.indices);
+  assert.deepEqual(newShadows.bounds,oldShadows.bounds);
+  for(const part of ['solid','canvas'])assert.deepEqual(expand(compact,newShadows[part]),expand(bits,oldShadows[part]));
+  // Position-only welding would destroy normal/material/UV seams and signed zero.
+  const seams=new Float32Array(11*9);
+  for(let i=2;i<11;i++)seams[i*9+i-2]=1;
+  seams[0]=-0;
+  assert.equal(indexCaravelMesh(seams).vertices.length,seams.length);
+});
 test('caravel mesh has finite triangles, unit normals, and a forward bowsprit', () => {
   const mesh = createCaravelMesh();
   assert.equal(mesh.length % 27, 0);
