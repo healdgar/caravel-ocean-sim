@@ -4,7 +4,7 @@ Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-oce
 
 A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck wash, whitecaps, and volumetric weather. The caravel has square sails and a lateen mizzen, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
 
-[Open Seasick Simulator](https://healdgar.github.io/seasick-simulator/).
+[Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
 ![Looking toward the sun from 2.4 m above the water](docs/front.jpg)
 
@@ -61,7 +61,7 @@ you copy it manually. Each copy captures your latest settings.
 
 For crossing storm seas, select **Hella rough** in Sea settings: 28 m/s wind,
 8 m swell, and extra foam. The sliders allow up to 32 m/s wind and 10 m swell.
-[Try rough seas](https://healdgar.github.io/seasick-simulator/?boat=1&windSpeed=28&windDir=123&fetchKm=300&swellHs=8&swellLength=95&swellDir=236&choppy=1.6&foam=1.7).
+[Try rough seas](https://healdgar.github.io/caravel-ocean-sim/?boat=1&windSpeed=28&windDir=123&fetchKm=300&swellHs=8&swellLength=95&swellDir=236&choppy=1.6&foam=1.7).
 Links share the configuration; they do not freeze an animation frame or the
 boat's travelled position.
 
@@ -405,9 +405,9 @@ level while the vessel continues floating and steering.
 
 ## GitHub Pages build
 
-[Open the live sailing demo](https://healdgar.github.io/seasick-simulator/).
+[Open the live sailing demo](https://healdgar.github.io/caravel-ocean-sim/).
 Source and the published build now live together in the public
-[`healdgar/seasick-simulator`](https://github.com/healdgar/seasick-simulator) repository.
+[`healdgar/caravel-ocean-sim`](https://github.com/healdgar/caravel-ocean-sim) repository.
 
 `node build.mjs` also generates `docs/index.html`, a standalone minified demo
 with the oak material embedded. It starts in Boat camera unless the URL contains
