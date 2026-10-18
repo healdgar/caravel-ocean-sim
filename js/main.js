@@ -19,8 +19,8 @@ import { BLOOM_DOWN, BLOOM_UP, COMPOSITE } from './wgsl/post.js';
 
 const qs = new URLSearchParams(location.search);
 const DBG = Number(qs.get('dbg')) || 0;
-// Opt-in until the extra geometry work has been measured on the target phone.
-const OCEAN_DEPTH = qs.get('oceanDepth') === '1';
+// Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
+const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
 const D2R = Math.PI / 180;
 const GU = GPUBufferUsage;
 const TU = GPUTextureUsage;
