@@ -399,7 +399,8 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     localN=vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
   }
   if(material==14.0){
-    let angle=-hull.size.w*0.0174532925;let c=cos(angle);let s=sin(angle);
+    // +X is starboard and +Z is aft: positive helm moves the trailing edge to starboard.
+    let angle=hull.size.w*0.0174532925;let c=cos(angle);let s=sin(angle);
     let pivot=vec3f(0,-0.6,5.68);let q=position-pivot;
     local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
     localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);

@@ -1195,6 +1195,66 @@ test('clouds extinguish the HDR sun and surface light together', {timeout:120000
   }finally{await page.close();}
 });
 
+test('GPU rudder trailing edge and wheel agree with port and starboard steering', { timeout: 30000 }, async () => {
+  const page = await browser.newPage();
+  try {
+    await page.route('**/__rudder_test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
+    await page.goto(`${origin}/__rudder_test`);
+    const result = await page.evaluate(async () => {
+      const { VESSEL_RIG } = await import('/js/wgsl/vessel.js');
+      const { createCaravelMesh } = await import('/js/caravel.js');
+      const { WHEEL_CENTER } = await import('/js/hull.js');
+      const { stepBoatSteering } = await import('/js/boat.js');
+      const mesh = createCaravelMesh(), blade = [];
+      for (let i = 0; i < mesh.length; i += 9) if (mesh[i + 6] === 14) blade.push([mesh[i], mesh[i + 1], mesh[i + 2], 14]);
+      const trailingZ = Math.max(...blade.map(p => p[2]));
+      const points = blade.filter(p => p[2] === trailingZ);
+      points.push([WHEEL_CENTER[0], WHEEL_CENTER[1] + 0.5, WHEEL_CENTER[2], 7]);
+      const device = await (await navigator.gpu.requestAdapter()).requestDevice();
+      const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
+      const B = GPUBufferUsage, size = points.length * 16;
+      const buffer = (size, usage) => device.createBuffer({ size, usage });
+      const hull = buffer(96, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
+      const output = buffer(size, B.STORAGE | B.COPY_SRC), read = buffer(size, B.MAP_READ | B.COPY_DST);
+      device.queue.writeBuffer(input, 0, new Float32Array(points.flat()));
+      const module = device.createShaderModule({ code: VESSEL_RIG + `
+        @group(0) @binding(0) var<uniform> hull: Hull;
+        @group(0) @binding(1) var<storage, read> points: array<vec4f>;
+        @group(0) @binding(2) var<storage, read_write> result: array<vec4f>;
+        @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id: vec3u) {
+          let p = points[id.x]; let v = rigVertex(p.xyz, vec3f(1,0,0), p.w, vec2f(0));
+          result[id.x] = vec4f(v.position * v.scale, 1.0);
+        }` });
+      const pipe = await device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+      const group = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [hull, input, output].map((buffer, binding) => ({ binding, resource: { buffer } })) });
+      const h = new Float32Array(24); h[12] = 3.6; h[13] = 12;
+      const samples = [];
+      for (const angle of [-35, -8.75, 0, 8.75, 35]) {
+        h[15] = angle; device.queue.writeBuffer(hull, 0, h);
+        const enc = device.createCommandEncoder(), pass = enc.beginComputePass();
+        pass.setPipeline(pipe); pass.setBindGroup(0, group); pass.dispatchWorkgroups(points.length); pass.end();
+        enc.copyBufferToBuffer(output, 0, read, 0, size); device.queue.submit([enc.finish()]);
+        await read.mapAsync(GPUMapMode.READ); const values = new Float32Array(read.getMappedRange());
+        let trailingX = 0; for (let i = 0; i < points.length - 1; i++) trailingX += values[i * 4] / (points.length - 1);
+        const wheelX = values[(points.length - 1) * 4]; read.unmap();
+        const boat = { speed: 6, length: 12, heading: 0, rudder: angle, rudderTarget: angle, yawRate: 0 };
+        stepBoatSteering(boat, 0, 1 / 60);
+        samples.push({ angle, trailingX, wheelX, yaw: boat.yawRate });
+      }
+      device.destroy(); return { samples, errors };
+    });
+    assert.deepEqual(result.errors, []);
+    for (const { angle, trailingX, wheelX, yaw } of result.samples) {
+      if (angle === 0) { assert.ok(Math.abs(trailingX) < 1e-6); assert.equal(yaw, 0); }
+      else {
+        assert.equal(Math.sign(trailingX), Math.sign(yaw), 'blade trailing edge follows the commanded turn');
+        assert.equal(Math.sign(trailingX), Math.sign(angle));
+        if (Math.abs(angle) < 10) assert.equal(Math.sign(wheelX), Math.sign(trailingX), 'clockwise helm agrees with starboard blade motion');
+      }
+    }
+  } finally { await page.close(); }
+});
+
 test('vessel shadows follow the sun and hull, transmit canvas, and leave unblocked receivers lit', {timeout:120000}, async()=>{
   const page=await browser.newPage();
   try{

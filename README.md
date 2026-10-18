@@ -384,7 +384,9 @@ to return it to neutral. The rudder stays where the wheel is left. The **Rudder*
 slider provides the same control. With mouse look released (Esc), drag the visible
 3D wheel clockwise for starboard or counterclockwise for port. The wheel rotates
 with the actual rudder angle, with a one-turn range in each direction. Turn rate
-builds gradually and decays after centering; rudder authority depends on boat speed
+builds gradually and decays after centering. The rudder's trailing edge moves to
+starboard for positive helm and to port for negative helm, matching the turn;
+visible geometry and shadow casters share this rotation. Rudder authority depends on boat speed
 and length. A stationary boat does not turn under rudder alone.
 
 This is an approximate steering response, without wind-driven sail forces or a
