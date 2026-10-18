@@ -1,3 +1,4 @@
+import { createWaterInteraction } from './interaction.js';
 import { createCaravelMesh, WHEEL_CENTER } from './caravel.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition } from './boat.js';
@@ -196,8 +197,6 @@ async function main() {
   const samplerSim = device.createSampler({
     magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat',
   });
-  const bgFoamUpd = [0, 1].map((i) => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
-    fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim], 'foamupd' + i));
   const bgFoamMips = [0, 1].map((i) => {
     const out = [];
     for (let m = 1; m < FOAMW_MIPS; m++) out.push(bg(arr16MipPipe, [lvl(foamW[i], m - 1), lvl(foamW[i], m)]));
@@ -323,10 +322,13 @@ async function main() {
   const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(24);
   let bgCaravel;
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, shader, computePipe });
+  const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
+    fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
-  const bgOcean = [0, 1].map((i) => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
+  const bgOcean = [0, 1].map((i) => [0, 1].map(w => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
     fullArr(dispTex), fullArr(derivTex), fullArr(momTex), foamTex.createView(), envCubeView, sampRepeat,
-    fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }], 'ocean' + i));
+    fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'ocean' + i)));
   const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp], 'sky');
 
   // Water height under the camera (async readback, a few frames of latency) so the
@@ -336,7 +338,7 @@ async function main() {
   const probeRead = mkBuf(64, GU.MAP_READ | GU.COPY_DST, 'probe read');
   const boatUBO = mkBuf(32, GU.UNIFORM | GU.COPY_DST, 'boat probe');
   const boatUniform = new Float32Array(8);
-  const bgProbe = bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }], 'probe');
+  const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'probe'));
   let probePending = false, waterH = 0;
   let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
   const onProbe = () => {
@@ -515,7 +517,7 @@ async function main() {
   };
   let cameraMode = cameraModeFromLink(qs);
   const boat = {
-    enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
+    effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
     beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', 0, 0, 360),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', 2.4, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
@@ -778,6 +780,10 @@ async function main() {
   prowToggle.type = 'checkbox'; prowToggle.checked = boat.showProw;
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
   prowLabel.append(prowToggle); boatPanel.append(prowLabel);
+  const effectsLabel = document.createElement('label'); effectsLabel.textContent = 'Wakes & spray';
+  const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
+  effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
+  effectsLabel.append(effectsToggle); boatPanel.append(effectsLabel);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
   cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
   const cameraButtons=new Map();
@@ -867,7 +873,7 @@ async function main() {
   centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
   boatPanel.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatPanel.append(boatStatus);
-  const note = document.createElement('p'); note.textContent = 'Approximate hull motion from wave samples. No wake, planing, or hull-specific hydrodynamics.'; boatPanel.append(note);
+  const note = document.createElement('p'); note.textContent = 'Wave-driven hull motion, bow waves and impact spray. Speed is set manually.'; boatPanel.append(note);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
@@ -944,10 +950,11 @@ async function main() {
       cp.setBindGroup(0, bgSimMips[m - 1]);
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
+    interaction.encode(cp);
     // foam clipmaps
     foamCur = 1 - foamCur;
     cp.setPipeline(foamUpdPipe);
-    cp.setBindGroup(0, bgFoamUpd[foamCur]);
+    cp.setBindGroup(0, bgFoamUpd[foamCur][interaction.current]);
     cp.dispatchWorkgroups(FOAM_RES / 8, FOAM_RES / 8, 2);
     cp.setPipeline(arr16MipPipe);
     const fm = bgFoamMips[foamCur];
@@ -1006,6 +1013,14 @@ async function main() {
     frameIndex++;
 
     writeFrame(simTime);
+    boatRotate(hullData.subarray(0, 3), 1, 0, 0, boat.heading * D2R, boat.pitch, boat.roll);
+    boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
+    boatRotate(hullData.subarray(8, 11), 0, 0, -1, boat.heading * D2R, boat.pitch, boat.roll);
+    hullData[12] = boat.beam; hullData[13] = boat.length; hullData[14] = boat.eye; hullData[15] = boat.rudder;
+    hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
+    hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
+    device.queue.writeBuffer(hullUBO, 0, hullData);
+    interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
     simF[52] = simTime; simF[53] = dt;
@@ -1043,7 +1058,7 @@ async function main() {
       boatUniform[4]=boat.x; boatUniform[5]=boat.heave; boatUniform[6]=boat.z;
       device.queue.writeBuffer(boatUBO, 0, boatUniform);
       cp.setPipeline(probePipe);
-      cp.setBindGroup(0, bgProbe);
+      cp.setBindGroup(0, bgProbe[interaction.current]);
       cp.dispatchWorkgroups(1);
     }
     // This LUT depends only on sun elevation, haze and effective camera altitude.
@@ -1070,21 +1085,13 @@ async function main() {
     }
     cp.end();
 
-    boatRotate(hullData.subarray(0, 3), 1, 0, 0, boat.heading * D2R, boat.pitch, boat.roll);
-    boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
-    boatRotate(hullData.subarray(8, 11), 0, 0, -1, boat.heading * D2R, boat.pitch, boat.roll);
-    hullData[12] = boat.beam; hullData[13] = boat.length; hullData[14] = boat.eye; hullData[15] = boat.rudder;
-    hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
-    hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
-    device.queue.writeBuffer(hullUBO, 0, hullData);
-
     const drawProw = boat.showProw;
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
     if (nodeCount) {
       rp.setPipeline(oceanPipe);
-      rp.setBindGroup(0, bgOcean[foamCur]);
+      rp.setBindGroup(0, bgOcean[foamCur][interaction.current]);
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
@@ -1105,10 +1112,11 @@ async function main() {
       const prowPass = enc.beginRenderPass({
         colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: mainPass.colorAttachments[0].resolveTarget,
           loadOp: 'load', storeOp: 'discard' }],
-        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: boat.enabled ? 'clear' : 'load', depthStoreOp: 'discard' },
+        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: 'discard' },
       });
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
-      prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9); prowPass.end();
+      prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9);
+      interaction.draw(prowPass); prowPass.end();
     }
 
     if (P.bloom > 0) {

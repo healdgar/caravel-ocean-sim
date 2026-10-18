@@ -48,7 +48,7 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 Open **Sea settings** and adjust the waves and lighting, then select **Copy share
 link** in the top controls. The link includes every sea and lighting parameter,
 boat length, beam, heading, speed, eye height, rudder setting, ship visibility,
-and the selected camera mode. Opening it restores those settings. The address
+wake/spray visibility, and the selected camera mode. Opening it restores those settings. The address
 bar also receives the link; if copying is blocked, a selected text field lets
 you copy it manually. Each copy captures your latest settings.
 
@@ -67,6 +67,16 @@ The sea is a Tessendorf FFT simulation with six cascades of 256 by 256 samples. 
 The spectrum is a fetch-limited JONSWAP wind sea with Donelan-Banner directional spreading, plus a narrow long-crested swell. Dispersion includes the capillary term, and choppy horizontal displacement sharpens the crests. Spectrum evolution feeds directly into the first radix-2 inverse FFT in workgroup memory, followed by the column FFT.
 
 The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart near the camera and the mesh reaches 160 km, with continuous vertex morphing between levels.
+
+### Bow waves and spray
+
+Thirty-two GPU probes intersect the moving hull with the horizontally displaced FFT surface. Relative water rise and forward speed drive two curling bow sheets, droplets, and finer wind-carried mist. A dry bow stops emitting; a stationary hull still splashes when struck by a rising crest.
+
+A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Gravity, drag, water collision, and fixed-capacity particle storage stay on the GPU (8,192 slots).
+
+**Wakes & spray** toggles the effect, also preserved as `effects=0` or `effects=1` in shared links. Changing sea spectrum or hull dimensions resets contact history to avoid false impacts. The grid uses a damped wave approximation with bounded forcing; it does not model full hull hydrodynamics, planing, or a physically exact Kelvin wake.
+
+Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_demo) for curling sheets and separate spray populations; [booherbg/clean-room-fft-ocean](https://github.com/booherbg/clean-room-fft-ocean) for ocean/contact-driven spray; [bob6664569/open-water](https://github.com/bob6664569/open-water) for persistent world-space wakes. This implementation uses native WebGPU/WGSL and adds no runtime dependencies.
 
 ### Shading
 
@@ -112,7 +122,7 @@ npm test
 npm run build
 ```
 
-The WebGPU tests compare the fused FFT with analytical travelling waves across all six cascades, and exercise sky invalidation, settings changes, bloom toggling, and resizing down to 1 × 1. They use SwiftShader and an offscreen GPU render target so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed.
+The WebGPU tests compare the fused FFT with analytical travelling waves across all six cascades, and exercise sky invalidation, settings changes, bloom toggling, and resizing down to 1 × 1. Additional GPU fixtures check dry/stationary/moving and tilted hull contacts, impact emission, wake persistence and stability, matching buoyancy heights, particle retirement and landing foam, and effect toggling. They use SwiftShader and an offscreen GPU render target so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed.
 
 ## Known limitations
 
@@ -132,9 +142,10 @@ I built this with Claude Code (Opus 5.5). I asked for the most realistic water i
 | `index.html` | Page shell, HUD, and settings panel styles |
 | `js/main.js` | Device setup, resources, camera modes, per-frame loop |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
+| `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/caravel.js` | Full hull, decks, cabin, rigging, square sails, and helm geometry |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
-| `js/wgsl/` | Shaders as JavaScript modules: `sim.js` (waves and foam), `sky.js` (atmosphere and clouds), `ocean.js` (surface and sky pass), `post.js` (bloom and tone mapping), `common.js` (shared structs) |
+| `js/wgsl/` | Shaders as JavaScript modules: `sim.js` (waves and foam), `interaction.js` (bow sheets, wake, and spray), `sky.js` (atmosphere and clouds), `ocean.js` (surface and sky pass), `post.js` (bloom and tone mapping), `common.js` (shared structs) |
 | `server.mjs` | Tiny static server for development |
 | `build.mjs` | Builds `ocean.html` and `ocean.min.html` |
 | `docs/` | README images |
@@ -158,7 +169,7 @@ from the actual displaced FFT ocean. Larger footprints average over waves;
 length also slows the pitch/heave response and beam slows the roll response.
 Speed changes position and therefore the waves encountered. Live pitch, roll,
 and heave are shown in the panel. This is an approximate displacement-hull ride,
-without hull-specific mass/stability, wake, planing, or slamming physics.
+with visual wakes and impact spray, but without hull-specific mass/stability, planing, or slamming forces.
 
 URL options: `boat=1&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=2.4`.
 Run `node --test tests/boat.test.mjs` for the hull-response math checks.
@@ -179,11 +190,10 @@ and keeps its wave-following pose while the camera flies or orbits around it.
 The PBR material uses the live atmospheric sunlight, cloud transmittance, sky
 environment, and current ocean HDR image for visible water reflections and
 approximate bounced light. Offscreen reflections use the environment cube;
-rail shadows are approximate. A separate near-field depth pass keeps wave crests
-from rendering through the foredeck in Boat camera. Exterior views share the
-ocean depth buffer so the water correctly occludes the submerged hull. A
-world-space hull volume also excludes water inside the vessel, keeping the
-decks dry while preserving the exterior waterline in all camera modes. The neutral oak albedo texture has no
+rail shadows are approximate. All camera modes share the ocean depth buffer, so
+water, hull, bow sheets, and spray occlude each other consistently. A world-space
+hull volume excludes water inside the vessel below deck level; overtopping
+crests remain visible. The neutral oak albedo texture has no
 intentional scene lighting and is embedded into both standalone HTML bundles. It was created
 with the built-in image generation tool using this prompt:
 

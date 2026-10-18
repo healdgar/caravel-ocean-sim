@@ -223,7 +223,285 @@ fn pfbm(p: vec2f, period: i32, oct: i32) -> f32 {
 }
 `;
 
+// ---- js/wgsl/interaction.js ----
+// Local hull response and spray. Bounded visual approximation, not a fluid solver.
+
+const WAKE_SIZE = 256;
+const SPRAY_COUNT = 8192;
+const CONTACT_COUNT = 32;
+const INTERACTION_TYPES = /* wgsl */ `
+struct Interaction {
+  domain: vec4f,   // world centre xz, extent, texel size
+  previous: vec4f, // previous centre xz, dt, reset
+  motion: vec4f,   // speed m/s, enabled, wind velocity xz
+  phase: vec4f,    // time, frame, reserved
+};
+struct Contact { point: vec4f, axis: vec4f, flow: vec4f, state: vec4f };
+struct Drop { position: vec4f, velocity: vec4f, shape: vec4f };
+struct InteractionHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
+`;
+// All consumers query the same world-space field, including the buoyancy probe.
+const WAKE_SAMPLE = INTERACTION_TYPES + /* wgsl */ `
+fn wakeAt(p: vec2f) -> vec4f {
+  let uv = (p - I.domain.xy) / I.domain.z + 0.5;
+  let edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5));
+  if (I.motion.y < 0.5 || edge >= 0.495) { return vec4f(0.0); }
+  return textureSampleLevel(wakeTex, wakeSamp, uv, 0.0) * (1.0 - smoothstep(0.45, 0.495, edge)) * I.motion.y;
+}
+`;
+const INTERACTION_SEA = /* wgsl */ `
+fn interactionDisp(p: vec2f) -> vec3f {
+  var d = vec3f(0.0);
+  for (var c = 0u; c < ${CASCADES}u; c++) {
+    d += textureSampleLevel(seaTex, seaSamp, p * F.cascInvL[c >> 2u][c & 3u], c, 0.0).xyz;
+  }
+  return d;
+}
+fn interactionSea(p: vec2f) -> f32 {
+  var q = p;
+  for (var k = 0; k < 3; k++) { q = p - interactionDisp(q).xz; }
+  return interactionDisp(q).y;
+}
+fn interactionRandom(n: u32) -> f32 {
+  var x = n * 747796405u + 2891336453u;
+  x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+  return f32((x >> 22u) ^ x) / 4294967296.0;
+}
+`;
+
+const WATER_CONTACTS = FRAME_WGSL + INTERACTION_TYPES + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> I: Interaction;
+@group(0) @binding(2) var<uniform> H: InteractionHull;
+@group(0) @binding(3) var seaTex: texture_2d_array<f32>;
+@group(0) @binding(4) var seaSamp: sampler;
+@group(0) @binding(5) var<storage, read_write> contacts: array<Contact, ${CONTACT_COUNT}>;
+` + INTERACTION_SEA + /* wgsl */ `
+@compute @workgroup_size(32) fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  let u = f32(i % 16u) / 15.0;
+  let side = select(-1.0, 1.0, i >= 16u);
+  let a = mix(0.28, 0.992, u);
+  let z = -6.4 * a;
+  let deck = 0.7 + 0.47 * a * a * a;
+  let halfWidth = (1.8 * sqrt(max(0.0006, 1.0 - a * a)) + 0.105) * H.size.x / 3.6;
+  let spine = H.origin.xyz - H.forward.xyz * (z * H.size.y / 12.0);
+  let rest = spine + H.right.xyz * side * halfWidth * 0.9;
+  var p = rest;
+  var level = 0.0;
+  var localY = 0.0;
+  var width = halfWidth * 0.9;
+  for (var j = 0; j < 3; j++) {
+    level = interactionSea(p.xz);
+    localY = (level - spine.y - H.right.y * side * width) / max(0.35, H.up.y);
+    let depth = clamp((deck - localY) / (deck + 1.45), 0.0, 1.0);
+    width = halfWidth * sqrt(max(0.001, 1.0 - depth * depth));
+    p = spine + H.right.xyz * side * width + H.up.xyz * localY;
+  }
+  p.y = level;
+  let signedWater = level - rest.y;
+  let old = contacts[i];
+  let reset = I.previous.w > 0.5 || old.state.y < 0.5;
+  let closing = select(clamp((signedWater - old.state.x) / max(I.previous.z, 0.001), 0.0, 7.0), 0.0, reset);
+  let wet = smoothstep(-1.42, -0.9, localY) * (1.0 - smoothstep(deck + 0.3, deck + 1.1, localY)) * I.motion.y;
+  let speed = max(I.motion.x, 0.0);
+  let drive = wet * min(2.6, (0.13 * speed + 0.46 * closing) * mix(0.3, 1.0, u));
+  let strength = select(mix(old.point.w, drive, 1.0 - exp(-I.previous.z * 14.0)), drive, reset);
+  let outward = normalize(H.right.xyz * side + H.forward.xyz * (0.18 + 0.35 * a * a));
+  contacts[i].point = vec4f(p, strength * I.motion.y);
+  contacts[i].axis = vec4f(outward, strength);
+  contacts[i].flow = vec4f(H.forward.xyz * speed + outward * (speed * 0.45 + closing * 0.6), wet);
+  contacts[i].state = vec4f(signedWater, 1.0, closing, u);
+}
+`;
+
+const WAKE_UPDATE = INTERACTION_TYPES + /* wgsl */ `
+@group(0) @binding(0) var<uniform> I: Interaction;
+@group(0) @binding(1) var<uniform> H: InteractionHull;
+@group(0) @binding(2) var prevWake: texture_2d<f32>;
+@group(0) @binding(3) var dstWake: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(4) var<storage, read> contacts: array<Contact, ${CONTACT_COUNT}>;
+@group(0) @binding(5) var<storage, read_write> landings: array<atomic<u32>>;
+fn previousCell(q: vec2i) -> vec4f {
+  if (any(q < vec2i(1)) || any(q >= vec2i(${WAKE_SIZE - 1})) || I.previous.w > 0.5) { return vec4f(0.0); }
+  return textureLoad(prevWake, q, 0);
+}
+@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
+  let q = vec2i(id.xy);
+  let deposited = f32(atomicExchange(&landings[id.y * ${WAKE_SIZE}u + id.x], 0u)) / 4096.0;
+  if (I.motion.y < 0.5) { textureStore(dstWake, q, vec4f(0.0)); return; }
+  let shift = vec2i(round((I.domain.xy - I.previous.xy) / I.domain.w));
+  let pq = q + shift;
+  let old = previousCell(pq);
+  let lap = previousCell(pq + vec2i(1,0)).x + previousCell(pq - vec2i(1,0)).x + previousCell(pq + vec2i(0,1)).x + previousCell(pq - vec2i(0,1)).x - 4.0 * old.x;
+  let p = (vec2f(id.xy) + 0.5 - ${WAKE_SIZE / 2}.0) * I.domain.w + I.domain.xy;
+  let delta = p - H.origin.xz;
+  let along = dot(delta, H.forward.xz);
+  let side = select(0u, 16u, dot(delta, H.right.xz) >= 0.0);
+  let u = clamp((along / max(H.size.y * 6.4 / 12.0, 0.1) - 0.28) / 0.712, 0.0, 1.0);
+  let contact = contacts[side + u32(round(u * 15.0))];
+  let width = max(0.55, H.size.x * 0.18);
+  let toContact = p - contact.point.xz;
+  let r = length(toContact) / width;
+  // A crest outside the hull and a shallow trough behind it displace water to either side.
+  let outside = dot(toContact, contact.axis.xz);
+  let source = exp(-r * r * 1.4) * smoothstep(-0.2, 0.25, outside) * contact.point.w;
+  let stern = exp(-pow((along + H.size.y * 0.44) / max(0.7, H.size.y * 0.1), 2.0) - pow(dot(delta, H.right.xz) / max(0.6, H.size.x * 0.45), 2.0));
+  let sternWet = (contacts[0].flow.w + contacts[16].flow.w) * 0.5;
+  let forcing = source * 8.0 - stern * sternWet * min(0.65, I.motion.x * 0.05);
+  let dt = I.previous.z;
+  // c=2.5 m/s and dx>=0.5 m remain CFL-stable at the host's maximum dt=0.1 s.
+  let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 2.0) * dt) * exp(-dt * 1.25), -3.0, 3.0);
+  let edge = 1.0 - smoothstep(0.43, 0.495, max(abs(p.x - I.domain.x), abs(p.y - I.domain.y)) / I.domain.z);
+  let height = clamp(old.x + velocity * dt, -0.7, 1.1) * edge;
+  let foamSource = source * 2.5 + stern * sternWet * min(1.5, I.motion.x * 0.12);
+  let foam = clamp(old.z * exp(-dt * 0.45) + foamSource * dt + deposited, 0.0, 1.0) * edge;
+  textureStore(dstWake, q, vec4f(height, velocity * edge, foam, max(foamSource * dt, deposited)));
+}
+`;
+
+const SPRAY_UPDATE = FRAME_WGSL + WAKE_SAMPLE + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> I: Interaction;
+@group(0) @binding(2) var seaTex: texture_2d_array<f32>;
+@group(0) @binding(3) var seaSamp: sampler;
+@group(0) @binding(4) var wakeTex: texture_2d<f32>;
+@group(0) @binding(5) var wakeSamp: sampler;
+@group(0) @binding(6) var<storage, read> contacts: array<Contact, ${CONTACT_COUNT}>;
+@group(0) @binding(7) var<storage, read_write> drops: array<Drop, ${SPRAY_COUNT}>;
+@group(0) @binding(8) var<storage, read_write> landings: array<atomic<u32>>;
+` + INTERACTION_SEA + /* wgsl */ `
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  var d = drops[i];
+  let dt = I.previous.z;
+  if (I.motion.y < 0.5 || I.previous.w > 0.5) { drops[i].position.w = 0.0; return; }
+  if (d.position.w > 0.0) {
+    d.position.w -= dt;
+    let mist = d.shape.z;
+    let drag = 1.0 - exp(-dt * mix(0.35, 2.2, mist));
+    d.velocity = vec4f(mix(d.velocity.xyz, vec3f(I.motion.z * 0.5, 0.0, I.motion.w * 0.5), drag), d.velocity.w);
+    d.velocity.y -= mix(9.81, 3.0, mist) * dt;
+    d.position = vec4f(d.position.xyz + d.velocity.xyz * dt, d.position.w);
+    let level = interactionSea(d.position.xz) + wakeAt(d.position.xz + I.domain.xy - I.previous.xy).x;
+    if (d.position.y <= level && d.velocity.y < 0.0) {
+      let cell = vec2i(floor((d.position.xz - I.domain.xy) / I.domain.w + ${WAKE_SIZE / 2}.0));
+      if (all(cell >= vec2i(0)) && all(cell < vec2i(${WAKE_SIZE}))) {
+        atomicAdd(&landings[u32(cell.y) * ${WAKE_SIZE}u + u32(cell.x)], select(100u, 24u, mist > 0.5));
+      }
+      d.position.w = 0.0;
+    }
+    drops[i] = d;
+    return;
+  }
+  let seed = i * 1399u + u32(I.phase.y) * 7919u;
+  let r0 = interactionRandom(seed); let r1 = interactionRandom(seed + 1u); let r2 = interactionRandom(seed + 2u);
+  let contact = contacts[u32(r0 * 31.999)];
+  let rate = contact.point.w * 0.75;
+  if (r1 > 1.0 - exp(-rate * dt)) { return; }
+  let mist = select(0.0, 1.0, i % 7u == 0u);
+  let life = mix(0.65 + r2 * 0.6, 1.0 + r2 * 0.7, mist);
+  let lift = 1.1 + sqrt(max(contact.point.w, 0.0)) * (2.2 + r2 * 2.0);
+  let velocity = contact.flow.xyz * (0.65 + r2 * 0.35) + vec3f(0.0, lift, 0.0);
+  let p = contact.point.xyz + contact.axis.xyz * (0.05 + r2 * 0.18) + vec3f(0.0, 0.12 + wakeAt(contact.point.xz + I.domain.xy - I.previous.xy).x, 0.0);
+  drops[i].position = vec4f(p, life);
+  drops[i].velocity = vec4f(velocity, life);
+  drops[i].shape = vec4f(mix(0.012 + r0 * 0.021, 0.045 + r0 * 0.055, mist), r2, mist, contact.point.w);
+}
+`;
+
+// Both populations share the ocean's sky/sun illumination and reverse-Z depth buffer.
+const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + WAKE_SAMPLE + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> I: Interaction;
+@group(0) @binding(2) var<storage, read> contacts: array<Contact, ${CONTACT_COUNT}>;
+@group(0) @binding(3) var<storage, read> drops: array<Drop, ${SPRAY_COUNT}>;
+@group(0) @binding(4) var envCube: texture_cube<f32>;
+@group(0) @binding(5) var effectSamp: sampler;
+@group(0) @binding(6) var transLUT: texture_2d<f32>;
+@group(0) @binding(7) var wakeTex: texture_2d<f32>;
+@group(0) @binding(8) var wakeSamp: sampler;
+struct EffectVertex { @builtin(position) position: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) data: vec4f };
+fn sheetPoint(station: u32, side: u32, q: f32) -> vec3f {
+  let c = contacts[station + side * 16u];
+  // Smooth short-wave contact jitter along the continuous sheet; droplets retain it.
+  var strength = 0.0;
+  for (var j = -2; j <= 2; j++) {
+    strength += contacts[u32(clamp(i32(station) + j, 0, 15)) + side * 16u].point.w * f32(3 - abs(j));
+  }
+  strength /= 9.0;
+  let width = 0.15 + strength * 1.1;
+  let ripple = sin(f32(station) * 1.7 + I.phase.x * 9.0 + q * 7.0) * 0.035 * strength * q;
+  let outward = width * (0.85 * q + 0.42 * sin(q * 3.14159));
+  let lift = strength * sin(q * 2.95) + ripple + 0.025;
+  return c.point.xyz + c.axis.xyz * outward + vec3f(0.0, lift + wakeAt(c.point.xz).x, 0.0);
+}
+@vertex fn sheetVS(@builtin(vertex_index) vi: u32) -> EffectVertex {
+  let corners = array<vec2u, 6>(vec2u(0,0),vec2u(1,0),vec2u(1,1),vec2u(0,0),vec2u(1,1),vec2u(0,1));
+  let cell = vi / 6u;
+  let side = cell / 150u;
+  let local = cell % 150u;
+  let corner = corners[vi % 6u];
+  let station = local / 10u + corner.x;
+  let q = f32(local % 10u + corner.y) / 10.0;
+  let p = sheetPoint(station, side, q);
+  let a = sheetPoint(min(15u, station + 1u), side, q) - sheetPoint(select(0u, station - 1u, station > 0u), side, q);
+  let b = sheetPoint(station, side, min(1.0, q + 0.03)) - sheetPoint(station, side, max(0.0, q - 0.03));
+  let crossN = cross(a, b);
+  let n = crossN / max(length(crossN), 0.0001);
+  var o: EffectVertex;
+  o.position = F.viewProj * vec4f(p - F.camPos.xyz, 1.0);
+  o.world = p; o.normal = n; o.uv = vec2f(f32(station) / 15.0, q);
+  o.data = vec4f(contacts[station + side * 16u].point.w, 0.0, 0.0, 0.0);
+  return o;
+}
+@vertex fn dropVS(@builtin(vertex_index) vi: u32, @builtin(instance_index) i: u32) -> EffectVertex {
+  let corners = array<vec2f, 6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1));
+  let d = drops[i];
+  let age = clamp(1.0 - d.position.w / max(0.01, d.velocity.w), 0.0, 1.0);
+  let distanceToEye = distance(d.position.xyz, F.camPos.xyz);
+  let size = min(d.shape.x * mix(1.0, 1.0 + age * 2.4, d.shape.z), distanceToEye * length(F.camUp.xyz) * mix(6.0, 18.0, d.shape.z) / F.screen.y);
+  let uv = corners[vi];
+  let right = normalize(F.camRight.xyz); let up = normalize(F.camUp.xyz);
+  let projected = vec2f(dot(d.velocity.xyz, right), dot(d.velocity.xyz, up));
+  let direction = (projected + vec2f(0.0, 0.001)) / max(length(projected + vec2f(0.0, 0.001)), 0.001);
+  let stretch = mix(1.0 + min(1.3, length(projected) * 0.06), 1.0, d.shape.z);
+  let offset = direction * uv.y * stretch + vec2f(direction.y, -direction.x) * uv.x;
+  let p = d.position.xyz + (right * offset.x + up * offset.y) * size;
+  var o: EffectVertex;
+  o.position = F.viewProj * vec4f(p - F.camPos.xyz, 1.0);
+  o.world = p; o.normal = vec3f(0,1,0); o.uv = uv;
+  o.data = vec4f(select(0.0, smoothstep(0.35, 1.2, distanceToEye), d.position.w > 0.0), age, d.shape.z, d.shape.y);
+  return o;
+}
+fn sprayLight(p: vec3f) -> vec3f {
+  let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
+  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w;
+  let view = normalize(F.camPos.xyz - p);
+  let scatter = pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
+  return sky * 0.85 + sun * (0.12 + scatter * 0.65);
+}
+@fragment fn sheetFS(o: EffectVertex) -> @location(0) vec4f {
+  let n = normalize(o.normal + vec3f(0.0, 0.0001, 0.0));
+  let view = normalize(F.camPos.xyz - o.world);
+  let reflected = textureSampleLevel(envCube, effectSamp, reflect(-view, n), 1.3).rgb;
+  let bands = clamp(0.5 + gnoise(o.uv * vec2f(22.0, 7.0) - vec2f(I.phase.x * 0.6, I.phase.x * 2.0)), 0.0, 1.0);
+  let brokenLip = smoothstep(0.48, 0.93, o.uv.y) * (0.45 + 0.55 * bands);
+  let foam = clamp(brokenLip + o.data.x * 0.045, 0.0, 0.85);
+  let color = mix(reflected * 0.8 + F.waterCol.rgb * 0.4, sprayLight(o.world), foam);
+  let ends = smoothstep(0.0, 0.1, o.uv.x) * (1.0 - smoothstep(0.94, 1.0, o.uv.x));
+  let alpha = smoothstep(0.02, 0.16, o.data.x) * ends * (1.0 - smoothstep(0.78 + bands * 0.16, 1.0, o.uv.y)) * (0.36 + foam * 0.48) * I.motion.y;
+  return vec4f(color * alpha, alpha);
+}
+@fragment fn dropFS(o: EffectVertex) -> @location(0) vec4f {
+  let r2 = dot(o.uv, o.uv);
+  let alpha = exp(-r2 * mix(3.5, 2.5, o.data.z)) * (1.0 - smoothstep(0.65, 1.0, r2)) * (1.0 - smoothstep(0.55, 1.0, o.data.y)) * mix(0.65, 0.055, o.data.z) * o.data.x * I.motion.y;
+  return vec4f(sprayLight(o.world) * alpha, alpha);
+}
+`;
+
 // ---- js/wgsl/sim.js ----
+
 // FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
 
 const FFT_MATH = /* wgsl */ `
@@ -565,7 +843,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 // World-space foam clipmaps (toroidally addressed, centred on the camera).
 // Foam is injected where the TOTAL surface Jacobian (all cascades) folds, then decays.
 const FOAM_RES = 1024;
-const FOAM_UPDATE = /* wgsl */ `
+const FOAM_UPDATE = WAKE_SAMPLE + /* wgsl */ `
 const RES: i32 = ${FOAM_RES};
 struct FoamU {
   snap: array<vec4i, 2>,     // per level: current camera texel (x, z), previous (x, z)
@@ -582,6 +860,9 @@ struct FoamU {
 @group(0) @binding(4) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(5) var samp: sampler;
 @group(0) @binding(6) var sampPrev: sampler;
+@group(0) @binding(7) var<uniform> I: Interaction;
+@group(0) @binding(8) var wakeTex: texture_2d<f32>;
+@group(0) @binding(9) var wakeSamp: sampler;
 
 fn wrapIdx(i: i32, lo: i32) -> i32 { return lo + (((i - lo) % RES) + RES) % RES; }
 
@@ -614,7 +895,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
   }
   let dt = U.p0.z;
-  let inject = clamp((U.p1.x - J) * U.p1.y, 0.0, 1.0);
+  let hullFoam = wakeAt(p);
+  let inject = max(clamp((U.p1.x - J) * U.p1.y, 0.0, 1.0), hullFoam.z);
   var f = prev.r * exp(-dt * U.p0.w);
   f = max(f, inject);
   f = min(f + inject * dt * U.p1.z, 1.6);
@@ -1144,6 +1426,7 @@ fn main(@builtin(local_invocation_index) k: u32) {
 `;
 
 // ---- js/wgsl/ocean.js ----
+
 // Ocean surface + sky background rendering.
 
 
@@ -1184,7 +1467,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 `;
 
-const OCEAN = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
+const OCEAN = WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -1195,6 +1478,9 @@ const OCEAN = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
 @group(0) @binding(11) var<storage, read> sunVis: array<f32, 4>;
 struct OceanHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
 @group(0) @binding(12) var<uniform> H: OceanHull;
+@group(0) @binding(13) var<uniform> I: Interaction;
+@group(0) @binding(14) var wakeTex: texture_2d<f32>;
+@group(0) @binding(15) var wakeSamp: sampler;
 ` + SKY_RENDER_FUNCS + /* wgsl */ `
 const ENV_MAXMIP: f32 = ${ENV_MIPS - 1}.0;
 const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
@@ -1227,7 +1513,9 @@ struct VSOut {
     }
   }
   var o: VSOut;
-  let world = vec3f(xz.x + disp.x, disp.y, xz.y + disp.z);
+  let displacedXZ = xz + disp.xz;
+  disp.y += wakeAt(displacedXZ).x;
+  let world = vec3f(displacedXZ.x, disp.y, displacedXZ.y);
   o.rel = world - F.camPos.xyz;
   o.pos = F.viewProj * vec4f(o.rel, 1.0);
   o.xz = xz;
@@ -1292,7 +1580,10 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   cov.y += unres;
   let jx = max(1.0 + jxx, 0.15);
   let jz = max(1.0 + jzz, 0.15);
-  let sl = vec2f(s.x / jx, s.y / jz);
+  let wp = in.rel.xz + F.camPos.xz;
+  let dx = I.domain.w;
+  let wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
+  let sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
   let nrm = normalize(vec3f(-sl.x, 1.0, -sl.y));
   // specular anti-aliasing: slope variation across the pixel widens the lobe
   let dsx = dpdx(sl);
@@ -1435,13 +1726,16 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
 
 // Samples the displaced surface height under the camera (inverting the horizontal
 // displacement with a few fixed-point iterations).
-const HEIGHT_PROBE = FRAME_WGSL + /* wgsl */ `
+const HEIGHT_PROBE = WAKE_SAMPLE + FRAME_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var<storage, read_write> outH: array<f32, 16>;
 struct ProbeBoat { config: vec4f, origin: vec4f };
 @group(0) @binding(4) var<uniform> boat: ProbeBoat;
+@group(0) @binding(5) var<uniform> I: Interaction;
+@group(0) @binding(6) var wakeTex: texture_2d<f32>;
+@group(0) @binding(7) var wakeSamp: sampler;
 fn dispAt(xz: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
@@ -1462,7 +1756,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let d = dispAt(x0);
     x0 = goal - d.xz;
   }
-  outH[id.x] = dispAt(x0).y;
+  outH[id.x] = dispAt(x0).y + wakeAt(goal).x;
 }
 `;
 
@@ -2092,10 +2386,84 @@ function createShareLink(href, settings, boat, cameraMode) {
   for (const [key, value] of Object.entries(settings)) setNumber(key, value);
   for (const [key, param] of Object.entries(BOAT_LINK_KEYS)) setNumber(param, boat[key]);
   url.searchParams.set('prow', boat.showProw ? '1' : '0');
+  url.searchParams.set('effects', boat.effects === false ? '0' : '1');
   return url.href;
 }
 
+// ---- js/interaction.js ----
+// GPU-owned bow contacts, a moving local wake grid, and fixed-capacity spray.
+
+async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, shader, computePipe }) {
+  const bu = GPUBufferUsage, tu = GPUTextureUsage;
+  const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
+  const contacts = device.createBuffer({ label: 'hull contacts', size: 32 * 64, usage: bu.STORAGE | bu.COPY_SRC });
+  const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
+  const landings = device.createBuffer({ label: 'spray landing foam', size: WAKE_SIZE * WAKE_SIZE * 4, usage: bu.STORAGE | bu.COPY_SRC });
+  const textures = [0, 1].map(i => device.createTexture({ label: 'local wake ' + i, size: [WAKE_SIZE, WAKE_SIZE], format: 'rgba16float', usage: tu.TEXTURE_BINDING | tu.STORAGE_BINDING | tu.COPY_SRC }));
+  const views = textures.map(t => t.createView());
+  const sampler = device.createSampler({ minFilter: 'linear', magFilter: 'linear', mipmapFilter: 'linear' });
+  const [contactPipe, wakePipe, sprayPipe, module] = await Promise.all([
+    computePipe(WATER_CONTACTS, 'hull contact'), computePipe(WAKE_UPDATE, 'local wake'), computePipe(SPRAY_UPDATE, 'spray update'), shader(WATER_EFFECTS, 'water effects'),
+  ]);
+  const buffer = b => ({ buffer: b });
+  const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
+  const contactGroup = bind(contactPipe, [buffer(frameUBO), buffer(uniform), buffer(hullUBO), seaView, seaSampler, buffer(contacts)]);
+  const wakeGroups = views.map((v, i) => bind(wakePipe, [buffer(uniform), buffer(hullUBO), views[1 - i], v, buffer(contacts), buffer(landings)]));
+  const sprayGroups = views.map(v => bind(sprayPipe, [buffer(frameUBO), buffer(uniform), seaView, seaSampler, v, sampler, buffer(contacts), buffer(drops), buffer(landings)]));
+  const renderPipes = await Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({
+    label: kind === 'sheet' ? 'bow sheets' : 'spray', layout: 'auto',
+    vertex: { module, entryPoint: kind + 'VS' },
+    fragment: { module, entryPoint: kind + 'FS', targets: [{ format: 'rgba16float', blend: {
+      color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+    } }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
+  })));
+  // Auto layouts omit the unused population's binding in each render entry point.
+  const renderGroups = views.map(wakeView => renderPipes.map((pipe, i) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: buffer(frameUBO) }, { binding: 1, resource: buffer(uniform) },
+    { binding: i === 0 ? 2 : 3, resource: buffer(i === 0 ? contacts : drops) },
+    { binding: 4, resource: envView }, { binding: 5, resource: sampler }, { binding: 6, resource: transView },
+    ...(i === 0 ? [{ binding: 7, resource: wakeView }, { binding: 8, resource: sampler }] : []),
+  ] })));
+  // Drop shading samples sky and transmittance, but not the contact population.
+  const values = new Float32Array(16);
+  let current = 0, prevX = 0, prevZ = 0, previousExtent = 0, previousRevision = -1, wasEnabled = false, enabled = false, needsClear = true;
+  return {
+    uniform, views, sampler, contacts, drops, textures, landings,
+    get current() { return current; },
+    update(boat, dt, time, frame, windSpeed, windDir, resetSea = false) {
+      enabled = boat.showProw && boat.effects !== false;
+      const extent = Math.max(128, boat.length * 4), dx = extent / WAKE_SIZE;
+      const x = Math.round(boat.x / dx) * dx, z = Math.round(boat.z / dx) * dx;
+      const reset = resetSea || enabled !== wasEnabled || previousRevision !== boat.revision || extent !== previousExtent || Math.hypot(x - prevX, z - prevZ) > extent * 0.25;
+      values[0] = x; values[1] = z; values[2] = extent; values[3] = dx;
+      values[4] = prevX; values[5] = prevZ; values[6] = Math.max(0, Math.min(0.1, dt)); values[7] = reset ? 1 : 0;
+      values[8] = boat.speed * 0.514444; values[9] = enabled ? 1 : 0;
+      values[10] = Math.cos(windDir) * windSpeed; values[11] = Math.sin(windDir) * windSpeed;
+      values[12] = time; values[13] = frame;
+      device.queue.writeBuffer(uniform, 0, values);
+      prevX = x; prevZ = z; previousExtent = extent; previousRevision = boat.revision; wasEnabled = enabled;
+    },
+    encode(cp) {
+      if (!enabled && !needsClear) return;
+      needsClear = enabled;
+      cp.setPipeline(contactPipe); cp.setBindGroup(0, contactGroup); cp.dispatchWorkgroups(1);
+      // Landing cells use the current domain and are consumed immediately by the wake pass.
+      cp.setPipeline(sprayPipe); cp.setBindGroup(0, sprayGroups[current]); cp.dispatchWorkgroups(SPRAY_COUNT / 64);
+      current = 1 - current;
+      cp.setPipeline(wakePipe); cp.setBindGroup(0, wakeGroups[current]); cp.dispatchWorkgroups(WAKE_SIZE / 8, WAKE_SIZE / 8);
+    },
+    draw(pass) {
+      if (!enabled) return;
+      pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[current][0]); pass.draw(2 * 15 * 10 * 6);
+      pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[current][1]); pass.draw(6, SPRAY_COUNT);
+    },
+  };
+}
+
 // ---- js/main.js ----
+
 
 
 
@@ -2293,8 +2661,6 @@ async function main() {
   const samplerSim = device.createSampler({
     magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat',
   });
-  const bgFoamUpd = [0, 1].map((i) => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
-    fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim], 'foamupd' + i));
   const bgFoamMips = [0, 1].map((i) => {
     const out = [];
     for (let m = 1; m < FOAMW_MIPS; m++) out.push(bg(arr16MipPipe, [lvl(foamW[i], m - 1), lvl(foamW[i], m)]));
@@ -2420,10 +2786,13 @@ async function main() {
   const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(24);
   let bgCaravel;
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, shader, computePipe });
+  const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
+    fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
-  const bgOcean = [0, 1].map((i) => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
+  const bgOcean = [0, 1].map((i) => [0, 1].map(w => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
     fullArr(dispTex), fullArr(derivTex), fullArr(momTex), foamTex.createView(), envCubeView, sampRepeat,
-    fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }], 'ocean' + i));
+    fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'ocean' + i)));
   const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp], 'sky');
 
   // Water height under the camera (async readback, a few frames of latency) so the
@@ -2433,7 +2802,7 @@ async function main() {
   const probeRead = mkBuf(64, GU.MAP_READ | GU.COPY_DST, 'probe read');
   const boatUBO = mkBuf(32, GU.UNIFORM | GU.COPY_DST, 'boat probe');
   const boatUniform = new Float32Array(8);
-  const bgProbe = bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }], 'probe');
+  const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'probe'));
   let probePending = false, waterH = 0;
   let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
   const onProbe = () => {
@@ -2612,7 +2981,7 @@ async function main() {
   };
   let cameraMode = cameraModeFromLink(qs);
   const boat = {
-    enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
+    effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
     beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', 0, 0, 360),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', 2.4, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
@@ -2875,6 +3244,10 @@ async function main() {
   prowToggle.type = 'checkbox'; prowToggle.checked = boat.showProw;
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
   prowLabel.append(prowToggle); boatPanel.append(prowLabel);
+  const effectsLabel = document.createElement('label'); effectsLabel.textContent = 'Wakes & spray';
+  const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
+  effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
+  effectsLabel.append(effectsToggle); boatPanel.append(effectsLabel);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
   cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
   const cameraButtons=new Map();
@@ -2964,7 +3337,7 @@ async function main() {
   centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
   boatPanel.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatPanel.append(boatStatus);
-  const note = document.createElement('p'); note.textContent = 'Approximate hull motion from wave samples. No wake, planing, or hull-specific hydrodynamics.'; boatPanel.append(note);
+  const note = document.createElement('p'); note.textContent = 'Wave-driven hull motion, bow waves and impact spray. Speed is set manually.'; boatPanel.append(note);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
@@ -3041,10 +3414,11 @@ async function main() {
       cp.setBindGroup(0, bgSimMips[m - 1]);
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
+    interaction.encode(cp);
     // foam clipmaps
     foamCur = 1 - foamCur;
     cp.setPipeline(foamUpdPipe);
-    cp.setBindGroup(0, bgFoamUpd[foamCur]);
+    cp.setBindGroup(0, bgFoamUpd[foamCur][interaction.current]);
     cp.dispatchWorkgroups(FOAM_RES / 8, FOAM_RES / 8, 2);
     cp.setPipeline(arr16MipPipe);
     const fm = bgFoamMips[foamCur];
@@ -3103,6 +3477,14 @@ async function main() {
     frameIndex++;
 
     writeFrame(simTime);
+    boatRotate(hullData.subarray(0, 3), 1, 0, 0, boat.heading * D2R, boat.pitch, boat.roll);
+    boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
+    boatRotate(hullData.subarray(8, 11), 0, 0, -1, boat.heading * D2R, boat.pitch, boat.roll);
+    hullData[12] = boat.beam; hullData[13] = boat.length; hullData[14] = boat.eye; hullData[15] = boat.rudder;
+    hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
+    hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
+    device.queue.writeBuffer(hullUBO, 0, hullData);
+    interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
     simF[52] = simTime; simF[53] = dt;
@@ -3140,7 +3522,7 @@ async function main() {
       boatUniform[4]=boat.x; boatUniform[5]=boat.heave; boatUniform[6]=boat.z;
       device.queue.writeBuffer(boatUBO, 0, boatUniform);
       cp.setPipeline(probePipe);
-      cp.setBindGroup(0, bgProbe);
+      cp.setBindGroup(0, bgProbe[interaction.current]);
       cp.dispatchWorkgroups(1);
     }
     // This LUT depends only on sun elevation, haze and effective camera altitude.
@@ -3167,21 +3549,13 @@ async function main() {
     }
     cp.end();
 
-    boatRotate(hullData.subarray(0, 3), 1, 0, 0, boat.heading * D2R, boat.pitch, boat.roll);
-    boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
-    boatRotate(hullData.subarray(8, 11), 0, 0, -1, boat.heading * D2R, boat.pitch, boat.roll);
-    hullData[12] = boat.beam; hullData[13] = boat.length; hullData[14] = boat.eye; hullData[15] = boat.rudder;
-    hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
-    hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
-    device.queue.writeBuffer(hullUBO, 0, hullData);
-
     const drawProw = boat.showProw;
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
     if (nodeCount) {
       rp.setPipeline(oceanPipe);
-      rp.setBindGroup(0, bgOcean[foamCur]);
+      rp.setBindGroup(0, bgOcean[foamCur][interaction.current]);
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
@@ -3202,10 +3576,11 @@ async function main() {
       const prowPass = enc.beginRenderPass({
         colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: mainPass.colorAttachments[0].resolveTarget,
           loadOp: 'load', storeOp: 'discard' }],
-        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: boat.enabled ? 'clear' : 'load', depthStoreOp: 'discard' },
+        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: 'discard' },
       });
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
-      prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9); prowPass.end();
+      prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9);
+      interaction.draw(prowPass); prowPass.end();
     }
 
     if (P.bloom > 0) {

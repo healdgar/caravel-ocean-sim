@@ -1,3 +1,4 @@
+import { WAKE_SAMPLE } from './interaction.js';
 // FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
 import { N, LOGN, CASCADES, NOISE_WGSL, PERIODIC_WGSL } from './common.js';
 
@@ -340,7 +341,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 // World-space foam clipmaps (toroidally addressed, centred on the camera).
 // Foam is injected where the TOTAL surface Jacobian (all cascades) folds, then decays.
 export const FOAM_RES = 1024;
-export const FOAM_UPDATE = /* wgsl */ `
+export const FOAM_UPDATE = WAKE_SAMPLE + /* wgsl */ `
 const RES: i32 = ${FOAM_RES};
 struct FoamU {
   snap: array<vec4i, 2>,     // per level: current camera texel (x, z), previous (x, z)
@@ -357,6 +358,9 @@ struct FoamU {
 @group(0) @binding(4) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(5) var samp: sampler;
 @group(0) @binding(6) var sampPrev: sampler;
+@group(0) @binding(7) var<uniform> I: Interaction;
+@group(0) @binding(8) var wakeTex: texture_2d<f32>;
+@group(0) @binding(9) var wakeSamp: sampler;
 
 fn wrapIdx(i: i32, lo: i32) -> i32 { return lo + (((i - lo) % RES) + RES) % RES; }
 
@@ -389,7 +393,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
   }
   let dt = U.p0.z;
-  let inject = clamp((U.p1.x - J) * U.p1.y, 0.0, 1.0);
+  let hullFoam = wakeAt(p);
+  let inject = max(clamp((U.p1.x - J) * U.p1.y, 0.0, 1.0), hullFoam.z);
   var f = prev.r * exp(-dt * U.p0.w);
   f = max(f, inject);
   f = min(f + inject * dt * U.p1.z, 1.6);

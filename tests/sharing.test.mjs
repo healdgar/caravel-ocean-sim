@@ -40,3 +40,10 @@ test('camera links support all three views and legacy boat links', () => {
   assert.equal(cameraModeFromLink(new URLSearchParams('view=invalid&boat=1')), 'boat');
   assert.equal(cameraModeFromLink(new URLSearchParams('view=ship&boat=1')), 'ship');
 });
+
+test('sharing preserves the wake and spray switch', () => {
+  for (const effects of [true, false]) {
+    const url = new URL(createShareLink('https://example.com/', {}, { ...boat, effects }, 'ship'));
+    assert.equal(url.searchParams.get('effects'), effects ? '1' : '0');
+  }
+});

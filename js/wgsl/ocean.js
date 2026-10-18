@@ -1,3 +1,4 @@
+import { WAKE_SAMPLE } from './interaction.js';
 // Ocean surface + sky background rendering.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
@@ -39,7 +40,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 `;
 
-export const OCEAN = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
+export const OCEAN = WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -50,6 +51,9 @@ export const OCEAN = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ 
 @group(0) @binding(11) var<storage, read> sunVis: array<f32, 4>;
 struct OceanHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
 @group(0) @binding(12) var<uniform> H: OceanHull;
+@group(0) @binding(13) var<uniform> I: Interaction;
+@group(0) @binding(14) var wakeTex: texture_2d<f32>;
+@group(0) @binding(15) var wakeSamp: sampler;
 ` + SKY_RENDER_FUNCS + /* wgsl */ `
 const ENV_MAXMIP: f32 = ${ENV_MIPS - 1}.0;
 const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
@@ -82,7 +86,9 @@ struct VSOut {
     }
   }
   var o: VSOut;
-  let world = vec3f(xz.x + disp.x, disp.y, xz.y + disp.z);
+  let displacedXZ = xz + disp.xz;
+  disp.y += wakeAt(displacedXZ).x;
+  let world = vec3f(displacedXZ.x, disp.y, displacedXZ.y);
   o.rel = world - F.camPos.xyz;
   o.pos = F.viewProj * vec4f(o.rel, 1.0);
   o.xz = xz;
@@ -147,7 +153,10 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   cov.y += unres;
   let jx = max(1.0 + jxx, 0.15);
   let jz = max(1.0 + jzz, 0.15);
-  let sl = vec2f(s.x / jx, s.y / jz);
+  let wp = in.rel.xz + F.camPos.xz;
+  let dx = I.domain.w;
+  let wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
+  let sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
   let nrm = normalize(vec3f(-sl.x, 1.0, -sl.y));
   // specular anti-aliasing: slope variation across the pixel widens the lobe
   let dsx = dpdx(sl);
@@ -290,13 +299,16 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
 
 // Samples the displaced surface height under the camera (inverting the horizontal
 // displacement with a few fixed-point iterations).
-export const HEIGHT_PROBE = FRAME_WGSL + /* wgsl */ `
+export const HEIGHT_PROBE = WAKE_SAMPLE + FRAME_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var<storage, read_write> outH: array<f32, 16>;
 struct ProbeBoat { config: vec4f, origin: vec4f };
 @group(0) @binding(4) var<uniform> boat: ProbeBoat;
+@group(0) @binding(5) var<uniform> I: Interaction;
+@group(0) @binding(6) var wakeTex: texture_2d<f32>;
+@group(0) @binding(7) var wakeSamp: sampler;
 fn dispAt(xz: vec2f) -> vec3f {
   var d = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
@@ -317,6 +329,6 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let d = dispAt(x0);
     x0 = goal - d.xz;
   }
-  outH[id.x] = dispAt(x0).y;
+  outH[id.x] = dispAt(x0).y + wakeAt(goal).x;
 }
 `;
