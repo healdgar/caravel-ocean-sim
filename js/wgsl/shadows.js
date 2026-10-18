@@ -69,4 +69,43 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   }
   return result/9.0;
 }
+
+// Water colour comes from a volume, not an opaque receiving sheet. Integrate
+// sunlight entering around a refracted view ray. The optical length and diffuse
+// spread are authored approximations; this is not a full underwater ray march.
+fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
+  if(SH.origin.w<0.5){return vec3f(1);}
+  let n=normalize(mix(vec3f(0,1,0),normal,0.8));
+  let eyeRay=refract(-view,n,0.75);
+  let sunRay=refract(-SH.sun.xyz,n,0.75);
+  // Backtrack from points along the underwater view ray to the local surface.
+  let entry=eyeRay-sunRay*(dot(eyeRay,n)/min(dot(sunRay,n),-0.1));
+  let tangent=normalize(vec3f(n.y,-n.x,0));
+  let bitangent=cross(n,tangent);
+  let spread=0.22+0.7*sqrt(clamp(variance,0.0,0.25));
+  let p=SH.lightView*vec4f(world-SH.origin.xyz+n*0.008+SH.sun.xyz*0.006,1);
+  let shift=SH.lightView*vec4f(entry,0);
+  let tx=SH.lightView*vec4f(tangent,0);
+  let ty=SH.lightView*vec4f(bitangent,0);
+  // Conservative bound around all sample footprints: no extra texture reads
+  // across the rest of the ocean, including just outside the shadow-map border.
+  let reach=abs(shift.xyz)*5.0+(abs(tx.xyz)+abs(ty.xyz))*(0.16+5.0*spread);
+  if(any(abs(p.xy)>vec2f(1)+reach.xy) || p.z+reach.z<0.0){return vec3f(1);}
+  var result=vec3f(0);
+  for(var i=0u;i<32u;i++){
+    // Equal-probability strata of an exponential optical path (mean 1.2 m).
+    let path=-log(1.0-(f32(i)+0.5)/32.0)*1.2;
+    let angle=f32(i)*2.399963;
+    let radius=(0.16+path*spread)*sqrt((f32(i%4u)+0.5)/4.0);
+    let q=p+shift*path+(tx*cos(angle)+ty*sin(angle))*radius;
+    let uv=q.xy*vec2f(0.5,-0.5)+0.5;
+    if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || q.z<0.0){result+=vec3f(1);continue;}
+    let depth=min(q.z-0.00002,0.99999);
+    let solid=textureSampleCompareLevel(solidShadow,shadowCompare,uv,depth);
+    let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,uv,depth);
+    let transmission=textureSampleLevel(canvasFilter,shadowLinear,uv,0.0).rgb;
+    result+=solid*mix(transmission,vec3f(1),cloth);
+  }
+  return result/32.0;
+}
 `;

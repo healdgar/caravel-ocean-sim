@@ -162,7 +162,9 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   cov += aa * min(1.0, 0.03 / max(max(aa.x, aa.y), 1e-8));
   let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
 
-  let sunE = sunIlluminance() * sunVis[0] * vesselShadow(in.rel+F.camPos.xyz,nrm);
+  let sunlight = sunIlluminance() * sunVis[0];
+  let sunE = sunlight * vesselShadow(in.rel+F.camPos.xyz,nrm);
+  let waterSun = sunlight * waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y);
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
   // average radiance of the whole upper hemisphere (incl. the bright horizon band)
   let skyHemi = skyUp * 0.4 + 0.15 * (
@@ -209,13 +211,13 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let ambient = skyUp * 1.3 + skyN * 0.5;
   let NdL = max(dot(nrm, Ld), 0.0);
   // upwelling light is diffuse: light it with smooth terms only (no per-pixel normal noise)
-  var body = F.waterCol.rgb * (skyHemi * 1.6 + sunE * max(Ld.y, 0.0) * 0.8);
+  var body = F.waterCol.rgb * (skyHemi * 1.6 + waterSun * max(Ld.y, 0.0) * 0.8);
   // light transmitted through the thin upper part of backlit crests
   let crest = clamp((in.height - 0.05) / 0.9, 0.0, 1.0);
   let toSun = max(dot(Ld, -V), 0.0);
   let thin = pow(clamp(0.5 - 0.5 * dot(Ld, nrm), 0.0, 1.0), 3.0);
   let k1 = F.sssCol.w * crest * crest * pow(toSun, 4.0) * thin * exp(-dist / 600.0);
-  body += F.sssCol.rgb * sunE * k1;
+  body += F.sssCol.rgb * mix(waterSun,sunE,0.65) * k1;
 
   // ---- foam ----
   // persistent foam from the world-space clipmaps (near: fine, far: coarse), plus
@@ -249,7 +251,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   foamMask = max(foamMask, fresh*smoothstep(0.28,0.68,pat)*0.8*F.foamP.z);
   foamMask = max(foamMask,cover*0.22*smoothstep(0.3,0.75,pat));
   // submerged bubbles brighten and tint the water just beneath foam
-  body += F.sssCol.rgb * (sunE * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
+  body += F.sssCol.rgb * (waterSun * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
   body += vec3f(0.10, 0.32, 0.30) * skyUp * fwl.g * 0.35;
   // bubbly brightness variation inside the foam
   let bub = textureSample(foamTex, sampR, xz * 1.9 + vec2f(0.21, 0.53)).g;

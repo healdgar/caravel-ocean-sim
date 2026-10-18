@@ -152,7 +152,7 @@ The suite contains 27 checks covering:
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Dry decks below the rails, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
-- Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows.
+- Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
 
 GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks in native Chrome supplement these tests; software-GPU checks do not establish device frame rates or visual quality.
@@ -165,6 +165,7 @@ GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU o
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing, or create separate runoff landing splashes. Severe crests can still overtop the hull and boat camera.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
+- Underwater vessel shadows use a bounded local-surface scattering approximation, with authored optical depth and spread. They do not simulate underwater caustics or full multiple scattering.
 
 ## How it was made
 
@@ -251,6 +252,23 @@ limits self-shadow speckling on tilted surfaces. Direct sunlight is attenuated
 while sky fill and reflections remain. This replaces the former analytic rail
 shadow approximation. Hiding the ship or placing the sun below the horizon skips
 the passes. `shadows=0` disables them for performance comparisons.
+
+Water separates surface sunlight from underwater scatter. Sun glitter and foam
+retain the geometric shadow; the water body's colour integrates 32 samples around
+a refracted view ray, backtracked toward the refracted sun. Wave normals move this
+footprint, and unresolved slope variance broadens it. Fine rigging therefore fades
+and sail edges disperse instead of printing a crisp silhouette into the water's
+diffuse colour. Thin crest transmission blends toward the surface result. The
+authored mean optical path is 1.2 m; a conservative vessel-footprint bound skips
+these texture reads elsewhere on the ocean. Deck and sail shading retain their
+existing surface filter.
+
+Visual references: the [Rolex Sydney Hobart aerial photograph](https://rolexsydneyhobart.com/race/2025/news/day-2/2025-rolex-sydney-hobart-afternoon-update/)
+shows a broad shadow interrupted by rough-water highlights; [SilverTip](https://www.yachtingdevelopments.co.nz/media)
+shows that shadows can still be sharply defined against sun glitter.
+[Rendering Natural Waters](https://graphics.stanford.edu/courses/cs348b-competition/cs348b-01/ocean_scenes/ocean.pdf)
+describes the distinction between surface reflection/refraction and water-volume
+scattering. These inform the approximation, not a claim of calibrated optics.
 
 All camera modes share the ocean depth buffer, so
 water, hull, deck wash, bow sheets, and spray occlude each other consistently. A world-space

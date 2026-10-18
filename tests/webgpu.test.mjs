@@ -728,8 +728,8 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
       const shader=async(code,label)=>device.createShaderModule({code,label});
       const mesh=[];
-      for(const [cx,material] of [[0,0],[3,9]])for(const [x,z] of [[-1,-1],[1,-1],[1,1],[-1,-1],[1,1],[-1,1]])
-        mesh.push(cx+x,2,z,0,1,0,material,0.025,0.5);
+      for(const [cx,material,width] of [[0,0,1],[3,9,1],[-3,0,0.035]])for(const [x,z] of [[-1,-1],[1,-1],[1,1],[-1,-1],[1,1],[-1,1]])
+        mesh.push(cx+x*width,2,z,0,1,0,material,0.025,0.5);
       const vertices=new Float32Array(mesh),vertexBuffer=buffer(vertices.byteLength,B.VERTEX|B.COPY_DST);
       device.queue.writeBuffer(vertexBuffer,0,vertices);
       const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
@@ -739,7 +739,13 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
         @group(0) @binding(0) var<storage,read> points:array<vec4f>;
         @group(0) @binding(1) var<storage,read_write> result:array<vec4f>;
         @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
-          result[id.x]=vec4f(vesselShadow(points[id.x].xyz,vec3f(0,1,0)),1.0);
+          let point=points[id.x];
+          if(point.w>0.5){
+            let rough=point.w>1.5;
+            result[id.x]=vec4f(waterVesselShadow(point.xyz,
+              normalize(select(vec3f(0,1,0),vec3f(0.45,1,0.2),rough)),
+              select(vec3f(0,1,0),vec3f(0.6,0.8,0),rough),select(0.0,0.12,rough)),1.0);
+          }else{result[id.x]=vec4f(vesselShadow(point.xyz,vec3f(0,1,0)),1.0);}
         }
       `,'shadow receivers');
       const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
@@ -748,7 +754,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const receivers=shadows.bind(pipe);
       async function sample(sun,locations,enabled=true){
         device.queue.writeBuffer(hullUBO,0,hull);shadows.update(hull,sun,enabled);
-        const positions=locations.flatMap(([x,y,z])=>[x+hull[16],y+hull[17],z+hull[18],0]);
+        const positions=locations.flatMap(([x,y,z,water=0])=>[x+hull[16],y+hull[17],z+hull[18],water]);
         device.queue.writeBuffer(points,0,new Float32Array(positions));
         const enc=device.createCommandEncoder();shadows.encode(enc);
         const cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.setBindGroup(1,receivers);cp.dispatchWorkgroups(locations.length);cp.end();
@@ -757,6 +763,11 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       }
       const locations=[[0,0,0],[3,0,0],[6,0,0],[0,3,0],[0,2,0]];
       const overhead=await sample([0,1,0],locations);
+      const waterLocations=[[0,0,0,1],[3,0,0,1],[20,0,20,1],[-3,0,0,1],[0.95,0,0,1]];
+      const water=await sample([0,1,0],waterLocations);
+      const choppy=await sample([0,1,0],waterLocations.map(([x,y,z])=>[x,y,z,2]));
+      const thinSurface=await sample([0,1,0],[[-3,0,0]]);
+      const waterHidden=await sample([0,1,0],waterLocations,false);
       hull[16]=10000;hull[17]=2;hull[18]=-8000;
       const moved=await sample([0,1,0],locations);
       boatRotate(hull.subarray(0,3),1,0,0,0.8,0.2,-0.15);
@@ -769,7 +780,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       hull.fill(0,0,12);hull[0]=1;hull[5]=1;hull[10]=-1;
       const oblique=await sample([Math.SQRT1_2,Math.SQRT1_2,0],[[-2,0,0],[1,0,0],[-4,0,0],[0,3,0],[6,0,0]]);
       const hidden=await sample([0,1,0],locations,false),night=await sample([0,-1,0],locations);
-      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night};
+      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night,water,choppy,thinSurface,waterHidden};
     });
     assert.deepEqual(result.errors,[]);
     for(const values of [result.overhead,result.moved,result.tilted,result.oblique]){
@@ -779,6 +790,13 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       assert.ok(values[8]>0.99 && values[12]>0.99,'outside/above the caster stays lit');
     }
     assert.ok(result.overhead[16]>0.99,'caster surface must not shadow itself');
+    assert.ok(result.water[0]<0.25,'a broad hull shadow survives water scattering');
+    assert.ok(result.water[4]>result.water[5] && result.water[5]>result.water[6],'water preserves warm canvas transmission');
+    assert.ok(result.water[8]>0.99 && result.choppy[8]>0.99,'water beyond the vessel footprint stays lit');
+    assert.ok(result.thinSurface[0]<0.1 && result.water[12]>0.75,'fine rigging blocks surface glints but fades in scattered water light');
+    assert.ok(result.water[16]>0.1 && result.water[16]<0.9,'water integrates across the silhouette edge');
+    assert.ok(Math.abs(result.water[16]-result.choppy[16])>0.05,'wave normal and refracted view alter the underwater footprint');
+    assert.ok(result.waterHidden.every(v=>v===1),'hidden vessel skips water shadowing');
     for(let i=0;i<result.moved.length;i++)assert.ok(Math.abs(result.moved[i]-result.overhead[i])<0.005,'translation retains the shadow');
     for(const values of [result.hidden,result.night])assert.ok(values.every(v=>v===1),'hidden/night shadows are disabled');
   }finally{await page.close();}
