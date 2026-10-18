@@ -164,3 +164,17 @@ fn pfbm(p: vec2f, period: i32, oct: i32) -> f32 {
   return s;
 }
 `;
+
+// Fractional coverage, with bounded production and decay; no additive saturation.
+export const FOAM_MODEL = /* wgsl */ `
+fn breakingCompression(jxx: f32, jzz: f32, jxz: f32, threshold: f32) -> f32 {
+  let least=1.0+0.5*(jxx+jzz)-sqrt(0.25*(jxx-jzz)*(jxx-jzz)+jxz*jxz);
+  return smoothstep(0.0,0.65,threshold-least);
+}
+fn foamCoverage(previous: f32, breaking: f32, amount: f32, decay: f32, dt: f32) -> f32 {
+  let production=breaking*amount*2.2;
+  let rate=production+decay;
+  let equilibrium=production/max(rate,0.001);
+  return clamp(equilibrium+(previous-equilibrium)*exp(-rate*dt),0.0,1.0);
+}
+`;

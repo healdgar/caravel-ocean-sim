@@ -190,7 +190,7 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
     await page.goto(`${origin}/__interaction_test`);
     const result = await page.evaluate(async () => {
       const { createWaterInteraction } = await import('/js/interaction.js');
-      const { WAKE_SIZE, SPRAY_COUNT } = await import('/js/wgsl/interaction.js');
+      const { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT } = await import('/js/wgsl/interaction.js');
       const adapter = await navigator.gpu.requestAdapter();
       const device = await adapter.requestDevice();
       const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
@@ -250,7 +250,7 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       const movingContacts = await read(fx.contacts, 32 * 64), movingWake = await wake();
       let maxHeight = 0, foam = 0, finite = true;
       for (let i = 0; i < movingWake.length; i += 4) { maxHeight = Math.max(maxHeight, Math.abs(movingWake[i])); foam += movingWake[i + 2]; finite &&= Number.isFinite(movingWake[i]) && Number.isFinite(movingWake[i + 1]); }
-      const moving = { live: live(await read(fx.drops, SPRAY_COUNT * 48)), maxHeight, foam };
+      const moving = { live: live(await read(fx.drops, SPRAY_COUNT * 48)), sheets: (await read(fx.sheets,SHEET_COUNT*64)).filter((v,i)=>i%16===7 && v>0).length, maxHeight, foam };
       // Buoyancy and rendering sample this same field: probe its strongest texel centre.
       let peak = 0;
       for (let i = 0; i < movingWake.length; i += 4) if (movingWake[i] > movingWake[peak]) peak = i;
@@ -292,6 +292,25 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       device.queue.writeTexture({ texture: sea }, new Uint16Array([0, 0x3000, 0, 0]), { bytesPerRow: 8 }, [1, 1, 1]);
       await advance(1);
       const impact = Array.from(await read(fx.contacts, 32 * 64));
+      const launched=(await read(fx.sheets,SHEET_COUNT*64)).filter((v,i)=>i%16===7 && v>0).length;
+      const impactWake=await wake();
+      await advance(60);
+      const propagatedWake=await wake();
+      let outgoing=0;
+      for(let cell=0;cell<WAKE_SIZE*WAKE_SIZE;cell++){
+        const x=(cell%WAKE_SIZE+.5-128)*.5,z=(Math.floor(cell/WAKE_SIZE)+.5-128)*.5;
+        let distance=Infinity;
+        for(let c=0;c<32;c++)distance=Math.min(distance,Math.hypot(x-impact[c*16],z-impact[c*16+2]));
+        if(distance>2.5)outgoing=Math.max(outgoing,Math.abs(propagatedWake[cell*4])-Math.abs(impactWake[cell*4]));
+      }
+      await advance(90);
+      const settled={sheets:(await read(fx.sheets,SHEET_COUNT*64)).filter((v,i)=>i%16===7 && v>0).length,
+        particles:live(await read(fx.drops,SPRAY_COUNT*48)),contacts:Array.from(await read(fx.contacts,32*64))};
+      // A second distinct rise must launch another event, after the first sheet has vanished.
+      device.queue.writeTexture({texture:sea},new Uint16Array([0,0x3400,0,0]),{bytesPerRow:8},[1,1,1]);
+      await advance(1);
+      const second=Array.from(await read(fx.contacts,32*64));
+      device.queue.writeTexture({texture:sea},new Uint16Array([0,0x3000,0,0]),{bytesPerRow:8},[1,1,1]);
       // Deposit one known descending droplet into a quiet cell, without CPU production hooks.
       boat.effects = false; await advance(1); boat.effects = true; boat.revision++; await advance(2);
       const inject = await computePipe(`struct D { p:vec4f, v:vec4f, s:vec4f }; @group(0) @binding(0) var<storage,read_write> d:array<D>; @compute @workgroup_size(1) fn main(){ d[0].p=vec4f(20,0.14,20,1); d[0].v=vec4f(0,-3,0,1); d[0].s=vec4f(0.03,0,0,1); }`, 'landing fixture');
@@ -302,6 +321,7 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       const landedLive = (await read(fx.drops, 48))[3];
       // Roll, pitch, and heading must move the emitter with the hull/water intersection.
       const { boatRotate } = await import('/js/boat.js');
+      const { hullHalfWidth } = await import('/js/hull.js');
       boatRotate(h.subarray(0, 3), 1, 0, 0, 0.7, 0.08, 0.25);
       boatRotate(h.subarray(4, 7), 0, 1, 0, 0.7, 0.08, 0.25);
       boatRotate(h.subarray(8, 11), 0, 0, -1, 0.7, 0.08, 0.25);
@@ -312,19 +332,17 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
         const p = tilted.subarray(i * 16, i * 16 + 3);
         const dot = offset => p.reduce((sum, v, j) => sum + v * h[offset + j], 0);
         const x = dot(0), y = dot(4), z = -dot(8);
-        const a = -z / 6.4, deck = 0.7 + 0.47 * a ** 3;
-        const halfWidth = 1.8 * Math.sqrt(Math.max(0.0006, 1 - a * a)) + 0.105;
-        const depth = Math.max(0, Math.min(1, (deck - y) / (deck + 1.45)));
-        const expectedWidth = halfWidth * Math.sqrt(Math.max(0.001, 1 - depth * depth));
+        const expectedWidth = hullHalfWidth(z,y);
         contactError = Math.max(contactError, Math.abs(Math.abs(x) - expectedWidth), Math.abs(p[1] - 0.125));
       }
       device.destroy();
-      return { resting, moving, probeError, contacts: Array.from(movingContacts), retained, finite, disabled, dry, impact, landing, landedLive, contactError, errors };
+      return { resting, moving, probeError, contacts: Array.from(movingContacts), retained, finite, disabled, dry, impact, landing, landedLive, contactError, launched, outgoing, settled, second, errors };
     });
     assert.deepEqual(result.errors, []);
     assert.equal(result.resting.live, 0); assert.equal(result.resting.wake, 0);
     assert.ok(result.resting.contacts.every((v, i) => i % 16 !== 3 || v === 0));
-    assert.ok(result.moving.live > 50, JSON.stringify(result.moving));
+    assert.equal(result.moving.live,0,'steady speed on flat water must not become a droplet fountain');
+    assert.equal(result.moving.sheets,0,'calm displacement does not launch impact sheets');
     assert.ok(result.moving.maxHeight > 0.02 && result.moving.maxHeight <= 1.11);
     assert.ok(result.moving.foam > 1);
     assert.ok(result.probeError < 0.001, `Buoyancy differs from wake texture: ${result.probeError}`);
@@ -335,10 +353,50 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
     assert.ok(result.retained > 20, 'wake must remain in world space when its grid moves');
     assert.ok(result.finite); assert.deepEqual(result.disabled, { live: 0, wake: false });
     assert.ok(result.dry.every((v, i) => i % 16 !== 3 || v === 0), 'dry hull emits no spray');
+    assert.ok(result.launched>10,'a rising crest launches a coherent sheet population');
+    assert.ok(result.outgoing>0.0001,`impact must radiate away from the hull: ${result.outgoing}`);
+    assert.equal(result.settled.sheets,0,'impact sheets expire between waves');
+    assert.equal(result.settled.particles,0,'mist settles between waves');
+    assert.ok(result.settled.contacts.every((v,i)=>i%16!==7 || v<0.0001),'impact energy decays on a held water level');
+    assert.ok(result.second.some((v,i)=>i%16===15 && v>result.impact[i]),'the next crest triggers another launch');
     assert.ok(result.impact.some((v, i) => i % 16 === 3 && v > 0.2), 'relative wave impact drives emission at zero boat speed');
     assert.ok(result.landing > 0, 'landing deposits foam'); assert.ok(result.landedLive <= 0, 'landed particle is retired');
     assert.ok(result.contactError < 0.02, `Tilted hull contact error: ${result.contactError}`);
   } finally { await page.close(); }
+});
+
+test('foam forms at breaking compression, stays bounded, and clears between crests', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__foam_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__foam_test`);
+    const result=await page.evaluate(async()=>{
+      const {FOAM_MODEL}=await import('/js/wgsl/common.js');
+      const device=await (await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const code=FOAM_MODEL+`@group(0) @binding(0) var<storage,read_write> out:array<vec4f>;
+      @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
+        let dt=select(1.0/30.0,1.0/120.0,id.x==1u); let steps=u32(round(8.0/dt));
+        let calm=breakingCompression(-0.3,0.0,0.0,0.15);
+        let crest=breakingCompression(-1.5,0.0,0.0,0.15);
+        var f=0.0;for(var i=0u;i<steps;i++){f=foamCoverage(f,crest,1.7,0.85,dt);}
+        let peak=f;for(var i=0u;i<u32(round(3.0/dt));i++){f=foamCoverage(f,calm,1.7,0.85,dt);}
+        out[id.x]=vec4f(calm,crest,peak,f);
+      }`;
+      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code}),entryPoint:'main'}});
+      const out=device.createBuffer({size:32,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+      const read=device.createBuffer({size:32,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+      const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(pipe);
+      cp.setBindGroup(0,device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:out}}]}));cp.dispatchWorkgroups(2);cp.end();
+      enc.copyBufferToBuffer(out,0,read,0,32);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const values=Array.from(new Float32Array(read.getMappedRange()));read.unmap();device.destroy();return {values,errors};
+    });
+    assert.deepEqual(result.errors,[]);const a=result.values.slice(0,4),b=result.values.slice(4);
+    assert.equal(a[0],0);assert.equal(a[1],1);
+    assert.ok(a[2]>0.5 && a[2]<0.9,'sustained breaking remains fractional coverage');
+    assert.ok(a[3]<0.08,'foam clears within three seconds after a crest passes');
+    for(let i=0;i<4;i++)assert.ok(Math.abs(a[i]-b[i])<1e-5,'30 Hz and 120 Hz coverage agree');
+  }finally{await page.close();}
 });
 
 test('renderer invalidates only changed sky inputs and skips disabled bloom', { timeout: 600000 }, async () => {
@@ -403,7 +461,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     // The target is deliberately 1x1; exercise the control's change handler directly.
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame = await step(page);
-    for (const key of ['hull contact', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
+    for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
     assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.

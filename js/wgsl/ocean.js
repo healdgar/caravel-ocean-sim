@@ -1,6 +1,7 @@
+import { HULL_PROFILE } from './hull.js';
 import { WAKE_SAMPLE } from './interaction.js';
 // Ocean surface + sky background rendering.
-import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES } from './common.js';
+import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
 
 const RENDER_BINDINGS = /* wgsl */ `
@@ -40,7 +41,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 `;
 
-export const OCEAN = WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
+export const OCEAN = FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -230,14 +231,14 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let fw0 = textureSample(foamWorld, sampR, xz / F.lodP.z, 0u);
   let fw1 = textureSample(foamWorld, sampR, xz / F.lodP.w, 1u);
   let fwl = mix(fw1, fw0, w0) * w1;
-  let fresh = clamp((F.foamP.x - J) * F.foamP.y, 0.0, 1.0);
-  var cover = clamp((max(fwl.r, fresh * (1.0 - w1 * 0.7)) + fwl.g * 0.6) * F.foamP.z, 0.0, 1.5);
+  let fresh = breakingCompression(jxx,jzz,jxz,F.foamP.x);
+  var cover = clamp(max(max(fwl.r*0.65,fwl.g*0.9),fresh*(1.0-w1)*0.65)*F.foamP.z,0.0,0.95);
   // aged foam breaks into wind-aligned streaks; fresh crest foam stays dense
   let wd = F.windP[0].xy;
   let ws = vec2f(dot(xz, wd), dot(xz, vec2f(-wd.y, wd.x)));
   let streak = textureSample(foamTex, sampR, ws * vec2f(0.035, 0.11)).a;
   let freshK = clamp(fwl.g * 2.0 + fresh, 0.0, 1.0);
-  cover *= mix(smoothstep(0.25, 0.75, streak) * 1.5, 1.0, freshK);
+  cover *= mix(mix(0.35,1.0,smoothstep(0.25,0.75,streak)), 1.0, freshK);
   let pat = foamPattern(xz, F.camPos.w);
   let fw = fwidth(pat) + 0.03;
   // soft threshold: thin foam is a translucent film, dense foam is opaque white
@@ -246,7 +247,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let fm = smoothstep(1.0 - cover - fw - soft, 1.0 - cover + fw + soft, pat);
   var foamMask = clamp(fm * smoothstep(0.0, 0.5, cover), 0.0, 1.0) * (0.68 + 0.32 * smoothstep(0.3, 0.9, cover));
   // freshly broken crests: dense, almost opaque core
-  foamMask = max(foamMask, smoothstep(0.35, 0.9, fwl.g) * smoothstep(0.25, 0.6, pat + 0.25) * 0.95);
+  foamMask = max(foamMask, smoothstep(0.55,0.95,fwl.g)*smoothstep(0.35,0.75,pat)*0.85*F.foamP.z);
   // submerged bubbles brighten and tint the water just beneath foam
   body += F.sssCol.rgb * (sunE * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
   body += vec3f(0.10, 0.32, 0.30) * skyUp * fwl.g * 0.35;
@@ -284,14 +285,8 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   if(H.rig.z > 0.5) {
     let relative=in.rel+F.camPos.xyz-H.origin.xyz;
     let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-    if(q.z >= -6.4 && q.z <= 5.6 && q.y > -1.45) {
-      let ratio=select(q.z/7.4,-q.z/6.4,q.z<0.0);
-      let halfWidth=1.8*sqrt(max(0.0006,1.0-ratio*ratio))+0.105;
-      let deckHeight=select(0.7+0.18*(q.z/5.6)*(q.z/5.6),0.7+0.47*pow(max(0.0,-q.z/6.4),3.0),q.z<0.0);
-      let depth=clamp((deckHeight-q.y)/(deckHeight+1.45),0.0,1.0);
-      let section=halfWidth*sqrt(max(0.0,1.0-depth*depth));
-      if(abs(q.x)<section) { discard; }
-    }
+    // Bulwarks protect the interior; crests overtopping the rail remain visible.
+    if(q.y < hullDeck(q.z)+0.66 && abs(q.x) < hullHalfWidth(q.z,q.y)) { discard; }
   }
   return vec4f(col, 1.0);
 }

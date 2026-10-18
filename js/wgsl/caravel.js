@@ -46,6 +46,9 @@ fn rotateHull(p: vec3f) -> vec3f {
     local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
     localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
   }
+  if (material == 13.0) {
+    local.x+=min(hull.rig.y*0.002,0.04)*sin(hull.origin.w*2.5+position.y*4.0)*27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);
+  }
   if (material == 9.0) {
     let flutter=min(hull.rig.y*0.0015,0.035)*sin(hull.origin.w*2.5+position.x*3.0+position.y*4.0);
     local.z+=flutter*sin(uv.x*3.14159265)*uv.y*uv.y;
@@ -101,7 +104,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let det = dot(dx,sx);
   let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
   n = normalize(n - clamp(gradient,vec3f(-0.12),vec3f(0.12)) * select(1.0,0.1,in.material == 3u || in.material == 8u));
-  var albedo = timber * vec3f(0.78,0.81,0.82);
+  var albedo = timber * vec3f(1.08,0.94,0.74);
   var rough = clamp(0.74 + (0.2-relief)*0.18,0.64,0.85); var metal = 0.0;
   let plank = floor((p.x+1.8)/0.18);
   albedo *= 0.82 + 0.2 * fract(sin(plank*74.17)*4321.1);
@@ -121,11 +124,11 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   if(in.material == 4u) { albedo=vec3f(0.012,0.009,0.006); rough=0.92; }
   if(in.material == 3u || in.material == 8u) { albedo=vec3f(0.065,0.07,0.071); rough=0.38; metal=0.85; }
-  if(in.material == 9u) {
+  if(in.material == 9u || in.material == 13u) {
     let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
     let seam=mix(0.78,1.0,smoothstep(0.004,0.013+clothAA,clothSeam));
-    albedo=vec3f(0.66,0.62,0.49)*aged*seam*(1.0+0.025*weave);
+    albedo=vec3f(0.74,0.70,0.57)*aged*seam*(1.0+0.025*weave);
     n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
   }
   if(in.material == 11u) { albedo=vec3f(0.018,0.035,0.033); rough=0.3; metal=0.25; }
@@ -133,8 +136,10 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   if(in.material == 15u) {
     let hullSeam=abs(fract(in.uv.x*18.0)-0.5);
     albedo*=mix(0.7,0.93,smoothstep(0.004,0.035+hullSeamAA,hullSeam)); rough=0.82;
-    let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.036,0.029,0.02),tar*0.65);
+    let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.025,0.022,0.018),tar*0.9);
   }
+  if(in.material == 16u) { albedo=timber*vec3f(0.13,0.12,0.10); rough=0.85; }
+  if(in.material == 17u) { albedo=timber*vec3f(1.3,1.02,0.62); rough=0.62; }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
   let nh=clamp(dot(n,h),0.0,1.0); let vh=clamp(dot(v,h),0.0,1.0);
@@ -166,7 +171,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let spec=d*g*fresnel/(4.0*nv*max(nl,0.001));
   var col=(albedo*(1.0-metal)/PI+spec)*direct*nl;
   col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*(f0+(1.0-f0)*(fv2*fv2*fv))*(1.0-rough*0.45);
-  if(in.material == 9u) {
+  if(in.material == 9u || in.material == 13u) {
     let through=max(dot(-n,l),0.0);
     col+=albedo*sunIlluminance()*sunVis[0]*through*0.28;
     col+=albedo*sky*0.12;

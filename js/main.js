@@ -747,7 +747,7 @@ async function main() {
     // deep water body scatter colour (greenish coastal water), unresolved slope variance
     f[76] = 0.016 * P.turbidity; f[77] = 0.080 * P.turbidity; f[78] = 0.096 * P.turbidity; f[79] = 0.0024;
     f[80] = 0.035; f[81] = 0.120; f[82] = 0.085; f[83] = 2.6;
-    f[84] = 0.36 + 0.12 * P.foam; f[85] = 2.5; f[86] = 1.0; f[87] = 1.0;
+    f[84] = 0.15; f[85] = 1.0; f[86] = Math.min(1,P.foam); f[87] = 1.0;
     f[88] = (5.802e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
@@ -977,8 +977,8 @@ async function main() {
       foamUF[8 + l] = ts;
     }
     foamFirst = false;
-    foamUF[10] = dt; foamUF[11] = 0.22;          // decay 1/s
-    foamUF[12] = 0.52 + 0.16 * P.foam; foamUF[13] = 2.0; foamUF[14] = 1.0; foamUF[15] = 0;
+    foamUF[10] = dt; foamUF[11] = 0.85;          // decay 1/s
+    foamUF[12] = 0.15; foamUF[13] = 1.0; foamUF[14] = P.foam; foamUF[15] = 0;
     for (let c = 0; c < C; c++) { foamUF[16 + c] = CASC_L[c]; foamUF[24 + c] = 1 / CASC_L[c]; }
     const drift = 0.03 * P.windSpeed;
     foamUF[32] = Math.cos(P.windDir * D2R) * drift; foamUF[33] = Math.sin(P.windDir * D2R) * drift;

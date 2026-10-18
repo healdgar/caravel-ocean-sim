@@ -1,6 +1,6 @@
 import { WAKE_SAMPLE } from './interaction.js';
 // FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
-import { N, LOGN, CASCADES, NOISE_WGSL, PERIODIC_WGSL } from './common.js';
+import { N, LOGN, CASCADES, NOISE_WGSL, PERIODIC_WGSL, FOAM_MODEL } from './common.js';
 
 const FFT_MATH = /* wgsl */ `
 const N: u32 = ${N}u;
@@ -339,9 +339,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 `;
 
 // World-space foam clipmaps (toroidally addressed, centred on the camera).
-// Foam is injected where the TOTAL surface Jacobian (all cascades) folds, then decays.
+// Strong compression of the total displacement field produces fractional foam coverage.
 export const FOAM_RES = 1024;
-export const FOAM_UPDATE = WAKE_SAMPLE + /* wgsl */ `
+export const FOAM_UPDATE = FOAM_MODEL + WAKE_SAMPLE + /* wgsl */ `
 const RES: i32 = ${FOAM_RES};
 struct FoamU {
   snap: array<vec4i, 2>,     // per level: current camera texel (x, z), previous (x, z)
@@ -394,12 +394,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   }
   let dt = U.p0.z;
   let hullFoam = wakeAt(p);
-  let inject = max(clamp((U.p1.x - J) * U.p1.y, 0.0, 1.0), hullFoam.z);
-  var f = prev.r * exp(-dt * U.p0.w);
-  f = max(f, inject);
-  f = min(f + inject * dt * U.p1.z, 1.6);
-  // g: freshness (recently injected) used for brighter, denser crest foam
-  let fresh = max(prev.g * exp(-dt * 1.6), inject);
+  let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
+  let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
+  let f=max(seaFoam,hullFoam.z*0.65);
+  let fresh=mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0));
   textureStore(dst, id.xy, lvl, vec4f(f, fresh, J, 1.0));
 }
 `;

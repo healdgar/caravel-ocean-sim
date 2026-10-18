@@ -2,7 +2,7 @@
 
 Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU ocean with a wave-driven sailing ship, square sails, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
+A real-time WebGPU ocean with a wave-driven sailing ship, square sails and a lateen mizzen, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
 
 [Open Seasick Simulator](https://healdgar.github.io/seasick-simulator/).
 
@@ -68,11 +68,17 @@ The spectrum is a fetch-limited JONSWAP wind sea with Donelan-Banner directional
 
 The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart near the camera and the mesh reaches 160 km, with continuous vertex morphing between levels.
 
+### Caravel model
+
+The native procedural mesh follows [this generated art reference](assets/caravel-design-reference.png): a fuller raked hull, dark swept wales, raised stern cabin with arched windows, four billowing square sails, a triangular lateen mizzen, anchors, and rigging. The [generation prompt](assets/caravel-design-reference-prompt.txt) is retained locally with the artwork. The reference was generated with the built-in image tool; it is art direction, not a historical reconstruction.
+
+The model uses roughly 80,000 triangles and retains the animated wheel, rudder, and canvas. `js/hull.js` defines the section used by the mesh; `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Water overtopping the bulwarks remains visible. No imported model or Blender dependency is required.
+
 ### Bow waves and spray
 
-Thirty-two GPU probes intersect the moving hull with the horizontally displaced FFT surface. Relative water rise and forward speed drive two curling bow sheets, droplets, and finer wind-carried mist. A dry bow stops emitting; a stationary hull still splashes when struck by a rising crest.
+Thirty-two GPU probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Small droplets and broad translucent mist are secondary to the sheets, rather than constant streams.
 
-A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Gravity, drag, water collision, and fixed-capacity particle storage stay on the GPU (8,192 slots).
+A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Impacts inject outward-travelling crest/trough pulses. Gravity, drag, water collision, 128 sheet slots, and 4,096 secondary particle slots stay on the GPU.
 
 **Wakes & spray** toggles the effect, also preserved as `effects=0` or `effects=1` in shared links. Changing sea spectrum or hull dimensions resets contact history to avoid false impacts. The grid uses a damped wave approximation with bounded forcing; it does not model full hull hydrodynamics, planing, or a physically exact Kelvin wake.
 
@@ -84,7 +90,7 @@ Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_de
 - Sun glitter uses an anisotropic Gaussian slope distribution with Smith masking and the size of the solar disc.
 - The sky reflection comes from an environment cube map with roughness-filtered mips. One face and its mip chain refresh per frame; all six refresh on startup and after settings changes. At grazing angles the reflection direction is tilted to account for which wave facets the viewer can actually see.
 - The water body is turbid blue-green, lit by the whole sky hemisphere. Backlit crests get a subsurface glow, and wind-gust patches modulate the short ripples.
-- Whitecaps start where the total surface Jacobian folds. Foam is stored in two camera-centred world-space maps (128 m and 1 km wide), decays over time, drifts downwind, and breaks into streaks as it ages. A procedural bubble texture gives it its structure.
+- Whitecaps form at strong compression of the surface displacement field. Coverage follows bounded production and decay, so repeated crests cannot accumulate beyond full coverage. The Foam control changes production rather than lowering the breaking threshold. Two camera-centred world-space maps (128 m and 1 km wide) retain foam, which fades, drifts downwind, and breaks into streaks. A procedural bubble texture gives it structure.
 
 ### Sky
 
@@ -143,7 +149,8 @@ I built this with Claude Code (Opus 5.5). I asked for the most realistic water i
 | `js/main.js` | Device setup, resources, camera modes, per-frame loop |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
-| `js/caravel.js` | Full hull, decks, cabin, rigging, square sails, and helm geometry |
+| `js/caravel.js` | Hull, quarterdeck, cabin, rigging, square and lateen sails, and helm geometry |
+| `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
 | `js/wgsl/` | Shaders as JavaScript modules: `sim.js` (waves and foam), `interaction.js` (bow sheets, wake, and spray), `sky.js` (atmosphere and clouds), `ocean.js` (surface and sky pass), `post.js` (bloom and tone mapping), `common.js` (shared structs) |
 | `server.mjs` | Tiny static server for development |
