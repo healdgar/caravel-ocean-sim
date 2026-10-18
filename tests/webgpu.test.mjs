@@ -108,7 +108,7 @@ test('fused FFT reproduces analytical travelling waves in every cascade', { time
           const expected = [
             [choppy * sx / w.k, height, choppy * sz / w.k, jacobian * w.kx * w.kz],
             [sx, sz, jacobian * w.kx ** 2, jacobian * w.kz ** 2],
-            [sx * sx, sz * sz, sx * sz, 0],
+            [sx * sx, sz * sz, sx * sz, jacobian * w.kx * w.kz],
           ];
           for (const vector of expected) {
             for (let j = 0; j < 4; j++) {
@@ -255,6 +255,37 @@ test('early hull exclusion preserves water edges and the complete ship image', {
     }
     assert.ok(new Set(captures[0]).size>20);
     assert.deepEqual(captures[1],captures[0],`${view}: moving the mask must preserve every pixel`);
+  }
+});
+
+test('packed wave samples preserve sunset and rough-sea pixels', {timeout:180000}, async()=>{
+  const ocean=await readFile(new URL('../js/wgsl/ocean.js',import.meta.url),'utf8');
+  // Restore the old displacement read. Its alpha remains independently stored
+  // and mip-filtered, so this checks the complete FFT -> filtering -> shading path.
+  const legacy=ocean.replace('jxz += moments.w * gk;',
+    'jxz += textureSample(dispTex, sampR, uv, c).w * gk;');
+  assert.notEqual(legacy,ocean);
+  for(const scene of ['view=boat','view=ship&windSpeed=18&swellHs=5&sunElev=35&sunAzim=30']){
+    const captures=[];
+    for(const shader of [legacy,ocean]){
+      const page=await browser.newPage({viewport:{width:128,height:96}});
+      try{
+        await page.addInitScript(instrumentRenderer);
+        await page.route('**/js/wgsl/ocean.js',route=>route.fulfill({contentType:'text/javascript',body:shader}));
+        await page.goto(`${origin}/?${scene}&shot=packed.png&frames=100000`);
+        await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
+        await step(page);
+        captures.push(await page.evaluate(async()=>{
+          const texture=check.target,row=Math.ceil(texture.width*4/256)*256;
+          const buffer=check.device.createBuffer({size:row*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+          const enc=check.device.createCommandEncoder();enc.copyTextureToBuffer({texture},{buffer,bytesPerRow:row},[texture.width,texture.height]);
+          check.device.queue.submit([enc.finish()]);await buffer.mapAsync(GPUMapMode.READ);
+          const pixels=Array.from(new Uint8Array(buffer.getMappedRange()));buffer.unmap();buffer.destroy();return pixels;
+        }));
+      }finally{await page.close();}
+    }
+    assert.ok(new Set(captures[0]).size>20);
+    assert.deepEqual(captures[1],captures[0],`${scene}: packed wave samples must preserve every pixel`);
   }
 });
 

@@ -1237,7 +1237,9 @@ fn emit(x: u32, y: u32, c: u32, a: vec4f, b: vec4f) {
   let p = vec2u(x, y);
   textureStore(dispOut, p, c, vec4f(a.x, a.z, a.y, a.w));
   textureStore(derivOut, p, c, b);
-  textureStore(momOut, p, c, vec4f(b.x * b.x, b.y * b.y, b.x * b.y, 0.0));
+  // Duplicate jxz in the unused moment alpha: surface shading needs it but
+  // not displacement.xyz. Both copies retain identical half precision/mips.
+  textureStore(momOut, p, c, vec4f(b.x * b.x, b.y * b.y, b.x * b.y, a.w));
 }
 
 @compute @workgroup_size(${N / 2})
@@ -2412,12 +2414,14 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
     let uv = xz * F.cascInvL[c >> 2u][c & 3u];
     let gk = mix(1.0, gust, select(0.0, select(0.5, 1.0, c >= 4u), c >= 3u));
     let dv = textureSample(derivTex, sampR, uv, c) * gk;
-    let mv = textureSample(momTex, sampR, uv, c) * (gk * gk);
-    let av = textureSample(dispTex, sampR, uv, c) * gk;
+    // Moments carry the same filtered jxz in alpha, saving one anisotropic
+    // displacement sample per cascade. jxz scales linearly, moments quadratically.
+    let moments = textureSample(momTex, sampR, uv, c);
+    let mv = moments.xyz * (gk * gk);
     s += dv.xy;
     jxx += dv.z;
     jzz += dv.w;
-    jxz += av.w;
+    jxz += moments.w * gk;
     cov += vec3f(max(mv.x - dv.x * dv.x, 0.0), max(mv.y - dv.y * dv.y, 0.0), mv.z - dv.x * dv.y);
   }
   let dist = length(in.rel);

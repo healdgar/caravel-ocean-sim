@@ -131,12 +131,14 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
     let uv = xz * F.cascInvL[c >> 2u][c & 3u];
     let gk = mix(1.0, gust, select(0.0, select(0.5, 1.0, c >= 4u), c >= 3u));
     let dv = textureSample(derivTex, sampR, uv, c) * gk;
-    let mv = textureSample(momTex, sampR, uv, c) * (gk * gk);
-    let av = textureSample(dispTex, sampR, uv, c) * gk;
+    // Moments carry the same filtered jxz in alpha, saving one anisotropic
+    // displacement sample per cascade. jxz scales linearly, moments quadratically.
+    let moments = textureSample(momTex, sampR, uv, c);
+    let mv = moments.xyz * (gk * gk);
     s += dv.xy;
     jxx += dv.z;
     jzz += dv.w;
-    jxz += av.w;
+    jxz += moments.w * gk;
     cov += vec3f(max(mv.x - dv.x * dv.x, 0.0), max(mv.y - dv.y * dv.y, 0.0), mv.z - dv.x * dv.y);
   }
   let dist = length(in.rel);
