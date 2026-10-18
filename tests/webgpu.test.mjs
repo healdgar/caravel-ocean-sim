@@ -229,7 +229,7 @@ test('early hull exclusion preserves water edges and the complete ship image', {
   const ocean=await readFile(new URL('../js/wgsl/ocean.js',import.meta.url),'utf8');
   const block=ocean.match(/  \/\/ BEGIN HULL EARLY EXIT[\s\S]*?  \/\/ END HULL EARLY EXIT/)[0];
   const late=process.env.OCEAN_BASELINE?await readFile(process.env.OCEAN_BASELINE,'utf8'):
-    ocean.replace(block,'').replace('  return vec4f(col, 1.0);',block.replace('discard; return vec4f(0);','discard;')+'\n  return vec4f(col, 1.0);');
+    ocean.replace(block,'').replace('  return vec4f(col, 1.0);',block.replace('${OCEAN_HULL_MASK}',"${OCEAN_HULL_MASK.replace('discard; return vec4f(0);','discard;')}")+'\n  return vec4f(col, 1.0);');
   const main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
   for(const view of ['boat','ship']){
     const captures=[];
@@ -237,11 +237,12 @@ test('early hull exclusion preserves water edges and the complete ship image', {
       const page=await browser.newPage({viewport:{width:96,height:72}});
       try{
         await page.addInitScript(instrumentRenderer);
-        await page.route('**/js/wgsl/ocean.js',route=>route.fulfill({contentType:'text/javascript',body:shader}));
+        await page.route('**/js/wgsl/ocean.js',route=>route.fulfill({contentType:'text/javascript',
+          body:shader.includes('export const OCEAN_VISIBLE')?shader:shader+'\nexport const OCEAN_VISIBLE=OCEAN;'}));
         // Expose the water cutout in the helm view, so the hull cannot hide a
         // masking regression. The exterior view retains all visible geometry.
         if(view==='boat')await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:main.replace('prowPass.drawIndexed(caravelIndices.length);','/* expose ocean cutout */')}));
-        await page.goto(`${origin}/?view=${view}&sunElev=35&sunAzim=30&clouds=0&shot=mask.png&frames=100000`);
+        await page.goto(`${origin}/?view=${view}&sunElev=35&sunAzim=30&clouds=0&oceanDepth=0&shot=mask.png&frames=100000`);
         await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
         await step(page);
         captures.push(await page.evaluate(async()=>{
@@ -287,6 +288,54 @@ test('packed wave samples preserve sunset and rough-sea pixels', {timeout:180000
     assert.ok(new Set(captures[0]).size>20);
     assert.deepEqual(captures[1],captures[0],`${scene}: packed wave samples must preserve every pixel`);
   }
+});
+
+test('ocean visibility stage preserves coverage and bounds shading error', {timeout:360000}, async()=>{
+  const main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
+  const ocean=await readFile(new URL('../js/wgsl/ocean.js',import.meta.url),'utf8');
+  const differences=[];
+  for(const scene of ['view=boat','view=ship&windSpeed=18&swellHs=5&sunElev=35',
+    'view=free&prow=0&cam=0,2.4,0,30,-5.5','view=boat&dbg=1','view=boat&effects=0&bloom=0']
+    .filter(scene=>!process.env.OCEAN_COVERAGE_ONLY||scene.includes('bloom=0'))){
+    const coverage=scene.includes('bloom=0');
+    const captures=[];
+    for(const mode of [0,1]){
+      const page=await browser.newPage({viewport:{width:192,height:128}});
+      try{
+        await page.addInitScript(instrumentRenderer);
+        // Expose the water cutout so the deck cannot conceal a mask regression.
+        if(scene==='view=boat'||coverage)await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',
+          body:main.replace('prowPass.drawIndexed(caravelIndices.length);','/* expose water edges */')}));
+        // White water and black sky isolate sample coverage from floating-point
+        // shading/compiler differences. The zero uniform keeps bindings active.
+        if(coverage)await page.route('**/js/wgsl/ocean.js',route=>route.fulfill({contentType:'text/javascript',body:ocean
+          .replace('return vec4f(col, 1.0);','return mix(vec4f(1.0),vec4f(col,1.0),F.reserved.x);')
+          .replace('return vec4f(L, 1.0);','return mix(vec4f(0,0,0,1),vec4f(L,1.0),F.reserved.x);')}));
+        await page.goto(`${origin}/?${scene}&oceanDepth=${mode}&shot=depth.png&frames=100000`);
+        await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
+        const frame=await step(page);
+        assert.equal(frame.render['ocean visibility']||0,mode);
+        captures.push(await page.evaluate(async()=>{
+          const texture=check.target,row=Math.ceil(texture.width*4/256)*256;
+          const buffer=check.device.createBuffer({size:row*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+          const enc=check.device.createCommandEncoder();enc.copyTextureToBuffer({texture},{buffer,bytesPerRow:row},[texture.width,texture.height]);
+          check.device.queue.submit([enc.finish()]);await buffer.mapAsync(GPUMapMode.READ);
+          const pixels=Array.from(new Uint8Array(buffer.getMappedRange()));buffer.unmap();buffer.destroy();return pixels;
+        }));
+      }finally{await page.close();}
+    }
+    assert.ok(new Set(captures[0]).size>(coverage?1:20));
+    if(coverage){assert.deepEqual(captures[1],captures[0],'depth visibility must preserve exact MSAA water/hull/sky coverage');continue;}
+    const delta=captures[1].map((v,i)=>Math.abs(v-captures[0][i])).filter((_,i)=>i%4!==3);
+    const difference={scene,max:Math.max(...delta),mean:delta.reduce((a,b)=>a+b,0)/delta.length,
+      rms:Math.sqrt(delta.reduce((a,b)=>a+b*b,0)/delta.length),aboveTwo:delta.filter(d=>d>2).length/delta.length};
+    console.log('visibility comparison',difference);
+    differences.push(difference);
+  }
+  // Different shader control flow changes rounding and helper-lane derivatives
+  // around occlusion edges. Require sub-quarter-level RMS (over 60 dB PSNR),
+  // sparse outliers, and no material single-channel deviation on a 0..255 scale.
+  assert.ok(differences.every(d=>d.mean<0.01&&d.rms<0.25&&d.aboveTwo<0.001&&d.max<=32),JSON.stringify(differences));
 });
 
 test('GPU timing handles unsupported devices, query readback, and skipped passes', {timeout:30000}, async()=>{

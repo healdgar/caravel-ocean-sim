@@ -140,12 +140,15 @@ The optimized frame schedule also avoids redundant GPU work:
 - With the ship visible, the ocean pass resolves directly into the water-reflection texture. This removes one full-screen RGBA16F copy (8 bytes per pixel read and written), preserving 4× MSAA, HDR precision, and every reflection mip. With the ship hidden, it resolves directly into the final HDR texture.
 - Water inside the hull exits before shadow filtering, reflections, lighting, and atmospheric shading. Implicit texture gradients and wave/foam derivatives are evaluated first, preserving water-mask edges and all visible shading. This removes work on pixels that were already discarded; shadow sample counts and render quality stay unchanged.
 - The slope-moment texture also carries the cross derivative in its previously unused alpha channel. Ocean fragments read 12 rather than 18 wave-cascade texture samples, with identical half precision, mip filtering, anisotropy, and wave detail. Displacement data remains available to geometry, foam, and buoyancy.
+- The optional `oceanDepth=1` path resolves ocean visibility with a cheap depth draw before shading, within the same render pass. The full surface shader contains no discard and uses an equal-depth test, allowing hidden water to be rejected before its texture sampling and lighting. Both draws use identical, invariant vertex positions, the original hull cutout, and 4× MSAA. This adds a geometry draw in exchange for avoiding hidden-fragment work; it remains opt-in until measured on the target phone.
 
-These are reductions in memory and scheduled work, not a measured hardware FPS improvement. GPU timing depends on the adapter and scene.
+These changes target memory and GPU work. Frame-rate benefits depend on the adapter and scene; the device observations below are not controlled benchmarks.
 
 ### GPU profiling
 
 Add `profile=1` to any scene URL for an opt-in timing overlay. It samples waves/effects, sky/clouds, environment reflections, solid/canvas shadows, ocean, reflection filtering, ship/spray, bloom, and composite every eight frames when `timestamp-query` is supported. Normal mode retains the original single compute pass; detailed mode splits it into three for measurement. Unsupported devices render normally and report that timing is unavailable.
+
+Add `oceanDepth=1` to test the visibility stage; the overlay identifies `Ocean visibility: depth first`. The default `inline` path remains available with `oceanDepth=0`. Compare the same resolution and scene. Both visibility and shading remain within the `Ocean + sky` span; the new stage does not introduce a render-pass boundary. Capture JSON records `oceanDepth`, and ordinary share links omit this diagnostic flag.
 
 Values are GPU **spans**, not exclusive costs: render stages can overlap or wait on earlier work, especially on tile GPUs. Pass times must not be added; bloom reports its enclosing span. Detailed mode's **sampled GPU window** runs from the earliest measured pass start to the latest measured end, including stages that begin before the first compute pass. It includes waits and is not a frame-rate measurement. Normal mode's cheaper **GPU endpoints** interval covers only first-compute start to composite end. These are different metrics; compare matching modes and use actual FPS/frame cadence for performance. Browser timestamp quantization can round short passes to zero. The overlay also shows render dimensions and device pixel ratio.
 
@@ -153,7 +156,7 @@ For a reproducible local capture, use `?view=ship&profile=1&w=1280&h=720&shot=gp
 
 The initial October 2026 Mac comparison reported roughly 12 ms compute-to-composite endpoint intervals, incorrectly labelled whole-frame spans. Those figures are not comparable to the corrected sampled GPU window (capture format version 2). No sustained FPS improvement has been established. Confirmed benefits are reductions in buffer storage and scheduled GPU work. Waves, cloud quality, shadows, HDR, and antialiasing settings remain unchanged.
 
-User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabled at the helm, showed 6.5 FPS / 153.8 ms at 1206 × 1998 and 15.4 FPS / 64.9 ms at 603 × 999. Quartering pixel count improved FPS about 2.4×, indicating substantial resolution-dependent cost. These are individual observations, not a controlled benchmark; overlapping pass spans cannot isolate exclusive ocean, ship, or bloom costs. The subsequent packed-wave optimization has not yet been measured on that phone. Default resolution is unchanged.
+User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabled at the helm, showed 6.5 FPS / 153.8 ms at 1206 × 1998 and 15.4 FPS / 64.9 ms at 603 × 999. Quartering pixel count improved FPS about 2.4×, indicating substantial resolution-dependent cost. After packed wave reads (`a85cb45`), the full-resolution screenshot showed 8.6 FPS / 116.6 ms: about 32% higher FPS, still too slow. These are individual observations, not a controlled benchmark; overlapping pass spans cannot isolate exclusive ocean, ship, or bloom costs. The subsequent depth-first visibility path has not yet been measured on that phone. Default resolution is unchanged.
 
 ## Validation
 
@@ -166,7 +169,7 @@ npm run build
 npm test
 ```
 
-The suite contains 37 checks covering:
+The suite contains 38 checks covering:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
@@ -177,6 +180,7 @@ The suite contains 37 checks covering:
 - Bit-exact indexed geometry and shadow partitions; pixel equality between the original copy/unindexed schedule, direct resolve/indexed rendering, and profiled rendering; actual slow-frame FPS, timestamp readback, overlapping/early render stages, stale disabled queries, quantized zero intervals, invalid timestamps, and unsupported-device fallback.
 - Pixel equality before/after early hull exclusion, both with the water cutout exposed at the helm and with the complete ship visible from outside.
 - Analytical cross-derivative values and pixel equality between separate and packed wave-texture reads, at sunset and in rough seas.
+- Exact MSAA coverage comparison between inline and depth-first ocean visibility. Shaded comparisons cover exposed hull edges, rough seas, free-camera water, and unmasked debug views; they bound rounding/edge differences to sub-quarter-level RMS on a 0–255 channel scale, rather than asserting bit equality. Resolution, wave cascades, texture filtering, shadows and antialiasing remain unchanged.
 
 GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks in native Chrome supplement these tests; software-GPU checks do not establish device frame rates or visual quality.
 

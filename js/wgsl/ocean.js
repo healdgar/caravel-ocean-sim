@@ -37,6 +37,14 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 `;
 
+const OCEAN_HULL_MASK = /* wgsl */ `
+  if(F.post.w <= 0.5 && H.rig.z > 0.5) {
+    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
+    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+    if(hullExcludesOcean(q)) { discard; return vec4f(0); }
+  }
+`;
+
 export const OCEAN = FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
@@ -57,7 +65,7 @@ const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
 const TEX_N: f32 = ${N}.0;
 
 struct VSOut {
-  @builtin(position) pos: vec4f,
+  @invariant @builtin(position) pos: vec4f,
   @location(0) rel: vec3f,     // displaced position relative to the camera
   @location(1) xz: vec2f,      // undisplaced (lagrangian) coordinates
   @location(2) height: f32,
@@ -178,11 +186,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   // BEGIN HULL EARLY EXIT
   // Deck wash owns water inside the hull. Skip shadow filters, reflections and
   // lighting for these discarded fragments; preserve unmasked debug views.
-  if(F.post.w <= 0.5 && H.rig.z > 0.5) {
-    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-    if(hullExcludesOcean(q)) { discard; return vec4f(0); }
-  }
+${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
 
   let sunlight = sunIlluminance() * sunVis[0];
@@ -299,7 +303,18 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   col = col * T + fogCol * (1.0 - T);
   return vec4f(col, 1.0);
 }
+
+// Visibility only: identical vertex positions, hull cutout and MSAA coverage.
+// Colour writes are disabled; no wave shading or texture derivatives run here.
+@fragment fn depthOnly(in: VSOut) -> @location(0) vec4f {
+${OCEAN_HULL_MASK}
+  return vec4f(0);
+}
 `;
+
+// Remove only the surface shader's cutout. depthOnly retains the same mask.
+// This variant can reject hidden fragments before any expensive shading.
+export const OCEAN_VISIBLE = OCEAN.replace(OCEAN_HULL_MASK, '');
 
 // Samples the displaced surface height under the camera (inverting the horizontal
 // displacement with a few fixed-point iterations).

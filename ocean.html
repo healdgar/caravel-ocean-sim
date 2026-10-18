@@ -2320,6 +2320,14 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 `;
 
+const OCEAN_HULL_MASK = /* wgsl */ `
+  if(F.post.w <= 0.5 && H.rig.z > 0.5) {
+    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
+    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+    if(hullExcludesOcean(q)) { discard; return vec4f(0); }
+  }
+`;
+
 const OCEAN = FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
@@ -2340,7 +2348,7 @@ const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
 const TEX_N: f32 = ${N}.0;
 
 struct VSOut {
-  @builtin(position) pos: vec4f,
+  @invariant @builtin(position) pos: vec4f,
   @location(0) rel: vec3f,     // displaced position relative to the camera
   @location(1) xz: vec2f,      // undisplaced (lagrangian) coordinates
   @location(2) height: f32,
@@ -2461,11 +2469,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   // BEGIN HULL EARLY EXIT
   // Deck wash owns water inside the hull. Skip shadow filters, reflections and
   // lighting for these discarded fragments; preserve unmasked debug views.
-  if(F.post.w <= 0.5 && H.rig.z > 0.5) {
-    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-    if(hullExcludesOcean(q)) { discard; return vec4f(0); }
-  }
+${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
 
   let sunlight = sunIlluminance() * sunVis[0];
@@ -2582,7 +2586,18 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   col = col * T + fogCol * (1.0 - T);
   return vec4f(col, 1.0);
 }
+
+// Visibility only: identical vertex positions, hull cutout and MSAA coverage.
+// Colour writes are disabled; no wave shading or texture derivatives run here.
+@fragment fn depthOnly(in: VSOut) -> @location(0) vec4f {
+${OCEAN_HULL_MASK}
+  return vec4f(0);
+}
 `;
+
+// Remove only the surface shader's cutout. depthOnly retains the same mask.
+// This variant can reject hidden fragments before any expensive shading.
+const OCEAN_VISIBLE = OCEAN.replace(OCEAN_HULL_MASK, '');
 
 // Samples the displaced surface height under the camera (inverting the horizontal
 // displacement with a few fixed-point iterations).
@@ -3897,6 +3912,8 @@ function createGPUProfiler(device, requested=false) {
 
 const qs = new URLSearchParams(location.search);
 const DBG = Number(qs.get('dbg')) || 0;
+// Opt-in until the extra geometry work has been measured on the target phone.
+const OCEAN_DEPTH = qs.get('oceanDepth') === '1';
 const D2R = Math.PI / 180;
 const GU = GPUBufferUsage;
 const TU = GPUTextureUsage;
@@ -4134,7 +4151,7 @@ async function main() {
   const MSAA = 4;
   const HDR = 'rgba16float';
   const [oceanMod, skyMod, downMod, upMod, compMod] = await Promise.all([
-    shader(OCEAN, 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
+    shader(OCEAN_DEPTH ? OCEAN_VISIBLE : OCEAN, 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
     shader(BLOOM_UP, 'bloom up'), shader(COMPOSITE, 'composite'),
   ]);
   const oceanPipe = await device.createRenderPipelineAsync({
@@ -4145,9 +4162,20 @@ async function main() {
     },
     fragment: { module: oceanMod, entryPoint: 'fs', targets: [{ format: HDR }] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: !OCEAN_DEPTH, depthCompare: OCEAN_DEPTH ? 'equal' : 'greater' },
     multisample: { count: MSAA },
   });
+  const oceanDepthPipe = OCEAN_DEPTH ? await device.createRenderPipelineAsync({
+    label: 'ocean visibility', layout: 'auto',
+    vertex: {
+      module: oceanMod, entryPoint: 'vs',
+      buffers: [{ arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }],
+    },
+    fragment: { module: oceanMod, entryPoint: 'depthOnly', targets: [{ format: HDR, writeMask: 0 }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+    multisample: { count: MSAA },
+  }) : null;
   const skyPipe = await device.createRenderPipelineAsync({
     label: 'sky', layout: 'auto',
     vertex: { module: skyMod, entryPoint: 'vs' },
@@ -4219,9 +4247,17 @@ async function main() {
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
-  const bgOcean = [0, 1].map((i) => [0, 1].map(w => bg(oceanPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
+  const oceanResources = (i,w) => [{ buffer: frameUBO }, transView, skyView, sampClamp,
     fullArr(dispTex), fullArr(derivTex), fullArr(momTex), foamTex.createView(), envCubeView, sampRepeat,
-    fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'ocean' + i)));
+    fullArr(foamW[i]), { buffer: sunVisBuf }, { buffer: hullUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler];
+  const bgOcean = [0, 1].map(i => [0, 1].map(w => device.createBindGroup({
+    label:'ocean'+i, layout:oceanPipe.getBindGroupLayout(0),
+    entries:oceanResources(i,w).map((resource,binding)=>({binding,resource})).filter(e=>!OCEAN_DEPTH || e.binding!==12),
+  })));
+  const bgOceanDepth = OCEAN_DEPTH ? [0,1].map(w=>device.createBindGroup({
+    label:'ocean visibility', layout:oceanDepthPipe.getBindGroupLayout(0),
+    entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>[0,4,9,12,13,14,15].includes(e.binding)),
+  })) : [];
   const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, { buffer: sunVisBuf }], 'sky');
   const clouds = await createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
   clouds.setSkyPipeline(skyPipe);
@@ -4913,7 +4949,7 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
@@ -5024,11 +5060,18 @@ async function main() {
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
     if (nodeCount) {
+      rp.setVertexBuffer(0, instBuf);
+      rp.setIndexBuffer(idxBuf, 'uint16');
+      // Keep depth and colour in one render pass so tile attachments stay live.
+      // The second draw shades only the surviving surface, with no discard.
+      if (OCEAN_DEPTH) {
+        rp.setPipeline(oceanDepthPipe);
+        rp.setBindGroup(0, bgOceanDepth[interaction.current]);
+        rp.drawIndexed(GRID * GRID * 6, nodeCount);
+      }
       rp.setPipeline(oceanPipe);
       rp.setBindGroup(0, bgOcean[foamCur][interaction.current]);
       rp.setBindGroup(1, oceanShadows);
-      rp.setVertexBuffer(0, instBuf);
-      rp.setIndexBuffer(idxBuf, 'uint16');
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
     rp.setPipeline(skyPipe);
@@ -5119,7 +5162,7 @@ async function main() {
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
     if(profilePanel){
       await profiler.settled();profilePanel.textContent=profileSummary+'\n'+profiler.text();
-      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,parameters:P,profile:profiler.snapshot()},null,2)});
+      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,parameters:P,profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
     shotIdx++;
