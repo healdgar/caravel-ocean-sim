@@ -166,14 +166,14 @@ function instrumentRenderer() {
   };
 }
 
-async function step(page) {
-  const result = await page.evaluate(async () => {
+async function step(page,extraMs=0) {
+  const result = await page.evaluate(async extraMs => {
     const callback = check.callback;
     check.callback = null; check.compute = {}; check.render = {};
-    callback(performance.now());
+    callback(performance.now()+extraMs);
     await check.device.queue.onSubmittedWorkDone();
     return { compute: check.compute, render: check.render, errors: check.errors };
-  });
+  },extraMs);
   assert.deepEqual(result.errors, []);
   return result;
 }
@@ -207,7 +207,8 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
       await page.goto(`${origin}/?view=ship&sunElev=35&sunAzim=30&clouds=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
       try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
-      const frame=await step(page);
+      const frame=await step(page,1000);
+      assert.ok(parseFloat(await page.locator('#fps').textContent())<2,'FPS must reflect a one-second frame, not the 100 ms simulation clamp');
       assert.equal(frame.render.caravel,1);
       const pixels=await page.evaluate(async()=>{
         const texture=check.target,bytesPerRow=Math.ceil(texture.width*4/256)*256;

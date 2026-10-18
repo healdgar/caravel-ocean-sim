@@ -7,6 +7,29 @@ export const GPU_PASS_NAMES = [
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];
 
+// Passes may begin before the first encoded compute pass starts. Preserve the
+// endpoint interval separately; only min(start)..max(end) encloses all samples.
+export function decodeGPUTimestamps(values,names,used) {
+  let first=null,last=null,bloomFirst=null,bloomLast=null;
+  const passes={};
+  for(let i=0;i<names.length;i++){
+    const name=names[i];passes[name]=0;
+    if(!used[i])continue; // Unwritten slots may contain a previous frame's data.
+    const start=values[i*2],end=values[i*2+1];
+    if(end<start)return null;
+    passes[name]=Number(end-start)/1e6;
+    if(first===null||start<first)first=start;
+    if(last===null||end>last)last=end;
+    if(name.startsWith('Bloom ')){
+      if(bloomFirst===null||start<bloomFirst)bloomFirst=start;
+      if(bloomLast===null||end>bloomLast)bloomLast=end;
+    }
+  }
+  if(first===null)return null;
+  passes.Bloom=bloomFirst===null?0:Number(bloomLast-bloomFirst)/1e6;
+  return {windowMs:Number(last-first)/1e6,passes};
+}
+
 export function createGPUProfiler(device, requested=false) {
   const supported=device.features.has('timestamp-query'), detailed=requested && supported;
   const names=detailed?GPU_PASS_NAMES:['Frame'], count=names.length*2, bytes=count*8;
@@ -17,10 +40,10 @@ export function createGPUProfiler(device, requested=false) {
   const first={querySet:query,beginningOfPassWriteIndex:0},last={querySet:query,endOfPassWriteIndex:1};
   const used=new Uint8Array(names.length), pendingUsed=new Uint8Array(names.length);
   const latest={},smoothed={},samples=[];
-  let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,reading=Promise.resolve(),error='';
+  let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,droppedSamples=0,reading=Promise.resolve(),error='';
   function snapshot() {
     const sorted=samples.map(s=>s.totalMs).sort((a,b)=>a-b);
-    return {supported,detailed,error,totalMs,sampleCount,latest:{...latest},smoothed:{...smoothed},
+    return {version:2,metric:detailed?'sampled GPU window':'compute-to-composite endpoints',supported,detailed,error,totalMs,sampleCount,droppedSamples,latest:{...latest},smoothed:{...smoothed},
       medianMs:sorted.length?sorted[Math.floor(sorted.length/2)]:null,
       p95Ms:sorted.length?sorted[Math.min(sorted.length-1,Math.ceil(sorted.length*.95)-1)]:null,
       samples:samples.map(s=>({...s,passes:{...s.passes}}))};
@@ -45,29 +68,17 @@ export function createGPUProfiler(device, requested=false) {
       if(!pending)return reading;
       reading=staging.mapAsync(GPUMapMode.READ).then(()=>{
         const values=new BigUint64Array(staging.getMappedRange());
-        const elapsed=Number(values[count-1]-values[0])/1e6;
-        let bloomStart=null,bloomEnd=0n;
-        for(let i=0;i<names.length;i++){
-          const ms=pendingUsed[i]?Number(values[i*2+1]-values[i*2])/1e6:0;
-          latest[names[i]]=ms;
-          smoothed[names[i]]=sampleCount?smoothed[names[i]]*.8+ms*.2:ms;
-          if(pendingUsed[i]&&names[i].startsWith('Bloom ')){
-            const start=values[i*2],end=values[i*2+1];
-            if(bloomStart===null||start<bloomStart)bloomStart=start;
-            if(end>bloomEnd)bloomEnd=end;
-          }
-        }
-        // Tile GPUs can start vertex work before preceding fragments finish.
-        // Bloom is its enclosing time span, never a sum of overlapping passes.
-        latest.Bloom=bloomStart===null?0:Number(bloomEnd-bloomStart)/1e6;
-        smoothed.Bloom=sampleCount?smoothed.Bloom*.8+latest.Bloom*.2:latest.Bloom;
+        const decoded=decodeGPUTimestamps(values,names,pendingUsed);
         staging.unmap();
-        if(Number.isFinite(elapsed)&&elapsed>=0){
-          totalMs=sampleCount?totalMs*.8+elapsed*.2:elapsed;sampleCount++;
-          if(detailed&&pendingFrame>=120){
-            samples.push({frame:pendingFrame,totalMs:elapsed,passes:{...latest}});
-            if(samples.length>512)samples.shift();
-          }
+        if(!decoded){droppedSamples++;return;}
+        for(const [name,ms] of Object.entries(decoded.passes)){
+          latest[name]=ms;smoothed[name]=sampleCount?smoothed[name]*.8+ms*.2:ms;
+        }
+        const elapsed=decoded.windowMs;
+        totalMs=sampleCount?totalMs*.8+elapsed*.2:elapsed;sampleCount++;
+        if(detailed&&pendingFrame>=120){
+          samples.push({frame:pendingFrame,totalMs:elapsed,passes:{...latest}});
+          if(samples.length>512)samples.shift();
         }
       }).catch(e=>{error=String(e.message||e);}).finally(()=>{pending=false;});
       return reading;
@@ -76,14 +87,15 @@ export function createGPUProfiler(device, requested=false) {
     text(){
       if(!supported)return 'GPU pass timing unavailable: timestamp-query unsupported.';
       if(error)return `GPU pass timing unavailable: ${error}`;
-      const lines=[`GPU frame span  ${totalMs.toFixed(2)} ms`, 'Pass spans (overlap; not additive):'];
+      const lines=[`GPU ${detailed?'sampled window':'endpoints'}  ${totalMs.toFixed(2)} ms`, 'Smoothed pass spans (overlap; not additive):'];
       for(const name of GPU_PASS_NAMES.filter(n=>!n.startsWith('Bloom '))){
         if(name==='Composite'){
           lines.push(`Bloom                   ${(smoothed.Bloom||0).toFixed(2)} ms`);
         }
         lines.push(`${name.padEnd(23)} ${(smoothed[name]||0).toFixed(2)} ms`);
       }
-      lines.push('Sampled every 8 frames; rounded GPU timestamps.', 'Profiling adds pass boundaries; compare like-for-like.');
+      lines.push('GPU windows include waits; they are not FPS.', 'Sampled every 8 frames; rounded GPU timestamps.', 'Profiling adds pass boundaries; compare like-for-like.');
+      if(droppedSamples)lines.push(`Discarded invalid timestamp samples: ${droppedSamples}`);
       return lines.join('\n');
     },
     destroy(){query?.destroy();resolve?.destroy();staging?.destroy();},

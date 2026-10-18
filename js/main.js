@@ -494,6 +494,7 @@ async function main() {
   // GPU timing
   // --------------------------------------------------------------------------------------
   const profiler=createGPUProfiler(device,qs.get('profile')==='1');
+  let profileSummary='Waiting for frame timing…';
   let profilePanel=null;
   if(qs.get('profile')==='1'){
     profilePanel=document.createElement('pre');profilePanel.id='gpu-profile';
@@ -1026,14 +1027,16 @@ async function main() {
     if (shooting) return;  // paused while a screenshot is read back
     requestAnimationFrame(frame);
     resize();
-    let dt = Math.min(0.1, (now - last) / 1000);
+    const elapsed = Math.max(0, (now - last) / 1000);
+    let dt = Math.min(0.1, elapsed);
     last = now;
-    fpsN++; fpsT += dt;
+    fpsN++; fpsT += elapsed;
     if (fpsT > 0.5) {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
-        (hasTS ? `  |  GPU ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      if(profilePanel)profilePanel.textContent=profiler.text();
+        (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}`;
+      if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
@@ -1237,7 +1240,7 @@ async function main() {
     const nm = shotSeq > 1 ? shotName.replace('.png', `_${shotIdx}.png`) : shotName;
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
     if(profilePanel){
-      await profiler.settled();profilePanel.textContent=profiler.text();
+      await profiler.settled();profilePanel.textContent=profileSummary+'\n'+profiler.text();
       await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,parameters:P,profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
