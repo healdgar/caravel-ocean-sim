@@ -398,8 +398,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let hullFoam = wakeAt(p);
   let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
   let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
-  let f=max(seaFoam,hullFoam.z*0.65);
-  let fresh=mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0));
+  let f=max(seaFoam,hullFoam.z*0.9);
+  let fresh=max(mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0)),hullFoam.w*0.9);
   textureStore(dst, id.xy, lvl, vec4f(f, fresh, J, 1.0));
 }
 `;

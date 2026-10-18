@@ -6,7 +6,8 @@ import { SHADOW_SAMPLE } from './shadows.js';
 export const WAKE_SIZE = 256;
 export const SPRAY_COUNT = 4096;
 export const SHEET_COUNT = 128;
-export const CONTACT_COUNT = 32;
+// The first 32 contacts launch bow spray; eight aft contacts drive the stern wake.
+export const CONTACT_COUNT = 40;
 export const INTERACTION_TYPES = /* wgsl */ `
 struct Interaction {
   domain: vec4f,   // world centre xz, extent, texel size
@@ -73,12 +74,14 @@ fn pressureSea(p: vec2f) -> f32 {
   var q=p;for(var k=0;k<3;k++){q=p-pressureDisp(q).xz;}
   return pressureDisp(q).y;
 }
-@compute @workgroup_size(32) fn main(@builtin(global_invocation_id) id: vec3u) {
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
   let i = id.x;
-  let u = f32(i % 16u) / 15.0;
-  let side = select(-1.0, 1.0, i >= 16u);
+  if(i >= ${CONTACT_COUNT}u){return;}
+  let aft = i >= 32u;
+  let u = select(f32(i % 16u) / 15.0, f32(i % 4u) / 3.0, aft);
+  let side = select(-1.0, 1.0, (i >= 16u && i < 32u) || i >= 36u);
   let a = mix(0.28, 0.992, u);
-  let z = -6.4 * a;
+  let z = select(-6.4 * a, mix(2.0,5.25,u), aft);
   let deck = hullDeck(z);
   let halfWidth = hullHalfWidth(z, 0.0) * H.size.x / 3.6;
   let spine = H.origin.xyz - H.forward.xyz * (z * H.size.y / 12.0);
@@ -108,7 +111,7 @@ fn pressureSea(p: vec2f) -> f32 {
   let drive = wet * (min(0.35,speed*0.035)*mix(0.35,1.0,u)+impact*0.8);
   let age = select(old.state.y+dt,1.0,reset);
   let launch = !reset && hit>0.12 && age>0.22 && (old.state.z<=0.3 || age>0.42);
-  let outward = normalize(H.right.xyz * side + H.forward.xyz * (0.18 + 0.35 * a * a));
+  let outward = normalize(H.right.xyz * side + H.forward.xyz * select(0.18 + 0.35 * a * a,-0.25,aft));
   contacts[i].point = vec4f(p,drive);
   contacts[i].axis = vec4f(outward,impact);
   contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*(0.7+sqrt(impact)*1.7),wet);
@@ -129,6 +132,11 @@ fn previousCell(q: vec2i) -> vec4f {
   if (any(q < vec2i(1)) || any(q >= vec2i(${WAKE_SIZE - 1})) || I.previous.w > 0.5) { return vec4f(0.0); }
   return textureLoad(prevWake, q, 0);
 }
+fn previousFoam(q:vec2f)->vec2f {
+  let cell=vec2i(floor(q));let f=fract(q);
+  return mix(mix(previousCell(cell).zw,previousCell(cell+vec2i(1,0)).zw,f.x),
+    mix(previousCell(cell+vec2i(0,1)).zw,previousCell(cell+vec2i(1,1)).zw,f.x),f.y);
+}
 @compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
   let q = vec2i(id.xy);
   let deposited = f32(atomicExchange(&landings[id.y * ${WAKE_SIZE}u + id.x], 0u)) / 4096.0;
@@ -136,7 +144,8 @@ fn previousCell(q: vec2i) -> vec4f {
   let shift = vec2i(round((I.domain.xy - I.previous.xy) / I.domain.w));
   let pq = q + shift;
   let old = previousCell(pq);
-  let lap = previousCell(pq + vec2i(1,0)).x + previousCell(pq - vec2i(1,0)).x + previousCell(pq + vec2i(0,1)).x + previousCell(pq - vec2i(0,1)).x - 4.0 * old.x;
+  let neighbours = previousCell(pq + vec2i(1,0)) + previousCell(pq - vec2i(1,0)) + previousCell(pq + vec2i(0,1)) + previousCell(pq - vec2i(0,1));
+  let lap = neighbours.x - 4.0 * old.x;
   let p = (vec2f(id.xy) + 0.5 - ${WAKE_SIZE / 2}.0) * I.domain.w + I.domain.xy;
   let delta = p - H.origin.xz;
   let along = dot(delta, H.forward.xz);
@@ -148,20 +157,42 @@ fn previousCell(q: vec2i) -> vec4f {
   let r = length(toContact) / width;
   // A crest outside the hull and a shallow trough behind it displace water to either side.
   let outside = dot(toContact, contact.axis.xz);
-  let source = exp(-r * r * 1.4) * smoothstep(-0.2, 0.25, outside) * contact.point.w;
-  let stern = exp(-pow((along + H.size.y * 0.44) / max(0.7, H.size.y * 0.1), 2.0) - pow(dot(delta, H.right.xz) / max(0.6, H.size.x * 0.45), 2.0));
-  let sternWet = (contacts[0].flow.w + contacts[16].flow.w) * 0.5;
+  let bowSource = exp(-r * r * 1.4) * smoothstep(-0.2, 0.25, outside) * contact.point.w;
+  let aftU=clamp((-along/max(H.size.y/12.0,0.1)-2.0)/3.25,0.0,1.0);
+  let aft=contacts[32u+select(0u,4u,side>0u)+u32(round(aftU*3.0))];
+  let aftDelta=p-aft.point.xz;
+  let aftSource=exp(-dot(aftDelta,aftDelta)/(width*width)*1.4)*smoothstep(-0.2,0.25,dot(aftDelta,aft.axis.xz))*aft.point.w;
+  let source=bowSource+aftSource*0.45;
+  // Sample the actual aft waterline: bow immersion cannot stand in for a dry stern.
+  let sternCentre = (contacts[35].point.xz + contacts[39].point.xz) * 0.5;
+  let sternDelta = p-sternCentre;
+  let sternAlong = dot(sternDelta,H.forward.xz);
+  let sternAcross = dot(sternDelta,H.right.xz);
+  let stern = exp(-pow(sternAlong / max(0.7,H.size.y*0.065),2.0)-pow(sternAcross / max(0.6,H.size.x*0.32),2.0));
+  let sternWet = (contacts[35].flow.w + contacts[39].flow.w) * 0.5;
   let pulse = exp(-r*r*2.0)*(1.0-r*r*2.0)*smoothstep(-0.1,0.2,outside)*contact.axis.w;
   let forwardSpeed = max(0.0, I.motion.x);
-  let forcing = source*4.0+pulse*14.0-stern*sternWet*min(0.35,forwardSpeed*0.025);
+  // A trough at the transom and a recovery crest behind it radiate into the trail.
+  let recovery = exp(-pow((sternAlong+max(1.0,H.size.y*0.12))/max(0.8,H.size.y*0.08),2.0)-pow(sternAcross/max(0.8,H.size.x*0.5),2.0));
+  let forcing = source*4.0+pulse*14.0+(recovery*0.65-stern)*sternWet*min(0.65,forwardSpeed*forwardSpeed*0.035);
   let dt = I.previous.z;
   // c=2.5 m/s and dx>=0.5 m remain CFL-stable at the host's maximum dt=0.1 s.
-  let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 2.0) * dt) * exp(-dt * 1.25), -3.0, 3.0);
+  let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 1.2) * dt) * exp(-dt * 0.55), -3.0, 3.0);
   let edge = 1.0 - smoothstep(0.43, 0.495, max(abs(p.x - I.domain.x), abs(p.y - I.domain.y)) / I.domain.z);
   let height = clamp(old.x + velocity * dt, -0.7, 1.1) * edge;
-  let foamSource = source*0.65+max(pulse,0.0)*1.4+stern*sternWet*min(0.5,forwardSpeed*0.05);
-  let foam = clamp(old.z * exp(-dt * 0.45) + foamSource * dt + deposited, 0.0, 1.0) * edge;
-  textureStore(dstWake, q, vec4f(height, velocity * edge, foam, max(foamSource * dt, deposited)));
+  let froude=forwardSpeed/sqrt(9.81*max(H.size.y,1.0));
+  // Broad, intermittent entrainment, not a propeller jet. Texture stays in world
+  // space, so an old trail follows the travelled track through turns and stops.
+  let churn=0.72+0.28*sin(sternAcross*3.1+I.phase.x*2.3)*sin(sternAlong*2.7-I.phase.x*1.7);
+  let foamSource=source*2.5+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*0.95)*smoothstep(0.04,0.28,froude)*churn;
+  let eddy=vec2f(cos(p.y*0.65+I.phase.x*0.5),-cos(p.x*0.65-I.phase.x*0.4))*0.24;
+  let drift=I.motion.zw*0.012+eddy;
+  let transported=previousFoam(vec2f(pq)-drift*dt/I.domain.w);
+  let spread=1.0-exp(-dt*0.28/(I.domain.w*I.domain.w));
+  let aged=mix(transported,neighbours.zw*0.25,spread)*exp(-dt*vec2f(0.11,0.8));
+  let born=1.0-exp(-foamSource*dt);
+  let foam=clamp(aged+(vec2f(1.0)-aged)*born+deposited,vec2f(0.0),vec2f(1.0))*edge;
+  textureStore(dstWake, q, vec4f(height, velocity * edge, foam));
 }
 `;
 

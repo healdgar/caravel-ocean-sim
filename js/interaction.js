@@ -1,5 +1,5 @@
 // GPU-owned bow contacts, a moving local wake grid, and fixed-capacity spray.
-import { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT, SHEET_UPDATE, WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
+import { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT, CONTACT_COUNT, SHEET_UPDATE, WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
 import { boatForwardSpeed } from './boat.js';
 import { createDeckWash } from './deck.js';
 
@@ -8,7 +8,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
   const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe});
-  const contacts = device.createBuffer({ label: 'hull contacts', size: 32 * 64, usage: bu.STORAGE | bu.COPY_SRC });
+  const contacts = device.createBuffer({ label: 'hull contacts', size: CONTACT_COUNT * 64, usage: bu.STORAGE | bu.COPY_SRC });
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
   const landings = device.createBuffer({ label: 'spray landing foam', size: WAKE_SIZE * WAKE_SIZE * 4, usage: bu.STORAGE | bu.COPY_SRC });

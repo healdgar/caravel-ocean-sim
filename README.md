@@ -85,15 +85,19 @@ The visible mesh and shadow casters share 107,914 unique vertex records through 
 
 The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
 
-### Bow waves and spray
+### Wake, bow waves and spray
 
-Thirty-two GPU probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Small droplets and broad translucent mist are secondary to the sheets, rather than constant streams.
+Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Small droplets and broad translucent mist are secondary to the sheets, rather than constant streams.
 
 A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Impacts inject outward-travelling crest/trough pulses. Gravity, drag, water collision, 128 sheet slots, and 4,096 secondary particle slots stay on the GPU.
 
+The stern wake uses its own waterline contacts, so lifting the stern clear of the sea stops stern entrainment even while the bow remains wet. A transom trough and recovery crest, plus quarter-hull pressure, feed the outgoing waves. Foam production follows actual forward speed and the speed-to-hull-length ratio. It forms a broken trail, drifts through a small eddy field, spreads and fades along the travelled path; turning does not rotate old foam with the ship. Fresh bubbles fade faster than the lingering surface foam. These authored rates are a visual approximation for a displacement vessel, without a propeller jet.
+
+Wake transport reuses the existing grid, textures and compute dispatch. Eight additional contact probes and local-grid texture reads add GPU work; no extra full-screen pass or particle population was added. The 30 FPS automatic-resolution target remains active. Physical-iPhone performance of this change has not been measured.
+
 **Wakes & spray** toggles the effect, also preserved as `effects=0` or `effects=1` in shared links. Changing sea spectrum or hull dimensions resets contact history to avoid false impacts. The grid uses a damped wave approximation with bounded forcing; it does not model full hull hydrodynamics, planing, or a physically exact Kelvin wake.
 
-Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_demo) for curling sheets and separate spray populations; [booherbg/clean-room-fft-ocean](https://github.com/booherbg/clean-room-fft-ocean) for ocean/contact-driven spray; [bob6664569/open-water](https://github.com/bob6664569/open-water) for persistent world-space wakes. This implementation uses native WebGPU/WGSL and adds no runtime dependencies.
+Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_demo) for curling sheets and separate spray populations; [booherbg/clean-room-fft-ocean](https://github.com/booherbg/clean-room-fft-ocean) for ocean/contact-driven spray; [bob6664569/open-water](https://github.com/bob6664569/open-water) for persistent world-space wakes. [NUS CRISP's ship-wake overview](https://crisp.nus.edu.sg/~research/shipwakes/shipwakes.htm) distinguishes the outgoing wave pattern from the turbulent trail and near-hull foam. This implementation uses native WebGPU/WGSL and adds no runtime dependencies.
 
 ### Deck wash and buoyancy
 
@@ -182,7 +186,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
+- Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, forecastle and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.

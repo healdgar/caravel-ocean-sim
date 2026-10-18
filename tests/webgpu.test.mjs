@@ -468,12 +468,13 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       const computePipe = async (code, label) => device.createComputePipelineAsync({ label, layout: 'auto', compute: { module: await shader(code, label), entryPoint: 'main' } });
       const fx = await createWaterInteraction({ device, frameUBO: frame, hullUBO: hull, seaView: sea.createView({ dimension: '2d-array' }), seaSampler: sampler, envView: env.createView({ dimension: 'cube' }), transView: trans.createView(), shader, computePipe });
       const boat = { showProw: true, effects: true, length: 12, beam: 3.6, x: 0, z: 0, speed: 12, surgeVelocity: 0, revision: 0 };
-      let tick = 0;
-      async function advance(count, dt = 1 / 60) {
+      let tick = 0, interactionTime = 0;
+      async function advance(count, dt = 1 / 60, move = () => {}) {
         for (let i = 0; i < count; i++) {
+          move(i);
           h[16] = boat.x; h[18] = boat.z;
           device.queue.writeBuffer(hull, 0, h);
-          fx.update(boat, dt, ++tick * dt, tick, 0, 0);
+          fx.update(boat, dt, interactionTime += dt, ++tick, 0, 0);
           const enc = device.createCommandEncoder(), cp = enc.beginComputePass(); fx.encode(cp); cp.end();
           device.queue.submit([enc.finish()]);
         }
@@ -592,8 +593,42 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
         const expectedWidth = hullHalfWidth(z,y);
         contactError = Math.max(contactError, Math.abs(Math.abs(x) - expectedWidth), Math.abs(p[1] - 0.125));
       }
+      // A stern lifted clear of the sea must not inherit wetness from the bow.
+      boatRotate(h.subarray(0,3),1,0,0,0,-0.4,0);
+      boatRotate(h.subarray(4,7),0,1,0,0,-0.4,0);
+      boatRotate(h.subarray(8,11),0,0,-1,0,-0.4,0);
+      boat.revision++;await advance(2);
+      const aftContacts=await read(fx.contacts,40*64);
+      const liftedStern={bow:aftContacts[11],stern:(aftContacts[35*16+11]+aftContacts[39*16+11])*0.5};
+      // Emit along a real travelled path, then turn and stop. Read old foam at
+      // fixed world coordinates, independently of the vessel's new orientation.
+      h.fill(0,0,12);h[0]=h[5]=1;h[10]=-1;h[17]=0;
+      boat.x=boat.z=0;boat.surgeVelocity=3.1;boat.revision++;
+      device.queue.writeTexture({texture:sea},new Uint16Array(4),{bytesPerRow:8},[1,1,1]);
+      await advance(2);
+      await advance(180,1/30,()=>{boat.z-=3.1/30;});
+      const trail=await wake(),trailX=0,trailZ=boat.z+5.25+8;
+      const foamAt=(field,x,z)=>{
+        const qx=Math.round((x-Math.round(boat.x*2)*0.5)*2+127.5),qz=Math.round((z-Math.round(boat.z*2)*0.5)*2+127.5);
+        return field[(qz*WAKE_SIZE+qx)*4+2];
+      };
+      const trailFoam=foamAt(trail,trailX,trailZ);
+      await advance(150,1/30,i=>{
+        const heading=(i+1)/150;
+        boatRotate(h.subarray(0,3),1,0,0,heading,0,0);
+        boatRotate(h.subarray(8,11),0,0,-1,heading,0,0);
+        boat.x+=Math.sin(heading)*3.1/30;boat.z-=Math.cos(heading)*3.1/30;
+      });
+      const curved=await wake(),oldTrail=foamAt(curved,trailX,trailZ);
+      const foamSum=field=>field.reduce((sum,v,i)=>sum+(i%4===2?v:0),0);
+      const beforeStop=foamSum(curved);
+      boat.surgeVelocity=0;await advance(180,1/30);
+      const afterStop=foamSum(await wake());
+      await advance(450,0.1);
+      const afterDecay=foamSum(await wake());
+      const trailHistory={trailFoam,oldTrail,beforeStop,afterStop,afterDecay};
       device.destroy();
-      return { resting, moving, probeError, selfPropulsion, contacts: Array.from(movingContacts), retained, finite, disabled, dry, impact, landing, landedLive, contactError, launched, outgoing, settled, second, errors };
+      return { resting, moving, probeError, selfPropulsion, contacts: Array.from(movingContacts), retained, finite, disabled, dry, impact, landing, landedLive, contactError, launched, outgoing, settled, second, liftedStern, trailHistory, errors };
     });
     assert.deepEqual(result.errors, []);
     assert.equal(result.resting.live, 0); assert.equal(result.resting.wake, 0);
@@ -620,6 +655,12 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
     assert.ok(result.impact.some((v, i) => i % 16 === 3 && v > 0.2), 'relative wave impact drives emission at zero boat speed');
     assert.ok(result.landing > 0, 'landing deposits foam'); assert.ok(result.landedLive <= 0, 'landed particle is retired');
     assert.ok(result.contactError < 0.02, `Tilted hull contact error: ${result.contactError}`);
+    assert.ok(result.liftedStern.bow>0.5 && result.liftedStern.stern===0,`stern contact must be independent: ${JSON.stringify(result.liftedStern)}`);
+    const trail=result.trailHistory;
+    assert.ok(trail.trailFoam>0.04,`foam survives eight metres astern: ${JSON.stringify(trail)}`);
+    assert.ok(trail.oldTrail>trail.trailFoam*0.15,'a turn must leave old foam on its original world-space track');
+    assert.ok(trail.afterStop<trail.beforeStop*0.8 && trail.afterStop>trail.beforeStop*0.15,'stopping ages the trail without deleting it or sustaining new foam');
+    assert.ok(trail.afterDecay<trail.afterStop*0.03,'old wake foam eventually clears');
   } finally { await page.close(); }
 });
 
