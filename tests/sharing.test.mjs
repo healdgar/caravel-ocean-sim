@@ -6,7 +6,7 @@ const boat = { length: 12, beam: 3.6, heading: 278.123456789, speed: 9.5, eye: 2
 
 test('share link carries the live storm, lighting, and boat configuration on a Pages subpath', () => {
   const settings = { ...ROUGH_SEAS, sunElev: 12.3, sunAzim: -180, clouds: 0.76, cloudBase: 1.4, cloudDepth: 3.8,
-    cloudDensity: 1.65, cloudAnvil: 0.8, cloudQuality: 0.75, bloom: 0, swellSpread: 48 };
+    cloudDensity: 1.65, cloudAnvil: 0.8, cloudQuality: 0.75, bloom: 0, swellSpread: 48, spindrift: 1.5 };
   const link = new URL(createShareLink('https://healdgar.github.io/seasick-simulator/?windSpeed=7', settings, boat, 'boat'));
   assert.equal(link.pathname, '/seasick-simulator/');
   for (const [key, value] of Object.entries(settings)) assert.equal(Number(link.searchParams.get(key)), value);

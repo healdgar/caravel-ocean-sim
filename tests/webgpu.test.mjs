@@ -133,12 +133,18 @@ test('fused FFT reproduces analytical travelling waves in every cascade', { time
 // Keep scheduling deterministic and render to an ordinary GPU texture. Some headless
 // SwiftShader builds support WebGPU but cannot present a WebGPU canvas swap chain.
 function instrumentRenderer() {
-  window.check = { callback: null, compute: {}, render: {}, errors: [], target: null };
+  window.check = { callback: null, compute: {}, render: {}, errors: [], target: null, buffers: {} };
   window.requestAnimationFrame = callback => { check.callback = callback; return 1; };
   const requestDevice = GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice = async function (...args) {
     const device = await requestDevice.apply(this, args);
     check.device = device;
+    const createBuffer = device.createBuffer.bind(device);
+    device.createBuffer = desc => {
+      const buffer = createBuffer(desc);
+      if (desc.label === 'crest spray plumes') check.buffers.crest = buffer;
+      return buffer;
+    };
     device.addEventListener('uncapturederror', e => check.errors.push(e.error.message));
     return device;
   };
@@ -820,6 +826,122 @@ test('foam forms at breaking compression, stays bounded, and clears between cres
   }finally{await page.close();}
 });
 
+test('crest spray requires wind and breaking, drifts downwind, excludes the hull and clears', { timeout: 120000 }, async () => {
+  const page = await browser.newPage();
+  try {
+    await page.route('**/__crest_test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
+    await page.goto(`${origin}/__crest_test`);
+    const result = await page.evaluate(async () => {
+      const { SPINDRIFT_COUNT, SPINDRIFT_UPDATE, SPINDRIFT_STATE } = await import('/js/wgsl/spindrift.js');
+      const { hullHalfWidth } = await import('/js/hull.js');
+      const device = await (await navigator.gpu.requestAdapter()).requestDevice();
+      const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
+      const bu = GPUBufferUsage, tu = GPUTextureUsage;
+      const make = (size, usage) => device.createBuffer({ size, usage });
+      const frame = make(384, bu.UNIFORM | bu.COPY_DST), control = make(16, bu.UNIFORM | bu.COPY_DST), hull = make(96, bu.UNIFORM | bu.COPY_DST);
+      const plumes = make(SPINDRIFT_COUNT * 64, bu.STORAGE | bu.COPY_SRC);
+      const read = make(plumes.size, bu.MAP_READ | bu.COPY_DST);
+      const textures = [0, 1].map(() => device.createTexture({ size: [1, 1, 6], format: 'rgba16float', usage: tu.TEXTURE_BINDING | tu.COPY_DST }));
+      const sampler = device.createSampler({ minFilter: 'linear', magFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat' });
+      const pipe = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: device.createShaderModule({ code: SPINDRIFT_UPDATE }), entryPoint: 'main' } });
+      const resources = [{ buffer: frame }, { buffer: control }, { buffer: hull }, ...textures.map(t => t.createView({ dimension: '2d-array' })), sampler, { buffer: plumes }];
+      const group = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
+      const f = new Float32Array(96), h = new Float32Array(24);
+      f[17] = 8; f[30] = -1; f.set([1, 1, 1, 1, 1, 1], 48);
+      h[0] = 1; h[5] = 1; h[10] = -1; h[12] = 3.6; h[13] = 12;
+      function sea(breaking) {
+        const d = new Uint16Array(24), j = new Uint16Array(24);
+        d[1] = 0x3c00; // Constant height 1 m, only cascade zero contributes.
+        j[2] = breaking ? 0xbe00 : 0; // -1.5: compressed/breaking; zero: flat.
+        for (const [i, data] of [d, j].entries()) device.queue.writeTexture({ texture: textures[i] }, data, { bytesPerRow: 8, rowsPerImage: 1 }, [1, 1, 6]);
+      }
+      function dispatch(dt, reset, amount, index) {
+        device.queue.writeBuffer(control, 0, new Float32Array([dt, reset, amount, index]));
+        const enc = device.createCommandEncoder(), cp = enc.beginComputePass();
+        cp.setPipeline(pipe); cp.setBindGroup(0, group); cp.dispatchWorkgroups(SPINDRIFT_COUNT / 64); cp.end();
+        device.queue.submit([enc.finish()]);
+      }
+      async function snapshot() {
+        const enc = device.createCommandEncoder(); enc.copyBufferToBuffer(plumes, 0, read, 0, plumes.size); device.queue.submit([enc.finish()]);
+        await read.mapAsync(GPUMapMode.READ); const a = new Float32Array(read.getMappedRange()).slice(); read.unmap();
+        return Array.from({ length: SPINDRIFT_COUNT }, (_, i) => Array.from(a.slice(i * 16, i * 16 + 16))).filter(p => p[7] > 0);
+      }
+      async function run(speed, breaking, visible = false, dt = 1 / 30) {
+        f[56] = 1; f[58] = speed; device.queue.writeBuffer(frame, 0, f);
+        h[22] = visible ? 1 : 0; device.queue.writeBuffer(hull, 0, h); sea(breaking);
+        dispatch(dt, 1, 1, 0);
+        for (let i = 1; i <= Math.round(2 / dt); i++) dispatch(dt, 0, 1, i);
+        return snapshot();
+      }
+      const calm = await run(7, true), flat = await run(28, false), moderate = await run(12, true), strong = await run(28, true);
+      sea(false);
+      for (let i = 61; i <= 150; i++) dispatch(1 / 30, 0, 1, i);
+      const expired = (await snapshot()).length;
+      const fast = await run(28, true, false, 1 / 120);
+      // An enlarged hull makes exclusion meaningful over much of the emission domain.
+      h[12] = 72; h[13] = 120;
+      const protectedPlumes = await run(28, true, true);
+      const hullViolations = protectedPlumes.filter(p => Math.abs(p[0] * 3.6 / h[12]) < hullHalfWidth(p[2] * 12 / h[13], p[1])).length;
+      dispatch(1 / 30, 0, 0, 61); const disabled = (await snapshot()).length;
+      await run(28, true); dispatch(1 / 30, 1, 1, 61); const reset = (await snapshot()).length;
+      // Exercise the actual shared trajectory helper with mirrored wind directions.
+      const motionCode = `${SPINDRIFT_STATE}
+        @group(0) @binding(0) var<storage, read_write> out: array<vec4f>;
+        @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id: vec3u) {
+          let sign = select(1.0, -1.0, id.x == 1u);
+          let p = CrestPlume(vec4f(0.0,1.0,0.0,0.0),vec4f(2.0*sign,2.0,0.0,2.0),vec4f(0.0),vec4f(1.0,0.0,20.0*sign,0.0));
+          out[id.x] = vec4f(plumePosition(p, 1.0), 0.0);
+        }`;
+      const motionPipe = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: device.createShaderModule({ code: motionCode }), entryPoint: 'main' } });
+      const motion = make(32, bu.STORAGE | bu.COPY_SRC), motionRead = make(32, bu.MAP_READ | bu.COPY_DST);
+      const enc = device.createCommandEncoder(), cp = enc.beginComputePass(); cp.setPipeline(motionPipe);
+      cp.setBindGroup(0, device.createBindGroup({ layout: motionPipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: motion } }] }));
+      cp.dispatchWorkgroups(2); cp.end(); enc.copyBufferToBuffer(motion, 0, motionRead, 0, 32); device.queue.submit([enc.finish()]);
+      await motionRead.mapAsync(GPUMapMode.READ); const positions = Array.from(new Float32Array(motionRead.getMappedRange())); motionRead.unmap();
+      device.destroy();
+      return { errors, calm: calm.length, flat: flat.length, moderate: moderate.length, strong, expired, fast: fast.length, protectedCount: protectedPlumes.length, hullViolations, disabled, reset, positions };
+    });
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.calm, 0); assert.equal(result.flat, 0);
+    assert.ok(result.moderate > 0 && result.strong.length > result.moderate * 1.5, JSON.stringify({ moderate: result.moderate, strong: result.strong.length }));
+    assert.ok(result.strong.length <= 1024 && result.strong.every(p => p.every(Number.isFinite)));
+    assert.ok(result.strong.every(p => Math.abs(p[1] - 1.12) < 1e-5), 'births sit on the sampled displaced surface');
+    assert.ok(Math.abs(result.fast - result.strong.length) / result.strong.length < 0.25, 'emission density remains comparable at 30 and 120 Hz');
+    assert.ok(result.protectedCount > 0); assert.equal(result.hullViolations, 0);
+    assert.equal(result.expired, 0); assert.equal(result.disabled, 0); assert.equal(result.reset, 0);
+    assert.ok(result.positions[0] > 6 && result.positions[4] < -6, 'spray entrains into the wind');
+    assert.ok(Math.abs(result.positions[0] + result.positions[4]) < 1e-5);
+  } finally { await page.close(); }
+});
+
+test('crest spray populates from the actual rough FFT ocean without the ship', { timeout: 180000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1, height: 1 } });
+  try {
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(() => {
+      // This fixture reads simulation state. Drawing millions of ocean vertices
+      // on a CPU GPU adds no coverage; the scheduling fixture tests both draw paths.
+      GPURenderPassEncoder.prototype.drawIndexed = function () {};
+      GPURenderPassEncoder.prototype.draw = function () {};
+    });
+    await page.goto(`${origin}/?prow=0&clouds=0&cam=0,8,0,0,-8&windSpeed=26&windDir=65&swellHs=5&choppy=1.6&shot=test.png&frames=100000`);
+    await page.waitForFunction(() => check.callback, undefined, { polling: 100, timeout: 120000 });
+    // Two simulated seconds exercise crest encounters and the finite-lived population.
+    for (let i = 0; i < 120; i++) await step(page);
+    const stats = await page.evaluate(async () => {
+      const device = check.device, source = check.buffers.crest;
+      const read = device.createBuffer({ size: source.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      const enc = device.createCommandEncoder(); enc.copyBufferToBuffer(source, 0, read, 0, source.size); device.queue.submit([enc.finish()]);
+      await read.mapAsync(GPUMapMode.READ); const a = new Float32Array(read.getMappedRange());
+      let active = 0, finite = true;
+      for (let i = 0; i < a.length; i += 16) { if (a[i + 7] > 0) active++; for (let k = 0; k < 16; k++) finite &&= Number.isFinite(a[i + k]); }
+      read.unmap(); read.destroy(); return { active, finite };
+    });
+    assert.ok(stats.finite); assert.ok(stats.active > 5, `rough sea active wisps: ${stats.active}`);
+    console.log('Rough FFT crest spray:', stats);
+  } finally { await page.close(); }
+});
+
 test('renderer invalidates only changed sky inputs and skips disabled bloom', { timeout: 600000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 64, height: 48 } });
   try {
@@ -848,6 +970,8 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['sim evolve'], undefined);
     assert.equal(frame.compute['height probe'], undefined);
     assert.equal(frame.compute['cloud density'], undefined);
+    assert.equal(frame.compute['crest spray update'], undefined, 'calm wind skips crest work after its initial clear');
+    assert.equal(frame.render['crest spray'], undefined);
     assert.equal(frame.compute['cloud lighting'], undefined);
     assert.equal(frame.compute['cloud rays'].length, 1);
     assert.equal(frame.compute['env cube'][0][2], 1);
@@ -881,6 +1005,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['sim init'], undefined);
     assert.equal(frame.render['bloom down'], undefined);
     assert.equal(frame.render['bloom up'], undefined);
+
     assert.equal(frame.render.composite, 1);
 
     await slider(page, 'Wind speed', 10);
@@ -892,6 +1017,8 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['height probe'].length, 1);
     assert.equal(frame.render['bloom down'], 1);
     assert.equal(frame.render['bloom up'], undefined);
+    assert.equal(frame.compute['crest spray update'].length, 1);
+    assert.equal(frame.render['crest spray'], 1, 'crest spray renders with the ship hidden');
 
     // The target is deliberately 1x1; exercise the control's change handler directly.
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
@@ -904,6 +1031,8 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     frame = await step(page);
     assert.equal(frame.compute['local wake'], undefined);
     assert.equal(frame.compute['spray update'], undefined);
+    assert.equal(frame.compute['crest spray update'].length, 1);
+    assert.equal(frame.render['crest spray'], 1, 'crest spray survives disabling boat effects');
     assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
     assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
     await page.setViewportSize({width:32,height:24});
@@ -914,6 +1043,11 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
     assert.equal(frame.render.caravel,1);assert.equal(frame.render['solid shadows'],1);
+    await slider(page, 'Crest spray', 0);
+    await step(page);
+    frame = await step(page);
+    assert.equal(frame.compute['crest spray update'], undefined);
+    assert.equal(frame.render['crest spray'], undefined);
   } finally { await page.close(); }
 });
 

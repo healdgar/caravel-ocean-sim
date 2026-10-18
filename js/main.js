@@ -3,6 +3,7 @@ import { createGPUProfiler } from './profiler.js';
 import { createAdaptiveResolution } from './resolution.js';
 import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
+import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
 import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT } from './hull.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -40,6 +41,7 @@ export const P = {
   choppy: 1.25,
   turbidity: 1.6,     // water body brightness (coastal sediment / plankton)
   foam: 1.0,
+  spindrift: 1.0,     // wind-stripped breaking crests, independent of boat spray
   sunElev: 2.6,        // deg
   sunAzim: 4,          // deg (0 = straight ahead of the start view)
   exposure: 1.35,
@@ -352,6 +354,7 @@ async function main() {
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
+  const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
@@ -1016,6 +1019,7 @@ async function main() {
     ['choppy', 'Choppiness', 0, 1.6, 0.01, ''],
     ['turbidity', 'Water turbidity', 0.2, 3, 0.01, ''],
     ['foam', 'Foam', 0, 3, 0.01, ''],
+    ['spindrift', 'Crest spray', 0, 2, 0.05, ''],
     ['sunElev', 'Sun elevation (deg)', -2, 60, 0.1, ''],
     ['sunAzim', 'Sun azimuth (deg)', -180, 180, 0.5, ''],
     ['haze', 'Haze', 0.5, 15, 0.1, ''],
@@ -1077,6 +1081,7 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
     interaction.encode(cp);
+    spindrift.encode(cp);
     // foam clipmaps
     foamCur = 1 - foamCur;
     cp.setPipeline(foamUpdPipe);
@@ -1157,6 +1162,7 @@ async function main() {
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
+    spindrift.update(frameF, P.spindrift, dt, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
     simF[52] = simTime; simF[53] = dt;
@@ -1256,6 +1262,7 @@ async function main() {
     rp.setBindGroup(0, bgSky);
     clouds.drawSky(rp);
     rp.draw(3);
+    if (!drawProw) spindrift.draw(rp);
     rp.end();
 
     if (drawProw) {
@@ -1274,7 +1281,7 @@ async function main() {
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
       prowPass.setBindGroup(1,caravelShadows);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);
-      interaction.draw(prowPass); prowPass.end();
+      interaction.draw(prowPass); spindrift.draw(prowPass); prowPass.end();
     }
 
     if (P.bloom > 0) {

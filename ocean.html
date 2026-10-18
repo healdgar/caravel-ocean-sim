@@ -1084,6 +1084,180 @@ fn corner(v:u32)->vec2f {
 }
 `;
 
+// ---- js/wgsl/spindrift.js ----
+
+
+
+const SPINDRIFT_COUNT = 1024;
+const SPINDRIFT_STATE = /* wgsl */ `
+struct CrestPlume {
+  origin: vec4f, // birth position, age
+  launch: vec4f, // initial velocity, lifetime (zero = vacant)
+  crest: vec4f,  // crest tangent, initial half width
+  shape: vec4f,  // strength, seed, birth wind x/z
+};
+// Aerodynamic entrainment of a mist parcel, with an authored settling rate.
+// Birth data stays in world space when the camera or wind changes.
+fn plumePosition(p: CrestPlume, t: f32) -> vec3f {
+  let wind = vec3f(p.shape.z, 0.0, p.shape.w) * 0.68;
+  let entrain = (1.0 - exp(-1.5 * t)) / 1.5;
+  let horizontal = wind * t + (vec3f(p.launch.x, 0.0, p.launch.z) - wind) * entrain;
+  return p.origin.xyz + horizontal + vec3f(0.0, p.launch.y * t - 1.25 * t * t, 0.0);
+}
+`;
+
+const SPINDRIFT_UPDATE = /* wgsl */ `
+${FRAME_WGSL}
+${SPINDRIFT_STATE}
+${FOAM_MODEL}
+${NOISE_WGSL}
+${HULL_PROFILE}
+struct CrestControl { step: vec4f }; // dt, reset, amount, frame
+struct CrestHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> C: CrestControl;
+@group(0) @binding(2) var<uniform> hull: CrestHull;
+@group(0) @binding(3) var displacement: texture_2d_array<f32>;
+@group(0) @binding(4) var derivatives: texture_2d_array<f32>;
+@group(0) @binding(5) var seaSampler: sampler;
+@group(0) @binding(6) var<storage, read_write> plumes: array<CrestPlume>;
+fn crestRandom(seed: u32) -> f32 { return f32(pcgHash(seed)) / 4294967296.0; }
+fn crestDisplacement(q: vec2f) -> vec3f {
+  var d = vec3f(0.0);
+  for (var c = 0u; c < 6u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let mip = max(0.0, log2(256.0 * invL * 0.65));
+    d += textureSampleLevel(displacement, seaSampler, fract(q * invL), i32(c), mip).xyz;
+  }
+  return d;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= ${SPINDRIFT_COUNT}u) { return; }
+  var p = plumes[id.x];
+  if (C.step.y > 0.5 || C.step.z <= 0.0) {
+    p.launch.w = 0.0; plumes[id.x] = p; return;
+  }
+  let dt = C.step.x;
+  if (p.launch.w > 0.0) {
+    p.origin.w += dt;
+    let head = plumePosition(p, p.origin.w);
+    var landed = false;
+    // Stagger collision work. Two displacement samples invert the horizontal wave offset.
+    if ((id.x + u32(C.step.w)) % 4u == 0u && p.origin.w > 0.25) {
+      let q = head.xz - crestDisplacement(head.xz).xz;
+      landed = head.y < crestDisplacement(q).y - 0.15;
+    }
+    if (p.origin.w >= p.launch.w || distance(head.xz, F.camPos.xz) > 85.0 || landed) { p.launch.w = 0.0; }
+    plumes[id.x] = p;
+    return;
+  }
+  let seed = pcgHash(id.x + u32(C.step.w) * 104729u);
+  let wind = F.windP[0].xy * F.windP[0].z;
+  // A smooth, authored onset: breaking alone does not make airborne spindrift.
+  let windLift = smoothstep(8.0, 19.0, F.windP[0].z);
+  if (windLift == 0.0 || crestRandom(seed) > 1.0 - exp(-4.0 * windLift * C.step.z * dt)) { return; }
+  let cell = vec2f(f32(id.x % 32u), f32(id.x / 32u)) - 15.5;
+  let jitter = vec2f(crestRandom(seed + 1u), crestRandom(seed + 2u)) - 0.5;
+  let q = floor(F.camPos.xz / 4.0) * 4.0 + (cell + jitter) * 4.0;
+  if (distance(q, F.camPos.xz) > 70.0) { return; }
+  // Reject samples behind the observer before fetching the six cascades.
+  if (dot(vec3f(q.x, F.camPos.y, q.y) - F.camPos.xyz, F.camFwd.xyz) < -8.0) { return; }
+  var d = vec4f(0.0); var deriv = vec4f(0.0);
+  for (var c = 0u; c < 6u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let mip = max(0.0, log2(256.0 * invL * 0.65));
+    d += textureSampleLevel(displacement, seaSampler, fract(q * invL), i32(c), mip);
+    deriv += textureSampleLevel(derivatives, seaSampler, fract(q * invL), i32(c), mip);
+  }
+  let breaking = breakingCompression(deriv.z, deriv.w, d.w, 0.45);
+  if (crestRandom(seed + 3u) >= breaking) { return; }
+  let origin = vec3f(q.x + d.x, d.y + 0.12, q.y + d.z);
+  if (hull.rig.z > 0.5) {
+    let delta = origin - hull.origin.xyz;
+    let local = vec3f(dot(delta, hull.right.xyz) * 3.6 / hull.size.x,
+      dot(delta, hull.up.xyz), -dot(delta, hull.forward.xyz) * 12.0 / hull.size.y);
+    if (hullExcludesOcean(local)) { return; }
+  }
+  // The compressed principal direction gives the local crest's tangent.
+  let angle = 0.5 * atan2(2.0 * d.w, deriv.z - deriv.w);
+  let tangent = vec3f(cos(angle), 0.0, sin(angle));
+  let strength = windLift * mix(0.4, 1.0, breaking);
+  p.origin = vec4f(origin, 0.0);
+  p.launch = vec4f(wind.x * 0.12, 1.1 + 1.5 * strength + crestRandom(seed + 4u) * 0.7,
+    wind.y * 0.12, 1.1 + 1.1 * strength);
+  p.crest = vec4f(tangent, 0.45 + crestRandom(seed + 5u) * 0.7);
+  p.shape = vec4f(strength, crestRandom(seed + 6u) * 100.0, wind);
+  plumes[id.x] = p;
+}
+`;
+
+const SPINDRIFT_RENDER = /* wgsl */ `
+${FRAME_WGSL}
+${ATMO_CORE_WGSL}
+${SPINDRIFT_STATE}
+${NOISE_WGSL}
+${SHADOW_SAMPLE}
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<storage, read> plumes: array<CrestPlume>;
+@group(0) @binding(2) var environment: texture_cube<f32>;
+@group(0) @binding(3) var lightSampler: sampler;
+@group(0) @binding(4) var transmittance: texture_2d<f32>;
+@group(0) @binding(5) var<storage, read> sunVisibility: vec4f;
+struct CrestVertex {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+  @location(1) light: vec3f,
+  @location(2) shape: vec3f, // opacity, seed, age
+};
+@vertex fn crestVS(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CrestVertex {
+  let p = plumes[instance];
+  var o: CrestVertex;
+  o.position = vec4f(2.0, 2.0, 0.0, 1.0); o.uv = vec2f(0.0); o.light = vec3f(0.0); o.shape = vec3f(0.0);
+  if (p.launch.w <= 0.0) { return o; }
+  let corner = array<vec2f, 6>(vec2f(0.0,-1.0),vec2f(1.0,-1.0),vec2f(0.0,1.0),vec2f(0.0,1.0),vec2f(1.0,-1.0),vec2f(1.0,1.0))[vertex % 6u];
+  let u = (f32(vertex / 6u) + corner.x) / 4.0;
+  let age = p.origin.w;
+  let head = plumePosition(p, age);
+  let distanceToEye = length(head - F.camPos.xyz);
+  let metresPerPixel = max(distanceToEye, 1.0) * 2.0 * length(F.camUp.xyz) * F.screen.w;
+  let trailTime = min(age, 0.65);
+  let tail = plumePosition(p, max(0.0, age - trailTime));
+  let lengthLimit = min(1.0, 150.0 * metresPerPixel / max(length(head - tail), 0.01));
+  let t = max(0.0, age - trailTime * (1.0 - u) * lengthLimit);
+  let center = plumePosition(p, t);
+  let view = normalize(F.camPos.xyz - center);
+  let path = normalize(head - tail + vec3f(0.0, 0.01, 0.0));
+  let across = cross(path, view);
+  let facingSide = normalize(across + normalize(F.camRight.xyz) * 0.01);
+  // Start spread along the actual crest, then billow toward the view as it disperses.
+  let crestSide = p.crest.xyz * select(-1.0, 1.0, dot(p.crest.xyz, facingSide) >= 0.0);
+  let side = normalize(mix(crestSide, facingSide, 0.25 + 0.6 * smoothstep(0.0, 1.0, t)));
+  let width = min(p.crest.w * (0.65 + t * 0.8), metresPerPixel * 26.0);
+  let world = center + side * corner.y * width;
+  o.position = F.viewProj * vec4f(world - F.camPos.xyz, 1.0);
+  o.uv = vec2f(u, corner.y);
+  let sky = textureSampleLevel(environment, lightSampler, vec3f(0.0,1.0,0.0), 5.0).rgb;
+  let sunlight = textureSampleLevel(transmittance, lightSampler, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb;
+  let phase = 0.35 + 1.5 * pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
+  let shadow = vesselShadow(center, vec3f(0.0,1.0,0.0));
+  o.light = sky * 0.7 + sunlight * F.sunDir.w * sunVisibility.x * phase * shadow;
+  let fade = smoothstep(0.0, 0.18, age) * (1.0 - smoothstep(0.45, 1.0, age / p.launch.w));
+  o.shape = vec3f((0.12 + 0.14 * p.shape.x) * fade * smoothstep(2.0, 6.0, distanceToEye)
+    * (1.0 - smoothstep(55.0, 80.0, distanceToEye)), p.shape.y, age);
+  return o;
+}
+@fragment fn crestFS(o: CrestVertex) -> @location(0) vec4f {
+  let uv = o.uv;
+  let flow = vec2f(uv.x * 4.0 - o.shape.z * 0.7, uv.y * 1.8) + o.shape.y;
+  let billows = 0.55 + 0.65 * gnoise(flow) + 0.3 * gnoise(flow * 2.3);
+  let edge = 1.0 - smoothstep(0.2, 1.0, abs(uv.y));
+  let ends = smoothstep(0.0, 0.25, uv.x) * (1.0 - smoothstep(0.65, 1.0, uv.x));
+  let alpha = o.shape.x * edge * ends * smoothstep(0.1, 0.8, billows);
+  return vec4f(o.light * alpha, alpha);
+}
+`;
+
 // ---- js/wgsl/sim.js ----
 
 // FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
@@ -3839,6 +4013,53 @@ async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaS
   };
 }
 
+// ---- js/spindrift.js ----
+
+// A fixed population of world-space crest wisps; independent of ship effects.
+async function createSpindrift({ device, frameUBO, hullUBO, seaView, derivView, seaSampler, envView, transView, sunVis, shader, computePipe, shadows }) {
+  const usage = GPUBufferUsage;
+  const control = device.createBuffer({ label: 'crest spray control', size: 16, usage: usage.UNIFORM | usage.COPY_DST });
+  const plumes = device.createBuffer({ label: 'crest spray plumes', size: SPINDRIFT_COUNT * 64, usage: usage.STORAGE | usage.COPY_SRC });
+  const [updatePipe, module] = await Promise.all([computePipe(SPINDRIFT_UPDATE, 'crest spray update'), shader(SPINDRIFT_RENDER, 'crest spray')]);
+  const renderPipe = await device.createRenderPipelineAsync({
+    label: 'crest spray', layout: 'auto', vertex: { module, entryPoint: 'crestVS' },
+    fragment: { module, entryPoint: 'crestFS', targets: [{ format: 'rgba16float', blend: {
+      color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+    } }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
+  });
+  const buffer = buffer => ({ buffer });
+  const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
+  const updateGroup = bind(updatePipe, [buffer(frameUBO), buffer(control), buffer(hullUBO), seaView, derivView, seaSampler, buffer(plumes)]);
+  const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
+  const renderGroup = bind(renderPipe, [buffer(frameUBO), buffer(plumes), envView, sampler, transView, buffer(sunVis)]);
+  const shadowGroup = shadows.bind(renderPipe);
+  const values = new Float32Array(4);
+  let enabled = false, previousEnabled = false, needsClear = true, previousX = NaN, previousZ = NaN;
+  return {
+    plumes,
+    update(frame, amount, dt, resetSea = false) {
+      enabled = amount > 0 && frame[58] > 8;
+      const reset = resetSea || enabled !== previousEnabled || !Number.isFinite(previousX)
+        || Math.hypot(frame[16] - previousX, frame[18] - previousZ) > 40;
+      values[0] = Math.max(0, Math.min(0.1, dt)); values[1] = reset ? 1 : 0;
+      values[2] = enabled ? Math.max(0, Math.min(2, amount)) : 0; values[3] = frame[70];
+      device.queue.writeBuffer(control, 0, values);
+      previousX = frame[16]; previousZ = frame[18]; previousEnabled = enabled;
+    },
+    encode(pass) {
+      if (!enabled && !needsClear) return;
+      needsClear = enabled;
+      pass.setPipeline(updatePipe); pass.setBindGroup(0, updateGroup); pass.dispatchWorkgroups(SPINDRIFT_COUNT / 64);
+    },
+    draw(pass) {
+      if (!enabled) return;
+      pass.setPipeline(renderPipe); pass.setBindGroup(0, renderGroup); pass.setBindGroup(1, shadowGroup); pass.draw(24, SPINDRIFT_COUNT);
+    },
+  };
+}
+
 // ---- js/clouds.js ----
 
 
@@ -4112,6 +4333,7 @@ function createAdaptiveResolution(mode = 'auto') {
 
 
 
+
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -4143,6 +4365,7 @@ const P = {
   choppy: 1.25,
   turbidity: 1.6,     // water body brightness (coastal sediment / plankton)
   foam: 1.0,
+  spindrift: 1.0,     // wind-stripped breaking crests, independent of boat spray
   sunElev: 2.6,        // deg
   sunAzim: 4,          // deg (0 = straight ahead of the start view)
   exposure: 1.35,
@@ -4455,6 +4678,7 @@ async function main() {
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
+  const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
@@ -5119,6 +5343,7 @@ async function main() {
     ['choppy', 'Choppiness', 0, 1.6, 0.01, ''],
     ['turbidity', 'Water turbidity', 0.2, 3, 0.01, ''],
     ['foam', 'Foam', 0, 3, 0.01, ''],
+    ['spindrift', 'Crest spray', 0, 2, 0.05, ''],
     ['sunElev', 'Sun elevation (deg)', -2, 60, 0.1, ''],
     ['sunAzim', 'Sun azimuth (deg)', -180, 180, 0.5, ''],
     ['haze', 'Haze', 0.5, 15, 0.1, ''],
@@ -5180,6 +5405,7 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
     interaction.encode(cp);
+    spindrift.encode(cp);
     // foam clipmaps
     foamCur = 1 - foamCur;
     cp.setPipeline(foamUpdPipe);
@@ -5260,6 +5486,7 @@ async function main() {
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
+    spindrift.update(frameF, P.spindrift, dt, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
     simF[52] = simTime; simF[53] = dt;
@@ -5359,6 +5586,7 @@ async function main() {
     rp.setBindGroup(0, bgSky);
     clouds.drawSky(rp);
     rp.draw(3);
+    if (!drawProw) spindrift.draw(rp);
     rp.end();
 
     if (drawProw) {
@@ -5377,7 +5605,7 @@ async function main() {
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
       prowPass.setBindGroup(1,caravelShadows);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);
-      interaction.draw(prowPass); prowPass.end();
+      interaction.draw(prowPass); spindrift.draw(prowPass); prowPass.end();
     }
 
     if (P.bloom > 0) {

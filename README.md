@@ -99,6 +99,16 @@ Wake transport reuses the existing grid, textures and compute dispatch. Eight ad
 
 Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_demo) for curling sheets and separate spray populations; [booherbg/clean-room-fft-ocean](https://github.com/booherbg/clean-room-fft-ocean) for ocean/contact-driven spray; [bob6664569/open-water](https://github.com/bob6664569/open-water) for persistent world-space wakes. [NUS CRISP's ship-wake overview](https://crisp.nus.edu.sg/~research/shipwakes/shipwakes.htm) distinguishes the outgoing wave pattern from the turbulent trail and near-hull foam. This implementation uses native WebGPU/WGSL and adds no runtime dependencies.
 
+### Wind-blown crest spray
+
+**Sea settings → Crest spray** controls spindrift independently of **Wakes & spray** and ship visibility. It is on by default; `spindrift=0` disables it, and shared links preserve the setting. The default 7 m/s wind emits none. Raise wind speed to see intermittent wisps; the rough-seas preset makes them more frequent.
+
+Emission samples the actual FFT displacement and compression, filtered over a 0.65 m patch. Only breaking crests emit, with an authored wind response that begins above 8 m/s and reaches full strength at 19 m/s. Births follow the displaced surface and avoid the ship's enclosed footprint. Short translucent ribbons spread along the crest, entrain downwind, settle, collide with water and fade. Sunlight, clouds, sky fill, vessel shadows and scene depth affect their appearance. This is a visual spindrift model, not calibrated droplet-size physics or a sea-spray flux prediction.
+
+The GPU owns at most 1,024 wisps in a 70 m emission radius, with 1.1–2.2 second lifetimes. Projected ribbon dimensions are limited; candidates behind the camera are rejected and water collision checks are staggered. Rendering reuses the existing scene pass, with no additional full-screen pass or readback. Calm wind or a disabled control skips the compute and draw after one clear. Spectrum changes and camera teleports reset the population. The existing 30 FPS automatic-resolution target is unchanged; this addition still needs performance confirmation on a physical iPhone.
+
+Physical basis: [Anguelova et al., *Spume Drops Produced by the Wind Tearing of Wave Crests*](https://journals.ametsoc.org/view/journals/phoc/29/6/1520-0485_1999_029_1156_sdpbtw_2.0.co_2.xml) links production to breaking crests; [Andreas, *A New Sea Spray Generation Function for Wind Speeds up to 32 m/s*](https://doi.org/10.1175/1520-0485%281998%29028%3C2175%3AANSSGF%3E2.0.CO%3B2) discusses uncertain onset and production rates. These motivate the wind-and-breaking gate; the rendering rates and trajectories are authored.
+
 ### Deck wash and buoyancy
 
 A 32 × 96 hull-local water field samples the displaced sea at the rails. Overtopping adds water at the edges; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff strips share the scene lighting. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls deck wash.
@@ -184,6 +194,8 @@ npm test
 
 The suite covers:
 
+- Crest-spray wind/breaking gates, displaced birth height, downwind entrainment, hull exclusion, bounded populations, 30/120 Hz emission, clears, real FFT emission and rendering independent of the ship and its wake toggle.
+
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
@@ -223,6 +235,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
+| `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and ribbon rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
 | `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
