@@ -319,9 +319,131 @@ fn hullHalfWidth(z: f32, y: f32) -> f32 {
 }
 `;
 
+// ---- js/wgsl/vessel.js ----
+// Shared deformation keeps visible geometry and shadow casters coincident.
+const VESSEL_RIG = /* wgsl */ `
+struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f };
+fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
+struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
+fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
+  var scale=vec3f(hull.size.x/3.6,1.0,hull.size.y/12.0);
+  var local=position;var localN=normal;
+  if(material==7.0 || material==8.0){
+    scale=vec3f(1.0);
+    let angle=-hull.size.w/35.0*6.2831853;let c=cos(angle);let s=sin(angle);
+    let pivot=vec3f(0,1.43,-1.7);let q=position-pivot;
+    local=vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+pivot;
+    localN=vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
+  }
+  if(material==14.0){
+    let angle=-hull.size.w*0.0174532925;let c=cos(angle);let s=sin(angle);
+    let pivot=vec3f(0,-0.6,5.68);let q=position-pivot;
+    local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
+    localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
+  }
+  if(material==13.0){local.x+=min(hull.rig.y*0.002,0.04)*sin(hull.origin.w*2.5+position.y*4.0)*27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);}
+  if(material==9.0){
+    let flutter=min(hull.rig.y*0.0015,0.035)*sin(hull.origin.w*2.5+position.x*3.0+position.y*4.0);
+    local.z+=flutter*sin(uv.x*3.14159265)*uv.y*uv.y;
+  }
+  return RigVertex(local,localN,scale);
+}
+`;
+
+const CANVAS_OPTICS = /* wgsl */ `
+fn canvasThickness(uv:vec2f,material:u32)->f32 {
+  let seamDistance=abs(fract(uv.x*10.0)-0.5);
+  let seam=1.0-smoothstep(0.004,0.013+max(fwidth(seamDistance),0.001),seamDistance);
+  let squareEdge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  let triangleEdge=min(min(uv.x,uv.y),(1.0-uv.x-uv.y)*0.70710678);
+  let edge=select(squareEdge,triangleEdge,material==13u);
+  let hem=1.0-smoothstep(0.006,0.014+max(fwidth(edge),0.0005),edge);
+  let fold=pow(0.5+0.5*cos(uv.x*62.83185+sin(uv.y*9.0)*0.35),8.0);
+  let weave=sin(uv.x*1400.0)*sin(uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,max(fwidth(uv.x+uv.y),0.001)));
+  return 1.0+0.95*seam+0.85*hem+0.18*fold+0.035*weave;
+}
+fn canvasTransmission(thickness:f32,incidence:f32)->vec3f {
+  return exp(-vec3f(0.90,1.15,1.60)*thickness/max(incidence,0.12));
+}
+`;
+
+// ---- js/wgsl/shadows.js ----
+
+const SHADOW_FRAME = /* wgsl */ `
+struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
+`;
+
+const SHADOW_CAST = SHADOW_FRAME + VESSEL_RIG + CANVAS_OPTICS + /* wgsl */ `
+@group(0) @binding(0) var<uniform> hull:Hull;
+@group(0) @binding(1) var<uniform> SH:ShadowFrame;
+struct ShadowVertex {
+  @builtin(position) position:vec4f,
+  @location(0) normal:vec3f,
+  @location(1) uv:vec2f,
+  @location(2) @interpolate(flat) material:u32,
+};
+@vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) material:f32,@location(3) uv:vec2f)->ShadowVertex {
+  let rig=rigVertex(position,normal,material,uv);
+  var out:ShadowVertex;
+  out.position=SH.lightView*vec4f(rotateHull(rig.position*rig.scale),1.0);
+  out.normal=normalize(rotateHull(rig.normal/rig.scale));out.uv=uv;out.material=u32(material);
+  return out;
+}
+@fragment fn canvasFS(in:ShadowVertex)->@location(0) vec4f {
+  return vec4f(canvasTransmission(canvasThickness(in.uv,in.material),abs(dot(normalize(in.normal),SH.sun.xyz))),1.0);
+}
+`;
+
+// Separate solid and cloth depths prevent translucent sails becoming opaque
+// blockers. Only direct solar light is shadowed; sky and reflections remain.
+const SHADOW_SAMPLE = SHADOW_FRAME + /* wgsl */ `
+@group(1) @binding(0) var<uniform> SH:ShadowFrame;
+@group(1) @binding(1) var solidShadow:texture_depth_2d;
+@group(1) @binding(2) var shadowCompare:sampler_comparison;
+@group(1) @binding(3) var canvasShadow:texture_depth_2d;
+@group(1) @binding(4) var canvasFilter:texture_2d<f32>;
+@group(1) @binding(5) var shadowLinear:sampler;
+fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
+  if(SH.origin.w<0.5){return vec3f(1);}
+  let facing=select(-1.0,1.0,dot(normal,SH.sun.xyz)>=0.0);
+  let offset=normal*facing*0.008+SH.sun.xyz*0.006;
+  let p=SH.lightView*vec4f(world-SH.origin.xyz+offset,1.0);
+  let uv=p.xy*vec2f(0.5,-0.5)+0.5;
+  if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || p.z<0.0){return vec3f(1);}
+  let dim=vec2i(textureDimensions(solidShadow));let at=clamp(vec2i(uv*vec2f(dim)),vec2i(0),dim-1);
+  let blocker=min(textureLoad(solidShadow,at,0),textureLoad(canvasShadow,at,0));
+  // Solar angular radius grows the penumbra with receiver distance. The cap
+  // bounds the nine-tap filter cost and prevents thin rigging washing out.
+  let distance=max(p.z-blocker,0.0)*SH.sun.w;
+  let radius=clamp(distance*0.004675/SH.texel.xy,vec2f(0.8),vec2f(6.0))/vec2f(dim);
+  let reference=min(p.z-0.00002,0.99999);
+  let span=SH.texel.xy*vec2f(dim);
+  let right=vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)*span.x*0.5;
+  let up=vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)*span.y*0.5;
+  let nl=dot(normal,SH.sun.xyz);
+  let denominator=select(-1.0,1.0,nl>=0.0)*max(abs(nl),0.1)*SH.sun.w;
+  let slope=vec2f(dot(normal,right),-dot(normal,up))*span/denominator;
+  let offsets=array<vec2f,9>(vec2f(0,0),vec2f(0.334,0),vec2f(-0.348,0.319),vec2f(0.050,-0.575),
+    vec2f(0.406,0.529),vec2f(-0.734,-0.130),vec2f(0.689,-0.438),vec2f(-0.229,0.852),vec2f(-0.435,-0.837));
+  var result=vec3f(0);
+  for(var i=0u;i<9u;i++){
+    let delta=offsets[i]*radius;let q=uv+delta;
+    // Follow the receiving plane across the filter, avoiding false self-shadow
+    // on slanted sails without pushing contact shadows away from the geometry.
+    let depth=min(reference+dot(slope,delta),0.99999);
+    let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
+    let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
+    let transmission=textureSampleLevel(canvasFilter,shadowLinear,q,0.0).rgb;
+    result+=solid*mix(transmission,vec3f(1),cloth);
+  }
+  return result/9.0;
+}
+`;
+
 // ---- js/wgsl/interaction.js ----
 
 // Local hull response and spray. Bounded visual approximation, not a fluid solver.
+
 
 const WAKE_SIZE = 256;
 const SPRAY_COUNT = 4096;
@@ -566,7 +688,7 @@ const SPRAY_UPDATE = FRAME_WGSL + WAKE_SAMPLE + /* wgsl */ `
 `;
 
 // Both populations share the ocean's sky/sun illumination and reverse-Z depth buffer.
-const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + /* wgsl */ `
+const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> I: Interaction;
 @group(0) @binding(2) var<storage, read> sheets: array<Sheet, ${SHEET_COUNT}>;
@@ -574,6 +696,7 @@ const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYP
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var effectSamp: sampler;
 @group(0) @binding(6) var transLUT: texture_2d<f32>;
+@group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
 struct EffectVertex { @builtin(position) position: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) data: vec4f };
 fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   let t=s.origin.w*(0.35+0.65*q)*(1.0+0.06*sin(u*4.0+s.origin.x*2.0));
@@ -616,7 +739,7 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
 }
 fn sprayLight(p: vec3f) -> vec3f {
   let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
-  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w;
+  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * vesselShadow(p,vec3f(0,1,0));
   let view = normalize(F.camPos.xyz - p);
   let scatter = pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
   return sky * 0.85 + sun * (0.12 + scatter * 0.65);
@@ -645,6 +768,7 @@ fn sprayLight(p: vec3f) -> vec3f {
 `;
 
 // ---- js/wgsl/deck.js ----
+
 
 
 
@@ -745,7 +869,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
 }
 `;
 
-const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wgsl */ `
+const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> H:InteractionHull;
 @group(0) @binding(2) var deckWater:texture_2d<f32>;
@@ -807,7 +931,7 @@ fn corner(v:u32)->vec2f {
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
   let reflection=textureSampleLevel(envCube,deckSamp,reflect(-v,n),2.0).rgb;
   let ambient=textureSampleLevel(envCube,deckSamp,vec3f(0,1,0),6.0).rgb;
-  let sun=textureSampleLevel(transLUT,deckSamp,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0];
+  let sun=textureSampleLevel(transLUT,deckSamp,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*vesselShadow(in.world,n);
   let pattern=clamp(0.5+gnoise(flowUV*1.7)+gnoise(flowUV*4.1)*0.3,0.0,1.0);
   let front=(1.0-smoothstep(0.015,0.11,w.x))*smoothstep(0.003,0.018,w.x)*w.z;
   let froth=clamp(w.y*(0.4+pattern*0.6)+front*0.55,0.0,0.85);
@@ -2095,6 +2219,7 @@ fn main(@builtin(local_invocation_index) k: u32) {
 // ---- js/wgsl/ocean.js ----
 
 
+
 // Ocean surface + sky background rendering.
 
 
@@ -2130,7 +2255,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 }
 `;
 
-const OCEAN = FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + /* wgsl */ `
+const OCEAN = FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -2255,7 +2380,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   cov += aa * min(1.0, 0.03 / max(max(aa.x, aa.y), 1e-8));
   let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
 
-  let sunE = sunIlluminance() * sunVis[0];
+  let sunE = sunIlluminance() * sunVis[0] * vesselShadow(in.rel+F.camPos.xyz,nrm);
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
   // average radiance of the whole upper hemisphere (incl. the bright horizon band)
   let skyHemi = skyUp * 0.4 + 0.15 * (
@@ -2559,14 +2684,15 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
 
 
 
-const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + /* wgsl */ `
+
+
+const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + CANVAS_OPTICS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var<storage, read> sunVis: array<f32, 4>;
-struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
 @group(0) @binding(6) var<uniform> hull: Hull;
 @group(0) @binding(7) var waterScene: texture_2d<f32>;
 @group(0) @binding(8) var dispTex: texture_2d_array<f32>;
@@ -2584,40 +2710,13 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
 };
-fn rotateHull(p: vec3f) -> vec3f {
-  return hull.right.xyz * p.x + hull.up.xyz * p.y - hull.forward.xyz * p.z;
-}
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f) -> BoatVertex {
-  var scale = vec3f(hull.size.x / 3.6, 1.0, hull.size.y / 12.0);
-  var local = position; var localN = normal;
-  if (material == 7.0 || material == 8.0) {
-    scale = vec3f(1.0);
-    let angle = -hull.size.w / 35.0 * 6.2831853;
-    let c = cos(angle); let s = sin(angle);
-    let pivot = vec3f(0.0,1.43,-1.7);
-    let q = position - pivot;
-    local = vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+pivot;
-    localN = vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
-  }
-  if (material == 14.0) {
-    let angle = -hull.size.w * 0.0174532925;
-    let c=cos(angle); let s=sin(angle); let pivot=vec3f(0.0,-0.6,5.68);
-    let q=position-pivot;
-    local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
-    localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
-  }
-  if (material == 13.0) {
-    local.x+=min(hull.rig.y*0.002,0.04)*sin(hull.origin.w*2.5+position.y*4.0)*27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);
-  }
-  if (material == 9.0) {
-    let flutter=min(hull.rig.y*0.0015,0.035)*sin(hull.origin.w*2.5+position.x*3.0+position.y*4.0);
-    local.z+=flutter*sin(uv.x*3.14159265)*uv.y*uv.y;
-  }
-  let relative = rotateHull(local * scale) + hull.origin.xyz - F.camPos.xyz;
+  let rig=rigVertex(position,normal,material,uv);
+  let relative = rotateHull(rig.position * rig.scale) + hull.origin.xyz - F.camPos.xyz;
   var o: BoatVertex;
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
-  o.normal = normalize(rotateHull(localN / scale));
+  o.normal = normalize(rotateHull(rig.normal / rig.scale));
   o.local = position;
   o.material = u32(material); o.normalLocal = normal; o.uv=uv;
   return o;
@@ -2666,7 +2765,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   n = normalize(n - clamp(gradient,vec3f(-0.12),vec3f(0.12)) * select(1.0,0.1,in.material == 3u || in.material == 8u));
   var albedo = timber * vec3f(1.08,0.94,0.74);
   var rough = clamp(0.74 + (0.2-relief)*0.18,0.64,0.85); var metal = 0.0;
-  var canvasDepth=1.0;
+  let canvasDepth=canvasThickness(in.uv,in.material);
   let plank = floor((p.x+1.8)/0.18);
   albedo *= 0.82 + 0.2 * fract(sin(plank*74.17)*4321.1);
   // Fine end-grain joints, splits, and oxidised grain.
@@ -2694,10 +2793,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
     let seam=1.0-smoothstep(0.004,0.013+clothAA,clothSeam);
     let hem=1.0-smoothstep(0.006,0.014+edgeAA,clothEdge);
-    let fold=pow(0.5+0.5*cos(in.uv.x*62.83185+sin(in.uv.y*9.0)*0.35),8.0);
     // Optical depth: overlapped stitching and doubled edge cloth block more
     // light. Broad folds and filtered weave avoid a uniformly luminous sheet.
-    canvasDepth=1.0+0.95*seam+0.85*hem+0.18*fold+0.035*weave;
     albedo=vec3f(0.58,0.55,0.48)*aged*(1.0-0.12*seam-0.08*hem)*(1.0+0.025*weave);
     n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
   }
@@ -2727,16 +2824,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let fh=1.0-vh; let fh2=fh*fh;
   let fv=1.0-nv; let fv2=fv*fv;
   let fresnel=f0+(1.0-f0)*fh2*fh2*fh;
-  // Analytic rail shadows on the deck; world sun is transformed into hull space.
-  let localSun=vec3f(dot(l,hull.right.xyz),dot(l,hull.up.xyz),-dot(l,hull.forward.xyz));
-  var shade=1.0;
-  if(in.material==0u && p.y<1.3 && localSun.y>0.0) {
-    let railHeight=1.45+0.52*pow(clamp(-p.z/6.4,0.0,1.0),3.0);
-    let atRail=p.x+localSun.x*(railHeight-p.y)/max(localSun.y,0.001);
-    let edge=1.8*sqrt(max(0.002,1.0-pow(max(0.0,-p.z)/6.4,2.0)));
-    shade=mix(1.0,0.05,smoothstep(edge-0.08,edge+0.04,abs(atRail)));
-  }
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*shade;
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*vesselShadow(in.world,normalize(in.normal));
   // The last cube mip is a face average, not diffuse irradiance. Sampling it
   // along a vertical timber normal mixes in the sea, then counts that green
   // light again below. Use separate sky/sea hemispheres and their projected
@@ -2757,7 +2845,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // gives unbleached canvas a warm glow. These are authored, not measured,
     // fabric coefficients. The view-facing normal makes both sides equivalent.
     let opticalDepth=vec3f(0.90,1.15,1.60)*canvasDepth;
-    let transmitted=exp(-opticalDepth/max(through,0.12));
+    let transmitted=canvasTransmission(canvasDepth,through);
     let alignment=max(dot(-v,l),0.0);
     // A diffuse lobe plus a broad, normalized forward lobe around the sun.
     let scatter=0.70/PI+0.30*(34.0/(2.0*PI))*pow(alignment,32.0);
@@ -3177,6 +3265,98 @@ function createShareLink(href, settings, boat, cameraMode) {
   return url.href;
 }
 
+// ---- js/shadows.js ----
+
+function shadowMeshData(mesh) {
+  const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity],solid=[],canvas=[];
+  for(let i=0;i<mesh.length;i+=9)for(let axis=0;axis<3;axis++){
+    bounds[axis]=Math.min(bounds[axis],mesh[i+axis]);bounds[axis+3]=Math.max(bounds[axis+3],mesh[i+axis]);
+  }
+  for(let i=0;i<mesh.length/9;i+=3){
+    const material=mesh[i*9+6];(material===9 || material===13 ? canvas:solid).push(i,i+1,i+2);
+  }
+  return {bounds,solid:new Uint32Array(solid),canvas:new Uint32Array(canvas)};
+}
+
+// Boat-relative coordinates retain precision during long voyages. Fit only the
+// caster footprint: water receivers project into it even at very low sun angles.
+function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
+  const [sx,sy,sz]=sun;
+  const horizontal=Math.hypot(sx,sz);
+  const rx=horizontal>1e-5?sz/horizontal:1,rz=horizontal>1e-5?-sx/horizontal:0;
+  const ux=sy*rz,uy=sz*rx-sx*rz,uz=-sy*rx;
+  let xmin=Infinity,ymin=Infinity,zmin=Infinity,xmax=-Infinity,ymax=-Infinity,zmax=-Infinity;
+  for(let i=0;i<8;i++){
+    const x=bounds[(i&1)?3:0]*hull[12]/3.6;
+    const y=bounds[(i&2)?4:1];const z=bounds[(i&4)?5:2]*hull[13]/12;
+    const wx=hull[0]*x+hull[4]*y-hull[8]*z,wy=hull[1]*x+hull[5]*y-hull[9]*z,wz=hull[2]*x+hull[6]*y-hull[10]*z;
+    const px=rx*wx+rz*wz,py=ux*wx+uy*wy+uz*wz,pz=-sx*wx-sy*wy-sz*wz;
+    xmin=Math.min(xmin,px);xmax=Math.max(xmax,px);ymin=Math.min(ymin,py);ymax=Math.max(ymax,py);zmin=Math.min(zmin,pz);zmax=Math.max(zmax,pz);
+  }
+  // Margin includes animated canvas, rudder rotation, and the filter footprint.
+  const width=Math.ceil((xmax-xmin+2)*4)/4,height=Math.ceil((ymax-ymin+2)*4)/4;
+  const tx=width/resolution,ty=height/resolution;
+  const cx=Math.round((xmin+xmax)*0.5/tx)*tx,cy=Math.round((ymin+ymax)*0.5/ty)*ty;
+  zmin-=2;zmax+=2;const depth=zmax-zmin;
+  out.fill(0);out[0]=rx*2/width;out[8]=rz*2/width;out[12]=-cx*2/width;
+  out[1]=ux*2/height;out[5]=uy*2/height;out[9]=uz*2/height;out[13]=-cy*2/height;
+  out[2]=-sx/depth;out[6]=-sy/depth;out[10]=-sz/depth;out[14]=-zmin/depth;out[15]=1;
+  out.set(hull.subarray(16,19),16);out[19]=enabled && sy>0?1:0;
+  out.set(sun,20);out[23]=depth;out[24]=tx;out[25]=ty;
+  return out;
+}
+
+async function createVesselShadows({device,hullUBO,mesh,vertexBuffer,shader,resolution=2048}) {
+  const B=GPUBufferUsage,T=GPUTextureUsage;
+  const data=new Float32Array(28),parts=shadowMeshData(mesh);
+  const uniform=device.createBuffer({label:'vessel shadow frame',size:112,usage:B.UNIFORM|B.COPY_DST});
+  const depth=label=>device.createTexture({label,size:[resolution,resolution],format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
+  const solid=depth('solid shadow'),canvas=depth('canvas shadow');
+  const transmission=device.createTexture({label:'canvas shadow transmission',size:[resolution,resolution],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
+  const views=[solid.createView(),canvas.createView(),transmission.createView()];
+  const compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'});
+  const linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
+  const module=await shader(SHADOW_CAST,'vessel shadows');
+  const pipes=await Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({
+    label:cloth?'canvas shadows':'solid shadows',layout:'auto',
+    vertex:{module,entryPoint:'vs',buffers:[{arrayStride:36,attributes:[
+      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
+    ]}]},
+    ...(cloth?{fragment:{module,entryPoint:'canvasFS',targets:[{format:'rgba16float'}]}}:{}),
+    primitive:{topology:'triangle-list',cullMode:'none'},
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
+  })));
+  const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
+    {binding:0,resource:{buffer:hullUBO}},{binding:1,resource:{buffer:uniform}},
+  ]}));
+  const indices=[parts.solid,parts.canvas].map(values=>{
+    const b=device.createBuffer({size:Math.max(4,values.byteLength),usage:B.INDEX|B.COPY_DST});
+    device.queue.writeBuffer(b,0,values);return b;
+  });
+  const passes=[0,1].map(i=>({
+    label:i?'canvas shadows':'solid shadows',
+    colorAttachments:i?[{view:views[2],clearValue:[1,1,1,1],loadOp:'clear',storeOp:'store'}]:[],
+    depthStencilAttachment:{view:views[i],depthClearValue:1,depthLoadOp:'clear',depthStoreOp:'store'},
+  }));
+  const counts=[parts.solid.length,parts.canvas.length];
+  return {
+    update(hull,sun,enabled){fitVesselShadow(data,hull,sun,parts.bounds,resolution,enabled);device.queue.writeBuffer(uniform,0,data);},
+    encode(encoder){
+      if(!data[19])return;
+      for(let i=0;i<2;i++){
+        const pass=encoder.beginRenderPass(passes[i]);pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
+        pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);pass.end();
+      }
+    },
+    bind(pipe){return device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[
+      {binding:0,resource:{buffer:uniform}},{binding:1,resource:views[0]},{binding:2,resource:compare},
+      {binding:3,resource:views[1]},{binding:4,resource:views[2]},{binding:5,resource:linear},
+    ]});},
+    destroy(){solid.destroy();canvas.destroy();transmission.destroy();uniform.destroy();for(const b of indices)b.destroy();},
+  };
+}
+
 // ---- js/deck.js ----
 
 async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe}) {
@@ -3201,15 +3381,17 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
   })));
   // Four substeps always finish in texture zero; timber reads that same wetness field.
   const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis)]));
+  let shadowGroups;
   return {
     textures,view:views[0],sampler,
+    setShadows(shadows){shadowGroups=pipes.map(p=>shadows.bind(p));},
     encode(cp){
       cp.setPipeline(update);
       for(let s=0;s<4;s++){cp.setBindGroup(0,groups[1-s%2]);cp.dispatchWorkgroups(DECK_COLS/8,DECK_ROWS/8);}
     },
     draw(pass){
-      pass.setPipeline(pipes[0]);pass.setBindGroup(0,renderGroups[0]);pass.draw(DECK_COLS*DECK_ROWS*24);
-      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.draw(8*6,DECK_ROWS*2);
+      pass.setPipeline(pipes[0]);pass.setBindGroup(0,renderGroups[0]);pass.setBindGroup(1,shadowGroups[0]);pass.draw(DECK_COLS*DECK_ROWS*24);
+      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.setBindGroup(1,shadowGroups[1]);pass.draw(8*6,DECK_ROWS*2);
     },
   };
 }
@@ -3220,6 +3402,7 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
 
 async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, sunVis, shader, computePipe }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
+  if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
   const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe});
   const contacts = device.createBuffer({ label: 'hull contacts', size: 32 * 64, usage: bu.STORAGE | bu.COPY_SRC });
@@ -3252,12 +3435,15 @@ async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaS
     { binding: 0, resource: buffer(frameUBO) }, { binding: 1, resource: buffer(uniform) },
     { binding: i === 0 ? 2 : 3, resource: buffer(i === 0 ? sheets : drops) },
     { binding: 4, resource: envView }, { binding: 5, resource: sampler }, { binding: 6, resource: transView },
+    { binding: 7, resource: buffer(sunVis) },
   ] }));
   // Drop shading samples sky and transmittance, but not the contact population.
   const values = new Float32Array(16);
+  let shadowGroups;
   let current = 0, prevX = 0, prevZ = 0, previousExtent = 0, previousRevision = -1, wasEnabled = false, enabled = false, needsClear = true;
   return {
     uniform, views, sampler, contacts, drops, sheets, textures, landings, deck,
+    setShadows(shadows){deck.setShadows(shadows);shadowGroups=renderPipes.map(p=>shadows.bind(p));},
     get current() { return current; },
     update(boat, dt, time, frame, windSpeed, windDir, resetSea = false) {
       enabled = boat.showProw && boat.effects !== false;
@@ -3286,8 +3472,8 @@ async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaS
     draw(pass) {
       if (!enabled) return;
       deck.draw(pass);
-      pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[0]); pass.draw(8*10*6,SHEET_COUNT);
-      pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[1]); pass.draw(6, SPRAY_COUNT);
+      pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[0]); pass.setBindGroup(1,shadowGroups[0]); pass.draw(8*10*6,SHEET_COUNT);
+      pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[1]); pass.setBindGroup(1,shadowGroups[1]); pass.draw(6, SPRAY_COUNT);
     },
   };
 }
@@ -3406,6 +3592,7 @@ async function createVolumetricClouds({ device, frameUBO, transView, skyView, sa
 }
 
 // ---- js/main.js ----
+
 
 
 
@@ -3735,8 +3922,11 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(24);
+  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,vertexBuffer:caravelBuffer,shader});
+  const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
+  interaction.setShadows(shadows);
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
@@ -4463,6 +4653,7 @@ async function main() {
     hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
     hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
     device.queue.writeBuffer(hullUBO, 0, hullData);
+    shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
@@ -4533,12 +4724,14 @@ async function main() {
     cp.end();
 
     const drawProw = boat.showProw;
+    shadows.encode(enc);
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
     if (nodeCount) {
       rp.setPipeline(oceanPipe);
       rp.setBindGroup(0, bgOcean[foamCur][interaction.current]);
+      rp.setBindGroup(1, oceanShadows);
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
@@ -4563,6 +4756,7 @@ async function main() {
         depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: 'discard' },
       });
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
+      prowPass.setBindGroup(1,caravelShadows);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9);
       interaction.draw(prowPass); prowPass.end();
     }

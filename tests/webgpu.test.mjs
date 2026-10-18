@@ -499,6 +499,8 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['cloud resolve'].length, 1);
     assert.equal(frame.render['bloom down'], 6); // 32 x 24 supports six mip levels.
     assert.equal(frame.render['bloom up'], 5);
+    assert.equal(frame.render['solid shadows'],undefined);
+    assert.equal(frame.render['canvas shadows'],undefined);
 
     frame = await step(page);
     assert.equal(frame.compute.skyview, undefined);
@@ -557,12 +559,14 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     frame = await step(page);
     for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
     assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
+    assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.
     frame = await step(page);
     assert.equal(frame.compute['local wake'], undefined);
     assert.equal(frame.compute['spray update'], undefined);
     assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
+    assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
   } finally { await page.close(); }
 });
 
@@ -707,6 +711,76 @@ test('clouds extinguish the HDR sun and surface light together', {timeout:120000
     assert.ok(opaque.radiance<1 && thicker.radiance<1,'opaque clouds must hide the HDR solar disc');
     assert.ok(Math.abs((thin.radiance-opaque.radiance)/(clear.radiance-opaque.radiance)-thin.visibility)<1e-5,
       'visible disc and surface sunlight must use identical attenuation');
+  }finally{await page.close();}
+});
+
+test('vessel shadows follow the sun and hull, transmit canvas, and leave unblocked receivers lit', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__shadow_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__shadow_test`);
+    const result=await page.evaluate(async()=>{
+      const {createVesselShadows}=await import('/js/shadows.js');
+      const {SHADOW_SAMPLE}=await import('/js/wgsl/shadows.js');
+      const {boatRotate}=await import('/js/boat.js');
+      const device=await (await navigator.gpu.requestAdapter()).requestDevice();
+      const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
+      const shader=async(code,label)=>device.createShaderModule({code,label});
+      const mesh=[];
+      for(const [cx,material] of [[0,0],[3,9]])for(const [x,z] of [[-1,-1],[1,-1],[1,1],[-1,-1],[1,1],[-1,1]])
+        mesh.push(cx+x,2,z,0,1,0,material,0.025,0.5);
+      const vertices=new Float32Array(mesh),vertexBuffer=buffer(vertices.byteLength,B.VERTEX|B.COPY_DST);
+      device.queue.writeBuffer(vertexBuffer,0,vertices);
+      const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
+      const hullUBO=buffer(96,B.UNIFORM|B.COPY_DST);
+      const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256});
+      const module=await shader(SHADOW_SAMPLE+`
+        @group(0) @binding(0) var<storage,read> points:array<vec4f>;
+        @group(0) @binding(1) var<storage,read_write> result:array<vec4f>;
+        @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
+          result[id.x]=vec4f(vesselShadow(points[id.x].xyz,vec3f(0,1,0)),1.0);
+        }
+      `,'shadow receivers');
+      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
+      const points=buffer(80,B.STORAGE|B.COPY_DST),output=buffer(80,B.STORAGE|B.COPY_SRC),read=buffer(80,B.COPY_DST|B.MAP_READ);
+      const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:points}},{binding:1,resource:{buffer:output}}]});
+      const receivers=shadows.bind(pipe);
+      async function sample(sun,locations,enabled=true){
+        device.queue.writeBuffer(hullUBO,0,hull);shadows.update(hull,sun,enabled);
+        const positions=locations.flatMap(([x,y,z])=>[x+hull[16],y+hull[17],z+hull[18],0]);
+        device.queue.writeBuffer(points,0,new Float32Array(positions));
+        const enc=device.createCommandEncoder();shadows.encode(enc);
+        const cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.setBindGroup(1,receivers);cp.dispatchWorkgroups(locations.length);cp.end();
+        enc.copyBufferToBuffer(output,0,read,0,80);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const values=Array.from(new Float32Array(read.getMappedRange())).slice(0,locations.length*4);read.unmap();return values;
+      }
+      const locations=[[0,0,0],[3,0,0],[6,0,0],[0,3,0],[0,2,0]];
+      const overhead=await sample([0,1,0],locations);
+      hull[16]=10000;hull[17]=2;hull[18]=-8000;
+      const moved=await sample([0,1,0],locations);
+      boatRotate(hull.subarray(0,3),1,0,0,0.8,0.2,-0.15);
+      boatRotate(hull.subarray(4,7),0,1,0,0.8,0.2,-0.15);
+      boatRotate(hull.subarray(8,11),0,0,-1,0.8,0.2,-0.15);
+      const solidCenter=new Float32Array(3),clothCenter=new Float32Array(3);
+      boatRotate(solidCenter,0,2,0,0.8,0.2,-0.15);boatRotate(clothCenter,3,2,0,0.8,0.2,-0.15);
+      const tilted=await sample([0,1,0],[[solidCenter[0],0,solidCenter[2]],[clothCenter[0],0,clothCenter[2]],
+        [20,0,20],[solidCenter[0],solidCenter[1]+1,solidCenter[2]],Array.from(solidCenter)]);
+      hull.fill(0,0,12);hull[0]=1;hull[5]=1;hull[10]=-1;
+      const oblique=await sample([Math.SQRT1_2,Math.SQRT1_2,0],[[-2,0,0],[1,0,0],[-4,0,0],[0,3,0],[6,0,0]]);
+      const hidden=await sample([0,1,0],locations,false),night=await sample([0,-1,0],locations);
+      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night};
+    });
+    assert.deepEqual(result.errors,[]);
+    for(const values of [result.overhead,result.moved,result.tilted,result.oblique]){
+      assert.ok(values[0]<0.01,'solid geometry blocks sunlight below it');
+      assert.ok(values[4]>0.15 && values[4]<0.5,'canvas transmits a fraction of sunlight');
+      assert.ok(values[4]>values[5] && values[5]>values[6],'canvas shadow retains warm transmission');
+      assert.ok(values[8]>0.99 && values[12]>0.99,'outside/above the caster stays lit');
+    }
+    assert.ok(result.overhead[16]>0.99,'caster surface must not shadow itself');
+    for(let i=0;i<result.moved.length;i++)assert.ok(Math.abs(result.moved[i]-result.overhead[i])<0.005,'translation retains the shadow');
+    for(const values of [result.hidden,result.night])assert.ok(values.every(v=>v===1),'hidden/night shadows are disabled');
   }finally{await page.close();}
 });
 

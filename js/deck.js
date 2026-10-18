@@ -22,15 +22,17 @@ export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,se
   })));
   // Four substeps always finish in texture zero; timber reads that same wetness field.
   const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis)]));
+  let shadowGroups;
   return {
     textures,view:views[0],sampler,
+    setShadows(shadows){shadowGroups=pipes.map(p=>shadows.bind(p));},
     encode(cp){
       cp.setPipeline(update);
       for(let s=0;s<4;s++){cp.setBindGroup(0,groups[1-s%2]);cp.dispatchWorkgroups(DECK_COLS/8,DECK_ROWS/8);}
     },
     draw(pass){
-      pass.setPipeline(pipes[0]);pass.setBindGroup(0,renderGroups[0]);pass.draw(DECK_COLS*DECK_ROWS*24);
-      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.draw(8*6,DECK_ROWS*2);
+      pass.setPipeline(pipes[0]);pass.setBindGroup(0,renderGroups[0]);pass.setBindGroup(1,shadowGroups[0]);pass.draw(DECK_COLS*DECK_ROWS*24);
+      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.setBindGroup(1,shadowGroups[1]);pass.draw(8*6,DECK_ROWS*2);
     },
   };
 }

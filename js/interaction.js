@@ -4,6 +4,7 @@ import { createDeckWash } from './deck.js';
 
 export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, sunVis, shader, computePipe }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
+  if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
   const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe});
   const contacts = device.createBuffer({ label: 'hull contacts', size: 32 * 64, usage: bu.STORAGE | bu.COPY_SRC });
@@ -36,12 +37,15 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     { binding: 0, resource: buffer(frameUBO) }, { binding: 1, resource: buffer(uniform) },
     { binding: i === 0 ? 2 : 3, resource: buffer(i === 0 ? sheets : drops) },
     { binding: 4, resource: envView }, { binding: 5, resource: sampler }, { binding: 6, resource: transView },
+    { binding: 7, resource: buffer(sunVis) },
   ] }));
   // Drop shading samples sky and transmittance, but not the contact population.
   const values = new Float32Array(16);
+  let shadowGroups;
   let current = 0, prevX = 0, prevZ = 0, previousExtent = 0, previousRevision = -1, wasEnabled = false, enabled = false, needsClear = true;
   return {
     uniform, views, sampler, contacts, drops, sheets, textures, landings, deck,
+    setShadows(shadows){deck.setShadows(shadows);shadowGroups=renderPipes.map(p=>shadows.bind(p));},
     get current() { return current; },
     update(boat, dt, time, frame, windSpeed, windDir, resetSea = false) {
       enabled = boat.showProw && boat.effects !== false;
@@ -70,8 +74,8 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     draw(pass) {
       if (!enabled) return;
       deck.draw(pass);
-      pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[0]); pass.draw(8*10*6,SHEET_COUNT);
-      pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[1]); pass.draw(6, SPRAY_COUNT);
+      pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[0]); pass.setBindGroup(1,shadowGroups[0]); pass.draw(8*10*6,SHEET_COUNT);
+      pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[1]); pass.setBindGroup(1,shadowGroups[1]); pass.draw(6, SPRAY_COUNT);
     },
   };
 }

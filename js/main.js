@@ -1,4 +1,5 @@
 import { createVolumetricClouds } from './clouds.js';
+import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createCaravelMesh, WHEEL_CENTER } from './caravel.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -328,8 +329,11 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   const hullUBO = mkBuf(96, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(24);
+  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,vertexBuffer:caravelBuffer,shader});
+  const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
+  interaction.setShadows(shadows);
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
@@ -1056,6 +1060,7 @@ async function main() {
     hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
     hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
     device.queue.writeBuffer(hullUBO, 0, hullData);
+    shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
@@ -1126,12 +1131,14 @@ async function main() {
     cp.end();
 
     const drawProw = boat.showProw;
+    shadows.encode(enc);
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
     if (nodeCount) {
       rp.setPipeline(oceanPipe);
       rp.setBindGroup(0, bgOcean[foamCur][interaction.current]);
+      rp.setBindGroup(1, oceanShadows);
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
@@ -1156,6 +1163,7 @@ async function main() {
         depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: 'discard' },
       });
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
+      prowPass.setBindGroup(1,caravelShadows);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.draw(caravelMesh.length / 9);
       interaction.draw(prowPass); prowPass.end();
     }

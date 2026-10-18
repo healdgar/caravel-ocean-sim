@@ -1,14 +1,15 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
-export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + /* wgsl */ `
+import { VESSEL_RIG, CANVAS_OPTICS } from './vessel.js';
+import { SHADOW_SAMPLE } from './shadows.js';
+export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + CANVAS_OPTICS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var<storage, read> sunVis: array<f32, 4>;
-struct Hull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
 @group(0) @binding(6) var<uniform> hull: Hull;
 @group(0) @binding(7) var waterScene: texture_2d<f32>;
 @group(0) @binding(8) var dispTex: texture_2d_array<f32>;
@@ -26,40 +27,13 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
 };
-fn rotateHull(p: vec3f) -> vec3f {
-  return hull.right.xyz * p.x + hull.up.xyz * p.y - hull.forward.xyz * p.z;
-}
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f) -> BoatVertex {
-  var scale = vec3f(hull.size.x / 3.6, 1.0, hull.size.y / 12.0);
-  var local = position; var localN = normal;
-  if (material == 7.0 || material == 8.0) {
-    scale = vec3f(1.0);
-    let angle = -hull.size.w / 35.0 * 6.2831853;
-    let c = cos(angle); let s = sin(angle);
-    let pivot = vec3f(0.0,1.43,-1.7);
-    let q = position - pivot;
-    local = vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+pivot;
-    localN = vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
-  }
-  if (material == 14.0) {
-    let angle = -hull.size.w * 0.0174532925;
-    let c=cos(angle); let s=sin(angle); let pivot=vec3f(0.0,-0.6,5.68);
-    let q=position-pivot;
-    local=vec3f(c*q.x+s*q.z,q.y,-s*q.x+c*q.z)+pivot;
-    localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
-  }
-  if (material == 13.0) {
-    local.x+=min(hull.rig.y*0.002,0.04)*sin(hull.origin.w*2.5+position.y*4.0)*27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);
-  }
-  if (material == 9.0) {
-    let flutter=min(hull.rig.y*0.0015,0.035)*sin(hull.origin.w*2.5+position.x*3.0+position.y*4.0);
-    local.z+=flutter*sin(uv.x*3.14159265)*uv.y*uv.y;
-  }
-  let relative = rotateHull(local * scale) + hull.origin.xyz - F.camPos.xyz;
+  let rig=rigVertex(position,normal,material,uv);
+  let relative = rotateHull(rig.position * rig.scale) + hull.origin.xyz - F.camPos.xyz;
   var o: BoatVertex;
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
-  o.normal = normalize(rotateHull(localN / scale));
+  o.normal = normalize(rotateHull(rig.normal / rig.scale));
   o.local = position;
   o.material = u32(material); o.normalLocal = normal; o.uv=uv;
   return o;
@@ -108,7 +82,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   n = normalize(n - clamp(gradient,vec3f(-0.12),vec3f(0.12)) * select(1.0,0.1,in.material == 3u || in.material == 8u));
   var albedo = timber * vec3f(1.08,0.94,0.74);
   var rough = clamp(0.74 + (0.2-relief)*0.18,0.64,0.85); var metal = 0.0;
-  var canvasDepth=1.0;
+  let canvasDepth=canvasThickness(in.uv,in.material);
   let plank = floor((p.x+1.8)/0.18);
   albedo *= 0.82 + 0.2 * fract(sin(plank*74.17)*4321.1);
   // Fine end-grain joints, splits, and oxidised grain.
@@ -136,10 +110,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
     let seam=1.0-smoothstep(0.004,0.013+clothAA,clothSeam);
     let hem=1.0-smoothstep(0.006,0.014+edgeAA,clothEdge);
-    let fold=pow(0.5+0.5*cos(in.uv.x*62.83185+sin(in.uv.y*9.0)*0.35),8.0);
     // Optical depth: overlapped stitching and doubled edge cloth block more
     // light. Broad folds and filtered weave avoid a uniformly luminous sheet.
-    canvasDepth=1.0+0.95*seam+0.85*hem+0.18*fold+0.035*weave;
     albedo=vec3f(0.58,0.55,0.48)*aged*(1.0-0.12*seam-0.08*hem)*(1.0+0.025*weave);
     n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
   }
@@ -169,16 +141,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let fh=1.0-vh; let fh2=fh*fh;
   let fv=1.0-nv; let fv2=fv*fv;
   let fresnel=f0+(1.0-f0)*fh2*fh2*fh;
-  // Analytic rail shadows on the deck; world sun is transformed into hull space.
-  let localSun=vec3f(dot(l,hull.right.xyz),dot(l,hull.up.xyz),-dot(l,hull.forward.xyz));
-  var shade=1.0;
-  if(in.material==0u && p.y<1.3 && localSun.y>0.0) {
-    let railHeight=1.45+0.52*pow(clamp(-p.z/6.4,0.0,1.0),3.0);
-    let atRail=p.x+localSun.x*(railHeight-p.y)/max(localSun.y,0.001);
-    let edge=1.8*sqrt(max(0.002,1.0-pow(max(0.0,-p.z)/6.4,2.0)));
-    shade=mix(1.0,0.05,smoothstep(edge-0.08,edge+0.04,abs(atRail)));
-  }
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*shade;
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*vesselShadow(in.world,normalize(in.normal));
   // The last cube mip is a face average, not diffuse irradiance. Sampling it
   // along a vertical timber normal mixes in the sea, then counts that green
   // light again below. Use separate sky/sea hemispheres and their projected
@@ -199,7 +162,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // gives unbleached canvas a warm glow. These are authored, not measured,
     // fabric coefficients. The view-facing normal makes both sides equivalent.
     let opticalDepth=vec3f(0.90,1.15,1.60)*canvasDepth;
-    let transmitted=exp(-opticalDepth/max(through,0.12));
+    let transmitted=canvasTransmission(canvasDepth,through);
     let alignment=max(dot(-v,l),0.0);
     // A diffuse lobe plus a broad, normalized forward lobe around the sun.
     let scatter=0.70/PI+0.30*(34.0/(2.0*PI))*pow(alignment,32.0);

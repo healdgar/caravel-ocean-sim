@@ -1,6 +1,7 @@
 import { HULL_PROFILE } from './hull.js';
 // Local hull response and spray. Bounded visual approximation, not a fluid solver.
 import { FRAME_WGSL, CASCADES, ATMO_CORE_WGSL, NOISE_WGSL } from './common.js';
+import { SHADOW_SAMPLE } from './shadows.js';
 
 export const WAKE_SIZE = 256;
 export const SPRAY_COUNT = 4096;
@@ -245,7 +246,7 @@ export const SPRAY_UPDATE = FRAME_WGSL + WAKE_SAMPLE + /* wgsl */ `
 `;
 
 // Both populations share the ocean's sky/sun illumination and reverse-Z depth buffer.
-export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + /* wgsl */ `
+export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> I: Interaction;
 @group(0) @binding(2) var<storage, read> sheets: array<Sheet, ${SHEET_COUNT}>;
@@ -253,6 +254,7 @@ export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACT
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var effectSamp: sampler;
 @group(0) @binding(6) var transLUT: texture_2d<f32>;
+@group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
 struct EffectVertex { @builtin(position) position: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) data: vec4f };
 fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   let t=s.origin.w*(0.35+0.65*q)*(1.0+0.06*sin(u*4.0+s.origin.x*2.0));
@@ -295,7 +297,7 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
 }
 fn sprayLight(p: vec3f) -> vec3f {
   let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
-  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w;
+  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * vesselShadow(p,vec3f(0,1,0));
   let view = normalize(F.camPos.xyz - p);
   let scatter = pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
   return sky * 0.85 + sun * (0.12 + scatter * 0.65);

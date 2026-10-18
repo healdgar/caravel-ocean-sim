@@ -146,12 +146,13 @@ npm run build
 npm test
 ```
 
-The suite contains 25 checks covering:
+The suite contains 27 checks covering:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings.
 - Dry, stationary, moving, and tilted hull contacts; impact sheets; persistent wakes; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Dry decks below the rails, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
+- Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows.
 - JavaScript and WGSL initialization in all three standalone builds.
 
 GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks in native Chrome supplement these tests; software-GPU checks do not establish device frame rates or visual quality.
@@ -163,6 +164,7 @@ GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU o
 - The scene is open ocean with an optional fully modeled sailing ship. There is no shoreline, surf, or other vessels.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing, or create separate runoff landing splashes. Severe crests can still overtop the hull and boat camera.
+- Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
 
 ## How it was made
 
@@ -180,6 +182,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
 | `js/caravel.js` | Hull, quarterdeck, cabin, rigging, square and lateen sails, and helm geometry |
+| `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
 | `js/wgsl/` | Shaders as JavaScript modules, including waves/foam, atmosphere, ocean, timber, and post-processing |
@@ -237,8 +240,19 @@ approximate bounced light. Offscreen reflections use the environment cube;
 its sea fallback follows cloud shadows. Diffuse lighting weights separate sky
 and sea hemispheres by surface orientation, avoiding duplicate sea tint on
 vertical timber. Neutral white balance preserves the oak colour across sunlight
-settings; shaded and wet wood still pick up their surroundings. Rail shadows are
-approximate. All camera modes share the ocean depth buffer, so
+settings; shaded and wet wood still pick up their surroundings.
+
+Two 2048 × 2048 sun shadow maps track the moving vessel: one for solid timber,
+metal and rigging, and one for canvas with its warm optical transmission.
+The actual mesh casts onto the deck, hull, sails, displaced ocean, foam, deck wash
+and spray. The shadow and visible passes share sail flutter, steering and hull
+transforms. Filtered edges soften with caster distance; receiver-plane correction
+limits self-shadow speckling on tilted surfaces. Direct sunlight is attenuated
+while sky fill and reflections remain. This replaces the former analytic rail
+shadow approximation. Hiding the ship or placing the sun below the horizon skips
+the passes. `shadows=0` disables them for performance comparisons.
+
+All camera modes share the ocean depth buffer, so
 water, hull, deck wash, bow sheets, and spray occlude each other consistently. A world-space
 hull volume excludes ocean water inside the bulwarks and stern cabin; overtopping
 crests remain visible. The neutral oak albedo texture has no

@@ -1,4 +1,5 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, NOISE_WGSL } from './common.js';
+import { SHADOW_SAMPLE } from './shadows.js';
 import { HULL_PROFILE } from './hull.js';
 import { INTERACTION_TYPES, INTERACTION_SEA } from './interaction.js';
 
@@ -99,7 +100,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
 }
 `;
 
-export const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wgsl */ `
+export const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> H:InteractionHull;
 @group(0) @binding(2) var deckWater:texture_2d<f32>;
@@ -161,7 +162,7 @@ fn corner(v:u32)->vec2f {
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
   let reflection=textureSampleLevel(envCube,deckSamp,reflect(-v,n),2.0).rgb;
   let ambient=textureSampleLevel(envCube,deckSamp,vec3f(0,1,0),6.0).rgb;
-  let sun=textureSampleLevel(transLUT,deckSamp,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0];
+  let sun=textureSampleLevel(transLUT,deckSamp,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*vesselShadow(in.world,n);
   let pattern=clamp(0.5+gnoise(flowUV*1.7)+gnoise(flowUV*4.1)*0.3,0.0,1.0);
   let front=(1.0-smoothstep(0.015,0.11,w.x))*smoothstep(0.003,0.018,w.x)*w.z;
   let froth=clamp(w.y*(0.4+pattern*0.6)+front*0.55,0.0,0.85);
