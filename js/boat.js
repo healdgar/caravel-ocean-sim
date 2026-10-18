@@ -18,7 +18,41 @@ export function boatHydrodynamics(length, beam) {
   const mass = 1025 * volume;
   // Authored effective coefficients, not a calibrated resistance curve.
   const wettedArea = 0.85 * length * (beam + 2 * HULL_DRAFT);
-  return { length, beam, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea };
+  // Estimated stability and mass distribution, including 20% added roll inertia.
+  const metacentricHeight=beam*.22;
+  const rollInertia=mass*((beam*.38)**2+1.6**2)*1.2;
+  const rollStiffness=mass*9.81*metacentricHeight;
+  const rollDamping=2*.35*Math.sqrt(rollInertia*rollStiffness);
+  return { length, beam, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
+    metacentricHeight,rollInertia,rollStiffness,rollDamping };
+}
+
+// Wind-induced roll about the wave-supported attitude. I*angle'' = Mwind - Mg*GM*sin(angle) - damping*angle'.
+// Keeping this response separate preserves the established short-wave buoyancy filter.
+export function stepBoatHeel(boat, moment, dt) {
+  boat.sailHeel ??= 0;boat.sailHeelVelocity ??= 0;
+  if(!(dt>0)||!Number.isFinite(dt))return;
+  const hydro=boat.hydrodynamics;
+  const steps=Math.ceil(dt*120),h=dt/steps;
+  for(let i=0;i<steps;i++){
+    const free=boat.sailHeelVelocity+(moment-hydro.rollStiffness*Math.sin(boat.sailHeel))/hydro.rollInertia*h;
+    boat.sailHeelVelocity=free/(1+hydro.rollDamping/hydro.rollInertia*h);
+    boat.sailHeel+=boat.sailHeelVelocity*h;
+    // This simulator has no capsize solver; bound extreme out-of-model configurations.
+    const limit=Math.PI/3;
+    if(Math.abs(boat.sailHeel)>limit){
+      boat.sailHeel=Math.sign(boat.sailHeel)*limit;
+      if(boat.sailHeel*boat.sailHeelVelocity>0)boat.sailHeelVelocity=0;
+    }
+  }
+}
+
+export function stepBoatRoll(boat, target, omega, dt, targetVelocity=0) {
+  boat.waveRoll ??= (boat.roll ?? 0)-(boat.sailHeel ?? 0);
+  boat.waveRollVelocity ??= (boat.rollVelocity ?? 0)-(boat.sailHeelVelocity ?? 0);
+  boatSpring(boat,'waveRoll',target,omega,dt,targetVelocity);
+  boat.roll=boat.waveRoll+(boat.sailHeel ?? 0);
+  boat.rollVelocity=boat.waveRollVelocity+(boat.sailHeelVelocity ?? 0);
 }
 
 export function boatForwardSpeed(boat) {
@@ -42,6 +76,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.leewayDistance = 0;
   boat.leewayVelocity ??= 0;
   boat.sailHeel ??= 0;
+  boat.sailHeelVelocity ??= 0;
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
   let hydro = boat.hydrodynamics;
   if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam) {
@@ -54,10 +89,14 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const thrust = hydro.drag * target * Math.abs(target);
   const waveForce = -1025 * 9.81 * hydro.volume * slope;
   const initial = boatForwardSpeed(boat);
+  const waveRoll=(boat.roll ?? boat.sailHeel)-boat.sailHeel;
+  const waveRollVelocity=(boat.rollVelocity ?? boat.sailHeelVelocity)-boat.sailHeelVelocity;
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
-    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways) : null;
+    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways,
+      waveRoll+boat.sailHeel,waveRollVelocity+boat.sailHeelVelocity) : null;
+    stepBoatHeel(boat,loads?.rollMoment ?? 0,h);
     const force = (loads ? loads.forward : thrust) + waveForce;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
@@ -75,8 +114,8 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.surgeVelocity = velocity;
   boat.surgeAcceleration = (velocity - initial) / dt;
   boat.leewayVelocity = sideways; boat.leewayDistance = sidewaysDistance;
-  const loads = sailForces(boat, windSpeed, windDirection, velocity, sideways);
-  boat.sailHeel = sailing ? -Math.max(-0.42, Math.min(0.42, Math.atan2(loads.side * 5, hydro.mass * 9.81 * boat.beam * 0.22))) : 0;
+  sailForces(boat, windSpeed, windDirection, velocity, sideways,
+    waveRoll+boat.sailHeel,waveRollVelocity+boat.sailHeelVelocity);
   return distance;
 }
 

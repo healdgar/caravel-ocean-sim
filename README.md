@@ -198,7 +198,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; application checks exercise sail controls and propulsion switching.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll-energy dissipation and unchanged wave response. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, forecastle and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
@@ -296,13 +296,37 @@ relative to the bow. Apparent wind subtracts the ship's forward and sideways vel
 from the true wind. Lift and drag use dynamic pressure `0.5 * airDensity * windSpeed²`,
 exposed area and authored angle-dependent coefficients. Square sails lose drive near
 headwind; the lateen can work somewhat closer to the wind. Lateral force produces
-bounded leeway against hull/keel resistance and a damped heel. Sailing resistance rises
+bounded leeway against hull/keel resistance and a heeling moment. Sailing resistance rises
 above an authored Froude-number threshold. The basis is
 [relative air velocity](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/relative-velocity/),
 the [aerodynamic force equation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/)
 and [points of sail](https://www.rya.org.uk/training/do-you-know-your-points-of-sail/).
 This is an approximate sailing model, not a measured caravel polar or cloth/fluid simulation.
 It omits sail interference, weather helm, reefing penalties, gust loading and capsizing.
+
+**Wind speed at 10 m** is the reference for a neutral logarithmic marine wind profile:
+`U(z) = U10 * log(z / z0) / log(10 / z0)`, with fixed roughness `z0 = 0.0002 m`.
+Each of the five sails samples wind at its current centre of effort; upper canvas
+therefore experiences stronger wind and greater leverage. Furling changes both area
+and centre height. Each lateral force contributes `-force * lever` about the hull's
+estimated centre of lateral resistance, half a draft below the waterline. Heeling
+shortens projected sail area and leverage; apparent wind also subtracts the sail's
+sideways velocity caused by roll. The profile follows the open-water approximation in
+this [marine windage study](https://www.fws.gov/doiddata/dwh-ar-documents/876/DWH-AR0269040.pdf).
+
+Wind-induced heel follows `I * angle'' = windMoment - mass*g*GM*sin(angle) - damping*angle'`,
+with roll inertia, hydrostatic righting torque and damping, rather than a prescribed
+tilt. It uses 1/120-second substeps and implicit velocity damping. The terms follow the
+standard [ship roll equation](https://doi.org/10.3390/jmse13091750); this caravel's coefficients
+remain authored: `GM = 0.22 * beam`, radius of gyration squared
+`(0.38 * beam)² + 1.6²`, 20% added roll inertia and damping ratio 0.35.
+The panel reports **wind heel** separately from total roll. The established wave-roll
+response is added once to this wind response, preserving its short-chop filtering.
+In Set speed mode, wind torque is disabled and any existing heel settles gradually.
+Wind heel is bounded at 60° because the simulator has no capsize solver. Fixed surface
+roughness, one wind sample per sail, omitted bare-hull/rigging windage, and linear
+superposition with wave roll limit realism; directional shear and atmospheric stability
+are not modeled.
 
 Choose **Set speed** to retain the previous propulsion model. **Calm-water speed**
 sets the thrust that balances resistance at that speed on flat water; waves still
@@ -331,8 +355,9 @@ does not solve diffraction, full depth-dependent pressure, detailed sailing aero
 wave-driven lateral motion, broaching, planing, or slamming.
 
 Speed changes position and therefore the waves encountered. Live pitch, roll, and
-heave remain visible in the panel. Their damped hull-pose model is unchanged; the
-new mass/inertia model applies to surge, with visual wakes, impact spray, and retained deck wash.
+heave remain visible in the panel. The existing wave-following response combines with
+the wind-driven heel; both surge and wind roll have inertia. Wakes, impact spray and
+retained deck wash follow the resulting motion.
 
 Sailing URL options: `view=ship&propulsion=sail&sailFore=1&sailMain=1&sailMizzen=1`.
 Sail targets are fractions from 0 to 1; shared links preserve them and the propulsion mode.

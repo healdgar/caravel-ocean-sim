@@ -1421,7 +1421,7 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
         return write.call(this,buffer,offset,data,...args);
       };
     });
-    await page.goto(`${origin}/?view=ship&windSpeed=7&w=32&h=32`);
+    await page.goto(`${origin}/?view=ship&windSpeed=20&windDir=165&boatHeading=0&w=32&h=32`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail');
     assert.equal(await page.locator('#boat-speed').isVisible(),false);
@@ -1431,9 +1431,11 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
       return check.hull;
     },count);
     let hull=await advance(1);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[1,1,1]);
+    hull=await advance(80);assert.ok(hull[4]<-.01,'wind torque reaches the rendered hull lean');
     await page.getByRole('button',{name:'Lower all',exact:true}).click();
     hull=await advance(2);assert.ok(hull[24]>0&&hull[24]<1,'canvas does not disappear instantly');
     hull=await advance(60);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[0,0,0]);
+    hull=await advance(200);assert.ok(Math.abs(hull[4])<.001,'bare poles settle upright on flat water');
     await page.getByRole('button',{name:'Reef 50%',exact:true}).click();
     hull=await advance(35);assert.deepEqual(hull.slice(24,27),[.5,.5,.5]);
     await page.locator('#boat-propulsion').selectOption('manual');
