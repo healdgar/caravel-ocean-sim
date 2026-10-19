@@ -1,8 +1,8 @@
 # Crew assets
 
-`sailor.glb`: 975,136 bytes, 15,683 triangles, 65 joints; Idle, Walk and Brace
+`sailor.glb`: 975,152 bytes, 15,683 triangles, 65 joints; Idle, Walk and Brace
 clips.
-`sailor-female.glb`: 1,194,228 bytes, 18,408 triangles, 65 joints; the same clips,
+`sailor-female.glb`: 1,194,264 bytes, 18,408 triangles, 65 joints; the same clips,
 retargeted to the distinct female base mesh with tied hair.
 Each GLB contains all geometry, vertex colours, skeleton and animation.
 Runtime instances share each mesh and vary clothing, skin/hair colours, height
@@ -36,6 +36,9 @@ Preparation retains target bone lengths, transfers animation rotations through
 model-space rest poses, and keeps small pelvis/root translations. It removes
 unused clips and textures, bakes each hair export's node transform, adds a belt,
 and authors vertex colours and
-slightly expanded clothing surfaces. The costume is an initial approximation,
+slightly expanded clothing surfaces. The local body adaptation reduces torso,
+upper-arm and thigh bulk and chest/bust projection with bone-weighted radial
+reshaping. Heights, joint locations, hands, feet and animation data remain intact;
+normals are recomputed and clothing/belt thickness reduced to match. The costume is an initial approximation,
 not a documented historical reconstruction. Ground contact is approximate;
 there is no foot IK or cloth simulation.

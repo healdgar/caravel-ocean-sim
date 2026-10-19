@@ -1,8 +1,11 @@
-import { TILLER_PIVOT, HULL_VERTICAL_SCALE, hullDeck } from '../hull.js';
-import { SAIL_PLAN, LATEEN_CORNERS, LATEEN_PIVOT } from '../sailing.js';
+import { TILLER_PIVOT, HULL_VERTICAL_SCALE, hullDeck, vesselDeck } from '../hull.js';
+import { SAIL_PLAN, LATEEN_CORNERS, LATEEN_PIVOT, runningRiggingLines } from '../sailing.js';
+import { RIG_MASTS, mastPoint, standingRiggingLines } from '../rigging.js';
 const SAIL_RIG_INFO = SAIL_PLAN.map(s=>'vec4f('+[s.z,s.top,s.width,s.height].join(',')+')').join(',');
 const SAIL_BELLIES = SAIL_PLAN.map(s=>s.belly).join(',');
 const LATEEN_POINTS = LATEEN_CORNERS.map(p=>'vec3f('+p.join(',')+')').join(',');
+export const RIG_OBSTACLES=[...standingRiggingLines(),...runningRiggingLines(),...RIG_MASTS.map((m,i)=>({a:mastPoint(i,vesselDeck(m.z)),b:mastPoint(i,m.height),r:m.r,r2:m.r*.35,id:0,weights:[0,0]}))];
+const RIG_OBSTACLE_WGSL=RIG_OBSTACLES.map(o=>'RigObstacle(vec4f('+[...o.a,o.r].join(',')+'),vec4f('+[...o.b,o.r2].join(',')+'),vec4f('+[o.id,...o.weights,0].join(',')+'))').join(',');
 // Shared deformation keeps visible geometry and shadow casters coincident.
 export const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
@@ -23,7 +26,7 @@ fn sailRestPoint(id:u32,uv:vec2f)->vec3f {
     info.y-uv.y*info.w+0.28*sin(uv.x*3.14159265)*uv.y*uv.y,
     info.x-belly*sin(uv.x*3.14159265)*sin(uv.y*3.14159265*0.88));
 }
-fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
+fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
   var p=position;var pivot=vec3f(0);var yaw=hull.sailTrim.x;
   // Running ropes encode endpoint attachment in UV.y, independent of sail height.
   let weight=select(1.0,uv.y,anchored);
@@ -36,9 +39,11 @@ fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
       p.y=info.y+(p.y-info.y)*mix(0.025,1.0,deployed);
       p.z=info.x+(p.z-info.x)*mix(0.06,0.12+0.88*fill,deployed);
       if(material==9u){
-        let edge=sin(uv.x*3.14159265)*uv.y;
-        // Loose canvas luffs; loaded canvas has smaller trailing-edge flutter.
-        p.z+=deployed*(0.02+0.16*(1.0-fill))*min(hull.sailWind.z/4.0,1.0)*sin(time*7.0+uv.x*15.0+uv.y*8.0)*edge;
+        let edge=sin(uv.x*3.14159265)*sin(uv.y*3.14159265);
+        let slack=1.0-smoothstep(.2,.85,fill);
+        // Taut canvas holds its camber. Fast luffing belongs to unloaded cloth;
+        // the bolt ropes pin its perimeter, with only slow pressure breathing.
+        p.z+=deployed*min(hull.sailWind.z/4.0,1.0)*edge*(.16*slack*slack*sin(time*7.0+uv.x*15.0+uv.y*8.0)+.003*fill*sin(time*.7));
         p.z+=(1.0-deployed)*0.05*sin(uv.y*62.83185)*sin(uv.x*3.14159265);
       }
     }
@@ -47,16 +52,79 @@ fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
     let corners=array<vec3f,3>(${LATEEN_POINTS});let yard=normalize(corners[1]-corners[0]);
     pivot=vec3f(${LATEEN_PIVOT.join(',')});yaw=hull.sailTrim.y;
     if(material!=10u){
-      let onYard=corners[0]+yard*dot(position-corners[0],yard);
+      var onYard=corners[0]+yard*dot(position-corners[0],yard);
+      // Gather each cloth column to its yard attachment. Nearest projection
+      // mixes columns and turns a curved gathered bundle into wide triangles.
+      if(material==13u){onYard=mix(corners[0],corners[1],uv.x);}
+      if(material==12u && anchored && distance(position,corners[2])<.05){onYard=corners[0];}
       p=mix(onYard,position,mix(0.025,1.0,deployed));
       p.x*=-hull.sailWind.w*(0.12+0.88*fill);
       if(material==13u){
         let belly=27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);
-        p.x+=deployed*(0.02+0.15*(1.0-fill))*min(hull.sailWind.z/4.0,1.0)*sin(time*7.0+uv.x*17.0+uv.y*11.0)*belly;
+        let slack=1.0-smoothstep(.2,.85,fill);
+        p.x+=deployed*min(hull.sailWind.z/4.0,1.0)*belly*(.15*slack*slack*sin(time*7.0+uv.x*17.0+uv.y*11.0)+.003*fill*sin(time*.7));
       }
     }
   }
+  // The lateen yard hangs alongside the mast, rather than through its axis.
+  if(id==3u){p.x-=hull.sailWind.w*.20;}
   return mix(position,pivot+sailRotate(p-pivot,yaw),weight);
+}
+struct RigObstacle {a:vec4f,b:vec4f,motion:vec4f};
+const rigObstacles=array<RigObstacle,${RIG_OBSTACLES.length}>(${RIG_OBSTACLE_WGSL});
+// Small, smooth contact dimples; never pull distant vertices across the rig.
+fn sailClearRig(point:vec3f,uv:vec2f,id:u32)->vec3f {
+  var offset=vec3f(0);
+  let edge=select(min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y)),min(min(uv.x,uv.y),1.0-uv.x-uv.y),id==3u);
+  let free=smoothstep(0.0,.12,edge);
+  for(var i=0u;i<${RIG_OBSTACLES.length}u;i++){
+    let line=rigObstacles[i];var a=line.a.xyz;var b=line.b.xyz;let other=u32(line.motion.x);
+    if(other>0u){
+      a=sailBasePoint(a,vec2f(0,line.motion.y),other,12u,true);
+      b=sailBasePoint(b,vec2f(0,line.motion.z),other,12u,true);
+    }
+    if(any(point<min(a,b)-.23)||any(point>max(a,b)+.23)){continue;}
+    let axis=b-a;let along=clamp(dot(point-a,axis)/max(dot(axis,axis),.00001),0.0,1.0);
+    let q=point-mix(a,b,along);let d=length(q);let radius=mix(line.a.w,line.b.w,along)+.07;
+    // A continuous vector field avoids a sign flip when the cloth crosses a rope.
+    offset+=q/max(radius,.001)*.12*(1.0-smoothstep(0.0,radius,d));
+  }
+  return point+offset*(free*min(1.0,.06/max(length(offset),.00001)));
+}
+// Hide only rope fragments at a cloth contact. This fallback handles crossings
+// without stretching canvas into spikes. Sewn bolt ropes are a separate material.
+// Inverse parameterization is inexpensive and does not run the contact loop.
+fn rigInsideCanvas(point:vec3f)->bool {
+  for(var id=1u;id<=3u;id++){
+    let deployed=mix(.025,1.0,hull.sailSet[id-1u]);var uv=vec2f(0);var material=9u;
+    if(id<3u){
+      let info=array<vec4f,2>(${SAIL_RIG_INFO})[id-1u];let pivot=vec3f(0,info.y,info.x);
+      let p=pivot+sailRotate(point-pivot,-hull.sailTrim.x);
+      uv=vec2f(p.x/info.z+.5,(info.y-p.y)/(info.w*deployed));
+      for(var k=0u;k<3u;k++){
+        uv.x=p.x/(info.z*(1.0-.11*sin(uv.y*3.14159265)+.025*uv.y))+.5;
+        uv.y=(info.y-p.y)/deployed/info.w+.28*sin(uv.x*3.14159265)*uv.y*uv.y/info.w;
+      }
+      if(any(uv<vec2f(0))||any(uv>vec2f(1))){continue;}
+    }else{
+      material=13u;let pivot=vec3f(${LATEEN_PIVOT.join(',')});
+      let p=pivot+sailRotate(point-pivot,-hull.sailTrim.y);
+      let corners=array<vec3f,3>(${LATEEN_POINTS});let a=corners[1].yz-corners[0].yz;
+      let b=(corners[2].yz-corners[0].yz)*deployed;let q=p.yz-corners[0].yz;
+      let det=a.x*b.y-a.y*b.x;
+      uv=vec2f(q.x*b.y-q.y*b.x,a.x*q.y-a.y*q.x)/det;
+      if(any(uv<vec2f(0))||uv.x+uv.y>1.0){continue;}
+    }
+    let cloth=sailBasePoint(sailRestPoint(id,uv),uv,id,material,false);
+    // Includes the bounded 6 cm deflection and interpolation between mesh samples.
+    if(distance(point,cloth)<.14){return true;}
+  }
+  return false;
+}
+fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
+  let p=sailBasePoint(position,uv,id,material,anchored);
+  if(material==9u || material==13u){return sailClearRig(p,uv,id);}
+  return p;
 }
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
 fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
@@ -86,6 +154,11 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
   let tag=u32(round(fract(material)*16.0));let id=tag&7u;let base=u32(material);
   if(id>0u && id<=3u){
     local=sailPoint(position,uv,id,base,(tag&8u)!=0u);
+    if(base==19u){
+      // Sewn bolt ropes share their exact cloth UV, including collision offsets.
+      let rest=sailRestPoint(id,uv);let cloth=select(9u,13u,id==3u);
+      local=sailPoint(rest,uv,id,cloth,false)+sailRotate(position-rest,select(hull.sailTrim.x,hull.sailTrim.y,id==3u));
+    }
     if(base==9u || base==13u){
       let du=vec2f(0.0005,0);let dv=vec2f(0,0.0005);
       let tangent=sailPoint(sailRestPoint(id,uv+du),uv+du,id,base,false)-sailPoint(sailRestPoint(id,uv-du),uv-du,id,base,false);

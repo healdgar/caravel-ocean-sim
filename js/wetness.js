@@ -8,7 +8,7 @@ export function createWetnessData(mesh,crewCount=12) {
   const points=[0,0,0,0,0,0,0,0],lookup=new Uint32Array(mesh.length/9),seen=new Map();
   for(let i=0;i<mesh.length;i+=9){
     const material=mesh[i+6],base=Math.floor(material);
-    const kind=[2,12].includes(base)?1:[9,13].includes(base)?2:[0,1,5,6,7,10,14,15,16,17,18].includes(base)?0:-1;
+    const kind=[2,12,19].includes(base)?1:[9,13].includes(base)?2:[0,1,5,6,7,10,14,15,16,17,18].includes(base)?0:-1;
     if(kind<0)continue;
     const key=[material,...[0,1,2].map(j=>Math.round(mesh[i+j]/.15)),(Math.round(material%1*16)&8)?mesh[i+8]:0].join('/');
     let probe=seen.get(key);

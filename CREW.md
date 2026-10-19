@@ -27,6 +27,10 @@ teleporting workers or resurrecting old commands. Dangerous wind/roll pauses wor
 and retains aloft grips. General navigation/reservations, fatigue, anchor handling,
 yard crawling, cannon operation and autonomous steering remain future work.
 
+The prepared male and female GLBs use modestly slimmer bodies and clothing,
+with unchanged skeletons, heights and animation clips. See `assets/crew/README.md`
+for the reproducible preparation and provenance.
+
 ## Complement
 
 The current complement is 12 visible people, including the captain: captain,

@@ -67,7 +67,7 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
       {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
       {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
     ]}]},
-    ...(cloth?{fragment:{module,entryPoint:'canvasFS',targets:[{format:'rgba16float'}]}}:{}),
+    fragment:{module,entryPoint:cloth?'canvasFS':'solidFS',targets:cloth?[{format:'rgba16float'}]:[]},
     primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
   })));

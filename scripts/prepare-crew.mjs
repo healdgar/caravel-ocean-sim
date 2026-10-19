@@ -50,6 +50,46 @@ function accessor(values,type,componentType=5126){
   g.accessors.push(desc);return g.accessors.length-1;
 }
 const skin=[.36,.18,.10],linen=[.55,.47,.31],trousers=[.095,.12,.15],leather=[.055,.025,.012],hairColor=[.045,.019,.009];
+targetPlayer.sample(null,0);
+// Reduce the superhero bulk around existing bone axes, preserving joint lengths,
+// hands, head and feet. The same weights still drive every animation and IK grip.
+const limbEnds={upperarm:'lowerarm',lowerarm:'hand',thigh:'calf',calf:'foot'};
+const slimAxes=targetPlayer.joints.map(node=>{
+  const name=targetPlayer.names[node],start=Array.from(targetPlayer.world[node].subarray(12,15));
+  const match=/^(upperarm|lowerarm|thigh|calf)_([lr])$/.exec(name);
+  if(match){
+    const endNode=targetPlayer.names.indexOf(limbEnds[match[1]]+'_'+match[2]);
+    const end=Array.from(targetPlayer.world[endNode].subarray(12,15));
+    return {start,axis:end.map((v,i)=>v-start[i]),scale:{upperarm:.86,lowerarm:.93,thigh:.94,calf:.96}[match[1]]};
+  }
+  if(/^(spine_|pelvis|clavicle)/.test(name))return {start,axis:[0,1,0],scale:.91,chest:/^spine_0[23]$/.test(name)};
+  return null;
+});
+function slimBody(pos,joints,weights){
+  for(let i=0;i<pos.length/3;i++){
+    const original=Array.from(pos.subarray(i*3,i*3+3)),delta=[0,0,0];
+    for(let k=0;k<4;k++){
+      const bone=slimAxes[joints[i*4+k]],weight=weights[i*4+k];if(!bone||weight===0)continue;
+      const {start,axis,scale,chest}=bone,q=original.map((v,j)=>v-start[j]);
+      const along=q.reduce((s,v,j)=>s+v*axis[j],0)/axis.reduce((s,v)=>s+v*v,0);
+      for(let j=0;j<3;j++)delta[j]+=(q[j]-axis[j]*along)*(scale-1)*weight;
+      // Flatten the pronounced front-chest contour without compressing the back.
+      if(chest)delta[2]-=Math.max(0,q[2])*(female?.22:.12)*weight;
+    }
+    for(let j=0;j<3;j++)pos[i*3+j]+=delta[j];
+  }
+}
+function surfaceNormals(pos,indices,fallback){
+  const normals=new Float32Array(pos.length);
+  for(let i=0;i<indices.length;i+=3){
+    const [a,b,c]=Array.from(indices.subarray(i,i+3),x=>x*3);
+    const u=[0,1,2].map(k=>pos[b+k]-pos[a+k]),v=[0,1,2].map(k=>pos[c+k]-pos[a+k]);
+    const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+    for(const vertex of [a,b,c])for(let k=0;k<3;k++)normals[vertex+k]+=n[k];
+  }
+  for(let i=0;i<normals.length;i+=3){const length=Math.hypot(...normals.subarray(i,i+3));for(let k=0;k<3;k++)normals[i+k]=length>1e-10?normals[i+k]/length:fallback[i+k];}
+  return normals;
+}
 // Simple authored tunic, breeches and shoes. These colours are linear, not sRGB.
 for(let mi=0;mi<g.meshes.length;mi++)for(const p of g.meshes[mi].primitives){
   const old=body.json.meshes[mi].primitives[0],pos=gltfAccessor(body,old.attributes.POSITION),norm=gltfAccessor(body,old.attributes.NORMAL);
@@ -59,13 +99,15 @@ for(let mi=0;mi<g.meshes.length;mi++)for(const p of g.meshes[mi].primitives){
     if(mi===0)color=hairColor;
     else if(mi===1){const cx=Math.abs(x)-.029;const iris=cx*cx+(y-(female?1.656:1.699))**2<.00006 && z>(female?.069:.074);color=iris?[.024,.013,.006]:[.65,.60,.49];}
     else if(y<.23){color=leather;inflate=.012;}
-    else if(y<(female?.99:1.015)){color=trousers;inflate=.018;}
-    else if((y<(female?1.49:1.565) || Math.abs(x)>.12) && Math.abs(x)<(female?.63:.69)){color=linen;inflate=.032;}
+    else if(y<(female?.99:1.015)){color=trousers;inflate=.012;}
+    else if((y<(female?1.49:1.565) || Math.abs(x)>.12) && Math.abs(x)<(female?.63:.69)){color=linen;inflate=.012;}
     colors.set(color,i);for(let k=0;k<3;k++)pos[i+k]+=norm[i+k]*inflate;
   }
-  p.attributes={POSITION:accessor(pos,'VEC3'),NORMAL:accessor(norm,'VEC3'),COLOR_0:accessor(colors,'VEC3'),
-    JOINTS_0:accessor(gltfAccessor(body,old.attributes.JOINTS_0),'VEC4',5123),WEIGHTS_0:accessor(gltfAccessor(body,old.attributes.WEIGHTS_0),'VEC4')};
-  p.indices=accessor(gltfAccessor(body,old.indices),'SCALAR',5125);p.material=0;
+  const joints=gltfAccessor(body,old.attributes.JOINTS_0),weights=gltfAccessor(body,old.attributes.WEIGHTS_0),indices=gltfAccessor(body,old.indices);
+  if(mi===2)slimBody(pos,joints,weights);
+  p.attributes={POSITION:accessor(pos,'VEC3'),NORMAL:accessor(mi===2?surfaceNormals(pos,indices,norm):norm,'VEC3'),COLOR_0:accessor(colors,'VEC3'),
+    JOINTS_0:accessor(joints,'VEC4',5123),WEIGHTS_0:accessor(weights,'VEC4')};
+  p.indices=accessor(indices,'SCALAR',5125);p.material=0;
 }
 g.skins[0].inverseBindMatrices=accessor(gltfAccessor(body,body.json.skins[0].inverseBindMatrices),'MAT4');
 const jointIndex=name=>g.skins[0].joints.findIndex(n=>g.nodes[n].name===name);
@@ -87,7 +129,7 @@ for(let i=0;i<hairPos.length/3;i++){hc.push(...hairColor);hj.push(jointIndex('He
 addMesh(female?'Tied hair':'Parted hair',hairPos,hairNorm,hc,hj,hw,gltfAccessor(hair,hp.indices));
 // A belt finishes the short linen shirt; no rigid skirt that clips raised legs.
 for(const [name,rings,color] of [
-  ['Leather belt',female?[[.97,.168,.143],[1.01,.168,.143]]:[[.995,.205,.16],[1.035,.205,.16]],leather],
+  ['Leather belt',female?[[.97,.151,.129],[1.01,.151,.129]]:[[.995,.184,.144],[1.035,.184,.144]],leather],
 ]){
   const pos=[],normal=[],col=[],joint=[],weight=[],idx=[],N=32;
   for(const [y,rx,rz] of rings)for(let i=0;i<N;i++){
@@ -133,7 +175,7 @@ for(const [sourceName,name] of clips){
   g.animations.push(clip);
 }
 g.asset={version:'2.0',generator:'waterworld/scripts/prepare-crew.mjs',copyright:'Quaternius and Gonzalo Furnier (CC0); sailor adaptation CC0'};
-g.extras={sourceRevision:revision,clips:clips.map(c=>c[0]),note:'Authored clothing and retargeted animation; no historical costume calibration'};
+g.extras={sourceRevision:revision,clips:clips.map(c=>c[0]),note:'Slimmed body around preserved bones, authored clothing and retargeted animation; no historical costume calibration'};
 g.buffers=[{byteLength}];const bin=Buffer.concat(buffers);
 let json=Buffer.from(JSON.stringify(g));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
 const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67,0);header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+bin.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);

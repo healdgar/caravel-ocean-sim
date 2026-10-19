@@ -29,6 +29,7 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
   @location(6) wet:vec2f,
+  @location(7) rigLocal:vec3f,
 };
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let rig=rigVertex(position,normal,material,uv);
@@ -37,7 +38,7 @@ struct BoatVertex {
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
   o.normal = normalize(rotateHull(rig.normal / rig.scale));
-  o.local = position;
+  o.local = position;o.rigLocal=rig.position;
   o.material = u32(material); o.normalLocal = normal; o.uv=uv;o.wet=moisture[wetLookup[index]];
   return o;
 }
@@ -68,6 +69,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   return mix(env,filteredOcean,confidence*0.55);
 }
 @fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  if(in.material==12u && rigInsideCanvas(in.rigLocal)){discard;}
   let p = in.local;
   var wet=clamp(in.wet,vec2f(0),vec2f(1));
   if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}
@@ -104,7 +106,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
   if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= 0.8; rough = 0.67; }
   let ropeAA=fwidth(p.x+p.y+p.z);
-  if(in.material == 2u || in.material == 12u) {
+  if(in.material == 2u || in.material == 12u || in.material==19u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
     albedo = vec3f(0.28,0.20,0.11) * (0.8+0.2*twist); rough=0.87;
   }
@@ -129,7 +131,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   if(in.material == 16u) { albedo=timber*vec3f(0.13,0.12,0.10); rough=0.85; }
   if(in.material == 17u) { albedo=timber*vec3f(1.3,1.02,0.62); rough=0.62; }
-  if(in.material==2u || in.material==12u){
+  if(in.material==2u || in.material==12u || in.material==19u){
     albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);
   }else if(in.material==9u || in.material==13u){
     albedo*=mix(1.0,.72,wet.x);rough=mix(.95,.84,wet.x);

@@ -29,3 +29,24 @@ export function tacklePoint(mast,height){
   const f=Math.max(0,Math.min(1,(height-bottom[1])/(top[1]-bottom[1])));
   return bottom.map((v,i)=>v+(top[i]-v)*f);
 }
+
+// Shared centre lines for visible standing rigging and sail clearance.
+export function standingRiggingLines(){
+  const lines=[],add=(a,b,r,r2=r,sides=10)=>lines.push({a,b,r,r2,sides,id:0,weights:[0,0]});
+  for(let mast=0;mast<RIG_MASTS.length;mast++)for(const side of [-1,1]){
+    const {head,feet}=shroudGeometry(mast,side);
+    for(const foot of feet)add(foot,head,.022,.016);
+    add(feet[0].map((v,i)=>(v+feet[1][i])*.5),head,.024,.021);
+  }
+  for(const t of SAIL_TACKLES){
+    const a=tacklePoint(t.mast,-10),b=tacklePoint(t.mast,30);
+    add(a,b,.012,.012,8);add([a[0]-.035,a[1],a[2]],[b[0]-.035,b[1],b[2]],.012,.012,8);
+  }
+  for(const [mast,target,r] of [[0,[0,1.9,-8.1],.028],[1,[0,vesselDeck(-5.3)+.3,-5.3],.036],[2,[0,5.9,-.2],.026]])
+    add(mastPoint(mast,RIG_MASTS[mast].height*.96),target,r,r*.8,12);
+  for(const side of [-1,1])for(const [mast,z] of [[0,-1.7],[1,2.3],[2,5.2]]){
+    const head=mastPoint(mast,RIG_MASTS[mast].height*.94);head[0]=side*.12;
+    add(head,[side*(deckHalfWidth(z)-.04),vesselDeck(z)+.35,z],.024);
+  }
+  return lines;
+}

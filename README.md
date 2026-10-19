@@ -121,6 +121,8 @@ Hiding characters or the ship does not stop their simulation or sail orders.
 Hulls below 10.5 m long or 3.2 m wide hide the company because these authored
 stations no longer provide sufficient clearance.
 
+Both crew meshes have slimmer torsos and limbs, reduced chest/bust projection, and
+less clothing bulk. Their heights, joint lengths, animations and hand targets are preserved.
 Both embedded GLBs total 2.17 MB. Each has 65 joints and Idle, Walk and Brace
 clips; the male model has 15,683 triangles, the female 18,408. Twelve sailors use
 two instanced draws in the ship pass and two in the existing solid shadow pass,
@@ -196,7 +198,7 @@ Surface film fades within seconds; absorbed moisture dries over minutes, faster
 in wind. Rope dries slower than wood, canvas faster. These are visual rates:
 absorbed water does not yet change sail weight, drape, strength or ship stability.
 Spray exposure uses a transient 24 × 32 × 48 grid around the vessel, populated by
-the existing impact sheets, droplets and crest plumes. Around 8,900 material
+the existing impact sheets, droplets and crest plumes. Around 9,000 material
 probes interpolate wetness across the mesh; sea contact uses a 32 × 32 cache of
 the displaced six-cascade ocean. The extra GPU storage is below 1 MB and adds no
 draw passes. Fine spray occlusion and detailed cloth/skin absorption are
@@ -286,7 +288,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll-energy dissipation and unchanged wave response. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll-energy dissipation and unchanged wave response. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; loaded versus slack motion, bounded contact deflection, sewn-rope attachment and masked intersections across both tacks and extreme trim; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
@@ -394,8 +396,16 @@ about 5.6 seconds of attended work from fully set to fully furled, plus travel
 and climbing time (roughly a minute for the first complete fore/main operation). The percentage readouts show actual
 canvas while the sliders show the requested amount. Square sails gather at their yards;
 the lateen gathers along its diagonal yard. Yards brace and the mizzen changes tack
-automatically, with a short lag. Loaded sails fill; unloaded canvas luffs. Visible
-geometry, lighting normals, rigging and shadow casters share the deformation.
+automatically, with a short lag. Loaded sails hold their camber with only slow, small
+pressure motion; rapid luffing fades with wind loading and is strongest in slack or
+poorly trimmed canvas. Sewn edge ropes follow the exact cloth deformation, including
+furling. The lateen yard hangs beside the mizzen mast.
+
+Rig contacts produce smooth deflections capped at 6 cm in design coordinates
+(10 cm on the default vessel). Remaining rope/cloth intersections use a narrow
+fragment mask in both the visible and shadow passes, rather than pulling distant
+cloth vertices into spikes. This is a bounded visual approximation, not a cloth
+collision solver. Visible geometry, lighting normals and shadow casters share the deformation.
 Lowering sails removes drive gradually; momentum and waves keep moving the vessel.
 
 The sail readout reports the point of sail, apparent wind speed and its direction

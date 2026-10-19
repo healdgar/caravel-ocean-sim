@@ -1411,7 +1411,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
     for(const sample of result.samples){assert.equal(sample.finite,true);assert.ok(sample.normalError<.001);assert.ok(sample.fixedError<1e-6);assert.ok(sample.yardHeightError<1e-6);}
     for(let mast=0;mast<3;mast++){
       assert.ok(reef.area[mast]>full.area[mast]*.3&&reef.area[mast]<full.area[mast]*.65,'reef reduces exposed canvas');
-      assert.ok(bare.area[mast]<full.area[mast]*.12,'bare poles retain only gathered cloth');
+      assert.ok(bare.area[mast]<full.area[mast]*.12,`bare poles retain gathered cloth: mast ${mast}, areas ${bare.area[mast]} / ${full.area[mast]}`);
       assert.ok(tack.motion[mast]>.5,'wind change rotates each sail group');
     }
     assert.ok(fore.motion[0]>2);assert.equal(fore.motion[1],0);assert.equal(fore.motion[2],0);
@@ -1752,5 +1752,93 @@ test('wet materials visibly shade the ship and crew and return to their dry appe
     assert.ok(rms(dry,wet)>1,'material state changes visible shading');
     assert.ok(rms(dry,restored)<rms(dry,wet)*.05,`dry state restores material response: restored ${rms(dry,restored)}, wet ${rms(dry,wet)}`);
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
+test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounded and sewn ropes stay attached', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__cloth_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(`${origin}/__cloth_test`);
+    const result=await page.evaluate(async()=>{
+      const {VESSEL_RIG,RIG_OBSTACLES}=await import('/js/wgsl/vessel.js');
+      const {createCaravelMesh}=await import('/js/caravel.js');
+      const raw=createCaravelMesh(),points=[];
+      for(let i=0;i<raw.length;i+=27)if([9,13,19].includes(Math.floor(raw[i+6])))points.push(...raw.subarray(i,i+27));
+      const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
+      const hull=buffer(144,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
+      const bytes=(n+RIG_OBSTACLES.length)*32;
+      const output=buffer(bytes,B.STORAGE|B.COPY_SRC),read=buffer(bytes,B.MAP_READ|B.COPY_DST);
+      device.queue.writeBuffer(input,0,new Float32Array(points));
+      const module=device.createShaderModule({code:VESSEL_RIG+`
+        @group(0) @binding(0) var<uniform> hull:Hull;
+        @group(0) @binding(1) var<storage,read> points:array<f32>;
+        @group(0) @binding(2) var<storage,read_write> result:array<vec4f>;
+        @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) gid:vec3u){
+          let i=gid.x*9u;if(i+8u>=arrayLength(&points)){return;}
+          let p=vec3f(points[i],points[i+1u],points[i+2u]);let material=points[i+6u];let uv=vec2f(points[i+7u],points[i+8u]);
+          let v=rigVertex(p,vec3f(points[i+3u],points[i+4u],points[i+5u]),material,uv);
+          result[gid.x*2u]=vec4f(v.position,1);
+          let id=u32(round(fract(material)*16.0));
+          var centre=sailBasePoint(p,uv,id,u32(material),false);
+          if(u32(material)==19u){centre=sailPoint(sailRestPoint(id,uv),uv,id,select(9u,13u,id==3u),false);}
+          result[gid.x*2u+1u]=vec4f(centre,1);
+          if(gid.x<${RIG_OBSTACLES.length}u){
+            let line=rigObstacles[gid.x];let other=u32(line.motion.x);var a=line.a.xyz;var b=line.b.xyz;
+            if(other>0u){a=sailBasePoint(a,vec2f(0,line.motion.y),other,12u,true);b=sailBasePoint(b,vec2f(0,line.motion.z),other,12u,true);}
+            result[(${n}u+gid.x)*2u]=vec4f(a,1);result[(${n}u+gid.x)*2u+1u]=vec4f(b,1);
+          }
+        }
+        @compute @workgroup_size(64) fn mask(@builtin(global_invocation_id) gid:vec3u){
+          let i=gid.x*9u;if(i+2u>=arrayLength(&points)){return;}
+          result[gid.x*2u]=vec4f(select(0.0,1.0,rigInsideCanvas(vec3f(points[i],points[i+1u],points[i+2u]))),0,0,0);
+        }`});
+      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
+      const maskPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'mask'}});
+      const maskGroup=device.createBindGroup({layout:maskPipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
+      const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
+      const h=new Float32Array(36);h[12]=6;h[13]=20;h[34]=12;h[35]=1;
+      const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],sub=(a,b)=>a.map((x,i)=>x-b[i]),dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+      function hit(a,b,c,line){
+        const e1=sub(b,a),e2=sub(c,a),dir=sub(line.b,line.a),p=cross(dir,e2),det=dot(e1,p);
+        if(Math.abs(det)<1e-8)return false;
+        const t=sub(line.a,a),u=dot(t,p)/det;if(u<1e-5||u>1-1e-5)return false;
+        const q=cross(t,e1),v=dot(dir,q)/det;if(v<1e-5||u+v>1-1e-5)return false;
+        const distance=dot(e2,q)/det;return distance>.001&&distance<.999?line.a.map((x,i)=>x+distance*dir[i]):null;
+      }
+      const captures=[],collisions=[],sewn=[],deflections=[];
+      for(const [fill,yaw,time,set,tack=1] of [[1,0,0,1],[1,0,.2,1],[0,0,0,1],[0,0,.2,1],[1,.6,1,1],[1,-.6,1,1],[.6,.6,1,.5],[0,0,1,0],[1,0,0,1,-1],[1,.6,2,1,-1],[0,-.6,2,1,-1],[1,1.047,1,1],[1,-1.047,1,1]]){
+        h[35]=tack;h.set([set,set,set],24);h[28]=yaw;h[29]=-yaw;h[30]=h[31]=fill;h[19]=time;device.queue.writeBuffer(hull,0,h);
+        const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.dispatchWorkgroups(Math.ceil(n/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const values=new Float32Array(read.getMappedRange()).slice();read.unmap();captures.push(values);
+        const hits={},contacts=[];let ropeError=0,deflection=0;
+        const lines=RIG_OBSTACLES.map((line,j)=>({...line,a:Array.from(values.subarray((n+j)*8,(n+j)*8+3)),b:Array.from(values.subarray((n+j)*8+4,(n+j)*8+7))}));
+        for(let i=0;i<n;i++){
+          const base=Math.floor(points[i*9+6]);
+          if(base===19){const distance=Math.hypot(values[i*8]-values[i*8+4],values[i*8+1]-values[i*8+5],values[i*8+2]-values[i*8+6]);ropeError=Math.max(ropeError,Math.max(0,distance-.01501));}
+          if(base!==19)deflection=Math.max(deflection,Math.hypot(...[0,1,2].map(k=>values[i*8+k]-values[i*8+4+k])));
+          if(base===19||i%3)continue;
+          const tri=[0,1,2].map(j=>Array.from(values.subarray((i+j)*8,(i+j)*8+3)));
+          for(const [j,line] of lines.entries()){const point=hit(...tri,line);if(point)contacts.push({point,j});}
+        }
+        contacts.push({point:[0,-1,0],j:-1},{point:[8,8,8],j:-1});
+        if(contacts.length){
+          const probes=new Float32Array(contacts.length*9);contacts.forEach(({point},i)=>probes.set(point,i*9));device.queue.writeBuffer(input,0,probes);
+          const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(maskPipe);cp.setBindGroup(0,maskGroup);cp.dispatchWorkgroups(Math.ceil(contacts.length/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+          const masks=new Float32Array(read.getMappedRange());contacts.forEach(({j},i)=>{if(j===-1?masks[i*8]>.5:(j>=43||masks[i*8]<.5))hits[j]=(hits[j]??0)+1;});read.unmap();device.queue.writeBuffer(input,0,new Float32Array(points));
+        }
+        collisions.push(hits);sewn.push(ropeError);deflections.push(deflection);
+      }
+      const movement=(a,b)=>{
+        let max=0;for(let i=0;i<n;i++)if(Math.floor(points[i*9+6])!==19)max=Math.max(max,Math.hypot(...[0,1,2].map(k=>captures[a][i*8+k]-captures[b][i*8+k])));return max;
+      };
+      const loaded=movement(0,1),slack=movement(2,3);device.destroy();return {errors,loaded,slack,collisions,sewn,deflections};
+    });
+    assert.deepEqual(result.errors,[]);
+    assert.ok(result.loaded<.01,`loaded motion ${result.loaded}`);assert.ok(result.slack>.05,`slack motion ${result.slack}`);
+    assert.ok(result.sewn.every(e=>e<1e-5),`bolt-rope attachment error: ${result.sewn}`);
+    assert.ok(result.deflections.every(d=>d<=.06001),`contact cannot stretch cloth into spikes: ${result.deflections}`);
+    assert.deepEqual(result.collisions,result.collisions.map(()=>({})),'rope crossings must be masked; masts must clear canvas');
   }finally{await page.close();}
 });

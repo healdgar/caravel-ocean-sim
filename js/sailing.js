@@ -1,14 +1,24 @@
-import { HULL_DRAFT, HULL_VERTICAL_SCALE } from './hull.js';
+import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck } from './hull.js';
 import { mastPoint } from './rigging.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
 // World wind is a velocity toward (cos(direction), sin(direction)) in X/Z.
 export const SAIL_PLAN = [
-  { id: 1, mast: 0, z: mastPoint(0,6.4)[2], top: 6.4, width: 4.6, height: 3.8, belly: 0.65 },
-  { id: 2, mast: 1, z: mastPoint(1,8.0)[2], top: 8.0, width: 6.3, height: 5.4, belly: 0.9 },
+  { id: 1, mast: 0, z: mastPoint(0,6.4)[2]-.16, top: 6.4, width: 4.6, height: 3.8, belly: 0.65 },
+  { id: 2, mast: 1, z: mastPoint(1,8.0)[2]-.20, top: 8.0, width: 6.3, height: 5.4, belly: 0.9 },
 ];
 export const LATEEN_CORNERS = [[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]];
 export const LATEEN_PIVOT = mastPoint(2,4.3);
+export function runningRiggingLines(){
+  const lines=[];
+  for(const {id,z,top,width:w,height:h} of SAIL_PLAN)for(const side of [-1,1]){
+    lines.push({a:[side*w*.5,top-h,z],b:[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],r:.013,r2:.013,sides:8,id,weights:[1,0]},
+      {a:[side*w*.56,top,z],b:[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],r:.011,r2:.011,sides:8,id,weights:[1,0]});
+  }
+  lines.push({a:LATEEN_CORNERS[2],b:[1.1,vesselDeck(4)+.3,5.5],r:.016,r2:.016,sides:8,id:3,weights:[1,0]},
+    {a:mastPoint(2,6),b:LATEEN_CORNERS[0],r:.014,r2:.014,sides:8,id:3,weights:[0,1]});
+  return lines;
+}
 export const SAIL_KEYS = ['sailFore', 'sailMain', 'sailMizzen'];
 const squareAreas = [0, 0];
 for (const sail of SAIL_PLAN) squareAreas[sail.mast] += sail.width * sail.height * 0.95;
