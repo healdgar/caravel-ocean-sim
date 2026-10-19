@@ -79,6 +79,62 @@ function slimBody(pos,joints,weights){
     for(let j=0;j<3;j++)pos[i*3+j]+=delta[j];
   }
 }
+const clamp01=x=>Math.max(0,Math.min(1,x));
+const smooth=(lo,hi,x)=>{const t=clamp01((x-lo)/(hi-lo));return t*t*(3-2*t);};
+// Shape the clothed surface as fabric over the body, rather than a coloured
+// muscle suit. Preserve topology, skin weights, joint positions and every clip.
+function drapeWorkwear(pos,colors,joints,weights){
+  const waist=female?.99:1.015,shoulder=female?1.47:1.53;
+  for(let i=0;i<pos.length/3;i++){
+    const shirt=Math.abs(colors[i*3]-linen[0])<.001,pants=Math.abs(colors[i*3]-trousers[0])<.001;
+    if(!shirt&&!pants)continue;
+    const p=Array.from(pos.subarray(i*3,i*3+3));let torso=0;
+    const delta=[0,0,0];
+    for(let k=0;k<4;k++){
+      const node=targetPlayer.joints[joints[i*4+k]],name=targetPlayer.names[node],w=weights[i*4+k];
+      if(/^(spine_|pelvis|clavicle)/.test(name))torso+=w;
+      const match=/^(upperarm|lowerarm|thigh|calf)_([lr])$/.exec(name);if(!match||w===0)continue;
+      const part=match[1],arm=part.includes('arm');if(shirt!==arm)continue;
+      const bone=slimAxes[joints[i*4+k]],q=p.map((v,j)=>v-bone.start[j]),length=Math.hypot(...bone.axis);
+      const t=q.reduce((s,v,j)=>s+v*bone.axis[j],0)/(length*length);
+      const radial=q.map((v,j)=>v-bone.axis[j]*t),radius=Math.hypot(...radial);if(radius<.001)continue;
+      const ends={upperarm:[.067,.055],lowerarm:[.054,.039],thigh:[.106,.076],calf:[.074,.057]}[part];
+      const fit=(ends[0]+(ends[1]-ends[0])*clamp01(t))*(female?.91:1);
+      const blend=arm?.9:smooth(.04,.28,t)*.75;
+      const change=Math.max(-.012,Math.min(.018,fit-radius))*w*blend;
+      for(let j=0;j<3;j++)delta[j]+=radial[j]/radius*change;
+    }
+    if(shirt&&torso>.01){
+      const t=clamp01((p[1]-waist)/(shoulder-waist));
+      const rx=(female?.148:.171)+(female?.032:.038)*smooth(.15,.85,t);
+      const rz=(female?.112:.126)+.014*smooth(.25,.8,t),center=-.027;
+      const angle=Math.atan2(p[2]-center,p[0]),c=Math.cos(angle),s=Math.sin(angle),power=2.5;
+      const radius=(Math.abs(c/rx)**power+Math.abs(s/rz)**power)**(-1/power);
+      const fold=1+.012*Math.cos(angle*9+t*2.5)*Math.sin(Math.PI*t);
+      const blend=torso*(1-smooth(shoulder-.07,shoulder+.025,p[1]));
+      delta[0]+=(c*radius*fold-p[0])*blend;
+      delta[2]+=(center+s*radius*fold-p[2])*blend;
+    }
+    if(pants){
+      // Breeches bridge the seat and groin instead of reproducing the base
+      // body's cleft or genital sculpt. Join the waist to one cloth envelope,
+      // blending back into separate trouser legs below the pelvis.
+      const crotch=female?.855:.885,center=-.027;
+      const upper=smooth(crotch-.015,crotch+.045,p[1]);
+      const t=clamp01((p[1]-crotch)/(waist-crotch));
+      const waistRadius=female?.148:.171;
+      const rx=(female?.181:.199)+(waistRadius-(female?.181:.199))*smooth(.5,1,t);
+      const rz=p[2]>=center
+        ?.05+((female?.112:.126)-.05)*smooth(0,.85,t)
+        :(female?.112:.126)+.017*Math.sin(Math.PI*t);
+      const angle=Math.atan2(p[2]-center,p[0]),c=Math.cos(angle),s=Math.sin(angle),power=2.5;
+      const radius=(Math.abs(c/rx)**power+Math.abs(s/rz)**power)**(-1/power);
+      delta[0]+=(c*radius-p[0])*upper;
+      delta[2]+=(center+s*radius-p[2])*upper;
+    }
+    for(let j=0;j<3;j++)pos[i*3+j]+=delta[j];
+  }
+}
 function surfaceNormals(pos,indices,fallback){
   const normals=new Float32Array(pos.length);
   for(let i=0;i<indices.length;i+=3){
@@ -87,10 +143,19 @@ function surfaceNormals(pos,indices,fallback){
     const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
     for(const vertex of [a,b,c])for(let k=0;k<3;k++)normals[vertex+k]+=n[k];
   }
+  // Mirrored source vertices share positions but not indices. Average their
+  // normals so a hard centre seam cannot recreate a cleft through lighting.
+  const seams=new Map();
+  for(let i=0;i<pos.length;i+=3){const key=[0,1,2].map(k=>Math.round(pos[i+k]*1e5)).join(',');if(!seams.has(key))seams.set(key,[]);seams.get(key).push(i);}
+  for(const vertices of seams.values())if(vertices.length>1){
+    const sum=[0,0,0];for(const i of vertices)for(let k=0;k<3;k++)sum[k]+=normals[i+k];
+    for(const i of vertices)for(let k=0;k<3;k++)normals[i+k]=sum[k];
+  }
   for(let i=0;i<normals.length;i+=3){const length=Math.hypot(...normals.subarray(i,i+3));for(let k=0;k<3;k++)normals[i+k]=length>1e-10?normals[i+k]/length:fallback[i+k];}
   return normals;
 }
 // Simple authored tunic, breeches and shoes. These colours are linear, not sRGB.
+let clothedBody;
 for(let mi=0;mi<g.meshes.length;mi++)for(const p of g.meshes[mi].primitives){
   const old=body.json.meshes[mi].primitives[0],pos=gltfAccessor(body,old.attributes.POSITION),norm=gltfAccessor(body,old.attributes.NORMAL);
   const colors=new Float32Array(pos.length);
@@ -100,11 +165,11 @@ for(let mi=0;mi<g.meshes.length;mi++)for(const p of g.meshes[mi].primitives){
     else if(mi===1){const cx=Math.abs(x)-.029;const iris=cx*cx+(y-(female?1.656:1.699))**2<.00006 && z>(female?.069:.074);color=iris?[.024,.013,.006]:[.65,.60,.49];}
     else if(y<.23){color=leather;inflate=.012;}
     else if(y<(female?.99:1.015)){color=trousers;inflate=.012;}
-    else if((y<(female?1.49:1.565) || Math.abs(x)>.12) && Math.abs(x)<(female?.63:.69)){color=linen;inflate=.012;}
+    else if((y<(female?1.515:1.565) || Math.abs(x)>.12) && Math.abs(x)<(female?.63:.69)){color=linen;inflate=.012;}
     colors.set(color,i);for(let k=0;k<3;k++)pos[i+k]+=norm[i+k]*inflate;
   }
   const joints=gltfAccessor(body,old.attributes.JOINTS_0),weights=gltfAccessor(body,old.attributes.WEIGHTS_0),indices=gltfAccessor(body,old.indices);
-  if(mi===2)slimBody(pos,joints,weights);
+  if(mi===2){slimBody(pos,joints,weights);drapeWorkwear(pos,colors,joints,weights);clothedBody={pos,joints,weights};}
   p.attributes={POSITION:accessor(pos,'VEC3'),NORMAL:accessor(mi===2?surfaceNormals(pos,indices,norm):norm,'VEC3'),COLOR_0:accessor(colors,'VEC3'),
     JOINTS_0:accessor(joints,'VEC4',5123),WEIGHTS_0:accessor(weights,'VEC4')};
   p.indices=accessor(indices,'SCALAR',5125);p.material=0;
@@ -128,18 +193,59 @@ for(let i=0;i<hairPos.length;i+=3){
 for(let i=0;i<hairPos.length/3;i++){hc.push(...hairColor);hj.push(jointIndex('Head'),0,0,0);hw.push(1,0,0,0);}
 addMesh(female?'Tied hair':'Parted hair',hairPos,hairNorm,hc,hj,hw,gltfAccessor(hair,hp.indices));
 // A belt finishes the short linen shirt; no rigid skirt that clips raised legs.
+function garmentWeights(point){
+  const {pos,joints,weights}=clothedBody,nearest=[];
+  for(let i=0;i<pos.length/3;i++){
+    const d=[0,1,2].reduce((sum,k)=>sum+(pos[i*3+k]-point[k])**2,0);
+    if(nearest.length===4&&d>=nearest[3].d)continue;
+    nearest.push({i,d});nearest.sort((a,b)=>a.d-b.d);nearest.length=Math.min(4,nearest.length);
+  }
+  const influence=new Map();
+  for(const {i,d} of nearest)for(let k=0;k<4;k++){
+    const j=joints[i*4+k],w=weights[i*4+k]/Math.max(d,1e-6);
+    influence.set(j,(influence.get(j)??0)+w);
+  }
+  const top=[...influence].sort((a,b)=>b[1]-a[1]).slice(0,4),sum=top.reduce((n,v)=>n+v[1],0);
+  while(top.length<4)top.push([0,0]);
+  return {joints:top.map(v=>v[0]),weights:top.map(v=>v[1]/sum)};
+}
 for(const [name,rings,color] of [
-  ['Leather belt',female?[[.97,.151,.129],[1.01,.151,.129]]:[[.995,.184,.144],[1.035,.184,.144]],leather],
+  ['Leather belt',female?[[.97,.174,.15],[1.01,.174,.15]]:[[.995,.191,.15],[1.035,.191,.15]],leather],
 ]){
   const pos=[],normal=[],col=[],joint=[],weight=[],idx=[],N=32;
   for(const [y,rx,rz] of rings)for(let i=0;i<N;i++){
-    const a=i/N*Math.PI*2,c=Math.cos(a),s=Math.sin(a),fold=1+.018*Math.cos(a*12);
-    pos.push(rx*c*fold,y,rz*s*fold-.015);const len=Math.hypot(c/rx,s/rz);normal.push(c/rx/len,0,s/rz/len);col.push(...color);
-    joint.push(jointIndex('pelvis'),jointIndex('spine_01'),0,0);const upper=Math.max(0,(y-.92)*4);weight.push(1-upper,upper,0,0);
+    const a=i/N*Math.PI*2,c=Math.cos(a),s=Math.sin(a),radius=(Math.abs(c/rx)**2.5+Math.abs(s/rz)**2.5)**(-1/2.5);
+    const point=[radius*c,y,radius*s-.027],binding=garmentWeights(point);
+    pos.push(...point);const len=Math.hypot(c/rx,s/rz);normal.push(c/rx/len,0,s/rz/len);col.push(...color);
+    joint.push(...binding.joints);weight.push(...binding.weights);
   }
   for(let r=0;r<rings.length-1;r++)for(let i=0;i<N;i++){const j=(i+1)%N,a=r*N+i,b=r*N+j;idx.push(a,b,a+N,b,b+N,a+N);}
   addMesh(name,pos,normal,col,joint,weight,idx);
 }
+
+// Rolled cuffs and a sewn neck band give the shirt actual edges. They follow
+// the existing forearm/neck joints and add only 312 triangles per body.
+function clothBand(name,rings,N,point,jointName){
+  const pos=[],norm=[],col=[],joints=[],weights=[],indices=[];
+  for(const [along,radius] of rings)for(let i=0;i<N;i++){
+    const angle=i/N*Math.PI*2,p=point(along,radius,angle);
+    pos.push(...p);norm.push(0,1,0);col.push(...linen);joints.push(jointIndex(jointName),0,0,0);weights.push(1,0,0,0);
+  }
+  for(let r=0;r<rings.length-1;r++)for(let i=0;i<N;i++){const a=r*N+i,b=r*N+(i+1)%N;indices.push(a,a+N,b,b,a+N,b+N);}
+  addMesh(name,pos,surfaceNormals(new Float32Array(pos),new Uint32Array(indices),new Float32Array(norm)),col,joints,weights,indices);
+}
+for(const [side,sign] of [['l',1],['r',-1]]){
+  const elbow=Array.from(targetPlayer.world[targetPlayer.names.indexOf('lowerarm_'+side)].subarray(12,15));
+  const wrist=Array.from(targetPlayer.world[targetPlayer.names.indexOf('hand_'+side)].subarray(12,15));
+  clothBand('Rolled cuff '+side,[[.83,.043],[.85,.047],[.95,.047],[.98,.042]],16,(t,r,a)=>{
+    const center=elbow.map((v,k)=>v+(wrist[k]-v)*t),radius=r*(female?.91:1);
+    return [center[0],center[1]+Math.cos(a)*radius,center[2]+Math.sin(a)*radius*sign];
+  },'lowerarm_'+side);
+}
+const neck=Array.from(targetPlayer.world[targetPlayer.names.indexOf('neck_01')].subarray(12,15));
+clothBand('Linen neck band',[[female?1.488:1.538,1],[female?1.498:1.55,1.055],[female?1.516:1.566,1]],20,(y,r,a)=>[
+  Math.cos(a)*(female?.061:.067)*r,y,neck[2]+Math.sin(a)*(female?.057:.062)*r,
+],'neck_01');
 
 // Retarget rotation in model space, retaining target bone lengths. Matching
 // names alone is insufficient: these two exports have different rest rotations.
@@ -175,7 +281,7 @@ for(const [sourceName,name] of clips){
   g.animations.push(clip);
 }
 g.asset={version:'2.0',generator:'waterworld/scripts/prepare-crew.mjs',copyright:'Quaternius and Gonzalo Furnier (CC0); sailor adaptation CC0'};
-g.extras={sourceRevision:revision,clips:clips.map(c=>c[0]),note:'Slimmed body around preserved bones, authored clothing and retargeted animation; no historical costume calibration'};
+g.extras={sourceRevision:revision,clips:clips.map(c=>c[0]),workwearRevision:2,note:'Slim body with looser cloth silhouette around preserved bones; no historical costume calibration'};
 g.buffers=[{byteLength}];const bin=Buffer.concat(buffers);
 let json=Buffer.from(JSON.stringify(g));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
 const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67,0);header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+bin.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);

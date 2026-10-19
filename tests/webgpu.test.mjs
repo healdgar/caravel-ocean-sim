@@ -17,7 +17,9 @@ before(async () => {
   ]);
   browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH || undefined,
-    args: ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog'],
+    args: process.env.WEBGPU_BACKEND==='metal'
+      ? ['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']
+      : ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog'],
   });
 });
 

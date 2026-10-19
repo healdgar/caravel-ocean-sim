@@ -1,8 +1,8 @@
 # Crew assets
 
-`sailor.glb`: 975,152 bytes, 15,683 triangles, 65 joints; Idle, Walk and Brace
+`sailor.glb`: 993,696 bytes, 15,995 triangles, 65 joints; Idle, Walk and Brace
 clips.
-`sailor-female.glb`: 1,194,264 bytes, 18,408 triangles, 65 joints; the same clips,
+`sailor-female.glb`: 1,212,816 bytes, 18,720 triangles, 65 joints; the same clips,
 retargeted to the distinct female base mesh with tied hair.
 Each GLB contains all geometry, vertex colours, skeleton and animation.
 Runtime instances share each mesh and vary clothing, skin/hair colours, height,
@@ -10,7 +10,7 @@ facial proportions and animation phase. Six instances of each model form the
 current company. Individual appearances live in `js/crew.js`; `js/wgsl/crew.js`
 applies bounded head, jaw, nose and eye morphs before animation, including brows
 and hair, with corrected normals and matching shadows. The GLB files and skeletons
-remain unchanged. Black, white and East Asian appearances and red hair are
+retain their established rig and animation data. Black, white and East Asian appearances and red hair are
 intentional artistic choices, independent of jobs and historical demographics.
 
 Original assets: Quaternius [Universal Base Characters](https://quaternius.itch.io/universal-base-characters)
@@ -47,3 +47,22 @@ reshaping. Heights, joint locations, hands, feet and animation data remain intac
 normals are recomputed and clothing/belt thickness reduced to match. The costume is an initial approximation,
 not a documented historical reconstruction. Ground contact is approximate;
 there is no foot IK or cloth simulation.
+
+## Workwear refinement
+
+The active models remain the authored Quaternius crew. The Meshy replacement
+experiment is shelved; its generated bodies and preparation scripts stay local
+under `.meshy/`, outside standalone builds.
+
+Revision 2 shapes cloth over the torso and limbs, adds a sewn neck band and
+rolled cuffs, and bridges the trouser front and seat while retaining separate
+leg openings. Coincident mirrored vertices share
+smooth normals, removing lighting seams that exaggerated anatomical creases.
+The body skin weights, 65-joint skeleton and animation curves are unchanged.
+The belt borrows adjacent garment weights so it follows waist and hip bends.
+New cuffs and collars use the existing forearm and neck bones;
+they add 312 triangles per body. Runtime skin lighting has mild diffuse wrap
+and a broad dry highlight; linen remains matte and wetness still follows spray.
+
+This is stylized workwear, not cloth simulation or a calibrated historical
+costume. Review front, rear, walking, crouching and work poses after rebuilding.

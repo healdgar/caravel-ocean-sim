@@ -103,9 +103,12 @@ struct CrewVertex {
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
   let albedo=v.color*mix(1.0,mix(.68,.92,v.skin),wet.x);
   let view=normalize(F.camPos.xyz-v.world);let halfway=normalize(view+sun);
-  // Damp cloth stays matte; exposed skin carries a modest fresh-water highlight.
-  let gloss=mix(.004,.035,v.skin)*wet.y*pow(max(dot(n,halfway),0.0),mix(8.0,32.0,v.skin));
-  let col=albedo*(direct*max(dot(n,sun),0.0)/PI+ambient)+direct*gloss*max(dot(n,sun),0.0);
+  // A little diffuse wrap softens facial terminators. Skin has a broad dry
+  // highlight; linen stays matte and retained water strengthens the glint.
+  let wrap=.14*v.skin;
+  let diffuse=max(0.0,(dot(n,sun)+wrap)/(1.0+wrap))/(1.0+wrap);
+  let gloss=(.006*v.skin+mix(.004,.029,v.skin)*wet.y)*pow(max(dot(n,halfway),0.0),mix(8.0,mix(18.0,32.0,wet.y),v.skin));
+  let col=albedo*(direct*diffuse/PI+ambient)+direct*gloss*max(dot(n,sun),0.0);
   let fog=exp(-F.fogExt.rgb*length(v.world-F.camPos.xyz));
   return vec4f(col*fog+sky*(1.0-fog),1);
 }

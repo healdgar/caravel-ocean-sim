@@ -154,10 +154,14 @@ Hiding characters or the ship does not stop their simulation or sail orders.
 Hulls below 10.5 m long or 3.2 m wide hide the company because these authored
 stations no longer provide sufficient clearance.
 
-Both crew meshes have slimmer torsos and limbs, reduced chest/bust projection, and
-less clothing bulk. Their heights, joint lengths, animations and hand targets are preserved.
-Both embedded GLBs total 2.17 MB. Each has 65 joints and Idle, Walk and Brace
-clips; the male model has 15,683 triangles, the female 18,408. Twelve sailors use
+The original Quaternius crew remains the active asset family. Workwear has a
+looser shirt silhouette, sewn collars and rolled cuffs, and trousers that bridge
+the pelvis and seat rather than following the unclothed body sculpt. Smoothed
+centre-seam normals avoid artificial creases. Heights, body skin weights,
+joint lengths, animation curves and hand targets are preserved; the belt follows
+the adjacent garment weights through bends.
+Both embedded GLBs total 2.21 MB. Each has 65 joints and Idle, Walk and Brace
+clips; the male model has 15,995 triangles, the female 18,720. Twelve sailors use
 two instanced draws in the ship pass and two in the existing solid shadow pass,
 with independent bone palettes. They receive ship/sail shadows. No render pass
 is added. The 30 FPS automatic-resolution target remains active; the expanded
@@ -179,6 +183,17 @@ executor. No remote decision service or new rendering pass is added.
 [Asset provenance and rebuild instructions](assets/crew/README.md) retain the CC0
 licence, source revision and checksums. [Crew and decision-system design](CREW.md)
 describes the larger decision and work-execution system.
+
+The **Meshy replacement experiment is shelved** in favour of refining the
+original crew. The local **Meshy 7.1 CLI** remains available for future requests:
+`npm run meshy -- help`. It reads credentials from 1Password, preserves generation
+requests and task IDs locally, downloads GLBs/PBR maps with checksums, and checks
+rig compatibility. Image-guided generation uses references with a shared outfit
+and T-pose; body type changes anatomy only. [Meshy authoring workflow](assets/crew/MESHY.md) covers the
+male/female presets, paid submissions, recovery, native remeshing and auto-rigging.
+The generated candidates failed visual review and remain archived locally.
+Shipped models use the refined original geometry, rig and animations; no Meshy
+body or replacement renderer is included.
 
 ### Wake, bow waves and spray
 
@@ -336,7 +351,7 @@ The suite covers:
 - Analytical cross-derivative values and pixel equality between separate and packed wave-texture reads, at sunset and in rough seas.
 - Exact MSAA coverage comparison between inline and depth-first ocean visibility. Shaded comparisons cover exposed hull edges, rough seas, free-camera water, and unmasked debug views; they bound rounding/edge differences to sub-quarter-level RMS on a 0–255 channel scale, rather than asserting bit equality. Resolution, wave cascades, texture filtering, shadows and antialiasing remain unchanged.
 
-GPU fixtures use SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks in native Chrome supplement these tests; software-GPU checks do not establish device frame rates or visual quality.
+GPU fixtures default to SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). On macOS, `WEBGPU_BACKEND=metal` selects the native GPU for local validation. Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks supplement these tests; neither software rendering nor Mac checks establish physical-iPhone performance.
 
 ## Known limitations
 
