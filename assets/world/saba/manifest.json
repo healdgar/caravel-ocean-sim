@@ -1,0 +1,36 @@
+{
+  "name": "Saba",
+  "latitude": 17.635,
+  "longitude": -63.238,
+  "spanMetres": 8192,
+  "gridSize": 257,
+  "format": "signed int16 little endian; metres = value / 4; rows north to south",
+  "accessed": "2026-10-19",
+  "terrainSources": [
+    {
+      "url": "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/12/1328/1843.png",
+      "sha256": "b3ef5e7a85dfd64b342e350e737f356663820206597a221bec310e3918c3c124"
+    },
+    {
+      "url": "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/12/1328/1844.png",
+      "sha256": "8c0fb272543fa6428c217ec30bac1ab2817fece9fe912cdf7f18b2d751a573e8"
+    },
+    {
+      "url": "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/12/1329/1843.png",
+      "sha256": "4fcfdd8fbc702879e491242fc08d77e6305ca6c6847fb360c6e0994e40adf9bc"
+    },
+    {
+      "url": "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/12/1329/1844.png",
+      "sha256": "4fcfdd8fbc702879e491242fc08d77e6305ca6c6847fb360c6e0994e40adf9bc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_land.geojson",
+      "sha256": "9e0729ee253ca7d7a5c4ae9395fb1902264c5377c52e224d13dd85010e2835d9"
+    }
+  ],
+  "heightSHA256": "3304f7605b7cab3fc022a957bc6465e9e04b098b391ae8d675506f69d3d6d5a4",
+  "terrainCredit": "Mapzen terrain tiles; global SRTM/GMTED2010 courtesy USGS; ETOPO1 courtesy NOAA.",
+  "worldCredit": "Made with Natural Earth. Public domain.",
+  "visualCleanup": "12 isolated coastal samples median-filtered; disconnected patches smaller than 16 cells above 50 m.",
+  "limitations": "Elevation-derived coast; generated vegetation/materials; underwater skirt is not surveyed bathymetry."
+}

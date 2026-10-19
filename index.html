@@ -71,20 +71,39 @@
   #gpu-profile pre { margin:0; padding:0 12px 12px; max-height:60dvh; overflow:auto; white-space:pre-wrap; overscroll-behavior:contain; }
   button, input, select, summary { touch-action:manipulation; }
   :focus-visible { outline:2px solid #f5bf77; outline-offset:2px; }
+  #landfall-panel { position:fixed; right:12px; bottom:12px; width:350px; max-height:calc(100dvh - 170px);
+    display:flex; flex-direction:column; overflow:hidden; border:1px solid #ffffff30; border-radius:10px;
+    background:#0b171ded; color:#e8e2d6; font:13px/1.5 system-ui,sans-serif; z-index:7; box-sizing:border-box; }
+  #landfall-panel[hidden] { display:none; }
+  #landfall-panel button { min-height:44px; background:#263744; color:#eee; border:1px solid #617480; border-radius:5px; padding:7px 10px; cursor:pointer; }
+  #landfall-panel button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
+  .landfall-stages,.landfall-weather { display:flex; flex-wrap:wrap; gap:5px; }
+  .landfall-stages button,.landfall-weather button { flex:1; }
+  #landfall-panel p { font-size:12px; }
+  #landfall-panel .landfall-intro { font-size:14px; }
+  #landfall-panel summary { min-height:44px; cursor:pointer; display:flex; align-items:center; }
+  #landfall-chart svg { width:100%; display:block; background:#142c39; border-radius:5px; }
+  #landfall-panel .landfall-credit { font-size:11px; color:#a8b6bc; }
+  #landfall-ocean { margin-top:10px; }
   @media (max-width:900px), (pointer:coarse) {
     :root { --controls-bottom:156px; --view-height:100dvh; --view-top:0px; --keyboard-inset:0px; }
     #hud { left:max(8px,env(safe-area-inset-left)); top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:8px; font-size:10px; }
     #hud .help { display:none; }
     #fps { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
     #camera-dock { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); top:calc(var(--view-top) + 32px + env(safe-area-inset-top));
-      max-width:none; display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:4px; padding:4px; }
-    #camera-dock > button { grid-column:span 2; min-width:0; padding:6px 3px; }
+      max-width:none; display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:4px; padding:4px; }
+    #camera-dock > button { grid-column:span 4; min-width:0; padding:6px 3px; }
+    #camera-dock > button:nth-of-type(n+4) { grid-column:span 3; }
     #camera-dock button, #panel button, #boat-panel button, #captain-panel button, #gpu-profile summary { min-height:44px; }
     #panel, #boat-panel, #captain-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
       bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); top:auto; width:auto;
       max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
     #boat-panel.compact { right:auto; }
     .sea-settings-open #boat-panel { visibility:hidden; }
+    #landfall-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto;
+      bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom)));
+      max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
+    .landfall-open #boat-panel { visibility:hidden; }
     #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
     #panel input { width:100%; min-width:0; height:44px; }
     #boat-panel label { min-height:44px; margin:6px 0; }
@@ -99,7 +118,7 @@
     #gpu-profile summary { box-sizing:border-box; padding:12px 8px; }
   }
   @media (max-width:900px) and (orientation:landscape) {
-    #camera-dock { grid-template-columns:repeat(6,minmax(0,1fr)); }
+    #camera-dock { grid-template-columns:repeat(7,minmax(0,1fr)); }
     #camera-dock > button, #camera-dock > button:nth-of-type(n+4) { grid-column:span 1; }
     #boat-panel, #panel, #captain-panel { width:min(420px,calc(100vw - 16px)); }
     #gpu-profile pre { max-height:20dvh; }

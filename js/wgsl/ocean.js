@@ -45,7 +45,7 @@ const OCEAN_HULL_MASK = /* wgsl */ `
   }
 `;
 
-export const OCEAN = FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SHADOW_SAMPLE + /* wgsl */ `
+function oceanSource(coast='') { return FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -59,7 +59,7 @@ struct OceanHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin:
 @group(0) @binding(13) var<uniform> I: Interaction;
 @group(0) @binding(14) var wakeTex: texture_2d<f32>;
 @group(0) @binding(15) var wakeSamp: sampler;
-` + SKY_RENDER_FUNCS + /* wgsl */ `
+` + SKY_RENDER_FUNCS + coast + /* wgsl */ `
 const ENV_MAXMIP: f32 = ${ENV_MIPS - 1}.0;
 const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
 const TEX_N: f32 = ${N}.0;
@@ -294,13 +294,11 @@ ${OCEAN_HULL_MASK}
   }
   var col = body * (1.0 - Fr) + refl * Fr + spec;
   col = mix(col, foamLit, foamMask * 0.95);
+  ${coast?'col = coastalWater(col, in.xz, in.height, foamLit);':''}
 
   // ---- aerial perspective ----
   // aerial perspective: atmosphere extinction plus a marine haze floor
-  let T = exp(-max(F.fogExt.rgb, vec3f(F.fogExt.w)) * dist);
-  let hz = normalize(vec3f(-V.x, 0.002, -V.z));
-  let fogCol = skyAtmo(hz);
-  col = col * T + fogCol * (1.0 - T);
+  col = surfaceAir(col, in.rel + F.camPos.xyz);
   return vec4f(col, 1.0);
 }
 
@@ -310,11 +308,16 @@ ${OCEAN_HULL_MASK}
 ${OCEAN_HULL_MASK}
   return vec4f(0);
 }
-`;
+`; }
+
+export const OCEAN = oceanSource();
 
 // Remove only the surface shader's cutout. depthOnly retains the same mask.
 // This variant can reject hidden fragments before any expensive shading.
 export const OCEAN_VISIBLE = OCEAN.replace(OCEAN_HULL_MASK, '');
+export function createCoastalOcean(coast,depthFirst){
+  const code=oceanSource(coast);return depthFirst?code.replace(OCEAN_HULL_MASK,''):code;
+}
 
 // Samples the displaced surface height under the camera (inverting the horizontal
 // displacement with a few fixed-point iterations).

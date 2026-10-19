@@ -1,4 +1,8 @@
 import { createVolumetricClouds } from './clouds.js';
+import { createTerrain } from './terrain.js';
+import { COASTAL_WATER } from './wgsl/terrain.js';
+import { LANDFALL_VIEWS } from './terrain-model.js';
+import { createLandfallUI, LANDFALL_WEATHER } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
 import { createAdaptiveResolution } from './resolution.js';
 import { createVesselShadows } from './shadows.js';
@@ -20,10 +24,12 @@ import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } f
 import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS } from './wgsl/common.js';
 import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
-import { OCEAN, OCEAN_VISIBLE, SKY_BG, HEIGHT_PROBE } from './wgsl/ocean.js';
+import { OCEAN, OCEAN_VISIBLE, SKY_BG, HEIGHT_PROBE, createCoastalOcean } from './wgsl/ocean.js';
 import { BLOOM_DOWN, BLOOM_UP, COMPOSITE } from './wgsl/post.js';
 
 const qs = new URLSearchParams(location.search);
+const LAND_STAGE=qs.has('landfall')?(Object.hasOwn(LANDFALL_VIEWS,qs.get('landfall'))?qs.get('landfall'):'approach'):null;
+const LAND_WEATHER=Object.hasOwn(LANDFALL_WEATHER,qs.get('weather'))?qs.get('weather'):'clear';
 const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
 const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
@@ -265,7 +271,7 @@ async function main() {
   const MSAA = 4;
   const HDR = 'rgba16float';
   const [oceanMod, skyMod, downMod, upMod, compMod] = await Promise.all([
-    shader(OCEAN_DEPTH ? OCEAN_VISIBLE : OCEAN, 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
+    shader(LAND_STAGE?createCoastalOcean(COASTAL_WATER,OCEAN_DEPTH):OCEAN_DEPTH ? OCEAN_VISIBLE : OCEAN, 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
     shader(BLOOM_UP, 'bloom up'), shader(COMPOSITE, 'composite'),
   ]);
   const oceanPipe = await device.createRenderPipelineAsync({
@@ -383,6 +389,8 @@ async function main() {
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
   const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
+  const terrain=LAND_STAGE?await createTerrain({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):null;
+  const coastalGroup=terrain?.waterGroup(oceanPipe);
 
   // Water height under the camera (async readback, a few frames of latency) so the
   // floating camera rides above passing crests instead of clipping into them.
@@ -582,6 +590,7 @@ async function main() {
   // Camera & input
   // --------------------------------------------------------------------------------------
   const cam = { x: 0, y: 2.4, z: 0, yaw: 0, pitch: -5.5 * D2R, fovY: 58 * D2R, speed: 6 };
+  if(LAND_STAGE){const view=LANDFALL_VIEWS[LAND_STAGE];Object.assign(cam,view);cam.yaw=view.yaw*D2R;cam.pitch=view.pitch*D2R;cam.speed=45;}
   if (qs.get('cam')) {
     const v = qs.get('cam').split(',').map(Number);
     cam.x = v[0]; cam.y = v[1]; cam.z = v[2]; cam.yaw = (v[3] || 0) * D2R; cam.pitch = (v[4] || 0) * D2R;
@@ -595,7 +604,7 @@ async function main() {
   const propulsion = propulsionFromLink(qs);
   const boat = {
     effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
-    beam: param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    beam: param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', LAND_STAGE?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     provisionDays:param('provisionDays',DEFAULT_PROVISION_DAYS,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
@@ -658,6 +667,7 @@ async function main() {
   }, { passive: true });
 
   function updateBoat(dt) {
+    const previousX=boat.x,previousZ=boat.z;
     const steering = boat.enabled ? (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) : 0;
     const age=Math.max(0,simTime-targetTime);
     const predicted=boat.waveAttitude??={heave:0,pitch:0,roll:0};
@@ -671,6 +681,7 @@ async function main() {
     const heading = previousHeading + (previousYaw + boat.yawRate) * dt * 0.25;
     boat.x += Math.sin(heading) * distance; boat.z -= Math.cos(heading) * distance;
     boat.x += Math.cos(heading) * boat.leewayDistance; boat.z += Math.sin(heading) * boat.leewayDistance;
+    if(terrain)boat.coastBlocked=terrain.constrain(boat,previousX,previousZ);
     // Heave retains water-velocity compensation for asynchronous readback;
     // rotation instead integrates pressure and wind through physical inertia.
     const rate=age<.25 && targetRevision===boat.revision?targetRate.heave:0;
@@ -707,6 +718,7 @@ async function main() {
     cam.y = Math.max(1.0, Math.min(3000, cam.y));
     // keep clear of the actual (displaced) water surface under the camera
     if (cam.y < waterH + 0.9) cam.y += (waterH + 0.9 - cam.y) * Math.min(1, dt * 12);
+    if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+2);
   }
 
   // --------------------------------------------------------------------------------------
@@ -843,7 +855,7 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const panel = document.getElementById('panel');
   function setPanelOpen(open) {
-    if(open)setCaptainOpen(false);
+    if(open){setCaptainOpen(false);landfallUI.close();}
     panel.classList.toggle('hidden', !open);
     document.body.classList.toggle('sea-settings-open', open);
     seaSettingsButton.setAttribute('aria-expanded', String(open));
@@ -900,7 +912,7 @@ async function main() {
   captainHide.onclick=()=>{setCaptainOpen(false);captainButton.focus();};captainPanel.querySelector('.panel-header').append(captainHide);
   function setCaptainOpen(open){
     captainPanel.hidden=!open;document.body.classList.toggle('captain-open',open);captainButton.setAttribute('aria-expanded',String(open));
-    if(open){setPanelOpen(false);if(document.pointerLockElement)document.exitPointerLock();captainHide.focus();}
+    if(open){setPanelOpen(false);landfallUI.close();if(document.pointerLockElement)document.exitPointerLock();captainHide.focus();}
   }
   captainButton.onclick=()=>setCaptainOpen(captainPanel.hidden);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!captainPanel.hidden)captainHide.click();});
@@ -948,6 +960,10 @@ async function main() {
     }
   };
   cameraDock.append(captainButton,seaSettingsButton, shareButton, sharePanel);
+  const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,
+    onOpen:()=>{setPanelOpen(false);setCaptainOpen(false);},
+    getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}needSpectrum=true;envFull=true;}});
+  if(LAND_STAGE){boatPanel.classList.add('compact');collapseBoat.textContent='Controls';collapseBoat.setAttribute('aria-expanded','false');}
   if(profileDetails)cameraDock.append(profileDetails);
   panel.before(cameraDock);
   // Keep controls in the visible viewport, including browser bars and keyboards.
@@ -1053,6 +1069,7 @@ async function main() {
   boatBody.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
   const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
+  if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],{swellHs:.65,windSpeed:5.5});
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
@@ -1192,6 +1209,7 @@ async function main() {
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     requestAnimationFrame(frame);
+    landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
     resolution.sample(elapsed,!document.hidden);
     resize();
@@ -1299,6 +1317,7 @@ async function main() {
       skySun = frameF[33]; skyHaze = frameF[72]; skyHeight = frameF[73];
     }
     clouds.encode(cp);
+    terrain?.encode(cp,skyChanged);
     cp.setPipeline(sunVisPipe);
     cp.setBindGroup(0, bgSunVis);
     cp.setBindGroup(1, bgSunClouds);
@@ -1328,6 +1347,7 @@ async function main() {
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
+    terrain?.draw(rp);
     if (nodeCount) {
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
@@ -1341,6 +1361,7 @@ async function main() {
       rp.setPipeline(oceanPipe);
       rp.setBindGroup(0, bgOcean[foamCur][interaction.current]);
       rp.setBindGroup(1, oceanShadows);
+      if(coastalGroup)rp.setBindGroup(2,coastalGroup);
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
     rp.setPipeline(skyPipe);

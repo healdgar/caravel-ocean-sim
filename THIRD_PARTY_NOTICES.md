@@ -1,4 +1,22 @@
-# Third-party code
+# Third-party code and data
+
+## Saba elevation and world overview
+
+Elevation derives from [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/),
+using four zoom-12 Terrarium tiles in the public `elevation-tiles-prod` bucket.
+Global sources: SRTM and GMTED2010, courtesy U.S. Geological Survey; ETOPO1,
+courtesy NOAA. These US-government source datasets are public domain. Preserve
+the [Tilezen attribution guidance](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)
+when importing other regions, whose component datasets may have different terms.
+
+World chart: Made with [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/).
+The 1:110 million land polygons are public domain. This is an overview map, not
+a navigational coastline.
+
+`assets/world/saba/manifest.json` records downloaded URLs and SHA-256 hashes.
+`scripts/prepare-land.py` resamples elevation and generates the canopy material.
+The coastline/skirt and vegetation are local adaptations; no Google/Apple imagery,
+code or proprietary map data is incorporated.
 
 ## Quaternius crew assets
 

@@ -6,6 +6,13 @@ A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck was
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
+[Try the Saba landfall MVP](https://healdgar.github.io/caravel-ocean-sim/?landfall=approach&boat=1).
+Open **Landfall** to choose Horizon, Approach or Near coast, and compare clear air,
+sunset, backlighting and sea mist. The world overview locates Saba; only this island
+currently renders in 3D. [Longer-term geography and voyage design](LAND_SYSTEM_DESIGN.md).
+
+![Saba landfall at sunset, rendered from aboard the caravel](docs/landfall.png)
+
 ![Looking toward the sun from 2.4 m above the water](docs/front.jpg)
 
 | 75 degrees off the sun, 2.4 m up | Looking toward the sun from 30 m up |
@@ -66,6 +73,30 @@ Links share the configuration; they do not freeze an animation frame or the
 boat's travelled position.
 
 ## How it works
+
+### Landfall MVP
+
+Saba uses real Mapzen Terrarium elevation, resampled to a 32 m grid across an
+8.192 km region. Its fixed 34,784-triangle mesh preserves the silhouette throughout
+approach. Generated forest materials and instanced broadleaf crowns supply surface
+detail; they are not aerial imagery or a reconstruction of historical vegetation.
+The same sun, sky, atmospheric extinction and volumetric clouds light the sea,
+ship and land. A cached terrain/cloud shadow field shades the slopes; foreground
+cloud integration stops at terrain, allowing low cloud to veil the mountains.
+
+The shore has approximate shallow-water tint, wave-contact foam and wet rock.
+A swept hull-clearance constraint stops the ship entering the elevation-derived
+coast. The underwater skirt is authored, **not surveyed bathymetry**. Deep-water
+waves still lack coastal refraction, shelter and a physical surf solver.
+
+All simulation clocks remain unchanged. This is a visual landfall slice: no ports,
+docking, river currents, voyage compression, terrain streaming or complete grounding
+model yet. The future target remains 15–20 minutes of offshore passage.
+The source packs, licenses, checksums and rebuild instructions live in
+[`assets/world/README.md`](assets/world/README.md). Both single-file builds embed
+the island and world chart. The regular ocean scene does not allocate terrain GPU
+resources. The existing automatic 30 FPS resolution target remains active; combined
+land/ocean performance still needs a physical iPhone measurement.
 
 ### Waves
 

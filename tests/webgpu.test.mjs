@@ -190,6 +190,35 @@ async function slider(page, label, value) {
   }, String(value));
 }
 
+for(const entry of ['index.html','ocean.min.html','docs/index.html'])test(`landfall renders terrain, canopy and coastal ocean in ${entry}`,{timeout:180000},async()=>{
+  const page=await browser.newPage({viewport:{width:402,height:666}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.goto(`${origin}/${entry}?landfall=approach&view=free&prow=0&boatSpeed=0&clouds=0&w=64&h=48`);
+    await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.locator('#err').textContent(),'');
+    const frame=await step(page);
+    assert.equal(frame.render.island,1);assert.equal(frame.render['island trees'],1);
+    assert.equal(frame.compute['island sunlight'].length,1);
+    await page.getByRole('button',{name:'Landfall',exact:true}).click();
+    const hide=page.getByRole('button',{name:'Hide landfall'});
+    assert.equal(await hide.isVisible(),true);
+    await page.locator('#landfall-panel .panel-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+    const bounds=await hide.boundingBox();assert.ok(bounds.y>=0&&bounds.y+bounds.height<=666);
+    await page.getByText('World map & sources',{exact:true}).click();
+    await page.getByRole('img',{name:'World map locating Saba in the eastern Caribbean'}).waitFor();
+    await page.getByRole('button',{name:'Sea mist',exact:true}).click();
+    assert.equal(new URL(page.url()).searchParams.get('weather'),'mist');
+    assert.equal(new URL(page.url()).searchParams.has('clouds'),false,'weather selection replaces stale explicit settings');
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    assert.equal(await page.locator('#landfall-panel').isVisible(),false);
+    await page.getByRole('button',{name:'Landfall',exact:true}).click();
+    assert.equal(await page.locator('#panel').isVisible(),false,'landfall opens without competing panels');
+    await hide.click();assert.equal(await page.locator('#landfall-panel').isVisible(),false);
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
 test('indexed ship and direct HDR resolve match the original pixels, including profiled rendering', {timeout:180000}, async()=>{
   // Start on a sampled frame so the comparison also exercises timestamp writes.
   const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace('let frameIndex = 0;','let frameIndex = 7;');

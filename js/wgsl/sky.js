@@ -196,6 +196,18 @@ fn sunIlluminance() -> vec3f {
   return sampleTrans(camR(), F.sunDir.y) * F.sunDir.w;
 }
 
+// One surface atmosphere for sea, timber and terrain. The near-sea haze layer
+// weakens with altitude and with the user's clear-air setting, not travel speed.
+fn surfaceAir(color:vec3f,world:vec3f)->vec3f {
+  let delta=world-F.camPos.xyz;let d=length(delta);
+  let altitude=max(0.0,(world.y+F.camPos.y)*0.5);
+  let marine=F.fogExt.w*clamp(F.atmo.x/3.0,0.2,3.0)*exp(-altitude/220.0);
+  let extinction=max(F.fogExt.rgb,vec3f(marine));
+  let transmission=exp(-extinction*d);
+  let direction=normalize(vec3f(delta.x,max(delta.y,0.002*d),delta.z));
+  return color*transmission+skyAtmo(direction)*(1.0-transmission);
+}
+
 fn skyViewUV(dir: vec3f) -> vec2f {
   let r = camR();
   let vHorizon = rhoOf(r);

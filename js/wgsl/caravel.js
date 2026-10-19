@@ -183,8 +183,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     let behind=sky*(1.0-skyVisibility)+bounce*0.22*skyVisibility;
     col+=behind*exp(-opticalDepth)*0.7;
   }
-  let fog=exp(-F.fogExt.rgb*length(in.world-F.camPos.xyz));
-  col=col*fog+skyAtmo(normalize(vec3f(in.world.x-F.camPos.x,0.05,in.world.z-F.camPos.z)))*(1.0-fog);
+  col=surfaceAir(col,in.world);
   return vec4f(col,1.0);
 }
 `;

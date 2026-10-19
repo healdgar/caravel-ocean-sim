@@ -142,10 +142,10 @@ fn volumeSunVisibility(ro:vec3f,rd:vec3f)->f32 {
   return exp(-optical);
 }
 struct CloudRay { color:vec4f, distance:f32 };
-fn marchClouds(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:vec3f)->CloudRay {
+fn marchCloudsTo(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:vec3f,maxDistance:f32)->CloudRay {
   var out:CloudRay;out.color=vec4f(0);out.distance=0.0;
   if(CF.screen.w<0.5){return out;}
-  let hit=cloudInterval(ro,rd);if(hit.y<=hit.x){return out;}
+  var hit=cloudInterval(ro,rd);hit.y=min(hit.y,maxDistance);if(hit.y<=hit.x){return out;}
   let phase=saturate(dot(rd,F.sunDir.xyz)*0.5+0.5);
   let scatter=0.10+0.30*pow(phase,4.0);let silverPhase=pow(phase,24.0);
   let extent=hit.y-hit.x;var tr=1.0;var color=vec3f(0);var depth=0.0;var weight=0.0;
@@ -178,6 +178,9 @@ fn marchClouds(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:v
   }
   out.color=vec4f(color,clamp(1.0-tr,0.0,1.0));out.distance=depth/max(weight,0.00001);
   return out;
+}
+fn marchClouds(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:vec3f)->CloudRay {
+  return marchCloudsTo(ro,rd,budget,jitter,sunColor,skyColor,65.0);
 }
 `;
 
