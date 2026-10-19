@@ -1,6 +1,6 @@
 import { DECK_COLS, DECK_ROWS, DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
 
-export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe}) {
+export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe}) {
   const textures=[0,1].map(i=>device.createTexture({label:'deck water '+i,size:[DECK_COLS,DECK_ROWS],format:'rgba32float',
     usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC}));
   const views=textures.map(t=>t.createView());
@@ -21,7 +21,7 @@ export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,se
     depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:4},
   })));
   // Four substeps always finish in texture zero; timber reads that same wetness field.
-  const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis)]));
+  const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis),skyView]));
   let shadowGroups;
   return {
     textures,view:views[0],sampler,

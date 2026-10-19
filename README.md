@@ -223,7 +223,7 @@ Physical basis: [Anguelova et al., *Spume Drops Produced by the Wind Tearing of 
 
 ### Deck wash and buoyancy
 
-A 32 × 96 hull-local water field samples the displaced sea at the rails. Overtopping adds water at the edges; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff strips share the scene lighting. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls deck wash.
+A 32 × 96 hull-local water field samples the displaced sea at the rails. Overtopping adds water at the edges; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff share the scene lighting. Falling sheets use their actual surface normals, sun glints, bubble scattering, Fresnel transparency and directional marine haze; they no longer use fixed-opacity blue reflection strips. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls deck wash.
 
 The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull at its loaded draft relative to the sampled surface. Large crests can still overtop it.
 
@@ -350,12 +350,13 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes, quarterdeck camera support and forward sightlines on resized hulls; camera checks cover windward boarding and smooth tack changes.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Recovery checks verify identical propulsion at centered/hard-over helm, passive wind-driven sternway in both directions, reverse steering, resuming sail after centering, and no yard transfers during wind oscillations. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses and fixed deck leads; loaded versus slack motion, sewn-rope attachment, and physical triangle-to-rope clearance including rope thickness across both tacks, partial furling and complete yard transfers; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Recovery checks verify identical propulsion at centered/hard-over helm, passive wind-driven sternway in both directions, reverse steering without helm-induced propulsion, and no yard transfers during wind oscillations. Aerodynamic checks cover actual cloth geometry, continuous incidence/stall response, normal-reversal invariance, pressure/area scaling, and nonpositive still-air energy input across translation, roll and pitch. Recovery time and heading are not prescribed. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses and fixed deck leads; loaded versus slack motion, sewn-rope attachment, and physical triangle-to-rope clearance including rope thickness across both tacks, partial furling and complete yard transfers; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
+- Production runoff shading tests verify sunlight on vertical sheets, backlighting, transparency, marine haze and no direct sun below the horizon.
 - Production crew/vessel fragment radiance agrees for identical optical inputs under front/back lighting, solid/canvas/cloud shadows, directional marine haze, altitude changes, grazing normals and reflection toggles.
 - JavaScript and WGSL initialization in all three standalone builds.
 - Adaptive-resolution convergence, cautious recovery, bounded scale, manual overrides and background/resume handling; actual GPU target resizing and fixed capture dimensions. Mobile checks cover unobstructed Hide buttons while scrolling, collapsed/expanded profiling, and six portrait, landscape and tablet viewports.
@@ -389,7 +390,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/profiler.js` | Optional GPU pass spans, sampled frame timing, and local capture statistics |
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
-| `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
+| `js/sailing.js`, `js/sail-aerodynamics.js` | Apparent wind, prescribed trim, sail handling, cloth-derived aerodynamic panels and rigid-body loads |
 | `js/lateen.js`, `js/wgsl/lateen.js` | Routine tacks, ordered yard transfers, cloth supports, sheet leads and matching CPU/GPU motion |
 | `js/instruments.js` | Optional signed speed and apparent wind HUD, recovery cues and local preferences |
 | `js/rig-plan.js` | Digitized d’Albertis lateen sail/mast coordinates and uniform hull-scale conversion |
@@ -474,7 +475,11 @@ follow the same deformation as the cloth.
 
 Routine tacks leave the yards in place. On the bad tack, wind reverses the canvas
 camber against a smooth mast/rig support envelope; the clew stays on the yard's
-side. Drive is reduced by an authored 28% coefficient, not a measured Niña polar.
+side. **This retained-yard pose is still a rig limitation:** it can hold the canvas
+backed, producing astern force. The force model now reports that actual load instead
+of awarding a fixed 72% of good-tack drive. The HUD identifies backed canvas; an
+ordered yard transfer restores the leeward pose. Routine sheet/yard geometry needs
+further correction before sail-position optimization.
 Wind oscillations in irons never initiate yard transfer.
 
 Use **Captain → Transfer yards** to move the yards to leeward for a longer leg.
@@ -520,32 +525,45 @@ hoists and handling drill are not recovered Niña specifications. See
 
 The sail readout reports the point of sail, apparent wind speed and its direction
 relative to the bow. Apparent wind subtracts the ship's forward and sideways velocity
-from the true wind. Lift and drag use dynamic pressure `0.5 * airDensity * windSpeed²`,
-exposed area and authored angle-dependent coefficients. The active lateen rig loses
-drive near headwind; the stored square plan uses a wider no-go angle. Lateral force produces
-bounded leeway against hull/keel resistance and a heeling moment. Sailing resistance rises
-above an authored Froude-number threshold. The basis is
-[relative air velocity](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/relative-velocity/),
-the [aerodynamic force equation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/)
-and [points of sail](https://www.rya.org.uk/training/do-you-know-your-points-of-sail/).
-This is an approximate sailing model, not a measured caravel polar or cloth/fluid simulation.
-It omits sail interference, weather helm, reefing penalties, gust loading and capsizing.
+from the true wind. Forces now use a 36-triangle aerodynamic mesh per sail,
+sampled from the same transformed cloth used for rendering, including camber,
+furling, mast supports and yard handling. Geometry is cached between changes;
+decorative flutter does not drive rigid-body loads.
+
+Each panel uses dynamic pressure `0.5 * airDensity * relativeSpeed²`, its exposed
+area and incidence to the actual cloth. Lift is perpendicular to relative airflow;
+drag is parallel. A finite-span lift slope and induced drag blend continuously
+into separated flat-plate forces through an authored 18–35° stall interval.
+There is no controller-target power bonus, fixed bad-tack discount or special
+120° apparent-wind dip. Backed canvas can push astern. Prescribed sheet targets
+remain unchanged; this pass does not optimize sail positions.
+
+The equations follow NASA Glenn's [lift equation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/lift-equation/),
+[drag equation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/)
+and [finite-span induced drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/induced-drag-coefficient/).
+The stall angles, efficiency and separated-flow coefficients are authored
+approximations, not measured Niña data. This is neither a calibrated caravel polar
+nor a cloth/fluid solver. It omits sail interference, aerodynamic yaw/weather helm,
+vertical sail-force coupling to buoyancy, and capsizing. Lateral force drives
+leeway against hull/keel resistance; forward resistance rises above an authored
+Froude-number threshold. See [SAILING_MODEL.md](SAILING_MODEL.md) for validation
+and the remaining rig limitation.
 
 **Wind speed at 10 m** is the reference for a neutral logarithmic marine wind profile:
 `U(z) = U10 * log(z / z0) / log(10 / z0)`, with fixed roughness `z0 = 0.0002 m`.
-Each of the three sails samples wind at its current centre of effort; higher canvas
-therefore experiences stronger wind and greater leverage. Furling changes both area
-and centre height. Each lateral force contributes `-force * lever` about the hull's
-loaded centre of gravity. Heeling
-shortens projected sail area and leverage; apparent wind also subtracts the sail's
-sideways velocity caused by roll. The profile follows the open-water approximation in
+Each aerodynamic panel samples wind at its current height; higher canvas sees
+stronger wind. Furling changes both exposed area and centre of effort. Full `r × F`
+moments act about the loaded centre of gravity. Roll and pitch rotate panel normals
+and moment arms; their point velocities are subtracted from local airflow. Heel
+therefore changes incidence as well as leverage, rather than applying a fixed
+cosine discount. The profile follows the open-water approximation in
 this [marine windage study](https://www.fws.gov/doiddata/dwh-ar-documents/876/DWH-AR0269040.pdf).
 
 Wave and wind loads share one roll state:
 `I * roll'' = windMoment + mass*g*GM*sin(waveAngle-roll) - damping*roll'`.
-Pitch uses the analogous longitudinal waterplane righting moment. Both integrate
+Pitch also receives sail torque and uses the analogous longitudinal waterplane righting moment. Both integrate
 in substeps no longer than 1/120 second with implicit damping. Sail apparent wind
-includes the velocity induced by this same roll, allowing aerodynamic damping as
+includes velocity induced by this same roll and pitch, allowing aerodynamic damping as
 well as steady heel. The effect depends on heading, trim and canvas; wind is not
 an unconditional upright constraint. See [Kerdraon et al. (2020), sections 3.1 and 3.4](https://doi.org/10.1016/j.oceaneng.2020.107668)
 for coupled rigid-body dynamics and rotational apparent wind.

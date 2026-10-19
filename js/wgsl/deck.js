@@ -1,4 +1,6 @@
-import { FRAME_WGSL, ATMO_CORE_WGSL, NOISE_WGSL } from './common.js';
+import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
+import { SKY_RENDER_FUNCS } from './sky.js';
+import { VESSEL_LIGHTING } from './vessel.js';
 import { SHADOW_SAMPLE } from './shadows.js';
 import { HULL_PROFILE } from './hull.js';
 import { INTERACTION_TYPES, INTERACTION_SEA } from './interaction.js';
@@ -102,15 +104,16 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
 }
 `;
 
-export const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
+export const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_LIGHTING + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> H:InteractionHull;
 @group(0) @binding(2) var deckWater:texture_2d<f32>;
-@group(0) @binding(3) var deckSamp:sampler;
+@group(0) @binding(3) var sampC:sampler;
 @group(0) @binding(4) var envCube:texture_cube<f32>;
 @group(0) @binding(5) var transLUT:texture_2d<f32>;
 @group(0) @binding(6) var<storage,read> sunVis:array<f32,4>;
-` + DECK_TRANSFORM + DECK_SAMPLING + /* wgsl */ `
+@group(0) @binding(7) var skyLUT:texture_2d<f32>;
+` + SKY_RENDER_FUNCS + DECK_TRANSFORM + DECK_SAMPLING + /* wgsl */ `
 struct DeckVertex {
   @builtin(position) pos:vec4f, @location(0) world:vec3f,
   @location(1) uv:vec2f, @location(2) local:vec3f,
@@ -160,21 +163,40 @@ fn corner(v:u32)->vec2f {
   var n=normalize(H.up.xyz-H.right.xyz*gradient.x/(H.size.x/3.6)+H.forward.xyz*gradient.y/(H.size.y/12.0));
   n=normalize(n+H.right.xyz*ripple.x+H.forward.xyz*ripple.y);
   let v=normalize(F.camPos.xyz-in.world);
-  if(curtain){n=normalize(H.right.xyz+H.forward.xyz*ripple.x);}
+  // Falling sheets bend away from the rail: use their actual surface, not
+  // a fixed +X normal (which also treated port and starboard identically).
+  let face=cross(dpdx(in.world),dpdy(in.world));
+  if(curtain){n=normalize(face/max(length(face),0.00001)+H.forward.xyz*ripple.x+H.up.xyz*ripple.y);}
+  n=select(-n,n,dot(n,v)>=0.0);
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
-  let reflection=textureSampleLevel(envCube,deckSamp,reflect(-v,n),2.0).rgb;
-  let ambient=textureSampleLevel(envCube,deckSamp,vec3f(0,1,0),6.0).rgb;
-  let sun=textureSampleLevel(transLUT,deckSamp,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*vesselShadow(in.world,n);
+  let reflection=textureSampleLevel(envCube,sampC,reflect(-v,n),2.0).rgb;
+  let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),6.0).rgb;
+  let sun=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*step(0.0,F.sunDir.y)*vesselShadow(in.world,n);
   let pattern=clamp(0.5+gnoise(flowUV*1.7)+gnoise(flowUV*4.1)*0.3,0.0,1.0);
   let front=(1.0-smoothstep(0.015,0.11,w.x))*smoothstep(0.003,0.018,w.x)*w.z;
   let froth=clamp(w.y*(0.4+pattern*0.6)+front*0.55,0.0,0.85);
-  let foamLight=vec3f(0.83,0.88,0.91)*(ambient*1.35+sun*max(n.y,0.0)*0.12);
+  let nl=max(dot(n,F.sunDir.xyz),0.0);
+  // Entrained bubbles scatter light from either side of a thin water sheet.
+  let scatter=pow(max(dot(-v,F.sunDir.xyz),0.0),12.0);
+  let foamLight=vec3f(0.88,0.90,0.91)*(ambient*1.1+sun*(0.12+0.28*abs(dot(n,F.sunDir.xyz))+scatter*0.35));
   let color=mix(reflection,foamLight,froth);
   var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
-  if(curtain){alpha=smoothstep(0.002,0.04,in.curtain.y)*(0.3+0.3*pattern)*(1.0-smoothstep(0.7,1.0,in.curtain.x));}
+  if(curtain){
+    let fall=in.curtain.x;
+    let aeration=clamp(w.y*0.35+0.08+smoothstep(0.1,0.8,fall)*pattern*0.22,0.0,0.55);
+    let breakup=mix(1.0,smoothstep(0.2,0.65,pattern),smoothstep(0.35,0.95,fall));
+    let coverage=smoothstep(0.002,0.04,in.curtain.y)*breakup*(1.0-smoothstep(0.65,1.0,fall));
+    // Clear water transmits the hull behind it. Only Fresnel reflection and
+    // bubbles obscure it; fixed opacity made dark blue plastic strips.
+    alpha=coverage*(f*(1.0-aeration)+aeration);
+    if(alpha<0.003){discard;}
+    let glint=sun*vesselSpecular(n,v,F.sunDir.xyz,0.24,vec3f(0.02))*nl;
+    let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration);
+    return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
+  }
   // Do not bridge the vertical cabin face with a diagonal water polygon.
   if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
-  return vec4f(color*alpha,alpha);
+  return vec4f(surfaceAir(color,in.world)*alpha,alpha);
 }
 `;

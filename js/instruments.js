@@ -8,7 +8,8 @@ export function instrumentReadout(boat){
   let cue=pointOfSail(s.apparentAngle,s.apparentSpeed);
   if(boat.propulsion==='manual')cue='Set-speed mode';
   else if(s.maneuver)cue='Transferring yards · crew handling rig';
-  else if(speed<-.05)cue=angle>=50&&angle<110&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';
+  else if(s.forward<0&&angle>=55&&s.rig.some(p=>p.pressure<-.5))cue='Canvas backed · transfer yards';
+  else if(speed<-.05)cue=s.forward>0&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';
   else if(angle<42&&s.apparentSpeed>=.5)cue='In irons · rudder needs water flow';
   else if(s.rig.some(p=>p.pressure<-.5))cue+=' · bad tack';
   return {speed:(Math.abs(speed)<.05?0:speed).toFixed(1),motion:speed<-.05?'ASTERN':'AHEAD',

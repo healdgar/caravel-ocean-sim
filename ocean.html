@@ -610,7 +610,87 @@ function ropeParameter(line,step){
   const t=step/RIG_SEGMENTS;return ['shroud','runner','stay','fall'].includes(line.kind)?t*t:t;
 }
 
+// ---- js/sail-aerodynamics.js ----
+
+
+// Low-order force model, not a measured Niña polar. Coefficients depend on
+// incidence to the cloth, never on the controller's requested sheet angle.
+// q*S*CL/CD and finite-span induced drag follow NASA Glenn's lift/drag notes.
+// Stall limits, efficiency and separated-plate drag are authored approximations.
+const AERO_DENSITY = 1.225;
+function aeroSmooth(a,b,x){const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);}
+function sailCoefficients(out,incidence,aspect){
+  const alpha=Math.min(Math.PI/2,Math.abs(incidence)),ar=Math.max(.5,aspect);
+  const separation=aeroSmooth(18*Math.PI/180,35*Math.PI/180,alpha);
+  const slope=2*Math.PI*ar/(ar+2);
+  const attached=slope*alpha,separated=1.6*Math.sin(alpha)*Math.cos(alpha);
+  out.lift=Math.sign(incidence)*(attached*(1-separation)+separated*separation);
+  const induced=attached*attached/(Math.PI*ar*.7);
+  out.drag=.04+induced*(1-separation)+1.6*Math.sin(alpha)**2*separation;
+  out.separation=separation;return out;
+}
+
+function createSailGeometry(subdivisions=6){
+  const samples=[],indices=[],at=new Map();
+  for(let u=0;u<=subdivisions;u++)for(let v=0;v<=subdivisions-u;v++){
+    at.set(u+','+v,samples.length);samples.push([u/subdivisions,v/subdivisions]);
+  }
+  const id=(u,v)=>at.get(u+','+v);
+  for(let u=0;u<subdivisions;u++)for(let v=0;v<subdivisions-u;v++){
+    indices.push([id(u,v),id(u+1,v),id(u,v+1)]);
+    if(u+v<subdivisions-1)indices.push([id(u+1,v),id(u+1,v+1),id(u,v+1)]);
+  }
+  return {key:new Float64Array(24).fill(NaN),samples,indices,
+    panels:Array.from({length:3*indices.length},()=>({
+      point:new Float64Array(3),normal:new Float64Array(3),area:0,aspect:1,
+    })),coefficients:{lift:0,drag:0,separation:0},force:new Float64Array(3)};
+}
+
+// A coarse triangular mesh samples the actual cloth, including its camber and
+// mast support on the bad tack. Decorative flutter is omitted from mean loads.
+// Cache geometry across rigid-body substeps; no GPU readback is required.
+function updateSailGeometry(geometry,boat,poses){
+  const sx=boat.beam/3.6,sy=HULL_VERTICAL_SCALE,sz=boat.length/12;
+  const {samples,indices}=geometry;
+  for(let m=0;m<3;m++){
+    const p=poses[m],at=m*8,key=geometry.key;
+    if(key[at]===sx&&key[at+1]===sz&&key[at+2]===p.opening&&key[at+3]===p.side
+      &&key[at+4]===p.dip&&key[at+5]===p.deployed&&key[at+6]===p.fill&&key[at+7]===p.pressure)continue;
+    key.set([sx,sz,p.opening,p.side,p.dip,p.deployed,p.fill,p.pressure],at);
+    const points=samples.map(([u,v])=>{
+      const q=lateenClothPoint(m,u,v,p,0,0);q[0]*=sx;q[1]*=sy;q[2]*=sz;return q;
+    });
+    let total=0;
+    for(let j=0;j<indices.length;j++){
+      const panel=geometry.panels[m*indices.length+j],[ia,ib,ic]=indices[j],a=points[ia],b=points[ib],c=points[ic];
+      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+      const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,n=Math.hypot(nx,ny,nz);
+      panel.normal[0]=nx/Math.max(n,1e-10);panel.normal[1]=ny/Math.max(n,1e-10);panel.normal[2]=nz/Math.max(n,1e-10);
+      for(let k=0;k<3;k++)panel.point[k]=(a[k]+b[k]+c[k])/3;
+      // The narrow visual bundle at zero set is furled cloth, not exposed area.
+      panel.area=n*.5*p.deployed/(.012+.988*p.deployed);total+=panel.area;
+    }
+    const span=Math.max(...points.map(q=>q[1]))-Math.min(...points.map(q=>q[1]));
+    for(let j=0;j<indices.length;j++)geometry.panels[m*indices.length+j].aspect=Math.max(.5,Math.min(12,span*span/Math.max(total,1e-6)));
+  }
+  return geometry.panels;
+}
+
+// Lift is perpendicular to relative airflow; drag is parallel and dissipative.
+// Reversing the mesh normal leaves the force unchanged. out is caller-owned.
+function sailPanelForce(out,coefficients,nx,ny,nz,wx,wy,wz,area,aspect){
+  const speed=Math.hypot(wx,wy,wz);
+  if(speed<1e-8||area<=0){out.fill(0);return 0;}
+  const x=wx/speed,y=wy/speed,z=wz/speed,dot=Math.max(-1,Math.min(1,nx*x+ny*y+nz*z));
+  const incidence=Math.asin(dot),q=.5*AERO_DENSITY*speed*speed*area;
+  sailCoefficients(coefficients,incidence,aspect);
+  const lift=q*coefficients.lift/Math.max(1e-8,Math.sqrt(Math.max(0,1-dot*dot))),drag=q*coefficients.drag;
+  out[0]=(nx-dot*x)*lift+x*drag;out[1]=(ny-dot*y)*lift+y*drag;out[2]=(nz-dot*z)*lift+z*drag;
+  return aeroSmooth(.5,5,speed)*aeroSmooth(.02,.20,Math.abs(incidence));
+}
+
 // ---- js/sailing.js ----
+
 
 
 
@@ -639,13 +719,6 @@ const WIND_ROUGHNESS = 0.0002;
 function windAtHeight(speed, height) {
   return speed * Math.log(Math.max(height, WIND_ROUGHNESS) / WIND_ROUGHNESS) / Math.log(10 / WIND_ROUGHNESS);
 }
-const SAIL_LOADS = SAIL_PLAN.map((s,i)=>{
-  if(s.kind==='square')return {mast:s.mast,kind:s.kind,area:SAIL_AREAS[i],top:s.top,drop:s.height*.5};
-  const centre=s.corners[0].map((_,axis)=>s.corners.reduce((sum,p)=>sum+p[axis],0)/3);
-  // Match the cloth's column gathering onto the yard (u = 1/3 at its centroid).
-  const top=s.corners[0][1]+(s.corners[1][1]-s.corners[0][1])/3;
-  return {mast:s.mast,kind:s.kind,area:SAIL_AREAS[i],top,drop:top-centre[1]};
-});
 const sailClamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const sailSmooth = (lo, hi, x) => { const t = sailClamp((x - lo) / (hi - lo), 0, 1); return t * t * (3 - 2 * t); };
 
@@ -655,9 +728,10 @@ function sailingState(boat) {
     squareYaw: 0, lateenYaw: 0, tack: 1, canvasTack: 1, forward: 0, side: 0, area: 0,
     apparentSpeed: 0, apparentAngle: 0, squareFill: 0, lateenFill: 0,
     squareTarget: 0, lateenTarget: 0, windSide: 0, windForward: 0, rollMoment: 0,
-    loadWind: {tack:1}, panelSide:new Float64Array(SAIL_LOADS.length), panelMoment:new Float64Array(SAIL_LOADS.length),
+    pitchMoment:0, panelSide:new Float64Array(3), panelMoment:new Float64Array(3),
   };
   boat.sailState.rig??=createLateenPoses(boat.sailState.set);
+  boat.sailState.geometry??=createSailGeometry();
   return boat.sailState;
 }
 
@@ -683,50 +757,47 @@ function advanceSails(boat, dt, windSpeed, windDirection) {
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
   s.lateenYaw += sailClamp(s.lateenTarget - s.lateenYaw, -dt * 0.65, dt * 0.65);
   advanceLateenRig(s,boat,dt);
+  // Pressure loads fill the canvas with a short response time. This state only
+  // advances with time; querying forces never changes the geometry underneath it.
+  for(const p of s.rig)p.fill+=((p.targetFill??0)-p.fill)*(1-Math.exp(-dt*4));
 }
 
 function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
   roll = boat.roll ?? 0, rollRate = boat.rollVelocity ?? 0) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, velocity, sideways, windSpeed, windDirection);
-  s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.squareFill=0;s.lateenFill=0;
-  const upright=Math.max(0,Math.cos(roll));
-  let squareArea=0,lateenArea=0;
-  for(let i=0;i<SAIL_LOADS.length;i++){
-    const panel=SAIL_LOADS[i],lateen=panel.kind==='lateen',deployed=lateen?s.rig[panel.mast].deployed:s.set[panel.mast];
-    // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const centreHeight=lateen?lateenClothPoint(panel.mast,1/3,1/3,s.rig[panel.mast],0,0,false)[1]:panel.top-panel.drop*(.025+.975*deployed);
-    const height=centreHeight*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
-    const lever=Math.max(.1,height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)
-      -(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE))*upright;
-    const wind=s.loadWind;wind.tack=s.tack;
-    // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
-    apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
-    const speed=wind.apparentSpeed,angle=Math.abs(wind.apparentAngle),degrees=angle*180/Math.PI;
-    const trim=lateen?Math.max(0,Math.cos(2*(Math.abs(s.rig[i].opening)-lateenSheetTarget(wind.lateenTarget,i))))
-      :Math.max(0,Math.cos(2*(s.squareYaw-wind.squareTarget)));
-    const efficiency=lateen?.72+.28*sailClamp(-s.rig[i].side*wind.tack,0,1):1;
-    const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim*efficiency;
-    const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
-    const fill=sailSmooth(.5,5,speed)*power;
-    if(lateen)s.rig[i].fill=fill;
-    s.area+=area;
-    if(lateen){s.lateenFill+=fill*area;lateenArea+=area;}else{s.squareFill+=fill*area;squareArea+=area;}
-    // Projected area and the horizontal lever both shorten as the vessel heels.
-    const pressure=.5*1.225*speed*speed*area*upright,q=pressure*power;
-    const drag=.10+1.2*Math.sin(Math.max(0,angle-Math.PI/2))**2;
-    const f=speed>1e-6?wind.windForward/speed:0,r=speed>1e-6?wind.windSide/speed:0;
-    let lift=1.1*Math.sin(angle)*(1-sailSmooth(90,125,degrees));
-    if(f>0)lift=Math.min(lift,.85*drag*Math.abs(r)/f);
-    // Luffing canvas retains wind drag and can drive the ship astern.
-    // Helm input never changes this force; the rudder needs actual water flow.
-    const noGo=1-sailSmooth(35,80,degrees),windage=pressure*noGo*.08;
-    const side=q*(lift*-f*Math.sign(r)+drag*r)+windage*r;
-    s.forward+=q*(lift*Math.abs(r)+drag*f)+windage*f;s.side+=side;
-    s.panelSide[i]=side;s.panelMoment[i]=-side*lever;s.rollMoment+=s.panelMoment[i];
+  s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.pitchMoment=0;s.squareFill=0;s.lateenFill=0;
+  s.panelSide.fill(0);s.panelMoment.fill(0);
+  const geometry=s.geometry,panels=updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
+  const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0;
+  const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const cg=(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE)-HULL_DRAFT*HULL_VERTICAL_SCALE;
+  const relativeDirection=windDirection-(boat.heading??0)*Math.PI/180;
+  const windX=Math.cos(relativeDirection),windZ=Math.sin(relativeDirection);
+  // The roll axis rotates with pitch. Point velocities and torque use the same
+  // axes as the visible hull: roll around Z, then pitch around X.
+  const ox=pitchRate,oy=-rollRate*sp,oz=rollRate*cp;
+  for(let m=0;m<3;m++){
+    let fill=0,area=0;
+    for(let j=0;j<geometry.indices.length;j++){
+      const panel=panels[m*geometry.indices.length+j],[x,y,z]=panel.point,[nx,ny,nz]=panel.normal;
+      const rx=cr*x-sr*(y-cg),ry=cp*(sr*x+cr*(y-cg))-sp*z,rz=sp*(sr*x+cr*(y-cg))+cp*z;
+      const normalX=cr*nx-sr*ny,normalY=cp*(sr*nx+cr*ny)-sp*nz,normalZ=sp*(sr*nx+cr*ny)+cp*nz;
+      const height=cp*(sr*x+cr*y)-sp*z-(boat.hydrodynamics?.sinkage??0);
+      const localWind=windAtHeight(windSpeed,height);
+      const wx=windX*localWind-sideways-(oy*rz-oz*ry);
+      const wy=-(oz*rx-ox*rz),wz=windZ*localWind+velocity-(ox*ry-oy*rx);
+      fill+=sailPanelForce(force,geometry.coefficients,normalX,normalY,normalZ,wx,wy,wz,panel.area,panel.aspect)*panel.area;
+      const [fx,fy,fz]=force;
+      const mx=ry*fz-rz*fy,my=rz*fx-rx*fz,mz=rx*fy-ry*fx;
+      const rollMoment=-sp*my+cp*mz;
+      s.forward-=fz;s.side+=fx;s.rollMoment+=rollMoment;s.pitchMoment+=mx;
+      s.panelSide[m]+=fx;s.panelMoment[m]+=rollMoment;area+=panel.area;
+    }
+    s.rig[m].targetFill=area>0?fill/area:0;
+    s.lateenFill+=s.rig[m].fill*area;s.area+=area;
   }
-  s.squareFill=squareArea>0?s.squareFill/squareArea:0;
-  s.lateenFill=lateenArea>0?s.lateenFill/lateenArea:0;
+  s.lateenFill=s.area>0?s.lateenFill/s.area:0;
   return s;
 }
 
@@ -1713,1011 +1784,6 @@ fn sprayLight(p: vec3f) -> vec3f {
 }
 `;
 
-// ---- js/wgsl/deck.js ----
-
-
-
-
-
-const DECK_COLS = 32;
-const DECK_ROWS = 96;
-// Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
-const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
-fn deckWidth(z:f32)->f32 {
-  return max(0.015,hullBreadth(z)-0.145);
-}
-fn deckFloor(z:f32)->f32 {
-  return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});
-}
-fn deckRail(z:f32)->f32 { return select(0.66,0.16,z>=${QUARTERDECK_START}); }
-fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z+6.3)/11.9); }
-fn deckPoint(uv:vec2f)->vec3f {
-  let z=uv.y*11.9-6.3;
-  return vec3f((uv.x*2.0-1.0)*deckWidth(z),deckFloor(z),z);
-}
-`;
-// Float32 retains small drainage/drying increments at high frame rates. Explicit
-// bilinear loads avoid requiring the optional float32-filterable GPU feature.
-const DECK_SAMPLING = /* wgsl */ `
-fn sampleDeck(uv:vec2f)->vec4f {
-  let size=vec2i(textureDimensions(deckWater));let p=clamp(uv,vec2f(0.0),vec2f(1.0))*vec2f(size)-0.5;
-  let base=vec2i(floor(p));let f=fract(p);
-  let a=textureLoad(deckWater,clamp(base,vec2i(0),size-1),0);
-  let b=textureLoad(deckWater,clamp(base+vec2i(1,0),vec2i(0),size-1),0);
-  let c=textureLoad(deckWater,clamp(base+vec2i(0,1),vec2i(0),size-1),0);
-  let d=textureLoad(deckWater,clamp(base+vec2i(1,1),vec2i(0),size-1),0);
-  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
-}
-`;
-const DECK_TRANSFORM = /* wgsl */ `
-fn deckWorld(p:vec3f)->vec3f {
-  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y*HULL_Y_SCALE-H.forward.xyz*p.z*(H.size.y/12.0);
-}
-`;
-
-// Conservative, positivity-limited downhill exchange. This is a thin-water visual
-// model, not a flooding/stability solver. Sea enters at the rail; stored water
-// crosses the deck, drains through scuppers, and leaves a slower-drying wet film.
-const DECK_UPDATE = FRAME_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wgsl */ `
-@group(0) @binding(0) var<uniform> F:Frame;
-@group(0) @binding(1) var<uniform> I:Interaction;
-@group(0) @binding(2) var<uniform> H:InteractionHull;
-@group(0) @binding(3) var seaTex:texture_2d_array<f32>;
-@group(0) @binding(4) var seaSamp:sampler;
-@group(0) @binding(5) var previousDeck:texture_2d<f32>;
-@group(0) @binding(6) var nextDeck:texture_storage_2d<rgba32float,write>;
-` + INTERACTION_SEA + DECK_TRANSFORM + /* wgsl */ `
-const DECK_SIZE=vec2i(${DECK_COLS},${DECK_ROWS});
-fn cellPoint(c:vec2i)->vec3f { return deckPoint((vec2f(c)+0.5)/vec2f(DECK_SIZE)); }
-fn cellArea(p:vec3f)->f32 {
-  return 2.0*deckWidth(p.z)*(H.size.x/3.6)/f32(DECK_SIZE.x)*11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
-}
-// Positive means water leaves a for b. Each face uses the identical flux on both sides.
-fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
-  if(any(b<vec2i(0)) || any(b>=DECK_SIZE)){return 0.0;}
-  let pa=cellPoint(a);let pb=cellPoint(b);
-  if(abs(pa.y-pb.y)*HULL_Y_SCALE>0.8){return 0.0;} // solid cabin face
-  let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
-  let dh=deckWorld(pa).y+wa*H.up.y-deckWorld(pb).y-wb*H.up.y;
-  let donor=select(wb,wa,dh>0.0);
-  let area=select(cellArea(pb),cellArea(pa),dh>0.0);
-  let face=select((deckWidth(pa.z)+deckWidth(pb.z))*(H.size.x/3.6)/f32(DECK_SIZE.x),11.9*(H.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
-  // Limit the head conductance as well as donor volume. sqrt(head) alone
-  // oscillates around equilibrium and leaves a checkerboard on pooled water.
-  let conductance=min(2.0*sqrt(9.81*donor)*face,min(cellArea(pa),cellArea(pb))/(8.0*dt));
-  let rate=abs(dh)*conductance;
-  return sign(dh)*min(rate,donor*area/(4.0*dt));
-}
-@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u) {
-  let c=vec2i(id.xy);if(any(c>=DECK_SIZE)){return;}
-  if(I.motion.y<0.5 || I.previous.w>0.5){textureStore(nextDeck,c,vec4f(0.0));return;}
-  let dt=max(I.previous.z*0.25,0.00001);
-  let p=cellPoint(c);let area=cellArea(p);let old=textureLoad(previousDeck,c,0);
-  let q=vec4f(flux(c,c+vec2i(1,0),dt),flux(c,c-vec2i(1,0),dt),flux(c,c+vec2i(0,1),dt),flux(c,c-vec2i(0,1),dt));
-  var depth=max(0.0,old.x-dot(q,vec4f(1.0))*dt/area);
-  var ingress=0.0;var drain=0.0;
-  if(c.x==0 || c.x==DECK_SIZE.x-1) {
-    let side=select(-1.0,1.0,c.x>0);
-    let edge=vec3f(side*(deckWidth(p.z)+0.10),p.y,p.z);
-    let rail=deckWorld(edge+vec3f(0.0,deckRail(p.z),0.0));
-    let over=max(0.0,(interactionSea(rail.xz)-rail.y)/max(H.up.y,0.35));
-    let face=11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
-    ingress=min(4.0,1.3*pow(over,1.5));
-    // Scuppers between rail posts; quarterdeck railing is open underneath.
-    let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=${QUARTERDECK_START});
-    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*HULL_Y_SCALE),1.5)),0.0,over>0.0);
-    depth+=(ingress-drain)*face*dt/area;
-  }
-  // Bound violent immersion; do not accumulate an unbounded reservoir inside the hull.
-  depth=clamp(depth-0.0015*dt,0.0,1.2);
-  let turbulence=min(1.0,ingress*0.8+dot(abs(q),vec4f(1.0))/area*0.15);
-  let froth=max(old.y*exp(-dt*1.1),turbulence)*smoothstep(0.001,0.025,depth);
-  let wet=max(old.z*exp(-dt*0.045),smoothstep(0.0005,0.01,depth));
-  textureStore(nextDeck,c,vec4f(depth,froth,wet,drain-ingress));
-}
-`;
-
-const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
-@group(0) @binding(0) var<uniform> F:Frame;
-@group(0) @binding(1) var<uniform> H:InteractionHull;
-@group(0) @binding(2) var deckWater:texture_2d<f32>;
-@group(0) @binding(3) var deckSamp:sampler;
-@group(0) @binding(4) var envCube:texture_cube<f32>;
-@group(0) @binding(5) var transLUT:texture_2d<f32>;
-@group(0) @binding(6) var<storage,read> sunVis:array<f32,4>;
-` + DECK_TRANSFORM + DECK_SAMPLING + /* wgsl */ `
-struct DeckVertex {
-  @builtin(position) pos:vec4f, @location(0) world:vec3f,
-  @location(1) uv:vec2f, @location(2) local:vec3f,
-  @location(3) curtain:vec2f,
-};
-fn corner(v:u32)->vec2f {
-  return array<vec2f,6>(vec2f(0,0),vec2f(1,0),vec2f(0,1),vec2f(0,1),vec2f(1,0),vec2f(1,1))[v];
-}
-@vertex fn washVS(@builtin(vertex_index) v:u32)->DeckVertex {
-  let cell=v/6u;let uv=(vec2f(f32(cell%${DECK_COLS*2}u),f32(cell/${DECK_COLS*2}u))+corner(v%6u))/vec2f(${DECK_COLS*2}.0,${DECK_ROWS*2}.0);
-  let water=sampleDeck(uv);
-  var p=deckPoint(uv);
-  let ripple=gnoise(p.xz*7.0+vec2f(-F.camPos.w*1.3,F.camPos.w*0.7))*min(water.x*0.08,0.008);
-  p.y+=(0.008+water.x+ripple)/HULL_Y_SCALE;
-  var o:DeckVertex;o.world=deckWorld(p);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
-  o.uv=uv;o.local=p;o.curtain=vec2f(0.0);return o;
-}
-// Continuous strips through scuppers, plus inward curtains while a crest overtops.
-@vertex fn runoffVS(@builtin(vertex_index) v:u32,@builtin(instance_index) inst:u32)->DeckVertex {
-  let side=select(-1.0,1.0,inst>=${DECK_ROWS}u);let row=inst%${DECK_ROWS}u;
-  let c=corner(v%6u);let segment=v/6u;
-  let fall=(f32(segment)+c.y)/8.0;
-  let uv=vec2f(select(0.0,1.0,side>0.0),(f32(row)+c.x)/${DECK_ROWS}.0);
-  let water=sampleDeck(uv);
-  var p=deckPoint(uv);let incoming=water.w<0.0;
-  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*HULL_Y_SCALE+1.2)/9.81));let t=fall*duration;
-  p.x+=side*(0.16+0.55*t);
-  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*HULL_Y_SCALE);
-  p.y+=select((0.03+outlet)/HULL_Y_SCALE,deckRail(p.z)+0.12/HULL_Y_SCALE,incoming);
-  if(incoming){p.x=side*(deckWidth(p.z)+0.09-(0.5+min(flow,2.0))*t);}
-  p.z+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*0.012*fall;
-  var o:DeckVertex;o.world=deckWorld(p)-vec3f(0.0,4.905*t*t,0.0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
-  o.uv=uv;o.local=p;o.curtain=vec2f(fall+0.001,flow);return o;
-}
-@fragment fn washFS(in:DeckVertex)->@location(0) vec4f {
-  let w=sampleDeck(in.uv);
-  let curtain=in.curtain.x>0.0;
-  let flowUV=in.local.xz*6.0+vec2f(-F.camPos.w*0.7,F.camPos.w*0.4);
-  let ripple=vec2f(gnoise(flowUV),gnoise(flowUV+vec2f(13.7,8.1)))*0.025;
-  // Central height differences stay continuous across cell boundaries; facet
-  // derivatives and derivatives of bilinear heights both expose the grid.
-  let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
-  let xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
-  let dz=texel.y*11.9;
-  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*HULL_Y_SCALE)/(2.0*dz);
-  let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));
-  var n=normalize(H.up.xyz-H.right.xyz*gradient.x/(H.size.x/3.6)+H.forward.xyz*gradient.y/(H.size.y/12.0));
-  n=normalize(n+H.right.xyz*ripple.x+H.forward.xyz*ripple.y);
-  let v=normalize(F.camPos.xyz-in.world);
-  if(curtain){n=normalize(H.right.xyz+H.forward.xyz*ripple.x);}
-  let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
-  let reflection=textureSampleLevel(envCube,deckSamp,reflect(-v,n),2.0).rgb;
-  let ambient=textureSampleLevel(envCube,deckSamp,vec3f(0,1,0),6.0).rgb;
-  let sun=textureSampleLevel(transLUT,deckSamp,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*vesselShadow(in.world,n);
-  let pattern=clamp(0.5+gnoise(flowUV*1.7)+gnoise(flowUV*4.1)*0.3,0.0,1.0);
-  let front=(1.0-smoothstep(0.015,0.11,w.x))*smoothstep(0.003,0.018,w.x)*w.z;
-  let froth=clamp(w.y*(0.4+pattern*0.6)+front*0.55,0.0,0.85);
-  let foamLight=vec3f(0.83,0.88,0.91)*(ambient*1.35+sun*max(n.y,0.0)*0.12);
-  let color=mix(reflection,foamLight,froth);
-  var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
-  if(curtain){alpha=smoothstep(0.002,0.04,in.curtain.y)*(0.3+0.3*pattern)*(1.0-smoothstep(0.7,1.0,in.curtain.x));}
-  // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
-  if(alpha<0.003){discard;}
-  return vec4f(color*alpha,alpha);
-}
-`;
-
-// ---- js/wgsl/spindrift.js ----
-
-
-
-const SPINDRIFT_COUNT = 1024;
-const SPINDRIFT_STRIDE = 96;
-const SPINDRIFT_STATE = /* wgsl */ `
-struct CrestPlume {
-  origin: vec4f, // birth position, age
-  launch: vec4f, // initial velocity, lifetime (zero = vacant)
-  crest: vec4f,  // crest tangent, initial half width
-  shape: vec4f,  // strength, seed, birth wind x/z
-  source: vec4f, // undisturbed crest x/z, release age, reserved
-  root: vec4f,   // tracked crest position, reserved
-};
-// Aerodynamic entrainment of a mist parcel, with an authored settling rate.
-// Birth data stays in world space when the camera or wind changes.
-fn plumePosition(p: CrestPlume, t: f32) -> vec3f {
-  let wind = vec3f(p.shape.z, 0.0, p.shape.w) * 0.68;
-  let entrain = (1.0 - exp(-1.5 * t)) / 1.5;
-  let horizontal = wind * t + (vec3f(p.launch.x, 0.0, p.launch.z) - wind) * entrain;
-  return p.origin.xyz + horizontal + vec3f(0.0, p.launch.y * t - 1.25 * t * t, 0.0);
-}
-// A short emission burst stays connected to its moving wave, then detaches.
-// The head always follows the original world-space ballistic trajectory.
-fn plumeSheetPosition(p: CrestPlume, u: f32) -> vec3f {
-  let tailAge = max(0.0, p.origin.w - p.source.z);
-  let t = mix(tailAge, p.origin.w, u);
-  let attached = (1.0 - smoothstep(0.0, 0.35, tailAge)) * (1.0-u) * (1.0-u);
-  return plumePosition(p,t) + (p.root.xyz-p.origin.xyz)*attached;
-}
-`;
-
-const SPINDRIFT_UPDATE = /* wgsl */ `
-${FRAME_WGSL}
-${SPINDRIFT_STATE}
-${FOAM_MODEL}
-${NOISE_WGSL}
-${HULL_PROFILE}
-struct CrestControl { step: vec4f }; // dt, reset, amount, frame
-struct CrestHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var<uniform> C: CrestControl;
-@group(0) @binding(2) var<uniform> hull: CrestHull;
-@group(0) @binding(3) var displacement: texture_2d_array<f32>;
-@group(0) @binding(4) var derivatives: texture_2d_array<f32>;
-@group(0) @binding(5) var seaSampler: sampler;
-@group(0) @binding(6) var<storage, read_write> plumes: array<CrestPlume>;
-fn crestRandom(seed: u32) -> f32 { return f32(pcgHash(seed)) / 4294967296.0; }
-fn crestDisplacement(q: vec2f) -> vec3f {
-  var d = vec3f(0.0);
-  for (var c = 0u; c < 6u; c++) {
-    let invL = F.cascInvL[c >> 2u][c & 3u];
-    let mip = max(0.0, log2(256.0 * invL * 0.65));
-    d += textureSampleLevel(displacement, seaSampler, fract(q * invL), i32(c), mip).xyz;
-  }
-  return d;
-}
-struct CrestSample { d: vec4f, derivative: vec4f };
-fn crestSample(q: vec2f) -> CrestSample {
-  var s: CrestSample;
-  for (var c = 0u; c < 6u; c++) {
-    let invL = F.cascInvL[c >> 2u][c & 3u];
-    let mip = max(0.0, log2(256.0 * invL * 0.65));
-    s.d += textureSampleLevel(displacement, seaSampler, fract(q * invL), i32(c), mip);
-    s.derivative += textureSampleLevel(derivatives, seaSampler, fract(q * invL), i32(c), mip);
-  }
-  return s;
-}
-fn crestBreaking(s: CrestSample) -> f32 {
-  return breakingCompression(s.derivative.z, s.derivative.w, s.d.w, 0.45);
-}
-fn crestInHull(world: vec3f) -> bool {
-  if (hull.rig.z < 0.5) { return false; }
-  let delta = world - hull.origin.xyz;
-  let local = vec3f(dot(delta,hull.right.xyz)*3.6/hull.size.x,
-    dot(delta,hull.up.xyz)/HULL_Y_SCALE,-dot(delta,hull.forward.xyz)*12.0/hull.size.y);
-  return hullExcludesOcean(local);
-}
-// Fit a local ridge across the compressed direction, never a trough or slope.
-// Returns the peak offset and its rise above the two shoulders (metres).
-fn crestPeak(q: vec2f, normal: vec2f, height: f32) -> vec2f {
-  let radius = 1.4;
-  let lo = crestDisplacement(q-normal*radius).y;
-  let hi = crestDisplacement(q+normal*radius).y;
-  let curvature = 2.0*height-lo-hi;
-  if (curvature <= 0.04) { return vec2f(0.0); }
-  let offset = 0.5*radius*(hi-lo)/curvature;
-  if (abs(offset) > radius) { return vec2f(0.0); }
-  return vec2f(offset,curvature*0.5);
-}
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= ${SPINDRIFT_COUNT}u) { return; }
-  var p = plumes[id.x];
-  if (C.step.y > 0.5 || C.step.z <= 0.0) {
-    p.launch.w = 0.0; plumes[id.x] = p; return;
-  }
-  let dt = C.step.x;
-  if (p.launch.w > 0.0) {
-    p.origin.w += dt;
-    if (p.origin.w < p.source.z) {
-      let q = p.source.xy;
-      let normal = vec2f(-p.crest.z,p.crest.x);
-      let peak = crestPeak(q,normal,crestDisplacement(q).y);
-      let nextQ = q + normal*clamp(peak.x,-12.0*dt,12.0*dt);
-      let s = crestSample(nextQ);
-      let root = vec3f(nextQ.x+s.d.x,s.d.y+0.035,nextQ.y+s.d.z);
-      if (peak.y < 0.035 || crestBreaking(s) < 0.15 || crestInHull(root)) {
-        p.source.z = p.origin.w;
-      } else {
-        p.source = vec4f(nextQ,p.source.z,0.0);
-        p.root = vec4f(root,0.0);
-      }
-    }
-    let head = plumePosition(p, p.origin.w);
-    var landed = false;
-    // Stagger collision work. Two displacement samples invert the horizontal wave offset.
-    if ((id.x + u32(C.step.w)) % 4u == 0u && p.origin.w > p.source.z + 0.15) {
-      let q = head.xz - crestDisplacement(head.xz).xz;
-      landed = head.y < crestDisplacement(q).y - 0.15;
-    }
-    if (p.origin.w >= p.launch.w || distance(head.xz, F.camPos.xz) > 85.0 || landed) { p.launch.w = 0.0; }
-    plumes[id.x] = p;
-    return;
-  }
-  let seed = pcgHash(id.x + u32(C.step.w) * 104729u);
-  let wind = F.windP[0].xy * F.windP[0].z;
-  // A smooth, authored onset: breaking alone does not make airborne spindrift.
-  let windLift = smoothstep(8.0, 19.0, F.windP[0].z);
-  if (windLift == 0.0 || crestRandom(seed) > 1.0 - exp(-5.0 * windLift * C.step.z * dt)) { return; }
-  let cell = vec2f(f32(id.x % 32u), f32(id.x / 32u)) - 15.5;
-  let worldCell = floor(F.camPos.xz / 4.0) + cell;
-  // World-anchored search points: a moving wave encounters them, rather than
-  // resampling a uniform cloud of unrelated points every frame.
-  let cellSeed = pcgHash(bitcast<u32>(i32(floor(worldCell.x))) ^ pcgHash(bitcast<u32>(i32(floor(worldCell.y)))));
-  let jitter = vec2f(crestRandom(cellSeed),crestRandom(cellSeed+1u))-0.5;
-  var q = (worldCell+jitter*0.6)*4.0;
-  if (distance(q, F.camPos.xz) > 70.0) { return; }
-  // Reject samples behind the observer before fetching the six cascades.
-  if (dot(vec3f(q.x, F.camPos.y, q.y) - F.camPos.xyz, F.camFwd.xyz) < -8.0) { return; }
-  var s = crestSample(q);
-  if (crestBreaking(s) < 0.2) { return; }
-  // The least-compressed eigenvector runs ALONG the crest; its perpendicular
-  // crosses the ridge. Compression by itself also occurs on wave faces.
-  let angle = 0.5 * atan2(2.0*s.d.w,s.derivative.z-s.derivative.w);
-  let tangent = vec3f(cos(angle),0.0,sin(angle));
-  let normal = vec2f(-tangent.z,tangent.x);
-  let peak = crestPeak(q,normal,s.d.y);
-  if (peak.y < 0.055) { return; }
-  q += normal*peak.x;
-  s = crestSample(q);
-  let shoulders = vec2f(crestDisplacement(q-normal*1.4).y,crestDisplacement(q+normal*1.4).y);
-  let prominence = s.d.y-max(shoulders.x,shoulders.y);
-  let breaking = crestBreaking(s);
-  if (prominence < 0.035 || breaking < 0.2) { return; }
-  let origin = vec3f(q.x+s.d.x,s.d.y+0.035,q.y+s.d.z);
-  if (crestInHull(origin)) { return; }
-  let strength = windLift * breaking * mix(0.55,1.0,smoothstep(0.06,0.4,prominence));
-  p.origin = vec4f(origin, 0.0);
-  p.launch = vec4f(wind.x*0.16,0.4+1.0*strength,
-    wind.y*0.16,0.9+0.8*strength+crestRandom(seed+4u)*0.3);
-  p.crest = vec4f(tangent,(0.8+1.4*strength)*mix(0.7,1.2,crestRandom(seed+5u)));
-  p.shape = vec4f(strength, crestRandom(seed + 6u) * 100.0, wind);
-  p.source = vec4f(q,0.28+0.32*strength,0.0);
-  p.root = vec4f(origin,0.0);
-  plumes[id.x] = p;
-}
-`;
-
-// Shared with the GPU silhouette regression. Density vanishes on the complete
-// volume boundary, including its underside; the raster quad carries no opacity.
-const SPINDRIFT_VOLUME = /* wgsl */ `
-fn mistInterval(origin:vec3f,direction:vec3f)->vec2f {
-  let a=dot(direction,direction);let middle=-dot(origin,direction)/a;
-  // Closest-point form avoids subtracting two large squared distances when
-  // looking at a thin mist volume from the far end of the emission radius.
-  let closest=origin+direction*middle;
-  let halfSquared=(1.0-dot(closest,closest))/a;
-  if(halfSquared<=0.0){return vec2f(0);}
-  let halfSpan=sqrt(halfSquared);
-  return vec2f(max(0.0,middle-halfSpan),max(0.0,middle+halfSpan));
-}
-fn mistDensity(p:vec3f,seed:f32,age:f32)->f32 {
-  let radial=max(0.0,1.0-dot(p,p));
-  let flow=vec2f(p.x*3.1+p.z*.7,p.y*4.5-p.z*.55-age*.35)+seed;
-  let breakup=smoothstep(-.22,.32,gnoise(flow));
-  return radial*radial*(.18+.82*breakup);
-}
-fn mistOpticalDepth(origin:vec3f,direction:vec3f,seed:f32,age:f32)->vec2f {
-  let span=mistInterval(origin,direction);let step=(span.y-span.x)/3.0;
-  var density=0.0;
-  for(var i=0u;i<3u;i++){
-    density+=mistDensity(origin+direction*(span.x+(f32(i)+.5)*step),seed,age);
-  }
-  return vec2f(density*step,span.x);
-}
-`;
-
-const SPINDRIFT_RENDER = /* wgsl */ `
-${FRAME_WGSL}
-${ATMO_CORE_WGSL}
-${SPINDRIFT_STATE}
-${NOISE_WGSL}
-${SPINDRIFT_VOLUME}
-${SHADOW_SAMPLE}
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var<storage, read> plumes: array<CrestPlume>;
-@group(0) @binding(2) var environment: texture_cube<f32>;
-@group(0) @binding(3) var lightSampler: sampler;
-@group(0) @binding(4) var transmittance: texture_2d<f32>;
-@group(0) @binding(5) var<storage, read> sunVisibility: vec4f;
-struct CrestVertex {
-  @builtin(position) position: vec4f,
-  @location(0) ray:vec3f,
-  @location(1) @interpolate(flat) center:vec3f,
-  @location(2) @interpolate(flat) radii:vec3f,
-  @location(3) @interpolate(flat) wind:vec2f,
-  @location(4) @interpolate(flat) light:vec3f,
-  @location(5) @interpolate(flat) shape:vec3f,
-};
-@vertex fn crestVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->CrestVertex {
-  let p=plumes[instance];var o:CrestVertex;
-  o.position=vec4f(2,2,0,1);o.radii=vec3f(1);o.shape=vec3f(0);
-  if(p.launch.w<=0.0){return o;}
-  // Four overlapping parcels fill one continuous, crest-born burst. Their
-  // world-space ellipsoids do not turn into planes when the camera moves.
-  let parcel=f32(vertex/6u);let u=(parcel+.5)/4.0;
-  let corner=array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1))[vertex%6u];
-  let age=p.origin.w;let detached=smoothstep(p.source.z,p.source.z+.6,age);
-  let tail=plumeSheetPosition(p,0.0);let head=plumeSheetPosition(p,1.0);
-  let wind=normalize(p.shape.zw+vec2f(.00001,0));
-  let along=vec3f(wind.x,0,wind.y);let across=vec3f(wind.y,0,-wind.x);
-  let center=plumeSheetPosition(p,u)+p.crest.xyz*(sin(p.shape.y+parcel*2.4)*p.crest.w*.20)
-    +vec3f(0,.035+u*.06,0);
-  let relative=center-F.camPos.xyz;let distanceToEye=length(relative);
-  let metresPerPixel=max(distanceToEye,1.0)*2.0*length(F.camUp.xyz)*F.screen.w;
-  var radii=vec3f(p.crest.w*(.40+.12*u+.15*detached),.10+.16*u+.12*detached,
-    .20+length(head-tail)*.24+.12*detached);
-  radii*=min(1.0,metresPerPixel*65.0/max(max(radii.x,radii.y),radii.z));
-  let right=normalize(F.camRight.xyz);let up=normalize(F.camUp.xyz);let forward=normalize(F.camFwd.xyz);
-  let r=vec3f(dot(right,across),right.y,dot(right,along))*radii;
-  let v=vec3f(dot(up,across),up.y,dot(up,along))*radii;
-  let d=vec3f(dot(forward,across),forward.y,dot(forward,along))*radii;
-  let depth=length(d);let padding=distanceToEye/max(distanceToEye-depth,.1);
-  let ray=relative+right*corner.x*length(r)*padding+up*corner.y*length(v)*padding-forward*depth;
-  o.position=F.viewProj*vec4f(ray,1);o.ray=ray;o.center=relative;o.radii=radii;o.wind=wind;
-  let view=normalize(-relative);
-  let sky=textureSampleLevel(environment,lightSampler,vec3f(0,1,0),5.0).rgb;
-  let sunlight=textureSampleLevel(transmittance,lightSampler,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb;
-  // Normalized scattering replaces the unbounded orange sheet illumination.
-  let phase=phaseMie(dot(-view,F.sunDir.xyz),.5);
-  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*vesselShadow(center,vec3f(0,1,0));
-  let fade=smoothstep(0.0,.08,age)*(1.0-smoothstep(.35,1.0,age/p.launch.w));
-  o.shape=vec3f((.65+.70*p.shape.x)*fade*smoothstep(1.0,4.0,distanceToEye)
-    *(1.0-smoothstep(55.0,80.0,distanceToEye)),p.shape.y+parcel*7.1,age);
-  return o;
-}
-struct CrestFragment { @location(0) color:vec4f,@builtin(frag_depth) depth:f32 };
-@fragment fn crestFS(o:CrestVertex)->CrestFragment {
-  if(o.shape.x<=0.0){discard;}
-  let direction=normalize(o.ray);let across=vec3f(o.wind.y,0,-o.wind.x);let along=vec3f(o.wind.x,0,o.wind.y);
-  let origin=vec3f(dot(-o.center,across),-o.center.y,dot(-o.center,along))/o.radii;
-  let ray=vec3f(dot(direction,across),direction.y,dot(direction,along))/o.radii;
-  let integrated=mistOpticalDepth(origin,ray,o.shape.y,o.shape.z);
-  let alpha=(1.0-exp(-integrated.x*o.shape.x))*exp(-dot(F.fogExt.rgb,vec3f(.333333))*integrated.y);
-  if(alpha<.001){discard;}
-  let clip=F.viewProj*vec4f(direction*integrated.y,1);
-  var out:CrestFragment;out.color=vec4f(o.light*alpha,alpha);out.depth=clip.z/clip.w;return out;
-}
-`;
-
-// ---- js/wgsl/wetness.js ----
-
-
-
-
-
-
-const WET_GRID=[24,32,48];
-const WET_SEA_SIZE=32;
-const WET_SPACE=/* wgsl */ `
-const wetMin=vec3f(-4.2,-1.5,-8.7);
-const wetSpan=vec3f(8.4,11.0,16.4);
-const wetSize=vec3u(${WET_GRID.join(',')});
-fn wetLocal(world:vec3f)->vec3f {
-  let q=world-hull.origin.xyz;
-  return vec3f(dot(q,hull.right.xyz),dot(q,hull.up.xyz),-dot(q,hull.forward.xyz))/vec3f(hull.size.x/3.6,HULL_Y_SCALE,hull.size.y/12.0);
-}
-fn wetWorld(p:vec3f)->vec3f {return rotateHull(p*vec3f(hull.size.x/3.6,HULL_Y_SCALE,hull.size.y/12.0))+hull.origin.xyz;}
-fn wetIndex(p:vec3u)->u32 {return (p.z*wetSize.y+p.y)*wetSize.x+p.x;}
-`;
-// Absorbed moisture and a short-lived surface film have separate lifetimes.
-// Rates are authored visual approximations; they do not add mass to the ship.
-const WET_MATERIAL=/* wgsl */ `
-fn moistureStep(old:vec2f,water:f32,spray:f32,kind:u32,wind:f32,dt:f32)->vec2f {
-  let drying=array<f32,4>(0.004,0.002,0.006,0.004)[kind]*(1.0+min(wind,30.0)*0.025);
-  let absorbed=old.x*exp(-dt*drying);
-  let film=old.y*exp(-dt*(0.18+min(wind,30.0)*0.012));
-  let uptake=water*18.0+spray*1.8;
-  return clamp(vec2f(absorbed+(1.0-absorbed)*(1.0-exp(-dt*uptake)),
-    film+(1.0-film)*(1.0-exp(-dt*(water*25.0+spray*4.0)))),vec2f(0),vec2f(1));
-}
-`;
-const WET_CLEAR=/* wgsl */ `
-@group(0) @binding(0) var<storage,read_write> mist:array<atomic<u32>>;
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
-  if(id.x<arrayLength(&mist)){atomicStore(&mist[id.x],0u);}
-}
-`;
-const WET_DEPOSIT=INTERACTION_TYPES+VESSEL_RIG+DECK_PROFILE+SPINDRIFT_STATE+/* wgsl */ `
-@group(0) @binding(0) var<uniform> hull:Hull;
-@group(0) @binding(1) var<uniform> I:Interaction;
-@group(0) @binding(2) var<storage,read_write> mist:array<atomic<u32>>;
-@group(0) @binding(3) var<storage,read> drops:array<Drop>;
-@group(0) @binding(4) var<storage,read> sheets:array<Sheet>;
-@group(0) @binding(5) var<storage,read> plumes:array<CrestPlume>;
-`+WET_SPACE+/* wgsl */ `
-fn deposit(world:vec3f,amount:f32){
-  let q=(wetLocal(world)-wetMin)/wetSpan*vec3f(wetSize)-0.5;
-  let base=vec3i(floor(q));let f=fract(q);
-  for(var i=0u;i<8u;i++){
-    let corner=vec3i(vec3u(i&1u,(i>>1u)&1u,(i>>2u)&1u));let p=base+corner;
-    if(all(p>=vec3i(0))&&all(p<vec3i(wetSize))){
-      let w=mix(vec3f(1)-f,f,vec3f(corner));
-      atomicAdd(&mist[wetIndex(vec3u(p))],u32(amount*w.x*w.y*w.z*4096.0));
-    }
-  }
-}
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
-  if(I.motion.y<0.5 || I.previous.w>0.5){return;}
-  let i=id.x;
-  if(i<${SPRAY_COUNT}u){let d=drops[i];if(d.position.w>0.0){deposit(d.position.xyz,mix(0.6,0.18,d.shape.z));}}
-  if(i<${SHEET_COUNT}u){let s=sheets[i];if(s.velocity.w>0.0){
-    let t=s.origin.w*.8;let p=s.origin.xyz+s.velocity.xyz*t-vec3f(0,4.905*t*t,0);
-    for(var j=-2;j<=2;j++){deposit(p+s.tangent.xyz*f32(j)*s.tangent.w*.5,s.axis.w*.45);}
-  }}
-  if(i<${SPINDRIFT_COUNT}u){let p=plumes[i];if(p.launch.w>0.0){
-    let at=plumePosition(p,p.origin.w);
-    for(var j=-1;j<=1;j++){deposit(at+p.crest.xyz*f32(j)*p.crest.w,p.shape.x*.12);}
-  }}
-}
-`;
-const WET_SEA=FRAME_WGSL+VESSEL_RIG+DECK_PROFILE+/* wgsl */ `
-@group(0) @binding(0) var<uniform> F:Frame;
-@group(0) @binding(1) var<uniform> hull:Hull;
-@group(0) @binding(2) var seaTex:texture_2d_array<f32>;
-@group(0) @binding(3) var seaSamp:sampler;
-@group(0) @binding(4) var levels:texture_storage_2d<r32float,write>;
-`+WET_SPACE+INTERACTION_SEA+/* wgsl */ `
-@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
-  let uv=(vec2f(id.xy)+.5)/${WET_SEA_SIZE}.0;
-  let p=vec3f(wetMin.x+uv.x*wetSpan.x,0,wetMin.z+uv.y*wetSpan.z);
-  textureStore(levels,vec2i(id.xy),vec4f(interactionSea(wetWorld(p).xz)));
-}
-`;
-const WET_UPDATE=INTERACTION_TYPES+VESSEL_RIG+DECK_PROFILE+WET_MATERIAL+/* wgsl */ `
-struct WetProbe {position:vec4f,uvKind:vec4f};
-@group(0) @binding(0) var<uniform> hull:Hull;
-@group(0) @binding(1) var<uniform> I:Interaction;
-@group(0) @binding(2) var<storage,read> probes:array<WetProbe>;
-@group(0) @binding(3) var<storage,read_write> moisture:array<vec2f>;
-@group(0) @binding(4) var<storage,read> mist:array<u32>;
-@group(0) @binding(5) var levels:texture_2d<f32>;
-@group(0) @binding(6) var deckWater:texture_2d<f32>;
-`+WET_SPACE+DECK_SAMPLING+/* wgsl */ `
-fn mistAt(p:vec3f)->f32 {
-  let q=(p-wetMin)/wetSpan*vec3f(wetSize)-.5;let base=vec3i(floor(q));let f=fract(q);var value=0.0;
-  for(var i=0u;i<8u;i++){
-    let corner=vec3i(vec3u(i&1u,(i>>1u)&1u,(i>>2u)&1u));let at=base+corner;
-    if(all(at>=vec3i(0))&&all(at<vec3i(wetSize))){let w=mix(vec3f(1)-f,f,vec3f(corner));value+=f32(mist[wetIndex(vec3u(at))])*w.x*w.y*w.z/4096.0;}
-  }
-  return min(value,8.0);
-}
-fn levelAt(world:vec3f)->f32 {
-  // Project onto the local y=0 plane before looking up world-space sea heights.
-  let qWorld=world.xz-hull.origin.xz;let r=hull.right.xz;let back=-hull.forward.xz;
-  let det=max(.1,r.x*back.y-r.y*back.x);
-  let p=vec2f(qWorld.x*back.y-qWorld.y*back.x,r.x*qWorld.y-r.y*qWorld.x)/det/vec2f(hull.size.x/3.6,hull.size.y/12.0);
-  let uv=(p-wetMin.xz)/wetSpan.xz;
-  let q=clamp(uv,vec2f(0),vec2f(1))*${WET_SEA_SIZE}.0-.5;let b=vec2i(floor(q));let f=fract(q);
-  let hi=vec2i(${WET_SEA_SIZE-1});
-  return mix(mix(textureLoad(levels,clamp(b,vec2i(0),hi),0).x,textureLoad(levels,clamp(b+vec2i(1,0),vec2i(0),hi),0).x,f.x),
-    mix(textureLoad(levels,clamp(b+vec2i(0,1),vec2i(0),hi),0).x,textureLoad(levels,clamp(b+vec2i(1,1),vec2i(0),hi),0).x,f.x),f.y);
-}
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
-  let i=id.x;if(i>=arrayLength(&probes)){return;}let probe=probes[i];
-  if(I.motion.y<.5 || I.previous.w>.5 || probe.uvKind.w<.5){moisture[i]=vec2f(0);return;}
-  let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);
-  let p=rig.position;let world=wetWorld(p);let floor=deckFloor(p.z);
-  let inFootprint=p.z> -6.3 && p.z<5.6 && abs(p.x)<deckWidth(p.z)-.10 && p.y>=hullDeck(p.z)-.08;
-  let sheltered=inFootprint && p.z>=${QUARTERDECK_START} && p.y<${QUARTERDECK_HEIGHT-.08};
-  var water=smoothstep(-.025,.08,levelAt(world)-world.y);
-  var spray=mistAt(p);
-  if(inFootprint && p.y<=floor+deckRail(p.z)){
-    let wash=sampleDeck(deckUV(p));
-    water=smoothstep(.0003,.003,wash.x)*smoothstep(-.015,.035,wash.x-(p.y-floor)*HULL_Y_SCALE);
-    if(p.y<floor-.08){water=0.0;}
-  }
-  if(sheltered){water=0.0;spray=0.0;}
-  moisture[i]=moistureStep(moisture[i],water,spray,u32(probe.uvKind.z),length(I.motion.zw),I.previous.z);
-}
-`;
-
-// ---- js/wgsl/sim.js ----
-
-// FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
-
-const FFT_MATH = /* wgsl */ `
-const N: u32 = ${N}u;
-const LOGN: u32 = ${LOGN}u;
-const PI: f32 = 3.14159265358979;
-fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
-`;
-
-const SIM_STRUCT = FFT_MATH + /* wgsl */ `
-const GRAV: f32 = 9.81;
-const SURF: f32 = 7.4e-5;   // surface tension / density
-
-struct Sim {
-  L:          array<vec4f, 2>,  // patch size per cascade ([c>>2][c&3])
-  kMin:       array<vec4f, 2>,
-  kMax:       array<vec4f, 2>,
-  foamDecay:  array<vec4f, 2>,  // 1/s per cascade
-  foamThresh: array<vec4f, 2>,  // Jacobian threshold per cascade
-  wind:       vec4f,  // U10 m/s, direction rad, fetch m, gamma
-  swell:      vec4f,  // Hs m, direction rad, peak omega, spreading exponent
-  misc:       vec4f,  // choppiness, short wave cut (m), loop period s, seed
-  timeP:      vec4f,  // time (looped), dt, foam gain, spectrum gain
-};
-@group(0) @binding(0) var<uniform> S: Sim;
-
-fn waveVec(x: u32, y: u32, L: f32) -> vec2f {
-  let nx = select(i32(x), i32(x) - i32(N), x >= N / 2u);
-  let ny = select(i32(y), i32(y) - i32(N), y >= N / 2u);
-  return vec2f(f32(nx), f32(ny)) * (2.0 * PI / L);
-}
-fn omegaOf(k: f32) -> f32 { return sqrt(GRAV * k + SURF * k * k * k); }
-fn dOmegaOf(k: f32) -> f32 { return (GRAV + 3.0 * SURF * k * k) / (2.0 * omegaOf(k)); }
-fn mulI(a: vec2f) -> vec2f { return vec2f(-a.y, a.x); }
-`;
-
-const SIM_INIT = SIM_STRUCT + NOISE_WGSL + /* wgsl */ `
-@group(0) @binding(1) var<storage, read_write> h0: array<vec4f>;
-
-fn rand01(s: u32) -> f32 { return (f32(pcgHash(s) >> 8u) + 0.5) / 16777216.0; }
-fn gauss2(seed: u32) -> vec2f {
-  let u1 = rand01(seed * 2u + 17u);
-  let u2 = rand01(seed * 2u + 18u + pcgHash(seed));
-  let r = sqrt(-2.0 * log(u1));
-  let a = 2.0 * PI * u2;
-  return r * vec2f(cos(a), sin(a));
-}
-fn wrapAngle(a: f32) -> f32 {
-  var x = a;
-  x = x - 2.0 * PI * floor((x + PI) / (2.0 * PI));
-  return x;
-}
-fn jonswap(w: f32, wp: f32, alpha: f32, gamma: f32) -> f32 {
-  let sigma = select(0.09, 0.07, w <= wp);
-  let d = (w - wp) / (sigma * wp);
-  let r = exp(-0.5 * d * d);
-  let q = wp / w;
-  let q2 = q * q;
-  return alpha * GRAV * GRAV / (w * w * w * w * w) * exp(-1.25 * q2 * q2) * pow(gamma, r);
-}
-// Donelan-Banner directional spreading (normalised over [-pi, pi])
-fn donelanBanner(theta: f32, w: f32, wp: f32) -> f32 {
-  let ratio = w / wp;
-  var beta: f32;
-  if (ratio < 0.95) {
-    beta = 2.61 * pow(ratio, 1.3);
-  } else if (ratio < 1.6) {
-    beta = 2.28 * pow(ratio, -1.3);
-  } else {
-    let eps = -0.4 + 0.8393 * exp(-0.567 * log(ratio * ratio));
-    beta = pow(10.0, eps);
-  }
-  let sh = 1.0 / cosh(clamp(beta * theta, -20.0, 20.0));
-  return beta / (2.0 * tanh(beta * PI)) * sh * sh;
-}
-// cos^2s(theta/2) spreading, normalised
-fn cosSpread(theta: f32, s: f32) -> f32 {
-  let q = sqrt(s + 0.25) / (2.0 * sqrt(PI));
-  return q * pow(abs(cos(theta * 0.5)), 2.0 * s);
-}
-
-fn spectrum(k: vec2f) -> f32 {
-  let kl = length(k);
-  let w = omegaOf(kl);
-  let theta = atan2(k.y, k.x);
-  // fetch-limited wind sea (JONSWAP)
-  let U = S.wind.x;
-  let F = S.wind.z;
-  var Sw = 0.0;
-  if (U > 0.1) {
-    let alpha = 0.076 * pow(U * U / (F * GRAV), 0.22);
-    let wp = 22.0 * pow(GRAV * GRAV / (U * F), 1.0 / 3.0);
-    Sw = jonswap(w, wp, alpha, S.wind.w) * donelanBanner(wrapAngle(theta - S.wind.y), w, wp);
-  }
-  // swell: narrow, long-crested JONSWAP
-  if (S.swell.x > 0.001) {
-    let ws = S.swell.z;
-    let gs = 6.0;
-    let hs4 = S.swell.x * 0.25;
-    let alphaS = hs4 * hs4 * 5.0 * ws * ws * ws * ws / (GRAV * GRAV) * (1.0 - 0.287 * log(gs));
-    Sw += jonswap(w, ws, alphaS, gs) * cosSpread(wrapAngle(theta - S.swell.y), S.swell.w);
-  }
-  // damp the very shortest waves
-  let sc = S.misc.y;
-  Sw *= exp(-kl * kl * sc * sc);
-  return Sw * dOmegaOf(kl) / kl * S.timeP.w;
-}
-
-fn amplitude(k: vec2f, c: u32) -> f32 {
-  let kl = length(k);
-  if (kl < 1e-5 || kl < S.kMin[c >> 2u][c & 3u] || kl >= S.kMax[c >> 2u][c & 3u]) { return 0.0; }
-  let dk = 2.0 * PI / S.L[c >> 2u][c & 3u];
-  // the finest cascades are toned down (they otherwise read as crumpled foil)
-  let g = select(1.0, select(0.85, 0.6, c == 5u), c >= 4u);
-  return sqrt(max(spectrum(k), 0.0)) * dk * 0.5 * g;
-}
-
-@compute @workgroup_size(16, 16, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let c = id.z;
-  let L = S.L[c >> 2u][c & 3u];
-  let k = waveVec(id.x, id.y, L);
-  let mx = (N - id.x) % N;
-  let my = (N - id.y) % N;
-  let seed = u32(S.misc.w) * 7919u + c * 1000003u;
-  let a = gauss2(seed + (id.y * N + id.x)) * amplitude(k, c);
-  let b = gauss2(seed + (my * N + mx)) * amplitude(-k, c);
-  h0[(c * N + id.y) * N + id.x] = vec4f(a, b.x, -b.y);
-}
-`;
-
-const EVOLVE = /* wgsl */ `
-@group(0) @binding(1) var<storage, read> h0: array<vec4f>;
-struct Spectrum { a: vec4f, b: vec4f };
-
-fn evolve(x: u32, y: u32, c: u32) -> Spectrum {
-  let idx = (c * N + y) * N + x;
-  let k = waveVec(x, y, S.L[c >> 2u][c & 3u]);
-  let kl = length(k);
-  if (kl < 1e-5) {
-    return Spectrum(vec4f(0.0), vec4f(0.0));
-  }
-  let w0 = 2.0 * PI / S.misc.z;
-  let w = floor(omegaOf(kl) / w0) * w0;
-  let ph = w * S.timeP.x;
-  let e = vec2f(cos(ph), sin(ph));
-  let H0 = h0[idx];
-  // h0(k) travels along +k: h(k,t) = h0(k) e^{-iwt} + conj(h0(-k)) e^{iwt}
-  let h = cmul(H0.xy, vec2f(e.x, -e.y)) + cmul(H0.zw, e);
-  let ih = mulI(h);
-  let lam = S.misc.x;
-  let ik = 1.0 / kl;
-  let Dx = ih * (lam * k.x * ik);
-  let Dz = ih * (lam * k.y * ik);
-  let jxz = h * (-lam * k.x * k.y * ik);
-  let sx = ih * k.x;
-  let sz = ih * k.y;
-  let jxx = h * (-lam * k.x * k.x * ik);
-  let jzz = h * (-lam * k.y * k.y * ik);
-  return Spectrum(vec4f(Dx + mulI(Dz), h + mulI(jxz)),
-                  vec4f(sx + mulI(sz), jxx + mulI(jzz)));
-}
-`;
-
-const FFT_CORE = /* wgsl */ `
-var<workgroup> wa: array<vec4f, ${N}>;
-var<workgroup> wb: array<vec4f, ${N}>;
-fn bitrev(i: u32) -> u32 { return reverseBits(i) >> (32u - LOGN); }
-// In-place radix-2 inverse FFT over shared memory (input already bit-reversed).
-fn butterflies(t: u32) {
-  for (var s = 0u; s < LOGN; s++) {
-    let half = 1u << s;
-    let pos = t & (half - 1u);
-    let i0 = ((t >> s) << (s + 1u)) + pos;
-    let i1 = i0 + half;
-    let ang = PI * f32(pos) / f32(half);
-    let w = vec2f(cos(ang), sin(ang));
-    let a0 = wa[i0]; let a1 = wa[i1];
-    let b0 = wb[i0]; let b1 = wb[i1];
-    let ta = vec4f(cmul(a1.xy, w), cmul(a1.zw, w));
-    let tb = vec4f(cmul(b1.xy, w), cmul(b1.zw, w));
-    wa[i0] = a0 + ta; wa[i1] = a0 - ta;
-    wb[i0] = b0 + tb; wb[i1] = b0 - tb;
-    workgroupBarrier();
-  }
-}
-`;
-
-// Evolve directly into workgroup memory, avoiding two full-size spectrum buffers.
-const FFT_ROWS = SIM_STRUCT + EVOLVE + FFT_CORE + /* wgsl */ `
-@group(0) @binding(2) var<storage, read_write> outA: array<vec4f>;
-@group(0) @binding(3) var<storage, read_write> outB: array<vec4f>;
-
-@compute @workgroup_size(${N / 2})
-fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32) {
-  let base = (wg.z * N + wg.x) * N;
-  let e0 = t;
-  let e1 = t + N / 2u;
-  let s0 = evolve(e0, wg.x, wg.z);
-  let s1 = evolve(e1, wg.x, wg.z);
-  wa[bitrev(e0)] = s0.a;
-  wa[bitrev(e1)] = s1.a;
-  wb[bitrev(e0)] = s0.b;
-  wb[bitrev(e1)] = s1.b;
-  workgroupBarrier();
-  butterflies(t);
-  outA[base + e0] = wa[e0];
-  outA[base + e1] = wa[e1];
-  outB[base + e0] = wb[e0];
-  outB[base + e1] = wb[e1];
-}
-`;
-
-// Column pass + final assembly (displacement / derivative / slope-moment textures).
-const FFT_COLS = FFT_MATH + FFT_CORE + /* wgsl */ `
-@group(0) @binding(0) var<storage, read> inA: array<vec4f>;
-@group(0) @binding(1) var<storage, read> inB: array<vec4f>;
-@group(0) @binding(2) var dispOut: texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(3) var derivOut: texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(4) var momOut: texture_storage_2d_array<rgba16float, write>;
-
-fn emit(x: u32, y: u32, c: u32, a: vec4f, b: vec4f) {
-  // a = (Dx, Dz, Dy, jxz), b = (sx, sz, jxx, jzz)
-  let p = vec2u(x, y);
-  textureStore(dispOut, p, c, vec4f(a.x, a.z, a.y, a.w));
-  textureStore(derivOut, p, c, b);
-  // Duplicate jxz in the unused moment alpha: surface shading needs it but
-  // not displacement.xyz. Both copies retain identical half precision/mips.
-  textureStore(momOut, p, c, vec4f(b.x * b.x, b.y * b.y, b.x * b.y, a.w));
-}
-
-@compute @workgroup_size(${N / 2})
-fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32) {
-  let x = wg.x;
-  let c = wg.z;
-  let e0 = t;
-  let e1 = t + N / 2u;
-  let i0 = (c * N + e0) * N + x;
-  let i1 = (c * N + e1) * N + x;
-  wa[bitrev(e0)] = inA[i0];
-  wa[bitrev(e1)] = inA[i1];
-  wb[bitrev(e0)] = inB[i0];
-  wb[bitrev(e1)] = inB[i1];
-  workgroupBarrier();
-  butterflies(t);
-  emit(x, e0, c, wa[e0], wb[e0]);
-  emit(x, e1, c, wa[e1], wb[e1]);
-}
-`;
-
-// Box-filter mip generation for the three simulation textures (array of cascades).
-const SIM_MIPS = /* wgsl */ `
-@group(0) @binding(0) var srcA: texture_2d_array<f32>;
-@group(0) @binding(1) var srcB: texture_2d_array<f32>;
-@group(0) @binding(2) var srcC: texture_2d_array<f32>;
-@group(0) @binding(3) var dstA: texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(4) var dstB: texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(5) var dstC: texture_storage_2d_array<rgba16float, write>;
-
-fn box(t: texture_2d_array<f32>, p: vec2i, l: u32) -> vec4f {
-  return 0.25 * (textureLoad(t, p, l, 0) + textureLoad(t, p + vec2i(1, 0), l, 0) +
-                 textureLoad(t, p + vec2i(0, 1), l, 0) + textureLoad(t, p + vec2i(1, 1), l, 0));
-}
-
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let size = textureDimensions(dstA);
-  if (id.x >= size.x || id.y >= size.y) { return; }
-  let p = vec2i(id.xy) * 2;
-  textureStore(dstA, id.xy, id.z, box(srcA, p, id.z));
-  textureStore(dstB, id.xy, id.z, box(srcB, p, id.z));
-  textureStore(dstC, id.xy, id.z, box(srcC, p, id.z));
-}
-`;
-
-// Tileable foam micro-structure: R = bubble lace (multi-scale Worley edges),
-// G = finer lace, B = soft fbm density, A = streak noise.
-const FOAM_TEX = NOISE_WGSL + PERIODIC_WGSL + /* wgsl */ `
-@group(0) @binding(0) var dst: texture_storage_2d<rgba8unorm, write>;
-const SIZE: f32 = 512.0;
-
-fn h2(i: vec2i, salt: u32) -> vec2f {
-  let h = pcgHash((u32(i.x) * 73856093u) ^ pcgHash(u32(i.y) * 19349663u + salt));
-  let h2v = pcgHash(h + 0x9e3779b9u);
-  return vec2f(f32(h >> 8u), f32(h2v >> 8u)) / 16777216.0;
-}
-// "swiss cheese" foam: 1 in foam material, 0 inside bubbles; per-bubble radius
-fn bubbles(uv: vec2f, period: i32, salt: u32, rmin: f32, rmax: f32) -> f32 {
-  let w = vec2f(pfbm(uv * f32(period) * 0.5, period / 2, 3), pfbm(uv * f32(period) * 0.5 + 17.0, period / 2, 3));
-  let p = uv * f32(period) + w * 0.9;
-  let ip = vec2i(floor(p));
-  let fp = p - floor(p);
-  var v = 9.0;
-  for (var j = -1; j <= 1; j++) {
-    for (var i = -1; i <= 1; i++) {
-      let o = vec2i(i, j);
-      let cell = ((ip + o) % period + period) % period;
-      let hh = h2(cell, salt);
-      let r = vec2f(o) + hh * 0.9 + 0.05 - fp;
-      let rad = mix(rmin, rmax, h2(cell, salt + 7u).x);
-      v = min(v, length(r) / rad);
-    }
-  }
-  return smoothstep(0.8, 1.25, v);
-}
-
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let uv = (vec2f(id.xy) + 0.5) / SIZE;
-  // irregular holes from warped fbm (big sheets with ragged openings) ...
-  let w1 = vec2f(pfbm(uv * 5.0, 5, 3), pfbm(uv * 5.0 + vec2f(3.7, 9.1), 5, 3));
-  let m1 = smoothstep(-0.14, 0.06, pfbm(uv * 10.0 + w1 * 1.4, 10, 5));
-  let w2 = vec2f(pfbm(uv * 12.0 + 1.3, 12, 2), pfbm(uv * 12.0 + 7.9, 12, 2));
-  let m2 = smoothstep(-0.16, 0.04, pfbm(uv * 27.0 + w2 * 0.9, 27, 4));
-  // ... plus small round bubbles
-  let b3 = bubbles(uv, 29, 37u, 0.06, 0.45);
-  let b4 = bubbles(uv, 61, 53u, 0.05, 0.42);
-  let dens = pfbm(uv * 4.0, 4, 5) * 0.5 + 0.5;
-  let fineD = pfbm(uv * 16.0, 16, 3) * 0.5 + 0.5;
-  let big = m1 * (0.55 + 0.45 * m2) * (0.75 + 0.25 * b3);
-  let fine = 0.45 + 0.55 * b3 * (0.7 + 0.3 * b4);
-  let streak = pfbm(uv * vec2f(4.0, 16.0), 4, 5) * 0.5 + 0.5;
-  textureStore(dst, id.xy, vec4f(clamp(big * 0.6 + dens * 0.4, 0.0, 1.0), clamp(fine * 0.8 + fineD * 0.2, 0.0, 1.0), dens, streak));
-}
-`;
-
-const RGBA8_MIPS = /* wgsl */ `
-@group(0) @binding(0) var src: texture_2d<f32>;
-@group(0) @binding(1) var dst: texture_storage_2d<rgba8unorm, write>;
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let size = textureDimensions(dst);
-  if (id.x >= size.x || id.y >= size.y) { return; }
-  let p = vec2i(id.xy) * 2;
-  let v = 0.25 * (textureLoad(src, p, 0) + textureLoad(src, p + vec2i(1, 0), 0) +
-                  textureLoad(src, p + vec2i(0, 1), 0) + textureLoad(src, p + vec2i(1, 1), 0));
-  textureStore(dst, id.xy, v);
-}
-`;
-
-// World-space foam clipmaps (toroidally addressed, centred on the camera).
-// Strong compression of the total displacement field produces fractional foam coverage.
-const FOAM_RES = 1024;
-const FOAM_UPDATE = FOAM_MODEL + WAKE_SAMPLE + /* wgsl */ `
-const RES: i32 = ${FOAM_RES};
-struct FoamU {
-  snap: array<vec4i, 2>,     // per level: current camera texel (x, z), previous (x, z)
-  p0: vec4f,                 // texel size level 0, level 1, dt, decay rate
-  p1: vec4f,                 // J threshold, gain, growth, -
-  cascL: array<vec4f, 2>,
-  cascInvL: array<vec4f, 2>,
-  drift: vec4f,              // foam drift velocity (m/s) xz
-};
-@group(0) @binding(0) var<uniform> U: FoamU;
-@group(0) @binding(1) var prevTex: texture_2d_array<f32>;
-@group(0) @binding(2) var dst: texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(3) var dispTex: texture_2d_array<f32>;
-@group(0) @binding(4) var derivTex: texture_2d_array<f32>;
-@group(0) @binding(5) var samp: sampler;
-@group(0) @binding(6) var sampPrev: sampler;
-@group(0) @binding(7) var<uniform> I: Interaction;
-@group(0) @binding(8) var wakeTex: texture_2d<f32>;
-@group(0) @binding(9) var wakeSamp: sampler;
-
-fn wrapIdx(i: i32, lo: i32) -> i32 { return lo + (((i - lo) % RES) + RES) % RES; }
-
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let lvl = id.z;
-  let sn = U.snap[lvl];
-  let ts = select(U.p0.x, U.p0.y, lvl == 1u);
-  let lo = sn.xy - vec2i(RES / 2);
-  let g = vec2i(wrapIdx(i32(id.x), lo.x), wrapIdx(i32(id.y), lo.y));
-  let plo = sn.zw - vec2i(RES / 2);
-  let inPrev = all(g >= plo) && all(g < plo + vec2i(RES));
-  let p = (vec2f(g) + 0.5) * ts;
-  var jxx = 0.0; var jzz = 0.0; var jxz = 0.0;
-  for (var c = 0u; c < ${CASCADES}u; c++) {
-    let texel = U.cascL[c >> 2u][c & 3u] / ${N}.0;
-    let lod = log2(max(ts / texel, 1.0));
-    if (lod < 7.5) {
-      let uv = p * U.cascInvL[c >> 2u][c & 3u];
-      let d = textureSampleLevel(derivTex, samp, uv, c, lod);
-      let a = textureSampleLevel(dispTex, samp, uv, c, lod);
-      jxx += d.z; jzz += d.w; jxz += a.w;
-    }
-  }
-  let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
-  var prev = vec4f(0.0);
-  if (inPrev) {
-    // semi-Lagrangian advection: foam slowly drifts downwind (and spreads a little)
-    let back = (vec2f(id.xy) + 0.5 - U.drift.xy * U.p0.z / ts) / f32(RES);
-    prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
-  }
-  let dt = U.p0.z;
-  let hullFoam = wakeAt(p);
-  let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
-  let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
-  let f=max(seaFoam,hullFoam.z*0.9);
-  let fresh=max(mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0)),hullFoam.w*0.9);
-  textureStore(dst, id.xy, lvl, vec4f(f, fresh, J, 1.0));
-}
-`;
-
-const ARRAY16_MIPS = /* wgsl */ `
-@group(0) @binding(0) var src: texture_2d_array<f32>;
-@group(0) @binding(1) var dst: texture_storage_2d_array<rgba16float, write>;
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let size = textureDimensions(dst);
-  if (id.x >= size.x || id.y >= size.y) { return; }
-  let p = vec2i(id.xy) * 2;
-  let v = 0.25 * (textureLoad(src, p, id.z, 0) + textureLoad(src, p + vec2i(1, 0), id.z, 0) +
-                  textureLoad(src, p + vec2i(0, 1), id.z, 0) + textureLoad(src, p + vec2i(1, 1), id.z, 0));
-  textureStore(dst, id.xy, id.z, v);
-}
-`;
-
 // ---- js/wgsl/cloud-model.js ----
 // Adapted from Joshua Brewster, MIT. See THIRD_PARTY_NOTICES.md for pinned provenance.
 // Retains the upstream rounded cumulus/anvil anatomy; units here are kilometres.
@@ -3582,6 +2648,1033 @@ fn main(@builtin(local_invocation_index) k: u32) {
     for (var i = 0u; i < 7u; i++) { acc += part[i]; }
     sunVis[0] = acc / 7.0;
   }
+}
+`;
+
+// ---- js/wgsl/deck.js ----
+
+
+
+
+
+
+
+const DECK_COLS = 32;
+const DECK_ROWS = 96;
+// Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
+const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
+fn deckWidth(z:f32)->f32 {
+  return max(0.015,hullBreadth(z)-0.145);
+}
+fn deckFloor(z:f32)->f32 {
+  return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});
+}
+fn deckRail(z:f32)->f32 { return select(0.66,0.16,z>=${QUARTERDECK_START}); }
+fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z+6.3)/11.9); }
+fn deckPoint(uv:vec2f)->vec3f {
+  let z=uv.y*11.9-6.3;
+  return vec3f((uv.x*2.0-1.0)*deckWidth(z),deckFloor(z),z);
+}
+`;
+// Float32 retains small drainage/drying increments at high frame rates. Explicit
+// bilinear loads avoid requiring the optional float32-filterable GPU feature.
+const DECK_SAMPLING = /* wgsl */ `
+fn sampleDeck(uv:vec2f)->vec4f {
+  let size=vec2i(textureDimensions(deckWater));let p=clamp(uv,vec2f(0.0),vec2f(1.0))*vec2f(size)-0.5;
+  let base=vec2i(floor(p));let f=fract(p);
+  let a=textureLoad(deckWater,clamp(base,vec2i(0),size-1),0);
+  let b=textureLoad(deckWater,clamp(base+vec2i(1,0),vec2i(0),size-1),0);
+  let c=textureLoad(deckWater,clamp(base+vec2i(0,1),vec2i(0),size-1),0);
+  let d=textureLoad(deckWater,clamp(base+vec2i(1,1),vec2i(0),size-1),0);
+  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+}
+`;
+const DECK_TRANSFORM = /* wgsl */ `
+fn deckWorld(p:vec3f)->vec3f {
+  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y*HULL_Y_SCALE-H.forward.xyz*p.z*(H.size.y/12.0);
+}
+`;
+
+// Conservative, positivity-limited downhill exchange. This is a thin-water visual
+// model, not a flooding/stability solver. Sea enters at the rail; stored water
+// crosses the deck, drains through scuppers, and leaves a slower-drying wet film.
+const DECK_UPDATE = FRAME_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var<uniform> I:Interaction;
+@group(0) @binding(2) var<uniform> H:InteractionHull;
+@group(0) @binding(3) var seaTex:texture_2d_array<f32>;
+@group(0) @binding(4) var seaSamp:sampler;
+@group(0) @binding(5) var previousDeck:texture_2d<f32>;
+@group(0) @binding(6) var nextDeck:texture_storage_2d<rgba32float,write>;
+` + INTERACTION_SEA + DECK_TRANSFORM + /* wgsl */ `
+const DECK_SIZE=vec2i(${DECK_COLS},${DECK_ROWS});
+fn cellPoint(c:vec2i)->vec3f { return deckPoint((vec2f(c)+0.5)/vec2f(DECK_SIZE)); }
+fn cellArea(p:vec3f)->f32 {
+  return 2.0*deckWidth(p.z)*(H.size.x/3.6)/f32(DECK_SIZE.x)*11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
+}
+// Positive means water leaves a for b. Each face uses the identical flux on both sides.
+fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
+  if(any(b<vec2i(0)) || any(b>=DECK_SIZE)){return 0.0;}
+  let pa=cellPoint(a);let pb=cellPoint(b);
+  if(abs(pa.y-pb.y)*HULL_Y_SCALE>0.8){return 0.0;} // solid cabin face
+  let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
+  let dh=deckWorld(pa).y+wa*H.up.y-deckWorld(pb).y-wb*H.up.y;
+  let donor=select(wb,wa,dh>0.0);
+  let area=select(cellArea(pb),cellArea(pa),dh>0.0);
+  let face=select((deckWidth(pa.z)+deckWidth(pb.z))*(H.size.x/3.6)/f32(DECK_SIZE.x),11.9*(H.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
+  // Limit the head conductance as well as donor volume. sqrt(head) alone
+  // oscillates around equilibrium and leaves a checkerboard on pooled water.
+  let conductance=min(2.0*sqrt(9.81*donor)*face,min(cellArea(pa),cellArea(pb))/(8.0*dt));
+  let rate=abs(dh)*conductance;
+  return sign(dh)*min(rate,donor*area/(4.0*dt));
+}
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u) {
+  let c=vec2i(id.xy);if(any(c>=DECK_SIZE)){return;}
+  if(I.motion.y<0.5 || I.previous.w>0.5){textureStore(nextDeck,c,vec4f(0.0));return;}
+  let dt=max(I.previous.z*0.25,0.00001);
+  let p=cellPoint(c);let area=cellArea(p);let old=textureLoad(previousDeck,c,0);
+  let q=vec4f(flux(c,c+vec2i(1,0),dt),flux(c,c-vec2i(1,0),dt),flux(c,c+vec2i(0,1),dt),flux(c,c-vec2i(0,1),dt));
+  var depth=max(0.0,old.x-dot(q,vec4f(1.0))*dt/area);
+  var ingress=0.0;var drain=0.0;
+  if(c.x==0 || c.x==DECK_SIZE.x-1) {
+    let side=select(-1.0,1.0,c.x>0);
+    let edge=vec3f(side*(deckWidth(p.z)+0.10),p.y,p.z);
+    let rail=deckWorld(edge+vec3f(0.0,deckRail(p.z),0.0));
+    let over=max(0.0,(interactionSea(rail.xz)-rail.y)/max(H.up.y,0.35));
+    let face=11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
+    ingress=min(4.0,1.3*pow(over,1.5));
+    // Scuppers between rail posts; quarterdeck railing is open underneath.
+    let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=${QUARTERDECK_START});
+    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*HULL_Y_SCALE),1.5)),0.0,over>0.0);
+    depth+=(ingress-drain)*face*dt/area;
+  }
+  // Bound violent immersion; do not accumulate an unbounded reservoir inside the hull.
+  depth=clamp(depth-0.0015*dt,0.0,1.2);
+  let turbulence=min(1.0,ingress*0.8+dot(abs(q),vec4f(1.0))/area*0.15);
+  let froth=max(old.y*exp(-dt*1.1),turbulence)*smoothstep(0.001,0.025,depth);
+  let wet=max(old.z*exp(-dt*0.045),smoothstep(0.0005,0.01,depth));
+  textureStore(nextDeck,c,vec4f(depth,froth,wet,drain-ingress));
+}
+`;
+
+const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_LIGHTING + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var<uniform> H:InteractionHull;
+@group(0) @binding(2) var deckWater:texture_2d<f32>;
+@group(0) @binding(3) var sampC:sampler;
+@group(0) @binding(4) var envCube:texture_cube<f32>;
+@group(0) @binding(5) var transLUT:texture_2d<f32>;
+@group(0) @binding(6) var<storage,read> sunVis:array<f32,4>;
+@group(0) @binding(7) var skyLUT:texture_2d<f32>;
+` + SKY_RENDER_FUNCS + DECK_TRANSFORM + DECK_SAMPLING + /* wgsl */ `
+struct DeckVertex {
+  @builtin(position) pos:vec4f, @location(0) world:vec3f,
+  @location(1) uv:vec2f, @location(2) local:vec3f,
+  @location(3) curtain:vec2f,
+};
+fn corner(v:u32)->vec2f {
+  return array<vec2f,6>(vec2f(0,0),vec2f(1,0),vec2f(0,1),vec2f(0,1),vec2f(1,0),vec2f(1,1))[v];
+}
+@vertex fn washVS(@builtin(vertex_index) v:u32)->DeckVertex {
+  let cell=v/6u;let uv=(vec2f(f32(cell%${DECK_COLS*2}u),f32(cell/${DECK_COLS*2}u))+corner(v%6u))/vec2f(${DECK_COLS*2}.0,${DECK_ROWS*2}.0);
+  let water=sampleDeck(uv);
+  var p=deckPoint(uv);
+  let ripple=gnoise(p.xz*7.0+vec2f(-F.camPos.w*1.3,F.camPos.w*0.7))*min(water.x*0.08,0.008);
+  p.y+=(0.008+water.x+ripple)/HULL_Y_SCALE;
+  var o:DeckVertex;o.world=deckWorld(p);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
+  o.uv=uv;o.local=p;o.curtain=vec2f(0.0);return o;
+}
+// Continuous strips through scuppers, plus inward curtains while a crest overtops.
+@vertex fn runoffVS(@builtin(vertex_index) v:u32,@builtin(instance_index) inst:u32)->DeckVertex {
+  let side=select(-1.0,1.0,inst>=${DECK_ROWS}u);let row=inst%${DECK_ROWS}u;
+  let c=corner(v%6u);let segment=v/6u;
+  let fall=(f32(segment)+c.y)/8.0;
+  let uv=vec2f(select(0.0,1.0,side>0.0),(f32(row)+c.x)/${DECK_ROWS}.0);
+  let water=sampleDeck(uv);
+  var p=deckPoint(uv);let incoming=water.w<0.0;
+  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*HULL_Y_SCALE+1.2)/9.81));let t=fall*duration;
+  p.x+=side*(0.16+0.55*t);
+  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*HULL_Y_SCALE);
+  p.y+=select((0.03+outlet)/HULL_Y_SCALE,deckRail(p.z)+0.12/HULL_Y_SCALE,incoming);
+  if(incoming){p.x=side*(deckWidth(p.z)+0.09-(0.5+min(flow,2.0))*t);}
+  p.z+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*0.012*fall;
+  var o:DeckVertex;o.world=deckWorld(p)-vec3f(0.0,4.905*t*t,0.0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
+  o.uv=uv;o.local=p;o.curtain=vec2f(fall+0.001,flow);return o;
+}
+@fragment fn washFS(in:DeckVertex)->@location(0) vec4f {
+  let w=sampleDeck(in.uv);
+  let curtain=in.curtain.x>0.0;
+  let flowUV=in.local.xz*6.0+vec2f(-F.camPos.w*0.7,F.camPos.w*0.4);
+  let ripple=vec2f(gnoise(flowUV),gnoise(flowUV+vec2f(13.7,8.1)))*0.025;
+  // Central height differences stay continuous across cell boundaries; facet
+  // derivatives and derivatives of bilinear heights both expose the grid.
+  let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
+  let xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
+  let dz=texel.y*11.9;
+  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*HULL_Y_SCALE)/(2.0*dz);
+  let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));
+  var n=normalize(H.up.xyz-H.right.xyz*gradient.x/(H.size.x/3.6)+H.forward.xyz*gradient.y/(H.size.y/12.0));
+  n=normalize(n+H.right.xyz*ripple.x+H.forward.xyz*ripple.y);
+  let v=normalize(F.camPos.xyz-in.world);
+  // Falling sheets bend away from the rail: use their actual surface, not
+  // a fixed +X normal (which also treated port and starboard identically).
+  let face=cross(dpdx(in.world),dpdy(in.world));
+  if(curtain){n=normalize(face/max(length(face),0.00001)+H.forward.xyz*ripple.x+H.up.xyz*ripple.y);}
+  n=select(-n,n,dot(n,v)>=0.0);
+  let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
+  let reflection=textureSampleLevel(envCube,sampC,reflect(-v,n),2.0).rgb;
+  let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),6.0).rgb;
+  let sun=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*step(0.0,F.sunDir.y)*vesselShadow(in.world,n);
+  let pattern=clamp(0.5+gnoise(flowUV*1.7)+gnoise(flowUV*4.1)*0.3,0.0,1.0);
+  let front=(1.0-smoothstep(0.015,0.11,w.x))*smoothstep(0.003,0.018,w.x)*w.z;
+  let froth=clamp(w.y*(0.4+pattern*0.6)+front*0.55,0.0,0.85);
+  let nl=max(dot(n,F.sunDir.xyz),0.0);
+  // Entrained bubbles scatter light from either side of a thin water sheet.
+  let scatter=pow(max(dot(-v,F.sunDir.xyz),0.0),12.0);
+  let foamLight=vec3f(0.88,0.90,0.91)*(ambient*1.1+sun*(0.12+0.28*abs(dot(n,F.sunDir.xyz))+scatter*0.35));
+  let color=mix(reflection,foamLight,froth);
+  var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
+  if(curtain){
+    let fall=in.curtain.x;
+    let aeration=clamp(w.y*0.35+0.08+smoothstep(0.1,0.8,fall)*pattern*0.22,0.0,0.55);
+    let breakup=mix(1.0,smoothstep(0.2,0.65,pattern),smoothstep(0.35,0.95,fall));
+    let coverage=smoothstep(0.002,0.04,in.curtain.y)*breakup*(1.0-smoothstep(0.65,1.0,fall));
+    // Clear water transmits the hull behind it. Only Fresnel reflection and
+    // bubbles obscure it; fixed opacity made dark blue plastic strips.
+    alpha=coverage*(f*(1.0-aeration)+aeration);
+    if(alpha<0.003){discard;}
+    let glint=sun*vesselSpecular(n,v,F.sunDir.xyz,0.24,vec3f(0.02))*nl;
+    let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration);
+    return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
+  }
+  // Do not bridge the vertical cabin face with a diagonal water polygon.
+  if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
+  if(alpha<0.003){discard;}
+  return vec4f(surfaceAir(color,in.world)*alpha,alpha);
+}
+`;
+
+// ---- js/wgsl/spindrift.js ----
+
+
+
+const SPINDRIFT_COUNT = 1024;
+const SPINDRIFT_STRIDE = 96;
+const SPINDRIFT_STATE = /* wgsl */ `
+struct CrestPlume {
+  origin: vec4f, // birth position, age
+  launch: vec4f, // initial velocity, lifetime (zero = vacant)
+  crest: vec4f,  // crest tangent, initial half width
+  shape: vec4f,  // strength, seed, birth wind x/z
+  source: vec4f, // undisturbed crest x/z, release age, reserved
+  root: vec4f,   // tracked crest position, reserved
+};
+// Aerodynamic entrainment of a mist parcel, with an authored settling rate.
+// Birth data stays in world space when the camera or wind changes.
+fn plumePosition(p: CrestPlume, t: f32) -> vec3f {
+  let wind = vec3f(p.shape.z, 0.0, p.shape.w) * 0.68;
+  let entrain = (1.0 - exp(-1.5 * t)) / 1.5;
+  let horizontal = wind * t + (vec3f(p.launch.x, 0.0, p.launch.z) - wind) * entrain;
+  return p.origin.xyz + horizontal + vec3f(0.0, p.launch.y * t - 1.25 * t * t, 0.0);
+}
+// A short emission burst stays connected to its moving wave, then detaches.
+// The head always follows the original world-space ballistic trajectory.
+fn plumeSheetPosition(p: CrestPlume, u: f32) -> vec3f {
+  let tailAge = max(0.0, p.origin.w - p.source.z);
+  let t = mix(tailAge, p.origin.w, u);
+  let attached = (1.0 - smoothstep(0.0, 0.35, tailAge)) * (1.0-u) * (1.0-u);
+  return plumePosition(p,t) + (p.root.xyz-p.origin.xyz)*attached;
+}
+`;
+
+const SPINDRIFT_UPDATE = /* wgsl */ `
+${FRAME_WGSL}
+${SPINDRIFT_STATE}
+${FOAM_MODEL}
+${NOISE_WGSL}
+${HULL_PROFILE}
+struct CrestControl { step: vec4f }; // dt, reset, amount, frame
+struct CrestHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> C: CrestControl;
+@group(0) @binding(2) var<uniform> hull: CrestHull;
+@group(0) @binding(3) var displacement: texture_2d_array<f32>;
+@group(0) @binding(4) var derivatives: texture_2d_array<f32>;
+@group(0) @binding(5) var seaSampler: sampler;
+@group(0) @binding(6) var<storage, read_write> plumes: array<CrestPlume>;
+fn crestRandom(seed: u32) -> f32 { return f32(pcgHash(seed)) / 4294967296.0; }
+fn crestDisplacement(q: vec2f) -> vec3f {
+  var d = vec3f(0.0);
+  for (var c = 0u; c < 6u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let mip = max(0.0, log2(256.0 * invL * 0.65));
+    d += textureSampleLevel(displacement, seaSampler, fract(q * invL), i32(c), mip).xyz;
+  }
+  return d;
+}
+struct CrestSample { d: vec4f, derivative: vec4f };
+fn crestSample(q: vec2f) -> CrestSample {
+  var s: CrestSample;
+  for (var c = 0u; c < 6u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let mip = max(0.0, log2(256.0 * invL * 0.65));
+    s.d += textureSampleLevel(displacement, seaSampler, fract(q * invL), i32(c), mip);
+    s.derivative += textureSampleLevel(derivatives, seaSampler, fract(q * invL), i32(c), mip);
+  }
+  return s;
+}
+fn crestBreaking(s: CrestSample) -> f32 {
+  return breakingCompression(s.derivative.z, s.derivative.w, s.d.w, 0.45);
+}
+fn crestInHull(world: vec3f) -> bool {
+  if (hull.rig.z < 0.5) { return false; }
+  let delta = world - hull.origin.xyz;
+  let local = vec3f(dot(delta,hull.right.xyz)*3.6/hull.size.x,
+    dot(delta,hull.up.xyz)/HULL_Y_SCALE,-dot(delta,hull.forward.xyz)*12.0/hull.size.y);
+  return hullExcludesOcean(local);
+}
+// Fit a local ridge across the compressed direction, never a trough or slope.
+// Returns the peak offset and its rise above the two shoulders (metres).
+fn crestPeak(q: vec2f, normal: vec2f, height: f32) -> vec2f {
+  let radius = 1.4;
+  let lo = crestDisplacement(q-normal*radius).y;
+  let hi = crestDisplacement(q+normal*radius).y;
+  let curvature = 2.0*height-lo-hi;
+  if (curvature <= 0.04) { return vec2f(0.0); }
+  let offset = 0.5*radius*(hi-lo)/curvature;
+  if (abs(offset) > radius) { return vec2f(0.0); }
+  return vec2f(offset,curvature*0.5);
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= ${SPINDRIFT_COUNT}u) { return; }
+  var p = plumes[id.x];
+  if (C.step.y > 0.5 || C.step.z <= 0.0) {
+    p.launch.w = 0.0; plumes[id.x] = p; return;
+  }
+  let dt = C.step.x;
+  if (p.launch.w > 0.0) {
+    p.origin.w += dt;
+    if (p.origin.w < p.source.z) {
+      let q = p.source.xy;
+      let normal = vec2f(-p.crest.z,p.crest.x);
+      let peak = crestPeak(q,normal,crestDisplacement(q).y);
+      let nextQ = q + normal*clamp(peak.x,-12.0*dt,12.0*dt);
+      let s = crestSample(nextQ);
+      let root = vec3f(nextQ.x+s.d.x,s.d.y+0.035,nextQ.y+s.d.z);
+      if (peak.y < 0.035 || crestBreaking(s) < 0.15 || crestInHull(root)) {
+        p.source.z = p.origin.w;
+      } else {
+        p.source = vec4f(nextQ,p.source.z,0.0);
+        p.root = vec4f(root,0.0);
+      }
+    }
+    let head = plumePosition(p, p.origin.w);
+    var landed = false;
+    // Stagger collision work. Two displacement samples invert the horizontal wave offset.
+    if ((id.x + u32(C.step.w)) % 4u == 0u && p.origin.w > p.source.z + 0.15) {
+      let q = head.xz - crestDisplacement(head.xz).xz;
+      landed = head.y < crestDisplacement(q).y - 0.15;
+    }
+    if (p.origin.w >= p.launch.w || distance(head.xz, F.camPos.xz) > 85.0 || landed) { p.launch.w = 0.0; }
+    plumes[id.x] = p;
+    return;
+  }
+  let seed = pcgHash(id.x + u32(C.step.w) * 104729u);
+  let wind = F.windP[0].xy * F.windP[0].z;
+  // A smooth, authored onset: breaking alone does not make airborne spindrift.
+  let windLift = smoothstep(8.0, 19.0, F.windP[0].z);
+  if (windLift == 0.0 || crestRandom(seed) > 1.0 - exp(-5.0 * windLift * C.step.z * dt)) { return; }
+  let cell = vec2f(f32(id.x % 32u), f32(id.x / 32u)) - 15.5;
+  let worldCell = floor(F.camPos.xz / 4.0) + cell;
+  // World-anchored search points: a moving wave encounters them, rather than
+  // resampling a uniform cloud of unrelated points every frame.
+  let cellSeed = pcgHash(bitcast<u32>(i32(floor(worldCell.x))) ^ pcgHash(bitcast<u32>(i32(floor(worldCell.y)))));
+  let jitter = vec2f(crestRandom(cellSeed),crestRandom(cellSeed+1u))-0.5;
+  var q = (worldCell+jitter*0.6)*4.0;
+  if (distance(q, F.camPos.xz) > 70.0) { return; }
+  // Reject samples behind the observer before fetching the six cascades.
+  if (dot(vec3f(q.x, F.camPos.y, q.y) - F.camPos.xyz, F.camFwd.xyz) < -8.0) { return; }
+  var s = crestSample(q);
+  if (crestBreaking(s) < 0.2) { return; }
+  // The least-compressed eigenvector runs ALONG the crest; its perpendicular
+  // crosses the ridge. Compression by itself also occurs on wave faces.
+  let angle = 0.5 * atan2(2.0*s.d.w,s.derivative.z-s.derivative.w);
+  let tangent = vec3f(cos(angle),0.0,sin(angle));
+  let normal = vec2f(-tangent.z,tangent.x);
+  let peak = crestPeak(q,normal,s.d.y);
+  if (peak.y < 0.055) { return; }
+  q += normal*peak.x;
+  s = crestSample(q);
+  let shoulders = vec2f(crestDisplacement(q-normal*1.4).y,crestDisplacement(q+normal*1.4).y);
+  let prominence = s.d.y-max(shoulders.x,shoulders.y);
+  let breaking = crestBreaking(s);
+  if (prominence < 0.035 || breaking < 0.2) { return; }
+  let origin = vec3f(q.x+s.d.x,s.d.y+0.035,q.y+s.d.z);
+  if (crestInHull(origin)) { return; }
+  let strength = windLift * breaking * mix(0.55,1.0,smoothstep(0.06,0.4,prominence));
+  p.origin = vec4f(origin, 0.0);
+  p.launch = vec4f(wind.x*0.16,0.4+1.0*strength,
+    wind.y*0.16,0.9+0.8*strength+crestRandom(seed+4u)*0.3);
+  p.crest = vec4f(tangent,(0.8+1.4*strength)*mix(0.7,1.2,crestRandom(seed+5u)));
+  p.shape = vec4f(strength, crestRandom(seed + 6u) * 100.0, wind);
+  p.source = vec4f(q,0.28+0.32*strength,0.0);
+  p.root = vec4f(origin,0.0);
+  plumes[id.x] = p;
+}
+`;
+
+// Shared with the GPU silhouette regression. Density vanishes on the complete
+// volume boundary, including its underside; the raster quad carries no opacity.
+const SPINDRIFT_VOLUME = /* wgsl */ `
+fn mistInterval(origin:vec3f,direction:vec3f)->vec2f {
+  let a=dot(direction,direction);let middle=-dot(origin,direction)/a;
+  // Closest-point form avoids subtracting two large squared distances when
+  // looking at a thin mist volume from the far end of the emission radius.
+  let closest=origin+direction*middle;
+  let halfSquared=(1.0-dot(closest,closest))/a;
+  if(halfSquared<=0.0){return vec2f(0);}
+  let halfSpan=sqrt(halfSquared);
+  return vec2f(max(0.0,middle-halfSpan),max(0.0,middle+halfSpan));
+}
+fn mistDensity(p:vec3f,seed:f32,age:f32)->f32 {
+  let radial=max(0.0,1.0-dot(p,p));
+  let flow=vec2f(p.x*3.1+p.z*.7,p.y*4.5-p.z*.55-age*.35)+seed;
+  let breakup=smoothstep(-.22,.32,gnoise(flow));
+  return radial*radial*(.18+.82*breakup);
+}
+fn mistOpticalDepth(origin:vec3f,direction:vec3f,seed:f32,age:f32)->vec2f {
+  let span=mistInterval(origin,direction);let step=(span.y-span.x)/3.0;
+  var density=0.0;
+  for(var i=0u;i<3u;i++){
+    density+=mistDensity(origin+direction*(span.x+(f32(i)+.5)*step),seed,age);
+  }
+  return vec2f(density*step,span.x);
+}
+`;
+
+const SPINDRIFT_RENDER = /* wgsl */ `
+${FRAME_WGSL}
+${ATMO_CORE_WGSL}
+${SPINDRIFT_STATE}
+${NOISE_WGSL}
+${SPINDRIFT_VOLUME}
+${SHADOW_SAMPLE}
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<storage, read> plumes: array<CrestPlume>;
+@group(0) @binding(2) var environment: texture_cube<f32>;
+@group(0) @binding(3) var lightSampler: sampler;
+@group(0) @binding(4) var transmittance: texture_2d<f32>;
+@group(0) @binding(5) var<storage, read> sunVisibility: vec4f;
+struct CrestVertex {
+  @builtin(position) position: vec4f,
+  @location(0) ray:vec3f,
+  @location(1) @interpolate(flat) center:vec3f,
+  @location(2) @interpolate(flat) radii:vec3f,
+  @location(3) @interpolate(flat) wind:vec2f,
+  @location(4) @interpolate(flat) light:vec3f,
+  @location(5) @interpolate(flat) shape:vec3f,
+};
+@vertex fn crestVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->CrestVertex {
+  let p=plumes[instance];var o:CrestVertex;
+  o.position=vec4f(2,2,0,1);o.radii=vec3f(1);o.shape=vec3f(0);
+  if(p.launch.w<=0.0){return o;}
+  // Four overlapping parcels fill one continuous, crest-born burst. Their
+  // world-space ellipsoids do not turn into planes when the camera moves.
+  let parcel=f32(vertex/6u);let u=(parcel+.5)/4.0;
+  let corner=array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1))[vertex%6u];
+  let age=p.origin.w;let detached=smoothstep(p.source.z,p.source.z+.6,age);
+  let tail=plumeSheetPosition(p,0.0);let head=plumeSheetPosition(p,1.0);
+  let wind=normalize(p.shape.zw+vec2f(.00001,0));
+  let along=vec3f(wind.x,0,wind.y);let across=vec3f(wind.y,0,-wind.x);
+  let center=plumeSheetPosition(p,u)+p.crest.xyz*(sin(p.shape.y+parcel*2.4)*p.crest.w*.20)
+    +vec3f(0,.035+u*.06,0);
+  let relative=center-F.camPos.xyz;let distanceToEye=length(relative);
+  let metresPerPixel=max(distanceToEye,1.0)*2.0*length(F.camUp.xyz)*F.screen.w;
+  var radii=vec3f(p.crest.w*(.40+.12*u+.15*detached),.10+.16*u+.12*detached,
+    .20+length(head-tail)*.24+.12*detached);
+  radii*=min(1.0,metresPerPixel*65.0/max(max(radii.x,radii.y),radii.z));
+  let right=normalize(F.camRight.xyz);let up=normalize(F.camUp.xyz);let forward=normalize(F.camFwd.xyz);
+  let r=vec3f(dot(right,across),right.y,dot(right,along))*radii;
+  let v=vec3f(dot(up,across),up.y,dot(up,along))*radii;
+  let d=vec3f(dot(forward,across),forward.y,dot(forward,along))*radii;
+  let depth=length(d);let padding=distanceToEye/max(distanceToEye-depth,.1);
+  let ray=relative+right*corner.x*length(r)*padding+up*corner.y*length(v)*padding-forward*depth;
+  o.position=F.viewProj*vec4f(ray,1);o.ray=ray;o.center=relative;o.radii=radii;o.wind=wind;
+  let view=normalize(-relative);
+  let sky=textureSampleLevel(environment,lightSampler,vec3f(0,1,0),5.0).rgb;
+  let sunlight=textureSampleLevel(transmittance,lightSampler,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb;
+  // Normalized scattering replaces the unbounded orange sheet illumination.
+  let phase=phaseMie(dot(-view,F.sunDir.xyz),.5);
+  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*vesselShadow(center,vec3f(0,1,0));
+  let fade=smoothstep(0.0,.08,age)*(1.0-smoothstep(.35,1.0,age/p.launch.w));
+  o.shape=vec3f((.65+.70*p.shape.x)*fade*smoothstep(1.0,4.0,distanceToEye)
+    *(1.0-smoothstep(55.0,80.0,distanceToEye)),p.shape.y+parcel*7.1,age);
+  return o;
+}
+struct CrestFragment { @location(0) color:vec4f,@builtin(frag_depth) depth:f32 };
+@fragment fn crestFS(o:CrestVertex)->CrestFragment {
+  if(o.shape.x<=0.0){discard;}
+  let direction=normalize(o.ray);let across=vec3f(o.wind.y,0,-o.wind.x);let along=vec3f(o.wind.x,0,o.wind.y);
+  let origin=vec3f(dot(-o.center,across),-o.center.y,dot(-o.center,along))/o.radii;
+  let ray=vec3f(dot(direction,across),direction.y,dot(direction,along))/o.radii;
+  let integrated=mistOpticalDepth(origin,ray,o.shape.y,o.shape.z);
+  let alpha=(1.0-exp(-integrated.x*o.shape.x))*exp(-dot(F.fogExt.rgb,vec3f(.333333))*integrated.y);
+  if(alpha<.001){discard;}
+  let clip=F.viewProj*vec4f(direction*integrated.y,1);
+  var out:CrestFragment;out.color=vec4f(o.light*alpha,alpha);out.depth=clip.z/clip.w;return out;
+}
+`;
+
+// ---- js/wgsl/wetness.js ----
+
+
+
+
+
+
+const WET_GRID=[24,32,48];
+const WET_SEA_SIZE=32;
+const WET_SPACE=/* wgsl */ `
+const wetMin=vec3f(-4.2,-1.5,-8.7);
+const wetSpan=vec3f(8.4,11.0,16.4);
+const wetSize=vec3u(${WET_GRID.join(',')});
+fn wetLocal(world:vec3f)->vec3f {
+  let q=world-hull.origin.xyz;
+  return vec3f(dot(q,hull.right.xyz),dot(q,hull.up.xyz),-dot(q,hull.forward.xyz))/vec3f(hull.size.x/3.6,HULL_Y_SCALE,hull.size.y/12.0);
+}
+fn wetWorld(p:vec3f)->vec3f {return rotateHull(p*vec3f(hull.size.x/3.6,HULL_Y_SCALE,hull.size.y/12.0))+hull.origin.xyz;}
+fn wetIndex(p:vec3u)->u32 {return (p.z*wetSize.y+p.y)*wetSize.x+p.x;}
+`;
+// Absorbed moisture and a short-lived surface film have separate lifetimes.
+// Rates are authored visual approximations; they do not add mass to the ship.
+const WET_MATERIAL=/* wgsl */ `
+fn moistureStep(old:vec2f,water:f32,spray:f32,kind:u32,wind:f32,dt:f32)->vec2f {
+  let drying=array<f32,4>(0.004,0.002,0.006,0.004)[kind]*(1.0+min(wind,30.0)*0.025);
+  let absorbed=old.x*exp(-dt*drying);
+  let film=old.y*exp(-dt*(0.18+min(wind,30.0)*0.012));
+  let uptake=water*18.0+spray*1.8;
+  return clamp(vec2f(absorbed+(1.0-absorbed)*(1.0-exp(-dt*uptake)),
+    film+(1.0-film)*(1.0-exp(-dt*(water*25.0+spray*4.0)))),vec2f(0),vec2f(1));
+}
+`;
+const WET_CLEAR=/* wgsl */ `
+@group(0) @binding(0) var<storage,read_write> mist:array<atomic<u32>>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(id.x<arrayLength(&mist)){atomicStore(&mist[id.x],0u);}
+}
+`;
+const WET_DEPOSIT=INTERACTION_TYPES+VESSEL_RIG+DECK_PROFILE+SPINDRIFT_STATE+/* wgsl */ `
+@group(0) @binding(0) var<uniform> hull:Hull;
+@group(0) @binding(1) var<uniform> I:Interaction;
+@group(0) @binding(2) var<storage,read_write> mist:array<atomic<u32>>;
+@group(0) @binding(3) var<storage,read> drops:array<Drop>;
+@group(0) @binding(4) var<storage,read> sheets:array<Sheet>;
+@group(0) @binding(5) var<storage,read> plumes:array<CrestPlume>;
+`+WET_SPACE+/* wgsl */ `
+fn deposit(world:vec3f,amount:f32){
+  let q=(wetLocal(world)-wetMin)/wetSpan*vec3f(wetSize)-0.5;
+  let base=vec3i(floor(q));let f=fract(q);
+  for(var i=0u;i<8u;i++){
+    let corner=vec3i(vec3u(i&1u,(i>>1u)&1u,(i>>2u)&1u));let p=base+corner;
+    if(all(p>=vec3i(0))&&all(p<vec3i(wetSize))){
+      let w=mix(vec3f(1)-f,f,vec3f(corner));
+      atomicAdd(&mist[wetIndex(vec3u(p))],u32(amount*w.x*w.y*w.z*4096.0));
+    }
+  }
+}
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(I.motion.y<0.5 || I.previous.w>0.5){return;}
+  let i=id.x;
+  if(i<${SPRAY_COUNT}u){let d=drops[i];if(d.position.w>0.0){deposit(d.position.xyz,mix(0.6,0.18,d.shape.z));}}
+  if(i<${SHEET_COUNT}u){let s=sheets[i];if(s.velocity.w>0.0){
+    let t=s.origin.w*.8;let p=s.origin.xyz+s.velocity.xyz*t-vec3f(0,4.905*t*t,0);
+    for(var j=-2;j<=2;j++){deposit(p+s.tangent.xyz*f32(j)*s.tangent.w*.5,s.axis.w*.45);}
+  }}
+  if(i<${SPINDRIFT_COUNT}u){let p=plumes[i];if(p.launch.w>0.0){
+    let at=plumePosition(p,p.origin.w);
+    for(var j=-1;j<=1;j++){deposit(at+p.crest.xyz*f32(j)*p.crest.w,p.shape.x*.12);}
+  }}
+}
+`;
+const WET_SEA=FRAME_WGSL+VESSEL_RIG+DECK_PROFILE+/* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var<uniform> hull:Hull;
+@group(0) @binding(2) var seaTex:texture_2d_array<f32>;
+@group(0) @binding(3) var seaSamp:sampler;
+@group(0) @binding(4) var levels:texture_storage_2d<r32float,write>;
+`+WET_SPACE+INTERACTION_SEA+/* wgsl */ `
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
+  let uv=(vec2f(id.xy)+.5)/${WET_SEA_SIZE}.0;
+  let p=vec3f(wetMin.x+uv.x*wetSpan.x,0,wetMin.z+uv.y*wetSpan.z);
+  textureStore(levels,vec2i(id.xy),vec4f(interactionSea(wetWorld(p).xz)));
+}
+`;
+const WET_UPDATE=INTERACTION_TYPES+VESSEL_RIG+DECK_PROFILE+WET_MATERIAL+/* wgsl */ `
+struct WetProbe {position:vec4f,uvKind:vec4f};
+@group(0) @binding(0) var<uniform> hull:Hull;
+@group(0) @binding(1) var<uniform> I:Interaction;
+@group(0) @binding(2) var<storage,read> probes:array<WetProbe>;
+@group(0) @binding(3) var<storage,read_write> moisture:array<vec2f>;
+@group(0) @binding(4) var<storage,read> mist:array<u32>;
+@group(0) @binding(5) var levels:texture_2d<f32>;
+@group(0) @binding(6) var deckWater:texture_2d<f32>;
+`+WET_SPACE+DECK_SAMPLING+/* wgsl */ `
+fn mistAt(p:vec3f)->f32 {
+  let q=(p-wetMin)/wetSpan*vec3f(wetSize)-.5;let base=vec3i(floor(q));let f=fract(q);var value=0.0;
+  for(var i=0u;i<8u;i++){
+    let corner=vec3i(vec3u(i&1u,(i>>1u)&1u,(i>>2u)&1u));let at=base+corner;
+    if(all(at>=vec3i(0))&&all(at<vec3i(wetSize))){let w=mix(vec3f(1)-f,f,vec3f(corner));value+=f32(mist[wetIndex(vec3u(at))])*w.x*w.y*w.z/4096.0;}
+  }
+  return min(value,8.0);
+}
+fn levelAt(world:vec3f)->f32 {
+  // Project onto the local y=0 plane before looking up world-space sea heights.
+  let qWorld=world.xz-hull.origin.xz;let r=hull.right.xz;let back=-hull.forward.xz;
+  let det=max(.1,r.x*back.y-r.y*back.x);
+  let p=vec2f(qWorld.x*back.y-qWorld.y*back.x,r.x*qWorld.y-r.y*qWorld.x)/det/vec2f(hull.size.x/3.6,hull.size.y/12.0);
+  let uv=(p-wetMin.xz)/wetSpan.xz;
+  let q=clamp(uv,vec2f(0),vec2f(1))*${WET_SEA_SIZE}.0-.5;let b=vec2i(floor(q));let f=fract(q);
+  let hi=vec2i(${WET_SEA_SIZE-1});
+  return mix(mix(textureLoad(levels,clamp(b,vec2i(0),hi),0).x,textureLoad(levels,clamp(b+vec2i(1,0),vec2i(0),hi),0).x,f.x),
+    mix(textureLoad(levels,clamp(b+vec2i(0,1),vec2i(0),hi),0).x,textureLoad(levels,clamp(b+vec2i(1,1),vec2i(0),hi),0).x,f.x),f.y);
+}
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  let i=id.x;if(i>=arrayLength(&probes)){return;}let probe=probes[i];
+  if(I.motion.y<.5 || I.previous.w>.5 || probe.uvKind.w<.5){moisture[i]=vec2f(0);return;}
+  let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);
+  let p=rig.position;let world=wetWorld(p);let floor=deckFloor(p.z);
+  let inFootprint=p.z> -6.3 && p.z<5.6 && abs(p.x)<deckWidth(p.z)-.10 && p.y>=hullDeck(p.z)-.08;
+  let sheltered=inFootprint && p.z>=${QUARTERDECK_START} && p.y<${QUARTERDECK_HEIGHT-.08};
+  var water=smoothstep(-.025,.08,levelAt(world)-world.y);
+  var spray=mistAt(p);
+  if(inFootprint && p.y<=floor+deckRail(p.z)){
+    let wash=sampleDeck(deckUV(p));
+    water=smoothstep(.0003,.003,wash.x)*smoothstep(-.015,.035,wash.x-(p.y-floor)*HULL_Y_SCALE);
+    if(p.y<floor-.08){water=0.0;}
+  }
+  if(sheltered){water=0.0;spray=0.0;}
+  moisture[i]=moistureStep(moisture[i],water,spray,u32(probe.uvKind.z),length(I.motion.zw),I.previous.z);
+}
+`;
+
+// ---- js/wgsl/sim.js ----
+
+// FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
+
+const FFT_MATH = /* wgsl */ `
+const N: u32 = ${N}u;
+const LOGN: u32 = ${LOGN}u;
+const PI: f32 = 3.14159265358979;
+fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+`;
+
+const SIM_STRUCT = FFT_MATH + /* wgsl */ `
+const GRAV: f32 = 9.81;
+const SURF: f32 = 7.4e-5;   // surface tension / density
+
+struct Sim {
+  L:          array<vec4f, 2>,  // patch size per cascade ([c>>2][c&3])
+  kMin:       array<vec4f, 2>,
+  kMax:       array<vec4f, 2>,
+  foamDecay:  array<vec4f, 2>,  // 1/s per cascade
+  foamThresh: array<vec4f, 2>,  // Jacobian threshold per cascade
+  wind:       vec4f,  // U10 m/s, direction rad, fetch m, gamma
+  swell:      vec4f,  // Hs m, direction rad, peak omega, spreading exponent
+  misc:       vec4f,  // choppiness, short wave cut (m), loop period s, seed
+  timeP:      vec4f,  // time (looped), dt, foam gain, spectrum gain
+};
+@group(0) @binding(0) var<uniform> S: Sim;
+
+fn waveVec(x: u32, y: u32, L: f32) -> vec2f {
+  let nx = select(i32(x), i32(x) - i32(N), x >= N / 2u);
+  let ny = select(i32(y), i32(y) - i32(N), y >= N / 2u);
+  return vec2f(f32(nx), f32(ny)) * (2.0 * PI / L);
+}
+fn omegaOf(k: f32) -> f32 { return sqrt(GRAV * k + SURF * k * k * k); }
+fn dOmegaOf(k: f32) -> f32 { return (GRAV + 3.0 * SURF * k * k) / (2.0 * omegaOf(k)); }
+fn mulI(a: vec2f) -> vec2f { return vec2f(-a.y, a.x); }
+`;
+
+const SIM_INIT = SIM_STRUCT + NOISE_WGSL + /* wgsl */ `
+@group(0) @binding(1) var<storage, read_write> h0: array<vec4f>;
+
+fn rand01(s: u32) -> f32 { return (f32(pcgHash(s) >> 8u) + 0.5) / 16777216.0; }
+fn gauss2(seed: u32) -> vec2f {
+  let u1 = rand01(seed * 2u + 17u);
+  let u2 = rand01(seed * 2u + 18u + pcgHash(seed));
+  let r = sqrt(-2.0 * log(u1));
+  let a = 2.0 * PI * u2;
+  return r * vec2f(cos(a), sin(a));
+}
+fn wrapAngle(a: f32) -> f32 {
+  var x = a;
+  x = x - 2.0 * PI * floor((x + PI) / (2.0 * PI));
+  return x;
+}
+fn jonswap(w: f32, wp: f32, alpha: f32, gamma: f32) -> f32 {
+  let sigma = select(0.09, 0.07, w <= wp);
+  let d = (w - wp) / (sigma * wp);
+  let r = exp(-0.5 * d * d);
+  let q = wp / w;
+  let q2 = q * q;
+  return alpha * GRAV * GRAV / (w * w * w * w * w) * exp(-1.25 * q2 * q2) * pow(gamma, r);
+}
+// Donelan-Banner directional spreading (normalised over [-pi, pi])
+fn donelanBanner(theta: f32, w: f32, wp: f32) -> f32 {
+  let ratio = w / wp;
+  var beta: f32;
+  if (ratio < 0.95) {
+    beta = 2.61 * pow(ratio, 1.3);
+  } else if (ratio < 1.6) {
+    beta = 2.28 * pow(ratio, -1.3);
+  } else {
+    let eps = -0.4 + 0.8393 * exp(-0.567 * log(ratio * ratio));
+    beta = pow(10.0, eps);
+  }
+  let sh = 1.0 / cosh(clamp(beta * theta, -20.0, 20.0));
+  return beta / (2.0 * tanh(beta * PI)) * sh * sh;
+}
+// cos^2s(theta/2) spreading, normalised
+fn cosSpread(theta: f32, s: f32) -> f32 {
+  let q = sqrt(s + 0.25) / (2.0 * sqrt(PI));
+  return q * pow(abs(cos(theta * 0.5)), 2.0 * s);
+}
+
+fn spectrum(k: vec2f) -> f32 {
+  let kl = length(k);
+  let w = omegaOf(kl);
+  let theta = atan2(k.y, k.x);
+  // fetch-limited wind sea (JONSWAP)
+  let U = S.wind.x;
+  let F = S.wind.z;
+  var Sw = 0.0;
+  if (U > 0.1) {
+    let alpha = 0.076 * pow(U * U / (F * GRAV), 0.22);
+    let wp = 22.0 * pow(GRAV * GRAV / (U * F), 1.0 / 3.0);
+    Sw = jonswap(w, wp, alpha, S.wind.w) * donelanBanner(wrapAngle(theta - S.wind.y), w, wp);
+  }
+  // swell: narrow, long-crested JONSWAP
+  if (S.swell.x > 0.001) {
+    let ws = S.swell.z;
+    let gs = 6.0;
+    let hs4 = S.swell.x * 0.25;
+    let alphaS = hs4 * hs4 * 5.0 * ws * ws * ws * ws / (GRAV * GRAV) * (1.0 - 0.287 * log(gs));
+    Sw += jonswap(w, ws, alphaS, gs) * cosSpread(wrapAngle(theta - S.swell.y), S.swell.w);
+  }
+  // damp the very shortest waves
+  let sc = S.misc.y;
+  Sw *= exp(-kl * kl * sc * sc);
+  return Sw * dOmegaOf(kl) / kl * S.timeP.w;
+}
+
+fn amplitude(k: vec2f, c: u32) -> f32 {
+  let kl = length(k);
+  if (kl < 1e-5 || kl < S.kMin[c >> 2u][c & 3u] || kl >= S.kMax[c >> 2u][c & 3u]) { return 0.0; }
+  let dk = 2.0 * PI / S.L[c >> 2u][c & 3u];
+  // the finest cascades are toned down (they otherwise read as crumpled foil)
+  let g = select(1.0, select(0.85, 0.6, c == 5u), c >= 4u);
+  return sqrt(max(spectrum(k), 0.0)) * dk * 0.5 * g;
+}
+
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let c = id.z;
+  let L = S.L[c >> 2u][c & 3u];
+  let k = waveVec(id.x, id.y, L);
+  let mx = (N - id.x) % N;
+  let my = (N - id.y) % N;
+  let seed = u32(S.misc.w) * 7919u + c * 1000003u;
+  let a = gauss2(seed + (id.y * N + id.x)) * amplitude(k, c);
+  let b = gauss2(seed + (my * N + mx)) * amplitude(-k, c);
+  h0[(c * N + id.y) * N + id.x] = vec4f(a, b.x, -b.y);
+}
+`;
+
+const EVOLVE = /* wgsl */ `
+@group(0) @binding(1) var<storage, read> h0: array<vec4f>;
+struct Spectrum { a: vec4f, b: vec4f };
+
+fn evolve(x: u32, y: u32, c: u32) -> Spectrum {
+  let idx = (c * N + y) * N + x;
+  let k = waveVec(x, y, S.L[c >> 2u][c & 3u]);
+  let kl = length(k);
+  if (kl < 1e-5) {
+    return Spectrum(vec4f(0.0), vec4f(0.0));
+  }
+  let w0 = 2.0 * PI / S.misc.z;
+  let w = floor(omegaOf(kl) / w0) * w0;
+  let ph = w * S.timeP.x;
+  let e = vec2f(cos(ph), sin(ph));
+  let H0 = h0[idx];
+  // h0(k) travels along +k: h(k,t) = h0(k) e^{-iwt} + conj(h0(-k)) e^{iwt}
+  let h = cmul(H0.xy, vec2f(e.x, -e.y)) + cmul(H0.zw, e);
+  let ih = mulI(h);
+  let lam = S.misc.x;
+  let ik = 1.0 / kl;
+  let Dx = ih * (lam * k.x * ik);
+  let Dz = ih * (lam * k.y * ik);
+  let jxz = h * (-lam * k.x * k.y * ik);
+  let sx = ih * k.x;
+  let sz = ih * k.y;
+  let jxx = h * (-lam * k.x * k.x * ik);
+  let jzz = h * (-lam * k.y * k.y * ik);
+  return Spectrum(vec4f(Dx + mulI(Dz), h + mulI(jxz)),
+                  vec4f(sx + mulI(sz), jxx + mulI(jzz)));
+}
+`;
+
+const FFT_CORE = /* wgsl */ `
+var<workgroup> wa: array<vec4f, ${N}>;
+var<workgroup> wb: array<vec4f, ${N}>;
+fn bitrev(i: u32) -> u32 { return reverseBits(i) >> (32u - LOGN); }
+// In-place radix-2 inverse FFT over shared memory (input already bit-reversed).
+fn butterflies(t: u32) {
+  for (var s = 0u; s < LOGN; s++) {
+    let half = 1u << s;
+    let pos = t & (half - 1u);
+    let i0 = ((t >> s) << (s + 1u)) + pos;
+    let i1 = i0 + half;
+    let ang = PI * f32(pos) / f32(half);
+    let w = vec2f(cos(ang), sin(ang));
+    let a0 = wa[i0]; let a1 = wa[i1];
+    let b0 = wb[i0]; let b1 = wb[i1];
+    let ta = vec4f(cmul(a1.xy, w), cmul(a1.zw, w));
+    let tb = vec4f(cmul(b1.xy, w), cmul(b1.zw, w));
+    wa[i0] = a0 + ta; wa[i1] = a0 - ta;
+    wb[i0] = b0 + tb; wb[i1] = b0 - tb;
+    workgroupBarrier();
+  }
+}
+`;
+
+// Evolve directly into workgroup memory, avoiding two full-size spectrum buffers.
+const FFT_ROWS = SIM_STRUCT + EVOLVE + FFT_CORE + /* wgsl */ `
+@group(0) @binding(2) var<storage, read_write> outA: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> outB: array<vec4f>;
+
+@compute @workgroup_size(${N / 2})
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32) {
+  let base = (wg.z * N + wg.x) * N;
+  let e0 = t;
+  let e1 = t + N / 2u;
+  let s0 = evolve(e0, wg.x, wg.z);
+  let s1 = evolve(e1, wg.x, wg.z);
+  wa[bitrev(e0)] = s0.a;
+  wa[bitrev(e1)] = s1.a;
+  wb[bitrev(e0)] = s0.b;
+  wb[bitrev(e1)] = s1.b;
+  workgroupBarrier();
+  butterflies(t);
+  outA[base + e0] = wa[e0];
+  outA[base + e1] = wa[e1];
+  outB[base + e0] = wb[e0];
+  outB[base + e1] = wb[e1];
+}
+`;
+
+// Column pass + final assembly (displacement / derivative / slope-moment textures).
+const FFT_COLS = FFT_MATH + FFT_CORE + /* wgsl */ `
+@group(0) @binding(0) var<storage, read> inA: array<vec4f>;
+@group(0) @binding(1) var<storage, read> inB: array<vec4f>;
+@group(0) @binding(2) var dispOut: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(3) var derivOut: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(4) var momOut: texture_storage_2d_array<rgba16float, write>;
+
+fn emit(x: u32, y: u32, c: u32, a: vec4f, b: vec4f) {
+  // a = (Dx, Dz, Dy, jxz), b = (sx, sz, jxx, jzz)
+  let p = vec2u(x, y);
+  textureStore(dispOut, p, c, vec4f(a.x, a.z, a.y, a.w));
+  textureStore(derivOut, p, c, b);
+  // Duplicate jxz in the unused moment alpha: surface shading needs it but
+  // not displacement.xyz. Both copies retain identical half precision/mips.
+  textureStore(momOut, p, c, vec4f(b.x * b.x, b.y * b.y, b.x * b.y, a.w));
+}
+
+@compute @workgroup_size(${N / 2})
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) t: u32) {
+  let x = wg.x;
+  let c = wg.z;
+  let e0 = t;
+  let e1 = t + N / 2u;
+  let i0 = (c * N + e0) * N + x;
+  let i1 = (c * N + e1) * N + x;
+  wa[bitrev(e0)] = inA[i0];
+  wa[bitrev(e1)] = inA[i1];
+  wb[bitrev(e0)] = inB[i0];
+  wb[bitrev(e1)] = inB[i1];
+  workgroupBarrier();
+  butterflies(t);
+  emit(x, e0, c, wa[e0], wb[e0]);
+  emit(x, e1, c, wa[e1], wb[e1]);
+}
+`;
+
+// Box-filter mip generation for the three simulation textures (array of cascades).
+const SIM_MIPS = /* wgsl */ `
+@group(0) @binding(0) var srcA: texture_2d_array<f32>;
+@group(0) @binding(1) var srcB: texture_2d_array<f32>;
+@group(0) @binding(2) var srcC: texture_2d_array<f32>;
+@group(0) @binding(3) var dstA: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(4) var dstB: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(5) var dstC: texture_storage_2d_array<rgba16float, write>;
+
+fn box(t: texture_2d_array<f32>, p: vec2i, l: u32) -> vec4f {
+  return 0.25 * (textureLoad(t, p, l, 0) + textureLoad(t, p + vec2i(1, 0), l, 0) +
+                 textureLoad(t, p + vec2i(0, 1), l, 0) + textureLoad(t, p + vec2i(1, 1), l, 0));
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let size = textureDimensions(dstA);
+  if (id.x >= size.x || id.y >= size.y) { return; }
+  let p = vec2i(id.xy) * 2;
+  textureStore(dstA, id.xy, id.z, box(srcA, p, id.z));
+  textureStore(dstB, id.xy, id.z, box(srcB, p, id.z));
+  textureStore(dstC, id.xy, id.z, box(srcC, p, id.z));
+}
+`;
+
+// Tileable foam micro-structure: R = bubble lace (multi-scale Worley edges),
+// G = finer lace, B = soft fbm density, A = streak noise.
+const FOAM_TEX = NOISE_WGSL + PERIODIC_WGSL + /* wgsl */ `
+@group(0) @binding(0) var dst: texture_storage_2d<rgba8unorm, write>;
+const SIZE: f32 = 512.0;
+
+fn h2(i: vec2i, salt: u32) -> vec2f {
+  let h = pcgHash((u32(i.x) * 73856093u) ^ pcgHash(u32(i.y) * 19349663u + salt));
+  let h2v = pcgHash(h + 0x9e3779b9u);
+  return vec2f(f32(h >> 8u), f32(h2v >> 8u)) / 16777216.0;
+}
+// "swiss cheese" foam: 1 in foam material, 0 inside bubbles; per-bubble radius
+fn bubbles(uv: vec2f, period: i32, salt: u32, rmin: f32, rmax: f32) -> f32 {
+  let w = vec2f(pfbm(uv * f32(period) * 0.5, period / 2, 3), pfbm(uv * f32(period) * 0.5 + 17.0, period / 2, 3));
+  let p = uv * f32(period) + w * 0.9;
+  let ip = vec2i(floor(p));
+  let fp = p - floor(p);
+  var v = 9.0;
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let o = vec2i(i, j);
+      let cell = ((ip + o) % period + period) % period;
+      let hh = h2(cell, salt);
+      let r = vec2f(o) + hh * 0.9 + 0.05 - fp;
+      let rad = mix(rmin, rmax, h2(cell, salt + 7u).x);
+      v = min(v, length(r) / rad);
+    }
+  }
+  return smoothstep(0.8, 1.25, v);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let uv = (vec2f(id.xy) + 0.5) / SIZE;
+  // irregular holes from warped fbm (big sheets with ragged openings) ...
+  let w1 = vec2f(pfbm(uv * 5.0, 5, 3), pfbm(uv * 5.0 + vec2f(3.7, 9.1), 5, 3));
+  let m1 = smoothstep(-0.14, 0.06, pfbm(uv * 10.0 + w1 * 1.4, 10, 5));
+  let w2 = vec2f(pfbm(uv * 12.0 + 1.3, 12, 2), pfbm(uv * 12.0 + 7.9, 12, 2));
+  let m2 = smoothstep(-0.16, 0.04, pfbm(uv * 27.0 + w2 * 0.9, 27, 4));
+  // ... plus small round bubbles
+  let b3 = bubbles(uv, 29, 37u, 0.06, 0.45);
+  let b4 = bubbles(uv, 61, 53u, 0.05, 0.42);
+  let dens = pfbm(uv * 4.0, 4, 5) * 0.5 + 0.5;
+  let fineD = pfbm(uv * 16.0, 16, 3) * 0.5 + 0.5;
+  let big = m1 * (0.55 + 0.45 * m2) * (0.75 + 0.25 * b3);
+  let fine = 0.45 + 0.55 * b3 * (0.7 + 0.3 * b4);
+  let streak = pfbm(uv * vec2f(4.0, 16.0), 4, 5) * 0.5 + 0.5;
+  textureStore(dst, id.xy, vec4f(clamp(big * 0.6 + dens * 0.4, 0.0, 1.0), clamp(fine * 0.8 + fineD * 0.2, 0.0, 1.0), dens, streak));
+}
+`;
+
+const RGBA8_MIPS = /* wgsl */ `
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var dst: texture_storage_2d<rgba8unorm, write>;
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let size = textureDimensions(dst);
+  if (id.x >= size.x || id.y >= size.y) { return; }
+  let p = vec2i(id.xy) * 2;
+  let v = 0.25 * (textureLoad(src, p, 0) + textureLoad(src, p + vec2i(1, 0), 0) +
+                  textureLoad(src, p + vec2i(0, 1), 0) + textureLoad(src, p + vec2i(1, 1), 0));
+  textureStore(dst, id.xy, v);
+}
+`;
+
+// World-space foam clipmaps (toroidally addressed, centred on the camera).
+// Strong compression of the total displacement field produces fractional foam coverage.
+const FOAM_RES = 1024;
+const FOAM_UPDATE = FOAM_MODEL + WAKE_SAMPLE + /* wgsl */ `
+const RES: i32 = ${FOAM_RES};
+struct FoamU {
+  snap: array<vec4i, 2>,     // per level: current camera texel (x, z), previous (x, z)
+  p0: vec4f,                 // texel size level 0, level 1, dt, decay rate
+  p1: vec4f,                 // J threshold, gain, growth, -
+  cascL: array<vec4f, 2>,
+  cascInvL: array<vec4f, 2>,
+  drift: vec4f,              // foam drift velocity (m/s) xz
+};
+@group(0) @binding(0) var<uniform> U: FoamU;
+@group(0) @binding(1) var prevTex: texture_2d_array<f32>;
+@group(0) @binding(2) var dst: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(3) var dispTex: texture_2d_array<f32>;
+@group(0) @binding(4) var derivTex: texture_2d_array<f32>;
+@group(0) @binding(5) var samp: sampler;
+@group(0) @binding(6) var sampPrev: sampler;
+@group(0) @binding(7) var<uniform> I: Interaction;
+@group(0) @binding(8) var wakeTex: texture_2d<f32>;
+@group(0) @binding(9) var wakeSamp: sampler;
+
+fn wrapIdx(i: i32, lo: i32) -> i32 { return lo + (((i - lo) % RES) + RES) % RES; }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let lvl = id.z;
+  let sn = U.snap[lvl];
+  let ts = select(U.p0.x, U.p0.y, lvl == 1u);
+  let lo = sn.xy - vec2i(RES / 2);
+  let g = vec2i(wrapIdx(i32(id.x), lo.x), wrapIdx(i32(id.y), lo.y));
+  let plo = sn.zw - vec2i(RES / 2);
+  let inPrev = all(g >= plo) && all(g < plo + vec2i(RES));
+  let p = (vec2f(g) + 0.5) * ts;
+  var jxx = 0.0; var jzz = 0.0; var jxz = 0.0;
+  for (var c = 0u; c < ${CASCADES}u; c++) {
+    let texel = U.cascL[c >> 2u][c & 3u] / ${N}.0;
+    let lod = log2(max(ts / texel, 1.0));
+    if (lod < 7.5) {
+      let uv = p * U.cascInvL[c >> 2u][c & 3u];
+      let d = textureSampleLevel(derivTex, samp, uv, c, lod);
+      let a = textureSampleLevel(dispTex, samp, uv, c, lod);
+      jxx += d.z; jzz += d.w; jxz += a.w;
+    }
+  }
+  let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
+  var prev = vec4f(0.0);
+  if (inPrev) {
+    // semi-Lagrangian advection: foam slowly drifts downwind (and spreads a little)
+    let back = (vec2f(id.xy) + 0.5 - U.drift.xy * U.p0.z / ts) / f32(RES);
+    prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
+  }
+  let dt = U.p0.z;
+  let hullFoam = wakeAt(p);
+  let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
+  let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
+  let f=max(seaFoam,hullFoam.z*0.9);
+  let fresh=max(mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0)),hullFoam.w*0.9);
+  textureStore(dst, id.xy, lvl, vec4f(f, fresh, J, 1.0));
+}
+`;
+
+const ARRAY16_MIPS = /* wgsl */ `
+@group(0) @binding(0) var src: texture_2d_array<f32>;
+@group(0) @binding(1) var dst: texture_storage_2d_array<rgba16float, write>;
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let size = textureDimensions(dst);
+  if (id.x >= size.x || id.y >= size.y) { return; }
+  let p = vec2i(id.xy) * 2;
+  let v = 0.25 * (textureLoad(src, p, id.z, 0) + textureLoad(src, p + vec2i(1, 0), id.z, 0) +
+                  textureLoad(src, p + vec2i(0, 1), id.z, 0) + textureLoad(src, p + vec2i(1, 1), id.z, 0));
+  textureStore(dst, id.xy, id.z, v);
 }
 `;
 
@@ -4732,7 +4825,7 @@ function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0) {
   for (let i = 0; i < steps; i++) {
     const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways) : null;
     stepBoatRotation(boat,'roll',attitude.roll??0,loads?.rollMoment??0,h);
-    stepBoatRotation(boat,'pitch',attitude.pitch??0,0,h);
+    stepBoatRotation(boat,'pitch',attitude.pitch??0,loads?.pitchMoment??0,h);
     const force = (loads ? loads.forward : thrust) + waveForce;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
@@ -6087,7 +6180,7 @@ async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexB
 
 // ---- js/deck.js ----
 
-async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe}) {
+async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe}) {
   const textures=[0,1].map(i=>device.createTexture({label:'deck water '+i,size:[DECK_COLS,DECK_ROWS],format:'rgba32float',
     usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC}));
   const views=textures.map(t=>t.createView());
@@ -6108,7 +6201,7 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
     depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:4},
   })));
   // Four substeps always finish in texture zero; timber reads that same wetness field.
-  const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis)]));
+  const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis),skyView]));
   let shadowGroups;
   return {
     textures,view:views[0],sampler,
@@ -6129,11 +6222,11 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
 
 
 
-async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, sunVis, shader, computePipe }) {
+async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, skyView, sunVis, shader, computePipe }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
-  const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,sunVis,shader,computePipe});
+  const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView,sunVis,shader,computePipe});
   const contacts = device.createBuffer({ label: 'hull contacts', size: CONTACT_COUNT * 64, usage: bu.STORAGE | bu.COPY_SRC });
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
@@ -6731,7 +6824,8 @@ function instrumentReadout(boat){
   let cue=pointOfSail(s.apparentAngle,s.apparentSpeed);
   if(boat.propulsion==='manual')cue='Set-speed mode';
   else if(s.maneuver)cue='Transferring yards · crew handling rig';
-  else if(speed<-.05)cue=angle>=50&&angle<110&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';
+  else if(s.forward<0&&angle>=55&&s.rig.some(p=>p.pressure<-.5))cue='Canvas backed · transfer yards';
+  else if(speed<-.05)cue=s.forward>0&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';
   else if(angle<42&&s.apparentSpeed>=.5)cue='In irons · rudder needs water flow';
   else if(s.rig.some(p=>p.pressure<-.5))cue+=' · bad tack';
   return {speed:(Math.abs(speed)<.05?0:speed).toFixed(1),motion:speed<-.05?'ASTERN':'AHEAD',
@@ -7136,7 +7230,7 @@ async function main() {
   try { crew=await createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
-  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
   const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
   wetness.connect(interaction,spindrift,fullArr(dispTex),samplerSim);

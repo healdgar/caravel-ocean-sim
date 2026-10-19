@@ -11,7 +11,8 @@ test('instruments distinguish signed speed, apparent wind from bearing and stern
   s.apparentAngle=-Math.PI/4;r=instrumentReadout(b);assert.equal(r.direction,'45° port');
   s.apparentAngle=0;assert.match(instrumentReadout(b).cue,/steering is reversed/);
   b.surgeVelocity=0;assert.match(instrumentReadout(b).cue,/rudder needs water flow/);
-  b.surgeVelocity=-KNOT_TO_MPS;b.rudderTarget=30;s.apparentAngle=Math.PI/2;assert.match(instrumentReadout(b).cue,/centre rudder/);
+  b.surgeVelocity=-KNOT_TO_MPS;b.rudderTarget=30;s.apparentAngle=Math.PI/2;s.forward=100;assert.match(instrumentReadout(b).cue,/centre rudder/);
+  s.forward=-100;s.rig.forEach(p=>p.pressure=-1);assert.match(instrumentReadout(b).cue,/Canvas backed/);
   b.surgeVelocity=-.001;assert.equal(instrumentReadout(b).speed,'0.0');
   s.apparentSpeed=0;assert.equal(instrumentReadout(b).calm,true);
 });

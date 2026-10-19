@@ -97,3 +97,16 @@ test('routine tacks and oscillating in irons retain yards and exposed canvas',()
     if(i>600)assert.equal(requestYardTransfer(s),false,'transfer unavailable in irons');
   }
 });
+
+test('ordered yard transfer changes backed geometry into drawing canvas without adding propulsion',()=>{
+  const b=boat();let s=sailingState(b);
+  for(let i=0;i<120;i++){advanceSails(b,.1,8,Math.PI);sailForces(b,8,Math.PI,0);}
+  for(let i=0;i<120;i++){advanceSails(b,.1,8,0);sailForces(b,8,0,0);}
+  assert.ok(s.forward<0,'retained-yard windward clew is actually backed');assert.ok(requestYardTransfer(s));
+  let bare=false;
+  for(let i=0;i<1200&&s.maneuver;i++){
+    advanceSails(b,.1,8,0);s=sailForces(b,8,0,0);
+    if(s.rig.every(p=>p.deployed===0)){bare=true;assert.equal(s.forward,0,'handling cannot supply thrust with furled canvas');}
+  }
+  assert.ok(bare);assert.equal(s.maneuver,null);assert.ok(s.forward>500,'leeward sail geometry draws after transfer');
+});

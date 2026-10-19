@@ -2157,3 +2157,58 @@ test('sailing instruments persist independent switches, share overrides, and hid
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
   }finally{await page.close();}
 });
+
+test('vertical scupper water transmits the hull, catches sunlight and follows marine haze', {timeout:60000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__runoff',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__runoff`);
+    const result=await page.evaluate(async()=>{
+      const {DECK_RENDER}=await import('/js/wgsl/deck.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,T=GPUTextureUsage,buf=(size,usage)=>device.createBuffer({size,usage:usage|B.COPY_DST});
+      const frame=buf(384,B.UNIFORM),hull=buf(96,B.UNIFORM),sun=buf(16,B.STORAGE),shadow=buf(112,B.UNIFORM);
+      const texture=(color,layers=1)=>{
+        const t=device.createTexture({size:[1,1,layers],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});
+        for(let i=0;i<layers;i++)device.queue.writeTexture({texture:t,origin:[0,0,i]},new Uint8Array([...color,255]),{bytesPerRow:4},[1,1]);return t;
+      };
+      const env=texture([25,40,70],6),trans=texture([240,155,65]),sky=texture([240,170,100]);
+      const deck=device.createTexture({size:[1,1],format:'rgba32float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      const depth=device.createTexture({size:[1,1],format:'depth32float',usage:T.TEXTURE_BINDING|T.RENDER_ATTACHMENT});
+      const output=device.createTexture({size:[4,4],format:'rgba32float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
+      const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'}),read=buf(1024,B.COPY_DST|B.MAP_READ);
+      const code=DECK_RENDER+`@vertex fn fixtureVS(@builtin(vertex_index) i:u32)->DeckVertex {
+        let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];
+        var o:DeckVertex;o.pos=vec4f(p,0,1);o.world=vec3f(p.x,p.y+2.0,0);o.uv=vec2f(.5);
+        o.local=vec3f(p.x,2,p.y);o.curtain=vec2f(.25,0.05);return o;
+      }`;
+      const module=device.createShaderModule({code});
+      for(const m of (await module.getCompilationInfo()).messages)if(m.type==='error')errors.push(m.message);
+      const pipe=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'fixtureVS'},fragment:{module,entryPoint:'washFS',targets:[{format:'rgba32float'}]}});
+      const binding=buffer=>({buffer}),view=t=>t.createView();
+      const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[binding(frame),binding(hull),view(deck),sampler,env.createView({dimension:'cube'}),view(trans),binding(sun),view(sky)].map((resource,binding)=>({binding,resource}))});
+      const shadows=device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[binding(shadow),view(depth),device.createSampler({compare:'less-equal'}),view(depth),view(trans),sampler].map((resource,binding)=>({binding,resource}))});
+      const h=new Float32Array(20);h[0]=1;h[5]=1;h[10]=-1;h[12]=3.6;h[13]=12;device.queue.writeBuffer(hull,0,h);
+      device.queue.writeTexture({texture:deck},new Float32Array([.02,.3,1,.05]),{bytesPerRow:16},[1,1]);
+      const report=[];
+      for(const c of [{name:'sun',sun:1},{name:'shade',sun:0},{name:'haze',sun:0,distance:300,fog:.003},{name:'backlit',sun:1,light:[0,.2,-Math.sqrt(.96)]},{name:'night',sun:1,light:[0,-.2,Math.sqrt(.96)]}]){
+        const f=new Float32Array(96);f.set([0,2,c.distance??30,0],16);f.set([...(c.light??[0,.2,Math.sqrt(.96)]),14],32);f.set([3,.01],72);f.set([c.fog??0,c.fog??0,c.fog??0,c.fog??0],88);
+        device.queue.writeBuffer(frame,0,f);device.queue.writeBuffer(sun,0,new Float32Array([c.sun,0,0,0]));
+        const enc=device.createCommandEncoder(),pass=enc.beginRenderPass({colorAttachments:[{view:view(output),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}]});
+        pass.setPipeline(pipe);pass.setBindGroup(0,group);pass.setBindGroup(1,shadows);pass.draw(3);pass.end();
+        enc.copyTextureToBuffer({texture:output},{buffer:read,bytesPerRow:256},[4,4]);device.queue.submit([enc.finish()]);
+        await read.mapAsync(GPUMapMode.READ);report.push({name:c.name,rgba:Array.from(new Float32Array(read.getMappedRange()).slice(0,4))});read.unmap();
+      }
+      device.destroy();return {errors,report};
+    });
+    assert.deepEqual(result.errors,[]);
+    const colors=Object.fromEntries(result.report.map(s=>[s.name,s.rgba]));
+    for(const {rgba}of result.report){assert.ok(rgba.every(Number.isFinite));assert.ok(rgba[3]>.02&&rgba[3]<.55,'thin runoff leaves the hull visible');}
+    assert.ok(colors.sun[0]>colors.shade[0]*3,'vertical sheets receive sunlight');
+    assert.ok(colors.sun[0]>colors.sun[2],'warm sun is not replaced by blue environment reflection');
+    assert.ok(colors.backlit[0]>colors.shade[0]*2,'bubbles scatter backlighting');
+    assert.ok(colors.haze[0]>colors.shade[0]*3,'distant runoff shares warm atmospheric light');
+    for(let i=0;i<3;i++)assert.ok(Math.abs(colors.night[i]-colors.shade[i])<1e-6,'no direct sun below the horizon');
+  }finally{await page.close();}
+});

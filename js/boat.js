@@ -149,7 +149,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   for (let i = 0; i < steps; i++) {
     const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways) : null;
     stepBoatRotation(boat,'roll',attitude.roll??0,loads?.rollMoment??0,h);
-    stepBoatRotation(boat,'pitch',attitude.pitch??0,0,h);
+    stepBoatRotation(boat,'pitch',attitude.pitch??0,loads?.pitchMoment??0,h);
     const force = (loads ? loads.forward : thrust) + waveForce;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);

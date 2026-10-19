@@ -368,7 +368,7 @@ async function main() {
   try { crew=await createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
-  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
   const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
   wetness.connect(interaction,spindrift,fullArr(dispTex),samplerSim);

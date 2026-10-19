@@ -1,6 +1,7 @@
 import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck } from './hull.js';
 import { SQUARE_RIG_MASTS } from './rigging.js';
-import { SAIL_PLAN, createLateenPoses, advanceLateenRig, lateenSheetTarget, lateenClothPoint } from './lateen.js';
+import { SAIL_PLAN, createLateenPoses, advanceLateenRig } from './lateen.js';
+import { createSailGeometry, updateSailGeometry, sailPanelForce } from './sail-aerodynamics.js';
 export { SAIL_PLAN, runningRiggingLines } from './lateen.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
@@ -27,13 +28,6 @@ const WIND_ROUGHNESS = 0.0002;
 export function windAtHeight(speed, height) {
   return speed * Math.log(Math.max(height, WIND_ROUGHNESS) / WIND_ROUGHNESS) / Math.log(10 / WIND_ROUGHNESS);
 }
-const SAIL_LOADS = SAIL_PLAN.map((s,i)=>{
-  if(s.kind==='square')return {mast:s.mast,kind:s.kind,area:SAIL_AREAS[i],top:s.top,drop:s.height*.5};
-  const centre=s.corners[0].map((_,axis)=>s.corners.reduce((sum,p)=>sum+p[axis],0)/3);
-  // Match the cloth's column gathering onto the yard (u = 1/3 at its centroid).
-  const top=s.corners[0][1]+(s.corners[1][1]-s.corners[0][1])/3;
-  return {mast:s.mast,kind:s.kind,area:SAIL_AREAS[i],top,drop:top-centre[1]};
-});
 const sailClamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const sailSmooth = (lo, hi, x) => { const t = sailClamp((x - lo) / (hi - lo), 0, 1); return t * t * (3 - 2 * t); };
 
@@ -43,9 +37,10 @@ export function sailingState(boat) {
     squareYaw: 0, lateenYaw: 0, tack: 1, canvasTack: 1, forward: 0, side: 0, area: 0,
     apparentSpeed: 0, apparentAngle: 0, squareFill: 0, lateenFill: 0,
     squareTarget: 0, lateenTarget: 0, windSide: 0, windForward: 0, rollMoment: 0,
-    loadWind: {tack:1}, panelSide:new Float64Array(SAIL_LOADS.length), panelMoment:new Float64Array(SAIL_LOADS.length),
+    pitchMoment:0, panelSide:new Float64Array(3), panelMoment:new Float64Array(3),
   };
   boat.sailState.rig??=createLateenPoses(boat.sailState.set);
+  boat.sailState.geometry??=createSailGeometry();
   return boat.sailState;
 }
 
@@ -71,50 +66,47 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
   s.lateenYaw += sailClamp(s.lateenTarget - s.lateenYaw, -dt * 0.65, dt * 0.65);
   advanceLateenRig(s,boat,dt);
+  // Pressure loads fill the canvas with a short response time. This state only
+  // advances with time; querying forces never changes the geometry underneath it.
+  for(const p of s.rig)p.fill+=((p.targetFill??0)-p.fill)*(1-Math.exp(-dt*4));
 }
 
 export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
   roll = boat.roll ?? 0, rollRate = boat.rollVelocity ?? 0) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, velocity, sideways, windSpeed, windDirection);
-  s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.squareFill=0;s.lateenFill=0;
-  const upright=Math.max(0,Math.cos(roll));
-  let squareArea=0,lateenArea=0;
-  for(let i=0;i<SAIL_LOADS.length;i++){
-    const panel=SAIL_LOADS[i],lateen=panel.kind==='lateen',deployed=lateen?s.rig[panel.mast].deployed:s.set[panel.mast];
-    // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const centreHeight=lateen?lateenClothPoint(panel.mast,1/3,1/3,s.rig[panel.mast],0,0,false)[1]:panel.top-panel.drop*(.025+.975*deployed);
-    const height=centreHeight*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
-    const lever=Math.max(.1,height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)
-      -(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE))*upright;
-    const wind=s.loadWind;wind.tack=s.tack;
-    // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
-    apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
-    const speed=wind.apparentSpeed,angle=Math.abs(wind.apparentAngle),degrees=angle*180/Math.PI;
-    const trim=lateen?Math.max(0,Math.cos(2*(Math.abs(s.rig[i].opening)-lateenSheetTarget(wind.lateenTarget,i))))
-      :Math.max(0,Math.cos(2*(s.squareYaw-wind.squareTarget)));
-    const efficiency=lateen?.72+.28*sailClamp(-s.rig[i].side*wind.tack,0,1):1;
-    const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim*efficiency;
-    const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
-    const fill=sailSmooth(.5,5,speed)*power;
-    if(lateen)s.rig[i].fill=fill;
-    s.area+=area;
-    if(lateen){s.lateenFill+=fill*area;lateenArea+=area;}else{s.squareFill+=fill*area;squareArea+=area;}
-    // Projected area and the horizontal lever both shorten as the vessel heels.
-    const pressure=.5*1.225*speed*speed*area*upright,q=pressure*power;
-    const drag=.10+1.2*Math.sin(Math.max(0,angle-Math.PI/2))**2;
-    const f=speed>1e-6?wind.windForward/speed:0,r=speed>1e-6?wind.windSide/speed:0;
-    let lift=1.1*Math.sin(angle)*(1-sailSmooth(90,125,degrees));
-    if(f>0)lift=Math.min(lift,.85*drag*Math.abs(r)/f);
-    // Luffing canvas retains wind drag and can drive the ship astern.
-    // Helm input never changes this force; the rudder needs actual water flow.
-    const noGo=1-sailSmooth(35,80,degrees),windage=pressure*noGo*.08;
-    const side=q*(lift*-f*Math.sign(r)+drag*r)+windage*r;
-    s.forward+=q*(lift*Math.abs(r)+drag*f)+windage*f;s.side+=side;
-    s.panelSide[i]=side;s.panelMoment[i]=-side*lever;s.rollMoment+=s.panelMoment[i];
+  s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.pitchMoment=0;s.squareFill=0;s.lateenFill=0;
+  s.panelSide.fill(0);s.panelMoment.fill(0);
+  const geometry=s.geometry,panels=updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
+  const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0;
+  const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const cg=(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE)-HULL_DRAFT*HULL_VERTICAL_SCALE;
+  const relativeDirection=windDirection-(boat.heading??0)*Math.PI/180;
+  const windX=Math.cos(relativeDirection),windZ=Math.sin(relativeDirection);
+  // The roll axis rotates with pitch. Point velocities and torque use the same
+  // axes as the visible hull: roll around Z, then pitch around X.
+  const ox=pitchRate,oy=-rollRate*sp,oz=rollRate*cp;
+  for(let m=0;m<3;m++){
+    let fill=0,area=0;
+    for(let j=0;j<geometry.indices.length;j++){
+      const panel=panels[m*geometry.indices.length+j],[x,y,z]=panel.point,[nx,ny,nz]=panel.normal;
+      const rx=cr*x-sr*(y-cg),ry=cp*(sr*x+cr*(y-cg))-sp*z,rz=sp*(sr*x+cr*(y-cg))+cp*z;
+      const normalX=cr*nx-sr*ny,normalY=cp*(sr*nx+cr*ny)-sp*nz,normalZ=sp*(sr*nx+cr*ny)+cp*nz;
+      const height=cp*(sr*x+cr*y)-sp*z-(boat.hydrodynamics?.sinkage??0);
+      const localWind=windAtHeight(windSpeed,height);
+      const wx=windX*localWind-sideways-(oy*rz-oz*ry);
+      const wy=-(oz*rx-ox*rz),wz=windZ*localWind+velocity-(ox*ry-oy*rx);
+      fill+=sailPanelForce(force,geometry.coefficients,normalX,normalY,normalZ,wx,wy,wz,panel.area,panel.aspect)*panel.area;
+      const [fx,fy,fz]=force;
+      const mx=ry*fz-rz*fy,my=rz*fx-rx*fz,mz=rx*fy-ry*fx;
+      const rollMoment=-sp*my+cp*mz;
+      s.forward-=fz;s.side+=fx;s.rollMoment+=rollMoment;s.pitchMoment+=mx;
+      s.panelSide[m]+=fx;s.panelMoment[m]+=rollMoment;area+=panel.area;
+    }
+    s.rig[m].targetFill=area>0?fill/area:0;
+    s.lateenFill+=s.rig[m].fill*area;s.area+=area;
   }
-  s.squareFill=squareArea>0?s.squareFill/squareArea:0;
-  s.lateenFill=lateenArea>0?s.lateenFill/lateenArea:0;
+  s.lateenFill=s.area>0?s.lateenFill/s.area:0;
   return s;
 }
 
