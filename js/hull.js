@@ -68,3 +68,13 @@ export function hullSurfacePoint(station, angle) {
   const z=station*(1-rake*depth*depth), deck=hullDeck(z), y=deck-(deck+HULL_DRAFT)*depth;
   return [Math.sign(Math.cos(angle))*hullHalfWidth(z,Math.max(-HULL_DRAFT,y)),y,z];
 }
+// Follow a strake relative to the sheer, including the bow/stern rake. Sampling
+// hullHalfWidth at an unraked end Z instead snaps the strip towards the centreline.
+export function hullSheerAngle(station, offset) {
+  let low=0,high=Math.PI/2;
+  for(let i=0;i<26;i++){
+    const angle=(low+high)/2,p=hullSurfacePoint(station,angle);
+    if(p[1]-hullDeck(p[2])>offset)low=angle;else high=angle;
+  }
+  return (low+high)/2;
+}

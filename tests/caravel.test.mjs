@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCaravelMesh, indexCaravelMesh } from '../js/caravel.js';
 import { shadowMeshData } from '../js/shadows.js';
-import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, hullDeck, TILLER_PIVOT, TILLER_HANDLE, tillerPoint, HELM_EYE_X, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
+import { hullHalfWidth, hullSurfacePoint, deckHalfWidth, HULL_DRAFT, vesselDeck, hullDeck, TILLER_PIVOT, TILLER_HANDLE, tillerPoint, HELM_EYE_X, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
 import { boatEyePosition } from '../js/boat.js';
 import { createCompany, stepCompany } from '../js/crew.js';
 import { SAIL_PLAN, SAIL_AREAS } from '../js/sailing.js';
@@ -214,4 +214,121 @@ test('fine bow and stern sections retain a full midbody and four unobstructed gu
     assert.ok([3,4].includes(hit.material),'four elevated iron falconets exist');
   }
   for(const z of [-5.5,-4.2,-3.8])assert.ok(vesselDeck(z)<1.2,'continuous sheer replaces the forecastle tier');
+});
+
+test('quarterdeck seams are caulked, its underside is closed and rail feet bear on timber',()=>{
+  const mesh=createCaravelMesh();
+  for(const x of [-1.7+8*.145+.1425,-1.7+14*.145+.1425]){
+    const hit=firstHit(mesh,[x,2.32,3.7],[0,-1,0],[12,19]);
+    assert.equal(hit.material,4,'a seam exposes caulk, never the cabin below');
+    assert.ok(Math.abs(hit.point[1]-2.282)<.001);
+    const ceiling=firstHit(mesh,[x,2.1,3.7],[0,1,0],[12,19]);
+    assert.equal(ceiling.material,1);
+    assert.ok(Math.abs(ceiling.point[1]-2.225)<.001);
+  }
+  for(const side of [-1,1])for(const z of [2.7,3.18,3.66,4.14,4.62,5.1,5.6]){
+    const x=side*(deckHalfWidth(z)+.105-.04);
+    const support=firstHit(mesh,[x,2.301,z],[0,-1,0],[17,12,19]);
+    assert.ok([0,1].includes(support.material));
+    assert.ok(2.3-support.point[1]<.003,'rail foot touches deck or rim');
+  }
+});
+
+test('stair treads intersect both stringers and gun forks connect to their swivel shafts',()=>{
+  const parts=new Map(),raw=createCaravelMesh({parts});
+  const triangles=material=>new Float32Array(Array.from({length:raw.length/27},(_,i)=>i*27)
+    .filter(i=>raw[i+6]===material).flatMap(i=>Array.from(raw.subarray(i,i+27))));
+  const stair=triangles(6),iron=triangles(3),floor=hullDeck(1.5),steps=Math.ceil((2.3-floor)*HULL_VERTICAL_SCALE/.23);
+  for(const x of [.72,1.20])for(let i=0;i<steps;i++){
+    const y=floor+(2.3-floor)*(i+1)/steps-.02,z=1.5+i*1.14/(steps-1);
+    const tread=parts.get(`stair:tread:${i}`),bottom=Math.min(...Array.from(tread).filter((_,j)=>j%9===1));
+    const support=firstHit(parts.get(`stair:stringer:${x}`),[x,y+.2,z],[0,-1,0]);
+    assert.ok(support.point[1]>=bottom-1e-6,'actual stringer intersects the tread underside; no floating step');
+    // Midway between treads, a stringer must still exist (floating steps fail).
+    if(i<steps-1){
+      const middle=z+.5*1.14/(steps-1),hit=firstHit(stair,[x,2.4,middle],[0,-1,0]);
+      assert.ok(hit.point[1]>floor && hit.point[1]<2.3,'continuous side support between steps');
+    }
+  }
+  for(const side of [-1,1])for(const z of [3.25,4.9]){
+    const x=side*(deckHalfWidth(z)+.105-.04);
+    for(const dz of [-.07,.07]){
+      const hit=firstHit(iron,[x+.15,2.77,z+dz],[-1,0,0]);
+      assert.ok(Math.abs(hit.point[0]-x)<.025,'fork base joins both arms to the central shaft');
+    }
+  }
+});
+
+test('bulwark seams block sightlines while scuppers remain open',()=>{
+  const mesh=createCaravelMesh();
+  for(const side of [-1,1]){
+    const z=-.85,y=hullDeck(z),x=side*(deckHalfWidth(z)+.2);
+    const seam=firstHit(mesh,[x,y+.123*3-.002,z],[-side,0,0],[12,19]);
+    assert.equal(seam.material,4,'thin board joints expose recessed caulking');
+    assert.ok(Math.abs(seam.point[0])>deckHalfWidth(z));
+    const drain=firstHit(mesh,[x,y+.065,z],[-side,0,0],[12,19]);
+    assert.ok(side*drain.point[0]<deckHalfWidth(z)-.1,'near-side scupper is open');
+  }
+});
+
+test('vertical planking and individual deck boards have noncollapsed, continuous grain coordinates',()=>{
+  const mesh=createCaravelMesh();let checked=0;
+  for(let i=0;i<mesh.length;i+=27){
+    const material=mesh[i+6];
+    // Stern fan previously projected onto XZ, producing radial streaks. Deck
+    // corners previously selected different texture tiles within one board.
+    if(material===1 && [2,11,20].every(j=>mesh[i+j]>5.1) && [4,13,22].every(j=>Math.abs(mesh[i+j])<.7)){
+      const u1=mesh[i+16]-mesh[i+7],v1=mesh[i+17]-mesh[i+8],u2=mesh[i+25]-mesh[i+7],v2=mesh[i+26]-mesh[i+8];
+      assert.ok(Math.abs(u1*v2-u2*v1)>1e-9,'vertical timber UV triangles retain area');checked++;
+    }
+    if(material===0){
+      const offsets=[0,9,18].map(j=>mesh[i+j+7]-mesh[i+j]*1.6);
+      assert.ok(Math.max(...offsets)-Math.min(...offsets)<1e-6,'one grain offset per board');
+    }
+  }
+  assert.ok(checked>20);
+});
+
+test('hull bands follow the sheer through the raked ends and weld to hull vertices',()=>{
+  const parts=new Map();createCaravelMesh({parts});
+  const positions=mesh=>{
+    const unique=new Map();
+    for(let i=0;i<mesh.length;i+=9){const p=Array.from(mesh.subarray(i,i+3));unique.set(p.join(','),p);}
+    return [...unique.values()];
+  };
+  const hull=positions(parts.get('hull')),transom=positions(parts.get('transom'));
+  const distance=(a,b)=>Math.hypot(...a.map((x,i)=>x-b[i]));
+  const edges=mesh=>{
+    const result=new Map(),key=p=>p.map(x=>Math.round(x*1e6)).join(',');
+    for(let i=0;i<mesh.length;i+=27)for(const [a,b]of [[0,9],[9,18],[18,0]]){
+      const pair=[key(Array.from(mesh.subarray(i+a,i+a+3))),key(Array.from(mesh.subarray(i+b,i+b+3)))].sort().join('|');
+      result.set(pair,(result.get(pair)||0)+1);
+    }
+    return result;
+  };
+  const hullEdges=edges(parts.get('hull'));
+  for(const side of [-1,1]){
+    const band=positions(parts.get(`wale:${side}:-0.35`));
+    const boundary=[...edges(parts.get(`wale:${side}:-0.35`))].filter(([,count])=>count===1);
+    assert.ok(boundary.length>=228);
+    for(const [edge]of boundary)assert.ok(hullEdges.has(edge),'every open band edge is welded to an actual hull triangle edge');
+    const endpoints=[];
+    for(const offset of [-.275,-.425]){
+      const edge=hull.filter(p=>side*p[0]>0 && Math.abs(p[1]-hullDeck(p[2])-offset)<2e-6);
+      assert.ok(edge.length>=113,'both attachment edges span the whole hull');
+      for(const p of edge){
+        assert.ok(band.some(q=>distance(p,q)<1e-6),'attachment vertex is shared with hull within 2 micrometres at vessel scale');
+        const outer=[p[0]+side*.035,p[1],p[2]];
+        assert.ok(band.some(q=>distance(outer,q)<1e-6),'outer edge has constant proud thickness; no centreline snap');
+      }
+      endpoints.push(edge.reduce((a,b)=>a[2]>b[2]?a:b));
+    }
+    for(const p of endpoints)assert.ok(transom.some(q=>distance(p,q)<1e-6),'band/hull seam meets the actual transom boundary');
+    // Every visible band vertex belongs to an attachment or its proud surface.
+    for(const p of band){
+      assert.ok([-0.275,-0.425].some(offset=>Math.abs(p[1]-hullDeck(p[2])-offset)<2e-6));
+      const nearest=hull.filter(q=>side*q[0]>0 && Math.abs(q[1]-p[1])<1e-6 && Math.abs(q[2]-p[2])<1e-6);
+      assert.ok(nearest.some(q=>Math.abs(p[0]-q[0])<1e-6 || Math.abs(side*(p[0]-q[0])-.035)<1e-6));
+    }
+  }
 });

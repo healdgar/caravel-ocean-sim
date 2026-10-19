@@ -331,13 +331,14 @@ npm run build
 npm test
 ```
 
-The October 19 macOS/Metal run passed 132 of 134 tests, including all new physics,
-instrument/mobile checks and 810 GPU rig-clearance poses. Two older exact-pixel
-comparisons (indexed HDR rendering and packed wave reads) differed. The indexed
-comparison passed in isolation; the packed comparison also failed on the prior
-published commit `57549ef`, and two identical renderer runs differed by two
-one-level color channels. These strict assertions remain unchanged; the complete
-suite is not reported as green. Real iPhone performance was not remeasured.
+The October 19 model/join revision passed 138 of 139 tests on macOS/Metal,
+including geometry connections, material wetness, instruments/mobile controls,
+indexed HDR rendering and 810 GPU rig-clearance poses. The older exact-pixel
+packed-wave comparison still differed. That comparison also failed on the prior
+published commit `57549ef`; an earlier control using two identical renderer runs
+differed by two one-level color channels. The strict assertion remains unchanged;
+the complete suite is not reported as green. Dry, damp and wet-film standalone
+renders were inspected separately. Real iPhone performance was not remeasured.
 
 The suite covers:
 
@@ -699,6 +700,37 @@ with the built-in image generation tool using this prompt:
 > subtle salt-weathered brown-grey patina, tiny knots and fissures; orthographic,
 > flat unlit color only, no directional illumination, shadows, highlights,
 > ambient occlusion, perspective, plank seams, text, or borders.
+
+### Timber and structural joins
+
+The hull's dark reinforcing bands follow the raked hull sections at both ends.
+The lower bands and hull share their attachment vertices and triangle edges;
+their proud faces keep a constant thickness instead of collapsing toward the
+centreline at the stern. Long rails use continuous sections. Stair stringers,
+quarterdeck rim timbers, swivel-gun fork bases, rudder brackets, cleat supports
+and stay attachments join the objects they support. Mast hoops and bowsprit
+bindings follow the spars' taper and inclination.
+
+Quarterdeck seams have recessed caulking and a closed underside. Bulwark seams
+are backed while the actual scuppers, stern lights and steering opening remain
+open. These checks concern the modeled exterior; the ship still has no complete
+hold or internal framing model.
+
+Grain follows each plank or timber face, including the stern. Hull and cabin
+planking has staggered butt joints, recessed seams, board variation and stronger
+filtered grain relief. Dry and moisture-darkened timber stays rough; a transient,
+grain-dependent surface film produces wet glints without smoothing away the
+wood's relief. These are authored material parameters, not measured oak samples.
+
+Run `npm run test:model` for the mesh, join, UV and moisture-buffer checks.
+The tests examine actual generated vertices and triangles: lower-band attachment
+vertices agree within one millionth of a design unit, open attachment edges must
+match hull triangle edges, and the band ends must meet the transom. Ray tests
+check support contact, caulk coverage and intentional openings. UV tests reject
+collapsed vertical grain and texture offsets that change within a deck board.
+Sharp timber normals and material seams remain separate vertex records even
+where their positions coincide; global proximity welding would damage these
+surfaces and close intentional openings.
 
 ### Steering and rendering refinements
 

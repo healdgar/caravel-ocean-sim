@@ -9,7 +9,8 @@
     "start": "node server.mjs",
     "build": "node build.mjs",
     "meshy": "node scripts/meshy.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:model": "node --test tests/caravel.test.mjs tests/wetness.test.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

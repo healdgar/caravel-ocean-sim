@@ -77,23 +77,35 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let relief = dot(timber, vec3f(0.2126,0.7152,0.0722));
   let broad = gnoise(vec2f(grainUV.x * 18.0, grainUV.y * 0.7));
   let grain = gnoise(vec2f(grainUV.x * 180.0 + broad*3.0, grainUV.y * 5.0));
-  let fine = gnoise(vec2f(grainUV.x * 700.0, grainUV.y * 24.0));
   let footprint = max(length(dpdx(grainUV)),length(dpdy(grainUV)));
-  let bump = relief * 0.0009 + grain * 0.00012 * (1.0-smoothstep(0.0005,0.004,footprint));
+  // Plank seams follow the hull's girth and the cabin's horizontal strakes.
+  // Unlike a painted line, their recessed height also breaks the light response.
+  let plankedWall=in.material==15u || (in.material==1u && p.z>=2.699 && p.y<2.23 && abs(in.normalLocal.y)<.3);
+  let course=select(p.y/.16,in.uv.x*18.0,in.material==15u);
+  let board=floor(course);
+  let edge=min(fract(course),1.0-fract(course));
+  let seam=1.0-smoothstep(.008,.035+max(fwidth(course),.001),edge);
+  let along=select(p.z,p.x,abs(in.normalLocal.z)>.75 && in.material!=15u);
+  let buttCoord=(along+fract(sin(board*73.17)*4321.1)*2.6)/2.6;
+  let butt=min(fract(buttCoord),1.0-fract(buttCoord));
+  let buttSeam=1.0-smoothstep(.0008,.003+max(fwidth(buttCoord),.0003),butt);
+  let join=select(0.0,max(seam,buttSeam*.8),plankedWall);
+  let bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018;
   let dx = dpdx(in.world); let dy = dpdy(in.world);
   let sx = cross(dy,n); let sy = cross(n,dx);
   let det = dot(dx,sx);
   let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
-  n = normalize(n - clamp(gradient,vec3f(-0.12),vec3f(0.12)) * select(1.0,0.1,in.material == 3u || in.material == 8u));
-  var albedo = timber * vec3f(1.08,0.94,0.74);
-  var rough = clamp(0.74 + (0.2-relief)*0.18,0.64,0.85); var metal = 0.0;
+  let isWood=in.material==0u || in.material==1u || in.material==5u || in.material==6u || in.material==7u || in.material==10u || in.material==14u || in.material==15u || in.material==16u || in.material==17u || in.material==18u;
+  n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
+  var albedo = timber * vec3f(1.02,.98,.88);
+  var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
   let canvasDepth=canvasThickness(in.uv,in.material)*canvasWetDepth(wet.x);
-  let plank = floor((p.x+1.8)/0.18);
-  albedo *= 0.82 + 0.2 * fract(sin(plank*74.17)*4321.1);
+  let plank=select(floor((p.x+1.8)/.145),board,plankedWall);
+  albedo *= .88 + .16 * fract(sin(plank*74.17)*4321.1);
+  albedo *= 1.0-join*.58;
   // Fine end-grain joints, splits, and oxidised grain.
   let joint = abs(fract((p.z + fract(plank*0.413)*2.0)/2.3)-0.5);
   let jointAA = max(fwidth(joint),0.001);
-  let hullSeamAA=max(fwidth(in.uv.x*18.0),0.001);
   let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
   let clothAA=max(fwidth(clothSeam),0.001);
   let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
@@ -102,7 +114,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let clothEdge=select(squareEdge,triangleEdge,in.material==13u);
   let edgeAA=max(fwidth(clothEdge),0.0005);
   if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
-  if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= 0.8; rough = 0.67; }
+  if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= .87; }
   let ropeAA=fwidth(p.x+p.y+p.z);
   if(in.material == 2u || in.material == 12u || in.material==19u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
@@ -121,23 +133,24 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
   }
   if(in.material == 11u) { albedo=vec3f(0.018,0.035,0.033); rough=0.3; metal=0.25; }
-  if(in.material == 14u) { albedo*=0.6; rough=0.75; }
+  if(in.material == 14u) { albedo*=0.6; }
   if(in.material == 15u) {
-    let hullSeam=abs(fract(in.uv.x*18.0)-0.5);
-    albedo*=mix(0.7,0.93,smoothstep(0.004,0.035+hullSeamAA,hullSeam)); rough=0.82;
+    albedo*=.93;
     let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.025,0.022,0.018),tar*0.9);
   }
-  if(in.material == 16u) { albedo=timber*vec3f(0.13,0.12,0.10); rough=0.85; }
-  if(in.material == 17u) { albedo=timber*vec3f(1.3,1.02,0.62); rough=0.62; }
+  if(in.material == 16u) { albedo=timber*vec3f(.20,.18,.15); }
+  if(in.material == 17u) { albedo=timber*vec3f(1.10,1.0,.80); }
   if(in.material==2u || in.material==12u || in.material==19u){
     albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);
   }else if(in.material==9u || in.material==13u){
     albedo*=mix(1.0,.72,wet.x);rough=mix(.95,.84,wet.x);
   }else if(in.material!=3u && in.material!=4u && in.material!=8u && in.material!=11u){
-    // Water fills fine grain before the absorbed colour dries. Keep broad timber relief.
-    albedo*=mix(1.0,.55,wet.x);
-    rough=mix(rough,.32,wet.x);rough=mix(rough,.22,wet.y*.65);
-    n=normalize(mix(n,normalize(in.normal)*select(-1.0,1.0,front),wet.y*.55));
+    // Absorbed moisture darkens coarse timber without varnishing it. Only the
+    // transient surface film glints; grain valleys retain more water than ridges.
+    albedo*=mix(1.0,.58,wet.x);
+    rough=mix(rough,max(.62,rough-.15),wet.x);
+    let film=wet.y*(.35+.65*(1.0-smoothstep(.12,.65,relief+grain*.25)));
+    rough=mix(rough,.27+grain*.09,film);
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
