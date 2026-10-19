@@ -1,10 +1,10 @@
-import { SPINDRIFT_COUNT, SPINDRIFT_UPDATE, SPINDRIFT_RENDER } from './wgsl/spindrift.js';
+import { SPINDRIFT_COUNT, SPINDRIFT_STRIDE, SPINDRIFT_UPDATE, SPINDRIFT_RENDER } from './wgsl/spindrift.js';
 
-// A fixed population of world-space crest wisps; independent of ship effects.
+// Bounded, crest-attached spray bursts; independent of ship effects.
 export async function createSpindrift({ device, frameUBO, hullUBO, seaView, derivView, seaSampler, envView, transView, sunVis, shader, computePipe, shadows }) {
   const usage = GPUBufferUsage;
   const control = device.createBuffer({ label: 'crest spray control', size: 16, usage: usage.UNIFORM | usage.COPY_DST });
-  const plumes = device.createBuffer({ label: 'crest spray plumes', size: SPINDRIFT_COUNT * 64, usage: usage.STORAGE | usage.COPY_SRC });
+  const plumes = device.createBuffer({ label: 'crest spray plumes', size: SPINDRIFT_COUNT * SPINDRIFT_STRIDE, usage: usage.STORAGE | usage.COPY_SRC });
   const [updatePipe, module] = await Promise.all([computePipe(SPINDRIFT_UPDATE, 'crest spray update'), shader(SPINDRIFT_RENDER, 'crest spray')]);
   const renderPipe = await device.createRenderPipelineAsync({
     label: 'crest spray', layout: 'auto', vertex: { module, entryPoint: 'crestVS' },
@@ -40,7 +40,7 @@ export async function createSpindrift({ device, frameUBO, hullUBO, seaView, deri
     },
     draw(pass) {
       if (!enabled) return;
-      pass.setPipeline(renderPipe); pass.setBindGroup(0, renderGroup); pass.setBindGroup(1, shadowGroup); pass.draw(24, SPINDRIFT_COUNT);
+      pass.setPipeline(renderPipe); pass.setBindGroup(0, renderGroup); pass.setBindGroup(1, shadowGroup); pass.draw(48, SPINDRIFT_COUNT);
     },
   };
 }
