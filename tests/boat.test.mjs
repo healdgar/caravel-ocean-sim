@@ -77,8 +77,8 @@ test('boarding uses the ship world position and eye height independently of a sp
 const surgeBoat = (speed = 6) => ({ length: 20, beam: 6, speed, surgeVelocity: speed * KNOT_TO_MPS });
 test('displacement scales with submerged geometry and includes added water inertia', () => {
   const base = boatHydrodynamics(20, 6), long = boatHydrodynamics(40, 6), wide = boatHydrodynamics(20, 12);
-  assert.ok(base.mass > 190000 && base.mass < 205000);
-  assert.ok(base.draft>2.58&&base.draft<2.59);
+  assert.ok(base.mass > 100000 && base.mass < 115000);
+  assert.ok(Math.abs(base.draft-2)<1e-8);
   assert.equal(base.mass, base.volume * 1025);
   assert.equal(long.mass, 2 * base.mass);
   assert.equal(wide.mass, 2 * base.mass);

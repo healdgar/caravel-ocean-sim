@@ -1,17 +1,30 @@
 # Crew and decision-system preparation
 
-Twelve named animated sailors are implemented: six women and six men. Each local
-rule policy selects watch movement, station keeping or bracing. Disjoint authored
-stations span the main deck, forecastle and quarterdeck. `createCompany(policy)`
-accepts a replacement synchronous policy. Two instanced model batches share
-geometry, while every sailor has an independent pose, appearance and state.
+Twelve named sailors are implemented: six women and six men. Captain orders
+create executable sail-handling and hatch jobs. Fore/main work assembles an aloft
+hand and a deck hand; only their attendance allows actual canvas to change.
+A lookout climbs the foremast shrouds during watch. Job phases are approach,
+ascending, working, descending and return. Routes are authored; role allocation
+reserves distinct shrouds, and moving sailors yield to nearby bodies.
 
-Captain's orders live in their own panel. Full/reduced/furled sail and heavy-weather
-objectives update vessel sail requests; resume-watch retains them. Commands are
-revisioned and replaceable. Manual sail edits supersede an outstanding objective.
-The existing automatic sail handler still performs the actual canvas transition;
-animated crew do not yet execute or gate physical rigging work. General navigation,
-reservations, climbing, anchoring and battening hatches below remain design work.
+`js/rigging.js` supplies the mesh, ladder path and grip positions. Two-bone IK
+places hands and boots against the ratlines, with alternating planted and moving
+limbs. Climbers stop below the mast tops; the basket's solid floor is not traversed.
+The carpenter closes a hinged hatch over eight seconds. Hands haul actual tackle
+leads; the helmsman's hands follow the player-controlled wheel. Crew near the helm
+camera fade, while their shadows and exterior appearance remain.
+
+`createCompany(policy)` accepts a local synchronous policy. Observations include
+identity, role, captain order/revision, wind, roll/rate, hazard, job and stage.
+The current executable return values are `work`, `standby` and `brace` during jobs,
+and `patrol`, `standby`, `brace` on watch. Decisions run at 2 Hz with immediate
+hazard interruption. The executor owns motion and work; policy failure falls back
+locally. The broader asynchronous contract below remains a proposal.
+
+Hidden crew continue working. Changed sail requests replace targets without
+teleporting workers or resurrecting old commands. Dangerous wind/roll pauses work
+and retains aloft grips. General navigation/reservations, fatigue, anchor handling,
+yard crawling, cannon operation and autonomous steering remain future work.
 
 ## Complement
 
@@ -111,32 +124,28 @@ reset. On timeout or failure use the local policy. Never block the render loop.
 
 - `js/hull.js` is the source for decks and helm anchors. Author routes around
   stairs, cabin, masts and railings in ship space. Validate access to mast tops;
-  the current crow's-nest floor needs an actual opening before climbing works.
+  the current crow's-nest floor needs an actual opening before basket entry works.
 - `js/caravel.js` and `js/wgsl/vessel.js` define moving yards and rigging. Work
   anchors must follow the same transforms as the visible rig.
-- `boat.sailFore`, `sailMain`, `sailMizzen` currently request sail fractions.
-  `advanceSails` in `js/sailing.js` changes actual `sailingState(boat).set` and
-  trim automatically. In crew mode, commands must create work; executor progress
-  must become the sole driver of these actual values. Do not leave automatic
-  handling running alongside crew work. Preserve automatic handling as a
-  separate mode until a complete crew workflow is usable.
+- `boat.sailFore`, `sailMain`, `sailMizzen` request sail fractions.
+  `advanceSails` changes actual canvas only with the per-mast attendance gate
+  `boat.crewSailRate`. Yard trim remains automatic. Without a crew system (e.g.
+  standalone physics fixtures or asset-load failure), the existing automatic
+  handler remains available. There is no second canvas integrator.
 - Existing controls in `js/main.js` should issue structured orders. The captain
   need not select individual hands for routine work. Keep heading/helm control
   separate until an explicit helmsman task and steering controller exist.
 
-## First executable milestone
+## Executable milestone and limits
 
-Foundation complete: twelve visible sailors, ship-local watch stations,
-idle/walk/brace clips, separate shipwide captain orders, shared ship lighting
-and animated shadows. No individual positioning commands are exposed. Next:
+Implemented: approach, climb/haul, attended sail changes, hatch closing, returning,
+periodic aloft lookout, urgent bracing, and replaceable commands. CPU tests check
+continuous movement, body separation, finite skin matrices, grip error, hazard
+holds, actual canvas/hatch changes, return completion and hidden-crew operation.
+GPU tests check both instanced batches, camera-fade flags, pipeline compilation,
+actual sail uniforms through the UI, and all standalone builds.
 
-Three visible sailors complete one foremast sail-reduction order: approach,
-reserve stations, climb/haul, perform work together and return. Use a deliberately
-authored sequence first; identify required rig access and hardware before calling
-it historical reefing. The other crew retain simple watch/rest state.
-
-Acceptance checks: no duplicate station occupancy; no work without a present,
-capable team; orders changed mid-climb leave no stuck reservation; stale async
-decisions cannot resurrect cancelled work; actual sail area and forces follow
-completed work; hiding a character changes neither progress nor fatigue. Measure
-the added CPU/GPU cost on the iPhone against the existing 30 FPS target.
+The sequence is authored and simplified, not historical reefing or a general
+multi-agent planning solution. Station ownership is by fixed role; there is no
+arbitrary task auction or general deadlock resolver. Physical iPhone performance
+of procedural IK remains unmeasured; the 30 FPS resolution target still applies.

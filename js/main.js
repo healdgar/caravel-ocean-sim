@@ -5,6 +5,7 @@ import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
+import { crewWorkLabel } from './crew-work.js';
 import { createCrew, CAPTAIN_ORDERS } from './crew.js';
 import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
@@ -943,7 +944,7 @@ async function main() {
     if(!crew)return;
     const status=crew.status();if(crewStatus.textContent!==status)crewStatus.textContent=status;
     for(const [id,button] of orderButtons)button.setAttribute('aria-pressed',String(crew.state.order===id));
-    if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${s.intent==='brace'?'Bracing':s.walk>.3?'On rounds':'At station'}`;
+    if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${crewWorkLabel(s)}`;
   }
   const shareButton = document.createElement('button');
   shareButton.textContent = 'Copy share link';
@@ -1247,7 +1248,7 @@ async function main() {
     hullData[16]=boat.x; hullData[17]=boat.heave; hullData[18]=boat.z; hullData[19]=simTime;
     hullData[20]=P.windDir*D2R-boat.heading*D2R; hullData[21]=P.windSpeed; hullData[22]=boat.showProw?1:0;
     const sails=sailingState(boat);
-    hullData.set(sails.set,24);hullData[28]=sails.squareYaw;hullData[29]=sails.lateenYaw;
+    hullData.set(sails.set,24);hullData[27]=boat.hatchesClosed??0;hullData[28]=sails.squareYaw;hullData[29]=sails.lateenYaw;
     hullData[30]=sails.squareFill;hullData[31]=sails.lateenFill;
     hullData[32]=sails.windSide;hullData[33]=-sails.windForward;hullData[34]=sails.apparentSpeed;hullData[35]=sails.canvasTack;
     device.queue.writeBuffer(hullUBO, 0, hullData);

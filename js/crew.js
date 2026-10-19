@@ -1,6 +1,8 @@
 import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_STATION_Z } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
+import { assignCrewWork, stepCrewWork } from './crew-work.js';
+import { poseCrewWork } from './crew-pose.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
@@ -23,7 +25,7 @@ export const CAPTAIN_ORDERS = [
   {id:'full',label:'Make full sail',detail:'Set all canvas. Speed follows the wind.',sails:[1,1,1]},
   {id:'reduced',label:'Reduce sail',detail:'Bring each sail group to half canvas.',sails:[.5,.5,.5]},
   {id:'furl',label:'Furl all sails',detail:'Take in the canvas and coast.',sails:[0,0,0]},
-  {id:'weather',label:'Prepare for heavy weather',detail:'Carry little canvas; gather the hands at their stations.',sails:[.2,.2,0]},
+  {id:'weather',label:'Prepare for heavy weather',detail:'Shorten sail and secure the main hatch.',sails:[.2,.2,0]},
   {id:'watch',label:'Resume sea watch',detail:'Return to routine duties; retain the current sail setting.'},
 ];
 const CREW_SHIRTS=[[.55,.47,.31],[.23,.31,.36],[.38,.15,.10],[.30,.32,.18],[.48,.36,.22],[.38,.38,.35]];
@@ -41,6 +43,7 @@ export function createCompany(policy=deckhandDecision) {
 export function issueCaptainOrder(company,boat,id) {
   const order=CAPTAIN_ORDERS.find(o=>o.id===id);if(!order)return false;
   company.order=id;company.revision++;company.pending=!!order.sails;
+  boat.crewSailRate=new Float64Array(3);
   if(order.sails){boat.propulsion='sail';for(let i=0;i<3;i++)boat[SAIL_KEYS[i]]=order.sails[i];}
   for(const s of company.crew)s.decisionIn=0;
   return true;
@@ -51,20 +54,26 @@ export function stepCompany(company,boat,dt,wind) {
   if(order.sails&&order.sails.some((value,i)=>Math.abs(value-boat[SAIL_KEYS[i]])>.001)){
     company.order='watch';company.pending=false;company.revision++;
   } else company.pending=!!order.sails&&order.sails.some((value,i)=>Math.abs(value-sails.set[i])>.01);
+  dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
+  company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
-    s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
-    s.order=company.pending||company.order==='weather'?'standby':'patrol';stepDeckhand(s,boat,dt,wind);
+    s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
+    s.order=company.pending||company.order==='weather'?'standby':'patrol';
+    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind);}
   }
   return company;
 }
+function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='hatch'&&s.job.stage!=='return');}
 export function companyStatus(company) {
   const bracing=company.crew.filter(s=>s.intent==='brace').length;
   if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
+  if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
   if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
-  return company.order==='watch'?'Sea watch · 12 aboard':`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;
+  return company.order==='watch'?`Sea watch · 12 aboard${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;
 }
 export function deckhandDecision(observation) {
   if(observation.hazard)return 'brace';
+  if(observation.job)return 'work';
   return observation.order==='patrol'?'patrol':'standby';
 }
 export function createDeckhand(policy=deckhandDecision) {
@@ -147,12 +156,14 @@ export async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,en
         const a=b.model.animator;
         for(let i=0;i<b.people.length;i++){
           const s=b.people[i];a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
-          if(s.brace>.001)a.blend('Brace',s.time,s.brace);
+          if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
+          poseCrewWork(a,s,boat);
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,i*32);
           b.actors.set(s.shirt,i*32+16);b.actors.set(s.trousers,i*32+20);b.actors.set(s.skin,i*32+24);b.actors.set(s.hair,i*32+28);
           // The first-person helm occupies this sailor's station. Keep his shadow
           // and exterior presence, but do not put his head in front of the camera.
           b.actors[i*32+19]=Number(boat.enabled===true&&s.role==='Helmsman');
+          b.actors[i*32+23]=Number(boat.enabled===true);
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }

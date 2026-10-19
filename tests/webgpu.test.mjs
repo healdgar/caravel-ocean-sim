@@ -781,7 +781,7 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
     assert.equal(result.belowRail.water,0,'water below the bulwark must not seep through the hull');
     assert.ok(result.flooded.water>0.1 && result.flooded.center>0.01,'overtopping must travel into the deck');
     assert.equal(result.flooded.roof,0,'a lower crest must not flood the raised quarterdeck');
-    assert.equal(result.flooded.forecastle,0,'a three-metre crest stays below the forecastle bulwarks');
+    assert.ok(result.flooded.forecastle>0,'a three-metre crest can overtop the continuous foredeck');
     assert.ok(result.retained.water>result.flooded.water*0.8,'the deck must retain wash after the sea recedes');
     assert.ok(result.tilted.drain>0,'scupper outflow drives runoff strips');
     assert.ok(result.tilted.moment<0,'wash moves toward the low port rail');
@@ -1439,11 +1439,11 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
     hull=await advance(80);assert.ok(hull[4]<-.01,'wind torque reaches the rendered hull lean');
     await page.getByRole('button',{name:'Captain',exact:true}).click();
     await page.getByRole('button',{name:'Furl all sails',exact:true}).click();
-    hull=await advance(2);assert.ok(hull[24]>0&&hull[24]<1,'canvas does not disappear instantly');
-    hull=await advance(60);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[0,0,0]);
+    hull=await advance(2);assert.equal(hull[24],1,'canvas waits for hands to reach the rigging');
+    hull=await advance(1000);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[0,0,0]);
     hull=await advance(200);assert.ok(Math.abs(hull[4])<.001,'bare poles settle upright on flat water');
     await page.getByRole('button',{name:'Reduce sail',exact:true}).click();
-    hull=await advance(35);assert.deepEqual(hull.slice(24,27),[.5,.5,.5]);
+    hull=await advance(1000);assert.deepEqual(hull.slice(24,27),[.5,.5,.5]);
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
     await page.locator('#boat-propulsion').selectOption('manual');
     assert.equal(await page.locator('#boat-speed').isVisible(),true);assert.equal(await page.locator('#sail-controls').isVisible(),false);
@@ -1560,10 +1560,12 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     assert.deepEqual(await page.evaluate(()=>check.crewInstances),[6,6]);
     assert.equal(await page.locator('#boat-length').inputValue(), '20');
     assert.equal(await page.locator('#boat-beam').inputValue(), '6');
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),1,'helm view hides only its own helmsman');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),1,'helm view hides its own helmsman');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===23&&v===1).length),12,'near-camera transparency is enabled for every sailor');
     await page.getByRole('button',{name:'View ship',exact:true}).click();
     await page.evaluate(()=>check.crewActors=[]);await step(page,100);
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),0,'exterior restores all twelve sailors');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===23&&v===1).length),0,'exterior disables the camera fade');
     const bones=await page.evaluate(()=>check.crewBones);
     assert.equal(bones.length,6*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
     await step(page,100);assert.notDeepEqual(await page.evaluate(()=>check.crewBones),bones);

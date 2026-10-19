@@ -77,13 +77,22 @@ The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart 
 
 ### Caravel model
 
-The native procedural mesh follows [this generated art reference](assets/caravel-design-reference.png): a fuller raked hull, dark swept wales, raised stern cabin with arched windows, four billowing square sails, a triangular lateen mizzen, anchors, and rigging. The [generation prompt](assets/caravel-design-reference-prompt.txt) is retained locally with the artwork. The reference was generated with the built-in image tool; it is art direction, not a historical reconstruction.
+The procedural hull is guided by the Martínez-Hidalgo and d’Albertis reconstruction
+plates, with a finer bow, curved stem, full midbody, modest tumblehome and finer
+underwater stern. [Research, sources and historical limits](CARAVEL_RESEARCH.md)
+distinguish the authored interpretation from measured reconstruction offsets.
+The earlier [generated reference](assets/caravel-design-reference.png) remains
+art direction only.
 
-The model has 84,134 triangles, including substantial forestays, topmast stays and paired backstays, a railed mainmast crow's nest, and a low forecastle with a port-side ladder. Topsails clear the mast platforms. The helm sits on the aft quarterdeck, with the mizzen's foot raised above the standing viewpoint. All nine cabin windows occupy actual arched wall openings with recessed glazing and timber reveals; the obsolete bulwarks that crossed them have been removed.
+One continuous main deck and a partial raised quarterdeck replace the tall
+forecastle tier. Two small recessed stern lights replace the ornate window
+rows. Four rail-mounted swivel falconets follow the Mariners’ Museum Niña
+model's equipment list. They are modeled cannon, without firing mechanics.
+The wheel, lookout basket and existing rig remain gameplay concessions.
 
-The visible mesh and shadow casters share 107,914 unique vertex records through 32-bit indices. Deduplication compares all nine float32 components bit-for-bit, preserving triangle order, material boundaries, hard normals, and UV seams.
-
-The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
+The hull, camera, shadows, water exclusion, spray contacts and deck wash share
+one geometry definition. Indexed mesh records preserve normals, material and UV
+seams; no imported ship model or Blender dependency is required.
 
 ### Ship's company and captain's orders
 
@@ -97,9 +106,10 @@ replaceable local decision policy, independently of rendering.
 Open **Captain** for a separate orders panel: **Make full sail**, **Reduce sail**,
 **Furl all sails**, **Prepare for heavy weather**, or **Resume sea watch**. These
 are shipwide objectives, with no individual position controls. Sail orders select
-wind-driven propulsion and change the actual canvas gradually through existing
-automatic sail handling. Heavy-weather preparation requests 20% fore/main canvas,
-furled mizzen and stationary crew. Returning to watch retains sail settings.
+wind-driven propulsion and assign work. Fore/main changes wait for an aloft
+rigging hand and a deck hand at the halyard; the mizzen uses its quarterdeck hand.
+Heavy-weather preparation requests 20% fore/main canvas, furled mizzen, and
+a carpenter to close the visible weather hatch. Returning to watch retains sail settings.
 Manual sail sliders remain in Boat perspective and supersede an outstanding order.
 The captain panel has a persistent Hide button and scrollable roster; it opens
 separately from boat and sea settings on mobile.
@@ -116,13 +126,18 @@ with independent bone palettes. They receive ship/sail shadows. No render pass
 is added. The 30 FPS automatic-resolution target remains active; the expanded
 crew's physical-iPhone performance has not yet been measured.
 
-This is a visible company and command foundation. Animation does not yet perform
-or gate sail handling. Precise foot placement, active balance, climbing, rope
-handling, task reservations, fatigue, watch rotation, anchor deployment and
-battening hatches remain future work. The helmsman occupies a station; steering
-still follows the player's controls. Bracing uses authored thresholds, not a
-biomechanical balance model. The limited GLB reader supports the prepared skin,
-indexed triangles, vertex colours and LINEAR/STEP TRS clips.
+Crew follow bounded authored routes, yield to nearby bodies, climb the rendered
+ratlines with procedural two-bone IK, haul shared tackle leads, then return to
+stations. The lookout periodically climbs the foremast shrouds, below its top.
+Dangerous heel, roll rate or strong wind pauses work; climbers retain their holds.
+Helmsman hands follow the wheel. Nearby sailors become progressively transparent
+in the first-person camera; shadows and exterior visibility remain intact.
+
+This is an executable local job system, not a general planner or a historically
+exact reefing drill. Free navigation, yard crawling, entry into the lookout
+basket, fatigue, anchor deployment, cannon firing and autonomous steering remain
+future work. The policy can choose work, wait or brace; safety remains in the
+executor. No remote decision service or new rendering pass is added.
 
 [Asset provenance and rebuild instructions](assets/crew/README.md) retain the CC0
 licence, source revision and checksums. [Crew and decision-system design](CREW.md)
@@ -130,7 +145,7 @@ describes the larger decision and work-execution system.
 
 ### Wake, bow waves and spray
 
-Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Small droplets and broad translucent mist are secondary to the sheets, rather than constant streams.
+Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Normals come from the planking gradient; relative closing speed produces bounded quadratic impact forcing. Adjacent contacts create broad sheets, while delayed mist is born along their airborne lips. Receding water or a stronger new strike re-arms the next burst; sheet landings add foam.
 
 A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Impacts inject outward-travelling crest/trough pulses. Gravity, drag, water collision, 128 sheet slots, and 4,096 secondary particle slots stay on the GPU.
 
@@ -202,7 +217,7 @@ The optimized frame schedule also avoids redundant GPU work:
 - The sky-view LUT updates only when sun elevation, haze, or effective camera altitude changes. An unchanged sky skips 256 × 144 × 48 atmospheric integration steps.
 - Updating only the changed reflection face removes five-sixths of the steady-state cube mip filtering work.
 - The water-height probe runs only when its result will be read back, and disabled bloom skips all 15 blur passes at normal resolutions.
-- Exact caravel vertex reuse reduces its main vertex/index buffers from 9,086,472 to 4,894,512 bytes (46.1%). Including the unchanged-size shadow index buffers, total mesh-buffer storage falls 41.5%. All 84,134 triangles remain.
+- At that revision, exact caravel vertex reuse reduced its main vertex/index buffers from 9,086,472 to 4,894,512 bytes (46.1%). Including the unchanged-size shadow index buffers, total mesh-buffer storage fell 41.5%; all 84,134 triangles were retained. The later hull revision changes the geometry and triangle count.
 - With the ship visible, the ocean pass resolves directly into the water-reflection texture. This removes one full-screen RGBA16F copy (8 bytes per pixel read and written), preserving 4× MSAA, HDR precision, and every reflection mip. With the ship hidden, it resolves directly into the final HDR texture.
 - Water inside the hull exits before shadow filtering, reflections, lighting, and atmospheric shading. Implicit texture gradients and wave/foam derivatives are evaluated first, preserving water-mask edges and all visible shading. This removes work on pixels that were already discarded; shadow sample counts and render quality stay unchanged.
 - The slope-moment texture also carries the cross derivative in its previously unused alpha channel. Ocean fragments read 12 rather than 18 wave-cascade texture samples, with identical half precision, mip filtering, anisotropy, and wave detail. Displacement data remains available to geometry, foam, and buoyancy.
@@ -244,7 +259,7 @@ The suite covers:
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
 - Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll-energy dissipation and unchanged wave response. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
-- Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, forecastle and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
+- Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
@@ -280,14 +295,14 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
-| `js/gltf.js`, `js/crew.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
+| `js/gltf.js`, `js/crew.js`, `js/crew-work.js`, `js/crew-pose.js`, `js/rigging.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
 | `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and ribbon rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
 | `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
-| `js/caravel.js` | Hull, forecastle, quarterdeck, recessed windows, lookout, rigging, sails, and helm geometry |
+| `js/caravel.js` | Hull, continuous foredeck, quarterdeck, swivel cannon, lookout, rigging, sails, and helm geometry |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
@@ -312,12 +327,13 @@ The default hull is **20 m long × 6 m beam**, excluding the bowsprit. The origi
 length and beam controls set the other two axes. Decks, rigging, ocean exclusion,
 spray contacts, deck wash, shadows and crew anchors use the same transform.
 The cabin doorway is about 1.97 m high, cabin headroom 2.27–2.57 m, and the mainmast
-about 18 m above the main deck. Eight forecastle and twelve quarterdeck ladder
-treads keep risers below 23 cm; shroud rungs are spaced at most 35 cm vertically.
+about 18 m above the main deck. Twelve quarterdeck ladder treads keep risers
+below 23 cm; shroud rungs are spaced at most 35 cm vertically.
 Crew retain their 1.71–1.80 m adult heights. The wheel retains its human dimensions,
 sits 0.95 m above the quarterdeck, and the helmsman stands 0.60 m behind it.
-The helmsman's body is hidden in the first-person helm view so it cannot obstruct
-the camera; he remains visible in exterior/free views and continues casting shadows.
+The helmsman's body is hidden in first-person view. Other nearby sailors fade
+using depth-correct screen-door transparency between 1.4 and 4.8 m from the camera.
+All remain visible in exterior/free views and continue casting shadows.
 
 The default eye is **5.43 m above the waterline**, 1.6 m above the quarterdeck;
 its longitudinal position follows hull length. Shared links preserve explicit
@@ -344,7 +360,8 @@ displacement; steering, wakes and spray use that speed.
 **Fore sails**, **Main sails** and **Mizzen sail** independently set 0–100% canvas.
 The separate **Captain** panel issues **Make full sail**, **Reduce sail** and
 **Furl all sails** across all three groups. Handling takes
-about 5.6 seconds from fully set to fully furled. The percentage readouts show actual
+about 5.6 seconds of attended work from fully set to fully furled, plus travel
+and climbing time (roughly a minute for the first complete fore/main operation). The percentage readouts show actual
 canvas while the sliders show the requested amount. Square sails gather at their yards;
 the lateen gathers along its diagonal yard. Yards brace and the mizzen changes tack
 automatically, with a short lag. Loaded sails fill; unloaded canvas luffs. Visible
@@ -406,8 +423,8 @@ needed. Stale forces fade if probing stalls. Integration uses substeps of at mos
 1/120 second with implicit signed drag to remain stable at mobile frame rates.
 
 Displacement is integrated from the canonical submerged hull at its mean waterline:
-about **197.6 tonnes** for the default 20 × 6 m ship, using seawater density
-1025 kg/m³ and the mesh's **2.58 m draft**. This is the authored hull's computed
+about **107.7 tonnes** for the default 20 × 6 m ship, using seawater density
+1025 kg/m³ and the mesh's **2.0 m draft**. This is the authored hull's computed
 displacement, not a historical tonnage claim. Length and beam rescale this volume;
 draft stays fixed at the enlarged model height. Sail area and centres of effort,
 keel resistance, wetted area and roll inertia also use the physical dimensions.
@@ -433,7 +450,7 @@ Run `node --test tests/boat.test.mjs tests/sailing.test.mjs` for the motion chec
 
 The complete vessel includes a rounded planked hull and keel, square transom,
 stern cabin with windows, raised quarterdeck, bow and stern rails, bowsprit,
-hatch grating, cleats, fittings, and a rudder that moves with the helm. Three
+hinged hatch cover and grating, four swivel cannon, cleats, fittings, and a rudder that moves with the helm. Three
 masts carry four shaped square sails and a triangular lateen mizzen, with yards, stays, shrouds, and ratlines.
 Canvas uses a two-sided cloth material and slight wind-driven flutter under the
 actual sun and sky. Thin-sheet transmission produces a soft, warm glow around

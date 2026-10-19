@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
 import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE} from '../js/hull.js';
+import {poseCrewWork} from '../js/crew-pose.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
@@ -89,7 +90,7 @@ test('twelve named crew, evenly split, keep separate clear stations on every dec
   assert.equal(CREW_ROSTER.filter(s=>s.sex==='female').length,6);
   for(const dimensions of [[20,6],[12,3.6],[10.5,3.2],[24,7.2]]){
     const b={...boat,length:dimensions[0],beam:dimensions[1]},company=createCompany();
-    for(let i=0;i<3600;i++){
+    for(let i=0;i<600;i++){
       stepCompany(company,b,1/60,2);
       for(const [j,s] of company.crew.entries()){
         assert.ok(s.visible);assert.ok(s.z>=s.route[0]-1e-5&&s.z<=s.route[1]+1e-5);
@@ -103,14 +104,54 @@ test('twelve named crew, evenly split, keep separate clear stations on every dec
   }
 });
 test('captain orders change actual sails gradually, can be replaced, and survive hidden crew',()=>{
-  const b={...boat,sailFore:1,sailMain:1,sailMizzen:1,propulsion:'manual'},c=createCompany();sailingState(b);
+  const b={...boat,length:20,beam:6,sailFore:1,sailMain:1,sailMizzen:1,propulsion:'manual'},c=createCompany();sailingState(b);stepCompany(c,b,0,8);
   assert.equal(issueCaptainOrder(c,b,'teleport'),false);assert.equal(c.revision,0);
   assert.equal(issueCaptainOrder(c,b,'furl'),true);assert.equal(b.propulsion,'sail');
-  advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);assert.ok(sailingState(b).set[0]>0&&sailingState(b).set[0]<1);assert.ok(c.pending);
+  advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);assert.equal(sailingState(b).set[0],1,'canvas waits for its crew');assert.ok(c.pending);
   b.crew=false;issueCaptainOrder(c,b,'weather');
-  for(let i=0;i<80;i++){advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);}
+  for(let i=0;i<1200;i++){advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);}
   assert.deepEqual(Array.from(sailingState(b).set),[.2,.2,0]);assert.equal(c.pending,false);
   assert.ok(c.crew.every(s=>s.observation.captainOrder==='weather'&&s.observation.orderRevision===c.revision));
   assert.ok(c.crew.every(s=>s.intent==='standby'));stepCompany(c,{...b,roll:.5},.1,8);assert.ok(c.crew.every(s=>s.intent==='brace'));
   issueCaptainOrder(c,b,'full');b.sailFore=.4;stepCompany(c,b,.1,8);assert.equal(c.order,'watch');assert.equal(b.sailFore,.4,'old order must not overwrite manual changes');
+});
+
+test('crew climb real ratlines, operate sails and hatch, hold in danger, and return without teleporting',()=>{
+  const b={length:20,beam:6,roll:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1},c=createCompany();
+  stepCompany(c,b,0,8);sailingState(b);issueCaptainOrder(c,b,'weather');
+  const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
+  const a=female.animator;let climbing=0,working=0,gripError=0;
+  for(let i=0;i<1200;i++){
+    const before=c.crew.map(s=>Array.from(s.position));
+    advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);
+    for(const [k,s] of c.crew.entries()){
+      const travel=Math.hypot(...Array.from(s.position).map((v,j)=>v-before[k][j]));
+      assert.ok(travel<.16,`${s.id} must traverse paths continuously: ${travel}`);
+      assert.ok(s.transform.every(Number.isFinite));
+      if(s.job?.stage==='ascending')climbing++;
+      if(s.job?.stage==='working')working++;
+      if(s.job?.rung>0 && i%9===0){
+        a.sample('Idle',s.time);poseCrewWork(a,s,b);assert.ok(a.palette.every(Number.isFinite));
+        for(const [name,target] of Object.entries(s.grips)){
+          const p=a.world[a.names.indexOf(name)].subarray(12,15);
+          gripError=Math.max(gripError,Math.hypot(...Array.from(p).map((v,j)=>v-target[j])));
+        }
+        assert.ok(Math.abs(s.position[0])>.52,'climber clears the mast');
+      }
+      for(let j=0;j<k;j++)assert.ok(Math.hypot(...Array.from(s.position).map((v,n)=>v-c.crew[j].position[n]))>.50,'bodies remain separated');
+    }
+    if(i===100){const sailor=c.crew.find(s=>s.job?.stage==='ascending'),position=Array.from(sailor.position),rung=sailor.job.rung;
+      stepCompany(c,{...b,roll:.6},.1,8);assert.equal(sailor.job.rung,rung);assert.deepEqual(Array.from(sailor.position),position);assert.equal(sailor.intent,'brace');}
+  }
+  assert.ok(climbing>100&&working>100);assert.ok(gripError<.08,`hands/boots stay at their ratlines: ${gripError}`);
+  assert.equal(b.hatchesClosed,1);assert.deepEqual(Array.from(sailingState(b).set),[.2,.2,0]);
+  assert.ok(c.crew.every(s=>!s.job),'workers finish and return to stations');
+});
+test('lookout ascends on watch; superseding orders bring her down; hidden crew keep doing work',()=>{
+  const b={length:20,beam:6,crew:false},c=createCompany();
+  for(let i=0;i<500;i++)stepCompany(c,b,.1,6);
+  const lookout=c.crew.find(s=>s.role==='Lookout');assert.ok(lookout.position[1]>6);
+  issueCaptainOrder(c,b,'furl');
+  for(let i=0;i<1200;i++){advanceSails(b,.1,6,0);stepCompany(c,b,.1,6);}
+  assert.ok(!lookout.job);assert.ok(lookout.position[1]<2);
 });

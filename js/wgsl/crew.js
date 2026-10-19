@@ -26,13 +26,13 @@ export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + CREW_SKIN 
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
 struct CrewVertex {
   @builtin(position) position:vec4f, @location(0) world:vec3f,
-  @location(1) normal:vec3f, @location(2) color:vec3f
+  @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32
 };
 @vertex fn vs(v:CrewInput)->CrewVertex {
   let skin=crewSkin(v);let p=rotateHull((skin*vec4f(v.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;
-  let actor=actors[v.instance];
+  let actor=actors[v.instance];out.helm=actor.trousers.w;
   if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
   if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=actor.shirt.rgb;}
   if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=actor.trousers.rgb;}
@@ -41,6 +41,12 @@ struct CrewVertex {
   return out;
 }
 @fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+  // Screen-door transparency preserves correct depth and the two instanced draws.
+  // Every nearby sailor clears the first-person sightline, including moving crew.
+  let opacity=select(1.0,smoothstep(1.4,4.8,distance(v.world,F.camPos.xyz)),v.helm>.5);
+  let pixel=vec2u(v.position.xy)%4u;
+  let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
+  if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
   let trans=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,sun.y),0).rgb;
   let direct=trans*F.sunDir.w*sunVis[0]*step(0.0,sun.y)*vesselShadow(v.world,n);

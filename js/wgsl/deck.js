@@ -2,18 +2,16 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, NOISE_WGSL } from './common.js';
 import { SHADOW_SAMPLE } from './shadows.js';
 import { HULL_PROFILE } from './hull.js';
 import { INTERACTION_TYPES, INTERACTION_SEA } from './interaction.js';
-import { FORECASTLE_END, FORECASTLE_HEIGHT, QUARTERDECK_START, QUARTERDECK_HEIGHT } from '../hull.js';
+import { QUARTERDECK_START, QUARTERDECK_HEIGHT } from '../hull.js';
 
 export const DECK_COLS = 32;
 export const DECK_ROWS = 96;
 // Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
 export const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
 fn deckWidth(z:f32)->f32 {
-  let r=select(z/7.4,-z/6.4,z<0.0);
-  return max(0.04,1.8*sqrt(max(0.0006,1.0-r*r))-0.04);
+  return max(0.015,hullBreadth(z)-0.145);
 }
 fn deckFloor(z:f32)->f32 {
-  if(z<=${FORECASTLE_END}){return ${FORECASTLE_HEIGHT};}
   return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});
 }
 fn deckRail(z:f32)->f32 { return select(0.66,0.16,z>=${QUARTERDECK_START}); }

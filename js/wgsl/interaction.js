@@ -1,3 +1,4 @@
+import { HULL_DRAFT } from '../hull.js';
 import { HULL_PROFILE } from './hull.js';
 // Local hull response and spray. Bounded visual approximation, not a fluid solver.
 import { FRAME_WGSL, CASCADES, ATMO_CORE_WGSL, NOISE_WGSL } from './common.js';
@@ -103,18 +104,28 @@ fn pressureSea(p: vec2f) -> f32 {
   let reset = I.previous.w > 0.5 || old.state.y < 0.0001;
   let rise = clamp((signedWater - old.state.x) / dt, -8.0, 8.0);
   let closing = select(mix(old.state.z, rise, 1.0-exp(-dt*18.0)), 0.0, reset);
-  let wet = smoothstep(-1.52, -0.9, localY) * smoothstep(0.0, 0.08, width) * (1.0 - smoothstep(deck + 0.3, deck + 1.1, localY)) * I.motion.y;
+  let wet = smoothstep(-${HULL_DRAFT}, -${HULL_DRAFT*.65}, localY) * smoothstep(0.0, 0.08, width) * (1.0 - smoothstep(deck + 0.3, deck + 1.1, localY)) * I.motion.y;
   let speed = max(I.motion.x, 0.0);
-  // Only water rising into the hull can launch a sheet. Speed alone makes a low bow wave.
-  let hit = wet * min(2.5, max(0.0, closing-0.3) * (0.5+min(speed,10.0)*0.045)) * mix(0.4,1.0,u);
-  let impact = select(max(hit,old.axis.w*exp(-dt*9.0))*wet,0.0,reset);
-  let drive = wet * (min(0.35,speed*0.035)*mix(0.35,1.0,u)+impact*0.8);
-  let age = select(old.state.y+dt,1.0,reset);
-  let launch = !reset && hit>0.12 && age>0.22 && (old.state.z<=0.3 || age>0.42);
-  let outward = normalize(H.right.xyz * side + H.forward.xyz * select(0.18 + 0.35 * a * a,-0.25,aft));
+  // Gradient of the actual planking, including the fine entry and changing
+  // section flare. Splash direction must change with the rebuilt hull.
+  let eps=0.04;
+  let dz=(hullHalfWidth(z+eps,localY)-hullHalfWidth(z-eps,localY))/(2.0*eps)*H.size.x/3.6/(H.size.y/12.0);
+  let dy=(hullHalfWidth(z,localY+eps)-hullHalfWidth(z,localY-eps))/(2.0*eps)*H.size.x/3.6/HULL_Y_SCALE;
+  let normal=normalize(H.right.xyz*side+H.forward.xyz*dz-H.up.xyz*dy);
+  let outward=normalize(vec3f(normal.x,0.0,normal.z)+H.right.xyz*side*0.12);
+  let entry=clamp(dot(outward,H.forward.xyz),0.0,1.0);
+  // Relative rise already includes heave, pitch, and motion through the wave.
+  // Quadratic impact pressure distinguishes a hard slam from a gentle swell.
+  let approach=max(0.0,closing-0.28);
+  let hit=wet*min(3.5,approach*approach*.20)*(0.45+0.55*entry)*mix(.55,1.0,u);
+  let impact=select(max(hit,old.axis.w*exp(-dt*7.0))*wet,0.0,reset);
+  let drive=wet*(min(.35,speed*.035)*mix(.35,1.0,u)+impact*.8);
+  let age=select(old.state.y+dt,1.0,reset);
+  // Re-arm when the face recedes, or on a distinctly stronger subsequent slam.
+  let launch=!reset && hit>.12 && age>.28 && (old.state.z<=.3 || (hit>old.axis.w*1.18 && age>.5));
   contacts[i].point = vec4f(p,drive);
   contacts[i].axis = vec4f(outward,impact);
-  contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*(0.7+sqrt(impact)*1.7),wet);
+  contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*(0.45+sqrt(impact)*1.9),wet);
   contacts[i].state = vec4f(signedWater,select(age,0.001,launch),closing,select(old.state.w,old.state.w+1.0,launch));
   if(reset){contacts[i].state.w=0.0;}
 
@@ -203,6 +214,7 @@ export const SHEET_UPDATE = FRAME_WGSL + INTERACTION_TYPES + /* wgsl */ `
 @group(0) @binding(3) var seaSamp: sampler;
 @group(0) @binding(4) var<storage, read> contacts: array<Contact, ${CONTACT_COUNT}>;
 @group(0) @binding(5) var<storage, read_write> sheets: array<Sheet, ${SHEET_COUNT}>;
+@group(0) @binding(6) var<storage, read_write> landings:array<atomic<u32>>;
 ` + INTERACTION_SEA + /* wgsl */ `
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
   let i=id.x; var s=sheets[i]; let dt=I.previous.z;
@@ -211,15 +223,25 @@ export const SHEET_UPDATE = FRAME_WGSL + INTERACTION_TYPES + /* wgsl */ `
   if(s.velocity.w>0.0){
     let t=s.origin.w*0.8;
     let p=s.origin.xyz+s.velocity.xyz*t-vec3f(0.0,4.905*t*t,0.0);
-    if(s.origin.w>s.velocity.w || (t>0.2 && s.velocity.y-9.81*t<0.0 && p.y<interactionSea(p.xz))){s.velocity.w=0.0;}
+    let landed=t>0.2 && s.velocity.y-9.81*t<0.0 && p.y<interactionSea(p.xz);
+    if(s.origin.w>s.velocity.w || landed){
+      if(landed){for(var j=-2;j<=2;j++){
+        let at=p.xz+s.tangent.xz*f32(j)*s.tangent.w*.6;
+        let cell=vec2i(floor((at-I.domain.xy)/I.domain.w+${WAKE_SIZE/2}.0));
+        if(all(cell>=vec2i(0)) && all(cell<vec2i(${WAKE_SIZE}))){atomicAdd(&landings[u32(cell.y)*${WAKE_SIZE}u+u32(cell.x)],u32(min(800.0,s.axis.w*240.0)));}
+      }
+      }
+      s.velocity.w=0.0;
+    }
   }
-  let c=contacts[i/4u];
-  if(c.state.y<0.002 && u32(c.state.w)%4u==i%4u && c.axis.w>0.1){
+  let ci=i/4u;let c=contacts[ci];
+  let neighbor=contacts[min(ci+1u,(ci/16u)*16u+15u)];
+  if(ci%2u==0u && c.state.y<0.002 && u32(c.state.w)%4u==i%4u && c.axis.w>0.1){
     let energy=c.axis.w;
-    s.origin=vec4f(c.point.xyz+vec3f(0.0,0.04,0.0),0.001);
+    s.origin=vec4f(mix(c.point.xyz,neighbor.point.xyz,.5)+vec3f(0.0,0.04,0.0),0.001);
     s.velocity=vec4f(c.flow.xyz+vec3f(0.0,1.2+sqrt(energy)*3.0,0.0),0.7+sqrt(energy)*0.32);
     s.axis=vec4f(c.axis.xyz,energy);
-    s.tangent=vec4f(normalize(vec3f(-c.axis.z,0.0,c.axis.x)),max(0.22,I.phase.z*0.24));
+    s.tangent=vec4f(normalize(vec3f(-c.axis.z,0.0,c.axis.x)),clamp(distance(c.point.xyz,neighbor.point.xyz)*1.3,.32,1.1));
   }
   sheets[i]=s;
 }
@@ -264,16 +286,19 @@ export const SPRAY_UPDATE = FRAME_WGSL + WAKE_SAMPLE + /* wgsl */ `
   let ci=u32(r0*31.999); let next=min(ci+1u,(ci/16u)*16u+15u);
   let contact=contacts[ci]; let neighbor=contacts[next];
   let energy=mix(contact.axis.w,neighbor.axis.w,r2);
-  let rate=max(0.0,energy-0.18)*0.24;
+  let rate=max(0.0,energy-0.18)*0.28*smoothstep(.06,.2,contact.state.y)*(1.0-smoothstep(.45,.85,contact.state.y));
   if (r1 > 1.0 - exp(-rate * dt)) { return; }
-  let mist = select(0.0, 1.0, i % 12u != 0u);
+  let mist = select(0.0, 1.0, i % 24u != 0u);
   let life = mix(0.45+r2*0.25,0.65+r2*0.55,mist);
   let lift = 1.0+sqrt(energy)*(2.4+r1*1.3);
   let velocity = contact.flow.xyz * (0.65 + r2 * 0.35) + vec3f(0.0, lift, 0.0);
-  let p = mix(contact.point.xyz,neighbor.point.xyz,r2)+contact.axis.xyz*(0.08+r1*0.25)+vec3f(0.0,0.1,0.0);
+  // Fragmenting sheet lips emit mist in flight, rather than bead streams at the hull.
+  let flight=min(.38,contact.state.y*.65);
+  let p=mix(contact.point.xyz,neighbor.point.xyz,r2)+velocity*flight-vec3f(0,4.905*flight*flight,0)
+    +contact.axis.xyz*(.10+r1*.20)+vec3f(0,.12,0);
   drops[i].position = vec4f(p, life);
   drops[i].velocity = vec4f(velocity, life);
-  drops[i].shape = vec4f(mix(0.003+r0*0.004,0.14+r0*0.22,mist),r2,mist,energy);
+  drops[i].shape = vec4f(mix(0.003+r0*0.004,0.22+r0*0.32,mist),r2,mist,energy);
 }
 `;
 
@@ -292,7 +317,7 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   let t=s.origin.w*(0.35+0.65*q)*(1.0+0.06*sin(u*4.0+s.origin.x*2.0));
   let fan=s.tangent.w*(0.65+q)*(1.0+t*1.6);
   let curl=(1.0-u*u)*sin(q*3.14159)*s.axis.w*0.12;
-  return s.origin.xyz+s.velocity.xyz*t-vec3f(0.0,4.905*t*t-curl,0.0)+s.tangent.xyz*u*fan;
+  return s.origin.xyz+s.velocity.xyz*t-vec3f(0.0,4.905*t*t-curl,0.0)+s.tangent.xyz*u*fan+vec3f(I.motion.z,0,I.motion.w)*(.08*t*t*q);
 }
 @vertex fn sheetVS(@builtin(vertex_index) vi: u32, @builtin(instance_index) i: u32) -> EffectVertex {
   let corners=array<vec2u,6>(vec2u(0,0),vec2u(1,0),vec2u(1,1),vec2u(0,0),vec2u(1,1),vec2u(0,1));
@@ -352,7 +377,7 @@ fn sprayLight(p: vec3f) -> vec3f {
 }
 @fragment fn dropFS(o: EffectVertex) -> @location(0) vec4f {
   let r2 = dot(o.uv, o.uv);
-  let alpha = exp(-r2 * mix(3.5, 2.5, o.data.z)) * (1.0 - smoothstep(0.65, 1.0, r2)) * (1.0 - smoothstep(0.55, 1.0, o.data.y)) * mix(0.22, 0.035, o.data.z) * o.data.x * I.motion.y;
+  let alpha = exp(-r2 * mix(3.5, 2.5, o.data.z)) * (1.0 - smoothstep(0.65, 1.0, r2)) * (1.0 - smoothstep(0.55, 1.0, o.data.y)) * mix(0.16, 0.028, o.data.z) * o.data.x * I.motion.y;
   return vec4f(sprayLight(o.world) * alpha, alpha);
 }
 `;

@@ -21,7 +21,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const buffer = b => ({ buffer: b });
   const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
   const contactGroup = bind(contactPipe, [buffer(frameUBO), buffer(uniform), buffer(hullUBO), seaView, seaSampler, buffer(contacts)]);
-  const sheetGroup=bind(sheetPipe,[buffer(frameUBO),buffer(uniform),seaView,seaSampler,buffer(contacts),buffer(sheets)]);
+  const sheetGroup=bind(sheetPipe,[buffer(frameUBO),buffer(uniform),seaView,seaSampler,buffer(contacts),buffer(sheets),buffer(landings)]);
   const wakeGroups = views.map((v, i) => bind(wakePipe, [buffer(uniform), buffer(hullUBO), views[1 - i], v, buffer(contacts), buffer(landings)]));
   const sprayGroups = views.map(v => bind(sprayPipe, [buffer(frameUBO), buffer(uniform), seaView, seaSampler, v, sampler, buffer(contacts), buffer(drops), buffer(landings)]));
   const renderPipes = await Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({

@@ -1,4 +1,4 @@
-import { WHEEL_CENTER, HULL_VERTICAL_SCALE } from '../hull.js';
+import { WHEEL_CENTER, HULL_VERTICAL_SCALE, hullDeck } from '../hull.js';
 import { SAIL_PLAN, LATEEN_CORNERS } from '../sailing.js';
 const SAIL_RIG_INFO = SAIL_PLAN.map(s=>'vec4f('+[s.z,s.top,s.width,s.height].join(',')+')').join(',');
 const SAIL_BELLIES = SAIL_PLAN.map(s=>s.belly).join(',');
@@ -70,6 +70,13 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     let q=position-pivot;
     local=vec3f(c*q.x-s*q.y,s*q.x+c*q.y,q.z)+anchor;
     localN=vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
+  }
+  if(material==18.0){
+    let pivot=vec3f(0,${hullDeck(-2.65)+.085},-2.65);let q=position-pivot;
+    let angle=(1.0-clamp(hull.sailSet.w,0.0,1.0))*1.5707963;
+    let c=cos(angle);let s=sin(angle);
+    local=vec3f(q.x,c*q.y-s*q.z,s*q.y+c*q.z)+pivot;
+    localN=vec3f(normal.x,c*normal.y-s*normal.z,s*normal.y+c*normal.z);
   }
   if(material==14.0){
     // +X is starboard and +Z is aft: positive helm moves the trailing edge to starboard.

@@ -45,14 +45,14 @@ test('complete vessel includes stern, submerged hull, five canvas panels, and a 
     const b=bounds.get(material);b.minY=Math.min(b.minY,mesh[i+1]);b.maxY=Math.max(b.maxY,mesh[i+1]);
     b.minZ=Math.min(b.minZ,mesh[i+2]);b.maxZ=Math.max(b.maxZ,mesh[i+2]);b.count++;
   }
-  assert.ok(bounds.get(15).minY<-1.4);
+  assert.ok(bounds.get(15).minY<=-HULL_DRAFT+.001);
   assert.ok(bounds.get(15).minZ<=-6.39 && bounds.get(15).maxZ>=5.59);
   assert.ok(bounds.get(9).count>=4*28*20*6);
   assert.ok(bounds.get(9).maxY>10 && bounds.get(9).minZ<-4);
   assert.ok(bounds.get(13).count>1000 && bounds.get(13).maxZ>6 && bounds.get(13).minY>4.1);
   assert.ok(bounds.get(16).count>100 && bounds.get(17).maxY>2.7);
   assert.ok(bounds.get(10).maxY>=11.49);
-  assert.ok(bounds.get(14).maxZ>6 && bounds.get(14).minY<-1.2);
+  assert.ok(bounds.get(14).maxZ>6 && bounds.get(14).minY<-1.05);
   assert.ok(bounds.get(11).minZ>3);
 });
 
@@ -84,18 +84,15 @@ function firstHit(mesh,origin,direction){
   return {material,point:origin.map((x,i)=>x+direction[i]*distance)};
 }
 
-test('all nine cabin windows have unobstructed recessed glazing inside real wall openings',()=>{
+test('two modest stern lights are recessed; cabin sides are planked',()=>{
   const mesh=createCaravelMesh();
-  for(const x of [-.7,0,.7]){
-    const hit=firstHit(mesh,[x+.1,1.60,6.5],[0,0,-1]);
+  for(const x of [-.48,.48]){
+    const hit=firstHit(mesh,[x+.065,1.62,6.5],[0,0,-1]);
     assert.equal(hit.material,11,'stern planking must not cross a pane');
-    assert.ok(hit.point[2]<5.55 && hit.point[2]>5.50,'glass sits behind the transom face');
+    assert.ok(hit.point[2]<5.55 && hit.point[2]>5.50);
   }
   for(const side of [-1,1])for(const z of [3.4,4.35,5.18]){
-    const hit=firstHit(mesh,[side*3,1.60,z+.1],[-side,0,0]);
-    assert.equal(hit.material,11,'side planking must not cross a pane');
-    assert.ok(Math.abs(Math.abs(hit.point[0])-hullHalfWidth(z+.1,1.6)+.08)<.001);
-    assert.equal(firstHit(mesh,[side*3,2.12,z+.1],[-side,0,0]).material,1,'wood closes above the arch');
+    assert.equal(firstHit(mesh,[side*3,1.60,z+.1],[-side,0,0]).material,1);
   }
 });
 
@@ -134,7 +131,7 @@ test('20 m hull grounds adult crew on real decks, keeps the helm reachable and l
   assert.ok(Math.abs(helm.position[2]-WHEEL_CENTER[2]*scale[2]-.6)<1e-6);
   assert.ok(Math.abs(WHEEL_CENTER[1]*scale[1]-helm.position[1]-.922)<1e-6);
   // Detect actual upper tread faces, rather than trusting the requested step count.
-  for(const [xmin,xmax,zmin,zmax,minSteps,startZ] of [[.69,1.23,1.4,2.75,12,1.5],[-1.19,-.62,-3.95,-2.9,8,-3.04]]){
+  for(const [xmin,xmax,zmin,zmax,minSteps,startZ] of [[.69,1.23,1.4,2.75,12,1.5]]){
     const levels=new Set();
     for(let i=0;i<mesh.length;i+=9)if(mesh[i+6]===6&&mesh[i+4]>.999&&
       mesh[i]/scale[0]>xmin&&mesh[i]/scale[0]<xmax&&mesh[i+2]/scale[2]>zmin&&mesh[i+2]/scale[2]<zmax){
@@ -144,4 +141,16 @@ test('20 m hull grounds adult crew on real decks, keeps the helm reachable and l
     assert.ok(heights[0]-vesselDeck(startZ)*scale[1]<=.231,'first tread is reachable from the deck');
     for(let i=1;i<heights.length;i++)assert.ok(heights[i]-heights[i-1]<=.231);
   }
+});
+
+test('fine bow and stern sections retain a full midbody and four unobstructed gun muzzles',()=>{
+  assert.ok(hullHalfWidth(-5.8,1.5)<.55,'foremost metre tapers into the stem');
+  assert.ok(hullHalfWidth(5.0,-.7)<hullHalfWidth(5.0,0)*.7,'underwater stern has a fine run');
+  assert.ok(hullHalfWidth(0,0)>1.7,'midbody buoyancy stays full');
+  const mesh=createCaravelMesh();
+  for(const side of [-1,1])for(const z of [3.25,4.9]){
+    const hit=firstHit(mesh,[side*4,2.935,z],[-side,0,0]);
+    assert.ok([3,4].includes(hit.material),'four elevated iron falconets exist');
+  }
+  for(const z of [-5.5,-4.2,-3.8])assert.ok(vesselDeck(z)<1.2,'continuous sheer replaces the forecastle tier');
 });
