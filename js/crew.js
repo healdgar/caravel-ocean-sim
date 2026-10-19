@@ -144,7 +144,7 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   return s;
 }
 
-export async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4}) {
+export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4}) {
   const models=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
   })),B=GPUBufferUsage,state=createCompany();
@@ -168,7 +168,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,en
     const vertex=buffer('crew vertices',model.vertices,B.VERTEX),index=buffer('crew indices',model.indices,B.INDEX);
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
-    const main=group(pipeline,[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state}]);
+    const main=group(pipeline,[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView]);
     const shadow=group(shadowPipeline,[{buffer:shadows.uniform},...common]);
     return {model,people,poses,actors,vertex,index,bones,actor,main,shadow};
   });

@@ -56,6 +56,38 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
 }
 `;
 
+// Hull, rigging and crew share a light response; materials supply their own
+// albedo and roughness. Environment sampling stays with each renderer.
+export const VESSEL_LIGHTING = /* wgsl */ `
+fn vesselFresnel(f0:vec3f,cosine:f32)->vec3f {
+  // Dot products can exceed 1 by an ulp. Multiplication also avoids WGSL's
+  // undefined pow(negative,5), which can produce an HDR firefly.
+  let f=1.0-clamp(cosine,0.0,1.0);let f2=f*f;
+  return f0+(1.0-f0)*f2*f2*f;
+}
+fn vesselSpecular(n:vec3f,v:vec3f,l:vec3f,rough:f32,f0:vec3f)->vec3f {
+  // The half-vector is undefined when view and light oppose exactly.
+  let h=(v+l)/max(length(v+l),0.00001);
+  let nv=clamp(dot(n,v),0.001,1.0);let nl=clamp(dot(n,l),0.0,1.0);
+  let nh=clamp(dot(n,h),0.0,1.0);let vh=clamp(dot(v,h),0.0,1.0);
+  let a=rough*rough;let a2=a*a;
+  let d=a2/(PI*pow(nh*nh*(a2-1.0)+1.0,2.0));
+  let k=pow(rough+1.0,2.0)/8.0;
+  let g=nv/(nv*(1.0-k)+k)*nl/(nl*(1.0-k)+k);
+  return d*g*vesselFresnel(f0,vh)/(4.0*nv*max(nl,0.001));
+}
+fn vesselAmbient(n:vec3f,sky:vec3f,sea:vec3f)->vec3f {
+  let skyVisibility=0.5+0.5*n.y;
+  return sky*skyVisibility+sea*0.22*(1.0-skyVisibility);
+}
+fn vesselEnvironment(n:vec3f,v:vec3f,rough:f32,f0:vec3f)->vec3f {
+  // Rough surfaces average many facet angles. Applying the smooth-surface
+  // grazing limit to a blurred cube makes matte linen and timber shine white.
+  let f=1.0-clamp(dot(n,v),0.001,1.0);let f2=f*f;
+  return (f0+(max(vec3f(1.0-rough),f0)-f0)*f2*f2*f)*(1.0-rough*0.45);
+}
+`;
+
 export const CANVAS_OPTICS = /* wgsl */ `
 // Reduced fibre/medium index contrast lowers scattering when damp. This modest
 // optical adjustment is authored, not a measured historical canvas coefficient.

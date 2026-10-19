@@ -1,9 +1,9 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
-import { VESSEL_RIG, CANVAS_OPTICS } from './vessel.js';
+import { VESSEL_RIG, VESSEL_LIGHTING, CANVAS_OPTICS } from './vessel.js';
 import { SHADOW_SAMPLE } from './shadows.js';
-export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + CANVAS_OPTICS + SHADOW_SAMPLE + /* wgsl */ `
+export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -153,18 +153,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     rough=mix(rough,.27+grain*.09,film);
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
-  let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
-  let nh=clamp(dot(n,h),0.0,1.0); let vh=clamp(dot(v,h),0.0,1.0);
-  let a=rough*rough; let a2=a*a;
-  let d=a2/(PI*pow(nh*nh*(a2-1.0)+1.0,2.0));
-  let k=pow(rough+1.0,2.0)/8.0;
-  let g=nv/(nv*(1.0-k)+k)*nl/(nl*(1.0-k)+k);
+  let nl=clamp(dot(n,l),0.0,1.0);
   let f0=mix(vec3f(0.04),albedo,metal);
-  // Float dot products can exceed 1 by an ulp at a joint facing the eye.
-  // pow(negative,5.0) is undefined in WGSL and can yield an HDR firefly.
-  let fh=1.0-vh; let fh2=fh*fh;
-  let fv=1.0-nv; let fv2=fv*fv;
-  let fresnel=f0+(1.0-f0)*fh2*fh2*fh;
   let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*vesselShadow(in.world,normalize(in.normal));
   // The last cube mip is a face average, not diffuse irradiance. Sampling it
   // along a vertical timber normal mixes in the sea, then counts that green
@@ -174,11 +164,11 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let reflected=waterLight(in.world,reflect(-v,n),rough);
   let bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9);
   let skyVisibility=0.5+0.5*n.y;
-  let ambient=sky*skyVisibility+bounce*0.22*(1.0-skyVisibility);
+  let ambient=vesselAmbient(n,sky,bounce);
   let ao=mix(0.65,1.0,smoothstep(0.72,1.5,p.y));
-  let spec=d*g*fresnel/(4.0*nv*max(nl,0.001));
+  let spec=vesselSpecular(n,v,l,rough,f0);
   var col=(albedo*(1.0-metal)/PI+spec)*direct*nl;
-  col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*(f0+(1.0-f0)*(fv2*fv2*fv))*(1.0-rough*0.45);
+  col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0);
   if(in.material == 9u || in.material == 13u) {
     let through=max(dot(-n,l),0.0);
     // Thin canvas transmits light without revealing the background. Beer

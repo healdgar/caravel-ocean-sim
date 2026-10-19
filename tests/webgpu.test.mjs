@@ -1849,6 +1849,122 @@ test('crew face morphs keep the body fixed, bound facial displacement and preser
   }finally{await page.close();}
 });
 
+test('crew and vessel materials share sunlight, shadows, reflected light and directional marine haze', {timeout:60000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__lighting',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__lighting`);
+    const result=await page.evaluate(async()=>{
+      const {CREW_RENDER}=await import('/js/wgsl/crew.js'),{CARAVEL}=await import('/js/wgsl/caravel.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,T=GPUTextureUsage;
+      const buffer=(size,usage)=>device.createBuffer({size,usage:usage|B.COPY_DST});
+      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM);
+      const sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
+      const compare=device.createSampler({compare:'less-equal'});
+      const texture=(color,layers=1)=>{
+        const t=device.createTexture({size:[1,1,layers],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});
+        for(let i=0;i<layers;i++)device.queue.writeTexture({texture:t,origin:[0,0,i]},new Uint8Array([...color,255]),{bytesPerRow:4},[1,1]);
+        return t;
+      };
+      const trans=texture([230,166,89]),env=texture([40,52,70],6),water=texture([40,52,70]),oak=texture([128,128,128]);
+      const disp=texture([0,0,0],3),deck=texture([0,0,0]),cloth=texture([102,66,36]);
+      // Sunward warm haze and antisolar blue haze must come from the directional
+      // sky LUT, not the cube's zenith texel. The fragment entry points are intact.
+      const sky=device.createTexture({size:[8,4],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      const skyPixels=new Uint8Array(8*4*4);
+      for(let y=0;y<4;y++)for(let x=0;x<8;x++)skyPixels.set([240-x*27,170-x*12,65+x*20,255],(y*8+x)*4);
+      device.queue.writeTexture({texture:sky},skyPixels,{bytesPerRow:32},[8,4]);
+      const depths=[0,1].map(()=>device.createTexture({size:[4,4],format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING}));
+      const output=device.createTexture({size:[4,4],format:'rgba32float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
+      const read=buffer(1024,B.COPY_DST|B.MAP_READ);
+      const common=`
+        struct LightingFixture { world:vec4f, normal:vec4f, color:vec4f };
+        @group(0) @binding(15) var<uniform> Q:LightingFixture;
+        fn fixturePosition(i:u32)->vec4f {
+          return vec4f(array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i],0,1);
+        }`;
+      const crewVS=`@vertex fn fixtureVS(@builtin(vertex_index) i:u32)->CrewVertex {
+        var o:CrewVertex;o.position=fixturePosition(i);o.world=Q.world.xyz;o.normal=Q.normal.xyz;
+        o.color=Q.color.xyz;o.helm=0;o.wet=vec2f(0);o.skin=0;return o;
+      }`;
+      const boatVS=`@vertex fn fixtureVS(@builtin(vertex_index) i:u32)->BoatVertex {
+        var o:BoatVertex;o.pos=fixturePosition(i);o.world=Q.world.xyz;o.normal=Q.normal.xyz;
+        o.local=vec3f(0,2,0);o.normalLocal=Q.normal.xyz;o.uv=vec2f(.2,.3);o.wet=vec2f(0);
+        o.material=4u;return o;
+      }`;
+      // Match caulk's albedo/roughness to dry linen: identical optical inputs
+      // should yield identical radiance, regardless of which mesh draws them.
+      const pipelines=await Promise.all([[CREW_RENDER,crewVS],[CARAVEL,boatVS]].map(async([code,vs])=>{
+        const module=device.createShaderModule({code:code+common+vs});
+        const info=await module.getCompilationInfo();for(const m of info.messages)if(m.type==='error')errors.push(m.message);
+        return device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'fixtureVS'},fragment:{module,entryPoint:'fs',targets:[{format:'rgba32float'}]}});
+      }));
+      const buf=b=>({buffer:b}),view=t=>t.createView();
+      const groups=[
+        [[0,buf(frame)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[15,buf(fixture)]],
+        [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],
+          [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[15,buf(fixture)]],
+      ].map((entries,i)=>device.createBindGroup({layout:pipelines[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))}));
+      const shadowGroups=pipelines.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[
+        buf(shadow),view(depths[0]),compare,view(depths[1]),view(cloth),sampler,
+      ].map((resource,binding)=>({binding,resource}))}));
+      const cases=[
+        {name:'front',light:[0,.5,Math.sqrt(.75)],fog:0},
+        {name:'solid shadow',light:[0,.5,Math.sqrt(.75)],fog:0,solid:0},
+        {name:'canvas shadow',light:[0,.5,Math.sqrt(.75)],fog:0,canvas:0},
+        {name:'cloud shadow',light:[0,.5,Math.sqrt(.75)],fog:0,sun:0},
+        {name:'backlit',light:[0,.2,-Math.sqrt(.96)]},
+        {name:'opposed view and sun',light:[0,0,-1]},
+        {name:'below horizon',light:[0,-.2,Math.sqrt(.96)],fog:0},
+        {name:'near haze',distance:3,haze:12},
+        {name:'far haze',distance:300,haze:12},
+        {name:'antisolar haze',distance:300,haze:12,light:[0,.2,Math.sqrt(.96)]},
+        {name:'high altitude',distance:300,haze:12,altitude:1500},
+        {name:'upward normal',normal:[0,1,0]},
+        {name:'grazing normal',normal:[1,0,.001]},
+        {name:'no reflections',reflections:0,fog:0},
+      ],report=[];
+      for(const c of cases){
+        const f=new Float32Array(96),height=c.altitude??2,light=c.light??[0,.2,-Math.sqrt(.96)];
+        f.set([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);f.set([0,height,c.distance??30,0],16);
+        f.set([...light,14],32);f.set([4,4,.25,.25],36);f.fill(.01,48,54);f[63]=c.reflections??1;
+        f.set([c.haze??3,Math.max(height,10)*.001],72);f.set(c.fog===0?[0,0,0,0]:[.00002,.00003,.00005,.00011],88);
+        const q=new Float32Array([0,height,0,0,...(c.normal??[0,0,1]),0,.012,.009,.006,0]);
+        const sh=new Float32Array(28);sh[14]=.5;sh[15]=1;sh[19]=1;sh.set([...light,100],20);sh.set([.25,.25,0,0],24);
+        device.queue.writeBuffer(frame,0,f);device.queue.writeBuffer(fixture,0,q);
+        device.queue.writeBuffer(shadow,0,sh);device.queue.writeBuffer(sun,0,new Float32Array([c.sun??1,0,0,0]));
+        const colors=[];
+        for(let i=0;i<2;i++){
+          const enc=device.createCommandEncoder();
+          for(let j=0;j<2;j++)enc.beginRenderPass({colorAttachments:[],depthStencilAttachment:{view:view(depths[j]),depthClearValue:(j===0?c.solid:c.canvas)??1,depthLoadOp:'clear',depthStoreOp:'store'}}).end();
+          const pass=enc.beginRenderPass({colorAttachments:[{view:view(output),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}]});
+          pass.setPipeline(pipelines[i]);pass.setBindGroup(0,groups[i]);pass.setBindGroup(1,shadowGroups[i]);pass.draw(3);pass.end();
+          enc.copyTextureToBuffer({texture:output},{buffer:read,bytesPerRow:256},[4,4]);device.queue.submit([enc.finish()]);
+          await read.mapAsync(GPUMapMode.READ);colors.push(Array.from(new Float32Array(read.getMappedRange()).slice(0,3)));read.unmap();
+        }
+        report.push({name:c.name,crew:colors[0],boat:colors[1]});
+      }
+      device.destroy();return {errors,report};
+    });
+    assert.deepEqual(result.errors,[]);
+    for(const sample of result.report)for(let channel=0;channel<3;channel++){
+      const a=sample.crew[channel],b=sample.boat[channel];
+      assert.ok(Number.isFinite(a)&&Number.isFinite(b),JSON.stringify(sample));
+      assert.ok(Math.abs(a-b)<2e-5+Math.abs(b)*.001,JSON.stringify(sample));
+    }
+    const byName=Object.fromEntries(result.report.map(s=>[s.name,s.crew]));
+    assert.ok(byName.front[0]>byName['solid shadow'][0]*2,'solid objects block direct sunlight');
+    assert.ok(byName['canvas shadow'][0]>byName['solid shadow'][0]&&byName['canvas shadow'][0]<byName.front[0],'canvas transmits part of the sun');
+    assert.ok(Math.abs(byName['cloud shadow'][0]-byName['solid shadow'][0])<1e-5,'cloud and solid shadows leave ambient light');
+    assert.ok(byName['far haze'][0]>byName['near haze'][0]*3,'distance increases sunward haze');
+    assert.ok(byName['far haze'][0]>byName['antisolar haze'][0]*2,'haze follows the viewing direction');
+    assert.ok(byName['high altitude'][0]<byName['far haze'][0],'marine haze thins with altitude');
+    assert.ok(byName['grazing normal'][0]<.1,'rough cloth does not acquire a mirror-bright rim');
+  }finally{await page.close();}
+});
+
 for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
   test(`${bundle} initializes all JavaScript and WGSL pipelines`, { timeout: 120000 }, async () => {
     const page = await browser.newPage();

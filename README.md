@@ -242,7 +242,8 @@ backlighting and transmitted shadows. Reduced wet-fabric reflectance follows
 [the observed effect of water on textile scattering](https://onlinelibrary.wiley.com/doi/10.1002/app.1973.070170317);
 the coefficients here are authored, not measurements of historical sailcloth.
 Crew use four moving exposure probes each: clothing darkens, with a smaller
-fresh-water highlight on skin.
+absorption change on skin. Surface water lowers material roughness for sun and
+sky highlights; dry linen stays matte.
 
 Surface film fades within seconds; absorbed moisture dries over minutes, faster
 in wind. Rope dries slower than wood, canvas faster. These are visual rates:
@@ -331,14 +332,16 @@ npm run build
 npm test
 ```
 
-The October 19 model/join revision passed 138 of 139 tests on macOS/Metal,
-including geometry connections, material wetness, instruments/mobile controls,
-indexed HDR rendering and 810 GPU rig-clearance poses. The older exact-pixel
-packed-wave comparison still differed. That comparison also failed on the prior
-published commit `57549ef`; an earlier control using two identical renderer runs
-differed by two one-level color channels. The strict assertion remains unchanged;
-the complete suite is not reported as green. Dry, damp and wet-film standalone
-renders were inspected separately. Real iPhone performance was not remeasured.
+The October 19 lighting revision passed 139 of 140 tests on macOS/Metal,
+including the 14-case crew/vessel radiance comparison, geometry connections,
+material wetness, mobile controls, all standalone builds and 810 GPU rig poses.
+The strict indexed/direct-HDR pixel comparison differed by one or two colour
+levels in a few channels; an isolated snapshot of the prior published commit
+`f1aa3d1` reproduces that failure. The packed-wave comparison passed this run;
+it failed during the preceding model revision, including on `57549ef`.
+Strict assertions remain unchanged; the complete suite is not reported as green.
+Six lighting views plus dry, damp and wet-film standalone renders were inspected
+separately. Real iPhone performance was not remeasured.
 
 The suite covers:
 
@@ -353,6 +356,7 @@ The suite covers:
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
+- Production crew/vessel fragment radiance agrees for identical optical inputs under front/back lighting, solid/canvas/cloud shadows, directional marine haze, altitude changes, grazing normals and reflection toggles.
 - JavaScript and WGSL initialization in all three standalone builds.
 - Adaptive-resolution convergence, cautious recovery, bounded scale, manual overrides and background/resume handling; actual GPU target resizing and fixed capture dimensions. Mobile checks cover unobstructed Hide buttons while scrolling, collapsed/expanded profiling, and six portrait, landscape and tablet viewports.
 - Bit-exact indexed geometry and shadow partitions; pixel equality between the original copy/unindexed schedule, direct resolve/indexed rendering, and profiled rendering; actual slow-frame FPS, timestamp readback, overlapping/early render stages, stale disabled queries, quantized zero intervals, invalid timestamps, and unsupported-device fallback.
@@ -657,6 +661,15 @@ its sea fallback follows cloud shadows. Diffuse lighting weights separate sky
 and sea hemispheres by surface orientation, avoiding duplicate sea tint on
 vertical timber. Neutral white balance preserves the oak colour across sunlight
 settings; shaded and wet wood still pick up their surroundings.
+
+Crew share the vessel's solar extinction, cloud/rig shadows, sky/sea ambient
+weights, GGX highlights and directional marine haze. Skin, clothing and timber
+retain distinct colours and roughness. Crew use the environment cube for broad
+reflections; the hull also samples the filtered ocean image. Roughness limits
+grazing environment reflections so matte cloth and wood do not acquire bright
+mirror-like rims. A GPU regression compares the unchanged production fragment
+entry points with identical optical inputs across sunlight, solid/canvas/cloud
+shadows, opposing light/view directions, haze, altitude and reflection toggles.
 
 Two 2048 × 2048 sun shadow maps track the moving vessel: one for solid timber,
 metal and rigging, and one for canvas with its warm optical transmission.

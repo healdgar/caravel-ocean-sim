@@ -1,5 +1,6 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
-import { VESSEL_RIG } from './vessel.js';
+import { VESSEL_RIG, VESSEL_LIGHTING } from './vessel.js';
+import { SKY_RENDER_FUNCS } from './sky.js';
 import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
 
 export const CREW_SKIN = /* wgsl */ `
@@ -58,13 +59,14 @@ fn crewSurface(v:CrewInput)->CrewSurface {
   return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),normal);
 }
 `;
-export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + CREW_SKIN + SHADOW_SAMPLE + /* wgsl */ `
+export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING + CREW_SKIN + SHADOW_SAMPLE + SKY_RENDER_FUNCS + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(4) var transLUT:texture_2d<f32>;
 @group(0) @binding(5) var sampC:sampler;
 @group(0) @binding(6) var envCube:texture_cube<f32>;
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
 @group(0) @binding(8) var<storage,read> moisture:array<vec2f>;
+@group(0) @binding(9) var skyLUT:texture_2d<f32>;
 struct CrewVertex {
   @builtin(position) position:vec4f, @location(0) world:vec3f,
   @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
@@ -95,22 +97,27 @@ struct CrewVertex {
   let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
   if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
-  let trans=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,sun.y),0).rgb;
-  let direct=trans*F.sunDir.w*sunVis[0]*step(0.0,sun.y)*vesselShadow(v.world,n);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*vesselShadow(v.world,n);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS-1}.0).rgb;
-  let sea=textureSampleLevel(envCube,sampC,vec3f(0,-1,0),${ENV_MIPS-1}.0).rgb;
-  let ambient=sky*(.5+.5*n.y)+sea*.15*(.5-.5*n.y);
+  let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS-1}.0).rgb;
+  let ambient=vesselAmbient(n,sky,sea);
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
   let albedo=v.color*mix(1.0,mix(.68,.92,v.skin),wet.x);
-  let view=normalize(F.camPos.xyz-v.world);let halfway=normalize(view+sun);
+  let view=normalize(F.camPos.xyz-v.world);
   // A little diffuse wrap softens facial terminators. Skin has a broad dry
-  // highlight; linen stays matte and retained water strengthens the glint.
+  // highlight; absorbed water darkens linen, surface water strengthens glints.
+  // Roughness values are authored material choices, not measured cloth/skin data.
+  let rough=mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y);
   let wrap=.14*v.skin;
   let diffuse=max(0.0,(dot(n,sun)+wrap)/(1.0+wrap))/(1.0+wrap);
-  let gloss=(.006*v.skin+mix(.004,.029,v.skin)*wet.y)*pow(max(dot(n,halfway),0.0),mix(8.0,mix(18.0,32.0,wet.y),v.skin));
-  let col=albedo*(direct*diffuse/PI+ambient)+direct*gloss*max(dot(n,sun),0.0);
-  let fog=exp(-F.fogExt.rgb*length(v.world-F.camPos.xyz));
-  return vec4f(col*fog+sky*(1.0-fog),1);
+  let f0=vec3f(.04);
+  let spec=vesselSpecular(n,view,sun,rough,f0);
+  let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
+  let col=albedo*(direct*diffuse/PI+ambient)+direct*spec*max(dot(n,sun),0.0)
+    +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
+  // Match timber, canvas and land: the same directional sky and marine haze
+  // must veil every surface along this view ray, including shadowed sailors.
+  return vec4f(surfaceAir(col,v.world),1);
 }
 `;
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
