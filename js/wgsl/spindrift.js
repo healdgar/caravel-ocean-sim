@@ -10,8 +10,8 @@ struct CrestPlume {
   launch: vec4f, // initial velocity, lifetime (zero = vacant)
   crest: vec4f,  // crest tangent, initial half width
   shape: vec4f,  // strength, seed, birth wind x/z
-  source: vec4f, // undisturbed crest x/z, release age, left foot height offset
-  root: vec4f,   // tracked crest position, right foot height offset
+  source: vec4f, // undisturbed crest x/z, release age, reserved
+  root: vec4f,   // tracked crest position, reserved
 };
 // Aerodynamic entrainment of a mist parcel, with an authored settling rate.
 // Birth data stays in world space when the camera or wind changes.
@@ -70,10 +70,6 @@ fn crestSample(q: vec2f) -> CrestSample {
 fn crestBreaking(s: CrestSample) -> f32 {
   return breakingCompression(s.derivative.z, s.derivative.w, s.d.w, 0.45);
 }
-fn crestFootHeights(q: vec2f, tangent: vec2f, width: f32, height: f32) -> vec2f {
-  return vec2f(crestDisplacement(q-tangent*width).y,
-    crestDisplacement(q+tangent*width).y)-height;
-}
 fn crestInHull(world: vec3f) -> bool {
   if (hull.rig.z < 0.5) { return false; }
   let delta = world - hull.origin.xyz;
@@ -113,9 +109,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       if (peak.y < 0.035 || crestBreaking(s) < 0.15 || crestInHull(root)) {
         p.source.z = p.origin.w;
       } else {
-        let feet = crestFootHeights(nextQ,p.crest.xz,p.crest.w,s.d.y);
-        p.source = vec4f(nextQ,p.source.z,feet.x);
-        p.root = vec4f(root,feet.y);
+        p.source = vec4f(nextQ,p.source.z,0.0);
+        p.root = vec4f(root,0.0);
       }
     }
     let head = plumePosition(p, p.origin.w);
@@ -163,14 +158,42 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   if (crestInHull(origin)) { return; }
   let strength = windLift * breaking * mix(0.55,1.0,smoothstep(0.06,0.4,prominence));
   p.origin = vec4f(origin, 0.0);
-  p.launch = vec4f(wind.x*0.16,1.0+2.5*strength,
+  p.launch = vec4f(wind.x*0.16,0.4+1.0*strength,
     wind.y*0.16,0.9+0.8*strength+crestRandom(seed+4u)*0.3);
   p.crest = vec4f(tangent,(0.8+1.4*strength)*mix(0.7,1.2,crestRandom(seed+5u)));
   p.shape = vec4f(strength, crestRandom(seed + 6u) * 100.0, wind);
-  let feet = crestFootHeights(q,tangent.xz,p.crest.w,s.d.y);
-  p.source = vec4f(q,0.28+0.32*strength,feet.x);
-  p.root = vec4f(origin,feet.y);
+  p.source = vec4f(q,0.28+0.32*strength,0.0);
+  p.root = vec4f(origin,0.0);
   plumes[id.x] = p;
+}
+`;
+
+// Shared with the GPU silhouette regression. Density vanishes on the complete
+// volume boundary, including its underside; the raster quad carries no opacity.
+export const SPINDRIFT_VOLUME = /* wgsl */ `
+fn mistInterval(origin:vec3f,direction:vec3f)->vec2f {
+  let a=dot(direction,direction);let middle=-dot(origin,direction)/a;
+  // Closest-point form avoids subtracting two large squared distances when
+  // looking at a thin mist volume from the far end of the emission radius.
+  let closest=origin+direction*middle;
+  let halfSquared=(1.0-dot(closest,closest))/a;
+  if(halfSquared<=0.0){return vec2f(0);}
+  let halfSpan=sqrt(halfSquared);
+  return vec2f(max(0.0,middle-halfSpan),max(0.0,middle+halfSpan));
+}
+fn mistDensity(p:vec3f,seed:f32,age:f32)->f32 {
+  let radial=max(0.0,1.0-dot(p,p));
+  let flow=vec2f(p.x*3.1+p.z*.7,p.y*4.5-p.z*.55-age*.35)+seed;
+  let breakup=smoothstep(-.22,.32,gnoise(flow));
+  return radial*radial*(.18+.82*breakup);
+}
+fn mistOpticalDepth(origin:vec3f,direction:vec3f,seed:f32,age:f32)->vec2f {
+  let span=mistInterval(origin,direction);let step=(span.y-span.x)/3.0;
+  var density=0.0;
+  for(var i=0u;i<3u;i++){
+    density+=mistDensity(origin+direction*(span.x+(f32(i)+.5)*step),seed,age);
+  }
+  return vec2f(density*step,span.x);
 }
 `;
 
@@ -179,6 +202,7 @@ ${FRAME_WGSL}
 ${ATMO_CORE_WGSL}
 ${SPINDRIFT_STATE}
 ${NOISE_WGSL}
+${SPINDRIFT_VOLUME}
 ${SHADOW_SAMPLE}
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> plumes: array<CrestPlume>;
@@ -188,67 +212,60 @@ ${SHADOW_SAMPLE}
 @group(0) @binding(5) var<storage, read> sunVisibility: vec4f;
 struct CrestVertex {
   @builtin(position) position: vec4f,
-  @location(0) uv: vec2f,
-  @location(1) light: vec3f,
-  @location(2) shape: vec3f, // opacity, seed, age
+  @location(0) ray:vec3f,
+  @location(1) @interpolate(flat) center:vec3f,
+  @location(2) @interpolate(flat) radii:vec3f,
+  @location(3) @interpolate(flat) wind:vec2f,
+  @location(4) @interpolate(flat) light:vec3f,
+  @location(5) @interpolate(flat) shape:vec3f,
 };
-@vertex fn crestVS(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CrestVertex {
-  let p = plumes[instance];
-  var o: CrestVertex;
-  o.position = vec4f(2.0, 2.0, 0.0, 1.0); o.uv = vec2f(0.0); o.light = vec3f(0.0); o.shape = vec3f(0.0);
-  if (p.launch.w <= 0.0) { return o; }
-  let corner = array<vec2f, 6>(vec2f(0.0,-1.0),vec2f(1.0,-1.0),vec2f(0.0,1.0),vec2f(0.0,1.0),vec2f(1.0,-1.0),vec2f(1.0,1.0))[vertex % 6u];
-  let quad = vertex/6u;
-  let u = (f32(quad/2u)+corner.x)/4.0;
-  let v = f32(quad%2u)+(corner.y-1.0)*0.5;
-  let age = p.origin.w;
-  let head = plumePosition(p, age);
-  let distanceToEye = length(head - F.camPos.xyz);
-  let metresPerPixel = max(distanceToEye, 1.0) * 2.0 * length(F.camUp.xyz) * F.screen.w;
-  let tail = plumeSheetPosition(p,0.0);
-  let detached = smoothstep(p.source.z,p.source.z+0.6,age);
-  let lengthLimit = min(1.0,150.0*metresPerPixel/max(length(head-tail),0.01));
-  let sampleU = mix((1.0-lengthLimit)*detached,1.0,u);
-  let center = plumeSheetPosition(p,sampleU);
-  let view = normalize(F.camPos.xyz - center);
-  let path = normalize(head - tail + vec3f(0.0, 0.01, 0.0));
-  let across = cross(path, view);
-  let facingSide = normalize(across + normalize(F.camRight.xyz) * 0.01);
-  // Start spread along the actual crest, then billow toward the view as it disperses.
-  let sideSign = select(-1.0,1.0,dot(p.crest.xyz,facingSide)>=0.0);
-  let crestSide = p.crest.xyz*sideSign;
-  let side = normalize(mix(crestSide,facingSide,0.15*u+0.55*detached));
-  let spread = 1.0 + u*0.45 + detached*0.5;
-  let width = min(p.crest.w*spread,metresPerPixel*65.0);
-  // Scallop the sheet edge along the crest; turbulence grows after lift-off.
-  let curl = sin(v*5.0+p.shape.y+u*7.0-age*5.0)*u*0.12;
-  // Three sampled points curve the foot along the water instead of stretching
-  // a straight billboard edge over an uneven crest.
-  let footHeight = select(p.source.w,p.root.w,v*sideSign>=0.0)*abs(v);
-  let footFollow = (1.0-u)*(1.0-u)*(1.0-detached)*min(1.0,width/p.crest.w);
-  let world = center + side*v*width + vec3f(0.0,curl+footHeight*footFollow,0.0);
-  o.position = F.viewProj * vec4f(world - F.camPos.xyz, 1.0);
-  o.uv = vec2f(u,v);
-  let sky = textureSampleLevel(environment, lightSampler, vec3f(0.0,1.0,0.0), 5.0).rgb;
-  let sunlight = textureSampleLevel(transmittance, lightSampler, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb;
-  let phase = 0.35 + 1.5 * pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
-  let shadow = vesselShadow(center, vec3f(0.0,1.0,0.0));
-  o.light = sky * 0.7 + sunlight * F.sunDir.w * sunVisibility.x * phase * shadow;
-  let fade = smoothstep(0.0,0.08,age)*(1.0-smoothstep(0.45,1.0,age/p.launch.w));
-  o.shape = vec3f((0.24+0.26*p.shape.x)*fade*smoothstep(1.0,4.0,distanceToEye)
-    * (1.0 - smoothstep(55.0, 80.0, distanceToEye)), p.shape.y, age);
+@vertex fn crestVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->CrestVertex {
+  let p=plumes[instance];var o:CrestVertex;
+  o.position=vec4f(2,2,0,1);o.radii=vec3f(1);o.shape=vec3f(0);
+  if(p.launch.w<=0.0){return o;}
+  // Four overlapping parcels fill one continuous, crest-born burst. Their
+  // world-space ellipsoids do not turn into planes when the camera moves.
+  let parcel=f32(vertex/6u);let u=(parcel+.5)/4.0;
+  let corner=array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1))[vertex%6u];
+  let age=p.origin.w;let detached=smoothstep(p.source.z,p.source.z+.6,age);
+  let tail=plumeSheetPosition(p,0.0);let head=plumeSheetPosition(p,1.0);
+  let wind=normalize(p.shape.zw+vec2f(.00001,0));
+  let along=vec3f(wind.x,0,wind.y);let across=vec3f(wind.y,0,-wind.x);
+  let center=plumeSheetPosition(p,u)+p.crest.xyz*(sin(p.shape.y+parcel*2.4)*p.crest.w*.20)
+    +vec3f(0,.035+u*.06,0);
+  let relative=center-F.camPos.xyz;let distanceToEye=length(relative);
+  let metresPerPixel=max(distanceToEye,1.0)*2.0*length(F.camUp.xyz)*F.screen.w;
+  var radii=vec3f(p.crest.w*(.40+.12*u+.15*detached),.10+.16*u+.12*detached,
+    .20+length(head-tail)*.24+.12*detached);
+  radii*=min(1.0,metresPerPixel*65.0/max(max(radii.x,radii.y),radii.z));
+  let right=normalize(F.camRight.xyz);let up=normalize(F.camUp.xyz);let forward=normalize(F.camFwd.xyz);
+  let r=vec3f(dot(right,across),right.y,dot(right,along))*radii;
+  let v=vec3f(dot(up,across),up.y,dot(up,along))*radii;
+  let d=vec3f(dot(forward,across),forward.y,dot(forward,along))*radii;
+  let depth=length(d);let padding=distanceToEye/max(distanceToEye-depth,.1);
+  let ray=relative+right*corner.x*length(r)*padding+up*corner.y*length(v)*padding-forward*depth;
+  o.position=F.viewProj*vec4f(ray,1);o.ray=ray;o.center=relative;o.radii=radii;o.wind=wind;
+  let view=normalize(-relative);
+  let sky=textureSampleLevel(environment,lightSampler,vec3f(0,1,0),5.0).rgb;
+  let sunlight=textureSampleLevel(transmittance,lightSampler,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb;
+  // Normalized scattering replaces the unbounded orange sheet illumination.
+  let phase=phaseMie(dot(-view,F.sunDir.xyz),.5);
+  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*vesselShadow(center,vec3f(0,1,0));
+  let fade=smoothstep(0.0,.08,age)*(1.0-smoothstep(.35,1.0,age/p.launch.w));
+  o.shape=vec3f((.65+.70*p.shape.x)*fade*smoothstep(1.0,4.0,distanceToEye)
+    *(1.0-smoothstep(55.0,80.0,distanceToEye)),p.shape.y+parcel*7.1,age);
   return o;
 }
-@fragment fn crestFS(o: CrestVertex) -> @location(0) vec4f {
-  let uv = o.uv;
-  let flow = vec2f(uv.x*3.0-o.shape.z*1.6,uv.y*3.5)+o.shape.y;
-  let noise = gnoise(flow)*0.65+gnoise(flow*2.7)*0.35;
-  // Dense, irregular water at the foot grades into torn, translucent fingers.
-  // Never fade out the root while it is attached to the crest.
-  let edge = 1.0-smoothstep(0.45+noise*0.2,1.0,abs(uv.y));
-  let tip = 1.0-smoothstep(0.45+noise*0.18,1.0,uv.x);
-  let torn = mix(0.85,smoothstep(-0.35,0.35,noise),smoothstep(0.05,0.8,uv.x));
-  let alpha = o.shape.x*edge*tip*torn;
-  return vec4f(o.light * alpha, alpha);
+struct CrestFragment { @location(0) color:vec4f,@builtin(frag_depth) depth:f32 };
+@fragment fn crestFS(o:CrestVertex)->CrestFragment {
+  if(o.shape.x<=0.0){discard;}
+  let direction=normalize(o.ray);let across=vec3f(o.wind.y,0,-o.wind.x);let along=vec3f(o.wind.x,0,o.wind.y);
+  let origin=vec3f(dot(-o.center,across),-o.center.y,dot(-o.center,along))/o.radii;
+  let ray=vec3f(dot(direction,across),direction.y,dot(direction,along))/o.radii;
+  let integrated=mistOpticalDepth(origin,ray,o.shape.y,o.shape.z);
+  let alpha=(1.0-exp(-integrated.x*o.shape.x))*exp(-dot(F.fogExt.rgb,vec3f(.333333))*integrated.y);
+  if(alpha<.001){discard;}
+  let clip=F.viewProj*vec4f(direction*integrated.y,1);
+  var out:CrestFragment;out.color=vec4f(o.light*alpha,alpha);out.depth=clip.z/clip.w;return out;
 }
 `;

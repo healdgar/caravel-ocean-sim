@@ -40,7 +40,7 @@ export async function createSpindrift({ device, frameUBO, hullUBO, seaView, deri
     },
     draw(pass) {
       if (!enabled) return;
-      pass.setPipeline(renderPipe); pass.setBindGroup(0, renderGroup); pass.setBindGroup(1, shadowGroup); pass.draw(48, SPINDRIFT_COUNT);
+      pass.setPipeline(renderPipe); pass.setBindGroup(0, renderGroup); pass.setBindGroup(1, shadowGroup); pass.draw(24, SPINDRIFT_COUNT);
     },
   };
 }

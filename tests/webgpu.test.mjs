@@ -981,6 +981,51 @@ test('crest spray requires wind and breaking, drifts downwind, excludes the hull
   } finally { await page.close(); }
 });
 
+test('crest spray mist fades at every silhouette edge and retains volume from every axis', { timeout: 120000 }, async () => {
+  const page=await browser.newPage();
+  try {
+    await page.route('**/__mist_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__mist_test`);
+    const result=await page.evaluate(async()=>{
+      const {SPINDRIFT_VOLUME}=await import('/js/wgsl/spindrift.js');
+      const {NOISE_WGSL}=await import('/js/wgsl/common.js');
+      const device=await (await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const code=`${NOISE_WGSL}${SPINDRIFT_VOLUME}
+        @group(0) @binding(0) var<storage,read_write> out:array<vec4f>;
+        @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
+          let offsets=array<f32,5>(0.0,.8,.97,1.0,1.02);
+          let radii=vec3f(.8,.15,1.2);let axis=id.x/5u;let edge=id.x%5u;
+          var direction=vec3f(0);direction[axis]=1.0;
+          var origin=-direction*60.0;
+          origin[(axis+1u)%3u]=offsets[edge]*radii[(axis+1u)%3u];
+          let front=mistOpticalDepth(origin/radii,direction/radii,19.2,.4);
+          let back=mistOpticalDepth((origin+direction*120.0)/radii,-direction/radii,19.2,.4);
+          out[id.x]=vec4f(front,back);
+        }`;
+      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code}),entryPoint:'main'}});
+      const out=device.createBuffer({size:240,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+      const read=device.createBuffer({size:240,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+      const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(pipe);
+      pass.setBindGroup(0,device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:out}}]}));
+      pass.dispatchWorkgroups(15);pass.end();enc.copyBufferToBuffer(out,0,read,0,240);device.queue.submit([enc.finish()]);
+      await read.mapAsync(GPUMapMode.READ);const values=Array.from(new Float32Array(read.getMappedRange()));
+      read.unmap();device.destroy();return {values,errors};
+    });
+    assert.deepEqual(result.errors,[]);assert.ok(result.values.every(Number.isFinite));
+    for(let axis=0;axis<3;axis++){
+      const rays=Array.from({length:5},(_,edge)=>result.values.slice((axis*5+edge)*4,(axis*5+edge+1)*4));
+      assert.ok(rays[0][0]>.02,`mist remains visible along axis ${axis}`);
+      assert.ok(rays[1][0]<rays[0][0] && rays[2][0]<rays[1][0],'opacity falls towards every boundary');
+      assert.ok(rays[2][0]<.002,'near-tangent rays fade before reaching the bounds');
+      assert.equal(rays[3][0],0,'no straight opaque edge at the tangent');
+      assert.equal(rays[4][0],0,'no opacity outside the volume');
+      for(const ray of rays)assert.ok(Math.abs(ray[0]-ray[2])<.0001,'front and back integrate the same mist');
+      assert.ok(rays[0][1]>58 && rays[0][1]<60,'depth belongs to the volume entry, not its billboard');
+    }
+  }finally{await page.close();}
+});
+
 test('crest spray populates from the actual rough FFT ocean without the ship', { timeout: 180000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1, height: 1 } });
   try {
