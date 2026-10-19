@@ -1,4 +1,13 @@
-// Canonical hull section, in metres. Mesh, ocean mask, and spray use this profile.
+// Preserve the mesh's original design coordinates; convert to metres at the
+// hull transform. All consumers (including water and crew) share this scale.
+export const HULL_DESIGN_LENGTH = 12;
+export const HULL_DESIGN_BEAM = 3.6;
+export const DEFAULT_BOAT_LENGTH = 20;
+export const DEFAULT_BOAT_BEAM = 6;
+export const HULL_VERTICAL_SCALE = DEFAULT_BOAT_LENGTH / HULL_DESIGN_LENGTH;
+export function hullScale(length = DEFAULT_BOAT_LENGTH, beam = DEFAULT_BOAT_BEAM) {
+  return [beam / HULL_DESIGN_BEAM, HULL_VERTICAL_SCALE, length / HULL_DESIGN_LENGTH];
+}
 export const HULL_DRAFT = 1.55;
 export const HULL_UNIFORM_BYTES = 144; // transform, rig, sail set/trim/apparent wind
 export const HULL_BOW_RAKE = 0.9;
@@ -9,9 +18,11 @@ export const FORECASTLE_END = -3.9;
 export const FORECASTLE_HEIGHT = 1.75;
 export const QUARTERDECK_START = 2.7;
 export const QUARTERDECK_HEIGHT = 2.3;
-export const WHEEL_CENTER = [0, 3.25, 4.4];
-export const HELM_EYE_Z = 5.4;
-export const HELM_EYE_HEIGHT = 3.9;
+// Wheel and people retain human dimensions; only their deck anchors scale.
+export const WHEEL_CENTER = [0, QUARTERDECK_HEIGHT + .95 / HULL_VERTICAL_SCALE, 4.4];
+export const HELM_STATION_Z = WHEEL_CENTER[2] + .60 / HULL_VERTICAL_SCALE;
+export const HELM_EYE_Z = HELM_STATION_Z + .25 / HULL_VERTICAL_SCALE;
+export const HELM_EYE_HEIGHT = QUARTERDECK_HEIGHT * HULL_VERTICAL_SCALE + 1.6;
 export function hullDeck(z) {
   return z < 0 ? 0.7 + 0.47 * (-z / 6.4) ** 3 : 0.7 + 0.24 * (z / 5.6) ** 2;
 }

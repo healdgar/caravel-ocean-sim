@@ -1,4 +1,5 @@
 import { SHADOW_CAST } from './wgsl/shadows.js';
+import { HULL_VERTICAL_SCALE } from './hull.js';
 
 export function shadowMeshData(mesh,meshIndices=null) {
   const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity],solid=[],canvas=[];
@@ -29,7 +30,7 @@ export function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
   let xmin=Infinity,ymin=Infinity,zmin=Infinity,xmax=-Infinity,ymax=-Infinity,zmax=-Infinity;
   for(let i=0;i<8;i++){
     const x=bounds[(i&1)?3:0]*hull[12]/3.6;
-    const y=bounds[(i&2)?4:1];const z=bounds[(i&4)?5:2]*hull[13]/12;
+    const y=bounds[(i&2)?4:1]*HULL_VERTICAL_SCALE;const z=bounds[(i&4)?5:2]*hull[13]/12;
     const wx=hull[0]*x+hull[4]*y-hull[8]*z,wy=hull[1]*x+hull[5]*y-hull[9]*z,wz=hull[2]*x+hull[6]*y-hull[10]*z;
     const px=rx*wx+rz*wz,py=ux*wx+uy*wy+uz*wz,pz=-sx*wx-sy*wy-sz*wz;
     xmin=Math.min(xmin,px);xmax=Math.max(xmax,px);ymin=Math.min(ymin,py);ymax=Math.max(ymax,py);zmin=Math.min(zmin,pz);zmax=Math.max(zmax,pz);

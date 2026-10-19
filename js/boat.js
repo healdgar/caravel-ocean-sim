@@ -1,9 +1,9 @@
-import { HELM_EYE_Z, HULL_DRAFT, hullHalfWidth } from './hull.js';
+import { HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullHalfWidth, hullScale } from './hull.js';
 import { advanceSails, sailForces } from './sailing.js';
 
 export const KNOT_TO_MPS = 0.514444;
-// Displacement of the canonical mesh below its mean waterline, in cubic metres.
-// Hull dimensions scale horizontally; its draft currently stays at HULL_DRAFT.
+// Displacement in design coordinates. Apply the same three axis scales as the
+// rendered hull; draft, wetted area and inertia below are in physical metres.
 const BOAT_VOLUME = (() => {
   let volume = 0;
   const dz = 12 / 96, dy = HULL_DRAFT / 32;
@@ -14,16 +14,18 @@ const BOAT_VOLUME = (() => {
 })();
 
 export function boatHydrodynamics(length, beam) {
-  const volume = BOAT_VOLUME * length / 12 * beam / 3.6;
+  const [sx,sy,sz] = hullScale(length,beam);
+  const volume = BOAT_VOLUME * sx * sy * sz;
+  const draft = HULL_DRAFT * sy;
   const mass = 1025 * volume;
   // Authored effective coefficients, not a calibrated resistance curve.
-  const wettedArea = 0.85 * length * (beam + 2 * HULL_DRAFT);
+  const wettedArea = 0.85 * length * (beam + 2 * draft);
   // Estimated stability and mass distribution, including 20% added roll inertia.
   const metacentricHeight=beam*.22;
-  const rollInertia=mass*((beam*.38)**2+1.6**2)*1.2;
+  const rollInertia=mass*((beam*.38)**2+(1.6*HULL_VERTICAL_SCALE)**2)*1.2;
   const rollStiffness=mass*9.81*metacentricHeight;
   const rollDamping=2*.35*Math.sqrt(rollInertia*rollStiffness);
-  return { length, beam, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
+  return { length, beam, draft, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
     metacentricHeight,rollInertia,rollStiffness,rollDamping };
 }
 
@@ -106,7 +108,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
     distance += (velocity + next) * 0.5 * h;
     velocity = next;
     // Keel/hull resistance bounds sideways drift instead of converting it into forward drive.
-    const lateralInertia = hydro.mass * 1.8, keelDrag = 0.5 * 1025 * boat.length * HULL_DRAFT * 0.8;
+    const lateralInertia = hydro.mass * 1.8, keelDrag = 0.5 * 1025 * boat.length * hydro.draft * 0.8;
     const lateralFree = sideways + (loads?.side ?? 0) / lateralInertia * h;
     const nextSide = 2 * lateralFree / (1 + Math.sqrt(1 + 4 * keelDrag / lateralInertia * h * Math.abs(lateralFree)));
     sidewaysDistance += (sideways + nextSide) * 0.5 * h; sideways = nextSide;

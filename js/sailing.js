@@ -1,4 +1,4 @@
-import { HULL_DRAFT } from './hull.js';
+import { HULL_DRAFT, HULL_VERTICAL_SCALE } from './hull.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
 // World wind is a velocity toward (cos(direction), sin(direction)) in X/Z.
@@ -75,15 +75,15 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   for(let i=0;i<SAIL_LOADS.length;i++){
     const panel=SAIL_LOADS[i],lateen=panel.mast===2,deployed=s.set[panel.mast];
     // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const height=panel.top-panel.drop*(.025+.975*deployed);
-    const lever=(height+HULL_DRAFT*.5)*upright;
+    const height=(panel.top-panel.drop*(.025+.975*deployed))*HULL_VERTICAL_SCALE;
+    const lever=(height+HULL_DRAFT*HULL_VERTICAL_SCALE*.5)*upright;
     const wind=s.loadWind;wind.tack=s.tack;
     // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
     apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
     const speed=wind.apparentSpeed,angle=Math.abs(wind.apparentAngle),degrees=angle*180/Math.PI;
     const trim=Math.max(0,Math.cos(2*((lateen?s.lateenYaw:s.squareYaw)-(lateen?wind.lateenTarget:wind.squareTarget))));
     const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim;
-    const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6);
+    const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
     const fill=sailSmooth(.5,5,speed)*power;
     s.area+=area;
     if(lateen)s.lateenFill=fill;else{s.squareFill+=fill*area;squareArea+=area;}

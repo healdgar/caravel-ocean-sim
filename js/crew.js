@@ -1,5 +1,5 @@
 import { loadCrewGLB, gltfTRS } from './gltf.js';
-import { hullDeck, vesselDeck } from './hull.js';
+import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_STATION_Z } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 
@@ -17,7 +17,7 @@ export const CREW_ROSTER = [
   {id:'maria',name:'Maria',sex:'female',role:'Lookout',x:.65,z:-4.7,route:[-4.7,-4.7],yaw:Math.PI},
   {id:'afonso',name:'Afonso',sex:'male',role:'Foredeck hand',x:-.65,z:-4.65,route:[-4.65,-4.65],yaw:Math.PI},
   {id:'isabel',name:'Isabel',sex:'female',role:'Mizzen hand',x:-.75,z:3.25,route:[3.25,3.25]},
-  {id:'pedro',name:'Pedro',sex:'male',role:'Helmsman',x:0,z:5.15,route:[5.15,5.15],yaw:Math.PI},
+  {id:'pedro',name:'Pedro',sex:'male',role:'Helmsman',x:0,z:HELM_STATION_Z,route:[HELM_STATION_Z,HELM_STATION_Z],yaw:Math.PI},
 ];
 export const CAPTAIN_ORDERS = [
   {id:'full',label:'Make full sail',detail:'Set all canvas. Speed follows the wind.',sails:[1,1,1]},
@@ -102,7 +102,7 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   }
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   s.walkTime+=dt*.8; // Authored stride cadence, independent of delivered FPS.
-  s.position.set([s.x*boat.beam/3.6,(s.company?vesselDeck(s.z):hullDeck(s.z))+.028,s.z*lengthScale]);
+  s.position.set([s.x*boat.beam/3.6,(s.company?vesselDeck(s.z):hullDeck(s.z))*HULL_VERTICAL_SCALE+.028,s.z*lengthScale]);
   s.rotation.set([0,Math.sin(s.yaw/2),0,Math.cos(s.yaw/2)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
 }
@@ -150,6 +150,9 @@ export async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,en
           if(s.brace>.001)a.blend('Brace',s.time,s.brace);
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,i*32);
           b.actors.set(s.shirt,i*32+16);b.actors.set(s.trousers,i*32+20);b.actors.set(s.skin,i*32+24);b.actors.set(s.hair,i*32+28);
+          // The first-person helm occupies this sailor's station. Keep his shadow
+          // and exterior presence, but do not put his head in front of the camera.
+          b.actors[i*32+19]=Number(boat.enabled===true&&s.role==='Helmsman');
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }

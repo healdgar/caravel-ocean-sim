@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { apparentWind, sailingState, sailForces, advanceSails, SAIL_AREAS, SAIL_PLAN, windAtHeight } from '../js/sailing.js';
 import { stepBoatSurge, stepBoatHeel, stepBoatRoll, boatHydrodynamics, boatSpring, boatForwardSpeed, KNOT_TO_MPS } from '../js/boat.js';
+import { HULL_VERTICAL_SCALE } from '../js/hull.js';
 
-const vessel = extra => ({ propulsion:'sail', speed:6, heading:0, length:12, beam:3.6, sailFore:1, sailMain:1, sailMizzen:1, ...extra });
+const vessel = extra => ({ propulsion:'sail', speed:6, heading:0, length:20, beam:6, sailFore:1, sailMain:1, sailMizzen:1, ...extra });
 const windAt = angle => (angle + 90) * Math.PI / 180;
 function trimmed(boat, wind=7, angle=90, speed=0, side=0) {
   const s=sailForces(boat,wind,windAt(angle),speed,side);
@@ -40,7 +41,7 @@ test('each mast has independent canvas and mis-trim depowers the sails',()=>{
   for(let i=0;i<3;i++){
     const b=vessel({sailFore:0,sailMain:0,sailMizzen:0});b[['sailFore','sailMain','sailMizzen'][i]]=1;
     const loads=trimmed(b);
-    assert.ok(Math.abs(loads.area-SAIL_AREAS[i])<1e-10);assert.ok(loads.forward>0);
+    assert.ok(Math.abs(loads.area-SAIL_AREAS[i]*HULL_VERTICAL_SCALE*(20/12))<1e-10);assert.ok(loads.forward>0);
   }
   const b=vessel(),full=trimmed(b);b.sailState.squareYaw+=Math.PI/2;b.sailState.lateenYaw+=Math.PI/2;
   assert.ok(sailForces(b,7,windAt(90),0).forward<full.forward*.01);
@@ -72,7 +73,7 @@ test('wind angles produce distinct speeds and mirrored tacks give mirrored heel 
 });
 
 test('sailing starts from rest, adds mass-dependent acceleration and conserves motion on mode changes',()=>{
-  const a=vessel({sailMizzen:0}),b=vessel({sailMizzen:0,length:24});
+  const a=vessel({sailMizzen:0}),b=vessel({sailMizzen:0,length:40});
   trimmed(a);trimmed(b);assert.equal(boatForwardSpeed(a),0);
   stepBoatSurge(a,0,.1,7,windAt(90));stepBoatSurge(b,0,.1,7,windAt(90));
   assert.ok(a.surgeVelocity>b.surgeVelocity*1.8);
@@ -132,17 +133,18 @@ test('marine wind shear is referenced to 10 m and upper sails exert more torque 
 });
 
 test('roll inertia delays heel, displacement resists torque and righting moment balances a held wind load',()=>{
-  const a=vessel({hydrodynamics:boatHydrodynamics(12,3.6)}),large=vessel({hydrodynamics:boatHydrodynamics(24,3.6)});
+  const a=vessel({hydrodynamics:boatHydrodynamics(20,6)}),large=vessel({hydrodynamics:boatHydrodynamics(40,6)});
   const moment=a.hydrodynamics.rollStiffness*.15,equilibrium=Math.asin(.15);
   stepBoatHeel(a,moment,1/120);stepBoatHeel(large,moment,1/120);
   assert.ok(a.sailHeel>0 && a.sailHeel<equilibrium*.001);
   assert.ok(Math.abs(a.sailHeel/large.sailHeel-2)<1e-10,'equal torque accelerates double inertia half as much');
-  for(let i=0;i<2400;i++)stepBoatHeel(a,moment,1/120);
+  // The larger vessel has a longer roll period; allow 40 s to settle.
+  for(let i=0;i<4800;i++)stepBoatHeel(a,moment,1/120);
   assert.ok(Math.abs(a.sailHeel-equilibrium)<.0001);assert.ok(Math.abs(a.sailHeelVelocity)<.0001);
   const angle=a.sailHeel;stepBoatHeel(a,0,1/120);
   assert.ok(Math.abs(a.sailHeel-angle)<.001,'removing torque preserves angular motion');
   const energy=b=>.5*b.hydrodynamics.rollInertia*b.sailHeelVelocity**2+b.hydrodynamics.rollStiffness*(1-Math.cos(b.sailHeel));
-  const start=energy(a);for(let i=0;i<2400;i++)stepBoatHeel(a,0,1/120);
+  const start=energy(a);for(let i=0;i<4800;i++)stepBoatHeel(a,0,1/120);
   assert.ok(energy(a)<start*1e-6,'damping dissipates roll energy after the wind load is removed');
 });
 

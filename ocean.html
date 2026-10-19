@@ -174,7 +174,16 @@ SOFTWARE.
 <div id="err"></div>
 <script type="module">
 // ---- js/hull.js ----
-// Canonical hull section, in metres. Mesh, ocean mask, and spray use this profile.
+// Preserve the mesh's original design coordinates; convert to metres at the
+// hull transform. All consumers (including water and crew) share this scale.
+const HULL_DESIGN_LENGTH = 12;
+const HULL_DESIGN_BEAM = 3.6;
+const DEFAULT_BOAT_LENGTH = 20;
+const DEFAULT_BOAT_BEAM = 6;
+const HULL_VERTICAL_SCALE = DEFAULT_BOAT_LENGTH / HULL_DESIGN_LENGTH;
+function hullScale(length = DEFAULT_BOAT_LENGTH, beam = DEFAULT_BOAT_BEAM) {
+  return [beam / HULL_DESIGN_BEAM, HULL_VERTICAL_SCALE, length / HULL_DESIGN_LENGTH];
+}
 const HULL_DRAFT = 1.55;
 const HULL_UNIFORM_BYTES = 144; // transform, rig, sail set/trim/apparent wind
 const HULL_BOW_RAKE = 0.9;
@@ -185,9 +194,11 @@ const FORECASTLE_END = -3.9;
 const FORECASTLE_HEIGHT = 1.75;
 const QUARTERDECK_START = 2.7;
 const QUARTERDECK_HEIGHT = 2.3;
-const WHEEL_CENTER = [0, 3.25, 4.4];
-const HELM_EYE_Z = 5.4;
-const HELM_EYE_HEIGHT = 3.9;
+// Wheel and people retain human dimensions; only their deck anchors scale.
+const WHEEL_CENTER = [0, QUARTERDECK_HEIGHT + .95 / HULL_VERTICAL_SCALE, 4.4];
+const HELM_STATION_Z = WHEEL_CENTER[2] + .60 / HULL_VERTICAL_SCALE;
+const HELM_EYE_Z = HELM_STATION_Z + .25 / HULL_VERTICAL_SCALE;
+const HELM_EYE_HEIGHT = QUARTERDECK_HEIGHT * HULL_VERTICAL_SCALE + 1.6;
 function hullDeck(z) {
   return z < 0 ? 0.7 + 0.47 * (-z / 6.4) ** 3 : 0.7 + 0.24 * (z / 5.6) ** 2;
 }
@@ -284,15 +295,15 @@ function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
   for(let i=0;i<SAIL_LOADS.length;i++){
     const panel=SAIL_LOADS[i],lateen=panel.mast===2,deployed=s.set[panel.mast];
     // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const height=panel.top-panel.drop*(.025+.975*deployed);
-    const lever=(height+HULL_DRAFT*.5)*upright;
+    const height=(panel.top-panel.drop*(.025+.975*deployed))*HULL_VERTICAL_SCALE;
+    const lever=(height+HULL_DRAFT*HULL_VERTICAL_SCALE*.5)*upright;
     const wind=s.loadWind;wind.tack=s.tack;
     // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
     apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
     const speed=wind.apparentSpeed,angle=Math.abs(wind.apparentAngle),degrees=angle*180/Math.PI;
     const trim=Math.max(0,Math.cos(2*((lateen?s.lateenYaw:s.squareYaw)-(lateen?wind.lateenTarget:wind.squareTarget))));
     const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim;
-    const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6);
+    const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
     const fill=sailSmooth(.5,5,speed)*power;
     s.area+=area;
     if(lateen)s.lateenFill=fill;else{s.squareFill+=fill*area;squareArea+=area;}
@@ -502,6 +513,7 @@ fn foamCoverage(previous: f32, breaking: f32, amount: f32, decay: f32, dt: f32) 
 // ---- js/wgsl/hull.js ----
 
 const HULL_PROFILE = /* wgsl */ `
+const HULL_Y_SCALE:f32 = ${HULL_VERTICAL_SCALE};
 fn hullDeck(z: f32) -> f32 {
   return select(0.7+0.24*(z/5.6)*(z/5.6),0.7+0.47*pow(max(0.0,-z/6.4),3.0),z<0.0);
 }
@@ -585,7 +597,7 @@ fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
 }
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
 fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
-  var scale=vec3f(hull.size.x/3.6,1.0,hull.size.y/12.0);
+  var scale=vec3f(hull.size.x/3.6,${HULL_VERTICAL_SCALE},hull.size.y/12.0);
   var local=position;var localN=normal;
   if(material==7.0 || material==8.0){
     let pivot=vec3f(${WHEEL_CENTER.join(',')});
@@ -840,9 +852,9 @@ fn pressureSea(p: vec2f) -> f32 {
   var width = halfWidth * 0.9;
   for (var j = 0; j < 5; j++) {
     level = interactionSea(p.xz);
-    localY = (level - spine.y - H.right.y * side * width) / max(0.35, H.up.y);
+    localY = (level - spine.y - H.right.y * side * width) / (max(0.35, H.up.y)*HULL_Y_SCALE);
     width = hullHalfWidth(z, localY) * H.size.x / 3.6;
-    p = spine + H.right.xyz * side * width + H.up.xyz * localY;
+    p = spine + H.right.xyz * side * width + H.up.xyz * localY*HULL_Y_SCALE;
   }
   p.y = level;
   let signedWater = pressureSea(p.xz) - rest.y;
@@ -1145,7 +1157,7 @@ fn sampleDeck(uv:vec2f)->vec4f {
 `;
 const DECK_TRANSFORM = /* wgsl */ `
 fn deckWorld(p:vec3f)->vec3f {
-  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y-H.forward.xyz*p.z*(H.size.y/12.0);
+  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y*HULL_Y_SCALE-H.forward.xyz*p.z*(H.size.y/12.0);
 }
 `;
 
@@ -1170,7 +1182,7 @@ fn cellArea(p:vec3f)->f32 {
 fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
   if(any(b<vec2i(0)) || any(b>=DECK_SIZE)){return 0.0;}
   let pa=cellPoint(a);let pb=cellPoint(b);
-  if(abs(pa.y-pb.y)>0.8){return 0.0;} // solid cabin face
+  if(abs(pa.y-pb.y)*HULL_Y_SCALE>0.8){return 0.0;} // solid cabin face
   let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
   let dh=deckWorld(pa).y+wa*H.up.y-deckWorld(pb).y-wb*H.up.y;
   let donor=select(wb,wa,dh>0.0);
@@ -1199,7 +1211,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
     ingress=min(4.0,1.3*pow(over,1.5));
     // Scuppers between rail posts; quarterdeck railing is open underneath.
     let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=${QUARTERDECK_START});
-    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)),1.5)),0.0,over>0.0);
+    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*HULL_Y_SCALE),1.5)),0.0,over>0.0);
     depth+=(ingress-drain)*face*dt/area;
   }
   // Bound violent immersion; do not accumulate an unbounded reservoir inside the hull.
@@ -1233,7 +1245,7 @@ fn corner(v:u32)->vec2f {
   let water=sampleDeck(uv);
   var p=deckPoint(uv);
   let ripple=gnoise(p.xz*7.0+vec2f(-F.camPos.w*1.3,F.camPos.w*0.7))*min(water.x*0.08,0.008);
-  p.y+=0.008+water.x+ripple;
+  p.y+=(0.008+water.x+ripple)/HULL_Y_SCALE;
   var o:DeckVertex;o.world=deckWorld(p);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
   o.uv=uv;o.local=p;o.curtain=vec2f(0.0);return o;
 }
@@ -1245,10 +1257,10 @@ fn corner(v:u32)->vec2f {
   let uv=vec2f(select(0.0,1.0,side>0.0),(f32(row)+c.x)/${DECK_ROWS}.0);
   let water=sampleDeck(uv);
   var p=deckPoint(uv);let incoming=water.w<0.0;
-  let flow=abs(water.w);let duration=min(0.65,sqrt(2.0*max(0.1,p.y+1.2)/9.81));let t=fall*duration;
+  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*HULL_Y_SCALE+1.2)/9.81));let t=fall*duration;
   p.x+=side*(0.16+0.55*t);
-  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z));
-  p.y+=select(0.03+outlet,deckRail(p.z)+0.12,incoming);
+  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*HULL_Y_SCALE);
+  p.y+=select((0.03+outlet)/HULL_Y_SCALE,deckRail(p.z)+0.12/HULL_Y_SCALE,incoming);
   if(incoming){p.x=side*(deckWidth(p.z)+0.09-(0.5+min(flow,2.0))*t);}
   p.z+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*0.012*fall;
   var o:DeckVertex;o.world=deckWorld(p)-vec3f(0.0,4.905*t*t,0.0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
@@ -1264,7 +1276,7 @@ fn corner(v:u32)->vec2f {
   let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
   let xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
   let dz=texel.y*11.9;
-  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x+deckFloor(in.local.z+dz)-sampleDeck(in.uv-vec2f(0,texel.y)).x-deckFloor(in.local.z-dz))/(2.0*dz);
+  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*HULL_Y_SCALE)/(2.0*dz);
   let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));
   var n=normalize(H.up.xyz-H.right.xyz*gradient.x/(H.size.x/3.6)+H.forward.xyz*gradient.y/(H.size.y/12.0));
   n=normalize(n+H.right.xyz*ripple.x+H.forward.xyz*ripple.y);
@@ -1282,7 +1294,7 @@ fn corner(v:u32)->vec2f {
   var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
   if(curtain){alpha=smoothstep(0.002,0.04,in.curtain.y)*(0.3+0.3*pattern)*(1.0-smoothstep(0.7,1.0,in.curtain.x));}
   // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(abs(in.local.y-w.x-0.008-deckFloor(in.local.z))>0.10 && !curtain){discard;}
+  if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
   return vec4f(color*alpha,alpha);
 }
@@ -1380,7 +1392,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   if (hull.rig.z > 0.5) {
     let delta = origin - hull.origin.xyz;
     let local = vec3f(dot(delta, hull.right.xyz) * 3.6 / hull.size.x,
-      dot(delta, hull.up.xyz), -dot(delta, hull.forward.xyz) * 12.0 / hull.size.y);
+      dot(delta, hull.up.xyz)/HULL_Y_SCALE, -dot(delta, hull.forward.xyz) * 12.0 / hull.size.y);
     if (hullExcludesOcean(local)) { return; }
   }
   // The compressed principal direction gives the local crest's tangent.
@@ -2776,7 +2788,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 const OCEAN_HULL_MASK = /* wgsl */ `
   if(F.post.w <= 0.5 && H.rig.z > 0.5) {
     let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/HULL_Y_SCALE,-dot(relative,H.forward.xyz)/(H.size.y/12.0));
     if(hullExcludesOcean(q)) { discard; return vec4f(0); }
   }
 `;
@@ -3481,6 +3493,7 @@ struct CrewVertex {
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;
   let actor=actors[v.instance];
+  if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
   if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=actor.shirt.rgb;}
   if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=actor.trousers.rgb;}
   if(distance(v.color,vec3f(.36,.18,.10))<.001){out.color=actor.skin.rgb;}
@@ -3510,8 +3523,8 @@ const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 
 
 const KNOT_TO_MPS = 0.514444;
-// Displacement of the canonical mesh below its mean waterline, in cubic metres.
-// Hull dimensions scale horizontally; its draft currently stays at HULL_DRAFT.
+// Displacement in design coordinates. Apply the same three axis scales as the
+// rendered hull; draft, wetted area and inertia below are in physical metres.
 const BOAT_VOLUME = (() => {
   let volume = 0;
   const dz = 12 / 96, dy = HULL_DRAFT / 32;
@@ -3522,16 +3535,18 @@ const BOAT_VOLUME = (() => {
 })();
 
 function boatHydrodynamics(length, beam) {
-  const volume = BOAT_VOLUME * length / 12 * beam / 3.6;
+  const [sx,sy,sz] = hullScale(length,beam);
+  const volume = BOAT_VOLUME * sx * sy * sz;
+  const draft = HULL_DRAFT * sy;
   const mass = 1025 * volume;
   // Authored effective coefficients, not a calibrated resistance curve.
-  const wettedArea = 0.85 * length * (beam + 2 * HULL_DRAFT);
+  const wettedArea = 0.85 * length * (beam + 2 * draft);
   // Estimated stability and mass distribution, including 20% added roll inertia.
   const metacentricHeight=beam*.22;
-  const rollInertia=mass*((beam*.38)**2+1.6**2)*1.2;
+  const rollInertia=mass*((beam*.38)**2+(1.6*HULL_VERTICAL_SCALE)**2)*1.2;
   const rollStiffness=mass*9.81*metacentricHeight;
   const rollDamping=2*.35*Math.sqrt(rollInertia*rollStiffness);
-  return { length, beam, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
+  return { length, beam, draft, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
     metacentricHeight,rollInertia,rollStiffness,rollDamping };
 }
 
@@ -3614,7 +3629,7 @@ function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0) {
     distance += (velocity + next) * 0.5 * h;
     velocity = next;
     // Keel/hull resistance bounds sideways drift instead of converting it into forward drive.
-    const lateralInertia = hydro.mass * 1.8, keelDrag = 0.5 * 1025 * boat.length * HULL_DRAFT * 0.8;
+    const lateralInertia = hydro.mass * 1.8, keelDrag = 0.5 * 1025 * boat.length * hydro.draft * 0.8;
     const lateralFree = sideways + (loads?.side ?? 0) / lateralInertia * h;
     const nextSide = 2 * lateralFree / (1 + Math.sqrt(1 + 4 * keelDrag / lateralInertia * h * Math.abs(lateralFree)));
     sidewaysDistance += (sideways + nextSide) * 0.5 * h; sideways = nextSide;
@@ -3693,7 +3708,8 @@ function indexCaravelMesh(mesh) {
   return {vertices:new Float32Array(compact.slice(0,count*9).buffer),indices};
 }
 
-// Timber geometry in metres, authored for a 12 x 3.6 m hull.
+// Timber in the original 12 x 3.6 design frame; the shared hull transform makes
+// the default vessel 20 x 6 m, with matching height, draft and sail dimensions.
 function createCaravelMesh() {
   const out=[];
   const add=(a,b)=>a.map((v,i)=>v+b[i]);
@@ -3806,9 +3822,10 @@ function createCaravelMesh() {
   quad([-fw,deck(FORECASTLE_END),FORECASTLE_END],[fw,deck(FORECASTLE_END),FORECASTLE_END],
     [fw,FORECASTLE_HEIGHT,FORECASTLE_END],[-fw,FORECASTLE_HEIGHT,FORECASTLE_END],1);
   beam([-fw,FORECASTLE_HEIGHT,FORECASTLE_END],[fw,FORECASTLE_HEIGHT,FORECASTLE_END],.12,.1,16);
-  for(let i=0;i<5;i++){
-    const y=deck(-3)+(FORECASTLE_HEIGHT-deck(-3))*(i+1)/5,z=-3.04-i*.19;
-    beam([-1.18,y,z],[-.63,y,z],.21,.055,6);
+  const foreSteps=Math.ceil((FORECASTLE_HEIGHT-deck(-3))*HULL_VERTICAL_SCALE/.23);
+  for(let i=0;i<foreSteps;i++){
+    const y=deck(-3)+(FORECASTLE_HEIGHT-deck(-3))*(i+1)/foreSteps-.02,z=-3.04-i*.8/(foreSteps-1);
+    beam([-1.18,y,z],[-.63,y,z],.8/foreSteps+.025,.04,6);
   }
   for(const x of [-1.23,-.58]){
     beam([x,deck(-3.04),-3.04],[x,FORECASTLE_HEIGHT,-3.84],.075,.09,1);
@@ -3960,9 +3977,10 @@ function createCaravelMesh() {
   for(const y of [roof+.23,roof+.49])beam([-cabinWidth(zBack)-.06,y,zBack],[cabinWidth(zBack)+.06,y,zBack],.09,.07,17);
   for(const x of [-.65,0,.65])beam([x,roof,zBack],[x,roof+.49,zBack],.06,.07,17);
   // Companionway steps clear the mizzen and mainmast shrouds.
-  for(let i=0;i<7;i++){
-    const y=.83+(roof-.83)*(i+1)/7,z=1.5+i*.19;
-    beam([.7,y,z],[1.22,y,z],.21,.05,6);
+  const aftStepFloor=deck(1.5),aftSteps=Math.ceil((roof-aftStepFloor)*HULL_VERTICAL_SCALE/.23);
+  for(let i=0;i<aftSteps;i++){
+    const y=aftStepFloor+(roof-aftStepFloor)*(i+1)/aftSteps-.02,z=1.5+i*1.14/(aftSteps-1);
+    beam([.7,y,z],[1.22,y,z],1.14/aftSteps+.025,.04,6);
   }
   // Two iron anchors hang from short catheads, clear of the bow's water contacts.
   for(const side of [-1,1]){
@@ -4015,8 +4033,9 @@ function createCaravelMesh() {
         beam(add(foot,[side*.025,-.4,0]),add(foot,[side*.025,.02,0]),.045,.035,3);
         tube(add(foot,[-side*.025,0,0]),add(foot,[side*.025,0,0]),.065,16,.065,12);
       }
-      for(let j=1;j<20;j++){
-        const t=j/21,ends=feet.map(foot=>add(mul(foot,1-t),mul(head,t)));
+      const rungs=Math.ceil((head[1]-Math.min(...feet.map(p=>p[1])))*HULL_VERTICAL_SCALE/.35);
+      for(let j=1;j<rungs;j++){
+        const t=j/rungs,ends=feet.map(foot=>add(mul(foot,1-t),mul(head,t)));
         tube(ends[0],ends[1],.009,12,.009,6);
       }
     }
@@ -4039,10 +4058,10 @@ function createCaravelMesh() {
   // Foremast working top; the mainmast carries the larger lookout basket.
   for(const [z,y] of [[-4.15,6.97]]){
     tube([0,y,z],[0,y+.07,z],.38,1,.38,24);
-    torus([0,y+.27,z],.37,.023,17,'y',32);
+    torus([0,y+.54,z],.37,.023,17,'y',32);
     for(let i=0;i<8;i++){
       const a=i*Math.PI/4,x=.37*Math.cos(a),dz=.37*Math.sin(a);
-      tube([x,y,z+dz],[x,y+.27,z+dz],.018,17,.018,8);
+      tube([x,y,z+dz],[x,y+.54,z+dz],.018,17,.018,8);
     }
   }
   const nestZ=.85,nestFloor=8.38;
@@ -4270,7 +4289,7 @@ const CREW_ROSTER = [
   {id:'maria',name:'Maria',sex:'female',role:'Lookout',x:.65,z:-4.7,route:[-4.7,-4.7],yaw:Math.PI},
   {id:'afonso',name:'Afonso',sex:'male',role:'Foredeck hand',x:-.65,z:-4.65,route:[-4.65,-4.65],yaw:Math.PI},
   {id:'isabel',name:'Isabel',sex:'female',role:'Mizzen hand',x:-.75,z:3.25,route:[3.25,3.25]},
-  {id:'pedro',name:'Pedro',sex:'male',role:'Helmsman',x:0,z:5.15,route:[5.15,5.15],yaw:Math.PI},
+  {id:'pedro',name:'Pedro',sex:'male',role:'Helmsman',x:0,z:HELM_STATION_Z,route:[HELM_STATION_Z,HELM_STATION_Z],yaw:Math.PI},
 ];
 const CAPTAIN_ORDERS = [
   {id:'full',label:'Make full sail',detail:'Set all canvas. Speed follows the wind.',sails:[1,1,1]},
@@ -4355,7 +4374,7 @@ function stepDeckhand(s,boat,dt,wind=0) {
   }
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   s.walkTime+=dt*.8; // Authored stride cadence, independent of delivered FPS.
-  s.position.set([s.x*boat.beam/3.6,(s.company?vesselDeck(s.z):hullDeck(s.z))+.028,s.z*lengthScale]);
+  s.position.set([s.x*boat.beam/3.6,(s.company?vesselDeck(s.z):hullDeck(s.z))*HULL_VERTICAL_SCALE+.028,s.z*lengthScale]);
   s.rotation.set([0,Math.sin(s.yaw/2),0,Math.cos(s.yaw/2)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
 }
@@ -4403,6 +4422,9 @@ async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,envCubeVi
           if(s.brace>.001)a.blend('Brace',s.time,s.brace);
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,i*32);
           b.actors.set(s.shirt,i*32+16);b.actors.set(s.trousers,i*32+20);b.actors.set(s.skin,i*32+24);b.actors.set(s.hair,i*32+28);
+          // The first-person helm occupies this sailor's station. Keep his shadow
+          // and exterior presence, but do not put his head in front of the camera.
+          b.actors[i*32+19]=Number(boat.enabled===true&&s.role==='Helmsman');
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }
@@ -4458,6 +4480,7 @@ function createShareLink(href, settings, boat, cameraMode) {
 
 // ---- js/shadows.js ----
 
+
 function shadowMeshData(mesh,meshIndices=null) {
   const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity],solid=[],canvas=[];
   let sailingRig=false;
@@ -4487,7 +4510,7 @@ function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
   let xmin=Infinity,ymin=Infinity,zmin=Infinity,xmax=-Infinity,ymax=-Infinity,zmax=-Infinity;
   for(let i=0;i<8;i++){
     const x=bounds[(i&1)?3:0]*hull[12]/3.6;
-    const y=bounds[(i&2)?4:1];const z=bounds[(i&4)?5:2]*hull[13]/12;
+    const y=bounds[(i&2)?4:1]*HULL_VERTICAL_SCALE;const z=bounds[(i&4)?5:2]*hull[13]/12;
     const wx=hull[0]*x+hull[4]*y-hull[8]*z,wy=hull[1]*x+hull[5]*y-hull[9]*z,wz=hull[2]*x+hull[6]*y-hull[10]*z;
     const px=rx*wx+rz*wz,py=ux*wx+uy*wy+uz*wz,pz=-sx*wx-sy*wy-sz*wz;
     xmin=Math.min(xmin,px);xmax=Math.max(xmax,px);ymin=Math.min(ymin,py);ymax=Math.max(ymax,py);zmin=Math.min(zmin,pz);zmax=Math.max(zmax,pz);
@@ -5381,7 +5404,7 @@ async function main() {
   const boatUniform = new Float32Array(8);
   const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler, fullArr(derivTex)], 'probe'));
   let probePending = false, waterH = 0;
-  let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
+  let probeLength = DEFAULT_BOAT_LENGTH, probeBeam = DEFAULT_BOAT_BEAM, probeRevision = 0;
   let probeTime=0, targetTime=-1, targetRevision=-1;
   const boatAxes=['heave','pitch','roll'];
   const targetRate={heave:0,pitch:0,roll:0};
@@ -5584,8 +5607,8 @@ async function main() {
   let cameraMode = cameraModeFromLink(qs);
   const propulsion = propulsionFromLink(qs);
   const boat = {
-    effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
-    beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
+    beam: param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
@@ -5593,7 +5616,7 @@ async function main() {
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
-    elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',25,10,120) };
+    elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',32,10,120) };
   const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
   const keys = Object.create(null);
@@ -5617,7 +5640,8 @@ async function main() {
     // Wheel size stays fixed; its anchor and the eye follow hull length/beam.
     const px=WHEEL_CENTER[0]*boat.beam/3.6+x-WHEEL_CENTER[0];
     const pz=(WHEEL_CENTER[2]-HELM_EYE_Z)*boat.length/12+z-WHEEL_CENTER[2];
-    boatRotate(helmPoint,px,y-boat.eye,pz,boat.heading*D2R,boat.pitch,boat.roll);
+    const py=WHEEL_CENTER[1]*HULL_VERTICAL_SCALE+y-WHEEL_CENTER[1]-boat.eye;
+    boatRotate(helmPoint,px,py,pz,boat.heading*D2R,boat.pitch,boat.roll);
     const m=viewProj,w=m[3]*helmPoint[0]+m[7]*helmPoint[1]+m[11]*helmPoint[2]+m[15];
     return {x:(0.5+0.5*(m[0]*helmPoint[0]+m[4]*helmPoint[1]+m[8]*helmPoint[2])/w)*canvas.clientWidth,
       y:(0.5-0.5*(m[1]*helmPoint[0]+m[5]*helmPoint[1]+m[9]*helmPoint[2])/w)*canvas.clientHeight,w};
@@ -5699,11 +5723,11 @@ async function main() {
       return;
     }
     if (cameraMode === 'ship') {
-      const radius=shipOrbit.distance * Math.max(0.7,Math.sqrt(boat.length/12));
+      const radius=shipOrbit.distance * Math.max(0.7,Math.sqrt(boat.length/DEFAULT_BOAT_LENGTH));
       const horizontal=radius*Math.cos(shipOrbit.elevation);
       cam.x=boat.x+Math.sin(shipOrbit.yaw)*horizontal;
       cam.z=boat.z+Math.cos(shipOrbit.yaw)*horizontal;
-      cam.y=4+radius*Math.sin(shipOrbit.elevation);
+      cam.y=4*HULL_VERTICAL_SCALE+radius*Math.sin(shipOrbit.elevation);
       cam.yaw=Math.atan2(boat.x-cam.x,cam.z-boat.z);
       cam.pitch=-shipOrbit.elevation;
       return;

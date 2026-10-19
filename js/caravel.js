@@ -1,5 +1,5 @@
 import { hullDeck, hullHalfWidth, hullSurfacePoint, vesselDeck, WHEEL_CENTER,
-  FORECASTLE_END, FORECASTLE_HEIGHT, QUARTERDECK_START, QUARTERDECK_HEIGHT } from './hull.js';
+  FORECASTLE_END, FORECASTLE_HEIGHT, QUARTERDECK_START, QUARTERDECK_HEIGHT, HULL_VERTICAL_SCALE } from './hull.js';
 import { SAIL_PLAN, LATEEN_CORNERS } from './sailing.js';
 
 // Deduplicate complete vertex records by their float32 bits. Material, normal,
@@ -17,7 +17,8 @@ export function indexCaravelMesh(mesh) {
   return {vertices:new Float32Array(compact.slice(0,count*9).buffer),indices};
 }
 
-// Timber geometry in metres, authored for a 12 x 3.6 m hull.
+// Timber in the original 12 x 3.6 design frame; the shared hull transform makes
+// the default vessel 20 x 6 m, with matching height, draft and sail dimensions.
 export function createCaravelMesh() {
   const out=[];
   const add=(a,b)=>a.map((v,i)=>v+b[i]);
@@ -130,9 +131,10 @@ export function createCaravelMesh() {
   quad([-fw,deck(FORECASTLE_END),FORECASTLE_END],[fw,deck(FORECASTLE_END),FORECASTLE_END],
     [fw,FORECASTLE_HEIGHT,FORECASTLE_END],[-fw,FORECASTLE_HEIGHT,FORECASTLE_END],1);
   beam([-fw,FORECASTLE_HEIGHT,FORECASTLE_END],[fw,FORECASTLE_HEIGHT,FORECASTLE_END],.12,.1,16);
-  for(let i=0;i<5;i++){
-    const y=deck(-3)+(FORECASTLE_HEIGHT-deck(-3))*(i+1)/5,z=-3.04-i*.19;
-    beam([-1.18,y,z],[-.63,y,z],.21,.055,6);
+  const foreSteps=Math.ceil((FORECASTLE_HEIGHT-deck(-3))*HULL_VERTICAL_SCALE/.23);
+  for(let i=0;i<foreSteps;i++){
+    const y=deck(-3)+(FORECASTLE_HEIGHT-deck(-3))*(i+1)/foreSteps-.02,z=-3.04-i*.8/(foreSteps-1);
+    beam([-1.18,y,z],[-.63,y,z],.8/foreSteps+.025,.04,6);
   }
   for(const x of [-1.23,-.58]){
     beam([x,deck(-3.04),-3.04],[x,FORECASTLE_HEIGHT,-3.84],.075,.09,1);
@@ -284,9 +286,10 @@ export function createCaravelMesh() {
   for(const y of [roof+.23,roof+.49])beam([-cabinWidth(zBack)-.06,y,zBack],[cabinWidth(zBack)+.06,y,zBack],.09,.07,17);
   for(const x of [-.65,0,.65])beam([x,roof,zBack],[x,roof+.49,zBack],.06,.07,17);
   // Companionway steps clear the mizzen and mainmast shrouds.
-  for(let i=0;i<7;i++){
-    const y=.83+(roof-.83)*(i+1)/7,z=1.5+i*.19;
-    beam([.7,y,z],[1.22,y,z],.21,.05,6);
+  const aftStepFloor=deck(1.5),aftSteps=Math.ceil((roof-aftStepFloor)*HULL_VERTICAL_SCALE/.23);
+  for(let i=0;i<aftSteps;i++){
+    const y=aftStepFloor+(roof-aftStepFloor)*(i+1)/aftSteps-.02,z=1.5+i*1.14/(aftSteps-1);
+    beam([.7,y,z],[1.22,y,z],1.14/aftSteps+.025,.04,6);
   }
   // Two iron anchors hang from short catheads, clear of the bow's water contacts.
   for(const side of [-1,1]){
@@ -339,8 +342,9 @@ export function createCaravelMesh() {
         beam(add(foot,[side*.025,-.4,0]),add(foot,[side*.025,.02,0]),.045,.035,3);
         tube(add(foot,[-side*.025,0,0]),add(foot,[side*.025,0,0]),.065,16,.065,12);
       }
-      for(let j=1;j<20;j++){
-        const t=j/21,ends=feet.map(foot=>add(mul(foot,1-t),mul(head,t)));
+      const rungs=Math.ceil((head[1]-Math.min(...feet.map(p=>p[1])))*HULL_VERTICAL_SCALE/.35);
+      for(let j=1;j<rungs;j++){
+        const t=j/rungs,ends=feet.map(foot=>add(mul(foot,1-t),mul(head,t)));
         tube(ends[0],ends[1],.009,12,.009,6);
       }
     }
@@ -363,10 +367,10 @@ export function createCaravelMesh() {
   // Foremast working top; the mainmast carries the larger lookout basket.
   for(const [z,y] of [[-4.15,6.97]]){
     tube([0,y,z],[0,y+.07,z],.38,1,.38,24);
-    torus([0,y+.27,z],.37,.023,17,'y',32);
+    torus([0,y+.54,z],.37,.023,17,'y',32);
     for(let i=0;i<8;i++){
       const a=i*Math.PI/4,x=.37*Math.cos(a),dz=.37*Math.sin(a);
-      tube([x,y,z+dz],[x,y+.27,z+dz],.018,17,.018,8);
+      tube([x,y,z+dz],[x,y+.54,z+dz],.018,17,.018,8);
     }
   }
   const nestZ=.85,nestFloor=8.38;

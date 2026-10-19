@@ -585,7 +585,8 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       const landedLive = (await read(fx.drops, 48))[3];
       // Roll, pitch, and heading must move the emitter with the hull/water intersection.
       const { boatRotate } = await import('/js/boat.js');
-      const { hullHalfWidth } = await import('/js/hull.js');
+      const { hullHalfWidth, HULL_VERTICAL_SCALE } = await import('/js/hull.js');
+      boat.length=h[13]=20;boat.beam=h[12]=6;
       boatRotate(h.subarray(0, 3), 1, 0, 0, 0.7, 0.08, 0.25);
       boatRotate(h.subarray(4, 7), 0, 1, 0, 0.7, 0.08, 0.25);
       boatRotate(h.subarray(8, 11), 0, 0, -1, 0.7, 0.08, 0.25);
@@ -595,8 +596,8 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       for (let i = 0; i < 32; i++) {
         const p = tilted.subarray(i * 16, i * 16 + 3);
         const dot = offset => p.reduce((sum, v, j) => sum + v * h[offset + j], 0);
-        const x = dot(0), y = dot(4), z = -dot(8);
-        const expectedWidth = hullHalfWidth(z,y);
+        const x = dot(0), y = dot(4)/HULL_VERTICAL_SCALE, z = -dot(8)*12/boat.length;
+        const expectedWidth = hullHalfWidth(z,y)*boat.beam/3.6;
         contactError = Math.max(contactError, Math.abs(Math.abs(x) - expectedWidth), Math.abs(p[1] - 0.125));
       }
       // A stern lifted clear of the sea must not inherit wetness from the bow.
@@ -764,7 +765,7 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
         return{water,wet,drain,center,moment,roof,forecastle,max,finite};
       }
       await advance(1,1/60,true);seaHeight(0x3c00);await advance(60);const belowRail=await read();
-      seaHeight(0x4000);await advance(120);const flooded=await read(); // two-metre crest
+      seaHeight(0x4200);await advance(120);const flooded=await read(); // three-metre crest
       seaHeight(0);await advance(1);const retained=await read();
       boatRotate(h.subarray(0,3),1,0,0,0,0,0.22);boatRotate(h.subarray(4,7),0,1,0,0,0,0.22);boatRotate(h.subarray(8,11),0,0,-1,0,0,0.22);
       await advance(90);const tilted=await read();
@@ -780,7 +781,7 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
     assert.equal(result.belowRail.water,0,'water below the bulwark must not seep through the hull');
     assert.ok(result.flooded.water>0.1 && result.flooded.center>0.01,'overtopping must travel into the deck');
     assert.equal(result.flooded.roof,0,'a lower crest must not flood the raised quarterdeck');
-    assert.equal(result.flooded.forecastle,0,'a two-metre crest stays below the forecastle bulwarks');
+    assert.equal(result.flooded.forecastle,0,'a three-metre crest stays below the forecastle bulwarks');
     assert.ok(result.retained.water>result.flooded.water*0.8,'the deck must retain wash after the sea recedes');
     assert.ok(result.tilted.drain>0,'scupper outflow drives runoff strips');
     assert.ok(result.tilted.moment<0,'wash moves toward the low port rail');
@@ -881,7 +882,8 @@ test('crest spray requires wind and breaking, drifts downwind, excludes the hull
       // An enlarged hull makes exclusion meaningful over much of the emission domain.
       h[12] = 72; h[13] = 120;
       const protectedPlumes = await run(28, true, true);
-      const hullViolations = protectedPlumes.filter(p => Math.abs(p[0] * 3.6 / h[12]) < hullHalfWidth(p[2] * 12 / h[13], p[1])).length;
+      const {HULL_VERTICAL_SCALE}=await import('/js/hull.js');
+      const hullViolations = protectedPlumes.filter(p => Math.abs(p[0] * 3.6 / h[12]) < hullHalfWidth(p[2] * 12 / h[13], p[1]/HULL_VERTICAL_SCALE)).length;
       dispatch(1 / 30, 0, 0, 61); const disabled = (await snapshot()).length;
       await run(28, true); dispatch(1 / 30, 1, 1, 61); const reset = (await snapshot()).length;
       // Exercise the actual shared trajectory helper with mirrored wind directions.
@@ -1263,6 +1265,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
     const result=await page.evaluate(async()=>{
       const {createVesselShadows}=await import('/js/shadows.js');
       const {SHADOW_SAMPLE}=await import('/js/wgsl/shadows.js');
+      const {HULL_VERTICAL_SCALE:S}=await import('/js/hull.js');
       const {boatRotate}=await import('/js/boat.js');
       const device=await (await navigator.gpu.requestAdapter()).requestDevice();
       const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
@@ -1302,7 +1305,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
         enc.copyBufferToBuffer(output,0,read,0,80);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
         const values=Array.from(new Float32Array(read.getMappedRange())).slice(0,locations.length*4);read.unmap();return values;
       }
-      const locations=[[0,0,0],[3,0,0],[6,0,0],[0,3,0],[0,2,0]];
+      const locations=[[0,0,0],[3,0,0],[6,0,0],[0,3*S,0],[0,2*S,0]];
       const overhead=await sample([0,1,0],locations);
       const waterLocations=[[0,0,0,1],[3,0,0,1],[20,0,20,1],[-3,0,0,1],[0.95,0,0,1]];
       const water=await sample([0,1,0],waterLocations);
@@ -1315,11 +1318,11 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       boatRotate(hull.subarray(4,7),0,1,0,0.8,0.2,-0.15);
       boatRotate(hull.subarray(8,11),0,0,-1,0.8,0.2,-0.15);
       const solidCenter=new Float32Array(3),clothCenter=new Float32Array(3);
-      boatRotate(solidCenter,0,2,0,0.8,0.2,-0.15);boatRotate(clothCenter,3,2,0,0.8,0.2,-0.15);
+      boatRotate(solidCenter,0,2*S,0,0.8,0.2,-0.15);boatRotate(clothCenter,3,2*S,0,0.8,0.2,-0.15);
       const tilted=await sample([0,1,0],[[solidCenter[0],0,solidCenter[2]],[clothCenter[0],0,clothCenter[2]],
         [20,0,20],[solidCenter[0],solidCenter[1]+1,solidCenter[2]],Array.from(solidCenter)]);
       hull.fill(0,0,12);hull[0]=1;hull[5]=1;hull[10]=-1;
-      const oblique=await sample([Math.SQRT1_2,Math.SQRT1_2,0],[[-2,0,0],[1,0,0],[-4,0,0],[0,3,0],[6,0,0]]);
+      const oblique=await sample([Math.SQRT1_2,Math.SQRT1_2,0],[[-2*S,0,0],[3-2*S,0,0],[-4*S,0,0],[0,3*S,0],[6,0,0]]);
       const hidden=await sample([0,1,0],locations,false),night=await sample([0,-1,0],locations);
       shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night,water,choppy,thinSurface,waterHidden};
     });
@@ -1351,6 +1354,8 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
     const result=await page.evaluate(async()=>{
       const {VESSEL_RIG}=await import('/js/wgsl/vessel.js');
       const {createCaravelMesh}=await import('/js/caravel.js');
+      const {hullScale}=await import('/js/hull.js');
+      const scale=hullScale();
       const mesh=createCaravelMesh(),points=[];
       for(let i=0;i<mesh.length;i+=27)if(mesh[i+6]%1!==0)points.push(...mesh.subarray(i,i+27));
       const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice();
@@ -1370,7 +1375,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
         }`});
       const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
       const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const h=new Float32Array(36);h[12]=3.6;h[13]=12;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
+      const h=new Float32Array(36);h[12]=6;h[13]=20;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
       const samples=[];let full;
       for(const [set,yaw,tack] of [[[1,1,1],0,1],[[.5,.5,.5],0,1],[[0,0,0],0,1],[[0,1,1],0,1],[[1,1,1],.6,-1]]){
         h.set(set,24);h[28]=yaw;h[29]=-yaw;h[35]=tack;device.queue.writeBuffer(hull,0,h);
@@ -1385,7 +1390,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
           const d=Math.hypot(...[0,1,2].map(j=>v[i*8+j]-full[i*8+j]));
           if(base===9||base===13)motion[mast]=Math.max(motion[mast],d);
           if(base===10)yardHeightError=Math.max(yardHeightError,Math.abs(v[i*8+1]-full[i*8+1]));
-          if((tag&8)&&points[i*9+1]<3)fixedError=Math.max(fixedError,Math.hypot(...[0,1,2].map(j=>v[i*8+j]-points[i*9+j])));
+          if((tag&8)&&points[i*9+1]<3)fixedError=Math.max(fixedError,Math.hypot(...[0,1,2].map(j=>v[i*8+j]-points[i*9+j]*scale[j])));
           if(i%3===0&&(base===9||base===13)){
             const a=[0,1,2].map(j=>v[(i+1)*8+j]-v[i*8+j]),b=[0,1,2].map(j=>v[(i+2)*8+j]-v[i*8+j]);
             area[mast]+=.5*Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]);
@@ -1543,6 +1548,7 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
         if(buffer.label==='crew joints')check.crewBones=Array.from(data);
+        if(buffer.label==='crew transforms')check.crewActors=(check.crewActors||[]).concat(Array.from(data));
         return write.call(this,buffer,offset,data,...rest);
       };
     });
@@ -1552,6 +1558,12 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true);
     const first=await step(page,100);assert.equal(first.render.crew,1);assert.equal(first.render['crew shadow'],1);
     assert.deepEqual(await page.evaluate(()=>check.crewInstances),[6,6]);
+    assert.equal(await page.locator('#boat-length').inputValue(), '20');
+    assert.equal(await page.locator('#boat-beam').inputValue(), '6');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),1,'helm view hides only its own helmsman');
+    await page.getByRole('button',{name:'View ship',exact:true}).click();
+    await page.evaluate(()=>check.crewActors=[]);await step(page,100);
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),0,'exterior restores all twelve sailors');
     const bones=await page.evaluate(()=>check.crewBones);
     assert.equal(bones.length,6*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
     await step(page,100);assert.notDeepEqual(await page.evaluate(()=>check.crewBones),bones);

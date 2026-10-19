@@ -40,7 +40,7 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 const OCEAN_HULL_MASK = /* wgsl */ `
   if(F.post.w <= 0.5 && H.rig.z > 0.5) {
     let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/HULL_Y_SCALE,-dot(relative,H.forward.xyz)/(H.size.y/12.0));
     if(hullExcludesOcean(q)) { discard; return vec4f(0); }
   }
 `;

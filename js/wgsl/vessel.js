@@ -1,4 +1,4 @@
-import { WHEEL_CENTER } from '../hull.js';
+import { WHEEL_CENTER, HULL_VERTICAL_SCALE } from '../hull.js';
 import { SAIL_PLAN, LATEEN_CORNERS } from '../sailing.js';
 const SAIL_RIG_INFO = SAIL_PLAN.map(s=>'vec4f('+[s.z,s.top,s.width,s.height].join(',')+')').join(',');
 const SAIL_BELLIES = SAIL_PLAN.map(s=>s.belly).join(',');
@@ -60,7 +60,7 @@ fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
 }
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
 fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
-  var scale=vec3f(hull.size.x/3.6,1.0,hull.size.y/12.0);
+  var scale=vec3f(hull.size.x/3.6,${HULL_VERTICAL_SCALE},hull.size.y/12.0);
   var local=position;var localN=normal;
   if(material==7.0 || material==8.0){
     let pivot=vec3f(${WHEEL_CENTER.join(',')});

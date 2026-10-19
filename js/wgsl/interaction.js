@@ -92,9 +92,9 @@ fn pressureSea(p: vec2f) -> f32 {
   var width = halfWidth * 0.9;
   for (var j = 0; j < 5; j++) {
     level = interactionSea(p.xz);
-    localY = (level - spine.y - H.right.y * side * width) / max(0.35, H.up.y);
+    localY = (level - spine.y - H.right.y * side * width) / (max(0.35, H.up.y)*HULL_Y_SCALE);
     width = hullHalfWidth(z, localY) * H.size.x / 3.6;
-    p = spine + H.right.xyz * side * width + H.up.xyz * localY;
+    p = spine + H.right.xyz * side * width + H.up.xyz * localY*HULL_Y_SCALE;
   }
   p.y = level;
   let signedWater = pressureSea(p.xz) - rest.y;

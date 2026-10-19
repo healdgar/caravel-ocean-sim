@@ -18,8 +18,11 @@ reservations, climbing, anchoring and battening hatches below remain design work
 The current complement is 12 visible people, including the captain: captain,
 mate, boatswain and nine hands. Six are women and six are men; roles are unrelated
 to gender. Individual skills and two six-person duty watches remain future work.
-This is a lean design estimate for our default 12 m × 3.6 m vessel,
+This is a lean gameplay complement for our default 20 m × 6 m vessel,
 not a documented historical minimum or a validated manning requirement.
+Adult body heights remain 1.71–1.80 m. Stations and deck elevations follow the
+enlarged hull, walking speed stays in metres per second, and the helmsman's station
+is anchored 0.60 m behind the fixed-size wheel at the default dimensions.
 
 The [Museum of Angra do Heroísmo](https://museu-angra.cultura.azores.gov.pt/en/others/historical-pieces/caravela/)
 describes 20–30 m caravels, with smaller examples carrying 25–30 people. The

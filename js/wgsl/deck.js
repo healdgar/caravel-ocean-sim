@@ -38,7 +38,7 @@ fn sampleDeck(uv:vec2f)->vec4f {
 `;
 const DECK_TRANSFORM = /* wgsl */ `
 fn deckWorld(p:vec3f)->vec3f {
-  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y-H.forward.xyz*p.z*(H.size.y/12.0);
+  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y*HULL_Y_SCALE-H.forward.xyz*p.z*(H.size.y/12.0);
 }
 `;
 
@@ -63,7 +63,7 @@ fn cellArea(p:vec3f)->f32 {
 fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
   if(any(b<vec2i(0)) || any(b>=DECK_SIZE)){return 0.0;}
   let pa=cellPoint(a);let pb=cellPoint(b);
-  if(abs(pa.y-pb.y)>0.8){return 0.0;} // solid cabin face
+  if(abs(pa.y-pb.y)*HULL_Y_SCALE>0.8){return 0.0;} // solid cabin face
   let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
   let dh=deckWorld(pa).y+wa*H.up.y-deckWorld(pb).y-wb*H.up.y;
   let donor=select(wb,wa,dh>0.0);
@@ -92,7 +92,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
     ingress=min(4.0,1.3*pow(over,1.5));
     // Scuppers between rail posts; quarterdeck railing is open underneath.
     let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=${QUARTERDECK_START});
-    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)),1.5)),0.0,over>0.0);
+    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*HULL_Y_SCALE),1.5)),0.0,over>0.0);
     depth+=(ingress-drain)*face*dt/area;
   }
   // Bound violent immersion; do not accumulate an unbounded reservoir inside the hull.
@@ -126,7 +126,7 @@ fn corner(v:u32)->vec2f {
   let water=sampleDeck(uv);
   var p=deckPoint(uv);
   let ripple=gnoise(p.xz*7.0+vec2f(-F.camPos.w*1.3,F.camPos.w*0.7))*min(water.x*0.08,0.008);
-  p.y+=0.008+water.x+ripple;
+  p.y+=(0.008+water.x+ripple)/HULL_Y_SCALE;
   var o:DeckVertex;o.world=deckWorld(p);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
   o.uv=uv;o.local=p;o.curtain=vec2f(0.0);return o;
 }
@@ -138,10 +138,10 @@ fn corner(v:u32)->vec2f {
   let uv=vec2f(select(0.0,1.0,side>0.0),(f32(row)+c.x)/${DECK_ROWS}.0);
   let water=sampleDeck(uv);
   var p=deckPoint(uv);let incoming=water.w<0.0;
-  let flow=abs(water.w);let duration=min(0.65,sqrt(2.0*max(0.1,p.y+1.2)/9.81));let t=fall*duration;
+  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*HULL_Y_SCALE+1.2)/9.81));let t=fall*duration;
   p.x+=side*(0.16+0.55*t);
-  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z));
-  p.y+=select(0.03+outlet,deckRail(p.z)+0.12,incoming);
+  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*HULL_Y_SCALE);
+  p.y+=select((0.03+outlet)/HULL_Y_SCALE,deckRail(p.z)+0.12/HULL_Y_SCALE,incoming);
   if(incoming){p.x=side*(deckWidth(p.z)+0.09-(0.5+min(flow,2.0))*t);}
   p.z+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*0.012*fall;
   var o:DeckVertex;o.world=deckWorld(p)-vec3f(0.0,4.905*t*t,0.0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
@@ -157,7 +157,7 @@ fn corner(v:u32)->vec2f {
   let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
   let xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
   let dz=texel.y*11.9;
-  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x+deckFloor(in.local.z+dz)-sampleDeck(in.uv-vec2f(0,texel.y)).x-deckFloor(in.local.z-dz))/(2.0*dz);
+  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*HULL_Y_SCALE)/(2.0*dz);
   let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));
   var n=normalize(H.up.xyz-H.right.xyz*gradient.x/(H.size.x/3.6)+H.forward.xyz*gradient.y/(H.size.y/12.0));
   n=normalize(n+H.right.xyz*ripple.x+H.forward.xyz*ripple.y);
@@ -175,7 +175,7 @@ fn corner(v:u32)->vec2f {
   var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
   if(curtain){alpha=smoothstep(0.002,0.04,in.curtain.y)*(0.3+0.3*pattern)*(1.0-smoothstep(0.7,1.0,in.curtain.x));}
   // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(abs(in.local.y-w.x-0.008-deckFloor(in.local.z))>0.10 && !curtain){discard;}
+  if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
   return vec4f(color*alpha,alpha);
 }

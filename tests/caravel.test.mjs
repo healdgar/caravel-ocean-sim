@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCaravelMesh, indexCaravelMesh } from '../js/caravel.js';
 import { shadowMeshData } from '../js/shadows.js';
-import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, WHEEL_CENTER, HELM_EYE_Z } from '../js/hull.js';
+import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, WHEEL_CENTER, HELM_EYE_Z, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
+import { createCompany, stepCompany } from '../js/crew.js';
 
 test('indexed caravel preserves every vertex bit, triangle, and shadow partition',()=>{
   const raw=createCaravelMesh(),indexed=indexCaravelMesh(raw);
@@ -109,7 +110,38 @@ test('raised decks and lookout have solid floors; the working helm sits aft on t
   assert.equal(lookout.material,0);assert.ok(lookout.point[1]>8.3);
   assert.ok(WHEEL_CENTER[2]>4 && WHEEL_CENTER[2]<HELM_EYE_Z);
   for(let i=0;i<mesh.length;i+=9)if(mesh[i+6]===7 || mesh[i+6]===8){
-    assert.ok(mesh[i+1]>vesselDeck(mesh[i+2]));
+    assert.ok(mesh[i+1]-WHEEL_CENTER[1]+WHEEL_CENTER[1]*HULL_VERTICAL_SCALE>vesselDeck(mesh[i+2])*HULL_VERTICAL_SCALE);
     assert.ok(Math.abs(mesh[i+2]-WHEEL_CENTER[2])<.1);
+  }
+});
+
+test('20 m hull grounds adult crew on real decks, keeps the helm reachable and limits stair risers',()=>{
+  const mesh=createCaravelMesh(),scale=hullScale(),company=createCompany();
+  // Convert real triangles to metres, including the fixed-size wheel exception.
+  for(let i=0;i<mesh.length;i+=9)for(let axis=0;axis<3;axis++){
+    mesh[i+axis]=mesh[i+6]===7||mesh[i+6]===8
+      ?mesh[i+axis]-WHEEL_CENTER[axis]+WHEEL_CENTER[axis]*scale[axis]:mesh[i+axis]*scale[axis];
+  }
+  stepCompany(company,{length:20,beam:6},0,0);
+  for(const sailor of company.crew){
+    // Probe each boot beside any caulk gap, from below arms/torso height.
+    const p=Array.from(sailor.position),hits=[-.07,.07].map(dx=>firstHit(mesh,[p[0]+dx,p[1]+.15,p[2]],[0,-1,0]));
+    const hit=hits.sort((a,b)=>b.point[1]-a.point[1])[0];
+    assert.equal(hit.material,0,`${sailor.id} stands on deck boards`);
+    assert.ok(Math.abs(hit.point[1]-(p[1]-.028))<.015,`${sailor.id} feet match the enlarged deck`);
+  }
+  const helm=company.crew.find(s=>s.role==='Helmsman');
+  assert.ok(Math.abs(helm.position[2]-WHEEL_CENTER[2]*scale[2]-.6)<1e-6);
+  assert.ok(Math.abs(WHEEL_CENTER[1]*scale[1]-helm.position[1]-.922)<1e-6);
+  // Detect actual upper tread faces, rather than trusting the requested step count.
+  for(const [xmin,xmax,zmin,zmax,minSteps,startZ] of [[.69,1.23,1.4,2.75,12,1.5],[-1.19,-.62,-3.95,-2.9,8,-3.04]]){
+    const levels=new Set();
+    for(let i=0;i<mesh.length;i+=9)if(mesh[i+6]===6&&mesh[i+4]>.999&&
+      mesh[i]/scale[0]>xmin&&mesh[i]/scale[0]<xmax&&mesh[i+2]/scale[2]>zmin&&mesh[i+2]/scale[2]<zmax){
+      levels.add(Math.round(mesh[i+1]*10000)/10000);
+    }
+    const heights=[...levels].sort((a,b)=>a-b);assert.ok(heights.length>=minSteps);
+    assert.ok(heights[0]-vesselDeck(startZ)*scale[1]<=.231,'first tread is reachable from the deck');
+    for(let i=1;i<heights.length;i++)assert.ok(heights[i]-heights[i-1]<=.231);
   }
 });

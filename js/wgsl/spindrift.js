@@ -90,7 +90,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   if (hull.rig.z > 0.5) {
     let delta = origin - hull.origin.xyz;
     let local = vec3f(dot(delta, hull.right.xyz) * 3.6 / hull.size.x,
-      dot(delta, hull.up.xyz), -dot(delta, hull.forward.xyz) * 12.0 / hull.size.y);
+      dot(delta, hull.up.xyz)/HULL_Y_SCALE, -dot(delta, hull.forward.xyz) * 12.0 / hull.size.y);
     if (hullExcludesOcean(local)) { return; }
   }
   // The compressed principal direction gives the local crest's tangent.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
 import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
-import {hullDeck,hullHalfWidth,vesselDeck} from '../js/hull.js';
+import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE} from '../js/hull.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
@@ -52,7 +52,7 @@ test('deck route respects hull clearance, dimensions and render-rate independenc
     for(let i=0;i<fps*60;i++){
       stepDeckhand(s,boat,1/fps);low=Math.min(low,s.z);high=Math.max(high,s.z);
       assert.ok(s.z>=-2.20001&&s.z<=.10001);assert.ok(Math.abs(s.x)+.32<hullHalfWidth(s.z,hullDeck(s.z)));
-      assert.ok(Math.abs(s.position[1]-hullDeck(s.z)-.028)<1e-6);assert.ok(s.transform.every(Number.isFinite));
+      assert.ok(Math.abs(s.position[1]-hullDeck(s.z)*HULL_VERTICAL_SCALE-.028)<1e-6);assert.ok(s.transform.every(Number.isFinite));
     }
     assert.ok(low<-2.19&&high>.09);final.push(s.z);
   }
@@ -87,13 +87,13 @@ test('female asset has a distinct mesh, compatible rig and grounded animation',(
 test('twelve named crew, evenly split, keep separate clear stations on every deck',()=>{
   assert.equal(CREW_ROSTER.length,12);assert.equal(new Set(CREW_ROSTER.map(s=>s.id)).size,12);
   assert.equal(CREW_ROSTER.filter(s=>s.sex==='female').length,6);
-  for(const dimensions of [[12,3.6],[10.5,3.2],[24,7.2]]){
+  for(const dimensions of [[20,6],[12,3.6],[10.5,3.2],[24,7.2]]){
     const b={...boat,length:dimensions[0],beam:dimensions[1]},company=createCompany();
     for(let i=0;i<3600;i++){
       stepCompany(company,b,1/60,2);
       for(const [j,s] of company.crew.entries()){
         assert.ok(s.visible);assert.ok(s.z>=s.route[0]-1e-5&&s.z<=s.route[1]+1e-5);
-        assert.ok(Math.abs(s.position[1]-vesselDeck(s.z)-.028)<1e-6);
+        assert.ok(Math.abs(s.position[1]-vesselDeck(s.z)*HULL_VERTICAL_SCALE-.028)<1e-6);
         assert.ok(Math.abs(s.position[0])+.3<hullHalfWidth(s.z,vesselDeck(s.z))*b.beam/3.6);
         // Main deck excludes the companionway, mainmast and hatch grating.
         if(s.z>-3.9&&s.z<2.7){assert.ok(!(s.x>.35&&s.z>1.1));assert.ok(Math.hypot(s.x,s.z-.85)>.55);assert.ok(s.z> -2.3);}

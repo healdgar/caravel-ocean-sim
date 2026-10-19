@@ -6,7 +6,7 @@ import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
 import { createCrew, CAPTAIN_ORDERS } from './crew.js';
-import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES } from './hull.js';
+import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, stepBoatRoll, KNOT_TO_MPS } from './boat.js';
@@ -389,7 +389,7 @@ async function main() {
   const boatUniform = new Float32Array(8);
   const bgProbe = [0, 1].map(w => bg(probePipe, [{ buffer: frameUBO }, fullArr(dispTex), samplerSim, { buffer: probeOut }, { buffer: boatUBO }, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler, fullArr(derivTex)], 'probe'));
   let probePending = false, waterH = 0;
-  let probeLength = 12, probeBeam = 3.6, probeRevision = 0;
+  let probeLength = DEFAULT_BOAT_LENGTH, probeBeam = DEFAULT_BOAT_BEAM, probeRevision = 0;
   let probeTime=0, targetTime=-1, targetRevision=-1;
   const boatAxes=['heave','pitch','roll'];
   const targetRate={heave:0,pitch:0,roll:0};
@@ -592,8 +592,8 @@ async function main() {
   let cameraMode = cameraModeFromLink(qs);
   const propulsion = propulsionFromLink(qs);
   const boat = {
-    effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', 12, 3, 100),
-    beam: param('boatBeam', 3.6, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
+    beam: param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
@@ -601,7 +601,7 @@ async function main() {
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
-    elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',25,10,120) };
+    elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',32,10,120) };
   const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
   const keys = Object.create(null);
@@ -625,7 +625,8 @@ async function main() {
     // Wheel size stays fixed; its anchor and the eye follow hull length/beam.
     const px=WHEEL_CENTER[0]*boat.beam/3.6+x-WHEEL_CENTER[0];
     const pz=(WHEEL_CENTER[2]-HELM_EYE_Z)*boat.length/12+z-WHEEL_CENTER[2];
-    boatRotate(helmPoint,px,y-boat.eye,pz,boat.heading*D2R,boat.pitch,boat.roll);
+    const py=WHEEL_CENTER[1]*HULL_VERTICAL_SCALE+y-WHEEL_CENTER[1]-boat.eye;
+    boatRotate(helmPoint,px,py,pz,boat.heading*D2R,boat.pitch,boat.roll);
     const m=viewProj,w=m[3]*helmPoint[0]+m[7]*helmPoint[1]+m[11]*helmPoint[2]+m[15];
     return {x:(0.5+0.5*(m[0]*helmPoint[0]+m[4]*helmPoint[1]+m[8]*helmPoint[2])/w)*canvas.clientWidth,
       y:(0.5-0.5*(m[1]*helmPoint[0]+m[5]*helmPoint[1]+m[9]*helmPoint[2])/w)*canvas.clientHeight,w};
@@ -707,11 +708,11 @@ async function main() {
       return;
     }
     if (cameraMode === 'ship') {
-      const radius=shipOrbit.distance * Math.max(0.7,Math.sqrt(boat.length/12));
+      const radius=shipOrbit.distance * Math.max(0.7,Math.sqrt(boat.length/DEFAULT_BOAT_LENGTH));
       const horizontal=radius*Math.cos(shipOrbit.elevation);
       cam.x=boat.x+Math.sin(shipOrbit.yaw)*horizontal;
       cam.z=boat.z+Math.cos(shipOrbit.yaw)*horizontal;
-      cam.y=4+radius*Math.sin(shipOrbit.elevation);
+      cam.y=4*HULL_VERTICAL_SCALE+radius*Math.sin(shipOrbit.elevation);
       cam.yaw=Math.atan2(boat.x-cam.x,cam.z-boat.z);
       cam.pitch=-shipOrbit.elevation;
       return;

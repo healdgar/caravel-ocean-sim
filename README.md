@@ -307,9 +307,22 @@ MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
 Set length and beam in metres, heading in degrees (0 along the
 original view, 90 to the right), and eye height above the mean waterline.
-The default eye is 3.9 m above the waterline, standing behind the aft-quarterdeck wheel;
-its longitudinal position follows hull length. Older shared links with `boatEye=2.4`
-retain that explicit low eye height; raise **Eye above water** to 3.9 m for the new helm.
+The default hull is **20 m long × 6 m beam**, excluding the bowsprit. The original
+12 × 3.6 design frame is converted to metres with a shared 5/3 vertical scale;
+length and beam controls set the other two axes. Decks, rigging, ocean exclusion,
+spray contacts, deck wash, shadows and crew anchors use the same transform.
+The cabin doorway is about 1.97 m high, cabin headroom 2.27–2.57 m, and the mainmast
+about 18 m above the main deck. Eight forecastle and twelve quarterdeck ladder
+treads keep risers below 23 cm; shroud rungs are spaced at most 35 cm vertically.
+Crew retain their 1.71–1.80 m adult heights. The wheel retains its human dimensions,
+sits 0.95 m above the quarterdeck, and the helmsman stands 0.60 m behind it.
+The helmsman's body is hidden in the first-person helm view so it cannot obstruct
+the camera; he remains visible in exterior/free views and continues casting shadows.
+
+The default eye is **5.43 m above the waterline**, 1.6 m above the quarterdeck;
+its longitudinal position follows hull length. Shared links preserve explicit
+dimensions and eye heights. Remove `boatLength`, `boatBeam`, and `boatEye` from an
+older link to use the enlarged defaults, or set them to 20, 6, and 5.43 respectively.
 The helm controls the rudder; mouse look is relative to the boat. **Look ahead**
 centres the view. Choose **Free camera** or press **B** to leave the floating viewpoint.
 Choose **View ship** for a level exterior view that follows the ship: drag to orbit
@@ -393,8 +406,11 @@ needed. Stale forces fade if probing stalls. Integration uses substeps of at mos
 1/120 second with implicit signed drag to remain stable at mobile frame rates.
 
 Displacement is integrated from the canonical submerged hull at its mean waterline:
-about **42.7 tonnes** for the default 12 × 3.6 m ship, using seawater density
-1025 kg/m³. Length and beam rescale this volume; draft remains 1.55 m as in the mesh.
+about **197.6 tonnes** for the default 20 × 6 m ship, using seawater density
+1025 kg/m³ and the mesh's **2.58 m draft**. This is the authored hull's computed
+displacement, not a historical tonnage claim. Length and beam rescale this volume;
+draft stays fixed at the enlarged model height. Sail area and centres of effort,
+keel resistance, wetted area and roll inertia also use the physical dimensions.
 Added mass is an authored 8% of displacement; effective resistance uses coefficient
 0.012 and estimated wetted area. These coefficients are not calibrated to a historical
 caravel. Hull-footprint filtering approximates short-wave cancellation; the model
@@ -408,7 +424,7 @@ retained deck wash follow the resulting motion.
 
 Sailing URL options: `view=ship&propulsion=sail&sailFore=1&sailMain=1&sailMizzen=1`.
 Sail targets are fractions from 0 to 1; shared links preserve them and the propulsion mode.
-Manual example: `boat=1&propulsion=manual&boatLength=12&boatBeam=3.6&boatHeading=0&boatSpeed=6&boatEye=3.9`.
+Manual example: `boat=1&propulsion=manual&boatLength=20&boatBeam=6&boatHeading=0&boatSpeed=6&boatEye=5.43`.
 The legacy `windDir` parameter remains the wind's travel angle in the world's X/Z plane;
 its source bearing in boat-heading coordinates is `(windDir - 90 + 360) % 360`.
 Run `node --test tests/boat.test.mjs tests/sailing.test.mjs` for the motion checks.

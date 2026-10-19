@@ -33,6 +33,7 @@ struct CrewVertex {
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;
   let actor=actors[v.instance];
+  if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
   if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=actor.shirt.rgb;}
   if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=actor.trousers.rgb;}
   if(distance(v.color,vec3f(.36,.18,.10))<.001){out.color=actor.skin.rgb;}

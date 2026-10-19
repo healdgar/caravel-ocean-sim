@@ -74,10 +74,11 @@ test('boarding uses the ship world position and eye height independently of a sp
   assert.ok(Math.abs(out[2]-boat.z-2*HELM_EYE_Z)<1e-12,'helm eye follows a resized stern');
 });
 
-const surgeBoat = (speed = 6) => ({ length: 12, beam: 3.6, speed, surgeVelocity: speed * KNOT_TO_MPS });
+const surgeBoat = (speed = 6) => ({ length: 20, beam: 6, speed, surgeVelocity: speed * KNOT_TO_MPS });
 test('displacement scales with submerged geometry and includes added water inertia', () => {
-  const base = boatHydrodynamics(12, 3.6), long = boatHydrodynamics(24, 3.6), wide = boatHydrodynamics(12, 7.2);
-  assert.ok(base.mass > 20000 && base.mass < 70000);
+  const base = boatHydrodynamics(20, 6), long = boatHydrodynamics(40, 6), wide = boatHydrodynamics(20, 12);
+  assert.ok(base.mass > 190000 && base.mass < 205000);
+  assert.ok(base.draft>2.58&&base.draft<2.59);
   assert.equal(base.mass, base.volume * 1025);
   assert.equal(long.mass, 2 * base.mass);
   assert.equal(wide.mass, 2 * base.mass);
@@ -104,7 +105,7 @@ test('uphill pressure slows the ship; downhill pressure accelerates it independe
 
 test('equal applied force accelerates a larger inertia less; target edits preserve momentum', () => {
   const a = surgeBoat(), b = surgeBoat();
-  a.hydrodynamics = boatHydrodynamics(12, 3.6);
+  a.hydrodynamics = boatHydrodynamics(20, 6);
   b.hydrodynamics = { ...a.hydrodynamics, mass: a.hydrodynamics.mass * 2, addedMass: a.hydrodynamics.addedMass * 2 };
   a.speed = b.speed = 12;
   stepBoatSurge(a, 0, 0.1); stepBoatSurge(b, 0, 0.1);
@@ -128,7 +129,7 @@ test('unpowered drag dissipates kinetic energy in either direction without rever
 test('undamped wave work equals the change in kinetic energy including added mass', () => {
   for (const slope of [-0.08, 0.08]) {
     const boat = { ...surgeBoat(0), surgeVelocity: 2 };
-    const hydro = boat.hydrodynamics = { ...boatHydrodynamics(12, 3.6), drag: 0 };
+    const hydro = boat.hydrodynamics = { ...boatHydrodynamics(20, 6), drag: 0 };
     const inertia = hydro.mass + hydro.addedMass, start = 0.5 * inertia * boat.surgeVelocity ** 2;
     let distance = 0;
     for (let i = 0; i < 100; i++) distance += stepBoatSurge(boat, slope, 0.1);
