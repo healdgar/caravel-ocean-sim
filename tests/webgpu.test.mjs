@@ -1975,6 +1975,17 @@ test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounde
       const {createCaravelMesh}=await import('/js/caravel.js');
       const raw=createCaravelMesh(),points=[];
       for(let i=0;i<raw.length;i+=27)if([9,13,19].includes(Math.floor(raw[i+6])))points.push(...raw.subarray(i,i+27));
+      // The three large lateen courses can meet a neighboring sail's sewn edge.
+      // Include those actual moving segments, not only standing/running rigging.
+      const sewnSegments=new Map();
+      for(let i=0;i<points.length;i+=27)if(Math.floor(points[i+6])===19){
+        const id=Math.round((points[i+6]%1)*16);
+        for(let j=1;j<3;j++){
+          const a=i/9,b=a+j,ua=points.slice(i+7,i+9),ub=points.slice(i+j*9+7,i+j*9+9);
+          if(Math.hypot(ua[0]-ub[0],ua[1]-ub[1])<1e-6)continue;
+          sewnSegments.set(`${id}:${[ua.join(','),ub.join(',')].sort().join(':')}`,{a,b,id});
+        }
+      }
       const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
@@ -2003,7 +2014,8 @@ test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounde
         }
         @compute @workgroup_size(64) fn mask(@builtin(global_invocation_id) gid:vec3u){
           let i=gid.x*9u;if(i+2u>=arrayLength(&points)){return;}
-          result[gid.x*2u]=vec4f(select(0.0,1.0,rigInsideCanvas(vec3f(points[i],points[i+1u],points[i+2u]))),0,0,0);
+          let p=vec3f(points[i],points[i+1u],points[i+2u]);
+          result[gid.x*2u]=vec4f(select(0.0,1.0,rigCanvasContact(p,u32(points[i+3u]),u32(points[i+4u]))),0,0,0);
         }`});
       const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
       const maskPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'mask'}});
@@ -2018,38 +2030,51 @@ test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounde
         const q=cross(t,e1),v=dot(dir,q)/det;if(v<1e-5||u+v>1-1e-5)return false;
         const distance=dot(e2,q)/det;return distance>.001&&distance<.999?line.a.map((x,i)=>x+distance*dir[i]):null;
       }
-      const captures=[],collisions=[],sewn=[],deflections=[];
-      for(const [fill,yaw,time,set,tack=1] of [[1,0,0,1],[1,0,.2,1],[0,0,0,1],[0,0,.2,1],[1,.6,1,1],[1,-.6,1,1],[.6,.6,1,.5],[0,0,1,0],[1,0,0,1,-1],[1,.6,2,1,-1],[0,-.6,2,1,-1],[1,1.047,1,1],[1,-1.047,1,1]]){
+      const captures=[],collisions=[],sewn=[],deflections=[];let neighboringEdgeContacts=0;
+      const states=[[1,0,0,1],[1,0,.2,1],[0,0,0,1],[0,0,.2,1],[1,.6,1,1],[1,-.6,1,1],[.6,.6,1,.5],[0,0,1,0],[1,0,0,1,-1],[1,.6,2,1,-1],[0,-.6,2,1,-1],[1,1.047,1,1],[1,-1.047,1,1],
+        ...Array.from({length:24},(_,i)=>[0,i%2?.08:-.08,i*.137,i%3===0?.45:1,i%2?1:-1])];
+      for(const [fill,yaw,time,set,tack=1] of states){
         h[35]=tack;h.set([set,set,set],24);h[28]=yaw;h[29]=-yaw;h[30]=h[31]=fill;h[19]=time;device.queue.writeBuffer(hull,0,h);
         const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.dispatchWorkgroups(Math.ceil(n/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
         const values=new Float32Array(read.getMappedRange()).slice();read.unmap();captures.push(values);
         const hits={},contacts=[];let ropeError=0,deflection=0;
         const lines=RIG_OBSTACLES.map((line,j)=>({...line,a:Array.from(values.subarray((n+j)*8,(n+j)*8+3)),b:Array.from(values.subarray((n+j)*8+4,(n+j)*8+7))}));
+        for(const edge of sewnSegments.values())lines.push({a:Array.from(values.subarray(edge.a*8+4,edge.a*8+7)),b:Array.from(values.subarray(edge.b*8+4,edge.b*8+7)),owner:edge.id});
         for(let i=0;i<n;i++){
           const base=Math.floor(points[i*9+6]);
           if(base===19){const distance=Math.hypot(values[i*8]-values[i*8+4],values[i*8+1]-values[i*8+5],values[i*8+2]-values[i*8+6]);ropeError=Math.max(ropeError,Math.max(0,distance-.01501));}
           if(base!==19)deflection=Math.max(deflection,Math.hypot(...[0,1,2].map(k=>values[i*8+k]-values[i*8+4+k])));
           if(base===19||i%3)continue;
           const tri=[0,1,2].map(j=>Array.from(values.subarray((i+j)*8,(i+j)*8+3)));
-          for(const [j,line] of lines.entries()){const point=hit(...tri,line);if(point)contacts.push({point,j});}
+          const owner=Math.round((points[i*9+6]%1)*16);
+          for(const [j,line] of lines.entries()){
+            if(line.owner===owner)continue;
+            const point=hit(...tri,line);if(point){contacts.push({point,j});if(line.owner)neighboringEdgeContacts++;}
+          }
         }
         contacts.push({point:[0,-1,0],j:-1},{point:[8,8,8],j:-1});
+        const topEdge=lines.find(line=>line.owner===1);
+        contacts.push({point:topEdge.a.map((v,i)=>(v+topEdge.b[i])*.5),j:-1,owner:1});
         if(contacts.length){
-          const probes=new Float32Array(contacts.length*9);contacts.forEach(({point},i)=>probes.set(point,i*9));device.queue.writeBuffer(input,0,probes);
+          const probes=new Float32Array(contacts.length*9);contacts.forEach(({point,j,owner},i)=>{
+            const sewnOwner=owner??lines[j]?.owner??0;
+            probes.set(point,i*9);probes[i*9+3]=sewnOwner?19:12;probes[i*9+4]=sewnOwner;
+          });device.queue.writeBuffer(input,0,probes);
           const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(maskPipe);cp.setBindGroup(0,maskGroup);cp.dispatchWorkgroups(Math.ceil(contacts.length/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-          const masks=new Float32Array(read.getMappedRange());contacts.forEach(({j},i)=>{if(j===-1?masks[i*8]>.5:(j>=RIG_OBSTACLES.length-3||masks[i*8]<.5))hits[j]=(hits[j]??0)+1;});read.unmap();device.queue.writeBuffer(input,0,new Float32Array(points));
+          const masks=new Float32Array(read.getMappedRange());contacts.forEach(({j},i)=>{if(j===-1?masks[i*8]>.5:((j>=RIG_OBSTACLES.length-3&&j<RIG_OBSTACLES.length)||masks[i*8]<.5))hits[j]=(hits[j]??0)+1;});read.unmap();device.queue.writeBuffer(input,0,new Float32Array(points));
         }
         collisions.push(hits);sewn.push(ropeError);deflections.push(deflection);
       }
       const movement=(a,b)=>{
         let max=0;for(let i=0;i<n;i++)if(Math.floor(points[i*9+6])!==19)max=Math.max(max,Math.hypot(...[0,1,2].map(k=>captures[a][i*8+k]-captures[b][i*8+k])));return max;
       };
-      const loaded=movement(0,1),slack=movement(2,3);device.destroy();return {errors,loaded,slack,collisions,sewn,deflections};
+      const loaded=movement(0,1),slack=movement(2,3);device.destroy();return {errors,loaded,slack,collisions,sewn,deflections,neighboringEdgeContacts};
     });
     assert.deepEqual(result.errors,[]);
     assert.ok(result.loaded<.01,`loaded motion ${result.loaded}`);assert.ok(result.slack>.05,`slack motion ${result.slack}`);
     assert.ok(result.sewn.every(e=>e<1e-5),`bolt-rope attachment error: ${result.sewn}`);
     assert.ok(result.deflections.every(d=>d<=.06001),`contact cannot stretch cloth into spikes: ${result.deflections}`);
+    assert.ok(result.neighboringEdgeContacts>0,'exercise actual intersections with a different sail’s sewn edging');
     assert.deepEqual(result.collisions,result.collisions.map(()=>({})),'rope crossings must be masked; masts must clear canvas');
   }finally{await page.close();}
 });

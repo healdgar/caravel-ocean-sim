@@ -100,10 +100,12 @@ fn sailClearRig(point:vec3f,uv:vec2f,id:u32)->vec3f {
   return point+offset*(free*min(1.0,.06/max(length(offset),.00001)));
 }
 // Hide only rope fragments at a cloth contact. This fallback handles crossings
-// without stretching canvas into spikes. Sewn bolt ropes are a separate material.
+// without stretching canvas into spikes. A sewn edge belongs to one sail: keep
+// that attachment visible, but mask contacts with the other lateen courses.
 // Inverse parameterization is inexpensive and does not run the contact loop.
-fn rigInsideCanvas(point:vec3f)->bool {
+fn rigInsideOtherCanvas(point:vec3f,owner:u32)->bool {
   for(var id=1u;id<=3u;id++){
+    if(id==owner){continue;}
     let deployed=mix(.025,1.0,hull.sailSet[id-1u]);var uv=vec2f(0);var material=9u;
     if(!isLateen(id)){
       let info=array<vec4f,3>(${SAIL_RIG_INFO})[id-1u];let pivot=vec3f(0,info.y,info.x);
@@ -127,6 +129,12 @@ fn rigInsideCanvas(point:vec3f)->bool {
     // Includes the bounded 6 cm deflection and interpolation between mesh samples.
     if(distance(point,cloth)<.14){return true;}
   }
+  return false;
+}
+fn rigInsideCanvas(point:vec3f)->bool {return rigInsideOtherCanvas(point,0u);}
+fn rigCanvasContact(point:vec3f,material:u32,owner:u32)->bool {
+  if(material==12u){return rigInsideCanvas(point);}
+  if(material==19u){return rigInsideOtherCanvas(point,owner);}
   return false;
 }
 fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {

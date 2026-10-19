@@ -446,7 +446,10 @@ furling. Each lateen yard hangs beside its mast.
 Rig contacts produce smooth deflections capped at 6 cm in design coordinates
 (10 cm on the default vessel). Remaining rope/cloth intersections use a narrow
 fragment mask in both the visible and shadow passes, rather than pulling distant
-cloth vertices into spikes. This is a bounded visual approximation, not a cloth
+cloth vertices into spikes. Sewn edge ropes remain attached and visible on their
+own sail, but their contacts with neighboring lateen canvas receive the same mask.
+The contact regression covers overlapping sail edges, both tacks, luff phases,
+partial furling and extreme trim. This is a bounded visual approximation, not a cloth
 collision solver. Visible geometry, lighting normals and shadow casters share the deformation.
 Lowering sails removes drive gradually; momentum and waves keep moving the vessel.
 
