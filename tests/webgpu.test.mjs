@@ -1566,12 +1566,12 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     assert.deepEqual(await page.evaluate(()=>check.crewInstances),[6,6]);
     assert.equal(await page.locator('#boat-length').inputValue(), '20');
     assert.equal(await page.locator('#boat-beam').inputValue(), '6');
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),0,'the helmsman below the quarterdeck remains visible');
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===23&&v===1).length),12,'near-camera transparency is enabled for every sailor');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'the helmsman below the quarterdeck remains visible');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===23&&v===1).length),12,'near-camera transparency is enabled for every sailor');
     await page.getByRole('button',{name:'View ship',exact:true}).click();
     await page.evaluate(()=>check.crewActors=[]);await step(page,100);
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),0,'exterior restores all twelve sailors');
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===23&&v===1).length),0,'exterior disables the camera fade');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'exterior restores all twelve sailors');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===23&&v===1).length),0,'exterior disables the camera fade');
     const bones=await page.evaluate(()=>check.crewBones);
     assert.equal(bones.length,6*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
     await step(page,100);assert.notDeepEqual(await page.evaluate(()=>check.crewBones),bones);
@@ -1586,6 +1586,68 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     await page.getByLabel('Show crew',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
     const shipHidden=await step(page,100);assert.equal(shipHidden.render.crew,undefined);assert.equal(shipHidden.render['crew shadow'],undefined);
     assert.deepEqual(warnings,[]);
+  }finally{await page.close();}
+});
+
+test('crew face morphs keep the body fixed, bound facial displacement and preserve finite normals', {timeout:60000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__crew_faces',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__crew_faces`);
+    const result=await page.evaluate(async()=>{
+      const {CREW_SKIN}=await import('/js/wgsl/crew.js');
+      const {createCompany,CREW_ACTOR_FLOATS}=await import('/js/crew.js');
+      const {loadCrewGLB}=await import('/js/gltf.js');
+      const device=await (await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const buffer=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
+      const report=[];
+      for(const sex of ['male','female']){
+        const model=loadCrewGLB(await (await fetch(`/assets/crew/sailor${sex==='female'?'-female':''}.glb`)).arrayBuffer());
+        const vertices=new Float32Array(model.vertices.buffer),count=model.vertexCount;
+        const input=new Float32Array(count*8),people=createCompany().crew.filter(s=>s.sex===sex);
+        people.push({id:'identity',face:[1,1,0,1]});
+        const actors=new Float32Array(people.length*CREW_ACTOR_FLOATS);
+        for(let i=0;i<count;i++){input.set(vertices.subarray(i*15,i*15+3),i*8);input.set(vertices.subarray(i*15+3,i*15+6),i*8+4);}
+        for(let i=0;i<people.length;i++){actors[i*CREW_ACTOR_FLOATS+27]=Number(sex==='female');actors.set(people[i].face,i*CREW_ACTOR_FLOATS+32);}
+        const module=device.createShaderModule({code:'struct Hull { unused:vec4f };'+CREW_SKIN+`
+          @group(0) @binding(0) var<storage,read> vertices:array<vec4f>;
+          @group(0) @binding(4) var<storage,read_write> result:array<vec4f>;
+          @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+            let i=id.x;if(i>=${count*people.length}u){return;}
+            let vertex=i%${count}u;
+            let v=CrewInput(vertices[vertex*2u].xyz,vertices[vertex*2u+1u].xyz,vec3f(0),vec4u(0),vec4f(1,0,0,0),i/${count}u);
+            let surface=crewSurface(v);result[i*2u]=vec4f(surface.position,1);result[i*2u+1u]=vec4f(surface.normal,0);
+          }`});
+        const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
+        const points=buffer(input,GPUBufferUsage.STORAGE),cast=buffer(actors,GPUBufferUsage.STORAGE);
+        const size=count*people.length*32,output=device.createBuffer({size,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+        const read=device.createBuffer({size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+        const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:points}},{binding:3,resource:{buffer:cast}},{binding:4,resource:{buffer:output}}]});
+        const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(pipe);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(count*people.length/64));pass.end();enc.copyBufferToBuffer(output,0,read,0,size);device.queue.submit([enc.finish()]);
+        await read.mapAsync(GPUMapMode.READ);const data=new Float32Array(read.getMappedRange());
+        for(let actor=0;actor<people.length;actor++){
+          let maxShift=0,bodyShift=0,normalError=0,finite=true;
+          for(let i=0;i<count;i++){
+            const at=(actor*count+i)*8,p=i*8;
+            const shift=Math.hypot(data[at]-input[p],data[at+1]-input[p+1],data[at+2]-input[p+2]);
+            maxShift=Math.max(maxShift,shift);
+            if(input[p+1]<(sex==='female'?1.5646:1.6148))bodyShift=Math.max(bodyShift,shift);
+            normalError=Math.max(normalError,Math.abs(Math.hypot(data[at+4],data[at+5],data[at+6])-1));
+            for(let k=0;k<8;k++)finite=finite&&Number.isFinite(data[at+k]);
+          }
+          report.push({sex,id:people[actor].id,maxShift,bodyShift,normalError,finite});
+        }
+        read.unmap();for(const b of [points,cast,output,read])b.destroy();
+      }
+      device.destroy();return {report,errors};
+    });
+    assert.deepEqual(result.errors,[]);
+    for(const s of result.report){
+      assert.ok(s.finite,JSON.stringify(s));assert.ok(s.normalError<1e-5,JSON.stringify(s));
+      assert.equal(s.bodyShift,0,JSON.stringify(s));assert.ok(s.maxShift<.025,JSON.stringify(s));
+      if(s.id==='identity')assert.equal(s.maxShift,0);else assert.ok(s.maxShift>.001,JSON.stringify(s));
+    }
   }finally{await page.close();}
 });
 

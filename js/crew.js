@@ -29,15 +29,35 @@ export const CAPTAIN_ORDERS = [
   {id:'watch',label:'Resume sea watch',detail:'Return to routine duties; retain the current sail setting.'},
 ];
 const CREW_SHIRTS=[[.55,.47,.31],[.23,.31,.36],[.38,.15,.10],[.30,.32,.18],[.48,.36,.22],[.38,.38,.35]];
-const CREW_SKINS=[[.36,.18,.10],[.54,.31,.19],[.20,.085,.045],[.42,.23,.12]];
+// Individual art direction, independent of role and policy. Colours are sRGB bytes;
+// face = head width, jaw width, nose projection (metres), eye opening.
+// The stylized company intentionally includes Black, white and East Asian
+// appearances, including two redheads; it is not a historical demographic claim.
+const CREW_APPEARANCES={
+  ines:    {skin:[126,79,56], hair:[28,20,18], face:[1.04,1.02,-.002,.96]},
+  tomas:   {skin:[227,180,151],hair:[67,43,29], face:[.97,1.03,.003,1.02]},
+  beatriz: {skin:[218,166,120],hair:[22,20,19], face:[1.06,.96,-.010,.80]},
+  duarte:  {skin:[89,53,39],  hair:[22,18,16], face:[1.05,1.04,-.003,1.00]},
+  joao:    {skin:[185,133,94],hair:[29,24,21], face:[1.07,.98,-.012,.78]},
+  catarina:{skin:[237,191,163],hair:[164,70,26],face:[.99,.95,.002,1.02]},
+  leonor:  {skin:[99,62,45],  hair:[37,24,19], face:[1.02,.97,-.004,.94]},
+  rui:     {skin:[220,166,132],hair:[143,54,20],face:[1.02,1.03,.005,.98]},
+  maria:   {skin:[230,181,137],hair:[39,29,24],face:[1.04,.98,-.008,.84]},
+  afonso:  {skin:[153,96,64], hair:[30,23,18], face:[1.03,1.01,-.001,.96]},
+  isabel:  {skin:[213,158,129],hair:[186,148,81],face:[.96,.98,.001,1.00]},
+  pedro:   {skin:[205,153,111],hair:[24,22,21],face:[1.06,1.00,-.009,.82]},
+};
+const crewLinearColour=rgb=>rgb.map(byte=>{const v=byte/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
+export const CREW_ACTOR_FLOATS=36;
 export function createCompany(policy=deckhandDecision) {
   return {order:'watch',revision:0,pending:false,crew:CREW_ROSTER.map((person,i)=>{
     const s=createDeckhand(policy);Object.assign(s,person,{route:[...person.route],target:person.route[1],wait:i*.37,
       time:i*.43,walkTime:i*.27,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
-    s.shirt=CREW_SHIRTS[i%6];s.skin=CREW_SKINS[i%4];s.trousers=i%3?[.095,.12,.15]:[.16,.10,.065];
-    s.hair=i%4===0?[.12,.045,.015]:i%4===1?[.075,.055,.033]:[.025,.014,.009];return s;
+    const look=CREW_APPEARANCES[s.id];
+    s.shirt=CREW_SHIRTS[i%6];s.skin=crewLinearColour(look.skin);s.trousers=i%3?[.095,.12,.15]:[.16,.10,.065];
+    s.hair=crewLinearColour(look.hair);s.face=[...look.face];return s;
   })};
 }
 export function issueCaptainOrder(company,boat,id) {
@@ -139,7 +159,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,en
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
-    const poses=new Float32Array(people.length*65*16),actors=new Float32Array(people.length*32);
+    const poses=new Float32Array(people.length*65*16),actors=new Float32Array(people.length*CREW_ACTOR_FLOATS);
     const vertex=buffer('crew vertices',model.vertices,B.VERTEX),index=buffer('crew indices',model.indices,B.INDEX);
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
@@ -161,12 +181,14 @@ export async function createCrew({device,frameUBO,hullUBO,transView,sampClamp,en
           const s=b.people[i];a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
           if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
           poseCrewWork(a,s,boat);
-          b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,i*32);
-          b.actors.set(s.shirt,i*32+16);b.actors.set(s.trousers,i*32+20);b.actors.set(s.skin,i*32+24);b.actors.set(s.hair,i*32+28);
+          const offset=i*CREW_ACTOR_FLOATS;
+          b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
+          b.actors.set(s.shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
+          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female');
           // The tiller station is below the camera; all crew remain visible.
-          b.actors[i*32+19]=0;
-          b.actors[i*32+23]=Number(boat.enabled===true);
-          b.actors[i*32+31]=wetness.crewOffset+state.crew.indexOf(s)*4;
+          b.actors[offset+19]=0;
+          b.actors[offset+23]=Number(boat.enabled===true);
+          b.actors[offset+31]=wetness.crewOffset+state.crew.indexOf(s)*4;
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }

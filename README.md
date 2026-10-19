@@ -99,8 +99,10 @@ seams; no imported ship model or Blender dependency is required.
 ### Ship's company and captain's orders
 
 Twelve named sailors are aboard: six women and six men, using distinct
-Quaternius-derived models. They have varied clothing, skin and hair colours,
-heights and animation phases. Six tend short, separate routes on the main deck;
+Quaternius-derived models. The deliberately diverse company includes Black,
+white and East Asian appearances, two redheads, and individual skin tones, hair,
+head/jaw shapes, nose profiles and eye openings. Appearance is fixed per sailor
+and independent of role. Clothing, heights and animation phases also vary. Six tend short, separate routes on the main deck;
 the others hold lookout, quarterdeck and helm stations. Strong wind, heel or roll
 rate interrupts normal duties with a crouched brace. Each sailor uses the same
 replaceable local decision policy, independently of rendering.

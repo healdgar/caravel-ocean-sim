@@ -2,10 +2,10 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { VESSEL_RIG } from './vessel.js';
 import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
 
-const CREW_SKIN = /* wgsl */ `
+export const CREW_SKIN = /* wgsl */ `
 @group(0) @binding(1) var<uniform> hull:Hull;
 @group(0) @binding(2) var<storage,read> joints:array<mat4x4f>;
-struct CrewActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f };
+struct CrewActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
 @group(0) @binding(3) var<storage,read> actors:array<CrewActor>;
 struct CrewInput {
   @location(0) position:vec3f, @location(1) normal:vec3f,
@@ -16,6 +16,46 @@ fn crewSkin(v:CrewInput)->mat4x4f {
   let b=v.bones+vec4u(v.instance*65u);
   return actors[v.instance].transform*(joints[b.x]*v.weights.x+joints[b.y]*v.weights.y+
     joints[b.z]*v.weights.z+joints[b.w]*v.weights.w);
+}
+struct CrewSurface { position:vec3f, normal:vec3f };
+// Smooth local morphs before skinning keep eyes, brows and hair attached during
+// animation. Analytic derivatives give the inverse-transpose normal without
+// extra mesh copies, textures or per-person draw calls.
+fn crewRamp(lo:f32,hi:f32,x:f32)->vec2f {
+  let t=clamp((x-lo)/(hi-lo),0.0,1.0);
+  return vec2f(t*t*(3.0-2.0*t),6.0*t*(1.0-t)/(hi-lo));
+}
+fn crewSurface(v:CrewInput)->CrewSurface {
+  let actor=actors[v.instance];let p=v.position;let f=actor.face;
+  let headY=select(1.5998,1.5496,actor.skin.w>.5);
+  if(p.y<=headY+.015){return CrewSurface(p,v.normal);}
+  let eyeY=select(1.699,1.656,actor.skin.w>.5);
+  let head=crewRamp(headY+.015,headY+.065,p.y);
+  let jaw=vec2f(1,0)-crewRamp(headY+.06,headY+.13,p.y);
+  let width=1.0+head.x*((f.x-1.0)+(f.y-1.0)*jaw.x);
+  let widthY=head.y*((f.x-1.0)+(f.y-1.0)*jaw.x)+head.x*(f.y-1.0)*jaw.y;
+  let nx=vec2f(1,0)-crewRamp(.012,.045,abs(p.x));
+  let ny0=crewRamp(eyeY-.065,eyeY-.025,p.y);
+  let ny1=vec2f(1,0)-crewRamp(eyeY+.005,eyeY+.04,p.y);
+  let nz=crewRamp(.07,.10,p.z);
+  let nose=nx.x*ny0.x*ny1.x*nz.x;
+  let noseD=vec3f(nx.y*sign(p.x)*ny0.x*ny1.x*nz.x,
+    nx.x*(ny0.y*ny1.x+ny0.x*ny1.y)*nz.x,nx.x*ny0.x*ny1.x*nz.y);
+  let ex0=crewRamp(.015,.026,abs(p.x));
+  let ex1=vec2f(1,0)-crewRamp(.058,.080,abs(p.x));
+  let ey=vec2f(1,0)-crewRamp(.016,.040,abs(p.y-eyeY));
+  let ez=crewRamp(.025,.060,p.z);
+  let eye=ex0.x*ex1.x*ey.x*ez.x;
+  let eyeD=vec3f((ex0.y*ex1.x+ex0.x*ex1.y)*sign(p.x)*ey.x*ez.x,
+    ex0.x*ex1.x*ey.y*sign(p.y-eyeY)*ez.x,ex0.x*ex1.x*ey.x*ez.y);
+  let eyeShift=(p.y-eyeY)*(f.w-1.0);
+  let eyeGradient=eyeShift*eyeD+vec3f(0,(f.w-1.0)*eye,0);
+  // Columns of the deformation Jacobian; cofactor columns transform normals.
+  let dx=vec3f(width,eyeGradient.x,f.z*noseD.x);
+  let dy=vec3f(p.x*widthY,1.0+eyeGradient.y,f.z*noseD.y);
+  let dz=vec3f(0,eyeGradient.z,1.0+f.z*noseD.z);
+  let normal=normalize(cross(dy,dz)*v.normal.x+cross(dz,dx)*v.normal.y+cross(dx,dy)*v.normal.z);
+  return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),normal);
 }
 `;
 export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + CREW_SKIN + SHADOW_SAMPLE + /* wgsl */ `
@@ -31,9 +71,9 @@ struct CrewVertex {
   @location(4) wet:vec2f, @location(5) skin:f32
 };
 @vertex fn vs(v:CrewInput)->CrewVertex {
-  let skin=crewSkin(v);let p=rotateHull((skin*vec4f(v.position,1)).xyz)+hull.origin.xyz;
+  let skin=crewSkin(v);let surface=crewSurface(v);let p=rotateHull((skin*vec4f(surface.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
-  out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;
+  out.world=p;out.normal=normalize(rotateHull((skin*vec4f(surface.normal,0)).xyz));out.color=v.color;
   let actor=actors[v.instance];out.helm=actor.trousers.w;
   let base=u32(actor.hair.w);let y=v.position.y;
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.5,y));
@@ -73,6 +113,6 @@ struct CrewVertex {
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 @group(0) @binding(0) var<uniform> SH:ShadowFrame;
 @vertex fn vs(v:CrewInput)->@builtin(position) vec4f {
-  return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(v.position,1)).xyz),1);
+  return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(crewSurface(v).position,1)).xyz),1);
 }
 `;

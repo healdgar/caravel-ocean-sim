@@ -29,7 +29,13 @@ yard crawling, cannon operation and autonomous steering remain future work.
 
 The prepared male and female GLBs use modestly slimmer bodies and clothing,
 with unchanged skeletons, heights and animation clips. See `assets/crew/README.md`
-for the reproducible preparation and provenance.
+for the reproducible preparation and provenance. Each named sailor has an authored
+appearance: the company includes Black, white and East Asian appearances and two
+redheads, independently of roles or skills. Skin and hair palettes are converted
+from sRGB to linear light; subtle head, jaw, nose and eye morphs run before skinning
+in both colour and shadow passes. Twelve people still share two mesh/animation
+assets and two instanced draws per pass. This is deliberate contemporary casting,
+not a claim about historical demographics.
 
 ## Complement
 

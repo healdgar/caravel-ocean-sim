@@ -5,8 +5,13 @@ clips.
 `sailor-female.glb`: 1,194,264 bytes, 18,408 triangles, 65 joints; the same clips,
 retargeted to the distinct female base mesh with tied hair.
 Each GLB contains all geometry, vertex colours, skeleton and animation.
-Runtime instances share each mesh and vary clothing, skin/hair colours, height
-and animation phase. Six instances of each model form the current company.
+Runtime instances share each mesh and vary clothing, skin/hair colours, height,
+facial proportions and animation phase. Six instances of each model form the
+current company. Individual appearances live in `js/crew.js`; `js/wgsl/crew.js`
+applies bounded head, jaw, nose and eye morphs before animation, including brows
+and hair, with corrected normals and matching shadows. The GLB files and skeletons
+remain unchanged. Black, white and East Asian appearances and red hair are
+intentional artistic choices, independent of jobs and historical demographics.
 
 Original assets: Quaternius [Universal Base Characters](https://quaternius.itch.io/universal-base-characters)
 and [Universal Animation Library](https://quaternius.itch.io/universal-animation-library).
