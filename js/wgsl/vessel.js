@@ -98,6 +98,9 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
 `;
 
 export const CANVAS_OPTICS = /* wgsl */ `
+// Reduced fibre/medium index contrast lowers scattering when damp. This modest
+// optical adjustment is authored, not a measured historical canvas coefficient.
+fn canvasWetDepth(wet:f32)->f32 {return 1.0-0.18*clamp(wet,0.0,1.0);}
 fn canvasThickness(uv:vec2f,material:u32)->f32 {
   let seamDistance=abs(fract(uv.x*10.0)-0.5);
   let seam=1.0-smoothstep(0.004,0.013+max(fwidth(seamDistance),0.001),seamDistance);

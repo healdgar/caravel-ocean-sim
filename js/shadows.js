@@ -48,7 +48,7 @@ export function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
   return out;
 }
 
-export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048}) {
+export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
   const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
   const uniform=device.createBuffer({label:'vessel shadow frame',size:112,usage:B.UNIFORM|B.COPY_DST});
@@ -58,6 +58,8 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   const views=[solid.createView(),canvas.createView(),transmission.createView()];
   const compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'});
   const linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
+  const fallback=wetness?[]:[device.createBuffer({size:8,usage:B.STORAGE}),device.createBuffer({size:mesh.length/9*4,usage:B.STORAGE})];
+  const moisture=wetness?.state??fallback[0],lookup=wetness?.lookup??fallback[1];
   const module=await shader(SHADOW_CAST,'vessel shadows');
   const pipes=await Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({
     label:cloth?'canvas shadows':'solid shadows',layout:'auto',
@@ -71,6 +73,7 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   })));
   const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
     {binding:0,resource:{buffer:hullUBO}},{binding:1,resource:{buffer:uniform}},
+    {binding:2,resource:{buffer:moisture}},{binding:3,resource:{buffer:lookup}},
   ]}));
   const indices=[parts.solid,parts.canvas].map(values=>{
     const b=device.createBuffer({size:Math.max(4,values.byteLength),usage:B.INDEX|B.COPY_DST});
@@ -98,6 +101,6 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
       {binding:0,resource:{buffer:uniform}},{binding:1,resource:views[0]},{binding:2,resource:compare},
       {binding:3,resource:views[1]},{binding:4,resource:views[2]},{binding:5,resource:linear},
     ]});},
-    destroy(){solid.destroy();canvas.destroy();transmission.destroy();uniform.destroy();for(const b of indices)b.destroy();},
+    destroy(){solid.destroy();canvas.destroy();transmission.destroy();uniform.destroy();for(const b of [...indices,...fallback])b.destroy();},
   };
 }

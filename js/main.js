@@ -4,6 +4,7 @@ import { createAdaptiveResolution } from './resolution.js';
 import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
+import { createSurfaceWetness } from './wetness.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
 import { crewWorkLabel } from './crew-work.js';
 import { createCrew, CAPTAIN_ORDERS } from './crew.js';
@@ -352,15 +353,17 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   const hullUBO = mkBuf(HULL_UNIFORM_BYTES, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(HULL_UNIFORM_BYTES / 4);
-  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader});
+  const wetness=await createSurfaceWetness({device,mesh:caravelMesh,hullUBO,frameUBO,computePipe});
+  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness});
   const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let crew=null,crewError='';
-  try { crew=await createCrew({device,frameUBO,hullUBO,transView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA}); }
+  try { crew=await createCrew({device,frameUBO,hullUBO,transView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
   const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
+  wetness.connect(interaction,spindrift,fullArr(dispTex),samplerSim);
   const bgFoamUpd = [0, 1].map(i => [0, 1].map(w => bg(foamUpdPipe, [{ buffer: foamUBO }, lvl(foamW[1 - i], 0), lvl(foamW[i], 0),
     fullArr(dispTex), fullArr(derivTex), samplerSim, samplerSim, { buffer: interaction.uniform }, interaction.views[w], interaction.sampler], 'foamupd' + i)));
 
@@ -497,7 +500,8 @@ async function main() {
     for (let m=1;m<waterMips;m++) waterMipGroups.push(bg(waterFilterPipe,
       [lvl(waterCopy,m-1,'2d'),lvl(waterCopy,m,'2d')], 'water reflection mip'));
     bgCaravel = bg(caravelPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp,
-      envCubeView, { buffer: sunVisBuf }, { buffer: hullUBO }, waterCopy.createView(), fullArr(dispTex), samplerSim, oakTex.createView(), oakSampler, interaction.deck.view], 'caravel');
+      envCubeView, { buffer: sunVisBuf }, { buffer: hullUBO }, waterCopy.createView(), fullArr(dispTex), samplerSim, oakTex.createView(), oakSampler, interaction.deck.view,
+      {buffer:wetness.state}, {buffer:wetness.lookup}], 'caravel');
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
     bloomTex = device.createTexture({ size: [bw, bh], format: HDR, mipLevelCount: bloomLevels, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
@@ -1137,6 +1141,7 @@ async function main() {
     }
     interaction.encode(cp);
     spindrift.encode(cp);
+    wetness.encode(cp,boat.showProw && boat.effects!==false);
     // foam clipmaps
     foamCur = 1 - foamCur;
     cp.setPipeline(foamUpdPipe);
@@ -1225,6 +1230,7 @@ async function main() {
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     crew?.update(boat,dt,P.windSpeed);
+    wetness.updateCrew(crew?.state,boat);
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
     if (needSpectrum) writeSimStatic();

@@ -7,21 +7,24 @@ struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 export const SHADOW_CAST = SHADOW_FRAME + VESSEL_RIG + CANVAS_OPTICS + /* wgsl */ `
 @group(0) @binding(0) var<uniform> hull:Hull;
 @group(0) @binding(1) var<uniform> SH:ShadowFrame;
+@group(0) @binding(2) var<storage,read> moisture:array<vec2f>;
+@group(0) @binding(3) var<storage,read> wetLookup:array<u32>;
 struct ShadowVertex {
   @builtin(position) position:vec4f,
   @location(0) normal:vec3f,
   @location(1) uv:vec2f,
   @location(2) @interpolate(flat) material:u32,
+  @location(3) wet:f32,
 };
-@vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) material:f32,@location(3) uv:vec2f)->ShadowVertex {
+@vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) material:f32,@location(3) uv:vec2f,@builtin(vertex_index) index:u32)->ShadowVertex {
   let rig=rigVertex(position,normal,material,uv);
   var out:ShadowVertex;
   out.position=SH.lightView*vec4f(rotateHull(rig.position*rig.scale),1.0);
-  out.normal=normalize(rotateHull(rig.normal/rig.scale));out.uv=uv;out.material=u32(material);
+  out.normal=normalize(rotateHull(rig.normal/rig.scale));out.uv=uv;out.material=u32(material);out.wet=moisture[wetLookup[index]].x;
   return out;
 }
 @fragment fn canvasFS(in:ShadowVertex)->@location(0) vec4f {
-  return vec4f(canvasTransmission(canvasThickness(in.uv,in.material),abs(dot(normalize(in.normal),SH.sun.xyz))),1.0);
+  return vec4f(canvasTransmission(canvasThickness(in.uv,in.material)*canvasWetDepth(in.wet),abs(dot(normalize(in.normal),SH.sun.xyz))),1.0);
 }
 `;
 

@@ -11,8 +11,8 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/sim.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js'];
-const order = ['js/hull.js', 'js/rigging.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/profiler.js', 'js/resolution.js', 'js/main.js'];
+const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js'];
+const order = ['js/hull.js', 'js/rigging.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/profiler.js', 'js/resolution.js', 'js/main.js'];
 const stripModuleSyntax = (src) => src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
@@ -66,6 +66,7 @@ minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/gltf.js'), 'utf8'
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew-work.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew-pose.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew.js'), 'utf8'));
+minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/wetness.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sharing.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/shadows.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/deck.js'), 'utf8'));

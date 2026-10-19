@@ -1280,7 +1280,8 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       device.queue.writeBuffer(vertexBuffer,0,vertices);
       const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
       const hullUBO=buffer(144,B.UNIFORM|B.COPY_DST);
-      const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256});
+      const wetState=buffer(8,B.STORAGE|B.COPY_DST),wetLookup=buffer(vertices.length/9*4,B.STORAGE);
+      const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256,wetness:{state:wetState,lookup:wetLookup}});
       const module=await shader(SHADOW_SAMPLE+`
         @group(0) @binding(0) var<storage,read> points:array<vec4f>;
         @group(0) @binding(1) var<storage,read_write> result:array<vec4f>;
@@ -1326,7 +1327,9 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       hull.fill(0,0,12);hull[0]=1;hull[5]=1;hull[10]=-1;
       const oblique=await sample([Math.SQRT1_2,Math.SQRT1_2,0],[[-2*S,0,0],[3-2*S,0,0],[-4*S,0,0],[0,3*S,0],[6,0,0]]);
       const hidden=await sample([0,1,0],locations,false),night=await sample([0,-1,0],locations);
-      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night,water,choppy,thinSurface,waterHidden};
+      device.queue.writeBuffer(wetState,0,new Float32Array([1,1]));
+      const wetCloth=await sample([0,1,0],locations);
+      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night,water,choppy,thinSurface,waterHidden,wetCloth};
     });
     assert.deepEqual(result.errors,[]);
     for(const values of [result.overhead,result.moved,result.tilted,result.oblique]){
@@ -1335,6 +1338,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       assert.ok(values[4]>values[5] && values[5]>values[6],'canvas shadow retains warm transmission');
       assert.ok(values[8]>0.99 && values[12]>0.99,'outside/above the caster stays lit');
     }
+    assert.ok(result.wetCloth[4]>result.overhead[4]+.04 && result.wetCloth[4]<.65,'wet canvas reduces scattering without becoming clear');
     assert.ok(result.overhead[16]>0.99,'caster surface must not shadow itself');
     assert.ok(result.water[0]<0.25,'a broad hull shadow survives water scattering');
     assert.ok(result.water[4]>result.water[5] && result.water[5]>result.water[6],'water preserves warm canvas transmission');
@@ -1603,3 +1607,150 @@ for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
     } finally { await page.close(); }
   });
 }
+
+test('surface moisture follows water, spray, moving sails and crew, then dries and resets', {timeout:120000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__wet_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    await page.goto(`${origin}/__wet_test`);
+    const result=await page.evaluate(async()=>{
+      const {createSurfaceWetness,createWetnessData}=await import('/js/wetness.js');
+      const {HULL_VERTICAL_SCALE:S,hullDeck}=await import('/js/hull.js');
+      const {SPRAY_COUNT,SHEET_COUNT}=await import('/js/wgsl/interaction.js');
+      const {SPINDRIFT_COUNT}=await import('/js/wgsl/spindrift.js');
+      const {SAIL_PLAN}=await import('/js/sailing.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
+      device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,T=GPUTextureUsage;
+      const buffer=(size,usage=B.STORAGE)=>device.createBuffer({size,usage:usage|B.COPY_DST});
+      const shader=async(code,label)=>{
+        const module=device.createShaderModule({code,label});
+        const info=await module.getCompilationInfo();
+        const errors=info.messages.filter(m=>m.type==='error');
+        if(errors.length)throw Error(label+': '+errors.map(e=>e.message).join('\n'));
+        return module;
+      };
+      const computePipe=async(code,label)=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:await shader(code,label),entryPoint:'main'}});
+      // One probe each: submerged exterior, dry deck, sheltered cabin, exposed
+      // wood/rope/canvas at the same height, high dry rigging, actual moving sail.
+      const plan=SAIL_PLAN[0],sail=[0,plan.top-plan.height+.28,plan.z-plan.belly*Math.sin(Math.PI*.88)];
+      const positions=[[2,-.3,0,15],[0,hullDeck(0),0,0],[0,1.1,4,1],
+        [2.1,3,0,10],[2.1,3,0,2],[2.1,3,0,9],[2,8,0,2],[...sail,9.0625]];
+      const mesh=new Float32Array(positions.flatMap(([x,y,z,mat])=>[x,y,z,0,1,0,mat,.5,1]));
+      const descriptors=createWetnessData(mesh);
+      const hull=new Float32Array(36);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;hull.set([1,1,1,1],24);hull.set([0,0,1,1],28);hull[35]=-1;
+      const hullUBO=buffer(144,B.UNIFORM),frameUBO=buffer(512,B.UNIFORM),uniform=buffer(64,B.UNIFORM);
+      device.queue.writeBuffer(hullUBO,0,hull);
+      const sea=device.createTexture({size:[1,1,6],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      const deck=device.createTexture({size:[1,1],format:'rgba32float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      const drops=buffer(SPRAY_COUNT*48),sheets=buffer(SHEET_COUNT*64),plumes=buffer(SPINDRIFT_COUNT*64);
+      const wet=await createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe});
+      wet.connect({uniform,drops,sheets,deck:{view:deck.createView()}},{plumes},sea.createView({dimension:'2d-array'}),device.createSampler());
+      const read=buffer(wet.probeCount*8,B.MAP_READ),control=new Float32Array(16);control[6]=.1;control[9]=1;
+      const writeControl=()=>device.queue.writeBuffer(uniform,0,control);
+      async function sample(frames=1){
+        writeControl();const enc=device.createCommandEncoder(),cp=enc.beginComputePass();
+        for(let i=0;i<frames;i++)wet.encode(cp);cp.end();
+        enc.copyBufferToBuffer(wet.state,0,read,0,wet.probeCount*8);device.queue.submit([enc.finish()]);
+        await read.mapAsync(GPUMapMode.READ);const values=Array.from(new Float32Array(read.getMappedRange()));read.unmap();
+        return positions.map((_,i)=>values.slice(descriptors.lookup[i]*2,descriptors.lookup[i]*2+2)).concat([values.slice(wet.crewOffset*2,wet.crewOffset*2+8)]);
+      }
+      function drop(x,y,z){device.queue.writeBuffer(drops,0,new Float32Array([x,y,z,10,0,0,0,0,0,0,0,0]));}
+      const dry=await sample(10);
+      drop(2.1,3*S,0);const sprayed=await sample(30);
+      device.queue.writeBuffer(drops,0,new Float32Array(12));const drained=await sample(50);
+      // A covered tiller space is not wet just because an external wave is high.
+      const seaBytes=new Uint16Array(6*4);seaBytes[1]=0x4400; // 4 m in cascade zero
+      device.queue.writeTexture({texture:sea},seaBytes,{bytesPerRow:8,rowsPerImage:1},[1,1,6]);
+      const highSea=await sample(10);
+      device.queue.writeTexture({texture:deck},new Float32Array([.2,0,.9,0]),{bytesPerRow:16},[1,1]);
+      const washed=await sample(10);
+      device.queue.writeTexture({texture:sea},new Uint16Array(24),{bytesPerRow:8,rowsPerImage:1},[1,1,6]);
+      device.queue.writeTexture({texture:deck},new Float32Array(4),{bytesPerRow:16},[1,1]);
+      // Wet the deployed foot, then furl/brace it; moisture remains attached.
+      drop(sail[0],sail[1]*S,sail[2]);const sailWet=await sample(40);
+      hull[24]=0;hull[28]=.7;device.queue.writeBuffer(hullUBO,0,hull);
+      device.queue.writeBuffer(drops,0,new Float32Array(12));const furled=await sample(1);
+      wet.updateCrew({crew:[{position:[-2,3*S,0],scale:[1,1,1],visible:true}]},{beam:3.6,length:12});
+      drop(-2,3*S+.08,0);const crewWet=await sample(40);
+      wet.updateCrew({crew:[{position:[0,5*S,1],scale:[1,1,1],visible:true}]},{beam:3.6,length:12});
+      device.queue.writeBuffer(drops,0,new Float32Array(12));const crewMoved=await sample(1);
+      control[7]=1;const reset=await sample(1);control[7]=0;
+      drop(2.1,3*S,0);await sample(5);control[9]=0;const disabled=await sample(1);
+      control[9]=1;device.queue.writeBuffer(drops,0,new Float32Array(12));
+      device.queue.writeBuffer(sheets,0,new Float32Array([2.1,3*S,0,.2,0,0,0,5,0,1,0,1,1,0,0,.5]));
+      const sheetWet=await sample(30);
+      control[7]=1;await sample();control[7]=0;device.queue.writeBuffer(sheets,0,new Float32Array(16));
+      device.queue.writeBuffer(plumes,0,new Float32Array([2.1,3*S,0,0,0,0,0,5,1,0,0,.2,1,0,0,0]));
+      const crestWet=await sample(30);
+      wet.destroy();device.destroy();return {errors,dry,sprayed,drained,highSea,washed,sailWet,furled,crewWet,crewMoved,reset,disabled,sheetWet,crestWet};
+    });
+    assert.deepEqual(result.errors,[]);
+    assert.ok(result.dry[0][0]>.8,'submerged exterior absorbs water');
+    for(let i=1;i<8;i++)assert.deepEqual(result.dry[i],[0,0],'no spontaneous moisture on a dry surface');
+    for(const i of [3,4,5])assert.ok(result.sprayed[i][0]>.1,'actual particle positions wet wood, rope and canvas');
+    assert.deepEqual(result.sprayed[6],[0,0],'dry high rigging is not soaked by global wind');
+    for(const i of [3,4,5]){
+      assert.ok(result.drained[i][0]<result.sprayed[i][0]);
+      assert.ok(result.drained[i][0]>result.sprayed[i][0]*.9,'absorbed moisture persists');
+      assert.ok(result.drained[i][1]<result.sprayed[i][1]*.5,'surface film drains faster');
+    }
+    const retention=i=>result.drained[i][0]/result.sprayed[i][0];
+    assert.ok(retention(4)>retention(3)&&retention(3)>retention(5),'rope dries slower than timber, canvas faster');
+    assert.equal(result.highSea[1][0],0,'external sea cannot wet sheltered deck through the hull');
+    assert.equal(result.highSea[2][0],0,'quarterdeck protects the cabin');
+    assert.ok(result.washed[1][0]>.8,'retained deck wash wets planks');
+    assert.ok(result.sailWet[7][0]>.1,'deployed sail catches local spray');
+    assert.ok(result.furled[7][0]>result.sailWet[7][0]*.99,'furling retains wetness');
+    assert.ok(result.crewWet[8][0]>.1 && result.crewWet[8][6]===0,'boots can get wet without the head');
+    assert.ok(result.crewMoved[8][0]>result.crewWet[8][0]*.99,'crew carry damp clothes when moving');
+    assert.ok(result.reset.flat().every(v=>v===0));assert.ok(result.disabled.flat().every(v=>v===0));
+    assert.ok(result.sheetWet[3][0]>.1,'impact sheet lips deposit moisture');
+    assert.ok(result.crestWet[3][0]>.03,'wind-blown crest plumes deposit moisture');
+  }finally{await page.close();}
+});
+
+test('wet materials visibly shade the ship and crew and return to their dry appearance', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:128,height:96}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      const request=GPUAdapter.prototype.requestDevice;
+      GPUAdapter.prototype.requestDevice=async function(...args){
+        const device=await request.apply(this,args),create=device.createBuffer.bind(device);
+        device.createBuffer=desc=>{const b=create(desc);if(desc.label==='surface moisture')check.moisture=b;return b;};
+        return device;
+      };
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,...args){
+        if(!check.freezeScene || buffer.label==='surface moisture')return write.call(this,buffer,...args);
+      };
+      const labels=new WeakMap(),set=GPUComputePassEncoder.prototype.setPipeline,dispatch=GPUComputePassEncoder.prototype.dispatchWorkgroups;
+      GPUComputePassEncoder.prototype.setPipeline=function(p){labels.set(this,p.label);return set.call(this,p);};
+      GPUComputePassEncoder.prototype.dispatchWorkgroups=function(...args){if(!check.freezeScene && labels.get(this)!=='surface moisture')return dispatch.apply(this,args);};
+    });
+    await page.goto(`${origin}/?view=ship&boatSpeed=0&sunElev=35&clouds=0&windSpeed=2&swellHs=.1&w=128&h=96`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
+    const render=()=>page.evaluate(async()=>{check.callback(1000);await check.device.queue.onSubmittedWorkDone();});
+    await render();
+    const capture=()=>page.evaluate(async()=>{
+      const texture=check.target,bytesPerRow=Math.ceil(texture.width*4/256)*256;
+      const read=check.device.createBuffer({size:bytesPerRow*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+      const enc=check.device.createCommandEncoder();enc.copyTextureToBuffer({texture},{buffer:read,bytesPerRow},[texture.width,texture.height]);
+      check.device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const values=Array.from(new Uint8Array(read.getMappedRange()));read.unmap();read.destroy();return values;
+    });
+    // Freeze asynchronous buoyancy readbacks, rotating environment updates and
+    // uniforms too; equal timestamps alone do not freeze the rendered scene.
+    await page.evaluate(()=>check.freezeScene=true);
+    await render();const dry=await capture();
+    await page.evaluate(()=>check.device.queue.writeBuffer(check.moisture,0,new Float32Array(check.moisture.size/4).fill(1)));
+    await render();const wet=await capture();
+    await page.evaluate(()=>check.device.queue.writeBuffer(check.moisture,0,new Float32Array(check.moisture.size/4)));
+    await render();const restored=await capture();
+    const rms=(a,b)=>Math.sqrt(a.reduce((sum,x,i)=>sum+(x-b[i])**2,0)/a.length);
+    assert.ok(rms(dry,wet)>1,'material state changes visible shading');
+    assert.ok(rms(dry,restored)<rms(dry,wet)*.05,`dry state restores material response: restored ${rms(dry,restored)}, wet ${rms(dry,wet)}`);
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});

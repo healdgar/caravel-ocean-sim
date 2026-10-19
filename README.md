@@ -175,6 +175,33 @@ A 32 × 96 hull-local water field samples the displaced sea at the rails. Overto
 
 The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull on the sampled surface. Large crests can still overtop it.
 
+### Wet timber, rigging, canvas and crew
+
+Porous surfaces retain moisture where waves, deck wash or spray actually reach
+them. Hull planks, rails, masts, yards, ropes and sails carry their wet patches
+when the ship moves or the rig furls. Sheltered deck surfaces use retained deck
+water instead of the external ocean height; the quarterdeck protects the tiller
+space. Wind alone does not wet the upper rigging.
+
+Wet timber darkens and becomes more reflective; a fresh film softens fine grain
+normals and adds sheen. Rope darkens but stays rough. Canvas darkens while
+remaining matte, with a modest reduction in optical scattering shared by its
+backlighting and transmitted shadows. Reduced wet-fabric reflectance follows
+[the observed effect of water on textile scattering](https://onlinelibrary.wiley.com/doi/10.1002/app.1973.070170317);
+the coefficients here are authored, not measurements of historical sailcloth.
+Crew use four moving exposure probes each: clothing darkens, with a smaller
+fresh-water highlight on skin.
+
+Surface film fades within seconds; absorbed moisture dries over minutes, faster
+in wind. Rope dries slower than wood, canvas faster. These are visual rates:
+absorbed water does not yet change sail weight, drape, strength or ship stability.
+Spray exposure uses a transient 24 × 32 × 48 grid around the vessel, populated by
+the existing impact sheets, droplets and crest plumes. Around 8,900 material
+probes interpolate wetness across the mesh; sea contact uses a 32 × 32 cache of
+the displaced six-cascade ocean. The extra GPU storage is below 1 MB and adds no
+draw passes. Fine spray occlusion and detailed cloth/skin absorption are
+approximations. Disabling ship effects clears wetness and skips its updates.
+
 ### Shading
 
 - Mip-mapped first and second moments of the wave slopes (LEAN mapping) give the right anisotropic roughness at every distance. The sun glitter widens with distance and the far sea settles into a sheen without aliasing. Screen-space slope derivatives add specular anti-aliasing.
@@ -262,6 +289,7 @@ The suite covers:
 - Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll-energy dissipation and unchanged wave response. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
+- Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
 - Bounded foam production and decay, cloud clearing/occlusion/advection, temporal-history invalidation, sky scheduling, bloom toggling, and resizing down to 1 × 1.
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - JavaScript and WGSL initialization in all three standalone builds.
@@ -302,6 +330,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and ribbon rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
+| `js/wetness.js`, `js/wgsl/wetness.js` | Persistent material moisture, spray exposure, cached sea contact and crew probes |
 | `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
 | `js/caravel.js` | Hull, continuous foredeck, quarterdeck, swivel cannon, lookout, rigging, sails, and helm geometry |

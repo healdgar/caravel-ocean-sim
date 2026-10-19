@@ -24,15 +24,22 @@ export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + CREW_SKIN 
 @group(0) @binding(5) var sampC:sampler;
 @group(0) @binding(6) var envCube:texture_cube<f32>;
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
+@group(0) @binding(8) var<storage,read> moisture:array<vec2f>;
 struct CrewVertex {
   @builtin(position) position:vec4f, @location(0) world:vec3f,
-  @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32
+  @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
+  @location(4) wet:vec2f, @location(5) skin:f32
 };
 @vertex fn vs(v:CrewInput)->CrewVertex {
   let skin=crewSkin(v);let p=rotateHull((skin*vec4f(v.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;
   let actor=actors[v.instance];out.helm=actor.trousers.w;
+  let base=u32(actor.hair.w);let y=v.position.y;
+  let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.5,y));
+  let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.08,1.55,y));
+  out.wet=mix(lower,upper,smoothstep(.5,1.08,y));
+  out.skin=select(0.0,1.0,distance(v.color,vec3f(.36,.18,.10))<.001);
   if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
   if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=actor.shirt.rgb;}
   if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=actor.trousers.rgb;}
@@ -53,7 +60,12 @@ struct CrewVertex {
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS-1}.0).rgb;
   let sea=textureSampleLevel(envCube,sampC,vec3f(0,-1,0),${ENV_MIPS-1}.0).rgb;
   let ambient=sky*(.5+.5*n.y)+sea*.15*(.5-.5*n.y);
-  let col=v.color*(direct*max(dot(n,sun),0.0)/PI+ambient);
+  let wet=clamp(v.wet,vec2f(0),vec2f(1));
+  let albedo=v.color*mix(1.0,mix(.68,.92,v.skin),wet.x);
+  let view=normalize(F.camPos.xyz-v.world);let halfway=normalize(view+sun);
+  // Damp cloth stays matte; exposed skin carries a modest fresh-water highlight.
+  let gloss=mix(.004,.035,v.skin)*wet.y*pow(max(dot(n,halfway),0.0),mix(8.0,32.0,v.skin));
+  let col=albedo*(direct*max(dot(n,sun),0.0)/PI+ambient)+direct*gloss*max(dot(n,sun),0.0);
   let fog=exp(-F.fogExt.rgb*length(v.world-F.camPos.xyz));
   return vec4f(col*fog+sky*(1.0-fog),1);
 }

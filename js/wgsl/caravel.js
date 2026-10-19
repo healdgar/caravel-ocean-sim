@@ -17,6 +17,8 @@ export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG +
 @group(0) @binding(10) var oakAlbedo: texture_2d<f32>;
 @group(0) @binding(11) var oakSampler: sampler;
 @group(0) @binding(12) var deckWater: texture_2d<f32>;
+@group(0) @binding(13) var<storage,read> moisture:array<vec2f>;
+@group(0) @binding(14) var<storage,read> wetLookup:array<u32>;
 ` + SKY_RENDER_FUNCS + DECK_SAMPLING + /* wgsl */ `
 struct BoatVertex {
   @builtin(position) pos: vec4f,
@@ -26,8 +28,9 @@ struct BoatVertex {
   @location(3) @interpolate(flat) material: u32,
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
+  @location(6) wet:vec2f,
 };
-@vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f) -> BoatVertex {
+@vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let rig=rigVertex(position,normal,material,uv);
   let relative = rotateHull(rig.position * rig.scale) + hull.origin.xyz - F.camPos.xyz;
   var o: BoatVertex;
@@ -35,7 +38,7 @@ struct BoatVertex {
   o.world = relative + F.camPos.xyz;
   o.normal = normalize(rotateHull(rig.normal / rig.scale));
   o.local = position;
-  o.material = u32(material); o.normalLocal = normal; o.uv=uv;
+  o.material = u32(material); o.normalLocal = normal; o.uv=uv;o.wet=moisture[wetLookup[index]];
   return o;
 }
 fn oceanHeight(p: vec2f) -> f32 {
@@ -66,6 +69,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
 }
 @fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
   let p = in.local;
+  var wet=clamp(in.wet,vec2f(0),vec2f(1));
+  if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}
   var n = normalize(in.normal) * select(-1.0,1.0,front);
   let grainUV = in.uv;
   let timber = pow(textureSample(oakAlbedo, oakSampler, grainUV).rgb, vec3f(2.2));
@@ -82,7 +87,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   n = normalize(n - clamp(gradient,vec3f(-0.12),vec3f(0.12)) * select(1.0,0.1,in.material == 3u || in.material == 8u));
   var albedo = timber * vec3f(1.08,0.94,0.74);
   var rough = clamp(0.74 + (0.2-relief)*0.18,0.64,0.85); var metal = 0.0;
-  let canvasDepth=canvasThickness(in.uv,in.material);
+  let canvasDepth=canvasThickness(in.uv,in.material)*canvasWetDepth(wet.x);
   let plank = floor((p.x+1.8)/0.18);
   albedo *= 0.82 + 0.2 * fract(sin(plank*74.17)*4321.1);
   // Fine end-grain joints, splits, and oxidised grain.
@@ -124,9 +129,15 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   if(in.material == 16u) { albedo=timber*vec3f(0.13,0.12,0.10); rough=0.85; }
   if(in.material == 17u) { albedo=timber*vec3f(1.3,1.02,0.62); rough=0.62; }
-  if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){
-    let deckWet=sampleDeck(deckUV(p)).z;
-    albedo*=mix(1.0,0.52,deckWet);rough=mix(rough,0.28,deckWet);
+  if(in.material==2u || in.material==12u){
+    albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);
+  }else if(in.material==9u || in.material==13u){
+    albedo*=mix(1.0,.72,wet.x);rough=mix(.95,.84,wet.x);
+  }else if(in.material!=3u && in.material!=4u && in.material!=8u && in.material!=11u){
+    // Water fills fine grain before the absorbed colour dries. Keep broad timber relief.
+    albedo*=mix(1.0,.55,wet.x);
+    rough=mix(rough,.32,wet.x);rough=mix(rough,.22,wet.y*.65);
+    n=normalize(mix(n,normalize(in.normal)*select(-1.0,1.0,front),wet.y*.55));
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let h=normalize(v+l); let nv=clamp(dot(n,v),0.001,1.0); let nl=clamp(dot(n,l),0.0,1.0);
