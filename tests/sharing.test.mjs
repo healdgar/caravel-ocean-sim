@@ -72,3 +72,11 @@ test('sailing links preserve propulsion and individual sail targets; old speed l
   assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6')),'manual');
   assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6&propulsion=sail')),'sail');
 });
+
+test('speed and wind instrument visibility survives sharing independently',()=>{
+  for(const speedHud of [true,false])for(const windHud of [true,false]){
+    const link=new URL(createShareLink('https://example.com/',{}, {...boat,speedHud,windHud},'boat'));
+    assert.equal(link.searchParams.get('speedHud'),speedHud?'1':'0');
+    assert.equal(link.searchParams.get('windHud'),windHud?'1':'0');
+  }
+});

@@ -2,7 +2,7 @@ import {lateenSheetTarget} from '../js/lateen.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { apparentWind, sailingState, sailForces, advanceSails, SAIL_AREAS, windAtHeight } from '../js/sailing.js';
-import { stepBoatSurge, stepBoatRotation, boatHydrodynamics, boatForwardSpeed, KNOT_TO_MPS } from '../js/boat.js';
+import { stepBoatSurge, stepBoatSteering, stepBoatRotation, boatHydrodynamics, boatForwardSpeed, KNOT_TO_MPS } from '../js/boat.js';
 import { HULL_VERTICAL_SCALE } from '../js/hull.js';
 
 const vessel = extra => ({ propulsion:'sail', speed:6, heading:0, length:20, beam:6, sailFore:1, sailMain:1, sailMizzen:1, ...extra });
@@ -30,7 +30,7 @@ test('apparent wind subtracts vessel velocity and respects compass heading',()=>
 
 test('thrust requires wind, raised canvas and a sailable angle; pressure scales with wind squared',()=>{
   assert.equal(trimmed(vessel(),0).forward,0);
-  assert.ok(trimmed(vessel(),7,0).forward===0);
+  assert.ok(trimmed(vessel(),7,0).forward<0,'luffing canvas retains wind drag');
   assert.equal(trimmed(vessel({sailFore:0,sailMain:0,sailMizzen:0})).forward,0);
   const normal=trimmed(vessel()),double=trimmed(vessel(),14),half=trimmed(vessel({sailFore:.5,sailMain:.5,sailMizzen:.5}));
   assert.ok(normal.forward>1000);
@@ -66,7 +66,7 @@ test('raising and lowering takes time; bare poles coast under drag and retain wa
 
 test('wind angles produce distinct speeds and mirrored tacks give mirrored heel and leeway',()=>{
   const head=sail(vessel(),120,7,0),reach=sail(vessel()),run=sail(vessel(),120,7,180),other=sail(vessel(),120,7,-90);
-  assert.equal(boatForwardSpeed(head),0);
+  assert.ok(boatForwardSpeed(head)<0,'headwind produces sternway rather than cancelling every force');
   assert.ok(reach.surgeVelocity>run.surgeVelocity && run.surgeVelocity>0.5);
   assert.ok(Math.abs(reach.surgeVelocity-other.surgeVelocity)<1e-8);
   assert.ok(Math.abs(reach.leewayVelocity+other.leewayVelocity)<1e-8);
@@ -203,4 +203,32 @@ test('rapid wave slopes cannot prescribe roll velocity; long swells still move t
     }
     assert.ok(Math.abs(b[axis])<.002);
   }
+});
+
+test('wind-driven sternway gives reverse rudder response without helm-triggered thrust',()=>{
+  const straight=vessel({rudder:0,rudderTarget:0}),over=vessel({rudder:30,rudderTarget:30});
+  for(let i=0;i<600;i++){
+    // Hold headings identical to isolate propulsion from subsequent steering.
+    stepBoatSurge(straight,0,.1,8,Math.PI/2);stepBoatSurge(over,0,.1,8,Math.PI/2);
+    assert.equal(over.surgeVelocity,straight.surgeVelocity,'helm cannot add reverse force');
+    assert.deepEqual(over.sailState.rig,straight.sailState.rig,'helm cannot automatically back or trim sails');
+  }
+  assert.ok(straight.surgeVelocity<-.2,'wind develops sternway with the rudder centred');
+  for(const rudder of [-30,30])for(const dt of [.1,1/60]){
+    const b=vessel({rudder:0,rudderTarget:rudder});let released=0,minSpeed=0;
+    for(let t=0;t<360;t+=dt){
+      // Centre as the sail starts drawing. Do not force a guaranteed beam-on
+      // turn: the time/angle depend on wind, inertia and the sail polar.
+      if(!released&&Math.abs(b.sailState?.apparentAngle??0)>=52*Math.PI/180){released=t;b.rudderTarget=0;}
+      stepBoatSurge(b,0,dt,8,Math.PI/2);stepBoatSteering(b,0,dt);
+      minSpeed=Math.min(minSpeed,b.surgeVelocity);
+      assert.ok(!b.sailState.maneuver);
+    }
+    assert.ok(released>100&&released<230);assert.ok(minSpeed<-.2);
+    assert.ok(b.surgeVelocity>.2,'drawing sails gradually recover forward motion');
+    const signedHeading=((b.heading+180)%360)-180;
+    assert.ok(signedHeading*rudder<0,'sternway reverses the rudder turn');
+  }
+  const stopped=vessel({rudder:30,rudderTarget:30,surgeVelocity:0});
+  stepBoatSteering(stopped,0,1);assert.equal(stopped.heading,0,'rudder alone cannot turn a stopped ship');
 });

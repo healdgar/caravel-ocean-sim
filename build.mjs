@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js'];
-const order = ['js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/main.js'];
+const order = ['js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/main.js'];
 const stripModuleSyntax = (src) => src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
@@ -84,6 +84,7 @@ minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/terrain.js'), 'ut
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/landfall.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/profiler.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/resolution.js'), 'utf8'));
+minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/instruments.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/main.js'), 'utf8'));
 
 function findEsbuild() {

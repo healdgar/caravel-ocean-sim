@@ -331,6 +331,14 @@ npm run build
 npm test
 ```
 
+The October 19 macOS/Metal run passed 132 of 134 tests, including all new physics,
+instrument/mobile checks and 810 GPU rig-clearance poses. Two older exact-pixel
+comparisons (indexed HDR rendering and packed wave reads) differed. The indexed
+comparison passed in isolation; the packed comparison also failed on the prior
+published commit `57549ef`, and two identical renderer runs differed by two
+one-level color channels. These strict assertions remain unchanged; the complete
+suite is not reported as green. Real iPhone performance was not remeasured.
+
 The suite covers:
 
 - Both crew rigs and grounded clip bounds, balanced twelve-person roster, deck clearance and separation, replaceable captain orders, gradual canvas changes, hidden-character independence, two six-instance GPU draws, animated shadows, embedded assets and mobile panel reachability.
@@ -338,7 +346,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes, quarterdeck camera support and forward sightlines on resized hulls; camera checks cover windward boarding and smooth tack changes.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses and fixed deck leads; loaded versus slack motion, sewn-rope attachment, and physical triangle-to-rope clearance including rope thickness across both tacks, partial furling and complete yard transfers; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Recovery checks verify identical propulsion at centered/hard-over helm, passive wind-driven sternway in both directions, reverse steering, resuming sail after centering, and no yard transfers during wind oscillations. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses and fixed deck leads; loaded versus slack motion, sewn-rope attachment, and physical triangle-to-rope clearance including rope thickness across both tacks, partial furling and complete yard transfers; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
@@ -377,7 +385,8 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
-| `js/lateen.js`, `js/wgsl/lateen.js` | Independent lateen poses, sequential yard transfers, sheet leads and matching CPU/GPU motion |
+| `js/lateen.js`, `js/wgsl/lateen.js` | Routine tacks, ordered yard transfers, cloth supports, sheet leads and matching CPU/GPU motion |
+| `js/instruments.js` | Optional signed speed and apparent wind HUD, recovery cues and local preferences |
 | `js/rig-plan.js` | Digitized d’Albertis lateen sail/mast coordinates and uniform hull-scale conversion |
 | `js/gltf.js`, `js/crew.js`, `js/crew-work.js`, `js/crew-pose.js`, `js/rigging.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
 | `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
@@ -454,24 +463,50 @@ about 5.6 seconds of attended work from fully set to fully furled, plus travel
 and climbing time (roughly a minute for the first complete fore/main operation). The percentage readouts show actual
 canvas while the sliders show the requested amount. Each lateen gathers along
 its diagonal yard. Each sail trims around that yard with an independent sheet angle;
-the yards remain fore-and-aft on the leeward side of their masts. Loaded canvas holds
+the yards remain fore-and-aft beside their masts. Loaded canvas holds
 its camber; rapid luffing belongs to slack or poorly trimmed sails. Sewn edge ropes
 follow the same deformation as the cloth.
 
-A sustained change of tack initiates a crew-attended maneuver: gather all canvas,
-align the bundles, raise and steepen one yard, pass it abaft its mast, lower it,
-then repeat for the other yards. Once all three are across, the crew sheets and
-sets the captain's requested canvas. Handling takes about a minute after the deck
-hands arrive; climbers descend before runners are eased. The ship loses sail drive
-while canvas is gathered and keeps its momentum and wave response. Readouts show
-actual exposed canvas and the Captain panel reports the maneuver.
+Routine tacks leave the yards in place. On the bad tack, wind reverses the canvas
+camber against a smooth mast/rig support envelope; the clew stays on the yard's
+side. Drive is reduced by an authored 28% coefficient, not a measured Niña polar.
+Wind oscillations in irons never initiate yard transfer.
 
-Both quarters carry sheet leads. The working sheet changes with tack; the lazy
-sheet hangs below the foot and returns across the deck. Halyards support fixed
-slings along the yards, with separate tack lines at their forward heels. Windward
-runners remain taut; leeward runners and paired running stays gather beside their
-masts. Rope geometry stays continuous in the visible and shadow passes: there are
-no intersection masks or contact dimples. The fore stay remains led to the bowsprit.
+Use **Captain → Transfer yards** to move the yards to leeward for a longer leg.
+The order is available on the bad tack, outside 55° apparent wind angle and in
+at least 0.5 m/s apparent wind. It gathers all canvas, aligns the bundles, raises
+and steepens one yard, passes it abaft its mast, lowers it, then repeats for the
+other yards. The crew sets the captain's requested canvas afterward. Handling
+takes about a minute after deck hands arrive; climbers descend first. An underway
+transfer finishes even if the wind changes. The ship retains momentum and wave
+response while sail drive is reduced.
+
+Both quarters carry sheet leads. The working sheet follows the physical yard/clew
+side; the lazy sheet hangs below the foot and returns across the deck. Halyards
+support fixed slings along the yards, with separate tack lines at their forward
+heels. Yard-side runners and paired running stays remain gathered beside the masts;
+the opposite set remains taut. This clearance arrangement does not solve the change
+in stay tensions on the bad tack. Rope geometry remains continuous in visible and
+shadow passes; no intersection masks are used. The fore stay leads to the bowsprit.
+
+**Recovering from irons:** luffing canvas retains wind drag, so a stalled ship can
+develop sternway with the rudder centered. Putting the rudder over then turns the
+ship through the backward water flow, with reversed steering. Center it (**X** or
+**Centre rudder**) as the sails begin drawing again. Helm input never adds thrust,
+backs sails, or changes sheet trim. Recovery is not guaranteed to reach a beam-on
+heading; wind, canvas, inertia and existing sail coefficients determine the turn.
+The HUD distinguishes astern drift from forward speed. Explicit crew-operated
+backing of sails is not implemented. [US Sailing's guidance](https://www.ussailing.org/news/getting-in-and-out-of-irons/)
+describes actual sail backing; this simulator currently models passive canvas
+windage and water-flow steering, not that complete crew maneuver.
+
+The optional **speed** and **wind** instruments remain visible when controls close.
+Speed is signed longitudinal speed through water in knots; **ASTERN** identifies
+reverse motion. The wind dial shows **apparent wind from**, relative to the bow
+(always up), plus wind speed in knots. Recovery cues appear below. **Show speed
+indicator** and **Show wind indicator** in boat controls toggle them independently;
+choices persist locally and travel in share links (`speedHud=0`, `windHud=0`).
+`ui=0` also hides both. Instruments update at 10 Hz and do not affect the simulation.
 
 The operating rig is an authored, reconstruction-guided kinematic approximation,
 not a rope-tension or cloth solver. Its sheet leads, released-runner curves, yard

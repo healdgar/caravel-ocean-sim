@@ -1,5 +1,5 @@
 import { vesselDeck } from './hull.js';
-import { mastPoint, RIG_MASTS, standingRiggingLines } from './rigging.js';
+import { mastPoint, RIG_MASTS, standingRiggingLines, standingRopePoint } from './rigging.js';
 import { LATEEN_RIG_PLATE, rigPlatePoint } from './rig-plan.js';
 
 export const SAIL_PLAN=LATEEN_RIG_PLATE.sails.map((s,mast)=>{
@@ -14,7 +14,14 @@ export const rigClamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 export function rigSmooth(a,b,x){const t=rigClamp((x-a)/(b-a));return t*t*(3-2*t);}
 export function lateenSheetTarget(target,mast){return rigClamp(.30+Math.abs(target)*[.76,.72,.68][mast],.30,1.15);}
 export function createLateenPoses(set,side=-1){
-  return Array.from({length:3},(_,i)=>({side,opening:.30,dip:0,fill:0,deployed:set[i]}));
+  return Array.from({length:3},(_,i)=>({side,opening:.30,dip:0,fill:0,deployed:set[i],pressure:1}));
+}
+export function yardTransferAvailable(s){
+  return !s.maneuver && Math.abs(s.apparentAngle)>=55*Math.PI/180 && s.apparentSpeed>=.5 && s.rig.some(p=>p.side!==-s.tack);
+}
+export function requestYardTransfer(s){
+  if(!yardTransferAvailable(s))return false;
+  s.maneuver={side:-s.tack,stage:'gather',mast:0};return true;
 }
 export function advanceLateenRig(s,boat,dt){
   const approach=(value,target,rate)=>value+rigClamp(target-value,-rate*dt,rate*dt);
@@ -23,11 +30,8 @@ export function advanceLateenRig(s,boat,dt){
     for(const p of s.rig)p.side=targetSide;
     s.rigInitialized=true;
   }
-  if(!s.maneuver){
-    const changed=s.rig.some(p=>p.side!==targetSide)&&Math.abs(s.windSide)>.5;
-    s.tackWait=changed?(s.tackWait??0)+dt:0;
-    if(s.tackWait>=.6)s.maneuver={side:targetSide,stage:'gather',mast:0};
-  }
+  // Wind crossing the bow never transfers a yard. The captain orders that
+  // operation explicitly; routine tacks keep canvas and spars in service.
   const m=s.maneuver;
   if(m){
     // Finish an underway transfer before accepting another wind reversal.
@@ -38,8 +42,8 @@ export function advanceLateenRig(s,boat,dt){
         for(const p of s.rig)p.deployed=approach(p.deployed,0,.35*ready);
         if(s.rig.every(p=>p.deployed===0))m.stage='align';
       }else if(m.stage==='align'){
-        for(const p of s.rig)p.opening=approach(p.opening,0,.5);
-        if(s.rig.every(p=>p.opening===0))m.stage='raise';
+        for(const p of s.rig){p.opening=approach(p.opening,0,.5);p.pressure=approach(p.pressure,1,.7);}
+        if(s.rig.every(p=>p.opening===0&&p.pressure===1))m.stage='raise';
       }else if(m.stage==='raise'){
         const p=s.rig[m.mast];p.dip=approach(p.dip,1,.25);
         if(p.dip===1){m.stage='pass';m.angle=Math.acos(p.side);}
@@ -56,12 +60,16 @@ export function advanceLateenRig(s,boat,dt){
       }else{
         const requested=[boat.sailFore??1,boat.sailMain??1,boat.sailMizzen??1].map(v=>rigClamp(v));
         for(let i=0;i<3;i++)s.set[i]=s.rig[i].deployed=approach(s.rig[i].deployed,requested[i],.22*ready);
-        if(s.rig.every((p,i)=>p.deployed===requested[i])){s.maneuver=null;s.tackWait=0;}
+        if(s.rig.every((p,i)=>p.deployed===requested[i]))s.maneuver=null;
       }
     }
   }else{
     for(let i=0;i<3;i++){
       const p=s.rig[i];p.deployed=s.set[i];
+      const windAcross=rigClamp(s.windSide/1.2,-1,1),pressure=windAcross*p.side;
+      p.pressure=approach(p.pressure,pressure,.8);
+      // The clew remains on the yard's side on the bad tack. Wind reverses
+      // camber against the supports; it does not sweep cloth through the mast.
       p.opening=approach(p.opening,lateenSheetTarget(s.lateenTarget,i),.4-i*.035);
     }
   }
@@ -72,6 +80,7 @@ export function advanceLateenRig(s,boat,dt){
 export function writeLateenUniform(h,s){
   for(let i=0;i<3;i++){
     const p=s.rig[i];h[24+i]=p.deployed;h.set([p.opening,p.side,p.dip,p.fill],36+i*4);
+    h[48+i]=p.pressure??1;
   }
 }
 const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
@@ -97,7 +106,7 @@ export function lateenYardPoint(mast,point,pose){
   q[1]+=pose.dip*[.85,1.80,1.35][mast];
   return q.map((v,i)=>v+s.pivot[i]);
 }
-export function lateenClothPoint(mast,u,v,pose,time=0,wind=7){
+export function lateenClothPoint(mast,u,v,pose,time=0,wind=7,contact=true){
   const s=SAIL_PLAN[mast],[a,b]=s.corners,axis=sub(b,a),n=Math.hypot(...axis);
   axis.forEach((x,i)=>axis[i]=x/n);
   // Affine brailing gathers the clew to the middle of the yard. Sending it to
@@ -106,10 +115,32 @@ export function lateenClothPoint(mast,u,v,pose,time=0,wind=7){
   const onYard=a.map((x,i)=>mix(x,b[i],u+clewAlong*v));
   let p=onYard.map((x,i)=>mix(x,rest[i],mix(.012,1,pose.deployed)));
   const belly=27*u*v*Math.max(0,1-u-v),slack=1-rigSmooth(.2,.85,pose.fill);
-  p[0]=pose.side*(p[0]*(.12+.88*pose.fill)+pose.deployed*Math.min(wind/4,1)*belly*
+  p[0]=pose.side*(pose.pressure??1)*(p[0]*(.12+.88*pose.fill)+pose.deployed*Math.min(wind/4,1)*belly*
     (.15*slack*slack*Math.sin(time*7+u*17+v*11)+.003*pose.fill*Math.sin(time*.7)));
   p=rotateAxis(sub(p,a),axis,-pose.side*pose.opening).map((x,i)=>x+a[i]);
-  return lateenYardPoint(mast,p,pose);
+  p=lateenYardPoint(mast,p,pose);
+  return contact&&(pose.pressure??1)<.95 ? supportedCanvas(p,mast,v,pose) : p;
+}
+
+// Cloth bears on the existing mast and rig, on the yard's side. A broad,
+// smooth support envelope spans cloth triangles; it never hides a rope.
+// Supports do not move the sewn luff off its yard.
+const RIG_SUPPORTS=standingRiggingLines();
+function supportedCanvas(point,mast,v,pose){
+  const side=pose.side;let x=point[0]*side;
+  const support=(a,b,r)=>{
+    if(point[1]<Math.min(a[1],b[1])-.2||point[1]>Math.max(a[1],b[1])+.2)return;
+    const t=rigClamp((point[1]-a[1])/(b[1]-a[1])),p=a.map((n,i)=>mix(n,b[i],t));
+    const d2=(point[1]-p[1])**2+(point[2]-p[2])**2,limit=side*p[0]+r+.10-d2/.65;
+    const h=rigClamp(.5+.5*(x-limit)/.06);x=mix(limit,x,h)+.06*h*(1-h);
+  };
+  for(let i=0;i<3;i++){const m=RIG_MASTS[i];support(mastPoint(i,vesselDeck(m.z)),mastPoint(i,m.height),m.r);}
+  for(const line of RIG_SUPPORTS){
+    const t=rigClamp((point[1]-line.a[1])/(line.b[1]-line.a[1]));
+    const q=standingRopePoint(line,t,pose),a=[q[0],line.a[1],q[2]],b=[q[0],line.b[1],q[2]];
+    support(a,b,line.r);
+  }
+  point[0]=mix(point[0],side*x,rigSmooth(0,.08,v));return point;
 }
 
 // Two sheets stay led to opposite quarters: the working sheet carries load,

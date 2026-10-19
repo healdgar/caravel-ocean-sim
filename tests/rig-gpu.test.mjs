@@ -16,7 +16,7 @@ test('rendered lateen rig has physical clearance on both tacks, while reefing, l
     await page.route('**/__rig',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(`http://localhost:${port}/__rig`);
     const result=await page.evaluate(async()=>{
       const {VESSEL_RIG}=await import('/js/wgsl/vessel.js');
-      const {SAIL_PLAN,RIG_LINES,RIG_SEGMENTS,ropeParameter,lateenRestPoint,lateenClothPoint,lateenYardPoint,writeLateenUniform,createLateenPoses}=await import('/js/lateen.js');
+      const {SAIL_PLAN,RIG_LINES,RIG_SEGMENTS,ropeParameter,lateenRestPoint,lateenClothPoint,lateenYardPoint,writeLateenUniform,createLateenPoses,requestYardTransfer}=await import('/js/lateen.js');
       const {RIG_MASTS,mastPoint}=await import('/js/rigging.js');
       const {vesselDeck}=await import('/js/hull.js');
       const {sailingState,advanceSails,sailForces}=await import('/js/sailing.js');
@@ -45,7 +45,7 @@ test('rendered lateen rig has physical clearance on both tacks, while reefing, l
       const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
-      const hull=buffer(192,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST),output=buffer(n*32,B.STORAGE|B.COPY_SRC),read=buffer(n*32,B.MAP_READ|B.COPY_DST);
+      const hull=buffer(208,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST),output=buffer(n*32,B.STORAGE|B.COPY_SRC),read=buffer(n*32,B.MAP_READ|B.COPY_DST);
       device.queue.writeBuffer(input,0,new Float32Array(points));
       const module=device.createShaderModule({code:VESSEL_RIG+`
         @group(0) @binding(0) var<uniform> hull:Hull;
@@ -61,21 +61,34 @@ test('rendered lateen rig has physical clearance on both tacks, while reefing, l
       for(const [fill,time]of [[1,0],[1,.2],[0,0],[0,.2]]){
         const poses=createLateenPoses([1,1,1]);poses.forEach(p=>Object.assign(p,{opening:.6,fill}));states.push({poses,time,label:`motion ${fill}/${time}`});
       }
-      for(const side of [-1,1])for(const opening of [.3,.6,1.15])for(const deployed of [0,.25,.5,1])for(const fill of [0,1]){
-        const poses=createLateenPoses([deployed,deployed,deployed],side);poses.forEach(p=>Object.assign(p,{opening,fill}));states.push({poses,time:states.length*.137,label:`set ${side}/${opening}/${deployed}/${fill}`});
+      for(const side of [-1,1])for(const opening of [.3,.6,1.15])for(const deployed of [0,.25,.5,1])for(const fill of [0,1])for(const pressure of [-1,0,1]){
+        const poses=createLateenPoses([deployed,deployed,deployed],side);poses.forEach(p=>Object.assign(p,{opening,fill,pressure}));states.push({poses,time:states.length*.137,label:`set ${side}/${opening}/${deployed}/${fill}/${pressure}`});
       }
       for(const wind of [0,Math.PI]){
         const b={length:20,beam:6,heading:0,sailFore:1,sailMain:1,sailMizzen:1};
         for(let i=0;i<60;i++)advanceSails(b,.1,12,wind);
+        for(let i=0;i<80;i++)advanceSails(b,.1,12,wind+Math.PI);
+        requestYardTransfer(sailingState(b));
         for(let i=0;i<800;i++){
           advanceSails(b,.1,12,wind+Math.PI);sailForces(b,12,wind+Math.PI,0);const s=sailingState(b);
           if(i%2===0)states.push({poses:s.rig.map(p=>({...p})),time:i*.1,label:`transfer ${wind}/${s.maneuver?.stage}/${s.maneuver?.mast}/${i}`});
           if(i>10&&!s.maneuver)break;
         }
       }
+      // Follow actual trim/load transitions, including repeated wind reversals
+      // in irons, rather than testing only perfectly settled end poses.
+      for(const side of [-1,1]){
+        const b={length:20,beam:6,heading:0,sailFore:1,sailMain:1,sailMizzen:1};
+        for(let i=0;i<60;i++)advanceSails(b,.1,12,side<0?Math.PI:0);
+        for(let i=0;i<200;i++){
+          const wind=i<100?(side<0?0:Math.PI):Math.PI/2+.08*Math.sin(i*.2);
+          advanceSails(b,.1,12,wind);sailForces(b,12,wind,0);const s=sailingState(b);
+          if(i%4===0)states.push({poses:s.rig.map(p=>({...p})),time:i*.1,label:`routine ${side}/${i}`});
+        }
+      }
       const failures=[],captures=[];let parity=0,normalError=0;
       for(const [stateIndex,state]of states.entries()){
-        const h=new Float32Array(48);h[12]=6;h[13]=20;h[19]=state.time;h[34]=14;writeLateenUniform(h,{rig:state.poses});device.queue.writeBuffer(hull,0,h);
+        const h=new Float32Array(52);h[12]=6;h[13]=20;h[19]=state.time;h[34]=14;writeLateenUniform(h,{rig:state.poses});device.queue.writeBuffer(hull,0,h);
         const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.dispatchWorkgroups(Math.ceil(n/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,n*32);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
         const values=new Float32Array(read.getMappedRange()).slice();read.unmap();if(!values.every(Number.isFinite))throw Error('Non-finite rig vertex');
         const p=i=>Array.from(values.subarray(i*8,i*8+3));

@@ -1,6 +1,7 @@
 import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_STATION_Z, HELM_TILLER_DISTANCE, tillerPoint } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
+import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
@@ -27,6 +28,7 @@ export const CAPTAIN_ORDERS = [
   {id:'furl',label:'Furl all sails',detail:'Take in the canvas and coast.',sails:[0,0,0]},
   {id:'weather',label:'Prepare for heavy weather',detail:'Shorten sail and secure the main hatch.',sails:[.2,.2,0]},
   {id:'watch',label:'Resume sea watch',detail:'Return to routine duties; retain the current sail setting.'},
+  {id:'transfer',label:'Transfer yards',detail:'Move yards to leeward for this leg. Gathers canvas; takes about a minute.'},
 ];
 const CREW_SHIRTS=[[.55,.47,.31],[.23,.31,.36],[.38,.15,.10],[.30,.32,.18],[.48,.36,.22],[.38,.38,.35]];
 // Individual art direction, independent of role and policy. Colours are sRGB bytes;
@@ -62,6 +64,7 @@ export function createCompany(policy=deckhandDecision) {
 }
 export function issueCaptainOrder(company,boat,id) {
   const order=CAPTAIN_ORDERS.find(o=>o.id===id);if(!order)return false;
+  if(id==='transfer')return requestYardTransfer(sailingState(boat));
   company.order=id;company.revision++;company.pending=!!order.sails;
   boat.crewSailRate=new Float64Array(3);
   if(order.sails){boat.propulsion='sail';for(let i=0;i<3;i++)boat[SAIL_KEYS[i]]=order.sails[i];}
@@ -88,7 +91,7 @@ function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='ha
 export function companyStatus(company) {
   const bracing=company.crew.filter(s=>s.intent==='brace').length;
   if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
-  if(company.rigManeuver)return 'Changing tack · gathering canvas and handling yards';
+  if(company.rigManeuver)return 'Transferring yards · gathering canvas and handling spars';
   if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
   if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
   return company.order==='watch'?`Sea watch · 12 aboard${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;

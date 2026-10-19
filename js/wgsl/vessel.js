@@ -3,7 +3,7 @@ import { LATEEN_MOTION } from './lateen.js';
 // Shared deformation keeps visible geometry, wetness and shadow casters coincident.
 export const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
-  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3> };
+  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3>, lateenPressure:vec4f };
 fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
 ${LATEEN_MOTION}
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };

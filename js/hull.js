@@ -9,7 +9,7 @@ export function hullScale(length = DEFAULT_BOAT_LENGTH, beam = DEFAULT_BOAT_BEAM
   return [beam / HULL_DESIGN_BEAM, HULL_VERTICAL_SCALE, length / HULL_DESIGN_LENGTH];
 }
 export const HULL_DRAFT = 1.2;
-export const HULL_UNIFORM_BYTES = 192; // transform, controls, apparent wind, three independent lateen poses
+export const HULL_UNIFORM_BYTES = 208; // transform, controls, lateen poses and pressure sides
 export const HULL_BOW_RAKE = 1.45;
 export const HULL_STERN_RAKE = 0.5;
 export const HULL_SECTION_POWER = 0.65;

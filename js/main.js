@@ -1,4 +1,5 @@
-import { writeLateenUniform } from './lateen.js';
+import { createSailingInstruments } from './instruments.js';
+import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { createVolumetricClouds } from './clouds.js';
 import { createTerrain } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
@@ -889,6 +890,7 @@ async function main() {
   const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
   effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
   effectsLabel.append(effectsToggle); boatBody.append(effectsLabel);
+  const instruments=createSailingInstruments(boat,qs,boatBody);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
   cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
   const cameraButtons=new Map();
@@ -934,7 +936,11 @@ async function main() {
   function updateCrewUI(){
     if(!crew)return;
     const status=crew.status();if(crewStatus.textContent!==status)crewStatus.textContent=status;
-    for(const [id,button] of orderButtons)button.setAttribute('aria-pressed',String(crew.state.order===id));
+    for(const [id,button] of orderButtons){
+      const sails=sailingState(boat);
+      button.setAttribute('aria-pressed',String(id==='transfer'?!!sails.maneuver:crew.state.order===id));
+      if(id==='transfer'){button.disabled=!yardTransferAvailable(sails);button.title=sails.maneuver?'Transfer underway':yardTransferAvailable(sails)?'Move yards to leeward':'Available on the bad tack, once clear of the wind';}
+    }
     if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${crewWorkLabel(s)}`;
   }
   const shareButton = document.createElement('button');
@@ -974,9 +980,16 @@ async function main() {
     const css=document.documentElement.style;
     css.setProperty('--view-top',top+'px');css.setProperty('--view-height',height+'px');
     css.setProperty('--keyboard-inset',Math.max(0,innerHeight-top-height)+'px');
-    css.setProperty('--controls-bottom',(cameraDock.getBoundingClientRect().bottom+8)+'px');
+    const instrumentsHeight=instruments.root.hidden?0:instruments.root.getBoundingClientRect().height;
+    if(profilePanel && profileDetails.open && matchMedia('(max-width:900px), (pointer:coarse)').matches){
+      const base=cameraDock.getBoundingClientRect().bottom-profilePanel.getBoundingClientRect().height;
+      profilePanel.style.maxHeight=Math.max(0,Math.min(160,height*.24,top+height-base-instrumentsHeight-104))+'px';
+    }else if(profilePanel)profilePanel.style.maxHeight='';
+    const dockBottom=cameraDock.getBoundingClientRect().bottom+8;
+    css.setProperty('--dock-bottom',dockBottom+'px');
+    css.setProperty('--controls-bottom',(dockBottom+(instruments.root.hidden?0:instrumentsHeight+8))+'px');
   };
-  new ResizeObserver(layoutControls).observe(cameraDock);
+  const controlsObserver=new ResizeObserver(layoutControls);controlsObserver.observe(cameraDock);controlsObserver.observe(instruments.root);
   window.visualViewport?.addEventListener('resize',layoutControls);
   window.visualViewport?.addEventListener('scroll',layoutControls);
   addEventListener('resize',layoutControls);layoutControls();
@@ -1051,7 +1064,7 @@ async function main() {
   function showPropulsionControls(){
     speedRow.hidden=boat.propulsion==='sail';sailControls.hidden=boat.propulsion!=='sail';
     note.textContent=boat.propulsion==='sail'
-      ? 'Sails trim automatically. Reef in strong wind; lower all to coast. Waves and inertia continue to affect motion.'
+      ? 'Sails trim automatically. In irons: wind can push the ship astern. The rudder steers that backward flow; centre it as the sails begin drawing again. Captain → Transfer yards is optional on the bad tack.'
       : 'Waves change speed and hull motion. Set the calm-water speed above.';
   }
   propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
@@ -1244,6 +1257,7 @@ async function main() {
     if (fixedDt) dt = fixedDt;
     if(needSpectrum){boat.revision++;targetTime=-1;}
     updateBoat(dt);
+    instruments.update(now);
     updateCamera(dt);
     simTime += dt;
     if (simTime > LOOP) simTime -= LOOP;

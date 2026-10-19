@@ -52,7 +52,7 @@ fore/main plus lateen mizzen for a future model, using the same generic rig code
 The active sail outlines and mast positions now follow the d’Albertis side
 elevation, measured as described below. Hull/decks, working tackles, runners and
 shorter bowsprit retain their existing interpretation. All three sails furl
-independently and tack through the existing shared trim response.
+independently; routine tacks retain yard sides and full transfer is ordered separately.
 
 ### Sail-size audit
 
@@ -105,11 +105,26 @@ yard and rope handling; it does not specify our exact three-masted Niña maneuve
 
 The simulation now separates sheet trim around the diagonal yard from yard
 transfer around the mast. Each yard has its own pose, fixed halyard sling and tack
-line. Paired sheets swap working/lazy roles. Windward runners stay taut while eased
-leeward runners gather alongside the mast. Paired running stays to the waterways
-replace fixed inter-mast stays; the fore stay remains at the bowsprit. All canvas
-is gathered before a yard moves, and yards are raised, passed abaft their masts and
-lowered individually. Extra main/mizzen hoist clears the retained quarterdeck.
+line. Paired sheets follow the clew's physical side. Yard-side runners gather
+alongside the mast and the opposite runners remain taut; this kinematic clearance
+arrangement does not solve load redistribution on the bad tack. Paired running
+stays replace fixed inter-mast stays; the fore stay remains at the bowsprit. All
+canvas is gathered before a yard moves, and yards are raised, passed abaft their
+masts and lowered individually. Extra main/mizzen hoist clears the quarterdeck.
+
+Routine tacks retain yard sides and reverse canvas pressure, using smooth support
+envelopes against masts and rig. The explicit **Transfer yards** captain order
+moves the yards to leeward. The [Mallorca Maritime Museum's San Miguel account](https://museumaritim.conselldemallorca.es/en/-/san-miguel-un-llaut-gran-de-1899)
+describes lateen sailing with the sail on either side of the mast, with different
+efficiency. It supports distinguishing routine tacking from transfer, not our exact
+Niña handling geometry or authored 28% bad-tack drive penalty.
+
+The irons-recovery model retains passive canvas wind drag. Sternway can therefore
+develop independently of helm input. Reverse rudder authority comes only from the
+signed water flow; helm position never applies thrust or commands sail backing.
+[US Sailing's irons-recovery guidance](https://www.ussailing.org/news/getting-in-and-out-of-irons/)
+also describes crew-operated backing of sails, which is not implemented here.
+The passive windage coefficient remains an authored approximation.
 
 These rope leads, hoist distances, release curves and crew sequence are authored
 mechanical accommodations to this hybrid hull and sail plan, not traced details

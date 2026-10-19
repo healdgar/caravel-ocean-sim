@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {advanceSails,sailingState,sailForces} from '../js/sailing.js';
-import {SAIL_PLAN,lateenYardPoint,lateenClothPoint,lateenRopePoint,runningRiggingLines} from '../js/lateen.js';
+import {SAIL_PLAN,requestYardTransfer,lateenYardPoint,lateenClothPoint,lateenRopePoint,runningRiggingLines} from '../js/lateen.js';
 import {standingRiggingLines,standingRopePoint} from '../js/rigging.js';
 import {createCompany,stepCompany,issueCaptainOrder} from '../js/crew.js';
 import {segmentTriangleDistance,segmentDistance,rigClearance} from '../scripts/rig-clearance.mjs';
@@ -26,6 +26,8 @@ test('lateen transfer gathers first, preserves yard length, passes outside the m
   assert.equal(s.maneuver,undefined,'brief wind shifts do not trigger a transfer');
   for(let i=0;i<10;i++)advanceSails(b,.1,8,0);
   b.crewRigRate=[0,0,0];for(let i=0;i<80;i++)advanceSails(b,.1,8,Math.PI);
+  assert.equal(s.maneuver,undefined,'even sustained reversal does not transfer yards automatically');
+  assert.ok(requestYardTransfer(s));assert.equal(requestYardTransfer(s),false,'do not restart a transfer');
   assert.equal(s.maneuver.stage,'gather');assert.ok(s.rig.every(p=>p.dip===0&&p.side===original));
   b.crewRigRate=[1,1,1];const stages=new Set(),transferred=new Set();let previous=s.rig.map((p,i)=>lateenYardPoint(i,SAIL_PLAN[i].pivot,p));
   for(let j=0;j<1000&&s.maneuver;j++){
@@ -68,9 +70,10 @@ test('working sheets swap sides while deck leads stay fixed and leeward runners 
   }
 });
 
-test('deck hands execute a wind reversal and finish without abandoning captain orders',()=>{
+test('deck hands execute an ordered yard transfer and finish without abandoning captain orders',()=>{
   const b=boat(),c=createCompany();
   for(let i=0;i<100;i++){advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);}
+  advanceSails(b,.1,8,Math.PI);assert.ok(issueCaptainOrder(c,b,'transfer'));
   let handled=false;
   for(let i=0;i<2400;i++){
     advanceSails(b,.1,8,Math.PI);stepCompany(c,b,.1,8);
@@ -80,4 +83,17 @@ test('deck hands execute a wind reversal and finish without abandoning captain o
   }
   assert.ok(handled);assert.equal(b.sailState.maneuver,null);assert.ok(b.sailState.rig.every(p=>p.side===-1&&p.deployed===.5));
   assert.equal(c.pending,false);assert.ok(c.crew.every(s=>!s.job));
+});
+
+// Rapid sign changes near headwind used to repeatedly gather and move yards.
+test('routine tacks and oscillating in irons retain yards and exposed canvas',()=>{
+  const b=boat();advanceSails(b,.1,8,0);const s=sailingState(b),side=s.rig.map(p=>p.side);
+  for(let i=0;i<1200;i++){
+    const wind=i<600?Math.PI:Math.PI/2+.02*Math.sin(i*.12);
+    advanceSails(b,.1,8,wind);sailForces(b,8,wind,0);
+    assert.equal(s.maneuver,undefined);assert.deepEqual(s.rig.map(p=>p.side),side);
+    assert.ok(s.rig.every(p=>p.deployed===1&&p.dip===0));
+    if(i===500)assert.ok(s.rig.every(p=>p.pressure<-.99),'bad tack reverses canvas loading without moving the yards');
+    if(i>600)assert.equal(requestYardTransfer(s),false,'transfer unavailable in irons');
+  }
 });

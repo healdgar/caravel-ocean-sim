@@ -56,6 +56,24 @@
   #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
     padding:6px; border-radius:8px; background:#0b0f14ef; border:1px solid #ffffff25; z-index:5; box-sizing:border-box; }
   #camera-dock[hidden] { display:none; }
+  #sailing-instruments { position:fixed; left:12px; top:var(--dock-bottom,120px); z-index:5; display:flex; flex-wrap:wrap;
+    width:352px; max-width:calc(100vw - 24px); box-sizing:border-box; border:1px solid #ffffff35; border-radius:8px;
+    background:#0b171ded; color:#f8f1df; font:12px/1.25 system-ui,sans-serif; pointer-events:none; }
+  #sailing-instruments[hidden], #sailing-instruments [hidden] { display:none; }
+  .instrument-speed { padding:7px 10px; flex:1; }
+  .instrument-label { display:block; font-size:9px; letter-spacing:.05em; color:#c4ccd0; }
+  #sailing-knots { font:600 26px/1.1 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+  #sailing-motion { font-size:10px; letter-spacing:.08em; }
+  .instrument-speed[data-astern=true] { color:#ffca79; }
+  .instrument-wind { display:flex; align-items:center; gap:7px; padding:4px 10px 4px 0; flex:1; }
+  .instrument-wind svg { width:56px; height:56px; flex:none; fill:none; stroke:#839ba6; stroke-width:1; }
+  .instrument-wind svg text { text-anchor:middle; fill:#c4ccd0; stroke:none; font:8px system-ui,sans-serif; }
+  .instrument-wind .wind-bow { fill:#c4ccd0; stroke:none; }
+  #sailing-wind-arrow { stroke:#ffca79; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  #sailing-wind-knots { font:600 19px/1.3 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+  #sailing-wind-direction { white-space:nowrap; font-size:10px; }
+  #sailing-cue { flex:0 0 100%; box-sizing:border-box; padding:4px 10px; border-top:1px solid #ffffff20; font-size:10px; color:#ffca79; }
+  #captain-panel button:disabled { opacity:.5; cursor:default; }
   #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
   #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
   #share-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; flex:0 0 100%; width:min(540px,calc(100vw - 52px)); box-sizing:border-box; padding:5px 0; }
@@ -94,6 +112,7 @@
       max-width:none; display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:4px; padding:4px; }
     #camera-dock > button { grid-column:span 4; min-width:0; padding:6px 3px; }
     #camera-dock > button:nth-of-type(n+4) { grid-column:span 3; }
+    #sailing-instruments { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); max-width:none; width:auto; }
     #camera-dock button, #panel button, #boat-panel button, #captain-panel button, #gpu-profile summary { min-height:44px; }
     #panel, #boat-panel, #captain-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
       bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); top:auto; width:auto;
@@ -122,6 +141,9 @@
     #camera-dock > button, #camera-dock > button:nth-of-type(n+4) { grid-column:span 1; }
     #boat-panel, #panel, #captain-panel { width:min(420px,calc(100vw - 16px)); }
     #gpu-profile pre { max-height:20dvh; }
+    #sailing-instruments { left:auto; width:300px; }
+    .instrument-speed { padding:4px 8px; }
+    .instrument-wind svg { width:44px; height:44px; }
   }
   #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
 </style>
@@ -222,7 +244,7 @@ function hullScale(length = DEFAULT_BOAT_LENGTH, beam = DEFAULT_BOAT_BEAM) {
   return [beam / HULL_DESIGN_BEAM, HULL_VERTICAL_SCALE, length / HULL_DESIGN_LENGTH];
 }
 const HULL_DRAFT = 1.2;
-const HULL_UNIFORM_BYTES = 192; // transform, controls, apparent wind, three independent lateen poses
+const HULL_UNIFORM_BYTES = 208; // transform, controls, lateen poses and pressure sides
 const HULL_BOW_RAKE = 1.45;
 const HULL_STERN_RAKE = 0.5;
 const HULL_SECTION_POWER = 0.65;
@@ -406,7 +428,14 @@ const rigClamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 function rigSmooth(a,b,x){const t=rigClamp((x-a)/(b-a));return t*t*(3-2*t);}
 function lateenSheetTarget(target,mast){return rigClamp(.30+Math.abs(target)*[.76,.72,.68][mast],.30,1.15);}
 function createLateenPoses(set,side=-1){
-  return Array.from({length:3},(_,i)=>({side,opening:.30,dip:0,fill:0,deployed:set[i]}));
+  return Array.from({length:3},(_,i)=>({side,opening:.30,dip:0,fill:0,deployed:set[i],pressure:1}));
+}
+function yardTransferAvailable(s){
+  return !s.maneuver && Math.abs(s.apparentAngle)>=55*Math.PI/180 && s.apparentSpeed>=.5 && s.rig.some(p=>p.side!==-s.tack);
+}
+function requestYardTransfer(s){
+  if(!yardTransferAvailable(s))return false;
+  s.maneuver={side:-s.tack,stage:'gather',mast:0};return true;
 }
 function advanceLateenRig(s,boat,dt){
   const approach=(value,target,rate)=>value+rigClamp(target-value,-rate*dt,rate*dt);
@@ -415,11 +444,8 @@ function advanceLateenRig(s,boat,dt){
     for(const p of s.rig)p.side=targetSide;
     s.rigInitialized=true;
   }
-  if(!s.maneuver){
-    const changed=s.rig.some(p=>p.side!==targetSide)&&Math.abs(s.windSide)>.5;
-    s.tackWait=changed?(s.tackWait??0)+dt:0;
-    if(s.tackWait>=.6)s.maneuver={side:targetSide,stage:'gather',mast:0};
-  }
+  // Wind crossing the bow never transfers a yard. The captain orders that
+  // operation explicitly; routine tacks keep canvas and spars in service.
   const m=s.maneuver;
   if(m){
     // Finish an underway transfer before accepting another wind reversal.
@@ -430,8 +456,8 @@ function advanceLateenRig(s,boat,dt){
         for(const p of s.rig)p.deployed=approach(p.deployed,0,.35*ready);
         if(s.rig.every(p=>p.deployed===0))m.stage='align';
       }else if(m.stage==='align'){
-        for(const p of s.rig)p.opening=approach(p.opening,0,.5);
-        if(s.rig.every(p=>p.opening===0))m.stage='raise';
+        for(const p of s.rig){p.opening=approach(p.opening,0,.5);p.pressure=approach(p.pressure,1,.7);}
+        if(s.rig.every(p=>p.opening===0&&p.pressure===1))m.stage='raise';
       }else if(m.stage==='raise'){
         const p=s.rig[m.mast];p.dip=approach(p.dip,1,.25);
         if(p.dip===1){m.stage='pass';m.angle=Math.acos(p.side);}
@@ -448,12 +474,16 @@ function advanceLateenRig(s,boat,dt){
       }else{
         const requested=[boat.sailFore??1,boat.sailMain??1,boat.sailMizzen??1].map(v=>rigClamp(v));
         for(let i=0;i<3;i++)s.set[i]=s.rig[i].deployed=approach(s.rig[i].deployed,requested[i],.22*ready);
-        if(s.rig.every((p,i)=>p.deployed===requested[i])){s.maneuver=null;s.tackWait=0;}
+        if(s.rig.every((p,i)=>p.deployed===requested[i]))s.maneuver=null;
       }
     }
   }else{
     for(let i=0;i<3;i++){
       const p=s.rig[i];p.deployed=s.set[i];
+      const windAcross=rigClamp(s.windSide/1.2,-1,1),pressure=windAcross*p.side;
+      p.pressure=approach(p.pressure,pressure,.8);
+      // The clew remains on the yard's side on the bad tack. Wind reverses
+      // camber against the supports; it does not sweep cloth through the mast.
       p.opening=approach(p.opening,lateenSheetTarget(s.lateenTarget,i),.4-i*.035);
     }
   }
@@ -464,6 +494,7 @@ function advanceLateenRig(s,boat,dt){
 function writeLateenUniform(h,s){
   for(let i=0;i<3;i++){
     const p=s.rig[i];h[24+i]=p.deployed;h.set([p.opening,p.side,p.dip,p.fill],36+i*4);
+    h[48+i]=p.pressure??1;
   }
 }
 const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
@@ -489,7 +520,7 @@ function lateenYardPoint(mast,point,pose){
   q[1]+=pose.dip*[.85,1.80,1.35][mast];
   return q.map((v,i)=>v+s.pivot[i]);
 }
-function lateenClothPoint(mast,u,v,pose,time=0,wind=7){
+function lateenClothPoint(mast,u,v,pose,time=0,wind=7,contact=true){
   const s=SAIL_PLAN[mast],[a,b]=s.corners,axis=sub(b,a),n=Math.hypot(...axis);
   axis.forEach((x,i)=>axis[i]=x/n);
   // Affine brailing gathers the clew to the middle of the yard. Sending it to
@@ -498,10 +529,32 @@ function lateenClothPoint(mast,u,v,pose,time=0,wind=7){
   const onYard=a.map((x,i)=>mix(x,b[i],u+clewAlong*v));
   let p=onYard.map((x,i)=>mix(x,rest[i],mix(.012,1,pose.deployed)));
   const belly=27*u*v*Math.max(0,1-u-v),slack=1-rigSmooth(.2,.85,pose.fill);
-  p[0]=pose.side*(p[0]*(.12+.88*pose.fill)+pose.deployed*Math.min(wind/4,1)*belly*
+  p[0]=pose.side*(pose.pressure??1)*(p[0]*(.12+.88*pose.fill)+pose.deployed*Math.min(wind/4,1)*belly*
     (.15*slack*slack*Math.sin(time*7+u*17+v*11)+.003*pose.fill*Math.sin(time*.7)));
   p=rotateAxis(sub(p,a),axis,-pose.side*pose.opening).map((x,i)=>x+a[i]);
-  return lateenYardPoint(mast,p,pose);
+  p=lateenYardPoint(mast,p,pose);
+  return contact&&(pose.pressure??1)<.95 ? supportedCanvas(p,mast,v,pose) : p;
+}
+
+// Cloth bears on the existing mast and rig, on the yard's side. A broad,
+// smooth support envelope spans cloth triangles; it never hides a rope.
+// Supports do not move the sewn luff off its yard.
+const RIG_SUPPORTS=standingRiggingLines();
+function supportedCanvas(point,mast,v,pose){
+  const side=pose.side;let x=point[0]*side;
+  const support=(a,b,r)=>{
+    if(point[1]<Math.min(a[1],b[1])-.2||point[1]>Math.max(a[1],b[1])+.2)return;
+    const t=rigClamp((point[1]-a[1])/(b[1]-a[1])),p=a.map((n,i)=>mix(n,b[i],t));
+    const d2=(point[1]-p[1])**2+(point[2]-p[2])**2,limit=side*p[0]+r+.10-d2/.65;
+    const h=rigClamp(.5+.5*(x-limit)/.06);x=mix(limit,x,h)+.06*h*(1-h);
+  };
+  for(let i=0;i<3;i++){const m=RIG_MASTS[i];support(mastPoint(i,vesselDeck(m.z)),mastPoint(i,m.height),m.r);}
+  for(const line of RIG_SUPPORTS){
+    const t=rigClamp((point[1]-line.a[1])/(line.b[1]-line.a[1]));
+    const q=standingRopePoint(line,t,pose),a=[q[0],line.a[1],q[2]],b=[q[0],line.b[1],q[2]];
+    support(a,b,line.r);
+  }
+  point[0]=mix(point[0],side*x,rigSmooth(0,.08,v));return point;
 }
 
 // Two sheets stay led to opposite quarters: the working sheet carries load,
@@ -632,7 +685,7 @@ function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
   for(let i=0;i<SAIL_LOADS.length;i++){
     const panel=SAIL_LOADS[i],lateen=panel.kind==='lateen',deployed=lateen?s.rig[panel.mast].deployed:s.set[panel.mast];
     // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const centreHeight=lateen?lateenClothPoint(panel.mast,1/3,1/3,s.rig[panel.mast],0,0)[1]:panel.top-panel.drop*(.025+.975*deployed);
+    const centreHeight=lateen?lateenClothPoint(panel.mast,1/3,1/3,s.rig[panel.mast],0,0,false)[1]:panel.top-panel.drop*(.025+.975*deployed);
     const height=centreHeight*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
     const lever=Math.max(.1,height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)
       -(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE))*upright;
@@ -640,22 +693,26 @@ function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
     // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
     apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
     const speed=wind.apparentSpeed,angle=Math.abs(wind.apparentAngle),degrees=angle*180/Math.PI;
-    const trim=lateen?Math.max(0,-s.rig[i].side*wind.tack)*Math.max(0,Math.cos(2*(s.rig[i].opening-lateenSheetTarget(wind.lateenTarget,i))))
+    const trim=lateen?Math.max(0,Math.cos(2*(Math.abs(s.rig[i].opening)-lateenSheetTarget(wind.lateenTarget,i))))
       :Math.max(0,Math.cos(2*(s.squareYaw-wind.squareTarget)));
-    const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim;
+    const efficiency=lateen?.72+.28*sailClamp(-s.rig[i].side*wind.tack,0,1):1;
+    const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim*efficiency;
     const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
     const fill=sailSmooth(.5,5,speed)*power;
     if(lateen)s.rig[i].fill=fill;
     s.area+=area;
     if(lateen){s.lateenFill+=fill*area;lateenArea+=area;}else{s.squareFill+=fill*area;squareArea+=area;}
     // Projected area and the horizontal lever both shorten as the vessel heels.
-    const q=.5*1.225*speed*speed*area*power*upright;
+    const pressure=.5*1.225*speed*speed*area*upright,q=pressure*power;
     const drag=.10+1.2*Math.sin(Math.max(0,angle-Math.PI/2))**2;
     const f=speed>1e-6?wind.windForward/speed:0,r=speed>1e-6?wind.windSide/speed:0;
     let lift=1.1*Math.sin(angle)*(1-sailSmooth(90,125,degrees));
     if(f>0)lift=Math.min(lift,.85*drag*Math.abs(r)/f);
-    const side=q*(lift*-f*Math.sign(r)+drag*r);
-    s.forward+=q*(lift*Math.abs(r)+drag*f);s.side+=side;
+    // Luffing canvas retains wind drag and can drive the ship astern.
+    // Helm input never changes this force; the rudder needs actual water flow.
+    const noGo=1-sailSmooth(35,80,degrees),windage=pressure*noGo*.08;
+    const side=q*(lift*-f*Math.sign(r)+drag*r)+windage*r;
+    s.forward+=q*(lift*Math.abs(r)+drag*f)+windage*f;s.side+=side;
     s.panelSide[i]=side;s.panelMoment[i]=-side*lever;s.rollMoment+=s.panelMoment[i];
   }
   s.squareFill=squareArea>0?s.squareFill/squareArea:0;
@@ -930,10 +987,12 @@ fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
   let clewAlong=dot(c[2]-c[0],c[1]-c[0])/dot(c[1]-c[0],c[1]-c[0]);
   var p=mix(mix(c[0],c[1],uv.x+clewAlong*uv.y),position,mix(.012,1.0,deployed));
   let belly=27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);let slack=1.0-smoothstep(.2,.85,fill);
-  p.x=pose.y*(p.x*(.12+.88*fill)+deployed*min(hull.sailWind.z/4.0,1.0)*belly*
+  p.x=pose.y*hull.lateenPressure[id-1u]*(p.x*(.12+.88*fill)+deployed*min(hull.sailWind.z/4.0,1.0)*belly*
     (.15*slack*slack*sin(time*7.0+uv.x*17.0+uv.y*11.0)+.003*fill*sin(time*.7)));
   p=c[0]+rigAxisRotate(p-c[0],normalize(c[1]-c[0]),-pose.y*pose.x);
-  return yardPoint(id,p);
+  p=yardPoint(id,p);
+  if(hull.lateenPressure[id-1u]<.95){p=supportedCanvas(p,id,uv.y);}
+  return p;
 }
 fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
   return sailPoint(position,uv,id,material,anchored);
@@ -941,17 +1000,36 @@ fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec
 fn rigMastPoint(mast:u32,y:f32)->vec3f {
   let m=rigMasts[mast];return vec3f(0,y,m.x+m.z*(y-m.w)/(m.y-m.w));
 }
+fn standingPoint(line:RigLine,t:f32,pose:vec4f)->vec3f {
+  let a=line.a.xyz;let b=line.b.xyz;let side=line.control.z;let kind=u32(line.control.x);let mast=u32(line.control.y);
+  let point=mix(a,b,t);if(kind==2u){return point;}
+  let ease=select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
+  let low=1.0-t;let foot=pow(low,32.0);let y=point.y-.12*sin(3.14159265*t);
+  let axis=rigMastPoint(mast,y);
+  let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
+  return mix(point,clear,ease);
+}
+fn canvasSupport(x:f32,p:vec3f,a:vec3f,b:vec3f,r:f32,side:f32)->f32 {
+  if(p.y<min(a.y,b.y)-.2||p.y>max(a.y,b.y)+.2){return x;}
+  let t=clamp((p.y-a.y)/(b.y-a.y),0.0,1.0);let centre=mix(a,b,t);let delta=p.yz-centre.yz;
+  let limit=side*centre.x+r+.10-dot(delta,delta)/.65;
+  let h=clamp(.5+.5*(x-limit)/.06,0.0,1.0);return mix(limit,x,h)+.06*h*(1.0-h);
+}
+fn supportedCanvas(p:vec3f,id:u32,v:f32)->vec3f {
+  let pose=hull.lateen[id-1u];let side=pose.y;var x=p.x*side;
+  for(var i=0u;i<3u;i++){
+    x=canvasSupport(x,p,rigMastPoint(i,rigMasts[i].w),rigMastPoint(i,rigMasts[i].y),array<f32,3>(${RIG_MASTS.map(m=>m.r)})[i],side);
+  }
+  for(var i=0u;i<${RIG_LINES.filter(l=>['shroud','runner','stay','fall','forestay'].includes(l.kind)).length}u;i++){
+    let line=rigLines[i];let t=clamp((p.y-line.a.y)/(line.b.y-line.a.y),0.0,1.0);let q=standingPoint(line,t,pose);
+    x=canvasSupport(x,p,vec3f(q.x,line.a.y,q.z),vec3f(q.x,line.b.y,q.z),line.a.w,side);
+  }
+  return vec3f(mix(p.x,side*x,smoothstep(0.0,.08,v)),p.yz);
+}
 fn rigRopePoint(index:u32,t:f32)->vec3f {
   let line=rigLines[index];let kind=u32(line.control.x);let mast=u32(line.control.y);let id=mast+1u;
   let side=line.control.z;let pose=hull.lateen[mast];var a=line.a.xyz;var b=line.b.xyz;
-  if(kind<2u){
-    let point=mix(a,b,t);let ease=select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
-    let low=1.0-t;let foot=pow(low,32.0);let y=point.y-.12*sin(3.14159265*t);
-    let axis=rigMastPoint(mast,y);
-    let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,
-      axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
-    return mix(point,clear,ease);
-  }
+  if(kind<3u){return standingPoint(line,t,pose);}
   if(kind==3u){a=sailPoint(sailRestPoint(id,vec2f(0,1)),vec2f(0,1),id,13u,false);}
   if(kind==4u){b=yardPoint(id,line.b.xyz);}
   if(kind==5u){a=yardPoint(id,lateenCorners(id)[1]);}
@@ -978,7 +1056,7 @@ fn ropeFrame(v:vec3f,oldAxis:vec3f,newAxis:vec3f)->vec3f {
 // Shared deformation keeps visible geometry, wetness and shadow casters coincident.
 const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
-  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3> };
+  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3>, lateenPressure:vec4f };
 fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
 ${LATEEN_MOTION}
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
@@ -5452,6 +5530,7 @@ function poseCrewWork(a,s,boat){
 
 
 
+
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
 const CREW_ROSTER = [
@@ -5474,6 +5553,7 @@ const CAPTAIN_ORDERS = [
   {id:'furl',label:'Furl all sails',detail:'Take in the canvas and coast.',sails:[0,0,0]},
   {id:'weather',label:'Prepare for heavy weather',detail:'Shorten sail and secure the main hatch.',sails:[.2,.2,0]},
   {id:'watch',label:'Resume sea watch',detail:'Return to routine duties; retain the current sail setting.'},
+  {id:'transfer',label:'Transfer yards',detail:'Move yards to leeward for this leg. Gathers canvas; takes about a minute.'},
 ];
 const CREW_SHIRTS=[[.55,.47,.31],[.23,.31,.36],[.38,.15,.10],[.30,.32,.18],[.48,.36,.22],[.38,.38,.35]];
 // Individual art direction, independent of role and policy. Colours are sRGB bytes;
@@ -5509,6 +5589,7 @@ function createCompany(policy=deckhandDecision) {
 }
 function issueCaptainOrder(company,boat,id) {
   const order=CAPTAIN_ORDERS.find(o=>o.id===id);if(!order)return false;
+  if(id==='transfer')return requestYardTransfer(sailingState(boat));
   company.order=id;company.revision++;company.pending=!!order.sails;
   boat.crewSailRate=new Float64Array(3);
   if(order.sails){boat.propulsion='sail';for(let i=0;i<3;i++)boat[SAIL_KEYS[i]]=order.sails[i];}
@@ -5535,7 +5616,7 @@ function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='ha
 function companyStatus(company) {
   const bracing=company.crew.filter(s=>s.intent==='brace').length;
   if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
-  if(company.rigManeuver)return 'Changing tack · gathering canvas and handling yards';
+  if(company.rigManeuver)return 'Transferring yards · gathering canvas and handling spars';
   if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
   if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
   return company.order==='watch'?`Sea watch · 12 aboard${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;
@@ -5754,6 +5835,7 @@ function createShareLink(href, settings, boat, cameraMode) {
   url.searchParams.set('prow', boat.showProw ? '1' : '0');
   url.searchParams.set('effects', boat.effects === false ? '0' : '1');
   url.searchParams.set('crew', boat.crew === false ? '0' : '1');
+  for(const key of ['speedHud','windHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
   return url.href;
 }
 
@@ -6500,7 +6582,53 @@ function createAdaptiveResolution(mode = 'auto') {
   };
 }
 
+// ---- js/instruments.js ----
+
+
+function instrumentReadout(boat){
+  const s=sailingState(boat),speed=boatForwardSpeed(boat)/KNOT_TO_MPS;
+  const degrees=s.apparentAngle*180/Math.PI,angle=Math.abs(degrees);
+  const direction=angle<3?'Ahead':angle>177?'Astern':`${Math.round(angle)}° ${degrees<0?'port':'starboard'}`;
+  let cue=pointOfSail(s.apparentAngle,s.apparentSpeed);
+  if(boat.propulsion==='manual')cue='Set-speed mode';
+  else if(s.maneuver)cue='Transferring yards · crew handling rig';
+  else if(speed<-.05)cue=angle>=50&&angle<110&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';
+  else if(angle<42&&s.apparentSpeed>=.5)cue='In irons · rudder needs water flow';
+  else if(s.rig.some(p=>p.pressure<-.5))cue+=' · bad tack';
+  return {speed:(Math.abs(speed)<.05?0:speed).toFixed(1),motion:speed<-.05?'ASTERN':'AHEAD',
+    wind:(s.apparentSpeed/KNOT_TO_MPS).toFixed(1),degrees,direction,calm:s.apparentSpeed<.5,cue};
+}
+
+// Presentation only: the instruments never change the physics or resolution.
+function createSailingInstruments(boat,search,controls){
+  let saved={};try{saved=JSON.parse(localStorage.getItem('sailing-instruments')||'{}')||{};}catch{/* unavailable storage */}
+  const root=document.createElement('aside');root.id='sailing-instruments';root.setAttribute('aria-label','Sailing instruments');
+  root.innerHTML=`<div class="instrument-speed"><span class="instrument-label">SPEED THROUGH WATER</span><div><strong id="sailing-knots">0.0</strong> <span>kn</span></div><span id="sailing-motion">AHEAD</span></div>
+    <div class="instrument-wind"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27"/><path class="wind-bow" d="M29 9 L32 3 L35 9"/><text x="32" y="36">BOW</text><g id="sailing-wind-arrow"><path d="M32 10 V23 M27 18 L32 23 L37 18"/></g></svg><div><span class="instrument-label">APPARENT WIND · FROM</span><div><strong id="sailing-wind-knots">0.0</strong> kn</div><span id="sailing-wind-direction">Ahead</span></div></div>
+    <div id="sailing-cue"></div>`;
+  const speedCard=root.querySelector('.instrument-speed'),windCard=root.querySelector('.instrument-wind');
+  for(const [key,label,card]of [['speedHud','Show speed indicator',speedCard],['windHud','Show wind indicator',windCard]]){
+    boat[key]=search.has(key)?search.get(key)!=='0':saved[key]!==false;
+    const row=document.createElement('label'),input=document.createElement('input');row.textContent=label;
+    input.type='checkbox';input.id='boat-'+key;input.checked=boat[key];card.hidden=!boat[key];
+    input.onchange=()=>{boat[key]=input.checked;card.hidden=!input.checked;try{localStorage.setItem('sailing-instruments',JSON.stringify({speedHud:boat.speedHud,windHud:boat.windHud}));}catch{/* unavailable storage */}update(performance.now(),true);};
+    row.append(input);controls.append(row);
+  }
+  const fields=Object.fromEntries(['knots','motion','wind-knots','wind-direction','cue'].map(key=>[key,root.querySelector('#sailing-'+key)]));
+  const arrow=root.querySelector('#sailing-wind-arrow');let last=-Infinity;
+  function update(now,force=false){
+    root.hidden=search.get('ui')==='0'||(!boat.speedHud&&!boat.windHud);
+    if(root.hidden||(!force&&now-last<100))return;last=now;
+    const r=instrumentReadout(boat);
+    for(const [key,value]of Object.entries({knots:r.speed,motion:r.motion,'wind-knots':r.wind,'wind-direction':r.calm?'Calm':r.direction,cue:r.cue}))if(fields[key].textContent!==value)fields[key].textContent=value;
+    arrow.setAttribute('transform',`rotate(${r.degrees} 32 32)`);arrow.style.opacity=r.calm?'0':'1';
+    speedCard.dataset.astern=String(r.motion==='ASTERN');
+  }
+  document.body.append(root);update(0,true);return {root,update};
+}
+
 // ---- js/main.js ----
+
 
 
 
@@ -7391,6 +7519,7 @@ async function main() {
   const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
   effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
   effectsLabel.append(effectsToggle); boatBody.append(effectsLabel);
+  const instruments=createSailingInstruments(boat,qs,boatBody);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
   cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
   const cameraButtons=new Map();
@@ -7436,7 +7565,11 @@ async function main() {
   function updateCrewUI(){
     if(!crew)return;
     const status=crew.status();if(crewStatus.textContent!==status)crewStatus.textContent=status;
-    for(const [id,button] of orderButtons)button.setAttribute('aria-pressed',String(crew.state.order===id));
+    for(const [id,button] of orderButtons){
+      const sails=sailingState(boat);
+      button.setAttribute('aria-pressed',String(id==='transfer'?!!sails.maneuver:crew.state.order===id));
+      if(id==='transfer'){button.disabled=!yardTransferAvailable(sails);button.title=sails.maneuver?'Transfer underway':yardTransferAvailable(sails)?'Move yards to leeward':'Available on the bad tack, once clear of the wind';}
+    }
     if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${crewWorkLabel(s)}`;
   }
   const shareButton = document.createElement('button');
@@ -7476,9 +7609,16 @@ async function main() {
     const css=document.documentElement.style;
     css.setProperty('--view-top',top+'px');css.setProperty('--view-height',height+'px');
     css.setProperty('--keyboard-inset',Math.max(0,innerHeight-top-height)+'px');
-    css.setProperty('--controls-bottom',(cameraDock.getBoundingClientRect().bottom+8)+'px');
+    const instrumentsHeight=instruments.root.hidden?0:instruments.root.getBoundingClientRect().height;
+    if(profilePanel && profileDetails.open && matchMedia('(max-width:900px), (pointer:coarse)').matches){
+      const base=cameraDock.getBoundingClientRect().bottom-profilePanel.getBoundingClientRect().height;
+      profilePanel.style.maxHeight=Math.max(0,Math.min(160,height*.24,top+height-base-instrumentsHeight-104))+'px';
+    }else if(profilePanel)profilePanel.style.maxHeight='';
+    const dockBottom=cameraDock.getBoundingClientRect().bottom+8;
+    css.setProperty('--dock-bottom',dockBottom+'px');
+    css.setProperty('--controls-bottom',(dockBottom+(instruments.root.hidden?0:instrumentsHeight+8))+'px');
   };
-  new ResizeObserver(layoutControls).observe(cameraDock);
+  const controlsObserver=new ResizeObserver(layoutControls);controlsObserver.observe(cameraDock);controlsObserver.observe(instruments.root);
   window.visualViewport?.addEventListener('resize',layoutControls);
   window.visualViewport?.addEventListener('scroll',layoutControls);
   addEventListener('resize',layoutControls);layoutControls();
@@ -7553,7 +7693,7 @@ async function main() {
   function showPropulsionControls(){
     speedRow.hidden=boat.propulsion==='sail';sailControls.hidden=boat.propulsion!=='sail';
     note.textContent=boat.propulsion==='sail'
-      ? 'Sails trim automatically. Reef in strong wind; lower all to coast. Waves and inertia continue to affect motion.'
+      ? 'Sails trim automatically. In irons: wind can push the ship astern. The rudder steers that backward flow; centre it as the sails begin drawing again. Captain → Transfer yards is optional on the bad tack.'
       : 'Waves change speed and hull motion. Set the calm-water speed above.';
   }
   propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
@@ -7746,6 +7886,7 @@ async function main() {
     if (fixedDt) dt = fixedDt;
     if(needSpectrum){boat.revision++;targetTime=-1;}
     updateBoat(dt);
+    instruments.update(now);
     updateCamera(dt);
     simTime += dt;
     if (simTime > LOOP) simTime -= LOOP;

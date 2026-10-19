@@ -9,11 +9,14 @@ reserves distinct runners, and moving sailors yield to nearby bodies.
 
 `js/rigging.js` supplies the mesh, runner path and grip positions. Two-bone IK
 places alternating hands and simplified boot locks against the actual ropes.
-Climbers use the windward runner and stop below the mast heads. A tack change
-recalls climbers before easing runners. Three deck hands attend the tackle while
+Climbers use the taut runner opposite the yard and stop below the mast heads.
+The **Transfer yards** captain order recalls climbers before easing runners.
+Routine tacks retain the yard side and do not interrupt their work. Three deck hands attend the tackle while
 all canvas gathers and the yards transfer individually; revised captain orders
 determine how much canvas is set afterward. There are no ratline ladders or mast baskets
 in the selected Martínez-Hidalgo reconstruction.
+Automatic sheet trim is not yet a distinct crew animation/job. Helm input does
+not command sail backing; explicit crew-operated backing is not implemented.
 The carpenter closes a hinged hatch over eight seconds. Hands haul actual tackle
 leads; the helmsman follows the player-controlled tiller beneath the quarterdeck. Crew near the helm
 camera fade, while their shadows and exterior appearance remain.

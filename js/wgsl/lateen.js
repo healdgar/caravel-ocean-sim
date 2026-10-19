@@ -42,10 +42,12 @@ fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
   let clewAlong=dot(c[2]-c[0],c[1]-c[0])/dot(c[1]-c[0],c[1]-c[0]);
   var p=mix(mix(c[0],c[1],uv.x+clewAlong*uv.y),position,mix(.012,1.0,deployed));
   let belly=27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);let slack=1.0-smoothstep(.2,.85,fill);
-  p.x=pose.y*(p.x*(.12+.88*fill)+deployed*min(hull.sailWind.z/4.0,1.0)*belly*
+  p.x=pose.y*hull.lateenPressure[id-1u]*(p.x*(.12+.88*fill)+deployed*min(hull.sailWind.z/4.0,1.0)*belly*
     (.15*slack*slack*sin(time*7.0+uv.x*17.0+uv.y*11.0)+.003*fill*sin(time*.7)));
   p=c[0]+rigAxisRotate(p-c[0],normalize(c[1]-c[0]),-pose.y*pose.x);
-  return yardPoint(id,p);
+  p=yardPoint(id,p);
+  if(hull.lateenPressure[id-1u]<.95){p=supportedCanvas(p,id,uv.y);}
+  return p;
 }
 fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
   return sailPoint(position,uv,id,material,anchored);
@@ -53,17 +55,36 @@ fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec
 fn rigMastPoint(mast:u32,y:f32)->vec3f {
   let m=rigMasts[mast];return vec3f(0,y,m.x+m.z*(y-m.w)/(m.y-m.w));
 }
+fn standingPoint(line:RigLine,t:f32,pose:vec4f)->vec3f {
+  let a=line.a.xyz;let b=line.b.xyz;let side=line.control.z;let kind=u32(line.control.x);let mast=u32(line.control.y);
+  let point=mix(a,b,t);if(kind==2u){return point;}
+  let ease=select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
+  let low=1.0-t;let foot=pow(low,32.0);let y=point.y-.12*sin(3.14159265*t);
+  let axis=rigMastPoint(mast,y);
+  let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
+  return mix(point,clear,ease);
+}
+fn canvasSupport(x:f32,p:vec3f,a:vec3f,b:vec3f,r:f32,side:f32)->f32 {
+  if(p.y<min(a.y,b.y)-.2||p.y>max(a.y,b.y)+.2){return x;}
+  let t=clamp((p.y-a.y)/(b.y-a.y),0.0,1.0);let centre=mix(a,b,t);let delta=p.yz-centre.yz;
+  let limit=side*centre.x+r+.10-dot(delta,delta)/.65;
+  let h=clamp(.5+.5*(x-limit)/.06,0.0,1.0);return mix(limit,x,h)+.06*h*(1.0-h);
+}
+fn supportedCanvas(p:vec3f,id:u32,v:f32)->vec3f {
+  let pose=hull.lateen[id-1u];let side=pose.y;var x=p.x*side;
+  for(var i=0u;i<3u;i++){
+    x=canvasSupport(x,p,rigMastPoint(i,rigMasts[i].w),rigMastPoint(i,rigMasts[i].y),array<f32,3>(${RIG_MASTS.map(m=>m.r)})[i],side);
+  }
+  for(var i=0u;i<${RIG_LINES.filter(l=>['shroud','runner','stay','fall','forestay'].includes(l.kind)).length}u;i++){
+    let line=rigLines[i];let t=clamp((p.y-line.a.y)/(line.b.y-line.a.y),0.0,1.0);let q=standingPoint(line,t,pose);
+    x=canvasSupport(x,p,vec3f(q.x,line.a.y,q.z),vec3f(q.x,line.b.y,q.z),line.a.w,side);
+  }
+  return vec3f(mix(p.x,side*x,smoothstep(0.0,.08,v)),p.yz);
+}
 fn rigRopePoint(index:u32,t:f32)->vec3f {
   let line=rigLines[index];let kind=u32(line.control.x);let mast=u32(line.control.y);let id=mast+1u;
   let side=line.control.z;let pose=hull.lateen[mast];var a=line.a.xyz;var b=line.b.xyz;
-  if(kind<2u){
-    let point=mix(a,b,t);let ease=select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
-    let low=1.0-t;let foot=pow(low,32.0);let y=point.y-.12*sin(3.14159265*t);
-    let axis=rigMastPoint(mast,y);
-    let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,
-      axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
-    return mix(point,clear,ease);
-  }
+  if(kind<3u){return standingPoint(line,t,pose);}
   if(kind==3u){a=sailPoint(sailRestPoint(id,vec2f(0,1)),vec2f(0,1),id,13u,false);}
   if(kind==4u){b=yardPoint(id,line.b.xyz);}
   if(kind==5u){a=yardPoint(id,lateenCorners(id)[1]);}

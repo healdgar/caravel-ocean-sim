@@ -1328,7 +1328,7 @@ test('GPU tiller opposes the rudder trailing edge and agrees with port and starb
       const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
       const B = GPUBufferUsage, size = points.length * 16;
       const buffer = (size, usage) => device.createBuffer({ size, usage });
-      const hull = buffer(192, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
+      const hull = buffer(208, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
       const output = buffer(size, B.STORAGE | B.COPY_SRC), read = buffer(size, B.MAP_READ | B.COPY_DST);
       device.queue.writeBuffer(input, 0, new Float32Array(points.flat()));
       const module = device.createShaderModule({ code: VESSEL_RIG + `
@@ -1391,7 +1391,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const vertices=new Float32Array(mesh),vertexBuffer=buffer(vertices.byteLength,B.VERTEX|B.COPY_DST);
       device.queue.writeBuffer(vertexBuffer,0,vertices);
       const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
-      const hullUBO=buffer(192,B.UNIFORM|B.COPY_DST);
+      const hullUBO=buffer(208,B.UNIFORM|B.COPY_DST);
       const wetState=buffer(8,B.STORAGE|B.COPY_DST),wetLookup=buffer(vertices.length/9*4,B.STORAGE);
       const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256,wetness:{state:wetState,lookup:wetLookup}});
       const module=await shader(SHADOW_SAMPLE+`
@@ -1480,7 +1480,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
       const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice();
       const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
-      const hull=buffer(192,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
+      const hull=buffer(208,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
       const output=buffer(n*32,B.STORAGE|B.COPY_SRC),read=buffer(n*32,B.MAP_READ|B.COPY_DST);
       device.queue.writeBuffer(input,0,new Float32Array(points));
       const module=device.createShaderModule({code:VESSEL_RIG+`
@@ -1494,7 +1494,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
         }`});
       const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
       const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const h=new Float32Array(48);h[12]=6;h[13]=20;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
+      const h=new Float32Array(52);h[12]=6;h[13]=20;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
       const samples=[];let full;
       for(const [set,yaw,tack] of [[[1,1,1],0,1],[[.5,.5,.5],0,1],[[0,0,0],0,1],[[0,1,1],0,1],[[1,1,1],.6,-1]]){
         h.set(set,24);h[28]=yaw;h[29]=-yaw;h[35]=tack;
@@ -1681,7 +1681,7 @@ test('mobile panels keep Hide reachable while scrolling, profiling and rotating'
         await page.waitForFunction(()=>{
           const css=getComputedStyle(document.documentElement);
           return Math.abs(parseFloat(css.getPropertyValue('--view-height'))-innerHeight)<1 &&
-            Math.abs(parseFloat(css.getPropertyValue('--controls-bottom'))-document.querySelector('#camera-dock').getBoundingClientRect().bottom-8)<1;
+            Math.abs(parseFloat(css.getPropertyValue('--controls-bottom'))-document.querySelector('#sailing-instruments').getBoundingClientRect().bottom-8)<1;
         },undefined,{polling:20,timeout:2000});
         await page.locator('#boat-controls').evaluate(el=>el.scrollTop=el.scrollHeight);
         await reachable('#boat-panel .collapse');
@@ -1899,9 +1899,9 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
         [2.1,3,0,10],[2.1,3,0,2],[2.1,3,0,9],[2,8,0,2],[...plan.corners[2],13.0625]];
       const mesh=new Float32Array(positions.flatMap(([x,y,z,mat])=>[x,y,z,0,1,0,mat,0,1]));
       const descriptors=createWetnessData(mesh);
-      const hull=new Float32Array(48);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;hull.set([1,1,1,1],24);hull.set([0,0,1,1],28);hull[35]=-1;
+      const hull=new Float32Array(52);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;hull.set([1,1,1,1],24);hull.set([0,0,1,1],28);hull[35]=-1;
       writeLateenUniform(hull,{rig});
-      const hullUBO=buffer(192,B.UNIFORM),frameUBO=buffer(512,B.UNIFORM),uniform=buffer(64,B.UNIFORM);
+      const hullUBO=buffer(208,B.UNIFORM),frameUBO=buffer(512,B.UNIFORM),uniform=buffer(64,B.UNIFORM);
       device.queue.writeBuffer(hullUBO,0,hull);
       const sea=device.createTexture({size:[1,1,6],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
       const deck=device.createTexture({size:[1,1],format:'rgba32float',usage:T.TEXTURE_BINDING|T.COPY_DST});
@@ -2013,6 +2013,31 @@ test('wet materials visibly shade the ship and crew and return to their dry appe
     const rms=(a,b)=>Math.sqrt(a.reduce((sum,x,i)=>sum+(x-b[i])**2,0)/a.length);
     assert.ok(rms(dry,wet)>1,'material state changes visible shading');
     assert.ok(rms(dry,restored)<rms(dry,wet)*.05,`dry state restores material response: restored ${rms(dry,restored)}, wet ${rms(dry,wet)}`);
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
+test('sailing instruments persist independent switches, share overrides, and hide with clean capture UI', {timeout:120000},async()=>{
+  const page=await browser.newPage({viewport:{width:402,height:666}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    const load=async query=>{await page.goto(`${origin}/index.html?boat=1&w=32&h=32&${query}`);await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});};
+    await load('windDir=90&boatHeading=0&windSpeed=8');await step(page,150);
+    assert.equal(await page.locator('#sailing-instruments').isVisible(),true);
+    assert.match(await page.locator('#sailing-cue').textContent(),/In irons/);
+    await page.getByLabel('Show speed indicator',{exact:true}).uncheck();
+    assert.equal(await page.locator('.instrument-speed').isVisible(),false);
+    assert.equal(await page.locator('.instrument-wind').isVisible(),true);
+    await page.getByRole('button',{name:'Toggle boat controls'}).click();
+    assert.equal(await page.locator('.instrument-wind').isVisible(),true,'closing controls leaves navigation visible');
+    await load('');assert.equal(await page.getByLabel('Show speed indicator',{exact:true}).isChecked(),false);
+    await page.getByLabel('Show wind indicator',{exact:true}).uncheck();
+    assert.equal(await page.locator('#sailing-instruments').isVisible(),false);
+    await load('speedHud=1&windHud=0');
+    assert.equal(await page.locator('.instrument-speed').isVisible(),true);
+    assert.equal(await page.locator('.instrument-wind').isVisible(),false);
+    await load('speedHud=1&windHud=1&ui=0');
+    assert.equal(await page.locator('#sailing-instruments').isVisible(),false);
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
   }finally{await page.close();}
 });
