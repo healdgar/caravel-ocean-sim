@@ -7,7 +7,7 @@ import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
 import { crewWorkLabel } from './crew-work.js';
 import { createCrew, CAPTAIN_ORDERS } from './crew.js';
-import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
+import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, stepBoatRoll, KNOT_TO_MPS } from './boat.js';
@@ -616,40 +616,11 @@ async function main() {
   });
   addEventListener('keyup', (e) => { keys[e.code] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
-  let wheelDrag = null, suppressLookClick = false;
+  let suppressLookClick = false;
   canvas.addEventListener('click', () => {
     if(suppressLookClick) { suppressLookClick=false; return; }
     if (cameraMode !== 'ship' && document.pointerLockElement !== canvas) canvas.requestPointerLock?.()?.catch?.(()=>{});
   });
-  const helmPoint = new Float32Array(3);
-  function projectHelm(x,y,z) {
-    // Wheel size stays fixed; its anchor and the eye follow hull length/beam.
-    const px=WHEEL_CENTER[0]*boat.beam/3.6+x-WHEEL_CENTER[0];
-    const pz=(WHEEL_CENTER[2]-HELM_EYE_Z)*boat.length/12+z-WHEEL_CENTER[2];
-    const py=WHEEL_CENTER[1]*HULL_VERTICAL_SCALE+y-WHEEL_CENTER[1]-boat.eye;
-    boatRotate(helmPoint,px,py,pz,boat.heading*D2R,boat.pitch,boat.roll);
-    const m=viewProj,w=m[3]*helmPoint[0]+m[7]*helmPoint[1]+m[11]*helmPoint[2]+m[15];
-    return {x:(0.5+0.5*(m[0]*helmPoint[0]+m[4]*helmPoint[1]+m[8]*helmPoint[2])/w)*canvas.clientWidth,
-      y:(0.5-0.5*(m[1]*helmPoint[0]+m[5]*helmPoint[1]+m[9]*helmPoint[2])/w)*canvas.clientHeight,w};
-  }
-  canvas.addEventListener('pointerdown',(e)=>{
-    if(!boat.enabled || !boat.showProw || document.pointerLockElement || e.button!==0) return;
-    const rect=canvas.getBoundingClientRect(),p=projectHelm(...WHEEL_CENTER),r=projectHelm(WHEEL_CENTER[0]+0.64,WHEEL_CENTER[1],WHEEL_CENTER[2]);
-    const radius=Math.hypot(r.x-p.x,r.y-p.y),x=e.clientX-rect.left-p.x,y=e.clientY-rect.top-p.y;
-    if(p.w<=0 || Math.hypot(x,y)>radius*1.1) return;
-    e.preventDefault(); suppressLookClick=true; canvas.setPointerCapture(e.pointerId);
-    wheelDrag={x:p.x+rect.left,y:p.y+rect.top,angle:Math.atan2(y,x)};
-  });
-  canvas.addEventListener('pointermove',(e)=>{
-    if(!wheelDrag) return;
-    const angle=Math.atan2(e.clientY-wheelDrag.y,e.clientX-wheelDrag.x);
-    let delta=angle-wheelDrag.angle;
-    if(delta>Math.PI)delta-=2*Math.PI; if(delta<-Math.PI)delta+=2*Math.PI;
-    boat.rudderTarget=Math.max(-35,Math.min(35,boat.rudderTarget+delta*35/(2*Math.PI)));
-    wheelDrag.angle=angle;
-  });
-  const releaseWheel=()=>{wheelDrag=null;};
-  canvas.addEventListener('pointerup',releaseWheel); canvas.addEventListener('pointercancel',releaseWheel);
   let dragging = false;
   canvas.addEventListener('mousedown', (e) => { if (e.button === 2 || (cameraMode === 'ship' && e.button === 0)) dragging = true; });
   addEventListener('mouseup', () => { dragging = false; });
@@ -664,11 +635,11 @@ async function main() {
     }
   }
   addEventListener('mousemove', (e) => {
-    if (!wheelDrag && (document.pointerLockElement === canvas || dragging)) turnView(e.movementX,e.movementY);
+    if ((document.pointerLockElement === canvas || dragging)) turnView(e.movementX,e.movementY);
   });
   let touchLook=null;
   canvas.addEventListener('pointerdown',e=>{
-    if(e.pointerType==='mouse'||wheelDrag||e.defaultPrevented||touchLook)return;
+    if(e.pointerType==='mouse'||e.defaultPrevented||touchLook)return;
     e.preventDefault();suppressLookClick=true;touchLook={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove',e=>{
@@ -875,7 +846,7 @@ async function main() {
   boatPanel.id = 'boat-panel';
   boatPanel.setAttribute('aria-labelledby','boat-title');
   boatPanel.innerHTML = `<div class="panel-header"><strong id="boat-title">Boat perspective</strong></div>
-    <div class="panel-body" id="boat-controls"><p>Drag the wheel or use Rudder to steer. Heading 0° follows the original view; 90° turns right.</p></div>`;
+    <div class="panel-body" id="boat-controls"><p>Use Rudder or A/D to steer. The helmsman works the tiller below the quarterdeck. Heading 0° follows the original view; 90° turns right.</p></div>`;
   const boatBody=boatPanel.querySelector('.panel-body');
   panel.before(boatPanel);
   const collapseBoat = document.createElement('button');
@@ -1017,7 +988,7 @@ async function main() {
   const sailControls=document.createElement('div');sailControls.id='sail-controls';boatBody.append(sailControls);
   const sailInputs=[];
   for(const [i,key] of SAIL_KEYS.entries()){
-    const row=document.createElement('label'),name=document.createElement('span');name.textContent=['Fore sails','Main sails','Mizzen sail'][i];
+    const row=document.createElement('label'),name=document.createElement('span');name.textContent=['Fore course','Main course','Mizzen sail'][i];
     const input=document.createElement('input');Object.assign(input,{type:'range',min:0,max:100,step:5,value:boat[key]*100,id:'boat-'+key});
     input.setAttribute('aria-label',name.textContent);
     const output=document.createElement('output');output.textContent=Math.round(boat[key]*100)+'%';

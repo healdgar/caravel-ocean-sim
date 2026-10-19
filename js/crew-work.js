@@ -1,5 +1,5 @@
 import { vesselDeck, HULL_VERTICAL_SCALE } from './hull.js';
-import { shroudGeometry, shroudPoint } from './rigging.js';
+import { shroudGeometry, climbingPoint } from './rigging.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { gltfTRS } from './gltf.js';
 
@@ -11,7 +11,7 @@ const deckPoint=(x,z)=>[x,vesselDeck(z),z];
 function physical(p,boat){return [p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12];}
 function homePoint(s){return deckPoint(s.home[0],s.home[1]);}
 function climbRoot(mast,side,rung,boat){
-  const p=shroudPoint(mast,side,rung);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
+  const p=climbingPoint(mast,side,rung);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
 }
 function routeTo(s,target){
   // Named corridors stay clear of the hatch, mast heels and aft companionway.
@@ -120,7 +120,7 @@ export function crewWorkLabel(s){
   if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';
   if(!s.job)return s.walk>.3?'On rounds':'At station';
   const j=s.job;
-  if(j.stage==='ascending')return 'Climbing ratlines';if(j.stage==='descending')return 'Climbing down';
+  if(j.stage==='ascending')return 'Climbing a runner';if(j.stage==='descending')return 'Climbing down';
   if(j.stage==='approach')return 'Going to work';if(j.stage==='return')return 'Returning to station';
   return {rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind];
 }

@@ -1197,7 +1197,7 @@ test('clouds extinguish the HDR sun and surface light together', {timeout:120000
   }finally{await page.close();}
 });
 
-test('GPU rudder trailing edge and wheel agree with port and starboard steering', { timeout: 30000 }, async () => {
+test('GPU tiller opposes the rudder trailing edge and agrees with port and starboard steering', { timeout: 30000 }, async () => {
   const page = await browser.newPage();
   try {
     await page.route('**/__rudder_test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
@@ -1205,13 +1205,13 @@ test('GPU rudder trailing edge and wheel agree with port and starboard steering'
     const result = await page.evaluate(async () => {
       const { VESSEL_RIG } = await import('/js/wgsl/vessel.js');
       const { createCaravelMesh } = await import('/js/caravel.js');
-      const { WHEEL_CENTER } = await import('/js/hull.js');
+      const { TILLER_HANDLE, tillerPoint } = await import('/js/hull.js');
       const { stepBoatSteering } = await import('/js/boat.js');
       const mesh = createCaravelMesh(), blade = [];
       for (let i = 0; i < mesh.length; i += 9) if (mesh[i + 6] === 14) blade.push([mesh[i], mesh[i + 1], mesh[i + 2], 14]);
       const trailingZ = Math.max(...blade.map(p => p[2]));
       const points = blade.filter(p => p[2] === trailingZ);
-      points.push([WHEEL_CENTER[0], WHEEL_CENTER[1] + 0.5, WHEEL_CENTER[2], 7]);
+      points.push([...TILLER_HANDLE,7]);
       const device = await (await navigator.gpu.requestAdapter()).requestDevice();
       const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
       const B = GPUBufferUsage, size = points.length * 16;
@@ -1238,20 +1238,22 @@ test('GPU rudder trailing edge and wheel agree with port and starboard steering'
         enc.copyBufferToBuffer(output, 0, read, 0, size); device.queue.submit([enc.finish()]);
         await read.mapAsync(GPUMapMode.READ); const values = new Float32Array(read.getMappedRange());
         let trailingX = 0; for (let i = 0; i < points.length - 1; i++) trailingX += values[i * 4] / (points.length - 1);
-        const wheelX = values[(points.length - 1) * 4]; read.unmap();
+        const tillerX = values[(points.length - 1) * 4]; read.unmap();
         const boat = { speed: 6, length: 12, heading: 0, rudder: angle, rudderTarget: angle, yawRate: 0 };
         stepBoatSteering(boat, 0, 1 / 60);
-        samples.push({ angle, trailingX, wheelX, yaw: boat.yawRate });
+        samples.push({ angle, trailingX, tillerX, expectedX:tillerPoint({...boat,beam:3.6})[0], yaw: boat.yawRate });
       }
       device.destroy(); return { samples, errors };
     });
     assert.deepEqual(result.errors, []);
-    for (const { angle, trailingX, wheelX, yaw } of result.samples) {
+    for (const { angle, trailingX, tillerX, expectedX, yaw } of result.samples) {
       if (angle === 0) { assert.ok(Math.abs(trailingX) < 1e-6); assert.equal(yaw, 0); }
       else {
         assert.equal(Math.sign(trailingX), Math.sign(yaw), 'blade trailing edge follows the commanded turn');
         assert.equal(Math.sign(trailingX), Math.sign(angle));
-        if (Math.abs(angle) < 10) assert.equal(Math.sign(wheelX), Math.sign(trailingX), 'clockwise helm agrees with starboard blade motion');
+        assert.equal(Math.sign(tillerX), -Math.sign(trailingX), 'direct tiller moves opposite the rudder trailing edge');
+        // WGSL trig permits small approximation error; keep alignment within 0.1 mm.
+        assert.ok(Math.abs(tillerX-expectedX)<1e-4,`crew grip agrees with GPU steering geometry: ${JSON.stringify({angle,tillerX,expectedX})}`);
       }
     }
   } finally { await page.close(); }
@@ -1385,12 +1387,12 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
         if(!full)full=v;
         const area=[0,0,0],motion=[0,0,0];let normalError=0,fixedError=0,yardHeightError=0;
         for(let i=0;i<n;i++){
-          const material=points[i*9+6],base=Math.floor(material),tag=Math.round(material%1*16),id=tag&7,mast=Math.min(2,Math.floor((id-1)/2));
+          const material=points[i*9+6],base=Math.floor(material),tag=Math.round(material%1*16),id=tag&7,mast=id-1;
           normalError=Math.max(normalError,Math.abs(Math.hypot(...v.subarray(i*8+4,i*8+7))-1));
           const d=Math.hypot(...[0,1,2].map(j=>v[i*8+j]-full[i*8+j]));
           if(base===9||base===13)motion[mast]=Math.max(motion[mast],d);
           if(base===10)yardHeightError=Math.max(yardHeightError,Math.abs(v[i*8+1]-full[i*8+1]));
-          if((tag&8)&&points[i*9+1]<3)fixedError=Math.max(fixedError,Math.hypot(...[0,1,2].map(j=>v[i*8+j]-points[i*9+j]*scale[j])));
+          if((tag&8)&&points[i*9+8]===0)fixedError=Math.max(fixedError,Math.hypot(...[0,1,2].map(j=>v[i*8+j]-points[i*9+j]*scale[j])));
           if(i%3===0&&(base===9||base===13)){
             const a=[0,1,2].map(j=>v[(i+1)*8+j]-v[i*8+j]),b=[0,1,2].map(j=>v[(i+2)*8+j]-v[i*8+j]);
             area[mast]+=.5*Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]);
@@ -1560,7 +1562,7 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     assert.deepEqual(await page.evaluate(()=>check.crewInstances),[6,6]);
     assert.equal(await page.locator('#boat-length').inputValue(), '20');
     assert.equal(await page.locator('#boat-beam').inputValue(), '6');
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),1,'helm view hides its own helmsman');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===19&&v===1).length),0,'the helmsman below the quarterdeck remains visible');
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%32===23&&v===1).length),12,'near-camera transparency is enabled for every sailor');
     await page.getByRole('button',{name:'View ship',exact:true}).click();
     await page.evaluate(()=>check.crewActors=[]);await step(page,100);

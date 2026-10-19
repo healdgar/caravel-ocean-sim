@@ -77,8 +77,7 @@ The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart 
 
 ### Caravel model
 
-The procedural hull is guided by the Martínez-Hidalgo and d’Albertis reconstruction
-plates, with a finer bow, curved stem, full midbody, modest tumblehome and finer
+The procedural vessel follows the Martínez-Hidalgo converted Niña reconstruction, with a finer bow, curved stem, full midbody, modest tumblehome and finer
 underwater stern. [Research, sources and historical limits](CARAVEL_RESEARCH.md)
 distinguish the authored interpretation from measured reconstruction offsets.
 The earlier [generated reference](assets/caravel-design-reference.png) remains
@@ -88,7 +87,10 @@ One continuous main deck and a partial raised quarterdeck replace the tall
 forecastle tier. Two small recessed stern lights replace the ornate window
 rows. Four rail-mounted swivel falconets follow the Mariners’ Museum Niña
 model's equipment list. They are modeled cannon, without firing mechanics.
-The wheel, lookout basket and existing rig remain gameplay concessions.
+Three single masts carry square forecourse and maincourse plus a lateen mizzen.
+A direct tiller replaces the wheel, beneath the quarterdeck. Topsails and large
+mast baskets are removed. Raked masts, a shorter bowsprit and runners follow this
+interpretation; exact offsets and complete period sail handling remain approximations.
 
 The hull, camera, shadows, water exclusion, spray contacts and deck wash share
 one geometry definition. Indexed mesh records preserve normals, material and UV
@@ -127,15 +129,15 @@ is added. The 30 FPS automatic-resolution target remains active; the expanded
 crew's physical-iPhone performance has not yet been measured.
 
 Crew follow bounded authored routes, yield to nearby bodies, climb the rendered
-ratlines with procedural two-bone IK, haul shared tackle leads, then return to
-stations. The lookout periodically climbs the foremast shrouds, below its top.
+runners with procedural two-bone IK, haul shared tackle leads, then return to
+stations. The lookout periodically climbs a foremast runner, below the mast head.
 Dangerous heel, roll rate or strong wind pauses work; climbers retain their holds.
-Helmsman hands follow the wheel. Nearby sailors become progressively transparent
+The helmsman follows the tiller beneath the quarterdeck. Nearby sailors become progressively transparent
 in the first-person camera; shadows and exterior visibility remain intact.
 
 This is an executable local job system, not a general planner or a historically
-exact reefing drill. Free navigation, yard crawling, entry into the lookout
-basket, fatigue, anchor deployment, cannon firing and autonomous steering remain
+exact reefing drill. Free navigation, yard crawling, fatigue, anchor deployment,
+cannon firing and autonomous steering remain
 future work. The policy can choose work, wait or brace; safety remains in the
 executor. No remote decision service or new rendering pass is added.
 
@@ -327,11 +329,10 @@ The default hull is **20 m long × 6 m beam**, excluding the bowsprit. The origi
 length and beam controls set the other two axes. Decks, rigging, ocean exclusion,
 spray contacts, deck wash, shadows and crew anchors use the same transform.
 The cabin doorway is about 1.97 m high, cabin headroom 2.27–2.57 m, and the mainmast
-about 18 m above the main deck. Twelve quarterdeck ladder treads keep risers
-below 23 cm; shroud rungs are spaced at most 35 cm vertically.
-Crew retain their 1.71–1.80 m adult heights. The wheel retains its human dimensions,
-sits 0.95 m above the quarterdeck, and the helmsman stands 0.60 m behind it.
-The helmsman's body is hidden in first-person view. Other nearby sailors fade
+about 13.3 m above the main deck. Twelve quarterdeck ladder treads keep risers
+below 23 cm. Crew retain their 1.71–1.80 m adult heights. The helmsman works a
+waist-height tiller on the main deck beneath the quarterdeck, facing aft and
+following its swing. The camera remains on the upper deck. Nearby sailors fade
 using depth-correct screen-door transparency between 1.4 and 4.8 m from the camera.
 All remain visible in exterior/free views and continue casting shadows.
 
@@ -357,7 +358,7 @@ on a beam reach and accelerates under its sails. Heading, wind speed, apparent w
 trim and exposed canvas determine its drive. The panel shows actual speed and estimated
 displacement; steering, wakes and spray use that speed.
 
-**Fore sails**, **Main sails** and **Mizzen sail** independently set 0–100% canvas.
+**Fore course**, **Main course** and **Mizzen sail** independently set 0–100% canvas.
 The separate **Captain** panel issues **Make full sail**, **Reduce sail** and
 **Furl all sails** across all three groups. Handling takes
 about 5.6 seconds of attended work from fully set to fully furled, plus travel
@@ -383,7 +384,7 @@ It omits sail interference, weather helm, reefing penalties, gust loading and ca
 
 **Wind speed at 10 m** is the reference for a neutral logarithmic marine wind profile:
 `U(z) = U10 * log(z / z0) / log(10 / z0)`, with fixed roughness `z0 = 0.0002 m`.
-Each of the five sails samples wind at its current centre of effort; upper canvas
+Each of the three sails samples wind at its current centre of effort; higher canvas
 therefore experiences stronger wind and greater leverage. Furling changes both area
 and centre height. Each lateral force contributes `-force * lever` about the hull's
 estimated centre of lateral resistance, half a draft below the waterline. Heeling
@@ -451,7 +452,7 @@ Run `node --test tests/boat.test.mjs tests/sailing.test.mjs` for the motion chec
 The complete vessel includes a rounded planked hull and keel, square transom,
 stern cabin with windows, raised quarterdeck, bow and stern rails, bowsprit,
 hinged hatch cover and grating, four swivel cannon, cleats, fittings, and a rudder that moves with the helm. Three
-masts carry four shaped square sails and a triangular lateen mizzen, with yards, stays, shrouds, and ratlines.
+single masts carry two shaped square courses and a triangular lateen mizzen, with yards, stays and runners.
 Canvas uses a two-sided cloth material and slight wind-driven flutter under the
 actual sun and sky. Thin-sheet transmission produces a soft, warm glow around
 the backlighting sun; seams, hems, folds, and grazing light paths transmit less.
@@ -516,23 +517,20 @@ with the built-in image generation tool using this prompt:
 
 ### Steering and rendering refinements
 
-Use **A / D** or **left / right arrows** to turn the wheel, **X** or **Centre rudder**
-to return it to neutral. The rudder stays where the wheel is left. The **Rudder**
-slider provides the same control. With mouse look released (Esc), drag the visible
-3D wheel clockwise for starboard or counterclockwise for port. The wheel rotates
-with the actual rudder angle, with a one-turn range in each direction. Turn rate
-builds gradually and decays after centering. The rudder's trailing edge moves to
-starboard for positive helm and to port for negative helm, matching the turn;
-visible geometry and shadow casters share this rotation. Rudder authority depends on boat speed
-and length. A stationary boat does not turn under rudder alone.
+Use **A / D** or **left / right arrows** to command port/starboard helm;
+**X** or **Centre rudder** returns it to neutral. The **Rudder** slider provides
+the same control on mobile. The visible direct tiller and rudder share their
+stock axis: a starboard command moves the blade's trailing edge to starboard and
+the forward-pointing tiller to port. The helmsman follows its grip below the
+quarterdeck; the player observes from above. Wheel dragging is removed.
 
-This is an approximate steering response, without wind-driven sail forces or a
-hull-specific rudder/keel model. The interactive wheel remains an artistic concession:
-[ships' wheels appeared around 1703](https://navyhistory.au/helm-orders/), after the
-caravel era. This model is not a strict historical reconstruction.
+Turn rate builds gradually and decays after centering. Rudder authority depends
+on speed and hull length; a stationary boat does not turn under rudder alone.
+This remains an approximate yaw response, not a measured caravel manoeuvring model.
+See [the reconstruction notes](CARAVEL_RESEARCH.md) for steering and rig sources.
 
 Reflections now use a roughness-filtered HDR mip chain and blend continuously at
-screen edges. Timber grain follows the individual timbers, spokes, and wheel rim
+screen edges. Timber grain follows the individual timbers and tiller
 using stable local UV coordinates. Detail normals and rope fibres are filtered,
 overlapping plank faces have been removed,
 and cap rails are continuous beveled sweeps. Sea-state-dependent culling bounds
@@ -551,7 +549,7 @@ hotspot after the correction. This visual check supplements the steering and
 mesh tests; it is not a guarantee for every GPU or lighting configuration.
 
 The full-ship checks cover finite geometry, submerged hull extent, stern cabin,
-five sail panels, mast height, rudder placement, and the world-space camera eye
+three sail panels, mast height, tiller/rudder alignment, crew grip clearance and the camera eye
 anchor. The independent camera and hull wave probes let Free camera remain
 level while the vessel continues floating and steering.
 

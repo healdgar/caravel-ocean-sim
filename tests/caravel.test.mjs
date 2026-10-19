@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCaravelMesh, indexCaravelMesh } from '../js/caravel.js';
 import { shadowMeshData } from '../js/shadows.js';
-import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, WHEEL_CENTER, HELM_EYE_Z, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
+import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, hullDeck, TILLER_PIVOT, TILLER_HANDLE, tillerPoint, HELM_EYE_Z, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
 import { createCompany, stepCompany } from '../js/crew.js';
 
 test('indexed caravel preserves every vertex bit, triangle, and shadow partition',()=>{
@@ -14,7 +14,8 @@ test('indexed caravel preserves every vertex bit, triangle, and shadow partition
     return out;
   }
   assert.deepEqual(expand(compact,indexed.indices),bits);
-  assert.ok(indexed.vertices.byteLength+indexed.indices.byteLength<raw.byteLength*.55);
+  assert.ok(indexed.vertices.byteLength+indexed.indices.byteLength<raw.byteLength*.57);
+  assert.ok(indexed.vertices.byteLength+indexed.indices.byteLength<4_000_000);
   const oldShadows=shadowMeshData(raw),newShadows=shadowMeshData(indexed.vertices,indexed.indices);
   assert.deepEqual(newShadows.bounds,oldShadows.bounds);
   for(const part of ['solid','canvas'])assert.deepEqual(expand(compact,newShadows[part]),expand(bits,oldShadows[part]));
@@ -33,10 +34,10 @@ test('caravel mesh has finite triangles, unit normals, and a forward bowsprit', 
     assert.ok(Math.abs(Math.hypot(mesh[i+3],mesh[i+4],mesh[i+5])-1)<1e-6);
     forward = Math.min(forward, mesh[i+2]);
   }
-  assert.ok(forward < -10);
+  assert.ok(forward < -8.3 && forward > -8.6);
 });
 
-test('complete vessel includes stern, submerged hull, five canvas panels, and a working rudder', () => {
+test('complete vessel includes two square courses, one lateen, single masts and a working rudder', () => {
   const mesh=createCaravelMesh();
   const bounds=new Map();
   for(let i=0;i<mesh.length;i+=9){
@@ -47,11 +48,14 @@ test('complete vessel includes stern, submerged hull, five canvas panels, and a 
   }
   assert.ok(bounds.get(15).minY<=-HULL_DRAFT+.001);
   assert.ok(bounds.get(15).minZ<=-6.39 && bounds.get(15).maxZ>=5.59);
-  assert.ok(bounds.get(9).count>=4*28*20*6);
-  assert.ok(bounds.get(9).maxY>10 && bounds.get(9).minZ<-4);
-  assert.ok(bounds.get(13).count>1000 && bounds.get(13).maxZ>6 && bounds.get(13).minY>4.1);
+  assert.ok(bounds.get(9).count>=2*28*20*6);
+  assert.ok(bounds.get(9).maxY>=8 && bounds.get(9).minZ<-4);
+  assert.ok(bounds.get(13).count>1000 && bounds.get(13).maxZ>6 && bounds.get(13).minY>=2.5);
   assert.ok(bounds.get(16).count>100 && bounds.get(17).maxY>2.7);
-  assert.ok(bounds.get(10).maxY>=11.49);
+  assert.ok(bounds.get(10).maxY>=8.69 && bounds.get(10).maxY<8.8);
+  const panels=new Set();
+  for(let i=6;i<mesh.length;i+=9)if([9,13].includes(Math.floor(mesh[i])))panels.add(Math.round(mesh[i]%1*16));
+  assert.deepEqual([...panels].sort(),[1,2,3]);
   assert.ok(bounds.get(14).maxZ>6 && bounds.get(14).minY<-1.05);
   assert.ok(bounds.get(11).minZ>3);
 });
@@ -96,28 +100,32 @@ test('two modest stern lights are recessed; cabin sides are planked',()=>{
   }
 });
 
-test('raised decks and lookout have solid floors; the working helm sits aft on the quarterdeck',()=>{
+test('continuous main deck and quarterdeck support a direct tiller below the after deck',()=>{
   const mesh=createCaravelMesh();
   for(const z of [-5,-1.9,3.1]){
-    const hit=firstHit(mesh,[.3,3,z],[0,-1,0]);
+    const hit=firstHit(mesh,[.3,vesselDeck(z)+.15,z],[0,-1,0]);
     assert.equal(hit.material,0);
-    assert.ok(Math.abs(hit.point[1]-vesselDeck(z))<.003,'visible deck agrees with the water floor');
+    assert.ok(Math.abs(hit.point[1]-vesselDeck(z))<.003);
   }
-  const lookout=firstHit(mesh,[.5,9.2,1.0],[0,-1,0]);
-  assert.equal(lookout.material,0);assert.ok(lookout.point[1]>8.3);
-  assert.ok(WHEEL_CENTER[2]>4 && WHEEL_CENTER[2]<HELM_EYE_Z);
-  for(let i=0;i<mesh.length;i+=9)if(mesh[i+6]===7 || mesh[i+6]===8){
-    assert.ok(mesh[i+1]-WHEEL_CENTER[1]+WHEEL_CENTER[1]*HULL_VERTICAL_SCALE>vesselDeck(mesh[i+2])*HULL_VERTICAL_SCALE);
-    assert.ok(Math.abs(mesh[i+2]-WHEEL_CENTER[2])<.1);
+  assert.ok(TILLER_HANDLE[2]<TILLER_PIVOT[2]);
+  const helmTriangles=[];
+  for(let i=0;i<mesh.length;i+=9)if(mesh[i+6]===7||mesh[i+6]===8)helmTriangles.push(Array.from(mesh.subarray(i,i+3)));
+  assert.ok(helmTriangles.length>0);
+  for(const [x,y,z] of helmTriangles){
+    assert.ok(y>hullDeck(z) && y<vesselDeck(z),'tiller occupies the main-deck steering space');
+    assert.ok(Math.abs(x)<.2,'no wheel rim or spokes remain');
+  }
+  for(const rudder of [-35,0,35]){
+    const b={length:20,beam:6,rudder},p=tillerPoint(b),z=p[2]/(20/12);
+    assert.ok(Math.abs(p[0])+.2<hullHalfWidth(z,1.34)*(6/3.6),'full helm remains inside the hull');
   }
 });
 
 test('20 m hull grounds adult crew on real decks, keeps the helm reachable and limits stair risers',()=>{
   const mesh=createCaravelMesh(),scale=hullScale(),company=createCompany();
-  // Convert real triangles to metres, including the fixed-size wheel exception.
+  // All ship geometry, including the tiller, shares the hull transform.
   for(let i=0;i<mesh.length;i+=9)for(let axis=0;axis<3;axis++){
-    mesh[i+axis]=mesh[i+6]===7||mesh[i+6]===8
-      ?mesh[i+axis]-WHEEL_CENTER[axis]+WHEEL_CENTER[axis]*scale[axis]:mesh[i+axis]*scale[axis];
+    mesh[i+axis]*=scale[axis];
   }
   stepCompany(company,{length:20,beam:6},0,0);
   for(const sailor of company.crew){
@@ -128,8 +136,10 @@ test('20 m hull grounds adult crew on real decks, keeps the helm reachable and l
     assert.ok(Math.abs(hit.point[1]-(p[1]-.028))<.015,`${sailor.id} feet match the enlarged deck`);
   }
   const helm=company.crew.find(s=>s.role==='Helmsman');
-  assert.ok(Math.abs(helm.position[2]-WHEEL_CENTER[2]*scale[2]-.6)<1e-6);
-  assert.ok(Math.abs(WHEEL_CENTER[1]*scale[1]-helm.position[1]-.922)<1e-6);
+  const grip=tillerPoint({length:20,beam:6});
+  assert.ok(Math.abs(helm.position[2]-grip[2]+.32)<1e-6);
+  assert.ok(grip[1]-helm.position[1]>.9 && grip[1]-helm.position[1]<1.1);
+  assert.ok(helm.position[1]+1.8<vesselDeck(helm.z)*scale[1],'standing head clears the quarterdeck');
   // Detect actual upper tread faces, rather than trusting the requested step count.
   for(const [xmin,xmax,zmin,zmax,minSteps,startZ] of [[.69,1.23,1.4,2.75,12,1.5]]){
     const levels=new Set();

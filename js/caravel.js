@@ -1,6 +1,6 @@
-import { hullDeck, deckHalfWidth, HULL_DRAFT, HULL_BOW_RAKE, HULL_STERN_RAKE, hullHalfWidth, hullSurfacePoint, vesselDeck, WHEEL_CENTER,
+import { hullDeck, deckHalfWidth, HULL_DRAFT, HULL_BOW_RAKE, HULL_STERN_RAKE, hullHalfWidth, hullSurfacePoint, vesselDeck, TILLER_PIVOT, TILLER_HANDLE,
   QUARTERDECK_START, QUARTERDECK_HEIGHT, HULL_VERTICAL_SCALE } from './hull.js';
-import { RIG_MASTS, shroudGeometry, SAIL_TACKLES, tacklePoint } from './rigging.js';
+import { RIG_MASTS, mastPoint, shroudGeometry, SAIL_TACKLES, tacklePoint } from './rigging.js';
 import { SAIL_PLAN, LATEEN_CORNERS } from './sailing.js';
 
 // Deduplicate complete vertex records by their float32 bits. Material, normal,
@@ -52,14 +52,15 @@ export function createCaravelMesh() {
     const uv=(i,end)=>[i/8*0.8+a[0]*0.31+a[2]*0.071,end*length*0.65];
     for(let i=0;i<8;i++){let j=(i+1)%8;quad(aa[i],bb[i],bb[j],aa[j],m,null,[uv(i,0),uv(i,1),uv(i+1,1),uv(i+1,0)]);tri(a,aa[j],aa[i],m);tri(b,bb[i],bb[j],m);}
   }
-  function tube(a,b,r,m=2,r2=r,sides=12) {
+  function tube(a,b,r,m=2,r2=r,sides=12,motion=null) {
     const axis=norm(sub(b,a)),u=norm(cross(axis,Math.abs(axis[1])<0.9?[0,1,0]:[1,0,0])),v=cross(axis,u);
     const n=i=>add(mul(u,Math.cos(i*2*Math.PI/sides)),mul(v,Math.sin(i*2*Math.PI/sides)));
     for(let i=0;i<sides;i++){
       const na=n(i),nb=n(i+1),length=Math.hypot(...sub(b,a));
-      quad(add(a,mul(na,r)),add(b,mul(na,r2)),add(b,mul(nb,r2)),add(a,mul(nb,r)),m,[na,na,nb,nb],[[i/sides*0.7,0],[i/sides*0.7,length*0.75],[(i+1)/sides*0.7,length*0.75],[(i+1)/sides*0.7,0]]);
-      tri(a,add(a,mul(nb,r)),add(a,mul(na,r)),m);
-      tri(b,add(b,mul(na,r2)),add(b,mul(nb,r2)),m);
+      const uv=(u,end)=>[u,motion?motion[end]:end*length*.75];
+      quad(add(a,mul(na,r)),add(b,mul(na,r2)),add(b,mul(nb,r2)),add(a,mul(nb,r)),m,[na,na,nb,nb],[uv(i/sides*.7,0),uv(i/sides*.7,1),uv((i+1)/sides*.7,1),uv((i+1)/sides*.7,0)]);
+      tri(a,add(a,mul(nb,r)),add(a,mul(na,r)),m,null,motion?[uv(0,0),uv(0,0),uv(0,0)]:undefined);
+      tri(b,add(b,mul(na,r2)),add(b,mul(nb,r2)),m,null,motion?[uv(0,1),uv(0,1),uv(0,1)]:undefined);
     }
   }
   function torus(center,r,tubeR,m=2,axis='z',segments=64) {
@@ -118,12 +119,12 @@ export function createCaravelMesh() {
   }
   // Continuous foredeck follows the sheer, as in the reconstruction plan.
   beam([0,.65,-6.35],[0,deck(-6.4)+.7,-6.48],.12,.16,5);
-  tube([0,1.17,-4.9],[0,2.65,-10.7],0.145,1,0.045,28);
+  tube([0,1.17,-4.9],[0,2.05,-8.4],0.145,1,0.045,28);
   for(const side of [-1,1]){
-    tube([side*width(-4.8),deck(-4.8)+0.65,-4.8],[0,2.6,-10.5],0.016,2,0.016,12);
-    tube([side*0.32,0.9,-6.0],[0,2.6,-10.5],0.012,2,0.012,10);
+    tube([side*width(-4.8),deck(-4.8)+0.65,-4.8],[0,2.03,-8.3],0.016,2,0.016,12);
+    tube([side*0.32,0.9,-6.0],[0,2.03,-8.3],0.012,2,0.012,10);
   }
-  for(let i=0;i<9;i++)torus([0,1.17+(6.1+i*0.038-4.9)/5.8*1.48,-6.1-i*0.038],0.13,0.015,2,'z',32);
+  for(let i=0;i<9;i++)torus([0,1.17+(6.1+i*0.038-4.9)/3.5*.88,-6.1-i*0.038],0.13,0.015,2,'z',32);
   for(let turn=0;turn<5;turn++)torus([0.86,deck(-3.2)+0.025,-3.2],0.13+turn*0.028,0.013,2,'y',48);
   // Main-deck grating and its weathered frame.
   for(const x of [-0.48,0.48])beam([x,deck(-3.0)+0.03,-2.65],[x,deck(-3.6)+0.03,-3.65],0.075,0.09,1);
@@ -134,19 +135,11 @@ export function createCaravelMesh() {
     [.44,deck(-2.65)+.085,-3.61],[-.44,deck(-2.65)+.085,-3.61],18);
   for(const x of [-0.35,0.35])beam([x,vesselDeck(-4.8),-4.8],[x,vesselDeck(-4.8)+0.36,-4.8],0.11,0.11,5);
   beam([-0.5,vesselDeck(-4.8)+0.28,-4.8],[0.5,vesselDeck(-4.8)+0.28,-4.8],0.1,0.1,6);
-  // A working ship's wheel. Material 7/8 vertices rotate together in the shader.
-  const c=WHEEL_CENTER;
-  beam([0,QUARTERDECK_HEIGHT,c[2]+0.18],[0,c[1]+.03,c[2]+0.18],0.19,0.21,5);
-  tube([0,c[1],c[2]-.035],[0,c[1],c[2]+0.25],0.085,3,0.085,20);
-  torus(c,0.48,0.041,7,'z',96);
-  for(let i=0;i<8;i++){
-    const a=i*Math.PI/4,d=[Math.sin(a),Math.cos(a),0];
-    tube(add(c,mul(d,0.09)),add(c,mul(d,0.47)),0.025,7,0.019,12);
-    tube(add(c,mul(d,0.47)),add(c,mul(d,0.62)),0.025,7,0.031,12);
-    tube(add(c,mul(d,0.62)),add(c,mul(d,0.64)),0.031,7,0.02,12);
-  }
-  tube(add(c,[0,0,-0.04]),add(c,[0,0,0.06]),0.10,8,0.10,32);
-  torus(add(c,[0,0,0.064]),0.07,0.009,8,'z',32);
+  // Direct wooden tiller: rigidly keyed to the rudder stock, below quarterdeck.
+  tube([0,.95,TILLER_PIVOT[2]],TILLER_PIVOT,.065,3,.065,16);
+  beam(TILLER_PIVOT,TILLER_HANDLE,.105,.09,7);
+  tube([-.09,TILLER_PIVOT[1],TILLER_PIVOT[2]],
+    [.09,TILLER_PIVOT[1],TILLER_PIVOT[2]],.045,8,.045,12);
 
   // Full planked hull, from the sharp stem to the square transom.
   const hullPoint=hullSurfacePoint;
@@ -195,8 +188,9 @@ export function createCaravelMesh() {
   // A broad raised stern follows the hull's taper; all ornament is real geometry.
   const zFront=QUARTERDECK_START,zBack=5.6,roof=QUARTERDECK_HEIGHT;
   const cabinWidth=z=>width(z)+0.105;
-  quad([-cabinWidth(zFront),deck(zFront),zFront],[cabinWidth(zFront),deck(zFront),zFront],
-    [cabinWidth(zFront),roof,zFront],[-cabinWidth(zFront),roof,zFront],1);
+  for(const [a,b] of [[-cabinWidth(zFront),-.55],[.55,cabinWidth(zFront)]])
+    quad([a,deck(zFront),zFront],[b,deck(zFront),zFront],[b,roof,zFront],[a,roof,zFront],1);
+  quad([-.55,1.99,zFront],[.55,1.99,zFront],[.55,roof,zFront],[-.55,roof,zFront],1);
   for(const side of [-1,1])for(let j=0;j<24;j++){
     const z=zFront+(zBack-zFront)*j/24,Z=zFront+(zBack-zFront)*(j+1)/24;
     for(const y of [1.13,2.22])beam([side*(cabinWidth(z)+.035),y,z],[side*(cabinWidth(Z)+.035),y,Z],.07,.07,16);
@@ -207,9 +201,9 @@ export function createCaravelMesh() {
     const l=Math.max(-edge,x),r=Math.min(edge,x+.14);
     if(r>l)quad([l,roof,z],[l,roof,Z],[r,roof,Z],[r,roof,z],0);
   }
-  // Wall panels stop at each arch. Reveals lead to glazing recessed 8 cm;
+  // Wall panels stop at each rectangular light. Glazing is recessed 8 cm;
   // neither solid planking nor the former main-deck rail crosses the openings.
-  function windowWall(start,end,centers,point,floor){
+  function windowWall(start,end,centers,point,floor,steeringPort=false){
     const cy=1.69,r=.14,bottom=cy-.14;
       const panel=(a,b,lowA,lowB,highA,highB)=>quad(point(a,lowA),point(b,lowB),point(b,highB),point(a,highA),1,null,
         [[lowA*1.6,a*.55],[lowB*1.6,b*.55],[highB*1.6,b*.55],[highA*1.6,a*.55]]);
@@ -217,7 +211,12 @@ export function createCaravelMesh() {
       const steps=Math.ceil((b-a)/.12);
       for(let i=0;i<steps;i++){
         const u=a+(b-a)*i/steps,U=a+(b-a)*(i+1)/steps;
-        panel(u,U,floor(u),floor(U),roof,roof);
+        if(steeringPort && u<.13 && U>-.13){
+          const l=Math.max(u,-.13),r=Math.min(U,.13);
+          if(u<l)panel(u,l,floor(u),floor(l),roof,roof);
+          panel(l,r,floor(l),floor(r),1.22,1.22);panel(l,r,1.54,1.54,roof,roof);
+          if(r<U)panel(r,U,floor(r),floor(U),roof,roof);
+        }else panel(u,U,floor(u),floor(U),roof,roof);
       }
     };
     let previous=start;
@@ -245,7 +244,7 @@ export function createCaravelMesh() {
     solid(previous,end);
   }
   windowWall(-cabinWidth(zBack),cabinWidth(zBack),[-.48,.48],
-    (x,y,inset=0)=>[x,y,zBack+inset],()=>deck(zBack));
+    (x,y,inset=0)=>[x,y,zBack+inset],()=>deck(zBack),true);
   for(const side of [-1,1]){
     windowWall(zFront,zBack,[],
       (z,y,inset=0)=>[side*(cabinWidth(z)+inset),y,z],deck);
@@ -254,10 +253,9 @@ export function createCaravelMesh() {
       beam([x,roof,z],[x,roof+.49,z],.06,.07,17);
       beam([x,roof+.23,z],[side*(cabinWidth(Math.min(z+.48,zBack))+.06),roof+.23,Math.min(z+.48,zBack)],.055,.055,16);
     }
-    beam([side*.33,deck(zFront),zFront-.025],[side*.33,2.06,zFront-.025],.08,.08,17);
+    beam([side*.59,deck(zFront),zFront-.025],[side*.59,2.04,zFront-.025],.08,.08,17);
   }
-  beam([-.37,2.06,zFront-.025],[.37,2.06,zFront-.025],.08,.08,17);
-  quad([-.28,.83,zFront-.012],[.28,.83,zFront-.012],[.28,2.01,zFront-.012],[-.28,2.01,zFront-.012],16);
+  beam([-.63,2.04,zFront-.025],[.63,2.04,zFront-.025],.08,.08,17);
   for(const y of [roof+.23,roof+.49])beam([-cabinWidth(zBack)-.06,y,zBack],[cabinWidth(zBack)+.06,y,zBack],.09,.07,17);
   for(const x of [-.65,0,.65])beam([x,roof,zBack],[x,roof+.49,zBack],.06,.07,17);
   // Museum Nina reconstruction: four small swivel falconets on the poop rail.
@@ -303,7 +301,7 @@ export function createCaravelMesh() {
     }
   }
 
-  // Square rig: shaped canvas panels, yards, masts, stays, and shroud ladders.
+  // Two square courses, single masts, stays and Mediterranean runners.
   // Fractional material bits identify moving sails without widening the vertex buffer.
   function squareSail({id,z,top,width:w,height:h,belly}){
     const tag=id/16,anchored=(id+8)/16;
@@ -325,24 +323,23 @@ export function createCaravelMesh() {
     for(const u of [0,1])for(let j=0;j<rows;j++)tube(point(u,j/rows),point(u,(j+1)/rows),0.013,12+tag,0.013,8);
     for(let i=0;i<columns;i++)tube(point(i/columns,1),point((i+1)/columns,1),0.014,12+tag,0.014,8);
     for(const side of [-1,1]){
-      tube([side*w*0.5,top-h,z],[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],0.013,12+anchored,0.013,8);
-      tube([side*w*0.56,top,z],[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],0.011,12+anchored,0.011,8);
+      tube([side*w*0.5,top-h,z],[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],0.013,12+anchored,0.013,8,[1,0]);
+      tube([side*w*0.56,top,z],[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],0.011,12+anchored,0.011,8,[1,0]);
     }
   }
   for(const [mast,{z,height,r}] of RIG_MASTS.entries()){
-    tube([0,deck(z),z],[0,height,z],r,10,r*0.35,24);
-    for(let y=1.5;y<height;y+=1.4)torus([0,y,z],r*(1-(y/height)*0.6)+0.004,0.012,3,'y',24);
+    tube(mastPoint(mast,deck(z)),mastPoint(mast,height),r,10,r*0.35,24);
+    for(let y=1.5;y<height;y+=1.4)torus(mastPoint(mast,y),r*(1-(y/height)*0.6)+0.004,0.012,3,'y',24);
     for(const side of [-1,1]){
-      const {head,feet,rungs}=shroudGeometry(mast,side);
+      const {head,feet}=shroudGeometry(mast,side);
       for(const foot of feet){
         tube(foot,head,.022,12,.016,10);
         beam(add(foot,[side*.025,-.4,0]),add(foot,[side*.025,.02,0]),.045,.035,3);
         tube(add(foot,[-side*.025,0,0]),add(foot,[side*.025,0,0]),.065,16,.065,12);
       }
-      for(let j=1;j<rungs;j++){
-        const t=j/rungs,ends=feet.map(foot=>add(mul(foot,1-t),mul(head,t)));
-        tube(ends[0],ends[1],.009,12,.009,6);
-      }
+      // Central runner is also the rope climbed by the crew. No ratline ladder.
+      const foot=feet[0].map((v,i)=>(v+feet[1][i])*.5);
+      tube(foot,head,.024,12,.021,10);
     }
   }
   for(const t of SAIL_TACKLES){
@@ -352,50 +349,20 @@ export function createCaravelMesh() {
     tube(add(bottom,[-.07,0,0]),add(bottom,[.07,0,0]),.065,16,.065,12);
     beam(add(bottom,[0,-.25,0]),add(bottom,[0,.06,0]),.075,.09,5);
   }
-  // Standing rigging carries load fore-and-aft as well as across the beam.
-  // Lower stays land below the forward sail; topmast stays pass above its yard.
-  for(const [a,b,r] of [
-    [[0,7.05,-4.15],[0,2.42,-9.8],.032],
-    [[0,9.12,-4.15],[0,2.63,-10.55],.024],
-    [[0,8.27,.85],[0,vesselDeck(-5.3)+.28,-5.3],.036],
-    [[0,11.25,.85],[0,9.12,-4.15],.027],
-    [[-.10,7.8,4.15],[-.10,6.75,.85],.028],
-  ])tube(a,b,r,12,r*.78,12);
-  // Paired backstays lead outboard, avoiding the centreline helm and canvas.
-  for(const side of [-1,1])for(const [z,y,footZ] of [[-4.15,8.95,-1.7],[.85,11.2,3.05]]){
-    const foot=[side*(width(footZ)+.04),vesselDeck(footZ)+.35,footZ];
-    tube([side*.12,y,z],foot,.024,12,.024,10);
+  // Lower stays and paired runners, led to the waterways without channels.
+  for(const [mast,target,r] of [[0,[0,1.9,-8.1],.028],[1,[0,vesselDeck(-5.3)+.3,-5.3],.036],
+    [2,[0,5.9,-.2],.026]])tube(mastPoint(mast,RIG_MASTS[mast].height*.96),target,r,12,r*.8,12);
+  for(const side of [-1,1])for(const [mast,footZ] of [[0,-1.7],[1,2.3],[2,5.2]]){
+    const top=mastPoint(mast,RIG_MASTS[mast].height*.94);top[0]=side*.12;
+    const foot=[side*(width(footZ)-.04),vesselDeck(footZ)+.35,footZ];
+    tube(top,foot,.024,12,.024,10);
     tube(add(foot,[-side*.035,0,0]),add(foot,[side*.035,0,0]),.075,16,.075,12);
   }
-  // Foremast working top; the mainmast carries the larger lookout basket.
-  for(const [z,y] of [[-4.15,6.97]]){
-    tube([0,y,z],[0,y+.07,z],.38,1,.38,24);
-    torus([0,y+.54,z],.37,.023,17,'y',32);
-    for(let i=0;i<8;i++){
-      const a=i*Math.PI/4,x=.37*Math.cos(a),dz=.37*Math.sin(a);
-      tube([x,y,z+dz],[x,y+.54,z+dz],.018,17,.018,8);
-    }
-  }
-  const nestZ=.85,nestFloor=8.38;
-  tube([0,nestFloor-.11,nestZ],[0,nestFloor,nestZ],.69,0,.72,32);
-  for(const side of [-1,1]){
-    beam([0,nestFloor-.72,nestZ],[side*.65,nestFloor-.1,nestZ],.1,.11,1);
-    beam([0,nestFloor-.72,nestZ],[0,nestFloor-.1,nestZ+side*.65],.1,.11,1);
-  }
-  for(let i=0;i<18;i++){
-    const a=i*Math.PI/9,A=(i+1)*Math.PI/9;
-    const p=(angle,r,y)=>[Math.cos(angle)*r,y,nestZ+Math.sin(angle)*r];
-    beam(p(a,.71,nestFloor),p(a,.8,nestFloor+.72),.045,.05,17);
-    // Waist-high planking and an open upper rail read as a lookout basket.
-    quad(p(a+.012,.715,nestFloor+.05),p(A-.012,.715,nestFloor+.05),
-      p(A-.012,.76,nestFloor+.4),p(a+.012,.76,nestFloor+.4),1);
-  }
-  torus([0,nestFloor+.4,nestZ],.76,.025,16,'y',48);
-  torus([0,nestFloor+.72,nestZ],.8,.035,17,'y',48);
+  // No round tops or oversized lookout baskets in this reconstruction.
   for(const sail of SAIL_PLAN)squareSail(sail);
   // Lateen mizzen: the long oblique yard defines the triangular silhouette.
-  // The foot clears a standing helmsman on the quarterdeck.
-  const [la,lb,lc]=LATEEN_CORNERS,resolution=26,lateenTag=5/16;
+  // The foot clears the open deck; steering takes place below the quarterdeck.
+  const [la,lb,lc]=LATEEN_CORNERS,resolution=26,lateenTag=3/16;
   const lateen=(u,v)=>{
     const p=add(la,add(mul(sub(lb,la),u),mul(sub(lc,la),v)));
     p[0]+=.8*27*u*v*(1-u-v);
@@ -410,8 +377,8 @@ export function createCaravelMesh() {
   }
   tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10+lateenTag,.045,18);
   for(const [a,b] of [[la,lb],[lb,lc],[lc,la]])tube(a,b,.015,12+lateenTag,.015,10);
-  tube(lc,[1.1,roof+.3,5.5],.016,12+13/16,.016,8);
+  tube(lc,[1.1,roof+.3,5.5],.016,12+11/16,.016,8,[1,0]);
   // The halyard's mast end stays fixed; its yard end rotates with the lateen.
-  tube([0,7.6,4.15],la,.014,12+13/16,.014,8);
+  tube(mastPoint(2,6.0),la,.014,12+11/16,.014,8,[0,1]);
   return new Float32Array(out);
 }

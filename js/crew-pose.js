@@ -1,6 +1,6 @@
 import { gltfQuatMultiply } from './gltf.js';
-import { shroudPoint, tacklePoint } from './rigging.js';
-import { HULL_VERTICAL_SCALE, WHEEL_CENTER } from './hull.js';
+import { climbingPoint, tacklePoint } from './rigging.js';
+import { HULL_VERTICAL_SCALE, tillerPoint } from './hull.js';
 
 const poseSub=(a,b)=>a.map((v,i)=>v-b[i]);
 const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
@@ -43,13 +43,12 @@ export function poseCrewWork(a,s,boat){
   const j=s.job;s.grips=null;
   if(j && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
     const phase=j.rung,targets={};
-    for(const [side,offset,across] of [['l',0,.5+.15*j.side],['r',1,.5-.15*j.side]]){
-      // Alternating holds: one side remains planted while the opposite limbs
-      // transfer to the next rung. Targets come from the rendered ratline mesh.
+    for(const [side,offset] of [['l',0],['r',1]]){
+      // Alternate hand-over-hand holds with a simplified boot lock on the runner.
       const cycle=(phase+offset)/2,base=Math.floor(cycle)*2-offset,f=cycle-Math.floor(cycle);
       const swing=Math.max(0,Math.min(1,(f-.55)/.45)),e=swing*swing*(3-2*swing);
       const foot=base+1+e*2,hand=foot+3;
-      const point=r=>{const p=shroudPoint(j.mast,j.side,r,across);return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12],s);};
+      const point=r=>{const p=climbingPoint(j.mast,j.side,r);return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
       const ft=point(foot),ht=point(hand),sign=side==='l'?1:-1;
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.3,.5,.65]);
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.65,1.1,.10]);
@@ -70,11 +69,10 @@ export function poseCrewWork(a,s,boat){
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.10]);
     }
   }else if(s.role==='Helmsman'){
-    const theta=-(boat.rudder??0)/35*Math.PI*2;
+    a.blend('Brace',s.time,.4);
     for(const [side,sign] of [['l',1],['r',-1]]){
-      const angle=theta+sign*.8;
-      const target=actorLocal([WHEEL_CENTER[0]*boat.beam/3.6+Math.sin(angle)*.45,
-        WHEEL_CENTER[1]*HULL_VERTICAL_SCALE+Math.cos(angle)*.45,WHEEL_CENTER[2]*boat.length/12+.04],s);
+      const p=tillerPoint(boat,sign*.09);p[0]+=sign*.035;
+      const target=actorLocal(p,s);
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],target,[sign*.6,1,.3]);
     }
   }

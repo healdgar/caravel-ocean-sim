@@ -1,18 +1,23 @@
 import { HULL_DRAFT, HULL_VERTICAL_SCALE } from './hull.js';
+import { mastPoint } from './rigging.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
 // World wind is a velocity toward (cos(direction), sin(direction)) in X/Z.
 export const SAIL_PLAN = [
-  { id: 1, mast: 0, z: -4.15, top: 6.65, width: 4.9, height: 2.9, belly: 0.7 },
-  { id: 2, mast: 0, z: -4.15, top: 8.85, width: 3.25, height: 1.5, belly: 0.42 },
-  { id: 3, mast: 1, z: 0.85, top: 8.0, width: 5.9, height: 3.25, belly: 0.88 },
-  { id: 4, mast: 1, z: 0.85, top: 10.9, width: 3.95, height: 1.65, belly: 0.52 },
+  { id: 1, mast: 0, z: mastPoint(0,6.4)[2], top: 6.4, width: 4.6, height: 3.8, belly: 0.65 },
+  { id: 2, mast: 1, z: mastPoint(1,8.0)[2], top: 8.0, width: 6.3, height: 5.4, belly: 0.9 },
 ];
-export const LATEEN_CORNERS = [[0, 8.05, 5.9], [0, 4.5, 2.6], [1.1, 4.15, 6.3]];
+export const LATEEN_CORNERS = [[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]];
+export const LATEEN_PIVOT = mastPoint(2,4.3);
 export const SAIL_KEYS = ['sailFore', 'sailMain', 'sailMizzen'];
 const squareAreas = [0, 0];
 for (const sail of SAIL_PLAN) squareAreas[sail.mast] += sail.width * sail.height * 0.95;
-export const SAIL_AREAS = [...squareAreas, 7.63];
+const lateenEdgeA=LATEEN_CORNERS[1].map((x,i)=>x-LATEEN_CORNERS[0][i]);
+const lateenEdgeB=LATEEN_CORNERS[2].map((x,i)=>x-LATEEN_CORNERS[0][i]);
+export const SAIL_AREAS = [...squareAreas, .5*Math.hypot(
+  lateenEdgeA[1]*lateenEdgeB[2]-lateenEdgeA[2]*lateenEdgeB[1],
+  lateenEdgeA[2]*lateenEdgeB[0]-lateenEdgeA[0]*lateenEdgeB[2],
+  lateenEdgeA[0]*lateenEdgeB[1]-lateenEdgeA[1]*lateenEdgeB[0])];
 // Neutral marine surface-layer profile, referenced to the weather control at 10 m.
 // Fixed roughness is an approximation; atmospheric stability and directional shear are omitted.
 const WIND_ROUGHNESS = 0.0002;
@@ -36,7 +41,7 @@ export function sailingState(boat) {
     squareYaw: 0, lateenYaw: 0, tack: 1, canvasTack: 1, forward: 0, side: 0, area: 0,
     apparentSpeed: 0, apparentAngle: 0, squareFill: 0, lateenFill: 0,
     squareTarget: 0, lateenTarget: 0, windSide: 0, windForward: 0, rollMoment: 0,
-    loadWind: {tack:1}, panelSide:new Float64Array(5), panelMoment:new Float64Array(5),
+    loadWind: {tack:1}, panelSide:new Float64Array(SAIL_LOADS.length), panelMoment:new Float64Array(SAIL_LOADS.length),
   };
   return boat.sailState;
 }

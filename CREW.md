@@ -3,15 +3,16 @@
 Twelve named sailors are implemented: six women and six men. Captain orders
 create executable sail-handling and hatch jobs. Fore/main work assembles an aloft
 hand and a deck hand; only their attendance allows actual canvas to change.
-A lookout climbs the foremast shrouds during watch. Job phases are approach,
+A lookout climbs a foremast runner during watch. Job phases are approach,
 ascending, working, descending and return. Routes are authored; role allocation
-reserves distinct shrouds, and moving sailors yield to nearby bodies.
+reserves distinct runners, and moving sailors yield to nearby bodies.
 
-`js/rigging.js` supplies the mesh, ladder path and grip positions. Two-bone IK
-places hands and boots against the ratlines, with alternating planted and moving
-limbs. Climbers stop below the mast tops; the basket's solid floor is not traversed.
+`js/rigging.js` supplies the mesh, runner path and grip positions. Two-bone IK
+places alternating hands and simplified boot locks against the actual ropes.
+Climbers stop below the mast heads. There are no ratline ladders or mast baskets
+in the selected Martínez-Hidalgo reconstruction.
 The carpenter closes a hinged hatch over eight seconds. Hands haul actual tackle
-leads; the helmsman's hands follow the player-controlled wheel. Crew near the helm
+leads; the helmsman follows the player-controlled tiller beneath the quarterdeck. Crew near the helm
 camera fade, while their shadows and exterior appearance remain.
 
 `createCompany(policy)` accepts a local synchronous policy. Observations include
@@ -35,7 +36,8 @@ This is a lean gameplay complement for our default 20 m × 6 m vessel,
 not a documented historical minimum or a validated manning requirement.
 Adult body heights remain 1.71–1.80 m. Stations and deck elevations follow the
 enlarged hull, walking speed stays in metres per second, and the helmsman's station
-is anchored 0.60 m behind the fixed-size wheel at the default dimensions.
+follows the tiller grip from 0.32 m forward, facing aft. A slight crouch lets both
+hands reach the waist-height arm. The player camera remains above on the quarterdeck.
 
 The [Museum of Angra do Heroísmo](https://museu-angra.cultura.azores.gov.pt/en/others/historical-pieces/caravela/)
 describes 20–30 m caravels, with smaller examples carrying 25–30 people. The
@@ -113,7 +115,7 @@ reset. On timeout or failure use the local policy. Never block the render loop.
   multi-person work, assemble the required team before advancing progress.
 - Reservations expire or release on cancellation, reset and route failure.
   Acquire shared resources in a stable order; avoid holding one while waiting
-  indefinitely for another. Yield on ladders at authored passing/waiting nodes.
+  indefinitely for another. Yield on climbing routes at authored passing/waiting nodes.
 - Recheck hazards during travel and work. Urgent bracing can interrupt ordinary
   orders. A climber stops at a secure grip or platform, never switches directly
   into a deck-walking animation. Resume or replan after the hazard passes.
@@ -123,8 +125,8 @@ reset. On timeout or failure use the local policy. Never block the render loop.
 ## Integration seams
 
 - `js/hull.js` is the source for decks and helm anchors. Author routes around
-  stairs, cabin, masts and railings in ship space. Validate access to mast tops;
-  the current crow's-nest floor needs an actual opening before basket entry works.
+  stairs, cabin, masts and railings in ship space. The helmsman's main-deck floor
+  uses `hullDeck`; upper quarterdeck stations use `vesselDeck`.
 - `js/caravel.js` and `js/wgsl/vessel.js` define moving yards and rigging. Work
   anchors must follow the same transforms as the visible rig.
 - `boat.sailFore`, `sailMain`, `sailMizzen` request sail fractions.

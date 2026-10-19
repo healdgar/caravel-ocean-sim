@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
 import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
-import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE} from '../js/hull.js';
+import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
@@ -93,11 +93,11 @@ test('twelve named crew, evenly split, keep separate clear stations on every dec
     for(let i=0;i<600;i++){
       stepCompany(company,b,1/60,2);
       for(const [j,s] of company.crew.entries()){
-        assert.ok(s.visible);assert.ok(s.z>=s.route[0]-1e-5&&s.z<=s.route[1]+1e-5);
-        assert.ok(Math.abs(s.position[1]-vesselDeck(s.z)*HULL_VERTICAL_SCALE-.028)<1e-6);
+        assert.ok(s.visible);if(s.role!=='Helmsman')assert.ok(s.z>=s.route[0]-1e-5&&s.z<=s.route[1]+1e-5);
+        assert.ok(Math.abs(s.position[1]-(s.role==='Helmsman'?hullDeck(s.z):vesselDeck(s.z))*HULL_VERTICAL_SCALE-.028)<1e-6);
         assert.ok(Math.abs(s.position[0])+.3<hullHalfWidth(s.z,vesselDeck(s.z))*b.beam/3.6);
         // Main deck excludes the companionway, mainmast and hatch grating.
-        if(s.z>-3.9&&s.z<2.7){assert.ok(!(s.x>.35&&s.z>1.1));assert.ok(Math.hypot(s.x,s.z-.85)>.55);assert.ok(s.z> -2.3);}
+        if(s.z>-3.9&&s.z<2.7){assert.ok(!(s.x>.35&&s.z>1.1));assert.ok(Math.hypot(s.x,s.z+.1)>.55);assert.ok(s.z> -2.3);}
         for(let k=0;k<j;k++){const p=company.crew[k].position;assert.ok(Math.hypot(s.position[0]-p[0],s.position[1]-p[1],s.position[2]-p[2])>.64,`${s.id} overlaps ${company.crew[k].id}`);}
       }
     }
@@ -116,7 +116,7 @@ test('captain orders change actual sails gradually, can be replaced, and survive
   issueCaptainOrder(c,b,'full');b.sailFore=.4;stepCompany(c,b,.1,8);assert.equal(c.order,'watch');assert.equal(b.sailFore,.4,'old order must not overwrite manual changes');
 });
 
-test('crew climb real ratlines, operate sails and hatch, hold in danger, and return without teleporting',()=>{
+test('crew climb real runners, operate sails and hatch, hold in danger, and return without teleporting',()=>{
   const b={length:20,beam:6,roll:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1},c=createCompany();
   stepCompany(c,b,0,8);sailingState(b);issueCaptainOrder(c,b,'weather');
   const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
@@ -143,7 +143,7 @@ test('crew climb real ratlines, operate sails and hatch, hold in danger, and ret
     if(i===100){const sailor=c.crew.find(s=>s.job?.stage==='ascending'),position=Array.from(sailor.position),rung=sailor.job.rung;
       stepCompany(c,{...b,roll:.6},.1,8);assert.equal(sailor.job.rung,rung);assert.deepEqual(Array.from(sailor.position),position);assert.equal(sailor.intent,'brace');}
   }
-  assert.ok(climbing>100&&working>100);assert.ok(gripError<.08,`hands/boots stay at their ratlines: ${gripError}`);
+  assert.ok(climbing>100&&working>100);assert.ok(gripError<.08,`hands/boots stay at their runner rope: ${gripError}`);
   assert.equal(b.hatchesClosed,1);assert.deepEqual(Array.from(sailingState(b).set),[.2,.2,0]);
   assert.ok(c.crew.every(s=>!s.job),'workers finish and return to stations');
 });
@@ -154,4 +154,23 @@ test('lookout ascends on watch; superseding orders bring her down; hidden crew k
   issueCaptainOrder(c,b,'furl');
   for(let i=0;i<1200;i++){advanceSails(b,.1,6,0);stepCompany(c,b,.1,6);}
   assert.ok(!lookout.job);assert.ok(lookout.position[1]<2);
+});
+
+
+test('helmsman follows the direct tiller below the quarterdeck at full port and starboard',()=>{
+  const c=createCompany(),b={length:20,beam:6},a=model.animator;
+  for(const rudder of [-35,-10,0,10,35]){
+    b.rudder=rudder;stepCompany(c,b,0,0);
+    const s=c.crew.find(s=>s.role==='Helmsman'),p=tillerPoint(b);
+    assert.ok(Math.abs(s.position[0]-p[0])<1e-6);
+    assert.ok(Math.abs(s.position[2]+.32-p[2])<1e-6);
+    assert.ok(s.position[1]+1.8<vesselDeck(s.z)*HULL_VERTICAL_SCALE);
+    a.sample('Idle',s.time);poseCrewWork(a,s,b);
+    for(const [side,sign] of [['l',1],['r',-1]]){
+      const hand=a.world[a.names.indexOf('hand_'+side)].subarray(12,15);
+      const world=Array.from(hand).map((v,i)=>v*s.scale[i]+s.position[i]);
+      const target=tillerPoint(b,sign*.09);target[0]+=sign*.035;
+      assert.ok(Math.hypot(...world.map((v,i)=>v-target[i]))<.05,'hands reach the actual tiller');
+    }
+  }
 });

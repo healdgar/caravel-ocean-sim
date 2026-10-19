@@ -16,11 +16,19 @@ export const HULL_SECTION_POWER = 0.65;
 // Upper decks and helm share one layout with the mesh, camera, and water field.
 export const QUARTERDECK_START = 2.7;
 export const QUARTERDECK_HEIGHT = 2.3;
-// Wheel and people retain human dimensions; only their deck anchors scale.
-export const WHEEL_CENTER = [0, QUARTERDECK_HEIGHT + .95 / HULL_VERTICAL_SCALE, 4.4];
-export const HELM_STATION_Z = WHEEL_CENTER[2] + .60 / HULL_VERTICAL_SCALE;
-export const HELM_EYE_Z = HELM_STATION_Z + .25 / HULL_VERTICAL_SCALE;
+// Direct tiller on the main deck below the quarterdeck. The player observes
+// from above; the helmsman and camera occupy distinct physical stations.
+export const TILLER_PIVOT = [0, 1.38, 5.68];
+export const TILLER_HANDLE = [0, 1.43, 3.95];
+export const HELM_TILLER_DISTANCE = .32;
+export const HELM_STATION_Z = TILLER_HANDLE[2] - HELM_TILLER_DISTANCE / HULL_VERTICAL_SCALE;
+export const HELM_EYE_Z = 4.91;
 export const HELM_EYE_HEIGHT = QUARTERDECK_HEIGHT * HULL_VERTICAL_SCALE + 1.6;
+export function tillerPoint(boat, along=0) {
+  const a=(boat.rudder??0)*Math.PI/180,q=TILLER_HANDLE[2]-TILLER_PIVOT[2]+along/(boat.length/12);
+  return [Math.sin(a)*q*boat.beam/3.6,TILLER_HANDLE[1]*HULL_VERTICAL_SCALE,
+    (TILLER_PIVOT[2]+Math.cos(a)*q)*boat.length/12];
+}
 export function hullDeck(z) {
   return z < 0 ? 0.7 + 0.47 * (-z / 6.4) ** 3 : 0.7 + 0.24 * (z / 5.6) ** 2;
 }

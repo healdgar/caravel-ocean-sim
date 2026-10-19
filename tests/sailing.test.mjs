@@ -115,13 +115,13 @@ test('sailing remains finite and consistent from 10 to 120 FPS, including strong
   assert.ok(storm.surgeVelocity<10 && Math.abs(storm.sailHeel)<=.42);
 });
 
-test('marine wind shear is referenced to 10 m and upper sails exert more torque per square metre',()=>{
+test('marine wind shear is referenced to 10 m and higher sail centres exert more torque per square metre',()=>{
   assert.equal(windAtHeight(12,10),12);assert.equal(windAtHeight(12,0),0);
   assert.ok(windAtHeight(12,2)<windAtHeight(12,5));assert.ok(windAtHeight(12,20)>12);
   const loads=trimmed(vessel(),12),strong=trimmed(vessel(),24),bare=trimmed(vessel({sailFore:0,sailMain:0,sailMizzen:0}),12);
   assert.ok(Math.abs(strong.rollMoment/loads.rollMoment-4)<1e-10);
   assert.ok(loads.rollMoment>0);assert.equal(bare.rollMoment,0);
-  for(const lower of [0,2]){
+  for(const lower of [0]){
     const area=i=>SAIL_PLAN[i].width*SAIL_PLAN[i].height*.95;
     assert.ok(Math.abs(loads.panelSide[lower+1])/area(lower+1)>Math.abs(loads.panelSide[lower])/area(lower),'higher canvas feels faster wind');
     assert.ok(loads.panelMoment[lower+1]/area(lower+1)>loads.panelMoment[lower]/area(lower),'height adds leverage as well as pressure');
