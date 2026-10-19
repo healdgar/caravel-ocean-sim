@@ -1,3 +1,4 @@
+import { writeLateenUniform } from './lateen.js';
 import { createVolumetricClouds } from './clouds.js';
 import { createTerrain } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
@@ -1233,7 +1234,7 @@ async function main() {
       loadingStatus.textContent=`Crew ${(hydro.crewMass/1000).toFixed(2)} t · Water ${(hydro.waterMass/1000).toFixed(2)} t · Food ${(hydro.foodMass/1000).toFixed(2)} t · Casks and spares ${(hydro.storesMass/1000).toFixed(2)} t · Cargo ${(hydro.cargoMass/1000).toFixed(1)} t. Main-deck freeboard ${hydro.freeboard.toFixed(2)} m.${hydro.overloadKg>0?' Overloaded: this loading exceeds the supported draft.':''}`;
       const sails=sailingState(boat),angle=sails.apparentAngle/D2R;
       sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind torque ${Math.abs(sails.rollMoment/1000).toFixed(1)} kN·m`;
-      for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.set[i]*100)+'%';
+      for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.rig[i].deployed*100)+'%';
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
       if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
       rudderValue.textContent=boat.rudder.toFixed(1)+' deg';
@@ -1260,6 +1261,7 @@ async function main() {
     hullData.set(sails.set,24);hullData[27]=boat.hatchesClosed??0;hullData[28]=sails.squareYaw;hullData[29]=sails.lateenYaw;
     hullData[30]=sails.squareFill;hullData[31]=sails.lateenFill;
     hullData[32]=sails.windSide;hullData[33]=-sails.windForward;hullData[34]=sails.apparentSpeed;hullData[35]=sails.canvasTack;
+    writeLateenUniform(hullData,sails);
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     crew?.update(boat,dt,P.windSpeed);

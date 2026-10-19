@@ -29,8 +29,6 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
   @location(6) wet:vec2f,
-  @location(7) rigLocal:vec3f,
-  @location(8) @interpolate(flat) sailId:u32,
 };
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let rig=rigVertex(position,normal,material,uv);
@@ -39,9 +37,8 @@ struct BoatVertex {
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
   o.normal = normalize(rotateHull(rig.normal / rig.scale));
-  o.local = position;o.rigLocal=rig.position;
+  o.local = position;
   o.material = u32(material); o.normalLocal = normal; o.uv=uv;o.wet=moisture[wetLookup[index]];
-  o.sailId=u32(round(fract(material)*16.0))&7u;
   return o;
 }
 fn oceanHeight(p: vec2f) -> f32 {
@@ -71,7 +68,6 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   return mix(env,filteredOcean,confidence*0.55);
 }
 @fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-  if(rigCanvasContact(in.rigLocal,in.material,in.sailId)){discard;}
   let p = in.local;
   var wet=clamp(in.wet,vec2f(0),vec2f(1));
   if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}

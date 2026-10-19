@@ -1,5 +1,5 @@
 import { vesselDeck, HULL_VERTICAL_SCALE } from './hull.js';
-import { shroudGeometry, climbingPoint } from './rigging.js';
+import { shroudGeometry, climbingPoint, workingTacklePoint, RIG_MASTS } from './rigging.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { gltfTRS } from './gltf.js';
 
@@ -11,12 +11,20 @@ const deckPoint=(x,z)=>[x,vesselDeck(z),z];
 function physical(p,boat){return [p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12];}
 function homePoint(s){return deckPoint(s.home[0],s.home[1]);}
 function climbRoot(mast,side,rung,boat){
-  const p=climbingPoint(mast,side,rung);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
+  const p=climbingPoint(mast,side,rung,boat.sailState?.rig[mast]);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
+}
+function haulStation(mast){
+  if(mast===1)return deckPoint(-.72,2.03);
+  if(mast===2)return deckPoint(.15,4.45);
+  const p=workingTacklePoint(mast,vesselDeck(RIG_MASTS[mast].z)+.75);
+  return deckPoint(p[0]+Math.sign(p[0])*.35,p[2]);
 }
 function routeTo(s,target){
   // Named corridors stay clear of the hatch, mast heels and aft companionway.
   if(s.id==='maria')return [deckPoint(s.x,target[2]),target];
   if(s.id==='rui')return [deckPoint(.55,s.z),deckPoint(.55,-2.25),target];
+  if(s.id==='beatriz')return [deckPoint(s.x,-2.65),deckPoint(target[0],-2.65),target];
+  if(s.id==='catarina')return [deckPoint(s.x,2.55),deckPoint(target[0],2.55),target];
   return [deckPoint(target[0],s.z),target];
 }
 export function assignCrewWork(company,boat) {
@@ -26,33 +34,37 @@ export function assignCrewWork(company,boat) {
     s.home??=[s.x,s.z];
     if(s.job)continue;
     let job;
-    if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]]){
-      const [mast,side]=CLIMBERS[s.id];job={kind:'rig',mast,side};
-    }else if(HANDS[s.id]!==undefined && needs[HANDS[s.id]]){
+    if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
+      const [mast]=CLIMBERS[s.id],side=-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
+    }else if(HANDS[s.id]!==undefined && (needs[HANDS[s.id]] || sails.maneuver)){
       job={kind:'haul',mast:HANDS[s.id]};
     }else if(s.id==='rui' && company.order==='weather' && (boat.hatchesClosed??0)<.999){
       job={kind:'hatch'};
-    }else if(s.id==='maria' && company.order==='watch' && company.workTime>(s.nextWatch??12)){
-      job={kind:'lookout',mast:0,side:1};
+    }else if(s.id==='maria' && !sails.maneuver && company.order==='watch' && company.workTime>(s.nextWatch??12)){
+      job={kind:'lookout',mast:0,side:-Math.sign(sails.rig[0].side)};
     }
     if(!job)continue;
     job.stage='approach';job.elapsed=0;job.rung=0;job.revision=company.revision;
     const target=job.kind==='hatch'?deckPoint(0,-2.25)
-      :job.kind==='haul'?deckPoint(s.home[0],s.home[1])
+      :job.kind==='haul'?haulStation(job.mast)
       :climbRoot(job.mast,job.side,0,boat);
     job.path=routeTo(s,target);job.cursor=0;s.job=job;s.intent='work';s.work=0;
   }
   // Crew attendance gates the actual canvas integrator, even when rendered crew
   // are hidden. Manual sliders still request jobs; no instant magical sail changes.
+  boat.crewRigRate??=new Float64Array(3);boat.crewRigRate.fill(0);
+  const aloft=company.crew.some(s=>s.job?.rung>0);
   boat.crewSailRate??=new Float64Array(3);boat.crewSailRate.fill(0);
   for(let mast=0;mast<3;mast++){
     const ready=company.crew.filter(s=>s.job?.mast===mast && s.job.stage==='working' && !s.observation.hazard);
+    boat.crewRigRate[mast]=Number(!aloft && ready.some(s=>s.job.kind==='haul'));
     boat.crewSailRate[mast]=mast===2?Number(ready.some(s=>s.job.kind==='haul'))
       :Number(ready.some(s=>s.job.kind==='haul') && ready.some(s=>s.job.kind==='rig'));
   }
 }
 export function stepCrewWork(s,company,boat,dt) {
   const j=s.job;if(!j)return false;
+  if(boat.sailState?.maneuver && (j.kind==='rig'||j.kind==='lookout') && ['ascending','working'].includes(j.stage))j.stage='descending';
   dt=workClamp(Number.isFinite(dt)?dt:0,0,.1);s.time+=dt;s.walkTime+=dt*.8;
   const o=s.observation;
   o.hazard=Math.abs(boat.roll??0)>(s.intent==='brace'?.26:.36)||Math.abs(boat.rollVelocity??0)>(s.intent==='brace'?.3:.5)||o.wind>(s.intent==='brace'?19:23);
@@ -96,7 +108,7 @@ export function stepCrewWork(s,company,boat,dt) {
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
-        :Math.abs((boat[SAIL_KEYS[j.mast]]??1)-sailingState(boat).set[j.mast])<.008;
+        :!sailingState(boat).maneuver && Math.abs((boat[SAIL_KEYS[j.mast]]??1)-sailingState(boat).set[j.mast])<.008;
       if(done){if(j.kind==='rig'||j.kind==='lookout'){j.stage='descending';s.nextWatch=company.workTime+45;}
         else startReturn(s,boat);}
     }
@@ -113,8 +125,9 @@ export function stepCrewWork(s,company,boat,dt) {
 function startReturn(s,boat){
   const j=s.job;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s);
-  j.path=s.id==='rui'?[deckPoint(.55,s.z),deckPoint(.55,home[2]),home]
-    :[deckPoint(home[0],s.z),home];
+  j.path=s.id==='maria'?[deckPoint(s.x,-3.2),deckPoint(home[0],-3.2),home]
+    :s.id==='duarte'?[deckPoint(home[0],s.z),home]
+    :[...j.path.slice(0,-1).reverse(),home];
 }
 export function crewWorkLabel(s){
   if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';

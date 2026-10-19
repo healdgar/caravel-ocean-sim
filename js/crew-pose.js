@@ -1,5 +1,5 @@
 import { gltfQuatMultiply } from './gltf.js';
-import { climbingPoint, tacklePoint } from './rigging.js';
+import { climbingPoint, workingTacklePoint } from './rigging.js';
 import { HULL_VERTICAL_SCALE, tillerPoint } from './hull.js';
 
 const poseSub=(a,b)=>a.map((v,i)=>v-b[i]);
@@ -48,7 +48,7 @@ export function poseCrewWork(a,s,boat){
       const cycle=(phase+offset)/2,base=Math.floor(cycle)*2-offset,f=cycle-Math.floor(cycle);
       const swing=Math.max(0,Math.min(1,(f-.55)/.45)),e=swing*swing*(3-2*swing);
       const foot=base+1+e*2,hand=foot+3;
-      const point=r=>{const p=climbingPoint(j.mast,j.side,r);return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
+      const point=r=>{const p=climbingPoint(j.mast,j.side,r,boat.sailState?.rig[j.mast]);return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
       const ft=point(foot),ht=point(hand),sign=side==='l'?1:-1;
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.3,.5,.65]);
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.65,1.1,.10]);
@@ -63,7 +63,7 @@ export function poseCrewWork(a,s,boat){
       let hand;
       if(j.kind==='haul'){
         const height=(s.position[1]+1.04+.17*Math.sin(phase+sign*.55))/HULL_VERTICAL_SCALE;
-        const p=tacklePoint(j.mast,height);
+        const p=workingTacklePoint(j.mast,height);
         hand=actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12],s);
       }else hand=[sign*.16,.42+.06*Math.sin(phase),.43];
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.10]);

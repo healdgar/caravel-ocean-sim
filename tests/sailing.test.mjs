@@ -1,3 +1,4 @@
+import {lateenSheetTarget} from '../js/lateen.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { apparentWind, sailingState, sailForces, advanceSails, SAIL_AREAS, windAtHeight } from '../js/sailing.js';
@@ -9,6 +10,7 @@ const windAt = angle => (angle + 90) * Math.PI / 180;
 function trimmed(boat, wind=7, angle=90, speed=0, side=0) {
   const s=sailForces(boat,wind,windAt(angle),speed,side);
   s.squareYaw=s.squareTarget;s.lateenYaw=s.lateenTarget;
+  for(let i=0;i<3;i++){s.rig[i].opening=lateenSheetTarget(s.lateenTarget,i);s.rig[i].side=-s.tack;}
   return {...sailForces(boat,wind,windAt(angle),speed,side)};
 }
 function sail(boat, seconds=120, wind=7, angle=90, dt=1/30, slope=0) {
@@ -43,7 +45,7 @@ test('each mast has independent canvas and mis-trim depowers the sails',()=>{
     const loads=trimmed(b);
     assert.ok(Math.abs(loads.area-SAIL_AREAS[i]*HULL_VERTICAL_SCALE*(20/12))<1e-10);assert.ok(loads.forward>0);
   }
-  const b=vessel(),full=trimmed(b);b.sailState.squareYaw+=Math.PI/2;b.sailState.lateenYaw+=Math.PI/2;
+  const b=vessel(),full=trimmed(b);b.sailState.squareYaw+=Math.PI/2;b.sailState.lateenYaw+=Math.PI/2;for(const p of b.sailState.rig)p.opening+=Math.PI/2;
   assert.ok(sailForces(b,7,windAt(90),0).forward<full.forward*.01);
 });
 

@@ -1328,7 +1328,7 @@ test('GPU tiller opposes the rudder trailing edge and agrees with port and starb
       const errors = []; device.onuncapturederror = e => errors.push(e.error.message);
       const B = GPUBufferUsage, size = points.length * 16;
       const buffer = (size, usage) => device.createBuffer({ size, usage });
-      const hull = buffer(144, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
+      const hull = buffer(192, B.UNIFORM | B.COPY_DST), input = buffer(size, B.STORAGE | B.COPY_DST);
       const output = buffer(size, B.STORAGE | B.COPY_SRC), read = buffer(size, B.MAP_READ | B.COPY_DST);
       device.queue.writeBuffer(input, 0, new Float32Array(points.flat()));
       const module = device.createShaderModule({ code: VESSEL_RIG + `
@@ -1391,7 +1391,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const vertices=new Float32Array(mesh),vertexBuffer=buffer(vertices.byteLength,B.VERTEX|B.COPY_DST);
       device.queue.writeBuffer(vertexBuffer,0,vertices);
       const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
-      const hullUBO=buffer(144,B.UNIFORM|B.COPY_DST);
+      const hullUBO=buffer(192,B.UNIFORM|B.COPY_DST);
       const wetState=buffer(8,B.STORAGE|B.COPY_DST),wetLookup=buffer(vertices.length/9*4,B.STORAGE);
       const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256,wetness:{state:wetState,lookup:wetLookup}});
       const module=await shader(SHADOW_SAMPLE+`
@@ -1472,6 +1472,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
     const result=await page.evaluate(async()=>{
       const {VESSEL_RIG}=await import('/js/wgsl/vessel.js');
       const {createCaravelMesh}=await import('/js/caravel.js');
+      const {writeLateenUniform,createLateenPoses}=await import('/js/lateen.js');
       const {hullScale}=await import('/js/hull.js');
       const scale=hullScale();
       const mesh=createCaravelMesh(),points=[];
@@ -1479,7 +1480,7 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
       const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice();
       const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
-      const hull=buffer(144,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
+      const hull=buffer(192,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
       const output=buffer(n*32,B.STORAGE|B.COPY_SRC),read=buffer(n*32,B.MAP_READ|B.COPY_DST);
       device.queue.writeBuffer(input,0,new Float32Array(points));
       const module=device.createShaderModule({code:VESSEL_RIG+`
@@ -1493,10 +1494,11 @@ test('GPU canvas furls independently, braces with its yards and keeps finite lig
         }`});
       const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
       const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const h=new Float32Array(36);h[12]=6;h[13]=20;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
+      const h=new Float32Array(48);h[12]=6;h[13]=20;h[19]=1.25;h[30]=h[31]=1;h[34]=7;h[35]=1;
       const samples=[];let full;
       for(const [set,yaw,tack] of [[[1,1,1],0,1],[[.5,.5,.5],0,1],[[0,0,0],0,1],[[0,1,1],0,1],[[1,1,1],.6,-1]]){
-        h.set(set,24);h[28]=yaw;h[29]=-yaw;h[35]=tack;device.queue.writeBuffer(hull,0,h);
+        h.set(set,24);h[28]=yaw;h[29]=-yaw;h[35]=tack;
+        const poses=createLateenPoses(set,-tack);for(const p of poses){p.opening=.3+yaw;p.fill=1;}writeLateenUniform(h,{rig:poses});device.queue.writeBuffer(hull,0,h);
         const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(pipe);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(n/64));pass.end();
         enc.copyBufferToBuffer(output,0,read,0,n*32);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
         const v=new Float32Array(read.getMappedRange()).slice();read.unmap();
@@ -1876,7 +1878,7 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
       const {HULL_VERTICAL_SCALE:S,hullDeck}=await import('/js/hull.js');
       const {SPRAY_COUNT,SHEET_COUNT}=await import('/js/wgsl/interaction.js');
       const {SPINDRIFT_COUNT,SPINDRIFT_STRIDE}=await import('/js/wgsl/spindrift.js');
-      const {SAIL_PLAN}=await import('/js/sailing.js');
+      const {SAIL_PLAN,createLateenPoses,writeLateenUniform,lateenClothPoint}=await import('/js/lateen.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage;
@@ -1891,13 +1893,15 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
       const computePipe=async(code,label)=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:await shader(code,label),entryPoint:'main'}});
       // One probe each: submerged exterior, dry deck, sheltered cabin, exposed
       // wood/rope/canvas at the same height, high dry rigging, actual moving sail.
-      const plan=SAIL_PLAN[0],sail=plan.corners[2].slice();sail[0]+=.2; // mast-side offset at tack -1
+      const plan=SAIL_PLAN[0],rig=createLateenPoses([1,1,1]);
+      const sail=lateenClothPoint(0,0,1,rig[0]);
       const positions=[[2,-.3,0,15],[0,hullDeck(0),0,0],[0,1.1,4,1],
         [2.1,3,0,10],[2.1,3,0,2],[2.1,3,0,9],[2,8,0,2],[...plan.corners[2],13.0625]];
       const mesh=new Float32Array(positions.flatMap(([x,y,z,mat])=>[x,y,z,0,1,0,mat,0,1]));
       const descriptors=createWetnessData(mesh);
-      const hull=new Float32Array(36);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;hull.set([1,1,1,1],24);hull.set([0,0,1,1],28);hull[35]=-1;
-      const hullUBO=buffer(144,B.UNIFORM),frameUBO=buffer(512,B.UNIFORM),uniform=buffer(64,B.UNIFORM);
+      const hull=new Float32Array(48);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;hull.set([1,1,1,1],24);hull.set([0,0,1,1],28);hull[35]=-1;
+      writeLateenUniform(hull,{rig});
+      const hullUBO=buffer(192,B.UNIFORM),frameUBO=buffer(512,B.UNIFORM),uniform=buffer(64,B.UNIFORM);
       device.queue.writeBuffer(hullUBO,0,hull);
       const sea=device.createTexture({size:[1,1,6],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
       const deck=device.createTexture({size:[1,1],format:'rgba32float',usage:T.TEXTURE_BINDING|T.COPY_DST});
@@ -1927,7 +1931,7 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
       device.queue.writeTexture({texture:deck},new Float32Array(4),{bytesPerRow:16},[1,1]);
       // Wet the deployed foot, then furl/brace it; moisture remains attached.
       drop(sail[0],sail[1]*S,sail[2]);const sailWet=await sample(40);
-      hull[24]=0;hull[29]=.7;device.queue.writeBuffer(hullUBO,0,hull);
+      rig[0].deployed=0;rig[0].opening=.7;writeLateenUniform(hull,{rig});device.queue.writeBuffer(hullUBO,0,hull);
       device.queue.writeBuffer(drops,0,new Float32Array(12));const furled=await sample(1);
       wet.updateCrew({crew:[{position:[-2,3*S,0],scale:[1,1,1],visible:true}]},{beam:3.6,length:12});
       drop(-2,3*S+.08,0);const crewWet=await sample(40);
@@ -2010,118 +2014,5 @@ test('wet materials visibly shade the ship and crew and return to their dry appe
     assert.ok(rms(dry,wet)>1,'material state changes visible shading');
     assert.ok(rms(dry,restored)<rms(dry,wet)*.05,`dry state restores material response: restored ${rms(dry,restored)}, wet ${rms(dry,wet)}`);
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
-  }finally{await page.close();}
-});
-
-test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounded and sewn ropes stay attached', {timeout:120000}, async()=>{
-  const page=await browser.newPage();
-  try{
-    await page.route('**/__cloth_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(`${origin}/__cloth_test`);
-    const result=await page.evaluate(async()=>{
-      const {VESSEL_RIG,RIG_OBSTACLES}=await import('/js/wgsl/vessel.js');
-      const {createCaravelMesh}=await import('/js/caravel.js');
-      const raw=createCaravelMesh(),points=[];
-      for(let i=0;i<raw.length;i+=27)if([9,13,19].includes(Math.floor(raw[i+6])))points.push(...raw.subarray(i,i+27));
-      // The three large lateen courses can meet a neighboring sail's sewn edge.
-      // Include those actual moving segments, not only standing/running rigging.
-      const sewnSegments=new Map();
-      for(let i=0;i<points.length;i+=27)if(Math.floor(points[i+6])===19){
-        const id=Math.round((points[i+6]%1)*16);
-        for(let j=1;j<3;j++){
-          const a=i/9,b=a+j,ua=points.slice(i+7,i+9),ub=points.slice(i+j*9+7,i+j*9+9);
-          if(Math.hypot(ua[0]-ub[0],ua[1]-ub[1])<1e-6)continue;
-          sewnSegments.set(`${id}:${[ua.join(','),ub.join(',')].sort().join(':')}`,{a,b,id});
-        }
-      }
-      const n=points.length/9,device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
-      device.onuncapturederror=e=>errors.push(e.error.message);
-      const B=GPUBufferUsage,buffer=(size,usage)=>device.createBuffer({size,usage});
-      const hull=buffer(144,B.UNIFORM|B.COPY_DST),input=buffer(points.length*4,B.STORAGE|B.COPY_DST);
-      const bytes=(n+RIG_OBSTACLES.length)*32;
-      const output=buffer(bytes,B.STORAGE|B.COPY_SRC),read=buffer(bytes,B.MAP_READ|B.COPY_DST);
-      device.queue.writeBuffer(input,0,new Float32Array(points));
-      const module=device.createShaderModule({code:VESSEL_RIG+`
-        @group(0) @binding(0) var<uniform> hull:Hull;
-        @group(0) @binding(1) var<storage,read> points:array<f32>;
-        @group(0) @binding(2) var<storage,read_write> result:array<vec4f>;
-        @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) gid:vec3u){
-          let i=gid.x*9u;if(i+8u>=arrayLength(&points)){return;}
-          let p=vec3f(points[i],points[i+1u],points[i+2u]);let material=points[i+6u];let uv=vec2f(points[i+7u],points[i+8u]);
-          let v=rigVertex(p,vec3f(points[i+3u],points[i+4u],points[i+5u]),material,uv);
-          result[gid.x*2u]=vec4f(v.position,1);
-          let id=u32(round(fract(material)*16.0));
-          var centre=sailBasePoint(p,uv,id,u32(material),false);
-          if(u32(material)==19u){centre=sailPoint(sailRestPoint(id,uv),uv,id,select(9u,13u,isLateen(id)),false);}
-          result[gid.x*2u+1u]=vec4f(centre,1);
-          if(gid.x<${RIG_OBSTACLES.length}u){
-            let line=rigObstacles[gid.x];let other=u32(line.motion.x);var a=line.a.xyz;var b=line.b.xyz;
-            if(other>0u){a=sailBasePoint(a,vec2f(0,line.motion.y),other,12u,true);b=sailBasePoint(b,vec2f(0,line.motion.z),other,12u,true);}
-            result[(${n}u+gid.x)*2u]=vec4f(a,1);result[(${n}u+gid.x)*2u+1u]=vec4f(b,1);
-          }
-        }
-        @compute @workgroup_size(64) fn mask(@builtin(global_invocation_id) gid:vec3u){
-          let i=gid.x*9u;if(i+2u>=arrayLength(&points)){return;}
-          let p=vec3f(points[i],points[i+1u],points[i+2u]);
-          result[gid.x*2u]=vec4f(select(0.0,1.0,rigCanvasContact(p,u32(points[i+3u]),u32(points[i+4u]))),0,0,0);
-        }`});
-      const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
-      const maskPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'mask'}});
-      const maskGroup=device.createBindGroup({layout:maskPipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const group=device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[hull,input,output].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const h=new Float32Array(36);h[12]=6;h[13]=20;h[34]=12;h[35]=1;
-      const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],sub=(a,b)=>a.map((x,i)=>x-b[i]),dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
-      function hit(a,b,c,line){
-        const e1=sub(b,a),e2=sub(c,a),dir=sub(line.b,line.a),p=cross(dir,e2),det=dot(e1,p);
-        if(Math.abs(det)<1e-8)return false;
-        const t=sub(line.a,a),u=dot(t,p)/det;if(u<1e-5||u>1-1e-5)return false;
-        const q=cross(t,e1),v=dot(dir,q)/det;if(v<1e-5||u+v>1-1e-5)return false;
-        const distance=dot(e2,q)/det;return distance>.001&&distance<.999?line.a.map((x,i)=>x+distance*dir[i]):null;
-      }
-      const captures=[],collisions=[],sewn=[],deflections=[];let neighboringEdgeContacts=0;
-      const states=[[1,0,0,1],[1,0,.2,1],[0,0,0,1],[0,0,.2,1],[1,.6,1,1],[1,-.6,1,1],[.6,.6,1,.5],[0,0,1,0],[1,0,0,1,-1],[1,.6,2,1,-1],[0,-.6,2,1,-1],[1,1.047,1,1],[1,-1.047,1,1],
-        ...Array.from({length:24},(_,i)=>[0,i%2?.08:-.08,i*.137,i%3===0?.45:1,i%2?1:-1])];
-      for(const [fill,yaw,time,set,tack=1] of states){
-        h[35]=tack;h.set([set,set,set],24);h[28]=yaw;h[29]=-yaw;h[30]=h[31]=fill;h[19]=time;device.queue.writeBuffer(hull,0,h);
-        const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(pipe);cp.setBindGroup(0,group);cp.dispatchWorkgroups(Math.ceil(n/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-        const values=new Float32Array(read.getMappedRange()).slice();read.unmap();captures.push(values);
-        const hits={},contacts=[];let ropeError=0,deflection=0;
-        const lines=RIG_OBSTACLES.map((line,j)=>({...line,a:Array.from(values.subarray((n+j)*8,(n+j)*8+3)),b:Array.from(values.subarray((n+j)*8+4,(n+j)*8+7))}));
-        for(const edge of sewnSegments.values())lines.push({a:Array.from(values.subarray(edge.a*8+4,edge.a*8+7)),b:Array.from(values.subarray(edge.b*8+4,edge.b*8+7)),owner:edge.id});
-        for(let i=0;i<n;i++){
-          const base=Math.floor(points[i*9+6]);
-          if(base===19){const distance=Math.hypot(values[i*8]-values[i*8+4],values[i*8+1]-values[i*8+5],values[i*8+2]-values[i*8+6]);ropeError=Math.max(ropeError,Math.max(0,distance-.01501));}
-          if(base!==19)deflection=Math.max(deflection,Math.hypot(...[0,1,2].map(k=>values[i*8+k]-values[i*8+4+k])));
-          if(base===19||i%3)continue;
-          const tri=[0,1,2].map(j=>Array.from(values.subarray((i+j)*8,(i+j)*8+3)));
-          const owner=Math.round((points[i*9+6]%1)*16);
-          for(const [j,line] of lines.entries()){
-            if(line.owner===owner)continue;
-            const point=hit(...tri,line);if(point){contacts.push({point,j});if(line.owner)neighboringEdgeContacts++;}
-          }
-        }
-        contacts.push({point:[0,-1,0],j:-1},{point:[8,8,8],j:-1});
-        const topEdge=lines.find(line=>line.owner===1);
-        contacts.push({point:topEdge.a.map((v,i)=>(v+topEdge.b[i])*.5),j:-1,owner:1});
-        if(contacts.length){
-          const probes=new Float32Array(contacts.length*9);contacts.forEach(({point,j,owner},i)=>{
-            const sewnOwner=owner??lines[j]?.owner??0;
-            probes.set(point,i*9);probes[i*9+3]=sewnOwner?19:12;probes[i*9+4]=sewnOwner;
-          });device.queue.writeBuffer(input,0,probes);
-          const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(maskPipe);cp.setBindGroup(0,maskGroup);cp.dispatchWorkgroups(Math.ceil(contacts.length/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-          const masks=new Float32Array(read.getMappedRange());contacts.forEach(({j},i)=>{if(j===-1?masks[i*8]>.5:((j>=RIG_OBSTACLES.length-3&&j<RIG_OBSTACLES.length)||masks[i*8]<.5))hits[j]=(hits[j]??0)+1;});read.unmap();device.queue.writeBuffer(input,0,new Float32Array(points));
-        }
-        collisions.push(hits);sewn.push(ropeError);deflections.push(deflection);
-      }
-      const movement=(a,b)=>{
-        let max=0;for(let i=0;i<n;i++)if(Math.floor(points[i*9+6])!==19)max=Math.max(max,Math.hypot(...[0,1,2].map(k=>captures[a][i*8+k]-captures[b][i*8+k])));return max;
-      };
-      const loaded=movement(0,1),slack=movement(2,3);device.destroy();return {errors,loaded,slack,collisions,sewn,deflections,neighboringEdgeContacts};
-    });
-    assert.deepEqual(result.errors,[]);
-    assert.ok(result.loaded<.01,`loaded motion ${result.loaded}`);assert.ok(result.slack>.05,`slack motion ${result.slack}`);
-    assert.ok(result.sewn.every(e=>e<1e-5),`bolt-rope attachment error: ${result.sewn}`);
-    assert.ok(result.deflections.every(d=>d<=.06001),`contact cannot stretch cloth into spikes: ${result.deflections}`);
-    assert.ok(result.neighboringEdgeContacts>0,'exercise actual intersections with a different sail’s sewn edging');
-    assert.deepEqual(result.collisions,result.collisions.map(()=>({})),'rope crossings must be masked; masts must clear canvas');
   }finally{await page.close();}
 });

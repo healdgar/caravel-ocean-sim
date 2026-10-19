@@ -96,6 +96,28 @@ Regenerate with `node scripts/sail-plan-audit.mjs`. The new area and sail height
 also feed propulsion and heel; they are not a visual-only enlargement. The old
 square plan and its mast dimensions remain separate for a future vessel.
 
+## Operating rig
+
+[Museo Galileo's Michael of Rhodes explanation](https://brunelleschi.imss.fi.it/michaelofrhodes/ships_sails.html)
+describes long, heavy lateen yards slung beside masts and the difficulty of
+manhandling them through surrounding stays and shrouds. This supports coordinated
+yard and rope handling; it does not specify our exact three-masted Niña maneuver.
+
+The simulation now separates sheet trim around the diagonal yard from yard
+transfer around the mast. Each yard has its own pose, fixed halyard sling and tack
+line. Paired sheets swap working/lazy roles. Windward runners stay taut while eased
+leeward runners gather alongside the mast. Paired running stays to the waterways
+replace fixed inter-mast stays; the fore stay remains at the bowsprit. All canvas
+is gathered before a yard moves, and yards are raised, passed abaft their masts and
+lowered individually. Extra main/mizzen hoist clears the retained quarterdeck.
+
+These rope leads, hoist distances, release curves and crew sequence are authored
+mechanical accommodations to this hybrid hull and sail plan, not traced details
+or proof of an exact historical drill. Rope lengths/tensions, block friction,
+spar flex and full cloth collisions are not dynamically solved. Clearance tests
+read actual GPU-transformed cloth triangles and rope/yard capsules through both
+tacks and transfers; fragment masking no longer counts as separation.
+
 The [modern replica operator](https://www.ninapinta.net/) explicitly describes
 its Niña as a **caravela redonda**, with square fore/main and lateen aft sails.
 Its header sailing footage shows useful near-hull whitewater and a steadier

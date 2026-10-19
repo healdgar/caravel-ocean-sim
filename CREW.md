@@ -9,7 +9,10 @@ reserves distinct runners, and moving sailors yield to nearby bodies.
 
 `js/rigging.js` supplies the mesh, runner path and grip positions. Two-bone IK
 places alternating hands and simplified boot locks against the actual ropes.
-Climbers stop below the mast heads. There are no ratline ladders or mast baskets
+Climbers use the windward runner and stop below the mast heads. A tack change
+recalls climbers before easing runners. Three deck hands attend the tackle while
+all canvas gathers and the yards transfer individually; revised captain orders
+determine how much canvas is set afterward. There are no ratline ladders or mast baskets
 in the selected Martínez-Hidalgo reconstruction.
 The carpenter closes a hinged hatch over eight seconds. Hands haul actual tackle
 leads; the helmsman follows the player-controlled tiller beneath the quarterdeck. Crew near the helm

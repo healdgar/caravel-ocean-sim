@@ -338,7 +338,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes, quarterdeck camera support and forward sightlines on resized hulls; camera checks cover windward boarding and smooth tack changes.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; loaded versus slack motion, bounded contact deflection, sewn-rope attachment and masked intersections across both tacks and extreme trim; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses and fixed deck leads; loaded versus slack motion, sewn-rope attachment, and physical triangle-to-rope clearance including rope thickness across both tacks, partial furling and complete yard transfers; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
@@ -351,7 +351,7 @@ The suite covers:
 - Analytical cross-derivative values and pixel equality between separate and packed wave-texture reads, at sunset and in rough seas.
 - Exact MSAA coverage comparison between inline and depth-first ocean visibility. Shaded comparisons cover exposed hull edges, rough seas, free-camera water, and unmasked debug views; they bound rounding/edge differences to sub-quarter-level RMS on a 0–255 channel scale, rather than asserting bit equality. Resolution, wave cascades, texture filtering, shadows and antialiasing remain unchanged.
 
-GPU fixtures default to SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). On macOS, `WEBGPU_BACKEND=metal` selects the native GPU for local validation. Tests use port 8082 by default; override it with `TEST_PORT` if needed. Visual checks supplement these tests; neither software rendering nor Mac checks establish physical-iPhone performance.
+GPU fixtures default to SwiftShader and an offscreen render target, so a physical GPU or window system is not required. To use an existing Chromium installation, set `CHROMIUM_PATH` (for example, `CHROMIUM_PATH=/usr/bin/chromium npm test`). On macOS, `WEBGPU_BACKEND=metal` selects the native GPU for local validation. The main GPU suite uses port 8082 by default (`TEST_PORT` overrides it); the independent rig-clearance fixture uses 8085 (`RIG_TEST_PORT` overrides it). Visual checks supplement these tests; neither software rendering nor Mac checks establish physical-iPhone performance.
 
 ## Known limitations
 
@@ -377,6 +377,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
+| `js/lateen.js`, `js/wgsl/lateen.js` | Independent lateen poses, sequential yard transfers, sheet leads and matching CPU/GPU motion |
 | `js/rig-plan.js` | Digitized d’Albertis lateen sail/mast coordinates and uniform hull-scale conversion |
 | `js/gltf.js`, `js/crew.js`, `js/crew-work.js`, `js/crew-pose.js`, `js/rigging.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
 | `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
@@ -452,21 +453,30 @@ The separate **Captain** panel issues **Make full sail**, **Reduce sail** and
 about 5.6 seconds of attended work from fully set to fully furled, plus travel
 and climbing time (roughly a minute for the first complete fore/main operation). The percentage readouts show actual
 canvas while the sliders show the requested amount. Each lateen gathers along
-its diagonal yard. All three yards trim and change tack
-automatically, with a short lag. Loaded sails hold their camber with only slow, small
-pressure motion; rapid luffing fades with wind loading and is strongest in slack or
-poorly trimmed canvas. Sewn edge ropes follow the exact cloth deformation, including
-furling. Each lateen yard hangs beside its mast.
+its diagonal yard. Each sail trims around that yard with an independent sheet angle;
+the yards remain fore-and-aft on the leeward side of their masts. Loaded canvas holds
+its camber; rapid luffing belongs to slack or poorly trimmed sails. Sewn edge ropes
+follow the same deformation as the cloth.
 
-Rig contacts produce smooth deflections capped at 6 cm in design coordinates
-(10 cm on the default vessel). Remaining rope/cloth intersections use a narrow
-fragment mask in both the visible and shadow passes, rather than pulling distant
-cloth vertices into spikes. Sewn edge ropes remain attached and visible on their
-own sail, but their contacts with neighboring lateen canvas receive the same mask.
-The contact regression covers overlapping sail edges, both tacks, luff phases,
-partial furling and extreme trim. This is a bounded visual approximation, not a cloth
-collision solver. Visible geometry, lighting normals and shadow casters share the deformation.
-Lowering sails removes drive gradually; momentum and waves keep moving the vessel.
+A sustained change of tack initiates a crew-attended maneuver: gather all canvas,
+align the bundles, raise and steepen one yard, pass it abaft its mast, lower it,
+then repeat for the other yards. Once all three are across, the crew sheets and
+sets the captain's requested canvas. Handling takes about a minute after the deck
+hands arrive; climbers descend before runners are eased. The ship loses sail drive
+while canvas is gathered and keeps its momentum and wave response. Readouts show
+actual exposed canvas and the Captain panel reports the maneuver.
+
+Both quarters carry sheet leads. The working sheet changes with tack; the lazy
+sheet hangs below the foot and returns across the deck. Halyards support fixed
+slings along the yards, with separate tack lines at their forward heels. Windward
+runners remain taut; leeward runners and paired running stays gather beside their
+masts. Rope geometry stays continuous in the visible and shadow passes: there are
+no intersection masks or contact dimples. The fore stay remains led to the bowsprit.
+
+The operating rig is an authored, reconstruction-guided kinematic approximation,
+not a rope-tension or cloth solver. Its sheet leads, released-runner curves, yard
+hoists and handling drill are not recovered Niña specifications. See
+[the reconstruction notes](CARAVEL_RESEARCH.md#operating-rig).
 
 The sail readout reports the point of sail, apparent wind speed and its direction
 relative to the bow. Apparent wind subtracts the ship's forward and sideways velocity

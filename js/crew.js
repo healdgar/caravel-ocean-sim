@@ -75,6 +75,7 @@ export function stepCompany(company,boat,dt,wind) {
     company.order='watch';company.pending=false;company.revision++;
   } else company.pending=!!order.sails&&order.sails.some((value,i)=>Math.abs(value-sails.set[i])>.01);
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
+  company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
@@ -87,6 +88,7 @@ function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='ha
 export function companyStatus(company) {
   const bracing=company.crew.filter(s=>s.intent==='brace').length;
   if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
+  if(company.rigManeuver)return 'Changing tack · gathering canvas and handling yards';
   if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
   if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
   return company.order==='watch'?`Sea watch · 12 aboard${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;

@@ -222,7 +222,7 @@ function hullScale(length = DEFAULT_BOAT_LENGTH, beam = DEFAULT_BOAT_BEAM) {
   return [beam / HULL_DESIGN_BEAM, HULL_VERTICAL_SCALE, length / HULL_DESIGN_LENGTH];
 }
 const HULL_DRAFT = 1.2;
-const HULL_UNIFORM_BYTES = 144; // transform, rig, sail set/trim/apparent wind
+const HULL_UNIFORM_BYTES = 192; // transform, controls, apparent wind, three independent lateen poses
 const HULL_BOW_RAKE = 1.45;
 const HULL_STERN_RAKE = 0.5;
 const HULL_SECTION_POWER = 0.65;
@@ -327,15 +327,16 @@ function shroudGeometry(mast,side) {
   const rungs=Math.ceil((head[1]-Math.min(...feet.map(p=>p[1])))*HULL_VERTICAL_SCALE/.35);
   return {head,feet,rungs};
 }
-function shroudPoint(mast,side,rung,across=.5) {
+function shroudPoint(mast,side,rung,across=.5,pose=null) {
   const {head,feet,rungs}=shroudGeometry(mast,side),t=Math.max(0,Math.min(1,rung/rungs));
+  if(pose)return standingRopePoint({kind:'runner',mast,side,a:feet[0].map((v,i)=>v*(1-across)+feet[1][i]*across),b:head},t,pose);
   return head.map((v,i)=>(feet[0][i]*(1-across)+feet[1][i]*across)*(1-t)+v*t);
 }
 // Rope ascent uses the central runner, without transverse ratlines.
-function climbingPoint(mast,side,step){return shroudPoint(mast,side,step,.5);}
+function climbingPoint(mast,side,step,pose=null){return shroudPoint(mast,side,step,.5,pose);}
 
 // Working halyard leads terminate beside the assigned deck hands.
-const SAIL_TACKLES = [{mast:0,x:1.05,z:-1.4},{mast:1,x:-1.1,z:-.45},{mast:2,x:-.75,z:3.25}];
+const SAIL_TACKLES = [{mast:0,x:1.05,z:-1.4},{mast:1,x:-1.1,z:-.45},{mast:2,x:-.4,z:4.55}];
 function tacklePoint(mast,height){
   const t=SAIL_TACKLES[mast],m=RIG_MASTS[mast],side=Math.sign(t.x);
   const bottom=[t.x+side*.25,vesselDeck(t.z)+.25,t.z];
@@ -343,30 +344,211 @@ function tacklePoint(mast,height){
   const f=Math.max(0,Math.min(1,(height-bottom[1])/(top[1]-bottom[1])));
   return bottom.map((v,i)=>v+(top[i]-v)*f);
 }
+function workingTacklePoint(mast,height){
+  const a=tacklePoint(mast,-10),b=tacklePoint(mast,30),side=Math.sign(a[0]);
+  const t=Math.max(0,Math.min(1,(height-a[1])/(b[1]-a[1])));
+  return standingRopePoint({kind:'fall',mast,side,a,b},t,null);
+}
 
 // Shared centre lines for visible standing rigging and sail clearance.
 function standingRiggingLines(){
-  const lines=[],add=(a,b,r,r2=r,sides=10)=>lines.push({a,b,r,r2,sides,id:0,weights:[0,0]});
+  const lines=[],add=(kind,mast,side,a,b,r,r2=r,sides=10)=>lines.push({kind,mast,side,a,b,r,r2,sides,id:0,weights:[0,0]});
   for(let mast=0;mast<RIG_MASTS.length;mast++)for(const side of [-1,1]){
     const {head,feet}=shroudGeometry(mast,side);
-    for(const foot of feet)add(foot,head,.022,.016);
-    add(feet[0].map((v,i)=>(v+feet[1][i])*.5),head,.024,.021);
+    for(const foot of feet)add('shroud',mast,side,foot,head,.022,.016);
+    add('runner',mast,side,feet[0].map((v,i)=>(v+feet[1][i])*.5),head,.024,.021);
   }
   for(const t of SAIL_TACKLES){
-    const a=tacklePoint(t.mast,-10),b=tacklePoint(t.mast,30);
-    add(a,b,.012,.012,8);add([a[0]-.035,a[1],a[2]],[b[0]-.035,b[1],b[2]],.012,.012,8);
+    const a=tacklePoint(t.mast,-10),b=tacklePoint(t.mast,30),side=Math.sign(a[0]);
+    add('fall',t.mast,side,a,b,.012,.012,8);
+    add('fall',t.mast,side,[a[0]-.035,a[1],a[2]],[b[0]-.035,b[1],b[2]],.012,.012,8);
   }
-  for(const [mast,target,r] of [[0,[0,1.9,-8.1],.036],[1,mastPoint(0,RIG_MASTS[0].height*.7),.028],[2,mastPoint(1,RIG_MASTS[1].height*.7),.026]])
-    add(mastPoint(mast,RIG_MASTS[mast].height*.96),target,r,r*.8,12);
+  // Keep the fore stay to the bowsprit. The other masts use paired running
+  // stays led to the waterways; fixed inter-mast stays blocked yard transfer.
+  add('forestay',0,0,[0,1.9,-8.1],mastPoint(0,RIG_MASTS[0].height*.96),.036,.0288,12);
   for(const side of [-1,1])for(const [mast,m] of RIG_MASTS.entries()){
-    const z=Math.min(5.35,m.z+1.3);
-    const head=mastPoint(mast,RIG_MASTS[mast].height*.94);head[0]=side*.12;
-    add(head,[side*(deckHalfWidth(z)-.04),vesselDeck(z)+.35,z],.024);
+    for(const direction of [-1,1]){
+      const z=Math.max(-5.8,Math.min(5.35,m.z+direction*1.3));
+      const head=mastPoint(mast,m.height*.94);head[0]=side*.12;
+      add('stay',mast,side,[side*(deckHalfWidth(z)-.04),vesselDeck(z)+.03,z],head,.024);
+    }
   }
   return lines;
 }
 
+function standingRopePoint(line,t,pose){
+  const point=line.a.map((v,i)=>v+(line.b[i]-v)*t);
+  if(line.kind==='forestay')return point;
+  const lee=(pose?.side??-1)*line.side>0?1:0;
+  const ease=line.kind==='fall'?1:Math.max(lee,Math.min(1,(pose?.dip??0)/.12));
+  // Eased pendants are gathered alongside the mast. Their fixed deck ends
+  // remain visible; paid-out length curves down to the same belaying points.
+  const low=1-t,foot=Math.pow(low,32),m=RIG_MASTS[line.mast];
+  const y=point[1]-.12*Math.sin(Math.PI*t),axis=mastPoint(line.mast,y);
+  const x=line.b[0]+line.side*.08*low+(line.a[0]-line.b[0]-line.side*.08)*foot;
+  const z=axis[2]+(line.a[2]-mastPoint(line.mast,line.a[1])[2])*foot;
+  return [point[0]+(x-point[0])*ease,point[1]+(y-point[1])*ease,point[2]+(z-point[2])*ease];
+}
+
+// ---- js/lateen.js ----
+
+
+
+const SAIL_PLAN=LATEEN_RIG_PLATE.sails.map((s,mast)=>{
+  const corners=s.corners.map(rigPlatePoint),[a,b]=corners,m=RIG_MASTS[mast];
+  const base=mastPoint(mast,vesselDeck(m.z)),slope=m.rake/(m.height-base[1]);
+  const t=(base[2]+slope*(a[1]-base[1])-a[2])/((b[2]-a[2])-slope*(b[1]-a[1]));
+  return {id:mast+1,mast,kind:'lateen',corners,pivot:a.map((v,i)=>v+t*(b[i]-v)),belly:s.belly};
+});
+
+const mix=(a,b,t)=>a+(b-a)*t;
+const rigClamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+function rigSmooth(a,b,x){const t=rigClamp((x-a)/(b-a));return t*t*(3-2*t);}
+function lateenSheetTarget(target,mast){return rigClamp(.30+Math.abs(target)*[.76,.72,.68][mast],.30,1.15);}
+function createLateenPoses(set,side=-1){
+  return Array.from({length:3},(_,i)=>({side,opening:.30,dip:0,fill:0,deployed:set[i]}));
+}
+function advanceLateenRig(s,boat,dt){
+  const approach=(value,target,rate)=>value+rigClamp(target-value,-rate*dt,rate*dt);
+  const targetSide=-s.tack;
+  if(!s.rigInitialized){
+    for(const p of s.rig)p.side=targetSide;
+    s.rigInitialized=true;
+  }
+  if(!s.maneuver){
+    const changed=s.rig.some(p=>p.side!==targetSide)&&Math.abs(s.windSide)>.5;
+    s.tackWait=changed?(s.tackWait??0)+dt:0;
+    if(s.tackWait>=.6)s.maneuver={side:targetSide,stage:'gather',mast:0};
+  }
+  const m=s.maneuver;
+  if(m){
+    // Finish an underway transfer before accepting another wind reversal.
+    // All canvas is gathered before the yards move, avoiding neighbouring sails.
+    const ready=boat.crewRigRate?Math.min(...boat.crewRigRate):1;
+    if(ready>0){
+      if(m.stage==='gather'){
+        for(const p of s.rig)p.deployed=approach(p.deployed,0,.35*ready);
+        if(s.rig.every(p=>p.deployed===0))m.stage='align';
+      }else if(m.stage==='align'){
+        for(const p of s.rig)p.opening=approach(p.opening,0,.5);
+        if(s.rig.every(p=>p.opening===0))m.stage='raise';
+      }else if(m.stage==='raise'){
+        const p=s.rig[m.mast];p.dip=approach(p.dip,1,.25);
+        if(p.dip===1){m.stage='pass';m.angle=Math.acos(p.side);}
+      }else if(m.stage==='pass'){
+        const p=s.rig[m.mast],angle=m.side>0?0:Math.PI;
+        m.angle=approach(m.angle,angle,.45);p.side=Math.cos(m.angle);
+        if(m.angle===angle){p.side=m.side;m.stage='lower';}
+      }else if(m.stage==='lower'){
+        const p=s.rig[m.mast];p.dip=approach(p.dip,0,.25);
+        if(p.dip===0){m.mast++;m.stage=m.mast<3?'raise':'sheet';}
+      }else if(m.stage==='sheet'){
+        for(let i=0;i<3;i++)s.rig[i].opening=approach(s.rig[i].opening,lateenSheetTarget(s.lateenTarget,i),.45);
+        if(s.rig.every(p=>p.opening>=.30))m.stage='set';
+      }else{
+        const requested=[boat.sailFore??1,boat.sailMain??1,boat.sailMizzen??1].map(v=>rigClamp(v));
+        for(let i=0;i<3;i++)s.set[i]=s.rig[i].deployed=approach(s.rig[i].deployed,requested[i],.22*ready);
+        if(s.rig.every((p,i)=>p.deployed===requested[i])){s.maneuver=null;s.tackWait=0;}
+      }
+    }
+  }else{
+    for(let i=0;i<3;i++){
+      const p=s.rig[i];p.deployed=s.set[i];
+      p.opening=approach(p.opening,lateenSheetTarget(s.lateenTarget,i),.4-i*.035);
+    }
+  }
+  s.canvasTack=-s.rig.reduce((sum,p)=>sum+p.side,0)/3;
+}
+
+// The same per-mast poses drive canvas, yards, rope leads, shadows and wetness.
+function writeLateenUniform(h,s){
+  for(let i=0;i<3;i++){
+    const p=s.rig[i];h[24+i]=p.deployed;h.set([p.opening,p.side,p.dip,p.fill],36+i*4);
+  }
+}
+const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+const sub=(a,b)=>a.map((v,i)=>v-b[i]);
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function rotateAxis(p,axis,angle){
+  const c=Math.cos(angle),s=Math.sin(angle),q=cross(axis,p),d=dot(axis,p);
+  return p.map((v,i)=>v*c+q[i]*s+axis[i]*d*(1-c));
+}
+function lateenRestPoint(mast,u,v){
+  const s=SAIL_PLAN[mast],[a,b,c]=s.corners;
+  const p=a.map((x,i)=>x+(b[i]-x)*u+(c[i]-x)*v);
+  p[0]+=s.belly*27*u*v*(1-u-v);return p;
+}
+function lateenYardPoint(mast,point,pose){
+  const s=SAIL_PLAN[mast],[a,b]=s.corners;
+  const angle=-Math.atan2(a[2]-b[2],a[1]-b[1])*pose.dip;
+  const q=rotateAxis(sub(point,s.pivot),[1,0,0],angle);
+  const radius=[.46,.40,.34][mast]+pose.dip*.22;
+  // The gathered yard passes abaft its mast. It never interpolates through it.
+  q[0]+=pose.side*radius;
+  q[2]+=Math.sqrt(Math.max(0,1-pose.side*pose.side))*radius;
+  q[1]+=pose.dip*[.85,1.80,1.35][mast];
+  return q.map((v,i)=>v+s.pivot[i]);
+}
+function lateenClothPoint(mast,u,v,pose,time=0,wind=7){
+  const s=SAIL_PLAN[mast],[a,b]=s.corners,axis=sub(b,a),n=Math.hypot(...axis);
+  axis.forEach((x,i)=>axis[i]=x/n);
+  // Affine brailing gathers the clew to the middle of the yard. Sending it to
+  // the upper tip dragged its sheets through the next mast's canvas.
+  const rest=lateenRestPoint(mast,u,v),clewAlong=dot(sub(s.corners[2],a),axis)/n;
+  const onYard=a.map((x,i)=>mix(x,b[i],u+clewAlong*v));
+  let p=onYard.map((x,i)=>mix(x,rest[i],mix(.012,1,pose.deployed)));
+  const belly=27*u*v*Math.max(0,1-u-v),slack=1-rigSmooth(.2,.85,pose.fill);
+  p[0]=pose.side*(p[0]*(.12+.88*pose.fill)+pose.deployed*Math.min(wind/4,1)*belly*
+    (.15*slack*slack*Math.sin(time*7+u*17+v*11)+.003*pose.fill*Math.sin(time*.7)));
+  p=rotateAxis(sub(p,a),axis,-pose.side*pose.opening).map((x,i)=>x+a[i]);
+  return lateenYardPoint(mast,p,pose);
+}
+
+// Two sheets stay led to opposite quarters: the working sheet carries load,
+// and the lazy sheet hangs below the foot. Halyards support the sling, not the
+// upper yard tip. Tack lines control the forward heel of each long yard.
+function runningRiggingLines(){
+  const lines=[];
+  for(const sail of SAIL_PLAN){
+    const {mast,id,corners,pivot}=sail,z=Math.min(5.5,corners[2][2]+.55);
+    for(const side of [-1,1])lines.push({kind:'sheet',mast,side,a:corners[2],b:[side*1.0,vesselDeck(z)+.18,z],r:.016,r2:.016,sides:8,id,weights:[1,0]});
+    const axis=sub(corners[1],corners[0]),length=Math.hypot(...axis);
+    const sling=pivot.map((v,i)=>v+axis[i]/length*[.4,.45,.75][mast]);
+    lines.push({kind:'halyard',mast,side:0,a:mastPoint(mast,RIG_MASTS[mast].height*.97),b:sling,r:.022,r2:.022,sides:8,id,weights:[0,1]});
+    const tackZ=Math.max(-6.1,corners[1][2]-.25);
+    lines.push({kind:'tack',mast,side:0,a:corners[1],b:[0,vesselDeck(tackZ)+.12,tackZ],r:.018,r2:.018,sides:8,id,weights:[1,0]});
+  }
+  return lines;
+}
+
+function lateenRopePoint(line,t,poses,time=0,wind=7){
+  const p=poses[line.mast];let a=line.a,b=line.b;
+  if(line.kind==='sheet')a=lateenClothPoint(line.mast,0,1,p,time,wind);
+  if(line.kind==='tack')a=lateenYardPoint(line.mast,SAIL_PLAN[line.mast].corners[1],p);
+  if(line.kind==='halyard')b=lateenYardPoint(line.mast,line.b,p);
+  let point=a.map((x,i)=>mix(x,b[i],t));
+  if(line.kind==='sheet'){
+    const lazy=1-rigSmooth(-.25,.25,line.side*p.side);
+    const lead=[-b[0],b[1]-.05,b[2]-.12],q=t<.72?t/.72:(t-.72)/.28;
+    const slack=t<.72?a.map((x,i)=>mix(x,lead[i],q)):lead.map((x,i)=>mix(x,b[i],q));
+    slack[1]-=Math.sin(Math.PI*q)*(t<.72?.25:.02);
+    point[1]-=Math.sin(Math.PI*t)*(.04+p.dip*.35);
+    point=point.map((x,i)=>mix(x,slack[i],lazy));
+    // The mizzen's leads are forward of its clew: carry their slack abaft the
+    // vertical bundle during transfer. The other sheets already lead aft.
+    if(line.mast===2)point[2]+=p.dip*.45*Math.sin(Math.PI*t);
+  }else if(line.kind==='tack')point[1]-=Math.sin(Math.PI*t)*(.06+p.dip*.2);
+  return point;
+}
+
+const RIG_LINES=[...standingRiggingLines(),...runningRiggingLines()];
+const RIG_SEGMENTS=12;
+function ropeParameter(line,step){
+  const t=step/RIG_SEGMENTS;return ['shroud','runner','stay','fall'].includes(line.kind)?t*t:t;
+}
+
 // ---- js/sailing.js ----
+
 
 
 
@@ -382,28 +564,6 @@ const SQUARE_RIG_PLAN = [
   {id:2,mast:1,kind:'square',z:squareRigPoint(1,8)[2]-.20,top:8,width:6.3,height:5.4,belly:.9},
   {id:3,mast:2,kind:'lateen',corners:[[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]],pivot:squareRigPoint(2,4.3),belly:.8},
 ];
-const SAIL_PLAN = LATEEN_RIG_PLATE.sails.map((s,mast)=>{
-  const corners=s.corners.map(rigPlatePoint),[a,b]=corners,m=RIG_MASTS[mast];
-  const base=mastPoint(mast,vesselDeck(m.z)),slope=m.rake/(m.height-base[1]);
-  // Turn each diagonal yard about its crossing of the actual raked mast.
-  const t=(base[2]+slope*(a[1]-base[1])-a[2])/((b[2]-a[2])-slope*(b[1]-a[1]));
-  return {id:mast+1,mast,kind:'lateen',corners,pivot:a.map((v,i)=>v+t*(b[i]-v)),belly:s.belly};
-});
-function runningRiggingLines(){
-  const lines=[];
-  for(const sail of SAIL_PLAN){
-    const {id,mast,z,top,width:w,height:h,corners}=sail;
-    if(sail.kind==='square')for(const side of [-1,1]){
-      lines.push({a:[side*w*.5,top-h,z],b:[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],r:.013,r2:.013,sides:8,id,weights:[1,0]},
-        {a:[side*w*.56,top,z],b:[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],r:.011,r2:.011,sides:8,id,weights:[1,0]});
-    }else{
-      const sheetZ=Math.min(5.5,corners[2][2]);
-      lines.push({a:corners[2],b:[1.1,vesselDeck(sheetZ)+.3,sheetZ],r:.016,r2:.016,sides:8,id,weights:[1,0]},
-        {a:mastPoint(mast,RIG_MASTS[mast].height*.97),b:corners[0],r:.014,r2:.014,sides:8,id,weights:[0,1]});
-    }
-  }
-  return lines;
-}
 const SAIL_KEYS = ['sailFore', 'sailMain', 'sailMizzen'];
 const SAIL_AREAS = SAIL_PLAN.map(s=>{
   if(s.kind==='square')return s.width*s.height*.95;
@@ -434,6 +594,7 @@ function sailingState(boat) {
     squareTarget: 0, lateenTarget: 0, windSide: 0, windForward: 0, rollMoment: 0,
     loadWind: {tack:1}, panelSide:new Float64Array(SAIL_LOADS.length), panelMoment:new Float64Array(SAIL_LOADS.length),
   };
+  boat.sailState.rig??=createLateenPoses(boat.sailState.set);
   return boat.sailState;
 }
 
@@ -458,7 +619,7 @@ function advanceSails(boat, dt, windSpeed, windDirection) {
   // Yards and lateen take time to brace/tack; forces use this actual trim.
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
   s.lateenYaw += sailClamp(s.lateenTarget - s.lateenYaw, -dt * 0.65, dt * 0.65);
-  s.canvasTack += sailClamp(s.tack - s.canvasTack, -dt * 1.2, dt * 1.2);
+  advanceLateenRig(s,boat,dt);
 }
 
 function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
@@ -469,19 +630,22 @@ function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
   const upright=Math.max(0,Math.cos(roll));
   let squareArea=0,lateenArea=0;
   for(let i=0;i<SAIL_LOADS.length;i++){
-    const panel=SAIL_LOADS[i],lateen=panel.kind==='lateen',deployed=s.set[panel.mast];
+    const panel=SAIL_LOADS[i],lateen=panel.kind==='lateen',deployed=lateen?s.rig[panel.mast].deployed:s.set[panel.mast];
     // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const height=(panel.top-panel.drop*(.025+.975*deployed))*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
+    const centreHeight=lateen?lateenClothPoint(panel.mast,1/3,1/3,s.rig[panel.mast],0,0)[1]:panel.top-panel.drop*(.025+.975*deployed);
+    const height=centreHeight*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
     const lever=Math.max(.1,height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)
       -(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE))*upright;
     const wind=s.loadWind;wind.tack=s.tack;
     // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
     apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
     const speed=wind.apparentSpeed,angle=Math.abs(wind.apparentAngle),degrees=angle*180/Math.PI;
-    const trim=Math.max(0,Math.cos(2*((lateen?s.lateenYaw:s.squareYaw)-(lateen?wind.lateenTarget:wind.squareTarget))));
+    const trim=lateen?Math.max(0,-s.rig[i].side*wind.tack)*Math.max(0,Math.cos(2*(s.rig[i].opening-lateenSheetTarget(wind.lateenTarget,i))))
+      :Math.max(0,Math.cos(2*(s.squareYaw-wind.squareTarget)));
     const power=sailSmooth(lateen?42:55,lateen?60:75,degrees)*trim*trim;
     const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
     const fill=sailSmooth(.5,5,speed)*power;
+    if(lateen)s.rig[i].fill=fill;
     s.area+=area;
     if(lateen){s.lateenFill+=fill*area;lateenArea+=area;}else{s.squareFill+=fill*area;squareArea+=area;}
     // Projected area and the horizontal lever both shorten as the vessel heels.
@@ -721,151 +885,102 @@ fn hullExcludesOcean(local:vec3f)->bool {
 }
 `;
 
+// ---- js/wgsl/lateen.js ----
+
+
+
+const v3=p=>`vec3f(${p.join(',')})`,v4=p=>`vec4f(${p.join(',')})`;
+const kinds={shroud:0,runner:0,stay:0,fall:1,forestay:2,sheet:3,halyard:4,tack:5};
+const LATEEN_MOTION=/* wgsl */ `
+const rigCorners=array<vec3f,9>(${SAIL_PLAN.flatMap(s=>s.corners).map(v3)});
+const rigPivots=array<vec3f,3>(${SAIL_PLAN.map(s=>v3(s.pivot))});
+const rigMasts=array<vec4f,3>(${RIG_MASTS.map(m=>v4([m.z,m.height,m.rake,vesselDeck(m.z)]))});
+struct RigLine {a:vec4f,b:vec4f,control:vec4f};
+const rigLines=array<RigLine,${RIG_LINES.length}>(${RIG_LINES.map(l=>`RigLine(${v4([...l.a,l.r])},${v4([...l.b,l.r2])},${v4([kinds[l.kind],l.mast,l.side,0])})`)});
+fn rigAxisRotate(p:vec3f,axis:vec3f,angle:f32)->vec3f {
+  let c=cos(angle);let s=sin(angle);return p*c+cross(axis,p)*s+axis*dot(axis,p)*(1.0-c);
+}
+fn lateenCorners(id:u32)->array<vec3f,3> {
+  let i=(id-1u)*3u;return array<vec3f,3>(rigCorners[i],rigCorners[i+1u],rigCorners[i+2u]);
+}
+fn lateenPivot(id:u32)->vec3f {return rigPivots[id-1u];}
+fn isLateen(id:u32)->bool {return true;}
+fn sailRestPoint(id:u32,uv:vec2f)->vec3f {
+  let c=lateenCorners(id);var p=c[0]+(c[1]-c[0])*uv.x+(c[2]-c[0])*uv.y;
+  p.x+=array<f32,3>(${SAIL_PLAN.map(s=>s.belly)})[id-1u]*27.0*uv.x*uv.y*(1.0-uv.x-uv.y);return p;
+}
+fn yardRotation(id:u32,p:vec3f)->vec3f {
+  let c=lateenCorners(id);let dip=hull.lateen[id-1u].z;
+  return rigAxisRotate(p,vec3f(1,0,0),-atan2(c[0].z-c[1].z,c[0].y-c[1].y)*dip);
+}
+fn yardPoint(id:u32,p:vec3f)->vec3f {
+  let pose=hull.lateen[id-1u];let pivot=lateenPivot(id);
+  let radius=array<f32,3>(.46,.40,.34)[id-1u]+pose.z*.22;
+  return pivot+yardRotation(id,p-pivot)+vec3f(pose.y*radius,
+    pose.z*array<f32,3>(.85,1.80,1.35)[id-1u],sqrt(max(0.0,1.0-pose.y*pose.y))*radius);
+}
+fn clothRotation(id:u32,p:vec3f)->vec3f {
+  let c=lateenCorners(id);let pose=hull.lateen[id-1u];
+  return yardRotation(id,rigAxisRotate(p,normalize(c[1]-c[0]),-pose.y*pose.x));
+}
+fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
+  if(material==10u){return yardPoint(id,position);}
+  let c=lateenCorners(id);let pose=hull.lateen[id-1u];let deployed=hull.sailSet[id-1u];
+  let fill=pose.w;let time=hull.origin.w;
+  let clewAlong=dot(c[2]-c[0],c[1]-c[0])/dot(c[1]-c[0],c[1]-c[0]);
+  var p=mix(mix(c[0],c[1],uv.x+clewAlong*uv.y),position,mix(.012,1.0,deployed));
+  let belly=27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);let slack=1.0-smoothstep(.2,.85,fill);
+  p.x=pose.y*(p.x*(.12+.88*fill)+deployed*min(hull.sailWind.z/4.0,1.0)*belly*
+    (.15*slack*slack*sin(time*7.0+uv.x*17.0+uv.y*11.0)+.003*fill*sin(time*.7)));
+  p=c[0]+rigAxisRotate(p-c[0],normalize(c[1]-c[0]),-pose.y*pose.x);
+  return yardPoint(id,p);
+}
+fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
+  return sailPoint(position,uv,id,material,anchored);
+}
+fn rigMastPoint(mast:u32,y:f32)->vec3f {
+  let m=rigMasts[mast];return vec3f(0,y,m.x+m.z*(y-m.w)/(m.y-m.w));
+}
+fn rigRopePoint(index:u32,t:f32)->vec3f {
+  let line=rigLines[index];let kind=u32(line.control.x);let mast=u32(line.control.y);let id=mast+1u;
+  let side=line.control.z;let pose=hull.lateen[mast];var a=line.a.xyz;var b=line.b.xyz;
+  if(kind<2u){
+    let point=mix(a,b,t);let ease=select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
+    let low=1.0-t;let foot=pow(low,32.0);let y=point.y-.12*sin(3.14159265*t);
+    let axis=rigMastPoint(mast,y);
+    let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,
+      axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
+    return mix(point,clear,ease);
+  }
+  if(kind==3u){a=sailPoint(sailRestPoint(id,vec2f(0,1)),vec2f(0,1),id,13u,false);}
+  if(kind==4u){b=yardPoint(id,line.b.xyz);}
+  if(kind==5u){a=yardPoint(id,lateenCorners(id)[1]);}
+  var point=mix(a,b,t);
+  if(kind==3u){
+    let lazy=1.0-smoothstep(-.25,.25,side*pose.y);
+    let lead=vec3f(-b.x,b.y-.05,b.z-.12);let q=select((t-.72)/.28,t/.72,t<.72);
+    var slack=select(mix(lead,b,q),mix(a,lead,q),t<.72);
+    slack.y-=sin(3.14159265*q)*select(.02,.25,t<.72);
+    point.y-=sin(3.14159265*t)*(.04+pose.z*.35);point=mix(point,slack,lazy);
+    if(mast==2u){point.z+=pose.z*.45*sin(3.14159265*t);}
+  }
+  if(kind==5u){point.y-=sin(3.14159265*t)*(.06+pose.z*.2);}
+  return point;
+}
+fn ropeFrame(v:vec3f,oldAxis:vec3f,newAxis:vec3f)->vec3f {
+  let axis=cross(oldAxis,newAxis);return v+cross(axis,v)+cross(axis,cross(axis,v))/max(.00001,1.0+dot(oldAxis,newAxis));
+}
+`;
+
 // ---- js/wgsl/vessel.js ----
 
 
-
-const SAIL_RIG_INFO = SAIL_PLAN.map(s=>'vec4f('+[s.z??0,s.top??0,s.width??1,s.height??1].join(',')+')').join(',');
-const SAIL_BELLIES = SAIL_PLAN.map(s=>s.belly).join(',');
-const LATEEN_POINTS = SAIL_PLAN.flatMap(s=>s.corners??[[0,0,0],[0,1,0],[0,0,1]]).map(p=>'vec3f('+p.join(',')+')').join(',');
-const LATEEN_PIVOTS = SAIL_PLAN.map(s=>'vec3f('+(s.pivot??[0,0,0]).join(',')+')').join(',');
-const SAIL_KINDS = SAIL_PLAN.map(s=>s.kind==='lateen'?'true':'false').join(',');
-const RIG_OBSTACLES=[...standingRiggingLines(),...runningRiggingLines(),...RIG_MASTS.map((m,i)=>({a:mastPoint(i,vesselDeck(m.z)),b:mastPoint(i,m.height),r:m.r,r2:m.r*.35,id:0,weights:[0,0]}))];
-const RIG_OBSTACLE_WGSL=RIG_OBSTACLES.map(o=>'RigObstacle(vec4f('+[...o.a,o.r].join(',')+'),vec4f('+[...o.b,o.r2].join(',')+'),vec4f('+[o.id,...o.weights,0].join(',')+'))').join(',');
-// Shared deformation keeps visible geometry and shadow casters coincident.
+// Shared deformation keeps visible geometry, wetness and shadow casters coincident.
 const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
-  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f };
+  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3> };
 fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
-fn sailRotate(p:vec3f,angle:f32)->vec3f {
-  let c=cos(angle);let s=sin(angle);return vec3f(c*p.x+s*p.z,p.y,-s*p.x+c*p.z);
-}
-fn isLateen(id:u32)->bool {return array<bool,3>(${SAIL_KINDS})[id-1u];}
-fn lateenCorners(id:u32)->array<vec3f,3> {
-  let points=array<vec3f,9>(${LATEEN_POINTS});let i=(id-1u)*3u;
-  return array<vec3f,3>(points[i],points[i+1u],points[i+2u]);
-}
-fn lateenPivot(id:u32)->vec3f {return array<vec3f,3>(${LATEEN_PIVOTS})[id-1u];}
-fn sailRestPoint(id:u32,uv:vec2f)->vec3f {
-  if(isLateen(id)){
-    let corners=lateenCorners(id);
-    var p=corners[0]+(corners[1]-corners[0])*uv.x+(corners[2]-corners[0])*uv.y;
-    p.x+=array<f32,3>(${SAIL_BELLIES})[id-1u]*27.0*uv.x*uv.y*(1.0-uv.x-uv.y);return p;
-  }
-  let info=array<vec4f,3>(${SAIL_RIG_INFO})[id-1u];
-  let belly=array<f32,3>(${SAIL_BELLIES})[id-1u];
-  return vec3f((uv.x-0.5)*info.z*(1.0-0.11*sin(uv.y*3.14159265)+0.025*uv.y),
-    info.y-uv.y*info.w+0.28*sin(uv.x*3.14159265)*uv.y*uv.y,
-    info.x-belly*sin(uv.x*3.14159265)*sin(uv.y*3.14159265*0.88));
-}
-fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
-  var p=position;var pivot=vec3f(0);var yaw=hull.sailTrim.x;
-  // Running ropes encode endpoint attachment in UV.y, independent of sail height.
-  let weight=select(1.0,uv.y,anchored);
-  let time=hull.origin.w;
-  if(!isLateen(id)){
-    let info=array<vec4f,3>(${SAIL_RIG_INFO})[id-1u];
-    let deployed=hull.sailSet[id-1u];let fill=hull.sailTrim.z;
-    pivot=vec3f(0,info.y,info.x);
-    if(material!=10u){
-      p.y=info.y+(p.y-info.y)*mix(0.025,1.0,deployed);
-      p.z=info.x+(p.z-info.x)*mix(0.06,0.12+0.88*fill,deployed);
-      if(material==9u){
-        let edge=sin(uv.x*3.14159265)*sin(uv.y*3.14159265);
-        let slack=1.0-smoothstep(.2,.85,fill);
-        // Taut canvas holds its camber. Fast luffing belongs to unloaded cloth;
-        // the bolt ropes pin its perimeter, with only slow pressure breathing.
-        p.z+=deployed*min(hull.sailWind.z/4.0,1.0)*edge*(.16*slack*slack*sin(time*7.0+uv.x*15.0+uv.y*8.0)+.003*fill*sin(time*.7));
-        p.z+=(1.0-deployed)*0.05*sin(uv.y*62.83185)*sin(uv.x*3.14159265);
-      }
-    }
-  }else{
-    let deployed=hull.sailSet[id-1u];let fill=hull.sailTrim.w;
-    let corners=lateenCorners(id);let yard=normalize(corners[1]-corners[0]);
-    pivot=lateenPivot(id);yaw=hull.sailTrim.y;
-    if(material!=10u){
-      var onYard=corners[0]+yard*dot(position-corners[0],yard);
-      // Gather each cloth column to its yard attachment. Nearest projection
-      // mixes columns and turns a curved gathered bundle into wide triangles.
-      if(material==13u){onYard=mix(corners[0],corners[1],uv.x);}
-      if(material==12u && anchored && distance(position,corners[2])<.05){onYard=corners[0];}
-      p=mix(onYard,position,mix(0.025,1.0,deployed));
-      p.x*=-hull.sailWind.w*(0.12+0.88*fill);
-      if(material==13u){
-        let belly=27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);
-        let slack=1.0-smoothstep(.2,.85,fill);
-        p.x+=deployed*min(hull.sailWind.z/4.0,1.0)*belly*(.15*slack*slack*sin(time*7.0+uv.x*17.0+uv.y*11.0)+.003*fill*sin(time*.7));
-      }
-    }
-  }
-  // The lateen yard hangs alongside the mast, rather than through its axis.
-  if(isLateen(id)){p.x-=hull.sailWind.w*.20;}
-  return mix(position,pivot+sailRotate(p-pivot,yaw),weight);
-}
-struct RigObstacle {a:vec4f,b:vec4f,motion:vec4f};
-const rigObstacles=array<RigObstacle,${RIG_OBSTACLES.length}>(${RIG_OBSTACLE_WGSL});
-// Small, smooth contact dimples; never pull distant vertices across the rig.
-fn sailClearRig(point:vec3f,uv:vec2f,id:u32)->vec3f {
-  var offset=vec3f(0);
-  let edge=select(min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y)),min(min(uv.x,uv.y),1.0-uv.x-uv.y),isLateen(id));
-  let free=smoothstep(0.0,.12,edge);
-  for(var i=0u;i<${RIG_OBSTACLES.length}u;i++){
-    let line=rigObstacles[i];var a=line.a.xyz;var b=line.b.xyz;let other=u32(line.motion.x);
-    if(other>0u){
-      a=sailBasePoint(a,vec2f(0,line.motion.y),other,12u,true);
-      b=sailBasePoint(b,vec2f(0,line.motion.z),other,12u,true);
-    }
-    if(any(point<min(a,b)-.23)||any(point>max(a,b)+.23)){continue;}
-    let axis=b-a;let along=clamp(dot(point-a,axis)/max(dot(axis,axis),.00001),0.0,1.0);
-    let q=point-mix(a,b,along);let d=length(q);let radius=mix(line.a.w,line.b.w,along)+.07;
-    // A continuous vector field avoids a sign flip when the cloth crosses a rope.
-    offset+=q/max(radius,.001)*.12*(1.0-smoothstep(0.0,radius,d));
-  }
-  return point+offset*(free*min(1.0,.06/max(length(offset),.00001)));
-}
-// Hide only rope fragments at a cloth contact. This fallback handles crossings
-// without stretching canvas into spikes. A sewn edge belongs to one sail: keep
-// that attachment visible, but mask contacts with the other lateen courses.
-// Inverse parameterization is inexpensive and does not run the contact loop.
-fn rigInsideOtherCanvas(point:vec3f,owner:u32)->bool {
-  for(var id=1u;id<=3u;id++){
-    if(id==owner){continue;}
-    let deployed=mix(.025,1.0,hull.sailSet[id-1u]);var uv=vec2f(0);var material=9u;
-    if(!isLateen(id)){
-      let info=array<vec4f,3>(${SAIL_RIG_INFO})[id-1u];let pivot=vec3f(0,info.y,info.x);
-      let p=pivot+sailRotate(point-pivot,-hull.sailTrim.x);
-      uv=vec2f(p.x/info.z+.5,(info.y-p.y)/(info.w*deployed));
-      for(var k=0u;k<3u;k++){
-        uv.x=p.x/(info.z*(1.0-.11*sin(uv.y*3.14159265)+.025*uv.y))+.5;
-        uv.y=(info.y-p.y)/deployed/info.w+.28*sin(uv.x*3.14159265)*uv.y*uv.y/info.w;
-      }
-      if(any(uv<vec2f(0))||any(uv>vec2f(1))){continue;}
-    }else{
-      material=13u;let pivot=lateenPivot(id);
-      let p=pivot+sailRotate(point-pivot,-hull.sailTrim.y);
-      let corners=lateenCorners(id);let a=corners[1].yz-corners[0].yz;
-      let b=(corners[2].yz-corners[0].yz)*deployed;let q=p.yz-corners[0].yz;
-      let det=a.x*b.y-a.y*b.x;
-      uv=vec2f(q.x*b.y-q.y*b.x,a.x*q.y-a.y*q.x)/det;
-      if(any(uv<vec2f(0))||uv.x+uv.y>1.0){continue;}
-    }
-    let cloth=sailBasePoint(sailRestPoint(id,uv),uv,id,material,false);
-    // Includes the bounded 6 cm deflection and interpolation between mesh samples.
-    if(distance(point,cloth)<.14){return true;}
-  }
-  return false;
-}
-fn rigInsideCanvas(point:vec3f)->bool {return rigInsideOtherCanvas(point,0u);}
-fn rigCanvasContact(point:vec3f,material:u32,owner:u32)->bool {
-  if(material==12u){return rigInsideCanvas(point);}
-  if(material==19u){return rigInsideOtherCanvas(point,owner);}
-  return false;
-}
-fn sailPoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec3f {
-  let p=sailBasePoint(position,uv,id,material,anchored);
-  if(material==9u || material==13u){return sailClearRig(p,uv,id);}
-  return p;
-}
+${LATEEN_MOTION}
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
 fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
   var scale=vec3f(hull.size.x/3.6,${HULL_VERTICAL_SCALE},hull.size.y/12.0);
@@ -892,19 +1007,25 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
   }
   let tag=u32(round(fract(material)*16.0));let id=tag&7u;let base=u32(material);
-  if(id>0u && id<=3u){
-    local=sailPoint(position,uv,id,base,(tag&8u)!=0u);
+  if(base==12u && uv.x>=100.0){
+    let index=u32(round(uv.x-100.0));let line=rigLines[index];let t=uv.y;
+    let oldAxis=normalize(line.b.xyz-line.a.xyz);
+    let newAxis=normalize(rigRopePoint(index,min(1.0,t+.001))-rigRopePoint(index,max(0.0,t-.001)));
+    local=rigRopePoint(index,t)+ropeFrame(position-mix(line.a.xyz,line.b.xyz,t),oldAxis,newAxis);
+    localN=ropeFrame(normal,oldAxis,newAxis);
+  }else if(id>0u && id<=3u){
+    local=sailPoint(position,uv,id,base,false);
     if(base==19u){
-      // Sewn bolt ropes share their exact cloth UV, including collision offsets.
-      let rest=sailRestPoint(id,uv);let cloth=select(9u,13u,isLateen(id));
-      local=sailPoint(rest,uv,id,cloth,false)+sailRotate(position-rest,select(hull.sailTrim.x,hull.sailTrim.y,isLateen(id)));
+      let rest=sailRestPoint(id,uv);
+      local=sailPoint(rest,uv,id,13u,false)+clothRotation(id,position-rest);
     }
     if(base==9u || base==13u){
-      let du=vec2f(0.0005,0);let dv=vec2f(0,0.0005);
+      let du=vec2f(.0005,0);let dv=vec2f(0,.0005);
       let tangent=sailPoint(sailRestPoint(id,uv+du),uv+du,id,base,false)-sailPoint(sailRestPoint(id,uv-du),uv-du,id,base,false);
       let vertical=sailPoint(sailRestPoint(id,uv+dv),uv+dv,id,base,false)-sailPoint(sailRestPoint(id,uv-dv),uv-dv,id,base,false);
       localN=normalize(cross(tangent,vertical));
-    }else{localN=sailRotate(normal,select(hull.sailTrim.x,hull.sailTrim.y,isLateen(id)));}
+    }else if(base==10u){localN=yardRotation(id,normal);}
+    else{localN=clothRotation(id,normal);}
   }
   return RigVertex(local,localN,scale);
 }
@@ -947,21 +1068,15 @@ struct ShadowVertex {
   @location(1) uv:vec2f,
   @location(2) @interpolate(flat) material:u32,
   @location(3) wet:f32,
-  @location(4) rigLocal:vec3f,
-  @location(5) @interpolate(flat) sailId:u32,
 };
 @vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) material:f32,@location(3) uv:vec2f,@builtin(vertex_index) index:u32)->ShadowVertex {
   let rig=rigVertex(position,normal,material,uv);
   var out:ShadowVertex;
-  out.rigLocal=rig.position;
-  out.sailId=u32(round(fract(material)*16.0))&7u;
   out.position=SH.lightView*vec4f(rotateHull(rig.position*rig.scale),1.0);
   out.normal=normalize(rotateHull(rig.normal/rig.scale));out.uv=uv;out.material=u32(material);out.wet=moisture[wetLookup[index]].x;
   return out;
 }
-@fragment fn solidFS(in:ShadowVertex){
-  if(rigCanvasContact(in.rigLocal,in.material,in.sailId)){discard;}
-}
+@fragment fn solidFS(){}
 @fragment fn canvasFS(in:ShadowVertex)->@location(0) vec4f {
   return vec4f(canvasTransmission(canvasThickness(in.uv,in.material)*canvasWetDepth(in.wet),abs(dot(normalize(in.normal),SH.sun.xyz))),1.0);
 }
@@ -3899,8 +4014,6 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
   @location(6) wet:vec2f,
-  @location(7) rigLocal:vec3f,
-  @location(8) @interpolate(flat) sailId:u32,
 };
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let rig=rigVertex(position,normal,material,uv);
@@ -3909,9 +4022,8 @@ struct BoatVertex {
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
   o.normal = normalize(rotateHull(rig.normal / rig.scale));
-  o.local = position;o.rigLocal=rig.position;
+  o.local = position;
   o.material = u32(material); o.normalLocal = normal; o.uv=uv;o.wet=moisture[wetLookup[index]];
-  o.sailId=u32(round(fract(material)*16.0))&7u;
   return o;
 }
 fn oceanHeight(p: vec2f) -> f32 {
@@ -3941,7 +4053,6 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   return mix(env,filteredOcean,confidence*0.55);
 }
 @fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-  if(rigCanvasContact(in.rigLocal,in.material,in.sailId)){discard;}
   let p = in.local;
   var wet=clamp(in.wet,vec2f(0),vec2f(1));
   if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}
@@ -4623,15 +4734,15 @@ function createCaravelMesh() {
     const uv=(i,end)=>[i/8*0.8+a[0]*0.31+a[2]*0.071,end*length*0.65];
     for(let i=0;i<8;i++){let j=(i+1)%8;quad(aa[i],bb[i],bb[j],aa[j],m,null,[uv(i,0),uv(i,1),uv(i+1,1),uv(i+1,0)]);tri(a,aa[j],aa[i],m);tri(b,bb[i],bb[j],m);}
   }
-  function tube(a,b,r,m=2,r2=r,sides=12,motion=null,clothUV=null) {
+  function tube(a,b,r,m=2,r2=r,sides=12,motion=null,clothUV=null,open=false) {
     const axis=norm(sub(b,a)),u=norm(cross(axis,Math.abs(axis[1])<0.9?[0,1,0]:[1,0,0])),v=cross(axis,u);
     const n=i=>add(mul(u,Math.cos(i*2*Math.PI/sides)),mul(v,Math.sin(i*2*Math.PI/sides)));
     for(let i=0;i<sides;i++){
       const na=n(i),nb=n(i+1),length=Math.hypot(...sub(b,a));
       const uv=(u,end)=>clothUV?clothUV[end]:[u,motion?motion[end]:end*length*.75];
       quad(add(a,mul(na,r)),add(b,mul(na,r2)),add(b,mul(nb,r2)),add(a,mul(nb,r)),m,[na,na,nb,nb],[uv(i/sides*.7,0),uv(i/sides*.7,1),uv((i+1)/sides*.7,1),uv((i+1)/sides*.7,0)]);
-      tri(a,add(a,mul(nb,r)),add(a,mul(na,r)),m,null,motion||clothUV?[uv(0,0),uv(0,0),uv(0,0)]:undefined);
-      tri(b,add(b,mul(na,r2)),add(b,mul(nb,r2)),m,null,motion||clothUV?[uv(0,1),uv(0,1),uv(0,1)]:undefined);
+      if(!open)tri(a,add(a,mul(nb,r)),add(a,mul(na,r)),m,null,motion||clothUV?[uv(0,0),uv(0,0),uv(0,0)]:undefined);
+      if(!open)tri(b,add(b,mul(na,r2)),add(b,mul(nb,r2)),m,null,motion||clothUV?[uv(0,1),uv(0,1),uv(0,1)]:undefined);
     }
   }
   function torus(center,r,tubeR,m=2,axis='z',segments=64) {
@@ -4910,8 +5021,7 @@ function createCaravelMesh() {
     tube(add(bottom,[-.07,0,0]),add(bottom,[.07,0,0]),.065,16,.065,12);
     beam(add(bottom,[0,-.25,0]),add(bottom,[0,.06,0]),.075,.09,5);
   }
-  // Lower stays and paired runners, led to the waterways without channels.
-  for(const {a,b,r,r2,sides} of standingRiggingLines())tube(a,b,r,12,r2,sides);
+  // Lower stay attachments at the waterways, without channels.
   for(const side of [-1,1])for(const m of RIG_MASTS){
     const footZ=Math.min(5.35,m.z+1.3);
     const foot=[side*(width(footZ)-.04),vesselDeck(footZ)+.35,footZ];
@@ -4938,10 +5048,14 @@ function createCaravelMesh() {
     tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10+lateenTag,.045,18);
     for(const [a,b] of [[[0,0],[1,0]],[[1,0],[0,1]],[[0,1],[0,0]]])for(let i=0;i<resolution;i++){
       const u=a.map((v,j)=>v+(b[j]-v)*i/resolution),v=a.map((v,j)=>v+(b[j]-v)*(i+1)/resolution);
-      tube(lateen(...u),lateen(...v),.015,19+lateenTag,.015,10,null,[u,v]);
+      tube(lateen(...u),lateen(...v),.015,19+lateenTag,.015,10,null,[u,v],true);
     }
   }
-  for(const {a,b,r,r2,sides,id,weights} of runningRiggingLines())tube(a,b,r,12+(id+8)/16,r2,sides,weights);
+  for(const [index,line] of RIG_LINES.entries())for(let j=0;j<RIG_SEGMENTS;j++){
+    const {a,b,r,r2}=line,t=ropeParameter(line,j),u=ropeParameter(line,j+1);
+    const point=t=>a.map((v,i)=>v+(b[i]-v)*t),radius=t=>r+(r2-r)*t;
+    tube(point(t),point(u),radius(t),12,radius(u),6,null,[[100+index,t],[100+index,u]],true);
+  }
   return new Float32Array(out);
 }
 
@@ -5124,12 +5238,20 @@ const deckPoint=(x,z)=>[x,vesselDeck(z),z];
 function physical(p,boat){return [p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12];}
 function homePoint(s){return deckPoint(s.home[0],s.home[1]);}
 function climbRoot(mast,side,rung,boat){
-  const p=climbingPoint(mast,side,rung);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
+  const p=climbingPoint(mast,side,rung,boat.sailState?.rig[mast]);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
+}
+function haulStation(mast){
+  if(mast===1)return deckPoint(-.72,2.03);
+  if(mast===2)return deckPoint(.15,4.45);
+  const p=workingTacklePoint(mast,vesselDeck(RIG_MASTS[mast].z)+.75);
+  return deckPoint(p[0]+Math.sign(p[0])*.35,p[2]);
 }
 function routeTo(s,target){
   // Named corridors stay clear of the hatch, mast heels and aft companionway.
   if(s.id==='maria')return [deckPoint(s.x,target[2]),target];
   if(s.id==='rui')return [deckPoint(.55,s.z),deckPoint(.55,-2.25),target];
+  if(s.id==='beatriz')return [deckPoint(s.x,-2.65),deckPoint(target[0],-2.65),target];
+  if(s.id==='catarina')return [deckPoint(s.x,2.55),deckPoint(target[0],2.55),target];
   return [deckPoint(target[0],s.z),target];
 }
 function assignCrewWork(company,boat) {
@@ -5139,33 +5261,37 @@ function assignCrewWork(company,boat) {
     s.home??=[s.x,s.z];
     if(s.job)continue;
     let job;
-    if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]]){
-      const [mast,side]=CLIMBERS[s.id];job={kind:'rig',mast,side};
-    }else if(HANDS[s.id]!==undefined && needs[HANDS[s.id]]){
+    if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
+      const [mast]=CLIMBERS[s.id],side=-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
+    }else if(HANDS[s.id]!==undefined && (needs[HANDS[s.id]] || sails.maneuver)){
       job={kind:'haul',mast:HANDS[s.id]};
     }else if(s.id==='rui' && company.order==='weather' && (boat.hatchesClosed??0)<.999){
       job={kind:'hatch'};
-    }else if(s.id==='maria' && company.order==='watch' && company.workTime>(s.nextWatch??12)){
-      job={kind:'lookout',mast:0,side:1};
+    }else if(s.id==='maria' && !sails.maneuver && company.order==='watch' && company.workTime>(s.nextWatch??12)){
+      job={kind:'lookout',mast:0,side:-Math.sign(sails.rig[0].side)};
     }
     if(!job)continue;
     job.stage='approach';job.elapsed=0;job.rung=0;job.revision=company.revision;
     const target=job.kind==='hatch'?deckPoint(0,-2.25)
-      :job.kind==='haul'?deckPoint(s.home[0],s.home[1])
+      :job.kind==='haul'?haulStation(job.mast)
       :climbRoot(job.mast,job.side,0,boat);
     job.path=routeTo(s,target);job.cursor=0;s.job=job;s.intent='work';s.work=0;
   }
   // Crew attendance gates the actual canvas integrator, even when rendered crew
   // are hidden. Manual sliders still request jobs; no instant magical sail changes.
+  boat.crewRigRate??=new Float64Array(3);boat.crewRigRate.fill(0);
+  const aloft=company.crew.some(s=>s.job?.rung>0);
   boat.crewSailRate??=new Float64Array(3);boat.crewSailRate.fill(0);
   for(let mast=0;mast<3;mast++){
     const ready=company.crew.filter(s=>s.job?.mast===mast && s.job.stage==='working' && !s.observation.hazard);
+    boat.crewRigRate[mast]=Number(!aloft && ready.some(s=>s.job.kind==='haul'));
     boat.crewSailRate[mast]=mast===2?Number(ready.some(s=>s.job.kind==='haul'))
       :Number(ready.some(s=>s.job.kind==='haul') && ready.some(s=>s.job.kind==='rig'));
   }
 }
 function stepCrewWork(s,company,boat,dt) {
   const j=s.job;if(!j)return false;
+  if(boat.sailState?.maneuver && (j.kind==='rig'||j.kind==='lookout') && ['ascending','working'].includes(j.stage))j.stage='descending';
   dt=workClamp(Number.isFinite(dt)?dt:0,0,.1);s.time+=dt;s.walkTime+=dt*.8;
   const o=s.observation;
   o.hazard=Math.abs(boat.roll??0)>(s.intent==='brace'?.26:.36)||Math.abs(boat.rollVelocity??0)>(s.intent==='brace'?.3:.5)||o.wind>(s.intent==='brace'?19:23);
@@ -5209,7 +5335,7 @@ function stepCrewWork(s,company,boat,dt) {
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
-        :Math.abs((boat[SAIL_KEYS[j.mast]]??1)-sailingState(boat).set[j.mast])<.008;
+        :!sailingState(boat).maneuver && Math.abs((boat[SAIL_KEYS[j.mast]]??1)-sailingState(boat).set[j.mast])<.008;
       if(done){if(j.kind==='rig'||j.kind==='lookout'){j.stage='descending';s.nextWatch=company.workTime+45;}
         else startReturn(s,boat);}
     }
@@ -5226,8 +5352,9 @@ function stepCrewWork(s,company,boat,dt) {
 function startReturn(s,boat){
   const j=s.job;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s);
-  j.path=s.id==='rui'?[deckPoint(.55,s.z),deckPoint(.55,home[2]),home]
-    :[deckPoint(home[0],s.z),home];
+  j.path=s.id==='maria'?[deckPoint(s.x,-3.2),deckPoint(home[0],-3.2),home]
+    :s.id==='duarte'?[deckPoint(home[0],s.z),home]
+    :[...j.path.slice(0,-1).reverse(),home];
 }
 function crewWorkLabel(s){
   if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';
@@ -5288,7 +5415,7 @@ function poseCrewWork(a,s,boat){
       const cycle=(phase+offset)/2,base=Math.floor(cycle)*2-offset,f=cycle-Math.floor(cycle);
       const swing=Math.max(0,Math.min(1,(f-.55)/.45)),e=swing*swing*(3-2*swing);
       const foot=base+1+e*2,hand=foot+3;
-      const point=r=>{const p=climbingPoint(j.mast,j.side,r);return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
+      const point=r=>{const p=climbingPoint(j.mast,j.side,r,boat.sailState?.rig[j.mast]);return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
       const ft=point(foot),ht=point(hand),sign=side==='l'?1:-1;
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.3,.5,.65]);
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.65,1.1,.10]);
@@ -5303,7 +5430,7 @@ function poseCrewWork(a,s,boat){
       let hand;
       if(j.kind==='haul'){
         const height=(s.position[1]+1.04+.17*Math.sin(phase+sign*.55))/HULL_VERTICAL_SCALE;
-        const p=tacklePoint(j.mast,height);
+        const p=workingTacklePoint(j.mast,height);
         hand=actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12],s);
       }else hand=[sign*.16,.42+.06*Math.sin(phase),.43];
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.10]);
@@ -5395,6 +5522,7 @@ function stepCompany(company,boat,dt,wind) {
     company.order='watch';company.pending=false;company.revision++;
   } else company.pending=!!order.sails&&order.sails.some((value,i)=>Math.abs(value-sails.set[i])>.01);
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
+  company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
@@ -5407,6 +5535,7 @@ function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='ha
 function companyStatus(company) {
   const bracing=company.crew.filter(s=>s.intent==='brace').length;
   if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
+  if(company.rigManeuver)return 'Changing tack · gathering canvas and handling yards';
   if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
   if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
   return company.order==='watch'?`Sea watch · 12 aboard${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;
@@ -6372,6 +6501,7 @@ function createAdaptiveResolution(mode = 'auto') {
 }
 
 // ---- js/main.js ----
+
 
 
 
@@ -7606,7 +7736,7 @@ async function main() {
       loadingStatus.textContent=`Crew ${(hydro.crewMass/1000).toFixed(2)} t · Water ${(hydro.waterMass/1000).toFixed(2)} t · Food ${(hydro.foodMass/1000).toFixed(2)} t · Casks and spares ${(hydro.storesMass/1000).toFixed(2)} t · Cargo ${(hydro.cargoMass/1000).toFixed(1)} t. Main-deck freeboard ${hydro.freeboard.toFixed(2)} m.${hydro.overloadKg>0?' Overloaded: this loading exceeds the supported draft.':''}`;
       const sails=sailingState(boat),angle=sails.apparentAngle/D2R;
       sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind torque ${Math.abs(sails.rollMoment/1000).toFixed(1)} kN·m`;
-      for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.set[i]*100)+'%';
+      for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.rig[i].deployed*100)+'%';
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
       if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
       rudderValue.textContent=boat.rudder.toFixed(1)+' deg';
@@ -7633,6 +7763,7 @@ async function main() {
     hullData.set(sails.set,24);hullData[27]=boat.hatchesClosed??0;hullData[28]=sails.squareYaw;hullData[29]=sails.lateenYaw;
     hullData[30]=sails.squareFill;hullData[31]=sails.lateenFill;
     hullData[32]=sails.windSide;hullData[33]=-sails.windForward;hullData[34]=sails.apparentSpeed;hullData[35]=sails.canvasTack;
+    writeLateenUniform(hullData,sails);
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     crew?.update(boat,dt,P.windSpeed);

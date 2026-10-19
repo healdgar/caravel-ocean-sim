@@ -15,21 +15,15 @@ struct ShadowVertex {
   @location(1) uv:vec2f,
   @location(2) @interpolate(flat) material:u32,
   @location(3) wet:f32,
-  @location(4) rigLocal:vec3f,
-  @location(5) @interpolate(flat) sailId:u32,
 };
 @vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) material:f32,@location(3) uv:vec2f,@builtin(vertex_index) index:u32)->ShadowVertex {
   let rig=rigVertex(position,normal,material,uv);
   var out:ShadowVertex;
-  out.rigLocal=rig.position;
-  out.sailId=u32(round(fract(material)*16.0))&7u;
   out.position=SH.lightView*vec4f(rotateHull(rig.position*rig.scale),1.0);
   out.normal=normalize(rotateHull(rig.normal/rig.scale));out.uv=uv;out.material=u32(material);out.wet=moisture[wetLookup[index]].x;
   return out;
 }
-@fragment fn solidFS(in:ShadowVertex){
-  if(rigCanvasContact(in.rigLocal,in.material,in.sailId)){discard;}
-}
+@fragment fn solidFS(){}
 @fragment fn canvasFS(in:ShadowVertex)->@location(0) vec4f {
   return vec4f(canvasTransmission(canvasThickness(in.uv,in.material)*canvasWetDepth(in.wet),abs(dot(normalize(in.normal),SH.sun.xyz))),1.0);
 }
