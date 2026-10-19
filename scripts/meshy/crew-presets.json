@@ -1,0 +1,14 @@
+{
+  "male": {
+    "body": "Male body type; subtle musculature. West African facial features, short tightly curled hair.",
+    "texture_appearance": "Dark brown skin and short black hair, natural facial detail."
+  },
+  "female": {
+    "body": "Female body type; modest chest. East Asian facial features, hair in a compact bun.",
+    "texture_appearance": "Light-medium skin and dark brown hair, natural facial detail."
+  },
+  "shared": {
+    "prompt": "One adult human game character, front view, strict T-pose: both arms straight sideways at shoulder height, elbows straight, palms down, legs straight and slightly apart. Neutral posture and expression. Circa-1490 caravel deckhand working kit: plain collarless linen pullover, sleeves rolled to elbows, ankle-length wool trousers, simple leather belt, flat leather shoes. Same practical outfit and pose for every body type. Body type affects anatomy only, never clothing, posture, equipment or styling. Slim ordinary build. Solid hair, separated fingers. ",
+    "texture_prompt": "Period deckhand work clothes shared by all body types: faded unbleached linen pullover, muted brown wool trousers, plain brown leather belt and flat shoes. Dry natural materials, subtle fabric weave and seams. Base color without painted shadows or highlights. "
+  }
+}
