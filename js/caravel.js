@@ -341,7 +341,8 @@ export function createCaravelMesh() {
   }
   // Lower stays and paired runners, led to the waterways without channels.
   for(const {a,b,r,r2,sides} of standingRiggingLines())tube(a,b,r,12,r2,sides);
-  for(const side of [-1,1])for(const [mast,footZ] of [[0,-1.7],[1,2.3],[2,5.2]]){
+  for(const side of [-1,1])for(const m of RIG_MASTS){
+    const footZ=Math.min(5.35,m.z+1.3);
     const foot=[side*(width(footZ)-.04),vesselDeck(footZ)+.35,footZ];
     tube(add(foot,[-side*.035,0,0]),add(foot,[side*.035,0,0]),.075,16,.075,12);
   }

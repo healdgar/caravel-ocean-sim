@@ -121,13 +121,16 @@ test('marine wind shear is referenced to 10 m and higher sail centres exert more
   const loads=trimmed(vessel(),12),strong=trimmed(vessel(),24),bare=trimmed(vessel({sailFore:0,sailMain:0,sailMizzen:0}),12);
   assert.ok(Math.abs(strong.rollMoment/loads.rollMoment-4)<1e-10);
   assert.ok(loads.rollMoment>0);assert.equal(bare.rollMoment,0);
-  for(const lower of [0]){
+  for(const lower of [1,2]){
+    const higher=lower-1; // The traced all-lateen plan is tallest forward.
     const area=i=>SAIL_AREAS[i];
-    assert.ok(Math.abs(loads.panelSide[lower+1])/area(lower+1)>Math.abs(loads.panelSide[lower])/area(lower),'higher canvas feels faster wind');
-    assert.ok(loads.panelMoment[lower+1]/area(lower+1)>loads.panelMoment[lower]/area(lower),'height adds leverage as well as pressure');
+    assert.ok(Math.abs(loads.panelSide[higher])/area(higher)>Math.abs(loads.panelSide[lower])/area(lower),'higher canvas feels faster wind');
+    assert.ok(loads.panelMoment[higher]/area(higher)>loads.panelMoment[lower]/area(lower),'height adds leverage as well as pressure');
   }
   const reef=trimmed(vessel({sailFore:.5,sailMain:.5,sailMizzen:.5}),12);
-  assert.ok(reef.rollMoment<loads.rollMoment*.65 && reef.rollMoment>loads.rollMoment*.5);
+  // Half the area retains more than half the torque: the tall triangular
+  // fore course gathers upward, raising its remaining centre of effort.
+  assert.ok(reef.rollMoment<loads.rollMoment*.75 && reef.rollMoment>loads.rollMoment*.5);
   const tilted=trimmed(vessel({roll:.5}),12);
   assert.ok(tilted.rollMoment<loads.rollMoment*.8,'heeling shortens the projected area and lever');
 });

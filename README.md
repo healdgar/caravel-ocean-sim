@@ -331,6 +331,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
+| `js/rig-plan.js` | Digitized d’Albertis lateen sail/mast coordinates and uniform hull-scale conversion |
 | `js/gltf.js`, `js/crew.js`, `js/crew-work.js`, `js/crew-pose.js`, `js/rigging.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
 | `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
@@ -532,6 +533,12 @@ The complete vessel includes a rounded planked hull and keel, square transom,
 stern cabin with windows, raised quarterdeck, bow and stern rails, bowsprit,
 hinged hatch cover and grating, four swivel cannon, cleats, fittings, and a rudder that moves with the helm. Three
 single masts carry three triangular lateen sails, with diagonal yards, stays and runners.
+Their proportions are measured from d’Albertis’s 1892 Niña side elevation at our
+20 m hull length: approximately **114 m² fore, 50 m² main, 16 m² mizzen**. The
+foremost sail is largest. Mast positions follow the same drawing; a uniform
+1.08 m lift clears the retained quarterdeck without stretching the sails.
+These are reconstruction-based scan estimates, not known original Niña dimensions.
+See the [measurement audit and orthographic comparison](CARAVEL_RESEARCH.md#sail-size-audit).
 Canvas uses a two-sided cloth material and slight wind-driven flutter under the
 actual sun and sky. Thin-sheet transmission produces a soft, warm glow around
 the backlighting sun; seams, hems, folds, and grazing light paths transmit less.

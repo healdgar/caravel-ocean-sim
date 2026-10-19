@@ -1,21 +1,26 @@
 import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck } from './hull.js';
-import { mastPoint } from './rigging.js';
+import { mastPoint, RIG_MASTS, SQUARE_RIG_MASTS } from './rigging.js';
+import { LATEEN_RIG_PLATE, rigPlatePoint } from './rig-plan.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
 // World wind is a velocity toward (cos(direction), sin(direction)) in X/Z.
 // Active caravela latina; retain the converted square rig as a separate model plan.
-// Dimensions remain an authored reconstruction, not measured replica sail plans.
-const MIZZEN_SAIL = {id:3,mast:2,kind:'lateen',corners:[[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]],pivot:mastPoint(2,4.3),belly:.8};
+function squareRigPoint(mast,y){
+  const m=SQUARE_RIG_MASTS[mast],base=vesselDeck(m.z);
+  return [0,y,m.z+m.rake*(y-base)/(m.height-base)];
+}
 export const SQUARE_RIG_PLAN = [
-  {id:1,mast:0,kind:'square',z:mastPoint(0,6.4)[2]-.16,top:6.4,width:4.6,height:3.8,belly:.65},
-  {id:2,mast:1,kind:'square',z:mastPoint(1,8)[2]-.20,top:8,width:6.3,height:5.4,belly:.9},
-  MIZZEN_SAIL,
+  {id:1,mast:0,kind:'square',z:squareRigPoint(0,6.4)[2]-.16,top:6.4,width:4.6,height:3.8,belly:.65},
+  {id:2,mast:1,kind:'square',z:squareRigPoint(1,8)[2]-.20,top:8,width:6.3,height:5.4,belly:.9},
+  {id:3,mast:2,kind:'lateen',corners:[[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]],pivot:squareRigPoint(2,4.3),belly:.8},
 ];
-export const SAIL_PLAN = [
-  {id:1,mast:0,kind:'lateen',corners:[[0,7.7,-1.8],[0,2.1,-6.4],[.4,2.4,-.5]],pivot:mastPoint(0,4.8),belly:.65},
-  {id:2,mast:1,kind:'lateen',corners:[[0,9.2,2.8],[0,2.6,-3.4],[.6,2.5,3.2]],pivot:mastPoint(1,6),belly:.9},
-  MIZZEN_SAIL,
-];
+export const SAIL_PLAN = LATEEN_RIG_PLATE.sails.map((s,mast)=>{
+  const corners=s.corners.map(rigPlatePoint),[a,b]=corners,m=RIG_MASTS[mast];
+  const base=mastPoint(mast,vesselDeck(m.z)),slope=m.rake/(m.height-base[1]);
+  // Turn each diagonal yard about its crossing of the actual raked mast.
+  const t=(base[2]+slope*(a[1]-base[1])-a[2])/((b[2]-a[2])-slope*(b[1]-a[1]));
+  return {id:mast+1,mast,kind:'lateen',corners,pivot:a.map((v,i)=>v+t*(b[i]-v)),belly:s.belly};
+});
 export function runningRiggingLines(){
   const lines=[];
   for(const sail of SAIL_PLAN){
@@ -26,7 +31,7 @@ export function runningRiggingLines(){
     }else{
       const sheetZ=Math.min(5.5,corners[2][2]);
       lines.push({a:corners[2],b:[1.1,vesselDeck(sheetZ)+.3,sheetZ],r:.016,r2:.016,sides:8,id,weights:[1,0]},
-        {a:mastPoint(mast,sail.pivot[1]+1.5),b:corners[0],r:.014,r2:.014,sides:8,id,weights:[0,1]});
+        {a:mastPoint(mast,RIG_MASTS[mast].height*.97),b:corners[0],r:.014,r2:.014,sides:8,id,weights:[0,1]});
     }
   }
   return lines;

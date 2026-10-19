@@ -4,6 +4,8 @@ import { createCaravelMesh, indexCaravelMesh } from '../js/caravel.js';
 import { shadowMeshData } from '../js/shadows.js';
 import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, hullDeck, TILLER_PIVOT, TILLER_HANDLE, tillerPoint, HELM_EYE_Z, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
 import { createCompany, stepCompany } from '../js/crew.js';
+import { SAIL_PLAN, SAIL_AREAS } from '../js/sailing.js';
+import { RIG_MASTS, mastPoint } from '../js/rigging.js';
 
 test('indexed caravel preserves every vertex bit, triangle, and shadow partition',()=>{
   const raw=createCaravelMesh(),indexed=indexCaravelMesh(raw);
@@ -49,15 +51,35 @@ test('complete vessel includes three lateen courses, single masts and a working 
   assert.ok(bounds.get(15).minY<=-HULL_DRAFT+.001);
   assert.ok(bounds.get(15).minZ<=-6.39 && bounds.get(15).maxZ>=5.59);
   assert.equal(bounds.has(9),false,'square courses are reserved for the future model');
-  assert.ok(bounds.get(13).count>6000 && bounds.get(13).maxZ>6 && bounds.get(13).minZ<-6);
-  assert.ok(bounds.get(13).minY>=2.09 && bounds.get(13).maxY>=9.19);
+  assert.ok(bounds.get(13).count>6000 && bounds.get(13).maxZ>6 && bounds.get(13).minZ<-5.9);
+  assert.ok(bounds.get(13).minY>=1.95 && bounds.get(13).maxY>=12.45);
   assert.ok(bounds.get(16).count>100 && bounds.get(17).maxY>2.7);
-  assert.ok(bounds.get(10).maxY>=8.69 && bounds.get(10).maxY<9.5);
+  assert.ok(bounds.get(10).maxY>=12.59 && bounds.get(10).maxY<12.7);
   const panels=new Set();
   for(let i=6;i<mesh.length;i+=9)if([9,13].includes(Math.floor(mesh[i])))panels.add(Math.round(mesh[i]%1*16));
   assert.deepEqual([...panels].sort(),[1,2,3]);
   assert.ok(bounds.get(14).maxZ>6 && bounds.get(14).minY<-1.05);
   assert.ok(bounds.get(11).minZ>3);
+});
+
+test('lateen canvas matches the measured 20 m reconstruction and yards pivot beside their masts',()=>{
+  // Independently recorded from the side-elevation audit, rounded to scan precision.
+  const expected=[{area:114,luff:21.7},{area:50,luff:15.0},{area:16,luff:8.5}];
+  const mesh=createCaravelMesh();
+  for(const [i,s] of SAIL_PLAN.entries()){
+    assert.ok(Math.abs(SAIL_AREAS[i]*HULL_VERTICAL_SCALE**2-expected[i].area)<.2);
+    const [a,b]=s.corners,luff=Math.hypot(...a.map((v,j)=>v-b[j]))*HULL_VERTICAL_SCALE;
+    assert.ok(Math.abs(luff-expected[i].luff)<.05);
+    const axis=mastPoint(i,s.pivot[1]);
+    assert.ok(Math.hypot(...axis.map((v,j)=>v-s.pivot[j]))<1e-8);
+    assert.ok(s.pivot[1]<RIG_MASTS[i].height && s.pivot[1]>vesselDeck(axis[2]));
+    for(const p of s.corners){
+      let nearest=Infinity;
+      for(let j=0;j<mesh.length;j+=9)if(Math.abs(mesh[j+6]-(13+s.id/16))<1e-6)
+        nearest=Math.min(nearest,Math.hypot(...p.map((v,k)=>v-mesh[j+k])));
+      assert.ok(nearest<1e-5,'rendered sail boundary retains the measured corners');
+    }
+  }
 });
 
 test('raked hull surface agrees with water-contact sections and stays within the mesh budget', () => {

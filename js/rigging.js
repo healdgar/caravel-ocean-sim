@@ -1,15 +1,21 @@
-import { deckHalfWidth, vesselDeck, HULL_VERTICAL_SCALE } from './hull.js';
+import { deckHalfWidth, vesselDeck, HULL_VERTICAL_SCALE, QUARTERDECK_START } from './hull.js';
+import { LATEEN_RIG_PLATE, rigPlatePoint } from './rig-plan.js';
 
-// Three single masts, without topsails/tops; shared by the lateen and stored square plans.
-// Dimensions are authored approximations of the reconstruction plate.
-export const RIG_MASTS = [{z:-4.15,height:6.9,r:.115,rake:-.28},{z:-.1,height:8.7,r:.15,rake:-.12},{z:3.05,height:6.3,r:.095,rake:.18}];
+// Keep the converted rig's supports with its future model. Active mast positions
+// and heights come from the same orthographic plate as the lateen canvas.
+export const SQUARE_RIG_MASTS = [{z:-4.15,height:6.9,r:.115,rake:-.28},{z:-.1,height:8.7,r:.15,rake:-.12},{z:3.05,height:6.3,r:.095,rake:.18}];
+export const RIG_MASTS = LATEEN_RIG_PLATE.sails.map(s=>{
+  const foot=rigPlatePoint(s.mastFoot),head=rigPlatePoint(s.mastHead);
+  return {z:foot[2],height:head[1],r:s.radius,rake:head[2]-foot[2]};
+});
 export function mastPoint(mast,y){
   const m=RIG_MASTS[mast],base=vesselDeck(m.z);
   return [0,y,m.z+m.rake*(y-base)/(m.height-base)];
 }
 export function shroudGeometry(mast,side) {
   const {z,height}=RIG_MASTS[mast],head=mastPoint(mast,height*.92);head[0]=side*.11;
-  const feet=[-.65,.65].map(dz=>[side*(deckHalfWidth(z+dz)-.40),vesselDeck(z+dz)+.10,z+dz]);
+  const span=z<QUARTERDECK_START?Math.min(.65,QUARTERDECK_START-z-.12):.65;
+  const feet=[-span,span].map(dz=>[side*(deckHalfWidth(z+dz)-.40),vesselDeck(z+dz)+.10,z+dz]);
   const rungs=Math.ceil((head[1]-Math.min(...feet.map(p=>p[1])))*HULL_VERTICAL_SCALE/.35);
   return {head,feet,rungs};
 }
@@ -42,9 +48,10 @@ export function standingRiggingLines(){
     const a=tacklePoint(t.mast,-10),b=tacklePoint(t.mast,30);
     add(a,b,.012,.012,8);add([a[0]-.035,a[1],a[2]],[b[0]-.035,b[1],b[2]],.012,.012,8);
   }
-  for(const [mast,target,r] of [[0,[0,1.9,-8.1],.028],[1,[0,vesselDeck(-5.3)+.3,-5.3],.036],[2,[0,5.9,-.2],.026]])
+  for(const [mast,target,r] of [[0,[0,1.9,-8.1],.036],[1,mastPoint(0,RIG_MASTS[0].height*.7),.028],[2,mastPoint(1,RIG_MASTS[1].height*.7),.026]])
     add(mastPoint(mast,RIG_MASTS[mast].height*.96),target,r,r*.8,12);
-  for(const side of [-1,1])for(const [mast,z] of [[0,-1.7],[1,2.3],[2,5.2]]){
+  for(const side of [-1,1])for(const [mast,m] of RIG_MASTS.entries()){
+    const z=Math.min(5.35,m.z+1.3);
     const head=mastPoint(mast,RIG_MASTS[mast].height*.94);head[0]=side*.12;
     add(head,[side*(deckHalfWidth(z)-.04),vesselDeck(z)+.35,z],.024);
   }

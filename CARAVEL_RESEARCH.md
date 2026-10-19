@@ -2,7 +2,7 @@
 
 This is a reconstruction-guided game vessel, not a replica with surveyed offsets.
 The established 20 × 6 m size and twelve-person company are retained. The hull baseline remains Martínez-Hidalgo’s Niña reconstruction. At the user’s
-request, the active sail plan is now an authored three-mast **caravela latina**
+request, the active sail plan is a three-mast **caravela latina**
 (all lateen). The converted square fore/main plan is retained separately for a
 future model; the active vessel no longer claims that converted Niña sail plan.
 
@@ -47,9 +47,52 @@ The rig has three single masts with triangular fore, main and mizzen sails.
 `SAIL_PLAN` drives mesh geometry, moving ropes, shader deformation, shadows,
 wetness and aerodynamic area/height. `SQUARE_RIG_PLAN` retains the previous square
 fore/main plus lateen mizzen for a future model, using the same generic rig code.
-Mast rake, hull/decks, runners and shorter bowsprit are retained. Yard and triangle
-dimensions are authored and are not traced sail offsets. All three sails furl
+The active sail outlines and mast positions now follow the d’Albertis side
+elevation, measured as described below. Hull/decks, working tackles, runners and
+shorter bowsprit retain their existing interpretation. All three sails furl
 independently and tack through the existing shared trim response.
+
+### Sail-size audit
+
+The previous triangles were estimated from appearance and had the wrong size
+ordering. For this three-mast all-lateen version, the reference is the
+[d’Albertis 1892 Niña plate](https://navires-anciens.be/wp-content/uploads/2020/06/Nina.jpg),
+identified by the [reproduction page](https://navires-anciens.be/plans_de_la_nina/).
+The adjacent Martínez-Hidalgo **two-mast** lateen drawing is a different rig;
+its triangles are not mixed into this three-mast arrangement.
+
+Measurements use the orthographic profile, not the inset painting or rendered
+camera views. In the 669 × 473 px scan, the deck's stem/transom span is x = 88–391;
+the waterline is y = 320. Normalize that 303 px span to our retained 20 m hull,
+using the same scale in both axes. The cloth corners (high yard end, tack, clew)
+are approximately:
+
+| Sail | Image coordinates (px) | Previous flat area | Traced flat area | Traced luff |
+|---|---|---:|---:|---:|
+| Fore | (302,22), (100,282), (302,281) | 44 m² | 114 m² | 21.7 m |
+| Main | (370,106), (233,287), (371,272) | 62 m² | 50 m² | 15.0 m |
+| Mizzen | (407,169), (330,272), (407,265) | 22 m² | 16 m² | 8.5 m |
+| **Total** | | **128 m²** | **180 m²** | |
+
+These are scan-derived estimates, not printed historical dimensions. Reading a
+corner within about 3 px means roughly 0.2 m per point at this scale; areas are
+especially uncertain for the small mizzen. Decimal coordinates in code preserve
+one uniform transform, not survey precision. The luff is the canvas edge along
+the yard; the rendered wooden spar extends slightly beyond it.
+
+`js/rig-plan.js` retains the source coordinates and transform. Mast feet, heads,
+and rake are traced from the same elevation; the largest and tallest sail is
+forward. Yard pivots intersect the supporting mast axes. The rig is translated
+upward **1.08 m**, without changing sail edges or area, to clear our higher retained
+quarterdeck. This is explicitly a hybrid of the existing hull interpretation and
+this sail reconstruction. Camber, spar diameter, clearance, and working rope leads
+remain authored. It does not establish the original Niña's exact rig or sail area.
+
+![Equal-scale orthographic sail comparison](research/lateen-sail-plan.svg)
+
+Regenerate with `node scripts/sail-plan-audit.mjs`. The new area and sail heights
+also feed propulsion and heel; they are not a visual-only enlargement. The old
+square plan and its mast dimensions remain separate for a future vessel.
 
 The [modern replica operator](https://www.ninapinta.net/) explicitly describes
 its Niña as a **caravela redonda**, with square fore/main and lateen aft sails.
