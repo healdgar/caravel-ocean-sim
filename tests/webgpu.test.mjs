@@ -1539,6 +1539,45 @@ test('loading controls retain the solved waterline through startup, cargo edits 
   }finally{await page.close();}
 });
 
+test('captain camera boards to windward and follows tacks in the rendered frame', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:402,height:666}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      GPURenderPassEncoder.prototype.draw=function(){};GPURenderPassEncoder.prototype.drawIndexed=function(){};
+      GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
+        if(buffer.label==='frame ubo')check.frame=Array.from(data);
+        if(buffer.label==='hull transform')check.hull=Array.from(data);
+        return write.call(this,buffer,offset,data,...rest);
+      };
+    });
+    await page.goto(`${origin}/?view=boat&boatSpeed=0&windSpeed=8&windDir=0&boatHeading=0&w=32&h=32`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    const advance=async count=>page.evaluate(async count=>{
+      check.now??=performance.now();
+      for(let i=0;i<count;i++){check.now+=50;check.callback(check.now);await check.device.queue.onSubmittedWorkDone();}
+      const d=check.frame.slice(16,19).map((v,i)=>v-check.hull[16+i]);
+      const eye=[0,4,8].map((axis,j)=>d.reduce((n,v,i)=>n+v*check.hull[axis+i],0)*(j===2?-1:1));
+      const look=check.frame.slice(28,31),dot=axis=>look.reduce((n,v,i)=>n+v*check.hull[axis+i],0);
+      return [...eye,Math.atan2(dot(0),dot(8))];
+    },count);
+    const port=await advance(1);
+    assert.ok(port[0]<-1.8 && Math.abs(port[1]-5.433333)<.001 && Math.abs(port[2]-5.166667)<.001);
+    assert.ok(Math.abs(port[3]+Math.PI/12)<.001,'default aim looks ahead outside the port sail edge');
+    await page.locator('#boat-heading').fill('180');
+    const turning=await advance(1);assert.ok(turning[0]<0,'tack does not teleport the camera');
+    const starboard=await advance(100);assert.ok(starboard[0]>1.8);
+    assert.ok(Math.abs(starboard[3]-Math.PI/12)<.001,'default aim mirrors with the tack');
+    await page.getByRole('button',{name:'View ship',exact:true}).click();
+    await page.locator('#boat-heading').fill('0');await advance(1);
+    await page.getByRole('button',{name:'Boat camera',exact:true}).click();
+    assert.ok((await advance(1))[0]<-1.8,'boarding immediately selects the current windward station');
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
 test('mobile panels keep Hide reachable while scrolling, profiling and rotating', {timeout:120000}, async()=>{
   const page=await browser.newPage({viewport:{width:402,height:666}});
   try {

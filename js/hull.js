@@ -22,7 +22,10 @@ export const TILLER_PIVOT = [0, 1.38, 5.68];
 export const TILLER_HANDLE = [0, 1.43, 3.95];
 export const HELM_TILLER_DISTANCE = .32;
 export const HELM_STATION_Z = TILLER_HANDLE[2] - HELM_TILLER_DISTANCE / HULL_VERTICAL_SCALE;
-export const HELM_EYE_Z = 4.91;
+// Captain stands near a forward quarterdeck corner, clear of the
+// centreline masts. These are hull design coordinates, scaled with beam/length.
+export const HELM_EYE_X = 1.1;
+export const HELM_EYE_Z = 3.1;
 export const HELM_EYE_HEIGHT = QUARTERDECK_HEIGHT * HULL_VERTICAL_SCALE + 1.6;
 export function tillerPoint(boat, along=0) {
   const a=(boat.rudder??0)*Math.PI/180,q=TILLER_HANDLE[2]-TILLER_PIVOT[2]+along/(boat.length/12);

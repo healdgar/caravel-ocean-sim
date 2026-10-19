@@ -290,7 +290,7 @@ The suite covers:
 - Both crew rigs and grounded clip bounds, balanced twelve-person roster, deck clearance and separation, replaceable captain orders, gradual canvas changes, hidden-character independence, two six-instance GPU draws, animated shadows, embedded assets and mobile panel reachability.
 - Crest-spray wind/breaking gates, displaced birth height, downwind entrainment, hull exclusion, bounded populations, 30/120 Hz emission, clears, real FFT emission and rendering independent of the ship and its wake toggle.
 
-- Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
+- Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes, quarterdeck camera support and forward sightlines on resized hulls; camera checks cover windward boarding and smooth tack changes.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
 - Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; loaded versus slack motion, bounded contact deflection, sewn-rope attachment and masked intersections across both tacks and extreme trim; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
@@ -365,15 +365,20 @@ The default hull is **20 m long × 6 m beam**, excluding the bowsprit. The origi
 length and beam controls set the other two axes. Decks, rigging, ocean exclusion,
 spray contacts, deck wash, shadows and crew anchors use the same transform.
 The cabin doorway is about 1.97 m high, cabin headroom 2.27–2.57 m, and the mainmast
-about 13.3 m above the main deck. Twelve quarterdeck ladder treads keep risers
+about 11.0 m above the main deck (see the sail-plan audit). Twelve quarterdeck ladder treads keep risers
 below 23 cm. Crew retain their 1.71–1.80 m adult heights. The helmsman works a
 waist-height tiller on the main deck beneath the quarterdeck, facing aft and
-following its swing. The camera remains on the upper deck. Nearby sailors fade
+following its swing. The captain's camera stands near the forward windward
+corner of the quarterdeck, ahead of the mizzen and beside the centreline masts.
+It looks 15° outboard of the bow to see past the sail edges and crosses smoothly
+to the opposite side after a tack, keeping the billowing canvas leeward.
+Boarding selects the current windward side immediately. Ship
+geometry remains visible. Nearby sailors fade
 using depth-correct screen-door transparency between 1.4 and 4.8 m from the camera.
 All remain visible in exterior/free views and continue casting shadows.
 
 The default eye is **about 5.35 m above the loaded waterline**, 1.6 m above the quarterdeck;
-its longitudinal position follows hull length. Shared links preserve explicit
+its fore/aft and lateral position follow hull length and beam. Shared links preserve explicit
 dimensions and eye heights. Remove `boatLength`, `boatBeam`, and `boatEye` from an
 older link to use the enlarged defaults, or set them to 20, 6, and 5.43 respectively.
 The helm controls the rudder; mouse look is relative to the boat. **Look ahead**

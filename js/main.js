@@ -11,7 +11,7 @@ import { createCrew, CAPTAIN_ORDERS } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
-import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
+import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
@@ -678,6 +678,7 @@ async function main() {
   }
   function updateCamera(dt) {
     if (boat.enabled) {
+      stepBoatView(boat,dt);
       boatEyePosition(eyePosition,boat);
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
       return;
@@ -789,7 +790,10 @@ async function main() {
     const near = 0.05;
     proj.fill(0);
     proj[0] = 1 / tanX; proj[5] = 1 / tanY; proj[11] = -1; proj[14] = near;
-    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    // Look just outside the sail envelope; manual look remains relative to this
+    // forward quarter, and the bias follows the captain's smooth tack crossing.
+    const viewYaw=cam.yaw+(boat.enabled?(boat.eyeSide??1)*15*D2R:0);
+    const cy = Math.cos(viewYaw), sy = Math.sin(viewYaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     let fx = cp * sy, fy = sp, fz = -cp * cy;            // forward
     let rx = cy, ry = 0, rz = sy;                          // right
     let ux = ry * fz - rz * fy, uy = rz * fx - rx * fz, uz = rx * fy - ry * fx; // up = right x fwd
@@ -969,12 +973,13 @@ async function main() {
   function setCameraMode(mode) {
     if(mode===cameraMode) return;
     if(boat.enabled) {
-      boatRotate(boatForward,Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw),boat.heading*D2R,boat.pitch,boat.roll);
+      const viewYaw=cam.yaw+(boat.eyeSide??1)*15*D2R;
+      boatRotate(boatForward,Math.cos(cam.pitch)*Math.sin(viewYaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(viewYaw),boat.heading*D2R,boat.pitch,boat.roll);
       cam.yaw=Math.atan2(boatForward[0],-boatForward[2]);
       cam.pitch=Math.asin(Math.max(-1,Math.min(1,boatForward[1])));
     }
     cameraMode=mode; boat.enabled=mode==='boat';
-    if(boat.enabled) {cam.yaw=0;cam.pitch=-5.5*D2R;boat.showProw=true;prowToggle.checked=true;}
+    if(boat.enabled) {cam.yaw=0;cam.pitch=-5.5*D2R;boat.eyeSide=boat.sailState?.tack??1;boat.eyeSideVelocity=0;boat.showProw=true;prowToggle.checked=true;}
     if(mode==='ship') {shipOrbit.yaw=boat.heading*D2R+1.0;boat.showProw=true;prowToggle.checked=true;}
     if(document.pointerLockElement) document.exitPointerLock();
     for(const k in keys) keys[k]=false;

@@ -59,19 +59,35 @@ test('centering rudder lets yaw decay and results stay stable at lower frame rat
   assert.ok(Math.abs(a.rudder)<1e-6);
 });
 
-import { boatEyePosition } from '../js/boat.js';
-import { HELM_EYE_Z, HELM_EYE_HEIGHT } from '../js/hull.js';
+import { boatEyePosition, stepBoatView } from '../js/boat.js';
+import { HELM_EYE_X, HELM_EYE_Z, HELM_EYE_HEIGHT } from '../js/hull.js';
 test('boarding uses the ship world position and eye height independently of a spectator camera', () => {
-  const boat={x:100,z:-30,heave:2,eye:HELM_EYE_HEIGHT,length:12,heading:90,pitch:0,roll:0};
+  const boat={x:100,z:-30,heave:2,eye:HELM_EYE_HEIGHT,length:12,beam:3.6,heading:90,pitch:0,roll:0};
   const out=new Float64Array(3); boatEyePosition(out,boat);
-  assert.deepEqual(Array.from(out),[100-HELM_EYE_Z,2+HELM_EYE_HEIGHT,-30]);
+  assert.deepEqual(Array.from(out),[100-HELM_EYE_Z,2+HELM_EYE_HEIGHT,-30+HELM_EYE_X]);
   boat.pitch=0.2;boat.roll=-0.15;boatEyePosition(out,boat);
-  assert.ok(Math.abs(Math.hypot(out[0]-boat.x,out[1]-boat.heave,out[2]-boat.z)-Math.hypot(boat.eye,HELM_EYE_Z))<1e-12);
+  assert.ok(Math.abs(Math.hypot(out[0]-boat.x,out[1]-boat.heave,out[2]-boat.z)-Math.hypot(HELM_EYE_X,boat.eye,HELM_EYE_Z))<1e-12);
   const previous=Array.from(out);boat.x+=20;boat.z-=5;boatEyePosition(out,boat);
   assert.ok(Math.abs(out[0]-previous[0]-20)<1e-12);
   assert.ok(Math.abs(out[2]-previous[2]+5)<1e-12);
-  boat.length=24;boat.pitch=boat.roll=boat.heading=0;boatEyePosition(out,boat);
+  boat.length=24;boat.beam=7.2;boat.pitch=boat.roll=boat.heading=0;boatEyePosition(out,boat);
+  assert.ok(Math.abs(out[0]-boat.x-2*HELM_EYE_X)<1e-12,'captain eye follows a resized beam');
   assert.ok(Math.abs(out[2]-boat.z-2*HELM_EYE_Z)<1e-12,'helm eye follows a resized stern');
+});
+
+test('captain starts to windward and crosses smoothly with frame-independent tack changes',()=>{
+  const results=[];
+  for(const dt of [1/10,1/30,1/120]){
+    const b={sailState:{tack:-1}};stepBoatView(b,0);assert.equal(b.eyeSide,-1);
+    b.sailState.tack=1;
+    for(let i=0;i<Math.round(2/dt);i++){
+      const previous=b.eyeSide;stepBoatView(b,dt);
+      assert.ok(b.eyeSide>=previous && b.eyeSide<=1);
+      assert.ok(b.eyeSide-previous<3*dt,'crossing never teleports across the deck');
+    }
+    results.push(b.eyeSide);assert.ok(b.eyeSide>.99);
+  }
+  assert.ok(Math.max(...results)-Math.min(...results)<1e-12);
 });
 
 const surgeBoat = (speed = 6) => ({ length: 20, beam: 6, speed, surgeVelocity: speed * KNOT_TO_MPS });

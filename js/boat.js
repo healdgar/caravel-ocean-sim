@@ -1,4 +1,4 @@
-import { HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale } from './hull.js';
+import { HELM_EYE_X, HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale } from './hull.js';
 import { advanceSails, sailForces } from './sailing.js';
 
 export const KNOT_TO_MPS = 0.514444;
@@ -212,9 +212,18 @@ export function stepBoatSteering(boat, command, dt) {
   boat.heading = ((boat.heading + (previous + boat.yawRate) * 0.5 * dt * 180 / Math.PI) % 360 + 360) % 360;
 }
 
+// Stand to windward of the billowing canvas. The sailing model retains its tack
+// near a dead run/calm; a critically damped crossing avoids a camera teleport.
+export function stepBoatView(boat,dt){
+  const side=boat.sailState?.tack??1;
+  boat.eyeSide??=side;
+  boatSpring(boat,'eyeSide',side,4,dt);
+}
 // World-space eye anchor; keeping it separate from the vessel allows inspection.
 export function boatEyePosition(out, boat) {
-  boatRotate(out, 0, boat.eye, HELM_EYE_Z * boat.length / 12, boat.heading * Math.PI / 180, boat.pitch, boat.roll);
+  const side=boat.eyeSide??boat.sailState?.tack??1;
+  boatRotate(out, side * HELM_EYE_X * boat.beam / 3.6, boat.eye, HELM_EYE_Z * boat.length / 12,
+    boat.heading * Math.PI / 180, boat.pitch, boat.roll);
   out[0] += boat.x; out[1] += boat.heave; out[2] += boat.z;
   return out;
 }

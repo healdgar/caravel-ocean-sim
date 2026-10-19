@@ -40,7 +40,9 @@ They are visible equipment; aiming, firing, ammunition and recoil are unimplemen
 The wheel is replaced by a direct tiller on the main deck beneath the quarterdeck.
 The stock passes through a small stern port; a real opening in the forward cabin
 bulkhead gives access. The helmsman follows the arm, with hands placed against it.
-The player observes from the quarterdeck above. Control direction still commands
+The player observes from the forward windward quarterdeck corner, clear of the
+relocated mizzen and the centreline masts. The camera crosses smoothly after a
+tack to keep the billowing canvas leeward. Control direction still commands
 the desired turn; the forward-pointing tiller moves opposite the rudder blade.
 
 The rig has three single masts with triangular fore, main and mizzen sails.

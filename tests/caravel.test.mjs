@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCaravelMesh, indexCaravelMesh } from '../js/caravel.js';
 import { shadowMeshData } from '../js/shadows.js';
-import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, hullDeck, TILLER_PIVOT, TILLER_HANDLE, tillerPoint, HELM_EYE_Z, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
+import { hullHalfWidth, hullSurfacePoint, HULL_DRAFT, vesselDeck, hullDeck, TILLER_PIVOT, TILLER_HANDLE, tillerPoint, HELM_EYE_X, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_VERTICAL_SCALE, hullScale } from '../js/hull.js';
+import { boatEyePosition } from '../js/boat.js';
 import { createCompany, stepCompany } from '../js/crew.js';
 import { SAIL_PLAN, SAIL_AREAS } from '../js/sailing.js';
 import { RIG_MASTS, mastPoint } from '../js/rigging.js';
@@ -93,12 +94,13 @@ test('raked hull surface agrees with water-contact sections and stays within the
 });
 
 // Intersect actual triangles, so tests catch planking/trim occluding an opening.
-function firstHit(mesh,origin,direction){
+function firstHit(mesh,origin,direction,ignore=[]){
   const sub=(a,b)=>a.map((x,i)=>x-b[i]);
   const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
   const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
   let distance=Infinity,material=-1;
   for(let i=0;i<mesh.length;i+=27){
+    if(ignore.includes(Math.floor(mesh[i+6])))continue;
     const a=Array.from(mesh.slice(i,i+3)),b=Array.from(mesh.slice(i+9,i+12)),c=Array.from(mesh.slice(i+18,i+21));
     const e1=sub(b,a),e2=sub(c,a),p=cross(direction,e2),det=dot(e1,p);
     if(Math.abs(det)<1e-9)continue;
@@ -109,6 +111,33 @@ function firstHit(mesh,origin,direction){
   }
   return {material,point:origin.map((x,i)=>x+direction[i]*distance)};
 }
+
+test('captain stands on the quarterdeck with clear forward sightlines at supported vessel scales',()=>{
+  const raw=createCaravelMesh();
+  for(const [length,beam] of [[12,3.6],[20,6],[24,7.2]])for(const side of [-1,1]){
+    const scale=hullScale(length,beam),mesh=raw.slice();
+    for(let i=0;i<mesh.length;i+=9)for(let axis=0;axis<3;axis++)mesh[i+axis]*=scale[axis];
+    const eye=boatEyePosition(new Float64Array(3),{x:0,z:0,heave:0,eye:HELM_EYE_HEIGHT,eyeSide:side,length,beam,heading:0,pitch:0,roll:0});
+    const floor=firstHit(mesh,[eye[0],vesselDeck(HELM_EYE_Z)*scale[1]+.15,eye[2]],[0,-1,0]);
+    assert.equal(floor.material,0,'a real deck supports the captain, not an overboard camera');
+    assert.ok(Math.abs(eye[1]-floor.point[1]-1.6)<.01,'normal standing eye height');
+    for(const pitch of [-5.5,0])for(const yaw of [-6,0,6]){
+      const p=pitch*Math.PI/180,h=yaw*Math.PI/180;
+      // Thin ropes naturally cross the view; test the solid mast/spar/canvas
+      // obstruction that can actually swallow the captain's field of view.
+      const hit=firstHit(mesh,Array.from(eye),[Math.sin(h)*Math.cos(p),Math.sin(p),-Math.cos(h)*Math.cos(p)],[12,19]);
+      if(yaw===0)assert.equal(hit.material,-1,`clear centre view: ${length} m hull, pitch ${pitch}`);
+      // Off-axis sails/ropes remain visible, but cannot fill the eye's immediate
+      // neighbourhood. Small hulls retain full-height sails and narrow the view.
+      else assert.ok(hit.material===-1||Math.hypot(...hit.point.map((v,i)=>v-eye[i]))>3,
+        `near obstruction: ${length} m hull, side ${side}, yaw ${yaw}, pitch ${pitch}: ${JSON.stringify(hit)}`);
+    }
+    for(let i=0;i<RIG_MASTS.length;i++){
+      const centre=mastPoint(i,eye[1]/scale[1]);
+      assert.ok(Math.hypot((side*HELM_EYE_X-centre[0])*scale[0],(HELM_EYE_Z-centre[2])*scale[2])>RIG_MASTS[i].r*scale[0]+.5);
+    }
+  }
+});
 
 test('two modest stern lights are recessed; cabin sides are planked',()=>{
   const mesh=createCaravelMesh();
