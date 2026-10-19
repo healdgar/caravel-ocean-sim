@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {readGLB,gltfAccessor,createSkinAnimator,gltfQuatMultiply,gltfSlerp} from '../js/gltf.js';
+import {readGLB,gltfAccessor,createSkinAnimator,gltfQuatMultiply,gltfSlerp,gltfTRS} from '../js/gltf.js';
 const source=process.argv[2]??'/tmp/waterworld-crew';
 const revision='5821923af517ac5fdc82505faa92a0d575fc1b1a';
 const prefix='https://raw.githubusercontent.com/NafisRayan/Animate-Rigged-Humanoid-No-Blender/'+revision+'/';
@@ -15,6 +15,10 @@ const files={
   'body.bin':[bodyPath+'Superhero_Male_FullBody.bin','459003f9745853ae562a85506a2b94dd56515c1f37728f9fa3d2ce1a3e4cd92f'],
   'hair.gltf':[hairPath+'Hair_SimpleParted.gltf','ce6c666d00bcca2baa0c58d0442505f90f8feff952592effc4697a2341e9e56d'],
   'hair.bin':[hairPath+'Hair_SimpleParted.bin','57c6359703a37e346ee38a9c7ba55c8dee761c0a02da99847d06f5a91728f3cc'],
+  'female.gltf':[bodyPath+'Superhero_Female_FullBody.gltf','adedf28000a0716f689b009a70314506fc62f827498f77ba852acb5610f3f3f4'],
+  'female.bin':[bodyPath+'Superhero_Female_FullBody.bin','3a8220a485b33d05d879115a50697728b45a151781106033afb8b8c243fca208'],
+  'buns.gltf':[hairPath+'Hair_Buns.gltf','2bb3593575e21c9af39a53e48c42c1314b0a894e9577f3f14abffcb145cd56c5'],
+  'buns.bin':[hairPath+'Hair_Buns.bin','4f6d4c010201278483da8d6d46ec40e3beb8d9e679ec2139bed216c561bccd38'],
 };
 const data={};await fs.mkdir(source,{recursive:true});
 for(const [name,[remote,hash]] of Object.entries(files)){
@@ -25,7 +29,9 @@ for(const [name,[remote,hash]] of Object.entries(files)){
   data[name]=await fs.readFile(path.join(source,name));
   if(createHash('sha256').update(data[name]).digest('hex')!==hash)throw Error('Source checksum mismatch: '+name);
 }
-const body={json:JSON.parse(data['body.gltf']),bin:data['body.bin']},hair={json:JSON.parse(data['hair.gltf']),bin:data['hair.bin']};
+for(const female of [false,true]) {
+const bodyName=female?'female':'body',hairName=female?'buns':'hair';
+const body={json:JSON.parse(data[bodyName+'.gltf']),bin:data[bodyName+'.bin']},hair={json:JSON.parse(data[hairName+'.gltf']),bin:data[hairName+'.bin']};
 const animation=readGLB(data['UAL1.glb']),sourcePlayer=createSkinAnimator(animation),targetPlayer=createSkinAnimator(body);
 const g=structuredClone(body.json);
 delete g.images;delete g.textures;delete g.samplers;delete g.extensionsUsed;delete g.extensionsRequired;
@@ -51,10 +57,10 @@ for(let mi=0;mi<g.meshes.length;mi++)for(const p of g.meshes[mi].primitives){
   for(let i=0;i<pos.length;i+=3){
     const x=pos[i],y=pos[i+1],z=pos[i+2];let color=skin,inflate=0;
     if(mi===0)color=hairColor;
-    else if(mi===1){const cx=Math.abs(x)-.029;const iris=cx*cx+(y-1.699)**2<.00006 && z>.074;color=iris?[.024,.013,.006]:[.65,.60,.49];}
+    else if(mi===1){const cx=Math.abs(x)-.029;const iris=cx*cx+(y-(female?1.656:1.699))**2<.00006 && z>(female?.069:.074);color=iris?[.024,.013,.006]:[.65,.60,.49];}
     else if(y<.23){color=leather;inflate=.012;}
-    else if(y<1.015){color=trousers;inflate=.018;}
-    else if((y<1.565 || Math.abs(x)>.12) && Math.abs(x)<.69){color=linen;inflate=.032;}
+    else if(y<(female?.99:1.015)){color=trousers;inflate=.018;}
+    else if((y<(female?1.49:1.565) || Math.abs(x)>.12) && Math.abs(x)<(female?.63:.69)){color=linen;inflate=.032;}
     colors.set(color,i);for(let k=0;k<3;k++)pos[i+k]+=norm[i+k]*inflate;
   }
   p.attributes={POSITION:accessor(pos,'VEC3'),NORMAL:accessor(norm,'VEC3'),COLOR_0:accessor(colors,'VEC3'),
@@ -67,12 +73,21 @@ function addMesh(name,positions,normals,colors,joints,weights,indices){
   const mesh=g.meshes.length;g.meshes.push({name,primitives:[{attributes:{POSITION:accessor(positions,'VEC3'),NORMAL:accessor(normals,'VEC3'),COLOR_0:accessor(colors,'VEC3'),JOINTS_0:accessor(joints,'VEC4',5123),WEIGHTS_0:accessor(weights,'VEC4')},indices:accessor(indices,'SCALAR',5125),material:0}]});
   const node=g.nodes.length;g.nodes.push({name,mesh,skin:0});g.nodes[g.scenes[0].nodes[0]].children.push(node);
 }
-const hp=hair.json.meshes[0].primitives[0],hairPos=gltfAccessor(hair,hp.attributes.POSITION),hc=[],hj=[],hw=[];
+const hp=hair.json.meshes[0].primitives[0],hairPos=gltfAccessor(hair,hp.attributes.POSITION),hairNorm=gltfAccessor(hair,hp.attributes.NORMAL),hc=[],hj=[],hw=[];
+// Hair exports use different node transforms; bake their centimetre/Z-up frame.
+const hairNode=hair.json.nodes.find(n=>n.mesh===0),hairMatrix=gltfTRS(new Float32Array(16),hairNode.translation??[0,0,0],hairNode.rotation??[0,0,0,1],hairNode.scale??[1,1,1]);
+for(let i=0;i<hairPos.length;i+=3){
+  for(const [values,w] of [[hairPos,1],[hairNorm,0]]){
+    const x=values[i],y=values[i+1],z=values[i+2];
+    for(let k=0;k<3;k++)values[i+k]=hairMatrix[k]*x+hairMatrix[4+k]*y+hairMatrix[8+k]*z+hairMatrix[12+k]*w;
+    if(!w){const length=Math.hypot(values[i],values[i+1],values[i+2]);for(let k=0;k<3;k++)values[i+k]/=length;}
+  }
+}
 for(let i=0;i<hairPos.length/3;i++){hc.push(...hairColor);hj.push(jointIndex('Head'),0,0,0);hw.push(1,0,0,0);}
-addMesh('Parted hair',hairPos,gltfAccessor(hair,hp.attributes.NORMAL),hc,hj,hw,gltfAccessor(hair,hp.indices));
+addMesh(female?'Tied hair':'Parted hair',hairPos,hairNorm,hc,hj,hw,gltfAccessor(hair,hp.indices));
 // A belt finishes the short linen shirt; no rigid skirt that clips raised legs.
 for(const [name,rings,color] of [
-  ['Leather belt',[[.995,.205,.16],[1.035,.205,.16]],leather],
+  ['Leather belt',female?[[.97,.168,.143],[1.01,.168,.143]]:[[.995,.205,.16],[1.035,.205,.16]],leather],
 ]){
   const pos=[],normal=[],col=[],joint=[],weight=[],idx=[],N=32;
   for(const [y,rx,rz] of rings)for(let i=0;i<N;i++){
@@ -123,6 +138,7 @@ g.buffers=[{byteLength}];const bin=Buffer.concat(buffers);
 let json=Buffer.from(JSON.stringify(g));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
 const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67,0);header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+bin.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);
 const bh=Buffer.alloc(8);bh.writeUInt32LE(bin.length,0);bh.writeUInt32LE(0x004e4942,4);
-const out=new URL('../assets/crew/sailor.glb',import.meta.url);await fs.mkdir(new URL('../assets/crew/',import.meta.url),{recursive:true});
+const out=new URL('../assets/crew/'+(female?'sailor-female.glb':'sailor.glb'),import.meta.url);await fs.mkdir(new URL('../assets/crew/',import.meta.url),{recursive:true});
 const output=Buffer.concat([header,json,bh,bin]);await fs.writeFile(out,output);
-console.log('Sailor GLB:',output.length,'bytes;',g.animations.map(a=>a.name).join(', '));
+console.log(female?'Female sailor GLB:':'Male sailor GLB:',output.length,'bytes;',g.animations.map(a=>a.name).join(', '));
+}

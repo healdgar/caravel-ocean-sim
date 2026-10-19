@@ -1,17 +1,24 @@
 # Crew and decision-system preparation
 
-The first animated deckhand is implemented: a local rule policy selects patrol,
-standby or brace; an executor follows a bounded deck route and drives GLB clip
-blending. `createDeckhand(policy)` accepts a replacement synchronous policy.
-Captain's work orders, general navigation, reservations and rigging execution
-below remain design work. Sail controls still drive automatic handling directly.
+Twelve named animated sailors are implemented: six women and six men. Each local
+rule policy selects watch movement, station keeping or bracing. Disjoint authored
+stations span the main deck, forecastle and quarterdeck. `createCompany(policy)`
+accepts a replacement synchronous policy. Two instanced model batches share
+geometry, while every sailor has an independent pose, appearance and state.
+
+Captain's orders live in their own panel. Full/reduced/furled sail and heavy-weather
+objectives update vessel sail requests; resume-watch retains them. Commands are
+revisioned and replaceable. Manual sail edits supersede an outstanding objective.
+The existing automatic sail handler still performs the actual canvas transition;
+animated crew do not yet execute or gate physical rigging work. General navigation,
+reservations, climbing, anchoring and battening hatches below remain design work.
 
 ## Complement
 
-Start with 12 simulated people, including the captain: captain, mate, boatswain
-and nine hands with overlapping sailing, cooking and maintenance skills. Two
-six-person watches provide a simple initial duty schedule; manoeuvres can call
-all hands. This is a lean design estimate for our default 12 m × 3.6 m vessel,
+The current complement is 12 visible people, including the captain: captain,
+mate, boatswain and nine hands. Six are women and six are men; roles are unrelated
+to gender. Individual skills and two six-person duty watches remain future work.
+This is a lean design estimate for our default 12 m × 3.6 m vessel,
 not a documented historical minimum or a validated manning requirement.
 
 The [Museum of Angra do Heroísmo](https://museu-angra.cultura.azores.gov.pt/en/others/historical-pieces/caravela/)
@@ -20,11 +27,11 @@ describes 20–30 m caravels, with smaller examples carrying 25–30 people. The
 over 4,000 miles with 11 sailors in 1991–92. A modern replica voyage establishes
 feasibility under those conditions, not a minimum for period equipment or storms.
 
-Simulated complement and rendered population are separate. Initially budget six
-visible sailors, with off-watch crew below deck; all-hands work may require more
-visible characters. Hidden crew retain identity, fatigue and task state. Never
-complete physical work merely because its workers are off camera. Crew count
-must remain configurable, including a historically fuller 25–30-person option.
+All 12 are presently visible; the display switch does not pause their state.
+Future watch rotation can reduce visible population while retaining off-watch
+identity, fatigue and tasks below deck. Never complete physical work merely
+because its workers are off camera. Configurable complements, including a
+historically fuller 25–30-person option, remain future work.
 
 ## Responsibilities
 
@@ -116,8 +123,9 @@ reset. On timeout or failure use the local policy. Never block the render loop.
 
 ## First executable milestone
 
-Foundation complete: one visible sailor, ship-local patrol, idle/walk/brace clips,
-keep-watch/stand-by controls, shared ship lighting and animated shadows. Next:
+Foundation complete: twelve visible sailors, ship-local watch stations,
+idle/walk/brace clips, separate shipwide captain orders, shared ship lighting
+and animated shadows. No individual positioning commands are exposed. Next:
 
 Three visible sailors complete one foremast sail-reduction order: approach,
 reserve stations, climb/haul, perform work together and return. Use a deliberately

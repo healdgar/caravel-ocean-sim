@@ -1,7 +1,12 @@
-# First deckhand
+# Crew assets
 
 `sailor.glb`: 975,136 bytes, 15,683 triangles, 65 joints; Idle, Walk and Brace
-clips. The GLB contains all geometry, vertex colours, skeleton and animation.
+clips.
+`sailor-female.glb`: 1,194,228 bytes, 18,408 triangles, 65 joints; the same clips,
+retargeted to the distinct female base mesh with tied hair.
+Each GLB contains all geometry, vertex colours, skeleton and animation.
+Runtime instances share each mesh and vary clothing, skin/hair colours, height
+and animation phase. Six instances of each model form the current company.
 
 Original assets: Quaternius [Universal Base Characters](https://quaternius.itch.io/universal-base-characters)
 and [Universal Animation Library](https://quaternius.itch.io/universal-animation-library).
@@ -29,7 +34,8 @@ standalone builds; it does not contact an asset service.
 
 Preparation retains target bone lengths, transfers animation rotations through
 model-space rest poses, and keeps small pelvis/root translations. It removes
-unused clips and textures, adds hair and a belt, and authors vertex colours and
+unused clips and textures, bakes each hair export's node transform, adds a belt,
+and authors vertex colours and
 slightly expanded clothing surfaces. The costume is an initial approximation,
 not a documented historical reconstruction. Ground contact is approximate;
 there is no foot IK or cloth simulation.

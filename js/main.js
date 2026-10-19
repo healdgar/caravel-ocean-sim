@@ -5,7 +5,7 @@ import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
-import { createCrew } from './crew.js';
+import { createCrew, CAPTAIN_ORDERS } from './crew.js';
 import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -355,7 +355,7 @@ async function main() {
   const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let crew=null,crewError='';
   try { crew=await createCrew({device,frameUBO,hullUBO,transView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA}); }
-  catch(error) { crewError='Deckhand unavailable'; console.warn('Crew initialization:',error); }
+  catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
@@ -863,6 +863,7 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const panel = document.getElementById('panel');
   function setPanelOpen(open) {
+    if(open)setCaptainOpen(false);
     panel.classList.toggle('hidden', !open);
     document.body.classList.toggle('sea-settings-open', open);
     seaSettingsButton.setAttribute('aria-expanded', String(open));
@@ -888,15 +889,9 @@ async function main() {
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
   prowLabel.append(prowToggle); boatBody.append(prowLabel);
   boat.crew=qs.get('crew')!=='0';
-  const crewLabel=document.createElement('label');crewLabel.textContent='Deckhand';
+  const crewLabel=document.createElement('label');crewLabel.textContent='Show crew';
   const crewToggle=document.createElement('input');crewToggle.type='checkbox';crewToggle.checked=boat.crew;crewToggle.disabled=!crew;
   crewToggle.addEventListener('change',()=>{boat.crew=crewToggle.checked;});crewLabel.append(crewToggle);boatBody.append(crewLabel);
-  const crewOrderLabel=document.createElement('label');crewOrderLabel.textContent='Deckhand order';
-  const crewOrder=document.createElement('select');crewOrder.id='crew-order';crewOrder.innerHTML='<option value="patrol">Keep watch</option><option value="standby">Stand by</option>';
-  crewOrder.setAttribute('aria-label','Deckhand order');
-  crewOrder.disabled=!crew;crewOrder.addEventListener('change',()=>{if(crew){crew.state.order=crewOrder.value;crew.state.decisionIn=0;}});
-  crewOrderLabel.append(crewOrder);boatBody.append(crewOrderLabel);
-  const crewStatus=document.createElement('p');crewStatus.id='crew-status';crewStatus.textContent=crewError||'On watch';boatBody.append(crewStatus);
   const effectsLabel = document.createElement('label'); effectsLabel.textContent = 'Wakes & spray';
   const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
   effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
@@ -914,6 +909,41 @@ async function main() {
   seaSettingsButton.setAttribute('aria-controls', 'panel');
   seaSettingsButton.setAttribute('aria-expanded', 'false');
   seaSettingsButton.onclick = togglePanel;
+  const captainButton=document.createElement('button');captainButton.textContent='Captain';
+  captainButton.setAttribute('aria-controls','captain-panel');captainButton.setAttribute('aria-expanded','false');
+  const captainPanel=document.createElement('section');captainPanel.id='captain-panel';captainPanel.hidden=true;
+  captainPanel.setAttribute('aria-labelledby','captain-title');
+  captainPanel.innerHTML='<div class="panel-header"><strong id="captain-title">Captain’s orders</strong></div><div class="panel-body"><p>Command the ship. The crew attends to its stations.</p></div>';
+  panel.before(captainPanel);
+  const captainBody=captainPanel.querySelector('.panel-body'),captainHide=document.createElement('button');
+  captainHide.textContent='Hide';captainHide.setAttribute('aria-label','Hide captain orders');
+  captainHide.onclick=()=>{setCaptainOpen(false);captainButton.focus();};captainPanel.querySelector('.panel-header').append(captainHide);
+  function setCaptainOpen(open){
+    captainPanel.hidden=!open;document.body.classList.toggle('captain-open',open);captainButton.setAttribute('aria-expanded',String(open));
+    if(open){setPanelOpen(false);if(document.pointerLockElement)document.exitPointerLock();captainHide.focus();}
+  }
+  captainButton.onclick=()=>setCaptainOpen(captainPanel.hidden);
+  addEventListener('keydown',e=>{if(e.key==='Escape'&&!captainPanel.hidden)captainHide.click();});
+  const crewStatus=document.createElement('p');crewStatus.id='crew-status';crewStatus.setAttribute('role','status');crewStatus.textContent=crewError||'Sea watch · 12 aboard';captainBody.append(crewStatus);
+  const orderButtons=new Map(),orders=document.createElement('div');orders.className='captain-orders';
+  for(const order of CAPTAIN_ORDERS){
+    const button=document.createElement('button');button.type='button';button.disabled=!crew;button.dataset.order=order.id;
+    button.setAttribute('aria-label',order.label);button.setAttribute('aria-pressed',String(order.id==='watch'));
+    const name=document.createElement('strong'),detail=document.createElement('span');name.textContent=order.label;detail.textContent=order.detail;button.append(name,detail);
+    button.onclick=()=>{if(crew?.order(boat,order.id)){propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();}};
+    orders.append(button);orderButtons.set(order.id,button);
+  }
+  captainBody.append(orders);
+  const crewDetails=document.createElement('details'),crewSummary=document.createElement('summary');crewSummary.textContent='Ship’s company · 6 women · 6 men';crewDetails.append(crewSummary);
+  const crewList=document.createElement('ul');crewList.id='crew-roster';
+  const crewRows=crew?crew.state.crew.map(s=>{const row=document.createElement('li');row.textContent=`${s.name} · ${s.role}`;crewList.append(row);return row;}):[];
+  crewDetails.append(crewList);captainBody.append(crewDetails);
+  function updateCrewUI(){
+    if(!crew)return;
+    const status=crew.status();if(crewStatus.textContent!==status)crewStatus.textContent=status;
+    for(const [id,button] of orderButtons)button.setAttribute('aria-pressed',String(crew.state.order===id));
+    if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${s.intent==='brace'?'Bracing':s.walk>.3?'On rounds':'At station'}`;
+  }
   const shareButton = document.createElement('button');
   shareButton.textContent = 'Copy share link';
   const sharePanel = document.createElement('div'); sharePanel.id = 'share-panel'; sharePanel.hidden = true;
@@ -937,7 +967,7 @@ async function main() {
       shareStatus.textContent = 'Select and copy this link to share your settings.';
     }
   };
-  cameraDock.append(seaSettingsButton, shareButton, sharePanel);
+  cameraDock.append(captainButton,seaSettingsButton, shareButton, sharePanel);
   if(profileDetails)cameraDock.append(profileDetails);
   panel.before(cameraDock);
   // Keep controls in the visible viewport, including browser bars and keyboards.
@@ -992,12 +1022,6 @@ async function main() {
     input.addEventListener('input',()=>{boat[key]=Number(input.value)/100;});
     row.append(name,input,output);sailControls.append(row);sailInputs.push({input,output});
   }
-  const sailButtons=document.createElement('div');sailButtons.className='sail-buttons';
-  for(const [name,set] of [['Full sail',1],['Reef 50%',0.5],['Lower all',0]]){
-    const button=document.createElement('button');button.textContent=name;
-    button.onclick=()=>{for(const [i,key] of SAIL_KEYS.entries()){boat[key]=set;sailInputs[i].input.value=set*100;}};sailButtons.append(button);
-  }
-  sailControls.append(sailButtons);
   const sailStatus=document.createElement('p');sailStatus.id='sail-status';sailControls.append(sailStatus);
   let speedRow;
   for (const [key, label, min, max, step] of [
@@ -1191,7 +1215,7 @@ async function main() {
       if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
       if(profileToggle)profileToggle.textContent=`Performance · ${fps.toFixed(1)} FPS · ${Math.round(resolution.scale*100)}%`;
       updateResolutionStatus();
-      crewStatus.textContent=crew?crew.status():crewError;
+      updateCrewUI();
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';

@@ -2,15 +2,16 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
-import {createDeckhand,stepDeckhand} from '../js/crew.js';
-import {hullDeck,hullHalfWidth} from '../js/hull.js';
+import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
+import {hullDeck,hullHalfWidth,vesselDeck} from '../js/hull.js';
+import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
 const model=loadCrewGLB(bytes);
 const boat={length:12,beam:3.6,roll:0,rollVelocity:0};
-function positions(palette){
-  const f=new Float32Array(model.vertices.buffer),u=new Uint16Array(model.vertices.buffer),out=new Float32Array(model.vertexCount*3);
-  for(let i=0;i<model.vertexCount;i++)for(let k=0;k<4;k++){
+function positions(palette,mesh=model){
+  const f=new Float32Array(mesh.vertices.buffer),u=new Uint16Array(mesh.vertices.buffer),out=new Float32Array(mesh.vertexCount*3);
+  for(let i=0;i<mesh.vertexCount;i++)for(let k=0;k<4;k++){
     const b=u[i*30+18+k]*16,w=f[i*15+11+k];
     for(let axis=0;axis<3;axis++)out[i*3+axis]+=w*(palette[b+axis]*f[i*15]+palette[b+4+axis]*f[i*15+1]+palette[b+8+axis]*f[i*15+2]+palette[b+12+axis]);
   }
@@ -67,4 +68,49 @@ test('orders and rough-weather interruption stop movement; invalid policies fall
   for(let i=0;i<20;i++)stepDeckhand(s,{...boat,roll:.5},.1);assert.ok(s.brace>.99);
   for(let i=0;i<30;i++)stepDeckhand(s,boat,.1);assert.equal(s.intent,'patrol');assert.ok(s.brace<.001);
   const url=new URL(createShareLink('https://example.com/',{}, {...boat,crew:false},'boat'));assert.equal(url.searchParams.get('crew'),'0');
+});
+test('female asset has a distinct mesh, compatible rig and grounded animation',()=>{
+  const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
+  assert.equal(female.animator.joints.length,65);assert.notEqual(female.vertexCount,model.vertexCount);
+  assert.ok(female.indices.length/3<24000);
+  const rest=positions(female.animator.sample(null,0),female),f=new Float32Array(female.vertices.buffer);
+  for(let i=0;i<female.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5);
+  for(const [name,clip] of female.animator.clips){
+    let min=Infinity,max=-Infinity;
+    for(let t=0;t<clip.duration;t+=.13){const p=positions(female.animator.sample(name,t),female);for(let i=0;i<p.length;i++){
+      assert.ok(Number.isFinite(p[i])&&Math.abs(p[i])<2.1);
+      if(i%3===1){min=Math.min(min,p[i]);max=Math.max(max,p[i]);}
+    }}
+    assert.ok(min>-.05&&min<.08,`${name} feet: ${min}`);assert.ok(max>(name==='Brace'?.85:1.55)&&max<1.95,`${name} height: ${max}`);
+  }
+});
+test('twelve named crew, evenly split, keep separate clear stations on every deck',()=>{
+  assert.equal(CREW_ROSTER.length,12);assert.equal(new Set(CREW_ROSTER.map(s=>s.id)).size,12);
+  assert.equal(CREW_ROSTER.filter(s=>s.sex==='female').length,6);
+  for(const dimensions of [[12,3.6],[10.5,3.2],[24,7.2]]){
+    const b={...boat,length:dimensions[0],beam:dimensions[1]},company=createCompany();
+    for(let i=0;i<3600;i++){
+      stepCompany(company,b,1/60,2);
+      for(const [j,s] of company.crew.entries()){
+        assert.ok(s.visible);assert.ok(s.z>=s.route[0]-1e-5&&s.z<=s.route[1]+1e-5);
+        assert.ok(Math.abs(s.position[1]-vesselDeck(s.z)-.028)<1e-6);
+        assert.ok(Math.abs(s.position[0])+.3<hullHalfWidth(s.z,vesselDeck(s.z))*b.beam/3.6);
+        // Main deck excludes the companionway, mainmast and hatch grating.
+        if(s.z>-3.9&&s.z<2.7){assert.ok(!(s.x>.35&&s.z>1.1));assert.ok(Math.hypot(s.x,s.z-.85)>.55);assert.ok(s.z> -2.3);}
+        for(let k=0;k<j;k++){const p=company.crew[k].position;assert.ok(Math.hypot(s.position[0]-p[0],s.position[1]-p[1],s.position[2]-p[2])>.64,`${s.id} overlaps ${company.crew[k].id}`);}
+      }
+    }
+  }
+});
+test('captain orders change actual sails gradually, can be replaced, and survive hidden crew',()=>{
+  const b={...boat,sailFore:1,sailMain:1,sailMizzen:1,propulsion:'manual'},c=createCompany();sailingState(b);
+  assert.equal(issueCaptainOrder(c,b,'teleport'),false);assert.equal(c.revision,0);
+  assert.equal(issueCaptainOrder(c,b,'furl'),true);assert.equal(b.propulsion,'sail');
+  advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);assert.ok(sailingState(b).set[0]>0&&sailingState(b).set[0]<1);assert.ok(c.pending);
+  b.crew=false;issueCaptainOrder(c,b,'weather');
+  for(let i=0;i<80;i++){advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);}
+  assert.deepEqual(Array.from(sailingState(b).set),[.2,.2,0]);assert.equal(c.pending,false);
+  assert.ok(c.crew.every(s=>s.observation.captainOrder==='weather'&&s.observation.orderRevision===c.revision));
+  assert.ok(c.crew.every(s=>s.intent==='standby'));stepCompany(c,{...b,roll:.5},.1,8);assert.ok(c.crew.every(s=>s.intent==='brace'));
+  issueCaptainOrder(c,b,'full');b.sailFore=.4;stepCompany(c,b,.1,8);assert.equal(c.order,'watch');assert.equal(b.sailFore,.4,'old order must not overwrite manual changes');
 });

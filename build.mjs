@@ -17,7 +17,8 @@ const stripModuleSyntax = (src) => src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
   .replaceAll("'assets/caravel-oak-albedo.webp'", () => JSON.stringify('data:image/webp;base64,' + fs.readFileSync(path.join(root, 'assets/caravel-oak-albedo.webp')).toString('base64')))
-  .replaceAll("'assets/crew/sailor.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor.glb')).toString('base64')));
+  .replaceAll("'assets/crew/sailor.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor.glb')).toString('base64')))
+  .replaceAll("'assets/crew/sailor-female.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor-female.glb')).toString('base64')));
 
 const notices = fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8');
 const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace('</head>', () => '<!--\n' + notices + '\n-->\n</head>');

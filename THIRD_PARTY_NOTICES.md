@@ -2,7 +2,7 @@
 
 ## Quaternius crew assets
 
-The first sailor adapts Quaternius Universal Base Characters and Universal
+The male and female sailors adapt Quaternius Universal Base Characters and Universal
 Animation Library (animations credited to Quaternius and Gonzalo Furnier), under
 CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/.
 

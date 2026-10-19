@@ -5,14 +5,17 @@ import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
 const CREW_SKIN = /* wgsl */ `
 @group(0) @binding(1) var<uniform> hull:Hull;
 @group(0) @binding(2) var<storage,read> joints:array<mat4x4f>;
-@group(0) @binding(3) var<uniform> actor:mat4x4f;
+struct CrewActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f };
+@group(0) @binding(3) var<storage,read> actors:array<CrewActor>;
 struct CrewInput {
   @location(0) position:vec3f, @location(1) normal:vec3f,
-  @location(2) color:vec3f, @location(3) bones:vec4u, @location(4) weights:vec4f
+  @location(2) color:vec3f, @location(3) bones:vec4u, @location(4) weights:vec4f,
+  @builtin(instance_index) instance:u32
 };
 fn crewSkin(v:CrewInput)->mat4x4f {
-  return actor*(joints[v.bones.x]*v.weights.x+joints[v.bones.y]*v.weights.y+
-    joints[v.bones.z]*v.weights.z+joints[v.bones.w]*v.weights.w);
+  let b=v.bones+vec4u(v.instance*65u);
+  return actors[v.instance].transform*(joints[b.x]*v.weights.x+joints[b.y]*v.weights.y+
+    joints[b.z]*v.weights.z+joints[b.w]*v.weights.w);
 }
 `;
 export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + CREW_SKIN + SHADOW_SAMPLE + /* wgsl */ `
@@ -28,7 +31,13 @@ struct CrewVertex {
 @vertex fn vs(v:CrewInput)->CrewVertex {
   let skin=crewSkin(v);let p=rotateHull((skin*vec4f(v.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
-  out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;return out;
+  out.world=p;out.normal=normalize(rotateHull((skin*vec4f(v.normal,0)).xyz));out.color=v.color;
+  let actor=actors[v.instance];
+  if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=actor.shirt.rgb;}
+  if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=actor.trousers.rgb;}
+  if(distance(v.color,vec3f(.36,.18,.10))<.001){out.color=actor.skin.rgb;}
+  if(distance(v.color,vec3f(.045,.019,.009))<.001){out.color=actor.hair.rgb;}
+  return out;
 }
 @fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;

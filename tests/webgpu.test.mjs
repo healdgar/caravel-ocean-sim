@@ -1432,12 +1432,14 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
     },count);
     let hull=await advance(1);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[1,1,1]);
     hull=await advance(80);assert.ok(hull[4]<-.01,'wind torque reaches the rendered hull lean');
-    await page.getByRole('button',{name:'Lower all',exact:true}).click();
+    await page.getByRole('button',{name:'Captain',exact:true}).click();
+    await page.getByRole('button',{name:'Furl all sails',exact:true}).click();
     hull=await advance(2);assert.ok(hull[24]>0&&hull[24]<1,'canvas does not disappear instantly');
     hull=await advance(60);assert.ok(hull.every(Number.isFinite));assert.deepEqual(hull.slice(24,27),[0,0,0]);
     hull=await advance(200);assert.ok(Math.abs(hull[4])<.001,'bare poles settle upright on flat water');
-    await page.getByRole('button',{name:'Reef 50%',exact:true}).click();
+    await page.getByRole('button',{name:'Reduce sail',exact:true}).click();
     hull=await advance(35);assert.deepEqual(hull.slice(24,27),[.5,.5,.5]);
+    await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
     await page.locator('#boat-propulsion').selectOption('manual');
     assert.equal(await page.locator('#boat-speed').isVisible(),true);assert.equal(await page.locator('#sail-controls').isVisible(),false);
     hull=await advance(3);assert.ok(hull.every(Number.isFinite));
@@ -1486,6 +1488,15 @@ test('mobile panels keep Hide reachable while scrolling, profiling and rotating'
         await page.getByRole('button',{name:'Hide sea settings'}).click();
         assert.equal(await page.locator('#panel').isVisible(),false);
         assert.equal(await page.locator('#boat-panel').isVisible(),true);
+        await page.getByRole('button',{name:'Captain',exact:true}).click();
+        assert.equal(await page.locator('#boat-panel').isVisible(),false);
+        assert.equal(await page.locator('#panel').isVisible(),false);
+        await page.locator('#captain-panel .panel-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+        await reachable('#captain-panel .panel-header button');
+        assert.equal(await page.locator('#captain-panel .panel-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+        await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+        assert.equal(await page.locator('#captain-panel').isVisible(),false);
+        await page.getByRole('button',{name:'Hide sea settings'}).click();
       }
     }
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
@@ -1516,13 +1527,19 @@ test('resolution controls resize GPU targets and explicit dimensions stay fixed'
   }finally{await page.close();}
 });
 
-test('deckhand renders and casts shadows, changes pose, obeys orders and hides with the ship', {timeout:120000}, async()=>{
+test('crew renders twelve independent sailors in two batches, obeys captain orders and hides with the ship', {timeout:120000}, async()=>{
   const page=await browser.newPage({viewport:{width:320,height:240}}),warnings=[];
   page.on('pageerror',error=>warnings.push(error.message));
   page.on('console',msg=>{if(msg.type()==='warning'||msg.type()==='error')warnings.push(msg.text());});
   try{
     await page.addInitScript(instrumentRenderer);
     await page.addInitScript(()=>{
+      const pipeline=GPURenderPassEncoder.prototype.setPipeline,draw=GPURenderPassEncoder.prototype.drawIndexed;
+      GPURenderPassEncoder.prototype.setPipeline=function(p){this.crewLabel=p.label;return pipeline.call(this,p);};
+      GPURenderPassEncoder.prototype.drawIndexed=function(n,instances,...rest){
+        if(this.crewLabel==='crew')check.crewInstances=(check.crewInstances||[]).concat(instances);
+        return draw.call(this,n,instances,...rest);
+      };
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
         if(buffer.label==='crew joints')check.crewBones=Array.from(data);
@@ -1532,15 +1549,21 @@ test('deckhand renders and casts shadows, changes pose, obeys orders and hides w
     await page.goto(`${origin}/?boat=1&boatSpeed=0&windSpeed=2&swellHs=.1&sunElev=45&w=64&h=48`);
     try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
     catch(error){throw Error(error.message+'; '+warnings.join('\n'));}
-    assert.equal(await page.getByLabel('Deckhand',{exact:true}).isEnabled(),true);
+    assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true);
     const first=await step(page,100);assert.equal(first.render.crew,1);assert.equal(first.render['crew shadow'],1);
+    assert.deepEqual(await page.evaluate(()=>check.crewInstances),[6,6]);
     const bones=await page.evaluate(()=>check.crewBones);
+    assert.equal(bones.length,6*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
     await step(page,100);assert.notDeepEqual(await page.evaluate(()=>check.crewBones),bones);
-    await page.getByLabel('Deckhand order',{exact:true}).selectOption('standby');
-    await step(page,600);await step(page,600);assert.equal(await page.locator('#crew-status').textContent(),'Standing by');
-    await page.getByLabel('Deckhand',{exact:true}).uncheck();
+    assert.equal(await page.locator('#boat-panel #crew-order').count(),0);
+    await page.getByRole('button',{name:'Captain',exact:true}).click();
+    await page.getByRole('button',{name:'Prepare for heavy weather',exact:true}).click();
+    await step(page,600);await step(page,600);assert.match(await page.locator('#crew-status').textContent(),/Prepare for heavy weather/);
+    assert.equal(await page.locator('#crew-roster li').count(),12);
+    await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
+    await page.getByLabel('Show crew',{exact:true}).uncheck();
     const hidden=await step(page,100);assert.equal(hidden.render.crew,undefined);assert.equal(hidden.render['crew shadow'],undefined);
-    await page.getByLabel('Deckhand',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
+    await page.getByLabel('Show crew',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
     const shipHidden=await step(page,100);assert.equal(shipHidden.render.crew,undefined);assert.equal(shipHidden.render['crew shadow'],undefined);
     assert.deepEqual(warnings,[]);
   }finally{await page.close();}
@@ -1555,7 +1578,7 @@ for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
       await page.addInitScript(instrumentRenderer);
       await page.goto(`${origin}/${bundle}?w=1&h=1`);
       await page.waitForFunction(() => check.callback, undefined, { polling: 100, timeout: 90000 });
-      assert.equal(await page.getByLabel('Deckhand',{exact:true}).isEnabled(),true,'embedded crew asset and pipelines initialize');
+      assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true,'both embedded crew assets and pipelines initialize');
       assert.deepEqual(await page.evaluate(async () => {
         await check.device.queue.onSubmittedWorkDone();
         return check.errors;

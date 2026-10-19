@@ -85,34 +85,48 @@ The visible mesh and shadow casters share 107,914 unique vertex records through 
 
 The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
 
-### First animated deckhand
+### Ship's company and captain's orders
 
-A Quaternius-derived sailor walks a short port-side deck route, pauses, turns,
-and blends between idle and walking. Strong wind, heel or roll rate interrupts
-walking with a crouched brace. **Deckhand order → Stand by** stops the patrol;
-**Keep watch** resumes it. **Deckhand** hides the character, and shared links
-preserve that switch as `crew=0` or `crew=1`. Hiding the ship also hides the sailor.
-Very small hulls (under 8 m long or 2.8 m wide) hide the sailor because the authored
-walkway no longer provides sufficient clearance.
+Twelve named sailors are aboard: six women and six men, using distinct
+Quaternius-derived models. They have varied clothing, skin and hair colours,
+heights and animation phases. Six tend short, separate routes on the main deck;
+the others hold lookout, quarterdeck and helm stations. Strong wind, heel or roll
+rate interrupts normal duties with a crouched brace. Each sailor uses the same
+replaceable local decision policy, independently of rendering.
 
-The self-contained GLB is 975 KB, with 15,683 triangles, 65 joints and three clips.
-Native WebGPU skinning sends joint matrices rather than deformed vertices each
-frame. The sailor receives ship and sail shadows and casts into the existing
-solid shadow pass; no new render pass is introduced. The asset and runtime add
-about 1.3 MB to each standalone page. The 30 FPS automatic-resolution target
-remains active; physical-iPhone performance has not yet been measured.
+Open **Captain** for a separate orders panel: **Make full sail**, **Reduce sail**,
+**Furl all sails**, **Prepare for heavy weather**, or **Resume sea watch**. These
+are shipwide objectives, with no individual position controls. Sail orders select
+wind-driven propulsion and change the actual canvas gradually through existing
+automatic sail handling. Heavy-weather preparation requests 20% fore/main canvas,
+furled mizzen and stationary crew. Returning to watch retains sail settings.
+Manual sail sliders remain in Boat perspective and supersede an outstanding order.
+The captain panel has a persistent Hide button and scrollable roster; it opens
+separately from boat and sea settings on mobile.
 
-This is one animated deckhand with a replaceable local rule policy. Ship-local
-movement keeps him aboard as the hull moves, but precise foot placement, active
-balance, climbing, rope handling, task reservations, fatigue, watch rotation and
-crew-driven sail handling remain future work. The crouch is an animation response
-to authored thresholds, not a biomechanical balance model. The limited GLB reader
-supports the prepared skin, indexed triangles, vertex colours and LINEAR/STEP
-TRS clips; it is not a general glTF renderer.
+**Show crew** is a display switch, preserved in shared links as `crew=0/1`.
+Hiding characters or the ship does not stop their simulation or sail orders.
+Hulls below 10.5 m long or 3.2 m wide hide the company because these authored
+stations no longer provide sufficient clearance.
+
+Both embedded GLBs total 2.17 MB. Each has 65 joints and Idle, Walk and Brace
+clips; the male model has 15,683 triangles, the female 18,408. Twelve sailors use
+two instanced draws in the ship pass and two in the existing solid shadow pass,
+with independent bone palettes. They receive ship/sail shadows. No render pass
+is added. The 30 FPS automatic-resolution target remains active; the expanded
+crew's physical-iPhone performance has not yet been measured.
+
+This is a visible company and command foundation. Animation does not yet perform
+or gate sail handling. Precise foot placement, active balance, climbing, rope
+handling, task reservations, fatigue, watch rotation, anchor deployment and
+battening hatches remain future work. The helmsman occupies a station; steering
+still follows the player's controls. Bracing uses authored thresholds, not a
+biomechanical balance model. The limited GLB reader supports the prepared skin,
+indexed triangles, vertex colours and LINEAR/STEP TRS clips.
 
 [Asset provenance and rebuild instructions](assets/crew/README.md) retain the CC0
 licence, source revision and checksums. [Crew and decision-system design](CREW.md)
-describes the larger system and proposed 12-person complement.
+describes the larger decision and work-execution system.
 
 ### Wake, bow waves and spray
 
@@ -223,6 +237,7 @@ npm test
 
 The suite covers:
 
+- Both crew rigs and grounded clip bounds, balanced twelve-person roster, deck clearance and separation, replaceable captain orders, gradual canvas changes, hidden-character independence, two six-instance GPU draws, animated shadows, embedded assets and mobile panel reachability.
 - Crest-spray wind/breaking gates, displaced birth height, downwind entrainment, hull exclusion, bounded populations, 30/120 Hz emission, clears, real FFT emission and rendering independent of the ship and its wake toggle.
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
@@ -314,7 +329,8 @@ trim and exposed canvas determine its drive. The panel shows actual speed and es
 displacement; steering, wakes and spray use that speed.
 
 **Fore sails**, **Main sails** and **Mizzen sail** independently set 0–100% canvas.
-**Full sail**, **Reef 50%** and **Lower all** change all three together. Handling takes
+The separate **Captain** panel issues **Make full sail**, **Reduce sail** and
+**Furl all sails** across all three groups. Handling takes
 about 5.6 seconds from fully set to fully furled. The percentage readouts show actual
 canvas while the sliders show the requested amount. Square sails gather at their yards;
 the lateen gathers along its diagonal yard. Yards brace and the mizzen changes tack
