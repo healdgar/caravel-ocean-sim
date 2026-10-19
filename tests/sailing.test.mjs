@@ -137,7 +137,7 @@ test('roll inertia delays heel, displacement resists torque and righting moment 
   const moment=a.hydrodynamics.rollStiffness*.15,equilibrium=Math.asin(.15);
   stepBoatHeel(a,moment,1/120);stepBoatHeel(large,moment,1/120);
   assert.ok(a.sailHeel>0 && a.sailHeel<equilibrium*.001);
-  assert.ok(Math.abs(a.sailHeel/large.sailHeel-2)<1e-10,'equal torque accelerates double inertia half as much');
+  assert.ok(large.sailHeel<a.sailHeel*.55&&large.sailHeel>a.sailHeel*.45,'twice the fixed vessel mass nearly halves the initial response; crew and stores stay fixed');
   // The larger vessel has a longer roll period; allow 40 s to settle.
   for(let i=0;i<4800;i++)stepBoatHeel(a,moment,1/120);
   assert.ok(Math.abs(a.sailHeel-equilibrium)<.0001);assert.ok(Math.abs(a.sailHeelVelocity)<.0001);

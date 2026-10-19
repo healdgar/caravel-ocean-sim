@@ -3,6 +3,7 @@ const BOAT_LINK_KEYS = {
   length: 'boatLength', beam: 'boatBeam', heading: 'boatHeading',
   speed: 'boatSpeed', eye: 'boatEye', rudderTarget: 'boatRudder',
   sailFore: 'sailFore', sailMain: 'sailMain', sailMizzen: 'sailMizzen',
+  provisionDays: 'provisionDays', cargoTonnes: 'cargoTonnes',
 };
 
 export const ROUGH_SEAS = {

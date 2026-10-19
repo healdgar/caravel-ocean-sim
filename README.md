@@ -54,7 +54,7 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 
 Open **Sea settings** and adjust the waves and lighting, then select **Copy share
 link** in the top controls. The link includes every sea and lighting parameter,
-boat length, beam, heading, speed, eye height, rudder setting, ship visibility,
+boat length, beam, heading, speed, eye height, rudder setting, provisions, cargo, ship visibility,
 wake/spray/deck-wash visibility, and the selected camera mode. Opening it restores those settings. The address
 bar also receives the link; if copying is blocked, a selected text field lets
 you copy it manually. Each copy captures your latest settings.
@@ -177,7 +177,7 @@ Physical basis: [Anguelova et al., *Spume Drops Produced by the Wind Tearing of 
 
 A 32 × 96 hull-local water field samples the displaced sea at the rails. Overtopping adds water at the edges; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff strips share the scene lighting. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls deck wash.
 
-The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull on the sampled surface. Large crests can still overtop it.
+The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull at its loaded draft relative to the sampled surface. Large crests can still overtop it.
 
 ### Wet timber, rigging, canvas and crew
 
@@ -356,7 +356,7 @@ MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
 Set length and beam in metres, heading in degrees (0 along the
-original view, 90 to the right), and eye height above the mean waterline.
+original view, 90 to the right), and camera height. The camera moves with the loaded hull.
 The default hull is **20 m long × 6 m beam**, excluding the bowsprit. The original
 12 × 3.6 design frame is converted to metres with a shared 5/3 vertical scale;
 length and beam controls set the other two axes. Decks, rigging, ocean exclusion,
@@ -369,7 +369,7 @@ following its swing. The camera remains on the upper deck. Nearby sailors fade
 using depth-correct screen-door transparency between 1.4 and 4.8 m from the camera.
 All remain visible in exterior/free views and continue casting shadows.
 
-The default eye is **5.43 m above the waterline**, 1.6 m above the quarterdeck;
+The default eye is **about 5.35 m above the loaded waterline**, 1.6 m above the quarterdeck;
 its longitudinal position follows hull length. Shared links preserve explicit
 dimensions and eye heights. Remove `boatLength`, `boatBeam`, and `boatEye` from an
 older link to use the enlarged defaults, or set them to 20, 6, and 5.43 respectively.
@@ -464,12 +464,41 @@ readback carry the mean world-space slope; no new texture, dispatch, or readback
 needed. Stale forces fade if probing stalls. Integration uses substeps of at most
 1/120 second with implicit signed drag to remain stable at mobile frame rates.
 
-Displacement is integrated from the canonical submerged hull at its mean waterline:
-about **107.7 tonnes** for the default 20 × 6 m ship, using seawater density
-1025 kg/m³ and the mesh's **2.0 m draft**. This is the authored hull's computed
-displacement, not a historical tonnage claim. Length and beam rescale this volume;
-draft stays fixed at the enlarged model height. Sail area and centres of effort,
-keel resistance, wetted area and roll inertia also use the physical dimensions.
+Loading now solves displacement against a hydrostatic table integrated from the
+canonical hull. The original **2.0 m design draft** calibrates approximately
+**107.7 tonnes of vessel and permanent ballast**; this is an authored reference,
+not a measured lightship weight or historical tonnage claim.
+
+The default twelve-person departure manifest adds **7.94 tonnes**:
+
+- Crew: 0.96 t (12 × 80 kg).
+- Water: 3.60 t (60 days × 12 × 5 kg/day, including cooking).
+- Food: 1.08 t (60 days × 12 × 1.5 kg/day).
+- Casks/containers: 0.80 t; spare rope, canvas, tools and other stores: 1.50 t.
+
+These are explicit provisioning assumptions. The resulting displacement is
+**115.6 t**, draft **2.086 m**, and lowest main-deck freeboard **1.081 m**.
+The supplied ship sits **8.6 cm deeper** than the former fixed waterline. Its
+broad waterplane needs about 0.92 t to sink another centimetre near design draft;
+ordinary provisions do not justify lowering it half a metre. For comparison,
+the [modern Niña replica operator](https://www.ninapinta.net/) reports 7 ft
+(2.13 m) draft; that different reconstruction is a scale check, not calibration.
+
+**Boat controls → Supplies and cargo** adjusts 0–120 provision days and 0–40 t
+of additional cargo; shared links retain both. Stores do not yet deplete with
+elapsed time. Hidden crew retain their mass. Containers and spares remain aboard
+at zero provision days. Additional cargo and stores are assumed secured low
+amidships; there is no asymmetric trim, shifting cargo or tank slosh model.
+Length and beam rescale fixed vessel mass, while the twelve-person manifest
+stays fixed. Configurations exceeding the supported draft show **Overloaded**;
+the non-flooding model retains at least 15 cm of main-deck freeboard and does not
+simulate foundering.
+
+Loaded mass drives surge inertia, draft-dependent drag and lateral resistance,
+heave response, centre of gravity, hydrostatic righting and roll inertia. The
+same vertical offset reaches rendering, camera, water exclusion, contacts,
+deck wash, wet materials and shadows. Sail wind heights and torque arms use the
+loaded waterline. No additional per-frame GPU pass or geometry is required.
 Added mass is an authored 8% of displacement; effective resistance uses coefficient
 0.012 and estimated wetted area. These coefficients are not calibrated to a historical
 caravel. Hull-footprint filtering approximates short-wave cancellation; the model

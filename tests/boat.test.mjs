@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boatTargets, boatSpring, boatRotate, boatHydrodynamics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from '../js/boat.js';
+import { boatTargets, boatSpring, boatRotate, boatHydrodynamics, hullHydrostatics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from '../js/boat.js';
 
 test('flat sea gives level hull and correct height', () => {
   assert.deepEqual(boatTargets(Array(9).fill(2), 10, 3), { heave: 2, pitch: 0, roll: 0 });
@@ -77,12 +77,45 @@ test('boarding uses the ship world position and eye height independently of a sp
 const surgeBoat = (speed = 6) => ({ length: 20, beam: 6, speed, surgeVelocity: speed * KNOT_TO_MPS });
 test('displacement scales with submerged geometry and includes added water inertia', () => {
   const base = boatHydrodynamics(20, 6), long = boatHydrodynamics(40, 6), wide = boatHydrodynamics(20, 12);
-  assert.ok(base.mass > 100000 && base.mass < 115000);
-  assert.ok(Math.abs(base.draft-2)<1e-8);
-  assert.equal(base.mass, base.volume * 1025);
-  assert.equal(long.mass, 2 * base.mass);
-  assert.equal(wide.mass, 2 * base.mass);
+  assert.ok(base.fixedMass > 107000 && base.fixedMass < 108000);
+  assert.ok(base.mass>115000&&base.mass<116000);
+  assert.ok(base.draft>2.08&&base.draft<2.10);
+  assert.ok(Math.abs(base.mass-base.volume*1025)<.001);
+  assert.equal(long.fixedMass, 2 * base.fixedMass);
+  assert.equal(wide.fixedMass, 2 * base.fixedMass);
+  assert.equal(long.loadMass,base.loadMass,'resizing does not duplicate the twelve-person manifest');
   assert.ok(base.addedMass > 0 && base.drag > 0);
+});
+
+test('crew and sixty days of stores settle at an Archimedean waterline; cargo increases draft and inertia',()=>{
+  const ship=boatHydrodynamics(20,6),empty=boatHydrodynamics(20,6,0),laden=boatHydrodynamics(20,6,60,20);
+  assert.equal(ship.crewMass,960);assert.equal(ship.waterMass,3600);assert.equal(ship.foodMass,1080);
+  assert.equal(ship.storesMass,2300);assert.equal(ship.loadMass,7940);
+  assert.equal(ship.mass-empty.mass,4680);assert.equal(laden.mass-ship.mass,20000);
+  for(const h of [empty,ship,laden]){
+    assert.ok(Math.abs(hullHydrostatics(h.length,h.beam,h.sinkage).mass-h.mass)<.001);
+    assert.ok(Math.abs(h.draft+h.freeboard-(2+7/6))<1e-10);
+    assert.equal(h.overloadKg,0);assert.ok(h.metacentricHeight>0);
+  }
+  assert.ok(empty.draft<ship.draft&&ship.draft<laden.draft);
+  assert.ok(laden.rollInertia>ship.rollInertia&&laden.drag>ship.drag&&laden.heaveOmega<ship.heaveOmega);
+  assert.ok(laden.centreOfGravity<ship.centreOfGravity,'secured hold cargo lowers the combined centre of gravity');
+});
+
+test('loading edits invalidate cached hydrostatics without changing velocity or hiding crew mass',()=>{
+  const b={...surgeBoat(0),surgeVelocity:3};stepBoatSurge(b,0,.01);
+  const before=b.surgeVelocity,hydro=b.hydrodynamics;b.cargoTonnes=20;b.crew=false;stepBoatSurge(b,0,.00001);
+  assert.notEqual(b.hydrodynamics,hydro);assert.ok(b.hydrodynamics.sinkage>hydro.sinkage);
+  assert.ok(Math.abs(b.surgeVelocity-before)<.0001);assert.equal(b.hydrodynamics.crewMass,960);
+  const next=b.hydrodynamics;stepBoatSurge(b,0,.01);assert.equal(b.hydrodynamics,next,'steady frames reuse the solved loading');
+});
+
+test('unsupported loading is reported without discarding mass or sinking through the open deck',()=>{
+  const small=boatHydrodynamics(3,1,120,40);
+  assert.ok(small.overloadKg>40000);assert.ok(small.freeboard>=.15);
+  assert.equal(small.cargoMass,40000);assert.equal(small.mass,small.fixedMass+small.loadMass);
+  for(const h of [small,boatHydrodynamics(20,6,NaN,Infinity),boatHydrodynamics(20,6,-1,-1)])
+    assert.ok(Object.values(h).every(Number.isFinite));
 });
 
 test('calm-water thrust holds the selected speed and distance without a speed clamp', () => {

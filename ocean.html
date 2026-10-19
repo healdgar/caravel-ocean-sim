@@ -387,8 +387,8 @@ function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
   for(let i=0;i<SAIL_LOADS.length;i++){
     const panel=SAIL_LOADS[i],lateen=panel.mast===2,deployed=s.set[panel.mast];
     // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
-    const height=(panel.top-panel.drop*(.025+.975*deployed))*HULL_VERTICAL_SCALE;
-    const lever=(height+HULL_DRAFT*HULL_VERTICAL_SCALE*.5)*upright;
+    const height=(panel.top-panel.drop*(.025+.975*deployed))*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
+    const lever=(height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)*.5)*upright;
     const wind=s.loadWind;wind.tack=s.tack;
     // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
     apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
@@ -3939,30 +3939,73 @@ const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 
 
 const KNOT_TO_MPS = 0.514444;
-// Displacement in design coordinates. Apply the same three axis scales as the
-// rendered hull; draft, wetted area and inertia below are in physical metres.
-const BOAT_VOLUME = (() => {
-  let volume = 0;
-  const dz = 12 / 96, dy = HULL_DRAFT / 32;
-  for (let z = 0; z < 96; z++) for (let y = 0; y < 32; y++) {
-    volume += 2 * hullHalfWidth(-6.4 + (z + 0.5) * dz, -HULL_DRAFT + (y + 0.5) * dy) * dz * dy;
+const DEFAULT_PROVISION_DAYS = 60;
+const SEAWATER_DENSITY = 1025;
+// Authored departure manifest for the twelve-person company. The existing
+// design waterline calibrates vessel + permanent ballast mass, not empty wood.
+// Quantities are gameplay assumptions, not a recovered historical inventory.
+const BOAT_MANIFEST = Object.freeze({crew:12,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:800,sparesKg:1500});
+// Integrate the canonical hull once. At runtime loading only interpolates this
+// table; it never adds ocean samples, meshes or GPU work. y is in design units.
+const HYDRO_STEP = .005;
+const HYDRO_DECK = hullDeck(0);
+const HULL_HYDRO = (()=>{
+  const rows=[];let volume=0,moment=0,previousArea=0,previousMoment=0;
+  for(let j=0;j<=Math.round((HULL_DRAFT+HYDRO_DECK)/HYDRO_STEP);j++){
+    const y=-HULL_DRAFT+j*HYDRO_STEP;let area=0,waterplaneMoment=0;
+    for(let i=0;i<192;i++){
+      const width=hullHalfWidth(-6.4+(i+.5)*12/192,y);
+      area+=2*width*12/192;waterplaneMoment+=2/3*width**3*12/192;
+    }
+    if(j){volume+=(previousArea+area)*.5*HYDRO_STEP;moment+=(previousMoment+area*y)*.5*HYDRO_STEP;}
+    rows.push({volume,moment,area,waterplaneMoment});previousArea=area;previousMoment=area*y;
   }
-  return volume;
+  return rows;
 })();
+function hullHydrostatics(length,beam,waterline=0){
+  const [sx,sy,sz]=hullScale(length,beam),at=Math.max(0,Math.min(HULL_HYDRO.length-1,(waterline/sy+HULL_DRAFT)/HYDRO_STEP));
+  const i=Math.min(HULL_HYDRO.length-2,Math.floor(at)),t=at-i,a=HULL_HYDRO[i],b=HULL_HYDRO[i+1];
+  const mix=key=>a[key]+(b[key]-a[key])*t,volume=mix('volume')*sx*sy*sz;
+  return {volume,mass:volume*SEAWATER_DENSITY,waterplaneArea:mix('area')*sx*sz,
+    centreOfBuoyancy:volume>0?HULL_DRAFT*sy+mix('moment')*sx*sy*sy*sz/volume:0,
+    waterplaneMoment:mix('waterplaneMoment')*sx**3*sz};
+}
+const provisionSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(120,value)):DEFAULT_PROVISION_DAYS;
+const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(40,value)):0;
 
-function boatHydrodynamics(length, beam) {
-  const [sx,sy,sz] = hullScale(length,beam);
-  const volume = BOAT_VOLUME * sx * sy * sz;
-  const draft = HULL_DRAFT * sy;
-  const mass = 1025 * volume;
+function boatHydrodynamics(length, beam, provisionDays=DEFAULT_PROVISION_DAYS, cargoTonnes=0) {
+  provisionDays=provisionSetting(provisionDays);cargoTonnes=cargoSetting(cargoTonnes);
+  const base=hullHydrostatics(length,beam),sy=HULL_VERTICAL_SCALE,M=BOAT_MANIFEST;
+  const crewMass=M.crew*M.personKg,waterMass=M.crew*M.waterKgPerDay*provisionDays;
+  const foodMass=M.crew*M.foodKgPerDay*provisionDays,storesMass=M.casksKg+M.sparesKg,cargoMass=cargoTonnes*1000;
+  const loadMass=crewMass+waterMass+foodMass+storesMass+cargoMass,mass=base.mass+loadMass;
+  // Preserve at least 15 cm to the lowest deck. Unsupported configurations are
+  // explicitly reported as overloaded; this remains a non-flooding model.
+  let low=0,high=HYDRO_DECK*sy-.15;
+  const maximumMass=hullHydrostatics(length,beam,high).mass;
+  for(let i=0;i<28;i++){
+    const mid=(low+high)*.5;
+    if(hullHydrostatics(length,beam,mid).mass<mass)low=mid;else high=mid;
+  }
+  const sinkage=(low+high)*.5,loaded=hullHydrostatics(length,beam,sinkage);
+  const {volume,waterplaneArea}=loaded,draft=HULL_DRAFT*sy+sinkage,freeboard=HYDRO_DECK*sy-sinkage;
   // Authored effective coefficients, not a calibrated resistance curve.
   const wettedArea = 0.85 * length * (beam + 2 * draft);
-  // Estimated stability and mass distribution, including 20% added roll inertia.
-  const metacentricHeight=beam*.22;
-  const rollInertia=mass*((beam*.38)**2+(1.6*HULL_VERTICAL_SCALE)**2)*1.2;
+  // Calibrate fixed vessel KG to the previous stability estimate, then add crew
+  // on deck and secured stores/cargo low amidships. No free-surface tank slosh.
+  const fixedKG=base.centreOfBuoyancy+base.waterplaneMoment/base.volume-beam*.22;
+  const crewKG=HULL_DRAFT*sy+1.5*sy,storesKG=HULL_DRAFT*sy-.45*sy;
+  const centreOfGravity=(base.mass*fixedKG+crewMass*crewKG+(loadMass-crewMass)*storesKG)/mass;
+  const metacentricHeight=Math.max(.1,loaded.centreOfBuoyancy+loaded.waterplaneMoment/volume-centreOfGravity);
+  const rollInertia=1.2*(base.mass*((beam*.38)**2+(1.6*sy)**2+(fixedKG-centreOfGravity)**2)
+    +crewMass*((beam*.3)**2+(crewKG-centreOfGravity)**2)
+    +(loadMass-crewMass)*((beam*.18)**2+(storesKG-centreOfGravity)**2));
   const rollStiffness=mass*9.81*metacentricHeight;
   const rollDamping=2*.35*Math.sqrt(rollInertia*rollStiffness);
-  return { length, beam, draft, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
+  const addedMass=mass*.08,heaveOmega=Math.sqrt(SEAWATER_DENSITY*9.81*waterplaneArea/(mass+addedMass));
+  return { length,beam,provisionDays,cargoTonnes,draft,sinkage,freeboard,volume,mass,addedMass,
+    fixedMass:base.mass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,overloadKg:Math.max(0,mass-maximumMass),
+    waterplaneArea,centreOfGravity,heaveOmega,drag:0.5*SEAWATER_DENSITY*0.012*wettedArea,
     metacentricHeight,rollInertia,rollStiffness,rollDamping };
 }
 
@@ -4018,8 +4061,9 @@ function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0) {
   boat.sailHeelVelocity ??= 0;
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
   let hydro = boat.hydrodynamics;
-  if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam) {
-    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam);
+  if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam
+      || hydro.provisionDays!==provisionSetting(boat.provisionDays) || hydro.cargoTonnes!==cargoSetting(boat.cargoTonnes)) {
+    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam,boat.provisionDays,boat.cargoTonnes);
   }
   const inertia = hydro.mass + hydro.addedMass;
   const sailing = boat.propulsion === 'sail';
@@ -5122,6 +5166,7 @@ const BOAT_LINK_KEYS = {
   length: 'boatLength', beam: 'boatBeam', heading: 'boatHeading',
   speed: 'boatSpeed', eye: 'boatEye', rudderTarget: 'boatRudder',
   sailFore: 'sailFore', sailMain: 'sailMain', sailMizzen: 'sailMizzen',
+  provisionDays: 'provisionDays', cargoTonnes: 'cargoTonnes',
 };
 
 const ROUGH_SEAS = {
@@ -6109,7 +6154,7 @@ async function main() {
         targetRate[key]=valid?targetRate[key]+(rate-targetRate[key])*(1-Math.exp(-elapsed*8)):0;
         // Spawn on the sampled surface, including after a sea-preset change.
         if(placed){
-          boat[key]=next[key];boat[key+'Velocity']=0;
+          boat[key]=next[key]-(key==='heave'?boat.hydrodynamics.sinkage:0);boat[key+'Velocity']=0;
           if(key==='roll'){
             boat.waveRoll=next.roll;boat.waveRollVelocity=0;
             boat.roll+=boat.sailHeel ?? 0;boat.rollVelocity=boat.sailHeelVelocity ?? 0;
@@ -6299,10 +6344,13 @@ async function main() {
     beam: param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
+    provisionDays:param('provisionDays',DEFAULT_PROVISION_DAYS,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, waveRoll: 0, waveRollVelocity: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
+  boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes);
+  boat.heave=-boat.hydrodynamics.sinkage;
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
     elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',32,10,120) };
   const eyePosition = new Float32Array(3);
@@ -6369,8 +6417,8 @@ async function main() {
     const age=Math.max(0,simTime-targetTime);
     for(const key of boatAxes){
       const rate=age<0.25 && targetRevision===boat.revision?targetRate[key]:0;
-      const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):response;
-      const target=boat.target[key]+rate*Math.min(age,0.25);
+      const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):key==='heave'?boat.hydrodynamics.heaveOmega:response;
+      const target=boat.target[key]+rate*Math.min(age,0.25)-(key==='heave'?boat.hydrodynamics.sinkage:0);
       if(key==='roll')stepBoatRoll(boat,target,omega,dt,rate);
       else boatSpring(boat,key,target,omega,dt,rate);
     }
@@ -6702,7 +6750,7 @@ async function main() {
   for (const [key, label, min, max, step] of [
     ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
-    ['eye', 'Eye above water (m)', 1, 15, 0.1],
+    ['eye', 'Camera height (m)', 1, 15, 0.1],
   ]) {
     const row = document.createElement('label');
     const name = document.createElement('span'); name.textContent = label;
@@ -6716,6 +6764,15 @@ async function main() {
     row.append(name, input); boatBody.append(row);
     if(key==='speed')speedRow=row;
   }
+  const loadingPanel=document.createElement('details');loadingPanel.id='boat-loading';
+  const loadingTitle=document.createElement('summary');loadingTitle.textContent='Supplies and cargo';loadingPanel.append(loadingTitle);
+  for(const [key,label,max,step] of [['provisionDays','Provisions for 12 (days)',120,5],['cargoTonnes','Additional cargo (t)',40,.5]]){
+    const row=document.createElement('label'),name=document.createElement('span'),input=document.createElement('input');name.textContent=label;
+    Object.assign(input,{type:'number',min:0,max,step,value:boat[key],id:'boat-'+key});input.setAttribute('aria-label',label);
+    input.addEventListener('input',()=>{if(input.validity.valid&&input.value!==''){boat[key]=Number(input.value);boat.revision++;}});
+    row.append(name,input);loadingPanel.append(row);
+  }
+  const loadingStatus=document.createElement('p');loadingStatus.id='boat-loading-status';loadingPanel.append(loadingStatus);boatBody.append(loadingPanel);
   function showPropulsionControls(){
     speedRow.hidden=boat.propulsion==='sail';sailControls.hidden=boat.propulsion!=='sail';
     note.textContent=boat.propulsion==='sail'
@@ -6895,7 +6952,9 @@ async function main() {
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
-      boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ≈ ${((boat.hydrodynamics?.mass || 0)/1000).toFixed(1)} t`;
+      const hydro=boat.hydrodynamics;
+      boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ${(hydro.mass/1000).toFixed(1)} t · Draft ${hydro.draft.toFixed(2)} m`;
+      loadingStatus.textContent=`Crew ${(hydro.crewMass/1000).toFixed(2)} t · Water ${(hydro.waterMass/1000).toFixed(2)} t · Food ${(hydro.foodMass/1000).toFixed(2)} t · Casks and spares ${(hydro.storesMass/1000).toFixed(2)} t · Cargo ${(hydro.cargoMass/1000).toFixed(1)} t. Main-deck freeboard ${hydro.freeboard.toFixed(2)} m.${hydro.overloadKg>0?' Overloaded: this loading exceeds the supported draft.':''}`;
       const sails=sailingState(boat),angle=sails.apparentAngle/D2R;
       sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind heel ${Math.abs((boat.sailHeel ?? 0)/D2R).toFixed(1)}° ${(boat.sailHeel ?? 0)>=0?'port':'starboard'}`;
       for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.set[i]*100)+'%';

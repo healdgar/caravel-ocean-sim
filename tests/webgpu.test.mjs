@@ -1458,6 +1458,51 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
   }finally{await page.close();}
 });
 
+test('loading controls retain the solved waterline through startup, cargo edits and sea resets', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:402,height:666}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      // Zeroed probe buffers stand for a flat sea; exercise the real async
+      // readback, pose placement, camera and resource uploads without raster cost.
+      GPURenderPassEncoder.prototype.draw=function(){};GPURenderPassEncoder.prototype.drawIndexed=function(){};
+      GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...args){
+        if(buffer.label==='hull transform')check.hull=Array.from(data);
+        if(buffer.label==='frame ubo')check.frame=Array.from(data);
+        return write.call(this,buffer,offset,data,...args);
+      };
+    });
+    await page.goto(`${origin}/?boat=1&boatSpeed=0&windSpeed=0&swellHs=0&clouds=0&w=32&h=32`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    const advance=async count=>page.evaluate(async count=>{
+      check.now??=0;
+      for(let i=0;i<count;i++){check.callback(check.now);check.now+=100;await check.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));}
+      return {hull:check.hull,frame:check.frame,errors:check.errors};
+    },count);
+    const base=await advance(40);
+    assert.ok(Math.abs(base.hull[17]+.08561)<.0001,'spawn includes stores draft');
+    assert.ok(Math.abs(base.frame[17]-(5.433333+base.hull[17]))<.0001,'camera sinks with the ship');
+    await page.locator('#boat-loading summary').click();
+    assert.equal(await page.getByLabel('Provisions for 12 (days)').inputValue(),'60');
+    await page.getByLabel('Additional cargo (t)').fill('20');
+    const transition=await advance(2);
+    assert.ok(transition.hull[17]<base.hull[17]&&transition.hull[17]>-.295,'cargo settles rather than teleporting');
+    const loaded=await advance(80);assert.ok(Math.abs(loaded.hull[17]+.29548)<.0001);
+    assert.match(await page.locator('#boat-loading-status').textContent(),/Cargo 20.0 t/);
+    assert.equal(await page.locator('#boat-controls').evaluate(el=>el.scrollWidth<=el.clientWidth),true,'loading details fit a mobile panel');
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    await page.getByRole('button',{name:'Hella rough',exact:true}).click();
+    const reset=await advance(40);assert.ok(Math.abs(reset.hull[17]+.29548)<.0001,'sea reset retains loading offset');
+    await page.getByRole('button',{name:'Hide sea settings'}).click();
+    await page.getByLabel('Additional cargo (t)').fill('0');
+    await page.getByLabel('Provisions for 12 (days)').fill('0');
+    const empty=await advance(80);assert.ok(Math.abs(empty.hull[17]+.03536)<.0001);
+    assert.ok(empty.hull.every(Number.isFinite));assert.deepEqual(empty.errors,[]);
+  }finally{await page.close();}
+});
+
 test('mobile panels keep Hide reachable while scrolling, profiling and rotating', {timeout:120000}, async()=>{
   const page=await browser.newPage({viewport:{width:402,height:666}});
   try {

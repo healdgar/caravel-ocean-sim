@@ -1,31 +1,74 @@
-import { HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullHalfWidth, hullScale } from './hull.js';
+import { HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale } from './hull.js';
 import { advanceSails, sailForces } from './sailing.js';
 
 export const KNOT_TO_MPS = 0.514444;
-// Displacement in design coordinates. Apply the same three axis scales as the
-// rendered hull; draft, wetted area and inertia below are in physical metres.
-const BOAT_VOLUME = (() => {
-  let volume = 0;
-  const dz = 12 / 96, dy = HULL_DRAFT / 32;
-  for (let z = 0; z < 96; z++) for (let y = 0; y < 32; y++) {
-    volume += 2 * hullHalfWidth(-6.4 + (z + 0.5) * dz, -HULL_DRAFT + (y + 0.5) * dy) * dz * dy;
+export const DEFAULT_PROVISION_DAYS = 60;
+export const SEAWATER_DENSITY = 1025;
+// Authored departure manifest for the twelve-person company. The existing
+// design waterline calibrates vessel + permanent ballast mass, not empty wood.
+// Quantities are gameplay assumptions, not a recovered historical inventory.
+export const BOAT_MANIFEST = Object.freeze({crew:12,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:800,sparesKg:1500});
+// Integrate the canonical hull once. At runtime loading only interpolates this
+// table; it never adds ocean samples, meshes or GPU work. y is in design units.
+const HYDRO_STEP = .005;
+const HYDRO_DECK = hullDeck(0);
+const HULL_HYDRO = (()=>{
+  const rows=[];let volume=0,moment=0,previousArea=0,previousMoment=0;
+  for(let j=0;j<=Math.round((HULL_DRAFT+HYDRO_DECK)/HYDRO_STEP);j++){
+    const y=-HULL_DRAFT+j*HYDRO_STEP;let area=0,waterplaneMoment=0;
+    for(let i=0;i<192;i++){
+      const width=hullHalfWidth(-6.4+(i+.5)*12/192,y);
+      area+=2*width*12/192;waterplaneMoment+=2/3*width**3*12/192;
+    }
+    if(j){volume+=(previousArea+area)*.5*HYDRO_STEP;moment+=(previousMoment+area*y)*.5*HYDRO_STEP;}
+    rows.push({volume,moment,area,waterplaneMoment});previousArea=area;previousMoment=area*y;
   }
-  return volume;
+  return rows;
 })();
+export function hullHydrostatics(length,beam,waterline=0){
+  const [sx,sy,sz]=hullScale(length,beam),at=Math.max(0,Math.min(HULL_HYDRO.length-1,(waterline/sy+HULL_DRAFT)/HYDRO_STEP));
+  const i=Math.min(HULL_HYDRO.length-2,Math.floor(at)),t=at-i,a=HULL_HYDRO[i],b=HULL_HYDRO[i+1];
+  const mix=key=>a[key]+(b[key]-a[key])*t,volume=mix('volume')*sx*sy*sz;
+  return {volume,mass:volume*SEAWATER_DENSITY,waterplaneArea:mix('area')*sx*sz,
+    centreOfBuoyancy:volume>0?HULL_DRAFT*sy+mix('moment')*sx*sy*sy*sz/volume:0,
+    waterplaneMoment:mix('waterplaneMoment')*sx**3*sz};
+}
+const provisionSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(120,value)):DEFAULT_PROVISION_DAYS;
+const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(40,value)):0;
 
-export function boatHydrodynamics(length, beam) {
-  const [sx,sy,sz] = hullScale(length,beam);
-  const volume = BOAT_VOLUME * sx * sy * sz;
-  const draft = HULL_DRAFT * sy;
-  const mass = 1025 * volume;
+export function boatHydrodynamics(length, beam, provisionDays=DEFAULT_PROVISION_DAYS, cargoTonnes=0) {
+  provisionDays=provisionSetting(provisionDays);cargoTonnes=cargoSetting(cargoTonnes);
+  const base=hullHydrostatics(length,beam),sy=HULL_VERTICAL_SCALE,M=BOAT_MANIFEST;
+  const crewMass=M.crew*M.personKg,waterMass=M.crew*M.waterKgPerDay*provisionDays;
+  const foodMass=M.crew*M.foodKgPerDay*provisionDays,storesMass=M.casksKg+M.sparesKg,cargoMass=cargoTonnes*1000;
+  const loadMass=crewMass+waterMass+foodMass+storesMass+cargoMass,mass=base.mass+loadMass;
+  // Preserve at least 15 cm to the lowest deck. Unsupported configurations are
+  // explicitly reported as overloaded; this remains a non-flooding model.
+  let low=0,high=HYDRO_DECK*sy-.15;
+  const maximumMass=hullHydrostatics(length,beam,high).mass;
+  for(let i=0;i<28;i++){
+    const mid=(low+high)*.5;
+    if(hullHydrostatics(length,beam,mid).mass<mass)low=mid;else high=mid;
+  }
+  const sinkage=(low+high)*.5,loaded=hullHydrostatics(length,beam,sinkage);
+  const {volume,waterplaneArea}=loaded,draft=HULL_DRAFT*sy+sinkage,freeboard=HYDRO_DECK*sy-sinkage;
   // Authored effective coefficients, not a calibrated resistance curve.
   const wettedArea = 0.85 * length * (beam + 2 * draft);
-  // Estimated stability and mass distribution, including 20% added roll inertia.
-  const metacentricHeight=beam*.22;
-  const rollInertia=mass*((beam*.38)**2+(1.6*HULL_VERTICAL_SCALE)**2)*1.2;
+  // Calibrate fixed vessel KG to the previous stability estimate, then add crew
+  // on deck and secured stores/cargo low amidships. No free-surface tank slosh.
+  const fixedKG=base.centreOfBuoyancy+base.waterplaneMoment/base.volume-beam*.22;
+  const crewKG=HULL_DRAFT*sy+1.5*sy,storesKG=HULL_DRAFT*sy-.45*sy;
+  const centreOfGravity=(base.mass*fixedKG+crewMass*crewKG+(loadMass-crewMass)*storesKG)/mass;
+  const metacentricHeight=Math.max(.1,loaded.centreOfBuoyancy+loaded.waterplaneMoment/volume-centreOfGravity);
+  const rollInertia=1.2*(base.mass*((beam*.38)**2+(1.6*sy)**2+(fixedKG-centreOfGravity)**2)
+    +crewMass*((beam*.3)**2+(crewKG-centreOfGravity)**2)
+    +(loadMass-crewMass)*((beam*.18)**2+(storesKG-centreOfGravity)**2));
   const rollStiffness=mass*9.81*metacentricHeight;
   const rollDamping=2*.35*Math.sqrt(rollInertia*rollStiffness);
-  return { length, beam, draft, volume, mass, addedMass: mass * 0.08, drag: 0.5 * 1025 * 0.012 * wettedArea,
+  const addedMass=mass*.08,heaveOmega=Math.sqrt(SEAWATER_DENSITY*9.81*waterplaneArea/(mass+addedMass));
+  return { length,beam,provisionDays,cargoTonnes,draft,sinkage,freeboard,volume,mass,addedMass,
+    fixedMass:base.mass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,overloadKg:Math.max(0,mass-maximumMass),
+    waterplaneArea,centreOfGravity,heaveOmega,drag:0.5*SEAWATER_DENSITY*0.012*wettedArea,
     metacentricHeight,rollInertia,rollStiffness,rollDamping };
 }
 
@@ -81,8 +124,9 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.sailHeelVelocity ??= 0;
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
   let hydro = boat.hydrodynamics;
-  if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam) {
-    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam);
+  if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam
+      || hydro.provisionDays!==provisionSetting(boat.provisionDays) || hydro.cargoTonnes!==cargoSetting(boat.cargoTonnes)) {
+    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam,boat.provisionDays,boat.cargoTonnes);
   }
   const inertia = hydro.mass + hydro.addedMass;
   const sailing = boat.propulsion === 'sail';

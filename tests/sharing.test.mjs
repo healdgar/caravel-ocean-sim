@@ -49,6 +49,14 @@ test('sharing preserves the wake and spray switch', () => {
   }
 });
 
+test('loading links preserve provision days and additional cargo, including empty stores',()=>{
+  for(const provisionDays of [0,60,120]){
+    const link=new URL(createShareLink('https://example.com/',{}, {...boat,provisionDays,cargoTonnes:12.5},'ship'));
+    assert.equal(Number(link.searchParams.get('provisionDays')),provisionDays);
+    assert.equal(Number(link.searchParams.get('cargoTonnes')),12.5);
+  }
+});
+
 test('sharing keeps the calm-water target rather than a transient wave-driven speed', () => {
   const url = new URL(createShareLink('https://example.com/', {}, { ...boat, surgeVelocity: 2.1 }, 'boat'));
   assert.equal(Number(url.searchParams.get('boatSpeed')), boat.speed);

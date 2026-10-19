@@ -11,7 +11,7 @@ import { createCrew, CAPTAIN_ORDERS } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
-import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, stepBoatRoll, KNOT_TO_MPS } from './boat.js';
+import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, stepBoatRoll, boatHydrodynamics, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
@@ -411,7 +411,7 @@ async function main() {
         targetRate[key]=valid?targetRate[key]+(rate-targetRate[key])*(1-Math.exp(-elapsed*8)):0;
         // Spawn on the sampled surface, including after a sea-preset change.
         if(placed){
-          boat[key]=next[key];boat[key+'Velocity']=0;
+          boat[key]=next[key]-(key==='heave'?boat.hydrodynamics.sinkage:0);boat[key+'Velocity']=0;
           if(key==='roll'){
             boat.waveRoll=next.roll;boat.waveRollVelocity=0;
             boat.roll+=boat.sailHeel ?? 0;boat.rollVelocity=boat.sailHeelVelocity ?? 0;
@@ -601,10 +601,13 @@ async function main() {
     beam: param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
+    provisionDays:param('provisionDays',DEFAULT_PROVISION_DAYS,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, waveRoll: 0, waveRollVelocity: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
+  boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes);
+  boat.heave=-boat.hydrodynamics.sinkage;
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
     elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',32,10,120) };
   const eyePosition = new Float32Array(3);
@@ -671,8 +674,8 @@ async function main() {
     const age=Math.max(0,simTime-targetTime);
     for(const key of boatAxes){
       const rate=age<0.25 && targetRevision===boat.revision?targetRate[key]:0;
-      const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):response;
-      const target=boat.target[key]+rate*Math.min(age,0.25);
+      const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):key==='heave'?boat.hydrodynamics.heaveOmega:response;
+      const target=boat.target[key]+rate*Math.min(age,0.25)-(key==='heave'?boat.hydrodynamics.sinkage:0);
       if(key==='roll')stepBoatRoll(boat,target,omega,dt,rate);
       else boatSpring(boat,key,target,omega,dt,rate);
     }
@@ -1004,7 +1007,7 @@ async function main() {
   for (const [key, label, min, max, step] of [
     ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
-    ['eye', 'Eye above water (m)', 1, 15, 0.1],
+    ['eye', 'Camera height (m)', 1, 15, 0.1],
   ]) {
     const row = document.createElement('label');
     const name = document.createElement('span'); name.textContent = label;
@@ -1018,6 +1021,15 @@ async function main() {
     row.append(name, input); boatBody.append(row);
     if(key==='speed')speedRow=row;
   }
+  const loadingPanel=document.createElement('details');loadingPanel.id='boat-loading';
+  const loadingTitle=document.createElement('summary');loadingTitle.textContent='Supplies and cargo';loadingPanel.append(loadingTitle);
+  for(const [key,label,max,step] of [['provisionDays','Provisions for 12 (days)',120,5],['cargoTonnes','Additional cargo (t)',40,.5]]){
+    const row=document.createElement('label'),name=document.createElement('span'),input=document.createElement('input');name.textContent=label;
+    Object.assign(input,{type:'number',min:0,max,step,value:boat[key],id:'boat-'+key});input.setAttribute('aria-label',label);
+    input.addEventListener('input',()=>{if(input.validity.valid&&input.value!==''){boat[key]=Number(input.value);boat.revision++;}});
+    row.append(name,input);loadingPanel.append(row);
+  }
+  const loadingStatus=document.createElement('p');loadingStatus.id='boat-loading-status';loadingPanel.append(loadingStatus);boatBody.append(loadingPanel);
   function showPropulsionControls(){
     speedRow.hidden=boat.propulsion==='sail';sailControls.hidden=boat.propulsion!=='sail';
     note.textContent=boat.propulsion==='sail'
@@ -1197,7 +1209,9 @@ async function main() {
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
-      boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ≈ ${((boat.hydrodynamics?.mass || 0)/1000).toFixed(1)} t`;
+      const hydro=boat.hydrodynamics;
+      boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ${(hydro.mass/1000).toFixed(1)} t · Draft ${hydro.draft.toFixed(2)} m`;
+      loadingStatus.textContent=`Crew ${(hydro.crewMass/1000).toFixed(2)} t · Water ${(hydro.waterMass/1000).toFixed(2)} t · Food ${(hydro.foodMass/1000).toFixed(2)} t · Casks and spares ${(hydro.storesMass/1000).toFixed(2)} t · Cargo ${(hydro.cargoMass/1000).toFixed(1)} t. Main-deck freeboard ${hydro.freeboard.toFixed(2)} m.${hydro.overloadKg>0?' Overloaded: this loading exceeds the supported draft.':''}`;
       const sails=sailingState(boat),angle=sails.apparentAngle/D2R;
       sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind heel ${Math.abs((boat.sailHeel ?? 0)/D2R).toFixed(1)}° ${(boat.sailHeel ?? 0)>=0?'port':'starboard'}`;
       for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.set[i]*100)+'%';

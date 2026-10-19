@@ -18,8 +18,16 @@ Hermite interpolation. They are visually guided approximations, **not offsets
 traced or measured from the plates**. CPU geometry and WGSL water exclusion share
 the coefficients. The bow narrows sooner; the midbody has modest tumblehome;
 forward and aft submerged sections become finer. A curved stem follows the same
-surface. Draft is 2.0 m at default scale; integrated displacement is about 107.7 t.
-The latter is the volume of this mesh, not historical tonnage.
+surface. The 2.0 m design draft displaces about 107.7 t and calibrates the
+simulation's fixed vessel/permanent-ballast mass, not historical tonnage or a
+measured empty-ship weight. An authored 60-day manifest for twelve people adds
+7.94 t (crew, water, food, containers and spares), giving 115.6 t displacement
+and 2.086 m loaded draft. Hydrostatic integration determines the 8.6 cm sinkage;
+no arbitrary visual waterline offset is applied. The modern
+[Niña replica operator](https://www.ninapinta.net/) reports 7 ft (2.13 m) draft,
+a useful scale comparison for a different reconstruction. Exact ration masses
+and the fixed mass/ballast calibration remain simulation assumptions. See the
+README loading section for quantities, cargo controls and limitations.
 
 There is one continuous main deck and one partial raised quarterdeck, with cargo
 space implied below. The tall forecastle tier and its ladder were removed. The
