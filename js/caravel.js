@@ -1,7 +1,7 @@
 import { hullDeck, deckHalfWidth, HULL_DRAFT, HULL_BOW_RAKE, HULL_STERN_RAKE, hullHalfWidth, hullSurfacePoint, vesselDeck, TILLER_PIVOT, TILLER_HANDLE,
   QUARTERDECK_START, QUARTERDECK_HEIGHT, HULL_VERTICAL_SCALE } from './hull.js';
 import { RIG_MASTS, mastPoint, shroudGeometry, SAIL_TACKLES, tacklePoint, standingRiggingLines } from './rigging.js';
-import { SAIL_PLAN, LATEEN_CORNERS, runningRiggingLines } from './sailing.js';
+import { SAIL_PLAN, runningRiggingLines } from './sailing.js';
 
 // Deduplicate complete vertex records by their float32 bits. Material, normal,
 // UV seams and triangle order remain exact, including signed zero components.
@@ -301,7 +301,7 @@ export function createCaravelMesh() {
     }
   }
 
-  // Two square courses, single masts, stays and Mediterranean runners.
+  // Single masts, stays and Mediterranean runners; geometry follows the selected plan.
   // Fractional material bits identify moving sails without widening the vertex buffer.
   function squareSail({id,z,top,width:w,height:h,belly}){
     const tag=id/16;
@@ -346,26 +346,28 @@ export function createCaravelMesh() {
     tube(add(foot,[-side*.035,0,0]),add(foot,[side*.035,0,0]),.075,16,.075,12);
   }
   // No round tops or oversized lookout baskets in this reconstruction.
-  for(const sail of SAIL_PLAN)squareSail(sail);
-  // Lateen mizzen: the long oblique yard defines the triangular silhouette.
+  for(const sail of SAIL_PLAN)if(sail.kind==='square')squareSail(sail);
+  // Lateen courses: the long oblique yard defines the triangular silhouette.
   // The foot clears the open deck; steering takes place below the quarterdeck.
-  const [la,lb,lc]=LATEEN_CORNERS,resolution=26,lateenTag=3/16;
-  const lateen=(u,v)=>{
-    const p=add(la,add(mul(sub(lb,la),u),mul(sub(lc,la),v)));
-    p[0]+=.8*27*u*v*(1-u-v);
-    return p;
-  };
-  const ln=(u,v)=>norm(cross(sub(lateen(u+.0001,v),lateen(u-.0001,v)),sub(lateen(u,v+.0001),lateen(u,v-.0001))));
-  function lateenTri(points){tri(...points.map(([u,v])=>lateen(u,v)),13+lateenTag,points.map(([u,v])=>ln(u,v)),points);}
-  for(let i=0;i<resolution;i++)for(let j=0;j<resolution-i;j++){
-    const u=i/resolution,v=j/resolution,d=1/resolution;
-    lateenTri([[u,v],[u+d,v],[u,v+d]]);
-    if(i+j<resolution-1)lateenTri([[u+d,v],[u+d,v+d],[u,v+d]]);
-  }
-  tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10+lateenTag,.045,18);
-  for(const [a,b] of [[[0,0],[1,0]],[[1,0],[0,1]],[[0,1],[0,0]]])for(let i=0;i<resolution;i++){
-    const u=a.map((v,j)=>v+(b[j]-v)*i/resolution),v=a.map((v,j)=>v+(b[j]-v)*(i+1)/resolution);
-    tube(lateen(...u),lateen(...v),.015,19+lateenTag,.015,10,null,[u,v]);
+  for(const sail of SAIL_PLAN.filter(s=>s.kind==='lateen')){
+    const [la,lb,lc]=sail.corners,resolution=26,lateenTag=sail.id/16;
+    const lateen=(u,v)=>{
+      const p=add(la,add(mul(sub(lb,la),u),mul(sub(lc,la),v)));
+      p[0]+=sail.belly*27*u*v*(1-u-v);
+      return p;
+    };
+    const ln=(u,v)=>norm(cross(sub(lateen(u+.0001,v),lateen(u-.0001,v)),sub(lateen(u,v+.0001),lateen(u,v-.0001))));
+    function lateenTri(points){tri(...points.map(([u,v])=>lateen(u,v)),13+lateenTag,points.map(([u,v])=>ln(u,v)),points);}
+    for(let i=0;i<resolution;i++)for(let j=0;j<resolution-i;j++){
+      const u=i/resolution,v=j/resolution,d=1/resolution;
+      lateenTri([[u,v],[u+d,v],[u,v+d]]);
+      if(i+j<resolution-1)lateenTri([[u+d,v],[u+d,v+d],[u,v+d]]);
+    }
+    tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10+lateenTag,.045,18);
+    for(const [a,b] of [[[0,0],[1,0]],[[1,0],[0,1]],[[0,1],[0,0]]])for(let i=0;i<resolution;i++){
+      const u=a.map((v,j)=>v+(b[j]-v)*i/resolution),v=a.map((v,j)=>v+(b[j]-v)*(i+1)/resolution);
+      tube(lateen(...u),lateen(...v),.015,19+lateenTag,.015,10,null,[u,v]);
+    }
   }
   for(const {a,b,r,r2,sides,id,weights} of runningRiggingLines())tube(a,b,r,12+(id+8)/16,r2,sides,weights);
   return new Float32Array(out);

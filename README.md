@@ -2,7 +2,7 @@
 
 Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck wash, whitecaps, and volumetric weather. The caravel has square sails and a lateen mizzen, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
+A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck wash, whitecaps, and volumetric weather. The caravel has three triangular lateen sails, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
@@ -77,7 +77,7 @@ The surface mesh is a CDLOD quadtree with 17 levels. Vertices are 6.25 cm apart 
 
 ### Caravel model
 
-The procedural vessel follows the Martínez-Hidalgo converted Niña reconstruction, with a finer bow, curved stem, full midbody, modest tumblehome and finer
+The procedural hull follows the Martínez-Hidalgo Niña reconstruction, with a finer bow, curved stem, full midbody, modest tumblehome and finer
 underwater stern. [Research, sources and historical limits](CARAVEL_RESEARCH.md)
 distinguish the authored interpretation from measured reconstruction offsets.
 The earlier [generated reference](assets/caravel-design-reference.png) remains
@@ -87,7 +87,7 @@ One continuous main deck and a partial raised quarterdeck replace the tall
 forecastle tier. Two small recessed stern lights replace the ornate window
 rows. Four rail-mounted swivel falconets follow the Mariners’ Museum Niña
 model's equipment list. They are modeled cannon, without firing mechanics.
-Three single masts carry square forecourse and maincourse plus a lateen mizzen.
+Three single masts carry triangular fore, main and mizzen sails. The previous square fore/main configuration is preserved in `SQUARE_RIG_PLAN` for a future model; it is not the active rig.
 A direct tiller replaces the wheel, beneath the quarterdeck. Topsails and large
 mast baskets are removed. Raked masts, a shorter bowsprit and runners follow this
 interpretation; exact offsets and complete period sail handling remain approximations.
@@ -151,13 +151,13 @@ describes the larger decision and work-execution system.
 
 ### Wake, bow waves and spray
 
-Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Forward speed produces a low displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Normals come from the planking gradient; relative closing speed produces bounded quadratic impact forcing. Adjacent contacts create broad sheets, while delayed mist is born along their airborne lips. Receding water or a stronger new strike re-arms the next burst; sheet landings add foam.
+Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Continuous hull pressure scales with speed squared and produces paired crests/troughs even on flat water. A raised, contact-attached bow ribbon shows the immediate water parting, with speed-dependent breaking froth; it samples the evolving wake height so it stays above its own displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Normals come from the planking gradient; relative closing speed produces bounded quadratic impact forcing. Adjacent contacts create broad sheets, while delayed mist is born along their airborne lips. Receding water or a stronger new strike re-arms the next burst; sheet landings add foam.
 
 A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Impacts inject outward-travelling crest/trough pulses. Gravity, drag, water collision, 128 sheet slots, and 4,096 secondary particle slots stay on the GPU.
 
 The stern wake uses its own waterline contacts, so lifting the stern clear of the sea stops stern entrainment even while the bow remains wet. A transom trough and recovery crest, plus quarter-hull pressure, feed the outgoing waves. Foam production follows actual forward speed and the speed-to-hull-length ratio. It forms a broken trail, drifts through a small eddy field, spreads and fades along the travelled path; turning does not rotate old foam with the ship. Fresh bubbles fade faster than the lingering surface foam. These authored rates are a visual approximation for a displacement vessel, without a propeller jet.
 
-Wake transport reuses the existing grid, textures and compute dispatch. Eight additional contact probes and local-grid texture reads add GPU work; no extra full-screen pass or particle population was added. The 30 FPS automatic-resolution target remains active. Physical-iPhone performance of this change has not been measured.
+Wake transport reuses the existing grid, textures and compute dispatch. The immediate bow ribbon adds one small draw of 120 triangles in the existing effects pass, using the existing waterline contacts and wake texture. It adds no full-screen pass or particle population. The 30 FPS automatic-resolution target remains active. Physical-iPhone performance of this change has not been measured.
 
 **Wakes & spray** toggles the effect, also preserved as `effects=0` or `effects=1` in shared links. Changing sea spectrum or hull dimensions resets contact history to avoid false impacts. The grid uses a damped wave approximation with bounded forcing; it does not model full hull hydrodynamics, planing, or a physically exact Kelvin wake.
 
@@ -292,7 +292,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes and solid raised-deck/lookout floors; camera checks cover the aft helm on resized hulls.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll-energy dissipation and unchanged wave response. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; loaded versus slack motion, bounded contact deflection, sewn-rope attachment and masked intersections across both tacks and extreme trim; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, braced yards and anchored rigging; loaded versus slack motion, bounded contact deflection, sewn-rope attachment and masked intersections across both tacks and extreme trim; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
@@ -383,10 +383,11 @@ For repeatable exterior captures, `orbitYaw`, `orbitElevation` (degrees), and
 `orbitDistance` (metres at the default hull size) set the initial orbit; ordinary
 shared links omit these capture controls.
 
-The camera follows a damped hull pose fitted to a 3 by 3 grid of heights sampled
-from the actual displaced FFT ocean and local wake. Measured wave velocity and
-bounded readback prediction reduce lag on rising water. Larger footprints average over waves;
-length also slows the pitch/heave response and beam slows the roll response.
+Heave follows a 3 by 3 grid of displaced FFT heights plus the local wake. Measured
+vertical water velocity and bounded readback prediction reduce lag on rising water.
+Roll and pitch instead integrate hull inertia, restoring torque and damping against
+incident-wave slopes filtered over the hull footprint. Short visible chop no longer
+prescribes angular velocity, and the ship does not rock itself through its own wake.
 Forward speed evolves under wave pressure, propulsion, quadratic resistance, and
 ship plus added-water inertia. **Sailing** is the default: the ship starts from rest
 on a beam reach and accelerates under its sails. Heading, wind speed, apparent wind,
@@ -398,12 +399,12 @@ The separate **Captain** panel issues **Make full sail**, **Reduce sail** and
 **Furl all sails** across all three groups. Handling takes
 about 5.6 seconds of attended work from fully set to fully furled, plus travel
 and climbing time (roughly a minute for the first complete fore/main operation). The percentage readouts show actual
-canvas while the sliders show the requested amount. Square sails gather at their yards;
-the lateen gathers along its diagonal yard. Yards brace and the mizzen changes tack
+canvas while the sliders show the requested amount. Each lateen gathers along
+its diagonal yard. All three yards trim and change tack
 automatically, with a short lag. Loaded sails hold their camber with only slow, small
 pressure motion; rapid luffing fades with wind loading and is strongest in slack or
 poorly trimmed canvas. Sewn edge ropes follow the exact cloth deformation, including
-furling. The lateen yard hangs beside the mizzen mast.
+furling. Each lateen yard hangs beside its mast.
 
 Rig contacts produce smooth deflections capped at 6 cm in design coordinates
 (10 cm on the default vessel). Remaining rope/cloth intersections use a narrow
@@ -415,8 +416,8 @@ Lowering sails removes drive gradually; momentum and waves keep moving the vesse
 The sail readout reports the point of sail, apparent wind speed and its direction
 relative to the bow. Apparent wind subtracts the ship's forward and sideways velocity
 from the true wind. Lift and drag use dynamic pressure `0.5 * airDensity * windSpeed²`,
-exposed area and authored angle-dependent coefficients. Square sails lose drive near
-headwind; the lateen can work somewhat closer to the wind. Lateral force produces
+exposed area and authored angle-dependent coefficients. The active lateen rig loses
+drive near headwind; the stored square plan uses a wider no-go angle. Lateral force produces
 bounded leeway against hull/keel resistance and a heeling moment. Sailing resistance rises
 above an authored Froude-number threshold. The basis is
 [relative air velocity](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/relative-velocity/),
@@ -430,24 +431,30 @@ It omits sail interference, weather helm, reefing penalties, gust loading and ca
 Each of the three sails samples wind at its current centre of effort; higher canvas
 therefore experiences stronger wind and greater leverage. Furling changes both area
 and centre height. Each lateral force contributes `-force * lever` about the hull's
-estimated centre of lateral resistance, half a draft below the waterline. Heeling
+loaded centre of gravity. Heeling
 shortens projected sail area and leverage; apparent wind also subtracts the sail's
 sideways velocity caused by roll. The profile follows the open-water approximation in
 this [marine windage study](https://www.fws.gov/doiddata/dwh-ar-documents/876/DWH-AR0269040.pdf).
 
-Wind-induced heel follows `I * angle'' = windMoment - mass*g*GM*sin(angle) - damping*angle'`,
-with roll inertia, hydrostatic righting torque and damping, rather than a prescribed
-tilt. It uses 1/120-second substeps and implicit velocity damping. The terms follow the
-standard [ship roll equation](https://doi.org/10.3390/jmse13091750); this caravel's coefficients
-remain authored: `GM = 0.22 * beam`, radius of gyration squared
-`(0.38 * beam)² + 1.6²`, 20% added roll inertia and damping ratio 0.35.
-The panel reports **wind heel** separately from total roll. The established wave-roll
-response is added once to this wind response, preserving its short-chop filtering.
-In Set speed mode, wind torque is disabled and any existing heel settles gradually.
-Wind heel is bounded at 60° because the simulator has no capsize solver. Fixed surface
-roughness, one wind sample per sail, omitted bare-hull/rigging windage, and linear
-superposition with wave roll limit realism; directional shear and atmospheric stability
-are not modeled.
+Wave and wind loads share one roll state:
+`I * roll'' = windMoment + mass*g*GM*sin(waveAngle-roll) - damping*roll'`.
+Pitch uses the analogous longitudinal waterplane righting moment. Both integrate
+in substeps no longer than 1/120 second with implicit damping. Sail apparent wind
+includes the velocity induced by this same roll, allowing aerodynamic damping as
+well as steady heel. The effect depends on heading, trim and canvas; wind is not
+an unconditional upright constraint. See [Kerdraon et al. (2020), sections 3.1 and 3.4](https://doi.org/10.1016/j.oceaneng.2020.107668)
+for coupled rigid-body dynamics and rotational apparent wind.
+
+The loaded hull determines mass, centre of gravity and righting stiffness.
+Effective radii of gyration, added-water inertia (20% roll, 50% pitch), baseline
+damping ratios (0.50 roll, 0.70 pitch) and extra damping underway are authored
+approximations. The default loaded vessel has small-angle undamped periods of
+about 6.49 s in roll and 3.32 s in pitch. These are model values, not measurements
+from the replica video. The panel reports wind torque. Set speed mode disables
+wind torque while retaining angular momentum and wave response. Angles are bounded
+at 60° because capsizing is not modeled. Atmospheric stability, directional wind
+shear, unsteady aerodynamic hysteresis, bare-hull windage, wave diffraction and
+full six-axis hydrodynamic coupling remain omitted.
 
 Choose **Set speed** to retain the previous propulsion model. **Calm-water speed**
 sets the thrust that balances resistance at that speed on flat water; waves still
@@ -524,7 +531,7 @@ Run `node --test tests/boat.test.mjs tests/sailing.test.mjs` for the motion chec
 The complete vessel includes a rounded planked hull and keel, square transom,
 stern cabin with windows, raised quarterdeck, bow and stern rails, bowsprit,
 hinged hatch cover and grating, four swivel cannon, cleats, fittings, and a rudder that moves with the helm. Three
-single masts carry two shaped square courses and a triangular lateen mizzen, with yards, stays and runners.
+single masts carry three triangular lateen sails, with diagonal yards, stays and runners.
 Canvas uses a two-sided cloth material and slight wind-driven flutter under the
 actual sun and sky. Thin-sheet transmission produces a soft, warm glow around
 the backlighting sun; seams, hems, folds, and grazing light paths transmit less.

@@ -119,7 +119,10 @@ fn pressureSea(p: vec2f) -> f32 {
   let approach=max(0.0,closing-0.28);
   let hit=wet*min(3.5,approach*approach*.20)*(0.45+0.55*entry)*mix(.55,1.0,u);
   let impact=select(max(hit,old.axis.w*exp(-dt*7.0))*wet,0.0,reset);
-  let drive=wet*(min(.35,speed*.035)*mix(.35,1.0,u)+impact*.8);
+  // Continuous stagnation pressure exists on flat water too. The wave-driven
+  // impact remains separate, so steady headway does not fire ballistic spray.
+  let pressureHead=min(.55,speed*speed/(2.0*9.81)*.85);
+  let drive=wet*(pressureHead*(.18+.82*entry)*mix(.5,1.0,u)+impact*.8);
   let age=select(old.state.y+dt,1.0,reset);
   // Re-arm when the face recedes, or on a distinctly stronger subsequent slam.
   let launch=!reset && hit>.12 && age>.28 && (old.state.z<=.3 || (hit>old.axis.w*1.18 && age>.5));
@@ -185,17 +188,20 @@ fn previousFoam(q:vec2f)->vec2f {
   let forwardSpeed = max(0.0, I.motion.x);
   // A trough at the transom and a recovery crest behind it radiate into the trail.
   let recovery = exp(-pow((sternAlong+max(1.0,H.size.y*0.12))/max(0.8,H.size.y*0.08),2.0)-pow(sternAcross/max(0.8,H.size.x*0.5),2.0));
-  let forcing = source*4.0+pulse*14.0+(recovery*0.65-stern)*sternWet*min(0.65,forwardSpeed*forwardSpeed*0.035);
+  // Paired crest/trough forcing parts the water and radiates ripples into the
+  // existing surface field, rather than painting a white line on flat water.
+  let hollow=exp(-pow((outside-width*1.5)/(width*.7),2.0)-pow(dot(toContact,vec2f(-contact.axis.z,contact.axis.x))/width,2.0))*contact.point.w;
+  let forcing = (source-hollow*.55)*10.0+pulse*14.0+(recovery*0.65-stern)*sternWet*min(0.65,forwardSpeed*forwardSpeed*0.035);
   let dt = I.previous.z;
   // c=2.5 m/s and dx>=0.5 m remain CFL-stable at the host's maximum dt=0.1 s.
-  let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 1.2) * dt) * exp(-dt * 0.55), -3.0, 3.0);
+  let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 0.6) * dt) * exp(-dt * 0.38), -3.0, 3.0);
   let edge = 1.0 - smoothstep(0.43, 0.495, max(abs(p.x - I.domain.x), abs(p.y - I.domain.y)) / I.domain.z);
   let height = clamp(old.x + velocity * dt, -0.7, 1.1) * edge;
   let froude=forwardSpeed/sqrt(9.81*max(H.size.y,1.0));
   // Broad, intermittent entrainment, not a propeller jet. Texture stays in world
   // space, so an old trail follows the travelled track through turns and stops.
   let churn=0.72+0.28*sin(sternAcross*3.1+I.phase.x*2.3)*sin(sternAlong*2.7-I.phase.x*1.7);
-  let foamSource=source*2.5+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*0.95)*smoothstep(0.04,0.28,froude)*churn;
+  let foamSource=source*3.5*smoothstep(.6,3.5,forwardSpeed)+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*0.95)*smoothstep(0.04,0.28,froude)*churn;
   let eddy=vec2f(cos(p.y*0.65+I.phase.x*0.5),-cos(p.x*0.65-I.phase.x*0.4))*0.24;
   let drift=I.motion.zw*0.012+eddy;
   let transported=previousFoam(vec2f(pq)-drift*dt/I.domain.w);
@@ -312,6 +318,8 @@ export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACT
 @group(0) @binding(5) var effectSamp: sampler;
 @group(0) @binding(6) var transLUT: texture_2d<f32>;
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
+@group(0) @binding(8) var<storage,read> waterline:array<Contact,${CONTACT_COUNT}>;
+@group(0) @binding(9) var contactWake:texture_2d<f32>;
 struct EffectVertex { @builtin(position) position: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) data: vec4f };
 fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   let t=s.origin.w*(0.35+0.65*q)*(1.0+0.06*sin(u*4.0+s.origin.x*2.0));
@@ -352,6 +360,28 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   o.data = vec4f(select(0.0, smoothstep(0.35, 1.2, distanceToEye), d.position.w > 0.0), age, d.shape.z, d.shape.y);
   return o;
 }
+// A narrow raised water ribbon stays rooted on the measured bow waterline.
+// Two strips per segment give a round crest; the wake grid carries its waves aft.
+@vertex fn contactVS(@builtin(vertex_index) vi:u32,@builtin(instance_index) instance:u32)->EffectVertex {
+  let corners=array<vec2f,6>(vec2f(0,0),vec2f(1,0),vec2f(1,1),vec2f(0,0),vec2f(1,1),vec2f(0,1));
+  let uv=corners[vi%6u];let across=(f32(vi/6u)+uv.y)*.5;
+  let index=instance%15u+(instance/15u)*16u;
+  let a=waterline[index];let b=waterline[index+1u];
+  let wet=min(a.flow.w,b.flow.w)*I.motion.y;
+  let normal=normalize(mix(a.axis.xyz,b.axis.xyz,uv.x));
+  let energy=mix(a.point.w,b.point.w,uv.x);
+  let impact=mix(a.axis.w,b.axis.w,uv.x);
+  let speed=max(0.0,I.motion.x);let moving=smoothstep(.15,1.2,speed);
+  let width=(.10+min(.48,speed*.08)+impact*.05)*wet*moving;
+  let head=min(.24,speed*speed/(2.0*9.81)*.22)*wet;
+  var p=mix(a.point.xyz,b.point.xyz,uv.x)+normal*(across*width-.015);
+  p.y+=textureSampleLevel(contactWake,effectSamp,(p.xz-I.domain.xy)/I.domain.z+.5,0.0).x
+    +.025+sin(across*3.14159265)*head;
+  var o:EffectVertex;o.position=F.viewProj*vec4f(p-F.camPos.xyz,1);o.world=p;
+  o.normal=normalize(vec3f(normal.x*cos(across*3.14159265),1,normal.z*cos(across*3.14159265)));
+  o.uv=vec2f((f32(index%16u)+uv.x)*.7+I.phase.x*speed*.7,across);
+  o.data=vec4f(wet*moving,energy,impact,0);return o;
+}
 fn sprayLight(p: vec3f) -> vec3f {
   let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
   let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * vesselShadow(p,vec3f(0,1,0));
@@ -374,6 +404,18 @@ fn sprayLight(p: vec3f) -> vec3f {
   let rim=smoothstep(0.0,0.12,o.uv.y)*(1.0-smoothstep(0.76+noise*0.14,1.0,o.uv.y));
   let alpha=smoothstep(0.05,0.3,o.data.x)*ends*rim*holes*fade*(0.20+foam*0.45)*I.motion.y;
   return vec4f(color * alpha, alpha);
+}
+@fragment fn contactFS(o:EffectVertex)->@location(0) vec4f {
+  let n=normalize(o.normal);let view=normalize(F.camPos.xyz-o.world);
+  let reflected=textureSampleLevel(envCube,effectSamp,reflect(-view,n),1.0).rgb;
+  let noise=.5+.5*gnoise(o.uv*vec2f(7,9));
+  let fizz=smoothstep(.6,3.5,max(0.0,I.motion.x))*smoothstep(.25,.7,noise);
+  let froth=(.25+.65*fizz)*smoothstep(.0,.18,o.data.y+o.data.z)*sin(o.uv.y*3.14159265);
+  let fresnel=.04+.65*pow(1.0-abs(dot(n,view)),5.0);
+  let color=mix(reflected*(.45+fresnel)+F.waterCol.rgb*.3,sprayLight(o.world),froth);
+  let edge=(1.0-smoothstep(.65,1.0,o.uv.y));
+  let alpha=o.data.x*edge*(.5+froth*.4);
+  return vec4f(color*alpha,alpha);
 }
 @fragment fn dropFS(o: EffectVertex) -> @location(0) vec4f {
   let r2 = dot(o.uv, o.uv);

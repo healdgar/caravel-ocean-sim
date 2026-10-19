@@ -37,7 +37,7 @@ test('caravel mesh has finite triangles, unit normals, and a forward bowsprit', 
   assert.ok(forward < -8.3 && forward > -8.6);
 });
 
-test('complete vessel includes two square courses, one lateen, single masts and a working rudder', () => {
+test('complete vessel includes three lateen courses, single masts and a working rudder', () => {
   const mesh=createCaravelMesh();
   const bounds=new Map();
   for(let i=0;i<mesh.length;i+=9){
@@ -48,11 +48,11 @@ test('complete vessel includes two square courses, one lateen, single masts and 
   }
   assert.ok(bounds.get(15).minY<=-HULL_DRAFT+.001);
   assert.ok(bounds.get(15).minZ<=-6.39 && bounds.get(15).maxZ>=5.59);
-  assert.ok(bounds.get(9).count>=2*28*20*6);
-  assert.ok(bounds.get(9).maxY>=8 && bounds.get(9).minZ<-4);
-  assert.ok(bounds.get(13).count>1000 && bounds.get(13).maxZ>6 && bounds.get(13).minY>=2.5);
+  assert.equal(bounds.has(9),false,'square courses are reserved for the future model');
+  assert.ok(bounds.get(13).count>6000 && bounds.get(13).maxZ>6 && bounds.get(13).minZ<-6);
+  assert.ok(bounds.get(13).minY>=2.09 && bounds.get(13).maxY>=9.19);
   assert.ok(bounds.get(16).count>100 && bounds.get(17).maxY>2.7);
-  assert.ok(bounds.get(10).maxY>=8.69 && bounds.get(10).maxY<8.8);
+  assert.ok(bounds.get(10).maxY>=8.69 && bounds.get(10).maxY<9.5);
   const panels=new Set();
   for(let i=6;i<mesh.length;i+=9)if([9,13].includes(Math.floor(mesh[i])))panels.add(Math.round(mesh[i]%1*16));
   assert.deepEqual([...panels].sort(),[1,2,3]);

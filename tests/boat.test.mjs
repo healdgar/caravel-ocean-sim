@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boatTargets, boatSpring, boatRotate, boatHydrodynamics, hullHydrostatics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from '../js/boat.js';
+import { boatWaveAttitude, boatTargets, boatSpring, boatRotate, boatHydrodynamics, hullHydrostatics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from '../js/boat.js';
 
 test('flat sea gives level hull and correct height', () => {
   assert.deepEqual(boatTargets(Array(9).fill(2), 10, 3), { heave: 2, pitch: 0, roll: 0 });
@@ -211,4 +211,13 @@ test('rudder authority follows actual surge speed including a reversal', () => {
   assert.ok(Math.abs(forward.heading + reverse.heading - 360) < 1e-8);
   assert.equal(stopped.heading, 0);
   assert.equal(boatForwardSpeed(stopped), 0);
+});
+
+
+test('filtered pressure slopes orient both axes independently of fine surface samples',()=>{
+  const north=boatWaveAttitude(.1,-.2,0),east=boatWaveAttitude(.1,-.2,90);
+  assert.ok(Math.abs(north.roll-Math.atan(.1))<1e-12);
+  assert.ok(Math.abs(north.pitch-Math.atan(.2))<1e-12);
+  assert.ok(Math.abs(east.roll-Math.atan(-.2))<1e-12);
+  assert.ok(Math.abs(east.pitch-Math.atan(.1))<1e-12);
 });

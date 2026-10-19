@@ -3,45 +3,53 @@ import { mastPoint } from './rigging.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
 // World wind is a velocity toward (cos(direction), sin(direction)) in X/Z.
-export const SAIL_PLAN = [
-  { id: 1, mast: 0, z: mastPoint(0,6.4)[2]-.16, top: 6.4, width: 4.6, height: 3.8, belly: 0.65 },
-  { id: 2, mast: 1, z: mastPoint(1,8.0)[2]-.20, top: 8.0, width: 6.3, height: 5.4, belly: 0.9 },
+// Active caravela latina; retain the converted square rig as a separate model plan.
+// Dimensions remain an authored reconstruction, not measured replica sail plans.
+const MIZZEN_SAIL = {id:3,mast:2,kind:'lateen',corners:[[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]],pivot:mastPoint(2,4.3),belly:.8};
+export const SQUARE_RIG_PLAN = [
+  {id:1,mast:0,kind:'square',z:mastPoint(0,6.4)[2]-.16,top:6.4,width:4.6,height:3.8,belly:.65},
+  {id:2,mast:1,kind:'square',z:mastPoint(1,8)[2]-.20,top:8,width:6.3,height:5.4,belly:.9},
+  MIZZEN_SAIL,
 ];
-export const LATEEN_CORNERS = [[0,6.7,5.5],[0,2.5,1.35],[.7,3.7,6.2]];
-export const LATEEN_PIVOT = mastPoint(2,4.3);
+export const SAIL_PLAN = [
+  {id:1,mast:0,kind:'lateen',corners:[[0,7.7,-1.8],[0,2.1,-6.4],[.4,2.4,-.5]],pivot:mastPoint(0,4.8),belly:.65},
+  {id:2,mast:1,kind:'lateen',corners:[[0,9.2,2.8],[0,2.6,-3.4],[.6,2.5,3.2]],pivot:mastPoint(1,6),belly:.9},
+  MIZZEN_SAIL,
+];
 export function runningRiggingLines(){
   const lines=[];
-  for(const {id,z,top,width:w,height:h} of SAIL_PLAN)for(const side of [-1,1]){
-    lines.push({a:[side*w*.5,top-h,z],b:[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],r:.013,r2:.013,sides:8,id,weights:[1,0]},
-      {a:[side*w*.56,top,z],b:[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],r:.011,r2:.011,sides:8,id,weights:[1,0]});
+  for(const sail of SAIL_PLAN){
+    const {id,mast,z,top,width:w,height:h,corners}=sail;
+    if(sail.kind==='square')for(const side of [-1,1]){
+      lines.push({a:[side*w*.5,top-h,z],b:[side*1.5,vesselDeck(z+1.3)+.5,z+1.3],r:.013,r2:.013,sides:8,id,weights:[1,0]},
+        {a:[side*w*.56,top,z],b:[side*1.5,vesselDeck(z+1.7)+.5,z+1.7],r:.011,r2:.011,sides:8,id,weights:[1,0]});
+    }else{
+      const sheetZ=Math.min(5.5,corners[2][2]);
+      lines.push({a:corners[2],b:[1.1,vesselDeck(sheetZ)+.3,sheetZ],r:.016,r2:.016,sides:8,id,weights:[1,0]},
+        {a:mastPoint(mast,sail.pivot[1]+1.5),b:corners[0],r:.014,r2:.014,sides:8,id,weights:[0,1]});
+    }
   }
-  lines.push({a:LATEEN_CORNERS[2],b:[1.1,vesselDeck(4)+.3,5.5],r:.016,r2:.016,sides:8,id:3,weights:[1,0]},
-    {a:mastPoint(2,6),b:LATEEN_CORNERS[0],r:.014,r2:.014,sides:8,id:3,weights:[0,1]});
   return lines;
 }
 export const SAIL_KEYS = ['sailFore', 'sailMain', 'sailMizzen'];
-const squareAreas = [0, 0];
-for (const sail of SAIL_PLAN) squareAreas[sail.mast] += sail.width * sail.height * 0.95;
-const lateenEdgeA=LATEEN_CORNERS[1].map((x,i)=>x-LATEEN_CORNERS[0][i]);
-const lateenEdgeB=LATEEN_CORNERS[2].map((x,i)=>x-LATEEN_CORNERS[0][i]);
-export const SAIL_AREAS = [...squareAreas, .5*Math.hypot(
-  lateenEdgeA[1]*lateenEdgeB[2]-lateenEdgeA[2]*lateenEdgeB[1],
-  lateenEdgeA[2]*lateenEdgeB[0]-lateenEdgeA[0]*lateenEdgeB[2],
-  lateenEdgeA[0]*lateenEdgeB[1]-lateenEdgeA[1]*lateenEdgeB[0])];
+export const SAIL_AREAS = SAIL_PLAN.map(s=>{
+  if(s.kind==='square')return s.width*s.height*.95;
+  const a=s.corners[1].map((x,i)=>x-s.corners[0][i]),b=s.corners[2].map((x,i)=>x-s.corners[0][i]);
+  return .5*Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]);
+});
 // Neutral marine surface-layer profile, referenced to the weather control at 10 m.
 // Fixed roughness is an approximation; atmospheric stability and directional shear are omitted.
 const WIND_ROUGHNESS = 0.0002;
 export function windAtHeight(speed, height) {
   return speed * Math.log(Math.max(height, WIND_ROUGHNESS) / WIND_ROUGHNESS) / Math.log(10 / WIND_ROUGHNESS);
 }
-const lateenCenter=LATEEN_CORNERS[0].map((_,axis)=>LATEEN_CORNERS.reduce((sum,p)=>sum+p[axis],0)/3);
-const lateenYard=LATEEN_CORNERS[1].map((x,axis)=>x-LATEEN_CORNERS[0][axis]);
-const lateenProjection=lateenYard.reduce((sum,x,axis)=>sum+x*(lateenCenter[axis]-LATEEN_CORNERS[0][axis]),0)/lateenYard.reduce((sum,x)=>sum+x*x,0);
-const lateenFurledHeight=LATEEN_CORNERS[0][1]+lateenProjection*lateenYard[1];
-const SAIL_LOADS = [
-  ...SAIL_PLAN.map(sail => ({ mast:sail.mast, area:sail.width*sail.height*.95, top:sail.top, drop:sail.height*.5 })),
-  { mast:2, area:SAIL_AREAS[2], top:lateenFurledHeight, drop:lateenFurledHeight-lateenCenter[1] },
-];
+const SAIL_LOADS = SAIL_PLAN.map((s,i)=>{
+  if(s.kind==='square')return {mast:s.mast,kind:s.kind,area:SAIL_AREAS[i],top:s.top,drop:s.height*.5};
+  const centre=s.corners[0].map((_,axis)=>s.corners.reduce((sum,p)=>sum+p[axis],0)/3);
+  // Match the cloth's column gathering onto the yard (u = 1/3 at its centroid).
+  const top=s.corners[0][1]+(s.corners[1][1]-s.corners[0][1])/3;
+  return {mast:s.mast,kind:s.kind,area:SAIL_AREAS[i],top,drop:top-centre[1]};
+});
 const sailClamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const sailSmooth = (lo, hi, x) => { const t = sailClamp((x - lo) / (hi - lo), 0, 1); return t * t * (3 - 2 * t); };
 
@@ -81,17 +89,18 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
 }
 
 export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
-  roll = boat.roll ?? boat.sailHeel ?? 0, rollRate = boat.rollVelocity ?? boat.sailHeelVelocity ?? 0) {
+  roll = boat.roll ?? 0, rollRate = boat.rollVelocity ?? 0) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, velocity, sideways, windSpeed, windDirection);
   s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.squareFill=0;s.lateenFill=0;
   const upright=Math.max(0,Math.cos(roll));
-  let squareArea=0;
+  let squareArea=0,lateenArea=0;
   for(let i=0;i<SAIL_LOADS.length;i++){
-    const panel=SAIL_LOADS[i],lateen=panel.mast===2,deployed=s.set[panel.mast];
+    const panel=SAIL_LOADS[i],lateen=panel.kind==='lateen',deployed=s.set[panel.mast];
     // Furling gathers canvas toward its yard, moving the remaining centre of effort upward.
     const height=(panel.top-panel.drop*(.025+.975*deployed))*HULL_VERTICAL_SCALE-(boat.hydrodynamics?.sinkage??0);
-    const lever=(height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)*.5)*upright;
+    const lever=Math.max(.1,height+(boat.hydrodynamics?.draft??HULL_DRAFT*HULL_VERTICAL_SCALE)
+      -(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE))*upright;
     const wind=s.loadWind;wind.tack=s.tack;
     // Roll moves the centre of effort sideways; subtract that velocity from the local wind.
     apparentWind(wind,boat.heading,velocity,sideways-rollRate*lever,windAtHeight(windSpeed,height*upright),windDirection);
@@ -101,7 +110,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
     const area=panel.area*deployed*(lateen?boat.length/12:boat.beam/3.6)*HULL_VERTICAL_SCALE;
     const fill=sailSmooth(.5,5,speed)*power;
     s.area+=area;
-    if(lateen)s.lateenFill=fill;else{s.squareFill+=fill*area;squareArea+=area;}
+    if(lateen){s.lateenFill+=fill*area;lateenArea+=area;}else{s.squareFill+=fill*area;squareArea+=area;}
     // Projected area and the horizontal lever both shorten as the vessel heels.
     const q=.5*1.225*speed*speed*area*power*upright;
     const drag=.10+1.2*Math.sin(Math.max(0,angle-Math.PI/2))**2;
@@ -113,6 +122,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
     s.panelSide[i]=side;s.panelMoment[i]=-side*lever;s.rollMoment+=s.panelMoment[i];
   }
   s.squareFill=squareArea>0?s.squareFill/squareArea:0;
+  s.lateenFill=lateenArea>0?s.lateenFill/lateenArea:0;
   return s;
 }
 

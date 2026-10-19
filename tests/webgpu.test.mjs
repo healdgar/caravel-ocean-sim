@@ -510,9 +510,9 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       boat.speed = 0; boat.surgeVelocity = 12 * 0.514444;
       await advance(90);
       const movingContacts = await read(fx.contacts, 32 * 64), movingWake = await wake();
-      let maxHeight = 0, foam = 0, finite = true;
-      for (let i = 0; i < movingWake.length; i += 4) { maxHeight = Math.max(maxHeight, Math.abs(movingWake[i])); foam += movingWake[i + 2]; finite &&= Number.isFinite(movingWake[i]) && Number.isFinite(movingWake[i + 1]); }
-      const moving = { live: live(await read(fx.drops, SPRAY_COUNT * 48)), sheets: (await read(fx.sheets,SHEET_COUNT*64)).filter((v,i)=>i%16===7 && v>0).length, maxHeight, foam };
+      let maxHeight = 0, minHeight=0, foam = 0, finite = true;
+      for (let i = 0; i < movingWake.length; i += 4) { maxHeight = Math.max(maxHeight, Math.abs(movingWake[i])); minHeight=Math.min(minHeight,movingWake[i]); foam += movingWake[i + 2]; finite &&= Number.isFinite(movingWake[i]) && Number.isFinite(movingWake[i + 1]); }
+      const moving = { live: live(await read(fx.drops, SPRAY_COUNT * 48)), minHeight, sheets: (await read(fx.sheets,SHEET_COUNT*64)).filter((v,i)=>i%16===7 && v>0).length, maxHeight, foam };
       // Buoyancy and rendering sample this same field: probe its strongest texel centre.
       let peak = 0;
       for (let i = 0; i < movingWake.length; i += 4) if (movingWake[i] > movingWake[peak]) peak = i;
@@ -638,6 +638,7 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
       return { resting, moving, probeError, selfPropulsion, contacts: Array.from(movingContacts), retained, finite, disabled, dry, impact, landing, landedLive, contactError, launched, outgoing, settled, second, liftedStern, trailHistory, errors };
     });
     assert.deepEqual(result.errors, []);
+    assert.ok(result.moving.minHeight<-.001,'steady calm-water headway produces a displaced trough as well as crests');
     assert.equal(result.resting.live, 0); assert.equal(result.resting.wake, 0);
     assert.ok(result.resting.contacts.every((v, i) => i % 16 !== 3 || v === 0));
     assert.equal(result.moving.live,0,'steady speed on flat water must not become a droplet fountain');
@@ -1061,7 +1062,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame = await step(page);
     for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
-    assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
+    assert.equal(frame.render['bow waterline'],1);assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
     assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.
@@ -1070,7 +1071,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['spray update'], undefined);
     assert.equal(frame.compute['crest spray update'].length, 1);
     assert.equal(frame.render['crest spray'], 1, 'crest spray survives disabling boat effects');
-    assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
+    assert.equal(frame.render['bow waterline'],undefined);assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
     assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
     await page.setViewportSize({width:32,height:24});
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
@@ -1775,10 +1776,10 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
       const computePipe=async(code,label)=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:await shader(code,label),entryPoint:'main'}});
       // One probe each: submerged exterior, dry deck, sheltered cabin, exposed
       // wood/rope/canvas at the same height, high dry rigging, actual moving sail.
-      const plan=SAIL_PLAN[0],sail=[0,plan.top-plan.height+.28,plan.z-plan.belly*Math.sin(Math.PI*.88)];
+      const plan=SAIL_PLAN[0],sail=plan.corners[2].slice();sail[0]+=.2; // mast-side offset at tack -1
       const positions=[[2,-.3,0,15],[0,hullDeck(0),0,0],[0,1.1,4,1],
-        [2.1,3,0,10],[2.1,3,0,2],[2.1,3,0,9],[2,8,0,2],[...sail,9.0625]];
-      const mesh=new Float32Array(positions.flatMap(([x,y,z,mat])=>[x,y,z,0,1,0,mat,.5,1]));
+        [2.1,3,0,10],[2.1,3,0,2],[2.1,3,0,9],[2,8,0,2],[...plan.corners[2],13.0625]];
+      const mesh=new Float32Array(positions.flatMap(([x,y,z,mat])=>[x,y,z,0,1,0,mat,0,1]));
       const descriptors=createWetnessData(mesh);
       const hull=new Float32Array(36);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;hull.set([1,1,1,1],24);hull.set([0,0,1,1],28);hull[35]=-1;
       const hullUBO=buffer(144,B.UNIFORM),frameUBO=buffer(512,B.UNIFORM),uniform=buffer(64,B.UNIFORM);
@@ -1811,7 +1812,7 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
       device.queue.writeTexture({texture:deck},new Float32Array(4),{bytesPerRow:16},[1,1]);
       // Wet the deployed foot, then furl/brace it; moisture remains attached.
       drop(sail[0],sail[1]*S,sail[2]);const sailWet=await sample(40);
-      hull[24]=0;hull[28]=.7;device.queue.writeBuffer(hullUBO,0,hull);
+      hull[24]=0;hull[29]=.7;device.queue.writeBuffer(hullUBO,0,hull);
       device.queue.writeBuffer(drops,0,new Float32Array(12));const furled=await sample(1);
       wet.updateCrew({crew:[{position:[-2,3*S,0],scale:[1,1,1],visible:true}]},{beam:3.6,length:12});
       drop(-2,3*S+.08,0);const crewWet=await sample(40);
@@ -1924,7 +1925,7 @@ test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounde
           result[gid.x*2u]=vec4f(v.position,1);
           let id=u32(round(fract(material)*16.0));
           var centre=sailBasePoint(p,uv,id,u32(material),false);
-          if(u32(material)==19u){centre=sailPoint(sailRestPoint(id,uv),uv,id,select(9u,13u,id==3u),false);}
+          if(u32(material)==19u){centre=sailPoint(sailRestPoint(id,uv),uv,id,select(9u,13u,isLateen(id)),false);}
           result[gid.x*2u+1u]=vec4f(centre,1);
           if(gid.x<${RIG_OBSTACLES.length}u){
             let line=rigObstacles[gid.x];let other=u32(line.motion.x);var a=line.a.xyz;var b=line.b.xyz;
@@ -1968,7 +1969,7 @@ test('loaded canvas steadies, slack canvas luffs, and cloth contacts stay bounde
         if(contacts.length){
           const probes=new Float32Array(contacts.length*9);contacts.forEach(({point},i)=>probes.set(point,i*9));device.queue.writeBuffer(input,0,probes);
           const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(maskPipe);cp.setBindGroup(0,maskGroup);cp.dispatchWorkgroups(Math.ceil(contacts.length/64));cp.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-          const masks=new Float32Array(read.getMappedRange());contacts.forEach(({j},i)=>{if(j===-1?masks[i*8]>.5:(j>=43||masks[i*8]<.5))hits[j]=(hits[j]??0)+1;});read.unmap();device.queue.writeBuffer(input,0,new Float32Array(points));
+          const masks=new Float32Array(read.getMappedRange());contacts.forEach(({j},i)=>{if(j===-1?masks[i*8]>.5:(j>=RIG_OBSTACLES.length-3||masks[i*8]<.5))hits[j]=(hits[j]??0)+1;});read.unmap();device.queue.writeBuffer(input,0,new Float32Array(points));
         }
         collisions.push(hits);sewn.push(ropeError);deflections.push(deflection);
       }

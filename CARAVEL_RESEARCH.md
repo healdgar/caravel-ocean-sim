@@ -1,9 +1,10 @@
 # Caravel shape and equipment audit — 19 October 2026
 
 This is a reconstruction-guided game vessel, not a replica with surveyed offsets.
-The established 20 × 6 m size and twelve-person company are retained. The chosen
-baseline is Martínez-Hidalgo’s interpretation of Niña after conversion to square
-sails in the Canaries, rather than a mixture of incompatible reconstructions.
+The established 20 × 6 m size and twelve-person company are retained. The hull baseline remains Martínez-Hidalgo’s Niña reconstruction. At the user’s
+request, the active sail plan is now an authored three-mast **caravela latina**
+(all lateen). The converted square fore/main plan is retained separately for a
+future model; the active vessel no longer claims that converted Niña sail plan.
 
 ## Drawings examined
 
@@ -42,21 +43,24 @@ bulkhead gives access. The helmsman follows the arm, with hands placed against i
 The player observes from the quarterdeck above. Control direction still commands
 the desired turn; the forward-pointing tiller moves opposite the rudder blade.
 
-The rig now has three single masts, two square courses and one lateen mizzen.
-Both topsails and the large baskets are removed. Mast rake, sail proportions,
-shorter bowsprit and longitudinal stays follow the selected plate's arrangement.
-Paired runners lead to the waterways; there are no ratline ladders or channels.
-These dimensions are authored approximations, not measurements extracted from the
-plate. The source's proposed deck length is 20.10 m and beam 6.44 m, versus our
-20 × 6 m. No exact-replica claim is made for hull volume, windows, deck fittings,
-armament, rope count, crew complement or accommodation layout.
+The rig has three single masts with triangular fore, main and mizzen sails.
+`SAIL_PLAN` drives mesh geometry, moving ropes, shader deformation, shadows,
+wetness and aerodynamic area/height. `SQUARE_RIG_PLAN` retains the previous square
+fore/main plus lateen mizzen for a future model, using the same generic rig code.
+Mast rake, hull/decks, runners and shorter bowsprit are retained. Yard and triangle
+dimensions are authored and are not traced sail offsets. All three sails furl
+independently and tack through the existing shared trim response.
 
-The source specifies a bonnet on the maincourse. Detachable bonnet handling,
-yard lowering, mast-side changes of the lateen yard and detailed block systems
-are not implemented. Continuous canvas gathering and automatic yard trim remain
-simulation approximations. The museum model and modern sailing replica use an
-alternative four-mast interpretation; their rigs are not used as interchangeable
-evidence for this three-mast version.
+The [modern replica operator](https://www.ninapinta.net/) explicitly describes
+its Niña as a **caravela redonda**, with square fore/main and lateen aft sails.
+Its header sailing footage shows useful near-hull whitewater and a steadier
+attitude, but the camera motion, wind, speed and wave spectrum are unknown; it
+cannot calibrate our roll coefficients. The user-requested all-lateen version
+is a different caravel interpretation, not a correction to that operator’s rig.
+The previous converted Niña interpretation and its sources remain recorded above.
+No exact replica claim is made for sail proportions, hull offsets, equipment,
+rope count, crew complement or accommodation. Yard lowering, detailed block
+systems, sail interference and historical tacking drills remain approximations.
 
 ## Simulation implications
 
@@ -72,3 +76,13 @@ hand grips and simplified boot locks follow those ropes. Work gates sail movemen
 and the carpenter closes a visible hatch. The lookout holds below the foremast
 head; there is no platform to enter. Nearby crew fade in the helm camera;
 exterior appearance and shadows remain intact. See [CREW.md](CREW.md).
+
+Roll and pitch now integrate inertia and restoring moments against hull-filtered
+incident-wave slopes. Wind torque acts on the same roll state; rate-dependent
+apparent wind can damp that rocking. The model follows the structure of
+[Kerdraon et al., *Ocean Engineering* 212 (2020) 107668](https://doi.org/10.1016/j.oceaneng.2020.107668),
+not its yacht-specific coefficients. Effective added inertia and damping are
+explicitly authored. Continuous speed-squared hull pressure also feeds crest/trough
+waves into the existing ocean displacement field in calm water, with a small
+waterline ribbon for immediate contact. This remains a bounded local wave model,
+not a calibrated dispersive Kelvin-wake or diffraction solver.

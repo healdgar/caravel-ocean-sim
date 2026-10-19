@@ -1,6 +1,6 @@
 import { deckHalfWidth, vesselDeck, HULL_VERTICAL_SCALE } from './hull.js';
 
-// Martinez-Hidalgo's converted Nina: three single masts, without topsails/tops.
+// Three single masts, without topsails/tops; shared by the lateen and stored square plans.
 // Dimensions are authored approximations of the reconstruction plate.
 export const RIG_MASTS = [{z:-4.15,height:6.9,r:.115,rake:-.28},{z:-.1,height:8.7,r:.15,rake:-.12},{z:3.05,height:6.3,r:.095,rake:.18}];
 export function mastPoint(mast,y){

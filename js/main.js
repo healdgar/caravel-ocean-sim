@@ -11,7 +11,7 @@ import { createCrew, CAPTAIN_ORDERS } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
-import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, stepBoatRoll, boatHydrodynamics, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
+import { boatTargets, boatSpring, boatRotate, stepBoatSteering, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
@@ -401,7 +401,8 @@ async function main() {
     const heights = new Float32Array(probeRead.getMappedRange(0, 64));
     waterH = heights[9];
     if (probeRevision === boat.revision) {
-      const next=boatTargets(heights.subarray(0,9),probeLength,probeBeam);
+      const next={...boatTargets(heights.subarray(0,9),probeLength,probeBeam),
+        ...boatWaveAttitude(heights[10],heights[11],boat.heading)};
       const elapsed=probeTime-targetTime;
       const placed=targetTime<0;
       for(const key of boatAxes){
@@ -412,10 +413,6 @@ async function main() {
         // Spawn on the sampled surface, including after a sea-preset change.
         if(placed){
           boat[key]=next[key]-(key==='heave'?boat.hydrodynamics.sinkage:0);boat[key+'Velocity']=0;
-          if(key==='roll'){
-            boat.waveRoll=next.roll;boat.waveRollVelocity=0;
-            boat.roll+=boat.sailHeel ?? 0;boat.rollVelocity=boat.sailHeelVelocity ?? 0;
-          }
         }
       }
       if(placed)boat.revision++; // a pose placement must not launch a false impact
@@ -603,7 +600,7 @@ async function main() {
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye', HELM_EYE_HEIGHT, 1, 15),
     provisionDays:param('provisionDays',DEFAULT_PROVISION_DAYS,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
     x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
-    heave: 0, pitch: 0, roll: 0, waveRoll: 0, waveRollVelocity: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
+    heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
   boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes);
@@ -662,23 +659,22 @@ async function main() {
 
   function updateBoat(dt) {
     const steering = boat.enabled ? (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) : 0;
+    const age=Math.max(0,simTime-targetTime);
+    const predicted=boat.waveAttitude??={heave:0,pitch:0,roll:0};
+    for(const key of boatAxes){
+      const rate=age<.25 && targetRevision===boat.revision?targetRate[key]:0;
+      predicted[key]=boat.target[key]+rate*Math.min(age,.25);
+    }
     const distance = stepBoatSurge(boat, boatWaveSlope(boat, simTime), dt, P.windSpeed, P.windDir * D2R);
     const previousHeading = boat.heading * D2R, previousYaw = boat.yawRate;
     stepBoatSteering(boat, steering, dt);
     const heading = previousHeading + (previousYaw + boat.yawRate) * dt * 0.25;
     boat.x += Math.sin(heading) * distance; boat.z -= Math.cos(heading) * distance;
     boat.x += Math.cos(heading) * boat.leewayDistance; boat.z += Math.sin(heading) * boat.leewayDistance;
-    const response = Math.max(0.65, 4.5 / Math.sqrt(boat.length / 6));
-    // Follow the measured water velocity, including short readback latency. A
-    // held-target spring alone lags a rising swell by roughly two time constants.
-    const age=Math.max(0,simTime-targetTime);
-    for(const key of boatAxes){
-      const rate=age<0.25 && targetRevision===boat.revision?targetRate[key]:0;
-      const omega=key==='roll'?Math.max(0.8,3/Math.sqrt(boat.beam/2)):key==='heave'?boat.hydrodynamics.heaveOmega:response;
-      const target=boat.target[key]+rate*Math.min(age,0.25)-(key==='heave'?boat.hydrodynamics.sinkage:0);
-      if(key==='roll')stepBoatRoll(boat,target,omega,dt,rate);
-      else boatSpring(boat,key,target,omega,dt,rate);
-    }
+    // Heave retains water-velocity compensation for asynchronous readback;
+    // rotation instead integrates pressure and wind through physical inertia.
+    const rate=age<.25 && targetRevision===boat.revision?targetRate.heave:0;
+    boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage,boat.hydrodynamics.heaveOmega,dt,rate);
   }
   function updateCamera(dt) {
     if (boat.enabled) {
@@ -1213,7 +1209,7 @@ async function main() {
       boatMotion.textContent = `Speed ${(boatForwardSpeed(boat)/KNOT_TO_MPS).toFixed(2)} kn · Displacement ${(hydro.mass/1000).toFixed(1)} t · Draft ${hydro.draft.toFixed(2)} m`;
       loadingStatus.textContent=`Crew ${(hydro.crewMass/1000).toFixed(2)} t · Water ${(hydro.waterMass/1000).toFixed(2)} t · Food ${(hydro.foodMass/1000).toFixed(2)} t · Casks and spares ${(hydro.storesMass/1000).toFixed(2)} t · Cargo ${(hydro.cargoMass/1000).toFixed(1)} t. Main-deck freeboard ${hydro.freeboard.toFixed(2)} m.${hydro.overloadKg>0?' Overloaded: this loading exceeds the supported draft.':''}`;
       const sails=sailingState(boat),angle=sails.apparentAngle/D2R;
-      sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind heel ${Math.abs((boat.sailHeel ?? 0)/D2R).toFixed(1)}° ${(boat.sailHeel ?? 0)>=0?'port':'starboard'}`;
+      sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind torque ${Math.abs(sails.rollMoment/1000).toFixed(1)} kN·m`;
       for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.set[i]*100)+'%';
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
       if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
