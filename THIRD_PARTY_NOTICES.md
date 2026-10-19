@@ -1,5 +1,19 @@
 # Third-party code
 
+## Quaternius crew assets
+
+The first sailor adapts Quaternius Universal Base Characters and Universal
+Animation Library (animations credited to Quaternius and Gonzalo Furnier), under
+CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/.
+
+Sources: https://quaternius.itch.io/universal-base-characters and
+https://quaternius.itch.io/universal-animation-library.
+The free Standard data was acquired from a public mirror pinned at
+`NafisRayan/Animate-Rigged-Humanoid-No-Blender@5821923af517ac5fdc82505faa92a0d575fc1b1a`.
+No mirror code is used. `assets/crew/README.md`, `assets/crew/LICENSE-CC0.txt` and
+`scripts/prepare-crew.mjs` retain provenance, licence and exact source checksums.
+Local costume/retargeting adaptations are also CC0.
+
 ## Joshbrew WebGPU clouds
 
 The volumetric cloud density, cached lighting, and ray integration in

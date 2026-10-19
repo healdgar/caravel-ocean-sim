@@ -82,13 +82,15 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   }));
   const counts=[parts.solid.length,parts.canvas.length];
   return {
+    uniform,
     update(hull,sun,enabled){fitVesselShadow(data,hull,sun,parts.bounds,resolution,enabled);device.queue.writeBuffer(uniform,0,data);},
-    encode(encoder,profiler){
+    encode(encoder,profiler,extraSolid){
       if(!data[19])return;
       for(let i=0;i<2;i++){
         passes[i].timestampWrites=profiler?.writes(i?'Canvas shadows':'Solid shadows');
         const pass=encoder.beginRenderPass(passes[i]);pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
-        pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);pass.end();
+        pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);
+        if(i===0)extraSolid?.(pass);pass.end();
       }
     },
     bind(pipe){return device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[

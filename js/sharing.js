@@ -35,5 +35,6 @@ export function createShareLink(href, settings, boat, cameraMode) {
   for (const [key, param] of Object.entries(BOAT_LINK_KEYS)) setNumber(param, boat[key]);
   url.searchParams.set('prow', boat.showProw ? '1' : '0');
   url.searchParams.set('effects', boat.effects === false ? '0' : '1');
+  url.searchParams.set('crew', boat.crew === false ? '0' : '1');
   return url.href;
 }

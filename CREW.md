@@ -1,7 +1,10 @@
 # Crew and decision-system preparation
 
-Design only: crew agents, characters, navigation and work execution are not yet
-implemented. The current sail controls still drive automatic handling directly.
+The first animated deckhand is implemented: a local rule policy selects patrol,
+standby or brace; an executor follows a bounded deck route and drives GLB clip
+blending. `createDeckhand(policy)` accepts a replacement synchronous policy.
+Captain's work orders, general navigation, reservations and rigging execution
+below remain design work. Sail controls still drive automatic handling directly.
 
 ## Complement
 
@@ -112,6 +115,9 @@ reset. On timeout or failure use the local policy. Never block the render loop.
   separate until an explicit helmsman task and steering controller exist.
 
 ## First executable milestone
+
+Foundation complete: one visible sailor, ship-local patrol, idle/walk/brace clips,
+keep-watch/stand-by controls, shared ship lighting and animated shadows. Next:
 
 Three visible sailors complete one foremast sail-reduction order: approach,
 reserve stations, climb/haul, perform work together and return. Use a deliberately

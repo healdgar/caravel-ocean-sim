@@ -1516,6 +1516,36 @@ test('resolution controls resize GPU targets and explicit dimensions stay fixed'
   }finally{await page.close();}
 });
 
+test('deckhand renders and casts shadows, changes pose, obeys orders and hides with the ship', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:320,height:240}}),warnings=[];
+  page.on('pageerror',error=>warnings.push(error.message));
+  page.on('console',msg=>{if(msg.type()==='warning'||msg.type()==='error')warnings.push(msg.text());});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
+        if(buffer.label==='crew joints')check.crewBones=Array.from(data);
+        return write.call(this,buffer,offset,data,...rest);
+      };
+    });
+    await page.goto(`${origin}/?boat=1&boatSpeed=0&windSpeed=2&swellHs=.1&sunElev=45&w=64&h=48`);
+    try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
+    catch(error){throw Error(error.message+'; '+warnings.join('\n'));}
+    assert.equal(await page.getByLabel('Deckhand',{exact:true}).isEnabled(),true);
+    const first=await step(page,100);assert.equal(first.render.crew,1);assert.equal(first.render['crew shadow'],1);
+    const bones=await page.evaluate(()=>check.crewBones);
+    await step(page,100);assert.notDeepEqual(await page.evaluate(()=>check.crewBones),bones);
+    await page.getByLabel('Deckhand order',{exact:true}).selectOption('standby');
+    await step(page,600);await step(page,600);assert.equal(await page.locator('#crew-status').textContent(),'Standing by');
+    await page.getByLabel('Deckhand',{exact:true}).uncheck();
+    const hidden=await step(page,100);assert.equal(hidden.render.crew,undefined);assert.equal(hidden.render['crew shadow'],undefined);
+    await page.getByLabel('Deckhand',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
+    const shipHidden=await step(page,100);assert.equal(shipHidden.render.crew,undefined);assert.equal(shipHidden.render['crew shadow'],undefined);
+    assert.deepEqual(warnings,[]);
+  }finally{await page.close();}
+});
+
 for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
   test(`${bundle} initializes all JavaScript and WGSL pipelines`, { timeout: 120000 }, async () => {
     const page = await browser.newPage();
@@ -1525,6 +1555,7 @@ for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
       await page.addInitScript(instrumentRenderer);
       await page.goto(`${origin}/${bundle}?w=1&h=1`);
       await page.waitForFunction(() => check.callback, undefined, { polling: 100, timeout: 90000 });
+      assert.equal(await page.getByLabel('Deckhand',{exact:true}).isEnabled(),true,'embedded crew asset and pipelines initialize');
       assert.deepEqual(await page.evaluate(async () => {
         await check.device.queue.onSubmittedWorkDone();
         return check.errors;

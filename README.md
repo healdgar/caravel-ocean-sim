@@ -85,13 +85,34 @@ The visible mesh and shadow casters share 107,914 unique vertex records through 
 
 The wheel, rudder, and canvas remain animated. `js/hull.js` defines the hull section, raised-deck levels, and helm anchors; the mesh, camera, wheel picking, shadow deformation, and deck-water field use that shared layout. `js/wgsl/hull.js` supplies matching ocean-mask and spray-contact functions. Forecastle wash enters only above its raised bulwarks. No imported model or Blender dependency is required.
 
-### Crew preparation
+### First animated deckhand
 
-[Crew and decision-system design](CREW.md) separates captain's orders, individual
-decisions, shared task reservations, movement and actual rigging work. It proposes
-12 simulated people for the small default vessel, independently of the visible
-character budget, with a replaceable local decision policy. This is preparation;
-animated crew and crew-driven sail handling are not implemented yet.
+A Quaternius-derived sailor walks a short port-side deck route, pauses, turns,
+and blends between idle and walking. Strong wind, heel or roll rate interrupts
+walking with a crouched brace. **Deckhand order → Stand by** stops the patrol;
+**Keep watch** resumes it. **Deckhand** hides the character, and shared links
+preserve that switch as `crew=0` or `crew=1`. Hiding the ship also hides the sailor.
+Very small hulls (under 8 m long or 2.8 m wide) hide the sailor because the authored
+walkway no longer provides sufficient clearance.
+
+The self-contained GLB is 975 KB, with 15,683 triangles, 65 joints and three clips.
+Native WebGPU skinning sends joint matrices rather than deformed vertices each
+frame. The sailor receives ship and sail shadows and casts into the existing
+solid shadow pass; no new render pass is introduced. The asset and runtime add
+about 1.3 MB to each standalone page. The 30 FPS automatic-resolution target
+remains active; physical-iPhone performance has not yet been measured.
+
+This is one animated deckhand with a replaceable local rule policy. Ship-local
+movement keeps him aboard as the hull moves, but precise foot placement, active
+balance, climbing, rope handling, task reservations, fatigue, watch rotation and
+crew-driven sail handling remain future work. The crouch is an animation response
+to authored thresholds, not a biomechanical balance model. The limited GLB reader
+supports the prepared skin, indexed triangles, vertex colours and LINEAR/STEP
+TRS clips; it is not a general glTF renderer.
+
+[Asset provenance and rebuild instructions](assets/crew/README.md) retain the CC0
+licence, source revision and checksums. [Crew and decision-system design](CREW.md)
+describes the larger system and proposed 12-person complement.
 
 ### Wake, bow waves and spray
 
@@ -244,6 +265,8 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/sailing.js` | Shared sail plan, apparent wind, automatic trim, sail handling and aerodynamic forces |
+| `js/gltf.js`, `js/crew.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
+| `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and ribbon rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |

@@ -5,6 +5,7 @@ import { createVesselShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
+import { createCrew } from './crew.js';
 import { WHEEL_CENTER, HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -352,6 +353,9 @@ async function main() {
   const hullData = new Float32Array(HULL_UNIFORM_BYTES / 4);
   const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader});
   const oceanShadows=shadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
+  let crew=null,crewError='';
+  try { crew=await createCrew({device,frameUBO,hullUBO,transView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA}); }
+  catch(error) { crewError='Deckhand unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis:sunVisBuf, shader, computePipe });
   interaction.setShadows(shadows);
@@ -883,6 +887,16 @@ async function main() {
   prowToggle.type = 'checkbox'; prowToggle.checked = boat.showProw;
   prowToggle.addEventListener('change', () => { boat.showProw = prowToggle.checked; });
   prowLabel.append(prowToggle); boatBody.append(prowLabel);
+  boat.crew=qs.get('crew')!=='0';
+  const crewLabel=document.createElement('label');crewLabel.textContent='Deckhand';
+  const crewToggle=document.createElement('input');crewToggle.type='checkbox';crewToggle.checked=boat.crew;crewToggle.disabled=!crew;
+  crewToggle.addEventListener('change',()=>{boat.crew=crewToggle.checked;});crewLabel.append(crewToggle);boatBody.append(crewLabel);
+  const crewOrderLabel=document.createElement('label');crewOrderLabel.textContent='Deckhand order';
+  const crewOrder=document.createElement('select');crewOrder.id='crew-order';crewOrder.innerHTML='<option value="patrol">Keep watch</option><option value="standby">Stand by</option>';
+  crewOrder.setAttribute('aria-label','Deckhand order');
+  crewOrder.disabled=!crew;crewOrder.addEventListener('change',()=>{if(crew){crew.state.order=crewOrder.value;crew.state.decisionIn=0;}});
+  crewOrderLabel.append(crewOrder);boatBody.append(crewOrderLabel);
+  const crewStatus=document.createElement('p');crewStatus.id='crew-status';crewStatus.textContent=crewError||'On watch';boatBody.append(crewStatus);
   const effectsLabel = document.createElement('label'); effectsLabel.textContent = 'Wakes & spray';
   const effectsToggle = document.createElement('input'); effectsToggle.type = 'checkbox'; effectsToggle.checked = boat.effects;
   effectsToggle.addEventListener('change', () => { boat.effects = effectsToggle.checked; });
@@ -1177,6 +1191,7 @@ async function main() {
       if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
       if(profileToggle)profileToggle.textContent=`Performance · ${fps.toFixed(1)} FPS · ${Math.round(resolution.scale*100)}%`;
       updateResolutionStatus();
+      crewStatus.textContent=crew?crew.status():crewError;
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';
@@ -1212,6 +1227,7 @@ async function main() {
     hullData[32]=sails.windSide;hullData[33]=-sails.windForward;hullData[34]=sails.apparentSpeed;hullData[35]=sails.canvasTack;
     device.queue.writeBuffer(hullUBO, 0, hullData);
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
+    crew?.update(boat,dt,P.windSpeed);
     interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
     if (needSpectrum) writeSimStatic();
@@ -1289,7 +1305,7 @@ async function main() {
     // Resolve the ocean straight into the reflection pyramid. The ship pass
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
-    shadows.encode(enc,profiler);
+    shadows.encode(enc,profiler,crew?.drawShadow);
     mainPass.timestampWrites=profiler.writes('Ocean + sky');
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
@@ -1332,6 +1348,7 @@ async function main() {
       prowPass.setPipeline(caravelPipe); prowPass.setBindGroup(0, bgCaravel);
       prowPass.setBindGroup(1,caravelShadows);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);
+      crew?.draw(prowPass);
       interaction.draw(prowPass); spindrift.draw(prowPass); prowPass.end();
     }
 

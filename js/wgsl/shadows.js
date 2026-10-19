@@ -1,6 +1,6 @@
 import { VESSEL_RIG, CANVAS_OPTICS } from './vessel.js';
 
-const SHADOW_FRAME = /* wgsl */ `
+export const SHADOW_FRAME = /* wgsl */ `
 struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 `;
 

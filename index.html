@@ -28,6 +28,8 @@
   #boat-panel[hidden] { display:none; }
   #boat-panel label { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 12px; }
   #boat-panel input[type=number] { width: 76px; background: #172532; color: #fff; border: 1px solid #71818d; border-radius: 4px; padding: 5px; }
+  #crew-order { max-width:55%; min-height:36px; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:5px; }
+  #crew-status { margin:4px 0 10px; font-size:12px; color:#b9c8cf; }
   #boat-panel input[type=checkbox] { width: 20px; height: 20px; accent-color: #e2a04e; }
   #boat-rudder { width:100px; accent-color:#e2a04e; }
   #sail-controls input[type=range] { width:100px; min-width:0; accent-color:#e2a04e; }
@@ -76,7 +78,7 @@
     #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
     #panel input { width:100%; min-width:0; height:44px; }
     #boat-panel label { min-height:44px; margin:6px 0; }
-    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
+    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #share-panel input, #crew-order { font-size:16px; min-height:44px; box-sizing:border-box; }
     #boat-panel input[type=number] { width:90px; }
     #boat-rudder { height:44px; min-width:0; }
     #sail-controls input[type=range], #boat-propulsion { min-height:44px; }

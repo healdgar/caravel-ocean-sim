@@ -11,12 +11,13 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/sim.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js'];
-const order = ['js/hull.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/profiler.js', 'js/resolution.js', 'js/main.js'];
+const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/sim.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js'];
+const order = ['js/hull.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/gltf.js', 'js/crew.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/profiler.js', 'js/resolution.js', 'js/main.js'];
 const stripModuleSyntax = (src) => src
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
-  .replaceAll("'assets/caravel-oak-albedo.webp'", () => JSON.stringify('data:image/webp;base64,' + fs.readFileSync(path.join(root, 'assets/caravel-oak-albedo.webp')).toString('base64')));
+  .replaceAll("'assets/caravel-oak-albedo.webp'", () => JSON.stringify('data:image/webp;base64,' + fs.readFileSync(path.join(root, 'assets/caravel-oak-albedo.webp')).toString('base64')))
+  .replaceAll("'assets/crew/sailor.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor.glb')).toString('base64')));
 
 const notices = fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8');
 const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace('</head>', () => '<!--\n' + notices + '\n-->\n</head>');
@@ -59,6 +60,8 @@ minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sailing.js'), 'ut
 for (const f of wgslModules) minJs += stripModuleSyntax(minifyTemplates(fs.readFileSync(path.join(root, f), 'utf8'))) + '\n';
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/boat.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/caravel.js'), 'utf8'));
+minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/gltf.js'), 'utf8'));
+minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sharing.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/shadows.js'), 'utf8'));
 minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/deck.js'), 'utf8'));
