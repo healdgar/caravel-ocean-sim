@@ -676,7 +676,7 @@ npm run build
 npm test
 ```
 
-The recursive-tree revision was checked with **276 tests** using installed Chrome on
+The sunset-haze revision passed **277 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -699,10 +699,10 @@ without accepting geometry or visible shading changes. Software rendering keeps
 the packed-wave comparison exact. The byte-exact indexing/resolve fixture holds
 the ocean flat to isolate those changes from FFT rounding; wave behavior has
 separate travelling-wave and rough-sea coverage.
-The tree revision's serialized run passed 275/276; the existing packed-wave
-comparison encountered its intermittent native Metal rounding difference and
-passed when rerun alone. Identical native draws can occasionally differ by two
-blue levels. No assertions were changed.
+The shared-atmosphere regression rejects a false sunset cone on downward views
+while retaining genuine horizon warmth. It also checks continuity through nadir,
+clear-air identity, finite zero-distance rays, distance haze and precipitation.
+Visible overhead and horizon fleet views were checked with bloom off and on.
 
 Tree checks verify connected recursive growth, taper, bark/leaf UVs, terminal
 attachments, stable LOD dimensions and a bounded forest draw budget. Native GPU
@@ -1142,6 +1142,13 @@ where their positions coincide; global proximity welding would damage these
 surfaces and close intentional openings.
 
 ### Steering and rendering refinements
+
+Surface haze follows the actual camera-to-surface sightline, including downward
+views. Sampling the sunset horizon for downward rays previously painted an
+orange cone across water and ships in the overhead fleet view. The shared
+atmosphere now uses its below-horizon LUT for those rays; normal horizon haze,
+sun reflections and bloom remain. A native GPU regression checks the false
+cone, legitimate horizon warmth, nadir continuity and finite zero-distance rays.
 
 Use **A / D** or **left / right arrows** to command port/starboard helm;
 **X** or **Centre rudder** returns it to neutral. The **Rudder** slider provides

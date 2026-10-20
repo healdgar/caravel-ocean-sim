@@ -3601,7 +3601,9 @@ fn surfaceAir(color:vec3f,world:vec3f)->vec3f {
   let marine=F.fogExt.w*clamp(F.atmo.x/3.0,0.2,3.0)*exp(-altitude/220.0);
   let extinction=max(F.fogExt.rgb,vec3f(marine))+vec3f(F.reserved.x*0.0025);
   let transmission=exp(-extinction*d);
-  let direction=normalize(vec3f(delta.x,max(delta.y,0.002*d),delta.z));
+  // Keep the actual sightline: folding downward rays onto the bright sunset
+  // horizon projects its scattering lobe across opaque ships and water.
+  let direction=delta/max(d,1e-6);
   let rainSky=mix(skyAtmo(direction),skyAtmo(vec3f(0,1,0))*.55,F.reserved.x*.7)+lightningCloud(direction);
   return color*transmission+rainSky*(1.0-transmission);
 }
