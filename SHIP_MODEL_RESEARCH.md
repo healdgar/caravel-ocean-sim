@@ -98,3 +98,13 @@ support. All require dimensions and load/displacement evidence before modelling.
 
 These reference crew figures describe their sources; they are not approved
 runtime agent counts or substitutes for mass, ballast and hydrostatic data.
+
+The later programme also includes **Flying Cloud**, replacing a generic schooner,
+and **Gipsy Moth IV** (the working interpretation of "Gypsy Moth"). Both are planned:
+
+- [The Mariners' Museum's Flying Cloud record](https://catalogs.marinersmuseum.org/object/CL14156)
+  identifies Donald McKay's 1851 American clipper. Its lines, deck layout and
+  complete sail tiers need dedicated references; Victory's hull must not be reused.
+- [Royal Museums Greenwich's Gipsy Moth IV record](https://www.rmg.co.uk/collections/objects/rmgc-object-13959)
+  identifies Chichester's ketch for the 1966–67 voyage. Obtain the original yacht's
+  hull and rig plans before choosing dimensions or cockpit/crew attachments.

@@ -1336,6 +1336,7 @@ async function main() {
     }
     for(const v of vessels)v.interaction.encode(cp);
     spindrift.encode(cp);
+    marineLife.encode(cp);
     for(const v of vessels)v.wetness.encode(cp,v.boat.showProw);
     // foam clipmaps
     foamCur = 1 - foamCur;

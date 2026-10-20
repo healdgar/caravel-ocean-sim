@@ -4,6 +4,8 @@ export const MARINE_ANIMAL_LIMIT=2;
 export const MARINE_EFFECT_LIMIT=48;
 export const MARINE_EFFECT_SECONDS=4.2;
 export const MARINE_ENCOUNTER_SECONDS=95;
+// Forehead outlet on the supplied rigged whale, in normalized actor metres.
+export const WHALE_BLOWHOLE=Object.freeze([-3.79664,1.2930143,-6.10073]);
 const marineClamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const marineAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
 const marineEase=t=>{t=marineClamp(t,0,1);return t*t*(3-2*t);};
@@ -114,8 +116,13 @@ export function createMarineLifeState(random=Math.random){
           if(bounds.touching)stamp(a,'trail',at,oldAge,dt,oldX,oldZ,oldHeading,a.type==='whale'?.45:.22);
         }
         if(dt>0)while(a.nextBlow<=age+1e-8){
-          const at=a.nextBlow;a.nextBlow+=20;const pose=marinePoseAt(at,a),height=pose.depth+Math.cos(pose.pitch)*1.5+Math.sin(pose.pitch)*3.6;
-          if(height>-.05&&age<83){const blow=stamp(a,'blow',at,oldAge,dt,oldX,oldZ,oldHeading,.9,3.6);blow.height=Math.max(.08,height);
+          const at=a.nextBlow;a.nextBlow+=20;const pose=marinePoseAt(at,a);
+          const cr=Math.cos(pose.roll),sr=Math.sin(pose.roll),cp=Math.cos(pose.pitch),sp=Math.sin(pose.pitch);
+          const bx=(cr*WHALE_BLOWHOLE[0]-sr*WHALE_BLOWHOLE[1])*a.scale;
+          const bankY=sr*WHALE_BLOWHOLE[0]+cr*WHALE_BLOWHOLE[1],by=(cp*bankY-sp*WHALE_BLOWHOLE[2])*a.scale;
+          const bz=(sp*bankY+cp*WHALE_BLOWHOLE[2])*a.scale,height=pose.depth+by;
+          if(height>.02&&age<83){const blow=stamp(a,'blow',at,oldAge,dt,oldX,oldZ,oldHeading,.9);blow.height=height;
+            blow.x+=Math.cos(blow.heading)*bx-Math.sin(blow.heading)*bz;blow.z+=Math.sin(blow.heading)*bx+Math.cos(blow.heading)*bz;
             const wind=(settings.windDir??120)*Math.PI/180,speed=marineClamp(settings.windSpeed??7,0,35);blow.windX=Math.cos(wind)*speed;blow.windZ=Math.sin(wind)*speed;}
         }
       }

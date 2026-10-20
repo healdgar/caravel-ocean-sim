@@ -109,3 +109,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+# User-supplied whale asset
+
+`assets/wildlife/whale.glb` is the user's Meshy-generated whale and compatible
+23-bone SmartRig, supplied as `Meshy_AI_Character_output.glb` on 20 October 2026.
+It shares the original `Meshy_AI_Gentle_Giant_of_the_D_1020213410_texture.glb`
+geometry, UVs and textures, with a different source coordinate scale and origin.
+The supplied files contain no animation clips. The local importer retains their
+skin weights and textures; swimming and water effects are project code.
+
+Source SHA-256: `86dce920b93ac22cf864feac74a457abea9da1e9efc25aec7c1a73a6634f5632`.

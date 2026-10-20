@@ -120,6 +120,8 @@ Pinta/Santa María and fleet work, the following targets remain on the roadmap.
 | Roman galley, c. AD 350 | Oars and sail, coordinated rowing, vessel-specific steering and crew layout | Select a late-Roman vessel class and reconstruction; resolve seagoing versus riverine service and oar-bank arrangement |
 | Caribbean canoe, AD 1492, 30 people | Paddle propulsion and steering, occupied paddling stations, loading-sensitive freeboard | Select regional/cultural references; distinguish 30 occupants from 30 active paddlers and any extra cargo |
 | HMS Victory, 1805 configuration | Implemented first pass: own hull, square/fore-and-aft sail groups, crew stations and running rigging | Further dimensional refinement and measured sailing calibration remain; see source ledger |
+| Flying Cloud, 1851 clipper | Full ship rig with separate courses, topsails and upper sails; fine-ended ocean-going hull | Replaces the generic schooner target; obtain lines, deck and sail plans before modelling |
+| Gipsy Moth IV, 1966 yacht | Ketch rig, yacht-scale crew, cockpit helm and handling | Working interpretation of the requested "Gypsy Moth"; distinguish original circumnavigation configuration from later refits |
 
 The Victory identity/date is the working interpretation of "Admiral Nelson's
 ship". Historical starting points and unresolved choices are recorded in

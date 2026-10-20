@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {createMarineLifeState,MARINE_ANIMAL_LIMIT,MARINE_EFFECT_LIMIT,MARINE_EFFECT_SECONDS} from './marine-life-state.js';
-import {MARINE_LIFE_RENDER,MARINE_BLOW_SEGMENTS,MARINE_BLOW_ROWS} from './wgsl/marine-life.js';
+import {MARINE_LIFE_RENDER,MARINE_EFFECT_INIT,MARINE_MIST_COUNT,MARINE_BREATH_DROP_COUNT,MARINE_FALLOUT_COUNT} from './wgsl/marine-life.js';
 import {DOLPHIN_RIPPLE_SEGMENTS,DOLPHIN_RIPPLE_RINGS,DOLPHIN_RIPPLE_ROWS,DOLPHIN_SHEET_SEGMENTS,DOLPHIN_SHEET_ROWS,DOLPHIN_DROP_COUNT} from './wgsl/dolphins.js';
+import {loadMarineGLB} from './marine-asset.js';
+import {createMarineRig} from './marine-rig.js';
 
 // Original procedural marine-animal approximations, in physical metres. Whale:
 // humpback-like long pectorals, broad head, ventral pleats and horizontal flukes.
@@ -92,14 +94,45 @@ export function createMarineMesh(type='whale'){
     }
     if(orientation<0)for(let i=firstIndex;i<indices.length;i+=3)[indices[i+1],indices[i+2]]=[indices[i+2],indices[i+1]];
   }
+  function whaleFluke(){
+    // Head is -Z. The peduncle joins the leading centre of one continuous
+    // horizontal foil; both pointed tips sweep aft of the V-shaped notch.
+    // The former pair of rounded lobes swept toward the head instead.
+    const span=3.45,stations=28,sections=12,colour=[.045,.065,.077];
+    const point=(s,theta)=>{
+      const u=Math.abs(s),leading=5.72+1.73*Math.pow(u,1.1);
+      const serration=.025*Math.sin(u*Math.PI*18)*Math.sin(u*Math.PI);
+      const trailing=7.45-.85*Math.pow(1-u,4)+serration;
+      const chord=(trailing-leading)*.5,thickness=.15*Math.sqrt(Math.max(0,1-u*u));
+      return [s*span,-.22+.025*u*u+thickness*Math.sin(theta),(leading+trailing)*.5+chord*Math.cos(theta)];
+    };
+    const first=vertices.length/9,left=add(point(-1,0),[-1,0,0],colour);
+    for(let station=1;station<stations;station++){
+      const s=station/stations*2-1;
+      for(let section=0;section<sections;section++){
+        const theta=section/sections*Math.PI*2,p=point(s,theta),eps=.0001;
+        const before=point(s-eps,theta),after=point(s+eps,theta),a=point(s,theta-eps),b=point(s,theta+eps);
+        const u=after.map((v,i)=>v-before[i]),v=b.map((q,i)=>q-a[i]);
+        add(p,unit([u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]]),colour);
+      }
+    }
+    const right=add(point(1,0),[1,0,0],colour),ring=first+1;
+    for(let section=0;section<sections;section++){
+      const next=(section+1)%sections;indices.push(left,ring+section,ring+next);
+      for(let station=0;station<stations-2;station++){
+        const a=ring+station*sections+section,b=a+sections,c=ring+station*sections+next,d=c+sections;
+        indices.push(a,b,c,c,b,d);
+      }
+      const end=ring+(stations-2)*sections;indices.push(end+section,right,end+next);
+    }
+  }
   if(whale){
     fin([[0,1.04,1.4],[0,1.74,1.85],[0,1.95,2.35],[0,1.46,2.55],[0,.9,2.9]],0,.14,[.04,.055,.063]);
     for(const side of [-1,1]){
       fin([[side*1.35,-.25,-2.5],[side*2.1,-.32,-2.05],[side*3.6,-.58,-.4],[side*4.9,-.78,.95],[side*5.05,-.88,1.4],
         [side*4.65,-.9,1.6],[side*3.5,-.68,.98],[side*1.35,-.47,-.75]],1,.12,[.13,.16,.17]);
-      fin([[0,-.22,6.1],[side*.9,-.15,5.75],[side*2.2,-.13,5.45],[side*3.25,-.12,5.65],[side*3.5,-.18,6.05],
-        [side*2.45,-.22,6.85],[side*.5,-.22,7.35],[side*.06,-.22,7.05]],1,.14,[.045,.065,.077]);
     }
+    whaleFluke();
   }else{
     fin([[0,.45,-.55],[0,1.25,-.15],[0,1.45,.20],[0,.66,.33],[0,.40,.74]],0,.055,[.075,.105,.12]);
     fin([[0,.21,1.25],[0,.53,1.40],[0,.62,1.57],[0,.22,1.72]],0,.025,[.075,.105,.12]);
@@ -144,25 +177,58 @@ export function createMarineMesh(type='whale'){
 }
 
 export async function createMarineLife({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random,waterOptics=null}){
+  const response=await fetch('assets/wildlife/whale.glb');if(!response.ok)throw Error('Whale asset unavailable');
+  const whaleModel=loadMarineGLB(await response.arrayBuffer()),whaleRig=createMarineRig(whaleModel);
   const state=createMarineLifeState(random),B=GPUBufferUsage;
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
+  const material=whaleModel.materials[0];
+  async function marineTexture(reference,fallback,textureFormat){
+    if(!reference){const texture=device.createTexture({size:[1,1],format:textureFormat,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});device.queue.writeTexture({texture},new Uint8Array(fallback),{bytesPerRow:4},[1,1]);return texture;}
+    const source=whaleModel.images[reference.image],bitmap=await createImageBitmap(new Blob([source.bytes],{type:source.mimeType}),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
+    const levels=Math.floor(Math.log2(Math.max(bitmap.width,bitmap.height)))+1;
+    const texture=device.createTexture({label:'whale '+textureFormat,size:[bitmap.width,bitmap.height],mipLevelCount:levels,format:textureFormat,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT});
+    for(let level=0;level<levels;level++){
+      const w=Math.max(1,bitmap.width>>level),h=Math.max(1,bitmap.height>>level),canvas=new OffscreenCanvas(w,h);
+      canvas.getContext('2d').drawImage(bitmap,0,0,w,h);device.queue.copyExternalImageToTexture({source:canvas},{texture,mipLevel:level},[w,h]);
+    }
+    bitmap.close();return texture;
+  }
+  const textures=await Promise.all([marineTexture(material.baseColorTexture,[255,255,255,255],'rgba8unorm-srgb'),marineTexture(material.normalTexture,[128,128,255,255],'rgba8unorm'),marineTexture(material.metallicRoughnessTexture,[255,150,0,255],'rgba8unorm')]);
+  const bones=buffer('whale joint poses',whaleRig.update(0,0),B.STORAGE);
   const values=new Float32Array(MARINE_ANIMAL_LIMIT*8),effectValues=new Float32Array(MARINE_EFFECT_LIMIT*12);
   const animals=buffer('marine animal poses',values,B.STORAGE),effects=buffer('marine surface events',effectValues,B.STORAGE);
-  const meshes={};for(const kind of ['shark','whale']){const mesh=createMarineMesh(kind);meshes[kind]={vertex:buffer(`${kind} vertices`,mesh.vertices,B.VERTEX),index:buffer(`${kind} indices`,mesh.indices,B.INDEX),count:mesh.indices.length};}
+  const origins=buffer('marine emission origins',new Float32Array(MARINE_EFFECT_LIMIT*4),B.STORAGE);
+  const landings=buffer('marine droplet contacts',new Float32Array(MARINE_EFFECT_LIMIT*MARINE_BREATH_DROP_COUNT*4),B.STORAGE);
+  const meshes={};for(const kind of ['shark','whale']){
+    const mesh=kind==='whale'?whaleModel:createMarineMesh(kind),stride=kind==='whale'?11:9,num=mesh.vertices.length/stride;
+    const data=new ArrayBuffer(num*68),f=new Float32Array(data),j=new Uint16Array(data);
+    for(let i=0;i<num;i++){
+      f.set(mesh.vertices.subarray(i*stride,i*stride+stride),i*17);
+      for(let k=0;k<4;k++){j[i*34+22+k]=kind==='whale'?whaleModel.skin.joints[i*4+k]:0;f[i*17+13+k]=kind==='whale'?whaleModel.skin.weights[i*4+k]:k===0?1:0;}
+    }
+    meshes[kind]={vertex:buffer(`${kind} vertices`,new Uint8Array(data),B.VERTEX),index:buffer(`${kind} indices`,mesh.indices,B.INDEX),count:mesh.indices.length};
+  }
   const module=await shader(MARINE_LIFE_RENDER,'marine wildlife');
-  const layout=[{arrayStride:36,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x3'}]}];
-  const kinds=[['dolphin',layout,'marine animals'],['dolphinRipple',[],'marine ripples'],['dolphinSplash',[],'marine splash crowns'],['dolphinDrop',[],'marine spray'],['marineBlow',[],'whale blows']];
+  const layout=[{arrayStride:68,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'float32x2'},{shaderLocation:4,offset:44,format:'uint16x4'},{shaderLocation:5,offset:52,format:'float32x4'}]}];
+  const kinds=[['dolphin',layout,'marine animals'],['dolphinRipple',[],'marine ripples'],['dolphinSplash',[],'marine splash crowns'],['dolphinDrop',[],'marine spray'],['marineBlow',[],'whale breath mist'],['marineBreathDrop',[],'whale breath water'],['marineFallout',[],'whale breath fallout']];
   const pipelines=await Promise.all(kinds.map(([kind,buffers,label],i)=>device.createRenderPipelineAsync({label,layout:'auto',
     vertex:{module,entryPoint:kind+'VS',buffers},fragment:{module,entryPoint:kind+'FS',targets:[{format,...(i?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})));
-  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects}];
-  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?[0,1,2,3,4,5,6,7,8]:[0,1,2,3,4,5,6,7,9]).includes(e.binding))}));
+  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects},{buffer:origins},{buffer:landings},...textures.map(t=>t.createView()),{buffer:bones}];
+  const bodyBindings=[0,1,2,3,4,5,6,7,8,12,13,14,15];
+  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?bodyBindings:i===1?[0,1,2,3,4,5,6,7,9]:i===4?[0,1,2,3,5,6,7,9,10]:i===5?[0,1,2,3,4,5,6,7,9,10,11]:i===6?[0,1,2,3,4,5,6,7,9,11]:[0,1,2,3,4,5,6,7,9,10]).includes(e.binding))}));
+  const birthModule=await shader(MARINE_EFFECT_INIT,'marine emission height');
+  const birthPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:birthModule,entryPoint:'marineBirthCS'}});
+  const birthGroup=device.createBindGroup({layout:birthPipeline.getBindGroupLayout(0),entries:[0,6,7,9,10,11].map(binding=>({binding,resource:resources[binding]}))});
   const submerged=waterOptics?await waterOptics.capture({source:MARINE_LIFE_RENDER,pipeline:pipelines[0],vertex:{entryPoint:'dolphinVS',buffers:layout},entry:'dolphinFS',world:'v.world'}):null;
-  const submergedGroup=submerged?.bindGroup(resources.slice(0,9));
-  let waterCount=0,burstCount=0,blowCount=0;
-  return {state,trigger:(type,boat,options)=>state.trigger(type,boat,options),encode(){},
+  const submergedGroup=submerged?.bindGroup(bodyBindings.map(binding=>({binding,resource:resources[binding]})));
+  let waterCount=0,burstCount=0,blowCount=0,effectCount=0;
+  return {state,trigger:(type,boat,options)=>state.trigger(type,boat,options),encode(pass){
+      if(!effectCount)return;pass.setPipeline(birthPipeline);pass.setBindGroup(0,birthGroup);pass.dispatchWorkgroups(effectCount);
+    },
     update(dt,boat,settings,terrain=null,vessels=[boat]){
       state.step(dt,boat,settings,terrain,vessels);waterCount=0;burstCount=0;blowCount=0;
+      if(state.active&&state.animals[0].type==='whale')device.queue.writeBuffer(bones,0,whaleRig.update(state.age,state.animals[0].depth>1?.2:1));
       for(let i=0;i<state.count;i++){const a=state.animals[i];values.set([a.x,a.depth,a.z,a.heading,a.pitch,a.scale,a.phase,(a.type==='whale'?2:-2)+a.roll],i*8);}
       let count=0;
       // Stable pool order: impact bursts, ordinary surface trails, then blows.
@@ -170,11 +236,12 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
         const type=e.kind==='blow'?2:e.kind==='trail'?1:0;
         if(type!==category||e.age<0||e.age>=MARINE_EFFECT_SECONDS||e.strength<=0)continue;
         const kind=e.kind==='trail'?0:e.kind==='emerge'?1:e.kind==='entry'?2:3;
-        effectValues.set([e.x,e.z,e.age,e.strength,e.heading,e.seed,kind,e.scale,e.kind==='blow'?e.height:e.speed,e.windX,e.windZ,0],count++*12);
+        effectValues.set([e.x,e.z,e.age,e.strength,e.heading,e.seed,kind,e.scale,e.kind==='blow'?e.height:e.speed,e.windX,e.windZ,e.id+1],count++*12);
         if(type===0)burstCount++;if(type===2)blowCount++;else waterCount++;
       }
       if(state.active)device.queue.writeBuffer(animals,0,values);
       if(count)device.queue.writeBuffer(effects,0,effectValues,0,count*12);
+      effectCount=count;
     },
     drawSubmerged(pass){
       if(!submerged||!state.active)return;
@@ -185,8 +252,12 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
       if(waterCount){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,groups[1]);pass.draw(DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_RINGS*DOLPHIN_RIPPLE_ROWS*6,waterCount);}
       if(burstCount){pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);pass.draw(DOLPHIN_SHEET_SEGMENTS*DOLPHIN_SHEET_ROWS*6,burstCount);
         pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,burstCount*DOLPHIN_DROP_COUNT);}
-      if(blowCount){pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);pass.draw(MARINE_BLOW_SEGMENTS*MARINE_BLOW_ROWS*6,blowCount,0,waterCount);}
+      if(blowCount){
+        pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);pass.draw(MARINE_MIST_COUNT*6,blowCount,0,waterCount);
+        pass.setPipeline(pipelines[5]);pass.setBindGroup(0,groups[5]);pass.draw(MARINE_BREATH_DROP_COUNT*6,blowCount,0,waterCount);
+        pass.setPipeline(pipelines[6]);pass.setBindGroup(0,groups[6]);pass.draw(MARINE_FALLOUT_COUNT*6,blowCount,0,waterCount);
+      }
     },
-    destroy(){for(const b of [animals,effects,...Object.values(meshes).flatMap(m=>[m.vertex,m.index])])b.destroy();},
+    destroy(){for(const b of [animals,effects,origins,landings,bones,...Object.values(meshes).flatMap(m=>[m.vertex,m.index])])b.destroy();for(const texture of textures)texture.destroy();},
   };
 }

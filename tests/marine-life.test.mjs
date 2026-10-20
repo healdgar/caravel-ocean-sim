@@ -105,6 +105,44 @@ test('physical meshes distinguish horizontal whale flukes and long pectorals fro
   assert.throws(()=>createMarineMesh('kraken'),/Unknown marine mesh/);
 });
 
+test('whale flukes form one sealed foil with aft-swept tips, an aft notch and a buried peduncle attachment',()=>{
+  const mesh=createMarineMesh('whale'),count=mesh.vertices.length/9,parents=Array.from({length:count},(_,i)=>i);
+  const find=i=>parents[i]===i?i:(parents[i]=find(parents[i]));
+  for(let i=0;i<mesh.indices.length;i+=3)for(let j=1;j<3;j++)parents[find(mesh.indices[i+j])]=find(mesh.indices[i]);
+  const groups=new Map();for(let id=0;id<count;id++){const root=find(id);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(id);}
+  const point=id=>Array.from(mesh.vertices.subarray(id*9,id*9+3));
+  const candidates=[...groups.values()].filter(ids=>ids.some(id=>point(id)[2]>6.5)&&ids.some(id=>Math.abs(point(id)[0])>3));
+  assert.equal(candidates.length,1,'the two lobes share vertices across the tail centre instead of independent overlapping patches');
+  const ids=candidates[0],points=ids.map(point),centre=points.filter(([x])=>Math.abs(x)<1e-6);
+  const tips=points.filter(([x])=>Math.abs(x)>3.4),notch=Math.max(...centre.map(p=>p[2])),leading=Math.min(...centre.map(p=>p[2]));
+  assert.ok(tips.some(([x])=>x<0)&&tips.some(([x])=>x>0));
+  assert.ok(tips.every(p=>p[2]>notch+.6),'pointed tips sweep aft of the V-notch, rather than forward toward the head');
+  assert.ok(leading<6&&notch>6.4,'the leading edge overlaps the peduncle while its trailing notch remains aft of the trunk');
+  assert.ok(points.every(([,y])=>y>-.4&&y<-.05),'a horizontal foil retains finite, animal-scale thickness');
+  // Both lobes must be closed, with outward winding. This catches open centre
+  // seams and mirrored undersides that a bounding-box test would miss.
+  const members=new Set(ids),edges=new Map();let signedVolume=0;
+  for(let i=0;i<mesh.indices.length;i+=3){
+    const triangle=Array.from(mesh.indices.subarray(i,i+3));if(!members.has(triangle[0]))continue;
+    const [a,b,c]=triangle.map(point),u=b.map((v,j)=>v-a[j]),v=c.map((q,j)=>q-a[j]);
+    const cross=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+    assert.ok(Math.hypot(...cross)>1e-6,'foil triangles have nonzero area');
+    const normal=triangle.map(id=>Array.from(mesh.vertices.subarray(id*9+3,id*9+6))).reduce((sum,n)=>sum.map((v,j)=>v+n[j]),[0,0,0]);
+    assert.ok(cross.reduce((sum,n,j)=>sum+n*normal[j],0)>0,'both foil surfaces face outwards');
+    signedVolume+=(a[0]*(b[1]*c[2]-b[2]*c[1])+a[1]*(b[2]*c[0]-b[0]*c[2])+a[2]*(b[0]*c[1]-b[1]*c[0]))/6;
+    for(let j=0;j<3;j++){const a=triangle[j],b=triangle[(j+1)%3],key=a<b?`${a}:${b}`:`${b}:${a}`;edges.set(key,(edges.get(key)??0)+1);}
+  }
+  assert.ok(signedVolume>.1,'the sealed foil encloses positive water-displacing volume');
+  assert.ok([...edges.values()].every(n=>n===2),'every foil edge is welded to exactly two triangles');
+  const root=centre.reduce((a,p)=>p[2]<a[2]?p:a),bodyRings=Array.from({length:77},(_,ring)=>{
+    const start=ring*33*9,z=mesh.vertices[start+2],xs=[],ys=[];
+    for(let sector=0;sector<32;sector++){xs.push(mesh.vertices[start+sector*9]);ys.push(mesh.vertices[start+sector*9+1]);}
+    return {z,w:Math.max(...xs),h:(Math.max(...ys)-Math.min(...ys))*.5,y:(Math.max(...ys)+Math.min(...ys))*.5};
+  }).sort((a,b)=>Math.abs(a.z-root[2])-Math.abs(b.z-root[2]));
+  const neck=bodyRings[0];assert.ok(Math.abs(neck.z-root[2])<.15);
+  assert.ok((root[0]/neck.w)**2+((root[1]-neck.y)/neck.h)**2<.25,'the leading centre is buried inside the tail stock, without a visible gap');
+});
+
 test('smooth marine profiles keep shading normals perpendicular to body tangents and closed fins share rounded rim normals',()=>{
   for(const type of ['whale','shark']){
     const mesh=createMarineMesh(type),sectors=type==='whale'?32:24,rings=type==='whale'?76:56,stride=sectors+1;

@@ -240,7 +240,8 @@ shared with Niña rather than representing an 1805 uniform reconstruction.
 Pinta and Santa María retain planned rig and [reported specification
 profiles](SHIP_MODEL_RESEARCH.md); their geometry and three-ship toggles remain
 pending. The [later vessel roadmap](SHIP_MODELS.md#later-vessel-programme)
-contains the Viking longship, Roman galley and Caribbean canoe. Victory was
+contains the Viking longship, Roman galley, Caribbean canoe, **Flying Cloud**
+clipper (replacing the generic schooner) and **Gipsy Moth IV** yacht. Victory was
 brought forward at the user's request.
 
 A second copy of the selected model follows by default. Open **Camera views → View both
@@ -360,7 +361,7 @@ Optical basis: [PBRT refraction and Fresnel](https://www.pbr-book.org/4ed/Reflec
 and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transmittance).
 
 A separate, bounded marine encounter occasionally introduces a passing shark or
-an approximately 14 m humpback-like whale. Whale encounters include a full breach,
+a 14.1 m whale using the supplied Meshy model and its native 23-bone rig. Whale encounters include a full breach,
 reentry splash, fluke dive and periodic blow. The shark swims with lateral tail
 motion; whales beat their horizontal flukes vertically. Bodies and contact effects
 follow the moving FFT ocean. Whales require sixteen metres of clear water; sharks
@@ -369,12 +370,25 @@ exponential interval averaging thirty minutes and are suppressed in severe weath
 One shark/whale encounter can run alongside the dolphin pod. No wildlife draw is
 submitted when those animals and their remaining surface effects are absent.
 
+The whale preserves the supplied model's 15,717 triangles, UVs, base colour,
+normal and roughness textures. Its rig has no animation clips; bounded tail,
+fluke and pectoral strokes are authored on the existing bones and weights.
+Its brief blow emits soft condensate parcels and separate heavier water droplets
+from the posed forehead outlet. The parcels
+inherit forward motion, entrain into wind and disperse; coarse water falls under
+gravity. GPU-cached launch heights keep airborne spray independent of later
+waves. First descending contacts stop those drops and create small ripples at
+the recorded locations. Breach sheets and spray also retain their launch height.
+These bounded particle approximations are not a full fluid solver or a
+species-calibrated respiratory model.
+
 Open **Sea settings → Environment & encounters** for **Spot shark**, **Whale
 breach**, **Whale fluke dive**, **Whale blow**, **View marine animal** and **End marine
 encounter**. Natural sightings have a separate switch. Debug links accept
 `shark=1` or `whale=breach|fluke|blow`, plus `marineView=1&view=ship` to frame the
-animal. These are original procedural approximations and authored animation;
-there are no scanned animal assets, biological behavior simulation or wildlife sounds.
+animal. Encounter behavior and swimming motion are authored; there is no
+biological behavior simulation or wildlife audio. The whale GLB and all three
+textures are embedded in the standalone builds.
 
 ## Share your sea conditions
 
@@ -676,7 +690,7 @@ npm run build
 npm test
 ```
 
-The sunset-haze revision passed **277 tests** using installed Chrome on
+The rigged-whale revision passed **293 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -703,6 +717,12 @@ The shared-atmosphere regression rejects a false sunset cone on downward views
 while retaining genuine horizon warmth. It also checks continuity through nadir,
 clear-air identity, finite zero-distance rays, distance haze and precipitation.
 Visible overhead and horizon fleet views were checked with bloom off and on.
+
+The supplied whale checks cover embedded textures, mesh transforms, UVs,
+23-bone skin weights, rest-shape preservation, native bone axes, fixed head
+attachments, a submerged swimming envelope and standalone rendering. Spray
+checks cover finite emission, gravity, wind entrainment, inherited momentum,
+frozen launch heights and persistent first-contact locations.
 
 Tree checks verify connected recursive growth, taper, bark/leaf UVs, terminal
 attachments, stable LOD dimensions and a bounded forest draw budget. Native GPU
