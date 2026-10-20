@@ -226,11 +226,15 @@ tops. Eight square sails, three headsails and a gaff spanker use shared posed
 geometry for forces, rendering, running ropes, shadows and wetting. Fore/main/
 mizzen controls operate mast groups; they do not represent individual sail handling.
 
-[Victory's source ledger](VICTORY_RESEARCH.md) distinguishes reported dimensions
-and surviving fore-topsail measurements from authored hull offsets, spars and
-rigging. This is an initial game reconstruction, not a digitized Admiralty model
-or calibrated naval simulator. Her hydrostatics integrate her own hull at an
-**authored 8.8 m service draught** (about 4,866 tonnes in this geometry); the reported
+[Victory's source ledger](VICTORY_RESEARCH.md) distinguishes reported dimensions,
+surviving fore-topsail measurements and sections measured from the supplied
+Meshy reference from authored underwater offsets, spars and rigging. The fuller
+rounded bow, changing stern sections and inward-curving upper sides share one
+fair hull definition across geometry, water exclusion and hydrostatics. Deck
+edges, bulkheads, wales, rails and end closures join that same surface. This is
+a game reconstruction, not a digitized Admiralty model or calibrated naval
+simulator. Her hydrostatics integrate her own hull at an
+**authored 8.8 m service draught** (about 4,905 tonnes in this geometry); the reported
 2,162 tons builder's measurement is never used as displacement. Mass, inertia,
 wind shear and canvas incidence drive motion; requested speed supplies no motor
 thrust in sailing mode. Twelve visible sailors represent a working watch; the
@@ -690,7 +694,7 @@ npm run build
 npm test
 ```
 
-The rigged-whale revision passed **293 tests** using installed Chrome on
+The reference-fitted Victory revision passed **302 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -702,6 +706,11 @@ clearing, whale breaches/flukes/blows and wet-skin sunlight glints. Victory chec
 cover hull/deck geometry, source dimensions, independent mast groups, wind-driven
 loading, mass/inertia, 48 rig clearance poses, sewn head/yard joints, CPU/GPU cloth
 parity, crew reach/routes, anchor scaling, draft-safe coastal starts and two-ship rendering.
+Hull regressions check withheld reference sections, fair tangents, rendered deck,
+bulkhead, wale and rail connections, closed ends, supported curved galleries,
+dense CPU/GPU width parity and independent hydrostatic quadrature. Victory's
+joined procedural model contains 82,906 triangles and about 5.27 MB of indexed
+geometry; the 3.52-million-triangle reference is not loaded by the game.
 Underwater checks cover Snell refraction, Fresnel reflection, spectral extinction,
 sparse silhouettes at 12/60 m without dark halos, visible crest faces above eye
 level, all six material families, real whale/dolphin image changes, resizing and

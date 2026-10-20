@@ -21,6 +21,69 @@ The National Historic Ships register lists 51 ft beam but gives an erroneous 5.4
 
 **Still uncalibrated:** loaded draught, waterline length, vertical centre of gravity, detailed mass distribution, roll/pitch damping, resistance and sail coefficients. Commonly repeated mast heights and draught values were not verified against an accessible 1805 dimensional schedule in this quick pass. Any chosen runtime values must remain labelled authored approximations. Builder's measurement/tons burthen are capacity conventions, not displacement mass.
 
+## Measured user reference and waterline fit
+
+The supplied `Meshy_AI_Victory_at_Portsmouth_1020215320_generate.glb` is a shape
+reference, rather than a replacement runtime asset. Its SHA-256 is
+`f54976c233c708811065981f00a1be9ff6b3c6a56880b34b36d391720cd3453e`.
+It contains 3,517,784 triangles, including broken/fused rigging and fittings.
+The game retains its procedural working structure, gunports, guns and rig.
+
+Exact triangle/plane intersections were measured along source X (bow negative,
+stern positive), with Y up and Z across the beam. Port/starboard outer distances
+were averaged. Section spikes caused by guns, boats, channels and broken
+attachments were excluded; small missing intervals were interpolated. Fifteen
+longitudinal stations and eight reliable source height bands inform the fit.
+Shape-preserving cubic interpolation shares tangents between frames; separate
+height sections allow a rounded bluff bow, tumblehome and a fine lower stern
+under a broad upper counter. A single repeated cross-section cannot do this.
+
+Registration is explicit and **authored**:
+
+- Robust reference half-breadth: 0.176884356886 source units. Scale:
+  44.802152884 metres/source unit, anchored to the reported 15.8496 m beam.
+- Source gun-deck endpoints are inferred, not annotated. The fitted sternpost
+  is X=+0.78; the 56.6928 m baseline gives centre X=0.147298261907.
+- Source upper gun-deck floor Y=-0.358 aligns with design height 1.17
+  (5.527548 m). This places the chosen waterline at source Y=-0.481376838928.
+  The GLB itself supplies no waterline or loading condition.
+- Engine design Z=(source X-centre X)×44.802152884/4.7244. Design base
+  Y=(source Y-waterline)×44.802152884/4.7244; the authored sheer is then added.
+  Transverse widths use the corresponding beam scale. Extreme offsets are
+  bounded by the reported beam.
+
+The user's Portsmouth photograph supplies an additional visual check of lower
+gunport clearance, high stern galleries and the narrow lower stern. Its
+perspective and unspecified loading condition cannot establish exact draft.
+The reference mesh's shallow underside cannot establish it either; the deeper
+8.8 m fairbody remains authored. Reconstruction plans and this reference also
+describe different historical/display states, so the fit is not an assertion
+that every feature matches October 1805.
+
+An independent set of 22 clean sections at source X=-0.30, +0.10, +0.40 and
++0.60, omitted from the fitted station grid, gives 0.0668 m RMS half-breadth
+error and 0.2119 m maximum error. These measure agreement with this imperfect
+GLB, not historical accuracy. Tests also check rendered joins and dense CPU/GPU
+width parity, so water contact follows the same surface.
+
+The procedural hull's edge planks, continuous waterways, tapered bulkheads,
+rail posts, proud wale returns, curved gunport lids and raked end closures use
+the same hull evaluator. Stern galleries have shared arched, horizontally bowed
+and raked skins, glazing and structural returns. Their restrained crown and
+corner rounding are authored from the reference silhouette and photograph,
+not surveyed moulding dimensions. The completed working model retains 104
+represented guns and its existing sail/rig attachment nodes at 82,906 triangles
+(5,271,816 bytes of indexed geometry); the source's broken rigging is not copied.
+
+The fit changes integrated volume at the chosen waterline from 4,747.85 to
+4,785.39 m³ (+0.79%), and waterplane area from 765.88 to 815.20 m². At the
+model's 1,025 kg/m³ seawater density that is 4,905.03 tonnes. The default
+manifest's fixed mass is derived from this geometry to retain its chosen
+waterline; it is not independent evidence for historical displacement.
+Independent numerical quadrature checks convergence, buoyancy and declared
+mass accounting. Positive model stability does not validate its authored
+centre of gravity or damping against sea trials.
+
 ## Original and reconstruction plans
 
 | Record | What it establishes | Caveat |

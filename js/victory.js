@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import { VICTORY_DESIGN, VICTORY_MASTS, VICTORY_SAILS,VICTORY_STANDING_LINES,VICTORY_RUNNING_LINES,victoryShroud,
   victorySheer, victoryHullDeck, victoryVesselDeck, victoryHullHalfWidth,
-  victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot } from './models/victory.js';
+  victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot,victoryHullPoint } from './models/victory.js';
 
 // A separate first-rate hull, decks, batteries and full rig. The nine-float
 // vertex contract is shared with the caravel; its authored geometry is not.
@@ -63,13 +63,13 @@ export function createVictoryMesh({groups,parts}={}){
   const upperPorts=VICTORY_DESIGN.gunDecks.filter(g=>!batteries.includes(g)).flatMap(g=>Array.from({length:g.count/2},(_,i)=>({y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1)})));
   for(const p of ports){zValues.add(p.z-portW/2);zValues.add(p.z+portW/2);}
   for(const p of upperPorts){zValues.add(p.z-portW/2);zValues.add(p.z+portW/2);}
-  const zs=[...zValues].sort((a,b)=>a-b),ys=[-VICTORY_DESIGN.hull.draft,-1.7,-1.5,-1.25,-1,-.75,-.5,-.25,0,.15,.2,.58,.65,.7,1.08,1.15,1.2,1.58];
+  const zs=[...zValues].sort((a,b)=>a-b),ys=[-VICTORY_DESIGN.hull.draft,-1.7,-1.5,-1.25,-1,-.75,-.5,-.25,0,.07,.2,.58,.6,.67,.7,1.08,1.1,1.17,1.2,1.58,
+    VICTORY_DESIGN.decks.forecastle.height,VICTORY_DESIGN.decks.quarter.height,VICTORY_DESIGN.decks.poop.height];
   for(const p of ports){ys.push(p.y-portH/2,p.y+portH/2);}
   const levels=[...new Set(ys)].sort((a,b)=>a-b);
-  function hullPoint(station,y,side){
-    const depth=Math.max(0,-y/VICTORY_DESIGN.hull.draft),z=station*(1-(station<0?VICTORY_DESIGN.hull.bowRake:VICTORY_DESIGN.hull.sternRake)/6*depth*depth),h=y+victorySheer(z);
-    return [side*victoryHullHalfWidth(z,h),h,z];
-  }
+  const hullPoint=(station,y,side)=>victoryHullPoint(station,y,side);
+  const skinTop=z=>Math.max(1.58,victoryVesselDeck(z)-victorySheer(z));
+  const hullMaterial=y=>y<-.13?22:((y>=.2&&y<=.58)||(y>=.7&&y<=1.08)||(y>=1.2&&y<=1.58))?21:20;
   function hullNormal(p,side){
     const e=.0001,wY=(victoryHullHalfWidth(p[2],p[1]+e)-victoryHullHalfWidth(p[2],p[1]-e))/(2*e),wZ=(victoryHullHalfWidth(p[2]+e,p[1])-victoryHullHalfWidth(p[2]-e,p[1]))/(2*e);
     return unit([side,-wY,-wZ]);
@@ -77,12 +77,23 @@ export function createVictoryMesh({groups,parts}={}){
   const hullStart=out.length;
   for(const side of [-1,1])for(let j=0;j<levels.length-1;j++)for(let i=0;i<zs.length-1;i++){
     const a=levels[j],b=levels[j+1],z=zs[i],Z=zs[i+1],cy=(a+b)/2,cz=(z+Z)/2;
+    if(cy>skinTop(cz)+1e-8)continue;
     if(ports.some(p=>Math.abs(cz-p.z)<portW/2-1e-7&&Math.abs(cy-p.y)<portH/2-1e-7))continue;
-    const material=cy<-.13?22:((cy>=.2&&cy<=.58)||(cy>=.7&&cy<=1.08)||(cy>=1.2&&cy<=1.58))?21:20;
+    const material=hullMaterial(cy);
     const points=[[z,a],[Z,a],[Z,b],[z,b]].map(([s,y])=>hullPoint(s,y,side));
     quad(...points,material,points.map(p=>hullNormal(p,side)),[[a*5,z*2],[a*5,Z*2],[b*5,Z*2],[b*5,z*2]]);
   }
   group('hull.planking','hull',hullStart);
+  // The end skins share every raked station vertex with the side planking.
+  // At a zero-width stem the sides already meet, so degenerate faces are omitted.
+  for(const [name,station]of [['bow',-6],['stern',6]]){
+    const start=out.length;
+    for(let j=0;j<levels.length-1;j++){
+      const a=levels[j],b=levels[j+1];if((a+b)/2>skinTop(station)+1e-8)continue;
+      quad(hullPoint(station,a,-1),hullPoint(station,a,1),hullPoint(station,b,1),hullPoint(station,b,-1),hullMaterial((a+b)/2));
+    }
+    group('hull.closure.'+name,'hull',start);
+  }
   // Copper plates have sparse dark seams and a restrained nail rhythm.
   const copperStart=out.length;
   for(const side of [-1,1])for(let y=-1.6;y<-.15;y+=.17)for(let z=-5.4;z<5.7;z+=.48){
@@ -91,12 +102,16 @@ export function createVictoryMesh({groups,parts}={}){
   }
   group('hull.copper.seams','hull',copperStart);
   // Proud wales track exactly the same surface as the hull on both sides.
+  const waleZs=[...new Set([...Array.from({length:49},(_,i)=>-6+i/4),...VICTORY_DESIGN.hull.stations])].sort((a,b)=>a-b);
   for(const side of [-1,1]){
     const start=out.length;
-    for(const h of [.035,.635,1.135])for(let i=0;i<zs.length-1;i++){
-      const a=hullPoint(zs[i],h-.035,side),b=hullPoint(zs[i+1],h-.035,side),c=hullPoint(zs[i+1],h+.035,side),d=hullPoint(zs[i],h+.035,side);
-      for(const p of [a,b,c,d])p[0]+=side*.023;
+    for(const h of [.035,.635,1.135])for(let i=0;i<waleZs.length-1;i++){
+      const skin=[hullPoint(waleZs[i],h-.035,side),hullPoint(waleZs[i+1],h-.035,side),hullPoint(waleZs[i+1],h+.035,side),hullPoint(waleZs[i],h+.035,side)];
+      const [a,b,c,d]=skin.map(p=>[p[0]+side*.023,p[1],p[2]]);
       quad(a,b,c,d,20,[hullNormal(a,side),hullNormal(b,side),hullNormal(c,side),hullNormal(d,side)]);
+      quad(skin[0],skin[1],b,a,20);quad(d,c,skin[2],skin[3],20);
+      if(i===0)quad(skin[0],a,d,skin[3],20);
+      if(i===waleZs.length-2)quad(b,skin[1],skin[2],c,20);
     }
     group(`hull.wales.${side<0?'port':'starboard'}`,'hull',start);
   }
@@ -104,41 +119,103 @@ export function createVictoryMesh({groups,parts}={}){
   // and individual barrels. The far end is dark recess, not a solid yellow wall.
   for(const side of [-1,1])for(const [index,p]of ports.entries()){
     const start=out.length,y=p.y+victorySheer(p.z),x=side*victoryHullHalfWidth(p.z,y),a=p.z-portW/2,b=p.z+portW/2,lo=y-portH/2,hi=y+portH/2;
-    const outer=(z,Y)=>side*victoryHullHalfWidth(z,Y),inset=x-side*.14;
-    quad([inset,lo,a],[inset,hi,a],[inset,hi,b],[inset,lo,b],4);
-    for(const z of [a,b])quad([outer(z,lo),lo,z],[outer(z,hi),hi,z],[inset,hi,z],[inset,lo,z],24);
-    for(const Y of [lo,hi])quad([outer(a,Y),Y,a],[inset,Y,a],[inset,Y,b],[outer(b,Y),Y,b],24);
+    const inset=x-side*.14,surface=(z,base,inside=false)=>{
+      const Y=base+victorySheer(z);return [inside?inset:side*victoryHullHalfWidth(z,Y),Y,z];
+    },low=p.y-portH/2,high=p.y+portH/2;
+    quad(surface(a,low,true),surface(a,high,true),surface(b,high,true),surface(b,low,true),4);
+    for(const z of [a,b])quad(surface(z,low),surface(z,high),surface(z,high,true),surface(z,low,true),24);
+    for(const base of [low,high])quad(surface(a,base),surface(a,base,true),surface(b,base,true),surface(b,base),24);
     tube([inset-side*.10,y,p.z],[x+side*.19,y,p.z],p.calibre===32?.040:p.calibre===24?.035:.030,3,.026,8);
     tube([x+side*.192,y,p.z],[x+side*.195,y,p.z],.021,4,.021,8);
-    quad([x,hi+.015,a],[x+side*.17,hi+.10,a],[x+side*.17,hi+.10,b],[x,hi+.015,b],20);
+    // The hinge and raised leaf retain the curved sheer and tumblehome of the
+    // opening. A flat rectangle across the bow separated from its gunport.
+    for(let i=0;i<3;i++){
+      const z=a+(b-a)*i/3,Z=a+(b-a)*(i+1)/3;
+      const hinge=q=>{const v=surface(q,high+.008);v[0]+=side*.004;return v;};
+      const raised=q=>{const v=hinge(q);v[0]+=side*.17;v[1]+=.085;return v;};
+      quad(hinge(z),raised(z),raised(Z),hinge(Z),20);
+    }
     for(const z of [p.z-.068,p.z+.068])rope([x+side*.12,hi+.075,z],[x+side*.08,hi+.22,z],.004,3);
     group(`gun.${p.deck}.${side<0?'port':'starboard'}.${index}`,'hull',start);
   }
   function deck(start,end,height,node){
-    const begin=out.length,N=Math.ceil((end-start)/.26);
+    const begin=out.length,N=Math.ceil((end-start)/.5),edges=[];
+    // Clip each plank against both sloping deck edges. Taking the narrower
+    // endpoint for the entire strip left missing wedges along the curved bow.
+    const clip=(polygon,distance)=>{
+      const result=[];
+      for(let i=0;i<polygon.length;i++){
+        const a=polygon[i],b=polygon[(i+1)%polygon.length],da=distance(a),db=distance(b);
+        if(da>=-1e-10)result.push(a);
+        if((da<0)!==(db<0)){const t=da/(da-db);result.push(a.map((v,j)=>v+(b[j]-v)*t));}
+      }
+      return result;
+    };
     for(let i=0;i<N;i++){
-      const z=start+(end-start)*i/N,Z=start+(end-start)*(i+1)/N,y=height+victorySheer(z),Y=height+victorySheer(Z),w=victoryHullHalfWidth(z,y)-.035,W=victoryHullHalfWidth(Z,Y)-.035;
+      const z=start+(end-start)*i/N,Z=start+(end-start)*(i+1)/N,y=height+victorySheer(z),Y=height+victorySheer(Z);
+      const outer=victoryHullHalfWidth(z,y),Outer=victoryHullHalfWidth(Z,Y),w=Math.max(0,outer-.035),W=Math.max(0,Outer-.035);
+      const stops=[z,...zs.filter(p=>p>z+1e-9&&p<Z-1e-9),Z];
+      const breadthAt=p=>Math.max(0,victoryHullHalfWidth(p,height+victorySheer(p))-.035);
+      const widths=stops.map(breadthAt),minimum=Math.min(...widths),maximum=Math.max(...widths);
+      edges.push({z,Z,y,Y,w,W,outer,Outer,stops});
       for(let x=-1.8;x<1.8;x+=.054){
-        const l=Math.max(x,-w,-W),r=Math.min(x+.052,w,W);if(r<=l)continue;
+        if(x>maximum||x+.052< -maximum)continue;
+        // Interior boards need only the gentle sheer samples. Edge boards
+        // follow every skin station, including the changing stern flare.
+        const cuts=x>=-minimum&&x+.052<=minimum?[z,Z]:stops;
         const offset=Math.sin(Math.round(x/.054)*13.4)*.4;
-        quad([l,y,z],[l,Y,Z],[r,Y,Z],[r,y,z],0,null,[[l*5+offset,z*2],[l*5+offset,Z*2],[r*5+offset,Z*2],[r*5+offset,z*2]]);
+        for(let j=0;j<cuts.length-1;j++){
+          const a=cuts[j],b=cuts[j+1],A=height+victorySheer(a),B=height+victorySheer(b),wa=breadthAt(a),wb=breadthAt(b);
+          let polygon=[[x,A,a],[x,B,b],[x+.052,B,b],[x+.052,A,a]];
+          const breadth=p=>wa+(wb-wa)*(p[2]-a)/(b-a);
+          polygon=clip(clip(polygon,p=>p[0]+breadth(p)),p=>breadth(p)-p[0]);
+          for(let k=1;k<polygon.length-1;k++){
+            const points=[polygon[0],polygon[k],polygon[k+1]];
+            tri(...points,0,null,points.map(p=>[p[0]*5+offset,p[2]*2]));
+          }
+        }
       }
     }
     group(node+'.planks',node,begin);
+    const waterwayStart=out.length;
+    // A continuous waterway closes the trimmed plank ends against the skin.
+    for(const e of edges){
+      const stops=e.stops;
+      const point=(z,side,outer)=>{
+        const y=height+victorySheer(z),skin=victoryHullHalfWidth(z,y),width=outer?skin:Math.max(0,skin-.035);
+        return [side*width,y,z];
+      };
+      for(const side of [-1,1])for(let i=0;i<stops.length-1;i++)quad(point(stops[i],side,false),point(stops[i+1],side,false),point(stops[i+1],side,true),point(stops[i],side,true),0);
+    }
+    group(node+'.waterway',node,waterwayStart);
   }
-  deck(-6,6,VICTORY_DESIGN.decks.main,'deck.main');deck(-5.9,VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,'deck.forecastle');
+  deck(-6,6,VICTORY_DESIGN.decks.main,'deck.main');deck(-6,VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,'deck.forecastle');
   deck(VICTORY_DESIGN.decks.quarter.start,6,VICTORY_DESIGN.decks.quarter.height,'deck.quarter');deck(VICTORY_DESIGN.decks.poop.start,6,VICTORY_DESIGN.decks.poop.height,'deck.poop');
   // The waist has an open view down onto the upper deck; raised ends are
   // enclosed by joined bulkheads, not isolated floating deck plates.
   for(const [z,top,bottom]of [[VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.quarter.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.poop.height,VICTORY_DESIGN.decks.quarter.height]]){
-    const start=out.length,w=victoryHullHalfWidth(z,top+victorySheer(z))-.04;
-    box([-w,bottom+victorySheer(z),z-.015],[w,top+victorySheer(z),z+.015],23);
+    const start=out.length,steps=Math.max(2,Math.ceil((top-bottom)/.12));
+    for(let i=0;i<steps;i++){
+      const lo=bottom+(top-bottom)*i/steps,hi=bottom+(top-bottom)*(i+1)/steps;
+      for(const face of [-1,1]){
+        const Z=z+face*.015,y=lo+victorySheer(Z),Y=hi+victorySheer(Z),w=victoryHullHalfWidth(Z,y),W=victoryHullHalfWidth(Z,Y);
+        quad([-w,y,Z],[w,y,Z],[W,Y,Z],[-W,Y,Z],23);
+      }
+      for(const side of [-1,1]){
+        const p=(Y,Z)=>[side*victoryHullHalfWidth(Z,Y+victorySheer(Z)),Y+victorySheer(Z),Z];
+        quad(p(lo,z-.015),p(lo,z+.015),p(hi,z+.015),p(hi,z-.015),23);
+      }
+    }
+    for(const base of [bottom,top]){
+      const a=z-.015,b=z+.015,A=base+victorySheer(a),B=base+victorySheer(b),w=victoryHullHalfWidth(a,A),W=victoryHullHalfWidth(b,B);
+      quad([-w,A,a],[-W,B,b],[W,B,b],[w,A,a],23);
+    }
     group('deck.bulkhead.'+z,'hull',start);
   }
   // Upper bulwarks, continuous black rail, and proper openings for the smaller
   // quarterdeck/forecastle battery, which completes the 104-gun total.
   for(const side of [-1,1]){
-    const start=out.length;
+    const start=out.length,samples=[];
     for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],centre=(z+Z)/2;
       const base=victoryVesselDeck(centre)-victorySheer(centre),waist=centre>VICTORY_DESIGN.decks.forecastle.end&&centre<VICTORY_DESIGN.decks.quarter.start,h=waist?1.58-base:centre>=VICTORY_DESIGN.decks.poop.start?.19:.285;
@@ -148,8 +225,23 @@ export function createVictoryMesh({groups,parts}={}){
         const height=gunPort?Math.max(.03,gunPort.y-base-portH/2):h;
         quad([w,y,z],[W,Y,Z],[side*victoryHullHalfWidth(Z,Y+height),Y+height,Z],[side*victoryHullHalfWidth(z,y+height),y+height,z],20);
       }
-      tube([rail,y+h,z],[Rail,Y+h,Z],.025,20,.025,4,undefined,true);
-      if(i%3===0)tube([w-side*.018,y,z],[w-side*.018,y+h,z],.013,21,.013,6);
+      samples.push({i,bottom:[w,y,z],top:[rail,y+h,z],nextTop:[Rail,Y+h,Z]});
+    }
+    group(`bulwark.${side}.skin`,'hull',start);
+    const railStart=out.length;
+    for(const s of samples)tube(s.top,s.nextTop,.025,20,.025,4,undefined,true);
+    group(`bulwark.${side}.rail`,'hull',railStart);
+    for(const s of samples)if(s.i%3===0){
+      const postStart=out.length;
+      // Both end rings are buried in the waterway/rail; hidden end caps add no
+      // visible surface and would duplicate those joined timber interfaces.
+      const inset=x=>x-side*Math.min(.018,Math.abs(x)*.5);
+      tube([inset(s.bottom[0]),s.bottom[1],s.bottom[2]],[inset(s.top[0]),s.top[1],s.top[2]],.013,21,.013,6,undefined,true);
+      group(`bulwark.${side}.stanchion.${s.i}`,'hull',postStart);
+    }
+    for(const [z,low,high]of [[VICTORY_DESIGN.decks.forecastle.end,1.58,VICTORY_DESIGN.decks.forecastle.height+.285],[VICTORY_DESIGN.decks.quarter.start,1.58,VICTORY_DESIGN.decks.quarter.height+.285],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.quarter.height+.285,VICTORY_DESIGN.decks.poop.height+.19]]){
+      const point=base=>{const y=base+victorySheer(z);return [side*victoryHullHalfWidth(z,y),y,z];};
+      tube(point(low),point(high),.025,20,.025,4,undefined,true);
     }
     group(`bulwark.${side}`,'hull',start);
   }
@@ -160,41 +252,99 @@ export function createVictoryMesh({groups,parts}={}){
     for(const z1 of [z-.08,z+.08])tube([x-side*.12,floor+.035,z1],[x+side*.045,floor+.035,z1],.039,1,.039,8);
     group(`gun.${g.id}.${side<0?'port':'starboard'}.${i}`,'hull',start);
   }
-  // Closing stern skin and the distinctive enclosed galleries of the 1803 refit.
+  // One gently arched, bowed and raked transom supports every gallery skin,
+  // window and moulding. The square stern remains broad; its upper corners
+  // turn inward rather than becoming three disconnected rectangular shelves.
   const sternStart=out.length;
-  for(let y=-1.4;y<2.63;y+=.11){
-    const Y=Math.min(2.63,y+.11),z=6+Math.max(0,y)*.07,w=victoryHullHalfWidth(6,Math.min(y,2.63))+.04,W=victoryHullHalfWidth(6,Math.min(Y,2.63))+.04;
-    quad([-w,y,z],[w,y,z],[W,Y,z+.008],[-W,Y,z+.008],y<-.1?22:20);
-  }
-  for(const [level,y]of [1.03,1.55,2.05].entries()){
-    const w=1.12-level*.035,z=6.17+y*.07;
-    box([-w-.11,y-.19,z-.03],[w+.11,y+.23,z+.07],21);
-    box([-w-.08,y-.15,z+.071],[w+.08,y+.19,z+.081],20);
-    for(let col=0;col<9;col++){
-      const x=-w+col*(2*w/9),r=x+2*w/9-.035;
-      quad([x,y-.115,z+.085],[r,y-.115,z+.085],[r,y+.15,z+.085],[x,y+.15,z+.085],11);
-      tube([x,y-.14,z+.09],[x,y+.18,z+.09],.010,25,.010,5);
-      tube([x,y+.015,z+.095],[r,y+.015,z+.095],.007,25,.007,5);
+  const rear=(fraction,baseY,outset=.21,extra=.12)=>{
+    const t=Math.max(0,Math.min(1,(baseY-.84)/1.44)),arch=(.045+.055*t)*(1-fraction*fraction);
+    const p=hullPoint(6,baseY+arch,1),round=Math.max(0,Math.min(1,(baseY-1.9)/.38));
+    const corner=1-.035*round*round*(3-2*round)*fraction**8;
+    return [fraction*(p[0]+extra)*corner,p[1],p[2]+outset-(.06*fraction*fraction+.055*(baseY-1))*outset/.21];
+  };
+  const gallerySegments=18;
+  const rearPanel=(left,right,low,high,outset,material,rows=1)=>{
+    for(let row=0;row<rows;row++)for(let i=0;i<gallerySegments;i++){
+      const a=left+(right-left)*i/gallerySegments,b=left+(right-left)*(i+1)/gallerySegments;
+      const y=low+(high-low)*row/rows,Y=low+(high-low)*(row+1)/rows;
+      quad(rear(a,y,outset),rear(b,y,outset),rear(b,Y,outset),rear(a,Y,outset),material);
     }
-    for(const Y of [y-.20,y+.22])tube([-w-.15,Y,z+.11],[w+.15,Y,z+.11],.025,25,.025,6);
+  };
+  for(const [level,y]of [1.03,1.55,2.05].entries()){
+    const low=y-.19,high=y+.23;
+    const rearStart=out.length;
+    rearPanel(-1,1,low,high,.21,21,3);
+    group(`stern.gallery.${level}.rear`,'hull',rearStart);
+    const returnStart=out.length;
+    for(const side of [-1,1])for(let i=0;i<3;i++){
+      const a=low+(high-low)*i/3,b=low+(high-low)*(i+1)/3;
+      quad(rear(side,a,0,0),rear(side,a),rear(side,b),rear(side,b,0,0),21);
+    }
+    for(const Y of [low,high])for(let i=0;i<gallerySegments;i++){
+      const a=-1+2*i/gallerySegments,b=-1+2*(i+1)/gallerySegments;
+      quad(rear(a,Y,0,0),rear(a,Y),rear(b,Y),rear(b,Y,0,0),21);
+    }
+    group(`stern.gallery.${level}.returns`,'hull',returnStart);
+    rearPanel(-.985,.985,y-.15,y+.19,.212,20,2);
+    const windowStart=out.length;
+    for(let col=0;col<9;col++){
+      const left=-1+col*2/9+.013,right=-1+(col+1)*2/9-.013;
+      for(let i=0;i<2;i++){
+        const a=left+(right-left)*i/2,b=left+(right-left)*(i+1)/2;
+        quad(rear(a,y-.115,.216),rear(b,y-.115,.216),rear(b,y+.15,.216),rear(a,y+.15,.216),11);
+        tube(rear(a,y+.015,.226),rear(b,y+.015,.226),.007,25,.007,5,undefined,true);
+      }
+      tube(rear(left,y-.14,.222),rear(left,y+.18,.222),.010,25,.010,5);
+    }
+    group(`stern.gallery.${level}.windows`,'hull',windowStart);
+    const trimStart=out.length;
+    for(const Y of [y-.20,y+.22])for(let i=0;i<gallerySegments;i++)tube(rear(-1+2*i/gallerySegments,Y,.235),rear(-1+2*(i+1)/gallerySegments,Y,.235),.025,25,.025,6,undefined,true);
+    group(`stern.gallery.${level}.trim`,'hull',trimStart);
     for(const side of [-1,1]){
-      const x=side*(w+.13);
-      box([x-side*.12,y-.18,5.28],[x+side*.05,y+.20,z+.04],21);
+      const end=hullPoint(6,y,1)[2]+.21,point=(z,baseY,outset=.12)=>{
+        const t=Math.max(0,Math.min(1,(z-5.28)/(end-5.28))),edge=rear(side,baseY,.21,outset);
+        const Z=5.28+(edge[2]-5.28)*t,sampleZ=Math.min(Z,6),Y=baseY+victorySheer(sampleZ);
+        const parent=hullPoint(6,baseY,1),correction=edge[0]-side*(parent[0]+outset);
+        return [side*(victoryHullHalfWidth(sampleZ,Y)+outset)+correction*t*t,Y,Z];
+      };
+      for(let i=0;i<5;i++){
+        const a=5.28+(end-5.28)*i/5,b=5.28+(end-5.28)*(i+1)/5;
+        quad(point(a,y-.18),point(b,y-.18),point(b,y+.20),point(a,y+.20),21);
+        for(const Y of [y-.18,y+.20])quad(point(a,Y,.002),point(b,Y,.002),point(b,Y),point(a,Y),21);
+      }
+      for(const z of [5.28,end])quad(point(z,y-.18,.002),point(z,y-.18),point(z,y+.20),point(z,y+.20,.002),21);
       for(let k=0;k<4;k++){
         const a=5.32+k*.19,b=a+.145;
-        quad([x+side*.055,y-.12,a],[x+side*.055,y+.14,a],[x+side*.055,y+.14,b],[x+side*.055,y-.12,b],11);
-        tube([x+side*.06,y-.15,a],[x+side*.06,y+.17,a],.009,25,.009,5);
+        for(let i=0;i<2;i++){
+          const z=a+(b-a)*i/2,Z=a+(b-a)*(i+1)/2;
+          quad(point(z,y-.12,.123),point(z,y+.14,.123),point(Z,y+.14,.123),point(Z,y-.12,.123),11);
+        }
+        tube(point(a,y-.15,.13),point(a,y+.17,.13),.009,25,.009,5);
       }
-      tube([x+side*.08,y+.22,5.2],[x+side*.08,y+.22,z+.11],.022,25,.022,6);
+      for(let i=0;i<5;i++)tube(point(5.28+(end-5.28)*i/5,y+.22,.15),point(5.28+(end-5.28)*(i+1)/5,y+.22,.15),.022,25,.022,6);
     }
   }
   // Gilded crest and simple carved scroll rhythm are authored ornaments.
-  ring([0,2.57,6.37],.13,.028,25,'z',20);
+  const crown=rear(0,2.28,.235),crestZ=crown[2];
+  ring([0,crown[1]+.12,crestZ],.13,.028,25,'z',20);
   for(const side of [-1,1])for(let i=0;i<5;i++){
-    const x=side*(.3+i*.19),y=2.51-.08*(i/4)**2;
-    tube([x-.055,y,6.35],[x+.055,y+.04,6.35],.021,25,.013,6);
+    const x=side*(.3+i*.19),roof=rear(x/(hullPoint(6,2.28,1)[0]+.12),2.28,.235);
+    tube([x-.055,roof[1]-.015,roof[2]],[x+.055,roof[1]+.035,roof[2]],.021,25,.013,6);
   }
   group('stern.galleries','hull',sternStart);
+  // A shaped sternpost/deadwood fillet joins the raked underwater transom to
+  // the existing rudder stock. It belongs to the hull, not the moving rudder.
+  const postStart=out.length,postLevels=[...levels.filter(y=>y<=.81),.81];
+  for(let i=0;i<postLevels.length-1;i++){
+    const a=postLevels[i],b=postLevels[i+1],point=(base,side,aft)=>{
+      const p=hullPoint(6,base,side);return [side*.045,p[1],aft?Math.max(5.88,p[2]+.035):p[2]-.025];
+    };
+    for(const side of [-1,1])quad(point(a,side,false),point(a,side,true),point(b,side,true),point(b,side,false),20);
+    for(const aft of [false,true])quad(point(a,-1,aft),point(a,1,aft),point(b,1,aft),point(b,-1,aft),20);
+    if(i===0)quad(point(a,-1,false),point(a,-1,true),point(a,1,true),point(a,1,false),20);
+    if(i===postLevels.length-2)quad(point(b,-1,false),point(b,1,false),point(b,1,true),point(b,-1,true),20);
+  }
+  group('hull.sternpost','hull',postStart);
   // Rudder and stem are substantial joined structures.
   const rudderStart=out.length;
   box([-.045,-1.68,5.84],[.045,.81,6.04],14);

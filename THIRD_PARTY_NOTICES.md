@@ -119,3 +119,13 @@ The supplied files contain no animation clips. The local importer retains their
 skin weights and textures; swimming and water effects are project code.
 
 Source SHA-256: `86dce920b93ac22cf864feac74a457abea9da1e9efc25aec7c1a73a6634f5632`.
+
+# User-supplied Victory shape reference
+
+The procedural Victory hull uses measurements from the user's
+`Meshy_AI_Victory_at_Portsmouth_1020215320_generate.glb`, supplied on
+20 October 2026. The original GLB and the supplied Portsmouth photograph are
+not bundled. Registration, rejected artifacts and modelling limits are recorded
+in `VICTORY_RESEARCH.md`; these measurements are not Admiralty construction offsets.
+
+Reference SHA-256: `f54976c233c708811065981f00a1be9ff6b3c6a56880b34b36d391720cd3453e`.

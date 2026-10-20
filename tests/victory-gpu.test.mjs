@@ -140,3 +140,47 @@ test('Victory GPU cloth, reefing, support contact and hull-water footprint match
     assert.deepEqual(result.errors,[]);assert.equal(result.checked,result.samples*4*3);assert.ok(result.lines>30);assert.ok(result.changed>50);assert.ok(result.maxError<3e-4,`CPU/GPU model error ${result.maxError}`);
   }finally{await page.close();}
 });
+
+test('the full Victory GPU hull footprint matches CPU sections through bow, keel, tumblehome and outside caps',{timeout:120000},async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__victory-hull',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(`${origin}/__victory-hull`);
+    const result=await page.evaluate(async()=>{
+      const {HULL_PROFILE}=await import('/js/wgsl/hull.js'),{VICTORY_DESIGN:D,victoryHullHalfWidth,victoryHullPoint,victorySheer}=await import('/js/models/victory.js');
+      const {hullHalfWidth}=await import('/js/hull.js');
+      const probes=[];
+      // Deliberately sample between authored knots, not merely the same table
+      // entries on both processors. Boundary probes use a finite offset on
+      // either side of the cap, avoiding an ambiguous float-rounded equality.
+      for(let iz=0;iz<190;iz++)for(let iy=0;iy<65;iy++)probes.push([-6.9+iz*.073,-D.hull.draft-.17+iy*.083,1,0]);
+      for(const station of [-6,6])for(const base of [-D.hull.draft,-1.5,-.8,-.2,0,.5,1.17,1.67,2.15,2.6]){
+        const point=victoryHullPoint(station,base,1);
+        for(const dz of [-.001,.001])probes.push([point[2]+dz,point[1],1,0]);
+      }
+      for(const z of [-5.5,-4,-1,0,1,3,5.5])for(const base of [0,.5,1.17,1.58,1.67,2.04,2.15,2.65])probes.push([z,base+victorySheer(z),1,0]);
+      for(const z of [-6,-5,-3,0,3,5])for(const y of [-1,-.5,0,.5,1])probes.push([z,y,0,0]);
+      const input=new Float32Array(probes.flat()),adapter=await navigator.gpu.requestAdapter();if(!adapter)throw Error('No WebGPU adapter');
+      const device=await adapter.requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const code=HULL_PROFILE+`
+@group(0)@binding(0)var<storage,read>points:array<vec4f>;
+@group(0)@binding(1)var<storage,read_write>answers:array<vec4f>;
+@compute @workgroup_size(64)fn hullProbe(@builtin(global_invocation_id)i:vec3u){
+ if(i.x>=arrayLength(&points)){return;}let p=points[i.x];answers[i.x]=vec4f(modelHullWidth(p.x,p.y,p.z),0,0,0);
+}`;
+      const module=device.createShaderModule({code}),info=await module.getCompilationInfo();errors.push(...info.messages.filter(m=>m.type==='error').map(m=>m.message));
+      const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'hullProbe'}}),B=GPUBufferUsage;
+      const source=device.createBuffer({size:input.byteLength,usage:B.STORAGE|B.COPY_DST}),output=device.createBuffer({size:input.byteLength,usage:B.STORAGE|B.COPY_SRC}),read=device.createBuffer({size:input.byteLength,usage:B.COPY_DST|B.MAP_READ});device.queue.writeBuffer(source,0,input);
+      const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:source}},{binding:1,resource:{buffer:output}}]});
+      const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(probes.length/64));pass.end();encoder.copyBufferToBuffer(output,0,read,0,input.byteLength);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const values=new Float32Array(read.getMappedRange()).slice();read.unmap();let maxError=0,worst=null,inside=0,outside=0;
+      for(let i=0;i<probes.length;i++){
+        const z=input[i*4],y=input[i*4+1],expected=input[i*4+2]>.5?victoryHullHalfWidth(z,y):hullHalfWidth(z,y),value=values[i*4];
+        if(!Number.isFinite(value)||value<0)throw Error('Invalid GPU hull width');
+        const error=Math.abs(value-expected);if(error>maxError){maxError=error;worst={z,y,value,expected};}if(expected>0)inside++;else outside++;
+      }
+      device.destroy();return {errors,count:probes.length,maxError,worst,inside,outside};
+    });
+    assert.deepEqual(result.errors,[]);assert.ok(result.count>12000&&result.inside>3000&&result.outside>1000,'exercise the full hull and exterior domain');
+    assert.ok(result.maxError<3e-4,`dense CPU/GPU hull error ${JSON.stringify(result.worst)}`);
+  }finally{await page.close();}
+});
