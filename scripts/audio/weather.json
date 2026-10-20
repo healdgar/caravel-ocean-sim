@@ -1,0 +1,59 @@
+[
+  {
+    "id": "thunder-distant",
+    "label": "Distant rolling thunder",
+    "seconds": 12,
+    "loop": false,
+    "driver": "Distant lightning event: direction, range and sound travel delay",
+    "prompt": "One distant thunder roll across the open sea, heard from the deck of a wooden sailing ship. A soft low atmospheric rumble builds unevenly, rolls in overlapping natural folds, then gradually fades into quiet. Rounded distant sound with little sharp high-frequency crack. An isolated outdoor field recording of thunder alone, with no music, rain, wind or ship noises. Complete natural decay."
+  },
+  {
+    "id": "thunder-near",
+    "label": "Nearby thunderclap",
+    "seconds": 8,
+    "loop": false,
+    "driver": "Nearby lightning event: delayed directional clap and rolling tail",
+    "prompt": "One nearby natural thunderclap over a wooden sailing ship on the open sea. A sudden sharp atmospheric crack opens immediately into a deep, irregular rolling thunder tail spreading across the sky and decaying into quiet. Broad outdoor space, no enclosed echo. A realistic isolated field recording of one lightning event, thunder alone, without music, rain, wind or ship noises."
+  },
+  {
+    "id": "rain-light",
+    "label": "Light rain on deck and canvas",
+    "seconds": 14,
+    "loop": true,
+    "driver": "Light rainfall intensity and listener exposure to deck/canvas",
+    "prompt": "Light steady rain aboard a wooden sailing ship. Fine individual droplets patter irregularly on weathered oak deck planks and softly on canvas, with tiny wet ticks and sparse delicate splashes. Gentle open-air rainfall texture heard at deck level. Even seamless ambience, no musical rhythm. Rain alone, without thunder, wind, voices, footsteps or metallic roof ringing."
+  },
+  {
+    "id": "rain-heavy",
+    "label": "Heavy rain on deck and canvas",
+    "seconds": 14,
+    "loop": true,
+    "driver": "Heavy rainfall intensity and listener exposure to deck/canvas",
+    "prompt": "Heavy steady rain aboard a wooden sailing ship. Countless individual raindrops patter densely and irregularly on weathered oak deck planks and softly on canvas, with rapid tiny wet ticks and delicate droplet splashes. Closely overlapping rainfall forms a continuous full rain hiss at deck level. Even seamless ambience with no musical rhythm. Rain alone, without thunder, wind, voices or metallic roof ringing."
+  },
+  {
+    "id": "snow-contact",
+    "label": "Snow brushing canvas",
+    "seconds": 12,
+    "loop": true,
+    "driver": "Very quiet snow contact near canvas; reuse wind for the surrounding air",
+    "prompt": "Fine airborne snow crystals gently brushing taut canvas sailcloth on a wooden sailing ship. An extremely faint, soft, dry fabric whisper with tiny irregular feather-light brushes. Restrained close-up contact detail, barely audible, with an even delicate texture throughout. The entire recording contains only this gentle powder-on-cloth friction. Seamless ambience.",
+    "reviewNote": "Snow ambience uses the existing wind layer; no added snow-contact track is selected. The optional contact candidates sounded like footsteps or coarse brushing."
+  },
+  {
+    "id": "sleet-deck",
+    "label": "Sleet on wooden deck",
+    "seconds": 12,
+    "loop": true,
+    "driver": "Sleet intensity: small ice-pellet contacts on exposed timber",
+    "prompt": "A steady shower of tiny sleet ice pellets striking the weathered oak deck of a wooden sailing ship. Fine, hard, irregular dry ticks with very short little bounces, closely scattered across the timber over a restrained soft patter. Smaller and lighter impacts than hailstones. Natural open-deck field recording, even seamless texture. Only ice-pellet contacts, without thunder, wind, voices or music."
+  },
+  {
+    "id": "hail-deck",
+    "label": "Hail bouncing on wooden deck",
+    "seconds": 12,
+    "loop": true,
+    "driver": "Hail intensity and pellet size: heavier impacts and short bounces",
+    "prompt": "An even shower of pea-sized hailstones landing on the oak deck of a wooden sailing ship. Small rounded wooden taps with little secondary bouncing ticks, scattered randomly across a broad surface. Uniform restrained impact weight throughout; many tiny contacts overlap into continuous natural patter. Close recording of small ice pellets on solid wood only, with no foreground events. Seamless ambience."
+  }
+]

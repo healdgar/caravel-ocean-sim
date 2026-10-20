@@ -9,6 +9,7 @@
     "start": "node server.mjs",
     "build": "node build.mjs",
     "meshy": "node scripts/meshy.mjs",
+    "audio": "node scripts/audio.mjs",
     "test": "node --test",
     "test:model": "node --test tests/caravel.test.mjs tests/wetness.test.mjs"
   },

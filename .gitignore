@@ -5,6 +5,12 @@ shots/
 .claude/
 # Meshy credentials references, task records and generated source assets stay local.
 .meshy/
+# Local sound-generation takes and request records.
+.audio/
+# Local authoring credentials; never commit or deploy these files.
+.env
+.env.*
+!.env.example
 # OS and editor files
 .DS_Store
 Thumbs.db

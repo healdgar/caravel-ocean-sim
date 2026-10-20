@@ -49,7 +49,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     uniform, views, sampler, contacts, drops, sheets, textures, landings, deck,
     setShadows(shadows){deck.setShadows(shadows);shadowGroups=renderPipes.map(p=>shadows.bind(p));},
     get current() { return current; },
-    update(boat, dt, time, frame, windSpeed, windDir, resetSea = false) {
+    update(boat, dt, time, frame, windSpeed, windDir, resetSea = false, precipitation = 0) {
       enabled = boat.showProw && boat.effects !== false;
       const extent = Math.max(128, boat.length * 4), dx = extent / WAKE_SIZE;
       const x = Math.round(boat.x / dx) * dx, z = Math.round(boat.z / dx) * dx;
@@ -58,7 +58,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
       values[4] = prevX; values[5] = prevZ; values[6] = Math.max(0, Math.min(0.1, dt)); values[7] = reset ? 1 : 0;
       values[8] = boatForwardSpeed(boat); values[9] = enabled ? 1 : 0;
       values[10] = Math.cos(windDir) * windSpeed; values[11] = Math.sin(windDir) * windSpeed;
-      values[12] = time; values[13] = frame; values[14]=boat.length/12;
+      values[12] = time; values[13] = frame; values[14]=boat.length/12;values[15]=precipitation;
       device.queue.writeBuffer(uniform, 0, values);
       prevX = x; prevZ = z; previousExtent = extent; previousRevision = boat.revision; wasEnabled = enabled;
     },

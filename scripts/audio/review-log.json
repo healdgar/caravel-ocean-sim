@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-19",
+  "method": "User listening feedback, followed by Argon native audio review through agy.",
+  "reports": [
+    ".audio/argon-review/argon-original-review.json",
+    ".audio/argon-review/audition-04/argon-review.json",
+    ".audio/argon-review/audition-05/argon-review.json",
+    ".audio/argon-review/audition-06/argon-review.json",
+    ".audio/argon-review/audition-06-edited/argon-review.json",
+    ".audio/argon-review/weather-01/argon-review.json",
+    ".audio/argon-review/weather-02/argon-review.json",
+    ".audio/argon-review/weather-03/argon-review.json",
+    ".audio/argon-review/nature-01/argon-review.json",
+    ".audio/argon-review/nature-02/argon-review.json"
+  ],
+  "findings": {
+    "wind-steady-02": "Rejected by user: human-like whistling.",
+    "wind-strong-02": "Rejected by user: human-like whistling.",
+    "hull-wash-02": "Accepted by user; retain unchanged.",
+    "timber-creak-02": "Accepted by user; retain unchanged.",
+    "hull-slap-02": "User liked impact but rejected extra tail noise. Trim to 0.88 seconds with 0.15 second fade; Argon accepted edited result.",
+    "hull-slam-02": "Argon rejected brittle breakage.",
+    "wind-steady-03": "Argon: usable unpitched low wind bed, but muffled.",
+    "wind-strong-03": "Argon rejected pitched howling and abrupt tail.",
+    "hull-slam-03": "Argon rejected separate events and brittle cracking.",
+    "wind-steady-04": "Argon rejected water sloshing and squeaks.",
+    "wind-strong-04": "Argon rejected thunder and rain-like tail.",
+    "hull-slam-04": "Argon rejected brittle smash and separated pre-thump.",
+    "wind-steady-05": "Argon KEEP: clean natural turbulence, slightly dark tonal balance. Selected for user review.",
+    "wind-strong-05": "Argon REJECT: percussive flapping, splattering and microphone buffeting.",
+    "hull-slam-05": "Argon REJECT: isolated sub-bass thump, no recognizable water or wooden hull character.",
+    "wind-strong-06": "Argon EDIT: stronger wind than reference, early flutter at about 2.1-3.7 seconds; suggested retaining 4-16 seconds with loop crossfade and gentle EQ.",
+    "hull-slam-06": "Argon REJECT: recognizable water but multiple hits and brittle wood clatter; not salvageable as one heavy impact.",
+    "wind-strong-06-edited": "Argon KEEP after direct listening to two 11.6-second repetitions: natural unpitched gusts, no intrusive artifacts, clean loop boundary. Selected for user review; original untouched.",
+    "thunder-distant-01": "Argon KEEP: isolated distant atmospheric roll, clean decay.",
+    "thunder-near-01": "Argon KEEP: isolated sharp nearby crack and rolling decay, distinct from distant roll.",
+    "rain-light-01": "Argon KEEP: natural wet irregular patter; recommends a short loop crossfade.",
+    "rain-heavy-01": "Argon REJECT: intrusive human voices and cheering.",
+    "snow-contact-01": "Argon REJECT: rhythmic crunchy footsteps instead of soft contact.",
+    "sleet-deck-01": "Argon KEEP: fine irregular ice-pellet ticking on wood; recommends a short loop crossfade.",
+    "hail-deck-01": "Argon REJECT: base hail is plausible but includes explosive crash and hammering bursts.",
+    "rain-heavy-02": "Argon REJECT: water sloshing/churning rather than overhead rainfall.",
+    "snow-contact-02": "Argon REJECT: periodic coarse brush strokes or footsteps. Prefer existing wind with no added snow-contact layer.",
+    "hail-deck-02": "Argon KEEP: natural continuous heavier pellet impacts and bounces, distinct from sleet.",
+    "rain-light-01-edited": "Argon KEEP across two 13.7-second cycles; clean 0.3-second blended boundary.",
+    "sleet-deck-01-edited": "Argon KEEP across two 11.7-second cycles; clean 0.3-second blended boundary.",
+    "rain-heavy-03-edited": "Argon KEEP after listening to two 13.7-second cycles: natural dense rainfall, perceptibly heavier than light rain, no foreign artifacts, clean loop boundary.",
+    "hail-deck-02-edited": "Argon KEEP after listening to two 11.7-second cycles: natural ice-pellet taps and bounces on oak, clean loop boundary.",
+    "gull-near-01": "Argon EDIT/borderline REJECT: isolated but too busy and mechanically repetitive; initial solitary cry may be salvageable.",
+    "seabirds-distant-01": "Argon REJECT: dense colony chorus with surf/wind bed instead of sparse isolated calls.",
+    "tern-calls-01": "Argon REJECT: coarse caw followed by mismatched woodland-like peeps and background twittering.",
+    "gull-near-01-edited": "Argon KEEP: isolated 1.25-second gull cry with intact ending. Selected from take 01 with a 0.1-second tail fade.",
+    "gull-near-02": "Argon EDIT/REJECT full phrase: repetitive introductory peeps and later pinched squawks; not selected.",
+    "seabirds-distant-02": "Argon REJECT: piercing reverberant call over continuous wind/hiss instead of sparse clean distant birds.",
+    "tern-calls-02": "Argon REJECT: breathy shushing and guttural scrape sounds, not convincing birds."
+  },
+  "caution": "These are listening judgments, not objective quality metrics. Argon misidentified the source of the edited light impact in its comparison prose; source mapping and timings are taken from local records. The nature-02 report also incorrectly attributed gull-isolated-cry.wav to take 02; it was rendered from gull-near take 01. Its KEEP verdict applies to that named audition file; source identity comes from local generation records and edit settings.",
+  "pending": [
+    "hull-slam",
+    "seabirds-distant",
+    "tern-calls"
+  ],
+  "designDecisions": {
+    "snow": "Reuse the existing wind layer with no dedicated precipitation sound. Both optional powder/canvas-contact candidates failed; do not invent noisy snowfall."
+  },
+  "omitted": [
+    "snow-contact"
+  ]
+}

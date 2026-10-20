@@ -128,6 +128,7 @@ struct LandVertex {
   var col=albedo*(direct*max(dot(n,F.sunDir.xyz),0.0)/PI+ambient*(0.42+0.35*max(n.y,0.0)));
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
   col+=direct*wet*pow(max(dot(n,h),0.0),48.0)*0.06;
+  col+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.9);
   col=surfaceAir(col,world);
   // Clip cloud integration at the land surface: clouds behind mountains stay
   // hidden; low clouds in front veil the slopes using the existing volume.

@@ -113,7 +113,7 @@ fn levelAt(world:vec3f)->f32 {
 }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   let i=id.x;if(i>=arrayLength(&probes)){return;}let probe=probes[i];
-  if(I.motion.y<.5 || I.previous.w>.5 || probe.uvKind.w<.5){moisture[i]=vec2f(0);return;}
+  if(I.previous.w>.5 || probe.uvKind.w<.5){moisture[i]=vec2f(0);return;}
   let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);
   let p=rig.position;let world=wetWorld(p);let floor=deckFloor(p.z);
   let inFootprint=p.z> -6.3 && p.z<5.6 && abs(p.x)<deckWidth(p.z)-.10 && p.y>=hullDeck(p.z)-.08;
@@ -125,6 +125,8 @@ fn levelAt(world:vec3f)->f32 {
     water=smoothstep(.0003,.003,wash.x)*smoothstep(-.015,.035,wash.x-(p.y-floor)*HULL_Y_SCALE);
     if(p.y<floor-.08){water=0.0;}
   }
+  if(I.motion.y<.5){water=0.0;spray=0.0;}
+  spray+=I.phase.w*.24;
   if(sheltered){water=0.0;spray=0.0;}
   moisture[i]=moistureStep(moisture[i],water,spray,u32(probe.uvKind.z),length(I.motion.zw),I.previous.z);
 }

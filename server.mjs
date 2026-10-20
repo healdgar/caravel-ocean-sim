@@ -5,7 +5,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.argv[2] || process.env.PORT || 8080);
@@ -17,16 +17,29 @@ const types = {
   '.css': 'text/css; charset=utf-8',
   '.png': 'image/png',
   '.json': 'application/json',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
 };
 
-http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+// Reject private paths both before and after resolving symlinks. Git ignores
+// alone do not keep credentials out of a static server's responses.
+function privatePath(root, file) {
+  const relative = path.relative(root, file);
+  return path.isAbsolute(relative) || relative.split(path.sep).some(part => part.startsWith('.'));
+}
+
+export function createDevServer({ directory = root } = {}) {
+  const servedRoot = fs.realpathSync(directory);
+  return http.createServer((req, res) => {
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { res.writeHead(400); res.end('bad request'); return; }
   if (req.method === 'POST' && url.pathname === '/__shot') {
     const name = path.basename(url.searchParams.get('name') || 'shot.png');
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
-      const dir = path.join(root, 'shots');
+      const dir = path.join(servedRoot, 'shots');
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, name), Buffer.concat(chunks));
       res.writeHead(200, { 'content-type': 'text/plain' });
@@ -44,16 +57,30 @@ http.createServer((req, res) => {
     });
     return;
   }
-  let p = decodeURIComponent(url.pathname);
+  let p;
+  try { p = decodeURIComponent(url.pathname); }
+  catch { res.writeHead(400); res.end('bad request'); return; }
+  if (p.includes('\0') || p.includes('\\')) { res.writeHead(400); res.end('bad request'); return; }
+  if (p.split('/').some(part => part.startsWith('.'))) { res.writeHead(403); res.end(); return; }
   if (p.endsWith('/')) p += 'index.html';
-  const file = path.join(root, p);
-  if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
-  fs.readFile(file, (err, data) => {
+  const file = path.resolve(servedRoot, '.' + p);
+  if (privatePath(servedRoot, file)) { res.writeHead(403); res.end(); return; }
+  fs.realpath(file, (err, resolved) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
-    res.writeHead(200, {
-      'content-type': types[path.extname(file)] || 'application/octet-stream',
-      'cache-control': 'no-store',
+    if (privatePath(servedRoot, resolved)) { res.writeHead(403); res.end(); return; }
+    fs.readFile(resolved, (err, data) => {
+      if (err) { res.writeHead(404); res.end('not found'); return; }
+      res.writeHead(200, {
+        'content-type': types[path.extname(file)] || 'application/octet-stream',
+        'content-length': data.length,
+        'cache-control': 'no-store',
+      });
+      res.end(data);
     });
-    res.end(data);
   });
-}).listen(port, () => console.log(`ocean dev server: http://localhost:${port}/`));
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  createDevServer().listen(port, () => console.log(`ocean dev server: http://localhost:${port}/`));
+}

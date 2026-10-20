@@ -1,4 +1,7 @@
 import { createSailingInstruments } from './instruments.js';
+import { createSceneAudio } from './audio.js';
+import { createWeatherState, createImpactDetector, STORM_WEATHER, WEATHER_TYPES } from './weather-state.js';
+import { createWeatherRenderer } from './weather.js';
 import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { createVolumetricClouds } from './clouds.js';
 import { createTerrain } from './terrain.js';
@@ -64,6 +67,11 @@ export const P = {
   cloudDensity: 1.0,
   cloudAnvil: 0.15,
   cloudQuality: 0.5, // ray resolution fraction, capped at 1280 x 720
+  rain: 0,           // precipitation amount; type selected independently
+  precipitation: 0,  // rain, snow, sleet, hail
+  thunder: 0,        // storm discharge frequency (zero disables flashes)
+  soundVolume: .7,
+  seabirds: .25,
   bloom: 0.10,
 };
 const CASC_L = [1103.0, 211.3, 39.7, 7.43, 1.393, 0.2617];
@@ -393,6 +401,11 @@ async function main() {
   const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
   const terrain=LAND_STAGE?await createTerrain({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):null;
   const coastalGroup=terrain?.waterGroup(oceanPipe);
+  const weather=createWeatherState();
+  const weatherRenderer=await createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
+  const impactDetector=createImpactDetector();
+  const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
+  let audioPending=false;
 
   // Water height under the camera (async readback, a few frames of latency) so the
   // floating camera rides above passing crests instead of clipping into them.
@@ -841,6 +854,8 @@ async function main() {
     f[64] = R0; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure; f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
+    const strike=weather.strike,dx=strike?strike.x-cam.x:0,dz=strike?strike.z-cam.z:1,range=Math.hypot(dx,dz)||1;
+    f[74]=dx/range;f[75]=dz/range;
     // deep water body scatter colour (greenish coastal water), unresolved slope variance
     f[76] = 0.016 * P.turbidity; f[77] = 0.080 * P.turbidity; f[78] = 0.096 * P.turbidity; f[79] = 0.0024;
     f[80] = 0.035; f[81] = 0.120; f[82] = 0.085; f[83] = 2.6;
@@ -849,6 +864,7 @@ async function main() {
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[91] = 1.1e-4;
+    f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
     device.queue.writeBuffer(frameUBO, 0, f);
   }
 
@@ -1091,6 +1107,21 @@ async function main() {
   const hideSea=document.createElement('button');hideSea.textContent='Hide';hideSea.setAttribute('aria-label','Hide sea settings');
   hideSea.onclick=()=>{setPanelOpen(false);seaSettingsButton.focus();};seaHeader.append(seaTitle,hideSea);
   const seaBody=document.createElement('div');seaBody.className='panel-body';panel.append(seaHeader,seaBody);
+  const soundButton=document.createElement('button');soundButton.textContent='Enable sound';soundButton.id='sound-toggle';
+  soundButton.setAttribute('aria-pressed','false');
+  const soundStatus=document.createElement('p');soundStatus.id='sound-status';soundStatus.setAttribute('aria-live','polite');
+  soundStatus.textContent='Enable sound for wind, hull, weather and seabirds.';
+  const sceneAudio=createSceneAudio({onStatus:state=>{
+    soundButton.textContent=state.enabled?'Mute sound':'Enable sound';soundButton.setAttribute('aria-pressed',String(state.enabled));
+    soundStatus.textContent=state.loading?'Loading sounds…':state.ready?(state.missing?`${state.missing} sounds unavailable; toggle sound to retry.`:'Sound follows the wind, ship motion and weather.'):'Enable sound for wind, hull, weather and seabirds.';
+  }});
+  soundButton.onclick=()=>sceneAudio.toggle().catch(()=>{soundStatus.textContent='Could not start audio. Tap Enable sound to retry.';});
+  seaBody.append(soundButton,soundStatus);
+  const typeLabel=document.createElement('label');typeLabel.className='resolution-control';typeLabel.textContent='Precipitation';
+  const typeSelect=document.createElement('select');typeSelect.id='precipitation-type';typeSelect.setAttribute('aria-label','Precipitation type');
+  WEATHER_TYPES.forEach((label,i)=>{const o=document.createElement('option');o.value=i;o.textContent=label;typeSelect.append(o);});
+  typeSelect.value=String(P.precipitation);typeSelect.onchange=()=>{P.precipitation=Number(typeSelect.value);};
+  typeLabel.append(typeSelect);seaBody.append(typeLabel);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.classList.contains('hidden'))hideSea.click();});
   const resolutionLabel=document.createElement('label');resolutionLabel.className='resolution-control';resolutionLabel.textContent='Render resolution';
   const resolutionInput=document.createElement('select');resolutionInput.id='render-resolution';
@@ -1106,6 +1137,11 @@ async function main() {
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
   const seaSliders = new Map();
+  const stormButton=document.createElement('button');stormButton.textContent='Thunderstorm';
+  const dryButton=document.createElement('button');dryButton.textContent='Stop precipitation & lightning';
+  const applyWeather=settings=>{Object.assign(P,settings);typeSelect.value=String(P.precipitation);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}envFull=true;};
+  stormButton.onclick=()=>applyWeather(STORM_WEATHER);dryButton.onclick=()=>applyWeather({rain:0,thunder:0});
+  seaBody.append(stormButton,dryButton);
   roughButton.onclick = () => {
     Object.assign(P, ROUGH_SEAS);
     for (const [key, { input, output }] of seaSliders) { input.value = P[key]; output.textContent = String(P[key]); }
@@ -1113,6 +1149,10 @@ async function main() {
   };
   seaBody.append(roughButton);
   const SLIDERS = [
+    ['rain', 'Precipitation intensity', 0, 1, .01, ''],
+    ['thunder', 'Lightning & thunder', 0, 1, .01, ''],
+    ['soundVolume', 'Sound volume', 0, 1, .01, ''],
+    ['seabirds', 'Seabird activity', 0, 1, .01, ''],
     ['windSpeed', 'Wind speed at 10 m (m/s)', 0, 32, 0.1, 'spec'],
     ['windDir', 'Wind direction (deg)', 0, 360, 1, 'spec'],
     ['fetchKm', 'Fetch (km)', 5, 800, 1, 'spec'],
@@ -1168,7 +1208,7 @@ async function main() {
   let last = performance.now();
   let fpsN = 0, fpsT = 0;
   let shooting = false;
-  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();});
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();sceneAudio.visibility(document.hidden);});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -1185,7 +1225,7 @@ async function main() {
     }
     interaction.encode(cp);
     spindrift.encode(cp);
-    wetness.encode(cp,boat.showProw && boat.effects!==false);
+    wetness.encode(cp,boat.showProw);
     // foam clipmaps
     foamCur = 1 - foamCur;
     cp.setPipeline(foamUpdPipe);
@@ -1263,7 +1303,10 @@ async function main() {
     if (simTime > LOOP) simTime -= LOOP;
     frameIndex++;
 
+    weather.step(dt,P,cam);
     writeFrame(simTime);
+    weatherRenderer.update(weather,P,dt);
+    sceneAudio.update(dt,P,boat,frameF,weather);
     if (clouds.update(frameF,P,dt)) envFull = true;
     boatRotate(hullData.subarray(0, 3), 1, 0, 0, boat.heading * D2R, boat.pitch, boat.roll);
     boatRotate(hullData.subarray(4, 7), 0, 1, 0, boat.heading * D2R, boat.pitch, boat.roll);
@@ -1280,7 +1323,7 @@ async function main() {
     shadows.update(hullData,frameF.subarray(32,35),boat.showProw && qs.get('shadows')!=='0');
     crew?.update(boat,dt,P.windSpeed);
     wetness.updateCrew(crew?.state,boat);
-    interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum);
+    interaction.update(boat, dt, simTime, frameIndex, P.windSpeed, P.windDir * D2R, needSpectrum,weather.intensity*(weather.type===1?.1:1));
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
@@ -1384,7 +1427,7 @@ async function main() {
     rp.setBindGroup(0, bgSky);
     clouds.drawSky(rp);
     rp.draw(3);
-    if (!drawProw) spindrift.draw(rp);
+    if (!drawProw) {spindrift.draw(rp);weatherRenderer.draw(rp);}
     rp.end();
 
     if (drawProw) {
@@ -1404,7 +1447,7 @@ async function main() {
       prowPass.setBindGroup(1,caravelShadows);
       prowPass.setVertexBuffer(0, caravelBuffer); prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);
       crew?.draw(prowPass);
-      interaction.draw(prowPass); spindrift.draw(prowPass); prowPass.end();
+      interaction.draw(prowPass); spindrift.draw(prowPass);weatherRenderer.draw(prowPass); prowPass.end();
     }
 
     if (P.bloom > 0) {
@@ -1432,6 +1475,9 @@ async function main() {
     pc.end();
 
     if (doProbe) enc.copyBufferToBuffer(probeOut, 0, probeRead, 0, 64);
+    const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
+    const audioRevision=boat.revision;
+    if(doAudio)enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
@@ -1442,6 +1488,10 @@ async function main() {
     }
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
+    if(doAudio){audioPending=true;audioRead.mapAsync(GPUMapMode.READ).then(()=>{
+      const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
+      audioRead.unmap();audioPending=false;if(audioRevision===boat.revision)sceneAudio.impact(event);
+    }).catch(()=>{audioPending=false;});}
     if (doProbe) { probePending = true; probeRead.mapAsync(GPUMapMode.READ).then(onProbe, onProbeFail); }
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);

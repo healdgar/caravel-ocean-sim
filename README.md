@@ -34,6 +34,139 @@ npm start        # serves http://localhost:8080/
 
 After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [GitHub Pages build](#github-pages-build).
 
+### Local authoring credentials
+
+Keep the project-specific ElevenLabs key in `.env.local` as
+`ELEVENLABS_API_KEY=your-key`. Start from `.env.example` and set file permissions
+with `chmod 600 .env.local`. This is a plaintext local credential readable by
+your Mac account, so subsequent asset generation needs no 1Password prompt.
+Local Node authoring commands can load it with `--env-file=.env.local`.
+
+`.env.local` is ignored by Git, blocked by the development server, and excluded
+from the explicit file list used to build the standalone pages and GitHub Pages.
+Restart any development server started before this protection was added.
+Only generated audio belongs in the game; never import credentials into `js/`
+or copy them into `assets/` or `docs/`.
+
+### Sound sample authoring
+
+The local ElevenLabs CLI reads `.env.local` directly, without 1Password:
+
+```sh
+npm run audio -- plan                   # offline prompts, model and durations
+npm run audio -- generate hull-slap     # one paid sample
+npm run audio -- pilot                  # six paid samples, 59 seconds total
+npm run audio -- plan --set weather     # inspect weather prompts, no API call
+npm run audio -- weather --take 01      # seven paid weather samples, 84 seconds
+npm run audio -- plan --set nature      # inspect seabird prompts, no API call
+npm run audio -- nature --take 01       # three paid bird candidates, 12 seconds
+npm run audio -- review --take 02       # local listening page, no API call
+npm run audio -- review --selected      # selected takes and nondestructive edits
+```
+
+Enable **Sound Effects** permission on the ElevenLabs key. The CLI uses the
+[official sound-generation API](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert)
+and `eleven_text_to_sound_v2`. Preview files use its standard 44.1 kHz / 128 kbps
+MP3 format. The first batch contains steady and strong wind, hull wash, light
+and heavy wave impacts, and a timber creak. These are audition candidates;
+generated output still needs listening, editing and in-game balancing.
+
+Prompts and intended simulation drivers live in `scripts/audio/pilot.json`.
+`scripts/audio/weather.json` adds distant thunder, a nearby thunderclap, light
+and heavy rain, snow contact, sleet and hail. `weather` generates only that set;
+`pilot` still generates only the original ship sounds. `generate` accepts IDs
+from any set, and `review --selected` combines the chosen samples.
+`scripts/audio/nature.json` adds nearby gull calls, distant seabirds and a tern
+variant. These are isolated calling phrases rather than repeating ambience beds,
+intended for occasional positioned events with long, varied gaps. Water and wind
+remain separate layers. **Seabird activity** controls occasional positioned cries;
+rain and strong wind suppress them.
+The selected bird sample is an isolated 1.25-second gull cry; busier distant-flock
+and tern candidates failed listening review and remain withheld.
+Thunder uses each lightning event's direction and distance, with a propagation
+delay of distance / 343 m/s. Precipitation uses independent loops for
+type and intensity; deck impacts fade as the camera leaves the ship. Snow reuses the existing
+wind layer without an added precipitation track. Two optional snow/canvas-contact
+candidates sounded like footsteps or coarse brushing and were rejected. If a
+convincing contact detail is selected later, its boosted audition level must not
+become its in-game volume.
+Audio, request records, checksums and returned credit costs stay in ignored
+`.audio/pilot/`. Completed takes are reused; concurrent duplicate submissions
+are blocked. Failed or interrupted requests are never automatically retried.
+After inspecting a failure or deliberately requesting another variant, use a
+new take name, e.g. `npm run audio -- generate hull-slap --take 02`.
+
+The review command uses `ffmpeg` to decode completed, checksum-verified takes
+into stereo WAV listening copies in ignored `shots/audio-review/`. It gives
+each copy a -6 dBFS peak ceiling before integer conversion, preventing decoded
+MP3 overshoots from clipping. Originals remain untouched; these audition levels
+are not a physical sound mix. With the development server running, open
+`/shots/audio-review/` to hear isolated samples and repeating ambience loops.
+This review page is not part of the deployed game.
+
+`scripts/audio/review-selection.json` retains per-sample selections and listening
+feedback. The accepted hull wash and timber creak keep their original takes.
+The light slap uses a nondestructive tail cut/fade. Edits can also retain a source
+interval, apply a high-pass/high-shelf EQ, and blend the tail into the head for
+a seamless wind loop. The loop is shorter by the crossfade duration; all edit
+settings are saved with the selection and included in its WAV filename hash.
+Replacement prompts establish
+a wooden-sailing-ship setting, then isolate one source; wind calls for unpitched,
+irregular airflow. Listing too many surrounding objects produced unwanted
+foreground sounds in some takes. Listening decisions and rejected candidates
+are recorded in `scripts/audio/review-log.json`.
+Generation records preserve the original prompt for
+every take even when the current recipe changes. Argon auditory reviews through
+the user-requested `agy` CLI are staged separately under ignored `.audio/`;
+credential files are never supplied to that reviewer. Its perceptual comments
+guide selection; approximate reported timestamps are checked against the audio
+duration and waveform before editing.
+
+The selected twelve sounds are integrated. **Sea settings → Enable sound** starts Web Audio
+from a user gesture; **Mute sound** suspends it. Nothing contacts ElevenLabs at
+runtime. Steady/strong wind blend with apparent wind, hull wash follows absolute
+speed through water (including sternway), and new GPU bow-contact events trigger
+light slaps. Roll, pitch and heave motion trigger spaced timber creaks. Nearby
+and distant thunder follow the same events as the visible flashes. The mix has
+bounded event voices, smooth gains and a master compressor. Background tabs
+suspend sound and discard pending events rather than replaying a backlog.
+
+`node scripts/audio-promote.mjs` reproduces the selected edits locally, encodes
+gapless-tagged MP3s into `assets/audio/`, writes their checksums/provenance, and
+regenerates `js/audio-assets.js`. Rejected takes remain excluded. `npm run build`
+embeds the twelve files in every standalone page, including GitHub Pages;
+credentials, request records and audition pages are excluded. The compressed
+audio totals about 2.1 MB, decoded only after sound is enabled. Gains and ranges
+are authored approximations, not calibrated acoustic pressure measurements.
+
+`node --test tests/audio-authoring.test.mjs` checks local key loading, duplicate
+charge prevention and error redaction without contacting ElevenLabs.
+
+## Rain and lightning
+
+**Sea settings → Thunderstorm** sets pouring rain, dense low storm clouds and
+intermittent lightning. It leaves wind, waves and sailing speed under their
+existing controls. Precipitation intensity, type (rain/snow/sleet/hail) and
+lightning frequency are independent sliders/selectors; clear conditions remain
+the default. **Stop precipitation & lightning** stops new weather effects.
+Shared links preserve these settings. `rain=1&thunder=1` also enables them by URL.
+
+Wind-driven precipitation occupies a camera-centered world volume with at most
+24,000 instanced streaks/pellets (6,000 snowflakes), no particle CPU simulation,
+no depth writes, and the scene's normal depth test. Particles fade at the volume
+boundary and are suppressed below the ship's decks. Rain adds distance haze and
+wets exposed wood, ropes, sails and crew through the existing material moisture
+system; the covered tiller space stays sheltered. Moisture drains and dries.
+Snow/sleet/hail are visual variants, without accumulation or an icing simulation.
+
+Lightning has irregular, separated discharges, branched bolts and short return
+strokes. Cool flash illumination reaches clouds, ocean, ship, sails, crew, spray
+and land before HDR tonemapping. The flash is evaluated live, avoiding stale
+illumination in cached cloud/reflection textures. This is broad cloud lighting,
+not an additional shadow-map light. There are no lightning damage mechanics.
+Thunder follows the distance delay; setting **Lightning & thunder** to zero
+disables flashes. The weather clock never fast-forwards ship physics.
+
 ## Controls
 
 | Input | Action |
@@ -332,18 +465,21 @@ npm run build
 npm test
 ```
 
-The October 19 lighting revision passed 139 of 140 tests on macOS/Metal,
-including the 14-case crew/vessel radiance comparison, geometry connections,
-material wetness, mobile controls, all standalone builds and 810 GPU rig poses.
-The strict indexed/direct-HDR pixel comparison differed by one or two colour
-levels in a few channels; an isolated snapshot of the prior published commit
-`f1aa3d1` reproduces that failure. The packed-wave comparison passed this run;
-it failed during the preceding model revision, including on `57549ef`.
-Strict assertions remain unchanged; the complete suite is not reported as green.
-Six lighting views plus dry, damp and wet-film standalone renders were inspected
-separately. Real iPhone performance was not remeasured.
+The audio/weather revision passes **167/167 tests** using installed Chrome on
+macOS/Metal, including geometry, lighting, mobile controls, all three standalone
+builds, precipitation, flash illumination, wetting and actual Web Audio decoding.
+The packed-wave comparison on Metal permits a one-level RGB rounding difference
+in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
+retain their original assertions. This handles native compiler reassociation
+without accepting geometry or visible shading changes. Software rendering keeps
+the packed-wave comparison exact.
+
+The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
+performance and the final mix on phone speakers remain unmeasured.
 
 The suite covers:
+
+- Weather event spacing, thunder propagation delays, precipitation variants, visible flash brightness, exposed versus sheltered rain wetting, decoded loop durations, gesture activation, mute/resume and bounded impact playback.
 
 - Both crew rigs and grounded clip bounds, balanced twelve-person roster, deck clearance and separation, replaceable captain orders, gradual canvas changes, hidden-character independence, two six-instance GPU draws, animated shadows, embedded assets and mobile panel reachability.
 - Crest-spray wind/breaking gates, displaced birth height, downwind entrainment, hull exclusion, bounded populations, 30/120 Hz emission, clears, real FFT emission and rendering independent of the ship and its wake toggle.

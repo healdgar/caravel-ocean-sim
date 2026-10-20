@@ -20,6 +20,7 @@
   .panel-body { overflow-y:auto; min-height:0; padding:0 12px 12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
   #panel label { display:grid; grid-template-columns:minmax(0,1fr) 110px 40px; gap:6px; align-items:center; margin:3px 0; }
   #panel input { width:110px; accent-color:#e2a04e; }
+  #precipitation-type { background:#172532; color:#eee; border:1px solid #617480; border-radius:4px; min-height:44px; }
   #panel button, #boat-panel button, #captain-panel button { color:#111; background:#e2a04e; border:0; border-radius:4px; padding:7px 12px; cursor:pointer; }
   #panel .panel-header button, #boat-panel .collapse { background:#33424e; color:white; flex:none; margin:0; }
   #panel .panel-body > button { margin:10px 0; }
@@ -126,7 +127,7 @@
     #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
     #panel input { width:100%; min-width:0; height:44px; }
     #boat-panel label { min-height:44px; margin:6px 0; }
-    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
+    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #precipitation-type, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
     #boat-panel input[type=number] { width:90px; }
     #boat-rudder { height:44px; min-width:0; }
     #sail-controls input[type=range], #boat-propulsion { min-height:44px; }

@@ -14,7 +14,7 @@ struct Interaction {
   domain: vec4f,   // world centre xz, extent, texel size
   previous: vec4f, // previous centre xz, dt, reset
   motion: vec4f,   // speed m/s, enabled, wind velocity xz
-  phase: vec4f,    // time, frame, hull length scale, reserved
+  phase: vec4f,    // time, frame, hull length scale, precipitation wetting
 };
 struct Contact { point: vec4f, axis: vec4f, flow: vec4f, state: vec4f };
 // Contact: point.w = displacement forcing; axis.w = impact energy;
@@ -387,7 +387,7 @@ fn sprayLight(p: vec3f) -> vec3f {
   let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * vesselShadow(p,vec3f(0,1,0));
   let view = normalize(F.camPos.xyz - p);
   let scatter = pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
-  return sky * 0.85 + sun * (0.12 + scatter * 0.65);
+  return sky * 0.85 + sun * (0.12 + scatter * 0.65)+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
 }
 @fragment fn sheetFS(o: EffectVertex) -> @location(0) vec4f {
   let n = normalize(o.normal + vec3f(0.0, 0.0001, 0.0));

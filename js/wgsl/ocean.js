@@ -32,7 +32,9 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
   let volume = textureSampleLevel(cloudScreen, sampC, in.pos.xy * F.screen.zw, 0.0);
   // Reconstructed rgba16 cloud alpha lacks the dynamic range to occlude the
   // HDR solar disc. Use the same full-precision solar visibility as the boat.
-  let L = skyAtmo(d2) * (1.0 - volume.a) + volume.rgb + sunDisk(dir) * sunVis[0];
+  let haze=F.reserved.x*(1.0-smoothstep(-.02,.3,dir.y))*.8;
+  let L = mix(skyAtmo(d2) * (1.0 - volume.a) + volume.rgb + sunDisk(dir) * sunVis[0],skyAtmo(vec3f(0,1,0))*.55,haze)
+    +lightningCloud(dir)*(.4+volume.a*.6);
   return vec4f(L, 1.0);
 }
 `;
@@ -294,6 +296,8 @@ ${OCEAN_HULL_MASK}
   }
   var col = body * (1.0 - Fr) + refl * Fr + spec;
   col = mix(col, foamLit, foamMask * 0.95);
+  col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
+    +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;
   ${coast?'col = coastalWater(col, in.xz, in.height, foamLit);':''}
 
   // ---- aerial perspective ----

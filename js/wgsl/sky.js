@@ -196,16 +196,34 @@ fn sunIlluminance() -> vec3f {
   return sampleTrans(camR(), F.sunDir.y) * F.sunDir.w;
 }
 
+// Broad light from the discharging cloud. Evaluate at draw time so a brief
+// flash cannot remain baked into the amortized reflection cube or cloud history.
+fn lightningDirection()->vec3f {return normalize(vec3f(F.atmo.z,0.8,F.atmo.w));}
+fn lightningLight()->vec3f {return vec3f(0.65,0.78,1.0)*F.reserved.z*5.0;}
+fn lightningSurface(n:vec3f,v:vec3f,albedo:vec3f,rough:f32)->vec3f {
+  if(F.reserved.z<.0001){return vec3f(0);}
+  let l=lightningDirection();let nl=max(dot(n,l),0.0);
+  let halfVector=normalize(l+v+vec3f(.00001));
+  let exponent=mix(120.0,4.0,rough);
+  let spec=pow(max(dot(n,halfVector),0.0),exponent)*(exponent+2.0)*.003;
+  return lightningLight()*(albedo*(.06+.32*nl)+spec*nl);
+}
+fn lightningCloud(dir:vec3f)->vec3f {
+  if(F.reserved.z<.0001){return vec3f(0);}
+  return lightningLight()*(.06+.5*pow(max(dot(dir,lightningDirection()),0.0),6.0));
+}
+
 // One surface atmosphere for sea, timber and terrain. The near-sea haze layer
 // weakens with altitude and with the user's clear-air setting, not travel speed.
 fn surfaceAir(color:vec3f,world:vec3f)->vec3f {
   let delta=world-F.camPos.xyz;let d=length(delta);
   let altitude=max(0.0,(world.y+F.camPos.y)*0.5);
   let marine=F.fogExt.w*clamp(F.atmo.x/3.0,0.2,3.0)*exp(-altitude/220.0);
-  let extinction=max(F.fogExt.rgb,vec3f(marine));
+  let extinction=max(F.fogExt.rgb,vec3f(marine))+vec3f(F.reserved.x*0.0025);
   let transmission=exp(-extinction*d);
   let direction=normalize(vec3f(delta.x,max(delta.y,0.002*d),delta.z));
-  return color*transmission+skyAtmo(direction)*(1.0-transmission);
+  let rainSky=mix(skyAtmo(direction),skyAtmo(vec3f(0,1,0))*.55,F.reserved.x*.7)+lightningCloud(direction);
+  return color*transmission+rainSky*(1.0-transmission);
 }
 
 fn skyViewUV(dir: vec3f) -> vec2f {

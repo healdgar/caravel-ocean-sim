@@ -23,12 +23,12 @@ struct Frame {
   windP:    array<vec4f, 2>,  // [0].xy = wind direction, [0].z = wind speed; [1] = hull heading, length, beam, reflection enable
   lodP:     vec4f,     // CDLOD base range, grid quads per node, -, -
   post:     vec4f,     // exposure, bloom strength, frame index, -
-  atmo:     vec4f,     // haze (mie multiplier), camera altitude km, -, -
+  atmo:     vec4f,     // haze, camera altitude km, lightning horizontal direction x/z
   waterCol: vec4f,     // body scatter colour rgb, unresolved slope variance
   sssCol:   vec4f,     // sss colour rgb, sss strength
   foamP:    vec4f,     // J threshold, J gain, foam intensity, lace sharpness
   fogExt:   vec4f,     // rgb extinction per metre near sea level
-  reserved: vec4f,     // padding preserves the 384-byte frame layout
+  reserved: vec4f,     // precipitation intensity/type, lightning radiance, weather clock
 };
 `;
 

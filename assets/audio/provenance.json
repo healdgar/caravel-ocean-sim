@@ -1,0 +1,155 @@
+[
+  {
+    "id": "wind-steady",
+    "take": "05",
+    "edit": null,
+    "seconds": 16,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "e5c687baf7da295c2cdf9801661e137e9979eb2a73685613985c68c6c6f87cd8",
+    "bytes": 270254
+  },
+  {
+    "id": "wind-strong",
+    "take": "06",
+    "edit": {
+      "startSeconds": 4,
+      "endSeconds": 16,
+      "loopCrossfadeSeconds": 0.4,
+      "highpassHz": 90,
+      "highShelfHz": 4500,
+      "highShelfGainDb": -3.5
+    },
+    "seconds": 11.6,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "56421dacb176cb95c77c62bbf5ae8e41cfb108382b507822aa556173b47aa1e7",
+    "bytes": 202612
+  },
+  {
+    "id": "hull-wash",
+    "take": "02",
+    "edit": null,
+    "seconds": 16,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "bb2c234525ac4d5cb1aa6c36143a9529ddccb5956e4546181242d0bd0d7368c6",
+    "bytes": 256935
+  },
+  {
+    "id": "hull-slap",
+    "take": "02",
+    "edit": {
+      "endSeconds": 0.88,
+      "fadeOutSeconds": 0.15
+    },
+    "seconds": 0.88,
+    "loop": false,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "f0d0cabc5576da3a7a04a9cff3e34654c416ba18f5bc1ad40f7b636b299dfaba",
+    "bytes": 13132
+  },
+  {
+    "id": "timber-creak",
+    "take": "02",
+    "edit": null,
+    "seconds": 4,
+    "loop": false,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "0e2aaec4bed48c5a7c2a07b32917bfe5ac2f286e61611abf335f03944fce7387",
+    "bytes": 63125
+  },
+  {
+    "id": "thunder-distant",
+    "take": "01",
+    "edit": null,
+    "seconds": 12,
+    "loop": false,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "a5884234cd5d404e6fab8eba6eddc77ebaaa2c00f7cc28e0cf022446c5853922",
+    "bytes": 148969
+  },
+  {
+    "id": "thunder-near",
+    "take": "01",
+    "edit": null,
+    "seconds": 8,
+    "loop": false,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "ce557033ee143129bd22e3de617be6f2cd3832c2b91d96650837857169fb6fa0",
+    "bytes": 91232
+  },
+  {
+    "id": "rain-light",
+    "take": "01",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "seconds": 13.7,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "1077c883788d141bf1132af3da44239711fd0a1f5863277f82e236f7469f7c20",
+    "bytes": 307739
+  },
+  {
+    "id": "rain-heavy",
+    "take": "03",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "seconds": 13.7,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "508a899866b27ab38f6b1a210a42713986d41f3c09a3dbf1e8169fc9c7e11065",
+    "bytes": 256126
+  },
+  {
+    "id": "sleet-deck",
+    "take": "01",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "seconds": 11.7,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "23e74f7d5fa89933780ce0b9adfdce979c7b909912d7a7fc8abc62bd438511d3",
+    "bytes": 239745
+  },
+  {
+    "id": "hail-deck",
+    "take": "02",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "seconds": 11.7,
+    "loop": true,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "07c97e2064531473ebb76651449081137e250fea93c9bec8533052ebb015a84c",
+    "bytes": 249033
+  },
+  {
+    "id": "gull-near",
+    "take": "01",
+    "edit": {
+      "endSeconds": 1.25,
+      "fadeOutSeconds": 0.1
+    },
+    "seconds": 1.25,
+    "loop": false,
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "sha256": "a2a807fee4338ec1e14880d9af500273f984fc070feb9f588db20970dc44d291",
+    "bytes": 17019
+  }
+]

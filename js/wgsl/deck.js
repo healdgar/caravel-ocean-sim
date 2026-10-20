@@ -191,12 +191,12 @@ fn corner(v:u32)->vec2f {
     alpha=coverage*(f*(1.0-aeration)+aeration);
     if(alpha<0.003){discard;}
     let glint=sun*vesselSpecular(n,v,F.sunDir.xyz,0.24,vec3f(0.02))*nl;
-    let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration);
+    let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration+lightningSurface(n,v,vec3f(.1),.24));
     return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
   }
   // Do not bridge the vertical cabin face with a diagonal water polygon.
   if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
-  return vec4f(surfaceAir(color,in.world)*alpha,alpha);
+  return vec4f(surfaceAir(color+lightningSurface(n,v,vec3f(.1),.24),in.world)*alpha,alpha);
 }
 `;

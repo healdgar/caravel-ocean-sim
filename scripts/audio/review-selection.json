@@ -1,0 +1,78 @@
+{
+  "wind-steady": {
+    "take": "05",
+    "note": "Wooden-ship prompt. Argon heard natural unpitched airflow without whistles; slightly dark in tone. Ready for your listening review."
+  },
+  "hull-wash": {
+    "take": "02",
+    "note": "Kept unchanged after your listening review."
+  },
+  "hull-slap": {
+    "take": "02",
+    "edit": {
+      "endSeconds": 0.88,
+      "fadeOutSeconds": 0.15
+    },
+    "note": "Original first impact retained; the second event and trailing noise are removed with a short fade."
+  },
+  "timber-creak": {
+    "take": "02",
+    "note": "Kept unchanged after your listening review."
+  },
+  "wind-strong": {
+    "take": "06",
+    "edit": {
+      "startSeconds": 4,
+      "endSeconds": 16,
+      "loopCrossfadeSeconds": 0.4,
+      "highpassHz": 90,
+      "highShelfHz": 4500,
+      "highShelfGainDb": -3.5
+    },
+    "note": "Argon passed this edited strong-wind loop after listening across two repetitions. Early flutter removed; rumble and hiss softened. Ready for your listening review."
+  },
+  "thunder-distant": {
+    "take": "01",
+    "note": "Argon passed this isolated distant roll: soft onset and natural decay. Ready for your listening review."
+  },
+  "thunder-near": {
+    "take": "01",
+    "note": "Argon passed this nearby clap: sharp attack and rolling tail, distinct from the distant thunder."
+  },
+  "rain-light": {
+    "take": "01",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "note": "Argon passed the rainfall and listened across the edited loop boundary. Light droplets on timber and canvas."
+  },
+  "rain-heavy": {
+    "take": "03",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "note": "Argon passed this revised downpour and its loop join; denser than the light-rain reference, without the earlier vocal or sloshing artifacts."
+  },
+  "sleet-deck": {
+    "take": "01",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "note": "Argon passed fine ice-pellet ticking on wood and the edited loop boundary."
+  },
+  "hail-deck": {
+    "take": "02",
+    "edit": {
+      "loopCrossfadeSeconds": 0.3
+    },
+    "note": "Argon passed the revised hail and loop join: heavier pellet taps and bounces than sleet, without the earlier crashes."
+  },
+  "gull-near": {
+    "take": "01",
+    "edit": {
+      "endSeconds": 1.25,
+      "fadeOutSeconds": 0.1
+    },
+    "note": "Argon passed this isolated single gull cry. The repetitive later calls were removed; the original source is preserved. Ready for your listening review."
+  }
+}

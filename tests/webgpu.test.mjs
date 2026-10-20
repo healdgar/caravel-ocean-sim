@@ -323,7 +323,14 @@ test('packed wave samples preserve sunset and rough-sea pixels', {timeout:180000
       }finally{await page.close();}
     }
     assert.ok(new Set(captures[0]).size>20);
-    assert.deepEqual(captures[1],captures[0],`${scene}: packed wave samples must preserve every pixel`);
+    // Native Metal may reassociate float math when downstream lighting changes.
+    // Permit isolated one-level RGB rounding, never changed coverage or a visible
+    // shading difference. Software rendering retains the exact comparison.
+    if(process.env.WEBGPU_BACKEND==='metal'){
+      const differences=captures[1].map((v,i)=>Math.abs(v-captures[0][i]));
+      assert.ok(differences.every((d,i)=>d<=1&&(i%4!==3||d===0)),`${scene}: RGB error exceeds one level or alpha changed`);
+      assert.ok(differences.filter(d=>d>0).length<=captures[0].length*.001,`${scene}: more than 0.1% of channels differ`);
+    }else assert.deepEqual(captures[1],captures[0],`${scene}: packed wave samples must preserve every pixel`);
   }
 });
 
@@ -2061,7 +2068,10 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
       control[7]=1;await sample();control[7]=0;device.queue.writeBuffer(sheets,0,new Float32Array(16));
       device.queue.writeBuffer(plumes,0,new Float32Array([2.1,3*S,0,0,0,0,0,5,1,0,0,.2,1,0,0,0]));
       const crestWet=await sample(30);
-      wet.destroy();device.destroy();return {errors,dry,sprayed,drained,highSea,washed,sailWet,furled,crewWet,crewMoved,reset,disabled,sheetWet,crestWet};
+      control[7]=1;await sample();control[7]=0;control[9]=0;control[15]=1;
+      device.queue.writeBuffer(plumes,0,new Float32Array(24));const rained=await sample(40);
+      control[15]=0;const rainDried=await sample(50);
+      wet.destroy();device.destroy();return {errors,dry,sprayed,drained,highSea,washed,sailWet,furled,crewWet,crewMoved,reset,disabled,sheetWet,crestWet,rained,rainDried};
     });
     assert.deepEqual(result.errors,[]);
     assert.ok(result.dry[0][0]>.8,'submerged exterior absorbs water');
@@ -2082,7 +2092,11 @@ test('surface moisture follows water, spray, moving sails and crew, then dries a
     assert.ok(result.furled[7][0]>result.sailWet[7][0]*.99,'furling retains wetness');
     assert.ok(result.crewWet[8][0]>.1 && result.crewWet[8][6]===0,'boots can get wet without the head');
     assert.ok(result.crewMoved[8][0]>result.crewWet[8][0]*.99,'crew carry damp clothes when moving');
-    assert.ok(result.reset.flat().every(v=>v===0));assert.ok(result.disabled.flat().every(v=>v===0));
+    assert.ok(result.reset.flat().every(v=>v===0));
+    assert.ok(result.disabled[3][0]>0,'switching off spray does not instantly dry the timber');
+    for(const i of [1,3,4,5,6])assert.ok(result.rained[i][0]>.1,'rain wets exposed planks, ropes and sails without wake effects');
+    assert.equal(result.rained[2][0],0,'quarterdeck shelters the tiller space from rain');
+    assert.ok(result.rainDried[3][0]<result.rained[3][0]&&result.rainDried[3][0]>0,'rain moisture dries gradually');
     assert.ok(result.sheetWet[3][0]>.1,'impact sheet lips deposit moisture');
     assert.ok(result.crestWet[3][0]>.03,'wind-blown crest plumes deposit moisture');
   }finally{await page.close();}
@@ -2210,5 +2224,102 @@ test('vertical scupper water transmits the hull, catches sunlight and follows ma
     assert.ok(colors.backlit[0]>colors.shade[0]*2,'bubbles scatter backlighting');
     assert.ok(colors.haze[0]>colors.shade[0]*3,'distant runoff shares warm atmospheric light');
     for(let i=0;i<3;i++)assert.ok(Math.abs(colors.night[i]-colors.shade[i])<1e-6,'no direct sun below the horizon');
+  }finally{await page.close();}
+});
+
+// Weather is authored, but its GPU draw and Web Audio playback paths are real.
+test('rain variants, lightning illumination and stop controls work in the rendered scene', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:640,height:480}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
+        if(buffer.label==='frame ubo')check.weather=Array.from(data);
+        return write.call(this,buffer,offset,data,...rest);
+      };
+    });
+    const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace('createWeatherState();','createWeatherState(()=>.5);');
+    await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:source}));
+    const startupErrors=[];page.on('pageerror',e=>startupErrors.push(e.message));
+    await page.goto(`${origin}/?view=ship&w=160&h=120&sunElev=-2&clouds=.9&rain=1&thunder=1`);
+    await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:30000});
+    assert.equal(await page.locator('#err').textContent(),'');assert.deepEqual(startupErrors,[]);
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    for(const type of ['0','1','2','3']){
+      await page.getByLabel('Precipitation type').selectOption(type);const frame=await step(page);
+      assert.equal(frame.render.precipitation,1);assert.equal(await page.evaluate(()=>check.weather[93]),Number(type));
+    }
+    // Controlled frame timestamps reach the first discharge without a real-time wait.
+    const flash=await page.evaluate(async()=>{
+      const now=performance.now();
+      for(let i=0;i<90;i++){
+        check.callback(now+i*100);await check.device.queue.onSubmittedWorkDone();
+        if(check.weather[94]>.5)return {flash:check.weather[94],render:{...check.render}};
+      }
+      return null;
+    });
+    assert.ok(flash?.flash>.5);assert.ok(flash.render.lightning);
+    const luminance=()=>page.evaluate(async()=>{
+      const t=check.target,row=Math.ceil(t.width*4/256)*256;
+      const b=check.device.createBuffer({size:row*t.height,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+      const enc=check.device.createCommandEncoder();enc.copyTextureToBuffer({texture:t},{buffer:b,bytesPerRow:row},[t.width,t.height]);
+      check.device.queue.submit([enc.finish()]);await b.mapAsync(GPUMapMode.READ);
+      const pixels=new Uint8Array(b.getMappedRange());let sum=0;
+      for(let y=0;y<t.height;y++)for(let x=0;x<t.width;x++)sum+=pixels[y*row+x*4]+pixels[y*row+x*4+1]+pixels[y*row+x*4+2];
+      b.unmap();b.destroy();return sum/(t.width*t.height*3);
+    });
+    const lit=await luminance();
+    await page.getByRole('button',{name:'Stop precipitation & lightning',exact:true}).click();
+    const dry=await step(page);assert.equal(dry.render.lightning,undefined);assert.equal(dry.render.precipitation,undefined);
+    assert.equal(await page.evaluate(()=>check.weather[94]),0);
+    assert.ok(lit>await luminance()+2,'lightning illuminates rendered scene pixels, not just a control value');
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
+test('selected audio decodes, loops, delays thunder, mutes and resumes through Web Audio', {timeout:60000}, async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/__audio_test',route=>route.fulfill({contentType:'text/html',body:'<button id="sound">Sound</button>'}));
+    await page.goto(`${origin}/__audio_test`);
+    await page.evaluate(async()=>{
+      window.audioCheck={starts:[],status:{},context:null};
+      const create=AudioContext.prototype.createBufferSource;
+      AudioContext.prototype.createBufferSource=function(){
+        audioCheck.context=this;const s=create.call(this),start=s.start.bind(s);
+        s.start=(...args)=>{audioCheck.starts.push({loop:s.loop,duration:s.buffer?.duration,end:s.loopEnd});return start(...args);};return s;
+      };
+      const {createSceneAudio}=await import('/js/audio.js');
+      audioCheck.engine=createSceneAudio({onStatus:s=>audioCheck.status=s});
+      document.querySelector('button').onclick=()=>audioCheck.engine.toggle();
+    });
+    assert.equal(await page.evaluate(()=>audioCheck.starts.length),0,'no autoplay');
+    await page.getByRole('button',{name:'Sound',exact:true}).click();
+    await page.waitForFunction(()=>audioCheck.status.ready,undefined,{timeout:15000});
+    const loaded=await page.evaluate(()=>({status:audioCheck.status,starts:audioCheck.starts}));
+    assert.equal(loaded.status.missing,0);assert.equal(loaded.starts.length,7);
+    for(const s of loaded.starts){assert.equal(s.loop,true);assert.ok(Math.abs(s.duration-s.end)<.03,'gapless decode preserves the edited loop');}
+    const result=await page.evaluate(async()=>{
+      const engine=audioCheck.engine,p={soundVolume:.5,windSpeed:15,seabirds:0};
+      const boat={revision:1,showProw:true,x:0,z:0,length:20,surgeVelocity:2};
+      const frame=new Float32Array(96);frame[17]=2;frame[20]=1;
+      const weather={intensity:1,type:0,event:{x:686,z:0,distance:686,delay:2}};
+      engine.update(.1,p,boat,frame,weather);weather.event=null;
+      for(let i=0;i<19;i++)engine.update(.1,p,boat,frame,weather);
+      const early=audioCheck.starts.length;engine.update(.11,p,boat,frame,weather);
+      const later=audioCheck.starts.length;
+      engine.impact({x:1,z:0,strength:1});const impact=audioCheck.starts.length;
+      engine.impact({x:1,z:0,strength:1});const bounded=audioCheck.starts.length;
+      await engine.toggle();const muted=audioCheck.context.state;
+      engine.impact({x:1,z:0,strength:1});engine.update(10,p,boat,frame,weather);
+      const silent=audioCheck.starts.length;
+      return {early,later,impact,bounded,muted,silent};
+    });
+    assert.deepEqual(result,{early:7,later:8,impact:9,bounded:9,muted:'suspended',silent:9});
+    await page.getByRole('button',{name:'Sound',exact:true}).click();
+    await page.waitForFunction(()=>audioCheck.context.state==='running');
+    assert.equal(await page.evaluate(()=>audioCheck.starts.length),9,'resume reuses the seven ambience sources');
+    await page.evaluate(()=>audioCheck.engine.destroy());
   }finally{await page.close();}
 });

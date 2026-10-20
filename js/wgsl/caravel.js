@@ -184,6 +184,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     let behind=sky*(1.0-skyVisibility)+bounce*0.22*skyVisibility;
     col+=behind*exp(-opticalDepth)*0.7;
   }
+  col+=lightningSurface(n,v,albedo,rough);
+  if(in.material==9u || in.material==13u){col+=lightningLight()*albedo*max(dot(-n,lightningDirection()),0.0)*.12;}
   col=surfaceAir(col,in.world);
   return vec4f(col,1.0);
 }

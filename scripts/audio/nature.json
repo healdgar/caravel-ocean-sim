@@ -1,0 +1,26 @@
+[
+  {
+    "id": "gull-near",
+    "label": "Single gull cry",
+    "seconds": 3,
+    "loop": false,
+    "driver": "Occasional nearby bird event; position and distance follow the bird",
+    "prompt": "One solitary wild gull heard clearly from the deck of a wooden sailing ship. A single short natural calling phrase lasting about one second: a nasal descending gull cry with a breathy raspy throat texture and irregular pitch. Brief quiet before, then the entire natural decay into quiet afterward. Isolated outdoor bird recording; only this one gull call is audible."
+  },
+  {
+    "id": "seabirds-distant",
+    "label": "Distant seabird calls",
+    "seconds": 6,
+    "loop": false,
+    "driver": "Sparse distant bird activity, with long randomized gaps between events",
+    "prompt": "One solitary gull far from a wooden sailing ship gives two faint natural cries separated by two seconds of quiet. Distant softened nasal bird calls with a dry open-air perspective and very little high-frequency detail. Quiet before and after. The entire recording contains only these two distant cries and a faint clean recording noise floor."
+  },
+  {
+    "id": "tern-calls",
+    "label": "Tern calls",
+    "seconds": 3,
+    "loop": false,
+    "driver": "Alternate passing seabird call; occasional spatial event rather than a continuous loop",
+    "prompt": "One wild tern heard from the deck of a wooden sailing ship gives a single brief high, thin, slightly nasal rasping cry, about one second long. Sharp avian throat texture and a natural uneven falling pitch. A clean onset after a short silence, then a complete decay into quiet. Isolated outdoor field recording of this one tern call only."
+  }
+]

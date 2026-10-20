@@ -1,0 +1,50 @@
+[
+  {
+    "id": "wind-steady",
+    "label": "Steady open-air wind",
+    "seconds": 16,
+    "loop": true,
+    "driver": "Apparent wind speed and gust strength",
+    "prompt": "Field recording of a steady sea breeze heard from the exposed deck of a wooden sailing ship. The only audible sound is airy, unpitched wind turbulence: broad soft rushing air with gentle irregular swells, a clear upper-air hiss and a quiet low rustle. A clean wind-protected microphone captures open outdoor air. Even continuous texture for a seamless ambience loop."
+  },
+  {
+    "id": "wind-strong",
+    "label": "Strong open-air wind",
+    "seconds": 16,
+    "loop": true,
+    "driver": "Strong apparent wind layer",
+    "prompt": "Steady strong sea wind heard from the exposed deck of a wooden sailing ship. Clean recording through a sheltered windscreen. Continuous broad airy rushing with full-bodied unpitched turbulence and a soft upper hiss. Smooth irregular gusts swell slowly and overlap, keeping a sustained flowing texture throughout. Only moving air is audible. Natural outdoor ambience, seamless loop."
+  },
+  {
+    "id": "hull-wash",
+    "label": "Water passing the hull",
+    "seconds": 16,
+    "loop": true,
+    "driver": "Speed through water and local hull immersion",
+    "prompt": "Close exterior recording beside a heavy wooden sailing hull moving steadily through the sea: continuous irregular rushing water, small rippling slaps, fine bubbles and fizz along the planking. Stable flowing texture for a seamless loop. Only water against wood. No beach breakers, major impacts, wind, voices, music, birds, engines or propeller sounds."
+  },
+  {
+    "id": "hull-slap",
+    "label": "Light wave slap",
+    "seconds": 3,
+    "loop": false,
+    "driver": "Single mild wave contact at its hull location",
+    "prompt": "One small wave slapping against the outside of a heavy wooden boat hull. Brief crisp wet slap with a restrained hollow wooden resonance, followed by a small splash and a few fading drips. One isolated natural event, complete decay into quiet. Close exterior perspective. No repeated impacts, wind, continuous ocean ambience, voices or music."
+  },
+  {
+    "id": "hull-slam",
+    "label": "Heavy wave impact",
+    "seconds": 4,
+    "loop": false,
+    "driver": "Single energetic bow impact, never triggered every frame",
+    "prompt": "One large wave slapping and splashing against the outside of a heavy wooden sailing ship. A broad wet slap followed immediately by a substantial splash of foamy water, bubbling and washing down the oak planking. Subtle hollow wooden resonance underneath the clearly audible water. One isolated natural event with a connected watery decay into quiet. Close exterior recording."
+  },
+  {
+    "id": "timber-creak",
+    "label": "Timber flexing under load",
+    "seconds": 4,
+    "loop": false,
+    "driver": "Changing rig load and hull angular motion",
+    "prompt": "One deep creak from the massive wooden frames of a sailing ship under gradually increasing strain, then gently releasing. Low resonant timber groan with small fibrous friction details. Intact heavy wood flexing, not breaking. Close isolated natural recording, complete decay into quiet. No door hinge squeak, water, wind, footsteps, voices or music."
+  }
+]
