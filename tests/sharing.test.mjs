@@ -84,3 +84,10 @@ test('heading, speed and wind instrument visibility survives sharing independent
     assert.equal(link.searchParams.get('windHud'),windHud?'1':'0');
   }
 });
+
+test('shared links restore the following ship switch',()=>{
+  for(const followingShip of [true,false]){
+    const link=new URL(createShareLink('https://example.com/',{}, {...boat,followingShip},'boat'));
+    assert.equal(link.searchParams.get('follower'),followingShip?'1':'0');
+  }
+});

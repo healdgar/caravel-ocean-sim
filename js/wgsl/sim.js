@@ -1,4 +1,4 @@
-import { WAKE_SAMPLE } from './interaction.js';
+import { WAKE_SAMPLE, FLEET_WAKE_SAMPLE } from './interaction.js';
 // FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
 import { N, LOGN, CASCADES, NOISE_WGSL, PERIODIC_WGSL, FOAM_MODEL } from './common.js';
 
@@ -402,6 +402,11 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let fresh=max(mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0)),hullFoam.w*0.9);
   textureStore(dst, id.xy, lvl, vec4f(f, fresh, J, 1.0));
 }
+`;
+
+export const FLEET_FOAM_UPDATE=FOAM_UPDATE.replace(WAKE_SAMPLE,FLEET_WAKE_SAMPLE)+/* wgsl */ `
+@group(0) @binding(10) var<uniform> I2:Interaction;
+@group(0) @binding(11) var wakeTex2:texture_2d<f32>;
 `;
 
 export const ARRAY16_MIPS = /* wgsl */ `

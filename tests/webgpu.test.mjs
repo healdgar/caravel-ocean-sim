@@ -134,7 +134,11 @@ test('fused FFT reproduces analytical travelling waves in every cascade', { time
 
 // Keep scheduling deterministic and render to an ordinary GPU texture. Some headless
 // SwiftShader builds support WebGPU but cannot present a WebGPU canvas swap chain.
-function instrumentRenderer() {
+function instrumentRenderer({fleet=false}={}) {
+  // Existing fixtures isolate one vessel. Fleet coverage opts in explicitly;
+  // production startup keeps the companion enabled by default.
+  const fixtureURL=new URL(location.href);
+  if(!fleet&&!fixtureURL.searchParams.has('follower')){fixtureURL.searchParams.set('follower','0');history.replaceState(null,'',fixtureURL);}
   window.check = { callback: null, compute: {}, render: {}, errors: [], target: null, buffers: {} };
   window.requestAnimationFrame = callback => { check.callback = callback; return 1; };
   const requestDevice = GPUAdapter.prototype.requestDevice;
@@ -225,23 +229,29 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
   // Start on a sampled frame so the comparison also exercises timestamp writes.
   const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace('let frameIndex = 0;','let frameIndex = 7;');
   // Recreate the previous unindexed/copy schedule only inside this comparison.
-  const legacy=source
+  // Hold the ocean flat to isolate indexing/resolve from Metal's FFT rounding;
+  // travelling-wave and rough-sea fixtures independently cover the wave fields.
+  const rawMesh=source
     .replace('indexCaravelMesh(createCaravelMesh())','((vertices)=>({vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)}))(createCaravelMesh())')
-    .replace("prowPass.setIndexBuffer(caravelIndexBuffer,'uint32'); prowPass.drawIndexed(caravelIndices.length);",'prowPass.draw(caravelMesh.length/9);')
+    .replace(/prowPass\.setIndexBuffer\(caravelIndexBuffer,\s*'uint32'\);\s*prowPass\.drawIndexed\(caravelIndices\.length\);/,'prowPass.draw(caravelMesh.length/9);');
+  const copiedResolve=input=>input
     .replace('drawProw?waterView:hdrView','hdrView')
     .replace('format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });','format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC });')
     .replace('usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });','usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST });')
     .replace("const filterPass = enc.beginComputePass",'enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);\n      const filterPass = enc.beginComputePass');
+  const legacy=copiedResolve(rawMesh),indexedCopy=copiedResolve(source);
+  assert.ok(legacy.includes('prowPass.draw(caravelMesh.length/9);'),'legacy fixture must use the unindexed ship draw');
+  assert.ok(indexedCopy.includes('enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);'),'copy fixture must retain the intermediate texture copy');
   const captures=[];
-  for(const mode of ['legacy','optimized','profiled']){
+  for(const mode of ['legacy','indexedCopy','optimized','profiled']){
     const page=await browser.newPage({viewport:{width:96,height:72}});
     try{
       const initErrors=[];
       page.on('pageerror',e=>initErrors.push(e.message));
       page.on('console',msg=>{if(msg.text().includes('init failed'))initErrors.push(msg.text());});
       await page.addInitScript(instrumentRenderer);
-      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:source}));
-      await page.goto(`${origin}/?view=ship&sunElev=35&sunAzim=30&clouds=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
+      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:mode==='indexedCopy'?indexedCopy:source}));
+      await page.goto(`${origin}/?view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
       try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
       const frame=await step(page,1000);
@@ -258,8 +268,9 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
       captures.push(pixels);
     }finally{await page.close();}
   }
-  assert.deepEqual(captures[1],captures[0],'indexed/direct resolve pixels');
-  assert.deepEqual(captures[2],captures[0],'profiling must preserve pixels');
+  assert.deepEqual(captures[1],captures[0],'indexing must preserve pixels');
+  assert.deepEqual(captures[2],captures[1],'direct resolve must preserve pixels');
+  assert.deepEqual(captures[3],captures[2],'profiling must preserve pixels');
 });
 
 test('early hull exclusion preserves water edges and the complete ship image', {timeout:180000}, async()=>{
@@ -2053,7 +2064,8 @@ for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
     try {
       await page.addInitScript(instrumentRenderer);
       await page.goto(`${origin}/${bundle}?w=1&h=1`);
-      await page.waitForFunction(() => check.callback, undefined, { polling: 100, timeout: 90000 });
+      await page.waitForFunction(() => check.callback||document.querySelector('#err')?.textContent, undefined, { polling: 100, timeout: 90000 });
+      assert.equal(await page.locator('#err').textContent(),'');
       assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true,'both embedded crew assets and pipelines initialize');
       assert.deepEqual(await page.evaluate(async () => {
         await check.device.queue.onSubmittedWorkDone();
@@ -2183,7 +2195,7 @@ test('wet materials visibly shade the ship and crew and return to their dry appe
       const request=GPUAdapter.prototype.requestDevice;
       GPUAdapter.prototype.requestDevice=async function(...args){
         const device=await request.apply(this,args),create=device.createBuffer.bind(device);
-        device.createBuffer=desc=>{const b=create(desc);if(desc.label==='surface moisture')check.moisture=b;return b;};
+        device.createBuffer=desc=>{const b=create(desc);if(desc.label==='surface moisture'&&!check.moisture)check.moisture=b;return b;};
         return device;
       };
       const write=GPUQueue.prototype.writeBuffer;
@@ -2397,5 +2409,133 @@ test('selected audio decodes, loops, delays thunder, mutes and resumes through W
     await page.waitForFunction(()=>audioCheck.context.state==='running');
     assert.equal(await page.evaluate(()=>audioCheck.starts.length),9,'resume reuses the seven ambience sources');
     await page.evaluate(()=>audioCheck.engine.destroy());
+  }finally{await page.close();}
+});
+
+test('two vessels share global water but own transforms, probes, wakes, rigs and shadows', {timeout:180000}, async()=>{
+  const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace(
+    'vessels[0].boat=boat;vessels[1].boat=companion;',
+    'vessels[0].boat=boat;vessels[1].boat=companion;window.fleetFixture={vessels,boat,companion,followerAI};');
+  const page=await browser.newPage({viewport:{width:320,height:240}});
+  try{
+    await page.addInitScript(instrumentRenderer,{fleet:true});
+    await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:source}));
+    await page.goto(`${origin}/?view=ship&landfall=approach&sunElev=35&clouds=0&w=96&h=72`);
+    await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.locator('#err').textContent(),'');
+    let frame=await step(page,100);
+    assert.equal(frame.render.caravel,2);assert.equal(frame.render.crew,2);
+    assert.equal(frame.compute['height probe'].length,2);assert.equal(frame.compute['local wake'].length,2);
+    assert.equal(frame.render['solid shadows'],2);assert.equal(frame.render['canvas shadows'],2);
+    assert.equal(frame.render.ocean,1,'the water is drawn once for both vessels');
+    assert.equal(frame.compute['fft rows'].length,1,'both hulls share the same ocean FFT');
+    await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
+    for(let i=0;i<4;i++){await step(page,100);await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));}
+    const state=await page.evaluate(()=>{
+      const {vessels,boat,companion}=fleetFixture;
+      return {separation:Math.hypot(boat.x-companion.x,boat.z-companion.z),sameRig:boat.sailState===companion.sailState,
+        sameHull:vessels[0].hullUBO===vessels[1].hullUBO,sameWetness:vessels[0].wetness.state===vessels[1].wetness.state,
+        sameCrewMesh:vessels[0].crew.assets.geometry[0].vertex===vessels[1].crew.assets.geometry[0].vertex,
+        probes:vessels.map(v=>v.probe.state.time),positions:vessels.map(v=>Array.from(v.hullData.subarray(16,19)))};
+    });
+    assert.ok(state.separation>50);assert.equal(state.sameRig,false);assert.equal(state.sameHull,false);assert.equal(state.sameWetness,false);assert.equal(state.sameCrewMesh,true);
+    assert.ok(state.probes.every(t=>t>=0));assert.notDeepEqual(state.positions[0],state.positions[1]);
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
+    await page.locator('#follower-toggle').uncheck();frame=await step(page,100);
+    assert.equal(frame.render.caravel,1);assert.equal(frame.render.crew,1);assert.equal(frame.render['solid shadows'],1);
+    const dormantTime=await page.evaluate(()=>fleetFixture.vessels[1].crew.state.workTime);
+    await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
+    frame=await step(page,100);
+    assert.equal(frame.compute['local wake'].length,1,'disabled companion adds no ongoing wake compute');
+    assert.equal(frame.compute['surface moisture'].length,1,'disabled companion adds no ongoing wetness compute');
+    assert.equal(await page.evaluate(()=>fleetFixture.vessels[1].crew.state.workTime),dormantTime,'disabled companion does no crew simulation');
+    await page.locator('#follower-toggle').check();frame=await step(page,100);
+    assert.equal(frame.render.caravel,2);assert.deepEqual(frame.errors,[]);
+    await page.goto(`${origin}/?follower=0&view=ship&sunElev=35&clouds=0&w=96&h=72`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    frame=await step(page,100);assert.equal(frame.render.caravel,1);assert.equal(frame.compute['height probe'].length,1);
+    assert.equal(await page.locator('#follower-toggle').isChecked(),false);
+    assert.equal(await page.evaluate(()=>fleetFixture.vessels[1].crew.state.workTime??0),0);
+  }finally{await page.close();}
+});
+
+test('captain anchor orders connect voices, depth, retrieval and debug dolphin rendering', {timeout:120000},async()=>{
+  const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace('  resize();\n  updateResolutionStatus();',
+    `  window.encounterFixture={anchor,boat,terrain,P,dolphins,sceneAudio,updateAnchorUI,orders:[],events:[]};
+    const realOrder=sceneAudio.order.bind(sceneAudio),realAnchor=sceneAudio.anchor.bind(sceneAudio);
+    sceneAudio.order=(id,options)=>{encounterFixture.orders.push(id);return realOrder(id,options);};
+    sceneAudio.anchor=(event,ship)=>{encounterFixture.events.push(event.type);return realAnchor(event,ship);};
+    resize();\n  updateResolutionStatus();`);
+  const page=await browser.newPage({viewport:{width:390,height:844}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:source}));
+    await page.goto(`${origin}/?landfall=coast&windSpeed=0&swellHs=0&clouds=0&sunElev=30&w=64&h=48`);
+    await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.locator('#err').textContent(),'');
+    const advance=async count=>page.evaluate(async count=>{
+      check.now??=performance.now();
+      for(let i=0;i<count;i++){check.now+=100;check.render={};check.callback(check.now);await check.device.queue.onSubmittedWorkDone();}
+      return {render:check.render,phase:encounterFixture.anchor.phase,errors:check.errors};
+    },count);
+    await advance(8);
+    await page.getByRole('button',{name:'Captain',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:'Drop anchor',exact:true}).isEnabled(),true);
+    await page.getByRole('button',{name:'Enable sound',exact:true}).click();
+    await page.waitForFunction(()=>encounterFixture.sceneAudio.ready,undefined,{polling:100,timeout:15000});
+    await page.getByRole('button',{name:'Drop anchor',exact:true}).click();
+    assert.equal(await page.evaluate(()=>encounterFixture.anchor.phase),'lowering');
+    assert.equal(await page.evaluate(()=>encounterFixture.anchor.depthFathoms),null,'no sounding until the anchor reaches the bottom');
+    await advance(2);
+    assert.ok((await page.evaluate(()=>encounterFixture.events)).includes('drop'));
+    assert.ok((await page.evaluate(()=>encounterFixture.events)).includes('reel-start'));
+    assert.deepEqual(await page.evaluate(()=>encounterFixture.orders),['drop-anchor']);
+    const grounded=await page.evaluate(()=>{
+      const f=encounterFixture;for(let i=0;i<450;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();
+      return {phase:f.anchor.phase,depth:f.anchor.depthFathoms};
+    });
+    assert.equal(grounded.phase,'anchored');assert.ok(grounded.depth>3&&grounded.depth<7);
+    assert.match(await page.locator('#anchor-status').textContent(),/fathoms \(simulated sounding\)/);
+    const drawn=await advance(1);assert.equal(drawn.render['anchor and rode'],1);assert.deepEqual(drawn.errors,[]);
+    await page.getByRole('button',{name:'Weigh anchor',exact:true}).click();
+    await advance(1);assert.ok((await page.evaluate(()=>encounterFixture.orders)).includes('weigh-anchor'));
+    await page.evaluate(()=>{const f=encounterFixture;for(let i=0;i<1600;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();});
+    assert.equal((await advance(1)).phase,'stowed');
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
+    for(const [key,value] of [['length','22'],['beam','6.5'],['heading','90']]){
+      await page.evaluate(()=>{
+        const f=encounterFixture,assertDrop=f.anchor.drop(f.boat,{terrain:f.terrain,settings:f.P});
+        if(!assertDrop)throw Error('Expected coastal anchor drop');
+        for(let i=0;i<450;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});
+        f.boat.revision++;
+      });
+      assert.equal((await advance(1)).phase,'anchored','normal revision changes do not retrieve the anchor');
+      await page.evaluate(()=>{encounterFixture.boat.externalForce={x:123,z:456,yaw:789};});
+      await page.locator('#boat-'+key).fill(value);
+      const reset=await page.evaluate(()=>({phase:encounterFixture.anchor.phase,force:encounterFixture.boat.externalForce,splash:encounterFixture.anchor.splash}));
+      assert.equal(reset.phase,'stowed',key+' edit stows the working anchor');
+      assert.deepEqual(reset.force,{x:0,z:0,yaw:0,tension:0});assert.equal(reset.splash,null);
+      await advance(1);
+    }
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    await page.locator('#voice-controls summary').click();
+    assert.equal(await page.getByLabel('Crew voice',{exact:true}).locator('option').count(),12);
+    await page.locator('#environment-debug summary').click();
+    await page.getByRole('button',{name:'Spot dolphin pod',exact:true}).click();
+    const wildlife=await advance(1);assert.equal(wildlife.render.dolphins,1);assert.deepEqual(wildlife.errors,[]);
+    assert.ok(await page.evaluate(()=>encounterFixture.dolphins.state.count>=5&&encounterFixture.dolphins.state.count<=7));
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
+    await page.getByLabel('Show ship',{exact:true}).uncheck();
+    const withoutShip=await advance(1);assert.equal(withoutShip.render.caravel,undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    await page.getByRole('button',{name:'End encounter',exact:true}).click();
+    assert.equal((await advance(1)).render.dolphins,undefined);
+    await page.getByRole('button',{name:'Mute sound',exact:true}).click();
+    assert.equal(await page.evaluate(()=>encounterFixture.sceneAudio.enabled),false);
+    await page.goto(`${origin}/?windSpeed=0&w=32&h=32`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});await advance(8);
+    await page.getByRole('button',{name:'Captain',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:'Drop anchor',exact:true}).isEnabled(),false,'deep open ocean has no anchoring');
+    assert.match(await page.locator('#anchor-status').textContent(),/No coastal sounding/);
   }finally{await page.close();}
 });

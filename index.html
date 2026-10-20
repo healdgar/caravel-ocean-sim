@@ -26,13 +26,16 @@
   #camera-dock > button { background:var(--glass); border-color:#ffffff30; box-shadow:0 2px 12px #0002; }
   #camera-dock > button[aria-expanded=true] { color:var(--gold); border-color:var(--gold); }
   #sailing-instruments { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); left:max(12px,env(safe-area-inset-left)); z-index:5; display:flex; flex-wrap:wrap; width:344px; max-width:calc(100vw - 16px); box-sizing:border-box; border:1px solid #ffffff26; border-radius:10px; background:var(--glass); pointer-events:none; box-shadow:0 4px 20px #0002; }
-  .instrument-heading,.instrument-speed { padding:9px 12px 6px; flex:1; }
-  .instrument-heading { border-right:1px solid #ffffff18; }
+  .instrument-heading,.instrument-speed { padding:9px 12px 6px; box-sizing:border-box; }
+  .instrument-heading { flex:0 0 80px; border-right:1px solid #ffffff18; }
+  .instrument-speed { flex:0 0 108px; }
+  .instrument-speed > div { white-space:nowrap; }
+  .instrument-speed > div > span { font-size:10px; }
   .instrument-label { display:block; font-size:8px; letter-spacing:.09em; color:var(--muted); }
   #sailing-heading,#sailing-knots { font:500 23px/1.3 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
   #sailing-motion,.instrument-caption { display:block; font-size:8px; letter-spacing:.07em; color:var(--muted); }
   .instrument-speed[data-astern=true] { color:var(--gold); }
-  .instrument-wind { display:flex; align-items:center; gap:4px; padding:6px 10px 6px 0; }
+  .instrument-wind { display:flex; flex:1; min-width:0; align-items:center; gap:4px; padding:6px 10px 6px 0; }
   .instrument-wind svg { width:44px; height:44px; flex:none; fill:none; stroke:#839ba6; stroke-width:1; }
   .instrument-wind svg text { text-anchor:middle; fill:var(--muted); stroke:none; font:8px system-ui,sans-serif; }
   .instrument-wind .wind-bow { fill:var(--muted); stroke:none; }
@@ -92,9 +95,20 @@
   #landfall-chart svg { width:100%; display:block; background:#142c39; border-radius:5px; }
   #landfall-panel .landfall-credit { font-size:11px; color:var(--muted); }
   #landfall-ocean { margin-top:10px; }
+  #anchor-status { color:var(--gold); font-size:12px; }
+  #environment-debug,#voice-controls { border-top:1px solid #ffffff20; margin-top:12px; padding-top:6px; }
+  #environment-debug p,#voice-controls p { color:var(--muted); font-size:11px; }
+  #panel #environment-debug label,#panel #voice-controls label { display:flex; justify-content:space-between; gap:8px; }
+  #panel #environment-debug input[type=checkbox] { width:20px; }
+  .encounter-buttons { display:flex; flex-wrap:wrap; gap:5px; }
+  .encounter-buttons button { flex:1; }
+  #encounter-notice { position:fixed; top:calc(var(--controls-bottom) + 8px); left:50%; transform:translateX(-50%); max-width:calc(100vw - 30px); padding:8px 12px; border:1px solid #ffffff30; border-radius:7px; background:var(--glass); font-size:12px; color:var(--gold); z-index:4; pointer-events:none; box-sizing:border-box; }
   @media (max-width:720px), (pointer:coarse) {
     #sailing-instruments { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); left:50%; transform:translateX(-50%); width:344px; }
     .instrument-heading,.instrument-speed { padding:6px 9px 4px; }
+    .instrument-heading { flex-basis:70px; }
+    .instrument-speed { flex-basis:100px; }
+    .instrument-wind .instrument-label { font-size:7px; letter-spacing:.03em; }
     #sailing-heading,#sailing-knots { font-size:21px; }
     .instrument-wind { padding:4px 8px 4px 0; }
     .instrument-wind svg { width:40px; height:40px; }

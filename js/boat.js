@@ -142,6 +142,12 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const target = boat.speed * KNOT_TO_MPS;
   const thrust = hydro.drag * target * Math.abs(target);
   const waveForce = -1025 * 9.81 * hydro.volume * slope;
+  // Optional world-space loads (e.g. an anchor rode) pass through the same
+  // inertial integrator as wind and wave pressure. Units: N, clockwise N m.
+  const external=boat.externalForce,heading=(boat.heading??0)*Math.PI/180;
+  const externalX=Number.isFinite(external?.x)?external.x:0,externalZ=Number.isFinite(external?.z)?external.z:0;
+  const externalForward=externalX*Math.sin(heading)-externalZ*Math.cos(heading);
+  const externalSide=externalX*Math.cos(heading)+externalZ*Math.sin(heading);
   const initial = boatForwardSpeed(boat);
   const attitude=boat.waveAttitude ?? boat.target ?? {roll:0,pitch:0};
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
@@ -150,7 +156,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
     const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways) : null;
     stepBoatRotation(boat,'roll',attitude.roll??0,loads?.rollMoment??0,h);
     stepBoatRotation(boat,'pitch',attitude.pitch??0,loads?.pitchMoment??0,h);
-    const force = (loads ? loads.forward : thrust) + waveForce;
+    const force = (loads ? loads.forward : thrust) + waveForce + externalForward;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
     const drag = hydro.drag * (sailing ? 1 + 80 * Math.max(0, froude - 0.28) ** 2 : 1);
@@ -160,7 +166,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
     velocity = next;
     // Keel/hull resistance bounds sideways drift instead of converting it into forward drive.
     const lateralInertia = hydro.mass * 1.8, keelDrag = 0.5 * 1025 * boat.length * hydro.draft * 0.8;
-    const lateralFree = sideways + (loads?.side ?? 0) / lateralInertia * h;
+    const lateralFree = sideways + ((loads?.side ?? 0)+externalSide) / lateralInertia * h;
     const nextSide = 2 * lateralFree / (1 + Math.sqrt(1 + 4 * keelDrag / lateralInertia * h * Math.abs(lateralFree)));
     sidewaysDistance += (sideways + nextSide) * 0.5 * h; sideways = nextSide;
   }
@@ -208,7 +214,10 @@ export function stepBoatSteering(boat, command, dt) {
   const speed = boatForwardSpeed(boat);
   const desired = speed / Math.max(boat.length, 3) * Math.tan(boat.rudder * Math.PI / 180) * 0.65;
   const previous = boat.yawRate || 0;
-  boat.yawRate = desired + (previous - desired) * Math.exp(-dt / (0.9 + boat.length * 0.06));
+  const response=0.9+boat.length*.06,decay=Math.exp(-dt/response);
+  const yawMoment=Number.isFinite(boat.externalForce?.yaw)?boat.externalForce.yaw:0;
+  const yawInertia=(boat.hydrodynamics?.mass??60000)*(boat.length**2+(boat.beam??boat.length*.3)**2)/12*1.5;
+  boat.yawRate = desired + (previous - desired) * decay + yawMoment/yawInertia*response*(1-decay);
   boat.heading = ((boat.heading + (previous + boat.yawRate) * 0.5 * dt * 180 / Math.PI) % 360 + 360) % 360;
 }
 

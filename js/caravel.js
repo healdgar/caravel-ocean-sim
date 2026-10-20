@@ -1,5 +1,5 @@
 import { hullDeck, deckHalfWidth, HULL_DRAFT, HULL_BOW_RAKE, HULL_STERN_RAKE, hullHalfWidth, hullSurfacePoint, hullSheerAngle, vesselDeck, TILLER_PIVOT, TILLER_HANDLE,
-  QUARTERDECK_START, QUARTERDECK_HEIGHT, HULL_VERTICAL_SCALE } from './hull.js';
+  QUARTERDECK_START, QUARTERDECK_HEIGHT, HULL_VERTICAL_SCALE, anchorCathead } from './hull.js';
 import { RIG_MASTS, mastPoint, shroudGeometry, SAIL_TACKLES, tacklePoint } from './rigging.js';
 import { SAIL_PLAN, RIG_LINES, RIG_SEGMENTS, ropeParameter } from './lateen.js';
 
@@ -376,10 +376,14 @@ export function createCaravelMesh({parts}={}) {
     beam([.7,y,z],[1.22,y,z],1.14/aftSteps+.025,.04,6);
     part(`stair:tread:${i}`,start);
   }
-  // Two iron anchors hang from short catheads, clear of the bow's water contacts.
+  // Both catheads remain part of the hull. The working port anchor/rode is a
+  // separate animated object; the starboard anchor remains a secured spare.
   for(const side of [-1,1]){
-    const x=side*(width(-4.8)+.27),z=-4.8;
-    beam([side*(width(z)-.15),vesselDeck(z)+.58,z],[x,vesselDeck(z)+.78,z],.11,.13,17);
+    const attachment=anchorCathead(side),[x,,z]=attachment.tip,start=out.length;
+    beam(attachment.root,attachment.tip,.11,.13,17);
+    part(`anchor:cathead:${side}`,start);
+    if(side===-1)continue;
+    const spareStart=out.length;
     tube([x,vesselDeck(z)+.76,z],[x,.7,z],.023,12,.023,8);
     beam([x,.83,z],[x,-.02,z],.065,.065,3);
     beam([x,.66,z-.3],[x,.66,z+.3],.085,.09,16);
@@ -387,6 +391,7 @@ export function createCaravelMesh({parts}={}) {
       beam([x,0,z],[x,.17,z+dz*.31],.06,.06,3);
       tri([x-.11,.17,z+dz*.31],[x+.11,.17,z+dz*.31],[x,.39,z+dz*.4],3);
     }
+    part('anchor:spare',spareStart);
   }
 
   // Single masts, stays and Mediterranean runners; geometry follows the selected plan.

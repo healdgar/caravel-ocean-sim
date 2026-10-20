@@ -1,0 +1,32 @@
+{
+  "model": "eleven_v3",
+  "crew": [
+    {"id":"ines","name":"Inês","sex":"female","voiceId":"pFZP5JQG7iQjIQuC4Bku","sourceVoice":"Lily","character":"A steady, resonant senior sailor"},
+    {"id":"tomas","name":"Tomás","sex":"male","voiceId":"JBFqnCBsd6RMkjVDRZzb","sourceVoice":"George","character":"A warm, seasoned mate"},
+    {"id":"beatriz","name":"Beatriz","sex":"female","voiceId":"aAsWcN5jdLdiYG7Hq0YL","sourceVoice":"Harriet","character":"An older, brisk boatswain"},
+    {"id":"duarte","name":"Duarte","sex":"male","voiceId":"SOYHLrjzK2X1ezoPC6cr","sourceVoice":"Harry","character":"A rough, energetic foremast hand"},
+    {"id":"joao","name":"João","sex":"male","voiceId":"IKne3meq5aSn9XLyUdCD","sourceVoice":"Charlie","character":"A younger, clear and energetic mainmast hand"},
+    {"id":"catarina","name":"Catarina","sex":"female","voiceId":"ZF6FPAbjXT4488VcRRnw","sourceVoice":"Amelia","character":"A clear, lively mainmast hand"},
+    {"id":"leonor","name":"Leonor","sex":"female","voiceId":"Xb7hH8MSUJpSbSDYk0k2","sourceVoice":"Alice","character":"A measured, practical sailmaker"},
+    {"id":"rui","name":"Rui","sex":"male","voiceId":"N2lVS1w4EtoT3dr4eOWO","sourceVoice":"Callum","character":"A gravelly carpenter"},
+    {"id":"maria","name":"Maria","sex":"female","voiceId":"1e9Gn3OQenGu4rjQ3Du1","sourceVoice":"Niamh","character":"A bright, quick lookout with an Irish lilt"},
+    {"id":"afonso","name":"Afonso","sex":"male","voiceId":"nPczCjzI2devNBz1zQrb","sourceVoice":"Brian","character":"A deep, resonant foredeck hand"},
+    {"id":"isabel","name":"Isabel","sex":"female","voiceId":"jB2lPb5DhAX6l1TLkKXy","sourceVoice":"Sophia","character":"A warm, matter-of-fact mizzen hand"},
+    {"id":"pedro","name":"Pedro","sex":"male","voiceId":"onwK4e9ZLuTAKqWW03F9","sourceVoice":"Daniel","character":"A precise, steady helmsman"}
+  ],
+  "captain": {
+    "name":"Captain Trevenen",
+    "description":"A native Cornish man from a fishing village in Cornwall, England, aged about fifty-five. STRONG RHOTIC CORNISH / WEST COUNTRY ACCENT is essential: clearly pronounce every r in words such as furl, foremast, starboard, work and anchor. Broad rural West Country vowels, rolled or strongly curled r, a recognisable southwestern English burr. Earthy, gravelly, weathered low male voice with a natural chest rasp. A working sailing master calling crisp practical orders across the deck of an old wooden sailing ship. Forceful human projection, brisk speech, never a polished narrator or theatrical pirate. Completely dry voice, no ambience or music. Entirely original fictional character, no imitation of a real person.",
+    "preview":"[shouts] Make full sail! [pause] Reef the sails! [pause] Furl all sails! [pause] Batten down the hatches! [pause] Let go the anchor! [pause] Heave away!",
+    "orders":[
+      {"id":"full","text":"[shouts] Make full sail!"},
+      {"id":"reduced","text":"[shouts] Reef the sails!"},
+      {"id":"furl","text":"[shouts] Furl all sails!"},
+      {"id":"weather","text":"[shouts] Shorten sail! Batten down the hatches!"},
+      {"id":"watch","text":"[shouts] Resume the sea watch!"},
+      {"id":"transfer","text":"[shouts] Hands to the yards! Transfer to leeward!"},
+      {"id":"drop-anchor","text":"[shouts] Let go the anchor!"},
+      {"id":"weigh-anchor","text":"[shouts] All hands, weigh anchor! Heave away!"}
+    ]
+  }
+}

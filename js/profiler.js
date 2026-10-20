@@ -1,7 +1,7 @@
 // Timestamp queries are optional. Detailed mode adds compute pass boundaries;
 // normal rendering retains its single compute pass and samples only frame time.
 export const GPU_PASS_NAMES = [
-  'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows',
+  'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
   'Ocean + sky', 'Water reflection filter', 'Ship + spray',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',

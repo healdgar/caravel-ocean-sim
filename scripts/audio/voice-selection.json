@@ -1,0 +1,12 @@
+{
+  "crew":{"tomas":"02","beatriz":"02","duarte":"02","catarina":"02","maria":"02"},
+  "anchor":{"anchor-splash":"02"},
+  "captain":{"designTake":"03","preview":2,"voiceId":"88JH5heaSVisRkK8M5zW","name":"Captain Trevenen"},
+  "review":{
+    "reviewer":"Argon via agy CLI, direct audio ingestion",
+    "crew":"All twelve selected acknowledgments passed. Five initial takes were replaced for truncation, hiss or excessive acting. Maria received conservative 5 dB denoising; the final cleaned clip passed a further listen.",
+    "captain":"The first audition set lacked Cornish rhoticity. A revised prompt yielded the selected rough West Country captain. All eight final orders passed listening review, with complete words and consistent voice.",
+    "anchor":"Initial plunge rejected as a dry crash; water-only second take passed. Wooden windlass and hemp tackle release passed on their first takes.",
+    "minorNotes":"Yard order uses lee-ward pronunciation; weigh-anchor order has a natural aspirated opening breath. No digital artifacts or missing syllables reported in final captain clips."
+  }
+}

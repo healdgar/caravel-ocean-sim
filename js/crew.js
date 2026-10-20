@@ -144,8 +144,8 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   return s;
 }
 
-export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4}) {
-  const models=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
+export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null}) {
+  const models=shared?.models??await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
   })),B=GPUBufferUsage,state=createCompany();
   if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
@@ -155,17 +155,17 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
     {shaderLocation:4,offset:44,format:'float32x4'},
   ]}];
-  const module=await shader(CREW_RENDER,'crew'),shadowModule=await shader(CREW_SHADOW,'crew shadow');
-  const pipeline=await device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
+  const module=shared?null:await shader(CREW_RENDER,'crew'),shadowModule=shared?null:await shader(CREW_SHADOW,'crew shadow');
+  const pipeline=shared?.pipeline??await device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
     fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
-  const shadowPipeline=await device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
+  const shadowPipeline=shared?.shadowPipeline??await device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}});
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
     const poses=new Float32Array(people.length*65*16),actors=new Float32Array(people.length*CREW_ACTOR_FLOATS);
-    const vertex=buffer('crew vertices',model.vertices,B.VERTEX),index=buffer('crew indices',model.indices,B.INDEX);
+    const vertex=shared?.geometry[i].vertex??buffer('crew vertices',model.vertices,B.VERTEX),index=shared?.geometry[i].index??buffer('crew indices',model.indices,B.INDEX);
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
     const main=group(pipeline,[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView]);
@@ -175,7 +175,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const lighting=shadows.bind(pipeline);
   let enabled=true,drawEnabled=false;
   const drawBatch=(pass,b,shadow)=>{pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);};
-  return {state,triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),joints:65,
+  return {state,assets:{models,pipeline,shadowPipeline,geometry:batches.map(({vertex,index})=>({vertex,index}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),joints:65,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     update(boat,dt,wind){
       stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&state.crew[0].visible;
@@ -201,6 +201,6 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);},
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);},
     status(){return !state.crew[0].visible?'Crew needs a larger deck':companyStatus(state);},
-    destroy(){for(const b of batches)for(const resource of [b.vertex,b.index,b.bones,b.actor])resource.destroy();},
+    destroy(){for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index]),b.bones,b.actor])resource.destroy();},
   };
 }

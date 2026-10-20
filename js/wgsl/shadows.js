@@ -113,3 +113,25 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
   return result/32.0;
 }
 `;
+
+// Identical filtering, with one independently fitted footprint per ship. Array
+// layers retain the same three sampled textures even in a coastal scene.
+export const SCENE_SHADOW_SAMPLE = SHADOW_SAMPLE
+  .replace(/var<uniform>\s*SH:ShadowFrame;/,'var<uniform> shadowFrames:array<ShadowFrame,2>;')
+  .replaceAll('texture_depth_2d;','texture_depth_2d_array;')
+  .replace(/var\s+canvasFilter:texture_2d<f32>;/,'var canvasFilter:texture_2d_array<f32>;')
+  .replace(/fn vesselShadow\(world:vec3f,normal:vec3f\)->vec3f\s*\{/,'fn vesselLayerShadow(world:vec3f,normal:vec3f,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
+  .replace(/fn waterVesselShadow\(world:vec3f,normal:vec3f,view:vec3f,variance:f32\)->vec3f\s*\{/,'fn waterVesselLayerShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
+  .replaceAll('textureLoad(solidShadow,at,0)','textureLoad(solidShadow,at,layer,0)')
+  .replaceAll('textureLoad(canvasShadow,at,0)','textureLoad(canvasShadow,at,layer,0)')
+  .replaceAll('shadowCompare,q,depth','shadowCompare,q,layer,depth')
+  .replaceAll('shadowCompare,uv,depth','shadowCompare,uv,layer,depth')
+  .replaceAll('canvasFilter,shadowLinear,q,0.0','canvasFilter,shadowLinear,q,layer,0.0')
+  .replaceAll('canvasFilter,shadowLinear,uv,0.0','canvasFilter,shadowLinear,uv,layer,0.0') + /* wgsl */ `
+fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
+  return vesselLayerShadow(world,normal,0)*vesselLayerShadow(world,normal,1);
+}
+fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
+  return waterVesselLayerShadow(world,normal,view,variance,0)*waterVesselLayerShadow(world,normal,view,variance,1);
+}
+`;

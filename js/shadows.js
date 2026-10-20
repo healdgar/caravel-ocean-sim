@@ -48,14 +48,29 @@ export function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
   return out;
 }
 
-export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null}) {
+// Array layers share three texture bindings across the whole scene. Each vessel
+// renders into its own layer; adding a ship does not exhaust mobile texture slots.
+export function createSceneShadows(device,count=2,resolution=2048){
+  const T=GPUTextureUsage,B=GPUBufferUsage;
+  const textures=['depth32float','depth32float','rgba16float'].map((format,i)=>device.createTexture({label:'fleet shadow '+i,size:[resolution,resolution,count],format,usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING}));
+  const uniform=device.createBuffer({label:'fleet shadow frames',size:112*count,usage:B.UNIFORM|B.COPY_DST});
+  const frames=new Float32Array(28*count),compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'}),linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
+  return {resolution,
+    layer(index){return {views:textures.map(t=>t.createView({dimension:'2d',baseArrayLayer:index,arrayLayerCount:1}))};},
+    update(vessels){for(let i=0;i<count;i++)frames.set(vessels[i].shadows.data,i*28);device.queue.writeBuffer(uniform,0,frames);},
+    bind(pipe){return device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[{buffer:uniform},textures[0].createView({dimension:'2d-array'}),compare,textures[1].createView({dimension:'2d-array'}),textures[2].createView({dimension:'2d-array'}),linear].map((resource,binding)=>({binding,resource}))});},
+    destroy(){uniform.destroy();for(const t of textures)t.destroy();},
+  };
+}
+
+export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null,targets=null}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
   const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
   const uniform=device.createBuffer({label:'vessel shadow frame',size:112,usage:B.UNIFORM|B.COPY_DST});
   const depth=label=>device.createTexture({label,size:[resolution,resolution],format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
-  const solid=depth('solid shadow'),canvas=depth('canvas shadow');
-  const transmission=device.createTexture({label:'canvas shadow transmission',size:[resolution,resolution],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
-  const views=[solid.createView(),canvas.createView(),transmission.createView()];
+  const solid=targets?null:depth('solid shadow'),canvas=targets?null:depth('canvas shadow');
+  const transmission=targets?null:device.createTexture({label:'canvas shadow transmission',size:[resolution,resolution],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
+  const views=targets?.views??[solid.createView(),canvas.createView(),transmission.createView()];
   const compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'});
   const linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
   const fallback=wetness?[]:[device.createBuffer({size:8,usage:B.STORAGE}),device.createBuffer({size:mesh.length/9*4,usage:B.STORAGE})];
@@ -86,12 +101,12 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   }));
   const counts=[parts.solid.length,parts.canvas.length];
   return {
-    uniform,
+    uniform,data,
     update(hull,sun,enabled){fitVesselShadow(data,hull,sun,parts.bounds,resolution,enabled);device.queue.writeBuffer(uniform,0,data);},
-    encode(encoder,profiler,extraSolid){
+    encode(encoder,profiler,extraSolid,timingPrefix=''){
       if(!data[19])return;
       for(let i=0;i<2;i++){
-        passes[i].timestampWrites=profiler?.writes(i?'Canvas shadows':'Solid shadows');
+        passes[i].timestampWrites=profiler?.writes(timingPrefix+(i?'Canvas shadows':'Solid shadows'));
         const pass=encoder.beginRenderPass(passes[i]);pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
         pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);
         if(i===0)extraSolid?.(pass);pass.end();
@@ -101,6 +116,6 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
       {binding:0,resource:{buffer:uniform}},{binding:1,resource:views[0]},{binding:2,resource:compare},
       {binding:3,resource:views[1]},{binding:4,resource:views[2]},{binding:5,resource:linear},
     ]});},
-    destroy(){solid.destroy();canvas.destroy();transmission.destroy();uniform.destroy();for(const b of [...indices,...fallback])b.destroy();},
+    destroy(){solid?.destroy();canvas?.destroy();transmission?.destroy();uniform.destroy();for(const b of [...indices,...fallback])b.destroy();},
   };
 }

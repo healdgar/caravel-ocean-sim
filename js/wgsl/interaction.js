@@ -32,6 +32,17 @@ fn wakeAt(p: vec2f) -> vec4f {
   return textureSampleLevel(wakeTex, wakeSamp, uv, 0.0) * (1.0 - smoothstep(0.45, 0.495, edge)) * I.motion.y;
 }
 `;
+// Shared consumers (surface, foam and probes) see the sum of both independent
+// wake grids. Local emitters continue to use their own WAKE_SAMPLE.
+export const FLEET_WAKE_SAMPLE = WAKE_SAMPLE.replace('fn wakeAt(', 'fn firstWakeAt(') + /* wgsl */ `
+fn wakeAt(p:vec2f)->vec4f {
+  let uv=(p-I2.domain.xy)/I2.domain.z+0.5;
+  let edge=max(abs(uv.x-.5),abs(uv.y-.5));
+  var second=vec4f(0);
+  if(I2.motion.y>.5&&edge<.495){second=textureSampleLevel(wakeTex2,wakeSamp,uv,0.0)*(1.0-smoothstep(.45,.495,edge))*I2.motion.y;}
+  return firstWakeAt(p)+second;
+}
+`;
 export const INTERACTION_SEA = /* wgsl */ `
 fn interactionDisp(p: vec2f) -> vec3f {
   var d = vec3f(0.0);

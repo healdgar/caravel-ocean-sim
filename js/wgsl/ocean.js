@@ -1,6 +1,6 @@
 import { HULL_PROFILE } from './hull.js';
-import { WAKE_SAMPLE } from './interaction.js';
-import { SHADOW_SAMPLE } from './shadows.js';
+import { WAKE_SAMPLE, FLEET_WAKE_SAMPLE } from './interaction.js';
+import { SCENE_SHADOW_SAMPLE } from './shadows.js';
 // Ocean surface + sky background rendering.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
@@ -40,14 +40,19 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
 `;
 
 const OCEAN_HULL_MASK = /* wgsl */ `
-  if(F.post.w <= 0.5 && H.rig.z > 0.5) {
-    let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-    let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/HULL_Y_SCALE,-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-    if(hullExcludesOcean(q)) { discard; return vec4f(0); }
+  if(F.post.w <= 0.5) {
+    ${[0,1].map(vessel=>`{
+      let H=hulls[${vessel}];
+      if(H.rig.z>.5){
+        let relative=in.rel+F.camPos.xyz-H.origin.xyz;
+        let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/HULL_Y_SCALE,-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+        if(hullExcludesOcean(q)) { discard; return vec4f(0); }
+      }
+    }`).join('\n')}
   }
 `;
 
-function oceanSource(coast='') { return FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SHADOW_SAMPLE + /* wgsl */ `
+function oceanSource(coast='') { return FOAM_MODEL + HULL_PROFILE + FLEET_WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SCENE_SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -57,10 +62,12 @@ function oceanSource(coast='') { return FOAM_MODEL + HULL_PROFILE + WAKE_SAMPLE 
 @group(0) @binding(10) var foamWorld: texture_2d_array<f32>;
 @group(0) @binding(11) var<storage, read> sunVis: array<f32, 4>;
 struct OceanHull { right: vec4f, up: vec4f, forward: vec4f, size: vec4f, origin: vec4f, rig: vec4f };
-@group(0) @binding(12) var<uniform> H: OceanHull;
+@group(0) @binding(12) var<uniform> hulls: array<OceanHull,2>;
 @group(0) @binding(13) var<uniform> I: Interaction;
 @group(0) @binding(14) var wakeTex: texture_2d<f32>;
 @group(0) @binding(15) var wakeSamp: sampler;
+@group(0) @binding(16) var<uniform> I2: Interaction;
+@group(0) @binding(17) var wakeTex2: texture_2d<f32>;
 ` + SKY_RENDER_FUNCS + coast + /* wgsl */ `
 const ENV_MAXMIP: f32 = ${ENV_MIPS - 1}.0;
 const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
@@ -384,4 +391,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     outH[10] = meanSlope.x; outH[11] = meanSlope.y;
   }
 }
+`;
+
+export const FLEET_HEIGHT_PROBE=HEIGHT_PROBE.replace(WAKE_SAMPLE,FLEET_WAKE_SAMPLE)+/* wgsl */ `
+@group(0) @binding(9) var<uniform> I2:Interaction;
+@group(0) @binding(10) var wakeTex2:texture_2d<f32>;
 `;

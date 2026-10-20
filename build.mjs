@@ -11,10 +11,10 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js'];
-const order = ['js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/sail-aerodynamics.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
+const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js'];
+const order = ['js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/sail-aerodynamics.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/anchor.js', 'js/dolphin-state.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
 const stripModuleSyntax = (src) => src
-  .replace(/"assets\/audio\/([a-z-]+)\.mp3"/g, (_, id) => JSON.stringify('data:audio/mpeg;base64,' + fs.readFileSync(path.join(root, 'assets/audio', id + '.mp3')).toString('base64')))
+  .replace(/"assets\/audio\/([a-z0-9/-]+)\.mp3"/g, (_, id) => JSON.stringify('data:audio/mpeg;base64,' + fs.readFileSync(path.join(root, 'assets/audio', id + '.mp3')).toString('base64')))
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
   .replace(/^export\s*\{[^}]*\}\s*from\s*['"][^'"]+['"];\s*$/gm, '')
@@ -61,35 +61,11 @@ function minifyTemplates(src) {
     return '`' + out + '`';
   });
 }
-let minJs = stripModuleSyntax(fs.readFileSync(path.join(root, 'js/hull.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/rig-plan.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/rigging.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/lateen.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sail-aerodynamics.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sailing.js'), 'utf8'));
-for (const f of wgslModules) minJs += stripModuleSyntax(minifyTemplates(fs.readFileSync(path.join(root, f), 'utf8'))) + '\n';
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/boat.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/caravel.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/gltf.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew-work.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew-pose.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/crew.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/wetness.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/sharing.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/shadows.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/deck.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/interaction.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/spindrift.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/clouds.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/terrain-model.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/terrain.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/landfall.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/profiler.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/resolution.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/instruments.js'), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/controls.js'), 'utf8'));
-for (const f of ['js/weather-state.js','js/audio-assets.js','js/audio.js','js/weather.js']) minJs += stripModuleSyntax(fs.readFileSync(path.join(root, f), 'utf8'));
-minJs += stripModuleSyntax(fs.readFileSync(path.join(root, 'js/main.js'), 'utf8'));
+let minJs = '';
+for (const f of order) {
+  const src=fs.readFileSync(path.join(root,f),'utf8');
+  minJs+=stripModuleSyntax(wgslModules.includes(f)?minifyTemplates(src):src)+'\n';
+}
 
 function findEsbuild() {
   const req = createRequire(import.meta.url);

@@ -38,6 +38,11 @@ export function hullDeck(z) {
 export function vesselDeck(z) {
   return z >= QUARTERDECK_START ? QUARTERDECK_HEIGHT : hullDeck(z);
 }
+// One attachment definition for the timber cathead and animated working anchor.
+export function anchorCathead(side=-1) {
+  const z=-4.8,x=side*(deckHalfWidth(z)+.27),y=vesselDeck(z);
+  return {root:[side*(deckHalfWidth(z)-.15),y+.58,z],tip:[x,y+.78,z],fairlead:[x,y+.76,z]};
+}
 // Authored stations guided by the Martinez-Hidalgo reconstruction's half-breadth
 // and body plans; not digitized offsets or a claim of an exact Nina replica.
 export const HULL_STATIONS = [-6.4,-5.8,-4.8,-3.2,-1.6,0,1.4,2.8,4.2,5.6];

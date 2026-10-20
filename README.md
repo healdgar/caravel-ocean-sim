@@ -204,6 +204,85 @@ Performance disclosure inside Sea settings.
 
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
 
+## Following ship, crew voices and encounters
+
+A second copy of the caravel follows by default. Open **Camera views → View both
+ships** to frame the pair; **Ship settings → Following ship** disables it, and
+`follower=0` starts with one ship. Shared links preserve the choice. Hull geometry,
+oak textures, crew geometry, the FFT ocean, clouds and weather are shared. Each
+vessel owns its hull/rig state, 12-person company, water probes, wake, wetness and
+shadow layer. Ocean rendering excludes both hulls, combines both wakes and
+receives both sets of shadows. Disabling the companion stops its physics,
+crew work, probe reads and ongoing effect/shadow work.
+
+The follower operates ordinary sail and rudder commands. It follows a position
+about 2.8 hull lengths astern and 1.5 lengths to starboard, commits to tacks,
+shortens sail for strong wind and close separation, and uses actual sternway
+steering when caught in irons. A sustained bad-tack recovery can request one
+crew-operated yard transfer after clearing the wind. Recovery remains committed
+when the pursuit target crosses the bow. Identical ships cannot reliably close
+a gap while the leader maintains equal or greater speed. Separation steering
+is an initial avoidance policy; passage planning, a ship-collision solver,
+combat and hailing remain future work.
+
+**Enable sound** in Captain or Sea settings to hear the new voices. The 12 named
+crew each have a distinct, reusable voice saying “Aye captain!”: Inês, Tomás,
+Beatriz, Duarte, João, Catarina, Leonor, Rui, Maria, Afonso, Isabel and Pedro.
+The player’s eight orders use a separate original rough Cornish voice,
+**Captain Trevenen**. A captain command is followed by a rotating crew reply;
+repeated input keeps only the newest pending exchange. Captain Inês can be
+previewed, but the default crew response rotates among the other 11 hands.
+**Sea settings → Crew voices** previews each named voice.
+
+The new 23 MP3 assets include 12 acknowledgments, eight orders, a water plunge,
+tackle release and a hemp-rope/windlass loop. They total about 487 KB. Argon
+listened to the generated takes, rejected several noisy/truncated performances,
+and approved the selected replacements and final captain lines. Runtime audio
+uses the existing gesture-enabled Web Audio context, spatial attenuation,
+volume, mute and visibility controls; the windlass starts only when needed.
+No generation requests or API credentials run in the game. Local authoring uses
+`scripts/voices.mjs`; selected provenance is in `assets/audio/voices/provenance.json`
+and `scripts/audio/voice-selection.json`. Private journals remain in ignored
+`.audio/voices/`.
+
+### Anchoring
+
+Use **Landfall → Near coast**, slow below **1.5 knots**, then choose **Captain →
+Drop anchor**. It is available only inside the loaded coastal depth domain,
+with visible land within 2.5 km, safe under-keel clearance, at most 35 m depth,
+and enough of the 200 m hemp rode for 5:1 scope from the bow. Haze, rain,
+cloud base and the horizon affect the visibility proxy. Open ocean has no
+valid sounding and cannot be anchored.
+
+The port anchor leaves its cathead, falls through the water with a splash,
+reaches the bed and pays out rode. Only bottom contact reveals depth in fathoms
+(1 fathom = 1.8288 m). **The Saba underwater skirt is authored, not surveyed
+bathymetry; the readout explicitly says “simulated sounding.”** The seabed anchor
+retains its world position/orientation while the ship swings. A slack rode
+cannot push; tension acts through ordinary hull inertia and yaw. Holding
+strength is finite and the anchor drags under excess load. **Weigh anchor**
+hauls the ship toward its anchor, breaks it out and retrieves it progressively.
+The starboard spare remains stowed. Both ship copies have the same anchor
+geometry; player commands operate the lead ship’s port anchor.
+
+### Dolphins
+
+Pods of 5–7 dolphins visit occasionally in fair weather. Each opportunity waits
+at least seven minutes plus an exponential interval averaging 15 minutes,
+including the first visit; use the debug trigger for immediate viewing. Encounters last
+about 105 seconds. The procedural animals swim, breathe, occasionally breach,
+beat their tails and leave small water-entry ripples and droplets. Their height
+samples the same displaced wave field as the ocean; the water depth test
+occludes submerged bodies. They avoid the active hulls and water shallower than
+six metres. Motion is authored wildlife behavior, not a hydrodynamic animal
+simulation. No wildlife draw or effect pass runs while a pod is absent.
+
+For immediate testing, open **Sea settings → Environment & encounters → Spot
+dolphin pod**. **View pod** frames the animals; **End encounter** clears them,
+and **Natural dolphin sightings** disables automatic visits. Debug URL options
+are `dolphins=1&dolphinView=1&view=ship`; ordinary share links omit these debug
+flags. Encounters use normal simulation seconds and do not fast-forward sailing.
+
 ## Share your sea conditions
 
 Open **Sea settings** and adjust the waves and lighting, then select **Copy share
@@ -479,14 +558,17 @@ npm run build
 npm test
 ```
 
-The compact-helm revision passes **168/168 tests** using installed Chrome on
+The fleet-and-encounters revision passes **202/202 tests** using installed Chrome on
 macOS/Metal, including geometry, lighting, mobile controls, all three standalone
-builds, precipitation, flash illumination, wetting and actual Web Audio decoding.
+builds, precipitation, flash illumination, wetting, independent vessel state,
+anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
 in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
 retain their original assertions. This handles native compiler reassociation
 without accepting geometry or visible shading changes. Software rendering keeps
-the packed-wave comparison exact.
+the packed-wave comparison exact. The byte-exact indexing/resolve fixture holds
+the ocean flat to isolate those changes from FFT rounding; wave behavior has
+separate travelling-wave and rough-sea coverage.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.
