@@ -1,8 +1,37 @@
 # Third-party code and data
 
-## Saba elevation and world overview
+## Saba LiDAR terrain and aerial imagery
 
-Elevation derives from [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/),
+Current Saba relief and RGB appearance seeds derive from **Beeldmateriaal
+Nederland**, [Dataroom Caribisch Nederland](https://www.beeldmateriaal.nl/dataroom-caribisch-nederland),
+under the [Creative Commons Attribution 4.0 International licence](https://creativecommons.org/licenses/by/4.0/).
+The publisher describes Saba aerial/LiDAR acquisition around 2023–2024; the DTM
+file is labelled Saba 2023. A WMS publication-layer date is not a capture date.
+
+- Bare-earth source: [M_SABA2023.TIF](https://basisdata.nl/hwh-ortho/Caribisch_NL/LiDAR/caribisch/Saba/02a_DTM_50cm/M_SABA2023.TIF), half-metre spacing.
+- RGB source: [Saba orthophoto WMS](https://api.ellipsis-drive.com/v3/ogc/wms/37a9029d-7578-4471-826d-3b40d721b83b?request=getCapabilities).
+
+These data are **modified**. The local DTM is area-averaged, gap-interpolated,
+reprojected and quantized to 16 m spacing. The publisher's EPSG:10641 coordinate
+assignment is recorded because the original TIFF carries a generic LOCAL_CS tag;
+no hydrographic vertical-datum conversion is asserted. A reduced orthophoto crop
+is co-registered and lightly antialiased. Median historical cleanup is limited to
+compact neutral-bright features in vegetated surroundings; natural pale cliffs
+and canopy detail are retained. Bounded local shadow lifting reduces photographed
+shade. Its colours seed authored ground appearance and a
+greenness-derived vegetation mask; they are not calibrated surface reflectance,
+surveyed species coverage or a reconstruction of historical land cover.
+The exterior underwater skirt is authored and is not bathymetry.
+
+`assets/world/saba/manifest.json` preserves exact download URLs, original and
+derived SHA-256 hashes, licensing, coordinate assignment and processing limits.
+`scripts/prepare-land-imagery.py` reproduces the local derivatives from cached
+source downloads. CC BY 4.0 applies to these data derivatives; the project's MIT
+code licence does not replace it. No endorsement by the source provider is implied.
+
+## Earlier global terrain prototype and world overview
+
+The earlier Saba terrain prototype derived from [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/),
 using four zoom-12 Terrarium tiles in the public `elevation-tiles-prod` bucket.
 Global sources: SRTM and GMTED2010, courtesy U.S. Geological Survey; ETOPO1,
 courtesy NOAA. These US-government source datasets are public domain. Preserve
@@ -13,10 +42,10 @@ World chart: Made with [Natural Earth](https://www.naturalearthdata.com/about/te
 The 1:110 million land polygons are public domain. This is an overview map, not
 a navigational coastline.
 
-`assets/world/saba/manifest.json` records downloaded URLs and SHA-256 hashes.
-`scripts/prepare-land.py` resamples elevation and generates the canopy material.
-The coastline/skirt and vegetation are local adaptations; no Google/Apple imagery,
-code or proprietary map data is incorporated.
+`scripts/prepare-land.py` can recreate that older global-relief baseline and its
+unused procedural canopy material; the local LiDAR/imagery importer now replaces
+the rendered Saba relief and appearance. Coastline/skirt and vegetation adaptations
+remain authored. No Google/Apple imagery, code or proprietary map data is incorporated.
 
 ## Quaternius crew assets
 

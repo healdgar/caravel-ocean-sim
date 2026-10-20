@@ -1,7 +1,7 @@
-import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck } from './hull.js';
+import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck, vesselDraft } from './hull.js';
 import { SQUARE_RIG_MASTS } from './rigging.js';
 import { SAIL_PLAN, createLateenPoses, advanceLateenRig } from './lateen.js';
-import { createSailGeometry, updateSailGeometry, sailPanelForce } from './sail-aerodynamics.js';
+import { createSailGeometry, createVictorySailGeometry, updateSailGeometry, sailPanelForce } from './sail-aerodynamics.js';
 export { SAIL_PLAN, runningRiggingLines } from './lateen.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
@@ -40,7 +40,7 @@ export function sailingState(boat) {
     pitchMoment:0, panelSide:new Float64Array(3), panelMoment:new Float64Array(3),
   };
   boat.sailState.rig??=createLateenPoses(boat.sailState.set);
-  boat.sailState.geometry??=createSailGeometry();
+  boat.sailState.geometry??=boat.modelId==='victory'?createVictorySailGeometry():createSailGeometry();
   return boat.sailState;
 }
 
@@ -61,11 +61,17 @@ export function apparentWind(out, heading, speed, sideways, windSpeed, windDirec
 export function advanceSails(boat, dt, windSpeed, windDirection) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, boat.surgeVelocity ?? 0, boat.leewayVelocity ?? 0, windSpeed, windDirection);
+  // This reconstruction's yard/shroud envelope permits 23 degrees of brace.
+  // Forces use that physical stop too; do not draw one trim and simulate another.
+  if(boat.modelId==='victory')s.squareTarget=sailClamp(s.squareTarget,-.4,.4);
   for (let i = 0; i < 3; i++) s.set[i] += sailClamp(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1) - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i]??1), dt * 0.18 * (boat.crewSailRate?.[i]??1));
   // Yards and lateen take time to brace/tack; forces use this actual trim.
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
   s.lateenYaw += sailClamp(s.lateenTarget - s.lateenYaw, -dt * 0.65, dt * 0.65);
-  advanceLateenRig(s,boat,dt);
+  if(boat.modelId==='victory'){
+    for(let i=0;i<3;i++){s.rig[i].deployed=s.set[i];s.rig[i].side=-s.tack;}
+    s.canvasTack=s.tack;
+  }else advanceLateenRig(s,boat,dt);
   // Pressure loads fill the canvas with a short response time. This state only
   // advances with time; querying forces never changes the geometry underneath it.
   for(const p of s.rig)p.fill+=((p.targetFill??0)-p.fill)*(1-Math.exp(-dt*4));
@@ -80,7 +86,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   const geometry=s.geometry,panels=updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
   const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0;
   const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
-  const cg=(boat.hydrodynamics?.centreOfGravity??HULL_DRAFT*HULL_VERTICAL_SCALE)-HULL_DRAFT*HULL_VERTICAL_SCALE;
+  const datum=vesselDraft(boat),cg=(boat.hydrodynamics?.centreOfGravity??datum)-datum;
   const relativeDirection=windDirection-(boat.heading??0)*Math.PI/180;
   const windX=Math.cos(relativeDirection),windZ=Math.sin(relativeDirection);
   // The roll axis rotates with pitch. Point velocities and torque use the same
@@ -88,8 +94,10 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   const ox=pitchRate,oy=-rollRate*sp,oz=rollRate*cp;
   for(let m=0;m<3;m++){
     let fill=0,area=0;
-    for(let j=0;j<geometry.indices.length;j++){
-      const panel=panels[m*geometry.indices.length+j],[x,y,z]=panel.point,[nx,ny,nz]=panel.normal;
+    const group=geometry.victory?geometry.groups[m]:panels,start=geometry.victory?0:m*geometry.indices.length,count=geometry.victory?group.length:geometry.indices.length;
+    for(let j=0;j<count;j++){
+      const panel=group[start+j];
+      const [x,y,z]=panel.point,[nx,ny,nz]=panel.normal;
       const rx=cr*x-sr*(y-cg),ry=cp*(sr*x+cr*(y-cg))-sp*z,rz=sp*(sr*x+cr*(y-cg))+cp*z;
       const normalX=cr*nx-sr*ny,normalY=cp*(sr*nx+cr*ny)-sp*nz,normalZ=sp*(sr*nx+cr*ny)+cp*nz;
       const height=cp*(sr*x+cr*y)-sp*z-(boat.hydrodynamics?.sinkage??0);
@@ -107,6 +115,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
     s.lateenFill+=s.rig[m].fill*area;s.area+=area;
   }
   s.lateenFill=s.area>0?s.lateenFill/s.area:0;
+  if(geometry.victory)s.squareFill=s.lateenFill;
   return s;
 }
 

@@ -93,9 +93,9 @@ fn pressureSea(p: vec2f) -> f32 {
   let u = select(f32(i % 16u) / 15.0, f32(i % 4u) / 3.0, aft);
   let side = select(-1.0, 1.0, (i >= 16u && i < 32u) || i >= 36u);
   let a = mix(0.28, 0.992, u);
-  let z = select(-6.4 * a, mix(2.0,5.25,u), aft);
-  let deck = hullDeck(z);
-  let halfWidth = hullHalfWidth(z, 0.0) * H.size.x / 3.6;
+  let z = select(-select(6.4,6.0,H.rig.w>.5) * a, mix(2.0,select(5.25,5.65,H.rig.w>.5),u), aft);
+  let deck = modelHullDeck(z,H.rig.w);
+  let halfWidth = modelHullWidth(z,0.0,H.rig.w) * H.size.x / 3.6;
   let spine = H.origin.xyz - H.forward.xyz * (z * H.size.y / 12.0);
   let rest = spine + H.right.xyz * side * halfWidth * 0.9;
   var p = rest;
@@ -104,9 +104,9 @@ fn pressureSea(p: vec2f) -> f32 {
   var width = halfWidth * 0.9;
   for (var j = 0; j < 5; j++) {
     level = interactionSea(p.xz);
-    localY = (level - spine.y - H.right.y * side * width) / (max(0.35, H.up.y)*HULL_Y_SCALE);
-    width = hullHalfWidth(z, localY) * H.size.x / 3.6;
-    p = spine + H.right.xyz * side * width + H.up.xyz * localY*HULL_Y_SCALE;
+    localY = (level - spine.y - H.right.y * side * width) / (max(0.35, H.up.y)*shipY(H.right.w));
+    width = modelHullWidth(z,localY,H.rig.w) * H.size.x / 3.6;
+    p = spine + H.right.xyz * side * width + H.up.xyz * localY*shipY(H.right.w);
   }
   p.y = level;
   let signedWater = pressureSea(p.xz) - rest.y;
@@ -115,13 +115,13 @@ fn pressureSea(p: vec2f) -> f32 {
   let reset = I.previous.w > 0.5 || old.state.y < 0.0001;
   let rise = clamp((signedWater - old.state.x) / dt, -8.0, 8.0);
   let closing = select(mix(old.state.z, rise, 1.0-exp(-dt*18.0)), 0.0, reset);
-  let wet = smoothstep(-${HULL_DRAFT}, -${HULL_DRAFT*.65}, localY) * smoothstep(0.0, 0.08, width) * (1.0 - smoothstep(deck + 0.3, deck + 1.1, localY)) * I.motion.y;
+  let wet = smoothstep(-modelHullDraft(H.rig.w),-modelHullDraft(H.rig.w)*.65,localY) * smoothstep(0.0, 0.08, width) * (1.0 - smoothstep(deck + 0.3, deck + 1.1, localY)) * I.motion.y;
   let speed = max(I.motion.x, 0.0);
   // Gradient of the actual planking, including the fine entry and changing
   // section flare. Splash direction must change with the rebuilt hull.
   let eps=0.04;
-  let dz=(hullHalfWidth(z+eps,localY)-hullHalfWidth(z-eps,localY))/(2.0*eps)*H.size.x/3.6/(H.size.y/12.0);
-  let dy=(hullHalfWidth(z,localY+eps)-hullHalfWidth(z,localY-eps))/(2.0*eps)*H.size.x/3.6/HULL_Y_SCALE;
+  let dz=(modelHullWidth(z+eps,localY,H.rig.w)-modelHullWidth(z-eps,localY,H.rig.w))/(2.0*eps)*H.size.x/3.6/(H.size.y/12.0);
+  let dy=(modelHullWidth(z,localY+eps,H.rig.w)-modelHullWidth(z,localY-eps,H.rig.w))/(2.0*eps)*H.size.x/3.6/shipY(H.right.w);
   let normal=normalize(H.right.xyz*side+H.forward.xyz*dz-H.up.xyz*dy);
   let outward=normalize(vec3f(normal.x,0.0,normal.z)+H.right.xyz*side*0.12);
   let entry=clamp(dot(outward,H.forward.xyz),0.0,1.0);
@@ -175,7 +175,7 @@ fn previousFoam(q:vec2f)->vec2f {
   let delta = p - H.origin.xz;
   let along = dot(delta, H.forward.xz);
   let side = select(0u, 16u, dot(delta, H.right.xz) >= 0.0);
-  let u = clamp((along / max(H.size.y * 6.4 / 12.0, 0.1) - 0.28) / 0.712, 0.0, 1.0);
+  let u = clamp((along / max(H.size.y * select(6.4,6.0,H.rig.w>.5) / 12.0, 0.1) - 0.28) / 0.712, 0.0, 1.0);
   let contact = contacts[side + u32(round(u * 15.0))];
   let width = max(0.55, H.size.x * 0.18);
   let toContact = p - contact.point.xz;

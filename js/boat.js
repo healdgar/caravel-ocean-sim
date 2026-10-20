@@ -1,4 +1,5 @@
-import { HELM_EYE_X, HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale } from './hull.js';
+import { HELM_EYE_X, HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale, vesselVerticalScale } from './hull.js';
+import {VICTORY_DESIGN,victoryHullHalfWidth,victoryHullDeck} from './models/victory.js';
 import { advanceSails, sailForces } from './sailing.js';
 
 export const KNOT_TO_MPS = 0.514444;
@@ -26,55 +27,76 @@ const HULL_HYDRO = (()=>{
   }
   return rows;
 })();
-export function hullHydrostatics(length,beam,waterline=0){
-  const [sx,sy,sz]=hullScale(length,beam),at=Math.max(0,Math.min(HULL_HYDRO.length-1,(waterline/sy+HULL_DRAFT)/HYDRO_STEP));
-  const i=Math.min(HULL_HYDRO.length-2,Math.floor(at)),t=at-i,a=HULL_HYDRO[i],b=HULL_HYDRO[i+1];
+const VICTORY_HYDRO=(()=>{
+  const rows=[];let volume=0,moment=0,previousArea=0,previousMoment=0;
+  const draft=VICTORY_DESIGN.hull.draft;
+  for(let j=0;j<=Math.ceil((draft+VICTORY_DESIGN.decks.main)/HYDRO_STEP);j++){
+    const y=-draft+j*HYDRO_STEP;let area=0,waterplaneMoment=0,longitudinalMoment=0,areaZ=0;
+    for(let i=0;i<192;i++){
+      const z=-6+(i+.5)*12/192,w=victoryHullHalfWidth(z,y);
+      area+=2*w*12/192;waterplaneMoment+=2/3*w**3*12/192;longitudinalMoment+=2*w*z*z*12/192;areaZ+=2*w*z*12/192;
+    }
+    if(j){volume+=(previousArea+area)*.5*HYDRO_STEP;moment+=(previousMoment+area*y)*.5*HYDRO_STEP;}
+    rows.push({volume,moment,area,waterplaneMoment,longitudinalMoment:longitudinalMoment-areaZ*areaZ/Math.max(area,1e-9)});
+    previousArea=area;previousMoment=area*y;
+  }return rows;
+})();
+export function hullHydrostatics(length,beam,waterline=0,modelId='nina'){
+  const victory=modelId==='victory',rows=victory?VICTORY_HYDRO:HULL_HYDRO,draft=victory?VICTORY_DESIGN.hull.draft:HULL_DRAFT;
+  const [sx,,sz]=hullScale(length,beam),sy=victory?VICTORY_DESIGN.frame.verticalScale:HULL_VERTICAL_SCALE,at=Math.max(0,Math.min(rows.length-1,(waterline/sy+draft)/HYDRO_STEP));
+  const i=Math.min(rows.length-2,Math.floor(at)),t=at-i,a=rows[i],b=rows[i+1];
   const mix=key=>a[key]+(b[key]-a[key])*t,volume=mix('volume')*sx*sy*sz;
   return {volume,mass:volume*SEAWATER_DENSITY,waterplaneArea:mix('area')*sx*sz,
-    centreOfBuoyancy:volume>0?HULL_DRAFT*sy+mix('moment')*sx*sy*sy*sz/volume:0,
+    centreOfBuoyancy:volume>0?draft*sy+mix('moment')*sx*sy*sy*sz/volume:0,
     waterplaneMoment:mix('waterplaneMoment')*sx**3*sz,longitudinalMoment:mix('longitudinalMoment')*sx*sz**3};
 }
 const provisionSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(120,value)):DEFAULT_PROVISION_DAYS;
 const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(40,value)):0;
 
-export function boatHydrodynamics(length, beam, provisionDays=DEFAULT_PROVISION_DAYS, cargoTonnes=0) {
+export function boatHydrodynamics(length, beam, provisionDays=DEFAULT_PROVISION_DAYS, cargoTonnes=0,modelId='nina') {
   provisionDays=provisionSetting(provisionDays);cargoTonnes=cargoSetting(cargoTonnes);
-  const base=hullHydrostatics(length,beam),sy=HULL_VERTICAL_SCALE,M=BOAT_MANIFEST;
+  const victory=modelId==='victory',base=hullHydrostatics(length,beam,0,modelId),sy=victory?VICTORY_DESIGN.frame.verticalScale:HULL_VERTICAL_SCALE;
+  const M=victory?{...BOAT_MANIFEST,crew:820,casksKg:40000,sparesKg:60000}:BOAT_MANIFEST;
+  const designDraft=victory?VICTORY_DESIGN.hull.draft:HULL_DRAFT,deck=victory?victoryHullDeck(0):HYDRO_DECK;
   const crewMass=M.crew*M.personKg,waterMass=M.crew*M.waterKgPerDay*provisionDays;
   const foodMass=M.crew*M.foodKgPerDay*provisionDays,storesMass=M.casksKg+M.sparesKg,cargoMass=cargoTonnes*1000;
-  const loadMass=crewMass+waterMass+foodMass+storesMass+cargoMass,mass=base.mass+loadMass;
+  const loadMass=crewMass+waterMass+foodMass+storesMass+cargoMass;
+  // Victory's authored service waterline includes the standard service manifest.
+  // Integrate its own offsets; builders' tonnage never becomes kilograms.
+  const standardLoad=M.crew*(M.personKg+(M.waterKgPerDay+M.foodKgPerDay)*DEFAULT_PROVISION_DAYS)+M.casksKg+M.sparesKg;
+  const fixedMass=Math.max(base.mass*.3,base.mass-(victory?standardLoad:0)),mass=fixedMass+loadMass;
   // Preserve at least 15 cm to the lowest deck. Unsupported configurations are
   // explicitly reported as overloaded; this remains a non-flooding model.
-  let low=0,high=HYDRO_DECK*sy-.15;
-  const maximumMass=hullHydrostatics(length,beam,high).mass;
+  let low=victory?-designDraft*sy*.25:0,high=deck*sy-.15;
+  const maximumMass=hullHydrostatics(length,beam,high,modelId).mass;
   for(let i=0;i<28;i++){
     const mid=(low+high)*.5;
-    if(hullHydrostatics(length,beam,mid).mass<mass)low=mid;else high=mid;
+    if(hullHydrostatics(length,beam,mid,modelId).mass<mass)low=mid;else high=mid;
   }
-  const sinkage=(low+high)*.5,loaded=hullHydrostatics(length,beam,sinkage);
-  const {volume,waterplaneArea}=loaded,draft=HULL_DRAFT*sy+sinkage,freeboard=HYDRO_DECK*sy-sinkage;
+  const sinkage=(low+high)*.5,loaded=hullHydrostatics(length,beam,sinkage,modelId);
+  const {volume,waterplaneArea}=loaded,draft=designDraft*sy+sinkage,freeboard=deck*sy-sinkage;
   // Authored effective coefficients, not a calibrated resistance curve.
   const wettedArea = 0.85 * length * (beam + 2 * draft);
   // Calibrate fixed vessel KG to the previous stability estimate, then add crew
   // on deck and secured stores/cargo low amidships. No free-surface tank slosh.
-  const fixedKG=base.centreOfBuoyancy+base.waterplaneMoment/base.volume-beam*.22;
-  const crewKG=HULL_DRAFT*sy+1.5*sy,storesKG=HULL_DRAFT*sy-.45*sy;
-  const centreOfGravity=(base.mass*fixedKG+crewMass*crewKG+(loadMass-crewMass)*storesKG)/mass;
+  const fixedKG=base.centreOfBuoyancy+base.waterplaneMoment/base.volume-beam*(victory?.08:.22);
+  const crewKG=designDraft*sy+(victory?VICTORY_DESIGN.decks.quarter.height:1.5)*sy,storesKG=designDraft*sy-.45*sy;
+  const centreOfGravity=(fixedMass*fixedKG+crewMass*crewKG+(loadMass-crewMass)*storesKG)/mass;
   const metacentricHeight=Math.max(.1,loaded.centreOfBuoyancy+loaded.waterplaneMoment/volume-centreOfGravity);
-  const rollInertia=1.2*(base.mass*((beam*.38)**2+(1.6*sy)**2+(fixedKG-centreOfGravity)**2)
+  const rollInertia=1.2*(fixedMass*((beam*.38)**2+(1.6*sy)**2+(fixedKG-centreOfGravity)**2)
     +crewMass*((beam*.3)**2+(crewKG-centreOfGravity)**2)
     +(loadMass-crewMass)*((beam*.18)**2+(storesKG-centreOfGravity)**2));
   const rollStiffness=mass*9.81*metacentricHeight;
   // Effective added-water inertia and damping are authored, not replica measurements.
   const rollDamping=2*.50*Math.sqrt(rollInertia*rollStiffness);
-  const pitchInertia=1.5*(base.mass*((length*.26)**2+(1.6*sy)**2+(fixedKG-centreOfGravity)**2)
+  const pitchInertia=1.5*(fixedMass*((length*.26)**2+(1.6*sy)**2+(fixedKG-centreOfGravity)**2)
     +crewMass*((length*.25)**2+(crewKG-centreOfGravity)**2)
     +(loadMass-crewMass)*((length*.18)**2+(storesKG-centreOfGravity)**2));
   const pitchStiffness=mass*9.81*Math.max(.1,loaded.centreOfBuoyancy+loaded.longitudinalMoment/volume-centreOfGravity);
   const pitchDamping=2*.70*Math.sqrt(pitchInertia*pitchStiffness);
   const addedMass=mass*.08,heaveOmega=Math.sqrt(SEAWATER_DENSITY*9.81*waterplaneArea/(mass+addedMass));
-  return { length,beam,provisionDays,cargoTonnes,draft,sinkage,freeboard,volume,mass,addedMass,
-    fixedMass:base.mass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,overloadKg:Math.max(0,mass-maximumMass),
+  return { modelCode:victory?1:0,length,beam,provisionDays,cargoTonnes,draft,sinkage,freeboard,volume,mass,addedMass,
+    fixedMass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,overloadKg:Math.max(0,mass-maximumMass),
     waterplaneArea,centreOfGravity,heaveOmega,drag:0.5*SEAWATER_DENSITY*0.012*wettedArea,
     metacentricHeight,rollInertia,rollStiffness,rollDamping,pitchInertia,pitchStiffness,pitchDamping };
 }
@@ -133,8 +155,8 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
   let hydro = boat.hydrodynamics;
   if (!hydro || hydro.length !== boat.length || hydro.beam !== boat.beam
-      || hydro.provisionDays!==provisionSetting(boat.provisionDays) || hydro.cargoTonnes!==cargoSetting(boat.cargoTonnes)) {
-    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam,boat.provisionDays,boat.cargoTonnes);
+      || hydro.modelCode!==(boat.modelId==='victory'?1:0) || hydro.provisionDays!==provisionSetting(boat.provisionDays) || hydro.cargoTonnes!==cargoSetting(boat.cargoTonnes)) {
+    hydro = boat.hydrodynamics = boatHydrodynamics(boat.length, boat.beam,boat.provisionDays,boat.cargoTonnes,boat.modelId);
   }
   const inertia = hydro.mass + hydro.addedMass;
   const sailing = boat.propulsion === 'sail';
@@ -231,7 +253,10 @@ export function stepBoatView(boat,dt){
 // World-space eye anchor; keeping it separate from the vessel allows inspection.
 export function boatEyePosition(out, boat) {
   const side=boat.eyeSide??boat.sailState?.tack??1;
-  boatRotate(out, side * HELM_EYE_X * boat.beam / 3.6, boat.eye, HELM_EYE_Z * boat.length / 12,
+  const victory=boat.modelId==='victory',helm=victory?VICTORY_DESIGN.helm:null;
+  // Cross ahead of the mizzen rather than moving the eye through its trunk.
+  const eyeZ=victory?helm.z-.65*(1-Math.min(1,side*side)):HELM_EYE_Z;
+  boatRotate(out, side * (helm?.x??HELM_EYE_X) * boat.beam / 3.6, boat.eye, eyeZ * boat.length / 12,
     boat.heading * Math.PI / 180, boat.pitch, boat.roll);
   out[0] += boat.x; out[1] += boat.heave; out[2] += boat.z;
   return out;

@@ -23,7 +23,7 @@ export function copyVessel(source,{id='companion',distance=source.length*2.8,sid
     rudder:0,rudderTarget:0,yawRate:0,heave:0,pitch:0,roll:0,revision:0,
     target:{heave:0,pitch:0,roll:0},waveSlopeX:0,waveSlopeZ:0,waveSampleTime:-1,waveRevision:-1};
   bindVesselModel(boat,source.modelId??'nina');
-  boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes);
+  boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes,boat.modelId);
   boat.heave=-boat.hydrodynamics.sinkage;
   return boat;
 }

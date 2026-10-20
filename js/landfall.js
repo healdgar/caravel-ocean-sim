@@ -13,13 +13,13 @@ export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,get
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
   panel.setAttribute('aria-labelledby','landfall-title');
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-    <div class="panel-body"><p class="landfall-intro">A first landfall. Real island relief, generated vegetation, changing light.</p>
+    <div class="panel-body"><p class="landfall-intro">Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.</p>
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
     <p>Start at the horizon, on approach, or near the coast. Sailing physics remain at normal speed.</p>
     <div class="landfall-weather" role="group" aria-label="Landfall weather"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Saba is the first rendered region.</p>
-    <p class="landfall-credit">Terrain: Mapzen / USGS / NOAA. World outline: Natural Earth (public domain). Vegetation is generated. Shore clearance is approximate; ports and voyage compression are still to come.</p></details>
+    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), downsampled, reprojected and modified for terrain, colour and vegetation seeds. World outline: Natural Earth (public domain). Trees and historical cleanup are authored approximations. Shore clearance is approximate; ports and voyage compression are still to come.</p></details>
     <button id="landfall-ocean">Return to open ocean</button></div>`;
   const setOpen=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open));document.body.classList.toggle('landfall-open',open);
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};

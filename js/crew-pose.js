@@ -1,6 +1,7 @@
 import { gltfQuatMultiply } from './gltf.js';
-import { HULL_VERTICAL_SCALE } from './hull.js';
+import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode } from './ship-models.js';
+import { crewRunnerMetrics } from './crew-work.js';
 
 const poseSub=(a,b)=>a.map((v,i)=>v-b[i]);
 const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
@@ -37,18 +38,22 @@ export function solveCrewLimb(a,names,target,pole){
 }
 function actorLocal(p,s){
   const dx=p[0]-s.position[0],dy=p[1]-s.position[1],dz=p[2]-s.position[2],c=Math.cos(s.yaw),sn=Math.sin(s.yaw);
-  return [(c*dx-sn*dz)/s.scale[0],dy/s.scale[1],(sn*dx+c*dz)/s.scale[2]];
+  const x=c*dx-sn*dz,z=sn*dx+c*dz,pitch=s.climbPitch??0,cp=Math.cos(pitch),sp=Math.sin(pitch);
+  return [x/s.scale[0],(cp*dy+sp*z)/s.scale[1],(-sp*dy+cp*z)/s.scale[2]];
 }
 export function poseCrewWork(a,s,boat){
   const j=s.job;s.grips=null;
   if(j && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
-    const phase=j.rung,targets={};
+    // The tall first-rate's ratlines are farther apart. Hands can slide along
+    // the shroud between them; keep the human gait at a reachable 32 cm stride.
+    const spacing=boat.modelId==='victory'?crewRunnerMetrics(boat,j.mast,j.side).dy/.32:1;
+    const phase=j.rung*spacing,targets={};
     for(const [side,offset] of [['l',0],['r',1]]){
       // Alternate hand-over-hand holds with a simplified boot lock on the runner.
       const cycle=(phase+offset)/2,base=Math.floor(cycle)*2-offset,f=cycle-Math.floor(cycle);
       const swing=Math.max(0,Math.min(1,(f-.55)/.45)),e=swing*swing*(3-2*swing);
       const foot=base+1+e*2,hand=foot+3;
-      const point=r=>{const p=resolveShipNode(boat,`mast.${['fore','main','mizzen'][j.mast]}.runner`,{space:'design',side:j.side,step:r});return actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
+      const point=r=>{const p=resolveShipNode(boat,`mast.${['fore','main','mizzen'][j.mast]}.runner`,{space:'design',side:j.side,step:r/spacing});return actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat)+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
       const ft=point(foot),ht=point(hand),sign=side==='l'?1:-1;
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.3,.5,.65]);
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.65,1.1,.10]);
@@ -62,18 +67,21 @@ export function poseCrewWork(a,s,boat){
     for(const [side,sign] of [['l',1],['r',-1]]){
       let hand;
       if(j.kind==='haul'){
-        const height=(s.position[1]+1.04+.17*Math.sin(phase+sign*.55))/HULL_VERTICAL_SCALE;
+        const pull=boat.modelId==='victory'?1.10+.12*Math.sin(phase+sign*.55):1.04+.17*Math.sin(phase+sign*.55);
+        const height=(s.position[1]+pull)/vesselVerticalScale(boat);
         const p=resolveShipNode(boat,`rig.${['fore','main','mizzen'][j.mast]}.fall`,{space:'design',height});
-        hand=actorLocal([p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12],s);
-      }else hand=[sign*.16,.42+.06*Math.sin(phase),.43];
+        hand=actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat),p[2]*boat.length/12],s);
+      }else hand=[sign*.16,(boat.modelId==='victory'?.70:.42)+.06*Math.sin(phase),.43];
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.10]);
+      (s.grips??={})[`hand_${side}`]=hand;
     }
   }else if(s.role==='Helmsman'){
-    a.blend('Brace',s.time,.4);
+    a.blend('Brace',s.time,boat.modelId==='victory'?0:.4);
     for(const [side,sign] of [['l',1],['r',-1]]){
-      const p=resolveShipNode(boat,'helm.grip',{along:sign*.09});p[0]+=sign*.035;
+      const p=resolveShipNode(boat,'helm.grip',{along:sign*(boat.modelId==='victory'?-.09:.09)});if(boat.modelId!=='victory')p[0]+=sign*.035;
       const target=actorLocal(p,s);
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],target,[sign*.6,1,.3]);
+      (s.grips??={})[`hand_${side}`]=target;
     }
   }
 }

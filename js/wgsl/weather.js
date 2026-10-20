@@ -43,9 +43,9 @@ struct WeatherVertex {@builtin(position) position:vec4f,@location(0) uv:vec2f,@l
   var alpha=(.18+seed.z*.2)*(1.0-smoothstep(22.0,35.0,distance))*smoothstep(.5,1.5,distance);
   // Do not spawn precipitation inside the cabin, hull, or below a solid deck.
   let q=p-H.origin.xyz;
-  let local=vec3f(dot(q,H.right.xyz)/(H.size.x/3.6),dot(q,H.up.xyz)/HULL_Y_SCALE,-dot(q,H.forward.xyz)/(H.size.y/12.0));
-  let floor=select(hullDeck(local.z),${QUARTERDECK_HEIGHT},local.z>=${QUARTERDECK_START});
-  if(H.rig.z>.5 && local.z> -6.3 && local.z<5.6 && abs(local.x)<hullHalfWidth(local.z,hullDeck(local.z)) && local.y<floor){alpha=0.0;}
+  let local=vec3f(dot(q,H.right.xyz)/(H.size.x/3.6),dot(q,H.up.xyz)/shipY(H.right.w),-dot(q,H.forward.xyz)/(H.size.y/12.0));
+  let floor=modelVesselDeck(local.z,H.rig.w);
+  if(H.rig.z>.5 && local.z> -6.3 && local.z<5.6 && abs(local.x)<modelHullWidth(local.z,modelHullDeck(local.z,H.rig.w),H.rig.w) && local.y<floor){alpha=0.0;}
   var out:WeatherVertex;
   out.position=F.viewProj*vec4f(delta+across*corner.x*width+along*corner.y*halfLength,1);
   out.uv=corner;

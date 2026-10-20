@@ -5,21 +5,31 @@ import { SHADOW_SAMPLE } from './shadows.js';
 import { HULL_PROFILE } from './hull.js';
 import { INTERACTION_TYPES, INTERACTION_SEA } from './interaction.js';
 import { QUARTERDECK_START, QUARTERDECK_HEIGHT } from '../hull.js';
+import {VICTORY_DESIGN} from '../models/victory.js';
 
 export const DECK_COLS = 32;
 export const DECK_ROWS = 96;
 // Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
 export const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
 fn deckWidth(z:f32)->f32 {
+  if(hull.rig.w>.5){return max(.012,modelHullWidth(z,modelVesselDeck(z,hull.rig.w),hull.rig.w)-.045);}
   return max(0.015,hullBreadth(z)-0.145);
 }
 fn deckFloor(z:f32)->f32 {
-  return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});
+  return modelVesselDeck(z,hull.rig.w);
 }
-fn deckRail(z:f32)->f32 { return select(0.66,0.16,z>=${QUARTERDECK_START}); }
-fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z+6.3)/11.9); }
+fn deckRail(z:f32)->f32 {
+ if(hull.rig.w>.5){
+  if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.58-VICTORY_DESIGN.decks.main};}
+  return select(.285,.19,z>=${VICTORY_DESIGN.decks.poop.start});
+ }
+ return select(0.66,0.16,z>=${QUARTERDECK_START});
+}
+fn deckMinZ()->f32 {return select(-6.3,-6.0,hull.rig.w>.5);}
+fn deckLength()->f32 {return select(11.9,12.0,hull.rig.w>.5);}
+fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z-deckMinZ())/deckLength()); }
 fn deckPoint(uv:vec2f)->vec3f {
-  let z=uv.y*11.9-6.3;
+  let z=uv.y*deckLength()+deckMinZ();
   return vec3f((uv.x*2.0-1.0)*deckWidth(z),deckFloor(z),z);
 }
 `;
@@ -38,7 +48,7 @@ fn sampleDeck(uv:vec2f)->vec4f {
 `;
 const DECK_TRANSFORM = /* wgsl */ `
 fn deckWorld(p:vec3f)->vec3f {
-  return H.origin.xyz+H.right.xyz*p.x*(H.size.x/3.6)+H.up.xyz*p.y*HULL_Y_SCALE-H.forward.xyz*p.z*(H.size.y/12.0);
+  return hull.origin.xyz+hull.right.xyz*p.x*(hull.size.x/3.6)+hull.up.xyz*p.y*shipY(hull.right.w)-hull.forward.xyz*p.z*(hull.size.y/12.0);
 }
 `;
 
@@ -48,7 +58,7 @@ fn deckWorld(p:vec3f)->vec3f {
 export const DECK_UPDATE = FRAME_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> I:Interaction;
-@group(0) @binding(2) var<uniform> H:InteractionHull;
+@group(0) @binding(2) var<uniform> hull:InteractionHull;
 @group(0) @binding(3) var seaTex:texture_2d_array<f32>;
 @group(0) @binding(4) var seaSamp:sampler;
 @group(0) @binding(5) var previousDeck:texture_2d<f32>;
@@ -57,18 +67,18 @@ export const DECK_UPDATE = FRAME_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wg
 const DECK_SIZE=vec2i(${DECK_COLS},${DECK_ROWS});
 fn cellPoint(c:vec2i)->vec3f { return deckPoint((vec2f(c)+0.5)/vec2f(DECK_SIZE)); }
 fn cellArea(p:vec3f)->f32 {
-  return 2.0*deckWidth(p.z)*(H.size.x/3.6)/f32(DECK_SIZE.x)*11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
+  return 2.0*deckWidth(p.z)*(hull.size.x/3.6)/f32(DECK_SIZE.x)*deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y);
 }
 // Positive means water leaves a for b. Each face uses the identical flux on both sides.
 fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
   if(any(b<vec2i(0)) || any(b>=DECK_SIZE)){return 0.0;}
   let pa=cellPoint(a);let pb=cellPoint(b);
-  if(abs(pa.y-pb.y)*HULL_Y_SCALE>0.8){return 0.0;} // solid cabin face
+  if(abs(pa.y-pb.y)*shipY(hull.right.w)>0.8){return 0.0;} // solid cabin face
   let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
-  let dh=deckWorld(pa).y+wa*H.up.y-deckWorld(pb).y-wb*H.up.y;
+  let dh=deckWorld(pa).y+wa*hull.up.y-deckWorld(pb).y-wb*hull.up.y;
   let donor=select(wb,wa,dh>0.0);
   let area=select(cellArea(pb),cellArea(pa),dh>0.0);
-  let face=select((deckWidth(pa.z)+deckWidth(pb.z))*(H.size.x/3.6)/f32(DECK_SIZE.x),11.9*(H.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
+  let face=select((deckWidth(pa.z)+deckWidth(pb.z))*(hull.size.x/3.6)/f32(DECK_SIZE.x),deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
   // Limit the head conductance as well as donor volume. sqrt(head) alone
   // oscillates around equilibrium and leaves a checkerboard on pooled water.
   let conductance=min(2.0*sqrt(9.81*donor)*face,min(cellArea(pa),cellArea(pb))/(8.0*dt));
@@ -87,12 +97,13 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
     let side=select(-1.0,1.0,c.x>0);
     let edge=vec3f(side*(deckWidth(p.z)+0.10),p.y,p.z);
     let rail=deckWorld(edge+vec3f(0.0,deckRail(p.z),0.0));
-    let over=max(0.0,(interactionSea(rail.xz)-rail.y)/max(H.up.y,0.35));
-    let face=11.9*(H.size.y/12.0)/f32(DECK_SIZE.y);
+    let over=max(0.0,(interactionSea(rail.xz)-rail.y)/max(hull.up.y,0.35));
+    let face=deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y);
     ingress=min(4.0,1.3*pow(over,1.5));
     // Scuppers between rail posts; quarterdeck railing is open underneath.
-    let opening=select(select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17),1.0,p.z>=${QUARTERDECK_START});
-    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*HULL_Y_SCALE),1.5)),0.0,over>0.0);
+    let scupper=select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17);
+    let opening=select(scupper,1.0,hull.rig.w<.5&&p.z>=${QUARTERDECK_START});
+    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*shipY(hull.right.w)),1.5)),0.0,over>0.0);
     depth+=(ingress-drain)*face*dt/area;
   }
   // Bound violent immersion; do not accumulate an unbounded reservoir inside the hull.
@@ -106,7 +117,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
 
 export const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_LIGHTING + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
-@group(0) @binding(1) var<uniform> H:InteractionHull;
+@group(0) @binding(1) var<uniform> hull:InteractionHull;
 @group(0) @binding(2) var deckWater:texture_2d<f32>;
 @group(0) @binding(3) var sampC:sampler;
 @group(0) @binding(4) var envCube:texture_cube<f32>;
@@ -127,7 +138,7 @@ fn corner(v:u32)->vec2f {
   let water=sampleDeck(uv);
   var p=deckPoint(uv);
   let ripple=gnoise(p.xz*7.0+vec2f(-F.camPos.w*1.3,F.camPos.w*0.7))*min(water.x*0.08,0.008);
-  p.y+=(0.008+water.x+ripple)/HULL_Y_SCALE;
+  p.y+=(0.008+water.x+ripple)/shipY(hull.right.w);
   var o:DeckVertex;o.world=deckWorld(p);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
   o.uv=uv;o.local=p;o.curtain=vec2f(0.0);return o;
 }
@@ -139,10 +150,10 @@ fn corner(v:u32)->vec2f {
   let uv=vec2f(select(0.0,1.0,side>0.0),(f32(row)+c.x)/${DECK_ROWS}.0);
   let water=sampleDeck(uv);
   var p=deckPoint(uv);let incoming=water.w<0.0;
-  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*HULL_Y_SCALE+1.2)/9.81));let t=fall*duration;
+  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*shipY(hull.right.w)+1.2)/9.81));let t=fall*duration;
   p.x+=side*(0.16+0.55*t);
-  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*HULL_Y_SCALE);
-  p.y+=select((0.03+outlet)/HULL_Y_SCALE,deckRail(p.z)+0.12/HULL_Y_SCALE,incoming);
+  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*shipY(hull.right.w));
+  p.y+=select((0.03+outlet)/shipY(hull.right.w),deckRail(p.z)+0.12/shipY(hull.right.w),incoming);
   if(incoming){p.x=side*(deckWidth(p.z)+0.09-(0.5+min(flow,2.0))*t);}
   p.z+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*0.012*fall;
   var o:DeckVertex;o.world=deckWorld(p)-vec3f(0.0,4.905*t*t,0.0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
@@ -157,16 +168,16 @@ fn corner(v:u32)->vec2f {
   // derivatives and derivatives of bilinear heights both expose the grid.
   let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
   let xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
-  let dz=texel.y*11.9;
-  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*HULL_Y_SCALE)/(2.0*dz);
+  let dz=texel.y*deckLength();
+  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*shipY(hull.right.w))/(2.0*dz);
   let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));
-  var n=normalize(H.up.xyz-H.right.xyz*gradient.x/(H.size.x/3.6)+H.forward.xyz*gradient.y/(H.size.y/12.0));
-  n=normalize(n+H.right.xyz*ripple.x+H.forward.xyz*ripple.y);
+  var n=normalize(hull.up.xyz-hull.right.xyz*gradient.x/(hull.size.x/3.6)+hull.forward.xyz*gradient.y/(hull.size.y/12.0));
+  n=normalize(n+hull.right.xyz*ripple.x+hull.forward.xyz*ripple.y);
   let v=normalize(F.camPos.xyz-in.world);
   // Falling sheets bend away from the rail: use their actual surface, not
   // a fixed +X normal (which also treated port and starboard identically).
   let face=cross(dpdx(in.world),dpdy(in.world));
-  if(curtain){n=normalize(face/max(length(face),0.00001)+H.forward.xyz*ripple.x+H.up.xyz*ripple.y);}
+  if(curtain){n=normalize(face/max(length(face),0.00001)+hull.forward.xyz*ripple.x+hull.up.xyz*ripple.y);}
   n=select(-n,n,dot(n,v)>=0.0);
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
   let reflection=textureSampleLevel(envCube,sampC,reflect(-v,n),2.0).rgb;
@@ -195,7 +206,7 @@ fn corner(v:u32)->vec2f {
     return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
   }
   // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(abs((in.local.y-deckFloor(in.local.z))*HULL_Y_SCALE-w.x-0.008)>0.10 && !curtain){discard;}
+  if(abs((in.local.y-deckFloor(in.local.z))*shipY(hull.right.w)-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
   return vec4f(surfaceAir(color+lightningSurface(n,v,vec3f(.1),.24),in.world)*alpha,alpha);
 }

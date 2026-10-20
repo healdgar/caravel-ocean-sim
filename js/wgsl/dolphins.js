@@ -45,17 +45,24 @@ struct DolphinVertex {@builtin(position) pos:vec4f,@location(0) world:vec3f,@loc
   o.normal=dolphinYaw(pitch*bentN,d.root.w);o.albedo=albedo;
   o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
 }
-@fragment fn dolphinFS(v:DolphinVertex)->@location(0) vec4f {
-  let n=normalize(v.normal);let eye=normalize(F.camPos.xyz-v.world);let sun=F.sunDir.xyz;
+// A continuous water film adds a narrow sunlight glint over the softer skin
+// reflection. Both lobes use the scene sun, sky and atmospheric extinction.
+fn dolphinSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f)->vec3f {
+  let n=normalize(normal);let eye=normalize(F.camPos.xyz-world);let sun=F.sunDir.xyz;
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),8.0).rgb;
   let sea=textureSampleLevel(envCube,sampC,vec3f(0,-.4,1),8.0).rgb;
-  let f0=vec3f(.035);let rough=.24;
-  let diffuse=v.albedo*(vesselAmbient(n,sky,sea)+direct*max(dot(n,sun),0.0)/PI);
+  let f0=vec3f(.035);let rough=.32;let coatRough=.11;let coatF0=vec3f(.0204);
+  let coatF=vesselFresnel(coatF0,max(dot(n,eye),0.0));
+  let diffuse=albedo*(vesselAmbient(n,sky,sea)+direct*max(dot(n,sun),0.0)/PI);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-eye,n),rough*8.0).rgb*vesselEnvironment(n,eye,rough,f0);
   let spec=vesselSpecular(n,eye,sun,rough,f0)*direct*max(dot(n,sun),0.0);
-  let color=diffuse+reflected+spec+lightningSurface(n,eye,v.albedo,rough);
-  return vec4f(surfaceAir(color,v.world),1);
+  let waterReflection=textureSampleLevel(envCube,sampC,reflect(-eye,n),coatRough*8.0).rgb*vesselEnvironment(n,eye,coatRough,coatF0);
+  let waterGlint=vesselSpecular(n,eye,sun,coatRough,coatF0)*direct*max(dot(n,sun),0.0);
+  return (diffuse+reflected+spec)*(1.0-coatF)+waterReflection+waterGlint+lightningSurface(n,eye,albedo,coatRough);
+}
+@fragment fn dolphinFS(v:DolphinVertex)->@location(0) vec4f {
+  return vec4f(surfaceAir(dolphinSkinRadiance(v.world,v.normal,v.albedo),v.world),1);
 }
 fn dolphinCorner(i:u32)->vec2f {return array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(-1,1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1))[i];}
 struct DolphinEffect {@builtin(position) pos:vec4f,@location(0) uv:vec2f,@location(1) world:vec3f,@location(2) data:vec4f};

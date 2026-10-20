@@ -74,8 +74,8 @@ fn crestInHull(world: vec3f) -> bool {
   if (hull.rig.z < 0.5) { return false; }
   let delta = world - hull.origin.xyz;
   let local = vec3f(dot(delta,hull.right.xyz)*3.6/hull.size.x,
-    dot(delta,hull.up.xyz)/HULL_Y_SCALE,-dot(delta,hull.forward.xyz)*12.0/hull.size.y);
-  return hullExcludesOcean(local);
+    dot(delta,hull.up.xyz)/shipY(hull.right.w),-dot(delta,hull.forward.xyz)*12.0/hull.size.y);
+  return abs(local.x)<modelHullWidth(local.z,local.y,hull.rig.w);
 }
 // Fit a local ridge across the compressed direction, never a trough or slope.
 // Returns the peak offset and its rise above the two shoulders (metres).

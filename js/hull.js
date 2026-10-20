@@ -1,4 +1,12 @@
 import { NINA_DESIGN } from './models/nina.js';
+import { VICTORY_DESIGN, victoryHullHalfWidth, victoryHullDeck, victoryVesselDeck, victoryDeckHalfWidth } from './models/victory.js';
+
+export function vesselVerticalScale(boat){return boat.modelId==='victory'?VICTORY_DESIGN.frame.verticalScale:HULL_VERTICAL_SCALE;}
+export function vesselDraft(boat){return (boat.modelId==='victory'?VICTORY_DESIGN.hull.draft:HULL_DRAFT)*vesselVerticalScale(boat);}
+export function modelDeck(boat,z){return boat.modelId==='victory'?victoryVesselDeck(z):vesselDeck(z);}
+export function modelHullDeck(boat,z){return boat.modelId==='victory'?victoryHullDeck(z):hullDeck(z);}
+export function modelDeckWidth(boat,z){return boat.modelId==='victory'?victoryDeckHalfWidth(z):deckHalfWidth(z);}
+export function modelHullWidth(boat,z,y){return boat.modelId==='victory'?victoryHullHalfWidth(z,y):hullHalfWidth(z,y);}
 // Preserve the mesh's original design coordinates; convert to metres at the
 // hull transform. All consumers (including water and crew) share this scale.
 export const HULL_DESIGN_LENGTH = NINA_DESIGN.frame.length;

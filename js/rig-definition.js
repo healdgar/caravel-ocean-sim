@@ -34,7 +34,7 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
 
   if (!name(rig.id)) fail('rig.id', 'expected an ID');
   if (!name(rig.backend)) fail('rig.backend', 'expected a backend ID');
-  else if (!planned && rig.backend !== 'lateen3') fail('rig.backend', `${rig.backend} is not a ready runtime backend`);
+  else if (!planned && !['lateen3','square1805'].includes(rig.backend)) fail('rig.backend', `${rig.backend} is not a ready runtime backend`);
 
   const nodeIDs = new Set();
   for (const [key, node] of Object.entries(nodes)) {
@@ -79,11 +79,11 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
     if (!record(sail)) return;
     const path = `rig.sails[${i}]`;
     if (!mastIDs.has(sail.mast)) fail(`${path}.mast`, `unknown mast ${sail.mast}`);
-    if (!['lateen', 'square'].includes(sail.kind)) fail(`${path}.kind`, 'unknown sail kind');
+    if (!['lateen', 'square','headsail','gaff'].includes(sail.kind)) fail(`${path}.kind`, 'unknown sail kind');
     if (!name(sail.controlGroup)) fail(`${path}.controlGroup`, 'expected a control group ID');
     reference(sail.yardNode, `${path}.yardNode`);
     const clews = list(sail.clewNodes, `${path}.clewNodes`);
-    const expected = sail.kind === 'lateen' ? 1 : sail.kind === 'square' ? 2 : 0;
+    const expected = ['lateen','headsail','gaff'].includes(sail.kind) ? 1 : sail.kind === 'square' ? 2 : 0;
     if (expected && clews.length !== expected) fail(`${path}.clewNodes`, `${sail.kind} requires ${expected} free clew node${expected === 1 ? '' : 's'}`);
     if (new Set(clews).size !== clews.length) fail(`${path}.clewNodes`, 'duplicate clew nodes');
     clews.forEach((id, j) => reference(id, `${path}.clewNodes[${j}]`));

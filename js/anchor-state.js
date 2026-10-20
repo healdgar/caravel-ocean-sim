@@ -5,7 +5,13 @@ import { resolveShipNode } from './ship-models.js';
 export const FATHOM_METRES = 1.8288;
 // Gameplay equipment assumptions, not measurements of a particular replica.
 export const ANCHOR_LIMITS = Object.freeze({maxDepth:35,maxRode:200,scope:5,maxDropKnots:1.5,
-  payRate:3,weighRate:.75,maxCoastDistance:2500,anchorMass:240});
+  payRate:3,weighRate:.75,maxCoastDistance:2500,anchorMass:240,renderScale:1,rodeRadius:.031,maxStiffness:16000});
+// Authored first-rate equipment assumptions, not a measured holding-power
+// curve or a claim that the surviving ship carries this exact bower anchor.
+export const VICTORY_ANCHOR_LIMITS=Object.freeze({...ANCHOR_LIMITS,anchorMass:4000,renderScale:3.1,
+  rodeRadius:.08,maxRode:260,payRate:2.4,weighRate:.4,maxStiffness:90000});
+export const anchorEquipment=boat=>boat.modelId==='victory'?VICTORY_ANCHOR_LIMITS:ANCHOR_LIMITS;
+export const anchorEyeOffset=boat=>.65*anchorEquipment(boat).renderScale;
 const anchorLandmarks = new WeakMap();
 const anchorFinite = (n,fallback=0)=>Number.isFinite(n)?n:fallback;
 export const metresToFathoms = metres=>metres/FATHOM_METRES;
@@ -19,7 +25,7 @@ export function anchorFairlead(boat) {
 }
 function anchorHousedPosition(boat) {
   const p=anchorFairlead(boat),offset=[0,0,0];
-  boatRotate(offset,0,-.65,0,(boat.heading??0)*Math.PI/180,boat.pitch??0,boat.roll??0);
+  boatRotate(offset,0,-anchorEyeOffset(boat),0,(boat.heading??0)*Math.PI/180,boat.pitch??0,boat.roll??0);
   return {x:p.x+offset[0],y:p.y+offset[1],z:p.z+offset[2]};
 }
 
@@ -52,7 +58,7 @@ export function anchorLandVisible(boat,{terrain,settings={},eye}={}) {
 }
 
 export function anchorEligibility(boat,environment={}) {
-  const {terrain}=environment,point=anchorFairlead(boat);
+  const {terrain}=environment,point=anchorFairlead(boat),limits=anchorEquipment(boat);
   const result={allowed:false,reason:'No coastal sounding available',depth:null,depthFathoms:null,
     source:'Simulated coastal sounding',point,bed:null};
   if(!terrain?.height)return result;
@@ -61,12 +67,12 @@ export function anchorEligibility(boat,environment={}) {
   if(!Number.isFinite(bed))return result;
   result.bed=bed;result.depth=depth;result.depthFathoms=metresToFathoms(depth);
   if(depth<Math.max(3,(boat.hydrodynamics?.draft??2)+1)){result.reason='Too shallow for safe anchoring';return result;}
-  if(depth>ANCHOR_LIMITS.maxDepth||(depth+Math.max(1,point.y))*ANCHOR_LIMITS.scope>ANCHOR_LIMITS.maxRode){
-    result.reason=`Too deep: anchor limit ${ANCHOR_LIMITS.maxDepth} m`;return result;
+  if(depth>limits.maxDepth||(depth+Math.max(1,point.y))*limits.scope>limits.maxRode){
+    result.reason=`Too deep: anchor limit ${limits.maxDepth} m`;return result;
   }
   if(!anchorLandVisible(boat,environment)){result.reason='Land must be visible to anchor';return result;}
-  if(Math.hypot(boatForwardSpeed(boat),boat.leewayVelocity??0)>ANCHOR_LIMITS.maxDropKnots*KNOT_TO_MPS){
-    result.reason=`Slow below ${ANCHOR_LIMITS.maxDropKnots} knots to drop anchor`;return result;
+  if(Math.hypot(boatForwardSpeed(boat),boat.leewayVelocity??0)>limits.maxDropKnots*KNOT_TO_MPS){
+    result.reason=`Slow below ${limits.maxDropKnots} knots to drop anchor`;return result;
   }
   result.allowed=true;result.reason='Ready to drop anchor';return result;
 }
@@ -76,8 +82,8 @@ export function anchorEligibility(boat,environment={}) {
 // drags the anchor instead of giving it infinite holding strength.
 export function anchorTetherForce(state,boat,point) {
   if(!state.embedded||!['setting','anchored','weighing'].includes(state.phase))return {x:0,z:0,yaw:0,tension:0};
-  const p=point??anchorFairlead(boat),dx=state.position.x-p.x,dz=state.position.z-p.z;
-  const horizontal=Math.hypot(dx,dz),vertical=Math.max(0,p.y-state.position.y-.65),distance=Math.hypot(horizontal,vertical);
+  const p=point??anchorFairlead(boat),dx=state.position.x-p.x,dz=state.position.z-p.z,limits=anchorEquipment(boat);
+  const horizontal=Math.hypot(dx,dz),vertical=Math.max(0,p.y-state.position.y-anchorEyeOffset(boat)),distance=Math.hypot(horizontal,vertical);
   const stretch=Math.max(0,distance-state.rode*.97);
   if(stretch<=0||horizontal<1e-6)return {x:0,z:0,yaw:0,tension:0};
   const heading=(boat.heading??0)*Math.PI/180,forward=boatForwardSpeed(boat),side=boat.leewayVelocity??0;
@@ -85,17 +91,17 @@ export function anchorTetherForce(state,boat,point) {
   const vx=Math.sin(heading)*forward+Math.cos(heading)*side-rz*yawRate;
   const vz=-Math.cos(heading)*forward+Math.sin(heading)*side+rx*yawRate;
   const outward=-(vx*dx+vz*dz)/horizontal;
-  const mass=boat.hydrodynamics?.mass??60000,stiffness=Math.min(16000,mass*.12);
+  const mass=boat.hydrodynamics?.mass??60000,stiffness=Math.min(limits.maxStiffness,mass*.12);
   const damping=2*.65*Math.sqrt(stiffness*mass);
   const demand=Math.max(0,stiffness*stretch+damping*outward);
-  const holding=Math.min(mass*9.81*.10,ANCHOR_LIMITS.anchorMass*9.81*8),tension=Math.min(holding,demand);
+  const holding=Math.min(mass*9.81*.10,limits.anchorMass*9.81*8),tension=Math.min(holding,demand);
   const force=tension*horizontal/Math.max(distance,1e-6),x=dx/horizontal*force,z=dz/horizontal*force;
   return {x,z,yaw:rx*z-rz*x,tension,demand,holding};
 }
 
 export function createAnchorState(boat) {
   let serial=0,pending=[],checkTime=0;
-  const state={phase:'stowed',position:anchorHousedPosition(boat),rode:.65,
+  const state={phase:'stowed',position:anchorHousedPosition(boat),rode:anchorEyeOffset(boat),
     worldHeading:boat.heading??0,
     embedded:false,depth:null,depthFathoms:null,bed:null,velocity:{x:0,y:0,z:0},
     time:0,splash:null,events:[],force:{x:0,z:0,yaw:0,tension:0},reelRate:0,eligibility:{allowed:false,reason:'Checking coastal sounding'},
@@ -112,7 +118,7 @@ export function createAnchorState(boat) {
       if(this.phase!=='stowed')return false;
       this.eligibility=anchorEligibility(currentBoat,environment);if(!this.eligibility.allowed)return false;
       const p=anchorFairlead(currentBoat),heading=(currentBoat.heading??0)*Math.PI/180;
-      this.position=anchorHousedPosition(currentBoat);this.rode=.65;this.bed=this.eligibility.bed;
+      this.position=anchorHousedPosition(currentBoat);this.rode=anchorEyeOffset(currentBoat);this.bed=this.eligibility.bed;
       this.worldHeading=currentBoat.heading??0;
       this.depth=null;this.depthFathoms=null;this.embedded=false;this.dragging=false;this.phase='lowering';
       this.velocity={x:Math.sin(heading)*boatForwardSpeed(currentBoat),y:0,z:-Math.cos(heading)*boatForwardSpeed(currentBoat)};
@@ -122,7 +128,7 @@ export function createAnchorState(boat) {
     weigh(){if(!this.active||this.phase==='weighing')return false;this.phase='weighing';emit('reel-start');return true;},
     reset(currentBoat){
       if(this.active)emit('reel-stop');
-      this.phase='stowed';this.position=anchorHousedPosition(currentBoat);this.rode=.65;this.embedded=false;
+      this.phase='stowed';this.position=anchorHousedPosition(currentBoat);this.rode=anchorEyeOffset(currentBoat);this.embedded=false;
       this.worldHeading=currentBoat.heading??0;
       this.depth=this.depthFathoms=null;this.force={x:0,z:0,yaw:0,tension:0};this.splash=null;this.reelRate=0;
     },
@@ -133,48 +139,49 @@ export function createAnchorState(boat) {
       if(this.phase==='stowed'){
         this.position=anchorHousedPosition(currentBoat);this.force={x:0,z:0,yaw:0,tension:0};return this.force;
       }
-      const p=anchorFairlead(currentBoat),housedPosition=anchorHousedPosition(currentBoat);
+      const p=anchorFairlead(currentBoat),housedPosition=anchorHousedPosition(currentBoat),limits=anchorEquipment(currentBoat),eyeOffset=anchorEyeOffset(currentBoat);
+      const bedOffset=.22*limits.renderScale;
       const steps=this.phase==='lowering'?Math.max(1,Math.ceil(dt*120)):1,h=dt/steps;
       for(let i=0;i<steps;i++){
         if(this.phase==='stowed'){this.position=housedPosition;continue;}
         if(this.phase==='lowering'){
           const wasY=this.position.y;
-          this.rode=Math.min(ANCHOR_LIMITS.maxRode,this.rode+ANCHOR_LIMITS.payRate*h);this.reelRate=ANCHOR_LIMITS.payRate;
+          this.rode=Math.min(limits.maxRode,this.rode+limits.payRate*h);this.reelRate=limits.payRate;
           this.velocity.y=(this.velocity.y-9.81*h)/(1+(this.position.y<0?2.3:.08)*h);
           this.velocity.x*=Math.exp(-h*.8);this.velocity.z*=Math.exp(-h*.8);
           this.position.x+=this.velocity.x*h;this.position.z+=this.velocity.z*h;this.position.y+=this.velocity.y*h;
           const dx=this.position.x-p.x,dz=this.position.z-p.z;
-          this.position.y=Math.max(this.position.y,p.y-.65-Math.sqrt(Math.max(0,this.rode*this.rode-dx*dx-dz*dz)));
+          this.position.y=Math.max(this.position.y,p.y-eyeOffset-Math.sqrt(Math.max(0,this.rode*this.rode-dx*dx-dz*dz)));
           const surface=environment.waterHeight?.(this.position.x,this.position.z)??this.waterY??0;
           if(wasY>surface&&this.position.y<=surface){
             this.splash={x:this.position.x,y:surface,z:this.position.z,at:this.time};emit('splash',surface);
           }
           const localBed=environment.terrain?.height?.(this.position.x,this.position.z);
           if(Number.isFinite(localBed)&&localBed<0)this.bed=localBed;
-          if(this.position.y<=this.bed+.22){
-            this.position.y=this.bed+.22;this.velocity={x:0,y:0,z:0};this.embedded=true;this.phase='setting';
+          if(this.position.y<=this.bed+bedOffset){
+            this.position.y=this.bed+bedOffset;this.velocity={x:0,y:0,z:0};this.embedded=true;this.phase='setting';
             this.depth=-this.bed;this.depthFathoms=metresToFathoms(this.depth);emit('set');
           }
         }
         if(this.phase==='setting'){
-          const desired=Math.min(ANCHOR_LIMITS.maxRode,ANCHOR_LIMITS.scope*(this.depth+Math.max(1,p.y)));
-          this.rode=Math.min(desired,this.rode+ANCHOR_LIMITS.payRate*h);this.reelRate=ANCHOR_LIMITS.payRate;
+          const desired=Math.min(limits.maxRode,limits.scope*(this.depth+Math.max(1,p.y)));
+          this.rode=Math.min(desired,this.rode+limits.payRate*h);this.reelRate=limits.payRate;
           if(this.rode>=desired){this.phase='anchored';this.reelRate=0;emit('reel-stop');}
         }
         if(this.phase==='weighing'){
           const target=housedPosition;
           const dx=target.x-this.position.x,dy=target.y-this.position.y,dz=target.z-this.position.z;
           const distance=Math.hypot(dx,dy,dz),horizontal=Math.hypot(dx,dz);
-          this.reelRate=-ANCHOR_LIMITS.weighRate;
+          this.reelRate=-limits.weighRate;
           if(this.embedded){
             // Winching shortens the spring, pulling the *vessel* toward the
             // anchor. Break it out only once the bow is approximately above it.
-            this.rode=Math.max(distance*.94,this.rode-ANCHOR_LIMITS.weighRate*h);
+            this.rode=Math.max(distance*.94,this.rode-limits.weighRate*h);
             if(horizontal<Math.max(2,Math.abs(dy)*.22)&&this.rode<=distance*1.02){this.embedded=false;}
           }else{
-            const move=Math.min(distance,ANCHOR_LIMITS.weighRate*h);
+            const move=Math.min(distance,limits.weighRate*h);
             if(distance>1e-8){this.position.x+=dx/distance*move;this.position.y+=dy/distance*move;this.position.z+=dz/distance*move;}
-            this.rode=Math.max(.65,distance-move+.65);
+            this.rode=Math.max(eyeOffset,distance-move+eyeOffset);
             if(distance<=.04){this.phase='stowed';this.reelRate=0;emit('reel-stop');emit('secured');}
           }
         }
@@ -184,7 +191,7 @@ export function createAnchorState(boat) {
           const drift=Math.min(.7,(f.demand-f.holding)/(currentBoat.hydrodynamics?.mass??60000)*.25)*h;
           this.position.x+=dx/d*drift;this.position.z+=dz/d*drift;
           const bed=environment.terrain?.height?.(this.position.x,this.position.z);
-          if(Number.isFinite(bed)&&bed<0){this.bed=bed;this.position.y=bed+.22;}
+          if(Number.isFinite(bed)&&bed<0){this.bed=bed;this.position.y=bed+bedOffset;}
         }
       }
       this.force=anchorTetherForce(this,currentBoat,p);this.events.push(...pending);pending=[];
@@ -198,7 +205,7 @@ export function createAnchorState(boat) {
 // Bounded sagging line, clamped to the simulated bed. It straightens as tension
 // rises, instead of drawing a rigid rod from ship to bottom.
 export function anchorRodePoints(state,boat,segments=48) {
-  const a=anchorFairlead(boat),b=state.phase==='stowed'?a:{...state.position,y:state.position.y+.65},out=[];
+  const a=anchorFairlead(boat),b=state.phase==='stowed'?a:{...state.position,y:state.position.y+anchorEyeOffset(boat)},out=[];
   const distance=Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z),slack=Math.max(0,state.rode-distance);
   const sag=Math.min(Math.max(0,(a.y-(state.bed??-120))*.8),Math.sqrt(slack*Math.max(1,state.rode))*.5);
   for(let i=0;i<=segments;i++){

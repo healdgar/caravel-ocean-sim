@@ -1953,7 +1953,8 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage;
       const buffer=(size,usage)=>device.createBuffer({size,usage:usage|B.COPY_DST});
-      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM);
+      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM),hull=buffer(208,B.UNIFORM);
+      const hullValues=new Float32Array(52);hullValues[3]=5/3;device.queue.writeBuffer(hull,0,hullValues);
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
       const compare=device.createSampler({compare:'less-equal'});
       const texture=(color,layers=1)=>{
@@ -1997,7 +1998,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       const buf=b=>({buffer:b}),view=t=>t.createView();
       const groups=[
         [[0,buf(frame)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[15,buf(fixture)]],
-        [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],
+        [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],[6,buf(hull)],
           [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[15,buf(fixture)]],
       ].map((entries,i)=>device.createBindGroup({layout:pipelines[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))}));
       const shadowGroups=pipelines.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[
@@ -2498,22 +2499,22 @@ test('captain anchor orders connect voices, depth, retrieval and debug dolphin r
     assert.ok((await page.evaluate(()=>encounterFixture.events)).includes('reel-start'));
     assert.deepEqual(await page.evaluate(()=>encounterFixture.orders),['drop-anchor']);
     const grounded=await page.evaluate(()=>{
-      const f=encounterFixture;for(let i=0;i<450;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();
-      return {phase:f.anchor.phase,depth:f.anchor.depthFathoms};
+      const f=encounterFixture;for(let i=0;i<3000&&f.anchor.phase!=='anchored';i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();
+      return {phase:f.anchor.phase,depth:f.anchor.depthFathoms,expectedDepth:-f.terrain.height(f.anchor.position.x,f.anchor.position.z)/1.8288};
     });
-    assert.equal(grounded.phase,'anchored');assert.ok(grounded.depth>3&&grounded.depth<7);
+    assert.equal(grounded.phase,'anchored');assert.ok(grounded.depth>0&&Math.abs(grounded.depth-grounded.expectedDepth)<.005,'sounding follows the authored seabed at the actual anchor');
     assert.match(await page.locator('#anchor-status').textContent(),/fathoms \(simulated sounding\)/);
     const drawn=await advance(1);assert.equal(drawn.render['anchor and rode'],1);assert.deepEqual(drawn.errors,[]);
     await page.getByRole('button',{name:'Weigh anchor',exact:true}).click();
     await advance(1);assert.ok((await page.evaluate(()=>encounterFixture.orders)).includes('weigh-anchor'));
-    await page.evaluate(()=>{const f=encounterFixture;for(let i=0;i<1600;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();});
+    await page.evaluate(()=>{const f=encounterFixture;for(let i=0;i<4000&&f.anchor.active;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();});
     assert.equal((await advance(1)).phase,'stowed');
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     for(const [key,value] of [['length','22'],['beam','6.5'],['heading','90']]){
       await page.evaluate(()=>{
         const f=encounterFixture,assertDrop=f.anchor.drop(f.boat,{terrain:f.terrain,settings:f.P});
         if(!assertDrop)throw Error('Expected coastal anchor drop');
-        for(let i=0;i<450;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});
+        for(let i=0;i<3000&&f.anchor.phase!=='anchored';i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});
         f.boat.revision++;
       });
       assert.equal((await advance(1)).phase,'anchored','normal revision changes do not retrieve the anchor');

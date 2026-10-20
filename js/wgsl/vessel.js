@@ -1,15 +1,49 @@
 import { TILLER_PIVOT, HULL_VERTICAL_SCALE, hullDeck } from '../hull.js';
 import { LATEEN_MOTION } from './lateen.js';
+import {VICTORY_MOTION} from './victory.js';
+import {VICTORY_DESIGN,VICTORY_SAILS,victoryHatchPivot} from '../models/victory.js';
 // Shared deformation keeps visible geometry, wetness and shadow casters coincident.
 export const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
   sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3>, lateenPressure:vec4f };
 fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
 ${LATEEN_MOTION}
+${VICTORY_MOTION}
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
 fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
-  var scale=vec3f(hull.size.x/3.6,${HULL_VERTICAL_SCALE},hull.size.y/12.0);
+  var scale=vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0);
   var local=position;var localN=normal;
+  if(hull.rig.w>.5){
+    let base=u32(material);let id=u32(round(fract(material)*64.0));
+    if(id>0u && id<=${VICTORY_SAILS.length}u){
+      if(base==9u || base==13u || base==19u){
+        local=victoryClothPoint(id,uv);
+        if(base==19u){local+=victoryRotate(position-victoryRestPoint(id,uv),id);localN=victoryRotate(normal,id);}
+        else{
+          let du=vec2f(.0005,0);let dv=vec2f(0,.0005);
+          localN=normalize(cross(victoryClothPoint(id,uv+du)-victoryClothPoint(id,uv-du),victoryClothPoint(id,uv+dv)-victoryClothPoint(id,uv-dv)));
+        }
+      }else if(base==10u){local=victoryYardPoint(id,position);localN=victoryRotate(normal,id);}
+    }else if(base==12u && uv.x>=100.0){
+      let index=u32(round(uv.x-100.0));let line=victoryLines[index];let t=uv.y;
+      let oldAxis=normalize(line.b.xyz-line.a.xyz);
+      let newAxis=normalize(victoryRopePoint(index,1.0)-victoryRopePoint(index,0.0));
+      local=victoryRopePoint(index,t)+ropeFrame(position-mix(line.a.xyz,line.b.xyz,t),oldAxis,newAxis);
+      localN=ropeFrame(normal,oldAxis,newAxis);
+    }else if(base==7u || base==8u){
+      let pivot=vec3f(${VICTORY_DESIGN.wheel.centre.join(',')});let a=hull.size.w*.07;let c=cos(a);let s=sin(a);let p=position-pivot;
+      local=pivot+vec3f(c*p.x-s*p.y,s*p.x+c*p.y,p.z);localN=vec3f(c*normal.x-s*normal.y,s*normal.x+c*normal.y,normal.z);
+    }else if(base==14u){
+      let pivot=vec3f(${VICTORY_DESIGN.tiller.pivot.join(',')});let a=hull.size.w*.0174532925;let c=cos(a);let s=sin(a);let p=position-pivot;
+      local=pivot+vec3f(c*p.x+s*p.z,p.y,-s*p.x+c*p.z);localN=vec3f(c*normal.x+s*normal.z,normal.y,-s*normal.x+c*normal.z);
+    }else if(base==18u){
+      let pivot=vec3f(${victoryHatchPivot().join(',')});let p=position-pivot;
+      let a=(1.0-clamp(hull.sailSet.w,0.0,1.0))*1.57079632679;let c=cos(a);let s=sin(a);
+      local=pivot+vec3f(p.x,c*p.y+s*p.z,-s*p.y+c*p.z);
+      localN=vec3f(normal.x,c*normal.y+s*normal.z,-s*normal.y+c*normal.z);
+    }
+    return RigVertex(local,localN,scale);
+  }
   if(material==7.0 || material==8.0){
     let pivot=vec3f(${TILLER_PIVOT.join(',')});
     let angle=hull.size.w*0.0174532925;let c=cos(angle);let s=sin(angle);

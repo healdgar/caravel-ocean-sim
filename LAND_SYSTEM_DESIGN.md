@@ -1,7 +1,8 @@
 # Land, voyages and river navigation
 
 Design and implementation status, 20 October 2026. The first visual landfall slice
-is implemented: Saba elevation, generated canopy, atmospheric coloration,
+is implemented: Saba's local LiDAR relief, registered aerial colour and vegetation
+seeds, deterministic procedural trees with distance detail, atmospheric coloration,
 terrain/cloud shadows, approximate shore response and a world overview chart.
 Use `?landfall=approach&boat=1`. This single resident region has no terrain streaming,
 ports or voyage compression. Its underwater skirt and clearance constraint are
@@ -51,7 +52,44 @@ Keep the ship, water, wind, crew and controls running at ordinary simulation spe
 
 The player sails at six knots through the water while covering geographic distance faster offshore. Near a harbor, reef or riverbank, a metre becomes a metre again. Better sail handling still yields earlier arrival; a becalmed ship does not advance automatically.
 
-This requires a geography layer, not a faster physics clock. The current custom WebGPU renderer can accommodate it without replacing the engine, but terrain, bathymetry, streaming and grounding are new systems.
+This requires a geography layer, not a faster physics clock. The current custom WebGPU renderer can accommodate it without replacing the engine; regional mapping, surveyed bathymetry, streaming and physical grounding remain new work beyond the visual Saba foundation.
+
+### Completed Saba generation foundation
+
+The resident 8.192 km Saba pack now uses Beeldmateriaal Nederland's 2023 bare-earth
+LiDAR DTM, downsampled from half-metre source spacing to 513² samples at 16 m.
+The terrain has 104,972 triangles and remains the same physical surface at every
+viewing distance. Forest ground-return gaps receive recorded interpolation;
+the publisher's EPSG:10641 assignment replaces the TIFF's generic LOCAL_CS tag.
+Heights have not been transformed to chart datum. The shoreline, alignment and
+authored underwater skirt do not establish surveyed navigable depth.
+
+CC BY 4.0 Saba RGB orthophotography is registered to that same metric domain.
+The distributed 1024² colour seed is 8 m per pixel; natural ground retains its
+source detail with only 0.2-pixel antialiasing. Median historical cleanup is
+limited to compact neutral-bright features in vegetated surroundings; broad
+pale cliffs and canopy contrast are retained. Bounded local shadow lifting
+reduces photographed shade. These steps do not perfectly remove infrastructure or recover calibrated
+reflectance. A 512² greenness-derived probability mask supplies plausible
+vegetation distribution, constrained by terrain slope and elevation. Neither
+species nor 1492 land cover is asserted as measured.
+
+`js/vegetation.js` supplies four original seeded branch/crown forms, three
+tessellation tiers and 1,775 persistent instances. Roots, physical dimensions,
+canonical shape, regional colour and wind phase remain fixed while distance
+and hysteresis change mesh detail. Near/middle caps are 192/1024; overflow uses
+a cheaper mesh instead of moving, shrinking or deleting trees. Native WebGPU
+submits at most twelve instanced vegetation batches. This implements a bounded
+selected-region foundation; projected-size selection, smooth mesh crossfades,
+streamed tile/seam ownership and physical-iPhone frame-time acceptance remain
+future work. No Three.js runtime is introduced.
+
+The importer, exact source URLs, hashes, licenses, CRS assignment and processing
+limits are in `scripts/prepare-land-imagery.py` and `assets/world/saba/manifest.json`.
+Seven focused tests cover geometry, source/derived provenance, mask-constrained
+placement and tree identity/dimensions/budgets through repeated LOD approaches.
+Local native-WebGPU rendering also initializes without shader or resource errors.
+These checks do not establish streaming, harbor playability or device performance.
 
 ## Source data
 
@@ -61,6 +99,7 @@ Use downloadable source data to build our own regional assets locally. A map pic
 |---|---|---|
 | [OpenStreetMap](https://www.openstreetmap.org/copyright) and [processed coastlines](https://osmdata.openstreetmap.de/data/coastlines.html) | Coastlines, islands, river outlines, place names and selected geographic features | ODbL attribution and applicable derivative-database sharing obligations. Coverage and completeness vary. Download extracts; do not use the public tile service as an asset CDN. |
 | [Copernicus GLO-30](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) | Island relief, hills and distant silhouettes | Global 30 m surface model, including vegetation/buildings; not uniformly bare-earth terrain. Retain required attribution and clean up modern structures. It supplies no riverbed survey. |
+| [Beeldmateriaal Nederland Caribbean dataroom](https://www.beeldmateriaal.nl/dataroom-caribisch-nederland) | Current Saba LiDAR terrain and aerial colour/vegetation seeds; possible selected neighboring regions | CC BY 4.0. The game distributes reduced, reprojected, modified derivatives with source hashes and attribution. Capture dates, coordinate assignment, ground-return gaps and historical cleanup remain explicit; aerial colour supplies no bathymetry. |
 | [GEBCO](https://www.gebco.net/data-products/gridded-bathymetry-data) | Broad seafloor, continental shelves and deep-water context | Public-domain global grid at 15 arcseconds: roughly 400–460 m cells in the Caribbean. Too coarse to determine reef passages or docking clearance. Preserve source-quality information. |
 | [NOAA coastal elevation models](https://www.ncei.noaa.gov/products/coastal-elevation-models) and [chart features](https://www.nauticalcharts.noaa.gov/data/gis-data-and-services.html) | Detailed terrain/bathymetry and channel/hazard references where available | NOAA lists Puerto Rico and U.S. Virgin Islands CUDEM products at 1/9 and 1/3 arcsecond spacing. Verify individual tiles, source accuracy, dates and vertical datums. Grid spacing is not survey accuracy. |
 | [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/) | Lightweight Caribbean overview chart and fallback land outlines | Public domain. Its “1:10m” means 1:10 million map scale, not ten-metre detail; unsuitable for tactical coastlines. |
@@ -191,13 +230,15 @@ Preprocess GIS data locally into versioned `assets/world/<region>/` packs. A man
 
 Stream nearby quadtree terrain tiles; use cheap silhouettes at distance, reusable ground materials, instanced vegetation and simplified distant ports. Decode in a worker and cap resident buffers/textures. Neither the whole Caribbean nor photogrammetric city meshes should be resident. Collision terrain must stay independent of visual LOD and adaptive render resolution.
 
-### Deterministic vegetation and distance detail — planned
+### Deterministic vegetation and distance detail — foundation implemented
 
 Dan Greenheck's [Fractals to Forests / EZ-Tree article](https://tympanus.net/codrops/2025/01/27/fractals-to-forests-creating-realistic-3d-trees-with-three-js/)
 is a useful procedural-tree reference: seeded recursive branches, taper, growth
 direction, adjustable branch tessellation and leaf cards. Its implementation
-does **not** use L-systems. Our distance-LOD and regional placement rules below
-are a proposed adaptation, not a feature established by that article or our MVP.
+does **not** use L-systems. The Saba foundation above implements our own native
+seeded branches, stable placement and bounded distance detail. The fuller
+regional rules below include remaining work; they are not features established
+by the article or all completed by this single-region demo.
 
 - Derive stable tree IDs, position, species preset, height, crown size and shape
   seed from the regional vegetation layer. Generate these independently of
@@ -221,8 +262,10 @@ are a proposed adaptation, not a feature established by that article or our MVP.
 
 Acceptance includes repeated approaches, turns, region reloads and seam crossings
 with identical tree identities; no popping in position/scale, floating trunks or
-canopy-color jumps; and measured ocean-plus-land cost on iPhone. The existing
-generated Saba canopy does not establish this full tree pipeline.
+canopy-color jumps; and measured ocean-plus-land cost on iPhone. Saba's focused
+tests establish stable identities and physical extents within one resident region.
+They do not establish cross-region seams, imperceptible mesh transitions or the
+physical-iPhone performance gate.
 
 Initial performance acceptance: measure combined ocean + land on the actual iPhone against the existing 30 fps target. A provisional land budget of 2–4 ms GPU and 64 MB additional resident assets is a starting allocation, not a measured capability or a guarantee that the current frame has that headroom. Bound tile uploads and avoid compilation/decode spikes during approach.
 
@@ -232,7 +275,8 @@ The current single-file ocean demo can remain self-contained. Selected-region bu
 
 Completed precursor: one visual Saba region, selected for a distinctive landfall
 silhouette and a small distributable elevation pack. This validates rendering,
-not the spatial compression, coastal rings, tree LOD or harbor systems below. A
+registered imagery seeding and bounded deterministic tree detail, not the spatial
+compression, coastal rings, streamed tree seams or harbor systems below. A
 selected Virgin Islands island-hopping module is the preferred next coastal
 pilot; source coverage and navigable depth must be inspected before selecting
 its exact shores and port.

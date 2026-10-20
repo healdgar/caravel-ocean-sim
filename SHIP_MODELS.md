@@ -1,14 +1,16 @@
 # Reusable ship definitions
 
-The model/attachment foundation is implemented. Niña remains the only playable
-model. Pinta and Santa María have validated planned definitions; they cannot be
-spawned or silently rendered with Niña geometry. Building their meshes, square
-rigs and the three-ship sailing toggle is the next stage, not part of this pass.
+Niña and HMS Victory (1805) are playable. Pinta and Santa María remain validated
+planned definitions; neither can silently use another model's mesh. Victory was
+brought forward ahead of those variants at the user's request. The renderer still
+has two vessel slots; a three-model fleet toggle remains pending.
 
 ## Ownership
 
 - `js/models/nina.js`: immutable authored dimensions, hull parameters, deck/helm
   layout, anchor catheads, crew home stations, tackles and reconstruction plate.
+- `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`: Victory hull,
+  decks, batteries, spars, cloth, rope leads and shared posed geometry.
 - `js/ship-models.js`: model registry, sourced reference measurements, named
   structure points and posed attachment resolution.
 - `js/rig-definition.js`: validates node references, acyclic parents, mast/sail
@@ -19,10 +21,11 @@ rigs and the three-ship sailing toggle is the next stage, not part of this pass.
 - `js/vessels.js`: binds model identity and copies requested vessel settings
   without transplanting another vessel's running simulation.
 
-The current hull/rig exports remain compatible aliases. Shared routines such as
-hydrostatics, hull exclusion, climbing routes and shader generation still consume
-Niña's geometry. This refactor identifies that boundary instead of treating the
-existing caravel as a universal hull.
+Legacy hull/rig exports remain Niña aliases. Model-aware hydrostatics, deck/width
+queries, exclusion masks, helm camera, material transforms and crew routes select
+the appropriate geometry. The same ocean, weather, crew assets, lighting and
+sound systems serve both. See [VICTORY_RESEARCH.md](VICTORY_RESEARCH.md) for
+measurements, construction references and unresolved historical calibration.
 
 ## Structure points and mesh groups
 
@@ -48,10 +51,10 @@ The existing hull transform applies heading, pitch, roll and world translation.
 
 `space:'design'` preserves authored coordinates. Default `space:'vessel'` uses
 the model's length/beam reference and vertical scale. Niña deliberately retains
-its existing fixed vertical scale when the length slider changes. This pass
-does not rescale people, rewrite buoyancy or change sail forces.
+its existing fixed vertical scale when the length slider changes. Victory uses its own length-derived vertical scale and hydrostatic hull. Crew
+retain human dimensions rather than scaling with the ship.
 
-The mesh now exposes 110 named triangle ranges: hull, planking, decks, cabin,
+The Niña mesh exposes 110 named triangle ranges: hull, planking, decks, cabin,
 stairs, tiller/rudder, anchors, masts, yards, sails/edges and every rigging line.
 Ranges can nest and are **not** a disjoint mesh partition. `firstVertex` and
 `vertexCount` index the original triangle stream; because deduplication retains
@@ -64,6 +67,7 @@ and legacy `parts` inspection output remain intact.
 | Model | Prepared rig | Geometry/status |
 |---|---|---|
 | Niña | Three lateen courses | Current authored 20 × 6 m caravel; ready |
+| HMS Victory | Eight square sails, three headsails, gaff spanker | Own three-decker hull and `square1805` backend; ready |
 | Pinta | Square fore/main courses, lateen mizzen | Planned caravel; unresolved points remain null |
 | Santa María | Square fore/main, main topsail, spritsail, lateen mizzen | Planned nao hull/decks; unresolved points remain null |
 
@@ -84,10 +88,11 @@ draught. Original 1492 offsets and displacement remain uncertain.
 1. Select each variant's reconstruction/size profile and author its own hull,
    decks, structural points, crew routes and hydrostatics. Do not apply replica
    tonnage as displacement or scale Niña into a nao.
-2. Add a square cloth/yard/rope backend shared by visible rendering, forces,
-   shadows and wetting. A retained square mesh generator alone is insufficient.
-   The active shader, 208-byte hull uniform and force tessellation still assume
-   three lateen sails. Existing bad-tack geometry remains a separate known defect.
+2. Adapt the Victory square-cloth/yard/rope backend to each historical rig,
+   retaining a shared posed surface for visible rendering, forces, shadows and
+   wetting. The existing 208-byte hull uniform carries model identity, vertical
+   scale and three mast-control groups; Victory evaluates twelve actual sails.
+   Its initial bracing/contact envelope is authored rather than a calibrated polar.
 3. Validate mast/yard/sheet/cloth clearance, rig jobs, lookout access and physical
    dimensions. Keep one authoritative posed geometry for every consumer.
 4. Generalize the current two-vessel ocean mask, wake bindings, foam/probe
@@ -106,16 +111,15 @@ rendered fleet, anchor actions, crew jobs and all standalone bundles.
 
 ## Later vessel programme
 
-After completing Pinta, Santa María and their sailing-together validation, build
-the following models in the requested order. These are roadmap entries, not
-runtime definitions, available models or new work replacing the current fleet.
+Victory is implemented first at the subsequent request. After the remaining
+Pinta/Santa María and fleet work, the following targets remain on the roadmap.
 
 | Target | Planned capability | Reference decision before modelling |
 |---|---|---|
 | Viking longship, c. AD 850 | Sail and oar propulsion, rowing stations, steering oar, shallow open hull | Choose ninth-century evidence/reconstruction; do not silently substitute a later longship or claim an exact AD 850 wreck |
 | Roman galley, c. AD 350 | Oars and sail, coordinated rowing, vessel-specific steering and crew layout | Select a late-Roman vessel class and reconstruction; resolve seagoing versus riverine service and oar-bank arrangement |
 | Caribbean canoe, AD 1492, 30 people | Paddle propulsion and steering, occupied paddling stations, loading-sensitive freeboard | Select regional/cultural references; distinguish 30 occupants from 30 active paddlers and any extra cargo |
-| HMS Victory, 1805 configuration | Large square-rigged hull, multiple deck levels, sail groups, running rigging and gun stations | Assume Nelson's Trafalgar flagship; model her sailing-era configuration rather than copying today's conservation/display state |
+| HMS Victory, 1805 configuration | Implemented first pass: own hull, square/fore-and-aft sail groups, crew stations and running rigging | Further dimensional refinement and measured sailing calibration remain; see source ledger |
 
 The Victory identity/date is the working interpretation of "Admiral Nelson's
 ship". Historical starting points and unresolved choices are recorded in
@@ -138,11 +142,13 @@ The reusable architecture must consequently support:
   simulation/rendering rather than one full-cost animated agent per historical
   occupant.
 
-These extensions are not implemented. The current ready backend assumes three
-lateen sails, crew/provisions assume twelve people, and attachment resolution
-returns points. Rowing/paddling require shared posed orientations/transforms as
-well as points. Separate optional `rig`, `propulsion`, `steering`, `crewLayout`
-and `hull/hydrostatics` definitions before admitting these future craft.
+Oar/paddle propulsion and historical-complement crew simulation remain
+unimplemented. Ready backends support Niña lateens and Victory square/headsail/
+gaff cloth under three mast groups. Victory loading accounts for 820 people,
+with twelve visible workers. Attachment resolution returns points; rowing and
+paddling need shared posed orientations/transforms too. Separate optional `rig`,
+`propulsion`, `steering`, `crewLayout` and `hull/hydrostatics` capabilities before
+admitting those craft.
 
 Reuse ocean/weather, materials, wetness, hull contacts, wake/spray, crew identities,
 orders and attachment evaluation where applicable. Each additional hull needs

@@ -1,5 +1,7 @@
 import { lateenClothPoint } from './lateen.js';
 import { HULL_VERTICAL_SCALE } from './hull.js';
+import {VICTORY_DESIGN,VICTORY_SAILS} from './models/victory.js';
+import {victoryPose,victoryClothPoint} from './victory-motion.js';
 
 // Low-order force model, not a measured Niña polar. Coefficients depend on
 // incidence to the cloth, never on the controller's requested sheet angle.
@@ -34,10 +36,44 @@ export function createSailGeometry(subdivisions=6){
     })),coefficients:{lift:0,drag:0,separation:0},force:new Float64Array(3)};
 }
 
+export function createVictorySailGeometry(subdivisions=3){
+  const groups=Array.from({length:3},()=>[]),panels=[],surfaces=[];
+  for(const sail of VICTORY_SAILS){
+    const samples=[],indices=[],n=subdivisions,tri=sail.corners.length===3,at=new Map();
+    for(let i=0;i<=n;i++)for(let j=0;j<=(tri?n-i:n);j++){at.set(i+','+j,samples.length);samples.push([i/n,j/n]);}
+    const index=(i,j)=>at.get(i+','+j);
+    for(let i=0;i<n;i++)for(let j=0;j<(tri?n-i:n);j++){
+      indices.push([index(i,j),index(i+1,j),index(i,j+1)]);
+      if(!tri||i+j<n-1)indices.push([index(i+1,j),index(i+1,j+1),index(i,j+1)]);
+    }
+    const surface={sail,samples,indices,key:new Float64Array(9).fill(NaN),panels:indices.map(()=>({point:new Float64Array(3),normal:new Float64Array(3),area:0,aspect:1}))};
+    groups[sail.mast].push(...surface.panels);panels.push(...surface.panels);surfaces.push(surface);
+  }
+  return {victory:true,surfaces,groups,panels,coefficients:{lift:0,drag:0,separation:0},force:new Float64Array(3)};
+}
+function updateVictorySailGeometry(geometry,boat){
+  const state=boat.sailState,scale=[boat.beam/3.6,VICTORY_DESIGN.frame.verticalScale,boat.length/12];
+  for(const surface of geometry.surfaces){
+    const {sail,samples,indices,key}=surface,pose=victoryPose(sail,state);
+    const values=[...scale,pose.yaw,pose.deployed,pose.fill,pose.pressure,0,0];
+    if(values.every((v,i)=>key[i]===v))continue;key.set(values);
+    const points=samples.map(([u,v])=>victoryClothPoint(sail.id,u,v,pose).map((p,i)=>p*scale[i]));let total=0;
+    for(const [j,[a,b,c]]of indices.entries()){
+      const p=surface.panels[j],A=points[a],B=points[b],C=points[c],u=B.map((v,i)=>v-A[i]),v=C.map((x,i)=>x-A[i]);
+      const normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],m=Math.hypot(...normal);
+      for(let k=0;k<3;k++){p.point[k]=(A[k]+B[k]+C[k])/3;p.normal[k]=normal[k]/Math.max(m,1e-10);}
+      p.area=m*.5*pose.deployed/(.012+.988*pose.deployed);total+=p.area;
+    }
+    const span=Math.max(...points.map(p=>p[1]))-Math.min(...points.map(p=>p[1]));
+    for(const panel of surface.panels)panel.aspect=Math.max(.5,Math.min(12,span*span/Math.max(total,1e-6)));
+  }return geometry.panels;
+}
+
 // A coarse triangular mesh samples the actual cloth, including its camber and
 // mast support on the bad tack. Decorative flutter is omitted from mean loads.
 // Cache geometry across rigid-body substeps; no GPU readback is required.
 export function updateSailGeometry(geometry,boat,poses){
+  if(geometry.victory)return updateVictorySailGeometry(geometry,boat);
   const sx=boat.beam/3.6,sy=HULL_VERTICAL_SCALE,sz=boat.length/12;
   const {samples,indices}=geometry;
   for(let m=0;m<3;m++){

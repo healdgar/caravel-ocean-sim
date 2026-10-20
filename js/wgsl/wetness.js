@@ -8,14 +8,14 @@ import { QUARTERDECK_START, QUARTERDECK_HEIGHT } from '../hull.js';
 export const WET_GRID=[24,32,48];
 export const WET_SEA_SIZE=32;
 const WET_SPACE=/* wgsl */ `
-const wetMin=vec3f(-4.2,-1.5,-8.7);
-const wetSpan=vec3f(8.4,11.0,16.4);
+fn wetMin()->vec3f {return select(vec3f(-4.2,-1.5,-8.7),vec3f(-4.2,-2.1,-10.8),hull.rig.w>.5);}
+fn wetSpan()->vec3f {return select(vec3f(8.4,11.0,16.4),vec3f(8.4,15.7,17.8),hull.rig.w>.5);}
 const wetSize=vec3u(${WET_GRID.join(',')});
 fn wetLocal(world:vec3f)->vec3f {
   let q=world-hull.origin.xyz;
-  return vec3f(dot(q,hull.right.xyz),dot(q,hull.up.xyz),-dot(q,hull.forward.xyz))/vec3f(hull.size.x/3.6,HULL_Y_SCALE,hull.size.y/12.0);
+  return vec3f(dot(q,hull.right.xyz),dot(q,hull.up.xyz),-dot(q,hull.forward.xyz))/vec3f(hull.size.x/3.6,shipY(hull.right.w),hull.size.y/12.0);
 }
-fn wetWorld(p:vec3f)->vec3f {return rotateHull(p*vec3f(hull.size.x/3.6,HULL_Y_SCALE,hull.size.y/12.0))+hull.origin.xyz;}
+fn wetWorld(p:vec3f)->vec3f {return rotateHull(p*vec3f(hull.size.x/3.6,shipY(hull.right.w),hull.size.y/12.0))+hull.origin.xyz;}
 fn wetIndex(p:vec3u)->u32 {return (p.z*wetSize.y+p.y)*wetSize.x+p.x;}
 `;
 // Absorbed moisture and a short-lived surface film have separate lifetimes.
@@ -45,7 +45,7 @@ export const WET_DEPOSIT=INTERACTION_TYPES+VESSEL_RIG+DECK_PROFILE+SPINDRIFT_STA
 @group(0) @binding(5) var<storage,read> plumes:array<CrestPlume>;
 `+WET_SPACE+/* wgsl */ `
 fn deposit(world:vec3f,amount:f32){
-  let q=(wetLocal(world)-wetMin)/wetSpan*vec3f(wetSize)-0.5;
+  let q=(wetLocal(world)-wetMin())/wetSpan()*vec3f(wetSize)-0.5;
   let base=vec3i(floor(q));let f=fract(q);
   for(var i=0u;i<8u;i++){
     let corner=vec3i(vec3u(i&1u,(i>>1u)&1u,(i>>2u)&1u));let p=base+corner;
@@ -78,7 +78,7 @@ export const WET_SEA=FRAME_WGSL+VESSEL_RIG+DECK_PROFILE+/* wgsl */ `
 `+WET_SPACE+INTERACTION_SEA+/* wgsl */ `
 @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
   let uv=(vec2f(id.xy)+.5)/${WET_SEA_SIZE}.0;
-  let p=vec3f(wetMin.x+uv.x*wetSpan.x,0,wetMin.z+uv.y*wetSpan.z);
+  let p=vec3f(wetMin().x+uv.x*wetSpan().x,0,wetMin().z+uv.y*wetSpan().z);
   textureStore(levels,vec2i(id.xy),vec4f(interactionSea(wetWorld(p).xz)));
 }
 `;
@@ -93,7 +93,7 @@ struct WetProbe {position:vec4f,uvKind:vec4f};
 @group(0) @binding(6) var deckWater:texture_2d<f32>;
 `+WET_SPACE+DECK_SAMPLING+/* wgsl */ `
 fn mistAt(p:vec3f)->f32 {
-  let q=(p-wetMin)/wetSpan*vec3f(wetSize)-.5;let base=vec3i(floor(q));let f=fract(q);var value=0.0;
+  let q=(p-wetMin())/wetSpan()*vec3f(wetSize)-.5;let base=vec3i(floor(q));let f=fract(q);var value=0.0;
   for(var i=0u;i<8u;i++){
     let corner=vec3i(vec3u(i&1u,(i>>1u)&1u,(i>>2u)&1u));let at=base+corner;
     if(all(at>=vec3i(0))&&all(at<vec3i(wetSize))){let w=mix(vec3f(1)-f,f,vec3f(corner));value+=f32(mist[wetIndex(vec3u(at))])*w.x*w.y*w.z/4096.0;}
@@ -105,7 +105,7 @@ fn levelAt(world:vec3f)->f32 {
   let qWorld=world.xz-hull.origin.xz;let r=hull.right.xz;let back=-hull.forward.xz;
   let det=max(.1,r.x*back.y-r.y*back.x);
   let p=vec2f(qWorld.x*back.y-qWorld.y*back.x,r.x*qWorld.y-r.y*qWorld.x)/det/vec2f(hull.size.x/3.6,hull.size.y/12.0);
-  let uv=(p-wetMin.xz)/wetSpan.xz;
+  let uv=(p-wetMin().xz)/wetSpan().xz;
   let q=clamp(uv,vec2f(0),vec2f(1))*${WET_SEA_SIZE}.0-.5;let b=vec2i(floor(q));let f=fract(q);
   let hi=vec2i(${WET_SEA_SIZE-1});
   return mix(mix(textureLoad(levels,clamp(b,vec2i(0),hi),0).x,textureLoad(levels,clamp(b+vec2i(1,0),vec2i(0),hi),0).x,f.x),
@@ -116,13 +116,13 @@ fn levelAt(world:vec3f)->f32 {
   if(I.previous.w>.5 || probe.uvKind.w<.5){moisture[i]=vec2f(0);return;}
   let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);
   let p=rig.position;let world=wetWorld(p);let floor=deckFloor(p.z);
-  let inFootprint=p.z> -6.3 && p.z<5.6 && abs(p.x)<deckWidth(p.z)-.10 && p.y>=hullDeck(p.z)-.08;
-  let sheltered=inFootprint && p.z>=${QUARTERDECK_START} && p.y<${QUARTERDECK_HEIGHT-.08};
+  let inFootprint=p.z>deckMinZ() && p.z<deckMinZ()+deckLength() && abs(p.x)<deckWidth(p.z)-.10 && p.y>=modelHullDeck(p.z,hull.rig.w)-.08;
+  let sheltered=inFootprint && p.z>=select(${QUARTERDECK_START},1.65,hull.rig.w>.5) && p.y<floor-.08;
   var water=smoothstep(-.025,.08,levelAt(world)-world.y);
   var spray=mistAt(p);
   if(inFootprint && p.y<=floor+deckRail(p.z)){
     let wash=sampleDeck(deckUV(p));
-    water=smoothstep(.0003,.003,wash.x)*smoothstep(-.015,.035,wash.x-(p.y-floor)*HULL_Y_SCALE);
+    water=smoothstep(.0003,.003,wash.x)*smoothstep(-.015,.035,wash.x-(p.y-floor)*shipY(hull.right.w));
     if(p.y<floor-.08){water=0.0;}
   }
   if(I.motion.y<.5){water=0.0;spray=0.0;}

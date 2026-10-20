@@ -45,8 +45,8 @@ const OCEAN_HULL_MASK = /* wgsl */ `
       let H=hulls[${vessel}];
       if(H.rig.z>.5){
         let relative=in.rel+F.camPos.xyz-H.origin.xyz;
-        let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/HULL_Y_SCALE,-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-        if(hullExcludesOcean(q)) { discard; return vec4f(0); }
+        let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/shipY(H.right.w),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
+        if(abs(q.x)<modelHullWidth(q.z,q.y,H.rig.w)) { discard; return vec4f(0); }
       }
     }`).join('\n')}
   }

@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import { NINA_DESIGN } from './models/nina.js';
+import { VICTORY_DESIGN, VICTORY_MASTS, VICTORY_SAILS, victoryMastPoint, victoryVesselDeck, victoryHullHalfWidth, victoryAnchorCathead, victoryShroud, victoryHatchPivot } from './models/victory.js';
+import { victoryPose, victoryClothPoint, victoryYardPoint } from './victory-motion.js';
 import { deepFreeze, defineRig } from './rig-definition.js';
 import { vesselDeck, anchorCathead, TILLER_PIVOT, TILLER_HANDLE, tillerPoint } from './hull.js';
 import { RIG_MASTS, mastPoint, climbingPoint, workingTacklePoint } from './rigging.js';
@@ -73,7 +75,39 @@ function plannedNodes({topsail=false,lookout=false}={}){
 }
 const replicaReport=(id,name,dimensions,tonnage,source,notes)=>({id,subject:'modern-replica',name,dimensions,tonnage,source,notes});
 const ninaDefinitionNodes=ninaNodes(),pintaDefinitionNodes=plannedNodes(),santaDefinitionNodes=plannedNodes({topsail:true,lookout:true});
+function victoryDefinition(){
+  const nodes={},add=(id,p,parent='hull',kind='attachment')=>nodes[id]=structureNode(id,p,parent,kind);
+  add('hull',[0,0,0],null,'frame');
+  for(const [id,z]of [['main',0],['quarter',2],['forecastle',-5],['poop',5]])add('deck.'+id,[0,victoryVesselDeck(z),z],'hull','frame');
+  add('helm.tiller',[...VICTORY_DESIGN.tiller.pivot],'hull','part');
+  add('helm.rudder',[...VICTORY_DESIGN.tiller.pivot],'hull','part');
+  add('helm.wheel',[...VICTORY_DESIGN.wheel.centre],'hull','part');
+  add('helm.grip',[0,victoryVesselDeck(VICTORY_DESIGN.helm.z)+.23,VICTORY_DESIGN.crewStations.pedro.z-.1]);
+  add('helm.camera',[VICTORY_DESIGN.helm.x,victoryVesselDeck(VICTORY_DESIGN.helm.z)+VICTORY_DESIGN.helm.eyeAboveDeck/VICTORY_DESIGN.frame.verticalScale,VICTORY_DESIGN.helm.z]);
+  add('hatch.main',victoryHatchPivot(),'hull','part');add('station.hatch',[.45,victoryVesselDeck(-1.5),-1.5],'hull','station');
+  for(const [id,p]of Object.entries(VICTORY_DESIGN.crewStations))add('station.crew.'+id,[p.x,victoryVesselDeck(p.z),p.z],'hull','station');
+  for(const side of [-1,1])for(const [key,p]of Object.entries(victoryAnchorCathead(side)))add(`anchor.${side<0?'port':'starboard'}.${key}`,p);
+  for(const [i,m]of VICTORY_MASTS.entries()){
+    add('mast.'+m.id,victoryMastPoint(i,victoryVesselDeck(m.z)),'hull','frame');
+    add('mast.'+m.id+'.head',victoryMastPoint(i,m.height));
+    add('mast.'+m.id+'.runner',[.8,victoryVesselDeck(m.z),m.z]);
+    add('station.haul.'+m.id,[i===1?-1.05:1.05,victoryVesselDeck(m.z+.5),m.z+.5],'hull','station');
+    add('rig.'+m.id+'.fall',[i===1?-1.13:1.13,victoryVesselDeck(m.z+.5)+.25,m.z+.5]);
+  }
+  const sails=VICTORY_SAILS.map(s=>{
+    add('yard.'+s.name,[...s.pivot],'hull','part');
+    add('sail.'+s.name,[...s.pivot],'hull','part');
+    const clews=s.kind==='square'?['port','starboard']:['clew'];
+    const clewNodes=clews.map((side,i)=>{const id='sail.'+s.name+'.'+side;add(id,[...s.corners[s.kind==='square'?(i?2:3):2]]);return id;});
+    return {id:s.name,mast:VICTORY_MASTS[s.mast].id,kind:s.kind==='spanker'?'gaff':s.kind,controlGroup:s.controlGroup,yardNode:'yard.'+s.name,clewNodes};
+  });
+  return {id:'victory',name:'HMS Victory · 1805',revision:1,status:'ready',hullFamily:'first-rate',geometry:'victory-procedural-v1',
+    designFrame:VICTORY_DESIGN.frame,runtime:VICTORY_DESIGN.runtime,crewStations:VICTORY_DESIGN.crewStations,nodes,
+    rig:defineRig({id:'victory-1805-rig',backend:'square1805',masts:VICTORY_MASTS.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings:[]},nodes),
+    referenceMeasurements:[{subject:'historical-report',source:VICTORY_DESIGN.provenance.dimensions,dimensions:[{kind:'gun-deck-length',metres:56.6928,value:186,unit:'ft'},{kind:'extreme-beam',metres:15.8496,value:52,unit:'ft'}],tonnage:{value:2162,unit:'tons',kind:'builders-measurement-not-displacement'}}]};
+}
 export const SHIP_MODELS=deepFreeze({
+  victory:victoryDefinition(),
   nina:{id:'nina',name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
     designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,nodes:ninaDefinitionNodes,
     rig:rigFor('nina',['lateen','lateen','lateen'],ninaDefinitionNodes),
@@ -101,7 +135,7 @@ export function getShipModel(id='nina'){
 }
 export function requirePlayableShipModel(id='nina'){
   const model=getShipModel(id);
-  if(model.status!=='ready'||!model.geometry||!model.runtime||!model.designFrame||model.rig.backend!=='lateen3')throw Error(model.name+' is planned or not playable: geometry, rig animation/forces and clearance must be implemented first');
+  if(model.status!=='ready'||!model.geometry||!model.runtime||!model.designFrame||!['lateen3','square1805'].includes(model.rig.backend))throw Error(model.name+' is planned or not playable: geometry, rig animation/forces and clearance must be implemented first');
   return model;
 }
 
@@ -113,6 +147,32 @@ export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-
   if(!node)throw Error('Unknown '+model.id+' structure node: '+nodeId);
   if(!['design','vessel'].includes(space))throw Error('Unknown structure coordinate space: '+space);
   if(!(boat.length>0&&boat.beam>0&&Number.isFinite(boat.length)&&Number.isFinite(boat.beam)))throw Error('Structure points require finite positive hull dimensions');
+  if(model.id==='victory'&&nodeId.endsWith('.runner')){
+    const index=['fore','main','mizzen'].findIndex(id=>nodeId==='mast.'+id+'.runner'),t=Math.max(0,Math.min(1,step/29));
+    const {root,top}=victoryShroud(index,side,3),p=root.map((v,i)=>v+(top[i]-v)*t);
+    const k=space==='design'?[1,1,1]:[boat.beam/3.6,model.designFrame.verticalScale,boat.length/12];
+    for(let i=0;i<3;i++)out[i]=p[i]*k[i];return out;
+  }
+  if(model.id==='victory'&&nodeId.startsWith('rig.')&&nodeId.endsWith('.fall')){
+    const p=[...node.position];if(height>0)p[1]=height;
+    const k=space==='design'?[1,1,1]:[boat.beam/3.6,model.designFrame.verticalScale,boat.length/12];
+    for(let i=0;i<3;i++)out[i]=p[i]*k[i];return out;
+  }
+  if(model.id==='victory'&&nodeId==='helm.grip'){
+    const centre=VICTORY_DESIGN.wheel.centre,r=VICTORY_DESIGN.wheel.radius,a=(boat.rudder??0)*.07;
+    const theta=(along<0?Math.PI-.6:.6)+Math.sin(a)*.12,p=[centre[0]+Math.cos(theta)*r,centre[1]+Math.sin(theta)*r,centre[2]+.055];
+    const k=space==='design'?[1,1,1]:[boat.beam/3.6,model.designFrame.verticalScale,boat.length/12];
+    for(let i=0;i<3;i++)out[i]=p[i]*k[i];return out;
+  }
+  if(model.id==='victory'&&(nodeId.startsWith('yard.')||nodeId.startsWith('sail.'))){
+    const sail=VICTORY_SAILS.find(s=>nodeId==='yard.'+s.name||nodeId.startsWith('sail.'+s.name+'.'));
+    if(sail){
+      const state=boat.sailState??{squareYaw:0,lateenYaw:0,windSide:0,windForward:0,set:[1,1,1],rig:[{fill:0},{fill:0},{fill:0}]},pose=victoryPose(sail,state);
+      const p=nodeId.startsWith('yard.')?victoryYardPoint(sail.id,node.position,pose):victoryClothPoint(sail.id,sail.kind==='headsail'?0:nodeId.endsWith('.port')?0:1,1,pose,time,wind);
+      const k=space==='design'?[1,1,1]:[boat.beam/3.6,model.designFrame.verticalScale,boat.length/12];
+      for(let i=0;i<3;i++)out[i]=p[i]*k[i];return out;
+    }
+  }
   // Avoid a divide/multiply round trip at the animated tiller grip.
   if(node.motion?.type==='tiller-grip'&&space==='vessel'){const p=tillerPoint(boat,along);for(let i=0;i<3;i++)out[i]=p[i];return out;}
   function position(n){

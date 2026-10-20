@@ -55,7 +55,7 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection){
     const rig=sailingState(boat);
     // A sustained recovery on the bad tack can warrant one deliberate transfer,
     // after the bow is clear of the wind. This cannot chatter while in irons.
-    if(Math.abs(wrap(heading-windFrom))>80*RAD&&state.tackAge>20&&state.transferCooldown===0&&yardTransferAvailable(rig)){
+    if(boat.modelId!=='victory'&&Math.abs(wrap(heading-windFrom))>80*RAD&&state.tackAge>20&&state.transferCooldown===0&&yardTransferAvailable(rig)){
       if(requestYardTransfer(rig))state.transferCooldown=180;
     }
     if(rig.maneuver)state.status='Handling yards to recover';

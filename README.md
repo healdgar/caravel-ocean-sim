@@ -2,9 +2,11 @@
 
 Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck wash, whitecaps, and volumetric weather. The caravel has three triangular lateen sails, a working helm, and boat, free-flight, and exterior cameras. Sea conditions, sunlight, and clouds can be adjusted and shared in a link.
+A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. Niña carries three lateen sails; Victory has a tiered square rig. Both use wind-driven motion, working helms, crew and boat, free-flight and exterior cameras. Sea conditions, sunlight and clouds can be adjusted and shared in a link.
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
+
+![HMS Victory with tiered square sails](docs/victory.png)
 
 Project code is **MIT licensed**, copyright © 2026 **Six Cailloux, LLC**, with
 the original author's notice retained. See [LICENSE](LICENSE) and
@@ -13,9 +15,10 @@ the original author's notice retained. See [LICENSE](LICENSE) and
 [Try the Saba landfall MVP](https://healdgar.github.io/caravel-ocean-sim/?landfall=approach&boat=1).
 Open **Landfall** to choose Horizon, Approach or Near coast, and compare clear air,
 sunset, backlighting and sea mist. The world overview locates Saba; only this island
-currently renders in 3D. [Longer-term geography and voyage design](LAND_SYSTEM_DESIGN.md).
+currently renders in 3D. Real LiDAR relief and aerial imagery now seed its terrain
+and vegetation. [Longer-term geography and voyage design](LAND_SYSTEM_DESIGN.md).
 
-![Saba landfall at sunset, rendered from aboard the caravel](docs/landfall.png)
+![Saba LiDAR coast with aerial color and generated vegetation](docs/landfall.png)
 
 ![Looking toward the sun from 2.4 m above the water](docs/front.jpg)
 
@@ -215,15 +218,32 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 
 The [ship-model foundation](SHIP_MODELS.md) separates immutable model definitions,
 named attachment points, semantic mesh groups and cached geometry from each
-vessel's live state. Niña is playable; Pinta and Santa María have planned rig and
-[reported specification profiles](SHIP_MODEL_RESEARCH.md). Their meshes, square
-animation/forces and three-ship toggles remain the next stage.
-The [later vessel roadmap](SHIP_MODELS.md#later-vessel-programme) then adds a
-c. AD 850 Viking longship, c. AD 350 Roman galley, 30-person 1492 Caribbean canoe
-and HMS Victory in her 1805 configuration. These require new propulsion,
-steering, hull and crew capabilities and are not available models yet.
+vessel's live state. Niña and **HMS Victory (1805)** are playable. Choose
+**Ship settings → Vessel**, or [sail Victory](https://healdgar.github.io/caravel-ocean-sim/?ship=victory&boat=1&view=ship).
+Victory has her own 56.69 × 15.85 m hull, three gun decks with an open waist,
+104 represented guns, stern galleries, wheel, boats, stepped masts and fighting
+tops. Eight square sails, three headsails and a gaff spanker use shared posed
+geometry for forces, rendering, running ropes, shadows and wetting. Fore/main/
+mizzen controls operate mast groups; they do not represent individual sail handling.
 
-A second copy of the caravel follows by default. Open **Camera views → View both
+[Victory's source ledger](VICTORY_RESEARCH.md) distinguishes reported dimensions
+and surviving fore-topsail measurements from authored hull offsets, spars and
+rigging. This is an initial game reconstruction, not a digitized Admiralty model
+or calibrated naval simulator. Her hydrostatics integrate her own hull at an
+**authored 8.8 m service draught** (about 4,866 tonnes in this geometry); the reported
+2,162 tons builder's measurement is never used as displacement. Mass, inertia,
+wind shear and canvas incidence drive motion; requested speed supplies no motor
+thrust in sailing mode. Twelve visible sailors represent a working watch; the
+loading manifest accounts for 820 people. Their existing costume set remains
+shared with Niña rather than representing an 1805 uniform reconstruction.
+
+Pinta and Santa María retain planned rig and [reported specification
+profiles](SHIP_MODEL_RESEARCH.md); their geometry and three-ship toggles remain
+pending. The [later vessel roadmap](SHIP_MODELS.md#later-vessel-programme)
+contains the Viking longship, Roman galley and Caribbean canoe. Victory was
+brought forward at the user's request.
+
+A second copy of the selected model follows by default. Open **Camera views → View both
 ships** to frame the pair; **Ship settings → Following ship** disables it, and
 `follower=0` starts with one ship. Shared links preserve the choice. Hull geometry,
 oak textures, crew geometry, the FFT ocean, clouds and weather are shared. Each
@@ -307,6 +327,29 @@ and **Natural dolphin sightings** disables automatic visits. Debug URL options
 are `dolphins=1&dolphinView=1&view=ship`; ordinary share links omit these debug
 flags. Encounters use normal simulation seconds and do not fast-forward sailing.
 
+### Sharks, whales and wet skin
+
+Dolphins, sharks and whales share a wet skin material: a thin water clearcoat
+adds narrow sun glints and sky reflections above the softer skin reflection.
+Highlights follow the actual sun and camera and disappear when sunlight is absent.
+
+A separate, bounded marine encounter occasionally introduces a passing shark or
+an approximately 14 m humpback-like whale. Whale encounters include a full breach,
+reentry splash, fluke dive and periodic blow. The shark swims with lateral tail
+motion; whales beat their horizontal flukes vertically. Bodies and contact effects
+follow the moving FFT ocean. Whales require sixteen metres of clear water; sharks
+require six. Automatic opportunities wait at least fifteen minutes plus an
+exponential interval averaging thirty minutes and are suppressed in severe weather.
+One shark/whale encounter can run alongside the dolphin pod. No wildlife draw is
+submitted when those animals and their remaining surface effects are absent.
+
+Open **Sea settings → Environment & encounters** for **Spot shark**, **Whale
+breach**, **Whale fluke dive**, **Whale blow**, **View marine animal** and **End marine
+encounter**. Natural sightings have a separate switch. Debug links accept
+`shark=1` or `whale=breach|fluke|blow`, plus `marineView=1&view=ship` to frame the
+animal. These are original procedural approximations and authored animation;
+there are no scanned animal assets, biological behavior simulation or wildlife sounds.
+
 ## Share your sea conditions
 
 Open **Sea settings** and adjust the waves and lighting, then select **Copy share
@@ -326,10 +369,24 @@ boat's travelled position.
 
 ### Landfall MVP
 
-Saba uses real Mapzen Terrarium elevation, resampled to a 32 m grid across an
-8.192 km region. Its fixed 34,784-triangle mesh preserves the silhouette throughout
-approach. Generated forest materials and instanced broadleaf crowns supply surface
-detail; they are not aerial imagery or a reconstruction of historical vegetation.
+Saba uses Beeldmateriaal Nederland's 2023 bare-earth LiDAR DTM, area-averaged and
+reprojected from the half-metre source to a 513² grid at 16 m spacing across an
+8.192 km region. Its fixed 104,972-triangle mesh preserves the same relief
+throughout approach. Missing forest ground returns receive recorded interpolation;
+the result is visual terrain, with source CRS/datum and shoreline limitations.
+
+Licensed real aerial imagery supplies one registered 1024² colour seed at 8 m per
+pixel. Gentle infrastructure cleanup and bounded shadow lifting preserve broad
+green interior and exposed brown slopes. These approximate surface colours are
+not calibrated reflectance or an exact reconstruction of historical land cover.
+A derived greenness mask, elevation and slope constrain 1,775 generated trees.
+Four seeded recursive branch/crown variants share stable roots, height, radius
+and shape across three mesh-detail tiers. Distance and hysteresis select detail;
+near/middle instance limits are 192/1024, with overflow retaining the same trees
+in a cheaper tier. All tiers share the regional colour field and wind phase.
+This uses native WebGPU instancing, with no Three.js runtime or camera-seeded
+placement. Species and individual trees are authored approximations.
+
 The same sun, sky, atmospheric extinction and volumetric clouds light the sea,
 ship and land. A cached terrain/cloud shadow field shades the slopes; foreground
 cloud integration stops at terrain, allowing low cloud to veil the mountains.
@@ -343,8 +400,9 @@ All simulation clocks remain unchanged. This is a visual landfall slice: no port
 docking, river currents, voyage compression, terrain streaming or complete grounding
 model yet. The future target remains 15–20 minutes of offshore passage.
 The source packs, licenses, checksums and rebuild instructions live in
-[`assets/world/README.md`](assets/world/README.md). Both single-file builds embed
-the island and world chart. The regular ocean scene does not allocate terrain GPU
+[`assets/world/README.md`](assets/world/README.md). All three distributed HTML
+variants embed the island's height, imagery and vegetation mask plus the world
+chart. The regular ocean scene does not allocate terrain GPU
 resources. The existing automatic 30 FPS resolution target remains active; combined
 land/ocean performance still needs a physical iPhone measurement.
 
@@ -582,14 +640,18 @@ npm run build
 npm test
 ```
 
-The dolphin-surface-effects revision passes **221/221 tests** using installed Chrome on
-macOS/Metal, including geometry, lighting, mobile controls, all three standalone
+The Victory, landfall and marine-encounter revision passes **261/261 tests** using installed Chrome on
+macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
 Model checks preserve the exact Niña mesh/index hashes and verify named attachments,
 shared geometry, planned-model guards, independent crew and bundled license notices.
-Dolphin checks cover contact-gated emission across 10–120 FPS, visible splash/ripple
-geometry, expanding rings, all-wave-band height tracking, occlusion and clearing.
+Dolphin/marine checks cover contact-gated emission across 10–120 FPS, visible
+splash/ripple geometry, expanding rings, all-wave-band height tracking, occlusion,
+clearing, whale breaches/flukes/blows and wet-skin sunlight glints. Victory checks
+cover hull/deck geometry, source dimensions, independent mast groups, wind-driven
+loading, mass/inertia, 48 rig clearance poses, sewn head/yard joints, CPU/GPU cloth
+parity, crew reach/routes, anchor scaling, draft-safe coastal starts and two-ship rendering.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
 in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
 retain their original assertions. This handles native compiler reassociation
@@ -631,7 +693,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The scene supports two identical Niñas and one Saba landfall MVP. Breaking shoreline surf, ports, regional streaming and playable Pinta/Santa María models remain pending.
+- The scene supports two identical Niñas or two Victories and one Saba landfall MVP. Breaking shoreline surf, ports, regional streaming and playable Pinta/Santa María models remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
@@ -662,7 +724,10 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/wetness.js`, `js/wgsl/wetness.js` | Persistent material moisture, spray exposure, cached sea contact and crew probes |
 | `js/clouds.js`, `js/wgsl/clouds.js`, `js/wgsl/cloud-model.js` | Volumetric cloud resources, density and lighting caches, raymarching, and temporal reconstruction |
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
-| `js/caravel.js` | Hull, continuous foredeck, quarterdeck, swivel cannon, lookout, rigging, sails, and helm geometry |
+| `js/caravel.js` | Niña hull, decks, swivel cannon, lookout, lateen rig and helm geometry |
+| `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`, `js/wgsl/victory.js` | Victory construction, shared square/fore-and-aft rig poses, support contact and rope leads |
+| `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and deterministic procedural tree LOD |
+| `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-ui.js` | Bounded wildlife encounters, wet animals, contact effects and debug controls |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |

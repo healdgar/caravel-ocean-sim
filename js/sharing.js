@@ -33,6 +33,7 @@ export function createShareLink(href, settings, boat, cameraMode) {
   };
   url.searchParams.set('boat', cameraMode === 'boat' ? '1' : '0');
   url.searchParams.set('view', cameraMode);
+  if(boat.modelId==='victory')url.searchParams.set('ship','victory');
   url.searchParams.set('propulsion', boat.propulsion === 'sail' ? 'sail' : 'manual');
   for (const [key, value] of Object.entries(settings)) setNumber(key, value);
   for (const [key, param] of Object.entries(BOAT_LINK_KEYS)) setNumber(param, boat[key]);

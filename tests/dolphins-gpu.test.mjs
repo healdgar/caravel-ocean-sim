@@ -87,3 +87,64 @@ test('dolphin bodies and surface effects follow ocean height, reverse depth, and
     assert.equal(fx.occluded,0,JSON.stringify(fx));assert.equal(fx.expired,0,JSON.stringify(fx));assert.equal(fx.cleared,0,JSON.stringify(fx));assert.ok(fx.raised.count>5,JSON.stringify(fx));
   }finally{await browser?.close();server.kill();}
 });
+
+test('wet dolphin skin produces directional sunlight glints while retaining shaded environment reflections',{timeout:120000},async()=>{
+  const server=spawn(process.execPath,['server.mjs','8097'],{cwd:new URL('..',import.meta.url),stdio:['ignore','pipe','inherit']});let browser;
+  try{
+    await once(server.stdout,'data');
+    browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+    const page=await browser.newPage();await page.route('**/__dolphin-glint',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://localhost:8097/__dolphin-glint');
+    const result=await page.evaluate(async()=>{
+      const {DOLPHIN_RENDER}=await import('/js/wgsl/dolphins.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      // Evaluate the production radiance helper directly into float storage:
+      // no exposure, bloom, tonemapping or 8-bit clipping can manufacture a glint.
+      const code=DOLPHIN_RENDER+`
+@group(1)@binding(0)var<storage,read>probeNormals:array<vec4f>;
+@group(1)@binding(1)var<storage,read_write>probeColors:array<vec4f>;
+@compute @workgroup_size(16)fn wetProbe(@builtin(global_invocation_id)i:vec3u){
+ if(i.x>=arrayLength(&probeNormals)){return;}
+ let n=probeNormals[i.x].xyz;let eye=normalize(F.camPos.xyz);let sun=F.sunDir.xyz;
+ let ordinarySpec=vesselSpecular(n,eye,sun,.32,vec3f(.035))*sunIlluminance()*sunVis[0]*step(0.0,sun.y)*max(dot(n,sun),0.0);
+ probeColors[i.x]=vec4f(dolphinSkinRadiance(vec3f(0),n,vec3f(.16,.24,.30)),dot(ordinarySpec,vec3f(.2126,.7152,.0722)));
+}`;
+      const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code}),entryPoint:'wetProbe'}}),B=GPUBufferUsage,T=GPUTextureUsage;
+      const make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
+      const frameData=new Float32Array(96),frame=make(frameData,B.UNIFORM),sun=make(new Float32Array([1,0,0,0]),B.STORAGE);
+      const texture=(layers,color)=>{const t=device.createTexture({size:[1,1,layers],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});for(let i=0;i<layers;i++)device.queue.writeTexture({texture:t,origin:[0,0,i]},new Uint8Array([...color,255]),{bytesPerRow:4},[1,1]);return t;};
+      const trans=texture(1,[245,230,210]),env=texture(6,[30,45,65]),sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
+      const degrees=[0,-3,3,-12,12,-45,45,90,180],normalData=new Float32Array(degrees.flatMap(d=>[Math.sin(d*Math.PI/180),Math.cos(d*Math.PI/180),0,0]));
+      const normals=make(normalData,B.STORAGE),output=device.createBuffer({size:normalData.byteLength,usage:B.STORAGE|B.COPY_SRC}),read=device.createBuffer({size:normalData.byteLength,usage:B.COPY_DST|B.MAP_READ});
+      const scene=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:frame}},{binding:1,resource:trans.createView()},{binding:3,resource:sampler},{binding:4,resource:env.createView({dimension:'cube'})},{binding:5,resource:{buffer:sun}}]});
+      const probes=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:normals}},{binding:1,resource:{buffer:output}}]});
+      async function sample(sunDirection,eyeDirection,{visibility=1,intensity=10}={}){
+        frameData.set(eyeDirection.map(v=>v*10),16);frameData.set([...sunDirection,intensity],32);frameData[73]=.01;
+        device.queue.writeBuffer(frame,0,frameData);device.queue.writeBuffer(sun,0,new Float32Array([visibility,0,0,0]));
+        const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,scene);pass.setBindGroup(1,probes);pass.dispatchWorkgroups(1);pass.end();encoder.copyBufferToBuffer(output,0,read,0,normalData.byteLength);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const colors=Array.from(new Float32Array(read.getMappedRange()));read.unmap();if(colors.some(v=>!Number.isFinite(v)||v<0))throw Error('Dolphin glint produced nonfinite or negative radiance');return degrees.map((_,i)=>colors.slice(i*4,i*4+4));
+      }
+      const cases=[];
+      for(const angle of [30,65,80]){
+        const a=angle*Math.PI/180,s=[Math.sin(a),Math.cos(a),0],v=[-s[0],s[1],0];
+        const lit=await sample(s,v),shadow=await sample(s,v,{visibility:0}),unlit=await sample(s,v,{intensity:0}),changedSun=await sample(v,v),changedView=await sample(s,s);
+        cases.push({angle,lit,shadow,unlit,changedSun,changedView});
+      }
+      const darkness=await sample([0,-1,0],[0,1,0]);
+      for(let i=0;i<6;i++)device.queue.writeTexture({texture:env,origin:[0,0,i]},new Uint8Array([0,0,0,255]),{bytesPerRow:4},[1,1]);
+      const noEnvironment=await sample([0,1,0],[0,1,0],{visibility:0});
+      device.destroy();return {cases,darkness,noEnvironment,errors};
+    });
+    assert.deepEqual(result.errors,[]);
+    const luma=p=>p[0]*.2126+p[1]*.7152+p[2]*.0722;
+    for(const c of result.cases){
+      const highlight=luma(c.lit[0])-luma(c.shadow[0]);
+      assert.ok(highlight>c.lit[0][3]*10,`${c.angle}°: water-film glint must exceed the softer skin lobe`);
+      assert.ok(highlight>(luma(c.lit[3])-luma(c.shadow[3]))*20,`${c.angle}°: glint is concentrated around the reflection direction`);
+      assert.ok(luma(c.lit[0])>luma(c.changedSun[0])*10&&luma(c.lit[0])>luma(c.changedView[0])*10,'sun and view changes move the highlight');
+      assert.ok(luma(c.shadow[0])>.005,'shaded wet skin retains environment lighting');
+      for(let i=0;i<c.shadow.length;i++)for(let channel=0;channel<3;channel++)assert.ok(Math.abs(c.shadow[i][channel]-c.unlit[i][channel])<1e-6,'zero sunlight and occluded sunlight remove the same direct contribution');
+    }
+    assert.ok(luma(result.darkness[0])>.005,'a sun below the horizon does not erase environmental reflections');
+    assert.ok(result.noEnvironment.every(p=>p.slice(0,3).every(c=>Math.abs(c)<1e-7)),'with both direct sunlight and the environment removed, no self-lit glow remains');
+  }finally{await browser?.close();server.kill();}
+});

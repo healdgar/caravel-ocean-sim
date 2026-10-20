@@ -80,7 +80,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let footprint = max(length(dpdx(grainUV)),length(dpdy(grainUV)));
   // Plank seams follow the hull's girth and the cabin's horizontal strakes.
   // Unlike a painted line, their recessed height also breaks the light response.
-  let plankedWall=in.material==15u || (in.material==1u && p.z>=2.699 && p.y<2.23 && abs(in.normalLocal.y)<.3);
+  let paintedWood=hull.rig.w>.5 && (in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u);
+  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && p.z>=2.699 && p.y<2.23 && abs(in.normalLocal.y)<.3);
   let course=select(p.y/.16,in.uv.x*18.0,in.material==15u);
   let board=floor(course);
   let edge=min(fract(course),1.0-fract(course));
@@ -95,7 +96,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let sx = cross(dy,n); let sy = cross(n,dx);
   let det = dot(dx,sx);
   let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
-  let isWood=in.material==0u || in.material==1u || in.material==5u || in.material==6u || in.material==7u || in.material==10u || in.material==14u || in.material==15u || in.material==16u || in.material==17u || in.material==18u;
+  let isWood=paintedWood || in.material==0u || in.material==1u || in.material==5u || in.material==6u || in.material==7u || in.material==10u || in.material==14u || in.material==15u || in.material==16u || in.material==17u || in.material==18u;
   n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
   var albedo = timber * vec3f(1.02,.98,.88);
   var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
@@ -115,6 +116,16 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let edgeAA=max(fwidth(clothEdge),0.0005);
   if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
   if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= .87; }
+  if(hull.rig.w>.5){
+    if(in.material==20u){albedo=vec3f(.009,.008,.006);rough=.88;}
+    if(in.material==21u){albedo=vec3f(.48,.265,.075);rough=.85;}
+    if(in.material==22u){albedo=vec3f(.29,.115,.055);rough=.53;metal=.65;}
+    if(in.material==23u){albedo=vec3f(.68,.65,.55);rough=.86;}
+    if(in.material==24u){albedo=vec3f(.26,.028,.018);rough=.83;}
+    if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.45;metal=.6;}
+    if(in.material==26u){albedo=vec3f(.015,.035,.09);rough=.88;}
+    if(paintedWood){albedo*=mix(.88,1.04,relief)*(1.0-join*.46);}
+  }
   let ropeAA=fwidth(p.x+p.y+p.z);
   if(in.material == 2u || in.material == 12u || in.material==19u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
