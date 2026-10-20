@@ -1,7 +1,8 @@
 import { vesselDeck, HULL_VERTICAL_SCALE } from './hull.js';
-import { shroudGeometry, climbingPoint, workingTacklePoint, RIG_MASTS } from './rigging.js';
+import { shroudGeometry } from './rigging.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { gltfTRS } from './gltf.js';
+import { resolveShipNode } from './ship-models.js';
 
 const CLIMBERS={beatriz:[0,-1],catarina:[1,1]};
 const HANDS={duarte:0,joao:1,isabel:2};
@@ -11,13 +12,10 @@ const deckPoint=(x,z)=>[x,vesselDeck(z),z];
 function physical(p,boat){return [p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12];}
 function homePoint(s){return deckPoint(s.home[0],s.home[1]);}
 function climbRoot(mast,side,rung,boat){
-  const p=climbingPoint(mast,side,rung,boat.sailState?.rig[mast]);p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
+  const p=resolveShipNode(boat,`mast.${['fore','main','mizzen'][mast]}.runner`,{space:'design',side,step:rung});p[0]+=side*.108;p[1]-=.12/HULL_VERTICAL_SCALE;return p;
 }
-function haulStation(mast){
-  if(mast===1)return deckPoint(-.72,2.03);
-  if(mast===2)return deckPoint(.15,4.45);
-  const p=workingTacklePoint(mast,vesselDeck(RIG_MASTS[mast].z)+.75);
-  return deckPoint(p[0]+Math.sign(p[0])*.35,p[2]);
+function haulStation(mast,boat){
+  return resolveShipNode(boat,`station.haul.${['fore','main','mizzen'][mast]}`,{space:'design'});
 }
 function routeTo(s,target){
   // Named corridors stay clear of the hatch, mast heels and aft companionway.
@@ -45,8 +43,8 @@ export function assignCrewWork(company,boat) {
     }
     if(!job)continue;
     job.stage='approach';job.elapsed=0;job.rung=0;job.revision=company.revision;
-    const target=job.kind==='hatch'?deckPoint(0,-2.25)
-      :job.kind==='haul'?haulStation(job.mast)
+    const target=job.kind==='hatch'?resolveShipNode(boat,'station.hatch',{space:'design'})
+      :job.kind==='haul'?haulStation(job.mast,boat)
       :climbRoot(job.mast,job.side,0,boat);
     job.path=routeTo(s,target);job.cursor=0;s.job=job;s.intent='work';s.work=0;
   }

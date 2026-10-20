@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {copyVessel,createVesselProbeState,acceptVesselProbe,stepVessel} from '../js/vessels.js';
+import {bindVesselModel,copyVessel,createVesselProbeState,acceptVesselProbe,stepVessel} from '../js/vessels.js';
+import {getShipModel} from '../js/ship-models.js';
 import {createFollower,steerFollower} from '../js/follower.js';
-import {sailingState} from '../js/sailing.js';
+import {sailingState,advanceSails,sailForces} from '../js/sailing.js';
 
 const RAD=Math.PI/180;
 const source={length:24,beam:7.2,eye:4,heading:118,x:0,z:0,provisionDays:30,cargoTonnes:0,sailFore:1,sailMain:1,sailMizzen:1};
@@ -16,6 +17,48 @@ test('copied vessels preserve dimensions and loading without sharing mutable rig
   acceptVesselProbe(second,b,heights,1,0,second.length,second.beam);
   assert.equal(first.heave,-first.hydrodynamics.sinkage);assert.ok(second.heave>1);assert.equal(a.time,-1);assert.equal(b.time,1);
   assert.equal(acceptVesselProbe(second,b,heights,2,0,second.length,second.beam),false,'stale readback cannot overwrite a newer placement');
+});
+
+test('vessel instances share an immutable model identity while retaining their configured dimensions and load',()=>{
+  const first=bindVesselModel({...source,id:'leader'}),second=copyVessel(first,{id:'follower',distance:0,side:0});
+  assert.equal(first.modelId,'nina');assert.equal(second.modelId,'nina');
+  assert.equal(first.model,getShipModel('nina'));assert.equal(second.model,first.model);
+  assert.ok(Object.isFrozen(first.model));
+  assert.equal(first.length,source.length);assert.equal(first.beam,source.beam);
+  assert.equal(second.length,source.length);assert.equal(second.beam,source.beam);
+  assert.equal(second.provisionDays,source.provisionDays);assert.equal(second.cargoTonnes,source.cargoTonnes);
+});
+
+test('planned models cannot silently acquire Nina geometry or mutate an existing vessel identity',()=>{
+  const boat=bindVesselModel({...source}),model=boat.model;
+  for(const id of ['pinta','santa-maria']){
+    assert.equal(getShipModel(id).status,'planned');
+    assert.throws(()=>bindVesselModel(boat,id),/planned|not.*ready|not.*playable|unavailable/i);
+    assert.equal(boat.model,model);assert.equal(boat.modelId,'nina');
+    assert.throws(()=>copyVessel({...source,modelId:id}),/planned|not.*ready|not.*playable|unavailable/i);
+  }
+  assert.throws(()=>bindVesselModel(boat,'unknown-ship'),/unknown|not.*found/i);
+  assert.equal(boat.model,model);
+});
+
+test('copying a vessel copies its requested configuration without transplanting a running simulation',()=>{
+  const first=copyVessel(source,{id:'leader',distance:0,side:0});
+  Object.assign(first,{speed:6,surgeVelocity:2,leewayVelocity:.2,yawRate:.03,rudder:12,rudderTarget:12,
+    externalForce:{x:100,z:200,yaw:300},crewSailRate:new Float64Array([.3,.6,.9])});
+  advanceSails(first,.1,9,.7);sailForces(first,9,.7,2);
+  const firstRig=sailingState(first),firstSet=Array.from(firstRig.set),firstForces=[firstRig.forward,firstRig.side];
+  const second=copyVessel(first,{id:'follower',distance:0,side:0}),secondRig=sailingState(second);
+  assert.equal(first.id,'leader');assert.equal(second.id,'follower');
+  assert.equal(second.speed,first.speed);assert.equal(second.propulsion,'sail');
+  assert.equal(second.surgeVelocity,undefined);assert.equal(second.leewayVelocity,undefined);
+  assert.equal(second.externalForce,undefined);assert.equal(second.crewSailRate,undefined);
+  assert.equal(second.rudder,0);assert.equal(second.rudderTarget,0);assert.equal(second.yawRate,0);
+  assert.notEqual(second.hydrodynamics,first.hydrodynamics);
+  assert.notEqual(secondRig.geometry,firstRig.geometry);assert.notEqual(secondRig.set,firstRig.set);
+  assert.notEqual(secondRig.panelSide,firstRig.panelSide);assert.notEqual(secondRig.panelMoment,firstRig.panelMoment);
+  second.sailFore=0;advanceSails(second,1,15,2);sailForces(second,15,2,0);
+  assert.deepEqual(Array.from(firstRig.set),firstSet,'working one ship cannot change another ship\'s canvas');
+  assert.deepEqual([firstRig.forward,firstRig.side],firstForces,'force queries remain per ship');
 });
 
 test('follower policy has no authority to translate, accelerate or rotate a ship',()=>{

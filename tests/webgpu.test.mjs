@@ -232,7 +232,8 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
   // Hold the ocean flat to isolate indexing/resolve from Metal's FFT rounding;
   // travelling-wave and rough-sea fixtures independently cover the wave fields.
   const rawMesh=source
-    .replace('indexCaravelMesh(createCaravelMesh())','((vertices)=>({vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)}))(createCaravelMesh())')
+    .replace("import { createShipAssetCache } from './ship-mesh.js';","import { createShipAssetCache } from './ship-mesh.js';\nimport { createCaravelMesh } from './caravel.js';")
+    .replace("shipAssets.get('nina')","((asset,vertices)=>({...asset,vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)}))(shipAssets.get('nina'),createCaravelMesh())")
     .replace(/prowPass\.setIndexBuffer\(caravelIndexBuffer,\s*'uint32'\);\s*prowPass\.drawIndexed\(caravelIndices\.length\);/,'prowPass.draw(caravelMesh.length/9);');
   const copiedResolve=input=>input
     .replace('drawProw?waterView:hdrView','hdrView')
@@ -241,6 +242,7 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
     .replace("const filterPass = enc.beginComputePass",'enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);\n      const filterPass = enc.beginComputePass');
   const legacy=copiedResolve(rawMesh),indexedCopy=copiedResolve(source);
   assert.ok(legacy.includes('prowPass.draw(caravelMesh.length/9);'),'legacy fixture must use the unindexed ship draw');
+  assert.ok(legacy.includes('createCaravelMesh())'),'legacy fixture must replace the asset cache geometry with raw vertices');
   assert.ok(indexedCopy.includes('enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);'),'copy fixture must retain the intermediate texture copy');
   const captures=[];
   for(const mode of ['legacy','indexedCopy','optimized','profiled']){
@@ -2415,7 +2417,7 @@ test('selected audio decodes, loops, delays thunder, mutes and resumes through W
 test('two vessels share global water but own transforms, probes, wakes, rigs and shadows', {timeout:180000}, async()=>{
   const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace(
     'vessels[0].boat=boat;vessels[1].boat=companion;',
-    'vessels[0].boat=boat;vessels[1].boat=companion;window.fleetFixture={vessels,boat,companion,followerAI};');
+    'vessels[0].boat=boat;vessels[1].boat=companion;window.fleetFixture={vessels,boat,companion,followerAI,shipAsset,shipAssets};');
   const page=await browser.newPage({viewport:{width:320,height:240}});
   try{
     await page.addInitScript(instrumentRenderer,{fleet:true});
@@ -2432,13 +2434,18 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     for(let i=0;i<4;i++){await step(page,100);await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));}
     const state=await page.evaluate(()=>{
-      const {vessels,boat,companion}=fleetFixture;
+      const {vessels,boat,companion,shipAsset,shipAssets}=fleetFixture;
       return {separation:Math.hypot(boat.x-companion.x,boat.z-companion.z),sameRig:boat.sailState===companion.sailState,
+        sameModel:boat.model===companion.model&&boat.model===shipAsset.model,modelId:boat.modelId,
+        cachedAsset:shipAssets.get(boat.modelId)===shipAsset,groups:shipAsset.groups.length,
+        companyModels:vessels.map(v=>v.crew.state.modelId),
         sameHull:vessels[0].hullUBO===vessels[1].hullUBO,sameWetness:vessels[0].wetness.state===vessels[1].wetness.state,
         sameCrewMesh:vessels[0].crew.assets.geometry[0].vertex===vessels[1].crew.assets.geometry[0].vertex,
         probes:vessels.map(v=>v.probe.state.time),positions:vessels.map(v=>Array.from(v.hullData.subarray(16,19)))};
     });
     assert.ok(state.separation>50);assert.equal(state.sameRig,false);assert.equal(state.sameHull,false);assert.equal(state.sameWetness,false);assert.equal(state.sameCrewMesh,true);
+    assert.equal(state.sameModel,true);assert.equal(state.modelId,'nina');assert.equal(state.cachedAsset,true);
+    assert.ok(state.groups>100);assert.deepEqual(state.companyModels,['nina','nina']);
     assert.ok(state.probes.every(t=>t>=0));assert.notDeepEqual(state.positions[0],state.positions[1]);
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.locator('#follower-toggle').uncheck();frame=await step(page,100);

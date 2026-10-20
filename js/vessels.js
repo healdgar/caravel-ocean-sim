@@ -1,6 +1,16 @@
 import { boatHydrodynamics, boatTargets, boatWaveAttitude, boatWaveSlope, stepBoatSurge, stepBoatSteering, boatSpring } from './boat.js';
+import { requirePlayableShipModel } from './ship-models.js';
 
 const AXES=['heave','pitch','roll'];
+
+// Model definitions are shared and immutable; all live state remains on a boat.
+// Reject unfinished variants before attaching an identity that their renderer
+// and physical model cannot yet satisfy.
+export function bindVesselModel(boat,modelId=boat.modelId??'nina'){
+  const model=requirePlayableShipModel(modelId);
+  boat.modelId=model.id;boat.model=model;
+  return boat;
+}
 
 // Mutable simulation state never aliases the source ship's rig, crew or probe.
 export function copyVessel(source,{id='companion',distance=source.length*2.8,side=source.length*1.5}={}){
@@ -12,6 +22,7 @@ export function copyVessel(source,{id='companion',distance=source.length*2.8,sid
     x:source.x-Math.sin(h)*distance+Math.cos(h)*side,z:source.z+Math.cos(h)*distance+Math.sin(h)*side,
     rudder:0,rudderTarget:0,yawRate:0,heave:0,pitch:0,roll:0,revision:0,
     target:{heave:0,pitch:0,roll:0},waveSlopeX:0,waveSlopeZ:0,waveSampleTime:-1,waveRevision:-1};
+  bindVesselModel(boat,source.modelId??'nina');
   boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes);
   boat.heave=-boat.hydrodynamics.sinkage;
   return boat;

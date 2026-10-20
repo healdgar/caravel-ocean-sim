@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js'];
-const order = ['js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/sail-aerodynamics.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/anchor.js', 'js/dolphin-state.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/caravel.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
+const order = ['js/rig-definition.js', 'js/models/nina.js', 'js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/ship-models.js', 'js/sail-aerodynamics.js', 'js/sailing.js', ...wgslModules, 'js/boat.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/anchor.js', 'js/dolphin-state.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/caravel.js', 'js/ship-mesh.js', 'js/gltf.js', 'js/crew-work.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
 const stripModuleSyntax = (src) => src
   .replace(/"assets\/audio\/([a-z0-9/-]+)\.mp3"/g, (_, id) => JSON.stringify('data:audio/mpeg;base64,' + fs.readFileSync(path.join(root, 'assets/audio', id + '.mp3')).toString('base64')))
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
@@ -25,8 +25,9 @@ const stripModuleSyntax = (src) => src
   .replaceAll("'assets/world/saba/canopy.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/canopy.png')).toString('base64')))
   .replaceAll("'assets/world/land.json'", () => JSON.stringify('data:application/json;base64,' + fs.readFileSync(path.join(root, 'assets/world/land.json')).toString('base64')));
 
+const license = fs.readFileSync(path.join(root, 'LICENSE'), 'utf8');
 const notices = fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8');
-const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace('</head>', () => '<!--\n' + notices + '\n-->\n</head>');
+const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace('</head>', () => '<!--\n' + license + '\n' + notices + '\n-->\n</head>');
 const SCRIPT_TAG = '<script type="module" src="js/main.js"></script>';
 const write = (name, html) => {
   fs.writeFileSync(path.join(root, name), html);

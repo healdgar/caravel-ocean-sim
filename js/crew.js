@@ -1,27 +1,31 @@
 import { loadCrewGLB, gltfTRS } from './gltf.js';
-import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_STATION_Z, HELM_TILLER_DISTANCE, tillerPoint } from './hull.js';
+import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
+import { NINA_DESIGN } from './models/nina.js';
+import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
-export const CREW_ROSTER = [
-  {id:'ines',name:'Inês',sex:'female',role:'Captain',x:-.8,z:4.5,route:[4.5,4.5],yaw:Math.PI},
-  {id:'tomas',name:'Tomás',sex:'male',role:'Mate',x:.8,z:3.3,route:[3.3,3.3],yaw:Math.PI},
-  {id:'beatriz',name:'Beatriz',sex:'female',role:'Boatswain',x:-1.05,z:-2.1,route:[-2.1,-1.3]},
-  {id:'duarte',name:'Duarte',sex:'male',role:'Foremast hand',x:1.05,z:-1.4,route:[-2.1,-1.3]},
-  {id:'joao',name:'João',sex:'male',role:'Mainmast hand',x:-1.1,z:-.45,route:[-.45,.25]},
-  {id:'catarina',name:'Catarina',sex:'female',role:'Mainmast hand',x:1.1,z:.2,route:[-.45,.25]},
-  {id:'leonor',name:'Leonor',sex:'female',role:'Sailmaker',x:-1.1,z:1.25,route:[1.15,1.85]},
-  {id:'rui',name:'Rui',sex:'male',role:'Carpenter',x:-.25,z:1.8,route:[1.8,1.8],yaw:Math.PI},
-  {id:'maria',name:'Maria',sex:'female',role:'Lookout',x:.65,z:-4.7,route:[-4.7,-4.7],yaw:Math.PI},
-  {id:'afonso',name:'Afonso',sex:'male',role:'Foredeck hand',x:-.65,z:-4.65,route:[-4.65,-4.65],yaw:Math.PI},
-  {id:'isabel',name:'Isabel',sex:'female',role:'Mizzen hand',x:-.75,z:3.25,route:[3.25,3.25]},
-  {id:'pedro',name:'Pedro',sex:'male',role:'Helmsman',x:0,z:HELM_STATION_Z,route:[HELM_STATION_Z,HELM_STATION_Z],yaw:0},
+const CREW_IDENTITIES = [
+  {id:'ines',name:'Inês',sex:'female',role:'Captain'},
+  {id:'tomas',name:'Tomás',sex:'male',role:'Mate'},
+  {id:'beatriz',name:'Beatriz',sex:'female',role:'Boatswain'},
+  {id:'duarte',name:'Duarte',sex:'male',role:'Foremast hand'},
+  {id:'joao',name:'João',sex:'male',role:'Mainmast hand'},
+  {id:'catarina',name:'Catarina',sex:'female',role:'Mainmast hand'},
+  {id:'leonor',name:'Leonor',sex:'female',role:'Sailmaker'},
+  {id:'rui',name:'Rui',sex:'male',role:'Carpenter'},
+  {id:'maria',name:'Maria',sex:'female',role:'Lookout'},
+  {id:'afonso',name:'Afonso',sex:'male',role:'Foredeck hand'},
+  {id:'isabel',name:'Isabel',sex:'female',role:'Mizzen hand'},
+  {id:'pedro',name:'Pedro',sex:'male',role:'Helmsman'},
 ];
+// Identity and costume are reusable; home stations belong to the ship layout.
+export const CREW_ROSTER = CREW_IDENTITIES.map(person=>({...person,...NINA_DESIGN.crewStations[person.id]}));
 export const CAPTAIN_ORDERS = [
   {id:'full',label:'Make full sail',detail:'Set all canvas. Speed follows the wind.',sails:[1,1,1]},
   {id:'reduced',label:'Reduce sail',detail:'Bring each sail group to half canvas.',sails:[.5,.5,.5]},
@@ -51,8 +55,10 @@ const CREW_APPEARANCES={
 };
 const crewLinearColour=rgb=>rgb.map(byte=>{const v=byte/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
 export const CREW_ACTOR_FLOATS=36;
-export function createCompany(policy=deckhandDecision) {
-  return {order:'watch',revision:0,pending:false,crew:CREW_ROSTER.map((person,i)=>{
+export function createCompany(policy=deckhandDecision,modelId='nina') {
+  const model=requirePlayableShipModel(modelId);
+  return {modelId: model.id,order:'watch',revision:0,pending:false,crew:CREW_ROSTER.map((identity,i)=>{
+    const person={...identity,...model.crewStations[identity.id]};
     const s=createDeckhand(policy);Object.assign(s,person,{route:[...person.route],target:person.route[1],wait:i*.37,
       time:i*.43,walkTime:i*.27,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
@@ -137,17 +143,17 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   s.walkTime+=dt*.8; // Authored stride cadence, independent of delivered FPS.
   if(s.role==='Helmsman'){
-    const grip=tillerPoint(boat);s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-HELM_TILLER_DISTANCE)/lengthScale;s.yaw=0;
+    const grip=resolveShipNode(boat,'helm.grip');s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-HELM_TILLER_DISTANCE)/lengthScale;s.yaw=0;
     s.position.set([grip[0],hullDeck(s.z)*HULL_VERTICAL_SCALE+.028,grip[2]-HELM_TILLER_DISTANCE]);
   }else s.position.set([s.x*boat.beam/3.6,(s.company?vesselDeck(s.z):hullDeck(s.z))*HULL_VERTICAL_SCALE+.028,s.z*lengthScale]);
   s.rotation.set([0,Math.sin(s.yaw/2),0,Math.cos(s.yaw/2)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
 }
 
-export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null}) {
+export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina'}) {
   const models=shared?.models??await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
-  })),B=GPUBufferUsage,state=createCompany();
+  })),B=GPUBufferUsage,state=createCompany(undefined,modelId);
   if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const layout=[{arrayStride:60,attributes:[

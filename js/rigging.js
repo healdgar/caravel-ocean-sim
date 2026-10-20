@@ -1,5 +1,6 @@
 import { deckHalfWidth, vesselDeck, HULL_VERTICAL_SCALE, QUARTERDECK_START } from './hull.js';
 import { LATEEN_RIG_PLATE, rigPlatePoint } from './rig-plan.js';
+import { NINA_DESIGN } from './models/nina.js';
 
 // Keep the converted rig's supports with its future model. Active mast positions
 // and heights come from the same orthographic plate as the lateen canvas.
@@ -28,7 +29,7 @@ export function shroudPoint(mast,side,rung,across=.5,pose=null) {
 export function climbingPoint(mast,side,step,pose=null){return shroudPoint(mast,side,step,.5,pose);}
 
 // Working halyard leads terminate beside the assigned deck hands.
-export const SAIL_TACKLES = [{mast:0,x:1.05,z:-1.4},{mast:1,x:-1.1,z:-.45},{mast:2,x:-.4,z:4.55}];
+export const SAIL_TACKLES = NINA_DESIGN.tackles;
 export function tacklePoint(mast,height){
   const t=SAIL_TACKLES[mast],m=RIG_MASTS[mast],side=Math.sign(t.x);
   const bottom=[t.x+side*.25,vesselDeck(t.z)+.25,t.z];

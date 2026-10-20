@@ -16,13 +16,13 @@ import { LANDFALL_VIEWS } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
 import { createAdaptiveResolution } from './resolution.js';
-import { copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
+import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower } from './follower.js';
 import { createVesselShadows, createSceneShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createSurfaceWetness } from './wetness.js';
-import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
+import { createShipAssetCache } from './ship-mesh.js';
 import { crewWorkLabel } from './crew-work.js';
 import { createCrew, CAPTAIN_ORDERS } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
@@ -356,7 +356,9 @@ async function main() {
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
     multisample: { count: MSAA },
   });
-  const {vertices:caravelMesh,indices:caravelIndices} = indexCaravelMesh(createCaravelMesh());
+  const shipAssets=createShipAssetCache();
+  const shipAsset=shipAssets.get('nina');
+  const {vertices:caravelMesh,indices:caravelIndices} = shipAsset;
   const caravelBuffer = mkBuf(caravelMesh.byteLength, GU.VERTEX | GU.COPY_DST, 'caravel geometry');
   device.queue.writeBuffer(caravelBuffer, 0, caravelMesh);
   const caravelIndexBuffer=mkBuf(caravelIndices.byteLength,GU.INDEX|GU.COPY_DST,'caravel indices');
@@ -383,7 +385,7 @@ async function main() {
   const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness,targets:sceneShadows.layer(0)});
   const oceanShadows=sceneShadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let crew=null,crewError='';
-  try { crew=await createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA}); }
+  try { crew=await createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,modelId:shipAsset.model.id}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe });
@@ -395,7 +397,7 @@ async function main() {
   const companionWetness=await createSurfaceWetness({device,mesh:caravelMesh,hullUBO:companionHullUBO,frameUBO,computePipe});
   const companionShadows=await createVesselShadows({device,hullUBO:companionHullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness:companionWetness,targets:sceneShadows.layer(1)});
   let companionCrew=null;
-  try{companionCrew=await createCrew({device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets});}
+  try{companionCrew=await createCrew({device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
   catch(error){console.warn('Companion crew initialization:',error);}
   const companionInteraction=await createWaterInteraction({device,frameUBO,hullUBO:companionHullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe});
   companionInteraction.setShadows(companionShadows);
@@ -625,6 +627,7 @@ async function main() {
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
+  bindVesselModel(boat);
   boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes);
   boat.heave=-boat.hydrodynamics.sinkage;
   const companion=copyVessel(boat),followerAI=createFollower();

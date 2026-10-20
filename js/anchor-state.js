@@ -1,6 +1,6 @@
 import { boatForwardSpeed, boatRotate, KNOT_TO_MPS } from './boat.js';
-import { HULL_VERTICAL_SCALE, anchorCathead } from './hull.js';
 import { ISLAND } from './terrain-model.js';
+import { resolveShipNode } from './ship-models.js';
 
 export const FATHOM_METRES = 1.8288;
 // Gameplay equipment assumptions, not measurements of a particular replica.
@@ -12,8 +12,8 @@ export const metresToFathoms = metres=>metres/FATHOM_METRES;
 
 // Port bow cathead/fairlead, just outside the sheer. All dimensions in metres.
 export function anchorFairlead(boat) {
-  const p=anchorCathead(-1).fairlead,out=[0,0,0];
-  boatRotate(out,p[0]*boat.beam/3.6,p[1]*HULL_VERTICAL_SCALE,p[2]*boat.length/12,
+  const p=resolveShipNode(boat,'anchor.port.fairlead'),out=[0,0,0];
+  boatRotate(out,p[0],p[1],p[2],
     (boat.heading??0)*Math.PI/180,boat.pitch??0,boat.roll??0);
   return {x:(boat.x??0)+out[0],y:(boat.heave??0)+out[1],z:(boat.z??0)+out[2]};
 }

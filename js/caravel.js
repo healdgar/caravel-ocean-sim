@@ -20,10 +20,17 @@ export function indexCaravelMesh(mesh) {
 
 // Timber in the original 12 x 3.6 design frame; the shared hull transform makes
 // the default vessel 20 x 6 m, with matching height, draft and sail dimensions.
-export function createCaravelMesh({parts}={}) {
+export function createCaravelMesh({parts,groups}={}) {
   const out=[];
   // Optional local inspection data; the renderer keeps the original flat mesh.
-  const part=(name,start)=>{if(parts)parts.set(name,new Float32Array(out.slice(start)));};
+  // Groups are named, potentially nested inspection ranges, not a complete
+  // partition. Ranges address raw vertices (nine floats each). Indexing retains
+  // triangle order, so the same first/count become index-buffer offsets.
+  const group=(id,nodeId,start,motion)=>{
+    if(groups && out.length>start)groups.push({id,nodeId,firstVertex:start/9,vertexCount:(out.length-start)/9,...(motion&&{motion})});
+  };
+  const part=(name,start)=>{if(parts)parts.set(name,new Float32Array(out.slice(start)));group(name,'hull',start);};
+  const mastNames=['fore','main','mizzen'];
   const add=(a,b)=>a.map((v,i)=>v+b[i]);
   const sub=(a,b)=>a.map((v,i)=>v-b[i]);
   const mul=(a,s)=>a.map(v=>v*s);
@@ -100,14 +107,18 @@ export function createCaravelMesh({parts}={}) {
   const deck=hullDeck;
   const stations=[...Array.from({length:113},(_,i)=>-6.4+i*12/112),QUARTERDECK_START].sort((a,b)=>a-b);
   // Fine individual deck boards with a recessed continuous caulk bed.
+  const deckPlanksStart=out.length;
   for(let x=-1.8;x<1.8;x+=0.145)for(let z=5.6;z>-6.4;z-=0.16){
     const end=Math.max(-6.4,z-0.16),l=Math.max(x,-width(z)+.075,-width(end)+.075),r=Math.min(x+.140,width(z)-.075,width(end)-.075);
     if(r>l)deckBoard(l,r,deck(z),z,deck(end),end,Math.round((x+1.8)/.145));
   }
+  group('deck.main.planks','deck.main',deckPlanksStart);
+  const deckBedStart=out.length;
   for(let i=0;i<stations.length-1;i++){
     const z0=stations[i+1],z1=stations[i];
     quad([-width(z0),deck(z0)-0.025,z0],[width(z0),deck(z0)-0.025,z0],[width(z1),deck(z1)-0.025,z1],[-width(z1),deck(z1)-0.025,z1],4);
   }
+  group('deck.main.bed','deck.main',deckBedStart);
   for(const side of [-1,1]){
     // Continuous beveled cap rail sweep: no overlapping end-caps at joints.
     const railRing=[[-0.095,-0.035],[-0.08,-0.055],[0.08,-0.055],[0.105,-0.03],[0.105,0.035],[0.08,0.055],[-0.08,0.055],[-0.095,0.035]];
@@ -144,6 +155,7 @@ export function createCaravelMesh({parts}={}) {
 
     }
     part(`bulwark:${side}`,bulwarkStart);
+    const bulwarkFramesStart=out.length;
     for(let z=5.3;z>-6.15;z-=0.82){
       if(z>=QUARTERDECK_START)continue;
       const x=side*(width(z)-0.065),y=vesselDeck(z);
@@ -157,8 +169,10 @@ export function createCaravelMesh({parts}={}) {
         tube([x-side*0.12,y+0.5,z-0.1],[x-side*0.12,y+0.5,z+0.1],0.026,1,0.02);
       }
     }
+    group(`bulwark.frames:${side}`,'hull',bulwarkFramesStart);
   }
   // Continuous foredeck follows the sheer, as in the reconstruction plan.
+  const bowStart=out.length;
   beam([0,.65,-6.35],[0,deck(-6.4)+.7,-6.48],.12,.16,5);
   tube([0,1.17,-4.9],[0,2.05,-8.4],0.145,1,0.045,28);
   for(const side of [-1,1]){
@@ -170,20 +184,29 @@ export function createCaravelMesh({parts}={}) {
     torus([0,1.17+t*.88,-6.1-i*.038],.145-.1*t+.004,.015,2,[0,.88,-3.5],32,8);
   }
   for(let turn=0;turn<5;turn++)torus([0.86,deck(-3.2)+0.025,-3.2],0.13+turn*0.028,0.013,2,'y',48);
+  group('bow.structure','hull',bowStart);
   // Main-deck grating and its weathered frame.
+  const hatchFrameStart=out.length;
   for(const x of [-0.48,0.48])beam([x,deck(-3.0)+0.03,-2.65],[x,deck(-3.6)+0.03,-3.65],0.075,0.09,1);
   for(const z of [-2.65,-3.65])beam([-0.48,deck(z)+0.03,z],[0.48,deck(z)+0.03,z],0.075,0.09,6);
   for(let x=-0.4;x<0.45;x+=0.10)beam([x,deck(-2.68),-2.68],[x,deck(-3.62),-3.62],0.027,0.035,1);
   for(let z=-2.75;z>-3.65;z-=0.12)beam([-0.43,deck(z)+0.016,z],[0.43,deck(z)+0.016,z],0.025,0.025,6);
+  group('hatch.frame','deck.main',hatchFrameStart);
+  const hatchCoverStart=out.length;
   quad([-.44,deck(-2.65)+.085,-2.65],[.44,deck(-2.65)+.085,-2.65],
     [.44,deck(-2.65)+.085,-3.61],[-.44,deck(-2.65)+.085,-3.61],18);
+  group('hatch.cover','hull',hatchCoverStart,{type:'hatch'});
+  const foreBittsStart=out.length;
   for(const x of [-0.35,0.35])beam([x,vesselDeck(-4.8),-4.8],[x,vesselDeck(-4.8)+0.36,-4.8],0.11,0.11,5);
   beam([-0.5,vesselDeck(-4.8)+0.28,-4.8],[0.5,vesselDeck(-4.8)+0.28,-4.8],0.1,0.1,6);
+  group('deck.fore.bitts','deck.main',foreBittsStart);
   // Direct wooden tiller: rigidly keyed to the rudder stock, below quarterdeck.
+  const tillerStart=out.length;
   tube([0,.95,TILLER_PIVOT[2]],TILLER_PIVOT,.065,3,.065,16);
   beam(TILLER_PIVOT,TILLER_HANDLE,.105,.09,7);
   tube([-.09,TILLER_PIVOT[1],TILLER_PIVOT[2]],
     [.09,TILLER_PIVOT[1],TILLER_PIVOT[2]],.045,8,.045,12);
+  group('helm.tiller','helm.tiller',tillerStart,{type:'tiller'});
 
   // Full planked hull, from the sharp stem to the square transom.
   const hullPoint=hullSurfacePoint;
@@ -225,6 +248,7 @@ export function createCaravelMesh({parts}={}) {
     part(`wale:${side}:${offset}`,start);
   }
   // Close the narrow raked stem between the port and starboard planking.
+  const keelStart=out.length;
   for(let k=0;k<12;k++){
     const a=sectionAngle(-6.4,k),b=sectionAngle(-6.4,k+1);
     quad(hullPoint(-6.4,a),hullPoint(-6.4,Math.PI-a),hullPoint(-6.4,Math.PI-b),hullPoint(-6.4,b),16);
@@ -235,14 +259,18 @@ export function createCaravelMesh({parts}={}) {
     const stem=t=>{const p=hullPoint(-6.4,t*Math.PI/2);return [0,p[1],p[2]-.025];};
     beam(stem(i/24),stem((i+1)/24),.09,.13,16);
   }
+  group('hull.keel-stem','hull',keelStart);
   const transomStart=out.length;
   for(let k=0;k<24;k++){
     const a=sectionAngle(stations.at(-1),k),b=sectionAngle(stations.at(-1),k+1);
     tri([0,deck(5.6),5.6],hullPoint(5.6,a),hullPoint(5.6,b),1);
   }
   part('transom',transomStart);
+  const rudderStart=out.length;
   tube([0,-HULL_DRAFT-.05,5.68],[0,0.95,5.68],0.055,3,0.055,16);
   beam([0,-HULL_DRAFT+.10,6.05],[0,-0.1,6.05],0.72,0.075,14);
+  group('helm.rudder','hull',rudderStart,{type:'rudder'});
+  const sternFramesStart=out.length;
   for(let i=0;i<24;i++){
     const stern=t=>{const p=hullPoint(5.6,t*Math.PI/2);return [0,p[1],p[2]+.025];};
     beam(stern(i/24),stern((i+1)/24),.12,.13,16);
@@ -255,8 +283,10 @@ export function createCaravelMesh({parts}={}) {
     for(const side of [-1,1])beam([side*.065,y,z+.025],[side*.065,y,5.68],.045,.055,3);
     torus([0,y,5.68],.058,.015,3,'y',16);
   }
+  group('hull.stern-frames','hull',sternFramesStart);
 
   // A broad raised stern follows the hull's taper; all ornament is real geometry.
+  const cabinStart=out.length;
   const zFront=QUARTERDECK_START,zBack=5.6,roof=QUARTERDECK_HEIGHT;
   const cabinWidth=z=>width(z)+0.105;
   for(const [a,b] of [[-cabinWidth(zFront),-.55],[.55,cabinWidth(zFront)]])
@@ -270,6 +300,7 @@ export function createCaravelMesh({parts}={}) {
     railSweep(cabinStations,z=>[side*(cabinWidth(z)-.04),roof-.035,z],.17,.07,1);
   }
   // The afterdeck is planking over a solid caulk bed, with a ceiling and rim.
+  const afterdeckBedStart=out.length;
   for(let i=0;i<cabinStations.length-1;i++){
     const z=cabinStations[i],Z=cabinStations[i+1];
     for(const [y,mat]of [[roof-.018,4],[roof-.075,1]])quad([-cabinWidth(z),y,z],[cabinWidth(z),y,z],[cabinWidth(Z),y,Z],[-cabinWidth(Z),y,Z],mat);
@@ -277,11 +308,14 @@ export function createCaravelMesh({parts}={}) {
   for(const z of [zFront,zBack]){
     beam([-cabinWidth(z),roof-.04,z],[cabinWidth(z),roof-.04,z],.09,.08,1);
   }
+  group('deck.quarter.bed','hull',afterdeckBedStart);
+  const afterdeckPlanksStart=out.length;
   for(let x=-1.7;x<1.7;x+=.145)for(let z=zFront+.045;z<zBack-.045;z+=.15){
     const Z=Math.min(zBack-.045,z+.15),edge=Math.min(cabinWidth(z),cabinWidth(Z))-.125;
     const l=Math.max(-edge,x),r=Math.min(edge,x+.14);
     if(r>l)deckBoard(l,r,roof,z,roof,Z,Math.round((x+1.7)/.145));
   }
+  group('deck.quarter.planks','hull',afterdeckPlanksStart);
   // Wall panels stop at each rectangular light. Glazing is recessed 8 cm;
   // neither solid planking nor the former main-deck rail crosses the openings.
   function windowWall(start,end,centers,point,floor,steeringPort=false){
@@ -338,9 +372,11 @@ export function createCaravelMesh({parts}={}) {
   beam([-.63,2.04,zFront-.025],[.63,2.04,zFront-.025],.08,.08,17);
   for(const y of [roof+.23,roof+.49])beam([-cabinWidth(zBack)+.04,y,zBack],[cabinWidth(zBack)-.04,y,zBack],.09,.07,17);
   for(const x of [-.65,0,.65])beam([x,roof,zBack],[x,roof+.49,zBack],.06,.07,17);
+  group('cabin','hull',cabinStart);
   // Museum Nina reconstruction: four small swivel falconets on the poop rail.
   // Dimensions below are authored at human scale, converted to design units.
   for(const side of [-1,1])for(const z of [3.25,4.9]){
+    const gunStart=out.length;
     const x=side*(cabinWidth(z)-.04),y=roof+.61;
     tube([x,roof,z],[x,y-.08,z],.035,3,.035,10);
     beam([x,y-.14,z-.10],[x,y-.14,z+.10],.04,.045,3);
@@ -361,9 +397,11 @@ export function createCaravelMesh({parts}={}) {
     for(const t of [.15,.35,.72]){const p=add(breech,mul(sub(muzzle,breech),t));tube(add(p,mul(axis,-.018)),add(p,mul(axis,.018)),.068-t*.02,3,.068-t*.02,12);}
     beam(breech,[x-side*.52,y-.10,z],.028,.028,3);
     beam([x-side*.13,y-.065,z],[x-side*.13,y+.075,z],.07,.10,3);
+    group(`gun:${side}:${z}`,'hull',gunStart);
   }
 
   // Companionway steps clear the mizzen and mainmast shrouds.
+  const stairsStart=out.length;
   const aftStepFloor=deck(1.5),aftSteps=Math.ceil((roof-aftStepFloor)*HULL_VERTICAL_SCALE/.23);
   for(const x of [.72,1.20]){
     const start=out.length;
@@ -376,6 +414,7 @@ export function createCaravelMesh({parts}={}) {
     beam([.7,y,z],[1.22,y,z],1.14/aftSteps+.025,.04,6);
     part(`stair:tread:${i}`,start);
   }
+  group('stairs','hull',stairsStart);
   // Both catheads remain part of the hull. The working port anchor/rode is a
   // separate animated object; the starboard anchor remains a secured spare.
   for(const side of [-1,1]){
@@ -397,6 +436,7 @@ export function createCaravelMesh({parts}={}) {
   // Single masts, stays and Mediterranean runners; geometry follows the selected plan.
   // Fractional material bits identify moving sails without widening the vertex buffer.
   function squareSail({id,z,top,width:w,height:h,belly}){
+    const name=mastNames[id-1],canvasStart=out.length;
     const tag=id/16;
     const columns=28,rows=20;
     const point=(u,v)=>{
@@ -412,11 +452,17 @@ export function createCaravelMesh({parts}={}) {
       const u=i/columns,U=(i+1)/columns,v=j/rows,V=(j+1)/rows;
       quad(point(u,v),point(U,v),point(U,V),point(u,V),9+tag,[normal(u,v),normal(U,v),normal(U,V),normal(u,V)],[[u,v],[U,v],[U,V],[u,V]]);
     }
+    group(`sail.${name}.canvas`,`sail.${name}`,canvasStart,{type:'square-cloth',sail:id});
+    const yardStart=out.length;
     tube([-w*0.56,top+0.035,z],[w*0.56,top+0.035,z],0.066,10+tag,0.045,18);
+    group(`yard.${name}`,`yard.${name}`,yardStart,{type:'square-yard',sail:id});
+    const edgeStart=out.length;
     for(const u of [0,1])for(let j=0;j<rows;j++)tube(point(u,j/rows),point(u,(j+1)/rows),0.013,19+tag,0.013,8,null,[[u,j/rows],[u,(j+1)/rows]]);
     for(let i=0;i<columns;i++)tube(point(i/columns,1),point((i+1)/columns,1),0.014,19+tag,0.014,8,null,[[i/columns,1],[(i+1)/columns,1]]);
+    group(`sail.${name}.edge`,`sail.${name}`,edgeStart,{type:'sail-edge',sail:id});
   }
   for(const [mast,{z,height,r}] of RIG_MASTS.entries()){
+    const mastStart=out.length;
     tube(mastPoint(mast,deck(z)),mastPoint(mast,height),r,10,r*0.35,24);
     for(let y=1.5;y<height;y+=1.4)torus(mastPoint(mast,y),r*(1-.65*(y-deck(z))/(height-deck(z)))+.003,.012,3,sub(mastPoint(mast,y+1),mastPoint(mast,y)),24,6);
     for(const side of [-1,1]){
@@ -426,22 +472,28 @@ export function createCaravelMesh({parts}={}) {
         tube(add(foot,[-side*.025,0,0]),add(foot,[side*.025,0,0]),.065,16,.065,12);
       }
     }
+    group(`mast.${mastNames[mast]}`,`mast.${mastNames[mast]}`,mastStart);
   }
   for(const t of SAIL_TACKLES){
+    const tackleStart=out.length;
     const bottom=tacklePoint(t.mast,-10);
     tube(add(bottom,[-.07,0,0]),add(bottom,[.07,0,0]),.065,16,.065,12);
     beam(add(bottom,[0,-.25,0]),add(bottom,[0,.06,0]),.075,.09,5);
+    group(`tackle.${mastNames[t.mast]}`,`mast.${mastNames[t.mast]}`,tackleStart);
   }
   // Lower stay attachments at the waterways, without channels.
+  const stayAttachmentsStart=out.length;
   for(const {a:foot,side} of RIG_LINES.filter(line=>line.kind==='stay')){
     tube(add(foot,[-side*.035,0,0]),add(foot,[side*.035,0,0]),.055,16,.055,12);
     beam(add(foot,[0,-.07,0]),add(foot,[0,.015,0]),.045,.05,3);
   }
+  group('rig.stay-attachments','hull',stayAttachmentsStart);
   // No round tops or oversized lookout baskets in this reconstruction.
   for(const sail of SAIL_PLAN)if(sail.kind==='square')squareSail(sail);
   // Lateen courses: the long oblique yard defines the triangular silhouette.
   // The foot clears the open deck; steering takes place below the quarterdeck.
   for(const sail of SAIL_PLAN.filter(s=>s.kind==='lateen')){
+    const name=mastNames[sail.mast],canvasStart=out.length;
     const [la,lb,lc]=sail.corners,resolution=26,lateenTag=sail.id/16;
     const lateen=(u,v)=>{
       const p=add(la,add(mul(sub(lb,la),u),mul(sub(lc,la),v)));
@@ -455,16 +507,25 @@ export function createCaravelMesh({parts}={}) {
       lateenTri([[u,v],[u+d,v],[u,v+d]]);
       if(i+j<resolution-1)lateenTri([[u+d,v],[u+d,v+d],[u,v+d]]);
     }
+    group(`sail.${name}.canvas`,`sail.${name}`,canvasStart,{type:'lateen-cloth',sail:sail.id});
+    const yardStart=out.length;
     tube(add(la,[0,.14,.12]),add(lb,[0,-.12,-.1]),.07,10+lateenTag,.045,18);
+    group(`yard.${name}`,`yard.${name}`,yardStart,{type:'lateen-yard',sail:sail.id});
+    const edgeStart=out.length;
     for(const [a,b] of [[[0,0],[1,0]],[[1,0],[0,1]],[[0,1],[0,0]]])for(let i=0;i<resolution;i++){
       const u=a.map((v,j)=>v+(b[j]-v)*i/resolution),v=a.map((v,j)=>v+(b[j]-v)*(i+1)/resolution);
       tube(lateen(...u),lateen(...v),.015,19+lateenTag,.015,10,null,[u,v],true);
     }
+    group(`sail.${name}.edge`,`sail.${name}`,edgeStart,{type:'sail-edge',sail:sail.id});
   }
-  for(const [index,line] of RIG_LINES.entries())for(let j=0;j<RIG_SEGMENTS;j++){
-    const {a,b,r,r2}=line,t=ropeParameter(line,j),u=ropeParameter(line,j+1);
-    const point=t=>a.map((v,i)=>v+(b[i]-v)*t),radius=t=>r+(r2-r)*t;
-    tube(point(t),point(u),radius(t),12,radius(u),6,null,[[100+index,t],[100+index,u]],true);
+  for(const [index,line] of RIG_LINES.entries()){
+    const ropeStart=out.length;
+    for(let j=0;j<RIG_SEGMENTS;j++){
+      const {a,b,r,r2}=line,t=ropeParameter(line,j),u=ropeParameter(line,j+1);
+      const point=t=>a.map((v,i)=>v+(b[i]-v)*t),radius=t=>r+(r2-r)*t;
+      tube(point(t),point(u),radius(t),12,radius(u),6,null,[[100+index,t],[100+index,u]],true);
+    }
+    group(`rope.${index}.${line.kind}`,`mast.${mastNames[line.mast]}`,ropeStart,{type:'rig-rope',line:index,kind:line.kind});
   }
   return new Float32Array(out);
 }

@@ -1,6 +1,6 @@
 # Land, voyages and river navigation
 
-Design and implementation status, 19 October 2026. The first visual landfall slice
+Design and implementation status, 20 October 2026. The first visual landfall slice
 is implemented: Saba elevation, generated canopy, atmospheric coloration,
 terrain/cloud shadows, approximate shore response and a world overview chart.
 Use `?landfall=approach&boat=1`. This single resident region has no terrain streaming,
@@ -8,6 +8,42 @@ ports or voyage compression. Its underwater skirt and clearance constraint are
 approximations, not hydrographic grounding. See `assets/world/README.md` for provenance.
 The agreed future target is **15–20 minutes of open-ocean sailing per typical voyage**,
 plus coastal navigation, docking and optional encounters.
+
+## Playable scope
+
+Build **selected, meaningful game spaces**, not a detailed navigable globe. A
+lightweight geographic atlas can supply optional world context, expedition
+selection and chart references. It does not commit the game to generating,
+storing or seamlessly sailing every coastline or inland area.
+
+Initial region families are:
+
+- **Virgin Islands:** connected island-hopping waters, channels, approaches and
+  selected ports. Neighboring shores visible across a channel share a continuous
+  local metric region; preserve the real channel geometry.
+- **Columbia and Hudson:** selected contiguous navigable river reaches with
+  meaningful bends, bars, currents, junctions or berths. Their expedition modules
+  are separate from the Caribbean; no geographic portal between them is implied.
+- **Cuba and Hispaniola:** coastal strips arranged around each island's **closed
+  coastline**, with connected sea routes and selected bays, headlands and ports.
+  The interior is inaccessible except where an explicit river or other playable
+  module opens it. Strip width follows the navigation problem and sightlines,
+  rather than one fixed kilometre buffer.
+
+Large-island interiors still need coherent relief and real broad silhouettes for
+all supported viewing directions. Use low-cost elevation/color proxies behind
+the detailed coastal ring, including inland ridges visible from offshore. They
+are visual backdrops, not an implied explorable terrain simulation. Close the
+land surface behind the strips: no holes, abrupt inland cliffs, missing horizon
+mass or exposed module edges when the camera looks inland. Detailed modules join
+this backdrop at fixed, tested seams.
+
+Region boundaries are content and streaming boundaries, not visible scale
+changes. Positions, elevations, shorelines, vegetation and distant proxies must
+agree across them. Islands stay fixed when the destination or approach changes.
+This regional plan replaces any implied whole-Caribbean or whole-world detail
+generation requirement. **Only the single Saba visual MVP exists today**; the
+region families, coastal rings and river reaches below are plans.
 
 ## Core decision
 
@@ -31,17 +67,39 @@ Use downloadable source data to build our own regional assets locally. A map pic
 | [Google Earth](https://www.google.com/help/terms_maps-earth/) / [Google Map Tiles](https://developers.google.com/maps/documentation/tile/policies) | Visual inspection or a separately licensed map visualization | Ordinary access does not grant permission to extract and redistribute terrain/imagery as our game assets. Map Tiles also restricts extraction, offline use and storage. Not the proposed terrain pipeline. |
 | [Apple Maps](https://www.apple.com/legal/internet-services/maps/terms-en.html) | An authorized embedded map, if ever useful | Its terms restrict copying, extraction and derivative use. Not an open terrain or bathymetry source. |
 
-**Recommended combination: OSM outlines + Copernicus land elevation + GEBCO offshore depth + NOAA/local surveys for playable shores.** Use authored detail where the source cannot resolve a navigational feature; label that provenance rather than inventing survey precision.
+**Recommended combination: OSM outlines + Copernicus land elevation + GEBCO offshore depth + NOAA/local surveys for playable shores.** Add suitably licensed orthophotography or satellite imagery for the selected region's ground color and biome distribution. Use authored detail where the source cannot resolve a navigational feature; label that provenance rather than inventing survey precision.
 
 Keep OSM-derived geographic data identifiable and distributable with its required license. ODbL obligations concern the data; they do not automatically impose ODbL on our game code. The [OSMF produced-work guidance](https://osmfoundation.org/wiki/Licence/Community_Guidelines/Produced_Work_-_Guideline) distinguishes rendered works from derivative databases. Retain source snapshots, modifications, license notices and reproducible conversion instructions with each pack.
 
 Modern terrain is a starting point for this historical setting. Author period ports and settlements, remove modern infrastructure, and identify historically reconstructed shorelines separately. Present-day river channels and deltas must not be presented as exact historical reconstructions.
 
+### Imagery-seeded regional assets
+
+Use imagery as a measured starting point for the chosen modules, not as a mandate
+to download or texture the globe. Orthorectify/co-register it with the regional
+elevation and coast data; record acquisition date, resolution, season, color
+processing and uncertainty. Imagery supplies surface appearance; a height model
+supplies terrain geometry and separate depth data supplies navigable water.
+
+Preserve broad real colors and transitions between vegetation, sand, exposed
+rock, wet ground and developed areas. Reduce photographed haze and baked shadows
+before using the result as ground albedo, so our sun, clouds and atmosphere can
+relight it. Do not describe an attractive AI repaint as measured color or infer
+surveyed underwater clearance from water color. Authored historical cleanup and
+generated close-range detail remain separate, reproducible layers.
+
+Derive broad vegetation/biome masks from the imagery, terrain slope/elevation and
+reviewed regional presets. Generate coherent near-shore ground materials,
+forests and rocks from those masks. Retain the same low-frequency color field in
+the distant proxy; approaching a shore must reveal detail without replacing its
+recognizable color or landform. Detail unsupported by the imagery is plausible
+authored generation, not recovered photographic evidence.
+
 ## Space and clocks
 
 | Layer | Representation | Responsibility |
 |---|---|---|
-| Geographic atlas | WGS84 latitude/longitude, source elevations and metadata | Real locations, chart, geographic distances, region lookup |
+| Geographic atlas | Lightweight WGS84 latitude/longitude outlines and source metadata | Optional world context, real locations, chart, distances and region lookup |
 | Playable regions | Local metric coordinates; detailed coastal areas joined by shortened ocean areas | Actual sailing distance, visible terrain, collisions and encounters |
 | Local simulation | Metres and seconds, small coordinates around the active region | Existing ship, waves, wakes, spray, crew and camera |
 | Voyage state | Route, visited areas, elapsed play time and geographic progress | Pacing, encounter opportunities, saves and ETA |
@@ -56,9 +114,9 @@ For a simple offshore corridor, geographic progress is approximately `K × physi
 
 Build mappings before play, with continuous boundaries, positive Jacobians and no folds or overlapping land. Match position and direction across adjacent regions; preserve lengths and bearings in tactical areas. Account for the mapping when translating chart courses and geographic wind/current directions; never scale wind or current strength by `K`. A route graph helps planning and events but does not steer the player: corridors need navigable width, cross-connections and reversible entry from different bearings.
 
-Do not continuously rearrange islands around the selected destination. Turning back or changing destination must preserve the world, chart position and previously seen landmarks. Nearby islands whose tactical regions overlap belong to one region; retain their channels instead of compressing through them. Large islands may require several connected coastal regions. Their inland backdrop can be simplified; important bays, headlands and passages need explicit preservation constraints.
+Do not continuously rearrange islands around the selected destination. Turning back or changing destination must preserve the world, chart position and previously seen landmarks. Nearby islands whose tactical regions overlap belong to one region; retain their channels instead of compressing through them. Large islands use connected coastal regions around a closed island boundary. Their inland backdrop can be simplified, with the real visible ridgelines preserved; important bays, headlands and passages need explicit preservation constraints. An inaccessible interior does not license a gap in the island boundary or a false silhouette.
 
-There is a real compromise: exact global geography, unchanged local scale everywhere and drastically shorter journeys cannot all coexist. Preserve the geographic chart and tactical geometry; allow distortion in empty passage lengths and distant presentation. The mapping and horizon transition must pass a prototype before generating the whole Caribbean.
+There is a real compromise: exact global geography, unchanged local scale everywhere and drastically shorter journeys cannot all coexist. Preserve the geographic chart and tactical geometry; allow distortion in empty passage lengths and distant presentation. The mapping and horizon transition must pass a prototype before expanding the selected regional library.
 
 ### Pacing example
 
@@ -106,7 +164,7 @@ Grounding uses multiple hull/keel contact samples, loaded draft and local bed he
 
 ## Rivers
 
-Use the same regional asset format for Caribbean coasts, the Columbia, Amazon mouth, Mississippi and Hudson. The Columbia is a separate destination pack outside the Caribbean atlas, not a geographically adjacent portal. An expedition selection can load it independently; a later wider-world campaign can connect it by travel.
+Use the same regional asset format for Caribbean coasts and selected Columbia and Hudson reaches. The Amazon mouth and Mississippi remain possible later modules, not a requirement to map every river. River packs are separate expeditions outside the Caribbean atlas, not geographically adjacent portals. An expedition selection can load them independently; a later wider-world campaign can connect them by travel.
 
 River regions add channel beds, longitudinal water-surface slope, tidal influence where applicable, currents, eddies, bank shelter and restricted turning space. Ocean swell fades inland; wind chop and ship wake remain. Flow should steer and carry the vessel independently of where the bow points. Use an authored/derived flow field first; research hydrodynamic simulation only after navigation works.
 
@@ -129,25 +187,60 @@ and `js/wgsl/terrain.js` (rendering), and `js/landfall.js` (entry points/weather
 Future boundaries include `js/world.js` (coordinates/streaming), `js/voyage.js`
 (progress/events), and `js/coastal-water.js` (shared environmental sampling).
 
-Preprocess GIS data locally into versioned `assets/world/<region>/` packs. A manifest records geographic bounds, local origin/projection, mapping version, height/depth tiles, hazards, ports, source dates, license notices, datum transformations and checksums. Keep gameplay edits separate from source snapshots. Save region/mapping versions and voyage state so an asset update cannot silently move a saved ship onto land.
+Preprocess GIS data locally into versioned `assets/world/<region>/` packs. A manifest records geographic bounds, local origin/projection, mapping version, height/depth tiles, hazards, ports, source dates, license notices, datum transformations and checksums. It also identifies playable water/reaches, coastal-strip boundaries, inaccessible interior proxies, explicit inland entrances and adjoining module/seam IDs. Keep gameplay edits separate from source snapshots. Save region/mapping versions and voyage state so an asset update cannot silently move a saved ship onto land.
 
 Stream nearby quadtree terrain tiles; use cheap silhouettes at distance, reusable ground materials, instanced vegetation and simplified distant ports. Decode in a worker and cap resident buffers/textures. Neither the whole Caribbean nor photogrammetric city meshes should be resident. Collision terrain must stay independent of visual LOD and adaptive render resolution.
 
+### Deterministic vegetation and distance detail — planned
+
+Dan Greenheck's [Fractals to Forests / EZ-Tree article](https://tympanus.net/codrops/2025/01/27/fractals-to-forests-creating-realistic-3d-trees-with-three-js/)
+is a useful procedural-tree reference: seeded recursive branches, taper, growth
+direction, adjustable branch tessellation and leaf cards. Its implementation
+does **not** use L-systems. Our distance-LOD and regional placement rules below
+are a proposed adaptation, not a feature established by that article or our MVP.
+
+- Derive stable tree IDs, position, species preset, height, crown size and shape
+  seed from the regional vegetation layer. Generate these independently of
+  camera distance and terrain-tile load order. Give shared-border instances one
+  owner so adjacent strips cannot duplicate or move them.
+- Generate each canonical branch skeleton from its stable seed, then derive
+  lower-detail meshes and impostors from that same tree. Changing tessellation
+  must not consume a different random sequence that changes the tree's form.
+  Reuse a bounded library of variants where appropriate; avoid generating a new
+  detailed mesh for every approaching tree during a frame.
+- At distance, show canopy color/height masses; nearer, use clusters or tree
+  impostors; closest, use instanced trunks, major branches and foliage. Preserve
+  tree locations, physical sizes, canopy coverage and silhouette through the
+  handovers. Distance changes representation, not growth, density or placement.
+- Select detail by projected size and budget, with hysteresis and smooth
+  transitions. Wind phase and broad shadowing remain consistent across levels.
+  Keep collision and navigation envelopes independent of the visual tree LOD.
+- Implement or preprocess the useful algorithms for our **native WebGPU/WGSL**
+  renderer. Do not introduce a Three.js runtime to render the land or trees.
+  Check the project's license before reusing its code or exported assets.
+
+Acceptance includes repeated approaches, turns, region reloads and seam crossings
+with identical tree identities; no popping in position/scale, floating trunks or
+canopy-color jumps; and measured ocean-plus-land cost on iPhone. The existing
+generated Saba canopy does not establish this full tree pipeline.
+
 Initial performance acceptance: measure combined ocean + land on the actual iPhone against the existing 30 fps target. A provisional land budget of 2–4 ms GPU and 64 MB additional resident assets is a starting allocation, not a measured capability or a guarantee that the current frame has that headroom. Bound tile uploads and avoid compilation/decode spikes during approach.
 
-The current single-file ocean demo can remain self-contained. A Caribbean build will use optional static regional assets hosted with Pages, copied by the build with versioned URLs. Loading the map build from `file://` will not be the supported streaming path; use HTTP or an explicitly packaged offline region. No runtime Google/Apple API key is required for the recommended source stack.
+The current single-file ocean demo can remain self-contained. Selected-region builds will use optional static regional assets hosted with Pages, copied by the build with versioned URLs. Loading a streaming region from `file://` will not be supported; use HTTP or an explicitly packaged offline region. No runtime Google/Apple API key is required for the recommended source stack.
 
 ## Implementation sequence and acceptance
 
 Completed precursor: one visual Saba region, selected for a distinctive landfall
 silhouette and a small distributable elevation pack. This validates rendering,
-not the spatial compression or harbor systems below. Puerto Rico/USVI remains a
-candidate for the more demanding bathymetry/port pilot.
+not the spatial compression, coastal rings, tree LOD or harbor systems below. A
+selected Virgin Islands island-hopping module is the preferred next coastal
+pilot; source coverage and navigable depth must be inspected before selecting
+its exact shores and port.
 
 1. **Prove spatial transitions.** Two small test shores, a shortened ocean corridor, geographic chart and reversible approaches. Inspect clear-weather silhouettes, arbitrary turns, alternate approaches and boundary crossings. No whole-world import yet.
-2. **Build one real region.** Puerto Rico/U.S. Virgin Islands is the preferred data pilot because NOAA lists detailed coverage. Select the actual harbor and offshore test leg after inspecting tiles. Add terrain, bed sampling, grounding and one berth. Nearby-island channels remain continuous; they need not demonstrate maximum compression.
+2. **Build one real region.** Select a Virgin Islands harbor and neighboring island leg after inspecting imagery, elevation and bathymetry. Add imagery-seeded terrain/color/biomes, deterministic vegetation detail, bed sampling, grounding and one berth. Nearby-island channels remain continuous; they need not demonstrate maximum compression.
 3. **Prove one complete voyage.** Add a sufficiently separated destination, tune the offshore portion to 15–20 minutes at reference conditions, introduce a weather transition and one optional encounter, and profile on iPhone. Test reduced sail, tacking, drift and a full return voyage.
-4. **Expand the Caribbean.** Automate regional imports, add authored ports/reefs and source audits, then enrich events and docking.
-5. **Add one river reach.** Validate currents, bars, bends, bank collisions and water-level continuity before expanding to entire river packs.
+4. **Expand selected spaces.** Automate repeatable regional imports and source audits. Build connected Cuba/Hispaniola coastal strips with closed coastlines and coherent inland silhouette proxies; add chosen ports, reefs and explicit inland modules. Do not populate their entire interiors or every Caribbean island.
+5. **Add selected river reaches.** Choose a Columbia or Hudson reach; validate currents, bars, bends, bank collisions and water-level continuity before adding more meaningful reaches. Entire river packs remain optional.
 
-Required checks before shipping the first slice: unchanged sailing/animation/wave timing under compression; chart round-trip consistency; no inverted/overlapping region mappings; no skipped hazards; stable visible landmarks and persistent contacts; no wake or FFT phase jump; matching rendered/probed water; tide/draft grounding behavior; cold-cache streaming failure handling; save/reload at boundaries; and native iPhone frame-time measurement. A build or desktop screenshot alone does not establish those results.
+Required checks before shipping the first slice: unchanged sailing/animation/wave timing under compression; chart round-trip consistency; no inverted/overlapping region mappings; no skipped hazards; closed island boundaries and stable visible inland silhouettes; continuous terrain/color/vegetation seams with no visible scale changes; persistent contacts; no wake or FFT phase jump; matching rendered/probed water; tide/draft grounding behavior; cold-cache streaming failure handling; save/reload at boundaries; and native iPhone frame-time measurement. A build or desktop screenshot alone does not establish those results.

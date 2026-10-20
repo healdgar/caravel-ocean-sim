@@ -1,32 +1,33 @@
+import { NINA_DESIGN } from './models/nina.js';
 // Preserve the mesh's original design coordinates; convert to metres at the
 // hull transform. All consumers (including water and crew) share this scale.
-export const HULL_DESIGN_LENGTH = 12;
-export const HULL_DESIGN_BEAM = 3.6;
-export const DEFAULT_BOAT_LENGTH = 20;
-export const DEFAULT_BOAT_BEAM = 6;
-export const HULL_VERTICAL_SCALE = DEFAULT_BOAT_LENGTH / HULL_DESIGN_LENGTH;
+export const HULL_DESIGN_LENGTH = NINA_DESIGN.frame.length;
+export const HULL_DESIGN_BEAM = NINA_DESIGN.frame.beam;
+export const DEFAULT_BOAT_LENGTH = NINA_DESIGN.runtime.length;
+export const DEFAULT_BOAT_BEAM = NINA_DESIGN.runtime.beam;
+export const HULL_VERTICAL_SCALE = NINA_DESIGN.frame.verticalScale;
 export function hullScale(length = DEFAULT_BOAT_LENGTH, beam = DEFAULT_BOAT_BEAM) {
   return [beam / HULL_DESIGN_BEAM, HULL_VERTICAL_SCALE, length / HULL_DESIGN_LENGTH];
 }
-export const HULL_DRAFT = 1.2;
+export const HULL_DRAFT = NINA_DESIGN.hull.draft;
 export const HULL_UNIFORM_BYTES = 208; // transform, controls, lateen poses and pressure sides
-export const HULL_BOW_RAKE = 1.45;
-export const HULL_STERN_RAKE = 0.5;
-export const HULL_SECTION_POWER = 0.65;
+export const HULL_BOW_RAKE = NINA_DESIGN.hull.bowRake;
+export const HULL_STERN_RAKE = NINA_DESIGN.hull.sternRake;
+export const HULL_SECTION_POWER = NINA_DESIGN.hull.sectionPower;
 // Upper decks and helm share one layout with the mesh, camera, and water field.
-export const QUARTERDECK_START = 2.7;
-export const QUARTERDECK_HEIGHT = 2.3;
+export const QUARTERDECK_START = NINA_DESIGN.quarterdeck.start;
+export const QUARTERDECK_HEIGHT = NINA_DESIGN.quarterdeck.height;
 // Direct tiller on the main deck below the quarterdeck. The player observes
 // from above; the helmsman and camera occupy distinct physical stations.
-export const TILLER_PIVOT = [0, 1.38, 5.68];
-export const TILLER_HANDLE = [0, 1.43, 3.95];
-export const HELM_TILLER_DISTANCE = .32;
+export const TILLER_PIVOT = NINA_DESIGN.tiller.pivot;
+export const TILLER_HANDLE = NINA_DESIGN.tiller.handle;
+export const HELM_TILLER_DISTANCE = NINA_DESIGN.tiller.crewDistance;
 export const HELM_STATION_Z = TILLER_HANDLE[2] - HELM_TILLER_DISTANCE / HULL_VERTICAL_SCALE;
 // Captain stands near a forward quarterdeck corner, clear of the
 // centreline masts. These are hull design coordinates, scaled with beam/length.
-export const HELM_EYE_X = 1.1;
-export const HELM_EYE_Z = 3.1;
-export const HELM_EYE_HEIGHT = QUARTERDECK_HEIGHT * HULL_VERTICAL_SCALE + 1.6;
+export const HELM_EYE_X = NINA_DESIGN.helm.x;
+export const HELM_EYE_Z = NINA_DESIGN.helm.z;
+export const HELM_EYE_HEIGHT = QUARTERDECK_HEIGHT * HULL_VERTICAL_SCALE + NINA_DESIGN.helm.eyeAboveDeck;
 export function tillerPoint(boat, along=0) {
   const a=(boat.rudder??0)*Math.PI/180,q=TILLER_HANDLE[2]-TILLER_PIVOT[2]+along/(boat.length/12);
   return [Math.sin(a)*q*boat.beam/3.6,TILLER_HANDLE[1]*HULL_VERTICAL_SCALE,
@@ -40,13 +41,13 @@ export function vesselDeck(z) {
 }
 // One attachment definition for the timber cathead and animated working anchor.
 export function anchorCathead(side=-1) {
-  const z=-4.8,x=side*(deckHalfWidth(z)+.27),y=vesselDeck(z);
-  return {root:[side*(deckHalfWidth(z)-.15),y+.58,z],tip:[x,y+.78,z],fairlead:[x,y+.76,z]};
+  const a=NINA_DESIGN.anchor,z=a.z,x=side*(deckHalfWidth(z)+a.tipOutset),y=vesselDeck(z);
+  return {root:[side*(deckHalfWidth(z)-a.rootInset),y+a.rootRise,z],tip:[x,y+a.tipRise,z],fairlead:[x,y+a.fairleadRise,z]};
 }
 // Authored stations guided by the Martinez-Hidalgo reconstruction's half-breadth
 // and body plans; not digitized offsets or a claim of an exact Nina replica.
-export const HULL_STATIONS = [-6.4,-5.8,-4.8,-3.2,-1.6,0,1.4,2.8,4.2,5.6];
-export const HULL_BREADTHS = [.045,.51,1.08,1.52,1.73,1.77,1.70,1.52,1.29,1.06];
+export const HULL_STATIONS = NINA_DESIGN.hull.stations;
+export const HULL_BREADTHS = NINA_DESIGN.hull.breadths;
 export const HULL_TANGENTS = HULL_STATIONS.map((z,i)=>{
   const slope=j=>(HULL_BREADTHS[j+1]-HULL_BREADTHS[j])/(HULL_STATIONS[j+1]-HULL_STATIONS[j]);
   if(i===0)return slope(0);if(i===HULL_STATIONS.length-1)return slope(i-1);

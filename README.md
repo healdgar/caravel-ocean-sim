@@ -6,6 +6,10 @@ A real-time WebGPU ocean with a wave-driven sailing ship, impact spray, deck was
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
+Project code is **MIT licensed**, copyright © 2026 **Six Cailloux, LLC**, with
+the original author's notice retained. See [LICENSE](LICENSE) and
+[third-party asset/code notices](THIRD_PARTY_NOTICES.md).
+
 [Try the Saba landfall MVP](https://healdgar.github.io/caravel-ocean-sim/?landfall=approach&boat=1).
 Open **Landfall** to choose Horizon, Approach or Near coast, and compare clear air,
 sunset, backlighting and sea mist. The world overview locates Saba; only this island
@@ -208,6 +212,12 @@ Performance disclosure inside Sea settings.
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
 
 ## Following ship, crew voices and encounters
+
+The [ship-model foundation](SHIP_MODELS.md) separates immutable model definitions,
+named attachment points, semantic mesh groups and cached geometry from each
+vessel's live state. Niña is playable; Pinta and Santa María have planned rig and
+[reported specification profiles](SHIP_MODEL_RESEARCH.md). Their meshes, square
+animation/forces and three-ship toggles remain the next stage.
 
 A second copy of the caravel follows by default. Open **Camera views → View both
 ships** to frame the pair; **Ship settings → Following ship** disables it, and
@@ -561,10 +571,12 @@ npm run build
 npm test
 ```
 
-The fleet-and-encounters revision passes **202/202 tests** using installed Chrome on
+The reusable-model revision passes **219/219 tests** using installed Chrome on
 macOS/Metal, including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
+Model checks preserve the exact Niña mesh/index hashes and verify named attachments,
+shared geometry, planned-model guards, independent crew and bundled license notices.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
 in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
 retain their original assertions. This handles native compiler reassociation
@@ -606,7 +618,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The scene is open ocean with an optional fully modeled sailing ship. There is no shoreline, surf, or other vessels.
+- The scene supports two identical Niñas and one Saba landfall MVP. Breaking shoreline surf, ports, regional streaming and playable Pinta/Santa María models remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
