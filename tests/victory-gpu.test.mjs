@@ -84,6 +84,22 @@ test('a selectable Victory fleet renders with independent ship state, correct ca
   }finally{await page.close();}
 });
 
+for(const entry of ['ocean.html','ocean.min.html','docs/index.html'])test(`Victory starts and renders from ${entry}`,{timeout:120000},async()=>{
+  const page=await browser.newPage({viewport:{width:480,height:360}}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('console',msg=>{if(msg.text().includes('init failed')){errors.push(msg.text());page.evaluate(message=>{victoryCheck.startupFailure=message;},msg.text()).catch(()=>{});}});
+  try{
+    await page.addInitScript(instrumentVictory);
+    await page.goto(`${origin}/${entry}?ship=victory&view=ship&follower=0&sunElev=30&clouds=0&w=144&h=108`);
+    await page.waitForFunction(()=>victoryCheck.callback||victoryCheck.startupFailure||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.locator('#err').textContent(),'');assert.deepEqual(errors,[]);
+    assert.equal(await page.evaluate(()=>typeof victoryCheck.callback),'function');
+    const frame=await step(page);assert.equal(frame.render.caravel,1);assert.equal(frame.render.crew,1);assert.equal(frame.render.ocean,1);
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();assert.equal(await page.locator('#ship-model').inputValue(),'victory');
+    assert.deepEqual(errors,[]);
+  }finally{await page.close();}
+});
+
 test('Victory GPU cloth, reefing, support contact and hull-water footprint match the CPU geometry',{timeout:120000},async()=>{
   const page=await browser.newPage();
   try{

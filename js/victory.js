@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-import { VICTORY_DESIGN as D, VICTORY_MASTS as MASTS, VICTORY_SAILS as SAILS,VICTORY_STANDING_LINES,VICTORY_RUNNING_LINES,victoryShroud,
+import { VICTORY_DESIGN, VICTORY_MASTS, VICTORY_SAILS,VICTORY_STANDING_LINES,VICTORY_RUNNING_LINES,victoryShroud,
   victorySheer, victoryHullDeck, victoryVesselDeck, victoryHullHalfWidth,
   victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot } from './models/victory.js';
 
@@ -56,18 +56,18 @@ export function createVictoryMesh({groups,parts}={}){
     const p=a=>axis==='z'?[c[0]+Math.cos(a)*r,c[1]+Math.sin(a)*r,c[2]]:[c[0]+Math.cos(a)*r,c[1],c[2]+Math.sin(a)*r];
     for(let i=0;i<segments;i++)tube(p(i*2*Math.PI/segments),p((i+1)*2*Math.PI/segments),t,m,t,4,undefined,true);
   }
-  const zValues=new Set([...Array.from({length:49},(_,i)=>-6+i/4),...D.hull.stations]);
-  for(const z of [D.decks.forecastle.end,D.decks.quarter.start,D.decks.poop.start])zValues.add(z);
-  const portW=.235,portH=.21,batteries=D.gunDecks.filter(g=>['lower','middle','upper'].includes(g.id));
+  const zValues=new Set([...Array.from({length:49},(_,i)=>-6+i/4),...VICTORY_DESIGN.hull.stations]);
+  for(const z of [VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.poop.start])zValues.add(z);
+  const portW=.235,portH=.21,batteries=VICTORY_DESIGN.gunDecks.filter(g=>['lower','middle','upper'].includes(g.id));
   const ports=batteries.flatMap(g=>Array.from({length:g.count/2},(_,i)=>({deck:g.id,y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1),calibre:g.calibre})));
-  const upperPorts=D.gunDecks.filter(g=>!batteries.includes(g)).flatMap(g=>Array.from({length:g.count/2},(_,i)=>({y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1)})));
+  const upperPorts=VICTORY_DESIGN.gunDecks.filter(g=>!batteries.includes(g)).flatMap(g=>Array.from({length:g.count/2},(_,i)=>({y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1)})));
   for(const p of ports){zValues.add(p.z-portW/2);zValues.add(p.z+portW/2);}
   for(const p of upperPorts){zValues.add(p.z-portW/2);zValues.add(p.z+portW/2);}
-  const zs=[...zValues].sort((a,b)=>a-b),ys=[-D.hull.draft,-1.7,-1.5,-1.25,-1,-.75,-.5,-.25,0,.15,.2,.58,.65,.7,1.08,1.15,1.2,1.58];
+  const zs=[...zValues].sort((a,b)=>a-b),ys=[-VICTORY_DESIGN.hull.draft,-1.7,-1.5,-1.25,-1,-.75,-.5,-.25,0,.15,.2,.58,.65,.7,1.08,1.15,1.2,1.58];
   for(const p of ports){ys.push(p.y-portH/2,p.y+portH/2);}
   const levels=[...new Set(ys)].sort((a,b)=>a-b);
   function hullPoint(station,y,side){
-    const depth=Math.max(0,-y/D.hull.draft),z=station*(1-(station<0?D.hull.bowRake:D.hull.sternRake)/6*depth*depth),h=y+victorySheer(z);
+    const depth=Math.max(0,-y/VICTORY_DESIGN.hull.draft),z=station*(1-(station<0?VICTORY_DESIGN.hull.bowRake:VICTORY_DESIGN.hull.sternRake)/6*depth*depth),h=y+victorySheer(z);
     return [side*victoryHullHalfWidth(z,h),h,z];
   }
   function hullNormal(p,side){
@@ -126,11 +126,11 @@ export function createVictoryMesh({groups,parts}={}){
     }
     group(node+'.planks',node,begin);
   }
-  deck(-6,6,D.decks.main,'deck.main');deck(-5.9,D.decks.forecastle.end,D.decks.forecastle.height,'deck.forecastle');
-  deck(D.decks.quarter.start,6,D.decks.quarter.height,'deck.quarter');deck(D.decks.poop.start,6,D.decks.poop.height,'deck.poop');
+  deck(-6,6,VICTORY_DESIGN.decks.main,'deck.main');deck(-5.9,VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,'deck.forecastle');
+  deck(VICTORY_DESIGN.decks.quarter.start,6,VICTORY_DESIGN.decks.quarter.height,'deck.quarter');deck(VICTORY_DESIGN.decks.poop.start,6,VICTORY_DESIGN.decks.poop.height,'deck.poop');
   // The waist has an open view down onto the upper deck; raised ends are
   // enclosed by joined bulkheads, not isolated floating deck plates.
-  for(const [z,top,bottom]of [[D.decks.forecastle.end,D.decks.forecastle.height,D.decks.main],[D.decks.quarter.start,D.decks.quarter.height,D.decks.main],[D.decks.poop.start,D.decks.poop.height,D.decks.quarter.height]]){
+  for(const [z,top,bottom]of [[VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.quarter.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.poop.height,VICTORY_DESIGN.decks.quarter.height]]){
     const start=out.length,w=victoryHullHalfWidth(z,top+victorySheer(z))-.04;
     box([-w,bottom+victorySheer(z),z-.015],[w,top+victorySheer(z),z+.015],23);
     group('deck.bulkhead.'+z,'hull',start);
@@ -141,7 +141,7 @@ export function createVictoryMesh({groups,parts}={}){
     const start=out.length;
     for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],centre=(z+Z)/2;
-      const base=victoryVesselDeck(centre)-victorySheer(centre),waist=centre>D.decks.forecastle.end&&centre<D.decks.quarter.start,h=waist?1.58-base:centre>=D.decks.poop.start?.19:.285;
+      const base=victoryVesselDeck(centre)-victorySheer(centre),waist=centre>VICTORY_DESIGN.decks.forecastle.end&&centre<VICTORY_DESIGN.decks.quarter.start,h=waist?1.58-base:centre>=VICTORY_DESIGN.decks.poop.start?.19:.285;
       const y=base+victorySheer(z),Y=base+victorySheer(Z),w=side*victoryHullHalfWidth(z,y),W=side*victoryHullHalfWidth(Z,Y);
       const rail=side*victoryHullHalfWidth(z,y+h),Rail=side*victoryHullHalfWidth(Z,Y+h),gunPort=upperPorts.find(p=>Math.abs(centre-p.z)<portW/2-1e-7);
       if(!waist){
@@ -153,7 +153,7 @@ export function createVictoryMesh({groups,parts}={}){
     }
     group(`bulwark.${side}`,'hull',start);
   }
-  for(const g of D.gunDecks.filter(g=>!batteries.includes(g)))for(const side of [-1,1])for(let i=0;i<g.count/2;i++){
+  for(const g of VICTORY_DESIGN.gunDecks.filter(g=>!batteries.includes(g)))for(const side of [-1,1])for(let i=0;i<g.count/2;i++){
     const start=out.length,z=g.start+(g.end-g.start)*i/(g.count/2-1),floor=victoryVesselDeck(z),y=g.centre+victorySheer(z),x=side*(victoryHullHalfWidth(z,y)-.07),carronade=g.id==='forecastle'&&i===0;
     box([x-side*.14,floor+.015,z-.09],[x+side*.04,floor+.09,z+.09],24);
     tube([x-side*.15,y,z],[x+side*(carronade?.21:.3),y,z],carronade?.055:.032,3,carronade?.045:.025,12);
@@ -220,9 +220,9 @@ export function createVictoryMesh({groups,parts}={}){
   ring([0,2.48,-7.06],.14,.025,25,'z',20);
   group('bow.structure','hull',bowStart);
   // Two wheels on a common spindle, binnacle, companionways, capstan and bitts.
-  const wheelStart=out.length,wc=D.wheel.centre;
+  const wheelStart=out.length,wc=VICTORY_DESIGN.wheel.centre;
   for(const z of [wc[2]-.055,wc[2]+.055]){
-    ring([wc[0],wc[1],z],D.wheel.radius,.014,7,'z',36);
+    ring([wc[0],wc[1],z],VICTORY_DESIGN.wheel.radius,.014,7,'z',36);
     for(let i=0;i<10;i++){
       const a=i*2*Math.PI/10;
       tube([0,wc[1],z],[Math.cos(a)*.225,wc[1]+Math.sin(a)*.225,z],.009,7,.012,6);
@@ -251,7 +251,7 @@ export function createVictoryMesh({groups,parts}={}){
     tube([x-.13,y+.17,z],[x+.13,y+.17,z],.03,1,.03,8);
   }
   // Two flights connect each raised deck to the lower level.
-  for(const [z,top,bottom]of [[D.decks.forecastle.end,D.decks.forecastle.height,D.decks.main],[D.decks.quarter.start,D.decks.quarter.height,D.decks.main],[D.decks.poop.start,D.decks.poop.height,D.decks.quarter.height]])for(const side of [-1,1]){
+  for(const [z,top,bottom]of [[VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.quarter.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.poop.height,VICTORY_DESIGN.decks.quarter.height]])for(const side of [-1,1]){
     const x=side*.9,sign=z<0?1:-1,lo=z+sign*.6;
     for(let i=0;i<7;i++){
       const Z=lo+(z-lo)*(i+.5)/7,y=bottom+(top-bottom)*(i+1)/7+victorySheer(z);
@@ -266,7 +266,7 @@ export function createVictoryMesh({groups,parts}={}){
   group('hatch.main','hatch.main',hatchStart,{type:'hatch',pivot:hatchPivot});
   // Nested ship's boats on waist skids, with visible ribs and thwarts.
   for(const [boatIndex,x]of [-.43,.43].entries()){
-    const start=out.length,y=D.decks.main+.32,z=-1.15,half=.27,L=1.44;
+    const start=out.length,y=VICTORY_DESIGN.decks.main+.32,z=-1.15,half=.27,L=1.44;
     for(let i=0;i<20;i++)for(let j=0;j<7;j++){
       const point=(t,k)=>{const Z=-L+2*L*t,w=half*Math.sin(Math.PI*t)**.55,theta=k/7*Math.PI;return [x+Math.cos(theta)*w,y-Math.sin(theta)*.19,z+Z];};
       quad(point(i/20,j),point((i+1)/20,j),point((i+1)/20,j+1),point(i/20,j+1),23);
@@ -275,12 +275,12 @@ export function createVictoryMesh({groups,parts}={}){
       const p=t=>[x+side*half*Math.sin(Math.PI*t)**.55,y,z-L+2*L*t];tube(p(i/20),p((i+1)/20),.016,1,.016,6);
     }
     for(let Z=z-1;Z<z+1.1;Z+=.38){const w=half*Math.sin(Math.PI*(Z-z+L)/(2*L))**.55;box([x-w+.02,y-.05,Z-.035],[x+w-.02,y-.025,Z+.035],1);}
-    for(const Z of [z-.9,z+.9])box([x-.34,D.decks.main+.04,Z-.04],[x+.34,D.decks.main+.16,Z+.04],1);
+    for(const Z of [z-.9,z+.9])box([x-.34,VICTORY_DESIGN.decks.main+.04,Z-.04],[x+.34,VICTORY_DESIGN.decks.main+.16,Z+.04],1);
     group('boat.waist.'+boatIndex,'deck.main',start);
   }
   // Lower masts, overlapping topmasts and topgallants, open fighting tops,
   // trestletrees, crosstrees and rope-rung shrouds.
-  for(const [index,m]of MASTS.entries()){
+  for(const [index,m]of VICTORY_MASTS.entries()){
     const start=out.length,foot=victoryMastPoint(index,victoryVesselDeck(m.z));
     tube(foot,victoryMastPoint(index,m.platform+.48),m.radius,21,m.radius*.72,18);
     tube(victoryMastPoint(index,m.platform-.25),victoryMastPoint(index,m.topmastPlatform+.3),m.radius*.58,1,m.radius*.34,14);
@@ -319,11 +319,11 @@ export function createVictoryMesh({groups,parts}={}){
   }
   const crossjackStart=out.length,crossjack=victoryMastPoint(2,4.87);
   crossjack[2]-=.15;
-  const crossjackControl=SAILS.find(s=>s.name==='mizzen-topsail').id;
+  const crossjackControl=VICTORY_SAILS.find(s=>s.name==='mizzen-topsail').id;
   tube(add(crossjack,[-1.98,0,0]),crossjack,.026,tag(10,crossjackControl),.05,12);
   tube(crossjack,add(crossjack,[1.98,0,0]),.05,tag(10,crossjackControl),.026,12);
   group('yard.mizzen-crossjack','mast.mizzen',crossjackStart,{type:'victory-yard',sail:crossjackControl});
-  for(const s of SAILS){
+  for(const s of VICTORY_SAILS){
     const start=out.length,base=s.kind==='headsail'?13:9,steps=s.kind==='headsail'?15:18;
     if(s.kind==='headsail'){
       for(let i=0;i<steps;i++)for(let j=0;j<steps-i;j++){
@@ -361,7 +361,7 @@ export function createVictoryMesh({groups,parts}={}){
     }
   }
   group('rig.running','hull',runningStart,{type:'victory-running-rigging'});
-  for(const [index,m]of MASTS.entries()){
+  for(const [index,m]of VICTORY_MASTS.entries()){
     const start=out.length,x=index===1?-1.13:1.13,z=m.z+.5,y=victoryVesselDeck(z);
     rope([x,y+.035,z],[x,y+.9,z],.006,2);
     rope([x,y+.9,z],victoryMastPoint(index,m.platform+.25),.006,2);
@@ -390,7 +390,7 @@ export function createVictoryMesh({groups,parts}={}){
     flagQuad([[.45,0],[.55,0],[.55,1],[.45,1]],24,z+side*.010);
     flagQuad([[0,.43],[1,.43],[1,.57],[0,.57]],24,z+side*.010);
   }
-  for(let i=flagStart+1;i<out.length;i+=9)out[i]+=D.decks.poop.height-2.48;
+  for(let i=flagStart+1;i<out.length;i+=9)out[i]+=VICTORY_DESIGN.decks.poop.height-2.48;
   group('flag.ensign','hull',flagStart);
   return new Float32Array(out);
 }
