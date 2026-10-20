@@ -1123,6 +1123,133 @@ function pointOfSail(angle, speed) {
     : a < 110 ? 'Beam reach' : a < 165 ? 'Broad reach' : 'Running';
 }
 
+// ---- js/dolphin-state.js ----
+// Authored wildlife encounter: normal simulation seconds, independent of voyage time.
+const DOLPHIN_LIMIT=7;
+const DOLPHIN_ENCOUNTER_SECONDS=105;
+const DOLPHIN_SPLASH_LIMIT=64;
+const DOLPHIN_SPLASH_SECONDS=4.2;
+const DOLPHIN_CONTACT_STEP=.025,DOLPHIN_TRAIL_STEP=.25;
+const dolphinClamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const dolphinAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
+function dolphinBreath(time,phase,period=7.8,breach=false){
+  const cycle=(time/period+phase)%1;
+  const q=(cycle-.45)/.155,arc=Math.exp(-q*q);
+  const amplitude=breach?2.7:1.35;
+  return {depth:-1.1+amplitude*arc,pitch:dolphinClamp(-2*q*amplitude*arc/(.155*period*4.2),-.65,.65)};
+}
+// Root depth is relative to the wave sampled by the dolphin vertex shader.
+// Test the trunk, rather than a dorsal fin that can show while the body is submerged.
+const dolphinBodySections=[[-.9,.065,.30],[-.6,.025,.36],[-.15,0,.365],[.3,-.035,.29],[.75,-.075,.15],[1.12,-.10,.065]];
+function dolphinSurfaceContact(depth,pitch=0,scale=1){
+  const c=Math.cos(pitch),s=Math.sin(pitch);let min=Infinity,max=-Infinity;
+  for(const [z,y,r]of dolphinBodySections){const centre=(c*y-s*z)*scale,extent=Math.abs(c)*r*.9*scale;min=Math.min(min,depth+centre-extent);max=Math.max(max,depth+centre+extent);}
+  return {min,max,touching:min<=0&&max>=0};
+}
+function dolphinPoseAt(age,a,i){
+  const cycle=Math.floor(age/a.period+a.phase),breach=(cycle+i)%5===0&&i%3===0;
+  const pose=dolphinBreath(age,a.phase,a.period,breach);
+  return {...pose,depth:pose.depth-dolphinClamp((age-96)/9,0,1)*3,breach};
+}
+function createDolphinEncounter(random=Math.random){
+  const rand=()=>dolphinClamp(Number(random())||0,0,.999999999);
+  const animals=Array.from({length:DOLPHIN_LIMIT},(_,i)=>({x:0,z:0,heading:0,scale:.84+i*.035,phase:0,period:8,depth:-3,pitch:0,previousDepth:-3,breach:false}));
+  const splashes=Array.from({length:DOLPHIN_SPLASH_LIMIT},()=>({x:0,z:0,age:10,strength:0,heading:0,seed:0,kind:'trail',speed:0,scale:1,id:0,animal:0}));
+  const wait=()=>420-Math.log(Math.max(.00001,1-rand()))*900;
+  let time=0,age=0,count=0,serial=0,splashSerial=0,next=wait(),previousX=NaN,previousZ=NaN,event=null;
+  function safe(x,z,terrain){return !terrain||terrain.height(x,z)<-6;}
+  function clear(){count=0;age=0;for(const s of splashes){s.age=10;s.strength=0;}next=time+wait();}
+  function start(boat,{terrain=null,vessels=[boat]}={}){
+    if(count)return false;
+    const heading=(boat.heading??0)*Math.PI/180,side=rand()<.5?-1:1;
+    let found=false;
+    for(const candidate of [side,-side]){
+      found=true;
+      for(let i=0;i<DOLPHIN_LIMIT;i++){
+        const fore=boat.length*.64+8+i%3*5,beam=candidate*(boat.beam*.5+6+Math.floor(i/3)*3);
+        const x=boat.x+Math.sin(heading)*fore+Math.cos(heading)*beam,z=boat.z-Math.cos(heading)*fore+Math.sin(heading)*beam;
+        if(!safe(x,z,terrain)||vessels.some(v=>v!==boat&&Math.hypot(x-v.x,z-v.z)<v.length*.65)){found=false;break;}
+      }
+      if(found){
+        count=5+Math.floor(rand()*3);age=0;serial++;
+        for(let i=0;i<count;i++){
+          const a=animals[i],fore=boat.length*.64+8+i%3*5,beam=candidate*(boat.beam*.5+6+Math.floor(i/3)*3);
+          Object.assign(a,{x:boat.x+Math.sin(heading)*fore+Math.cos(heading)*beam,z:boat.z-Math.cos(heading)*fore+Math.sin(heading)*beam,
+            heading,side:candidate,phase:rand(),period:7+rand()*3,scale:.82+rand()*.23,depth:-2,pitch:0,previousDepth:-2,breach:false});
+          a.contactTick=0;a.nextTrailAt=DOLPHIN_TRAIL_STEP*(1+i/DOLPHIN_LIMIT);
+          const pose=dolphinPoseAt(0,a,i);a.contactPose=pose;a.contactBounds=dolphinSurfaceContact(pose.depth,pose.pitch,a.scale);a.entryPending=a.contactBounds.max>0;
+        }
+        event={id:serial,text:`Dolphins off the ${candidate<0?'port':'starboard'} bow · ${count} in the pod`};
+        previousX=boat.x;previousZ=boat.z;return true;
+      }
+    }
+    event={id:serial,text:'Dolphins need clear water at least six metres deep.'};return false;
+  }
+  return {
+    animals,splashes,enabled:true,get active(){return count>0;},get count(){return count;},get time(){return time;},get age(){return age;},get event(){return event;},get nextAt(){return next;},
+    trigger:start,clear,
+    step(dt,boat,settings={},terrain=null,vessels=[boat]){
+      dt=dolphinClamp(Number.isFinite(dt)?dt:0,0,.1);time+=dt;event=null;
+      for(const s of splashes)s.age+=dt;
+      if(Number.isFinite(previousX)&&Math.hypot(boat.x-previousX,boat.z-previousZ)>200){clear();previousX=boat.x;previousZ=boat.z;return;}
+      previousX=boat.x;previousZ=boat.z;
+      if(!count){
+        if(time>=next){next=time+wait();if(this.enabled&&(settings.windSpeed??7)<19&&(settings.rain??0)<.55)start(boat,{terrain,vessels});}
+        return;
+      }
+      const previousAge=age;age+=dt;
+      if(age>DOLPHIN_ENCOUNTER_SECONDS){clear();return;}
+      const heading=(boat.heading??0)*Math.PI/180,boatSpeed=Math.abs(boat.surgeVelocity??0);
+      const depart=dolphinClamp((age-75)/30,0,1);
+      for(let i=0;i<count;i++){
+        const a=animals[i],oldX=a.x,oldZ=a.z,oldHeading=a.heading,fore=boat.length*.64+8+i%3*5+depart*80,beam=a.side*(boat.beam*.5+6+Math.floor(i/3)*3+depart*25);
+        const tx=boat.x+Math.sin(heading)*fore+Math.cos(heading)*beam,tz=boat.z-Math.cos(heading)*fore+Math.sin(heading)*beam;
+        const dx=tx-a.x,dz=tz-a.z,distance=Math.hypot(dx,dz);
+        let desired=distance>3?Math.atan2(dx,-dz):heading+Math.sin(age*.3+a.phase*6)*.2;
+        let speed=dolphinClamp(boatSpeed+(distance-3)*.22,2.5,8.5);
+        // A motionless ship is passed naturally; dolphins never reverse to hold formation.
+        if(boatSpeed<.4&&age>12){desired=heading+a.side*.22;speed=3.4;}
+        for(const v of vessels){
+          const d=Math.hypot(a.x-v.x,a.z-v.z),radius=v.length*.5+4;
+          if(d<radius){desired=Math.atan2(a.x-v.x,-(a.z-v.z));speed=Math.max(speed,3);}
+        }
+        const aheadX=a.x+Math.sin(a.heading)*8,aheadZ=a.z-Math.cos(a.heading)*8;
+        if(!safe(aheadX,aheadZ,terrain))desired=a.heading+a.side*Math.PI*.75;
+        a.heading+=dolphinClamp(dolphinAngle(desired-a.heading),-.65*dt,.65*dt);
+        const nx=a.x+Math.sin(a.heading)*speed*dt,nz=a.z-Math.cos(a.heading)*speed*dt;
+        if(safe(nx,nz,terrain)){a.x=nx;a.z=nz;}else{a.heading+=dt*1.5;}
+        const pose=dolphinPoseAt(age,a,i);a.breach=pose.breach;a.depth=pose.depth;a.pitch=pose.pitch;
+        const travelled=Math.hypot(a.x-oldX,a.z-oldZ),actualSpeed=dt>0?travelled/dt:0;
+        function stamp(kind,at,strength){
+          const s=splashes.reduce((old,p)=>p.age>old.age?p:old,splashes[0]);
+          const t=dolphinClamp((at-previousAge)/dt,0,1);
+          Object.assign(s,{x:oldX+(a.x-oldX)*t,z:oldZ+(a.z-oldZ)*t,age:age-at,strength,
+            heading:oldHeading+dolphinAngle(a.heading-oldHeading)*t,seed:a.phase*91+i,kind,speed:actualSpeed,scale:a.scale,id:++splashSerial,animal:i});
+        }
+        // Fixed contact ticks and absolute trail times keep emission independent of render FPS.
+        // Event centres remain in world space; the GPU places them on the actual local wave.
+        if(dt>0)while((a.contactTick+1)*DOLPHIN_CONTACT_STEP<=age+1e-8){
+          const at=++a.contactTick*DOLPHIN_CONTACT_STEP,contactPose=dolphinPoseAt(at,a,i),bounds=dolphinSurfaceContact(contactPose.depth,contactPose.pitch,a.scale);
+          const previous=a.contactPose,previousBounds=a.contactBounds,vertical=(contactPose.depth-previous.depth)/DOLPHIN_CONTACT_STEP;
+          if(previousBounds.max<=0&&bounds.max>0){a.entryPending=true;stamp('emerge',at,dolphinClamp(.25+Math.max(0,vertical)*.06+actualSpeed*.015,.25,.65));}
+          const firstReentry=previousBounds.min>0&&bounds.min<=0;
+          const descendingPass=previous.depth>-.12*a.scale&&contactPose.depth<=-.12*a.scale;
+          if(a.entryPending&&vertical<0&&(firstReentry||descendingPass)){
+            stamp('entry',at,dolphinClamp(.45-vertical*.11+actualSpeed*.025,.5,1.25));a.entryPending=false;
+          }
+          a.contactPose=contactPose;a.contactBounds=bounds;
+        }
+        if(dt>0)while(a.nextTrailAt<=age+1e-8){
+          const at=a.nextTrailAt;a.nextTrailAt+=DOLPHIN_TRAIL_STEP;
+          const contactPose=dolphinPoseAt(at,a,i),bounds=dolphinSurfaceContact(contactPose.depth,contactPose.pitch,a.scale);
+          if(actualSpeed>.3&&bounds.touching)stamp('trail',at,dolphinClamp(.18+actualSpeed*.022,.2,.4));
+        }
+        a.previousDepth=a.depth;
+      }
+    },
+  };
+}
+
 // ---- js/wgsl/common.js ----
 // Shared constants and WGSL snippets.
 const N = 256;          // FFT resolution per cascade
@@ -5199,6 +5326,14 @@ struct AnchorVertex {
 
 
 
+
+const DOLPHIN_RIPPLE_SEGMENTS=32;
+const DOLPHIN_RIPPLE_RINGS=3;
+const DOLPHIN_RIPPLE_ROWS=2;
+const DOLPHIN_SHEET_SEGMENTS=28;
+const DOLPHIN_SHEET_ROWS=3;
+const DOLPHIN_DROP_COUNT=24;
+
 const DOLPHIN_RENDER=FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+/* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var transLUT:texture_2d<f32>;
@@ -5209,16 +5344,18 @@ const DOLPHIN_RENDER=FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+/* wgsl */ `
 @group(0) @binding(6) var displacement:texture_2d_array<f32>;
 @group(0) @binding(7) var seaSampler:sampler;
 struct Dolphin {root:vec4f,pose:vec4f};
-struct DolphinSplash {root:vec4f,shape:vec4f};
+// root: world xz, age, strength; shape: heading, seed, kind, scale;
+// motion: swimming speed. Kind 0=surface trail, 1=emergence, 2=reentry.
+struct DolphinSplash {root:vec4f,shape:vec4f,motion:vec4f};
 @group(0) @binding(8) var<storage,read> dolphins:array<Dolphin>;
 @group(0) @binding(9) var<storage,read> splashes:array<DolphinSplash>;
 `+SKY_RENDER_FUNCS+/* wgsl */ `
 fn dolphinSea(q:vec2f)->vec3f {
   var d=vec3f(0);
-  for(var c=0u;c<3u;c++){d+=textureSampleLevel(displacement,seaSampler,q*F.cascInvL[c>>2u][c&3u],i32(c),0.0).xyz;}
+  for(var c=0u;c<${CASCADES}u;c++){d+=textureSampleLevel(displacement,seaSampler,q*F.cascInvL[c>>2u][c&3u],i32(c),0.0).xyz;}
   return d;
 }
-fn dolphinHeight(p:vec2f)->f32 {let q=p-dolphinSea(p).xz;return dolphinSea(q).y;}
+fn dolphinHeight(p:vec2f)->f32 {var q=p;for(var k=0;k<2;k++){q=p-dolphinSea(q).xz;}return dolphinSea(q).y;}
 fn dolphinYaw(p:vec3f,heading:f32)->vec3f {let c=cos(heading);let s=sin(heading);return vec3f(c*p.x-s*p.z,p.y,s*p.x+c*p.z);}
 struct DolphinVertex {@builtin(position) pos:vec4f,@location(0) world:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f};
 @vertex fn dolphinVS(@location(0) p:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f,@builtin(instance_index) id:u32)->DolphinVertex {
@@ -5246,32 +5383,91 @@ struct DolphinVertex {@builtin(position) pos:vec4f,@location(0) world:vec3f,@loc
 }
 fn dolphinCorner(i:u32)->vec2f {return array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(-1,1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1))[i];}
 struct DolphinEffect {@builtin(position) pos:vec4f,@location(0) uv:vec2f,@location(1) world:vec3f,@location(2) data:vec4f};
+fn dolphinWaterColor(world:vec3f,normal:vec3f,foam:f32)->vec3f {
+  let eye=normalize(F.camPos.xyz-world);var n=normalize(normal);if(dot(n,eye)<0.0){n=-n;}
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
+  let reflected=textureSampleLevel(envCube,sampC,reflect(-eye,n),1.6).rgb;
+  let light=skyAtmo(vec3f(0,1,0))*.55+direct*max(F.sunDir.y,.08)*.22+lightningLight()*.25;
+  let spec=vesselSpecular(n,eye,F.sunDir.xyz,.19,vec3f(.025))*direct*max(dot(n,F.sunDir.xyz),0.0);
+  return mix(reflected*.85+spec,light,foam);
+}
+fn dolphinEffectData(s:DolphinSplash)->vec4f {return vec4f(s.root.z,s.root.w,s.shape.y,s.shape.z);}
 @vertex fn dolphinRippleVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) id:u32)->DolphinEffect {
-  let s=splashes[id];let age=s.root.z;let corner=dolphinCorner(vertex);let radius=.45+age*1.1;
-  let q=s.root.xy+dolphinYaw(vec3f(corner.x*radius,0,corner.y*radius*.65),s.shape.x).xz;
-  var o:DolphinEffect;o.world=vec3f(q.x,dolphinHeight(q)+.025,q.y);o.uv=corner;
-  o.data=vec4f(age,s.root.w,s.shape.y,0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+  let s=splashes[id];let trail=s.shape.z<.5;
+  let ring=vertex/${DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_ROWS*6}u;
+  let row=(vertex/${DOLPHIN_RIPPLE_SEGMENTS*6}u)%${DOLPHIN_RIPPLE_ROWS}u;
+  let segment=(vertex/6u)%${DOLPHIN_RIPPLE_SEGMENTS}u;let corner=dolphinCorner(vertex%6u)*.5+.5;
+  let angle=(f32(segment)+corner.x)*(2.0*PI)/${DOLPHIN_RIPPLE_SEGMENTS}.0;
+  let age=s.root.z-f32(ring)*.24;let grown=max(0.0,age);
+  let scale=max(.6,s.shape.w);let cross=(f32(row)+corner.y)/${DOLPHIN_RIPPLE_ROWS}.0*2.0-1.0;
+  let radius=(select(.4,.22,trail)*scale+grown*select(1.18,.88,trail))*(1.0+.025*sin(angle*5.0+s.shape.y));
+  let width=(.09+grown*.035)*scale;
+  let r=radius+cross*width;
+  let local=vec3f(cos(angle)*r,0,sin(angle)*r*select(.86,1.18,trail));
+  let q=s.root.xy+dolphinYaw(local,s.shape.x).xz;
+  let crest=(1.0-cross*cross)*.025*s.root.w*exp(-grown);
+  var o:DolphinEffect;o.world=vec3f(q.x,dolphinHeight(q)+.026+crest,q.y);o.uv=vec2f(cross,angle);
+  o.data=dolphinEffectData(s);o.data.x=age;
+  o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
 }
 @fragment fn dolphinRippleFS(v:DolphinEffect)->@location(0) vec4f {
-  let radius=length(v.uv);let band=abs(radius-.65);let aa=max(fwidth(radius),.008);
-  let broken=.65+.35*sin(atan2(v.uv.y,v.uv.x)*11.0+v.data.z);
-  let alpha=(1.0-smoothstep(.025,.065+aa,band))*(1.0-smoothstep(.3,3.2,v.data.x))*.32*v.data.y*broken;
-  let light=skyAtmo(vec3f(0,1,0))*.5+sunIlluminance()*sunVis[0]*max(F.sunDir.y,0.0)*.24+lightningLight()*.2;
+  var normal=normalize(cross(dpdy(v.world),dpdx(v.world)));if(normal.y<0.0){normal=-normal;}
+  let age=v.data.x;if(age<=0.0){discard;}
+  let edge=1.0-smoothstep(.35,1.0,abs(v.uv.x));
+  let broken=.65+.25*sin(v.uv.y*9.0+v.data.z)+.1*sin(v.uv.y*17.0-v.data.z);
+  let fade=smoothstep(0.0,.12,age)*(1.0-smoothstep(.5,${DOLPHIN_SPLASH_SECONDS},age));
+  // A surface swimmer leaves a broken, aft-weighted wake, not a spray emitter.
+  let aft=select(1.0,.28+.72*smoothstep(-.5,.4,sin(v.uv.y)),v.data.w<.5);
+  let foam=clamp(broken*exp(-age*1.2)*v.data.y,0.0,1.0);
+  let alpha=edge*fade*aft*(.16+foam*.44)*min(1.0,.45+v.data.y);
+  let light=dolphinWaterColor(v.world,normal,foam);
   return vec4f(surfaceAir(light,v.world)*alpha,alpha);
 }
+// A connected world-space crown expands from the contact footprint. Its rim
+// rises ballistically, then breaks up; it is never a camera-facing smoke card.
+@vertex fn dolphinSplashVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) id:u32)->DolphinEffect {
+  let s=splashes[id];let corner=dolphinCorner(vertex%6u)*.5+.5;
+  let cell=vertex/6u;let segment=cell%${DOLPHIN_SHEET_SEGMENTS}u;let row=cell/${DOLPHIN_SHEET_SEGMENTS}u;
+  let angle=(f32(segment)+corner.x)*(2.0*PI)/${DOLPHIN_SHEET_SEGMENTS}.0;
+  let t=(f32(row)+corner.y)/${DOLPHIN_SHEET_ROWS}.0;
+  let age=s.root.z;let strength=s.root.w;let scale=max(.6,s.shape.w);
+  let lobe=.8+.16*sin(angle*7.0+s.shape.y)+.09*sin(angle*13.0-s.shape.y);
+  let rise=max(0.0,(2.1+strength*2.9)*age-4.905*age*age);
+  let radius=(.23*scale+age*(.75+strength*1.6)*mix(.5,1.0,t))*(1.0+.1*sin(angle*5.0+s.shape.y));
+  let drift=s.motion.x*age*.22;
+  let q=s.root.xy+dolphinYaw(vec3f(cos(angle)*radius,0,sin(angle)*radius*1.15-drift),s.shape.x).xz;
+  var o:DolphinEffect;o.world=vec3f(q.x,dolphinHeight(q)+.035+rise*t*lobe,q.y);
+  o.uv=vec2f(angle,t);o.data=dolphinEffectData(s);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+}
+@fragment fn dolphinSplashFS(v:DolphinEffect)->@location(0) vec4f {
+  let n=normalize(cross(dpdy(v.world),dpdx(v.world)));
+  let life=(2.1+v.data.y*2.9)/4.905;
+  let fade=smoothstep(0.0,.045,v.data.x)*(1.0-smoothstep(life*.55,life,v.data.x));
+  let lace=.5+.25*sin(v.uv.x*19.0+v.data.z)*sin(v.uv.y*17.0+v.data.z)+.25*sin(v.uv.x*31.0-v.uv.y*13.0);
+  let opening=smoothstep(.12,.55,v.data.x)*smoothstep(.1,.75,v.uv.y);
+  let film=smoothstep(opening*.65,opening*.65+.18,lace);
+  let foam=clamp(.18+smoothstep(.4,1.0,v.uv.y)*.68+opening*.25,0.0,1.0);
+  let alpha=fade*film*(.17+foam*.43)*min(1.0,.45+v.data.y);
+  if(alpha<.003){discard;}
+  return vec4f(surfaceAir(dolphinWaterColor(v.world,n,foam),v.world)*alpha,alpha);
+}
 @vertex fn dolphinDropVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->DolphinEffect {
-  let s=splashes[instance/12u];let id=f32(instance%12u);let age=s.root.z;
-  let angle=id*2.39996+s.shape.y;let speed=.5+fract(sin(id*13.71+s.shape.y)*312.6)*1.4;
-  let launch=vec3f(cos(angle)*speed,1.2+speed*.6,sin(angle)*speed);
-  let p=vec3f(s.root.x,dolphinHeight(s.root.xy)+.06,s.root.y)+launch*age+vec3f(0,-4.905*age*age,0);
-  let corner=dolphinCorner(vertex);let width=.016*(.7+s.root.w)*max(.1,1.0-age);
-  var o:DolphinEffect;o.world=p;o.uv=corner;o.data=vec4f(age,s.root.w,s.shape.y,0);
+  let s=splashes[instance/${DOLPHIN_DROP_COUNT}u];let id=f32(instance%${DOLPHIN_DROP_COUNT}u);let age=s.root.z;
+  let angle=id*2.39996+s.shape.y;let random=fract(sin(id*13.71+s.shape.y)*312.6);
+  let speed=(.7+random*1.4)*(.6+s.root.w*.7);
+  let launch=dolphinYaw(vec3f(cos(angle)*speed,2.0+s.root.w*2.3+random*.8,sin(angle)*speed-s.motion.x*.18),s.shape.x);
+  let p=vec3f(s.root.x,dolphinHeight(s.root.xy)+.08,s.root.y)+launch*age+vec3f(0,-4.905*age*age,0);
+  let corner=dolphinCorner(vertex);let width=(.018+random*.018)*(.65+s.root.w)*max(.15,1.0-age*.8);
+  var o:DolphinEffect;o.world=p;o.uv=corner;o.data=dolphinEffectData(s);
   o.pos=F.viewProj*vec4f(p-F.camPos.xyz+(normalize(F.camRight.xyz)*corner.x+normalize(F.camUp.xyz)*corner.y)*width,1);return o;
 }
 @fragment fn dolphinDropFS(v:DolphinEffect)->@location(0) vec4f {
-  let alpha=(1.0-smoothstep(.1,1.0,dot(v.uv,v.uv)))*(1.0-smoothstep(.25,.7,v.data.x))*.5*v.data.y;
-  let light=skyAtmo(vec3f(0,1,0))*.6+sunIlluminance()*sunVis[0]*max(F.sunDir.y,0.0)*.32+lightningLight()*.3;
-  return vec4f(surfaceAir(light,v.world)*alpha,alpha);
+  let radius=dot(v.uv,v.uv);if(radius>.96){discard;}
+  let life=(2.0+v.data.y*2.3+.8)/4.905;
+  let alpha=(1.0-smoothstep(.25,1.0,radius))*(1.0-smoothstep(life*.6,life,v.data.x))*.65*min(1.0,.45+v.data.y);
+  let eye=normalize(F.camPos.xyz-v.world);
+  let n=normalize(F.camRight.xyz*v.uv.x+F.camUp.xyz*v.uv.y+eye*sqrt(max(.01,1.0-radius)));
+  return vec4f(surfaceAir(dolphinWaterColor(v.world,n,.65),v.world)*alpha,alpha);
 }
 `;
 
@@ -5971,97 +6167,6 @@ async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,e
   };
 }
 
-// ---- js/dolphin-state.js ----
-// Authored wildlife encounter: normal simulation seconds, independent of voyage time.
-const DOLPHIN_LIMIT=7;
-const DOLPHIN_ENCOUNTER_SECONDS=105;
-const DOLPHIN_SPLASH_LIMIT=20;
-const dolphinClamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const dolphinAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
-function dolphinBreath(time,phase,period=7.8,breach=false){
-  const cycle=(time/period+phase)%1;
-  const q=(cycle-.45)/.155,arc=Math.exp(-q*q);
-  const amplitude=breach?2.7:1.35;
-  return {depth:-1.1+amplitude*arc,pitch:dolphinClamp(-2*q*amplitude*arc/(.155*period*4.2),-.65,.65)};
-}
-function createDolphinEncounter(random=Math.random){
-  const rand=()=>dolphinClamp(Number(random())||0,0,.999999999);
-  const animals=Array.from({length:DOLPHIN_LIMIT},(_,i)=>({x:0,z:0,heading:0,scale:.84+i*.035,phase:0,period:8,depth:-3,pitch:0,previousDepth:-3,breach:false}));
-  const splashes=Array.from({length:DOLPHIN_SPLASH_LIMIT},()=>({x:0,z:0,age:10,strength:0,heading:0,seed:0}));
-  const wait=()=>420-Math.log(Math.max(.00001,1-rand()))*900;
-  let time=0,age=0,count=0,serial=0,next=wait(),previousX=NaN,previousZ=NaN,event=null;
-  function safe(x,z,terrain){return !terrain||terrain.height(x,z)<-6;}
-  function clear(){count=0;age=0;for(const s of splashes){s.age=10;s.strength=0;}next=time+wait();}
-  function start(boat,{terrain=null,vessels=[boat]}={}){
-    if(count)return false;
-    const heading=(boat.heading??0)*Math.PI/180,side=rand()<.5?-1:1;
-    let found=false;
-    for(const candidate of [side,-side]){
-      found=true;
-      for(let i=0;i<DOLPHIN_LIMIT;i++){
-        const fore=boat.length*.64+8+i%3*5,beam=candidate*(boat.beam*.5+6+Math.floor(i/3)*3);
-        const x=boat.x+Math.sin(heading)*fore+Math.cos(heading)*beam,z=boat.z-Math.cos(heading)*fore+Math.sin(heading)*beam;
-        if(!safe(x,z,terrain)||vessels.some(v=>v!==boat&&Math.hypot(x-v.x,z-v.z)<v.length*.65)){found=false;break;}
-      }
-      if(found){
-        count=5+Math.floor(rand()*3);age=0;serial++;
-        for(let i=0;i<count;i++){
-          const a=animals[i],fore=boat.length*.64+8+i%3*5,beam=candidate*(boat.beam*.5+6+Math.floor(i/3)*3);
-          Object.assign(a,{x:boat.x+Math.sin(heading)*fore+Math.cos(heading)*beam,z:boat.z-Math.cos(heading)*fore+Math.sin(heading)*beam,
-            heading,side:candidate,phase:rand(),period:7+rand()*3,scale:.82+rand()*.23,depth:-2,pitch:0,previousDepth:-2,breach:false});
-        }
-        event={id:serial,text:`Dolphins off the ${candidate<0?'port':'starboard'} bow · ${count} in the pod`};
-        previousX=boat.x;previousZ=boat.z;return true;
-      }
-    }
-    event={id:serial,text:'Dolphins need clear water at least six metres deep.'};return false;
-  }
-  return {
-    animals,splashes,enabled:true,get active(){return count>0;},get count(){return count;},get time(){return time;},get age(){return age;},get event(){return event;},get nextAt(){return next;},
-    trigger:start,clear,
-    step(dt,boat,settings={},terrain=null,vessels=[boat]){
-      dt=dolphinClamp(Number.isFinite(dt)?dt:0,0,.1);time+=dt;event=null;
-      for(const s of splashes)s.age+=dt;
-      if(Number.isFinite(previousX)&&Math.hypot(boat.x-previousX,boat.z-previousZ)>200){clear();previousX=boat.x;previousZ=boat.z;return;}
-      previousX=boat.x;previousZ=boat.z;
-      if(!count){
-        if(time>=next){next=time+wait();if(this.enabled&&(settings.windSpeed??7)<19&&(settings.rain??0)<.55)start(boat,{terrain,vessels});}
-        return;
-      }
-      age+=dt;
-      if(age>DOLPHIN_ENCOUNTER_SECONDS){clear();return;}
-      const heading=(boat.heading??0)*Math.PI/180,boatSpeed=Math.abs(boat.surgeVelocity??0);
-      const depart=dolphinClamp((age-75)/30,0,1),sink=dolphinClamp((age-96)/9,0,1)*3;
-      for(let i=0;i<count;i++){
-        const a=animals[i],fore=boat.length*.64+8+i%3*5+depart*80,beam=a.side*(boat.beam*.5+6+Math.floor(i/3)*3+depart*25);
-        const tx=boat.x+Math.sin(heading)*fore+Math.cos(heading)*beam,tz=boat.z-Math.cos(heading)*fore+Math.sin(heading)*beam;
-        const dx=tx-a.x,dz=tz-a.z,distance=Math.hypot(dx,dz);
-        let desired=distance>3?Math.atan2(dx,-dz):heading+Math.sin(age*.3+a.phase*6)*.2;
-        let speed=dolphinClamp(boatSpeed+(distance-3)*.22,2.5,8.5);
-        // A motionless ship is passed naturally; dolphins never reverse to hold formation.
-        if(boatSpeed<.4&&age>12){desired=heading+a.side*.22;speed=3.4;}
-        for(const v of vessels){
-          const d=Math.hypot(a.x-v.x,a.z-v.z),radius=v.length*.5+4;
-          if(d<radius){desired=Math.atan2(a.x-v.x,-(a.z-v.z));speed=Math.max(speed,3);}
-        }
-        const aheadX=a.x+Math.sin(a.heading)*8,aheadZ=a.z-Math.cos(a.heading)*8;
-        if(!safe(aheadX,aheadZ,terrain))desired=a.heading+a.side*Math.PI*.75;
-        a.heading+=dolphinClamp(dolphinAngle(desired-a.heading),-.65*dt,.65*dt);
-        const nx=a.x+Math.sin(a.heading)*speed*dt,nz=a.z-Math.cos(a.heading)*speed*dt;
-        if(safe(nx,nz,terrain)){a.x=nx;a.z=nz;}else{a.heading+=dt*1.5;}
-        const cycle=Math.floor(age/a.period+a.phase);a.breach=(cycle+i)%5===0&&i%3===0;
-        const breath=dolphinBreath(age,a.phase,a.period,a.breach);
-        a.depth=breath.depth-sink;a.pitch=breath.pitch;
-        if(a.previousDepth>-.2&&a.depth<=-.2&&sink===0){
-          const s=splashes.reduce((old,p)=>p.age>old.age?p:old,splashes[0]);
-          Object.assign(s,{x:a.x,z:a.z,age:0,strength:a.breach?1:.5,heading:a.heading,seed:a.phase*91+i});
-        }
-        a.previousDepth=a.depth;
-      }
-    },
-  };
-}
-
 // ---- js/dolphin-mesh.js ----
 // Procedural bottlenose proportions, metres. No external model or texture fetch.
 function createDolphinMesh(){
@@ -6120,32 +6225,41 @@ function createDolphinMesh(){
 async function createDolphins({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random}){
   const state=createDolphinEncounter(random),mesh=createDolphinMesh(),B=GPUBufferUsage;
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
-  const values=new Float32Array(DOLPHIN_LIMIT*8),splashValues=new Float32Array(DOLPHIN_SPLASH_LIMIT*8);
+  const values=new Float32Array(DOLPHIN_LIMIT*8),splashValues=new Float32Array(DOLPHIN_SPLASH_LIMIT*12);
   const animals=buffer('dolphin poses',values,B.STORAGE),splashes=buffer('dolphin water entries',splashValues,B.STORAGE);
   const vertex=buffer('dolphin vertices',mesh.vertices,B.VERTEX),index=buffer('dolphin indices',mesh.indices,B.INDEX);
   const module=await shader(DOLPHIN_RENDER,'dolphins');
   const layout=[{arrayStride:36,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x3'}]}];
-  const kinds=[['dolphin',layout],['dolphinRipple',[]],['dolphinDrop',[]]];
-  const pipelines=await Promise.all(kinds.map(([kind,buffers],i)=>device.createRenderPipelineAsync({label:['dolphins','dolphin ripples','dolphin spray'][i],layout:'auto',
+  const kinds=[['dolphin',layout],['dolphinRipple',[]],['dolphinSplash',[]],['dolphinDrop',[]]];
+  const pipelines=await Promise.all(kinds.map(([kind,buffers],i)=>device.createRenderPipelineAsync({label:['dolphins','dolphin ripples','dolphin splash crowns','dolphin spray'][i],layout:'auto',
     vertex:{module,entryPoint:kind+'VS',buffers},fragment:{module,entryPoint:kind+'FS',targets:[{format,...(i?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})));
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:splashes}];
-  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?[0,1,2,3,4,5,6,7,8]:[0,1,2,3,5,6,7,9]).includes(e.binding))}));
-  let splashCount=0;
+  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?[0,1,2,3,4,5,6,7,8]:[0,1,2,3,4,5,6,7,9]).includes(e.binding))}));
+  let splashCount=0,burstCount=0;
   return {state,triangles:mesh.indices.length/3,
     update(dt,boat,settings,terrain=null,vessels=[boat]){
-      state.step(dt,boat,settings,terrain,vessels);splashCount=0;
-      if(!state.active)return;
+      state.step(dt,boat,settings,terrain,vessels);splashCount=0;burstCount=0;
       for(let i=0;i<state.count;i++){
         const a=state.animals[i];values.set([a.x,a.depth,a.z,a.heading,a.pitch,a.scale,a.phase*Math.PI*2,1],i*8);
       }
-      for(const s of state.splashes)if(s.age<3.2&&s.strength>0){splashValues.set([s.x,s.z,s.age,s.strength,s.heading,s.seed,0,0],splashCount++*8);}
-      device.queue.writeBuffer(animals,0,values);if(splashCount)device.queue.writeBuffer(splashes,0,splashValues);
+      // Burst records come first: surface swimming draws rings only, while
+      // emergence/reentry also draws a short connected sheet and secondary drops.
+      for(const trail of [false,true])for(const s of state.splashes){
+        if(s.age<0||s.age>=DOLPHIN_SPLASH_SECONDS||s.strength<=0||(s.kind==='trail')!==trail)continue;
+        const kind=trail?0:s.kind==='emerge'?1:2;
+        splashValues.set([s.x,s.z,s.age,s.strength,s.heading,s.seed,kind,s.scale??1,s.speed??0,0,0,0],splashCount++*12);
+        if(!trail)burstCount++;
+      }
+      if(state.active)device.queue.writeBuffer(animals,0,values);if(splashCount)device.queue.writeBuffer(splashes,0,splashValues,0,splashCount*12);
     },
     draw(pass){
-      if(!state.active)return;
-      pass.setPipeline(pipelines[0]);pass.setBindGroup(0,groups[0]);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);
-      if(splashCount)for(let i=1;i<3;i++){pass.setPipeline(pipelines[i]);pass.setBindGroup(0,groups[i]);pass.draw(6,splashCount*(i===2?12:1));}
+      if(state.active){pass.setPipeline(pipelines[0]);pass.setBindGroup(0,groups[0]);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);}
+      if(splashCount){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,groups[1]);pass.draw(DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_RINGS*DOLPHIN_RIPPLE_ROWS*6,splashCount);}
+      if(burstCount){
+        pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);pass.draw(DOLPHIN_SHEET_SEGMENTS*DOLPHIN_SHEET_ROWS*6,burstCount);
+        pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,burstCount*DOLPHIN_DROP_COUNT);
+      }
     },
     destroy(){for(const b of [animals,splashes,vertex,index])b.destroy();},
   };

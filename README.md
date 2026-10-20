@@ -288,8 +288,15 @@ Pods of 5–7 dolphins visit occasionally in fair weather. Each opportunity wait
 at least seven minutes plus an exponential interval averaging 15 minutes,
 including the first visit; use the debug trigger for immediate viewing. Encounters last
 about 105 seconds. The procedural animals swim, breathe, occasionally breach,
-beat their tails and leave small water-entry ripples and droplets. Their height
-samples the same displaced wave field as the ocean; the water depth test
+beat their tails and disturb the water as they surface and dive. Rising trunk
+contact makes a small splash, reentry makes a stronger connected splash crown
+and secondary droplets, and surface swimming leaves short broken ripple trails.
+Tessellated rings expand from their world-space contact positions and follow all
+six ocean wave bands; they fade after 4.2 seconds. Airborne/submerged dolphins do
+not emit surface trails. The bounded 64-event pool uses fixed contact timing and
+at most four trail stamps per second per animal, independent of render FPS.
+These local surface effects are visual geometry, not additional FFT wave energy.
+Their height samples the same displaced wave field as the ocean; the water depth test
 occludes submerged bodies. They avoid the active hulls and water shallower than
 six metres. Motion is authored wildlife behavior, not a hydrodynamic animal
 simulation. No wildlife draw or effect pass runs while a pod is absent.
@@ -575,12 +582,14 @@ npm run build
 npm test
 ```
 
-The reusable-model revision passes **219/219 tests** using installed Chrome on
+The dolphin-surface-effects revision passes **221/221 tests** using installed Chrome on
 macOS/Metal, including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
 Model checks preserve the exact Niña mesh/index hashes and verify named attachments,
 shared geometry, planned-model guards, independent crew and bundled license notices.
+Dolphin checks cover contact-gated emission across 10–120 FPS, visible splash/ripple
+geometry, expanding rings, all-wave-band height tracking, occlusion and clearing.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
 in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
 retain their original assertions. This handles native compiler reassociation

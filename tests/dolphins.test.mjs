@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createDolphinEncounter,dolphinBreath,DOLPHIN_LIMIT,DOLPHIN_ENCOUNTER_SECONDS,DOLPHIN_SPLASH_LIMIT} from '../js/dolphin-state.js';
+import {createDolphinEncounter,dolphinBreath,dolphinSurfaceContact,DOLPHIN_LIMIT,DOLPHIN_ENCOUNTER_SECONDS,DOLPHIN_SPLASH_LIMIT,DOLPHIN_SPLASH_SECONDS} from '../js/dolphin-state.js';
 import {createDolphinMesh} from '../js/dolphin-mesh.js';
 const vessel=()=>({x:0,z:0,length:20,beam:6,heading:0,surgeVelocity:2});
 function seeded(){let n=37241;return ()=>{n=(Math.imul(n,1664525)+1013904223)>>>0;return n/4294967296;};}
@@ -52,6 +52,61 @@ test('pod motion and brief water entries stay finite, separated from hulls and c
     assert.ok(sawSurface&&sawSubmerged&&sawSplash);
   }
   const s=createDolphinEncounter(()=>.5);s.step(100,vessel());assert.ok(s.time<=.1,'background pauses do not advance encounters');
+});
+
+test('surface events follow the pitched trunk, with no underwater, airborne, idle or zero-delta emitter',()=>{
+  assert.equal(dolphinSurfaceContact(-.65,0,1).touching,false,'an exposed dorsal fin above a submerged trunk is not a body-water contact');
+  assert.equal(dolphinSurfaceContact(1,0,1).touching,false,'a fully airborne dolphin leaves no trail');
+  assert.equal(dolphinSurfaceContact(-.15,0,1).touching,true);
+  assert.equal(dolphinSurfaceContact(-.55,.6,1).touching,true,'pitch can bring the trunk to the surface before the root');
+  const state=createDolphinEncounter(()=>0),boat=vessel();state.step(.1,boat);
+  assert.ok(state.splashes.every(s=>s.strength===0),'no encounter means no emission');
+  state.trigger(boat);
+  for(let i=0;i<20;i++)state.step(0,boat);
+  assert.ok(state.splashes.every(s=>s.strength===0),'render-only updates cannot generate contacts');
+  for(let i=0;i<10;i++)state.step(.1,boat);
+  assert.ok(state.splashes.every(s=>s.strength===0),'a submerged swimming pod cannot emit arbitrary surface spray');
+  let lastId=0;const kinds=new Set(),entryStrength=[],emergeStrength=[];
+  for(let frame=0;frame<60*90;frame++){
+    boat.z-=2/60;state.step(1/60,boat);
+    const fresh=state.splashes.filter(s=>s.id>lastId&&s.strength>0);lastId=Math.max(lastId,...fresh.map(s=>s.id));
+    for(const s of fresh){
+      kinds.add(s.kind);assert.ok([s.x,s.z,s.age,s.strength,s.heading,s.seed,s.speed,s.scale].every(Number.isFinite));
+      assert.ok(s.age>=-1e-7&&s.age<=.1);assert.ok(s.speed>0&&s.scale>0);
+      const a=state.animals[s.animal],at=state.age-s.age,cycle=Math.floor(at/a.period+a.phase),breach=(cycle+s.animal)%5===0&&s.animal%3===0;
+      const pose=dolphinBreath(at,a.phase,a.period,breach),contact=dolphinSurfaceContact(pose.depth,pose.pitch,a.scale);
+      assert.equal(contact.touching,true,`${s.kind} occurs at an actual body-water contact`);
+      if(s.kind==='entry')entryStrength.push(s.strength);
+      if(s.kind==='emerge')emergeStrength.push(s.strength);
+    }
+    assert.ok(state.splashes.filter(s=>s.strength>0&&s.age<DOLPHIN_SPLASH_SECONDS).length<=DOLPHIN_SPLASH_LIMIT);
+  }
+  assert.deepEqual([...kinds].sort(),['emerge','entry','trail']);
+  assert.ok(Math.max(...entryStrength)>Math.max(...emergeStrength),'breach landings drive the stronger splash');
+  state.clear();assert.ok(state.splashes.every(s=>s.strength===0),'ending an encounter removes its effects');
+  state.trigger(boat);for(let i=0;i<50;i++)state.step(.1,boat);
+  boat.x+=1000;state.step(.1,boat);assert.ok(state.splashes.every(s=>s.strength===0),'teleports cannot leave water effects behind');
+});
+
+test('surface emission uses fixed contact times and bounded trail cadence across frame rates',()=>{
+  const snapshots=[];
+  for(const hz of [10,30,60,120]){
+    const state=createDolphinEncounter(seeded()),boat=vessel();state.trigger(boat);
+    let lastId=0;const events=[];
+    for(let frame=0;frame<hz*60;frame++){
+      boat.z-=2/hz;state.step(1/hz,boat);
+      const fresh=state.splashes.filter(s=>s.id>lastId&&s.strength>0).sort((a,b)=>a.id-b.id);lastId=Math.max(lastId,...fresh.map(s=>s.id));
+      for(const s of fresh)events.push({animal:s.animal,kind:s.kind,at:Math.round((state.age-s.age)*1e6)});
+    }
+    // Event order between animals within a frame is immaterial; event times and counts are fixed.
+    snapshots.push(events.sort((a,b)=>a.at-b.at||a.animal-b.animal||a.kind.localeCompare(b.kind)));
+    for(let animal=0;animal<state.count;animal++){
+      const trails=events.filter(e=>e.animal===animal&&e.kind==='trail');
+      for(let i=1;i<trails.length;i++)assert.ok(trails[i].at-trails[i-1].at>=249999,'trail stamps never exceed four per second');
+    }
+  }
+  for(const snapshot of snapshots.slice(1))assert.deepEqual(snapshot,snapshots[0]);
+  assert.equal(DOLPHIN_SPLASH_LIMIT,64);assert.equal(DOLPHIN_SPLASH_SECONDS,4.2);
 });
 
 test('breathing arcs have rising and falling pitch and geometry has dolphin scale and finite normals',()=>{
