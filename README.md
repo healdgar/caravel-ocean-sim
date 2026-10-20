@@ -122,6 +122,9 @@ credential files are never supplied to that reviewer. Its perceptual comments
 guide selection; approximate reported timestamps are checked against the audio
 duration and waveform before editing.
 
+The separate [hull and wave audio improvement](assets/audio/README.md#deferred-hull-and-wave-audio)
+is deferred for a later pass.
+
 The selected twelve sounds are integrated. **Sea settings → Enable sound** starts Web Audio
 from a user gesture; **Mute sound** suspends it. Nothing contacts ElevenLabs at
 runtime. Steady/strong wind blend with apparent wind, hull wash follows absolute
