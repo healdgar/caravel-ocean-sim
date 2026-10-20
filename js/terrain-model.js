@@ -28,7 +28,7 @@ export function terrainSample(heights,x,z,region=ISLAND){
   return (heights[k]*(1-a)+heights[k+1]*a)*(1-b)+(heights[k+n]*(1-a)+heights[k+n+1]*a)*b;
 }
 export function islandGeometry(heights){
-  const n=ISLAND.size,step=ISLAND.span/(n-1),vertices=new Float32Array(n*n*8),indices=[];
+  const n=ISLAND.size,step=ISLAND.span/(n-1),vertices=new Float32Array(n*n*8),indices=[],submergedIndices=[];
   for(let j=0;j<n;j++)for(let i=0;i<n;i++){
     const k=j*n+i,h=heights[k],x=ISLAND.x+(i/(n-1)-.5)*ISLAND.span,z=ISLAND.z+(j/(n-1)-.5)*ISLAND.span;
     const dx=(heights[j*n+Math.max(0,i-1)]-heights[j*n+Math.min(n-1,i+1)])/(2*step);
@@ -38,8 +38,11 @@ export function islandGeometry(heights){
     if(i<n-1&&j<n-1&&Math.max(h,heights[k+1],heights[k+n],heights[k+n+1])>-.5){
       indices.push(k,k+n,k+1,k+1,k+n,k+n+1);
     }
+    if(i<n-1&&j<n-1&&Math.min(h,heights[k+1],heights[k+n],heights[k+n+1])<0&&Math.max(h,heights[k+1],heights[k+n],heights[k+n+1])>-45){
+      submergedIndices.push(k,k+n,k+1,k+1,k+n,k+n+1);
+    }
   }
-  return {vertices,indices:new Uint32Array(indices)};
+  return {vertices,indices:new Uint32Array(indices),submergedIndices:new Uint32Array(submergedIndices)};
 }
 export function islandVegetation(heights,mask,region=ISLAND){
   return seedVegetation(region,(x,z)=>terrainSample(heights,x,z,region),mask);

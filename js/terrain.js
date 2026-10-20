@@ -2,7 +2,7 @@ import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, te
 import { TREE_VARIANTS, treeGeometry, selectTreeLods } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 
-export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples}){
+export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null}){
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   const [heightResponse,biomeResponse,albedoResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo)]);
   const heights=decodeIsland(await heightResponse.arrayBuffer()),biome=decodeBiome(await biomeResponse.arrayBuffer());
@@ -13,6 +13,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   };
   const vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices');
   const indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices');
+  const submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices'):indices;
+  const submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
   const uniform=buffer(new Float32Array([ISLAND.x,ISLAND.z,ISLAND.span,1]),GPUBufferUsage.UNIFORM,'land domain');
   const elevation=device.createTexture({label:'island elevation',size:[ISLAND.size,ISLAND.size],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:ISLAND.size*4},[ISLAND.size,ISLAND.size]);
@@ -63,6 +65,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()]];
   const groups=[terrainPipe,treePipe].map(pipe=>bind(pipe,resources));
   const cloudGroups=[terrainPipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
+  const submerged=waterOptics?await waterOptics.capture({source:TERRAIN,pipeline:terrainPipe,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}):null;
+  const submergedGroup=submerged?.bindGroup(resources.map(([binding,resource])=>({binding,resource}))),submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
   let tick=0;
@@ -75,6 +79,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     encode(pass,changed=false){
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
+    },
+    drawSubmerged(pass){
+      if(!submerged||!submergedCount)return;
+      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);
     },
     draw(pass,camera={x:0,y:6,z:0}){
       updateTrees(camera);

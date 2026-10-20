@@ -24,6 +24,7 @@ import { createVesselShadows, createSceneShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { createSpindrift } from './spindrift.js';
 import { createSurfaceWetness } from './wetness.js';
+import { createWaterOptics } from './water-optics.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import {getShipModel} from './ship-models.js';
 import {vesselVerticalScale} from './hull.js';
@@ -41,7 +42,7 @@ import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } f
 import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS } from './wgsl/common.js';
 import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, FLEET_FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
-import { OCEAN, OCEAN_VISIBLE, SKY_BG, FLEET_HEIGHT_PROBE, createCoastalOcean } from './wgsl/ocean.js';
+import { SKY_BG, FLEET_HEIGHT_PROBE, createOpticalOcean } from './wgsl/ocean.js';
 import { BLOOM_DOWN, BLOOM_UP, COMPOSITE } from './wgsl/post.js';
 
 const qs = new URLSearchParams(location.search);
@@ -67,7 +68,7 @@ export const P = {
   swellLength: 120,    // m peak wavelength
   swellSpread: 48,     // cos^2s exponent
   choppy: 1.25,
-  turbidity: 1.6,     // water body brightness (coastal sediment / plankton)
+  turbidity: 1.6,     // sediment/plankton scatter and submerged visibility
   foam: 1.0,
   spindrift: 1.0,     // wind-stripped breaking crests, independent of boat spray
   sunElev: 2.6,        // deg
@@ -294,7 +295,7 @@ async function main() {
   const MSAA = 4;
   const HDR = 'rgba16float';
   const [oceanMod, skyMod, downMod, upMod, compMod] = await Promise.all([
-    shader(LAND_STAGE?createCoastalOcean(COASTAL_WATER,OCEAN_DEPTH):OCEAN_DEPTH ? OCEAN_VISIBLE : OCEAN, 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
+    shader(createOpticalOcean(LAND_STAGE?COASTAL_WATER:'',OCEAN_DEPTH), 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
     shader(BLOOM_UP, 'bloom up'), shader(COMPOSITE, 'composite'),
   ]);
   const oceanPipe = await device.createRenderPipelineAsync({
@@ -361,6 +362,11 @@ async function main() {
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
     multisample: { count: MSAA },
   });
+  const waterOptics=await createWaterOptics({device,shader,seaView:fullArr(dispTex),seaSampler:samplerSim,format:HDR});
+  const submergedCaravel=await waterOptics.capture({source:CARAVEL,pipeline:caravelPipe,
+    vertex:{entryPoint:'vs',buffers:[{arrayStride:36,attributes:[
+      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'}]}]},world:'in.world',groups:2});
   const shipAssets=createShipAssetCache();
   const shipAsset=SHIP_ID==='nina'?shipAssets.get('nina'):shipAssets.get(SHIP_ID);
   const {vertices:caravelMesh,indices:caravelIndices} = shipAsset;
@@ -390,7 +396,7 @@ async function main() {
   const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness,targets:sceneShadows.layer(0)});
   const oceanShadows=sceneShadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let crew=null,crewError='';
-  try { crew=await createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,modelId:shipAsset.model.id}); }
+  try { crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,modelId:shipAsset.model.id}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
   const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe });
@@ -402,7 +408,7 @@ async function main() {
   const companionWetness=await createSurfaceWetness({device,mesh:caravelMesh,hullUBO:companionHullUBO,frameUBO,computePipe});
   const companionShadows=await createVesselShadows({device,hullUBO:companionHullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness:companionWetness,targets:sceneShadows.layer(1)});
   let companionCrew=null;
-  try{companionCrew=await createCrew({device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
+  try{companionCrew=await createCrew({waterOptics,device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
   catch(error){console.warn('Companion crew initialization:',error);}
   const companionInteraction=await createWaterInteraction({device,frameUBO,hullUBO:companionHullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe});
   companionInteraction.setShadows(companionShadows);
@@ -411,6 +417,7 @@ async function main() {
     {id:'player',boat:null,hullUBO,hullData,wetness,shadows,crew,interaction,lighting:caravelShadows},
     {id:'companion',boat:null,hullUBO:companionHullUBO,hullData:companionHullData,wetness:companionWetness,shadows:companionShadows,crew:companionCrew,interaction:companionInteraction,lighting:companionShadows.bind(caravelPipe)},
   ];
+  for(const v of vessels)v.submergedLighting=v.shadows.bind(submergedCaravel.pipeline);
   const wakeIndices=[0,1,2,3];
   const wakeIndex=()=>interaction.current+2*companionInteraction.current;
   const bgFoamUpd=[0,1].map(i=>wakeIndices.map(w=>bg(foamUpdPipe,[{buffer:foamUBO},lvl(foamW[1-i],0),lvl(foamW[i],0),
@@ -429,13 +436,13 @@ async function main() {
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
   const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
-  const terrain=LAND_STAGE?await createTerrain({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):null;
+  const terrain=LAND_STAGE?await createTerrain({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):null;
   const coastalGroup=terrain?.waterGroup(oceanPipe);
   const weather=createWeatherState();
   const weatherRenderer=await createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
-  await Promise.all(vessels.map(async v=>{v.anchorRenderer=await createAnchorRenderer({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
-  const dolphins=await createDolphins({device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
-  const marineLife=await createMarineLife({device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
+  await Promise.all(vessels.map(async v=>{v.anchorRenderer=await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
+  const dolphins=await createDolphins({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
+  const marineLife=await createMarineLife({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   const impactDetector=createImpactDetector();
   const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
@@ -493,6 +500,12 @@ async function main() {
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto');
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
+  let submergedColor,submergedDepth,oceanOpticsGroup;
+  const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
+  const opticsEmptyLayout=device.createBindGroupLayout({entries:[]});
+  const opticsEmptyGroup=device.createBindGroup({layout:opticsEmptyLayout,entries:[]});
+  const submergedPass={label:'Submerged geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
+    depthStencilAttachment:{view:null,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
   let waterMips = 1, waterMipGroups = [];
   const mainPass = {
     colorAttachments: [{ view: null, resolveTarget: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'discard' }],
@@ -514,7 +527,13 @@ async function main() {
     if (w === W && h === H) return;
     W = w; H = h;
     canvas.width = W; canvas.height = H;
-    for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy]) t && t.destroy();
+    for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,submergedDepth]) t && t.destroy();
+    submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
+    submergedDepth=device.createTexture({label:'submerged visibility',size:[W,H],format:'depth32float',usage:TU.RENDER_ATTACHMENT});
+    submergedPass.colorAttachments[0].view=submergedColor.createView();
+    submergedPass.depthStencilAttachment.view=submergedDepth.createView();
+    oceanOpticsGroup=device.createBindGroup({label:'water transmission',layout:oceanPipe.getBindGroupLayout(3),entries:[
+      {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}}]});
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
@@ -524,9 +543,12 @@ async function main() {
     waterMipGroups = [];
     for (let m=1;m<waterMips;m++) waterMipGroups.push(bg(waterFilterPipe,
       [lvl(waterCopy,m-1,'2d'),lvl(waterCopy,m,'2d')], 'water reflection mip'));
-    for(const v of vessels)v.bindGroup=bg(caravelPipe,[{buffer:frameUBO},transView,skyView,sampClamp,
-      envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
-      {buffer:v.wetness.state},{buffer:v.wetness.lookup}],v.id+' caravel');
+    for(const v of vessels){
+      const resources=[{buffer:frameUBO},transView,skyView,sampClamp,
+        envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
+        {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
+      v.bindGroup=bg(caravelPipe,resources,v.id+' caravel');v.submergedGroup=submergedCaravel.bindGroup(resources);
+    }
     bgCaravel=vessels[0].bindGroup;
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
@@ -873,6 +895,8 @@ async function main() {
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
     device.queue.writeBuffer(frameUBO, 0, f);
+    opticsData[0]=P.turbidity;opticsData[1]=qs.get('waterOptics')==='0'?0:1;
+    device.queue.writeBuffer(opticsUBO,0,opticsData);
   }
 
   // --------------------------------------------------------------------------------------
@@ -1501,6 +1525,16 @@ async function main() {
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
     for(const [i,v] of vessels.entries())v.shadows.encode(enc,profiler,v.crew?.drawShadow,i?'Companion ':'');
+    submergedPass.timestampWrites=profiler.writes('Submerged geometry');
+    const underwater=enc.beginRenderPass(submergedPass);
+    terrain?.drawSubmerged(underwater);
+    for(const v of vessels){
+      if(!v.boat.showProw)continue;
+      submergedCaravel.bind(underwater);underwater.setBindGroup(0,v.submergedGroup);underwater.setBindGroup(1,v.submergedLighting);
+      underwater.setVertexBuffer(0,caravelBuffer);underwater.setIndexBuffer(caravelIndexBuffer,'uint32');underwater.drawIndexed(caravelIndices.length);
+      v.crew?.drawSubmerged(underwater);v.anchorRenderer.drawSubmerged(underwater);
+    }
+    dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     mainPass.timestampWrites=profiler.writes('Ocean + sky');
     mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
@@ -1519,7 +1553,8 @@ async function main() {
       rp.setPipeline(oceanPipe);
       rp.setBindGroup(0, bgOcean[foamCur][wakeIndex()]);
       rp.setBindGroup(1, oceanShadows);
-      if(coastalGroup)rp.setBindGroup(2,coastalGroup);
+      rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
+      rp.setBindGroup(3,oceanOpticsGroup);
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
     rp.setPipeline(skyPipe);

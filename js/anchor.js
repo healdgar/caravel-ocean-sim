@@ -4,7 +4,7 @@ import { boatRotate } from './boat.js';
 
 // One anchor, a 48-span hemp rode, and one short-lived impact splash. No new
 // textures, compute fields, readbacks, per-particle objects, or shadow maps.
-export async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,envCubeView,sunVisBuf,shadows,shader,format,samples}) {
+export async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics=null}) {
   const module=await shader(ANCHOR_RENDER,'anchor and hemp rode');
   const vertices=new Float32Array(4096*8);let cursor=0,solidCount=0,totalCount=0,stowedCache='',shapeScale=1;
   const buffer=device.createBuffer({label:'anchor dynamic geometry',size:vertices.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
@@ -17,6 +17,9 @@ export async function createAnchorRenderer({device,frameUBO,transView,skyView,sa
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer}];
   const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))}));
   const shadowGroups=pipes.map(pipe=>shadows.bind(pipe));
+  const submerged=waterOptics?await waterOptics.capture({source:ANCHOR_RENDER,pipeline:pipes[0],
+    vertex:{buffers:[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}]},groups:2}):null;
+  const submergedGroup=submerged?.bindGroup(resources),submergedShadows=submerged?shadows.bind(submerged.pipeline):null;
   const add=(p,n,kind=0,alpha=1)=>{if(cursor+8>vertices.length)throw new Error('Anchor geometry budget exceeded');vertices.set([p[0],p[1],p[2],n[0],n[1],n[2],kind,alpha],cursor);cursor+=8;};
   const triangle=(a,b,c,kind,alpha=1)=>{
     const u=b.map((n,i)=>n-a[i]),v=c.map((n,i)=>n-a[i]),n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...n)||1;
@@ -99,6 +102,10 @@ export async function createAnchorRenderer({device,frameUBO,transView,skyView,sa
         }
       }
       totalCount=cursor/8;device.queue.writeBuffer(buffer,0,vertices,0,cursor);
+    },
+    drawSubmerged(pass){
+      if(!submerged||!solidCount)return;
+      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedShadows);pass.setVertexBuffer(0,buffer);pass.draw(solidCount);
     },
     draw(pass){
       pass.setVertexBuffer(0,buffer);

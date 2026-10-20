@@ -143,7 +143,7 @@ export function createMarineMesh(type='whale'){
   return {vertices:new Float32Array(vertices),indices:new Uint32Array(indices)};
 }
 
-export async function createMarineLife({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random}){
+export async function createMarineLife({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random,waterOptics=null}){
   const state=createMarineLifeState(random),B=GPUBufferUsage;
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const values=new Float32Array(MARINE_ANIMAL_LIMIT*8),effectValues=new Float32Array(MARINE_EFFECT_LIMIT*12);
@@ -157,6 +157,8 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})));
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects}];
   const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?[0,1,2,3,4,5,6,7,8]:[0,1,2,3,4,5,6,7,9]).includes(e.binding))}));
+  const submerged=waterOptics?await waterOptics.capture({source:MARINE_LIFE_RENDER,pipeline:pipelines[0],vertex:{entryPoint:'dolphinVS',buffers:layout},entry:'dolphinFS',world:'v.world'}):null;
+  const submergedGroup=submerged?.bindGroup(resources.slice(0,9));
   let waterCount=0,burstCount=0,blowCount=0;
   return {state,trigger:(type,boat,options)=>state.trigger(type,boat,options),encode(){},
     update(dt,boat,settings,terrain=null,vessels=[boat]){
@@ -173,6 +175,10 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
       }
       if(state.active)device.queue.writeBuffer(animals,0,values);
       if(count)device.queue.writeBuffer(effects,0,effectValues,0,count*12);
+    },
+    drawSubmerged(pass){
+      if(!submerged||!state.active)return;
+      const mesh=meshes[state.animals[0].type];submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);
     },
     draw(pass){
       if(state.active){const mesh=meshes[state.animals[0].type];pass.setPipeline(pipelines[0]);pass.setBindGroup(0,groups[0]);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);}

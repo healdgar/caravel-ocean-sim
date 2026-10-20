@@ -160,7 +160,7 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   return s;
 }
 
-export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina'}) {
+export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
   const models=shared?.models??await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
   })),B=GPUBufferUsage,state=createCompany(undefined,modelId);
@@ -184,11 +184,15 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const vertex=shared?.geometry[i].vertex??buffer('crew vertices',model.vertices,B.VERTEX),index=shared?.geometry[i].index??buffer('crew indices',model.indices,B.INDEX);
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
-    const main=group(pipeline,[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView]);
+    const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView];
+    const main=group(pipeline,mainResources);
     const shadow=group(shadowPipeline,[{buffer:shadows.uniform},...common]);
-    return {model,people,poses,actors,vertex,index,bones,actor,main,shadow};
+    return {model,people,poses,actors,vertex,index,bones,actor,main,shadow,mainResources};
   });
   const lighting=shadows.bind(pipeline);
+  const submerged=waterOptics?await waterOptics.capture({source:CREW_RENDER,pipeline,vertex:{buffers:layout},groups:2}):null;
+  const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
+  if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
   let enabled=true,drawEnabled=false;
   const drawBatch=(pass,b,shadow)=>{pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);};
   return {state,assets:{models,pipeline,shadowPipeline,geometry:batches.map(({vertex,index})=>({vertex,index}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),joints:65,
@@ -213,6 +217,11 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }
+    },
+    drawSubmerged(pass){
+      if(!submerged||!drawEnabled)return;
+      submerged.bind(pass);pass.setBindGroup(1,submergedLighting);
+      for(const b of batches){pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);}
     },
     draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);},
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);},

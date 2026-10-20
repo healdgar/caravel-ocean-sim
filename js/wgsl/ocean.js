@@ -4,6 +4,7 @@ import { SCENE_SHADOW_SAMPLE } from './shadows.js';
 // Ocean surface + sky background rendering.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
+import { WATER_TRANSMISSION } from './water-optics.js';
 
 const RENDER_BINDINGS = /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -328,6 +329,16 @@ export const OCEAN = oceanSource();
 export const OCEAN_VISIBLE = OCEAN.replace(OCEAN_HULL_MASK, '');
 export function createCoastalOcean(coast,depthFirst){
   const code=oceanSource(coast);return depthFirst?code.replace(OCEAN_HULL_MASK,''):code;
+}
+
+// The legacy shader remains available for isolated ocean probes. The scene
+// composes every submerged solid through this shared optical path.
+export function createOpticalOcean(coast='',depthFirst=true){
+  const code=oceanSource(coast)+WATER_TRANSMISSION;
+  const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
+    .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
+      'body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)');
+  return depthFirst?optical.replace(OCEAN_HULL_MASK,''):optical;
 }
 
 // Samples the displaced surface height under the camera (inverting the horizontal

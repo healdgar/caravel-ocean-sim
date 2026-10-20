@@ -333,6 +333,32 @@ Dolphins, sharks and whales share a wet skin material: a thin water clearcoat
 adds narrow sun glints and sky reflections above the softer skin reflection.
 Highlights follow the actual sun and camera and disappear when sunlight is absent.
 
+### Shared underwater optics
+
+Surface waves refract submerged geometry through one shared render path: both
+ships, crew, anchors and rode, dolphins, sharks, whales and the shallow seabed.
+The source pass captures posed materials below the displaced water surface.
+The ocean bends the view ray using the current FFT and wake normal, then applies
+RGB depth attenuation before Fresnel reflection, sunlight glitter and foam.
+Ripples therefore distort underwater silhouettes; grazing reflections and foam
+obscure them. Deep animals lose contrast and detail, fading into the water color.
+
+**Water turbidity** controls suspended-particle extinction as well as water-body
+brightness. Clear water reveals more submerged detail; turbid water hides it
+sooner. Refraction uses water's approximate refractive index of 1.333 and
+Beer–Lambert attenuation with authored blue-green-water coefficients, rather
+than measured local water samples. The resident coastal pack supplies an
+authored shallow seabed, not surveyed bathymetry.
+
+This is a screen-space approximation with one submerged depth layer. Missing or
+off-screen samples fall back to ordinary water shading; underwater cameras,
+multiple refractions and volumetric caustics are not modeled. Atmosphere is
+applied once, between camera and surface. `waterOptics=0` provides a diagnostic
+comparison; profiling includes a separate **Submerged geometry** span.
+
+Optical basis: [PBRT refraction and Fresnel](https://www.pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission)
+and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transmittance).
+
 A separate, bounded marine encounter occasionally introduces a passing shark or
 an approximately 14 m humpback-like whale. Whale encounters include a full breach,
 reentry splash, fluke dive and periodic blow. The shark swims with lateral tail
@@ -640,7 +666,7 @@ npm run build
 npm test
 ```
 
-The Victory, landfall and marine-encounter revision passes **264/264 tests** using installed Chrome on
+The shared underwater-optics revision passes **269/269 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -652,6 +678,10 @@ clearing, whale breaches/flukes/blows and wet-skin sunlight glints. Victory chec
 cover hull/deck geometry, source dimensions, independent mast groups, wind-driven
 loading, mass/inertia, 48 rig clearance poses, sewn head/yard joints, CPU/GPU cloth
 parity, crew reach/routes, anchor scaling, draft-safe coastal starts and two-ship rendering.
+Underwater checks cover Snell refraction, Fresnel reflection, spectral extinction,
+sparse silhouettes at 12/60 m without dark halos, visible crest faces above eye
+level, all six material families, real whale/dolphin image changes, resizing and
+coastal seabed capture in a standalone build.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
 in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
 retain their original assertions. This handles native compiler reassociation
@@ -659,6 +689,8 @@ without accepting geometry or visible shading changes. Software rendering keeps
 the packed-wave comparison exact. The byte-exact indexing/resolve fixture holds
 the ocean flat to isolate those changes from FFT rounding; wave behavior has
 separate travelling-wave and rough-sea coverage.
+Identical native Metal draws occasionally differed by two blue levels during
+this revision; the final serialized run passed without changing assertions.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.
@@ -728,6 +760,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`, `js/wgsl/victory.js` | Victory construction, shared square/fore-and-aft rig poses, support contact and rope leads |
 | `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and deterministic procedural tree LOD |
 | `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-ui.js` | Bounded wildlife encounters, wet animals, contact effects and debug controls |
+| `js/water-optics.js`, `js/wgsl/water-optics.js` | Shared submerged geometry capture, wave refraction, Fresnel and depth/turbidity attenuation |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
