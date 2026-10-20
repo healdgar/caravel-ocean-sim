@@ -218,6 +218,10 @@ named attachment points, semantic mesh groups and cached geometry from each
 vessel's live state. Niña is playable; Pinta and Santa María have planned rig and
 [reported specification profiles](SHIP_MODEL_RESEARCH.md). Their meshes, square
 animation/forces and three-ship toggles remain the next stage.
+The [later vessel roadmap](SHIP_MODELS.md#later-vessel-programme) then adds a
+c. AD 850 Viking longship, c. AD 350 Roman galley, 30-person 1492 Caribbean canoe
+and HMS Victory in her 1805 configuration. These require new propulsion,
+steering, hull and crew capabilities and are not available models yet.
 
 A second copy of the caravel follows by default. Open **Camera views → View both
 ships** to frame the pair; **Ship settings → Following ship** disables it, and

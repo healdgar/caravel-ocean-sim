@@ -60,3 +60,41 @@ coordinates remain independently authored and hydrostatically checked. Neither
 capacity tons nor unspecified tonnage supplies kilograms for the force model.
 Pinta can share caravel component roles with a square fore/main rig definition;
 Santa María needs its own hull/deck hierarchy, not just a scaled Niña mesh.
+
+## Later vessel reference starting points
+
+Requested sequence after the 1492 fleet: c. AD 850 Viking longship; c. AD 350 Roman
+galley; AD 1492 Caribbean canoe for 30 people; HMS Victory in 1805. This records
+targets and research leads, not selected plans, finished specifications or runtime
+support. All require dimensions and load/displacement evidence before modelling.
+
+- **Viking:** the [Museum of the Viking Age's Oseberg account](https://www.vikingtidsmuseet.no/english/viking-age/viking-ships/the-oseberg-ship.html)
+  describes a sail-and-oar vessel built in the 820s, 21.5 m long and 5 m wide,
+  with 15 oar holes per side. It is a nearby-period archaeological reference,
+  not an exact AD 850 narrow war-longship specification. The [Viking Ship Museum's
+  longship study](https://www.vikingeskibsmuseet.dk/frontend/Dokumenter/Skuldelev2_b.pdf)
+  distinguishes broader ninth-century Norwegian finds from the narrower later
+  longships. Select a defensible hull/rig interpretation for the requested period
+  before adopting dimensions or decorative reconstruction details.
+- **Roman:** [LEIZA's Museum of Ancient Seafaring](https://www.leiza.de/museen/museum-fuer-antike-schifffahrt)
+  holds the Mainz Roman wrecks and reconstructions. Treat those as a research
+  collection, not automatic approval of a particular AD 350 seagoing galley.
+  Vessel class, operating waters, steering, rig and rowing arrangement remain
+  unresolved. Do not borrow a classical trireme or later medieval galley solely
+  because it matches a familiar silhouette.
+- **Caribbean:** the [1492 journal account reproduced by Northern Virginia
+  Community College](https://pressbooks.nvcc.edu/ushistory/chapter/journal-of-christopher-columbus-1492/)
+  describes single-tree canoes, paddles and some carrying 40–45 people. That
+  supports a substantial paddled-canoe design space; it provides neither exact
+  hull offsets nor proof that 30 occupants means 30 paddlers. The requested
+  30-person capacity is our design target. Select a regional/cultural basis and
+  document reconstruction choices rather than generalizing every Caribbean canoe.
+- **Victory:** the [Royal Navy Museums' HMS Victory page](https://www.royalnavymuseums.org.uk/visit-us/portsmouth-historic-dockyard/hms-victory)
+  identifies Nelson's Trafalgar flagship and describes 1805 service with 104 guns
+  and 820 people. Use **1805 configuration** as the working target, pending any
+  user correction; obtain period plans and dated rig/deck specifications before
+  authoring. A game reconstruction of the sailing vessel must distinguish
+  historical structure from modern preservation supports and visitor alterations.
+
+These reference crew figures describe their sources; they are not approved
+runtime agent counts or substitutes for mass, ballast and hydrostatic data.

@@ -103,3 +103,49 @@ hashes. They check component ranges, shared asset caching, ready/planned guards,
 static and animated attachment alignment, inherited moving origins, crew station
 ownership and independent vessel simulation. The normal GPU suite covers the
 rendered fleet, anchor actions, crew jobs and all standalone bundles.
+
+## Later vessel programme
+
+After completing Pinta, Santa María and their sailing-together validation, build
+the following models in the requested order. These are roadmap entries, not
+runtime definitions, available models or new work replacing the current fleet.
+
+| Target | Planned capability | Reference decision before modelling |
+|---|---|---|
+| Viking longship, c. AD 850 | Sail and oar propulsion, rowing stations, steering oar, shallow open hull | Choose ninth-century evidence/reconstruction; do not silently substitute a later longship or claim an exact AD 850 wreck |
+| Roman galley, c. AD 350 | Oars and sail, coordinated rowing, vessel-specific steering and crew layout | Select a late-Roman vessel class and reconstruction; resolve seagoing versus riverine service and oar-bank arrangement |
+| Caribbean canoe, AD 1492, 30 people | Paddle propulsion and steering, occupied paddling stations, loading-sensitive freeboard | Select regional/cultural references; distinguish 30 occupants from 30 active paddlers and any extra cargo |
+| HMS Victory, 1805 configuration | Large square-rigged hull, multiple deck levels, sail groups, running rigging and gun stations | Assume Nelson's Trafalgar flagship; model her sailing-era configuration rather than copying today's conservation/display state |
+
+The Victory identity/date is the working interpretation of "Admiral Nelson's
+ship". Historical starting points and unresolved choices are recorded in
+[SHIP_MODEL_RESEARCH.md](SHIP_MODEL_RESEARCH.md#later-vessel-reference-starting-points).
+No dimensions, displacement or crew counts are inferred from the target dates.
+
+The reusable architecture must consequently support:
+
+- Optional sail, oar and paddle propulsion, including simultaneous modes where
+  supported by the selected vessel; craft without sails need no dummy masts.
+- Named oar pivots, grips, blades, paddle paths and crew stations. One evaluated
+  stroke must drive visible movement, hand targets, water contact, sound and
+  physical thrust. Dry recovery strokes cannot create propulsion.
+- Port/starboard stroke commands, cadence, crew effort and fatigue; stroke forces
+  and their lever arms determine surge/yaw, rather than an artificial speed boost.
+- Hull-specific hydrostatics, mass/inertia, load and freeboard; steering may use
+  rudders, steering oars, differential rowing or paddles as defined by the craft.
+- Variable sail, mast, deck, station and crew counts. Exposed work, climbing,
+  shelter and navigation paths belong to each model. Victory needs scalable crew
+  simulation/rendering rather than one full-cost animated agent per historical
+  occupant.
+
+These extensions are not implemented. The current ready backend assumes three
+lateen sails, crew/provisions assume twelve people, and attachment resolution
+returns points. Rowing/paddling require shared posed orientations/transforms as
+well as points. Separate optional `rig`, `propulsion`, `steering`, `crewLayout`
+and `hull/hydrostatics` definitions before admitting these future craft.
+
+Reuse ocean/weather, materials, wetness, hull contacts, wake/spray, crew identities,
+orders and attachment evaluation where applicable. Each additional hull needs
+its own displacement/contact representation and validation; a new mesh alone
+does not make the current Niña physics suitable for it. Admit each model only
+after geometry, propulsion, crew jobs and fleet performance pass its gates.
