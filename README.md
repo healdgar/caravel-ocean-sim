@@ -171,8 +171,10 @@ disables flashes. The weather clock never fast-forwards ship physics.
 
 | Input | Action |
 |---|---|
-| Click the canvas | Capture the mouse (Esc releases it). Holding the right mouse button also works. |
-| Mouse | Look around |
+| Drag the canvas with a mouse or finger | Look around; orbit in View ship. The mouse remains free after release; no pointer lock. |
+| Rudder arrows / slider | Set port or starboard rudder; arrows change the target by 5° |
+| Centre rudder icon | Set the rudder target to zero |
+| Furl / Reef / Full | Order all sails to 0%, 50%, or 100%; the crew handles the canvas |
 | W A S D | Move in Free camera; A / D steer in Boat camera |
 | Left / right arrows | Steer in Boat camera |
 | X | Centre the rudder |
@@ -186,7 +188,19 @@ disables flashes. The weather clock never fast-forwards ship physics.
 
 The free camera stays above the sampled water. The boat camera follows the hull; rough seas can overtop the gunwales and wash across the deck.
 
-On mobile, both settings panels keep their **Hide** button above the scrolling controls. Sea settings temporarily covers the boat controls. Buttons have 44 px touch targets, and the layout follows the visible viewport, safe areas and keyboard. The optional Performance monitor starts collapsed; expand it for detailed timings.
+The default view starts at the helm under **Sailing** propulsion. Heading,
+speed through water and apparent wind stay above the scene; a compact rudder
+and sail bar sits below. On desktop it uses one row; on phones, two. Finger
+drag looks around without steering. The six icon buttons open **Camera views**,
+**Captain**, **Landfall**, **Sea settings**, **Ship settings**, and **Copy share
+link**. Icons have accessible names and desktop hover labels.
+
+Only one secondary panel opens at a time. Its close button stays above the
+scrolling content. On phones, an open panel temporarily replaces the helm bar;
+navigation instruments remain visible. Phone buttons retain 44 px touch targets
+with 20 px icons. Layout follows the visible viewport, safe areas and keyboard.
+FPS/debug text is hidden on ordinary visits. `profile=1` enables it and adds the
+Performance disclosure inside Sea settings.
 
 URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolution, `cam=x,y,z,yawDeg,pitchDeg` sets the camera, `fov=deg` sets the field of view, `ui=0` hides the HUD, and any settings key works too, for example `windSpeed=12&swellHs=2&sunElev=8`.
 
@@ -279,7 +293,7 @@ rigging hand and a deck hand at the halyard; the mizzen uses its quarterdeck han
 Heavy-weather preparation requests 20% fore/main canvas, furled mizzen, and
 a carpenter to close the visible weather hatch. Returning to watch retains sail settings.
 Manual sail sliders remain in Boat perspective and supersede an outstanding order.
-The captain panel has a persistent Hide button and scrollable roster; it opens
+The captain panel has a persistent close button and scrollable roster; it opens
 separately from boat and sea settings on mobile.
 
 **Show crew** is a display switch, preserved in shared links as `crew=0/1`.
@@ -465,7 +479,7 @@ npm run build
 npm test
 ```
 
-The audio/weather revision passes **167/167 tests** using installed Chrome on
+The compact-helm revision passes **168/168 tests** using installed Chrome on
 macOS/Metal, including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting and actual Web Audio decoding.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
@@ -495,7 +509,7 @@ The suite covers:
 - Production runoff shading tests verify sunlight on vertical sheets, backlighting, transparency, marine haze and no direct sun below the horizon.
 - Production crew/vessel fragment radiance agrees for identical optical inputs under front/back lighting, solid/canvas/cloud shadows, directional marine haze, altitude changes, grazing normals and reflection toggles.
 - JavaScript and WGSL initialization in all three standalone builds.
-- Adaptive-resolution convergence, cautious recovery, bounded scale, manual overrides and background/resume handling; actual GPU target resizing and fixed capture dimensions. Mobile checks cover unobstructed Hide buttons while scrolling, collapsed/expanded profiling, and six portrait, landscape and tablet viewports.
+- Adaptive-resolution convergence, cautious recovery, bounded scale, manual overrides and background/resume handling; actual GPU target resizing and fixed capture dimensions. UI checks cover unobstructed close buttons, scrollable settings, collapsed/expanded profiling, and seven phone, landscape, tablet and desktop viewports. Touch checks verify independent camera drag and rudder commands, gradual crew-operated sails, and sailing defaults.
 - Bit-exact indexed geometry and shadow partitions; pixel equality between the original copy/unindexed schedule, direct resolve/indexed rendering, and profiled rendering; actual slow-frame FPS, timestamp readback, overlapping/early render stages, stale disabled queries, quantized zero intervals, invalid timestamps, and unsupported-device fallback.
 - Pixel equality before/after early hull exclusion, both with the water cutout exposed at the helm and with the complete ship visible from outside.
 - Analytical cross-derivative values and pixel equality between separate and packed wave-texture reads, at sunset and in rough seas.
@@ -555,7 +569,7 @@ MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Boat perspective
 
-Choose **Boat camera** in the always-visible camera controls, or open `ocean.html?boat=1`.
+Choose **Boat camera** under the **Camera views** icon, or open `ocean.html?boat=1`.
 Set length and beam in metres, heading in degrees (0 along the
 original view, 90 to the right), and camera height. The camera moves with the loaded hull.
 The default hull is **20 m long × 6 m beam**, excluding the bowsprit. The original
@@ -646,13 +660,14 @@ backing of sails is not implemented. [US Sailing's guidance](https://www.ussaili
 describes actual sail backing; this simulator currently models passive canvas
 windage and water-flow steering, not that complete crew maneuver.
 
-The optional **speed** and **wind** instruments remain visible when controls close.
+The **heading**, **speed** and **wind** instruments start visible and remain visible when controls close.
 Speed is signed longitudinal speed through water in knots; **ASTERN** identifies
 reverse motion. The wind dial shows **apparent wind from**, relative to the bow
 (always up), plus wind speed in knots. Recovery cues appear below. **Show speed
-indicator** and **Show wind indicator** in boat controls toggle them independently;
-choices persist locally and travel in share links (`speedHud=0`, `windHud=0`).
-`ui=0` also hides both. Instruments update at 10 Hz and do not affect the simulation.
+indicator**, **Show heading indicator**, and **Show wind indicator** in Ship settings toggle them independently;
+choices persist locally and travel in share links (`headingHud=0`, `speedHud=0`, `windHud=0`).
+Heading is the hull's heading, not course over ground. `ui=0` hides all instruments
+and controls. Instruments update at 10 Hz and do not affect the simulation.
 
 The operating rig is an authored, reconstruction-guided kinematic approximation,
 not a rope-tension or cloth solver. Its sheet leads, released-runner curves, yard
@@ -715,11 +730,12 @@ at 60° because capsizing is not modeled. Atmospheric stability, directional win
 shear, unsteady aerodynamic hysteresis, bare-hull windage, wave diffraction and
 full six-axis hydrodynamic coupling remain omitted.
 
-Choose **Set speed** to retain the previous propulsion model. **Calm-water speed**
+Choose **Ship settings → Propulsion → Set speed** to use the prescribed-thrust model. **Calm-water speed**
 sets the thrust that balances resistance at that speed on flat water; waves still
 change actual speed. A zero target lets the ship coast, including astern. Switching
-propulsion modes preserves momentum. Old links containing `boatSpeed` without an
-explicit propulsion mode retain this behavior and start at their selected speed.
+propulsion modes preserves momentum. Sailing is the default even when an old
+link contains `boatSpeed`; prescribed thrust now requires `propulsion=manual`.
+Tapping a sail command switches back to Sailing.
 
 The surge model uses the long-wave pressure-gradient approximation
 `(mass + addedMass) * dv/dt = thrust - drag * v * abs(v) - rho * g * volume * slope`.
@@ -752,7 +768,7 @@ ordinary provisions do not justify lowering it half a metre. For comparison,
 the [modern Niña replica operator](https://www.ninapinta.net/) reports 7 ft
 (2.13 m) draft; that different reconstruction is a scale check, not calibration.
 
-**Boat controls → Supplies and cargo** adjusts 0–120 provision days and 0–40 t
+**Ship settings → Supplies and cargo** adjusts 0–120 provision days and 0–40 t
 of additional cargo; shared links retain both. Stores do not yet deplete with
 elapsed time. Hidden crew retain their mass. Containers and spares remain aboard
 at zero provision days. Additional cargo and stores are assumed secured low
@@ -804,7 +820,7 @@ Cloud shadows attenuate the glow. The fabric coefficients are authored visual
 approximations, and the canvas retains depth occlusion rather than becoming
 transparent to background geometry. Apparent wind and deployed canvas drive propulsion
 in Sailing mode. Toggle **Show ship** or use `prow=0` to hide it.
-**Hide** collapses the controls; camera selection remains visible. Geometry
+Ship setup is behind the **Ship settings** icon; camera choices are behind **Camera views**. Geometry
 scales with boat length and beam. The ship has an independent world position
 and keeps its wave-following pose while the camera flies or orbits around it.
 

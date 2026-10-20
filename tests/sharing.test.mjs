@@ -36,6 +36,8 @@ test('camera links support all three views and legacy boat links', () => {
     const link = new URL(createShareLink('https://example.com/', {}, boat, mode));
     assert.equal(cameraModeFromLink(link.searchParams), mode);
   }
+  assert.equal(cameraModeFromLink(new URLSearchParams()), 'boat');
+  assert.equal(cameraModeFromLink(new URLSearchParams('cam=0,10,0')), 'free');
   assert.equal(cameraModeFromLink(new URLSearchParams('boat=1')), 'boat');
   assert.equal(cameraModeFromLink(new URLSearchParams('boat=0')), 'free');
   assert.equal(cameraModeFromLink(new URLSearchParams('view=invalid&boat=1')), 'boat');
@@ -63,19 +65,21 @@ test('sharing keeps the calm-water target rather than a transient wave-driven sp
   assert.equal(url.searchParams.has('surgeVelocity'), false);
 });
 
-test('sailing links preserve propulsion and individual sail targets; old speed links retain manual mode',()=>{
+test('sailing links preserve propulsion and individual sail targets; speed alone never enables manual mode',()=>{
   const ship={...boat,propulsion:'sail',sailFore:0,sailMain:.5,sailMizzen:1};
   const url=new URL(createShareLink('https://example.com/',{},ship,'boat'));
   assert.equal(propulsionFromLink(url.searchParams),'sail');
   for(const key of ['sailFore','sailMain','sailMizzen'])assert.equal(Number(url.searchParams.get(key)),ship[key]);
   assert.equal(propulsionFromLink(new URLSearchParams()),'sail');
-  assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6')),'manual');
+  assert.equal(propulsionFromLink(new URLSearchParams('propulsion=manual')),'manual');
+  assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6')),'sail');
   assert.equal(propulsionFromLink(new URLSearchParams('boatSpeed=6&propulsion=sail')),'sail');
 });
 
-test('speed and wind instrument visibility survives sharing independently',()=>{
-  for(const speedHud of [true,false])for(const windHud of [true,false]){
-    const link=new URL(createShareLink('https://example.com/',{}, {...boat,speedHud,windHud},'boat'));
+test('heading, speed and wind instrument visibility survives sharing independently',()=>{
+  for(const headingHud of [true,false])for(const speedHud of [true,false])for(const windHud of [true,false]){
+    const link=new URL(createShareLink('https://example.com/',{}, {...boat,headingHud,speedHud,windHud},'boat'));
+    assert.equal(link.searchParams.get('headingHud'),headingHud?'1':'0');
     assert.equal(link.searchParams.get('speedHud'),speedHud?'1':'0');
     assert.equal(link.searchParams.get('windHud'),windHud?'1':'0');
   }

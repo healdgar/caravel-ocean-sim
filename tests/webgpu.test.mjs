@@ -196,7 +196,7 @@ for(const entry of ['index.html','ocean.min.html','docs/index.html'])test(`landf
   const page=await browser.newPage({viewport:{width:402,height:666}});
   try{
     await page.addInitScript(instrumentRenderer);
-    await page.goto(`${origin}/${entry}?landfall=approach&view=free&prow=0&boatSpeed=0&clouds=0&w=64&h=48`);
+    await page.goto(`${origin}/${entry}?landfall=approach&view=free&prow=0&boatSpeed=0&propulsion=manual&clouds=0&w=64&h=48`);
     await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#err').textContent(),'');
     const frame=await step(page);
@@ -1572,6 +1572,7 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
     await page.getByRole('button',{name:'Reduce sail',exact:true}).click();
     hull=await advance(1000);assert.deepEqual(hull.slice(24,27),[.5,.5,.5]);
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.locator('#boat-propulsion').selectOption('manual');
     assert.equal(await page.locator('#boat-speed').isVisible(),true);assert.equal(await page.locator('#sail-controls').isVisible(),false);
     hull=await advance(3);assert.ok(hull.every(Number.isFinite));
@@ -1595,7 +1596,7 @@ test('loading controls retain the solved waterline through startup, cargo edits 
         return write.call(this,buffer,offset,data,...args);
       };
     });
-    await page.goto(`${origin}/?boat=1&boatSpeed=0&windSpeed=0&swellHs=0&clouds=0&w=32&h=32`);
+    await page.goto(`${origin}/?boat=1&boatSpeed=0&propulsion=manual&windSpeed=0&swellHs=0&clouds=0&w=32&h=32`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
     const advance=async count=>page.evaluate(async count=>{
       check.now??=0;
@@ -1605,6 +1606,7 @@ test('loading controls retain the solved waterline through startup, cargo edits 
     const base=await advance(40);
     assert.ok(Math.abs(base.hull[17]+.08561)<.0001,'spawn includes stores draft');
     assert.ok(Math.abs(base.frame[17]-(5.433333+base.hull[17]))<.0001,'camera sinks with the ship');
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.locator('#boat-loading summary').click();
     assert.equal(await page.getByLabel('Provisions for 12 (days)').inputValue(),'60');
     await page.getByLabel('Additional cargo (t)').fill('20');
@@ -1617,6 +1619,7 @@ test('loading controls retain the solved waterline through startup, cargo edits 
     await page.getByRole('button',{name:'Hella rough',exact:true}).click();
     const reset=await advance(40);assert.ok(Math.abs(reset.hull[17]+.29548)<.0001,'sea reset retains loading offset');
     await page.getByRole('button',{name:'Hide sea settings'}).click();
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Additional cargo (t)').fill('0');
     await page.getByLabel('Provisions for 12 (days)').fill('0');
     const empty=await advance(80);assert.ok(Math.abs(empty.hull[17]+.03536)<.0001);
@@ -1638,7 +1641,7 @@ test('captain camera boards to windward and follows tacks in the rendered frame'
         return write.call(this,buffer,offset,data,...rest);
       };
     });
-    await page.goto(`${origin}/?view=boat&boatSpeed=0&windSpeed=8&windDir=0&boatHeading=0&w=32&h=32`);
+    await page.goto(`${origin}/?view=boat&boatSpeed=0&propulsion=manual&windSpeed=8&windDir=0&boatHeading=0&w=32&h=32`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
     const advance=async count=>page.evaluate(async count=>{
       check.now??=performance.now();
@@ -1651,70 +1654,138 @@ test('captain camera boards to windward and follows tacks in the rendered frame'
     const port=await advance(1);
     assert.ok(port[0]<-1.8 && Math.abs(port[1]-5.433333)<.001 && Math.abs(port[2]-5.166667)<.001);
     assert.ok(Math.abs(port[3]+Math.PI/12)<.001,'default aim looks ahead outside the port sail edge');
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.locator('#boat-heading').fill('180');
     const turning=await advance(1);assert.ok(turning[0]<0,'tack does not teleport the camera');
     const starboard=await advance(100);assert.ok(starboard[0]>1.8);
     assert.ok(Math.abs(starboard[3]-Math.PI/12)<.001,'default aim mirrors with the tack');
+    await page.getByRole('button',{name:'Camera views',exact:true}).click();
     await page.getByRole('button',{name:'View ship',exact:true}).click();
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.locator('#boat-heading').fill('0');await advance(1);
+    await page.getByRole('button',{name:'Camera views',exact:true}).click();
     await page.getByRole('button',{name:'Boat camera',exact:true}).click();
     assert.ok((await advance(1))[0]<-1.8,'boarding immediately selects the current windward station');
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
   }finally{await page.close();}
 });
 
-test('mobile panels keep Hide reachable while scrolling, profiling and rotating', {timeout:120000}, async()=>{
+test('compact helm and icon panels remain reachable across phone, tablet and desktop layouts', {timeout:120000}, async()=>{
   const page=await browser.newPage({viewport:{width:402,height:666}});
   try {
     await page.addInitScript(instrumentRenderer);
-    await page.goto(`${origin}/index.html?boat=1&profile=1`);
+    await page.goto(`${origin}/index.html?profile=1&w=32&h=32`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
-    const reachable=async selector=>{
+    const reachable=async(selector,touch=true)=>{
       const box=await page.locator(selector).evaluate(el=>{
         const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
-        return {x:r.x,y:r.y,w:r.width,h:r.height,vw:innerWidth,vh:innerHeight,hit:el===hit||el.contains(hit),obstruction:hit?.outerHTML.slice(0,250),controlsBottom:getComputedStyle(document.documentElement).getPropertyValue('--controls-bottom')};
+        return {x:r.x,y:r.y,w:r.width,h:r.height,vw:innerWidth,vh:innerHeight,hit:el===hit||el.contains(hit),obstruction:hit?.outerHTML.slice(0,150)};
       });
       assert.ok(box.x>=0&&box.y>=0&&box.x+box.w<=box.vw+1&&box.y+box.h<=box.vh+1,`${selector} outside viewport: ${JSON.stringify(box)}`);
-      assert.ok(box.w>=44&&box.h>=44,`${selector} needs a touch target`);
-      assert.equal(box.hit,true,`${selector} is obstructed: ${JSON.stringify(box)}`);
+      assert.ok(box.w>=(touch?44:36)&&box.h>=(touch?44:36),`${selector} needs a usable target`);
+      assert.equal(box.hit,true,`${selector} obstructed: ${JSON.stringify(box)}`);
     };
-    assert.equal(await page.locator('#gpu-profile').getAttribute('open'),null,'phone profiler starts collapsed');
-    for(const [width,height] of [[320,568],[402,666],[390,844],[844,390],[768,1024],[320,360]]) {
+    assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail');
+    assert.equal(await page.locator('#boat-panel').isVisible(),false);
+    assert.equal(await page.locator('#sailing-heading').isVisible(),true);
+    assert.equal(await page.locator('#sailing-knots').isVisible(),true);
+    assert.equal(await page.locator('#sailing-wind-knots').isVisible(),true);
+    for(const [width,height] of [[320,568],[402,666],[390,844],[844,390],[768,1024],[320,360],[1440,900]]) {
       await page.setViewportSize({width,height});
-      for(const expanded of [false,true]) {
-        const open=await page.locator('#gpu-profile').evaluate(el=>el.open);
-        if(open!==expanded)await page.locator('#gpu-profile summary').click();
-        // ResizeObserver places the panels after the disclosure/viewport layout.
-        await page.waitForFunction(()=>{
-          const css=getComputedStyle(document.documentElement);
-          return Math.abs(parseFloat(css.getPropertyValue('--view-height'))-innerHeight)<1 &&
-            Math.abs(parseFloat(css.getPropertyValue('--controls-bottom'))-document.querySelector('#sailing-instruments').getBoundingClientRect().bottom-8)<1;
-        },undefined,{polling:20,timeout:2000});
-        await page.locator('#boat-controls').evaluate(el=>el.scrollTop=el.scrollHeight);
-        await reachable('#boat-panel .collapse');
-        await page.getByRole('button',{name:'Toggle boat controls'}).click();
-        assert.equal(await page.locator('#boat-controls').isVisible(),false);
-        await reachable('#boat-panel .collapse');
-        await page.getByRole('button',{name:'Toggle boat controls'}).click();
-        await page.getByRole('button',{name:'Sea settings',exact:true}).click();
-        assert.equal(await page.locator('#boat-panel').isVisible(),false,'mobile panels do not cover each other');
+      const touch=width<=720||height<=480;
+      await page.waitForFunction(()=>Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-height'))-innerHeight)<1,undefined,{polling:20,timeout:2000});
+      for(const id of ['rudder-port','rudder-centre','rudder-starboard'])await reachable('#'+id,touch);
+      for(const selector of ['[data-sail="0"]','[data-sail="0.5"]','[data-sail="1"]'])await reachable(selector,touch);
+      for(const name of ['Camera views','Captain','Landfall','Sea settings','Ship settings','Copy share link'])await reachable(`#camera-dock [aria-label="${name}"]`,touch);
+      const screen=await page.evaluate(()=>{
+        const h=document.querySelector('#helm-controls').getBoundingClientRect(),d=document.querySelector('#camera-dock').getBoundingClientRect();
+        return {clear:h.top-d.bottom,overflow:document.documentElement.scrollWidth>innerWidth};
+      });
+      assert.ok(screen.clear>=35,JSON.stringify({width,height,...screen}));assert.equal(screen.overflow,false);
+      await page.getByRole('button',{name:'Ship settings',exact:true}).click();
+      await page.locator('#boat-controls').evaluate(el=>el.scrollTop=el.scrollHeight);
+      await reachable('#boat-panel .panel-header button',touch);
+      assert.equal(await page.locator('#boat-controls').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+      await page.getByRole('button',{name:'Hide ship settings'}).click();
+      await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+      for(const expanded of [true,false]){
+        await page.locator('#gpu-profile').evaluate((el,expanded)=>el.open=expanded,expanded);
         await page.locator('#panel .panel-body').evaluate(el=>el.scrollTop=el.scrollHeight);
-        await reachable('#panel .panel-header button');
-        assert.equal(await page.locator('#panel .panel-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true,'settings have no horizontal overflow');
-        await page.getByRole('button',{name:'Hide sea settings'}).click();
-        assert.equal(await page.locator('#panel').isVisible(),false);
-        assert.equal(await page.locator('#boat-panel').isVisible(),true);
-        await page.getByRole('button',{name:'Captain',exact:true}).click();
-        assert.equal(await page.locator('#boat-panel').isVisible(),false);
-        assert.equal(await page.locator('#panel').isVisible(),false);
-        await page.locator('#captain-panel .panel-body').evaluate(el=>el.scrollTop=el.scrollHeight);
-        await reachable('#captain-panel .panel-header button');
-        assert.equal(await page.locator('#captain-panel .panel-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
-        await page.getByRole('button',{name:'Sea settings',exact:true}).click();
-        assert.equal(await page.locator('#captain-panel').isVisible(),false);
-        await page.getByRole('button',{name:'Hide sea settings'}).click();
+        await reachable('#panel .panel-header button',touch);
       }
+      assert.equal(await page.locator('#panel .panel-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+      await page.getByRole('button',{name:'Captain',exact:true}).click();
+      assert.equal(await page.locator('#panel').isVisible(),false);
+      await page.locator('#captain-panel .panel-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+      await reachable('#captain-panel .panel-header button',touch);
+      await page.getByRole('button',{name:'Landfall',exact:true}).click();
+      assert.equal(await page.locator('#captain-panel').isVisible(),false);
+      await reachable('#landfall-panel .panel-header button',touch);
+      await page.getByRole('button',{name:'Hide landfall'}).click();
+      assert.equal(await page.locator('#helm-controls').isVisible(),true);
+      assert.equal(await page.locator('#sailing-instruments').isVisible(),true);
+      await page.getByRole('button',{name:'Copy share link'}).click();
+      await reachable('#share-panel button',touch);
+      if(width<=720)assert.equal(await page.locator('#helm-controls').isVisible(),false,'share panel does not overlap helm');
+      assert.equal(await page.getByRole('button',{name:'Copy share link'}).getAttribute('aria-expanded'),'true');
+      await page.getByRole('button',{name:'Close share link'}).click();
+      assert.equal(await page.locator('#helm-controls').isVisible(),true);
     }
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
+test('tap helm commands and touch look stay independent, with real sail orders and no mouse capture', {timeout:120000},async()=>{
+  const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.addInitScript(()=>{
+      GPURenderPassEncoder.prototype.draw=function(){};GPURenderPassEncoder.prototype.drawIndexed=function(){};
+      GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
+      const write=GPUQueue.prototype.writeBuffer;
+      GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...args){
+        if(buffer.label==='hull transform')check.hull=Array.from(data);
+        if(buffer.label==='frame ubo')check.frame=Array.from(data);
+        return write.call(this,buffer,offset,data,...args);
+      };
+    });
+    await page.goto(`${origin}/?boatSpeed=6&w=32&h=32`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail');
+    await page.getByRole('button',{name:'Rudder to starboard',exact:true}).tap();
+    assert.equal(await page.locator('#boat-rudder').inputValue(),'5');
+    await step(page,100);
+    assert.ok((await page.evaluate(()=>check.hull[15]))>0,'tap reaches the simulated rudder');
+    await page.getByRole('button',{name:'Centre rudder',exact:true}).tap();
+    assert.equal(await page.locator('#boat-rudder').inputValue(),'0');
+    await page.getByRole('button',{name:'Rudder to port',exact:true}).tap();
+    assert.equal(await page.locator('#boat-rudder').inputValue(),'-5');
+    await page.getByRole('button',{name:'Centre rudder',exact:true}).tap();
+    await step(page,100);
+    const before=await page.evaluate(()=>check.frame.slice(28,31));
+    const touch=await page.context().newCDPSession(page);
+    await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:130,y:350}]});
+    await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:250,y:390}]});
+    await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await step(page,100);
+    const after=await page.evaluate(()=>check.frame.slice(28,31));
+    assert.ok(Math.hypot(...after.map((v,i)=>v-before[i]))>.15,'finger drag changes the rendered view');
+    assert.equal(await page.locator('#boat-rudder').inputValue(),'0','looking does not steer');
+    assert.equal(await page.evaluate(()=>document.pointerLockElement),null);
+    for(const [label,value] of [['Furl sails','0'],['Reef sails','50'],['Full sails','100']]){
+      await page.getByRole('button',{name:label,exact:true}).tap();
+      assert.equal(await page.getByRole('button',{name:label,exact:true}).getAttribute('aria-pressed'),'true');
+      for(const key of ['sailFore','sailMain','sailMizzen'])assert.equal(await page.locator('#boat-'+key).inputValue(),value);
+    }
+    await page.getByRole('button',{name:'Furl sails',exact:true}).tap();
+    await step(page,100);
+    assert.ok((await page.evaluate(()=>check.hull.slice(24,27))).some(x=>x>0),'command does not teleport canvas before crew work');
+    await page.getByRole('button',{name:'Ship settings',exact:true}).tap();
+    await page.locator('#boat-propulsion').selectOption('manual');
+    await page.getByRole('button',{name:'Hide ship settings',exact:true}).tap();
+    await page.getByRole('button',{name:'Full sails',exact:true}).tap();
+    assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail','sail command restores wind propulsion');
+    assert.equal(await page.locator('#sailing-instruments').isVisible(),true);
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
   }finally{await page.close();}
 });
@@ -1744,7 +1815,7 @@ test('resolution controls resize GPU targets and explicit dimensions stay fixed'
 });
 
 test('crew renders twelve independent sailors in two batches, obeys captain orders and hides with the ship', {timeout:120000}, async()=>{
-  const page=await browser.newPage({viewport:{width:320,height:240}}),warnings=[];
+  const page=await browser.newPage({viewport:{width:320,height:568}}),warnings=[];
   page.on('pageerror',error=>warnings.push(error.message));
   page.on('console',msg=>{if(msg.type()==='warning'||msg.type()==='error')warnings.push(msg.text());});
   try{
@@ -1763,7 +1834,7 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
         return write.call(this,buffer,offset,data,...rest);
       };
     });
-    await page.goto(`${origin}/?boat=1&boatSpeed=0&windSpeed=2&swellHs=.1&sunElev=45&w=64&h=48`);
+    await page.goto(`${origin}/?boat=1&boatSpeed=0&propulsion=manual&windSpeed=2&swellHs=.1&sunElev=45&w=64&h=48`);
     try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
     catch(error){throw Error(error.message+'; '+warnings.join('\n'));}
     assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true);
@@ -1773,6 +1844,7 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     assert.equal(await page.locator('#boat-beam').inputValue(), '6');
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'the helmsman below the quarterdeck remains visible');
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===23&&v===1).length),12,'near-camera transparency is enabled for every sailor');
+    await page.getByRole('button',{name:'Camera views',exact:true}).click();
     await page.getByRole('button',{name:'View ship',exact:true}).click();
     await page.evaluate(()=>check.crewActors=[]);await step(page,100);
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'exterior restores all twelve sailors');
@@ -1786,6 +1858,7 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     await step(page,600);await step(page,600);assert.match(await page.locator('#crew-status').textContent(),/Prepare for heavy weather/);
     assert.equal(await page.locator('#crew-roster li').count(),12);
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show crew',{exact:true}).uncheck();
     const hidden=await step(page,100);assert.equal(hidden.render.crew,undefined);assert.equal(hidden.render['crew shadow'],undefined);
     await page.getByLabel('Show crew',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
@@ -2121,7 +2194,7 @@ test('wet materials visibly shade the ship and crew and return to their dry appe
       GPUComputePassEncoder.prototype.setPipeline=function(p){labels.set(this,p.label);return set.call(this,p);};
       GPUComputePassEncoder.prototype.dispatchWorkgroups=function(...args){if(!check.freezeScene && labels.get(this)!=='surface moisture')return dispatch.apply(this,args);};
     });
-    await page.goto(`${origin}/?view=ship&boatSpeed=0&sunElev=35&clouds=0&windSpeed=2&swellHs=.1&w=128&h=96`);
+    await page.goto(`${origin}/?view=ship&boatSpeed=0&propulsion=manual&sunElev=35&clouds=0&windSpeed=2&swellHs=.1&w=128&h=96`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
     const render=()=>page.evaluate(async()=>{check.callback(1000);await check.device.queue.onSubmittedWorkDone();});
     await render();
@@ -2155,13 +2228,16 @@ test('sailing instruments persist independent switches, share overrides, and hid
     await load('windDir=90&boatHeading=0&windSpeed=8');await step(page,150);
     assert.equal(await page.locator('#sailing-instruments').isVisible(),true);
     assert.match(await page.locator('#sailing-cue').textContent(),/In irons/);
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show speed indicator',{exact:true}).uncheck();
     assert.equal(await page.locator('.instrument-speed').isVisible(),false);
     assert.equal(await page.locator('.instrument-wind').isVisible(),true);
-    await page.getByRole('button',{name:'Toggle boat controls'}).click();
+    await page.getByRole('button',{name:'Hide ship settings'}).click();
     assert.equal(await page.locator('.instrument-wind').isVisible(),true,'closing controls leaves navigation visible');
     await load('');assert.equal(await page.getByLabel('Show speed indicator',{exact:true}).isChecked(),false);
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show wind indicator',{exact:true}).uncheck();
+    await page.getByLabel('Show heading indicator',{exact:true}).uncheck();
     assert.equal(await page.locator('#sailing-instruments').isVisible(),false);
     await load('speedHud=1&windHud=0');
     assert.equal(await page.locator('.instrument-speed').isVisible(),true);

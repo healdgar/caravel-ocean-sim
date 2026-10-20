@@ -5,148 +5,132 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Seasick Simulator</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
-  #hud { position: fixed; left: 12px; top: 10px; font: 12px/1.45 ui-monospace, Consolas, monospace; color: #e8e2d6;
-         text-shadow: 0 1px 2px #000a; pointer-events: none; user-select: none; }
-  #hud .help { opacity: .7; }
-  #panel, #boat-panel, #captain-panel { position: fixed; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden;
-    max-height:calc(100dvh - 24px); border:1px solid #ffffff30; border-radius:10px; color:#e8e2d6;
-    background:#0b0f14f0; font:13px/1.4 system-ui,sans-serif; z-index:6; }
-  #panel { right:12px; top:12px; width:340px; }
-  #panel.hidden { display: none; }
-  .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px;
-    flex:none; border-bottom:1px solid #ffffff20; }
-  .panel-body { overflow-y:auto; min-height:0; padding:0 12px 12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
-  #panel label { display:grid; grid-template-columns:minmax(0,1fr) 110px 40px; gap:6px; align-items:center; margin:3px 0; }
-  #panel input { width:110px; accent-color:#e2a04e; }
-  #precipitation-type { background:#172532; color:#eee; border:1px solid #617480; border-radius:4px; min-height:44px; }
-  #panel button, #boat-panel button, #captain-panel button { color:#111; background:#e2a04e; border:0; border-radius:4px; padding:7px 12px; cursor:pointer; }
-  #panel .panel-header button, #boat-panel .collapse { background:#33424e; color:white; flex:none; margin:0; }
-  #panel .panel-body > button { margin:10px 0; }
-  #panel output { text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
-  #boat-panel { left:12px; bottom:12px; width:320px; max-height:65dvh; }
-  #boat-panel[hidden] { display:none; }
-  #boat-panel label { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 12px; }
-  #boat-panel input[type=number] { width: 76px; background: #172532; color: #fff; border: 1px solid #71818d; border-radius: 4px; padding: 5px; }
-  #captain-panel { left:12px; bottom:12px; width:360px; max-height:calc(100dvh - 150px); }
-  #captain-panel[hidden] { display:none; }
-  .captain-open #boat-panel { visibility:hidden; }
-  #captain-panel .panel-header button { background:#33424e; color:#fff; }
-  #crew-status { margin:12px 0; color:#f5bf77; }
-  .captain-orders { display:grid; gap:8px; }
-  #captain-panel .captain-orders button { padding:10px 12px; text-align:left; background:#172532; color:#e8e2d6; border:1px solid #617480; }
-  #captain-panel .captain-orders button[aria-pressed=true] { border-color:#e2a04e; background:#3e3020; }
-  .captain-orders span { display:block; margin-top:4px; font-size:12px; color:#c7cdd3; }
-  #captain-panel details { margin-top:14px; }
-  #captain-panel summary { cursor:pointer; min-height:44px; display:flex; align-items:center; }
-  #crew-roster { padding-left:18px; margin-top:0; }
+  :root { color-scheme:dark; --view-top:0px; --view-height:100dvh; --keyboard-inset:0px; --controls-bottom:108px; --instruments-bottom:92px; --ink:#f3eee3; --muted:#b8c4c7; --gold:#edbd78; --glass:#101d25e8; }
+  html,body { margin:0; height:100%; background:#000; overflow:hidden; font:13px/1.4 system-ui,sans-serif; color:var(--ink); }
+  [hidden] { display:none!important; }
+  #c { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+  #c:active { cursor:grabbing; }
+  button,input,select,summary { touch-action:manipulation; }
+  button { font:inherit; color:var(--ink); background:#24333c; border:1px solid #ffffff24; border-radius:7px; padding:7px 12px; cursor:pointer; min-height:36px; }
+  button:hover { background:#374752; }
+  button:active { transform:translateY(1px); }
+  button[aria-pressed=true],button[aria-expanded=true] { background:#dbc097; border-color:#edcf9c; color:#1c2528; }
+  button:disabled { opacity:.45; cursor:default; }
+  :focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+  .icon-button { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; flex:none; padding:9px; min-height:40px; }
+  .icon-button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; }
+  #hud { display:none; position:fixed; bottom:124px; left:14px; max-width:calc(100vw - 28px); font:10px/1.4 ui-monospace,monospace; color:var(--muted); pointer-events:none; text-shadow:0 1px 2px #000; }
+  .show-performance #hud { display:block; }
+  #hud .help { display:none; }
+  #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; gap:4px; z-index:8; }
+  #camera-dock > button { background:var(--glass); border-color:#ffffff30; box-shadow:0 2px 12px #0002; }
+  #camera-dock > button[aria-expanded=true] { color:var(--gold); border-color:var(--gold); }
+  #sailing-instruments { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); left:max(12px,env(safe-area-inset-left)); z-index:5; display:flex; flex-wrap:wrap; width:344px; max-width:calc(100vw - 16px); box-sizing:border-box; border:1px solid #ffffff26; border-radius:10px; background:var(--glass); pointer-events:none; box-shadow:0 4px 20px #0002; }
+  .instrument-heading,.instrument-speed { padding:9px 12px 6px; flex:1; }
+  .instrument-heading { border-right:1px solid #ffffff18; }
+  .instrument-label { display:block; font-size:8px; letter-spacing:.09em; color:var(--muted); }
+  #sailing-heading,#sailing-knots { font:500 23px/1.3 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+  #sailing-motion,.instrument-caption { display:block; font-size:8px; letter-spacing:.07em; color:var(--muted); }
+  .instrument-speed[data-astern=true] { color:var(--gold); }
+  .instrument-wind { display:flex; align-items:center; gap:4px; padding:6px 10px 6px 0; }
+  .instrument-wind svg { width:44px; height:44px; flex:none; fill:none; stroke:#839ba6; stroke-width:1; }
+  .instrument-wind svg text { text-anchor:middle; fill:var(--muted); stroke:none; font:8px system-ui,sans-serif; }
+  .instrument-wind .wind-bow { fill:var(--muted); stroke:none; }
+  #sailing-wind-arrow { stroke:var(--gold); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  #sailing-wind-knots { font:500 20px/1.3 ui-monospace,monospace; }
+  #sailing-wind-direction { white-space:nowrap; font-size:9px; color:var(--muted); }
+  #sailing-cue { flex:0 0 100%; box-sizing:border-box; padding:4px 12px; border-top:1px solid #ffffff18; font-size:10px; color:var(--gold); }
+  #helm-controls { position:fixed; z-index:5; bottom:calc(var(--keyboard-inset) + max(12px,env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); width:560px; max-width:calc(100vw - 24px); box-sizing:border-box; display:grid; grid-template-columns:1.35fr 1fr; gap:18px; padding:12px 14px; border:1px solid #ffffff30; border-radius:12px; background:var(--glass); box-shadow:0 6px 24px #0003; }
+  .helm-label { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:5px; font-size:11px; }
+  .helm-label output { color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; }
+  .rudder-controls { display:flex; align-items:center; gap:4px; }
+  #boat-rudder { width:100%; min-width:0; height:40px; margin:0; accent-color:var(--gold); }
+  .sail-buttons { display:flex; gap:4px; }
+  .sail-buttons button { flex:1; min-width:0; padding:7px 8px; height:40px; }
+  #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); color:#fff; text-shadow:0 1px 4px #000; font-size:11px; pointer-events:none; animation:hint-away 1s 7s forwards; }
+  .has-looked #look-hint { display:none; }
+  @keyframes hint-away { to { opacity:0; } }
+  #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
+  #panel.hidden { display:none; }
+  .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 10px 6px 14px; flex:none; border-bottom:1px solid #ffffff20; }
+  .panel-header strong { font-weight:550; }
+  .panel-header button { background:transparent; border-color:transparent; }
+  .panel-body { overflow-y:auto; min-height:0; padding:10px 14px 14px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+  .panel-body > p { font-size:12px; color:var(--muted); }
+  #panel label { display:grid; grid-template-columns:minmax(0,1fr) 104px 30px; gap:5px; align-items:center; min-height:36px; }
+  #panel input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
+  #panel output { text-align:right; font-size:11px; color:var(--muted); }
+  #panel .panel-body > button { margin:4px 3px 4px 0; }
+  #boat-panel label { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; margin:2px 0; }
+  input[type=number],input[type=url],select { box-sizing:border-box; color:var(--ink); background:#1c2e39; border:1px solid #6c7d86; border-radius:5px; padding:6px; font:inherit; min-height:36px; }
+  #boat-panel input[type=number] { width:82px; }
+  input[type=checkbox] { width:20px; height:20px; accent-color:var(--gold); }
+  #sail-controls input[type=range] { width:105px; min-width:0; accent-color:var(--gold); }
+  #sail-controls output { min-width:34px; text-align:right; color:var(--muted); font-size:11px; }
+  #sail-status,#boat-motion,#helm-readout,#boat-loading-status { font-size:11px; color:var(--muted); }
+  .camera-choices { display:grid; gap:6px; }
+  .captain-orders { display:grid; gap:6px; }
+  .captain-orders button { text-align:left; padding:8px 10px; }
+  .captain-orders span { display:block; margin-top:3px; font-size:11px; opacity:.8; }
+  #crew-status { color:var(--gold); }
+  #crew-roster { padding-left:18px; }
   #crew-roster li { margin:8px 0; }
-  #boat-panel input[type=checkbox] { width: 20px; height: 20px; accent-color: #e2a04e; }
-  #boat-rudder { width:100px; accent-color:#e2a04e; }
-  #sail-controls input[type=range] { width:100px; min-width:0; accent-color:#e2a04e; }
-  #boat-propulsion { background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
-  #boat-panel [hidden] { display:none; }
-  .sail-buttons { display:flex; flex-wrap:wrap; gap:5px; }
-  #boat-panel .sail-buttons button { margin:0; flex:1; padding:7px 6px; }
-  #boat-panel output { min-width:45px; font-size:11px; text-align:right; }
-  #boat-panel button { margin-right:6px; }
-  #boat-panel p { font-size: 11px; opacity: .8; margin: 8px 0 0; }
-  #boat-panel.compact { width: auto; }
-  #boat-panel.compact .panel-body { display:none; }
-  #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
-    padding:6px; border-radius:8px; background:#0b0f14ef; border:1px solid #ffffff25; z-index:5; box-sizing:border-box; }
-  #camera-dock[hidden] { display:none; }
-  #sailing-instruments { position:fixed; left:12px; top:var(--dock-bottom,120px); z-index:5; display:flex; flex-wrap:wrap;
-    width:352px; max-width:calc(100vw - 24px); box-sizing:border-box; border:1px solid #ffffff35; border-radius:8px;
-    background:#0b171ded; color:#f8f1df; font:12px/1.25 system-ui,sans-serif; pointer-events:none; }
-  #sailing-instruments[hidden], #sailing-instruments [hidden] { display:none; }
-  .instrument-speed { padding:7px 10px; flex:1; }
-  .instrument-label { display:block; font-size:9px; letter-spacing:.05em; color:#c4ccd0; }
-  #sailing-knots { font:600 26px/1.1 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
-  #sailing-motion { font-size:10px; letter-spacing:.08em; }
-  .instrument-speed[data-astern=true] { color:#ffca79; }
-  .instrument-wind { display:flex; align-items:center; gap:7px; padding:4px 10px 4px 0; flex:1; }
-  .instrument-wind svg { width:56px; height:56px; flex:none; fill:none; stroke:#839ba6; stroke-width:1; }
-  .instrument-wind svg text { text-anchor:middle; fill:#c4ccd0; stroke:none; font:8px system-ui,sans-serif; }
-  .instrument-wind .wind-bow { fill:#c4ccd0; stroke:none; }
-  #sailing-wind-arrow { stroke:#ffca79; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
-  #sailing-wind-knots { font:600 19px/1.3 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
-  #sailing-wind-direction { white-space:nowrap; font-size:10px; }
-  #sailing-cue { flex:0 0 100%; box-sizing:border-box; padding:4px 10px; border-top:1px solid #ffffff20; font-size:10px; color:#ffca79; }
-  #captain-panel button:disabled { opacity:.5; cursor:default; }
-  #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
-  #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
-  #share-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; flex:0 0 100%; width:min(540px,calc(100vw - 52px)); box-sizing:border-box; padding:5px 0; }
-  #share-panel[hidden] { display:none; }
-  #share-panel input { min-width:0; width:100%; box-sizing:border-box; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
-  #share-panel [role=status] { grid-column:1/-1; color:#e8e2d6; font:12px/1.4 system-ui,sans-serif; max-width:540px; }
-  #panel .resolution-control { display:flex; flex-wrap:wrap; justify-content:space-between; margin:12px 0 4px; }
-  #render-resolution { min-width:150px; max-width:100%; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
-  #resolution-status { font-size:11px; color:#c7cdd3; margin:0 0 10px; }
-  #gpu-profile { position:fixed; right:8px; top:8px; z-index:3; box-sizing:border-box; max-width:calc(100vw - 16px);
-    color:#fff; background:#07121ef0; border:1px solid #ffffff30; border-radius:6px; font:11px/1.5 monospace; }
-  #gpu-profile summary { padding:8px 12px; cursor:pointer; }
-  #gpu-profile pre { margin:0; padding:0 12px 12px; max-height:60dvh; overflow:auto; white-space:pre-wrap; overscroll-behavior:contain; }
-  button, input, select, summary { touch-action:manipulation; }
-  :focus-visible { outline:2px solid #f5bf77; outline-offset:2px; }
-  #landfall-panel { position:fixed; right:12px; bottom:12px; width:350px; max-height:calc(100dvh - 170px);
-    display:flex; flex-direction:column; overflow:hidden; border:1px solid #ffffff30; border-radius:10px;
-    background:#0b171ded; color:#e8e2d6; font:13px/1.5 system-ui,sans-serif; z-index:7; box-sizing:border-box; }
-  #landfall-panel[hidden] { display:none; }
-  #landfall-panel button { min-height:44px; background:#263744; color:#eee; border:1px solid #617480; border-radius:5px; padding:7px 10px; cursor:pointer; }
-  #landfall-panel button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
+  details summary { cursor:pointer; min-height:40px; display:flex; align-items:center; }
+  #captain-panel details { margin-top:12px; }
+  #share-panel { position:fixed; right:12px; top:var(--controls-bottom); z-index:7; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; width:350px; max-width:calc(100vw - 16px); box-sizing:border-box; background:#101d25f5; padding:12px; border:1px solid #ffffff30; border-radius:10px; }
+  #share-panel input { width:100%; min-width:0; }
+  #share-panel [role=status] { grid-column:1/-1; font-size:12px; color:var(--muted); }
+  #panel .resolution-control { display:flex; flex-wrap:wrap; justify-content:space-between; margin:8px 0; gap:6px; }
+  #render-resolution { max-width:100%; }
+  #resolution-status { font-size:11px; color:var(--muted); }
+  #gpu-profile { border:1px solid #ffffff24; border-radius:6px; margin-bottom:8px; font:10px/1.5 ui-monospace,monospace; }
+  #gpu-profile summary { padding:0 8px; }
+  #gpu-profile pre { margin:0; padding:0 8px 8px; max-height:160px; overflow:auto; white-space:pre-wrap; }
   .landfall-stages,.landfall-weather { display:flex; flex-wrap:wrap; gap:5px; }
-  .landfall-stages button,.landfall-weather button { flex:1; }
+  .landfall-stages button,.landfall-weather button { flex:1; padding:7px; }
   #landfall-panel p { font-size:12px; }
-  #landfall-panel .landfall-intro { font-size:14px; }
-  #landfall-panel summary { min-height:44px; cursor:pointer; display:flex; align-items:center; }
   #landfall-chart svg { width:100%; display:block; background:#142c39; border-radius:5px; }
-  #landfall-panel .landfall-credit { font-size:11px; color:#a8b6bc; }
+  #landfall-panel .landfall-credit { font-size:11px; color:var(--muted); }
   #landfall-ocean { margin-top:10px; }
-  @media (max-width:900px), (pointer:coarse) {
-    :root { --controls-bottom:156px; --view-height:100dvh; --view-top:0px; --keyboard-inset:0px; }
-    #hud { left:max(8px,env(safe-area-inset-left)); top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:8px; font-size:10px; }
-    #hud .help { display:none; }
-    #fps { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-    #camera-dock { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); top:calc(var(--view-top) + 32px + env(safe-area-inset-top));
-      max-width:none; display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:4px; padding:4px; }
-    #camera-dock > button { grid-column:span 4; min-width:0; padding:6px 3px; }
-    #camera-dock > button:nth-of-type(n+4) { grid-column:span 3; }
-    #sailing-instruments { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); max-width:none; width:auto; }
-    #camera-dock button, #panel button, #boat-panel button, #captain-panel button, #gpu-profile summary { min-height:44px; }
-    #panel, #boat-panel, #captain-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
-      bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); top:auto; width:auto;
-      max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
-    #boat-panel.compact { right:auto; }
-    .sea-settings-open #boat-panel { visibility:hidden; }
-    #landfall-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto;
-      bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom)));
-      max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
-    .landfall-open #boat-panel { visibility:hidden; }
-    #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
-    #panel input { width:100%; min-width:0; height:44px; }
-    #boat-panel label { min-height:44px; margin:6px 0; }
-    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #precipitation-type, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
+  @media (max-width:720px), (pointer:coarse) {
+    #sailing-instruments { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); left:50%; transform:translateX(-50%); width:344px; }
+    .instrument-heading,.instrument-speed { padding:6px 9px 4px; }
+    #sailing-heading,#sailing-knots { font-size:21px; }
+    .instrument-wind { padding:4px 8px 4px 0; }
+    .instrument-wind svg { width:40px; height:40px; }
+    #sailing-cue { padding:3px 9px; font-size:9px; }
+    #camera-dock { top:calc(var(--instruments-bottom) + 6px); right:50%; transform:translateX(50%); gap:4px; }
+    .icon-button { width:44px; height:44px; min-height:44px; padding:12px; }
+    #camera-dock > button { border-radius:9px; }
+    #helm-controls { bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); max-width:calc(100vw - 16px); width:400px; grid-template-columns:1fr; gap:7px; padding:8px 10px; }
+    .helm-label { margin-bottom:2px; font-size:10px; }
+    .helm-label output { font-size:10px; }
+    #boat-rudder { height:44px; }
+    .sail-buttons button { height:44px; padding:6px; }
+    #look-hint { bottom:164px; font-size:10px; }
+    #hud { bottom:166px; font-size:9px; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
+    .share-open #helm-controls,.sea-settings-open #helm-controls,.ship-settings-open #helm-controls,.captain-open #helm-controls,.landfall-open #helm-controls,.camera-open #helm-controls { visibility:hidden; }
+    .panel-body { padding:8px 12px 12px; }
+    #panel label { min-height:40px; grid-template-columns:minmax(0,1fr) minmax(75px,34%) 30px; }
+    #panel input[type=range],#sail-controls input[type=range] { height:40px; }
+    input[type=number],input[type=url],select { font-size:16px; min-height:40px; }
+    #boat-panel label { min-height:40px; }
     #boat-panel input[type=number] { width:90px; }
-    #boat-rudder { height:44px; min-width:0; }
-    #sail-controls input[type=range], #boat-propulsion { min-height:44px; }
-    #boat-panel input[type=checkbox] { width:24px; height:24px; }
-    #share-panel { grid-column:1/-1; width:100%; max-height:30dvh; overflow:auto; }
-    #gpu-profile { grid-column:1/-1; position:static; width:100%; max-width:none; font-size:10px; }
-    #gpu-profile pre { max-height:min(24dvh,160px); padding:0 8px 8px; }
-    #gpu-profile summary { box-sizing:border-box; padding:12px 8px; }
+    .panel-body button,summary { min-height:44px; }
+    #share-panel { right:8px; }
   }
-  @media (max-width:900px) and (orientation:landscape) {
-    #camera-dock { grid-template-columns:repeat(7,minmax(0,1fr)); }
-    #camera-dock > button, #camera-dock > button:nth-of-type(n+4) { grid-column:span 1; }
-    #boat-panel, #panel, #captain-panel { width:min(420px,calc(100vw - 16px)); }
-    #gpu-profile pre { max-height:20dvh; }
-    #sailing-instruments { left:auto; width:300px; }
-    .instrument-speed { padding:4px 8px; }
-    .instrument-wind svg { width:44px; height:44px; }
+  @media (max-height:480px) and (min-width:640px) {
+    #sailing-instruments { left:max(8px,env(safe-area-inset-left)); transform:none; width:310px; }
+    #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; }
+    .icon-button { width:44px; height:44px; min-height:44px; }
+    .sail-buttons button { height:44px; }
+    #helm-controls { width:520px; grid-template-columns:1.35fr 1fr; gap:14px; }
+    #look-hint { bottom:102px; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { left:auto; width:350px; }
   }
-  #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
+  @media (prefers-reduced-motion:reduce) { #look-hint { animation:none; } }
+  #err { position:fixed; inset:0; display:none; padding:40px; color:#f88; font:16px system-ui; white-space:pre-wrap; background:#000; z-index:20; }
 </style>
 </head>
 <body>

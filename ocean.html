@@ -5,148 +5,132 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Seasick Simulator</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
-  #hud { position: fixed; left: 12px; top: 10px; font: 12px/1.45 ui-monospace, Consolas, monospace; color: #e8e2d6;
-         text-shadow: 0 1px 2px #000a; pointer-events: none; user-select: none; }
-  #hud .help { opacity: .7; }
-  #panel, #boat-panel, #captain-panel { position: fixed; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden;
-    max-height:calc(100dvh - 24px); border:1px solid #ffffff30; border-radius:10px; color:#e8e2d6;
-    background:#0b0f14f0; font:13px/1.4 system-ui,sans-serif; z-index:6; }
-  #panel { right:12px; top:12px; width:340px; }
-  #panel.hidden { display: none; }
-  .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px;
-    flex:none; border-bottom:1px solid #ffffff20; }
-  .panel-body { overflow-y:auto; min-height:0; padding:0 12px 12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
-  #panel label { display:grid; grid-template-columns:minmax(0,1fr) 110px 40px; gap:6px; align-items:center; margin:3px 0; }
-  #panel input { width:110px; accent-color:#e2a04e; }
-  #precipitation-type { background:#172532; color:#eee; border:1px solid #617480; border-radius:4px; min-height:44px; }
-  #panel button, #boat-panel button, #captain-panel button { color:#111; background:#e2a04e; border:0; border-radius:4px; padding:7px 12px; cursor:pointer; }
-  #panel .panel-header button, #boat-panel .collapse { background:#33424e; color:white; flex:none; margin:0; }
-  #panel .panel-body > button { margin:10px 0; }
-  #panel output { text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
-  #boat-panel { left:12px; bottom:12px; width:320px; max-height:65dvh; }
-  #boat-panel[hidden] { display:none; }
-  #boat-panel label { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 12px; }
-  #boat-panel input[type=number] { width: 76px; background: #172532; color: #fff; border: 1px solid #71818d; border-radius: 4px; padding: 5px; }
-  #captain-panel { left:12px; bottom:12px; width:360px; max-height:calc(100dvh - 150px); }
-  #captain-panel[hidden] { display:none; }
-  .captain-open #boat-panel { visibility:hidden; }
-  #captain-panel .panel-header button { background:#33424e; color:#fff; }
-  #crew-status { margin:12px 0; color:#f5bf77; }
-  .captain-orders { display:grid; gap:8px; }
-  #captain-panel .captain-orders button { padding:10px 12px; text-align:left; background:#172532; color:#e8e2d6; border:1px solid #617480; }
-  #captain-panel .captain-orders button[aria-pressed=true] { border-color:#e2a04e; background:#3e3020; }
-  .captain-orders span { display:block; margin-top:4px; font-size:12px; color:#c7cdd3; }
-  #captain-panel details { margin-top:14px; }
-  #captain-panel summary { cursor:pointer; min-height:44px; display:flex; align-items:center; }
-  #crew-roster { padding-left:18px; margin-top:0; }
+  :root { color-scheme:dark; --view-top:0px; --view-height:100dvh; --keyboard-inset:0px; --controls-bottom:108px; --instruments-bottom:92px; --ink:#f3eee3; --muted:#b8c4c7; --gold:#edbd78; --glass:#101d25e8; }
+  html,body { margin:0; height:100%; background:#000; overflow:hidden; font:13px/1.4 system-ui,sans-serif; color:var(--ink); }
+  [hidden] { display:none!important; }
+  #c { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+  #c:active { cursor:grabbing; }
+  button,input,select,summary { touch-action:manipulation; }
+  button { font:inherit; color:var(--ink); background:#24333c; border:1px solid #ffffff24; border-radius:7px; padding:7px 12px; cursor:pointer; min-height:36px; }
+  button:hover { background:#374752; }
+  button:active { transform:translateY(1px); }
+  button[aria-pressed=true],button[aria-expanded=true] { background:#dbc097; border-color:#edcf9c; color:#1c2528; }
+  button:disabled { opacity:.45; cursor:default; }
+  :focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+  .icon-button { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; flex:none; padding:9px; min-height:40px; }
+  .icon-button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; }
+  #hud { display:none; position:fixed; bottom:124px; left:14px; max-width:calc(100vw - 28px); font:10px/1.4 ui-monospace,monospace; color:var(--muted); pointer-events:none; text-shadow:0 1px 2px #000; }
+  .show-performance #hud { display:block; }
+  #hud .help { display:none; }
+  #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; gap:4px; z-index:8; }
+  #camera-dock > button { background:var(--glass); border-color:#ffffff30; box-shadow:0 2px 12px #0002; }
+  #camera-dock > button[aria-expanded=true] { color:var(--gold); border-color:var(--gold); }
+  #sailing-instruments { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); left:max(12px,env(safe-area-inset-left)); z-index:5; display:flex; flex-wrap:wrap; width:344px; max-width:calc(100vw - 16px); box-sizing:border-box; border:1px solid #ffffff26; border-radius:10px; background:var(--glass); pointer-events:none; box-shadow:0 4px 20px #0002; }
+  .instrument-heading,.instrument-speed { padding:9px 12px 6px; flex:1; }
+  .instrument-heading { border-right:1px solid #ffffff18; }
+  .instrument-label { display:block; font-size:8px; letter-spacing:.09em; color:var(--muted); }
+  #sailing-heading,#sailing-knots { font:500 23px/1.3 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+  #sailing-motion,.instrument-caption { display:block; font-size:8px; letter-spacing:.07em; color:var(--muted); }
+  .instrument-speed[data-astern=true] { color:var(--gold); }
+  .instrument-wind { display:flex; align-items:center; gap:4px; padding:6px 10px 6px 0; }
+  .instrument-wind svg { width:44px; height:44px; flex:none; fill:none; stroke:#839ba6; stroke-width:1; }
+  .instrument-wind svg text { text-anchor:middle; fill:var(--muted); stroke:none; font:8px system-ui,sans-serif; }
+  .instrument-wind .wind-bow { fill:var(--muted); stroke:none; }
+  #sailing-wind-arrow { stroke:var(--gold); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  #sailing-wind-knots { font:500 20px/1.3 ui-monospace,monospace; }
+  #sailing-wind-direction { white-space:nowrap; font-size:9px; color:var(--muted); }
+  #sailing-cue { flex:0 0 100%; box-sizing:border-box; padding:4px 12px; border-top:1px solid #ffffff18; font-size:10px; color:var(--gold); }
+  #helm-controls { position:fixed; z-index:5; bottom:calc(var(--keyboard-inset) + max(12px,env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); width:560px; max-width:calc(100vw - 24px); box-sizing:border-box; display:grid; grid-template-columns:1.35fr 1fr; gap:18px; padding:12px 14px; border:1px solid #ffffff30; border-radius:12px; background:var(--glass); box-shadow:0 6px 24px #0003; }
+  .helm-label { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:5px; font-size:11px; }
+  .helm-label output { color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; }
+  .rudder-controls { display:flex; align-items:center; gap:4px; }
+  #boat-rudder { width:100%; min-width:0; height:40px; margin:0; accent-color:var(--gold); }
+  .sail-buttons { display:flex; gap:4px; }
+  .sail-buttons button { flex:1; min-width:0; padding:7px 8px; height:40px; }
+  #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); color:#fff; text-shadow:0 1px 4px #000; font-size:11px; pointer-events:none; animation:hint-away 1s 7s forwards; }
+  .has-looked #look-hint { display:none; }
+  @keyframes hint-away { to { opacity:0; } }
+  #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
+  #panel.hidden { display:none; }
+  .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 10px 6px 14px; flex:none; border-bottom:1px solid #ffffff20; }
+  .panel-header strong { font-weight:550; }
+  .panel-header button { background:transparent; border-color:transparent; }
+  .panel-body { overflow-y:auto; min-height:0; padding:10px 14px 14px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+  .panel-body > p { font-size:12px; color:var(--muted); }
+  #panel label { display:grid; grid-template-columns:minmax(0,1fr) 104px 30px; gap:5px; align-items:center; min-height:36px; }
+  #panel input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
+  #panel output { text-align:right; font-size:11px; color:var(--muted); }
+  #panel .panel-body > button { margin:4px 3px 4px 0; }
+  #boat-panel label { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; margin:2px 0; }
+  input[type=number],input[type=url],select { box-sizing:border-box; color:var(--ink); background:#1c2e39; border:1px solid #6c7d86; border-radius:5px; padding:6px; font:inherit; min-height:36px; }
+  #boat-panel input[type=number] { width:82px; }
+  input[type=checkbox] { width:20px; height:20px; accent-color:var(--gold); }
+  #sail-controls input[type=range] { width:105px; min-width:0; accent-color:var(--gold); }
+  #sail-controls output { min-width:34px; text-align:right; color:var(--muted); font-size:11px; }
+  #sail-status,#boat-motion,#helm-readout,#boat-loading-status { font-size:11px; color:var(--muted); }
+  .camera-choices { display:grid; gap:6px; }
+  .captain-orders { display:grid; gap:6px; }
+  .captain-orders button { text-align:left; padding:8px 10px; }
+  .captain-orders span { display:block; margin-top:3px; font-size:11px; opacity:.8; }
+  #crew-status { color:var(--gold); }
+  #crew-roster { padding-left:18px; }
   #crew-roster li { margin:8px 0; }
-  #boat-panel input[type=checkbox] { width: 20px; height: 20px; accent-color: #e2a04e; }
-  #boat-rudder { width:100px; accent-color:#e2a04e; }
-  #sail-controls input[type=range] { width:100px; min-width:0; accent-color:#e2a04e; }
-  #boat-propulsion { background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
-  #boat-panel [hidden] { display:none; }
-  .sail-buttons { display:flex; flex-wrap:wrap; gap:5px; }
-  #boat-panel .sail-buttons button { margin:0; flex:1; padding:7px 6px; }
-  #boat-panel output { min-width:45px; font-size:11px; text-align:right; }
-  #boat-panel button { margin-right:6px; }
-  #boat-panel p { font-size: 11px; opacity: .8; margin: 8px 0 0; }
-  #boat-panel.compact { width: auto; }
-  #boat-panel.compact .panel-body { display:none; }
-  #camera-dock { position:fixed; left:12px; top:66px; display:flex; gap:5px; flex-wrap:wrap; max-width:calc(100vw - 24px);
-    padding:6px; border-radius:8px; background:#0b0f14ef; border:1px solid #ffffff25; z-index:5; box-sizing:border-box; }
-  #camera-dock[hidden] { display:none; }
-  #sailing-instruments { position:fixed; left:12px; top:var(--dock-bottom,120px); z-index:5; display:flex; flex-wrap:wrap;
-    width:352px; max-width:calc(100vw - 24px); box-sizing:border-box; border:1px solid #ffffff35; border-radius:8px;
-    background:#0b171ded; color:#f8f1df; font:12px/1.25 system-ui,sans-serif; pointer-events:none; }
-  #sailing-instruments[hidden], #sailing-instruments [hidden] { display:none; }
-  .instrument-speed { padding:7px 10px; flex:1; }
-  .instrument-label { display:block; font-size:9px; letter-spacing:.05em; color:#c4ccd0; }
-  #sailing-knots { font:600 26px/1.1 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
-  #sailing-motion { font-size:10px; letter-spacing:.08em; }
-  .instrument-speed[data-astern=true] { color:#ffca79; }
-  .instrument-wind { display:flex; align-items:center; gap:7px; padding:4px 10px 4px 0; flex:1; }
-  .instrument-wind svg { width:56px; height:56px; flex:none; fill:none; stroke:#839ba6; stroke-width:1; }
-  .instrument-wind svg text { text-anchor:middle; fill:#c4ccd0; stroke:none; font:8px system-ui,sans-serif; }
-  .instrument-wind .wind-bow { fill:#c4ccd0; stroke:none; }
-  #sailing-wind-arrow { stroke:#ffca79; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
-  #sailing-wind-knots { font:600 19px/1.3 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
-  #sailing-wind-direction { white-space:nowrap; font-size:10px; }
-  #sailing-cue { flex:0 0 100%; box-sizing:border-box; padding:4px 10px; border-top:1px solid #ffffff20; font-size:10px; color:#ffca79; }
-  #captain-panel button:disabled { opacity:.5; cursor:default; }
-  #camera-dock button { color:#eee; background:#263744; border:1px solid #617480; padding:7px 10px; border-radius:5px; cursor:pointer; }
-  #camera-dock button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
-  #share-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; flex:0 0 100%; width:min(540px,calc(100vw - 52px)); box-sizing:border-box; padding:5px 0; }
-  #share-panel[hidden] { display:none; }
-  #share-panel input { min-width:0; width:100%; box-sizing:border-box; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
-  #share-panel [role=status] { grid-column:1/-1; color:#e8e2d6; font:12px/1.4 system-ui,sans-serif; max-width:540px; }
-  #panel .resolution-control { display:flex; flex-wrap:wrap; justify-content:space-between; margin:12px 0 4px; }
-  #render-resolution { min-width:150px; max-width:100%; background:#172532; color:#fff; border:1px solid #71818d; border-radius:4px; padding:7px; }
-  #resolution-status { font-size:11px; color:#c7cdd3; margin:0 0 10px; }
-  #gpu-profile { position:fixed; right:8px; top:8px; z-index:3; box-sizing:border-box; max-width:calc(100vw - 16px);
-    color:#fff; background:#07121ef0; border:1px solid #ffffff30; border-radius:6px; font:11px/1.5 monospace; }
-  #gpu-profile summary { padding:8px 12px; cursor:pointer; }
-  #gpu-profile pre { margin:0; padding:0 12px 12px; max-height:60dvh; overflow:auto; white-space:pre-wrap; overscroll-behavior:contain; }
-  button, input, select, summary { touch-action:manipulation; }
-  :focus-visible { outline:2px solid #f5bf77; outline-offset:2px; }
-  #landfall-panel { position:fixed; right:12px; bottom:12px; width:350px; max-height:calc(100dvh - 170px);
-    display:flex; flex-direction:column; overflow:hidden; border:1px solid #ffffff30; border-radius:10px;
-    background:#0b171ded; color:#e8e2d6; font:13px/1.5 system-ui,sans-serif; z-index:7; box-sizing:border-box; }
-  #landfall-panel[hidden] { display:none; }
-  #landfall-panel button { min-height:44px; background:#263744; color:#eee; border:1px solid #617480; border-radius:5px; padding:7px 10px; cursor:pointer; }
-  #landfall-panel button[aria-pressed=true] { background:#e2a04e; color:#111; border-color:#e2a04e; }
+  details summary { cursor:pointer; min-height:40px; display:flex; align-items:center; }
+  #captain-panel details { margin-top:12px; }
+  #share-panel { position:fixed; right:12px; top:var(--controls-bottom); z-index:7; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; width:350px; max-width:calc(100vw - 16px); box-sizing:border-box; background:#101d25f5; padding:12px; border:1px solid #ffffff30; border-radius:10px; }
+  #share-panel input { width:100%; min-width:0; }
+  #share-panel [role=status] { grid-column:1/-1; font-size:12px; color:var(--muted); }
+  #panel .resolution-control { display:flex; flex-wrap:wrap; justify-content:space-between; margin:8px 0; gap:6px; }
+  #render-resolution { max-width:100%; }
+  #resolution-status { font-size:11px; color:var(--muted); }
+  #gpu-profile { border:1px solid #ffffff24; border-radius:6px; margin-bottom:8px; font:10px/1.5 ui-monospace,monospace; }
+  #gpu-profile summary { padding:0 8px; }
+  #gpu-profile pre { margin:0; padding:0 8px 8px; max-height:160px; overflow:auto; white-space:pre-wrap; }
   .landfall-stages,.landfall-weather { display:flex; flex-wrap:wrap; gap:5px; }
-  .landfall-stages button,.landfall-weather button { flex:1; }
+  .landfall-stages button,.landfall-weather button { flex:1; padding:7px; }
   #landfall-panel p { font-size:12px; }
-  #landfall-panel .landfall-intro { font-size:14px; }
-  #landfall-panel summary { min-height:44px; cursor:pointer; display:flex; align-items:center; }
   #landfall-chart svg { width:100%; display:block; background:#142c39; border-radius:5px; }
-  #landfall-panel .landfall-credit { font-size:11px; color:#a8b6bc; }
+  #landfall-panel .landfall-credit { font-size:11px; color:var(--muted); }
   #landfall-ocean { margin-top:10px; }
-  @media (max-width:900px), (pointer:coarse) {
-    :root { --controls-bottom:156px; --view-height:100dvh; --view-top:0px; --keyboard-inset:0px; }
-    #hud { left:max(8px,env(safe-area-inset-left)); top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:8px; font-size:10px; }
-    #hud .help { display:none; }
-    #fps { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-    #camera-dock { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); top:calc(var(--view-top) + 32px + env(safe-area-inset-top));
-      max-width:none; display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:4px; padding:4px; }
-    #camera-dock > button { grid-column:span 4; min-width:0; padding:6px 3px; }
-    #camera-dock > button:nth-of-type(n+4) { grid-column:span 3; }
-    #sailing-instruments { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); max-width:none; width:auto; }
-    #camera-dock button, #panel button, #boat-panel button, #captain-panel button, #gpu-profile summary { min-height:44px; }
-    #panel, #boat-panel, #captain-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
-      bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); top:auto; width:auto;
-      max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
-    #boat-panel.compact { right:auto; }
-    .sea-settings-open #boat-panel { visibility:hidden; }
-    #landfall-panel { left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto;
-      bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom)));
-      max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
-    .landfall-open #boat-panel { visibility:hidden; }
-    #panel label { grid-template-columns:minmax(0,1fr) minmax(80px,38%) 36px; min-height:44px; margin:0; }
-    #panel input { width:100%; min-width:0; height:44px; }
-    #boat-panel label { min-height:44px; margin:6px 0; }
-    #boat-panel input[type=number], #boat-propulsion, #render-resolution, #precipitation-type, #share-panel input { font-size:16px; min-height:44px; box-sizing:border-box; }
+  @media (max-width:720px), (pointer:coarse) {
+    #sailing-instruments { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); left:50%; transform:translateX(-50%); width:344px; }
+    .instrument-heading,.instrument-speed { padding:6px 9px 4px; }
+    #sailing-heading,#sailing-knots { font-size:21px; }
+    .instrument-wind { padding:4px 8px 4px 0; }
+    .instrument-wind svg { width:40px; height:40px; }
+    #sailing-cue { padding:3px 9px; font-size:9px; }
+    #camera-dock { top:calc(var(--instruments-bottom) + 6px); right:50%; transform:translateX(50%); gap:4px; }
+    .icon-button { width:44px; height:44px; min-height:44px; padding:12px; }
+    #camera-dock > button { border-radius:9px; }
+    #helm-controls { bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); max-width:calc(100vw - 16px); width:400px; grid-template-columns:1fr; gap:7px; padding:8px 10px; }
+    .helm-label { margin-bottom:2px; font-size:10px; }
+    .helm-label output { font-size:10px; }
+    #boat-rudder { height:44px; }
+    .sail-buttons button { height:44px; padding:6px; }
+    #look-hint { bottom:164px; font-size:10px; }
+    #hud { bottom:166px; font-size:9px; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
+    .share-open #helm-controls,.sea-settings-open #helm-controls,.ship-settings-open #helm-controls,.captain-open #helm-controls,.landfall-open #helm-controls,.camera-open #helm-controls { visibility:hidden; }
+    .panel-body { padding:8px 12px 12px; }
+    #panel label { min-height:40px; grid-template-columns:minmax(0,1fr) minmax(75px,34%) 30px; }
+    #panel input[type=range],#sail-controls input[type=range] { height:40px; }
+    input[type=number],input[type=url],select { font-size:16px; min-height:40px; }
+    #boat-panel label { min-height:40px; }
     #boat-panel input[type=number] { width:90px; }
-    #boat-rudder { height:44px; min-width:0; }
-    #sail-controls input[type=range], #boat-propulsion { min-height:44px; }
-    #boat-panel input[type=checkbox] { width:24px; height:24px; }
-    #share-panel { grid-column:1/-1; width:100%; max-height:30dvh; overflow:auto; }
-    #gpu-profile { grid-column:1/-1; position:static; width:100%; max-width:none; font-size:10px; }
-    #gpu-profile pre { max-height:min(24dvh,160px); padding:0 8px 8px; }
-    #gpu-profile summary { box-sizing:border-box; padding:12px 8px; }
+    .panel-body button,summary { min-height:44px; }
+    #share-panel { right:8px; }
   }
-  @media (max-width:900px) and (orientation:landscape) {
-    #camera-dock { grid-template-columns:repeat(7,minmax(0,1fr)); }
-    #camera-dock > button, #camera-dock > button:nth-of-type(n+4) { grid-column:span 1; }
-    #boat-panel, #panel, #captain-panel { width:min(420px,calc(100vw - 16px)); }
-    #gpu-profile pre { max-height:20dvh; }
-    #sailing-instruments { left:auto; width:300px; }
-    .instrument-speed { padding:4px 8px; }
-    .instrument-wind svg { width:44px; height:44px; }
+  @media (max-height:480px) and (min-width:640px) {
+    #sailing-instruments { left:max(8px,env(safe-area-inset-left)); transform:none; width:310px; }
+    #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; }
+    .icon-button { width:44px; height:44px; min-height:44px; }
+    .sail-buttons button { height:44px; }
+    #helm-controls { width:520px; grid-template-columns:1.35fr 1fr; gap:14px; }
+    #look-hint { bottom:102px; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { left:auto; width:350px; }
   }
-  #err { position: fixed; inset: 0; display: none; padding: 40px; color: #f88; font: 16px system-ui; white-space: pre-wrap; background: #000; }
+  @media (prefers-reduced-motion:reduce) { #look-hint { animation:none; } }
+  #err { position:fixed; inset:0; display:none; padding:40px; color:#f88; font:16px system-ui; white-space:pre-wrap; background:#000; z-index:20; }
 </style>
 <!--
 # Third-party code and data
@@ -6156,13 +6140,13 @@ const ROUGH_SEAS = {
 
 function cameraModeFromLink(search) {
   const mode = search.get('view');
-  return ['boat', 'free', 'ship'].includes(mode) ? mode : search.get('boat') === '1' ? 'boat' : 'free';
+  return ['boat', 'free', 'ship'].includes(mode) ? mode : search.get('boat') === '0'||search.has('cam') ? 'free' : 'boat';
 }
 
 function propulsionFromLink(search) {
   const mode = search.get('propulsion');
   if (mode === 'sail' || mode === 'manual') return mode;
-  return search.has('boatSpeed') ? 'manual' : 'sail'; // Preserve existing speed-controlled links.
+  return 'sail'; // A speed parameter alone must never silently enable powered motion.
 }
 
 function createShareLink(href, settings, boat, cameraMode) {
@@ -6181,7 +6165,7 @@ function createShareLink(href, settings, boat, cameraMode) {
   url.searchParams.set('prow', boat.showProw ? '1' : '0');
   url.searchParams.set('effects', boat.effects === false ? '0' : '1');
   url.searchParams.set('crew', boat.crew === false ? '0' : '1');
-  for(const key of ['speedHud','windHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
+  for(const key of ['speedHud','windHud','headingHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
   return url.href;
 }
 
@@ -6729,7 +6713,7 @@ function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPositio
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
   panel.setAttribute('aria-labelledby','landfall-title');
-  panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button aria-label="Hide landfall">Hide</button></div>
+  panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">A first landfall. Real island relief, generated vegetation, changing light.</p>
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
     <p>Start at the horizon, on approach, or near the coast. Sailing physics remain at normal speed.</p>
@@ -6739,7 +6723,7 @@ function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPositio
     <p class="landfall-credit">Terrain: Mapzen / USGS / NOAA. World outline: Natural Earth (public domain). Vegetation is generated. Shore clearance is approximate; ports and voyage compression are still to come.</p></details>
     <button id="landfall-ocean">Return to open ocean</button></div>`;
   const setOpen=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open));document.body.classList.toggle('landfall-open',open);
-    if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();}};
+    if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
   button.onclick=()=>setOpen(panel.hidden);panel.querySelector('.panel-header button').onclick=()=>setOpen(false);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){setOpen(false);button.focus();}});
   for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast','Near coast']]){
@@ -6942,7 +6926,8 @@ function instrumentReadout(boat){
   else if(speed<-.05)cue=s.forward>0&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';
   else if(angle<42&&s.apparentSpeed>=.5)cue='In irons · rudder needs water flow';
   else if(s.rig.some(p=>p.pressure<-.5))cue+=' · bad tack';
-  return {speed:(Math.abs(speed)<.05?0:speed).toFixed(1),motion:speed<-.05?'ASTERN':'AHEAD',
+  const heading=Math.round(((boat.heading??0)%360+360)%360)%360;
+  return {heading:String(heading).padStart(3,'0')+'°',speed:(Math.abs(speed)<.05?0:speed).toFixed(1),motion:speed<-.05?'ASTERN':'AHEAD',
     wind:(s.apparentSpeed/KNOT_TO_MPS).toFixed(1),degrees,direction,calm:s.apparentSpeed<.5,cue};
 }
 
@@ -6950,26 +6935,82 @@ function instrumentReadout(boat){
 function createSailingInstruments(boat,search,controls){
   let saved={};try{saved=JSON.parse(localStorage.getItem('sailing-instruments')||'{}')||{};}catch{/* unavailable storage */}
   const root=document.createElement('aside');root.id='sailing-instruments';root.setAttribute('aria-label','Sailing instruments');
-  root.innerHTML=`<div class="instrument-speed"><span class="instrument-label">SPEED THROUGH WATER</span><div><strong id="sailing-knots">0.0</strong> <span>kn</span></div><span id="sailing-motion">AHEAD</span></div>
+  root.innerHTML=`<div class="instrument-heading"><span class="instrument-label">HEADING</span><strong id="sailing-heading">000°</strong><span class="instrument-caption">HULL</span></div>
+    <div class="instrument-speed"><span class="instrument-label">SPEED</span><div><strong id="sailing-knots">0.0</strong> <span>kn</span></div><span id="sailing-motion">AHEAD</span></div>
     <div class="instrument-wind"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27"/><path class="wind-bow" d="M29 9 L32 3 L35 9"/><text x="32" y="36">BOW</text><g id="sailing-wind-arrow"><path d="M32 10 V23 M27 18 L32 23 L37 18"/></g></svg><div><span class="instrument-label">APPARENT WIND · FROM</span><div><strong id="sailing-wind-knots">0.0</strong> kn</div><span id="sailing-wind-direction">Ahead</span></div></div>
     <div id="sailing-cue"></div>`;
-  const speedCard=root.querySelector('.instrument-speed'),windCard=root.querySelector('.instrument-wind');
-  for(const [key,label,card]of [['speedHud','Show speed indicator',speedCard],['windHud','Show wind indicator',windCard]]){
+  const headingCard=root.querySelector('.instrument-heading'),speedCard=root.querySelector('.instrument-speed'),windCard=root.querySelector('.instrument-wind');
+  for(const [key,label,card]of [['headingHud','Show heading indicator',headingCard],['speedHud','Show speed indicator',speedCard],['windHud','Show wind indicator',windCard]]){
     boat[key]=search.has(key)?search.get(key)!=='0':saved[key]!==false;
     const row=document.createElement('label'),input=document.createElement('input');row.textContent=label;
     input.type='checkbox';input.id='boat-'+key;input.checked=boat[key];card.hidden=!boat[key];
-    input.onchange=()=>{boat[key]=input.checked;card.hidden=!input.checked;try{localStorage.setItem('sailing-instruments',JSON.stringify({speedHud:boat.speedHud,windHud:boat.windHud}));}catch{/* unavailable storage */}update(performance.now(),true);};
+    input.onchange=()=>{boat[key]=input.checked;card.hidden=!input.checked;try{localStorage.setItem('sailing-instruments',JSON.stringify({headingHud:boat.headingHud,speedHud:boat.speedHud,windHud:boat.windHud}));}catch{/* unavailable storage */}update(performance.now(),true);};
     row.append(input);controls.append(row);
   }
-  const fields=Object.fromEntries(['knots','motion','wind-knots','wind-direction','cue'].map(key=>[key,root.querySelector('#sailing-'+key)]));
+  const fields=Object.fromEntries(['heading','knots','motion','wind-knots','wind-direction','cue'].map(key=>[key,root.querySelector('#sailing-'+key)]));
   const arrow=root.querySelector('#sailing-wind-arrow');let last=-Infinity;
   function update(now,force=false){
-    root.hidden=search.get('ui')==='0'||(!boat.speedHud&&!boat.windHud);
+    root.hidden=search.get('ui')==='0'||(!boat.speedHud&&!boat.windHud&&!boat.headingHud);
     if(root.hidden||(!force&&now-last<100))return;last=now;
     const r=instrumentReadout(boat);
-    for(const [key,value]of Object.entries({knots:r.speed,motion:r.motion,'wind-knots':r.wind,'wind-direction':r.calm?'Calm':r.direction,cue:r.cue}))if(fields[key].textContent!==value)fields[key].textContent=value;
+    for(const [key,value]of Object.entries({heading:r.heading,knots:r.speed,motion:r.motion,'wind-knots':r.wind,'wind-direction':r.calm?'Calm':r.direction,cue:r.cue}))if(fields[key].textContent!==value)fields[key].textContent=value;
     arrow.setAttribute('transform',`rotate(${r.degrees} 32 32)`);arrow.style.opacity=r.calm?'0':'1';
     speedCard.dataset.astern=String(r.motion==='ASTERN');
+  }
+  document.body.append(root);update(0,true);return {root,update};
+}
+
+// ---- js/controls.js ----
+
+const CONTROL_ICONS = {
+  camera:'<rect x="3" y="6" width="18" height="14" rx="3"/><circle cx="12" cy="13" r="4"/><path d="m8 6 1-3h6l1 3"/>',
+  captain:'<path d="M4 9c0-6 16-6 16 0l-2 5H6Z"/><path d="M6 14v3c3 3 9 3 12 0v-3M9 10h6"/>',
+  map:'<path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2ZM9 3v16M15 5v16"/>',
+  weather:'<path d="M7 16a4 4 0 1 1 1-8 5 5 0 0 1 9 1 3.5 3.5 0 1 1 1 7ZM8 19l-1 2M13 19l-1 2M18 19l-1 2"/>',
+  ship:'<path d="M12 2v14M10 4 4 13h6M14 6l5 7h-5M3 17h18l-3 4H6Z"/>',
+  share:'<path d="M12 16V3m-4 4 4-4 4 4M6 11H4v10h16V11h-2"/>',
+  close:'<path d="m6 6 12 12M18 6 6 18"/>',
+  port:'<path d="m14 5-7 7 7 7"/>',
+  starboard:'<path d="m10 5 7 7-7 7"/>',
+  centre:'<circle cx="12" cy="12" r="6"/><path d="M12 3v4m0 10v4M3 12h4m10 0h4"/>',
+};
+
+function controlIcon(button,icon,label){
+  button.type='button';button.classList.add('icon-button');button.title=label;button.setAttribute('aria-label',label);
+  button.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${CONTROL_ICONS[icon]}</svg>`;
+  return button;
+}
+
+// Small presentation surface; all commands use the existing helm and crew model.
+function createHelmControls(boat,onSails){
+  const root=document.createElement('section');root.id='helm-controls';root.setAttribute('aria-label','Helm controls');
+  root.innerHTML=`<div class="helm-rudder"><div class="helm-label"><label for="boat-rudder">Rudder</label><output id="rudder-angle" aria-live="off">Centred</output></div>
+    <div class="rudder-controls"><button id="rudder-port"></button><input type="range" id="boat-rudder" min="-35" max="35" step="0.5" value="${boat.rudderTarget}" aria-label="Rudder"><button id="rudder-centre"></button><button id="rudder-starboard"></button></div></div>
+    <div class="helm-sails"><div class="helm-label"><span>Sails</span><output id="helm-canvas" aria-live="off">Full canvas</output></div>
+    <div class="sail-buttons" role="group" aria-label="Sail amount"><button data-sail="0" aria-label="Furl sails">Furl</button><button data-sail="0.5" aria-label="Reef sails">Reef</button><button data-sail="1" aria-label="Full sails">Full</button></div></div>`;
+  const slider=root.querySelector('#boat-rudder'),angle=root.querySelector('#rudder-angle'),canvas=root.querySelector('#helm-canvas');
+  const buttons=[...root.querySelectorAll('[data-sail]')];
+  const setRudder=value=>{boat.rudderTarget=Math.max(-35,Math.min(35,value));slider.value=boat.rudderTarget;update(performance.now(),true);};
+  slider.oninput=()=>setRudder(Number(slider.value));
+  for(const [id,icon,label,action] of [
+    ['port','port','Rudder to port',()=>setRudder(boat.rudderTarget-5)],
+    ['centre','centre','Centre rudder',()=>setRudder(0)],
+    ['starboard','starboard','Rudder to starboard',()=>setRudder(boat.rudderTarget+5)],
+  ]) controlIcon(root.querySelector('#rudder-'+id),icon,label).onclick=action;
+  for(const button of buttons)button.onclick=()=>{onSails(Number(button.dataset.sail));update(performance.now(),true);};
+  let last=-Infinity;
+  function update(now,force=false){
+    if(!force&&now-last<100)return;last=now;
+    if(document.activeElement!==slider)slider.value=boat.rudderTarget;
+    const target=boat.rudderTarget,actual=boat.rudder??0,side=target<0?'port':'starboard';
+    angle.textContent=Math.abs(target)<.25?'Centred':`${Math.abs(target).toFixed(0)}° ${side}`;
+    angle.title=`Actual rudder: ${actual.toFixed(1)}°`;
+    slider.setAttribute('aria-valuetext',angle.textContent);
+    const rig=sailingState(boat).rig,deployed=rig.reduce((sum,p)=>sum+p.deployed,0)/3;
+    const uniform=SAIL_KEYS.every(k=>Math.abs(boat[k]-boat.sailFore)<.001),targetSail=boat.sailFore;
+    const working=SAIL_KEYS.some((k,i)=>Math.abs(boat[k]-rig[i].deployed)>.015);
+    canvas.textContent=boat.propulsion!=='sail'?'Set-speed mode':working?`Setting · ${Math.round(deployed*100)}%`:uniform&&targetSail===1?'Full canvas':uniform&&targetSail===0?'Furled':`${Math.round(deployed*100)}% canvas`;
+    for(const b of buttons)b.setAttribute('aria-pressed',String(boat.propulsion==='sail'&&uniform&&Math.abs(Number(b.dataset.sail)-targetSail)<.001));
   }
   document.body.append(root);update(0,true);return {root,update};
 }
@@ -7221,6 +7262,7 @@ async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,
 }
 
 // ---- js/main.js ----
+
 
 
 
@@ -7866,14 +7908,6 @@ async function main() {
   });
   addEventListener('keyup', (e) => { keys[e.code] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
-  let suppressLookClick = false;
-  canvas.addEventListener('click', () => {
-    if(suppressLookClick) { suppressLookClick=false; return; }
-    if (cameraMode !== 'ship' && document.pointerLockElement !== canvas) canvas.requestPointerLock?.()?.catch?.(()=>{});
-  });
-  let dragging = false;
-  canvas.addEventListener('mousedown', (e) => { if (e.button === 2 || (cameraMode === 'ship' && e.button === 0)) dragging = true; });
-  addEventListener('mouseup', () => { dragging = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   function turnView(dx,dy) {
     if(cameraMode === 'ship') {
@@ -7884,13 +7918,11 @@ async function main() {
       cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - dy * 0.0022));
     }
   }
-  addEventListener('mousemove', (e) => {
-    if ((document.pointerLockElement === canvas || dragging)) turnView(e.movementX,e.movementY);
-  });
   let touchLook=null;
   canvas.addEventListener('pointerdown',e=>{
-    if(e.pointerType==='mouse'||e.defaultPrevented||touchLook)return;
-    e.preventDefault();suppressLookClick=true;touchLook={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);
+    if(e.defaultPrevented||touchLook||![0,2].includes(e.button))return;
+    e.preventDefault();touchLook={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);
+    document.body.classList.add('has-looked');
   });
   canvas.addEventListener('pointermove',e=>{
     if(touchLook?.id!==e.pointerId)return;
@@ -8095,25 +8127,30 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const panel = document.getElementById('panel');
   function setPanelOpen(open) {
-    if(open){setCaptainOpen(false);landfallUI.close();}
+    if(open){setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);}
     panel.classList.toggle('hidden', !open);
     document.body.classList.toggle('sea-settings-open', open);
     seaSettingsButton.setAttribute('aria-expanded', String(open));
+    if(open)hideSea.focus({preventScroll:true});
   }
   function togglePanel() { setPanelOpen(panel.classList.contains('hidden')); }
   const boatPanel = document.createElement('section');
   boatPanel.id = 'boat-panel';
+  boatPanel.hidden=true;
   boatPanel.setAttribute('aria-labelledby','boat-title');
-  boatPanel.innerHTML = `<div class="panel-header"><strong id="boat-title">Boat perspective</strong></div>
-    <div class="panel-body" id="boat-controls"><p>Use Rudder or A/D to steer. The helmsman works the tiller below the quarterdeck. Heading 0° follows the original view; 90° turns right.</p></div>`;
+  boatPanel.innerHTML = `<div class="panel-header"><strong id="boat-title">Ship settings</strong></div>
+    <div class="panel-body" id="boat-controls"></div>`;
   const boatBody=boatPanel.querySelector('.panel-body');
   panel.before(boatPanel);
   const collapseBoat = document.createElement('button');
-  collapseBoat.className = 'collapse'; collapseBoat.textContent = 'Hide';
-  collapseBoat.setAttribute('aria-label', 'Toggle boat controls');
-  collapseBoat.setAttribute('aria-controls','boat-controls');collapseBoat.setAttribute('aria-expanded','true');
-  collapseBoat.onclick = () => { const compact = boatPanel.classList.toggle('compact'); collapseBoat.textContent = compact ? 'Controls' : 'Hide'; collapseBoat.setAttribute('aria-expanded',String(!compact)); };
+  controlIcon(collapseBoat,'close','Hide ship settings');
+  collapseBoat.onclick = () => {setBoatOpen(false);shipSettingsButton.focus();};
   boatPanel.querySelector('.panel-header').append(collapseBoat);
+  function setBoatOpen(open){
+    if(open){setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setCameraOpen(false);setShareOpen(false);}
+    boatPanel.hidden=!open;shipSettingsButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('ship-settings-open',open);
+    if(open)collapseBoat.focus({preventScroll:true});
+  }
   const prowLabel = document.createElement('label');
   prowLabel.textContent = 'Show ship';
   const prowToggle = document.createElement('input');
@@ -8131,29 +8168,45 @@ async function main() {
   const instruments=createSailingInstruments(boat,qs,boatBody);
   const cameraDock=document.createElement('div'); cameraDock.id='camera-dock';
   cameraDock.setAttribute('role','group'); cameraDock.setAttribute('aria-label','Scene controls');
+  const cameraButton=controlIcon(document.createElement('button'),'camera','Camera views');
+  cameraButton.setAttribute('aria-controls','camera-panel');cameraButton.setAttribute('aria-expanded','false');
+  const cameraPanel=document.createElement('section');cameraPanel.id='camera-panel';cameraPanel.hidden=true;cameraPanel.setAttribute('aria-labelledby','camera-title');
+  cameraPanel.innerHTML='<div class="panel-header"><strong id="camera-title">View</strong></div><div class="panel-body camera-choices"></div>';
+  const cameraBody=cameraPanel.querySelector('.panel-body');
+  const cameraClose=controlIcon(document.createElement('button'),'close','Hide camera views');
+  cameraClose.onclick=()=>{setCameraOpen(false);cameraButton.focus();};cameraPanel.querySelector('.panel-header').append(cameraClose);
+  panel.before(cameraPanel);
+  function setCameraOpen(open){
+    if(open){setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setShareOpen(false);}
+    cameraPanel.hidden=!open;cameraButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('camera-open',open);
+    if(open)cameraClose.focus({preventScroll:true});
+  }
+  cameraButton.onclick=()=>setCameraOpen(cameraPanel.hidden);cameraDock.append(cameraButton);
   const cameraButtons=new Map();
   for(const [mode,label] of [['boat','Boat camera'],['free','Free camera'],['ship','View ship']]) {
     const button=document.createElement('button'); button.textContent=label;
-    button.addEventListener('click',()=>setCameraMode(mode));
-    cameraDock.append(button); cameraButtons.set(mode,button);
+    button.addEventListener('click',()=>{setCameraMode(mode);setCameraOpen(false);cameraButton.focus();});
+    cameraBody.append(button); cameraButtons.set(mode,button);
   }
-  const seaSettingsButton = document.createElement('button');
-  seaSettingsButton.textContent = 'Sea settings';
+  const seaSettingsButton = controlIcon(document.createElement('button'),'weather','Sea settings');
   seaSettingsButton.setAttribute('aria-controls', 'panel');
   seaSettingsButton.setAttribute('aria-expanded', 'false');
   seaSettingsButton.onclick = togglePanel;
-  const captainButton=document.createElement('button');captainButton.textContent='Captain';
+  const captainButton=controlIcon(document.createElement('button'),'captain','Captain');
+  const shipSettingsButton=controlIcon(document.createElement('button'),'ship','Ship settings');
+  shipSettingsButton.setAttribute('aria-controls','boat-panel');shipSettingsButton.setAttribute('aria-expanded','false');
+  shipSettingsButton.onclick=()=>setBoatOpen(boatPanel.hidden);
   captainButton.setAttribute('aria-controls','captain-panel');captainButton.setAttribute('aria-expanded','false');
   const captainPanel=document.createElement('section');captainPanel.id='captain-panel';captainPanel.hidden=true;
   captainPanel.setAttribute('aria-labelledby','captain-title');
   captainPanel.innerHTML='<div class="panel-header"><strong id="captain-title">Captain’s orders</strong></div><div class="panel-body"><p>Command the ship. The crew attends to its stations.</p></div>';
   panel.before(captainPanel);
   const captainBody=captainPanel.querySelector('.panel-body'),captainHide=document.createElement('button');
-  captainHide.textContent='Hide';captainHide.setAttribute('aria-label','Hide captain orders');
+  controlIcon(captainHide,'close','Hide captain orders');
   captainHide.onclick=()=>{setCaptainOpen(false);captainButton.focus();};captainPanel.querySelector('.panel-header').append(captainHide);
   function setCaptainOpen(open){
     captainPanel.hidden=!open;document.body.classList.toggle('captain-open',open);captainButton.setAttribute('aria-expanded',String(open));
-    if(open){setPanelOpen(false);landfallUI.close();if(document.pointerLockElement)document.exitPointerLock();captainHide.focus();}
+    if(open){setPanelOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);if(document.pointerLockElement)document.exitPointerLock();captainHide.focus({preventScroll:true});}
   }
   captainButton.onclick=()=>setCaptainOpen(captainPanel.hidden);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!captainPanel.hidden)captainHide.click();});
@@ -8181,19 +8234,21 @@ async function main() {
     }
     if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${crewWorkLabel(s)}`;
   }
-  const shareButton = document.createElement('button');
-  shareButton.textContent = 'Copy share link';
+  const shareButton = controlIcon(document.createElement('button'),'share','Copy share link');
+  shareButton.setAttribute('aria-controls','share-panel');shareButton.setAttribute('aria-expanded','false');
   const sharePanel = document.createElement('div'); sharePanel.id = 'share-panel'; sharePanel.hidden = true;
   const shareInput = document.createElement('input');
   shareInput.type = 'url'; shareInput.readOnly = true; shareInput.setAttribute('aria-label', 'Share link');
   shareInput.addEventListener('click', () => shareInput.select());
-  const closeShare = document.createElement('button'); closeShare.textContent = 'Close';
-  closeShare.onclick = () => { sharePanel.hidden = true; shareButton.focus(); };
+  const closeShare = controlIcon(document.createElement('button'),'close','Close share link');
+  function setShareOpen(open){sharePanel.hidden=!open;shareButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('share-open',open);}
+  closeShare.onclick = () => { setShareOpen(false); shareButton.focus(); };
   const shareStatus = document.createElement('span'); shareStatus.setAttribute('role', 'status');
   sharePanel.append(shareInput, closeShare, shareStatus);
   shareButton.onclick = async () => {
     const url = createShareLink(location.href, P, boat, cameraMode);
-    sharePanel.hidden = false; shareInput.value = url;
+    setPanelOpen(false);setBoatOpen(false);setCaptainOpen(false);setCameraOpen(false);landfallUI.close();
+    setShareOpen(true); shareInput.value = url;
     // Also leave a shareable address in the browser if clipboard access is unavailable.
     try { history.replaceState(null, '', url); } catch { /* standalone file */ }
     try {
@@ -8204,13 +8259,21 @@ async function main() {
       shareStatus.textContent = 'Select and copy this link to share your settings.';
     }
   };
-  cameraDock.append(captainButton,seaSettingsButton, shareButton, sharePanel);
+  cameraDock.append(captainButton);
+  panel.before(sharePanel);
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,
-    onOpen:()=>{setPanelOpen(false);setCaptainOpen(false);},
+    onOpen:()=>{setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
     getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}needSpectrum=true;envFull=true;}});
-  if(LAND_STAGE){boatPanel.classList.add('compact');collapseBoat.textContent='Controls';collapseBoat.setAttribute('aria-expanded','false');}
-  if(profileDetails)cameraDock.append(profileDetails);
+  controlIcon(cameraDock.querySelector('#landfall-button'),'map','Landfall');
+  cameraDock.append(seaSettingsButton,shipSettingsButton,shareButton);
   panel.before(cameraDock);
+  addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    if(!boatPanel.hidden)collapseBoat.click();
+    if(!cameraPanel.hidden)cameraClose.click();
+    if(!panel.classList.contains('hidden'))hideSea.click();
+    if(!sharePanel.hidden)closeShare.click();
+  });
   // Keep controls in the visible viewport, including browser bars and keyboards.
   const layoutControls=()=>{
     const viewport=window.visualViewport, top=viewport?.offsetTop || 0, height=viewport?.height || innerHeight;
@@ -8218,14 +8281,9 @@ async function main() {
     const css=document.documentElement.style;
     css.setProperty('--view-top',top+'px');css.setProperty('--view-height',height+'px');
     css.setProperty('--keyboard-inset',Math.max(0,innerHeight-top-height)+'px');
-    const instrumentsHeight=instruments.root.hidden?0:instruments.root.getBoundingClientRect().height;
-    if(profilePanel && profileDetails.open && matchMedia('(max-width:900px), (pointer:coarse)').matches){
-      const base=cameraDock.getBoundingClientRect().bottom-profilePanel.getBoundingClientRect().height;
-      profilePanel.style.maxHeight=Math.max(0,Math.min(160,height*.24,top+height-base-instrumentsHeight-104))+'px';
-    }else if(profilePanel)profilePanel.style.maxHeight='';
-    const dockBottom=cameraDock.getBoundingClientRect().bottom+8;
-    css.setProperty('--dock-bottom',dockBottom+'px');
-    css.setProperty('--controls-bottom',(dockBottom+(instruments.root.hidden?0:instrumentsHeight+8))+'px');
+    const instrumentsBottom=instruments.root.hidden?top+8:instruments.root.getBoundingClientRect().bottom;
+    css.setProperty('--instruments-bottom',instrumentsBottom+'px');
+    css.setProperty('--controls-bottom',Math.max(cameraDock.getBoundingClientRect().bottom,instrumentsBottom)+8+'px');
   };
   const controlsObserver=new ResizeObserver(layoutControls);controlsObserver.observe(cameraDock);controlsObserver.observe(instruments.root);
   window.visualViewport?.addEventListener('resize',layoutControls);
@@ -8233,7 +8291,7 @@ async function main() {
   addEventListener('resize',layoutControls);layoutControls();
   const updateHelp = () => {
     document.querySelector('#hud .help').textContent = boat.enabled
-      ? 'A/D or arrows: steer | X: centre rudder | B: free camera | click sea: look | Esc: release | H: sea settings'
+      ? 'Drag to look · A/D: rudder · X: centre · B: change camera · H: sea settings'
       : cameraMode === 'ship' ? 'Drag: orbit ship | wheel: zoom | B: board ship | H: sea settings'
       : 'WASD: fly | Space/E: up | Q/C: down | wheel: speed | B: board ship | H: sea settings';
     for(const [mode,button] of cameraButtons) button.setAttribute('aria-pressed',String(mode===cameraMode));
@@ -8306,19 +8364,17 @@ async function main() {
       : 'Waves change speed and hull motion. Set the calm-water speed above.';
   }
   propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
-  const rudderRow = document.createElement('label');
-  rudderRow.textContent = 'Rudder';
-  const rudderInput = document.createElement('input');
-  Object.assign(rudderInput,{type:'range',min:-35,max:35,step:0.5,value:boat.rudderTarget,id:'boat-rudder'});
-  const rudderValue = document.createElement('output'); rudderValue.textContent='0 deg';
-  rudderInput.addEventListener('input',()=>{boat.rudderTarget=Number(rudderInput.value);});
-  rudderRow.append(rudderInput,rudderValue); boatBody.append(rudderRow);
-  const centreRudder = document.createElement('button'); centreRudder.textContent = 'Centre rudder';
-  centreRudder.onclick = ()=>{boat.rudderTarget=0;}; boatBody.append(centreRudder);
+  const helm=createHelmControls(boat,value=>{
+    const order=value===1?'full':value===0?'furl':'reduced';
+    if(!crew?.order(boat,order)){boat.propulsion='sail';for(const key of SAIL_KEYS)boat[key]=value;}
+    propulsionInput.value=boat.propulsion;
+    for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;
+    showPropulsionControls();updateCrewUI();
+  });
   const helmReadout=document.createElement('p'); helmReadout.id='helm-readout'; boatBody.append(helmReadout);
   const centerView = document.createElement('button'); centerView.textContent = 'Look ahead';
-  centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; };
-  boatBody.append(centerView);
+  centerView.onclick = () => { setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; setCameraOpen(false); };
+  cameraBody.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
   const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
   if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],{swellHs:.65,windSpeed:5.5});
@@ -8326,9 +8382,10 @@ async function main() {
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
   const seaHeader=document.createElement('div');seaHeader.className='panel-header';
-  const hideSea=document.createElement('button');hideSea.textContent='Hide';hideSea.setAttribute('aria-label','Hide sea settings');
+  const hideSea=controlIcon(document.createElement('button'),'close','Hide sea settings');
   hideSea.onclick=()=>{setPanelOpen(false);seaSettingsButton.focus();};seaHeader.append(seaTitle,hideSea);
   const seaBody=document.createElement('div');seaBody.className='panel-body';panel.append(seaHeader,seaBody);
+  if(profileDetails)seaBody.append(profileDetails);
   const soundButton=document.createElement('button');soundButton.textContent='Enable sound';soundButton.id='sound-toggle';
   soundButton.setAttribute('aria-pressed','false');
   const soundStatus=document.createElement('p');soundStatus.id='sound-status';soundStatus.setAttribute('aria-live','polite');
@@ -8413,7 +8470,9 @@ async function main() {
     row.append(name, inp, val);
     seaBody.appendChild(row);
   }
-  if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; cameraDock.hidden=true; }
+  const lookHint=document.createElement('div');lookHint.id='look-hint';lookHint.textContent='Drag to look around';document.body.append(lookHint);
+  if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }
+  if(qs.get('profile')==='1')document.body.classList.add('show-performance');
 
 
   const hudFps = document.getElementById('fps');
@@ -8511,8 +8570,6 @@ async function main() {
       sailStatus.textContent=`${pointOfSail(sails.apparentAngle,sails.apparentSpeed)} · apparent wind ${sails.apparentSpeed.toFixed(1)} m/s, ${Math.abs(angle).toFixed(0)}° ${angle>=0?'starboard':'port'} · ${sails.area.toFixed(0)} m² set · wind torque ${Math.abs(sails.rollMoment/1000).toFixed(1)} kN·m`;
       for(let i=0;i<3;i++)sailInputs[i].output.textContent=Math.round(sails.rig[i].deployed*100)+'%';
       if(document.activeElement!==document.getElementById('boat-heading')) document.getElementById('boat-heading').value=boat.heading.toFixed(1);
-      if(document.activeElement!==rudderInput) rudderInput.value=boat.rudderTarget;
-      rudderValue.textContent=boat.rudder.toFixed(1)+' deg';
       helmReadout.textContent=`Heading ${boat.heading.toFixed(1)} deg | Rudder ${boat.rudder.toFixed(1)} deg | Turn ${(boat.yawRate/D2R).toFixed(1)} deg/s`;
       fpsN = 0; fpsT = 0;
     }
@@ -8520,6 +8577,7 @@ async function main() {
     if(needSpectrum){boat.revision++;targetTime=-1;}
     updateBoat(dt);
     instruments.update(now);
+    helm.update(now);
     updateCamera(dt);
     simTime += dt;
     if (simTime > LOOP) simTime -= LOOP;

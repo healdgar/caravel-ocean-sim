@@ -12,7 +12,7 @@ export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,get
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
   panel.setAttribute('aria-labelledby','landfall-title');
-  panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button aria-label="Hide landfall">Hide</button></div>
+  panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">A first landfall. Real island relief, generated vegetation, changing light.</p>
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
     <p>Start at the horizon, on approach, or near the coast. Sailing physics remain at normal speed.</p>
@@ -22,7 +22,7 @@ export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,get
     <p class="landfall-credit">Terrain: Mapzen / USGS / NOAA. World outline: Natural Earth (public domain). Vegetation is generated. Shore clearance is approximate; ports and voyage compression are still to come.</p></details>
     <button id="landfall-ocean">Return to open ocean</button></div>`;
   const setOpen=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open));document.body.classList.toggle('landfall-open',open);
-    if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();}};
+    if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
   button.onclick=()=>setOpen(panel.hidden);panel.querySelector('.panel-header button').onclick=()=>setOpen(false);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){setOpen(false);button.focus();}});
   for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast','Near coast']]){

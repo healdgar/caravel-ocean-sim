@@ -14,13 +14,13 @@ export const ROUGH_SEAS = {
 
 export function cameraModeFromLink(search) {
   const mode = search.get('view');
-  return ['boat', 'free', 'ship'].includes(mode) ? mode : search.get('boat') === '1' ? 'boat' : 'free';
+  return ['boat', 'free', 'ship'].includes(mode) ? mode : search.get('boat') === '0'||search.has('cam') ? 'free' : 'boat';
 }
 
 export function propulsionFromLink(search) {
   const mode = search.get('propulsion');
   if (mode === 'sail' || mode === 'manual') return mode;
-  return search.has('boatSpeed') ? 'manual' : 'sail'; // Preserve existing speed-controlled links.
+  return 'sail'; // A speed parameter alone must never silently enable powered motion.
 }
 
 export function createShareLink(href, settings, boat, cameraMode) {
@@ -39,6 +39,6 @@ export function createShareLink(href, settings, boat, cameraMode) {
   url.searchParams.set('prow', boat.showProw ? '1' : '0');
   url.searchParams.set('effects', boat.effects === false ? '0' : '1');
   url.searchParams.set('crew', boat.crew === false ? '0' : '1');
-  for(const key of ['speedHud','windHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
+  for(const key of ['speedHud','windHud','headingHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
   return url.href;
 }

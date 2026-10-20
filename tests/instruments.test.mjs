@@ -15,6 +15,9 @@ test('instruments distinguish signed speed, apparent wind from bearing and stern
   s.forward=-100;s.rig.forEach(p=>p.pressure=-1);assert.match(instrumentReadout(b).cue,/Canvas backed/);
   b.surgeVelocity=-.001;assert.equal(instrumentReadout(b).speed,'0.0');
   s.apparentSpeed=0;assert.equal(instrumentReadout(b).calm,true);
+  for(const [heading,display] of [[0,'000°'],[359.8,'000°'],[-90,'270°'],[725,'005°']]){
+    b.heading=heading;assert.equal(instrumentReadout(b).heading,display);
+  }
 });
 
 test('wind dial follows the boat, not the camera or the world wind bearing',()=>{
