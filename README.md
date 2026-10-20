@@ -640,7 +640,7 @@ npm run build
 npm test
 ```
 
-The Victory, landfall and marine-encounter revision passes **261/261 tests** using installed Chrome on
+The Victory, landfall and marine-encounter revision passes **264/264 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
