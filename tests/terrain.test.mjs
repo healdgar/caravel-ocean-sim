@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import {ISLAND,LAND_REGIONS,LANDFALL_VIEWS,decodeIsland,decodeBiome,islandGeometry,islandVegetation,terrainSample,islandCoordinates,constrainIslandMotion,safeLandfallStart} from '../js/terrain-model.js';
-import {TREE_VARIANTS,TREE_LOD,treeGeometry,treeSkeleton,selectTreeLods,vegetationProbability} from '../js/vegetation.js';
+import {TREE_VARIANTS,TREE_VERTEX_FLOATS,TREE_LOD,treeGeometry,treeSkeleton,selectTreeLods,vegetationProbability} from '../js/vegetation.js';
 const file=await readFile(new URL('../assets/world/saba/height.bin',import.meta.url));
 const heights=decodeIsland(file.buffer.slice(file.byteOffset,file.byteOffset+file.byteLength));
 const maskFile=await readFile(new URL('../assets/world/saba/biome.bin',import.meta.url));
@@ -86,6 +86,7 @@ test('vegetation is deterministic, finite and rooted on dry ground',()=>{
     assert.ok(trees.slice(i,i+8).every(Number.isFinite));
     assert.ok(Math.abs(trees[i+1]-terrainSample(heights,trees[i],trees[i+2]))<.05);
     assert.ok(trees[i+1]>=15);
+    assert.ok(trees[i+3]>=3.2&&trees[i+3]<=7.6&&trees[i+4]>=8&&trees[i+4]<=18,'instance dimensions are physical metres');
     const u=(trees[i]-ISLAND.x)/ISLAND.span+.5,v=(trees[i+2]-ISLAND.z)/ISLAND.span+.5;
     assert.ok(vegetationProbability(biome,ISLAND.biomeSize,u,v)>0,'tree must belong to the registered vegetation mask');
   }
@@ -121,33 +122,119 @@ test('regional image and height layers share provenance and geographic bounds',a
   assert.ok(patch(.50,.50)>patch(.49,.72)+.20,'central forest differs from dry southern flank');
 });
 
-test('recursive tree variants retain physical extents while increasing branch and foliage detail',()=>{
+const distance3=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
+const pathLength=path=>path.slice(1).reduce((sum,p,i)=>sum+distance3(p,path[i]),0);
+const treeBounds=geometry=>{
+  const bounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};
+  for(let i=0;i<geometry.length;i+=TREE_VERTEX_FLOATS)for(let a=0;a<3;a++){
+    bounds.min[a]=Math.min(bounds.min[a],geometry[i+a]);bounds.max[a]=Math.max(bounds.max[a],geometry[i+a]);
+  }
+  return bounds;
+};
+
+test('recursive tree branches form a connected, tapered hierarchy with seeded irregular growth',()=>{
+  assert.ok(TREE_VARIANTS>=8,'forest has more than four repeated silhouettes');
   const variants=[];
   for(let variant=0;variant<TREE_VARIANTS;variant++){
-    const skeleton=treeSkeleton(variant);assert.deepEqual(skeleton,treeSkeleton(variant));
-    assert.equal(skeleton.branches.length,17);assert.equal(skeleton.crowns.length,5);
-    variants.push(JSON.stringify(skeleton));
+    const skeleton=treeSkeleton(variant),{branches,crowns}=skeleton;
+    assert.deepEqual(skeleton,treeSkeleton(variant));variants.push(JSON.stringify(skeleton));
+    assert.equal(crowns.length,0,'foliage cannot regress to closed ellipsoid crowns');
+    assert.ok(branches.length>100&&branches.length<300,'real recursive detail remains bounded');
+    assert.deepEqual(branches[0].from,[0,0,0]);assert.equal(branches[0].parent,-1);
+    const levels=new Map(),children=new Uint16Array(branches.length);
+    let curved=0;
+    for(const [index,branch] of branches.entries()){
+      assert.equal(branch.id,index);assert.ok(Number.isInteger(branch.level));
+      assert.equal(branch.path[0],branch.from);assert.equal(branch.path.at(-1),branch.to);
+      assert.equal(branch.radii.length,branch.path.length);assert.ok(branch.path.length>=3);
+      assert.equal(branch.radii[0],branch.radius);assert.equal(branch.radii.at(-1),branch.tipRadius);
+      assert.ok(branch.tipRadius>0&&branch.tipRadius<branch.radius*.3,'branch tips taper substantially');
+      for(let i=0;i<branch.path.length;i++){
+        assert.ok(branch.path[i].every(Number.isFinite));assert.ok(branch.path[i][1]>=0);
+        assert.ok(Number.isFinite(branch.radii[i])&&branch.radii[i]>0);
+        if(i){assert.ok(branch.radii[i]<branch.radii[i-1]);assert.ok(distance3(branch.path[i],branch.path[i-1])>0);}
+      }
+      if(index){
+        assert.ok(Number.isInteger(branch.parent)&&branch.parent>=0&&branch.parent<index,'parents precede children without cycles');
+        const parent=branches[branch.parent];children[branch.parent]++;
+        assert.equal(branch.level,parent.level+1);
+        assert.ok(branch.attachIndex>0&&branch.attachIndex<parent.path.length);
+        assert.equal(branch.from,parent.path[branch.attachIndex],'limb origin shares its actual curved parent section');
+        assert.ok(branch.radius<parent.radii[branch.attachIndex],'child root fits inside its parent section');
+        assert.ok(branch.growthLength>0&&branch.growthLength<parent.growthLength*.8,'recursive growth lengths shrink before independent height/radius scaling');
+      }
+      const chord=distance3(branch.from,branch.to);
+      if(pathLength(branch.path)>chord+1e-6)curved++;
+      const lengths=levels.get(branch.level)??[];lengths.push(pathLength(branch.path));levels.set(branch.level,lengths);
+    }
+    assert.ok(levels.size>=5,'trunk recursively forks through terminal twigs');
+    assert.ok(curved>branches.length*.9,'section paths twist rather than reuse straight cylinders');
+    for(let level=2;level<levels.size;level++){
+      const mean=n=>levels.get(n).reduce((sum,length)=>sum+length,0)/levels.get(n).length;
+      assert.ok(mean(level)<mean(level-1)*.8,'successive twig generations become shorter');
+    }
+    assert.ok(branches.filter((b,i)=>children[i]===0).every(b=>b.level===levels.size-1));
+  }
+  assert.equal(new Set(variants).size,TREE_VARIANTS,'each seed changes growth, not just instance colour');
+});
+
+test('leaf sprays attach to outer branches and terminal twigs with stem-to-tip texture coordinates',()=>{
+  for(let variant=0;variant<TREE_VARIANTS;variant++){
+    const {branches,sprays}=treeSkeleton(variant),parents=new Set(branches.map(b=>b.parent)),leafLevels=new Set();
+    assert.ok(sprays.length>500&&sprays.length<1500,'leaf sprays fill the canopy without unbounded growth');
+    for(const spray of sprays){
+      const branch=branches[spray.branch];assert.ok(branch&&branch.level>=3,'leaves belong to outer branches and twigs');leafLevels.add(branch.level);
+      if(branch.level===4)assert.ok(!parents.has(branch.id));
+      assert.ok(spray.attach>=0&&spray.attach<=1);
+      // Anchors follow their actual curved section, not a root-to-tip chord.
+      assert.ok(Number.isInteger(spray.attachIndex)&&spray.attachIndex>=0&&spray.attachIndex<branch.path.length-1);
+      const a=branch.path[spray.attachIndex],b=branch.path[spray.attachIndex+1];
+      const d=b.map((v,i)=>v-a[i]),t=d.reduce((sum,v,i)=>sum+v*(spray.anchor[i]-a[i]),0)/d.reduce((sum,v)=>sum+v*v,0);
+      const point=a.map((v,i)=>v+d[i]*t);
+      assert.ok(t>=-1e-8&&t<=1+1e-8&&distance3(point,spray.anchor)<1e-8,'leaf stem is on its curved parent twig');
+      const stem=spray.corners[0].map((v,i)=>(v+spray.corners[1][i])*.5);
+      assert.ok(distance3(stem,spray.anchor)<1e-8,'the card stem meets the twig, without floating leaves');
+      assert.ok(spray.corners.every(p=>p.every(Number.isFinite)));assert.ok(spray.width>0&&spray.height>0);
+      assert.ok(distance3(spray.corners[0],spray.corners[1])>0&&distance3(spray.corners[0],spray.corners[2])>0);
+    }
+    assert.deepEqual([...leafLevels].sort(),[3,4]);
+    const geometry=treeGeometry(variant,2),uvs=new Set();
+    for(let i=0;i<geometry.length;i+=TREE_VERTEX_FLOATS)if(geometry[i+6]===2){
+      const [u,v]=geometry.subarray(i+8,i+10);assert.ok(u>=0&&u<=1&&v>=0&&v<=1);uvs.add(`${u},${v}`);
+    }
+    assert.deepEqual([...uvs].sort(),['0,0','0,1','1,0','1,1']);
+  }
+});
+
+test('tree LOD changes detail without changing roots, silhouettes or physical dimensions',()=>{
+  const triangleLimits=[200,2500,8000];
+  for(let variant=0;variant<TREE_VARIANTS;variant++){
     let lastCount=0,canonical=null;
     for(let lod=0;lod<3;lod++){
       const geometry=treeGeometry(variant,lod);assert.deepEqual(geometry,treeGeometry(variant,lod));
-      assert.ok(geometry.length>lastCount);lastCount=geometry.length;
-      assert.ok(geometry.length/8<2300,'bounded shared tree mesh');
-      const bounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};
-      for(let i=0;i<geometry.length;i+=8){
-        assert.ok(geometry.subarray(i,i+8).every(Number.isFinite));
+      assert.equal(geometry.length%(TREE_VERTEX_FLOATS*3),0);assert.ok(geometry.length>lastCount);lastCount=geometry.length;
+      assert.ok(geometry.length/(TREE_VERTEX_FLOATS*3)<=triangleLimits[lod],'shared tree geometry respects its tier budget');
+      let foliage=0,bark=0;
+      for(let i=0;i<geometry.length;i+=TREE_VERTEX_FLOATS){
+        assert.ok(geometry.subarray(i,i+TREE_VERTEX_FLOATS).every(Number.isFinite));
         assert.ok(Math.abs(Math.hypot(...geometry.subarray(i+3,i+6))-1)<1e-5);
-        for(let a=0;a<3;a++){bounds.min[a]=Math.min(bounds.min[a],geometry[i+a]);bounds.max[a]=Math.max(bounds.max[a],geometry[i+a]);}
+        assert.ok(geometry[i+6]===2||geometry[i+6]===3);foliage+=geometry[i+6]===2;bark+=geometry[i+6]===3;
       }
-      assert.ok(bounds.max[1]<=1.001&&bounds.max[1]>.999);
+      assert.ok(foliage>100&&bark>=18,'every detail tier retains foliage and a visible trunk');
+      for(let i=0;i<geometry.length;i+=TREE_VERTEX_FLOATS*3){
+        const a=geometry.subarray(i,i+3),b=geometry.subarray(i+TREE_VERTEX_FLOATS,i+TREE_VERTEX_FLOATS+3),c=geometry.subarray(i+TREE_VERTEX_FLOATS*2,i+TREE_VERTEX_FLOATS*2+3);
+        const u=Array.from(b,(v,k)=>v-a[k]),v=Array.from(c,(n,k)=>n-a[k]);
+        assert.ok(Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-12,'no collapsed branch or leaf triangles');
+      }
+      const bounds=treeBounds(geometry);
+      assert.ok(bounds.max[1]<=1.001&&bounds.max[1]>.999);assert.equal(bounds.min[1],0);
       if(!canonical)canonical=bounds;
-      for(const a of [0,2]){
+      for(let a=0;a<3;a++){
         assert.ok(Math.abs(bounds.min[a]-canonical.min[a])<1e-6);
         assert.ok(Math.abs(bounds.max[a]-canonical.max[a])<1e-6);
       }
-      assert.ok(bounds.min[1]>=-.001);
     }
   }
-  assert.equal(new Set(variants).size,TREE_VARIANTS);
 });
 
 test('distance LOD preserves every tree identity, root and physical scale under budgets and repeated approaches',()=>{
@@ -164,4 +251,23 @@ test('distance LOD preserves every tree identity, root and physical scale under 
   const point=new Float32Array([0,0,0,4,12,.25,0,0]),held=new Map([[0,2]]);
   assert.equal(selectTreeLods(point,{x:TREE_LOD.near+10,y:0,z:0},held)[0].lod,2,'hysteresis prevents boundary chatter');
   assert.equal(selectTreeLods(point,{x:TREE_LOD.near*1.2,y:0,z:0},held)[0].lod,1);
+});
+
+test('forest draw budgets hold even when every instance is close to the camera',()=>{
+  const trees=islandVegetation(heights,biome),crowded=trees.slice(),triangles=[];
+  for(let variant=0;variant<TREE_VARIANTS;variant++)triangles.push([0,1,2].map(lod=>treeGeometry(variant,lod).length/(TREE_VERTEX_FLOATS*3)));
+  // A dense synthetic approach forces both detail budgets to overflow. Trees
+  // must step down in detail while retaining every identity and shape variant.
+  for(let i=0;i<crowded.length;i+=8){crowded[i]=0;crowded[i+1]=0;crowded[i+2]=0;}
+  const selected=selectTreeLods(crowded,{x:0,y:0,z:0});
+  assert.equal(selected.length,crowded.length/8);
+  assert.equal(selected.filter(t=>t.lod===2).length,Math.min(TREE_LOD.maxNear,selected.length));
+  assert.ok(selected.filter(t=>t.lod===1).length<=TREE_LOD.maxMiddle);
+  assert.equal(new Set(selected.map(t=>t.variant)).size,TREE_VARIANTS);
+  const count=selected.reduce((sum,t)=>sum+triangles[t.variant][t.lod],0);
+  assert.ok(count<2000000,`crowded forest is ${count} triangles`);
+  for(const [id,tree] of selected.entries()){
+    assert.equal(tree.id,id,'budget overflow cannot drop or reorder tied instance identities');
+    assert.equal(tree.variant,Math.min(TREE_VARIANTS-1,Math.floor(crowded[id*8+5]*TREE_VARIANTS)));
+  }
 });

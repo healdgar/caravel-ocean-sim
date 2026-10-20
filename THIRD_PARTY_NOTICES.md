@@ -1,5 +1,15 @@
 # Third-party code and data
 
+## Procedural tree growth reference
+
+The recursive branching and leaf-card approach follows Dan Greenheck's
+[Fractals to Forests](https://tympanus.net/codrops/2025/01/27/fractals-to-forests-creating-realistic-3d-trees-with-three-js/)
+explanation of [EZ-Tree](https://github.com/dgreenheck/ez-tree).
+The native WebGPU implementation and procedural twig-spray texture are original
+project code/artwork under the project MIT licence. No EZ-Tree source, textures
+or Three.js dependency are included. The texture generator is
+`scripts/prepare-tree-foliage.py`.
+
 ## Saba LiDAR terrain and aerial imagery
 
 Current Saba relief and RGB appearance seeds derive from **Beeldmateriaal

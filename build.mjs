@@ -24,6 +24,7 @@ const stripModuleSyntax = (src) => {
   .replaceAll("'assets/crew/sailor.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor.glb')).toString('base64')))
   .replaceAll("'assets/crew/sailor-female.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor-female.glb')).toString('base64')))
   .replaceAll("'assets/world/saba/albedo.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/albedo.png')).toString('base64')))
+  .replaceAll("'assets/tree-foliage.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/tree-foliage.png')).toString('base64')))
   .replaceAll("'assets/world/saba/biome.bin'", () => JSON.stringify('data:application/octet-stream;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/biome.bin')).toString('base64')))
   .replaceAll("'assets/world/saba/height.bin'", () => JSON.stringify('data:application/octet-stream;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/height.bin')).toString('base64')))
   .replaceAll("'assets/world/saba/canopy.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/canopy.png')).toString('base64')))

@@ -406,12 +406,22 @@ pixel. Gentle infrastructure cleanup and bounded shadow lifting preserve broad
 green interior and exposed brown slopes. These approximate surface colours are
 not calibrated reflectance or an exact reconstruction of historical land cover.
 A derived greenness mask, elevation and slope constrain 1,775 generated trees.
-Four seeded recursive branch/crown variants share stable roots, height, radius
-and shape across three mesh-detail tiers. Distance and hysteresis select detail;
-near/middle instance limits are 192/1024, with overflow retaining the same trees
-in a cheaper tier. All tiers share the regional colour field and wind phase.
-This uses native WebGPU instancing, with no Three.js runtime or camera-seeded
-placement. Species and individual trees are authored approximations.
+Eight seeded tree variants use five generations of curved, tapering branches,
+with children growing from actual parent sections. Hundreds of terminal twig
+sprays carry individual leaf cutouts, veins and transparent gaps; the crowns
+contain no opaque ellipsoid shells. Interior foliage receives authored canopy
+occlusion, while outer leaves transmit sunlight. The original leaf texture is
+reproducible with `python3 scripts/prepare-tree-foliage.py` (Pillow and NumPy).
+
+Three detail tiers share the same skeleton, roots, height, radius, colour and
+wind phase. Distant foliage aggregates the real boughs into crossed cutout
+sprays, retaining canopy coverage. Distance and hysteresis select detail;
+near/middle instance limits are 96/512, with overflow retaining the same trees
+in a cheaper tier. This uses native WebGPU instancing and stable regional seeds.
+The growth approach follows [Dan Greenheck's EZ-Tree article](https://tympanus.net/codrops/2025/01/27/fractals-to-forests-creating-realistic-3d-trees-with-three-js/).
+Species, coverage and canopy occlusion remain authored approximations.
+
+![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
 
 The same sun, sky, atmospheric extinction and volumetric clouds light the sea,
 ship and land. A cached terrain/cloud shadow field shades the slopes; foreground
@@ -666,7 +676,7 @@ npm run build
 npm test
 ```
 
-The shared underwater-optics revision passes **269/269 tests** using installed Chrome on
+The recursive-tree revision was checked with **276 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -689,8 +699,16 @@ without accepting geometry or visible shading changes. Software rendering keeps
 the packed-wave comparison exact. The byte-exact indexing/resolve fixture holds
 the ocean flat to isolate those changes from FFT rounding; wave behavior has
 separate travelling-wave and rough-sea coverage.
-Identical native Metal draws occasionally differed by two blue levels during
-this revision; the final serialized run passed without changing assertions.
+The tree revision's serialized run passed 275/276; the existing packed-wave
+comparison encountered its intermittent native Metal rounding difference and
+passed when rerun alone. Identical native draws can occasionally differ by two
+blue levels. No assertions were changed.
+
+Tree checks verify connected recursive growth, taper, bark/leaf UVs, terminal
+attachments, stable LOD dimensions and a bounded forest draw budget. Native GPU
+tests compare actual canopy coverage and sky gaps at every tier, reject an
+intentionally sparse canopy, and render the embedded foliage from all three
+standalone builds.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.

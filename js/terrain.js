@@ -1,5 +1,5 @@
 import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, terrainSample, constrainIslandMotion, safeLandfallStart } from './terrain-model.js';
-import { TREE_VARIANTS, treeGeometry, selectTreeLods } from './vegetation.js';
+import { TREE_VARIANTS, TREE_VERTEX_FLOATS, treeGeometry, selectTreeLods } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null}){
@@ -32,6 +32,19 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cp.dispatchWorkgroups(Math.ceil((ISLAND.albedoSize>>m)/8),Math.ceil((ISLAND.albedoSize>>m)/8));
   }
   cp.end();device.queue.submit([enc.finish()]);
+  const leafImage=await createImageBitmap(await (await load('assets/tree-foliage.png')).blob());
+  const leafMips=1+Math.floor(Math.log2(Math.max(leafImage.width,leafImage.height)));
+  const leafTexture=device.createTexture({label:'procedural twig and leaf cutouts',size:[leafImage.width,leafImage.height],format:'rgba8unorm',mipLevelCount:leafMips,
+    usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT});
+  device.queue.copyExternalImageToTexture({source:leafImage},{texture:leafTexture},[leafImage.width,leafImage.height]);leafImage.close();
+  const leafEncoder=device.createCommandEncoder(),leafPass=leafEncoder.beginComputePass();leafPass.setPipeline(mipPipe);
+  for(let m=1;m<leafMips;m++){
+    leafPass.setBindGroup(0,device.createBindGroup({layout:mipPipe.getBindGroupLayout(0),entries:[
+      {binding:0,resource:leafTexture.createView({baseMipLevel:m-1,mipLevelCount:1})},
+      {binding:1,resource:leafTexture.createView({baseMipLevel:m,mipLevelCount:1})}]}));
+    leafPass.dispatchWorkgroups(Math.ceil(Math.max(1,leafTexture.width>>m)/8),Math.ceil(Math.max(1,leafTexture.height>>m)/8));
+  }
+  leafPass.end();device.queue.submit([leafEncoder.finish()]);
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[ISLAND.biomeSize,ISLAND.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:ISLAND.biomeSize},[ISLAND.biomeSize,ISLAND.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
@@ -39,12 +52,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const makePipe=(entryPoint,buffers)=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':'island trees',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:'fs',targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:entryPoint==='treeVS'&&samples>1}});
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   const terrainPipe=await makePipe('vs',[meshLayout]);
-  const treePipe=await makePipe('treeVS',[meshLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}]);
+  const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
+  const treePipe=await makePipe('treeVS',[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}]);
   const treeMeshes=Array.from({length:3},(_,lod)=>Array.from({length:TREE_VARIANTS},(_,variant)=>{
-    const data=treeGeometry(variant,lod);return {buffer:buffer(data,GPUBufferUsage.VERTEX,`tree variant ${variant} detail ${lod}`),count:data.length/8};
+    const data=treeGeometry(variant,lod);return {buffer:buffer(data,GPUBufferUsage.VERTEX,`tree variant ${variant} detail ${lod}`),count:data.length/TREE_VERTEX_FLOATS};
   }));
   const treeBatches=Array.from({length:3*TREE_VARIANTS},(_,id)=>({
     buffer:buffer(new Float32Array(trees.length),GPUBufferUsage.VERTEX,`tree instances ${id}`),data:[],count:0,
@@ -62,7 +76,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   const lightPipe=await computePipe(TERRAIN_LIGHT,'island sunlight');
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
-  const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()]];
+  const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()]];
   const groups=[terrainPipe,treePipe].map(pipe=>bind(pipe,resources));
   const cloudGroups=[terrainPipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
   const submerged=waterOptics?await waterOptics.capture({source:TERRAIN,pipeline:terrainPipe,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}):null;

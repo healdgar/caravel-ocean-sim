@@ -71,33 +71,49 @@ struct Land {domain:vec4f};
 @group(0) @binding(7) var landAlbedo:texture_2d<f32>;
 @group(0) @binding(8) var landSampler:sampler;
 @group(0) @binding(9) var vegetationMask:texture_2d<f32>;
+@group(0) @binding(10) var leafSpray:texture_2d<f32>;
 ` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
 struct LandVertex {
   @builtin(position) pos:vec4f,
   @location(0) world:vec3f,
   @location(1) normal:vec3f,
   @location(2) kind:vec2f,
+  @location(3) leafUV:vec2f,
 };
 @vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f)->LandVertex{
-  var o:LandVertex;o.world=position;o.normal=normal;o.kind=kind;
+  var o:LandVertex;o.world=position;o.normal=normal;o.kind=kind;o.leafUV=vec2f(0);
   o.pos=F.viewProj*vec4f(position-F.camPos.xyz,1.0);return o;
 }
 @vertex fn treeVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
-  @location(3) root:vec4f,@location(4) shape:vec4f)->LandVertex{
+  @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
   let phase=shape.y*2.0*PI;
   let angle=phase;let c=cos(angle);let s=sin(angle);
   let local=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
-  // The same gentle upper-crown movement at every mesh tier; no tree growth or
-  // position change when crossing an LOD threshold.
-  let sway=vec3f(sin(F.camPos.w*0.65+phase),0,cos(F.camPos.w*0.49+phase))*0.12*position.y*position.y;
+  // Bend the entire connected structure by height. The same wind field and
+  // seed at every tier preserve branch attachments and tree identity at LODs.
+  let wind=F.windP[0].xy;let crosswind=vec2f(-wind.y,wind.x);
+  let windForce=clamp(F.windP[0].z/12.0,0.0,2.2)*0.018;
+  let gust=0.7+0.3*sin(F.camPos.w*0.65+phase);
+  let windDirection=wind*gust+crosswind*sin(F.camPos.w*0.49+phase)*0.22;
+  let swayXZ=windDirection*windForce*shape.x*position.y*position.y;
+  let sway=vec3f(swayXZ.x,0,swayXZ.y);
   var o:LandVertex;o.world=root.xyz+local+sway;
-  let rotated=vec3f(normal.x*c-normal.z*s,normal.y,normal.x*s+normal.z*c);
-  let detail=1.0-smoothstep(120.0,2200.0,distance(o.world,F.camPos.xyz));
-  o.normal=normalize(mix(vec3f(0,1,0),rotated,select(1.0,0.32+0.35*detail,kind.x<2.5)));
+  let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(0.001));
+  var rotated=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
+  rotated.y-=dot(rotated.xz,windDirection)*windForce*2.0*position.y;
+  o.normal=normalize(rotated);o.leafUV=leafUV;
   o.kind=kind;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);return o;
 }
-@fragment fn fs(in:LandVertex)->@location(0) vec4f{
+@fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let world=in.world;let distanceToEye=distance(world,F.camPos.xyz);var n=normalize(in.normal);
+  let foliage=in.kind.x>1.5&&in.kind.x<2.5;
+  // Sampling precedes any discard, keeping implicit derivatives valid for the
+  // ground material and the generated submerged-capture entry point as well.
+  let leaf=textureSampleBias(leafSpray,landSampler,in.leafUV,0.1);
+  let leafColor=pow(leaf.rgb,vec3f(2.2));
+  let coverage=select(1.0,leaf.a,foliage);
+  let crownExposure=clamp(in.kind.y,0.0,1.0);
+  if(foliage){n*=select(-1.0,1.0,front);}
   let broad=gnoise(world.xz*0.0018);let grain=gnoise(world.xz*0.019);
   let fineFade=1.0-smoothstep(0.3,2.0,max(length(dpdx(world)),length(dpdy(world))));
   let fine=gnoise(world.xz*0.31)*fineFade;
@@ -115,22 +131,41 @@ struct LandVertex {
   albedo*=1.0+fine*0.16;
   let canopyGrain=gnoise(world.xz*0.105);
   albedo*=1.0+canopyGrain*vegetation*0.24;
-  if(in.kind.x>1.5){
-    let leaf=mix(source,vec3f(0.043,0.065,0.023),0.32);
-    albedo=leaf*(0.9+in.kind.y*0.20);
+  if(foliage){
+    // Each card is a perforated spray of individual leaves and a fine twig,
+    // rather than a solid crown. Regional imagery gently colours the species.
+    let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
+    albedo=leafColor*mix(vec3f(1),regionalTint,0.2)*(0.78+in.kind.y*0.30);
   }
-  if(in.kind.x>2.5){albedo=vec3f(0.095,0.068,0.038)*(0.9+grain*0.2);}
+  if(in.kind.x>2.5){
+    let bark=gnoise(vec2f(world.x*8.0+world.z*6.0,world.y*0.4));
+    albedo=vec3f(0.095,0.068,0.038)*(0.82+bark*0.26+in.kind.y*0.16);
+  }
   let canopyDetail=1.0-smoothstep(700.0,2400.0,distanceToEye);
-  let relief=grain*0.14+fine*0.09+canopyGrain*fineFade*1.8*vegetation*canopyDetail*(1.0-rocky)*(1.0-shore);
+  let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
+  let barkRidges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);
+  let barkRelief=(barkRidges-0.5)*0.010*(1.2-in.kind.y)*fineFade;
+  var relief=grain*0.14+fine*0.09+canopyGrain*fineFade*1.8*vegetation*canopyDetail*(1.0-rocky)*(1.0-shore);
+  if(in.kind.x>2.5){relief=barkRelief;}
   let dx=dpdx(world);let dy=dpdy(world);let sx=cross(dy,n);let sy=cross(n,dx);let det=dot(dx,sx);
   let gradient=(dpdx(relief)*sx+dpdy(relief)*sy)/max(abs(det),0.00001)*sign(det);
-  n=normalize(n-clamp(gradient,vec3f(-0.45),vec3f(0.45)));
+  n=normalize(n-select(clamp(gradient,vec3f(-0.45),vec3f(0.45)),vec3f(0),foliage));
+  if(foliage&&coverage<0.015){discard;}
   let wet=(1.0-smoothstep(0.5,3.5,world.y))*(0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02));
   albedo*=1.0-wet*0.36;
   let sunlight=textureSampleLevel(landLight,sampC,uv,0.0).r;
   let direct=sunIlluminance()*sunlight;
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7.0).rgb;
-  var col=albedo*(direct*max(dot(n,F.sunDir.xyz),0.0)/PI+ambient*(0.42+0.35*max(n.y,0.0)));
+  let nDotL=dot(n,F.sunDir.xyz);
+  var diffuse=max(nDotL,0.0);
+  var ambientVisibility=0.42+0.35*max(n.y,0.0);
+  if(foliage){
+    // Thin leaves transmit warm green light when backlit. Branch interiors
+    // remain darker; no view-dependent upward-normal crown lighting.
+    diffuse=(diffuse+max(-nDotL,0.0)*0.48)*(0.22+0.78*crownExposure*crownExposure);
+    ambientVisibility=0.12+crownExposure*0.55+abs(n.y)*0.08;
+  }
+  var col=albedo*(direct*diffuse/PI+ambient*ambientVisibility);
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
   col+=direct*wet*pow(max(dot(n,h),0.0),48.0)*0.06;
   col+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.9);
@@ -139,6 +174,6 @@ struct LandVertex {
   // hidden; low clouds in front veil the slopes using the existing volume.
   let ray=marchCloudsTo(F.camPos.xyz*0.001,normalize(world-F.camPos.xyz),12u,0.5,
     sunIlluminance(),skyAtmo(vec3f(0,1,0)),distanceToEye*0.001);
-  return vec4f(col*(1.0-ray.color.a)+ray.color.rgb,1.0);
+  return vec4f(col*(1.0-ray.color.a)+ray.color.rgb,coverage);
 }
 `;
