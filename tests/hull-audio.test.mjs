@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createImpactDetector,createHullAudioState} from '../js/weather-state.js';
+import {createImpactDetector,createHullAudioState,createTimberAudioState} from '../js/weather-state.js';
 
 const hullAudioContact=(changes={})=>({revision:1,reset:false,wet:1,pressure:.2,closing:0,impact:0,position:{x:2,y:0,z:-4},...changes});
 function hullAudioAdvance(state,seconds,contact=hullAudioContact(),speed=3,dt=.05){
@@ -74,4 +74,100 @@ test('constant-contact wash envelopes are independent of render frame partition'
   const a=createHullAudioState(),b=createHullAudioState();
   const fine=hullAudioAdvance(a,1,hullAudioContact(),2,1/60),coarse=hullAudioAdvance(b,1,hullAudioContact(),2,1/30);
   assert.ok(Math.abs(fine.wash-coarse.wash)<1e-10);
+});
+
+const timberFace=(changes={})=>({x:2,y:0,z:-4,strength:2,closing:2,wet:1,kind:'light',...changes});
+const timberReturn=(changes={})=>({x:2,y:-1,z:-4,kind:'underside-reentry',closing:2,age:.1,probe:0,epoch:1,serial:1,revision:1,...changes});
+function timberAdvance(state,seconds,{contact=hullAudioContact(),strain=0,audible=true,dt=.05,revision=contact.revision}={}){
+  const sounds=[];
+  for(let t=0;t<seconds-1e-9;t+=dt){
+    state.contact(contact);
+    const sound=state.update(Math.min(dt,seconds-t),{strain,position:{x:2,y:0,z:-4},revision,audible});
+    if(sound)sounds.push(sound);
+  }
+  return sounds;
+}
+
+test('fresh hard water contact can groan without requiring large rigid-body motion',()=>{
+  const state=createTimberAudioState(()=>0);
+  state.contact(hullAudioContact({reset:true}));assert.equal(state.impact(timberFace()),null,'first/reset sample is silent');
+  assert.deepEqual(timberAdvance(state,4.1),[],'a steady hull has no periodic strain creak');
+  const sound=state.impact(timberFace());
+  assert.equal(sound.id,'timber-creak');assert.equal(sound.spatial,true);
+  assert.ok(sound.gain>=.1&&sound.gain<=.28&&sound.rate>=.9&&sound.rate<=.98);
+  assert.equal(sound.options.duration,4);assert.ok(sound.options.attack>0&&sound.options.release>0);
+});
+
+test('timber contact episodes group bow stations and underside probes until recession and cooldown',()=>{
+  const state=createTimberAudioState(()=>0);timberAdvance(state,4.1);
+  const sounds=[];
+  for(let probe=0;probe<10;probe++){const sound=state.underside(timberReturn({probe}));if(sound)sounds.push(sound);}
+  assert.equal(sounds.length,1,'one lower-hull return, not ten groans');
+  assert.equal(state.impact(timberFace()),null,'the bow and underside share the same acoustic episode');
+  timberAdvance(state,6,{contact:hullAudioContact({closing:2,impact:2})});
+  assert.equal(state.impact(timberFace({x:3})),null,'elapsed cooldown cannot retrigger persistent loading');
+  timberAdvance(state,.55);
+  assert.equal(state.underside(timberReturn({probe:0})),null,'a consumed probe serial stays consumed after recession');
+  assert.ok(state.underside(timberReturn({probe:0,serial:2})),'a genuinely new return can groan');
+});
+
+test('periodic timber motion and contact strain share one cooldown without belated contact playback',()=>{
+  const state=createTimberAudioState(()=>0);
+  const periodic=timberAdvance(state,4.1,{strain:.2});assert.equal(periodic.length,1);assert.equal(periodic[0].spatial,false);
+  assert.equal(state.impact(timberFace()),null,'a just-played motion creak blocks contact layering');
+  assert.deepEqual(timberAdvance(state,5.2,{contact:hullAudioContact({closing:2,impact:2})}),[],'no queued contact replays at cooldown expiry');
+  assert.equal(state.impact(timberFace()),null,'the blocked encounter was consumed');
+  timberAdvance(state,.55);assert.ok(state.impact(timberFace()));
+  assert.deepEqual(timberAdvance(state,.1,{strain:.3,contact:hullAudioContact({closing:2,impact:2})}),[],'contact also blocks a coincident periodic creak');
+});
+
+test('invalid, dry, separating, weak and stale face contacts cannot consume a timber episode',()=>{
+  const state=createTimberAudioState(()=>0);timberAdvance(state,4.1);
+  for(const changes of [{strength:.7},{closing:0},{closing:-3},{wet:0},{strength:NaN},{closing:Infinity},{x:NaN},{kind:'reentry'},{revision:0},{age:.36},{age:-.1},{age:NaN}])
+    assert.equal(state.impact(timberFace(changes)),null,JSON.stringify(changes));
+  state.update(.4);state.update(.4);state.update(.4);state.update(.1);
+  // update caps elapsed time at .1 like the hull-audio envelope; four steps
+  // without a refreshed contact exceed its .35-second freshness window.
+  assert.equal(state.impact(timberFace()),null,'a stale summary cannot authorize a new groan');
+  state.contact(hullAudioContact());assert.ok(state.impact(timberFace()),'invalid/stale events did not consume the episode or cooldown');
+});
+
+test('underside timber uses fresh revisioned returns and rejects old epochs and invalid serials',()=>{
+  const state=createTimberAudioState(()=>0);timberAdvance(state,4.1);
+  for(const changes of [{age:.36},{age:-.1},{closing:0},{closing:NaN},{revision:2},{probe:10},{probe:-1},{serial:1.5},{epoch:NaN},{z:Infinity}])
+    assert.equal(state.underside(timberReturn(changes)),null,JSON.stringify(changes));
+  assert.ok(state.underside(timberReturn({epoch:2})));
+  timberAdvance(state,5.6);
+  assert.equal(state.underside(timberReturn({epoch:1,serial:9})),null,'older epochs cannot play after rearming');
+  assert.equal(state.underside(timberReturn({epoch:2})),null,'serial ledger survives the acoustic cooldown');
+  assert.ok(state.underside(timberReturn({epoch:2,serial:2})));
+});
+
+test('timber gain follows bounded authored contact severity, without inventing force or impact energy',()=>{
+  const mild=createTimberAudioState(()=>.5),strong=createTimberAudioState(()=>.5);
+  timberAdvance(mild,4.1);timberAdvance(strong,4.1);
+  const a=mild.impact(timberFace({strength:.8,closing:1.3})),b=strong.impact(timberFace({strength:100,closing:8}));
+  assert.ok(a.gain<b.gain);assert.ok(b.gain<=.28);assert.equal(a.rate,b.rate);
+  assert.equal('force' in b,false);assert.equal('energy' in b,false);
+});
+
+test('timber reset, teleport and mute cannot replay a pending contact or motion creak',()=>{
+  const state=createTimberAudioState(()=>0);timberAdvance(state,4.1);assert.ok(state.impact(timberFace()));
+  state.reset();assert.equal(state.impact(timberFace()),null);assert.equal(state.underside(timberReturn()),null);
+  assert.deepEqual(timberAdvance(state,6,{audible:false,strain:.3}),[],'muted motion cannot schedule audible creaks');
+  assert.deepEqual(timberAdvance(state,.1,{strain:0}),[],'there is no saved event to replay on resume');
+  state.contact(hullAudioContact({revision:2,reset:true}));
+  assert.equal(state.impact(timberFace({revision:1})),null);
+  assert.equal(state.underside(timberReturn()),null,'an old return cannot cross a vessel teleport');
+  timberAdvance(state,4.1,{contact:hullAudioContact({revision:2})});
+  assert.ok(state.impact(timberFace({revision:2})));
+});
+
+test('timber episode recession and periodic scheduling are consistent at 30/60/120 Hz',()=>{
+  for(const dt of [1/30,1/60,1/120]){
+    const state=createTimberAudioState(()=>0);timberAdvance(state,4.1,{dt});assert.ok(state.impact(timberFace()));
+    timberAdvance(state,5.2,{dt,contact:hullAudioContact({closing:2,impact:2})});
+    assert.equal(state.impact(timberFace()),null);
+    timberAdvance(state,.55,{dt});assert.ok(state.impact(timberFace()));
+  }
 });

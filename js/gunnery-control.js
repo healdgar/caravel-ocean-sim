@@ -8,6 +8,7 @@ import { boatRotate } from './boat.js';
 // firing. The captain's spoken order has the same duration with sound muted.
 export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null}={}){
   const state=createGunneryState(createGunDefinitions(boat));boat.gunnery=state;
+  const previousStages=new Array(state.guns.length);
   let pending=null,prepared=false,lastReady=false,flash=null;
   const attended=gun=>!gun.visibleCrew||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
@@ -59,13 +60,13 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     update(dt,wind){
       if(pending&&state.time+1e-8>=pending.at){fireGunnery(state,pending.side);pending=null;}
-      const before=new Map(state.guns.map(g=>[g.id,g.stage]));
+      for(const gun of state.guns)previousStages[gun.index]=gun.stage;
       const events=stepGunnery(state,dt,{deferSeaCollision:true,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
         gunAttended:attended,canFire:(gun,pose)=>attended(gun)&&!muzzleBlock(gun,pose),
         onEvent:event=>{if(event.type==='shot'){recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}if(event.type!=='ready')onEvent(event);},
       });
-      for(const gun of state.guns)if(before.get(gun.id)!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
+      for(const gun of state.guns)if(previousStages[gun.index]!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
         onEvent({type:gun.stage==='ram'?'load':'run-out',gun,position:gunMuzzlePose(gun,boat).position});
       }
       const s=gunnerySummary(state,boat.gunnerySide),ready=prepared&&s.total>0&&s.ready===s.total&&

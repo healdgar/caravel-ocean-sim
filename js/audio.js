@@ -3,7 +3,7 @@ import { VOICE_ASSETS, CREW_VOICES } from './voice-assets.js';
 import { createVoiceDirector } from './voice-lines.js';
 import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
 import { createGunneryAudio } from './gunnery-audio.js';
-import { weatherClamp, weatherAudioLevels, createHullAudioState } from './weather-state.js';
+import { weatherClamp, weatherAudioLevels, createHullAudioState, createTimberAudioState } from './weather-state.js';
 
 const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 
@@ -11,15 +11,16 @@ const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 // fetched or started until the listener enables sound with a browser gesture.
 export function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
-  let time=0,nextCreak=4,nextBird=25,lastRevision=-1;
+  let time=0,nextBird=25;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
   const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[];
   const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
   const mute=()=>{if(context)master.gain.setTargetAtTime(enabled&&!hidden?volume:0,context.currentTime,.06);};
   const dialogue=createVoiceDirector({play:(...args)=>play(...args,true),assets:VOICE_ASSETS,crew:CREW_VOICES,available:()=>enabled&&!hidden&&ready&&context?.state==='running'&&context.currentTime>=previewUntil});
   const gunsAudio=createGunneryAudio({play,listener:()=>listener,available:()=>enabled&&!hidden&&ready&&context?.state==='running'});
-  const hullAudio=createHullAudioState();
-  function stopEvents(){dialogue.clear();gunsAudio.clear();hullAudio.reset();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
+  const hullAudio=createHullAudioState(),timberAudio=createTimberAudioState();
+  function stopEvents(){dialogue.clear();gunsAudio.clear();hullAudio.reset();timberAudio.reset();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
+  function creak(sound){if(sound&&shipDistance>.01)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,sound.spatial,sound.options);}
   function play(id,gain,position,rate=1,spatial=false,options={}){
     const pool=id==='cannon-report'?reports:voices,limit=id==='cannon-report'?12:8;
     if(!enabled||hidden||!ready||!buffers.has(id)||pool.size>=limit||context.state!=='running')return;
@@ -68,7 +69,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         buffers.set(id,await context.decodeAudioData(await response.arrayBuffer()));
       })).then(()=>{ready=true;loading=null;startLoops();status();});
     }
-    status();await loading;
+    status();await loading;timberAudio.reset();
   }
   return {
     get enabled(){return enabled;},get ready(){return ready;},
@@ -94,11 +95,15 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       else if(event.type==='splash')play('anchor-splash',.6,anchorPosition,1,true);
       else if(event.type==='drop')play('anchor-release',.4,anchorPosition,1,true);
     },
-    hullContact(contact){return hullAudio.contact(contact);},
-    hullUnderside(event){if(enabled&&!hidden&&ready)return hullAudio.underside(event);return false;},
+    hullContact(contact){if(enabled&&!hidden&&ready)timberAudio.contact(contact);return hullAudio.contact(contact);},
+    hullUnderside(event){
+      if(enabled&&!hidden&&ready){const accepted=hullAudio.underside(event);if(accepted)creak(timberAudio.underside(event));return accepted;}
+      return false;
+    },
     impact(event){
       if(!enabled||hidden||!ready)return;
       const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
+      creak(timberAudio.impact(event));
     },
     update(dt,settings,boat,frame,weather){
       time+=dt;volume=weatherClamp(settings.soundVolume??.7);
@@ -108,10 +113,11 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       dialogue.update(dt);
       gunsAudio.update(dt);
       const hullMix=hullAudio.update(dt,{speed:boat.surgeVelocity??0});
+      const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
+      const timberSound=timberAudio.update(dt,{strain,position:boat,revision:boat.revision,audible:enabled&&!hidden&&ready&&shipDistance>.01});
       if(!enabled||hidden||!ready)return;
       if(anchorReeling){anchorPosition={x:boat.x,y:(boat.heave??0)+3,z:boat.z};startLoop('anchor-reel',ALL_SOUNDS['anchor-reel']);}
       mute();
-      if(lastRevision!==boat.revision){lastRevision=boat.revision;nextCreak=time+4;}
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,speed:boat.surgeVelocity??0,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
@@ -123,11 +129,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       for(let i=pending.length-1;i>=0;i--)if(time>=pending[i].audioAt){
         const e=pending.splice(i,1)[0];play(e.distance<1200?'thunder-near':'thunder-distant',.7/(1+e.distance/3000),e,.95+Math.random()*.1);
       }
-      const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
-      if(time>nextCreak&&strain>.055&&shipDistance>.01){
-        play('timber-creak',weatherClamp(strain*.7,.08,.32)*shipDistance,{x:boat.x,z:boat.z},.92+Math.random()*.15);
-        nextCreak=time+5+Math.random()*7;
-      }
+      creak(timberSound);
       if(time>nextBird){
         const activity=weatherClamp(settings.seabirds??.25)*(1-weather.intensity)*weatherClamp(1-settings.windSpeed/24);
         if(Math.random()<activity){const a=Math.random()*Math.PI*2;play('gull-near',.16,{x:listener.x+Math.sin(a)*30,z:listener.z+Math.cos(a)*30},.97+Math.random()*.06);}

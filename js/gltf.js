@@ -85,6 +85,14 @@ export function createSkinAnimator(asset) {
   if(inverse.length!==joints.length*16)throw Error('Invalid inverse bind matrices');
   const palette=new Float32Array(joints.length*16),matrices=joints.map((_,i)=>palette.subarray(i*16,i*16+16));
   const inverseMatrices=joints.map((_,i)=>inverse.subarray(i*16,i*16+16));
+  // Preserve parent-first evaluation order, but retain the exact subset whose
+  // world transforms depend on each node. IK only changes one local rotation.
+  const branches=g.nodes.map(()=>[]),jointSlots=g.nodes.map(()=>[]);
+  for(const node of order)for(let ancestor=node;ancestor>=0;ancestor=parent[ancestor])branches[ancestor].push(node);
+  for(let i=0;i<joints.length;i++)jointSlots[joints[i]].push(i);
+  const branchJoints=branches.map(nodes=>nodes.flatMap(node=>jointSlots[node]));
+  const names=g.nodes.map(n=>n.name),nameIndices=new Map();
+  for(let i=0;i<names.length;i++)if(!nameIndices.has(names[i]))nameIndices.set(names[i],i);
   const clips=new Map();
   for(const clip of g.animations??[]){
     if(!clip.name || clips.has(clip.name))throw Error('Animations need unique names');
@@ -122,7 +130,13 @@ export function createSkinAnimator(asset) {
     for(let i=0;i<joints.length;i++)gltfMatMultiply(matrices[i],world[joints[i]],inverseMatrices[i]);
     return palette;
   }
-  return {rest,parent,order,world,pose:aPose,palette,clips,joints,names:g.nodes.map(n=>n.name),update:updateMatrices,
+  function updateBranch(node){
+    if(!Number.isInteger(node)||node<0||node>=branches.length)throw Error('Invalid animation branch');
+    for(const i of branches[node]){gltfTRS(local,aPose[i].t,aPose[i].r,aPose[i].s);if(parent[i]<0)world[i].set(local);else gltfMatMultiply(world[i],world[parent[i]],local);}
+    for(const i of branchJoints[node])gltfMatMultiply(matrices[i],world[joints[i]],inverseMatrices[i]);
+    return palette;
+  }
+  return {rest,parent,order,world,pose:aPose,palette,clips,joints,names,nodeIndex:name=>nameIndices.get(name)??-1,update:updateMatrices,updateBranch,
     sample(name,time,other=null,otherTime=0,blend=0){
       if(!Number.isFinite(time)||!Number.isFinite(otherTime)||!Number.isFinite(blend))throw Error('Invalid animation time');
       evaluate(aPose,name,time);

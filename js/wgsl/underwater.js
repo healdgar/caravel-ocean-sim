@@ -125,7 +125,7 @@ fn underwaterBoundary(world:vec3f,normal:vec3f,view:vec3f,skyHemi:vec3f,foam:f32
 }
 `;
 
-export function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves=false,shadows=false}={}){
+export function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves=false,shadows=false,skipAir=false}={}){
   const count=Math.max(1,Math.floor(samples));
   return FRAME_WGSL+ATMO_CORE_WGSL+WATER_OPTICS+/* wgsl */ `
 @group(0)@binding(0)var<uniform>F:Frame;
@@ -145,6 +145,9 @@ ${cameraProbe?'@group(0)@binding(11)var<storage,read>cameraSea:array<f32,16>;':'
 struct UnderwaterVertex{@builtin(position)position:vec4f,@location(0)ndc:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->UnderwaterVertex {
   let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
+  ${skipAir?`// The post passes choose original HDR using this same current GPU probe.
+  // Degenerate geometry avoids an otherwise identity full-screen copy in air.
+  if(${cameraProbe?'cameraSea[9]':'optics.z'}-F.camPos.y<=.005){return UnderwaterVertex(vec4f(0,0,0,1),p);}`:''}
   return UnderwaterVertex(vec4f(p,0,1),p);
 }
 fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {

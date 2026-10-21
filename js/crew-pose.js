@@ -8,6 +8,7 @@ const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
 const poseUnit=a=>{const n=Math.hypot(...a);return a.map(v=>v/Math.max(n,1e-9));};
 const poseCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const posePosition=m=>Array.from(m.subarray(12,15));
+const poseNodeIndex=(a,name)=>a.nodeIndex?a.nodeIndex(name):a.names.indexOf(name);
 function poseRotation(m){
   const scale=Math.hypot(m[0],m[1],m[2]),r=[m[0],m[4],m[8],m[1],m[5],m[9],m[2],m[6],m[10]].map(v=>v/scale);
   const trace=r[0]+r[4]+r[8];let q;
@@ -22,11 +23,12 @@ function turnBone(a,node,from,to){
   const n=Math.hypot(...delta);delta=delta.map(x=>x/Math.max(n,1e-9));
   const parent=a.parent[node],q=parent<0?[0,0,0,1]:poseRotation(a.world[parent]),inv=[-q[0],-q[1],-q[2],q[3]];
   const p=new Float32Array(4),local=new Float32Array(4);gltfQuatMultiply(p,inv,delta);gltfQuatMultiply(local,p,q);
-  gltfQuatMultiply(p,local,a.pose[node].r);a.pose[node].r.set(p);a.update();
+  gltfQuatMultiply(p,local,a.pose[node].r);a.pose[node].r.set(p);
+  if(a.updateBranch)a.updateBranch(node);else a.update();
 }
 export function solveCrewLimb(a,names,target,pole){
-  const nodes=names.map(n=>a.names.indexOf(n));if(nodes.some(n=>n<0))return;
-  const [upper,lower,end]=nodes,A=posePosition(a.world[upper]),B=posePosition(a.world[lower]),C=posePosition(a.world[end]);
+  const upper=poseNodeIndex(a,names[0]),lower=poseNodeIndex(a,names[1]),end=poseNodeIndex(a,names[2]);if(upper<0||lower<0||end<0)return;
+  const A=posePosition(a.world[upper]),B=posePosition(a.world[lower]),C=posePosition(a.world[end]);
   const l1=Math.hypot(...poseSub(B,A)),l2=Math.hypot(...poseSub(C,B)),ray=poseSub(target,A),dir=poseUnit(ray);
   const d=Math.max(Math.abs(l1-l2)+.001,Math.min(l1+l2-.001,Math.hypot(...ray)));
   const x=(l1*l1-l2*l2+d*d)/(2*d),h=Math.sqrt(Math.max(0,l1*l1-x*x));

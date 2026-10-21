@@ -3248,6 +3248,27 @@ fn canvasTransmission(thickness:f32,incidence:f32)->vec3f {
 }
 `;
 
+// ---- js/wgsl/vessel-pose.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
+// The canonical deformation is evaluated once per original indexed vertex.
+// Original local/material/UV data stays in the unmodified source vertex buffer.
+const VESSEL_POSE_UPDATE=VESSEL_RIG+/* wgsl */ `
+@group(0)@binding(0)var<uniform>hull:Hull;
+@group(0)@binding(1)var<storage,read>vesselPoseSource:array<f32>;
+struct VesselPoseVertex {position:vec4f,normal:vec4f};
+@group(0)@binding(2)var<storage,read_write>vesselPoseOutput:array<VesselPoseVertex>;
+@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
+  let vertex=id.x;let at=vertex*9u;
+  if(vertex>=arrayLength(&vesselPoseOutput)||at+8u>=arrayLength(&vesselPoseSource)){return;}
+  let position=vec3f(vesselPoseSource[at],vesselPoseSource[at+1u],vesselPoseSource[at+2u]);
+  let normal=vec3f(vesselPoseSource[at+3u],vesselPoseSource[at+4u],vesselPoseSource[at+5u]);
+  let uv=vec2f(vesselPoseSource[at+7u],vesselPoseSource[at+8u]);
+  let rig=rigVertex(position,normal,vesselPoseSource[at+6u],uv);
+  vesselPoseOutput[vertex]=VesselPoseVertex(vec4f(rig.position,0),vec4f(rig.normal,0));
+}
+`;
+
 // ---- js/wgsl/shadows.js ----
 
 const SHADOW_FRAME = /* wgsl */ `
@@ -3629,7 +3650,12 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   let pulse=exp(-r2*2.0)*(1.0-r2*2.0)*smoothstep(-.1,.2,outside)*c.axis.w;
   let relativeFlow=c.flow.xz-H.forward.xz*max(0.0,I.motion.x)*.8;
   let peel=max(0.0,dot(relativeFlow,c.axis.xz));
-  return WakePressure(vec4f(crest*c.point.w,hollow*c.point.w,pulse,crest*edge*c.point.w*peel/max(width,.1)),c.axis.xz*peel*crest*edge*c.flow.w);
+  // Entrained white water occupies a broader shoulder than the pressure crest.
+  // Its outward e-folding edge is 1.7 widths from the measured planking (about
+  // .31 beam at the normal grid resolution); never add a hull-attached ribbon.
+  // Keep these foam-only terms separate from the balanced displacement kernels.
+  let froth=exp(-pow((outside-width*.45)/(width*1.25),2.0)-tangent*tangent*.4)*edge;
+  return WakePressure(vec4f(crest*c.point.w,hollow*c.point.w,pulse,froth*c.point.w*peel/max(width,.1)),c.axis.xz*peel*froth*c.flow.w);
 }
 @compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
   let q = vec2i(id.xy);
@@ -3698,7 +3724,14 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   // Broad, intermittent entrainment, not a propeller jet. Texture stays in world
   // space, so an old trail follows the travelled track through turns and stops.
   let churn=.72+.28*shedding;
-  let foamSource=(source*2.8+pressure.w*.7)*smoothstep(.6,3.5,forwardSpeed)+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*.95)*smoothstep(.04,.28,froude)*churn;
+  // A short residence beside a moving bow must aerate before the water has
+  // travelled aft. Drive and peel already vanish at rest/on a dry hull; the
+  // low-speed gate suppresses creeping without delaying froth until 7 knots.
+  // The source rides the actual wet shoulders. Only their retained, separately
+  // aged coverage travels aft, where the existing material breaks it into foam.
+  let bowFroth=(port.shape.w+starboard.shape.w)*headway*16.0;
+  let aftFroth=(aftPort.shape.w+aftStarboard.shape.w)*.45*.7;
+  let foamSource=(source*2.8+aftFroth)*smoothstep(.6,3.5,forwardSpeed)+bowFroth+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*.95)*smoothstep(.04,.28,froude)*churn;
   let eddy=vec2f(cos(p.y*0.65+I.phase.x*0.5),-cos(p.x*0.65-I.phase.x*0.4))*0.24;
   let peelDrift=port.drift+starboard.drift+(aftPort.drift+aftStarboard.drift)*.45;
   let drift=I.motion.zw*.012+eddy+peelDrift/max(1.0,length(peelDrift)/2.0);
@@ -5111,6 +5144,12 @@ fn corner(v:u32)->vec2f {
   // Falling sheets bend away from the rail: use their actual surface, not
   // a fixed +X normal (which also treated port and starboard identically).
   let face=cross(dpdx(in.world),dpdy(in.world));
+  // Finish quad derivatives before rejecting transparent sheets. These exact
+  // zero-coverage cases previously paid for all environment/shadow lighting.
+  if(!curtain && w.x<=0.001){discard;}
+  if(curtain && (in.curtain.y<=0.002 || in.curtain.x>=1.0)){discard;}
+  // Do not bridge the vertical cabin face with a diagonal water polygon.
+  if(!curtain && abs((in.local.y-deckFloor(in.local.z))*shipY(hull.right.w)-w.x-0.008)>0.10){discard;}
   if(curtain){n=normalize(face/max(length(face),0.00001)+hull.forward.xyz*ripple.x+hull.up.xyz*ripple.y);}
   n=select(-n,n,dot(n,v)>=0.0);
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
@@ -5139,8 +5178,6 @@ fn corner(v:u32)->vec2f {
     let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration+lightningSurface(n,v,vec3f(.1),.24));
     return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
   }
-  // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(abs((in.local.y-deckFloor(in.local.z))*shipY(hull.right.w)-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
   return vec4f(surfaceAir(color+lightningSurface(n,v,vec3f(.1),.24),in.world)*alpha,alpha);
 }
@@ -5941,6 +5978,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let inPrev = all(g >= plo) && all(g < plo + vec2i(RES));
   let p = (vec2f(g) + 0.5) * ts;
   var jxx = 0.0; var jzz = 0.0; var jxz = 0.0;
+  var horizontalDisp = vec2f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
     let texel = U.cascL[c >> 2u][c & 3u] / ${N}.0;
     let lod = log2(max(ts / texel, 1.0));
@@ -5949,6 +5987,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       let d = textureSampleLevel(derivTex, samp, uv, c, lod);
       let a = textureSampleLevel(dispTex, samp, uv, c, lod);
       jxx += d.z; jzz += d.w; jxz += a.w;
+      horizontalDisp += a.xz;
     }
   }
   let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
@@ -5959,7 +5998,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
   }
   let dt = U.p0.z;
-  let hullFoam = wakeAt(p);
+  // The clipmap is read at the FFT's material coordinate p. Hull contacts and
+  // both fleet wake grids are Eulerian: sample them where that material point
+  // actually lies after horizontal displacement, matching the ocean vertex.
+  let hullFoam = wakeAt(p + horizontalDisp);
   let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
   let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
   let f=max(seaFoam,hullFoam.z*0.9);
@@ -6227,7 +6269,7 @@ fn underwaterBoundary(world:vec3f,normal:vec3f,view:vec3f,skyHemi:vec3f,foam:f32
 }
 `;
 
-function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves=false,shadows=false}={}){
+function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves=false,shadows=false,skipAir=false}={}){
   const count=Math.max(1,Math.floor(samples));
   return FRAME_WGSL+ATMO_CORE_WGSL+WATER_OPTICS+/* wgsl */ `
 @group(0)@binding(0)var<uniform>F:Frame;
@@ -6247,6 +6289,9 @@ ${cameraProbe?'@group(0)@binding(11)var<storage,read>cameraSea:array<f32,16>;':'
 struct UnderwaterVertex{@builtin(position)position:vec4f,@location(0)ndc:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->UnderwaterVertex {
   let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
+  ${skipAir?`// The post passes choose original HDR using this same current GPU probe.
+  // Degenerate geometry avoids an otherwise identity full-screen copy in air.
+  if(${cameraProbe?'cameraSea[9]':'optics.z'}-F.camPos.y<=.005){return UnderwaterVertex(vec4f(0,0,0,1),p);}`:''}
   return UnderwaterVertex(vec4f(p,0,1),p);
 }
 fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
@@ -6725,7 +6770,77 @@ const FLEET_HEIGHT_PROBE=HEIGHT_PROBE.replace(WAKE_SAMPLE,FLEET_WAKE_SAMPLE)+/* 
 const SCENE_HEIGHT_PROBE=FLEET_HEIGHT_PROBE.replace(FLEET_WAKE_SAMPLE,SCENE_WAKE_SAMPLE)
   +surfaceWaveSource(0,11,12);
 
+// ---- js/wgsl/ocean-lighting.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
+// No approximation: these frame-wide values are the ocean fragment's original
+// transmittance lookup and five environment lookups, in the original order.
+// The first vec4 remains the sun-visibility producer's independent output.
+const OCEAN_LIGHTING=FRAME_WGSL+ATMO_CORE_WGSL+/* wgsl */ `
+@group(0)@binding(0)var<uniform>F:Frame;
+@group(0)@binding(1)var transLUT:texture_2d<f32>;
+@group(0)@binding(2)var sampC:sampler;
+@group(0)@binding(3)var envCube:texture_cube<f32>;
+@group(0)@binding(4)var<storage,read_write>oceanLighting:array<vec4f,4>;
+@compute @workgroup_size(1)fn main(){
+  let sunlight=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*oceanLighting[0].x;
+  let skyUp=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS-1}.0).rgb;
+  let skyHemi=skyUp*0.4+0.15*(
+    textureSampleLevel(envCube,sampC,vec3f(0.94,0.34,0.0),${ENV_MIPS-2}.0).rgb+
+    textureSampleLevel(envCube,sampC,vec3f(-0.94,0.34,0.0),${ENV_MIPS-2}.0).rgb+
+    textureSampleLevel(envCube,sampC,vec3f(0.0,0.34,0.94),${ENV_MIPS-2}.0).rgb+
+    textureSampleLevel(envCube,sampC,vec3f(0.0,0.34,-0.94),${ENV_MIPS-2}.0).rgb);
+  oceanLighting[1]=vec4f(sunlight,0);
+  oceanLighting[2]=vec4f(skyUp,0);
+  oceanLighting[3]=vec4f(skyHemi,0);
+}
+`;
+
+function oceanLightingExpressionKey(expression){
+  return expression.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'').replace(/\s+/g,'')
+    .replace(/\b(\d+)\.0+\b/g,'$1').replace(/\b0\.(\d+)/g,'.$1').replace(/\b(\d+)u\b/g,'$1');
+}
+
+function withCachedOceanLighting(source){
+  // Preserve offsets while excluding comment braces and declarations. Coastal
+  // helpers have their own local lighting; specialize only the ocean entrypoint.
+  const code=source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,comment=>' '.repeat(comment.length));
+  const visibility=/\bvar\s*<\s*storage\s*,\s*read\s*>\s*sunVis\s*:\s*array\s*<\s*f32\s*,\s*4u?\s*>\s*;/g;
+  const visibilityMatches=[...code.matchAll(visibility)];
+  if(visibilityMatches.length!==1)throw new Error('Unrecognized ocean lighting visibility buffer');
+  const fragments=[...code.matchAll(/@fragment\s+fn\s+fs\s*\(\s*in\s*:\s*VSOut\s*\)\s*->\s*@location\s*\(\s*0u?\s*\)\s*vec4f\s*\{/g)];
+  if(fragments.length!==1)throw new Error('Unrecognized ocean lighting fragment');
+  const start=fragments[0].index+fragments[0][0].length;
+  let end=start,depth=1;
+  for(;end<code.length&&depth;end++){
+    if(code[end]==='{')depth++;
+    else if(code[end]==='}')depth--;
+  }
+  if(depth)throw new Error('Unrecognized ocean lighting fragment body');
+  const fragment=code.slice(start,end-1),edits=[{
+    index:visibilityMatches[0].index,length:visibilityMatches[0][0].length,value:'var<storage,read>sunVis:array<f32,16>;',
+  }];
+  const definitions=[
+    ['sunlight','sunIlluminance()*sunVis[0]','vec3f(sunVis[4],sunVis[5],sunVis[6])'],
+    ['skyUp','textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),ENV_MAXMIP).rgb','vec3f(sunVis[8],sunVis[9],sunVis[10])'],
+    ['skyHemi',`skyUp*0.4+0.15*(
+      textureSampleLevel(envCube,sampC,vec3f(0.94,0.34,0.0),ENV_MAXMIP-1.0).rgb+
+      textureSampleLevel(envCube,sampC,vec3f(-0.94,0.34,0.0),ENV_MAXMIP-1.0).rgb+
+      textureSampleLevel(envCube,sampC,vec3f(0.0,0.34,0.94),ENV_MAXMIP-1.0).rgb+
+      textureSampleLevel(envCube,sampC,vec3f(0.0,0.34,-0.94),ENV_MAXMIP-1.0).rgb)`,
+      'vec3f(sunVis[12],sunVis[13],sunVis[14])'],
+  ];
+  for(const [name,expected,value]of definitions){
+    const pattern=new RegExp('\\blet\\s+'+name+'\\s*=\\s*([^;]+);','g'),matches=[...fragment.matchAll(pattern)];
+    if(matches.length!==1||oceanLightingExpressionKey(matches[0][1])!==oceanLightingExpressionKey(expected))throw new Error('Unrecognized ocean lighting '+name);
+    edits.push({index:start+matches[0].index,length:matches[0][0].length,value:'let '+name+'='+value+';'});
+  }
+  for(const edit of edits.sort((a,b)=>b.index-a.index))source=source.slice(0,edit.index)+edit.value+source.slice(edit.index+edit.length);
+  return source;
+}
+
 // ---- js/wgsl/post.js ----
+
 // Bloom (dual-filter chain) and final composite with AgX tonemapping.
 const FS_TRI = /* wgsl */ `
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
@@ -6857,6 +6972,29 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
   return vec4f(clamp(o, vec3f(0.0), vec3f(1.0)), 1.0);
 }
 `;
+
+// Select with the current GPU eye-height probe, not last frame's asynchronous
+// host readback. Only the first bloom level and final composite need this
+// variant; other levels retain their original pipeline and binding layout.
+function createUnderwaterPost(source,kind){
+  let binding,pattern,replacement;
+  if(kind==='bloom'){
+    binding=3;
+    pattern=/return\s+textureSampleLevel\s*\(\s*src\s*,\s*samp\s*,\s*uv\s*,\s*0\.0\s*\)\s*\.rgb\s*;/;
+    replacement='if(postCameraSea[9]-postFrame.camPos.y<=.005){return textureSampleLevel(airHDR,samp,uv,0.0).rgb;}return textureSampleLevel(src,samp,uv,0.0).rgb;';
+  }else if(kind==='composite'){
+    binding=4;
+    pattern=/var\s+c\s*=\s*textureLoad\s*\(\s*hdr\s*,\s*pc\s*,\s*0\s*\)\s*\.rgb\s*;/;
+    replacement='var c:vec3f;if(postCameraSea[9]-postFrame.camPos.y<=.005){c=textureLoad(airHDR,pc,0).rgb;}else{c=textureLoad(hdr,pc,0).rgb;}';
+  }else throw new Error('Unknown underwater post pass');
+  if(!pattern.test(source))throw new Error('Unrecognized underwater post source');
+  source=source.replace(pattern,replacement);
+  return FRAME_WGSL+source+`
+@group(0)@binding(${binding})var airHDR:texture_2d<f32>;
+@group(0)@binding(${binding+1})var<uniform>postFrame:Frame;
+@group(0)@binding(${binding+2})var<storage,read>postCameraSea:array<f32,16>;
+`;
+}
 
 // ---- js/wgsl/caravel.js ----
 
@@ -9620,8 +9758,8 @@ function createWaterOptics({device,shader,seaView,seaSampler,format='rgba16float
 // One optional HDR pass before bloom. It owns no simulation/readback and skips
 // command encoding entirely outside the camera's near-surface inspection band.
 async function createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler,sunVis,
-  derivView,seaSampler,cameraProbe=null,surfaceWaves=null,sceneShadows=null,format='rgba16float',samples=4}){
-  const module=await shader(createUnderwaterMedium({samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows}),'underwater medium');
+  derivView,seaSampler,cameraProbe=null,surfaceWaves=null,sceneShadows=null,format='rgba16float',samples=4,skipAir=false}){
+  const module=await shader(createUnderwaterMedium({samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows,skipAir}),'underwater medium');
   const pipeline=await device.createRenderPipelineAsync({label:'underwater medium',layout:'auto',
     vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
   const shadowGroup=sceneShadows?.bind(pipeline);
@@ -10006,6 +10144,14 @@ function createSkinAnimator(asset) {
   if(inverse.length!==joints.length*16)throw Error('Invalid inverse bind matrices');
   const palette=new Float32Array(joints.length*16),matrices=joints.map((_,i)=>palette.subarray(i*16,i*16+16));
   const inverseMatrices=joints.map((_,i)=>inverse.subarray(i*16,i*16+16));
+  // Preserve parent-first evaluation order, but retain the exact subset whose
+  // world transforms depend on each node. IK only changes one local rotation.
+  const branches=g.nodes.map(()=>[]),jointSlots=g.nodes.map(()=>[]);
+  for(const node of order)for(let ancestor=node;ancestor>=0;ancestor=parent[ancestor])branches[ancestor].push(node);
+  for(let i=0;i<joints.length;i++)jointSlots[joints[i]].push(i);
+  const branchJoints=branches.map(nodes=>nodes.flatMap(node=>jointSlots[node]));
+  const names=g.nodes.map(n=>n.name),nameIndices=new Map();
+  for(let i=0;i<names.length;i++)if(!nameIndices.has(names[i]))nameIndices.set(names[i],i);
   const clips=new Map();
   for(const clip of g.animations??[]){
     if(!clip.name || clips.has(clip.name))throw Error('Animations need unique names');
@@ -10043,7 +10189,13 @@ function createSkinAnimator(asset) {
     for(let i=0;i<joints.length;i++)gltfMatMultiply(matrices[i],world[joints[i]],inverseMatrices[i]);
     return palette;
   }
-  return {rest,parent,order,world,pose:aPose,palette,clips,joints,names:g.nodes.map(n=>n.name),update:updateMatrices,
+  function updateBranch(node){
+    if(!Number.isInteger(node)||node<0||node>=branches.length)throw Error('Invalid animation branch');
+    for(const i of branches[node]){gltfTRS(local,aPose[i].t,aPose[i].r,aPose[i].s);if(parent[i]<0)world[i].set(local);else gltfMatMultiply(world[i],world[parent[i]],local);}
+    for(const i of branchJoints[node])gltfMatMultiply(matrices[i],world[joints[i]],inverseMatrices[i]);
+    return palette;
+  }
+  return {rest,parent,order,world,pose:aPose,palette,clips,joints,names,nodeIndex:name=>nameIndices.get(name)??-1,update:updateMatrices,updateBranch,
     sample(name,time,other=null,otherTime=0,blend=0){
       if(!Number.isFinite(time)||!Number.isFinite(otherTime)||!Number.isFinite(blend))throw Error('Invalid animation time');
       evaluate(aPose,name,time);
@@ -12238,6 +12390,7 @@ const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
 const poseUnit=a=>{const n=Math.hypot(...a);return a.map(v=>v/Math.max(n,1e-9));};
 const poseCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const posePosition=m=>Array.from(m.subarray(12,15));
+const poseNodeIndex=(a,name)=>a.nodeIndex?a.nodeIndex(name):a.names.indexOf(name);
 function poseRotation(m){
   const scale=Math.hypot(m[0],m[1],m[2]),r=[m[0],m[4],m[8],m[1],m[5],m[9],m[2],m[6],m[10]].map(v=>v/scale);
   const trace=r[0]+r[4]+r[8];let q;
@@ -12252,11 +12405,12 @@ function turnBone(a,node,from,to){
   const n=Math.hypot(...delta);delta=delta.map(x=>x/Math.max(n,1e-9));
   const parent=a.parent[node],q=parent<0?[0,0,0,1]:poseRotation(a.world[parent]),inv=[-q[0],-q[1],-q[2],q[3]];
   const p=new Float32Array(4),local=new Float32Array(4);gltfQuatMultiply(p,inv,delta);gltfQuatMultiply(local,p,q);
-  gltfQuatMultiply(p,local,a.pose[node].r);a.pose[node].r.set(p);a.update();
+  gltfQuatMultiply(p,local,a.pose[node].r);a.pose[node].r.set(p);
+  if(a.updateBranch)a.updateBranch(node);else a.update();
 }
 function solveCrewLimb(a,names,target,pole){
-  const nodes=names.map(n=>a.names.indexOf(n));if(nodes.some(n=>n<0))return;
-  const [upper,lower,end]=nodes,A=posePosition(a.world[upper]),B=posePosition(a.world[lower]),C=posePosition(a.world[end]);
+  const upper=poseNodeIndex(a,names[0]),lower=poseNodeIndex(a,names[1]),end=poseNodeIndex(a,names[2]);if(upper<0||lower<0||end<0)return;
+  const A=posePosition(a.world[upper]),B=posePosition(a.world[lower]),C=posePosition(a.world[end]);
   const l1=Math.hypot(...poseSub(B,A)),l2=Math.hypot(...poseSub(C,B)),ray=poseSub(target,A),dir=poseUnit(ray);
   const d=Math.max(Math.abs(l1-l2)+.001,Math.min(l1+l2-.001,Math.hypot(...ray)));
   const x=(l1*l1-l2*l2+d*d)/(2*d),h=Math.sqrt(Math.max(0,l1*l1-x*x));
@@ -12720,7 +12874,45 @@ function placeOrbitCamera(camera,orbit,x,y,z,radius) {
   camera.pitch=-orbit.elevation;
 }
 
+// ---- js/vessel-pose.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
+
+const POSED_VERTEX_LAYOUT=Object.freeze({arrayStride:32,attributes:Object.freeze([
+  Object.freeze({shaderLocation:4,offset:0,format:'float32x3'}),
+  Object.freeze({shaderLocation:5,offset:16,format:'float32x3'}),
+])});
+
+// Alter only the posed position/normal input. Material coordinates, original
+// normals, UVs, vertex indices and moisture lookup retain their exact contract.
+function withPosedVesselVertices(source){
+  const signature=/(@vertex\s+fn\s+vs\s*\()([\s\S]*?)(\)\s*->)/;
+  const call='rigVertex(position,normal,material,uv)';
+  if(!signature.test(source)||source.split(call).length!==2)throw new Error('Unrecognized vessel vertex shader');
+  if(/@location\([45]\)\s+(?:posedPosition|posedNormal)/.test(source))throw new Error('Vessel vertices are already posed');
+  return source.replace(signature,(_match,start,args,end)=>start+args+',@location(4) posedPosition:vec3f,@location(5) posedNormal:vec3f'+end)
+    .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
+}
+
+async function createVesselPose({device,computePipe,sourceBuffer,vertexCount,hullUBO,shared=null}){
+  if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
+  if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
+  const pipeline=shared?.pipeline??await computePipe(VESSEL_POSE_UPDATE,'shared vessel deformation');
+  const buffer=device.createBuffer({label:'posed vessel vertices',size:vertexCount*32,
+    usage:GPUBufferUsage.STORAGE|GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_SRC});
+  const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[hullUBO,sourceBuffer,buffer].map((resource,binding)=>({binding,resource:{buffer:resource}}))});
+  const assets=shared??Object.freeze({device,pipeline});let destroyed=false;
+  return {buffer,assets,vertexCount,
+    encode(pass,enabled=true){
+      if(!enabled||destroyed)return false;
+      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));return true;
+    },
+    destroy(){if(!destroyed){destroyed=true;buffer.destroy();}},
+  };
+}
+
 // ---- js/shadows.js ----
+
 
 
 function shadowMeshData(mesh,meshIndices=null) {
@@ -12785,7 +12977,7 @@ function createSceneShadows(device,count=2,resolution=2048){
   };
 }
 
-async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null,targets=null}) {
+async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null,targets=null,posed=null}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
   const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
   const uniform=device.createBuffer({label:'vessel shadow frame',size:112,usage:B.UNIFORM|B.COPY_DST});
@@ -12797,13 +12989,14 @@ async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexB
   const linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
   const fallback=wetness?[]:[device.createBuffer({size:8,usage:B.STORAGE}),device.createBuffer({size:mesh.length/9*4,usage:B.STORAGE})];
   const moisture=wetness?.state??fallback[0],lookup=wetness?.lookup??fallback[1];
-  const module=await shader(SHADOW_CAST,'vessel shadows');
+  const module=await shader(posed?withPosedVesselVertices(SHADOW_CAST):SHADOW_CAST,'vessel shadows');
+  const vertexBuffers=[{arrayStride:36,attributes:[
+    {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+    {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
+  ]},...(posed?[POSED_VERTEX_LAYOUT]:[])];
   const pipes=await Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({
     label:cloth?'canvas shadows':'solid shadows',layout:'auto',
-    vertex:{module,entryPoint:'vs',buffers:[{arrayStride:36,attributes:[
-      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
-    ]}]},
+    vertex:{module,entryPoint:'vs',buffers:vertexBuffers},
     fragment:{module,entryPoint:cloth?'canvasFS':'solidFS',targets:cloth?[{format:'rgba16float'}]:[]},
     primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
@@ -12830,7 +13023,7 @@ async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexB
       for(let i=0;i<2;i++){
         passes[i].timestampWrites=profiler?.writes(timingPrefix+(i?'Canvas shadows':'Solid shadows'));
         const pass=encoder.beginRenderPass(passes[i]);pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
-        pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);
+        pass.setVertexBuffer(0,vertexBuffer);if(posed)pass.setVertexBuffer(1,posed.buffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);
         if(i===0)extraSolid?.(pass);pass.end();
       }
     },
@@ -14163,10 +14356,11 @@ function createGPUProfiler(device, requested=false) {
 }
 
 // ---- js/resolution.js ----
-// Tune pixel count from delivered frame cadence, not overlapping GPU timestamps.
+// Delivered cadence drives reductions. Measured work can establish restoration
+// headroom even when presentation is capped at 60 Hz; it never forces a reduction.
 // Resolution is device-local; scene quality settings and simulation stay intact.
 function createAdaptiveResolution(mode = 'auto') {
-  const minimum = 0.35, targetFPS = 30, samples = new Float64Array(240);
+  const minimum = 0.35, targetFPS = 60, samples = new Float64Array(240), workSamples = new Float64Array(240);
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   let count = 0, seconds = 0, settle = 2, fastSeconds = 0, fps = 0;
   const reset = () => { count = 0; seconds = 0; settle = 2; fastSeconds = 0; };
@@ -14178,11 +14372,13 @@ function createAdaptiveResolution(mode = 'auto') {
       mode = next; scale = next === 'auto' ? scale : next === 'native' || next === 'fixed' ? 1 : Number(next);
       reset();
     },
-    sample(elapsed, visible = true) {
+    sample(elapsed, visible = true, workMs = null) {
       if (mode !== 'auto') return false;
       if (!visible || !Number.isFinite(elapsed) || elapsed <= 0 || elapsed > 1) { reset(); return false; }
       if (settle > 0) { settle -= elapsed; return false; }
-      samples[count++] = elapsed * 1000; seconds += elapsed;
+      samples[count] = elapsed * 1000;
+      workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
+      seconds += elapsed;
       if ((seconds < 1.5 || count < 12) && count < samples.length) return false;
       // Ignore isolated scheduling hiccups; sustained slow frames remain visible.
       const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
@@ -14190,15 +14386,29 @@ function createAdaptiveResolution(mode = 'auto') {
       for (let i = trim; i < count - trim; i++) ms += sorted[i];
       ms /= count - 2 * trim; fps = 1000 / ms;
       let next = scale;
-      if (ms > 1000 / targetFPS * 1.01) {
-        // Aim above 30 after a reduction, leaving modest headroom for wave peaks.
-        const factor = Math.max(0.7, Math.min(0.92, Math.sqrt((1000 / 33) / ms) * 0.96));
+      const budget = 1000 / targetFPS;
+      if (ms > budget * 1.01) {
+        // Modest headroom above 60 leaves room for wave peaks after reducing.
+        const factor = Math.max(0.7, Math.min(0.92, Math.sqrt((1000 / 66) / ms) * 0.96));
         next = Math.max(minimum, Math.round(scale * factor * 100) / 100);
         fastSeconds = 0;
-      } else if (fps > 42) {
-        fastSeconds += seconds;
-        if (fastSeconds >= 10) next = Math.min(1, Math.round((scale + 0.05) * 100) / 100);
-      } else fastSeconds = 0;
+      } else {
+        const work = workSamples.slice(0, count).filter(Number.isFinite).sort();
+        const measured = work.length >= count * .8;
+        let headroom = fps > targetFPS * 1.4;
+        if (measured) {
+          const workTrim = Math.floor(work.length * .1);let cost = 0;
+          for (let i = workTrim; i < work.length - workTrim; i++) cost += work[i];
+          cost /= work.length - 2 * workTrim;
+          // Raising scale 5% increases pixel work about 10%. Require more
+          // margin than that and stable target cadence before restoring detail.
+          headroom = fps >= targetFPS * .99 && cost <= budget * .86;
+        }
+        if (headroom) {
+          fastSeconds += seconds;
+          if (fastSeconds >= 10) next = Math.min(1, scale * 1.05);
+        } else fastSeconds = 0;
+      }
       count = 0; seconds = 0;
       if (next === scale) return false;
       scale = next; reset(); return true;
@@ -14421,6 +14631,67 @@ function createHullAudioState(){
         options:{duration:.66,attack:.018,release:.24,lowpassHz:1800,highpassHz:90},kind:'light'};
     },
     reset(){lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;lastReturn=null;},
+  };
+}
+
+// Acoustic severity only: these contacts do not measure timber stress, force or
+// joules. One shared clock prevents a contact groan and motion creak stacking.
+function createTimberAudioState(random=Math.random){
+  let time=0,nextCreak=4,revision=null,contact=null,lastContact=-Infinity,settleUntil=1,episode=false,receding=0,epoch=-1;
+  const serials=new Float64Array(10).fill(-1);
+  function reset(nextRevision=null){
+    revision=nextRevision;contact=null;lastContact=-Infinity;settleUntil=time+1;nextCreak=time+4;
+    episode=false;receding=0;epoch=-1;serials.fill(-1);
+  }
+  function fresh(){return contact&&time-lastContact<=.35&&time>=settleUntil;}
+  function emit(gain,position,contactDriven){
+    if(time<nextCreak)return null;
+    nextCreak=time+5+weatherClamp(random())*7;
+    return {id:'timber-creak',gain,position,rate:contactDriven ? .90+weatherClamp(random())*.08 : .92+weatherClamp(random())*.15,
+      spatial:contactDriven,options:contactDriven?{duration:4,attack:.025,release:.3}:{}};
+  }
+  function encounter(severity,event){
+    if(!fresh()||episode)return null;
+    // Consume even during cooldown: an old wave must not play belatedly when
+    // the preceding periodic/contact creak finishes, nor once per hull probe.
+    episode=true;receding=0;
+    return emit(.10+.18*Math.sqrt(weatherClamp(severity)),event,true);
+  }
+  return {
+    contact(value){
+      if(!value||!Number.isFinite(value.revision)||!Number.isFinite(value.pressure)||!Number.isFinite(value.wet)
+        ||!Number.isFinite(value.closing)||!Number.isFinite(value.impact))return false;
+      if(value.reset||revision!==value.revision)reset(value.revision);
+      contact=value;lastContact=time;return true;
+    },
+    impact(event){
+      // Waterline strength is authored spray severity; require actual positive
+      // encounter rate as well. Ordinary quiet water slaps remain unchanged.
+      if(event?.kind!=='light'||!(event.strength>=.8)||!(event.closing>1.25)||!(event.wet>.4)
+        ||![event.x,event.y,event.z,event.strength,event.closing,event.wet].every(Number.isFinite)
+        ||(event.age!==undefined&&!(event.age>=0&&event.age<=.35))
+        ||(event.revision!==undefined&&event.revision!==revision)||!(contact?.wet>0))return null;
+      return encounter(event.strength/3.5,event);
+    },
+    underside(event){
+      if(event?.kind!=='underside-reentry'||!(event.closing>1.25)||!(event.age>=0&&event.age<=.35)
+        ||![event.x,event.y,event.z,event.closing].every(Number.isFinite)
+        ||![event.epoch,event.probe,event.serial].every(Number.isInteger)||event.probe<0||event.probe>=serials.length
+        ||event.revision!==revision||event.epoch<epoch||!fresh())return null;
+      if(event.epoch!==epoch){epoch=event.epoch;serials.fill(-1);}
+      if(event.serial<=serials[event.probe])return null;
+      serials[event.probe]=event.serial;
+      return encounter(event.closing/5,event);
+    },
+    update(dt,{strain=0,position=null,revision:currentRevision=revision,audible=true}={}){
+      time+=weatherClamp(dt,0,.1);
+      if(currentRevision!==revision)reset(currentRevision);
+      if(fresh()&&contact.closing<.24&&contact.impact<.09)receding+=weatherClamp(dt,0,.1);else receding=0;
+      if(receding>.45)episode=false;
+      if(!audible||!Number.isFinite(strain)||strain<=.055||!position||![position.x,position.z].every(Number.isFinite))return null;
+      return emit(weatherClamp(strain*.7,.08,.32),position,false);
+    },
+    reset,
   };
 }
 
@@ -14896,6 +15167,7 @@ function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}
 // firing. The captain's spoken order has the same duration with sound muted.
 function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null}={}){
   const state=createGunneryState(createGunDefinitions(boat));boat.gunnery=state;
+  const previousStages=new Array(state.guns.length);
   let pending=null,prepared=false,lastReady=false,flash=null;
   const attended=gun=>!gun.visibleCrew||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
@@ -14947,13 +15219,13 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
     },
     update(dt,wind){
       if(pending&&state.time+1e-8>=pending.at){fireGunnery(state,pending.side);pending=null;}
-      const before=new Map(state.guns.map(g=>[g.id,g.stage]));
+      for(const gun of state.guns)previousStages[gun.index]=gun.stage;
       const events=stepGunnery(state,dt,{deferSeaCollision:true,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
         gunAttended:attended,canFire:(gun,pose)=>attended(gun)&&!muzzleBlock(gun,pose),
         onEvent:event=>{if(event.type==='shot'){recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}if(event.type!=='ready')onEvent(event);},
       });
-      for(const gun of state.guns)if(before.get(gun.id)!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
+      for(const gun of state.guns)if(previousStages[gun.index]!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
         onEvent({type:gun.stage==='ram'?'load':'run-out',gun,position:gunMuzzlePose(gun,boat).position});
       }
       const s=gunnerySummary(state,boat.gunnerySide),ready=prepared&&s.total>0&&s.ready===s.total&&
@@ -15027,15 +15299,16 @@ const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 // fetched or started until the listener enables sound with a browser gesture.
 function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
-  let time=0,nextCreak=4,nextBird=25,lastRevision=-1;
+  let time=0,nextBird=25;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
   const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[];
   const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
   const mute=()=>{if(context)master.gain.setTargetAtTime(enabled&&!hidden?volume:0,context.currentTime,.06);};
   const dialogue=createVoiceDirector({play:(...args)=>play(...args,true),assets:VOICE_ASSETS,crew:CREW_VOICES,available:()=>enabled&&!hidden&&ready&&context?.state==='running'&&context.currentTime>=previewUntil});
   const gunsAudio=createGunneryAudio({play,listener:()=>listener,available:()=>enabled&&!hidden&&ready&&context?.state==='running'});
-  const hullAudio=createHullAudioState();
-  function stopEvents(){dialogue.clear();gunsAudio.clear();hullAudio.reset();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
+  const hullAudio=createHullAudioState(),timberAudio=createTimberAudioState();
+  function stopEvents(){dialogue.clear();gunsAudio.clear();hullAudio.reset();timberAudio.reset();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
+  function creak(sound){if(sound&&shipDistance>.01)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,sound.spatial,sound.options);}
   function play(id,gain,position,rate=1,spatial=false,options={}){
     const pool=id==='cannon-report'?reports:voices,limit=id==='cannon-report'?12:8;
     if(!enabled||hidden||!ready||!buffers.has(id)||pool.size>=limit||context.state!=='running')return;
@@ -15084,7 +15357,7 @@ function createSceneAudio({onStatus=()=>{}}={}){
         buffers.set(id,await context.decodeAudioData(await response.arrayBuffer()));
       })).then(()=>{ready=true;loading=null;startLoops();status();});
     }
-    status();await loading;
+    status();await loading;timberAudio.reset();
   }
   return {
     get enabled(){return enabled;},get ready(){return ready;},
@@ -15110,11 +15383,15 @@ function createSceneAudio({onStatus=()=>{}}={}){
       else if(event.type==='splash')play('anchor-splash',.6,anchorPosition,1,true);
       else if(event.type==='drop')play('anchor-release',.4,anchorPosition,1,true);
     },
-    hullContact(contact){return hullAudio.contact(contact);},
-    hullUnderside(event){if(enabled&&!hidden&&ready)return hullAudio.underside(event);return false;},
+    hullContact(contact){if(enabled&&!hidden&&ready)timberAudio.contact(contact);return hullAudio.contact(contact);},
+    hullUnderside(event){
+      if(enabled&&!hidden&&ready){const accepted=hullAudio.underside(event);if(accepted)creak(timberAudio.underside(event));return accepted;}
+      return false;
+    },
     impact(event){
       if(!enabled||hidden||!ready)return;
       const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
+      creak(timberAudio.impact(event));
     },
     update(dt,settings,boat,frame,weather){
       time+=dt;volume=weatherClamp(settings.soundVolume??.7);
@@ -15124,10 +15401,11 @@ function createSceneAudio({onStatus=()=>{}}={}){
       dialogue.update(dt);
       gunsAudio.update(dt);
       const hullMix=hullAudio.update(dt,{speed:boat.surgeVelocity??0});
+      const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
+      const timberSound=timberAudio.update(dt,{strain,position:boat,revision:boat.revision,audible:enabled&&!hidden&&ready&&shipDistance>.01});
       if(!enabled||hidden||!ready)return;
       if(anchorReeling){anchorPosition={x:boat.x,y:(boat.heave??0)+3,z:boat.z};startLoop('anchor-reel',ALL_SOUNDS['anchor-reel']);}
       mute();
-      if(lastRevision!==boat.revision){lastRevision=boat.revision;nextCreak=time+4;}
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,speed:boat.surgeVelocity??0,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
@@ -15139,11 +15417,7 @@ function createSceneAudio({onStatus=()=>{}}={}){
       for(let i=pending.length-1;i>=0;i--)if(time>=pending[i].audioAt){
         const e=pending.splice(i,1)[0];play(e.distance<1200?'thunder-near':'thunder-distant',.7/(1+e.distance/3000),e,.95+Math.random()*.1);
       }
-      const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
-      if(time>nextCreak&&strain>.055&&shipDistance>.01){
-        play('timber-creak',weatherClamp(strain*.7,.08,.32)*shipDistance,{x:boat.x,z:boat.z},.92+Math.random()*.15);
-        nextCreak=time+5+Math.random()*7;
-      }
+      creak(timberSound);
       if(time>nextBird){
         const activity=weatherClamp(settings.seabirds??.25)*(1-weather.intensity)*weatherClamp(1-settings.windSpeed/24);
         if(Math.random()<activity){const a=Math.random()*Math.PI*2;play('gull-near',.16,{x:listener.x+Math.sin(a)*30,z:listener.z+Math.cos(a)*30},.97+Math.random()*.06);}
@@ -15232,10 +15506,12 @@ async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,
 
 
 
+
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
 // apart from the unavoidable swap-chain view and command buffer objects).
+
 
 
 
@@ -15473,7 +15749,7 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 16,
   });
   const frameUBO = mkBuf(384, GU.UNIFORM | GU.COPY_DST, 'frame ubo');
-  const sunVisBuf = mkBuf(16, GU.STORAGE, 'sun visibility');
+  const sunVisBuf = mkBuf(64, GU.STORAGE, 'sun visibility and ocean lighting');
   const transView = transLUT.createView();
   const msView = msLUT.createView();
   const skyView = skyLUT.createView();
@@ -15487,15 +15763,19 @@ async function main() {
   ] });
   const bgCubeMips = [];
   for (let m = 1; m < ENV_MIPS; m++) bgCubeMips.push(bg(cubeMipPipe, [lvl(envTex, m - 1), lvl(envTex, m), { buffer: frameUBO }], 'cubemip' + m));
+  const oceanLightingPipe=await computePipe(OCEAN_LIGHTING,'ocean frame lighting');
+  const bgOceanLighting=bg(oceanLightingPipe,[{buffer:frameUBO},transView,sampClamp,envCubeView,{buffer:sunVisBuf}]);
 
   // --------------------------------------------------------------------------------------
   // Render pipelines
   // --------------------------------------------------------------------------------------
   const MSAA = 4;
   const HDR = 'rgba16float';
-  const [oceanMod, skyMod, downMod, upMod, compMod] = await Promise.all([
-    shader(createOpticalOcean(LAND_STAGE?COASTAL_WATER:'',OCEAN_DEPTH,true,true), 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
+  const [oceanMod, skyMod, downMod, upMod, compMod, mediumDownMod, mediumCompMod] = await Promise.all([
+    shader(withCachedOceanLighting(createOpticalOcean(LAND_STAGE?COASTAL_WATER:'',OCEAN_DEPTH,true,true)), 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
     shader(BLOOM_UP, 'bloom up'), shader(COMPOSITE, 'composite'),
+    shader(createUnderwaterPost(BLOOM_DOWN,'bloom'),'medium bloom source'),
+    shader(createUnderwaterPost(COMPOSITE,'composite'),'medium composite source'),
   ]);
   const oceanPipe = await device.createRenderPipelineAsync({
     label: 'ocean', layout: 'auto',
@@ -15545,18 +15825,22 @@ async function main() {
     vertex: { module: compMod, entryPoint: 'vs' },
     fragment: { module: compMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
   });
+  const mediumDownPipe=await device.createRenderPipelineAsync({label:'medium bloom source',layout:'auto',
+    vertex:{module:mediumDownMod,entryPoint:'vs'},fragment:{module:mediumDownMod,entryPoint:'fs',targets:[{format:HDR}]}});
+  const mediumCompPipe=await device.createRenderPipelineAsync({label:'medium composite source',layout:'auto',
+    vertex:{module:mediumCompMod,entryPoint:'vs'},fragment:{module:mediumCompMod,entryPoint:'fs',targets:[{format:swapFormat}]}});
 
   window.oceanStartup?.stage('ship-crew','Building the ship and loading its crew…');
   const waterFilterPipe = await computePipe(WATER_FILTER, 'water reflections filter');
-  const caravelMod = await shader(CARAVEL, 'caravel');
+  const posedShip=SHIP_ID==='victory';
+  const caravelSource=posedShip?withPosedVesselVertices(CARAVEL):CARAVEL;
+  const shipVertexLayouts=[{arrayStride:36,attributes:[
+    {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+    {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'}]},...(posedShip?[POSED_VERTEX_LAYOUT]:[])];
+  const caravelMod = await shader(caravelSource, 'caravel');
   const caravelPipe = await device.createRenderPipelineAsync({
     label: 'caravel', layout: 'auto',
-    vertex: { module: caravelMod, entryPoint: 'vs', buffers: [{ arrayStride: 36, attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x3' },
-      { shaderLocation: 1, offset: 12, format: 'float32x3' },
-      { shaderLocation: 2, offset: 24, format: 'float32' },
-      { shaderLocation: 3, offset: 28, format: 'float32x2' },
-    ] }] },
+    vertex: { module: caravelMod, entryPoint: 'vs', buffers: shipVertexLayouts },
     fragment: { module: caravelMod, entryPoint: 'fs', targets: [{ format: HDR }] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
@@ -15564,16 +15848,14 @@ async function main() {
   });
   const surfaceWaves=await createSurfaceWaves({device,computePipe});
   const waterOptics=await createWaterOptics({device,shader,seaView:fullArr(dispTex),seaSampler:samplerSim,format:HDR,surfaceWaves});
-  const submergedCaravel=await waterOptics.capture({source:CARAVEL,pipeline:caravelPipe,
-    vertex:{entryPoint:'vs',buffers:[{arrayStride:36,attributes:[
-      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'}]}]},world:'in.world',groups:2});
+  const submergedCaravel=await waterOptics.capture({source:caravelSource,pipeline:caravelPipe,
+    vertex:{entryPoint:'vs',buffers:shipVertexLayouts},world:'in.world',groups:2});
   const shipAssets=createShipAssetCache();
   const shipAsset=SHIP_ID==='nina'?shipAssets.get('nina'):shipAssets.get(SHIP_ID);
   const {vertices:caravelMesh,indices:caravelIndices} = shipAsset;
-  const caravelBuffer = mkBuf(caravelMesh.byteLength, GU.VERTEX | GU.COPY_DST, 'caravel geometry');
+  const caravelBuffer = mkBuf(caravelMesh.byteLength, GU.VERTEX | GU.COPY_DST | (posedShip?GU.STORAGE:0), 'caravel geometry');
   device.queue.writeBuffer(caravelBuffer, 0, caravelMesh);
-  const companionCaravelBuffer=mkBuf(caravelMesh.byteLength,GU.VERTEX|GU.COPY_DST,'companion cannon geometry');
+  const companionCaravelBuffer=mkBuf(caravelMesh.byteLength,GU.VERTEX|GU.COPY_DST|(posedShip?GU.STORAGE:0),'companion cannon geometry');
   device.queue.writeBuffer(companionCaravelBuffer,0,caravelMesh);
   const caravelIndexBuffer=mkBuf(caravelIndices.byteLength,GU.INDEX|GU.COPY_DST,'caravel indices');
   device.queue.writeBuffer(caravelIndexBuffer,0,caravelIndices);
@@ -15594,9 +15876,10 @@ async function main() {
   const hullUBO = mkBuf(HULL_UNIFORM_BYTES, GU.UNIFORM | GU.COPY_DST, 'hull transform');
   const hullData = new Float32Array(HULL_UNIFORM_BYTES / 4);
   const sceneShadows=createSceneShadows(device);
+  const pose=posedShip?await createVesselPose({device,computePipe,sourceBuffer:caravelBuffer,vertexCount:caravelMesh.length/9,hullUBO}):null;
   const fleetHullUBO=mkBuf(192,GU.UNIFORM|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(48);
   const wetness=await createSurfaceWetness({device,mesh:caravelMesh,hullUBO,frameUBO,computePipe});
-  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness,targets:sceneShadows.layer(0)});
+  const shadows=await createVesselShadows({device,hullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness,targets:sceneShadows.layer(0),posed:pose});
   const oceanShadows=sceneShadows.bind(oceanPipe),caravelShadows=shadows.bind(caravelPipe);
   let crew=null,crewError='';
   try { crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,modelId:shipAsset.model.id}); }
@@ -15608,8 +15891,9 @@ async function main() {
   wetness.connect(interaction,spindrift,fullArr(dispTex),samplerSim);
   const companionHullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,'companion hull transform');
   const companionHullData=new Float32Array(HULL_UNIFORM_BYTES/4);
+  const companionPose=posedShip?await createVesselPose({device,computePipe,sourceBuffer:companionCaravelBuffer,vertexCount:caravelMesh.length/9,hullUBO:companionHullUBO,shared:pose.assets}):null;
   const companionWetness=await createSurfaceWetness({device,mesh:caravelMesh,hullUBO:companionHullUBO,frameUBO,computePipe});
-  const companionShadows=await createVesselShadows({device,hullUBO:companionHullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:companionCaravelBuffer,shader,wetness:companionWetness,targets:sceneShadows.layer(1)});
+  const companionShadows=await createVesselShadows({device,hullUBO:companionHullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:companionCaravelBuffer,shader,wetness:companionWetness,targets:sceneShadows.layer(1),posed:companionPose});
   let companionCrew=null;
   try{companionCrew=await createCrew({waterOptics,device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
   catch(error){console.warn('Companion crew initialization:',error);}
@@ -15617,8 +15901,8 @@ async function main() {
   companionInteraction.setShadows(companionShadows);
   companionWetness.connect(companionInteraction,spindrift,fullArr(dispTex),samplerSim);
   const vessels=[
-    {id:'player',boat:null,hullUBO,hullData,wetness,shadows,crew,interaction,lighting:caravelShadows},
-    {id:'companion',boat:null,hullUBO:companionHullUBO,hullData:companionHullData,wetness:companionWetness,shadows:companionShadows,crew:companionCrew,interaction:companionInteraction,lighting:companionShadows.bind(caravelPipe)},
+    {id:'player',boat:null,hullUBO,hullData,wetness,shadows,crew,interaction,pose,lighting:caravelShadows},
+    {id:'companion',boat:null,hullUBO:companionHullUBO,hullData:companionHullData,wetness:companionWetness,shadows:companionShadows,crew:companionCrew,interaction:companionInteraction,pose:companionPose,lighting:companionShadows.bind(caravelPipe)},
   ];
   for(const [i,v] of vessels.entries()){v.submergedLighting=v.shadows.bind(submergedCaravel.pipeline);v.vertexBuffer=i?companionCaravelBuffer:caravelBuffer;v.mesh=new Float32Array(caravelMesh);v.recoilMap=createGunRecoilMap(shipAsset);}
   const wakeIndices=[0,1,2,3,4,5,6,7];
@@ -15716,7 +16000,7 @@ async function main() {
   let submergedColor,submergedDepth,oceanOpticsGroup;
   const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
   const underwaterMedium=await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
-    derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA});
+    derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA,skipAir:true});
   const opticsEmptyLayout=device.createBindGroupLayout({entries:[]});
   const opticsEmptyGroup=device.createBindGroup({layout:opticsEmptyLayout,entries:[]});
   const submergedPass={label:'Submerged geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
@@ -15785,9 +16069,10 @@ async function main() {
       device.queue.writeBuffer(bloomUBOs[m], 0, tmp);
       bloomPasses.push({
         pipeline: downPipe,
+        underwaterPipeline:m===0?mediumDownPipe:null,
         timingName: `Bloom down ${m}`,
         bindGroup: bg(downPipe, [m === 0 ? hdrView : bv[m - 1], linSamp, { buffer: bloomUBOs[m] }]),
-        underwaterBindGroup:m===0?bg(downPipe,[mediumView,linSamp,{buffer:bloomUBOs[m]}]):null,
+        underwaterBindGroup:m===0?bg(mediumDownPipe,[mediumView,linSamp,{buffer:bloomUBOs[m]},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]):null,
         descriptor: { colorAttachments: [{ view: bv[m], clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] },
       });
     }
@@ -15804,7 +16089,7 @@ async function main() {
       });
     }
     bgComp = bg(compPipe, [hdrView, bv[0], linSamp, { buffer: compUBO }]);
-    bgCompUnderwater=bg(compPipe,[mediumView,bv[0],linSamp,{buffer:compUBO}]);
+    bgCompUnderwater=bg(mediumCompPipe,[mediumView,bv[0],linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]);
   }
 
   // --------------------------------------------------------------------------------------
@@ -16480,14 +16765,14 @@ async function main() {
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.classList.contains('hidden'))hideSea.click();});
   const resolutionLabel=document.createElement('label');resolutionLabel.className='resolution-control';resolutionLabel.textContent='Render resolution';
   const resolutionInput=document.createElement('select');resolutionInput.id='render-resolution';
-  for(const [value,label] of [['auto','Auto · 30+ FPS'],['native','Native (100%)'],['0.75','75%'],['0.5','50%'],...(fixedResolution?[['fixed','Fixed by URL']]:[])]) {
+  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','Native (100%)'],['0.75','75%'],['0.5','50%'],...(fixedResolution?[['fixed','Fixed by URL']]:[])]) {
     const option=document.createElement('option');option.value=value;option.textContent=label;resolutionInput.append(option);
   }
   resolutionInput.value=resolution.mode;resolutionInput.disabled=fixedResolution;
   resolutionInput.addEventListener('change',()=>{resolution.setMode(resolutionInput.value);resize();updateResolutionStatus();});
   resolutionLabel.append(resolutionInput);
   const resolutionStatus=document.createElement('p');resolutionStatus.id='resolution-status';
-  const updateResolutionStatus=()=>{resolutionStatus.textContent=`${W} × ${H} · ${resolution.mode==='fixed'?'fixed by URL':Math.round(resolution.scale*100)+'%'}${resolution.mode==='auto'?' · target 30 FPS':''}${resolution.mode==='auto'&&resolution.scale===resolution.minimum?' · minimum resolution':''}`;};
+  const updateResolutionStatus=()=>{resolutionStatus.textContent=`${W} × ${H} · ${resolution.mode==='fixed'?'fixed by URL':Math.round(resolution.scale*100)+'%'}${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}${resolution.mode==='auto'&&resolution.scale===resolution.minimum?' · minimum resolution':''}`;};
   seaBody.append(resolutionLabel,resolutionStatus);
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
@@ -16576,6 +16861,7 @@ async function main() {
   const fixedDt = shotName ? 1 / 60 : 0;
   let last = performance.now();
   let fpsN = 0, fpsT = 0;
+  let frameWorkMs=0;
   let shooting = false;
   document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
 
@@ -16593,6 +16879,7 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
     surfaceWaves.encode(cp);
+    for(const v of vessels)v.pose?.encode(cp,v.boat.showProw);
     for(const v of vessels)v.interaction.encode(cp);
     hullContactProbe.encode(cp);
     spindrift.encode(cp);
@@ -16634,10 +16921,11 @@ async function main() {
 
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
+    const cpuFrameStart=performance.now();
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
-    resolution.sample(elapsed,!document.hidden);
+    resolution.sample(elapsed,!document.hidden,profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null);
     resize();
     let dt = Math.min(0.1, elapsed);
     last = now;
@@ -16646,7 +16934,7 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target 30 FPS':''}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
       if(profileToggle)profileToggle.textContent=`Performance · ${fps.toFixed(1)} FPS · ${Math.round(resolution.scale*100)}%`;
       updateResolutionStatus();
@@ -16798,6 +17086,7 @@ async function main() {
       cp.setBindGroup(0, bgCubeMips[m - 1]);
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), envFaces);
     }
+    cp.setPipeline(oceanLightingPipe);cp.setBindGroup(0,bgOceanLighting);cp.dispatchWorkgroups(1);
     cp.end();
 
     gunSea.encode(enc,shipGuns.state.projectiles,simTime);
@@ -16817,7 +17106,7 @@ async function main() {
     for(const v of vessels){
       if(!v.boat.showProw)continue;
       submergedCaravel.bind(underwater);underwater.setBindGroup(0,v.submergedGroup);underwater.setBindGroup(1,v.submergedLighting);
-      underwater.setVertexBuffer(0,v.vertexBuffer);underwater.setIndexBuffer(caravelIndexBuffer,'uint32');underwater.drawIndexed(caravelIndices.length);
+      underwater.setVertexBuffer(0,v.vertexBuffer);if(v.pose)underwater.setVertexBuffer(1,v.pose.buffer);underwater.setIndexBuffer(caravelIndexBuffer,'uint32');underwater.drawIndexed(caravelIndices.length);
       v.crew?.drawSubmerged(underwater);v.anchorRenderer.drawSubmerged(underwater);
     }
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
@@ -16866,7 +17155,7 @@ async function main() {
       for(const v of vessels){
         if(!v.boat.showProw)continue;
         prowPass.setPipeline(caravelPipe);prowPass.setBindGroup(0,v.bindGroup);prowPass.setBindGroup(1,v.lighting);
-        prowPass.setVertexBuffer(0,v.vertexBuffer);prowPass.setIndexBuffer(caravelIndexBuffer,'uint32');prowPass.drawIndexed(caravelIndices.length);
+        prowPass.setVertexBuffer(0,v.vertexBuffer);if(v.pose)prowPass.setVertexBuffer(1,v.pose.buffer);prowPass.setIndexBuffer(caravelIndexBuffer,'uint32');prowPass.drawIndexed(caravelIndices.length);
         v.crew?.draw(prowPass);
         v.anchorRenderer.draw(prowPass);
       }
@@ -16882,10 +17171,10 @@ async function main() {
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
     if (P.bloom > 0) {
-      for (const { descriptor, pipeline, bindGroup, underwaterBindGroup, timingName } of bloomPasses) {
+      for (const { descriptor, pipeline, underwaterPipeline, bindGroup, underwaterBindGroup, timingName } of bloomPasses) {
         descriptor.timestampWrites=profiler.writes(timingName);
         const p = enc.beginRenderPass(descriptor);
-        p.setPipeline(pipeline);
+        p.setPipeline(cameraMediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
         p.setBindGroup(0, cameraMediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);
         p.draw(3);
         p.end();
@@ -16900,7 +17189,7 @@ async function main() {
     compPass.colorAttachments[0].view = swapTex.createView();
     compPass.timestampWrites=profiler.writes('Composite');
     const pc = enc.beginRenderPass(compPass);
-    pc.setPipeline(compPipe);
+    pc.setPipeline(cameraMediumBand?mediumCompPipe:compPipe);
     pc.setBindGroup(0, cameraMediumBand?bgCompUnderwater:bgComp);
     pc.draw(3);
     pc.end();
@@ -16952,6 +17241,7 @@ async function main() {
     },()=>{p.pending=false;});}}
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
+    frameWorkMs=performance.now()-cpuFrameStart;
   }
 
   async function saveShot(buf, bpr) {

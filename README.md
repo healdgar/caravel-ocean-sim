@@ -6,14 +6,12 @@ A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, im
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-The current checkpoint refines underwater lighting, distance-filtered terrain,
-cast-iron materials and sail shadows. It includes underwater inspection,
-wave-driven caustics and terrain-aligned grass and rocks. Earlier changes add finite deck overtopping,
-revised wakes and shared surface disturbances. Validation and release receipts
-are recorded in [the checkpoint log](BACKLOG.md); physical-iPhone performance
-remains unmeasured for this batch.
-The rendering corrections passed **428 native Metal tests**; Wells Bay placement
-passed **48 focused checks**.
+The current checkpoint reduces repeated crew, vessel and ocean shading work,
+targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater
+and connects hard water contacts to timber groans. It retains underwater lighting,
+distance-filtered terrain, cast-iron materials, sail shadows and the Wells Bay
+approach. Validation and release receipts are recorded in [the checkpoint log](BACKLOG.md);
+physical-iPhone performance remains unmeasured for this batch.
 
 ![HMS Victory with tiered square sails](docs/victory.png)
 
@@ -599,7 +597,7 @@ The source packs, licenses, checksums and rebuild instructions live in
 embed the island's height, imagery and vegetation mask plus the world chart.
 GitHub Pages loads terrain and foliage for land scenes, and the world chart on demand.
 The regular ocean scene does not allocate terrain GPU
-resources. The existing automatic 30 FPS resolution target remains active; combined
+resources. The automatic resolution target is now 60 FPS; combined
 land/ocean performance still needs a physical iPhone measurement.
 
 ### Waves
@@ -668,7 +666,7 @@ Both embedded GLBs total 2.21 MB. Each has 65 joints and Idle, Walk and Brace
 clips; the male model has 15,995 triangles, the female 18,720. Twelve sailors use
 two instanced draws in the ship pass and two in the existing solid shadow pass,
 with independent bone palettes. They receive ship/sail shadows. No render pass
-is added. The 30 FPS automatic-resolution target remains active; the expanded
+is added. The automatic-resolution target is now 60 FPS; the expanded
 crew's physical-iPhone performance has not yet been measured.
 
 Crew follow bounded authored routes, yield to nearby bodies, climb the rendered
@@ -707,6 +705,12 @@ and produces paired crests/troughs even on flat water. Interpolation between
 contacts removes whole-emitter switches, including across the stem; aft sampling
 uses each hull's actual span. Resolved pressure kernels deform the ocean mesh.
 The separate reflective bow ribbon and its abrupt endpoints have been removed.
+Fresh bow froth now fills a broader, connected shoulder outside the measured
+planking. Its production follows wet contact pressure and outward peel, with a
+smooth low-speed gate; the retained foam then breaks up and ages aft. It adds no
+new draw or particle population and leaves the wave-height forcing unchanged.
+Injection into the foam clipmaps follows horizontal FFT displacement, keeping
+the whitewater aligned with the hull in choppy seas.
 
 Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny
 ripples, launches finite-lived curved bow sheets into world space. A dry bow
@@ -716,6 +720,11 @@ quadratic impact forcing. Headway and pressure determine outward peel velocity
 and nearby foam transport. Adjacent contacts create broad sheets; delayed mist
 is born along their airborne lips. Receding water or a stronger new strike
 re-arms the next burst; sheet landings add foam.
+Strong, fresh bow contacts and underside returns can also trigger the accepted
+timber-creak recording. Hull stations share one strain episode and the periodic
+creak cooldown, preventing a chorus or delayed replay. This is an acoustic
+severity approximation; contact forcing is not measured structural stress, and
+an accepted heavy watery-crash recording remains outstanding.
 
 A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Impacts inject outward-travelling crest/trough pulses. Gravity, drag, water collision, 128 sheet slots, and 4,096 secondary particle slots stay on the GPU.
 
@@ -731,7 +740,7 @@ lingering coverage. Shedding timing and rates are authored visual approximations
 without a propeller jet or a calibrated turbulence model.
 
 Wake transport reuses the existing grid, textures and compute dispatch; removing
-the ribbon removes its separate draw. The 30 FPS automatic-resolution target
+the ribbon removes its separate draw. The 60 FPS automatic-resolution target
 remains active. Native GPU tests and visible Chrome review cover calm/rough
 water; physical-iPhone performance of this batch has not been measured.
 
@@ -774,7 +783,7 @@ Emission samples the actual FFT displacement and compression, filtered over a 0.
 
 Each burst tracks its moving crest for up to 0.28–0.60 seconds, ending emission early if breaking stops. Four overlapping mist volumes follow a low trajectory, stretch downwind, then detach, disperse, settle and collide with the sea. Three density samples through each visible volume soften its entire boundary, including the underside; camera-facing bounds contribute no opacity. This removes the old upright cards and their straight bottom edges. Sky illumination and normalized sunlight scattering replace the excessive orange sheet lighting. Births and attached sources avoid the ship's enclosed footprint; clouds, vessel shadows and scene depth affect appearance, and airborne spray still deposits moisture on the ship. This is a visual spindrift model, not calibrated droplet-size physics or a sea-spray flux prediction.
 
-The GPU owns at most 1,024 bursts in a 70 m emission radius, with 0.9–2.0 second lifetimes. Each uses 96 bytes of state and eight triangles. Projected volume bounds are limited; candidates behind the camera are rejected and water collision checks are staggered. Obsolete sheet-foot wave samples are removed. Rendering uses the existing effects pass, with no additional full-screen effect or readback. Calm wind or a disabled control skips the compute and draw after one clear. Spectrum changes and camera teleports reset the population. GPU fixtures check ridge-only births, travelling-crest attachment, detachment, wind response, frame-rate consistency, hull exclusion, wetness, and soft volume boundaries viewed from every axis. The existing 30 FPS automatic-resolution target is unchanged; physical-iPhone performance remains unverified.
+The GPU owns at most 1,024 bursts in a 70 m emission radius, with 0.9–2.0 second lifetimes. Each uses 96 bytes of state and eight triangles. Projected volume bounds are limited; candidates behind the camera are rejected and water collision checks are staggered. Obsolete sheet-foot wave samples are removed. Rendering uses the existing effects pass, with no additional full-screen effect or readback. Calm wind or a disabled control skips the compute and draw after one clear. Spectrum changes and camera teleports reset the population. GPU fixtures check ridge-only births, travelling-crest attachment, detachment, wind response, frame-rate consistency, hull exclusion, wetness, and soft volume boundaries viewed from every axis. The automatic-resolution target is now 60 FPS; physical-iPhone performance remains unverified.
 
 Physical basis: [Anguelova et al., *Spume Drops Produced by the Wind Tearing of Wave Crests*](https://journals.ametsoc.org/view/journals/phoc/29/6/1520-0485_1999_029_1156_sdpbtw_2.0.co_2.xml) links production to breaking crests; [Andreas, *A New Sea Spray Generation Function for Wind Speeds up to 32 m/s*](https://doi.org/10.1175/1520-0485%281998%29028%3C2175%3AANSSGF%3E2.0.CO%3B2) discusses uncertain onset and production rates. These motivate the wind-and-breaking gate; the rendering rates and trajectories are authored.
 
@@ -844,9 +853,9 @@ The render loop reuses large typed arrays and GPU resources, keeping most recurr
 
 Volumetric clouds add raymarching and reconstruction work. If frame rate drops at maximum **Cloud quality**, lower that setting or the render resolution. Cloud quality changes the screen ray resolution, while the cached density and lighting volumes remain fixed. The older RTX timing above predates these cloud and vessel effects and is not a current performance guarantee.
 
-**Render resolution** in Sea settings defaults to **Auto · 30+ FPS**. It measures delivered animation-frame cadence, lowers resolution after sustained frames slower than the 30 FPS target, and aims for roughly 33 FPS when reducing pixels. It waits two seconds after startup or a resize, ignores isolated stalls and hidden-tab time, and restores resolution in small steps only after sustained headroom above 42 FPS. The range is 35–100% of native width and height. Native, 75% and 50% overrides are also available.
+**Render resolution** in Sea settings defaults to **Auto · 60 FPS**. Delivered animation-frame cadence controls reductions, with modest headroom above the target. The controller waits two seconds after startup or a resize and ignores isolated stalls and hidden-tab time. On a 60 Hz display it can restore resolution after ten seconds of stable target cadence and measured CPU/GPU work headroom, in steps no larger than 5% of the current scale. Without reliable work samples, restoration requires higher delivered cadence. The range remains 35–100% of native width and height; Native, 75% and 50% overrides are available.
 
-Auto mode trades screen sharpness for frame rate; wave simulation, vessel geometry, shadows, effects and 4× MSAA stay enabled. Screen-sized render targets, including cloud reconstruction, follow the selected resolution. CPU limits, fixed GPU work or thermal throttling can still prevent 30 FPS at the minimum scale; the status shows when that floor is reached. Physical-iPhone results remain to be measured.
+Auto mode trades screen sharpness for frame rate; wave simulation, vessel geometry, shadows, effects and 4× MSAA stay enabled. Screen-sized render targets, including cloud reconstruction, follow the selected resolution. CPU limits, fixed GPU work or thermal throttling can still prevent 60 FPS at the minimum scale; the status shows when that floor is reached. Physical-iPhone results remain to be measured.
 
 Use `resolution=native` for a fixed native-resolution comparison, or `resolution=0.75` / `resolution=0.5`. Explicit `w`, `h` or `shot` parameters disable automatic tuning so captures remain reproducible. Resolution is device-local and omitted from ordinary scene share links. The monitor and capture JSON record the active mode and scale.
 
@@ -861,8 +870,21 @@ The optimized frame schedule also avoids redundant GPU work:
 - Water inside the hull exits before shadow filtering, reflections, lighting, and atmospheric shading. Implicit texture gradients and wave/foam derivatives are evaluated first, preserving water-mask edges and all visible shading. This removes work on pixels that were already discarded; shadow sample counts and render quality stay unchanged.
 - The slope-moment texture also carries the cross derivative in its previously unused alpha channel. Ocean fragments read 12 rather than 18 wave-cascade texture samples, with identical half precision, mip filtering, anisotropy, and wave detail. Displacement data remains available to geometry, foam, and buoyancy.
 - Ocean visibility is resolved by default with a cheap depth draw before shading, within the same render pass. The full surface shader contains no discard and uses an equal-depth test, allowing hidden water to be rejected before its texture sampling and lighting. Both draws use identical, invariant vertex positions, the original hull cutout, and 4× MSAA. This adds a geometry draw in exchange for avoiding hidden-fragment work; `oceanDepth=0` restores inline visibility for comparison.
+- Victory computes its animated vertex positions and normals once per enabled vessel, then reuses them for the visible ship, shadows and submerged capture. Raw material coordinates remain unchanged; companion pose and recoil buffers stay independent.
+- Crew inverse kinematics refresh only affected descendant transforms and joint-palette entries. Gunnery reuses stage storage rather than allocating a per-frame map.
+- Dry deck-water pixels exit before reflection and lighting. Above-water cameras skip the identity underwater fullscreen copy; bloom and composite select the source using the current GPU water-height probe.
+- A small compute dispatch caches frame-wide sunlight and diffuse sky values once. Direction-dependent ocean lighting remains per pixel, with identical environment sampling and precision.
 
 These changes target memory and GPU work. Frame-rate benefits depend on the adapter and scene; the device observations below are not controlled benchmarks.
+
+October 21 native Metal checks compare identical crew transforms, over 1.3 million
+posed vertices, and exact deck/post/ocean pixels. Visible Chrome on this Mac held
+60 FPS at 2906 × 1880 in the Victory Hella rough exterior scene. Native
+3840 × 2160 averaged about 54 FPS; Auto held 60 FPS near 90% scale. The final
+built-page check settled at 3494 × 1966 (91%) with a 17.5 ms p95 frame span.
+These short desktop observations do not establish sustained thermal or iPhone
+performance. Native mode keeps full pixel resolution; Auto can trade sharpness
+while preserving geometry, simulation and rendering features.
 
 ### GPU profiling
 
@@ -889,7 +911,7 @@ npm run build
 npm test
 ```
 
-The current checkpoint passed **441 tests** using installed Chrome on
+The current checkpoint passed **464 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three distributed
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -1024,7 +1046,9 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `index.html` | Page shell, HUD, and settings panel styles |
 | `js/main.js` | Device setup, resources, camera modes, per-frame loop |
 | `js/profiler.js` | Optional GPU pass spans, sampled frame timing, and local capture statistics |
-| `js/resolution.js` | Device-local render scaling toward 30 FPS from delivered frame cadence |
+| `js/resolution.js` | Device-local render scaling toward 60 FPS from delivered frame cadence |
+| `js/vessel-pose.js`, `js/wgsl/vessel-pose.js` | Shared animated Victory vertex positions/normals with independent vessel buffers |
+| `js/wgsl/ocean-lighting.js` | Exact frame-wide ocean lighting cache and guarded shader specialization |
 | `js/boat.js` | Wave response, steering, and world-space eye position |
 | `js/sailing.js`, `js/sail-aerodynamics.js` | Apparent wind, prescribed trim, sail handling, cloth-derived aerodynamic panels and rigid-body loads |
 | `js/lateen.js`, `js/wgsl/lateen.js` | Routine tacks, ordered yard transfers, cloth supports, sheet leads and matching CPU/GPU motion |

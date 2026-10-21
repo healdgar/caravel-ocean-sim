@@ -112,6 +112,67 @@ export function createHullAudioState(){
   };
 }
 
+// Acoustic severity only: these contacts do not measure timber stress, force or
+// joules. One shared clock prevents a contact groan and motion creak stacking.
+export function createTimberAudioState(random=Math.random){
+  let time=0,nextCreak=4,revision=null,contact=null,lastContact=-Infinity,settleUntil=1,episode=false,receding=0,epoch=-1;
+  const serials=new Float64Array(10).fill(-1);
+  function reset(nextRevision=null){
+    revision=nextRevision;contact=null;lastContact=-Infinity;settleUntil=time+1;nextCreak=time+4;
+    episode=false;receding=0;epoch=-1;serials.fill(-1);
+  }
+  function fresh(){return contact&&time-lastContact<=.35&&time>=settleUntil;}
+  function emit(gain,position,contactDriven){
+    if(time<nextCreak)return null;
+    nextCreak=time+5+weatherClamp(random())*7;
+    return {id:'timber-creak',gain,position,rate:contactDriven ? .90+weatherClamp(random())*.08 : .92+weatherClamp(random())*.15,
+      spatial:contactDriven,options:contactDriven?{duration:4,attack:.025,release:.3}:{}};
+  }
+  function encounter(severity,event){
+    if(!fresh()||episode)return null;
+    // Consume even during cooldown: an old wave must not play belatedly when
+    // the preceding periodic/contact creak finishes, nor once per hull probe.
+    episode=true;receding=0;
+    return emit(.10+.18*Math.sqrt(weatherClamp(severity)),event,true);
+  }
+  return {
+    contact(value){
+      if(!value||!Number.isFinite(value.revision)||!Number.isFinite(value.pressure)||!Number.isFinite(value.wet)
+        ||!Number.isFinite(value.closing)||!Number.isFinite(value.impact))return false;
+      if(value.reset||revision!==value.revision)reset(value.revision);
+      contact=value;lastContact=time;return true;
+    },
+    impact(event){
+      // Waterline strength is authored spray severity; require actual positive
+      // encounter rate as well. Ordinary quiet water slaps remain unchanged.
+      if(event?.kind!=='light'||!(event.strength>=.8)||!(event.closing>1.25)||!(event.wet>.4)
+        ||![event.x,event.y,event.z,event.strength,event.closing,event.wet].every(Number.isFinite)
+        ||(event.age!==undefined&&!(event.age>=0&&event.age<=.35))
+        ||(event.revision!==undefined&&event.revision!==revision)||!(contact?.wet>0))return null;
+      return encounter(event.strength/3.5,event);
+    },
+    underside(event){
+      if(event?.kind!=='underside-reentry'||!(event.closing>1.25)||!(event.age>=0&&event.age<=.35)
+        ||![event.x,event.y,event.z,event.closing].every(Number.isFinite)
+        ||![event.epoch,event.probe,event.serial].every(Number.isInteger)||event.probe<0||event.probe>=serials.length
+        ||event.revision!==revision||event.epoch<epoch||!fresh())return null;
+      if(event.epoch!==epoch){epoch=event.epoch;serials.fill(-1);}
+      if(event.serial<=serials[event.probe])return null;
+      serials[event.probe]=event.serial;
+      return encounter(event.closing/5,event);
+    },
+    update(dt,{strain=0,position=null,revision:currentRevision=revision,audible=true}={}){
+      time+=weatherClamp(dt,0,.1);
+      if(currentRevision!==revision)reset(currentRevision);
+      if(fresh()&&contact.closing<.24&&contact.impact<.09)receding+=weatherClamp(dt,0,.1);else receding=0;
+      if(receding>.45)episode=false;
+      if(!audible||!Number.isFinite(strain)||strain<=.055||!position||![position.x,position.z].every(Number.isFinite))return null;
+      return emit(weatherClamp(strain*.7,.08,.32),position,false);
+    },
+    reset,
+  };
+}
+
 export function weatherAudioLevels({wind=0,speed=0,intensity=0,type=0,ship=1}){
   const w=weatherClamp(wind/24),heavy=weatherClamp((w-.35)/.65),r=weatherClamp(intensity);
   return {'wind-steady':.48*Math.sqrt(w)*(1-.65*heavy),'wind-strong':.55*heavy,

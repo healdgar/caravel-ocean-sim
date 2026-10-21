@@ -210,6 +210,12 @@ fn corner(v:u32)->vec2f {
   // Falling sheets bend away from the rail: use their actual surface, not
   // a fixed +X normal (which also treated port and starboard identically).
   let face=cross(dpdx(in.world),dpdy(in.world));
+  // Finish quad derivatives before rejecting transparent sheets. These exact
+  // zero-coverage cases previously paid for all environment/shadow lighting.
+  if(!curtain && w.x<=0.001){discard;}
+  if(curtain && (in.curtain.y<=0.002 || in.curtain.x>=1.0)){discard;}
+  // Do not bridge the vertical cabin face with a diagonal water polygon.
+  if(!curtain && abs((in.local.y-deckFloor(in.local.z))*shipY(hull.right.w)-w.x-0.008)>0.10){discard;}
   if(curtain){n=normalize(face/max(length(face),0.00001)+hull.forward.xyz*ripple.x+hull.up.xyz*ripple.y);}
   n=select(-n,n,dot(n,v)>=0.0);
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
@@ -238,8 +244,6 @@ fn corner(v:u32)->vec2f {
     let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration+lightningSurface(n,v,vec3f(.1),.24));
     return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
   }
-  // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(abs((in.local.y-deckFloor(in.local.z))*shipY(hull.right.w)-w.x-0.008)>0.10 && !curtain){discard;}
   if(alpha<0.003){discard;}
   return vec4f(surfaceAir(color+lightningSurface(n,v,vec3f(.1),.24),in.world)*alpha,alpha);
 }

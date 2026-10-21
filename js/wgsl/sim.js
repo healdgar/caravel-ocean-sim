@@ -378,6 +378,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let inPrev = all(g >= plo) && all(g < plo + vec2i(RES));
   let p = (vec2f(g) + 0.5) * ts;
   var jxx = 0.0; var jzz = 0.0; var jxz = 0.0;
+  var horizontalDisp = vec2f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
     let texel = U.cascL[c >> 2u][c & 3u] / ${N}.0;
     let lod = log2(max(ts / texel, 1.0));
@@ -386,6 +387,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       let d = textureSampleLevel(derivTex, samp, uv, c, lod);
       let a = textureSampleLevel(dispTex, samp, uv, c, lod);
       jxx += d.z; jzz += d.w; jxz += a.w;
+      horizontalDisp += a.xz;
     }
   }
   let J = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
@@ -396,7 +398,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
   }
   let dt = U.p0.z;
-  let hullFoam = wakeAt(p);
+  // The clipmap is read at the FFT's material coordinate p. Hull contacts and
+  // both fleet wake grids are Eulerian: sample them where that material point
+  // actually lies after horizontal displacement, matching the ocean vertex.
+  let hullFoam = wakeAt(p + horizontalDisp);
   let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
   let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
   let f=max(seaFoam,hullFoam.z*0.9);

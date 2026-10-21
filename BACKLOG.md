@@ -47,7 +47,66 @@ These audits may close with no change when current source already satisfies the 
 
 - Gunnery muzzle speeds, reload/cadence and constant spherical drag remain authored approximations; damage, penetration, ricochet, adjustable gun elevation and AI combat are subsequent systems, not completed capabilities.
 - Historical ship displacement, detailed rig leads/sail schedules and hydrodynamic coefficients retain their source/assumption distinctions in research files.
-- Physical iPhone frame-rate qualification remains device-specific. Existing adaptive resolution targets30FPS; source/native desktop tests are not a replacement for that check.
+- Physical iPhone frame-rate qualification remains device-specific. Adaptive resolution now targets60FPS; source/native desktop tests are not a replacement for that check.
+
+## October 21 desktop performance and bow-whitewater pass
+
+Root retains the testing baton. Direct agents supplied source/proposed tests and
+read-only reviews; none ran tests, builds or browsers. Held woodland work remains
+outside production.
+
+- Reproduced the user's Victory / Hella rough / exterior view at native Retina
+  resolution. Initial profiled cadence was about50FPS and about4.7ms of JS work
+  per frame; GPU spans overlap and are not additive costs.
+- Crew posing now updates affected descendants rather than full skeletons for
+  each IK turn. Real male/female Niña/Victory work poses match transform/palette
+  bytes exactly. Gunnery reuses per-gun stage storage.
+- Victory computes one pose per enabled ship for visible, shadow and submerged
+  draws; raw material coordinates and independent recoil remain intact. Native
+  checks compare1,353,648 vertex evaluations with zero position/normal error and
+  actual diagnostic rendering with zero pixel differences.
+- Dry deck water rejects invisible pixels before lighting. The underwater pass
+  stops copying HDR in air; first bloom/final composite select sources using the
+  current GPU probe. Native tests retain exact pixels through air/water crossings,
+  stale CPU optics and resize. Distributed/minified shader replacements have
+  explicit guards; all three built pages boot after correcting a formatting bug.
+- Ocean sunlight and invariant diffuse sky values are computed once per frame,
+  after visibility/environment mip updates. Native cache values and full ocean
+  images match exactly; per-normal/view lighting remains per pixel.
+- Auto now targets60FPS. Actual cadence controls reductions; measured CPU/GPU
+  headroom permits cautious restoration on60Hz displays. Native keeps full pixel
+  resolution. Native visible Chrome held60FPS at2906×1880, about54FPS at3840×2160.
+  A3840×2160 Auto viewport held60FPS at3456×1944(90%). Short Mac observations do
+  not establish sustained/device-wide or physical-iPhone performance.
+- The user's reference shows broad white bow shoulders, not a thin hull ribbon.
+  Foam-only source width/birth now follows wet contacts, pressure and peel, and
+  clipmap injection includes horizontal FFT displacement. Native Niña/Victory
+  checks retain identical height/velocity fields, zero calm dry/stopped/astern
+  sources, bounded connected foam and correct independently enabled fleet mapping.
+- Strong fresh waterline contacts and accepted lower-hull returns now drive the
+  accepted timber-creak sample independently of roll/pitch. One grouped episode
+  and shared periodic cooldown prevent station/probe layering and delayed replay.
+  Eight additional pure checks pass for freshness, resets, invalid payloads,
+  grouping, revision/serial handling and30/60/120Hz partitioning. Severity is an
+  acoustic proxy: no structural damage/force solver or new crash sample is added.
+- Above-water geometry viewed through the surface from underwater remains absent:
+  that path refracts the environment, while the object capture excludes geometry
+  above water. A separate above-water refracted capture is still required.
+
+The first full run passed452/463. Ten coastal startups exposed a name collision
+between ocean and terrain lighting locals; specialization now validates/replaces
+only the balanced ocean fragment body, with20raw/compacted variants and negative
+helper/comment/formula guards. The remaining failure was the sail-opacity fixture
+missing the newly shared vertex layouts; it now uses production layouts and
+Victory's actual computed vertex buffer, preserving all opacity/light assertions.
+
+Final full native Metal suite **464/464 PASS**, root serialized,214.5seconds.
+Calm Niña and moderate Victory bow views render without page/GPU errors. Final
+built Victory/Hella rough at a3840×2160viewport held60.00FPS over601frame spans,
+p9517.5ms,3494×1966(91%) Auto resolution, with correct Victory selection and no
+warnings/errors. Proofs remain in ignored `shots/bow-froth-calm.png`,
+`shots/bow-froth-victory-moderate.png` and `shots/victory-final-rough-auto60.png`.
+Publication/public-byte verification is next.
 
 ## Release log
 

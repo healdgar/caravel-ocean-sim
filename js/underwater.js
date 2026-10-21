@@ -4,8 +4,8 @@ import {createUnderwaterMedium} from './wgsl/underwater.js';
 // One optional HDR pass before bloom. It owns no simulation/readback and skips
 // command encoding entirely outside the camera's near-surface inspection band.
 export async function createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler,sunVis,
-  derivView,seaSampler,cameraProbe=null,surfaceWaves=null,sceneShadows=null,format='rgba16float',samples=4}){
-  const module=await shader(createUnderwaterMedium({samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows}),'underwater medium');
+  derivView,seaSampler,cameraProbe=null,surfaceWaves=null,sceneShadows=null,format='rgba16float',samples=4,skipAir=false}){
+  const module=await shader(createUnderwaterMedium({samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows,skipAir}),'underwater medium');
   const pipeline=await device.createRenderPipelineAsync({label:'underwater medium',layout:'auto',
     vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
   const shadowGroup=sceneShadows?.bind(pipeline);

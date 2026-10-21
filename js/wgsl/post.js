@@ -1,3 +1,4 @@
+import {FRAME_WGSL} from './common.js';
 // Bloom (dual-filter chain) and final composite with AgX tonemapping.
 const FS_TRI = /* wgsl */ `
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
@@ -129,3 +130,26 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
   return vec4f(clamp(o, vec3f(0.0), vec3f(1.0)), 1.0);
 }
 `;
+
+// Select with the current GPU eye-height probe, not last frame's asynchronous
+// host readback. Only the first bloom level and final composite need this
+// variant; other levels retain their original pipeline and binding layout.
+export function createUnderwaterPost(source,kind){
+  let binding,pattern,replacement;
+  if(kind==='bloom'){
+    binding=3;
+    pattern=/return\s+textureSampleLevel\s*\(\s*src\s*,\s*samp\s*,\s*uv\s*,\s*0\.0\s*\)\s*\.rgb\s*;/;
+    replacement='if(postCameraSea[9]-postFrame.camPos.y<=.005){return textureSampleLevel(airHDR,samp,uv,0.0).rgb;}return textureSampleLevel(src,samp,uv,0.0).rgb;';
+  }else if(kind==='composite'){
+    binding=4;
+    pattern=/var\s+c\s*=\s*textureLoad\s*\(\s*hdr\s*,\s*pc\s*,\s*0\s*\)\s*\.rgb\s*;/;
+    replacement='var c:vec3f;if(postCameraSea[9]-postFrame.camPos.y<=.005){c=textureLoad(airHDR,pc,0).rgb;}else{c=textureLoad(hdr,pc,0).rgb;}';
+  }else throw new Error('Unknown underwater post pass');
+  if(!pattern.test(source))throw new Error('Unrecognized underwater post source');
+  source=source.replace(pattern,replacement);
+  return FRAME_WGSL+source+`
+@group(0)@binding(${binding})var airHDR:texture_2d<f32>;
+@group(0)@binding(${binding+1})var<uniform>postFrame:Frame;
+@group(0)@binding(${binding+2})var<storage,read>postCameraSea:array<f32,16>;
+`;
+}

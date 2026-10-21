@@ -193,7 +193,12 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   let pulse=exp(-r2*2.0)*(1.0-r2*2.0)*smoothstep(-.1,.2,outside)*c.axis.w;
   let relativeFlow=c.flow.xz-H.forward.xz*max(0.0,I.motion.x)*.8;
   let peel=max(0.0,dot(relativeFlow,c.axis.xz));
-  return WakePressure(vec4f(crest*c.point.w,hollow*c.point.w,pulse,crest*edge*c.point.w*peel/max(width,.1)),c.axis.xz*peel*crest*edge*c.flow.w);
+  // Entrained white water occupies a broader shoulder than the pressure crest.
+  // Its outward e-folding edge is 1.7 widths from the measured planking (about
+  // .31 beam at the normal grid resolution); never add a hull-attached ribbon.
+  // Keep these foam-only terms separate from the balanced displacement kernels.
+  let froth=exp(-pow((outside-width*.45)/(width*1.25),2.0)-tangent*tangent*.4)*edge;
+  return WakePressure(vec4f(crest*c.point.w,hollow*c.point.w,pulse,froth*c.point.w*peel/max(width,.1)),c.axis.xz*peel*froth*c.flow.w);
 }
 @compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
   let q = vec2i(id.xy);
@@ -262,7 +267,14 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   // Broad, intermittent entrainment, not a propeller jet. Texture stays in world
   // space, so an old trail follows the travelled track through turns and stops.
   let churn=.72+.28*shedding;
-  let foamSource=(source*2.8+pressure.w*.7)*smoothstep(.6,3.5,forwardSpeed)+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*.95)*smoothstep(.04,.28,froude)*churn;
+  // A short residence beside a moving bow must aerate before the water has
+  // travelled aft. Drive and peel already vanish at rest/on a dry hull; the
+  // low-speed gate suppresses creeping without delaying froth until 7 knots.
+  // The source rides the actual wet shoulders. Only their retained, separately
+  // aged coverage travels aft, where the existing material breaks it into foam.
+  let bowFroth=(port.shape.w+starboard.shape.w)*headway*16.0;
+  let aftFroth=(aftPort.shape.w+aftStarboard.shape.w)*.45*.7;
+  let foamSource=(source*2.8+aftFroth)*smoothstep(.6,3.5,forwardSpeed)+bowFroth+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*.95)*smoothstep(.04,.28,froude)*churn;
   let eddy=vec2f(cos(p.y*0.65+I.phase.x*0.5),-cos(p.x*0.65-I.phase.x*0.4))*0.24;
   let peelDrift=port.drift+starboard.drift+(aftPort.drift+aftStarboard.drift)*.45;
   let drift=I.motion.zw*.012+eddy+peelDrift/max(1.0,length(peelDrift)/2.0);
