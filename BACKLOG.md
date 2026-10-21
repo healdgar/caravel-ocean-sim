@@ -328,6 +328,17 @@ Local audit receipts: `/tmp/waterworld-startup-audit-before.json`,
 parallelize independent critical setup and, if measurements justify it,
 defer disabled companion initialization. Neither is claimed complete here.
 
+Published `bdb57ddb0f2cc3e2d39bc16b4c1fcb5e81655442`; GitHub Pages deployment
+`39677090372` succeeded. Public HTML matched all 669,982 tested bytes, SHA-256
+`b90671d9a389b783026ecd8d87d11fbd955861659c7704784d92550fe5aa17ab`;
+the manifest and all 53 referenced assets (15,875,925 bytes) matched their hashes.
+Visible public Chrome reached readiness at 1.19 s with warm driver shaders,
+fetched only the wood/crew media, and reported no warnings/errors. Screenshot:
+`shots/startup-ready-release-bdb57dd.png`; deployed-byte/browser receipts:
+`/tmp/waterworld-startup-release-verified.json`,
+`/tmp/waterworld-startup-public-browser.json`. No physical-iPhone load timing
+is claimed.
+
 The held batch05 runtime/docs/test work is preserved in local Git stash
 `01a25d28773a65b814f7689355fd78ffce03c9d0` (message: Held marine impact v2).
 Production marine code was restored before this change; no held impact code is
