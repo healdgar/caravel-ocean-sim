@@ -21,8 +21,9 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
     assert.equal(record.sha256,createHash('sha256').update(original).digest('hex'));
     assert.ok(record.url.includes(record.sha256.slice(0,16)),'cache version follows actual bytes');
   }
-  for(const source of ['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/wildlife/whale.glb','assets/caravel-oak-albedo.webp'])
+  for(const source of ['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/caravel-oak-albedo.webp'])
     assert.ok(html.includes(`as="fetch" href="${manifest[source].url}" crossorigin="anonymous"`),'startup model discovery: '+source);
+  assert.ok(!html.includes(`as="fetch" href="${manifest['assets/wildlife/whale.glb'].url}"`),'inactive wildlife must not preload');
 });
 
 test('downloadable ocean pages retain their self-contained media',async()=>{

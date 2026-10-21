@@ -21,8 +21,14 @@ export function createWetnessData(mesh,crewCount=12) {
   return {points:new Float32Array([...points,...new Float32Array(crewCount*4*8)]),lookup,crewOffset};
 }
 
+// The hull's probe layout is model data; crew positions and GPU moisture remain
+// vessel state. Weak ownership releases the template with its source mesh.
+const wetnessTemplates=new WeakMap();
+
 export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe}) {
-  const data=createWetnessData(mesh),B=GPUBufferUsage,T=GPUTextureUsage;
+  let template=wetnessTemplates.get(mesh);
+  if(!template){template=createWetnessData(mesh);wetnessTemplates.set(mesh,template);}
+  const data={points:template.points.slice(),lookup:template.lookup,crewOffset:template.crewOffset},B=GPUBufferUsage,T=GPUTextureUsage;
   const buffer=(label,size,usage)=>device.createBuffer({label,size,usage});
   const points=buffer('wetness probes',data.points.byteLength,B.STORAGE|B.COPY_DST);
   const lookup=buffer('wetness vertex lookup',data.lookup.byteLength,B.STORAGE|B.COPY_DST);

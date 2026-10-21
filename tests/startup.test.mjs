@@ -74,7 +74,7 @@ test('a missing graphics API shows a sticky failure and a usable retry',{timeout
 });
 
 test('module and required asset failures remain visible instead of leaving a black canvas',{timeout:120000},async()=>{
-  for(const broken of ['**/js/main.js','**/assets/wildlife/whale.glb']){
+  for(const broken of ['**/js/main.js','**/assets/caravel-oak-albedo.webp']){
     const page=await browser.newPage();
     try{
       await page.route(broken,route=>route.abort('failed'));await page.goto(origin);
@@ -92,13 +92,46 @@ test('Pages fetches exact versioned assets, defers audio until enabled and remai
   try{
     await page.goto(origin+'/docs/index.html?follower=0');await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     assert.equal(requests.filter(url=>url.includes('/assets/audio/')).length,0,'muted audio is not part of startup transfer');
-    assert.ok(requests.some(url=>/whale\.[a-f0-9]{16}\.glb$/.test(url)));
-    for(const part of ['whale','sailor','sailor-female','caravel-oak-albedo'])
+    assert.equal(requests.filter(url=>/whale\.[a-f0-9]{16}\.glb$/.test(url)).length,0,'inactive wildlife does not block sailing');
+    for(const part of ['sailor','sailor-female','caravel-oak-albedo'])
       assert.equal(requests.filter(url=>new RegExp('/'+part+'\\.[a-f0-9]{16}\\.').test(url)).length,1,'preloaded asset is transferred once: '+part);
     await page.getByRole('button',{name:'Sea settings',exact:true}).click();await page.locator('#sound-toggle').click();
     await page.waitForFunction(()=>document.querySelector('#sound-status')?.textContent.includes('Sound follows'));
     assert.ok(requests.some(url=>/\/assets\/audio\/.*\.[a-f0-9]{16}\.mp3$/.test(url)));
     assert.deepEqual(failures,[]);assert.deepEqual(errors,[]);
+  }finally{await page.close();}
+});
+
+test('a delayed or failed whale download leaves sailing playable and encounter controls can retry',{timeout:120000},async()=>{
+  const page=await browser.newPage(),errors=[];let attempts=0,release;
+  const gate=new Promise(resolve=>release=resolve);
+  page.on('pageerror',e=>errors.push(e.message));
+  try{
+    await page.route('**/assets/wildlife/whale.glb',async route=>{
+      attempts++;if(attempts===1){await gate;await route.abort('failed');}else await route.continue();
+    });
+    await page.goto(origin+'/?follower=0');await page.waitForFunction(()=>window.oceanStartup.state==='ready');
+    assert.equal(attempts,0);
+    await page.getByRole('button',{name:'Sea settings',exact:true}).click();
+    await page.locator('#environment-debug').evaluate(element=>element.open=true);
+    await page.getByRole('button',{name:'Whale breach',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#marine-status')?.textContent.includes('Preparing'));
+    assert.equal(await page.locator('#ocean-startup').isVisible(),false);
+    assert.equal(await page.locator('#boat-rudder').isEnabled(),true);
+    release();await page.waitForFunction(()=>document.querySelector('#marine-status')?.textContent.includes('could not load'));
+    await page.getByRole('button',{name:'Whale breach',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#view-marine')?.disabled===false);
+    assert.equal(attempts,2);assert.deepEqual(errors,[]);
+    assert.equal(await page.locator('#err').textContent(),'');
+  }finally{release?.();await page.close();}
+});
+
+test('an explicit whale scene still waits for its requested model and reports failure',{timeout:120000},async()=>{
+  const page=await browser.newPage();
+  try{
+    await page.route('**/assets/wildlife/whale.glb',route=>route.abort('failed'));
+    await page.goto(origin+'/?follower=0&whale=breach');await page.waitForFunction(()=>window.oceanStartup.state==='failed');
+    assert.equal(await page.locator('#ocean-startup-retry').isVisible(),true);
   }finally{await page.close();}
 });
 

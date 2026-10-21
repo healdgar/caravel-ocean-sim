@@ -83,6 +83,15 @@ without a guessed percentage or failure timeout. Reduced motion and mobile
 safe areas are supported. The website uses separately cached media; the two
 downloadable HTML files retain their embedded assets and work offline.
 
+Ordinary sailing preloads only the wood texture and two crew models (2.77 MB
+before HTTP compression). The 8.32 MB whale asset loads on the first shark or
+whale encounter, with preparation/retry feedback; encounter time pauses during
+loading. Explicit whale/shark share links still prepare their requested animal
+before showing the scene. Matching ships reuse immutable wetness probe layouts
+and underwater material pipelines, while crew positions, moisture, GPU buffers
+and vessel bindings remain independent. Coastal terrain is still scene-gated;
+audio still loads only when enabled.
+
 ### Local authoring credentials
 
 Keep the project-specific ElevenLabs key in `.env.local` as
@@ -880,7 +889,7 @@ npm run build
 npm test
 ```
 
-The current checkpoint passed **393 tests** using installed Chrome on
+The current checkpoint passed **441 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three distributed
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -894,7 +903,9 @@ routine bad-tack handling remains unfinished.
 
 Startup checks cover loading feedback before delayed modules, the first canvas
 GPU fence, visible failures and Retry, mobile/reduced-motion layout, single-fetch
-preloads, deferred audio, exact media checksums and both offline downloads.
+preloads, deferred audio/wildlife, encounter loading/failure/retry, shared
+initialization with independent vessel state, exact media checksums and both
+offline downloads.
 The [rig-handling checkpoint](RIG_HANDLING.md) separates tested prototype
 logic from the exposed-cloth, crew and CPU/GPU clearance work still required.
 `node scripts/sail-rest-audit.mjs` reports local edge-length and area changes
@@ -1032,7 +1043,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/caravel.js` | Niña hull, decks, swivel cannon, lookout, lateen rig and helm geometry |
 | `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`, `js/wgsl/victory.js` | Victory construction, shared square/fore-and-aft rig poses, support contact and rope leads |
 | `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and deterministic procedural tree LOD |
-| `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-ui.js` | Bounded wildlife encounters, wet animals, contact effects and debug controls |
+| `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-loader.js`, `js/marine-ui.js` | Bounded wildlife encounters, deferred marine assets, wet animals, contact effects and debug controls |
 | `js/water-optics.js`, `js/wgsl/water-optics.js` | Shared submerged geometry capture, wave refraction, Fresnel and depth/turbidity attenuation |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
 | `js/hull.js`, `js/wgsl/hull.js` | Shared hull section for visible geometry, water masking, and bow contacts |
@@ -1456,8 +1467,9 @@ Source and the published build now live together in the public
 `node build.mjs` also generates `docs/index.html`, a minified website with
 content-hashed, byte-identical media in `docs/assets/` and a SHA-256 asset manifest.
 The initial HTML excludes model, audio and terrain payloads; current mandatory
-model/wood assets preload concurrently, audio waits for Enable sound, and terrain
-loads for land scenes. Both ocean HTML downloads remain self-contained.
+crew/wood assets preload concurrently, marine assets wait for an encounter,
+audio waits for Enable sound, and terrain loads for land scenes. Both ocean HTML
+downloads remain self-contained.
 Older hashed assets are retained for cached HTML; the build copies only its
 explicit runtime asset list. The site defaults to Boat camera and preserves
 explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder. To update the

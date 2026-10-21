@@ -178,10 +178,10 @@ export function createMarineMesh(type='whale'){
   return {vertices:new Float32Array(vertices),indices:new Uint32Array(indices)};
 }
 
-export async function createMarineLife({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random,waterOptics=null,surfaceWaves=null}){
+export async function createMarineLife({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random,waterOptics=null,surfaceWaves=null,state=createMarineLifeState(random)}){
   const response=await fetch('assets/wildlife/whale.glb');if(!response.ok)throw Error('Whale asset unavailable');
   const whaleModel=loadMarineGLB(await response.arrayBuffer()),whaleRig=createMarineRig(whaleModel);
-  const state=createMarineLifeState(random),B=GPUBufferUsage;
+  const B=GPUBufferUsage;
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const material=whaleModel.materials[0];
   async function marineTexture(reference,fallback,textureFormat){

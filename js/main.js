@@ -13,7 +13,7 @@ import { createAnchorState } from './anchor-state.js';
 import { createAnchorRenderer } from './anchor.js';
 import { createDolphins } from './dolphins.js';
 import { createDolphinControls } from './dolphin-ui.js';
-import { createMarineLife } from './marine-life.js';
+import { createDeferredMarineLife } from './marine-loader.js';
 import { createMarineControls } from './marine-ui.js';
 import { createWeatherState, createImpactDetector, STORM_WEATHER, WEATHER_TYPES } from './weather-state.js';
 import { createWeatherRenderer } from './weather.js';
@@ -462,7 +462,7 @@ async function main() {
   const weatherRenderer=await createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   await Promise.all(vessels.map(async v=>{v.anchorRenderer=await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
   const dolphins=await createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
-  const marineLife=await createMarineLife({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
+  const marineLife=createDeferredMarineLife({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   dolphins.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
   marineLife.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
   const gunEffects=await createGunneryEffects({surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
@@ -1365,7 +1365,11 @@ async function main() {
   const marineControls=createMarineControls({parent:dolphinControls.root,encounter:marineLife.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,notice:dolphinControls.notice,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=true;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   const marineDebug=qs.get('shark')==='1'?'shark':qs.has('whale')?(['breach','fluke','blow'].includes(qs.get('whale'))?qs.get('whale'):'breach'):null;
-  if(marineDebug){marineControls.trigger(marineDebug);if(qs.get('marineView')==='1'){shipOrbit.wildlife=true;shipOrbit.marine=true;}}
+  if(marineDebug){
+    window.oceanStartup?.stage('marine-encounter','Loading the requested marine encounter…');
+    await marineLife.load();marineControls.trigger(marineDebug);
+    if(qs.get('marineView')==='1'){shipOrbit.wildlife=true;shipOrbit.marine=true;}
+  }
   if(qs.get('dolphins')==='1'){dolphins.state.trigger(boat,{terrain,vessels:followerEnabled?dolphinVessels:dolphinPlayer});dolphinControls.notice(dolphins.state.event);}
   const lookHint=document.createElement('div');lookHint.id='look-hint';lookHint.textContent='Drag to look around';document.body.append(lookHint);
   if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }

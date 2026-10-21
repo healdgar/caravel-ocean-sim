@@ -13,8 +13,9 @@ export function createMarineControls({parent,encounter,boat,getTerrain=()=>null,
   end.onclick=()=>{encounter.clear();update(performance.now(),true);};
   function update(now,force=false){
     report();if(!force&&now-last<500)return;last=now;
-    view.disabled=end.disabled=!encounter.active;for(const button of buttons)button.disabled=encounter.active;
-    status.textContent=encounter.active?encounter.event?.text??'Marine encounter nearby':encounter.event?.text??'No shark or whale nearby';
+    view.disabled=!encounter.active||!!encounter.loading;end.disabled=!encounter.active;
+    for(const button of buttons)button.disabled=encounter.active||!!encounter.loading;
+    status.textContent=encounter.loading?'Preparing marine encounter…':encounter.loadError?'Marine animals could not load. Use a sighting button to retry.':encounter.active?encounter.event?.text??'Marine encounter nearby':encounter.event?.text??'No shark or whale nearby';
   }
   parent.append(root);update(0,true);return {root,update,trigger};
 }

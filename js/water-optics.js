@@ -72,27 +72,41 @@ ${originalSignature}{
 }
 
 export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba16float',surfaceWaves=null}){
+  // Material pipelines and their scene-only groups are immutable. Vessel
+  // resources still receive separate bind groups through bindGroup below.
+  const captures=new Map();
   return {
     async capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1}){
       if(groups>3)throw new Error('Water capture reserves bind group 3');
-      const captureNeedsWaves=surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source);
-      const module=await shader(createSubmergedShader(source,entry,world,!!surfaceWaves),'submerged material');
-      const captured=await device.createRenderPipelineAsync({label:'submerged opaque material',
-        layout:'auto',
-        vertex:{entryPoint:'vs',...vertex,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},
-        primitive:{topology:'triangle-list',cullMode:'none'},
-        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:1}});
-      const captureGroups=(captureNeedsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
-        ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[])]}));
-      const emptyGroups=Array.from({length:3-groups},(_,i)=>device.createBindGroup({layout:captured.getBindGroupLayout(i+groups),entries:[]}));
-      return {pipeline:captured,entry:'submergedFS',bindGroup(resources,index=0){
-        const entries=resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource});
-        return device.createBindGroup({layout:captured.getBindGroupLayout(index),entries});
-      },bind(pass){
-        pass.setPipeline(captured);
-        for(let i=groups;i<3;i++)pass.setBindGroup(i,emptyGroups[i-groups]);
-        pass.setBindGroup(3,captureGroups[captureNeedsWaves?surfaceWaves.current:0]);
-      }};
+      const vertexState={entryPoint:'vs',...vertex};
+      // The module is always generated here; a caller-supplied surface pipeline
+      // or module does not affect this capture's state.
+      delete vertexState.module;
+      const key=JSON.stringify([source,entry,world,vertexState,groups]);
+      if(captures.has(key))return captures.get(key);
+      const pending=(async()=>{
+        const captureNeedsWaves=surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source);
+        const module=await shader(createSubmergedShader(source,entry,world,!!surfaceWaves),'submerged material');
+        const captured=await device.createRenderPipelineAsync({label:'submerged opaque material',
+          layout:'auto',
+          vertex:{...vertexState,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},
+          primitive:{topology:'triangle-list',cullMode:'none'},
+          depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:1}});
+        const captureGroups=(captureNeedsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
+          ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[])]}));
+        const emptyGroups=Array.from({length:3-groups},(_,i)=>device.createBindGroup({layout:captured.getBindGroupLayout(i+groups),entries:[]}));
+        return {pipeline:captured,entry:'submergedFS',bindGroup(resources,index=0){
+          const entries=resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource});
+          return device.createBindGroup({layout:captured.getBindGroupLayout(index),entries});
+        },bind(pass){
+          pass.setPipeline(captured);
+          for(let i=groups;i<3;i++)pass.setBindGroup(i,emptyGroups[i-groups]);
+          pass.setBindGroup(3,captureGroups[captureNeedsWaves?surfaceWaves.current:0]);
+        }};
+      })();
+      captures.set(key,pending);
+      try{return await pending;}
+      catch(error){if(captures.get(key)===pending)captures.delete(key);throw error;}
     },
   };
 }

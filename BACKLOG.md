@@ -285,6 +285,49 @@ publication have NOT been run for batch05. Last public release remains
 
 ## User priority: startup delay and loading feedback
 
+### October 21 follow-up: remove inactive encounter and repeated setup costs
+
+Fresh public Chrome observations reached first GPU completion at 2.65 s and
+1.31 s with the browser resource cache bypassed. Those runs retained the
+driver's shader cache. A first unbundled local-source visit took 8.09 s despite
+millisecond local asset transfers: compilation/setup also matters, not merely
+network throughput. This is Mac evidence, not an iPhone timing.
+
+Instrumented copies of the exact Pages bundle identified 102 startup pipelines,
+the mandatory 8,319,500-byte whale, serial material setup and repeated CPU
+wetness probe generation for identical player/companion meshes. Ship geometry
+itself is procedural: indexed Niña buffers total 3,959,760 bytes, Victory
+6,086,508 bytes in memory; those buffers are not downloaded GLBs.
+
+The first fix defers marine assets/pipelines until a requested or natural
+encounter. Loading freezes encounter time rather than skipping its opening;
+failure leaves sailing available and exposes retry in environmental controls.
+Explicit whale/shark scene links retain first-frame readiness for that animal.
+Only wood and two crew models preload: 2,767,328 bytes before HTTP compression,
+versus 11,086,828 previously (75% fewer required media bytes). Original assets
+and the embedded offline downloads keep identical media quality.
+
+Factory-local submerged material caching shares pending compilations and
+scene-only groups, with separate vessel bindings and live wave-field selection.
+Immutable wetness layout templates are reused per mesh; mutable crew probes,
+moisture, GPU allocations and destruction remain independent. A matching warm
+local Pages run recorded 90 initial pipelines and 1.09 s to first GPU completion;
+the retained before bundle recorded 102 and 1.15 s. Do not interpret those small,
+noisy warm desktop differences as a cold-cache or device speed guarantee.
+Victory's coastal view reached readiness at 1.45 s in another warm local run.
+
+Verification: 8 new lifecycle/cache tests and 18 focused native Metal checks
+passed, followed by the complete serialized native Metal suite: **441/441 PASS**
+in 227.4 s. Visible Chrome reviewed Niña startup and Victory coastal rendering
+without reported warnings or errors. Publication results follow when verified.
+Local audit receipts: `/tmp/waterworld-startup-audit-before.json`,
+`/tmp/waterworld-startup-audit-after.json`,
+`/tmp/waterworld-startup-coast-after.json`;
+`shots/startup-audit/` holds instrumented before/after bundles and
+`shots/startup-victory-after.png` the rendered checkpoint. Remaining work:
+parallelize independent critical setup and, if measurements justify it,
+defer disabled companion initialization. Neither is claimed complete here.
+
 The held batch05 runtime/docs/test work is preserved in local Git stash
 `01a25d28773a65b814f7689355fd78ffce03c9d0` (message: Held marine impact v2).
 Production marine code was restored before this change; no held impact code is
