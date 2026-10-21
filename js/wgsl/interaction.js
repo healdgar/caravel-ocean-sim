@@ -139,7 +139,9 @@ fn pressureSea(p: vec2f) -> f32 {
   let launch=!reset && hit>.12 && age>.28 && (old.state.z<=.3 || (hit>old.axis.w*1.18 && age>.5));
   contacts[i].point = vec4f(p,drive);
   contacts[i].axis = vec4f(outward,impact);
-  contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*(0.45+sqrt(impact)*1.9),wet);
+  // Headway peels water outwards; calm water at rest has no constant lateral jet.
+  let peel=min(speed*.75,sqrt(2.0*9.81*pressureHead)*(.20+.65*entry))+sqrt(impact)*1.9;
+  contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*peel,wet);
   contacts[i].state = vec4f(signedWater,select(age,0.001,launch),closing,select(old.state.w,old.state.w+1.0,launch));
   if(reset){contacts[i].state.w=0.0;}
 
@@ -162,6 +164,37 @@ fn previousFoam(q:vec2f)->vec2f {
   return mix(mix(previousCell(cell).zw,previousCell(cell+vec2i(1,0)).zw,f.x),
     mix(previousCell(cell+vec2i(0,1)).zw,previousCell(cell+vec2i(1,1)).zw,f.x),f.y);
 }
+// Interpolate the measured waterline rather than switching whole emitters at
+// each half-contact. In particular, Victory's aft span ends at 5.65, not 5.25.
+fn wakeContact(first:u32,count:u32,u:f32)->Contact {
+  let at=clamp(u,0.0,1.0)*f32(count-1u);
+  let index=min(u32(floor(at)),count-2u);let t=at-f32(index);
+  let a=contacts[first+index];let b=contacts[first+index+1u];
+  let axis=mix(a.axis.xyz,b.axis.xyz,t);
+  return Contact(mix(a.point,b.point,t),vec4f(axis/max(length(axis),.0001),mix(a.axis.w,b.axis.w,t)),mix(a.flow,b.flow,t),mix(a.state,b.state,t));
+}
+fn wakeForeU(along:f32)->f32 {
+  return clamp((along/max(H.size.y*select(6.4,6.0,H.rig.w>.5)/12.0,.1)-.28)/.712,0.0,1.0);
+}
+fn wakeAftU(along:f32)->f32 {
+  return clamp((-along/max(H.size.y/12.0,.1)-2.0)/(select(5.25,5.65,H.rig.w>.5)-2.0),0.0,1.0);
+}
+struct WakePressure { shape:vec4f, drift:vec2f };
+fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
+  let delta=p-c.point.xz;let r2=dot(delta,delta)/(width*width);
+  let outside=dot(delta,c.axis.xz);
+  let edge=smoothstep(-.2,.25,outside);
+  let tangent=dot(delta,vec2f(-c.axis.z,c.axis.x))/width;
+  // Equal-width translated kernels balance each local pressure pair. Moving
+  // interpolation and hull clipping still do not constitute volume conservation.
+  // Their breadth is resolved by the wake grid, not a separate reflective strip.
+  let crest=exp(-pow((outside-width*.2)/(width*.7),2.0)-tangent*tangent);
+  let hollow=exp(-pow((outside-width*1.6)/(width*.7),2.0)-tangent*tangent);
+  let pulse=exp(-r2*2.0)*(1.0-r2*2.0)*smoothstep(-.1,.2,outside)*c.axis.w;
+  let relativeFlow=c.flow.xz-H.forward.xz*max(0.0,I.motion.x)*.8;
+  let peel=max(0.0,dot(relativeFlow,c.axis.xz));
+  return WakePressure(vec4f(crest*c.point.w,hollow*c.point.w,pulse,crest*edge*c.point.w*peel/max(width,.1)),c.axis.xz*peel*crest*edge*c.flow.w);
+}
 @compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
   let q = vec2i(id.xy);
   let deposited = f32(atomicExchange(&landings[id.y * ${WAKE_SIZE}u + id.x], 0u)) / 4096.0;
@@ -174,35 +207,52 @@ fn previousFoam(q:vec2f)->vec2f {
   let p = (vec2f(id.xy) + 0.5 - ${WAKE_SIZE / 2}.0) * I.domain.w + I.domain.xy;
   let delta = p - H.origin.xz;
   let along = dot(delta, H.forward.xz);
-  let side = select(0u, 16u, dot(delta, H.right.xz) >= 0.0);
-  let u = clamp((along / max(H.size.y * select(6.4,6.0,H.rig.w>.5) / 12.0, 0.1) - 0.28) / 0.712, 0.0, 1.0);
-  let contact = contacts[side + u32(round(u * 15.0))];
-  let width = max(0.55, H.size.x * 0.18);
-  let toContact = p - contact.point.xz;
-  let r = length(toContact) / width;
-  // A crest outside the hull and a shallow trough behind it displace water to either side.
-  let outside = dot(toContact, contact.axis.xz);
-  let bowSource = exp(-r * r * 1.4) * smoothstep(-0.2, 0.25, outside) * contact.point.w;
-  let aftU=clamp((-along/max(H.size.y/12.0,0.1)-2.0)/3.25,0.0,1.0);
-  let aft=contacts[32u+select(0u,4u,side>0u)+u32(round(aftU*3.0))];
-  let aftDelta=p-aft.point.xz;
-  let aftSource=exp(-dot(aftDelta,aftDelta)/(width*width)*1.4)*smoothstep(-0.2,0.25,dot(aftDelta,aft.axis.xz))*aft.point.w;
-  let source=bowSource+aftSource*0.45;
+  let u=wakeForeU(along);let aftU=wakeAftU(along);
+  // Resolve the pressure crest in the simulation grid; the removed sub-texel
+  // reflective ribbon cannot substitute for this actual surface displacement.
+  let width=max(max(.55,H.size.x*.18),I.domain.w*1.5);
+  let port=wakePressure(p,wakeContact(0u,16u,u),width);
+  let starboard=wakePressure(p,wakeContact(16u,16u,u),width);
+  let aftPort=wakePressure(p,wakeContact(32u,4u,aftU),width);
+  let aftStarboard=wakePressure(p,wakeContact(36u,4u,aftU),width);
+  // Both sides contribute continuously around the stem, without a side-selector seam.
+  let pressure=port.shape+starboard.shape+(aftPort.shape+aftStarboard.shape)*.45;
+  let source=pressure.x;let hollow=pressure.y;let pulse=pressure.z;
   // Sample the actual aft waterline: bow immersion cannot stand in for a dry stern.
   let sternCentre = (contacts[35].point.xz + contacts[39].point.xz) * 0.5;
   let sternDelta = p-sternCentre;
-  let sternAlong = dot(sternDelta,H.forward.xz);
-  let sternAcross = dot(sternDelta,H.right.xz);
-  let stern = exp(-pow(sternAlong / max(0.7,H.size.y*0.065),2.0)-pow(sternAcross / max(0.6,H.size.x*0.32),2.0));
+  let horizontalForward=H.forward.xz/max(length(H.forward.xz),.001);
+  let horizontalRight=vec2f(-horizontalForward.y,horizontalForward.x);
+  let sternAlong = dot(sternDelta,horizontalForward);
+  let sternAcross = dot(sternDelta,horizontalRight);
+  let sternLength=max(I.domain.w*2.0,H.size.y*.065);
+  let sternWidth=max(I.domain.w*1.5,H.size.x*.32);
+  let stern=exp(-pow(sternAlong/sternLength,2.0)-pow(sternAcross/sternWidth,2.0));
   let sternWet = (contacts[35].flow.w + contacts[39].flow.w) * 0.5;
-  let pulse = exp(-r*r*2.0)*(1.0-r*r*2.0)*smoothstep(-0.1,0.2,outside)*contact.axis.w;
   let forwardSpeed = max(0.0, I.motion.x);
   // A trough at the transom and a recovery crest behind it radiate into the trail.
-  let recovery = exp(-pow((sternAlong+max(1.0,H.size.y*0.12))/max(0.8,H.size.y*0.08),2.0)-pow(sternAcross/max(0.8,H.size.x*0.5),2.0));
-  // Paired crest/trough forcing parts the water and radiates ripples into the
-  // existing surface field, rather than painting a white line on flat water.
-  let hollow=exp(-pow((outside-width*1.5)/(width*.7),2.0)-pow(dot(toContact,vec2f(-contact.axis.z,contact.axis.x))/width,2.0))*contact.point.w;
-  let forcing = (source-hollow*.55)*10.0+pulse*14.0+(recovery*0.65-stern)*sternWet*min(0.65,forwardSpeed*forwardSpeed*0.035);
+  // U²/g controls the longitudinal scale; grid/domain bounds keep this local.
+  // The non-dispersive propagation below still does not establish a Kelvin angle.
+  let recoveryDistance=max(I.domain.w*2.0,min(H.size.y*.35,3.14159265*forwardSpeed*forwardSpeed/9.81));
+  let recoveryLength=max(I.domain.w*2.0,recoveryDistance*.6);
+  let recoveryWidth=max(I.domain.w*1.5,H.size.x*.5);
+  let recovery=exp(-pow((sternAlong+recoveryDistance)/recoveryLength,2.0)-pow(sternAcross/recoveryWidth,2.0));
+  let recoveryWeight=sternLength*sternWidth/(recoveryLength*recoveryWidth);
+  let headway=smoothstep(.15,1.2,forwardSpeed);
+  let sternHead=min(.35,forwardSpeed*forwardSpeed/(2.0*9.81)*.30)*sternWet*headway;
+  // Compact alternating pressure lobes shed real waves at the wet quarter.
+  // Their mean is zero over the plane; nothing is painted/forced along a long
+  // ship-attached trail. Timing is an authored beam-scaled visual approximation,
+  // not a propeller jet, calibrated vortex model, or deep-water Kelvin solver.
+  let shedLength=max(I.domain.w*2.0,H.size.x*.42);
+  let shedWidth=max(I.domain.w*1.5,H.size.x*.20);
+  let shedAlong=(sternAlong+sternLength*.6)/shedLength;
+  let portR2=shedAlong*shedAlong+pow((sternAcross+H.size.x*.23)/shedWidth,2.0);
+  let starboardR2=shedAlong*shedAlong+pow((sternAcross-H.size.x*.23)/shedWidth,2.0);
+  let shedding=sin(I.phase.x*sqrt(9.81/max(H.size.x,1.0))*1.1)*((1.0-portR2)*exp(-portR2)-(1.0-starboardR2)*exp(-starboardR2));
+  let forcing=(source-hollow)*10.0+pulse*14.0
+    +(recovery*recoveryWeight-stern)*sternWet*min(.65,forwardSpeed*forwardSpeed*.035)
+    +shedding*sternHead*2.0;
   let dt = I.previous.z;
   // c=2.5 m/s and dx>=0.5 m remain CFL-stable at the host's maximum dt=0.1 s.
   let velocity = clamp((old.y + (6.25 * lap / (I.domain.w * I.domain.w) + forcing - old.x * 0.6) * dt) * exp(-dt * 0.38), -3.0, 3.0);
@@ -211,10 +261,11 @@ fn previousFoam(q:vec2f)->vec2f {
   let froude=forwardSpeed/sqrt(9.81*max(H.size.y,1.0));
   // Broad, intermittent entrainment, not a propeller jet. Texture stays in world
   // space, so an old trail follows the travelled track through turns and stops.
-  let churn=0.72+0.28*sin(sternAcross*3.1+I.phase.x*2.3)*sin(sternAlong*2.7-I.phase.x*1.7);
-  let foamSource=source*3.5*smoothstep(.6,3.5,forwardSpeed)+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*0.95)*smoothstep(0.04,0.28,froude)*churn;
+  let churn=.72+.28*shedding;
+  let foamSource=(source*2.8+pressure.w*.7)*smoothstep(.6,3.5,forwardSpeed)+max(pulse,0.0)*1.4+stern*sternWet*min(4.0,forwardSpeed*.95)*smoothstep(.04,.28,froude)*churn;
   let eddy=vec2f(cos(p.y*0.65+I.phase.x*0.5),-cos(p.x*0.65-I.phase.x*0.4))*0.24;
-  let drift=I.motion.zw*0.012+eddy;
+  let peelDrift=port.drift+starboard.drift+(aftPort.drift+aftStarboard.drift)*.45;
+  let drift=I.motion.zw*.012+eddy+peelDrift/max(1.0,length(peelDrift)/2.0);
   let transported=previousFoam(vec2f(pq)-drift*dt/I.domain.w);
   let spread=1.0-exp(-dt*0.28/(I.domain.w*I.domain.w));
   let aged=mix(transported,neighbours.zw*0.25,spread)*exp(-dt*vec2f(0.11,0.8));
@@ -329,8 +380,6 @@ export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACT
 @group(0) @binding(5) var effectSamp: sampler;
 @group(0) @binding(6) var transLUT: texture_2d<f32>;
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
-@group(0) @binding(8) var<storage,read> waterline:array<Contact,${CONTACT_COUNT}>;
-@group(0) @binding(9) var contactWake:texture_2d<f32>;
 struct EffectVertex { @builtin(position) position: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f, @location(2) uv: vec2f, @location(3) data: vec4f };
 fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   let t=s.origin.w*(0.35+0.65*q)*(1.0+0.06*sin(u*4.0+s.origin.x*2.0));
@@ -371,28 +420,6 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
   o.data = vec4f(select(0.0, smoothstep(0.35, 1.2, distanceToEye), d.position.w > 0.0), age, d.shape.z, d.shape.y);
   return o;
 }
-// A narrow raised water ribbon stays rooted on the measured bow waterline.
-// Two strips per segment give a round crest; the wake grid carries its waves aft.
-@vertex fn contactVS(@builtin(vertex_index) vi:u32,@builtin(instance_index) instance:u32)->EffectVertex {
-  let corners=array<vec2f,6>(vec2f(0,0),vec2f(1,0),vec2f(1,1),vec2f(0,0),vec2f(1,1),vec2f(0,1));
-  let uv=corners[vi%6u];let across=(f32(vi/6u)+uv.y)*.5;
-  let index=instance%15u+(instance/15u)*16u;
-  let a=waterline[index];let b=waterline[index+1u];
-  let wet=min(a.flow.w,b.flow.w)*I.motion.y;
-  let normal=normalize(mix(a.axis.xyz,b.axis.xyz,uv.x));
-  let energy=mix(a.point.w,b.point.w,uv.x);
-  let impact=mix(a.axis.w,b.axis.w,uv.x);
-  let speed=max(0.0,I.motion.x);let moving=smoothstep(.15,1.2,speed);
-  let width=(.10+min(.48,speed*.08)+impact*.05)*wet*moving;
-  let head=min(.24,speed*speed/(2.0*9.81)*.22)*wet;
-  var p=mix(a.point.xyz,b.point.xyz,uv.x)+normal*(across*width-.015);
-  p.y+=textureSampleLevel(contactWake,effectSamp,(p.xz-I.domain.xy)/I.domain.z+.5,0.0).x
-    +.025+sin(across*3.14159265)*head;
-  var o:EffectVertex;o.position=F.viewProj*vec4f(p-F.camPos.xyz,1);o.world=p;
-  o.normal=normalize(vec3f(normal.x*cos(across*3.14159265),1,normal.z*cos(across*3.14159265)));
-  o.uv=vec2f((f32(index%16u)+uv.x)*.7+I.phase.x*speed*.7,across);
-  o.data=vec4f(wet*moving,energy,impact,0);return o;
-}
 fn sprayLight(p: vec3f) -> vec3f {
   let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
   let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * vesselShadow(p,vec3f(0,1,0));
@@ -415,18 +442,6 @@ fn sprayLight(p: vec3f) -> vec3f {
   let rim=smoothstep(0.0,0.12,o.uv.y)*(1.0-smoothstep(0.76+noise*0.14,1.0,o.uv.y));
   let alpha=smoothstep(0.05,0.3,o.data.x)*ends*rim*holes*fade*(0.20+foam*0.45)*I.motion.y;
   return vec4f(color * alpha, alpha);
-}
-@fragment fn contactFS(o:EffectVertex)->@location(0) vec4f {
-  let n=normalize(o.normal);let view=normalize(F.camPos.xyz-o.world);
-  let reflected=textureSampleLevel(envCube,effectSamp,reflect(-view,n),1.0).rgb;
-  let noise=.5+.5*gnoise(o.uv*vec2f(7,9));
-  let fizz=smoothstep(.6,3.5,max(0.0,I.motion.x))*smoothstep(.25,.7,noise);
-  let froth=(.25+.65*fizz)*smoothstep(.0,.18,o.data.y+o.data.z)*sin(o.uv.y*3.14159265);
-  let fresnel=.04+.65*pow(1.0-abs(dot(n,view)),5.0);
-  let color=mix(reflected*(.45+fresnel)+F.waterCol.rgb*.3,sprayLight(o.world),froth);
-  let edge=(1.0-smoothstep(.65,1.0,o.uv.y));
-  let alpha=o.data.x*edge*(.5+froth*.4);
-  return vec4f(color*alpha,alpha);
 }
 @fragment fn dropFS(o: EffectVertex) -> @location(0) vec4f {
   let r2 = dot(o.uv, o.uv);

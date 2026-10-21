@@ -1,5 +1,6 @@
 import { HULL_PROFILE } from './hull.js';
 import { WAKE_SAMPLE, FLEET_WAKE_SAMPLE } from './interaction.js';
+import { SCENE_WAKE_SAMPLE, surfaceWaveSource } from './surface-coupling.js';
 import { SCENE_SHADOW_SAMPLE } from './shadows.js';
 // Ocean surface + sky background rendering.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
@@ -53,7 +54,7 @@ const OCEAN_HULL_MASK = /* wgsl */ `
   }
 `;
 
-function oceanSource(coast='') { return FOAM_MODEL + HULL_PROFILE + FLEET_WAKE_SAMPLE + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SCENE_SHADOW_SAMPLE + /* wgsl */ `
+function oceanSource(coast='',surfaceWaves=false) { return FOAM_MODEL + HULL_PROFILE + (surfaceWaves?SCENE_WAKE_SAMPLE+surfaceWaveSource(0,18,19):FLEET_WAKE_SAMPLE) + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SCENE_SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -333,8 +334,8 @@ export function createCoastalOcean(coast,depthFirst){
 
 // The legacy shader remains available for isolated ocean probes. The scene
 // composes every submerged solid through this shared optical path.
-export function createOpticalOcean(coast='',depthFirst=true){
-  const code=oceanSource(coast)+WATER_TRANSMISSION;
+export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false){
+  const code=oceanSource(coast,surfaceWaves)+WATER_TRANSMISSION;
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
       'body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)');
@@ -408,3 +409,5 @@ export const FLEET_HEIGHT_PROBE=HEIGHT_PROBE.replace(WAKE_SAMPLE,FLEET_WAKE_SAMP
 @group(0) @binding(9) var<uniform> I2:Interaction;
 @group(0) @binding(10) var wakeTex2:texture_2d<f32>;
 `;
+export const SCENE_HEIGHT_PROBE=FLEET_HEIGHT_PROBE.replace(FLEET_WAKE_SAMPLE,SCENE_WAKE_SAMPLE)
+  +surfaceWaveSource(0,11,12);

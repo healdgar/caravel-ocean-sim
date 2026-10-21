@@ -1,14 +1,17 @@
 import {createDolphinEncounter,DOLPHIN_LIMIT,DOLPHIN_SPLASH_LIMIT,DOLPHIN_SPLASH_SECONDS} from './dolphin-state.js';
 import {createDolphinMesh} from './dolphin-mesh.js';
+import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
+import {surfaceWaveGroups} from './surface-bindings.js';
 import {DOLPHIN_RENDER,DOLPHIN_RIPPLE_SEGMENTS,DOLPHIN_RIPPLE_RINGS,DOLPHIN_RIPPLE_ROWS,DOLPHIN_SHEET_SEGMENTS,DOLPHIN_SHEET_ROWS,DOLPHIN_DROP_COUNT} from './wgsl/dolphins.js';
 
-export async function createDolphins({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random,waterOptics=null}){
+export async function createDolphins({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,random=Math.random,waterOptics=null,surfaceWaves=null}){
   const state=createDolphinEncounter(random),mesh=createDolphinMesh(),B=GPUBufferUsage;
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const values=new Float32Array(DOLPHIN_LIMIT*8),splashValues=new Float32Array(DOLPHIN_SPLASH_LIMIT*12);
   const animals=buffer('dolphin poses',values,B.STORAGE),splashes=buffer('dolphin water entries',splashValues,B.STORAGE);
   const vertex=buffer('dolphin vertices',mesh.vertices,B.VERTEX),index=buffer('dolphin indices',mesh.indices,B.INDEX);
-  const module=await shader(DOLPHIN_RENDER,'dolphins');
+  const source=surfaceWaves?coupleSurfaceHeight(DOLPHIN_RENDER,'dolphinSea(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'seaSampler'}):DOLPHIN_RENDER;
+  const module=await shader(source,'dolphins');
   const layout=[{arrayStride:36,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x3'}]}];
   const kinds=[['dolphin',layout],['dolphinRipple',[]],['dolphinSplash',[]],['dolphinDrop',[]]];
   const pipelines=await Promise.all(kinds.map(([kind,buffers],i)=>device.createRenderPipelineAsync({label:['dolphins','dolphin ripples','dolphin splash crowns','dolphin spray'][i],layout:'auto',
@@ -16,8 +19,11 @@ export async function createDolphins({device,frameUBO,transView,skyView,sampler,
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})));
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:splashes}];
   const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?[0,1,2,3,4,5,6,7,8]:[0,1,2,3,4,5,6,7,9]).includes(e.binding))}));
-  const submerged=waterOptics?await waterOptics.capture({source:DOLPHIN_RENDER,pipeline:pipelines[0],vertex:{entryPoint:'dolphinVS',buffers:layout},entry:'dolphinFS',world:'v.world'}):null;
+  const waveGroups=pipelines.map(pipe=>surfaceWaveGroups(device,pipe,surfaceWaves));
+  const submerged=waterOptics?await waterOptics.capture({source,pipeline:pipelines[0],vertex:{entryPoint:'dolphinVS',buffers:layout},entry:'dolphinFS',world:'v.world',groups:surfaceWaves?2:1}):null;
   const submergedGroup=submerged?.bindGroup(resources.slice(0,9));
+  const submergedWaves=submerged?surfaceWaveGroups(device,submerged.pipeline,surfaceWaves):null;
+  const bind=(pass,i)=>{pass.setPipeline(pipelines[i]);pass.setBindGroup(0,groups[i]);if(waveGroups[i])pass.setBindGroup(1,waveGroups[i][surfaceWaves.current]);};
   let splashCount=0,burstCount=0;
   return {state,triangles:mesh.indices.length/3,
     update(dt,boat,settings,terrain=null,vessels=[boat]){
@@ -37,14 +43,14 @@ export async function createDolphins({device,frameUBO,transView,skyView,sampler,
     },
     drawSubmerged(pass){
       if(!submerged||!state.active)return;
-      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);
+      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);if(submergedWaves)pass.setBindGroup(1,submergedWaves[surfaceWaves.current]);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);
     },
     draw(pass){
-      if(state.active){pass.setPipeline(pipelines[0]);pass.setBindGroup(0,groups[0]);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);}
-      if(splashCount){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,groups[1]);pass.draw(DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_RINGS*DOLPHIN_RIPPLE_ROWS*6,splashCount);}
+      if(state.active){bind(pass,0);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);}
+      if(splashCount){bind(pass,1);pass.draw(DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_RINGS*DOLPHIN_RIPPLE_ROWS*6,splashCount);}
       if(burstCount){
-        pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);pass.draw(DOLPHIN_SHEET_SEGMENTS*DOLPHIN_SHEET_ROWS*6,burstCount);
-        pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,burstCount*DOLPHIN_DROP_COUNT);
+        bind(pass,2);pass.draw(DOLPHIN_SHEET_SEGMENTS*DOLPHIN_SHEET_ROWS*6,burstCount);
+        bind(pass,3);pass.draw(6,burstCount*DOLPHIN_DROP_COUNT);
       }
     },
     destroy(){for(const b of [animals,splashes,vertex,index])b.destroy();},

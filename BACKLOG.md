@@ -1,6 +1,9 @@
 # Waterworld backlog and overnight checkpoint
 
-Run: October 20–21, 2026, America/Los_Angeles. Stop starting new work at **08:00 October 21**; stabilize active changes and report.
+Overnight run: October 20–21, 2026, America/Los_Angeles, with an **08:00 October 21**
+implementation cutoff. That one-night heartbeat is now **paused**. Subsequent
+daytime work follows the user's new requests; earlier active-heartbeat/cutoff
+entries below are historical records, not current scheduling instructions.
 
 ## Working rules
 
@@ -18,9 +21,9 @@ Run: October 20–21, 2026, America/Los_Angeles. Stop starting new work at **08:
 - Last complete native Metal suite: 350 tests passed. A final focused control/crew run passed 7 tests after the last small control changes. Current test count can consequently differ from that earlier full run.
 - Public `docs/index.html` SHA-256: `499368f428c73138c010e0cc2b3b54fed403544fc78fbbe85d104527d6a08af4`.
 - Clean tree verified before overnight work began.
-- Local hourly continuation: `waterworld-overnight-backlog`, bounded to this night; disable when the overnight run ends. The goal record carries the same cutoff but currently reports blocked; no code/permission blocker remains. Continue under the explicit overnight authorization and heartbeat.
+- Original local hourly continuation: `waterworld-overnight-backlog`, bounded to that night and now paused. Daytime requests do not extend its overnight authorization or reactivate it.
 
-## Active work
+## Original overnight workstreams
 
 | Priority | Owner | Work | Gate |
 |---|---|---|---|
@@ -192,7 +195,7 @@ history before pursuing CPU/GPU integration or performance. Do not promote the
 held row/PBD/tether prototypes or substitute support release for contact solving.
 At/after08:00local, start no new implementation and disable the one-night heartbeat.
 
-The heartbeat remains active. Its bounded count was extended from9to10solely to
+Historical overnight status: the heartbeat remains active. Its bounded count was extended from9to10solely to
 retain a wake at/after the08:00cutoff for stabilization/report/disable; the prompt,
 thread, notification policy and prohibition on new implementation after08:00
 are unchanged. Always check actual local time before starting another change.
@@ -340,3 +343,97 @@ then the ship/helm, with no warning/error logs. Evidence:
 `shots/startup-ready-public.png`; local receipts are in
 `/tmp/waterworld-startup-deployed.json` and
 `/tmp/waterworld-startup-after-public.json`.
+
+## Daytime requests: forest, ship wake and shared surface disturbances
+
+**Combined local validation passed; publication pending.**
+The last published receipt above remains the startup checkpoint until the new
+public bytes are verified below. Root alone owns
+numerical/geometric checks, native GPU tests, rendered review, builds and any
+subsequent Pages publication. Documentation/source readiness is not a passing
+combined run or a physical-iPhone result.
+
+- **Ship wake:** removed the separate reflective waterline ribbon. Continuous
+  interpolation now drives resolved crest/trough pressure across fore/aft
+  contacts, with Victory's correct aft span. Headway/pressure set outward peel
+  velocity and nearby foam transport. A balanced stern trough/recovery pair and
+  compact alternating quarter-pressure lobes drive the actual retained height
+  field. These are bounded authored waves, not calibrated CFD or Kelvin dispersion;
+  no propulsion assist was added.
+- **Shared scene water:** wildlife surface events, anchor entry and actual
+  round-shot water contacts feed independent 512² near/far layers covering
+  256/1,024 m. Their authored 4 m/s wave response contributes surface displacement,
+  normals, refraction and probes without altering the global FFT spectrum.
+  Source IDs, bounded impulses, reset handling and near/far representation are
+  part of root's current checks. Existing splash effects are not sufficient proof
+  that the underlying sea moves correctly.
+- **Forest:** the Saba pack records 17,466 stable trees from 360,000 deterministic
+  candidates. Distant trees use opaque primary-bough envelopes joined to their
+  actual trunk. Near/middle geometry retains recursive branches and leaf cutouts.
+  Actual render-pixel height/FOV/depth select a conservative 3 px geometry-error
+  target with 12% hysteresis; frustum culling and source-integrated leaf colour are
+  included. Production 96/512 near/middle budgets flag overflow rather than
+  silently violating the geometry target. Source colour/elevation remain 8 m/16 m;
+  density is authored, not historical canopy reconstruction. Combined geometric,
+  canopy rendering and desktop cost checks passed as recorded below; pixel
+  geometry bounds do not certify imperceptible alpha/colour transitions.
+- **Breaking water:** `BREAKING_WAVES.md` records primary research, engine limits
+  and a proposed shared lifecycle for wakes, open-sea crests and future beaches.
+  It is not implemented. References include
+  [Thürey et al. 2007](https://cgl.ethz.ch/Downloads/Publications/Papers/2007/Thue07b/Thue07b.pdf),
+  [Chentanez/Müller 2010](https://matthias-research.github.io/pages/publications/hfFluid.pdf)
+  and [Derakhti et al. 2020](https://faculty.washington.edu/jmt3rd/Publications/Derakhti_etal_2020_breakingonset.pdf).
+  Wind is not the sole cause of breaking; `B≈.85` cannot be applied using wind,
+  a fixed grid propagation speed or an unvalidated fluid-velocity estimate.
+  Argon input is consultation, not validation evidence.
+
+### Next bounded hull-audio work — not implemented
+
+The user's clarification distinguishes sustained hull-relative rushing from
+small steep wave-face slaps riding on a larger swell. Current waterline contacts
+sample all six FFT bands independently of broad buoyancy-slope filtering, but
+their pressure signal uses a 0.65 m footprint and a roughly 56 ms temporal filter.
+Audio then requires a stronger spray-launch serial, reads every eight frames,
+and applies whole-wave rearm/quiet gates. Short modest contacts can be attenuated
+or missed; the current continuous wash uses surge speed rather than full
+hull-relative current/leeway flow.
+
+Next: a separately gated modest-contact audio event retaining peak/time/position
+through readback, plus a small steep wave-on-long-swell fixture at 30/60/120 Hz.
+Keep rush continuous, preserve underside-return suppression and avoid coupling
+ordinary slaps to ballistic spray eligibility. Assess spatial filtering only
+after the fixture shows an actual loss. No new audio runtime, asset promotion
+or physical-device qualification is claimed by this source audit.
+
+### Daytime checkpoint validation
+
+- **406/406 PASS**, installed Chrome on native Metal, serialized by root,
+  208.5 seconds. Includes source and all three packaged pages, offline downloads,
+  mobile controls, sail/rig invariants, Victory, shared optics, scene-wave kernels,
+  propagation/reset/reprojection, source lifecycle, canopy geometry and actual
+  production whale contacts. Imagery preparation script syntax also checked;
+  no imagery download/regeneration or new paid asset generation.
+- The first combined run was405/406: the new wave-image fixture let its wildlife
+  follow camera move after ending the animal. Freezing camera/frame inputs fixed
+  the comparison, without a runtime change. At the same scene instant, removing
+  wave sampling changed6304pixels versus4pixels in the unchanged control; the
+  wave remains after actor/splash removal. The corrected full run passed.
+- Tightened offline geometry bounds with point-to-triangle BVH queries and
+  adaptive subdivision, then regenerated the eight cached tier tables. Full
+  geometric surfaces remain conservative: this is not an alpha/colour guarantee.
+  Pixel-mode selection avoids an unnecessary whole-stand distance sort.
+- Actual1280×800 horizon/approach/coast checks: median GPU-completed frame
+  intervals8.3/8.5/10.6ms; p9510.6/9.8/13.2ms. At3840×2160: medians11.5/13.1/29.6ms;
+  p9513.7/15.0/31.5ms. These are short sequential CPU+GPU completion observations
+  on this Mac, not physical-iPhone qualification or isolated GPU pass timings.
+  The4K coast retained231near,11790middle and4052far trees; pixel quality takes
+  precedence over legacy96/512 authoring budgets. No runtime region was deleted.
+- Visible Chrome reviewed revised wakes in mild/rough water with no warnings or
+  errors. Local evidence: `shots/wake-field-heavy-final-local.png`,
+  `shots/forest-water-coast-3840.png`, `shots/whale-real-waves-contact.png`.
+  Independent source review found no wave binding/current/reset/order blocker.
+- Remaining: connected overturning/spilling water and richer splash absorption,
+  genuinely sharper coastal relief/colour, appearance-bounded stand-level forest
+  aggregation, physical-iPhone cost, and independent modest-slap audio. The new
+  waves are authored linear responses; no CFD, calibrated energy conservation,
+  bathymetric surf or universal breaking-onset implementation is claimed.

@@ -2,7 +2,7 @@ import {seedVegetation} from './vegetation.js';
 // A selected resident region, not a world texture. Every layer has one metric
 // domain; additional river/coastal packs can use this same sampling contract.
 export const LAND_REGIONS = Object.freeze({saba:Object.freeze({id:'saba',name:'Saba',latitude:17.635,longitude:-63.238,
-  span:8192,size:513,biomeSize:512,albedoSize:1024,x:0,z:-6000,vegetationSeed:47231,
+  span:8192,size:513,biomeSize:512,albedoSize:1024,x:0,z:-6000,vegetationSeed:47231,vegetationCandidates:360000,
   assets:Object.freeze({height:'assets/world/saba/height.bin',albedo:'assets/world/saba/albedo.png',biome:'assets/world/saba/biome.bin'})})});
 export const ISLAND = LAND_REGIONS.saba;
 export const LANDFALL_VIEWS = Object.freeze({

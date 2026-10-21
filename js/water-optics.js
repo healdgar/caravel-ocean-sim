@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import { CASCADES } from './wgsl/common.js';
+import {surfaceWaveSource} from './wgsl/surface-coupling.js';
 
 // Capture the real material and posed geometry. Refraction, extinction and air
 // perspective are applied once by the water surface, independent of the object.
@@ -12,7 +13,9 @@ function opticsMatching(source,start,open,close){
   throw new Error('Incomplete water capture shader');
 }
 
-export function createSubmergedShader(source,entry='fs',world='v.world'){
+export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false){
+  const sharedSurface=/\bfn\s+surfaceWaveAt\s*\(/.test(source);
+  if(surfaceWaves&&!sharedSurface)source+=surfaceWaveSource(3,2,3,'captureSeaSampler');
   const air=/\bfn\s+surfaceAir\s*\([^)]*\)\s*->\s*vec3f\s*\{/m.exec(source);
   if(air){
     const start=source.indexOf('{',air.index);
@@ -48,7 +51,7 @@ fn captureDisplacement(p:vec2f)->vec3f{
 fn captureHeight(p:vec2f)->f32{
   var q=p;
   for(var i=0;i<3;i++){q=p-captureDisplacement(q).xz;}
-  return captureDisplacement(q).y;
+  return captureDisplacement(q).y${surfaceWaves?'+surfaceWaveAt(p).x':''};
 }
 ${originalSignature}{
   let material=waterCaptureMaterial(${argumentsList});
@@ -61,17 +64,19 @@ ${originalSignature}{
 `;
 }
 
-export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba16float'}){
+export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba16float',surfaceWaves=null}){
   return {
     async capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1}){
       if(groups>3)throw new Error('Water capture reserves bind group 3');
-      const module=await shader(createSubmergedShader(source,entry,world),'submerged material');
+      const captureNeedsWaves=surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source);
+      const module=await shader(createSubmergedShader(source,entry,world,!!surfaceWaves),'submerged material');
       const captured=await device.createRenderPipelineAsync({label:'submerged opaque material',
         layout:'auto',
         vertex:{entryPoint:'vs',...vertex,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},
         primitive:{topology:'triangle-list',cullMode:'none'},
         depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:1}});
-      const captureGroup=device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler}]});
+      const captureGroups=(captureNeedsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
+        ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[])]}));
       const emptyGroups=Array.from({length:3-groups},(_,i)=>device.createBindGroup({layout:captured.getBindGroupLayout(i+groups),entries:[]}));
       return {pipeline:captured,entry:'submergedFS',bindGroup(resources,index=0){
         const entries=resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource});
@@ -79,7 +84,7 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
       },bind(pass){
         pass.setPipeline(captured);
         for(let i=groups;i<3;i++)pass.setBindGroup(i,emptyGroups[i-groups]);
-        pass.setBindGroup(3,captureGroup);
+        pass.setBindGroup(3,captureGroups[captureNeedsWaves?surfaceWaves.current:0]);
       }};
     },
   };

@@ -1,4 +1,5 @@
 import { WAKE_SAMPLE, FLEET_WAKE_SAMPLE } from './interaction.js';
+import { SCENE_WAKE_SAMPLE, surfaceWaveSource } from './surface-coupling.js';
 // FFT ocean simulation (Tessendorf) — 6 cascades of 256^2.
 import { N, LOGN, CASCADES, NOISE_WGSL, PERIODIC_WGSL, FOAM_MODEL } from './common.js';
 
@@ -408,6 +409,8 @@ export const FLEET_FOAM_UPDATE=FOAM_UPDATE.replace(WAKE_SAMPLE,FLEET_WAKE_SAMPLE
 @group(0) @binding(10) var<uniform> I2:Interaction;
 @group(0) @binding(11) var wakeTex2:texture_2d<f32>;
 `;
+export const SCENE_FOAM_UPDATE=FLEET_FOAM_UPDATE.replace(FLEET_WAKE_SAMPLE,SCENE_WAKE_SAMPLE)
+  +surfaceWaveSource(0,12,13);
 
 export const ARRAY16_MIPS = /* wgsl */ `
 @group(0) @binding(0) var src: texture_2d_array<f32>;

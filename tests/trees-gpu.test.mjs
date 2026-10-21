@@ -26,7 +26,7 @@ function instrumentTrees(){
   };
   const createPipeline=GPUDevice.prototype.createRenderPipelineAsync;
   GPUDevice.prototype.createRenderPipelineAsync=function(desc){
-    if(desc.label==='island trees')treeCheck.pipelines.push({samples:desc.multisample?.count,alphaCoverage:desc.multisample?.alphaToCoverageEnabled});
+    if(['island trees','island canopy and wood'].includes(desc.label))treeCheck.pipelines.push({samples:desc.multisample?.count,alphaCoverage:desc.multisample?.alphaToCoverageEnabled});
     return createPipeline.call(this,desc);
   };
   const copyImage=GPUQueue.prototype.copyExternalImageToTexture;
@@ -48,7 +48,7 @@ function instrumentTrees(){
     labels.set(this,pipeline.label);treeCheck.render[pipeline.label]=(treeCheck.render[pipeline.label]||0)+1;return setPipeline.call(this,pipeline);
   };
   GPURenderPassEncoder.prototype.draw=function(...args){
-    if(labels.get(this)==='island trees'&&treeCheck.hideTrees)return;
+    if(['island trees','island canopy and wood'].includes(labels.get(this))&&treeCheck.hideTrees)return;
     return draw.apply(this,args);
   };
 }
@@ -101,15 +101,15 @@ async function coverage(page,baseline=false){
   },baseline);
 }
 
-test('the production tree renderer keeps a full, perforated canopy through all distance LODs',{timeout:240000},async t=>{
+test('the production tree renderer retains detailed perforated foliage and opaque distant crown masses',{timeout:240000},async t=>{
   const terrain=await readFile(new URL('../js/terrain.js',import.meta.url),'utf8'),main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-  const treeMarker='trees=islandVegetation(heights,biome);',geometryMarker='treeGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
+  const treeMarker='trees=islandVegetation(heights,biome);',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
   for(const marker of [treeMarker,geometryMarker,groundMarker])assert.ok(terrain.includes(marker),'tree fixture marker '+marker);
   assert.ok(main.includes(cameraMarker));
   // Keep one original, unmodified seeded instance. Suppressing terrain isolates
   // its true silhouette against the same production sky, lighting and tonemap.
   const geometryFixture=`(()=>{
-    const data=treeGeometry(variant,Number(new URL(location.href).searchParams.get('treeTestLod')));
+    const data=treeRenderGeometry(variant,Number(new URL(location.href).searchParams.get('treeTestLod')));
     if(!new URL(location.href).searchParams.has('treeTestSparse'))return data;
     const sparse=[];let leaf=0;
     for(let i=0;i<data.length;i+=TREE_VERTEX_FLOATS*6){
@@ -134,15 +134,15 @@ test('the production tree renderer keeps a full, perforated canopy through all d
       });
       await frame(page);await frame(page);await coverage(page,true);
       await page.evaluate(()=>{treeCheck.hideTrees=false;});const rendered=await frame(page),pixels=await coverage(page);
-      assert.ok(rendered.render['island trees']>0);assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:true}]);
+      assert.ok(rendered.render['island trees']>0);assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:false},{samples:4,alphaCoverage:true}]);
       assert.equal(textureLoaded,true,'production leaf texture was fetched');assert.deepEqual(errors,[]);
       if(lod==='sparse'){
         assert.ok(pixels.density<.22,'the density gate must reject a sparse branch scaffold: '+JSON.stringify(pixels));
         t.diagnostic('Rejected sparse canopy: '+JSON.stringify(pixels));continue;
       }
       assert.ok(pixels.leaves>1000,`LOD ${lod} needs visible foliage: ${JSON.stringify(pixels)}`);
-      assert.ok(pixels.density>.22&&pixels.density<.92,`LOD ${lod} must form a crown while retaining leaf gaps: ${JSON.stringify(pixels)}`);
-      assert.ok(pixels.gaps>.03&&pixels.gaps<.75,`LOD ${lod} must expose sky between leaves without a bare scaffold: ${JSON.stringify(pixels)}`);
+      assert.ok(pixels.density>.22&&pixels.density<=(lod===0?1:.92),`LOD ${lod} must form a full crown: ${JSON.stringify(pixels)}`);
+      if(lod!==0)assert.ok(pixels.gaps>.03&&pixels.gaps<.75,`LOD ${lod} retains resolved gaps between leaves: ${JSON.stringify(pixels)}`);
       results.push(pixels);
     }finally{await page.close();}
   }
@@ -160,6 +160,6 @@ for(const entry of ['ocean.html','ocean.min.html','docs/index.html'])test(`proce
     await page.addInitScript(instrumentTrees);
     await ready(page,`${origin}/${entry}?landfall=coast&view=free&prow=0&follower=0&sunElev=45&clouds=0&w=144&h=108`);
     const rendered=await frame(page);assert.ok(rendered.render['island trees']>0);assert.ok(rendered.render.island>0);assert.equal(rendered.render.ocean,1);
-    assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:true}]);assert.deepEqual(rendered.leafUploads,[[1024,1024]],'each distribution uploads the same leaf atlas');assert.deepEqual(errors,[]);
+    assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:false},{samples:4,alphaCoverage:true}]);assert.deepEqual(rendered.leafUploads,[[1024,1024]],'each distribution uploads the same leaf atlas');assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });

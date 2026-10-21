@@ -25,7 +25,8 @@ function dolphinPoseAt(age,a,i){
   const pose=dolphinBreath(age,a.phase,a.period,breach);
   return {...pose,depth:pose.depth-dolphinClamp((age-96)/9,0,1)*3,breach};
 }
-export function createDolphinEncounter(random=Math.random){
+export function createDolphinEncounter(random=Math.random,options={}){
+  let dolphinSurfaceSink=typeof options.onSurfaceEvent==='function'?options.onSurfaceEvent:null;
   const rand=()=>dolphinClamp(Number(random())||0,0,.999999999);
   const animals=Array.from({length:DOLPHIN_LIMIT},(_,i)=>({x:0,z:0,heading:0,scale:.84+i*.035,phase:0,period:8,depth:-3,pitch:0,previousDepth:-3,breach:false}));
   const splashes=Array.from({length:DOLPHIN_SPLASH_LIMIT},()=>({x:0,z:0,age:10,strength:0,heading:0,seed:0,kind:'trail',speed:0,scale:1,id:0,animal:0}));
@@ -60,6 +61,7 @@ export function createDolphinEncounter(random=Math.random){
     event={id:serial,text:'Dolphins need clear water at least six metres deep.'};return false;
   }
   return {
+    get onSurfaceEvent(){return dolphinSurfaceSink;},set onSurfaceEvent(value){dolphinSurfaceSink=typeof value==='function'?value:null;},
     animals,splashes,enabled:true,get active(){return count>0;},get count(){return count;},get time(){return time;},get age(){return age;},get event(){return event;},get nextAt(){return next;},
     trigger:start,clear,
     step(dt,boat,settings={},terrain=null,vessels=[boat]){
@@ -94,22 +96,27 @@ export function createDolphinEncounter(random=Math.random){
         if(safe(nx,nz,terrain)){a.x=nx;a.z=nz;}else{a.heading+=dt*1.5;}
         const pose=dolphinPoseAt(age,a,i);a.breach=pose.breach;a.depth=pose.depth;a.pitch=pose.pitch;
         const travelled=Math.hypot(a.x-oldX,a.z-oldZ),actualSpeed=dt>0?travelled/dt:0;
-        function stamp(kind,at,strength){
+        function stamp(kind,at,strength,closingSpeed=0){
           const s=splashes.reduce((old,p)=>p.age>old.age?p:old,splashes[0]);
           const t=dolphinClamp((at-previousAge)/dt,0,1);
-          Object.assign(s,{x:oldX+(a.x-oldX)*t,z:oldZ+(a.z-oldZ)*t,age:age-at,strength,
+          Object.assign(s,{x:oldX+(a.x-oldX)*t,z:oldZ+(a.z-oldZ)*t,age:Math.max(0,age-at),strength,
             heading:oldHeading+dolphinAngle(a.heading-oldHeading)*t,seed:a.phase*91+i,kind,speed:actualSpeed,scale:a.scale,id:++splashSerial,animal:i});
+          // The callback is born with the physical contact, independent of FX
+          // pool retention, rendering, or whether the encounter is later ended.
+          dolphinSurfaceSink?.({source:options.source??'dolphin',id:s.id,x:s.x,z:s.z,kind,age:s.age,
+            radiusMetres:(kind==='trail'?.30:.42)*a.scale,closingSpeed,
+            velocity:[(a.x-oldX)/dt,kind==='entry'?-closingSpeed:kind==='emerge'?closingSpeed:0,(a.z-oldZ)/dt]});
         }
         // Fixed contact ticks and absolute trail times keep emission independent of render FPS.
         // Event centres remain in world space; the GPU places them on the actual local wave.
         if(dt>0)while((a.contactTick+1)*DOLPHIN_CONTACT_STEP<=age+1e-8){
           const at=++a.contactTick*DOLPHIN_CONTACT_STEP,contactPose=dolphinPoseAt(at,a,i),bounds=dolphinSurfaceContact(contactPose.depth,contactPose.pitch,a.scale);
           const previous=a.contactPose,previousBounds=a.contactBounds,vertical=(contactPose.depth-previous.depth)/DOLPHIN_CONTACT_STEP;
-          if(previousBounds.max<=0&&bounds.max>0){a.entryPending=true;stamp('emerge',at,dolphinClamp(.25+Math.max(0,vertical)*.06+actualSpeed*.015,.25,.65));}
+          if(previousBounds.max<=0&&bounds.max>0){a.entryPending=true;stamp('emerge',at,dolphinClamp(.25+Math.max(0,vertical)*.06+actualSpeed*.015,.25,.65),Math.max(0,vertical));}
           const firstReentry=previousBounds.min>0&&bounds.min<=0;
           const descendingPass=previous.depth>-.12*a.scale&&contactPose.depth<=-.12*a.scale;
           if(a.entryPending&&vertical<0&&(firstReentry||descendingPass)){
-            stamp('entry',at,dolphinClamp(.45-vertical*.11+actualSpeed*.025,.5,1.25));a.entryPending=false;
+            stamp('entry',at,dolphinClamp(.45-vertical*.11+actualSpeed*.025,.5,1.25),-vertical);a.entryPending=false;
           }
           a.contactPose=contactPose;a.contactBounds=bounds;
         }

@@ -55,7 +55,8 @@ export function marineSurfaceBounds(type,depth,pitch=0,scale=1,roll=0){
     min=Math.min(min,depth+centre-extent);max=Math.max(max,depth+centre+extent);}
   return {min,max,touching:min<=0&&max>=0};
 }
-export function createMarineLifeState(random=Math.random){
+export function createMarineLifeState(random=Math.random,options={}){
+  let marineSurfaceSink=typeof options.onSurfaceEvent==='function'?options.onSurfaceEvent:null;
   const rand=()=>marineClamp(Number(random())||0,0,.999999999),wait=()=>900-Math.log(Math.max(.00001,1-rand()))*1800;
   const animals=Array.from({length:MARINE_ANIMAL_LIMIT},()=>({x:0,z:0,heading:0,depth:-8,pitch:0,roll:0,scale:1,phase:0,type:'whale',behavior:'encounter',speed:3}));
   const effects=Array.from({length:MARINE_EFFECT_LIMIT},()=>({x:0,z:0,age:10,strength:0,heading:0,seed:0,kind:'trail',scale:1,speed:0,height:0,windX:0,windZ:0,id:0,animal:0,anchorX:null,anchorZ:null}));
@@ -91,11 +92,15 @@ export function createMarineLifeState(random=Math.random){
     const pose=marinePoseAt(at,a),scale=a.type==='whale'?5.2*a.scale:a.scale;
     const anchorX=oldX+(a.x-oldX)*fraction,anchorZ=oldZ+(a.z-oldZ)*fraction;
     Object.assign(slot,{x:anchorX+Math.sin(heading)*offset,z:anchorZ-Math.cos(heading)*offset,anchorX,anchorZ,
-      age:age-at,strength,heading,seed:a.phase+at*.17,kind,scale,speed:a.speed,id:++effectSerial,animal:0,
+      age:Math.max(0,age-at),strength,heading,seed:a.phase+at*.17,kind,scale,speed:a.speed,id:++effectSerial,animal:0,
       height:pose.depth+Math.cos(pose.pitch)*1.5+Math.sin(pose.pitch)*3.6,
       windX:0,windZ:0});return slot;
   }
-  return {animals,effects,enabled:true,get active(){return count>0;},get count(){return count;},get age(){return age;},get time(){return time;},get event(){return event;},get nextAt(){return next;},trigger,clear,
+  function surfaceContact(a,e,closingSpeed,vx,vz,radius){
+    marineSurfaceSink?.({source:options.source??'marine',id:e.id,x:e.x,z:e.z,kind:e.kind,age:e.age,
+      radiusMetres:radius*a.scale,closingSpeed,velocity:[vx,e.kind==='entry'?-closingSpeed:e.kind==='emerge'?closingSpeed:0,vz]});
+  }
+  return {animals,effects,enabled:true,get onSurfaceEvent(){return marineSurfaceSink;},set onSurfaceEvent(value){marineSurfaceSink=typeof value==='function'?value:null;},get active(){return count>0;},get count(){return count;},get age(){return age;},get time(){return time;},get event(){return event;},get nextAt(){return next;},trigger,clear,
     step(dt,boat,settings={},terrain=null,vessels=[boat]){
       dt=marineClamp(Number.isFinite(dt)?dt:0,0,.1);time+=dt;event=null;for(const e of effects)e.age+=dt;
       if(Number.isFinite(previousX)&&Math.hypot(boat.x-previousX,boat.z-previousZ)>250){clear();previousX=boat.x;previousZ=boat.z;return;}
@@ -111,27 +116,30 @@ export function createMarineLifeState(random=Math.random){
         a.heading+=marineClamp(marineAngle(desired-a.heading),-.32*dt,.32*dt);
         const nx=a.x+Math.sin(a.heading)*a.speed*dt,nz=a.z-Math.cos(a.heading)*a.speed*dt;
         if(safe(nx,nz,a.type,terrain)){a.x=nx;a.z=nz;}else a.heading+=dt*a.side*.5;
+        const surfaceVX=dt>0?(a.x-oldX)/dt:0,surfaceVZ=dt>0?(a.z-oldZ)/dt:0;
         Object.assign(a,marinePoseAt(age,a));
         if(dt>0)while((a.contactTick+1)*.025<=age+1e-8){
           const at=++a.contactTick*.025,pose=marinePoseAt(at,a),bounds=marineSurfaceBounds(a.type,pose.depth,pose.pitch,a.scale,pose.roll);
           const old=a.contactBounds,vertical=(pose.depth-a.contactPose.depth)/.025;
-          if(old.max<=0&&bounds.max>0){a.entryPending=true;stamp(a,'emerge',at,oldAge,dt,oldX,oldZ,oldHeading,a.type==='whale'?.85:.25);}
+          if(old.max<=0&&bounds.max>0){a.entryPending=true;const e=stamp(a,'emerge',at,oldAge,dt,oldX,oldZ,oldHeading,a.type==='whale'?.85:.25);surfaceContact(a,e,Math.max(0,vertical),surfaceVX,surfaceVZ,a.type==='whale'?1.6:.45);}
           if(a.entryPending&&vertical<0&&((old.min>0&&bounds.min<=0)||(a.contactPose.depth>-.2&&pose.depth<=-.2))){
             const strength=marineClamp(.55-vertical*.1,.6,a.type==='whale'?2.6:.9);
-            stamp(a,'entry',at,oldAge,dt,oldX,oldZ,oldHeading,strength);
+            const e=stamp(a,'entry',at,oldAge,dt,oldX,oldZ,oldHeading,strength);
+            // One physical budget, despite the three overlapping visual crowns.
+            surfaceContact(a,e,-vertical,surfaceVX,surfaceVZ,a.type==='whale'?2.1:.55);
             if(a.type==='whale'){stamp(a,'entry',at,oldAge,dt,oldX,oldZ,oldHeading,strength*.65,3);stamp(a,'entry',at,oldAge,dt,oldX,oldZ,oldHeading,strength*.65,-3);}
             a.entryPending=false;
           }
           if(a.type==='whale'&&(a.behavior==='fluke'||a.behavior==='encounter')){
             const previousTail=a.contactPose.depth-Math.sin(a.contactPose.pitch)*6.5*a.scale-.2*Math.cos(a.contactPose.pitch)*a.scale;
             const tail=pose.depth-Math.sin(pose.pitch)*6.5*a.scale-.2*Math.cos(pose.pitch)*a.scale;
-            if(previousTail>0&&tail<=0&&pose.pitch<-.3)stamp(a,'entry',at,oldAge,dt,oldX,oldZ,oldHeading,.82,-6.5*Math.cos(pose.pitch)*a.scale);
+            if(previousTail>0&&tail<=0&&pose.pitch<-.3){const e=stamp(a,'entry',at,oldAge,dt,oldX,oldZ,oldHeading,.82,-6.5*Math.cos(pose.pitch)*a.scale);surfaceContact(a,e,Math.max(0,(previousTail-tail)/.025),surfaceVX,surfaceVZ,1.1);}
           }
           a.contactPose=pose;a.contactBounds=bounds;
         }
         if(dt>0)while(a.nextTrail<=age+1e-8){
           const at=a.nextTrail;a.nextTrail+=.65;const pose=marinePoseAt(at,a),bounds=marineSurfaceBounds(a.type,pose.depth,pose.pitch,a.scale,pose.roll);
-          if(bounds.touching)stamp(a,'trail',at,oldAge,dt,oldX,oldZ,oldHeading,a.type==='whale'?.45:.22);
+          if(bounds.touching){const e=stamp(a,'trail',at,oldAge,dt,oldX,oldZ,oldHeading,a.type==='whale'?.45:.22);surfaceContact(a,e,0,surfaceVX,surfaceVZ,a.type==='whale'?.85:.28);}
         }
         if(dt>0)while(a.nextBlow<=age+1e-8){
           const at=a.nextBlow;a.nextBlow+=20;const pose=marinePoseAt(at,a);

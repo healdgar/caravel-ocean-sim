@@ -24,8 +24,8 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const sheetGroup=bind(sheetPipe,[buffer(frameUBO),buffer(uniform),seaView,seaSampler,buffer(contacts),buffer(sheets),buffer(landings)]);
   const wakeGroups = views.map((v, i) => bind(wakePipe, [buffer(uniform), buffer(hullUBO), views[1 - i], v, buffer(contacts), buffer(landings)]));
   const sprayGroups = views.map(v => bind(sprayPipe, [buffer(frameUBO), buffer(uniform), seaView, seaSampler, v, sampler, buffer(contacts), buffer(drops), buffer(landings)]));
-  const renderPipes = await Promise.all(['sheet', 'drop', 'contact'].map(kind => device.createRenderPipelineAsync({
-    label: kind === 'sheet' ? 'bow sheets' : kind==='contact'?'bow waterline':'spray', layout: 'auto',
+  const renderPipes = await Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({
+    label: kind === 'sheet' ? 'bow sheets' : 'spray', layout: 'auto',
     vertex: { module, entryPoint: kind + 'VS' },
     fragment: { module, entryPoint: kind + 'FS', targets: [{ format: 'rgba16float', blend: {
       color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
@@ -34,12 +34,11 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
   })));
   // Auto layouts omit the unused population's binding in each render entry point.
-  const renderGroups = views.map(view=>renderPipes.map((pipe, i) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
+  const renderGroups = views.map(()=>renderPipes.map((pipe, i) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
     { binding: 0, resource: buffer(frameUBO) }, { binding: 1, resource: buffer(uniform) },
-    { binding: [2,3,8][i], resource: buffer([sheets,drops,contacts][i]) },
+    { binding: [2,3][i], resource: buffer([sheets,drops][i]) },
     { binding: 4, resource: envView }, { binding: 5, resource: sampler }, { binding: 6, resource: transView },
     { binding: 7, resource: buffer(sunVis) },
-    ...(i===2?[{binding:9,resource:view}]:[]),
   ] })));
   // Drop shading samples sky and transmittance, but not the contact population.
   const values = new Float32Array(16);
@@ -76,7 +75,8 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
     draw(pass) {
       if (!enabled) return;
       deck.draw(pass);
-      pass.setPipeline(renderPipes[2]);pass.setBindGroup(0,renderGroups[current][2]);pass.setBindGroup(1,shadowGroups[2]);pass.draw(12,30);
+      // The continuous waterline crest belongs to the displaced ocean mesh.
+      // Only detached impact water is a separate transparent surface.
       pass.setPipeline(renderPipes[0]); pass.setBindGroup(0, renderGroups[current][0]); pass.setBindGroup(1,shadowGroups[0]); pass.draw(8*10*6,SHEET_COUNT);
       pass.setPipeline(renderPipes[1]); pass.setBindGroup(0, renderGroups[current][1]); pass.setBindGroup(1,shadowGroups[1]); pass.draw(6, SPRAY_COUNT);
     },

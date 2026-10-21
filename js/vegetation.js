@@ -3,6 +3,11 @@
 export const TREE_VARIANTS = 8;
 export const TREE_VERTEX_FLOATS = 10;
 export const TREE_LOD = Object.freeze({near:380,middle:1800,hysteresis:.12,maxNear:96,maxMiddle:512});
+export const TREE_PIXEL_ERROR=3;
+// Offline symmetric surface-distance bounds from measureTreeLodErrors, in
+// canonical mesh units. Regenerate after editing tree geometry. These are
+// conservative geometry bounds, not a guarantee about alpha or colour error.
+export const TREE_GEOMETRY_ERRORS=Object.freeze([[0.2204514674554226,0.03251848598128034,0],[0.21758449369916483,0.035432014857525035,0],[0.2456964873924588,0.031938874892850945,0],[0.2218023075838458,0.031149415596848265,0],[0.2391238426232965,0.03598358824134491,0],[0.26850395181679126,0.03576560307977978,0],[0.2457086449752897,0.03331245898262045,0],[0.21711395032039205,0.03151272352187278,0]].map(Object.freeze));
 const random = initial => {
   let seed=initial>>>0;
   return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
@@ -15,7 +20,7 @@ export function vegetationProbability(mask,size,u,v){
 export function seedVegetation(region,sampleHeight,mask){
   const rand=random(region.vegetationSeed??47231),out=[];
   // Candidate identities and dimensions never depend on a camera or detail tier.
-  for(let id=0;id<36000;id++){
+  for(let id=0;id<(region.vegetationCandidates??36000);id++){
     const u=rand(),v=rand(),density=rand(),shape=rand(),radius=3.2+rand()*4.4,height=8+rand()*10;
     const x=region.x+(u-.5)*region.span,z=region.z+(v-.5)*region.span,h=sampleHeight(x,z);
     const sx=(sampleHeight(x+12,z)-sampleHeight(x-12,z))/24,sz=(sampleHeight(x,z+12)-sampleHeight(x,z-12))/24;
@@ -199,21 +204,248 @@ export function treeGeometry(variant=0,lod=0){
   }
   return new Float32Array(vertices);
 }
-// Original instance index is its persistent identity. Budget overflow retains
-// the tree in a cheaper tier rather than deleting or moving it.
-export function selectTreeLods(trees,camera,previous=new Map(),policy=TREE_LOD){
-  const selected=[],near=policy.near,middle=policy.middle,h=policy.hysteresis;
-  for(let id=0;id<trees.length/8;id++){
-    const k=id*8,distance=Math.hypot(trees[k]-camera.x,trees[k+1]-camera.y,trees[k+2]-camera.z);
-    const old=previous.get(id)??0;
-    let lod=distance<near*(old===2?1+h:1-h)?2:distance<middle*(old>=1?1+h:1-h)?1:0;
-    selected.push({id,lod,distance,variant:Math.min(TREE_VARIANTS-1,Math.floor(trees[k+5]*TREE_VARIANTS))});
+
+// A distant crown is the coarse spatial envelope of each actual primary bough,
+// not a billboard, camera-facing shell or independently grown ellipsoid. Wood
+// joins every envelope to its original trunk. Near/middle geometry is unchanged.
+const treeCanopyCache=new Map();
+export function treeCanopyGeometry(variant=0){
+  const key=((variant%TREE_VARIANTS+TREE_VARIANTS)%TREE_VARIANTS)|0;
+  if(treeCanopyCache.has(key))return treeCanopyCache.get(key);
+  const {branches,sprays}=treeSkeleton(key),out=[];
+  const push=(p,n,kind,shade)=>out.push(...p,...n,kind,shade,0,0);
+  const triangle=(a,b,c,kind,shade,centre)=>{
+    let n=treeNormal(treeCross(b.map((v,k)=>v-a[k]),c.map((v,k)=>v-a[k])));
+    const outward=a.map((v,k)=>(v+b[k]+c[k])/3-centre[k]);
+    if(n.reduce((sum,v,k)=>sum+v*outward[k],0)<0){[b,c]=[c,b];n=n.map(v=>-v);}
+    for(const p of[a,b,c]){
+      const smooth=kind===4?treeNormal(p.map((v,k)=>(v-centre[k])/(k===1?.65:1))):n;
+      push(p,smooth,kind,shade);
+    }
+  };
+  // Keep only the original coarse trunk. Its silhouette and base stay rooted.
+  const trunk=treeGeometry(key,0);
+  for(let i=0;i<trunk.length;i+=TREE_VERTEX_FLOATS*3)if(trunk[i+6]===3)out.push(...trunk.subarray(i,i+TREE_VERTEX_FLOATS*3));
+  for(const bough of branches.filter(b=>b.level===1)){
+    const leaves=sprays.filter(s=>{
+      let b=branches[s.branch];while(b.level>1)b=branches[b.parent];return b.id===bough.id;
+    });
+    const points=leaves.flatMap(s=>s.corners),low=[Infinity,Infinity,Infinity],high=[-Infinity,-Infinity,-Infinity];
+    for(const p of points)for(let k=0;k<3;k++){low[k]=Math.min(low[k],p[k]);high[k]=Math.max(high[k],p[k]);}
+    const centre=low.map((v,k)=>(v+high[k])*.5),height=high[1]-low[1];
+    const shade=leaves.reduce((sum,s)=>sum+s.exposure,0)/leaves.length;
+    const rings=[.26,.74].map((vertical,ring)=>Array.from({length:8},(_,i)=>{
+      const angle=i*Math.PI/4,direction=[Math.cos(angle),Math.sin(angle)];
+      let radius=0;
+      for(const p of points)radius=Math.max(radius,(p[0]-centre[0])*direction[0]+(p[2]-centre[2])*direction[1]);
+      const boundary=Math.min(
+        (direction[0]>=0?high[0]-centre[0]:centre[0]-low[0])/Math.max(Math.abs(direction[0]),1e-8),
+        (direction[1]>=0?high[2]-centre[2]:centre[2]-low[2])/Math.max(Math.abs(direction[1]),1e-8));
+      radius=Math.min(boundary,radius*(ring===0?.91:.97));
+      return[centre[0]+direction[0]*radius,low[1]+height*vertical,centre[2]+direction[1]*radius];
+    }));
+    const bottom=[centre[0],low[1],centre[2]],top=[centre[0],high[1],centre[2]];
+    for(let i=0;i<8;i++){
+      const j=(i+1)%8;
+      triangle(bottom,rings[0][j],rings[0][i],4,shade*.78,centre);
+      triangle(rings[0][i],rings[0][j],rings[1][i],4,shade,centre);
+      triangle(rings[0][j],rings[1][j],rings[1][i],4,shade,centre);
+      triangle(top,rings[1][i],rings[1][j],4,Math.min(1,shade+.12),centre);
+    }
+    // A triangular-section coarse branch reaches the envelope's interior from
+    // the exact primary-bough attachment, without an expensive far bark mesh.
+    const a=bough.from,b=[bottom[0],bottom[1]+height*.08,bottom[2]],axis=treeNormal(b.map((v,k)=>v-a[k])),[right,front]=treeFrame(axis);
+    const ring=(p,r)=>Array.from({length:3},(_,i)=>p.map((v,k)=>v+r*(right[k]*Math.cos(i*2*Math.PI/3)+front[k]*Math.sin(i*2*Math.PI/3))));
+    const A=ring(a,bough.radius),B=ring(b,bough.tipRadius),middle=a.map((v,k)=>(v+b[k])*.5);
+    for(let i=0;i<3;i++){const j=(i+1)%3;triangle(A[i],A[j],B[i],3,.44,middle);triangle(A[j],B[j],B[i],3,.44,middle);}
   }
-  selected.sort((a,b)=>a.distance-b.distance||a.id-b.id);
+  const geometry=new Float32Array(out);treeCanopyCache.set(key,geometry);return geometry;
+}
+export function treeRenderGeometry(variant=0,lod=0){return lod===0?treeCanopyGeometry(variant):treeGeometry(variant,lod);}
+
+// AUTHORING ONLY; never called by rendering. Point-to-triangle BVH queries and
+// adaptive source subdivision bound the symmetric surface Hausdorff distance.
+// For each source triangle, distance to ONE destination triangle is convex, so
+// its maximum vertex distance bounds its entire interior. The independent
+// Lipschitz bound (sample maximum + 2/3 longest edge) remains valid where those
+// nearest triangles differ. Refine the largest bound until its gap above the
+// sampled lower bound is <= tolerance. Limits return the unresolved UPPER
+// bound, never an optimistic sample. Alpha, colour and visibility are excluded.
+export function measureTreeLodErrors(variant=0,options={}){
+  const tolerance=Math.max(0,options.tolerance??.002),maxDepth=Math.max(0,Math.floor(options.maxDepth??16)),maxSplits=Math.max(0,Math.floor(options.maxSplits??200000));
+  const pointKey=p=>p.join(','),distance2=(a,b)=>(a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;
+  const segmentDistance2=(p,a,b)=>{
+    const x=b[0]-a[0],y=b[1]-a[1],z=b[2]-a[2],length=x*x+y*y+z*z;
+    const t=length?Math.max(0,Math.min(1,((p[0]-a[0])*x+(p[1]-a[1])*y+(p[2]-a[2])*z)/length)):0;
+    return(p[0]-a[0]-t*x)**2+(p[1]-a[1]-t*y)**2+(p[2]-a[2]-t*z)**2;
+  };
+  const triangleDistance2=(p,triangle)=>{
+    const[a,b,c]=triangle.points,abx=b[0]-a[0],aby=b[1]-a[1],abz=b[2]-a[2],acx=c[0]-a[0],acy=c[1]-a[1],acz=c[2]-a[2];
+    const nx=aby*acz-abz*acy,ny=abz*acx-abx*acz,nz=abx*acy-aby*acx;
+    if(nx*nx+ny*ny+nz*nz<1e-30)return Math.min(segmentDistance2(p,a,b),segmentDistance2(p,b,c),segmentDistance2(p,c,a));
+    const apx=p[0]-a[0],apy=p[1]-a[1],apz=p[2]-a[2],d1=abx*apx+aby*apy+abz*apz,d2=acx*apx+acy*apy+acz*apz;
+    if(d1<=0&&d2<=0)return distance2(p,a);
+    const bpx=p[0]-b[0],bpy=p[1]-b[1],bpz=p[2]-b[2],d3=abx*bpx+aby*bpy+abz*bpz,d4=acx*bpx+acy*bpy+acz*bpz;
+    if(d3>=0&&d4<=d3)return distance2(p,b);
+    const vc=d1*d4-d3*d2;
+    if(vc<=0&&d1>=0&&d3<=0){const v=d1/(d1-d3);return(apx-v*abx)**2+(apy-v*aby)**2+(apz-v*abz)**2;}
+    const cpx=p[0]-c[0],cpy=p[1]-c[1],cpz=p[2]-c[2],d5=abx*cpx+aby*cpy+abz*cpz,d6=acx*cpx+acy*cpy+acz*cpz;
+    if(d6>=0&&d5<=d6)return distance2(p,c);
+    const vb=d5*d2-d1*d6;
+    if(vb<=0&&d2>=0&&d6<=0){const w=d2/(d2-d6);return(apx-w*acx)**2+(apy-w*acy)**2+(apz-w*acz)**2;}
+    const va=d3*d6-d5*d4;
+    if(va<=0&&d4-d3>=0&&d5-d6>=0){const w=(d4-d3)/((d4-d3)+(d5-d6));return(bpx-w*(c[0]-b[0]))**2+(bpy-w*(c[1]-b[1]))**2+(bpz-w*(c[2]-b[2]))**2;}
+    const denominator=1/(va+vb+vc),v=vb*denominator,w=vc*denominator;
+    return(apx-v*abx-w*acx)**2+(apy-v*aby-w*acy)**2+(apz-v*abz-w*acz)**2;
+  };
+  const boxDistance2=(p,node)=>{
+    let sum=0;for(let k=0;k<3;k++){const d=Math.max(node.low[k]-p[k],0,p[k]-node.high[k]);sum+=d*d;}return sum;
+  };
+  const build=triangles=>{
+    const low=[Infinity,Infinity,Infinity],high=[-Infinity,-Infinity,-Infinity];
+    for(const t of triangles)for(let k=0;k<3;k++){low[k]=Math.min(low[k],t.low[k]);high[k]=Math.max(high[k],t.high[k]);}
+    if(triangles.length<=8)return{low,high,triangles};
+    let axis=0;for(let k=1;k<3;k++)if(high[k]-low[k]>high[axis]-low[axis])axis=k;
+    triangles.sort((a,b)=>a.center[axis]-b.center[axis]);const middle=triangles.length>>1;
+    return{low,high,left:build(triangles.slice(0,middle)),right:build(triangles.slice(middle))};
+  };
+  const surface=data=>{
+    const triangles=[];
+    for(let i=0;i<data.length;i+=TREE_VERTEX_FLOATS*3){
+      const points=[0,1,2].map(j=>Array.from(data.subarray(i+j*TREE_VERTEX_FLOATS,i+j*TREE_VERTEX_FLOATS+3)));
+      const low=[0,1,2].map(k=>Math.min(...points.map(p=>p[k]))),high=[0,1,2].map(k=>Math.max(...points.map(p=>p[k])));
+      triangles.push({points,key:points.map(pointKey).sort().join('|'),low,high,center:low.map((v,k)=>(v+high[k])*.5)});
+    }
+    return{triangles,keys:new Set(triangles.map(t=>t.key)),bvh:build(triangles.slice())};
+  };
+  const nearest=(node,p,best={distance2:Infinity,triangle:null})=>{
+    if(boxDistance2(p,node)>best.distance2)return best;
+    if(node.triangles){
+      for(const t of node.triangles){const d=triangleDistance2(p,t);if(d<best.distance2){best.distance2=d;best.triangle=t;}}
+    }else{
+      let a=node.left,b=node.right;if(boxDistance2(p,a)>boxDistance2(p,b))[a,b]=[b,a];
+      nearest(a,p,best);nearest(b,p,best);
+    }
+    return best;
+  };
+  const directed=(from,to)=>{
+    const cache=new Map(),heap=[];let lower=0,splits=0,limited=false;
+    const sample=p=>{
+      const key=pointKey(p);if(!cache.has(key)){const hit=nearest(to.bvh,p);cache.set(key,{distance:Math.sqrt(hit.distance2),triangle:hit.triangle});}
+      const hit=cache.get(key);lower=Math.max(lower,hit.distance);return hit;
+    };
+    const cell=(points,depth=0,parentUpper=Infinity)=>{
+      const hits=points.map(sample);let edge=0,length2=0;
+      for(let i=0;i<3;i++){const d=distance2(points[i],points[(i+1)%3]);if(d>length2){edge=i;length2=d;}}
+      let upper=Math.max(...hits.map(h=>h.distance))+Math.sqrt(length2)*2/3;
+      // Each candidate is an entire convex destination triangle, not three
+      // unrelated nearest points. This removes the old long-edge penalty for
+      // source faces that closely follow one target face.
+      for(const t of new Set(hits.map(h=>h.triangle))){
+        upper=Math.min(upper,Math.sqrt(Math.max(...points.map(p=>triangleDistance2(p,t)))));
+      }
+      return{points,depth,edge,upper:Math.min(parentUpper,upper+1e-7)};
+    };
+    const push=value=>{
+      let i=heap.length;heap.push(value);while(i>0){const parent=(i-1)>>1;if(heap[parent].upper>=value.upper)break;heap[i]=heap[parent];i=parent;}heap[i]=value;
+    };
+    const pop=()=>{
+      const result=heap[0],tail=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let child=i*2+1;if(child+1<heap.length&&heap[child+1].upper>heap[child].upper)child++;if(heap[child].upper<=tail.upper)break;heap[i]=heap[child];i=child;}heap[i]=tail;}return result;
+    };
+    for(const t of from.triangles)if(!to.keys.has(t.key))push(cell(t.points));
+    while(heap.length&&heap[0].upper>lower+tolerance){
+      if(splits>=maxSplits||heap[0].depth>=maxDepth){limited=true;break;}
+      const t=pop(),a=t.points[t.edge],b=t.points[(t.edge+1)%3],c=t.points[(t.edge+2)%3],middle=a.map((v,k)=>(v+b[k])*.5);
+      push(cell([a,middle,c],t.depth+1,t.upper));push(cell([middle,b,c],t.depth+1,t.upper));splits++;
+    }
+    return{lower,upper:Math.max(lower,heap[0]?.upper??0),splits,limited};
+  };
+  const full=surface(treeGeometry(variant,2)),details=[];
+  const errors=[0,1].map(lod=>{
+    const proxy=surface(treeRenderGeometry(variant,lod)),forward=directed(full,proxy),reverse=directed(proxy,full);
+    details.push({lod,lower:Math.max(forward.lower,reverse.lower),upper:Math.max(forward.upper,reverse.upper),forward,reverse});
+    return Math.max(forward.upper,reverse.upper);
+  });
+  errors.push(0);return options.details?{variant,errors,details,tolerance,maxDepth,maxSplits}:errors;
+}
+
+export function treeProjectedError(error,tree,camera){
+  if(error===0)return 0;if(!Number.isFinite(error)||error<0)return Infinity;
+  const h=camera.screenHeight,tan=camera.tanHalfFovY,f=camera.forward;
+  if(!(h>0&&tan>0)||!f||f.length<3)return Infinity;
+  const centre=[tree[0],tree[1]+tree[4]*.5,tree[2]],delta=centre.map((v,k)=>v-[camera.x,camera.y,camera.z][k]);
+  const length=Math.hypot(...f);if(!(length>0))return Infinity;
+  const depth=delta.reduce((sum,v,k)=>sum+v*f[k]/length,0),distance=Math.hypot(...delta);
+  const radius=Math.hypot(tree[3]*Math.SQRT2,tree[4]*.5)+1;
+  // The shared wind deformation's bounded shear is covered by 20% inflation.
+  const worldError=error*Math.max(tree[3],tree[4])*1.2,near=depth-radius;
+  if(near<=worldError)return Infinity;
+  const lateral=Math.sqrt(Math.max(0,distance*distance-depth*depth))+radius;
+  return h/(2*tan)*worldError*Math.sqrt(1+(lateral/near)**2)/(near-worldError);
+}
+
+// Conservative patch bounds include complete crowns and strong-wind sway. The
+// renderer supplies its actual world view-projection; local captain yaw is not
+// enough to cull a hull-relative camera safely.
+export function createForestPatches(trees,span=128){
+  const patches=new Map();
+  for(let id=0;id<trees.length/8;id++){
+    const k=id*8,x=trees[k],y=trees[k+1],z=trees[k+2],radius=trees[k+3]+8,height=trees[k+4];
+    const key=Math.floor(x/span)+':'+Math.floor(z/span);
+    if(!patches.has(key))patches.set(key,{ids:[],low:[Infinity,Infinity,Infinity],high:[-Infinity,-Infinity,-Infinity]});
+    const patch=patches.get(key);patch.ids.push(id);
+    for(let axis=0;axis<3;axis++){
+      const low=axis===0?x-radius:axis===1?y-1:z-radius,high=axis===0?x+radius:axis===1?y+height+1:z+radius;
+      patch.low[axis]=Math.min(patch.low[axis],low);patch.high[axis]=Math.max(patch.high[axis],high);
+    }
+  }
+  return[...patches.values()].map(p=>({...p,centre:p.low.map((v,k)=>(v+p.high[k])*.5),radius:Math.hypot(...p.high.map((v,k)=>(v-p.low[k])*.5))}));
+}
+export function visibleForestIds(patches,camera,viewProjection=null){
+  const visible=[],matrix=viewProjection?.length>=16?viewProjection:null;
+  for(const patch of patches){
+    if(matrix){
+      const p=patch.centre.map((v,k)=>v-[camera.x,camera.y,camera.z][k]);
+      let outside=false;
+      // WebGPU clip X/Y lie in [-W,+W]. Ignore the infinite reverse-Z far
+      // plane; a conservative W test also rejects completely rearward patches.
+      for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
+        const a=[0,1,2].map(k=>matrix[k*4+3]+(axis===3?0:sign*matrix[k*4+axis]));
+        const d=matrix[15]+(axis===3?0:sign*matrix[12+axis]);
+        if(a.reduce((sum,v,k)=>sum+v*p[k],d)<-patch.radius*Math.hypot(...a)){outside=true;break;}
+      }
+      if(outside)continue;
+    }
+    visible.push(...patch.ids);
+  }
+  return visible;
+}
+// Original instance index is persistent identity. Production uses actual render
+// pixels; budgets flag excess work rather than silently violating its error
+// target. Legacy offline callers without a projection retain distance budgets.
+export function selectTreeLods(trees,camera,previous=new Map(),policy=TREE_LOD,candidates=null){
+  const selected=[],near=policy.near,middle=policy.middle,h=policy.hysteresis;
+  const pixels=camera.screenHeight>0&&camera.tanHalfFovY>0&&camera.forward?.length>=3;
+  for(const id of candidates??Array.from({length:trees.length/8},(_,i)=>i)){
+    const k=id*8,distance=Math.hypot(trees[k]-camera.x,trees[k+1]-camera.y,trees[k+2]-camera.z);
+    const old=previous.get(id)??(pixels?2:0),variant=Math.min(TREE_VARIANTS-1,Math.floor(trees[k+5]*TREE_VARIANTS));
+    let lod=distance<near*(old===2?1+h:1-h)?2:distance<middle*(old>=1?1+h:1-h)?1:0;
+    if(pixels){
+      lod=2;
+      for(let tier=0;tier<2;tier++){
+        const error=treeProjectedError(TREE_GEOMETRY_ERRORS[variant][tier],trees.subarray(k,k+8),camera);
+        if(error<=TREE_PIXEL_ERROR*(old===tier?1+h:1-h)){lod=tier;break;}
+      }
+    }
+    selected.push({id,lod,distance,variant,...(pixels?{projectedError:treeProjectedError(TREE_GEOMETRY_ERRORS[variant][lod],trees.subarray(k,k+8),camera)}:{})});
+  }
+  // Pixel selection has no nearest-count downgrade: retain source/patch order
+  // instead of sorting the entire visible stand every moving-camera frame.
+  if(!pixels)selected.sort((a,b)=>a.distance-b.distance||a.id-b.id);
   let nearCount=0,middleCount=0;
   for(const tree of selected){
-    if(tree.lod===2&&++nearCount>policy.maxNear)tree.lod=1;
-    if(tree.lod===1&&++middleCount>policy.maxMiddle)tree.lod=0;
+    if(tree.lod===2&&++nearCount>policy.maxNear){if(pixels)tree.qualityBudgetOverflow=true;else tree.lod=1;}
+    if(tree.lod===1&&++middleCount>policy.maxMiddle){if(pixels)tree.qualityBudgetOverflow=true;else tree.lod=0;}
     previous.set(tree.id,tree.lod);
   }
   return selected;

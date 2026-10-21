@@ -158,11 +158,12 @@ mask = mask.resize((MASK_SIZE,MASK_SIZE),Image.Resampling.BOX)
 mask_bytes=mask.tobytes();(OUT/'biome.bin').write_bytes(mask_bytes)
 # Record the deterministic count using the actual runtime sampler, avoiding a
 # second Python copy of its RNG, slope limits and geographic edge conventions.
-instance_count=int(subprocess.check_output(['node','--input-type=module','-e',
+vegetation_counts=json.loads(subprocess.check_output(['node','--input-type=module','-e',
     "import{readFileSync}from'node:fs';import{decodeIsland,decodeBiome,islandVegetation}from'./js/terrain-model.js';"
     "const h=readFileSync('assets/world/saba/height.bin'),b=readFileSync('assets/world/saba/biome.bin');"
     "const raw=x=>x.buffer.slice(x.byteOffset,x.byteOffset+x.byteLength);"
-    "console.log(islandVegetation(decodeIsland(raw(h)),decodeBiome(raw(b))).length/8);"],cwd=ROOT,text=True).strip())
+    "const {ISLAND}=await import('./js/terrain-model.js');"
+    "console.log(JSON.stringify({instances:islandVegetation(decodeIsland(raw(h)),decodeBiome(raw(b))).length/8,candidates:ISLAND.vegetationCandidates}));"],cwd=ROOT,text=True))
 manifest.update(dict(
     schemaVersion=2, id='saba', kind='island-region',
     localOrigin=dict(x=0,z=-6000), projection='local equirectangular, metres; X east, Z south',
@@ -180,7 +181,7 @@ manifest.update(dict(
     vegetation=dict(maskSize=MASK_SIZE,format='uint8 vegetation probability, rows north to south',
         sha256=hashlib.sha256(mask_bytes).hexdigest(),
         provenance='Authored RGB greenness interpretation, constrained by elevation and slope; not a surveyed forest/species map.',
-        seed=47231,instanceCount=instance_count,variantLibrary='Native seeded recursive branches, foliage clusters and distance LOD; no Three.js runtime.'),
+        seed=47231,candidateCount=vegetation_counts['candidates'],instanceCount=vegetation_counts['instances'],variantLibrary='Native seeded recursive branches, foliage clusters and projected-error LOD; no Three.js runtime.'),
     playableScope='Single continuous island region; no whole-world generation or voyage compression.',
     limitations='16 m elevation-derived coast and visual CRS/datum alignment; authored vegetation and historical cleanup; approximate de-lighting; underwater skirt is not surveyed bathymetry.'))
 (OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

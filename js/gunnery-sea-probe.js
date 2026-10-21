@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {GUNNERY_SEA_PROBE} from './wgsl/gunnery-probe.js';
+import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
 
 export const GUNNERY_SEA_PROBE_LIMITS=Object.freeze({projectiles:128,knotsPerQuery:65,pathKnots:4096});
 
-export async function createGunnerySeaProbe({device,frameUBO,seaView,seaSampler,shader,computePipe,maxProjectiles=128}){
+export async function createGunnerySeaProbe({device,frameUBO,seaView,seaSampler,shader,computePipe,maxProjectiles=128,surfaceWaves=null}){
   const limit=Math.max(1,Math.min(GUNNERY_SEA_PROBE_LIMITS.projectiles,Math.floor(maxProjectiles)||128));
   const B=GPUBufferUsage,knotsPerQuery=GUNNERY_SEA_PROBE_LIMITS.knotsPerQuery;
   const input=device.createBuffer({label:'roundshot sea sweep intervals',size:limit*16,usage:B.STORAGE|B.COPY_DST});
@@ -11,10 +12,11 @@ export async function createGunnerySeaProbe({device,frameUBO,seaView,seaSampler,
   const output=device.createBuffer({label:'roundshot FFT sea contacts',size:limit*32,usage:B.STORAGE|B.COPY_SRC});
   const readback=device.createBuffer({label:'roundshot contact readback',size:limit*32,usage:B.COPY_DST|B.MAP_READ});
   const uniform=device.createBuffer({label:'roundshot sea query count',size:16,usage:B.UNIFORM|B.COPY_DST});
-  const pipeline=computePipe?await computePipe(GUNNERY_SEA_PROBE,'roundshot actual sea sweep'):
-    await device.createComputePipelineAsync({label:'roundshot actual sea sweep',layout:'auto',compute:{module:await shader(GUNNERY_SEA_PROBE,'roundshot actual sea sweep'),entryPoint:'main'}});
+  const source=surfaceWaves?coupleSurfaceHeight(GUNNERY_SEA_PROBE,'gunneryProbeDisplacement(q).y','p',{uniformBinding:7,textureBinding:8,samplerName:'gunneryProbeSampler'}):GUNNERY_SEA_PROBE;
+  const pipeline=computePipe?await computePipe(source,'roundshot actual sea sweep'):
+    await device.createComputePipelineAsync({label:'roundshot actual sea sweep',layout:'auto',compute:{module:await shader(source,'roundshot actual sea sweep'),entryPoint:'main'}});
   const resources=[{buffer:frameUBO},seaView,seaSampler,{buffer:input},{buffer:knots},{buffer:output},{buffer:uniform}];
-  const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
+  const groups=(surfaceWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[...resources,...(view?[{buffer:surfaceWaves.uniform},view]:[])].map((resource,binding)=>({binding,resource}))}));
   const bytes=new ArrayBuffer(limit*16),queryU32=new Uint32Array(bytes),queryF32=new Float32Array(bytes),knotValues=new Float32Array(limit*knotsPerQuery*4);
   const paths=new Map(),resolved=new Set();let pending=null,encoded=null,generation=0,destroyed=false,overflow=0;
   const validVector=p=>p?.length===3&&Array.from(p).every(Number.isFinite);
@@ -58,7 +60,7 @@ export async function createGunnerySeaProbe({device,frameUBO,seaView,seaSampler,
       if(!batch.length)return false;
       device.queue.writeBuffer(input,0,bytes,0,batch.length*16);device.queue.writeBuffer(knots,0,knotValues,0,knotCount*4);
       device.queue.writeBuffer(uniform,0,new Uint32Array([batch.length,0,0,0]));
-      const pass=encoder.beginComputePass({label:'sweep roundshot against actual FFT sea'});pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(batch.length/32));pass.end();
+      const pass=encoder.beginComputePass({label:'sweep roundshot against actual sea'});pass.setPipeline(pipeline);pass.setBindGroup(0,groups[surfaceWaves?surfaceWaves.current:0]);pass.dispatchWorkgroups(Math.ceil(batch.length/32));pass.end();
       encoder.copyBufferToBuffer(output,0,readback,0,batch.length*32);encoded={batch,generation};return true;
     },
     // Call once after queue.submit. It starts a promise without stalling RAF.

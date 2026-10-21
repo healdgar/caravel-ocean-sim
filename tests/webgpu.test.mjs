@@ -1160,7 +1160,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame = await step(page);
     for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
-    assert.equal(frame.render['bow waterline'],1);assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
+    assert.equal(frame.render['bow waterline'],undefined,'the ocean mesh replaces the detached waterline ribbon');assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
     assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.

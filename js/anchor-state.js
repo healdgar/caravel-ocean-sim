@@ -99,12 +99,12 @@ export function anchorTetherForce(state,boat,point) {
   return {x,z,yaw:rx*z-rz*x,tension,demand,holding};
 }
 
-export function createAnchorState(boat) {
+export function createAnchorState(boat,options={}) {
   let serial=0,pending=[],checkTime=0;
   const state={phase:'stowed',position:anchorHousedPosition(boat),rode:anchorEyeOffset(boat),
     worldHeading:boat.heading??0,
     embedded:false,depth:null,depthFathoms:null,bed:null,velocity:{x:0,y:0,z:0},
-    time:0,splash:null,events:[],force:{x:0,z:0,yaw:0,tension:0},reelRate:0,eligibility:{allowed:false,reason:'Checking coastal sounding'},
+    time:0,splash:null,events:[],force:{x:0,z:0,yaw:0,tension:0},reelRate:0,eligibility:{allowed:false,reason:'Checking coastal sounding'},onSurfaceEvent:typeof options.onSurfaceEvent==='function'?options.onSurfaceEvent:null,
     get active(){return this.phase!=='stowed';},
     get status(){
       const depth=this.depthFathoms===null?'':` · ${this.depthFathoms.toFixed(1)} fathoms (simulated sounding)`;
@@ -154,7 +154,7 @@ export function createAnchorState(boat) {
           this.position.y=Math.max(this.position.y,p.y-eyeOffset-Math.sqrt(Math.max(0,this.rode*this.rode-dx*dx-dz*dz)));
           const surface=environment.waterHeight?.(this.position.x,this.position.z)??this.waterY??0;
           if(wasY>surface&&this.position.y<=surface){
-            this.splash={x:this.position.x,y:surface,z:this.position.z,at:this.time};emit('splash',surface);
+            this.splash={x:this.position.x,y:surface,z:this.position.z,at:this.time};emit('splash',surface,{massKg:limits.anchorMass,scale:limits.renderScale,velocity:[this.velocity.x,this.velocity.y,this.velocity.z]});
           }
           const localBed=environment.terrain?.height?.(this.position.x,this.position.z);
           if(Number.isFinite(localBed)&&localBed<0)this.bed=localBed;
@@ -198,7 +198,13 @@ export function createAnchorState(boat) {
       return this.force;
     },
   };
-  function emit(type,surface){const p=state.position;pending.push({type,serial:++serial,x:p.x,y:surface??p.y,z:p.z,strength:type==='splash'?.8:1});}
+  function emit(type,surface,contact){
+    const p=state.position,event={type,serial:++serial,x:p.x,y:surface??p.y,z:p.z,strength:type==='splash'?.8:1};
+    if(contact){event.massKg=contact.massKg;event.velocity=contact.velocity.slice();}
+    pending.push(event);
+    if(type==='splash'&&contact)state.onSurfaceEvent?.({source:options.source??'anchor',id:event.serial,x:p.x,z:p.z,kind:'entry',age:0,
+      radiusMetres:.32*contact.scale,closingSpeed:Math.max(0,-contact.velocity[1]),velocity:contact.velocity.slice(),massKg:contact.massKg});
+  }
   return state;
 }
 

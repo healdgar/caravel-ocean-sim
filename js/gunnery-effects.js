@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {GUNNERY_RENDER,GUNNERY_DEPTH_RESOLVE,GUNNERY_CROWN_SEGMENTS,GUNNERY_CROWN_ROWS,GUNNERY_DROP_COUNT,GUNNERY_RING_SEGMENTS,GUNNERY_RING_COUNT} from './wgsl/gunnery.js';
+import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
+import {surfaceWaveGroups} from './surface-bindings.js';
 
 export const GUNNERY_FX_LIMITS=Object.freeze({shots:64,smoke:192,impacts:40,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
 const gunneryFxFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
@@ -85,13 +87,14 @@ export function gunnerySmokeParcel(shot,index){
   return {centre,radii:[across,across*(1+.12*Math.sin(shot.seed*17+index)),along],direction,extinction,age:t,seed:shot.seed*79+index*11};
 }
 
-export async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4}){
+export async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,surfaceWaves=null}){
   const state=createGunneryEffectState(),B=GPUBufferUsage,T=GPUTextureUsage;
   const volumes=new Float32Array((GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots)*20);
   const balls=new Float32Array(GUNNERY_FX_LIMITS.projectiles*4),contacts=new Float32Array(GUNNERY_FX_LIMITS.impacts*16);
   const make=(label,bytes)=>device.createBuffer({label,size:bytes,usage:B.STORAGE|B.COPY_DST});
   const volumeBuffer=make('black powder smoke volumes',volumes.byteLength),ballBuffer=make('iron roundshot positions',balls.byteLength),contactBuffer=make('roundshot water contacts',contacts.byteLength);
-  const module=await shader(GUNNERY_RENDER,'black powder cannon effects');
+  const source=surfaceWaves?coupleSurfaceHeight(GUNNERY_RENDER,'gunnerySeaDisplacement(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'gunnerySeaSampler'}):GUNNERY_RENDER;
+  const module=await shader(source,'black powder cannon effects');
   const transparent={color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
   const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true]];
   const pipelines=await Promise.all(types.map(([entry,blend],i)=>device.createRenderPipelineAsync({label:entry,layout:'auto',
@@ -102,6 +105,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   // Auto layouts reflect each entry point. Keep this table explicit so resource
   // changes are checked by native pipeline creation and integration tests.
   const bindings=[[0,1,2,3,4,5,9],[0,1,2,3,5,8,11],[0,1,2,3,4,5,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10]];
+  const ringWaves=surfaceWaveGroups(device,pipelines[4],surfaceWaves);
   let volumeCount=0,impactCount=0,ballCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
   let volumeGroup=null,depthReady=false;
   const groups=pipelines.map((pipe,i)=>i===1?null:device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:bindings[i].map(binding=>({binding,resource:resources[binding]}))}));
@@ -157,7 +161,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       if(impactCount){
         pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);pass.draw(GUNNERY_CROWN_SEGMENTS*GUNNERY_CROWN_ROWS*6,impactCount);
         pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,impactCount*GUNNERY_DROP_COUNT);
-        pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
+        pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
       }
       if(volumeCount&&depthReady){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,volumeGroup);pass.draw(36,volumeCount);}
     },

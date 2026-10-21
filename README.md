@@ -6,6 +6,11 @@ A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, im
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
+The current checkpoint adds denser forest geometry, revised ship wakes and a
+shared surface-disturbance field. **406 tests pass on native Metal**, including
+rendered whale-wave coupling and all three packaged pages. Physical-iPhone
+performance remains unmeasured for this batch; see [the checkpoint log](BACKLOG.md).
+
 ![HMS Victory with tiered square sails](docs/victory.png)
 
 Project code is **MIT licensed**, copyright © 2026 **Six Cailloux, LLC**, with
@@ -353,8 +358,10 @@ Tessellated rings expand from their world-space contact positions and follow all
 six ocean wave bands; they fade after 4.2 seconds. Airborne/submerged dolphins do
 not emit surface trails. The bounded 64-event pool uses fixed contact timing and
 at most four trail stamps per second per animal, independent of render FPS.
-These local surface effects are visual geometry, not additional FFT wave energy.
-Their height samples the same displaced wave field as the ocean; the water depth test
+Contact events also drive the independent shared surface-wave grid, adding real
+ocean displacement without changing the global FFT spectrum. The local splash
+geometry remains separate from those propagated waves. Its height samples the
+displaced sea plus the shared disturbance field; the water depth test
 occludes submerged bodies. They avoid the active hulls and water shallower than
 six metres. Motion is authored wildlife behavior, not a hydrodynamic animal
 simulation. No wildlife draw or effect pass runs while a pod is absent.
@@ -382,7 +389,8 @@ Highlights follow the actual sun and camera and disappear when sunlight is absen
 Surface waves refract submerged geometry through one shared render path: both
 ships, crew, anchors and rode, dolphins, sharks, whales and the shallow seabed.
 The source pass captures posed materials below the displaced water surface.
-The ocean bends the view ray using the current FFT and wake normal, then applies
+The ocean bends the view ray using the current FFT, vessel-wake and shared
+surface-disturbance normal, then applies
 RGB depth attenuation before Fresnel reflection, sunlight glitter and foam.
 Ripples therefore distort underwater silhouettes; grazing reflections and foam
 obscure them. Deep animals lose contrast and detail, fading into the water color.
@@ -407,7 +415,7 @@ A separate, bounded marine encounter occasionally introduces a passing shark or
 a 14.1 m sperm whale using the supplied straight Meshy model and its native 18-bone rig. Whale encounters include a full breach,
 reentry splash, fluke dive and periodic blow. The shark swims with lateral tail
 motion; whales beat their horizontal flukes vertically. Bodies and contact effects
-follow the moving FFT ocean. Whales require sixteen metres of clear water; sharks
+follow the moving sea and shared surface disturbances. Whales require sixteen metres of clear water; sharks
 require six. Automatic opportunities wait at least fifteen minutes plus an
 exponential interval averaging thirty minutes and are suppressed in severe weather.
 One shark/whale encounter can run alongside the dolphin pod. No wildlife draw is
@@ -467,21 +475,38 @@ Licensed real aerial imagery supplies one registered 1024² colour seed at 8 m p
 pixel. Gentle infrastructure cleanup and bounded shadow lifting preserve broad
 green interior and exposed brown slopes. These approximate surface colours are
 not calibrated reflectance or an exact reconstruction of historical land cover.
-A derived greenness mask, elevation and slope constrain 1,775 generated trees.
+A derived greenness mask, elevation and slope select 17,466 stable trees from
+360,000 seeded candidates in the current Saba pack. Camera distance changes
+detail, not tree identity, position or regional density. The original 8 m colour
+and 16 m elevation limits remain; additional trees do not improve source resolution.
 Eight seeded tree variants use five generations of curved, tapering branches,
 with children growing from actual parent sections. Hundreds of terminal twig
-sprays carry individual leaf cutouts, veins and transparent gaps; the crowns
-contain no opaque ellipsoid shells. Interior foliage receives authored canopy
+sprays carry individual leaf cutouts, veins and transparent gaps at near/middle
+detail. Interior foliage receives authored canopy
 occlusion, while outer leaves transmit sunlight. The original leaf texture is
 reproducible with `python3 scripts/prepare-tree-foliage.py` (Pillow and NumPy).
 
-Three detail tiers share the same skeleton, roots, height, radius, colour and
-wind phase. Distant foliage aggregates the real boughs into crossed cutout
-sprays, retaining canopy coverage. Distance and hysteresis select detail;
-near/middle instance limits are 96/512, with overflow retaining the same trees
-in a cheaper tier. This uses native WebGPU instancing and stable regional seeds.
+Three detail tiers share the same skeleton, roots, height, radius and wind phase.
+Distant trees use opaque envelopes derived from their actual primary boughs,
+joined to the original trunk; they do not use crossed foliage cards. Their colour
+uses the source leaf texture's integrated linear colour with bounded regional tint.
+Conservative geometry-error bounds project through the actual rendered pixel
+height, field of view and tree depth, with a 3-pixel target and 12% hysteresis.
+This bounds geometry selection, not colour, alpha or a perceptually invisible
+transition. Frustum culling excludes off-screen forest patches. Production budgets
+of 96 near and 512 middle trees report overflow rather than silently degrading
+trees that need more detail; instance buffers grow within the finite regional
+population. This uses native WebGPU instancing and stable regional seeds.
 The growth approach follows [Dan Greenheck's EZ-Tree article](https://tympanus.net/codrops/2025/01/27/fractals-to-forests-creating-realistic-3d-trees-with-three-js/).
 Species, coverage and canopy occlusion remain authored approximations.
+
+Opaque ground, wood and distant crowns draw before cutout foliage, following
+[Apple's tile-renderer guidance](https://developer.apple.com/videos/play/wwdc2020/10632/)
+so those solid surfaces remain eligible for hidden-surface removal. Filtered,
+metre-scale rock/soil relief adds close detail without blurring the registered
+colour seed. This does not recover missing cliff geometry or high-resolution
+imagery. The projected geometry bounds are measured offline with triangle BVH
+queries and adaptive subdivision; this work does not run in the frame loop.
 
 ![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
 
@@ -604,17 +629,70 @@ body or replacement renderer is included.
 
 ### Wake, bow waves and spray
 
-Thirty-two bow probes and eight aft probes intersect the moving hull with the horizontally displaced FFT surface. Continuous hull pressure scales with speed squared and produces paired crests/troughs even on flat water. A raised, contact-attached bow ribbon shows the immediate water parting, with speed-dependent breaking froth; it samples the evolving wake height so it stays above its own displacement wave. Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny ripples, launches finite-lived curved bow sheets into world space; they spread, tear at the lip, fall, and expire between impacts. A dry bow stops emitting, while a stationary hull still responds to rising crests. Normals come from the planking gradient; relative closing speed produces bounded quadratic impact forcing. Adjacent contacts create broad sheets, while delayed mist is born along their airborne lips. Receding water or a stronger new strike re-arms the next burst; sheet landings add foam.
+Thirty-two bow probes and eight aft probes intersect the moving hull with the
+horizontally displaced FFT surface. Continuous pressure scales with speed squared
+and produces paired crests/troughs even on flat water. Interpolation between
+contacts removes whole-emitter switches, including across the stem; aft sampling
+uses each hull's actual span. Resolved pressure kernels deform the ocean mesh.
+The separate reflective bow ribbon and its abrupt endpoints have been removed.
+
+Water rising relative to the hull, filtered over a 0.65 m patch to suppress tiny
+ripples, launches finite-lived curved bow sheets into world space. A dry bow
+stops emitting, while a stationary hull still responds to rising wave faces.
+Normals follow the planking gradient; relative closing speed produces bounded
+quadratic impact forcing. Headway and pressure determine outward peel velocity
+and nearby foam transport. Adjacent contacts create broad sheets; delayed mist
+is born along their airborne lips. Receding water or a stronger new strike
+re-arms the next burst; sheet landings add foam.
 
 A boat-centred 256 × 256 local wave grid adds displacement and slopes to the ocean. It retains disturbances in world space as the ship moves. Bow and stern foam and droplet landings feed the existing foam clipmaps. The buoyancy probe samples the same added height. Impacts inject outward-travelling crest/trough pulses. Gravity, drag, water collision, 128 sheet slots, and 4,096 secondary particle slots stay on the GPU.
 
-The stern wake uses its own waterline contacts, so lifting the stern clear of the sea stops stern entrainment even while the bow remains wet. A transom trough and recovery crest, plus quarter-hull pressure, feed the outgoing waves. Foam production follows actual forward speed and the speed-to-hull-length ratio. It forms a broken trail, drifts through a small eddy field, spreads and fades along the travelled path; turning does not rotate old foam with the ship. Fresh bubbles fade faster than the lingering surface foam. These authored rates are a visual approximation for a displacement vessel, without a propeller jet.
+The stern wake uses its own waterline contacts, so lifting the stern clear stops
+stern forcing even while the bow remains wet. A balanced transom trough/recovery
+pair uses a bounded longitudinal scale proportional to speed squared over gravity.
+Compact alternating quarter-pressure lobes feed the retained height/velocity
+field, rather than painting a long oscillating stripe behind the ship. Foam
+production follows actual forward speed and the speed-to-hull-length ratio;
+it peels outward, drifts, spreads and fades along the travelled path. Turning
+does not rotate old disturbances with the ship. Fresh foam fades faster than
+lingering coverage. Shedding timing and rates are authored visual approximations,
+without a propeller jet or a calibrated turbulence model.
 
-Wake transport reuses the existing grid, textures and compute dispatch. The immediate bow ribbon adds one small draw of 120 triangles in the existing effects pass, using the existing waterline contacts and wake texture. It adds no full-screen pass or particle population. The 30 FPS automatic-resolution target remains active. Physical-iPhone performance of this change has not been measured.
+Wake transport reuses the existing grid, textures and compute dispatch; removing
+the ribbon removes its separate draw. The 30 FPS automatic-resolution target
+remains active. Native GPU tests and visible Chrome review cover calm/rough
+water; physical-iPhone performance of this batch has not been measured.
 
 **Wakes & spray** toggles the effect, also preserved as `effects=0` or `effects=1` in shared links. Changing sea spectrum or hull dimensions resets contact history to avoid false impacts. The grid uses a damped wave approximation with bounded forcing; it does not model full hull hydrodynamics, planing, or a physically exact Kelvin wake.
 
 Technique references: [Noniv/snowflow_demo](https://github.com/Noniv/snowflow_demo) for curling sheets and separate spray populations; [booherbg/clean-room-fft-ocean](https://github.com/booherbg/clean-room-fft-ocean) for ocean/contact-driven spray; [bob6664569/open-water](https://github.com/bob6664569/open-water) for persistent world-space wakes. [NUS CRISP's ship-wake overview](https://crisp.nus.edu.sg/~research/shipwakes/shipwakes.htm) distinguishes the outgoing wave pattern from the turbulent trail and near-hull foam. This implementation uses native WebGPU/WGSL and adds no runtime dependencies.
+
+### Shared surface disturbances and future breaking waves
+
+Wildlife surface contacts, anchor entry and round-shot water impacts now feed an
+independent scene-wave field. Two 512 × 512 layers cover 256 m and 1,024 m;
+near/far representations crossfade rather than adding the same event twice.
+Bounded event impulses propagate through actual surface height, normals,
+refraction and water probes. Existing splash/foam geometry accompanies these
+waves; it does not substitute for ocean deformation. The FFT spectrum remains
+unchanged. The field's 4 m/s propagation speed and momentum-transfer coefficient
+are authored approximations, with CFL-safe substeps, not a dispersive Kelvin,
+Navier–Stokes or bathymetric surf solver. GPU checks cover balanced source
+kernels, propagation, recentering, reset, shared buoyancy and production whale
+encounters. Waves persist after the animal and splash geometry disappear.
+Events outside the far layer's approximately 512 m radius are culled; this is
+not an ocean-wide disturbance simulation.
+
+[Breaking-water research and acceptance gates](BREAKING_WAVES.md) separates
+crest instability, connected spilling/plunging water, first contact, air
+entrainment, residual foam and wind-stripped spray. Wind is not required for
+breaking. Practical references include
+[Thürey et al.'s connected breaking sheets](https://cgl.ethz.ch/Downloads/Publications/Papers/2007/Thue07b/Thue07b.pdf),
+[Chentanez and Müller's hybrid height-field/particle water](https://matthias-research.github.io/pages/publications/hfFluid.pdf)
+and [Derakhti et al.'s crest-onset criterion](https://faculty.washington.edu/jmt3rd/Publications/Derakhti_etal_2020_breakingonset.pdf).
+The latter needs liquid velocity and tracked crest speed; wind or our constant
+wave-grid speed is not a valid substitute. A shared breaker lifecycle remains
+proposed work, not an implemented universal breaking-wave system.
 
 ### Wind-blown crest spray
 
@@ -815,9 +893,12 @@ checks cover finite emission, gravity, wind entrainment, inherited momentum,
 frozen launch heights and persistent first-contact locations.
 
 Tree checks verify connected recursive growth, taper, bark/leaf UVs, terminal
-attachments, stable LOD dimensions and a bounded forest draw budget. Native GPU
+attachments and stable LOD dimensions. Native GPU
 tests compare actual canopy coverage and sky gaps at every tier, reject an
 intentionally sparse canopy, and render the same foliage from all three builds.
+The denser stand, opaque far boughs, projected geometry-error selection and shared
+surface-wave integration are undergoing combined validation; the earlier checks
+do not by themselves qualify this working batch.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.
@@ -878,6 +959,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/gltf.js`, `js/crew.js`, `js/crew-work.js`, `js/crew-pose.js`, `js/rigging.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
 | `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
+| `js/surface-waves.js`, `js/wgsl/surface-waves.js`, `js/wgsl/surface-coupling.js` | Independent shared event waves and surface-query coupling |
 | `js/hull-contact.js`, `js/wgsl/hull-contact.js` | Canonical lower-hull probes and persistent incident-sea exposure/return events; no impact forces |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and soft volume rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
@@ -898,6 +980,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `docs/` | Generated GitHub Pages demo, `.nojekyll`, and README images |
 | `tests/` | Boat math, geometry, sharing, GPU behavior, and standalone startup checks |
 | `THIRD_PARTY_NOTICES.md` | Joshbrew shader provenance and MIT license |
+| `BREAKING_WAVES.md` | Primary breaking-water research, current limits and proposed shared lifecycle |
 
 ## License
 
@@ -937,7 +1020,8 @@ For repeatable exterior captures, `orbitYaw`, `orbitElevation` (degrees), and
 `orbitDistance` (metres at the default hull size) set the initial orbit; ordinary
 shared links omit these capture controls.
 
-Heave follows a 3 by 3 grid of displaced FFT heights plus the local wake. Measured
+Heave follows a 3 by 3 grid of displaced FFT heights plus vessel wakes and the
+shared surface-disturbance field. Measured
 vertical water velocity and bounded readback prediction reduce lag on rising water.
 Roll and pitch instead integrate hull inertia, restoring torque and damping against
 incident-wave slopes filtered over the hull footprint. Short visible chop no longer

@@ -53,8 +53,9 @@
     "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953",
     "provenance": "Authored RGB greenness interpretation, constrained by elevation and slope; not a surveyed forest/species map.",
     "seed": 47231,
-    "instanceCount": 1775,
-    "variantLibrary": "Native seeded recursive branches, foliage clusters and distance LOD; no Three.js runtime."
+    "candidateCount": 360000,
+    "instanceCount": 17466,
+    "variantLibrary": "Native seeded recursive branches, foliage clusters and projected-error LOD; no Three.js runtime."
   },
   "playableScope": "Single continuous island region; no whole-world generation or voyage compression.",
   "terrainSurvey": {

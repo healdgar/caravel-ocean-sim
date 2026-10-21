@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import {GUNPORT_CLEARANCE} from './wgsl/gunnery-probe.js';
 import {gunMuzzlePose} from './gunnery-models.js';
+import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
 
 // A dry muzzle is an operational game constraint, not an historical firing
 // doctrine or a simulation of powder ignition. Check the actual displaced sea;
@@ -25,14 +26,15 @@ export function createGunportSafetyState({maxAge=.3,maxTravel=.5,margin=.1}={}){
   };
 }
 
-export async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePipe}){
+export async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePipe,surfaceWaves=null}){
   const B=GPUBufferUsage,limit=128,state=createGunportSafetyState();
   const make=(label,usage)=>device.createBuffer({label,size:limit*16,usage});
   const input=make('gunport muzzle positions',B.STORAGE|B.COPY_DST),output=make('gunport sea clearance',B.STORAGE|B.COPY_SRC),readback=make('gunport clearance readback',B.COPY_DST|B.MAP_READ);
   const count=device.createBuffer({label:'gunport query count',size:16,usage:B.UNIFORM|B.COPY_DST});
-  const pipeline=await computePipe(GUNPORT_CLEARANCE,'gunport actual sea clearance');
+  const source=surfaceWaves?coupleSurfaceHeight(GUNPORT_CLEARANCE,'gunneryProbeDisplacement(q).y','p',{uniformBinding:6,textureBinding:7,samplerName:'gunneryProbeSampler'}):GUNPORT_CLEARANCE;
+  const pipeline=await computePipe(source,'gunport actual sea clearance');
   const resources=[{buffer:frameUBO},seaView,seaSampler,{buffer:input},{buffer:output},{buffer:count}];
-  const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
+  const groups=(surfaceWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[...resources,...(view?[{buffer:surfaceWaves.uniform},view]:[])].map((resource,binding)=>({binding,resource}))}));
   const points=new Float32Array(limit*4);let pending=null,encoded=null,generation=0,destroyed=false;
   return {
     state,
@@ -44,7 +46,7 @@ export async function createGunportSafety({device,frameUBO,seaView,seaSampler,co
       const batch=guns.slice(0,limit).map(g=>({id:g.id,position:gunMuzzlePose(g,boat).position,time,revision:boat.revision??0}));
       for(const [i,p]of batch.entries())points.set([...p.position,guns[i].diameter*.5],i*4);
       device.queue.writeBuffer(input,0,points,0,batch.length*4);device.queue.writeBuffer(count,0,new Uint32Array([batch.length,0,0,0]));
-      const pass=encoder.beginComputePass({label:'check sea at loaded muzzles'});pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(batch.length/32));pass.end();
+      const pass=encoder.beginComputePass({label:'check sea at loaded muzzles'});pass.setPipeline(pipeline);pass.setBindGroup(0,groups[surfaceWaves?surfaceWaves.current:0]);pass.dispatchWorkgroups(Math.ceil(batch.length/32));pass.end();
       encoder.copyBufferToBuffer(output,0,readback,0,batch.length*16);encoded={batch,generation};return true;
     },
     read(){
