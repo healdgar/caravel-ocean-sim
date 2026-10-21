@@ -346,9 +346,8 @@ then the ship/helm, with no warning/error logs. Evidence:
 
 ## Daytime requests: forest, ship wake and shared surface disturbances
 
-**Combined local validation passed; publication pending.**
-The last published receipt above remains the startup checkpoint until the new
-public bytes are verified below. Root alone owns
+**Published and verified: runtime checkpoint `6a39870`.**
+The public-byte receipt is recorded below. Root alone owns
 numerical/geometric checks, native GPU tests, rendered review, builds and any
 subsequent Pages publication. Documentation/source readiness is not a passing
 combined run or a physical-iPhone result.
@@ -437,3 +436,13 @@ or physical-device qualification is claimed by this source audit.
   aggregation, physical-iPhone cost, and independent modest-slap audio. The new
   waves are authored linear responses; no CFD, calibrated energy conservation,
   bathymetric surf or universal breaking-onset implementation is claimed.
+
+**Published daytime checkpoint:** `6a39870345526df0809cbb9b0969749eb4942c93`.
+Pages workflow `39633359534` succeeded. At2026-10-21 16:18:27UTC, deployed HTML,
+manifest and all53 referenced assets matched local bytes/SHA-256 counts.
+HTML637680bytes, SHA-256
+`a9614bc10be3868ee695f0d0e30cfce0832a258eef67dabc79a83b22b11b6689`;
+referenced assets15875925bytes. Fresh visible public Chrome loaded the coastal
+scene with no warnings/errors; proof `shots/daytime-public-coast.png`.
+Source/asset receipts remain local in `/tmp/waterworld-startup-deployed.json`.
+The overnight heartbeat remains paused; this batch followed fresh daytime requests.
