@@ -64,7 +64,7 @@ export const VICTORY_DESIGN=deepFreeze({
   gunDecks:[{id:'lower',count:30,centre:.38,calibre:32,start:-5.12,end:5.05},
     {id:'middle',count:28,centre:.88,calibre:24,start:-4.9,end:4.85},
     {id:'upper',count:30,centre:1.38,calibre:12,start:-5.05,end:5.05},
-    {id:'quarter',count:12,centre:1.88,calibre:12,start:1.98,end:5.15},
+    {id:'quarter',count:12,centre:1.88,calibre:12,start:1.98,end:4.12},
     {id:'forecastle',count:4,centre:1.88,calibre:12,start:-4.8,end:-4.18}],
   crewStations:{
     ines:{x:-.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},

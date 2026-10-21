@@ -1,6 +1,11 @@
 import { createSailingInstruments } from './instruments.js';
 import { controlIcon, createHelmControls } from './controls.js';
 import { createSceneAudio } from './audio.js';
+import { createShipGunnery } from './gunnery-control.js';
+import { createGunneryControls } from './gunnery-ui.js';
+import { createGunneryEffects } from './gunnery-effects.js';
+import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
+import { createGunRecoilMap, updateGunRecoilVertices } from './gunnery-models.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
 import { createAnchorRenderer } from './anchor.js';
@@ -372,6 +377,8 @@ async function main() {
   const {vertices:caravelMesh,indices:caravelIndices} = shipAsset;
   const caravelBuffer = mkBuf(caravelMesh.byteLength, GU.VERTEX | GU.COPY_DST, 'caravel geometry');
   device.queue.writeBuffer(caravelBuffer, 0, caravelMesh);
+  const companionCaravelBuffer=mkBuf(caravelMesh.byteLength,GU.VERTEX|GU.COPY_DST,'companion cannon geometry');
+  device.queue.writeBuffer(companionCaravelBuffer,0,caravelMesh);
   const caravelIndexBuffer=mkBuf(caravelIndices.byteLength,GU.INDEX|GU.COPY_DST,'caravel indices');
   device.queue.writeBuffer(caravelIndexBuffer,0,caravelIndices);
   const oakImage = await createImageBitmap(await (await fetch('assets/caravel-oak-albedo.webp')).blob());
@@ -406,7 +413,7 @@ async function main() {
   const companionHullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,'companion hull transform');
   const companionHullData=new Float32Array(HULL_UNIFORM_BYTES/4);
   const companionWetness=await createSurfaceWetness({device,mesh:caravelMesh,hullUBO:companionHullUBO,frameUBO,computePipe});
-  const companionShadows=await createVesselShadows({device,hullUBO:companionHullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:caravelBuffer,shader,wetness:companionWetness,targets:sceneShadows.layer(1)});
+  const companionShadows=await createVesselShadows({device,hullUBO:companionHullUBO,mesh:caravelMesh,meshIndices:caravelIndices,vertexBuffer:companionCaravelBuffer,shader,wetness:companionWetness,targets:sceneShadows.layer(1)});
   let companionCrew=null;
   try{companionCrew=await createCrew({waterOptics,device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
   catch(error){console.warn('Companion crew initialization:',error);}
@@ -417,7 +424,7 @@ async function main() {
     {id:'player',boat:null,hullUBO,hullData,wetness,shadows,crew,interaction,lighting:caravelShadows},
     {id:'companion',boat:null,hullUBO:companionHullUBO,hullData:companionHullData,wetness:companionWetness,shadows:companionShadows,crew:companionCrew,interaction:companionInteraction,lighting:companionShadows.bind(caravelPipe)},
   ];
-  for(const v of vessels)v.submergedLighting=v.shadows.bind(submergedCaravel.pipeline);
+  for(const [i,v] of vessels.entries()){v.submergedLighting=v.shadows.bind(submergedCaravel.pipeline);v.vertexBuffer=i?companionCaravelBuffer:caravelBuffer;v.mesh=new Float32Array(caravelMesh);v.recoilMap=createGunRecoilMap(shipAsset);}
   const wakeIndices=[0,1,2,3];
   const wakeIndex=()=>interaction.current+2*companionInteraction.current;
   const bgFoamUpd=[0,1].map(i=>wakeIndices.map(w=>bg(foamUpdPipe,[{buffer:foamUBO},lvl(foamW[1-i],0),lvl(foamW[i],0),
@@ -443,6 +450,8 @@ async function main() {
   await Promise.all(vessels.map(async v=>{v.anchorRenderer=await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
   const dolphins=await createDolphins({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   const marineLife=await createMarineLife({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
+  const gunEffects=await createGunneryEffects({device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
+  const gunSea=await createGunnerySeaProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
   const impactDetector=createImpactDetector();
   const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
@@ -535,7 +544,7 @@ async function main() {
     oceanOpticsGroup=device.createBindGroup({label:'water transmission',layout:oceanPipe.getBindGroupLayout(3),entries:[
       {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}}]});
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
-    depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
+    depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     waterMips = Math.min(8, Math.floor(Math.log2(Math.max(W,H)))+1);
     waterCopy = device.createTexture({ size: [W, H], format: HDR, mipLevelCount: waterMips,
@@ -663,6 +672,14 @@ async function main() {
   if(terrain&&LAND_STAGE){const start=terrain.safeStart(companion,companion);companion.x=start.x;companion.z=start.z;}
   let followerEnabled=qs.get('follower')!=='0';boat.followingShip=followerEnabled;
   vessels[0].boat=boat;vessels[1].boat=companion;
+  const shipGuns=createShipGunnery(boat,{onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),onEvent:event=>{
+    sceneAudio.gunneryEvent(event);
+    if(event.type==='shot')gunEffects.emitShot({...event,id:event.shotId,chargeKg:event.mass*.3});
+    else if(event.type==='impact'&&event.kind==='water')gunEffects.emitImpact({...event,id:event.shotId,position:event.surfacePosition,massKg:event.mass});
+  }});
+  vessels[0].gunnery=shipGuns;
+  // The following ship retains secured guns until a future AI combat order system.
+  const companionGuns=createShipGunnery(companion);vessels[1].gunnery=companionGuns;
   for(const v of vessels)v.anchor=createAnchorState(v.boat);
   // Refresh the entry level from the latest local wave probe throughout the fall.
   const anchor=vessels[0].anchor,anchorEnvironment={terrain,settings:P,waterHeight:()=>boat.target.heave};
@@ -1002,7 +1019,7 @@ async function main() {
     const button=document.createElement('button');button.type='button';button.disabled=!crew;button.dataset.order=order.id;
     button.setAttribute('aria-label',order.label);button.setAttribute('aria-pressed',String(order.id==='watch'));
     const name=document.createElement('strong'),detail=document.createElement('span');name.textContent=order.label;detail.textContent=order.detail;button.append(name,detail);
-    button.onclick=()=>{if(crew?.order(boat,order.id)){sceneAudio.order(order.id,{boat});propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();}};
+    button.onclick=()=>{if(crew?.order(boat,order.id)){shipGuns.standDown();sceneAudio.order(order.id,{boat});propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();}};
     orders.append(button);orderButtons.set(order.id,button);
   }
   captainBody.append(orders);
@@ -1013,6 +1030,7 @@ async function main() {
   anchorWeigh.onclick=()=>{if(anchor.weigh()){sceneAudio.order('weigh-anchor',{boat});updateAnchorUI();}};
   orders.append(anchorDrop,anchorWeigh);
   const anchorStatus=document.createElement('p');anchorStatus.id='anchor-status';anchorStatus.setAttribute('role','status');captainBody.append(anchorStatus);
+  const gunControls=createGunneryControls(captainBody,shipGuns);
   function updateAnchorUI(){
     anchorDrop.disabled=anchor.active||!anchor.eligibility.allowed;anchorDrop.title=anchor.active?'Anchor already deployed':anchor.eligibility.reason;
     anchorWeigh.disabled=!anchor.active||anchor.phase==='weighing';
@@ -1132,7 +1150,7 @@ async function main() {
     const input=document.createElement('input');Object.assign(input,{type:'range',min:0,max:100,step:5,value:boat[key]*100,id:'boat-'+key});
     input.setAttribute('aria-label',name.textContent);
     const output=document.createElement('output');output.textContent=Math.round(boat[key]*100)+'%';
-    input.addEventListener('input',()=>{boat[key]=Number(input.value)/100;});
+    input.addEventListener('input',()=>{shipGuns.standDown();boat[key]=Number(input.value)/100;});
     row.append(name,input,output);sailControls.append(row);sailInputs.push({input,output});
   }
   const sailStatus=document.createElement('p');sailStatus.id='sail-status';sailControls.append(sailStatus);
@@ -1178,6 +1196,7 @@ async function main() {
   propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
   const helm=createHelmControls(boat,value=>{
     const order=value===1?'full':value===0?'furl':'reduced';
+    shipGuns.standDown();
     if(!crew?.order(boat,order)){boat.propulsion='sail';for(const key of SAIL_KEYS)boat[key]=value;}
     sceneAudio.order(order,{boat});
     propulsionInput.value=boat.propulsion;
@@ -1391,7 +1410,7 @@ async function main() {
       if(profileToggle)profileToggle.textContent=`Performance · ${fps.toFixed(1)} FPS · ${Math.round(resolution.scale*100)}%`;
       updateResolutionStatus();
       updateCrewUI();
-      updateAnchorUI();fleetViewButton.disabled=!followerEnabled;
+      updateAnchorUI();gunControls.update();fleetViewButton.disabled=!followerEnabled;
       followerStatus.textContent=followerEnabled?`${followerAI.status} · ${followerAI.separation.toFixed(0)} m · ${(boatForwardSpeed(companion)/KNOT_TO_MPS).toFixed(1)} kn`:'Companion hidden';
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
@@ -1440,6 +1459,7 @@ async function main() {
       data[16]=ship.x;data[17]=ship.heave;data[18]=ship.z;data[19]=simTime;
       data[20]=P.windDir*D2R-ship.heading*D2R;data[21]=P.windSpeed;data[22]=ship.showProw?1:0;
       data[23]=ship.modelId==='victory'?1:0;
+      const flash=v.gunnery.flash;data[7]=flash?.energy??0;data[11]=flash?.gunId??0;
       const sails=sailingState(ship);
       data.set(sails.set,24);data[27]=ship.hatchesClosed??0;data[28]=sails.squareYaw;data[29]=sails.lateenYaw;
       data[30]=sails.squareFill;data[31]=sails.lateenFill;data[32]=sails.windSide;data[33]=-sails.windForward;data[34]=sails.apparentSpeed;data[35]=sails.canvasTack;
@@ -1447,9 +1467,17 @@ async function main() {
       fleetHullData.set(data.subarray(0,24),index*24);
       v.shadows.update(data,frameF.subarray(32,35),ship.showProw&&qs.get('shadows')!=='0');
       if(!index||followerEnabled){v.crew?.update(ship,dt,P.windSpeed);v.wetness.updateCrew(v.crew?.state,ship);}
+      if(!index||followerEnabled){
+        v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
+        for(const range of updateGunRecoilVertices(v.recoilMap,v.mesh,v.gunnery.state.guns,ship)){
+          device.queue.writeBuffer(v.vertexBuffer,range.byteOffset,v.mesh.buffer,range.byteOffset,range.byteLength);
+        }
+      }
       if(ship.showProw)v.anchorRenderer.update(v.anchor,ship);
       v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
     }
+    gunEffects.setProjectiles(shipGuns.state.projectiles);
+    gunEffects.update(dt,{wind:[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed],eye:[cam.x,cam.y,cam.z]});
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
     if (needSpectrum) writeSimStatic();
@@ -1521,7 +1549,9 @@ async function main() {
     }
     cp.end();
 
+    gunSea.encode(enc,shipGuns.state.projectiles,simTime);
     const drawProw=vessels.some(v=>v.boat.showProw);
+    const gunTransparent=gunEffects.transparentActive;
     // Resolve the ocean straight into the reflection pyramid. The ship pass
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
@@ -1532,13 +1562,13 @@ async function main() {
     for(const v of vessels){
       if(!v.boat.showProw)continue;
       submergedCaravel.bind(underwater);underwater.setBindGroup(0,v.submergedGroup);underwater.setBindGroup(1,v.submergedLighting);
-      underwater.setVertexBuffer(0,caravelBuffer);underwater.setIndexBuffer(caravelIndexBuffer,'uint32');underwater.drawIndexed(caravelIndices.length);
+      underwater.setVertexBuffer(0,v.vertexBuffer);underwater.setIndexBuffer(caravelIndexBuffer,'uint32');underwater.drawIndexed(caravelIndices.length);
       v.crew?.drawSubmerged(underwater);v.anchorRenderer.drawSubmerged(underwater);
     }
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     mainPass.timestampWrites=profiler.writes('Ocean + sky');
-    mainPass.colorAttachments[0].storeOp = drawProw ? 'store' : 'discard';
-    mainPass.depthStencilAttachment.depthStoreOp = drawProw ? 'store' : 'discard';
+    mainPass.colorAttachments[0].storeOp = drawProw||gunTransparent ? 'store' : 'discard';
+    mainPass.depthStencilAttachment.depthStoreOp = drawProw||gunTransparent ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
     terrain?.draw(rp,cam);
     if (nodeCount) {
@@ -1562,7 +1592,7 @@ async function main() {
     rp.setBindGroup(0, bgSky);
     clouds.drawSky(rp);
     rp.draw(3);
-    if (!drawProw) {dolphins.draw(rp);marineLife.draw(rp);spindrift.draw(rp);weatherRenderer.draw(rp);}
+    if (!drawProw) {dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);spindrift.draw(rp);if(!gunTransparent)weatherRenderer.draw(rp);}
     rp.end();
 
     if (drawProw) {
@@ -1575,18 +1605,24 @@ async function main() {
       const prowPass = enc.beginRenderPass({
         timestampWrites:profiler.writes('Ship + spray'),
         colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: hdrView,
-          loadOp: 'load', storeOp: 'discard' }],
-        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: 'discard' },
+          loadOp: 'load', storeOp: gunTransparent?'store':'discard' }],
+        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: gunTransparent?'store':'discard' },
       });
       for(const v of vessels){
         if(!v.boat.showProw)continue;
         prowPass.setPipeline(caravelPipe);prowPass.setBindGroup(0,v.bindGroup);prowPass.setBindGroup(1,v.lighting);
-        prowPass.setVertexBuffer(0,caravelBuffer);prowPass.setIndexBuffer(caravelIndexBuffer,'uint32');prowPass.drawIndexed(caravelIndices.length);
+        prowPass.setVertexBuffer(0,v.vertexBuffer);prowPass.setIndexBuffer(caravelIndexBuffer,'uint32');prowPass.drawIndexed(caravelIndices.length);
         v.crew?.draw(prowPass);
         v.anchorRenderer.draw(prowPass);
       }
       for(const v of vessels)v.interaction.draw(prowPass);
-      dolphins.draw(prowPass);marineLife.draw(prowPass);spindrift.draw(prowPass);weatherRenderer.draw(prowPass);prowPass.end();
+      dolphins.draw(prowPass);marineLife.draw(prowPass);gunEffects.drawProjectiles(prowPass);spindrift.draw(prowPass);if(!gunTransparent)weatherRenderer.draw(prowPass);prowPass.end();
+    }
+
+    if(gunTransparent){
+      gunEffects.resolveDepth(enc,depthMS.createView(),W,H);
+      const effects=enc.beginRenderPass({colorAttachments:[{view:mainPass.colorAttachments[0].view,resolveTarget:hdrView,loadOp:'load',storeOp:'discard'}],depthStencilAttachment:{view:depthMS.createView(),depthLoadOp:'load',depthStoreOp:'discard'}});
+      gunEffects.draw(effects);weatherRenderer.draw(effects);effects.end();
     }
 
     if (P.bloom > 0) {
@@ -1627,6 +1663,7 @@ async function main() {
     }
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
+    gunSea.read(contact=>shipGuns.impact(contact));
     if(doAudio){audioPending=true;audioRead.mapAsync(GPUMapMode.READ).then(()=>{
       const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
       audioRead.unmap();audioPending=false;if(audioRevision===boat.revision)sceneAudio.impact(event);

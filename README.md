@@ -26,6 +26,23 @@ and vegetation. [Longer-term geography and voyage design](LAND_SYSTEM_DESIGN.md)
 |---|---|
 | ![](docs/side.jpg) | ![](docs/high.jpg) |
 
+## Cannon drill
+
+Open **Captain → Gunnery**. Prepare a side, wait for the crew's readiness report,
+then order one broadside. Guns load, run out and recoil; solid round shot inherits
+the ship's motion and follows gravity and aerodynamic drag. Wave contacts drive
+water impacts. Brief muzzle flashes light the ship; dense powder smoke follows
+wind and respects scene depth. Enable sound for captain orders, crew readiness,
+carriage work and delayed cannon reports.
+
+Niña uses her four small swivel guns; Victory uses her 104-gun arrangement.
+The visible watch demonstrates selected deck-gun teams; interior teams are
+abstracted. Damage, penetration, ricochet and AI combat are not yet modeled.
+[Implementation, historical sources and assumptions](GUNNERY.md).
+[Audio review and provenance](GUNNERY_AUDIO.md).
+
+![Victory firing a rolling broadside, with powder smoke obscuring the battery](docs/gunnery.png)
+
 ## Run it
 
 You need a recent Chrome with WebGPU and a reasonably capable GPU. On a laptop, force Chrome onto the dedicated GPU in the Windows graphics settings, or it will fall back to the integrated one.

@@ -1,0 +1,11 @@
+{
+  "cannon-report":{"take":"03","edit":{"endSeconds":0.52,"fadeOutSeconds":0.12}},
+  "cannon-recoil":{"take":"01"},
+  "cannon-rammer":{"take":"02","edit":{"endSeconds":0.55,"fadeOutSeconds":0.06}},
+  "cannon-run-out":{"take":"03"},
+  "captain-guns-prepare":{"take":"02"},
+  "captain-guns-fire-port":{"take":"01"},
+  "captain-guns-fire-starboard":{"take":"01"},
+  "captain-guns-cease":{"take":"01"},
+  "crew-guns-ready":{"take":"01"}
+}

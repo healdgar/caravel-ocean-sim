@@ -1,7 +1,7 @@
 import { gltfQuatMultiply } from './gltf.js';
 import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode } from './ship-models.js';
-import { crewRunnerMetrics } from './crew-work.js';
+import { crewRunnerMetrics, crewGunneryTool } from './crew-work.js';
 
 const poseSub=(a,b)=>a.map((v,i)=>v-b[i]);
 const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
@@ -60,6 +60,16 @@ export function poseCrewWork(a,s,boat){
       targets[`foot_${side}`]=ft;targets[`hand_${side}`]=ht;
     }
     s.grips=targets;return;
+  }
+  if(j?.kind==='gunnery'&&j.stage==='working'){
+    const tool=crewGunneryTool(s,boat);if(!tool?.hands)return;
+    a.blend('Brace',s.time,j.gunRole==='loader'?.50:.22);
+    for(const [i,side]of ['l','r'].entries()){
+      const hand=actorLocal(tool.hands[i],s),sign=side==='l'?1:-1;
+      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.2]);
+      (s.grips??={})[`hand_${side}`]=hand;
+    }
+    return;
   }
   if(j?.stage==='working' && (j.kind==='haul'||j.kind==='hatch')){
     if(j.kind==='hatch')a.blend('Brace',s.time,.8);

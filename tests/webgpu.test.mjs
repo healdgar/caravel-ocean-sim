@@ -1998,7 +1998,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       }));
       const buf=b=>({buffer:b}),view=t=>t.createView();
       const groups=[
-        [[0,buf(frame)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[15,buf(fixture)]],
+        [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[15,buf(fixture)]],
         [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],[6,buf(hull)],
           [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[15,buf(fixture)]],
       ].map((entries,i)=>device.createBindGroup({layout:pipelines[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))}));

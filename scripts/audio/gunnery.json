@@ -1,0 +1,43 @@
+{
+  "sounds": [
+    {
+      "id": "cannon-report",
+      "label": "Black powder naval gun report",
+      "seconds": 0.8,
+      "loop": false,
+      "driver": "One muzzle discharge, heard after acoustic travel time.",
+      "prompt": "A single antique naval cannon BANG outdoors: ONE sudden sharp explosive crack with a rich solid gunshot body and a short airy fading tail. One discharge in total, immediate attack at the start. Close documentary field recording on a wooden sailing ship. No voices, music, echo, drone or additional shots."
+    },
+    {
+      "id": "cannon-recoil",
+      "label": "Oak carriage recoil and breeching arrest",
+      "seconds": 1.6,
+      "loop": false,
+      "driver": "Gun carriage recoil; no second explosion.",
+      "prompt": "Close foley of a very heavy oak naval cannon carriage recoiling once across the oak gun deck of an eighteenth-century wooden sailing warship. A short low wooden truck rumble, heavy hemp breeching rope stretching tight, one muted timber arrest thud, then settle to silence. No cannon blast, voices, breaking wood, steel machinery, squealing or rattling shell cases."
+    },
+    {
+      "id": "cannon-rammer",
+      "label": "Rammer seating the charge",
+      "seconds": 1.8,
+      "loop": false,
+      "driver": "Ramming stage of a gun's loading sequence.",
+      "prompt": "Quiet close foley, one controlled manual movement: a coarse linen wad pushed down a thick iron tube using a wooden pole. Continuous soft dry cloth friction sliding inward, ONE dull muffled seating thump, pole slides back out. In the gun deck of a wooden sailing ship. Natural dry sound in a quiet space. No repeated tapping, rhythmic knocks, dialogue, machinery or gunfire."
+    },
+    {
+      "id": "cannon-run-out",
+      "label": "Hemp tackle running the gun out",
+      "seconds": 1.2,
+      "loop": false,
+      "driver": "Crew haul the gun to battery using tackles.",
+      "prompt": "Quiet close foley of small solid wooden wheels rolling gently over wooden floorboards, low continuous rubbing and gritty rolling friction with coarse hemp rope under tension. One short controlled movement ending quietly. Dry natural recording on an old wooden sailing ship. No voices, crash, impact, water, machinery or music."
+    }
+  ],
+  "speech": [
+    {"id":"captain-guns-prepare","speaker":"captain","text":"[shouts] Hands to the guns. Load round shot!"},
+    {"id":"captain-guns-fire-port","speaker":"captain","text":"[shouts] Port battery! Fire!"},
+    {"id":"captain-guns-fire-starboard","speaker":"captain","text":"[shouts] Starboard battery! Fire!"},
+    {"id":"captain-guns-cease","speaker":"captain","text":"[shouts] Cease fire!"},
+    {"id":"crew-guns-ready","speaker":"tomas","text":"[shouts] Guns ready, captain!"}
+  ]
+}

@@ -34,7 +34,7 @@ function victoryStairHeight(z,boat){
   for(const [a,b,A,B]of VICTORY_STAIRS)if(z>=a&&z<=b)return A+(B-A)*(z-a)/(b-a)+victorySheer(z);
   return modelDeck(boat,z);
 }
-export function victoryCrewRoute(s,target,boat){
+export function victoryCrewRoute(s,target,boat,{gunCorridor=false}={}){
   let side=Math.sign(s.x)||Math.sign(target[0])||1;
   const start=victoryLanding(s.z),end=victoryLanding(target[2]);
   const path=[],add=(x,z,y=modelDeck(boat,z))=>{
@@ -42,7 +42,7 @@ export function victoryCrewRoute(s,target,boat){
   };
   // Enter/leave a flight at its landing, then use the outboard corridor. The
   // centreline remains clear for hatch gratings, capstans and mast heels.
-  const outer=z=>side*Math.min(1.3,modelDeckWidth(boat,z)-.12);
+  const outer=z=>side*Math.min(gunCorridor?.54:1.3,modelDeckWidth(boat,z)-.12);
   add(s.x,start);add(outer(start),start);
   const along=(from,to)=>{
     const direction=Math.sign(to-from),count=Math.max(1,Math.ceil(Math.abs(to-from)/.35));
@@ -79,12 +79,101 @@ function routeTo(s,target,boat){
   if(s.id==='catarina')return [deckPoint(s.x,2.55),deckPoint(target[0],2.55),target];
   return [deckPoint(target[0],s.z),target];
 }
+export function crewGunStation(gun,role,boat){
+  const sx=boat.beam/3.6,sign=gun.sideSign??(gun.side==='port'?-1:1);
+  if(role==='loader'){
+    const x=boat.modelId==='victory'?gun.muzzleDesign[0]-sign*(gun.recoilLength+.10)/sx:gun.breechDesign[0]-sign*.15/sx;
+    const z=gun.station[2]+(boat.modelId==='victory'?.10:.24);
+    const edge=modelDeckWidth(boat,z)-.34/sx;
+    return [Math.max(-edge,Math.min(edge,x)),modelDeck(boat,z),z];
+  }
+  const z=gun.station[2]-(boat.modelId==='victory'?.13:.25),x=gun.station[0]-sign*(boat.modelId==='victory'?.08/sx:.33);
+  return [x,modelDeck(boat,z),z];
+}
+function gunCrewRoute(s,target,boat){
+  if(boat.modelId==='victory')return victoryCrewRoute(s,target,boat,{gunCorridor:true});
+  const path=[],add=p=>{if(!path.length||distance3(path.at(-1),p)>1e-8)path.push(p);};
+  const start=[s.x,modelDeck(boat,s.z),s.z];add(start);
+  // Niña's rendered companionway is a starboard flight at x .72–1.20,
+  // from z1.5 to2.64. Walk its actual ramp before entering the quarterdeck.
+  if(s.z<2.7){
+    add([.96,modelDeck(boat,1.5),1.5]);
+    for(let i=1;i<=8;i++)add([.96,modelDeck(boat,1.5)+(2.3-modelDeck(boat,1.5))*i/8,1.5+1.14*i/8]);
+  }
+  const z=s.z<2.7?2.64:s.z;add([Math.sign(target[0])*.38,2.3,z]);
+  add([Math.sign(target[0])*.38,2.3,target[2]]);add(target);return path;
+}
+function assignGunCrew(company,boat){
+  const guns=boat.gunnery?.guns;
+  if(!guns)return;
+  const weather=guns.filter(g=>g.weatherDeck),limit=boat.modelId==='victory'?4:2;
+  const selected=new Set();
+  for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side).slice(0,limit))selected.add(gun.id);
+  for(const gun of weather)gun.visibleCrew=selected.has(gun.id);
+  const targets=guns.filter(g=>selected.has(g.id)&&g.side===boat.gunnerySide);
+  const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery');
+  for(const s of company.crew){
+    const j=s.job;
+    if(j?.kind==='gunnery'&&j.stage!=='return'&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat);
+    // An aloft worker climbs down normally; there is no cannon-station teleport.
+    if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&['ascending','working'].includes(j.stage))j.stage='descending';
+    else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat);
+  }
+  if(!active)return;
+  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&!s.job);
+  for(const gun of targets)for(const role of['loader','tackle']){
+    if(company.crew.some(s=>s.job?.kind==='gunnery'&&s.job.stage!=='return'&&s.job.gun.id===gun.id&&s.job.gunRole===role))continue;
+    const target=crewGunStation(gun,role,boat),point=physical(target,boat);
+    available.sort((a,b)=>distance3(a.position,point)-distance3(b.position,point));
+    const sailor=available.shift();if(!sailor)continue;
+    sailor.home??=[sailor.x,sailor.z];
+    sailor.job={kind:'gunnery',gun,gunRole:role,stage:'approach',elapsed:0,rung:0,revision:company.revision,path:gunCrewRoute(sailor,target,boat),cursor:0};
+    sailor.intent='work';sailor.work=0;
+  }
+}
+export function updateCrewGunneryAttendance(company,boat){
+  boat.gunneryAttendance??=new Set();boat.gunneryAttendance.clear();
+  if(!boat.gunnery)return;
+  for(const gun of boat.gunnery.guns.filter(g=>g.visibleCrew&&g.side===boat.gunnerySide)){
+    const hands=company.crew.filter(s=>s.job?.kind==='gunnery'&&s.job.gun.id===gun.id&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard);
+    if(hands.some(s=>s.job.gunRole==='loader')&&hands.some(s=>s.job.gunRole==='tackle'))boat.gunneryAttendance.add(gun.id);
+  }
+}
+// Boat-local metre targets shared by actual hand IK and the visible tool mesh.
+export function crewGunneryTool(s,boat){
+  const j=s.job;if(j?.kind!=='gunnery'||j.stage!=='working'||s.intent!=='work')return null;
+  const gun=j.gun,stage=gun.stage,scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12];
+  const direction=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...direction);for(let i=0;i<3;i++)direction[i]/=n;
+  const muzzle=gun.muzzleDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);
+  const along=(distance,base=muzzle)=>base.map((v,i)=>v+direction[i]*distance);
+  if(j.gunRole==='loader'&&['swab','load','ram'].includes(stage)){
+    if(gun.kind==='swivel'){
+      const breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);
+      return {kind:'chamber',a:along(-.12,breech),b:along(.12,breech),hands:[breech.map((v,i)=>v+(i===2?.09:0)),breech.map((v,i)=>v-(i===2?.09:0))]};
+    }
+    const stroke=Math.sin((gun.progress??0)*Math.PI*4)*.10,grip=along(.10+stroke);
+    return {kind:stage==='swab'?'sponge':'rammer',a:along(.72+stroke),b:along(-.6+stroke),hands:[grip,along(.26+stroke)]};
+  }
+  if(j.gunRole==='loader'&&stage==='prime'){
+    const breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);breech[1]+=.10;
+    return {kind:'prime',hands:[breech,breech.map((v,i)=>v+(i===2?.12:0))]};
+  }
+  if(j.gunRole==='tackle'&&['swab','load','ram','runout'].includes(stage)){
+    const sign=gun.sideSign??Math.sign(gun.directionDesign[0]),pull=stage==='runout'?Math.sin((gun.progress??0)*Math.PI*6)*.07:0;
+    const hands=[-.10,.10].map(z=>[s.position[0]+sign*(.32+pull),s.position[1]+1.03,s.position[2]+z]);
+    const breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);breech[2]-=.22;
+    return {kind:'tackle',a:breech,b:hands[1],hands};
+  }
+  return null;
+}
 export function assignCrewWork(company,boat) {
   const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs((boat[key]??1)-sails.set[i])>.008);
   company.workTime??=0;
+  assignGunCrew(company,boat);
   for(const s of company.crew){
     s.home??=[s.x,s.z];
     if(s.job)continue;
+    if(company.gunneryActive)continue;
     let job;
     if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
       const [mast]=CLIMBERS[s.id],side=boat.modelId==='victory'?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
@@ -144,6 +233,20 @@ export function stepCrewWork(s,company,boat,dt) {
           if(j.stage==='return'){s.job=null;s.x=s.home[0];s.z=s.home[1];s.wait=2;return false;}
           j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';j.elapsed=0;
         }}
+        j.blockedTime=0;
+      }else if(j.kind==='gunnery'){
+        // Shared stairs/crossings can produce opposing traffic. A small clear
+        // sidestep lets one body yield without walking through another person.
+        j.blockedTime=(j.blockedTime??0)+dt;
+        if(j.blockedTime>.5){
+          const preference=(company.crew.indexOf(s)%2?1:-1),sx=boat.beam/3.6;
+          for(const side of[preference,-preference]){
+            const candidate=[p[0]+side*.6*dt/sx,p[1],p[2]],cp=physical(candidate,boat);
+            if(Math.abs(candidate[0])+.32/sx>=modelDeckWidth(boat,candidate[2]))continue;
+            if(company.crew.some(other=>other!==s&&other.position&&Math.hypot(cp[0]-other.position[0],cp[1]+.028-other.position[1],cp[2]-other.position[2])<.54))continue;
+            j.position=candidate;s.x=candidate[0];s.z=candidate[2];moving=true;break;
+          }
+        }
       }
     }else if(j.stage==='ascending'||j.stage==='descending'){
       const {rungs,dy}=crewRunnerMetrics(boat,j.mast,j.side);
@@ -155,6 +258,10 @@ export function stepCrewWork(s,company,boat,dt) {
       j.position=climbRoot(j.mast,j.side,j.rung,boat);s.x=j.position[0];s.z=j.position[2];s.yaw=-j.side*Math.PI/2;
       if(j.stage==='ascending'&&j.rung>=j.top){j.stage='working';j.elapsed=0;}
       if(j.stage==='descending'&&j.rung<=0)startReturn(s,boat);
+    }else if(j.stage==='working'&&j.kind==='gunnery'){
+      s.yaw=(j.gun.sideSign??Math.sign(j.gun.directionDesign[0]))*Math.PI/2;
+      const tool=crewGunneryTool(s,boat);
+      if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
     }else if(j.stage==='working'){
       s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
@@ -171,10 +278,15 @@ export function stepCrewWork(s,company,boat,dt) {
   s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   s.work+=(Number(active&&j.stage==='working')-s.work)*blend;
   const p=j.position??[s.x,modelDeck(boat,s.z),s.z];s.position.set(physical(p,boat));s.position[1]+=.028;
+  if(j.kind==='gunnery'&&j.stage==='working'){
+    const tool=crewGunneryTool(s,boat);
+    if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
+  }
   s.climbPitch=0;
   if(boat.modelId==='victory'&&j.rung>0){
     const runner=crewRunnerMetrics(boat,j.mast,j.side);s.climbPitch=runner.lean;s.yaw=runner.yaw;
   }else if(boat.modelId==='victory'&&j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
+  else if(j.kind==='gunnery'&&j.stage==='working'&&active&&!['ready','recoil','spent'].includes(j.gun.stage))s.climbPitch=j.gunRole==='loader'&&boat.modelId==='victory'?.45:.10;
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin(s.climbPitch/2),cx=Math.cos(s.climbPitch/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return true;
@@ -182,7 +294,7 @@ export function stepCrewWork(s,company,boat,dt) {
 function startReturn(s,boat){
   const j=s.job;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s,boat);
-  if(boat.modelId==='victory'){j.path=victoryCrewRoute(s,home,boat);return;}
+  if(boat.modelId==='victory'){j.path=victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'});return;}
   j.path=s.id==='maria'?[deckPoint(s.x,-3.2),deckPoint(home[0],-3.2),home]
     :s.id==='duarte'?[deckPoint(home[0],s.z),home]
     :[...j.path.slice(0,-1).reverse(),home];
@@ -193,5 +305,6 @@ export function crewWorkLabel(s){
   const j=s.job;
   if(j.stage==='ascending')return 'Climbing a runner';if(j.stage==='descending')return 'Climbing down';
   if(j.stage==='approach')return 'Going to work';if(j.stage==='return')return 'Returning to station';
+  if(j.kind==='gunnery')return {swab:'Sponging the bore',load:'Loading round shot',ram:'Ramming home',runout:'Hauling the gun out',prime:'Priming the gun',ready:'Standing clear · gun ready',recoil:'Standing clear of recoil',spent:'Awaiting reload'}[j.gun.stage]??'At the guns';
   return {rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind];
 }

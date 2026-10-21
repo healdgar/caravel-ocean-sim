@@ -2,11 +2,27 @@ import { TILLER_PIVOT, HULL_VERTICAL_SCALE, hullDeck } from '../hull.js';
 import { LATEEN_MOTION } from './lateen.js';
 import {VICTORY_MOTION} from './victory.js';
 import {VICTORY_DESIGN,VICTORY_SAILS,victoryHatchPivot} from '../models/victory.js';
+import {createGunDefinitions} from '../gunnery-models.js';
 // Shared deformation keeps visible geometry, wetness and shadow casters coincident.
 export const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
   sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3>, lateenPressure:vec4f };
 fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
+const gunFlashNina=array<vec3f,4>(${createGunDefinitions('nina').map(g=>'vec3f('+g.muzzleDesign.join(',')+')').join(',')});
+const gunFlashVictory=array<vec3f,104>(${createGunDefinitions('victory').map(g=>'vec3f('+g.muzzleDesign.join(',')+')').join(',')});
+fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f {
+  let energy=abs(hull.up.w);if(energy<.0001){return vec3f(0);}
+  let index=u32(max(0.0,hull.forward.w));
+  var local=gunFlashNina[min(index,3u)];
+  if(hull.rig.w>.5){local=gunFlashVictory[min(index,103u)];}
+  let scale=vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
+  let light=hull.origin.xyz+rotateHull(local*scale);
+  let delta=light-world;let d=max(.25,length(delta));let l=delta/d;
+  let halfV=normalize(l+eye);let spec=pow(max(dot(n,halfV),0.0),mix(90.0,8.0,rough));
+  // A finite, warm black-powder flash. Illumination falls with distance, lasts
+  // less than a tenth of a second, and adds no persistent glow to the wood.
+  return vec3f(1.0,.47,.12)*energy*90.0/(1.0+d*d)*(albedo*.31831*max(dot(n,l),0.0)+spec*.07);
+}
 ${LATEEN_MOTION}
 ${VICTORY_MOTION}
 struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };

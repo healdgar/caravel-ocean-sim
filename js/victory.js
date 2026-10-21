@@ -136,8 +136,10 @@ export function createVictoryMesh({groups,parts}={}){
     quad(surface(a,low,true),surface(a,high,true),surface(b,high,true),surface(b,low,true),4);
     for(const z of [a,b])quad(surface(z,low),surface(z,high),surface(z,high,true),surface(z,low,true),24);
     for(const base of [low,high])quad(surface(a,base),surface(a,base,true),surface(b,base,true),surface(b,base),24);
+    const recoilStart=out.length,gunId=(side<0?0:ports.length)+index;
     tube([inset-side*.10,y,p.z],[x+side*.19,y,p.z],p.calibre===32?.040:p.calibre===24?.035:.030,3,.026,8);
     tube([x+side*.192,y,p.z],[x+side*.195,y,p.z],.021,4,.021,8);
+    group(`gunnery.recoil.${gunId}`,'hull',recoilStart,{type:'gun-recoil',gunId,axis:[side,0,0]});
     // The hinge and raised leaf retain the curved sheer and tumblehome of the
     // opening. A flat rectangle across the bow separated from its gunport.
     for(let i=0;i<3;i++){
@@ -262,9 +264,28 @@ export function createVictoryMesh({groups,parts}={}){
   }
   for(const g of VICTORY_DESIGN.gunDecks.filter(g=>!batteries.includes(g)))for(const side of [-1,1])for(let i=0;i<g.count/2;i++){
     const start=out.length,z=g.start+(g.end-g.start)*i/(g.count/2-1),floor=victoryVesselDeck(z),y=g.centre+victorySheer(z),x=side*(victoryHullHalfWidth(z,y)-.07),carronade=g.id==='forecastle'&&i===0;
-    box([x-side*.14,floor+.015,z-.09],[x+side*.04,floor+.09,z+.09],24);
-    tube([x-side*.15,y,z],[x+side*(carronade?.21:.3),y,z],carronade?.055:.032,3,carronade?.045:.025,12);
-    for(const z1 of [z-.08,z+.08])tube([x-side*.12,floor+.035,z1],[x+side*.045,floor+.035,z1],.039,1,.039,8);
+    const gunId=88+(g.id==='quarter'?(side<0?0:6)+i:12+(side<0?0:2)+i);
+    // Two cheeks, two axles and four discrete wooden trucks. Axles run along
+    // Z, so the carriage wheels actually roll with the athwartships recoil.
+    const rear=x-side*.25,front=x+side*.015,left=Math.min(rear,front),right=Math.max(rear,front);
+    box([left,floor+.055,z-.082],[right,floor+.105,z+.082],24);
+    for(const sign of[-1,1])box([left,floor+.09,z+sign*.073-.013],[right,floor+.18,z+sign*.073+.013],24);
+    for(const ax of[x-side*.21,x-side*.005]){
+      tube([ax,floor+.042,z-.12],[ax,floor+.042,z+.12],.013,3,.013,8);
+      for(const sign of[-1,1])tube([ax,floor+.042,z+sign*.095],[ax,floor+.042,z+sign*.126],.042,1,.042,8);
+    }
+    const breech=[x-side*.15,y,z],muzzle=[x+side*(carronade?.21:.3),y,z],outer=carronade?.045:.025,bore=outer*.67;
+    tube(breech,muzzle,carronade?.055:.032,3,outer,12,undefined,true);
+    const inside=[muzzle[0]-side*.10,y,z];
+    // A real annular muzzle and dark internal bore, without a solid metal cap.
+    const point=(p,r,j)=>[p[0],p[1]+r*Math.cos(j*Math.PI/6),p[2]+r*Math.sin(j*Math.PI/6)];
+    for(let j=0;j<12;j++){
+      quad(point(muzzle,outer,j),point(muzzle,bore,j),point(muzzle,bore,j+1),point(muzzle,outer,j+1),3);
+      quad(point(muzzle,bore,j),point(inside,bore,j),point(inside,bore,j+1),point(muzzle,bore,j+1),4);
+      tri(inside,point(inside,bore,j+1),point(inside,bore,j),4);
+      tri(breech,point(breech,carronade?.055:.032,j),point(breech,carronade?.055:.032,j+1),3);
+    }
+    group(`gunnery.recoil.${gunId}`,'hull',start,{type:'gun-recoil',gunId,axis:[side,0,0]});
     group(`gun.${g.id}.${side<0?'port':'starboard'}.${i}`,'hull',start);
   }
   // One gently arched, bowed and raked transom supports every gallery skin,

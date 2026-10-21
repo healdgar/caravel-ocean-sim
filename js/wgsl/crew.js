@@ -113,7 +113,7 @@ struct CrewVertex {
   let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
-  let col=lightningSurface(n,view,albedo,rough)+albedo*(direct*diffuse/PI+ambient)+direct*spec*max(dot(n,sun),0.0)
+  let col=lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+albedo*(direct*diffuse/PI+ambient)+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   // Match timber, canvas and land: the same directional sky and marine haze
   // must veil every surface along this view ray, including shadowed sailors.

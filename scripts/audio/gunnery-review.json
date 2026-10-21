@@ -1,0 +1,24 @@
+{
+  "method":"Argon via the user-authorized agy CLI, direct native read_file audio ingestion. Local ffprobe durations and checksums are authoritative; early perceptual time estimates were inconsistent and were not used as exact edit instructions.",
+  "selected":{
+    "cannon-report":{"take":"03","edit":{"endSeconds":0.52,"fadeOutSeconds":0.12},"verdict":"KEEP","evidence":"Final edited sample was directly re-listened: one immediate sharp outdoor blast, low-mid body and crisp crack, clean smooth fade, no second hit."},
+    "cannon-recoil":{"take":"01","verdict":"KEEP","evidence":"Wooden carriage rolls and scrapes, taut breeching creak and solid wooden arrest, no gun blast or modern machinery."},
+    "cannon-rammer":{"take":"02","edit":{"endSeconds":0.55,"fadeOutSeconds":0.06},"verdict":"KEEP","evidence":"Edited opening directly re-listened: single scraping/sliding motion and muffled seating thud; no later rhythmic taps."},
+    "cannon-run-out":{"take":"03","verdict":"KEEP","evidence":"Restrained timber and rope strain, short low rolling shift and quiet settling, no crash or voices."},
+    "captain-guns-prepare":{"take":"02","verdict":"KEEP","heard":"Hands to the guns! Load round shot!","evidence":"Replacement ends cleanly and matches accepted Captain Trevenen voice."},
+    "captain-guns-fire-port":{"take":"01","verdict":"KEEP","heard":"Port battery, fire!"},
+    "captain-guns-fire-starboard":{"take":"01","verdict":"KEEP","heard":"Starboard battery, fire!"},
+    "captain-guns-cease":{"take":"01","verdict":"KEEP","heard":"Cease fire!"},
+    "crew-guns-ready":{"take":"01","verdict":"KEEP","heard":"Guns ready, cap'n!"}
+  },
+  "rejected":{
+    "cannon-report-01":"Low cinematic thud without sharp attack.",
+    "cannon-report-02":"Three separate reports.",
+    "cannon-rammer-01":"Metronomic wooden tapping.",
+    "cannon-run-out-01":"Explosive opening crash.",
+    "cannon-run-out-02":"Spurious crash and vocal-like grunt.",
+    "captain-guns-prepare-01":"Truncated final word decay."
+  },
+  "sourceGenerationCredits":274,
+  "caution":"Perceptual model review is a quality gate, not a recording of an actual period naval gun or a human approval of the finished game mix. Final mix still requires user listening."
+}

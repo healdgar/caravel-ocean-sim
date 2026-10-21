@@ -2,8 +2,9 @@ import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
-import { assignCrewWork, stepCrewWork } from './crew-work.js';
+import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
+import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
@@ -90,9 +91,10 @@ export function stepCompany(company,boat,dt,wind) {
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
-    s.order=company.pending||company.order==='weather'?'standby':'patrol';
+    s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
     if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind);}
   }
+  updateCrewGunneryAttendance(company,boat);
   return company;
 }
 function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='hatch'&&s.job.stage!=='return');}
@@ -193,12 +195,14 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const submerged=waterOptics?await waterOptics.capture({source:CREW_RENDER,pipeline,vertex:{buffers:layout},groups:2}):null;
   const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
   if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
+  const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
   let enabled=true,drawEnabled=false;
   const drawBatch=(pass,b,shadow)=>{pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);};
-  return {state,assets:{models,pipeline,shadowPipeline,geometry:batches.map(({vertex,index})=>({vertex,index}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),joints:65,
+  return {state,assets:{models,pipeline,shadowPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index})=>({vertex,index}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),joints:65,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     update(boat,dt,wind){
       stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&state.crew[0].visible;
+      gunTools.update(state,boat,drawEnabled);
       if(!drawEnabled)return;
       for(const b of batches){
         const a=b.model.animator;
@@ -222,10 +226,11 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       if(!submerged||!drawEnabled)return;
       submerged.bind(pass);pass.setBindGroup(1,submergedLighting);
       for(const b of batches){pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);}
+      gunTools.drawSubmerged(pass);
     },
-    draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);},
-    drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);},
+    draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},
+    drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},
     status(){return !state.crew[0].visible?'Crew needs a larger deck':companyStatus(state);},
-    destroy(){for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index]),b.bones,b.actor])resource.destroy();},
+    destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index]),b.bones,b.actor])resource.destroy();},
   };
 }

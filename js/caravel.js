@@ -382,6 +382,7 @@ export function createCaravelMesh({parts,groups}={}) {
     beam([x,y-.14,z-.10],[x,y-.14,z+.10],.04,.045,3);
     for(const dz of [-.10,.10])beam([x,y-.16,z+dz],[x,y+.035,z+dz],.035,.035,3);
     tube([x,y,z-.13],[x,y,z+.13],.028,3,.028,10);
+    const recoilStart=out.length,gunId=(side<0?0:2)+(z===3.25?0:1);
     const breech=[x-side*.24,y,z],muzzle=[x+side*.49,y+.025,z];
     // Barrel sides only: a dark recessed bore replaces the usual tube end cap.
     const axis=norm(sub(muzzle,breech)),up=norm(cross(axis,[0,0,1])),across=cross(axis,up);
@@ -397,6 +398,7 @@ export function createCaravelMesh({parts,groups}={}) {
     for(const t of [.15,.35,.72]){const p=add(breech,mul(sub(muzzle,breech),t));tube(add(p,mul(axis,-.018)),add(p,mul(axis,.018)),.068-t*.02,3,.068-t*.02,12);}
     beam(breech,[x-side*.52,y-.10,z],.028,.028,3);
     beam([x-side*.13,y-.065,z],[x-side*.13,y+.075,z],.07,.10,3);
+    group(`gunnery.recoil.${gunId}`,'hull',recoilStart,{type:'gun-recoil',gunId,axis:[side*.73,.025,0]});
     group(`gun:${side}:${z}`,'hull',gunStart);
   }
 
