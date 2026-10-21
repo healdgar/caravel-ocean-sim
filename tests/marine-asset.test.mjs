@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {test} from 'node:test';
 import {loadMarineGLB,MARINE_ASSET_LENGTH,MARINE_ASSET_HEAD_SIGN,MARINE_ASSET_VERTEX_FLOATS,MARINE_ASSET_ROOT_LIFT} from '../js/marine-asset.js';
 import {readGLB,gltfAccessor} from '../js/gltf.js';
@@ -35,8 +36,9 @@ const dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
 test('the supplied textured whale is bounded, metre-scaled, actor-aligned and retains all three embedded maps',()=>{
   const bytes=readFileSync(new URL('../assets/wildlife/whale.glb',import.meta.url)),model=loadMarineGLB(bytes);
   assert.equal(MARINE_ASSET_VERTEX_FLOATS,11);assert.equal(MARINE_ASSET_HEAD_SIGN,1);
-  assert.equal(model.vertexCount,10792);assert.equal(model.indices.length,47151);assert.equal(model.vertices.byteLength/model.vertexCount,44);
-  close(model.bounds.size[2],MARINE_ASSET_LENGTH);assert.ok(model.bounds.size[0]>9&&model.bounds.size[0]<10.5);assert.ok(model.bounds.size[1]>5&&model.bounds.size[1]<6);
+  assert.equal(model.vertexCount,28526);assert.equal(model.indices.length,117762);assert.equal(model.vertices.byteLength/model.vertexCount,44);
+  assert.ok(model.indices.length/3<45000,'the supplied 145,388-triangle source is reduced for the encounter renderer');
+  close(model.bounds.size[2],MARINE_ASSET_LENGTH);assert.ok(model.bounds.size[0]>5&&model.bounds.size[0]<5.5);assert.ok(model.bounds.size[1]>3.3&&model.bounds.size[1]<3.7);
   for(let axis=0;axis<3;axis++)close(model.bounds.min[axis]+model.bounds.max[axis],axis===1?MARINE_ASSET_ROOT_LIFT*2:0);
   assert.equal(model.primitives.length,1);assert.deepEqual(model.primitives[0],{firstIndex:0,indexCount:model.indices.length,material:0});
   assert.ok(model.vertices.every(Number.isFinite));assert.ok(model.indices.every(i=>i<model.vertexCount));
@@ -47,6 +49,11 @@ test('the supplied textured whale is bounded, metre-scaled, actor-aligned and re
   }
   assert.equal(model.images.length,3);assert.ok(model.images.every(i=>i.mimeType==='image/jpeg'&&i.bytes.length>500000&&i.bytes[0]===255&&i.bytes[1]===216));
   assert.deepEqual(['baseColorTexture','metallicRoughnessTexture','normalTexture'].map(name=>model.materials[0][name].image),[1,2,0]);
+  assert.deepEqual(model.images.map(i=>createHash('sha256').update(i.bytes).digest('hex')),[
+    'abc380013c0b5dbcbd573bf39cdb71075abeb5671ad45b4932ae1183dc033253',
+    'bbe89c57e601fceadc30fa3c7a704617b1fa7eb111dc634291230b9655e12f46',
+    'e8962d421da3b1746d15a8f26b602fb5c6e003c3065737e3cc34eb6a6be7f616',
+  ],'the source normal, color and roughness JPEGs pass through reduction byte-for-byte');
   assert.equal(model.materials[0].doubleSided,true);
 });
 
@@ -67,9 +74,9 @@ test('marine normalization explicitly changes source +Z heading to -Z without al
   assert.deepEqual(material.baseColorTexture,{image:0,texCoord:0,sampler:{wrapS:33071,wrapT:33648,minFilter:9985,magFilter:9728}});
 });
 
-test('the supplied 23-bone whale keeps normalized influences and its authored rest shape after metre/origin conversion',()=>{
+test('the supplied straight 18-bone whale keeps normalized influences and its authored rest shape after metre/origin conversion',()=>{
   const bytes=readFileSync(new URL('../assets/wildlife/whale.glb',import.meta.url)),model=loadMarineGLB(bytes),{animator,joints,weights}=model.skin;
-  assert.equal(animator.joints.length,23);assert.equal(animator.clips.size,0);assert.equal(joints.length,model.vertexCount*4);assert.equal(weights.length,model.vertexCount*4);
+  assert.equal(animator.joints.length,18);assert.equal(animator.clips.size,0);assert.equal(joints.length,model.vertexCount*4);assert.equal(weights.length,model.vertexCount*4);
   assert.ok(joints instanceof Uint16Array);assert.ok(weights instanceof Float32Array);
   for(let i=0;i<animator.palette.length;i++)close(animator.palette[i],i%16%5===0?1:0,1e-5);
   const asset=readGLB(bytes),primitive=asset.json.meshes[0].primitives[0],positions=gltfAccessor(asset,primitive.attributes.POSITION);
@@ -79,7 +86,7 @@ test('the supplied 23-bone whale keeps normalized influences and its authored re
     let sum=0;const result=[0,0,0];
     for(let k=0;k<4;k++){
       const joint=joints[i*4+k],weight=weights[i*4+k],at=joint*16;
-      assert.ok(joint>=0&&joint<23&&weight>=0&&weight<=1);sum+=weight;
+      assert.ok(joint>=0&&joint<18&&weight>=0&&weight<=1);sum+=weight;
       for(let axis=0;axis<3;axis++)result[axis]+=weight*(animator.palette[at+axis]*positions[i*3]+animator.palette[at+4+axis]*positions[i*3+1]+animator.palette[at+8+axis]*positions[i*3+2]+animator.palette[at+12+axis]);
     }
     close(sum,1,1e-6);

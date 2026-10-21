@@ -5,7 +5,7 @@ export const MARINE_EFFECT_LIMIT=48;
 export const MARINE_EFFECT_SECONDS=4.2;
 export const MARINE_ENCOUNTER_SECONDS=95;
 // Forehead outlet on the supplied rigged whale, in normalized actor metres.
-export const WHALE_BLOWHOLE=Object.freeze([-3.79664,1.2930143,-6.10073]);
+export const WHALE_BLOWHOLE=Object.freeze([-.25,1.28,-6.0]);
 const marineClamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const marineAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
 const marineEase=t=>{t=marineClamp(t,0,1);return t*t*(3-2*t);};

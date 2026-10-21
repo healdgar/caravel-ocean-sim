@@ -72,6 +72,31 @@ test('the rendered bow and raked stern close the exact same loft used by the hul
   }
 });
 
+test('the forebody reaches the measured rounded nose instead of clipping every height at the gundeck endpoint',()=>{
+  // Exact source sections reject the narrow projecting stem and broken head
+  // rails. These are physical GLB coordinates, independent of the fore-only
+  // runtime warp; retaining old widths while moving the stem must fail here.
+  const metres=44.80215288399298,centre=.14729826190723827,waterline=-.4813768389280885;
+  const samples=[[-.47,-.48,.06192675139],[-.47,-.46,.11181887500],
+    [-.43,-.50,.03442839253],[-.43,-.49,.06523457334],[-.43,-.48,.08607798476],[-.43,-.46,.10703564834],
+    [-.39,-.48,.08011642035],[-.39,-.46,.10885335753],
+    [-.37,-.48,.07522562790],[-.37,-.46,.09718703660],
+    [-.35,-.49,.06125283165],[-.35,-.48,.07161272314],[-.35,-.46,.09652310423]];
+  for(const [sourceY,sourceX,halfBreadth]of samples){
+    const z=(sourceX-centre)*metres/scale[2],base=(sourceY-waterline)*metres/scale[1];
+    close(width(z,base+sheer(z))*scale[0],halfBreadth*metres,.12,`forward shell at ${sourceX},${sourceY}`);
+  }
+  const skin=part('hull.planking');
+  for(const [sourceY,x,sourceX]of [[-.43,.015,-.50521],[-.37,.005,-.508455],[-.37,.015,-.506545],[-.35,.025,-.504765]]){
+    const z=(sourceX-centre)*metres/scale[2],base=(sourceY-waterline)*metres/scale[1],y=base+sheer(z);
+    const distance=hitDistance(skin,[x*metres/scale[0],y,z-1],[0,0,1]);
+    assert.ok(Number.isFinite(distance),'the front ray must hit real planking');
+    close(distance,1,.12/scale[2],`rendered rounded nose at source height ${sourceY}`);
+  }
+  const lower=victory.victoryHullPoint(-6,0,1),upper=victory.victoryHullPoint(-6,1.67,1);
+  assert.ok((lower[2]-upper[2])*scale[2]>.95,'the upper stem projects forward of the waterline rather than ending at one vertical cut');
+});
+
 test('planked deck edges follow both ends of each curved strip and bulkheads follow the side at both heights',()=>{
   for(const id of ['main','forecastle','quarter','poop']){
     const data=part(`deck.${id}.planks`),waterway=part(`deck.${id}.waterway`),rows=new Map(),triangles=[];

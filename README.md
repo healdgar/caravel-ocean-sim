@@ -365,7 +365,7 @@ Optical basis: [PBRT refraction and Fresnel](https://www.pbr-book.org/4ed/Reflec
 and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transmittance).
 
 A separate, bounded marine encounter occasionally introduces a passing shark or
-a 14.1 m whale using the supplied Meshy model and its native 23-bone rig. Whale encounters include a full breach,
+a 14.1 m sperm whale using the supplied straight Meshy model and its native 18-bone rig. Whale encounters include a full breach,
 reentry splash, fluke dive and periodic blow. The shark swims with lateral tail
 motion; whales beat their horizontal flukes vertically. Bodies and contact effects
 follow the moving FFT ocean. Whales require sixteen metres of clear water; sharks
@@ -374,8 +374,9 @@ exponential interval averaging thirty minutes and are suppressed in severe weath
 One shark/whale encounter can run alongside the dolphin pod. No wildlife draw is
 submitted when those animals and their remaining surface effects are absent.
 
-The whale preserves the supplied model's 15,717 triangles, UVs, base colour,
-normal and roughness textures. Its rig has no animation clips; bounded tail,
+The whale uses a reduced 39,254-triangle derivative of the supplied 145,388-triangle
+model, preserving its UVs, skin and three original texture images. Its straight
+neutral pose needs no curl correction. Its rig has no animation clips; bounded tail,
 fluke and pectoral strokes are authored on the existing bones and weights.
 Its brief blow emits soft condensate parcels and separate heavier water droplets
 from the posed forehead outlet. The parcels
@@ -694,7 +695,7 @@ npm run build
 npm test
 ```
 
-The reference-fitted Victory revision passed **302 tests** using installed Chrome on
+The storm-haze, Victory bow and straight-whale revision passed **303 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -709,7 +710,7 @@ parity, crew reach/routes, anchor scaling, draft-safe coastal starts and two-shi
 Hull regressions check withheld reference sections, fair tangents, rendered deck,
 bulkhead, wale and rail connections, closed ends, supported curved galleries,
 dense CPU/GPU width parity and independent hydrostatic quadrature. Victory's
-joined procedural model contains 82,906 triangles and about 5.27 MB of indexed
+joined procedural model contains 84,832 triangles and about 5.41 MB of indexed
 geometry; the 3.52-million-triangle reference is not loaded by the game.
 Underwater checks cover Snell refraction, Fresnel reflection, spectral extinction,
 sparse silhouettes at 12/60 m without dark halos, visible crest faces above eye
@@ -726,9 +727,14 @@ The shared-atmosphere regression rejects a false sunset cone on downward views
 while retaining genuine horizon warmth. It also checks continuity through nadir,
 clear-air identity, finite zero-distance rays, distance haze and precipitation.
 Visible overhead and horizon fleet views were checked with bloom off and on.
+Nearby haze uses a local scattering source; the directional distant sky blends
+back over 0.5–2.5 km. This prevents heavy rain from projecting an infinite horizon
+stripe across opaque sails. Canvas still transmits sunlight, while both vessels'
+posed sails reject arbitrary background colours and write depth in the actual
+production pipeline. Rain extinction and its effect on visibility are retained.
 
 The supplied whale checks cover embedded textures, mesh transforms, UVs,
-23-bone skin weights, rest-shape preservation, native bone axes, fixed head
+18-bone skin weights, straight rest-shape preservation, native bone axes, fixed head
 attachments, a submerged swimming envelope and standalone rendering. Spray
 checks cover finite emission, gravity, wind entrainment, inherited momentum,
 frozen launch heights and persistent first-contact locations.

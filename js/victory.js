@@ -81,7 +81,15 @@ export function createVictoryMesh({groups,parts}={}){
     if(ports.some(p=>Math.abs(cz-p.z)<portW/2-1e-7&&Math.abs(cy-p.y)<portH/2-1e-7))continue;
     const material=hullMaterial(cy);
     const points=[[z,a],[Z,a],[Z,b],[z,b]].map(([s,y])=>hullPoint(s,y,side));
-    quad(...points,material,points.map(p=>hullNormal(p,side)),[[a*5,z*2],[a*5,Z*2],[b*5,Z*2],[b*5,z*2]]);
+    // The curved stem needs finer vertical samples than a flat battery panel.
+    // Keep the neighbouring frame edge linear so both strips share it exactly.
+    const slices=i===0&&b>0?Math.max(1,Math.ceil((b-a)/.045)):1;
+    for(let k=0;k<slices;k++){
+      const t=k/slices,T=(k+1)/slices,lo=a+(b-a)*t,hi=a+(b-a)*T;
+      const edge=q=>points[1].map((v,j)=>v+(points[2][j]-v)*q);
+      const p=slices===1?points:[hullPoint(z,lo,side),edge(t),edge(T),hullPoint(z,hi,side)];
+      quad(...p,material,p.map(p=>hullNormal(p,side)),[[lo*5,z*2],[lo*5,Z*2],[hi*5,Z*2],[hi*5,z*2]]);
+    }
   }
   group('hull.planking','hull',hullStart);
   // The end skins share every raked station vertex with the side planking.
@@ -138,7 +146,11 @@ export function createVictoryMesh({groups,parts}={}){
     for(const z of [p.z-.068,p.z+.068])rope([x+side*.12,hi+.075,z],[x+side*.08,hi+.22,z],.004,3);
     group(`gun.${p.deck}.${side<0?'port':'starboard'}.${index}`,'hull',start);
   }
-  function deck(start,end,height,node){
+  function deck(firstStation,lastStation,height,node){
+    // The stem moves forward with height. Deck strips and their edge samples
+    // must use the skin's physical longitudinal coordinates at this level.
+    const start=hullPoint(firstStation,height,1)[2],end=hullPoint(lastStation,height,1)[2];
+    const skinZs=zs.map(station=>hullPoint(station,height,1)[2]);
     const begin=out.length,N=Math.ceil((end-start)/.5),edges=[];
     // Clip each plank against both sloping deck edges. Taking the narrower
     // endpoint for the entire strip left missing wedges along the curved bow.
@@ -154,7 +166,7 @@ export function createVictoryMesh({groups,parts}={}){
     for(let i=0;i<N;i++){
       const z=start+(end-start)*i/N,Z=start+(end-start)*(i+1)/N,y=height+victorySheer(z),Y=height+victorySheer(Z);
       const outer=victoryHullHalfWidth(z,y),Outer=victoryHullHalfWidth(Z,Y),w=Math.max(0,outer-.035),W=Math.max(0,Outer-.035);
-      const stops=[z,...zs.filter(p=>p>z+1e-9&&p<Z-1e-9),Z];
+      const stops=[z,...skinZs.filter(p=>p>z+1e-9&&p<Z-1e-9),Z];
       const breadthAt=p=>Math.max(0,victoryHullHalfWidth(p,height+victorySheer(p))-.035);
       const widths=stops.map(breadthAt),minimum=Math.min(...widths),maximum=Math.max(...widths);
       edges.push({z,Z,y,Y,w,W,outer,Outer,stops});
@@ -219,13 +231,13 @@ export function createVictoryMesh({groups,parts}={}){
     for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],centre=(z+Z)/2;
       const base=victoryVesselDeck(centre)-victorySheer(centre),waist=centre>VICTORY_DESIGN.decks.forecastle.end&&centre<VICTORY_DESIGN.decks.quarter.start,h=waist?1.58-base:centre>=VICTORY_DESIGN.decks.poop.start?.19:.285;
-      const y=base+victorySheer(z),Y=base+victorySheer(Z),w=side*victoryHullHalfWidth(z,y),W=side*victoryHullHalfWidth(Z,Y);
-      const rail=side*victoryHullHalfWidth(z,y+h),Rail=side*victoryHullHalfWidth(Z,Y+h),gunPort=upperPorts.find(p=>Math.abs(centre-p.z)<portW/2-1e-7);
+      const bottom=hullPoint(z,base,side),nextBottom=hullPoint(Z,base,side);
+      const top=hullPoint(z,base+h,side),nextTop=hullPoint(Z,base+h,side),gunPort=upperPorts.find(p=>Math.abs(centre-p.z)<portW/2-1e-7);
       if(!waist){
         const height=gunPort?Math.max(.03,gunPort.y-base-portH/2):h;
-        quad([w,y,z],[W,Y,Z],[side*victoryHullHalfWidth(Z,Y+height),Y+height,Z],[side*victoryHullHalfWidth(z,y+height),y+height,z],20);
+        quad(bottom,nextBottom,hullPoint(Z,base+height,side),hullPoint(z,base+height,side),20);
       }
-      samples.push({i,bottom:[w,y,z],top:[rail,y+h,z],nextTop:[Rail,Y+h,Z]});
+      samples.push({i,bottom,top,nextTop});
     }
     group(`bulwark.${side}.skin`,'hull',start);
     const railStart=out.length;
@@ -240,7 +252,7 @@ export function createVictoryMesh({groups,parts}={}){
       group(`bulwark.${side}.stanchion.${s.i}`,'hull',postStart);
     }
     for(const [z,low,high]of [[VICTORY_DESIGN.decks.forecastle.end,1.58,VICTORY_DESIGN.decks.forecastle.height+.285],[VICTORY_DESIGN.decks.quarter.start,1.58,VICTORY_DESIGN.decks.quarter.height+.285],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.quarter.height+.285,VICTORY_DESIGN.decks.poop.height+.19]]){
-      const point=base=>{const y=base+victorySheer(z);return [side*victoryHullHalfWidth(z,y),y,z];};
+      const point=base=>hullPoint(z,base,side);
       tube(point(low),point(high),.025,20,.025,4,undefined,true);
     }
     group(`bulwark.${side}`,'hull',start);

@@ -45,7 +45,9 @@ const marineBodyVertex=/* wgsl */ `
   else{local.x+=beat*.42*tail*tail;bentN=normalize(normal+vec3f(0,0,-normal.x*beat*.35*tail));}
   let forward=dolphinYaw(vec3f(0,0,-length*.32),d.root.w).xz;
   let seaPitch=clamp(atan2(dolphinHeight(d.root.xz+forward)-dolphinHeight(d.root.xz-forward),length*.64),-.28,.28);
-  let pitchAngle=d.pose.x+seaPitch*(1.0-smoothstep(-.5,2.0,d.root.y));
+  // Whale pitch/roll come from the same CPU pose used by its forehead outlet.
+  // An extra wave pitch here would detach exhalation from the rendered head.
+  let pitchAngle=d.pose.x+seaPitch*(1.0-smoothstep(-.5,2.0,d.root.y))*select(1.0,0.0,whale);
   let c=cos(pitchAngle);let s=sin(pitchAngle);
   let pitch=mat3x3f(vec3f(1,0,0),vec3f(0,c,s),vec3f(0,-s,c));
   let cr=cos(roll);let sr=sin(roll);let bank=mat3x3f(vec3f(cr,sr,0),vec3f(-sr,cr,0),vec3f(0,0,1));

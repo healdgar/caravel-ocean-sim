@@ -3,9 +3,9 @@ import {gltfQuatMultiply,gltfMatMultiply} from './gltf.js';
 
 export const MARINE_SWIM_PERIOD=5.2;
 
-// The supplied SmartRig is a whale-specific 23-bone chain, without authored
-// clips. Keep its bind pose and weights; add a slow travelling dorsoventral
-// stroke, foil pitch and paired pectoral strokes through the existing joints.
+// The straight sperm whale has an 18-bone SmartRig and no authored clips.
+// Preserve its neutral bind shape; the existing posterior chain carries a
+// travelling dorsoventral stroke with a growing amplitude toward the flukes.
 export function createMarineRig(model){
   const animator=model?.skin?.animator,normalization=model?.normalization;
   if(!animator||!normalization)throw Error('Marine rig needs a skinned, normalized model');
@@ -29,14 +29,12 @@ export function createMarineRig(model){
   };
   // Convert the model-space transverse X axis into each native bone's rest
   // frame. These arbitrary Meshy bone axes are not interchangeable with X.
-  for(const [index,name]of ['008','007','006','005','004','003','002'].entries())
-    // The supplied rest mesh raises its tail several metres above the back.
-    // Relax that display pose at the tail root for ordinary swimming, through
-    // its skin weights, rather than moving the animal or hiding exposed fins.
-    channel('Bone_'+name,0,[.020,.030,.038,.044,.050,.042,.032][index],-index*.2,index===0?.35:0);
-  channel('Bone_020',0,.080,-1.6);channel('Bone_022',0,.080,-1.6);
-  // Opposite signs about longitudinal Z raise/lower both flippers together.
-  channel('Bone_015',2,.055,1.3);channel('Bone_018',2,-.055,1.3);
+  for(const [index,name]of ['008','007','006','005','004'].entries())
+    channel('Bone_'+name,0,[.035,.060,.090,.110,.090][index],-index*.28);
+  // Both flippers move gently as foils; their distal joints flex less than
+  // their roots. Opposite longitudinal rotations produce a paired stroke.
+  channel('Bone_011',2,.055,1.3);channel('Bone_014',2,-.055,1.3);
+  channel('Bone_010',2,.025,.95);channel('Bone_013',2,-.025,.95);
   function update(time,amplitude=1){
     if(!Number.isFinite(time)||!Number.isFinite(amplitude))throw Error('Invalid marine rig time or amplitude');
     const strength=Math.max(0,Math.min(1,amplitude)),phase=((time%MARINE_SWIM_PERIOD)+MARINE_SWIM_PERIOD)%MARINE_SWIM_PERIOD/MARINE_SWIM_PERIOD*Math.PI*2;

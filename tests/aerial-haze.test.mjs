@@ -38,6 +38,8 @@ test('shared surface atmosphere does not project the sunset horizon onto opaque 
       add('near nadir sunward',[.01,-1,0]);add('near nadir away',[-.01,-1,0]);
       add('down sunward',[1,-1,0]);add('down away',[-1,-1,0]);
       add('horizon sunward',[1,.002,0]);add('horizon away',[-1,.002,0]);
+      add('distant horizon sunward',[1,.002,0],5000);add('distant horizon away',[-1,.002,0],5000);
+      for(const y of [-.01,-.002,0,.002,.01])add('near horizon '+y,[1,y,0],100);
       add('eye',[0,0,0],0);
       for(const distance of [1,10,50,100,200])add('distance '+distance,[1,-1,0],distance);
       for(const x of [-.002,-.001,0,.001,.002])add('cross nadir '+x,[x,-1,0]);
@@ -56,6 +58,8 @@ test('shared surface atmosphere does not project the sunset horizon onto opaque 
       const sky=device.createTexture({size:[SKY_W,SKY_H],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
       device.queue.writeTexture({texture:sky},pixels,{bytesPerRow:SKY_W*8},[SKY_W,SKY_H]);
       const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
+      const trans=device.createTexture({size:[1,1],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});
+      device.queue.writeTexture({texture:trans},new Uint8Array([230,166,89,255]),{bytesPerRow:4},[1,1]);
       const frameData=new Float32Array(96),angle=2*Math.PI/180;
       frameData.set(eye,16);frameData.set([Math.cos(angle),Math.sin(angle),0,1],32);
       frameData.set([3,.2,0,0],72);frameData.set([.0005,.0005,.0005,0],88);
@@ -79,7 +83,7 @@ struct SurfaceProbe {world:vec4f,color:vec4f};
       errors.push(...info.messages.filter(m=>m.type==='error').map(m=>m.message));
       const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
       const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[
-        {binding:0,resource:{buffer:frame}},{binding:2,resource:sky.createView()},{binding:3,resource:sampler},
+        {binding:0,resource:{buffer:frame}},{binding:1,resource:trans.createView()},{binding:2,resource:sky.createView()},{binding:3,resource:sampler},
         {binding:4,resource:{buffer:input}},{binding:5,resource:{buffer:output}},
       ]});
       async function render(clear=false,rain=0){
@@ -91,16 +95,21 @@ struct SurfaceProbe {world:vec4f,color:vec4f};
         const values=new Float32Array(read.getMappedRange()).slice();read.unmap();
         return Object.fromEntries(probes.map((p,i)=>[p.name,Array.from(values.slice(i*4,i*4+3))]));
       }
-      const haze=await render(),clear=await render(true),rain=await render(false,.7);
-      device.destroy();return {errors,base,probes,haze,clear,rain};
+      const haze=await render(),clear=await render(true),rain=await render(false,1);
+      // Alter only the distant horizon image. Local finite-path scattering must
+      // not change on an opaque ship 100 m away, even in pouring rain.
+      for(let y=0;y<SKY_H;y++)for(let x=0;x<SKY_W;x++)pixels.set([.1,.15,.25,1].map(half),(y*SKY_W+x)*4);
+      device.queue.writeTexture({texture:sky},pixels,{bytesPerRow:SKY_W*8},[SKY_W,SKY_H]);
+      const flatRain=await render(false,1);
+      device.destroy();return {errors,base,probes,haze,clear,rain,flatRain};
     });
     assert.deepEqual(result.errors,[]);
     const separation=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
-    const {haze,clear,rain,base}=result;
+    const {haze,clear,rain,flatRain,base}=result;
     for(const frame of [haze,clear,rain])for(const [name,color]of Object.entries(frame)){
       assert.ok(color.every(v=>Number.isFinite(v)&&v>=0),`${name} must remain finite: ${color}`);
     }
-    const horizonExcess=separation(haze['horizon sunward'],haze['horizon away']);
+    const horizonExcess=separation(haze['distant horizon sunward'],haze['distant horizon away']);
     assert.ok(horizonExcess>.2,'the test must retain a strong, legitimate sunset horizon');
     for(const [toward,away]of [['near nadir sunward','near nadir away'],['down sunward','down away']]){
       assert.ok(separation(haze[toward],haze[away])<horizonExcess*.02,
@@ -117,6 +126,10 @@ struct SurfaceProbe {world:vec4f,color:vec4f};
       assert.ok(difference>previousDistance,'distance increases the existing finite-segment atmospheric veil');
       previousDistance=difference;
     }
+    for(const y of [-.01,-.002,0,.002,.01])assert.ok(separation(rain['near horizon '+y],flatRain['near horizon '+y])<1e-7,
+      'nearby opaque sails must not inherit the infinite sky horizon during heavy rain');
+    assert.ok(separation(rain['distant horizon sunward'],flatRain['distant horizon sunward'])>.05,
+      'kilometre-scale visibility must retain distant directional scattering');
     assert.ok(separation(rain['down sunward'],rain['down away'])<horizonExcess*.02,
       'precipitation haze must not reintroduce the horizon flare below the camera');
   }finally{await page.close();}

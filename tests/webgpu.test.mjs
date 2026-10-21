@@ -1964,8 +1964,9 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       };
       const trans=texture([230,166,89]),env=texture([40,52,70],6),water=texture([40,52,70]),oak=texture([128,128,128]);
       const disp=texture([0,0,0],3),deck=texture([0,0,0]),cloth=texture([102,66,36]);
-      // Sunward warm haze and antisolar blue haze must come from the directional
-      // sky LUT, not the cube's zenith texel. The fragment entry points are intact.
+      // Distant sunward/antisolar haze retains directional sky colour. Short
+      // air segments use local illumination rather than a distant horizon image.
+      // The fragment entry points are intact.
       const sky=device.createTexture({size:[8,4],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});
       const skyPixels=new Uint8Array(8*4*4);
       for(let y=0;y<4;y++)for(let x=0;x<8;x++)skyPixels.set([240-x*27,170-x*12,65+x*20,255],(y*8+x)*4);
@@ -2013,9 +2014,12 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
         {name:'opposed view and sun',light:[0,0,-1]},
         {name:'below horizon',light:[0,-.2,Math.sqrt(.96)],fog:0},
         {name:'near haze',distance:3,haze:12},
-        {name:'far haze',distance:300,haze:12},
-        {name:'antisolar haze',distance:300,haze:12,light:[0,.2,Math.sqrt(.96)]},
-        {name:'high altitude',distance:300,haze:12,altitude:1500},
+        {name:'local haze',distance:300,haze:12},
+        // Kilometre paths exercise the distant directional regime; projecting
+        // that same sky image at 300 m was the opaque-sail horizon defect.
+        {name:'far haze',distance:3000,haze:12},
+        {name:'antisolar haze',distance:3000,haze:12,light:[0,.2,Math.sqrt(.96)]},
+        {name:'high altitude',distance:3000,haze:12,altitude:1500},
         {name:'upward normal',normal:[0,1,0]},
         {name:'grazing normal',normal:[1,0,.001]},
         {name:'no reflections',reflections:0,fog:0},
@@ -2052,6 +2056,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
     assert.ok(byName.front[0]>byName['solid shadow'][0]*2,'solid objects block direct sunlight');
     assert.ok(byName['canvas shadow'][0]>byName['solid shadow'][0]&&byName['canvas shadow'][0]<byName.front[0],'canvas transmits part of the sun');
     assert.ok(Math.abs(byName['cloud shadow'][0]-byName['solid shadow'][0])<1e-5,'cloud and solid shadows leave ambient light');
+    assert.ok(byName['local haze'][0]>byName['near haze'][0]*3,'finite local distance increases the aerial veil');
     assert.ok(byName['far haze'][0]>byName['near haze'][0]*3,'distance increases sunward haze');
     assert.ok(byName['far haze'][0]>byName['antisolar haze'][0]*2,'haze follows the viewing direction');
     assert.ok(byName['high altitude'][0]<byName['far haze'][0],'marine haze thins with altitude');

@@ -224,8 +224,19 @@ fn surfaceAir(color:vec3f,world:vec3f)->vec3f {
   // Keep the actual sightline: folding downward rays onto the bright sunset
   // horizon projects its scattering lobe across opaque ships and water.
   let direction=delta/max(d,1e-6);
-  let rainSky=mix(skyAtmo(direction),skyAtmo(vec3f(0,1,0))*.55,F.reserved.x*.7)+lightningCloud(direction);
-  return color*transmission+rainSky*(1.0-transmission);
+  let rain=clamp(F.reserved.x,0.0,1.0);
+  let zenith=skyAtmo(vec3f(0,1,0));
+  // A short air segment cannot contain the infinite sky's horizon boundary.
+  // Reusing that image as local fog made nearby opaque sails inherit a horizon
+  // stripe, particularly when heavy rain raised the veil to ~25% at 100 m.
+  // Approximate local illumination with diffuse sky and a continuous aerosol
+  // phase lobe. Rain retains its extinction while weakening direct illumination.
+  let cosine=clamp(dot(direction,F.sunDir.xyz),-1.0,1.0);
+  let localSun=sunIlluminance()*step(0.0,F.sunDir.y)*phaseHG(cosine,.8)*.06*mix(1.0,.15,rain);
+  let localAir=zenith*mix(.45,.25,rain)+localSun;
+  let distantAir=mix(skyAtmo(direction),zenith*.55,rain*.7);
+  let air=mix(localAir,distantAir,smoothstep(500.0,2500.0,d))+lightningCloud(direction);
+  return color*transmission+air*(1.0-transmission);
 }
 
 fn skyViewUV(dir: vec3f) -> vec2f {

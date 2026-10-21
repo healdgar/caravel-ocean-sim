@@ -72,12 +72,23 @@ the same hull evaluator. Stern galleries have shared arched, horizontally bowed
 and raked skins, glazing and structural returns. Their restrained crown and
 corner rounding are authored from the reference silhouette and photograph,
 not surveyed moulding dimensions. The completed working model retains 104
-represented guns and its existing sail/rig attachment nodes at 82,906 triangles
-(5,271,816 bytes of indexed geometry); the source's broken rigging is not copied.
+represented guns and its existing sail/rig attachment nodes at 84,832 triangles
+(5,413,404 bytes of indexed geometry); the source's broken rigging is not copied.
+
+The first fit incorrectly closed every above-water height at one vertical
+gun-deck endpoint. Fine forward sections show the actual rounded shell reaching
+source X≈-0.507 to -0.510, ahead of that cutoff. The corrected stem varies with
+height and projects about 1.10 m forward of its authored waterline endpoint.
+Dense forward frames and vertical stem samples retain the rounded entry instead
+of a large triangular first panel. A fore-only coordinate warp ends before the
+first gunport, preserving interior deck and rig registration. The measured
+stem/beakhead are distinguished; broken lower source plating still requires
+authored closure. New regression rays hit actual rendered planking at measured
+near-nose widths, rather than accepting only a zero-width endpoint.
 
 The fit changes integrated volume at the chosen waterline from 4,747.85 to
-4,785.39 m³ (+0.79%), and waterplane area from 765.88 to 815.20 m². At the
-model's 1,025 kg/m³ seawater density that is 4,905.03 tonnes. The default
+4,785.22 m³ (+0.79%), and waterplane area from 765.88 to approximately 815 m². At the
+model's 1,025 kg/m³ seawater density that is 4,904.85 tonnes. The default
 manifest's fixed mass is derived from this geometry to retain its chosen
 waterline; it is not independent evidence for historical displacement.
 Independent numerical quadrature checks convergence, buoyancy and declared

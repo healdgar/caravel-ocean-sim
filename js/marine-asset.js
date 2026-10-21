@@ -1,13 +1,13 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {readGLB,gltfAccessor,gltfTRS,gltfMatMultiply,createSkinAnimator} from './gltf.js';
 
-// Audited Meshy whale: Y up, head +Z. Its rigged export changes source scale
-// and origin; anatomical extent normalization preserves the same 14.1 m animal.
+// Audited straight Meshy sperm whale: Y up, head +Z. Normalize its anatomical
+// extent to 14.1 m; the actor origin is the centre of its neutral body envelope.
 // The encounter renderer uses metres, head -Z and a trunk-aligned actor origin.
 export const MARINE_ASSET_LENGTH=14.1;
 export const MARINE_ASSET_HEAD_SIGN=1;
 export const MARINE_ASSET_VERTEX_FLOATS=11;
-export const MARINE_ASSET_ROOT_LIFT=1.2;
+export const MARINE_ASSET_ROOT_LIFT=0;
 
 export function loadMarineGLB(bytes,{headSign=MARINE_ASSET_HEAD_SIGN}={}){
   if(![1,-1].includes(headSign))throw Error('Marine headSign must be 1 or -1');
