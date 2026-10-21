@@ -3,7 +3,7 @@ import {createMarineLifeState,MARINE_ANIMAL_LIMIT,MARINE_EFFECT_LIMIT,MARINE_EFF
 import {MARINE_LIFE_RENDER,MARINE_EFFECT_INIT,MARINE_MIST_COUNT,MARINE_BREATH_DROP_COUNT,MARINE_FALLOUT_COUNT} from './wgsl/marine-life.js';
 import {DOLPHIN_RIPPLE_SEGMENTS,DOLPHIN_RIPPLE_RINGS,DOLPHIN_RIPPLE_ROWS,DOLPHIN_SHEET_SEGMENTS,DOLPHIN_SHEET_ROWS,DOLPHIN_DROP_COUNT} from './wgsl/dolphins.js';
 import {loadMarineGLB} from './marine-asset.js';
-import {createMarineRig} from './marine-rig.js';
+import {createMarineRig,marineStrokeAmplitude} from './marine-rig.js';
 
 // Original procedural marine-animal approximations, in physical metres. Whale:
 // humpback-like long pectorals, broad head, ventral pleats and horizontal flukes.
@@ -198,6 +198,7 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
   const values=new Float32Array(MARINE_ANIMAL_LIMIT*8),effectValues=new Float32Array(MARINE_EFFECT_LIMIT*12);
   const animals=buffer('marine animal poses',values,B.STORAGE),effects=buffer('marine surface events',effectValues,B.STORAGE);
   const origins=buffer('marine emission origins',new Float32Array(MARINE_EFFECT_LIMIT*4),B.STORAGE);
+  const seededBirthKeys=new Float64Array(MARINE_EFFECT_LIMIT),birthSeed=new Float32Array(4);
   const landings=buffer('marine droplet contacts',new Float32Array(MARINE_EFFECT_LIMIT*MARINE_BREATH_DROP_COUNT*4),B.STORAGE);
   const meshes={};for(const kind of ['shark','whale']){
     const mesh=kind==='whale'?whaleModel:createMarineMesh(kind),stride=kind==='whale'?11:9,num=mesh.vertices.length/stride;
@@ -228,7 +229,7 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
     },
     update(dt,boat,settings,terrain=null,vessels=[boat]){
       state.step(dt,boat,settings,terrain,vessels);waterCount=0;burstCount=0;blowCount=0;
-      if(state.active&&state.animals[0].type==='whale')device.queue.writeBuffer(bones,0,whaleRig.update(state.age,state.animals[0].depth>1?.2:1));
+      if(state.active&&state.animals[0].type==='whale')device.queue.writeBuffer(bones,0,whaleRig.update(state.age,marineStrokeAmplitude(state.animals[0].depth)));
       for(let i=0;i<state.count;i++){const a=state.animals[i];values.set([a.x,a.depth,a.z,a.heading,a.pitch,a.scale,a.phase,(a.type==='whale'?2:-2)+a.roll],i*8);}
       let count=0;
       // Stable pool order: impact bursts, ordinary surface trails, then blows.
@@ -237,6 +238,16 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
         if(type!==category||e.age<0||e.age>=MARINE_EFFECT_SECONDS||e.strength<=0)continue;
         const kind=e.kind==='trail'?0:e.kind==='emerge'?1:e.kind==='entry'?2:3;
         effectValues.set([e.x,e.z,e.age,e.strength,e.heading,e.seed,kind,e.scale,e.kind==='blow'?e.height:e.speed,e.windX,e.windZ,e.id+1],count++*12);
+        if(type===2&&Number.isFinite(e.anchorX)&&Number.isFinite(e.anchorZ)){
+          const key=e.id+1,slot=key%MARINE_EFFECT_LIMIT;
+          if(key>0&&seededBirthKeys[slot]!==key){
+            // e.height is measured above sea under the animal root, not under
+            // its displaced forehead. A negative nonzero key marks this one-
+            // time root query; the GPU replaces it with the frozen birth.
+            birthSeed.set([-key,0,e.anchorX,e.anchorZ]);device.queue.writeBuffer(origins,slot*16,birthSeed);
+            seededBirthKeys[slot]=key;
+          }
+        }
         if(type===0)burstCount++;if(type===2)blowCount++;else waterCount++;
       }
       if(state.active)device.queue.writeBuffer(animals,0,values);

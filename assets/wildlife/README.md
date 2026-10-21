@@ -22,8 +22,21 @@ neutral envelope. The game length is authored, not an anatomical measurement.
 There are no supplied animation clips. `js/marine-rig.js` adds a bounded 5.2 s
 travelling vertical tail stroke and paired flipper motion through the existing
 bones; it applies no rest-pose curl correction. Skinning runs on the GPU.
+As the root emerges, an authored smooth transition reduces that stroke to 20%
+while airborne. It replaces a one-metre threshold that abruptly changed 80% of
+the skeletal pose during a breach; the neutral mesh and rig remain untouched.
 
 The forehead outlet is mapped to actor coordinates `[-.25, 1.28, -6]`.
 Whale rendering and the outlet share pitch and roll. Exhalation and contact
 particles are separate project simulations. Surface contacts still use an
 analytic envelope, not collision against every animated triangle.
+
+Each real blow also retains the animal-root X/Z at emission. Its outlet height
+is relative to the ocean under that root, so the GPU's first birth query samples
+the same root rather than a different wave under the forehead several metres
+away. A negative, nonzero event key seeds the existing bounded origin cache;
+the first compute dispatch replaces it with the positive key and frozen launch
+height. Slot reuse captures a fresh origin. Synthetic effects without a root
+anchor still sample their effect position. Airborne breath stays detached from
+later animal movement and waves; later water still clips droplets and receives
+their impacts. These are birth-snapshot effects, not a fluid simulation.

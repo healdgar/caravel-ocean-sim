@@ -1,0 +1,18 @@
+[
+  {
+    "id": "hull-pressure",
+    "label": "Soft water pressure against planking",
+    "seconds": 3,
+    "loop": false,
+    "driver": "One measured wave contact; restrained accent beneath continuous hull wash",
+    "prompt": "Beside a large wooden sailing ship, one gentle swell presses against heavy oak planking. A soft low watery push blends into close bubbling and draining water, fading naturally into quiet. Broad, rounded onset, small event, intact timber, outdoor recording. Only water against wood. No sharp slap, tossed splash, repeated hits, cracking, voices, music, wind or beach surf."
+  },
+  {
+    "id": "hull-reentry",
+    "label": "Lower bow meeting water after a swell",
+    "seconds": 4,
+    "loop": false,
+    "driver": "One observed dry-to-wet fore-contact return; underside-slam probes remain subsequent",
+    "prompt": "Beside a large wooden sailing ship, a heavy descending lower bow meets the sea after a swell. One broad low wet pressure onset grows immediately into dense rushing, churning, bubbling seawater, then drains naturally into quiet. Weighty displaced water against intact oak, close outdoor recording. No separate splash attacks, brittle cracks, explosive bang, repeated impacts, voices, music or surf loop."
+  }
+]

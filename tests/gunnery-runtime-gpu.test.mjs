@@ -105,6 +105,10 @@ for(const model of ['nina','victory'])test(`${model}: captain UI, attended loadi
     for(const stage of ['swab','load','ram','runout','prime','ready'])assert.ok(loading.stages.includes(stage),JSON.stringify(loading));
     assert.ok(loading.finite);assert.ok(loading.jobs.some(j=>j.includes('gun')),JSON.stringify(loading));assert.ok(!loading.events.includes('shot'));
     assert.ok(loading.toolDraws>0&&loading.toolShadows>0,JSON.stringify(loading));
+    // CPU-fast loading cannot authorize fire until actual sea clearance returns.
+    assert.equal(await page.locator('#guns-fire-starboard').isEnabled(),false);
+    await gunneryRuntimeStep(page,.05);await gunneryRuntimeStep(page,.05);
+    await page.evaluate(()=>gunneryFixture.controls.update());
     assert.equal(await page.locator('#guns-fire-starboard').isEnabled(),true);
     await page.locator('#guns-fire-starboard').click();
     const ordered=await page.evaluate(()=>({side:gunneryFixture.shipGuns.ordered,time:gunneryFixture.shipGuns.state.time,shots:gunneryFixture.events.filter(e=>e.type==='shot').length}));
@@ -133,18 +137,16 @@ test('explicit full Victory battery stress fixture bounds all 52 muzzle clouds i
   const {page,errors}=await gunneryRuntimePage('victory');
   try{
     await gunneryRuntimeStep(page);
-    const stress=await page.evaluate(()=>{
-      const f=gunneryFixture;
-      // Deliberate stress setup only: attendance and UI drill are separately
-      // tested above. Generate a complete battery without waiting real minutes.
-      const guns=f.shipGuns.state.guns.filter(g=>g.side==='starboard');for(const g of guns){g.stage='ready';g.loading=false;g.offset=0;}
-      f.boat.gunnerySide='starboard';f.boat.gunneryAttendance=new Set(guns.map(g=>g.id));
-      const ordered=f.shipGuns.fire('starboard');for(let i=0;i<150;i++)f.shipGuns.update(.1,[1,0,0]);
-      // This fixture isolates worst smoke overlap from asynchronous sea flight.
-      f.shipGuns.state.projectiles.length=0;f.gunEffects.setProjectiles([]);f.gunEffects.update(.05,{wind:[1,0,0],eye:[0,10,65]});
-      return {ordered,total:guns.length,shots:f.events.filter(e=>e.type==='shot').length,counts:f.gunEffects.counts};
+    const stress=await page.evaluate(async()=>{
+      const f=gunneryFixture,{gunMuzzlePose}=await import('/js/gunnery-models.js');
+      // Visual-only worst case: synthesize simultaneous events at all52actual
+      // attachments. The real drill, safety interlock and flight run above.
+      const guns=f.shipGuns.state.guns.filter(g=>g.side==='starboard');
+      for(const g of guns){const pose=gunMuzzlePose({...g,offset:0},f.boat);f.gunEffects.emitShot({id:g.id,position:pose.position,direction:pose.direction,chargeKg:g.mass*.3});}
+      f.gunEffects.setProjectiles([]);f.gunEffects.update(.05,{wind:[1,0,0],eye:[0,10,65]});
+      return {total:guns.length,counts:f.gunEffects.counts};
     });
-    assert.equal(stress.ordered,true);assert.equal(stress.total,52);assert.equal(stress.shots,52);assert.equal(stress.counts.volumes,208);
+    assert.equal(stress.total,52);assert.equal(stress.counts.volumes,208);
     const frame=await gunneryRuntimeStep(page,.001);assert.equal(frame.render.gunneryVolume,1);assert.equal(frame.compute['resolve cannon effects depth'],1);assert.ok(frame.counts.volumes<=208);
     assert.deepEqual(frame.errors,[]);assert.deepEqual(errors,[]);await gunneryRuntimeCapture(page,'gunnery-victory-52-gun-stress.png');
   }finally{await page.close();}

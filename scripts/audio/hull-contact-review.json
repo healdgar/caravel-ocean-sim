@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-21",
+  "provider": "ElevenLabs",
+  "model": "eleven_text_to_sound_v2",
+  "credits": 70,
+  "reviewer": "gemini-4-argon-high via agy native read_file audio ingestion",
+  "reviews": [
+    "d1f6a305-acae-4c10-a556-da2a10d06264",
+    "aad89777-c053-41cd-9cf8-43fdf90b44db",
+    "519fda50-c4d9-49af-a409-96e0ad407d8d",
+    "e98d3a77-b757-47f2-a9fb-bbefa366ea65"
+  ],
+  "findings": {
+    "calmMix": "KEEP",
+    "stationaryMix": "KEEP with minor flow-character reservation",
+    "provisionalReentryMix": "EDIT: exposed steady wash character, lacked displacement body and pumped"
+  },
+  "decision": "Retain quieter accepted light contacts and continuous pressure-driven wash. Suppress the provisional replayed-wash re-entry accent; no accepted bottom-slam asset or underside detector yet.",
+  "sources": [
+    {
+      "id": "hull-pressure",
+      "take": "01",
+      "sha256": "16235530f1ae4bf1975bd512f4f8d85272ea8691b80ff4dc931e1ee8ccdb3e2b",
+      "credits": 30,
+      "edit": {
+        "endSeconds": 1.55,
+        "fadeOutSeconds": 0.3
+      },
+      "status": "rejected",
+      "reason": "Argon rejected the edited take: vocal/knock artifacts and an unnatural tail. No asset promoted."
+    },
+    {
+      "id": "hull-reentry",
+      "take": "01",
+      "sha256": "fcc6d49a785e1de674de969fa2bc853dbbd2176173448566b1821c4047b8c4cf",
+      "credits": 40,
+      "edit": {
+        "endSeconds": 2.05,
+        "fadeOutSeconds": 0.55
+      },
+      "status": "rejected",
+      "reason": "Argon rejected the edited take: vocal/knock artifacts and an unnatural tail. No asset promoted."
+    }
+  ],
+  "finalAmbientMix": "KEEP as ambient hull water; separate heavy-impact texture still absent"
+}

@@ -41,7 +41,7 @@ export function marineSurfaceBounds(type,depth,pitch=0,scale=1,roll=0){
 export function createMarineLifeState(random=Math.random){
   const rand=()=>marineClamp(Number(random())||0,0,.999999999),wait=()=>900-Math.log(Math.max(.00001,1-rand()))*1800;
   const animals=Array.from({length:MARINE_ANIMAL_LIMIT},()=>({x:0,z:0,heading:0,depth:-8,pitch:0,roll:0,scale:1,phase:0,type:'whale',behavior:'encounter',speed:3}));
-  const effects=Array.from({length:MARINE_EFFECT_LIMIT},()=>({x:0,z:0,age:10,strength:0,heading:0,seed:0,kind:'trail',scale:1,speed:0,height:0,windX:0,windZ:0,id:0,animal:0}));
+  const effects=Array.from({length:MARINE_EFFECT_LIMIT},()=>({x:0,z:0,age:10,strength:0,heading:0,seed:0,kind:'trail',scale:1,speed:0,height:0,windX:0,windZ:0,id:0,animal:0,anchorX:null,anchorZ:null}));
   let time=0,age=0,count=0,next=wait(),serial=0,effectSerial=0,event=null,previousX=NaN,previousZ=NaN;
   const safe=(x,z,type,terrain)=>!terrain||terrain.height(x,z)<(type==='whale'?-16:-6);
   function clear(){count=0;age=0;for(const e of effects){e.age=10;e.strength=0;}next=time+wait();}
@@ -72,7 +72,8 @@ export function createMarineLifeState(random=Math.random){
     let slot=effects[0];for(const e of effects)if(e.age>slot.age)slot=e;
     const fraction=dt>0?marineClamp((at-oldAge)/dt,0,1):1,heading=oldHeading+marineAngle(a.heading-oldHeading)*fraction;
     const pose=marinePoseAt(at,a),scale=a.type==='whale'?5.2*a.scale:a.scale;
-    Object.assign(slot,{x:oldX+(a.x-oldX)*fraction+Math.sin(heading)*offset,z:oldZ+(a.z-oldZ)*fraction-Math.cos(heading)*offset,
+    const anchorX=oldX+(a.x-oldX)*fraction,anchorZ=oldZ+(a.z-oldZ)*fraction;
+    Object.assign(slot,{x:anchorX+Math.sin(heading)*offset,z:anchorZ-Math.cos(heading)*offset,anchorX,anchorZ,
       age:age-at,strength,heading,seed:a.phase+at*.17,kind,scale,speed:a.speed,id:++effectSerial,animal:0,
       height:pose.depth+Math.cos(pose.pitch)*1.5+Math.sin(pose.pitch)*3.6,
       windX:0,windZ:0});return slot;

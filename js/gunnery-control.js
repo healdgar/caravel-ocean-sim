@@ -6,13 +6,13 @@ import { boatRotate } from './boat.js';
 
 // Explicit orders govern the drill. There is no automatic reload or repeated
 // firing. The captain's spoken order has the same duration with sound muted.
-export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{}}={}){
+export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null}={}){
   const state=createGunneryState(createGunDefinitions(boat));boat.gunnery=state;
   let pending=null,prepared=false,lastReady=false,flash=null;
   const attended=gun=>!gun.visibleCrew||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
   const canFire=side=>sideValid(side)&&boat.gunnerySide===side&&!pending&&!state.queue.length&&
-    state.guns.filter(g=>g.side===side).every(g=>g.stage==='ready'&&attended(g));
+    state.guns.filter(g=>g.side===side).every(g=>g.stage==='ready'&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)));
   function recoil(event){
     const h=boat.hydrodynamics;if(!h)return;
     const impulse=event.impulse,centre=[0,0,0];
@@ -62,7 +62,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{}}={}){
       const before=new Map(state.guns.map(g=>[g.id,g.stage]));
       const events=stepGunnery(state,dt,{deferSeaCollision:true,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
-        gunAttended:attended,canFire:attended,
+        gunAttended:attended,canFire:(gun,pose)=>attended(gun)&&!muzzleBlock(gun,pose),
         onEvent:event=>{if(event.type==='shot'){recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}if(event.type!=='ready')onEvent(event);},
       });
       for(const gun of state.guns)if(before.get(gun.id)!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
@@ -76,6 +76,13 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{}}={}){
     impact(contact){return resolveGunneryImpact(state,contact.shotId??contact.id,contact);},
     summary(side){return gunnerySummary(state,side);},
     canFire,
+    blockedReason(side){
+      if(side!==boat.gunnerySide)return null;
+      for(const gun of state.guns.filter(g=>g.side===side)){
+        if(!attended(gun))return 'Manning guns';
+        const reason=muzzleBlock(gun,gunMuzzlePose(gun,boat));if(reason)return reason;
+      }return null;
+    },
     get selectedSide(){return boat.gunnerySide??null;},
     get ordered(){return pending?.side??null;},
     // Reuse the two previously reserved Hull axis padding floats. GPU lighting

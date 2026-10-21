@@ -14,16 +14,19 @@ export const FORMAT='mp3_44100_128';
 export const PILOT=JSON.parse(await fs.readFile(new URL('./audio/pilot.json',import.meta.url),'utf8'));
 export const WEATHER=JSON.parse(await fs.readFile(new URL('./audio/weather.json',import.meta.url),'utf8'));
 export const NATURE=JSON.parse(await fs.readFile(new URL('./audio/nature.json',import.meta.url),'utf8'));
-export const SAMPLES=[...PILOT,...WEATHER,...NATURE];
+export const HULL_CONTACT=JSON.parse(await fs.readFile(new URL('./audio/hull-contact.json',import.meta.url),'utf8'));
+export const SAMPLES=[...PILOT,...WEATHER,...NATURE,...HULL_CONTACT];
 const HELP=`Local ElevenLabs sound authoring (Node 22+)
 
 npm run audio -- plan                  Inspect the six-sample pilot; no API call
 npm run audio -- plan --set weather    Inspect weather prompts; no API call
 npm run audio -- plan --set nature     Inspect seabird prompts; no API call
+npm run audio -- plan --set hull       Inspect revised hull-contact prompts
 npm run audio -- generate hull-slap    Generate/reuse one sample (paid)
 npm run audio -- pilot                 Generate/reuse the six-sample pilot (paid)
 npm run audio -- weather               Generate/reuse the weather set (paid)
 npm run audio -- nature                Generate/reuse the seabird set (paid)
+npm run audio -- hull                  Generate/reuse two hull-contact samples (paid)
 npm run audio -- review --take 02      Build a local listening page; no API call
 npm run audio -- review --selected     Review the currently selected takes/edits
 
@@ -252,9 +255,9 @@ export async function main(args=process.argv.slice(2)) {
   const {values,positionals}=parseArgs({args,allowPositionals:true,options:{take:{type:'string',default:'01'},selected:{type:'boolean'},set:{type:'string'}}});
   const [command='help',id]=positionals;
   if(command==='help'){console.log(HELP);return;}
-  if(values.set&&!['pilot','weather','nature','all'].includes(values.set))throw Error('Use --set pilot, weather, nature or all.');
+  if(values.set&&!['pilot','weather','nature','hull','all'].includes(values.set))throw Error('Use --set pilot, weather, nature, hull or all.');
   if(values.set&&!['plan','review'].includes(command))throw Error('--set applies only to plan or review; generate accepts a sample ID.');
-  const catalog=values.set==='weather'?WEATHER:values.set==='nature'?NATURE:values.set==='pilot'?PILOT:values.set==='all'?SAMPLES:undefined;
+  const catalog=values.set==='weather'?WEATHER:values.set==='nature'?NATURE:values.set==='hull'?HULL_CONTACT:values.set==='pilot'?PILOT:values.set==='all'?SAMPLES:undefined;
   if(command==='plan'){
     const planned=catalog??PILOT;
     console.log(JSON.stringify({model:MODEL,format:FORMAT,totalSeconds:planned.reduce((s,x)=>s+x.seconds,0),
@@ -264,8 +267,8 @@ export async function main(args=process.argv.slice(2)) {
     const selection=values.selected?JSON.parse(await fs.readFile(new URL('./audio/review-selection.json',import.meta.url),'utf8')):undefined;
     console.log(JSON.stringify(await buildReview({take:values.take,selection,samples:catalog??SAMPLES})));return;
   }
-  if(!['generate','pilot','weather','nature'].includes(command))throw Error('Use help, plan, generate, pilot, weather, nature or review.');
-  const samples=command==='pilot'?PILOT:command==='weather'?WEATHER:command==='nature'?NATURE:SAMPLES.filter(x=>x.id===id);
+  if(!['generate','pilot','weather','nature','hull'].includes(command))throw Error('Use help, plan, generate, pilot, weather, nature, hull or review.');
+  const samples=command==='pilot'?PILOT:command==='weather'?WEATHER:command==='nature'?NATURE:command==='hull'?HULL_CONTACT:SAMPLES.filter(x=>x.id===id);
   if(!samples.length)throw Error('Unknown sample; run plan for available IDs.');
   const key=await resolveAudioKey();
   for(const sample of samples){

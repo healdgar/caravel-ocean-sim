@@ -34,6 +34,7 @@ the ship's motion and follows gravity and aerodynamic drag. Wave contacts drive
 water impacts. Brief muzzle flashes light the ship; dense powder smoke follows
 wind and respects scene depth. Enable sound for captain orders, crew readiness,
 carriage work and delayed cannon reports.
+Loaded guns require current sea clearance; awash gunports hold fire.
 
 Niña uses her four small swivel guns; Victory uses her 104-gun arrangement.
 The visible watch demonstrates selected deck-gun teams; interior teams are
@@ -146,14 +147,16 @@ credential files are never supplied to that reviewer. Its perceptual comments
 guide selection; approximate reported timestamps are checked against the audio
 duration and waveform before editing.
 
-The separate [hull and wave audio improvement](assets/audio/README.md#deferred-hull-and-wave-audio)
-is deferred for a later pass.
+The [hull and wave audio refinement](assets/audio/README.md#hull-and-wave-audio-refinement)
+uses continuous contact-driven wash and sparse, softer accents. A convincing
+lower-hull crash texture and actual underside-slam detection remain unfinished.
 
 The selected twelve sounds are integrated. **Sea settings → Enable sound** starts Web Audio
 from a user gesture; **Mute sound** suspends it. Nothing contacts ElevenLabs at
-runtime. Steady/strong wind blend with apparent wind, hull wash follows absolute
-speed through water (including sternway), and new GPU bow-contact events trigger
-light slaps. Roll, pitch and heave motion trigger spaced timber creaks. Nearby
+runtime. Steady/strong wind blend with apparent wind; hull wash follows signed
+speed, wetness and wave pressure, including waves against a stationary ship.
+GPU bow contacts trigger quiet accents only after the previous wave recedes.
+Roll, pitch and heave motion trigger spaced timber creaks. Nearby
 and distant thunder follow the same events as the visible flashes. The mix has
 bounded event voices, smooth gains and a master compressor. Background tabs
 suspend sound and discard pending events rather than replaying a backlog.
@@ -718,10 +721,16 @@ npm run build
 npm test
 ```
 
-The Victory entrance and dolphin-fluke revision passed **307 tests** using installed Chrome on
+The current overnight checkpoint passed **368 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
+New checks cover heave/yaw-relative sail wind, continuous whale emergence,
+root-anchored breath births, restrained contact-driven hull audio and fresh
+actual-ocean clearance at loaded gun muzzles. Separate native blow/breach
+captures supplemented the suite. The attempted lateen support-owner repair is
+held outside this release because mixed-yard cloth/stay clearance still fails;
+routine bad-tack handling remains unfinished.
 Model checks preserve the exact Niña mesh/index hashes and verify named attachments,
 shared geometry, planned-model guards, independent crew and bundled license notices.
 Dolphin/marine checks cover contact-gated emission across 10–120 FPS, visible
@@ -745,9 +754,11 @@ sparse silhouettes at 12/60 m without dark halos, visible crest faces above eye
 level, all six material families, real whale/dolphin image changes, resizing and
 coastal seabed capture in a standalone build.
 The packed-wave comparison on Metal permits a one-level RGB rounding difference
-in at most 0.1% of channels; alpha must remain identical. Other pixel comparisons
-retain their original assertions. This handles native compiler reassociation
-without accepting geometry or visible shading changes. Software rendering keeps
+in at most 0.2% of channels; alpha must remain identical. Fresh-device captures
+of the same shader reproduced 52/49,152 one-level differences, exceeding the
+previous 0.1% threshold. Other pixel comparisons retain their original assertions.
+This bounds measured native raster/filter noise without accepting geometry or
+visible shading changes. Software rendering keeps
 the packed-wave comparison exact. The byte-exact indexing/resolve fixture holds
 the ocean flat to isolate those changes from FFT rounding; wave behavior has
 separate travelling-wave and rough-sea coverage.

@@ -8,7 +8,7 @@ unchanged. This is an authored low-order model, not a measured caravel polar.
 
 - Sample 36 triangles per sail from `lateenClothPoint`, with the renderer's hull
   scale, camber, furling, mast supports and yard pose. Ignore decorative flutter.
-- At each triangle, subtract forward/leeway and roll/pitch point velocity from
+- At each triangle, subtract forward/leeway, heave and yaw/roll/pitch point velocity from
   the height-dependent wind. Compute incidence against the triangle normal.
 - Use `q = 0.5 ρ V²`, `L = q S CL`, and `D = q S CD`. Lift is perpendicular to
   relative airflow; drag follows it. Normal winding cannot change the result.
@@ -18,8 +18,9 @@ unchanged. This is an authored low-order model, not a measured caravel polar.
   These stall and plate coefficients are assumptions, not measured sail data.
 - Sum forces and `r × F` about the loaded centre of gravity. Integrate forward,
   sideways, roll and pitch loads through existing inertia, righting and drag.
-  Vertical force is used in torque but does not yet alter buoyancy/heave;
-  aerodynamic yaw and sail-to-sail interference remain omitted.
+  Vertical force and yaw moment are retained as diagnostics; vertical force is
+  used in torque but does not yet alter buoyancy/heave, and aerodynamic yaw
+  does not yet drive steering. Sail-to-sail interference remains omitted.
 - Pressure-derived canvas fill approaches its target over 0.25 seconds. Force
   queries do not advance the canvas. Furled visual bundles have zero exposed area.
 
@@ -54,6 +55,17 @@ sternway. Recovery time, reaching a particular heading, and subsequent forward
 motion are not guaranteed: they depend on actual canvas geometry and water flow.
 
 Run `node scripts/sail-force-audit.mjs` for reproducible fixed-pose loads.
+
+`tests/sail-motion.test.mjs` adds finite differences of the authoritative
+`boatRotate` transform in the existing centre-of-gravity load frame. It checks
+heave, heading, roll and pitch together for Niña and Victory, signed still-air
+resistance, zero-rate compatibility and combined six-axis aerodynamic work.
+Positive compass yaw rotates about world -Y; omitting it from point velocity
+previously made turning cloth see incorrect relative airflow. Heave likewise
+now contributes to relative airflow rather than appearing stationary to the air.
+The extra diagnostic loads are not propulsion assistance or a new heave/yaw
+integrator. Historical coefficients and the remaining bad-tack rig limitation
+are unchanged.
 
 ## Performance assessment
 

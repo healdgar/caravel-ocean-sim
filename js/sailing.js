@@ -37,7 +37,7 @@ export function sailingState(boat) {
     squareYaw: 0, lateenYaw: 0, tack: 1, canvasTack: 1, forward: 0, side: 0, area: 0,
     apparentSpeed: 0, apparentAngle: 0, squareFill: 0, lateenFill: 0,
     squareTarget: 0, lateenTarget: 0, windSide: 0, windForward: 0, rollMoment: 0,
-    pitchMoment:0, panelSide:new Float64Array(3), panelMoment:new Float64Array(3),
+    pitchMoment:0, yawMoment:0, heaveForce:0, panelSide:new Float64Array(3), panelMoment:new Float64Array(3),
   };
   boat.sailState.rig??=createLateenPoses(boat.sailState.set);
   boat.sailState.geometry??=boat.modelId==='victory'?createVictorySailGeometry():createSailGeometry();
@@ -81,17 +81,19 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   roll = boat.roll ?? 0, rollRate = boat.rollVelocity ?? 0) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, velocity, sideways, windSpeed, windDirection);
-  s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.pitchMoment=0;s.squareFill=0;s.lateenFill=0;
+  s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.pitchMoment=0;s.yawMoment=0;s.heaveForce=0;s.squareFill=0;s.lateenFill=0;
   s.panelSide.fill(0);s.panelMoment.fill(0);
   const geometry=s.geometry,panels=updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
-  const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0;
+  const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0,yawRate=boat.yawRate??0,heaveRate=boat.heaveVelocity??0;
   const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
   const datum=vesselDraft(boat),cg=(boat.hydrodynamics?.centreOfGravity??datum)-datum;
   const relativeDirection=windDirection-(boat.heading??0)*Math.PI/180;
   const windX=Math.cos(relativeDirection),windZ=Math.sin(relativeDirection);
-  // The roll axis rotates with pitch. Point velocities and torque use the same
-  // axes as the visible hull: roll around Z, then pitch around X.
-  const ox=pitchRate,oy=-rollRate*sp,oz=rollRate*cp;
+  // Heading is rotation about -worldY. In the heading-aligned load frame,
+  // omega includes yaw and the pitch-rotated roll axis. Relative airflow must
+  // subtract all rigid motion, including heave; otherwise rising/turning sails
+  // see the air as if those components of their motion did not exist.
+  const ox=pitchRate,oy=-yawRate-rollRate*sp,oz=rollRate*cp;
   for(let m=0;m<3;m++){
     let fill=0,area=0;
     const group=geometry.victory?geometry.groups[m]:panels,start=geometry.victory?0:m*geometry.indices.length,count=geometry.victory?group.length:geometry.indices.length;
@@ -103,12 +105,12 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
       const height=cp*(sr*x+cr*y)-sp*z-(boat.hydrodynamics?.sinkage??0);
       const localWind=windAtHeight(windSpeed,height);
       const wx=windX*localWind-sideways-(oy*rz-oz*ry);
-      const wy=-(oz*rx-ox*rz),wz=windZ*localWind+velocity-(ox*ry-oy*rx);
+      const wy=-heaveRate-(oz*rx-ox*rz),wz=windZ*localWind+velocity-(ox*ry-oy*rx);
       fill+=sailPanelForce(force,geometry.coefficients,normalX,normalY,normalZ,wx,wy,wz,panel.area,panel.aspect)*panel.area;
       const [fx,fy,fz]=force;
       const mx=ry*fz-rz*fy,my=rz*fx-rx*fz,mz=rx*fy-ry*fx;
       const rollMoment=-sp*my+cp*mz;
-      s.forward-=fz;s.side+=fx;s.rollMoment+=rollMoment;s.pitchMoment+=mx;
+      s.forward-=fz;s.side+=fx;s.heaveForce+=fy;s.rollMoment+=rollMoment;s.pitchMoment+=mx;s.yawMoment-=my;
       s.panelSide[m]+=fx;s.panelMoment[m]+=rollMoment;area+=panel.area;
     }
     s.rig[m].targetFill=area>0?fill/area:0;

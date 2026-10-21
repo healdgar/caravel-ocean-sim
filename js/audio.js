@@ -3,7 +3,7 @@ import { VOICE_ASSETS, CREW_VOICES } from './voice-assets.js';
 import { createVoiceDirector } from './voice-lines.js';
 import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
 import { createGunneryAudio } from './gunnery-audio.js';
-import { weatherClamp, weatherAudioLevels } from './weather-state.js';
+import { weatherClamp, weatherAudioLevels, createHullAudioState } from './weather-state.js';
 
 const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 
@@ -11,15 +11,16 @@ const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 // fetched or started until the listener enables sound with a browser gesture.
 export function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
-  let time=0,lastSlap=-10,nextCreak=4,nextBird=25,lastRevision=-1;
+  let time=0,nextCreak=4,nextBird=25,lastRevision=-1;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
   const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[];
   const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
   const mute=()=>{if(context)master.gain.setTargetAtTime(enabled&&!hidden?volume:0,context.currentTime,.06);};
   const dialogue=createVoiceDirector({play:(...args)=>play(...args,true),assets:VOICE_ASSETS,crew:CREW_VOICES,available:()=>enabled&&!hidden&&ready&&context?.state==='running'&&context.currentTime>=previewUntil});
   const gunsAudio=createGunneryAudio({play,listener:()=>listener,available:()=>enabled&&!hidden&&ready&&context?.state==='running'});
-  function stopEvents(){dialogue.clear();gunsAudio.clear();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
-  function play(id,gain,position,rate=1,spatial=false){
+  const hullAudio=createHullAudioState();
+  function stopEvents(){dialogue.clear();gunsAudio.clear();hullAudio.reset();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
+  function play(id,gain,position,rate=1,spatial=false,options={}){
     const pool=id==='cannon-report'?reports:voices,limit=id==='cannon-report'?12:8;
     if(!enabled||hidden||!ready||!buffers.has(id)||pool.size>=limit||context.state!=='running')return;
     const source=context.createBufferSource(),level=context.createGain(),pan=context.createStereoPanner();
@@ -28,8 +29,19 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*.85;
     const range=Math.hypot(dx,(position.y??position.heave??0)-listener.y,dz);
     level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/24):1);
-    source.connect(level).connect(pan).connect(master);pool.add(source);
-    source.onended=()=>{pool.delete(source);source.disconnect();level.disconnect();pan.disconnect();};source.start();return source.buffer.duration/rate;
+    const filters=[];let tail=source;
+    for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){
+      const filter=context.createBiquadFilter();filter.type=type;filter.frequency.value=hz;filter.Q.value=.6;tail.connect(filter);tail=filter;filters.push(filter);
+    }
+    tail.connect(level).connect(pan).connect(master);pool.add(source);
+    const offset=weatherClamp(options.offset??0,0,Math.max(0,source.buffer.duration-.01));
+    const duration=Math.min(source.buffer.duration-offset,Number.isFinite(options.duration)?Math.max(.02,options.duration):source.buffer.duration),seconds=duration/rate;
+    if(options.attack||options.release){
+      const at=context.currentTime,target=level.gain.value,attack=Math.min(seconds*.3,options.attack??0),release=Math.min(seconds*.8,options.release??0);
+      level.gain.setValueAtTime(0,at);level.gain.linearRampToValueAtTime(target,at+attack);
+      level.gain.setValueAtTime(target,at+Math.max(attack,seconds-release));level.gain.linearRampToValueAtTime(0,at+seconds);
+    }
+    source.onended=()=>{pool.delete(source);source.disconnect();for(const filter of filters)filter.disconnect();level.disconnect();pan.disconnect();};source.start(0,offset,duration);return seconds;
   }
   function startLoop(id,asset){
     if(!asset?.loop||!buffers.has(id)||loops.has(id))return;
@@ -82,7 +94,11 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       else if(event.type==='splash')play('anchor-splash',.6,anchorPosition,1,true);
       else if(event.type==='drop')play('anchor-release',.4,anchorPosition,1,true);
     },
-    impact(event){if(event&&time-lastSlap>.5){lastSlap=time;play('hull-slap',(.12+.2*Math.sqrt(event.strength))*shipDistance,event,.92+Math.random()*.14);}},
+    hullContact(contact){return hullAudio.contact(contact);},
+    impact(event){
+      if(!enabled||hidden||!ready)return;
+      const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
+    },
     update(dt,settings,boat,frame,weather){
       time+=dt;volume=weatherClamp(settings.soundVolume??.7);
       listener.x=frame[16];listener.y=frame[17];listener.z=frame[18];
@@ -90,12 +106,14 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       shipDistance=boat.showProw?1/(1+Math.max(0,Math.hypot(boat.x-listener.x,boat.z-listener.z)-boat.length*.5)/18):0;
       dialogue.update(dt);
       gunsAudio.update(dt);
+      const hullMix=hullAudio.update(dt,{speed:boat.surgeVelocity??0});
       if(!enabled||hidden||!ready)return;
       if(anchorReeling){anchorPosition={x:boat.x,y:(boat.heave??0)+3,z:boat.z};startLoop('anchor-reel',ALL_SOUNDS['anchor-reel']);}
       mute();
       if(lastRevision!==boat.revision){lastRevision=boat.revision;nextCreak=time+4;}
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,speed:boat.surgeVelocity??0,intensity:weather.intensity,type:weather.type,ship:shipDistance});
+      levels['hull-wash']=hullMix.wash*shipDistance;
       for(const [id,loop] of loops){
         const gain=id==='anchor-reel'?(anchorReeling ? .3/(1+Math.max(0,Math.hypot(anchorPosition.x-listener.x,anchorPosition.y-listener.y,anchorPosition.z-listener.z)-8)/24):0):levels[id]??0;
         loop.gain.gain.setTargetAtTime(gain,context.currentTime,id==='anchor-reel'?.08:.45);

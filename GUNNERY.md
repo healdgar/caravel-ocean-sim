@@ -20,6 +20,8 @@ Shot weight is in imperial pounds; mass is converted to kilograms. Diameter foll
 
 An opposite impulse enters the existing hull's surge, leeway, heave and angular velocity states. The normal mass, added-water inertia and hull resistance then govern motion. Recoil is applied once per discharge, not repeatedly while its animation plays.
 
+Loaded muzzles also require a fresh GPU sea-clearance sample before the captain can order fire, and each gun is checked again at discharge. Awash muzzles, stale readbacks, substantial movement and changed sea/ship revisions hold fire without spending a round or applying recoil. The HUD distinguishes checking the sea from gunports awash. A 10 cm clearance margin is an authored operational constraint, not a recovered historical firing rule.
+
 Contact sweeps the shot's trajectory against all six cascades of the actual GPU ocean, including inverse horizontal displacement. Spatial subdivisions and bisection catch crests between integration points. Asynchronous readback retains unchecked trajectory segments. It samples the current wave field, rather than reconstructing historical FFT textures at every past trajectory time. Splashes are emitted from those measured contacts with the arriving velocity and shot mass.
 
 Ship penetration, structural damage, land impacts, water-skipping ricochets, variable powder charges, adjustable gun elevation, and AI combat decisions are subsequent systems. The following ship keeps its guns secured. This is a firing and sea-impact system, not a completed combat model.
@@ -30,7 +32,7 @@ A short muzzle flash illuminates nearby timber and crew. Connected three-dimensi
 
 The existing Web Audio context spatializes each report. Sound arrives after distance divided by the speed of sound; nearby report arrivals can share a mixing voice while their projectiles remain independent. Gun reports have a separate bounded source pool so they do not consume every crew/mechanical voice. [Sound generation, listening review and provenance](GUNNERY_AUDIO.md).
 
-Idle gunnery emits no smoke/particle work or ocean readback. A broadside adds bounded round shot, smoke volumes and impact slots. Full Victory broadsides cost more than idle sailing, particularly close to the smoke. The existing resolution monitor retains its 30 FPS target; physical iPhone performance still requires device testing.
+Secured gunnery emits no smoke/particle work or ocean readback. A manned, loaded battery adds a bounded muzzle-clearance query while it awaits orders. A broadside adds bounded round shot, smoke volumes and impact slots. Full Victory broadsides cost more than idle sailing, particularly close to the smoke. The existing resolution monitor retains its 30 FPS target; physical iPhone performance still requires device testing.
 
 ## Sources and reconstruction limits
 

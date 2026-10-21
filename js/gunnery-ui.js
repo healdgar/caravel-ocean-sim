@@ -22,7 +22,8 @@ export function createGunneryControls(parent,gunnery){
     standDown.disabled=!gunnery.selectedSide;
     for(const r of rows){
       const s=gunnery.summary(r.side),ordered=gunnery.ordered===r.side;
-      const text=ordered?'Captain’s order · stand clear':s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${gunnery.selectedSide===r.side&&!gunnery.canFire(r.side)?' · manning guns':''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
+      const held=s.ready===s.total?gunnery.blockedReason(r.side):null;
+      const text=ordered?'Captain’s order · stand clear':s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
       if(r.status.textContent!==text)r.status.textContent=text;
       r.fire.disabled=!gunnery.canFire(r.side);
       r.prepare.disabled=!!gunnery.ordered||!!s.queued||s.loading>0||(s.ready===s.total&&gunnery.selectedSide===r.side)||['port','starboard'].some(side=>side!==r.side&&gunnery.summary(side).loading>0);

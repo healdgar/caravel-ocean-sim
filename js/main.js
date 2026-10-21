@@ -5,6 +5,7 @@ import { createShipGunnery } from './gunnery-control.js';
 import { createGunneryControls } from './gunnery-ui.js';
 import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
+import { createGunportSafety } from './gunport-safety.js';
 import { createGunRecoilMap, updateGunRecoilVertices } from './gunnery-models.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
@@ -452,6 +453,7 @@ async function main() {
   const marineLife=await createMarineLife({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   const gunEffects=await createGunneryEffects({device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
   const gunSea=await createGunnerySeaProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
+  const gunportSafety=await createGunportSafety({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
   const impactDetector=createImpactDetector();
   const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
@@ -672,7 +674,7 @@ async function main() {
   if(terrain&&LAND_STAGE){const start=terrain.safeStart(companion,companion);companion.x=start.x;companion.z=start.z;}
   let followerEnabled=qs.get('follower')!=='0';boat.followingShip=followerEnabled;
   vessels[0].boat=boat;vessels[1].boat=companion;
-  const shipGuns=createShipGunnery(boat,{onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),onEvent:event=>{
+  const shipGuns=createShipGunnery(boat,{muzzleBlock:(gun,pose)=>gunportSafety.block(gun,pose,boat.gunnery.time,boat.revision),onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),onEvent:event=>{
     sceneAudio.gunneryEvent(event);
     if(event.type==='shot')gunEffects.emitShot({...event,id:event.shotId,chargeKg:event.mass*.3});
     else if(event.type==='impact'&&event.kind==='water')gunEffects.emitImpact({...event,id:event.shotId,position:event.surfacePosition,massKg:event.mass});
@@ -1550,6 +1552,7 @@ async function main() {
     cp.end();
 
     gunSea.encode(enc,shipGuns.state.projectiles,simTime);
+    gunportSafety.encode(enc,boat,shipGuns.state.time);
     const drawProw=vessels.some(v=>v.boat.showProw);
     const gunTransparent=gunEffects.transparentActive;
     // Resolve the ocean straight into the reflection pyramid. The ship pass
@@ -1664,9 +1667,10 @@ async function main() {
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
     gunSea.read(contact=>shipGuns.impact(contact));
+    gunportSafety.read();
     if(doAudio){audioPending=true;audioRead.mapAsync(GPUMapMode.READ).then(()=>{
-      const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
-      audioRead.unmap();audioPending=false;if(audioRevision===boat.revision)sceneAudio.impact(event);
+      const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision,{draft:boat.hydrodynamics.draft});
+      audioRead.unmap();audioPending=false;if(audioRevision===boat.revision){sceneAudio.hullContact(impactDetector.contact);sceneAudio.impact(event);}
     }).catch(()=>{audioPending=false;});}
     for(const v of vessels){const p=v.probe;if(p.requested){p.pending=true;p.read.mapAsync(GPUMapMode.READ).then(()=>{
       const heights=new Float32Array(p.read.getMappedRange(0,64));

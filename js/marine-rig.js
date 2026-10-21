@@ -3,6 +3,15 @@ import {gltfQuatMultiply,gltfMatMultiply} from './gltf.js';
 
 export const MARINE_SWIM_PERIOD=5.2;
 
+// Root depth is relative to the local sea. Blend propulsion into a restrained
+// airborne stroke instead of changing 80% of the pose on a single frame. The
+// emergence range is authored; it is not a measured cetacean gait model.
+export function marineStrokeAmplitude(depth){
+  if(!Number.isFinite(depth))throw Error('Invalid marine rig depth');
+  const t=Math.max(0,Math.min(1,(depth+.5)/2));
+  return 1-.8*t*t*(3-2*t);
+}
+
 // The straight sperm whale has an 18-bone SmartRig and no authored clips.
 // Preserve its neutral bind shape; the existing posterior chain carries a
 // travelling dorsoventral stroke with a growing amplitude toward the flukes.

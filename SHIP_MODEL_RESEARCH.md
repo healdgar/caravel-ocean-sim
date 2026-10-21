@@ -61,6 +61,70 @@ capacity tons nor unspecified tonnage supplies kilograms for the force model.
 Pinta can share caravel component roles with a square fore/main rig definition;
 Santa María needs its own hull/deck hierarchy, not just a scaled Niña mesh.
 
+## Pinta / Santa María implementation audit
+
+Source/code review, 20 October 2026; no runtime changes or validation in this pass.
+
+The planned definitions correctly preserve unresolved positions and reject play.
+Pinta already requests two square courses and a lateen mizzen. Santa María adds
+a main topsail and spritsail, matching the five sail names on the builder page.
+Three mast control groups can therefore remain; they must not limit sail count.
+
+Rechecking the [current Niña/Pinta operator](https://www.ninapinta.net/) confirms
+that its Pinta is a modern, enlarged visitor vessel. Its Niña reconstruction also
+uses evidence from a later inventory, rather than our three-lateen interpretation.
+Its modern below-deck crew accommodation is not an original deck plan. The older
+exact dimension table above remains indexed evidence, not a newly surveyed hull.
+Neither that table nor Baiona's length/capacity estimate supplies hull offsets,
+mast positions, individual sail dimensions or a defensible displacement.
+
+The [Santa María builder](https://www.fundacionnaovictoria.org/es/la-construccion-nao-santa-maria/)
+names Principal, Castillo, Tolda and Toldilla: separate deck levels, not evidence
+of four full-length decks. The replica uses wood-covered fibreglass construction.
+The [Barcelona museum model](https://www.mmb.cat/en/colleccions/model-ships/model-carrack-santa-maria/)
+was made in 1964; it supports a rig interpretation, not original construction
+measurements. Santa María's planned graph still lacks an explicit poop-deck role;
+its user-requested foremast lookout placement remains unverified.
+
+### Smallest coherent playable Pinta
+
+Implement one three-sail mixed rig before adding Santa María or a third fleet
+slot. Reuse caravel building primitives and force equations, with an independent
+Pinta design and independently allocated running state. Extract the existing
+square-cloth evaluator from Victory only far enough to accept model-owned sail,
+spar, support and rope descriptors. Combine two such square courses with an
+actual lateen mizzen; Victory's gaff spanker is not a lateen replacement.
+
+Current blockers are concrete: `createVictorySailGeometry()` imports Victory's
+twelve sails and vertical scale; CPU/WGSL motion imports its support/rope arrays
+and brace stops; `hull.rig.w` distinguishes only Niña/Victory. Most other model-ID
+branches silently select Niña for anything else. Merely allowing another backend
+name would bypass protection without supplying a working model.
+
+| Implementation owner | Files / responsibility |
+|---|---|
+| Vessel geometry | New `js/models/pinta.js` and mesh builder; `js/ship-mesh.js`, `js/hull.js`, `js/wgsl/hull.js`: own hull/deck profile, joined structure, scale and attachment points. Caravel primitives may be shared; shape and dimensions remain explicit. |
+| Rig / sail physics | `js/lateen.js`, `js/victory-motion.js`, corresponding WGSL, `js/sail-aerodynamics.js`, `js/sailing.js`: descriptor-driven square/lateen poses, model-specific brace/contact limits, actual sail areas, paired sheets and independently resolved rope leads. One posed surface serves forces, rendering, shadows and wetting. |
+| Ship integration | `js/ship-models.js`, `js/rig-definition.js`, `js/vessels.js`, `js/wgsl/vessel.js`: resolved nodes and explicit backend dispatch. Preserve the ready guard until every required capability exists; avoid treating Pinta as either binary shader branch. |
+| Loading / deck work | `js/boat.js`, `js/crew-work.js`, `js/anchor-state.js`, `js/gunnery-models.js`: hull-derived hydrostatics/inertia, authored loading, routes and helm, anchor equipment and explicit gun attachments or empty armament. Do not inherit Niña's twelve-person manifest or Victory's batteries by fallback. |
+| UI / release integration | `js/main.js` and fleet/render bindings: model selection, specification labels and per-instance resources. Keep two slots initially. Three independently selectable ships require the separate ocean-mask/wake/probe/shadow expansion already listed in `SHIP_MODELS.md`. |
+
+Before authoring, select **one** Pinta subject: an explicitly authored 1492-style
+reconstruction or the enlarged Sanger visitor replica. Preserve the distinction
+in UI metadata. Resolve its hull-length convention, beam/draught profile, deck
+breaks, mast/yard/sail proportions, loading and armament without averaging the
+incompatible reports. Unsupported choices should be labelled authored, not
+historically calibrated. A named reconstruction drawing can govern proportions;
+museum photographs alone cannot establish reliable offsets.
+
+Acceptance requires actual cloth/rope clearance on both tacks and during
+reefing/yard work, CPU/WGSL attachment agreement, load/freeboard and inertial
+checks, crew-route containment, per-instance independence and a visible sailing
+check. The retained-yard bad-tack defect documented in `SAILING_MODEL.md` must not
+be copied into the new lateen. Keep Pinta planned until those checks pass. Santa
+María follows with its own nao hull/deck hierarchy and an explicit lookout
+decision; the three-ship fleet and physical-iPhone 30 FPS check follow that.
+
 ## Later vessel reference starting points
 
 Requested sequence after the 1492 fleet: c. AD 850 Viking longship; c. AD 350 Roman

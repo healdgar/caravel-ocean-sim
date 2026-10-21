@@ -157,7 +157,13 @@ export const MARINE_EFFECT_INIT=DOLPHIN_RENDER+MARINE_BREATH_DYNAMICS+/* wgsl */
 @group(0) @binding(11) var<storage,read_write> marineContacts:array<vec4f>;
 @compute @workgroup_size(${MARINE_BREATH_DROP_COUNT}) fn marineBirthCS(@builtin(workgroup_id) id:vec3u,@builtin(local_invocation_id) local:vec3u){
   let s=splashes[id.x];let slot=u32(s.motion.w)%48u;
-  if(local.x==0u&&s.motion.w>0.0&&marineBirths[slot].x!=s.motion.w){marineBirths[slot]=vec4f(s.motion.w,dolphinHeight(s.root.xy),0,0);}
+  if(local.x==0u&&s.motion.w>0.0&&marineBirths[slot].x!=s.motion.w){
+    // CPU seeds real blows with their interpolated animal-root query. The
+    // outlet's height is relative to that same sea sample used by the body.
+    // Direct/synthetic effects have no negative key and retain their fallback.
+    let seed=marineBirths[slot];let anchor=select(s.root.xy,seed.zw,seed.x == -s.motion.w);
+    marineBirths[slot]=vec4f(s.motion.w,dolphinHeight(anchor),0,0);
+  }
   storageBarrier();
   if(s.motion.w<=0.0||s.shape.z<2.5){return;}
   let index=slot*${MARINE_BREATH_DROP_COUNT}u+local.x;
