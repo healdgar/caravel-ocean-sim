@@ -325,4 +325,18 @@ Evidence: `shots/startup-mobile-loading.png`, `shots/startup-ready-local.png`.
 Initial Pages HTML is 614,127 bytes; 53 referenced assets total 15,875,925 bytes.
 The whale remains a mandatory 8.32 MB startup resource and pipeline count remains
 102; this checkpoint improves packaging and feedback without claiming all
-startup work has disappeared. Publication and deployed-byte verification follow.
+startup work has disappeared.
+
+Published startup checkpoint `12e58a891419e317d029df461e59783732219c10`;
+Pages workflow `39618593217` succeeded. At 2026-10-21 14:40:48 UTC, the public
+HTML and manifest matched local bytes, and all 53 deployed assets matched their
+SHA-256/byte counts. HTML SHA-256:
+`72ef564f9369023b602a8b7e4d2755a5a1d0762bd747a79c96ffcc1261fda148`.
+Fresh public Chrome on this Mac reached its first GPU frame in 1.20s, versus
+the earlier 2.34s observation; HTML transfer was 212,493 compressed bytes.
+These are desktop observations, not an iPhone or controlled repeated benchmark.
+The deployed scene also passed visible Chrome review: real loading stage,
+then the ship/helm, with no warning/error logs. Evidence:
+`shots/startup-ready-public.png`; local receipts are in
+`/tmp/waterworld-startup-deployed.json` and
+`/tmp/waterworld-startup-after-public.json`.
