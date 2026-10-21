@@ -726,7 +726,7 @@ npm run build
 npm test
 ```
 
-The current overnight checkpoint passed **376 tests** using installed Chrome on
+The current overnight checkpoint passed **383 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -736,10 +736,17 @@ actual-ocean clearance at loaded gun muzzles. Separate native blow/breach
 captures supplemented the suite. The attempted lateen support-owner repair is
 held outside this release because mixed-yard cloth/stay clearance still fails;
 routine bad-tack handling remains unfinished.
+The [rig-handling checkpoint](RIG_HANDLING.md) separates tested prototype
+logic from the exposed-cloth, crew and CPU/GPU clearance work still required.
+`node scripts/sail-rest-audit.mjs` reports local edge-length and area changes
+against the canonical cloth; add `--json` for material UVs and dimensional excess.
+Its 54 fixed Niña samples expose up to 13.1% local edge stretch in the tight backed
+pose despite little total-area change. Finite geometry is not a cloth/contact
+pass. The audit does not change the renderer or sailing forces.
 Lower-hull checks additionally verify actual skin/keel placement, mirrored
 scaled transforms, persistent first-wet events, all six displaced sea bands,
 readback expiry and silent lifecycle resets. The full native suite passed in
-186.1 seconds; visible Chrome also exercised sound enable, rough seas and mute
+180.1 seconds; visible Chrome also exercised sound enable, rough seas and mute
 without console errors. These checks do not qualify physical iPhone performance
 or establish a calibrated slam-force solver.
 Model checks preserve the exact Niña mesh/index hashes and verify named attachments,

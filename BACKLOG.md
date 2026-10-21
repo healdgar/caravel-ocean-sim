@@ -106,3 +106,77 @@ found no remaining blocker. Actual visible Chrome exercised Victory, sound
 enable, Hella rough, spectrum reset and mute with no console errors; proof
 `shots/overnight-bottom-local.png`. No crash sound, force impulse or rig change
 is included. Publication pending.
+
+**Published batch02:** `1e665c03a715e5e57b147d14034faef146b4e26a`.
+Pages deployment39581887758succeeded. Public page SHA-256 matched local bytes:
+`04cc20d03bd006453ec6e2e4c798729e3875b90975f9dcbcfcf50085d6c42443`.
+Fresh visible Chrome loaded the published Victory, enabled sound, changed to
+Hella rough, muted and continued rendering with no console warnings/errors.
+Live proof `shots/overnight-bottom-live.png`; verification tabs closed.
+Source/bundles/tests are committed and pushed; this publication receipt remains
+local for the next checkpoint. Root remains the sole tester. Next priority is
+the retained-yard operating-rig correction; do not promote any held contact
+prototype or claim the accepted heavy-crash texture exists.
+
+## Batch03: retained-yard research and isolated prototypes
+
+`RIG_HANDLING.md` records the mechanical distinctions and release gates. Primary
+museum research adds the missing routine yard-azimuth degree of freedom; the
+existing yard is rigid in azimuth outside transfers. Root's25raw yaw/signed-sheet
+poses showed forward force is possible but every such pose still contacts rig;
+yaw alone is not a clearance correction. The actual-yard oracle now accepts an
+optional yard transform. An eight-fixture pure crew/support handover prototype
+passed, but it changes no production state and remains blocked at its external
+geometry-clearance gate. Held fixtures use `.fixture.mjs`, never `.test.mjs`,
+to avoid accidental discovery by the production suite. No batch03 runtime edits
+or publication yet. Continue finite-mast wrapping/slack work; never promote a
+signed-clew flip, wider spar offset or support masking as a completed correction.
+
+Root subsequently rejected three isolated contact candidates on the same
+fully exposed signed-sheet fixture: independent horizontal rows157pairs
+(45own-mast), raw-subarc splice143(36own-mast), mesh constraints119(11own-mast).
+The mesh pins were exact but edge stretch reached1.60times canonical reference;
+three sails took425ms in the unoptimized diagnostic. None is releasable.
+Ordinary free-edge points must move; they are not fixed attachments. Continue
+from a known clear lattice with contact history, rather than inventing a wrap
+side from an already intersecting raw surface. `RIG_HANDLING.md` records the
+specific failures and remaining gates. No live rig change.
+
+Root's31pose retained-history continuation removed deep own-mast crossings.
+With target attraction applied once before each unchanged64iteration solve,
+all93sampled sail surfaces met their own-mast margin; full-rig endpoint still
+failed194pairs and edge stretch reached8%. This is not continuous collision or
+textile clearance. Worst stretch sits below the moving clew, including on a
+mizzen with no contact projection; explicit endpoint relaxation confirms slow
+local propagation. An optional canonical graph-distance tether experiment is
+next, preserving edge limits and iteration count. Production remains unchanged.
+
+That tether comparison reduced maximum local stretch to4.6%, but still failed
+217full-rig contacts. A full-raw-target prediction reversed contact normals and
+was rejected. Selected rope witnesses are gathered stays/runners, always-eased
+working falls and a foreign halyard; more support release alone is insufficient.
+Root's production metric sweep also found existing tight-backed edge ratios
+up to1.131with little total-area change. The reusable material-mesh audit exposes
+this limitation without blessing it as a clearance pass.
+
+Fresh visible Chrome inspected Victory's stern and close forward-quarter view,
+calm sea/furled sails, with no console warnings/errors. Source audit found no
+recurrence of the corrected blunt entrance or detached wales. Remaining numeric
+gate: define and measure semantic keel and figurehead-to-taffrail endpoints
+against the ledger's46.1010m/69.0372m conventions before reshaping again; generic
+mesh extrema are not those measurements. Proofs `shots/overnight-victory-bow-review.png`
+and `shots/overnight-victory-shape-review.png`; inspection tab closed.
+
+**Batch03 gate passed:** complete native Metal suite383/383, serialized by root,
+180.1seconds. Seven new material-mesh audit checks passed, including finite-input
+arithmetic overflow; independent review caught and corrected partial edge extrema
+after overflow. CLI JSON returned54records with no invalid coordinates/topology,
+while honestly reporting backed-pose edge stretch. Only the audit script/tests
+and local project documentation enter this checkpoint. Runtime JS/WGSL and all
+three standalone page bytes remain unchanged. No contact prototype, artificial
+force correction, new asset or paid generation is included. Publication pending.
+
+The heartbeat remains active. Its bounded count was extended from9to10solely to
+retain a wake at/after the08:00cutoff for stabilization/report/disable; the prompt,
+thread, notification policy and prohibition on new implementation after08:00
+are unchanged. Always check actual local time before starting another change.

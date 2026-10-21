@@ -117,7 +117,9 @@ envelopes against masts and rig. The explicit **Transfer yards** captain order
 moves the yards to leeward. The [Mallorca Maritime Museum's San Miguel account](https://museumaritim.conselldemallorca.es/en/-/san-miguel-un-llaut-gran-de-1899)
 describes lateen sailing with the sail on either side of the mast, with different
 efficiency. It supports distinguishing routine tacking from transfer, not our exact
-Niña handling geometry or authored 28% bad-tack drive penalty.
+Niña handling geometry. The former fixed 28% bad-tack drive discount has been removed;
+forces now use the posed canvas. Its windward-clew defect remains documented in
+`SAILING_MODEL.md` and `RIG_HANDLING.md`.
 
 The irons-recovery model retains passive canvas wind drag. Sternway can therefore
 develop independently of helm input. Reverse rudder authority comes only from the

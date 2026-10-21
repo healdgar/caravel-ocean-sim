@@ -44,6 +44,18 @@ bonus, or claim this operating rig is mechanically complete. A proper correction
 must pass the existing rendered triangle/rope clearance checks before optimizing
 trim or calibrating voyage speeds.
 
+`RIG_HANDLING.md` records the current mechanical audit and isolated prototype
+results, including missing routine yard azimuth, independent sheet/support
+controls, crew-clear handover and the required cloth rest metric. Those
+experiments have not changed the released rig.
+
+`node scripts/sail-rest-audit.mjs` measures the 26-row material mesh against its
+canonical reference. `--json` retains worst-edge UVs, ratios, dimensional excess
+and total areas across 54 authored full-canvas poses. The current tight backed
+pose stretches local edges by up to 13.1% while total area changes little; this
+is a kinematic limitation. Finite coordinates and unsigned areas do not prove
+a valid textile metric, orientation, self-contact or rig clearance.
+
 ## Validation
 
 `tests/sail-aerodynamics.test.mjs` covers cloth-coordinate identity, exposed area,
