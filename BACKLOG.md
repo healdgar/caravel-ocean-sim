@@ -639,7 +639,14 @@ https://www.sabapark.org/downloads/SCF%20Yacht%20Brochure.pdf .
   overrides, without GPU/page errors.42focused terrain/sharing/camera/fleet/startup
   checks pass. Six additional native Metal packaged-landfall, sailing-control,
   mobile-panel and independent-fleet checks pass. All three packaged pages render;
-  no regression thresholds changed for this scene setup. Publication pending.
+  no regression thresholds changed for this scene setup. Published as
+  `3cbadc2bc15752673af2a62c04de13f2b07115e2`; Pages39669511100 succeeded.
+  At20:23:13UTC, public HTML/manifest/all53assets matched tested bytes.
+  HTML668690bytes, SHA-256
+  `5c1507942765757d814e67539b0d8ed0d62c55f498e53614b250a69fa338c692`.
+  Asset bytes remain15875925. Fresh visible Chrome renders both boats at Wells
+  Bay with heading112° and no warnings/errors. Proof:
+  `shots/wells-bay-public-verified.png`. Physical iPhone remains unqualified.
 - This sets up incoming surf, but does not implement it: the2m-minimum authored
   bed and16m terrain grid still lack an intertidal profile. Shoaling/breaking,
   plunging fronts, foam transport and swash remain the next water-system work.
