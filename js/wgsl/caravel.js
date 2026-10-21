@@ -3,7 +3,69 @@ import { SKY_RENDER_FUNCS } from './sky.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
 import { VESSEL_RIG, VESSEL_LIGHTING, CANVAS_OPTICS } from './vessel.js';
 import { SHADOW_SAMPLE } from './shadows.js';
-export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + /* wgsl */ `
+
+// Exact marker recognized by createSubmergedShader. Both hull and rudder retain
+// their authored material IDs/finishes; only the surrounding optical medium
+// changes in the capture variant. No new resource or vertex-layout contract.
+export const VESSEL_MATERIAL_MEDIUM=/* wgsl */ `
+const vesselWaterCapture=false;
+fn vesselWoodDielectricF0()->f32 {
+  let medium=select(1.0,1.333,vesselWaterCapture);
+  let ratio=(1.5-medium)/(1.5+medium);return select(0.04,ratio*ratio,vesselWaterCapture);
+}
+fn vesselAirFilm(film:f32)->f32 {return select(film,0.0,vesselWaterCapture);}
+fn vesselWoodMaterial(material:u32,paintedWood:bool)->bool {
+  return paintedWood || material==0u || material==1u || material==5u || material==6u || material==7u || material==10u ||
+    material==14u || material==15u || material==16u || material==17u || material==18u;
+}
+fn vesselWoodOptics(rough:f32,absorbed:f32,film:f32,relief:f32,grain:f32)->vec4f {
+  let darkening=mix(1.0,0.58,absorbed);
+  let intrinsic=mix(rough,max(0.62,rough-0.15),absorbed);
+  // Once immersed there is no outer water/air boundary atop a wet board. Keep
+  // absorption and grain, but do not varnish the submerged surface with that
+  // air-side film lobe. This helper is shared by every timber material.
+  let surfaceFilm=vesselAirFilm(film)*(0.35+0.65*(1.0-smoothstep(0.12,0.65,relief+grain*0.25)));
+  return vec4f(darkening,mix(intrinsic,0.27+grain*0.09,surfaceFilm),vesselWoodDielectricF0(),surfaceFilm);
+}
+`;
+
+// Authored aged/cast-iron finish, not a measured Victory conservation recipe.
+// Oxide is a dark dielectric; exposed iron is a separate area fraction. A dark
+// diffuse colour must not also stand in for the conductor's F0. Approximate
+// linear bare-iron reflectance follows Filament's common-metal reference:
+// https://google.github.io/filament/main/materials.html#materialmodels/litmodel/basecolor
+// Water's IOR=1.33 gives about 2% normal-incidence reflectance. Its surface film
+// is a second lobe, not absorbed timber moisture or a smoother metal substrate.
+export const IRON_SURFACE = /* wgsl */ `
+const vesselIronWaterF0=0.020059312;
+struct VesselIronSurface {
+  albedo:vec3f,f0:vec3f,rough:f32,bare:f32,relief:f32,film:f32,filmRough:f32,
+};
+fn vesselIronNoise(p:vec3f,frequency:f32)->f32 {
+  return (gnoise(p.xy*frequency)+gnoise(p.yz*frequency+vec2f(7.1,3.9))+
+    gnoise(p.zx*frequency+vec2f(13.7,19.3)))/3.0;
+}
+fn vesselIronSurface(p:vec3f,footprint:f32,film:f32)->VesselIronSurface {
+  // Metres in the undeformed object frame keep the finish fixed to the gun.
+  // Remove unresolved surface frequencies from colour, roughness AND relief.
+  let coarse=vesselIronNoise(p,8.0)*(1.0-smoothstep(0.025,0.10,footprint));
+  let pits=vesselIronNoise(p,85.0)*(1.0-smoothstep(0.002,0.008,footprint));
+  var surface:VesselIronSurface;
+  surface.bare=clamp(0.06+coarse*0.16,0.02,0.14);
+  surface.albedo=vec3f(0.020,0.019,0.017)*(0.94+coarse*0.22);
+  surface.f0=mix(vec3f(0.04),vec3f(0.55,0.57,0.57),surface.bare);
+  surface.rough=clamp(0.73+coarse*0.16+pits*0.12,0.62,0.86);
+  surface.relief=coarse*0.0007+pits*0.00016;
+  surface.film=clamp(film,0.0,1.0);surface.filmRough=0.23+coarse*0.06;
+  return surface;
+}
+fn vesselIronTransmission(film:f32,nv:f32,nl:f32)->f32 {
+  let fv=vesselFresnel(vec3f(vesselIronWaterF0),nv).x;
+  let fl=vesselFresnel(vec3f(vesselIronWaterF0),nl).x;
+  return mix(1.0,(1.0-fv)*(1.0-fl),film);
+}
+`;
+export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -93,11 +155,25 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let join=select(0.0,max(seam,buttSeam*.8),plankedWall);
   let bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018;
   let dx = dpdx(in.world); let dy = dpdy(in.world);
+  // Shadow depth rasterizes flat triangles, while cloth lighting uses smooth
+  // analytic normals. Receiver-plane filtering must follow the actual triangle
+  // or a wide filter can turn that mismatch into a ladder of self-shadow acne.
+  let triangleNormal=cross(dx,dy);
+  let shadowNormal=triangleNormal/max(length(triangleNormal),.000000000001);
   let sx = cross(dy,n); let sy = cross(n,dx);
   let det = dot(dx,sx);
   let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
-  let isWood=paintedWood || in.material==0u || in.material==1u || in.material==5u || in.material==6u || in.material==7u || in.material==10u || in.material==14u || in.material==15u || in.material==16u || in.material==17u || in.material==18u;
+  let isWood=vesselWoodMaterial(in.material,paintedWood);
   n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
+  let isIron=in.material==3u || in.material==8u;
+  let materialPoint=p*vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
+  let materialFootprint=max(length(dpdx(materialPoint)),length(dpdy(materialPoint)));
+  var iron:VesselIronSurface;
+  if(isIron){iron=vesselIronSurface(materialPoint,materialFootprint,vesselAirFilm(wet.y));}
+  // Derivatives remain outside material-dependent control flow. They use the
+  // same surface-gradient frame as timber but a separate, filtered cast relief.
+  let ironGradient=(dpdx(iron.relief)*sx+dpdy(iron.relief)*sy)/max(abs(det),0.000001)*sign(det);
+  if(isIron){n=normalize(n-clamp(ironGradient,vec3f(-.18),vec3f(.18)));}
   var albedo = timber * vec3f(1.02,.98,.88);
   var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
   let canvasDepth=canvasThickness(in.uv,in.material)*canvasWetDepth(wet.x);
@@ -132,7 +208,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     albedo = vec3f(0.28,0.20,0.11) * (0.8+0.2*twist); rough=0.87;
   }
   if(in.material == 4u) { albedo=vec3f(0.012,0.009,0.006); rough=0.92; }
-  if(in.material == 3u || in.material == 8u) { albedo=vec3f(0.065,0.07,0.071); rough=0.38; metal=0.85; }
+  if(isIron){albedo=iron.albedo;rough=iron.rough;metal=iron.bare;}
   if(in.material == 9u || in.material == 13u) {
     let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
@@ -158,28 +234,65 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }else if(in.material!=3u && in.material!=4u && in.material!=8u && in.material!=11u){
     // Absorbed moisture darkens coarse timber without varnishing it. Only the
     // transient surface film glints; grain valleys retain more water than ridges.
-    albedo*=mix(1.0,.58,wet.x);
-    rough=mix(rough,max(.62,rough-.15),wet.x);
-    let film=wet.y*(.35+.65*(1.0-smoothstep(.12,.65,relief+grain*.25)));
-    rough=mix(rough,.27+grain*.09,film);
+    let timberMoisture=vesselWoodOptics(rough,wet.x,wet.y,relief,grain);
+    albedo*=timberMoisture.x;rough=timberMoisture.y;
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let nl=clamp(dot(n,l),0.0,1.0);
-  let f0=mix(vec3f(0.04),albedo,metal);
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*vesselShadow(in.world,normalize(in.normal));
+  var f0=mix(vec3f(0.04),albedo,metal);
+  if(isWood){f0=vec3f(vesselWoodDielectricF0());}
+  if(isIron){
+    f0=iron.f0;
+    // The oxide's dielectric boundary changes medium too. Bare-metal F0 stays
+    // the bounded authored conductor approximation; complex-IOR recalibration
+    // and underwater multiple scattering are not provided by this material.
+    if(vesselWaterCapture){f0=mix(vec3f(vesselWoodDielectricF0()),vec3f(0.55,0.57,0.57),iron.bare);}
+  }
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*vesselShadow(in.world,shadowNormal);
   // The last cube mip is a face average, not diffuse irradiance. Sampling it
   // along a vertical timber normal mixes in the sea, then counts that green
   // light again below. Use separate sky/sea hemispheres and their projected
   // visibility instead; keep directional ocean reflections in the specular term.
-  let sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
-  let reflected=waterLight(in.world,reflect(-v,n),rough);
-  let bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9);
+  var sky:vec3f;var reflected:vec3f;var bounce:vec3f;
+  if(vesselWaterCapture&&F.screen.x>=0.0){
+    // Low-frequency transmitted-ambient proxy, subsequently attenuated on the
+    // light/view water legs by the common optics passes. It intentionally has
+    // no directionally reflected image of the AIR sky or ocean. Snell-window
+    // IBL and offscreen underwater transport require a separate renderer.
+    sky=skyAtmo(vec3f(0,1,0));bounce=sky*0.08;
+    reflected=vesselAmbient(n,sky,bounce);
+  }else{
+    // The invalid-dimensions fallback keeps the original resources reachable
+    // to automatic layout reflection, matching the capture fog bypass pattern.
+    sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
+    reflected=waterLight(in.world,reflect(-v,n),rough);
+    bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9);
+  }
   let skyVisibility=0.5+0.5*n.y;
   let ambient=vesselAmbient(n,sky,bounce);
   let ao=mix(0.65,1.0,smoothstep(0.72,1.5,p.y));
   let spec=vesselSpecular(n,v,l,rough,f0);
-  var col=(albedo*(1.0-metal)/PI+spec)*direct*nl;
-  col+=albedo*(1.0-metal)*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0);
+  var diffuse=albedo*(1.0-metal);
+  var diffuseAmbient=diffuse;
+  var directTransmission=1.0;var environmentTransmission=1.0;
+  if(isIron){
+    let halfVector=(v+l)/max(length(v+l),0.00001);
+    let oxideF0=vesselWoodDielectricF0();
+    diffuse*=vec3f(1)-vesselFresnel(vec3f(oxideF0),max(dot(v,halfVector),0.0));
+    diffuseAmbient*=1.0-oxideF0;
+    directTransmission=vesselIronTransmission(iron.film,max(dot(n,v),0.0),nl);
+    // The host's environment mip chain is not GGX-convolved. This remains a
+    // bounded two-pass attenuation approximation, not a split-sum IBL integral.
+    environmentTransmission=vesselIronTransmission(iron.film,max(dot(n,v),0.0),max(dot(n,v),0.0));
+  }
+  var col=(diffuse/PI+spec)*direct*nl*directTransmission;
+  col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
+  if(!vesselWaterCapture&&isIron&&iron.film>0.0001){
+    let filmF0=vec3f(vesselIronWaterF0);
+    col+=iron.film*vesselSpecular(n,v,l,iron.filmRough,filmF0)*direct*nl;
+    let filmReflection=waterLight(in.world,reflect(-v,n),iron.filmRough);
+    col+=iron.film*filmReflection*F.windP[1].w*vesselEnvironment(n,v,iron.filmRough,filmF0);
+  }
   if(in.material == 9u || in.material == 13u) {
     let through=max(dot(-n,l),0.0);
     // Thin canvas transmits light without revealing the background. Beer

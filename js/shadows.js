@@ -96,7 +96,7 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   });
   const passes=[0,1].map(i=>({
     label:i?'canvas shadows':'solid shadows',
-    colorAttachments:i?[{view:views[2],clearValue:[1,1,1,1],loadOp:'clear',storeOp:'store'}]:[],
+    colorAttachments:i?[{view:views[2],clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}]:[],
     depthStencilAttachment:{view:views[i],depthClearValue:1,depthLoadOp:'clear',depthStoreOp:'store'},
   }));
   const counts=[parts.solid.length,parts.canvas.length];

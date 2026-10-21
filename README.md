@@ -6,12 +6,13 @@ A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, im
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-The current checkpoint adds underwater inspection, wave-driven light caustics,
-and terrain-aligned grass and rocks. Earlier changes add finite deck overtopping,
+The current checkpoint refines underwater lighting, distance-filtered terrain,
+cast-iron materials and sail shadows. It includes underwater inspection,
+wave-driven caustics and terrain-aligned grass and rocks. Earlier changes add finite deck overtopping,
 revised wakes and shared surface disturbances. Validation and release receipts
 are recorded in [the checkpoint log](BACKLOG.md); physical-iPhone performance
 remains unmeasured for this batch.
-The complete production suite passes **420 tests on native Metal**.
+The complete production suite passes **428 tests on native Metal**.
 
 ![HMS Victory with tiered square sails](docs/victory.png)
 
@@ -412,7 +413,11 @@ This is a screen-space approximation with one submerged depth layer. Missing or
 off-screen samples fall back to ordinary water shading. Below the surface, the
 same displaced ocean uses water-to-air refraction, a Snell window and total
 internal reflection. A separate HDR pass applies wavelength-dependent extinction
-and bounded sunlight/sky scattering before bloom. Current GPU wave height selects
+and bounded sunlight/sky scattering before bloom. Scattering integrates a planar
+homogeneous water column analytically, stops at the water exit, and uses a
+normalized angular phase. A representative vessel-shadow sample attenuates its
+direct-sun term. This avoids the old unshadowed additive solar glow and coarse
+depth strata; it is not a full shadowed volume integral. Current GPU wave height selects
 the camera's medium; CPU readback does not delay a crest crossing. Captured solid
 radiance avoids applying air fog or the viewing water path twice. Captured seabed
 can fill geometry deliberately omitted from the normal air-side draw.
@@ -420,7 +425,13 @@ can fill geometry deliberately omitted from the normal air-side draw.
 Short/mid-wave slopes focus and defocus refracted sunlight on submerged solids,
 including those viewed from above water. These moving **caustics** fade with depth,
 turbidity, solar visibility and vessel shadow. They use a bounded local receiver-map
-Jacobian, not animated noise or a complete photon/multiple-scattering solver.
+Jacobian with finite-beam regularization and actual rendered-pixel filtering,
+not animated noise or a complete photon/multiple-scattering solver. Folded
+single-ray maps fade toward mean irradiance; deep caustics fade continuously.
+Captured vessel wood uses water-relative dielectric reflectance, retains absorbed
+darkening and loses the air-side wet-film gloss. Hull and rudder share this optical
+policy, while their authored tar/wood finishes remain distinct. Captured
+reflections use a diffuse ambient approximation, not a reflected air-sky image.
 Underwater reflections approximate the diffuse water body; above-water objects
 are not reconstructed inside the refracted sky window. Profiling includes separate
 **Submerged geometry** and **Underwater medium** spans. `waterOptics=0` disables
@@ -431,6 +442,21 @@ and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transm
 plus [GPU Gems' water-caustics discussion](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-2-rendering-water-caustics).
 Historical night, Moon phases and celestial-navigation work is specified in
 [ASTRO_NAVIGATION.md](ASTRO_NAVIGATION.md); runtime Moon lighting remains pending.
+
+Sail and rig shadows use continuously weighted tent filtering and a smoothed
+blocker estimate at the existing 2048-pixel map size. Canvas edge coverage is
+applied once, preserving transmitted colour. Shadow receiver planes follow the
+rendered triangles; smooth normals remain responsible for material lighting.
+
+Iron fittings and guns use a dark oxide finish with filtered cast relief, a small
+exposed-metal fraction and a separate draining water-film highlight. These are
+authored material values, not a measured Victory conservation finish. The shared
+environment reflection remains an approximation rather than GGX-convolved IBL.
+
+Cliff noise and fissures filter by their actual projected material footprint,
+including oblique views. Unresolved grain loses contrast toward the registered
+aerial colour rather than producing a moving pixel pattern. Bump shading guards
+ill-conditioned surface gradients; nearby resolved detail remains available.
 
 A separate, bounded marine encounter occasionally introduces a passing shark or
 a 14.1 m sperm whale using the supplied straight Meshy model and its native 18-bone rig. Whale encounters include a full breach,

@@ -14,6 +14,13 @@ function opticsMatching(source,start,open,close){
 }
 
 export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false){
+  // Explicit vessel-material opt-in. Do not guess by material number, rename
+  // arbitrary booleans or apply an air/water toggle to unrelated scene shaders.
+  const vesselMarker='const vesselWaterCapture=false;';
+  if(/\bconst\s+vesselWaterCapture\b/.test(source)){
+    if(!source.includes(vesselMarker)||source.indexOf(vesselMarker)!==source.lastIndexOf(vesselMarker))throw new Error('Unrecognized vessel water capture marker');
+    source=source.replace(vesselMarker,'const vesselWaterCapture=true;');
+  }
   const sharedSurface=/\bfn\s+surfaceWaveAt\s*\(/.test(source);
   if(surfaceWaves&&!sharedSurface)source+=surfaceWaveSource(3,2,3,'captureSeaSampler');
   const air=/\bfn\s+surfaceAir\s*\([^)]*\)\s*->\s*vec3f\s*\{/m.exec(source);

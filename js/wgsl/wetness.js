@@ -22,6 +22,15 @@ fn wetIndex(p:vec3u)->u32 {return (p.z*wetSize.y+p.y)*wetSize.x+p.x;}
 // Rates are authored visual approximations; they do not add mass to the ship.
 export const WET_MATERIAL=/* wgsl */ `
 fn moistureStep(old:vec2f,water:f32,spray:f32,kind:u32,wind:f32,dt:f32)->vec2f {
+  if(kind==4u){
+    // Nonporous iron loses its film to drainage/evaporation more quickly than
+    // wood or cloth. These visual rates are authored, not a corrosion model.
+    // Water, actual deposited spray and the existing rain term supply the film;
+    // humidity/absorbed moisture cannot keep a dry cannon permanently glossy.
+    let film=old.y*exp(-dt*(0.9+min(wind,30.0)*0.035));
+    let deposition=water*25.0+spray*4.0;
+    return vec2f(0,clamp(film+(1.0-film)*(1.0-exp(-dt*deposition)),0.0,1.0));
+  }
   let drying=array<f32,4>(0.004,0.002,0.006,0.004)[kind]*(1.0+min(wind,30.0)*0.025);
   let absorbed=old.x*exp(-dt*drying);
   let film=old.y*exp(-dt*(0.18+min(wind,30.0)*0.012));

@@ -34,7 +34,15 @@ fn causticLightSlope(p:vec2f,footprint:f32)->vec2f {
   let down=refract(-normalize(F.sunDir.xyz),normal,1.0/WATER_REFRACTIVE_INDEX);
   return down.xz/max(-down.y,.15);
 }
-fn waterCausticFactor(receiver:vec3f,surfaceY:f32)->vec3f {
+fn waterCausticPixelFootprint(receiver:vec3f)->f32 {
+  let relative=receiver-F.camPos.xyz;
+  let depth=max(0.0,dot(relative,normalize(F.camFwd.xyz)));
+  let pixel=2.0*depth*max(length(F.camRight.xyz)/max(F.screen.x,1.0),length(F.camUp.xyz)/max(F.screen.y,1.0));
+  // The usual seabed receiver is oblique to the view. Bound that enlargement
+  // without differentiating a discontinuous screen-space captured silhouette.
+  return pixel/max(abs(normalize(relative+vec3f(0,.000001,0)).y),.2);
+}
+fn waterCausticFactorFiltered(receiver:vec3f,surfaceY:f32,pixelFootprint:f32)->vec3f {
   let depth=surfaceY-receiver.y;
   if(depth<=.035||depth>=40.0||F.sunDir.y<=.015||sunVis[0]<=.001){return vec3f(1);}
   let light=sunIlluminance()*sunVis[0];
@@ -42,9 +50,10 @@ fn waterCausticFactor(receiver:vec3f,surfaceY:f32)->vec3f {
   let direct=dot(light,vec3f(.2126,.7152,.0722));
   let diffuse=dot(sky,vec3f(.2126,.7152,.0722));
   let strength=smoothstep(.015,.15,F.sunDir.y)*direct/max(direct+diffuse*3.0,.0001)
-    *smoothstep(.035,.25,depth)*exp(-depth*(.045+max(optics.x,0.0)*.07));
-  if(strength<.005){return vec3f(1);}
-  let footprint=max(.035,depth*.018);
+    *smoothstep(.035,.25,depth)*exp(-depth*(.045+max(optics.x,0.0)*.07))*(1.0-smoothstep(20.0,40.0,depth));
+  if(strength<.0001){return vec3f(1);}
+  let beam=max(.035,depth*(.018+min(max(optics.x,0.0),4.0)*.006));
+  let footprint=max(beam,pixelFootprint*1.25);
   let flat=refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
   var entry=receiver.xz-depth*flat.xz/max(-flat.y,.15);
   entry=receiver.xz-depth*causticLightSlope(entry,footprint);
@@ -52,12 +61,46 @@ fn waterCausticFactor(receiver:vec3f,surfaceY:f32)->vec3f {
   let dz=(causticLightSlope(entry+vec2f(0,footprint),footprint)-causticLightSlope(entry-vec2f(0,footprint),footprint))/(2.0*footprint);
   let columnX=vec2f(1,0)+depth*dx;let columnZ=vec2f(0,1)+depth*dz;
   let jacobian=columnX.x*columnZ.y-columnX.y*columnZ.x;
-  let focus=clamp(1.0/max(abs(jacobian),.25),.35,3.0);
+  // A point-light inverse determinant diverges at a fold. Integrate a finite
+  // beam instead of flattening that singularity into hard three-times plateaux.
+  // Beyond a folded single-ray map, fade to mean irradiance; the missing light
+  // paths cannot be recovered by taking abs(det) and inventing a second image.
+  let blur=.55+min(pixelFootprint/max(beam,.001),2.0)*.35;
+  let density=sqrt((1.0+blur*blur)/(jacobian*jacobian+blur*blur));
+  let focus=mix(1.0,density,smoothstep(-.35,.15,jacobian));
   let shadow=${shadows?'vesselShadow(vec3f(entry.x,surfaceY,entry.y),vec3f(0,1,0))':'vec3f(1)'};
   return mix(vec3f(1),vec3f(focus),strength*shadow);
 }
+fn waterCausticFactor(receiver:vec3f,surfaceY:f32)->vec3f {
+  return waterCausticFactorFiltered(receiver,surfaceY,0.0);
+}
 `;
 }
+
+// Exact homogeneous single-scatter path weight for a planar water column.
+// The light and viewing legs share spectral extinction. Above-surface samples
+// cannot contribute, and every channel is bounded by the removed view energy.
+export const UNDERWATER_SCATTER=/* wgsl */ `
+fn underwaterLightIntegral(path:f32,eyeDepth:f32,rayY:f32,lightCos:f32,turbidity:f32)->vec3f {
+  var waterPath=max(path,0.0);
+  if(rayY>0.00001){waterPath=min(waterPath,max(eyeDepth,0.0)/rayY);}
+  let cosine=max(lightCos,.05);let depth=max(eyeDepth,0.0);
+  let start=waterTransmittance(depth/cosine,turbidity);
+  let end=waterTransmittance(waterPath,turbidity)*waterTransmittance(max(0.0,depth-rayY*waterPath)/cosine,turbidity);
+  let coefficient=1.0-rayY/cosine;
+  var integral=vec3f(0);
+  if(abs(coefficient)<.001){
+    let extinction=vec3f(.20,.065,.035)+max(turbidity,0.0)*vec3f(.11,.095,.085);
+    integral=extinction*waterPath*waterTransmittance(depth/cosine+coefficient*waterPath*.5,turbidity);
+  }else{integral=(start-end)/coefficient;}
+  return clamp(integral,vec3f(0),vec3f(1)-waterTransmittance(waterPath,turbidity));
+}
+fn underwaterPhase(cosine:f32)->f32 {
+  // Both lobes integrate to one. An additive unnormalised solar pedestal made
+  // the entire water column glow even away from forward scattering.
+  return mix(1.0/(4.0*PI),phaseHG(cosine,.72),.7);
+}
+`;
 
 // Interior side of the same displaced surface, not a second flat ocean. Exact
 // dielectric Fresnel gives a Snell window and total internal reflection. The
@@ -98,7 +141,7 @@ export function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves
 @group(0)@binding(10)var seaSampler:sampler;
 ${cameraProbe?'@group(0)@binding(11)var<storage,read>cameraSea:array<f32,16>;':''}
 `+SKY_RENDER_FUNCS+(shadows?SCENE_SHADOW_SAMPLE:'')+(surfaceWaves?surfaceWaveSource(2,0,1,'seaSampler'):'')
-  +waterCausticFunctions({derivatives:'derivTex',sampler:'seaSampler',surfaceWaves,shadows})+/* wgsl */ `
+  +waterCausticFunctions({derivatives:'derivTex',sampler:'seaSampler',surfaceWaves,shadows})+UNDERWATER_SCATTER+/* wgsl */ `
 struct UnderwaterVertex{@builtin(position)position:vec4f,@location(0)ndc:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->UnderwaterVertex {
   let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
@@ -130,31 +173,27 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
   let receiver=F.camPos.xyz+ray*path;
   let endDepth=max(0.0,surfaceY-receiver.y);
   if(receiverVisible){
-    radiance=raw.rgb*waterCausticFactor(receiver,surfaceY);
+    radiance=raw.rgb*waterCausticFactorFiltered(receiver,surfaceY,waterCausticPixelFootprint(receiver));
   }
   let lightDown=refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
   let lightCos=max(-lightDown.y,.25);
   if(receiverVisible){radiance*=waterTransmittance(endDepth/lightCos,optics.x);}
   let transmission=waterTransmittance(path,optics.x);
-  // Four bounded source samples integrate directional sunlight and diffuse sky
-  // into the water path. There are no FFT lookups or fabricated light strips in
-  // this volume integration; real focusing is evaluated only at solid hits.
+  // Analytic single scattering avoids depth-dependent four-stratum brightness
+  // jumps. The water has no emissive term; sky and refracted sunlight supply it.
   let sun=sunIlluminance()*sunVis[0]*smoothstep(0.0,.05,F.sunDir.y)*(1.0-waterFresnel(max(F.sunDir.y,0.0)));
   let sky=skyAtmo(vec3f(0,1,0));
   let towardLight=normalize(-lightDown);
-  let phase=phaseHG(dot(ray,towardLight),.72);
-  let ds=path*.25;
-  var scatter=vec3f(0);
-  for(var i=0u;i<4u;i++){
-    let at=(f32(i)+.5)*ds;
-    let depth=max(0.0,eyeDepth-ray.y*at);
-    let entry=waterTransmittance(depth/lightCos,optics.x);
-    let ambient=waterTransmittance(depth/.65,optics.x);
-    let source=F.waterCol.rgb*(sky*ambient*1.4+sun*entry*(.10+phase*.65));
-    // Analytic within-stratum Beer integral prevents distant paths from gaining
-    // energy as a fixed raymarch step becomes longer than an extinction length.
-    scatter+=source*waterTransmittance(f32(i)*ds,optics.x)*(vec3f(1)-waterTransmittance(ds,optics.x));
-  }
+  // Keep the representative shadow point inside the same participating water
+  // segment even when an upward ray exits within the first two metres.
+  let at=min(path,min(2.0,eyeDepth/max(ray.y,.00001)));
+  let sampleWorld=F.camPos.xyz+ray*at;
+  let sampleDepth=max(0.0,surfaceY-sampleWorld.y);
+  let entry=sampleWorld.xz-sampleDepth*lightDown.xz/lightCos;
+  let sunShadow=${shadows?'vesselShadow(vec3f(entry.x,surfaceY,entry.y),vec3f(0,1,0))':'vec3f(1)'};
+  let scatterAlbedo=clamp(F.waterCol.rgb,vec3f(0),vec3f(.85));
+  let scatter=scatterAlbedo*(sky*1.4*underwaterLightIntegral(path,eyeDepth,ray.y,.65,optics.x)
+    +sun*sunShadow*underwaterPhase(dot(ray,towardLight))*underwaterLightIntegral(path,eyeDepth,ray.y,lightCos,optics.x));
   return vec4f(max(vec3f(0),radiance*transmission+scatter),1);
 }
 `;

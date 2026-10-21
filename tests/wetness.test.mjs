@@ -14,10 +14,15 @@ test('moisture follows material identity across indexing, sail attachments and n
   const vertex=(mat,v=0,n=1)=>[0,4,0,0,n,0,mat,.5,v];
   const data=createWetnessData(new Float32Array([
     ...vertex(9.0625),...vertex(9.0625,0,-1),...vertex(9.125),
-    ...vertex(12.5625,0),...vertex(12.5625,1),...vertex(11),...vertex(3),
+    ...vertex(12.5625,0),...vertex(12.5625,1),...vertex(11),...vertex(3),...vertex(8),
   ]),0);
   assert.equal(data.lookup[0],data.lookup[1],'opposite normals share the same fabric moisture');
   assert.notEqual(data.lookup[0],data.lookup[2],'different sails stay independent');
   assert.notEqual(data.lookup[3],data.lookup[4],'fixed and moving rope attachments stay independent');
-  assert.equal(data.lookup[5],0);assert.equal(data.lookup[6],0,'glass and iron are not porous materials');
+  assert.equal(data.lookup[5],0,'glass still has no moisture probe');
+  for(const i of [6,7]){
+    const probe=data.lookup[i];assert.ok(probe>0,'iron carries a surface-film probe');
+    assert.equal(data.points[probe*8+6],4,'iron uses the nonabsorbing film kind, not timber or crew');
+  }
+  assert.notEqual(data.lookup[6],data.lookup[7],'iron fittings retain their material identities');
 });

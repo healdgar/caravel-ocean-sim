@@ -2,6 +2,45 @@ import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 
+// Procedurals need their sampling rate in material coordinates, just as image
+// textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
+// Derivatives are supplied by the caller before material-dependent branches.
+export const TERRAIN_FILTERING = /* wgsl */ `
+fn landMaterialFootprint(dx:vec2f,dy:vec2f)->f32{
+  // Frobenius norm bounds the longest axis of the pixel's material footprint,
+  // including oblique/sheared projections; max(length(dx),length(dy)) can miss it.
+  return sqrt(dot(dx,dx)+dot(dy,dy));
+}
+fn landDetailWeight(cellWidth:f32)->f32{
+  // A lattice cell needs several pixels. Remove its contrast before Nyquist;
+  // multiplying a fully aliased sample by a distant world-metre fade is too late.
+  return 1.0-smoothstep(0.125,0.5,cellWidth);
+}
+fn landFilteredNoise(p:vec2f,cellWidth:f32)->f32{
+  let weight=landDetailWeight(cellWidth);
+  if(weight<=0.0){return 0.0;}
+  return gnoise(p)*weight; // Gradient noise has zero mean.
+}
+fn landFilteredFissure(p:vec2f,cellWidth:f32,inner:f32,outer:f32)->f32{
+  // Thresholding noise introduces much finer features than the lattice itself.
+  // Fade crack contrast at its own width, never threshold already-faded noise
+  // (which would turn every unresolved cell into a dark crack). Unresolved crack
+  // contrast returns to the registered material colour, not a darkened plateau.
+  let weight=landDetailWeight(cellWidth/max(outer-inner,0.001));
+  if(weight<=0.0){return 0.0;}
+  return (1.0-smoothstep(inner,outer,abs(gnoise(p))))*weight;
+}
+fn landFilteredBump(n:vec3f,dx:vec3f,dy:vec3f,hx:f32,hy:f32)->vec3f{
+  let sx=cross(dy,n);let sy=cross(n,dx);let det=dot(dx,sx);
+  let area=length(cross(dx,dy));
+  // Smooth vertex normals can become nearly tangent to a steep triangle. That
+  // ill-conditioned inverse must not amplify tiny residual height differences.
+  let confidence=smoothstep(0.08,0.25,abs(det)/max(area,0.000000000001));
+  let gradient=(hx*sx+hy*sy)/max(abs(det),max(area*0.08,0.000000000001))*sign(det);
+  return normalize(n-clamp(gradient,vec3f(-0.42),vec3f(0.42))*confidence);
+}
+`;
+
 const LAND_SAMPLING = /* wgsl */ `
 struct Land { domain:vec4f };
 fn landHeight(p:vec2f)->f32 {
@@ -73,7 +112,7 @@ struct Land {domain:vec4f};
 @group(0) @binding(9) var vegetationMask:texture_2d<f32>;
 @group(0) @binding(10) var leafSpray:texture_2d<f32>;
 @group(0) @binding(11) var<uniform> leafMean:vec4f;
-` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
+` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + TERRAIN_FILTERING + /* wgsl */ `
 struct LandVertex {
   @builtin(position) pos:vec4f,
   @location(0) world:vec3f,
@@ -141,14 +180,21 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
 fn landOpaque(in:LandVertex)->vec4f{
   let world=in.world;var n=normalize(in.normal);
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
+  let dx=dpdx(world);let dy=dpdy(world);
   // Registered aerial RGB remains the regional colour seed. The neutral detail
   // below adds material scale, never a replacement green/brown island palette.
-  let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
+  let source=pow(textureSampleGrad(landAlbedo,landSampler,uv,dx.xz/LAND.domain.z,dy.xz/LAND.domain.z).rgb,vec3f(2.2));
   let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0.0).r;
-  let footprint=max(length(dpdx(world)),length(dpdy(world)));
+  let footprint=max(length(dx),length(dy));
   let detailFade=1.0-smoothstep(0.25,2.5,footprint);
-  let microFade=1.0-smoothstep(0.04,0.5,footprint);
-  let mesoFade=1.0-smoothstep(1.0,8.0,footprint);
+  var grain=0.0;
+  if(in.kind.x<2.5){grain=landFilteredNoise(world.xz*0.019,landMaterialFootprint(dx.xz,dy.xz)*0.019);}
+  let rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
+  let vertical=mix(world.zy,world.xy,smoothstep(0.35,0.65,abs(n.z)/(abs(n.x)+abs(n.z)+0.001)));
+  let materialUV=mix(world.xz,vertical,rocky);
+  // Different cliff projections and their blend can stretch coordinates much
+  // faster than world position. Filter that actual mapping, before branching.
+  let materialWidth=landMaterialFootprint(dpdx(materialUV),dpdy(materialUV));
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
@@ -156,15 +202,14 @@ fn landOpaque(in:LandVertex)->vec4f{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
     // bark never execute these ground-material evaluations.
-    let grain=gnoise(world.xz*0.019);
-    let rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
-    let vertical=mix(world.zy,world.xy,smoothstep(0.35,0.65,abs(n.z)/(abs(n.x)+abs(n.z)+0.001)));
-    let materialUV=mix(world.xz,vertical,rocky);
-    let blocks=gnoise(materialUV*.19)*mesoFade;
-    let stone=gnoise(materialUV*0.82)*detailFade;
-    let pores=gnoise(materialUV*5.4)*microFade;
-    let fissure=(1.0-smoothstep(0.025,0.11,abs(gnoise(materialUV*1.7+vec2f(13.1,7.7)))))*detailFade;
-    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blocks)))*mesoFade;
+    let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
+    var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19);}
+    let blocks=blockNoise*blockWeight;
+    let stone=landFilteredNoise(materialUV*.82,materialWidth*.82);
+    let pores=landFilteredNoise(materialUV*5.4,materialWidth*5.4);
+    let fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11);
+    // Reuse the raw block noise, not its faded value, without another noise call.
+    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065);
     albedo=source*(1.0+blocks*.14+stone*0.10+pores*0.055-(fissure*.075+coarseFissure*.08)*rocky);
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006);
     relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky);
@@ -183,9 +228,13 @@ fn landOpaque(in:LandVertex)->vec4f{
     ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.08;
     relief=0.0;roughness=0.95;
   }
-  let dx=dpdx(world);let dy=dpdy(world);let sx=cross(dy,n);let sy=cross(n,dx);let det=dot(dx,sx);
-  let gradient=(dpdx(relief)*sx+dpdy(relief)*sy)/max(abs(det),0.00001)*sign(det);
-  n=normalize(n-clamp(gradient,vec3f(-0.42),vec3f(0.42)));
+  let reliefX=dpdx(relief);let reliefY=dpdy(relief);
+  if(in.kind.x<2.5){n=landFilteredBump(n,dx,dy,reliefX,reliefY);}
+  else{
+    let sx=cross(dy,n);let sy=cross(n,dx);let det=dot(dx,sx);
+    let gradient=(reliefX*sx+reliefY*sy)/max(abs(det),0.00001)*sign(det);
+    n=normalize(n-clamp(gradient,vec3f(-0.42),vec3f(0.42)));
+  }
   let wet=(1.0-smoothstep(0.5,3.5,world.y))*(0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02));
   roughness=mix(roughness,0.27,wet);
   return landFinish(world,n,albedo,max(dot(n,F.sunDir.xyz),0.0),ambientVisibility,wet,roughness);

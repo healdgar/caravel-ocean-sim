@@ -560,3 +560,52 @@ sextant lessons; the current600second loop cannot serve as its astronomy clock.
 The distant long-crest report is source-confirmed: swell is deliberately narrow
 (spread48). A broader directional spectrum/finite coherence needs a separate
 height/energy-preserving comparison; shortening peak wavelength is not that fix.
+
+## Daytime rendering corrections: underwater, terrain and Victory materials
+
+Root retains the sole testing baton; direct agents supplied source and proposed
+tests only. Held woodland assets/modules remain outside production.
+
+- Underwater solar scattering no longer adds an unnormalized, unshadowed light
+  pedestal. The homogeneous planar-column single-scatter integral clips at the
+  water exit, has a cancellation-safe limit, normalized angular phase and bounded
+  energy. A representative in-water point supplies vessel shadow; this is not a
+  full shadowed volume integral. Native GPU values match independent CPU path
+  quadrature across light/view angles, turbidity and surface exits.
+- Caustic focusing uses finite-beam regularization, actual rendered-pixel
+  footprints and mip-filtered slope fields. Folded local ray maps approach mean
+  irradiance; depth fades continuously. This remains a local Jacobian
+  approximation, not multivalued photon accumulation.
+- Cliff detail now filters in its actual material-coordinate footprint, including
+  oblique projections and the narrower frequencies introduced by crack thresholds.
+  Unresolved grain returns toward registered aerial colour; filtered block noise
+  is no longer thresholded into a dark crack everywhere. Bump inverses reject
+  ill-conditioned geometry. No extra material noise octave calls.
+- Iron3/8 receives authored rough oxide/cast relief, a small exposed conductor
+  fraction and separate water-film highlights. Nonporous kind4 moisture probes
+  collect and drain rain/spray/water film without absorbing it; crew kind3 stays
+  unchanged. This is not a measured conservation finish or full GGX IBL.
+- The user's bright submerged rudder exposed an air/water material-interface bug.
+  Captured wood now uses relative water/substrate reflectance and no water-air
+  film gloss or directional air-environment reflection. Hull15/rudder14 share this
+  policy; tar/wood finishes, material IDs and helm pose remain distinct. Submerged
+  iron loses its air-film lobe too. Underwater ambient remains approximate; direct
+  material lighting is not a complete refracted incident-light solution.
+- Vessel shadows use integrated tent weights and continuous blocker estimates
+  without larger maps. Canvas transmission clears with zero coverage and is
+  normalized once. Actual rendered review found a self-shadow lattice on curved
+  sails: receiver planes now use raster-triangle normals while lighting retains
+  smooth normals. Bilinear comparison footprints receive their own bounded
+  plane-depth allowance, limited to one shadow texel. Native sloped-plane tests
+  retain close opaque/canvas occlusion and the existing thin-rigging/edge gates.
+
+Focused native checks pass. Ten frozen actual-scene comparisons cover underwater
+hull/rudder, near-bed caustics, cliff, Victory guns and four sail/light angles;
+no page/GPU errors. The first full run passed427/428: the old thin-rigging test
+required90% centre occlusion independent of filter footprint. The new tent gives
+88.84% for its two-texel strip. Replaced that cutoff with independent numerical
+area quadrature of the rasterized strip under the contact tent (0.1% tolerance),
+while retaining strong surface-vs-volume contrast. The focused oracle now passes.
+Final complete production suite **428/428 PASS**, installed Chrome/native Metal,
+root serialized,325.5seconds. Source and standalone bundles frozen for publication;
+no physical-iPhone performance claim. Public-byte verification pending.

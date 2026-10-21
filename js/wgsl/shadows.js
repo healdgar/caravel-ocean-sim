@@ -38,6 +38,34 @@ export const SHADOW_SAMPLE = SHADOW_FRAME + /* wgsl */ `
 @group(1) @binding(3) var canvasShadow:texture_depth_2d;
 @group(1) @binding(4) var canvasFilter:texture_2d<f32>;
 @group(1) @binding(5) var shadowLinear:sampler;
+struct ShadowTentAxis {position:vec3f,weight:vec3f};
+fn shadowTentIntegral(x:f32,radius:f32)->f32 {
+  let q=clamp(x,-radius,radius);
+  if(q<=0.0){return .5*(q+radius)*(q+radius);}
+  return radius*radius-.5*(radius-q)*(radius-q);
+}
+// Integrate a tent over each depth texel, then pair adjacent texel weights
+// into one bilinear comparison fetch. Contact shadows need at most four taps;
+// wider physical penumbrae use nine. Positions and normalized weights vary
+// continuously with subtexel receiver motion, unlike a sparse disk stencil.
+fn shadowTentAxis(uv:f32,size:f32,radius:f32)->ShadowTentAxis {
+  let pixel=uv*size;let base=floor(pixel-radius);
+  var result:ShadowTentAxis;
+  for(var pair=0u;pair<3u;pair++){
+    let left=base+f32(pair*2u);
+    let a=shadowTentIntegral(left+1.0-pixel,radius)-shadowTentIntegral(left-pixel,radius);
+    let b=shadowTentIntegral(left+2.0-pixel,radius)-shadowTentIntegral(left+1.0-pixel,radius);
+    let sum=max(a+b,0.0);
+    result.position[pair]=(left+.5+b/max(sum,.000001))/size;
+    result.weight[pair]=sum/(radius*radius);
+  }
+  return result;
+}
+fn shadowCanvasTransmission(sample:vec4f)->vec3f {
+  // RGB is coverage-premultiplied by rasterization/filtering. White clear plus
+  // a second visibility blend would attenuate the edge's coverage twice.
+  return select(vec3f(1),clamp(sample.rgb/max(sample.a,.000001),vec3f(0),vec3f(1)),sample.a>.000001);
+}
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   if(SH.origin.w<0.5){return vec3f(1);}
   let facing=select(-1.0,1.0,dot(normal,SH.sun.xyz)>=0.0);
@@ -45,12 +73,25 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   let p=SH.lightView*vec4f(world-SH.origin.xyz+offset,1.0);
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
   if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || p.z<0.0){return vec3f(1);}
-  let dim=vec2i(textureDimensions(solidShadow));let at=clamp(vec2i(uv*vec2f(dim)),vec2i(0),dim-1);
-  let blocker=min(textureLoad(solidShadow,at,0),textureLoad(canvasShadow,at,0));
+  let dim=vec2i(textureDimensions(solidShadow));
+  let texel=uv*vec2f(dim)-.5;let cell=vec2i(floor(texel));let phase=fract(texel);
+  var blockerSum=0.0;var blockerWeight=0.0;
+  for(var corner=0u;corner<4u;corner++){
+    let step=vec2i(i32(corner&1u),i32(corner>>1u));let at=clamp(cell+step,vec2i(0),dim-1);
+    let weight=select(1.0-phase.x,phase.x,step.x==1)*select(1.0-phase.y,phase.y,step.y==1);
+    let depth=min(textureLoad(solidShadow,at,0),textureLoad(canvasShadow,at,0));
+    // Clear/further depth is not a blocker and must not drag the estimated
+    // separation toward the far plane at a magnified shadow silhouette.
+    if(depth<p.z-.00002){blockerSum+=depth*weight;blockerWeight+=weight;}
+  }
+  let blocker=select(p.z,blockerSum/max(blockerWeight,.000001),blockerWeight>.000001);
   // Solar angular radius grows the penumbra with receiver distance. The cap
   // bounds the nine-tap filter cost and prevents thin rigging washing out.
   let distance=max(p.z-blocker,0.0)*SH.sun.w;
-  let radius=clamp(distance*0.004675/SH.texel.xy,vec2f(0.8),vec2f(6.0))/vec2f(dim);
+  let radius=clamp(distance*0.004675/SH.texel.xy,vec2f(1.5),vec2f(6.0));
+  let tentRadius=min(radius,vec2f(2.5));let spread=max(radius/2.5,vec2f(1));
+  let horizontal=shadowTentAxis(uv.x,f32(dim.x),tentRadius.x);
+  let vertical=shadowTentAxis(uv.y,f32(dim.y),tentRadius.y);
   let reference=min(p.z-0.00002,0.99999);
   let span=SH.texel.xy*vec2f(dim);
   let right=vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)*span.x*0.5;
@@ -58,20 +99,27 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   let nl=dot(normal,SH.sun.xyz);
   let denominator=select(-1.0,1.0,nl>=0.0)*max(abs(nl),0.1)*SH.sun.w;
   let slope=vec2f(dot(normal,right),-dot(normal,up))*span/denominator;
-  let offsets=array<vec2f,9>(vec2f(0,0),vec2f(0.334,0),vec2f(-0.348,0.319),vec2f(0.050,-0.575),
-    vec2f(0.406,0.529),vec2f(-0.734,-0.130),vec2f(0.689,-0.438),vec2f(-0.229,0.852),vec2f(-0.435,-0.837));
   var result=vec3f(0);
   for(var i=0u;i<9u;i++){
-    let delta=offsets[i]*radius;let q=uv+delta;
-    // Follow the receiving plane across the filter, avoiding false self-shadow
-    // on slanted sails without pushing contact shadows away from the geometry.
-    let depth=min(reference+dot(slope,delta),0.99999);
+    let x=i%3u;let y=i/3u;let weight=horizontal.weight[x]*vertical.weight[y];
+    if(weight<=.000001){continue;}
+    let delta=(vec2f(horizontal.position[x],vertical.position[y])-uv)*spread;let q=uv+delta;
+    // Follow the receiving plane across the tent; the residual bias below is
+    // limited to one comparison-texel footprint, independent of penumbra width.
+    // A bilinear comparison fetch still tests ONE reference against four
+    // distinct texel centres. Bound the nearer-plane discrepancy within that
+    // exact footprint too; correcting only q leaves a repeating lattice of
+    // false canvas blockers as the paired tent positions cross depth texels.
+    let samplePhase=fract(q*vec2f(dim)-.5);
+    let footprintBias=dot(max(slope,vec2f(0)),samplePhase/vec2f(dim))
+      +dot(max(-slope,vec2f(0)),(vec2f(1)-samplePhase)/vec2f(dim));
+    let depth=min(reference+dot(slope,delta)-footprintBias,0.99999);
     let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
     let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
-    let transmission=textureSampleLevel(canvasFilter,shadowLinear,q,0.0).rgb;
-    result+=solid*mix(transmission,vec3f(1),cloth);
+    let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));
+    result+=solid*mix(transmission,vec3f(1),cloth)*weight;
   }
-  return result/9.0;
+  return result;
 }
 
 // Water colour comes from a volume, not an opaque receiving sheet. Integrate
@@ -107,7 +155,7 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
     let depth=min(q.z-0.00002,0.99999);
     let solid=textureSampleCompareLevel(solidShadow,shadowCompare,uv,depth);
     let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,uv,depth);
-    let transmission=textureSampleLevel(canvasFilter,shadowLinear,uv,0.0).rgb;
+    let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,uv,0.0));
     result+=solid*mix(transmission,vec3f(1),cloth);
   }
   return result/32.0;

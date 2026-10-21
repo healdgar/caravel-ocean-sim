@@ -338,7 +338,7 @@ export function createCoastalOcean(coast,depthFirst){
 // composes every submerged solid through this shared optical path.
 export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false){
   const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
-    'mix(body,hit.source.rgb*waterCausticFactor(waterSourcePosition(hit.uv,hit.source.a),world.y),transmission)');
+    'mix(body,hit.source.rgb*waterCausticFactorFiltered(waterSourcePosition(hit.uv,hit.source.a),world.y,waterCausticPixelFootprint(waterSourcePosition(hit.uv,hit.source.a))),transmission)');
   const code=oceanSource(coast,surfaceWaves)+transmission
     +waterCausticFunctions({surfaceWaves})+UNDERWATER_INTERFACE
     +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');

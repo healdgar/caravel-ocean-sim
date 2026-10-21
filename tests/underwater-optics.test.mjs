@@ -66,7 +66,7 @@ test('wave-derived caustics focus and defocus fixed receivers and fade without s
     const buffer=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
     const frameData=new Float32Array(96);frameData.set([0,1,0,14],32);frameData.fill(.25,48,54);
     const opticsData=new Float32Array([0,1,2,0]),frame=buffer(frameData,B.UNIFORM),optics=buffer(opticsData,B.UNIFORM),visibility=buffer(new Float32Array([1,0,0,0]),B.STORAGE);
-    const field=device.createTexture({size:[W,H,CASCADES],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+    const field=device.createTexture({size:[W,H,CASCADES],format:'rgba16float',mipLevelCount:7,usage:T.TEXTURE_BINDING|T.COPY_DST});
     const sampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat'});
     const output=device.createBuffer({size:W*H*16,usage:B.STORAGE|B.COPY_SRC}),read=device.createBuffer({size:W*H*16,usage:B.COPY_DST|B.MAP_READ});
     const module=device.createShaderModule({code:FRAME_WGSL+WATER_OPTICS+`
@@ -82,13 +82,13 @@ fn skyAtmo(direction:vec3f)->vec3f{return vec3f(.3);}
 @compute @workgroup_size(8,8)fn main(@builtin(global_invocation_id)i:vec3u){
  if(i.x>=64u||i.y>=64u){return;}
  let p=((vec2f(i.xy)+.5)/64.0-.5)*4.0;
- answer[i.y*64u+i.x]=vec4f(waterCausticFactor(vec3f(p.x,-optics.z,p.y),0),1);
+ answer[i.y*64u+i.x]=vec4f(waterCausticFactorFiltered(vec3f(p.x,-optics.z,p.y),0,optics.w),1);
 }`});
     errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
     const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
     const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{buffer:frame},field.createView({dimension:'2d-array'}),sampler,{buffer:optics},{buffer:visibility},{buffer:output}].map((resource,binding)=>({binding,resource}))});
     const half=value=>{if(value<0)return half(-value)|32768;if(value===0)return 0;const e=Math.floor(Math.log2(value));return ((e+15)<<10)+Math.round((value/2**e-1)*1024);};
-    async function render({amplitude=.22,phase=0,depth=2,turbidity=0,sun=1,visible=1}={}){
+    async function render({amplitude=.22,phase=0,depth=2,turbidity=0,sun=1,visible=1,footprint=0}={}){
       const pixels=new Uint16Array(W*H*CASCADES*4);
       // One physically meaningful sinusoidal height field: x/y slopes are its
       // analytic derivatives. Changing its phase moves light, not the receivers.
@@ -97,7 +97,20 @@ fn skyAtmo(direction:vec3f)->vec3f{return vec3f(.3);}
         pixels[at]=half(amplitude*Math.sin((x+.5)/W*Math.PI*2+phase));pixels[at+1]=half(amplitude*.8*Math.sin((y+.5)/H*Math.PI*2+phase));
       }
       device.queue.writeTexture({texture:field},pixels,{bytesPerRow:W*8,rowsPerImage:H},[W,H,CASCADES]);
-      frameData.set([0,sun,0,14],32);device.queue.writeBuffer(frame,0,frameData);opticsData.set([turbidity,1,depth,0]);device.queue.writeBuffer(optics,0,opticsData);device.queue.writeBuffer(visibility,0,new Float32Array([visible,0,0,0]));
+      // Exact area means of the periodic derivative field, independently
+      // downsampled rather than leaving an unfiltered single-level fixture.
+      for(let level=1;level<7;level++){
+        const size=W>>level,stride=1<<level,mips=new Uint16Array(size*size*CASCADES*4);
+        for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+          let sx=0,sy=0;for(let j=0;j<stride;j++){
+            sx+=amplitude*Math.sin((x*stride+j+.5)/W*Math.PI*2+phase)/stride;
+            sy+=amplitude*.8*Math.sin((y*stride+j+.5)/H*Math.PI*2+phase)/stride;
+          }
+          const at=((3*size+y)*size+x)*4;mips[at]=half(Math.abs(sx)<1e-6?0:sx);mips[at+1]=half(Math.abs(sy)<1e-6?0:sy);
+        }
+        device.queue.writeTexture({texture:field,mipLevel:level},mips,{bytesPerRow:size*8,rowsPerImage:size},[size,size,CASCADES]);
+      }
+      frameData.set([0,sun,0,14],32);device.queue.writeBuffer(frame,0,frameData);opticsData.set([turbidity,1,depth,footprint]);device.queue.writeBuffer(optics,0,opticsData);device.queue.writeBuffer(visibility,0,new Float32Array([visible,0,0,0]));
       const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(8,8);pass.end();encoder.copyBufferToBuffer(output,0,read,0,W*H*16);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
       const values=Array.from(new Float32Array(read.getMappedRange())).filter((_,i)=>i%4===0);read.unmap();
       if(!values.every(Number.isFinite))throw Error('Nonfinite caustic focusing');
@@ -106,7 +119,10 @@ fn skyAtmo(direction:vec3f)->vec3f{return vec3f(.3);}
     }
     const flat=await render({amplitude:0}),waves=await render(),shifted=await render({phase:.8});
     const night=await render({sun:-1}),shadowed=await render({visible:0}),deep=await render({depth:45}),opaque=await render({turbidity:20});
-    device.destroy();return {errors,flat,waves,shifted,night,shadowed,deep,opaque};
+    const minified=await render({footprint:8}),minifiedShift=await render({footprint:8,phase:1.1});
+    const approachingCutoff=await render({depth:39.9}),atCutoff=await render({depth:40.0});
+    const folds=[];for(const depth of [3,5,8,12,20,30])folds.push(await render({depth}));
+    device.destroy();return {errors,flat,waves,shifted,night,shadowed,deep,opaque,minified,minifiedShift,approachingCutoff,atCutoff,folds};
   });
   assert.deepEqual(result.errors,[]);
   for(const name of ['flat','night','shadowed','deep'])assert.ok(result[name].values.every(value=>Math.abs(value-1)<1e-6),`${name} cannot invent caustic light`);
@@ -115,6 +131,10 @@ fn skyAtmo(direction:vec3f)->vec3f{return vec3f(.3);}
   assert.ok(difference>.02,'changing actual wave phase moves the pattern across fixed world receivers');
   assert.ok(result.opaque.rms<result.waves.rms*.2,'suspended matter suppresses underwater contrast instead of preserving clear-water caustics');
   assert.ok(result.waves.min>=0&&result.waves.max<=3.001,'local focusing remains bounded near a caustic fold');
+  for(const sample of [result.minified,result.minifiedShift])assert.ok(sample.rms<.001,'subpixel caustics converge to mean irradiance independent of wave phase');
+  const cutoffChange=Math.max(...result.approachingCutoff.values.map((v,i)=>Math.abs(v-result.atCutoff.values[i])));
+  assert.ok(cutoffChange<.0001,'deep caustics fade continuously instead of switching off at forty metres');
+  for(const sample of result.folds){assert.ok(sample.max<2.1&&sample.min>=0,'finite beams avoid hard saturated plateaux at focusing folds');}
 });
 
 for(const samples of [1,4])test(`production underwater helper respects visible depth, current GPU water height and resize (${samples} depth samples)`,{timeout:120000},async()=>{
@@ -153,7 +173,8 @@ for(const samples of [1,4])test(`production underwater helper respects visible d
       frameData.set([w,h,1/w,1/h],36);device.queue.writeBuffer(frame,0,frameData);helper.resize({width:w,height:h,hdrView:hdr.createView(),depthView:depth.createView(),submergedView:raw.createView()});
     }
     function write(texture,color){const pixels=new Uint16Array(width*height*4);for(let i=0;i<pixels.length;i+=4)pixels.set(color.map(half),i);device.queue.writeTexture({texture},pixels,{bytesPerRow:width*8},[width,height]);}
-    async function render({original=[.02,.03,.04],captured=[.8,.6,.4],rawDepth=4,forwardDepth=4,eyeY=-2,waterY=0,cpuHeight=-100,turbidity=0,missingDepth=false,active=true}={}){
+    async function render({original=[.02,.03,.04],captured=[.8,.6,.4],rawDepth=4,forwardDepth=4,eyeY=-2,waterY=0,cpuHeight=-100,turbidity=0,missingDepth=false,active=true,scatter=[0,0,0],visibleSun=1}={}){
+      frameData.set(scatter,76);device.queue.writeBuffer(sun,0,new Float32Array([visibleSun,0,0,0]));
       frameData[17]=eyeY;device.queue.writeBuffer(frame,0,frameData);opticsData.set([turbidity,1,cpuHeight,0]);device.queue.writeBuffer(optics,0,opticsData);probeData[9]=waterY;device.queue.writeBuffer(probe,0,probeData);
       device.queue.writeBuffer(depthParams,0,new Float32Array([.05/Math.max(forwardDepth*2.5,.001),.05/Math.max(forwardDepth,.001),0,0]));
       write(hdr,[...original,1]);write(raw,[...captured,rawDepth]);
@@ -167,8 +188,10 @@ for(const samples of [1,4])test(`production underwater helper respects visible d
     resize(3,3);
     const clear=await render(),differentAirFog=await render({original:[.9,.05,.7]}),occluded=await render({rawDepth:9}),missingRaw=await render({rawDepth:0}),air=await render({eyeY:2,cpuHeight:100});
     const movedWater=await render({waterY:-10,cpuHeight:100}),turbid=await render({turbidity:2}),deeper=await render({eyeY:-12}),missing=await render({missingDepth:true,rawDepth:0}),captureOnly=await render({missingDepth:true}),nearerRaw=await render({forwardDepth:8}),far=await render({forwardDepth:500,rawDepth:500}),near=await render({forwardDepth:.1,rawDepth:.1}),skipped=await render({active:false});
+    const noLight=await render({original:[0,0,0],captured:[0,0,0],rawDepth:0,scatter:[.12,.12,.12],visibleSun:0});
+    const scattering=await render({original:[0,0,0],captured:[0,0,0],rawDepth:0,scatter:[.12,.12,.12]});
     resize(5,3);const resized=await render();helper.destroy();GPUDevice.prototype.createTexture=nativeTexture;device.destroy();
-    return {errors,samples,clear,differentAirFog,occluded,missingRaw,air,movedWater,turbid,deeper,missing,captureOnly,nearerRaw,far,near,skipped,resized};
+    return {errors,samples,clear,differentAirFog,occluded,missingRaw,air,movedWater,turbid,deeper,missing,captureOnly,nearerRaw,far,near,skipped,resized,noLight,scattering};
   },samples);
   assert.deepEqual(result.errors,[]);assert.equal(result.samples,samples);
   const extinction=[.20,.065,.035],captured=[.8,.6,.4],original=[.02,.03,.04];
@@ -185,5 +208,7 @@ for(const samples of [1,4])test(`production underwater helper respects visible d
   assert.ok(result.far.color.slice(0,3).every(value=>Number.isFinite(value)&&value<.001),'distant paths remain finite and fade into black non-scattering water');
   assert.ok(result.near.color.slice(0,3).every((value,i)=>Number.isFinite(value)&&value>result.clear.color[i]),'near visible receivers retain more contrast');
   assert.equal(result.skipped.encoded,false,'distant air/disabled host path must encode no optional pass');
+  assert.deepEqual(result.noLight.color,[0,0,0,1],'the water volume cannot glow without an incident light source');
+  assert.ok(result.scattering.color.slice(0,3).every(v=>v>0&&v<.08),'a horizontal viewing ray gets bounded normalized solar scattering, not an additive light pedestal');
   assert.deepEqual([result.resized.width,result.resized.height],[5,3]);assert.deepEqual(result.resized.color,result.clear.color,'resize rebinds depth, capture and target without changing central ray optics');
 });

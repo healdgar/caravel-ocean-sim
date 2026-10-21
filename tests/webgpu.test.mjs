@@ -1455,6 +1455,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const water=await sample([0,1,0],waterLocations);
       const choppy=await sample([0,1,0],waterLocations.map(([x,y,z])=>[x,y,z,2]));
       const thinSurface=await sample([0,1,0],[[-3,0,0]]);
+      const thinShadowFrame=Array.from(shadows.data);
       const waterHidden=await sample([0,1,0],waterLocations,false);
       hull[16]=10000;hull[17]=2;hull[18]=-8000;
       const moved=await sample([0,1,0],locations);
@@ -1470,7 +1471,7 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const hidden=await sample([0,1,0],locations,false),night=await sample([0,-1,0],locations);
       device.queue.writeBuffer(wetState,0,new Float32Array([1,1]));
       const wetCloth=await sample([0,1,0],locations);
-      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night,water,choppy,thinSurface,waterHidden,wetCloth};
+      shadows.destroy();device.destroy();return {errors,overhead,moved,tilted,oblique,hidden,night,water,choppy,thinSurface,thinShadowFrame,waterHidden,wetCloth};
     });
     assert.deepEqual(result.errors,[]);
     for(const values of [result.overhead,result.moved,result.tilted,result.oblique]){
@@ -1484,7 +1485,20 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
     assert.ok(result.water[0]<0.25,'a broad hull shadow survives water scattering');
     assert.ok(result.water[4]>result.water[5] && result.water[5]>result.water[6],'water preserves warm canvas transmission');
     assert.ok(result.water[8]>0.99 && result.choppy[8]>0.99,'water beyond the vessel footprint stays lit');
-    assert.ok(result.thinSurface[0]<0.1 && result.water[12]>0.75,'fine rigging blocks surface glints but fades in scattered water light');
+    // Independent area quadrature of the rasterized strip under the contact
+    // tent. A two-texel rope need not become >90% opaque under a wider filter;
+    // its coverage must match its projected footprint rather than a magic cutoff.
+    const shadowFrame=result.thinShadowFrame,N=256,radius=1.5;
+    const centre=((shadowFrame[0]*-3+shadowFrame[12])*.5+.5)*N;
+    let blocked=0,total=0;
+    for(let i=0;i<32768;i++){
+      const q=centre-radius+(i+.5)*(2*radius/32768),weight=radius-Math.abs(q-centre);
+      const worldX=(2*((Math.floor(q)+.5)/N)-1-shadowFrame[12])/shadowFrame[0];
+      total+=weight;if(Math.abs(worldX+3)<.035)blocked+=weight;
+    }
+    const expectedVisibility=1-blocked/total;
+    assert.ok(Math.abs(result.thinSurface[0]-expectedVisibility)<.001,`fine-rigging coverage matches area quadrature: ${result.thinSurface[0]} versus ${expectedVisibility}`);
+    assert.ok(result.thinSurface[0]<.25 && result.water[12]>.75,'fine rigging strongly blocks surface glints but fades in scattered water light');
     assert.ok(result.water[16]>0.1 && result.water[16]<0.9,'water integrates across the silhouette edge');
     assert.ok(Math.abs(result.water[16]-result.choppy[16])>0.05,'wave normal and refracted view alter the underwater footprint');
     assert.ok(result.waterHidden.every(v=>v===1),'hidden vessel skips water shadowing');
