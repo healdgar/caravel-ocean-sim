@@ -4718,9 +4718,8 @@ fn skyAtmo(dir: vec3f) -> vec3f {
 }
 `;
 
-// Clouds + full sky radiance (needs the same bindings as SKY_RENDER_FUNCS).
-const SKY_CLOUD_FUNCS = CLOUD_SAMPLE + /* wgsl */ `
-
+// Solar disc shared by air and refracted underwater views.
+const SUN_DISK = /* wgsl */ `
 fn sunDisk(dir: vec3f) -> vec3f {
   let c = dot(dir, F.sunDir.xyz);
   let ang = sqrt(max(2.0 * (1.0 - c), 0.0));
@@ -4733,6 +4732,10 @@ fn sunDisk(dir: vec3f) -> vec3f {
   let rad = F.sunDir.w / (PI * SUN_ANG_R * SUN_ANG_R);
   return rad * limb * edge * sampleTrans(camR(), max(dir.y, -0.01));
 }
+`;
+
+// Clouds + full sky radiance (needs the same bindings as SKY_RENDER_FUNCS).
+const SKY_CLOUD_FUNCS = CLOUD_SAMPLE + SUN_DISK + /* wgsl */ `
 
 fn skyRadiance(dirIn: vec3f, withSun: bool) -> vec3f {
   var dir = dirIn;
@@ -5943,6 +5946,15 @@ fn waterFresnel(c:f32)->f32 {
   let parallel=(WATER_REFRACTIVE_INDEX*cosine-transmitted)/(WATER_REFRACTIVE_INDEX*cosine+transmitted);
   return clamp(.5*(perpendicular*perpendicular+parallel*parallel),0.0,1.0);
 }
+fn waterInteriorFresnel(c:f32)->f32 {
+  let cosine=clamp(c,0.0,1.0);
+  let sineSquared=WATER_REFRACTIVE_INDEX*WATER_REFRACTIVE_INDEX*(1.0-cosine*cosine);
+  if(sineSquared>=1.0){return 1.0;}
+  let transmitted=sqrt(max(0.0,1.0-sineSquared));
+  let perpendicular=(WATER_REFRACTIVE_INDEX*cosine-transmitted)/max(WATER_REFRACTIVE_INDEX*cosine+transmitted,.000001);
+  let parallel=(cosine-WATER_REFRACTIVE_INDEX*transmitted)/max(cosine+WATER_REFRACTIVE_INDEX*transmitted,.000001);
+  return clamp(.5*(perpendicular*perpendicular+parallel*parallel),0.0,1.0);
+}
 fn waterTransmittance(path:f32,turbidity:f32)->vec3f {
   let extinction=vec3f(.20,.065,.035)+max(turbidity,0.0)*vec3f(.11,.095,.085);
   return exp(-extinction*max(path,0.0));
@@ -6002,8 +6014,8 @@ fn waterTraceSource(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,star
   hit.path=clamp((hit.source.a-surfaceDepth)/alongForward,0.0,500.0);hit.valid=1.0;return hit;
 }
 fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
-  // The camera is kept in air by the scene. A crest's visible front face may
-  // nevertheless rise above eye level and must retain its transmission.
+  // This path observes the interface from air. Underwater scene variants use
+  // the interior dielectric branch; a crest can still rise above an air eye.
   if(optics.y<.5){return body;}
   let forward=normalize(F.camFwd.xyz);
   let surfaceDepth=dot(world-F.camPos.xyz,forward);
@@ -6031,12 +6043,176 @@ fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
 }
 `;
 
+// ---- js/wgsl/underwater.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
+
+
+
+
+// Receiver-map Jacobian of refracted sunlight, sampled from the simulated FFT
+// slopes. This local, filtered focusing approximation is not a photon solver:
+// folded/multiple light paths are bounded rather than accumulated. No noise or
+// preanimated caustic texture is used. See GPU Gems, chapter 2 (Guardado/Crespo).
+function waterCausticFunctions({derivatives='derivTex',sampler='sampR',surfaceWaves=false,shadows=true}={}){
+  return /* wgsl */ `
+fn causticSlope(p:vec2f,footprint:f32)->vec2f {
+  var slope=vec2f(0);
+  // Long swells transport the patch; the resolved 7 m, 1.4 m and .26 m bands
+  // provide its visible focusing. The finite footprint filters deep shimmer.
+  for(var c=3u;c<${CASCADES}u;c++){
+    let invL=F.cascInvL[c>>2u][c&3u];
+    let lod=max(0.0,log2(max(1.0,footprint*invL*f32(textureDimensions(${derivatives}).x))));
+    let d=textureSampleLevel(${derivatives},${sampler},p*invL,i32(c),lod);
+    slope+=d.xy/max(vec2f(1)+d.zw,vec2f(.2));
+  }
+  ${surfaceWaves?`if(SW.step.w>.5){
+    let e=max(footprint,SW.nearDomain.w);
+    slope+=vec2f(surfaceWaveAt(p+vec2f(e,0)).x-surfaceWaveAt(p-vec2f(e,0)).x,
+      surfaceWaveAt(p+vec2f(0,e)).x-surfaceWaveAt(p-vec2f(0,e)).x)/(2.0*e);
+  }`:''}
+  return slope;
+}
+fn causticLightSlope(p:vec2f,footprint:f32)->vec2f {
+  let slope=causticSlope(p,footprint);
+  let normal=normalize(vec3f(-slope.x,1,-slope.y));
+  let down=refract(-normalize(F.sunDir.xyz),normal,1.0/WATER_REFRACTIVE_INDEX);
+  return down.xz/max(-down.y,.15);
+}
+fn waterCausticFactor(receiver:vec3f,surfaceY:f32)->vec3f {
+  let depth=surfaceY-receiver.y;
+  if(depth<=.035||depth>=40.0||F.sunDir.y<=.015||sunVis[0]<=.001){return vec3f(1);}
+  let light=sunIlluminance()*sunVis[0];
+  let sky=skyAtmo(vec3f(0,1,0));
+  let direct=dot(light,vec3f(.2126,.7152,.0722));
+  let diffuse=dot(sky,vec3f(.2126,.7152,.0722));
+  let strength=smoothstep(.015,.15,F.sunDir.y)*direct/max(direct+diffuse*3.0,.0001)
+    *smoothstep(.035,.25,depth)*exp(-depth*(.045+max(optics.x,0.0)*.07));
+  if(strength<.005){return vec3f(1);}
+  let footprint=max(.035,depth*.018);
+  let flat=refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
+  var entry=receiver.xz-depth*flat.xz/max(-flat.y,.15);
+  entry=receiver.xz-depth*causticLightSlope(entry,footprint);
+  let dx=(causticLightSlope(entry+vec2f(footprint,0),footprint)-causticLightSlope(entry-vec2f(footprint,0),footprint))/(2.0*footprint);
+  let dz=(causticLightSlope(entry+vec2f(0,footprint),footprint)-causticLightSlope(entry-vec2f(0,footprint),footprint))/(2.0*footprint);
+  let columnX=vec2f(1,0)+depth*dx;let columnZ=vec2f(0,1)+depth*dz;
+  let jacobian=columnX.x*columnZ.y-columnX.y*columnZ.x;
+  let focus=clamp(1.0/max(abs(jacobian),.25),.35,3.0);
+  let shadow=${shadows?'vesselShadow(vec3f(entry.x,surfaceY,entry.y),vec3f(0,1,0))':'vec3f(1)'};
+  return mix(vec3f(1),vec3f(focus),strength*shadow);
+}
+`;
+}
+
+// Interior side of the same displaced surface, not a second flat ocean. Exact
+// dielectric Fresnel gives a Snell window and total internal reflection. The
+// reflected underwater hemisphere remains a bounded diffuse-body approximation;
+// this does not trace offscreen objects or reconstruct above-water silhouettes.
+const UNDERWATER_INTERFACE=SUN_DISK+/* wgsl */ `
+fn underwaterBoundary(world:vec3f,normal:vec3f,view:vec3f,skyHemi:vec3f,foam:f32,foamLight:vec3f)->vec3f {
+  let interior=-normal;
+  let cosine=clamp(dot(view,interior),0.0,1.0);
+  let reflectance=waterInteriorFresnel(cosine);
+  let airRay=refract(-view,interior,WATER_REFRACTIVE_INDEX);
+  var transmitted=vec3f(0);
+  if(reflectance<.99999&&dot(airRay,airRay)>.00001){
+    let dir=normalize(airRay);
+    // Sky LUT and solar disc share the ordinary above-water illumination. Local
+    // surface slopes distort the window; the medium pass attenuates the eye leg.
+    transmitted=(textureSampleLevel(envCube,sampR,normalize(vec3f(dir.x,max(dir.y,.0005),dir.z)),0.0).rgb+sunDisk(dir)*sunVis[0])*(1.0-reflectance);
+  }
+  let reflected=F.waterCol.rgb*(skyHemi*1.5+sunIlluminance()*sunVis[0]*max(F.sunDir.y,0.0)*.22);
+  let bubbles=foamLight*.3+skyHemi*.06;
+  return mix(transmitted+reflected*reflectance,bubbles,clamp(foam*.85,0.0,.95));
+}
+`;
+
+function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves=false,shadows=false}={}){
+  const count=Math.max(1,Math.floor(samples));
+  return FRAME_WGSL+ATMO_CORE_WGSL+WATER_OPTICS+/* wgsl */ `
+@group(0)@binding(0)var<uniform>F:Frame;
+@group(0)@binding(1)var hdrSource:texture_2d<f32>;
+@group(0)@binding(2)var sceneDepth:${count===1?'texture_depth_2d':'texture_depth_multisampled_2d'};
+@group(0)@binding(3)var rawSubmerged:texture_2d<f32>;
+@group(0)@binding(4)var<uniform>optics:vec4f;
+@group(0)@binding(5)var transLUT:texture_2d<f32>;
+@group(0)@binding(6)var skyLUT:texture_2d<f32>;
+@group(0)@binding(7)var sampC:sampler;
+@group(0)@binding(8)var<storage,read>sunVis:array<f32,4>;
+@group(0)@binding(9)var derivTex:texture_2d_array<f32>;
+@group(0)@binding(10)var seaSampler:sampler;
+${cameraProbe?'@group(0)@binding(11)var<storage,read>cameraSea:array<f32,16>;':''}
+`+SKY_RENDER_FUNCS+(shadows?SCENE_SHADOW_SAMPLE:'')+(surfaceWaves?surfaceWaveSource(2,0,1,'seaSampler'):'')
+  +waterCausticFunctions({derivatives:'derivTex',sampler:'seaSampler',surfaceWaves,shadows})+/* wgsl */ `
+struct UnderwaterVertex{@builtin(position)position:vec4f,@location(0)ndc:vec2f};
+@vertex fn vs(@builtin(vertex_index)i:u32)->UnderwaterVertex {
+  let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
+  return UnderwaterVertex(vec4f(p,0,1),p);
+}
+fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
+  var depth=0.0;
+  for(var sample=0;sample<${count};sample++){depth=max(depth,textureLoad(sceneDepth,pixel,${count===1?'0':'sample'}));}
+  if(depth<=0.0){return -1.0;}
+  let a=F.viewProj*vec4f(ray,0);let b=F.viewProj*vec4f(0,0,0,1);
+  return max(0.0,(b.z-depth*b.w)/(depth*a.w-a.z));
+}
+@fragment fn fs(v:UnderwaterVertex)->@location(0)vec4f {
+  let pixel=vec2i(v.position.xy);let original=textureLoad(hdrSource,pixel,0);
+  let surfaceY=${cameraProbe?'cameraSea[9]':'optics.z'};
+  let eyeDepth=surfaceY-F.camPos.y;
+  if(eyeDepth<=.005){return original;}
+  let ray=normalize(F.camFwd.xyz+v.ndc.x*F.camRight.xyz+v.ndc.y*F.camUp.xyz);
+  let distance=underwaterSceneDistance(pixel,ray);
+  var path=select(120.0,min(distance,120.0),distance>=0.0);
+  var radiance=select(vec3f(0),original.rgb,distance>=0.0);
+  let raw=textureLoad(rawSubmerged,pixel,0);
+  let forwardDepth=path*dot(ray,normalize(F.camFwd.xyz));
+  // Capture also contains seabed omitted by the ordinary air-side terrain
+  // draw. A captured solid may precede the ordinary depth (or fill clear depth),
+  // but must never shine through a closer surface or an opaque air object.
+  let receiverVisible=raw.a>0.0&&(distance<0.0||raw.a<=forwardDepth+max(.08,forwardDepth*.005));
+  if(receiverVisible){path=min(120.0,raw.a/max(dot(ray,normalize(F.camFwd.xyz)),.001));}
+  let receiver=F.camPos.xyz+ray*path;
+  let endDepth=max(0.0,surfaceY-receiver.y);
+  if(receiverVisible){
+    radiance=raw.rgb*waterCausticFactor(receiver,surfaceY);
+  }
+  let lightDown=refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
+  let lightCos=max(-lightDown.y,.25);
+  if(receiverVisible){radiance*=waterTransmittance(endDepth/lightCos,optics.x);}
+  let transmission=waterTransmittance(path,optics.x);
+  // Four bounded source samples integrate directional sunlight and diffuse sky
+  // into the water path. There are no FFT lookups or fabricated light strips in
+  // this volume integration; real focusing is evaluated only at solid hits.
+  let sun=sunIlluminance()*sunVis[0]*smoothstep(0.0,.05,F.sunDir.y)*(1.0-waterFresnel(max(F.sunDir.y,0.0)));
+  let sky=skyAtmo(vec3f(0,1,0));
+  let towardLight=normalize(-lightDown);
+  let phase=phaseHG(dot(ray,towardLight),.72);
+  let ds=path*.25;
+  var scatter=vec3f(0);
+  for(var i=0u;i<4u;i++){
+    let at=(f32(i)+.5)*ds;
+    let depth=max(0.0,eyeDepth-ray.y*at);
+    let entry=waterTransmittance(depth/lightCos,optics.x);
+    let ambient=waterTransmittance(depth/.65,optics.x);
+    let source=F.waterCol.rgb*(sky*ambient*1.4+sun*entry*(.10+phase*.65));
+    // Analytic within-stratum Beer integral prevents distant paths from gaining
+    // energy as a fixed raymarch step becomes longer than an extinction length.
+    scatter+=source*waterTransmittance(f32(i)*ds,optics.x)*(vec3f(1)-waterTransmittance(ds,optics.x));
+  }
+  return vec4f(max(vec3f(0),radiance*transmission+scatter),1);
+}
+`;
+}
+const UNDERWATER_MEDIUM=createUnderwaterMedium();
+
 // ---- js/wgsl/ocean.js ----
 
 
 
 
 // Ocean surface + sky background rendering.
+
 
 
 
@@ -6368,11 +6544,18 @@ function createCoastalOcean(coast,depthFirst){
 
 // The legacy shader remains available for isolated ocean probes. The scene
 // composes every submerged solid through this shared optical path.
-function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false){
-  const code=oceanSource(coast,surfaceWaves)+WATER_TRANSMISSION;
+function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false){
+  const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
+    'mix(body,hit.source.rgb*waterCausticFactor(waterSourcePosition(hit.uv,hit.source.a),world.y),transmission)');
+  const code=oceanSource(coast,surfaceWaves)+transmission
+    +waterCausticFunctions({surfaceWaves})+UNDERWATER_INTERFACE
+    +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
-      'body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)');
+      `if(${cameraProbe?'F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&F.camPos.y<optics.z-.005'}){
+    return vec4f(underwaterBoundary(in.rel+F.camPos.xyz,nrm,V,skyHemi,foamMask,foamLit),1);
+  }
+  body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)`);
   return depthFirst?optical.replace(OCEAN_HULL_MASK,''):optical;
 }
 
@@ -7039,6 +7222,19 @@ struct LandVertex {
   o.normal=normalize(rotated);o.leafUV=leafUV;
   o.kind=kind;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);return o;
 }
+@vertex fn groundVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
+  @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
+  let angle=shape.y*2.0*PI;let c=cos(angle);let s=sin(angle);
+  let up=normalize(vec3f(-shape.z,1,-shape.w));let right=normalize(vec3f(1,shape.z,0));let front=cross(right,up);
+  let p=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
+  let grass=kind.x>6.5;
+  var sway=vec3f(0);
+  if(grass){let bend=F.windP[0].xy*clamp(F.windP[0].z/12.0,0.0,2.2)*.035*shape.x*position.y*position.y*sin(F.camPos.w*1.8+angle);sway=vec3f(bend.x,0,bend.y);}
+  let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(.001));
+  let n=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
+  var o:LandVertex;o.world=root.xyz+right*p.x+up*p.y+front*p.z+sway;o.normal=normalize(right*n.x+up*n.y+front*n.z);
+  o.kind=kind;o.leafUV=leafUV;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+}
 // The opaque call graph contains neither discard nor a leaf texture fetch.
 // Keep that property for Apple's hidden-surface removal; a runtime branch in
 // one shared cutout fragment would still make solid ground a feedback shader.
@@ -7069,6 +7265,7 @@ fn landOpaque(in:LandVertex)->vec4f{
   let footprint=max(length(dpdx(world)),length(dpdy(world)));
   let detailFade=1.0-smoothstep(0.25,2.5,footprint);
   let microFade=1.0-smoothstep(0.04,0.5,footprint);
+  let mesoFade=1.0-smoothstep(1.0,8.0,footprint);
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
@@ -7080,12 +7277,14 @@ fn landOpaque(in:LandVertex)->vec4f{
     let rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
     let vertical=mix(world.zy,world.xy,smoothstep(0.35,0.65,abs(n.z)/(abs(n.x)+abs(n.z)+0.001)));
     let materialUV=mix(world.xz,vertical,rocky);
+    let blocks=gnoise(materialUV*.19)*mesoFade;
     let stone=gnoise(materialUV*0.82)*detailFade;
     let pores=gnoise(materialUV*5.4)*microFade;
     let fissure=(1.0-smoothstep(0.025,0.11,abs(gnoise(materialUV*1.7+vec2f(13.1,7.7)))))*detailFade;
-    albedo=source*(1.0+stone*0.10+pores*0.055-fissure*rocky*0.075);
+    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blocks)))*mesoFade;
+    albedo=source*(1.0+blocks*.14+stone*0.10+pores*0.055-(fissure*.075+coarseFissure*.08)*rocky);
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006);
-    relief=mix(soil,stone*0.14-fissure*0.065,rocky);
+    relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky);
     roughness=clamp(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.65,0.98);
   }else if(!crown){
     let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
@@ -7110,6 +7309,30 @@ fn landOpaque(in:LandVertex)->vec4f{
 }
 @fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
 @fragment fn opaqueFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
+// The props use local atmosphere and the terrain's cached cloud sunlight. A
+// twelve-step volume integration per grass blade would defeat their budget.
+@fragment fn groundFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
+  let world=in.world;let grass=in.kind.x>6.5;
+  var n=normalize(in.normal);if(grass){n*=select(-1.0,1.0,front);}
+  let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+.5;
+  let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
+  let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0).r;
+  let luminance=dot(source,vec3f(.2126,.7152,.0722));
+  let shade=.72+in.kind.y*.30;
+  let rock=mix(vec3f(luminance)*vec3f(.95,.91,.85),source,.12)*shade;
+  let dry=vec3f(.17,.145,.065);let green=mix(leafMean.rgb,source,.18);
+  let foliage=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
+  let albedo=select(rock,foliage,grass);
+  let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
+  let direct=sunIlluminance()*sunlight;
+  let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
+  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.35,grass);
+  let visibility=select(.35+.28*max(n.y,0.0),.32+in.kind.y*.32,grass);
+  let wet=(1.0-smoothstep(1.0,7.0,world.y))*.5;
+  var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
+  color+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.84);
+  return vec4f(surfaceAir(color,world),1);
+}
 @fragment fn leafFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let world=in.world;var n=normalize(in.normal)*select(-1.0,1.0,front);
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
@@ -9110,6 +9333,43 @@ function createWaterOptics({device,shader,seaView,seaSampler,format='rgba16float
         pass.setBindGroup(3,captureGroups[captureNeedsWaves?surfaceWaves.current:0]);
       }};
     },
+  };
+}
+
+// ---- js/underwater.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
+// One optional HDR pass before bloom. It owns no simulation/readback and skips
+// command encoding entirely outside the camera's near-surface inspection band.
+async function createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler,sunVis,
+  derivView,seaSampler,cameraProbe=null,surfaceWaves=null,sceneShadows=null,format='rgba16float',samples=4}){
+  const module=await shader(createUnderwaterMedium({samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows}),'underwater medium');
+  const pipeline=await device.createRenderPipelineAsync({label:'underwater medium',layout:'auto',
+    vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+  const shadowGroup=sceneShadows?.bind(pipeline);
+  const emptyGroup=surfaceWaves&&!shadowGroup?device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[]}):null;
+  const waveGroups=surfaceWaves?.views.map(view=>device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries:[
+    {binding:0,resource:{buffer:surfaceWaves.uniform}},{binding:1,resource:view}]}));
+  let texture=null,view=null,group=null,width=0,height=0;
+  const descriptor={label:'Underwater medium',colorAttachments:[{view:null,loadOp:'clear',storeOp:'store',clearValue:[0,0,0,1]}]};
+  return {
+    get view(){return view;},pipeline,
+    resize({width:w,height:h,hdrView,depthView,submergedView}){
+      if(!Number.isInteger(w)||!Number.isInteger(h)||w<1||h<1)throw new RangeError('Underwater target dimensions must be positive integers');
+      if(width!==w||height!==h||!texture){texture?.destroy();width=w;height=h;texture=device.createTexture({label:'underwater filtered HDR',size:[w,h],format,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.RENDER_ATTACHMENT});view=texture.createView();descriptor.colorAttachments[0].view=view;}
+      const resources=[{buffer:frameUBO},hdrView,depthView,submergedView,{buffer:opticsUBO},transView,skyView,sampler,{buffer:sunVis},derivView,seaSampler,...(cameraProbe?[{buffer:cameraProbe}]:[])];
+      group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
+      return view;
+    },
+    encode(encoder,active,timestampWrites){
+      if(!active||!group)return false;
+      descriptor.timestampWrites=timestampWrites;
+      const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(pipeline);pass.setBindGroup(0,group);
+      if(shadowGroup)pass.setBindGroup(1,shadowGroup);else if(emptyGroup)pass.setBindGroup(1,emptyGroup);
+      if(waveGroups)pass.setBindGroup(2,waveGroups[surfaceWaves.current]);
+      pass.draw(3);pass.end();return true;
+    },
+    destroy(){texture?.destroy();texture=null;view=null;group=null;width=height=0;},
   };
 }
 
@@ -12048,6 +12308,7 @@ const BOAT_LINK_KEYS = {
   speed: 'boatSpeed', eye: 'boatEye', rudderTarget: 'boatRudder',
   sailFore: 'sailFore', sailMain: 'sailMain', sailMizzen: 'sailMizzen',
   provisionDays: 'provisionDays', cargoTonnes: 'cargoTonnes',
+  x:'boatX',z:'boatZ',
 };
 
 const ROUGH_SEAS = {
@@ -12067,7 +12328,7 @@ function propulsionFromLink(search) {
   return 'sail'; // A speed parameter alone must never silently enable powered motion.
 }
 
-function createShareLink(href, settings, boat, cameraMode) {
+function createShareLink(href, settings, boat, cameraMode, camera=null) {
   const url = new URL(href);
   url.search = ''; url.hash = '';
   const scene=new URL(href).searchParams;
@@ -12077,6 +12338,15 @@ function createShareLink(href, settings, boat, cameraMode) {
   };
   url.searchParams.set('boat', cameraMode === 'boat' ? '1' : '0');
   url.searchParams.set('view', cameraMode);
+  if(cameraMode==='ship'&&camera?.orbit){
+    const orbit=camera.orbit;
+    setNumber('orbitYaw',(orbit.yaw*180/Math.PI-boat.heading)%360);
+    setNumber('orbitElevation',orbit.elevation*180/Math.PI);setNumber('orbitDistance',orbit.distance);
+    for(const axis of ['X','Y','Z'])setNumber('orbitPan'+axis,orbit['pan'+axis]||0);
+  }else if(cameraMode==='free'&&camera?.cam){
+    const c=camera.cam;
+    url.searchParams.set('cam',[c.x,c.y,c.z,c.yaw*180/Math.PI,c.pitch*180/Math.PI].map(n=>Number(n.toFixed(6))).join(','));
+  }
   if(boat.modelId==='victory')url.searchParams.set('ship','victory');
   url.searchParams.set('propulsion', boat.propulsion === 'sail' ? 'sail' : 'manual');
   for (const [key, value] of Object.entries(settings)) setNumber(key, value);
@@ -12087,6 +12357,34 @@ function createShareLink(href, settings, boat, cameraMode) {
   url.searchParams.set('follower',boat.followingShip===false?'0':'1');
   for(const key of ['speedHud','windHud','headingHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
   return url.href;
+}
+
+// ---- js/camera.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
+const ORBIT_LIMIT = Math.PI * .5 - .02;
+function orbitElevation(value) { return Math.max(-ORBIT_LIMIT,Math.min(ORBIT_LIMIT,value)); }
+function orbitDistance(value) { return Math.max(1,Math.min(600,value)); }
+
+// Pan the focus in the camera's screen plane. Distances are world metres;
+// using CSS height keeps a touch gesture independent of the rendering scale.
+function panOrbit(orbit,dx,dy,radius,fovY,height) {
+  const metres=2*radius*Math.tan(fovY*.5)/Math.max(1,height);
+  const sy=Math.sin(orbit.yaw),cy=Math.cos(orbit.yaw);
+  const se=Math.sin(orbit.elevation),ce=Math.cos(orbit.elevation);
+  orbit.panX=(orbit.panX||0)+metres*(-dx*cy-dy*sy*se);
+  orbit.panY=(orbit.panY||0)+metres*dy*ce;
+  orbit.panZ=(orbit.panZ||0)+metres*(dx*sy-dy*cy*se);
+}
+
+function placeOrbitCamera(camera,orbit,x,y,z,radius) {
+  const horizontal=radius*Math.cos(orbit.elevation);
+  const focusX=x+(orbit.panX||0),focusY=y+(orbit.panY||0),focusZ=z+(orbit.panZ||0);
+  camera.x=focusX+Math.sin(orbit.yaw)*horizontal;
+  camera.y=focusY+radius*Math.sin(orbit.elevation);
+  camera.z=focusZ+Math.cos(orbit.yaw)*horizontal;
+  camera.yaw=-orbit.yaw;
+  camera.pitch=-orbit.elevation;
 }
 
 // ---- js/shadows.js ----
@@ -12527,6 +12825,15 @@ function terrainSample(heights,x,z,region=ISLAND){
   const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*n+i;
   return (heights[k]*(1-a)+heights[k+1]*a)*(1-b)+(heights[k+n]*(1-a)+heights[k+n+1]*a)*b;
 }
+// Ground props rest on the rendered triangle, not the bilinear surface between
+// four elevations (which can float above a diagonal on steep coastal ground).
+function terrainSurfaceSample(heights,x,z,region=ISLAND){
+  const n=region.size,s=(n-1)/region.span,u=(x-region.x+region.span/2)*s,v=(z-region.z+region.span/2)*s;
+  if(u<0||v<0||u>=n-1||v>=n-1)return -120;
+  const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*n+i;
+  return a+b<=1?heights[k]+a*(heights[k+1]-heights[k])+b*(heights[k+n]-heights[k]):
+    heights[k+n+1]+(1-a)*(heights[k+n]-heights[k+n+1])+(1-b)*(heights[k+1]-heights[k+n+1]);
+}
 function islandGeometry(heights){
   const n=ISLAND.size,step=ISLAND.span/(n-1),vertices=new Float32Array(n*n*8),indices=[],submergedIndices=[];
   for(let j=0;j<n;j++)for(let i=0;i<n;i++){
@@ -12623,6 +12930,90 @@ function seedVegetation(region,sampleHeight,mask){
     out.push(x,h,z,radius,height,shape,sx,sz);
   }
   return new Float32Array(out);
+}
+// Authored local ground cover. Region-resident patch bounds are cheap; exact
+// roots are expanded lazily only after frustum and projected-extent culling.
+const GROUND_COVER=Object.freeze({patchSpan:64,grassPerPatch:32,rocksPerPatch:3,variants:4,maxExtent:5.1});
+function createGroundCoverPatches(region,sampleHeight){
+  const span=GROUND_COVER.patchSpan,count=Math.ceil(region.span/span),patches=[];
+  for(let j=0;j<count;j++)for(let i=0;i<count;i++){
+    const x=region.x-region.span*.5+i*span,z=region.z-region.span*.5+j*span;let low=Infinity,high=-Infinity;
+    // Patches align with the elevation lattice. Include every height vertex;
+    // triangle interiors cannot leave their vertex height range.
+    const divisions=Math.max(1,Math.ceil(span/(region.span/(region.size-1))));
+    for(let v=0;v<=divisions;v++)for(let u=0;u<=divisions;u++){
+      const h=sampleHeight(x+span*u/divisions,z+span*v/divisions);low=Math.min(low,h);high=Math.max(high,h);
+    }
+    if(high<1||low>855)continue;
+    const id=patches.length,r=GROUND_COVER.maxExtent;
+    patches.push({id,seed:(region.vegetationSeed??47231)^Math.imul(i+1,73856093)^Math.imul(j+1,19349663),x,z,ids:[id],
+      centre:[x+span*.5,(low+high)*.5,z+span*.5],radius:Math.hypot(span*.5+r,(high-low)*.5+r,span*.5+r),instances:null});
+  }
+  return patches;
+}
+function groundCoverInstances(patch,region,sampleHeight,mask){
+  if(patch.instances)return patch.instances;
+  const rand=random(patch.seed),groups=[[],[],[],[]],span=GROUND_COVER.patchSpan;
+  for(let i=0;i<GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;i++){
+    const grass=i>=GROUND_COVER.rocksPerPatch,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
+    const x=patch.x+u*span,z=patch.z+v*span,h=sampleHeight(x,z);
+    if(h<5||h>855)continue;
+    const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
+    const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
+    if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;
+    const variant=(grass?2:0)+(seed>.5?1:0),radius=grass?.7+size*1.1:.55+size*1.9,height=grass?.28+tall*.52:.4+tall*1.7;
+    groups[variant].push(x,h,z,radius,height,seed,sx,sz);
+  }
+  patch.instances=groups.map(data=>new Float32Array(data));return patch.instances;
+}
+// A whole prop may disappear only when its conservative projected geometric
+// extent is below the same actual-pixel target as trees. Rigid slope alignment
+// preserves radius; 20% covers the small grass wind bend. No fixed metre LOD.
+function projectedGroundExtent(x,y,z,extent,camera,margin=0){
+  const f=camera.forward,length=f?Math.hypot(f[0],f[1],f[2]):0;
+  if(!(camera.screenHeight>0&&camera.tanHalfFovY>0&&length>0))return Infinity;
+  const dx=x-camera.x,dy=y-camera.y,dz=z-camera.z,depth=(dx*f[0]+dy*f[1]+dz*f[2])/length;
+  const near=depth-extent-margin;
+  if(near<=extent)return Infinity;
+  const lateral=Math.sqrt(Math.max(0,dx*dx+dy*dy+dz*dz-depth*depth))+extent+margin;
+  return camera.screenHeight/(2*camera.tanHalfFovY)*extent*Math.sqrt(1+(lateral/near)**2)/(near-extent);
+}
+function groundCoverError(x,y,z,radius,height,camera){
+  return projectedGroundExtent(x,y,z,Math.hypot(radius*Math.SQRT2,height)*1.2,camera);
+}
+function groundCoverVisible(error,wasVisible=false){
+  return !Number.isFinite(error)||error>=TREE_PIXEL_ERROR*(wasVisible?.88:1);
+}
+const groundGeometryCache=new Map();
+function groundCoverGeometry(variant=0){
+  const key=variant%GROUND_COVER.variants;if(groundGeometryCache.has(key))return groundGeometryCache.get(key);
+  const rand=random(18491+key*7919),out=[];
+  const triangle=(a,b,c,kind,shade)=>{
+    let n=treeNormal(treeCross(b.map((v,k)=>v-a[k]),c.map((v,k)=>v-a[k])));
+    if(kind===6&&n.reduce((sum,v,k)=>sum+v*((a[k]+b[k]+c[k])/3-(k===1?.3:0)),0)<0){[b,c]=[c,b];n=n.map(v=>-v);}
+    for(const p of[a,b,c])out.push(...p,...n,kind,shade,0,0);
+  };
+  if(key<2){
+    const sides=8,phase=rand()*Math.PI*2,rings=[-.18,.26,.74].map((y,j)=>Array.from({length:sides},(_,i)=>{
+      const a=phase+i*Math.PI*2/sides,r=(j===0?.62:j===1?1:.62)*(.84+rand()*.16);
+      return[Math.cos(a)*r,y+(rand()-.5)*.16,Math.sin(a)*r];
+    })),top=[(rand()-.5)*.18,1,(rand()-.5)*.18],bottom=[0,-.2,0];
+    for(let i=0;i<sides;i++){const next=(i+1)%sides,shade=.5+rand()*.4;
+      triangle(bottom,rings[0][next],rings[0][i],6,shade);
+      for(let j=0;j<2;j++){triangle(rings[j][i],rings[j][next],rings[j+1][i],6,shade);triangle(rings[j][next],rings[j+1][next],rings[j+1][i],6,shade);}
+      triangle(rings[2][i],rings[2][next],top,6,shade);
+    }
+  }else{
+    // Bent opaque ribbons have real geometry and no alpha-card overdraw.
+    for(let blade=0;blade<18;blade++){
+      const angle=rand()*Math.PI*2,r=Math.sqrt(rand())*.76,x=Math.cos(angle)*r,z=Math.sin(angle)*r,turn=rand()*Math.PI*2,h=.4+rand()*.6,width=.025+rand()*.025;
+      const right=[Math.cos(turn)*width,0,Math.sin(turn)*width],bend=[-Math.sin(turn)*.22,0,Math.cos(turn)*.22],rows=[0,.48,.82].map(t=>[-1,1].map(side=>[x+right[0]*side*(1-t*.7)+bend[0]*t*t,h*t,z+right[2]*side*(1-t*.7)+bend[2]*t*t]));
+      const tip=[x+bend[0],h,z+bend[2]],shade=.45+rand()*.5;
+      for(let j=0;j<2;j++){triangle(rows[j][0],rows[j][1],rows[j+1][0],7,shade);triangle(rows[j][1],rows[j+1][1],rows[j+1][0],7,shade);}
+      triangle(rows[2][0],rows[2][1],tip,7,shade);
+    }
+  }
+  const geometry=new Float32Array(out);groundGeometryCache.set(key,geometry);return geometry;
 }
 const treeNormal=p=>{const l=Math.hypot(...p)||1;return p.map(x=>x/l);};
 const treeCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
@@ -13054,6 +13445,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const [heightResponse,biomeResponse,albedoResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo)]);
   const heights=decodeIsland(await heightResponse.arrayBuffer()),biome=decodeBiome(await biomeResponse.arrayBuffer());
   const mesh=islandGeometry(heights),trees=islandVegetation(heights,biome);
+  const groundSample=(x,z)=>terrainSurfaceSample(heights,x,z),groundPatches=createGroundCoverPatches(ISLAND,groundSample);
   const buffer=(data,usage,label)=>{
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
     if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;
@@ -13104,7 +13496,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:ISLAND.biomeSize},[ISLAND.biomeSize,ISLAND.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
   const module=await shader(TERRAIN,'island terrain');
-  const makePipe=(entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
+  const makePipe=(entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
@@ -13113,6 +13505,12 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
   const opaqueTreePipe=await makePipe('treeVS',treeBuffers,'opaqueFS'),treePipe=await makePipe('treeVS',treeBuffers,'leafFS');
+  const groundPipe=await makePipe('groundVS',treeBuffers,'groundFS');
+  const groundMeshes=Array.from({length:GROUND_COVER.variants},(_,variant)=>{
+    const geometry=groundCoverGeometry(variant);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover ${variant}`),count:geometry.length/TREE_VERTEX_FLOATS};
+  });
+  const groundBatches=groundMeshes.map((_,variant)=>({buffer:null,capacity:0,label:`ground cover instances ${variant}`,data:[],count:0}));
+  const groundStats={patches:groundPatches.length,resident:0,rocks:0,grass:0,triangles:0},previousGround=new Set();
   const treeMeshes=Array.from({length:3},(_,lod)=>Array.from({length:TREE_VARIANTS},(_,variant)=>{
     const data=treeRenderGeometry(variant,lod);let opaqueEnd=0;
     while(opaqueEnd<data.length&&data[opaqueEnd+6]!==2)opaqueEnd+=TREE_VERTEX_FLOATS*3;
@@ -13123,7 +13521,8 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const treeBatches=Array.from({length:3*TREE_VARIANTS},(_,id)=>({
     buffer:null,capacity:0,label:`tree instances ${id}`,data:[],count:0,
   }));
-  const previousLods=new Map(),forestPatches=createForestPatches(trees),lodStats={near:0,middle:0,far:0,budgetOverflow:0};let lastCamera=null,lastView=null,lastPixels=null;
+  const previousLods=new Map(),forestPatches=createForestPatches(trees),lodStats={near:0,middle:0,far:0,budgetOverflow:0};
+  let lastCamera=null,lastView=null,lastPixels=null;
   function updateTrees(camera,viewProjection){
     const sameView=(!viewProjection&&!lastView)||(viewProjection&&lastView&&lastView.every((v,i)=>Math.abs(v-viewProjection[i])<.004));
     const pixels=[camera.screenHeight,camera.tanHalfFovY,...(camera.forward??[])];
@@ -13148,6 +13547,34 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
       }
       device.queue.writeBuffer(batch.buffer,0,new Float32Array(batch.data));
     }
+    for(const batch of groundBatches){batch.data=[];batch.count=0;}
+    const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
+    for(const id of visibleForestIds(groundPatches,camera,viewProjection)){
+      const patch=groundPatches[id];
+      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<TREE_PIXEL_ERROR*.88)continue;
+      const instances=groundCoverInstances(patch,ISLAND,groundSample,biome);groundStats.resident++;
+      for(let variant=0;variant<GROUND_COVER.variants;variant++){
+        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<TREE_PIXEL_ERROR*.88)continue;
+        const data=instances[variant],batch=groundBatches[variant];
+        for(let i=0;i<data.length;i+=8){
+          const key=id+':'+variant+':'+i,error=groundCoverError(data[i],data[i+1],data[i+2],data[i+3],data[i+4],camera);
+          // Hysteresis retains small visible props a little longer; an omitted
+          // prop never exceeds the three-pixel geometric extent threshold.
+          if(!groundCoverVisible(error,previousGround.has(key)))continue;
+          groundNow.add(key);batch.data.push(...data.subarray(i,i+8));batch.count++;
+        }
+      }
+    }
+    previousGround.clear();for(const key of groundNow)previousGround.add(key);
+    for(let variant=0;variant<groundBatches.length;variant++){
+      const batch=groundBatches[variant];if(!batch.count)continue;
+      if(batch.count>batch.capacity){
+        batch.buffer?.destroy();batch.capacity=Math.min(groundPatches.length*(GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch),Math.max(batch.count,Math.ceil(batch.capacity*1.5),32));
+        batch.buffer=device.createBuffer({size:batch.capacity*32,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST,label:batch.label});
+      }
+      device.queue.writeBuffer(batch.buffer,0,new Float32Array(batch.data));
+      groundStats[variant<2?'rocks':'grass']+=batch.count;groundStats.triangles+=batch.count*groundMeshes[variant].count/3;
+    }
   }
   const lightPipe=await computePipe(TERRAIN_LIGHT,'island sunlight');
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
@@ -13158,9 +13585,12 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const opaqueResources=resources.filter(([binding])=>binding!==10);
   const leafResources=resources.filter(([binding])=>binding!==9&&binding!==11);
   const groups=[bind(terrainPipe,opaqueResources),bind(opaqueTreePipe,opaqueResources),bind(treePipe,leafResources)];
+  const groundGroup=bind(groundPipe,opaqueResources);
   const cloudGroups=[terrainPipe,opaqueTreePipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
   const submerged=waterOptics?await waterOptics.capture({source:TERRAIN,pipeline:terrainPipe,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}):null;
   const submergedGroup=submerged?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource}))),submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
+  const submergedGround=waterOptics?await waterOptics.capture({source:TERRAIN,pipeline:groundPipe,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}):null;
+  const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
   let tick=0;
@@ -13168,7 +13598,8 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     waterGroup:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:uniform}},{binding:1,resource:elevation.createView()}]}),
     triangles:mesh.indices.length/3,trees:trees.length/8,forestPatches:forestPatches.length,
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
-    lodStats,
+    lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),
+    prepare:updateTrees,
     height:(x,z)=>terrainSample(heights,x,z),
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z),
@@ -13179,11 +13610,23 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     drawSubmerged(pass){
       if(!submerged||!submergedCount)return;
       submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);
+      if(submergedGround){
+        submergedGround.bind(pass);pass.setBindGroup(0,submergedGroundGroup);
+        for(let i=0;i<groundBatches.length;i++)if(groundBatches[i].count){
+          pass.setVertexBuffer(0,groundMeshes[i].buffer);pass.setVertexBuffer(1,groundBatches[i].buffer);pass.draw(groundMeshes[i].count,groundBatches[i].count);
+        }
+      }
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
       updateTrees(camera,viewProjection);
       pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
       pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
+      // Opaque ground props have no cutout/depth reconstruction and no cloud
+      // ray march per blade. They remain in Apple's opaque visibility path.
+      pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
+      for(let i=0;i<groundBatches.length;i++)if(groundBatches[i].count){
+        pass.setVertexBuffer(0,groundMeshes[i].buffer);pass.setVertexBuffer(1,groundBatches[i].buffer);pass.draw(groundMeshes[i].count,groundBatches[i].count);
+      }
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
@@ -13266,7 +13709,7 @@ function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPositio
 // normal rendering retains its single compute pass and samples only frame time.
 const GPU_PASS_NAMES = [
   'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
-  'Submerged geometry', 'Ocean + sky', 'Water reflection filter', 'Ship + spray',
+  'Submerged geometry', 'Ocean + sky', 'Water reflection filter', 'Ship + spray', 'Underwater medium',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];
@@ -14434,6 +14877,8 @@ async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,
 
 
 
+
+
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -14696,7 +15141,7 @@ async function main() {
   const MSAA = 4;
   const HDR = 'rgba16float';
   const [oceanMod, skyMod, downMod, upMod, compMod] = await Promise.all([
-    shader(createOpticalOcean(LAND_STAGE?COASTAL_WATER:'',OCEAN_DEPTH,true), 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
+    shader(createOpticalOcean(LAND_STAGE?COASTAL_WATER:'',OCEAN_DEPTH,true,true), 'ocean'), shader(SKY_BG, 'sky'), shader(BLOOM_DOWN, 'bloom down'),
     shader(BLOOM_UP, 'bloom up'), shader(COMPOSITE, 'composite'),
   ]);
   const oceanPipe = await device.createRenderPipelineAsync({
@@ -14861,8 +15306,8 @@ async function main() {
   const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
 
-  // Water height under the camera (async readback, a few frames of latency) so the
-  // floating camera rides above passing crests instead of clipping into them.
+  // Water height under the inspection camera; optics use it as a coarse host
+  // scheduling hint. The inspection camera may cross the surface freely.
   const probePipe=await computePipe(SCENE_HEIGHT_PROBE,'height probe');
   let waterH=0;
   for(const vessel of vessels){
@@ -14917,6 +15362,8 @@ async function main() {
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
   let submergedColor,submergedDepth,oceanOpticsGroup;
   const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
+  const underwaterMedium=await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
+    derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA});
   const opticsEmptyLayout=device.createBindGroupLayout({entries:[]});
   const opticsEmptyGroup=device.createBindGroup({layout:opticsEmptyLayout,entries:[]});
   const submergedPass={label:'Submerged geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
@@ -14930,7 +15377,7 @@ async function main() {
     colorAttachments: [{ view: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
     timestampWrites: undefined,
   };
-  let bloomLevels = 0, bloomPasses = [], bgComp = null;
+  let bloomLevels = 0, bloomPasses = [], bgComp = null,bgCompUnderwater=null;
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -14948,7 +15395,8 @@ async function main() {
     submergedPass.colorAttachments[0].view=submergedColor.createView();
     submergedPass.depthStencilAttachment.view=submergedDepth.createView();
     oceanOpticsGroup=device.createBindGroup({label:'water transmission',layout:oceanPipe.getBindGroupLayout(3),entries:[
-      {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}}]});
+      {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}},
+      {binding:3,resource:{buffer:vessels[0].probe.output}}]});
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
@@ -14971,6 +15419,7 @@ async function main() {
     mainPass.colorAttachments[0].view = colorMS.createView();
     mainPass.depthStencilAttachment.view = depthMS.createView();
     hdrView = hdrTex.createView();
+    const mediumView=underwaterMedium.resize({width:W,height:H,hdrView,depthView:depthMS.createView(),submergedView:submergedColor.createView()});
     waterView = waterCopy.createView({baseMipLevel:0,mipLevelCount:1});
     const bv = [];
     for (let m = 0; m < bloomLevels; m++) bv.push(bloomTex.createView({ baseMipLevel: m, mipLevelCount: 1 }));
@@ -14985,6 +15434,7 @@ async function main() {
         pipeline: downPipe,
         timingName: `Bloom down ${m}`,
         bindGroup: bg(downPipe, [m === 0 ? hdrView : bv[m - 1], linSamp, { buffer: bloomUBOs[m] }]),
+        underwaterBindGroup:m===0?bg(downPipe,[mediumView,linSamp,{buffer:bloomUBOs[m]}]):null,
         descriptor: { colorAttachments: [{ view: bv[m], clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] },
       });
     }
@@ -15001,6 +15451,7 @@ async function main() {
       });
     }
     bgComp = bg(compPipe, [hdrView, bv[0], linSamp, { buffer: compUBO }]);
+    bgCompUnderwater=bg(compPipe,[mediumView,bv[0],linSamp,{buffer:compUBO}]);
   }
 
   // --------------------------------------------------------------------------------------
@@ -15066,7 +15517,7 @@ async function main() {
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye',SHIP_ID==='victory'?shipAsset.model.nodes['helm.camera'].position[1]*shipAsset.model.designFrame.verticalScale:HELM_EYE_HEIGHT,1,25),
     provisionDays:param('provisionDays',DEFAULT_PROVISION_DAYS,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
-    x: cam.x, z: cam.z, rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
+    x:param('boatX',cam.x,-1e7,1e7),z:param('boatZ',cam.z,-1e7,1e7),rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,
     heave: 0, pitch: 0, roll: 0, revision: 0, target: { heave: 0, pitch: 0, roll: 0 },
     waveSlopeX: 0, waveSlopeZ: 0, waveSampleTime: -1, waveRevision: -1,
   };
@@ -15097,7 +15548,10 @@ async function main() {
   const dolphinVessels=[boat,companion],dolphinPlayer=[boat];
 
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',57.3,-360,360)*D2R,
-    elevation:param('orbitElevation',14.3,3.5,72)*D2R, distance:param('orbitDistance',SHIP_ID==='victory'?65:32,10,120),fleet:qs.get('fleetView')==='1',wildlife:qs.get('dolphinView')==='1',fleetZoom:1 };
+    elevation:param('orbitElevation',14.3,-ORBIT_LIMIT/D2R,ORBIT_LIMIT/D2R)*D2R,
+    distance:param('orbitDistance',SHIP_ID==='victory'?65:32,1,600),
+    panX:param('orbitPanX',0,-10000,10000),panY:param('orbitPanY',0,-10000,10000),panZ:param('orbitPanZ',0,-10000,10000),
+    fleet:qs.get('fleetView')==='1',wildlife:qs.get('dolphinView')==='1',fleetZoom:1,radius:32 };
   const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
   const keys = Object.create(null);
@@ -15115,27 +15569,42 @@ async function main() {
   function turnView(dx,dy) {
     if(cameraMode === 'ship') {
       shipOrbit.yaw -= dx * 0.005;
-      shipOrbit.elevation = Math.max(0.06,Math.min(1.25,shipOrbit.elevation+dy*0.004));
+      shipOrbit.elevation = orbitElevation(shipOrbit.elevation+dy*0.004);
     } else {
       cam.yaw += dx * 0.0022;
       cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - dy * 0.0022));
     }
   }
-  let touchLook=null;
+  const lookPointers=new Map();
+  const panView=(dx,dy)=>panOrbit(shipOrbit,dx,dy,shipOrbit.radius,cam.fovY,canvas.clientHeight);
   canvas.addEventListener('pointerdown',e=>{
-    if(e.defaultPrevented||touchLook||![0,2].includes(e.button))return;
-    e.preventDefault();touchLook={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);
+    if(e.defaultPrevented||lookPointers.size>=2||![0,2].includes(e.button))return;
+    if(lookPointers.size&&e.pointerType!=='touch')return;
+    e.preventDefault();lookPointers.set(e.pointerId,{x:e.clientX,y:e.clientY,pan:e.button===2||e.shiftKey});canvas.setPointerCapture(e.pointerId);
     document.body.classList.add('has-looked');
   });
   canvas.addEventListener('pointermove',e=>{
-    if(touchLook?.id!==e.pointerId)return;
-    turnView(e.clientX-touchLook.x,e.clientY-touchLook.y);touchLook.x=e.clientX;touchLook.y=e.clientY;
+    const pointer=lookPointers.get(e.pointerId);if(!pointer)return;
+    const dx=e.clientX-pointer.x,dy=e.clientY-pointer.y;
+    if(cameraMode==='ship'&&lookPointers.size===2){
+      const other=[...lookPointers.entries()].find(([id])=>id!==e.pointerId)[1];
+      const before=Math.hypot(pointer.x-other.x,pointer.y-other.y);
+      const after=Math.hypot(e.clientX-other.x,e.clientY-other.y);
+      panView(dx*.5,dy*.5);
+      if(before>8&&after>8){
+        const ratio=before/after;
+        if(shipOrbit.fleet||shipOrbit.wildlife)shipOrbit.fleetZoom=Math.max(.1,Math.min(6,shipOrbit.fleetZoom*ratio));
+        else shipOrbit.distance=orbitDistance(shipOrbit.distance*ratio);
+      }
+    }else if(cameraMode==='ship'&&(pointer.pan||e.shiftKey))panView(dx,dy);
+    else turnView(dx,dy);
+    pointer.x=e.clientX;pointer.y=e.clientY;
   });
-  const releaseTouch=e=>{if(touchLook?.id===e.pointerId)touchLook=null;};
+  const releaseTouch=e=>lookPointers.delete(e.pointerId);
   canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',releaseTouch);canvas.addEventListener('lostpointercapture',releaseTouch);
   canvas.addEventListener('wheel', (e) => {
-    if(cameraMode === 'ship'&&(shipOrbit.fleet||shipOrbit.wildlife))shipOrbit.fleetZoom=Math.max(.5,Math.min(3,shipOrbit.fleetZoom*(e.deltaY<0?.9:1/.9)));
-    else if(cameraMode === 'ship') shipOrbit.distance=Math.max(10,Math.min(120,shipOrbit.distance*(e.deltaY<0?0.9:1/0.9)));
+    if(cameraMode === 'ship'&&(shipOrbit.fleet||shipOrbit.wildlife))shipOrbit.fleetZoom=Math.max(.1,Math.min(6,shipOrbit.fleetZoom*(e.deltaY<0?.9:1/.9)));
+    else if(cameraMode === 'ship') shipOrbit.distance=orbitDistance(shipOrbit.distance*(e.deltaY<0?0.9:1/0.9));
     else cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
   }, { passive: true });
 
@@ -15168,12 +15637,9 @@ async function main() {
       const halfFov=Math.atan(Math.tan(cam.fovY*.5)*Math.min(1,W/H));
       const fit=wildlife?(wildlifeRadius+4)/Math.sin(halfFov)*1.1:fleet?(Math.hypot(boat.x-companion.x,boat.z-companion.z)*.5+boat.length)/Math.sin(halfFov)*1.1:0;
       const radius=fleet||wildlife?fit*shipOrbit.fleetZoom:shipOrbit.distance * Math.max(0.7,Math.sqrt(boat.length/DEFAULT_BOAT_LENGTH));
-      const horizontal=radius*Math.cos(shipOrbit.elevation);
-      cam.x=centreX+Math.sin(shipOrbit.yaw)*horizontal;
-      cam.z=centreZ+Math.cos(shipOrbit.yaw)*horizontal;
-      cam.y=(wildlife?(shipOrbit.marine?2:.25):4*vesselVerticalScale(boat))+radius*Math.sin(shipOrbit.elevation);
-      cam.yaw=Math.atan2(centreX-cam.x,cam.z-centreZ);
-      cam.pitch=-shipOrbit.elevation;
+      shipOrbit.radius=radius;
+      placeOrbitCamera(cam,shipOrbit,centreX,wildlife?(shipOrbit.marine?2:.25):boat.heave+4*vesselVerticalScale(boat),centreZ,radius);
+      if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+.35);
       return;
     }
     const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
@@ -15187,10 +15653,8 @@ async function main() {
     const boost = keys.ShiftLeft || keys.ShiftRight ? 5 : 1;
     const v = cam.speed * boost * dt;
     cam.x += mx * v; cam.y += my * v; cam.z += mz * v;
-    cam.y = Math.max(1.0, Math.min(3000, cam.y));
-    // keep clear of the actual (displaced) water surface under the camera
-    if (cam.y < waterH + 0.9) cam.y += (waterH + 0.9 - cam.y) * Math.min(1, dt * 12);
-    if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+2);
+    cam.y = Math.max(-500, Math.min(3000, cam.y));
+    if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+.35);
   }
 
   // --------------------------------------------------------------------------------------
@@ -15324,6 +15788,7 @@ async function main() {
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
     device.queue.writeBuffer(frameUBO, 0, f);
     opticsData[0]=P.turbidity;opticsData[1]=qs.get('waterOptics')==='0'?0:1;
+    opticsData[2]=waterH;opticsData[3]=1;
     device.queue.writeBuffer(opticsUBO,0,opticsData);
   }
 
@@ -15400,6 +15865,11 @@ async function main() {
   }
   const fleetViewButton=document.createElement('button');fleetViewButton.textContent='View both ships';fleetViewButton.id='view-fleet';fleetViewButton.disabled=!followerEnabled;
   fleetViewButton.onclick=()=>{setCameraMode('ship');shipOrbit.fleet=true;shipOrbit.wildlife=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.31;setCameraOpen(false);};cameraBody.append(fleetViewButton);
+  const recenterView=document.createElement('button');recenterView.textContent='Centre inspection view';
+  recenterView.onclick=()=>{shipOrbit.panX=shipOrbit.panY=shipOrbit.panZ=0;setCameraOpen(false);};cameraBody.append(recenterView);
+  const cameraHint=document.createElement('p');cameraHint.className='help';
+  cameraHint.textContent='View ship: drag to orbit; right-drag or Shift-drag to pan; wheel to zoom. Touch: two fingers pan and pinch to zoom. Orbit below the surface to inspect underwater.';
+  cameraBody.append(cameraHint);
   const seaSettingsButton = controlIcon(document.createElement('button'),'weather','Sea settings');
   seaSettingsButton.setAttribute('aria-controls', 'panel');
   seaSettingsButton.setAttribute('aria-expanded', 'false');
@@ -15475,7 +15945,7 @@ async function main() {
   const shareStatus = document.createElement('span'); shareStatus.setAttribute('role', 'status');
   sharePanel.append(shareInput, closeShare, shareStatus);
   shareButton.onclick = async () => {
-    const url = createShareLink(location.href, P, boat, cameraMode);
+    const url = createShareLink(location.href, P, boat, cameraMode,{cam,orbit:shipOrbit});
     setPanelOpen(false);setBoatOpen(false);setCaptainOpen(false);setCameraOpen(false);landfallUI.close();
     setShareOpen(true); shareInput.value = url;
     // Also leave a shareable address in the browser if clipboard access is unavailable.
@@ -15902,6 +16372,10 @@ async function main() {
     device.queue.writeBuffer(simUBO, 0, simF);
     writeFoamUniforms(dt);
     selectAll();
+    // A conservative band schedules the optional pass. Its shaders use the
+    // current GPU eye-height probe, so crests switch the interface without a
+    // CPU readback delay. High aerial views pay no additional render pass.
+    const cameraMediumBand=cam.y<waterH+HB+2;
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 
     const enc = device.createCommandEncoder();
@@ -15929,11 +16403,14 @@ async function main() {
     for(const v of vessels){
       const ship=v.boat,p=v.probe;
       p.requested=!p.pending&&(v.id==='player'?(ship.showProw||ship.enabled||(frameIndex&7)===0):followerEnabled);
-      if(!p.requested)continue;
-      p.length=ship.length;p.beam=ship.beam;p.revision=ship.revision;p.time=simTime;
-      p.values[0]=ship.heading*D2R;p.values[1]=ship.length;p.values[2]=ship.beam;
-      p.values[4]=ship.x;p.values[5]=ship.heave;p.values[6]=ship.z;
-      device.queue.writeBuffer(p.uniform,0,p.values);cp.setPipeline(probePipe);cp.setBindGroup(0,p.groups[wakeIndex()]);cp.dispatchWorkgroups(1);
+      if(!p.requested&&!(v.id==='player'&&cameraMediumBand))continue;
+      if(p.requested){
+        p.length=ship.length;p.beam=ship.beam;p.revision=ship.revision;p.time=simTime;
+        p.values[0]=ship.heading*D2R;p.values[1]=ship.length;p.values[2]=ship.beam;
+        p.values[4]=ship.x;p.values[5]=ship.heave;p.values[6]=ship.z;
+        device.queue.writeBuffer(p.uniform,0,p.values);
+      }
+      cp.setPipeline(probePipe);cp.setBindGroup(0,p.groups[wakeIndex()]);cp.dispatchWorkgroups(1);
     }
     if(profiler.detailed){cp.end();cp=enc.beginComputePass({timestampWrites:profiler.writes('Sky + clouds')});}
     // This LUT depends only on sun elevation, haze and effective camera altitude.
@@ -15973,6 +16450,9 @@ async function main() {
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
     for(const [i,v] of vessels.entries())v.shadows.encode(enc,profiler,v.crew?.drawShadow,i?'Companion ':'');
+    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,
+      tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
+    terrain?.prepare(terrainCamera,frameF);
     submergedPass.timestampWrites=profiler.writes('Submerged geometry');
     const underwater=enc.beginRenderPass(submergedPass);
     terrain?.drawSubmerged(underwater);
@@ -15985,10 +16465,9 @@ async function main() {
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     mainPass.timestampWrites=profiler.writes('Ocean + sky');
     mainPass.colorAttachments[0].storeOp = drawProw||gunTransparent ? 'store' : 'discard';
-    mainPass.depthStencilAttachment.depthStoreOp = drawProw||gunTransparent ? 'store' : 'discard';
+    mainPass.depthStencilAttachment.depthStoreOp = drawProw||gunTransparent||cameraMediumBand ? 'store' : 'discard';
     const rp = enc.beginRenderPass(mainPass);
-    terrain?.draw(rp,{x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,
-      tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)},frameF);
+    terrain?.draw(rp,terrainCamera,frameF);
     if (nodeCount) {
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
@@ -16024,7 +16503,7 @@ async function main() {
         timestampWrites:profiler.writes('Ship + spray'),
         colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: hdrView,
           loadOp: 'load', storeOp: gunTransparent?'store':'discard' }],
-        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: gunTransparent?'store':'discard' },
+        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: gunTransparent||cameraMediumBand?'store':'discard' },
       });
       for(const v of vessels){
         if(!v.boat.showProw)continue;
@@ -16039,16 +16518,17 @@ async function main() {
 
     if(gunTransparent){
       gunEffects.resolveDepth(enc,depthMS.createView(),W,H);
-      const effects=enc.beginRenderPass({colorAttachments:[{view:mainPass.colorAttachments[0].view,resolveTarget:hdrView,loadOp:'load',storeOp:'discard'}],depthStencilAttachment:{view:depthMS.createView(),depthLoadOp:'load',depthStoreOp:'discard'}});
+      const effects=enc.beginRenderPass({colorAttachments:[{view:mainPass.colorAttachments[0].view,resolveTarget:hdrView,loadOp:'load',storeOp:'discard'}],depthStencilAttachment:{view:depthMS.createView(),depthLoadOp:'load',depthStoreOp:cameraMediumBand?'store':'discard'}});
       gunEffects.draw(effects);weatherRenderer.draw(effects);effects.end();
     }
 
+    underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
     if (P.bloom > 0) {
-      for (const { descriptor, pipeline, bindGroup, timingName } of bloomPasses) {
+      for (const { descriptor, pipeline, bindGroup, underwaterBindGroup, timingName } of bloomPasses) {
         descriptor.timestampWrites=profiler.writes(timingName);
         const p = enc.beginRenderPass(descriptor);
         p.setPipeline(pipeline);
-        p.setBindGroup(0, bindGroup);
+        p.setBindGroup(0, cameraMediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);
         p.draw(3);
         p.end();
       }
@@ -16063,7 +16543,7 @@ async function main() {
     compPass.timestampWrites=profiler.writes('Composite');
     const pc = enc.beginRenderPass(compPass);
     pc.setPipeline(compPipe);
-    pc.setBindGroup(0, bgComp);
+    pc.setBindGroup(0, cameraMediumBand?bgCompUnderwater:bgComp);
     pc.draw(3);
     pc.end();
 

@@ -11,6 +11,15 @@ fn waterFresnel(c:f32)->f32 {
   let parallel=(WATER_REFRACTIVE_INDEX*cosine-transmitted)/(WATER_REFRACTIVE_INDEX*cosine+transmitted);
   return clamp(.5*(perpendicular*perpendicular+parallel*parallel),0.0,1.0);
 }
+fn waterInteriorFresnel(c:f32)->f32 {
+  let cosine=clamp(c,0.0,1.0);
+  let sineSquared=WATER_REFRACTIVE_INDEX*WATER_REFRACTIVE_INDEX*(1.0-cosine*cosine);
+  if(sineSquared>=1.0){return 1.0;}
+  let transmitted=sqrt(max(0.0,1.0-sineSquared));
+  let perpendicular=(WATER_REFRACTIVE_INDEX*cosine-transmitted)/max(WATER_REFRACTIVE_INDEX*cosine+transmitted,.000001);
+  let parallel=(cosine-WATER_REFRACTIVE_INDEX*transmitted)/max(cosine+WATER_REFRACTIVE_INDEX*transmitted,.000001);
+  return clamp(.5*(perpendicular*perpendicular+parallel*parallel),0.0,1.0);
+}
 fn waterTransmittance(path:f32,turbidity:f32)->vec3f {
   let extinction=vec3f(.20,.065,.035)+max(turbidity,0.0)*vec3f(.11,.095,.085);
   return exp(-extinction*max(path,0.0));
@@ -70,8 +79,8 @@ fn waterTraceSource(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,star
   hit.path=clamp((hit.source.a-surfaceDepth)/alongForward,0.0,500.0);hit.valid=1.0;return hit;
 }
 fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
-  // The camera is kept in air by the scene. A crest's visible front face may
-  // nevertheless rise above eye level and must retain its transmission.
+  // This path observes the interface from air. Underwater scene variants use
+  // the interior dielectric branch; a crest can still rise above an air eye.
   if(optics.y<.5){return body;}
   let forward=normalize(F.camFwd.xyz);
   let surfaceDepth=dot(world-F.camPos.xyz,forward);

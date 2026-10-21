@@ -30,6 +30,90 @@ export function seedVegetation(region,sampleHeight,mask){
   }
   return new Float32Array(out);
 }
+// Authored local ground cover. Region-resident patch bounds are cheap; exact
+// roots are expanded lazily only after frustum and projected-extent culling.
+export const GROUND_COVER=Object.freeze({patchSpan:64,grassPerPatch:32,rocksPerPatch:3,variants:4,maxExtent:5.1});
+export function createGroundCoverPatches(region,sampleHeight){
+  const span=GROUND_COVER.patchSpan,count=Math.ceil(region.span/span),patches=[];
+  for(let j=0;j<count;j++)for(let i=0;i<count;i++){
+    const x=region.x-region.span*.5+i*span,z=region.z-region.span*.5+j*span;let low=Infinity,high=-Infinity;
+    // Patches align with the elevation lattice. Include every height vertex;
+    // triangle interiors cannot leave their vertex height range.
+    const divisions=Math.max(1,Math.ceil(span/(region.span/(region.size-1))));
+    for(let v=0;v<=divisions;v++)for(let u=0;u<=divisions;u++){
+      const h=sampleHeight(x+span*u/divisions,z+span*v/divisions);low=Math.min(low,h);high=Math.max(high,h);
+    }
+    if(high<1||low>855)continue;
+    const id=patches.length,r=GROUND_COVER.maxExtent;
+    patches.push({id,seed:(region.vegetationSeed??47231)^Math.imul(i+1,73856093)^Math.imul(j+1,19349663),x,z,ids:[id],
+      centre:[x+span*.5,(low+high)*.5,z+span*.5],radius:Math.hypot(span*.5+r,(high-low)*.5+r,span*.5+r),instances:null});
+  }
+  return patches;
+}
+export function groundCoverInstances(patch,region,sampleHeight,mask){
+  if(patch.instances)return patch.instances;
+  const rand=random(patch.seed),groups=[[],[],[],[]],span=GROUND_COVER.patchSpan;
+  for(let i=0;i<GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;i++){
+    const grass=i>=GROUND_COVER.rocksPerPatch,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
+    const x=patch.x+u*span,z=patch.z+v*span,h=sampleHeight(x,z);
+    if(h<5||h>855)continue;
+    const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
+    const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
+    if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;
+    const variant=(grass?2:0)+(seed>.5?1:0),radius=grass?.7+size*1.1:.55+size*1.9,height=grass?.28+tall*.52:.4+tall*1.7;
+    groups[variant].push(x,h,z,radius,height,seed,sx,sz);
+  }
+  patch.instances=groups.map(data=>new Float32Array(data));return patch.instances;
+}
+// A whole prop may disappear only when its conservative projected geometric
+// extent is below the same actual-pixel target as trees. Rigid slope alignment
+// preserves radius; 20% covers the small grass wind bend. No fixed metre LOD.
+export function projectedGroundExtent(x,y,z,extent,camera,margin=0){
+  const f=camera.forward,length=f?Math.hypot(f[0],f[1],f[2]):0;
+  if(!(camera.screenHeight>0&&camera.tanHalfFovY>0&&length>0))return Infinity;
+  const dx=x-camera.x,dy=y-camera.y,dz=z-camera.z,depth=(dx*f[0]+dy*f[1]+dz*f[2])/length;
+  const near=depth-extent-margin;
+  if(near<=extent)return Infinity;
+  const lateral=Math.sqrt(Math.max(0,dx*dx+dy*dy+dz*dz-depth*depth))+extent+margin;
+  return camera.screenHeight/(2*camera.tanHalfFovY)*extent*Math.sqrt(1+(lateral/near)**2)/(near-extent);
+}
+export function groundCoverError(x,y,z,radius,height,camera){
+  return projectedGroundExtent(x,y,z,Math.hypot(radius*Math.SQRT2,height)*1.2,camera);
+}
+export function groundCoverVisible(error,wasVisible=false){
+  return !Number.isFinite(error)||error>=TREE_PIXEL_ERROR*(wasVisible?.88:1);
+}
+const groundGeometryCache=new Map();
+export function groundCoverGeometry(variant=0){
+  const key=variant%GROUND_COVER.variants;if(groundGeometryCache.has(key))return groundGeometryCache.get(key);
+  const rand=random(18491+key*7919),out=[];
+  const triangle=(a,b,c,kind,shade)=>{
+    let n=treeNormal(treeCross(b.map((v,k)=>v-a[k]),c.map((v,k)=>v-a[k])));
+    if(kind===6&&n.reduce((sum,v,k)=>sum+v*((a[k]+b[k]+c[k])/3-(k===1?.3:0)),0)<0){[b,c]=[c,b];n=n.map(v=>-v);}
+    for(const p of[a,b,c])out.push(...p,...n,kind,shade,0,0);
+  };
+  if(key<2){
+    const sides=8,phase=rand()*Math.PI*2,rings=[-.18,.26,.74].map((y,j)=>Array.from({length:sides},(_,i)=>{
+      const a=phase+i*Math.PI*2/sides,r=(j===0?.62:j===1?1:.62)*(.84+rand()*.16);
+      return[Math.cos(a)*r,y+(rand()-.5)*.16,Math.sin(a)*r];
+    })),top=[(rand()-.5)*.18,1,(rand()-.5)*.18],bottom=[0,-.2,0];
+    for(let i=0;i<sides;i++){const next=(i+1)%sides,shade=.5+rand()*.4;
+      triangle(bottom,rings[0][next],rings[0][i],6,shade);
+      for(let j=0;j<2;j++){triangle(rings[j][i],rings[j][next],rings[j+1][i],6,shade);triangle(rings[j][next],rings[j+1][next],rings[j+1][i],6,shade);}
+      triangle(rings[2][i],rings[2][next],top,6,shade);
+    }
+  }else{
+    // Bent opaque ribbons have real geometry and no alpha-card overdraw.
+    for(let blade=0;blade<18;blade++){
+      const angle=rand()*Math.PI*2,r=Math.sqrt(rand())*.76,x=Math.cos(angle)*r,z=Math.sin(angle)*r,turn=rand()*Math.PI*2,h=.4+rand()*.6,width=.025+rand()*.025;
+      const right=[Math.cos(turn)*width,0,Math.sin(turn)*width],bend=[-Math.sin(turn)*.22,0,Math.cos(turn)*.22],rows=[0,.48,.82].map(t=>[-1,1].map(side=>[x+right[0]*side*(1-t*.7)+bend[0]*t*t,h*t,z+right[2]*side*(1-t*.7)+bend[2]*t*t]));
+      const tip=[x+bend[0],h,z+bend[2]],shade=.45+rand()*.5;
+      for(let j=0;j<2;j++){triangle(rows[j][0],rows[j][1],rows[j+1][0],7,shade);triangle(rows[j][1],rows[j+1][1],rows[j+1][0],7,shade);}
+      triangle(rows[2][0],rows[2][1],tip,7,shade);
+    }
+  }
+  const geometry=new Float32Array(out);groundGeometryCache.set(key,geometry);return geometry;
+}
 const treeNormal=p=>{const l=Math.hypot(...p)||1;return p.map(x=>x/l);};
 const treeCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const treeAdd=(a,b,t=1)=>a.map((v,i)=>v+b[i]*t);

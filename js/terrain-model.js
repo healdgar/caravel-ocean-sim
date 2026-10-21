@@ -27,6 +27,15 @@ export function terrainSample(heights,x,z,region=ISLAND){
   const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*n+i;
   return (heights[k]*(1-a)+heights[k+1]*a)*(1-b)+(heights[k+n]*(1-a)+heights[k+n+1]*a)*b;
 }
+// Ground props rest on the rendered triangle, not the bilinear surface between
+// four elevations (which can float above a diagonal on steep coastal ground).
+export function terrainSurfaceSample(heights,x,z,region=ISLAND){
+  const n=region.size,s=(n-1)/region.span,u=(x-region.x+region.span/2)*s,v=(z-region.z+region.span/2)*s;
+  if(u<0||v<0||u>=n-1||v>=n-1)return -120;
+  const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*n+i;
+  return a+b<=1?heights[k]+a*(heights[k+1]-heights[k])+b*(heights[k+n]-heights[k]):
+    heights[k+n+1]+(1-a)*(heights[k+n]-heights[k+n+1])+(1-b)*(heights[k+1]-heights[k+n+1]);
+}
 export function islandGeometry(heights){
   const n=ISLAND.size,step=ISLAND.span/(n-1),vertices=new Float32Array(n*n*8),indices=[],submergedIndices=[];
   for(let j=0;j<n;j++)for(let i=0;i<n;i++){

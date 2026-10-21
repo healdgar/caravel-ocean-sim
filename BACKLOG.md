@@ -469,7 +469,11 @@ infinite height; an older test explicitly required that wrong above-rail mask.
   `shots/deck-boarding-legacy.png`, `shots/deck-boarding-finite.png`.
 - This is prescribed-wave visibility plus bounded thin deck water, not a
   hydraulic overturning, flood-mass or cabin-flooding solver. No physical-iPhone
-  cost qualification. Publication is authorized; deployed bytes pending.
+  cost qualification. Published as `f16d33d20a2bd89a7246b225597a2000d02de7e7`;
+  Pages workflow39643356285 succeeded. At17:26:02UTC, deployed HTML and all53
+  assets matched tested bytes. HTML639533bytes, SHA-256
+  `fc0786da50541b07feeb017542e27153b75ffdc7c24ee9e4655fb3ea9a109783`;
+  assets15875925bytes.
 
 Separate active terrain work: reuse local forestmodeler/furlong woodland assets
 and directional depth reprojection for a terrain-conforming cohesive canopy;
@@ -480,3 +484,73 @@ Cloud views from above remain lower priority. Coastal/isolated-shoal surf must
 use local depth relative to wave height and wavelength; this is required shared
 breaking-water work, not a shoreline colour band. Keep its design separate from
 claims about already implemented runtime.
+
+## Underwater inspection, caustics and close ground detail
+
+- Exterior orbit now spans both sides of the waterline, with a closer zoom and
+  independent focus panning. Right/Shift drag pans; touch supports two-finger pan
+  and pinch. Free inspection also crosses the sea; terrain clearance remains.
+  Captain-view behavior is unchanged. Share links retain exterior angle/range/pan
+  and free-view coordinates.
+- The same displaced sea now has an interior dielectric interface: water-to-air
+  refraction, a Snell window and total internal reflection. A current GPU probe
+  classifies the camera without readback lag. A bounded HDR medium pass before
+  bloom applies spectral extinction and sunlight/sky scattering; captured solid
+  material avoids duplicate air fog and water attenuation. Captured shallow bed
+  can fill ordinary terrain's deliberately omitted submerged triangles.
+- Wave slopes drive a local refracted-light receiver Jacobian for caustics on
+  submerged solids from above/below water. Flat waves do not invent a pattern;
+  solar occlusion, depth and turbidity fade it. This is not multivalued photon
+  tracing, reflected-object reconstruction or full multiple scattering. Runtime
+  Moon lighting is pending the separate astronomy design.
+- Grass clumps and irregular rocks use four shared opaque meshes, deterministic
+  regional patches, triangle-accurate terrain roots, slope-aligned normals and
+  actual-render-pixel omission/hysteresis. Grass bends with wind; cached sunlight
+  avoids ray marching clouds per blade. Ground materials gain filtered meso detail.
+- Focused native optical checks passed: Snell/TIR, actual-wave focusing, negative
+  solar/depth/turbidity controls, one/four-sample depth, raw-solid occlusion,
+  current GPU camera classification, disabled dispatch and resize. Actual desktop
+  and emulated-mobile gestures pass. **420/420 complete production tests PASS**,
+  installed Chrome/native Metal, root serialized,214.6seconds. All three packaged
+  pages are included. Rendered shallow-bed caustics change with actual wave time;
+  proof `shots/caustic-bed-10.png` and `shots/caustic-bed-10.7.png`, no page/GPU
+  errors. An earlier run caught grass/rock pipelines mislabeled as tree wood;
+  their distinct ground-cover label restores the unchanged two-tree-pipeline
+  oracle. The final complete run passes without loosening that oracle.
+  Release/deployment receipt follows publication.
+- Actual1280×800 horizon/approach/coast GPU-completed frame medians with original
+  trees and new ground detail:6.2/6.0/8.9ms, p957.4/7.5/11.1ms, no page/GPU errors.
+  Coast selected252rocks and634grass clumps (69156prop triangles). These short
+  sequential observations are Mac results, not physical-iPhone qualification.
+
+### Held directional woodland prototype
+
+Imported exact leafy colour/normal/RG16-depth banks and reduced wood from local
+Castle and Commons / Forestmodeler, with source hashes and notices. Two banks
+use9MiB uncompressed GPU textures. New modules, intake script, assets and proposed
+tests remain local (fixture in `shots/woodland-next/woodland.test.mjs.txt`);
+**not imported by the production terrain or standalone build**.
+Initial rendered coverage was unacceptable (twig-like fragments/missing crowns),
+and frame medians22.4–28.2ms exceeded the accepted original tree path. No release
+claim follows its CPU receipt/bounds tests. Ray-entry/depth convergence repair,
+matched-source near geometry, below/overhead view coverage and coherent stand
+aggregation still need rendered validation.
+
+Source density review also found the existing full-green placement intensity
+can cover only about38% even under optimistic opaque-disc crowns. Increasing
+global candidates to900k predicts only about70%, with greater overdraw; it is
+not a calibrated closure fix. Next: authored patch closure targets and measured
+source crown footprints, deterministic union/overlap planting, then distant
+volumes derived from those same planted crowns. Do not fill sparse stands with
+an unrelated opaque shell or certify a new asset using old geometry-error tables.
+
+### Subsequent physics and sky work
+
+`BREAKING_WAVES.md` now requires detached-shoal and shoreline surf driven by local
+height/wavelength/depth, not a shoreline foam band. The current authored bed lacks
+intertidal/shoal detail; runtime transport/breaking/swashing remains pending.
+`ASTRO_NAVIGATION.md` specifies historical stars, Moon phase/light and optional
+sextant lessons; the current600second loop cannot serve as its astronomy clock.
+The distant long-crest report is source-confirmed: swell is deliberately narrow
+(spread48). A broader directional spectrum/finite coherence needs a separate
+height/energy-preserving comparison; shortening peak wavelength is not that fix.

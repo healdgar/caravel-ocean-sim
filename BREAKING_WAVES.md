@@ -124,6 +124,105 @@ For beaches, reuse the lifecycle only after a local depth/current/shore response
 exists. A foam-colored depth band does not simulate shoaling. For open sea, keep
 wind-driven spindrift as a child effect; a windless wake may still break.
 
+## Coastal and shoal surf — required scope, not implemented
+
+The requested system includes **surf over submerged shoals as well as surf at
+land**, followed by run-up, retreating water, retained foam and wet ground.
+Breaking must respond to the **local wave height and wavelength relative to
+local depth**. Neither distance from shore, global significant wave height nor
+wind alone can decide where every wave breaks. Shorter steep wavelets riding a
+larger swell remain separate candidates when resolved; do not collapse all
+contacts into the largest swell's crest or its rearm interval.
+
+### Source-proven limitations
+
+- `js/wgsl/terrain.js`, `COASTAL_WATER`: current shore foam is a colour mix from
+  instantaneous water/bed separation, positive surface height and procedural
+  noise. It has no crest identity, incoming wavelength, horizontal water flow,
+  breaking sheet, wet/dry front or backwash. More brightness in that band is not
+  the requested surf.
+- `scripts/prepare-land-imagery.py` and the Saba manifest: wet cells receive
+  `min(120, 2 + .15 * shoreDistance)` metres of authored depth. The minimum wet
+  cell depth is two metres; bilinear interpolation between those cells and land
+  supplies a graphical shoreline, not a resolved beach profile. A monotone
+  distance skirt contains no authored detached offshore bars, reefs or shoals.
+  The current sixteen-metre elevation grid and quarter-metre quantization cannot
+  establish detailed intertidal flow. Preserve the measured land relief and its
+  provenance; introduce explicitly authored or separately sourced shallow beds.
+- `js/wgsl/surface-waves.js`: the shared impulse field has no bed input or
+  horizontal momentum and uses a constant propagation speed. Its boat-centred
+  near/far coverage is not a coastal propagation, shoaling or swash solver.
+- `js/wgsl/spindrift.js`: its fixed-scale ridge shoulders, compression proxy and
+  wind gate are reusable tracking ideas, not a wavelength-aware coastal onset
+  model. Windless incoming surf must work without enabling spindrift.
+
+### Bounded implementation order
+
+1. **One canonical coastal bed.** Add a resident shallow-water tile contract with
+   bed elevation, wet/dry validity and authored/source provenance. Keep the real
+   island landform. Supply controlled beach, steep rock shore and detached shoal
+   fixtures first; do not manufacture shoals from the greenness map. Depth
+   sampling must agree across propagation, rendered water, shoreline contact,
+   underwater visibility and vessel clearance. Refine spatial resolution against
+   the shortest enabled coastal wavelength and bed feature, with convergence
+   checks instead of a universal cell size.
+2. **Incident wave and local transport.** Drive tile boundaries from the same
+   horizontally inverted incident FFT field. Preserve amplitude, phase and
+   propagation direction across the boundary. Add wavelength-aware depth response
+   before labelling it shoaling; a depth-only shallow-water approximation cannot
+   represent every FFT band. Restrict such an approximation to its applicable
+   bands and retain resolved short chop separately. Compose a local correction
+   to the incident surface, not a second complete wave added on top of it.
+3. **Tracked depth-limited fronts.** For each candidate retain crest position,
+   adjacent troughs, crest-to-trough height, local wavelength/direction, depth,
+   steepness, bed gradient and recent propagation history. Multi-scale sampling
+   must distinguish a small steep face from its underlying swell. Use a documented
+   proxy mode until its quantities and onset law are validated. Do not invent a
+   numerical breaking threshold, reuse global `Hs` as local height, or rename a
+   depth ratio as the published `B` criterion. A detached shoal must use the same
+   front lifecycle without a distance-to-land condition.
+4. **Spill, collapse and first return.** Start with one controlled spilling front,
+   then a coherent overturning lip where justified. Reuse generation-tagged
+   connected rows, gravity, total-surface first contact and one return budget.
+   Advect active whitewater and residual foam with the defined local water flow;
+   wind is a secondary drift. Separate burst foam from a permanent shoreline
+   colour. Feedback/dissipation remains explicitly approximate while the global
+   incident FFT is prescribed.
+5. **Swash and backwash.** Maintain finite water depth and horizontal transport
+   over the local bed, with wet/dry positivity and bounded time steps. Water must
+   climb the beach, slow, recede downhill and leave a drying wetness field that
+   the terrain material actually samples. A spray plane above dry ground or a
+   sinusoidal dark shore strip does not satisfy this step. Rocky shores can use
+   contact splash without falsely behaving like gently sloping beaches.
+
+Keep tile work, crest slots and emitted rows bounded; retain world identities
+as the observer moves. Distant landfall may display aggregated whitewater from
+the same active coastal state when individual sheets are subpixel. It must not
+substitute an always-white band or independent, camera-reseeded surf for that
+state. Use the existing sun, shadows, air visibility and water optical path.
+
+### Coastal acceptance fixtures
+
+- The **same incoming wave height, wavelength and phase** over deep water, a
+  gradual shelf and a detached shoal; changes must follow the bed, not shore
+  distance. Repeat with different heights and wavelengths, including a resolved
+  short wave riding a long swell.
+- Calm water over a beach and shoal: no permanent breaker, foam or rising water
+  source. High wind with flat water must not become a surf shortcut. Deep water
+  and a steep but receding/rear face remain negative cases.
+- A shoal outside the shoreline foam band's reach; an oblique incoming front;
+  a sheltered coast; and independently classified steep-rock contact versus
+  shallow-beach spill. Record where current transport/shelter is approximate.
+- Continuous water displacement at tile boundaries, coherent front identity,
+  no duplicate energy/foam injection, once-only sheet absorption, and no expired
+  event resurrected after reset or slot reuse.
+- A crest reaches dry shore, runs up and retreats; retained foam moves with the
+  water and wet ground outlasts it. Wet/dry cells stay finite and nonnegative;
+  no water appears uphill without an incoming volume/transport source.
+- The three existing horizon/approach/coast views, low waterline and overhead
+  views, and changed render resolution/FOV. Measure active work and native GPU
+  cost; physical-iPhone qualification remains separate.
+
 ## Consultation, not validation
 
 Argon consultation relayed during this work suggested smooth hull source/sink

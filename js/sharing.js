@@ -4,6 +4,7 @@ const BOAT_LINK_KEYS = {
   speed: 'boatSpeed', eye: 'boatEye', rudderTarget: 'boatRudder',
   sailFore: 'sailFore', sailMain: 'sailMain', sailMizzen: 'sailMizzen',
   provisionDays: 'provisionDays', cargoTonnes: 'cargoTonnes',
+  x:'boatX',z:'boatZ',
 };
 
 export const ROUGH_SEAS = {
@@ -23,7 +24,7 @@ export function propulsionFromLink(search) {
   return 'sail'; // A speed parameter alone must never silently enable powered motion.
 }
 
-export function createShareLink(href, settings, boat, cameraMode) {
+export function createShareLink(href, settings, boat, cameraMode, camera=null) {
   const url = new URL(href);
   url.search = ''; url.hash = '';
   const scene=new URL(href).searchParams;
@@ -33,6 +34,15 @@ export function createShareLink(href, settings, boat, cameraMode) {
   };
   url.searchParams.set('boat', cameraMode === 'boat' ? '1' : '0');
   url.searchParams.set('view', cameraMode);
+  if(cameraMode==='ship'&&camera?.orbit){
+    const orbit=camera.orbit;
+    setNumber('orbitYaw',(orbit.yaw*180/Math.PI-boat.heading)%360);
+    setNumber('orbitElevation',orbit.elevation*180/Math.PI);setNumber('orbitDistance',orbit.distance);
+    for(const axis of ['X','Y','Z'])setNumber('orbitPan'+axis,orbit['pan'+axis]||0);
+  }else if(cameraMode==='free'&&camera?.cam){
+    const c=camera.cam;
+    url.searchParams.set('cam',[c.x,c.y,c.z,c.yaw*180/Math.PI,c.pitch*180/Math.PI].map(n=>Number(n.toFixed(6))).join(','));
+  }
   if(boat.modelId==='victory')url.searchParams.set('ship','victory');
   url.searchParams.set('propulsion', boat.propulsion === 'sail' ? 'sail' : 'manual');
   for (const [key, value] of Object.entries(settings)) setNumber(key, value);

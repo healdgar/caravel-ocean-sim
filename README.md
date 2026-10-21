@@ -6,10 +6,12 @@ A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, im
 
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-The current checkpoint adds denser forest geometry, revised ship wakes and a
-shared surface-disturbance field. **407 tests pass on native Metal**, including
-rendered whale-wave coupling and all three packaged pages. Physical-iPhone
-performance remains unmeasured for this batch; see [the checkpoint log](BACKLOG.md).
+The current checkpoint adds underwater inspection, wave-driven light caustics,
+and terrain-aligned grass and rocks. Earlier changes add finite deck overtopping,
+revised wakes and shared surface disturbances. Validation and release receipts
+are recorded in [the checkpoint log](BACKLOG.md); physical-iPhone performance
+remains unmeasured for this batch.
+The complete production suite passes **420 tests on native Metal**.
 
 ![HMS Victory with tiered square sails](docs/victory.png)
 
@@ -234,7 +236,11 @@ disables flashes. The weather clock never fast-forwards ship physics.
 | Touch-drag the canvas | Look around or orbit in View ship |
 | H | Settings panel: wind, swell, choppiness, turbidity, foam, sun, haze, clouds, exposure, bloom |
 
-The free camera stays above the sampled water. The boat camera follows the hull; rough seas can overtop the gunwales and wash across the deck.
+Free and exterior cameras can cross the waterline. In **View ship**, drag to orbit,
+right-drag or Shift-drag to pan, and use the wheel to zoom close. On touchscreens,
+two fingers pan and pinch zooms. **Centre inspection view** clears the pan.
+Share links retain the inspection position. The boat camera still follows the hull;
+rough seas can overtop the gunwales and wash across the deck.
 
 The default view starts at the helm under **Sailing** propulsion. Heading,
 speed through water and apparent wind stay above the scene; a compact rudder
@@ -403,13 +409,28 @@ than measured local water samples. The resident coastal pack supplies an
 authored shallow seabed, not surveyed bathymetry.
 
 This is a screen-space approximation with one submerged depth layer. Missing or
-off-screen samples fall back to ordinary water shading; underwater cameras,
-multiple refractions and volumetric caustics are not modeled. Atmosphere is
-applied once, between camera and surface. `waterOptics=0` provides a diagnostic
-comparison; profiling includes a separate **Submerged geometry** span.
+off-screen samples fall back to ordinary water shading. Below the surface, the
+same displaced ocean uses water-to-air refraction, a Snell window and total
+internal reflection. A separate HDR pass applies wavelength-dependent extinction
+and bounded sunlight/sky scattering before bloom. Current GPU wave height selects
+the camera's medium; CPU readback does not delay a crest crossing. Captured solid
+radiance avoids applying air fog or the viewing water path twice. Captured seabed
+can fill geometry deliberately omitted from the normal air-side draw.
+
+Short/mid-wave slopes focus and defocus refracted sunlight on submerged solids,
+including those viewed from above water. These moving **caustics** fade with depth,
+turbidity, solar visibility and vessel shadow. They use a bounded local receiver-map
+Jacobian, not animated noise or a complete photon/multiple-scattering solver.
+Underwater reflections approximate the diffuse water body; above-water objects
+are not reconstructed inside the refracted sky window. Profiling includes separate
+**Submerged geometry** and **Underwater medium** spans. `waterOptics=0` disables
+above-water object transmission for diagnostic comparison.
 
 Optical basis: [PBRT refraction and Fresnel](https://www.pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission)
-and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transmittance).
+and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transmittance),
+plus [GPU Gems' water-caustics discussion](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-2-rendering-water-caustics).
+Historical night, Moon phases and celestial-navigation work is specified in
+[ASTRO_NAVIGATION.md](ASTRO_NAVIGATION.md); runtime Moon lighting remains pending.
 
 A separate, bounded marine encounter occasionally introduces a passing shark or
 a 14.1 m sperm whale using the supplied straight Meshy model and its native 18-bone rig. Whale encounters include a full breach,
@@ -507,6 +528,13 @@ metre-scale rock/soil relief adds close detail without blurring the registered
 colour seed. This does not recover missing cliff geometry or high-resolution
 imagery. The projected geometry bounds are measured offline with triangle BVH
 queries and adaptive subdivision; this work does not run in the frame loop.
+
+Deterministic grass clumps and irregular boulders now rest on the actual rendered
+terrain triangles, including steep slopes. Four shared opaque meshes use native
+instancing, regional culling and a three-render-pixel omission threshold. Grass
+bends with wind; cached terrain sunlight avoids cloud ray marching per blade.
+The material adds filtered metre-scale relief between aerial colour and close
+soil/rock grain. These additions do not yet supply a closed distant forest canopy.
 
 ![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
 
@@ -937,7 +965,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
-- Underwater vessel shadows use a bounded local-surface scattering approximation, with authored optical depth and spread. They do not simulate underwater caustics or full multiple scattering.
+- Underwater vessel shadows and wave-driven caustics use bounded optical approximations, with authored water coefficients. Multiple light paths, complete reflected objects and full multiple scattering remain unmodeled.
 
 ## How it was made
 

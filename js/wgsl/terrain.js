@@ -105,6 +105,19 @@ struct LandVertex {
   o.normal=normalize(rotated);o.leafUV=leafUV;
   o.kind=kind;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);return o;
 }
+@vertex fn groundVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
+  @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
+  let angle=shape.y*2.0*PI;let c=cos(angle);let s=sin(angle);
+  let up=normalize(vec3f(-shape.z,1,-shape.w));let right=normalize(vec3f(1,shape.z,0));let front=cross(right,up);
+  let p=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
+  let grass=kind.x>6.5;
+  var sway=vec3f(0);
+  if(grass){let bend=F.windP[0].xy*clamp(F.windP[0].z/12.0,0.0,2.2)*.035*shape.x*position.y*position.y*sin(F.camPos.w*1.8+angle);sway=vec3f(bend.x,0,bend.y);}
+  let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(.001));
+  let n=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
+  var o:LandVertex;o.world=root.xyz+right*p.x+up*p.y+front*p.z+sway;o.normal=normalize(right*n.x+up*n.y+front*n.z);
+  o.kind=kind;o.leafUV=leafUV;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+}
 // The opaque call graph contains neither discard nor a leaf texture fetch.
 // Keep that property for Apple's hidden-surface removal; a runtime branch in
 // one shared cutout fragment would still make solid ground a feedback shader.
@@ -135,6 +148,7 @@ fn landOpaque(in:LandVertex)->vec4f{
   let footprint=max(length(dpdx(world)),length(dpdy(world)));
   let detailFade=1.0-smoothstep(0.25,2.5,footprint);
   let microFade=1.0-smoothstep(0.04,0.5,footprint);
+  let mesoFade=1.0-smoothstep(1.0,8.0,footprint);
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
@@ -146,12 +160,14 @@ fn landOpaque(in:LandVertex)->vec4f{
     let rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
     let vertical=mix(world.zy,world.xy,smoothstep(0.35,0.65,abs(n.z)/(abs(n.x)+abs(n.z)+0.001)));
     let materialUV=mix(world.xz,vertical,rocky);
+    let blocks=gnoise(materialUV*.19)*mesoFade;
     let stone=gnoise(materialUV*0.82)*detailFade;
     let pores=gnoise(materialUV*5.4)*microFade;
     let fissure=(1.0-smoothstep(0.025,0.11,abs(gnoise(materialUV*1.7+vec2f(13.1,7.7)))))*detailFade;
-    albedo=source*(1.0+stone*0.10+pores*0.055-fissure*rocky*0.075);
+    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blocks)))*mesoFade;
+    albedo=source*(1.0+blocks*.14+stone*0.10+pores*0.055-(fissure*.075+coarseFissure*.08)*rocky);
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006);
-    relief=mix(soil,stone*0.14-fissure*0.065,rocky);
+    relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky);
     roughness=clamp(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.65,0.98);
   }else if(!crown){
     let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
@@ -176,6 +192,30 @@ fn landOpaque(in:LandVertex)->vec4f{
 }
 @fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
 @fragment fn opaqueFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
+// The props use local atmosphere and the terrain's cached cloud sunlight. A
+// twelve-step volume integration per grass blade would defeat their budget.
+@fragment fn groundFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
+  let world=in.world;let grass=in.kind.x>6.5;
+  var n=normalize(in.normal);if(grass){n*=select(-1.0,1.0,front);}
+  let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+.5;
+  let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
+  let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0).r;
+  let luminance=dot(source,vec3f(.2126,.7152,.0722));
+  let shade=.72+in.kind.y*.30;
+  let rock=mix(vec3f(luminance)*vec3f(.95,.91,.85),source,.12)*shade;
+  let dry=vec3f(.17,.145,.065);let green=mix(leafMean.rgb,source,.18);
+  let foliage=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
+  let albedo=select(rock,foliage,grass);
+  let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
+  let direct=sunIlluminance()*sunlight;
+  let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
+  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.35,grass);
+  let visibility=select(.35+.28*max(n.y,0.0),.32+in.kind.y*.32,grass);
+  let wet=(1.0-smoothstep(1.0,7.0,world.y))*.5;
+  var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
+  color+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.84);
+  return vec4f(surfaceAir(color,world),1);
+}
 @fragment fn leafFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let world=in.world;var n=normalize(in.normal)*select(-1.0,1.0,front);
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;

@@ -6,6 +6,7 @@ import { SCENE_SHADOW_SAMPLE } from './shadows.js';
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
 import { WATER_TRANSMISSION } from './water-optics.js';
+import { UNDERWATER_INTERFACE, waterCausticFunctions } from './underwater.js';
 
 const RENDER_BINDINGS = /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -335,11 +336,18 @@ export function createCoastalOcean(coast,depthFirst){
 
 // The legacy shader remains available for isolated ocean probes. The scene
 // composes every submerged solid through this shared optical path.
-export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false){
-  const code=oceanSource(coast,surfaceWaves)+WATER_TRANSMISSION;
+export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false){
+  const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
+    'mix(body,hit.source.rgb*waterCausticFactor(waterSourcePosition(hit.uv,hit.source.a),world.y),transmission)');
+  const code=oceanSource(coast,surfaceWaves)+transmission
+    +waterCausticFunctions({surfaceWaves})+UNDERWATER_INTERFACE
+    +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
-      'body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)');
+      `if(${cameraProbe?'F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&F.camPos.y<optics.z-.005'}){
+    return vec4f(underwaterBoundary(in.rel+F.camPos.xyz,nrm,V,skyHemi,foamMask,foamLit),1);
+  }
+  body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)`);
   return depthFirst?optical.replace(OCEAN_HULL_MASK,''):optical;
 }
 

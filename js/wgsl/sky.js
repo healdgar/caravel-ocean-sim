@@ -271,9 +271,8 @@ fn skyAtmo(dir: vec3f) -> vec3f {
 }
 `;
 
-// Clouds + full sky radiance (needs the same bindings as SKY_RENDER_FUNCS).
-export const SKY_CLOUD_FUNCS = CLOUD_SAMPLE + /* wgsl */ `
-
+// Solar disc shared by air and refracted underwater views.
+export const SUN_DISK = /* wgsl */ `
 fn sunDisk(dir: vec3f) -> vec3f {
   let c = dot(dir, F.sunDir.xyz);
   let ang = sqrt(max(2.0 * (1.0 - c), 0.0));
@@ -286,6 +285,10 @@ fn sunDisk(dir: vec3f) -> vec3f {
   let rad = F.sunDir.w / (PI * SUN_ANG_R * SUN_ANG_R);
   return rad * limb * edge * sampleTrans(camR(), max(dir.y, -0.01));
 }
+`;
+
+// Clouds + full sky radiance (needs the same bindings as SKY_RENDER_FUNCS).
+export const SKY_CLOUD_FUNCS = CLOUD_SAMPLE + SUN_DISK + /* wgsl */ `
 
 fn skyRadiance(dirIn: vec3f, withSun: bool) -> vec3f {
   var dir = dirIn;
