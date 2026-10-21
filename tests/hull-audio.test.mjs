@@ -25,12 +25,12 @@ test('hull sound contact summary retains continuous water pressure while accents
   assert.equal(detector.sample(values,2),null,'sea and vessel resets are silent');
 });
 
-test('re-entry classification requires observed exposure, wet return and relative closing',()=>{
+test('waterline exposure never masquerades as underside re-entry',()=>{
   const detector=createImpactDetector(1),values=new Float32Array(16);
   hullAudioRecord(values,0,{wet:0,immersion:-.8});detector.sample(values,1,{draft:3});
   detector.sample(values,1,{draft:3});detector.sample(values,1,{draft:3});
   hullAudioRecord(values,0,{serial:1,strength:2,wet:1,closing:2,immersion:.1});
-  assert.equal(detector.sample(values,1,{draft:3}).kind,'reentry');
+  assert.equal(detector.sample(values,1,{draft:3}).kind,'light');
   hullAudioRecord(values,0,{serial:2,strength:2,wet:1,closing:2,immersion:.2});
   assert.equal(detector.sample(values,1,{draft:3}).kind,'light','persistent immersion does not invent repeated lower-hull landings');
 });
@@ -55,13 +55,18 @@ test('water rushing follows contact and signed speed, works at rest in waves and
   function statefulWash(state){return state.update(NaN,{speed:NaN}).wash;}
 });
 
-test('re-entry retains wash without substituting an unaccepted crash or triggering a light slap',()=>{
+test('a fresh underside return suppresses coincident slaps without inventing crash energy or sound',()=>{
   const state=createHullAudioState();hullAudioAdvance(state,1.1);
-  const action=state.impact({x:0,y:0,z:0,strength:2,kind:'reentry',closing:2,wet:1});
-  assert.equal(action,null,'no louder loop or rejected crash is presented as a bottom impact');
+  const event={x:0,y:0,z:0,kind:'underside-reentry',closing:2,age:.1,probe:0,epoch:1,serial:1};
+  assert.equal(state.underside(event),true,'encounter speed requires no fabricated strength');
+  assert.equal(state.underside(event),false,'the same sampled episode cannot extend its quiet period');
   assert.ok(state.update(.1,{speed:3}).wash>0,'the continuous contact-driven water bed remains');
   assert.equal(state.impact({x:0,y:0,z:0,strength:1,kind:'light',closing:1,wet:1}),null,'the same return cannot fall through to a splash accent');
-  state.reset();assert.equal(state.impact({x:0,y:0,z:0,strength:3,kind:'reentry',closing:3,wet:1}),null);
+  state.reset();assert.equal(state.underside({...event,closing:NaN}),false);
+  assert.equal(state.underside({...event,age:.5}),false,'stalled readbacks cannot replay old returns');
+  assert.equal(state.underside({...event,age:-.1}),false);
+  assert.equal(state.underside({...event,closing:-2}),false,'separating hull and water is not an impact');
+  assert.equal(state.underside({...event,kind:'reentry'}),false,'waterline proxies cannot select the bottom-contact path');
   assert.equal(state.update(0).wash,0);assert.equal(state.impact({x:0,z:0,strength:NaN}),null);
 });
 

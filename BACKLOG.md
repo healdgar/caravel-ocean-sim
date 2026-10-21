@@ -18,7 +18,7 @@ Run: October 20–21, 2026, America/Los_Angeles. Stop starting new work at **08:
 - Last complete native Metal suite: 350 tests passed. A final focused control/crew run passed 7 tests after the last small control changes. Current test count can consequently differ from that earlier full run.
 - Public `docs/index.html` SHA-256: `499368f428c73138c010e0cc2b3b54fed403544fc78fbbe85d104527d6a08af4`.
 - Clean tree verified before overnight work began.
-- Local hourly continuation: `waterworld-overnight-backlog`, bounded to this night; disable when the overnight run ends. Active goal carries the same cutoff.
+- Local hourly continuation: `waterworld-overnight-backlog`, bounded to this night; disable when the overnight run ends. The goal record carries the same cutoff but currently reports blocked; no code/permission blocker remains. Continue under the explicit overnight authorization and heartbeat.
 
 ## Active work
 
@@ -54,7 +54,7 @@ These audits may close with no change when current source already satisfies the 
 - Argon listened directly through agy: calm/stationary mixes improved; replayed-wash re-entry lacked body and pumped. Two new candidates (70credits) and their trimmed versions were rejected; no new audio assets promoted. Re-entry now retains the continuous wash and suppresses the fake extra impact. True underside probes/accepted heavy-crash texture remain pending.
 - Root rendered actual blow and breach sequences on Metal at1000x700, no GPU/page errors; PNG evidence remains under ignored shots/. The final ambient hull mix received Argon KEEP; a heavy-impact texture remains absent.
 - **Held rig prototype:** support-owner/cache changes passed40focusedCPU cases but exposed a17mm main-stay/mizzen intersection in four new mixed-yard poses. Narrowing the pinned-seam ramp to1/26 moved the crossing into triangles touching the sewn luff (segment3; full24mm rope penetration). The full run consequently passed371/372; that prototype is not releasable. Correct support sidedness/wrap geometry together; do not adjust separation tolerances or hide a rope. The complete patch and proposed CPU regression are preserved locally under ignored `shots/lateen-support-work/`. Those runtime changes and extra fixtures have been removed from the release batch pending a coherent correction. The existing operating rig is unchanged.
-- **Release batch01 gate passed:** rebuilt all standalone pages; complete native Metal suite368/368 passed in187.9s, serialized by root. Public deployment/read-back still pending at this checkpoint. No new audio asset bytes entered the release.
+- **Published batch01:** `5d4f210c7cf9652188b55885fdf95d67679473a9`. Rebuilt all standalone pages; complete native Metal suite368/368 passed in187.9s, serialized by root. Pages deployment39565380826 succeeded. Public artifact SHA-256 matched local: `79afb04fcc1df1109cd02f2dafb255d0f092262ad16fe654149e19366c2a3b04`. Fresh visible Chrome loaded Victory, completed real crew preparation, enabled fire after52/52ready and discharged52guns; no console errors. Local proof `shots/overnight-live-victory.png`. No new audio asset bytes entered the release.
 
 ## Next mechanical rig work
 
@@ -65,3 +65,44 @@ CPU/WGSL/rope endpoints/forces/shadows must share that geometry. Existing tests
 that expect windward-clew backing do not establish correct routine tacking.
 Restrict own-yard exemptions to the sewn-luff neighbourhood when introducing a
 wrap; do not hide intersections or restore an artificial force multiplier.
+
+For the next pass, the held patch is `shots/lateen-support-work/owner-pose.patch`;
+its proposed test is `rig-support.fixture.txt` in the same folder (not named
+*.test.mjs, so Node cannot accidentally discover the unreleased fixture).
+Do not promote its narrower seam ramp alone: it changes which triangle crosses
+the same rope. The current one-sided X projection sends free cloth outboard of
+a neighbouring stay while its sewn luff remains inboard. A continuous contact
+path around the actual support, with the correct side, is required.
+Routine sheet handling needs separate signed trim and latched working side;
+occupied runners must remain taut until climbers descend. Additional per-mast
+support controls may require a uniform-layout change; preserve Victory's
+interpretation and every consumer if doing so. Full clearance, pinned-luff,
+continuity, mirrored/dissipative force and crew-safety gates precede release.
+
+## Batch02 in progress: lower-hull contact
+
+Root retains the testing baton. The expanded isolated lateen oracle ran204
+synthetic poses:164failed, predominantly compressed/furled own-yard penetration;
+full-canvas failures occurred at opening0. The ordinary trim controller keeps
+opening>=.30 and gathers before opening0 during a yard transfer. Thus the
+synthetic matrix diagnoses several representations, not204 reachable sailing
+states. No rig prototype entered production. Proper exposed-cloth wrapping needs
+signed sheet trim, a textile rest metric/slack, finite owner-posed obstacles,
+continuous contact topology and a shared deformation lattice. Gathered fabric
+needs its own yard-surface bundle; blanket contact exemptions are unacceptable.
+
+A separate ten-point canonical lower-bilge/keel sampler is being integrated.
+It retains exposure/return on the GPU every enabled simulation frame; existing
+40waterline/wake records cannot stand in for bottom contacts. Encounter speed
+is diagnostic, not impact energy or a new force. First/reset/stale events stay
+silent. Actual underside returns will suppress coincident light-splash audio;
+a convincing heavy-crash sample remains unaccepted. No paid generation.
+
+Batch02 local gate:376/376native Metal tests passed, serialized by root,
+186.1seconds. Focused hull/weather checks19/19and all3page startup checks passed.
+An initial reserved WGSL field (`meta`) prevented startup; renamed to `tags`,
+rebuilt, then ran the passing full suite. Independent direct-agent source review
+found no remaining blocker. Actual visible Chrome exercised Victory, sound
+enable, Hella rough, spectrum reset and mute with no console errors; proof
+`shots/overnight-bottom-local.png`. No crash sound, force impulse or rig change
+is included. Publication pending.

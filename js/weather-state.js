@@ -40,29 +40,22 @@ export function createWeatherState(random=Math.random){
 // New GPU contact serials, rather than a timer or wave height, trigger hull slaps.
 // Suppress first samples and resets so loading/teleporting cannot play false impacts.
 export function createImpactDetector(count=40){
-  const serials=new Float32Array(count).fill(-1),drySamples=new Uint8Array(count);let revision=-1;
-  return {contact:null,sample(values,boatRevision,context={}){
+  const serials=new Float32Array(count).fill(-1);let revision=-1;
+  return {contact:null,sample(values,boatRevision){
     let event=null,wet=0,pressure=0,closing=0,impact=0,weight=0,x=0,y=0,z=0,valid=0;
     const reset=revision!==boatRevision;revision=boatRevision;
-    const exposedDepth=Math.min(.5,Math.max(.2,(context.draft??2)*.2));
     for(let i=0;i<count;i++){
       const at=i*16,serial=values[at+15],strength=values[at+7];
       if(!Number.isFinite(serial)||!Number.isFinite(strength)||!Number.isFinite(values[at])||!Number.isFinite(values[at+1])||!Number.isFinite(values[at+2]))continue;
       // The eight aft records force the stern wake; they are not bow slams.
       const bow=i<Math.min(32,count),contactWet=weatherClamp(values[at+11]),rise=weatherClamp(values[at+14],-8,8);
-      const immersion=Number.isFinite(values[at+12])?values[at+12]:0;
-      const reentry=bow&&!reset&&drySamples[i]>=2&&contactWet>.5&&rise>1.25;
-      if(reset)drySamples[i]=0;
-      else if(contactWet<.1&&immersion<-exposedDepth)drySamples[i]=Math.min(3,drySamples[i]+1);
-      else if(contactWet>.5)drySamples[i]=0;
       if(bow){
         const force=weatherClamp(values[at+3],0,4),w=force+.03*contactWet;
         wet+=contactWet;pressure+=force;closing=Math.max(closing,Math.max(0,rise));impact=Math.max(impact,Math.max(0,strength));
         x+=values[at]*w;y+=values[at+1]*w;z+=values[at+2]*w;weight+=w;valid++;
       }
-      const priority=strength+(reentry?4:0),previousPriority=event?event.strength+(event.kind==='reentry'?4:0):-1;
-      if(bow&&!reset&&serials[i]>=0&&serial>serials[i]&&strength>.10&&priority>previousPriority)
-        event={x:values[at],y:values[at+1],z:values[at+2],strength,closing:Math.max(0,rise),wet:contactWet,kind:reentry?'reentry':'light'};
+      if(bow&&!reset&&serials[i]>=0&&serial>serials[i]&&strength>.10&&strength>(event?.strength??-1))
+        event={x:values[at],y:values[at+1],z:values[at+2],strength,closing:Math.max(0,rise),wet:contactWet,kind:'light'};
       serials[i]=serial;
     }
     this.contact={revision:boatRevision,reset,wet:valid?wet/valid:0,pressure:valid?pressure/valid:0,closing,impact,
@@ -73,15 +66,25 @@ export function createImpactDetector(count=40){
 
 // One quiet, contact-driven water bed and sparse accents. Contact pressure is
 // the renderer's authored forcing, not measured joules or an underside solver.
-// Re-entry means a fore contact became wet after exposure; a genuine keel slam
-// needs a lower-hull contact representation and a separately accepted sound.
+// The separate underside sampler observes lower-hull exposure/return. Its
+// encounter speed gates events; it is not impact pressure or measured energy.
 export function createHullAudioState(){
-  let time=0,lastContact=-Infinity,revision=null,contact=null,wash=0,quietUntil=0,latched=false,receding=0;
+  let time=0,lastContact=-Infinity,revision=null,contact=null,wash=0,quietUntil=0,latched=false,receding=0,lastReturn=null;
   return {
     contact(value){
       if(!value||!Number.isFinite(value.pressure)||!Number.isFinite(value.wet))return false;
       if(value.reset||revision!==value.revision){latched=false;receding=0;quietUntil=time+1;}
       revision=value.revision;contact=value;lastContact=time;return true;
+    },
+    underside(event){
+      if(event?.kind!=='underside-reentry'||!(event.closing>1.25)||!(event.age>=0&&event.age<=.35))return false;
+      if(![event.x,event.y,event.z,event.closing].every(Number.isFinite))return false;
+      if(![event.epoch,event.probe,event.serial].every(Number.isInteger)||event.probe<0||event.probe>=10)return false;
+      const key=[event.epoch,event.probe,event.serial].join(':');if(key===lastReturn)return false;
+      lastReturn=key;latched=true;receding=0;quietUntil=Math.max(quietUntil,time+3.2);
+      // Listening rejected the available crash candidates. Continue the wash
+      // and suppress a coincident light splash, without substituting a sound.
+      return true;
     },
     update(dt,{speed=0}={}){
       dt=weatherClamp(dt,0,.1);time+=dt;
@@ -99,20 +102,13 @@ export function createHullAudioState(){
     impact(event){
       if(!event||!Number.isFinite(event.strength)||event.strength<.18||time<quietUntil)return null;
       if(![event.x,event.y??0,event.z].every(Number.isFinite))return null;
-      const strength=weatherClamp(event.strength/3.5),reentry=event.kind==='reentry'&&event.closing>1.25&&event.wet>.5;
-      // A new observed exposure/return is its own episode even if other bow
-      // stations still carry wash. It still respects the longer quiet interval.
-      if(latched&&!reentry)return null;
-      latched=true;receding=0;quietUntil=time+(reentry?3.2:1.4+strength*.8);
-      // Keep the continuous pressure-driven wash, but do not fake a bottom
-      // crash by replaying that loop as a louder one-shot. Listening rejected
-      // that substitution and the replacement candidates. Reserve the quiet
-      // interval until an accepted impact texture and underside probes exist.
-      if(reentry)return null;
+      if((event.kind&&event.kind!=='light')||latched)return null;
+      const strength=weatherClamp(event.strength/3.5);
+      latched=true;receding=0;quietUntil=time+1.4+strength*.8;
       return {id:'hull-slap',gain:.027+.055*Math.sqrt(strength),rate:.93,position:event,
         options:{duration:.66,attack:.018,release:.24,lowpassHz:1800,highpassHz:90},kind:'light'};
     },
-    reset(){lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;},
+    reset(){lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;lastReturn=null;},
   };
 }
 

@@ -6,6 +6,7 @@ import { createGunneryControls } from './gunnery-ui.js';
 import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
 import { createGunportSafety } from './gunport-safety.js';
+import { createHullContactProbe } from './hull-contact.js';
 import { createGunRecoilMap, updateGunRecoilVertices } from './gunnery-models.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
@@ -455,6 +456,7 @@ async function main() {
   const gunSea=await createGunnerySeaProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
   const gunportSafety=await createGunportSafety({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
   const impactDetector=createImpactDetector();
+  const hullContactProbe=await createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
   const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
 
@@ -1340,7 +1342,7 @@ async function main() {
   let last = performance.now();
   let fpsN = 0, fpsT = 0;
   let shooting = false;
-  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();sceneAudio.visibility(document.hidden);});
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -1356,6 +1358,7 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
     for(const v of vessels)v.interaction.encode(cp);
+    hullContactProbe.encode(cp);
     spindrift.encode(cp);
     marineLife.encode(cp);
     for(const v of vessels)v.wetness.encode(cp,v.boat.showProw);
@@ -1479,6 +1482,7 @@ async function main() {
       v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
     }
     gunEffects.setProjectiles(shipGuns.state.projectiles);
+    hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     gunEffects.update(dt,{wind:[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed],eye:[cam.x,cam.y,cam.z]});
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
@@ -1653,9 +1657,9 @@ async function main() {
     pc.end();
 
     for(const {probe:p} of vessels)if(p.requested)enc.copyBufferToBuffer(p.output,0,p.read,0,64);
-    const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
-    const audioRevision=boat.revision;
-    if(doAudio)enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);
+    const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
+    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now();
+    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);hullContactProbe.copy(enc,frameIndex);}
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
@@ -1668,10 +1672,22 @@ async function main() {
     device.queue.submit(submitList);
     gunSea.read(contact=>shipGuns.impact(contact));
     gunportSafety.read();
-    if(doAudio){audioPending=true;audioRead.mapAsync(GPUMapMode.READ).then(()=>{
-      const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision,{draft:boat.hydrodynamics.draft});
-      audioRead.unmap();audioPending=false;if(audioRevision===boat.revision){sceneAudio.hullContact(impactDetector.contact);sceneAudio.impact(event);}
-    }).catch(()=>{audioPending=false;});}
+    if(doAudio){
+      audioPending=true;
+      const bottomEvents=[],bottomReady=hullContactProbe.read(event=>bottomEvents.push(event));
+      audioRead.mapAsync(GPUMapMode.READ).then(async()=>{
+        try{
+          // Resolve true underside returns before selecting a waterline accent.
+          // Neither RAF nor the GPU waits for these two small asynchronous maps.
+          await bottomReady;
+          if(audioRevision!==boat.revision||audioEpoch!==hullContactProbe.epoch||!sceneAudio.enabled||document.hidden||performance.now()-audioRequestedAt>350)return;
+          const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
+          sceneAudio.hullContact(impactDetector.contact);
+          for(const bottom of bottomEvents){const fresh=hullContactProbe.refreshEvent(bottom);if(fresh)sceneAudio.hullUnderside(fresh);}
+          sceneAudio.impact(event);
+        }finally{if(audioRead.mapState==='mapped')audioRead.unmap();audioPending=false;}
+      }).catch(()=>{audioPending=false;});
+    }
     for(const v of vessels){const p=v.probe;if(p.requested){p.pending=true;p.read.mapAsync(GPUMapMode.READ).then(()=>{
       const heights=new Float32Array(p.read.getMappedRange(0,64));
       if(v.id==='player')waterH=heights[9];

@@ -7596,6 +7596,115 @@ fn gunneryProbeClearance(start:vec4f,end:vec4f,fraction:f32,radius:f32)->f32{
 }
 `;
 
+// ---- js/wgsl/hull-contact.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+
+const HULL_CONTACT_COUNT = 10;
+const HULL_CONTACT_RECORD_BYTES = 96;
+const HULL_CONTACT_FLAGS = Object.freeze({valid: 1, armed: 2, wet: 4, event: 8});
+
+// Incident FFT surface only: all six cascades, including horizontal displacement.
+// Local wake grids are deliberately excluded. No pressure or force is generated.
+const HULL_CONTACT_QUERY = FRAME_WGSL + /* wgsl */ `
+struct ContactHull {right:vec4f,up:vec4f,forward:vec4f,size:vec4f,origin:vec4f,rig:vec4f};
+struct ContactControl {step:vec4f,gates:vec4f,tags:vec4u};
+struct UnderProbe {position:vec4f,normal:vec4f};
+struct UnderContact {
+  previous:vec4f, // previous world point xyz and sampled sea Y
+  current:vec4f,  // current world point xyz and signed immersion
+  motion:vec4f,   // hull Vy, sampled-height Vy, relative Vy, normal closing diagnostic
+  phase:vec4f,    // dry duration, event age, peak closing, unwrapped event time
+  event:vec4f,    // preserved first-wet world point xyz and closing at entry
+  tags:vec4u,     // epoch, event serial, sample ID, flags
+};
+@group(0)@binding(0)var<uniform>F:Frame;
+@group(0)@binding(1)var<uniform>H:ContactHull;
+@group(0)@binding(2)var<uniform>U:ContactControl;
+@group(0)@binding(3)var<storage,read>probes:array<UnderProbe,${HULL_CONTACT_COUNT}>;
+@group(0)@binding(4)var seaTex:texture_2d_array<f32>;
+@group(0)@binding(5)var seaSampler:sampler;
+@group(0)@binding(6)var<storage,read_write>contacts:array<UnderContact,${HULL_CONTACT_COUNT}>;
+const VALID:u32=${HULL_CONTACT_FLAGS.valid}u;
+const ARMED:u32=${HULL_CONTACT_FLAGS.armed}u;
+const WET:u32=${HULL_CONTACT_FLAGS.wet}u;
+const EVENT:u32=${HULL_CONTACT_FLAGS.event}u;
+fn contactDisp(p:vec2f)->vec3f {
+  var d=vec3f(0);
+  for(var c=0u;c<${CASCADES}u;c++){
+    d+=textureSampleLevel(seaTex,seaSampler,p*F.cascInvL[c>>2u][c&3u],i32(c),0.0).xyz;
+  }
+  return d;
+}
+fn contactSea(p:vec2f)->f32 {
+  var q=p;
+  for(var j=0u;j<3u;j++){q=p-contactDisp(q).xz;}
+  return contactDisp(q).y;
+}
+@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
+  let i=id.x;
+  if(i>=min(U.tags.z,${HULL_CONTACT_COUNT}u)||U.tags.y==0u){return;}
+  var old=contacts[i];let epoch=U.tags.x;let dt=U.step.x;
+  // A broken step invalidates history. Keep its serial inside the same epoch;
+  // otherwise a later recovery could reuse an already consumed event number.
+  if(!(dt>0.0&&dt<=0.100001)){
+    old.tags=vec4u(epoch,select(0u,old.tags.y,old.tags.x==epoch),U.tags.w,0u);
+    contacts[i]=old;return;
+  }
+  let scale=vec3f(H.size.x/3.6,H.right.w,H.size.y/12.0);
+  if(!all(scale>vec3f(0))||!all(abs(scale)<vec3f(1e8))){old.tags.w=0u;contacts[i]=old;return;}
+  let local=probes[i].position.xyz*scale;
+  let p=H.origin.xyz+H.right.xyz*local.x+H.up.xyz*local.y-H.forward.xyz*local.z;
+  let sea=contactSea(p.xz);let immersion=sea-p.y;
+  if(!all(abs(p)<vec3f(1e15))||!(abs(sea)<1e8)){
+    old.tags=vec4u(epoch,select(0u,old.tags.y,old.tags.x==epoch),U.tags.w,0u);
+    contacts[i]=old;return;
+  }
+  let seed=old.tags.x!=epoch||(old.tags.w&VALID)==0u;
+  if(seed){
+    let flags=VALID|select(0u,WET,immersion>=U.step.w);
+    contacts[i]=UnderContact(vec4f(p,sea),vec4f(p,immersion),vec4f(0),vec4f(0),vec4f(0),
+      vec4u(epoch,select(0u,old.tags.y,old.tags.x==epoch),U.tags.w,flags));
+    return;
+  }
+  let hullVy=(p.y-old.previous.y)/dt;
+  // This sea-height derivative follows the moving probe. It is NOT a water
+  // particle velocity or a calibrated impact pressure.
+  let seaVy=(sea-old.previous.w)/dt;
+  let relativeVy=hullVy-seaVy;
+  if(!(abs(hullVy)<1e12&&abs(seaVy)<1e12&&abs(relativeVy)<1e12)){
+    old.tags.w=0u;contacts[i]=old;return;
+  }
+  let closing=max(0.0,-relativeVy);
+  let wasWet=(old.tags.w&WET)!=0u;
+  let wet=select(select(wasWet,false,immersion<=-U.step.z),true,immersion>=U.step.w);
+  let dry=immersion<=-U.step.z;
+  let dryDuration=select(0.0,old.phase.x+dt,dry);
+  var armed=(old.tags.w&ARMED)!=0u||(dry&&dryDuration>=U.gates.x);
+  var flags=VALID|select(0u,WET,wet)|(old.tags.w&EVENT);
+  var event=old.event;var serial=old.tags.y;
+  var age=select(0.0,old.phase.y+dt,(old.tags.w&EVENT)!=0u);
+  var peak=old.phase.z;var eventTime=old.phase.w;
+  let entry=wet&&!wasWet;
+  if(entry){
+    if(armed&&relativeVy < -U.gates.z){
+      serial+=1u;flags|=EVENT;age=0.0;peak=closing;eventTime=U.step.y;
+      event=vec4f(p,closing);
+    }
+    // Consume the return even if its relative velocity was not inward. Another
+    // event requires a genuinely dry interval, not a grey-band oscillation.
+    armed=false;
+  }
+  if((flags&EVENT)!=0u&&wet&&age<=U.gates.w){peak=max(peak,closing);}
+  flags|=select(0u,ARMED,armed);
+  let nLocal=probes[i].normal.xyz/scale;
+  let n=normalize(H.right.xyz*nLocal.x+H.up.xyz*nLocal.y-H.forward.xyz*nLocal.z);
+  let normalClosing=max(0.0,dot(n,vec3f(0,relativeVy,0)));
+  contacts[i]=UnderContact(vec4f(p,sea),vec4f(p,immersion),
+    vec4f(hullVy,seaVy,relativeVy,normalClosing),vec4f(dryDuration,age,peak,eventTime),
+    event,vec4u(epoch,serial,U.tags.w,flags));
+}
+`;
+
 // ---- js/gunnery-effects.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 
@@ -7915,6 +8024,221 @@ async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePi
     clear(){generation++;encoded=null;state.clear();},
     get pending(){return !!pending;},
     destroy(){destroyed=true;generation++;state.clear();for(const b of[input,output,readback,count])b.destroy();},
+  };
+}
+
+// ---- js/hull-contact.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+
+
+
+
+// Sampling/hysteresis tolerances are authored numerical policy, not measured
+// vessel slam thresholds or force coefficients. Events remain diagnostics.
+const HULL_CONTACT_LIMITS=Object.freeze({dryGap:.025,wetGap:.005,dryHold:.06,
+  staleSeconds:.35,minClosing:0,peakWindow:.2,readEvery:8,maxDt:.100001});
+const hullContactNormalize=p=>{const n=Math.hypot(...p);return p.map(v=>v/Math.max(n,1e-15));};
+const hullContactSubtract=(a,b)=>a.map((v,i)=>v-b[i]);
+const hullContactCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const hullContactFinitePoint=p=>p?.length===3&&Array.from(p).every(Number.isFinite);
+const hullContactWallTime=()=>globalThis.performance?.now?.()??Date.now();
+
+function createHullContactDefinitions(modelId='nina'){
+  if(!['nina','victory'].includes(modelId))throw Error(`No underside geometry for ${modelId}`);
+  const points=[];
+  const add=(id,position,normal,source)=>points.push({id,position,normal,source});
+  if(modelId==='nina'){
+    // Exact longitudinal grid/rings used by createCaravelMesh, not a waterline
+    // contact guessed downwards. Other ring angles altered for wales are absent.
+    for(const i of [12,36,60,88])for(const ring of [8,16]){
+      const station=-6.4+i*12/112,angle=ring*Math.PI/24,p=hullSurfacePoint(station,angle),e=1e-5;
+      const around=hullContactSubtract(hullSurfacePoint(station,angle+e),hullSurfacePoint(station,angle-e));
+      const along=hullContactSubtract(hullSurfacePoint(station+e,angle),hullSurfacePoint(station-e,angle));
+      let normal=hullContactNormalize(hullContactCross(along,around));if(normal[0]*p[0]<0)normal=normal.map(v=>-v);
+      add(`bilge.${i}.${ring<12?'starboard':'port'}`,p,normal,{group:'hull',station,ring});
+    }
+    // The timber keel extends .075 design units below the skin. Its bevel has
+    // a flat bottom face on x=0, so these points lie on that actual face.
+    for(const i of [36,72]){
+      const z=-6.4+i*12/112;
+      add(`keel.${i}`,[0,-HULL_DRAFT-.075,z],[0,-1,0],{group:'hull.keel-stem',station:z});
+    }
+  }else{
+    // Both station and base-Y values are vertices of Victory's current loft.
+    // victoryHullPoint includes the submerged end rake and local sheer.
+    for(const station of [-4.5,-2.5,0,3])for(const side of [-1,1]){
+      const y=-1.5,p=victoryHullPoint(station,y,side),e=1e-5;
+      const up=hullContactSubtract(victoryHullPoint(station,y+e,side),victoryHullPoint(station,y-e,side));
+      const along=hullContactSubtract(victoryHullPoint(station+e,y,side),victoryHullPoint(station-e,y,side));
+      let normal=hullContactNormalize(hullContactCross(up,along));if(normal[0]*side<0)normal=normal.map(v=>-v);
+      add(`bilge.${station}.${side<0?'port':'starboard'}`,p,normal,{group:'hull.planking',station,baseY:y});
+    }
+    for(const station of [-2.5,1.5])add(`keel.${station}`,
+      victoryHullPoint(station,-VICTORY_DESIGN.hull.draft,0),[0,-1,0],
+      {group:'hull.planking',station,baseY:-VICTORY_DESIGN.hull.draft});
+  }
+  const values=new Float32Array(HULL_CONTACT_COUNT*8);
+  points.forEach((p,i)=>{values.set([...p.position,i,...p.normal,0],i*8);});
+  return {modelId,points,values,description:'Authored ten-point lower-bilge/keel coverage of canonical model geometry; FFT-only incident contact, no forces.'};
+}
+
+function hullContactWorldPoint(definition,boat){
+  const p=definition.position??definition,scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12],out=[0,0,0];
+  boatRotate(out,...p.map((v,k)=>v*scale[k]),(boat.heading??0)*Math.PI/180,boat.pitch??0,boat.roll??0);
+  return out.map((v,k)=>v+[boat.x??0,boat.heave??0,boat.z??0][k]);
+}
+
+// Readback-only consumer. The GPU owns per-frame dry/wet transitions; CPU
+// readback cadence must never stand in for consecutive physical dry samples.
+function createHullContactConsumer({staleSeconds=HULL_CONTACT_LIMITS.staleSeconds}={}){
+  const serials=new Uint32Array(HULL_CONTACT_COUNT);let epoch=0;
+  return {
+    reset(value){epoch=value>>>0;serials.fill(0);},
+    consume(buffer,{epoch:requestEpoch,now,extraAge=0}={}){
+      if((requestEpoch>>>0)!==epoch)return [];
+      const bytes=ArrayBuffer.isView(buffer)?buffer.buffer:buffer;
+      const offset=ArrayBuffer.isView(buffer)?buffer.byteOffset:0;
+      const size=ArrayBuffer.isView(buffer)?buffer.byteLength:buffer.byteLength;
+      if(size<HULL_CONTACT_COUNT*HULL_CONTACT_RECORD_BYTES)throw Error('Truncated underside readback');
+      const f=new Float32Array(bytes,offset,HULL_CONTACT_COUNT*24),u=new Uint32Array(bytes,offset,HULL_CONTACT_COUNT*24),events=[];
+      for(let i=0;i<HULL_CONTACT_COUNT;i++){
+        const at=i*24,recordEpoch=u[at+20],serial=u[at+21],flags=u[at+23];
+        if(recordEpoch!==epoch||(flags&HULL_CONTACT_FLAGS.valid)===0||(flags&HULL_CONTACT_FLAGS.event)===0)continue;
+        const delta=(serial-serials[i])>>>0;
+        if(delta===0||delta>=0x80000000)continue;
+        // Consume before checking age or payload. Expired/invalid events must
+        // not become audible later if another read returns the same serial.
+        serials[i]=serial;
+        const eventTime=f[at+15],age=Number.isFinite(now)?now-eventTime:f[at+13]+extraAge;
+        const closing=f[at+19],peakClosing=f[at+14],position=Array.from(f.subarray(at+16,at+19));
+        if(!hullContactFinitePoint(position)||![age,eventTime,closing,peakClosing].every(Number.isFinite)
+          ||age<-.001||age>staleSeconds||closing<=0||peakClosing<closing)continue;
+        events.push({kind:'underside-reentry',probe:i,epoch,serial,time:eventTime,age,
+          x:position[0],y:position[1],z:position[2],closing,peakClosing});
+      }
+      return events;
+    },
+    snapshot(){return {epoch,serials:Array.from(serials)};},
+  };
+}
+
+async function createHullContactProbe({device,frameUBO,hullUBO,seaView,seaSampler,
+  computePipe,shader,modelId='nina',limits={},clock=hullContactWallTime}){
+  const policy={...HULL_CONTACT_LIMITS,...limits},B=GPUBufferUsage;
+  for(const key of ['dryGap','wetGap','dryHold','staleSeconds','minClosing','peakWindow'])
+    if(!Number.isFinite(policy[key])||policy[key]<0)throw Error(`Invalid hull contact ${key}`);
+  if(!Number.isInteger(policy.readEvery)||policy.readEvery<1)throw Error('Invalid hull contact readEvery');
+  let definitions=createHullContactDefinitions(modelId),definitionsDirty=true;
+  const input=device.createBuffer({label:'canonical underside probes',size:HULL_CONTACT_COUNT*32,usage:B.STORAGE|B.COPY_DST});
+  const control=device.createBuffer({label:'underside contact control',size:48,usage:B.UNIFORM|B.COPY_DST});
+  const output=device.createBuffer({label:'persistent underside contacts',size:HULL_CONTACT_COUNT*HULL_CONTACT_RECORD_BYTES,usage:B.STORAGE|B.COPY_SRC});
+  const readback=device.createBuffer({label:'underside contact readback',size:HULL_CONTACT_COUNT*HULL_CONTACT_RECORD_BYTES,usage:B.MAP_READ|B.COPY_DST});
+  const pipeline=computePipe?await computePipe(HULL_CONTACT_QUERY,'underside incident sea contact'):
+    await device.createComputePipelineAsync({label:'underside incident sea contact',layout:'auto',
+      compute:{module:await shader(HULL_CONTACT_QUERY,'underside incident sea contact'),entryPoint:'main'}});
+  const resources=[{buffer:frameUBO},{buffer:hullUBO},{buffer:control},{buffer:input},seaView,seaSampler,{buffer:output}];
+  const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
+  const bytes=new ArrayBuffer(48),f=new Float32Array(bytes),u=new Uint32Array(bytes),consumer=createHullContactConsumer(policy);
+  let epoch=0,sampleID=0,time=0,enabled=false,valid=false,destroyed=false,boat=null,previous=null;
+  let encodedSample=-1,copiedSample=-1,encodedRequest=null,pending=null,lastRecords=null,lastEvents=[],lastError=null;
+  function reset(){
+    epoch=(epoch+1)>>>0;if(epoch===0)epoch=1;
+    consumer.reset(epoch);previous=null;encodedRequest=null;encodedSample=-1;copiedSample=-1;
+    valid=false;lastEvents=[];lastRecords=null;
+  }
+  reset();
+  const currentRequest=request=>!destroyed&&enabled&&request.epoch===epoch
+    &&boat?.revision===request.revision;
+  const requestNow=request=>Math.max(time,request.time+Math.max(0,clock()-request.wallTime)/1000);
+  function refreshEvent(event){
+    if(destroyed||!enabled||event?.epoch!==epoch||event.revision!==boat?.revision)return null;
+    const wall=clock(),age=Math.max(time-event.time,event.age+Math.max(0,wall-event.observedWallTime)/1000);
+    return Number.isFinite(age)&&age>=-.001&&age<=policy.staleSeconds
+      ? {...event,age,observedWallTime:wall}:null;
+  }
+  return {
+    output,control,input,readback,
+    get epoch(){return epoch;},get enabled(){return enabled;},get pending(){return !!pending;},
+    get requestEpoch(){return encodedRequest?.epoch??pending?.request.epoch??null;},
+    update(nextBoat,dt,{enabled:requested=false,resetSea=false,hidden=false}={}){
+      if(destroyed)return false;
+      const active=!!requested&&!hidden&&nextBoat?.showProw!==false;
+      if(active!==enabled){enabled=active;reset();}
+      boat=nextBoat;
+      // No queue writes, dispatches or copies while disabled, including input.
+      if(!enabled)return false;
+      const nextModel=boat.modelId??modelId;
+      if(nextModel!==definitions.modelId){definitions=createHullContactDefinitions(nextModel);definitionsDirty=true;reset();}
+      const fields=[boat.x,boat.z,boat.heave,boat.length,boat.beam,boat.pitch??0,boat.roll??0,boat.heading??0];
+      if(!fields.every(Number.isFinite)||!(boat.length>0&&boat.beam>0)||!(dt>0&&dt<=policy.maxDt)){
+        reset();return false;
+      }
+      // Compare actual probe displacement with physical sailing/body rates.
+      // The tolerance admits integration error; it is not a force or assistance.
+      let moved=false;
+      if(previous){
+        const radius=Math.max(boat.length*.5,boat.beam*.5,vesselVerticalScale(boat)*2);
+        const rates=[boat.rollVelocity??0,boat.pitchVelocity??0,boat.yawRate??0];
+        const speed=Math.hypot(boatForwardSpeed(boat),boat.leewayVelocity??0,boat.heaveVelocity??0);
+        const envelope=.5+radius*.01+2*dt*(speed+radius*rates.reduce((sum,v)=>sum+Math.abs(v),0));
+        if(!Number.isFinite(envelope))moved=true;
+        else for(const definition of definitions.points){
+          const a=hullContactWorldPoint(definition,boat),b=hullContactWorldPoint(definition,previous);
+          if(Math.hypot(...a.map((v,k)=>v-b[k]))>envelope){moved=true;break;}
+        }
+      }
+      if(resetSea||previous&&(previous.revision!==boat.revision||previous.length!==boat.length||previous.beam!==boat.beam)||moved)reset();
+      previous={x:boat.x,z:boat.z,heave:boat.heave,length:boat.length,beam:boat.beam,revision:boat.revision,
+        modelId:nextModel,pitch:boat.pitch??0,roll:boat.roll??0,heading:boat.heading??0};
+      time+=dt;sampleID=(sampleID+1)>>>0;valid=true;encodedSample=-1;
+      f.set([dt,time,policy.dryGap,policy.wetGap,policy.dryHold,policy.staleSeconds,policy.minClosing,policy.peakWindow]);
+      u.set([epoch,1,HULL_CONTACT_COUNT,sampleID],8);
+      if(definitionsDirty){device.queue.writeBuffer(input,0,definitions.values);definitionsDirty=false;}
+      device.queue.writeBuffer(control,0,bytes);return true;
+    },
+    encode(cp){
+      if(destroyed||!enabled||!valid||encodedSample===sampleID)return false;
+      cp.setPipeline(pipeline);cp.setBindGroup(0,group);cp.dispatchWorkgroups(1);
+      encodedSample=sampleID;return true;
+    },
+    copy(encoder,frameIndex){
+      if(destroyed||!enabled||!valid||pending||encodedRequest||encodedSample!==sampleID||copiedSample===sampleID
+        ||!Number.isInteger(frameIndex)||frameIndex%policy.readEvery!==0)return false;
+      encoder.copyBufferToBuffer(output,0,readback,0,HULL_CONTACT_COUNT*HULL_CONTACT_RECORD_BYTES);
+      copiedSample=sampleID;encodedRequest={epoch,revision:boat.revision,sampleID,time,wallTime:clock()};return true;
+    },
+    read(callback){
+      if(pending)return pending.promise;
+      if(destroyed||!encodedRequest)return Promise.resolve(0);
+      const request=encodedRequest;encodedRequest=null;
+      const operation={request,promise:null};pending=operation;
+      operation.promise=readback.mapAsync(GPUMapMode.READ).then(async()=>{
+        let events=[];
+        try{
+          // Epoch/revision BEFORE consume: stale completions cannot change the
+          // new generation's serial ledger, suppression state or callback.
+          if(!currentRequest(request))return 0;
+          lastRecords=new Uint8Array(readback.getMappedRange()).slice();
+          events=consumer.consume(lastRecords,{epoch:request.epoch,now:requestNow(request)});lastEvents=events;
+        }finally{if(readback.mapState==='mapped')readback.unmap();}
+        let count=0;
+        for(const event of events){
+          if(!currentRequest(request))break;
+          const age=requestNow(request)-event.time;
+          if(age<-.001||age>policy.staleSeconds)continue;
+          await callback?.({...event,age,revision:request.revision,observedWallTime:clock()});count++;
+        }
+        return count;
+      }).catch(error=>{lastError=String(error?.message??error);return 0;}).finally(()=>{
+        if(pending===operation)pending=null;
+      });
+      return operation.promise;
+    },
+    reset,refreshEvent,
+    snapshot(){return {epoch,enabled,valid,time,sampleID,pending:!!pending,requestEpoch:encodedRequest?.epoch??pending?.request.epoch??null,
+      modelId:definitions.modelId,policy:{...policy},definitions:definitions.points.map(p=>({...p,position:[...p.position],normal:[...p.normal]})),
+      consumer:consumer.snapshot(),events:lastEvents.map(e=>({...e})),records:lastRecords?.slice()??null,lastError};},
+    destroy(){destroyed=true;enabled=false;reset();for(const buffer of [input,control,output,readback])buffer.destroy();},
   };
 }
 
@@ -12516,29 +12840,22 @@ function createWeatherState(random=Math.random){
 // New GPU contact serials, rather than a timer or wave height, trigger hull slaps.
 // Suppress first samples and resets so loading/teleporting cannot play false impacts.
 function createImpactDetector(count=40){
-  const serials=new Float32Array(count).fill(-1),drySamples=new Uint8Array(count);let revision=-1;
-  return {contact:null,sample(values,boatRevision,context={}){
+  const serials=new Float32Array(count).fill(-1);let revision=-1;
+  return {contact:null,sample(values,boatRevision){
     let event=null,wet=0,pressure=0,closing=0,impact=0,weight=0,x=0,y=0,z=0,valid=0;
     const reset=revision!==boatRevision;revision=boatRevision;
-    const exposedDepth=Math.min(.5,Math.max(.2,(context.draft??2)*.2));
     for(let i=0;i<count;i++){
       const at=i*16,serial=values[at+15],strength=values[at+7];
       if(!Number.isFinite(serial)||!Number.isFinite(strength)||!Number.isFinite(values[at])||!Number.isFinite(values[at+1])||!Number.isFinite(values[at+2]))continue;
       // The eight aft records force the stern wake; they are not bow slams.
       const bow=i<Math.min(32,count),contactWet=weatherClamp(values[at+11]),rise=weatherClamp(values[at+14],-8,8);
-      const immersion=Number.isFinite(values[at+12])?values[at+12]:0;
-      const reentry=bow&&!reset&&drySamples[i]>=2&&contactWet>.5&&rise>1.25;
-      if(reset)drySamples[i]=0;
-      else if(contactWet<.1&&immersion<-exposedDepth)drySamples[i]=Math.min(3,drySamples[i]+1);
-      else if(contactWet>.5)drySamples[i]=0;
       if(bow){
         const force=weatherClamp(values[at+3],0,4),w=force+.03*contactWet;
         wet+=contactWet;pressure+=force;closing=Math.max(closing,Math.max(0,rise));impact=Math.max(impact,Math.max(0,strength));
         x+=values[at]*w;y+=values[at+1]*w;z+=values[at+2]*w;weight+=w;valid++;
       }
-      const priority=strength+(reentry?4:0),previousPriority=event?event.strength+(event.kind==='reentry'?4:0):-1;
-      if(bow&&!reset&&serials[i]>=0&&serial>serials[i]&&strength>.10&&priority>previousPriority)
-        event={x:values[at],y:values[at+1],z:values[at+2],strength,closing:Math.max(0,rise),wet:contactWet,kind:reentry?'reentry':'light'};
+      if(bow&&!reset&&serials[i]>=0&&serial>serials[i]&&strength>.10&&strength>(event?.strength??-1))
+        event={x:values[at],y:values[at+1],z:values[at+2],strength,closing:Math.max(0,rise),wet:contactWet,kind:'light'};
       serials[i]=serial;
     }
     this.contact={revision:boatRevision,reset,wet:valid?wet/valid:0,pressure:valid?pressure/valid:0,closing,impact,
@@ -12549,15 +12866,25 @@ function createImpactDetector(count=40){
 
 // One quiet, contact-driven water bed and sparse accents. Contact pressure is
 // the renderer's authored forcing, not measured joules or an underside solver.
-// Re-entry means a fore contact became wet after exposure; a genuine keel slam
-// needs a lower-hull contact representation and a separately accepted sound.
+// The separate underside sampler observes lower-hull exposure/return. Its
+// encounter speed gates events; it is not impact pressure or measured energy.
 function createHullAudioState(){
-  let time=0,lastContact=-Infinity,revision=null,contact=null,wash=0,quietUntil=0,latched=false,receding=0;
+  let time=0,lastContact=-Infinity,revision=null,contact=null,wash=0,quietUntil=0,latched=false,receding=0,lastReturn=null;
   return {
     contact(value){
       if(!value||!Number.isFinite(value.pressure)||!Number.isFinite(value.wet))return false;
       if(value.reset||revision!==value.revision){latched=false;receding=0;quietUntil=time+1;}
       revision=value.revision;contact=value;lastContact=time;return true;
+    },
+    underside(event){
+      if(event?.kind!=='underside-reentry'||!(event.closing>1.25)||!(event.age>=0&&event.age<=.35))return false;
+      if(![event.x,event.y,event.z,event.closing].every(Number.isFinite))return false;
+      if(![event.epoch,event.probe,event.serial].every(Number.isInteger)||event.probe<0||event.probe>=10)return false;
+      const key=[event.epoch,event.probe,event.serial].join(':');if(key===lastReturn)return false;
+      lastReturn=key;latched=true;receding=0;quietUntil=Math.max(quietUntil,time+3.2);
+      // Listening rejected the available crash candidates. Continue the wash
+      // and suppress a coincident light splash, without substituting a sound.
+      return true;
     },
     update(dt,{speed=0}={}){
       dt=weatherClamp(dt,0,.1);time+=dt;
@@ -12575,20 +12902,13 @@ function createHullAudioState(){
     impact(event){
       if(!event||!Number.isFinite(event.strength)||event.strength<.18||time<quietUntil)return null;
       if(![event.x,event.y??0,event.z].every(Number.isFinite))return null;
-      const strength=weatherClamp(event.strength/3.5),reentry=event.kind==='reentry'&&event.closing>1.25&&event.wet>.5;
-      // A new observed exposure/return is its own episode even if other bow
-      // stations still carry wash. It still respects the longer quiet interval.
-      if(latched&&!reentry)return null;
-      latched=true;receding=0;quietUntil=time+(reentry?3.2:1.4+strength*.8);
-      // Keep the continuous pressure-driven wash, but do not fake a bottom
-      // crash by replaying that loop as a louder one-shot. Listening rejected
-      // that substitution and the replacement candidates. Reserve the quiet
-      // interval until an accepted impact texture and underside probes exist.
-      if(reentry)return null;
+      if((event.kind&&event.kind!=='light')||latched)return null;
+      const strength=weatherClamp(event.strength/3.5);
+      latched=true;receding=0;quietUntil=time+1.4+strength*.8;
       return {id:'hull-slap',gain:.027+.055*Math.sqrt(strength),rate:.93,position:event,
         options:{duration:.66,attack:.018,release:.24,lowpassHz:1800,highpassHz:90},kind:'light'};
     },
-    reset(){lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;},
+    reset(){lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;lastReturn=null;},
   };
 }
 
@@ -13279,6 +13599,7 @@ function createSceneAudio({onStatus=()=>{}}={}){
       else if(event.type==='drop')play('anchor-release',.4,anchorPosition,1,true);
     },
     hullContact(contact){return hullAudio.contact(contact);},
+    hullUnderside(event){if(enabled&&!hidden&&ready)return hullAudio.underside(event);return false;},
     impact(event){
       if(!enabled||hidden||!ready)return;
       const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
@@ -13352,6 +13673,7 @@ async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,
 }
 
 // ---- js/main.js ----
+
 
 
 
@@ -13808,6 +14130,7 @@ async function main() {
   const gunSea=await createGunnerySeaProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
   const gunportSafety=await createGunportSafety({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
   const impactDetector=createImpactDetector();
+  const hullContactProbe=await createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
   const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
 
@@ -14693,7 +15016,7 @@ async function main() {
   let last = performance.now();
   let fpsN = 0, fpsT = 0;
   let shooting = false;
-  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();sceneAudio.visibility(document.hidden);});
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -14709,6 +15032,7 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
     for(const v of vessels)v.interaction.encode(cp);
+    hullContactProbe.encode(cp);
     spindrift.encode(cp);
     marineLife.encode(cp);
     for(const v of vessels)v.wetness.encode(cp,v.boat.showProw);
@@ -14832,6 +15156,7 @@ async function main() {
       v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
     }
     gunEffects.setProjectiles(shipGuns.state.projectiles);
+    hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     gunEffects.update(dt,{wind:[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed],eye:[cam.x,cam.y,cam.z]});
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
@@ -15006,9 +15331,9 @@ async function main() {
     pc.end();
 
     for(const {probe:p} of vessels)if(p.requested)enc.copyBufferToBuffer(p.output,0,p.read,0,64);
-    const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
-    const audioRevision=boat.revision;
-    if(doAudio)enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);
+    const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
+    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now();
+    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);hullContactProbe.copy(enc,frameIndex);}
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
@@ -15021,10 +15346,22 @@ async function main() {
     device.queue.submit(submitList);
     gunSea.read(contact=>shipGuns.impact(contact));
     gunportSafety.read();
-    if(doAudio){audioPending=true;audioRead.mapAsync(GPUMapMode.READ).then(()=>{
-      const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision,{draft:boat.hydrodynamics.draft});
-      audioRead.unmap();audioPending=false;if(audioRevision===boat.revision){sceneAudio.hullContact(impactDetector.contact);sceneAudio.impact(event);}
-    }).catch(()=>{audioPending=false;});}
+    if(doAudio){
+      audioPending=true;
+      const bottomEvents=[],bottomReady=hullContactProbe.read(event=>bottomEvents.push(event));
+      audioRead.mapAsync(GPUMapMode.READ).then(async()=>{
+        try{
+          // Resolve true underside returns before selecting a waterline accent.
+          // Neither RAF nor the GPU waits for these two small asynchronous maps.
+          await bottomReady;
+          if(audioRevision!==boat.revision||audioEpoch!==hullContactProbe.epoch||!sceneAudio.enabled||document.hidden||performance.now()-audioRequestedAt>350)return;
+          const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
+          sceneAudio.hullContact(impactDetector.contact);
+          for(const bottom of bottomEvents){const fresh=hullContactProbe.refreshEvent(bottom);if(fresh)sceneAudio.hullUnderside(fresh);}
+          sceneAudio.impact(event);
+        }finally{if(audioRead.mapState==='mapped')audioRead.unmap();audioPending=false;}
+      }).catch(()=>{audioPending=false;});
+    }
     for(const v of vessels){const p=v.probe;if(p.requested){p.pending=true;p.read.mapAsync(GPUMapMode.READ).then(()=>{
       const heights=new Float32Array(p.read.getMappedRange(0,64));
       if(v.id==='player')waterH=heights[9];

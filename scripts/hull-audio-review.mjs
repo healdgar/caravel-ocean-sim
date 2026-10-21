@@ -113,7 +113,10 @@ export async function renderHullAudioReview({out=path.join(HULL_REVIEW_ROOT,'sho
           waterGain.gain.setTargetAtTime(gain,t,.45);
           while(eventIndex<events.length&&events[eventIndex].at<=t+1e-8){
             const e=events[eventIndex++],event={x:e.index%2?1.8:-1.8,y:0,z:-4,strength:e.strength,kind:e.kind??'light',closing:e.closing??1,wet:1};
-            if(variant==='current'){const sound=state.impact(event);if(sound)accent(sound,t);}
+            if(variant==='current'){
+              if(e.kind==='reentry')state.underside({...event,kind:'underside-reentry',epoch:1,probe:0,serial:e.index+1,age:0});
+              else{const sound=state.impact(event);if(sound)accent(sound,t);}
+            }
             else if(t-lastLegacy>.5){lastLegacy=t;accent({id:'hull-slap',gain:.12+.2*Math.sqrt(event.strength),rate:.92+(e.index*.61803398875%1)*.14,position:event},t);}
           }
         }

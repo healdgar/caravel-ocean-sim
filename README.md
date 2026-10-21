@@ -149,13 +149,18 @@ duration and waveform before editing.
 
 The [hull and wave audio refinement](assets/audio/README.md#hull-and-wave-audio-refinement)
 uses continuous contact-driven wash and sparse, softer accents. A convincing
-lower-hull crash texture and actual underside-slam detection remain unfinished.
+lower-hull crash texture remains unfinished. Ten canonical lower-bilge/keel
+probes now distinguish actual underside exposure and return from ordinary
+waterline wash; their geometric encounter speed is not a calibrated slam force.
 
 The selected twelve sounds are integrated. **Sea settings → Enable sound** starts Web Audio
 from a user gesture; **Mute sound** suspends it. Nothing contacts ElevenLabs at
 runtime. Steady/strong wind blend with apparent wind; hull wash follows signed
 speed, wetness and wave pressure, including waves against a stationary ship.
 GPU bow contacts trigger quiet accents only after the previous wave recedes.
+Underside returns suppress a coincident light-splash accent while the wash
+continues. They retain dry/wet transitions on the GPU between audio readbacks,
+discard stale/reset events and add no query work while sound is disabled.
 Roll, pitch and heave motion trigger spaced timber creaks. Nearby
 and distant thunder follow the same events as the visible flashes. The mix has
 bounded event voices, smooth gains and a master compressor. Background tabs
@@ -721,7 +726,7 @@ npm run build
 npm test
 ```
 
-The current overnight checkpoint passed **368 tests** using installed Chrome on
+The current overnight checkpoint passed **376 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -731,6 +736,12 @@ actual-ocean clearance at loaded gun muzzles. Separate native blow/breach
 captures supplemented the suite. The attempted lateen support-owner repair is
 held outside this release because mixed-yard cloth/stay clearance still fails;
 routine bad-tack handling remains unfinished.
+Lower-hull checks additionally verify actual skin/keel placement, mirrored
+scaled transforms, persistent first-wet events, all six displaced sea bands,
+readback expiry and silent lifecycle resets. The full native suite passed in
+186.1 seconds; visible Chrome also exercised sound enable, rough seas and mute
+without console errors. These checks do not qualify physical iPhone performance
+or establish a calibrated slam-force solver.
 Model checks preserve the exact Niña mesh/index hashes and verify named attachments,
 shared geometry, planned-model guards, independent crew and bundled license notices.
 Dolphin/marine checks cover contact-gated emission across 10–120 FPS, visible
@@ -843,6 +854,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/gltf.js`, `js/crew.js`, `js/crew-work.js`, `js/crew-pose.js`, `js/rigging.js`, `js/wgsl/crew.js` | Bounded GLB loading, clip blending, deckhand execution, GPU skinning and shadows |
 | `assets/crew/`, `scripts/prepare-crew.mjs` | Self-contained sailor asset, CC0 provenance and reproducible preparation |
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
+| `js/hull-contact.js`, `js/wgsl/hull-contact.js` | Canonical lower-hull probes and persistent incident-sea exposure/return events; no impact forces |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and soft volume rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
 | `js/wetness.js`, `js/wgsl/wetness.js` | Persistent material moisture, spray exposure, cached sea contact and crew probes |

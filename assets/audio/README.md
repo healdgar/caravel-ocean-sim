@@ -27,15 +27,23 @@ this pass changes their contact drivers and playback envelopes, not their proven
   speed in either direction, actual fore-contact wetness, pressure and relative
   closing. It also responds to waves against a stationary hull. Attack/release
   smoothing prevents one readback from chopping its volume.
-- **Re-entry after exposure:** an observed dry-to-wet fore contact with strong
-  relative closing suppresses light-splash accents for a longer quiet interval.
-  The pressure-driven wash continues. Replaying that loop as a louder impact
-  was rejected in listening review. These forty GPU records follow the waterline,
-  not the underside; they do not establish a keel/bottom-panel collision.
+- **Re-entry after exposure:** ten dedicated lower-bilge/keel probes use actual
+  model surfaces and the full scaled/rotated hull transform. They query all six
+  horizontally displaced FFT bands and retain dry/wet hysteresis each frame,
+  independently of decimated CPU audio readback. A fresh inward return suppresses
+  coincident light-splash accents for a longer quiet interval. The pressure-driven
+  wash continues. The forty existing wake/spray records remain waterline contacts
+  and no longer classify bottom impacts. Replaying wash as a louder impact was
+  rejected in listening review. Each probe retains its latest return, rather
+  than queueing sounds for every missed event during a slow readback.
 
 The remaining asset task is a broad watery re-entry crash, with no brittle wood
-breakage or separate splash attacks. A dedicated lower-hull contact model is
-needed before claiming bottom-slam detection. Generate and audition replacements
+breakage or separate splash attacks. The lower-hull sampler measures geometric
+encounter speed, not water-particle velocity, force, pressure or joules. Its ten
+coverage points and dry/wet tolerances are authored numerical choices, and it
+currently excludes the local wake grids. It adds no impulses to the ship and
+runs only with sound enabled. Reset, mute, hiding, teleport and stale readback
+cannot replay a stored return. Generate and audition replacement sounds
 in a wooden sailing ship context, with Argon listening feedback and in-game
 review before promotion. Two further candidates cost 70 generation credits;
 Argon rejected their edited takes for vocal/knock artifacts and unnatural tails.

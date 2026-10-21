@@ -95,6 +95,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       else if(event.type==='drop')play('anchor-release',.4,anchorPosition,1,true);
     },
     hullContact(contact){return hullAudio.contact(contact);},
+    hullUnderside(event){if(enabled&&!hidden&&ready)return hullAudio.underside(event);return false;},
     impact(event){
       if(!enabled||hidden||!ready)return;
       const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
