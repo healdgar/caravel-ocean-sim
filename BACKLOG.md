@@ -446,3 +446,37 @@ referenced assets15875925bytes. Fresh visible public Chrome loaded the coastal
 scene with no warnings/errors; proof `shots/daytime-public-coast.png`.
 Source/asset receipts remain local in `/tmp/waterworld-startup-deployed.json`.
 The overnight heartbeat remains paused; this batch followed fresh daytime requests.
+
+## Finite hull exclusion and green water
+
+User reported a carved hollow with sharp inner edges when the bow plunges into
+a large crest. Source confirmed the ocean mask extruded the hull footprint to
+infinite height; an older test explicitly required that wrong above-rail mask.
+
+- Shared model-aware finite boundaries now follow exposed decks and solid cap
+  tops. Both ocean visibility paths admit continuous water above those caps;
+  below-rail hull and cabin/raised-deck space remain excluded.
+- Deck water enters all four perimeter faces, including a bow-only pulse with
+  dry side lips. Physical face lengths weight the bounded flux. Runoff starts
+  at the incoming head and travels inward; residual wash drains and dries.
+- Optional shared scene-wave sampling is connected to both ships' deck fields.
+  Its compute precedes deck updates; no self-wave propulsion force was added.
+- **407/407 native Metal tests PASS**, root serialized,198.8seconds. New test
+  proves bow-only ingress, no below-cap leak, cabin separation, retained wash,
+  drainage/wet-film persistence, current shared-wave view and disabled clears.
+  Five focused mask/deck/visibility/wake GPU checks also passed. Controlled
+  same-pose before/after renders show continuous water over the foredeck:
+  `shots/deck-boarding-legacy.png`, `shots/deck-boarding-finite.png`.
+- This is prescribed-wave visibility plus bounded thin deck water, not a
+  hydraulic overturning, flood-mass or cabin-flooding solver. No physical-iPhone
+  cost qualification. Publication is authorized; deployed bytes pending.
+
+Separate active terrain work: reuse local forestmodeler/furlong woodland assets
+and directional depth reprojection for a terrain-conforming cohesive canopy;
+varied trees and resolvable grass/rocks; no unreviewed prototype in this water
+checkpoint. Original ground-cover additions are preserved in
+`shots/terrain-next/source.patch` while the water snapshot is tested/published.
+Cloud views from above remain lower priority. Coastal/isolated-shoal surf must
+use local depth relative to wave height and wavelength; this is required shared
+breaking-water work, not a shoreline colour band. Keep its design separate from
+claims about already implemented runtime.

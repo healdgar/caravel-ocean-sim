@@ -1,6 +1,7 @@
-import { DECK_COLS, DECK_ROWS, DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
+import { DECK_COLS, DECK_ROWS, DECK_UPDATE, SCENE_DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
+import {surfaceWaveGroups} from './surface-bindings.js';
 
-export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe}) {
+export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe,surfaceWaves=null}) {
   const textures=[0,1].map(i=>device.createTexture({label:'deck water '+i,size:[DECK_COLS,DECK_ROWS],format:'rgba32float',
     usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC}));
   const views=textures.map(t=>t.createView());
@@ -11,8 +12,9 @@ export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,se
   }
   const b=buffer=>({buffer});
   const bind=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({resource,binding}))});
-  const [update,module]=await Promise.all([computePipe(DECK_UPDATE,'deck wash'),shader(DECK_RENDER,'deck water')]);
+  const [update,module]=await Promise.all([computePipe(surfaceWaves?SCENE_DECK_UPDATE:DECK_UPDATE,'deck wash'),shader(DECK_RENDER,'deck water')]);
   const groups=views.map((v,i)=>bind(update,[b(frameUBO),b(uniform),b(hullUBO),seaView,seaSampler,views[1-i],v]));
+  const waveGroups=surfaceWaveGroups(device,update,surfaceWaves);
   const pipes=await Promise.all(['washVS','runoffVS'].map(entryPoint=>device.createRenderPipelineAsync({
     label:entryPoint,layout:'auto',vertex:{module,entryPoint},
     fragment:{module,entryPoint:'washFS',targets:[{format:'rgba16float',blend:{
@@ -28,11 +30,11 @@ export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,se
     setShadows(shadows){shadowGroups=pipes.map(p=>shadows.bind(p));},
     encode(cp){
       cp.setPipeline(update);
-      for(let s=0;s<4;s++){cp.setBindGroup(0,groups[1-s%2]);cp.dispatchWorkgroups(DECK_COLS/8,DECK_ROWS/8);}
+      for(let s=0;s<4;s++){cp.setBindGroup(0,groups[1-s%2]);if(waveGroups)cp.setBindGroup(1,waveGroups[surfaceWaves.current]);cp.dispatchWorkgroups(DECK_COLS/8,DECK_ROWS/8);}
     },
     draw(pass){
       pass.setPipeline(pipes[0]);pass.setBindGroup(0,renderGroups[0]);pass.setBindGroup(1,shadowGroups[0]);pass.draw(DECK_COLS*DECK_ROWS*24);
-      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.setBindGroup(1,shadowGroups[1]);pass.draw(8*6,DECK_ROWS*2);
+      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.setBindGroup(1,shadowGroups[1]);pass.draw(8*6,2*(DECK_ROWS+DECK_COLS));
     },
   };
 }

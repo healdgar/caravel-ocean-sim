@@ -2833,11 +2833,10 @@ fn hullHalfWidth(z: f32, y: f32) -> f32 {
   return hullBreadth(station)*pow(max(0.0,1.0-depth*depth),${HULL_SECTION_POWER}+1.25*end*end*end)
     *(1.0+0.15*sin(3.14159265*depth));
 }
-// Extend the enclosed water footprint above the deck. The open-ocean wave field
-// cannot travel through solid bulwarks; overtopping is admitted at the rail by
-// the deck-water solver and then moves across the deck with finite flux.
+// Compatibility helper for the Niña. Production uses the same model-aware
+// finite boundary below, rather than extruding the waterline to infinite height.
 fn hullExcludesOcean(local:vec3f)->bool {
-  return abs(local.x)<hullHalfWidth(local.z,local.y);
+  return modelHullExcludesOcean(local,0.0);
 }
 fn shipY(value:f32)->f32 {return select(HULL_Y_SCALE,value,value>0.0);}
 fn victorySheer(z:f32)->f32 {return .085*pow(abs(z)/6.0,2.0)+.075*pow(max(0.0,-z/6.0),4.0);}
@@ -2896,6 +2895,23 @@ fn modelVesselDeck(z:f32,model:f32)->f32 {
  if(z<=${VICTORY_DESIGN.decks.forecastle.end} || z>=${VICTORY_DESIGN.decks.quarter.start}){y=${VICTORY_DESIGN.decks.quarter.height};}
  if(z>=${VICTORY_DESIGN.decks.poop.start}){y=${VICTORY_DESIGN.decks.poop.height};}
  return y+victorySheer(z);
+}
+// Solid cap tops, in canonical design units above each exposed weather deck.
+// Open quarterdeck rails have an authored low sill; this is a visual boundary,
+// not a collision model of each gap between rail posts.
+fn modelDeckBarrier(z:f32,model:f32)->f32 {
+  if(model>.5){
+    if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.605-VICTORY_DESIGN.decks.main};}
+    return select(.310,.215,z>=${VICTORY_DESIGN.decks.poop.start});
+  }
+  return select(.715,.160,z>=${QUARTERDECK_START});
+}
+fn modelHullExcludesOcean(local:vec3f,model:f32)->bool {
+  // A crest higher than the actual barrier is continuous green water above
+  // the open deck. Keep all below-deck/cabin space dry; residual deck wash is
+  // retained separately when that crest recedes.
+  if(local.y>modelVesselDeck(local.z,model)+modelDeckBarrier(local.z,model)){return false;}
+  return abs(local.x)<modelHullWidth(local.z,local.y,model);
 }
 `;
 
@@ -4853,14 +4869,10 @@ fn deckFloor(z:f32)->f32 {
   return modelVesselDeck(z,hull.rig.w);
 }
 fn deckRail(z:f32)->f32 {
- if(hull.rig.w>.5){
-  if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.58-VICTORY_DESIGN.decks.main};}
-  return select(.285,.19,z>=${VICTORY_DESIGN.decks.poop.start});
- }
- return select(0.66,0.16,z>=${QUARTERDECK_START});
+  return modelDeckBarrier(z,hull.rig.w);
 }
-fn deckMinZ()->f32 {return select(-6.3,-6.0,hull.rig.w>.5);}
-fn deckLength()->f32 {return select(11.9,12.0,hull.rig.w>.5);}
+fn deckMinZ()->f32 {return select(-6.4,-6.0,hull.rig.w>.5);}
+fn deckLength()->f32 {return 12.0;}
 fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z-deckMinZ())/deckLength()); }
 fn deckPoint(uv:vec2f)->vec3f {
   let z=uv.y*deckLength()+deckMinZ();
@@ -4884,10 +4896,23 @@ const DECK_TRANSFORM = /* wgsl */ `
 fn deckWorld(p:vec3f)->vec3f {
   return hull.origin.xyz+hull.right.xyz*p.x*(hull.size.x/3.6)+hull.up.xyz*p.y*shipY(hull.right.w)-hull.forward.xyz*p.z*(hull.size.y/12.0);
 }
+// UV is on one perimeter face. Return the actual cap lead, rather than a
+// dimensioned-in-metres offset accidentally multiplied by vessel scale.
+fn deckLip(uv:vec2f,sideFace:bool)->vec3f {
+  var p=deckPoint(uv);
+  if(sideFace){
+    let side=select(-1.0,1.0,uv.x>.5);
+    let nina=deckWidth(p.z)+.04;
+    let victory=modelHullWidth(p.z,p.y+deckRail(p.z),hull.rig.w);
+    p.x=side*select(nina,victory,hull.rig.w>.5);
+  }
+  return p;
+}
 `;
 
 // Conservative, positivity-limited downhill exchange. This is a thin-water visual
-// model, not a flooding/stability solver. Sea enters at the rail; stored water
+// model, not a flooding/stability solver. Depth is WORLD metres along hull.up;
+// deck coordinates/barrier heights remain model-local. Sea enters at the rail; stored water
 // crosses the deck, drains through scuppers, and leaves a slower-drying wet film.
 const DECK_UPDATE = FRAME_WGSL + INTERACTION_TYPES + DECK_PROFILE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
@@ -4926,28 +4951,40 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
   let p=cellPoint(c);let area=cellArea(p);let old=textureLoad(previousDeck,c,0);
   let q=vec4f(flux(c,c+vec2i(1,0),dt),flux(c,c-vec2i(1,0),dt),flux(c,c+vec2i(0,1),dt),flux(c,c-vec2i(0,1),dt));
   var depth=max(0.0,old.x-dot(q,vec4f(1.0))*dt/area);
-  var ingress=0.0;var drain=0.0;
-  if(c.x==0 || c.x==DECK_SIZE.x-1) {
-    let side=select(-1.0,1.0,c.x>0);
-    let edge=vec3f(side*(deckWidth(p.z)+0.10),p.y,p.z);
-    let rail=deckWorld(edge+vec3f(0.0,deckRail(p.z),0.0));
+  var ingress=0.0;var boundaryFlow=0.0;var perimeter=0.0;
+  // All four perimeter faces participate. Corner cells own two distinct faces;
+  // their physical lengths weight both volume and the rendered net flow.
+  for(var edge=0u;edge<4u;edge++){
+    let sideFace=edge<2u;let positive=(edge&1u)!=0u;
+    let onBoundary=select(select(c.y==0,c.y==DECK_SIZE.y-1,positive),select(c.x==0,c.x==DECK_SIZE.x-1,positive),sideFace);
+    if(!onBoundary){continue;}
+    var uv=(vec2f(c)+.5)/vec2f(DECK_SIZE);
+    if(sideFace){uv.x=select(0.0,1.0,positive);}else{uv.y=select(0.0,1.0,positive);}
+    let lip=deckLip(uv,sideFace);let barrier=deckRail(lip.z);
+    let rail=deckWorld(lip+vec3f(0.0,barrier,0.0));
+    // Convert vertical separation to normal WORLD depth once. shipY converts
+    // the local rail through deckWorld; applying it again here breaks scale.
     let over=max(0.0,(interactionSea(rail.xz)-rail.y)/max(hull.up.y,0.35));
-    let face=deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y);
-    ingress=min(4.0,1.3*pow(over,1.5));
-    // Scuppers between rail posts; quarterdeck railing is open underneath.
-    let scupper=select(0.0,0.8,abs(fract((5.3-p.z)/0.82)-0.5)<0.17);
-    let opening=select(scupper,1.0,hull.rig.w<.5&&p.z>=${QUARTERDECK_START});
-    drain=select(min(depth*area/(dt*face),opening*sqrt(19.62*depth)*min(depth,0.12)+1.3*pow(max(0.0,depth-deckRail(p.z)*shipY(hull.right.w)),1.5)),0.0,over>0.0);
-    depth+=(ingress-drain)*face*dt/area;
+    let face=select(2.0*deckWidth(lip.z)*(hull.size.x/3.6)/f32(DECK_SIZE.x),deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y),sideFace);
+    let incoming=min(4.0,1.3*pow(over,1.5));
+    // Solid bow/transom faces gain no invented scuppers. Open afterdeck rails
+    // still drain underneath; existing side scuppers retain their positions.
+    let scupper=select(0.0,0.8,sideFace&&abs(fract((5.3-lip.z)/0.82)-0.5)<0.17);
+    let opening=select(scupper,1.0,hull.rig.w<.5&&lip.z>=${QUARTERDECK_START});
+    let potential=opening*sqrt(19.62*depth)*min(depth,.12)+1.3*pow(max(0.0,depth-barrier*shipY(hull.right.w)),1.5);
+    let drain=select(min(depth*area/(dt*face),potential),0.0,over>0.0);
+    depth+=(incoming-drain)*face*dt/area;
+    ingress+=incoming*face;boundaryFlow+=(drain-incoming)*face;perimeter+=face;
   }
   // Bound violent immersion; do not accumulate an unbounded reservoir inside the hull.
   depth=clamp(depth-0.0015*dt,0.0,1.2);
-  let turbulence=min(1.0,ingress*0.8+dot(abs(q),vec4f(1.0))/area*0.15);
+  let turbulence=min(1.0,ingress/max(perimeter,.001)*0.8+dot(abs(q),vec4f(1.0))/area*0.15);
   let froth=max(old.y*exp(-dt*1.1),turbulence)*smoothstep(0.001,0.025,depth);
   let wet=max(old.z*exp(-dt*0.045),smoothstep(0.0005,0.01,depth));
-  textureStore(nextDeck,c,vec4f(depth,froth,wet,drain-ingress));
+  textureStore(nextDeck,c,vec4f(depth,froth,wet,boundaryFlow/max(perimeter,.001)));
 }
 `;
+const SCENE_DECK_UPDATE=coupleSurfaceHeight(DECK_UPDATE,'interactionDisp(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'seaSamp'});
 
 const DECK_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_LIGHTING + INTERACTION_TYPES + DECK_PROFILE + SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
@@ -4978,18 +5015,30 @@ fn corner(v:u32)->vec2f {
 }
 // Continuous strips through scuppers, plus inward curtains while a crest overtops.
 @vertex fn runoffVS(@builtin(vertex_index) v:u32,@builtin(instance_index) inst:u32)->DeckVertex {
-  let side=select(-1.0,1.0,inst>=${DECK_ROWS}u);let row=inst%${DECK_ROWS}u;
+  let sideFace=inst<${DECK_ROWS*2}u;
+  let index=select(inst-${DECK_ROWS*2}u,inst,sideFace);
+  let count=select(${DECK_COLS}u,${DECK_ROWS}u,sideFace);
+  let side=select(-1.0,1.0,index>=count);let row=index%count;
   let c=corner(v%6u);let segment=v/6u;
   let fall=(f32(segment)+c.y)/8.0;
-  let uv=vec2f(select(0.0,1.0,side>0.0),(f32(row)+c.x)/${DECK_ROWS}.0);
+  let along=(f32(row)+c.x)/f32(count);
+  let uv=select(vec2f(along,select(0.0,1.0,side>0.0)),vec2f(select(0.0,1.0,side>0.0),along),sideFace);
   let water=sampleDeck(uv);
-  var p=deckPoint(uv);let incoming=water.w<0.0;
-  let flow=abs(water.w);let duration=min(0.85,sqrt(2.0*max(0.1,p.y*shipY(hull.right.w)+1.2)/9.81));let t=fall*duration;
-  p.x+=side*(0.16+0.55*t);
+  var p=deckLip(uv,sideFace);let incoming=water.w<0.0;let flow=abs(water.w);
+  let verticalScale=shipY(hull.right.w);let barrier=deckRail(p.z)*verticalScale;
+  // Invert the same bounded weir law to recover an incoming crest head. Start
+  // on that cap lead and travel INWARD; outgoing water leaves toward the sea.
+  let head=pow(flow/1.3,2.0/3.0);
   let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*shipY(hull.right.w));
-  p.y+=select((0.03+outlet)/shipY(hull.right.w),deckRail(p.z)+0.12/shipY(hull.right.w),incoming);
-  if(incoming){p.x=side*(deckWidth(p.z)+0.09-(0.5+min(flow,2.0))*t);}
-  p.z+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*0.012*fall;
+  let start=select(.03+outlet,barrier+head,incoming);
+  let fallHeight=select(max(.1,deckWorld(p).y+start*hull.up.y+.4),max(.02,(start-water.x)*max(hull.up.y,.35)),incoming);
+  let duration=clamp(sqrt(2.0*fallHeight/9.81),.06,.85);let t=fall*duration;
+  let speed=clamp(sqrt(19.62*select(max(water.x,.02),head,incoming)),.5,4.0);
+  let travel=select(1.0,-1.0,incoming)*speed*t;
+  let direction=select(vec2f(0,side),vec2f(side,0),sideFace);
+  p.x+=direction.x*travel/(hull.size.x/3.6);p.z+=direction.y*travel/(hull.size.y/12.0);
+  p.y+=start/verticalScale;
+  p.x+=sin(p.z*31.0+F.camPos.w*6.0+fall*5.0)*.012*fall/(hull.size.x/3.6);
   var o:DeckVertex;o.world=deckWorld(p)-vec3f(0.0,4.905*t*t,0.0);o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
   o.uv=uv;o.local=p;o.curtain=vec2f(fall+0.001,flow);return o;
 }
@@ -6032,7 +6081,7 @@ const OCEAN_HULL_MASK = /* wgsl */ `
       if(H.rig.z>.5){
         let relative=in.rel+F.camPos.xyz-H.origin.xyz;
         let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/shipY(H.right.w),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-        if(abs(q.x)<modelHullWidth(q.z,q.y,H.rig.w)) { discard; return vec4f(0); }
+        if(modelHullExcludesOcean(q,H.rig.w)) { discard; return vec4f(0); }
       }
     }`).join('\n')}
   }
@@ -6179,7 +6228,8 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let bub = textureSample(foamTex, sampR, xz * 1.9 + vec2f(0.21, 0.53)).g;
 
   // BEGIN HULL EARLY EXIT
-  // Deck wash owns water inside the hull. Skip shadow filters, reflections and
+  // Exclude enclosed water below the rails. Overtopping crests remain continuous
+  // above open decks; retained wash takes over as they recede. Skip reflections and
   // lighting for these discarded fragments; preserve unmasked debug views.
 ${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
@@ -12163,7 +12213,8 @@ async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexB
 
 // ---- js/deck.js ----
 
-async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe}) {
+
+async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe,surfaceWaves=null}) {
   const textures=[0,1].map(i=>device.createTexture({label:'deck water '+i,size:[DECK_COLS,DECK_ROWS],format:'rgba32float',
     usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC}));
   const views=textures.map(t=>t.createView());
@@ -12174,8 +12225,9 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
   }
   const b=buffer=>({buffer});
   const bind=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({resource,binding}))});
-  const [update,module]=await Promise.all([computePipe(DECK_UPDATE,'deck wash'),shader(DECK_RENDER,'deck water')]);
+  const [update,module]=await Promise.all([computePipe(surfaceWaves?SCENE_DECK_UPDATE:DECK_UPDATE,'deck wash'),shader(DECK_RENDER,'deck water')]);
   const groups=views.map((v,i)=>bind(update,[b(frameUBO),b(uniform),b(hullUBO),seaView,seaSampler,views[1-i],v]));
+  const waveGroups=surfaceWaveGroups(device,update,surfaceWaves);
   const pipes=await Promise.all(['washVS','runoffVS'].map(entryPoint=>device.createRenderPipelineAsync({
     label:entryPoint,layout:'auto',vertex:{module,entryPoint},
     fragment:{module,entryPoint:'washFS',targets:[{format:'rgba16float',blend:{
@@ -12191,11 +12243,11 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
     setShadows(shadows){shadowGroups=pipes.map(p=>shadows.bind(p));},
     encode(cp){
       cp.setPipeline(update);
-      for(let s=0;s<4;s++){cp.setBindGroup(0,groups[1-s%2]);cp.dispatchWorkgroups(DECK_COLS/8,DECK_ROWS/8);}
+      for(let s=0;s<4;s++){cp.setBindGroup(0,groups[1-s%2]);if(waveGroups)cp.setBindGroup(1,waveGroups[surfaceWaves.current]);cp.dispatchWorkgroups(DECK_COLS/8,DECK_ROWS/8);}
     },
     draw(pass){
       pass.setPipeline(pipes[0]);pass.setBindGroup(0,renderGroups[0]);pass.setBindGroup(1,shadowGroups[0]);pass.draw(DECK_COLS*DECK_ROWS*24);
-      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.setBindGroup(1,shadowGroups[1]);pass.draw(8*6,DECK_ROWS*2);
+      pass.setPipeline(pipes[1]);pass.setBindGroup(0,renderGroups[1]);pass.setBindGroup(1,shadowGroups[1]);pass.draw(8*6,2*(DECK_ROWS+DECK_COLS));
     },
   };
 }
@@ -12205,11 +12257,11 @@ async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSample
 
 
 
-async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, skyView, sunVis, shader, computePipe }) {
+async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, skyView, sunVis, shader, computePipe, surfaceWaves=null }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
-  const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView,sunVis,shader,computePipe});
+  const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView,sunVis,shader,computePipe,surfaceWaves});
   const contacts = device.createBuffer({ label: 'hull contacts', size: CONTACT_COUNT * 64, usage: bu.STORAGE | bu.COPY_SRC });
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
@@ -14752,7 +14804,7 @@ async function main() {
   try { crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,modelId:shipAsset.model.id}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
-  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe });
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe, surfaceWaves });
   interaction.setShadows(shadows);
   const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
   wetness.connect(interaction,spindrift,fullArr(dispTex),samplerSim);
@@ -14763,7 +14815,7 @@ async function main() {
   let companionCrew=null;
   try{companionCrew=await createCrew({waterOptics,device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
   catch(error){console.warn('Companion crew initialization:',error);}
-  const companionInteraction=await createWaterInteraction({device,frameUBO,hullUBO:companionHullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe});
+  const companionInteraction=await createWaterInteraction({device,frameUBO,hullUBO:companionHullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves});
   companionInteraction.setShadows(companionShadows);
   companionWetness.connect(companionInteraction,spindrift,fullArr(dispTex),samplerSim);
   const vessels=[
@@ -15712,8 +15764,8 @@ async function main() {
       cp.setBindGroup(0, bgSimMips[m - 1]);
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
-    for(const v of vessels)v.interaction.encode(cp);
     surfaceWaves.encode(cp);
+    for(const v of vessels)v.interaction.encode(cp);
     hullContactProbe.encode(cp);
     spindrift.encode(cp);
     marineLife.encode(cp);

@@ -48,7 +48,7 @@ const OCEAN_HULL_MASK = /* wgsl */ `
       if(H.rig.z>.5){
         let relative=in.rel+F.camPos.xyz-H.origin.xyz;
         let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/shipY(H.right.w),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
-        if(abs(q.x)<modelHullWidth(q.z,q.y,H.rig.w)) { discard; return vec4f(0); }
+        if(modelHullExcludesOcean(q,H.rig.w)) { discard; return vec4f(0); }
       }
     }`).join('\n')}
   }
@@ -195,7 +195,8 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let bub = textureSample(foamTex, sampR, xz * 1.9 + vec2f(0.21, 0.53)).g;
 
   // BEGIN HULL EARLY EXIT
-  // Deck wash owns water inside the hull. Skip shadow filters, reflections and
+  // Exclude enclosed water below the rails. Overtopping crests remain continuous
+  // above open decks; retained wash takes over as they recede. Skip reflections and
   // lighting for these discarded fragments; preserve unmasked debug views.
 ${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT

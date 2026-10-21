@@ -725,7 +725,7 @@ test('bow contacts, persistent wake, impact spray, landing foam, and resets agre
   } finally { await page.close(); }
 });
 
-test('gunwales exclude the external wave field above the deck without hiding surrounding water', {timeout:120000}, async()=>{
+test('finite gunwales block below-rail water and admit overtopping crests above both weather decks', {timeout:120000}, async()=>{
   const page=await browser.newPage();
   try{
     await page.route('**/__hull_mask_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
@@ -734,21 +734,28 @@ test('gunwales exclude the external wave field above the deck without hiding sur
       const {HULL_PROFILE}=await import('/js/wgsl/hull.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice();
       const errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      // W is the model selector. Main/raised/poop decks, sealed cabin space,
+      // narrow bow, surrounding water and above-rail admission are independent.
       const locations=[
-        [0,0,0], [0,1,0], [0,1.8,0], [1.7,1.8,0], // below/above rail, inside hull
-        [0,3,4], [0,1.8,-6], // quarterdeck and narrow bow
-        [2,1.8,0], [1,1.8,-6], [0,1.8,-6.5], [0,3,5.7], [0,-2,0],
+        [0,0,0,0], [0,1,0,0], [0,1.8,0,0], [1.7,1.8,0,0],
+        [0,2.2,4,0], [0,3,4,0], [0,2,-6,0],
+        [2,1.8,0,0], [1,1.8,-6,0], [0,1.8,-6.5,0], [0,3,5.7,0], [0,-2,0,0],
+        [0,1.60,0,1], [0,1.62,0,1], // Victory waist cap1.605
+        [0,1.8,-4.5,1], [0,2.2,-4.5,1], // forecastle
+        [0,1.8,3,1], [0,2.2,3,1], // quarterdeck
+        [0,2.2,5,1], [0,2.6,5,1], // poop
+        [0,4,0,1], [4,1.0,0,1],
       ];
       const B=GPUBufferUsage,size=locations.length*4;
       const points=device.createBuffer({size:locations.length*16,usage:B.STORAGE|B.COPY_DST});
       const output=device.createBuffer({size,usage:B.STORAGE|B.COPY_SRC});
       const read=device.createBuffer({size,usage:B.COPY_DST|B.MAP_READ});
-      device.queue.writeBuffer(points,0,new Float32Array(locations.flatMap(p=>[...p,0])));
+      device.queue.writeBuffer(points,0,new Float32Array(locations.flat()));
       const module=device.createShaderModule({code:HULL_PROFILE+`
         @group(0) @binding(0) var<storage,read> points:array<vec4f>;
         @group(0) @binding(1) var<storage,read_write> result:array<u32>;
         @compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id:vec3u){
-          result[id.x]=select(0u,1u,hullExcludesOcean(points[id.x].xyz));
+          result[id.x]=select(0u,1u,modelHullExcludesOcean(points[id.x].xyz,points[id.x].w));
         }
       `});
       const pipe=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
@@ -758,8 +765,8 @@ test('gunwales exclude the external wave field above the deck without hiding sur
       const mask=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();device.destroy();return{mask,errors};
     });
     assert.deepEqual(result.errors,[]);
-    assert.deepEqual(result.mask,[1,1,1,1,1,1,0,0,0,0,0],
-      'crests above the rail must enter via deck wash, not reappear as ocean inside the hull');
+    assert.deepEqual(result.mask,[1,1,0,0,1,0,0,0,0,0,0,0,1,0,1,0,1,0,1,0,0,0],
+      'solid hull/cabin remains excluded; a crest above the finite barrier crosses the exposed deck');
   }finally{await page.close();}
 });
 
@@ -807,9 +814,9 @@ test('deck overtopping retains water, flows downhill, drains, and dries independ
         const a=new Float32Array(read.getMappedRange().slice(0));read.unmap();read.destroy();
         let water=0,wet=0,drain=0,center=0,moment=0,roof=0,forecastle=0,max=0,finite=true;
         for(let i=0;i<W*H;i++){
-          const z=(Math.floor(i/W)+0.5)/H*11.9-6.3,x=i%W;
+          const z=(Math.floor(i/W)+0.5)/H*12-6.4,x=i%W;
           const width=Math.max(0.04,1.8*Math.sqrt(Math.max(0.0006,1-(z<0?-z/6.4:z/7.4)**2))-0.04);
-          const volume=a[i*4]*2*width/W*11.9/H;
+          const volume=a[i*4]*2*width/W*12/H;
           water+=volume;wet+=a[i*4+2];drain+=Math.max(0,a[i*4+3]);
           moment+=(x/(W-1)*2-1)*volume;max=Math.max(max,a[i*4]);
           if(x>10 && x<22)center+=volume;if(z>=2.7)roof+=volume;

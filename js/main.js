@@ -414,7 +414,7 @@ async function main() {
   try { crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,modelId:shipAsset.model.id}); }
   catch(error) { crewError='Crew unavailable'; console.warn('Crew initialization:',error); }
   let bgCaravel;
-  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe });
+  const interaction = await createWaterInteraction({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), seaSampler: samplerSim, envView: envCubeView, transView, skyView, sunVis:sunVisBuf, shader, computePipe, surfaceWaves });
   interaction.setShadows(shadows);
   const spindrift = await createSpindrift({ device, frameUBO, hullUBO, seaView: fullArr(dispTex), derivView: fullArr(derivTex), seaSampler: samplerSim, envView: envCubeView, transView, sunVis: sunVisBuf, shader, computePipe, shadows });
   wetness.connect(interaction,spindrift,fullArr(dispTex),samplerSim);
@@ -425,7 +425,7 @@ async function main() {
   let companionCrew=null;
   try{companionCrew=await createCrew({waterOptics,device,frameUBO,hullUBO:companionHullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:companionShadows,wetness:companionWetness,shader,format:HDR,samples:MSAA,shared:crew?.assets,modelId:shipAsset.model.id});}
   catch(error){console.warn('Companion crew initialization:',error);}
-  const companionInteraction=await createWaterInteraction({device,frameUBO,hullUBO:companionHullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe});
+  const companionInteraction=await createWaterInteraction({device,frameUBO,hullUBO:companionHullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves});
   companionInteraction.setShadows(companionShadows);
   companionWetness.connect(companionInteraction,spindrift,fullArr(dispTex),samplerSim);
   const vessels=[
@@ -1374,8 +1374,8 @@ async function main() {
       cp.setBindGroup(0, bgSimMips[m - 1]);
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
-    for(const v of vessels)v.interaction.encode(cp);
     surfaceWaves.encode(cp);
+    for(const v of vessels)v.interaction.encode(cp);
     hullContactProbe.encode(cp);
     spindrift.encode(cp);
     marineLife.encode(cp);

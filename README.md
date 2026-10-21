@@ -7,7 +7,7 @@ A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, im
 [Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
 The current checkpoint adds denser forest geometry, revised ship wakes and a
-shared surface-disturbance field. **406 tests pass on native Metal**, including
+shared surface-disturbance field. **407 tests pass on native Metal**, including
 rendered whale-wave coupling and all three packaged pages. Physical-iPhone
 performance remains unmeasured for this batch; see [the checkpoint log](BACKLOG.md).
 
@@ -708,7 +708,7 @@ Physical basis: [Anguelova et al., *Spume Drops Produced by the Wind Tearing of 
 
 ### Deck wash and buoyancy
 
-A 32 × 96 hull-local water field samples the displaced sea at the rails. Overtopping adds water at the edges; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff share the scene lighting. Falling sheets use their actual surface normals, sun glints, bubble scattering, Fresnel transparency and directional marine haze; they no longer use fixed-opacity blue reflection strips. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls deck wash.
+A 32 × 96 hull-local water field samples the displaced sea and shared scene waves at all four deck boundaries. Overtopping adds water across bow, stern and side caps; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff share the scene lighting. Falling sheets start at the incoming crest head, use their actual surface normals, sun glints, bubble scattering, Fresnel transparency and directional marine haze. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls retained deck wash.
 
 The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull at its loaded draft relative to the sampled surface. Large crests can still overtop it.
 
@@ -1290,11 +1290,15 @@ scattering. These inform the approximation, not a claim of calibrated optics.
 
 All camera modes share the ocean depth buffer, so
 water, hull, deck wash, bow sheets, and spray occlude each other consistently. A world-space
-hull volume excludes the open-ocean surface inside the bulwarks and stern cabin,
-including above rail height. Previously, crests above the rail could reappear
-inside the deck without crossing a boundary, bypassing the gunwales and drawing
-over the deck-wash field. Water aboard now comes from the deck solver's measured
-rail overtopping, finite flow across the deck, retention and drainage. Buoyancy,
+hull volume excludes the open-ocean surface below finite deck barriers and inside
+the stern cabin. Its upper boundary follows each model's weather deck and cap
+height. A crest above that boundary remains continuous across the exposed deck;
+the hull no longer carves an infinitely tall hole into a submerged bow. Retained
+deck wash handles the smaller water left behind as the sea recedes. This is
+visual admission of a prescribed wave plus bounded deck flow, not a coupled
+hydraulic overturning or cabin-flooding solver. Below-rail waves remain excluded;
+the deck solver admits boundary overtopping, retains wash and drains it after
+the larger crest has passed. Buoyancy,
 freeboard and sea presets are unchanged. The neutral oak albedo texture has no
 intentional scene lighting and is embedded into both standalone HTML bundles. It was created
 with the built-in image generation tool using this prompt:

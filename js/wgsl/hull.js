@@ -24,11 +24,10 @@ fn hullHalfWidth(z: f32, y: f32) -> f32 {
   return hullBreadth(station)*pow(max(0.0,1.0-depth*depth),${HULL_SECTION_POWER}+1.25*end*end*end)
     *(1.0+0.15*sin(3.14159265*depth));
 }
-// Extend the enclosed water footprint above the deck. The open-ocean wave field
-// cannot travel through solid bulwarks; overtopping is admitted at the rail by
-// the deck-water solver and then moves across the deck with finite flux.
+// Compatibility helper for the Niña. Production uses the same model-aware
+// finite boundary below, rather than extruding the waterline to infinite height.
 fn hullExcludesOcean(local:vec3f)->bool {
-  return abs(local.x)<hullHalfWidth(local.z,local.y);
+  return modelHullExcludesOcean(local,0.0);
 }
 fn shipY(value:f32)->f32 {return select(HULL_Y_SCALE,value,value>0.0);}
 fn victorySheer(z:f32)->f32 {return .085*pow(abs(z)/6.0,2.0)+.075*pow(max(0.0,-z/6.0),4.0);}
@@ -87,5 +86,22 @@ fn modelVesselDeck(z:f32,model:f32)->f32 {
  if(z<=${VICTORY_DESIGN.decks.forecastle.end} || z>=${VICTORY_DESIGN.decks.quarter.start}){y=${VICTORY_DESIGN.decks.quarter.height};}
  if(z>=${VICTORY_DESIGN.decks.poop.start}){y=${VICTORY_DESIGN.decks.poop.height};}
  return y+victorySheer(z);
+}
+// Solid cap tops, in canonical design units above each exposed weather deck.
+// Open quarterdeck rails have an authored low sill; this is a visual boundary,
+// not a collision model of each gap between rail posts.
+fn modelDeckBarrier(z:f32,model:f32)->f32 {
+  if(model>.5){
+    if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.605-VICTORY_DESIGN.decks.main};}
+    return select(.310,.215,z>=${VICTORY_DESIGN.decks.poop.start});
+  }
+  return select(.715,.160,z>=${QUARTERDECK_START});
+}
+fn modelHullExcludesOcean(local:vec3f,model:f32)->bool {
+  // A crest higher than the actual barrier is continuous green water above
+  // the open deck. Keep all below-deck/cabin space dry; residual deck wash is
+  // retained separately when that crest recedes.
+  if(local.y>modelVesselDeck(local.z,model)+modelDeckBarrier(local.z,model)){return false;}
+  return abs(local.x)<modelHullWidth(local.z,local.y,model);
 }
 `;
