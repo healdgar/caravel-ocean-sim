@@ -1691,6 +1691,8 @@ test('compact helm and icon panels remain reachable across phone, tablet and des
     await page.addInitScript(instrumentRenderer);
     await page.goto(`${origin}/index.html?profile=1&w=32&h=32`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    await step(page);
+    await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     const reachable=async(selector,touch=true)=>{
       const box=await page.locator(selector).evaluate(el=>{
         const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
@@ -1766,6 +1768,8 @@ test('tap helm commands and touch look stay independent, with real sail orders a
     });
     await page.goto(`${origin}/?boatSpeed=6&w=32&h=32`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    await step(page);
+    await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail');
     await page.getByRole('button',{name:'Rudder to starboard',exact:true}).tap();
     assert.equal(await page.locator('#boat-rudder').inputValue(),'5');
@@ -1811,6 +1815,8 @@ test('resolution controls resize GPU targets and explicit dimensions stay fixed'
     await page.addInitScript(instrumentRenderer);
     await page.goto(`${origin}/index.html?boat=1`);
     await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    await step(page);
+    await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     await page.getByRole('button',{name:'Sea settings',exact:true}).click();
     assert.equal(await page.getByLabel('Render resolution').inputValue(),'auto');
     for(const [mode,width,height] of [['0.5',160,180],['native',320,360],['0.75',240,270]]) {
@@ -2076,7 +2082,7 @@ for (const bundle of ['ocean.html', 'ocean.min.html', 'docs/index.html']) {
       await page.goto(`${origin}/${bundle}?w=1&h=1`);
       await page.waitForFunction(() => check.callback||document.querySelector('#err')?.textContent, undefined, { polling: 100, timeout: 90000 });
       assert.equal(await page.locator('#err').textContent(),'');
-      assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true,'both embedded crew assets and pipelines initialize');
+      assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true,'both crew assets and pipelines initialize');
       assert.deepEqual(await page.evaluate(async () => {
         await check.device.queue.onSubmittedWorkDone();
         return check.errors;
@@ -2246,8 +2252,13 @@ test('sailing instruments persist independent switches, share overrides, and hid
   const page=await browser.newPage({viewport:{width:402,height:666}});
   try{
     await page.addInitScript(instrumentRenderer);
-    const load=async query=>{await page.goto(`${origin}/index.html?boat=1&w=32&h=32&${query}`);await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});};
-    await load('windDir=90&boatHeading=0&windSpeed=8');await step(page,150);
+    const load=async query=>{
+      await page.goto(`${origin}/index.html?boat=1&w=32&h=32&${query}`);
+      await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+      await step(page);
+      await page.waitForFunction(()=>window.oceanStartup.state==='ready');
+    };
+    await load('windDir=90&boatHeading=0&windSpeed=8');
     assert.equal(await page.locator('#sailing-instruments').isVisible(),true);
     assert.match(await page.locator('#sailing-cue').textContent(),/In irons/);
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
@@ -2343,6 +2354,8 @@ test('rain variants, lightning illumination and stop controls work in the render
     await page.goto(`${origin}/?view=ship&w=160&h=120&sunElev=-2&clouds=.9&rain=1&thunder=1`);
     await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:30000});
     assert.equal(await page.locator('#err').textContent(),'');assert.deepEqual(startupErrors,[]);
+    await step(page);
+    await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     await page.getByRole('button',{name:'Sea settings',exact:true}).click();
     for(const type of ['0','1','2','3']){
       await page.getByLabel('Precipitation type').selectOption(type);const frame=await step(page);

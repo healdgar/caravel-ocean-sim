@@ -10,6 +10,18 @@
   [hidden] { display:none!important; }
   #c { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
   #c:active { cursor:grabbing; }
+  #ocean-startup { position:fixed; inset:0; z-index:30; display:flex; overflow:auto; box-sizing:border-box; padding:max(24px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left)); background:radial-gradient(ellipse at 50% 30%,#213a47,#091820 75%); }
+  .ocean-startup-card { width:100%; max-width:380px; margin:auto; box-sizing:border-box; padding:28px; border:1px solid #ffffff26; border-radius:12px; background:#101d25ed; box-shadow:0 16px 60px #0004; }
+  .ocean-startup-name { margin:0 0 18px; color:var(--gold); font-size:11px; letter-spacing:.14em; }
+  #ocean-startup-title { margin:0 0 12px; font-size:26px; font-weight:500; line-height:1.2; }
+  #ocean-startup-stage { margin:0; font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
+  .ocean-startup-bar { height:3px; margin:22px 0 0; overflow:hidden; background:#ffffff16; border-radius:2px; }
+  .ocean-startup-bar span { display:block; width:35%; height:100%; background:var(--gold); animation:ocean-startup-drift 1.8s ease-in-out infinite; }
+  #ocean-startup-hint { margin:16px 0 0; color:var(--muted); font-size:12px; }
+  #ocean-startup-retry { margin-top:20px; min-height:44px; border-color:var(--gold); }
+  #ocean-startup[data-state=failed] .ocean-startup-bar { display:none; }
+  @keyframes ocean-startup-drift { from { transform:translateX(-110%); } to { transform:translateX(390%); } }
+  @media (prefers-reduced-motion:reduce) { .ocean-startup-bar span { animation:none; margin-inline:auto; } }
   button,input,select,summary { touch-action:manipulation; }
   button { font:inherit; color:var(--ink); background:#24333c; border:1px solid #ffffff24; border-radius:7px; padding:7px 12px; cursor:pointer; min-height:36px; }
   button:hover { background:#374752; }
@@ -314,7 +326,64 @@ Reference SHA-256: `f54976c233c708811065981f00a1be9ff6b3c6a56880b34b36d391720cd3
 -->
 </head>
 <body>
-<canvas id="c"></canvas>
+<div id="ocean-startup" data-state="loading" data-stage="module" role="dialog" aria-modal="true" aria-labelledby="ocean-startup-title" aria-describedby="ocean-startup-stage" tabindex="-1">
+  <div class="ocean-startup-card">
+    <p class="ocean-startup-name">SEASICK SIMULATOR</p>
+    <h1 id="ocean-startup-title">Preparing to sail</h1>
+    <p id="ocean-startup-stage" role="status" aria-live="polite" aria-atomic="true">Loading the sailing simulation…</p>
+    <div class="ocean-startup-bar" role="progressbar" aria-label="Loading the sailing scene"><span></span></div>
+    <p id="ocean-startup-hint" role="status" aria-live="polite" hidden>Still preparing the scene. Graphics setup and large models can take longer on a first visit.</p>
+    <button id="ocean-startup-retry" type="button" hidden>Retry</button>
+  </div>
+</div>
+<script>
+(() => {
+  const oceanBootOverlay=document.getElementById('ocean-startup');
+  const oceanBootTitle=document.getElementById('ocean-startup-title');
+  const oceanBootStage=document.getElementById('ocean-startup-stage');
+  const oceanBootHint=document.getElementById('ocean-startup-hint');
+  const oceanBootRetry=document.getElementById('ocean-startup-retry');
+  let oceanBootState='loading';
+  const oceanBootMark=name=>{if(window.performance?.mark)performance.mark('ocean-startup-'+name);};
+  const oceanBootTimer=setTimeout(()=>{if(oceanBootState==='loading')oceanBootHint.hidden=false;},10000);
+  const oceanBootError=event=>{
+    if(oceanBootState!=='loading')return;
+    if(event.target instanceof HTMLScriptElement)window.oceanStartup.fail('The sailing simulation could not be loaded. Check your connection and retry.');
+    else if(event instanceof ErrorEvent)window.oceanStartup.fail(event.error||event.message||'The sailing simulation could not start.');
+  };
+  const oceanBootRejection=event=>{if(oceanBootState==='loading')window.oceanStartup.fail(event.reason);};
+  const oceanBootKeyboard=event=>{
+    if(oceanBootState==='ready')return;
+    event.stopImmediatePropagation();
+    if(event.key==='Tab'){event.preventDefault();(oceanBootState==='failed'?oceanBootRetry:oceanBootOverlay).focus();}
+  };
+  window.oceanStartup=Object.freeze({
+    get state(){return oceanBootState;},
+    stage(name,label){
+      if(oceanBootState!=='loading')return;
+      oceanBootOverlay.dataset.stage=name;oceanBootStage.textContent=label;oceanBootMark(name);
+    },
+    ready(){
+      if(oceanBootState!=='loading')return;
+      oceanBootState='ready';oceanBootOverlay.dataset.state='ready';clearTimeout(oceanBootTimer);oceanBootMark('ready');
+      const oceanBootHadFocus=oceanBootOverlay.contains(document.activeElement);oceanBootOverlay.hidden=true;
+      removeEventListener('error',oceanBootError,true);removeEventListener('unhandledrejection',oceanBootRejection);removeEventListener('keydown',oceanBootKeyboard,true);
+      if(oceanBootHadFocus)document.getElementById('c')?.focus({preventScroll:true});
+    },
+    fail(error){
+      if(oceanBootState!=='loading')return;
+      oceanBootState='failed';oceanBootOverlay.dataset.state='failed';clearTimeout(oceanBootTimer);oceanBootMark('failed');
+      oceanBootTitle.textContent='Unable to set sail';oceanBootStage.setAttribute('role','alert');oceanBootStage.setAttribute('aria-live','assertive');
+      oceanBootStage.textContent=error?.message||String(error||'The sailing simulation could not start.');
+      oceanBootHint.hidden=true;oceanBootRetry.hidden=false;oceanBootRetry.focus();
+    },
+  });
+  oceanBootRetry.addEventListener('click',()=>location.reload());
+  addEventListener('error',oceanBootError,true);addEventListener('unhandledrejection',oceanBootRejection);addEventListener('keydown',oceanBootKeyboard,true);
+  oceanBootMark('bootstrap');oceanBootOverlay.focus({preventScroll:true});
+})();
+</script>
+<canvas id="c" tabindex="-1" aria-label="Ocean sailing scene"></canvas>
 <div id="hud">
   <div id="fps">starting…</div>
   <div class="help">click: mouse look · WASD move · Space/E up · Q/C down · Shift fast · wheel speed · H panel</div>
@@ -13751,8 +13820,8 @@ const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
 const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
 const D2R = Math.PI / 180;
-const GU = GPUBufferUsage;
-const TU = GPUTextureUsage;
+const GU = globalThis.GPUBufferUsage;
+const TU = globalThis.GPUTextureUsage;
 
 // ----------------------------------------------------------------------------------------
 // Tunable parameters (UI panel edits these)
@@ -13789,6 +13858,7 @@ const P = {
 const CASC_L = [1103.0, 211.3, 39.7, 7.43, 1.393, 0.2617];
 
 function fail(msg) {
+  window.oceanStartup?.fail(msg);
   const el = document.getElementById('err');
   el.style.display = 'block';
   el.textContent = msg;
@@ -13814,6 +13884,7 @@ function mat4Mul(out, a, b) {
 }
 
 async function main() {
+  window.oceanStartup?.stage('adapter','Starting the graphics device…');
   if (!navigator.gpu) fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) fail('No WebGPU adapter found.');
@@ -13821,14 +13892,15 @@ async function main() {
   const device = await adapter.requestDevice({
     requiredFeatures: hasTS ? ['timestamp-query'] : [],
   });
-  device.lost.then((i) => log('device lost: ' + i.message));
-  let firstGpuError = false;
-  device.onuncapturederror = (e) => { if (firstGpuError) return; firstGpuError = true; log('GPU error: ' + e.error.message); const errorPanel = document.getElementById('err'); errorPanel.style.display = 'block'; errorPanel.textContent = e.error.message; };
+  let firstGpuError = false,oceanStartupDeviceLost=false,oceanStartupFirstFrameSubmitted=false;
+  device.lost.then((i) => {oceanStartupDeviceLost=true;log('device lost: ' + i.message);window.oceanStartup?.fail('The graphics device was lost during startup. '+i.message);});
+  device.onuncapturederror = (e) => { if (firstGpuError) return; firstGpuError = true; window.oceanStartup?.fail(e.error); log('GPU error: ' + e.error.message); const errorPanel = document.getElementById('err'); errorPanel.style.display = 'block'; errorPanel.textContent = e.error.message; };
 
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('webgpu');
   const swapFormat = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format: swapFormat, alphaMode: 'opaque', usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
+  window.oceanStartup?.stage('ocean-sky','Preparing the ocean and sky…');
 
   async function shader(code, label) {
     const m = device.createShaderModule({ code, label });
@@ -14045,6 +14117,7 @@ async function main() {
     fragment: { module: compMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
   });
 
+  window.oceanStartup?.stage('ship-crew','Building the ship and loading its crew…');
   const waterFilterPipe = await computePipe(WATER_FILTER, 'water reflections filter');
   const caravelMod = await shader(CARAVEL, 'caravel');
   const caravelPipe = await device.createRenderPipelineAsync({
@@ -14132,6 +14205,7 @@ async function main() {
   const bgOceanDepth=OCEAN_DEPTH?wakeIndices.map(w=>device.createBindGroup({label:'ocean visibility',layout:oceanDepthPipe.getBindGroupLayout(0),
     entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>[0,4,9,12,13,14,15,16,17].includes(e.binding))})):[];
   const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, { buffer: sunVisBuf }], 'sky');
+  window.oceanStartup?.stage('weather-wildlife','Preparing weather, scenery and wildlife…');
   const clouds = await createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
@@ -15361,6 +15435,14 @@ async function main() {
     }
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
+    if(!oceanStartupFirstFrameSubmitted){
+      oceanStartupFirstFrameSubmitted=true;
+      // Setup uploads submit earlier too. Only this submission contains the
+      // first canvas composite, and its completion must precede revealing it.
+      device.queue.onSubmittedWorkDone().then(()=>{
+        if(!firstGpuError&&!oceanStartupDeviceLost)window.oceanStartup?.ready();
+      },error=>window.oceanStartup?.fail(error));
+    }
     gunSea.read(contact=>shipGuns.impact(contact));
     gunportSafety.read();
     if(doAudio){
@@ -15425,10 +15507,14 @@ async function main() {
   resize();
   updateResolutionStatus();
   addEventListener('resize', resize);
+  window.oceanStartup?.stage('first-frame','Rendering the first view…');
   requestAnimationFrame(frame);
 }
 
-main().catch((e) => { log('init failed: ' + (e && e.stack || e)); });
+main().catch((e) => {
+  log('init failed: ' + (e && e.stack || e));window.oceanStartup?.fail(e);
+  const oceanStartupErrorPanel=document.getElementById('err');oceanStartupErrorPanel.style.display='block';oceanStartupErrorPanel.textContent=e?.message||String(e);
+});
 
 
 </script>

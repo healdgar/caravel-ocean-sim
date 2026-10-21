@@ -160,6 +160,6 @@ for(const entry of ['ocean.html','ocean.min.html','docs/index.html'])test(`proce
     await page.addInitScript(instrumentTrees);
     await ready(page,`${origin}/${entry}?landfall=coast&view=free&prow=0&follower=0&sunElev=45&clouds=0&w=144&h=108`);
     const rendered=await frame(page);assert.ok(rendered.render['island trees']>0);assert.ok(rendered.render.island>0);assert.equal(rendered.render.ocean,1);
-    assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:true}]);assert.deepEqual(rendered.leafUploads,[[1024,1024]],'standalone bundle uploads its embedded leaf atlas');assert.deepEqual(errors,[]);
+    assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:true}]);assert.deepEqual(rendered.leafUploads,[[1024,1024]],'each distribution uploads the same leaf atlas');assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });

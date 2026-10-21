@@ -1,0 +1,267 @@
+{
+  "assets/wildlife/whale.glb": {
+    "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
+    "bytes": 8319500,
+    "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
+  },
+  "assets/crew/sailor.glb": {
+    "url": "assets/crew/sailor.ba12b9aa6029554b.glb",
+    "bytes": 993696,
+    "sha256": "ba12b9aa6029554b54e38d0fb05cb9c6102a12a8fb8b3b47ddb82860b85018f6"
+  },
+  "assets/crew/sailor-female.glb": {
+    "url": "assets/crew/sailor-female.3f432c8b7719045e.glb",
+    "bytes": 1212816,
+    "sha256": "3f432c8b7719045e96926fc29415f8954e9186302411f49be9bfc76bbeb50d40"
+  },
+  "assets/world/saba/height.bin": {
+    "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
+    "bytes": 526338,
+    "sha256": "44a7a266ceebe8c920fbe0fb8a3aa0b159dd89660ccfce37791861615ed93b28"
+  },
+  "assets/world/saba/albedo.png": {
+    "url": "assets/world/saba/albedo.ad19953a2635b227.png",
+    "bytes": 721715,
+    "sha256": "ad19953a2635b2270cc2a5ecca8ed93d16fda09d41a7689c25de4b6ebd4a8ef5"
+  },
+  "assets/world/saba/biome.bin": {
+    "url": "assets/world/saba/biome.a1f4077874c02161.bin",
+    "bytes": 262144,
+    "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953"
+  },
+  "assets/tree-foliage.png": {
+    "url": "assets/tree-foliage.ad40fb471213f1f4.png",
+    "bytes": 444839,
+    "sha256": "ad40fb471213f1f45acef13d9e51c4a26ae1e60a6e066fa165e1d5b5ea76b24b"
+  },
+  "assets/world/land.json": {
+    "url": "assets/world/land.171586c7917a28dc.json",
+    "bytes": 85183,
+    "sha256": "171586c7917a28dc7046d5394fea20b8d3a09ba76e3bc4e1e4a5481ce2b7698a"
+  },
+  "assets/audio/wind-steady.mp3": {
+    "url": "assets/audio/wind-steady.e5c687baf7da295c.mp3",
+    "bytes": 270254,
+    "sha256": "e5c687baf7da295c2cdf9801661e137e9979eb2a73685613985c68c6c6f87cd8"
+  },
+  "assets/audio/wind-strong.mp3": {
+    "url": "assets/audio/wind-strong.56421dacb176cb95.mp3",
+    "bytes": 202612,
+    "sha256": "56421dacb176cb95c77c62bbf5ae8e41cfb108382b507822aa556173b47aa1e7"
+  },
+  "assets/audio/hull-wash.mp3": {
+    "url": "assets/audio/hull-wash.bb2c234525ac4d5c.mp3",
+    "bytes": 256935,
+    "sha256": "bb2c234525ac4d5cb1aa6c36143a9529ddccb5956e4546181242d0bd0d7368c6"
+  },
+  "assets/audio/hull-slap.mp3": {
+    "url": "assets/audio/hull-slap.f0d0cabc5576da3a.mp3",
+    "bytes": 13132,
+    "sha256": "f0d0cabc5576da3a7a04a9cff3e34654c416ba18f5bc1ad40f7b636b299dfaba"
+  },
+  "assets/audio/timber-creak.mp3": {
+    "url": "assets/audio/timber-creak.0e2aaec4bed48c5a.mp3",
+    "bytes": 63125,
+    "sha256": "0e2aaec4bed48c5a7c2a07b32917bfe5ac2f286e61611abf335f03944fce7387"
+  },
+  "assets/audio/thunder-distant.mp3": {
+    "url": "assets/audio/thunder-distant.a5884234cd5d404e.mp3",
+    "bytes": 148969,
+    "sha256": "a5884234cd5d404e6fab8eba6eddc77ebaaa2c00f7cc28e0cf022446c5853922"
+  },
+  "assets/audio/thunder-near.mp3": {
+    "url": "assets/audio/thunder-near.ce557033ee143129.mp3",
+    "bytes": 91232,
+    "sha256": "ce557033ee143129bd22e3de617be6f2cd3832c2b91d96650837857169fb6fa0"
+  },
+  "assets/audio/rain-light.mp3": {
+    "url": "assets/audio/rain-light.1077c883788d141b.mp3",
+    "bytes": 307739,
+    "sha256": "1077c883788d141bf1132af3da44239711fd0a1f5863277f82e236f7469f7c20"
+  },
+  "assets/audio/rain-heavy.mp3": {
+    "url": "assets/audio/rain-heavy.508a899866b27ab3.mp3",
+    "bytes": 256126,
+    "sha256": "508a899866b27ab38f6b1a210a42713986d41f3c09a3dbf1e8169fc9c7e11065"
+  },
+  "assets/audio/sleet-deck.mp3": {
+    "url": "assets/audio/sleet-deck.23e74f7d5fa89933.mp3",
+    "bytes": 239745,
+    "sha256": "23e74f7d5fa89933780ce0b9adfdce979c7b909912d7a7fc8abc62bd438511d3"
+  },
+  "assets/audio/hail-deck.mp3": {
+    "url": "assets/audio/hail-deck.07c97e2064531473.mp3",
+    "bytes": 249033,
+    "sha256": "07c97e2064531473ebb76651449081137e250fea93c9bec8533052ebb015a84c"
+  },
+  "assets/audio/gull-near.mp3": {
+    "url": "assets/audio/gull-near.a2a807fee4338ec1.mp3",
+    "bytes": 17019,
+    "sha256": "a2a807fee4338ec1e14880d9af500273f984fc070feb9f588db20970dc44d291"
+  },
+  "assets/audio/voices/crew-ines.mp3": {
+    "url": "assets/audio/voices/crew-ines.1caae9b50de9e4ec.mp3",
+    "bytes": 14402,
+    "sha256": "1caae9b50de9e4ec55ae3436c83000594e0352ff24d2eec162be6b28f0519c25"
+  },
+  "assets/audio/voices/crew-tomas.mp3": {
+    "url": "assets/audio/voices/crew-tomas.73d094385f2f1436.mp3",
+    "bytes": 14741,
+    "sha256": "73d094385f2f1436ab91e19333102c832b36c4a20e6ed4d2880941d362b36e04"
+  },
+  "assets/audio/voices/crew-beatriz.mp3": {
+    "url": "assets/audio/voices/crew-beatriz.82a0698bc21aa077.mp3",
+    "bytes": 10450,
+    "sha256": "82a0698bc21aa0775ec6cf32d69ec7f63cb6f87c9cf4077e23cd25c2bda11f67"
+  },
+  "assets/audio/voices/crew-duarte.mp3": {
+    "url": "assets/audio/voices/crew-duarte.a936d7a655e681a4.mp3",
+    "bytes": 10185,
+    "sha256": "a936d7a655e681a40aa8e2a22bafd58a8a67e2896bf0b22263b37be63afc2fa8"
+  },
+  "assets/audio/voices/crew-joao.mp3": {
+    "url": "assets/audio/voices/crew-joao.1731634907fbe1f9.mp3",
+    "bytes": 14432,
+    "sha256": "1731634907fbe1f94f0726b261275e1388e5fde0ae7e5bbb18cf99a29f3d0e19"
+  },
+  "assets/audio/voices/crew-catarina.mp3": {
+    "url": "assets/audio/voices/crew-catarina.06bcb623f35b0404.mp3",
+    "bytes": 13441,
+    "sha256": "06bcb623f35b0404f81430ee283c74267cf5ae7d17a6fc2d0bbac8995059edff"
+  },
+  "assets/audio/voices/crew-leonor.mp3": {
+    "url": "assets/audio/voices/crew-leonor.1936eaf9dfc0b6a0.mp3",
+    "bytes": 14982,
+    "sha256": "1936eaf9dfc0b6a08433d5a93824f379f2cfdff5e30b49dd026dbb7b023de5f0"
+  },
+  "assets/audio/voices/crew-rui.mp3": {
+    "url": "assets/audio/voices/crew-rui.3153e741223700d7.mp3",
+    "bytes": 15787,
+    "sha256": "3153e741223700d730b6020434cae7259c7f7de6da2c73fb877e7315e1bf1cd3"
+  },
+  "assets/audio/voices/crew-maria.mp3": {
+    "url": "assets/audio/voices/crew-maria.8cd12c82c5f8846d.mp3",
+    "bytes": 11569,
+    "sha256": "8cd12c82c5f8846d3d1a9f466e1cb17a7be4ddc1f4b33badbd47c10446f4b107"
+  },
+  "assets/audio/voices/crew-afonso.mp3": {
+    "url": "assets/audio/voices/crew-afonso.6d22fa9b8fad5c09.mp3",
+    "bytes": 19643,
+    "sha256": "6d22fa9b8fad5c0970dc5e077219d2f1dc86e986c8e81a3f27dfbed353847c51"
+  },
+  "assets/audio/voices/crew-isabel.mp3": {
+    "url": "assets/audio/voices/crew-isabel.3335591c1eaa5c56.mp3",
+    "bytes": 12579,
+    "sha256": "3335591c1eaa5c5619867063deea8c60be41f40978e4a2f3a1e5dc174b7b0d46"
+  },
+  "assets/audio/voices/crew-pedro.mp3": {
+    "url": "assets/audio/voices/crew-pedro.e39bdd3dcada5798.mp3",
+    "bytes": 16950,
+    "sha256": "e39bdd3dcada5798079d7a91cb2bb93c2da92142089136c9c50e611674f08f72"
+  },
+  "assets/audio/voices/captain-full.mp3": {
+    "url": "assets/audio/voices/captain-full.61c0e3309f3e7b46.mp3",
+    "bytes": 13655,
+    "sha256": "61c0e3309f3e7b464c5554cba4d1303b99c2270e6e1d3290a23a277bcac75e3e"
+  },
+  "assets/audio/voices/captain-reduced.mp3": {
+    "url": "assets/audio/voices/captain-reduced.60d68415822b8dc3.mp3",
+    "bytes": 23476,
+    "sha256": "60d68415822b8dc30bcc914dd8a89b0bb0b7114704f145c389d878ae2588b547"
+  },
+  "assets/audio/voices/captain-furl.mp3": {
+    "url": "assets/audio/voices/captain-furl.05e7d8304e8bab3f.mp3",
+    "bytes": 17713,
+    "sha256": "05e7d8304e8bab3f094877d8fc15309512302f8a6abf384efc6adb15696eaed4"
+  },
+  "assets/audio/voices/captain-weather.mp3": {
+    "url": "assets/audio/voices/captain-weather.28f55a0fe7b769d7.mp3",
+    "bytes": 27667,
+    "sha256": "28f55a0fe7b769d7ed9f40e9c3cfdfd7776a7435fac1c3dd5b92cce6d5ba6bdf"
+  },
+  "assets/audio/voices/captain-watch.mp3": {
+    "url": "assets/audio/voices/captain-watch.b413bdaf3301435d.mp3",
+    "bytes": 22672,
+    "sha256": "b413bdaf3301435d722cae9e66e114722c12ceaf763889525bc2bf900efb8a50"
+  },
+  "assets/audio/voices/captain-transfer.mp3": {
+    "url": "assets/audio/voices/captain-transfer.379f106b4f01d7f3.mp3",
+    "bytes": 29663,
+    "sha256": "379f106b4f01d7f329ba1253f213dc0754219efc60ba19d94097887ee13bf73e"
+  },
+  "assets/audio/voices/captain-drop-anchor.mp3": {
+    "url": "assets/audio/voices/captain-drop-anchor.dce223647724e8a8.mp3",
+    "bytes": 15443,
+    "sha256": "dce223647724e8a8a34887da2291f0e2cfd646eae6d09115bddb8e6e4c556ffe"
+  },
+  "assets/audio/voices/captain-weigh-anchor.mp3": {
+    "url": "assets/audio/voices/captain-weigh-anchor.ab62363633d3d3a7.mp3",
+    "bytes": 34032,
+    "sha256": "ab62363633d3d3a71e60f3b2b71dc1d55e5b092f50d5150204a5d89a1dc6ed37"
+  },
+  "assets/audio/voices/anchor-splash.mp3": {
+    "url": "assets/audio/voices/anchor-splash.221fd001a06b3fdb.mp3",
+    "bytes": 34101,
+    "sha256": "221fd001a06b3fdb7f6c9f29ab60a52d9ffb8ffb0a2a1b77d3c916c1ea988594"
+  },
+  "assets/audio/voices/anchor-reel.mp3": {
+    "url": "assets/audio/voices/anchor-reel.4c48ff88aded5978.mp3",
+    "bytes": 78861,
+    "sha256": "4c48ff88aded5978460c62207ebb1339d82efa269bbe1a89853582fcfa4c1630"
+  },
+  "assets/audio/voices/anchor-release.mp3": {
+    "url": "assets/audio/voices/anchor-release.61c1a56ed3e20001.mp3",
+    "bytes": 20325,
+    "sha256": "61c1a56ed3e20001d5e2d64235ddf3829b8cb3938b296d8fc097bb2badc9480d"
+  },
+  "assets/audio/gunnery/cannon-report.mp3": {
+    "url": "assets/audio/gunnery/cannon-report.75b03dc1d4689af7.mp3",
+    "bytes": 5044,
+    "sha256": "75b03dc1d4689af7533e84238efedda54cafe4963f3f7f448e3ee59787881cc4"
+  },
+  "assets/audio/gunnery/cannon-recoil.mp3": {
+    "url": "assets/audio/gunnery/cannon-recoil.d504489b6fe3c23f.mp3",
+    "bytes": 15609,
+    "sha256": "d504489b6fe3c23ff1bb5af346cb1f46f0cb63f52abe49d47931bc2ab1630e7e"
+  },
+  "assets/audio/gunnery/cannon-rammer.mp3": {
+    "url": "assets/audio/gunnery/cannon-rammer.bbac76125111fa0b.mp3",
+    "bytes": 6487,
+    "sha256": "bbac76125111fa0bfd91552e0e2c0d5108cf4699d70703373d2c359fee99cc04"
+  },
+  "assets/audio/gunnery/cannon-run-out.mp3": {
+    "url": "assets/audio/gunnery/cannon-run-out.a4e8d1c2b1e66213.mp3",
+    "bytes": 11776,
+    "sha256": "a4e8d1c2b1e66213faa38abdda6b4f415f795a8c861d85fef2f20a531d62a896"
+  },
+  "assets/audio/gunnery/captain-guns-prepare.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-prepare.6eb3161e6f07ce7b.mp3",
+    "bytes": 29109,
+    "sha256": "6eb3161e6f07ce7b907c05add098b39703c6efd4d53e441ceb3c15ad428dd8ea"
+  },
+  "assets/audio/gunnery/captain-guns-fire-port.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-fire-port.dbd4af9af06d901c.mp3",
+    "bytes": 20062,
+    "sha256": "dbd4af9af06d901c3acd2591111b46bbecbaeecf3b8820b65bf1edf43b374e48"
+  },
+  "assets/audio/gunnery/captain-guns-fire-starboard.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-fire-starboard.49b766e3398acc14.mp3",
+    "bytes": 20414,
+    "sha256": "49b766e3398acc14737a4eafed0e7ec2bf2ed9aac21a26de1c575583bb385a04"
+  },
+  "assets/audio/gunnery/captain-guns-cease.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-cease.0a8b8a4c82ddcc74.mp3",
+    "bytes": 19845,
+    "sha256": "0a8b8a4c82ddcc74aaddf5f1f95a6c8543c584cc1d4437c769d6ae1eef351916"
+  },
+  "assets/audio/gunnery/crew-guns-ready.mp3": {
+    "url": "assets/audio/gunnery/crew-guns-ready.80d34d7d222a5ab2.mp3",
+    "bytes": 17842,
+    "sha256": "80d34d7d222a5ab206874dbe821bc78e36d8c1f5b14408d69dcf220cb6e986b0"
+  },
+  "assets/caravel-oak-albedo.webp": {
+    "url": "assets/caravel-oak-albedo.984a2b77f5f56053.webp",
+    "bytes": 560816,
+    "sha256": "984a2b77f5f56053e7fc8a20d57bd124e6129eee119d99fe4be1e55896b3f2a6"
+  }
+}

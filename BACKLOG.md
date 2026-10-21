@@ -226,3 +226,103 @@ step 5 and 216 independent-yaw endpoints yielded no complete clearance. See
 `RIG_HANDLING.md`; no prototype entered the runtime. Victory's endpoint audit
 also found missing semantic keel/figurehead/taffrail measurement nodes; details
 are recorded in `VICTORY_RESEARCH.md`. Do not reshape to generic mesh extrema.
+
+**Published batch04:** `dfd0ba8fdd55ce71a8bf0564d6a84a120d9ed1bd`.
+Pages deployment 39604848700 succeeded; public standalone bytes exactly match
+local SHA-256 `eadd9154e79e2d1bc7f670e528b324dcc3e9ae02f5fbfc40542c687c94d3c8d9`.
+Fresh visible Chrome loaded the public whale encounter without console warnings
+or errors; proof `shots/overnight-c1-breach-live.png`. Verification tab closed;
+direct agents complete, root retains testing and local server 8088 remains up.
+This publication receipt remains local for the next checkpoint. Full rig
+handling, accepted heavy hull-crash audio, actual wave-relative animal contact
+events and improved marine entry spray remain open. No new paid generation.
+
+## Batch05: marine impact water
+
+The visible whale re-entry spikes came from the shared dolphin crown's
+13-cycle rim sampled at only 28 segments, compounded by high rim foam and
+overlapping crowns. Marine impacts now use their own 64-segment/six-row curved
+sheet, analytic normals, brief staggered emission and full gravity for every
+detached row.64 impact drops retain first-contact records and generate24
+representative fallout ripples. Dolphins and whale breath remain unchanged.
+
+An initial candidate fixed drops but could expose an absorbed sheet again when
+waves fell. Independent review identified that gap. A separate344,064-byte
+cache now retains water absorption at every sheet lattice vertex, with exact
+seam identity, serial-keyed slot reuse and a dedicated compute dispatch.
+Root's13 focused Metal checks pass, including actual marine runtime rendering,
+analytic velocity/gravity/normals, later finest-band waves, first-contact
+retention and recycled keys. Full suite and final rendered gate pending.
+Limitations: sampled point contact, no swept/interior-triangle collision, no
+impact wind or fluid-pressure coupling. Geometry/contact work persists through
+the bounded4.2-second event life; physical iPhone cost is unqualified.
+
+Argon directly auditioned the existing anchor plunge and a filtered/slowed trial
+alone and in the current rough-water mix. Both hull-impact trials were REJECTED:
+point-source bubble/plunge, muffled slosh and repetition. No asset promoted or
+new sound generation. Detailed local review/provenance is recorded in
+`scripts/audio/hull-contact-review.json`; its duration guesses are not measured
+evidence. The continuous accepted wash remains, without a heavy-crash accent.
+
+The additional rig source audit supports the existing forward heel/aft penna
+orientation. Authored neighboring support/tackle leads remain suspect. A
+partial-brailing diagnostic is recommended but unrun; no rig behavior changed.
+
+**Batch05 held after rendered review:** the revised effect removes pointed
+rims but looks too faint in actual early/side re-entry captures
+(`shots/overnight-impact-early.png`, `shots/overnight-impact-side.png`). All13
+focused GPU checks pass, including the new retained sheet contacts, but their
+water is spatially flat. Source concern: one frozen root height can place a
+new parcel below the local wave at its offset footprint, immediately latching
+absorption. Check per-parcel local launch-height sampling before promoting;
+do not merely increase opacity or disable valid contact. Marine agent has a
+read-only design audit, no further edit authorization. Full suite/build and
+publication have NOT been run for batch05. Last public release remains
+`dfd0ba8`; root retains the testing baton. All working edits are intentional.
+
+## User priority: startup delay and loading feedback
+
+The held batch05 runtime/docs/test work is preserved in local Git stash
+`01a25d28773a65b814f7689355fd78ffce03c9d0` (message: Held marine impact v2).
+Production marine code was restored before this change; no held impact code is
+part of the startup release. Ignored recordings/prototypes remain in place.
+
+Verified the public page transferred14,055,444compressed bytes and decoded to
+21,774,158bytes before startup. On this Mac's fresh Chrome context, first GPU
+frame completed at2.34s, with102pipelines and no application errors. That desktop
+observation is not a physical-iPhone timing. The published HTML embedded muted
+audio, inactive terrain and all models. Generic init failures only logged, and
+the existing starting label was hidden inside the optional performance HUD.
+
+The Pages build now emits about600KB of HTML with explicit, content-hashed media
+files and a SHA-256 asset manifest. Mandatory wood/crew/whale files preload;
+audio remains gesture-loaded and terrain remains scene-gated. Both downloadable
+ocean pages retain every original embedded asset. No media reduction or fidelity
+change. Older hashed files remain available for cached HTML. A static loading
+screen precedes the module, reports actual milestones, waits for first canvas
+GPU completion, supports mobile/reduced motion, and retains errors with Retry.
+No guessed progress percentage or failure timeout. The extra presentation RAF
+was removed during review to preserve deterministic single-callback render
+fixtures; first-GPU-work completion still gates readiness.
+
+Eight focused tests passed before the final two assertion improvements: delayed
+module/mobile layout, first GPU fence, sticky API failure/Retry, script/asset
+failures, deferred web audio, byte-identical versioned media and both actual
+file:// offline boots. Exact per-asset embedding and single-transfer preload
+checks are now in the full serialized native Metal suite. Full/rendered/public
+gates pending. Root remains sole tester; direct agents did source work only.
+
+Final startup validation: **393/393 PASS**, serialized installed Chrome on native
+Metal, 185.5 seconds. The first full run found five legacy UI fixtures that froze
+RAF before any frame and then clicked through the loader. Those fixtures now
+render their real first frame and await readiness; their interaction assertions
+remain intact. Eight new startup/packaging tests pass, including exact bytes in
+both downloads and exactly one request for each preloaded asset.
+
+Visible Chrome review of the rebuilt Pages scene showed the real loading stage,
+then the ship, instruments, helm and usable Sea settings; no warning/error logs.
+Evidence: `shots/startup-mobile-loading.png`, `shots/startup-ready-local.png`.
+Initial Pages HTML is 614,127 bytes; 53 referenced assets total 15,875,925 bytes.
+The whale remains a mandatory 8.32 MB startup resource and pipeline count remains
+102; this checkpoint improves packaging and feedback without claiming all
+startup work has disappeared. Publication and deployed-byte verification follow.

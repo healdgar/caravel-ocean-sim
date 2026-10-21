@@ -60,8 +60,8 @@ const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
 const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
 const D2R = Math.PI / 180;
-const GU = GPUBufferUsage;
-const TU = GPUTextureUsage;
+const GU = globalThis.GPUBufferUsage;
+const TU = globalThis.GPUTextureUsage;
 
 // ----------------------------------------------------------------------------------------
 // Tunable parameters (UI panel edits these)
@@ -98,6 +98,7 @@ export const P = {
 const CASC_L = [1103.0, 211.3, 39.7, 7.43, 1.393, 0.2617];
 
 function fail(msg) {
+  window.oceanStartup?.fail(msg);
   const el = document.getElementById('err');
   el.style.display = 'block';
   el.textContent = msg;
@@ -123,6 +124,7 @@ function mat4Mul(out, a, b) {
 }
 
 async function main() {
+  window.oceanStartup?.stage('adapter','Starting the graphics device…');
   if (!navigator.gpu) fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) fail('No WebGPU adapter found.');
@@ -130,14 +132,15 @@ async function main() {
   const device = await adapter.requestDevice({
     requiredFeatures: hasTS ? ['timestamp-query'] : [],
   });
-  device.lost.then((i) => log('device lost: ' + i.message));
-  let firstGpuError = false;
-  device.onuncapturederror = (e) => { if (firstGpuError) return; firstGpuError = true; log('GPU error: ' + e.error.message); const errorPanel = document.getElementById('err'); errorPanel.style.display = 'block'; errorPanel.textContent = e.error.message; };
+  let firstGpuError = false,oceanStartupDeviceLost=false,oceanStartupFirstFrameSubmitted=false;
+  device.lost.then((i) => {oceanStartupDeviceLost=true;log('device lost: ' + i.message);window.oceanStartup?.fail('The graphics device was lost during startup. '+i.message);});
+  device.onuncapturederror = (e) => { if (firstGpuError) return; firstGpuError = true; window.oceanStartup?.fail(e.error); log('GPU error: ' + e.error.message); const errorPanel = document.getElementById('err'); errorPanel.style.display = 'block'; errorPanel.textContent = e.error.message; };
 
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('webgpu');
   const swapFormat = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format: swapFormat, alphaMode: 'opaque', usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
+  window.oceanStartup?.stage('ocean-sky','Preparing the ocean and sky…');
 
   async function shader(code, label) {
     const m = device.createShaderModule({ code, label });
@@ -354,6 +357,7 @@ async function main() {
     fragment: { module: compMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
   });
 
+  window.oceanStartup?.stage('ship-crew','Building the ship and loading its crew…');
   const waterFilterPipe = await computePipe(WATER_FILTER, 'water reflections filter');
   const caravelMod = await shader(CARAVEL, 'caravel');
   const caravelPipe = await device.createRenderPipelineAsync({
@@ -441,6 +445,7 @@ async function main() {
   const bgOceanDepth=OCEAN_DEPTH?wakeIndices.map(w=>device.createBindGroup({label:'ocean visibility',layout:oceanDepthPipe.getBindGroupLayout(0),
     entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>[0,4,9,12,13,14,15,16,17].includes(e.binding))})):[];
   const bgSky = bg(skyPipe, [{ buffer: frameUBO }, transView, skyView, sampClamp, { buffer: sunVisBuf }], 'sky');
+  window.oceanStartup?.stage('weather-wildlife','Preparing weather, scenery and wildlife…');
   const clouds = await createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
@@ -1670,6 +1675,14 @@ async function main() {
     }
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
+    if(!oceanStartupFirstFrameSubmitted){
+      oceanStartupFirstFrameSubmitted=true;
+      // Setup uploads submit earlier too. Only this submission contains the
+      // first canvas composite, and its completion must precede revealing it.
+      device.queue.onSubmittedWorkDone().then(()=>{
+        if(!firstGpuError&&!oceanStartupDeviceLost)window.oceanStartup?.ready();
+      },error=>window.oceanStartup?.fail(error));
+    }
     gunSea.read(contact=>shipGuns.impact(contact));
     gunportSafety.read();
     if(doAudio){
@@ -1734,7 +1747,11 @@ async function main() {
   resize();
   updateResolutionStatus();
   addEventListener('resize', resize);
+  window.oceanStartup?.stage('first-frame','Rendering the first view…');
   requestAnimationFrame(frame);
 }
 
-main().catch((e) => { log('init failed: ' + (e && e.stack || e)); });
+main().catch((e) => {
+  log('init failed: ' + (e && e.stack || e));window.oceanStartup?.fail(e);
+  const oceanStartupErrorPanel=document.getElementById('err');oceanStartupErrorPanel.style.display='block';oceanStartupErrorPanel.textContent=e?.message||String(e);
+});

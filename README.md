@@ -59,6 +59,13 @@ npm start        # serves http://localhost:8080/
 
 After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [GitHub Pages build](#github-pages-build).
 
+Startup shows actual graphics, ocean, ship/crew and weather preparation stages.
+The loading screen stays until the first rendered canvas frame completes on the
+GPU. Errors stay visible with Retry; slow first visits get an explanatory hint,
+without a guessed percentage or failure timeout. Reduced motion and mobile
+safe areas are supported. The website uses separately cached media; the two
+downloadable HTML files retain their embedded assets and work offline.
+
 ### Local authoring credentials
 
 Keep the project-specific ElevenLabs key in `.env.local` as
@@ -169,8 +176,9 @@ suspend sound and discard pending events rather than replaying a backlog.
 `node scripts/audio-promote.mjs` reproduces the selected edits locally, encodes
 gapless-tagged MP3s into `assets/audio/`, writes their checksums/provenance, and
 regenerates `js/audio-assets.js`. Rejected takes remain excluded. `npm run build`
-embeds the twelve files in every standalone page, including GitHub Pages;
-credentials, request records and audition pages are excluded. The compressed
+embeds the twelve files in both downloadable ocean pages; GitHub Pages serves
+the same bytes as versioned files fetched only after sound is enabled.
+Credentials, request records and audition pages are excluded. The compressed
 audio totals about 2.1 MB, decoded only after sound is enabled. Gains and ranges
 are authored approximations, not calibrated acoustic pressure measurements.
 
@@ -490,9 +498,10 @@ All simulation clocks remain unchanged. This is a visual landfall slice: no port
 docking, river currents, voyage compression, terrain streaming or complete grounding
 model yet. The future target remains 15–20 minutes of offshore passage.
 The source packs, licenses, checksums and rebuild instructions live in
-[`assets/world/README.md`](assets/world/README.md). All three distributed HTML
-variants embed the island's height, imagery and vegetation mask plus the world
-chart. The regular ocean scene does not allocate terrain GPU
+[`assets/world/README.md`](assets/world/README.md). Both downloadable ocean pages
+embed the island's height, imagery and vegetation mask plus the world chart.
+GitHub Pages loads terrain and foliage for land scenes, and the world chart on demand.
+The regular ocean scene does not allocate terrain GPU
 resources. The existing automatic 30 FPS resolution target remains active; combined
 land/ocean performance still needs a physical iPhone measurement.
 
@@ -730,8 +739,8 @@ npm run build
 npm test
 ```
 
-The current overnight checkpoint passed **385 tests** using installed Chrome on
-macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
+The current checkpoint passed **393 tests** using installed Chrome on
+macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three distributed
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
 New checks cover heave/yaw-relative sail wind, continuous whale emergence and
@@ -741,6 +750,10 @@ actual-ocean clearance at loaded gun muzzles. Separate native blow/breach
 captures supplemented the suite. The attempted lateen support-owner repair is
 held outside this release because mixed-yard cloth/stay clearance still fails;
 routine bad-tack handling remains unfinished.
+
+Startup checks cover loading feedback before delayed modules, the first canvas
+GPU fence, visible failures and Retry, mobile/reduced-motion layout, single-fetch
+preloads, deferred audio, exact media checksums and both offline downloads.
 The [rig-handling checkpoint](RIG_HANDLING.md) separates tested prototype
 logic from the exposed-cloth, crew and CPU/GPU clearance work still required.
 `node scripts/sail-rest-audit.mjs` reports local edge-length and area changes
@@ -804,8 +817,7 @@ frozen launch heights and persistent first-contact locations.
 Tree checks verify connected recursive growth, taper, bark/leaf UVs, terminal
 attachments, stable LOD dimensions and a bounded forest draw budget. Native GPU
 tests compare actual canopy coverage and sky gaps at every tier, reject an
-intentionally sparse canopy, and render the embedded foliage from all three
-standalone builds.
+intentionally sparse canopy, and render the same foliage from all three builds.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.
@@ -827,7 +839,7 @@ The suite covers:
 - Consistent HDR sun extinction, solid and translucent vessel shadows, sun direction, translated/tilted casters, self-shadow bias, and disabling hidden/night shadows. Water checks preserve broad shadows and canvas tint while dispersing fine rigging through the refracted scattering footprint.
 - Production runoff shading tests verify sunlight on vertical sheets, backlighting, transparency, marine haze and no direct sun below the horizon.
 - Production crew/vessel fragment radiance agrees for identical optical inputs under front/back lighting, solid/canvas/cloud shadows, directional marine haze, altitude changes, grazing normals and reflection toggles.
-- JavaScript and WGSL initialization in all three standalone builds.
+- JavaScript and WGSL initialization in all three distributed builds.
 - Adaptive-resolution convergence, cautious recovery, bounded scale, manual overrides and background/resume handling; actual GPU target resizing and fixed capture dimensions. UI checks cover unobstructed close buttons, scrollable settings, collapsed/expanded profiling, and seven phone, landscape, tablet and desktop viewports. Touch checks verify independent camera drag and rudder commands, gradual crew-operated sails, and sailing defaults.
 - Bit-exact indexed geometry and shadow partitions; pixel equality between the original copy/unindexed schedule, direct resolve/indexed rendering, and profiled rendering; actual slow-frame FPS, timestamp readback, overlapping/early render stages, stale disabled queries, quantized zero intervals, invalid timestamps, and unsupported-device fallback.
 - Pixel equality before/after early hull exclusion, both with the water cutout exposed at the helm and with the complete ship visible from outside.
@@ -882,7 +894,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
 | `js/wgsl/` | Shaders as JavaScript modules, including waves/foam, atmosphere, ocean, timber, and post-processing |
 | `server.mjs` | Tiny static server for development |
-| `build.mjs` | Builds all three standalone pages and embeds third-party notices |
+| `build.mjs` | Builds two standalone downloads and the cached-asset Pages site; retains third-party notices |
 | `docs/` | Generated GitHub Pages demo, `.nojekyll`, and README images |
 | `tests/` | Boat math, geometry, sharing, GPU behavior, and standalone startup checks |
 | `THIRD_PARTY_NOTICES.md` | Joshbrew shader provenance and MIT license |
@@ -1290,8 +1302,14 @@ level while the vessel continues floating and steering.
 Source and the published build now live together in the public
 [`healdgar/caravel-ocean-sim`](https://github.com/healdgar/caravel-ocean-sim) repository.
 
-`node build.mjs` also generates `docs/index.html`, a standalone minified demo
-with the oak material embedded. It starts in Boat camera unless the URL contains
-`boat=0`. GitHub Pages serves the `main` branch's `/docs` folder. To update the
-demo, rebuild, commit the generated bundles with the source, and push to `main`.
+`node build.mjs` also generates `docs/index.html`, a minified website with
+content-hashed, byte-identical media in `docs/assets/` and a SHA-256 asset manifest.
+The initial HTML excludes model, audio and terrain payloads; current mandatory
+model/wood assets preload concurrently, audio waits for Enable sound, and terrain
+loads for land scenes. Both ocean HTML downloads remain self-contained.
+Older hashed assets are retained for cached HTML; the build copies only its
+explicit runtime asset list. The site defaults to Boat camera and preserves
+explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder. To update the
+demo, rebuild, commit the generated HTML, asset manifest and referenced files
+alongside the source, and push to `main`.
 The `.nojekyll` file preserves the generated static page without a Jekyll build.

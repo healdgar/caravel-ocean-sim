@@ -9,27 +9,49 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/ocean.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js'];
 const order = ['js/rig-definition.js', 'js/models/nina.js', 'js/models/victory.js', 'js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/ship-models.js', 'js/victory-motion.js', 'js/sail-aerodynamics.js', 'js/sailing.js', 'js/dolphin-state.js', 'js/marine-life-state.js', 'js/boat.js', 'js/gunnery-state.js', 'js/gunnery-models.js', ...wgslModules, 'js/gunnery-effects.js', 'js/gunnery-sea-probe.js', 'js/gunport-safety.js', 'js/hull-contact.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/water-optics.js', 'js/anchor.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/gltf.js', 'js/marine-asset.js', 'js/marine-rig.js', 'js/marine-life.js', 'js/marine-ui.js', 'js/caravel.js', 'js/victory.js', 'js/ship-mesh.js', 'js/crew-work.js', 'js/gunnery-tools.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/vegetation.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/gunnery-audio-assets.js', 'js/gunnery-audio.js', 'js/gunnery-control.js', 'js/gunnery-ui.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
-const stripModuleSyntax = (src) => {
+// Downloads keep embedded assets. Pages uses identical bytes in independently
+// cacheable, content-addressed files; optional audio/terrain need not travel in
+// the initial HTML. Only these explicit runtime files and manifest MP3s qualify.
+const runtimeAssetTypes = new Map([
+  ['assets/caravel-oak-albedo.webp','image/webp'],
+  ['assets/wildlife/whale.glb','model/gltf-binary'],
+  ['assets/crew/sailor.glb','model/gltf-binary'],
+  ['assets/crew/sailor-female.glb','model/gltf-binary'],
+  ['assets/tree-foliage.png','image/png'],
+  ['assets/world/saba/albedo.png','image/png'],
+  ['assets/world/saba/canopy.png','image/png'],
+  ['assets/world/saba/biome.bin','application/octet-stream'],
+  ['assets/world/saba/height.bin','application/octet-stream'],
+  ['assets/world/land.json','application/json'],
+]);
+const runtimeAssetBytes = new Map(), pagesAssets = new Map();
+function runtimeAssetURL(file,mime,inlineAssets){
+  if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
+  const bytes=runtimeAssetBytes.get(file);
+  if(inlineAssets)return 'data:'+mime+';base64,'+bytes.toString('base64');
+  if(!pagesAssets.has(file)){
+    const sha256=createHash('sha256').update(bytes).digest('hex'),ext=path.posix.extname(file);
+    const url=file.slice(0,-ext.length)+'.'+sha256.slice(0,16)+ext;
+    pagesAssets.set(file,{url,bytes:bytes.length,sha256});
+  }
+  return pagesAssets.get(file).url;
+}
+const stripModuleSyntax = (src,inlineAssets=true) => {
   if(/^import\s*\{[^}]*\bas\b[^}]*\}\s*from/m.test(src)) throw new Error('Standalone modules require canonical import names; aliased imports cannot be flattened.');
   return src
-  .replace(/"assets\/audio\/([a-z0-9/-]+)\.mp3"/g, (_, id) => JSON.stringify('data:audio/mpeg;base64,' + fs.readFileSync(path.join(root, 'assets/audio', id + '.mp3')).toString('base64')))
+  .replace(/(['"])(assets\/[a-z0-9./-]+)\1/g,(match,quote,file)=>{
+    const mime=runtimeAssetTypes.get(file)||(/^assets\/audio\/[a-z0-9/-]+\.mp3$/.test(file)?'audio/mpeg':null);
+    return mime?JSON.stringify(runtimeAssetURL(file,mime,inlineAssets)):match;
+  })
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
   .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
   .replace(/^export\s*\{[^}]*\}\s*from\s*['"][^'"]+['"];\s*$/gm, '')
-  .replaceAll("'assets/caravel-oak-albedo.webp'", () => JSON.stringify('data:image/webp;base64,' + fs.readFileSync(path.join(root, 'assets/caravel-oak-albedo.webp')).toString('base64')))
-  .replaceAll("'assets/wildlife/whale.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/wildlife/whale.glb')).toString('base64')))
-  .replaceAll("'assets/crew/sailor.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor.glb')).toString('base64')))
-  .replaceAll("'assets/crew/sailor-female.glb'", () => JSON.stringify('data:model/gltf-binary;base64,' + fs.readFileSync(path.join(root, 'assets/crew/sailor-female.glb')).toString('base64')))
-  .replaceAll("'assets/world/saba/albedo.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/albedo.png')).toString('base64')))
-  .replaceAll("'assets/tree-foliage.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/tree-foliage.png')).toString('base64')))
-  .replaceAll("'assets/world/saba/biome.bin'", () => JSON.stringify('data:application/octet-stream;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/biome.bin')).toString('base64')))
-  .replaceAll("'assets/world/saba/height.bin'", () => JSON.stringify('data:application/octet-stream;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/height.bin')).toString('base64')))
-  .replaceAll("'assets/world/saba/canopy.png'", () => JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/world/saba/canopy.png')).toString('base64')))
-  .replaceAll("'assets/world/land.json'", () => JSON.stringify('data:application/json;base64,' + fs.readFileSync(path.join(root, 'assets/world/land.json')).toString('base64')));
+  ;
 };
 
 const license = fs.readFileSync(path.join(root, 'LICENSE'), 'utf8');
@@ -69,11 +91,15 @@ function minifyTemplates(src) {
     return '`' + out + '`';
   });
 }
-let minJs = '';
-for (const f of order) {
-  const src=fs.readFileSync(path.join(root,f),'utf8');
-  minJs+=stripModuleSyntax(wgslModules.includes(f)?minifyTemplates(src):src)+'\n';
+function collectMinJS(inlineAssets){
+  let result='';
+  for(const f of order){
+    const src=fs.readFileSync(path.join(root,f),'utf8');
+    result+=stripModuleSyntax(wgslModules.includes(f)?minifyTemplates(src):src,inlineAssets)+'\n';
+  }
+  return result;
 }
+let minJs=collectMinJS(true),pagesJs=collectMinJS(false);
 
 function findEsbuild() {
   const req = createRequire(import.meta.url);
@@ -90,19 +116,33 @@ function findEsbuild() {
 const esbuild = findEsbuild();
 if (esbuild) {
   minJs = esbuild.transformSync(minJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
+  pagesJs = esbuild.transformSync(pagesJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
 } else {
   console.log('esbuild not found: JS gets comment/indentation stripping only');
   minJs = minJs.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).join('\n');
+  pagesJs = pagesJs.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).join('\n');
 }
 
-const minPage = page
-  .replace(SCRIPT_TAG, () => `<script type="module">${minJs}</script>`)
+const minifyPage = js => page
+  .replace(SCRIPT_TAG, () => `<script type="module">${js}</script>`)
   .replace(/<style>([\s\S]*?)<\/style>/, (_, css) => `<style>${css.replace(/\s+/g, ' ').replace(/ ?([{}:;,>]) ?/g, '$1').trim()}</style>`)
   .replace(/>\s+</g, '><');
-write('ocean.min.html', minPage);
+write('ocean.min.html', minifyPage(minJs));
 
-// GitHub Pages serves a self-contained build from /docs and starts at the helm.
+// Pages serves cached assets; the two ocean downloads remain self-contained.
 const pagesBootstrap = '<script>const siteURL=new URL(location.href);if(!siteURL.searchParams.has("boat")){siteURL.searchParams.set("boat","1");history.replaceState(null,"",siteURL);}</script>';
 fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
-write('docs/index.html', minPage.replace('<script type="module">', pagesBootstrap + '<script type="module">'));
+for(const [file,record]of pagesAssets){
+  const destination=path.join(root,'docs',record.url);
+  fs.mkdirSync(path.dirname(destination),{recursive:true});
+  fs.writeFileSync(destination,runtimeAssetBytes.get(file));
+}
+fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Object.fromEntries(pagesAssets),null,2)+'\n');
+// These assets are required by current startup. Discover them with the HTML,
+// instead of waiting for the later sequential model initialization stages.
+const startupPreloads=['assets/caravel-oak-albedo.webp','assets/crew/sailor.glb',
+  'assets/crew/sailor-female.glb','assets/wildlife/whale.glb']
+  .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
+write('docs/index.html', minifyPage(pagesJs).replace('</head>',startupPreloads+'</head>')
+  .replace('<script type="module">', pagesBootstrap + '<script type="module">'));
 fs.writeFileSync(path.join(root, 'docs', '.nojekyll'), '');
