@@ -125,6 +125,38 @@ ratios remain near 1.001. This source-level measurement is a pre-existing
 kinematic limitation, not a newly introduced regression or a calibrated fabric
 strain. Area-only checks cannot certify the cloth's material geometry.
 
+### Clear seed and mast-axis yaw hypothesis
+
+A sampled full-rig-clear seed now exists for both production and raw signed-yard
+callbacks: all three sails use retained side -1, signed sheet -0.3 rad, pressure
++1, yard yaw 0, clew contraction 1, full set/fill, dip/time/wind 0. This certifies
+one static triangle/capsule snapshot. A 31-step raw handover input sweep from
+that seed first failed at reported step 5; it is not a validated maneuver.
+Fixed-luff preflight cleared the checked targets, but proposed clews conflicted
+at steps 18–20. A clear sewn attachment does not establish a usable clew target.
+
+The separate mast-axis prototype rigidly rotates the zero-yaw yard and canvas
+about the actual raked mast line, retaining fixed deck leads and standing rig.
+**Mechanical handling hypothesis, not an established historical drill.** Root
+verified 28 side/pressure/yaw combinations, all three masts and 378 vertices per
+sail: material point-pair lengths, infinite-axis radial distance and straight
+masthead-to-sling span were preserved within 5.33e-15 design units; sewn-luff
+and running-endpoint gaps were zero. These invariants do not verify finite
+tapered-mast contact, swept motion or full-rig clearance.
+
+One endpoint at pressure -1, signed sheet -0.3 and yaw +0.8 rad produced forward
+panel force while retaining 14 rope-contact pairs on seven physical ropes.
+Eleven pairs involve the next mast's supports; two involve the main's eased
+stay near its deck lead, and one involves the mizzen's centreline tack crossing
+main canvas. These are interior crossings, outside attachment exemptions.
+Flipping support sides introduced further yard/support conflicts.
+
+A completed 216-case independent-mast-yaw sweep found no fully clear endpoint;
+the best retained 13 rope-contact pairs. Endpoint drive does not establish a
+clear transition, correct camber or workable support handling. These remain
+held experiments: no released force or rig-geometry changes, and no verified
+routine handover or maneuver has been handed off.
+
 Local experiments and results remain under ignored `shots/lateen-support-work/`.
 Held test files use `.fixture.mjs`, avoiding automatic production test discovery.
 

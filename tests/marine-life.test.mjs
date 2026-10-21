@@ -56,6 +56,59 @@ test('whale actions include full breach, elevated flukes, separate blows and con
   assert.ok(entry>=4&&blows>=3);assert.deepEqual([...seen].sort(),['blow','emerge','entry','trail']);
 });
 
+test('breach joins match exact swimming and flight poses with continuous first derivatives',()=>{
+  const swimming=age=>{
+    const q=(age%20-3)/1.4,arc=Math.exp(-q*q);
+    return {pose:{depth:-3.4+3*arc,pitch:-.12*q*arc,roll:0},velocity:{depth:-6*q*arc/1.4,pitch:-.12*arc*(1-2*q*q)/1.4,roll:0}};
+  };
+  const flightEnd=2.9,joins=[
+    {age:4,...swimming(4)},
+    {age:6,pose:{depth:-1,pitch:.96,roll:0},velocity:{depth:13.7,pitch:-.96/3.6,roll:0}},
+    {age:8.9,pose:{depth:-1+13.7*flightEnd-4.905*flightEnd**2,pitch:.96*(1-flightEnd/3.6),roll:0},velocity:{depth:13.7-9.81*flightEnd,pitch:-.96/3.6,roll:0}},
+    {age:10.2,...swimming(10.2)},
+  ],h=1e-4;
+  for(const behavior of ['breach','encounter'])for(const {age,pose,velocity} of joins){
+    const sample=offset=>marinePoseAt(age+offset,{type:'whale',behavior}),at=sample(0);
+    const left=[sample(-h),sample(-2*h),sample(-3*h)],right=[sample(h),sample(2*h),sample(3*h)];
+    for(const key of ['depth','pitch','roll']){
+      const label=`${behavior} ${key} at age ${age}`;
+      assert.ok(Math.abs(at[key]-pose[key])<1e-12,`${label}: exact boundary pose`);
+      // Extrapolate each open interval independently, so a discontinuity at the
+      // branch itself cannot disappear into a central finite difference.
+      for(const samples of [left,right]){
+        const limit=3*samples[0][key]-3*samples[1][key]+samples[2][key];
+        assert.ok(Math.abs(limit-at[key])<2e-8,`${label}: two-sided position limit`);
+      }
+      const leftVelocity=(3*at[key]-4*left[0][key]+left[1][key])/(2*h);
+      const rightVelocity=(-3*at[key]+4*right[0][key]-right[1][key])/(2*h);
+      assert.ok(Math.abs(leftVelocity-velocity[key])<3e-6,`${label}: incoming velocity ${leftVelocity}`);
+      assert.ok(Math.abs(rightVelocity-velocity[key])<3e-6,`${label}: outgoing velocity ${rightVelocity}`);
+    }
+  }
+});
+
+test('breach preserves ballistic flight and apex while approach and recovery stay submerged and bounded',()=>{
+  const animal={type:'whale',behavior:'breach'},apexFlightTime=13.7/9.81,apexAge=6+apexFlightTime;
+  for(const elapsed of [.125,.5,1,apexFlightTime,2,2.8]){
+    const pose=marinePoseAt(6+elapsed,animal);
+    assert.ok(Math.abs(pose.depth-(-1+13.7*elapsed-9.81*elapsed**2/2))<1e-12,'unchanged free-flight height under gravity');
+    assert.ok(Math.abs(pose.pitch-.96*(1-elapsed/3.6))<1e-12,'unchanged flight pitch');
+    assert.ok(pose.roll>=0&&pose.roll<=.30,'the flight bank stays inside its authored amplitude');
+  }
+  const apex=marinePoseAt(apexAge,animal),h=1e-4;
+  assert.ok(Math.abs(apex.depth-(-1+13.7**2/(2*9.81)))<1e-12,'unchanged ballistic apex');
+  assert.ok(Math.abs((marinePoseAt(apexAge+h,animal).depth-marinePoseAt(apexAge-h,animal).depth)/(2*h))<1e-7,'zero vertical velocity at the apex');
+  // Cubic Bezier control-point bounds enclose the two Hermite joins. These
+  // limits permit the submerged momentum-carrying dips without a second leap.
+  for(let i=0;i<=160;i++){
+    const launch=marinePoseAt(4+2*i/160,animal),recovery=marinePoseAt(8.9+1.3*i/160,animal);
+    assert.ok(launch.depth>=-10.14&&launch.depth<=-1+1e-10,'launch root remains in its submerged depth envelope');
+    assert.ok(launch.pitch>=-.06&&launch.pitch<=1.14,'launch pitch remains within its control-point envelope');
+    assert.ok(recovery.depth>=-8.92&&recovery.depth<=-2.52,'recovery root stays submerged without an unbounded dive');
+    assert.ok(recovery.pitch>=-1e-8&&recovery.pitch<=.187,'recovery pitch remains within its control-point envelope');
+  }
+});
+
 test('marine contact events retain fixed cadence across 10–120 FPS without idle or zero-delta emission',()=>{
   const snapshots=[];
   for(const hz of [10,30,60,120]){

@@ -409,6 +409,10 @@ The whale uses a reduced 39,254-triangle derivative of the supplied 145,388-tria
 model, preserving its UVs, skin and three original texture images. Its straight
 neutral pose needs no curl correction. Its rig has no animation clips; bounded tail,
 fluke and pectoral strokes are authored on the existing bones and weights.
+The breach joins swimming, launch, ballistic flight and recovery with continuous
+position and first derivatives, including roll. The approach and recovery carry
+vertical momentum through submerged dips; the airborne arc is unchanged.
+This is an authored trajectory, not a hydrodynamic or species-calibrated leap.
 Its brief blow emits soft condensate parcels and separate heavier water droplets
 from the posed forehead outlet. The parcels
 inherit forward motion, entrain into wind and disperse; coarse water falls under
@@ -726,11 +730,12 @@ npm run build
 npm test
 ```
 
-The current overnight checkpoint passed **383 tests** using installed Chrome on
+The current overnight checkpoint passed **385 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
-New checks cover heave/yaw-relative sail wind, continuous whale emergence,
+New checks cover heave/yaw-relative sail wind, continuous whale emergence and
+breach position/velocity joins,
 root-anchored breath births, restrained contact-driven hull audio and fresh
 actual-ocean clearance at loaded gun muzzles. Separate native blow/breach
 captures supplemented the suite. The attempted lateen support-owner repair is

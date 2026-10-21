@@ -21,6 +21,19 @@ The National Historic Ships register lists 51 ft beam but gives an erroneous 5.4
 
 **Still uncalibrated:** loaded draught, waterline length, vertical centre of gravity, detailed mass distribution, roll/pitch damping, resistance and sail coefficients. Commonly repeated mast heights and draught values were not verified against an accessible 1805 dimensional schedule in this quick pass. Any chosen runtime values must remain labelled authored approximations. Builder's measurement/tons burthen are capacity conventions, not displacement mass.
 
+### Historical endpoint gate
+
+The 21 October source audit found no named keel/rabbet ends, figurehead extremity
+or taffrail measurement nodes in the working structure graph. The lowest loft
+row measures an authored fairbody, not the reported keel. `bow.knee` ends at
+design Z=-7.16 and the simplified `bow.arms` sits near -7.18; neither identifies
+the historical figurehead extremity. The upper stern-gallery trim is the nearest
+existing taffrail candidate, without an explicit cross-stern taffrail member.
+Identify those structural endpoints before asserting 46.1010 m or 69.0372 m
+regression checks. Bowsprit, flag and rudder extrema must not substitute for them.
+Existing rendered entrance and timber-contact checks establish local geometry
+and joins, not those historical length conventions.
+
 ## Measured user reference and waterline fit
 
 The supplied `Meshy_AI_Victory_at_Portsmouth_1020215320_generate.glb` is a shape

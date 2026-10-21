@@ -176,7 +176,53 @@ and local project documentation enter this checkpoint. Runtime JS/WGSL and all
 three standalone page bytes remain unchanged. No contact prototype, artificial
 force correction, new asset or paid generation is included. Publication pending.
 
+**Published batch03:** `443ea7fcbf9d3c879490d96f361f71dec55d965b`.
+Pages deployment39597495015succeeded; legacy Pages reports built at the same
+commit. Public page SHA-256 matches the prior verified runtime and local bytes:
+`04cc20d03bd006453ec6e2e4c798729e3875b90975f9dcbcfcf50085d6c42443`.
+The audit, tests and documentation are pushed; only this publication receipt
+remains local. All direct agents are complete; root retains testing. No test or
+inspection browser remains active. Local server8088stays available.
+
+Next bounded rig step: begin from an independently certified full-rig seed,
+not merely an own-mast-clear raw surface. Solve cloth against the actual mast,
+gathered rope bundle and foreign load-bearing lines; keep sheet/support controls
+independent. Preserve rest lengths, moving-attachment consistency and contact
+history before pursuing CPU/GPU integration or performance. Do not promote the
+held row/PBD/tether prototypes or substitute support release for contact solving.
+At/after08:00local, start no new implementation and disable the one-night heartbeat.
+
 The heartbeat remains active. Its bounded count was extended from9to10solely to
 retain a wake at/after the08:00cutoff for stabilization/report/disable; the prompt,
 thread, notification policy and prohibition on new implementation after08:00
 are unchanged. Always check actual local time before starting another change.
+
+## Batch04: breach trajectory continuity
+
+Verified whole-body breach discontinuities at ages 4, 6 and 8.9: pitch jumped at
+the launch branch, and vertical velocity jumped into and out of flight. Exact
+swimming/ballistic derivatives now join through submerged Hermite approach and
+recovery segments. A squared-sine bank has zero endpoint roll rates. Airborne
+height/pitch, launch time, apex and flight duration remain unchanged; the bank
+waveform changes intentionally. This is authored C1 kinematics, not C2 motion,
+conserved energy or hydrodynamic propulsion. Event logic and assets are unchanged.
+
+Root's dense diagnostic found root minima −5.53 m/−5.61 m in approach/recovery;
+the existing analytic body envelope reaches −10.58 m. These are not animated-skin
+or actual-seabed clearance checks. Independent direct-agent source review found
+no blocker. 22 focused marine checks passed on Metal. An initial omitted Chrome
+path prevented three GPU checks from launching; the correctly configured run
+passed. Complete serialized native Metal suite 385/385 passed in 175.4 seconds;
+all three standalone pages rebuilt. Visible Chrome captured the actual airborne
+breach and re-entry at deterministic frames 435/545 with no console warnings or
+errors (`shots/overnight-c1-breach.png`, `shots/overnight-c1-reentry.png`). Existing
+entry spray still shows authored pointed particle shapes; this checkpoint fixes
+motion, not that remaining fluid-effects quality limitation. Publication pending.
+Root remains sole tester.
+
+Further held rig work established one full-rig-clear static seed and preserved
+raked-mast-axis rotation invariants, but the raw handover first contacts rig at
+step 5 and 216 independent-yaw endpoints yielded no complete clearance. See
+`RIG_HANDLING.md`; no prototype entered the runtime. Victory's endpoint audit
+also found missing semantic keel/figurehead/taffrail measurement nodes; details
+are recorded in `VICTORY_RESEARCH.md`. Do not reshape to generic mesh extrema.
