@@ -486,6 +486,23 @@ const NINA_RIG_PLATE = deepFreeze({
 // Origin is the loaded waterline amidships; +X starboard, +Z aft. X and Y/Z
 // use their respective metre scales so the runtime transform restores shape.
 const length=56.6928,beam=15.8496,verticalScale=length/12;
+// The generated reference loses its lower stem and flares to almost full beam
+// within two metres. Retain its clean midbody sections, but fair the complete
+// forward 6.07 m as a finite-angle entrance, guided by the waterlines in RMG
+// ZAZ0120. These are authored reconstruction offsets, not a digitized survey.
+const victoryFrameStations=[-6,-5.99,-5.97,-5.94,-5.9,-5.84,-5.76,-5.664263832,-5.3,-5.190106766,-4.715949699,-3.767635567,-2.819321434,-1.871007301,-0.922693169,1.92224923,2.870563362,3.344720429,3.818877495,4.767191628,5.71550576,6];
+const victoryFrameLevels=[-1.862670392,-1.6,-1.2,-0.6,-0.461100308,-0.271437482,0.107888171,0.487213824,0.866539478,1.056202304,1.245865131,1.435527957,1.67,2.15,2.65];
+function fairVictoryForebody(rows){
+  const xs=victoryFrameStations,k=10,span=xs[k]+6,smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+  return rows.map((row,j)=>{
+    const w=row[k],h0=xs[k]-xs[k-1],h1=xs[k+1]-xs[k];
+    const end=victoryTangent(h0,h1,(w-row[k-1])/h0,(row[k+1]-w)/h1);
+    // Preserve the plan's broad upper battery/forecastle and the fine keel.
+    // The correction belongs to the bluff lower entrance around the waterline.
+    const y=victoryFrameLevels[j],strength=smooth((y+.6)/.6)*(1-smooth((y-.1)/.956202304));
+    return row.map((value,i)=>i>=k?value:value+(victoryCubic(0,w,2.3*w/span,end,span,(xs[i]+6)/span)-value)*strength);
+  });
+}
 const VICTORY_DESIGN=deepFreeze({
   frame:{length:12,beam:3.6,verticalScale},runtime:{length,beam},
   hull:{draft:8.8/verticalScale,bowRake:.9,sternRake:.32,
@@ -495,11 +512,11 @@ const VICTORY_DESIGN=deepFreeze({
     // Above-water stem rake follows the measured rounded shell; the beakhead
     // is separate. The quadratic fore-only warp leaves gunport leads fixed.
     foreJoin:-5.3,stemLevels:[0,0.107888171,0.487213824,0.866539478,1.056202304,1.245865131,1.435527957,2.65],stemRake:[0,0.062555768,0.204802887,0.22376917,0.22376917,0.233252311,0.233252311,0.233252311],
-    stations:[-6,-5.99,-5.97,-5.94,-5.9,-5.84,-5.76,-5.664263832,-5.3,-5.190106766,-4.715949699,-3.767635567,-2.819321434,-1.871007301,-0.922693169,1.92224923,2.870563362,3.344720429,3.818877495,4.767191628,5.71550576,6],
-    levels:[-1.862670392,-1.6,-1.2,-0.6,-0.461100308,-0.271437482,0.107888171,0.487213824,0.866539478,1.056202304,1.245865131,1.435527957,1.67,2.15,2.65],
+    stations:victoryFrameStations,
+    levels:victoryFrameLevels,
     // Height-major half-breadths. Censored fittings are interpolated; below the
     // shallow reference shell is an independent fairbody with authored draught.
-    sections:[
+    sections:fairVictoryForebody([
       [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
       [0,0.007635424,0.022794968,0.045226947,0.074481155,0.116706716,0.169265494,0.225260429,0.399650766,0.435469005,0.529299969,0.602178682,0.626650834,0.643989656,0.647011018,0.635421207,0.61763455,0.598431232,0.571042495,0.472216745,0.176453914,0.037651718],
       [0,0.015270849,0.045589936,0.090453895,0.14896231,0.233413433,0.33853099,0.450520859,0.799301533,0.870938011,1.058599938,1.204357364,1.253301667,1.287979313,1.294022036,1.270842414,1.235269101,1.196862463,1.14208499,0.94443349,0.352907828,0.075303437],
@@ -515,7 +532,7 @@ const VICTORY_DESIGN=deepFreeze({
       [0,0.068633622,0.23743955,0.391412116,0.537386809,0.651070451,0.798605491,0.93897617,1.12059074,1.184893,1.34755703,1.35034905,1.412617967,1.420161856,1.427705745,1.291912979,1.30788931,1.293740569,1.286448803,1.203614246,1.120779689,1.26296075],
       [0,0.067240046,0.232618442,0.383464662,0.526475402,0.637850747,0.782390151,0.919910664,1.097837628,1.160834259,1.320195466,1.322930795,1.383935369,1.391326083,1.398716796,1.265681243,1.281333182,1.267471725,1.260328015,1.179175378,1.098022741,1.237316877],
       [0,0.065498076,0.226592058,0.373530344,0.512836143,0.621326116,0.762120976,0.896078782,1.069396239,1.130760833,1.285993511,1.288657976,1.348082121,1.355281365,1.36248061,1.232891574,1.248138022,1.23463567,1.22767703,1.148626793,1.069576556,1.205262035]
-    ]},
+    ])},
   decks:{lower:.17,middle:.67,upper:1.17,main:1.17,
     forecastle:{end:-3.92,height:1.67},quarter:{start:1.65,height:1.67},poop:{start:4.35,height:2.15}},
   quarterdeck:{start:1.65,height:1.67},
@@ -6297,16 +6314,21 @@ fn dolphinSea(q:vec2f)->vec3f {
 }
 fn dolphinHeight(p:vec2f)->f32 {var q=p;for(var k=0;k<2;k++){q=p-dolphinSea(q).xz;}return dolphinSea(q).y;}
 fn dolphinYaw(p:vec3f,heading:f32)->vec3f {let c=cos(heading);let s=sin(heading);return vec3f(c*p.x-s*p.z,p.y,s*p.x+c*p.z);}
+struct DolphinStroke {position:vec3f,normal:vec3f};
+// The peduncle and both flukes share one continuous bend. Its inverse-transpose
+// normal keeps the two water-coated skins lit throughout the stroke.
+fn dolphinStroke(p:vec3f,normal:vec3f,beat:f32)->DolphinStroke {
+  let tail=max(0.0,(p.z-.25)/1.35);
+  return DolphinStroke(p+vec3f(0,beat*.24*tail*tail,0),normalize(normal+vec3f(0,0,-normal.y*beat*.48*tail/1.35)));
+}
 struct DolphinVertex {@builtin(position) pos:vec4f,@location(0) world:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f};
 @vertex fn dolphinVS(@location(0) p:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f,@builtin(instance_index) id:u32)->DolphinVertex {
-  let d=dolphins[id];let tail=max(0.0,(p.z-.25)/1.35);let beat=sin(F.reserved.w*8.0+d.pose.z);
-  let local=p+vec3f(0,beat*.24*tail*tail,0);
-  let bentN=normalize(normal+vec3f(0,0,-normal.y*beat*.48*tail/1.35));
+  let d=dolphins[id];let swim=dolphinStroke(p,normal,sin(F.reserved.w*8.0+d.pose.z));
   let c=cos(d.pose.x);let s=sin(d.pose.x);
   let pitch=mat3x3f(vec3f(1,0,0),vec3f(0,c,s),vec3f(0,-s,c));
   let root=vec3f(d.root.x,dolphinHeight(d.root.xz)+d.root.y,d.root.z);
-  var o:DolphinVertex;o.world=root+dolphinYaw(pitch*local*d.pose.y,d.root.w);
-  o.normal=dolphinYaw(pitch*bentN,d.root.w);o.albedo=albedo;
+  var o:DolphinVertex;o.world=root+dolphinYaw(pitch*swim.position*d.pose.y,d.root.w);
+  o.normal=dolphinYaw(pitch*swim.normal,d.root.w);o.albedo=albedo;
   o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
 }
 // A continuous water film adds a narrow sunlight glint over the softer skin
@@ -7437,8 +7459,18 @@ function createDolphinMesh(){
     }
   }
   for(let r=0;r<rings;r++)for(let s=0;s<sectors;s++){const a=r*(sectors+1)+s,b=a+sectors+1;indices.push(a,a+1,b,a+1,b+1,b);}
+  // Close the narrow tail stock inside the fluke root; an uncapped tube leaves
+  // a visible hole when the flukes are viewed from astern during an upstroke.
+  const [tailZ,tailRadius,tailY]=profile.at(-1);
+  for(let s=0;s<sectors;s++){
+    const a=s/sectors*Math.PI*2,b=(s+1)/sectors*Math.PI*2;
+    tri([0,tailY,tailZ],[Math.cos(a)*tailRadius,tailY+Math.sin(a)*tailRadius*.9,tailZ],[Math.cos(b)*tailRadius,tailY+Math.sin(b)*tailRadius*.9,tailZ],[.095,.13,.155]);
+  }
   function fin(outline,axis,thickness,color){
+    // Mirroring a fin also reverses its winding. Keep both skins outward so
+    // lighting agrees across the port/starboard flukes and pectoral fins.
     const centre=[0,0,0];for(const p of outline)for(let j=0;j<3;j++)centre[j]+=p[j]/outline.length;
+    if(normal(centre,outline[0],outline[1])[axis]<0)outline=[...outline].reverse();
     for(const side of [-1,1])for(let i=0;i<outline.length;i++){
       const c=[...centre],a=[...outline[i]],b=[...outline[(i+1)%outline.length]];
       c[axis]+=side*thickness;a[axis]+=side*thickness*.12;b[axis]+=side*thickness*.12;
@@ -7453,7 +7485,12 @@ function createDolphinMesh(){
   fin([[0,.27,-.2],[0,.6,-.015],[0,.83,.17],[0,.82,.25],[0,.46,.32],[0,.24,.55]],0,.055,[.10,.14,.16]);
   for(const side of [-1,1]){
     fin([[side*.25,-.035,-.55],[side*.47,-.08,-.39],[side*.87,-.26,.04],[side*.96,-.29,.19],[side*.68,-.17,.17],[side*.29,-.06,-.15]],1,.025,[.105,.14,.16]);
-    fin([[0,-.10,1.32],[side*.16,-.10,1.16],[side*.65,-.10,1.03],[side*.81,-.10,1.11],[side*.68,-.10,1.31],[side*.36,-.10,1.52],[side*.075,-.10,1.51]],1,.045,[.115,.15,.17]);
+    // The nose points toward -Z: fluke tips sweep aft (+Z), with the notch
+    // opening aft between the lobes. Embed the leading root in the peduncle.
+    // Span .75 m / body 3.11 m, sweep ~36 degrees: T. truncatus measurements
+    // average .61 m / 2.59 m and 35 degrees (PLOS ONE, Table 4):
+    // https://doi.org/10.1371/journal.pone.0255464
+    fin([[0,-.10,1.20],[side*.075,-.10,1.20],[side*.195,-.10,1.25],[side*.307,-.10,1.36],[side*.375,-.10,1.47],[side*.315,-.10,1.53],[side*.167,-.10,1.50],[side*.035,-.10,1.43],[0,-.10,1.40]],1,.018,[.115,.15,.17]);
     // Small eyes and a restrained mouth seam; do not sculpt a human smile.
     const eye=[side*.286,.105,-.91],eyeRadius=.028;
     for(let i=0;i<8;i++){
@@ -8829,7 +8866,10 @@ function createVictoryMesh({groups,parts}={}){
   }
   group('hull.copper.seams','hull',copperStart);
   // Proud wales track exactly the same surface as the hull on both sides.
-  const waleZs=[...new Set([...Array.from({length:49},(_,i)=>-6+i/4),...VICTORY_DESIGN.hull.stations])].sort((a,b)=>a-b);
+  // Match the actual planking grid, including gunport boundaries. A separate
+  // coarser grid matched only the analytic hull, missing the triangulated skin
+  // between joins and mostly burying return faces inside it.
+  const waleZs=zs;
   for(const side of [-1,1]){
     const start=out.length;
     for(const h of [.035,.635,1.135])for(let i=0;i<waleZs.length-1;i++){
@@ -9084,21 +9124,85 @@ function createVictoryMesh({groups,parts}={}){
   for(const y of [-1.3,-.65,0,.55])tube([-.06,y,5.86],[.06,y,5.86],.027,3,.027,8);
   group('helm.rudder','helm.rudder',rudderStart,{type:'rudder'});
   const bowStart=out.length;
+  const cubic=(a,b,c,d,t)=>a.map((v,k)=>v*(1-t)**3+3*b[k]*t*(1-t)**2+3*c[k]*t*t*(1-t)+d[k]*t**3);
+  // Swept rectangular timbers share a ring at every bend; these are shaped
+  // head rails and knees, rather than sagged ropes stretched into a V.
+  function curvedTimber(points,w,h,material){
+    let across=[1,0,0];
+    const rings=points.map((p,i)=>{
+      const tangent=unit(sub(points[Math.min(points.length-1,i+1)],points[Math.max(0,i-1)]));
+      // Parallel-transport the rectangular section. Switching a reference
+      // axis at a slope threshold rotated neighbouring stem rings 90 degrees.
+      const project=a=>sub(a,mul(tangent,a.reduce((n,v,k)=>n+v*tangent[k],0)));
+      let normal=project(across);if(Math.hypot(...normal)<1e-6)normal=project([0,0,1]);
+      across=unit(normal);const up=cross(across,tangent);
+      return [[-1,-1],[-1,1],[1,1],[1,-1]].map(([a,b])=>add(p,add(mul(across,a*w/2),mul(up,b*h/2))));
+    });
+    for(let i=0;i<rings.length-1;i++)for(let k=0;k<4;k++)quad(rings[i][k],rings[i][(k+1)%4],rings[i+1][(k+1)%4],rings[i+1][k],material);
+    quad(...rings[0].slice().reverse(),material);quad(...rings.at(-1),material);
+  }
+  const stemStart=out.length;
+  const stemBases=[-1.5,-1.25,-1,-.75,-.5,-.25,0,.2,.4,.6,.8,1,1.2,1.4,1.6,1.8];
+  const stem=stemBases.map(base=>{const p=hullPoint(-6,base,0);p[2]-=.018;return p;});
+  curvedTimber(stem,.075,.08,20);
+  group('bow.stem','hull',stemStart);
+  const kneeStart=out.length;
+  const kneeRoot=stem[stemBases.indexOf(.8)];
+  const kneePoint=t=>cubic(kneeRoot,[0,1.4,-6.5],[0,1.7,-7.0],[0,2.22,-7.16],t);
+  const knee=Array.from({length:17},(_,i)=>kneePoint(i/16));
+  curvedTimber(knee,.10,.16,21);
+  group('bow.knee','hull',kneeStart);
+  group('bow.cutwater','hull',stemStart);
   for(const side of [-1,1]){
     const cat=victoryAnchorCathead(side);tube(cat.root,cat.tip,.055,21,.047,8);
-    tube([side*.11,1.72,-5.9],[side*.12,2.11,-7.07],.045,21,.025,8);
-    for(let i=0;i<4;i++){
-      const y=1.48+i*.13;
-      rope([side*.12,y,-6.85],[side*victoryDeckHalfWidth(-5.55),y+.19,-5.55],.024,21,8,.045);
+    const railStart=out.length,rails=[];
+    for(let i=0;i<3;i++){
+      const start=out.length;
+      const base=1.05+i*.25,z=-5.45,y=base+victorySheer(z),w=victoryHullHalfWidth(z,y),tip=kneePoint(.65+i*.15);tip[0]=side*.03;
+      const curve=Array.from({length:17},(_,j)=>cubic([side*(w-.008),y,z],[side*w*.98,y-.06,-6.05],[side*.40,tip[1]-.30,-6.65],tip,j/16));
+      curvedTimber(curve,.042,.055,21);rails.push(curve);
+      group(`bow.headrail.${side}.${i}`,'hull',start);
     }
+    group(`bow.headrails.${side}`,'hull',railStart);
+    const frameStart=out.length;
+    for(const index of [10,13]){
+      const start=out.length;
+      // Frame bends pass through every member they support, not just the two
+      // outside rails; an independently drawn curve left false near-joints.
+      curvedTimber(rails.map(rail=>rail[index]),.032,.045,20);
+      group(`bow.headtimber.${side}.${index}`,'hull',start);
+    }
+    group(`bow.headtimbers.${side}`,'hull',frameStart);
   }
+  const gratingStart=out.length;
+  for(let i=0;i<10;i++){
+    const t=i/9,z=-6.32-t*.64,w=.32*(1-t)+.10*t,y=1.62+.13*t;
+    tube([-w,y,z],[w,y,z],.013,1,.013,4);
+  }
+  for(const side of [-1,1]){
+    tube([side*.32,1.62,-6.13],[side*.32,1.62,-6.32],.024,20,.024,4);
+    tube([side*.32,1.62,-6.32],[side*.10,1.75,-6.96],.024,20,.022,4);
+  }
+  tube([-.16,1.726,-6.84],[.16,1.726,-6.84],.021,20,.021,4);
+  group('bow.grating','hull',gratingStart);
   // Bowsprit, jibboom and flying jibboom are stepped spars, not an oversize mast.
   tube([0,2.1,-4.8],[0,3.06,-8.25],.14,1,.075,16);
   tube([0,2.92,-7.75],[0,3.28,-10.56],.062,1,.022,12);
   tube([0,2.88,-8.0],[0,1.78,-8.0],.035,20,.025,8);
-  for(const side of [-1,1])for(const end of [-8.2,-10.5])rope([side*.75,.88,-5.55],[0,end===-8.2?3.04:3.27,end],.011,20,6,.015);
-  tube([0,2.05,-6.65],[0,2.57,-7.03],.09,25,.055,10);
-  ring([0,2.48,-7.06],.14,.025,25,'z',20);
+  for(const side of [-1,1])for(const end of [-8.2,-10.5]){
+    const z=-5.55,y=.88+victorySheer(z),root=[side*victoryHullHalfWidth(z,y),y,z];
+    rope(root,[0,end===-8.2?3.04:3.27,end],.011,20,6,.015);
+  }
+  // Compact heraldic shield and crown on the knee, replacing a floating ring.
+  // Decoration remains an authored simplification of the 1803 royal arms.
+  const armsStart=out.length,shield=[[-.13,2.23,-7.18],[-.14,2.43,-7.18],[.14,2.43,-7.18],[.13,2.23,-7.18],[0,2.12,-7.18]],centre=[0,2.30,-7.19];
+  for(let i=0;i<shield.length;i++){tri(centre,shield[i],shield[(i+1)%shield.length],25);tube(shield[i],shield[(i+1)%shield.length],.012,25,.012,6);}
+  for(const side of [-1,1]){
+    tube([side*.11,2.45,-7.18],[side*.085,2.54,-7.18],.014,25,.009,6);
+    tube([side*.085,2.54,-7.18],[0,2.56,-7.18],.009,25,.009,6);
+  }
+  tube([-.11,2.45,-7.18],[.11,2.45,-7.18],.018,25,.018,6);
+  group('bow.arms','hull',armsStart);
   group('bow.structure','hull',bowStart);
   // Two wheels on a common spindle, binnacle, companionways, capstan and bitts.
   const wheelStart=out.length,wc=VICTORY_DESIGN.wheel.centre;

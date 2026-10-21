@@ -33,16 +33,21 @@ fn dolphinSea(q:vec2f)->vec3f {
 }
 fn dolphinHeight(p:vec2f)->f32 {var q=p;for(var k=0;k<2;k++){q=p-dolphinSea(q).xz;}return dolphinSea(q).y;}
 fn dolphinYaw(p:vec3f,heading:f32)->vec3f {let c=cos(heading);let s=sin(heading);return vec3f(c*p.x-s*p.z,p.y,s*p.x+c*p.z);}
+struct DolphinStroke {position:vec3f,normal:vec3f};
+// The peduncle and both flukes share one continuous bend. Its inverse-transpose
+// normal keeps the two water-coated skins lit throughout the stroke.
+fn dolphinStroke(p:vec3f,normal:vec3f,beat:f32)->DolphinStroke {
+  let tail=max(0.0,(p.z-.25)/1.35);
+  return DolphinStroke(p+vec3f(0,beat*.24*tail*tail,0),normalize(normal+vec3f(0,0,-normal.y*beat*.48*tail/1.35)));
+}
 struct DolphinVertex {@builtin(position) pos:vec4f,@location(0) world:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f};
 @vertex fn dolphinVS(@location(0) p:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f,@builtin(instance_index) id:u32)->DolphinVertex {
-  let d=dolphins[id];let tail=max(0.0,(p.z-.25)/1.35);let beat=sin(F.reserved.w*8.0+d.pose.z);
-  let local=p+vec3f(0,beat*.24*tail*tail,0);
-  let bentN=normalize(normal+vec3f(0,0,-normal.y*beat*.48*tail/1.35));
+  let d=dolphins[id];let swim=dolphinStroke(p,normal,sin(F.reserved.w*8.0+d.pose.z));
   let c=cos(d.pose.x);let s=sin(d.pose.x);
   let pitch=mat3x3f(vec3f(1,0,0),vec3f(0,c,s),vec3f(0,-s,c));
   let root=vec3f(d.root.x,dolphinHeight(d.root.xz)+d.root.y,d.root.z);
-  var o:DolphinVertex;o.world=root+dolphinYaw(pitch*local*d.pose.y,d.root.w);
-  o.normal=dolphinYaw(pitch*bentN,d.root.w);o.albedo=albedo;
+  var o:DolphinVertex;o.world=root+dolphinYaw(pitch*swim.position*d.pose.y,d.root.w);
+  o.normal=dolphinYaw(pitch*swim.normal,d.root.w);o.albedo=albedo;
   o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
 }
 // A continuous water film adds a narrow sunlight glint over the softer skin

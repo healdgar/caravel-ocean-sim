@@ -326,6 +326,12 @@ occludes submerged bodies. They avoid the active hulls and water shallower than
 six metres. Motion is authored wildlife behavior, not a hydrodynamic animal
 simulation. No wildlife draw or effect pass runs while a pod is absent.
 
+Flukes sweep aft from the tail stock, with a trailing central notch and a
+0.75 m span on the 3.11 m model. Proportions follow the bottlenose measurements
+in [PLOS ONE, Table 4](https://doi.org/10.1371/journal.pone.0255464).
+The embedded roots, closed tail stock and outward skin normals remain continuous
+through the production swimming stroke.
+
 For immediate testing, open **Sea settings → Environment & encounters → Spot
 dolphin pod**. **View pod** frames the animals; **End encounter** clears them,
 and **Natural dolphin sightings** disables automatic visits. Debug URL options
@@ -695,7 +701,7 @@ npm run build
 npm test
 ```
 
-The storm-haze, Victory bow and straight-whale revision passed **303 tests** using installed Chrome on
+The Victory entrance and dolphin-fluke revision passed **307 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three standalone
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -710,8 +716,13 @@ parity, crew reach/routes, anchor scaling, draft-safe coastal starts and two-shi
 Hull regressions check withheld reference sections, fair tangents, rendered deck,
 bulkhead, wale and rail connections, closed ends, supported curved galleries,
 dense CPU/GPU width parity and independent hydrostatic quadrature. Victory's
-joined procedural model contains 84,832 triangles and about 5.41 MB of indexed
+joined procedural model contains 89,449 triangles and about 5.85 MB of indexed
 geometry; the 3.52-million-triangle reference is not loaded by the game.
+The lower bow entrance is faired against museum half-breadth drawings; upper
+battery roundness is retained. Joined curved headrails, headtimbers, grating and
+cutwater replace straight projecting struts. Timber sections retain a stable
+frame through bends, and hull bands share the actual planking grid so their
+returns also meet between vertices. See [reference limits](VICTORY_RESEARCH.md).
 Underwater checks cover Snell refraction, Fresnel reflection, spectral extinction,
 sparse silhouettes at 12/60 m without dark halos, visible crest faces above eye
 level, all six material families, real whale/dolphin image changes, resizing and

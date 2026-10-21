@@ -16,8 +16,18 @@ export function createDolphinMesh(){
     }
   }
   for(let r=0;r<rings;r++)for(let s=0;s<sectors;s++){const a=r*(sectors+1)+s,b=a+sectors+1;indices.push(a,a+1,b,a+1,b+1,b);}
+  // Close the narrow tail stock inside the fluke root; an uncapped tube leaves
+  // a visible hole when the flukes are viewed from astern during an upstroke.
+  const [tailZ,tailRadius,tailY]=profile.at(-1);
+  for(let s=0;s<sectors;s++){
+    const a=s/sectors*Math.PI*2,b=(s+1)/sectors*Math.PI*2;
+    tri([0,tailY,tailZ],[Math.cos(a)*tailRadius,tailY+Math.sin(a)*tailRadius*.9,tailZ],[Math.cos(b)*tailRadius,tailY+Math.sin(b)*tailRadius*.9,tailZ],[.095,.13,.155]);
+  }
   function fin(outline,axis,thickness,color){
+    // Mirroring a fin also reverses its winding. Keep both skins outward so
+    // lighting agrees across the port/starboard flukes and pectoral fins.
     const centre=[0,0,0];for(const p of outline)for(let j=0;j<3;j++)centre[j]+=p[j]/outline.length;
+    if(normal(centre,outline[0],outline[1])[axis]<0)outline=[...outline].reverse();
     for(const side of [-1,1])for(let i=0;i<outline.length;i++){
       const c=[...centre],a=[...outline[i]],b=[...outline[(i+1)%outline.length]];
       c[axis]+=side*thickness;a[axis]+=side*thickness*.12;b[axis]+=side*thickness*.12;
@@ -32,7 +42,12 @@ export function createDolphinMesh(){
   fin([[0,.27,-.2],[0,.6,-.015],[0,.83,.17],[0,.82,.25],[0,.46,.32],[0,.24,.55]],0,.055,[.10,.14,.16]);
   for(const side of [-1,1]){
     fin([[side*.25,-.035,-.55],[side*.47,-.08,-.39],[side*.87,-.26,.04],[side*.96,-.29,.19],[side*.68,-.17,.17],[side*.29,-.06,-.15]],1,.025,[.105,.14,.16]);
-    fin([[0,-.10,1.32],[side*.16,-.10,1.16],[side*.65,-.10,1.03],[side*.81,-.10,1.11],[side*.68,-.10,1.31],[side*.36,-.10,1.52],[side*.075,-.10,1.51]],1,.045,[.115,.15,.17]);
+    // The nose points toward -Z: fluke tips sweep aft (+Z), with the notch
+    // opening aft between the lobes. Embed the leading root in the peduncle.
+    // Span .75 m / body 3.11 m, sweep ~36 degrees: T. truncatus measurements
+    // average .61 m / 2.59 m and 35 degrees (PLOS ONE, Table 4):
+    // https://doi.org/10.1371/journal.pone.0255464
+    fin([[0,-.10,1.20],[side*.075,-.10,1.20],[side*.195,-.10,1.25],[side*.307,-.10,1.36],[side*.375,-.10,1.47],[side*.315,-.10,1.53],[side*.167,-.10,1.50],[side*.035,-.10,1.43],[0,-.10,1.40]],1,.018,[.115,.15,.17]);
     // Small eyes and a restrained mouth seam; do not sculpt a human smile.
     const eye=[side*.286,.105,-.91],eyeRadius=.028;
     for(let i=0;i<8;i++){

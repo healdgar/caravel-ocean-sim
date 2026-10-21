@@ -4,6 +4,64 @@ import {once} from 'node:events';
 import {test} from 'node:test';
 import {chromium} from 'playwright';
 
+test('production dolphin stroke keeps aft-swept flukes joined, symmetric and correctly lit through a full beat',{timeout:120000},async()=>{
+  const server=spawn(process.execPath,['server.mjs','8095'],{cwd:new URL('..',import.meta.url),stdio:['ignore','pipe','inherit']});let browser;
+  try{
+    await once(server.stdout,'data');
+    browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+    const page=await browser.newPage();await page.route('**/__dolphin-stroke',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://localhost:8095/__dolphin-stroke');
+    const result=await page.evaluate(async()=>{
+      const {DOLPHIN_RENDER}=await import('/js/wgsl/dolphins.js'),{createDolphinMesh}=await import('/js/dolphin-mesh.js');
+      const mesh=createDolphinMesh(),count=mesh.vertices.length/9,frames=97,queries=new Float32Array(count*8),errors=[];
+      for(let i=0;i<count;i++){queries.set(mesh.vertices.slice(i*9,i*9+3),i*8);queries.set(mesh.vertices.slice(i*9+3,i*9+6),i*8+4);}
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage;device.onuncapturederror=e=>errors.push(e.error.message);
+      const input=device.createBuffer({size:queries.byteLength,usage:B.STORAGE|B.COPY_DST});device.queue.writeBuffer(input,0,queries);
+      const bytes=count*frames*8*4,output=device.createBuffer({size:bytes,usage:B.STORAGE|B.COPY_SRC}),read=device.createBuffer({size:bytes,usage:B.COPY_DST|B.MAP_READ});
+      const module=device.createShaderModule({code:DOLPHIN_RENDER+`
+struct StrokeProbe {p:vec4f,n:vec4f};
+@group(1)@binding(0)var<storage,read>strokeInput:array<StrokeProbe>;
+@group(1)@binding(1)var<storage,read_write>strokeOutput:array<StrokeProbe>;
+@compute @workgroup_size(64)fn strokeProbe(@builtin(global_invocation_id)i:vec3u){
+  let count=arrayLength(&strokeInput);if(i.x>=count*97u){return;}
+  let q=strokeInput[i.x%count];let phase=f32(i.x/count)*(2.0*PI)/96.0;
+  let stroke=dolphinStroke(q.p.xyz,q.n.xyz,sin(phase));
+  strokeOutput[i.x]=StrokeProbe(vec4f(stroke.position,1),vec4f(stroke.normal,0));
+}`});
+      for(const m of (await module.getCompilationInfo()).messages)if(m.type==='error')errors.push(m.message);
+      const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'strokeProbe'}});
+      const empty=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[]}),group=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:input}},{binding:1,resource:{buffer:output}}]});
+      const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,empty);pass.setBindGroup(1,group);pass.dispatchWorkgroups(Math.ceil(count*frames/64));pass.end();enc.copyBufferToBuffer(output,0,read,0,bytes);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const posed=new Float32Array(read.getMappedRange()),at=(frame,i)=>posed.subarray((frame*count+i)*8,(frame*count+i)*8+3),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],sub=(a,b)=>a.map((v,j)=>v-b[j]);
+      let fixedError=0,cycleError=0,axisError=0,normalError=0,maxSpeed=0,minArea=Infinity,maxArea=0,minFacing=1,tipRange=0;
+      const fluke=i=>Math.abs(mesh.vertices[i*9+6]-.115)<1e-6;
+      for(let i=0;i<count;i++){
+        const rest=queries.subarray(i*8,i*8+3);cycleError=Math.max(cycleError,Math.hypot(...sub(at(0,i),at(96,i))));
+        if(fluke(i)&&Math.abs(rest[0])>.37)tipRange=Math.max(tipRange,Math.abs(at(24,i)[1]-at(72,i)[1]));
+        for(let frame=0;frame<frames;frame++){
+          const p=at(frame,i),offset=(frame*count+i)*8;axisError=Math.max(axisError,Math.abs(p[0]-rest[0]),Math.abs(p[2]-rest[2]));
+          normalError=Math.max(normalError,Math.abs(Math.hypot(...posed.subarray(offset+4,offset+7))-1));
+          if(rest[2]<=.25)fixedError=Math.max(fixedError,Math.hypot(...sub(p,rest)));
+          if(frame)maxSpeed=Math.max(maxSpeed,Math.hypot(...sub(p,at(frame-1,i)))/(Math.PI/4/96));
+        }
+      }
+      for(let t=0;t<mesh.indices.length;t+=3){
+        const ids=Array.from(mesh.indices.slice(t,t+3));if(!ids.every(fluke))continue;
+        const rest=ids.map(i=>Array.from(queries.subarray(i*8,i*8+3))),originalArea=Math.hypot(...cross(sub(rest[1],rest[0]),sub(rest[2],rest[0])));
+        if(originalArea<1e-8)continue;
+        for(let frame=0;frame<frames;frame++){
+          const p=ids.map(i=>Array.from(at(frame,i))),n=cross(sub(p[1],p[0]),sub(p[2],p[0])),area=Math.hypot(...n),average=[0,0,0];
+          for(const id of ids)for(let c=0;c<3;c++)average[c]+=posed[(frame*count+id)*8+4+c]/3;
+          minArea=Math.min(minArea,area/originalArea);maxArea=Math.max(maxArea,area/originalArea);minFacing=Math.min(minFacing,n.reduce((a,v,c)=>a+v*average[c],0)/(area*Math.hypot(...average)));
+        }
+      }
+      const finite=posed.every(Number.isFinite);read.unmap();device.destroy();return {errors,finite,fixedError,cycleError,axisError,normalError,maxSpeed,minArea,maxArea,minFacing,tipRange};
+    });
+    assert.deepEqual(result.errors,[]);assert.equal(result.finite,true);assert.ok(result.fixedError<1e-6&&result.axisError<1e-6,JSON.stringify(result));
+    assert.ok(result.cycleError<1e-6&&result.normalError<1e-6,JSON.stringify(result));assert.ok(result.tipRange>.35&&result.tipRange<.45,JSON.stringify(result));
+    assert.ok(result.maxSpeed<2.1,JSON.stringify(result));assert.ok(result.minArea>.8&&result.maxArea<1.3&&result.minFacing>.98,JSON.stringify(result));
+  }finally{await browser?.close();server.kill();}
+});
+
 test('dolphin bodies and surface effects follow ocean height, reverse depth, and event lifetime',{timeout:120000},async()=>{
   const server=spawn(process.execPath,['server.mjs','8094'],{cwd:new URL('..',import.meta.url),stdio:['ignore','pipe','inherit']});
   let browser;

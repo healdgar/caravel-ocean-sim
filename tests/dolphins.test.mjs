@@ -122,3 +122,40 @@ test('breathing arcs have rising and falling pitch and geometry has dolphin scal
   assert.ok(maxX>.75&&maxX<1);assert.ok(maxZ-minZ>2.9&&maxZ-minZ<3.2);assert.ok(maxY>.8&&maxY<.9);
   assert.ok(mesh.indices.every(i=>i<mesh.vertices.length/9));
 });
+
+test('actual dolphin flukes sweep aft, form a trailing notch and join the tail stock',()=>{
+  const {vertices,indices}=createDolphinMesh(),point=i=>Array.from(vertices.slice(i*9,i*9+3));
+  const fluke=i=>Math.abs(vertices[i*9+6]-.115)<1e-6&&Math.abs(vertices[i*9+7]-.15)<1e-6&&Math.abs(vertices[i*9+8]-.17)<1e-6;
+  const points=[];for(let i=0;i<vertices.length/9;i++)if(fluke(i))points.push(point(i));
+  const roots=points.filter(p=>Math.abs(p[0])<1e-6),leadingRoot=Math.min(...roots.map(p=>p[2])),notch=Math.max(...roots.map(p=>p[2]));
+  const span=Math.max(...points.map(p=>p[0]))-Math.min(...points.map(p=>p[0])),nose=Math.min(...Array.from({length:vertices.length/9},(_,i)=>vertices[i*9+2]));
+  const bodyLength=Math.max(...points.map(p=>p[2]))-nose;
+  // Independent anatomical measurements: T. truncatus 61 cm span / 259 cm
+  // body length, 35-degree sweep; doi:10.1371/journal.pone.0255464, Table 4.
+  assert.ok(span/bodyLength>.23&&span/bodyLength<.28,'flukes span roughly one quarter of body length, not half');
+  for(const side of [-1,1]){
+    const tip=points.filter(p=>p[0]*side>.37),aftLobe=points.filter(p=>p[0]*side>.15&&p[0]*side<.34);
+    assert.ok(tip.length&&Math.min(...tip.map(p=>p[2]))>leadingRoot+.24,'head is -Z; both outer tips must sweep toward +Z');
+    const sweep=Math.atan((Math.min(...tip.map(p=>p[2]))-leadingRoot)/(span/2))*180/Math.PI;
+    assert.ok(sweep>32&&sweep<40,'fluke tip sweep follows the measured bottlenose form');
+    assert.ok(Math.max(...aftLobe.map(p=>p[2]))>notch+.12,'central trailing notch opens between aft-projecting lobes');
+    assert.ok(points.some(p=>p[0]*side>.07&&p[0]*side<.085&&p[2]<1.21),'leading root remains ahead of the outer foil');
+  }
+  const key=p=>p.map(v=>v.toFixed(5)).join(','),port=new Set(points.filter(p=>p[0]<=0).map(p=>key([-p[0],p[1],p[2]])));
+  for(const p of points.filter(p=>p[0]>=0))assert.ok(port.has(key(p)),'flukes retain symmetric attachment and sweep');
+  // Test the real tail-stock skin at a common embedded root station. Both
+  // fluke leading edges sit between its actual upper and lower ring vertices.
+  const tailStock=[];for(let i=0;i<vertices.length/9;i++){const p=point(i);if(!fluke(i)&&p[2]>1.17&&p[2]<1.25)tailStock.push(p);}
+  assert.ok(tailStock.length>20);
+  const bottom=Math.min(...tailStock.map(p=>p[1])),top=Math.max(...tailStock.map(p=>p[1]));
+  assert.ok(roots.filter(p=>p[2]===leadingRoot).every(p=>p[1]>bottom&&p[1]<top),'fluke root is embedded in the tail stock');
+  for(let i=0;i<indices.length;i+=3){
+    const ids=Array.from(indices.slice(i,i+3));if(!ids.every(fluke))continue;
+    const p=ids.map(point),centreY=p.reduce((n,q)=>n+q[1]/3,0);
+    if(p.every(q=>q[1]>-.1))for(const id of ids)assert.ok(vertices[id*9+4]>0,'upper fluke skin normals point outward on both sides');
+    if(p.every(q=>q[1]<-.1))for(const id of ids)assert.ok(vertices[id*9+4]<0,'lower fluke skin normals point outward on both sides');
+    assert.ok(Number.isFinite(centreY));
+  }
+  const tailCap=[];for(let i=0;i<indices.length;i+=3){const ids=Array.from(indices.slice(i,i+3));if(ids.every(id=>!fluke(id)&&Math.abs(vertices[id*9+2]-1.4)<1e-6&&vertices[id*9+5]>.99))tailCap.push(ids);}
+  assert.equal(tailCap.length,24,'tail stock is closed where the flukes attach');
+});

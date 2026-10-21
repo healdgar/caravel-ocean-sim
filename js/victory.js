@@ -110,7 +110,10 @@ export function createVictoryMesh({groups,parts}={}){
   }
   group('hull.copper.seams','hull',copperStart);
   // Proud wales track exactly the same surface as the hull on both sides.
-  const waleZs=[...new Set([...Array.from({length:49},(_,i)=>-6+i/4),...VICTORY_DESIGN.hull.stations])].sort((a,b)=>a-b);
+  // Match the actual planking grid, including gunport boundaries. A separate
+  // coarser grid matched only the analytic hull, missing the triangulated skin
+  // between joins and mostly burying return faces inside it.
+  const waleZs=zs;
   for(const side of [-1,1]){
     const start=out.length;
     for(const h of [.035,.635,1.135])for(let i=0;i<waleZs.length-1;i++){
@@ -365,21 +368,85 @@ export function createVictoryMesh({groups,parts}={}){
   for(const y of [-1.3,-.65,0,.55])tube([-.06,y,5.86],[.06,y,5.86],.027,3,.027,8);
   group('helm.rudder','helm.rudder',rudderStart,{type:'rudder'});
   const bowStart=out.length;
+  const cubic=(a,b,c,d,t)=>a.map((v,k)=>v*(1-t)**3+3*b[k]*t*(1-t)**2+3*c[k]*t*t*(1-t)+d[k]*t**3);
+  // Swept rectangular timbers share a ring at every bend; these are shaped
+  // head rails and knees, rather than sagged ropes stretched into a V.
+  function curvedTimber(points,w,h,material){
+    let across=[1,0,0];
+    const rings=points.map((p,i)=>{
+      const tangent=unit(sub(points[Math.min(points.length-1,i+1)],points[Math.max(0,i-1)]));
+      // Parallel-transport the rectangular section. Switching a reference
+      // axis at a slope threshold rotated neighbouring stem rings 90 degrees.
+      const project=a=>sub(a,mul(tangent,a.reduce((n,v,k)=>n+v*tangent[k],0)));
+      let normal=project(across);if(Math.hypot(...normal)<1e-6)normal=project([0,0,1]);
+      across=unit(normal);const up=cross(across,tangent);
+      return [[-1,-1],[-1,1],[1,1],[1,-1]].map(([a,b])=>add(p,add(mul(across,a*w/2),mul(up,b*h/2))));
+    });
+    for(let i=0;i<rings.length-1;i++)for(let k=0;k<4;k++)quad(rings[i][k],rings[i][(k+1)%4],rings[i+1][(k+1)%4],rings[i+1][k],material);
+    quad(...rings[0].slice().reverse(),material);quad(...rings.at(-1),material);
+  }
+  const stemStart=out.length;
+  const stemBases=[-1.5,-1.25,-1,-.75,-.5,-.25,0,.2,.4,.6,.8,1,1.2,1.4,1.6,1.8];
+  const stem=stemBases.map(base=>{const p=hullPoint(-6,base,0);p[2]-=.018;return p;});
+  curvedTimber(stem,.075,.08,20);
+  group('bow.stem','hull',stemStart);
+  const kneeStart=out.length;
+  const kneeRoot=stem[stemBases.indexOf(.8)];
+  const kneePoint=t=>cubic(kneeRoot,[0,1.4,-6.5],[0,1.7,-7.0],[0,2.22,-7.16],t);
+  const knee=Array.from({length:17},(_,i)=>kneePoint(i/16));
+  curvedTimber(knee,.10,.16,21);
+  group('bow.knee','hull',kneeStart);
+  group('bow.cutwater','hull',stemStart);
   for(const side of [-1,1]){
     const cat=victoryAnchorCathead(side);tube(cat.root,cat.tip,.055,21,.047,8);
-    tube([side*.11,1.72,-5.9],[side*.12,2.11,-7.07],.045,21,.025,8);
-    for(let i=0;i<4;i++){
-      const y=1.48+i*.13;
-      rope([side*.12,y,-6.85],[side*victoryDeckHalfWidth(-5.55),y+.19,-5.55],.024,21,8,.045);
+    const railStart=out.length,rails=[];
+    for(let i=0;i<3;i++){
+      const start=out.length;
+      const base=1.05+i*.25,z=-5.45,y=base+victorySheer(z),w=victoryHullHalfWidth(z,y),tip=kneePoint(.65+i*.15);tip[0]=side*.03;
+      const curve=Array.from({length:17},(_,j)=>cubic([side*(w-.008),y,z],[side*w*.98,y-.06,-6.05],[side*.40,tip[1]-.30,-6.65],tip,j/16));
+      curvedTimber(curve,.042,.055,21);rails.push(curve);
+      group(`bow.headrail.${side}.${i}`,'hull',start);
     }
+    group(`bow.headrails.${side}`,'hull',railStart);
+    const frameStart=out.length;
+    for(const index of [10,13]){
+      const start=out.length;
+      // Frame bends pass through every member they support, not just the two
+      // outside rails; an independently drawn curve left false near-joints.
+      curvedTimber(rails.map(rail=>rail[index]),.032,.045,20);
+      group(`bow.headtimber.${side}.${index}`,'hull',start);
+    }
+    group(`bow.headtimbers.${side}`,'hull',frameStart);
   }
+  const gratingStart=out.length;
+  for(let i=0;i<10;i++){
+    const t=i/9,z=-6.32-t*.64,w=.32*(1-t)+.10*t,y=1.62+.13*t;
+    tube([-w,y,z],[w,y,z],.013,1,.013,4);
+  }
+  for(const side of [-1,1]){
+    tube([side*.32,1.62,-6.13],[side*.32,1.62,-6.32],.024,20,.024,4);
+    tube([side*.32,1.62,-6.32],[side*.10,1.75,-6.96],.024,20,.022,4);
+  }
+  tube([-.16,1.726,-6.84],[.16,1.726,-6.84],.021,20,.021,4);
+  group('bow.grating','hull',gratingStart);
   // Bowsprit, jibboom and flying jibboom are stepped spars, not an oversize mast.
   tube([0,2.1,-4.8],[0,3.06,-8.25],.14,1,.075,16);
   tube([0,2.92,-7.75],[0,3.28,-10.56],.062,1,.022,12);
   tube([0,2.88,-8.0],[0,1.78,-8.0],.035,20,.025,8);
-  for(const side of [-1,1])for(const end of [-8.2,-10.5])rope([side*.75,.88,-5.55],[0,end===-8.2?3.04:3.27,end],.011,20,6,.015);
-  tube([0,2.05,-6.65],[0,2.57,-7.03],.09,25,.055,10);
-  ring([0,2.48,-7.06],.14,.025,25,'z',20);
+  for(const side of [-1,1])for(const end of [-8.2,-10.5]){
+    const z=-5.55,y=.88+victorySheer(z),root=[side*victoryHullHalfWidth(z,y),y,z];
+    rope(root,[0,end===-8.2?3.04:3.27,end],.011,20,6,.015);
+  }
+  // Compact heraldic shield and crown on the knee, replacing a floating ring.
+  // Decoration remains an authored simplification of the 1803 royal arms.
+  const armsStart=out.length,shield=[[-.13,2.23,-7.18],[-.14,2.43,-7.18],[.14,2.43,-7.18],[.13,2.23,-7.18],[0,2.12,-7.18]],centre=[0,2.30,-7.19];
+  for(let i=0;i<shield.length;i++){tri(centre,shield[i],shield[(i+1)%shield.length],25);tube(shield[i],shield[(i+1)%shield.length],.012,25,.012,6);}
+  for(const side of [-1,1]){
+    tube([side*.11,2.45,-7.18],[side*.085,2.54,-7.18],.014,25,.009,6);
+    tube([side*.085,2.54,-7.18],[0,2.56,-7.18],.009,25,.009,6);
+  }
+  tube([-.11,2.45,-7.18],[.11,2.45,-7.18],.018,25,.018,6);
+  group('bow.arms','hull',armsStart);
   group('bow.structure','hull',bowStart);
   // Two wheels on a common spindle, binnacle, companionways, capstan and bitts.
   const wheelStart=out.length,wc=VICTORY_DESIGN.wheel.centre;

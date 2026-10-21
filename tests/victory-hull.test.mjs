@@ -72,22 +72,18 @@ test('the rendered bow and raked stern close the exact same loft used by the hul
   }
 });
 
-test('the forebody reaches the measured rounded nose instead of clipping every height at the gundeck endpoint',()=>{
-  // Exact source sections reject the narrow projecting stem and broken head
-  // rails. These are physical GLB coordinates, independent of the fore-only
-  // runtime warp; retaining old widths while moving the stem must fail here.
+test('the rounded upper bow retains measured shell offsets and an independently raked stem',()=>{
+  // The incomplete lower Meshy entrance is deliberately superseded. Reliable
+  // upper roundhouse sections still constrain the shape above that correction.
   const metres=44.80215288399298,centre=.14729826190723827,waterline=-.4813768389280885;
-  const samples=[[-.47,-.48,.06192675139],[-.47,-.46,.11181887500],
-    [-.43,-.50,.03442839253],[-.43,-.49,.06523457334],[-.43,-.48,.08607798476],[-.43,-.46,.10703564834],
-    [-.39,-.48,.08011642035],[-.39,-.46,.10885335753],
-    [-.37,-.48,.07522562790],[-.37,-.46,.09718703660],
+  const samples=[[-.37,-.48,.07522562790],[-.37,-.46,.09718703660],
     [-.35,-.49,.06125283165],[-.35,-.48,.07161272314],[-.35,-.46,.09652310423]];
   for(const [sourceY,sourceX,halfBreadth]of samples){
     const z=(sourceX-centre)*metres/scale[2],base=(sourceY-waterline)*metres/scale[1];
     close(width(z,base+sheer(z))*scale[0],halfBreadth*metres,.12,`forward shell at ${sourceX},${sourceY}`);
   }
   const skin=part('hull.planking');
-  for(const [sourceY,x,sourceX]of [[-.43,.015,-.50521],[-.37,.005,-.508455],[-.37,.015,-.506545],[-.35,.025,-.504765]]){
+  for(const [sourceY,x,sourceX]of [[-.37,.005,-.508455],[-.37,.015,-.506545],[-.35,.025,-.504765]]){
     const z=(sourceX-centre)*metres/scale[2],base=(sourceY-waterline)*metres/scale[1],y=base+sheer(z);
     const distance=hitDistance(skin,[x*metres/scale[0],y,z-1],[0,0,1]);
     assert.ok(Number.isFinite(distance),'the front ray must hit real planking');
@@ -95,6 +91,71 @@ test('the forebody reaches the measured rounded nose instead of clipping every h
   }
   const lower=victory.victoryHullPoint(-6,0,1),upper=victory.victoryHullPoint(-6,1.67,1);
   assert.ok((lower[2]-upper[2])*scale[2]>.95,'the upper stem projects forward of the waterline rather than ending at one vertical cut');
+});
+
+test('actual waterline and rendered planking have a progressive entrance rather than a broad transverse bow wall',()=>{
+  // Coarse family bounds from RMG ZAZ0120's forward half-breadths, expanded for
+  // scan/read-off uncertainty. These are reconstruction gates, not surveyed
+  // individual loaded-waterline offsets. The former 7.4m breadth at 1m fails.
+  let lo=-6.1,hi=-5.8;
+  for(let i=0;i<50;i++){const z=(lo+hi)/2;if(width(z,0)>0)hi=z;else lo=z;}
+  const stem=(lo+hi)/2,skin=part('hull.planking');
+  let previous=0;
+  for(const [aft,minimum,maximum]of [[.5,1.8,3.6],[1,3.6,5.8],[2,6.8,9.2],[4,10.5,13.1],[6,12.8,15.0]]){
+    const z=stem+aft/scale[2],breadth=2*width(z,0)*scale[0];
+    assert.ok(breadth>=minimum&&breadth<=maximum,`forebody ${aft}m aft of the actual waterline stem is ${breadth}m wide`);
+    assert.ok(breadth>previous,'the entrance broadens continuously toward the shoulder');previous=breadth;
+    const distance=hitDistance(skin,[3,0,z],[-1,0,0]);
+    assert.ok(Number.isFinite(distance),'the actual rendered hull must enclose the waterline');
+    close((3-distance)*scale[0],breadth/2,.12,'rendered entrance follows its hydrodynamic surface');
+  }
+});
+
+test('curved solid headrails join the hull and a substantial cutwater supports the projecting head',()=>{
+  const knee=part('bow.cutwater');
+  const stemTimber=part('bow.stem');
+  for(let i=0;i<stemTimber.length;i+=9)close(Math.abs(stemTimber[i])*scale[0],.075*scale[0]/2,.00001,'stem sided width remains constant through its rake without rotating or pinching the rectangular section');
+  const surfacesMeet=(a,b)=>{
+    for(let i=0;i<a.length;i+=27)for(const [j,k]of [[0,9],[9,18],[18,0]]){
+      const p=position(a,i+j),q=position(a,i+k),d=q.map((v,k)=>v-p[k]),length=Math.hypot(...d);
+      if(length>1e-8&&hitDistance(b,p,d.map(v=>v/length))<=length+1e-7)return true;
+    }
+    return false;
+  };
+  for(const side of [-1,1])for(let i=0;i<3;i++){
+    const data=part(`bow.headrail.${side}.${i}`),base=1.05+i*.25,z=-5.45,y=base+sheer(z),root=[side*width(z,y),y,z];
+    const triangles=[];let bend=0;
+    // Recover the actual forward cap centre, independent of the authored curve.
+    const cap=data.subarray(data.length-54),tip=[0,1,2].map(k=>{let sum=0;for(let j=0;j<cap.length;j+=9)sum+=cap[j+k];return sum/6;});
+    const axis=tip.map((v,k)=>v-root[k]),length2=axis.reduce((n,v)=>n+v*v,0);
+    const port=hitDistance(knee,tip,[-1,0,0]),starboard=hitDistance(knee,tip,[1,0,0]);
+    assert.ok(port>0&&port<.12&&starboard>0&&starboard<.12,'actual rail tip must sit inside the closed central knee');
+    close(port+starboard,.10,.015,'the supporting knee has substantial transverse thickness');
+    for(let j=0;j<data.length;j+=27)triangles.push([0,9,18].map(k=>position(data,j+k)));
+    assert.ok(Math.min(...triangles.map(t=>triangleDistance(root,...t)))*scale[0]<.1,'the rectangular rail root overlaps its own skin height');
+    for(let j=0;j<data.length;j+=9){
+      const p=position(data,j),delta=p.map((v,k)=>v-root[k]),t=delta.reduce((n,v,k)=>n+v*axis[k],0)/length2;
+      if(t>.15&&t<.85)bend=Math.max(bend,Math.hypot(...delta.map((v,k)=>v-t*axis[k])));
+    }
+    assert.ok(bend>.15,'headrails must sweep around the bow rather than form straight V struts');
+    for(const index of [10,13])assert.ok(surfacesMeet(part(`bow.headtimber.${side}.${index}`),data),'every supporting frame must intersect every rail, including the middle member');
+  }
+  const data=part('bow.cutwater'),triangles=[];
+  for(let i=0;i<data.length;i+=27)triangles.push([0,9,18].map(j=>position(data,i+j)));
+  for(const base of [-1,-.5,0,.4,.8,1.2,1.6]){
+    const p=victory.victoryHullPoint(-6,base,0);
+    assert.ok(Math.min(...triangles.map(t=>triangleDistance(p,...t)))*scale[1]<.24,'cutwater timber must contain or touch the raked shell stem');
+  }
+  const grating=part('bow.grating');assert.ok(grating.length>0&&part('bow.arms').length>0);
+  for(const side of [-1,1]){
+    const anchor=[side*.32,1.62,-6.14];
+    assert.ok(width(anchor[2],anchor[1])>Math.abs(anchor[0]),'aft grating bearers terminate inside the actual hull');
+    assert.ok(hitDistance(grating,anchor,[1,0,0])<.04&&hitDistance(grating,anchor,[-1,0,0])<.04,'actual grating timber encloses its hull attachment');
+  }
+  const bearing=[0,1.726,-6.84];
+  assert.ok(hitDistance(grating,bearing,[0,1,0])<.04&&hitDistance(grating,bearing,[0,-1,0])<.04,'a real transverse bearing crosses the knee below the grating');
+  const up=hitDistance(knee,bearing,[0,1,0]),down=hitDistance(knee,bearing,[0,-1,0]);
+  assert.ok(up>0&&down>0&&up+down<.35&&hitDistance(knee,bearing,[1,0,0])<.06&&hitDistance(knee,bearing,[-1,0,0])<.06,`the bearing is inside the solid inclined knee: up=${up}, down=${down}`);
 });
 
 test('planked deck edges follow both ends of each curved strip and bulkheads follow the side at both heights',()=>{
@@ -123,6 +184,7 @@ test('planked deck edges follow both ends of each curved strip and bulkheads fol
 });
 
 test('proud wales have returns joining the skin along every band instead of floating detached ribbons',()=>{
+  const skin=part('hull.planking');
   for(const side of ['port','starboard']){
     const data=part(`hull.wales.${side}`),rows=new Map();
     for(let i=0;i<data.length;i+=9){
@@ -135,6 +197,17 @@ test('proud wales have returns joining the skin along every band instead of floa
       assert.ok(row.skin*scale[0]<.012,`${side} wale return is detached at ${key}: ${row.skin*scale[0]}m`);
       assert.ok(row.outer*scale[0]>.025&&row.outer*scale[0]<.2,`${side} wale retains finite proud timber at ${key}`);
     }
+    const sign=side==='port'?-1:1;let checked=0;
+    for(let i=0;i<data.length;i+=27){
+      const contacts=[0,9,18].map(j=>position(data,i+j)).filter(p=>Math.abs(Math.abs(p[0])-width(p[2],p[1]))<1e-6);
+      if(contacts.length!==2)continue;
+      if(Math.abs((contacts[0][1]-sheer(contacts[0][2]))-(contacts[1][1]-sheer(contacts[1][2])))>1e-5)continue;
+      const p=contacts[0].map((v,k)=>(v+contacts[1][k])/2);
+      if(Math.abs(contacts[0][2]-contacts[1][2])<1e-6)continue;
+      const distance=hitDistance(skin,[sign*3,p[1],p[2]],[-sign,0,0]);
+      close((3-distance)*scale[0],Math.abs(p[0])*scale[0],.012,`${side} actual wale-return midpoint must meet actual triangulated planking`);checked++;
+    }
+    assert.ok(checked>200,'check connections between vertices as well as analytic endpoint widths');
   }
 });
 

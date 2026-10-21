@@ -7,6 +7,23 @@ import { deepFreeze } from '../rig-definition.js';
 // Origin is the loaded waterline amidships; +X starboard, +Z aft. X and Y/Z
 // use their respective metre scales so the runtime transform restores shape.
 const length=56.6928,beam=15.8496,verticalScale=length/12;
+// The generated reference loses its lower stem and flares to almost full beam
+// within two metres. Retain its clean midbody sections, but fair the complete
+// forward 6.07 m as a finite-angle entrance, guided by the waterlines in RMG
+// ZAZ0120. These are authored reconstruction offsets, not a digitized survey.
+const victoryFrameStations=[-6,-5.99,-5.97,-5.94,-5.9,-5.84,-5.76,-5.664263832,-5.3,-5.190106766,-4.715949699,-3.767635567,-2.819321434,-1.871007301,-0.922693169,1.92224923,2.870563362,3.344720429,3.818877495,4.767191628,5.71550576,6];
+const victoryFrameLevels=[-1.862670392,-1.6,-1.2,-0.6,-0.461100308,-0.271437482,0.107888171,0.487213824,0.866539478,1.056202304,1.245865131,1.435527957,1.67,2.15,2.65];
+function fairVictoryForebody(rows){
+  const xs=victoryFrameStations,k=10,span=xs[k]+6,smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+  return rows.map((row,j)=>{
+    const w=row[k],h0=xs[k]-xs[k-1],h1=xs[k+1]-xs[k];
+    const end=victoryTangent(h0,h1,(w-row[k-1])/h0,(row[k+1]-w)/h1);
+    // Preserve the plan's broad upper battery/forecastle and the fine keel.
+    // The correction belongs to the bluff lower entrance around the waterline.
+    const y=victoryFrameLevels[j],strength=smooth((y+.6)/.6)*(1-smooth((y-.1)/.956202304));
+    return row.map((value,i)=>i>=k?value:value+(victoryCubic(0,w,2.3*w/span,end,span,(xs[i]+6)/span)-value)*strength);
+  });
+}
 export const VICTORY_DESIGN=deepFreeze({
   frame:{length:12,beam:3.6,verticalScale},runtime:{length,beam},
   hull:{draft:8.8/verticalScale,bowRake:.9,sternRake:.32,
@@ -16,11 +33,11 @@ export const VICTORY_DESIGN=deepFreeze({
     // Above-water stem rake follows the measured rounded shell; the beakhead
     // is separate. The quadratic fore-only warp leaves gunport leads fixed.
     foreJoin:-5.3,stemLevels:[0,0.107888171,0.487213824,0.866539478,1.056202304,1.245865131,1.435527957,2.65],stemRake:[0,0.062555768,0.204802887,0.22376917,0.22376917,0.233252311,0.233252311,0.233252311],
-    stations:[-6,-5.99,-5.97,-5.94,-5.9,-5.84,-5.76,-5.664263832,-5.3,-5.190106766,-4.715949699,-3.767635567,-2.819321434,-1.871007301,-0.922693169,1.92224923,2.870563362,3.344720429,3.818877495,4.767191628,5.71550576,6],
-    levels:[-1.862670392,-1.6,-1.2,-0.6,-0.461100308,-0.271437482,0.107888171,0.487213824,0.866539478,1.056202304,1.245865131,1.435527957,1.67,2.15,2.65],
+    stations:victoryFrameStations,
+    levels:victoryFrameLevels,
     // Height-major half-breadths. Censored fittings are interpolated; below the
     // shallow reference shell is an independent fairbody with authored draught.
-    sections:[
+    sections:fairVictoryForebody([
       [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
       [0,0.007635424,0.022794968,0.045226947,0.074481155,0.116706716,0.169265494,0.225260429,0.399650766,0.435469005,0.529299969,0.602178682,0.626650834,0.643989656,0.647011018,0.635421207,0.61763455,0.598431232,0.571042495,0.472216745,0.176453914,0.037651718],
       [0,0.015270849,0.045589936,0.090453895,0.14896231,0.233413433,0.33853099,0.450520859,0.799301533,0.870938011,1.058599938,1.204357364,1.253301667,1.287979313,1.294022036,1.270842414,1.235269101,1.196862463,1.14208499,0.94443349,0.352907828,0.075303437],
@@ -36,7 +53,7 @@ export const VICTORY_DESIGN=deepFreeze({
       [0,0.068633622,0.23743955,0.391412116,0.537386809,0.651070451,0.798605491,0.93897617,1.12059074,1.184893,1.34755703,1.35034905,1.412617967,1.420161856,1.427705745,1.291912979,1.30788931,1.293740569,1.286448803,1.203614246,1.120779689,1.26296075],
       [0,0.067240046,0.232618442,0.383464662,0.526475402,0.637850747,0.782390151,0.919910664,1.097837628,1.160834259,1.320195466,1.322930795,1.383935369,1.391326083,1.398716796,1.265681243,1.281333182,1.267471725,1.260328015,1.179175378,1.098022741,1.237316877],
       [0,0.065498076,0.226592058,0.373530344,0.512836143,0.621326116,0.762120976,0.896078782,1.069396239,1.130760833,1.285993511,1.288657976,1.348082121,1.355281365,1.36248061,1.232891574,1.248138022,1.23463567,1.22767703,1.148626793,1.069576556,1.205262035]
-    ]},
+    ])},
   decks:{lower:.17,middle:.67,upper:1.17,main:1.17,
     forecastle:{end:-3.92,height:1.67},quarter:{start:1.65,height:1.67},poop:{start:4.35,height:2.15}},
   quarterdeck:{start:1.65,height:1.67},

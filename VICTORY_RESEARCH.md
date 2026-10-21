@@ -72,8 +72,8 @@ the same hull evaluator. Stern galleries have shared arched, horizontally bowed
 and raked skins, glazing and structural returns. Their restrained crown and
 corner rounding are authored from the reference silhouette and photograph,
 not surveyed moulding dimensions. The completed working model retains 104
-represented guns and its existing sail/rig attachment nodes at 84,832 triangles
-(5,413,404 bytes of indexed geometry); the source's broken rigging is not copied.
+represented guns and its existing sail/rig attachment nodes at 89,449 triangles
+(5,846,340 bytes of indexed geometry); the source's broken rigging is not copied.
 
 The first fit incorrectly closed every above-water height at one vertical
 gun-deck endpoint. Fine forward sections show the actual rounded shell reaching
@@ -83,12 +83,39 @@ Dense forward frames and vertical stem samples retain the rounded entry instead
 of a large triangular first panel. A fore-only coordinate warp ends before the
 first gunport, preserving interior deck and rig registration. The measured
 stem/beakhead are distinguished; broken lower source plating still requires
-authored closure. New regression rays hit actual rendered planking at measured
-near-nose widths, rather than accepting only a zero-width endpoint.
+authored closure. Regression rays hit actual rendered planking at reliable upper
+near-nose sections, rather than accepting only a zero-width endpoint.
+
+The generated reference's lower entrance remained too full after that stem fix:
+the actual waterline reached 7.40 m breadth only 1 m behind the stem, and 10.42 m
+at 2 m. The [ZAZ0120 half-breadths](https://www.rmg.co.uk/collections/objects/rmgc-object-79911)
+and [ZAZ0126 upper-deck plan](https://www.rmg.co.uk/collections/objects/rmgc-object-79917)
+guide a separate faired entrance over the forward 6.07 m. The latter plan and
+the clean generated sections retain the broad rounded upper battery; the
+correction fades out above the lower entrance and below the fine keel sections.
+The revised actual waterline breadths at 0.5/1/2/4/6 m aft of the stem are
+2.72/5.07/8.41/12.38/13.99 m. These are authored offsets constrained by coarse
+visual plan ranges, **not** digitized historical waterlines or a sharp clipper
+bow. The 22 held-out clean reference sections remain within 0.0665 m RMS and
+0.2119 m maximum error. Rendered entrance widths, deck/rail/wale joints and the
+same CPU/GPU footprint are tested together.
+
+Three shaped rectangular headrails per side now sweep from the upper bow into
+the head, with transverse headtimbers, a small grating and a solid curved
+cutwater/knee. The initial low-reaching four-rail arrangement was rejected in
+assembled Blender inspection. Stable transported timber frames avoid twisting
+and pinching the near-vertical stem. Each head frame passes through all three
+rails; forward tips embed in the solid knee, and grating bearers reach the hull
+and knee. Actual triangle contacts supplement analytic point checks. Hull wales
+now share the complete planking grid, including gunport boundaries; midpoint
+rays check their returns against the rendered skin, not only its analytic loft.
+Bowsprit support leads meet the current skin. A compact shield and
+crown replace the ring-shaped figurehead placeholder. This remains simplified
+authored royal-arms decoration, not a sculpted copy of the original 1803 arms.
 
 The fit changes integrated volume at the chosen waterline from 4,747.85 to
-4,785.22 m³ (+0.79%), and waterplane area from 765.88 to approximately 815 m². At the
-model's 1,025 kg/m³ seawater density that is 4,904.85 tonnes. The default
+4,781.93 m³ (+0.72%), and waterplane area from 765.88 to approximately 809 m². At the
+model's 1,025 kg/m³ seawater density that is 4,901.48 tonnes. The default
 manifest's fixed mass is derived from this geometry to retain its chosen
 waterline; it is not independent evidence for historical displacement.
 Independent numerical quadrature checks convergence, buoyancy and declared
