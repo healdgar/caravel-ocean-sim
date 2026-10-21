@@ -106,7 +106,15 @@ built Victory/Hella rough at a3840×2160viewport held60.00FPS over601frame spans
 p9517.5ms,3494×1966(91%) Auto resolution, with correct Victory selection and no
 warnings/errors. Proofs remain in ignored `shots/bow-froth-calm.png`,
 `shots/bow-froth-victory-moderate.png` and `shots/victory-final-rough-auto60.png`.
-Publication/public-byte verification is next.
+Published runtime `5959d8e57266d924a112cda575401c525c473bcd`;
+Pages39692095383 succeeded. At23:15:49UTC, public HTML, manifest and all53assets
+matched the tested local bytes: HTML680633bytes, SHA-256
+`c60cabf4a736ca8a17c171c3f5aea2e9e9143a1ca535c0640f7d1426b5927e83`;
+asset bytes15875925. Fresh public Chrome rendered Niña's broader bow whitewater
+at2906×1880with ready startup and no warnings/errors;
+`shots/bow-froth-public-verified.png`. A second fresh public Victory/Hella rough
+view also reaches ready with the correct model and no warnings/errors;
+`shots/victory-frame-release-public.png`. No physical-iPhone qualification.
 
 ## Release log
 
