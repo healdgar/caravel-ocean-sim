@@ -517,7 +517,13 @@ claims about already implemented runtime.
   errors. An earlier run caught grass/rock pipelines mislabeled as tree wood;
   their distinct ground-cover label restores the unchanged two-tree-pipeline
   oracle. The final complete run passes without loosening that oracle.
-  Release/deployment receipt follows publication.
+  Published as `d0018e998611256cc71679e1958a1cf5aebb56a1`; Pages workflow
+  39653348992 succeeded. At18:32:08UTC, public HTML, manifest and all53assets
+  matched tested bytes. HTML659253bytes, SHA-256
+  `0868df573dec143c4212659ff4027ff20c20621c6b6c51729509b06ba9b19ff6`;
+  assets15875925bytes. Fresh visible public Chrome rendered submerged ship,
+  refracted surface and controls with no warnings/errors. Proof:
+  `shots/underwater-public-verified.png`. No physical-iPhone claim.
 - Actual1280×800 horizon/approach/coast GPU-completed frame medians with original
   trees and new ground detail:6.2/6.0/8.9ms, p957.4/7.5/11.1ms, no page/GPU errors.
   Coast selected252rocks and634grass clumps (69156prop triangles). These short
