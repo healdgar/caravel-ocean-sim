@@ -8,7 +8,7 @@ export const ISLAND = LAND_REGIONS.saba;
 export const LANDFALL_VIEWS = Object.freeze({
   horizon:{x:-1800,z:10500,y:6,yaw:6.2,pitch:1},
   approach:{x:-1100,z:-1400,y:6,yaw:10.4,pitch:6},
-  coast:{x:-2150,z:-5600,y:6,yaw:78,pitch:14},
+  coast:{x:-1750,z:-7000,y:6,yaw:112,pitch:1,heading:112},
 });
 export function decodeIsland(buffer,region=ISLAND){
   if(buffer.byteLength!==region.size**2*2)throw new Error(`Incomplete ${region.name} elevation pack`);

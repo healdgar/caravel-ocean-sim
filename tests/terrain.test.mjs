@@ -3,6 +3,8 @@ import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import {ISLAND,LAND_REGIONS,LANDFALL_VIEWS,decodeIsland,decodeBiome,islandGeometry,islandVegetation,terrainSample,islandCoordinates,constrainIslandMotion,safeLandfallStart} from '../js/terrain-model.js';
 import {TREE_VARIANTS,TREE_VERTEX_FLOATS,TREE_LOD,treeGeometry,treeRenderGeometry,treeSkeleton,selectTreeLods,vegetationProbability} from '../js/vegetation.js';
+import {LANDFALL_SEA,landfallCameraYaw,landfallStageURL} from '../js/landfall.js';
+import {cameraModeFromLink,createShareLink} from '../js/sharing.js';
 const file=await readFile(new URL('../assets/world/saba/height.bin',import.meta.url));
 const heights=decodeIsland(file.buffer.slice(file.byteOffset,file.byteOffset+file.byteLength));
 const maskFile=await readFile(new URL('../assets/world/saba/biome.bin',import.meta.url));
@@ -55,16 +57,56 @@ test('landfall starts clear loaded Victory and preserve every valid caravel came
       assert.equal(constrainIslandMotion(heights,boat,start.x,start.z),false,'same full-hull clearance as sailing');
       assert.ok(start.depth>=draft+1);
       assert.equal(start.moved,false,'authored coastal slope also clears a fully loaded first-rate at the preset');
-      // Match copyVessel's exact following offset at the preset's heading0.
-      const copyView={...start,x:start.x+victory.length*1.5,z:start.z+victory.length*2.8};
+      // The follower is aft/starboard in the vessel frame, including the Wells
+      // Bay shore-facing heading, and gets an independent clearance search.
+      const heading=(view.heading??0)*Math.PI/180;
+      const copyView={...start,x:start.x-Math.sin(heading)*victory.length*2.8+Math.cos(heading)*victory.length*1.5,
+        z:start.z+Math.cos(heading)*victory.length*2.8+Math.sin(heading)*victory.length*1.5};
       const follower=safeLandfallStart(heights,copyView,victory);
       const copy={...victory,...follower};
       assert.equal(constrainIslandMotion(heights,copy,copy.x,copy.z),false);
       assert.ok(Math.hypot(follower.x-copyView.x,follower.z-copyView.z)<=500,'companion adjustment stays near the coastal scene');
-      if(view===LANDFALL_VIEWS.coast)assert.equal(follower.moved,true,'first-rate follower originally lies over the shallows');
+      assert.ok(follower.depth>=draft+1,'each follower retains its own draft margin regardless of whether relocation was necessary');
     }
     assert.deepEqual(view,original);assert.deepEqual(caravel,before,'spawn search cannot alter physics or camera input');
   }
+});
+
+test('Wells Bay preset points the bow and swell into the concave shore while other starts stay unchanged',()=>{
+  const coast=LANDFALL_VIEWS.coast,sea=LANDFALL_SEA.coast;
+  assert.deepEqual(coast,{x:-1750,z:-7000,y:6,yaw:112,pitch:1,heading:112});
+  assert.deepEqual(sea,{swellDir:22,swellHs:1.2,swellLength:95,windSpeed:5.5,windDir:118});
+  const shore=[-1500-coast.x,-6900-coast.z],distance=Math.hypot(...shore),h=coast.heading*Math.PI/180,s=sea.swellDir*Math.PI/180;
+  assert.ok((Math.sin(h)*shore[0]-Math.cos(h)*shore[1])/distance>.99,'compass heading points into the bay');
+  assert.ok((Math.cos(s)*shore[0]+Math.sin(s)*shore[1])/distance>.99,'swell travel uses the distinct X/Z angle convention');
+  assert.deepEqual(LANDFALL_VIEWS.horizon,{x:-1800,z:10500,y:6,yaw:6.2,pitch:1});
+  assert.deepEqual(LANDFALL_VIEWS.approach,{x:-1100,z:-1400,y:6,yaw:10.4,pitch:6});
+});
+
+test('stage navigation resets stale vessel coordinates, helm and swell before applying its preset',()=>{
+  const old='https://example.com/ocean.html?landfall=approach&cam=1,2,3,4,5&boatX=450&boatZ=80&boatHeading=270&boatRudder=35&view=ship&boat=0&swellDir=190&swellHs=8&swellLength=300&swellSpread=2&windSpeed=28&windDir=4&follower=0&ship=victory';
+  const coast=landfallStageURL(old,'coast','sunset');
+  for(const key of ['cam','boatX','boatZ','boatRudder','swellSpread'])assert.equal(coast.searchParams.has(key),false,key+' cannot override the new preset');
+  for(const [key,value]of Object.entries({landfall:'coast',view:'boat',boat:'1',boatHeading:'112',boatSpeed:'4',weather:'sunset',swellDir:'22',swellHs:'1.2',swellLength:'95',windSpeed:'5.5',windDir:'118',follower:'0',ship:'victory'}))assert.equal(coast.searchParams.get(key),value,key);
+  const horizon=landfallStageURL(old,'horizon');assert.equal(horizon.searchParams.get('boatHeading'),'0');assert.equal(horizon.searchParams.get('swellHs'),'0.65');
+  assert.equal(horizon.searchParams.has('swellDir'),false);assert.equal(horizon.searchParams.has('swellLength'),false);
+  assert.throws(()=>landfallStageURL(old,'unknown'),/Unknown landfall/);
+});
+
+test('boat presets use relative look yaw without replacing explicit camera or shared heading overrides',()=>{
+  const absolute=112*Math.PI/180;
+  assert.equal(landfallCameraYaw('coast','boat',false,absolute),0);
+  assert.equal(landfallCameraYaw('coast','free',false,absolute),absolute);
+  assert.equal(landfallCameraYaw('coast','ship',false,absolute),absolute);
+  assert.equal(landfallCameraYaw('coast','boat',true,.731),.731);
+  assert.equal(landfallCameraYaw(null,'boat',false,.731),.731);
+  for(const stage of ['horizon','approach'])assert.equal(landfallCameraYaw(stage,'boat',false,.731),.731,'unmodified stage bearings remain unchanged');
+  const link=new URL(createShareLink('https://example.com/?landfall=coast',LANDFALL_SEA.coast,
+    {heading:257,x:-1800,z:-7100,speed:4,showProw:true,propulsion:'sail'},'free',
+    {cam:{x:-1900,y:12,z:-7200,yaw:.731,pitch:-.2}}));
+  assert.equal(link.searchParams.get('boatHeading'),'257');assert.equal(link.searchParams.get('boatX'),'-1800');assert.equal(link.searchParams.get('boatZ'),'-7100');
+  const yaw=Number(link.searchParams.get('cam').split(',')[3])*Math.PI/180;
+  assert.equal(landfallCameraYaw('coast',cameraModeFromLink(link.searchParams),link.searchParams.has('cam'),yaw),yaw);
 });
 
 test('safe start checks hull extremities and handles an enlarged hull or a centre-of-island preset',()=>{

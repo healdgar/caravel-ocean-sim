@@ -12,7 +12,8 @@ wave-driven caustics and terrain-aligned grass and rocks. Earlier changes add fi
 revised wakes and shared surface disturbances. Validation and release receipts
 are recorded in [the checkpoint log](BACKLOG.md); physical-iPhone performance
 remains unmeasured for this batch.
-The complete production suite passes **428 tests on native Metal**.
+The rendering corrections passed **428 native Metal tests**; Wells Bay placement
+passed **48 focused checks**.
 
 ![HMS Victory with tiered square sails](docs/victory.png)
 
@@ -21,10 +22,18 @@ the original author's notice retained. See [LICENSE](LICENSE) and
 [third-party asset/code notices](THIRD_PARTY_NOTICES.md).
 
 [Try the Saba landfall MVP](https://healdgar.github.io/caravel-ocean-sim/?landfall=approach&boat=1).
-Open **Landfall** to choose Horizon, Approach or Near coast, and compare clear air,
+Open **Landfall** to choose Horizon, Approach or Wells Bay approach, and compare clear air,
 sunset, backlighting and sea mist. The world overview locates Saba; only this island
 currently renders in 3D. Real LiDAR relief and aerial imagery now seed its terrain
 and vegetation. [Longer-term geography and voyage design](LAND_SYSTEM_DESIGN.md).
+
+The closest scene starts enabled vessels offshore from **Wells Bay**, with the bow
+and swell directed toward the bay. Each ship still receives independent draft
+clearance; explicit shared camera and sea settings override the defaults.
+Real Wells Bay has a small, seasonal coarse black-sand beach
+([Saba Tourism](https://www.sabatourism.com/tour-item/swimming-on-saba/)).
+The current terrain supplies its broad coastline; a detailed beach, port
+structures, depth-driven breaking surf and swash are still pending.
 
 ![Saba LiDAR coast with aerial color and generated vegetation](docs/landfall.png)
 

@@ -13072,7 +13072,7 @@ const ISLAND = LAND_REGIONS.saba;
 const LANDFALL_VIEWS = Object.freeze({
   horizon:{x:-1800,z:10500,y:6,yaw:6.2,pitch:1},
   approach:{x:-1100,z:-1400,y:6,yaw:10.4,pitch:6},
-  coast:{x:-2150,z:-5600,y:6,yaw:78,pitch:14},
+  coast:{x:-1750,z:-7000,y:6,yaw:112,pitch:1,heading:112},
 });
 function decodeIsland(buffer,region=ISLAND){
   if(buffer.byteLength!==region.size**2*2)throw new Error(`Incomplete ${region.name} elevation pack`);
@@ -13915,6 +13915,28 @@ const LANDFALL_WEATHER = Object.freeze({
   mist:{sunElev:24,sunAzim:225,haze:7,clouds:0.8,cloudBase:0.35,cloudDepth:2.2,cloudDensity:1.5,cloudAnvil:0.15},
 });
 
+const LANDFALL_SEA = Object.freeze({
+  horizon:Object.freeze({swellHs:.65,windSpeed:5.5}),
+  approach:Object.freeze({swellHs:.65,windSpeed:5.5}),
+  coast:Object.freeze({swellDir:22,swellHs:1.2,swellLength:95,windSpeed:5.5,windDir:118}),
+});
+
+// Preset yaw is absolute in free view, but boarding uses a relative look angle.
+// Explicit camera links already carry their intended angle and take precedence.
+function landfallCameraYaw(stage,mode,explicitCamera,currentYaw){
+  return LANDFALL_VIEWS[stage]?.heading!==undefined&&mode==='boat'&&!explicitCamera?0:currentYaw;
+}
+
+function landfallStageURL(href,stage,weather='clear'){
+  const view=LANDFALL_VIEWS[stage];if(!view)throw new RangeError('Unknown landfall stage');
+  const url=new URL(href);
+  for(const key of ['cam','boatX','boatZ','boatHeading','boatRudder','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
+  url.searchParams.set('landfall',stage);url.searchParams.set('view','boat');url.searchParams.set('boat','1');
+  url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed','4');url.searchParams.set('weather',weather);
+  for(const [key,value]of Object.entries(LANDFALL_SEA[stage]))url.searchParams.set(key,String(value));
+  return url;
+}
+
 function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPosition}){
   const button=document.createElement('button');button.textContent='Landfall';button.id='landfall-button';
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
@@ -13923,7 +13945,7 @@ function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPositio
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.</p>
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
-    <p>Start at the horizon, on approach, or near the coast. Sailing physics remain at normal speed.</p>
+    <p>Start at the horizon, on approach, or off Wells Bay. Detailed beach and breaking surf are still to come. Sailing physics remain at normal speed.</p>
     <div class="landfall-weather" role="group" aria-label="Landfall weather"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Saba is the first rendered region.</p>
@@ -13933,11 +13955,9 @@ function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPositio
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
   button.onclick=()=>setOpen(panel.hidden);panel.querySelector('.panel-header button').onclick=()=>setOpen(false);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){setOpen(false);button.focus();}});
-  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast','Near coast']]){
+  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast','Wells Bay approach']]){
     const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-pressed',String(active&&stage===id));
-    b.onclick=()=>{const url=new URL(location.href);url.searchParams.set('landfall',id);url.searchParams.delete('cam');
-      url.searchParams.set('view','boat');url.searchParams.set('boat','1');url.searchParams.set('boatHeading','0');url.searchParams.set('boatSpeed','4');
-      url.searchParams.set('weather',weather);location.assign(url.href);};panel.querySelector('.landfall-stages').append(b);
+    b.onclick=()=>location.assign(landfallStageURL(location.href,id,weather).href);panel.querySelector('.landfall-stages').append(b);
   }
   const weatherButtons=new Map();
   for(const [id,label] of [['clear','Clear'],['sunset','Sunset'],['backlit','Backlit'],['mist','Sea mist']]){
@@ -15776,10 +15796,11 @@ async function main() {
     return qs.has(key) && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
   };
   let cameraMode = cameraModeFromLink(qs);
+  cam.yaw=landfallCameraYaw(LAND_STAGE,cameraMode,qs.has('cam'),cam.yaw);
   const propulsion = propulsionFromLink(qs);
   const boat = {
     modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: SHIP_ID==='victory'?shipAsset.model.runtime.length:param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
-    beam: SHIP_ID==='victory'?shipAsset.model.runtime.beam:param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', LAND_STAGE?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    beam: SHIP_ID==='victory'?shipAsset.model.runtime.beam:param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', LAND_STAGE?(LANDFALL_VIEWS[LAND_STAGE].heading??0):propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',1,0,1), sailMain:param('sailMain',1,0,1), sailMizzen:param('sailMizzen',1,0,1),
     speed: param('boatSpeed', 6, 0, 40), eye: param('boatEye',SHIP_ID==='victory'?shipAsset.model.nodes['helm.camera'].position[1]*shipAsset.model.designFrame.verticalScale:HELM_EYE_HEIGHT,1,25),
     provisionDays:param('provisionDays',DEFAULT_PROVISION_DAYS,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
@@ -16356,7 +16377,7 @@ async function main() {
   cameraBody.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
   const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
-  if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],{swellHs:.65,windSpeed:5.5});
+  if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],LANDFALL_SEA[LAND_STAGE]);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');

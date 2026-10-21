@@ -607,5 +607,39 @@ required90% centre occlusion independent of filter footprint. The new tent gives
 area quadrature of the rasterized strip under the contact tent (0.1% tolerance),
 while retaining strong surface-vs-volume contrast. The focused oracle now passes.
 Final complete production suite **428/428 PASS**, installed Chrome/native Metal,
-root serialized,325.5seconds. Source and standalone bundles frozen for publication;
-no physical-iPhone performance claim. Public-byte verification pending.
+root serialized,325.5seconds. Published as
+`a86dc29906d37ea51c2a1d99a3e2abb9ecfa1886`; Pages39666411466 succeeded.
+At20:01:37UTC, public HTML/manifest/all53assets matched tested bytes:
+HTML667985bytes, SHA-256
+`630a480eda1a3d992f771cf28ce416bafccd691c3a4aa5ac51f327feb9a69b04`.
+Assets15875925bytes. Fresh visible Chrome rendered Victory's sail shadows with
+no warnings/errors; `shots/rendering-corrections-public.png`. No physical-iPhone
+performance claim.
+
+## Wells Bay nearest approach
+
+After publishing the rendering checkpoint, moved the closest Saba preset from
+Ladder Bay to an offshore Wells Bay approach. The registered pack contains this
+coastline but no explicit beach/port mesh. Saba Tourism describes Wells Bay's
+small coarse black-sand beach, which changes with northerly swell:
+https://www.sabatourism.com/tour-item/swimming-on-saba/ . The marine-park source
+distinguishes this anchorage from modern Fort Bay harbor:
+https://www.sabapark.org/downloads/SCF%20Yacht%20Brochure.pdf .
+
+- New coast start(-1750,−7000), heading112°, shore target roughly(-1500,−6900).
+  Swell travels22° in the separate X/Z convention,1.2m significant height/95m
+  wavelength; bow and wave travel point into the bay. Wind retains the118°
+  direction at5.5m/s so the approach is sailable.
+- Corrected coast boat-camera yaw to a local forward look; free-view bearing
+  remains absolute. Explicit camera, position, heading and sea links still win.
+  Horizon/approach camera behavior remains unchanged. Choosing a new stage
+  discards stale pose/helm/swell overrides; model and follower preference survive.
+- Both models and their followers retain independent full-envelope draft checks.
+  Native frozen renders verify default Niña/Victory, free view and explicit shared
+  overrides, without GPU/page errors.42focused terrain/sharing/camera/fleet/startup
+  checks pass. Six additional native Metal packaged-landfall, sailing-control,
+  mobile-panel and independent-fleet checks pass. All three packaged pages render;
+  no regression thresholds changed for this scene setup. Publication pending.
+- This sets up incoming surf, but does not implement it: the2m-minimum authored
+  bed and16m terrain grid still lack an intertidal profile. Shoaling/breaking,
+  plunging fronts, foam transport and swash remain the next water-system work.

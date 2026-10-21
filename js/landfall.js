@@ -7,6 +7,28 @@ export const LANDFALL_WEATHER = Object.freeze({
   mist:{sunElev:24,sunAzim:225,haze:7,clouds:0.8,cloudBase:0.35,cloudDepth:2.2,cloudDensity:1.5,cloudAnvil:0.15},
 });
 
+export const LANDFALL_SEA = Object.freeze({
+  horizon:Object.freeze({swellHs:.65,windSpeed:5.5}),
+  approach:Object.freeze({swellHs:.65,windSpeed:5.5}),
+  coast:Object.freeze({swellDir:22,swellHs:1.2,swellLength:95,windSpeed:5.5,windDir:118}),
+});
+
+// Preset yaw is absolute in free view, but boarding uses a relative look angle.
+// Explicit camera links already carry their intended angle and take precedence.
+export function landfallCameraYaw(stage,mode,explicitCamera,currentYaw){
+  return LANDFALL_VIEWS[stage]?.heading!==undefined&&mode==='boat'&&!explicitCamera?0:currentYaw;
+}
+
+export function landfallStageURL(href,stage,weather='clear'){
+  const view=LANDFALL_VIEWS[stage];if(!view)throw new RangeError('Unknown landfall stage');
+  const url=new URL(href);
+  for(const key of ['cam','boatX','boatZ','boatHeading','boatRudder','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
+  url.searchParams.set('landfall',stage);url.searchParams.set('view','boat');url.searchParams.set('boat','1');
+  url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed','4');url.searchParams.set('weather',weather);
+  for(const [key,value]of Object.entries(LANDFALL_SEA[stage]))url.searchParams.set(key,String(value));
+  return url;
+}
+
 export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPosition}){
   const button=document.createElement('button');button.textContent='Landfall';button.id='landfall-button';
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
@@ -15,7 +37,7 @@ export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,get
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">Saba · Lesser Antilles</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.</p>
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
-    <p>Start at the horizon, on approach, or near the coast. Sailing physics remain at normal speed.</p>
+    <p>Start at the horizon, on approach, or off Wells Bay. Detailed beach and breaking surf are still to come. Sailing physics remain at normal speed.</p>
     <div class="landfall-weather" role="group" aria-label="Landfall weather"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Saba is the first rendered region.</p>
@@ -25,11 +47,9 @@ export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,get
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
   button.onclick=()=>setOpen(panel.hidden);panel.querySelector('.panel-header button').onclick=()=>setOpen(false);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){setOpen(false);button.focus();}});
-  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast','Near coast']]){
+  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast','Wells Bay approach']]){
     const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-pressed',String(active&&stage===id));
-    b.onclick=()=>{const url=new URL(location.href);url.searchParams.set('landfall',id);url.searchParams.delete('cam');
-      url.searchParams.set('view','boat');url.searchParams.set('boat','1');url.searchParams.set('boatHeading','0');url.searchParams.set('boatSpeed','4');
-      url.searchParams.set('weather',weather);location.assign(url.href);};panel.querySelector('.landfall-stages').append(b);
+    b.onclick=()=>location.assign(landfallStageURL(location.href,id,weather).href);panel.querySelector('.landfall-stages').append(b);
   }
   const weatherButtons=new Map();
   for(const [id,label] of [['clear','Clear'],['sunset','Sunset'],['backlit','Backlit'],['mist','Sea mist']]){
