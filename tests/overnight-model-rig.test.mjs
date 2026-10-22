@@ -86,6 +86,9 @@ test('clipper canvas, load-bearing stays, visible end fittings and affine nodes 
     }
     const yard=d.surfaces.flatMap(s=>s.spars??[]).find(p=>p.id===stay.upperFitting.tier),higher=d.surfaces.filter(s=>s.kind==='square'&&s.mast===surface.mast).map(s=>s.spars[0]).filter(p=>p.a[1]>yard.a[1]).sort((a,b)=>a.a[1]-b.a[1])[0];
     assert.ok(stay.b[1]>yard.a[1]&&stay.b[1]<higher.a[1],'stay terminates at its actual named mast tier, not indiscriminately at the truck');
+    const next=d.surfaces.find(s=>s.id===stay.upperFitting.nextSurface);
+    assert.ok(next.mastTierGap);assert.ok(next.corners[2][1]-stay.b[1]>=stay.upperFitting.clothGap-1e-12,'the structural stay fitting occupies bare mast, never the next square tier canvas');
+    assert.equal(next.corners[2][1],next.corners[3][1]);
     if(surface.mast>0){assert.equal(stay.lowerFitting.mast,surface.mast-1);assert.equal(stay.lowerFitting.kind,'mast-aft-tang');}
     else assert.equal(stay.lowerFitting.kind,'bowsprit-collar');
   }

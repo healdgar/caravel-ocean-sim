@@ -98,10 +98,6 @@ function laterSailCloudStay(design,surface){
     const cosine=axis[1]/Math.hypot(...axis),body=[0,y,at[2]+side*laterSailMastRadiusAt(design,mast,y)/cosine];
     return {position:[0,y,body[2]+side*(radius+clearance)/cosine],body};
   };
-  // A named mast-tier stay terminates above that tier's sling, below the next
-  // yard. The pinned head is on this stay, not on an unrelated mast tang.
-  // These working fittings are authored, not recovered McKay rope plans.
-  const upperY=(yard.a[1]+next.a[1])*.5,upper=tang(surface.mast,upperY,-1);
   let lower,lowerFitting;
   if(surface.mast>0){
     lower=tang(surface.mast-1,surface.corners[0][1],1);
@@ -113,13 +109,41 @@ function laterSailCloudStay(design,surface){
     const body=at.map((v,i)=>v+normal[i]*r),position=body.map((v,i)=>v+normal[i]*(radius+clearance));
     lower={position,body};lowerFitting={id:surface.name+'-bowsprit-collar',kind:'bowsprit-collar',parameter:t,...lower};
   }
+  // Fit the mast stay above its actual sling but below the next tier's cloth.
+  // A midpoint between yards lands inside the next sail and threads the stay
+  // through its centre. Reserve a real bare-mast band instead. Its minimum
+  // height follows the finite yard/stay radii at the authored brace limit;
+  // yard spans/heights stay reported/authored as before, only the next sail's
+  // authored foot may rise. These are working fittings, not recovered plans.
+  const yardY=yard.a[1],atYard=laterSailMastAt(design,surface.mast,yardY),tangAtYard=tang(surface.mast,yardY,-1).position;
+  const foot=laterSailMastAt(design,surface.mast,laterSailDeckOf(design,m.z)),top=laterSailMastAt(design,surface.mast,m.height),height=top[1]-foot[1],cosine=height/Math.hypot(...top.map((v,i)=>v-foot[i]));
+  const tangSlope=(top[2]-foot[2])/height+.76*m.radius/(height*cosine),riseFromTack=yardY-lower.position[1],cosBrace=Math.cos(tiers[index].braceLimit??0);
+  const initialSlope=(tangAtYard[2]-lower.position[2])/riseFromTack,finiteMargin=(yard.radius+radius+clearance)*Math.sqrt(1+(initialSlope*cosBrace)**2);
+  const targetZ=atYard[2]-(atYard[2]-yard.a[2]+finiteMargin)/cosBrace,denominator=targetZ-lower.position[2]-tangSlope*riseFromTack;
+  if(!(riseFromTack>0&&cosBrace>0&&denominator>0))throw Error('Invalid finite stay/sling lead for '+surface.name);
+  const rise=(tangAtYard[2]-targetZ)*riseFromTack/denominator+.025/sy,upperY=yardY+rise,clothGap=.05/sy;
+  if(!(upperY>yardY&&upperY+clothGap<next.a[1]))throw Error('Insufficient actual mast-tier gap for '+surface.name);
+  const upper=tang(surface.mast,upperY,-1);
   const a=lower.position,b=upper.position,headY=Math.min(surface.corners[1][1],yard.a[1]-yard.radius-.05/sy),headT=(headY-a[1])/(b[1]-a[1]);
   if(!(headT>0&&headT<1))throw Error('Invalid actual stay head for '+surface.name);
-  const head=a.map((v,i)=>v+(b[i]-v)*headT),upperFitting={id:surface.name+'-upper-tang',kind:'mast-fore-tang',mast:surface.mast,tier:yard.id,...upper};
+  const head=a.map((v,i)=>v+(b[i]-v)*headT),upperFitting={id:surface.name+'-upper-tang',kind:'mast-fore-tang',mast:surface.mast,tier:yard.id,nextSurface:tiers[index+1].id,clothGap,...upper};
   const stay={id:surface.name+'-stay',kind:'sail-stay',a,b,r:radius,surface:surface.id,mast:surface.mast,side:0,
     lowerFitting,upperFitting,headParameter:headT,provenance:'Authored tier-specific load-bearing stay; cloth luff, end fittings and standing line share these exact endpoints.'};
   return {...surface,pivot:[...a],mastContactSide:'fore',corners:[a,head,surface.corners[2]],stay,
     headFitting:{kind:'stay-hanks',stay:stay.id,parameter:headT,clearance,stayRadius:radius,belowYard:yard.id,verticalClearance:.05/sy}};
+}
+function laterSailCloudWorkingRig(design){
+  const surfaces=design.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(design,s):s.kind==='headsail'?laterSailCloudStay(design,s):s);
+  return surfaces.map(surface=>{
+    if(surface.kind!=='square')return surface;
+    const fittings=surfaces.filter(s=>s.stay?.upperFitting.nextSurface===surface.id).map(s=>s.stay.upperFitting);
+    if(!fittings.length)return surface;
+    const footY=Math.max(surface.corners[2][1],...fittings.map(f=>f.position[1]+f.clothGap));
+    const m=design.masts[surface.mast],foot=laterSailMastAt(design,surface.mast,laterSailDeckOf(design,m.z)),top=laterSailMastAt(design,surface.mast,m.height),axis=top.map((v,i)=>v-foot[i]);
+    const clear=.012/design.frame.verticalScale,z=laterSailMastAt(design,surface.mast,footY)[2]-(laterSailMastRadiusAt(design,surface.mast,footY)+clear)*Math.hypot(...axis)/axis[1];
+    return {...surface,corners:[surface.corners[0],surface.corners[1],[surface.corners[2][0],footY,z],[surface.corners[3][0],footY,z]],
+      belly:Math.min(.18,(surface.corners[0][1]-footY)*.11),mastTierGap:{fittings:fittings.map(f=>f.id),footY,interpretation:'Authored working foot shortened for finite stay/sling clearance; reported yard spans and authored yard heights unchanged.'}};
+  });
 }
 function laterSailCloudCrew(){
   const ids=['ines','tomas','beatriz','duarte','joao','catarina','leonor','rui','maria','afonso','isabel','pedro'];
@@ -206,7 +230,7 @@ laterSailCloud.surfaces.push(
   laterSailGaff(25,'mizzen-spanker',2,'mizzen',[[0,3.25,3.65],[0,4.0,5.65],[0,1.15,6.22],[0,1.15,3.30]],[0,1.15,3.30],
     {spars:[{id:'spanker-boom',kind:'boom',a:[0,1.15,3.30],b:[0,1.15,6.22],radius:.035},{id:'spanker-gaff',kind:'gaff',a:[0,3.25,3.65],b:[0,4.0,5.65],radius:.026}]})
 );
-laterSailCloud.surfaces=laterSailCloud.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(laterSailCloud,s):s.kind==='headsail'?laterSailCloudStay(laterSailCloud,s):s);
+laterSailCloud.surfaces=laterSailCloudWorkingRig(laterSailCloud);
 
 const laterSailMothScale=laterSailMothFrame.verticalScale,laterSailMothX=laterSailMothRuntime.beam/3.6;
 // Authored V-body refinement, not a recovered builder offset table. Keep the

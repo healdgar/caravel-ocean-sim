@@ -93,18 +93,27 @@ for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual sewn fitti
   }
 });
 
-test('a separately braced clipper yard moves the real nearby staysail contact without changing its own sail command or another vessel',()=>{
+test('the re-led clipper staysail remains physically separate from both poses of the independently braced adjacent yard',()=>{
   const d=LATER_SAIL_DESIGNS['flying-cloud'],c=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),base=clearanceBoat(d,0),other={...base,sailState:{...base.sailState,surfaceYaw:{12:.55}}};
   const stay=d.surfaces.find(s=>s.id===22),one=new Float32Array(asset.vertices),two=new Float32Array(asset.vertices),again=new Float32Array(asset.vertices),staticSupports=c._surfaceCollisionSupports;
   assert.deepEqual(rigSurfacePose(stay,base.sailState),rigSurfacePose(stay,other.sailState),'only the other physical yard is rebraced');
   const a=withRigPoseContext(c,base.sailState),b=withRigPoseContext(c,other.sailState);
   assert.notDeepEqual(a._surfaceActiveSupports.find(s=>s.kind==='spar'&&s.surface===12),b._surfaceActiveSupports.find(s=>s.kind==='spar'&&s.surface===12));
   pose(base,3.1,14,one);pose(other,3.1,14,two);pose(base,3.1,14,again);
-  let changed=false;
+  const first=[],second=[];
   for(let at=0;at<asset.vertices.length;at+=9)if(Math.floor(asset.vertices[at+6])===13&&Math.round((asset.vertices[at+6]-13)*64)===22){
-    if([0,1,2].some(i=>one[at+i]!==two[at+i]))changed=true;
+    first.push(...one.subarray(at,at+3));second.push(...two.subarray(at,at+3));
   }
-  assert.ok(changed,'actual nearby staysail cloth responds to another moving spar rather than passing through it');
+  assert.ok(first.length>0);assert.deepEqual(first,second,'a properly separated staysail need not deform in response to a distant yard');
+  const yard=d.surfaces.find(s=>s.id===12),spar=yard.spars.find(s=>s.kind==='yard');
+  for(const [state,target]of [[base.sailState,one],[other.sailState,two]]){
+    const pose=rigSurfacePose(yard,state),a=surfaceYardPoint(yard,spar.a,pose),b=surfaceYardPoint(yard,spar.b,pose);
+    let gap=Infinity;
+    for(const triangle of clearanceClothTriangles(asset,target).filter(t=>t.surface===22)){
+      const q=clearanceTriangleAxis(...triangle.points,a,b);gap=Math.min(gap,q.distance-spar.radius*(1-.30*q.t));
+    }
+    assert.ok(gap>3e-5,'the unchanged actual staysail triangles clear the finite moving yard, rather than ignoring a real contact');
+  }
   assert.deepEqual(new Uint32Array(one.buffer),new Uint32Array(again.buffer),'dynamic support views cannot contaminate another instance/pose');
   assert.equal(c._surfaceCollisionSupports,staticSupports);assert.ok(Object.isFrozen(staticSupports));
 });
@@ -179,6 +188,18 @@ test('clipper structural stay axes clear the actual independently braced finite 
     for(const stay of stays)for(const surface of d.surfaces)for(const spar of surface.spars??[]){
       const p=rigSurfacePose(surface,boat.sailState),a=surfaceYardPoint(surface,spar.a,p),b=surfaceYardPoint(surface,spar.b,p),q=clearanceSegments(a,b,stay.a,stay.b),gap=q.distance-spar.radius*(1-.30*q.t)-stay.r;
       assert.ok(gap>=-3e-5,JSON.stringify({stay:stay.id,spar:spar.id,yaw,clearance:gap,a,b,stayA:stay.a,stayB:stay.b}));
+    }
+  }
+});
+
+test('clipper tier fittings occupy an actual open interval below all adjacent square canvas',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'],{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices),context=laterSailRigContext(d.id);
+  pose(clearanceBoat(d,0),3.1,14,target);
+  const triangles=clearanceClothTriangles(asset,target);
+  for(const stay of context.supports.filter(s=>s.kind==='sail-stay')){
+    const next=stay.upperFitting.nextSurface;
+    for(const triangle of triangles.filter(t=>t.surface===next))for(const p of triangle.points){
+      assert.ok(p[1]>stay.b[1]+stay.r-3e-5,'the actual posed next-tier cloth cannot hang down through the finite mast-stay termination');
     }
   }
 });
