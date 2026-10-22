@@ -38,7 +38,7 @@ function laterSailSquare(design,id,name,mast,headY,footY,yardFt,armFt,footFt){
 }
 function laterSailTriangle(id,name,mast,controlGroup,kind,corners,extra={}){
   return {id,name,mast,controlGroup,kind,corners,pivot:[...corners[0]],belly:.10,braceLimit:1.35,
-    sewnEdges:['v0'],camberAxis:[1,0,0],contactClearance:.025,...extra};
+    sewnEdges:kind==='bermudan'?['v0','u0']:['v0'],camberAxis:[1,0,0],contactClearance:.025,...extra};
 }
 function laterSailGaff(id,name,mast,controlGroup,corners,pivot,extra={}){
   return {id,name,mast,controlGroup,kind:'gaff',corners,pivot,belly:.13,braceLimit:1.30,sewnEdges:['v0','u0'],camberAxis:[1,0,0],...extra};
@@ -186,6 +186,12 @@ const laterSailMoth={
 };
 const laterSailMothMainTack=laterSailMastAt(laterSailMoth,0,1.35/laterSailMothScale),laterSailMothMainHead=laterSailMastAt(laterSailMoth,0,14.0/laterSailMothScale);
 const laterSailMothMizzenTack=laterSailMastAt(laterSailMoth,1,1.45/laterSailMothScale),laterSailMothMizzenHead=laterSailMastAt(laterSailMoth,1,9.35/laterSailMothScale);
+// Authored aft-face mast-track stand-off: the pinned luff must not run through
+// the spar's centre. Keep the same physical clearance at tack and head.
+for(const [index,points]of [[0,[laterSailMothMainTack,laterSailMothMainHead]],[1,[laterSailMothMizzenTack,laterSailMothMizzenHead]]]){
+  const offset=(laterSailMoth.masts[index].radius*laterSailMothX+.012)/laterSailMothScale;
+  for(const point of points)point[2]+=offset;
+}
 const laterSailMothMainClew=[0,1.35/laterSailMothScale,laterSailMothMainTack[2]+4.75/laterSailMothScale],laterSailMothMizzenClew=[0,1.45/laterSailMothScale,laterSailMothMizzenTack[2]+2.75/laterSailMothScale];
 laterSailMoth.surfaces.push(
   laterSailTriangle(1,'mainsail',0,'main','bermudan',[laterSailMothMainTack,laterSailMothMainHead,laterSailMothMainClew],
@@ -202,6 +208,24 @@ export function laterSailHullWidth(id,z,y){return hullLoftWidth(laterSailDesign(
 export function laterSailHullDeck(id,z){return hullLoftDeck(laterSailDesign(id).profile,z);}
 export function laterSailDeck(id,z,x=0){return laterSailDeckOf(laterSailDesign(id),z,x);}
 export function laterSailDeckWidth(id,z){const d=laterSailDesign(id);let y=d.profile.deck;for(const zone of d.deckZones)if(z>=zone.bounds[0]&&z<=zone.bounds[1])y=Math.max(y,zone.height);return Math.max(0,laterSailHullWidth(id,z,y+hullLoftSheer(d.profile,z))-.035);}
+// Authored crew access landings shared byte-for-byte by mesh and routes.
+// Coordinates are design units; y includes local sheer. No stair inferred from
+// a decorative deckhouse wall is treated as traversable.
+export function laterSailStairFlights(id){
+  const d=laterSailDesign(id),sx=d.runtime.beam/d.frame.beam,sz=d.runtime.length/d.frame.length,sy=d.frame.verticalScale,result=[];
+  if(d.cockpit){
+    const join=d.cockpit.bounds[0],z0=join-.22/sz,z1=join+.55/sz;
+    result.push({id:'cockpit-entry',zoneId:'cockpit',side:0,x:0,width:.62/sx,z0,z1,
+      y0:d.profile.deck+hullLoftSheer(d.profile,z0),y1:d.cockpit.floorHeight+hullLoftSheer(d.profile,z1)});
+  }
+  for(const zone of d.deckZones.filter(z=>z.id!=='main')){
+    const fore=zone.bounds[0]<=d.profile.stations[0],join=fore?zone.bounds[1]:zone.bounds[0],rise=zone.height-d.profile.deck;
+    const run=Math.max(.65/sz,rise*sy*1.6/sz),z0=fore?join-.10/sz:join-run,z1=fore?join+run:join+.10/sz;
+    for(const side of [-1,1])result.push({id:zone.id+'.'+(side<0?'port':'starboard'),zoneId:zone.id,side,x:side*.95,width:.72/sx,z0,z1,
+      y0:(fore?zone.height:d.profile.deck)+hullLoftSheer(d.profile,z0),y1:(fore?d.profile.deck:zone.height)+hullLoftSheer(d.profile,z1)});
+  }
+  return result;
+}
 export function laterSailKeelHalfWidth(id,z,y){
   const d=laterSailDesign(id),keel=d.keel;if(!keel)return 0;
   if(keel.kind!=='profiled-ballast-fin'){

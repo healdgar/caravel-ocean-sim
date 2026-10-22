@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Descriptor-driven CPU poses for new mixed rigs. Existing Niña/Victory
 // evaluators remain unchanged. All points are in the model's design frame.
-const surfaceKinds=new Set(['square','lateen','headsail','gaff']);
+const surfaceKinds=new Set(['square','lateen','headsail','gaff','bermudan']);
 const surfaceClamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 const surfaceSmooth=(a,b,x)=>{const t=surfaceClamp((x-a)/(b-a));return t*t*(3-2*t);};
 const surfaceAdd=(a,b)=>a.map((x,i)=>x+b[i]);
@@ -37,13 +37,22 @@ export function surfaceRestPoint(surface,u,v){
   p[1]+=(surface.footRise??0)*4*u*(1-u)*v;return p;
 }
 
+// A physical main mast may carry fore-controlled headsails and main canvas.
+// Never infer a control slot from the number or order of physical masts.
+export function surfaceControlIndex(surface){
+  const index={fore:0,main:1,mizzen:2}[surface?.controlGroup];
+  if(index===undefined)throw Error('Unknown surface control group: '+surface?.controlGroup);
+  return index;
+}
+
 export function rigSurfacePose(surface,state={}){
   surfaceCheck(surface);
-  const rig=state.rig?.[surface.mast]??{},lateen=surface.kind==='lateen';
-  const deployed=surfaceClamp(lateen?(rig.deployed??state.set?.[surface.mast]??1):(state.set?.[surface.mast]??rig.deployed??1));
+  const control=surfaceControlIndex(surface),rig=state.rig?.[control]??{},lateen=surface.kind==='lateen';
+  const deployed=surfaceClamp(lateen?(rig.deployed??state.set?.[control]??1):(state.set?.[control]??rig.deployed??1));
   const limit=surface.braceLimit??(surface.kind==='square'?Math.PI/3:1.2);
   if(!Number.isFinite(limit)||limit<0)throw Error('Invalid surface brace limit');
-  const yaw=lateen?0:surfaceClamp(surface.kind==='square'?(state.squareYaw??0):(state.lateenYaw??0),-limit,limit);
+  const requestedYaw=state.surfaceYaw?.[surface.id]??state.groupYaw?.[control]??rig.yaw??(surface.kind==='square'?(state.squareYaw??0):(state.lateenYaw??0));
+  const yaw=lateen?0:surfaceClamp(requestedYaw,-limit,limit);
   const pose={yaw,deployed,fill:surfaceClamp(rig.fill??0),side:surfaceClamp(rig.side??-(state.tack??1),-1,1),
     opening:surfaceClamp(rig.opening??.30,0,Math.PI/2),dip:surfaceClamp(rig.dip??0),pressure:surfaceClamp(rig.pressure??1,-1,1)};
   if(!lateen){
@@ -57,7 +66,7 @@ export function rigSurfacePose(surface,state={}){
 
 function surfaceRotateVector(surface,p,pose){
   // A headsail hinges around its actual luff, not around a global mast axis.
-  if(surface.kind==='headsail')return surfaceRotate(p,surfaceSubtract(surface.corners[1],surface.corners[0]),pose.yaw);
+  if(surface.kind==='headsail'||surface.kind==='bermudan')return surfaceRotate(p,surfaceSubtract(surface.corners[1],surface.corners[0]),pose.yaw);
   return surfaceRotate(p,[0,1,0],pose.yaw);
 }
 
@@ -72,7 +81,7 @@ export function surfaceYardPoint(surface,p,pose){
     q[1]+=dip*(surface.transferLift??Math.hypot(...surfaceSubtract(b,a))*.15);
     return surfaceAdd(surface.pivot,q);
   }
-  const pivot=surface.kind==='headsail'?surface.corners[0]:surface.pivot;
+  const pivot=surface.kind==='headsail'||surface.kind==='bermudan'?surface.corners[0]:surface.pivot;
   // Gaff/boom canvas rotates about its mast pivot; using a diagonal luff axis
   // here would rotate a boom out of its proper horizontal plane.
   return surfaceAdd(pivot,surfaceRotateVector(surface,surfaceSubtract(p,pivot),pose));
@@ -86,7 +95,7 @@ function surfaceClothMotion(surface,p,pose){
   return surfaceYardPoint(surface,p,pose);
 }
 function surfaceSewnWeight(surface,u,v){
-  const edges=surface.sewnEdges??(surface.kind==='gaff'&&surface.corners.length===4?['v0','u0']:['v0']);
+  const edges=surface.sewnEdges??((surface.kind==='gaff'&&surface.corners.length===4)||surface.kind==='bermudan'?['v0','u0']:['v0']);
   let weight=1;
   for(const edge of edges){
     const distance=edge==='u0'?u:edge==='u1'?1-u:edge==='v0'?v:edge==='v1'?1-v:edge==='diagonal'?1-u-v:null;
@@ -130,7 +139,8 @@ export function surfaceClothPoint(surface,u,v,pose,context={},time=0,wind=0){
   surfaceCheck(surface);
   const rest=surfaceRestPoint(surface,u,v),[a,b]=surface.corners,triangle=surface.corners.length===3;
   let gathered;
-  if(triangle){const axis=surfaceSubtract(b,a),along=surfaceDot(surfaceSubtract(rest,a),axis)/surfaceDot(axis,axis);gathered=surfaceMix(a,b,along);}
+  if(surface.kind==='bermudan')gathered=surfaceMix(a,surface.corners[2],v);
+  else if(triangle){const axis=surfaceSubtract(b,a),along=surfaceDot(surfaceSubtract(rest,a),axis)/surfaceDot(axis,axis);gathered=surfaceMix(a,b,along);}
   else gathered=surfaceRestPoint(surface,u,0);
   const deployed=surfaceClamp(pose.deployed??1),fill=surfaceClamp(pose.fill??0),flat=surfaceMix(gathered,rest,.012+.988*deployed);
   const envelope=triangle?27*u*v*Math.max(0,1-u-v):4*u*(1-u)*(v<=0||v>=1?0:Math.sin(Math.PI*v));
@@ -166,6 +176,12 @@ export function surfaceAttachmentPoint(attachment,context={}){
 
 export function surfaceRopePoint(line,t,context={}){
   if(!Number.isFinite(t))throw Error('Invalid rope coordinate');t=surfaceClamp(t);
+  if(line.clothEdge){
+    const surface=surfaceFind(line.surface,context),pose=surfaceContextPose(surface,context),[a,b]=line.clothEdge;
+    if(!Array.isArray(a)||!Array.isArray(b)||a.length!==2||b.length!==2||![...a,...b].every(Number.isFinite))throw Error('Invalid sewn rope edge');
+    const uv=a.map((v,i)=>v+(b[i]-v)*t);
+    return surfaceClothPoint(surface,...uv,pose,context,context.time??0,context.wind??0);
+  }
   const a=surfaceAttachmentPoint(line.a,context),b=surfaceAttachmentPoint(line.b,context);
   if(t===0)return a;if(t===1)return b;
   const binding=line.a?.surface??line.b?.surface??line.surface;

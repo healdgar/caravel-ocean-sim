@@ -73,19 +73,23 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
   if (!sails.length && rig.backend!=='surfaces-v1') fail('rig.sails', 'requires at least one sail');
   masts.forEach((mast, i) => {
     if (!record(mast)) return;
-    for (const key of ['node', 'headNode', 'climbNode']) reference(mast[key], `rig.masts[${i}].${key}`);
+    for (const key of ['node', 'headNode']) reference(mast[key], `rig.masts[${i}].${key}`);
+    if(mast.climbNode!==undefined||mast.climbable!==false)reference(mast.climbNode,`rig.masts[${i}].climbNode`);
   });
   sails.forEach((sail, i) => {
     if (!record(sail)) return;
     const path = `rig.sails[${i}]`;
     if (!mastIDs.has(sail.mast)) fail(`${path}.mast`, `unknown mast ${sail.mast}`);
-    if (!['lateen', 'square','headsail','gaff'].includes(sail.kind)) fail(`${path}.kind`, 'unknown sail kind');
+    if (!['lateen', 'square','headsail','gaff','bermudan'].includes(sail.kind)) fail(`${path}.kind`, 'unknown sail kind');
     if (!name(sail.controlGroup)) fail(`${path}.controlGroup`, 'expected a control group ID');
     if (rig.backend==='surfaces-v1' && !['fore','main','mizzen'].includes(sail.controlGroup)) fail(`${path}.controlGroup`, 'surfaces-v1 requires a supported canvas control group');
     if (rig.backend==='surfaces-v1' && (!Number.isInteger(sail.surfaceId)||sail.surfaceId<1)) fail(`${path}.surfaceId`, 'requires a positive authored surface ID');
-    reference(sail.yardNode, `${path}.yardNode`);
+    if(sail.yardNode!==undefined)reference(sail.yardNode, `${path}.yardNode`);
+    else if(['square','lateen'].includes(sail.kind))fail(`${path}.yardNode`,'yard-borne canvas requires an actual yard');
+    else if(sail.sparNode!==undefined)reference(sail.sparNode,`${path}.sparNode`);
+    else reference(sail.luffNode,`${path}.luffNode`);
     const clews = list(sail.clewNodes, `${path}.clewNodes`);
-    const expected = ['lateen','headsail','gaff'].includes(sail.kind) ? 1 : sail.kind === 'square' ? 2 : 0;
+    const expected = ['lateen','headsail','gaff','bermudan'].includes(sail.kind) ? 1 : sail.kind === 'square' ? 2 : 0;
     if (expected && clews.length !== expected) fail(`${path}.clewNodes`, `${sail.kind} requires ${expected} free clew node${expected === 1 ? '' : 's'}`);
     if (new Set(clews).size !== clews.length) fail(`${path}.clewNodes`, 'duplicate clew nodes');
     clews.forEach((id, j) => reference(id, `${path}.clewNodes[${j}]`));

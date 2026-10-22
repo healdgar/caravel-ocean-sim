@@ -3,6 +3,7 @@ import {createMeshWriter} from './mesh-writer.js';
 import {rowingDesign,rowingDeck,rowingHullWidth,rowingHullDeck,rowingRigContext} from './models/rowing.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
+import {rowingAnchorFitting,rowingSurfaceSpar} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
 
 const rowingMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]),rowingMeshSub=(a,b)=>a.map((v,i)=>v-b[i]),rowingMeshMul=(a,s)=>a.map(v=>v*s);
@@ -143,12 +144,21 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
     group('rowing.station.'+station.id,'rowing.'+station.id,start);
   }
   const steeringStart=out.length,steering=rowingSteeringPose(rest);
-  physicalGeometry(({tube,quad})=>{tube(steering.shaftA,steering.shaftB,.026,17,.018,8);quad(...steering.bladeCorners,17,steering.bladeCorners.map(()=>steering.bladeNormal));});
+  physicalGeometry(({tube,quad})=>{
+    tube(steering.shaftA,steering.shaftB,.026,17,.018,8);
+    const n=steering.bladeNormal,offset=rowingMeshMul(n,d.propulsion.bladeThickness*.5),front=steering.bladeCorners.map(q=>rowingMeshAdd(q,offset)),back=steering.bladeCorners.map(q=>rowingMeshSub(q,offset));
+    quad(...front,17,front.map(()=>n));quad(...back.slice().reverse(),17,back.map(()=>rowingMeshMul(n,-1)));
+    for(let j=0;j<4;j++)quad(front[j],front[(j+1)%4],back[(j+1)%4],back[j],17);
+  });
   group('helm.steering-oar','helm.rudder',steeringStart,{type:'steering-oar'});
   const cargoStart=out.length;
   for(const c of d.equipment.cargo){const y=rowingDeck(modelId,c.z),[w,h,L]=c.extent;box([-w,y,c.z-L],[w,y+h,c.z+L],1);}
   const bailerY=rowingDeck(modelId,2.8);box([.22,bailerY,2.7],[.35,bailerY+.09,2.9],1);
   group('deck.stores','deck.main',cargoStart);
+  if(d.equipment.anchor)for(const side of [-1,1]){
+    const start=out.length,a=rowingAnchorFitting(modelId,side);tube(a.root,a.tip,.035/sy,1,.028/sy,6);
+    group('anchor.'+(side<0?'port':'starboard'),'anchor.'+(side<0?'port':'starboard')+'.root',start);
+  }
   for(const m of context.masts){const start=out.length;tube(m.foot,m.head,m.radius,1,.018,12);group('mast.'+m.id,'mast.'+m.id,start);}
   for(const s of context.surfaces){
     const start=out.length,n=20;
@@ -156,7 +166,7 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
       const uv=[[i/n,j/n],[(i+1)/n,j/n],[(i+1)/n,(j+1)/n],[i/n,(j+1)/n]],q=uv.map(p=>surfaceRestPoint(s,...p));quad(...q,tag(9,s.id),null,uv);
     }
     group('sail.'+s.name,'sail.'+s.name,start,{type:'surface-cloth',surface:s.id});
-    const yardStart=out.length,a=s.corners[0],b=s.corners[1],axis=unit(rowingMeshSub(b,a));tube(rowingMeshAdd(a,rowingMeshMul(axis,-.10)),rowingMeshAdd(b,rowingMeshMul(axis,.10)),.035,tag(10,s.id),.025,10);
+    const yardStart=out.length,spar=rowingSurfaceSpar(s);tube(spar.a,spar.b,spar.radius,tag(10,s.id),spar.radiusEnd,10);
     group('yard.'+s.name,'yard.'+s.name,yardStart,{type:'surface-yard',surface:s.id});
   }
   const rigStart=out.length;for(const line of context.supports)rope(line.a,line.b,line.r,2,1,0);group('rig.standing','hull',rigStart);

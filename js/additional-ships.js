@@ -293,8 +293,10 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
 
 // Build the compact animation map once for each indexed immutable asset. Only
 // these vertices change: fixed hull and gun recoil buffers retain their bytes.
-export function createAdditionalAssetPose(asset){
-  const id=asset.model?.id??asset.modelId,design=additionalDesign(id),context=additionalRigContext(id),source=asset.vertices;
+export function createAdditionalAssetPose(asset,options={}){
+  // Optional descriptor injection reuses the exact pose algorithm for later
+  // ships. Existing Pinta/Santa calls and construction output are unchanged.
+  const id=asset.model?.id??asset.modelId,design=options.design??additionalDesign(id),context=options.context??additionalRigContext(id),source=asset.vertices;
   if(!(source instanceof Float32Array)||source.length%9)throw Error('Additional asset pose requires nine-float vertices');
   const surfaces=new Map(context.surfaces.map(s=>[s.id,s])),entries=[],cloth=new Map(),ropes=new Map();
   const restContext={...context,state:{},poses:new Map(context.surfaces.map(s=>[s.id,rigSurfacePose(s,{})])),time:0,wind:0};
@@ -318,7 +320,7 @@ export function createAdditionalAssetPose(asset){
       entries.push({kind,at:i,sample,c:additionalMeshDot(offset,frame.across),s:additionalMeshDot(offset,frame.up),
         nc:additionalMeshDot(normal,frame.across),ns:additionalMeshDot(normal,frame.up)});continue;
     }
-    if(kind===7||kind===14||kind===18)entries.push({kind,at:i,p,normal});
+    if(kind===7||kind===14||kind===18||(kind===8&&surfaceId===1&&design.steering.wheel))entries.push({kind,at:i,p,normal});
   }
   const samples=[...cloth.values()],ropeSamples=[...ropes.values()],poses=new Map(),yardTransforms=new Map(),runtime={...context,poses,state:null,time:0,wind:0};
   function write(target,at,p,n){for(let k=0;k<3;k++){target[at+k]=p[k];target[at+3+k]=n[k];}}
@@ -341,6 +343,7 @@ export function createAdditionalAssetPose(asset){
       sample.point=surfaceRopePoint(line,t,runtime);sample.frame=additionalMeshFrame(additionalMeshSub(b,a),sample.across);
     }
     const angle=(boat.rudder??0)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle),opening=(1-Math.max(0,Math.min(1,boat.hatchesClosed??0)))*Math.PI/2,hc=Math.cos(opening),hs=Math.sin(opening);
+    const steeringPose=options.steeringPose?.(boat);
     for(const entry of entries){
       const {kind,at,p,normal:n}=entry;
       if(kind===10){
@@ -349,6 +352,10 @@ export function createAdditionalAssetPose(asset){
       }else if(kind===12){
         const q=entry.sample.point,frame=entry.sample.frame;
         write(target,at,additionalMeshAdd(q,additionalMeshAdd(additionalMeshMul(frame.across,entry.c),additionalMeshMul(frame.up,entry.s))),additionalMeshUnit(additionalMeshAdd(additionalMeshMul(frame.across,entry.nc),additionalMeshMul(frame.up,entry.ns))));
+      }else if(kind===8){
+        const wheel=design.steering.wheel,a=additionalMeshUnit(wheel.axis??[0,0,1]),turn=angle*(wheel.turnRatio??12),wc=Math.cos(turn),ws=Math.sin(turn);
+        const rotate=v=>steeringPose?[0,1,2].map(i=>steeringPose.basis.reduce((sum,axis,j)=>sum+axis[i]*v[j],0)):additionalMeshAdd(additionalMeshAdd(additionalMeshMul(v,wc),additionalMeshMul(additionalMeshCross(a,v),ws)),additionalMeshMul(a,additionalMeshDot(a,v)*(1-wc)));
+        write(target,at,additionalMeshAdd(wheel.centre,rotate(additionalMeshSub(p,wheel.centre))),additionalMeshUnit(rotate(n)));
       }else if(kind===18){
         const q=additionalMeshSub(p,hinge);write(target,at,[p[0],hinge[1]+hc*q[1]+hs*q[2],hinge[2]-hs*q[1]+hc*q[2]],[n[0],hc*n[1]+hs*n[2],-hs*n[1]+hc*n[2]]);
       }else{
