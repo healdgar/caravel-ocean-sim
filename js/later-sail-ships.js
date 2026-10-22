@@ -223,7 +223,7 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   const hatchStart=out.length;box([hatch.x0,h.centre[1],hatch.z0],[hatch.x1,h.centre[1]+h.size[1],hatch.z1],18);
   group('hatch.main','hatch.main',hatchStart,{type:'hatch',pivot:[h.centre[0],h.centre[1],hatch.z0]});
   for(const [index,m]of context.masts.entries()){
-    const start=out.length;tube(m.foot,m.head,m.radius,cloud?1:3,m.radius*.24,16);
+    const start=out.length;tube(m.foot,m.head,m.radius,cloud?1:3,m.tipRadius,16);
     if(cloud){
       const platform=context.mastPoint(index,m.foot[1]+(m.height-m.foot[1])*.47),radius=.34;
       for(let j=0;j<16;j++){const a=j*Math.PI/8,b=(j+1)*Math.PI/8,A=laterMeshAdd(platform,[radius*Math.cos(a),0,radius*Math.sin(a)]),B=laterMeshAdd(platform,[radius*Math.cos(b),0,radius*Math.sin(b)]);tri(platform,A,B,1);tube(A,B,.025/sx,1,.025/sx,6);}

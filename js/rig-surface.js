@@ -108,9 +108,10 @@ function surfaceSewnWeight(surface,u,v){
 // Canonical model contexts freeze this once and carry it unchanged into their
 // per-vessel runtime view. Only authored static support geometry is prepared;
 // pressure, cloth side, contact clearance, time and sail state remain live.
+function surfaceMastSupport(m,index){return {a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index,...(m.tipRadius===undefined?{}:{rEnd:m.tipRadius})};}
 export function withRigSupportCache(context){
   if(context._surfaceCollisionSupports)return context;
-  const supports=[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
+  const supports=[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
   const prepared=Object.freeze(supports.map(s=>{
     if(!surfaceFinitePoint(s.a)||!surfaceFinitePoint(s.b))throw Error('Invalid rig support descriptor');
     const axis=Object.freeze(surfaceSubtract(s.b,s.a));
@@ -121,7 +122,7 @@ export function withRigSupportCache(context){
 export function withRigPoseContext(context,state={},poses=null){
   const live=poses??new Map((context.surfaces??[]).map(s=>[s.id,rigSurfacePose(s,state)]));
   if(!context.spars?.length)return {...context,state,poses:live};
-  const stationary=context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
+  const stationary=context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
   const moving=context.spars.map(spar=>{
     const owner=surfaceFind(spar.surface,context),pose=live.get(owner.id),a=surfaceYardPoint(owner,spar.a,pose),b=surfaceYardPoint(owner,spar.b,pose),axis=surfaceSubtract(b,a);
     return {a,b,r:spar.radius,kind:'spar',surface:owner.id,mast:owner.mast,_surfaceAxis:axis,_surfaceLength2:surfaceDot(axis,axis)};
@@ -134,13 +135,15 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
   const pin=surfaceSewnWeight(surface,u,v);if(pin===0)return point;
   const clearance=surface.contactClearance??.045,band=surface.contactBand??.25;
   if(!Number.isFinite(clearance)||clearance<0||!Number.isFinite(band)||band<=0)throw Error('Invalid surface contact margin');
-  const p=[...point],supports=context._surfaceActiveSupports??context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
+  const p=[...point],supports=context._surfaceActiveSupports??context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
   for(const support of supports){
     if(support.kind==='spar'&&support.surface===surface.id)continue; // own sewn spar
-    const {a,b}=support,r=(support.r??0)+clearance;
-    if(!surfaceFinitePoint(a)||!surfaceFinitePoint(b)||!Number.isFinite(r)||r<0)throw Error('Invalid rig support descriptor');
+    const {a,b}=support;let r=(support.r??0)+clearance;
+    if(!surfaceFinitePoint(a)||!surfaceFinitePoint(b)||!Number.isFinite(r)||r<0
+      ||(support.rEnd!==undefined&&(!Number.isFinite(support.rEnd)||support.rEnd+clearance<0)))throw Error('Invalid rig support descriptor');
     const axis=support._surfaceAxis??surfaceSubtract(b,a),length2=support._surfaceLength2??surfaceDot(axis,axis);if(length2<1e-12)throw Error('Degenerate rig support');
     const t=surfaceClamp(surfaceDot(surfaceSubtract(p,a),axis)/length2),q=surfaceMix(a,b,t),delta=surfaceSubtract(p,q);
+    if(support.rEnd!==undefined)r=(support.r??0)+(support.rEnd-(support.r??0))*t+clearance;
     const mastBarrier=(support.kind==='mast'||support.kind==='spar')&&support.mast===surface.mast&&surface.mastContactSide;
     if(mastBarrier&&!['fore','aft'].includes(mastBarrier))throw Error('Invalid authored mast contact side');
     const direction=mastBarrier?[0,0,mastBarrier==='fore'?-1:1]:normal;

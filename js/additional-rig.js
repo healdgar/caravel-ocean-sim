@@ -89,7 +89,7 @@ export function laterSailRigContext(id){
     const floor=laterSailDeck(id,m.z),t=(y-floor)/(m.height-floor);
     return [0,y,m.z+(m.rake??0)*t];
   };
-  const masts=d.masts.map((m,index)=>({...m,index,climbable:id==='flying-cloud',foot:mastPoint(index,laterSailDeck(id,m.z)),head:mastPoint(index,m.height)}));
+  const masts=d.masts.map((m,index)=>({...m,index,tipRadius:m.radius*.24,climbable:id==='flying-cloud',foot:mastPoint(index,laterSailDeck(id,m.z)),head:mastPoint(index,m.height)}));
   const spars=d.surfaces.flatMap(s=>(s.spars??[]).map(spar=>({...spar,surface:s.id,mast:s.mast,controlGroup:s.controlGroup})));
   for(const [index,m]of masts.entries()){
     const floor=m.foot[1],high=floor+(m.height-floor)*(id==='flying-cloud'?.47:.92),top=mastPoint(index,high);

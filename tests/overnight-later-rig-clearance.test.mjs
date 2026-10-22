@@ -127,6 +127,17 @@ test('named clipper staysail pinned heads set below their actual matching yard t
   }
 });
 
+test('later-mast contact cones use the exact radius taper drawn by the actual mast mesh',()=>{
+  for(const d of Object.values(LATER_SAIL_DESIGNS)){
+    const c=laterSailRigContext(d.id);
+    for(const mast of c.masts){
+      assert.equal(mast.tipRadius,mast.radius*.24);
+      const support=c._surfaceCollisionSupports.find(s=>s.kind==='mast'&&s.mast===mast.index);
+      assert.equal(support.r,mast.radius);assert.equal(support.rEnd,mast.tipRadius,'upper cloth cannot collide against an imaginary full-base-radius cylinder');
+    }
+  }
+});
+
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
   const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
   for(const [yaw,set]of [[0,[1,1,1]],[.67,[1,1,1]],[-.67,[1,1,1]],[.35,[.20,.40,.65]]]){
