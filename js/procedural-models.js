@@ -73,7 +73,10 @@ export function createProceduralShipDefinition(id,{status='planned'}={}){
     let x=h.centre[0]+h.size[0]/2+.24/scale[0],z=h.centre[2];
     if(d.cockpit){
       x=0;const aft=Math.max(...d.structures.map(s=>s.centre[2]+s.size[2]/2)),flight=laterSailStairFlights(id).find(f=>f.zoneId==='cockpit');
-      z=Math.min(aft+.56/scale[2],flight.z0-.20/scale[2]);
+      // Remain outside the cabin's .22 m navigation margin, but close enough
+      // for the standing worker to reach the real forward-hinged roof lid.
+      // Do not move the worker onto the descending cockpit flight.
+      z=Math.min(aft+.28/scale[2],flight.z0-.20/scale[2]);
     }
     add('station.hatch',[x,deck(z,x),z],'station');
   }

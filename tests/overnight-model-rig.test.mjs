@@ -115,5 +115,7 @@ test('rowing hand/foot/blade attachments convert hull metres to design once and 
     near(resolveProceduralShipNode(b,model,'helm.grip'),rowingSteeringPose(b).hands[0]);
   }
   const d=laterSailDesign('gipsy-moth-iv'),m=createProceduralShipDefinition(d.id),p=m.nodes['station.hatch'].position,cabin=d.structures[0],flight=laterSailStairFlights(d.id)[0];
-  assert.ok(p[2]>cabin.centre[2]+cabin.size[2]/2&&p[2]<flight.z0);near([p[1]],[laterSailDeck(d.id,p[2],p[0])]);
+  const cabinGap=(p[2]-cabin.centre[2]-cabin.size[2]/2)*d.frame.verticalScale,stairGap=(flight.z0-p[2])*d.frame.verticalScale;
+  assert.ok(cabinGap>=.28-1e-9&&cabinGap<=.30+1e-9,'standing hatch station stays outside the cabin wall/navigation margin without exceeding the real arm reach');
+  assert.ok(stairGap>=.20-1e-9,'standing worker stays ahead of the cockpit descent');near([p[1]],[laterSailDeck(d.id,p[2],p[0])]);
 });
