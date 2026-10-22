@@ -266,14 +266,18 @@ function additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,id){
     +crewMass*((length*.25)**2+(crewKG-centreOfGravity)**2)+(loadMass-crewMass)*((length*.18)**2+(storesKG-centreOfGravity)**2));
   const pitchStiffness=mass*9.81*Math.max(.1,loaded.centreOfBuoyancy+loaded.longitudinalMoment/volume-centreOfGravity);
   const pitchDamping=2*.70*Math.sqrt(pitchInertia*pitchStiffness),addedMass=mass*.08;
-  return {modelCode:hydroModelCode(id),length,beam,provisionDays,cargoTonnes,datumDraft,draft,sinkage,freeboard,volume,mass,addedMass,
-    fixedMass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,ballastMass,ballastKG,overloadKg:Math.max(0,mass-maximumMass),waterplaneArea,centreOfGravity,
+  const result={modelCode:hydroModelCode(id),length,beam,provisionDays,cargoTonnes,datumDraft,draft,sinkage,freeboard,volume,mass,addedMass,
+    fixedMass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,overloadKg:Math.max(0,mass-maximumMass),waterplaneArea,centreOfGravity,
+    heaveOmega:Math.sqrt(SEAWATER_DENSITY*9.81*waterplaneArea/(mass+addedMass)),drag:.5*SEAWATER_DENSITY*.012*.85*length*(beam+2*draft),
+    metacentricHeight,rollInertia,rollStiffness,rollDamping,pitchInertia,pitchStiffness,pitchDamping};
+  // Preserve the original four models' exact scalar object contract. Rich
+  // provenance/placement diagnostics belong only to the new authored vessels.
+  if(d.modelCode>=4)Object.assign(result,{ballastMass,ballastKG,
     referenceDisplacementKg:M.referenceDisplacementKg??null,referenceMassDifferenceKg:Number.isFinite(M.referenceDisplacementKg)?mass-M.referenceDisplacementKg:null,
     fixedKG,structureKG,crewKG,storesKG,rawGM,stabilityClamped:rawGM<.1,
     structureCGBasis:seated?'authored uniform wood shell/floor/bench/keel/mast volume':ballastMass?'authored hull and explicit lead ballast':'authored target GM',
-    structureShellCentroidY:structure?.shellCentroidY??null,structureGeometricWoodVolume:structure?.woodVolume??null,
-    heaveOmega:Math.sqrt(SEAWATER_DENSITY*9.81*waterplaneArea/(mass+addedMass)),drag:.5*SEAWATER_DENSITY*.012*.85*length*(beam+2*draft),
-    metacentricHeight,rollInertia,rollStiffness,rollDamping,pitchInertia,pitchStiffness,pitchDamping};
+    structureShellCentroidY:structure?.shellCentroidY??null,structureGeometricWoodVolume:structure?.woodVolume??null});
+  return result;
 }
 
 // One angular momentum state per axis. Wave righting, sail torque and hull
