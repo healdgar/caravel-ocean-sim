@@ -277,10 +277,10 @@ function assignGunCrew(company,boat){
   const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery');
   for(const s of company.crew){
     const j=s.job;
-    if(j?.kind==='gunnery'&&j.stage!=='return'&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat);
+    if(j?.kind==='gunnery'&&j.stage!=='return'&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
     // An aloft worker climbs down normally; there is no cannon-station teleport.
     if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&['ascending','working'].includes(j.stage))crewWorkDescend(s);
-    else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat);
+    else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat,company);
   }
   if(!active)return;
   const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&!s.job);
@@ -333,6 +333,7 @@ export function crewGunneryTool(s,boat){
 // models use it; the qualified four-ship routes keep their original geometry.
 export function proceduralCrewRoute(s,target,boat,company=null){
   const d=proceduralDesign(boat.modelId),sx=boat.beam/d.frame.beam,sy=d.frame.verticalScale,sz=boat.length/d.frame.length,flights=crewExtendedFlights(d.id);
+  const rowingBody=Object.hasOwn(ROWING_DESIGNS,d.id),bodies=company?.crew.filter(other=>other!==s&&other.position)??[];
   const pitch=.32,margin=d.cockpit?.22:.27,lo=d.profile.stations[0]*sz+.28,hi=d.profile.stations.at(-1)*sz-.28,columns=Math.ceil(boat.beam/pitch);
   // Narrow yacht side decks may lie between regular grid columns. Include the
   // actual centre of each authored cabin/walkway gap, without shrinking people.
@@ -360,7 +361,7 @@ export function proceduralCrewRoute(s,target,boat,company=null){
     if(clear)for(const b of d.structures??[])if(Math.abs(x-b.centre[0])<b.size[0]/2+margin/sx&&Math.abs(z-b.centre[2])<b.size[2]/2+margin/sz&&y<b.centre[1]+b.size[1]/2+.02){clear=false;break;}
     const h=d.hatch;
     if(clear&&h&&Math.abs(x-h.centre[0])<h.size[0]/2+.22/sx&&Math.abs(z-h.centre[2])<h.size[2]/2+.22/sz)clear=false;
-    if(clear&&company)for(const other of company.crew)if(other!==s&&other.position&&distance3(world,other.position)<.50&&distance3(world,physical(start,boat))>.48){clear=false;break;}
+    if(clear&&company)for(const other of bodies)if(distance3(rowingBody?[world[0],world[1]+.028,world[2]]:world,other.position)<(rowingBody?.58:.50)&&distance3(world,physical(start,boat))>.48){clear=false;break;}
     const result=clear?{key,i,j,p,world}:null;points.set(key,result);return result;
   };
   const nearest=p=>{
@@ -382,6 +383,10 @@ export function proceduralCrewRoute(s,target,boat,company=null){
       const mid=node.p.map((v,i)=>(v+next.p[i])*.5),onStair=flights.some(f=>Math.abs(mid[0]-f.x)<=f.width/2&&mid[2]>=f.z0&&mid[2]<=f.z1);
       if(Math.abs(next.world[1]-node.world[1])>(onStair?.65:.24))continue;
       if(di&&dj&&(!make(node.i+di,node.j)||!make(node.i,node.j+dj)))continue;
+      if(rowingBody&&bodies.length){
+        const a=node.world.map((v,i)=>v+(i===1?.028:0)),b=next.world.map((v,i)=>v+(i===1?.028:0)),delta=b.map((v,i)=>v-a[i]),length2=delta.reduce((n,v)=>n+v*v,0);
+        if(bodies.some(other=>{const t=workClamp(delta.reduce((n,v,i)=>n+v*(other.position[i]-a[i]),0)/Math.max(length2,1e-9),0,1),gap=distance3(a.map((v,i)=>v+delta[i]*t),other.position);return gap<.55&&gap<distance3(a,other.position)-1e-7;}))continue;
+      }
       const cost=costs.get(node.key)+distance3(node.world,next.world);if(cost>=(costs.get(next.key)??Infinity))continue;
       costs.set(next.key,cost);parents.set(next.key,node.key);push({node:next,cost:cost+distance3(next.world,b.world)});
     }
@@ -499,6 +504,13 @@ export function stepCrewWork(s,company,boat,dt) {
           else j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';j.elapsed=0;
         }}
         j.blockedTime=0;
+      }else if(Object.hasOwn(ROWING_DESIGNS,boat.modelId)){
+        j.blockedTime=(j.blockedTime??0)+dt;
+        if(j.blockedTime>.5){
+          const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);
+          if(path){j.path=path;j.cursor=0;}
+          j.blockedTime=0;
+        }
       }else if(ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery'){
         j.blockedTime=(j.blockedTime??0)+dt;
         if(j.blockedTime>.5)crewAdditionalPassingDetour(s,company,boat,p,target);
@@ -536,7 +548,7 @@ export function stepCrewWork(s,company,boat,dt) {
           j.lookoutEntry=[...j.position];j.stage='lookout-approach';j.path=[p];j.cursor=0;
         }
       }
-      if(j.stage==='descending'&&j.rung<=0)startReturn(s,boat);
+      if(j.stage==='descending'&&j.rung<=0)startReturn(s,boat,company);
     }else if(j.stage==='working'&&j.kind==='gunnery'){
       s.yaw=(j.gun.sideSign??Math.sign(j.gun.directionDesign[0]))*Math.PI/2;
       const tool=crewGunneryTool(s,boat);
@@ -548,8 +560,8 @@ export function stepCrewWork(s,company,boat,dt) {
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
         :!sailingState(boat).maneuver && Math.abs((boat[SAIL_KEYS[j.control??j.mast]]??1)-sailingState(boat).set[j.control??j.mast])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
       if(done){if(j.kind==='rig'||j.kind==='lookout'){crewWorkDescend(s);s.nextWatch=company.workTime+45;}
-        else startReturn(s,boat);}
-    }else if(j.stage==='waiting-return'&&j.elapsed>.5){startReturn(s,boat);
+        else startReturn(s,boat,company);}
+    }else if(j.stage==='waiting-return'&&j.elapsed>.5){startReturn(s,boat,company);
     }
     // A replaced order never teleports an aloft sailor; they finish/descend safely.
     if(j.kind==='lookout'&&company.order!=='watch'&&j.stage==='ascending')crewWorkDescend(s);
@@ -582,10 +594,10 @@ export function stepCrewWork(s,company,boat,dt) {
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return true;
 }
-function startReturn(s,boat){
+function startReturn(s,boat,company=null){
   const j=s.job;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s,boat);
-  if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
+  if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,Object.hasOwn(ROWING_DESIGNS,boat.modelId)?company:null);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
   if(ADDITIONAL_DESIGNS[boat.modelId]){j.path=additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'});return;}
   if(boat.modelId==='victory'){j.path=victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'});return;}
   j.path=s.id==='maria'?[deckPoint(s.x,-3.2),deckPoint(home[0],-3.2),home]

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {ROWING_DESIGNS,rowingBenchDescriptors,rowingDeck,rowingHullWidth} from '../js/models/rowing.js';
+import {ROWING_DESIGNS,rowingBenchDescriptors,rowingDeck,rowingHullWidth,rowingRigContext} from '../js/models/rowing.js';
 import {hullLoftSheer} from '../js/hull-loft.js';
 import {createMeshWriter} from '../js/mesh-writer.js';
 import {createRowingShipMesh} from '../js/rowing-ships.js';
@@ -10,6 +10,7 @@ import {advanceSails,sailingState} from '../js/sailing.js';
 import {requirePlayableShipModel} from '../js/ship-models.js';
 import {loadCrewGLB} from '../js/gltf.js';
 import {poseCrewWork} from '../js/crew-pose.js';
+import {proceduralCrewRoute} from '../js/crew-work.js';
 
 const crewBenchBoat=id=>{const model=requirePlayableShipModel(id);return {modelId:id,model,...model.runtime,heading:0,heave:0,pitch:0,roll:0,rollVelocity:0,rudder:0,sailFore:1,sailMain:1,sailMizzen:1,crew:false,showProw:true,hatchesClosed:0};};
 const crewBenchDistance=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
@@ -53,6 +54,22 @@ test('measured boot soles come from actual own skin while retaining immutable cr
       assert.ok(Math.abs(Math.max(...points.map(p=>p[0]-f.ankle[0]))-f.max[0])<1e-7);
     }
     assert.deepEqual(mesh.vertices,copy);assert.deepEqual(bytes,readFileSync(new URL('../assets/crew/'+file,import.meta.url)));
+  }
+});
+
+test('rowboat return routes use the same full body clearance as execution, including between graph nodes',()=>{
+  for(const id of ['oseberg','lusoria']){
+    const boat=crewBenchBoat(id),d=ROWING_DESIGNS[id],company=createCompany(undefined,id);stepCompany(company,boat,0,3);
+    const s=company.crew.find(person=>person.role==='Captain'),home=[s.x,rowingDeck(id,s.z),s.z],work=rowingRigContext(id).controlStations.main.position,scale=[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length];
+    s.x=work[0];s.z=work[2];s.position.set(work.map((v,i)=>v*scale[i]+(i===1?.028:0)));s.job={position:[...work]};
+    const path=proceduralCrewRoute(s,home,boat,company);assert.ok(path,id+' full return route exists around seated workers');
+    for(let i=1;i<path.length;i++){
+      const a=path[i-1].map((v,k)=>v*scale[k]+(k===1?.028:0)),b=path[i].map((v,k)=>v*scale[k]+(k===1?.028:0)),delta=b.map((v,k)=>v-a[k]),length2=delta.reduce((sum,v)=>sum+v*v,0);
+      for(const other of company.crew.filter(person=>person!==s)){
+        const t=Math.max(0,Math.min(1,delta.reduce((sum,v,k)=>sum+v*(other.position[k]-a[k]),0)/Math.max(length2,1e-9))),p=a.map((v,k)=>v+delta[k]*t),gap=crewBenchDistance(p,Array.from(other.position));
+        assert.ok(gap>=.54-1e-6,id+' return edge cannot enter the executor stopping radius '+JSON.stringify({other:other.id,gap,a,b,p}));
+      }
+    }
   }
 });
 
