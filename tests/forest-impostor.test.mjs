@@ -96,10 +96,35 @@ test('actual GPU atlas shader reconstructs front depth rather than writing the b
       await Promise.all([colourRead.mapAsync(GPUMapMode.READ),depthRead.mapAsync(GPUMapMode.READ)]);
       const decode=bits=>{const e=(bits>>10)&31,m=bits&1023;return (bits&32768?-1:1)*(e?Math.pow(2,e-15)*(1+m/1024):Math.pow(2,-14)*m/1024);};
       const color=Array.from(new Uint16Array(colourRead.getMappedRange(),32*512+32*8,4),decode),frontDepth=new Float32Array(depthRead.getMappedRange())[32*64+32];
-      colourRead.unmap();depthRead.unmap();await device.queue.onSubmittedWorkDone();atlas.destroy();device.destroy();return{errors,color,frontDepth,expectedDepth:.1/(10-manifest.prototypes[0].projection.extent*.5)};
+      colourRead.unmap();depthRead.unmap();
+      // Actual production reprojection helper: the centre-plane sample is
+      // covered, but its front-depth shift lands in a genuine transparent gap.
+      // Retain source fractional coverage/depth; an initially empty ray stays
+      // empty. This does not add geometry or union the three source silhouettes.
+      pigment.fill(0);surface.fill(0);const coverage=.5,extent=manifest.prototypes[0].projection.extent;
+      for(let y=24;y<40;y++)for(let x=24;x<40;x++){
+        const offset=((selected.row*64+y)*1024+selected.column*64+x)*4;
+        pigment.set([.2,.3,.1,coverage].map(half),offset);surface.set([...d.map(value=>value*coverage),.25*coverage].map(half),offset);
+      }
+      device.queue.writeTexture({texture:atlas.albedo},pigment,{bytesPerRow:8192},[1024,1024,1]);device.queue.writeTexture({texture:atlas.normalDepth},surface,{bytesPerRow:8192},[1024,1024,1]);
+      const sourceOrigin=d.map((value,k)=>value*10-r[k]*8),sourceRay=d.map((value,k)=>(-value+r[k]*.8)/Math.hypot(1,.8));
+      const vec=values=>'vec3f('+values.join(',')+')';
+      const witnessModule=await shader(code+'\n@group(0)@binding(1)var<storage,read_write>witness:array<vec4f>;'+
+        '@compute @workgroup_size(1)fn reprojectionWitness(){let origin='+vec(sourceOrigin)+';let ray='+vec(sourceRay)+';'+
+        'let hit=forestAtlasRay(119u,0u,origin,ray,vec3f(0),vec3f(0));witness[0]=hit.pigment;witness[1]=vec4f(hit.normal,hit.distance);'+
+        'let empty=forestAtlasRay(119u,0u,origin+'+vec(r.map(value=>value*extent*3))+',ray,vec3f(0),vec3f(0));witness[2]=empty.pigment;}','actual atlas disocclusion witness');
+      const witnessPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:witnessModule,entryPoint:'reprojectionWitness'}}),witness=buffer(new Float32Array(12),B.STORAGE|B.COPY_SRC),witnessRead=device.createBuffer({size:48,usage:B.COPY_DST|B.MAP_READ});
+      const witnessEncoder=device.createCommandEncoder(),witnessPass=witnessEncoder.beginComputePass();witnessPass.setPipeline(witnessPipeline);
+      witnessPass.setBindGroup(0,device.createBindGroup({layout:witnessPipeline.getBindGroupLayout(0),entries:[{binding:1,resource:{buffer:witness}}]}));witnessPass.setBindGroup(3,atlas.bind(witnessPipeline));witnessPass.dispatchWorkgroups(1);witnessPass.end();
+      witnessEncoder.copyBufferToBuffer(witness,0,witnessRead,0,48);device.queue.submit([witnessEncoder.finish()]);await witnessRead.mapAsync(GPUMapMode.READ);
+      const fallback=Array.from(new Float32Array(witnessRead.getMappedRange()));witnessRead.unmap();await device.queue.onSubmittedWorkDone();atlas.destroy();device.destroy();
+      return{errors,color,frontDepth,expectedDepth:.1/(10-extent*.5),fallback,expectedFallbackDistance:(10-extent*.5)*Math.hypot(1,.8)};
     },fixture);
     assert.deepEqual(result.errors,[]);assert.ok(Math.abs(result.frontDepth-result.expectedDepth)<.00002,JSON.stringify(result));
     assert.ok(result.frontDepth>.0104,'front surface must occlude a surface just in front of the billboard plane');
     assert.ok(Math.abs(result.color[0]-119/255)<.002);assert.ok(Math.abs(result.color[1]-.25)<.001);assert.ok(Math.abs(result.color[2]-.5)<.001);assert.equal(result.color[3],1);
+    assert.ok(Math.abs(result.fallback[3]-.5)<.0001,'later depth disocclusion retains actual half-covered leaf');
+    assert.ok(Math.abs(result.fallback[7]-result.expectedFallbackDistance)<.002,'fallback retains reconstructed source front depth');
+    assert.deepEqual(result.fallback.slice(8),[0,0,0,0],'initially uncovered rays remain transparent');
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

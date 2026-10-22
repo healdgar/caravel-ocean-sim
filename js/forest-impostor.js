@@ -169,14 +169,18 @@ fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)-
  var distance=dot(source.xyz-origin,camera.direction.xyz)/denominator;
  let footprint=max(length(vec2f(dot(dx,camera.right.xyz),dot(dx,camera.up.xyz))),length(vec2f(dot(dy,camera.right.xyz),dot(dy,camera.up.xyz))))*.5/extent*forestAtlasTable.config.y;
  let lod=clamp(log2(max(1.,footprint)),0.,log2(forestAtlasTable.config.y));
- var uv=vec2f(0);var sampled:ForestSurface;
+ var uv=vec2f(0);
  for(var iteration=0u;iteration<3u;iteration++){
    let relative=origin+ray*distance-source.xyz;uv=vec2f(.5+.5*dot(relative,camera.right.xyz)/extent,.5-.5*dot(relative,camera.up.xyz)/extent);
-   if(any(uv<vec2f(0))||any(uv>vec2f(1))){return result;}
-   sampled=forestAtlasFetch(frame,layer,uv,lod);if(sampled.pigment.a<=1e-6){return result;}
+   // A front-depth jump can expose a hole in a later reprojection. It cannot
+   // invalidate a previously covered source sample or erase its fractional
+   // coverage. Keep that sample and its own reconstructed depth as fallback.
+   if(any(uv<vec2f(0))||any(uv>vec2f(1))){break;}
+   let sampled=forestAtlasFetch(frame,layer,uv,lod);if(sampled.pigment.a<=1e-6){break;}
    let z=extent*(1.-2.*sampled.detail.a/sampled.pigment.a);distance=(z-dot(origin-source.xyz,camera.direction.xyz))/denominator;
+   result.pigment=sampled.pigment;result.normal=sampled.detail.xyz;result.distance=distance;
  }
- result.pigment=sampled.pigment;result.normal=sampled.detail.xyz;result.distance=distance;return result;
+ return result;
 }
 struct ForestImpostorOutput {@location(0)colour:vec4f,@builtin(frag_depth)depth:f32};
 @fragment fn forestImpostorFS(in:ForestImpostorVertex)->ForestImpostorOutput{
@@ -195,7 +199,11 @@ struct ForestImpostorOutput {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  let projected=F.viewProj*vec4f(world-F.camPos.xyz,1);if(projected.w<=0.){return o;}
  let n=normalize(forestAtlasRotate(normal,yaw));let material=forestAtlasTable.prototypes[in.prototype].material;
  let colour=pigment.rgb/pigment.a*in.yawTint.yzw;let nDotL=dot(n,F.sunDir.xyz);
- let lit=landFinish(world,n,colour,max(nDotL,0.)+max(-nDotL,0.)*material.y,.2+max(n.y,0.)*.42,0.,material.x);
+ // The atlas contains mixed wood/foliage pigment without a material-ID plane.
+ // Use the current native importer foliage exposure (.72), matching its
+ // canopy ambient and diffuse law; bark lighting remains an approximation.
+ let exposure=.72;let diffuse=(max(nDotL,0.)+max(-nDotL,0.)*material.y)*(.22+.78*exposure*exposure);
+ let lit=landFinish(world,n,colour,diffuse,.12+exposure*.55+abs(n.y)*.08,0.,material.x);
  o.colour=vec4f(lit.rgb,pigment.a);o.depth=clamp(projected.z/projected.w,0.,1.);return o;
 }
 `;
