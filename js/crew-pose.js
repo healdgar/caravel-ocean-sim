@@ -58,11 +58,23 @@ function poseHullPoint(p,s){
   const x=p[0]*s.scale[0],y=p[1]*s.scale[1],z=p[2]*s.scale[2],c=Math.cos(s.yaw),sn=Math.sin(s.yaw),pitch=s.climbPitch??0,cp=Math.cos(pitch),sp=Math.sin(pitch),Y=cp*y-sp*z,Z=sp*y+cp*z;
   return [s.position[0]+c*x+sn*Z,s.position[1]+Y,s.position[2]-sn*x+c*Z];
 }
+function poseNeutralSeatedBody(a){
+  // Idle's hip sway and torso twist are inappropriate under a constrained
+  // seated stroke: they place one shoulder behind the other. Keep authored
+  // neutral transforms and actual limb lengths, then apply the shared lean.
+  let branch=-1;
+  for(const name of ['root','pelvis','spine_01','spine_02','spine_03','clavicle_l','clavicle_r']){
+    const node=poseNodeIndex(a,name);if(node<0)continue;
+    const rest=a.rest[node],pose=a.pose[node];pose.t.set(rest.t);pose.r.set(rest.r);pose.s.set(rest.s);if(branch<0)branch=node;
+  }
+  if(branch>=0&&a.updateBranch)a.updateBranch(branch);else a.update();
+}
 // Seat is an authoritative pelvis anchor, never the standing actor root. This
 // permits real knees/boots on the floor while both hands follow one blade pose.
 export function poseSeatedCrew(a,s,targets=s.seatedPose){
   if(!targets)return false;
   const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Seated crew requires a pelvis joint');
+  poseNeutralSeatedBody(a);
   const lean=targets.body?.lean??0;
   turnBone(a,pelvis,[0,1,0],[0,Math.cos(lean),Math.sin(lean)]);
   poseMoveBone(a,pelvis,actorLocal(targets.seat,s));

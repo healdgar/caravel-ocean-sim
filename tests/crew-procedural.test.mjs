@@ -62,6 +62,23 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
   }
 });
 
+test('seated work neutralizes idle torso asymmetry without modifying rest lengths or legacy standing actors',()=>{
+  const boat=crewProposedBoat('oseberg'),company=createCompany(undefined,boat.modelId);boat.rowingState={phase:.88,rate:.45,effortPort:.8,effortStarboard:.8,cadence:.45};stepCompany(company,boat,0,3);
+  for(const sex of ['male','female']){
+    const mesh=loadCrewGLB(readFileSync(new URL('../assets/crew/'+(sex==='female'?'sailor-female.glb':'sailor.glb'),import.meta.url))),a=mesh.animator,s=company.crew.find(person=>person.stationId&&person.sex===sex),rest=a.rest.map(p=>[...p.t,...p.r,...p.s]),duration=a.clips.get('Idle').duration;let shoulders;
+    for(const t of [0,duration*.27,duration*.63]){
+      a.sample('Idle',t);poseCrewWork(a,s,boat);
+      const points=['upperarm_l','upperarm_r'].flatMap(name=>crewProposedWorld(s,Array.from(a.world[a.nodeIndex(name)].subarray(12,15))));
+      if(shoulders)for(let i=0;i<points.length;i++)assert.ok(Math.abs(points[i]-shoulders[i])<2e-5,'same physical stroke has neutral shoulders independent of idle weight shift');else shoulders=points;
+      for(const name of ['spine_01','spine_02','spine_03','clavicle_l','clavicle_r'])assert.deepEqual(a.pose[a.nodeIndex(name)].r,a.rest[a.nodeIndex(name)].r,'seated upper body starts from its authored neutral rotation');
+      assert.deepEqual(a.rest.map(p=>[...p.t,...p.r,...p.s]),rest,'IK never edits rest transforms or scales');
+    }
+    for(const id of ['nina','victory','pinta','santa-maria']){
+      const legacy=createCompany(undefined,id).crew[0];a.sample('Idle',duration*.31);const palette=a.palette.slice();poseCrewWork(a,legacy,crewProposedBoat(id));assert.deepEqual(a.palette,palette,id+' unseated captain keeps the existing animation');
+    }
+  }
+});
+
 test('solo Gipsy Moth physically visits independent sail controls and hatch without a two-person gate',()=>{
   const boat=crewProposedBoat('gipsy-moth-iv'),company=createCompany(undefined,boat.modelId),seen=new Set(),masts=new Map(),mesh=loadCrewGLB(readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));let hatchPoseChecked=false;stepCompany(company,boat,0,3);
   for(const order of ['weather','full']){
