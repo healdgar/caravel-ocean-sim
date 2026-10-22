@@ -15,12 +15,20 @@ before(async()=>{
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 
 function instrumentOvernightVessels(){
-  const r=window.overnightVesselsGPU={callback:null,now:null,device:null,errors:[],lost:null,buffers:[],draws:{},compute:{},pipelines:new WeakMap(),target:null};
+  const r=window.overnightVesselsGPU={callback:null,now:null,device:null,errors:[],lost:null,buffers:[],draws:{},compute:{},pipelines:new WeakMap(),target:null,simClock:null,fieldUpdates:{},watched:new WeakSet()};
   window.requestAnimationFrame=callback=>{r.callback=callback;return 1;};
   const requestDevice=GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice=async function(...args){const device=await requestDevice.apply(this,args);r.device=device;device.addEventListener('uncapturederror',event=>r.errors.push(event.error.message));device.lost.then(reason=>r.lost=reason.message);return device;};
   const createBuffer=GPUDevice.prototype.createBuffer;
   GPUDevice.prototype.createBuffer=function(desc){const inspect=/ geometry$/.test(desc.label||''),buffer=createBuffer.call(this,inspect?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);r.buffers.push(buffer);return buffer;};
+  const write=GPUQueue.prototype.writeBuffer;
+  GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
+    if(buffer.label==='sim ubo'&&offset===0){
+      const byteOffset=ArrayBuffer.isView(data)?data.byteOffset:0,backing=ArrayBuffer.isView(data)?data.buffer:data,elementBytes=ArrayBuffer.isView(data)?data.BYTES_PER_ELEMENT??1:1;
+      const values=new Float32Array(backing,byteOffset+(rest[0]??0)*elementBytes,56);r.simClock={time:values[52],dt:values[53],loop:values[50]};
+    }
+    return write.call(this,buffer,offset,data,...rest);
+  };
   const render=GPURenderPassEncoder.prototype.setPipeline;
   GPURenderPassEncoder.prototype.setPipeline=function(pipeline){r.pipelines.set(this,pipeline.label);return render.call(this,pipeline);};
   const draw=GPURenderPassEncoder.prototype.drawIndexed;
@@ -49,10 +57,14 @@ async function openRuntime(path,params={}){
 }
 async function frame(page,dt=.05){
   const result=await page.evaluate(async dt=>{
-    const r=overnightVesselsGPU,callback=r.callback;if(typeof callback!=='function')throw Error('Missing production frame');r.callback=null;r.draws={};r.compute={};
+    const r=overnightVesselsGPU,callback=r.callback;if(typeof callback!=='function')throw Error('Missing production frame');r.callback=null;r.draws={};r.compute={};r.fieldUpdates={};
+    for(const v of oceanFleet.vessels)if(v.rowingWater&&!r.watched.has(v.rowingWater)){
+      const probe=v.rowingWater,update=probe.update;r.watched.add(probe);
+      probe.update=function(boat,elapsed,options){r.fieldUpdates[v.id]={time:options.time,dt:elapsed,resetSea:options.resetSea};return update.call(this,boat,elapsed,options);};
+    }
     // A deterministic RAF clock keeps actual GPU/CPU waiting out of simulation
     // dt. No production integrator, shader, force or water sample is replaced.
-    r.now=(r.now??performance.now())+dt*1000;callback(r.now);await r.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));return {errors:r.errors,lost:r.lost,draws:r.draws,compute:r.compute};
+    r.now=(r.now??performance.now())+dt*1000;callback(r.now);await r.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));return {errors:r.errors,lost:r.lost,draws:r.draws,compute:r.compute,simClock:r.simClock,fieldUpdates:r.fieldUpdates,accepted:oceanFleet.vessels.map(v=>v.rowingWater?.state??null)};
   },dt);assert.deepEqual(result.errors,[]);assert.equal(result.lost,null);return result;
 }
 async function settle(page,count=8){let result;for(let i=0;i<count;i++)result=await frame(page);return result;}
@@ -135,6 +147,24 @@ for(const id of ['oseberg','lusoria','taino-canoe'])test(`${id}: actual GPU blad
     const before=history.at(-1).speed;await page.locator('#helm-controls [data-rowing="0"]').click();await frame(page);
     const stopped=await page.evaluate(()=>{const b=oceanFleet.vessels[0].boat;return {speed:b.surgeVelocity??0,power:b.rowingLoads?.crewPower,effort:b.rowingState.effortPort};});
     assert.equal(stopped.power,0);assert.equal(stopped.effort,0);assert.ok(stopped.speed>0&&stopped.speed<=before+.003,'Rest coasts rather than changing speed directly');assert.deepEqual(errors,[]);
+  }finally{await page.close();}
+});
+
+test('production rowing metadata uses the encoded FFT clock under varying frame dt and loop wrap',{timeout:240000},async()=>{
+  const {page,errors}=await openRuntime('/',{ship:'oseberg',t:'599.94',windSpeed:'4',swellHs:'.2'});
+  try{
+    let prior=599.94,wrapped=false,accepted=false;const actualDts=[];
+    for(let i=0;i<24;i++){
+      const result=await frame(page,i%2?.048:.012),clock=result.simClock,updates=Object.values(result.fieldUpdates);
+      assert.equal(clock.loop,600);assert.equal(updates.length,1);const update=updates[0];
+      assert.ok(Math.abs(update.time-clock.time)<5e-5,`probe time ${update.time} differs from actual uploaded FFT time ${clock.time}`);
+      assert.ok(Math.abs(update.dt-clock.dt)<1e-7,`probe dt ${update.dt} differs from actual uploaded FFT dt ${clock.dt}`);
+      if(i>0)actualDts.push(clock.dt);
+      if(clock.time<prior-1){wrapped=true;assert.equal(update.resetSea,true,'spectrum wrap discards incompatible orbital history');assert.ok(result.accepted[0]===null||result.accepted[0].time<=clock.time+5e-5,'pre-wrap readback cannot survive into the next loop');}
+      if(result.accepted[0]){accepted=true;assert.ok(result.accepted[0].time<=clock.time+5e-5);}
+      prior=clock.time;
+    }
+    assert.ok(wrapped&&accepted,'exercise a real wrap and new post-wrap orbital readback');assert.ok(actualDts.some(t=>Math.abs(t-.012)<1e-6)&&actualDts.some(t=>Math.abs(t-.048)<1e-6));assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
 
