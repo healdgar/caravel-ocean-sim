@@ -118,6 +118,9 @@ export function stepCompany(company,boat,dt,wind) {
   }
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
+  // Hazard/policy changes above can alter attendance during this step. Resolve
+  // every seated target from the final Set used by blades and physical forces.
+  if(Object.hasOwn(ROWING_DESIGNS,boat.modelId))for(const s of company.crew)if(!s.job)s.seatedPose=crewSeatedPose(s,boat);
   return company;
 }
 function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='hatch'&&s.job.stage!=='return');}

@@ -92,3 +92,17 @@ test('sail-less canoe never receives nonexistent mast/hatch/gunnery jobs and kee
   const {stationId}=rower;updateCrewRowingAttendance(company,boat);assert.equal(boat.rowingAttendance.has(stationId),false);boat.rowingState={phase:.2,rate:.45,effortPort:1,effortStarboard:1,cadence:.45};
   const absent=rowingStationPose(boat,stationId);assert.equal(absent.effort,0);assert.equal(absent.drive,false);
 });
+
+test('entering and leaving a hazard uses final physical attendance for the same-frame hand and blade pose',()=>{
+  for(const id of ['oseberg','lusoria','taino-canoe']){
+    const boat=crewProposedBoat(id),company=createCompany(undefined,id);boat.rowingState={phase:.2,rate:.45,effortPort:.8,effortStarboard:.8,cadence:.45};
+    for(const wind of [3,24,3]){
+      stepCompany(company,boat,.1,wind);
+      for(const s of company.crew.filter(s=>s.stationId)){
+        const actual=rowingStationPose(boat,s.stationId);assert.equal(s.seatedPose.effort,actual.effort);assert.equal(s.seatedPose.drive,actual.drive);
+        for(let i=0;i<2;i++)assert.ok(crewProposedDistance(s.seatedPose.hands[i],actual.hands[i])<1e-9,'hazard transition cannot leave a stale attended hand pose');
+        assert.equal(boat.rowingAttendance.has(s.stationId),wind<23);
+      }
+    }
+  }
+});
