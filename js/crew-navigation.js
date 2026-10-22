@@ -194,7 +194,10 @@ function crewNavigationDetour(a,b,boat,obstacles,body,scale){
     if(a[1]>=o.max[1]||a[1]+body.height<=o.min[1]||o.max[0]+margin<low[0]||o.min[0]-margin>high[0]||o.max[2]+margin<low[1]||o.min[2]-margin>high[1])continue;
     for(const x of[o.min[0]-margin,o.max[0]+margin])for(const z of[o.min[2]-margin,o.max[2]+margin]){
       if(nodes.length>=130)break;
-      const y=modelDeck(boat,z/scale[2])*scale[1],p=[x,y,z];
+      let y=modelDeck(boat,z/scale[2])*scale[1];const p=[x,y,z],access=body.rigAccess;
+      if(boat.modelId==='victory'&&Number.isInteger(access?.mast)&&[-1,1].includes(access.side)&&!crewNavigationOnDeck(p,boat,scale,body)){
+        y=victoryChainwale(access.mast,access.side,z/scale[2]).y*scale[1];p[1]=y;
+      }
       if(Math.abs(y-a[1])<.15&&(crewNavigationOnDeck(p,boat,scale,body)||crewNavigationRigAccess(p,body,boat,scale))&&!obstacles.some(q=>crewNavigationInside(p,q,body)))nodes.push(p);
     }
   }
