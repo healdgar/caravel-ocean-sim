@@ -98,10 +98,16 @@ export function laterSailRigContext(id){
       const z=Math.min(5.55,m.z+.28+j*.24),x=side*laterSailDeckWidth(id,z),y=laterSailDeck(id,z,x);
       supports.push({a:[x,y+.045/sy,z],b:top,r:(id==='flying-cloud'?.025:.006)/sx,mast:index,side,kind:'shroud'});
     }
-    const z=index===0?(d.bowsprit?.b[2]??-5.55):d.masts[index-1].z+.20;
-    const triatic=id==='gipsy-moth-iv'&&index>0;
-    const a=triatic?[...masts[index-1].head]:index===0&&d.bowsprit?[...d.bowsprit.b]:[0,laterSailDeck(id,z)+.08/sy,z];
-    supports.push({a,b:mastPoint(index,m.height*.96),r:.012/sx,mast:index,side:0,kind:triatic?'triatic-stay':'stay'});
+    if(id==='flying-cloud'){
+      // Tier-specific structural stays are also each canvas's sewn luff.
+      // Do not add a second unrelated full-height line through that canvas.
+      for(const surface of d.surfaces.filter(s=>s.mast===index&&s.stay))supports.push(surface.stay);
+    }else{
+      const z=index===0?(d.bowsprit?.b[2]??-5.55):d.masts[index-1].z+.20;
+      const triatic=index>0;
+      const a=triatic?[...masts[index-1].head]:index===0&&d.bowsprit?[...d.bowsprit.b]:[0,laterSailDeck(id,z)+.08/sy,z];
+      supports.push({a,b:mastPoint(index,m.height*.96),r:.012/sx,mast:index,side:0,kind:triatic?'triatic-stay':'stay'});
+    }
     if(id==='flying-cloud'){
       // Separate topmast shrouds land on a real mast platform, not at a
       // fictitious fourth mast or a shared all-canvas transform.
@@ -125,7 +131,7 @@ export function laterSailRigContext(id){
     const perimeter=triangle?[[0,0],[1,0],[0,1]]:[[0,0],[1,0],[1,1],[0,1]];
     for(let j=0;j<perimeter.length;j++)lines.push({surface:s.id,clothEdge:[perimeter[j],perimeter[(j+1)%perimeter.length]],
       kind:'bolt-rope',r:.008/sx,mast:s.mast,controlGroup:s.controlGroup});
-    if(s.kind==='headsail')lines.push({a:s.corners[0],b:s.corners[1],kind:'luff-stay',r:.008/sx,static:true,mast:s.mast,surface:s.id});
+    if(s.kind==='headsail'&&!s.stay)lines.push({a:s.corners[0],b:s.corners[1],kind:'luff-stay',r:.008/sx,static:true,mast:s.mast,surface:s.id});
     for(const side of [-1,1]){
       const corner=s.corners[triangle?2:side<0?3:2],uv=triangle?[0,1]:[side<0?0:1,1];
       let z=Math.max(-5.25,Math.min(5.45,corner[2]+.28));

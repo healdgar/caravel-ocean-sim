@@ -137,7 +137,7 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
   if(!Number.isFinite(clearance)||clearance<0||!Number.isFinite(band)||band<=0)throw Error('Invalid surface contact margin');
   const p=[...point],supports=context._surfaceActiveSupports??context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
   for(const support of supports){
-    if(support.kind==='spar'&&support.surface===surface.id)continue; // own sewn spar
+    if((support.kind==='spar'||support.kind==='sail-stay')&&support.surface===surface.id)continue; // own sewn spar/luff stay
     const {a,b}=support;let r=(support.r??0)+clearance;
     if(!surfaceFinitePoint(a)||!surfaceFinitePoint(b)||!Number.isFinite(r)||r<0
       ||(support.rEnd!==undefined&&(!Number.isFinite(support.rEnd)||support.rEnd+clearance<0)))throw Error('Invalid rig support descriptor');

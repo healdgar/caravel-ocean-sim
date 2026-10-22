@@ -98,6 +98,12 @@ export function createProceduralShipDefinition(id,{status='planned'}={}){
     add('station.haul.'+control,station.position,'station');
     add('rig.'+control+'.fall',station.lead,'attachment',{type:'procedural-fall',controlGroup:control,lineIndex:station.lineIndex});
   }
+  for(const surface of d.surfaces)if(surface.stay){
+    const stay=surface.stay,role='stay.'+surface.name,axis=proceduralNodeSub(stay.b,stay.a);
+    add(role,proceduralNodeMul(proceduralNodeAdd(stay.a,stay.b),.5),'part',{type:'procedural-stay',axis});
+    for(const [name,point]of [['lower',stay.a],['upper',stay.b],['head',surface.corners[1]]])add(role+'.'+name,point,'attachment',{type:'procedural-stay',axis});
+    for(const [name,fitting]of [['lower',stay.lowerFitting],['upper',stay.upperFitting]])fittings.push({id:fitting.id,kind:fitting.kind,node:role+'.'+name,...(fitting.mast===undefined?{}:{mast:context.masts[fitting.mast].id})});
+  }
   const sails=d.surfaces.map(s=>{
     const triangle=s.corners.length===3,root='sail.'+s.name,u=triangle?1/3:.5,v=triangle?1/3:.5;
     add(root,surfaceRestPoint(s,u,v),'part',{type:'procedural-cloth',surface:s.id,u,v});
@@ -153,6 +159,7 @@ export function proceduralShipNodeTransform(boat,model,node,options={}){
   if(motion.type==='procedural-mast'){
     const m=context.masts[motion.mast];return proceduralNodeAxisFrame([...node.position],proceduralNodeSub(m.head,m.foot));
   }
+  if(motion.type==='procedural-stay')return proceduralNodeAxisFrame([...node.position],motion.axis);
   if(motion.type==='procedural-runner'){
     const step=proceduralNodeClamp(options.step??0,0,motion.rungs),side=options.side??-1,p=context.runnerPoint(motion.mast,side,step),m=context.masts[motion.mast];
     const direction=proceduralNodeSub(context.runnerPoint(motion.mast,side,Math.min(motion.rungs,step+.01)),context.runnerPoint(motion.mast,side,Math.max(0,step-.01)));

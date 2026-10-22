@@ -160,13 +160,25 @@ for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth tria
     for(const obstacle of obstacles){obstacle.min=obstacle.a.map((v,i)=>Math.min(v,obstacle.b[i])-obstacle.r);obstacle.max=obstacle.a.map((v,i)=>Math.max(v,obstacle.b[i])+obstacle.r);}
     let worst={clearance:Infinity};
     for(const triangle of clearanceClothTriangles(asset,target))for(const obstacle of obstacles){
-      // Own yard/gaff/boom is a sewn attachment. Other spars and every shroud
-      // or stay are obstacles; no rope opacity or masked interval is accepted.
+      // Own yard/gaff/boom or actual luff stay is a sewn attachment. Every
+      // other spar/shroud/stay is an obstacle; no masked interval is accepted.
       if(obstacle.surface===triangle.surface)continue;
       if([0,1,2].some(i=>triangle.min[i]>obstacle.max[i]||triangle.max[i]<obstacle.min[i]))continue;
       const q=clearanceTriangleAxis(...triangle.points,obstacle.a,obstacle.b),gap=q.distance-obstacle.radiusAt(q.t);
       if(gap<worst.clearance)worst={clearance:gap,surface:triangle.surface,obstacle:obstacle.name,triangle:triangle.triangle,yaw,set,points:triangle.points};
     }
     assert.ok(worst.clearance>=-3e-5,JSON.stringify(worst));
+  }
+});
+
+test('clipper structural stay axes clear the actual independently braced finite yards',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'],context=laterSailRigContext(d.id);
+  for(const yaw of [0,.67,-.67]){
+    const boat=clearanceBoat(d,yaw),stays=context.supports.filter(s=>s.kind==='sail-stay');
+    assert.equal(stays.length,8);
+    for(const stay of stays)for(const surface of d.surfaces)for(const spar of surface.spars??[]){
+      const p=rigSurfacePose(surface,boat.sailState),a=surfaceYardPoint(surface,spar.a,p),b=surfaceYardPoint(surface,spar.b,p),q=clearanceSegments(a,b,stay.a,stay.b),gap=q.distance-spar.radius*(1-.30*q.t)-stay.r;
+      assert.ok(gap>=-3e-5,JSON.stringify({stay:stay.id,spar:spar.id,yaw,clearance:gap,a,b,stayA:stay.a,stayB:stay.b}));
+    }
   }
 });

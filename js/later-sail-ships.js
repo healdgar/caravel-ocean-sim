@@ -245,6 +245,10 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   }
   const standingStart=out.length;for(const line of context.lines.filter(line=>line.static))rope(line.a,line.b,line.r??.008,2);
   group('rig.standing','hull',standingStart);
+  for(const surface of d.surfaces)if(surface.stay)for(const fitting of [surface.stay.lowerFitting,surface.stay.upperFitting]){
+    const start=out.length;tube(fitting.body,fitting.position,surface.stay.r*1.25,3,surface.stay.r*1.25,6);
+    group('fitting.'+fitting.id,'stay.'+surface.name+'.'+(fitting===surface.stay.lowerFitting?'lower':'upper'),start);
+  }
   const rest={...withRigPoseContext(context,{}),time:0,wind:0},runningStart=out.length;
   for(const [index,line]of context.lines.entries())if(!line.static){
     const segments=line.kind==='bolt-rope'?22:line.kind==='sheet'?10:6;

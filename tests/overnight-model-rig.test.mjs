@@ -62,6 +62,35 @@ test('sewn bolt ropes follow the curved authoritative cloth rather than straight
   }
 });
 
+test('clipper canvas, load-bearing stays, visible end fittings and affine nodes share one tier-specific geometry',()=>{
+  const d=laterSailDesign('flying-cloud'),context=laterSailRigContext(d.id),model=createProceduralShipDefinition(d.id),b=boat(d),stays=context.supports.filter(s=>s.kind==='sail-stay');
+  assert.equal(stays.length,8);assert.equal(context.supports.some(s=>s.kind==='stay'),false,'no unrelated duplicate full-height forestay crosses the staysails');
+  for(const surface of d.surfaces.filter(s=>s.kind==='headsail')){
+    const stay=surface.stay;assert.equal(stays.find(s=>s.id===stay.id),stay);
+    const rendered=context.lines.filter(line=>line.id===stay.id);assert.equal(rendered.length,1);assert.equal(rendered[0].static,true);
+    near(rendered[0].a,stay.a);near(rendered[0].b,stay.b);assert.equal(rendered[0].r,stay.r);
+    assert.equal(context.lines.some(l=>l.surface===surface.id&&l.kind==='luff-stay'),false,'no second shorter line floats beside the structural stay');
+    near(surface.corners[0],stay.a);near(surface.corners[1],stay.a.map((v,i)=>v+(stay.b[i]-v)*stay.headParameter));
+    for(const yaw of [-.67,0,.67])for(const deployed of [.1,1])for(const u of [0,.19,.63,1]){
+      const state={...b.sailState,set:[deployed,deployed,deployed],groupYaw:[yaw,yaw,yaw]},pose=rigSurfacePose(surface,state),expected=surface.corners[0].map((v,i)=>v+(surface.corners[1][i]-v)*u);
+      near(surfaceClothPoint(surface,u,0,pose,withRigPoseContext(context,state),3.7,24),expected);
+    }
+    const root='stay.'+surface.name;
+    for(const [name,point]of [['lower',stay.a],['upper',stay.b],['head',surface.corners[1]]]){
+      const frame=proceduralShipNodeTransform(b,model,root+'.'+name);near(frame.position,point);
+      near(frame.basis[1],stay.b.map((v,i)=>(v-stay.a[i])/Math.hypot(...subtract(stay.b,stay.a))));
+    }
+    for(const [name,fitting]of [['lower',stay.lowerFitting],['upper',stay.upperFitting]]){
+      near(fitting.position,name==='lower'?stay.a:stay.b);assert.ok(Math.hypot(...subtract(fitting.position,fitting.body))>0,'a finite metal tang bridges wood and the stay eye');
+      assert.ok(model.rig.fittings.some(f=>f.id===fitting.id&&f.node===root+'.'+name));
+    }
+    const yard=d.surfaces.flatMap(s=>s.spars??[]).find(p=>p.id===stay.upperFitting.tier),higher=d.surfaces.filter(s=>s.kind==='square'&&s.mast===surface.mast).map(s=>s.spars[0]).filter(p=>p.a[1]>yard.a[1]).sort((a,b)=>a.a[1]-b.a[1])[0];
+    assert.ok(stay.b[1]>yard.a[1]&&stay.b[1]<higher.a[1],'stay terminates at its actual named mast tier, not indiscriminately at the truck');
+    if(surface.mast>0){assert.equal(stay.lowerFitting.mast,surface.mast-1);assert.equal(stay.lowerFitting.kind,'mast-aft-tang');}
+    else assert.equal(stay.lowerFitting.kind,'bowsprit-collar');
+  }
+});
+
 test('new structure graphs contain only real masts, equipment and spars; absent roles fail explicitly',()=>{
   for(const d of [...Object.values(ROWING_DESIGNS),...Object.values(LATER_SAIL_DESIGNS)]){
     const model=createProceduralShipDefinition(d.id),b=boat(d),c=proceduralRigContext(d.id);

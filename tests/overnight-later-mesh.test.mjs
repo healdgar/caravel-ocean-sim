@@ -33,6 +33,14 @@ test('real later meshes contain 25 clipper surfaces and fifteen yards, two ketch
       assert.equal(a.groups.filter(g=>g.id.startsWith('sail.')).length,25);assert.equal(a.groups.filter(g=>g.id.startsWith('yard.')).length,15);
       for(const name of ['structure.deckhouse','deck.poop.planks','deck.forecastle.planks','helm.wheel','bow.bowsprit'])assert.ok(names.has(name));
       assert.equal(names.has('helm.tiller'),false);
+      for(const surface of d.surfaces.filter(s=>s.stay))for(const fitting of [surface.stay.lowerFitting,surface.stay.upperFitting]){
+        const vertices=points(a.parts.get('fitting.'+fitting.id));assert.ok(vertices.length>0);
+        const normal=fitting.position.map((v,i)=>v-fitting.body[i]),length=Math.hypot(...normal),axis=normal.map(v=>v/length);
+        for(const centre of [fitting.body,fitting.position]){
+          const end=vertices.filter(p=>Math.abs(p.reduce((sum,v,i)=>sum+(v-centre[i])*axis[i],0))<2e-6);
+          assert.ok(end.length>=6,'drawn finite fitting reaches the same wood/stay endpoint as its node');
+        }
+      }
     }else{
       for(const name of ['structure.cabin','deck.cockpit','helm.tiller'])assert.ok(names.has(name));
       assert.equal(a.groups.some(g=>g.id.startsWith('yard.')),false);assert.equal(names.has('bow.bowsprit'),false);assert.equal(names.has('helm.wheel'),false);assert.equal(names.has('mast.fore'),false);
