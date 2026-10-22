@@ -82,10 +82,17 @@ test('full-sphere first forest requires only roots and atlases; native fetch is 
   assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.textures,null);assert.ok(pack.impostors);
   assert.equal(requests.includes('vertices.bin'),false);assert.equal(requests.includes('indices.bin'),false);
   assert.equal(requests.some(name=>name.endsWith('.png')),false);assert.equal(pack.roots.length,12);
+  assert.equal(pack.releaseNativeCPU(),false,'no fulfilled cache exists at first readiness');
   const a=pack.loadNative(),b=pack.loadNative();assert.equal(a,b,'one cached native load');
+  assert.equal(pack.releaseNativeCPU(),false,'an in-flight load remains deduplicated');assert.equal(pack.loadNative(),a);
   const native=await a;assert.deepEqual(native.vertices,decodeForestScenery(f.manifest,f.streams).vertices);
   assert.equal(requests.filter(name=>name==='vertices.bin').length,1);assert.equal(requests.filter(name=>name==='indices.bin').length,1);
   for(const name of Object.keys(f.textures))assert.equal(requests.filter(value=>value===name).length,1,name);
+  const retained=native.vertices.slice();assert.equal(pack.releaseNativeCPU(),true);assert.equal(pack.releaseNativeCPU(),false);
+  assert.deepEqual(native.vertices,retained,'cache release never detaches or mutates caller-held geometry');
+  const fresh=pack.loadNative();assert.notEqual(fresh,a);assert.equal(pack.loadNative(),fresh);
+  assert.deepEqual((await fresh).vertices,retained,'explicit reload verifies the original immutable bytes again');
+  for(const name of ['vertices.bin','indices.bin',...Object.keys(f.textures)])assert.equal(requests.filter(value=>value===name).length,2,name+' reloaded once after release');
   const tampered=nativeFixture(),tamperedAtlas=attachAtlas(tampered);new Uint8Array(tampered.streams['vertices.bin'])[0]^=1;
   const delayed=await loadForestScenery({assets,impostorAssets:tamperedAtlas.assets,fetchAsset:async name=>name==='manifest.json'?Response.json(tampered.manifest):new Response(new Uint8Array(tamperedAtlas.responses[name]??tampered.streams[name]??tampered.textures[name]))});
   await assert.rejects(delayed.loadNative(),/Forest digest mismatch: vertices/);

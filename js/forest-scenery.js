@@ -215,7 +215,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   validateForestMaterials(manifest.prototypes);
   const rootsPromise=stream('roots.bin'),atlasPromise=loadAtlases?loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message})):Promise.resolve({impostors:null,impostorError:null});
   const [rootBytes,atlas]=await Promise.all([rootsPromise,atlasPromise]),roots=new Float32Array(rootBytes);await finishForestChecks(forestRootChecks(manifest,roots));
-  let nativePromise;
+  let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
     const textures={},pending=new Map();
     const materialPromise=Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
@@ -227,13 +227,17 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
       })();pending.set(receipt.file,request);return request;
     }))));
     const [vertices,indices]=await Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal),materialPromise]);
-    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes},{signal});return{...geometry,textures};
+    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes},{signal});nativeLoaded=true;return{...geometry,textures};
   })();
+  // Drop only our fulfilled cache reference after successful GPU installation.
+  // Existing callers retain their immutable arrays; a later explicit native
+  // load fetches and verifies fresh bytes. An in-flight load stays deduplicated.
+  const releaseNativeCPU=()=>{if(!nativeLoaded)return false;nativePromise=undefined;nativeLoaded=false;return true;};
   // Only a complete full-sphere representation can display a forest without
   // native buffers. Upper-only legacy/missing atlases retain the eager path.
   const deferred=atlas.impostors?.manifest.layout.views.some(view=>view.direction[1]<0);
-  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,...atlas,loadNative}:
-    {...await loadNative(),...atlas,loadNative};
+  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,...atlas,loadNative,releaseNativeCPU}:
+    {...await loadNative(),...atlas,loadNative,releaseNativeCPU};
 }
 const coverageSets=new WeakMap();
 export function forestCoversPoint(manifest,x,z){
@@ -575,7 +579,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
-        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));nativeStatus.resident=true;nativeStatus.status='resident';return true;
+        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));nativeStatus.resident=true;nativeStatus.status='resident';pack.releaseNativeCPU?.();return true;
       }catch(error){surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
         if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas)throw error;return false;}
     }
