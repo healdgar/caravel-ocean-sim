@@ -38,7 +38,8 @@ test('GPU rig packs every ready model without altering indexed positions, normal
     assert.equal(packed[3],context._surfaceCollisionSupports.length+(context.spars?.length??0));
     assert.equal(packed[4],packed[2]+packed[3]*4);assert.equal(packed[5],context.lines.length);
     assert.equal(packed[6],packed[4]+context.lines.length*10);assert.equal(packed[7],packed[6]+4);
-    assert.equal(packed.length,(packed[7]+1)*4);
+    assert.equal(packed[11],packed[7]+1,'residual tail begins after unchanged high records');
+    assert.equal(packed.length,(packed[7]+1)*8);
     const categories=new Set();
     for(let i=0;i<count;i++){
       const at=i*9,m=i*12,kind=Math.floor(asset.vertices[at+6]),code=Math.round((asset.vertices[at+6]-kind)*64);
@@ -59,6 +60,34 @@ test('GPU rig packs every ready model without altering indexed positions, normal
     assert.ok(categories.has(0),model.id+' rigid hull retained');
     if(context.surfaces.length){assert.ok(categories.has(1),model.id+' cloth');assert.ok(categories.has(2),model.id+' authored spars');assert.ok(categories.has(3),model.id+' attached ropes');}
     if(Object.hasOwn(ROWING_DESIGNS,model.id))assert.ok(categories.has(4),model.id+' propulsors');
+  }
+});
+
+test('static descriptor residuals retain original authored double coordinates beyond the first float32 rounding',()=>{
+  for(const model of rigGPUDataTestModels.filter(m=>m.rig.backend==='surfaces-v1')){
+    const data=createRigGPUData(rigGPUDataTestCache.get(model.id)),packed=data.model,tail=packed[11]*4,context=proceduralRigContext(model.id);
+    let retained=0;
+    const coordinate=(at,value,label)=>{
+      const high=Math.fround(value),low=Math.fround(value-high);
+      assert.equal(packed[at],high,label+' high');assert.equal(packed[tail+at],low,label+' residual');
+      if(low!==0){retained++;assert.ok(Math.abs((packed[at]+packed[tail+at])-value)<Math.max(1e-20,Math.abs(value)*1e-14),label+' double reconstruction');}
+    };
+    for(const [i,surface]of context.surfaces.entries()){
+      const at=(packed[0]+i*10)*4;
+      for(let k=0;k<3;k++)coordinate(at+4+k,surface.pivot[k],model.id+' pivot '+surface.id+'/'+k);
+      for(const [j,p]of surface.corners.entries())for(let k=0;k<3;k++)coordinate(at+8+j*4+k,p[k],model.id+' corner '+surface.id+'/'+j+'/'+k);
+    }
+    const supports=context._surfaceCollisionSupports;
+    for(const [i,support]of supports.entries()){
+      const at=(packed[2]+i*4)*4;
+      for(let k=0;k<3;k++){coordinate(at+k,support.a[k],model.id+' supportA '+i+'/'+k);coordinate(at+4+k,support.b[k],model.id+' supportB '+i+'/'+k);}
+    }
+    for(const [i,spar]of (context.spars??[]).entries()){
+      const at=(packed[2]+(supports.length+i)*4)*4;
+      for(let k=0;k<3;k++){coordinate(at+k,spar.a[k],model.id+' sparA '+i+'/'+k);coordinate(at+4+k,spar.b[k],model.id+' sparB '+i+'/'+k);}
+    }
+    for(let i=0;i<12;i++)assert.equal(packed[tail+i],0,model.id+' integer header remains exact');
+    if(context.surfaces.length||supports.length)assert.ok(retained>0,model.id+' real descriptor precision is retained');
   }
 });
 
