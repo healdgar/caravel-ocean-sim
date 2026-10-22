@@ -157,3 +157,18 @@ fn levelAt(world:vec3f)->f32 {
   moisture[i]=moistureStep(moisture[i],water,spray,u32(probe.uvKind.z),length(I.motion.zw),I.previous.z);
 }
 `;
+
+// Reuse the authoritative indexed pose already produced on the GPU. Crew
+// probes have a sentinel index and retain their separately updated positions.
+// This variant needs neither a second rig evaluator nor a position readback.
+export function withPosedWetnessProbes(source=WET_UPDATE){
+  const sample='let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);\n  let p=rig.position;';
+  if(source.split(sample).length!==2)throw Error('Unrecognized wetness pose sample');
+  return source.replace(sample,`var p=probe.position.xyz;
+  let sourceIndex=wetPoseSourceVertices[i];
+  if(sourceIndex!=0xffffffffu&&sourceIndex<arrayLength(&wetPosedVertices)){p=wetPosedVertices[sourceIndex].position.xyz;}`)+/* wgsl */ `
+struct WetPosedVertex {position:vec4f,normal:vec4f};
+@group(0) @binding(7) var<storage,read> wetPosedVertices:array<WetPosedVertex>;
+@group(0) @binding(8) var<storage,read> wetPoseSourceVertices:array<u32>;
+`;
+}

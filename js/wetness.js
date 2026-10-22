@@ -1,4 +1,4 @@
-import { WET_CLEAR, WET_DEPOSIT, WET_SEA, WET_UPDATE, WET_GRID, WET_SEA_SIZE } from './wgsl/wetness.js';
+import { WET_CLEAR, WET_DEPOSIT, WET_SEA, WET_UPDATE, WET_GRID, WET_SEA_SIZE, withPosedWetnessProbes } from './wgsl/wetness.js';
 import { HULL_VERTICAL_SCALE, vesselVerticalScale } from './hull.js';
 import { SPRAY_COUNT } from './wgsl/interaction.js';
 
@@ -41,7 +41,8 @@ export function writeCrewWetnessData(data,company,boat){
 // vessel state. Weak ownership releases the template with its source mesh.
 const wetnessTemplates=new WeakMap();
 
-export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,crewCount=12}) {
+export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,crewCount=12,posed=null}) {
+  if(posed&&posed.vertexCount!==mesh.length/9)throw Error('Wetness requires the matching indexed vessel pose');
   let templates=wetnessTemplates.get(mesh);if(!templates){templates=new Map();wetnessTemplates.set(mesh,templates);}
   let template=templates.get(crewCount);
   if(!template){template=createWetnessData(mesh,crewCount);templates.set(crewCount,template);}
@@ -51,10 +52,17 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
   const lookup=buffer('wetness vertex lookup',data.lookup.byteLength,B.STORAGE|B.COPY_DST);
   const state=buffer('surface moisture',data.points.length/8*8,B.STORAGE|B.COPY_SRC|B.COPY_DST);
   device.queue.writeBuffer(points,0,data.points);device.queue.writeBuffer(lookup,0,data.lookup);
+  let poseSources=null;
+  if(posed){
+    const indices=new Uint32Array(data.points.length/8);indices.fill(0xffffffff);
+    for(let i=1;i<template.sourceVertices.length;i++)indices[i]=template.sourceVertices[i]/9;
+    poseSources=buffer('wetness indexed pose sources',indices.byteLength,B.STORAGE|B.COPY_DST);
+    device.queue.writeBuffer(poseSources,0,indices);
+  }
   const mist=buffer('wetting spray grid',WET_GRID.reduce((a,b)=>a*b)*4,B.STORAGE);
   const sea=device.createTexture({label:'wetting sea heights',size:[WET_SEA_SIZE,WET_SEA_SIZE],format:'r32float',usage:T.STORAGE_BINDING|T.TEXTURE_BINDING});
   const view=sea.createView();
-  const pipes=await Promise.all([[WET_CLEAR,'wetting grid clear'],[WET_DEPOSIT,'spray deposition'],[WET_SEA,'wetting sea heights'],[WET_UPDATE,'surface moisture']].map(([code,label])=>computePipe(code,label)));
+  const pipes=await Promise.all([[WET_CLEAR,'wetting grid clear'],[WET_DEPOSIT,'spray deposition'],[WET_SEA,'wetting sea heights'],[posed?withPosedWetnessProbes():WET_UPDATE,'surface moisture']].map(([code,label])=>computePipe(code,label)));
   const bind=(p,resources)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const b=buffer=>({buffer});let groups,needsClear=true;
   return {state,lookup,points,crewOffset:data.crewOffset,crewCount:data.crewCount,probeCount:data.points.length/8,
@@ -62,9 +70,10 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
       groups=[bind(pipes[0],[b(mist)]),
         bind(pipes[1],[b(hullUBO),b(interaction.uniform),b(mist),b(interaction.drops),b(interaction.sheets),b(spindrift.plumes)]),
         bind(pipes[2],[b(frameUBO),b(hullUBO),seaView,seaSampler,view]),
-        bind(pipes[3],[b(hullUBO),b(interaction.uniform),b(points),b(state),b(mist),view,interaction.deck.view])];
+        bind(pipes[3],[b(hullUBO),b(interaction.uniform),b(points),b(state),b(mist),view,interaction.deck.view,...(posed?[b(posed.buffer),b(poseSources)]:[])])];
     },
     updateGeometry(posedMesh){
+      if(posed)throw Error('GPU-posed wetness cannot accept CPU geometry uploads');
       if(posedMesh.length!==mesh.length)throw Error('Wetness geometry must match its source asset');
       for(let i=1;i<data.crewOffset;i++){
         const from=template.sourceVertices[i],to=i*8;
@@ -85,6 +94,6 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
         else pass.dispatchWorkgroups(Math.ceil((i===0?WET_GRID.reduce((a,b)=>a*b):i===1?SPRAY_COUNT:data.points.length/8)/64));
       }
     },
-    destroy(){for(const resource of [points,lookup,state,mist,sea])resource.destroy();},
+    destroy(){for(const resource of [points,lookup,state,mist,sea])resource.destroy();poseSources?.destroy();},
   };
 }

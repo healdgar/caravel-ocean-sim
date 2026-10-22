@@ -1,5 +1,38 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 22 morning: shared WebGPU graphics contract
+
+The user identified severe Flying Cloud slowdown and clarified that every ship,
+including future/fleet models, must use the shared GPU graphics system. CPU
+graphics exceptions need measured performance or transfer-latency justification.
+The new `surfaces-v1` adapters incorrectly selected per-frame CPU deformation;
+the correction extends the existing canonical GPU pose stage, with compact
+model/state buffers and GPU wetness reuse. Sparse physics/IK and one-time asset
+generation remain CPU work. See `GPU_ARCHITECTURE.md`.
+
+Integration is isolated in
+`/Users/alexwall/.codex/worktrees/overnight-models/waterworld`, branch
+`codex/gpu-rig-integration`, based on public documentation HEAD `379881a`.
+It excludes the unpublished primary crew-route work. The last public runtime
+remains `3ba18f9`; none of this morning's changes is published yet.
+
+- Stats-button source is `b634c53`, adding live CPU/FPS/resolution and optional
+  GPU detail, plus bounded escort timing names. Render/mobile qualification is
+  pending.
+- Root froze seven pre-port model references in `20dc609`; tests never regenerate
+  them. Old-source red check `/tmp/waterworld-gpu-contract-red-105.log` fails the
+  expected CPU-path guards. Integrated static/packing/wetness checks pass 9/9
+  in `/tmp/waterworld-gpu-contract-focused-107.log`.
+- Native Metal compiles legacy, descriptor-pose and GPU-posed wetness shaders
+  (`/tmp/waterworld-gpu-compile-108.json`). Every generic vertex is compared
+  against CPU references in five states. Current parity run 111 exposed f32
+  cancellation in furled cloth normals and rope tangents; thresholds remain
+  unchanged while relative-coordinate arithmetic is stabilized. Native runtime
+  dispatch/buffer-sharing/mutation check 113 is in progress.
+- The user is downloading a macOS update and authorized work until restart.
+  Stop promptly when asked, preserve all checkouts/assets, and keep the one-night
+  heartbeat paused. Root alone runs validation; direct authors run no tests.
+
 ## Active overnight authorization: October 21–22, 2026
 
 The user renewed overnight implementation at 21:42 PDT on October 21. Continue

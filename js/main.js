@@ -416,7 +416,8 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   async function shipRenderAsset(modelId){
     if(renderAssets.has(modelId))return renderAssets.get(modelId);
-    const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose??asset.model.gpuPose??(modelId==='victory');
+    const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose;
+    if(gpuPose!==true||typeof asset.pose==='function')throw Error('Ship rendering cannot bypass shared WebGPU deformation');
     fleetModelCode(asset.model); // A future model needs an explicit hull backend.
     const source=gpuPose?withPosedVesselVertices(CARAVEL):CARAVEL;
     const vertexLayouts=[{arrayStride:36,attributes:[
@@ -439,9 +440,9 @@ async function main() {
     const vertexBuffer=mkBuf(mesh.byteLength,GU.VERTEX|GU.COPY_DST|(render.gpuPose?GU.STORAGE:0),spec.id+' geometry');
     device.queue.writeBuffer(vertexBuffer,0,mesh);
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
-    const pose=render.gpuPose?await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets}):null;
+    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null});
     if(pose)render.poseAssets=pose.assets;
-    const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length});
+    const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
     const shadows=await createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose});
     let crew=null;
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
@@ -1653,7 +1654,7 @@ async function main() {
           device.queue.writeBuffer(v.vertexBuffer,range.byteOffset,v.mesh.buffer,range.byteOffset,range.byteLength);
         }
       }
-      if(v.asset.pose?.(ship,simTime,P.windSpeed,v.mesh)){device.queue.writeBuffer(v.vertexBuffer,0,v.mesh);v.wetness.updateGeometry(v.mesh);}
+      if(!index||followerEnabled)v.pose.update(ship,simTime,P.windSpeed);
       if(ship.showProw)v.anchorRenderer.update(v.anchor,ship);
       v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
     }

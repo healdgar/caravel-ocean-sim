@@ -136,7 +136,7 @@ export function createProceduralShipDefinition(id,{status='planned'}={}){
     if(station.pivot)add(role+'.pivot',station.pivot);
   }
   const rig=defineRig({id:id+'-rig',backend:'surfaces-v1',masts,sails,fittings},nodes,{planned:status!=='ready'});
-  return deepFreeze({id,modelCode:d.modelCode,gpuPose:false,name:d.name,revision:d.revision,status,development:true,hullFamily:d.family,
+  return deepFreeze({id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status,development:true,hullFamily:d.family,
     geometry:row?'rowing-procedural-v1':'later-sail-procedural-v1',designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,
     capabilities:{...(d.capabilities??{}),sailing:d.surfaces.length>0,rowing:row,yardTransfer:d.surfaces.some(s=>s.kind==='lateen'),
       anchors:!!(row?d.equipment.anchor:d.equipment.anchors),gunnery:false},nodes,rig,referenceMeasurements:d.references??d.referenceMeasurements});

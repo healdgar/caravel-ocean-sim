@@ -31,17 +31,20 @@ test('actual shared GPU surface backend matches every CPU reference vertex and f
           oracle(boat,c.time,c.wind,expected);
           const h=new Float32Array(52);h[3]=physical[1];h[12]=boat.beam;h[13]=boat.length;h[15]=boat.rudder;h[19]=c.time;h[21]=c.wind;h[22]=1;h[23]=model.modelCode;h[27]=boat.hatchesClosed;device.queue.writeBuffer(hull,0,h);
           pose.update(boat,c.time,c.wind);const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pose.encode(pass);pass.end();encoder.copyBufferToBuffer(pose.buffer,0,read,0,count*32);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);const actual=new Float32Array(read.getMappedRange()).slice();read.unmap();
-          let position=0,normal=0,frozenPosition=0,frozenNormal=0,worst=null,finite=true;
+          let position=0,normal=0,frozenPosition=0,frozenNormal=0,worst=null,worstPosition=null,worstNormal=null,finite=true;const byCategory={};
           for(let i=0;i<count;i++){
             const p=Math.hypot(...[0,1,2].map(k=>(actual[i*8+k]-expected[i*9+k])*physical[k])),n=Math.hypot(...[0,1,2].map(k=>actual[i*8+4+k]-expected[i*9+3+k]));
-            if(!Number.isFinite(p+n))finite=false;if(p>position||n>normal)worst={vertex:i,material:asset.vertices[i*9+6],position:p,normal:n};position=Math.max(position,p);normal=Math.max(normal,n);
+            const detail={vertex:i,material:asset.vertices[i*9+6],position:p,normal:n},category=asset.rigGPUData.vertices[i*12];
+            if(!Number.isFinite(p+n))finite=false;if(p>position||n>normal)worst=detail;if(p>position)worstPosition=detail;if(n>normal)worstNormal=detail;
+            const prior=byCategory[category]??={position:0,normal:0};if(p>prior.position){prior.position=p;prior.worstPosition=detail;}if(n>prior.normal){prior.normal=n;prior.worstNormal=detail;}
+            position=Math.max(position,p);normal=Math.max(normal,n);
             if(last)movement=Math.max(movement,Math.hypot(...[0,1,2].map(k=>(actual[i*8+k]-last[i*8+k])*physical[k])));
           }
           const frozenCase=golden.cases.find(g=>g.name===c.name);if(!frozenCase)throw Error('Missing frozen control state '+model.id+'/'+c.name);
           for(const sample of frozenCase.samples){
             const i=sample.vertex;frozenPosition=Math.max(frozenPosition,Math.hypot(...[0,1,2].map(k=>(actual[i*8+k]-sample.position[k])*physical[k])));frozenNormal=Math.max(frozenNormal,Math.hypot(...[0,1,2].map(k=>actual[i*8+4+k]-sample.normal[k])));
           }
-          cases.push({name:c.name,position,normal,frozenPosition,frozenNormal,worst,finite});last=actual;
+          cases.push({name:c.name,position,normal,frozenPosition,frozenNormal,worst,worstPosition,worstNormal,byCategory,finite});last=actual;
         }
         rows.push({id:model.id,count,sourceSHA256,expectedSHA256:golden.sourceSHA256,expectedCount:golden.vertexCount,movement,cases});pose.destroy();raw.destroy();hull.destroy();read.destroy();
       }

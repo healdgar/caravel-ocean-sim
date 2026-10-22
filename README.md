@@ -975,6 +975,17 @@ The scene renders in HDR with 4x MSAA. Post-processing adds up to 8 levels of bl
 
 ## Performance
 
+The chart icon in the scene controls opens **Performance stats**: FPS, frame time,
+CPU frame work, render resolution, vessel count and optional GPU pass timing.
+Closing it restores endpoint-only GPU timing for adaptive resolution.
+
+Graphics run on WebGPU by default for every model. Ships share one GPU pose
+stage across visible, shadow, underwater and wetness passes; adding a model
+must not introduce a JavaScript vertex-animation fallback. CPU exceptions need
+measured performance or transfer-latency evidence. The
+[graphics contract](GPU_ARCHITECTURE.md) and registry-wide regression tests
+enforce this boundary, including deliberate bypass attempts.
+
 The original renderer measured about 6 to 8 ms per frame at 2560 by 1440 on an RTX 5070 Ti, while other programs were also using the GPU. The HUD shows actual animation-frame cadence, plus GPU timestamp intervals when the browser supports `timestamp-query`. FPS uses elapsed wall time independently of the simulation's 100 ms timestep limit, so rates below 10 FPS remain visible.
 
 The render loop reuses large typed arrays and GPU resources, keeping most recurring allocations small.
