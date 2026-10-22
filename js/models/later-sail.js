@@ -99,7 +99,15 @@ function laterSailCloudStay(design,surface){
     return {position:[0,y,body[2]+side*(radius+clearance)/cosine],body};
   };
   let lower,lowerFitting;
-  if(surface.mast>0){
+  if(surface.name==='mizzen-topmast-staysail'){
+    // The main-spencer's sewn luff occupies the mainmast aft face. Lead the
+    // lowest mizzen stay from a real deck eye abaft that sail's whole aft
+    // envelope, instead of threading it through a gaff hoop on the mast.
+    const spencer=design.surfaces.find(s=>s.name==='main-spencer');
+    if(!spencer)throw Error('No spencer envelope for the mizzen stay lead');
+    const z=Math.max(...spencer.corners.map(p=>p[2]))+Math.max(...spencer.spars.map(s=>s.radius))+.10/sy,y=laterSailDeckOf(design,z),body=[0,y,z],position=[0,y+radius+clearance,z];
+    lower={position,body};lowerFitting={id:surface.name+'-deck-eye',kind:'deck-eye',deck:'main',...lower};
+  }else if(surface.mast>0){
     lower=tang(surface.mast-1,surface.corners[0][1],1);
     lowerFitting={id:surface.name+'-lower-tang',kind:'mast-aft-tang',mast:surface.mast-1,...lower};
   }else{
@@ -133,7 +141,17 @@ function laterSailCloudStay(design,surface){
     headFitting:{kind:'stay-hanks',stay:stay.id,parameter:headT,clearance,stayRadius:radius,belowYard:yard.id,verticalClearance:.05/sy}};
 }
 function laterSailCloudWorkingRig(design){
-  const rigged=design.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(design,s):s.kind==='headsail'?laterSailCloudStay(design,s):s);
+  const fitted=design.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(design,s):s.kind==='headsail'?laterSailCloudStay(design,s):s);
+  const rigged=fitted.map(surface=>{
+    if(!surface.stay||fitted.some(s=>s.stay&&s.mast===surface.mast&&s.stay.b[1]<surface.stay.b[1]))return surface;
+    // Authored non-overlapping lower working canvas. The original clews aft
+    // of their carrying mast put the sail body across the course-yard sweep.
+    // A forward clew retains half the tack-to-mast working foot, giving the
+    // separately braced finite course room rather than forcing cloth through.
+    const clew=surface.corners[2],at=laterSailMastAt(design,surface.mast,clew[1]),mastFore=at[2]-laterSailMastRadiusAt(design,surface.mast,clew[1])-.05/design.frame.verticalScale;
+    const z=Math.min(clew[2],(surface.corners[0][2]+mastFore)*.5);
+    return {...surface,corners:[surface.corners[0],surface.corners[1],[clew[0],clew[1],z]],workingFoot:{kind:'non-overlapping-course-clearance',originalClew:clew,interpretation:'Authored forward working clew; reported yard spans/heights unchanged.'}};
+  });
   const surfaces=rigged.map(surface=>{
     if(!surface.stay)return surface;
     const head=surface.corners[1],clew=surface.corners[2],lower=rigged.filter(s=>s.stay&&s.mast===surface.mast&&s.stay.b[1]<surface.stay.b[1]),constraints=[];
@@ -177,7 +195,7 @@ function laterSailCloudCrew(){
 }
 
 const laterSailCloud={
-  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:4,status:'planned',family:'extreme-clipper',
+  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:5,status:'planned',family:'extreme-clipper',
   frame:laterSailCloudFrame,runtime:laterSailCloudRuntime,
   interpretation:'1851 departure interpretation. Deck length and 41-foot beam select the contemporary report; all hull offsets and loaded draft are authored, not recovered McKay lines.',
   readiness:{backend:'surfaces-v1',requires:['independent loft/freeboard calibration','per-surface spars and cloth/rope clearance','wheel and deckhouse routes','loaded inertia and working crew','rendered and fleet checks']},
@@ -204,9 +222,11 @@ const laterSailCloud={
   steering:{kind:'rudder',control:'wheel-and-tiller',pivot:[0,-.32,5.48],handle:[0,.96,4.85],
     wheel:{centre:[0,1.01,4.85],radius:.75/laterSailCloudFrame.verticalScale,axis:[0,0,1]},
     rudder:{kind:'sternpost',outline:[[-.20,5.48],[-.82,5.48],[-.79,5.86],[-.18,5.76]],thickness:.035},provenance:'Authored steering attachments pending period plan.'},
-  masts:[{id:'fore',controlGroup:'fore',z:-3.38,height:8.45,radius:.128,rake:.76},
-    {id:'main',controlGroup:'main',z:-.18,height:9.10,radius:.132,rake:.83},
-    {id:'mizzen',controlGroup:'mizzen',z:3.38,height:7.45,radius:.095,rake:.65}],
+  // Authored aft chainplate spreads on the actual hull. Forward chainplates
+  // immediately beside the mast bisect the windward course at working brace.
+  masts:[{id:'fore',controlGroup:'fore',z:-3.38,height:8.45,radius:.128,rake:.76,chainplateZ:[-1.80,-1.55,-1.30,-1.05]},
+    {id:'main',controlGroup:'main',z:-.18,height:9.10,radius:.132,rake:.83,chainplateZ:[1.45,1.70,1.95,2.20]},
+    {id:'mizzen',controlGroup:'mizzen',z:3.38,height:7.45,radius:.095,rake:.65,chainplateZ:[4.85,5.03,5.21,5.39]}],
   surfaces:[],
   bowsprit:{a:[0,.78,-5.35],b:[0,1.38,-8.25],radius:.105,
     sections:[{kind:'bowsprit',outboardFt:20,diameterIn:28.5},{kind:'jibboom',innerJibFt:16,outerJibFt:13,endFt:5,diameterIn:16.5}],source:laterSailCloudSource},

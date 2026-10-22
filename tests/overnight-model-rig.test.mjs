@@ -89,7 +89,12 @@ test('clipper canvas, load-bearing stays, visible end fittings and affine nodes 
     const next=d.surfaces.find(s=>s.id===stay.upperFitting.nextSurface);
     assert.ok(next.mastTierGap);assert.ok(next.corners[2][1]-stay.b[1]>=stay.upperFitting.clothGap-1e-12,'the structural stay fitting occupies bare mast, never the next square tier canvas');
     assert.equal(next.corners[2][1],next.corners[3][1]);
-    if(surface.mast>0){assert.equal(stay.lowerFitting.mast,surface.mast-1);assert.equal(stay.lowerFitting.kind,'mast-aft-tang');}
+    if(surface.name==='mizzen-topmast-staysail'){
+      const spencer=d.surfaces.find(s=>s.name==='main-spencer');
+      assert.equal(stay.lowerFitting.kind,'deck-eye');assert.equal(stay.lowerFitting.mast,undefined);
+      assert.ok(stay.a[2]>Math.max(...spencer.corners.map(p=>p[2])),'the mizzen stay cannot start inside the main-spencer sewn luff');
+      near([stay.lowerFitting.body[1]],[laterSailDeck(d.id,stay.a[2])]);
+    }else if(surface.mast>0){assert.equal(stay.lowerFitting.mast,surface.mast-1);assert.equal(stay.lowerFitting.kind,'mast-aft-tang');}
     else assert.equal(stay.lowerFitting.kind,'bowsprit-collar');
   }
 });
@@ -116,7 +121,7 @@ test('new structure graphs contain only real masts, equipment and spars; absent 
 });
 
 test('upper clipper working staysail feet and leeches remain ahead of their actual lower structural stays',()=>{
-  const d=laterSailDesign('flying-cloud'),working=d.surfaces.filter(s=>s.workingFoot);
+  const d=laterSailDesign('flying-cloud'),working=d.surfaces.filter(s=>s.workingFoot?.kind==='non-overlapping-staysails');
   assert.ok(working.some(s=>s.id===23),'the overlapping mizzen topgallant clew is corrected in model geometry');
   for(const surface of working){
     const a=surface.corners[0],head=surface.corners[1],clew=surface.corners[2],foot=surface.workingFoot;
@@ -130,6 +135,17 @@ test('upper clipper working staysail feet and leeches remain ahead of their actu
         assert.ok(z<=stayZ-reserve+1e-12,`${surface.name} actual leech threads ${id}`);
       }
     }
+  }
+});
+
+test('lowest clipper working staysails retain forward clews instead of overlapping their carrying course yards',()=>{
+  const d=laterSailDesign('flying-cloud'),context=laterSailRigContext(d.id),working=d.surfaces.filter(s=>s.workingFoot?.kind==='non-overlapping-course-clearance');
+  assert.deepEqual(working.map(s=>s.id),[16,19,22]);
+  for(const surface of working){
+    const clew=surface.corners[2],at=context.mastPoint(surface.mast,clew[1]);
+    assert.ok(clew[2]<at[2]&&clew[2]<surface.workingFoot.originalClew[2]);
+    assert.ok(clew[2]>surface.corners[0][2],'working forward cloth retains a finite foot and actual tack attachment');
+    assert.equal(clew[1],surface.workingFoot.originalClew[1]);
   }
 });
 

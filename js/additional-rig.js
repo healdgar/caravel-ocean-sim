@@ -95,7 +95,7 @@ export function laterSailRigContext(id){
     const floor=m.foot[1],high=floor+(m.height-floor)*(id==='flying-cloud'?.47:.92),top=mastPoint(index,high);
     const count=id==='flying-cloud'?4:2;
     for(const side of [-1,1])for(let j=0;j<count;j++){
-      const z=Math.min(5.55,m.z+.28+j*.24),x=side*laterSailDeckWidth(id,z),y=laterSailDeck(id,z,x);
+      const z=id==='flying-cloud'?m.chainplateZ[j]:Math.min(5.55,m.z+.28+j*.24),x=side*laterSailDeckWidth(id,z),y=laterSailDeck(id,z,x);
       supports.push({a:[x,y+.045/sy,z],b:top,r:(id==='flying-cloud'?.025:.006)/sx,mast:index,side,kind:'shroud'});
     }
     if(id==='flying-cloud'){

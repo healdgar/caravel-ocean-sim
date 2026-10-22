@@ -157,6 +157,16 @@ test('clipper topmast shrouds land on actual side-and-aft platform quadrants',()
   }
 });
 
+test('clipper lower shrouds use their own actual aft hull chainplate spread',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'],c=laterSailRigContext(d.id);
+  for(const [index,mast]of d.masts.entries())for(const side of [-1,1]){
+    const lines=c.supports.filter(s=>s.kind==='shroud'&&s.mast===index&&s.side===side);
+    assert.deepEqual(lines.map(l=>l.a[2]),mast.chainplateZ);
+    assert.equal(new Set(lines.map(l=>l.a[2])).size,4,'four actual chainplates cannot collapse at a clipped stern coordinate');
+    for(const line of lines){assert.ok(line.a[2]>mast.z+1,'the windward lead is not rooted inside the close-braced course envelope');assert.equal(Math.sign(line.a[0]),side);}
+  }
+});
+
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
   const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
   for(const [yaw,set]of [[0,[1,1,1]],[.67,[1,1,1]],[-.67,[1,1,1]],[.35,[.20,.40,.65]]]){
