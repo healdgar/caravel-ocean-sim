@@ -115,6 +115,24 @@ test('new structure graphs contain only real masts, equipment and spars; absent 
   }
 });
 
+test('upper clipper working staysail feet and leeches remain ahead of their actual lower structural stays',()=>{
+  const d=laterSailDesign('flying-cloud'),working=d.surfaces.filter(s=>s.workingFoot);
+  assert.ok(working.some(s=>s.id===23),'the overlapping mizzen topgallant clew is corrected in model geometry');
+  for(const surface of working){
+    const a=surface.corners[0],head=surface.corners[1],clew=surface.corners[2],foot=surface.workingFoot;
+    assert.ok(clew[2]<foot.originalClew[2]);assert.equal(clew[1],foot.originalClew[1]);
+    assert.equal(surface.stay.a,a,'tack remains attached to the actual structural stay');
+    for(const id of foot.lowerStays){
+      const lower=d.surfaces.find(s=>s.stay?.id===id).stay,slope=(lower.b[2]-lower.a[2])/(lower.b[1]-lower.a[1]),reserve=(lower.r+foot.clearance+foot.camberReserve)*Math.sqrt(1+slope*slope);
+      const low=Math.max(clew[1],lower.a[1]),high=Math.min(head[1],lower.b[1]);
+      for(const y of [low,high]){
+        const t=(y-clew[1])/(head[1]-clew[1]),z=clew[2]+(head[2]-clew[2])*t,stayZ=lower.a[2]+slope*(y-lower.a[1]);
+        assert.ok(z<=stayZ-reserve+1e-12,`${surface.name} actual leech threads ${id}`);
+      }
+    }
+  }
+});
+
 test('cloth and spar affine frames derive from the same authoritative pose, with no animated-parent translation fiction',()=>{
   for(const d of Object.values(LATER_SAIL_DESIGNS)){
     const b=boat(d),model=createProceduralShipDefinition(d.id),c=withRigPoseContext(laterSailRigContext(d.id),b.sailState),snapshot=JSON.stringify(b);

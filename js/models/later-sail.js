@@ -133,7 +133,32 @@ function laterSailCloudStay(design,surface){
     headFitting:{kind:'stay-hanks',stay:stay.id,parameter:headT,clearance,stayRadius:radius,belowYard:yard.id,verticalClearance:.05/sy}};
 }
 function laterSailCloudWorkingRig(design){
-  const surfaces=design.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(design,s):s.kind==='headsail'?laterSailCloudStay(design,s):s);
+  const rigged=design.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(design,s):s.kind==='headsail'?laterSailCloudStay(design,s):s);
+  const surfaces=rigged.map(surface=>{
+    if(!surface.stay)return surface;
+    const head=surface.corners[1],clew=surface.corners[2],lower=rigged.filter(s=>s.stay&&s.mast===surface.mast&&s.stay.b[1]<surface.stay.b[1]),constraints=[];
+    let z=clew[2];
+    // Non-overlapping working headsails. An aft clew behind a lower stay
+    // makes the upper sail's foot/leech cross that load-bearing rope even
+    // before wind fills it. Keep both boundary ends ahead of the finite stay,
+    // reserving the existing cloth camber/flutter envelope. Luffs and real
+    // stay fittings remain unchanged; these clew dimensions are authored.
+    const camberReserve=(surface.belly??.1)+(surface.flutter??.035),clearance=.05/design.frame.verticalScale;
+    for(const own of lower){
+      const stay=own.stay,slope=(stay.b[2]-stay.a[2])/(stay.b[1]-stay.a[1]),reserve=(stay.r+clearance+camberReserve)*Math.sqrt(1+slope*slope);
+      const low=Math.max(clew[1],stay.a[1]),high=Math.min(head[1],stay.b[1]);if(low>high)continue;
+      for(const y of [low,high]){
+        const t=(y-clew[1])/(head[1]-clew[1]);if(t>=1)continue;
+        const bound=(stay.a[2]+slope*(y-stay.a[1])-reserve-head[2]*t)/(1-t);
+        z=Math.min(z,bound);
+      }
+      constraints.push(stay.id);
+    }
+    if(z===clew[2])return surface;
+    const luff=surface.corners[0][2]+(head[2]-surface.corners[0][2])*(clew[1]-surface.corners[0][1])/(head[1]-surface.corners[0][1]);
+    if(!(z>luff+.10/(design.runtime.beam/design.frame.beam)))throw Error('No non-overlapping working foot for '+surface.name);
+    return {...surface,corners:[surface.corners[0],head,[clew[0],clew[1],z]],workingFoot:{kind:'non-overlapping-staysails',lowerStays:constraints,originalClew:clew,clearance,camberReserve,interpretation:'Authored working clew ahead of lower structural stays; no reported sail dimensions are replaced.'}};
+  });
   return surfaces.map(surface=>{
     if(surface.kind!=='square')return surface;
     const fittings=surfaces.filter(s=>s.stay?.upperFitting.nextSurface===surface.id).map(s=>s.stay.upperFitting);
