@@ -2,7 +2,7 @@ import {createMeshWriter} from './mesh-writer.js';
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import { VICTORY_DESIGN, VICTORY_MASTS, VICTORY_SAILS,VICTORY_STANDING_LINES,VICTORY_RUNNING_LINES,victoryShroud,
   victorySheer, victoryHullDeck, victoryVesselDeck, victoryHullHalfWidth,
-  victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot,victoryHullPoint } from './models/victory.js';
+  victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot,victoryHullPoint,victoryStairFlights } from './models/victory.js';
 
 // A separate first-rate hull, decks, batteries and full rig. The nine-float
 // vertex contract is shared with the caravel; its authored geometry is not.
@@ -453,13 +453,14 @@ export function createVictoryMesh({groups,parts}={}){
     tube([x-.13,y+.17,z],[x+.13,y+.17,z],.03,1,.03,8);
   }
   // Two flights connect each raised deck to the lower level.
-  for(const [z,top,bottom]of [[VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.quarter.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.poop.height,VICTORY_DESIGN.decks.quarter.height]])for(const side of [-1,1]){
-    const x=side*.9,sign=z<0?1:-1,lo=z+sign*.6;
-    for(let i=0;i<7;i++){
-      const Z=lo+(z-lo)*(i+.5)/7,y=bottom+(top-bottom)*(i+1)/7+victorySheer(z);
-      box([x-.105,y-.025,Z-.047],[x+.105,y,Z+.047],0);
+  for(const flight of victoryStairFlights()){
+    const start=out.length,{x,width,treads}=flight,rising=flight.y1>flight.y0,lo=rising?flight.z0:flight.z1,z=rising?flight.z1:flight.z0,bottom=rising?flight.y0:flight.y1,top=rising?flight.y1:flight.y0;
+    for(let i=0;i<treads;i++){
+      const Z=lo+(z-lo)*(i+.5)/treads,y=bottom+(top-bottom)*(i+1)/treads;
+      box([x-width/2,y-.025,Z-.047],[x+width/2,y,Z+.047],0);
     }
-    for(const X of [x-.12,x+.12])tube([X,bottom+victorySheer(z)+.03,lo],[X,top+victorySheer(z)+.03,z],.022,1,.022,6);
+    for(const X of[x-flight.railOffset,x+flight.railOffset])tube([X,bottom+.03,lo],[X,top+.03,z],flight.railRadius,1,flight.railRadius,6);
+    group(flight.meshGroup,'hull',start);
   }
   group('deck.fittings','hull',fittingsStart);
   const hatchStart=out.length,hatchPivot=victoryHatchPivot(),hatchY=hatchPivot[1];

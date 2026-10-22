@@ -3,7 +3,7 @@ import { shroudGeometry } from './rigging.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { gltfTRS } from './gltf.js';
 import { resolveShipNode,requirePlayableShipModel } from './ship-models.js';
-import { VICTORY_DESIGN, victorySheer } from './models/victory.js';
+import { VICTORY_DESIGN, victorySheer,victoryStairFlights } from './models/victory.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
 import {ROWING_DESIGNS,rowingRigContext,rowingBenchDescriptors} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS,laterSailStairFlights} from './models/later-sail.js';
@@ -152,17 +152,13 @@ function crewAdditionalPassingDetour(s,company,boat,p,target){
 }
 // Match the paired seven-tread flights in the Victory mesh. Keeping these
 // elevations on the route prevents a raised-deck transition teleporting feet.
-const VICTORY_STAIRS=(()=>{const d=VICTORY_DESIGN.decks;return [
-  [d.forecastle.end,d.forecastle.end+.6,d.forecastle.height,d.main],
-  [d.quarter.start-.6,d.quarter.start,d.main,d.quarter.height],
-  [d.poop.start-.6,d.poop.start,d.quarter.height,d.poop.height],
-];})();
+const VICTORY_STAIRS=victoryStairFlights().filter(f=>f.side===1).map(f=>[f.z0,f.z1,f.y0,f.y1,f.x]);
 function victoryLanding(z){
   for(const [a,b,A,B] of VICTORY_STAIRS)if(z>a&&z<b)return Math.abs(z-a)<Math.abs(z-b)?a:b;
   return z;
 }
 function victoryStairHeight(z,boat){
-  for(const [a,b,A,B]of VICTORY_STAIRS)if(z>=a&&z<=b)return A+(B-A)*(z-a)/(b-a)+victorySheer(z);
+  for(const [a,b,A,B]of VICTORY_STAIRS)if(z>=a&&z<=b)return A+(B-A)*(z-a)/(b-a);
   return modelDeck(boat,z);
 }
 export function victoryCrewRoute(s,target,boat,{gunCorridor=false}={}){
@@ -179,9 +175,9 @@ export function victoryCrewRoute(s,target,boat,{gunCorridor=false}={}){
     const direction=Math.sign(to-from),count=Math.max(1,Math.ceil(Math.abs(to-from)/.35));
     const stops=[from,to,...Array.from({length:count-1},(_,i)=>from+(to-from)*(i+1)/count),...VICTORY_STAIRS.flatMap(([a,b])=>[a,b]).filter(z=>direction>0?z>from&&z<to:z<from&&z>to)].sort((a,b)=>direction*(a-b));
     for(let i=1;i<stops.length;i++){
-      const a=stops[i-1],b=stops[i],mid=(a+b)/2,flight=VICTORY_STAIRS.some(([lo,hi])=>mid>lo&&mid<hi);
-      add(flight?side*.9:outer(a),a,flight?victoryStairHeight(a,boat):modelDeck(boat,a));
-      add(flight?side*.9:outer(b),b,flight?victoryStairHeight(b,boat):modelDeck(boat,b));
+      const a=stops[i-1],b=stops[i],mid=(a+b)/2,flight=VICTORY_STAIRS.find(([lo,hi])=>mid>lo&&mid<hi);
+      add(flight?side*flight[4]:outer(a),a,flight?victoryStairHeight(a,boat):modelDeck(boat,a));
+      add(flight?side*flight[4]:outer(b),b,flight?victoryStairHeight(b,boat):modelDeck(boat,b));
     }
   };
   if(target[0]*side<0){
@@ -366,8 +362,8 @@ function gunCrewRoute(s,target,boat){
     add([.96,modelDeck(boat,1.5),1.5]);
     for(let i=1;i<=8;i++)add([.96,modelDeck(boat,1.5)+(2.3-modelDeck(boat,1.5))*i/8,1.5+1.14*i/8]);
   }
-  const z=s.z<2.7?2.64:s.z;add([Math.sign(target[0])*.38,2.3,z]);
-  add([Math.sign(target[0])*.38,2.3,target[2]]);add(target);return path;
+  const z=s.z<2.7?2.64:s.z;add([0,2.3,z]);
+  add([0,2.3,target[2]]);add(target);return path;
 }
 function assignGunCrew(company,boat){
   const guns=boat.gunnery?.guns;
@@ -640,7 +636,7 @@ export function stepCrewWork(s,company,boat,dt) {
         const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));
         j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
         if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
-        if(d<=.02){j.cursor++;if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}if(j.cursor>=j.path.length){
+        if(d-travel<=1e-8){j.cursor++;if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}if(j.cursor>=j.path.length){
           if(j.stage==='return'){s.job=null;s.home=[next[0],next[2]];s.wait=2;return false;}
           if(j.kind==='yield'){
             const shift=next[2]-j.priorHome[1];s.home=[next[0],next[2]];s.patrolX=next[0];s.route=s.route.map(z=>z+shift);s.target=s.route[1];s.navigationPath=null;s.navigationKey=null;s.job=null;s.wait=2;return false;

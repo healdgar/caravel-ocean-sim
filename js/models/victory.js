@@ -60,6 +60,11 @@ export const VICTORY_DESIGN=deepFreeze({
   quarterdeck:{start:1.65,height:1.67},
   helm:{x:.82,z:3.5,eyeAboveDeck:1.6},
   wheel:{centre:[0,1.95,3.7],radius:.18},
+  // Authored access lanes clear the complete gun recoil and fixed deck
+  // fittings. The fore pair also stays inboard of the forecastle bitts.
+  stairs:[{id:'forecastle',x:.30,run:.6,width:.21,treads:7,railOffset:.12,railRadius:.022},
+    {id:'quarter',x:.60,run:.6,width:.21,treads:7,railOffset:.12,railRadius:.022},
+    {id:'poop',x:.60,run:.6,width:.21,treads:7,railOffset:.12,railRadius:.022}],
   tiller:{pivot:[0,1.42,5.83],handle:[0,1.42,5.1],crewDistance:.35},
   anchor:{z:-4.85,rootInset:.04,tipOutset:.62,rootRise:.19,tipRise:.24,fairleadRise:.24},
   gunDecks:[{id:'lower',count:30,centre:.38,calibre:32,start:-5.12,end:5.05},
@@ -145,6 +150,12 @@ export function victoryHullPoint(station,baseY,side){
 }
 export function victoryDeckHalfWidth(z){return Math.max(.012,victoryHullHalfWidth(z,victoryVesselDeck(z))-.045);}
 export function victoryHatchPivot(){return [0,victoryVesselDeck(-1.5)+.145,-1.85];}
+const victoryStairFlightCache=deepFreeze(VICTORY_DESIGN.stairs.flatMap(stair=>{
+  const d=VICTORY_DESIGN.decks,zone=d[stair.id],fore=stair.id==='forecastle',boundary=fore?zone.end:zone.start,
+    bottom=stair.id==='poop'?d.quarter.height:d.main,z0=fore?boundary:boundary-stair.run,z1=fore?boundary+stair.run:boundary;
+  return[-1,1].map(side=>({id:'stairs.'+stair.id+'.'+(side<0?'port':'starboard'),meshGroup:'stairs.'+stair.id+'.'+(side<0?'port':'starboard'),zoneId:stair.id,side,x:side*stair.x,width:stair.width,treads:stair.treads,railOffset:stair.railOffset,railRadius:stair.railRadius,z0,z1,y0:(fore?zone.height:bottom)+victorySheer(z0),y1:(fore?bottom:zone.height)+victorySheer(z1)}));
+}));
+export function victoryStairFlights(){return victoryStairFlightCache;}
 export function victoryAnchorCathead(side=-1){
   const a=VICTORY_DESIGN.anchor,z=a.z,y=victoryVesselDeck(z),w=victoryDeckHalfWidth(z);
   return {root:[side*(w-a.rootInset),y+a.rootRise,z],tip:[side*(w+a.tipOutset),y+a.tipRise,z],fairlead:[side*(w+a.tipOutset),y+a.fairleadRise,z]};
