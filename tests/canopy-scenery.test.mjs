@@ -108,4 +108,12 @@ test('actual camera-relative projection culls only completely disjoint patches a
   for(const key of ['ship','x','z','heading','windSpeed','follower'])assert.equal(url.searchParams.get(key),original.searchParams.get(key));
   assert.equal(url.searchParams.get('canopy'),'near');assert.equal(url.searchParams.get('view'),'free');assert.equal(url.searchParams.get('landfall'),'approach');
   assert.equal(url.searchParams.get('cam').split(',').map(Number).every(Number.isFinite),true);
+  const coastHref='https://example.test/game/?landfall=coast&ship=victory&boatHeading=112&weather=clear&fleet=nina,pinta',coast=new URL(canopyInspectionURL(coastHref,manifest)),coastBefore=new URL(coastHref);
+  for(const key of ['landfall','ship','boatHeading','weather','fleet'])assert.equal(coast.searchParams.get(key),coastBefore.searchParams.get(key));
+  for(const key of ['boatX','boatZ','x','z'])assert.equal(coast.searchParams.has(key),false,'inspection preserves implicit coast spawn rather than inventing explicit ship coordinates');
+  assert.equal(coast.searchParams.get('view'),'free');assert.equal(coast.searchParams.get('canopy'),'near');assert.equal(coast.searchParams.get('boat'),'0');
+  assert.equal(coast.searchParams.get('cam').split(',').map(Number).every(Number.isFinite),true);
+  const explicit=new URL(canopyInspectionURL(coastHref+'&boatX=-1750&boatZ=-7000',manifest));
+  assert.equal(explicit.searchParams.get('landfall'),'coast');assert.equal(explicit.searchParams.get('boatX'),'-1750');assert.equal(explicit.searchParams.get('boatZ'),'-7000');
+  assert.equal(explicit.searchParams.get('fleet'),'nina,pinta');assert.equal(explicit.searchParams.get('boat'),'0');
 });
