@@ -138,6 +138,16 @@ test('later-mast contact cones use the exact radius taper drawn by the actual ma
   }
 });
 
+test('clipper topmast shrouds land on actual side-and-aft platform quadrants',()=>{
+  const c=laterSailRigContext('flying-cloud');
+  for(const support of c.supports.filter(s=>s.kind==='topmast-shroud')){
+    const top=c.masts[support.mast].platform,dx=support.a[0]-top[0],dz=support.a[2]-top[2];
+    assert.ok(dz>0,'a topmast shroud cannot lead forward through the fore-hung topsail');
+    assert.ok(Math.hypot(dx,dz)<.34,'the lower shroud attachment remains on the actual drawn mast platform');
+    assert.equal(support.a[1],top[1]);
+  }
+});
+
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
   const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
   for(const [yaw,set]of [[0,[1,1,1]],[.67,[1,1,1]],[-.67,[1,1,1]],[.35,[.20,.40,.65]]]){

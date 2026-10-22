@@ -106,7 +106,9 @@ export function laterSailRigContext(id){
       // Separate topmast shrouds land on a real mast platform, not at a
       // fictitious fourth mast or a shared all-canvas transform.
       const platform=mastPoint(index,high);
-      for(const side of [-1,1])for(const dz of [-.12,.12])supports.push({a:[side*.22,platform[1],platform[2]+dz],b:mastPoint(index,m.height*.80),r:.012/sx,mast:index,side,kind:'topmast-shroud'});
+      // Topmast shrouds land in the side-and-aft quadrants of the real top.
+      // A forward platform lead threads the fore-hung topsail itself.
+      for(const side of [-1,1])for(const dz of [.08,.20])supports.push({a:[side*.22,platform[1],platform[2]+dz],b:mastPoint(index,m.height*.80),r:.012/sx,mast:index,side,kind:'topmast-shroud'});
       const shrouds=supports.filter(s=>s.mast===index&&s.kind==='shroud');
       for(const side of [-1,1]){
         const same=shrouds.filter(s=>s.side===side),lo=Math.max(...same.map(s=>s.a[1]))+.20/sy,hi=top[1]-.20/sy;
