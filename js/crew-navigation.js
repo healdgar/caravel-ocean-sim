@@ -88,13 +88,14 @@ export function crewNavigationObstacles(boat){
     }
     if(id==='victory'){
       for(const z of[-4.52,-1.5,.65,2.35,4.75]){const y=modelDeck(boat,z),w=z===2.35?.29:.34;box('hatch.'+z,'hatch',[-w,y+.008,z-.35],[w,y+.122,z+.35],{reservation:'fixed'});}
+      const hatchPivotY=modelDeck(boat,-1.5)+.145;box('hatch.main','hatch',[-.35,hatchPivotY,-1.85],[.35,hatchPivotY+.045,-1.15],{reservation:'fixed',meshGroup:'hatch.main'});
       for(const z of[-4.85,2.68]){const y=modelDeck(boat,z);box('capstan.'+z,'capstan',[-.335,y,z-.335],[.335,y+.25,z+.335],{reservation:'fixed'});}
       for(const z of[-5.1,-3.95,1.8,4.22])for(const side of[-1,1]){const x=side*.65,y=modelDeck(boat,z);box('bitt.'+side+'.'+z,'bitt',[x-.16,y,z-.06],[x+.16,y+.21,z+.06],{reservation:'fixed'});}
       const binnacle=modelDeck(boat,3.05);box('binnacle','binnacle',[-.205,binnacle,2.88],[.205,binnacle+.305,3.17],{reservation:'fixed'});
       for(const [index,x]of[-.43,.43].entries())box('boat.waist.'+index,'ship-boat',[x-.34,1.17+.04,-2.606],[x+.34,1.17+.336,.306],{reservation:'fixed',meshGroup:'boat.waist.'+index});
     }else if(Object.hasOwn(ADDITIONAL_DESIGNS,id)){
       const h=ADDITIONAL_DESIGNS[id].hatch,x=h.centre[0],z=h.centre[2],y=modelDeck(boat,z);
-      box('hatch.main','hatch',[x-h.size[0]/2-.025,y-.03,z-h.size[2]/2-.025],[x+h.size[0]/2+.025,Math.max(y+.12,h.centre[1]+h.size[1]),z+h.size[2]/2+.025],{reservation:'fixed'});
+      box('hatch.main','hatch',[x-h.size[0]/2-.025,y-.32,z-h.size[2]/2-.025],[x+h.size[0]/2+.025,Math.max(y+.12,h.centre[1]+h.size[1]+.025),z+h.size[2]/2+.025],{reservation:'fixed'});
     }else{
       const hatchExtra={reservation:'fixed',meshGroup:'hatch.frame'};
       for(const x of[-.48,.48])beam('hatch.side.'+x,'hatch',[x,modelDeck(boat,-3)+.03,-2.65],[x,modelDeck(boat,-3.6)+.03,-3.65],.075,.09,hatchExtra);
