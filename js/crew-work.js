@@ -11,6 +11,7 @@ import {proceduralDesign,proceduralDeck,proceduralDeckWidth,proceduralHullWidth}
 import {laterSailRigContext} from './additional-rig.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear} from './crew-navigation.js';
+import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk} from './crew-motion.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
 const crewWorkControls=['fore','main','mizzen'];
@@ -272,7 +273,8 @@ export function crewGunStation(gun,role,boat){
     const offset=Math.max(0,gun.offset??0),muzzle=gun.muzzleDesign.map((v,i)=>v*scale[i]-direction[i]*offset),breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*offset),progress=workClamp(gun.progress??0,0,1);
     let x;
     if(role==='loader'){
-      const stroke=['swab','load','ram'].includes(gun.stage)?Math.sin(progress*Math.PI*4)*.10:0;
+      // The arms work the rammer stroke; the feet follow the gun's travel.
+      const stroke=0;
       x=['swab','load','ram'].includes(gun.stage)?muzzle[0]+direction[0]*(.18+stroke):gun.stage==='runout'?(muzzle[0]+direction[0]*.18)*(1-progress)+breech[0]*progress:gun.breechDesign[0]*sx;
       // Stand beside the actual truck envelope, following the real work along
       // the bore as the gun runs out. The feet never enter its recoil corridor.
@@ -533,9 +535,9 @@ export function assignCrewWork(company,boat) {
 export function stepCrewWork(s,company,boat,dt) {
   const j=s.job;if(!j)return false;
   if(boat.sailState?.maneuver && (j.kind==='rig'||j.kind==='lookout') && ['ascending','working'].includes(j.stage))crewWorkDescend(s);
-  dt=workClamp(Number.isFinite(dt)?dt:0,0,.1);s.time+=dt;s.walkTime+=dt*.8;
+  dt=workClamp(Number.isFinite(dt)?dt:0,0,.1);s.time+=dt;
   const o=s.observation;
-  o.hazard=Math.abs(boat.roll??0)>(s.intent==='brace'?.26:.36)||Math.abs(boat.rollVelocity??0)>(s.intent==='brace'?.3:.5)||o.wind>(s.intent==='brace'?19:23);
+  o.hazard=crewDeckHazard(boat,o.wind,s.intent==='brace');
   o.job=j.kind;o.stage=j.stage;o.order='work';
   s.decisionIn-=dt;
   if(o.hazard||s.decisionIn<=0){
@@ -560,17 +562,19 @@ export function stepCrewWork(s,company,boat,dt) {
     if(['approach','return','reposition','lookout-approach','lookout-return'].includes(j.stage)){
       let p=j.position??[s.x,s.position[1]? (s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z];
       const target=j.path[j.cursor],a=physical(p,boat),b=physical(target,boat),d=distance3(a,b);
-      const travel=Math.min(d,.75*dt),q=d>1e-6?travel/d:1;
+      const horizontal=Math.hypot(b[0]-a[0],b[2]-a[2]);
+      const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
+      const travel=Math.min(d,motion.speedMetresPerSecond*dt),q=d>1e-6?travel/d:1;
       const next=p.map((x,i)=>x+(target[i]-x)*q),world=physical(next,boat);
       // Yield locally to another body rather than walking through it.
       const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2])<.54);
       const clear=crewWorkSegmentClear(s,boat,p,next);
       if(clear&&(!occupied || d<.02)){
         const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));
-        j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;
+        j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
         if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
         if(d<=.02){j.cursor++;if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}if(j.cursor>=j.path.length){
-          if(j.stage==='return'){s.job=null;s.x=s.home[0];s.z=s.home[1];s.wait=2;return false;}
+          if(j.stage==='return'){s.job=null;s.home=[next[0],next[2]];s.wait=2;return false;}
           if(j.stage==='lookout-return')j.stage='descending';
           else if(j.stage==='lookout-approach'){j.stage='working';j.lookoutAtStation=true;}
           else j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';j.elapsed=0;
@@ -597,7 +601,7 @@ export function stepCrewWork(s,company,boat,dt) {
             if(Math.abs(candidate[0])+.32/sx>=modelDeckWidth(boat,candidate[2]))continue;
             if(!crewRoutineSegmentClear(s,boat,p,candidate))continue;
             if(company.crew.some(other=>other!==s&&other.position&&Math.hypot(cp[0]-other.position[0],cp[1]+.028-other.position[1],cp[2]-other.position[2])<.54))continue;
-            j.position=candidate;s.x=candidate[0];s.z=candidate[2];moving=true;break;
+            j.position=candidate;s.x=candidate[0];s.z=candidate[2];moving=true;crewAdvanceWalk(s,distance3(cp,physical(p,boat)));break;
           }
         }
       }

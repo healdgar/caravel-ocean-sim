@@ -16,6 +16,18 @@ night. Notify on meaningful changes, failures, required input or morning complet
 
 The October 20–21 overnight run and its old cutoff below are historical records.
 
+### Active user priority: crew clearance and purposeful movement
+
+After the canopy release, the user requested crew posting/pathing around deck
+obstacles, especially cannon, and less sluggish movement. Source review confirms
+legacy fixed corridors and patrols do not test gun carriages or recoil envelopes;
+Victory's loader station lies inside its carriage's longitudinal footprint.
+Routine speeds are 0.65–0.8 m/s and job travel is 0.75 m/s; the Walk clip advances
+at a fixed rate independently of actual travel. Root retains the sole validation
+baton while direct agents author clearance, pace and independent geometry checks.
+Keep human size, actual tool reach, stairs, body separation, weather caution and
+row/climb/reload clocks intact. No crew changes are qualified or published yet.
+
 ### Nine-vessel integration — published and byte-verified
 
 The registry now integrates all five later vessels alongside the original four.

@@ -124,7 +124,8 @@ export function stepCompany(company,boat,dt,wind) {
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
     if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationKey=null;s.navigationY=null;}
-    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind,company);}
+    const hadJob=!!s.job;
+    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:dt,wind,company);}
   }
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
