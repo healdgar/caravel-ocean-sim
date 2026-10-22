@@ -40,6 +40,7 @@ test('exact normal projections reuse only eight live triples and retain adjacent
   const surface=supportFastSurface({belly:0}),context=supportFastContext(surface,[{a:[0,-2,0],b:[0,3,0],r:.1,kind:'shroud'}]);
   rigSurfacePose(surface,{});
   const point=yaw=>surfaceClothPoint(surface,.5,.5,{yaw,deployed:1,fill:1,pressure:1},context);
+  surfaceClothPoint(surface,.5,.5,{yaw:0,deployed:1,fill:1,pressure:1});
   const first=supportFastHypots(()=>point(0)),hit=supportFastHypots(()=>point(0));
   assert.equal(first.calls,hit.calls+2,'a cache hit removes both primary projection hypots');assert.deepEqual(supportFastBytes(first.value),supportFastBytes(hit.value));
   for(let i=1;i<=8;i++)point(i*.07);
@@ -55,6 +56,7 @@ test('own-mast direction reuses its exact projection while nonpenetrating geomet
   const own=supportFastSurface({belly:0,mastContactSide:'fore'}),mast={index:0,foot:[0,-2,0],head:[0,3,0],radius:.1};
   const context=supportFastContext(own,[],{masts:[mast]}),point=yaw=>surfaceClothPoint(own,.4,.4,{yaw,deployed:1,fill:1,pressure:1},context);
   rigSurfacePose(own,{});
+  surfaceClothPoint(own,.4,.4,{yaw:0,deployed:1,fill:1,pressure:1});
   const first=supportFastHypots(()=>point(.1)),other=supportFastHypots(()=>point(.2));
   assert.equal(first.calls,other.calls+2,'a changing cloth normal does not invalidate a constant authored mast direction');
   const distant=supportFastSurface({belly:0,corners:[[-1,2,.5],[1,2,.5],[1,0,.5],[-1,0,.5]]}),clear=supportFastContext(distant,[{a:[0,-2,0],b:[0,3,0],r:.1,kind:'shroud'}]),pose=rigSurfacePose(distant,{});
@@ -125,4 +127,51 @@ test('mutable endpoints, shallow-frozen geometry and frozen accessors never acqu
   ])};
   surfaceClothPoint(surface,.5,.5,pose,spoof);radius=NaN;
   assert.throws(()=>surfaceClothPoint(surface,.5,.5,pose,spoof),/Invalid rig support descriptor/);
+});
+
+test('immutable UV preparation preserves every live pose term and keeps rest-point arrays fresh',()=>{
+  const surfaces=[supportFastSurface({camberAxis:[0,0,1],footRise:.04}),
+    supportFastSurface({kind:'headsail',corners:[[0,2,0],[0,4,1],[0,0,2]],camberAxis:[1,0,0]}),
+    supportFastSurface({kind:'bermudan',corners:[[0,2,0],[0,4,1],[0,0,2]],camberAxis:[1,0,0]}),
+    supportFastSurface({kind:'lateen',corners:[[0,3,1],[0,0,-1],[0,0,2]],camberAxis:[1,0,0]}),
+    supportFastSurface({kind:'gaff',hingeAxis:[0,1,.05],camberAxis:[1,0,0],sewnEdges:['v0','u0']})];
+  for(const candidate of surfaces){
+    const surface=deepFreeze(candidate),direct=structuredClone(surface),context=supportFastContext(surface,[{a:[0,-2,0],b:[0,5,0],r:.12,kind:'shroud'}]);
+    for(const [index,state]of [
+      {set:[0,1,0],windSide:7,windForward:-4,rig:[{},{fill:1,side:-1,opening:.3,dip:0},{}]},
+      {set:[0,.25,0],windSide:-5,windForward:6,rig:[{},{fill:.1,side:1,opening:.55,dip:.7},{}]},
+      {set:[0,0,0],windSide:0,windForward:0,rig:[{},{fill:0,side:-1,opening:.8,dip:1},{}]},
+    ].entries())for(const [u,v]of [[0,0],[-0,0],[0,-0],[.2,.3],[.2+.0005,.3],[.2-.0005,.3],[1,0],[0,1]]){
+      const pose=rigSurfacePose(surface,state),other=rigSurfacePose(direct,state),time=1.4+index,wind=12+index*5;
+      assert.deepEqual(supportFastBytes(surfaceClothPoint(surface,u,v,pose,context,time,wind)),supportFastBytes(surfaceClothPoint(direct,u,v,other,context,time,wind)),'mutable reference retains all time/fill/gathering/camber/axis arithmetic');
+    }
+    const first=surfaceRestPoint(surface,.2,.3),expected=[...first];first[0]+=100;
+    const second=surfaceRestPoint(surface,.2,.3);assert.notEqual(first,second);assert.deepEqual(supportFastBytes(second),supportFastBytes(expected),'public rest points never expose private cached arrays');
+    for(const [u,v]of [[NaN,0],[0,Infinity],[undefined,.3]]){
+      assert.throws(()=>surfaceClothPoint(surface,u,v,{},context),/Invalid surface coordinates/);
+      assert.throws(()=>surfaceClothPoint(direct,u,v,{},context),/Invalid surface coordinates/);
+    }
+  }
+});
+
+test('UV preparation distinguishes both signed-zero coordinates and evicts after 4096 entries',()=>{
+  let reads=0;const watch=point=>new Proxy(Object.freeze(point),{get(target,key,receiver){if(['0','1','2'].includes(key))reads++;return Reflect.get(target,key,receiver);}});
+  const surface=deepFreeze(supportFastSurface({corners:[[-1,2,.05],[1,2,.05],[1,0,.05],[-1,0,.05]].map(watch),camberAxis:[0,0,1]})),pose=rigSurfacePose(surface,{});
+  const point=(u,v)=>surfaceClothPoint(surface,u,v,pose);
+  point(.2,.3);reads=0;point(.2,.3);assert.equal(reads,0,'a repeated immutable UV reads no corner coordinates');
+  point(0,.3);reads=0;point(-0,.3);assert.ok(reads>0,'negative-zero U has its own exact entry');
+  reads=0;point(-0,.3);assert.equal(reads,0);
+  point(.2,0);reads=0;point(.2,-0);assert.ok(reads>0,'negative-zero V has its own exact entry');
+  reads=0;point(.2,-0);assert.equal(reads,0);
+  for(let i=1;i<=4096;i++)point(i/8192,.31);
+  reads=0;point(.2,.3);assert.ok(reads>0,'the first UV was evicted instead of retaining unbounded samples');
+  reads=0;point(.2,.3);assert.equal(reads,0,'the newly retained UV is reusable');
+});
+
+test('a mutable camber axis retains the general evaluator despite frozen outer geometry',()=>{
+  const axis=[0,0,1],shape=supportFastSurface({camberAxis:axis});deepFreeze(shape.corners);Object.freeze(shape.pivot);Object.freeze(shape);
+  const pose={yaw:0,deployed:1,fill:1,pressure:1},first=surfaceClothPoint(shape,.5,.5,pose);
+  axis[0]=1;axis[2]=0;
+  const changed=surfaceClothPoint(shape,.5,.5,pose),reference=surfaceClothPoint(structuredClone(shape),.5,.5,pose);
+  assert.notDeepEqual(supportFastBytes(first),supportFastBytes(changed));assert.deepEqual(supportFastBytes(changed),supportFastBytes(reference));
 });
