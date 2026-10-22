@@ -195,7 +195,7 @@ async function finishForestChecks(iterator,{yieldTask=forestLoadYield,signal}={}
   for(;;){forestLoadAbort(signal);const next=iterator.next();if(next.done)return next.value;await yieldTask();}
 }
 export async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
-export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true,deferNative=false}={}){
+export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
@@ -233,10 +233,9 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   // Existing callers retain their immutable arrays; a later explicit native
   // load fetches and verifies fresh bytes. An in-flight load stays deduplicated.
   const releaseNativeCPU=()=>{if(!nativeLoaded)return false;nativePromise=undefined;nativeLoaded=false;return true;};
-  // A complete full-sphere atlas, or an explicitly supplied solid canopy,
-  // can display the forest before native buffers. Public defaults stay eager
-  // when no complete representation is available.
-  const deferred=deferNative||atlas.impostors?.manifest.layout.views.some(view=>view.direction[1]<0);
+  // Only a complete full-sphere representation can display a forest without
+  // native buffers. Upper-only legacy/missing atlases retain the eager path.
+  const deferred=atlas.impostors?.manifest.layout.views.some(view=>view.direction[1]<0);
   return deferred?{manifest,roots,vertices:null,indices:null,textures:null,...atlas,loadNative,releaseNativeCPU}:
     {...await loadNative(),...atlas,loadNative,releaseNativeCPU};
 }
@@ -442,15 +441,12 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
 @group(0)@binding(5)var<storage,read_write>previousLod:array<u32>;
 @group(0)@binding(6)var<uniform>parameters:vec4f;
 @group(0)@binding(7)var<uniform>forestResidency:vec4u;
-@group(0)@binding(8)var<storage,read>forestCanopySelected:array<u32>;
 @compute @workgroup_size(64)fn forestReset(@builtin(global_invocation_id)id:vec3u){
  if(id.x>=u32(parameters.y)*4u){return;}atomicStore(&commands[id.x*5u+1u],0u);
 }
 @compute @workgroup_size(64)fn forestCull(@builtin(global_invocation_id)id:vec3u){
  if(id.x>=u32(parameters.x)){return;}
- let r=roots[id.x];if(r.rootScale.w<=0.0){return;}
- if(r.identity.z>=0.&&forestCanopySelected[u32(r.identity.z)]==1u){return;}
- let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
+ let r=roots[id.x];if(r.rootScale.w<=0.0){return;}let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let b=p.bound.xyz*r.rootScale.w;
  let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w;
  let clip=F.viewProj*vec4f(relative,1);
@@ -469,10 +465,8 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
  let threshold=parameters.z*select(.88,1.0,previousLod[id.x]==0u);
  let resident=forestResidency.x>0u;
  let geometricError=bitcast<f32>(p.far.z)*r.rootScale.w;
- let qualified=p.far.w==1u;
- let projectedError=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);
- let farError=select(projected,projectedError,qualified);
- let farLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&near>radius&&(!qualified||near>geometricError)&&farError<=threshold));
+ let farError=select(projected,projected*geometricError/(2.0*radius),p.far.w==1u);
+ let farLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&near>radius&&farError<=threshold));
  let atlasSupported=p.roots.z>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
  let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
  let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
@@ -487,9 +481,9 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
 }
 `;
 
-export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,canopyMass=null,mode='auto',nearPixels=3,
+export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
-  impostorMode=typeof location==='undefined'?'off':new URLSearchParams(location.search).get('forestImpostor')||'off'}){
+  impostorMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestImpostor')||'auto'}){
   if(!['auto','near','far'].includes(mode)||!(nearPixels>0&&nearPixels<=3))throw Error('Invalid forest LOD policy');
   if(!['auto','off','force'].includes(impostorMode)||!Number.isInteger(impostorPixels)||impostorPixels<3||impostorPixels>256)throw Error('Invalid authored forest impostor policy');
   if(samples<2)throw Error('Native forest coverage requires MSAA');
@@ -503,8 +497,6 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
     const rooted=pack.roots.slice();let excludedRoots=0;
-    if(canopyMass&&canopyMass.rootChunks.length!==m.rootCount)throw Error('Solid canopy owner table differs from forest roots');
-    for(let i=0;i<rooted.length;i+=12){const owner=canopyMass?.rootChunks[i/12];rooted[i+10]=owner===undefined||owner===0xffffffff?-1:owner;}
     if(groundSample)for(let i=0;i<rooted.length;i+=12){
       const x=rooted[i],z=rooted[i+2],y=groundSample(x,z);
       if(!Number.isFinite(y))throw Error('Non-finite forest ground sampler');
@@ -527,13 +519,12 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
     const previous=make(new Uint32Array(m.rootCount),B.STORAGE,'forest GPU previous LOD');
     const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,['auto','near','far'].indexOf(mode)]),B.UNIFORM,'forest projected size policy');
-    const residency=canopyMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
-    const canopySelection=canopyMass?.state??make(new Uint32Array([0]),B.STORAGE,'forest empty canopy selection');
+    const residency=make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
     const compute=await shader(FOREST_CULL_WGSL,'forest GPU cull and compact');
     const reset=await device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}});
     const cull=await device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}});
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
-    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,canopySelection].map((buffer,binding)=>({binding,resource:{buffer}}))});
+    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
     const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
       fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
       depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragment==='forestNativeLeafFS'}});
@@ -555,7 +546,6 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       });
     });
     const stats={loaded:true,roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,nearPixels,appearanceErrorSupported:false,mode,
-      get backend(){return atlas?'debug individual atlas / native':canopyMass?(nativeStatus.resident?'opaque canopy / opaque crowns / native':'opaque canopy startup preview'):'opaque crowns / native';},
       materialContract:m.materialContract,nativeMaterialLayers:0,nativeTextureFamilies:[],coverageFiltering:'linear alpha with MSAA',native:nativeStatus,
       certifiedGeometryPrototypes:m.prototypes.filter(p=>p.geometryErrorSupported===true).length,
       impostor:{loaded:!!atlas,error:pack.impostorError??null,views:atlas?.views??0,fullSphere:atlas?.fullSphere??false,projectedPixels:impostorPixels,
@@ -589,13 +579,11 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
-        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));nativeStatus.resident=true;nativeStatus.status='resident';
-        if(canopyMass)canopyMass.stats.phase='qualified exterior-error selection; native geometry resident';
-        pack.releaseNativeCPU?.();return true;
+        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));nativeStatus.resident=true;nativeStatus.status='resident';pack.releaseNativeCPU?.();return true;
       }catch(error){surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
-        if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas&&!canopyMass)throw error;return false;}
+        if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas)throw error;return false;}
     }
-    const deferred=((canopyMass&&canopyMass.stats.mode!=='near')||atlas?.fullSphere)&&mode==='auto'&&!pack.vertices;
+    const deferred=atlas?.fullSphere&&mode==='auto'&&!pack.vertices;
     const nativeReady=deferred?new Promise(resolve=>setTimeout(resolve,0)).then(installNative):Promise.resolve(await installNative());
     const draw=(pass,pipeline,group,cloud,cutout)=>{
       if(!native)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
