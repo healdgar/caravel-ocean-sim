@@ -7,12 +7,13 @@ A real-time WebGPU sailing game with wind-driven ships, crew, impact spray, deck
 [Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
 **Release status:** published runtime
-`7fba40de2601552757ada1ce490883ced75f06fb` includes the four-model fleet, passive
-hull/keel moments and astronomical night. The full native Metal suite passed
-**572/572**, with zero skips, plus rendered checks. Pages deployment
-`7243537555` succeeded at **2026-10-22 04:12:31 UTC**; public HTML, manifest and
-all 53 assets matched local sizes/hashes at **04:13:27 UTC**. No physical-iPhone
-performance result is claimed. [Exact receipts](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night).
+`7c0b52798111bbb693abac5db6d467deb22518d7` includes full Sun controls, the four-model
+fleet, passive hull/keel moments and astronomical night. The full native Metal
+suite passed **573/573**, zero skips, followed by date-field/mobile/offline checks
+and rendered review. Pages deployment `7244279543` built at
+**2026-10-22 05:09:08 UTC**; public HTML, manifest and all 53 assets matched local
+sizes/hashes at **05:09:53 UTC**. No physical-iPhone performance result is claimed.
+[Exact receipts](BACKLOG.md#sunenvironment-controls-checkpoint).
 
 The published checkpoint reduces repeated crew, vessel and ocean shading work,
 targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater

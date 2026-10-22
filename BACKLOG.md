@@ -29,12 +29,19 @@ The October 20–21 overnight run and its old cutoff below are historical record
   **315.616 seconds**. The new modular/Pages fixture checks full ranges, signed
   links, spectrum updates, mode switching, finite poles and actual GPU
   day→night→day recovery. The independent finite-disc oracle checks manual night
-  and ocean-cache parity. Publication receipt follows after rendered review.
+  and ocean-cache parity.
 - Rendered review caught the native date field truncating its time. It now has
   a full-width row. Follow-up native modular/Pages night/date-layout, offline
   downloads, mobile loading and phone/tablet/desktop panel-reachability checks
   passed after that CSS change. Visible Chrome shows the complete date/time
   and Sun controls without console warnings/errors (`shots/full-sun-controls.png`).
+- Published runtime **`7c0b52798111bbb693abac5db6d467deb22518d7`**, Pages deployment
+  **7244279543**, built **2026-10-22T05:09:08Z**. Public bytes verified at
+  **05:09:53Z**: HTML **1,134,838 bytes**, SHA-256
+  `f8d796fd522c355f2e2a4db8efb8b5551e61ffae9dc1b18de29f3bc963a1122e`;
+  manifest **11,321 bytes**, SHA-256
+  `de21217564c4051c331411cc3ddcc55f07835fd67b6245493958e705cf140a17`.
+  All **53 assets / 15,875,925 bytes** matched their individual sizes/hashes.
 
 ## Published checkpoint: four vessels, independent fleets and night
 
