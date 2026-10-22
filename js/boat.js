@@ -3,7 +3,7 @@ import {VICTORY_DESIGN,victoryHullHalfWidth,victoryHullDeck} from './models/vict
 import {PROCEDURAL_DESIGNS,proceduralHullWidth,proceduralHullDeck,proceduralDeck,proceduralKeelHalfWidth,proceduralProvisionDays} from './models/procedural.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {advanceRowing,rowingForces} from './rowing.js';
-import {hullLoftSheer} from './hull-loft.js';
+import {hullLoftSheer,hullLoftPoint} from './hull-loft.js';
 import { advanceSails, sailForces } from './sailing.js';
 import {createHullLateralDescriptor,evaluateHullLateral} from './hull-lateral.js';
 
@@ -165,12 +165,68 @@ export function boatHydrodynamics(length, beam, provisionDays, cargoTonnes=0,mod
 // above the main deck / design-unit height above the inner bottom. Not a Niña
 // manifest fallback or a historical inventory inferred from reported tonnage.
 export const ADDITIONAL_LOAD_PLACEMENT=Object.freeze({personCGAboveDeck:.9,storesAboveBottom:.35});
+const boatRowingStructureCache=new Map();
+function boatRowingStructure(id,length,beam){
+  const key=id+'/'+length+'/'+beam;if(boatRowingStructureCache.has(key))return boatRowingStructureCache.get(key);
+  const d=ROWING_DESIGNS[id],p=d.profile,sx=beam/d.frame.beam,sy=d.frame.verticalScale,sz=length/d.frame.length;
+  const point=(z,y,side)=>hullLoftPoint(p,z,y,side).map((v,i)=>v*[sx,sy,sz][i]);
+  let shellArea=0,shellMoment=0,woodVolume=0,woodMoment=0,benchVolume=0,mastVolume=0;
+  const triangle=(a,b,c)=>{
+    const u=b.map((v,i)=>v-a[i]),v=c.map((v,i)=>v-a[i]);
+    const area=.5*Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]);
+    shellArea+=area;shellMoment+=area*(a[1]+b[1]+c[1])/3;
+  };
+  const wood=(volume,y)=>{if(volume>0){woodVolume+=volume;woodMoment+=volume*y;}};
+  const nz=96,ny=24,z0=p.stations[0],span=p.stations.at(-1)-z0,dz=span/nz,dy=(p.deck-p.levels[0])/ny;
+  // Thin, uniform shell approximation on the actual outer loft, including a
+  // flat keel floor where present. Its CG cannot escape the geometry's height.
+  for(let i=0;i<nz;i++){
+    const z=z0+i*dz,Z=z+dz;
+    for(const side of [-1,1])for(let j=0;j<ny;j++){
+      const y=p.levels[0]+j*dy,Y=y+dy,a=point(z,y,side),b=point(Z,y,side),c=point(Z,Y,side),e=point(z,Y,side);
+      triangle(a,b,c);triangle(a,c,e);
+    }
+    const a=point(z,p.levels[0],-1),b=point(Z,p.levels[0],-1),c=point(Z,p.levels[0],1),e=point(z,p.levels[0],1);
+    triangle(a,b,c);triangle(a,c,e);
+  }
+  const shellCentroidY=shellMoment/shellArea;wood(shellArea*d.shellThicknessMetres,shellCentroidY);
+  // Floorboard thickness is an explicit authored loading approximation. Bench
+  // and leg dimensions below match the visible rowing-ships geometry.
+  for(let i=0;i<nz;i++){
+    const z=z0+(i+.5)*dz,y=proceduralDeck(id,z),w=Math.max(0,proceduralHullWidth(id,z,y)*sx-d.shellThicknessMetres);
+    const t=d.loading.structureFloorThicknessMetres;wood(2*w*dz*sz*t,y*sy-t*.5);
+  }
+  const benchZs=[...new Set([...d.stations.map(s=>s.seat[2]),...Object.values(d.crewStations).map(s=>s.z)])];
+  for(const z of benchZs){
+    const y=d.seatHeight+hullLoftSheer(p,z),w=Math.max(0,proceduralHullWidth(id,z,y)-d.shellThicknessMetres/sx);
+    if(w<.1)continue;
+    const volume=2*w*sx*(.032*sy)*(.13*sz);benchVolume+=volume;wood(volume,(y-.016)*sy);
+    const floor=proceduralDeck(id,z),height=Math.max(0,y-.02-floor)*sy;
+    wood(2*Math.PI*.022**2*sx*sz*height,(floor+y-.02)*sy*.5);
+  }
+  if(d.keel){const k=d.keel,n=48,step=(k.bounds[1]-k.bounds[0])/n;
+    for(let i=0;i<n;i++){const z=k.bounds[0]+(i+.5)*step;wood(k.width*sx*k.depth*sy*step*sz,(p.levels[0]+hullLoftSheer(p,z)-k.depth*.5)*sy);}
+  }
+  for(const m of d.masts){
+    const y=proceduralDeck(id,m.z),height=(m.height-y)*sy,a=m.radius,b=.018;
+    const volume=Math.PI*sx*sz*height*(a*a+a*b+b*b)/3;
+    const t=(a*a+2*a*b+3*b*b)/(4*(a*a+a*b+b*b));mastVolume+=volume;wood(volume,y*sy+height*t);
+  }
+  const cargo=d.equipment.cargo??[],cargoWeight=cargo.reduce((sum,c)=>sum+c.extent.reduce((v,x)=>v*x,1),0);
+  const storesFloorY=cargoWeight?cargo.reduce((sum,c)=>sum+proceduralDeck(id,c.z)*sy*c.extent.reduce((v,x)=>v*x,1),0)/cargoWeight:proceduralDeck(id,0)*sy;
+  // Only relative wood volumes place fixed mass. They do not claim a measured
+  // hull weight or turn reported tonnage into displacement. Rig cloth/oar mass
+  // and moving crew redistribution remain outside this static loading proxy.
+  const result=Object.freeze({hullLocalY:woodMoment/woodVolume,storesHullLocalY:storesFloorY+.05,shellArea,shellCentroidY,woodVolume,benchVolume,mastVolume});
+  boatRowingStructureCache.set(key,result);return result;
+}
 function additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,id){
   provisionDays=provisionSetting(provisionDays??proceduralProvisionDays(id));cargoTonnes=cargoSetting(cargoTonnes);
   const table=additionalHydroTable(id),d=table.design,M=d.loading,sy=d.frame.verticalScale;
   if(!M||!['crew','personKg','waterKgPerDay','foodKgPerDay','casksKg','sparesKg','gmBeamFraction'].every(key=>Number.isFinite(M[key])&&M[key]>=0)
     ||!(M.personKg>0)||!(M.gmBeamFraction>0)||!Number.isInteger(M.crew)||typeof M.designIncludesManifest!=='boolean')
     throw Error('No explicit loading manifest for '+id);
+  if(Object.hasOwn(ROWING_DESIGNS,id)&&!(Number.isFinite(M.structureFloorThicknessMetres)&&M.structureFloorThicknessMetres>0))throw Error('No authored rowing floor structure for '+id);
   const base=additionalHydrostatics(length,beam,0,id),datumDraft=table.datumDraft*sy;
   const crewMass=M.crew*M.personKg,waterMass=M.crew*M.waterKgPerDay*provisionDays,foodMass=M.crew*M.foodKgPerDay*provisionDays;
   const storesMass=M.casksKg+M.sparesKg,cargoMass=cargoTonnes*1000,loadMass=crewMass+waterMass+foodMass+storesMass+cargoMass;
@@ -178,17 +234,18 @@ function additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,id){
   const ballast=d.keel?.ballast,ballastMass=Number.isFinite(ballast?.massKg)?ballast.massKg:0;
   const fixedMass=Math.max(base.mass*.3,base.mass-(M.designIncludesManifest?standardLoad:0),ballastMass),mass=fixedMass+loadMass;
   const seated=Object.hasOwn(ROWING_DESIGNS,id),seats=seated?Object.values(d.crewStations):null;
+  const structure=seated?boatRowingStructure(id,length,beam):null;
   const crewKG=seated?datumDraft+seats.reduce((sum,p)=>sum+p.y*sy,0)/seats.length+(M.personCGAboveSeat??.35):
     datumDraft+proceduralHullDeck(id,0)*sy+ADDITIONAL_LOAD_PLACEMENT.personCGAboveDeck;
-  const storesKG=ADDITIONAL_LOAD_PLACEMENT.storesAboveBottom*sy;
-  // Match the complete standard manifest to its own authored GM target. This
-  // keeps stores/crew from changing the target simply by being counted twice.
+  const storesKG=seated?datumDraft+structure.storesHullLocalY:ADDITIONAL_LOAD_PLACEMENT.storesAboveBottom*sy;
+  // Legacy additional sailing hulls retain their authored GM calibration.
+  // Open rowing craft instead place structure on their actual shell/equipment.
   const targetKG=base.centreOfBuoyancy+base.waterplaneMoment/base.volume-beam*M.gmBeamFraction;
   const structureMass=fixedMass-ballastMass,ballastKG=ballastMass?datumDraft+ballast.centre[1]*sy:0;
   // An explicit lead ballast is a real mass at its authored depth. Do not
   // silently cancel its righting lever by solving the hull KG back to a GM.
-  const structureKG=datumDraft+(d.profile.deck*.55)*sy;
-  const fixedKG=ballastMass?(structureMass*structureKG+ballastMass*ballastKG)/fixedMass:
+  const structureKG=seated?datumDraft+structure.hullLocalY:datumDraft+(d.profile.deck*.55)*sy;
+  const fixedKG=seated?structureKG:ballastMass?(structureMass*structureKG+ballastMass*ballastKG)/fixedMass:
     ((fixedMass+standardLoad)*targetKG-crewMass*crewKG-(standardLoad-crewMass)*storesKG)/fixedMass;
   let low=-table.physicalDraft*sy,high=table.deck*sy-.15;
   const maximumMass=additionalHydrostatics(length,beam,high,id).mass;
@@ -198,7 +255,7 @@ function additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,id){
   const sinkage=(low+high)*.5,loaded=additionalHydrostatics(length,beam,sinkage,id),{volume,waterplaneArea}=loaded;
   const draft=table.physicalDraft*sy+sinkage,freeboard=table.deck*sy-sinkage;
   const centreOfGravity=(fixedMass*fixedKG+crewMass*crewKG+(loadMass-crewMass)*storesKG)/mass;
-  const metacentricHeight=Math.max(.1,loaded.centreOfBuoyancy+loaded.waterplaneMoment/volume-centreOfGravity);
+  const rawGM=loaded.centreOfBuoyancy+loaded.waterplaneMoment/volume-centreOfGravity,metacentricHeight=Math.max(.1,rawGM);
   const verticalRadius=(table.physicalDraft+table.deck)*sy*.35;
   const fixedRoll=ballastMass?structureMass*((beam*.38)**2+verticalRadius**2+(structureKG-centreOfGravity)**2)+ballastMass*((d.keel.width*beam/d.frame.beam*.25)**2+(ballastKG-centreOfGravity)**2):fixedMass*((beam*.38)**2+verticalRadius**2+(fixedKG-centreOfGravity)**2);
   const rollInertia=1.2*(fixedRoll
@@ -212,6 +269,9 @@ function additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,id){
   return {modelCode:hydroModelCode(id),length,beam,provisionDays,cargoTonnes,datumDraft,draft,sinkage,freeboard,volume,mass,addedMass,
     fixedMass,loadMass,crewMass,waterMass,foodMass,storesMass,cargoMass,ballastMass,ballastKG,overloadKg:Math.max(0,mass-maximumMass),waterplaneArea,centreOfGravity,
     referenceDisplacementKg:M.referenceDisplacementKg??null,referenceMassDifferenceKg:Number.isFinite(M.referenceDisplacementKg)?mass-M.referenceDisplacementKg:null,
+    fixedKG,structureKG,crewKG,storesKG,rawGM,stabilityClamped:rawGM<.1,
+    structureCGBasis:seated?'authored uniform wood shell/floor/bench/keel/mast volume':ballastMass?'authored hull and explicit lead ballast':'authored target GM',
+    structureShellCentroidY:structure?.shellCentroidY??null,structureGeometricWoodVolume:structure?.woodVolume??null,
     heaveOmega:Math.sqrt(SEAWATER_DENSITY*9.81*waterplaneArea/(mass+addedMass)),drag:.5*SEAWATER_DENSITY*.012*.85*length*(beam+2*draft),
     metacentricHeight,rollInertia,rollStiffness,rollDamping,pitchInertia,pitchStiffness,pitchDamping};
 }

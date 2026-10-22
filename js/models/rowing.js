@@ -27,6 +27,7 @@ function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,b
     keel:keelDepth?{bounds:[-5.65,5.65],depth:keelDepth/sy,width:keelWidth/sx}:null,
     loading:{crew:people,personKg:80,personCGAboveSeat:.35,waterKgPerDay:4,foodKgPerDay:1.2,casksKg:id==='oseberg'?180:id==='lusoria'?80:45,
       sparesKg:id==='oseberg'?350:id==='lusoria'?200:70,defaultProvisionDays:id==='oseberg'?7:id==='lusoria'?2:1,designIncludesManifest:true,gmBeamFraction:id==='oseberg'?.13:id==='lusoria'?.16:.18,
+      structureFloorThicknessMetres:.025,
       provenance:'Authored service manifest; reported hull weight/tonnage is retained only as source metadata.'},
     propulsion:{kind:propulsor,driveFraction:.44,cadence:.45,maxCadence:.70,catchAngle:.52,
       bladeLength:propulsor==='paddle'?.55:.62,bladeWidth:propulsor==='paddle'?.18:.15,bladeThickness:.018,

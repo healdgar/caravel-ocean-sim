@@ -113,3 +113,32 @@ test('seated oar torso follows the loom toward catch and finish instead of leani
     }
   }
 });
+
+test('open rowing stability follows physically placed wood, seated people and dry stores',()=>{
+  for(const id of ['oseberg','lusoria','taino-canoe']){
+    const d=proceduralDesign(id),h=boatHydrodynamics(d.runtime.length,d.runtime.beam,undefined,0,id),sy=d.frame.verticalScale;
+    const seats=Object.values(d.crewStations),meanSeat=seats.reduce((sum,p)=>sum+p.y*sy,0)/seats.length;
+    overnightPhysicsClose(h.crewKG,h.datumDraft+meanSeat+d.loading.personCGAboveSeat);
+    overnightPhysicsClose(h.storesKG,h.datumDraft+proceduralDeck(id,d.equipment.cargo[0].z)*sy+.05);
+    assert.equal(h.fixedKG,h.structureKG);assert.ok(h.structureGeometricWoodVolume>0);assert.ok(Number.isFinite(h.structureShellCentroidY));
+    assert.ok(h.structureKG>0&&h.structureKG<h.datumDraft+proceduralHullDeck(id,0)*sy,'fixed structure cannot be placed above the amidships gunwale to force a desired GM');
+    overnightPhysicsClose(h.centreOfGravity,(h.fixedMass*h.structureKG+h.crewMass*h.crewKG+(h.loadMass-h.crewMass)*h.storesKG)/h.mass);
+    const hydro=hullHydrostatics(d.runtime.length,d.runtime.beam,h.sinkage,id);
+    overnightPhysicsClose(h.rawGM,hydro.centreOfBuoyancy+hydro.waterplaneMoment/hydro.volume-h.centreOfGravity);
+    assert.equal(h.metacentricHeight,Math.max(.1,h.rawGM));assert.equal(h.stabilityClamped,h.rawGM<.1);
+    const full=boatHydrodynamics(d.runtime.length,d.runtime.beam,14,0,id);
+    assert.equal(full.structureKG,h.structureKG,'stores cannot silently retune fixed structure CG');
+    overnightPhysicsClose(full.centreOfGravity,(full.fixedMass*h.structureKG+full.crewMass*h.crewKG+(full.loadMass-full.crewMass)*h.storesKG)/full.mass);
+  }
+});
+
+test('rowing grip and boot targets remain anatomical left/right on both sides of the hull',()=>{
+  for(const id of ['oseberg','lusoria','taino-canoe']){
+    const d=proceduralDesign(id),b=overnightPhysicsBoat(id);b.rowingState={phase:.08,rate:.45,effortPort:1,effortStarboard:1};
+    for(const station of d.stations)for(const phase of [.08,.3,.65,.92]){
+      const pose=rowingStationPose(b,station.id,{phase}),leftX=station.kind==='oar'?1:-1;
+      assert.ok((pose.hands[0][0]-pose.hands[1][0])*leftX>0,'left hand cannot cross into the right grip because of hull side');
+      assert.ok((pose.feet[0][0]-pose.feet[1][0])*leftX>=0,'boots use the same anatomical side as seated actor yaw');
+    }
+  }
+});
