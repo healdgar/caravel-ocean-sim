@@ -21,6 +21,12 @@ test('actual mature native trees and their depth impostors preserve silhouette a
       const pack=await loadForestScenery();if(!pack.impostors)throw Error('Actual native atlases required: '+pack.impostorError);
       if(pack.manifest.nativeSource?.mode!=='catalog-mature-usdz')throw Error('This witness requires the actual catalogued mature native assets');
       if(pack.manifest.prototypes.length!==5||pack.impostors.manifest.layout.grid[0]!==16||!pack.impostors.manifest.layout.views.some(v=>v.direction[1]<0))throw Error('Five full-sphere mature specimens required');
+      const projections=pack.impostors.manifest.prototypes.map((p,i)=>{
+        const identity=pack.manifest.prototypes[i],projection=p.projection;
+        if(p.id!==identity.id||p.radius!==identity.radius||p.centre.some((v,k)=>v!==identity.centre[k]))throw Error('Native identity bounds changed');
+        if(!projection?.centre?.every(Number.isFinite)||projection.centre.length!==3||!(projection.supportRadius>0)||projection.groundPlaneY!==0||!projection.coverageBounds)throw Error('Exact above-ground projection metadata required');
+        return projection;
+      });
       const source=await pack.loadNative(),device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
       device.onuncapturederror=e=>errors.push(e.error.message);device.lost.then(info=>{if(info.reason!=='destroyed')errors.push(info.message);});
       const shader=async(code,label)=>{const module=device.createShaderModule({code,label}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
@@ -46,7 +52,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
         {binding:0,visibility:S.FRAGMENT,texture},{binding:1,visibility:S.FRAGMENT,texture},{binding:2,visibility:S.FRAGMENT,sampler:{}},{binding:3,visibility:S.VERTEX|S.FRAGMENT,buffer:storage}]});
       const layout=device.createPipelineLayout({bindGroupLayouts:[layout0,layout1,layout2,layout3]});
       const pipeline=(entryPoint,impostor=false)=>device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:impostor?'forestImpostorVS':'forestCanopyVS',buffers:impostor?[]:[FOREST_VERTEX_LAYOUT]},
-        fragment:{module,entryPoint,targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'},
+        fragment:{module,entryPoint,targets:[{format:'rgba16float'}]},primitive:{topology:'triangle-list',cullMode:'none'},
         depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:entryPoint!=='forestNativeOpaqueFS'}});
       const opaque=await pipeline('forestNativeOpaqueFS'),leaf=await pipeline('forestNativeLeafFS'),impostor=await pipeline('forestImpostorFS',true);
       const groundCode=await shader(FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
@@ -55,7 +61,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
  return F.viewProj*vec4f(vec3f(q[i].x,0,q[i].y)-F.camPos.xyz,1);
 }
 @fragment fn groundFS()->@location(0)vec4f{return vec4f(0,0,0,1);}`,'same opaque ground for both representations');
-      const ground=await device.createRenderPipelineAsync({layout,vertex:{module:groundCode,entryPoint:'groundVS'},fragment:{module:groundCode,entryPoint:'groundFS',targets:[{format:'rgba8unorm'}]},
+      const ground=await device.createRenderPipelineAsync({layout,vertex:{module:groundCode,entryPoint:'groundVS'},fragment:{module:groundCode,entryPoint:'groundFS',targets:[{format:'rgba16float'}]},
         primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4}});
       const group0=device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:frame}}]}),group1=device.createBindGroup({layout:layout1,entries:[]}),group3=atlas.bind(impostor);
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear'}),repeatSampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat'});
@@ -65,25 +71,48 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
         for(let family=0;family<4;family++){const f=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;e.push({binding:first,resource:f.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:f.normal.createView({dimension:'2d-array'})});}
         return device.createBindGroup({layout:layout2,entries:e});
       });
-      const W=128,H=128,target=device.createTexture({size:[W,H],format:'rgba8unorm',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
-      const msaa=device.createTexture({size:[W,H],format:'rgba8unorm',sampleCount:4,usage:T.RENDER_ATTACHMENT}),depth=device.createTexture({size:[W,H],format:'depth32float',sampleCount:4,usage:T.RENDER_ATTACHMENT});
-      const render=async(p,mode)=>{
-        const read=device.createBuffer({size:W*H*4,usage:B.COPY_DST|B.MAP_READ}),encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({
-          colorAttachments:[{view:msaa.createView(),resolveTarget:target.createView(),loadOp:'clear',storeOp:'discard',clearValue:[0,0,0,0]}],depthStencilAttachment:{view:depth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:0}});
+      const W=384,H=384,NATIVE_SCALE=4,textures=[];
+      const targetFor=scale=>{
+        const size=[W*scale,H*scale],target=device.createTexture({size,format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING|T.COPY_SRC});
+        const msaa=device.createTexture({size,format:'rgba16float',sampleCount:4,usage:T.RENDER_ATTACHMENT}),depth=device.createTexture({size,format:'depth32float',sampleCount:4,usage:T.RENDER_ATTACHMENT});
+        textures.push(target,msaa,depth);return {target,msaa,depth};
+      };
+      const logical=targetFor(1),supersampled=targetFor(NATIVE_SCALE);
+      const averageModule=await shader(`@group(0)@binding(0)var source:texture_2d<f32>;
+@vertex fn vs(@builtin(vertex_index)i:u32)->@builtin(position)vec4f{
+ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));return vec4f(p[i],0,1);
+}
+@fragment fn fs(@builtin(position)pixel:vec4f)->@location(0)vec4f{
+ let p=vec2i(pixel.xy)*4;var coverage=0.;
+ for(var y=0;y<4;y++){for(var x=0;x<4;x++){coverage+=textureLoad(source,p+vec2i(x,y),0).r;}}
+ return vec4f(coverage/16.,0,0,1);
+}`,'native reference GPU 4x4 linear coverage area average');
+      const averagePipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module:averageModule,entryPoint:'vs'},fragment:{module:averageModule,entryPoint:'fs',targets:[{format:'rgba16float'}]}});
+      const averageGroup=device.createBindGroup({layout:averagePipeline.getBindGroupLayout(0),entries:[{binding:0,resource:supersampled.target.createView()}]});
+      const half=(view,offset)=>{const h=view.getUint16(offset,true),sign=h&0x8000?-1:1,e=(h>>10)&31,m=h&1023;return e===0?sign*m*2**-24:e===31?(m?NaN:sign*Infinity):sign*(1+m/1024)*2**(e-15);};
+      const render=async(p,mode,scale=1)=>{
+        const output=scale===NATIVE_SCALE?supersampled:logical;
+        // Change only physical pixel dimensions: the logical camera/projection
+        // and immutable native geometry stay identical in all three witnesses.
+        frameData.set([W*scale,H*scale,1/(W*scale),1/(H*scale)],36);device.queue.writeBuffer(frame,0,frameData);
+        const read=device.createBuffer({size:W*H*8,usage:B.COPY_DST|B.MAP_READ}),encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({
+          colorAttachments:[{view:output.msaa.createView(),resolveTarget:output.target.createView(),loadOp:'clear',storeOp:'discard',clearValue:[0,0,0,0]}],depthStencilAttachment:{view:output.depth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:0}});
         pass.setBindGroup(0,group0);pass.setBindGroup(1,group1);pass.setBindGroup(2,groups[p.id]);pass.setBindGroup(3,group3);
         // A real shared depth plane occludes buried source roots AND any atlas
         // reconstruction behind that ground. No colour/vertex clipping shortcut.
         pass.setPipeline(ground);pass.draw(6);
         if(mode==='native'){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.setPipeline(opaque);pass.drawIndexed(p.wood.indexCount,1,p.wood.firstIndex);pass.setPipeline(leaf);pass.drawIndexed(p.leaf.indexCount,1,p.leaf.firstIndex);}
         else{pass.setPipeline(impostor);pass.setIndexBuffer(atlas.indices,'uint32');pass.drawIndexed(6,1);}
-        pass.end();encoder.copyTextureToBuffer({texture:target},{buffer:read,bytesPerRow:W*4},[W,H]);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
-        // R=white covered samples / MSAA4. Resolved A would square fractional
-        // source alpha under alpha-to-coverage and is deliberately not measured.
-        const bytes=new Uint8Array(read.getMappedRange()),coverage=Uint8Array.from({length:W*H},(_,i)=>bytes[i*4]);read.unmap();read.destroy();return coverage;
+        pass.end();
+        if(scale===NATIVE_SCALE){const average=encoder.beginRenderPass({colorAttachments:[{view:logical.target.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,0]}]});average.setPipeline(averagePipeline);average.setBindGroup(0,averageGroup);average.draw(3);average.end();}
+        encoder.copyTextureToBuffer({texture:logical.target},{buffer:read,bytesPerRow:W*8},[W,H]);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+        // White R preserves actual area. Never measure resolved alpha (alpha²)
+        // or threshold tiny leaves before GPU averaging the64 native samples.
+        const bytes=new DataView(read.getMappedRange()),coverage=Float32Array.from({length:W*H},(_,i)=>half(bytes,i*8));read.unmap();read.destroy();return coverage;
       };
       const normalize=a=>a.map(x=>x/Math.hypot(...a)),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
       const camera=(p,requested,diameter)=>{
-        const tan=.5,focal=H/(2*tan),distance=p.radius*Math.sqrt(1+(2*focal/diameter)**2),centre=[p.centre[0],p.centre[1]-sinks[p.id],p.centre[2]];
+        const projection=projections[p.id],tan=.5,focal=H/(2*tan),distance=projection.supportRadius*Math.sqrt(1+(2*focal/diameter)**2),centre=[projection.centre[0],projection.centre[1]-sinks[p.id],projection.centre[2]];
         // A distant -0.2Y ray to a low crown can put the camera underground.
         // Keep the original bound and its requested projected diameter; only
         // lower the ray as far as a real 1.7m above-ground eye permits. Report
@@ -93,7 +122,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
         const d=[requested[0]/horizontal*span,y,requested[2]/horizontal*span],r=normalize(cross([0,1,0],d)),u=cross(d,r);
         frameData.fill(0);for(let k=0;k<3;k++){frameData[k*4]=r[k]/tan;frameData[k*4+1]=u[k]/tan;frameData[k*4+3]=-d[k];}
         frameData[14]=.1;frameData.set(centre.map((v,k)=>v+d[k]*distance),16);frameData.set(r.map(v=>v*tan),20);frameData.set(u.map(v=>v*tan),24);frameData.set(d.map(v=>-v),28);frameData.set([0,1,0,1],32);frameData.set([W,H,1/W,1/H],36);device.queue.writeBuffer(frame,0,frameData);
-        return {requestedDirection:requested,actualDirection:d,eye:Array.from(frameData.slice(16,19)),lowerClamped:Math.abs(y-requested[1])>1e-8,distance,rootSink:sinks[p.id],sourceRoot:p.firstRoot};
+        return {requestedDirection:requested,actualDirection:d,eye:Array.from(frameData.slice(16,19)),lowerClamped:Math.abs(y-requested[1])>1e-8,distance,rootSink:sinks[p.id],sourceRoot:p.firstRoot,projectionCentre:projection.centre,supportRadius:projection.supportRadius,identityCentre:p.centre,identityRadius:p.radius};
       };
       // Exact squared Euclidean distance transform, not a 4-neighbour/chamfer
       // approximation that could conceal more than the allowed 3px displacement.
@@ -107,7 +136,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       };
       const compare=(native,atlas)=>{
         const a=native.map(v=>v>0?1:0),b=atlas.map(v=>v>0?1:0),toA=distances(a),toB=distances(b);let nativeSum=0,atlasSum=0,nativePixels=0,atlasPixels=0,lost=0,added=0,intersection=0,union=0;
-        for(let i=0;i<a.length;i++){nativeSum+=native[i]/255;atlasSum+=atlas[i]/255;if(a[i]){nativePixels++;lost=Math.max(lost,toB[i]);}if(b[i]){atlasPixels++;added=Math.max(added,toA[i]);}intersection+=a[i]&&b[i]?1:0;union+=a[i]||b[i]?1:0;}
+        for(let i=0;i<a.length;i++){nativeSum+=native[i];atlasSum+=atlas[i];if(a[i]){nativePixels++;lost=Math.max(lost,toB[i]);}if(b[i]){atlasPixels++;added=Math.max(added,toA[i]);}intersection+=a[i]&&b[i]?1:0;union+=a[i]||b[i]?1:0;}
         return {nativeSum,atlasSum,nativePixels,atlasPixels,relativeCoverageError:(atlasSum-nativeSum)/Math.max(nativeSum,1e-8),nativeToAtlas:Math.sqrt(lost),atlasToNative:Math.sqrt(added),iou:intersection/Math.max(union,1)};
       };
       const nearest=target=>pack.impostors.manifest.layout.views.reduce((best,view)=>view.direction.reduce((s,v,k)=>s+v*target[k],0)>best.direction.reduce((s,v,k)=>s+v*target[k],0)?view:best);
@@ -117,23 +146,24 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       const directions=[['horizontal-east',[1,0,0]],['horizontal-west',[-1,0,0]],['horizontal-north',[0,0,-1]],['horizontal-south',[0,0,1]],['lower-ne',[1,-.2,1]],['lower-sw',[-1,-.2,-1]],['above-nw',[1,.5,-1]],['above-se',[-1,.5,1]],...sourceViews.map(v=>['source-frame-'+v.index,v.direction])].map(([name,d])=>({name,d:normalize(d)}));
       const rows=[],witnesses=[];
       for(const p of pack.manifest.prototypes){let worst=null;
-        for(const direction of directions)for(const diameter of [32,48,64]){
-          const placement=camera(p,direction.d,diameter);const native=await render(p,'native'),atlas=await render(p,'atlas'),metric=compare(native,atlas),row={species:p.species,direction:direction.name,diameter,...placement,...metric};rows.push(row);
+        for(const direction of directions)for(const diameter of [32,48,64,128,256]){
+          const placement=camera(p,direction.d,diameter),native1x=await render(p,'native'),native=await render(p,'native',NATIVE_SCALE),atlas=await render(p,'atlas'),metric=compare(native,atlas);
+          const row={species:p.species,direction:direction.name,diameter,...placement,...metric,native1xDiagnostic:compare(native1x,atlas),native1xVsSupersampled:compare(native,native1x)};rows.push(row);
           const score=Math.max(metric.nativeToAtlas/3,metric.atlasToNative/3,metric.nativeSum>=10?Math.abs(metric.relativeCoverageError)/.2:0);if(!worst||score>worst.score)worst={score,row,native,atlas};
         }
         const canvas=new OffscreenCanvas(W*3,H+20),context=canvas.getContext('2d'),image=context.createImageData(W*3,H);for(let i=0;i<W*H;i++){
-          const x=i%W,y=Math.floor(i/W),a=worst.native[i],b=worst.atlas[i];for(let col=0;col<3;col++){const at=(y*W*3+col*W+x)*4;image.data.set(col===0?[a,a,a,255]:col===1?[b,b,b,255]:[Math.max(0,b-a),0,Math.max(0,a-b),255],at);}}
-        context.fillStyle='#000';context.fillRect(0,0,canvas.width,canvas.height);context.putImageData(image,0,20);context.fillStyle='#fff';context.font='10px monospace';context.fillText('native | depth atlas | excess red / loss blue',3,12);
+          const x=i%W,y=Math.floor(i/W),a=worst.native[i]*255,b=worst.atlas[i]*255;for(let col=0;col<3;col++){const at=(y*W*3+col*W+x)*4;image.data.set(col===0?[a,a,a,255]:col===1?[b,b,b,255]:[Math.max(0,b-a),0,Math.max(0,a-b),255],at);}}
+        context.fillStyle='#000';context.fillRect(0,0,canvas.width,canvas.height);context.putImageData(image,0,20);context.fillStyle='#fff';context.font='10px monospace';context.fillText('native4x + MSAA4 area average | depth atlas | excess red / loss blue',3,12);
         const name='forest-appearance-'+p.species+'-'+worst.row.direction+'-'+worst.row.diameter+'.png';const response=await fetch('/__shot?name='+encodeURIComponent(name),{method:'POST',body:await canvas.convertToBlob({type:'image/png'})});if(!response.ok)throw Error('Witness write failed');witnesses.push({file:'shots/'+name,...worst.row});
       }
-      await device.queue.onSubmittedWorkDone();atlas.destroy();surfaces.destroy();for(const b of allocated)b.destroy();for(const t of [target,msaa,depth])t.destroy();device.destroy();
-      const report={format:'waterworld.forest-atlas-appearance',version:1,qualification:'150 bounded grounded mature/source-frame/off-frame witnesses; global appearanceErrorSupported remains false; whole-support3px fallback unchanged',
-        fixture:{groundY:0,minimumEyeHeight:1.7,rootCollar:'First actual root sink per source prototype; instance scale1/yaw0; source geometry/bounds unchanged',mask:'Resolved white RGB R coverage, not alpha squared',silhouetteTolerancePixels:3,coverageTolerance:.2,coverageMinimumReferenceSum:10},
+      await device.queue.onSubmittedWorkDone();atlas.destroy();surfaces.destroy();for(const b of allocated)b.destroy();for(const t of textures)t.destroy();device.destroy();
+      const report={format:'waterworld.forest-atlas-appearance',version:2,qualification:'250 bounded grounded mature/source-frame/off-frame witnesses; global appearanceErrorSupported remains false; whole-support3px fallback unchanged',
+        fixture:{groundY:0,minimumEyeHeight:1.7,rootCollar:'First actual root sink per source prototype; instance scale1/yaw0; source geometry/bounds unchanged',cameraMapping:'Projection centre and supportRadius set requested above-ground body diameter; full native identity centre/radius remain unchanged and independently verified',mask:'Linear white R coverage, not alpha squared',logicalPixels:[W,H],diameters:[32,48,64,128,256],nativeReference:{scale:NATIVE_SCALE,physicalPixels:[W*NATIVE_SCALE,H*NATIVE_SCALE],msaa:4,logicalPixelSamples:64,filter:'GPU 4x4 arithmetic area average of resolved linear R; native1x MSAA4 diagnostic retained separately'},silhouetteTolerancePixels:3,coverageTolerance:.2,coverageMinimumReferenceSum:10},
         errors,rows,witnesses,sourceFiles:pack.manifest.files,atlasSourceFiles:pack.impostors.manifest.source.files,nativeMode:pack.manifest.nativeSource.mode,views:pack.impostors.manifest.layout.views.length};
       const response=await fetch('/__shot?name=forest-atlas-appearance-report.json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(report,null,2)});if(!response.ok)throw Error('Appearance JSON report write failed');
       return {...report,reportFile:'shots/forest-atlas-appearance-report.json'};
     });
-    assert.deepEqual(result.errors,[]);assert.equal(result.nativeMode,'catalog-mature-usdz');assert.equal(result.views,256);assert.equal(result.rows.length,150);
+    assert.deepEqual(result.errors,[]);assert.equal(result.nativeMode,'catalog-mature-usdz');assert.equal(result.views,256);assert.equal(result.rows.length,250);
     for(const name of ['vertices.bin','indices.bin','roots.bin'])assert.deepEqual(result.sourceFiles[name].sha256,result.atlasSourceFiles[name].sha256,'same actual source '+name);
     assert.ok(result.rows.every(row=>row.eye[1]>=1.7-1e-4),'every comparison camera stays above physical ground');
     assert.ok(result.rows.filter(row=>row.direction.startsWith('lower-')).every(row=>row.actualDirection[1]<0),'lower witnesses still look upward from below the crown centre');
