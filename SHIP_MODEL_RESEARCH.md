@@ -274,6 +274,39 @@ folder 4**, explicitly contains *Flying Cloud* material; those are later model
 research records, not automatically surviving builder's offsets.
 [Collection finding aid](https://research.mysticseaport.org/coll/coll261/).
 
+#### Working rig inventory audit — 22 October 2026
+
+The [Boston Daily Atlas report of 25 April 1851](https://www.sobco.com/ship_model/BDA/1851-04-25.html)
+explicitly lists a **56 ft crossjack yard**, **24 ft main-Spencer gaff**,
+**55 ft spanker boom** and **40 ft spanker gaff**. This is the contemporary
+text through a modern transcription; the original newspaper facsimile was not
+checked. The report confirms those spars, but its yard table does not establish
+the lowest mizzen sail's cloth dimensions or when that cloth was set. Do not
+infer fifteen working square sails merely from fifteen yards, or infer a bare
+crossjack solely from Victory's different configuration. Main-Spencer hardware
+has direct textual support; its working cloth remains an authored interpretation.
+
+The Museum of Fine Arts' own **April 1935 Bulletin, p. 25**, describes Boucher's
+Flying Cloud model as built from original plans/data under Arthur H. Clark,
+with all sails set. That establishes the museum's stated model provenance,
+not a recovered sail inventory for our mesh. The
+[museum publication](https://gizamedia.rc.fas.harvard.edu/images/MFA-images/Giza/GizaImage/full/library/bmfa_pdfs/bmfa33_1935_21to25.pdf)
+was readable, but its relevant model image was not available for detailed
+identification. The [museum-contributed catalogue record, 35.42](https://luna.davidrumsey.com/amico135996-17603.html),
+dates Boucher's model to **1915**; later references calling it 1916 should not
+silently replace that catalogue date.
+
+Bradner's [individual-sail reconstruction index](https://www.sobco.com/ship_model/fc/Flying_Cloud_Plans_Bradner/indexes/Index-Flying_Cloud_Individual_Sails.htm)
+includes a mizzen “Skip Jack” sail and main Spencer. It is a useful later
+interpretation, not independent proof of the 1851 canvas inventory. The current
+model retains a working crossjack with this uncertainty explicit. Its **25 cloth
+surfaces and 15 yards** are implementation counts. Individual cloth dimensions,
+the mizzen staysail selection, chainplate spread, raised crossjack foot and gaff
+sheet stops remain authored; passing geometric clearance tests cannot certify
+their historical accuracy. The raised foot derives from actual spanker-boom
+clearance. Contact-classification defects must be fixed in the shared evaluator,
+not excused by deleting uncertain canvas or repeatedly moving fittings.
+
 ### Gipsy Moth IV, 1966: original-voyage Bermudan ketch
 
 **Build choice:** Chichester's original-voyage yacht, keeping departure and later
