@@ -1,7 +1,7 @@
 import { gltfQuatMultiply } from './gltf.js';
 import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
-import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts } from './crew-work.js';
+import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight } from './crew-work.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
 
@@ -130,8 +130,54 @@ function poseRowingWalkingFeet(a,s,boat){
   const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s),left=point('foot_l'),right=point('foot_r');
   s.moisturePoints=[left.map((v,i)=>(v+right[i])*.5),point('pelvis'),point('spine_02'),point('Head')];return true;
 }
+function poseGroundedGunBody(a,s,boat,lean){
+  poseNeutralSeatedBody(a);
+  const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Gunnery stance requires a pelvis');
+  const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),c=Math.cos(s.yaw),sn=Math.sin(s.yaw);
+  const floor=(x,z)=>crewDeckHeight(boat,z/sz,x/sx)*sy,feet=[];
+  for(const side of ['l','r']){
+    const f=a.footContacts?.[side];if(!f)throw Error('Gunnery stance requires measured '+side+' boot');
+    const x=f.ankle[0]*s.scale[0],z=f.ankle[2]*s.scale[2],X=s.position[0]+c*x+sn*z,Z=s.position[2]-sn*x+c*z;
+    const step=.05,n=poseUnit([-(floor(X+step,Z)-floor(X-step,Z))/(2*step),1,-(floor(X,Z+step)-floor(X,Z-step))/(2*step)]);
+    const sole=[X,floor(X,Z)+.002,Z],ankle=sole.map((v,i)=>v+n[i]*f.ankleAboveSole*s.scale[1]);
+    feet.push({side,sole,ankle,normal:n,target:actorLocal(ankle,s)});
+  }
+  const base=posePosition(a.world[pelvis]),fraction=Math.max(0,Math.min(1,lean/.45));
+  const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
+  // Knees and the hip hinge supply the reach. The actor remains upright/yaw-only,
+  // while measured boots keep the same contacts and all limb lengths survive.
+  poseMoveBone(a,pelvis,[base[0],base[1]+lift-.12*fraction,base[2]+.08*fraction]);
+  for(const [name,weight]of [['pelvis',.18],['spine_01',.45],['spine_02',.37]]){
+    const node=poseNodeIndex(a,name);if(node>=0){const angle=lean*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
+  }
+  // As in the rowing stance, lower the pelvis only as much as the genuine leg
+  // lengths require. Never lengthen bones to manufacture a planted boot.
+  let lower=0;
+  for(const p of feet){
+    const hip=posePosition(a.world[poseNodeIndex(a,'thigh_'+p.side)]),knee=posePosition(a.world[poseNodeIndex(a,'calf_'+p.side)]),ankle=posePosition(a.world[poseNodeIndex(a,'foot_'+p.side)]);
+    const length=Math.hypot(...poseSub(knee,hip))+Math.hypot(...poseSub(ankle,knee))-.006,horizontal=Math.hypot(p.target[0]-hip[0],p.target[2]-hip[2]);
+    lower=Math.min(lower,p.target[1]+Math.sqrt(Math.max(0,length*length-horizontal*horizontal))-hip[1]);
+  }
+  if(lower<0){const p=posePosition(a.world[pelvis]);p[1]+=lower;poseMoveBone(a,pelvis,p);}
+  for(const p of feet){
+    const side=p.side,sign=side==='l'?1:-1,f=a.footContacts[side];
+    solveCrewLimb(a,['thigh_'+side,'calf_'+side,'foot_'+side],p.target,[sign*.25,.35,.85]);
+    // Match the measured boot's rest orientation to the actual deck tangent;
+    // leg IK must not leave a tipped ankle or rotate the sole through the deck.
+    const n=poseUnit([c*p.normal[0]-sn*p.normal[2],p.normal[1],sn*p.normal[0]+c*p.normal[2]]);
+    const delta=[...poseCross([0,1,0],n),1+n[1]],size=Math.hypot(...delta),alignment=delta.map(v=>v/size);
+    const parent=a.parent[f.node],q=poseRotation(a.world[parent]),inverse=[-q[0],-q[1],-q[2],q[3]],desired=new Float32Array(4),local=new Float32Array(4);
+    gltfQuatMultiply(desired,alignment,poseRotation(f.restWorld));gltfQuatMultiply(local,inverse,desired);a.pose[f.node].r.set(local);
+    const toe=poseNodeIndex(a,'ball_'+side);if(toe>=0)a.pose[toe].r.set(a.rest[toe].r);
+    if(a.updateBranch)a.updateBranch(f.node);else a.update();
+    (s.grips??={})['foot_'+side]=p.target;
+  }
+  s.gunContacts={feet,lean};
+  const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s);
+  s.moisturePoints=[feet[0].sole.map((v,i)=>(v+feet[1].sole[i])*.5),point('pelvis'),point('spine_02'),point('Head')];
+}
 export function poseCrewWork(a,s,boat){
-  const j=s.job;s.grips=null;s.walkContacts=null;
+  const j=s.job;s.grips=null;s.walkContacts=null;s.gunContacts=null;
   if(!j&&poseSeatedCrew(a,s))return;
   if(j)poseRowingWalkingFeet(a,s,boat);
   if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
@@ -153,8 +199,10 @@ export function poseCrewWork(a,s,boat){
     s.grips=targets;return;
   }
   if(j?.kind==='gunnery'&&j.stage==='working'){
-    const tool=crewGunneryTool(s,boat);if(!tool?.hands)return;
-    a.blend('Brace',s.time,j.gunRole==='loader'?.50:.22);
+    const tool=crewGunneryTool(s,boat),active=s.intent==='work'&&!['ready','recoil','spent'].includes(j.gun.stage);
+    a.blend('Brace',s.time,active?(j.gunRole==='loader'?.50:.22):0);
+    poseGroundedGunBody(a,s,boat,active?(j.gunRole==='loader'&&boat.modelId==='victory'?.45:.10):0);
+    if(!tool?.hands)return;
     for(const [i,side]of ['l','r'].entries()){
       const hand=actorLocal(tool.hands[i],s),sign=side==='l'?1:-1;
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.2]);
