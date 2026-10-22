@@ -138,7 +138,7 @@ fn levelAt(world:vec3f)->f32 {
     // shell must still receive sea contact below the gunwale.
     let interior=probe.uvKind.z==3.0 || abs(p.x)<modelHullWidth(p.z,p.y,hull.rig.w)-inset;
     if(interior){threshold=floor-.08;}
-    width=modelHullWidth(p.z,rim,hull.rig.w)-inset;
+    width=select(0.0,modelHullWidth(p.z,rim,hull.rig.w)-inset,interior);
   }
   let inFootprint=p.z>deckMinZ() && p.z<deckMinZ()+deckLength() && abs(p.x)<width && p.y>=threshold;
   // A historical quarterdeck roof is not a generic shelter on an open canoe,

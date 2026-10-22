@@ -56,7 +56,7 @@ test('actual wetness compute separates dry open interiors, wet external shells a
         const model=requirePlayableShipModel(id),d=proceduralDesign(id),boat={modelId:id,...model.runtime},sy=model.designFrame.verticalScale,z=d.cockpit?3.4:0;
         makeHull(model,boat);const floor=proceduralDeck(id,z,0),rim=proceduralHullDeck(id,z),y= floor<rim?(floor+rim)/2:floor-.15/sy,x=proceduralHullWidth(id,z,y);
         const probe=(x,y,kind)=>[x,y,z,kind===3?20:1,0,0,kind,1];
-        const probes=[probe(0,floor+.02/sy,3),probe(0,floor+.02/sy,0),probe(x,y,0)],sea=Math.max(floor,y)*sy+.12;
+        const upper=rim-.05/sy,probes=[probe(0,floor+.02/sy,3),probe(0,floor+.02/sy,0),probe(x,y,0),probe(proceduralHullWidth(id,z,upper),upper,0)],sea=rim*sy-.005;
         const dry=await run(production,probes,{sea}),flooded=await run(production,probes,{sea,depth:.08}),rain=await run(production,probes,{sea:-10,rain:1});
         ships.push({id,dry,flooded,rain});
       }
@@ -85,7 +85,7 @@ test('actual wetness compute separates dry open interiors, wet external shells a
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(result.errors,[]);
     for(const s of result.ships){
-      assert.equal(s.dry[0],0,s.id+' dry inner floor never wets boots from external sea');assert.equal(s.dry[2],0,s.id+' inner floorboards remain dry');assert.ok(s.dry[4]>.5,s.id+' external shell still receives sea contact');
+      assert.equal(s.dry[0],0,s.id+' dry inner floor never wets boots from external sea');assert.equal(s.dry[2],0,s.id+' inner floorboards remain dry');assert.ok(s.dry[4]>.5,s.id+' external shell still receives sea contact');assert.ok(s.dry[6]>.5,s.id+' exterior just below the gunwale cannot be incorrectly protected by the dry interior');
       assert.ok(s.flooded[0]>.5&&s.flooded[2]>.5,s.id+' actual deck wash wets crew and floorboards');assert.ok(s.rain[0]>.01,s.id+' exposed actors receive rain');assert.ok(s.dry.concat(s.flooded,s.rain).every(Number.isFinite));
     }
     assert.ok(result.parity.every(s=>s.equal),'legacy four-model wetness GPU outputs remain exact');
