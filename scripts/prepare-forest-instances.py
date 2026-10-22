@@ -229,8 +229,10 @@ def hash32(value):
     return (value ^ (value >> 16)) & 0xffffffff
 
 
-def place_roots(region, sample, biome, prototypes, *, spacing=6.0, seed=47231, exclude=None, max_roots=100000):
-    SOURCE.require(2 <= spacing <= 32 and prototypes and 0 < max_roots <= 250000, "Invalid forest placement limits")
+def place_roots(region, sample, biome, prototypes, *, spacing=6.0, seed=47231, exclude=None,
+                crown_spacing_factor=.65, max_roots=250000):
+    SOURCE.require(2 <= spacing <= 32 and prototypes and 0 < crown_spacing_factor <= 1
+                   and isinstance(max_roots, int) and 0 < max_roots <= 250000, "Invalid forest placement limits")
     span, origin = float(region["spanMetres"]), region["localOrigin"]
     x0, z0 = origin["x"]-span/2, origin["z"]-span/2
     mask_size = int(region["vegetation"]["maskSize"])
@@ -266,7 +268,7 @@ def place_roots(region, sample, biome, prototypes, *, spacing=6.0, seed=47231, e
             if not good:continue
             gx, gz = math.floor(x/grid), math.floor(z/grid)
             nearby = [r for a in range(gx-1, gx+2) for b in range(gz-1, gz+2) for r in neighbours.get((a, b), ())]
-            if any(math.hypot(x-r[0], z-r[2]) < .65*(radius+r[-1]) for r in nearby):continue
+            if any(math.hypot(x-r[0], z-r[2]) < crown_spacing_factor*(radius+r[-1]) for r in nearby):continue
             sink = p["basalRadius"]*scale*math.hypot(sx, sz)+.08
             yaw = hash32(key+3)/2**32*math.tau
             tint = .92+hash32(key+4)/2**32*.16
@@ -280,7 +282,8 @@ def place_roots(region, sample, biome, prototypes, *, spacing=6.0, seed=47231, e
                                            "dimensions": [occupancy_size, occupancy_size], "cells": sorted(cells)}
 
 
-def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_dir=None):
+def prepare(source_dir, region_dir, output, *, spacing=None, force=False, native_dir=None,
+            crown_spacing_factor=None, max_roots=250000):
     source_dir = source_dir.resolve() if source_dir is not None else None
     region_dir, output = region_dir.resolve(), output.resolve()
     if output.exists():
@@ -321,6 +324,11 @@ def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_d
         source_documents["source-native-index.json"] = native_raw
     else:
         SOURCE.require(source_dir is not None, "Provide native-dir or an explicit legacy source-dir")
+    # Mature source crowns include sparse outlying branches. Closer stem spacing
+    # overlaps their interior foliage without changing any native geometry. This
+    # is an authored stand-density policy, not a biological growth calculation.
+    spacing = (3. if native_index else 6.) if spacing is None else spacing
+    crown_spacing_factor = (.32 if native_index else .65) if crown_spacing_factor is None else crown_spacing_factor
     prototypes = []
     for species in SPECIES:
         p = (direct_native_base(native_records[species], native_dir/species) if direct_native
@@ -331,7 +339,8 @@ def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_d
     exclude = None
     legacy = ROOT/"assets/canopy-scenery/saba/manifest.json"
     if native_index is None and legacy.is_file():exclude = SOURCE.finite_json(legacy.read_bytes())["coverage"]["boundsXZ"]
-    roots, coverage = place_roots(region, sample, biome, prototypes, spacing=spacing, exclude=exclude)
+    roots, coverage = place_roots(region, sample, biome, prototypes, spacing=spacing, exclude=exclude,
+                                 crown_spacing_factor=crown_spacing_factor, max_roots=max_roots)
     vertices, indices, vertex_count, index_count = [], [], 0, 0
     for p in prototypes:
         own = np.flatnonzero(roots[:, 8] == p["id"])
@@ -347,7 +356,10 @@ def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_d
                 "rootAttributes": ["x", "collarY", "z", "scale", "yaw", "linearR", "linearG", "linearB", "prototype", "sinkMetres", "reserved", "reserved"],
                 "rootCount": len(roots), "prototypes": prototypes, "coverage": coverage, "appearanceErrorSupported": False,
                 "sourceClaim": "Current native grown oak/maple/birch/elm/chestnut cohorts are authored visual proxies, not surveyed tropical flora. Near alpha reuses the declared game foliage texture; native far crowns are approximate, not appearance-certified. Auto collapse requires whole support <=3pixels.",
-                "placement": {"candidateSpacingMetres": spacing, "seed": 47231, "minimumBiomeByte": 96, "elevationMetres": [18, 840], "maximumSlope": 1.1, "minimumCrownSpacingFactor": .65,
+                "placement": {"candidateSpacingMetres": spacing, "seed": 47231, "minimumBiomeByte": 96, "elevationMetres": [18, 840], "maximumSlope": 1.1,
+                              "minimumCrownSpacingFactor": crown_spacing_factor, "maximumRoots": max_roots,
+                              "crownSpacingReference": "sum of source maximum horizontal foliage radii, scaled per root",
+                              "densityPolicy": "authored overlapping native crowns" if native_index else "legacy crown spacing",
                               "legacyStandExcluded": exclude, "terrainReceipts": terrain_receipts},
                 "files": {n: SOURCE.receipt(raw, **{ {"vertices.bin": "vertexCount", "indices.bin": "indexCount", "roots.bin": "rootCount"}[n]: {"vertices.bin": vertex_count, "indices.bin": index_count, "roots.bin": len(roots)}[n]}) for n, raw in streams.items()}}
     if native_index:
@@ -378,8 +390,11 @@ if __name__ == "__main__":
     parser.add_argument("--source-dir", type=Path, help="Explicit same-cohort scenery far source; unnecessary for mature catalog-native bundles")
     parser.add_argument("--region", type=Path, default=ROOT/"assets/world/saba")
     parser.add_argument("--output", type=Path, default=ROOT/"assets/forest-scenery/saba")
-    parser.add_argument("--spacing", type=float, default=6.)
+    parser.add_argument("--spacing", type=float, help="Candidate grid metres: default3 native,6 legacy")
+    parser.add_argument("--crown-spacing-factor", type=float, help="Minimum separation as a fraction of summed crown radii: default.32 native,.65 legacy")
+    parser.add_argument("--max-roots", type=int, default=250000, help="Hard failure limit; roots are never truncated (maximum250000)")
     parser.add_argument("--native-dir", type=Path, help="Native Hero bundle; mature catalog exports include their own same-tree far streams")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    prepare(args.source_dir, args.region, args.output, spacing=args.spacing, force=args.force, native_dir=args.native_dir)
+    prepare(args.source_dir, args.region, args.output, spacing=args.spacing, force=args.force, native_dir=args.native_dir,
+            crown_spacing_factor=args.crown_spacing_factor, max_roots=args.max_roots)

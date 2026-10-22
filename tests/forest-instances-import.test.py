@@ -52,5 +52,63 @@ class ForestInstanceImport(unittest.TestCase):
             contacts += int(np.any(distances <= radius+peers[:, 3]*5))
         self.assertGreater(contacts, len(roots)*.5, "forest crowns should actually touch, not form an orchard grid")
 
+    def test_overlapping_native_stand_is_denser_without_relaxing_site_exclusions(self):
+        region = {"spanMetres": 128., "localOrigin": {"x": 0., "z": 0.}, "vegetation": {"maskSize": 32}}
+        mask = np.full((32, 32), 255, dtype=np.uint8)
+        mask[:, :5] = 0
+        mask[11:14, 13:17] = 64  # A low-probability interior patch is still ineligible.
+        def sample(x, z):
+            if z > 34:return 0., 0., 0.
+            if z > 24:return 10., 0., 0.
+            if z < -36:return 900., 0., 0.
+            return 80.+.1*x, 1.11 if x > 32 else .1, 0.
+        prototypes = [{"id": i, "crownRadius": float(5+i), "basalRadius": .3} for i in range(5)]
+        source_prototypes = [dict(p) for p in prototypes]
+        exclusion = [-8, 8, -8, 8]
+        old, _ = IMPORTER.place_roots(region, sample, mask.tobytes(), prototypes, exclude=exclusion)
+        roots, coverage = IMPORTER.place_roots(region, sample, mask.tobytes(), prototypes,
+            spacing=3., crown_spacing_factor=.32, exclude=exclusion)
+        again, again_coverage = IMPORTER.place_roots(region, sample, mask.tobytes(), prototypes,
+            spacing=3., crown_spacing_factor=.32, exclude=exclusion)
+        np.testing.assert_array_equal(roots, again)
+        self.assertEqual(coverage, again_coverage)
+        self.assertGreater(len(roots), 2*len(old), "Native density policy should materially fill the forest interior")
+        self.assertEqual(prototypes, source_prototypes, "Density must never change native prototypes")
+        self.assertEqual(roots.shape[1], 12)
+        self.assertEqual(roots.dtype, np.dtype("<f4"))
+        def biome(x, z):
+            u, v = (x+64)/128, (z+64)/128
+            return 0 if not (0 <= u < 1 and 0 <= v < 1) else int(mask[int(v*32), int(u*32)])
+        for i, row in enumerate(roots):
+            x, collar, z, scale = map(float, row[:4]);proto = prototypes[int(row[8])]
+            h, sx, sz = sample(x, z)
+            self.assertGreaterEqual(biome(x, z), 96)
+            self.assertGreaterEqual(h, 18);self.assertLessEqual(h, 840)
+            self.assertLessEqual(math.hypot(sx, sz), 1.1)
+            self.assertFalse(-8 <= x <= 8 and -8 <= z <= 8)
+            self.assertAlmostEqual(collar+float(row[9]), h, delta=1e-5)
+            radius = proto["crownRadius"]*scale
+            for dx, dz in ((radius, 0), (-radius, 0), (0, radius), (0, -radius)):
+                self.assertGreaterEqual(biome(x+dx, z+dz), 48)
+                self.assertGreaterEqual(sample(x+dx, z+dz)[0], 5)
+            peers = np.delete(roots, i, axis=0)
+            distances = np.hypot(peers[:, 0]-x, peers[:, 2]-z)
+            radii = np.array([prototypes[int(p[8])]["crownRadius"]*float(p[3]) for p in peers])
+            self.assertTrue(np.all(distances >= .32*(radius+radii)-1e-5))
+
+    def test_root_budget_fails_instead_of_truncating_and_rejects_invalid_policy(self):
+        region = {"spanMetres": 128., "localOrigin": {"x": 0., "z": 0.}, "vegetation": {"maskSize": 4}}
+        mask = bytes([255]*16)
+        prototypes = [{"id": 0, "crownRadius": 5., "basalRadius": .3}]
+        sample = lambda x, z:(100., 0., 0.)
+        with self.assertRaisesRegex(ValueError, "root limit exceeded"):
+            IMPORTER.place_roots(region, sample, mask, prototypes, spacing=3., crown_spacing_factor=.32, max_roots=1)
+        for invalid in (0, 250001, 1.5):
+            with self.assertRaisesRegex(ValueError, "Invalid forest placement limits"):
+                IMPORTER.place_roots(region, sample, mask, prototypes, max_roots=invalid)
+        for invalid in (0., -.1, 1.01, math.nan):
+            with self.assertRaisesRegex(ValueError, "Invalid forest placement limits"):
+                IMPORTER.place_roots(region, sample, mask, prototypes, crown_spacing_factor=invalid)
+
 
 if __name__ == "__main__":unittest.main()
