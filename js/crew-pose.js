@@ -130,7 +130,7 @@ function poseRowingWalkingFeet(a,s,boat){
   const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s),left=point('foot_l'),right=point('foot_r');
   s.moisturePoints=[left.map((v,i)=>(v+right[i])*.5),point('pelvis'),point('spine_02'),point('Head')];return true;
 }
-function poseGroundedGunBody(a,s,boat,lean){
+function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
   poseNeutralSeatedBody(a);
   const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Gunnery stance requires a pelvis');
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),c=Math.cos(s.yaw),sn=Math.sin(s.yaw);
@@ -142,11 +142,25 @@ function poseGroundedGunBody(a,s,boat,lean){
     const sole=[X,floor(X,Z)+.002,Z],ankle=sole.map((v,i)=>v+n[i]*f.ankleAboveSole*s.scale[1]);
     feet.push({side,sole,ankle,normal:n,target:actorLocal(ankle,s)});
   }
-  const base=posePosition(a.world[pelvis]),fraction=Math.max(0,Math.min(1,lean/.45));
+  const base=posePosition(a.world[pelvis]);let lean=requestedLean,drop=0,reachExcess=0;
+  if(hands&&requestedLean>0){
+    const targets=hands.map(p=>actorLocal(p,s)),centre=targets[0].map((v,i)=>(v+targets[1][i])*.5),shoulders=[];
+    for(const [i,side]of ['l','r'].entries()){
+      const shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),hand=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
+      const reach=Math.hypot(...poseSub(elbow,shoulder))+Math.hypot(...poseSub(hand,elbow));shoulders.push(shoulder);
+      reachExcess=Math.max(reachExcess,Math.hypot(...poseSub(targets[i],shoulder))-reach+.015);
+    }
+    // A high swivel breech needs forward reach, not an automatic deep crouch.
+    // Only add bend when the actual unchanged hand workspace requires it.
+    if(reachExcess>0)lean=Math.max(lean,Math.min(.65,Math.atan2(Math.max(0,centre[2]-base[2]),Math.max(.10,centre[1]-base[1]))));
+    const shoulderY=(shoulders[0][1]+shoulders[1][1])*.5;
+    drop=Math.max(0,Math.min(.18,shoulderY-centre[1]-.22));
+  }else if(requestedLean>0)drop=.12*Math.min(1,requestedLean/.45);
+  const fraction=Math.max(0,Math.min(1,lean/.45));
   const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
   // Knees and the hip hinge supply the reach. The actor remains upright/yaw-only,
   // while measured boots keep the same contacts and all limb lengths survive.
-  poseMoveBone(a,pelvis,[base[0],base[1]+lift-.12*fraction,base[2]+.08*fraction]);
+  poseMoveBone(a,pelvis,[base[0],base[1]+lift-drop,base[2]+.08*fraction]);
   for(const [name,weight]of [['pelvis',.18],['spine_01',.45],['spine_02',.37]]){
     const node=poseNodeIndex(a,name);if(node>=0){const angle=lean*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
   }
@@ -172,7 +186,7 @@ function poseGroundedGunBody(a,s,boat,lean){
     if(a.updateBranch)a.updateBranch(f.node);else a.update();
     (s.grips??={})['foot_'+side]=p.target;
   }
-  s.gunContacts={feet,lean};
+  s.gunContacts={feet,lean,requestedLean,reachExcessBefore:reachExcess};
   const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s);
   s.moisturePoints=[feet[0].sole.map((v,i)=>(v+feet[1].sole[i])*.5),point('pelvis'),point('spine_02'),point('Head')];
 }
@@ -201,7 +215,7 @@ export function poseCrewWork(a,s,boat){
   if(j?.kind==='gunnery'&&j.stage==='working'){
     const tool=crewGunneryTool(s,boat),active=s.intent==='work'&&!['ready','recoil','spent'].includes(j.gun.stage);
     a.blend('Brace',s.time,active?(j.gunRole==='loader'?.50:.22):0);
-    poseGroundedGunBody(a,s,boat,active?(j.gunRole==='loader'&&boat.modelId==='victory'?.45:.10):0);
+    poseGroundedGunBody(a,s,boat,active?(j.gunRole==='loader'&&boat.modelId==='victory'?.45:.10):0,tool?.hands);
     if(!tool?.hands)return;
     for(const [i,side]of ['l','r'].entries()){
       const hand=actorLocal(tool.hands[i],s),sign=side==='l'?1:-1;
