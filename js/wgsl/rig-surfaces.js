@@ -18,6 +18,8 @@ struct SurfaceGpuSurface {
 struct SurfaceGpuPose {yaw:f32,deployed:f32,fill:f32,side:f32,opening:f32,dip:f32,pressure:f32};
 struct SurfaceGpuFrame {across:vec3f,up:vec3f};
 struct SurfaceGpuRelative {origin:vec3f,offset:vec3f};
+struct SurfaceGpuScalarPair {value:f32,change:f32};
+struct SurfaceGpuVectorPair {value:vec3f,change:vec3f};
 fn surfaceGpuUnit(p:vec3f)->vec3f {
   let n=length(p);if(n>1e-12){return p/n;}return vec3f(0,1,0);
 }
@@ -60,45 +62,96 @@ fn surfaceGpuClothMotion(surface:SurfaceGpuSurface,point:vec3f,pose:SurfaceGpuPo
   if(surface.info.x==1.0){p=surface.a.xyz+surfaceGpuRotate(p-surface.a.xyz,surface.b.xyz-surface.a.xyz,-pose.side*pose.opening);}
   return surfaceGpuYard(surface,p,pose);
 }
-fn surfaceGpuSewnWeight(surface:SurfaceGpuSurface,uv:vec2f)->f32 {
-  let mask=u32(surface.hinge.w);let band=surface.camber.w;var weight=1.0;
-  if((mask&1u)!=0u){weight*=smoothstep(0.0,band,uv.x);}
-  if((mask&2u)!=0u){weight*=smoothstep(0.0,band,1.0-uv.x);}
-  if((mask&4u)!=0u){weight*=smoothstep(0.0,band,uv.y);}
-  if((mask&8u)!=0u){weight*=smoothstep(0.0,band,1.0-uv.y);}
-  if((mask&16u)!=0u){weight*=smoothstep(0.0,band,1.0-uv.x-uv.y);}
+// A paired value is its centre plus an explicitly small stencil change.
+// Factoring the changes keeps a furled sheet's derivative through contact
+// pushes, without widening the stencil or changing collision branches.
+fn surfaceGpuClampChange(value:f32,change:f32)->f32 {
+  if(value<=0.0){return clamp(value+change,0.0,1.0);}
+  if(value>=1.0){return clamp(value-1.0+change,-1.0,0.0);}
+  return clamp(change,-value,1.0-value);
+}
+fn surfaceGpuPositivePair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  let next=pair.value+pair.change;
+  if(pair.value>0.0&&next>0.0){return pair;}
+  if(pair.value<=0.0&&next<=0.0){return SurfaceGpuScalarPair(0,0);}
+  let value=max(0.0,pair.value);return SurfaceGpuScalarPair(value,max(0.0,next)-value);
+}
+fn surfaceGpuPairMultiply(a:SurfaceGpuScalarPair,b:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  return SurfaceGpuScalarPair(a.value*b.value,a.value*b.change+a.change*b.value+a.change*b.change);
+}
+fn surfaceGpuSmoothPair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  let x=clamp(pair.value,0.0,1.0);let d=surfaceGpuClampChange(pair.value,pair.change);
+  return SurfaceGpuScalarPair(x*x*(3.0-2.0*x),d*(6.0*x*(1.0-x)+d*(3.0-6.0*x-2.0*d)));
+}
+fn surfaceGpuSinPair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  return SurfaceGpuScalarPair(sin(pair.value),2.0*cos(pair.value+pair.change*.5)*sin(pair.change*.5));
+}
+fn surfaceGpuLengthChange(value:vec3f,change:vec3f)->f32 {
+  let denominator=length(value)+length(value+change);
+  if(denominator>1e-20){return (2.0*dot(value,change)+dot(change,change))/denominator;}return 0.0;
+}
+fn surfaceGpuUnitPair(pair:SurfaceGpuVectorPair)->SurfaceGpuVectorPair {
+  let size=length(pair.value);let nextSize=length(pair.value+pair.change);
+  if(size<=1e-12||nextSize<=1e-12){let value=surfaceGpuUnit(pair.value);return SurfaceGpuVectorPair(value,surfaceGpuUnit(pair.value+pair.change)-value);}
+  let value=pair.value/size;
+  return SurfaceGpuVectorPair(value,(pair.change-value*surfaceGpuLengthChange(pair.value,pair.change))/nextSize);
+}
+fn surfaceGpuDotPair(a:SurfaceGpuVectorPair,b:SurfaceGpuVectorPair)->SurfaceGpuScalarPair {
+  return SurfaceGpuScalarPair(dot(a.value,b.value),dot(a.value,b.change)+dot(a.change,b.value)+dot(a.change,b.change));
+}
+fn surfaceGpuSewnPair(surface:SurfaceGpuSurface,anchor:vec2f,change:vec2f)->SurfaceGpuScalarPair {
+  let mask=u32(surface.hinge.w);let band=surface.camber.w;var weight=SurfaceGpuScalarPair(1,0);
+  if((mask&1u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair(anchor.x/band,change.x/band)));}
+  if((mask&2u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair((1.0-anchor.x)/band,-change.x/band)));}
+  if((mask&4u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair(anchor.y/band,change.y/band)));}
+  if((mask&8u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair((1.0-anchor.y)/band,-change.y/band)));}
+  if((mask&16u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair((1.0-anchor.x-anchor.y)/band,(-change.x-change.y)/band)));}
   return weight;
 }
-fn surfaceGpuSupports(point:vec3f,reference:vec3f,normal:vec3f,index:u32,surface:SurfaceGpuSurface,pose:SurfaceGpuPose,uv:vec2f,origin:vec3f)->vec3f {
-  let pin=surfaceGpuSewnWeight(surface,uv);if(pin==0.0){return point;}
-  let clearance=surface.transfer.w;let band=surface.contact.x;var p=point;
+fn surfaceGpuContactSide(value:f32,mastBarrier:bool,surface:SurfaceGpuSurface,pose:SurfaceGpuPose)->f32 {
+  if(mastBarrier){return 1.0;}if(abs(value)>1e-8){return sign(value);}
+  var side=-sign(pose.pressure);if(surface.info.x==1.0){side=sign(pose.side);}if(side==0.0){side=-1.0;}return side;
+}
+fn surfaceGpuSupportsPair(initial:SurfaceGpuVectorPair,reference:SurfaceGpuVectorPair,normal:vec3f,index:u32,surface:SurfaceGpuSurface,pose:SurfaceGpuPose,anchor:vec2f,uvChange:vec2f,origin:vec3f)->SurfaceGpuVectorPair {
+  let pin=surfaceGpuSewnPair(surface,anchor,uvChange);if(pin.value==0.0&&pin.change==0.0){return initial;}
+  let clearance=surface.transfer.w;let band=surface.contact.x;var p=initial;
   let start=u32(surfaceGpuModel[0].z);let count=u32(surfaceGpuModel[0].w);
   for(var i=0u;i<count;i++){
     let at=start+i*4u;let A=surfaceGpuModel[at];let B=surfaceGpuModel[at+1u];let info=surfaceGpuModel[at+2u];let flags=u32(info.w);
     if((flags&2u)!=0u&&info.y==f32(index)){continue;}
     var a=A.xyz;var b=B.xyz;
     if(info.z>=0.0){let owner=u32(info.z);let descriptor=surfaceGpuDescriptor(owner);let ownerPose=surfaceGpuPose(owner);a=surfaceGpuYard(descriptor,a,ownerPose);b=surfaceGpuYard(descriptor,b,ownerPose);}
-    a-=origin;b-=origin;
-    let axis=b-a;let length2=dot(axis,axis);if(length2<1e-12){continue;}
-    let t=clamp(dot(p-a,axis)/length2,0.0,1.0);let q=mix(a,b,t);let delta=p-q;let radius=mix(A.w,B.w,t)+clearance;
+    let axis=b-a;let length2=dot(axis,axis);if(length2<1e-12){continue;}a-=origin;
+    let projection=dot(p.value-a,axis)/length2;let coordinate=clamp(projection,0.0,1.0);
+    let coordinateChange=surfaceGpuClampChange(projection,dot(p.change,axis)/length2);
+    let q=SurfaceGpuVectorPair(a+axis*coordinate,axis*coordinateChange);
+    let delta=SurfaceGpuVectorPair(p.value-q.value,p.change-q.change);
+    let radius=SurfaceGpuScalarPair(A.w+(B.w-A.w)*coordinate+clearance,(B.w-A.w)*coordinateChange);
     let mastBarrier=(flags&1u)!=0u&&info.x==surface.info.w&&surface.contact.y!=0.0;
     var direction=normal;if(mastBarrier){direction=vec3f(0,0,surface.contact.y);}
-    var contactNormal=direction-axis*dot(direction,axis)/length2;
-    if(length(contactNormal)<1e-10){
-      let restReference=reference-q;contactNormal=restReference-axis*dot(restReference,axis)/length2;
-      if(length(contactNormal)<1e-10){var fallback=vec3f(1,0,0);if(abs(axis.y)/sqrt(length2)<.9){fallback=vec3f(0,1,0);}contactNormal=cross(axis,fallback);}
+    var contactNormal=SurfaceGpuVectorPair(direction-axis*dot(direction,axis)/length2,vec3f(0));
+    let restReference=SurfaceGpuVectorPair(reference.value-q.value,reference.change-q.change);
+    if(length(contactNormal.value)<1e-10){
+      contactNormal=SurfaceGpuVectorPair(restReference.value-axis*dot(restReference.value,axis)/length2,restReference.change-axis*dot(restReference.change,axis)/length2);
+      var fallback=vec3f(1,0,0);if(abs(axis.y)/sqrt(length2)<.9){fallback=vec3f(0,1,0);}fallback=cross(axis,fallback);
+      if(length(contactNormal.value)<1e-10){
+        let query=contactNormal.value+contactNormal.change;contactNormal.value=fallback;
+        if(length(query)<1e-10){contactNormal.change=vec3f(0);}else{contactNormal.change=query-fallback;}
+      }else if(length(contactNormal.value+contactNormal.change)<1e-10){contactNormal.change=fallback-contactNormal.value;}
     }
-    contactNormal=surfaceGpuUnit(contactNormal);
-    let signed=dot(delta,contactNormal);let transverse=delta-contactNormal*signed;let distance=length(transverse);
-    if(distance>=radius+band){continue;}
-    let restSide=dot(reference-q,contactNormal);var side=1.0;
-    if(!mastBarrier){
-      if(abs(restSide)>1e-8){side=sign(restSide);}
-      else if(surface.info.x==1.0){side=sign(pose.side);if(side==0.0){side=-1.0;}}
-      else{side=-sign(pose.pressure);if(side==0.0){side=-1.0;}}
-    }
-    let penetration=radius-side*signed;
-    if(penetration>0.0){p+=contactNormal*side*penetration*(1.0-smoothstep(radius,radius+band,distance))*pin;}
+    contactNormal=surfaceGpuUnitPair(contactNormal);
+    let signed=surfaceGpuDotPair(delta,contactNormal);
+    let transverse=SurfaceGpuVectorPair(delta.value-contactNormal.value*signed.value,delta.change-contactNormal.value*signed.change-contactNormal.change*signed.value-contactNormal.change*signed.change);
+    let distance=SurfaceGpuScalarPair(length(transverse.value),surfaceGpuLengthChange(transverse.value,transverse.change));
+    let restSide=surfaceGpuDotPair(restReference,contactNormal);
+    let side=surfaceGpuContactSide(restSide.value,mastBarrier,surface,pose);let nextSide=surfaceGpuContactSide(restSide.value+restSide.change,mastBarrier,surface,pose);
+    let penetration=surfaceGpuPositivePair(SurfaceGpuScalarPair(radius.value-side*signed.value,radius.change-nextSide*signed.change+(side-nextSide)*signed.value));
+    if(penetration.value==0.0&&penetration.change==0.0){continue;}
+    let tension=surfaceGpuSmoothPair(SurfaceGpuScalarPair((distance.value-radius.value)/band,(distance.change-radius.change)/band));
+    let weight=surfaceGpuPairMultiply(SurfaceGpuScalarPair(1.0-tension.value,-tension.change),pin);
+    let correction=surfaceGpuPairMultiply(surfaceGpuPairMultiply(penetration,weight),SurfaceGpuScalarPair(side,nextSide-side));
+    p.value+=contactNormal.value*correction.value;
+    p.change+=contactNormal.value*correction.change+contactNormal.change*correction.value+contactNormal.change*correction.change;
   }
   return p;
 }
@@ -126,16 +179,26 @@ fn surfaceGpuClothNear(index:u32,uv:vec2f,anchor:vec2f)->SurfaceGpuRelative {
   else{gathered=surfaceGpuRest(surface,vec2f(anchor.x,0));gatheredDifference=(surface.b.xyz-surface.a.xyz)*(uv.x-anchor.x);}
   let deployed=clamp(pose.deployed,0.0,1.0);let fill=clamp(pose.fill,0.0,1.0);let factor=.012+.988*deployed;
   let flat=mix(gathered,rest,factor);let flatDifference=mix(gatheredDifference,restDifference,factor);
-  var envelope=27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y);
-  if(!triangle){var wave=0.0;if(uv.y>0.0&&uv.y<1.0){wave=sin(3.141592653589793*uv.y);}envelope=4.0*uv.x*(1.0-uv.x)*wave;}
-  let slack=1.0-smoothstep(.2,.85,fill);
-  let flutter=min(max(surfaceGpuLive[0].y,0.0)/4.0,1.0)*surface.c.w*slack*slack*sin(surfaceGpuLive[0].x*6.0+uv.x*17.0+uv.y*13.0);
+  let uvChange=uv-anchor;
+  let U=SurfaceGpuScalarPair(anchor.x,uvChange.x);let V=SurfaceGpuScalarPair(anchor.y,uvChange.y);
+  var envelope=surfaceGpuPairMultiply(surfaceGpuPairMultiply(U,V),surfaceGpuPositivePair(SurfaceGpuScalarPair(1.0-anchor.x-anchor.y,-uvChange.x-uvChange.y)));
+  envelope.value*=27.0;envelope.change*=27.0;
+  if(!triangle){
+    var wave=surfaceGpuSinPair(SurfaceGpuScalarPair(3.141592653589793*anchor.y,3.141592653589793*uvChange.y));
+    if(anchor.y<=0.0||anchor.y>=1.0){let next=wave.value+wave.change;wave.value=0.0;wave.change=next;}
+    if(uv.y<=0.0||uv.y>=1.0){wave.change=-wave.value;}
+    envelope=surfaceGpuPairMultiply(surfaceGpuPairMultiply(U,SurfaceGpuScalarPair(1.0-anchor.x,-uvChange.x)),wave);envelope.value*=4.0;envelope.change*=4.0;
+  }
+  let slack=1.0-smoothstep(.2,.85,fill);let flutterScale=min(max(surfaceGpuLive[0].y,0.0)/4.0,1.0)*surface.c.w*slack*slack;
+  var flutter=surfaceGpuSinPair(SurfaceGpuScalarPair(surfaceGpuLive[0].x*6.0+anchor.x*17.0+anchor.y*13.0,uvChange.x*17.0+uvChange.y*13.0));
+  flutter.value*=flutterScale;flutter.change*=flutterScale;
   var side=1.0;if(surface.info.x==1.0){side=pose.side;}
-  let camber=(surface.b.w*pose.pressure*side*(.12+.88*fill)+flutter)*envelope*deployed;
+  var camber=surfaceGpuPairMultiply(SurfaceGpuScalarPair(surface.b.w*pose.pressure*side*(.12+.88*fill)+flutter.value,flutter.change),envelope);camber.value*=deployed;camber.change*=deployed;
   let axis=surfaceGpuUnit(surface.camber.xyz);let origin=surfaceGpuClothMotion(surface,flat,pose);
-  let reference=surfaceGpuClothRotate(surface,flatDifference,pose);var point=surfaceGpuClothRotate(surface,flatDifference+axis*camber,pose);
-  if(surfaceGpuModel[0].w!=0.0){point=surfaceGpuSupports(point,reference,surfaceGpuUnit(surfaceGpuClothRotate(surface,axis,pose)),index,surface,pose,uv,origin);}
-  return SurfaceGpuRelative(origin,point);
+  let reference=SurfaceGpuVectorPair(vec3f(0),surfaceGpuClothRotate(surface,flatDifference,pose));
+  var point=SurfaceGpuVectorPair(surfaceGpuClothRotate(surface,axis*camber.value,pose),surfaceGpuClothRotate(surface,flatDifference+axis*camber.change,pose));
+  if(surfaceGpuModel[0].w!=0.0){point=surfaceGpuSupportsPair(point,reference,surfaceGpuUnit(surfaceGpuClothRotate(surface,axis,pose)),index,surface,pose,anchor,uvChange,origin);}
+  return SurfaceGpuRelative(origin+point.value,point.change);
 }
 fn surfaceGpuCloth(index:u32,uv:vec2f)->vec3f {
   let point=surfaceGpuClothNear(index,uv,uv);return point.origin+point.offset;
