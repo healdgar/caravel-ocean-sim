@@ -68,7 +68,7 @@ test('bounded deck turns follow the short arc and compose across frame partition
 
 test('real unobstructed deck movement attains the authored pace without moonwalking while waiting or braced',()=>{
   const final=[];
-  for(const fps of [30,60,120]){
+  for(const fps of [30,60,120,240]){
     const s=createDeckhand();s.wait=0;s.yaw=0;stepDeckhand(s,paceBoat,0,0);
     const origin=Array.from(s.position),startTime=s.walkTime;let travelled=0;
     for(let i=0;i<fps;i++){
@@ -76,7 +76,7 @@ test('real unobstructed deck movement attains the authored pace without moonwalk
       assert.ok(distance<=1.25/fps+2e-6,'no per-frame station teleport');travelled+=distance;
     }
     assert.ok(travelled>1.15&&travelled<=1.25001,'safe deck patrol is a purposeful human walk');
-    paceClose(s.walkTime-startTime,travelled/1.3*(4/3),3e-6);final.push(Array.from(s.position));
+    paceClose(s.walkTime-startTime,travelled/1.3*(4/3),3e-6);final.push({fps,position:Array.from(s.position)});
     assert.ok(paceDistance(s.position,origin)>1.15);
     s.order='standby';s.decisionIn=0;const stopped=Array.from(s.position),gait=s.walkTime;
     for(let i=0;i<fps;i++)stepDeckhand(s,paceBoat,1/fps,0);
@@ -85,7 +85,13 @@ test('real unobstructed deck movement attains the authored pace without moonwalk
     for(let i=0;i<fps;i++)stepDeckhand(s,{...paceBoat,roll:.5},1/fps,0);
     assert.deepEqual(Array.from(s.position),stopped);assert.equal(s.walkTime,gait);assert.equal(s.intent,'brace');
   }
-  for(const position of final)assert.ok(paceDistance(position,final[0])<2e-5,'same physical travel at 30/60/120 Hz');
+  // Grade-dependent speed uses explicit per-frame evaluation on curved sheer.
+  // Its trajectory should converge rather than be bit-identical across steps.
+  // Half a millimetre over this one-second walk is already below discernible
+  // skin motion; retain exact distance cadence and the per-frame speed cap above.
+  const reference=final.at(-1).position,errors=final.slice(0,-1).map(({fps,position})=>({fps,error:paceDistance(position,reference)}));
+  for(const {fps,error}of errors)assert.ok(error<.0005,`${fps} Hz curved-deck endpoint differs from 240 Hz by ${error} m`);
+  for(let i=1;i<errors.length;i++)assert.ok(errors[i].error<=errors[i-1].error*.75+2e-6,'halving the timestep must converge toward the high-rate trajectory');
 });
 
 test('seated strokes and gun loading retain their independent physical clocks',()=>{

@@ -6,7 +6,7 @@ import {createShipAssetCache} from '../js/ship-mesh.js';
 import {createGunDefinitions,createGunRecoilMap,updateGunRecoilVertices,gunMuzzlePose} from '../js/gunnery-models.js';
 import {createGunneryState,prepareGunnery,stepGunnery,gunnerySummary,fireGunnery} from '../js/gunnery-state.js';
 import {createCompany,stepCompany} from '../js/crew.js';
-import {crewGunneryTool} from '../js/crew-work.js';
+import {crewGunneryTool,crewGunStation,stepCrewWork} from '../js/crew-work.js';
 import {getShipModel,SHIP_MODELS} from '../js/ship-models.js';
 import {vesselVerticalScale,modelDeck} from '../js/hull.js';
 import {loadCrewGLB} from '../js/gltf.js';
@@ -63,6 +63,32 @@ function navNonWorkingArmTriangles(mesh){
   const f=new Float32Array(mesh.vertices.buffer,mesh.vertices.byteOffset,mesh.vertices.byteLength/4),u=new Uint16Array(mesh.vertices.buffer,mesh.vertices.byteOffset,mesh.vertices.byteLength/2),a=mesh.animator;
   const arm=index=>{let influence=0;for(let k=0;k<4;k++)if(/^(?:lowerarm|hand|thumb|index|middle|ring|pinky|finger)/i.test(a.names[a.joints[u[index*30+18+k]]]))influence+=f[index*15+11+k];return influence>.25;};
   const triangles=[];for(let i=0;i<mesh.indices.length;i+=3){const ids=Array.from(mesh.indices.subarray(i,i+3));if(!ids.some(arm))triangles.push(ids);}return triangles;
+}
+
+function navAssertPosedGunBody(mesh,s,boat,asset,posed,bodyIndices,details){
+  const a=mesh.animator,stage=s.job.gun.stage;a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);poseCrewWork(a,s,boat);
+  assert.ok(a.palette.every(Number.isFinite));const skin=navSkin(mesh,s),tool=crewGunneryTool(s,boat);let grips=0;
+  assert.equal(s.gunContacts?.feet.length,2,'actual gun pose supplies two measured planted boots');
+  for(const [name,target]of Object.entries(s.grips??{})){
+    const actual=a.world[a.names.indexOf(name)].subarray(12,15);assert.ok(navDistance(actual,target)<.12,JSON.stringify({...details,name,gap:navDistance(actual,target)}));grips++;
+  }
+  if(stage==='ready')assert.equal(tool,null,'ready sailors keep their hands and loading tools clear');
+  for(const side of ['l','r']){
+    const boot=a.footContacts[side].vertices.map(i=>skin[i]),gaps=boot.map(p=>p[1]-modelDeck(boat,p[2]/(boat.length/12))*vesselVerticalScale(boat));
+    assert.ok(Math.min(...gaps)>=-.008,JSON.stringify({...details,side,reason:'actual boot penetrates deck',gap:Math.min(...gaps)}));
+    assert.ok(Math.min(...gaps)<=.025,JSON.stringify({...details,side,reason:'working boot has no actual planted sole',gap:Math.min(...gaps)}));
+  }
+  const body=bodyIndices.map(indices=>navTriangle(indices.map(i=>skin[i]))),near=navTriangle(skin);
+  for(const gun of boat.gunnery.guns.filter(g=>g.weatherDeck)){
+    const points=navGroupPoints(asset,asset.groups.find(g=>g.id===gun.meshGroup),boat,posed),bounds=navTriangle(points);
+    if(near.min.some((v,i)=>v>bounds.max[i]||near.max[i]<bounds.min[i]))continue;
+    const triangles=[];for(let i=0;i<points.length;i+=3)triangles.push(navTriangle(points.slice(i,i+3)));
+    for(const triangle of body){
+      if(triangle.min.some((v,i)=>v>bounds.max[i]||triangle.max[i]<bounds.min[i]))continue;
+      for(const cannon of triangles)assert.equal(navTriangleCuts(triangle,cannon),false,JSON.stringify({...details,gun:gun.id,reason:'actual skinned torso/head/legs/boots cut rendered gun'}));
+    }
+  }
+  return grips;
 }
 
 test('independent mesh oracle detects real triangle penetration without treating empty gun-group bounds as solid',()=>{
@@ -157,30 +183,7 @@ test('actual gun teams retain physical routes, body clearance and reachable tool
         if(s.job.stage!=='working')continue;
         const stage=s.job.gun.stage,key=[s.job.gun.id,s.job.gunRole,stage].join(':');
         if(seen.has(key)||(!['ready','recoil','spent'].includes(stage)&&((s.job.gun.progress??0)<.3||(s.job.gun.progress??0)>.7)))continue;
-        seen.add(key);const mesh=meshes[s.sex],a=mesh.animator;a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);poseCrewWork(a,s,boat);
-        assert.ok(a.palette.every(Number.isFinite));const skin=navSkin(mesh,s),tool=crewGunneryTool(s,boat);
-        for(const [name,target]of Object.entries(s.grips??{})){
-          const actual=a.world[a.names.indexOf(name)].subarray(12,15);assert.ok(navDistance(actual,target)<.12,JSON.stringify({id,side,sailor:s.id,stage,role:s.job.gunRole,name,gap:navDistance(actual,target)}));gripSamples++;
-        }
-        if(stage==='ready')assert.equal(tool,null,'ready sailors keep their hands and loading tools clear');
-        // The imported boot skin, rather than just its ankle, must stay above
-        // the deck. A whole-actor forward tilt can satisfy tool IK while driving
-        // the toes through planking; this is an independent physical constraint.
-        for(const side of ['l','r']){
-          const boot=a.footContacts[side].vertices.map(i=>skin[i]),gaps=boot.map(p=>p[1]-modelDeck(boat,p[2]/(boat.length/12))*vesselVerticalScale(boat));
-          assert.ok(Math.min(...gaps)>=-.008,JSON.stringify({id,sailor:s.id,stage,role:s.job.gunRole,side,reason:'actual boot penetrates deck',gap:Math.min(...gaps)}));
-          assert.ok(Math.min(...gaps)<=.025,JSON.stringify({id,sailor:s.id,stage,side,reason:'working boot has no actual planted sole',gap:Math.min(...gaps)}));
-        }
-        const body=bodyIndices[s.sex].map(indices=>navTriangle(indices.map(i=>skin[i]))),near=navTriangle(skin);
-        for(const gun of boat.gunnery.guns.filter(g=>g.weatherDeck)){
-          const points=navGroupPoints(asset,asset.groups.find(g=>g.id===gun.meshGroup),boat,posed),bounds=navTriangle(points);
-          if(near.min.some((v,i)=>v>bounds.max[i]||near.max[i]<bounds.min[i]))continue;
-          const triangles=[];for(let i=0;i<points.length;i+=3)triangles.push(navTriangle(points.slice(i,i+3)));
-          for(const triangle of body){
-            if(triangle.min.some((v,i)=>v>bounds.max[i]||triangle.max[i]<bounds.min[i]))continue;
-            for(const cannon of triangles)assert.equal(navTriangleCuts(triangle,cannon),false,JSON.stringify({id,side,sailor:s.id,stage,role:s.job.gunRole,gun:gun.id,reason:'actual skinned torso/head/legs/boots cut rendered gun'}));
-          }
-        }
+        seen.add(key);gripSamples+=navAssertPosedGunBody(meshes[s.sex],s,boat,asset,posed,bodyIndices[s.sex],{id,side,sailor:s.id,stage,role:s.job.gunRole});
         bodySnapshots++;
       }
       stepGunnery(boat.gunnery,.1,environment);
@@ -211,4 +214,33 @@ test('actual gun teams retain physical routes, body clearance and reachable tool
     assert.deepEqual(asset.vertices,rest,'posed inspection never changes shared ship assets');
   }
   assert.ok(bodySnapshots>100&&gripSamples>100,'real male/female poses are measured across drill phases');
+});
+
+test('isolated actual working gun targets keep both imported bodies grounded, clear and within real limb reach',()=>{
+  const meshes=Object.fromEntries(['male','female'].map(sex=>[sex,loadCrewGLB(readFileSync(new URL('../assets/crew/'+(sex==='female'?'sailor-female.glb':'sailor.glb'),import.meta.url)))])),bodyIndices=Object.fromEntries(Object.entries(meshes).map(([sex,mesh])=>[sex,navNonWorkingArmTriangles(mesh)]));
+  let snapshots=0,grips=0;
+  for(const id of navGunModels){
+    const boat=navBoat(id),company=createCompany(undefined,id),asset=navAssets.get(id),posed=asset.vertices.slice(),map=createGunRecoilMap(asset),immutable=asset.vertices.slice();
+    stepCompany(company,boat,0,8);boat.gunnery=createGunneryState(createGunDefinitions(id));
+    // Every Victory weather-deck mounting, including carronades; the three
+    // swivel outfits retain both sides and their distinct fore/aft mountings.
+    for(const gun of boat.gunnery.guns.filter(g=>g.weatherDeck))for(const sex of ['male','female'])for(const role of ['loader','tackle'])for(const stage of ['swab','load','ram','runout','prime','ready'])for(const progress of stage==='ready'?[1]:[.125,.5,.875]){
+      gun.stage=stage;gun.progress=progress;gun.offset=stage==='prime'||stage==='ready'?0:stage==='runout'?gun.recoilLength*(1-progress):gun.recoilLength;
+      const target=crewGunStation(gun,role,boat),template=company.crew.find(s=>s.sex===sex);
+      assert.ok(template,id+' contains the actual '+sex+' body type');
+      // Isolate the real production pose from route availability. Its station,
+      // orientation and transform still come from the actual work executor;
+      // this fixture never claims that a blocked route has been completed.
+      const s={...template,x:target[0],z:target[2],time:0,walk:0,walkTime:0,work:1,intent:'work',decisionIn:1,
+        observation:{...template.observation,hazard:false},position:Float32Array.from(navPhysical(target,boat)),rotation:new Float32Array(4),transform:new Float32Array(16),scale:template.scale.slice(),
+        job:{kind:'gunnery',stage:'working',gun,gunRole:role,position:target.slice(),path:[target.slice()],cursor:0,elapsed:0,rung:0,revision:company.revision}};
+      s.position[1]+=.028;assert.equal(stepCrewWork(s,company,boat,0),true);assert.equal(s.job.stage,'working','the isolated station is the production phase target');
+      updateGunRecoilVertices(map,posed,boat.gunnery.guns,boat);
+      grips+=navAssertPosedGunBody(meshes[sex],s,boat,asset,posed,bodyIndices[sex],{id,gun:gun.id,sex,role,stage,progress,isolated:true});
+      const a=meshes[sex].animator;for(let i=0;i<a.pose.length;i++)assert.deepEqual(a.pose[i].s,a.rest[i].s,'gun reach cannot stretch actual bone scales');
+      snapshots++;
+    }
+    assert.deepEqual(asset.vertices,immutable,'isolated pose qualification preserves immutable ship geometry');
+  }
+  assert.ok(snapshots>=1000&&grips>snapshots*2,'both real bodies are measured at positive/zero/negative tool-stroke extremes');
 });
