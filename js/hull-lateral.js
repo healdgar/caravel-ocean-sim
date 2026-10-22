@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import {NINA_DESIGN} from './models/nina.js';
 import {VICTORY_DESIGN,victoryHullHalfWidth,victoryHullDeck,victorySheer} from './models/victory.js';
-import {ADDITIONAL_DESIGNS,additionalHullWidth,additionalHullDeck} from './models/additional.js';
+import {PROCEDURAL_DESIGNS,proceduralHullWidth,proceduralHullDeck,proceduralKeelBounds} from './models/procedural.js';
 import {hullLoftBottom} from './hull-loft.js';
 import {hullHalfWidth,hullDeck,HULL_DRAFT,HULL_BOW_RAKE,HULL_STERN_RAKE} from './hull.js';
 import {deepFreeze} from './rig-definition.js';
@@ -39,15 +39,16 @@ registerHullLateralModel('victory',{
   bottom:z=>-VICTORY_DESIGN.hull.draft+victorySheer(z),
   provenance:'Current authored underwater Victory loft, including its keel-depth profile; not Admiralty offsets or tank data.',
 });
-for(const [id,design] of Object.entries(ADDITIONAL_DESIGNS)){
+for(const [id,design] of Object.entries(PROCEDURAL_DESIGNS)){
   const {profile,keel}=design;
   registerHullLateralModel(id,{
     frame:design.frame,bounds:[profile.stations[0],profile.stations.at(-1)],
-    halfWidth:(z,y)=>additionalHullWidth(id,z,y),deck:z=>additionalHullDeck(id,z),bottom:z=>hullLoftBottom(profile,z),
+    halfWidth:(z,y)=>proceduralHullWidth(id,z,y),deck:z=>proceduralHullDeck(id,z),bottom:z=>hullLoftBottom(profile,z),
     provenance:design.interpretation+' Projected authored underwater hull, not measured hydrodynamic derivatives.',
-    appendages:keel?[{id:'timber-keel',kind:'exposed-keel',bounds:keel.bounds,
-      top:z=>hullLoftBottom(profile,z),bottom:z=>hullLoftBottom(profile,z)-keel.depth,
-      provenance:'Exposed timber below this model\'s own loft bottom; bounds, depth and width share the rendered keel definition.'}]:[],
+    appendages:keel?[{id:keel.kind==='profiled-ballast-fin'?'ballast-fin':'timber-keel',kind:'exposed-keel',bounds:keel.bounds,
+      top:z=>keel.kind==='profiled-ballast-fin'?Math.min(hullLoftBottom(profile,z),proceduralKeelBounds(id,z)?.top??0):hullLoftBottom(profile,z),
+      bottom:z=>keel.kind==='profiled-ballast-fin'?(proceduralKeelBounds(id,z)?.bottom??0):hullLoftBottom(profile,z)-keel.depth,
+      provenance:keel.kind==='profiled-ballast-fin'?'Exposed authored faired fin below the body loft; actual section envelope, not a rectangular fin.':'Exposed timber below this model\'s own loft bottom; bounds, depth and width share the rendered keel definition.'}]:[],
   });
 }
 

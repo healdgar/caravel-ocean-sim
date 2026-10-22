@@ -41,8 +41,8 @@ export function advanceRowing(boat,dt,commands={}){
   state.phase=(((Number.isFinite(state.phase)?state.phase:0)+target*dt+(previous-target)*(1-decay)/3)%1+1)%1;
   state.rate=next;state.cadence=cadence;state.effortPort=port;state.effortStarboard=starboard;return state;
 }
-function rowingStroke(d,state,station,phase){
-  const effort=rowingClamp(station.side<0?state.effortPort??0:state.effortStarboard??0),fraction=d.propulsion.driveFraction;
+function rowingStroke(d,state,station,phase,attending=true){
+  const effort=attending?rowingClamp(station.side<0?state.effortPort??0:state.effortStarboard??0):0,fraction=d.propulsion.driveFraction;
   const cycle=((phase+(station.phaseOffset??0))%1+1)%1,drive=cycle<fraction&&effort>0,t=drive?cycle/fraction:(cycle-fraction)/(1-fraction);
   const active=effort>0,rate=active?(state.rate??0):0,tdot=rate/(drive?fraction:1-fraction);
   const progress=rowingSmooth(t),progressRate=rowingSmoothDerivative(t)*tdot,sign=drive?1:-1;
@@ -88,7 +88,7 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
   const d=rowingDesign(boat.modelId),state=rowingState(boat),station=Number.isInteger(stationId)?d.stations[stationId]:d.stations.find(s=>s.id===stationId);
   if(!station)throw Error('No rowing station '+stationId+' on '+d.id);
   const scale=rowingScale(boat,d),physical=p=>p.map((v,i)=>v*scale[i]),seat=physical(station.seat);
-  const stroke=rowingStroke(d,state,station,Number.isFinite(phase)?phase:state.phase),spec=d.propulsion;
+  const stroke=rowingStroke(d,state,station,Number.isFinite(phase)?phase:state.phase,!boat.rowingAttendance||boat.rowingAttendance.has(station.id)),spec=d.propulsion;
   const feather=(1-stroke.immersed)*Math.PI/2,cos=Math.cos(feather),sin=Math.sin(feather);
   let shaftA,shaftB,centre,velocity,along,across,normal,hands;
   if(station.kind==='oar'){
@@ -105,13 +105,16 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
     hands=[rowingAdd(handle,rowingMul(along,-.065)),rowingAdd(handle,rowingMul(along,.065))];
   }else{
     const z=station.z*scale[2],rim=rowingHullDeck(d.id,station.z),edge=rowingHullWidth(d.id,station.z,rim)*scale[0];
-    centre=[station.side*(edge+.12),.48+(-.23-.48)*stroke.immersed,z+.46*stroke.sweep];
-    velocity=[0,-.71*stroke.immersionRate,.46*stroke.sweepRate];
-    along=rowingUnit([-station.side*.23,1,0]);
+    // Seated paddlers carry the loom diagonally inboard. Both grips must stay
+    // within an adult arm's envelope; lifting a vertical 1.5 m paddle beside a
+    // seated torso otherwise puts the top hand implausibly above the head.
+    centre=[station.side*(edge+.12),.28+(-.23-.28)*stroke.immersed,z+.30*stroke.sweep];
+    velocity=[0,-.51*stroke.immersionRate,.30*stroke.sweepRate];
+    along=rowingUnit([-station.side*.60,1,0]);
     const width=rowingUnit(rowingSub([1,0,0],rowingMul(along,along[0]))),N=rowingUnit(rowingCross(along,width));
     across=rowingAdd(rowingMul(width,cos),rowingMul(N,sin));normal=rowingUnit(rowingCross(along,across));
-    shaftA=rowingAdd(centre,rowingMul(along,1.54));shaftB=rowingAdd(centre,rowingMul(along,-spec.bladeLength*.5));
-    const low=rowingAdd(centre,rowingMul(along,.90)),high=rowingAdd(centre,rowingMul(along,1.39));hands=station.side<0?[high,low]:[low,high];
+    shaftA=rowingAdd(centre,rowingMul(along,1.30));shaftB=rowingAdd(centre,rowingMul(along,-spec.bladeLength*.5));
+    const low=rowingAdd(centre,rowingMul(along,.72)),high=rowingAdd(centre,rowingMul(along,1.15));hands=station.side<0?[high,low]:[low,high];
   }
   const footZ=seat[2]+(station.kind==='oar'?.58:-.46),floorDesign=rowingDeck(d.id,footZ/scale[2]),floor=floorDesign*scale[1];
   const footEdge=Math.max(.02,rowingHullWidth(d.id,footZ/scale[2],floorDesign)*scale[0]-d.shellThicknessMetres);
@@ -138,15 +141,15 @@ export function rowingSteeringPose(boat,{time=0,sampleWater}={}){
 // Flat stationary water is the explicit default. Wave phase speed is never used
 // as incident fluid velocity. Force/moment output is N/Nm, in the boat integrator's
 // heading-frame/generalized axes; the function never updates speed or phase.
-export function rowingForces(out,boat,{time=0,sampleWater,cg}={}){
+export function rowingForces(out,boat,{time=0,sampleWater,cg,surge=boat.surgeVelocity??0,sway=boat.leewayVelocity??0}={}){
   const d=rowingDesign(boat.modelId),h=(boat.heading??0)*Math.PI/180,p=boat.pitch??0,ch=Math.cos(h),sh=Math.sin(h),cp=Math.cos(p),sp=Math.sin(p);
   for(const key of ['forward','side','heaveForce','rollMoment','pitchMoment','yawMoment','power','crewPower','waterPower','dissipation','activeBlades','wetBlades'])out[key]=0;
   const forces=out.blades??=[];forces.length=0;
   const centre=rowingFinitePoint(cg)?Array.from(cg):[0,boat.hydrodynamics?(boat.hydrodynamics.centreOfGravity-(boat.hydrodynamics.datumDraft??-d.profile.levels[0]*d.frame.verticalScale)):0,0];
-  const u=boat.surgeVelocity??0,v=boat.leewayVelocity??0,w=boat.heaveVelocity??0,pr=boat.pitchVelocity??0,rr=boat.rollVelocity??0,yr=boat.yawRate??0;
+  const u=surge,v=sway,w=boat.heaveVelocity??0,pr=boat.pitchVelocity??0,rr=boat.rollVelocity??0,yr=boat.yawRate??0;
   if(![u,v,w,pr,rr,yr].every(Number.isFinite))return out;
   const translation=[u*sh+v*ch,w,-u*ch+v*sh],omega=[pr*ch-rr*sh*cp,-yr-rr*sp,pr*sh+rr*ch*cp];
-  const poses=d.stations.map(s=>rowingStationPose(boat,s.id,{time,sampleWater}));poses.push(rowingSteeringPose(boat,{time,sampleWater}));
+  const poses=d.stations.map((s,i)=>rowingStationPose(boat,i,{time,sampleWater}));poses.push(rowingSteeringPose(boat,{time,sampleWater}));
   for(const pose of poses){
     if(!(pose.wetArea>0)||!pose.waterValid)continue;
     const water=rowingWaterSample(sampleWater,pose.wetCentreWorld,time);if(!water)continue;

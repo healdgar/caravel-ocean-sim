@@ -1,6 +1,6 @@
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN, victoryHullHalfWidth, victoryHullDeck, victoryVesselDeck, victoryDeckHalfWidth } from './models/victory.js';
-import {ADDITIONAL_DESIGNS,additionalHullWidth,additionalHullDeck,additionalDeck,additionalDeckWidth} from './models/additional.js';
+import {PROCEDURAL_DESIGNS,proceduralHullWidth,proceduralHullDeck,proceduralDeck,proceduralDeckWidth,proceduralDraft} from './models/procedural.js';
 
 export function vesselHull(boatOrId='nina'){
   const id=typeof boatOrId==='string'?boatOrId:boatOrId.modelId??'nina',profile=VESSEL_HULLS[id];
@@ -9,7 +9,7 @@ export function vesselHull(boatOrId='nina'){
 }
 export function vesselVerticalScale(boat){return vesselHull(boat).frame.verticalScale;}
 export function vesselDraft(boat){const h=vesselHull(boat);return h.draft*h.frame.verticalScale;}
-export function modelDeck(boat,z){return vesselHull(boat).deck(z);}
+export function modelDeck(boat,z,x=0){return vesselHull(boat).deck(z,x);}
 export function modelHullDeck(boat,z){return vesselHull(boat).hullDeck(z);}
 export function modelDeckWidth(boat,z){return vesselHull(boat).deckWidth(z);}
 export function modelHullWidth(boat,z,y){return vesselHull(boat).halfWidth(z,y);}
@@ -109,7 +109,7 @@ export const VESSEL_HULLS=Object.freeze({
   victory:Object.freeze({id:'victory',frame:VICTORY_DESIGN.frame,runtime:VICTORY_DESIGN.runtime,
     bounds:Object.freeze([-6,6]),draft:VICTORY_DESIGN.hull.draft,halfWidth:victoryHullHalfWidth,
     hullDeck:victoryHullDeck,deck:victoryVesselDeck,deckWidth:victoryDeckHalfWidth}),
-  ...Object.fromEntries(Object.entries(ADDITIONAL_DESIGNS).map(([id,d])=>[id,Object.freeze({id,frame:d.frame,runtime:d.runtime,
-    bounds:Object.freeze([d.profile.stations[0],d.profile.stations.at(-1)]),draft:-d.profile.levels[0]+(d.keel?.depth??0),datumDraft:-d.profile.levels[0],
-    halfWidth:(z,y)=>additionalHullWidth(id,z,y),hullDeck:z=>additionalHullDeck(id,z),deck:z=>additionalDeck(id,z),deckWidth:z=>additionalDeckWidth(id,z)})])),
+  ...Object.fromEntries(Object.entries(PROCEDURAL_DESIGNS).map(([id,d])=>[id,Object.freeze({id,frame:d.frame,runtime:d.runtime,
+    bounds:Object.freeze([d.profile.stations[0],d.profile.stations.at(-1)]),draft:proceduralDraft(id),datumDraft:-d.profile.levels[0],
+    halfWidth:(z,y)=>proceduralHullWidth(id,z,y),hullDeck:z=>proceduralHullDeck(id,z),deck:(z,x=0)=>proceduralDeck(id,z,x),deckWidth:z=>proceduralDeckWidth(id,z)})])),
 });

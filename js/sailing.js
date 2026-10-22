@@ -2,8 +2,9 @@ import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck, vesselDraft } from './hull
 import { SQUARE_RIG_MASTS } from './rigging.js';
 import { SAIL_PLAN, createLateenPoses, advanceLateenRig } from './lateen.js';
 import { createSailGeometry, createVictorySailGeometry, createSurfaceSailGeometry, updateSailGeometry, sailPanelForce } from './sail-aerodynamics.js';
-import {ADDITIONAL_DESIGNS} from './models/additional.js';
-import {additionalRigContext} from './additional-rig.js';
+import {PROCEDURAL_DESIGNS} from './models/procedural.js';
+import {proceduralRigContext} from './additional-rig.js';
+import {surfaceControlIndex} from './rig-surface.js';
 export { SAIL_PLAN, runningRiggingLines } from './lateen.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
@@ -34,7 +35,7 @@ const sailClamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const sailSmooth = (lo, hi, x) => { const t = sailClamp((x - lo) / (hi - lo), 0, 1); return t * t * (3 - 2 * t); };
 
 export function sailingState(boat) {
-  const id=boat.modelId??'nina',design=Object.hasOwn(ADDITIONAL_DESIGNS,id)?ADDITIONAL_DESIGNS[id]:null;
+  const id=boat.modelId??'nina',design=Object.hasOwn(PROCEDURAL_DESIGNS,id)?PROCEDURAL_DESIGNS[id]:null;
   if(!design&&id!=='nina'&&id!=='victory')throw Error('No sailing model for '+id);
   if (!boat.sailState) boat.sailState = {
     set: new Float64Array(SAIL_KEYS.map(key => sailClamp(boat[key] ?? 1, 0, 1))),
@@ -46,16 +47,16 @@ export function sailingState(boat) {
   boat.sailState.rig??=createLateenPoses(boat.sailState.set);
   if(!boat.sailState.geometry){
     if(design){
-      const active=new Set(design.surfaces.map(s=>s.mast));
+      const active=new Set(design.surfaces.map(surfaceControlIndex));
       for(let i=0;i<3;i++)if(!active.has(i))boat.sailState.set[i]=boat.sailState.rig[i].deployed=0;
-      boat.sailState.geometry=createSurfaceSailGeometry(design,additionalRigContext(id));
+      boat.sailState.geometry=createSurfaceSailGeometry(design,proceduralRigContext(id));
     }else boat.sailState.geometry=id==='victory'?createVictorySailGeometry():createSailGeometry();
   }
   return boat.sailState;
 }
 
 function advanceSurfaceRig(s,boat,dt){
-  const surfaces=s.geometry.design.surfaces,lateenMasts=[...new Set(surfaces.filter(p=>p.kind==='lateen').map(p=>p.mast))].sort((a,b)=>a-b);
+  const surfaces=s.geometry.design.surfaces,lateenMasts=[...new Set(surfaces.filter(p=>p.kind==='lateen').map(surfaceControlIndex))].sort((a,b)=>a-b);
   if(lateenMasts.length){
     const m=s.maneuver;
     // Reuse the working transfer lifecycle, but never raise/pass/lower a square
@@ -75,7 +76,7 @@ function advanceSurfaceRig(s,boat,dt){
     if(m)for(let i=0;i<3;i++)s.set[i]=s.rig[i].deployed;
     s.canvasTack=-lateenMasts.reduce((sum,i)=>sum+s.rig[i].side,0)/lateenMasts.length;
   }else{s.maneuver=null;s.canvasTack=s.tack;}
-  const active=new Set(surfaces.map(p=>p.mast));
+  const active=new Set(surfaces.map(surfaceControlIndex));
   for(let i=0;i<3;i++){
     if(!active.has(i))s.set[i]=s.rig[i].deployed=0;
     if(!lateenMasts.includes(i)){s.rig[i].dip=0;s.rig[i].deployed=s.set[i];s.rig[i].side=-s.tack;}
@@ -164,7 +165,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   if(geometry.surfaceRig){
     let squareArea=0,squareFill=0,otherArea=0,otherFill=0;
     for(const surface of geometry.surfaces){
-      const fill=s.rig[surface.sail.mast].fill,area=surface.totalArea;
+      const fill=s.rig[surface.group].fill,area=surface.totalArea;
       if(surface.sail.kind==='square'){squareArea+=area;squareFill+=fill*area;}else{otherArea+=area;otherFill+=fill*area;}
     }
     s.squareFill=squareArea?squareFill/squareArea:0;s.lateenFill=otherArea?otherFill/otherArea:0;

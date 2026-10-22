@@ -25,7 +25,7 @@ function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,b
     interpretation,construction,referenceMeasurements:references,capabilities:{rowing:true,sailing:!!sail,steering:propulsor==='paddle'?'steering-paddle':'steering-oar',anchors:propulsor!=='paddle',gunnery:false},
     floorHeight:(freeboard-.48)/sy,seatHeight:(freeboard-.13)/sy,shellThickness:(propulsor==='paddle'?.055:.035)/sy,shellThicknessMetres:propulsor==='paddle'?.055:.035,
     keel:keelDepth?{bounds:[-5.65,5.65],depth:keelDepth/sy,width:keelWidth/sx}:null,
-    loading:{crew:people,personKg:80,waterKgPerDay:4,foodKgPerDay:1.2,casksKg:id==='oseberg'?180:id==='lusoria'?80:45,
+    loading:{crew:people,personKg:80,personCGAboveSeat:.35,waterKgPerDay:4,foodKgPerDay:1.2,casksKg:id==='oseberg'?180:id==='lusoria'?80:45,
       sparesKg:id==='oseberg'?350:id==='lusoria'?200:70,defaultProvisionDays:id==='oseberg'?7:id==='lusoria'?2:1,designIncludesManifest:true,gmBeamFraction:id==='oseberg'?.13:id==='lusoria'?.16:.18,
       provenance:'Authored service manifest; reported hull weight/tonnage is retained only as source metadata.'},
     propulsion:{kind:propulsor,driveFraction:.44,cadence:.45,maxCadence:.70,catchAngle:.52,
@@ -91,7 +91,8 @@ export function rowingDeckWidth(id,z){const d=rowingDesign(id);return Math.max(0
 const rowingRigContexts=new Map();
 export function rowingRigContext(id){
   if(rowingRigContexts.has(id))return rowingRigContexts.get(id);
-  const d=rowingDesign(id),masts=d.masts.map(m=>({...m,foot:[0,rowingDeck(id,m.z),m.z],head:[0,m.height,m.z+(m.rake??0)]})),supports=[],lines=[];
+  const d=rowingDesign(id),masts=d.masts.map((m,index)=>({...m,index,controlGroup:m.controlGroup??d.surfaces.find(s=>s.mast===index)?.controlGroup??'main',foot:[0,rowingDeck(id,m.z),m.z],head:[0,m.height,m.z+(m.rake??0)]})),supports=[],lines=[],controlStations={};
+  const mastPoint=(index,y)=>{const m=masts[index];if(!m)throw Error('No rowing mast '+index);const t=(y-m.foot[1])/(m.head[1]-m.foot[1]);return m.foot.map((v,i)=>v+(m.head[i]-v)*t);};
   for(const [index,m] of masts.entries()){
     for(const side of [-1,1])for(const offset of [-.65,.65]){
       const z=m.z+offset,y=rowingHullDeck(id,z),a=[side*(rowingHullWidth(id,z,y)-.025),y,z];supports.push({a,b:m.head,r:.008,kind:'shroud',mast:index,side});
@@ -99,12 +100,21 @@ export function rowingRigContext(id){
     for(const z of [-5.2,5.2])supports.push({a:[0,rowingHullDeck(id,z),z],b:m.head,r:.009,kind:'stay',mast:index,side:0});
   }
   for(const s of d.surfaces){
+    for(const [a,b]of [[[0,0],[1,0]],[[1,0],[1,1]],[[1,1],[0,1]],[[0,1],[0,0]]])
+      lines.push({surface:s.id,clothEdge:[a,b],kind:'bolt-rope',r:.006});
     for(const side of [-1,1]){
       const z=2.5,y=rowingHullDeck(id,z),x=side*Math.max(.2,rowingHullWidth(id,z,y)-.08);
       lines.push({a:{surface:s.id,uv:[side<0?0:1,1]},b:[x,y,z],kind:'sheet',side,paired:false,sag:.035,r:.007});
       lines.push({a:{surface:s.id,point:s.corners[side<0?0:1]},b:[x,rowingHullDeck(id,3.5),3.5],kind:'brace',side,sag:.03,r:.007});
     }
     lines.push({a:masts[s.mast].head,b:{surface:s.id,point:s.pivot},kind:'halyard',sag:.015,r:.008});
+    if(!controlStations[s.controlGroup]){
+      const rows=[...new Set(d.stations.map(row=>row.seat[2]))].sort((a,b)=>a-b),m=d.masts[s.mast];
+      const at=rows.findIndex(z=>z>m.z+.1),z=at>0?(rows[at-1]+rows[at])*.5:m.z+.3,x=.18;
+      const lead=[x,rowingDeck(id,z)+.88/d.frame.verticalScale,z],lineIndex=lines.length;
+      lines.push({a:masts[s.mast].head,b:lead,kind:'working-fall',mast:s.mast,controlGroup:s.controlGroup,sag:.01,r:.008});
+      controlStations[s.controlGroup]={id:'haul.'+s.controlGroup,mast:s.mast,controlGroup:s.controlGroup,kind:'haul',position:[x+.16,rowingDeck(id,z),z],lead,lineIndex};
+    }
   }
-  const context=deepFreeze({surfaces:d.surfaces,masts,supports,lines});rowingRigContexts.set(id,context);return context;
+  const context=deepFreeze({surfaces:d.surfaces,masts,supports,lines,controlStations,mastPoint});rowingRigContexts.set(id,context);return context;
 }

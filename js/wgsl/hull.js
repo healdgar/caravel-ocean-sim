@@ -1,10 +1,20 @@
 import { HULL_DRAFT, HULL_BOW_RAKE, HULL_STERN_RAKE, HULL_SECTION_POWER, HULL_VERTICAL_SCALE, HULL_STATIONS, HULL_BREADTHS, HULL_TANGENTS,QUARTERDECK_START,QUARTERDECK_HEIGHT } from '../hull.js';
 import {VICTORY_DESIGN,VICTORY_HULL_TANGENTS,VICTORY_STEM_TANGENTS} from '../models/victory.js';
-import {ADDITIONAL_DESIGNS} from '../models/additional.js';
+import {PROCEDURAL_DESIGNS,proceduralDraft} from '../models/procedural.js';
 import {hullLoftWGSL} from '../hull-loft.js';
 const victoryHullNX=VICTORY_DESIGN.hull.stations.length,victoryHullNY=VICTORY_DESIGN.hull.levels.length,victoryHullCells=victoryHullNX*victoryHullNY,victoryStemN=VICTORY_DESIGN.hull.stemLevels.length;
-const additionalHullWGSLProfiles=Object.values(ADDITIONAL_DESIGNS).map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
-const additionalHullCases=expression=>Object.values(ADDITIONAL_DESIGNS).map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
+const additionalHullWGSLProfiles=Object.values(PROCEDURAL_DESIGNS).map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
+const additionalHullCases=expression=>Object.values(PROCEDURAL_DESIGNS).map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
+const proceduralDeckWGSL=d=>Number.isFinite(d.floorHeight)?`var y=${d.floorHeight};`:
+  `var y=${d.profile.deck};`+(d.deckZones??[]).map(zone=>`if(z>=${zone.bounds[0]}&&z<=${zone.bounds[1]}){y=max(y,${zone.height});}`).join('')+
+  (d.cockpit?`if(z>${d.cockpit.bounds[0]}&&z<${d.cockpit.bounds[1]}&&abs(x)<${d.cockpit.halfWidth}){y=${d.cockpit.floorHeight};}`:'');
+const proceduralKeelWGSL=d=>{
+  const k=d.keel;if(!k)return 'return 0.0;';
+  if(k.kind!=='profiled-ballast-fin')return `let bottom=${d.profile.levels[0]}+additionalHull${d.modelCode}Sheer(z);if(z>=${k.bounds[0]}&&z<=${k.bounds[1]}&&y>=bottom-${k.depth}&&y<=bottom){return ${k.width*.5};}return 0.0;`;
+  return `if(y<${k.sections[0].y}||y>${k.sections.at(-1).y}){return 0.0;}`+k.sections.slice(0,-1).map((a,i)=>{
+    const b=k.sections[i+1];return `if(y<=${b.y}){let t=clamp((y-(${a.y}))/${b.y-a.y},0.0,1.0);let fore=mix(${a.zFore},${b.zFore},t);let aft=mix(${a.zAft},${b.zAft},t);if(z<=fore||z>=aft){return 0.0;}let u=(z-fore)/(aft-fore);let thickness=10.0*(.2969*sqrt(u)-.1260*u-.3516*u*u+.2843*u*u*u-.1036*u*u*u*u);return max(0.0,mix(${a.halfWidth},${b.halfWidth},t)*thickness);}`;
+  }).join('')+'return 0.0;';
+};
 export const HULL_PROFILE = /* wgsl */ `
 const HULL_Y_SCALE:f32 = ${HULL_VERTICAL_SCALE};
 fn hullDeck(z: f32) -> f32 {
@@ -40,7 +50,7 @@ fn modelHullDeck(z:f32,model:f32)->f32 {
  if(model>.5){return ${VICTORY_DESIGN.decks.main}+victorySheer(z);}return hullDeck(z);
 }
 fn modelHullDraft(model:f32)->f32 {
- if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${-d.profile.levels[0]+(d.keel?.depth??0)};`)}default:{return 0.0;}}}
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${proceduralDraft(d.id)};`)}default:{return 0.0;}}}
  return select(${HULL_DRAFT},${VICTORY_DESIGN.hull.draft},model>.5);
 }
 const VICTORY_HULL_X=array<f32,${victoryHullNX}>(${VICTORY_DESIGN.hull.stations.map(v=>v.toFixed(9)).join(',')});
@@ -92,30 +102,37 @@ fn modelHullWidth(z:f32,y:f32,model:f32)->f32 {
  else{let h=VICTORY_HULL_Y[j]-VICTORY_HULL_Y[j-1u];right=victoryEndTangent(span,h,d,(a-before)/h);}
  return max(0.0,victoryCubic(a,b,left,right,span,q));
 }
-fn modelVesselDeck(z:f32,model:f32)->f32 {
- if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`var y=${d.profile.deck};`+d.deckZones.map(zone=>`if(z>=${zone.bounds[0]}&&z<=${zone.bounds[1]}){y=max(y,${zone.height});}`).join('')+`return y+additionalHull${d.modelCode}Sheer(z);`)}default:{return -1000000.0;}}}
+fn modelVesselDeckAt(z:f32,x:f32,model:f32)->f32 {
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>proceduralDeckWGSL(d)+`return y+additionalHull${d.modelCode}Sheer(z);`)}default:{return -1000000.0;}}}
  if(model<.5){return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});}
  var y=${VICTORY_DESIGN.decks.main};
  if(z<=${VICTORY_DESIGN.decks.forecastle.end} || z>=${VICTORY_DESIGN.decks.quarter.start}){y=${VICTORY_DESIGN.decks.quarter.height};}
  if(z>=${VICTORY_DESIGN.decks.poop.start}){y=${VICTORY_DESIGN.decks.poop.height};}
  return y+victorySheer(z);
 }
+fn modelVesselDeck(z:f32,model:f32)->f32 {return modelVesselDeckAt(z,0.0,model);}
+fn modelKeelHalfWidth(z:f32,y:f32,model:f32)->f32 {
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(proceduralKeelWGSL)}default:{return 0.0;}}}return 0.0;
+}
 // Solid cap tops, in canonical design units above each exposed weather deck.
 // Open quarterdeck rails have an authored low sill; this is a visual boundary,
 // not a collision model of each gap between rail posts.
-fn modelDeckBarrier(z:f32,model:f32)->f32 {
-  if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${d.barrier};`)}default:{return 0.0;}}}
+fn modelDeckBarrierAt(z:f32,x:f32,model:f32)->f32 {
+  if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>Number.isFinite(d.floorHeight)?`return ${d.profile.deck-d.floorHeight};`:
+    (d.cockpit?`if(z>${d.cockpit.bounds[0]}&&z<${d.cockpit.bounds[1]}&&abs(x)<${d.cockpit.halfWidth}){return ${d.cockpit.coamingHeight-d.cockpit.floorHeight};}`:'')+`return ${d.barrier??0};`)}default:{return 0.0;}}}
   if(model>.5){
     if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.605-VICTORY_DESIGN.decks.main};}
     return select(.310,.215,z>=${VICTORY_DESIGN.decks.poop.start});
   }
   return select(.715,.160,z>=${QUARTERDECK_START});
 }
+fn modelDeckBarrier(z:f32,model:f32)->f32 {return modelDeckBarrierAt(z,0.0,model);}
 fn modelHullExcludesOcean(local:vec3f,model:f32)->bool {
   // A crest higher than the actual barrier is continuous green water above
   // the open deck. Keep all below-deck/cabin space dry; residual deck wash is
   // retained separately when that crest recedes.
-  if(local.y>modelVesselDeck(local.z,model)+modelDeckBarrier(local.z,model)){return false;}
+  if(local.y>modelVesselDeckAt(local.z,local.x,model)+modelDeckBarrierAt(local.z,local.x,model)){return false;}
+  if(model>=3.5){return abs(local.x)<max(modelHullWidth(local.z,local.y,model),modelKeelHalfWidth(local.z,local.y,model));}
   return abs(local.x)<modelHullWidth(local.z,local.y,model);
 }
 `;
