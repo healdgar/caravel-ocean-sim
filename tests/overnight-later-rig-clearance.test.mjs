@@ -213,3 +213,16 @@ test('clipper tier fittings occupy an actual open interval below all adjacent sq
     }
   }
 });
+
+test('the actual crossjack working foot arches above the finite spanker boom without discarding its sail or raising its corners',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'],course=d.surfaces.find(s=>s.id===11),spanker=d.surfaces.find(s=>s.id===25),boom=spanker.spars.find(s=>s.kind==='boom');
+  assert.equal(course.kind,'square');assert.equal(course.corners[2][1],1.05);assert.equal(course.corners[3][1],1.05);
+  assert.ok(course.boomClearance,'working foot clearance derives from the real boom');
+  for(const yaw of [-.67,0,.67]){
+    const state=clearanceBoat(d,yaw).sailState,cp=rigSurfacePose(course,state),sp=rigSurfacePose(spanker,state),top=Math.max(surfaceYardPoint(spanker,boom.a,sp)[1],surfaceYardPoint(spanker,boom.b,sp)[1])+boom.radius;
+    const centre=surfaceClothPoint(course,.5,1,cp,{},0,0);
+    assert.ok(centre[1]>=top+course.boomClearance.clearance,'actual cloth centre cannot hang below the spanker boom top');
+    const edges=[surfaceClothPoint(course,0,1,cp,{},0,0),surfaceClothPoint(course,1,1,cp,{},0,0)];
+    for(const edge of edges)assert.ok(Math.abs(edge[1]-1.05)<1e-12,'the authored corner heights remain attached at their actual foot level');
+  }
+});

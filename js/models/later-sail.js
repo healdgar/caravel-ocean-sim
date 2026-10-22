@@ -177,7 +177,7 @@ function laterSailCloudWorkingRig(design){
     if(!(z>luff+.10/(design.runtime.beam/design.frame.beam)))throw Error('No non-overlapping working foot for '+surface.name);
     return {...surface,corners:[surface.corners[0],head,[clew[0],clew[1],z]],workingFoot:{kind:'non-overlapping-staysails',lowerStays:constraints,originalClew:clew,clearance,camberReserve,interpretation:'Authored working clew ahead of lower structural stays; no reported sail dimensions are replaced.'}};
   });
-  return surfaces.map(surface=>{
+  const complete=surfaces.map(surface=>{
     if(surface.kind!=='square')return surface;
     const fittings=surfaces.filter(s=>s.stay?.upperFitting.nextSurface===surface.id).map(s=>s.stay.upperFitting);
     if(!fittings.length)return surface;
@@ -187,6 +187,24 @@ function laterSailCloudWorkingRig(design){
     return {...surface,corners:[surface.corners[0],surface.corners[1],[surface.corners[2][0],footY,z],[surface.corners[3][0],footY,z]],
       belly:Math.min(.18,(surface.corners[0][1]-footY)*.11),mastTierGap:{fittings:fittings.map(f=>f.id),footY,interpretation:'Authored working foot shortened for finite stay/sling clearance; reported yard spans and authored yard heights unchanged.'}};
   });
+  return laterSailCloudCrossjackFoot(design,complete);
+}
+function laterSailCloudCrossjackFoot(design,surfaces){
+  const crossjack=surfaces.find(s=>s.id===11),spanker=surfaces.find(s=>s.name==='mizzen-spanker'),boom=spanker?.spars.find(s=>s.kind==='boom');
+  if(!crossjack||!spanker?.hingeAxis||!boom)throw Error('No actual crossjack/spanker working rig');
+  const length=Math.hypot(...spanker.hingeAxis),ny=spanker.hingeAxis[1]/length,nz=spanker.hingeAxis[2]/length,angle=spanker.braceLimit,clearance=Math.max(crossjack.contactClearance??0,.05/design.frame.verticalScale);
+  const endpoints=[boom.a,boom.b].map(p=>({p,y:p[1]-spanker.pivot[1],z:p[2]-spanker.pivot[2]}));
+  // Exact raked-axis endpoint height/extreme lateral envelope, with finite
+  // drawn boom radius. An arched foot clears that whole overlap at either
+  // course brace, retaining the original corner heights and reported yards.
+  const boomTop=Math.max(...endpoints.map(({p,y,z})=>Math.max(p[1],p[1]+(ny*nz*z-nz*nz*y)*(1-Math.cos(angle)))))+boom.radius;
+  const lateral=Math.max(...endpoints.map(({p,y,z})=>Math.abs(p[0]-spanker.pivot[0])+Math.abs(ny*z-nz*y)*Math.sin(angle)))+boom.radius+clearance;
+  const courseAngle=crossjack.braceLimit,deltaZ=Math.max(...crossjack.corners.slice(2).map(p=>Math.abs(p[2]-crossjack.pivot[2]))),halfWidth=Math.min(...crossjack.corners.slice(2).map(p=>Math.abs(p[0])));
+  const unbracedX=(lateral+deltaZ*Math.sin(courseAngle))/Math.cos(courseAngle),weight=1-(unbracedX/halfWidth)**2;
+  if(!(weight>0))throw Error('No finite crossjack foot arch can clear the spanker boom');
+  const footRise=Math.max(crossjack.footRise??0,(boomTop+clearance-crossjack.corners[2][1])/weight);
+  return surfaces.map(s=>s===crossjack?{...s,footRise,boomClearance:{surface:spanker.id,spar:boom.id,boomTop,clearance,archWeight:weight,
+    interpretation:'Authored arched working crossjack foot derived from actual spanker boom radius and brace/sheet envelopes; crossjack cloth inventory remains an interpretation.'}}:s);
 }
 function laterSailCloudCrew(){
   const ids=['ines','tomas','beatriz','duarte','joao','catarina','leonor','rui','maria','afonso','isabel','pedro'];
@@ -195,7 +213,7 @@ function laterSailCloudCrew(){
 }
 
 const laterSailCloud={
-  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:6,status:'planned',family:'extreme-clipper',
+  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:7,status:'planned',family:'extreme-clipper',
   frame:laterSailCloudFrame,runtime:laterSailCloudRuntime,
   interpretation:'1851 departure interpretation. Deck length and 41-foot beam select the contemporary report; all hull offsets and loaded draft are authored, not recovered McKay lines.',
   readiness:{backend:'surfaces-v1',requires:['independent loft/freeboard calibration','per-surface spars and cloth/rope clearance','wheel and deckhouse routes','loaded inertia and working crew','rendered and fleet checks']},
@@ -243,6 +261,11 @@ const laterSailCloud={
       reportedYardsFt:{fore:[70,55,44.5,32,22],main:[82,64,50,37,24],mizzen:[56,45,33,25,20]},
       reportedMastPartsFt:{fore:[82,46,25,17,13],main:[88,51,28,19,14.5],mizzen:[78,40,22,14,10]},
       note:'Spar section lengths are not summed as mast height: step and overlaps require plans. Cloth heights, mast placement and truck heights remain authored.'},
+    {subject:'working-sail-inventory-limit',source:laterSailCloudSource,selected:true,
+      crossjack:{yardLengthFt:56,hardwareConfirmed:true,cloth:'Retained authored working crossjack; the contemporary spar table alone does not confirm its canvas dimensions or prove that it was routinely set.'},
+      mainSpencer:{gaffLengthFt:24,hardwareConfirmed:true,cloth:'Main-spencer working cloth retained; extent and sheet stops remain authored.'},
+      museumModel:'https://gizamedia.rc.fas.harvard.edu/images/MFA-images/Giza/GizaImage/full/library/bmfa_pdfs/bmfa33_1935_21to25.pdf',
+      note:'MFA Bulletin April1935 p25 describes Boucher model made from original plans/data under Arthur H. Clark, all sails set. Model-image detail was unavailable; no specific crossjack cloth identification is claimed.'},
     {subject:'museum-print-inscription-and-notes',source:laterSailCloudMuseum,selected:false,
       dimensions:[{kind:'extreme-beam',value:40,unit:'ft',metres:40*laterSailFoot}],
       tonnageReports:[{value:1139,unit:'register-tons',kind:'inscription-register-tonnage'},{value:1782,unit:'tons',kind:'museum-notes-tonnage-unspecified'}],
