@@ -2,7 +2,7 @@ import { lateenClothPoint } from './lateen.js';
 import { HULL_VERTICAL_SCALE } from './hull.js';
 import {VICTORY_DESIGN,VICTORY_SAILS} from './models/victory.js';
 import {victoryPose,victoryClothPoint} from './victory-motion.js';
-import {rigSurfacePose,surfaceClothPoint} from './rig-surface.js';
+import {rigSurfacePose,surfaceClothPoint,withRigPoseContext} from './rig-surface.js';
 
 // Low-order force model, not a measured Niña polar. Coefficients depend on
 // incidence to the cloth, never on the controller's requested sheet angle.
@@ -72,15 +72,15 @@ function updateVictorySailGeometry(geometry,boat){
 
 const surfaceAeroControls=['fore','main','mizzen'];
 function surfaceAeroContextKey(context){
-  const values=[context.supports?.length??0,context.masts?.length??0];
-  for(const s of context.supports??[])values.push(...s.a,...s.b,s.r??0,s.mast,s.side,s.kind);
+  const supports=context._surfaceActiveSupports??context.supports??[],values=[supports.length,context.masts?.length??0];
+  for(const s of supports)values.push(...s.a,...s.b,s.r??0,s.mast,s.side,s.kind,s.surface);
   for(const m of context.masts??[])values.push(...m.foot,...m.head,m.radius);
   return values;
 }
 function surfaceAeroDescriptorKey(s){
   return [s.id,s.kind,s.mast,s.controlGroup,...s.pivot,...s.corners.flat(),s.belly,s.footRise,s.braceLimit,
     s.yardClearance,s.transferArc,s.transferLift,s.contactClearance,s.contactBand,s.contactPinBand,s.flutter,s.pressureSpeed,
-    ...(s.camberAxis??[]),(s.sewnEdges??[]).join(',')];
+    ...(s.camberAxis??[]),(s.sewnEdges??[]).join(','),s.mastContactSide,...(s.hingeAxis??[])];
 }
 
 // The same descriptor/evaluator supplies the render mesh and these mean-load
@@ -109,14 +109,16 @@ export function createSurfaceSailGeometry(design,context={},subdivisions=3){
 function updateSurfaceSailGeometry(geometry,boat){
   const {design,context}=geometry,state=boat.sailState;
   if(!state)throw Error('Surface sail geometry requires vessel sailing state');
-  const scale=[boat.beam/design.frame.beam,design.frame.verticalScale,boat.length/design.frame.length],contextKey=surfaceAeroContextKey(context);
+  const scale=[boat.beam/design.frame.beam,design.frame.verticalScale,boat.length/design.frame.length];
   if(!scale.every(v=>Number.isFinite(v)&&v>0))throw Error('Invalid surface sail dimensions');
+  const poses=new Map(geometry.surfaces.map(surface=>[surface.sail.id,rigSurfacePose(surface.sail,state)]));
+  const liveContext=withRigPoseContext(context,state,poses),contextKey=surfaceAeroContextKey(liveContext);
   for(const surface of geometry.surfaces){
-    const {sail,samples,indices,points}=surface,pose=rigSurfacePose(sail,state);
+    const {sail,samples,indices,points}=surface,pose=poses.get(sail.id);
     const values=[...scale,pose.yaw,pose.deployed,pose.fill,pose.pressure,pose.side,pose.opening,pose.dip,...surfaceAeroDescriptorKey(sail),...contextKey];
     if(surface.key&&values.length===surface.key.length&&values.every((v,i)=>surface.key[i]===v))continue;
     for(let j=0;j<samples.length;j++){
-      const q=surfaceClothPoint(sail,samples[j][0],samples[j][1],pose,context,0,0);
+      const q=surfaceClothPoint(sail,samples[j][0],samples[j][1],pose,liveContext,0,0);
       for(let k=0;k<3;k++)points[j][k]=q[k]*scale[k];
     }
     let total=0,low=Infinity,high=-Infinity;
