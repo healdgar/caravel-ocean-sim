@@ -232,10 +232,7 @@ fn surfaceGpuSupportsPair(initial:SurfaceGpuVectorPair,reference:SurfaceGpuVecto
     let radius=SurfaceGpuScalarPair(fma(B.w-A.w,coordinate,A.w)+((B.w-A.w)*coordinateLow+clearance),(B.w-A.w)*coordinateChange);
     let mastBarrier=(flags&1u)!=0u&&info.x==surface.info.w&&surface.contact.y!=0.0;
     var direction=normal;if(mastBarrier){direction=vec3f(0,0,surface.contact.y);}
-    let wideDirection=SurfaceGpuWide(direction,vec3f(0));
-    let directionProjection=surfaceGpuWideScalarDivide(surfaceGpuWideDot(wideDirection,wideAxis),squaredAxis);
-    let perpendicular=surfaceGpuWideSubtract(wideDirection,surfaceGpuWideScalePair(wideAxis,directionProjection));
-    var contactNormal=SurfaceGpuVectorPair(perpendicular.high+perpendicular.low,vec3f(0));
+    var contactNormal=SurfaceGpuVectorPair(cross(axis,cross(direction,axis))/length2,vec3f(0));
     let restReference=SurfaceGpuVectorPair(reference.value-q.value,reference.change-q.change);
     if(length(contactNormal.value)<1e-10){
       contactNormal=SurfaceGpuVectorPair(restReference.value-axis*surfaceGpuDot(restReference.value,axis)/length2,restReference.change-axis*surfaceGpuDot(restReference.change,axis)/length2);
