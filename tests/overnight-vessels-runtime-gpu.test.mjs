@@ -97,7 +97,17 @@ test('canoe exposes only actual paddle controls; rowboats use main canvas and ya
       const actual=[];for(const [group,key]of [['fore','sailFore'],['main','sailMain'],['mizzen','sailMizzen']])if(await page.locator('#boat-'+key).isVisible())actual.push(group);
       assert.deepEqual(actual,id==='taino-canoe'?[]:id==='gipsy-moth-iv'?['fore','main','mizzen']:['main']);
       if(id!=='gipsy-moth-iv'){
-        const cadence=page.locator('#boat-rowing-cadence');await cadence.fill('36');assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rowingCadence),.6,'strokes/minute UI converts to physical Hz');
+        const cadence=page.locator('#boat-rowing-cadence');
+        for(const spm of [27,36]){
+          await cadence.fill(String(spm));assert.ok(await cadence.evaluate(input=>input.validity.valid&&!input.validity.stepMismatch),'normal rowing cadence is a valid browser number/step');
+          assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rowingCadence),spm/60,'strokes/minute UI converts to physical Hz');
+        }
+        await page.locator('#boat-propulsion').selectOption('manual');assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.propulsion),'manual');
+        await page.getByRole('button',{name:'Hide ship settings',exact:true}).click();await page.locator('#helm-controls [data-rowing="1"]').click();
+        assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.propulsion),'sail','human rowing returns to force-driven mode');
+        await page.getByRole('button',{name:'Ship settings',exact:true}).click();assert.equal(await page.locator('#boat-propulsion').inputValue(),'sail','visible propulsion settings follow the actual helm command');
+        assert.equal(await cadence.inputValue(),'36');
+        if(id!=='taino-canoe')assert.equal(await page.locator('#boat-sailMain').isVisible(),true,'real main canvas controls reappear after leaving set-speed mode');
       }else assert.equal(await page.locator('#boat-rowing-cadence').count(),0);
       await page.getByRole('button',{name:'Hide ship settings',exact:true}).click();
       if(id==='taino-canoe'){
