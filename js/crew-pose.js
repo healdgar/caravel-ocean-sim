@@ -174,7 +174,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
       const across=(target[0]-shoulder[0])**2+(target[1]-shoulder[1])**2;
       workspaceForward=Math.max(workspaceForward,target[2]-shoulder[2]-Math.sqrt(Math.max(0,reach*reach-across)));
     }
-    workspaceForward=Math.max(0,Math.min(.30-.08*fraction,workspaceForward));
+    workspaceForward=Math.max(0,Math.min(.34-.08*fraction,workspaceForward));
     if(workspaceForward){const p=posePosition(a.world[pelvis]);p[2]+=workspaceForward;poseMoveBone(a,pelvis,p);}
   }
   // As in the rowing stance, lower the pelvis only as much as the genuine leg
