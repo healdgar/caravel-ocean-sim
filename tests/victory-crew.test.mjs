@@ -12,6 +12,7 @@ import {VICTORY_DESIGN,VICTORY_MASTS,VICTORY_SAILS,victoryShroud} from '../js/mo
 import {victoryClothPoint,victoryPose} from '../js/victory-motion.js';
 import {boatEyePosition,boatRotate} from '../js/boat.js';
 import {victoryMastPoint} from '../js/models/victory.js';
+import {crewMotionPolicy} from '../js/crew-motion.js';
 
 const fixture=()=>({modelId:'victory',...VICTORY_DESIGN.runtime,roll:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1});
 const distance=(a,b)=>Math.hypot(...Array.from(a,(v,i)=>v-b[i]));
@@ -68,12 +69,19 @@ test('Victory workers climb safely, shorten all sail groups, secure the hatch an
   const actors=Object.fromEntries([['female','sailor-female.glb'],['male','sailor.glb']].map(([sex,path])=>[sex,loadCrewGLB(fs.readFileSync(new URL('../assets/crew/'+path,import.meta.url))).animator]));
   let ascending=0,working=0,foretop=0,maxGripError=0,maxHaulGripError=0;
   for(let i=0;i<6000;i++){
-    const previous=c.crew.map(s=>[...s.position]);advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);
+    const previous=c.crew.map(s=>[...s.position]),climbs=c.crew.map(s=>s.job&&({stage:s.job.stage,rung:s.job.rung,mast:s.job.mast,side:s.job.side}));
+    advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);
     for(const [k,s]of c.crew.entries()){
-      assert.ok(distance(s.position,previous[k])<.11,s.id+' continuous travel');
+      const pace=crewMotionPolicy(b,{purpose:'work'}).speedMetresPerSecond;
+      assert.ok(pace<=1.4,'work pace has a physical human cap');
+      assert.ok(distance(s.position,previous[k])<=pace*.1+2e-5,s.id+' continuous travel');
       assert.ok(s.transform.every(Number.isFinite));
       for(let n=0;n<k;n++)assert.ok(distance(s.position,c.crew[n].position)>.5,s.id+' body separation');
       if(s.job?.stage==='ascending')ascending++;
+      if(climbs[k]&&['ascending','descending'].includes(climbs[k].stage)&&s.job?.stage===climbs[k].stage&&s.job.mast===climbs[k].mast){
+        const dy=crewRunnerMetrics(b,s.job.mast,s.job.side).dy;
+        assert.ok(Math.abs(s.job.rung-climbs[k].rung)*dy<=.38*.1+1e-9,'faster deck pace cannot accelerate vertical climbing');
+      }
       if(s.job?.stage==='working')working++;
       if(s.job?.mast===0&&s.job.kind==='rig'&&s.job.stage==='working'){
         foretop++;assert.ok(s.position[1]+1.65<VICTORY_MASTS[0].platform*vesselVerticalScale(b),'head remains below the solid fighting top');

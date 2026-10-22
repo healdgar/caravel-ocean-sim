@@ -10,6 +10,7 @@ import {createGunneryState,prepareGunnery,fireGunnery,stepGunnery,gunnerySummary
 import {getShipModel} from '../js/ship-models.js';
 import {loadCrewGLB} from '../js/gltf.js';
 import {modelDeckWidth} from '../js/hull.js';
+import {crewMotionPolicy} from '../js/crew-motion.js';
 
 function drillFixture(id,side='port'){
   const boat={modelId:id,...getShipModel(id).runtime,roll:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1},company=createCompany(undefined,id);
@@ -34,7 +35,9 @@ test('both ships walk real gun teams to either battery, complete the drill, then
     assert.equal(summary.ready,summary.total,id+' '+side+' must finish without a route deadlock');
     assert.equal(boat.gunneryAttendance.size,expected);
     assert.equal(company.crew.filter(s=>s.job?.kind==='gunnery').length,expected*2);
-    assert.ok(closest>.50,'human bodies remain separated: '+closest);assert.ok(maxMove<.10,'no station teleport: '+maxMove);
+    assert.ok(closest>.50,'human bodies remain separated: '+closest);
+    const pace=crewMotionPolicy(boat,{purpose:'work'}).speedMetresPerSecond;
+    assert.ok(pace<=1.4,'work pace has a physical human cap');assert.ok(maxMove<=pace*.1+2e-5,'no station teleport: '+maxMove);
     assert.ok(company.crew.filter(s=>['ines','pedro'].includes(s.id)).every(s=>s.job?.kind!=='gunnery'));
     assert.equal(boat.gunnery.projectiles.length,0,'ready never fires without an explicit order');
     for(const s of company.crew.filter(s=>s.job?.kind==='gunnery')){
