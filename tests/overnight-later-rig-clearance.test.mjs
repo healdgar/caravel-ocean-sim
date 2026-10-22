@@ -46,9 +46,23 @@ function clearanceTriangleAxis(a,b,c,foot,head){
 const clearanceMastRadius=(mast,t)=>mast.radius*(1-.76*t);
 const clearanceBoat=(d,yaw,set=[1,1,1],backed=false)=>({modelId:d.id,...d.runtime,rudder:0,hatchesClosed:1,
   sailState:{set,groupYaw:[yaw,yaw,yaw],windSide:backed?-9:9,windForward:backed?-7:7,rig:[0,1,2].map(()=>({fill:backed?0:1,side:backed?1:-1}))}});
+const clearanceAssets=new Map();
+function clearanceAsset(d){
+  if(!clearanceAssets.has(d.id)){const raw=createLaterSailShipMesh(d.id),asset={model:{id:d.id},...indexCaravelMesh(raw)};clearanceAssets.set(d.id,{asset,pose:createLaterSailAssetPose(asset)});}
+  return clearanceAssets.get(d.id);
+}
+function clearanceClothTriangles(asset,target){
+  const triangles=[];
+  for(let at=0;at<asset.indices.length;at+=3){
+    const indices=Array.from(asset.indices.subarray(at,at+3)),first=indices[0]*9,kind=Math.floor(target[first+6]);if(kind!==9&&kind!==13)continue;
+    const surface=Math.round((target[first+6]-kind)*64),points=indices.map(i=>Array.from(target.subarray(i*9,i*9+3)));
+    triangles.push({surface,points,triangle:at/3,min:[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))),max:[0,1,2].map(i=>Math.max(...points.map(p=>p[i])))});
+  }
+  return triangles;
+}
 
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual sewn fittings and posed cloth retain finite mast clearance through bracing, backing and lowering`,()=>{
-  const context=laterSailRigContext(d.id),raw=createLaterSailShipMesh(d.id),asset={model:{id:d.id},...indexCaravelMesh(raw)},pose=createLaterSailAssetPose(asset),target=new Float32Array(asset.vertices);
+  const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
   for(const [yaw,set,backed]of [[0,[1,1,1],false],[.67,[1,1,1],false],[-.67,[1,1,1],false],[1.35,[1,1,1],false],[-1.35,[1,1,1],false],[.45,[.15,.35,.65],false],[-.45,[1,1,1],true]]){
     const boat=clearanceBoat(d,yaw,set,backed);assert.equal(pose(boat,2.7,18,target),true);
     let worst={clearance:Infinity};
@@ -76,5 +90,28 @@ for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual sewn fitti
       const a=surfaceClothPoint(surface,u,v,p,{},0,0),q=clearanceSegments(mast.foot,mast.head,a,a);
       assert.ok(q.distance-clearanceMastRadius(mast,q.t)>0,`${surface.name} pinned cloth is embedded in its mast`);
     }
+  }
+});
+
+for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
+  const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
+  for(const [yaw,set]of [[0,[1,1,1]],[.67,[1,1,1]],[-.67,[1,1,1]],[.35,[.20,.40,.65]]]){
+    const boat=clearanceBoat(d,yaw,set);pose(boat,3.1,14,target);
+    const obstacles=context.supports.map((s,index)=>({...s,name:`${s.kind}.${s.mast}.${s.side}.${index}`,radiusAt:()=>s.r??0}));
+    for(const surface of d.surfaces)for(const spar of surface.spars??[]){
+      const p=rigSurfacePose(surface,boat.sailState);
+      obstacles.push({a:surfaceYardPoint(surface,spar.a,p),b:surfaceYardPoint(surface,spar.b,p),r:spar.radius,radiusAt:t=>spar.radius*(1-.30*t),surface:surface.id,name:spar.id});
+    }
+    for(const obstacle of obstacles){obstacle.min=obstacle.a.map((v,i)=>Math.min(v,obstacle.b[i])-obstacle.r);obstacle.max=obstacle.a.map((v,i)=>Math.max(v,obstacle.b[i])+obstacle.r);}
+    let worst={clearance:Infinity};
+    for(const triangle of clearanceClothTriangles(asset,target))for(const obstacle of obstacles){
+      // Own yard/gaff/boom is a sewn attachment. Other spars and every shroud
+      // or stay are obstacles; no rope opacity or masked interval is accepted.
+      if(obstacle.surface===triangle.surface)continue;
+      if([0,1,2].some(i=>triangle.min[i]>obstacle.max[i]||triangle.max[i]<obstacle.min[i]))continue;
+      const q=clearanceTriangleAxis(...triangle.points,obstacle.a,obstacle.b),gap=q.distance-obstacle.radiusAt(q.t);
+      if(gap<worst.clearance)worst={clearance:gap,surface:triangle.surface,obstacle:obstacle.name,triangle:triangle.triangle,yaw,set,points:triangle.points};
+    }
+    assert.ok(worst.clearance>=-3e-5,JSON.stringify(worst));
   }
 });
