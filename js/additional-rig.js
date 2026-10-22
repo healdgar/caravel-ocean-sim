@@ -139,7 +139,9 @@ export function laterSailRigContext(id){
     const head=masts[s.mast].head;
     // Bermudan/head sails have a halyard at the actual head. A square's
     // halyard lifts its yard sling; gaff canvas lifts the gaff, not a luff yard.
-    const attachment=['bermudan','headsail'].includes(s.kind)?{surface:s.id,uv:[1,0]}:{surface:s.id,point:s.pivot};
+    const liftSpar=s.spars?.find(p=>p.kind===(s.kind==='square'?'yard':'gaff'));
+    const liftPoint=liftSpar?(s.kind==='square'?liftSpar.a.map((v,i)=>(v+liftSpar.b[i])*.5):liftSpar.b):s.pivot;
+    const attachment=['bermudan','headsail'].includes(s.kind)?{surface:s.id,uv:[1,0]}:{surface:s.id,point:liftPoint};
     lines.push({a:head,b:attachment,kind:'halyard',r:.012/sx,sag:.02/sy,mast:s.mast,controlGroup:s.controlGroup});
   }
   for(const group of ['fore','main','mizzen']){

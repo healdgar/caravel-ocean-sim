@@ -67,6 +67,7 @@ export function rigSurfacePose(surface,state={}){
 function surfaceRotateVector(surface,p,pose){
   // A headsail hinges around its actual luff, not around a global mast axis.
   if(surface.kind==='headsail'||surface.kind==='bermudan')return surfaceRotate(p,surfaceSubtract(surface.corners[1],surface.corners[0]),pose.yaw);
+  if(surface.kind==='gaff'&&surface.hingeAxis)return surfaceRotate(p,surface.hingeAxis,pose.yaw);
   return surfaceRotate(p,[0,1,0],pose.yaw);
 }
 

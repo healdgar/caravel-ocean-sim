@@ -27,13 +27,25 @@ function laterSailMastAt(design,mast,y){
   const m=design.masts[mast],floor=laterSailDeckOf(design,m.z),t=(y-floor)/(m.height-floor);
   return [0,y,m.z+(m.rake??0)*t];
 }
+function laterSailMastRadiusAt(design,mast,y){
+  const m=design.masts[mast],floor=laterSailDeckOf(design,m.z),t=Math.max(0,Math.min(1,(y-floor)/(m.height-floor)));
+  // Exact linear taper drawn by createLaterSailShipMesh, not a full-height
+  // cylinder or a force-dependent clearance masquerading as hardware.
+  return m.radius*(1-.76*t);
+}
 function laterSailSquare(design,id,name,mast,headY,footY,yardFt,armFt,footFt){
-  const m=design.masts[mast],z=laterSailMastAt(design,mast,headY)[2]-.035,sx=design.runtime.beam/design.frame.beam;
+  const m=design.masts[mast],pivot=laterSailMastAt(design,mast,headY),sx=design.runtime.beam/design.frame.beam;
+  const axis=laterSailMastAt(design,mast,m.height).map((v,i)=>v-laterSailMastAt(design,mast,laterSailDeckOf(design,m.z))[i]);
+  const yardRadius=.025,clearance=.012/design.frame.verticalScale;
+  const standOff=(laterSailMastRadiusAt(design,mast,headY)+yardRadius+clearance)*Math.hypot(...axis)/axis[1];
+  const z=pivot[2]-standOff,footStandOff=(laterSailMastRadiusAt(design,mast,footY)+clearance)*Math.hypot(...axis)/axis[1];
+  const footZ=laterSailMastAt(design,mast,footY)[2]-footStandOff;
   const head=(yardFt-2*armFt)*laterSailFoot/sx,foot=footFt*laterSailFoot/sx;
-  return {id,name,mast,controlGroup:m.controlGroup,kind:'square',pivot:[0,headY,z],
-    corners:[[-head/2,headY,z],[head/2,headY,z],[foot/2,footY,z+.04],[-foot/2,footY,z+.04]],
+  return {id,name,mast,controlGroup:m.controlGroup,kind:'square',pivot,
+    corners:[[-head/2,headY,z],[head/2,headY,z],[foot/2,footY,footZ],[-foot/2,footY,footZ]],
     belly:Math.min(.18,(headY-footY)*.11),braceLimit:.67,footRise:.035,contactClearance:.035,
-    spars:[{id:name+'-yard',kind:'yard',a:[-yardFt*laterSailFoot/sx/2,headY,z],b:[yardFt*laterSailFoot/sx/2,headY,z],radius:.025}],
+    yardStandOff:{kind:'tapered-mast-and-yard',distance:standOff,clearance},
+    spars:[{id:name+'-yard',kind:'yard',a:[-yardFt*laterSailFoot/sx/2,headY,z],b:[yardFt*laterSailFoot/sx/2,headY,z],radius:yardRadius}],
     provenance:{shape:'authored working cloth, with reported yard/yardarm spans',source:laterSailCloudSource,yardLengthFt:yardFt,yardarmFt:armFt}};
 }
 function laterSailTriangle(id,name,mast,controlGroup,kind,corners,extra={}){
@@ -43,6 +55,32 @@ function laterSailTriangle(id,name,mast,controlGroup,kind,corners,extra={}){
 function laterSailGaff(id,name,mast,controlGroup,corners,pivot,extra={}){
   return {id,name,mast,controlGroup,kind:'gaff',corners,pivot,belly:.13,braceLimit:1.30,sewnEdges:['v0','u0'],camberAxis:[1,0,0],...extra};
 }
+function laterSailTrackGaff(design,surface){
+  const m=design.masts[surface.mast],a=surface.corners[0],d=surface.corners[3];
+  const low=laterSailMastAt(design,surface.mast,d[1]),high=laterSailMastAt(design,surface.mast,a[1]);
+  const foot=laterSailMastAt(design,surface.mast,laterSailDeckOf(design,m.z)),head=laterSailMastAt(design,surface.mast,m.height),axis=head.map((v,i)=>v-foot[i]);
+  const clearance=.012/design.frame.verticalScale,cosine=axis[1]/Math.hypot(...axis);
+  const rootRadius=point=>Math.max(0,...(surface.spars??[]).flatMap(s=>[
+    s.a.every((v,i)=>v===point[i])?s.radius:0,s.b.every((v,i)=>v===point[i])?s.radius*.70:0]));
+  // Sewn luff follows mast hoops/travellers outside the actual tapered spar.
+  // Brace around that mast's real rake, preserving clearance as the gaff swings.
+  const sewnA=[0,a[1],high[2]+(laterSailMastRadiusAt(design,surface.mast,a[1])+rootRadius(a)+clearance)/cosine];
+  const sewnD=[0,d[1],low[2]+(laterSailMastRadiusAt(design,surface.mast,d[1])+rootRadius(d)+clearance)/cosine];
+  const replacement=p=>p.every((v,i)=>v===a[i])?sewnA:p.every((v,i)=>v===d[i])?sewnD:p;
+  return {...surface,pivot:low,hingeAxis:axis,corners:[sewnA,surface.corners[1],surface.corners[2],sewnD],
+    spars:surface.spars?.map(s=>({...s,a:replacement(s.a),b:replacement(s.b)})),
+    luffTrack:{kind:'tapered-mast-hoops',clearance}};
+}
+function laterSailStayHead(design,surface){
+  const m=design.masts[surface.mast],head=surface.corners[1],at=laterSailMastAt(design,surface.mast,head[1]);
+  const foot=laterSailMastAt(design,surface.mast,laterSailDeckOf(design,m.z)),top=laterSailMastAt(design,surface.mast,m.height),axis=top.map((v,i)=>v-foot[i]);
+  const clearance=.012/design.frame.verticalScale,stayRadius=.008/(design.runtime.beam/design.frame.beam);
+  const offset=(laterSailMastRadiusAt(design,surface.mast,head[1])+stayRadius+clearance)*Math.hypot(...axis)/axis[1];
+  // A stay terminates at a tang outside the mast. Placing the pinned head on
+  // the axis leaves the actual canvas embedded even when free cloth collides.
+  return {...surface,corners:[surface.corners[0],[0,head[1],at[2]-offset],surface.corners[2]],
+    headFitting:{kind:'mast-fore-tang',clearance,stayRadius}};
+}
 function laterSailCloudCrew(){
   const ids=['ines','tomas','beatriz','duarte','joao','catarina','leonor','rui','maria','afonso','isabel','pedro'];
   const positions=[[-.62,4.6],[.62,4.6],[-1,-3.15],[1,-3.15],[-1.10,-.5],[1.10,-.5],[-1.1,1],[1.1,1],[-.45,-5.1],[.45,-5.1],[-.8,3.15],[0,5.05]];
@@ -50,7 +88,7 @@ function laterSailCloudCrew(){
 }
 
 const laterSailCloud={
-  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:1,status:'planned',family:'extreme-clipper',
+  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:2,status:'planned',family:'extreme-clipper',
   frame:laterSailCloudFrame,runtime:laterSailCloudRuntime,
   interpretation:'1851 departure interpretation. Deck length and 41-foot beam select the contemporary report; all hull offsets and loaded draft are authored, not recovered McKay lines.',
   readiness:{backend:'surfaces-v1',requires:['independent loft/freeboard calibration','per-surface spars and cloth/rope clearance','wheel and deckhouse routes','loaded inertia and working crew','rendered and fleet checks']},
@@ -128,6 +166,7 @@ laterSailCloud.surfaces.push(
   laterSailGaff(25,'mizzen-spanker',2,'mizzen',[[0,3.25,3.65],[0,4.0,5.65],[0,1.15,6.22],[0,1.15,3.30]],[0,1.15,3.30],
     {spars:[{id:'spanker-boom',kind:'boom',a:[0,1.15,3.30],b:[0,1.15,6.22],radius:.035},{id:'spanker-gaff',kind:'gaff',a:[0,3.25,3.65],b:[0,4.0,5.65],radius:.026}]})
 );
+laterSailCloud.surfaces=laterSailCloud.surfaces.map(s=>s.kind==='gaff'?laterSailTrackGaff(laterSailCloud,s):s.kind==='headsail'?laterSailStayHead(laterSailCloud,s):s);
 
 const laterSailMothScale=laterSailMothFrame.verticalScale,laterSailMothX=laterSailMothRuntime.beam/3.6;
 // Authored V-body refinement, not a recovered builder offset table. Keep the
@@ -136,7 +175,7 @@ const laterSailMothScale=laterSailMothFrame.verticalScale,laterSailMothX=laterSa
 // changing displacement mass or moving the chosen waterline datum.
 const laterSailMothBilgeScale=.68,laterSailMothShoulderScale=.72;
 const laterSailMoth={
-  id:'gipsy-moth-iv',modelCode:8,name:'Gipsy Moth IV · 1966',revision:2,status:'planned',family:'bermudan-ketch',
+  id:'gipsy-moth-iv',modelCode:8,name:'Gipsy Moth IV · 1966',revision:3,status:'planned',family:'bermudan-ketch',
   frame:laterSailMothFrame,runtime:laterSailMothRuntime,
   interpretation:'Original design-DWL branch before voyage alterations. Builder-archive dimensions and original lead retained; hull/fin offsets, cockpit and sail dimensions are authored pending drawings.',
   readiness:{backend:'surfaces-v1',requires:['physical-mast/control-group separation','Bermudan luff/boom evaluator','profiled ballast keel in hydrostatics/contact/lateral force','recessed cockpit','singlehanded deck jobs','DWL displacement/ballast calibration','rendered clearance and fleet checks']},
@@ -191,11 +230,11 @@ const laterSailMoth={
 };
 const laterSailMothMainTack=laterSailMastAt(laterSailMoth,0,1.35/laterSailMothScale),laterSailMothMainHead=laterSailMastAt(laterSailMoth,0,14.0/laterSailMothScale);
 const laterSailMothMizzenTack=laterSailMastAt(laterSailMoth,1,1.45/laterSailMothScale),laterSailMothMizzenHead=laterSailMastAt(laterSailMoth,1,9.35/laterSailMothScale);
-// Authored aft-face mast-track stand-off: the pinned luff must not run through
-// the spar's centre. Keep the same physical clearance at tack and head.
-for(const [index,points]of [[0,[laterSailMothMainTack,laterSailMothMainHead]],[1,[laterSailMothMizzenTack,laterSailMothMizzenHead]]]){
-  const offset=(laterSailMoth.masts[index].radius*laterSailMothX+.012)/laterSailMothScale;
-  for(const point of points)point[2]+=offset;
+// Affine model radii, not x-metre radii applied along a differently scaled z
+// axis. The gooseneck clears the finite boom; the pinned head clears the taper.
+for(const [index,points,boomRadius]of [[0,[laterSailMothMainTack,laterSailMothMainHead],.065/laterSailMothX],[1,[laterSailMothMizzenTack,laterSailMothMizzenHead],.05/laterSailMothX]]){
+  const m=laterSailMoth.masts[index],foot=laterSailMastAt(laterSailMoth,index,laterSailDeckOf(laterSailMoth,m.z)),top=laterSailMastAt(laterSailMoth,index,m.height),axis=top.map((v,i)=>v-foot[i]);
+  for(const [j,point]of points.entries())point[2]+=(laterSailMastRadiusAt(laterSailMoth,index,point[1])+(j===0?boomRadius:0)+.012/laterSailMothScale)*Math.hypot(...axis)/axis[1];
 }
 const laterSailMothMainClew=[0,1.35/laterSailMothScale,laterSailMothMainTack[2]+4.75/laterSailMothScale],laterSailMothMizzenClew=[0,1.45/laterSailMothScale,laterSailMothMizzenTack[2]+2.75/laterSailMothScale];
 laterSailMoth.surfaces.push(
@@ -206,6 +245,7 @@ laterSailMoth.surfaces.push(
   laterSailTriangle(3,'working-jib',0,'fore','headsail',[[0,.90/laterSailMothScale,-5.15],laterSailMastAt(laterSailMoth,0,12.9/laterSailMothScale),[0,1.10/laterSailMothScale,.30]],{belly:.16}),
   laterSailTriangle(4,'inner-staysail',0,'fore','headsail',[[0,.92/laterSailMothScale,-3.35],laterSailMastAt(laterSailMoth,0,9.70/laterSailMothScale),[0,1.10/laterSailMothScale,.15]],{belly:.11})
 );
+laterSailMoth.surfaces=laterSailMoth.surfaces.map(s=>s.kind==='headsail'?laterSailStayHead(laterSailMoth,s):s);
 
 export const LATER_SAIL_DESIGNS=deepFreeze({'flying-cloud':laterSailCloud,'gipsy-moth-iv':laterSailMoth});
 export function laterSailDesign(id){const d=LATER_SAIL_DESIGNS[id];if(!d)throw Error('No later sailing design: '+id);return d;}
