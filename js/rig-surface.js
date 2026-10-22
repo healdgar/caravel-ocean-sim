@@ -12,22 +12,11 @@ const surfaceCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1
 const surfaceMix=(a,b,t)=>a.map((x,i)=>x+(b[i]-x)*t);
 const surfaceFinitePoint=p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite);
 const surfaceCheckedGeometry=new WeakSet(),surfacePreparedViews=new WeakMap(),surfacePreparedNormals=new WeakMap();
-const surfacePreparedUVs=new WeakMap(),surfaceNegativeZeroUV=Symbol('rig UV negative zero'),surfacePreparedUVLimit=4096;
 function surfaceFrozenData(value){
   if(!value||!Object.isFrozen(value))return false;
   const prototype=Object.getPrototypeOf(value);
   if(prototype!==Object.prototype&&prototype!==Array.prototype&&prototype!==null)return false;
   return Object.values(Object.getOwnPropertyDescriptors(value)).every(d=>Object.hasOwn(d,'value'));
-}
-function surfaceFrozenDescriptor(value,seen=new WeakSet()){
-  if(typeof value==='function')return false;
-  if(!value||typeof value!=='object')return true;
-  if(seen.has(value))return true;if(!surfaceFrozenData(value))return false;seen.add(value);
-  for(const key of Reflect.ownKeys(value)){
-    const descriptor=Object.getOwnPropertyDescriptor(value,key);
-    if(!Object.hasOwn(descriptor,'value')||!surfaceFrozenDescriptor(descriptor.value,seen))return false;
-  }
-  return true;
 }
 function surfaceUnit(p){const length=Math.hypot(...p);if(!(length>1e-12))throw Error('Degenerate rig surface axis');return surfaceMultiply(p,1/length);}
 function surfaceRotate(p,axis,angle){
@@ -57,32 +46,6 @@ export function surfaceRestPoint(surface,u,v){
   if(!d)return a.map((x,i)=>x+(b[i]-x)*u+(c[i]-x)*v);
   const p=surfaceMix(surfaceMix(a,b,u),surfaceMix(d,c,u),v);
   p[1]+=(surface.footRise??0)*4*u*(1-u)*v;return p;
-}
-
-// Only immutable authored geometry may retain UV invariants. The original
-// rest-point API still returns a fresh array; these private arrays never escape
-// into a caller's point result. Actual doubles, including -0, identify samples.
-function surfacePreparedUV(surface,u,v){
-  let cache=surfacePreparedUVs.get(surface);
-  if(!cache){
-    if(!surfaceFrozenDescriptor(surface))return null;
-    cache={rows:new Map(),ring:[],next:0,count:0,axis:null};surfacePreparedUVs.set(surface,cache);
-  }
-  if(!Number.isFinite(u)||!Number.isFinite(v))throw Error('Invalid surface coordinates');
-  const U=Object.is(u,-0)?surfaceNegativeZeroUV:u,V=Object.is(v,-0)?surfaceNegativeZeroUV:v,found=cache.rows.get(U)?.get(V);
-  if(found)return found;
-  const rest=surfaceRestPoint(surface,u,v),[a,b]=surface.corners,triangle=surface.corners.length===3;
-  let gathered;
-  if(surface.kind==='bermudan')gathered=surfaceMix(a,surface.corners[2],v);
-  else if(triangle){const axis=surfaceSubtract(b,a),along=surfaceDot(surfaceSubtract(rest,a),axis)/surfaceDot(axis,axis);gathered=surfaceMix(a,b,along);}
-  else gathered=surfaceRestPoint(surface,u,0);
-  const envelope=triangle?27*u*v*Math.max(0,1-u-v):4*u*(1-u)*(v<=0||v>=1?0:Math.sin(Math.PI*v));
-  const entry=Object.freeze({rest:Object.freeze(rest),gathered:Object.freeze(gathered),envelope,cache});
-  if(cache.count===surfacePreparedUVLimit){
-    const [oldU,oldV]=cache.ring[cache.next],row=cache.rows.get(oldU);row.delete(oldV);if(!row.size)cache.rows.delete(oldU);
-  }else cache.count++;
-  let row=cache.rows.get(U);if(!row){row=new Map();cache.rows.set(U,row);}row.set(V,entry);
-  cache.ring[cache.next]=[U,V];cache.next=(cache.next+1)%surfacePreparedUVLimit;return entry;
 }
 
 // A physical main mast may carry fore-controlled headsails and main canvas.
@@ -307,18 +270,17 @@ function surfaceApplyPreparedSupports(p,reference,normal,surface,pose,supports,p
 
 export function surfaceClothPoint(surface,u,v,pose,context={},time=0,wind=0){
   surfaceCheck(surface);
-  const prepared=surfacePreparedUV(surface,u,v),rest=prepared?.rest??surfaceRestPoint(surface,u,v),[a,b]=surface.corners,triangle=surface.corners.length===3;
+  const rest=surfaceRestPoint(surface,u,v),[a,b]=surface.corners,triangle=surface.corners.length===3;
   let gathered;
-  if(prepared)gathered=prepared.gathered;
-  else if(surface.kind==='bermudan')gathered=surfaceMix(a,surface.corners[2],v);
+  if(surface.kind==='bermudan')gathered=surfaceMix(a,surface.corners[2],v);
   else if(triangle){const axis=surfaceSubtract(b,a),along=surfaceDot(surfaceSubtract(rest,a),axis)/surfaceDot(axis,axis);gathered=surfaceMix(a,b,along);}
   else gathered=surfaceRestPoint(surface,u,0);
   const deployed=surfaceClamp(pose.deployed??1),fill=surfaceClamp(pose.fill??0),flat=surfaceMix(gathered,rest,.012+.988*deployed);
-  const envelope=prepared?prepared.envelope:triangle?27*u*v*Math.max(0,1-u-v):4*u*(1-u)*(v<=0||v>=1?0:Math.sin(Math.PI*v));
+  const envelope=triangle?27*u*v*Math.max(0,1-u-v):4*u*(1-u)*(v<=0||v>=1?0:Math.sin(Math.PI*v));
   const slack=1-surfaceSmooth(.2,.85,fill),flutter=Math.min(Math.max(wind,0)/4,1)*(surface.flutter??.035)*slack*slack*Math.sin(time*6+u*17+v*13);
   const sign=surface.kind==='lateen'?pose.side:1;
   const camber=((surface.belly??.2)*(pose.pressure??1)*sign*(.12+.88*fill)+flutter)*envelope*deployed;
-  const axis=prepared?(prepared.cache.axis??=Object.freeze(surfaceUnit(surface.camberAxis??(surface.kind==='square'?[0,0,1]:[1,0,0])))):surfaceUnit(surface.camberAxis??(surface.kind==='square'?[0,0,1]:[1,0,0]));
+  const axis=surfaceUnit(surface.camberAxis??(surface.kind==='square'?[0,0,1]:[1,0,0]));
   const reference=surfaceClothMotion(surface,flat,pose),point=surfaceClothMotion(surface,surfaceAdd(flat,surfaceMultiply(axis,camber)),pose);
   if(!(context.supports?.length||context.masts?.length))return point;
   const normal=surfaceUnit(surfaceSubtract(surfaceClothMotion(surface,surfaceAdd(flat,axis),pose),reference));
