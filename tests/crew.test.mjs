@@ -62,8 +62,11 @@ test('deck route respects hull clearance, dimensions and render-rate independenc
   assert.ok(Math.abs(resized.position[0]+1.9)<1e-6);stepDeckhand(resized,{...boat,beam:1},.1);assert.equal(resized.visible,false);
 });
 test('orders and rough-weather interruption stop movement; invalid policies fall back locally',()=>{
-  const s=createDeckhand();for(let i=0;i<30;i++)stepDeckhand(s,boat,.1);
-  assert.ok(s.walk>.9);s.order='standby';s.decisionIn=0;const z=s.z;
+  const s=createDeckhand(),startZ=s.z;
+  // Observe the actual walking phase; a faster sailor may already have reached
+  // the endpoint and begun its idle wait at an arbitrary three-second sample.
+  for(let i=0;i<60&&s.walk<=.9;i++)stepDeckhand(s,boat,.1);
+  assert.ok(s.walk>.9&&Math.abs(s.z-startZ)>.1,'real travel reaches the walking blend before the stop order');s.order='standby';s.decisionIn=0;const z=s.z;
   for(let i=0;i<20;i++)stepDeckhand(s,boat,.1);assert.equal(s.z,z);assert.ok(s.walk<.001);
   s.order='patrol';s.policy=()=> 'teleport';stepDeckhand(s,{...boat,roll:.5},.1);assert.equal(s.intent,'brace');assert.equal(s.z,z);
   for(let i=0;i<20;i++)stepDeckhand(s,{...boat,roll:.5},.1);assert.ok(s.brace>.99);
