@@ -1,10 +1,10 @@
-# Seasick Simulator
+# Ocean Sailing Simulator
 
 Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
 A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. Niña carries three lateen sails; Victory has a tiered square rig. Both use wind-driven motion, working helms, crew and boat, free-flight and exterior cameras. Sea conditions, sunlight and clouds can be adjusted and shared in a link.
 
-[Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
+[Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
 The current checkpoint reduces repeated crew, vessel and ocean shading work,
 targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater
