@@ -107,16 +107,17 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
     hands=station.side<0?[innerGrip,outerGrip]:[outerGrip,innerGrip];
   }else{
     const z=station.z*scale[2],rim=rowingHullDeck(d.id,station.z),edge=rowingHullWidth(d.id,station.z,rim)*scale[0];
-    // Seated paddlers carry the loom diagonally inboard. Both grips must stay
-    // within an adult arm's envelope; lifting a vertical 1.5 m paddle beside a
-    // seated torso otherwise puts the top hand implausibly above the head.
+    // A wide rim-to-seat gap calls for a stronger inboard shaft diagonal. The
+    // narrow ends retain their near-vertical stance; one fixed grip/shaft pose
+    // then works for both the raised recovery and fully buried drive blade.
+    const grip=spec.paddleGrip,inboard=rowingClamp((edge-Math.abs(seat[0]))/grip.seatRimReference,grip.inboardMin,grip.inboardMax);
     centre=[station.side*(edge+.12),.28+(-.23-.28)*stroke.immersed,z+.30*stroke.sweep];
     velocity=[0,-.51*stroke.immersionRate,.30*stroke.sweepRate];
-    along=rowingUnit([-station.side*.60,1,0]);
+    along=rowingUnit([-station.side*inboard,1,0]);
     const width=rowingUnit(rowingSub([1,0,0],rowingMul(along,along[0]))),N=rowingUnit(rowingCross(along,width));
     across=rowingAdd(rowingMul(width,cos),rowingMul(N,sin));normal=rowingUnit(rowingCross(along,across));
-    shaftA=rowingAdd(centre,rowingMul(along,1.30));shaftB=rowingAdd(centre,rowingMul(along,-spec.bladeLength*.5));
-    const low=rowingAdd(centre,rowingMul(along,.72)),high=rowingAdd(centre,rowingMul(along,1.15));hands=station.side<0?[low,high]:[high,low];
+    shaftA=rowingAdd(centre,rowingMul(along,grip.loom));shaftB=rowingAdd(centre,rowingMul(along,-spec.bladeLength*.5));
+    const low=rowingAdd(centre,rowingMul(along,grip.low)),high=rowingAdd(centre,rowingMul(along,grip.high));hands=station.side<0?[low,high]:[high,low];
   }
   const footZ=seat[2]+(station.kind==='oar'?.58:-.46),floorDesign=rowingDeck(d.id,footZ/scale[2]),floor=floorDesign*scale[1];
   const footEdge=Math.max(.02,rowingHullWidth(d.id,footZ/scale[2],floorDesign)*scale[0]-d.shellThicknessMetres);

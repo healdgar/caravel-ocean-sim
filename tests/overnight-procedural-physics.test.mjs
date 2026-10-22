@@ -143,3 +143,19 @@ test('rowing grip and boot targets remain anatomical left/right on both sides of
     }
   }
 });
+
+test('seated paddle grips fit the actual rim gap and remain on one physical loom',()=>{
+  const d=proceduralDesign('taino-canoe'),b=overnightPhysicsBoat(d.id),grip=d.propulsion.paddleGrip;
+  b.rowingState={phase:0,rate:.45,effortPort:1,effortStarboard:1};
+  assert.ok(grip.high-grip.low>=.30&&grip.high-grip.low<=.50);assert.ok(grip.loom>grip.high);
+  for(const station of d.stations)for(const phase of [0,.08,.22,.30,.439,.441,.65,.88,.99]){
+    const p=rowingStationPose(b,station.id,{phase}),ratio=Math.abs(p.bladeAlong[0]/p.bladeAlong[1]);
+    assert.ok(ratio>=grip.inboardMin-1e-12&&ratio<=grip.inboardMax+1e-12);
+    const low=p.hands[station.side<0?0:1],high=p.hands[station.side<0?1:0];
+    overnightPhysicsClose(Math.hypot(...low.map((v,i)=>v-p.bladeCentre[i])),grip.low);
+    overnightPhysicsClose(Math.hypot(...high.map((v,i)=>v-p.bladeCentre[i])),grip.high);
+    overnightPhysicsClose(Math.hypot(...high.map((v,i)=>v-low[i])),grip.high-grip.low);
+    if(Math.abs(station.z)<1)assert.ok(high[1]-p.seat[1]<.90,'broad midships stance must lower the raised top grip into the seated reach envelope');
+    assert.ok(p.bladeAlong.every(Number.isFinite)&&p.bladeVelocity.every(Number.isFinite));
+  }
+});
