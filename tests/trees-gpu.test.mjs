@@ -103,10 +103,11 @@ async function coverage(page,baseline=false){
 
 test('the production tree renderer retains detailed perforated foliage and opaque distant crown masses',{timeout:240000},async t=>{
   const terrain=await readFile(new URL('../js/terrain.js',import.meta.url),'utf8'),main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-  const treeMarker='trees=islandVegetation(heights,biome);',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
+  const treeMarker='const trees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees;',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
   for(const marker of [treeMarker,geometryMarker,groundMarker])assert.ok(terrain.includes(marker),'tree fixture marker '+marker);
   assert.ok(main.includes(cameraMarker));
-  // Keep one original, unmodified seeded instance. Suppressing terrain isolates
+  // Inspect the actual post-filter array with imported scenery explicitly off;
+  // keep one original, unmodified seeded instance. Suppressing terrain isolates
   // its true silhouette against the same production sky, lighting and tonemap.
   const geometryFixture=`(()=>{
     const data=treeRenderGeometry(variant,Number(new URL(location.href).searchParams.get('treeTestLod')));
@@ -117,7 +118,7 @@ test('the production tree renderer retains detailed perforated foliage and opaqu
     }
     return new Float32Array(sparse);
   })()`;
-  const fixture=terrain.replace(treeMarker,'trees=islandVegetation(heights,biome).slice(0,8);window.treeCheck.instance=Array.from(trees);')
+  const fixture=terrain.replace(treeMarker,'const trees=(canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees).slice(0,8);window.treeCheck.instance=Array.from(trees);window.treeCheck.originalSeed=Array.from(originalTrees.subarray(0,8));window.treeCheck.importedScenery=!!canopyPack;')
     .replace(geometryMarker,geometryFixture)
     .replace(groundMarker,'');
   const results=[];
@@ -128,7 +129,9 @@ test('the production tree renderer retains detailed perforated foliage and opaqu
       await page.addInitScript(instrumentTrees);
       await page.route('**/js/terrain.js',route=>route.fulfill({contentType:'text/javascript',body:fixture}));
       await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:main.replace(cameraMarker,'  window.treeCheck.camera=cam;\n'+cameraMarker)}));
-      await ready(page,`${origin}/?landfall=coast&view=free&prow=0&follower=0&sunElev=55&sunAzim=155&clouds=0&windSpeed=0&swellHs=0&fov=45&w=384&h=384&treeTestLod=${lod==='sparse'?'2&treeTestSparse=1':lod}`);
+      await ready(page,`${origin}/?landfall=coast&canopy=off&view=free&prow=0&follower=0&sunElev=55&sunAzim=155&clouds=0&windSpeed=0&swellHs=0&fov=45&w=384&h=384&treeTestLod=${lod==='sparse'?'2&treeTestSparse=1':lod}`);
+      const selected=await page.evaluate(()=>({actual:treeCheck.instance,original:treeCheck.originalSeed,imported:treeCheck.importedScenery}));
+      assert.equal(selected.imported,false);assert.equal(selected.actual.length,8);assert.deepEqual(selected.actual,selected.original,'the rendered post-filter tree retains its actual seeded root, scale and identity');
       await page.evaluate(()=>{
         const t=treeCheck.instance;Object.assign(treeCheck.camera,{x:t[0],y:t[1]+t[4]*.55,z:t[2]+t[4]*2.6,yaw:0,pitch:0});treeCheck.hideTrees=true;
       });
@@ -158,7 +161,7 @@ for(const entry of ['ocean.html','ocean.min.html','docs/index.html'])test(`proce
   const page=await browser.newPage({viewport:{width:480,height:360}}),errors=errorsFor(page);
   try{
     await page.addInitScript(instrumentTrees);
-    await ready(page,`${origin}/${entry}?landfall=coast&view=free&prow=0&follower=0&sunElev=45&clouds=0&w=144&h=108`);
+    await ready(page,`${origin}/${entry}?landfall=coast&canopy=off&view=free&prow=0&follower=0&sunElev=45&clouds=0&w=144&h=108`);
     const rendered=await frame(page);assert.ok(rendered.render['island trees']>0);assert.ok(rendered.render.island>0);assert.equal(rendered.render.ocean,1);
     assert.deepEqual(rendered.pipelines,[{samples:4,alphaCoverage:false},{samples:4,alphaCoverage:true}]);assert.deepEqual(rendered.leafUploads,[[1024,1024]],'each distribution uploads the same leaf atlas');assert.deepEqual(errors,[]);
   }finally{await page.close();}
