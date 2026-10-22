@@ -11,8 +11,35 @@ byte-verified checkpoints. The held woodland prototype stays separate.
 
 At **08:00 America/Los_Angeles on October 22**, start no new implementation;
 stabilize active work, record releases/checks/remaining tasks, and disable
-`waterworld-overnight-backlog`. Its local hourly heartbeat is active for this
-night. Notify on meaningful changes, failures, required input or morning completion.
+`waterworld-overnight-backlog`. The heartbeat was paused at the morning cutoff.
+Notify on meaningful changes, failures, required input or morning completion.
+
+### October 22 morning restart checkpoint
+
+The user is downloading a macOS update and explicitly resumed work until ready
+to restart. Keep the hourly heartbeat paused. Stop all authors, validation and
+the local server when asked; preserve every checkout and generated asset.
+
+- Public runtime remains `3ba18f9`; public documentation HEAD is `379881a`.
+- Primary local crew integration is `601c1c8`, unpublished. Latest focused run
+  `/tmp/waterworld-crew-combined-100.log` passes 42/47: Niña gun traffic/return,
+  all isolated gun poses and legacy climbing now pass. Victory gun attendance
+  and hauler reach still block release. Generated standalone pages are stale.
+- Performance cleanup is isolated from that crew stack. Stats UI checkout:
+  `/Users/alexwall/.codex/worktrees/performance-stats/waterworld`; CPU rig cache:
+  `/Users/alexwall/.codex/worktrees/cloud-rig-cache/waterworld`. Both start at
+  `379881a`; inspect their current files/commits before resuming.
+- Root observed Flying Cloud at about 5 FPS / 194 ms per frame in native Chrome,
+  1920 × 1080, with a 36 ms sampled GPU window. CPU sail deformation repeatedly
+  resolves identical attachments and support geometry. GPU windows include waits;
+  this is a reproduced slowdown, not a completed optimization benchmark.
+- New user priorities: visible FPS/performance button; Flying Cloud efficiency
+  without reducing fidelity; forest patches with touching/overlapping crowns
+  and a distant canopy derived from the same tree positions/colors/clearings.
+  The imported canopy covers only 42 trees in an 80 × 80 m summit patch; island
+  procedural scatter still lacks forest closure. No density fix is implemented.
+- Root owns all tests/builds/browser/profiling. Authors must not execute them;
+  direct subagents only. Keep the held woodland prototype out of checkpoints.
 
 The October 20–21 overnight run and its old cutoff below are historical records.
 
@@ -27,6 +54,16 @@ at a fixed rate independently of actual travel. Root retains the sole validation
 baton while direct agents author clearance, pace and independent geometry checks.
 Keep human size, actual tool reach, stairs, body separation, weather caution and
 row/climb/reload clocks intact. No crew changes are qualified or published yet.
+
+Current local integration uses shared physical equipment/full-recoil reservations,
+bounded route detours, distance-driven gait and authored clear-deck patrol/work
+caps of 1.25/1.4 m/s. Slopes/heel slow travel and existing brace thresholds stop it.
+Latest focused checks pass 42/47; this is not release clearance. Remaining
+stabilization covers Victory gun attendance and actual hauler reach. The confirmed
+fore stair/run-in barrel collision was corrected with shared physical stairs;
+independent channel/hull support and isolated gun-pose checks pass. The last qualified
+public runtime remains `3ba18f9`. Root owns all execution; source authors have
+not run checks. No unqualified crew source has been pushed.
 
 ### Nine-vessel integration — published and byte-verified
 
