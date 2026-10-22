@@ -326,7 +326,12 @@ export function proceduralCrewRoute(s,target,boat,company=null){
   return [[...start],...path,[...target]];
 }
 function crewProceduralTask(company,boat,s,job,target){
-  const path=proceduralCrewRoute(s,target,boat,company);if(!path)return false;
+  const retries=company.routeRetries??=new Map(),key=s.id+'/'+job.kind+'/'+(job.control??''),at=company.workTime??0,geometry=boat.modelId+'/'+boat.length+'/'+boat.beam,retry=retries.get(key);
+  if(retry&&retry.revision===company.revision&&retry.geometry===geometry&&at<retry.nextAt&&Math.hypot((s.x-retry.x)*boat.beam/3.6,(s.z-retry.z)*boat.length/12)<.25)return false;
+  company.routeAttempts=(company.routeAttempts??0)+1;
+  const path=proceduralCrewRoute(s,target,boat,company);
+  if(!path){retries.set(key,{revision:company.revision,geometry,nextAt:at+1,x:s.x,z:s.z});return false;}
+  retries.delete(key);
   s.home??=[s.x,s.z];s.job={...job,stage:'approach',elapsed:0,rung:0,revision:company.revision,path,cursor:0};s.intent='work';s.work=0;return true;
 }
 function assignProceduralCrewWork(company,boat){

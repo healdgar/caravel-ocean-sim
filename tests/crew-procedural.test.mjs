@@ -106,3 +106,14 @@ test('entering and leaving a hazard uses final physical attendance for the same-
     }
   }
 });
+
+test('blocked new-model assignments back off and invalidate immediately for a new captain order',()=>{
+  const boat=crewProposedBoat('gipsy-moth-iv'),company=createCompany(undefined,boat.modelId);stepCompany(company,boat,0,3);
+  // A disconnected start has no authored deck path. Never teleport it onto a
+  // route, and do not explore the entire graph again on every display frame.
+  company.crew[0].x=100;company.crew[0].position[0]=100*boat.beam/3.6;issueCaptainOrder(company,boat,'furl');stepCompany(company,boat,.1,3);
+  const attempts=company.routeAttempts;assert.ok(attempts>0);assert.equal(company.crew[0].job,null);
+  for(let i=0;i<5;i++)stepCompany(company,boat,.1,3);assert.equal(company.routeAttempts,attempts);
+  issueCaptainOrder(company,boat,'reduced');stepCompany(company,boat,.1,3);assert.ok(company.routeAttempts>attempts,'new orders invalidate blocked-path retry backoff');
+  assert.equal(company.crew[0].x,100,'planner failure never supplies a wall bypass or teleport');
+});
