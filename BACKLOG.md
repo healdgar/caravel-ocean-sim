@@ -6,8 +6,8 @@ The canvas wheel handler was passive, allowing Chromium trackpad pinch/Ctrl-whee
 to change the camera and trigger browser page zoom simultaneously. It now cancels
 the default through a canvas-scoped non-passive listener. Panel scrolling and
 browser zoom outside the scene retain their normal handling; no global zoom lock
-or viewport restriction was added. The static world-map SVG is a separate chart
-without local zoom controls; the user was asked which surface they meant.
+or viewport restriction was added. The user confirmed the issue concerns the
+3D ocean/island view. The separate static world-map SVG is unchanged.
 
 Native Metal regression run **30/30** passes in **39.692 seconds**:
 `/tmp/waterworld-map-zoom-regression-153.log`. Real Ctrl-wheel events on source and
@@ -16,6 +16,14 @@ scale, and still change source camera range. The mobile two-finger path retains
 the same layout invariants. Camera, Stats desktop/mobile, all-vessel GPU guards,
 asset packaging, startup and offline checks pass. This is not physical Safari or
 iPhone gesture qualification. Build receipt `/tmp/waterworld-map-zoom-build-152.log`.
+Published runtime **`5d6ee64194d4aa1a8964754b1fb548fc460aab85`** built at
+**2026-10-22T19:27:21Z**. Verification at **19:28:02Z** matches HTML
+**1,346,216 bytes**, SHA-256
+`bdc097e2c7dd2a31c8dee90371062de4c6c9b78cd1900ddf5abf04624716957f`,
+the unchanged manifest, and all **58 assets / 19,931,107 bytes**. Receipt
+`/tmp/waterworld-zoom-public-receipt-154.json`.
+Fresh visible Chrome review zoomed the public scene with unchanged HUD sizing
+and no console warnings/errors; proof `shots/scene-zoom-live.png`.
 
 ## October 22 morning: shared WebGPU graphics contract
 
