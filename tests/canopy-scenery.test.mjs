@@ -39,7 +39,7 @@ test('runtime keeps baked world coordinates, source UVs and already-linear colou
 });
 
 test('malformed manifests, overlapping/omitted ranges, bad vertices and incomplete bounds are rejected',()=>{
-  const edits=[m=>m.version=2,m=>m.upAxis='Z',m=>m.vertexLayout.strideBytes=40,m=>m.coverage.boundsXZ[1]=m.coverage.boundsXZ[0],
+  const edits=[m=>m.version=2,m=>m.upAxis='Z',m=>m.vertexLayout.strideBytes=40,m=>m.vertexLayout.attributes[0]='z',m=>m.patches=[],m=>m.coverage.boundsXZ[1]=m.coverage.boundsXZ[0],
     m=>m.files['near.bin'].bytes--,m=>m.files['near.bin'].sha256='unverified',m=>m.patches[0].near.firstVertex=1,
     m=>m.patches[0].near.vertexCount=6,m=>m.patches[0].near.vertexCount=0,m=>m.patches.push(structuredClone(m.patches[0])),
     m=>m.patches[0].radius=.1,m=>m.patches[0].high[0]=-2,m=>m.patches[0].centre[1]=NaN,
@@ -50,6 +50,7 @@ test('malformed manifests, overlapping/omitted ranges, bad vertices and incomple
     const {manifest,streams}=canopyTestFixture(),data=new Float32Array(streams['near.bin']);if(offset===3)data.fill(0,3,6);else data[offset]=value;
     assert.throws(()=>decodeCanopyScenery(manifest,streams),'finite unit direction, exposure, colour and complete culling support are required');
   }
+  for(const [name,kind]of [['near.bin',4],['leaf.bin',3],['far.bin',2]]){const {manifest,streams}=canopyTestFixture();new Float32Array(streams[name])[6]=kind;assert.throws(()=>decodeCanopyScenery(manifest,streams),'native opaque/cutout material kinds cannot be silently reclassified');}
   const {manifest,streams}=canopyTestFixture();streams['near.bin']=streams['near.bin'].slice(4);assert.throws(()=>decodeCanopyScenery(manifest,streams));
 });
 
