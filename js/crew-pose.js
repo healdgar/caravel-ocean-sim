@@ -208,6 +208,9 @@ export function poseCrewWork(a,s,boat){
   if(!j&&poseSeatedCrew(a,s))return;
   if(j)poseRowingWalkingFeet(a,s,boat);
   if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
+    // Arrival timing must not move real runner holds through an inherited Walk
+    // hip/spine sway. Limb phase below is driven only by actual rung travel.
+    poseNeutralSeatedBody(a);
     // The tall first-rate's ratlines are farther apart. Hands can slide along
     // the shroud between them; keep the human gait at a reachable 32 cm stride.
     const spacing=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId)?crewRunnerMetrics(boat,j.mast,j.side).dy/.32:1;
