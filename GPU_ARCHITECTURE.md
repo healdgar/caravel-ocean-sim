@@ -1,0 +1,9 @@
+# Graphics execution contract
+
+Per-frame graphics transformations belong on WebGPU for every renderable model. Adding a ship supplies model data to the shared renderer; it does not create a JavaScript mesh-animation backend. Main, shadow, submerged and wetness passes consume the same computed position/normal buffer.
+
+JavaScript may prepare immutable geometry and GPU metadata once, integrate sparse physical state, solve crew tasks/IK, and upload compact controls, joints or instance transforms. Existing cannon recoil may update its explicit bounded vertex subranges. It must not deform or upload a complete vessel mesh each frame, regenerate material probes from that mesh, or read posed vertices back to feed another render pass.
+
+A CPU graphics exception requires a concrete measured performance or transfer-latency advantage, a bounded workload, and regression coverage. No ship-class exemption is presently justified. CPU reference evaluators remain available to offline validation; runtime assets expose no CPU pose callback.
+
+`tests/gpu-vessel-contract.test.mjs` checks registry assets and forbidden runtime paths. `tests/gpu-vessel-contract-gpu.test.mjs` observes actual production GPU commands, buffer sharing and uploads, then deliberately disables dispatch and adds a full-mesh upload to prove those regressions are rejected. Native pose parity tests compare physical positions and normals rather than trusting a GPU flag. These tests do not establish a frame-rate guarantee on a physical device.

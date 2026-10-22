@@ -92,7 +92,7 @@ function assertFleetSnapshot(snapshot,expected){
   for(const [index,row]of snapshot.rows.entries()){
     assert.ok(row.vertices>1000&&row.indices>3000,row.model+' actual geometry');assert.equal(row.crew,12,row.model+' actual crew');assert.ok(row.crewFinite&&row.probeFinite,row.model+' finite live state');assert.ok(row.probeTime>=0,row.model+' receives its own actual sea readback');
     assert.ok(row.sampleMatches,row.model+' GPU vertex upload matches current instance geometry');assert.equal(row.shadowViews.length,3);assert.ok(row.shadowViews.every(view=>view.layer===index&&view.count===1&&view.total===expected),'shadow draws select this ship’s actual array layers');
-    if(row.cpuPose){assert.ok(row.dynamic>=0,row.model+' CPU pose moves real sail vertices');assert.ok(row.uploads>=2,row.model+' CPU pose reaches GPU');}
+    assert.equal(row.cpuPose,false,row.model+' has no runtime CPU mesh animator');assert.equal(row.gpuPose,true,row.model+' owns an actual GPU pose');assert.equal(row.dynamic,-1,row.model+' CPU sail vertices remain immutable');assert.equal(row.uploads,1,row.model+' source geometry is uploaded only at initialization');
   }
   for(const pair of snapshot.sameModels)assert.ok(Object.values(pair).every(Boolean),'immutable assets/index buffers shared; mutable ship state independent');
 }
@@ -113,7 +113,7 @@ for(const path of ['/', '/docs/index.html'])for(const model of ['nina','pinta','
     await fleetRuntimeStep(page);await fleetRuntimeStep(page);const first=await fleetRuntimeSnapshot(page);assertFleetSnapshot(first,1);
     const next=await fleetRuntimeStep(page);await fleetRuntimeStep(page);const last=await fleetRuntimeSnapshot(page);assertFleetSnapshot(last,1);
     assert.deepEqual(last.sources,first.sources,'rest vertices and immutable source indices survive live animation');
-    if(first.rows[0].cpuPose)assert.notEqual(last.rows[0].mesh,first.rows[0].mesh,'actual CPU posed cloth changes between frames');
+    assert.equal(last.rows[0].mesh,first.rows[0].mesh,'live GPU cloth never rewrites CPU rest vertices');
     assert.ok(next.render[model+' vessel']>0,'requested model actually draws');if(model==='victory')assert.ok(next.compute['shared vessel deformation']>0,'Victory uses real GPU deformation');
     assert.equal(await page.evaluate(()=>window.oceanStartup.state),'ready');assert.deepEqual(errors,[]);
   }finally{await page.close();}
@@ -126,7 +126,7 @@ for(const path of ['/', '/docs/index.html'])test(`${path} four different ships s
     await page.getByRole('button',{name:'Camera views',exact:true}).click();await page.getByRole('button',{name:'View fleet',exact:true}).click();
     const secondFrame=await fleetRuntimeStep(page);await fleetRuntimeStep(page);const second=await fleetRuntimeSnapshot(page);assertFleetSnapshot(second,4);assert.deepEqual(second.sources,first.sources);
     for(const model of ['nina','pinta','santa-maria','victory'])assert.ok(secondFrame.render[model+' vessel']>0,'fleet renders '+model);
-    for(const row of second.rows.filter(v=>v.cpuPose))assert.notEqual(row.mesh,first.rows.find(v=>v.id===row.id).mesh,row.model+' cloth remains live in fleet');
+    for(const row of second.rows)assert.equal(row.mesh,first.rows.find(v=>v.id===row.id).mesh,row.model+' GPU cloth preserves instance rest geometry');
     if(path==='/docs/index.html'){const shot=await fleetRuntimeCapture(page,'fleet-four-ships');assert.ok(shot.nonblack>1000);}
     assert.deepEqual(errors,[]);
   }finally{await page.close();}
