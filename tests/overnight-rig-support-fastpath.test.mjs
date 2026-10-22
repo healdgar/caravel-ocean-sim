@@ -10,6 +10,11 @@ const supportFastSurface=extra=>({id:1,mast:0,controlGroup:'main',kind:'square',
 const supportFastContext=(surface,supports,extra={})=>deepFreeze(withRigSupportCache({surfaces:[surface],supports,masts:[],lines:[],...extra}));
 const supportFastReference=context=>({...context,_surfaceCollisionSupports:Object.freeze([...context._surfaceCollisionSupports])});
 const supportFastBytes=value=>new Uint8Array(new Float64Array(value).buffer);
+function supportFastHypots(evaluate){
+  const original=Math.hypot;let calls=0;
+  Math.hypot=(...values)=>{calls++;return original(...values);};
+  try{return {value:evaluate(),calls};}finally{Math.hypot=original;}
+}
 function supportFastCompare(context,state,coordinates,time=1.7,wind=13){
   const direct=supportFastReference(context),fast=withRigPoseContext(context,state),reference=withRigPoseContext(direct,state);
   for(const surface of context.surfaces){
@@ -29,6 +34,41 @@ test('private preparation eliminates repeated support-coordinate reads without c
   const fast=surfaceClothPoint(surface,.4,.3,pose,context);assert.equal(reads,0,'trusted frozen support geometry is not rescanned per cloth sample');
   const direct=surfaceClothPoint(surface,.4,.3,pose,supportFastReference(context));assert.ok(reads>0,'separate array evaluator still reads and validates original endpoints');
   assert.deepEqual(supportFastBytes(fast),supportFastBytes(direct));
+});
+
+test('exact normal projections reuse only eight live triples and retain adjacent-angle Float64 results',()=>{
+  const surface=supportFastSurface({belly:0}),context=supportFastContext(surface,[{a:[0,-2,0],b:[0,3,0],r:.1,kind:'shroud'}]);
+  rigSurfacePose(surface,{});
+  const point=yaw=>surfaceClothPoint(surface,.5,.5,{yaw,deployed:1,fill:1,pressure:1},context);
+  const first=supportFastHypots(()=>point(0)),hit=supportFastHypots(()=>point(0));
+  assert.equal(first.calls,hit.calls+2,'a cache hit removes both primary projection hypots');assert.deepEqual(supportFastBytes(first.value),supportFastBytes(hit.value));
+  for(let i=1;i<=8;i++)point(i*.07);
+  const evicted=supportFastHypots(()=>point(0));assert.equal(evicted.calls,hit.calls+2,'the ninth distinct triple evicts the oldest entry instead of growing the cache');
+  const reference=supportFastReference(context);
+  for(const yaw of [0,-0,Number.EPSILON,Number.EPSILON*2,.25,.25+Number.EPSILON,-.25,-.25-Number.EPSILON]){
+    const pose={yaw,deployed:.83,fill:.7,pressure:-.6};
+    assert.deepEqual(supportFastBytes(surfaceClothPoint(surface,.5,.5,pose,context,1.5,18)),supportFastBytes(surfaceClothPoint(surface,.5,.5,pose,reference,1.5,18)),'no angle/normal quantization or signed-zero coalescing changes output');
+  }
+});
+
+test('own-mast direction reuses its exact projection while nonpenetrating geometry skips only distance work',()=>{
+  const own=supportFastSurface({belly:0,mastContactSide:'fore'}),mast={index:0,foot:[0,-2,0],head:[0,3,0],radius:.1};
+  const context=supportFastContext(own,[],{masts:[mast]}),point=yaw=>surfaceClothPoint(own,.4,.4,{yaw,deployed:1,fill:1,pressure:1},context);
+  rigSurfacePose(own,{});
+  const first=supportFastHypots(()=>point(.1)),other=supportFastHypots(()=>point(.2));
+  assert.equal(first.calls,other.calls+2,'a changing cloth normal does not invalidate a constant authored mast direction');
+  const distant=supportFastSurface({belly:0,corners:[[-1,2,.5],[1,2,.5],[1,0,.5],[-1,0,.5]]}),clear=supportFastContext(distant,[{a:[0,-2,0],b:[0,3,0],r:.1,kind:'shroud'}]),pose=rigSurfacePose(distant,{});
+  surfaceClothPoint(distant,.5,.5,pose,clear);
+  const fast=supportFastHypots(()=>surfaceClothPoint(distant,.5,.5,pose,clear)),direct=supportFastHypots(()=>surfaceClothPoint(distant,.5,.5,pose,supportFastReference(clear)));
+  assert.equal(direct.calls,fast.calls+3,'two cached projection hypots and one provably irrelevant distance hypot are avoided');
+  assert.deepEqual(supportFastBytes(fast.value),supportFastBytes(direct.value));
+});
+
+test('far support with ambiguous rest side retains the original pose-accessor distance gate',()=>{
+  const surface=supportFastSurface(),context=supportFastContext(surface,[{a:[10,-2,.05],b:[10,3,.05],r:.1,kind:'shroud'}]);
+  const sample=c=>{let pressureReads=0;const pose={yaw:0,deployed:1,fill:1,get pressure(){pressureReads++;if(pressureReads>1)throw Error('Unused pose accessor');return 1;}};
+    const point=surfaceClothPoint(surface,.5,.5,pose,c);assert.equal(pressureReads,1);return point;};
+  assert.deepEqual(supportFastBytes(sample(context)),supportFastBytes(sample(supportFastReference(context))));
 });
 
 test('prepared projection preserves overlapping support order and both normal fallback branches',()=>{

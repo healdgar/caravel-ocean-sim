@@ -11,7 +11,7 @@ const surfaceDot=(a,b)=>a.reduce((sum,x,i)=>sum+x*b[i],0);
 const surfaceCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const surfaceMix=(a,b,t)=>a.map((x,i)=>x+(b[i]-x)*t);
 const surfaceFinitePoint=p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite);
-const surfaceCheckedGeometry=new WeakSet(),surfacePreparedViews=new WeakMap();
+const surfaceCheckedGeometry=new WeakSet(),surfacePreparedViews=new WeakMap(),surfacePreparedNormals=new WeakMap();
 function surfaceFrozenData(value){
   if(!value||!Object.isFrozen(value))return false;
   const prototype=Object.getPrototypeOf(value);
@@ -146,7 +146,22 @@ function surfacePreparedSupportData(supports){
       x:s._surfaceAxis[0],y:s._surfaceAxis[1],z:s._surfaceAxis[2],length2:s._surfaceLength2,
       r:s.r??0,rEnd:s.rEnd,kind:s.kind,mast:s.mast,surface:s.surface}));
   }
-  return view.data=Object.freeze(data);
+  view.data=Object.freeze(data);surfacePreparedNormals.set(view.data,{entries:[],fore:[],aft:[]});return view.data;
+}
+function surfacePreparedNormalEntry(cache,normal){
+  for(const entry of cache.entries)if(Object.is(entry.x,normal[0])&&Object.is(entry.y,normal[1])&&Object.is(entry.z,normal[2]))return entry;
+  const entry={x:normal[0],y:normal[1],z:normal[2],projections:[]};
+  if(cache.entries.length===8)cache.entries.shift();cache.entries.push(entry);return entry;
+}
+// A primary projection depends on the exact direction and immutable support
+// axis. A null records only its degeneracy; the reference-based fallback is
+// evaluated afresh at each cloth point and is never stored here.
+function surfacePreparedNormal(support,directionX,directionY,directionZ){
+  const {x,y,z,length2}=support,projection=(((0+directionX*x)+directionY*y)+directionZ*z)/length2;
+  let nx=directionX-x*projection,ny=directionY-y*projection,nz=directionZ-z*projection;
+  if(Math.hypot(nx,ny,nz)<1e-10)return null;
+  const length=Math.hypot(nx,ny,nz);if(!(length>1e-12))throw Error('Degenerate rig surface axis');
+  const inverse=1/length;nx*=inverse;ny*=inverse;nz*=inverse;return [nx,ny,nz];
 }
 export function withRigPoseContext(context,state={},poses=null){
   const live=poses??new Map((context.surfaces??[]).map(s=>[s.id,rigSurfacePose(s,state)]));
@@ -208,8 +223,10 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
 // its support order, +0 reduce seed, expression association, hypot arguments,
 // normal fallbacks, taper interpolation and sequential point updates exactly.
 function surfaceApplyPreparedSupports(p,reference,normal,surface,pose,supports,pin,clearance,band){
-  let px=p[0],py=p[1],pz=p[2];
-  for(const support of supports){
+  let px=p[0],py=p[1],pz=p[2],normalEntry;
+  const normalCache=surfacePreparedNormals.get(supports);
+  for(let index=0;index<supports.length;index++){
+    const support=supports[index];
     if((support.kind==='spar'||support.kind==='sail-stay')&&support.surface===surface.id)continue;
     const {ax,ay,az,bx,by,bz,x,y,z,length2}=support;let r=support.r+clearance;
     if(!Number.isFinite(r)||r<0||(support.rEnd!==undefined&&support.rEnd+clearance<0))throw Error('Invalid rig support descriptor');
@@ -218,24 +235,32 @@ function surfaceApplyPreparedSupports(p,reference,normal,surface,pose,supports,p
     if(support.rEnd!==undefined)r=support.r+(support.rEnd-support.r)*t+clearance;
     const mastBarrier=(support.kind==='mast'||support.kind==='spar')&&support.mast===surface.mast&&surface.mastContactSide;
     if(mastBarrier&&mastBarrier!=='fore'&&mastBarrier!=='aft')throw Error('Invalid authored mast contact side');
-    const directionX=mastBarrier?0:normal[0],directionY=mastBarrier?0:normal[1],directionZ=mastBarrier?(mastBarrier==='fore'?-1:1):normal[2];
-    let projection=(((0+directionX*x)+directionY*y)+directionZ*z)/length2;
-    let nx=directionX-x*projection,ny=directionY-y*projection,nz=directionZ-z*projection;
-    if(Math.hypot(nx,ny,nz)<1e-10){
+    let projections;
+    if(mastBarrier)projections=mastBarrier==='fore'?normalCache.fore:normalCache.aft;
+    else{normalEntry??=surfacePreparedNormalEntry(normalCache,normal);projections=normalEntry.projections;}
+    let primary=projections[index];
+    if(primary===undefined)primary=projections[index]=surfacePreparedNormal(support,mastBarrier?0:normal[0],mastBarrier?0:normal[1],mastBarrier?(mastBarrier==='fore'?-1:1):normal[2]);
+    let nx,ny,nz;
+    if(primary===null){
       const rx=reference[0]-qx,ry=reference[1]-qy,rz=reference[2]-qz;
-      projection=(((0+rx*x)+ry*y)+rz*z)/length2;nx=rx-x*projection;ny=ry-y*projection;nz=rz-z*projection;
+      const projection=(((0+rx*x)+ry*y)+rz*z)/length2;nx=rx-x*projection;ny=ry-y*projection;nz=rz-z*projection;
       if(Math.hypot(nx,ny,nz)<1e-10){
         const vertical=Math.abs(y)/Math.sqrt(length2)<.9,cx=vertical?0:1,cy=vertical?1:0;
         nx=y*0-z*cy;ny=z*cx-x*0;nz=x*cy-y*cx;
       }
-    }
-    const length=Math.hypot(nx,ny,nz);if(!(length>1e-12))throw Error('Degenerate rig surface axis');
-    const inverse=1/length;nx*=inverse;ny*=inverse;nz*=inverse;
-    const signed=((0+dx*nx)+dy*ny)+dz*nz,distance=Math.hypot(dx-nx*signed,dy-ny*signed,dz-nz*signed);
-    if(distance>=r+band)continue;
+      const length=Math.hypot(nx,ny,nz);if(!(length>1e-12))throw Error('Degenerate rig surface axis');
+      const inverse=1/length;nx*=inverse;ny*=inverse;nz*=inverse;
+    }else{nx=primary[0];ny=primary[1];nz=primary[2];}
+    const signed=((0+dx*nx)+dy*ny)+dz*nz;
     const restSide=((0+(reference[0]-qx)*nx)+(reference[1]-qy)*ny)+(reference[2]-qz)*nz;
-    const side=mastBarrier?1:Math.abs(restSide)>1e-8?Math.sign(restSide):surface.kind==='lateen'?Math.sign(pose.side)||-1:-Math.sign(pose.pressure)||-1;
-    const penetration=r-side*signed;
+    // Known geometric sides can reject a nonpenetrating point before the
+    // distance hypot. Near-zero restSide retains the original distance gate
+    // before reading a caller's possibly accessor-backed pose side/pressure.
+    const geometricSide=mastBarrier?1:Math.abs(restSide)>1e-8?Math.sign(restSide):0;
+    let side=geometricSide,penetration=r-side*signed;
+    if(geometricSide&&penetration<=0)continue;
+    const distance=Math.hypot(dx-nx*signed,dy-ny*signed,dz-nz*signed);if(distance>=r+band)continue;
+    if(!geometricSide){side=surface.kind==='lateen'?Math.sign(pose.side)||-1:-Math.sign(pose.pressure)||-1;penetration=r-side*signed;}
     if(penetration>0){const weight=(1-surfaceSmooth(r,r+band,distance))*pin;
       px+=nx*side*penetration*weight;py+=ny*side*penetration*weight;pz+=nz*side*penetration*weight;
     }
