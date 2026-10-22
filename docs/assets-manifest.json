@@ -29,6 +29,31 @@
     "bytes": 262144,
     "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953"
   },
+  "assets/canopy-scenery/saba/manifest.json": {
+    "url": "assets/canopy-scenery/saba/manifest.90f2c991ce4e984c.json",
+    "bytes": 57430,
+    "sha256": "90f2c991ce4e984c7b9b165eccee1c146e0de4af189641e18161b3acce2a6b4f"
+  },
+  "assets/canopy-scenery/saba/near.bin": {
+    "url": "assets/canopy-scenery/saba/near.9254840c9c8beade.bin",
+    "bytes": 633048,
+    "sha256": "9254840c9c8beadeb9ecedf96ab85eaf778d7a115c4a57da9ecbe7c309a6d041"
+  },
+  "assets/canopy-scenery/saba/leaf.bin": {
+    "url": "assets/canopy-scenery/saba/leaf.ea253ccab284e91c.bin",
+    "bytes": 3075072,
+    "sha256": "ea253ccab284e91c0f0080a283b1e4fa0cd6130ae4e2b66f7f4a7e5de7eecb38"
+  },
+  "assets/canopy-scenery/saba/far.bin": {
+    "url": "assets/canopy-scenery/saba/far.f6522e672cf4f314.bin",
+    "bytes": 288288,
+    "sha256": "f6522e672cf4f3142bd09db099897f32d957c03e72d397825736a334ddde3a6a"
+  },
+  "assets/canopy-scenery/saba/instances.bin": {
+    "url": "assets/canopy-scenery/saba/instances.e10761fc2240a199.bin",
+    "bytes": 1344,
+    "sha256": "e10761fc2240a1993f5e6f4c850a6f5d4f37299c0cf2270ea17be75d57c4510f"
+  },
   "assets/tree-foliage.png": {
     "url": "assets/tree-foliage.ad40fb471213f1f4.png",
     "bytes": 444839,
