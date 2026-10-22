@@ -10,6 +10,7 @@ import {LATER_SAIL_DESIGNS,laterSailStairFlights} from './models/later-sail.js';
 import {proceduralDesign,proceduralDeck,proceduralDeckWidth,proceduralHullWidth} from './models/procedural.js';
 import {laterSailRigContext} from './additional-rig.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
+import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear} from './crew-navigation.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
 const crewWorkControls=['fore','main','mizzen'];
@@ -235,21 +236,59 @@ function routeTo(s,target,boat){
   if(ADDITIONAL_DESIGNS[boat.modelId])return additionalCrewRoute(s,target,boat);
   if(boat.modelId==='victory')return victoryCrewRoute(s,target,boat);
   // Named corridors stay clear of the hatch, mast heels and aft companionway.
-  if(s.id==='maria')return [deckPoint(s.x,target[2]),target];
-  if(s.id==='rui')return [deckPoint(.55,s.z),deckPoint(.55,-2.25),target];
-  if(s.id==='beatriz')return [deckPoint(s.x,-2.65),deckPoint(target[0],-2.65),target];
-  if(s.id==='catarina')return [deckPoint(s.x,2.55),deckPoint(target[0],2.55),target];
-  return [deckPoint(target[0],s.z),target];
+  if(s.id==='maria')return [deckPoint(s.x,target[2],boat),target];
+  if(s.id==='rui')return [deckPoint(.55,s.z,boat),deckPoint(.55,-2.25,boat),target];
+  if(s.id==='beatriz')return [deckPoint(s.x,-2.65,boat),deckPoint(target[0],-2.65,boat),target];
+  if(s.id==='catarina')return [deckPoint(s.x,2.55,boat),deckPoint(target[0],2.55,boat),target];
+  return [deckPoint(target[0],s.z,boat),target];
+}
+// Existing model routes retain their exact stair/ramp elevations. Only blocked
+// intermediate waypoints are moved on their own floor, then every connecting
+// segment is checked against equipment, including the complete recoil sweep.
+function crewWorkNavigationOptions(s,boat){
+  const j=s.job;if(!j||!['rig','lookout'].includes(j.kind))return s.navigationBody;
+  return {...s.navigationBody,rigAccess:{point:physical(climbRoot(j.mast,j.side,0,boat),boat),radius:1.25}};
+}
+function crewWorkSegmentClear(s,boat,a,b){
+  if(hasExtendedCrewModel(boat.modelId))return true;
+  return crewNavigationSegmentClear(physical(a,boat),physical(b,boat),boat,crewWorkNavigationOptions(s,boat));
+}
+function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
+  if(hasExtendedCrewModel(boat.modelId))return path;
+  if(!path?.length)return null;
+  const start=s.job?.position?.slice()??[s.x,s.position[1]?(s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z],points=[start],options=crewWorkNavigationOptions({...s,job},boat);
+  for(let i=0;i<path.length;i++){
+    const p=path[i];
+    if(crewNavigationClear(physical(p,boat),boat,options)){points.push(p);continue;}
+    if(i===path.length-1&&exactTarget)return null;
+    const clear=crewNavigationStation(p,boat,s.navigationBody);if(!clear)return null;points.push(clear);
+  }
+  return crewNavigationRoute(points,boat,options);
 }
 export function crewGunStation(gun,role,boat){
-  const sx=boat.beam/3.6,sign=gun.sideSign??(gun.side==='port'?-1:1);
+  const sx=boat.beam/3.6,sz=boat.length/12,sign=gun.sideSign??(gun.side==='port'?-1:1);
+  if(boat.modelId==='victory'){
+    const scale=[sx,vesselVerticalScale(boat),sz],direction=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...direction);for(let i=0;i<3;i++)direction[i]/=n;
+    const offset=Math.max(0,gun.offset??0),muzzle=gun.muzzleDesign.map((v,i)=>v*scale[i]-direction[i]*offset),breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*offset),progress=workClamp(gun.progress??0,0,1);
+    let x;
+    if(role==='loader'){
+      const stroke=['swab','load','ram'].includes(gun.stage)?Math.sin(progress*Math.PI*4)*.10:0;
+      x=['swab','load','ram'].includes(gun.stage)?muzzle[0]+direction[0]*(.18+stroke):gun.stage==='runout'?(muzzle[0]+direction[0]*.18)*(1-progress)+breech[0]*progress:gun.breechDesign[0]*sx;
+      // Stand beside the actual truck envelope, following the real work along
+      // the bore as the gun runs out. The feet never enter its recoil corridor.
+      const z=gun.station[2]+.126+.31/sz;
+      return[x/sx,modelDeck(boat,z),z];
+    }
+    x=(gun.breechDesign[0]-sign*.10)*sx-sign*(gun.recoilLength+.34);
+    const z=gun.station[2]-.13;return[x/sx,modelDeck(boat,z),z];
+  }
   if(role==='loader'){
-    const x=boat.modelId==='victory'?gun.muzzleDesign[0]-sign*(gun.recoilLength+.10)/sx:gun.breechDesign[0]-sign*.15/sx;
-    const z=gun.station[2]+(boat.modelId==='victory'?.10:.24);
+    const x=gun.breechDesign[0]-sign*.15/sx;
+    const z=gun.station[2]+.24;
     const edge=modelDeckWidth(boat,z)-.34/sx;
     return [Math.max(-edge,Math.min(edge,x)),modelDeck(boat,z),z];
   }
-  const z=gun.station[2]-(boat.modelId==='victory'?.13:.25),x=gun.station[0]-sign*(boat.modelId==='victory'?.08/sx:.33);
+  const z=gun.station[2]-.25,x=gun.station[0]-sign*.33;
   return [x,modelDeck(boat,z),z];
 }
 function gunCrewRoute(s,target,boat){
@@ -289,8 +328,9 @@ function assignGunCrew(company,boat){
     const target=crewGunStation(gun,role,boat),point=physical(target,boat);
     available.sort((a,b)=>distance3(a.position,point)-distance3(b.position,point));
     const sailor=available.shift();if(!sailor)continue;
+    const path=crewWorkNavigationRoute(sailor,gunCrewRoute(sailor,target,boat),boat,{exactTarget:true});if(!path)continue;
     sailor.home??=[sailor.x,sailor.z];
-    sailor.job={kind:'gunnery',gun,gunRole:role,stage:'approach',elapsed:0,rung:0,revision:company.revision,path:gunCrewRoute(sailor,target,boat),cursor:0};
+    sailor.job={kind:'gunnery',gun,gunRole:role,stage:'approach',elapsed:0,rung:0,revision:company.revision,path,cursor:0};
     sailor.intent='work';sailor.work=0;
   }
 }
@@ -298,7 +338,8 @@ export function updateCrewGunneryAttendance(company,boat){
   boat.gunneryAttendance??=new Set();boat.gunneryAttendance.clear();
   if(!boat.gunnery)return;
   for(const gun of boat.gunnery.guns.filter(g=>g.visibleCrew&&g.side===boat.gunnerySide)){
-    const hands=company.crew.filter(s=>s.job?.kind==='gunnery'&&s.job.gun.id===gun.id&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard);
+    const hands=company.crew.filter(s=>s.job?.kind==='gunnery'&&s.job.gun.id===gun.id&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard&&
+      distance3(physical(crewGunStation(gun,s.job.gunRole,boat),boat),[s.position[0],s.position[1]-.028,s.position[2]])<.035&&crewNavigationClear([s.position[0],s.position[1]-.028,s.position[2]],boat,s.navigationBody));
     if(hands.some(s=>s.job.gunRole==='loader')&&hands.some(s=>s.job.gunRole==='tackle'))boat.gunneryAttendance.add(gun.id);
   }
 }
@@ -470,7 +511,10 @@ export function assignCrewWork(company,boat) {
     const target=job.kind==='hatch'?resolveShipNode(boat,'station.hatch',{space:'design'})
       :job.kind==='haul'?haulStation(job.mast,boat)
       :climbRoot(job.mast,job.side,0,boat);
-    job.path=routeTo(s,target,boat);job.cursor=0;s.job=job;s.intent='work';s.work=0;
+    if((s.navigationRetryAt??0)>company.workTime)continue;
+    job.path=crewWorkNavigationRoute(s,routeTo(s,target,boat),boat,{exactTarget:job.kind==='rig'||job.kind==='lookout',job});
+    if(!job.path){s.navigationRetryAt=company.workTime+1;continue;}
+    job.cursor=0;s.job=job;s.intent='work';s.work=0;
   }
   // Crew attendance gates the actual canvas integrator, even when rendered crew
   // are hidden. Manual sliders still request jobs; no instant magical sail changes.
@@ -502,14 +546,26 @@ export function stepCrewWork(s,company,boat,dt) {
   if(!hasExtendedCrewModel(boat.modelId))s.visible=boat.beam>=3.2&&boat.length>=10.5;
   if(active){
     j.elapsed+=dt;
-    if(['approach','return','lookout-approach','lookout-return'].includes(j.stage)){
+    if(j.kind==='gunnery'&&j.stage==='working'){
+      const goal=crewGunStation(j.gun,j.gunRole,boat),from=j.position??[s.x,crewDeckHeight(boat,s.z,s.x),s.z];
+      if(distance3(physical(goal,boat),physical(from,boat))>.025){
+        const path=crewWorkNavigationRoute(s,[from,goal],boat,{exactTarget:true});
+        j.path=path??[];j.cursor=0;j.stage=path?'reposition':'waiting-gun';j.elapsed=0;
+      }
+    }
+    if(j.stage==='waiting-gun'&&j.elapsed>.5){
+      const goal=crewGunStation(j.gun,j.gunRole,boat),path=crewWorkNavigationRoute(s,[goal],boat,{exactTarget:true});j.elapsed=0;
+      if(path){j.path=path;j.cursor=0;j.stage='reposition';}
+    }
+    if(['approach','return','reposition','lookout-approach','lookout-return'].includes(j.stage)){
       let p=j.position??[s.x,s.position[1]? (s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z];
       const target=j.path[j.cursor],a=physical(p,boat),b=physical(target,boat),d=distance3(a,b);
       const travel=Math.min(d,.75*dt),q=d>1e-6?travel/d:1;
       const next=p.map((x,i)=>x+(target[i]-x)*q),world=physical(next,boat);
       // Yield locally to another body rather than walking through it.
       const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2])<.54);
-      if(!occupied || d<.02){
+      const clear=crewWorkSegmentClear(s,boat,p,next);
+      if(clear&&(!occupied || d<.02)){
         const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));
         j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;
         if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
@@ -539,6 +595,7 @@ export function stepCrewWork(s,company,boat,dt) {
           for(const side of[preference,-preference]){
             const candidate=[p[0]+side*.6*dt/sx,p[1],p[2]],cp=physical(candidate,boat);
             if(Math.abs(candidate[0])+.32/sx>=modelDeckWidth(boat,candidate[2]))continue;
+            if(!crewRoutineSegmentClear(s,boat,p,candidate))continue;
             if(company.crew.some(other=>other!==s&&other.position&&Math.hypot(cp[0]-other.position[0],cp[1]+.028-other.position[1],cp[2]-other.position[2])<.54))continue;
             j.position=candidate;s.x=candidate[0];s.z=candidate[2];moving=true;break;
           }
@@ -605,7 +662,6 @@ export function stepCrewWork(s,company,boat,dt) {
     const runner=crewRunnerMetrics(boat,j.mast,j.side);s.climbPitch=runner.lean;s.yaw=runner.yaw;
   }else if(boat.modelId==='victory'&&j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
   else if(hasExtendedCrewModel(boat.modelId)&&proceduralDesign(boat.modelId).cockpit&&j.kind==='hatch'&&j.stage==='working'&&active)s.climbPitch=.36*(1-(boat.hatchesClosed??0));
-  else if(j.kind==='gunnery'&&j.stage==='working'&&active&&!['ready','recoil','spent'].includes(j.gun.stage))s.climbPitch=j.gunRole==='loader'&&boat.modelId==='victory'?.45:.10;
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin(s.climbPitch/2),cx=Math.cos(s.climbPitch/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return true;
@@ -614,11 +670,12 @@ function startReturn(s,boat,company=null){
   const j=s.job;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s,boat);
   if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,Object.hasOwn(ROWING_DESIGNS,boat.modelId)?company:null);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
-  if(ADDITIONAL_DESIGNS[boat.modelId]){j.path=additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'});return;}
-  if(boat.modelId==='victory'){j.path=victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'});return;}
-  j.path=s.id==='maria'?[deckPoint(s.x,-3.2),deckPoint(home[0],-3.2),home]
-    :s.id==='duarte'?[deckPoint(home[0],s.z),home]
+  const path=ADDITIONAL_DESIGNS[boat.modelId]?additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
+    :boat.modelId==='victory'?victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
+    :s.id==='maria'?[deckPoint(s.x,-3.2,boat),deckPoint(home[0],-3.2,boat),home]
+    :s.id==='duarte'?[deckPoint(home[0],s.z,boat),home]
     :[...j.path.slice(0,-1).reverse(),home];
+  j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}
 }
 export function crewWorkLabel(s){
   if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';

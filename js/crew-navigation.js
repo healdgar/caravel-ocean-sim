@@ -17,7 +17,7 @@ function crewNavigationScale(boat){return[(boat.beam??3.6)/3.6,vesselVerticalSca
 function crewNavigationPhysical(p,scale){return p.map((v,i)=>v*scale[i]);}
 function crewNavigationDesign(p,scale){return p.map((v,i)=>v/scale[i]);}
 function crewNavigationEnvelope(options={}){
-  return {radius:Math.max(CREW_NAVIGATION_BODY.radius,Number.isFinite(options.radius)?options.radius:0),height:Math.max(CREW_NAVIGATION_BODY.height,Number.isFinite(options.height)?options.height:0)};
+  return {radius:Math.max(CREW_NAVIGATION_BODY.radius,Number.isFinite(options.radius)?options.radius:0),height:Math.max(CREW_NAVIGATION_BODY.height,Number.isFinite(options.height)?options.height:0),rigAccess:options.rigAccess??null};
 }
 // Equipment bounds follow the rendered meshes, with the whole authored recoil
 // travel reserved even while a gun is run out. Separate component records avoid
@@ -73,7 +73,7 @@ export function crewNavigationObstacles(boat){
       for(const z of[-4.85,2.68]){const y=modelDeck(boat,z);box('capstan.'+z,'capstan',[-.335,y,z-.335],[.335,y+.25,z+.335],{reservation:'fixed'});}
       for(const z of[-5.1,-3.95,1.8,4.22])for(const side of[-1,1]){const x=side*.65,y=modelDeck(boat,z);box('bitt.'+side+'.'+z,'bitt',[x-.16,y,z-.06],[x+.16,y+.21,z+.06],{reservation:'fixed'});}
       const binnacle=modelDeck(boat,3.05);box('binnacle','binnacle',[-.205,binnacle,2.88],[.205,binnacle+.305,3.17],{reservation:'fixed'});
-      for(const [index,x]of[-.43,.43].entries())box('boat.waist.'+index,'ship-boat',[x-.34,1.17+.04,-2.59],[x+.34,1.17+.336,.29],{reservation:'fixed'});
+      for(const [index,x]of[-.43,.43].entries())box('boat.waist.'+index,'ship-boat',[x-.34,1.17+.04,-2.606],[x+.34,1.17+.336,.306],{reservation:'fixed',meshGroup:'boat.waist.'+index});
     }else if(Object.hasOwn(ADDITIONAL_DESIGNS,id)){
       const h=ADDITIONAL_DESIGNS[id].hatch,x=h.centre[0],z=h.centre[2],y=modelDeck(boat,z);
       box('hatch.main','hatch',[x-h.size[0]/2-.025,y-.03,z-h.size[2]/2-.025],[x+h.size[0]/2+.025,Math.max(y+.12,h.centre[1]+h.size[1]),z+h.size[2]/2+.025],{reservation:'fixed'});
@@ -100,12 +100,21 @@ function crewNavigationIntersects(a,b,o,body){
 function crewNavigationOnDeck(p,boat,scale,body){
   const z=p[2]/scale[2],x=p[0]/scale[0];return Number.isFinite(p[1])&&Math.abs(x)+body.radius/scale[0]<modelDeckWidth(boat,z);
 }
+function crewNavigationRigAccess(p,body){
+  // Only the actual resolved runner root is an alternate support. A short
+  // endpoint access may cross the deck edge to its chainwale; interior paths
+  // and unrelated deck points never inherit an outboard-width exception.
+  const access=body.rigAccess;if(!access||!Array.isArray(access.point)||!(access.radius>0&&access.radius<=1.25))return false;
+  return Math.hypot(...p.map((v,i)=>v-access.point[i]))<=access.radius;
+}
 function crewNavigationPathClear(a,b,boat,obstacles,body,scale){
   if(obstacles.some(o=>crewNavigationIntersects(a,b,o,body)))return false;
   // Preserve the original ramp's interpolated elevation. Width follows the
   // actual hull profile along the path, rather than a fixed patrol corridor.
   const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12));
-  for(let i=0;i<=count;i++)if(!crewNavigationOnDeck(a.map((v,k)=>v+(b[k]-v)*i/count),boat,scale,body))return false;
+  for(let i=0;i<=count;i++){
+    const p=a.map((v,k)=>v+(b[k]-v)*i/count);if(!crewNavigationOnDeck(p,boat,scale,body)&&!crewNavigationRigAccess(p,body))return false;
+  }
   return true;
 }
 export function crewRoutineSegmentClear(s,boat,fromDesign,toDesign){
