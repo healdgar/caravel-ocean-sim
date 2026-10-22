@@ -87,6 +87,29 @@ test('attendance parks an unoccupied propulsor and substep velocity reaches rela
   const b=overnightPhysicsBoat('oseberg'),d=proceduralDesign(b.modelId);b.rowingState={phase:.22,rate:.45,effortPort:1,effortStarboard:1};
   const live=rowingStationPose(b,0);assert.ok(live.drive);
   b.rowingAttendance=new Set(d.stations.slice(1).map(s=>s.id));assert.equal(rowingStationPose(b,0).drive,false);
-  const f=rowingForces({},b,{surge:0,sway:0}),moving=rowingForces({},b,{surge:3,sway:.2});
-  assert.notEqual(f.forward,moving.forward);assert.ok(moving.blades.every(x=>x.stationId!==d.stations[0].id||!x.drive));
+  // Near-full drive cadence saturates the same hand-force cap at both speeds.
+  // Slow the physical blade sweep to test the unsaturated relative drag itself.
+  b.rowingState.rate=.02;
+  const f=rowingForces({},b,{surge:0,sway:0}),moving=rowingForces({},b,{surge:.1,sway:.02});
+  assert.ok(f.forward>moving.forward&&moving.forward>0,'headway reduces closing velocity and unsaturated forward plate reaction');
+  const blade=f.blades.find(p=>p.drive),next=moving.blades.find(p=>p.stationId===blade.stationId);
+  overnightPhysicsClose(next.relativeVelocity[0]-blade.relativeVelocity[0],.02);
+  overnightPhysicsClose(next.relativeVelocity[1]-blade.relativeVelocity[1],0);
+  overnightPhysicsClose(next.relativeVelocity[2]-blade.relativeVelocity[2],-.1);
+  for(const p of [...f.blades,...moving.blades])if(p.drive){
+    const station=d.stations.find(s=>s.id===p.stationId),cap=d.propulsion.maxHandForce*station.inboard/station.outboard;
+    assert.ok(Math.hypot(...p.force)<cap*.5,'fixture must remain far below the human-force cap');
+  }
+  assert.ok(moving.blades.every(x=>x.stationId!==d.stations[0].id||!x.drive));
+});
+
+test('seated oar torso follows the loom toward catch and finish instead of leaning away',()=>{
+  for(const id of ['oseberg','lusoria']){
+    const b=overnightPhysicsBoat(id);b.rowingState={phase:.08,rate:.45,effortPort:1,effortStarboard:1};
+    for(const phase of [.08,.40]){
+      const pose=rowingStationPose(b,0,{phase}),handZ=(pose.hands[0][2]+pose.hands[1][2])*.5;
+      assert.equal(Math.sign(pose.body.lean),Math.sign(handZ-pose.seat[2]),'yaw-zero oar torso leans toward its actual fore/aft hand target');
+      assert.ok(Math.abs(pose.body.lean)<=.16,'sign correction retains the authored torso range');
+    }
+  }
 });

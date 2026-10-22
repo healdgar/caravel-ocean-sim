@@ -122,7 +122,7 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
   const footX=rowingClamp(seat[0],-Math.max(0,footEdge-.12),Math.max(0,footEdge-.12));
   const feet=[[rowingClamp(footX-.10,-footEdge,footEdge),floor,footZ],[rowingClamp(footX+.10,-footEdge,footEdge),floor,footZ]];
   return rowingPoseFinish(boat,d,{stationId:station.id,station:station.index,side:station.side,drive:stroke.drive,effort:stroke.effort,
-    seat,feet,hands,body:{position:seat,yaw:station.kind==='oar'?0:Math.PI,lean:(station.kind==='oar'?1:-1)*.16*stroke.sweep},
+    seat,feet,hands,body:{position:seat,yaw:station.kind==='oar'?0:Math.PI,lean:-.16*stroke.sweep},
     shaftA,shaftB,bladeCentre:centre,bladeAlong:along,bladeAcross:across,bladeNormal:normal,bladeVelocity:velocity,
     bladeLength:spec.bladeLength,bladeWidth:spec.bladeWidth,feather}, {time,sampleWater});
 }
