@@ -41,6 +41,19 @@ test('native atlas validation binds exact geometry, materials, cameras and depth
   assert.match(FOREST_IMPOSTOR_WGSL,/forestAtlasFrame/);assert.match(FOREST_IMPOSTOR_WGSL,/forestAtlasRay/);
   assert.doesNotMatch(FOREST_IMPOSTOR_WGSL,/leafSpray|tree-foliage|discard/);
 });
+test('above-ground capture has a distinct bounded projection without changing full native identity',()=>{
+  const f=atlasFixture(),source=f.forest.prototypes[0],p=f.manifest.prototypes[0];
+  source.low=[-1,-1,-1];source.high=[1,1,1];source.radius=2;p.radius=2;
+  p.projection={centre:[0,.5,0],coverageBounds:{low:[-1,0,-1],high:[1,1,1]},groundPlaneY:0,supportRadius:1.5,extent:1.6};
+  assert.equal(validateForestImpostors(f.manifest,f.forest),f.manifest);assert.deepEqual(p.centre,[0,0,0]);
+  assert.ok(p.projection.extent<source.radius,'native culling bound and tighter visible capture are separate');
+  for(const mutate of [projection=>projection.centre[1]=.6,projection=>projection.coverageBounds.low[1]=-.01,
+    projection=>projection.coverageBounds.high[0]=2,projection=>projection.supportRadius=1,projection=>projection.groundPlaneY=-1]){
+    const manifest=structuredClone(f.manifest);mutate(manifest.prototypes[0].projection);
+    assert.throws(()=>validateForestImpostors(manifest,f.forest),/support|geometry/);
+  }
+  assert.match(FOREST_IMPOSTOR_WGSL,/root\.identity\.y\/root\.rootScale\.w/);
+});
 
 test('atlas transport verifies compressed and decoded bytes without a global fetch shim',async()=>{
   const {forest,manifest}=atlasFixture(),responses={},assets={'manifest.json':'manifest.json'},hash=raw=>createHash('sha256').update(raw).digest('hex');
@@ -111,13 +124,14 @@ test('actual GPU atlas shader reconstructs front depth rather than writing the b
       const vec=values=>'vec3f('+values.join(',')+')';
       const witnessModule=await shader(code+'\n@group(0)@binding(1)var<storage,read_write>witness:array<vec4f>;'+
         '@compute @workgroup_size(1)fn reprojectionWitness(){let origin='+vec(sourceOrigin)+';let ray='+vec(sourceRay)+';'+
-        'let hit=forestAtlasRay(119u,0u,origin,ray,'+vec(r.map(value=>value*.4))+','+vec(u.map(value=>value*.4))+');witness[0]=hit.pigment;witness[1]=vec4f(hit.normal,hit.distance);'+
-        'let empty=forestAtlasRay(119u,0u,origin+'+vec(r.map(value=>value*extent*3))+',ray,'+vec(r.map(value=>value*.4))+','+vec(u.map(value=>value*.4))+');witness[2]=empty.pigment;'+
-        'let remote=forestAtlasRay(119u,0u,origin,ray,'+vec(r.map(value=>value*.02))+','+vec(u.map(value=>value*.02))+');witness[3]=remote.pigment;}','actual atlas disocclusion witness');
-      const witnessPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:witnessModule,entryPoint:'reprojectionWitness'}}),witness=buffer(new Float32Array(16),B.STORAGE|B.COPY_SRC),witnessRead=device.createBuffer({size:64,usage:B.COPY_DST|B.MAP_READ});
+        'let hit=forestAtlasRay(119u,0u,origin,ray,'+vec(r.map(value=>value*.4))+','+vec(u.map(value=>value*.4))+',-1e30);witness[0]=hit.pigment;witness[1]=vec4f(hit.normal,hit.distance);'+
+        'let empty=forestAtlasRay(119u,0u,origin+'+vec(r.map(value=>value*extent*3))+',ray,'+vec(r.map(value=>value*.4))+','+vec(u.map(value=>value*.4))+',-1e30);witness[2]=empty.pigment;'+
+        'let remote=forestAtlasRay(119u,0u,origin,ray,'+vec(r.map(value=>value*.02))+','+vec(u.map(value=>value*.02))+',-1e30);witness[3]=remote.pigment;'+
+        'let sunk=forestAtlasRay(119u,0u,origin,ray,'+vec(r.map(value=>value*.4))+','+vec(u.map(value=>value*.4))+',1000.);witness[4]=sunk.pigment;}','actual atlas disocclusion witness');
+      const witnessPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:witnessModule,entryPoint:'reprojectionWitness'}}),witness=buffer(new Float32Array(20),B.STORAGE|B.COPY_SRC),witnessRead=device.createBuffer({size:80,usage:B.COPY_DST|B.MAP_READ});
       const witnessEncoder=device.createCommandEncoder(),witnessPass=witnessEncoder.beginComputePass();witnessPass.setPipeline(witnessPipeline);
       witnessPass.setBindGroup(0,device.createBindGroup({layout:witnessPipeline.getBindGroupLayout(0),entries:[{binding:1,resource:{buffer:witness}}]}));witnessPass.setBindGroup(3,fallbackAtlas.bind(witnessPipeline));witnessPass.dispatchWorkgroups(1);witnessPass.end();
-      witnessEncoder.copyBufferToBuffer(witness,0,witnessRead,0,64);device.queue.submit([witnessEncoder.finish()]);await witnessRead.mapAsync(GPUMapMode.READ);
+      witnessEncoder.copyBufferToBuffer(witness,0,witnessRead,0,80);device.queue.submit([witnessEncoder.finish()]);await witnessRead.mapAsync(GPUMapMode.READ);
       const fallback=Array.from(new Float32Array(witnessRead.getMappedRange()));witnessRead.unmap();await device.queue.onSubmittedWorkDone();fallbackAtlas.destroy();device.destroy();
       return{errors,color,frontDepth,expectedDepth:.1/(10-extent*.5),fallback,expectedFallbackDistance:(10-extent*.5)*Math.hypot(1,.8)};
     },fixture);
@@ -127,6 +141,7 @@ test('actual GPU atlas shader reconstructs front depth rather than writing the b
     assert.ok(Math.abs(result.fallback[3]-.5)<.0001,'later depth disocclusion retains actual half-covered leaf');
     assert.ok(Math.abs(result.fallback[7]-result.expectedFallbackDistance)<.002,'fallback retains reconstructed source front depth');
     assert.deepEqual(result.fallback.slice(8,12),[0,0,0,0],'initially uncovered rays remain transparent');
-    assert.deepEqual(result.fallback.slice(12),[0,0,0,0],'source coverage more than 1.5 pixels from the current ray is rejected');
+    assert.deepEqual(result.fallback.slice(12,16),[0,0,0,0],'source coverage more than 1.5 pixels from the current ray is rejected');
+    assert.deepEqual(result.fallback.slice(16),[0,0,0,0],'otherwise supported source pixels below the rooted collar grade remain hidden');
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

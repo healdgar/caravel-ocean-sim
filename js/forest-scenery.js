@@ -82,6 +82,24 @@ export const FOREST_VERTEX_LAYOUT=Object.freeze({arrayStride:56,attributes:[
 const finite=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isFinite);
 const uint=n=>Number.isSafeInteger(n)&&n>=0;
 const forestMapReceipt=(value,encoding)=>value&&/^[a-z0-9-]+\.png$/.test(value.file)&&uint(value.bytes)&&value.bytes>0&&value.bytes<=8*1024*1024&&/^[a-f0-9]{64}$/.test(value.sha256)&&value.encoding===encoding;
+const forestSourceReceipt=value=>value&&typeof value.file==='string'&&value.file.length>0&&uint(value.bytes)&&value.bytes>0&&/^[a-f0-9]{64}$/.test(value.sha256);
+const forestSameReceipt=(a,b)=>forestSourceReceipt(a)&&forestSourceReceipt(b)&&['file','bytes','sha256'].every(key=>a[key]===b[key]);
+function validateForestGeometryError(p,manifest){
+  if(p.geometryErrorSupported!==true)return;
+  const certificate=p.geometryErrorSource,error=p.geometryErrorMetres;
+  if(!Number.isFinite(error)||error<0||Math.fround(error)!==error||p.geometryErrorMethod!=='symmetric-fixed-opposing-vertex-triangle-bound-v1'||
+    !forestSameReceipt(certificate?.nativeGLB,p.source?.native?.glb)||!forestSameReceipt(certificate?.farAsset,p.source?.directFar)||
+    !forestSourceReceipt(certificate?.method)||certificate.method.file!=='scripts/prepare-canopy-scenery.py#conservative_error')throw Error('Invalid forest geometry error certificate');
+  for(const name of ['vertices.bin','indices.bin']){
+    const receipt=certificate.packedStreams?.[name],packed=manifest.files[name];
+    if(receipt?.bytes!==packed.bytes||receipt.sha256!==packed.sha256)throw Error('Forest geometry certificate stream mismatch');
+  }
+  for(const key of ['wood','leaf','far']){
+    const range=certificate.ranges?.[key],measured=certificate.measuredStreams?.[key];
+    if(range?.firstIndex!==p[key].firstIndex||range.indexCount!==p[key].indexCount||measured?.strideFloats!==14||
+      measured.vertexCount!==p[key].indexCount||measured.bytes!==measured.vertexCount*56||!/^[a-f0-9]{64}$/.test(measured.sha256))throw Error('Forest geometry certificate range mismatch');
+  }
+}
 export function validateForestMaterials(prototypes){
   let count=0;const receipts=new Map();
   for(const p of prototypes){
@@ -128,6 +146,7 @@ export function validateForestScenery(m){
       nextIndex+=r.indexCount;
     }
     if(!p.far.indexCount||!p.leaf.indexCount)throw Error('Forest requires detailed foliage and opaque far canopy');
+    validateForestGeometryError(p,m);
     nextRoot+=p.rootCount;
   }
   if(nextIndex!==m.files['indices.bin'].indexCount||nextRoot!==m.rootCount)throw Error('Incomplete forest partitions');
@@ -436,11 +455,14 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
  let depth=dot(relative,normalize(F.camFwd.xyz));let near=depth-radius;
  let lateral=sqrt(max(0.0,dot(relative,relative)-depth*depth))+radius;
  let projected=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*2.0*radius*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near,.0001);
- // No appearance bound is certified. Collapse only when the WHOLE crown's
- // support fits three rendered pixels; far mode is explicitly debug-only.
+ // A source-bound symmetric geometry certificate may bound displacement.
+ // Without it, collapse only when the WHOLE crown fits three pixels. Neither
+ // path certifies alpha/colour appearance; forced far mode is debug-only.
  let threshold=parameters.z*select(.88,1.0,previousLod[id.x]==0u);
  let resident=forestResidency.x>0u;
- let farLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&near>radius&&projected<=threshold));
+ let geometricError=bitcast<f32>(p.far.z)*r.rootScale.w;
+ let farError=select(projected,projected*geometricError/(2.0*radius),p.far.w==1u);
+ let farLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&near>radius&&farError<=threshold));
  let atlasSupported=p.roots.z>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
  let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
  let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
@@ -485,6 +507,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const meta=new ArrayBuffer(m.prototypes.length*80),floats=new Float32Array(meta),words=new Uint32Array(meta),draws=new Uint32Array(m.prototypes.length*20);
     for(const p of m.prototypes){const base=p.id*20;floats.set([...p.centre,p.radius],base);words.set([p.firstRoot,p.rootCount,atlas?((atlas.fullSphere?2:1)|(impostorMode==='force'?4:0)):0,impostorPixels],base+4);
       for(const [i,name]of ['wood','leaf','far'].entries()){const r=p[name];words.set([r.firstIndex,r.indexCount,0,0],base+8+i*4);draws.set([r.indexCount,0,r.firstIndex,0,0],(p.id*4+i)*5);}
+      if(p.geometryErrorSupported===true){floats[base+18]=p.geometryErrorMetres;words[base+19]=1;}
       draws.set([6,0,0,0,0],(p.id*4+3)*5);
     }
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest prototype bounds and ranges');
@@ -520,6 +543,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     });
     const stats={loaded:true,roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,nearPixels,appearanceErrorSupported:false,mode,
       materialContract:m.materialContract,nativeMaterialLayers:0,nativeTextureFamilies:[],coverageFiltering:'linear alpha with MSAA',native:nativeStatus,
+      certifiedGeometryPrototypes:m.prototypes.filter(p=>p.geometryErrorSupported===true).length,
       impostor:{loaded:!!atlas,error:pack.impostorError??null,views:atlas?.views??0,fullSphere:atlas?.fullSphere??false,projectedPixels:impostorPixels,
         mode:impostorMode,appearanceErrorSupported:false,qualification:'Authored initial policy; native rendered comparisons required'},
       species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};

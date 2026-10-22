@@ -27,9 +27,9 @@ test('native forest compute compacts roots, resets indirect counts and responds 
       const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
       const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frame,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
       const read=device.createBuffer({size:128,usage:B.COPY_DST|B.MAP_READ});
-      async function run(height,mode=0,atlasFlags=0,resident=1){
+      async function run(height,mode=0,atlasFlags=0,resident=1,errorMetres=0,certified=false){
         frameData[37]=height;parameterData[3]=mode;device.queue.writeBuffer(frame,0,frameData);device.queue.writeBuffer(parameters,0,parameterData);
-        u[6]=atlasFlags;u[7]=32;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+        u[6]=atlasFlags;u[7]=32;f[18]=errorMetres;u[19]=certified?1:0;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
         device.queue.writeBuffer(residency,0,new Uint32Array([resident,0,0,0]));
         const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(1);pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(1);pass.end();
         enc.copyBufferToBuffer(commands,0,read,0,80);enc.copyBufferToBuffer(visible,0,read,80,48);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
@@ -39,7 +39,8 @@ test('native forest compute compacts roots, resets indirect counts and responds 
       const normal=await run(1080),repeat=await run(1080),high=await run(2160),farDebug=await run(2160,2),nearDebug=await run(1080,1);
       const hemisphereBelow=await run(2160,0,1),fullSphere=await run(2160,0,2),forced=await run(2160,0,6);
       const deferred=await run(1080,0,2,0),deferredNear=await run(2160,1,2,0),unavailable=await run(1080,0,0,0),residentAgain=await run(1080,0,2,1);
-      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,farDebug,nearDebug,hemisphereBelow,fullSphere,forced,deferred,deferredNear,unavailable,residentAgain};
+      const certified=await run(1080,0,2,1,.01,true),unflagged=await run(1080,0,2,1,.01,false);
+      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,farDebug,nearDebug,hemisphereBelow,fullSphere,forced,deferred,deferredNear,unavailable,residentAgain,certified,unflagged};
     });
     assert.deepEqual(result.errors,[]);
     for(const name of ['normal','repeat']){assert.deepEqual(result[name].counts,[1,1,1,0],name);assert.deepEqual(result[name].near,[0]);assert.deepEqual(result[name].far,[1]);}
@@ -51,6 +52,8 @@ test('native forest compute compacts roots, resets indirect counts and responds 
     for(const name of ['deferred','deferredNear'])assert.deepEqual(result[name].counts,[0,0,0,2],'nonresident native geometry is never addressed: '+name);
     assert.deepEqual(result.unavailable.counts,[0,0,0,0],'unsupported atlas cannot issue native draws before residency');
     assert.deepEqual(result.residentAgain.counts,[1,1,1,0],'one residency transition restores normal GPU LOD selection');
+    assert.deepEqual(result.certified.counts,[0,0,2,0],'qualified geometric error uses the same projected three-pixel bound');
+    assert.deepEqual(result.unflagged.counts,[1,1,1,0],'an unqualified error value never bypasses the whole-support fallback');
     for(const row of Object.values(result).filter(v=>v?.commands))for(let i=0;i<4;i++)assert.deepEqual(row.commands.slice(i*5,i*5+5).filter((_,k)=>k!==1),[[3,0,0,0],[3,3,0,0],[3,6,0,0],[6,0,0,0]][i],'draw topology and zero firstInstance survive GPU count reset');
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

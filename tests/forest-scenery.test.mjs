@@ -128,6 +128,23 @@ test('native material IDs preserve every source group and explicitly isolate the
   const mixed=nativeFixture();new Float32Array(mixed.streams['vertices.bin'])[27]=1;
   assert.throws(()=>decodeForestScenery(mixed.manifest,mixed.streams),/material groups/);
 });
+test('geometry error certificates bind exact source and packed ranges without claiming appearance certification',()=>{
+  const f=nativeFixture(),p=f.manifest.prototypes[0],receipt=file=>({file,bytes:4,sha256:'0'.repeat(64)});
+  p.source={native:{glb:receipt('oak.glb')},directFar:receipt('oak-far.bin')};
+  p.geometryErrorSupported=true;p.geometryErrorMetres=Math.fround(.02);p.geometryErrorMethod='symmetric-fixed-opposing-vertex-triangle-bound-v1';
+  p.geometryErrorSource={nativeGLB:structuredClone(p.source.native.glb),farAsset:structuredClone(p.source.directFar),
+    packedStreams:Object.fromEntries(['vertices.bin','indices.bin'].map(name=>[name,{bytes:f.manifest.files[name].bytes,sha256:f.manifest.files[name].sha256}])),
+    measuredStreams:Object.fromEntries(['wood','leaf','far'].map(key=>[key,{bytes:p[key].indexCount*56,vertexCount:p[key].indexCount,strideFloats:14,sha256:'0'.repeat(64)}])),
+    ranges:Object.fromEntries(['wood','leaf','far'].map(key=>[key,structuredClone(p[key])])),method:receipt('scripts/prepare-canopy-scenery.py#conservative_error')};
+  assert.equal(validateForestScenery(f.manifest),f.manifest);assert.equal(f.manifest.appearanceErrorSupported,false);
+  for(const edit of [p=>p.geometryErrorMetres=-1,p=>p.geometryErrorMetres=.02,p=>p.geometryErrorMethod='invented',
+    p=>p.geometryErrorSource.nativeGLB.sha256='1'.repeat(64),p=>p.geometryErrorSource.farAsset.bytes++,
+    p=>p.geometryErrorSource.packedStreams['indices.bin'].bytes++,p=>p.geometryErrorSource.ranges.leaf.indexCount=0,
+    p=>p.geometryErrorSource.measuredStreams.far.strideFloats=13,p=>p.geometryErrorSource.method.file='other.py']){
+    const manifest=structuredClone(f.manifest);edit(manifest.prototypes[0]);assert.throws(()=>validateForestScenery(manifest),/certificate/);
+  }
+  delete p.geometryErrorSupported;delete p.geometryErrorSource;assert.equal(validateForestScenery(f.manifest),f.manifest,'old source packs retain the whole-support fallback');
+});
 test('native surface receipts are verified and an old regional pack cannot borrow generic foliage',async()=>{
   const {manifest,streams,textures}=nativeFixture(),assets=Object.fromEntries(['manifest.json',...Object.keys(streams),...Object.keys(textures)].map(n=>[n,n]));
   const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(streams[name]??textures[name]);

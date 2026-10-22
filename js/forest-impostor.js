@@ -30,8 +30,18 @@ export function validateForestImpostors(document,forest){
   for(const [index,p]of document.prototypes.entries()){
     const source=forest.prototypes[index];
     if(p.id!==source.id||p.species!==source.species||!forestAtlasFinite(p.centre,3)||p.centre.some((v,k)=>v!==source.centre[k])||p.radius!==source.radius||
-      !(p.projection?.extent>=source.radius&&p.projection.extent<source.radius*1.2)||p.detailedGeometry?.wood?.firstIndex!==source.wood.firstIndex||
+      p.detailedGeometry?.wood?.firstIndex!==source.wood.firstIndex||
       p.detailedGeometry.wood.indexCount!==source.wood.indexCount||p.detailedGeometry?.leaf?.firstIndex!==source.leaf.firstIndex||p.detailedGeometry.leaf.indexCount!==source.leaf.indexCount)throw Error('Forest atlas specimen mismatch');
+    const projection=p.projection;
+    if(projection?.centre!==undefined){
+      const bounds=projection.coverageBounds;
+      if(!forestAtlasFinite(projection.centre,3)||!forestAtlasFinite(bounds?.low,3)||!forestAtlasFinite(bounds?.high,3)||
+        !forestAtlasFinite(source.low,3)||!forestAtlasFinite(source.high,3)||projection.groundPlaneY!==0||bounds.low[1]<0||
+        !(projection.supportRadius>0)||!(projection.extent>=projection.supportRadius&&projection.extent<projection.supportRadius*1.2)||
+        bounds.low.some((v,k)=>v>bounds.high[k]||v<source.low[k]-1e-4||bounds.high[k]>source.high[k]+1e-4||
+          Math.abs(projection.centre[k]-(v+bounds.high[k])*.5)>1e-5))throw Error('Invalid clipped forest atlas support');
+      for(let bits=0;bits<8;bits++)if(Math.hypot(...bounds.low.map((v,k)=>(bits&(1<<k)?bounds.high[k]:v)-projection.centre[k]))>projection.supportRadius+1e-4)throw Error('Forest atlas support misses clipped geometry');
+    }else if(!(projection?.extent>=source.radius&&projection.extent<source.radius*1.2))throw Error('Forest atlas specimen mismatch');
     for(const material of source.nativeMaterials)for(const kind of ['albedo','normal','roughnessMap'].filter(key=>material[key])){
       const map=material[kind],receipt=document.source.files[map.file];if(receipt?.bytes!==map.bytes||receipt.sha256!==map.sha256)throw Error('Forest atlas native surface mismatch');
     }
@@ -100,7 +110,7 @@ export async function createForestImpostorResources({device,shader,pack,forest})
     for(const view of layout.views)values.set([...view.direction,0,...view.right,0,...view.up,0],4+view.index*12);
     for(const p of pack.manifest.prototypes){
       const leaf=forest.prototypes[p.id].nativeMaterials.find(m=>m.name.startsWith('foliage'))??forest.prototypes[p.id].nativeMaterials[0];
-      values.set([...p.centre,p.projection.extent,leaf.roughness,leaf.transmission,0,0],4+256*12+p.id*8);
+      values.set([...(p.projection.centre??p.centre),p.projection.extent,leaf.roughness,leaf.transmission,p.projection.groundPlaneY??0,p.projection.centre?1:0],4+256*12+p.id*8);
     }
     const metadata=device.createBuffer({label:'forest immutable native impostor cameras',size:values.byteLength,usage:B.STORAGE|B.COPY_DST});allocated.push(metadata);device.queue.writeBuffer(metadata,0,values);
     const indices=device.createBuffer({label:'forest immutable impostor quad indices',size:24,usage:B.INDEX|B.COPY_DST});allocated.push(indices);device.queue.writeBuffer(indices,0,new Uint32Array([0,1,2,0,2,3]));
@@ -124,6 +134,7 @@ struct ForestImpostorVertex {
  @builtin(position)pos:vec4f,@location(0)plane:vec3f,@location(1)rootScale:vec4f,
  @location(2)yawTint:vec4f,@location(3)@interpolate(flat)prototype:u32,
  @location(4)@interpolate(flat)frames:vec3u,@location(5)@interpolate(flat)weights:vec3f,
+ @location(6)@interpolate(flat)sourceFloor:f32,
 };
 fn forestAtlasRotate(p:vec3f,yaw:f32)->vec3f {let c=cos(yaw);let s=sin(yaw);return vec3f(c*p.x-s*p.z,p.y,s*p.x+c*p.z);}
 fn forestAtlasEncode(direction:vec3f,fullSphere:bool)->vec2f{
@@ -154,6 +165,9 @@ fn forestAtlasFrame(cell:vec2i,grid:i32,fullSphere:bool)->u32{
  let corners=array<vec2f,4>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,1));let q=corners[vertex];
  let plane=centre+(normalize(F.camRight.xyz)*q.x+normalize(F.camUp.xyz)*q.y)*source.centreExtent.w*root.rootScale.w;
  var o:ForestImpostorVertex;o.plane=plane;o.rootScale=root.rootScale;o.yawTint=root.yawColour;o.prototype=prototype;o.frames=frames;o.weights=weights;
+ // The rooted biological collar is sunk by identity.y world metres. This is
+ // a static root-grade approximation on slopes, not a new terrain alpha mask.
+ o.sourceFloor=max(select(-1e30,source.material.z,source.material.w>.5),root.identity.y/root.rootScale.w);
  o.pos=F.viewProj*vec4f(plane-F.camPos.xyz,1);return o;
 }
 struct ForestAtlasSample {pigment:vec4f,normal:vec3f,distance:f32};
@@ -177,7 +191,7 @@ fn forestAtlasFetch(frame:u32,layer:u32,uv:vec2f,lod:f32)->ForestSurface{
  let local=clamp(uv,vec2f(border),vec2f(1.-border));let origin=vec2f(f32(frame%grid),f32(frame/grid));let atlas=(origin+local)/f32(grid);
  var result:ForestSurface;result.pigment=textureSampleLevel(forestAtlasAlbedo,forestAtlasSampler,atlas,i32(layer),lod);result.detail=textureSampleLevel(forestAtlasNormalDepth,forestAtlasSampler,atlas,i32(layer),lod);return result;
 }
-fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)->ForestAtlasSample{
+fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f,sourceFloor:f32)->ForestAtlasSample{
  let camera=forestAtlasTable.views[frame];let source=forestAtlasTable.prototypes[layer].centreExtent;let extent=source.w;
  let denominator=dot(ray,camera.direction.xyz);var result:ForestAtlasSample;result.pigment=vec4f(0);result.normal=vec3f(0);result.distance=0.;
  if(abs(denominator)<.01){return result;}
@@ -196,7 +210,7 @@ fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)-
    let z=extent*(1.-2.*sampled.detail.a/sampled.pigment.a);distance=(z-dot(origin-source.xyz,camera.direction.xyz))/denominator;
    let sampleUV=clamp(uv,vec2f(border),vec2f(1.-border));
    let point=source.xyz+camera.right.xyz*((2.*sampleUV.x-1.)*extent)+camera.up.xyz*((1.-2.*sampleUV.y)*extent)+camera.direction.xyz*z;
-   if(forestAtlasHitSupported(point,source.xyz,origin,ray,dx,dy)){
+   if(point.y>=sourceFloor&&forestAtlasHitSupported(point,source.xyz,origin,ray,dx,dy)){
      result.pigment=sampled.pigment;result.normal=sampled.detail.xyz;result.distance=distance;
    }
  }
@@ -210,7 +224,7 @@ struct ForestImpostorOutput {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  let dx=forestAtlasRotate(dpdx(in.plane),-yaw)/scale;let dy=forestAtlasRotate(dpdy(in.plane),-yaw)/scale;
  var pigment=vec4f(0);var normal=vec3f(0);var distance=0.;
  for(var i=0u;i<3u;i++){
-   let sampled=forestAtlasRay(in.frames[i],in.prototype,origin,ray,dx,dy);let weight=in.weights[i];
+   let sampled=forestAtlasRay(in.frames[i],in.prototype,origin,ray,dx,dy,in.sourceFloor);let weight=in.weights[i];
    pigment+=sampled.pigment*weight;normal+=sampled.normal*weight;distance+=sampled.distance*sampled.pigment.a*weight;
  }
  var o:ForestImpostorOutput;o.colour=vec4f(0);o.depth=0.;
