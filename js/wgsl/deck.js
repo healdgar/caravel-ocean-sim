@@ -25,7 +25,7 @@ fn deckRail(z:f32)->f32 {
 }
 fn deckFloorAt(z:f32,x:f32)->f32 {
   if(hull.rig.w>=3.5){
-    ${Object.values(LATER_SAIL_DESIGNS).map(d=>`if(abs(hull.rig.w-${d.modelCode}.0)<.1){${laterSailStairFlights(d.id).map(f=>`if(abs(x-${f.x.toFixed(7)})<=${(f.width/2).toFixed(7)}&&z>=${f.z0.toFixed(7)}&&z<=${f.z1.toFixed(7)}){return mix(${f.y0.toFixed(7)},${f.y1.toFixed(7)},(z-${f.z0.toFixed(7)})/${(f.z1-f.z0).toFixed(7)});}`).join('')}}`).join('\n')}
+    ${Object.values(LATER_SAIL_DESIGNS).map(d=>`if(abs(hull.rig.w-${d.modelCode}.0)<.1){${laterSailStairFlights(d.id).map(f=>`if(abs(x-(${f.x.toFixed(7)}))<=${(f.width/2).toFixed(7)}&&z>=${f.z0.toFixed(7)}&&z<=${f.z1.toFixed(7)}){return mix(${f.y0.toFixed(7)},${f.y1.toFixed(7)},(z-(${f.z0.toFixed(7)}))/${(f.z1-f.z0).toFixed(7)});}`).join('')}}`).join('\n')}
     return modelVesselDeckAt(z,x,hull.rig.w);
   }
   return deckFloor(z);
@@ -66,7 +66,7 @@ fn deckInteriorCrest(a:vec3f,b:vec3f)->f32 {
     const c=d.cockpit,flights=laterSailStairFlights(d.id).filter(f=>f.zoneId==='cockpit');
     return `if(abs(hull.rig.w-${d.modelCode}.0)<.1){
       let A=a.z>${c.bounds[0]}&&a.z<${c.bounds[1]}&&abs(a.x)<${c.halfWidth};let B=b.z>${c.bounds[0]}&&b.z<${c.bounds[1]}&&abs(b.x)<${c.halfWidth};
-      if(A!=B){let p=(a+b)*.5;${flights.map(f=>`if(abs(p.x-${f.x.toFixed(7)})<=${(f.width/2).toFixed(7)}&&p.z>=${f.z0.toFixed(7)}&&p.z<=${f.z1.toFixed(7)}){return -1000000.0;}`).join('')}
+      if(A!=B){let p=(a+b)*.5;${flights.map(f=>`if(abs(p.x-(${f.x.toFixed(7)}))<=${(f.width/2).toFixed(7)}&&p.z>=${f.z0.toFixed(7)}&&p.z<=${f.z1.toFixed(7)}){return -1000000.0;}`).join('')}
         return ${c.coamingHeight}+modelHullDeck(p.z,hull.rig.w)-${d.profile.deck};}
     }`;
   }).join('\n')}
