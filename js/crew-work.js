@@ -185,7 +185,9 @@ export function victoryCrewRoute(s,target,boat,{gunCorridor=false}={}){
     const crossing=Math.min(start,end)>=4.35?4.75:Math.min(start,end)>=1.65?2:Math.max(start,end)<=-3.92?-4.7:.75;
     along(start,crossing);side=-side;add(outer(crossing),crossing);along(crossing,end);
   }else along(start,end);
-  add(target[0],end);
+  // An elevated runner root is already the actual destination. An extra
+  // floor waypoint at identical X/Z would descend through a port lining.
+  if(Math.abs(end-target[2])>1e-8||Math.abs(target[1]-modelDeck(boat,end))*vesselVerticalScale(boat)<.025)add(target[0],end);
   add(target[0],target[2],target[1]);return path;
 }
 // Exact shared lower/upper landings from the procedural mesh, with separate
@@ -244,7 +246,7 @@ function routeTo(s,target,boat){
 // segment is checked against equipment, including the complete recoil sweep.
 function crewWorkNavigationOptions(s,boat){
   const j=s.job;if(!j||!['rig','lookout'].includes(j.kind))return s.navigationBody;
-  return {...s.navigationBody,rigAccess:{point:physical(climbRoot(j.mast,j.side,0,boat),boat),radius:1.25}};
+  return {...s.navigationBody,rigAccess:{point:physical(climbRoot(j.mast,j.side,0,boat),boat),radius:1.25,mast:j.mast,side:j.side}};
 }
 function crewWorkSegmentClear(s,boat,a,b){
   if(hasExtendedCrewModel(boat.modelId))return true;

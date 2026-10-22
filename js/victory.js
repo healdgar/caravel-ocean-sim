@@ -2,7 +2,7 @@ import {createMeshWriter} from './mesh-writer.js';
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import { VICTORY_DESIGN, VICTORY_MASTS, VICTORY_SAILS,VICTORY_STANDING_LINES,VICTORY_RUNNING_LINES,victoryShroud,
   victorySheer, victoryHullDeck, victoryVesselDeck, victoryHullHalfWidth,
-  victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot,victoryHullPoint,victoryStairFlights } from './models/victory.js';
+  victoryDeckHalfWidth, victoryMastPoint, victoryAnchorCathead, victorySailPoint,victoryHatchPivot,victoryHullPoint,victoryStairFlights,victoryChainwale } from './models/victory.js';
 
 // A separate first-rate hull, decks, batteries and full rig. The nine-float
 // vertex contract is shared with the caravel; its authored geometry is not.
@@ -447,7 +447,7 @@ export function createVictoryMesh({groups,parts}={}){
     tube([0,y,z],[0,y+.25,z],.12,24,.1,16);ring([0,y+.23,z],.14,.017,1,'y',24);
     for(let i=0;i<8;i++){const a=i*Math.PI/4;tube([0,y+.21,z],[Math.cos(a)*.32,y+.21,z+Math.sin(a)*.32],.015,1,.015,6);}
   }
-  for(const z of [-5.1,-3.95,1.8,4.22])for(const side of [-1,1]){
+  for(const z of VICTORY_DESIGN.bittsZ)for(const side of [-1,1]){
     const y=victoryVesselDeck(z),x=side*.65;
     box([x-.04,y,z-.06],[x+.04,y+.21,z+.06],1);
     tube([x-.13,y+.17,z],[x+.13,y+.17,z],.03,1,.03,8);
@@ -503,6 +503,18 @@ export function createVictoryMesh({groups,parts}={}){
     group('mast.'+m.id,'mast.'+m.id,start);
     const rigStart=out.length;
     for(const side of [-1,1]){
+      const channelStart=out.length,channel=victoryChainwale(index,side,m.z+m.shrouds.lowerStart),segments=12,
+        channelQuad=(a,b,c,d,n)=>quad(a,b,c,d,1,[n,n,n,n]);
+      for(let k=0;k<segments;k++){
+        const za=channel.z0+(channel.z1-channel.z0)*k/segments,zb=channel.z0+(channel.z1-channel.z0)*(k+1)/segments,
+          a=victoryChainwale(index,side,za),b=victoryChainwale(index,side,zb),t=channel.thickness;
+        channelQuad([a.inner,a.y,za],[a.outer,a.y,za],[b.outer,b.y,zb],[b.inner,b.y,zb],[0,1,0]);
+        channelQuad([a.outer,a.y-t,za],[a.outer,a.y,za],[b.outer,b.y,zb],[b.outer,b.y-t,zb],[side,0,0]);
+        channelQuad([a.inner,a.y-t,za],[b.inner,b.y-t,zb],[b.outer,b.y-t,zb],[a.outer,a.y-t,za],[0,-1,0]);
+        if(k===0)channelQuad([a.inner,a.y-t,za],[a.outer,a.y-t,za],[a.outer,a.y,za],[a.inner,a.y,za],[0,0,-1]);
+        if(k===segments-1)channelQuad([b.inner,b.y,zb],[b.outer,b.y,zb],[b.outer,b.y-t,zb],[b.inner,b.y-t,zb],[0,0,1]);
+      }
+      group('chainwale.'+m.id+'.'+side,'hull',channelStart);
       const top=victoryMastPoint(index,m.platform+.25),roots=[];
       for(let k=0;k<7;k++){
         const {root}=victoryShroud(index,side,k),[x,y,z]=root;roots.push(root);

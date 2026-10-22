@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import {modelDeck,modelDeckWidth,vesselVerticalScale} from './hull.js';
 import {createGunDefinitions} from './gunnery-models.js';
-import {VICTORY_MASTS,victoryMastPoint,victoryHullHalfWidth,victorySheer} from './models/victory.js';
+import {VICTORY_DESIGN,VICTORY_MASTS,victoryMastPoint,victoryHullHalfWidth,victorySheer,victoryChainwale} from './models/victory.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
@@ -90,7 +90,7 @@ export function crewNavigationObstacles(boat){
       for(const z of[-4.52,-1.5,.65,2.35,4.75]){const y=modelDeck(boat,z),w=z===2.35?.29:.34;box('hatch.'+z,'hatch',[-w,y+.008,z-.35],[w,y+.122,z+.35],{reservation:'fixed'});}
       const hatchPivotY=modelDeck(boat,-1.5)+.145;box('hatch.main','hatch',[-.35,hatchPivotY,-1.85],[.35,hatchPivotY+.045,-1.15],{reservation:'fixed',meshGroup:'hatch.main'});
       for(const z of[-4.85,2.68]){const y=modelDeck(boat,z);box('capstan.'+z,'capstan',[-.335,y,z-.335],[.335,y+.25,z+.335],{reservation:'fixed'});}
-      for(const z of[-5.1,-3.95,1.8,4.22])for(const side of[-1,1]){const x=side*.65,y=modelDeck(boat,z);box('bitt.'+side+'.'+z,'bitt',[x-.16,y,z-.06],[x+.16,y+.21,z+.06],{reservation:'fixed'});}
+      for(const z of VICTORY_DESIGN.bittsZ)for(const side of[-1,1]){const x=side*.65,y=modelDeck(boat,z);box('bitt.'+side+'.'+z,'bitt',[x-.16,y,z-.06],[x+.16,y+.21,z+.06],{reservation:'fixed'});}
       const binnacle=modelDeck(boat,3.05);box('binnacle','binnacle',[-.205,binnacle,2.88],[.205,binnacle+.305,3.17],{reservation:'fixed'});
       for(const [index,x]of[-.43,.43].entries())box('boat.waist.'+index,'ship-boat',[x-.34,1.17+.04,-2.606],[x+.34,1.17+.336,.306],{reservation:'fixed',meshGroup:'boat.waist.'+index});
     }else if(Object.hasOwn(ADDITIONAL_DESIGNS,id)){
@@ -124,12 +124,21 @@ function crewNavigationIntersects(a,b,o,body){
 function crewNavigationOnDeck(p,boat,scale,body){
   const z=p[2]/scale[2],x=p[0]/scale[0];return Number.isFinite(p[1])&&Math.abs(x)+body.radius/scale[0]<modelDeckWidth(boat,z);
 }
-function crewNavigationRigAccess(p,body){
+function crewNavigationRigAccess(p,body,boat,scale){
   // Only the actual resolved runner root is an alternate support. A short
   // endpoint access may cross the deck edge to its chainwale; interior paths
   // and unrelated deck points never inherit an outboard-width exception.
   const access=body.rigAccess;if(!access||!Array.isArray(access.point)||!(access.radius>0&&access.radius<=1.25))return false;
-  return Math.hypot(...p.map((v,i)=>v-access.point[i]))<=access.radius;
+  if(boat.modelId==='victory'){
+    if(!Number.isInteger(access.mast)||![-1,1].includes(access.side))return false;
+    const z=p[2]/scale[2],channel=victoryChainwale(access.mast,access.side,z),x=access.side*p[0],
+      inner=Math.min(access.side*channel.inner,access.side*channel.outer)*scale[0],outer=Math.max(access.side*channel.inner,access.side*channel.outer)*scale[0];
+    return z*scale[2]-body.radius>=channel.z0*scale[2]&&z*scale[2]+body.radius<=channel.z1*scale[2]&&
+      x-body.radius>=inner&&x+body.radius<=outer&&Math.abs(p[1]-channel.y*scale[1])<.05;
+  }
+  // Other legacy runners retain their qualified entry, narrowed to the real
+  // transverse lead instead of granting a general circular walking area.
+  return Math.abs(p[2]-access.point[2])<=.30&&Math.abs(p[1]-access.point[1])<=.05&&Math.abs(p[0]-access.point[0])<=access.radius;
 }
 function crewNavigationPathClear(a,b,boat,obstacles,body,scale){
   if(obstacles.some(o=>crewNavigationIntersects(a,b,o,body)))return false;
@@ -137,7 +146,7 @@ function crewNavigationPathClear(a,b,boat,obstacles,body,scale){
   // actual hull profile along the path, rather than a fixed patrol corridor.
   const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12));
   for(let i=0;i<=count;i++){
-    const p=a.map((v,k)=>v+(b[k]-v)*i/count);if(!crewNavigationOnDeck(p,boat,scale,body)&&!crewNavigationRigAccess(p,body))return false;
+    const p=a.map((v,k)=>v+(b[k]-v)*i/count);if(!crewNavigationOnDeck(p,boat,scale,body)&&!crewNavigationRigAccess(p,body,boat,scale))return false;
   }
   return true;
 }
@@ -148,6 +157,7 @@ export function crewRoutineSegmentClear(s,boat,fromDesign,toDesign){
   return crewNavigationPathClear(a,b,boat,obstacles,body,scale);
 }
 export function crewNavigationSegmentClear(aMetres,bMetres,boat,options={}){
+  if(!aMetres||!bMetres||aMetres.length!==3||bMetres.length!==3||!Array.from(aMetres).every(Number.isFinite)||!Array.from(bMetres).every(Number.isFinite))return false;
   const obstacles=crewNavigationObstacles(boat);if(!obstacles)return false;
   const scale=crewNavigationScale(boat),body=crewNavigationEnvelope(options);
   return crewNavigationPathClear(aMetres,bMetres,boat,obstacles,body,scale);
@@ -185,7 +195,7 @@ function crewNavigationDetour(a,b,boat,obstacles,body,scale){
     for(const x of[o.min[0]-margin,o.max[0]+margin])for(const z of[o.min[2]-margin,o.max[2]+margin]){
       if(nodes.length>=130)break;
       const y=modelDeck(boat,z/scale[2])*scale[1],p=[x,y,z];
-      if(Math.abs(y-a[1])<.15&&(crewNavigationOnDeck(p,boat,scale,body)||crewNavigationRigAccess(p,body))&&!obstacles.some(q=>crewNavigationInside(p,q,body)))nodes.push(p);
+      if(Math.abs(y-a[1])<.15&&(crewNavigationOnDeck(p,boat,scale,body)||crewNavigationRigAccess(p,body,boat,scale))&&!obstacles.some(q=>crewNavigationInside(p,q,body)))nodes.push(p);
     }
   }
   const distance=nodes.map(()=>Infinity),parent=nodes.map(()=>-1),visited=new Set();distance[0]=0;

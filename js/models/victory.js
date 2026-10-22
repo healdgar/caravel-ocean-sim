@@ -60,6 +60,8 @@ export const VICTORY_DESIGN=deepFreeze({
   quarterdeck:{start:1.65,height:1.67},
   helm:{x:.82,z:3.5,eyeAboveDeck:1.6},
   wheel:{centre:[0,1.95,3.7],radius:.18},
+  bittsZ:[-5.1,-4.50,1.8,4.22],
+  chainwales:{inset:.08,outset:.30,endMargin:.10,rise:.04-.12/verticalScale,thickness:.025},
   // Authored access lanes clear the complete gun recoil and fixed deck
   // fittings. The fore pair also stays inboard of the forecastle bitts.
   stairs:[{id:'forecastle',x:.30,run:.6,width:.21,treads:7,railOffset:.12,railRadius:.022},
@@ -161,6 +163,15 @@ export function victoryAnchorCathead(side=-1){
   return {root:[side*(w-a.rootInset),y+a.rootRise,z],tip:[side*(w+a.tipOutset),y+a.tipRise,z],fairlead:[side*(w+a.tipOutset),y+a.fairleadRise,z]};
 }
 export function victoryMastPoint(index,y){const m=VICTORY_MASTS[index],foot=victoryVesselDeck(m.z);return [0,y,m.z+m.rake*(y-foot)/(m.height-foot)];}
+// The side channels join the hull continuously and carry the lower deadeyes.
+// Their top is also the authored footing for entering the lower ratlines.
+export function victoryChainwale(index,side,z){
+  const m=VICTORY_MASTS[index],c=VICTORY_DESIGN.chainwales;
+  if(!m||![-1,1].includes(side))throw Error('Invalid Victory chainwale');
+  const z0=m.z+m.shrouds.lowerStart-c.endMargin,z1=m.z+m.shrouds.lowerStart+6*m.shrouds.lowerStep+c.endMargin,
+    y=victoryVesselDeck(z)+c.rise,w=victoryHullHalfWidth(z,y);
+  return {z0,z1,y,inner:side*(w-c.inset),outer:side*(w+c.outset),thickness:c.thickness};
+}
 export function victoryShroud(index,side,k,upper=false){
   const m=VICTORY_MASTS[index];
   if(!m||![-1,1].includes(side)||!Number.isInteger(k)||k<0||k>=(upper?4:7))throw Error('Invalid Victory shroud');
