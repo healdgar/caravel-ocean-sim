@@ -291,4 +291,39 @@ fn landOpaque(in:LandVertex)->vec4f{
   let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.95);
   return vec4f(color.rgb,leaf.a);
 }
+// Imported canopy streams already contain absolute Y-up world positions and
+// source linear material factors. Do not run treeVS's root/scale/yaw/sway again.
+struct CanopyVertex {
+  @builtin(position) pos:vec4f,
+  @location(0) world:vec3f,
+  @location(1) normal:vec3f,
+  @location(2) kind:vec2f,
+  @location(3) leafUV:vec2f,
+  @location(4) colour:vec3f,
+};
+@vertex fn bakedCanopyVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
+  @location(5) leafUV:vec2f,@location(6) colour:vec3f)->CanopyVertex{
+  var o:CanopyVertex;o.world=position;o.normal=normal;o.kind=kind;o.leafUV=leafUV;o.colour=colour;
+  o.pos=F.viewProj*vec4f(position-F.camPos.xyz,1);return o;
+}
+// Opaque imported wood/crowns stay in the opaque visibility path. Their call
+// graph has no discard or foliage texture; source RGB replaces shared green.
+@fragment fn canopyOpaqueFS(in:CanopyVertex)->@location(0) vec4f{
+  let n=normalize(in.normal);let exposure=clamp(in.kind.y,0,1);
+  let crown=in.kind.x>3.5;
+  let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.47+max(n.y,0)*.08,crown);
+  return landFinish(in.world,n,in.colour,max(dot(n,F.sunDir.xyz),0),ambient,0,.95);
+}
+@fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
+  let n=normalize(in.normal)*select(-1.0,1.0,front);
+  // This borrowed alpha is an explicit approximation: the supplied GLB/native
+  // streams contain no leaf image. Never replace their linear RGB with it.
+  let alpha=textureSampleBias(leafSpray,landSampler,in.leafUV,.1).a;
+  let exposure=clamp(in.kind.y,0,1);let nDotL=dot(n,F.sunDir.xyz);
+  let diffuse=(max(nDotL,0)+max(-nDotL,0)*.48)*(.22+.78*exposure*exposure);
+  let ambient=.12+exposure*.55+abs(n.y)*.08;
+  if(alpha<.015){discard;}
+  let color=landFinish(in.world,n,in.colour,diffuse,ambient,0,.95);
+  return vec4f(color.rgb,alpha);
+}
 `;
