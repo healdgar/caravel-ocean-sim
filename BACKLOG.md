@@ -91,6 +91,17 @@ rendered checks and is published. The prior Sun-control receipt remains below.
   Root alone holds the testing baton; direct agents author isolated fixes and
   proposed checks without running validation.
 
+### Active follow-up: blade contact waves — unpublished
+
+The next bounded water task connects actual oar/paddle entry and emergence to
+the existing shared surface-wave field. Source is isolated from the published
+checkpoint until qualification: actual accepted moving-water samples, passive
+blade-load/swept-water impulse bounds, no change to propulsion, at most 32 events
+per frame with remaining shared capacity respected, and one-frame delayed events
+with real age. Missing/stale/reset/teleported/disabled contact must clear history.
+Subframe catches can be missed by the snapshot approximation. Independent CPU
+and native GPU fixtures are being authored; no passing receipt exists yet.
+
 ### Sun/environment controls checkpoint
 
 - Manual Sun elevation now spans −90°…90°; Sun azimuth, wind direction and swell
