@@ -157,6 +157,21 @@ fn forestAtlasFrame(cell:vec2i,grid:i32,fullSphere:bool)->u32{
  o.pos=F.viewProj*vec4f(plane-F.camPos.xyz,1);return o;
 }
 struct ForestAtlasSample {pigment:vec4f,normal:vec3f,distance:f32};
+fn forestAtlasHitSupported(point:vec3f,centre:vec3f,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)->bool{
+ // Project the actual baked source point onto the CURRENT billboard plane.
+ // Depth iteration alone intersects an unrelated point on the current ray;
+ // accepting that point can lift a hidden root above the terrain silhouette.
+ let plane=cross(dx,dy);let rayDepth=dot(ray,plane);let pointDepth=dot(point-origin,plane);
+ let centreDepth=dot(centre-origin,plane);
+ let xx=dot(dx,dx);let xy=dot(dx,dy);let yy=dot(dy,dy);let determinant=xx*yy-xy*xy;
+ if(determinant<=1e-20||abs(rayDepth)<=1e-20||pointDepth*centreDepth<=0.){return false;}
+ let offset=(point-origin)*(centreDepth/pointDepth)-ray*(centreDepth/rayDepth);
+ let px=dot(offset,dx);let py=dot(offset,dy);
+ let pixels=vec2f(px*yy-py*xy,py*xx-px*xy)/determinant;
+ // Authored reprojection support, measured in rendered pixels. Never expand
+ // source alpha or accept a fixed world-distance error as the camera moves.
+ return dot(pixels,pixels)<=1.5*1.5;
+}
 fn forestAtlasFetch(frame:u32,layer:u32,uv:vec2f,lod:f32)->ForestSurface{
  let grid=u32(forestAtlasTable.config.x);let tile=forestAtlasTable.config.y;let border=.5*exp2(ceil(lod))/tile;
  let local=clamp(uv,vec2f(border),vec2f(1.-border));let origin=vec2f(f32(frame%grid),f32(frame/grid));let atlas=(origin+local)/f32(grid);
@@ -169,6 +184,7 @@ fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)-
  var distance=dot(source.xyz-origin,camera.direction.xyz)/denominator;
  let footprint=max(length(vec2f(dot(dx,camera.right.xyz),dot(dx,camera.up.xyz))),length(vec2f(dot(dy,camera.right.xyz),dot(dy,camera.up.xyz))))*.5/extent*forestAtlasTable.config.y;
  let lod=clamp(log2(max(1.,footprint)),0.,log2(forestAtlasTable.config.y));
+ let border=.5*exp2(ceil(lod))/forestAtlasTable.config.y;
  var uv=vec2f(0);
  for(var iteration=0u;iteration<3u;iteration++){
    let relative=origin+ray*distance-source.xyz;uv=vec2f(.5+.5*dot(relative,camera.right.xyz)/extent,.5-.5*dot(relative,camera.up.xyz)/extent);
@@ -178,7 +194,11 @@ fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)-
    if(any(uv<vec2f(0))||any(uv>vec2f(1))){break;}
    let sampled=forestAtlasFetch(frame,layer,uv,lod);if(sampled.pigment.a<=1e-6){break;}
    let z=extent*(1.-2.*sampled.detail.a/sampled.pigment.a);distance=(z-dot(origin-source.xyz,camera.direction.xyz))/denominator;
-   result.pigment=sampled.pigment;result.normal=sampled.detail.xyz;result.distance=distance;
+   let sampleUV=clamp(uv,vec2f(border),vec2f(1.-border));
+   let point=source.xyz+camera.right.xyz*((2.*sampleUV.x-1.)*extent)+camera.up.xyz*((1.-2.*sampleUV.y)*extent)+camera.direction.xyz*z;
+   if(forestAtlasHitSupported(point,source.xyz,origin,ray,dx,dy)){
+     result.pigment=sampled.pigment;result.normal=sampled.detail.xyz;result.distance=distance;
+   }
  }
  return result;
 }
