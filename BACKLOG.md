@@ -1,5 +1,22 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 22: scene zoom must not scale the HUD
+
+The canvas wheel handler was passive, allowing Chromium trackpad pinch/Ctrl-wheel
+to change the camera and trigger browser page zoom simultaneously. It now cancels
+the default through a canvas-scoped non-passive listener. Panel scrolling and
+browser zoom outside the scene retain their normal handling; no global zoom lock
+or viewport restriction was added. The static world-map SVG is a separate chart
+without local zoom controls; the user was asked which surface they meant.
+
+Native Metal regression run **30/30** passes in **39.692 seconds**:
+`/tmp/waterworld-map-zoom-regression-153.log`. Real Ctrl-wheel events on source and
+packaged pages are trusted, canceled, preserve HUD rectangles/DPR/visual-viewport
+scale, and still change source camera range. The mobile two-finger path retains
+the same layout invariants. Camera, Stats desktop/mobile, all-vessel GPU guards,
+asset packaging, startup and offline checks pass. This is not physical Safari or
+iPhone gesture qualification. Build receipt `/tmp/waterworld-map-zoom-build-152.log`.
+
 ## October 22 morning: shared WebGPU graphics contract
 
 The user identified severe Flying Cloud slowdown and clarified that all scene

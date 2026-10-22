@@ -336,6 +336,8 @@ performance are unqualified.
 Free and exterior cameras can cross the waterline. In **View ship**, drag to orbit,
 right-drag or Shift-drag to pan, and use the wheel to zoom close. On touchscreens,
 two fingers pan and pinch zooms. **Centre inspection view** clears the pan.
+Scene wheel/pinch input keeps the HUD at its current size. Ctrl-wheel over the
+canvas is consumed by the scene; ordinary browser zoom outside it remains available.
 Share links retain the inspection position. The boat camera still follows the hull;
 rough seas can overtop the gunwales and wash across the deck.
 
