@@ -6,11 +6,12 @@ import {createShipAssetCache} from '../js/ship-mesh.js';
 import {createGunDefinitions,createGunRecoilMap,updateGunRecoilVertices,gunMuzzlePose} from '../js/gunnery-models.js';
 import {createGunneryState,prepareGunnery,stepGunnery,gunnerySummary,fireGunnery} from '../js/gunnery-state.js';
 import {createCompany,stepCompany} from '../js/crew.js';
-import {crewGunneryTool,crewGunStation,stepCrewWork} from '../js/crew-work.js';
+import {crewGunneryTool,crewGunStation,stepCrewWork,victoryCrewRoute} from '../js/crew-work.js';
 import {getShipModel,SHIP_MODELS} from '../js/ship-models.js';
 import {vesselVerticalScale,modelDeck} from '../js/hull.js';
 import {loadCrewGLB} from '../js/gltf.js';
 import {poseCrewWork} from '../js/crew-pose.js';
+import {victoryStairFlights} from '../js/models/victory.js';
 
 const navGunModels=['nina','victory','pinta','santa-maria'],navAssets=createShipAssetCache();
 const navBoat=id=>{const model=getShipModel(id);return {modelId:id,model,...model.runtime,roll:0,pitch:0,rollVelocity:0,heading:0,rudder:0,sailFore:1,sailMain:1,sailMizzen:1,crew:false};};
@@ -141,6 +142,33 @@ test('continuous route checks reject crossing mast or gun space even when both e
   assert.deepEqual(route[0],design(a));assert.deepEqual(route.at(-1),design(b));
   for(let i=1;i<route.length;i++)for(const o of obstacles)assert.equal(navSweptStandingBody(navPhysical(route[i-1],boat),navPhysical(route[i],boat),o),false,'full standing body clears '+o.id);
   const unknown={...boat,modelId:'nonexistent'};assert.equal(crewNavigationObstacles(unknown),null);assert.equal(crewNavigationRoute([design(a),design(b)],unknown),null);
+});
+
+test('every Victory stair joins its real seven-tread mesh and route while a full standing body clears gun recoil',()=>{
+  const boat=navBoat('victory'),asset=navAssets.get('victory'),flights=victoryStairFlights(),guns=crewNavigationObstacles(boat).filter(o=>o.kind==='gun');
+  assert.ok(Object.isFrozen(flights));assert.equal(flights.length,6,'paired fore, quarter and poop flights');
+  for(const f of flights){
+    assert.ok(Object.isFrozen(f));assert.equal(f.treads,7);assert.equal(f.width,.21,'the repair preserves the actual tread width');
+    const group=asset.groups.find(g=>g.id===f.meshGroup);assert.ok(group,f.id+' real mesh group exists');
+    const tops=[];
+    for(let raw=group.firstVertex;raw<group.firstVertex+group.vertexCount;raw+=3){
+      const records=Array.from({length:3},(_,i)=>asset.vertices.subarray(asset.indices[raw+i]*9,asset.indices[raw+i]*9+9));
+      if(records.every(v=>v[6]===0&&v[4]>.99999))tops.push(records.map(v=>Array.from(v.subarray(0,3))));
+    }
+    assert.equal(tops.length,f.treads*2,f.id+' contains seven actual rectangular tread top surfaces');
+    const low=f.y0<f.y1?{z:f.z0,y:f.y0}:{z:f.z1,y:f.y1},high=f.y0<f.y1?{z:f.z1,y:f.y1}:{z:f.z0,y:f.y0};
+    for(let i=0;i<f.treads;i++){
+      const z=low.z+(high.z-low.z)*(i+.5)/f.treads,y=low.y+(high.y-low.y)*(i+1)/f.treads,triangles=tops.filter(t=>Math.abs(t.reduce((sum,p)=>sum+p[2],0)/3-z)<.04&&t.every(p=>Math.abs(p[1]-y)<3e-6));
+      assert.equal(triangles.length,2,f.id+' real tread '+i+' uses the shared flight height/run');
+      const points=triangles.flat(),xs=points.map(p=>p[0]),zs=points.map(p=>p[2]);
+      assert.ok(Math.abs(Math.min(...xs)-(f.x-f.width/2))<3e-6&&Math.abs(Math.max(...xs)-(f.x+f.width/2))<3e-6,'physical tread is centred under its route');
+      assert.ok(Math.abs((Math.min(...zs)+Math.max(...zs))*.5-z)<3e-6,'physical tread follows the actual flight run');
+    }
+    const a=[f.x,f.y0,f.z0],b=[f.x,f.y1,f.z1],route=victoryCrewRoute({x:f.x,z:f.z0},b,boat);
+    for(const landing of [a,b])assert.ok(route.some(p=>navDistance(p,landing)<1e-8),f.id+' route reaches the exact model-owned landing');
+    for(const p of route.filter(p=>p[2]>f.z0+1e-8&&p[2]<f.z1-1e-8))assert.ok(Math.abs(p[0]-f.x)<1e-8,'route stays over its actual stair treads');
+    for(const o of guns)assert.equal(navSweptStandingBody(navPhysical(a,boat),navPhysical(b,boat),o),false,JSON.stringify({flight:f.id,obstacle:o.id,a,b,reason:'authored stair intersects gun recoil reservation'}));
+  }
 });
 
 test('all nine model companies retain real independent postings while legacy watch sweeps clear fixed equipment',()=>{

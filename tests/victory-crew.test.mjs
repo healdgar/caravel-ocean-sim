@@ -8,7 +8,7 @@ import {loadCrewGLB} from '../js/gltf.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {resolveShipNode,getShipModel} from '../js/ship-models.js';
 import {modelDeck,modelDeckWidth,vesselVerticalScale} from '../js/hull.js';
-import {VICTORY_DESIGN,VICTORY_MASTS,VICTORY_SAILS,victoryShroud} from '../js/models/victory.js';
+import {VICTORY_DESIGN,VICTORY_MASTS,VICTORY_SAILS,victoryShroud,victoryStairFlights} from '../js/models/victory.js';
 import {victoryClothPoint,victoryPose} from '../js/victory-motion.js';
 import {boatEyePosition,boatRotate} from '../js/boat.js';
 import {victoryMastPoint} from '../js/models/victory.js';
@@ -31,8 +31,9 @@ test('Victory uses a human-sized representative watch grounded on its own decks'
   assert.deepEqual({revision:c.revision,order:c.order},before,'a square-rigger has no lateen yard transfer');
 });
 test('Victory work routes use the mesh stair landings and safe outboard corridors',()=>{
-  const b=fixture(),target=resolveShipNode(b,'station.hatch',{space:'design'}),route=victoryCrewRoute({x:.93,z:2.65},target,b);
-  for(const z of [1.05,1.65])assert.ok(route.some(p=>Math.abs(p[0]-.9)<1e-8&&Math.abs(p[2]-z)<1e-8),'quarterdeck stair landing '+z);
+  const b=fixture(),target=resolveShipNode(b,'station.hatch',{space:'design'}),route=victoryCrewRoute({x:.93,z:2.65},target,b),flight=victoryStairFlights().find(f=>f.zoneId==='quarter'&&f.side===1);
+  assert.ok(flight,'the model owns the actual starboard quarterdeck flight');
+  for(const [z,y]of [[flight.z0,flight.y0],[flight.z1,flight.y1]])assert.ok(route.some(p=>Math.abs(p[0]-flight.x)<1e-8&&Math.abs(p[1]-y)<1e-8&&Math.abs(p[2]-z)<1e-8),'route uses the actual stair landing '+z);
   for(const p of route){assert.ok(p.every(Number.isFinite));assert.ok(Math.abs(p[0])<modelDeckWidth(b,p[2]));}
   const crossing=victoryCrewRoute({x:-.9,z:3.35},resolveShipNode(b,'station.haul.mizzen',{space:'design'}),b);
   assert.ok(crossing.some(p=>p[2]===2&&p[0]>0)&&crossing.some(p=>p[2]===2&&p[0]<0),'cross away from the wheel and fixed helmsman');
