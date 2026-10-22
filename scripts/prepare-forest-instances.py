@@ -158,7 +158,9 @@ def native_prototype(base, record, index, folder, texture_files):
             packed_raw = SOURCE.read_receipted(folder, name, {name: packed})
             owned_assets[name] = SOURCE.receipt(packed_raw)
         materials.append(material)
-    SOURCE.require("bark" in material_names and "wounds" in material_names, "Missing native wood materials")
+    SOURCE.require("bark" in material_names and
+                   (not record.get("triangles", {}).get("wounds", 0) or "wounds" in material_names),
+                   "Missing native wood materials")
     leaves = sorted((name for name in material_names if name.startswith("foliage_")), key=lambda name: int(name.split("_")[-1]))
     SOURCE.require(leaves and leaves == [f"foliage_{i}" for i in range(len(leaves))], "Native leaf archetypes must be contiguous")
     primitives, node = native_glb_primitives(raw, owned_assets)
