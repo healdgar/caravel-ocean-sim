@@ -351,19 +351,31 @@ export function crewGunStation(gun,role,boat){
     x=(sign<0?Math.max(...records.map(o=>o.max[0]))+.32:Math.min(...records.map(o=>o.min[0]))-.32)/sx;
   return [x,modelDeck(boat,z),z];
 }
+function crewNinaGunDeckRoute(s,target,boat){
+  const path=[],add=p=>{if(!path.length||distance3(path.at(-1),p)>1e-8)path.push(p);};
+  const start=s.job?.position?.slice()??[s.x,(s.position[1]-.028)/vesselVerticalScale(boat),s.z],floor=modelDeck(boat,1.5),high=2.3,upperZ=2.74,
+    stair=i=>[.96,floor+(high-floor)*i/8,1.5+1.14*i/8],endHigh=target[1]>1.5,onStairs=start[2]>=1.5&&start[2]<=2.64+.0001&&start[1]>modelDeck(boat,start[2])+.1;
+  let isHigh=start[1]>1.5;add(start);
+  if(onStairs){
+    const step=workClamp((start[2]-1.5)/1.14*8,0,8);
+    if(endHigh){for(let i=Math.ceil(step);i<=8;i++)add(stair(i));add([.96,high,upperZ]);isHigh=true;}
+    else{for(let i=Math.floor(step);i>=0;i--)add(stair(i));isHigh=false;}
+  }
+  if(!isHigh&&endHigh){
+    add([.96,floor,1.5]);for(let i=1;i<=8;i++)add(stair(i));add([.96,high,upperZ]);
+    add([0,high,upperZ]);add([0,high,target[2]]);
+  }else if(isHigh&&!endHigh){
+    add([0,high,start[2]]);add([0,high,upperZ]);add([.96,high,upperZ]);add(stair(8));
+    for(let i=7;i>=0;i--)add(stair(i));add([target[0],modelDeck(boat,1.5),1.5]);
+  }else if(endHigh){
+    add([0,high,path.at(-1)[2]]);add([0,high,target[2]]);
+  }else add([target[0],modelDeck(boat,start[2]),start[2]]);
+  add(target);return path;
+}
 function gunCrewRoute(s,target,boat){
   if(ADDITIONAL_DESIGNS[boat.modelId])return additionalCrewRoute(s,target,boat,{gunCorridor:true});
   if(boat.modelId==='victory')return victoryCrewRoute(s,target,boat,{gunCorridor:true});
-  const path=[],add=p=>{if(!path.length||distance3(path.at(-1),p)>1e-8)path.push(p);};
-  const start=[s.x,modelDeck(boat,s.z),s.z];add(start);
-  // Niña's rendered companionway is a starboard flight at x .72–1.20,
-  // from z1.5 to2.64. Walk its actual ramp before entering the quarterdeck.
-  if(s.z<2.7){
-    add([.96,modelDeck(boat,1.5),1.5]);
-    for(let i=1;i<=8;i++)add([.96,modelDeck(boat,1.5)+(2.3-modelDeck(boat,1.5))*i/8,1.5+1.14*i/8]);
-  }
-  const z=s.z<2.7?2.64:s.z;add([0,2.3,z]);
-  add([0,2.3,target[2]]);add(target);return path;
+  return crewNinaGunDeckRoute(s,target,boat);
 }
 function assignGunCrew(company,boat){
   const guns=boat.gunnery?.guns;
@@ -376,7 +388,7 @@ function assignGunCrew(company,boat){
   const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery');
   for(const s of company.crew){
     const j=s.job;
-    if(j?.kind==='gunnery'&&j.stage!=='return'&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
+    if(j?.kind==='gunnery'&&!['return','waiting-return'].includes(j.stage)&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
     // An aloft worker climbs down normally; there is no cannon-station teleport.
     if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&['ascending','working'].includes(j.stage))crewWorkDescend(s);
     else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat,company);
@@ -652,7 +664,9 @@ export function stepCrewWork(s,company,boat,dt) {
           if(Object.hasOwn(ROWING_DESIGNS,boat.modelId)){
             const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;}
           }else if(!hasExtendedCrewModel(boat.modelId)){
-            if(!crewWorkPassingDetour(s,company,boat,p,target)&&!crewWorkYieldIdle(s,company,boat,p,next)&&ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery')crewAdditionalPassingDetour(s,company,boat,p,target);
+            let repaired=false;
+            if(!clear){const path=crewWorkNavigationRoute(s,j.path.slice(j.cursor),boat,{exactTarget:['rig','lookout','gunnery'].includes(j.kind)});if(path){j.path=path;j.cursor=0;repaired=true;}}
+            if(!repaired&&!crewWorkPassingDetour(s,company,boat,p,target)&&!crewWorkYieldIdle(s,company,boat,p,next)&&ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery')crewAdditionalPassingDetour(s,company,boat,p,target);
           }
           j.blockedTime=0;
         }
@@ -728,6 +742,7 @@ function startReturn(s,boat,company=null){
   if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,Object.hasOwn(ROWING_DESIGNS,boat.modelId)?company:null);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
   const path=ADDITIONAL_DESIGNS[boat.modelId]?additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :boat.modelId==='victory'?victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
+    :j.kind==='gunnery'?crewNinaGunDeckRoute(s,home,boat)
     :s.id==='maria'?[deckPoint(s.x,-3.2,boat),deckPoint(home[0],-3.2,boat),home]
     :s.id==='duarte'?[deckPoint(home[0],s.z,boat),home]
     :[...j.path.slice(0,-1).reverse(),home];
