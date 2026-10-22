@@ -806,10 +806,13 @@ async function main() {
   const releaseTouch=e=>lookPointers.delete(e.pointerId);
   canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',releaseTouch);canvas.addEventListener('lostpointercapture',releaseTouch);
   canvas.addEventListener('wheel', (e) => {
+    // Trackpad pinch arrives as Ctrl-wheel in Chromium. The scene owns this
+    // gesture; allowing its browser default would also scale the HUD/panels.
+    e.preventDefault();
     if(cameraMode === 'ship'&&(shipOrbit.fleet||shipOrbit.wildlife))shipOrbit.fleetZoom=Math.max(.1,Math.min(6,shipOrbit.fleetZoom*(e.deltaY<0?.9:1/.9)));
     else if(cameraMode === 'ship') shipOrbit.distance=orbitDistance(shipOrbit.distance*(e.deltaY<0?0.9:1/0.9));
     else cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-  }, { passive: true });
+  }, { passive: false });
 
   function updateBoat(dt,resetSea=false){
     const fieldTime=simTime+dt,wrapped=fieldTime>LOOP;
