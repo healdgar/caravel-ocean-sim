@@ -251,7 +251,7 @@ def build_chunk(prototypes, root_ids, roots, ground, *, cell_metres=2., origin=(
     # distance is measured, including manifold-closure cells. Its lower endpoint can exceed the baked floor
     # by at most the measured vertical_excess. Conservative floors/roofs contain
     # the reference columns. This is a VOLUME bound, not hidden-face Hausdorff.
-    arithmetic = 1e-4+float(np.abs(vertices[:, :3]).max())*8*np.finfo(np.float32).eps
+    arithmetic = 1e-4+float(np.abs(vertices[:, :3]).max())*8*float(np.finfo(np.float32).eps)
     error = IMPORTER.float32_upper_bound(math.hypot(horizontal, max(0., vertical_excess))+arithmetic)
     low, high = vertices[:, :3].min(axis=0).astype(float), vertices[:, :3].max(axis=0).astype(float)
     occupied = set(cells);components = 0

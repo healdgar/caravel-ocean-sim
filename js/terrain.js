@@ -4,7 +4,7 @@ import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
-import {loadForestScenery,excludeForestRoots,createForestRenderer,FOREST_VERTEX_WGSL} from './forest-scenery.js';
+import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL} from './forest-scenery.js';
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto'}){
@@ -12,9 +12,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // createTerrain is itself deferred until landfall; optional stand downloads
   // never run on the open-ocean startup path. Failure retains all old roots.
   let canopyFailure=null;
-  const canopyPromise=canopyMode==='off'?Promise.resolve(null):loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;});
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery().catch(error=>{forestFailure=error.message;return null;});
+  // Regional native trees replace the entire old population. The small legacy
+  // example is a fallback, never a second stand mixed into the new forest.
+  const canopyPromise=forestPromise.then(forest=>forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   const [heightResponse,biomeResponse,albedoResponse,regionResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo),load('assets/world/saba/manifest.json')]);
   const heights=decodeIsland(await heightResponse.arrayBuffer()),biome=decodeBiome(await biomeResponse.arrayBuffer());
@@ -26,7 +28,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
   const canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees,forestPack=await forestPromise;
-  const trees=forestPack?excludeForestRoots(canopyTrees,forestPack.manifest):canopyTrees;
+  const trees=forestPack?new Float32Array(0):canopyTrees;
   const groundPatches=createGroundCoverPatches(ISLAND,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const buffer=(data,usage,label)=>{
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
