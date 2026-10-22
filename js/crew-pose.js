@@ -120,7 +120,7 @@ export function poseCrewWork(a,s,boat){
         const p=resolveShipNode(boat,`rig.${j.controlGroup??crewMastName(boat,j.mast)}.fall`,{space:'design',height});
         hand=actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat),p[2]*boat.length/12],s);
       }else if(hasExtendedCrewModel(boat.modelId)&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
-        const grip=resolveShipNode(boat,'hatch.grip');grip[0]+=sign*.10;
+        const grip=resolveShipNode(boat,'hatch.grip');grip[0]+=sign*.10*Math.cos(s.yaw);grip[2]-=sign*.10*Math.sin(s.yaw);
         hand=actorLocal(grip,s);
       }else if(ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId)){
         const h=(ADDITIONAL_DESIGNS[boat.modelId]??proceduralDesign(boat.modelId)).hatch;

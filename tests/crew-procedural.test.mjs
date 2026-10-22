@@ -68,7 +68,7 @@ test('solo Gipsy Moth physically visits independent sail controls and hatch with
       if(job?.kind==='hatch'&&job.stage==='working'&&!hatchPoseChecked){
         const s=company.crew[0],a=mesh.animator,grip=resolveShipNode(boat,'hatch.grip');a.sample('Idle',s.time);poseCrewWork(a,s,boat);
         for(const [side,sign]of [['l',1],['r',-1]]){
-          const hand=crewProposedWorld(s,Array.from(a.world[a.nodeIndex('hand_'+side)].subarray(12,15))),target=[grip[0]+sign*.10,grip[1],grip[2]];
+          const hand=crewProposedWorld(s,Array.from(a.world[a.nodeIndex('hand_'+side)].subarray(12,15))),target=[grip[0]+sign*.10*Math.cos(s.yaw),grip[1],grip[2]-sign*.10*Math.sin(s.yaw)];
           assert.ok(crewProposedDistance(hand,target)<.08,'solo sailor reaches actual aft lid grip rather than the far hinge through the cabin '+JSON.stringify({side,hand,target,root:Array.from(s.position),yaw:s.yaw,lean:s.climbPitch}));
         }
         hatchPoseChecked=true;
