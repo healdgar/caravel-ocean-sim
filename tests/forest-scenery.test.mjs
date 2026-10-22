@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {validateForestScenery,validateForestMaterials,decodeForestScenery,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
+import {validateForestScenery,validateForestMaterials,decodeForestScenery,decodeForestSceneryAsync,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
 
 function fixture(){
   const vertices=new Float32Array([3,4,4].flatMap(kind=>[[-1,0,0],[1,0,0],[0,2,0]].flatMap(p=>[...p,0,0,1,kind,.5,0,0,.1,.2,.05])));
@@ -33,11 +33,62 @@ function nativeFixture(){
   });
   return{...f,textures};
 }
+function attachAtlas(f){
+  const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),views=[];
+  for(let row=0;row<16;row++)for(let column=0;column<16;column++){
+    const u=2*(column+.5)/16-1,v=2*(row+.5)/16-1;let x=u,y=1-Math.abs(u)-Math.abs(v),z=v;
+    if(y<0){x=(1-Math.abs(v))*Math.sign(u);z=(1-Math.abs(u))*Math.sign(v);}
+    const length=Math.hypot(x,y,z),direction=[x/length,y/length,z/length],reference=Math.abs(direction[1])>.999?[0,0,1]:[0,1,0];
+    const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],r=cross(reference,direction),right=r.map(n=>n/Math.hypot(...r)),up=cross(direction,right);
+    views.push({index:views.length,row,column,direction,right,up});
+  }
+  const raw=new Uint8Array(1024*1024*8),encoded=gzipSync(raw),rawHash=hash(raw),encodedHash=hash(encoded),responses={},assets={'manifest.json':'atlas.json'};
+  const files=structuredClone(f.manifest.files);
+  for(const p of f.manifest.prototypes)for(const m of p.nativeMaterials)for(const key of ['albedo','normal','roughnessMap'])if(m[key])files[m[key].file]=m[key];
+  const prototypes=f.manifest.prototypes.map(p=>{
+    const outputs={};for(const [key,stem]of [['albedo','albedo'],['normalDepth','normal-depth']]){
+      const file=`prototype-${p.id}-${p.species}/${stem}.rgba16f.bin`;
+      outputs[key]={file,bytes:raw.byteLength,sha256:rawHash,gzip:{file:file+'.gz',bytes:encoded.byteLength,sha256:encodedHash,uncompressedSHA256:rawHash}};
+      assets[file+'.gz']=file+'.gz';responses[file+'.gz']=encoded;
+    }
+    return{id:p.id,species:p.species,centre:p.centre,radius:p.radius,projection:{extent:p.radius*1.05},detailedGeometry:{wood:p.wood,leaf:p.leaf},outputs};
+  });
+  const manifest={format:'waterworld.native-impostors',version:1,complete:true,units:'metres',upAxis:'Y',layout:{grid:[16,16],tilePixels:64,atlasPixels:[1024,1024],views},source:{files},prototypes};
+  const bytes=new TextEncoder().encode(JSON.stringify(manifest));responses['atlas.json']=bytes;
+  f.manifest.impostors={file:'impostors/manifest.json',bytes:bytes.byteLength,sha256:hash(bytes)};
+  return{assets,responses};
+}
 test('instanced pack preserves prototype vertices and compact roots, and declares no appearance certification',()=>{
   const {manifest,streams}=fixture(),before=structuredClone(streams),pack=decodeForestScenery(manifest,streams);
   assert.equal(pack.vertices.length,117);assert.equal(pack.roots.length,12);assert.equal(pack.indices.length,9);
   for(const name of Object.keys(streams))assert.deepEqual(new Uint8Array(streams[name]),new Uint8Array(before[name]));
   assert.ok(Object.values(FOREST_ASSETS).every(path=>path.startsWith('assets/forest-scenery/')));
+});
+test('cooperative native validation preserves exact bytes, failures and abort semantics',async()=>{
+  const f=nativeFixture(),sync=decodeForestScenery(f.manifest,f.streams);let yields=0;
+  const asyncPack=await decodeForestSceneryAsync(f.manifest,f.streams,{yieldTask:async()=>{yields++;}});
+  assert.ok(yields>0);for(const key of ['vertices','indices','roots'])assert.deepEqual(asyncPack[key],sync[key]);
+  const bad=nativeFixture();new Uint32Array(bad.streams['indices.bin'])[0]=999;
+  await assert.rejects(decodeForestSceneryAsync(bad.manifest,bad.streams,{yieldTask:async()=>{}}),/index outside/);
+  const abort=new AbortController();await assert.rejects(decodeForestSceneryAsync(f.manifest,f.streams,{signal:abort.signal,yieldTask:async()=>abort.abort()}),{name:'AbortError'});
+});
+test('full-sphere first forest requires only roots and atlases; native fetch is cached and receipt verified later',async()=>{
+  const f=nativeFixture(),atlas=attachAtlas(f),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
+  const fetchAsset=async name=>{
+    requests.push(name);if(name==='manifest.json')return Response.json(f.manifest);
+    return new Response(new Uint8Array(atlas.responses[name]??f.streams[name]??f.textures[name]));
+  };
+  const pack=await loadForestScenery({assets,impostorAssets:atlas.assets,fetchAsset});
+  assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.textures,null);assert.ok(pack.impostors);
+  assert.equal(requests.includes('vertices.bin'),false);assert.equal(requests.includes('indices.bin'),false);
+  assert.equal(requests.some(name=>name.endsWith('.png')),false);assert.equal(pack.roots.length,12);
+  const a=pack.loadNative(),b=pack.loadNative();assert.equal(a,b,'one cached native load');
+  const native=await a;assert.deepEqual(native.vertices,decodeForestScenery(f.manifest,f.streams).vertices);
+  assert.equal(requests.filter(name=>name==='vertices.bin').length,1);assert.equal(requests.filter(name=>name==='indices.bin').length,1);
+  for(const name of Object.keys(f.textures))assert.equal(requests.filter(value=>value===name).length,1,name);
+  const tampered=nativeFixture(),tamperedAtlas=attachAtlas(tampered);new Uint8Array(tampered.streams['vertices.bin'])[0]^=1;
+  const delayed=await loadForestScenery({assets,impostorAssets:tamperedAtlas.assets,fetchAsset:async name=>name==='manifest.json'?Response.json(tampered.manifest):new Response(new Uint8Array(tamperedAtlas.responses[name]??tampered.streams[name]??tampered.textures[name]))});
+  await assert.rejects(delayed.loadNative(),/Forest digest mismatch: vertices/);
 });
 test('invalid species, bounds, partitions, roots, indices and invented error certification are rejected',()=>{
   for(const edit of [m=>m.appearanceErrorSupported=true,m=>m.prototypes[0].species='fir',m=>m.rootStride=32,m=>m.prototypes[0].radius=.1,
@@ -92,9 +143,9 @@ test('native stream transport verifies both encoded and decoded receipts',async(
     const bytes=gzipSync(new Uint8Array(raw));encoded[name+'.gz']=bytes;assets[name]=name+'.gz';
     manifest.files[name].gzip={file:name+'.gz',bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')};
   }
-  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(encoded[name]??textures[name]);
+  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(new Uint8Array(encoded[name]??textures[name]));
   assert.equal((await loadForestScenery({assets,fetchAsset,loadAtlases:false})).vertices.length,126);
-  const original=encoded['roots.bin.gz'].slice();encoded['roots.bin.gz'][8]^=1;
+  const original=Uint8Array.from(encoded['roots.bin.gz']);encoded['roots.bin.gz'][8]^=1;
   await assert.rejects(loadForestScenery({assets,fetchAsset,loadAtlases:false}),/encoded digest/);
   encoded['roots.bin.gz']=original;manifest.files['roots.bin'].sha256='0'.repeat(64);
   await assert.rejects(loadForestScenery({assets,fetchAsset,loadAtlases:false}),/Forest digest/);

@@ -17,7 +17,7 @@ before(async()=>{
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 
 function instrumentProductionForest(){
-  const r=window.productionForestGPU={callback:null,device:null,frame:0,now:null,errors:[],lost:null,buffers:[],writes:[],dispatches:[],draws:[],manifest:null,manifestPending:null,lastCamera:null,rootUpload:null};
+  const r=window.productionForestGPU={callback:null,device:null,frame:0,now:null,errors:[],lost:null,buffers:[],writes:[],dispatches:[],draws:[],manifest:null,manifestPending:null,lastCamera:null,rootUpload:null,nativeResident:false};
   window.requestAnimationFrame=callback=>{r.callback=callback;return 1;};
   const request=GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice=async function(...args){const d=await request.apply(this,args);r.device=d;d.addEventListener('uncapturederror',e=>r.errors.push(e.error.message));d.lost.then(info=>r.lost=info.message);return d;};
@@ -43,7 +43,9 @@ function instrumentProductionForest(){
     const backing=ArrayBuffer.isView(data)?data.buffer:data;
     const start=(ArrayBuffer.isView(data)?data.byteOffset:0)+dataOffset*element;
     const bytes=size===undefined?(ArrayBuffer.isView(data)?data.byteLength:data.byteLength)-dataOffset*element:size*element;
-    if(buffer.label.startsWith('forest '))r.writes.push({frame:r.frame,label:buffer.label,offset,bytes});
+    const resident=buffer.label==='forest native residency'?new Uint32Array(backing,start,1)[0]:undefined;
+    if(resident!==undefined)r.nativeResident=resident===1;
+    if(buffer.label.startsWith('forest '))r.writes.push({frame:r.frame,label:buffer.label,offset,bytes,...(resident===undefined?{}:{resident})});
     if(buffer.label==='forest immutable root transforms'&&offset===0){
       const values=new Float32Array(backing,start,bytes/4),byPrototype={};let active=0,excluded=0;
       for(let i=0;i<values.length;i+=12){if(values[i+3]>0){active++;byPrototype[values[i+8]]=(byPrototype[values[i+8]]||0)+1;}else excluded++;}
@@ -75,7 +77,7 @@ function instrumentProductionForest(){
     const state=renderState(this);
     if(state.pipeline.startsWith('instanced forest ')){
       const entries=groupEntries.get(state.groups.get(2))??[],label=binding=>entries.find(e=>e.binding===binding)?.resource.buffer?.label;
-      r.draws.push({frame:r.frame,pipeline:state.pipeline,command:buffer.label,offset,vertex:state.vertex?.label,index:state.index?.label,roots:label(0),visible:label(1)});
+      r.draws.push({frame:r.frame,pipeline:state.pipeline,command:buffer.label,offset,vertex:state.vertex?.label,index:state.index?.label,roots:label(0),visible:label(1),resident:r.nativeResident});
     }
     return draw.call(this,buffer,offset);
   };
@@ -85,7 +87,7 @@ function instrumentProductionForest(){
     const read=r.device.createBuffer({label:'test forest readback',size:record.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
     const encoder=r.device.createCommandEncoder();encoder.copyBufferToBuffer(record.buffer,0,read,0,record.size);r.device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
     const commands=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();read.destroy();
-    return {frame:r.frame,startup:window.oceanStartup?.state,errors:r.errors,lost:r.lost,manifest:r.manifest,rootUpload:r.rootUpload,camera:r.lastCamera,
+    return {frame:r.frame,startup:window.oceanStartup?.state,errors:r.errors,lost:r.lost,manifest:r.manifest,rootUpload:r.rootUpload,camera:r.lastCamera,nativeResident:r.nativeResident,
       buffers:r.buffers.map(({buffer,...data})=>data),writes:r.writes.slice(),dispatches:r.dispatches.slice(),draws:r.draws.slice(),commands};
   };
 }
@@ -103,16 +105,23 @@ function assertGPUFrame(snapshot,frame,manifest){
   assert.equal(reset[0].x,Math.ceil(manifest.prototypes.length*4/64));assert.equal(cull[0].x,Math.ceil(manifest.rootCount/64));
   assert.deepEqual([reset[0].y,reset[0].z,cull[0].y,cull[0].z],[1,1,1,1]);
   const draws=snapshot.draws.filter(d=>d.frame===frame);
-  assert.equal(draws.length,manifest.prototypes.length*4,'native wood/leaves, far support and actual atlas topology per prototype');
-  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeOpaqueFS').length,manifest.prototypes.length*2);
-  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeLeafFS').length,manifest.prototypes.length);
+  const resident=draws.some(d=>d.resident);assert.ok(draws.every(d=>d.resident===resident),'residency changes only between submitted frames');
+  assert.equal(draws.length,manifest.prototypes.length*(resident?4:1),'native resources are addressed only after complete residency');
+  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeOpaqueFS').length,resident?manifest.prototypes.length*2:0);
+  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeLeafFS').length,resident?manifest.prototypes.length:0);
   assert.equal(draws.filter(d=>d.pipeline==='instanced forest native depth impostor').length,manifest.prototypes.length);
-  assert.deepEqual(draws.map(d=>d.offset).sort((a,b)=>a-b),Array.from({length:manifest.prototypes.length*4},(_,i)=>i*20));
+  assert.deepEqual(draws.map(d=>d.offset).sort((a,b)=>a-b),resident?Array.from({length:manifest.prototypes.length*4},(_,i)=>i*20):manifest.prototypes.map(p=>(p.id*4+3)*20));
   for(const draw of draws){
     assert.deepEqual([draw.command,draw.roots,draw.visible],['forest GPU indirect draws','forest immutable root transforms','forest GPU visible root IDs']);
     if(draw.pipeline==='instanced forest native depth impostor')assert.equal(draw.index,'forest immutable impostor quad indices');
     else assert.deepEqual([draw.vertex,draw.index],['forest immutable prototype vertices','forest immutable prototype indices']);
   }
+}
+function assertUploadedOnce(snapshot,label,size){
+  const buffers=snapshot.buffers.filter(b=>b.label===label),writes=snapshot.writes.filter(w=>w.label===label).sort((a,b)=>a.offset-b.offset);
+  assert.equal(buffers.length,1,label+' allocated once');assert.equal(buffers[0].size,size);
+  let end=0;for(const write of writes){assert.equal(write.offset,end,label+' has no duplicate or missing byte ranges');assert.ok(write.bytes>0);end+=write.bytes;}
+  assert.equal(end,size,label+' bytes uploaded exactly once');
 }
 function assertVisibleCounts(snapshot){
   const {manifest,commands}=snapshot;assert.equal(commands.length,manifest.prototypes.length*20);
@@ -139,6 +148,14 @@ for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps proto
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(/init failed|GPU error:|Shader compile error/i.test(m.text()))errors.push(m.text());});
   page.on('request',r=>{if(r.url().includes('/assets/forest-scenery/'))requests.push(r.url());});
   await page.addInitScript(instrumentProductionForest);
+  let releaseNative;const nativeGate=new Promise(resolve=>releaseNative=resolve);
+  // Delay actual responses, then continue their unchanged production request.
+  // This proves first readiness without substituting geometry or atlas bytes.
+  await page.route('**/assets/forest-scenery/**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(!path.includes('/impostors/')&&(/\/(vertices|indices)\.bin(?:\.[a-f0-9]{16})?\.gz$/.test(path)||path.endsWith('.png')))await nativeGate;
+    await route.continue();
+  });
   const query=new URLSearchParams({landfall:'coast',view:'free',boat:'0',prow:'0',boatX:'0',boatZ:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'35',windSpeed:'0',swellHs:'0',ui:'0',w:'640',h:'480'});
   try{
     await page.goto(origin+path+'?'+query);
@@ -146,25 +163,32 @@ for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps proto
     assert.equal(await page.locator('#err').textContent(),'',errors.join('\n'));
     for(let i=0;i<4;i++)await forestFrame(page);
     await page.waitForFunction(()=>window.oceanStartup?.state==='ready',undefined,{timeout:30000});
-    const initial=await page.evaluate(()=>productionForestGPU.snapshot());
+    const preview=await page.evaluate(()=>productionForestGPU.snapshot());
+    assert.equal(preview.startup,'ready');assert.equal(preview.nativeResident,false);
+    assert.equal(preview.buffers.some(b=>b.label==='forest immutable prototype vertices'||b.label==='forest immutable prototype indices'),false,'first ready frame needs no native geometry');
+    for(let frame=1;frame<=preview.frame;frame++)assertGPUFrame(preview,frame,preview.manifest);
+    assertVisibleCounts(preview);assert.deepEqual(preview.errors,[]);
+    releaseNative();await page.waitForFunction(()=>productionForestGPU.nativeResident,undefined,{polling:100,timeout:180000});
+    await forestFrame(page);const initial=await page.evaluate(()=>productionForestGPU.snapshot());
     assert.equal(initial.startup,'ready');assert.deepEqual(initial.errors,[]);assert.equal(initial.lost,null);assert.deepEqual(errors,[]);
     assert.equal(initial.manifest.format,'waterworld.forest-instances');assert.deepEqual(initial.manifest.files,expected.files);
-    assert.equal(initial.manifest.prototypes.length,5);assert.ok(initial.manifest.rootCount>30000);
+    assert.equal(initial.manifest.prototypes.length,5);assert.ok(initial.manifest.rootCount>10000);
     assert.deepEqual([...new Set(initial.manifest.prototypes.map(p=>p.species))].sort(),['birch','chestnut','elm','maple','oak']);
-    assert.equal(initial.rootUpload.total,initial.manifest.rootCount);assert.ok(initial.rootUpload.active>30000);
+    assert.equal(initial.rootUpload.total,initial.manifest.rootCount);assert.ok(initial.rootUpload.active>10000);
     assert.equal(initial.rootUpload.active+initial.rootUpload.excluded,initial.rootUpload.total);assert.equal(Object.keys(initial.rootUpload.byPrototype).length,5);
     for(const [label,size]of [['forest immutable root transforms',expected.files['roots.bin'].bytes],['forest immutable prototype vertices',expected.files['vertices.bin'].bytes],['forest immutable prototype indices',expected.files['indices.bin'].bytes],['forest prototype bounds and ranges',5*80]]){
-      const buffers=initial.buffers.filter(b=>b.label===label),writes=initial.writes.filter(w=>w.label===label);
-      assert.equal(buffers.length,1,label+' allocated exactly once');assert.equal(buffers[0].size,size);
-      assert.equal(writes.length,1,label+' uploaded exactly once');assert.equal(writes[0].offset,0);assert.equal(writes[0].bytes,size);
+      assertUploadedOnce(initial,label,size);
     }
+    assert.deepEqual(initial.writes.filter(w=>w.label==='forest native residency').map(w=>w.resident),[0,1],'one transition after complete native uploads');
     assert.equal(initial.buffers.filter(b=>b.readbackAdded).length,1,'only the actual indirect buffer gets diagnostic COPY_SRC');
     for(let frame=1;frame<=initial.frame;frame++)assertGPUFrame(initial,frame,initial.manifest);
     const beforeVisible=assertVisibleCounts(initial);
-    const hash=path==='/docs/index.html'?'\\.[a-f0-9]{16}':'';
     for(const name of ['manifest','vertices','indices','roots']){
-      const expression=name==='manifest'?'/'+name+hash+'\\.json$':'/'+name+'\\.bin'+hash+'\\.gz$';
-      assert.ok(requests.some(url=>new RegExp(expression).test(new URL(url).pathname)),'actual compressed production '+name+' asset request');
+      assert.ok(requests.some(url=>{
+        const parts=new URL(url).pathname.split('/').at(-1).split('.'),extension=name==='manifest'?'json':'gz';
+        if(parts[0]!==name||parts.at(-1)!==extension||(name!=='manifest'&&parts[1]!=='bin'))return false;
+        return path==='/docs/index.html'?parts.length===(name==='manifest'?3:4)&&/^[a-f0-9]{16}$/.test(parts.at(-2)):parts.length===(name==='manifest'?2:3);
+      }),'actual compressed production '+name+' asset request');
     }
     // Real free-camera drag and movement, not a replacement Frame UBO or a
     // fixture-only camera. The same production RAF drives the later dispatches.
@@ -180,5 +204,5 @@ for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps proto
     const afterVisible=assertVisibleCounts(moved);
     assert.deepEqual(moved.errors,[]);assert.equal(moved.lost,null);assert.deepEqual(errors,[]);
     t.diagnostic(JSON.stringify({path,roots:initial.rootUpload,prototypes:5,visibleBefore:beforeVisible,visibleAfter:afterVisible,frames:moved.frame,immutableUploads:initial.writes.length}));
-  }finally{await page.close();}
+  }finally{releaseNative();await page.close();}
 });

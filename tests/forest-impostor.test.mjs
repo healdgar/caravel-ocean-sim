@@ -48,9 +48,12 @@ test('atlas transport verifies compressed and decoded bytes without a global fet
     const raw=new Uint8Array(receipt.bytes),encoded=gzipSync(raw);receipt.sha256=hash(raw);receipt.gzip={file:receipt.file+'.gz',bytes:encoded.byteLength,sha256:hash(encoded),uncompressedSHA256:receipt.sha256};
     assets[receipt.gzip.file]=receipt.gzip.file;responses[receipt.gzip.file]=encoded;
   }
-  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(responses[name]);
+  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(Uint8Array.from(responses[name]));
+  forest.impostors={file:'impostors/manifest.json',bytes:1,sha256:'0'.repeat(64)};
+  await assert.rejects(loadForestImpostors({forest,fetchAsset,assets}),/manifest digest/);
+  delete forest.impostors;
   const loaded=await loadForestImpostors({forest,fetchAsset,assets});assert.equal(loaded.streams[0].albedo.byteLength,1024*1024*8);
-  const receipt=manifest.prototypes[0].outputs.albedo,original=responses[receipt.gzip.file].slice();responses[receipt.gzip.file][8]^=1;
+  const receipt=manifest.prototypes[0].outputs.albedo,original=Uint8Array.from(responses[receipt.gzip.file]);responses[receipt.gzip.file][8]^=1;
   await assert.rejects(loadForestImpostors({forest,fetchAsset,assets}),/gzip digest/);
   responses[receipt.gzip.file]=original;receipt.sha256='1'.repeat(64);receipt.gzip.uncompressedSHA256=receipt.sha256;
   await assert.rejects(loadForestImpostors({forest,fetchAsset,assets}),/decoded digest/);

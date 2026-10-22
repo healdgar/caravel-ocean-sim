@@ -44,9 +44,11 @@ export function validateForestImpostors(document,forest){
 }
 export async function loadForestImpostors({forest,fetchAsset=fetch,assets=FOREST_IMPOSTOR_ASSETS}){
   const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered forest atlas asset: '+name);const r=await fetchAsset(assets[name]);if(!r.ok)throw Error('Forest atlas unavailable ('+r.status+'): '+name);return r;};
-  const manifest=validateForestImpostors(await(await load('manifest.json')).json(),forest);
   const digest=async data=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),v=>v.toString(16).padStart(2,'0')).join('');
   if(!globalThis.crypto?.subtle||typeof DecompressionStream!=='function')throw Error('Forest atlas requires receipt verification and gzip decoding');
+  const manifestBytes=await(await load('manifest.json')).arrayBuffer();
+  if(forest.impostors&&(forest.impostors.file!=='impostors/manifest.json'||manifestBytes.byteLength!==forest.impostors.bytes||await digest(manifestBytes)!==forest.impostors.sha256))throw Error('Forest atlas manifest digest mismatch');
+  const manifest=validateForestImpostors(JSON.parse(new TextDecoder().decode(manifestBytes)),forest);
   const streams=await Promise.all(manifest.prototypes.map(async prototype=>{
     const row={};for(const kind of ['albedo','normalDepth']){
       const receipt=prototype.outputs[kind],compressed=await(await load(receipt.gzip.file)).arrayBuffer();
