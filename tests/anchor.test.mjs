@@ -176,24 +176,26 @@ test('working anchor fairlead meets the actual port cathead mesh at every hull a
 });
 
 test('deployed anchor retains its world orientation while the moored hull yaws',async()=>{
-  const previous=globalThis.GPUBufferUsage;globalThis.GPUBufferUsage={VERTEX:1,COPY_DST:2,UNIFORM:4};
-  let geometry;
+  const previous=globalThis.GPUBufferUsage;globalThis.GPUBufferUsage={VERTEX:1,COPY_DST:2,UNIFORM:4,STORAGE:8};
+  let commands;
   const device={createBuffer:({label})=>({label,destroy(){}}),
     createRenderPipelineAsync:async()=>({getBindGroupLayout(){}}),createBindGroup:()=>({}),
     queue:{writeBuffer(buffer,offset,data,start=0,count=data.length){
-      if(buffer.label==='anchor dynamic geometry')geometry=data.slice(start,start+count);
+      if(buffer.label==='anchor compact physical state')commands=data.slice(start,start+count);
     }}};
   let renderer;
   try{
     renderer=await createAnchorRenderer({device,shader:async()=>({}),shadows:{bind(){}}});
     const boat=anchorBoat(),state=createAnchorState(boat);boat.heading=27;
     state.drop(boat,anchorEnv);stepAnchor(state,boat,25);renderer.update(state,boat);
-    // First shank and stock triangles belong entirely to the anchor; the
-    // following rope/fairlead must move with the hull independently.
-    const ironAndStock=geometry.slice(0,72*8),position={...state.position};
+    // The GPU owns triangle expansion. Scale, heading and anchor origin must
+    // remain fixed while fairlead/catenary commands follow the yawing hull.
+    // anchor-expansion-gpu.test.mjs also checks the actual expanded triangles.
+    const ironCommands=commands.slice(0,8),rodeCommands=commands.slice(8),position={...state.position};
     boat.heading=154;state.step(1/60,boat,anchorEnv);renderer.update(state,boat);
     assert.equal(state.worldHeading,27);assert.deepEqual(state.position,position);
-    assert.deepEqual(geometry.slice(0,72*8),ironAndStock,'actual rendered anchor vertices keep the seabed orientation');
+    assert.deepEqual(commands.slice(0,8),ironCommands,'GPU anchor commands preserve the seabed orientation');
+    assert.notDeepEqual(commands.slice(8),rodeCommands,'the physical fairlead and rode continue to follow the hull');
     state.weigh();state.step(1/60,boat,anchorEnv);assert.equal(state.worldHeading,27);
   }finally{renderer?.destroy();globalThis.GPUBufferUsage=previous;}
 });

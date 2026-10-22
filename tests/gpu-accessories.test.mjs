@@ -18,6 +18,18 @@ test('gunnery tools cannot restore a CPU triangle-animation backend',()=>{
   assert.throws(()=>assertGPUToolRuntime(source.replace('writeGunneryToolInstances(company,boat,instances)','buildGunneryToolVertices(company,boat,vertices)')),/CPU tessellator|compact tool/);
 });
 
+function assertGPUAnchorRuntime(source){
+  const renderer=source.slice(source.indexOf('export async function createAnchorRenderer')),update=renderer.slice(renderer.indexOf('update(state,boat)'),renderer.indexOf('drawSubmerged(pass)'));
+  assert.ok(update.length>200);assert.match(renderer,/shader\(ANCHOR_GPU_RENDER/,'anchor draws must use the GPU expansion shader');assert.match(update,/writeAnchorGPUState\(/,'anchor updates contain physical commands');
+  assert.doesNotMatch(update,/\b(?:triangle|tube)\s*\(|vertices\.set\s*\(/,'anchor updates must not tessellate geometry on CPU');assert.doesNotMatch(update,/writeBuffer\(\s*buffer\s*,/,'anchor updates must not upload animated vertices');
+}
+
+test('anchor updates cannot restore per-frame CPU tessellation or dynamic triangle uploads',()=>{
+  const source=readFileSync(new URL('../js/anchor.js',import.meta.url),'utf8');assertGPUAnchorRuntime(source);
+  assert.throws(()=>assertGPUAnchorRuntime(source.replace('writeAnchorGPUState(state,boat,values)','triangle(a,b,c,0)')),/physical commands|tessellate/);
+  assert.throws(()=>assertGPUAnchorRuntime(source.replace('device.queue.writeBuffer(stateBuffer,0,values)','device.queue.writeBuffer(buffer,0,vertices)')),/animated vertices/);
+});
+
 test('actual gunnery renderer uploads immutable templates once and shares only compact endpoints across all draw paths',async t=>{
   const prior=Object.getOwnPropertyDescriptor(globalThis,'GPUBufferUsage');Object.defineProperty(globalThis,'GPUBufferUsage',{configurable:true,value:{VERTEX:1,COPY_DST:2,UNIFORM:4,STORAGE:8}});t.after(()=>prior?Object.defineProperty(globalThis,'GPUBufferUsage',prior):delete globalThis.GPUBufferUsage);
   const buffers=[],writes=[],groups=[],captures=[];
