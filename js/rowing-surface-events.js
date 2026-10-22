@@ -129,7 +129,7 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
     const active=new Set(),buckets=[];
     for(const vessel of Array.isArray(roster)?roster.slice(0,L.maxVessels):[]){
       const boat=vessel?.boat,id=vessel?.id;
-      if(!boat||typeof id!=='string'||active.has(id)||!Object.hasOwn(ROWING_DESIGNS,boat.modelId))continue;
+      if(!boat||!boat.showProw||boat.effects===false||typeof id!=='string'||active.has(id)||!Object.hasOwn(ROWING_DESIGNS,boat.modelId))continue;
       active.add(id);
       const state=boat.rowingState,accepted=rowingSurfaceAcceptedWater(boat,time),previous=vessels.get(id);
       if(!accepted||!state||![state.phase,state.rate,state.effortPort,state.effortStarboard].every(Number.isFinite)
@@ -208,7 +208,7 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
     // history, even if a fresh packet arrives before the next collection.
     for(const [id,record] of vessels){
       const accepted=rowingSurfaceAcceptedWater(record.boat,time);
-      if(!accepted||accepted.water!==record.water||record.boat.revision!==record.revision||record.boat.modelId!==record.modelId
+      if(!record.boat.showProw||record.boat.effects===false||!accepted||accepted.water!==record.water||record.boat.revision!==record.revision||record.boat.modelId!==record.modelId
         ||rowingSurfaceBoatMoved(record.position,record.boat,dt))vessels.delete(id);
     }
     stats.trackedStations=Array.from(vessels.values()).reduce((sum,r)=>sum+r.stations.size,0);
