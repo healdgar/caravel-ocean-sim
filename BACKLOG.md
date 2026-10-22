@@ -99,8 +99,35 @@ checkpoint until qualification: actual accepted moving-water samples, passive
 blade-load/swept-water impulse bounds, no change to propulsion, at most 32 events
 per frame with remaining shared capacity respected, and one-frame delayed events
 with real age. Missing/stale/reset/teleported/disabled contact must clear history.
-Subframe catches can be missed by the snapshot approximation. Independent CPU
-and native GPU fixtures are being authored; no passing receipt exists yet.
+Subframe catches can be missed by the snapshot approximation. Focused CPU/native
+GPU checks pass: actual three-model crossings, real shared height/foam output,
+passive impulse limits, stale/disabled/reset rejection and nine-vessel bounds.
+Canoe emergence now retains crossing-time prescribed motion through delayed dry
+confirmation. Full combined and rendered qualification remain pending.
+
+### Updated Forestmodeler canopy pipeline — active user priority
+
+The user requested adaptation to the newly updated local pipeline. Import the
+existing `waterworld.canopy-scenery/v1` bake through a separate native stand
+adapter; the older two-specimen woodland prototype remains untouched. The
+available Saba pack is **80×80 m, 42 stems, five temperate species**, not island-wide
+or botanically representative tropical coverage. Preserve existing terrain and
+procedural vegetation outside that domain.
+
+Native source meshes are already world-space Y-up; instances encode species,
+not yaw. Recover actual linear species material colors from the accompanying
+GLB, apply its node transform once, spatially partition draw ranges, and preserve
+opaque/cutout pass separation. Keep detailed geometry when the export cannot
+justify its appearance error; a geometry-only bound does not certify alpha-hole
+or material similarity. Never claim `standVolumes:true` is an interior-depth
+forest atlas: the current exporter supplies crown domes and shell-culled cards.
+
+Root owns import execution and all validation; direct agents author the local
+importer, native runtime/shader integration and independent fixtures. Capture
+exact bake receipts and current terrain/mask hashes, preserve Forestmodeler
+outputs, and distinguish observed dirty generator source from unknown bake
+provenance. Importing new Hudson/Columbia regions or growing island-wide assets
+is outside this bounded compatibility pass.
 
 ### Sun/environment controls checkpoint
 
