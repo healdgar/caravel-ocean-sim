@@ -1163,6 +1163,7 @@ async function main() {
     }
     if(crewDetails.open)for(const [i,s] of crew.state.crew.entries())crewRows[i].textContent=`${s.name} · ${s.role} · ${crewWorkLabel(s)}`;
   }
+  updateCrewUI();
   const shareButton = controlIcon(document.createElement('button'),'share','Copy share link');
   shareButton.setAttribute('aria-controls','share-panel');shareButton.setAttribute('aria-expanded','false');
   const sharePanel = document.createElement('div'); sharePanel.id = 'share-panel'; sharePanel.hidden = true;
