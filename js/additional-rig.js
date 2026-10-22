@@ -184,7 +184,12 @@ export function proceduralRigContext(id){
 export function laterSailSteeringPose(boat){
   const d=laterSailDesign(boat.modelId),angle=(boat.rudder??0)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle),pivot=d.steering.pivot;
   const rudderBasis=[[c,0,-s],[0,1,0],[s,0,c]],tillerPoint=p=>[pivot[0]+c*(p[0]-pivot[0])+s*(p[2]-pivot[2]),p[1],pivot[2]-s*(p[0]-pivot[0])+c*(p[2]-pivot[2])];
-  if(!d.steering.wheel){const handle=tillerPoint(d.steering.handle);return {kind:'tiller',pivot:[...pivot],handle,grips:[handle],basis:rudderBasis,rudderBasis};}
+  if(!d.steering.wheel){
+    const handle=tillerPoint(d.steering.handle),stock=tillerPoint([pivot[0],d.steering.handle[1],pivot[2]]),scale=[(boat.beam??d.runtime.beam)/d.frame.beam,d.frame.verticalScale,(boat.length??d.runtime.length)/d.frame.length];
+    const along=stock.map((v,i)=>(v-handle[i])*scale[i]),length=Math.hypot(...along);if(length<1e-12)throw Error('Degenerate tiller grip axis');
+    const second=handle.map((v,i)=>v+along[i]/length*.14/scale[i]);
+    return {kind:'tiller',pivot:[...pivot],handle,grips:[handle,second],basis:rudderBasis,rudderBasis};
+  }
   const wheel=d.steering.wheel,axis=wheel.axis??[0,0,1],length=Math.hypot(...axis);if(length<1e-12)throw Error('Degenerate wheel axis');
   const a=axis.map(v=>v/length),turn=angle*(wheel.turnRatio??12),C=Math.cos(turn),S=Math.sin(turn);
   const rotate=v=>{const dot=v.reduce((sum,x,i)=>sum+x*a[i],0),cross=[a[1]*v[2]-a[2]*v[1],a[2]*v[0]-a[0]*v[2],a[0]*v[1]-a[1]*v[0]];return v.map((x,i)=>x*C+cross[i]*S+a[i]*dot*(1-C));};

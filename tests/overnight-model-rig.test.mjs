@@ -94,6 +94,11 @@ test('cloth and spar affine frames derive from the same authoritative pose, with
     }
     assert.equal(JSON.stringify(b),snapshot);
     const helm=laterSailSteeringPose(b);near(resolveProceduralShipNode(b,model,'helm.grip',{space:'design'}),helm.handle);
+    if(helm.kind==='tiller'){
+      const k=[b.beam/d.frame.beam,d.frame.verticalScale,b.length/d.frame.length];
+      near([Math.hypot(...subtract(helm.grips[0],helm.grips[1]).map((v,i)=>v*k[i]))],[.14]);
+      near(resolveProceduralShipNode(b,model,'helm.grip',{space:'design',along:-.09}),helm.grips[1]);
+    }
     const h=model.nodes['hatch.grip'],a=resolveProceduralShipNode({...b,hatchesClosed:1},model,h,{space:'design'}),open=resolveProceduralShipNode({...b,hatchesClosed:0},model,h,{space:'design'});assert.ok(Math.hypot(...subtract(open,a))>.05);
   }
 });
