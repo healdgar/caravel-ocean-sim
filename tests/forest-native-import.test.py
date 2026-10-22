@@ -282,6 +282,19 @@ class ForestNativeImport(unittest.TestCase):
         with mock.patch.object(IMPORTER, "ROOT", self.folder), mock.patch.object(IMPORTER, "prototype", side_effect=AssertionError("No scenery near/far source permitted")), redirect_stdout(io.StringIO()):
             IMPORTER.prepare(None, region, output, native_dir=native)
         result = json.loads((output/"manifest.json").read_text())
+        for prototype in result["prototypes"]:
+            self.assertTrue(prototype["geometryErrorSupported"])
+            self.assertEqual(prototype["geometryErrorMethod"], "symmetric-fixed-opposing-vertex-triangle-bound-v1")
+            certificate = prototype["geometryErrorSource"]
+            self.assertEqual(certificate["nativeGLB"], prototype["source"]["native"]["glb"])
+            for key in ("file", "bytes", "sha256"):
+                self.assertEqual(certificate["farAsset"][key], prototype["source"]["directFar"][key])
+            for name in ("vertices.bin", "indices.bin"):
+                for key in ("bytes", "sha256"):
+                    self.assertEqual(certificate["packedStreams"][name][key], result["files"][name][key])
+            for name in ("wood", "leaf", "far"):
+                self.assertEqual(certificate["ranges"][name], prototype[name])
+                self.assertEqual(certificate["measuredStreams"][name]["vertexCount"], prototype[name]["indexCount"])
         self.assertEqual(result["nativeSource"]["ages"], ages)
         self.assertNotIn("age", result["nativeSource"]);self.assertNotIn("growthEngine", result["nativeSource"]["source"])
         for prototype in result["prototypes"]:

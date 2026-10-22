@@ -13,6 +13,7 @@ Native format v2 uses14floats/56bytes with an explicit native material slot.
 from __future__ import annotations
 import argparse
 import importlib.util
+import inspect
 import json
 import math
 from pathlib import Path
@@ -28,6 +29,46 @@ SPEC.loader.exec_module(SOURCE)
 SPECIES = ("oak", "maple", "birch", "elm", "chestnut")
 FORMAT = "waterworld.forest-instances"
 MAX_PACK_BYTES = 256*1024*1024
+GEOMETRY_ERROR_METHOD = "symmetric-fixed-opposing-vertex-triangle-bound-v1"
+
+
+def float32_upper_bound(value):
+    """Keep a conservative binary64 bound conservative in GPU metadata."""
+    SOURCE.require(math.isfinite(value) and value >= 0, "Invalid geometric error bound")
+    rounded = np.float32(value)
+    if float(rounded) < value:
+        rounded = np.nextafter(rounded, np.float32(math.inf))
+    SOURCE.require(math.isfinite(float(rounded)), "Geometric error exceeds Float32 range")
+    return float(rounded)
+
+
+def native_geometry_certificate(streams, native_glb, far_asset):
+    """Bound complete native/far triangle surfaces, never their appearance.
+
+    A fixed point on the opposite surface bounds every point in a triangle by
+    the maximum distance at its three vertices (convexity). The existing source
+    helper chooses that point with a KD-tree in each direction. Every wood,
+    below-ground root, wound and leaf triangle participates, with no clipping.
+    """
+    for name in ("wood", "leaf", "far"):
+        rows = streams[name]
+        SOURCE.require(rows.ndim == 2 and rows.shape[1] == 14 and len(rows) > 0
+                       and len(rows) % 3 == 0 and rows.dtype == np.dtype("<f4")
+                       and np.isfinite(rows).all(), "Invalid certificate triangle stream")
+    native = np.concatenate((streams["wood"], streams["leaf"]))
+    error = float32_upper_bound(SOURCE.conservative_error(native, streams["far"]))
+    return {"geometryErrorSupported": True, "geometryErrorMetres": error,
+            "geometryErrorMethod": GEOMETRY_ERROR_METHOD,
+            "geometryErrorScope": "Full unmasked triangle surfaces only; alpha coverage, colour, lighting and wind excluded",
+            "geometryErrorSource": {
+                "nativeGLB": {key: native_glb[key] for key in ("file", "bytes", "sha256")},
+                "farAsset": {key: far_asset[key] for key in ("file", "bytes", "sha256")},
+                "measuredStreams": {name: SOURCE.receipt(rows.tobytes(), vertexCount=len(rows), strideFloats=14)
+                                    for name, rows in streams.items()},
+                "method": {"file": "scripts/prepare-canopy-scenery.py#conservative_error",
+                           **SOURCE.receipt(inspect.getsource(SOURCE.conservative_error).encode())},
+                "farSubdivisionLevels": 0,
+                "appearanceErrorSupported": False, "textureAlphaErrorSupported": False, "colourErrorSupported": False}}
 
 
 def localise_stream(rows, root, yaw):
@@ -207,6 +248,15 @@ def native_prototype(base, record, index, folder, texture_files):
                 radius=float(np.linalg.norm((high-low)*.5))+.00001,
                 basalRadius=max(.06, float(np.linalg.norm(basal[:, [0, 2]], axis=1).max())),
                 crownRadius=float(np.linalg.norm(leaf[:, [0, 2]], axis=1).max()))
+    far_asset = base["source"].get("directFar")
+    if far_asset is None:
+        originals = [(name, item) for name, item in base["source"].get("files", {}).items() if name.endswith("_canopy_opaque.bin")]
+        if len(originals) == 1:
+            name, item = originals[0];far_asset = {"file": name, **item}
+    # Synthetic/older inputs without an identifiable far asset retain the
+    # whole-support fallback; never manufacture provenance for a certificate.
+    if far_asset is not None:
+        base.update(native_geometry_certificate(base["streams"], base["source"]["native"]["glb"], far_asset))
     return base
 
 
@@ -353,6 +403,10 @@ def prepare(source_dir, region_dir, output, *, spacing=None, force=False, native
             vertices.append(unique.astype("<f4"));indices.append((inverse+vertex_count).astype("<u4"))
             vertex_count += len(unique);index_count += len(inverse)
     streams = {"vertices.bin": np.concatenate(vertices).tobytes(), "indices.bin": np.concatenate(indices).tobytes(), "roots.bin": roots.tobytes()}
+    for p in prototypes:
+        if p.get("geometryErrorSupported"):
+            p["geometryErrorSource"]["packedStreams"] = {name: SOURCE.receipt(streams[name]) for name in ("vertices.bin", "indices.bin")}
+            p["geometryErrorSource"]["ranges"] = {name: dict(p[name]) for name in ("wood", "leaf", "far")}
     SOURCE.require(sum(map(len, streams.values()))+sum(map(len, texture_files.values())) <= MAX_PACK_BYTES, "Forest assets exceed explicit256MiB asset budget")
     manifest = {"format": FORMAT, "version": 2 if native_index else 1, "units": "metres", "upAxis": "Y", "vertexStride": 56 if native_index else 52, "rootStride": 48,
                 "rootAttributes": ["x", "collarY", "z", "scale", "yaw", "linearR", "linearG", "linearB", "prototype", "sinkMetres", "reserved", "reserved"],
@@ -367,7 +421,7 @@ def prepare(source_dir, region_dir, output, *, spacing=None, force=False, native
     if native_index:
         manifest.update(materialContract="gene-surfaces-v3", vertexAttributes=[*SOURCE.ATTRIBUTES, "nativeMaterial"],
                         sourceClaim=("Catalogued mature native Hero assets; original growth provenance retained verbatim. " if direct_native else "Current Forestmodeler native Hero cohorts. ")
-                                    +"Exact source wood/roots/wounds and native-size individual folded cutouts, with gene-surfaces-v3 materials. No scenery near-mesh simplification. Same-tree Forestmodeler opaque far domes remain approximate, not appearance-certified; strict whole-support fallback only.",
+                                    +"Exact source wood/roots/wounds and native-size individual folded cutouts, with gene-surfaces-v3 materials. No scenery near-mesh simplification. Same-tree Forestmodeler opaque far domes remain approximate, not appearance-certified; geometric certificates cover complete unmasked source triangles only, with whole-support fallback when absent.",
                         nativeSource={"index": SOURCE.receipt(native_raw), "source": native_index["source"], "quality": native_index["quality"],
                                       **({"mode": "catalog-mature-usdz", "ages": {key: value["age"] for key, value in native_records.items()}}
                                          if direct_native else {"farIndex": SOURCE.receipt(far_raw), "age": native_index["age"], "resolution": native_index["resolution"]})})
