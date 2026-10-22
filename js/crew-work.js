@@ -289,21 +289,52 @@ function crewWorkBodiesClear(s,company,boat,path){
 }
 function crewWorkPassingDetour(s,company,boat,p,target){
   if(hasExtendedCrewModel(boat.modelId))return false;
-  const j=s.job,from=physical(p,boat),to=physical(target,boat),length=Math.hypot(to[0]-from[0],to[2]-from[2]);if(length<1e-6)return false;
-  const axis=[(to[0]-from[0])/length,0,(to[2]-from[2])/length],normal=[-axis[2],0,axis[0]],near=company.crew.filter(o=>o!==s&&o.position&&Math.abs(o.position[1]-.028-from[1])<.30).map(o=>({person:o,along:(o.position[0]-from[0])*axis[0]+(o.position[2]-from[2])*axis[2],across:(o.position[0]-from[0])*normal[0]+(o.position[2]-from[2])*normal[2]})).filter(o=>o.along>-.1&&o.along<Math.max(length,.8)&&Math.abs(o.across)<.65).sort((a,b)=>a.along-b.along)[0];
-  if(!near)return false;
-  const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat);let index=j.cursor;
-  while(index<j.path.length-1){const point=physical(j.path[index],boat),along=(point[0]-from[0])*axis[0]+(point[2]-from[2])*axis[2];if(along>near.along+.68)break;index++;}
-  const finish=j.path[index];if(Math.abs(physical(finish,boat)[1]-from[1])>.12)return false;
-  const back=Math.max(0,near.along-.72),front=near.along+.72;
-  for(const span of[.70,.92,1.14])for(const side of[-1,1]){
-    const point=along=>{const q=[from[0]+axis[0]*along+normal[0]*side*span,from[1],from[2]+axis[2]*along+normal[2]*side*span],x=q[0]/sx,z=q[2]/sz,y=crewDeckHeight(boat,z,x);return[x,y,z];};
-    const candidate=[p,point(back),point(front),finish];
-    if(candidate.some(q=>Math.abs(q[1]*sy-from[1])>.12)||!crewWorkBodiesClear(s,company,boat,candidate))continue;
-    if(candidate.slice(1).some((q,i)=>!crewWorkSegmentClear(s,boat,candidate[i],q)))continue;
-    j.path=[...candidate.slice(1),...j.path.slice(index+1)];j.cursor=0;j.passing=true;j.passingDirection=Math.sign(axis[2]);j.blockedTime=0;return true;
+  const j=s.job,from=physical(p,boat),sy=vesselVerticalScale(boat),sx=boat.beam/3.6,sz=boat.length/12;
+  // A detour is a horizontal deck walk. Never short-cut a stair or an aloft
+  // transition to another floor. Retry only from the existing blocked timer.
+  if(Math.abs(p[1]-crewDeckHeight(boat,p[2],p[0]))*sy>.06)return false;
+  const neighbours=company.crew.filter(o=>o!==s&&o.position&&Math.abs(o.position[1]-.028-from[1])<.85&&Math.hypot(o.position[0]-from[0],o.position[2]-from[2])<3.5)
+    .sort((a,b)=>distance3(a.position,from)-distance3(b.position,from)).slice(0,6);
+  if(!neighbours.length)return false;
+  const goals=[];
+  for(let index=j.cursor;index<Math.min(j.path.length,j.cursor+14);index++){
+    const point=j.path[index],world=physical(point,boat),distance=Math.hypot(world[0]-from[0],world[2]-from[2]);
+    if(Math.abs(world[1]-from[1])>.12)break;
+    if(distance>4)break;
+    if(distance>.04&&crewWorkBodiesClear(s,company,boat,[point,point]))goals.push({point,index});
   }
-  return false;
+  if(!goals.length)return false;
+  // At most 62 vertices: the current position, up to 13 existing waypoints,
+  // and eight conservative corners around each of six nearby real bodies.
+  const nodes=[p],goalIndices=new Map();
+  for(const goal of goals){goalIndices.set(nodes.length,goal.index);nodes.push(goal.point);}
+  for(const other of neighbours)for(let k=0;k<8;k++){
+    const angle=k*Math.PI/4,x=(other.position[0]+Math.cos(angle)*.61)/sx,z=(other.position[2]+Math.sin(angle)*.61)/sz,
+      point=[x,crewDeckHeight(boat,z,x),z];
+    if(Math.abs(point[1]*sy-from[1])>.12||!crewWorkSegmentClear(s,boat,point,point)||!crewWorkBodiesClear(s,company,boat,[point,point]))continue;
+    nodes.push(point);
+  }
+  const cost=nodes.map(()=>Infinity),previous=nodes.map(()=>-1),visited=new Set(),edgeCache=new Map();cost[0]=0;
+  let finish=-1;
+  for(let step=0;step<nodes.length;step++){
+    let current=-1;
+    for(let i=0;i<nodes.length;i++)if(!visited.has(i)&&(current<0||cost[i]<cost[current]))current=i;
+    if(current<0||!Number.isFinite(cost[current]))break;
+    if(goalIndices.has(current)){finish=current;break;}
+    visited.add(current);
+    for(let next=1;next<nodes.length;next++){
+      if(visited.has(next))continue;
+      const distance=distance3(physical(nodes[current],boat),physical(nodes[next],boat)),candidate=cost[current]+distance;
+      if(candidate>=cost[next])continue;
+      const key=Math.min(current,next)+'/'+Math.max(current,next);let clear=edgeCache.get(key);
+      if(clear===undefined){clear=crewWorkBodiesClear(s,company,boat,[nodes[current],nodes[next]])&&crewWorkSegmentClear(s,boat,nodes[current],nodes[next]);edgeCache.set(key,clear);}
+      if(!clear)continue;cost[next]=candidate;previous[next]=current;
+    }
+  }
+  if(finish<0)return false;
+  const path=[];for(let index=finish;index>0;index=previous[index])path.push(nodes[index]);path.reverse();
+  if(!path.length)return false;
+  j.path=[...path,...j.path.slice(goalIndices.get(finish)+1)];j.cursor=0;j.passing=true;j.passingDirection=Math.sign(target[2]-p[2]);j.blockedTime=0;return true;
 }
 // A stationary off-duty sailor can occupy a legitimate work destination. Ask
 // that person to walk to a nearby clear post, retaining their body and floor;
