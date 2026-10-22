@@ -353,7 +353,8 @@ function crewWorkPassingDetour(s,company,boat,p,target){
 function crewWorkYieldIdle(s,company,boat,p,next){
   if(hasExtendedCrewModel(boat.modelId))return false;
   const wanted=physical(next,boat);wanted[1]+=.028;
-  const blocker=company.crew.filter(o=>o!==s&&!o.job&&o.role!=='Helmsman'&&o.id!=='ines'&&o.position&&distance3(o.position,wanted)<.68).sort((a,b)=>distance3(a.position,wanted)-distance3(b.position,wanted))[0];
+  const mayYield=o=>!o.job||(o.job.kind==='gunnery'&&o.job.stage==='working'&&o.job.gun.stage==='ready');
+  const blocker=company.crew.filter(o=>o!==s&&mayYield(o)&&o.role!=='Helmsman'&&o.id!=='ines'&&o.position&&distance3(o.position,wanted)<.68).sort((a,b)=>distance3(a.position,wanted)-distance3(b.position,wanted))[0];
   if(!blocker)return false;
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),start=[blocker.x,(blocker.position[1]-.028)/sy,blocker.z],choices=[];
   for(const radius of[.75,1.05])for(const [X,Z]of[[1,0],[-1,0],[0,1],[0,-1],[.707,.707],[-.707,.707],[.707,-.707],[-.707,-.707]]){
@@ -365,7 +366,12 @@ function crewWorkYieldIdle(s,company,boat,p,next){
     choices.push({target,path,distance:distance3(physicalTarget,wanted)});
   }
   choices.sort((a,b)=>b.distance-a.distance);const choice=choices[0];if(!choice)return false;
-  blocker.home??=[blocker.x,blocker.z];blocker.job={kind:'yield',stage:'approach',path:choice.path,cursor:0,elapsed:0,rung:0,revision:company.revision,priorHome:blocker.home.slice()};blocker.intent='work';blocker.work=0;blocker.decisionIn=0;return true;
+  blocker.home??=[blocker.x,blocker.z];
+  if(blocker.job){
+    const job=blocker.job;job.trafficResume={stage:job.stage,path:job.path.slice(job.cursor),requester:s.id,requesterAt:Array.from(s.position)};
+    job.stage='traffic-yield';job.path=choice.path;job.cursor=0;job.elapsed=0;
+  }else blocker.job={kind:'yield',stage:'approach',path:choice.path,cursor:0,elapsed:0,rung:0,revision:company.revision,priorHome:blocker.home.slice()};
+  blocker.intent='work';blocker.work=0;blocker.decisionIn=0;return true;
 }
 export function crewGunStation(gun,role,boat){
   const sx=boat.beam/3.6,sz=boat.length/12,sign=gun.sideSign??(gun.side==='port'?-1:1);
@@ -678,7 +684,16 @@ export function stepCrewWork(s,company,boat,dt) {
       const goal=crewGunStation(j.gun,j.gunRole,boat),path=crewWorkNavigationRoute(s,[goal],boat,{exactTarget:true});j.elapsed=0;
       if(path){j.path=path;j.cursor=0;j.stage='reposition';}
     }
-    if(['approach','return','reposition','lookout-approach','lookout-return'].includes(j.stage)){
+    if(j.stage==='traffic-hold'){
+      const resume=j.trafficResume,requester=company.crew.find(o=>o.id===resume?.requester);
+      if(resume&&j.elapsed>.5&&(!requester?.job||(distance3(requester.position,resume.requesterAt)>.85&&distance3(s.position,requester.position)>1.3))){
+        j.elapsed=0;
+        const target=j.kind==='gunnery'?crewGunStation(j.gun,j.gunRole,boat):resume.path.at(-1),
+          route=target&&crewWorkNavigationRoute(s,j.kind==='gunnery'?gunCrewRoute(s,target,boat):resume.path,boat,{exactTarget:true});
+        if(route){j.path=route;j.cursor=0;j.stage=resume.stage==='working'?'reposition':resume.stage;j.elapsed=0;delete j.trafficResume;}
+      }
+    }
+    if(['approach','return','reposition','lookout-approach','lookout-return','traffic-yield'].includes(j.stage)){
       let p=j.position??[s.x,s.position[1]? (s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z];
       const target=j.path[j.cursor],a=physical(p,boat),b=physical(target,boat),d=distance3(a,b);
       const horizontal=Math.hypot(b[0]-a[0],b[2]-a[2]);
@@ -693,11 +708,13 @@ export function stepCrewWork(s,company,boat,dt) {
         j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
         if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
         if(d-travel<=1e-8){j.cursor++;if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}if(j.cursor>=j.path.length){
-          if(j.stage==='return'){s.job=null;s.home=[next[0],next[2]];s.wait=2;return false;}
+          if(j.stage==='traffic-yield'){j.stage='traffic-hold';j.elapsed=0;}
+          else if(j.stage==='return'){s.job=null;s.home=[next[0],next[2]];s.wait=2;return false;}
           if(j.kind==='yield'){
             const shift=next[2]-j.priorHome[1];s.home=[next[0],next[2]];s.patrolX=next[0];s.route=s.route.map(z=>z+shift);s.target=s.route[1];s.navigationPath=null;s.navigationKey=null;s.job=null;s.wait=2;return false;
           }
-          if(j.stage==='lookout-return')j.stage='descending';
+          if(j.stage==='traffic-hold'){}
+          else if(j.stage==='lookout-return')j.stage='descending';
           else if(j.stage==='lookout-approach'){j.stage='working';j.lookoutAtStation=true;}
           else j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';j.elapsed=0;
         }}
@@ -781,7 +798,7 @@ export function stepCrewWork(s,company,boat,dt) {
   return true;
 }
 function startReturn(s,boat,company=null){
-  const j=s.job;j.stage='return';j.elapsed=0;j.cursor=0;
+  const j=s.job;delete j.trafficResume;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s,boat);
   if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,Object.hasOwn(ROWING_DESIGNS,boat.modelId)?company:null);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
   const path=ADDITIONAL_DESIGNS[boat.modelId]?additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
@@ -793,6 +810,7 @@ function startReturn(s,boat,company=null){
   j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}
 }
 export function crewWorkLabel(s){
+  if(s.job?.stage==='traffic-yield'||s.job?.stage==='traffic-hold')return 'Making way';
   if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';
   if(!s.job&&s.seatedPose)return s.stationId?s.seatedPose.effort>0?s.seatedPose.drive?'Pulling the blade':'Recovering the blade':'Holding the loom':s.role==='Helmsman'?'Working the steering blade':'Seated at station';
   if(!s.job)return s.walk>.3?'On rounds':'At station';
