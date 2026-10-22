@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {gzipSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import {validateForestScenery,validateForestMaterials,decodeForestScenery,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
@@ -84,6 +85,19 @@ test('native surface receipts are verified and an old regional pack cannot borro
   await assert.rejects(loadForestScenery({assets,fetchAsset}),/surface digest/i);
   const old=fixture(),oldAssets=Object.fromEntries(['manifest.json',...Object.keys(old.streams)].map(n=>[n,n]));
   await assert.rejects(loadForestScenery({assets:oldAssets,fetchAsset:async name=>name==='manifest.json'?Response.json(old.manifest):new Response(old.streams[name])}),/native surfaces/);
+});
+test('native stream transport verifies both encoded and decoded receipts',async()=>{
+  const {manifest,streams,textures}=nativeFixture(),encoded={},assets=Object.fromEntries(['manifest.json',...Object.keys(textures)].map(name=>[name,name]));
+  for(const [name,raw]of Object.entries(streams)){
+    const bytes=gzipSync(new Uint8Array(raw));encoded[name+'.gz']=bytes;assets[name]=name+'.gz';
+    manifest.files[name].gzip={file:name+'.gz',bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')};
+  }
+  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(encoded[name]??textures[name]);
+  assert.equal((await loadForestScenery({assets,fetchAsset,loadAtlases:false})).vertices.length,126);
+  const original=encoded['roots.bin.gz'].slice();encoded['roots.bin.gz'][8]^=1;
+  await assert.rejects(loadForestScenery({assets,fetchAsset,loadAtlases:false}),/encoded digest/);
+  encoded['roots.bin.gz']=original;manifest.files['roots.bin'].sha256='0'.repeat(64);
+  await assert.rejects(loadForestScenery({assets,fetchAsset,loadAtlases:false}),/Forest digest/);
 });
 test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
   const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');

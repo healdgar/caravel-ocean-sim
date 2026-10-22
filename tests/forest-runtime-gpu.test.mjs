@@ -100,28 +100,34 @@ function assertGPUFrame(snapshot,frame,manifest){
   const reset=snapshot.dispatches.filter(d=>d.frame===frame&&d.label==='forest reset indirect counts');
   const cull=snapshot.dispatches.filter(d=>d.frame===frame&&d.label==='forest cull and LOD');
   assert.equal(reset.length,1,'actual forest reset dispatch on frame '+frame);assert.equal(cull.length,1,'actual forest cull dispatch on frame '+frame);
-  assert.equal(reset[0].x,Math.ceil(manifest.prototypes.length*3/64));assert.equal(cull[0].x,Math.ceil(manifest.rootCount/64));
+  assert.equal(reset[0].x,Math.ceil(manifest.prototypes.length*4/64));assert.equal(cull[0].x,Math.ceil(manifest.rootCount/64));
   assert.deepEqual([reset[0].y,reset[0].z,cull[0].y,cull[0].z],[1,1,1,1]);
   const draws=snapshot.draws.filter(d=>d.frame===frame);
-  assert.equal(draws.length,manifest.prototypes.length*3,'three actual indirect topology ranges per prototype');
-  assert.equal(draws.filter(d=>d.pipeline==='instanced forest canopyOpaqueFS').length,manifest.prototypes.length*2);
-  assert.equal(draws.filter(d=>d.pipeline==='instanced forest canopyLeafFS').length,manifest.prototypes.length);
-  assert.deepEqual(draws.map(d=>d.offset).sort((a,b)=>a-b),Array.from({length:manifest.prototypes.length*3},(_,i)=>i*20));
-  for(const draw of draws)assert.deepEqual([draw.command,draw.vertex,draw.index,draw.roots,draw.visible],
-    ['forest GPU indirect draws','forest immutable prototype vertices','forest immutable prototype indices','forest immutable root transforms','forest GPU visible root IDs']);
+  assert.equal(draws.length,manifest.prototypes.length*4,'native wood/leaves, far support and actual atlas topology per prototype');
+  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeOpaqueFS').length,manifest.prototypes.length*2);
+  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeLeafFS').length,manifest.prototypes.length);
+  assert.equal(draws.filter(d=>d.pipeline==='instanced forest native depth impostor').length,manifest.prototypes.length);
+  assert.deepEqual(draws.map(d=>d.offset).sort((a,b)=>a-b),Array.from({length:manifest.prototypes.length*4},(_,i)=>i*20));
+  for(const draw of draws){
+    assert.deepEqual([draw.command,draw.roots,draw.visible],['forest GPU indirect draws','forest immutable root transforms','forest GPU visible root IDs']);
+    if(draw.pipeline==='instanced forest native depth impostor')assert.equal(draw.index,'forest immutable impostor quad indices');
+    else assert.deepEqual([draw.vertex,draw.index],['forest immutable prototype vertices','forest immutable prototype indices']);
+  }
 }
 function assertVisibleCounts(snapshot){
-  const {manifest,commands}=snapshot;assert.equal(commands.length,manifest.prototypes.length*15);
+  const {manifest,commands}=snapshot;assert.equal(commands.length,manifest.prototypes.length*20);
   let visible=0;
   for(const p of manifest.prototypes){
     const counts=[];
     for(const [i,key]of ['wood','leaf','far'].entries()){
-      const command=commands.slice((p.id*3+i)*5,(p.id*3+i+1)*5),range=p[key];
+      const command=commands.slice((p.id*4+i)*5,(p.id*4+i+1)*5),range=p[key];
       assert.deepEqual([command[0],command[2],command[3],command[4]],[range.indexCount,range.firstIndex,0,0],'actual immutable draw topology for '+p.species+'/'+key);
       assert.ok(command[1]<=p.rootCount,'GPU compaction fits its actual prototype root partition');counts.push(command[1]);
     }
+    const atlas=commands.slice((p.id*4+3)*5,(p.id*4+4)*5);assert.deepEqual([atlas[0],atlas[2],atlas[3],atlas[4]],[6,0,0,0]);
+    assert.ok(atlas[1]<=p.rootCount);counts.push(atlas[1]);
     assert.equal(counts[0],counts[1],'wood and foliage use the same near roots');
-    assert.ok(counts[0]+counts[2]<=p.rootCount);visible+=counts[0]+counts[2];
+    assert.ok(counts[0]+counts[2]+counts[3]<=p.rootCount);visible+=counts[0]+counts[2]+counts[3];
   }
   assert.ok(visible>0&&visible<=snapshot.rootUpload.active,'actual visible forest counts must be nonzero and bounded');
   return visible;
@@ -156,7 +162,10 @@ for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps proto
     for(let frame=1;frame<=initial.frame;frame++)assertGPUFrame(initial,frame,initial.manifest);
     const beforeVisible=assertVisibleCounts(initial);
     const hash=path==='/docs/index.html'?'\\.[a-f0-9]{16}':'';
-    for(const [name,extension]of [['manifest','json'],['vertices','bin'],['indices','bin'],['roots','bin']])assert.ok(requests.some(url=>new RegExp('/'+name+hash+'\\.'+extension+'$').test(new URL(url).pathname)),'actual production '+name+' asset request');
+    for(const name of ['manifest','vertices','indices','roots']){
+      const expression=name==='manifest'?'/'+name+hash+'\\.json$':'/'+name+'\\.bin'+hash+'\\.gz$';
+      assert.ok(requests.some(url=>new RegExp(expression).test(new URL(url).pathname)),'actual compressed production '+name+' asset request');
+    }
     // Real free-camera drag and movement, not a replacement Frame UBO or a
     // fixture-only camera. The same production RAF drives the later dispatches.
     await page.mouse.move(480,300);await page.mouse.down();await page.mouse.move(410,310,{steps:4});await page.mouse.up();
