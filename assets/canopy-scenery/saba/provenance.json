@@ -1,0 +1,1109 @@
+{
+  "alphaFallbackAtImport": {
+    "bytes": 444839,
+    "height": 1024,
+    "path": "assets/tree-foliage.png",
+    "sha256": "ad40fb471213f1f45acef13d9e51c4a26ae1e60a6e066fa165e1d5b5ea76b24b",
+    "width": 1024
+  },
+  "collarObservations": [
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.11258769035339355,
+          "heightErrorMetres": 0.00028710937510822987,
+          "offsetXZ": [
+            -9.155273446026513e-07,
+            0.00020000000040454324
+          ],
+          "position": [
+            -46.727500915527344,
+            802.769287109375,
+            -5830.3125
+          ],
+          "terrainHeightMetres": 802.8818747997284
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.73036789894104,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00028710937510822987,
+      "maximumHorizontalOffsetMetres": 0.00020000209586935836,
+      "stemIndex": 0
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.08751606941223145,
+          "heightErrorMetres": 0.0004500000000007276,
+          "offsetXZ": [
+            -2.6245117226153525e-06,
+            8.593750044383341e-05
+          ],
+          "position": [
+            -90.27300262451172,
+            813.96875,
+            -5896.2119140625
+          ],
+          "terrainHeightMetres": 814.0562660694122
+        }
+      ],
+      "declaredCrownRadiusMetres": 5.018485069274902,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.0004500000000007276,
+      "maximumHorizontalOffsetMetres": 8.597756709930802e-05,
+      "stemIndex": 1
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.03688609600067139,
+          "heightErrorMetres": 9.804687499581632e-05,
+          "offsetXZ": [
+            -0.05426395263672035,
+            -0.12893359374993452
+          ],
+          "position": [
+            -16.76836395263672,
+            819.135498046875,
+            -5879.79443359375
+          ],
+          "terrainHeightMetres": 819.1723841428757
+        },
+        {
+          "capAboveTerrainMetres": -0.05681300163269043,
+          "heightErrorMetres": 9.804687499581632e-05,
+          "offsetXZ": [
+            0.0542641845703109,
+            0.12887890625006548
+          ],
+          "position": [
+            -16.659835815429688,
+            819.135498046875,
+            -5879.53662109375
+          ],
+          "terrainHeightMetres": 819.1923110485077
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.559357166290283,
+      "genome": "birch",
+      "maximumHeightErrorMetres": 9.804687499581632e-05,
+      "maximumHorizontalOffsetMetres": 0.1398872694459127,
+      "stemIndex": 2
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.1229088306427002,
+          "heightErrorMetres": 0.00018759765634968062,
+          "offsetXZ": [
+            3.649902339475375e-06,
+            -0.00016718749975552782
+          ],
+          "position": [
+            -92.52469635009766,
+            802.3447875976562,
+            -5849.7763671875
+          ],
+          "terrainHeightMetres": 802.467696428299
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.864061117172241,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00018759765634968062,
+      "maximumHorizontalOffsetMetres": 0.0001672273358682495,
+      "stemIndex": 3
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.05638301372528076,
+          "heightErrorMetres": -0.00033066406240322976,
+          "offsetXZ": [
+            -1.8920898270380349e-07,
+            0.00021875000038562575
+          ],
+          "position": [
+            -56.081600189208984,
+            819.3460693359375,
+            -5880.80078125
+          ],
+          "terrainHeightMetres": 819.4024523496628
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.73036789894104,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00033066406240322976,
+      "maximumHorizontalOffsetMetres": 0.00021875008221427118,
+      "stemIndex": 4
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.09860491752624512,
+          "heightErrorMetres": 0.0003309570313376753,
+          "offsetXZ": [
+            -5.310058597274292e-07,
+            0.00013515624959836714
+          ],
+          "position": [
+            -16.62820053100586,
+            809.9617309570312,
+            -5829.37646484375
+          ],
+          "terrainHeightMetres": 810.0603358745575
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.7287261486053467,
+      "genome": "elm",
+      "maximumHeightErrorMetres": 0.0003309570313376753,
+      "maximumHorizontalOffsetMetres": 0.00013515729271008347,
+      "stemIndex": 5
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.20615553855895996,
+          "heightErrorMetres": -0.0002181640625167347,
+          "offsetXZ": [
+            1.3793945328188784e-06,
+            0.00019765624983847374
+          ],
+          "position": [
+            -66.87889862060547,
+            807.1038818359375,
+            -5848.64990234375
+          ],
+          "terrainHeightMetres": 807.3100373744965
+        }
+      ],
+      "declaredCrownRadiusMetres": 6.741079807281494,
+      "genome": "elm",
+      "maximumHeightErrorMetres": 0.0002181640625167347,
+      "maximumHorizontalOffsetMetres": 0.00019766106300808545,
+      "stemIndex": 6
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.0702558159828186,
+          "heightErrorMetres": -0.00024316406245361577,
+          "offsetXZ": [
+            -6.072998033346266e-07,
+            -0.00011406249996070983
+          ],
+          "position": [
+            -29.798200607299805,
+            815.4007568359375,
+            -5856.6494140625
+          ],
+          "terrainHeightMetres": 815.4710126519203
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.864061117172241,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00024316406245361577,
+      "maximumHorizontalOffsetMetres": 0.00011406411666399762,
+      "stemIndex": 7
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.18067049980163574,
+          "heightErrorMetres": 0.00036777343757421477,
+          "offsetXZ": [
+            -1.3305664054996669e-06,
+            -4.921875006402843e-05
+          ],
+          "position": [
+            -68.6948013305664,
+            794.3919677734375,
+            -5825.21044921875
+          ],
+          "terrainHeightMetres": 794.5726382732391
+        }
+      ],
+      "declaredCrownRadiusMetres": 6.25874662399292,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 0.00036777343757421477,
+      "maximumHorizontalOffsetMetres": 4.923673186580058e-05,
+      "stemIndex": 8
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.1774134635925293,
+          "heightErrorMetres": -0.00040517578122489795,
+          "offsetXZ": [
+            -2.3071289092513325e-06,
+            -8.359374987776391e-05
+          ],
+          "position": [
+            -90.9708023071289,
+            787.3746948242188,
+            -5824.38818359375
+          ],
+          "terrainHeightMetres": 787.5521082878113
+        }
+      ],
+      "declaredCrownRadiusMetres": 5.018485069274902,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.00040517578122489795,
+      "maximumHorizontalOffsetMetres": 8.362558138769534e-05,
+      "stemIndex": 9
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.08394265174865723,
+          "heightErrorMetres": 8.837890618451638e-05,
+          "offsetXZ": [
+            1.4770507874573013e-06,
+            0.00010312500035070116
+          ],
+          "position": [
+            -84.15129852294922,
+            811.9155883789062,
+            -5871.591796875
+          ],
+          "terrainHeightMetres": 811.9995310306549
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.73036789894104,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 8.837890618451638e-05,
+      "maximumHorizontalOffsetMetres": 0.00010313557764593574,
+      "stemIndex": 10
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.11350461840629578,
+          "heightErrorMetres": 0.00045019531251000444,
+          "offsetXZ": [
+            -1.9226074243761104e-07,
+            -0.00013750000016443664
+          ],
+          "position": [
+            -29.955900192260742,
+            813.2364501953125,
+            -5903.6484375
+          ],
+          "terrainHeightMetres": 813.3499548137188
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.504133224487305,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 0.00045019531251000444,
+      "maximumHorizontalOffsetMetres": 0.00013750013457961835,
+      "stemIndex": 11
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.047348618507385254,
+          "heightErrorMetres": -0.0003283203125192813,
+          "offsetXZ": [
+            1.8310547034161573e-07,
+            0.0001156250000349246
+          ],
+          "position": [
+            -37.35449981689453,
+            818.1209716796875,
+            -5872.021484375
+          ],
+          "terrainHeightMetres": 818.1683202981949
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.370128631591797,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.0003283203125192813,
+      "maximumHorizontalOffsetMetres": 0.00011562514501910724,
+      "stemIndex": 12
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.06686750054359436,
+          "heightErrorMetres": 0.00013496093754383764,
+          "offsetXZ": [
+            -8.209228532507495e-07,
+            -0.00021484374974534148
+          ],
+          "position": [
+            -28.12420082092285,
+            811.7308349609375,
+            -5840.72021484375
+          ],
+          "terrainHeightMetres": 811.7977024614811
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.3315553665161133,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.00013496093754383764,
+      "maximumHorizontalOffsetMetres": 0.00021484531812206173,
+      "stemIndex": 13
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.12947416305541992,
+          "heightErrorMetres": 0.00047011718754674803,
+          "offsetXZ": [
+            2.7587890656377567e-06,
+            6.328124982246663e-05
+          ],
+          "position": [
+            -79.07029724121094,
+            799.4793701171875,
+            -5838.57763671875
+          ],
+          "terrainHeightMetres": 799.6088442802429
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.147271633148193,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 0.00047011718754674803,
+      "maximumHorizontalOffsetMetres": 6.33413569179104e-05,
+      "stemIndex": 14
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.0933983325958252,
+          "heightErrorMetres": -0.0003319335937703727,
+          "offsetXZ": [
+            -5.493164039194198e-07,
+            0.00015468750007130438
+          ],
+          "position": [
+            -37.811500549316406,
+            817.7622680664062,
+            -5888.2314453125
+          ],
+          "terrainHeightMetres": 817.8556663990021
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.3727240562438965,
+      "genome": "elm",
+      "maximumHeightErrorMetres": 0.0003319335937703727,
+      "maximumHorizontalOffsetMetres": 0.00015468847541695344,
+      "stemIndex": 15
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.025017499923706055,
+          "heightErrorMetres": 3.9941406271282176e-05,
+          "offsetXZ": [
+            -0.1163298461914053,
+            0.07811093750024156
+          ],
+          "position": [
+            -17.341529846191406,
+            817.8384399414062,
+            -5865.1962890625
+          ],
+          "terrainHeightMetres": 817.86345744133
+        },
+        {
+          "capAboveTerrainMetres": -0.06879472732543945,
+          "heightErrorMetres": 3.9941406271282176e-05,
+          "offsetXZ": [
+            0.11632854003906345,
+            -0.07765078124975844
+          ],
+          "position": [
+            -17.108871459960938,
+            817.8384399414062,
+            -5865.35205078125
+          ],
+          "terrainHeightMetres": 817.9072346687317
+        }
+      ],
+      "declaredCrownRadiusMetres": 1.5,
+      "genome": "birch",
+      "maximumHeightErrorMetres": 3.9941406271282176e-05,
+      "maximumHorizontalOffsetMetres": 0.14012120350640248,
+      "stemIndex": 16
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.08278512954711914,
+          "heightErrorMetres": 0.000148535156199614,
+          "offsetXZ": [
+            -4.028320326199264e-07,
+            0.00019062499995925464
+          ],
+          "position": [
+            -29.47010040283203,
+            806.3672485351562,
+            -5824.849609375
+          ],
+          "terrainHeightMetres": 806.4500336647034
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.3315553665161133,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.000148535156199614,
+      "maximumHorizontalOffsetMetres": 0.00019062542559457365,
+      "stemIndex": 17
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.07842326164245605,
+          "heightErrorMetres": -0.00037275390627655725,
+          "offsetXZ": [
+            3.1127929389640485e-07,
+            -7.812500007275958e-05
+          ],
+          "position": [
+            -47.6338996887207,
+            813.3129272460938,
+            -5853.830078125
+          ],
+          "terrainHeightMetres": 813.3913505077362
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.370128631591797,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00037275390627655725,
+      "maximumHorizontalOffsetMetres": 7.812562019701023e-05,
+      "stemIndex": 18
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.047438621520996094,
+          "heightErrorMetres": -0.00048085937498854037,
+          "offsetXZ": [
+            -1.5136718758412826e-06,
+            -0.00018125000042346073
+          ],
+          "position": [
+            -53.527801513671875,
+            817.297119140625,
+            -5901.80078125
+          ],
+          "terrainHeightMetres": 817.344557762146
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.394761562347412,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00048085937498854037,
+      "maximumHorizontalOffsetMetres": 0.0001812563208719967,
+      "stemIndex": 19
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.11756491661071777,
+          "heightErrorMetres": -0.0004914062500347427,
+          "offsetXZ": [
+            2.575683595296141e-06,
+            -5.0781250138243195e-05
+          ],
+          "position": [
+            -70.4657974243164,
+            813.46630859375,
+            -5861.35205078125
+          ],
+          "terrainHeightMetres": 813.5838735103607
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.8985135555267334,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.0004914062500347427,
+      "maximumHorizontalOffsetMetres": 5.0846529002340977e-05,
+      "stemIndex": 20
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.09211254119873047,
+          "heightErrorMetres": -0.00016650390625727596,
+          "offsetXZ": [
+            -1.7883300813537062e-06,
+            1.249999968422344e-05
+          ],
+          "position": [
+            -56.58980178833008,
+            803.8793334960938,
+            -5836.9296875
+          ],
+          "terrainHeightMetres": 803.9714460372925
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.394761562347412,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00016650390625727596,
+      "maximumHorizontalOffsetMetres": 1.2627276689193939e-05,
+      "stemIndex": 21
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.1287682056427002,
+          "heightErrorMetres": 0.00031533203127764864,
+          "offsetXZ": [
+            8.422851607292614e-07,
+            -0.00021328124967112672
+          ],
+          "position": [
+            -91.94319915771484,
+            795.7957153320312,
+            -5838.45361328125
+          ],
+          "terrainHeightMetres": 795.924483537674
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.8985135555267334,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.00031533203127764864,
+      "maximumHorizontalOffsetMetres": 0.0002132829128307504,
+      "stemIndex": 22
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.07076478004455566,
+          "heightErrorMetres": 0.00021835937502601155,
+          "offsetXZ": [
+            -2.4414063659605745e-08,
+            -3.8281250454019755e-05
+          ],
+          "position": [
+            -16.306900024414062,
+            815.038818359375,
+            -5852.46923828125
+          ],
+          "terrainHeightMetres": 815.1095831394196
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.504133224487305,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 0.00021835937502601155,
+      "maximumHorizontalOffsetMetres": 3.8281258239116074e-05,
+      "stemIndex": 23
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.12679266929626465,
+          "heightErrorMetres": 0.0001543945312505457,
+          "offsetXZ": [
+            -1.9165039049084953e-06,
+            0.00015625000014551915
+          ],
+          "position": [
+            -79.3729019165039,
+            805.7732543945312,
+            -5850.15234375
+          ],
+          "terrainHeightMetres": 805.9000470638275
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.8928256034851074,
+      "genome": "elm",
+      "maximumHeightErrorMetres": 0.0001543945312505457,
+      "maximumHorizontalOffsetMetres": 0.00015626175326256987,
+      "stemIndex": 24
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.09189444780349731,
+          "heightErrorMetres": 0.00013310546876255103,
+          "offsetXZ": [
+            1.3610839815214604e-06,
+            -0.00020781249986612238
+          ],
+          "position": [
+            -49.062198638916016,
+            816.9689331054688,
+            -5866.0830078125
+          ],
+          "terrainHeightMetres": 817.0608275532722
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.504133224487305,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 0.00013310546876255103,
+      "maximumHorizontalOffsetMetres": 0.00020781695708053247,
+      "stemIndex": 25
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.09482002258300781,
+          "heightErrorMetres": 0.00018828125007530616,
+          "offsetXZ": [
+            1.5747070278848696e-06,
+            -3.1250001484295353e-06
+          ],
+          "position": [
+            -57.92369842529297,
+            797.68798828125,
+            -5825.908203125
+          ],
+          "terrainHeightMetres": 797.782808303833
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.370128631591797,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00018828125007530616,
+      "maximumHorizontalOffsetMetres": 3.4993325294053746e-06,
+      "stemIndex": 26
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.06166982650756836,
+          "heightErrorMetres": 0.0003183593750009095,
+          "offsetXZ": [
+            -3.7841796540760697e-07,
+            -0.00016484375009895302
+          ],
+          "position": [
+            -79.28820037841797,
+            815.226318359375,
+            -5884.18896484375
+          ],
+          "terrainHeightMetres": 815.2879881858826
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.394761562347412,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.0003183593750009095,
+      "maximumHorizontalOffsetMetres": 0.00016484418444956625,
+      "stemIndex": 27
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.08705282211303711,
+          "heightErrorMetres": -1.0839843753274181e-05,
+          "offsetXZ": [
+            -1.8310546892053026e-06,
+            -6.95312501193257e-05
+          ],
+          "position": [
+            -40.58000183105469,
+            809.8613891601562,
+            -5842.30126953125
+          ],
+          "terrainHeightMetres": 809.9484419822693
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.147271633148193,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 1.0839843753274181e-05,
+      "maximumHorizontalOffsetMetres": 6.955535568474287e-05,
+      "stemIndex": 28
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.09191358089447021,
+          "heightErrorMetres": 0.00015595703121107363,
+          "offsetXZ": [
+            8.911132809430455e-07,
+            -0.0001968750002561137
+          ],
+          "position": [
+            -58.57939910888672,
+            813.1648559570312,
+            -5858.779296875
+          ],
+          "terrainHeightMetres": 813.2567695379257
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.504133224487305,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 0.00015595703121107363,
+      "maximumHorizontalOffsetMetres": 0.00019687701696420598,
+      "stemIndex": 29
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.04731491208076477,
+          "heightErrorMetres": -0.00029462890620379767,
+          "offsetXZ": [
+            -3.753662092265131e-07,
+            0.00012656249964493327
+          ],
+          "position": [
+            -27.16390037536621,
+            818.0805053710938,
+            -5881.7802734375
+          ],
+          "terrainHeightMetres": 818.1278202831745
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.370128631591797,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00029462890620379767,
+      "maximumHorizontalOffsetMetres": 0.00012656305628486048,
+      "stemIndex": 30
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.11852264404296875,
+          "heightErrorMetres": 0.0004948242187765572,
+          "offsetXZ": [
+            3.5156249964529707e-06,
+            -0.00022343749969877535
+          ],
+          "position": [
+            -69.931396484375,
+            817.4371948242188,
+            -5875.3115234375
+          ],
+          "terrainHeightMetres": 817.5557174682617
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.3727240562438965,
+      "genome": "elm",
+      "maximumHeightErrorMetres": 0.0004948242187765572,
+      "maximumHorizontalOffsetMetres": 0.00022346515587615874,
+      "stemIndex": 31
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.13000869750976562,
+          "heightErrorMetres": 0.0001744140624850843,
+          "offsetXZ": [
+            1.1718749988176569e-06,
+            -0.00023046874957799446
+          ],
+          "position": [
+            -60.331298828125,
+            818.7437744140625,
+            -5869.44873046875
+          ],
+          "terrainHeightMetres": 818.8737831115723
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.8928256034851074,
+      "genome": "elm",
+      "maximumHeightErrorMetres": 0.0001744140624850843,
+      "maximumHorizontalOffsetMetres": 0.00023047172890195702,
+      "stemIndex": 32
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.04813137650489807,
+          "heightErrorMetres": -7.70507812148935e-05,
+          "offsetXZ": [
+            -4.119873047159217e-07,
+            0.00019296874961582944
+          ],
+          "position": [
+            -17.655500411987305,
+            818.6110229492188,
+            -5892.51220703125
+          ],
+          "terrainHeightMetres": 818.6591543257236
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.394761562347412,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 7.70507812148935e-05,
+      "maximumHorizontalOffsetMetres": 0.00019296918941073447,
+      "stemIndex": 33
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.13494586944580078,
+          "heightErrorMetres": 4.521484379438334e-05,
+          "offsetXZ": [
+            6.103515630684342e-07,
+            -3.2031250157160684e-05
+          ],
+          "position": [
+            -80.38999938964844,
+            792.2538452148438,
+            -5826.96533203125
+          ],
+          "terrainHeightMetres": 792.3887910842896
+        }
+      ],
+      "declaredCrownRadiusMetres": 4.147271633148193,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 4.521484379438334e-05,
+      "maximumHorizontalOffsetMetres": 3.2037064716686307e-05,
+      "stemIndex": 34
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.04744303226470947,
+          "heightErrorMetres": -0.00041484374992251105,
+          "offsetXZ": [
+            1.873779297056899e-06,
+            3.593749988795025e-05
+          ],
+          "position": [
+            -44.1797981262207,
+            818.46728515625,
+            -5879.8056640625
+          ],
+          "terrainHeightMetres": 818.5147281885147
+        }
+      ],
+      "declaredCrownRadiusMetres": 3.3315553665161133,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.00041484374992251105,
+      "maximumHorizontalOffsetMetres": 3.5986316108355736e-05,
+      "stemIndex": 35
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.02169203758239746,
+          "heightErrorMetres": -0.00034365234375854925,
+          "offsetXZ": [
+            -0.12955782470703525,
+            -0.05308750000040163
+          ],
+          "position": [
+            -95.79895782470703,
+            808.2627563476562,
+            -5869.4296875
+          ],
+          "terrainHeightMetres": 808.2844483852386
+        }
+      ],
+      "declaredCrownRadiusMetres": 1.5,
+      "genome": "birch",
+      "maximumHeightErrorMetres": 0.00034365234375854925,
+      "maximumHorizontalOffsetMetres": 0.1400125444348167,
+      "stemIndex": 36
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.0033044815063476562,
+          "heightErrorMetres": 0.0001125000000001819,
+          "offsetXZ": [
+            -0.11957973632812013,
+            0.07294687499961583
+          ],
+          "position": [
+            -83.39797973632812,
+            809.3828125,
+            -5860.251953125
+          ],
+          "terrainHeightMetres": 809.3861169815063
+        },
+        {
+          "capAboveTerrainMetres": -0.09427094459533691,
+          "heightErrorMetres": 0.0001125000000001819,
+          "offsetXZ": [
+            0.11957889404297362,
+            -0.07256093750038417
+          ],
+          "position": [
+            -83.15882110595703,
+            809.3828125,
+            -5860.3974609375
+          ],
+          "terrainHeightMetres": 809.4770834445953
+        }
+      ],
+      "declaredCrownRadiusMetres": 1.5,
+      "genome": "birch",
+      "maximumHeightErrorMetres": 0.0001125000000001819,
+      "maximumHorizontalOffsetMetres": 0.14007340901296117,
+      "stemIndex": 37
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.060945868492126465,
+          "heightErrorMetres": 6.435546879401954e-05,
+          "offsetXZ": [
+            1.8859863288867018e-06,
+            -0.00010234374985884642
+          ],
+          "position": [
+            -40.80759811401367,
+            815.3634643554688,
+            -5898.27490234375
+          ],
+          "terrainHeightMetres": 815.4244102239609
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.171104907989502,
+      "genome": "maple",
+      "maximumHeightErrorMetres": 6.435546879401954e-05,
+      "maximumHorizontalOffsetMetres": 0.00010236112582227139,
+      "stemIndex": 38
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.0532679557800293,
+          "heightErrorMetres": -0.00021806640620525286,
+          "offsetXZ": [
+            -1.8920898412488896e-06,
+            0.00010312500035070116
+          ],
+          "position": [
+            -69.56600189208984,
+            817.2064819335938,
+            -5893.716796875
+          ],
+          "terrainHeightMetres": 817.2597498893738
+        }
+      ],
+      "declaredCrownRadiusMetres": 2.20892333984375,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.00021806640620525286,
+      "maximumHorizontalOffsetMetres": 0.00010314235648510009,
+      "stemIndex": 39
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.04551577568054199,
+          "heightErrorMetres": -0.0005247070313316726,
+          "offsetXZ": [
+            -3.3813476534305664e-06,
+            -7.031249879219104e-06
+          ],
+          "position": [
+            -78.78690338134766,
+            816.7296752929688,
+            -5900.63720703125
+          ],
+          "terrainHeightMetres": 816.7751910686493
+        }
+      ],
+      "declaredCrownRadiusMetres": 1.7803528308868408,
+      "genome": "oak",
+      "maximumHeightErrorMetres": 0.0005247070313316726,
+      "maximumHorizontalOffsetMetres": 7.802050167576408e-06,
+      "stemIndex": 40
+    },
+    {
+      "caps": [
+        {
+          "capAboveTerrainMetres": -0.05027490854263306,
+          "heightErrorMetres": -0.00026416015634822543,
+          "offsetXZ": [
+            -8.361816412616463e-07,
+            0.00014062500031286618
+          ],
+          "position": [
+            -25.62070083618164,
+            817.5292358398438,
+            -5866.443359375
+          ],
+          "terrainHeightMetres": 817.5795107483864
+        }
+      ],
+      "declaredCrownRadiusMetres": 1.6494945287704468,
+      "genome": "fir",
+      "maximumHeightErrorMetres": 0.00026416015634822543,
+      "maximumHorizontalOffsetMetres": 0.00014062748633439622,
+      "stemIndex": 41
+    }
+  ],
+  "coordinates": {
+    "glbNodeApplied": {
+      "rotation": [
+        -0.7071067811865476,
+        0.0,
+        0.0,
+        0.7071067811865476
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ]
+    },
+    "native": "World Y-up metres; copied once, without root transform"
+  },
+  "generatorSnapshot": {
+    "claim": "Inspection-time source snapshot only. The old bake manifest does not identify its generating source revision; reproduction is not asserted.",
+    "filesAtImport": {
+      "gardenplans/cache.py": {
+        "bytes": 8346,
+        "sha256": "829514128a6aa64129682d8231acc0410787ac1a40d50d3085b86e293a6a60ac"
+      },
+      "gardenplans/export.py": {
+        "bytes": 24496,
+        "sha256": "8476582bc8138a2e7595c5685a8923f8cb8192f34cce9f0b5d0a3ed9872111aa"
+      },
+      "gardenplans/grow_colonize.py": {
+        "bytes": 268354,
+        "sha256": "0e18e2f4b397b02d7bcd1f035a3748efe9f109191d848790e3ba747f291622d3"
+      },
+      "gardenplans/organs.py": {
+        "bytes": 47022,
+        "sha256": "0a24814730542d95978d98cbc3ad96c4015592c9f169c2457f0a80ab7dfbf5c8"
+      },
+      "gardenplans/plan.py": {
+        "bytes": 255564,
+        "sha256": "f816e084983a728e63e2d438de428524396f5114568e939806ca085d8e3e11fd"
+      },
+      "gardenplans/scenery.py": {
+        "bytes": 77218,
+        "sha256": "97abd39b3481d43b4220d07855bccd872ff27f7e9060d4d57c56204b7b7847d9"
+      }
+    },
+    "headAtImport": "a167f9a6ef7f6a4b5115efbfb4b81f54522d317d",
+    "statusAtImport": "M docs/GAME.md\n M docs/MORPHOLOGY.md\n M docs/RED_MAPLE_EVIDENCE.md\n M gardenplans/cache.py\n M gardenplans/export.py\n M gardenplans/grow_colonize.py\n M gardenplans/organs.py\n M gardenplans/plan.py\n M scripts/export_scene.py\n M scripts/terrain_grove.py\n?? docs/WATERWORLD.md\n?? gardenplans/scenery.py\n?? scripts/bake_canopy_scenery.py\n?? scripts/bake_waterworld_scenery.py\n?? tests/test_canopy_scenery.py"
+  },
+  "sourceFiles": {
+    "saba_mixed_canopy.glb": {
+      "bytes": 1513176,
+      "sha256": "51c32d8f8273d5c0d161937238695409e244b36ea657cbe52f42ac545db12d6b"
+    },
+    "saba_mixed_canopy_cutout.bin": {
+      "bytes": 2365440,
+      "sha256": "1b6a36d75247f1765c691a59386ff33a4293e6149abde4266709d1e4227d6f6b"
+    },
+    "saba_mixed_canopy_opaque.bin": {
+      "bytes": 221760,
+      "sha256": "5e3cd7904a601d9bf40a8899edc521d1314dadc7bab716352754880f87bce5f6"
+    },
+    "saba_mixed_instances.bin": {
+      "bytes": 1344,
+      "sha256": "e10761fc2240a1993f5e6f4c850a6f5d4f37299c0cf2270ea17be75d57c4510f"
+    }
+  },
+  "sourceLimit": "Output byte receipts are verified. Current source snapshot is not evidence that it produced the previous bake.",
+  "sourceManifest": {
+    "bytes": 22064,
+    "filename": "saba_mixed_waterworld_manifest.json",
+    "sha256": "e4052406a7233d9c550975e075680f635f57a6270c85b54ed45d5dc7e129c1c4"
+  },
+  "terrainAtImport": {
+    "biome.bin": {
+      "bytes": 262144,
+      "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953"
+    },
+    "height.bin": {
+      "bytes": 526338,
+      "sha256": "44a7a266ceebe8c920fbe0fb8a3aa0b159dd89660ccfce37791861615ed93b28"
+    },
+    "manifest.json": {
+      "bytes": 4713,
+      "sha256": "fabed8e02413229310b2d5c43be9fddb77e2af83ed3c32e6c959a2b246d513c8"
+    }
+  }
+}

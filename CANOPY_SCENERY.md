@@ -25,6 +25,17 @@ terrain; it does not grow trees, render or download scenery. NumPy and SciPy are
 required. Defaults select the sibling Forestmodeler Saba export and write
 `assets/canopy-scenery/saba/`; overwriting requires `--force`.
 
+```sh
+uv run --directory ../forestmodeler python ../waterworld/scripts/prepare-canopy-scenery.py
+uv run --directory ../forestmodeler python ../waterworld/tests/canopy-import.test.py
+```
+
+The importer verifies 3 mm collar-height registration and records surviving basal
+stems' horizontal offsets and actual terrain clearances. A multi-stem tree may
+retain one offset trunk; its biological seed need not lie inside the surviving
+wood. Nearest same-genome assignment and the declared plant envelope check
+seating correspondence, not biological parent identity or every wood-ground contact.
+
 The pack retains source manifests/region, original instance bytes and a provenance
 ledger with source-file and terrain byte hashes. The current generator checkout
 is dirty; its recorded HEAD, status and selected source hashes describe inspection

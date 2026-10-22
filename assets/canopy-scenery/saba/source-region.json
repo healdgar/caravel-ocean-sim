@@ -1,0 +1,79 @@
+{
+  "name": "Saba",
+  "latitude": 17.635,
+  "longitude": -63.238,
+  "spanMetres": 8192,
+  "gridSize": 513,
+  "format": "signed int16 little endian; metres = value / 4; rows north to south",
+  "accessed": "2026-10-20",
+  "terrainSources": [
+    {
+      "url": "https://basisdata.nl/hwh-ortho/Caribisch_NL/LiDAR/caribisch/Saba/02a_DTM_50cm/M_SABA2023.TIF",
+      "sha256": "c72247094f1f08b038c59b88d832a461914047b580ac5e0cc2f8f31848c5c955"
+    }
+  ],
+  "heightSHA256": "44a7a266ceebe8c920fbe0fb8a3aa0b159dd89660ccfce37791861615ed93b28",
+  "terrainCredit": "Beeldmateriaal Nederland / Saba 2023 bare-earth LiDAR DTM, CC BY 4.0; reprojected and downsampled.",
+  "worldCredit": "Made with Natural Earth. Public domain.",
+  "visualCleanup": "No isolated-needle cleanup applied to local DTM. Modern road grading and other terrain alterations may remain.",
+  "limitations": "16 m elevation-derived coast and visual CRS/datum alignment; authored vegetation and historical cleanup; approximate de-lighting; underwater skirt is not surveyed bathymetry.",
+  "schemaVersion": 2,
+  "id": "saba",
+  "kind": "island-region",
+  "localOrigin": {
+    "x": 0,
+    "z": -6000
+  },
+  "projection": "local equirectangular, metres; X east, Z south",
+  "assets": {
+    "height": "height.bin",
+    "albedo": "albedo.png",
+    "biome": "biome.bin"
+  },
+  "imagery": {
+    "source": "Beeldmateriaal Nederland / Saba RGB orthophoto",
+    "sourcePage": "https://www.beeldmateriaal.nl/dataroom-caribisch-nederland",
+    "licence": "CC BY 4.0",
+    "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+    "acquisition": "2023\u20132024; publisher describes acquisition around 2023/2024",
+    "serviceLayerDate": "2025-05-27 (publication layer label, not capture date)",
+    "accessed": "2026-10-20",
+    "url": "https://api.ellipsis-drive.com/v3/ogc/wms/37a9029d-7578-4471-826d-3b40d721b83b?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=007963d5-7a71-4d40-b6ce-b4440306244f_786eb116-19ff-4406-bd3e-3d03bf8b89af&STYLES=&CRS=EPSG%3A3857&BBOX=-7043924.750898963%2C1990567.4509022054%2C-7035319.166671106%2C1999173.0358427146&WIDTH=1024&HEIGHT=1024&FORMAT=image%2Fpng&TRANSPARENT=true",
+    "sourceSHA256": "de101fe59b43080f4848d5c3445dc6e6cd9e55075b4576b549a17fa72613e0dd",
+    "textureSize": 1024,
+    "derivedSpacingMetres": 8.0,
+    "processing": "Co-registered to DEM; 0.2-pixel antialias only across natural ground. Median cleanup limited to compact neutral-bright components of <=20 pixels, <=6 pixels wide/high, in predominantly vegetated context; broad pale rock/cliffs and canopy detail retained, no global bright-ground recolouring. Bounded local shadow lifting. RGB is an approximate appearance seed, not calibrated reflectance. Modern features may remain.",
+    "cleanupComponents": 64,
+    "cleanupPixels": 189,
+    "albedoSHA256": "ad19953a2635b2270cc2a5ecca8ed93d16fda09d41a7689c25de4b6ebd4a8ef5"
+  },
+  "vegetation": {
+    "maskSize": 512,
+    "format": "uint8 vegetation probability, rows north to south",
+    "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953",
+    "provenance": "Authored RGB greenness interpretation, constrained by elevation and slope; not a surveyed forest/species map.",
+    "seed": 47231,
+    "candidateCount": 360000,
+    "instanceCount": 17466,
+    "variantLibrary": "Native seeded recursive branches, foliage clusters and projected-error LOD; no Three.js runtime."
+  },
+  "playableScope": "Single continuous island region; no whole-world generation or voyage compression.",
+  "terrainSurvey": {
+    "sourceSpacingMetres": 0.5,
+    "derivedSpacingMetres": 16,
+    "sourceCRS": "EPSG:10641 (publisher assignment; TIFF carries LOCAL_CS)",
+    "sourceVerticalDatum": "Publisher local DTM heights; not transformed to a hydrographic/chart datum.",
+    "processing": "16 m area-average excluding missing ground returns; close <=128 m return gaps and interpolate nearby measured ground; bilinear reprojection to local equirectangular grid; quarter-metre quantization. Measured land elevations > 0.1 m retained; remaining cells use the separately declared authored coastal depth model.",
+    "licence": "CC BY 4.0",
+    "licenceURL": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "authoredBathymetry": {
+    "provenance": "Gameplay coastal skirt from shore distance; not measured bathymetry, chart soundings or a navigational aid.",
+    "method": "Euclidean distance from each wet cell centre to the nearest dry cell, minus half the 16 m grid spacing; depth = min(120, 2 + 0.15 * distanceMetres).",
+    "minimumDepthMetres": 2,
+    "maximumDepthMetres": 120,
+    "depthPerShoreMetre": 0.15,
+    "shoreCellCorrectionMetres": 8.0,
+    "derivedSpacingMetres": 16.0
+  }
+}

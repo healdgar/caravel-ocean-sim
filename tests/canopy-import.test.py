@@ -222,7 +222,7 @@ class CanopyImport(unittest.TestCase):
         moved[0, 2] += .1
         self.raw["fixture_canopy.glb"] = make_glb(moved, self.local_leaf, [16, 23, 16])
         self.write_source()
-        with self.assertRaisesRegex(ValueError, "basal|Detailed wood root"):
+        with self.assertRaisesRegex(ValueError, "[Bb]asal|Detailed wood root"):
             self.prepare()
 
     def test_surviving_offset_stems_keep_collar_height_and_declared_plant_envelope_without_invented_seed_containment(self):
