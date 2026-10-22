@@ -4,6 +4,7 @@ import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
 import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight } from './crew-work.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
+import {VICTORY_DESIGN} from './models/victory.js';
 
 const poseSub=(a,b)=>a.map((v,i)=>v-b[i]);
 const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
@@ -135,9 +136,22 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
   const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Gunnery stance requires a pelvis');
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),c=Math.cos(s.yaw),sn=Math.sin(s.yaw);
   const floor=(x,z)=>crewDeckHeight(boat,z/sz,x/sx)*sy,feet=[];
+  let platformMin=-Infinity,platformMax=Infinity;
+  if(boat.modelId==='victory'){
+    // The quarterdeck ends at a real, tall poop-deck rise. Place each complete
+    // measured boot on the worker's platform, rather than straddling that wall.
+    const d=VICTORY_DESIGN.decks,z=s.position[2]/sz;
+    for(const edge of [d.forecastle.end,d.quarter.start,d.poop.start]){
+      if(z<edge)platformMax=Math.min(platformMax,edge*sz);else platformMin=Math.max(platformMin,edge*sz);
+    }
+  }
   for(const side of ['l','r']){
     const f=a.footContacts?.[side];if(!f)throw Error('Gunnery stance requires measured '+side+' boot');
-    const x=f.ankle[0]*s.scale[0],z=f.ankle[2]*s.scale[2],X=s.position[0]+c*x+sn*z,Z=s.position[2]-sn*x+c*z;
+    const x=f.ankle[0]*s.scale[0],z=f.ankle[2]*s.scale[2],X=s.position[0]+c*x+sn*z;
+    let Z=s.position[2]-sn*x+c*z;
+    const extent=[];
+    for(const u of [f.min[0],f.max[0]])for(const v of [f.min[2],f.max[2]])extent.push(-sn*u*s.scale[0]+c*v*s.scale[2]);
+    Z=Math.max(platformMin-Math.min(...extent)+.025,Math.min(platformMax-Math.max(...extent)-.025,Z));
     const step=.05,n=poseUnit([-(floor(X+step,Z)-floor(X-step,Z))/(2*step),1,-(floor(X,Z+step)-floor(X,Z-step))/(2*step)]);
     const sole=[X,floor(X,Z)+.002,Z],ankle=sole.map((v,i)=>v+n[i]*f.ankleAboveSole*s.scale[1]);
     feet.push({side,sole,ankle,normal:n,target:actorLocal(ankle,s)});
