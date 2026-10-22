@@ -40,3 +40,22 @@ test('mean-load cloth and its cache follow another surface actual moving spar',(
   assert.ok(geometry.surfaces[0].revision>beforeRadius,'actual spar radius also belongs to the clearance cache key');
   assert.equal(context._surfaceActiveSupports,undefined,'one live vessel pose cannot overwrite canonical static support context');
 });
+
+for(const kind of ['mast-tip','support-end'])test(`${kind} taper changes actual mean-load cloth without stale cached panels`,()=>{
+  const surface={id:1,mast:0,controlGroup:'main',kind:'square',pivot:[0,2,0],
+    corners:[[-1,2,0],[1,2,0],[1,0,0],[-1,0,0]],belly:0,braceLimit:1,mastContactSide:'aft',contactClearance:.05};
+  const design={id:'taper-fixture',frame:{length:12,beam:3.6,verticalScale:1},surfaces:[surface]};
+  const mast={index:0,foot:[0,0,-.10],head:[0,2,-.10],radius:.20,tipRadius:.10};
+  const support={a:mast.foot,b:mast.head,r:.20,rEnd:.10,mast:0,kind:'mast'};
+  const context={surfaces:[surface],masts:kind==='mast-tip'?[mast]:[],supports:kind==='support-end'?[support]:[]};
+  const state={set:[0,1,0],windSide:0,windForward:-4,rig:[{},{fill:0},{}]},boat={length:12,beam:3.6,sailState:state};
+  const geometry=createSurfaceSailGeometry(design,context,4),cloth=geometry.surfaces[0],index=cloth.samples.findIndex(([u,v])=>u===.5&&v===.5);
+  updateSailGeometry(geometry,boat);const firstRevision=geometry.revision,firstArea=cloth.totalArea;
+  assert.ok(Math.abs(cloth.points[index][2]-.10)<1e-12,'half-height contact uses actual interpolated radius .15 plus .05 clearance');
+  updateSailGeometry(geometry,boat);assert.equal(geometry.revision,firstRevision);
+  if(kind==='mast-tip')mast.tipRadius=.02;else support.rEnd=.02;
+  updateSailGeometry(geometry,boat);
+  assert.ok(geometry.revision>firstRevision,'changed physical taper must invalidate panel geometry');
+  assert.ok(Math.abs(cloth.points[index][2]-.06)<1e-12,'narrower actual contact radius changes cloth position rather than only its cache key');
+  assert.ok(Math.abs(cloth.totalArea-firstArea)>1e-6,'actual tapered contact changes aerodynamic cloth area');
+});

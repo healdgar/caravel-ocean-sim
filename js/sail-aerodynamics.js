@@ -73,8 +73,8 @@ function updateVictorySailGeometry(geometry,boat){
 const surfaceAeroControls=['fore','main','mizzen'];
 function surfaceAeroContextKey(context){
   const supports=context._surfaceActiveSupports??context.supports??[],values=[supports.length,context.masts?.length??0];
-  for(const s of supports)values.push(...s.a,...s.b,s.r??0,s.mast,s.side,s.kind,s.surface);
-  for(const m of context.masts??[])values.push(...m.foot,...m.head,m.radius);
+  for(const s of supports){values.push(...s.a,...s.b,s.r??0,s.mast,s.side,s.kind,s.surface);if(s.rEnd!==undefined)values.push('rEnd',s.rEnd);}
+  for(const m of context.masts??[]){values.push(...m.foot,...m.head,m.radius);if(m.tipRadius!==undefined)values.push('tipRadius',m.tipRadius);}
   return values;
 }
 function surfaceAeroDescriptorKey(s){
