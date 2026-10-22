@@ -1313,6 +1313,9 @@ async function main() {
   const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
   if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],LANDFALL_SEA[LAND_STAGE]);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
+  // Old signed-azimuth links retain their direction on the full-circle controls.
+  for(const key of ['windDir','swellDir','sunAzim'])if(P[key]<0||P[key]>360)P[key]=((P[key]%360)+360)%360;
+  P.sunElev=Math.max(-90,Math.min(90,P.sunElev));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
   const seaHeader=document.createElement('div');seaHeader.className='panel-header';
@@ -1325,11 +1328,12 @@ async function main() {
   const skyMode=document.createElement('select');skyMode.id='sky-mode';skyMode.innerHTML='<option value="manual">Manual Sun</option><option value="astronomy">Astronomical sky</option>';skyMode.value=astronomy.mode;
   const skyDate=document.createElement('input');skyDate.id='astronomy-date';skyDate.type='datetime-local';skyDate.step='1';skyDate.value=astronomy.state.date.slice(0,19);
   const astroInputs={};
-  function astroControl(text,element){const label=document.createElement('label');label.textContent=text;label.append(element);astronomyControls.append(label);}
+  function astroControl(text,element){const label=document.createElement('label');label.textContent=text;if(element===skyDate)label.className='astronomy-date-control';label.append(element);astronomyControls.append(label);}
   astroControl('Sky mode',skyMode);astroControl('Date / time (UT-like, proleptic Gregorian)',skyDate);
   for(const [key,label,min,max,value] of [['latitude','Latitude (north +)',-90,90,astronomy.anchor.latitude],['longitude','Longitude (east +)',-180,180,astronomy.anchor.longitude],['rate','Sky clock rate',0,3600,astronomy.rate]]){const input=document.createElement('input');input.type='number';input.min=min;input.max=max;input.step=key==='rate'?'1':'.001';input.value=value;input.id='astronomy-'+key;astroInputs[key]=input;astroControl(label,input);}
   for(const [key,label] of [['stars','Stars'],['constellations','Constellation guide lines']]){const input=document.createElement('input');input.type='checkbox';input.checked=astronomy[key];input.id='astronomy-'+key;astroInputs[key]=input;astroControl(label,input);}
   const astroStatus=document.createElement('p');astroStatus.id='astronomy-status';astronomyControls.append(astroStatus);
+  const skyHelp=document.createElement('p');skyHelp.textContent='Sun elevation: 0° is the horizon; negative angles move below it, reaching full night by −18°. Astronomical sky supplies the Moon and stars from the date and location. Moving a Sun slider selects Manual Sun.';astronomyControls.append(skyHelp);
   function applyAstronomy(values){try{astronomy.set(values,boat);envFull=true;astroStatus.textContent=astronomy.mode==='astronomy'?'Real Sun/Moon directions; sky clock is separate from wave simulation.':'Manual Sun controls active.';}catch(error){astroStatus.textContent=error.message;}}
   skyMode.onchange=()=>applyAstronomy({mode:skyMode.value});skyDate.onchange=()=>applyAstronomy({date:skyDate.value+'Z'});
   astroInputs.latitude.onchange=astroInputs.longitude.onchange=()=>applyAstronomy({latitude:astroInputs.latitude.value,longitude:astroInputs.longitude.value});
@@ -1402,8 +1406,8 @@ async function main() {
     ['turbidity', 'Water turbidity', 0.2, 3, 0.01, ''],
     ['foam', 'Foam', 0, 3, 0.01, ''],
     ['spindrift', 'Crest spray', 0, 2, 0.05, ''],
-    ['sunElev', 'Sun elevation (deg)', -2, 60, 0.1, ''],
-    ['sunAzim', 'Sun azimuth (deg)', -180, 180, 0.5, ''],
+    ['sunElev', 'Sun elevation (deg)', -90, 90, 0.1, ''],
+    ['sunAzim', 'Sun azimuth (deg)', 0, 360, 0.5, ''],
     ['haze', 'Haze', 0.5, 15, 0.1, ''],
     ['clouds', 'Cloud coverage', 0, 1, 0.01, ''],
     ['cloudBase', 'Cloud base (km)', 0.3, 5, 0.1, ''],
@@ -1424,11 +1428,12 @@ async function main() {
     seaSliders.set(key, { input: inp, output: val });
     inp.addEventListener('input', () => {
       P[key] = Number(inp.value); val.textContent = inp.value;
+      if(key==='sunElev'||key==='sunAzim'){if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});skyMode.value='manual';}
       if (kind === 'spec') needSpectrum = true;
       envFull = true;
     });
     row.append(name, inp, val);
-    seaBody.appendChild(row);
+    (key==='sunElev'||key==='sunAzim'?astronomyControls:seaBody).appendChild(row);
   }
   const dolphinControls=createDolphinControls({parent:seaBody,encounter:dolphins.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});

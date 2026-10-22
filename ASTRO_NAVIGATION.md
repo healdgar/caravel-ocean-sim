@@ -8,11 +8,18 @@ One geographic position and astronomical clock determine the Sun, Moon, stars, l
 
 Manual scene lighting remains the default. Enable **Sun, Moon and stars → Astronomical sky**, or use `skyMode=astronomy`. Existing manual share links retain their lighting.
 
+Manual Sun elevation now spans −90°…90° and azimuth 0°…360°. Its direct light
+obeys the same planetary horizon as the astronomical Sun; negative elevation
+reaches twilight and then dark night, without introducing an unrelated Moon.
+The date/location mode supplies Moon and stars. Editing either Sun slider selects
+Manual Sun explicitly. Legacy signed bearings are normalized to equivalent
+full-circle controls.
+
 ## Existing integration points
 
 | Source | Current behavior | Required boundary |
 | --- | --- | --- |
-| `js/main.js` | Manual `sunElev`/`sunAzim`; elevation slider stops at −2°. Spectrum `simTime` wraps at `LOOP=600`. | A separate unwrapped astronomical epoch; never drive astronomy from the FFT clock. |
+| `js/main.js` | Manual `sunElev`/`sunAzim` cover full altitude/azimuth. Spectrum `simTime` wraps at `LOOP=600`. | A separate unwrapped astronomical epoch; never drive astronomy from the FFT clock. |
 | `js/wgsl/sky.js` | Sun, atmosphere, clouds, environment cube and sun visibility share solar inputs. | Extend all light paths coherently; adding a Moon sprite alone is insufficient. |
 | `js/wgsl/ocean.js` | Sky background, reflected sky and direct solar light; background horizon sampling clamps a direction above the horizon. | Independent celestial visibility/occlusion; no below-horizon Moon or stars promoted by that clamp. |
 | `js/terrain-model.js` | Saba anchor at 17.635° N, 63.238° W; `islandCoordinates()` supplies a local geographic approximation. | Valid initial observer source. Global voyages need canonical latitude/longitude, not unlimited extrapolation of this regional approximation. |

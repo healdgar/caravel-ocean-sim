@@ -94,6 +94,26 @@ physical-device performance remains separate from release verification.
 
 ## Additional authorized work
 
+### Renewed overnight implementation, October 21–22
+
+The user renewed overnight work, with an 08:00 PDT October 22 implementation
+cutoff. Root retains exclusive test/build/browser/profiling execution. Direct
+authors work in separate local managed worktrees; no nested agents.
+
+| Owner | Local worktree | Source ownership |
+|---|---|---|
+| frame_cpu_audit | overnight-physics | Procedural hull/floor/keel contract, hydro/loading/lateral/contact, sailing and real rowing/water forces |
+| frame_gpu_audit | overnight-models | Later ship meshes, authored spars/rigs, control-group surface poses, model-owned attachments |
+| post_parity_tests | overnight-crew | Variable companies, seated rowing/steering IK, capability-aware jobs and moisture capacity |
+| root | primary checkout | Registry/parts/assets, equipment absence, main/UI/follower/sharing/bundle, integration and every qualification/release |
+
+Each author commits source and proposed checks without executing validation.
+Root integrates coherent handoffs before admission. Physics distinguishes outer
+body from keel/fin appendage (union volume, exposed lateral area), weather floor
+from perimeter barrier, and physical mast index from sail control group. Rowing
+must use current water-relative blade motion with stale-sample suppression.
+The five later vessels remain unregistered until those contracts work together.
+
 Night source follows `ASTRO_NAVIGATION.md`: independent simultaneous Sun/Moon,
 actual phase/limb and catalogue rotation, explicit 528-byte production Frame
 (previous 384-byte prefix retained), and shared lunar sea/material/cloud/wet/

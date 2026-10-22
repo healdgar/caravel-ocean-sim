@@ -26,7 +26,7 @@ function instrumentFleetRuntime(){
   GPUDevice.prototype.createBuffer=function(desc){
     // Inspection only: the real production geometry/uniform/wetting uploads are
     // unchanged. COPY_SRC lets this fixture verify bytes after the actual frame.
-    const inspect=/ geometry$|^wetness probes$|^frame ubo|^fleet wake domains$/.test(desc.label||'');
+    const inspect=/ geometry$|^wetness probes$|^frame ubo|^fleet wake domains$|^sun visibility and ocean lighting$/.test(desc.label||'');
     const buffer=createBuffer.call(this,inspect?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);r.buffers.push(buffer);return buffer;
   };
   const createTexture=GPUDevice.prototype.createTexture;
@@ -163,4 +163,63 @@ test('production528B manual/day/full/new sky cases render with different physica
     }finally{await page.close();}
   }
   assert.ok(fullLight.nonblack>100&&fullLight.luminance>newLight.luminance+1,'actual full-Moon scene is brighter than adapted moonless night');
+});
+
+test('modular and Pages manual Sun controls cover full angles and restore daylight after real cached night rendering',{timeout:300000},async()=>{
+  const degrees=Math.PI/180,near=(actual,expected,label)=>assert.ok(Math.abs(actual-expected)<2e-6,label+': '+actual+' vs '+expected);
+  for(const path of ['/', '/docs/index.html']){
+    // Fixed camera and low physical resolution isolate lighting changes from
+    // orbit framing and adaptive resolution. Clouds exercise their real cache.
+    const {page,errors}=await fleetRuntimeOpen(path,{view:'free',cam:'0,8,45,0,0',skyMode:'manual',sunElev:'30',sunAzim:'-85',windDir:'-90',swellDir:'-450',windSpeed:'2',swellHs:'.1',clouds:'.35',cloudQuality:'.25',astroDate:'2026-10-21T16:00:00Z',astroRate:'0'});
+    try{
+      const slider=async(key,value)=>page.locator('#sea-'+key).evaluate((input,value)=>{input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}));},value);
+      await fleetRuntimeStep(page);await page.getByRole('button',{name:'Sea settings',exact:true}).click();await page.locator('#astronomy-controls summary').click();
+      for(const width of [320,768]){
+        await page.setViewportSize({width,height:666});
+        const layout=await page.locator('#astronomy-date').evaluate(input=>({width:input.getBoundingClientRect().width,overflow:input.closest('.panel-body').scrollWidth>input.closest('.panel-body').clientWidth}));
+        assert.ok(layout.width>220,path+' date and time remain readable at viewport '+width);assert.equal(layout.overflow,false,path+' astronomy controls stay inside the panel');
+      }
+      const frame=async()=>page.evaluate(async()=>{const r=fleetRuntime,buffer=r.buffers.find(b=>/^frame ubo/.test(b.label)),lighting=r.buffers.find(b=>b.label==='sun visibility and ocean lighting');return {values:await r.read(buffer),light:await r.read(lighting),mode:oceanAstronomy.clock.mode,selected:document.querySelector('#sky-mode').value};});
+      const settle=async()=>{for(let i=0;i<3;i++)await fleetRuntimeStep(page,.02);};
+      const controls=await page.evaluate(()=>Object.fromEntries(['sunElev','sunAzim','windDir','swellDir'].map(key=>{const input=document.querySelector('#sea-'+key);return [key,{min:Number(input.min),max:Number(input.max),value:Number(input.value),output:Number(input.closest('label').querySelector('output').textContent),details:input.closest('details')?.id||null}];})));
+      assert.deepEqual([controls.sunElev.min,controls.sunElev.max],[-90,90]);
+      for(const key of ['sunAzim','windDir','swellDir'])assert.deepEqual([controls[key].min,controls[key].max],[0,360],path+' complete '+key+' range');
+      assert.equal(controls.sunElev.details,'astronomy-controls');assert.equal(controls.sunAzim.details,'astronomy-controls');
+      for(const [key,expected]of [['sunAzim',275],['windDir',270],['swellDir',270]]){
+        assert.equal(controls[key].value,expected,path+' normalizes imported '+key);assert.equal(controls[key].output,expected,path+' normalized readout matches slider');
+      }
+      await settle();const initial=await frame();assert.equal(initial.values.length,132);assert.ok(initial.values.every(Number.isFinite));
+      near(initial.values[32],Math.sin(275*degrees)*Math.cos(30*degrees),'signed azimuth actual Sun X');
+      near(initial.values[33],.5,'signed azimuth actual Sun Y');near(initial.values[34],-Math.cos(275*degrees)*Math.cos(30*degrees),'signed azimuth actual Sun Z');
+      near(initial.values[56],0,'normalized imported wind X');near(initial.values[57],-1,'normalized imported wind Z');
+      for(const azimuth of [0,360]){await slider('sunAzim',azimuth);await settle();const bearing=await frame();near(bearing.values[32],0,'Sun full-circle endpoint X');near(bearing.values[34],-Math.cos(30*degrees),'Sun full-circle endpoint Z');}
+      await slider('sunAzim',275);
+      await slider('windDir',360);await slider('swellDir',360);const changed=await fleetRuntimeStep(page,.02);
+      assert.ok(changed.compute['sim init']>0,'full-circle wind/swell endpoints reach actual spectrum rebuild');
+      for(const key of ['windDir','swellDir'])assert.equal(await page.locator('#sea-'+key).inputValue(),'360');
+      const endpoint=await frame();near(endpoint.values[56],1,'360-degree wind X');near(endpoint.values[57],0,'360-degree wind Z');
+      await settle();const daylight=await fleetRuntimeCapture(page);assert.ok(daylight.luminance>5&&daylight.nonblack>1000,path+' daylight image contains a lit scene');
+
+      await page.locator('#sky-mode').evaluate(input=>{input.value='astronomy';input.dispatchEvent(new Event('change',{bubbles:true}));});
+      await fleetRuntimeStep(page,.02);const astronomical=await frame();assert.equal(astronomical.mode,'astronomy');assert.equal(astronomical.selected,'astronomy');assert.equal(astronomical.values[112],1);
+      await slider('sunElev',-30);await settle();const manual=await frame(),night=await fleetRuntimeCapture(page);
+      assert.equal(manual.mode,'manual');assert.equal(manual.selected,'manual');assert.equal(manual.values[112],0);assert.equal(manual.values[99],0,'manual override does not introduce an unrelated astronomical Moon');
+      assert.ok(manual.light.slice(4,7).every(value=>value===0),'actual cached ocean direct Sun is extinguished at manual night');
+      near(manual.values[33],-.5,'manual Sun input survives the astronomical frame writer');
+      assert.ok(night.luminance<daylight.luminance*.55,path+' manual -30-degree Sun must substantially darken final GPU pixels: '+JSON.stringify({day:daylight.luminance,night:night.luminance}));
+
+      for(const altitude of [-90,90]){
+        await slider('sunElev',altitude);await settle();const pole=await frame();
+        assert.ok(pole.values.every(Number.isFinite),path+' pole retains a finite complete production Frame');near(pole.values[33],Math.sign(altitude),'Sun pole altitude');
+        assert.ok(pole.light.every(Number.isFinite),path+' solar-disc cloud rays and ocean lighting remain finite at both poles');
+        near(Math.hypot(...pole.values.slice(32,35)),1,'unit Sun direction at pole');
+        if(altitude<0){const nadir=await fleetRuntimeCapture(page);assert.ok(nadir.luminance<daylight.luminance*.55,path+' -90-degree Sun remains night');}
+      }
+      await slider('sunElev',30);await settle();const recovered=await fleetRuntimeCapture(page),last=await frame();
+      near(last.values[33],.5,'daylight Sun altitude restored');assert.equal(last.mode,'manual');
+      assert.ok(recovered.luminance>daylight.luminance*.7&&recovered.luminance<daylight.luminance*1.4,path+' restored environment/cloud lighting recovers comparable daylight: '+JSON.stringify({before:daylight.luminance,after:recovered.luminance}));
+      assert.ok(recovered.luminance>night.luminance*2+3,path+' day recovery is visible in the real final composite');
+      assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>fleetRuntime.errors),[]);
+    }finally{await page.close();}
+  }
 });

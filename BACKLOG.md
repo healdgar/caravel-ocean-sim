@@ -1,9 +1,40 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
-Overnight run: October 20–21, 2026, America/Los_Angeles, with an **08:00 October 21**
-implementation cutoff. That one-night heartbeat is now **paused**. Subsequent
-daytime work follows the user's new requests; earlier active-heartbeat/cutoff
-entries below are historical records, not current scheduling instructions.
+## Active overnight authorization: October 21–22, 2026
+
+The user renewed overnight implementation at 21:42 PDT on October 21. Continue
+`FLEET_MODELS_PLAN.md`: qualify the active Sun/environment control repair, then
+integrate the five authored later vessels with coherent geometry, propulsion,
+equipment, crew and fleet behavior. Root owns all execution/testing; direct
+subagents may author code, without nested agents. Publish only passing, rendered,
+byte-verified checkpoints. The held woodland prototype stays separate.
+
+At **08:00 America/Los_Angeles on October 22**, start no new implementation;
+stabilize active work, record releases/checks/remaining tasks, and disable
+`waterworld-overnight-backlog`. Its local hourly heartbeat is active for this
+night. Notify on meaningful changes, failures, required input or morning completion.
+
+The October 20–21 overnight run and its old cutoff below are historical records.
+
+### Sun/environment controls checkpoint
+
+- Manual Sun elevation now spans −90°…90°; Sun azimuth, wind direction and swell
+  direction cover 0°…360°. Signed old links normalize to the same direction.
+- Sun controls live in **Sun, Moon and stars**. Moving either explicitly selects
+  Manual Sun. Astronomy retains its actual date/location Moon and stars.
+- Manual direct sunlight now obeys the planetary horizon, including cached ocean
+  light; twilight scattering remains separate. Solar-disc cloud sampling has a
+  finite basis at zenith/nadir.
+- Root's complete native Metal run passed **573/573**, zero skips, in
+  **315.616 seconds**. The new modular/Pages fixture checks full ranges, signed
+  links, spectrum updates, mode switching, finite poles and actual GPU
+  day→night→day recovery. The independent finite-disc oracle checks manual night
+  and ocean-cache parity. Publication receipt follows after rendered review.
+- Rendered review caught the native date field truncating its time. It now has
+  a full-width row. Follow-up native modular/Pages night/date-layout, offline
+  downloads, mobile loading and phone/tablet/desktop panel-reachability checks
+  passed after that CSS change. Visible Chrome shows the complete date/time
+  and Sun controls without console warnings/errors (`shots/full-sun-controls.png`).
 
 ## Published checkpoint: four vessels, independent fleets and night
 

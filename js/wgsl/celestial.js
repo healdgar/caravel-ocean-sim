@@ -83,7 +83,7 @@ fn causticSourceLight()->vec3f{return sunIlluminance()*sunVis[0]*step(.015,F.sun
 `;
 export const CELESTIAL_STAR_STUB=`fn celestialStarBackground(dir:vec3f)->vec3f{return vec3f(0);}`;
 export function withCelestialFrame(source){
-  if(source.includes(CELESTIAL_SOLAR_STUB))source=source.replaceAll(CELESTIAL_SOLAR_STUB,`fn celestialSolarVisibility()->f32{if(F.celestial.x<.5){return 1.0;}return planetDiskVisibility(RG+F.atmo.y,F.sunDir.y,SUN_ANG_R);}`);
+  if(source.includes(CELESTIAL_SOLAR_STUB))source=source.replaceAll(CELESTIAL_SOLAR_STUB,`fn celestialSolarVisibility()->f32{return planetDiskVisibility(RG+F.atmo.y,F.sunDir.y,SUN_ANG_R);}`);
   if(source.includes(CELESTIAL_CAUSTIC_STUB))source=source.replaceAll(CELESTIAL_CAUSTIC_STUB,CELESTIAL_CAUSTIC_REAL);
   if(source.includes(CELESTIAL_STAR_STUB)){
     const binding=/\bvar\s+dst\s*:\s*texture_storage_2d_array/.test(source)?6:5;

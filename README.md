@@ -241,7 +241,14 @@ not an additional shadow-map light. There are no lightning damage mechanics.
 Thunder follows the distance delay; setting **Lightning & thunder** to zero
 disables flashes. The weather clock never fast-forwards ship physics.
 
-## Astronomical sky (development)
+## Sun controls and astronomical sky
+
+For night, open **Sea settings → Sun, Moon and stars**. In **Manual Sun**, drag
+**Sun elevation** below 0° for sunset/twilight and below −18° for full night.
+Choose **Astronomical sky** and a nighttime date/time at the selected location
+for the actual Moon, stars and moonlight. Editing a Sun slider selects Manual Sun.
+Sun elevation spans −90°…90°; Sun azimuth, wind and swell direction span 0°…360°.
+Signed azimuths in older links retain their equivalent direction.
 
 Open **Sea settings → Sun, Moon and stars → Astronomical sky**. Set an explicit
 date/time, latitude and east-positive longitude; the default observer is Saba.

@@ -59,7 +59,8 @@ test('actual528B direct sunlight obeys planet/finite-disc horizon while twilight
         const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(directPipe);pass.setBindGroup(0,directGroup);pass.dispatchWorkgroups(1);pass.setPipeline(cachePipe);pass.setBindGroup(0,cacheGroup);pass.dispatchWorkgroups(1);pass.end();encoder.copyBufferToBuffer(answer,0,read,0,48);encoder.copyBufferToBuffer(cache,0,read,48,64);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);const values=Array.from(new Float32Array(read.getMappedRange()));read.unmap();return {name,mu:frameData[33],height:frameData[73],enabled,direct:values.slice(0,3),scattered:values.slice(4,7),moon:values.slice(8,11),cachedDirect:values.slice(16,19)};
       }
       const rows=[];
-      rows.push(await sample('deep-night',{mu:-.9}));rows.push(await sample('day',{mu:.5}));rows.push(await sample('manual-compatibility',{mu:-.9,enabled:0}));
+      rows.push(await sample('deep-night',{mu:-.9}));rows.push(await sample('day',{mu:.5}));
+      for(const elevation of [-90,-30,-6,0,30,90])rows.push(await sample('manual-'+elevation,{mu:Math.sin(elevation*Math.PI/180),enabled:0}));
       for(const height of [0,.01,5]){
         const horizon=-Math.sqrt(1-(6360/(6360+height))**2);
         for(const d of [-1.2,-1,-.8,-.5,-.1,-.0001,0,.0001,.1,.5,.8,1,1.2])rows.push(await sample('cap-'+height+'-'+d,{mu:horizon+d*.004675,height}));
@@ -74,9 +75,14 @@ test('actual528B direct sunlight obeys planet/finite-disc horizon while twilight
     });
     assert.deepEqual(result.errors,[]);assert.equal(result.frameBytes,528);
     const rgb=[14,3.5,.875],black=values=>values.every(value=>value===0),close=(a,b,tolerance,label)=>assert.ok(Math.abs(a-b)<=tolerance,`${label}: ${a} vs ${b}`);
-    const deep=result.rows.find(row=>row.name==='deep-night'),day=result.rows.find(row=>row.name==='day'),manual=result.rows.find(row=>row.name==='manual-compatibility');
+    const deep=result.rows.find(row=>row.name==='deep-night'),day=result.rows.find(row=>row.name==='day');
     assert.ok(black(deep.direct)&&black(deep.cachedDirect),'deep-below-horizon Sun supplies no direct solar light to materials or cached ocean foam');
-    for(let k=0;k<3;k++){close(day.direct[k],rgb[k],2e-6,'above-horizon14×transmittance');close(day.cachedDirect[k],rgb[k],2e-6,'day cache parity');close(manual.direct[k],rgb[k],2e-6,'legacy manual light unchanged');}
+    for(let k=0;k<3;k++){close(day.direct[k],rgb[k],2e-6,'above-horizon14×transmittance');close(day.cachedDirect[k],rgb[k],2e-6,'day cache parity');}
+    for(const row of result.rows.filter(row=>row.name.startsWith('manual-'))){
+      const expected=solarDiscVisibleFraction(row.mu,row.height);
+      for(let k=0;k<3;k++){close(row.direct[k]/rgb[k],expected,.012,'manual solar cap '+row.name);close(row.cachedDirect[k],row.direct[k],3e-6,'manual cache parity');}
+      if(row.mu<-.02)assert.ok(black(row.direct)&&black(row.cachedDirect),'manual night has no direct Sun');
+    }
     // A synthetic nonzero sky LUT witnesses independent scattered twilight:
     // blocking the solar disc must not multiply skyAtmo by its direct-light cap.
     assert.ok(deep.scattered.every(value=>value>.4),'twilight scattering survives direct-Sun rejection');

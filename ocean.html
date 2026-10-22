@@ -75,9 +75,11 @@
   #panel label { display:grid; grid-template-columns:minmax(0,1fr) 104px 30px; gap:5px; align-items:center; min-height:36px; }
   #panel input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
   #panel output { text-align:right; font-size:11px; color:var(--muted); }
+  #panel #astronomy-controls .astronomy-date-control { grid-template-columns:minmax(0,1fr); gap:6px; padding:6px 0; }
+  #astronomy-date { width:100%; min-width:0; }
   #panel .panel-body > button { margin:4px 3px 4px 0; }
   #boat-panel label { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; margin:2px 0; }
-  input[type=number],input[type=url],select { box-sizing:border-box; color:var(--ink); background:#1c2e39; border:1px solid #6c7d86; border-radius:5px; padding:6px; font:inherit; min-height:36px; }
+  input[type=number],input[type=url],input[type=datetime-local],select { box-sizing:border-box; color:var(--ink); background:#1c2e39; border:1px solid #6c7d86; border-radius:5px; padding:6px; font:inherit; min-height:36px; }
   #boat-panel input[type=number] { width:82px; }
   input[type=checkbox] { width:20px; height:20px; accent-color:var(--gold); }
   #sail-controls input[type=range] { width:105px; min-width:0; accent-color:var(--gold); }
@@ -148,7 +150,7 @@
     .panel-body { padding:8px 12px 12px; }
     #panel label { min-height:40px; grid-template-columns:minmax(0,1fr) minmax(75px,34%) 30px; }
     #panel input[type=range],#sail-controls input[type=range] { height:40px; }
-    input[type=number],input[type=url],select { font-size:16px; min-height:40px; }
+    input[type=number],input[type=url],input[type=datetime-local],select { font-size:16px; min-height:40px; }
     #boat-panel label { min-height:40px; }
     #boat-panel input[type=number] { width:90px; }
     .panel-body button,summary { min-height:44px; }
@@ -4273,7 +4275,7 @@ fn causticSourceLight()->vec3f{return sunIlluminance()*sunVis[0]*step(.015,F.sun
 `;
 const CELESTIAL_STAR_STUB=`fn celestialStarBackground(dir:vec3f)->vec3f{return vec3f(0);}`;
 function withCelestialFrame(source){
-  if(source.includes(CELESTIAL_SOLAR_STUB))source=source.replaceAll(CELESTIAL_SOLAR_STUB,`fn celestialSolarVisibility()->f32{if(F.celestial.x<.5){return 1.0;}return planetDiskVisibility(RG+F.atmo.y,F.sunDir.y,SUN_ANG_R);}`);
+  if(source.includes(CELESTIAL_SOLAR_STUB))source=source.replaceAll(CELESTIAL_SOLAR_STUB,`fn celestialSolarVisibility()->f32{return planetDiskVisibility(RG+F.atmo.y,F.sunDir.y,SUN_ANG_R);}`);
   if(source.includes(CELESTIAL_CAUSTIC_STUB))source=source.replaceAll(CELESTIAL_CAUSTIC_STUB,CELESTIAL_CAUSTIC_REAL);
   if(source.includes(CELESTIAL_STAR_STUB)){
     const binding=/\bvar\s+dst\s*:\s*texture_storage_2d_array/.test(source)?6:5;
@@ -6525,7 +6527,8 @@ var<workgroup> part: array<f32, 8>;
 @compute @workgroup_size(8)
 fn main(@builtin(local_invocation_index) k: u32) {
   let sd = F.sunDir.xyz;
-  let tx = normalize(cross(sd, vec3f(0.0, 1.0, 0.0)));
+  let axis = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(sd.y) > .99);
+  let tx = normalize(cross(sd, axis));
   let ty = cross(tx, sd);
   var t = 1.0;
   if (k < 7u) {
@@ -19374,6 +19377,9 @@ async function main() {
   const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
   if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],LANDFALL_SEA[LAND_STAGE]);
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
+  // Old signed-azimuth links retain their direction on the full-circle controls.
+  for(const key of ['windDir','swellDir','sunAzim'])if(P[key]<0||P[key]>360)P[key]=((P[key]%360)+360)%360;
+  P.sunElev=Math.max(-90,Math.min(90,P.sunElev));
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
   const seaHeader=document.createElement('div');seaHeader.className='panel-header';
@@ -19386,11 +19392,12 @@ async function main() {
   const skyMode=document.createElement('select');skyMode.id='sky-mode';skyMode.innerHTML='<option value="manual">Manual Sun</option><option value="astronomy">Astronomical sky</option>';skyMode.value=astronomy.mode;
   const skyDate=document.createElement('input');skyDate.id='astronomy-date';skyDate.type='datetime-local';skyDate.step='1';skyDate.value=astronomy.state.date.slice(0,19);
   const astroInputs={};
-  function astroControl(text,element){const label=document.createElement('label');label.textContent=text;label.append(element);astronomyControls.append(label);}
+  function astroControl(text,element){const label=document.createElement('label');label.textContent=text;if(element===skyDate)label.className='astronomy-date-control';label.append(element);astronomyControls.append(label);}
   astroControl('Sky mode',skyMode);astroControl('Date / time (UT-like, proleptic Gregorian)',skyDate);
   for(const [key,label,min,max,value] of [['latitude','Latitude (north +)',-90,90,astronomy.anchor.latitude],['longitude','Longitude (east +)',-180,180,astronomy.anchor.longitude],['rate','Sky clock rate',0,3600,astronomy.rate]]){const input=document.createElement('input');input.type='number';input.min=min;input.max=max;input.step=key==='rate'?'1':'.001';input.value=value;input.id='astronomy-'+key;astroInputs[key]=input;astroControl(label,input);}
   for(const [key,label] of [['stars','Stars'],['constellations','Constellation guide lines']]){const input=document.createElement('input');input.type='checkbox';input.checked=astronomy[key];input.id='astronomy-'+key;astroInputs[key]=input;astroControl(label,input);}
   const astroStatus=document.createElement('p');astroStatus.id='astronomy-status';astronomyControls.append(astroStatus);
+  const skyHelp=document.createElement('p');skyHelp.textContent='Sun elevation: 0° is the horizon; negative angles move below it, reaching full night by −18°. Astronomical sky supplies the Moon and stars from the date and location. Moving a Sun slider selects Manual Sun.';astronomyControls.append(skyHelp);
   function applyAstronomy(values){try{astronomy.set(values,boat);envFull=true;astroStatus.textContent=astronomy.mode==='astronomy'?'Real Sun/Moon directions; sky clock is separate from wave simulation.':'Manual Sun controls active.';}catch(error){astroStatus.textContent=error.message;}}
   skyMode.onchange=()=>applyAstronomy({mode:skyMode.value});skyDate.onchange=()=>applyAstronomy({date:skyDate.value+'Z'});
   astroInputs.latitude.onchange=astroInputs.longitude.onchange=()=>applyAstronomy({latitude:astroInputs.latitude.value,longitude:astroInputs.longitude.value});
@@ -19463,8 +19470,8 @@ async function main() {
     ['turbidity', 'Water turbidity', 0.2, 3, 0.01, ''],
     ['foam', 'Foam', 0, 3, 0.01, ''],
     ['spindrift', 'Crest spray', 0, 2, 0.05, ''],
-    ['sunElev', 'Sun elevation (deg)', -2, 60, 0.1, ''],
-    ['sunAzim', 'Sun azimuth (deg)', -180, 180, 0.5, ''],
+    ['sunElev', 'Sun elevation (deg)', -90, 90, 0.1, ''],
+    ['sunAzim', 'Sun azimuth (deg)', 0, 360, 0.5, ''],
     ['haze', 'Haze', 0.5, 15, 0.1, ''],
     ['clouds', 'Cloud coverage', 0, 1, 0.01, ''],
     ['cloudBase', 'Cloud base (km)', 0.3, 5, 0.1, ''],
@@ -19485,11 +19492,12 @@ async function main() {
     seaSliders.set(key, { input: inp, output: val });
     inp.addEventListener('input', () => {
       P[key] = Number(inp.value); val.textContent = inp.value;
+      if(key==='sunElev'||key==='sunAzim'){if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});skyMode.value='manual';}
       if (kind === 'spec') needSpectrum = true;
       envFull = true;
     });
     row.append(name, inp, val);
-    seaBody.appendChild(row);
+    (key==='sunElev'||key==='sunAzim'?astronomyControls:seaBody).appendChild(row);
   }
   const dolphinControls=createDolphinControls({parent:seaBody,encounter:dolphins.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});

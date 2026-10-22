@@ -393,7 +393,8 @@ var<workgroup> part: array<f32, 8>;
 @compute @workgroup_size(8)
 fn main(@builtin(local_invocation_index) k: u32) {
   let sd = F.sunDir.xyz;
-  let tx = normalize(cross(sd, vec3f(0.0, 1.0, 0.0)));
+  let axis = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(sd.y) > .99);
+  let tx = normalize(cross(sd, axis));
   let ty = cross(tx, sd);
   var t = 1.0;
   if (k < 7u) {

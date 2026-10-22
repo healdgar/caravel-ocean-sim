@@ -75,9 +75,11 @@
   #panel label { display:grid; grid-template-columns:minmax(0,1fr) 104px 30px; gap:5px; align-items:center; min-height:36px; }
   #panel input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
   #panel output { text-align:right; font-size:11px; color:var(--muted); }
+  #panel #astronomy-controls .astronomy-date-control { grid-template-columns:minmax(0,1fr); gap:6px; padding:6px 0; }
+  #astronomy-date { width:100%; min-width:0; }
   #panel .panel-body > button { margin:4px 3px 4px 0; }
   #boat-panel label { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; margin:2px 0; }
-  input[type=number],input[type=url],select { box-sizing:border-box; color:var(--ink); background:#1c2e39; border:1px solid #6c7d86; border-radius:5px; padding:6px; font:inherit; min-height:36px; }
+  input[type=number],input[type=url],input[type=datetime-local],select { box-sizing:border-box; color:var(--ink); background:#1c2e39; border:1px solid #6c7d86; border-radius:5px; padding:6px; font:inherit; min-height:36px; }
   #boat-panel input[type=number] { width:82px; }
   input[type=checkbox] { width:20px; height:20px; accent-color:var(--gold); }
   #sail-controls input[type=range] { width:105px; min-width:0; accent-color:var(--gold); }
@@ -148,7 +150,7 @@
     .panel-body { padding:8px 12px 12px; }
     #panel label { min-height:40px; grid-template-columns:minmax(0,1fr) minmax(75px,34%) 30px; }
     #panel input[type=range],#sail-controls input[type=range] { height:40px; }
-    input[type=number],input[type=url],select { font-size:16px; min-height:40px; }
+    input[type=number],input[type=url],input[type=datetime-local],select { font-size:16px; min-height:40px; }
     #boat-panel label { min-height:40px; }
     #boat-panel input[type=number] { width:90px; }
     .panel-body button,summary { min-height:44px; }
