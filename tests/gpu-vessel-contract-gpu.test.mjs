@@ -18,12 +18,12 @@ before(async()=>{
 after(async()=>{await contractBrowser?.close();if(contractServer)await new Promise(resolve=>contractServer.close(resolve));});
 
 function instrumentVesselGPUContract(){
-  const r=window.vesselGPUContract={callback:null,now:null,device:null,errors:[],groups:new WeakMap(),pass:new WeakMap(),draws:[],dispatches:[],writes:[]};
+  const r=window.vesselGPUContract={callback:null,now:null,device:null,errors:[],groups:new WeakMap(),allGroups:[],pass:new WeakMap(),draws:[],dispatches:[],writes:[]};
   window.requestAnimationFrame=f=>{r.callback=f;return 1;};
   const request=GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice=async function(...a){const d=await request.apply(this,a);r.device=d;d.addEventListener('uncapturederror',e=>r.errors.push(e.error.message));return d;};
   const create=GPUDevice.prototype.createBindGroup;
-  GPUDevice.prototype.createBindGroup=function(d){const g=create.call(this,d);r.groups.set(g,d.entries);return g;};
+  GPUDevice.prototype.createBindGroup=function(d){const g=create.call(this,d);r.groups.set(g,d.entries);r.allGroups.push(g);return g;};
   const write=GPUQueue.prototype.writeBuffer;
   GPUQueue.prototype.writeBuffer=function(buffer,offset,data,start=0,count){const bytes=ArrayBuffer.isView(data)?data.BYTES_PER_ELEMENT??1:1;r.writes.push({buffer,offset,bytes:count===undefined?data.byteLength-start*bytes:count*bytes});return write.call(this,buffer,offset,data,start,count);};
   for(const prototype of [GPUComputePassEncoder.prototype,GPURenderPassEncoder.prototype]){
@@ -44,18 +44,31 @@ async function contractFrame(page,mutation=null){
     const r=vesselGPUContract,ships=oceanFleet.vessels,lead=ships[0],callback=r.callback;
     if(typeof callback!=='function')throw Error('No actual production RAF callback');
     r.callback=null;r.draws=[];r.dispatches=[];r.writes=[];let undo=()=>{};
+    const groupBuffers=g=>(r.groups.get(g)??[]).flatMap(e=>e.resource?.buffer?[e.resource.buffer]:[]);
     if(mutation==='disabled-pipeline'){
       const encode=lead.pose.encode;lead.pose.encode=()=>false;undo=()=>{lead.pose.encode=encode;};
+    }else if(mutation==='recoil-only'){
+      const recoil=lead.pose.assets.recoilAssets;
+      if(!recoil?.recordCount)throw Error('Recoil-only mutant requires a gun-equipped lead vessel');
+      const group=r.allGroups.find(g=>{const buffers=groupBuffers(g);return buffers.includes(lead.pose.buffer)&&buffers.includes(recoil.records);});
+      if(!group)throw Error('Recoil-only mutant could not find the actual recoil bind group');
+      const encode=lead.pose.encode;
+      lead.pose.encode=(pass,enabled=true)=>{
+        if(!enabled)return false;
+        pass.setPipeline(recoil.pipeline);pass.setBindGroup(0,group);
+        pass.dispatchWorkgroups(Math.ceil(recoil.recordCount/64));return true;
+      };
+      undo=()=>{lead.pose.encode=encode;};
     }else if(mutation==='cpu-fallback'){
       const asset=lead.asset;lead.asset={...asset,pose(){return true;}};undo=()=>{lead.asset=asset;};
     }else if(mutation==='full-mesh-upload')r.device.queue.writeBuffer(lead.vertexBuffer,0,lead.mesh);
     r.now=(r.now??performance.now())+50;callback(r.now);await r.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));
-    const groupBuffers=g=>(r.groups.get(g)??[]).flatMap(e=>e.resource?.buffer?[e.resource.buffer]:[]);
     const rows=ships.map(v=>{
       const posed=v.pose?.buffer,has=(d,b)=>d.groups.some(g=>groupBuffers(g).includes(b)),consumes=d=>d.vertices?.[1]===posed&&d.count>0;
       let changed=false;for(let i=0;i<v.mesh.length;i++)if(v.mesh[i]!==v.asset.vertices[i]){changed=true;break;}
       return {id:v.id,model:v.asset.model.id,required:v.asset.gpuPose===true&&v.render.gpuPose===true,cpuPose:typeof v.asset.pose==='function',pose:!!posed,
-        dispatches:posed?r.dispatches.filter(d=>has(d,posed)&&!has(d,v.wetness.state)).length:0,
+        dispatches:posed?r.dispatches.filter(d=>d.pipeline===v.pose.assets.pipeline&&has(d,posed)).length:0,
+        recoilDispatches:posed?r.dispatches.filter(d=>d.pipeline===v.pose.assets.recoilAssets?.pipeline&&has(d,posed)).length:0,
         main:r.draws.filter(d=>d.pipeline===v.render.pipeline&&consumes(d)).length,
         submerged:r.draws.filter(d=>d.pipeline===v.render.submerged.pipeline&&consumes(d)).length,
         shadow:r.draws.filter(d=>/shadows/.test(d.pipeline?.label??'')&&consumes(d)).length,shadowExpected:true,
@@ -80,8 +93,13 @@ for(const path of ['/', '/docs/index.html'])test(`${path}: every registered vess
       assertGPUVesselFrame(await contractFrame(page),models);assert.deepEqual(errors,[]);
       // These are actual runtime mutations followed by actual production frames,
       // not invented JSON flags. The same qualification must reject each.
-      for(const mutant of ['disabled-pipeline','cpu-fallback','full-mesh-upload']){
-        const bad=await contractFrame(page,mutant);assert.throws(()=>assertGPUVesselFrame(bad,models),undefined,mutant+' must fail');
+      for(const mutant of ['disabled-pipeline','recoil-only','cpu-fallback','full-mesh-upload']){
+        const bad=await contractFrame(page,mutant);
+        if(mutant==='recoil-only'){
+          assert.equal(bad.rows[0].dispatches,0,'recoil dispatch cannot qualify as canonical pose');
+          assert.ok(bad.rows[0].recoilDispatches>0,'mutant must dispatch the actual recoil pipeline');
+        }
+        assert.throws(()=>assertGPUVesselFrame(bad,models),undefined,mutant+' must fail');
         assertGPUVesselFrame(await contractFrame(page),models);
       }
     }finally{await page.close();}
