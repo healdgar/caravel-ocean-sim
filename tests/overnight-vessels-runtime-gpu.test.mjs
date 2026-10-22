@@ -182,3 +182,76 @@ test('mixed real fleet keeps rowing water, crew, geometry and command state inde
     await settle(page,6);const recovered=await snapshot(page);assert.ok(recovered.rows.filter(v=>v.rowingWater).every(v=>v.waterState&&v.waterSample&&v.boatWaterAlias));assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
+
+test('all five later vessels retain unobstructed44px helm and sticky settings on compact portrait and landscape',{timeout:600000},async t=>{
+  const sizes=[{width:320,height:360},{width:402,height:666},{width:844,height:390}],receipts=[];
+  for(const id of Object.keys(companies)){
+    const {page,errors}=await openRuntime('/docs/index.html',{ship:id,boatRudder:'0',headingHud:'1',speedHud:'1',windHud:'1'});
+    const reach=async(selector,context)=>{
+      assert.equal(await page.locator(selector).isVisible(),true,context+' visible '+selector);
+      const box=await page.locator(selector).evaluate(el=>{
+        const r=el.getBoundingClientRect(),points=[[.5,.5],[.12,.12],[.88,.12],[.12,.88],[.88,.88]],hits=points.map(([x,y])=>{const hit=document.elementFromPoint(r.x+r.width*x,r.y+r.height*y);return {clear:hit===el||el.contains(hit),obstruction:hit?.outerHTML.slice(0,160)};});
+        return {x:r.x,y:r.y,width:r.width,height:r.height,viewWidth:innerWidth,viewHeight:innerHeight,hits};
+      });
+      assert.ok(box.width>=44-.01&&box.height>=44-.01,context+' 44px touch target '+selector+' '+JSON.stringify(box));
+      assert.ok(box.x>=-.01&&box.y>=-.01&&box.x+box.width<=box.viewWidth+.01&&box.y+box.height<=box.viewHeight+.01,context+' target onscreen '+selector+' '+JSON.stringify(box));
+      assert.ok(box.hits.every(hit=>hit.clear),context+' target is hit-tested across its face '+selector+' '+JSON.stringify(box));return box;
+    };
+    const hud=async context=>{
+      const state=await page.evaluate(()=>{
+        const visible=el=>el&&!el.hidden&&getComputedStyle(el).display!=='none'&&getComputedStyle(el).visibility!=='hidden'&&el.getBoundingClientRect().width>0;
+        const blockers=['#camera-dock','#helm-controls','#boat-panel'].map(selector=>document.querySelector(selector)).filter(visible).map(el=>({id:el.id,rect:el.getBoundingClientRect()}));
+        return ['#sailing-instruments','#sailing-heading','#sailing-knots','#sailing-wind-knots','#sailing-wind-direction'].map(selector=>{
+          const el=document.querySelector(selector),r=el.getBoundingClientRect();return {selector,visible:visible(el),x:r.x,y:r.y,width:r.width,height:r.height,
+            onscreen:r.x>=-.01&&r.y>=-.01&&r.right<=innerWidth+.01&&r.bottom<=innerHeight+.01,
+            blockers:blockers.filter(b=>r.left<b.rect.right-.1&&r.right>b.rect.left+.1&&r.top<b.rect.bottom-.1&&r.bottom>b.rect.top+.1).map(b=>b.id)};
+        });
+      });
+      for(const field of state){assert.ok(field.visible&&field.onscreen,context+' readable default HUD '+JSON.stringify(field));assert.deepEqual(field.blockers,[],context+' HUD is not covered '+JSON.stringify(field));}
+    };
+    try{
+      for(const size of sizes){
+        const context=id+' '+size.width+'x'+size.height;await page.setViewportSize(size);
+        await page.waitForFunction(()=>Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-height'))-innerHeight)<1,undefined,{polling:20,timeout:3000});
+        const drawn=await settle(page,2);assert.ok(drawn.draws[id+' vessel']?.indices>3000,context+' actual native vessel GPU frame');
+        assert.equal(await page.evaluate(()=>oceanStartup.state),'ready');assert.equal(await page.locator('#boat-panel').isVisible(),false);
+        await hud(context);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,context+' no page horizontal overflow');
+        for(const selector of ['#rudder-port','#rudder-centre','#rudder-starboard'])await reach(selector,context);
+        await page.locator('#rudder-port').click();assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rudderTarget),-5,context+' actual port command');
+        await page.locator('#rudder-centre').click();assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rudderTarget),0);
+        await page.locator('#rudder-starboard').click();assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rudderTarget),5,context+' actual starboard command');
+        await page.locator('#rudder-centre').click();assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rudderTarget),0);
+        const hasSails=id!=='taino-canoe',hasOars=['oseberg','lusoria','taino-canoe'].includes(id);
+        assert.equal(await page.locator('#helm-controls .helm-sails').isVisible(),hasSails,context+' only actual canvas controls');
+        assert.equal(await page.locator('#helm-controls .helm-rowing').count(),Number(hasOars),context+' only actual human propulsors');
+        if(hasSails)for(const value of ['0','0.5','1']){
+          const selector='#helm-controls [data-sail="'+value+'"]';await reach(selector,context);await page.locator(selector).click();
+          const requested=await page.evaluate(()=>{const v=oceanFleet.vessels[0],keys={fore:'sailFore',main:'sailMain',mizzen:'sailMizzen'};return [...new Set(v.asset.model.rig.sails.map(s=>s.controlGroup))].map(group=>v.boat[keys[group]]);});
+          assert.ok(requested.length>0&&requested.every(n=>n===Number(value)),context+' actual canvas request '+value);assert.equal(await page.locator(selector).getAttribute('aria-pressed'),'true');
+        }
+        if(hasOars)for(const value of ['0.5','1','0']){
+          const selector='#helm-controls [data-rowing="'+value+'"]';await reach(selector,context);await page.locator(selector).click();
+          assert.equal(await page.evaluate(()=>oceanFleet.vessels[0].boat.rowingEffort),Number(value),context+' actual rowing request '+value);assert.equal(await page.locator(selector).getAttribute('aria-pressed'),'true');
+        }
+        await reach('#camera-dock [aria-label="Ship settings"]',context);await page.getByRole('button',{name:'Ship settings',exact:true}).click();
+        assert.equal(await page.locator('#boat-panel').isVisible(),true);assert.equal(await page.getByRole('button',{name:'Ship settings',exact:true}).getAttribute('aria-expanded'),'true');await hud(context+' settings open');
+        const close='#boat-panel [aria-label="Hide ship settings"]',before=await reach(close,context),body=page.locator('#boat-panel .panel-body'),box=await body.boundingBox();
+        assert.ok(box&&box.height>0,context+' usable settings scroll viewport');
+        const metrics=await body.evaluate(el=>({height:el.clientHeight,scrollHeight:el.scrollHeight,width:el.clientWidth,scrollWidth:el.scrollWidth}));
+        assert.ok(metrics.scrollWidth<=metrics.width,context+' settings body has no horizontal overflow '+JSON.stringify(metrics));
+        assert.ok(metrics.scrollHeight>metrics.height,context+' fixture exercises a real overflowing settings body');
+        // Wheel input exercises real overflow scrolling; no scrollTop, hidden,
+        // style, open-state or production command properties are forced.
+        await page.mouse.move(box.x+4,box.y+box.height/2);await page.mouse.wheel(0,metrics.scrollHeight+size.height);
+        await page.waitForFunction(()=>{const el=document.querySelector('#boat-panel .panel-body');return el.scrollTop>0&&el.scrollTop+el.clientHeight>=el.scrollHeight-2;},undefined,{polling:20,timeout:5000});
+        const after=await reach(close,context+' after settings scroll');assert.ok(Math.abs(after.y-before.y)<1&&Math.abs(after.x-before.x)<1,context+' Hide remains fixed in its actual header');
+        assert.equal(await body.evaluate(el=>el.scrollWidth<=el.clientWidth),true);await page.getByRole('button',{name:'Hide ship settings',exact:true}).click();
+        assert.equal(await page.locator('#boat-panel').isVisible(),false);assert.equal(await page.locator('#helm-controls').isVisible(),true);await hud(context+' settings closed');
+        const result=await frame(page);assert.deepEqual(result.errors,[]);assert.equal(result.lost,null);receipts.push(context);
+      }
+      assert.deepEqual(errors,[]);
+    }finally{await page.close();}
+  }
+  assert.equal(receipts.length,15);t.diagnostic('Actual native first-frame UI cases: '+receipts.join(', '));
+});
