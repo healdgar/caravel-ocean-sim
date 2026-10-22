@@ -195,7 +195,7 @@ function laterSailCloudCrew(){
 }
 
 const laterSailCloud={
-  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:5,status:'planned',family:'extreme-clipper',
+  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:6,status:'planned',family:'extreme-clipper',
   frame:laterSailCloudFrame,runtime:laterSailCloudRuntime,
   interpretation:'1851 departure interpretation. Deck length and 41-foot beam select the contemporary report; all hull offsets and loaded draft are authored, not recovered McKay lines.',
   readiness:{backend:'surfaces-v1',requires:['independent loft/freeboard calibration','per-surface spars and cloth/rope clearance','wheel and deckhouse routes','loaded inertia and working crew','rendered and fleet checks']},
@@ -224,7 +224,7 @@ const laterSailCloud={
     rudder:{kind:'sternpost',outline:[[-.20,5.48],[-.82,5.48],[-.79,5.86],[-.18,5.76]],thickness:.035},provenance:'Authored steering attachments pending period plan.'},
   // Authored aft chainplate spreads on the actual hull. Forward chainplates
   // immediately beside the mast bisect the windward course at working brace.
-  masts:[{id:'fore',controlGroup:'fore',z:-3.38,height:8.45,radius:.128,rake:.76,chainplateZ:[-1.80,-1.55,-1.30,-1.05]},
+  masts:[{id:'fore',controlGroup:'fore',z:-3.38,height:8.45,radius:.128,rake:.76,chainplateZ:[-1.80,-1.72,-1.64,-1.56]},
     {id:'main',controlGroup:'main',z:-.18,height:9.10,radius:.132,rake:.83,chainplateZ:[1.45,1.70,1.95,2.20]},
     {id:'mizzen',controlGroup:'mizzen',z:3.38,height:7.45,radius:.095,rake:.65,chainplateZ:[4.85,5.03,5.21,5.39]}],
   surfaces:[],
@@ -271,9 +271,13 @@ laterSailCloud.surfaces.push(
   laterSailTriangle(21,'main-royal-staysail',1,'main','headsail',[[0,5.6,-2.8],[0,7.7,.52],[0,5.7,.9]]),
   laterSailTriangle(22,'mizzen-topmast-staysail',2,'mizzen','headsail',[[0,1.25,.25],[0,4.8,3.85],[0,1.3,4.35]]),
   laterSailTriangle(23,'mizzen-topgallant-staysail',2,'mizzen','headsail',[[0,3.8,.3],[0,5.7,3.95],[0,3.85,4.3]]),
-  laterSailGaff(24,'main-spencer',1,'main',[[0,3.10,.10],[0,3.45,1.30],[0,1.15,1.50],[0,1.15,-.10]],[0,1.15,-.10],{spars:[{id:'main-spencer-gaff',kind:'gaff',a:[0,3.10,.10],b:[0,3.45,1.30],radius:.022}]}),
+  // The boom/gaff lane inside aft shrouds is distinct from the square yards'
+  // brace arc. These authored operating stops keep real canvas and spars in
+  // that lane; they are not claimed period trim angles. Independent optimal
+  // sheet handling remains separate from the three grouped sail controls.
+  laterSailGaff(24,'main-spencer',1,'main',[[0,3.10,.10],[0,3.45,1.30],[0,1.15,1.50],[0,1.15,-.10]],[0,1.15,-.10],{braceLimit:.35,workingTrim:{kind:'shroud-limited-gaff',radians:.35,interpretation:'Authored fore-and-aft sheet stop, independent of square-yard brace demand.'},spars:[{id:'main-spencer-gaff',kind:'gaff',a:[0,3.10,.10],b:[0,3.45,1.30],radius:.022}]}),
   laterSailGaff(25,'mizzen-spanker',2,'mizzen',[[0,3.25,3.65],[0,4.0,5.65],[0,1.15,6.22],[0,1.15,3.30]],[0,1.15,3.30],
-    {spars:[{id:'spanker-boom',kind:'boom',a:[0,1.15,3.30],b:[0,1.15,6.22],radius:.035},{id:'spanker-gaff',kind:'gaff',a:[0,3.25,3.65],b:[0,4.0,5.65],radius:.026}]})
+    {braceLimit:.15,workingTrim:{kind:'shroud-limited-gaff',radians:.15,interpretation:'Authored sheet stop includes the partly gathered sail envelope within mizzen shrouds.'},spars:[{id:'spanker-boom',kind:'boom',a:[0,1.15,3.30],b:[0,1.15,6.22],radius:.035},{id:'spanker-gaff',kind:'gaff',a:[0,3.25,3.65],b:[0,4.0,5.65],radius:.026}]})
 );
 laterSailCloud.surfaces=laterSailCloudWorkingRig(laterSailCloud);
 
