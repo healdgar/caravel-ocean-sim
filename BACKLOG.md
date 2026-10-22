@@ -69,8 +69,15 @@ public runtime remains `7c0b527` below.
   fell substantially; a proposed UV cache was reverted after paired native
   measurements showed no improvement. Flying Cloud remains CPU-heavy; these
   receipts do not establish 60 FPS or physical-iPhone performance.
-- The final serialized combined native run is in progress. Focused receipts are
-  **not** full combined-source clearance; no new release has been made yet.
+- The final serialized combined native Metal suite passes **687/687**, zero
+  skips/cancellations, in **370.783 seconds**. It includes modular/Pages startup,
+  all-nine allocation and mutable-state isolation, actual rowing water/thrust,
+  crew work/route clearance, original-four hydro parity, strict rig separation,
+  packaged/offline/mobile and rendering regressions. Visible Chrome review of
+  all five new models and the mixed nine-vessel scene completed; captured scenes
+  reported no JavaScript/shader/device errors. A navigation timeout after several
+  sequential scene reloads recovered in a fresh review tab without app changes.
+  This checkpoint is prepared for publication; deployed bytes are not yet verified.
 - Remaining scope includes whole-rig running-line/spar clearance and calibrated
   historical performance. Blade forces currently react to actual ocean motion;
   individual blade entry/exit does not yet emit its own surface-wave disturbance.
