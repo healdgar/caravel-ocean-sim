@@ -109,7 +109,8 @@ test('seated oar torso follows the loom toward catch and finish instead of leani
     for(const phase of [.08,.40]){
       const pose=rowingStationPose(b,0,{phase}),handZ=(pose.hands[0][2]+pose.hands[1][2])*.5;
       assert.equal(Math.sign(pose.body.lean),Math.sign(handZ-pose.seat[2]),'yaw-zero oar torso leans toward its actual fore/aft hand target');
-      assert.ok(Math.abs(pose.body.lean)<=.16,'sign correction retains the authored torso range');
+      assert.ok(Math.abs(pose.body.lean)<=proceduralDesign(id).propulsion.torsoLeanRadians,'catch/finish retain the authored torso range');
+      assert.ok(proceduralDesign(id).propulsion.torsoLeanRadians<=Math.PI/6,'oar torso range remains within a normal thirty-degree lean');
     }
   }
 });
