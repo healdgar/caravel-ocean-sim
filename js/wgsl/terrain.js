@@ -63,16 +63,43 @@ fn landNearRockImage(p:vec2f,dx:vec3f,dy:vec3f)->vec4f {
   let sample=textureSampleLevel(nearAlbedo,landSampler,uv,max(lod,0.0));
   return vec4f(pow(sample.rgb,vec3f(2.2)),landNearImageConfidence(uv,sample.a));
 }
+fn landNearFillMissing(selected:vec4f,seed:vec4f)->vec4f {
+  // Keep colour and confidence associated until the final coarse fallback.
+  // Mixing coarse RGB first would retain photographed sea even after a fully
+  // qualified dry seed is found for the missing portion.
+  let added=(1.0-selected.a)*seed.a;let confidence=selected.a+added;
+  return vec4f((selected.rgb*selected.a+seed.rgb*added)/max(confidence,.0001),confidence);
+}
+fn landNearDryFallback(p:vec2f,dx:vec3f,dy:vec3f)->vec4f {
+  // Only invalid raised pixels reach this bounded search. Flat retained coarse
+  // cells can have no useful horizontal normal; their dry source still exists
+  // nearby. Search nearest rings without inferring land from RGB hue.
+  var selected=vec4f(0);
+  for(var ring=0u;ring<3u;ring++){
+    let radius=8.0*f32(1u<<ring);
+    let a=landNearRockImage(p+vec2f(radius,0),dx,dy);
+    let b=landNearRockImage(p-vec2f(radius,0),dx,dy);
+    let c=landNearRockImage(p+vec2f(0,radius),dx,dy);
+    let d=landNearRockImage(p-vec2f(0,radius),dx,dy);
+    let total=a.a+b.a+c.a+d.a;
+    let confidence=max(max(a.a,b.a),max(c.a,d.a));
+    let colour=(a.rgb*a.a+b.rgb*b.a+c.rgb*c.a+d.rgb*d.a)/max(total,.0001);
+    selected=landNearFillMissing(selected,vec4f(colour,confidence));
+    if(selected.a>=.995){break;}
+  }
+  return selected;
+}
 fn landNearColour(coarse:vec3f,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,nx:vec3f,ny:vec3f,drySupport:f32)->vec3f {
   let uv=(world.xz-nearTerrain.domain.xy)/nearTerrain.domain.z+.5;
   let edge=min(min(uv.x,uv.y),min(1.0-uv.x,1.0-uv.y))*nearTerrain.domain.z;
-  if(edge<=0.0||drySupport<=.95){return coarse;}
+  let raised=world.y>0.0;
+  if(edge<=0.0||(!raised&&drySupport<=.95)){return coarse;}
   let fine=landNearImage(world.xz,dx.xz,dy.xz);
   // Keep the independent fine survey's actual diffuse colour. Normalizing it
   // against its 8m mip would reintroduce the coarse image's pale coastal strip.
-  var colour=mix(coarse,fine.rgb,fine.a);
+  var selected=fine;
   let steep=smoothstep(.25,.65,1.0-max(n.y,0.0));
-  if(steep>0.0){
+  if(steep>0.0||(raised&&fine.a<.995&&length(n.xz)>.001)){
     let horizontal=max(length(n.xz),.001);let outward=n.xz/horizontal;
     let inland=-outward;
     let inlandX=-(nx.xz-outward*dot(outward,nx.xz))/horizontal;
@@ -85,9 +112,14 @@ fn landNearColour(coarse:vec3f,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,nx:vec3f,ny
     let weights=vec3f(a.a,(1.0-a.a)*b.a,(1.0-a.a)*(1.0-b.a)*c.a);
     let confidence=dot(weights,vec3f(1));
     let rock=(a.rgb*weights.x+b.rgb*weights.y+c.rgb*weights.z)/max(confidence,.0001);
-    colour=mix(colour,rock,steep*confidence);
+    selected=landNearFillMissing(selected,vec4f(rock,confidence));
+    selected=vec4f(mix(selected.rgb,rock,steep*confidence),selected.a);
   }
-  return mix(coarse,colour,smoothstep(0.0,32.0,edge)*smoothstep(.95,.995,drySupport));
+  if(raised&&selected.a<.995){selected=landNearFillMissing(selected,landNearDryFallback(world.xz,dx,dy));}
+  // A coarse-retained raised vertex can have no fine height support. That is a
+  // geometry/provenance issue, not permission to skip available dry imagery.
+  let support=select(smoothstep(.95,.995,drySupport),1.0,raised);
+  return mix(coarse,selected.rgb,smoothstep(0.0,32.0,edge)*support*selected.a);
 }
 // Only neutral material coordinates rotate with the surface. The registered
 // image above remains geographic XZ, with a separately chosen dry cliff seed.

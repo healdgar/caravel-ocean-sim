@@ -46,8 +46,8 @@ struct Settings {world:vec4f,normal:vec4f,dx:vec4f,dy:vec4f,coarse:vec4f};
       const image=kind=>{
         const pixels=new Uint8Array(256*256*4);
         for(let z=0;z<256;z++)for(let x=0;x<256;x++){
-          const dry=kind==='rock'||kind==='stripes'||(kind==='coast'&&x<122);
-          const rgb=kind==='stripes'&&Math.floor(z/8)%2?[160,144,128,255]:[80,72,64,255];
+          const dry=kind==='rock'||kind==='stripes'||(kind==='coast'&&x<122)||(kind==='channel'&&(x<122||x>=136));
+          const rgb=kind==='channel'&&x>=136?[120,90,60,255]:kind==='stripes'&&Math.floor(z/8)%2?[160,144,128,255]:[80,72,64,255];
           pixels.set(dry?rgb:[245,250,255,0],(z*256+x)*4);
         }
         const texture=d.createTexture({size:[256,256],format:'rgba8unorm',mipLevelCount:9,usage:T.TEXTURE_BINDING|T.STORAGE_BINDING|T.COPY_DST});textures.push(texture);
@@ -60,10 +60,10 @@ struct Settings {world:vec4f,normal:vec4f,dx:vec4f,dy:vec4f,coarse:vec4f};
         }
         pass.end();d.queue.submit([encoder.finish()]);return texture;
       };
-      const rock=image('rock'),coast=image('coast'),water=image('water'),stripes=image('stripes');
+      const rock=image('rock'),coast=image('coast'),water=image('water'),stripes=image('stripes'),channel=image('channel');
       const target=d.createTexture({size:[1,1],format:'rgba32float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
-      const render=async(texture,{world=[0,10,0],normal=[0,1,0],dx=[.05,0,0],dy=[0,0,.05],support=1,mode=0}={})=>{
-        d.queue.writeBuffer(settings,0,new Float32Array([...world,support,...normal,mode,...dx,0,...dy,0,.8,.75,.7,0]));
+      const render=async(texture,{world=[0,10,0],normal=[0,1,0],dx=[.05,0,0],dy=[0,0,.05],support=1,mode=0,coarse=[.8,.75,.7]}={})=>{
+        d.queue.writeBuffer(settings,0,new Float32Array([...world,support,...normal,mode,...dx,0,...dy,0,...coarse,0]));
         const group=d.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:domain}},{binding:1,resource:texture.createView()},{binding:2,resource:sampler},{binding:3,resource:{buffer:settings}}]});
         const read=d.createBuffer({size:256,usage:B.COPY_DST|B.MAP_READ}),encoder=d.createCommandEncoder();
         const pass=encoder.beginRenderPass({colorAttachments:[{view:target.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,0]}]});
@@ -73,8 +73,14 @@ struct Settings {world:vec4f,normal:vec4f,dx:vec4f,dy:vec4f,coarse:vec4f};
       };
       const fine=await render(rock),unsupported=await render(rock,{support:0});
       const seam=await render(rock,{world:[-128,10,0]}),halfSeam=await render(rock,{world:[-112,10,0]});
+      const unsupportedSeam=await render(rock,{world:[-112,10,0],support:0});
+      const submergedUnsupported=await render(rock,{world:[0,-1,0],support:0});
       const cliff=await render(coast,{world:[2,10,0],normal:[1,0,0]}),highCliff=await render(coast,{world:[2,90,0],normal:[1,0,0]});
-      const wrongSide=await render(coast,{world:[2,10,0],normal:[-1,0,0]}),masked=await render(water);
+      const reverseFallback=await render(coast,{world:[2,10,0],normal:[-1,0,0]}),masked=await render(water);
+      const flatFallback=await render(coast,{world:[2,10,0],support:0});
+      const blueCoarse=await render(coast,{world:[2,10,0],normal:[1,0,0],support:0,coarse:[.02,.2,.55]});
+      const westSeed=await render(channel,{world:[2,10,0],normal:[1,0,0],support:0});
+      const eastSeed=await render(channel,{world:[2,10,0],normal:[-1,0,0],support:0});
       const minified=await render(rock,{dx:[8,0,0],dy:[0,0,8]});
       // XZ derivatives collapse to almost zero, but this cliff pixel spans 32m
       // vertically. Its colour seed must average the 8m source bands, not pick
@@ -84,14 +90,16 @@ struct Settings {world:vec4f,normal:vec4f,dx:vec4f,dy:vec4f,coarse:vec4f};
       const joint=await render(rock,{world:[0,0,0],normal:[0,0,1],dx:[.001,0,0],dy:[0,.001,0],mode:1});
       const unresolved=await render(rock,{world:[1.137,7.713,4.213],normal:[0,0,1],dx:[2,0,0],dy:[0,2,0],mode:1});
       await d.queue.onSubmittedWorkDone();for(const texture of textures)texture.destroy();d.destroy();
-      return {errors,fine,unsupported,seam,halfSeam,cliff,highCliff,wrongSide,masked,minified,verticalFootprint,strata,joint,unresolved};
+      return {errors,fine,unsupported,seam,halfSeam,unsupportedSeam,submergedUnsupported,cliff,highCliff,reverseFallback,flatFallback,blueCoarse,westSeed,eastSeed,masked,minified,verticalFootprint,strata,joint,unresolved};
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(result.errors,[]);
     const coarse=[.8,.75,.7],fine=[80,72,64].map(v=>(v/255)**2.2);
     const close=(actual,expected,label)=>expected.forEach((value,i)=>assert.ok(Math.abs(actual[i]-value)<2e-6,`${label} channel ${i}: ${actual[i]} vs ${value}`));
-    for(const key of ['fine','cliff','highCliff','minified'])close(result[key],fine,key+' retains the independent dark rock colour');
-    for(const key of ['unsupported','seam','wrongSide','masked'])close(result[key],coarse,key+' retains registered fallback, never invalid near surf RGB');
+    for(const key of ['fine','unsupported','cliff','highCliff','minified','reverseFallback','flatFallback','blueCoarse','westSeed'])close(result[key],fine,key+' selects qualified dry RGB before any coarse fallback');
+    close(result.eastSeed,[120,90,60].map(v=>(v/255)**2.2),'a qualified landward seed keeps priority over other dry colours');
+    for(const key of ['seam','submergedUnsupported','masked'])close(result[key],coarse,key+' retains registered fallback when seam/support/imagery requires it');
     close(result.halfSeam,coarse.map((v,i)=>(v+fine[i])/2),'32m seam has its true half-weight at 16m');
+    close(result.unsupportedSeam,coarse.map((v,i)=>(v+fine[i])/2),'raised unsupported geometry retains the same 32m seam');
     close(result.verticalFootprint,[120,108,96].map(v=>(v/255)**2.2),'vertical cliff footprint averages the actual source bands');
     assert.ok(Math.abs(result.strata[0]-1)<2e-6,'resolved strata have real nonzero relief');
     assert.ok(Math.abs(result.joint[1]-1)<2e-6,'resolved joints survive filtering at their own width');
