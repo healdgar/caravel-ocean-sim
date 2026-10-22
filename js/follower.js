@@ -1,12 +1,56 @@
 import { boatForwardSpeed } from './boat.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer, yardTransferAvailable } from './lateen.js';
+import { isProceduralDesign, proceduralDesign } from './models/procedural.js';
 
 const RAD=Math.PI/180;
 const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const followerControlKeys={fore:'sailFore',main:'sailMain',mizzen:'sailMizzen'};
+const followerControls=new Map();
+function followerSailKeys(boat){
+  const id=boat.modelId??'nina';
+  if(id==='nina'||id==='victory')return SAIL_KEYS;
+  if(followerControls.has(id))return followerControls.get(id);
+  const controls=new Set(proceduralDesign(id).surfaces.map(surface=>{
+    const key=followerControlKeys[surface.controlGroup];
+    if(!key)throw Error('No follower sail control for '+id+': '+surface.controlGroup);
+    return key;
+  }));
+  const keys=SAIL_KEYS.filter(key=>controls.has(key));followerControls.set(id,keys);return keys;
+}
+function followerCanvas(boat){let canvas=0;for(const key of followerSailKeys(boat))canvas=Math.max(canvas,clamp(boat[key]??0,0,1));return canvas;}
 
-// A helm policy, not a motion controller: it writes only rudder and sail targets.
+// Rowing is another human control policy. Differential strokes can turn a
+// stationary hull through immersed blades; they never set velocity or heading.
+function followerRowing(state,boat,leader,{course,heading,speed,windFrom,windSpeed,leaderSpeed,groundSpeed,forwardError,errorDistance,separation,L}){
+  state.tack=state.tackAge=state.ironsTime=state.recoveryTack=state.transferCooldown=state.helmTrim=0;
+  state.recovering=false;state.noGoAngle=0;
+  const error=wrap(course-heading)/RAD,yaw=(boat.yawRate??0)/RAD;
+  const leaderEffort=Number.isFinite(leader.rowingEffort)?clamp(leader.rowingEffort,0,1):0,leaderCanvas=followerCanvas(leader);
+  const working=leaderEffort>.01||leaderCanvas>.01||groundSpeed>.15;
+  const resting=!working&&Math.abs(leaderSpeed)<.15&&forwardError<L*.5&&errorDistance<L*2;
+  const stationForward=state.stationVelocityX*Math.sin(heading)-state.stationVelocityZ*Math.cos(heading);
+  let effort=resting?0:clamp((leaderEffort>.01?leaderEffort:.55)+forwardError/(L*4)+(stationForward-speed)*.18,0,1);
+  // A heading change is carried out by real one-sided strokes, including when
+  // coasting astern. Only the flow-dependent steering oar reverses its helm.
+  const turn=resting?0:clamp(error/65-yaw*.08,-1,1);
+  if(!resting&&Math.abs(error)>30)effort=Math.max(effort,.35);
+  boat.propulsion='sail';boat.rowingEffort=effort;boat.rowingTurn=turn;
+  boat.rudderTarget=resting?0:clamp(error*1.1-yaw*5,-35,35)*(speed<-.12?-1:1);
+  const keys=followerSailKeys(boat),angle=Math.min(Math.abs(wrap(course-windFrom)),Math.abs(wrap(heading-windFrom)));
+  // Sail assistance is optional; approaching the wind furls actual canvas
+  // instead of diverting a rowed course or entering a sail recovery maneuver.
+  const usableWind=windSpeed>.5&&angle>=70*RAD;
+  const stormScale=windSpeed>28?.18:windSpeed>20?.4:1;
+  const canvas=resting||!usableWind?0:Math.min(effort,stormScale);
+  for(const key of SAIL_KEYS)boat[key]=keys.includes(key)?canvas:0;
+  state.course=((course/RAD)%360+360)%360;
+  state.status=resting?'Resting at station':separation<L*1.8?'Rowing clear':'Rowing to follow';
+  return state;
+}
+
+// A helm policy: it writes only rudder, canvas and human rowing commands.
 // The hull receives every acceleration and turn from the ordinary sailing model.
 export function createFollower(formation={trail:2.8,side:1.5}){return {formation:{...formation},tack:0,tackAge:0,ironsTime:0,recovering:false,recoveryTack:0,transferCooldown:0,helmTrim:0,course:0,trackCourse:0,noGoAngle:62,stationVelocityX:0,stationVelocityZ:0,status:'Following',separation:0};}
 export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neighbors=null){
@@ -44,6 +88,10 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   let course=wrap(track-leeway);
   state.trackCourse=((track/RAD)%360+360)%360;
   const windFrom=Math.atan2(-Math.cos(windDirection),Math.sin(windDirection));
+  if(isProceduralDesign(boat.modelId)&&proceduralDesign(boat.modelId).capabilities.rowing){
+    const forwardError=(goalX-boat.x)*Math.sin(h)-(goalZ-boat.z)*Math.cos(h);
+    return followerRowing(state,boat,leader,{course,heading,speed,windFrom,windSpeed,leaderSpeed,groundSpeed,forwardError,errorDistance,separation,L});
+  }
   // A same-model leader making headway with positive sail drive demonstrates a
   // usable course. A fixed 62-degree limit otherwise forbids its escort from
   // following it close-hauled. Other hulls keep the conservative authored limit.
@@ -110,7 +158,7 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   }
   boat.propulsion='sail';boat.rudderTarget=rudder;
   const forwardError=(goalX-boat.x)*Math.sin(h)-(goalZ-boat.z)*Math.cos(h);
-  let leaderCanvas=0;for(const key of SAIL_KEYS)leaderCanvas=Math.max(leaderCanvas,clamp(leader[key]??0,0,1));
+  const leaderCanvas=followerCanvas(leader);
   const stationForward=state.stationVelocityX*Math.sin(heading)-state.stationVelocityZ*Math.cos(heading);
   const stationScale=clamp((leaderCanvas>.01?leaderCanvas:.9)+forwardError/(L*4)+(stationForward-speed)*.15,.12,1);
   const stormScale=windSpeed>28?.18:windSpeed>20?.4:1;
@@ -118,7 +166,8 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   // A newly sailing leader is still accelerating at its formation station.
   // Only a stopped leader with no requested canvas asks the companion to stop.
   const leaderSailing=leaderCanvas>.01;
-  for(const key of SAIL_KEYS)boat[key]=!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas;
+  const activeKeys=followerSailKeys(boat);
+  for(const key of SAIL_KEYS)boat[key]=activeKeys.includes(key)?(!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas):0;
   state.course=((course/RAD)%360+360)%360;
   return state;
 }
