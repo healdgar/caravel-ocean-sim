@@ -136,9 +136,13 @@ function crewNavigationRigAccess(p,body,boat,scale){
     return z*scale[2]-body.radius>=channel.z0*scale[2]&&z*scale[2]+body.radius<=channel.z1*scale[2]&&
       x-body.radius>=inner&&x+body.radius<=outer&&Math.abs(p[1]-channel.y*scale[1])<.05;
   }
-  // Other legacy runners retain their qualified entry, narrowed to the real
-  // transverse lead instead of granting a general circular walking area.
-  return Math.abs(p[2]-access.point[2])<=.30&&Math.abs(p[1]-access.point[1])<=.05&&Math.abs(p[0]-access.point[0])<=access.radius;
+  // A legacy low ratline can sit above and just outside the deck edge.
+  // Permit only its actual sloped boarding lead from a safe inboard footing;
+  // this is a single step onto the runner, not an unsupported walking disk.
+  if(!Array.isArray(access.entry)||access.entry.length!==3||!access.entry.every(Number.isFinite))return false;
+  const ray=access.point.map((v,i)=>v-access.entry[i]),length2=ray.reduce((sum,v)=>sum+v*v,0),
+    t=Math.max(0,Math.min(1,ray.reduce((sum,v,i)=>sum+v*(p[i]-access.entry[i]),0)/Math.max(length2,1e-12)));
+  return Math.hypot(...p.map((v,i)=>v-access.entry[i]-ray[i]*t))<=.04;
 }
 function crewNavigationPathClear(a,b,boat,obstacles,body,scale){
   if(obstacles.some(o=>crewNavigationIntersects(a,b,o,body)))return false;

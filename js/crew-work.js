@@ -246,7 +246,9 @@ function routeTo(s,target,boat){
 // segment is checked against equipment, including the complete recoil sweep.
 function crewWorkNavigationOptions(s,boat){
   const j=s.job;if(!j||!['rig','lookout'].includes(j.kind))return s.navigationBody;
-  return {...s.navigationBody,rigAccess:{point:physical(climbRoot(j.mast,j.side,0,boat),boat),radius:1.25,mast:j.mast,side:j.side}};
+  const root=climbRoot(j.mast,j.side,0,boat),sx=boat.beam/3.6,margin=(.30+.03)/sx,
+    x=j.side*Math.min(Math.abs(root[0]),Math.max(0,modelDeckWidth(boat,root[2])-margin)),entry=[x,crewDeckHeight(boat,root[2],x),root[2]];
+  return {...s.navigationBody,rigAccess:{point:physical(root,boat),entry:physical(entry,boat),radius:1.25,mast:j.mast,side:j.side}};
 }
 function crewWorkSegmentClear(s,boat,a,b){
   if(hasExtendedCrewModel(boat.modelId))return true;
@@ -256,8 +258,13 @@ function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
   if(hasExtendedCrewModel(boat.modelId))return path;
   if(!path?.length)return null;
   const start=s.job?.position?.slice()??[s.x,s.position[1]?(s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z],points=[start],options=crewWorkNavigationOptions({...s,job},boat),dense=[];
+  const waypoints=path.slice(),access=options?.rigAccess;
+  if(boat.modelId!=='victory'&&access?.entry&&distance3(physical(waypoints.at(-1),boat),access.point)<1e-6){
+    const scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12],entry=access.entry.map((v,i)=>v/scale[i]);
+    waypoints.splice(waypoints.length-1,0,entry);
+  }
   let previous=start;
-  for(const end of path){
+  for(const end of waypoints){
     const a=physical(previous,boat),b=physical(end,boat),distance=Math.hypot(b[0]-a[0],b[2]-a[2]),steps=Math.max(1,Math.ceil(distance/.45)),sy=vesselVerticalScale(boat);
     const ground=Math.abs(previous[1]-crewDeckHeight(boat,previous[2],previous[0]))*sy<.025&&Math.abs(end[1]-crewDeckHeight(boat,end[2],end[0]))*sy<.025;
     // Break gentle sheer into nearby floor edges, while retaining supplied
