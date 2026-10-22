@@ -246,10 +246,13 @@ test('all five later vessels retain unobstructed 44px helm and sticky settings o
         assert.ok(metrics.scrollHeight>metrics.height,context+' fixture exercises a real overflowing settings body');
         // Wheel input exercises real overflow scrolling; no scrollTop, hidden,
         // style, open-state or production command properties are forced.
-        await page.mouse.move(box.x+4,box.y+box.height/2);await page.mouse.wheel(0,-metrics.scrollHeight-size.height);
-        await page.waitForFunction(()=>document.querySelector('#boat-panel .panel-body').scrollTop===0,undefined,{polling:20,timeout:5000});
+        await page.bringToFront();await page.mouse.move(box.x+4,box.y+box.height/2);
+        if(await body.evaluate(el=>el.scrollTop>0)){
+          await page.mouse.wheel(0,-metrics.scrollHeight-size.height);
+          await page.waitForFunction(()=>document.querySelector('#boat-panel .panel-body').scrollTop===0,undefined,{polling:20,timeout:5000});
+        }
         await page.mouse.wheel(0,metrics.scrollHeight+size.height);
-        await page.waitForFunction(()=>{const el=document.querySelector('#boat-panel .panel-body');return el.scrollTop>0&&el.scrollTop+el.clientHeight>=el.scrollHeight-2;},undefined,{polling:20,timeout:5000});
+        await page.waitForFunction(()=>{const el=document.querySelector('#boat-panel .panel-body');return el.scrollTop>0&&el.scrollTop+el.clientHeight>=el.scrollHeight-2;},undefined,{polling:20,timeout:5000}).catch(async error=>{throw Error(context+' settings scroll '+JSON.stringify(await body.evaluate(el=>({top:el.scrollTop,height:el.clientHeight,total:el.scrollHeight}))),{cause:error});});
         const after=await reach(close,context+' after settings scroll');assert.ok(Math.abs(after.y-before.y)<1&&Math.abs(after.x-before.x)<1,context+' Hide remains fixed in its actual header');
         assert.equal(await body.evaluate(el=>el.scrollWidth<=el.clientWidth),true);await page.getByRole('button',{name:'Hide ship settings',exact:true}).click();
         assert.equal(await page.locator('#boat-panel').isVisible(),false);assert.equal(await page.locator('#helm-controls').isVisible(),true);await hud(context+' settings closed');
