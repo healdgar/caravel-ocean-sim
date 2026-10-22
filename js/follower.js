@@ -88,7 +88,7 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   let course=wrap(track-leeway);
   state.trackCourse=((track/RAD)%360+360)%360;
   const windFrom=Math.atan2(-Math.cos(windDirection),Math.sin(windDirection));
-  if(isProceduralDesign(boat.modelId)&&proceduralDesign(boat.modelId).capabilities.rowing){
+  if(isProceduralDesign(boat.modelId)&&proceduralDesign(boat.modelId).capabilities?.rowing){
     const forwardError=(goalX-boat.x)*Math.sin(h)-(goalZ-boat.z)*Math.cos(h);
     return followerRowing(state,boat,leader,{course,heading,speed,windFrom,windSpeed,leaderSpeed,groundSpeed,forwardError,errorDistance,separation,L});
   }
