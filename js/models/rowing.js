@@ -29,7 +29,7 @@ function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,b
       sparesKg:id==='oseberg'?350:id==='lusoria'?200:70,defaultProvisionDays:id==='oseberg'?7:id==='lusoria'?2:1,designIncludesManifest:true,gmBeamFraction:id==='oseberg'?.13:id==='lusoria'?.16:.18,
       structureFloorThicknessMetres:.025,
       provenance:'Authored service manifest; reported hull weight/tonnage is retained only as source metadata.'},
-    propulsion:{kind:propulsor,driveFraction:.44,cadence:.45,maxCadence:.70,catchAngle:.52,torsoLeanRadians:propulsor==='oar'?.30:.16,
+    propulsion:{kind:propulsor,driveFraction:.44,cadence:.45,maxCadence:.70,catchAngle:.52,torsoLeanRadians:propulsor==='oar'?.40:.16,
       bladeLength:propulsor==='paddle'?.55:.62,bladeWidth:propulsor==='paddle'?.18:.15,bladeThickness:.018,
       outboard:propulsor==='paddle'?0:id==='oseberg'?2.80:2.45,inboard:.80,shaftRadius:propulsor==='paddle'?.022:.028,
       maxHandForce:300,maxPower:210,dragCoefficient:1.6,normalDragProvenance:'Authored effective plate drag and human force/power limits; not measured replica trials.'},
