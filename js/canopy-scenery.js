@@ -155,7 +155,8 @@ export function canopyInspectionURL(href,manifest){
   const target=low.map((v,c)=>(v+high[c])*.5),r=Math.max(12,Math.hypot(...high.map((v,c)=>(v-low[c])*.5)));
   const eye=[target[0]+r*.65,high[1]+r*.28,target[2]+r*1.25],delta=target.map((v,c)=>v-eye[c]);
   const yaw=Math.atan2(delta[0],-delta[2])*180/Math.PI,pitch=Math.atan2(delta[1],Math.hypot(delta[0],delta[2]))*180/Math.PI;
-  const url=new URL(href);url.searchParams.set('landfall','approach');url.searchParams.set('view','free');url.searchParams.set('boat','0');
+  const url=new URL(href);if(!url.searchParams.has('landfall'))url.searchParams.set('landfall','approach');
+  url.searchParams.set('view','free');url.searchParams.set('boat','0');
   url.searchParams.set('canopy','near');url.searchParams.set('cam',[...eye,yaw,pitch].map(v=>Number(v.toFixed(5))).join(','));
   // Ship coordinates and Wells Bay presets are untouched; only the camera moves.
   return url.href;
