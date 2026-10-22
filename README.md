@@ -2,24 +2,23 @@
 
 Built on [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU sailing game with wind-driven ships, crew, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. The published game includes **Niña, Pinta, Santa María and HMS Victory**, independently selectable AI fleets, and an astronomical Sun, Moon and starry night. Boat, free-flight and exterior cameras share the same sea. Conditions, fleet choices and astronomical settings can be saved in a link.
+A real-time WebGPU sailing game with wind, oar and paddle propulsion, crew, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. The published game includes **nine vessel models**, independently selectable AI fleets, and an astronomical Sun, Moon and starry night. Boat, free-flight and exterior cameras share the same sea. Conditions, fleet choices and astronomical settings can be saved in a link.
 
 [Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
 **Release status:** published runtime
-`7c0b52798111bbb693abac5db6d467deb22518d7` includes full Sun controls, the four-model
-fleet, passive hull/keel moments and astronomical night. The full native Metal
-suite passed **573/573**, zero skips, followed by date-field/mobile/offline checks
-and rendered review. Pages deployment `7244279543` built at
-**2026-10-22 05:09:08 UTC**; public HTML, manifest and all 53 assets matched local
-sizes/hashes at **05:09:53 UTC**. No physical-iPhone performance result is claimed.
-[Exact receipts](BACKLOG.md#sunenvironment-controls-checkpoint).
+`c8a660d5135db4cb25ac47e3c3b60b3025bc916f` offers **nine model choices and up to
+nine active vessels**, including Oseberg, Lusoria, a thirty-person Taíno-style
+canoe, Flying Cloud and Gipsy Moth IV. The full native Metal suite passed
+**687/687**, zero skips or cancellations, in **370.783 seconds**; final visible
+Chrome reviews covered the five added models and nine-model fleet without console
+errors. Pages build `1305173682` completed at **2026-10-22 11:03:44 UTC**;
+public HTML, manifest and all 53 assets matched local sizes/hashes at
+**11:05:32 UTC**. No physical-iPhone or sustained frame-rate result is claimed.
 
-**Unpublished candidate:** the integrated source adds five independently built
-vessels—Oseberg, Lusoria, a thirty-person Taíno-style canoe, Flying Cloud and
-Gipsy Moth IV—for **nine model choices and up to nine active vessels**. Final
-combined qualification, rendered checks and publication are pending. The public
-release receipt above applies to the four-model checkpoint, not this candidate.
+The preceding Sun-control runtime `7c0b527` passed **573/573** native checks,
+followed by rendered/mobile/offline review; its public bytes matched at
+**2026-10-22 05:09:53 UTC**. [Exact receipts](BACKLOG.md#sunenvironment-controls-checkpoint).
 
 The published checkpoint reduces repeated crew, vessel and ocean shading work,
 targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater
@@ -335,8 +334,8 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 
 The [ship-model foundation](SHIP_MODELS.md) separates immutable model definitions,
 named attachment points, semantic mesh groups and cached geometry from each
-vessel's live state. The published baseline offers **Niña, Pinta, Santa María
-and HMS Victory (1805)**. Choose
+vessel's live state. The first four models are **Niña, Pinta, Santa María
+and HMS Victory (1805)**; the five later vessels are described below. Choose
 **Ship settings → Vessel**, or [sail Victory](https://healdgar.github.io/caravel-ocean-sim/?ship=victory&boat=1&view=ship).
 Victory has her own 56.69 × 15.85 m hull, three gun decks with an open waist,
 104 represented guns, stern galleries, wheel, boats, stepped masts and fighting
@@ -376,17 +375,16 @@ fleet** frames the enabled ships. An omitted `fleet` parameter preserves the
 legacy same-model escort; `follower=0` still starts alone. Explicit links use,
 for example, `ship=nina&fleet=pinta,santa-maria,victory`; `!pinta` preserves a
 configured disabled row without allocating its GPU vessel. Share links retain
-the roster. The five additional model choices below belong to the unpublished
-candidate; the fleet controls already exist in the published checkpoint.
+the roster. All nine model choices below are published.
 
 Immutable geometry, indices and render assets are shared per model; crew geometry,
 one FFT ocean and weather remain shared. Every enabled ship owns its posed
-geometry, hull/rig state, company, guns, anchor, sea probes, moisture and wake.
+geometry, hull/rig state, company, sea probes, moisture, wake and equipment where present.
 Two pooled wake banks and three shadow texture arrays have one layer per active
 vessel, with variable hull masks and probe dispatch; disabled rows allocate none.
 The nine-ship limit is a resource bound, not a device performance guarantee.
 
-Pinta/Santa María and the candidate's five additional vessels evaluate cloth,
+Pinta/Santa María and the five additional vessels evaluate cloth,
 spars, ropes and attachments through one
 CPU pose, uploading the same vertices used by visible, shadow, submerged and
 wetness paths. Victory retains shared GPU deformation. The new passive lateral
@@ -400,13 +398,12 @@ station rotation and leeway, and trim sail while holding distinct formation slot
 They commit to tacks and actual sternway recovery; rudder authority requires water
 flow. Avoidance and station-keeping remain authored AI policies, not passage
 planning, a ship-collision solver, combat or hailing. A following ship with no speed
-advantage cannot guarantee closing every gap. Published four-model fleet checks
-passed; the nine-model candidate needs its own final combined/rendered qualification.
+advantage cannot guarantee closing every gap. Published nine-model fleet checks
+and final rendered reviews passed.
 These policies are not calibrated historical maneuvers.
 
-The [nine-model candidate](SHIP_MODELS.md#later-vessel-programme) integrates the
-five additional hulls, rig/rowing poses, companies, controls and equipment. These
-choices remain **unpublished and under final qualification**:
+The [nine-model release](SHIP_MODELS.md#later-vessel-programme) includes these
+five additional hulls, rig/rowing poses, companies, controls and equipment:
 
 | Model | Default size and basis | Physical propulsion | Represented / loaded people |
 |---|---|---|---|
@@ -765,7 +762,7 @@ separately from boat and sea settings on mobile.
 **Show crew** is a display switch, preserved in shared links as `crew=0/1`.
 Hiding characters or the ship does not stop their simulation or sail orders.
 Resized legacy hulls below 10.5 m long or 3.2 m wide hide their company because
-those stations no longer provide sufficient clearance. Candidate rowing craft
+those stations no longer provide sufficient clearance. Model-owned rowing craft
 instead use their own narrow-hull stations and full represented complements;
 Gipsy Moth has one working sailor. A representative watch is distinct from the
 personnel mass in the loading model, as the table above records.
@@ -1000,8 +997,10 @@ These short desktop observations do not establish sustained thermal or iPhone
 performance. Native mode keeps full pixel resolution; Auto can trade sharpness
 while preserving geometry, simulation and rendering features.
 
-The nine-model candidate has no sustained target-device performance qualification
-yet. CPU poses preserve one authoritative geometry across rendering and forces.
+The nine-model release has no sustained target-device performance qualification
+yet. Flying Cloud remains CPU-heavy; release qualification does not establish
+60 FPS for that vessel. CPU poses preserve one authoritative geometry across
+rendering and forces.
 The nine-vessel resource limit does not imply 60 FPS on every Mac
 or 30 FPS on an iPhone; only device-specific measurements can establish that.
 
@@ -1021,7 +1020,22 @@ User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabl
 
 ## Validation
 
-The current four-model/fleet/astronomy checkpoint is **published and byte-verified**
+The current nine-model checkpoint is **published and byte-verified** as
+`c8a660d5135db4cb25ac47e3c3b60b3025bc916f`. Root's serialized full native Metal
+suite passed **687/687 tests**, with **zero skips or cancellations**, in
+**370.783 seconds**. Final visible Chrome reviews covered the five added models
+and all-nine-model fleet without console errors. Fifteen compact native UI cases
+passed with real scrolling; these are viewport checks, not physical-iPhone tests.
+Pages build `1305173682` completed at **2026-10-22T11:03:44Z**. Exact public bytes
+were verified at **2026-10-22T11:05:32Z**:
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| HTML | 1,277,453 | `860f40e6eb288c83e33404a7c5c667880dc4f085dbdc89b131ae78ea5762e9f3` |
+| Asset manifest | 11,321 | `de21217564c4051c331411cc3ddcc55f07835fd67b6245493958e705cf140a17` |
+| 53 assets | 15,875,925 total | Every individual size/hash matched local bytes |
+
+The preceding four-model/fleet/astronomy checkpoint was **published and byte-verified**
 as `7fba40de2601552757ada1ce490883ced75f06fb`. Root's serialized full native Metal suite passed
 **572/572 tests**, with **zero skips**, in **302.194 seconds**. CPU, native GPU and
 production modular/Pages fixtures cover posed uploads, immutable assets,
@@ -1033,10 +1047,12 @@ and native four-vessel, full-Moon and new-Moon captures. Pages deployment
 not establish historical navigation accuracy, sustained frame rate or physical
 iPhone performance.
 
-The nine-model candidate is a separate qualification boundary. Its integrated
-companies, oar/paddle water probes, optional equipment, mixed rigs and an
-all-nine-model fleet need final combined and rendered clearance before publication.
-Earlier four-model receipts do not establish those results.
+The nine-model receipt separately covers integrated companies, oar/paddle water
+probes, optional equipment, mixed rigs and all-nine-model fleet fixtures. It does
+not certify every whole-rig running-line interaction, historical calibration or
+sustained frame rate. The blade-to-wave gap correction is not included in this
+release. Earlier four-model receipts remain historical rather than evidence for
+the added five models.
 
 With Node.js 20 or newer:
 
@@ -1130,7 +1146,7 @@ tests compare actual canopy coverage and sky gaps at every tier, reject an
 intentionally sparse canopy, and render the same foliage from all three builds.
 The denser stand, opaque far boughs, projected geometry-error selection and shared
 surface-wave integration belong to the published `5959d8e` baseline. Those checks
-are separate from the current four-model/fleet/night qualification recorded above.
+are separate from the nine-model qualification recorded above.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.
@@ -1165,7 +1181,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The published game supports four model types and up to nine active vessels. The unpublished candidate integrates nine types; its final combined qualification and release remain pending. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
+- The published game supports nine model types and up to nine active vessels. Flying Cloud remains CPU-heavy; whole-rig running-line clearance and the blade-to-wave gap correction remain unfinished. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
@@ -1192,8 +1208,8 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/models/additional.js`, `js/additional-rig.js`, `js/additional-ships.js`, `js/rig-surface.js` | Pinta/Santa María hulls and authoritative CPU cloth/yard/rope/attachment poses |
 | `js/astronomy.js`, `js/celestial.js`, `js/wgsl/celestial.js` | Unwrapped geographic sky, Moon/stars, explicit 528-byte Frame and celestial rendering |
 | `js/vendor/`, `js/star-catalog.js` | Pinned local ephemeris code and separately licensed HYG derivative |
-| `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`, `js/rowing-water.js`, `js/wgsl/rowing-water.js` | Candidate oared/paddled hulls, shared strokes, actual water probes and human propulsion |
-| `js/models/procedural.js`, `js/models/later-sail.js`, `js/later-sail-ships.js`, `js/procedural-models.js` | Candidate model-owned hull/fin/deck adapters, later sailing vessels and affine attachments |
+| `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`, `js/rowing-water.js`, `js/wgsl/rowing-water.js` | Oared/paddled hulls, shared strokes, actual water probes and human propulsion |
+| `js/models/procedural.js`, `js/models/later-sail.js`, `js/later-sail-ships.js`, `js/procedural-models.js` | Model-owned hull/fin/deck adapters, later sailing vessels and affine attachments |
 | `js/sailing.js`, `js/sail-aerodynamics.js` | Apparent wind, prescribed trim, sail handling, cloth-derived aerodynamic panels and rigid-body loads |
 | `js/lateen.js`, `js/wgsl/lateen.js` | Routine tacks, ordered yard transfers, cloth supports, sheet leads and matching CPU/GPU motion |
 | `js/instruments.js` | Optional signed speed and apparent wind HUD, recovery cues and local preferences |

@@ -1,16 +1,21 @@
 # Reusable ship definitions
 
-The published registry admits **Niña, HMS Victory (1805), Pinta and Santa
-María**. Pinta/Santa María are explicit development reconstructions with their
+The published registry admits **Niña, HMS Victory (1805), Pinta, Santa María,
+Oseberg, Lusoria, the Taíno-style canoe, Flying Cloud and Gipsy Moth IV**.
+Pinta/Santa María are explicit development reconstructions with their
 own hulls, equipment and mixed rigs. Up to **eight independently selected AI
 followers plus the player** share one sea/weather simulation.
 
-The **unpublished nine-model candidate** integrates Oseberg, Lusoria, the
-Taíno-style canoe, Flying Cloud and Gipsy Moth IV with their own meshes, companies,
-propulsion, equipment and controls. Final combined qualification and release
-remain pending; registry/backend readiness is not a publication receipt.
+The five additional vessels have their own meshes, companies, propulsion,
+equipment and controls. Runtime `c8a660d5135db4cb25ac47e3c3b60b3025bc916f` is
+**published and byte-verified**: root's full native Metal suite passed **687/687**,
+zero skips or cancellations, in **370.783 seconds**. Final visible Chrome reviews
+covered the five added models and all-nine-model fleet without console errors;
+15 compact native UI cases passed with real scrolling. Pages build `1305173682`
+completed at **2026-10-22T11:03:44Z**; public HTML, manifest and all 53 assets matched
+local sizes/hashes at **11:05:32Z**. [Exact current receipt](README.md#validation).
 
-**Qualification/release boundary:** published runtime
+**Previous four-model receipt:** published runtime
 `7fba40de2601552757ada1ce490883ced75f06fb` passed **572/572 native Metal suite
 tests**, zero skips, in **302.194 seconds**, with rendered checks. Pages deployment
 `7243537555` succeeded at **2026-10-22T04:12:31Z**; public HTML, manifest and all
@@ -27,11 +32,11 @@ for [exact validation and deployment receipts](BACKLOG.md#published-checkpoint-f
 - `js/models/additional.js`, `js/additional-ships.js`, `js/additional-rig.js`,
   `js/rig-surface.js`: separate Pinta/Santa María lofts, decks, hardware, cloth,
   yards, ropes and authoritative posed surfaces/attachments.
-- `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`: candidate independent
+- `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`: independent
   oared/paddled hulls, benches and shared blade/crew/force stroke geometry.
 - `js/rowing-water.js`, `js/wgsl/rowing-water.js`: per-vessel moving-water samples
   from the shared GPU sea, consumed by actual blade immersion/relative flow.
-- `js/models/later-sail.js`, `js/later-sail-ships.js`: candidate clipper/ketch hulls,
+- `js/models/later-sail.js`, `js/later-sail-ships.js`: clipper/ketch hulls,
   fin/cockpit, model-owned spars, working cloth and named standing fittings.
 - `js/models/procedural.js`, `js/procedural-models.js`: strict hull/deck/appendage
   adapters and affine nodes; no fallback to caravel geometry or dummy equipment.
@@ -138,11 +143,11 @@ inheritance for unknown moving descendants, and absent roles throw explicitly.
 `resolveShipNode()` preserves its legacy point-query behavior while supporting
 the explicit new model backends.
 
-The candidate uses absent sail/mast/anchor paths for the canoe, distinct oar or
-paddle strokes, and simultaneous wind/human propulsion on Oseberg and Lusoria.
+The published implementation uses absent sail/mast/anchor paths for the canoe,
+distinct oar or paddle strokes, and simultaneous wind/human propulsion on Oseberg and Lusoria.
 One stroke drives visible blades, hand/foot targets and moving-water forces.
-Dry recovery does not supply drive. A ready backend still requires root's
-combined/rendered qualification before publication.
+Dry recovery does not supply drive. Future models still require combined/rendered
+qualification and exact deployed-byte verification before publication.
 
 ### Defined variants
 
@@ -152,15 +157,14 @@ combined/rendered qualification before publication.
 | HMS Victory | Eight square sails, three headsails, gaff spanker | Own three-decker hull and `square1805` backend; ready |
 | Pinta | Square fore/main courses, lateen mizzen | Development caravel, own loft/decks/equipment; `surfaces-v1`, CPU posed |
 | Santa María | Square fore/main, main topsail, spritsail, lateen mizzen | Development nao, main/forecastle/quarter/poop zones and fore lookout; `surfaces-v1`, CPU posed |
-| Oseberg-based vessel | One square sail, 30 oars, steering oar | Candidate independent clinker-style hull and bench/stroke layout; unpublished |
-| Lusoria | One square sail, 24 oars, steering oar | Candidate late-Roman riverine reconstruction; unpublished |
-| Taíno-style canoe | 24 paddlers and steering paddle; no mast or sail | Candidate independent dugout; no anchor or guns; unpublished |
-| Flying Cloud | 15 square yards/cloth tiers, eight headsails, two gaff sails | Candidate fine-ended clipper, wheel and own working rig; inventory interpretation, unpublished |
-| Gipsy Moth IV | Two Bermudan sails and two headsails on two masts | Candidate original-design ketch, recessed cockpit, fin and tiller; engine disabled, unpublished |
+| Oseberg-based vessel | One square sail, 30 oars, steering oar | Independent clinker-style hull and bench/stroke layout; published |
+| Lusoria | One square sail, 24 oars, steering oar | Late-Roman riverine reconstruction; published |
+| Taíno-style canoe | 24 paddlers and steering paddle; no mast or sail | Independent dugout; no anchor or guns; published |
+| Flying Cloud | 15 square yards/cloth tiers, eight headsails, two gaff sails | Fine-ended clipper, wheel and own working rig; inventory interpretation, published |
+| Gipsy Moth IV | Two Bermudan sails and two headsails on two masts | Original-design ketch, recessed cockpit, fin and tiller; engine disabled, published |
 
-The first four belong to the public receipt above; five additional rows describe
-integrated candidate source, not completed release qualification. Flying Cloud's
-25 cloth surfaces are not a verified historical inventory.
+All nine belong to the current published receipt. Flying Cloud's 25 cloth surfaces
+remain an authored inventory interpretation rather than a verified historical outfit.
 
 Sails have stable IDs independent of mast IDs; multiple sails can share a mast
 and `fore`, `main` or `mizzen` control group. Fittings attach by node ID. Santa
@@ -180,7 +184,7 @@ tonnage is never converted directly into displacement mass.
 
 ## Current geometry, physics and fleet contract
 
-Pinta/Santa María and the five additional candidate models use one CPU evaluator
+Pinta/Santa María and the five additional models use one CPU evaluator
 for cloth, spars, ropes, surface normals
 and attachment transforms. `asset.pose(boat,time,wind,targetVertices)` fills each
 instance's geometry; the visible, shadow and submerged passes consume that upload.
@@ -211,13 +215,26 @@ real vessel; `!model-id` keeps a disabled UI row without GPU resources. An omitt
 Model choices/add/remove/toggles apply through a scene reload; share links retain
 these selections. The single ocean/weather system receives all enabled hull masks,
 probes and wakes. Per-model source geometry/index/render assets are immutable;
-per-instance geometry, crew joint/actor buffers, wetness, probes, guns and anchors
-are independent. Two wake banks and three shadow arrays use one layer per active
+per-instance geometry, crew joint/actor buffers, wetness, probes and equipment
+where present are independent. Two wake banks and three shadow arrays use one layer per active
 vessel, without enumerating every wake-parity combination.
 
 ## Qualification and remaining boundaries
 
-Published four-model boundary:
+Current nine-model boundary:
+
+1. Passed: full serialized native Metal suite, **687/687**, zero skips or
+   cancellations, including actual variable companies, rowing-water probes,
+   optional equipment, shared rig poses and all-nine-model fleet fixtures.
+2. Passed: final visible Chrome reviews of all five added models and the
+   nine-model fleet without console errors; 15 compact native UI cases with real
+   scrolling; published HTML, manifest and 53-asset size/hash verification.
+3. Remaining: whole-rig running-line clearance is not certified, and the
+   blade-to-wave gap correction is not in this release. Historical offsets,
+   mass/ballast, sail polars and dynamic lateral response remain authored or
+   uncalibrated where the source ledger says so.
+
+Previous four-model boundary:
 
 1. Passed: root's combined CPU/native Metal suite and production modular/Pages
    fixtures, including posed uploads, tested cloth/rope poses, crew reach/routes,
@@ -229,14 +246,14 @@ Published four-model boundary:
    when defensible source data exist. Current finite/passive equations alone do
    not establish historical performance or seaworthiness.
 
-These completed receipts describe the published four-model source. The nine-model
-candidate adds actual variable companies, rowing-water probes, optional equipment,
-new rig envelopes and an all-nine-model scene; final combined and rendered
-qualification and deployed-byte verification are pending separately.
+The earlier four-model receipts remain historical; the current nine-model release
+has its own combined, rendered and deployed-byte evidence above. Finite-mast,
+standing-rig and other-spar gates cover representative tested poses, not every
+running-line or whole-rig interaction.
 
 Performance follow-up, not an admission gate: measure sustained target-device
-cost. The nine-vessel bound is not a guarantee of 60 FPS on Mac or 30 FPS on a
-physical iPhone.
+cost. Flying Cloud remains CPU-heavy. The nine-vessel bound and compact viewport
+checks are not guarantees of 60 FPS on Mac or 30 FPS on a physical iPhone.
 
 ## Validation
 
@@ -244,19 +261,21 @@ Existing baseline tests preserve pre-refactor Niña/Victory mesh/index hashes,
 semantic ranges and attachment contracts. Published-checkpoint checks cover shared assets,
 ready/planned guards, authoritative cloth/rope/crew/wetness positions, passive
 hull-load invariants, physical follower controls and actual modular/Pages fleets.
-Root's full native Metal suite passed **572/572**, zero skips, in **302.194 seconds**;
-the checkpoint is published and byte-verified. [Astronomy](ASTRO_NAVIGATION.md) adds a
+Root's current full native Metal suite passed **687/687**, zero skips or
+cancellations, in **370.783 seconds**; the nine-model checkpoint is published and
+byte-verified. The earlier four-model suite passed 572/572 in 302.194 seconds.
+[Astronomy](ASTRO_NAVIGATION.md) adds a
 separate 528-byte production Frame and actual Moon/stars/night lighting shared
 by each model, with no certified historical navigation accuracy.
 
 ## Later vessel programme
 
 Victory was implemented first at the subsequent request. The five later craft
-now have integrated candidate registry, geometry, crew, propulsion and renderer
-paths. They remain unpublished pending final qualification. Their source subjects
+now have published registry, geometry, crew, propulsion and renderer paths.
+Their source subjects
 and principal reconstruction limits are explicit:
 
-| Target | Candidate capability | Source / reconstruction boundary |
+| Target | Published capability | Source / reconstruction boundary |
 |---|---|---|
 | Viking vessel, c. AD 850 | One square sail, 30 oars, steering oar, open hull | Oseberg AD 820 hull proportions/reconstruction used for the c.850 scenario; draft, offsets and working sail authored |
 | Roman galley, c. AD 350 | 24 oars, one square sail, steering oar | Lusoria Rhenana riverine reconstruction branch; not a trireme; .38 m service draft authored |
@@ -286,7 +305,7 @@ The reusable architecture must consequently support:
   simulation/rendering rather than one full-cost animated agent per historical
   occupant.
 
-Companies and personnel mass are separate model fields. These are candidate
+Companies and personnel mass are separate model fields. These are
 simulation manifests, not newly established historical complements:
 
 | Model | Represented people | People in loading manifest | Equipment / helm |
