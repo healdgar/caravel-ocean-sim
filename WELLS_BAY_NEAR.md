@@ -29,10 +29,28 @@ receipts, grid alignment and every boundary height before replacing coarse cells
 
 Terrain vertices and fine height storage upload once. Main/submerged rendering,
 CPU roots/clearance and GPU coastal/light queries share the same fine triangle
-diagonal. Detail normals use orientation-aware filtered coordinates; the local
-imagery contributes detail normalized to the original regional macro colour.
+diagonal. Within measured dry support, the independent local RGB supplies actual
+linear diffuse colour, blending to the resident image across the 32 m seam. It
+is not normalized back to the older 8 m image's colour. Original RGB bytes and
+the WMS source hash remain intact; exported alpha intersects source opacity with
+at least 95% dry DTM coverage independently warped onto the 1 m imagery grid and
+a conservative 1 m shore inset. Opaque WMS sea/surf cannot certify dry imagery.
+
+Steep faces use the nearest confident 8/16/32 m landward image patch as a stable
+colour seed. Sampling accounts for the whole surface footprint and changes in
+the landward normal, with a minimum 4 m colour footprint. Missing confidence
+retains the registered fallback. Geographic photography is never projected
+around a cliff axis. Grain, bounded authored strata and joints instead use
+filtered surface coordinates and disappear before their features become
+subpixel. They add material relief, not surveyed ledges or new rock geometry.
 There is no per-frame JavaScript terrain deformation or global vegetation-policy
 change. Ground-patch bounds include fine peaks; existing local roots re-seat once.
+
+Material revision requires `--force` to rebake the optional pack's alpha and
+provenance. It changes no global Saba assets or terrain heights. The authored
+native material regression isolates dark fine RGB versus pale coarse RGB,
+shore-mask fallback, landward direction, seam weighting and subpixel relief;
+the Python regression checks alpha conservatism and unchanged source RGB.
 
 `nearTerrain=off` retains the complete coarse path for an explicit comparison.
 Without optional parent metadata, no near asset is requested. A corrupt declared

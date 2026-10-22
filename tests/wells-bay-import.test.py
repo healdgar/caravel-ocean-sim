@@ -42,6 +42,32 @@ class NearTerrainTests(unittest.TestCase):
         self.assertTrue(np.all(wet[~measured] <= 0)); self.assertTrue(np.isfinite(wet).all())
         self.assertLess(wet[32, 23], 0); self.assertGreater(wet[32, 23], -20)
 
+    def test_opaque_wms_surf_cannot_certify_dry_imagery_and_rgb_is_unchanged(self):
+        pixels = np.full((12, 12, 4), [245, 250, 255, 255], dtype=np.uint8)
+        coverage = np.ones((12, 12), dtype=np.float32); coverage[:, :4] = 0
+        pixels[2, 6, 3] = 99; pixels[2, 5, 3] = 0
+        before = pixels.copy(); support_before = coverage.copy()
+        result = IMPORTER.mask_near_albedo(pixels, coverage)
+        np.testing.assert_array_equal(result[:, :, :3], before[:, :, :3])
+        np.testing.assert_array_equal(pixels, before); np.testing.assert_array_equal(coverage, support_before)
+        self.assertTrue(np.all(result[:, :4, 3] == 0), 'Opaque WMS sea is masked by the measured DTM')
+        self.assertEqual(result[6, 4, 3], 0, 'The immediate mixed shoreline has a 1m inset')
+        self.assertEqual(result[6, 5, 3], 255, 'Interior measured land retains source opacity')
+        self.assertEqual(result[2, 6, 3], 99); self.assertEqual(result[2, 5, 3], 0)
+        self.assertTrue(np.all(result[0, :, 3] == 0), 'Unobserved crop exterior is conservative')
+
+    def test_measured_imagery_coverage_is_independent_and_never_invented(self):
+        pixels = np.full((4, 4, 4), 255, dtype=np.uint8)
+        coverage = np.full((4, 4), .95, dtype=np.float32); coverage[1, 1] = .94
+        result = IMPORTER.mask_near_albedo(pixels, coverage, shore_inset_metres=0)
+        self.assertEqual(result[1, 1, 3], 0); self.assertEqual(result[1, 2, 3], 255)
+        self.assertTrue(np.all(IMPORTER.mask_near_albedo(pixels, np.zeros_like(coverage))[:, :, 3] == 0))
+        with self.assertRaises(ValueError):
+            IMPORTER.mask_near_albedo(pixels, np.ones((2, 2)))
+        coverage[0, 0] = np.nan
+        with self.assertRaises(ValueError):
+            IMPORTER.mask_near_albedo(pixels, coverage)
+
 
 if __name__ == '__main__':
     unittest.main()

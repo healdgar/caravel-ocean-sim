@@ -73,6 +73,27 @@ def blend_near_heights(measured_heights, measured, coarse, x, z, spacing):
     return (coarse+(fine-coarse)*blend).astype('<f4')
 
 
+def mask_near_albedo(pixels, dry_coverage, pixel_metres=1, shore_inset_metres=1):
+    """Keep source RGB; alpha certifies conservative measured dry support.
+
+    The WMS alpha alone is not a coast mask: opaque foam and sea are valid image
+    pixels. Coverage is independently warped from the original 0.5m DTM's dry
+    returns, not from the authored seabed or the coarser runtime height grid.
+    """
+    if pixels.ndim != 3 or pixels.shape[2] != 4 or pixels.shape[:2] != dry_coverage.shape:
+        raise ValueError('Albedo and measured dry support are not registered')
+    if not np.isfinite(dry_coverage).all() or pixel_metres <= 0 or shore_inset_metres < 0:
+        raise ValueError('Invalid measured imagery support')
+    supported = dry_coverage >= .95
+    # An explicit one-image-pixel inset rejects mixed shore/surf pixels. Padding
+    # treats the unobserved exterior conservatively instead of extending land.
+    distance = distance_transform_edt(np.pad(supported, 1), sampling=pixel_metres)[1:-1, 1:-1]
+    supported &= distance > shore_inset_metres
+    result = pixels.copy()
+    result[:, :, 3] = np.where(supported, pixels[:, :, 3], 0)
+    return result
+
+
 def prepare(cache, region_path, spacing=2, force=False):
     region_path = Path(region_path); cache = Path(cache)
     parent_path = region_path/'manifest.json'; parent = json.loads(parent_path.read_text())
@@ -90,6 +111,8 @@ def prepare(cache, region_path, spacing=2, force=False):
     transform = Affine((east-west)/(n-1), 0, west-(east-west)/(n-1)/2,
                        0, -(north-south)/(n-1), north+(north-south)/(n-1)/2)
     heights = np.full((n, n), np.nan, dtype=np.float32); coverage = np.zeros((n, n), dtype=np.float32)
+    image_coverage = np.zeros((1024, 1024), dtype=np.float32)
+    image_transform = Affine((east-west)/1024, 0, west, 0, -(north-south)/1024, north)
     with rasterio.open(dtm_path) as dtm:
         bounds = transform_bounds('EPSG:4326', 'EPSG:10641', west, south, east, north, densify_pts=21)
         window = from_bounds(*bounds, dtm.transform)
@@ -101,6 +124,8 @@ def prepare(cache, region_path, spacing=2, force=False):
                       dst_crs='EPSG:4326', resampling=Resampling.average, warp_mem_limit=64)
         reproject(source=raw, destination=heights, src_nodata=np.nan, dst_nodata=np.nan, **common)
         reproject(source=valid.astype(np.float32), destination=coverage, dst_nodata=0, **common)
+        image_common = {**common, 'dst_transform': image_transform}
+        reproject(source=valid.astype(np.float32), destination=image_coverage, dst_nodata=0, **image_common)
     measured = np.isfinite(heights) & (coverage >= .5) & (heights > .1)
     if not measured.any():
         raise ValueError('The original survey has no dry terrain in the requested crop')
@@ -129,9 +154,9 @@ def prepare(cache, region_path, spacing=2, force=False):
         latitude = north-(j+.5)/1024*(north-south)
         row = max(0, min(1023, round((wms_bounds[3]-my(latitude))/(wms_bounds[3]-wms_bounds[1])*1024-.5)))
         registered[j] = pixels[row]
-    # Keep source RGB, with alpha indicating missing imagery. Shader preserves
-    # the existing regional macro colour and blends detail out at the seam.
-    image = Image.fromarray(registered)
+    # Opaque source water is still water. Preserve every registered RGB byte,
+    # but intersect source alpha with independently measured dry DTM support.
+    image = Image.fromarray(mask_near_albedo(registered, image_coverage))
     with tempfile.TemporaryDirectory(prefix='wells-bay-', dir=region_path) as temporary:
         folder = Path(temporary)
         (folder/'height.bin').write_bytes(final.tobytes())
@@ -149,7 +174,11 @@ def prepare(cache, region_path, spacing=2, force=False):
                 distanceDepthSlope=.15, shallowMinimumMetres=.05, transitionMetres=48),
             imagery=dict(url=url, sourceSHA256=digest_file(image_path), size=1024, derivedSpacingMetres=1,
                 licence='CC BY 4.0', licenceURL='https://creativecommons.org/licenses/by/4.0/',
-                acquisition=parent['imagery']['acquisition'], processing='Independent WMS crop reprojected to local metric domain; RGB preserved. Native source resolution is not certified by request dimensions.'))
+                acquisition=parent['imagery']['acquisition'],
+                alphaMask=dict(source='Original hash-verified 0.5m DTM dry-return coverage, independently area-averaged onto the 1m imagery grid',
+                    minimumDryCoverage=.95, shoreInsetMetres=1, modifiedChannels=['alpha'],
+                    sourceAlpha='Intersected with measured dry support; original RGB retained, including masked pixels'),
+                processing='Independent WMS crop reprojected to local metric domain; RGB preserved. Alpha modified by measured dry support with a 1m shore inset, not by WMS water opacity or authored bathymetry. Native source resolution is not certified by request dimensions.'))
         (folder/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
         output.mkdir(exist_ok=True)
         for name in (*files, 'manifest.json'):
