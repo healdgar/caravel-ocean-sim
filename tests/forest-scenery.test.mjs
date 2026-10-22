@@ -120,6 +120,12 @@ test('optional loader verifies binary digests before publishing a pack',async()=
   new Uint8Array(streams['roots.bin'])[0]^=1;
   await assert.rejects(loadForestScenery({assets,fetchAsset}),/digest/i);
 });
+test('solid-canopy startup can defer native bytes without fetching individual atlases',async()=>{
+  const {manifest,streams,textures}=nativeFixture(),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(streams),...Object.keys(textures)].map(name=>[name,name]));
+  const pack=await loadForestScenery({assets,loadAtlases:false,deferNative:true,fetchAsset:async name=>{requests.push(name);return name==='manifest.json'?Response.json(manifest):new Response(new Uint8Array(streams[name]??textures[name]));}});
+  assert.deepEqual(requests,['manifest.json','roots.bin']);assert.equal(pack.vertices,null);assert.equal(pack.impostors,null);
+  await pack.loadNative();assert.equal(requests.filter(name=>name==='vertices.bin').length,1);assert.equal(requests.filter(name=>name==='indices.bin').length,1);
+});
 test('native material IDs preserve every source group and explicitly isolate the coarse far approximation',()=>{
   const {manifest,streams}=nativeFixture(),pack=decodeForestScenery(manifest,streams);
   assert.equal(FOREST_VERTEX_LAYOUT.arrayStride,56);assert.deepEqual(FOREST_VERTEX_LAYOUT.attributes.at(-1),{shaderLocation:7,offset:52,format:'float32'});
