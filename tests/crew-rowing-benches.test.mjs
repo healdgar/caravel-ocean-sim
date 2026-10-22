@@ -60,9 +60,22 @@ test('measured boot soles come from actual own skin while retaining immutable cr
 test('rowboat return routes use the same full body clearance as execution, including between graph nodes',()=>{
   for(const id of ['oseberg','lusoria']){
     const boat=crewBenchBoat(id),d=ROWING_DESIGNS[id],company=createCompany(undefined,id);stepCompany(company,boat,0,3);
-    const s=company.crew.find(person=>person.role==='Captain'),home=[s.x,rowingDeck(id,s.z),s.z],work=rowingRigContext(id).controlStations.main.position,scale=[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length];
-    s.x=work[0];s.z=work[2];s.position.set(work.map((v,i)=>v*scale[i]+(i===1?.028:0)));s.job={position:[...work]};
-    const path=proceduralCrewRoute(s,home,boat,company);assert.ok(path,id+' full return route exists around seated workers');
+    const scale=[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length];
+    if(id==='lusoria'){
+      // The full seated fore pair and mast close this bow watch's passage. The
+      // captain is not a valid arbitrary substitute for the accessible rower.
+      const captain=company.crew.find(person=>person.role==='Captain'),before=Array.from(captain.position),work=rowingRigContext(id).controlStations.main.position;
+      assert.equal(proceduralCrewRoute(captain,work,boat,company),null,'an unreachable captain route remains rejected');
+      assert.deepEqual(Array.from(captain.position),before,'route failure cannot teleport a captain to the main fall');
+    }
+    assert.equal(issueCaptainOrder(company,boat,'reduced'),true);let s;
+    for(let tick=0;tick<2400&&!s;tick++){
+      advanceSails(boat,.1,3,0);stepCompany(company,boat,.1,3);s=company.crew.find(person=>person.job?.stage==='return');
+    }
+    assert.ok(s,id+' actual scheduler-selected worker must finish hauling and receive a return route');
+    const path=s.job.path;assert.ok(path.length>1,id+' issued full return route exists around seated workers');
+    assert.deepEqual([path.at(-1)[0],path.at(-1)[2]],s.home,'issued return reaches the actual worker station');
+    if(id==='lusoria')assert.ok(s.stationId,'the accessible rowing station supplies the worker instead of the unreachable bow captain');
     for(let i=1;i<path.length;i++){
       const a=path[i-1].map((v,k)=>v*scale[k]+(k===1?.028:0)),b=path[i].map((v,k)=>v*scale[k]+(k===1?.028:0)),delta=b.map((v,k)=>v-a[k]),length2=delta.reduce((sum,v)=>sum+v*v,0);
       for(const other of company.crew.filter(person=>person!==s)){
