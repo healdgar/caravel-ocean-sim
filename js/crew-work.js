@@ -477,13 +477,6 @@ export function stepCrewWork(s,company,boat,dt) {
       if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
     }else if(j.stage==='working'){
       s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
-      if(j.kind==='haul'&&hasExtendedCrewModel(boat.modelId)){
-        const lead=crewExtendedContext(boat.modelId).controlStations?.[j.controlGroup]?.lead;
-        if(lead)s.yaw=Math.atan2((lead[0]-s.x)*boat.beam/3.6,(lead[2]-s.z)*boat.length/12);
-      }
-      if(j.kind==='hatch'&&hasExtendedCrewModel(boat.modelId)&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
-        const grip=resolveShipNode(boat,'hatch.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
-      }
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
@@ -502,6 +495,16 @@ export function stepCrewWork(s,company,boat,dt) {
   if(j.kind==='gunnery'&&j.stage==='working'){
     const tool=crewGunneryTool(s,boat);
     if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
+  }
+  if(hasExtendedCrewModel(boat.modelId)&&j.stage==='working'){
+    // Approach can enter this stage in the current step. Face the real work
+    // before composing its transform, rather than inheriting the last path edge.
+    if(j.kind==='haul'){
+      const lead=crewExtendedContext(boat.modelId).controlStations?.[j.controlGroup]?.lead;
+      if(lead)s.yaw=Math.atan2((lead[0]-s.x)*boat.beam/3.6,(lead[2]-s.z)*boat.length/12);
+    }else if(j.kind==='hatch'&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
+      const grip=resolveShipNode(boat,'hatch.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
+    }
   }
   s.climbPitch=0;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId))&&j.rung>0&&!j.lookoutAtStation){
