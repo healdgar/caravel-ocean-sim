@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createCompany,stepCompany,issueCaptainOrder} from '../js/crew.js';
 import {poseCrewWork} from '../js/crew-pose.js';
-import {crewSeatedPose,updateCrewRowingAttendance} from '../js/crew-work.js';
+import {crewSeatedPose,updateCrewRowingAttendance,proceduralCrewRoute} from '../js/crew-work.js';
+import {laterSailRigContext} from '../js/additional-rig.js';
+import {laterSailStairFlights} from '../js/models/later-sail.js';
 import {loadCrewGLB} from '../js/gltf.js';
 import {requirePlayableShipModel,resolveShipNode} from '../js/ship-models.js';
 import {proceduralDesign} from '../js/models/procedural.js';
@@ -121,4 +123,19 @@ test('blocked new-model assignments back off and invalidate immediately for a ne
   for(let i=0;i<5;i++)stepCompany(company,boat,.1,3);assert.equal(company.routeAttempts,attempts);
   issueCaptainOrder(company,boat,'reduced');stepCompany(company,boat,.1,3);assert.ok(company.routeAttempts>attempts,'new orders invalidate blocked-path retry backoff');
   assert.equal(company.crew[0].x,100,'planner failure never supplies a wall bypass or teleport');
+});
+
+test('Moth work routes clear the actual cockpit coaming with a complete human envelope',()=>{
+  const boat=crewProposedBoat('gipsy-moth-iv'),company=createCompany(undefined,boat.modelId),d=proceduralDesign(boat.modelId),c=d.cockpit,sx=boat.beam/d.frame.beam,sz=boat.length/d.frame.length;
+  stepCompany(company,boat,0,3);const sailor=company.crew[0],context=laterSailRigContext(d.id),entry=laterSailStairFlights(d.id).find(f=>f.zoneId==='cockpit'),x=c.halfWidth*sx,z0=c.bounds[0]*sz,z1=c.bounds[1]*sz,gap=entry.width*sx/2;
+  const walls=[[[-x,z0],[-x,z1]],[[x,z0],[x,z1]],[[-x,z1],[x,z1]],[[-x,z0],[-gap,z0]],[[gap,z0],[x,z0]]];
+  const clearance=(point,[a,b])=>{const v=b.map((q,i)=>q-a[i]),den=v[0]*v[0]+v[1]*v[1],t=Math.max(0,Math.min(1,point.reduce((n,q,i)=>n+(q-a[i])*v[i],0)/den));return Math.hypot(...point.map((q,i)=>q-a[i]-t*v[i]));};
+  const targets=[resolveShipNode(boat,'station.hatch',{space:'design'}),...Object.values(context.controlStations).map(station=>station.position)];
+  for(const target of targets){
+    const path=proceduralCrewRoute(sailor,target,boat);assert.ok(path,'every actual work station must remain reachable through the real entry');
+    for(let i=1;i<path.length;i++){
+      const a=[path[i-1][0]*sx,path[i-1][2]*sz],b=[path[i][0]*sx,path[i][2]*sz],samples=Math.max(1,Math.ceil(Math.hypot(...b.map((v,j)=>v-a[j]))/.04));
+      for(let k=0;k<=samples;k++){const p=a.map((v,j)=>v+(b[j]-v)*k/samples);assert.ok(walls.every(wall=>clearance(p,wall)>=.22-1e-6),'human body never passes through a coaming wall or its opening jamb');}
+    }
+  }
 });

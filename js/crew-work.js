@@ -25,10 +25,13 @@ export function crewSeatedPose(s,boat){
   if(s.stationId)return rowingStationPose(boat,s.stationId);
   const d=proceduralDesign(boat.modelId),station=d.crewStations[s.stationKey??s.id];if(!station)return null;
   const scale=[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length],seat=[station.x,station.y,station.z].map((v,i)=>v*scale[i]);
-  const yaw=station.yaw??Math.PI,z=seat[2]+Math.cos(yaw)*.46,Z=z/scale[2],floor=proceduralDeck(d.id,Z,station.x)*scale[1];
+  const stance=station.yaw??Math.PI,z=seat[2]+Math.cos(stance)*.46,Z=z/scale[2],floor=proceduralDeck(d.id,Z,station.x)*scale[1];
   const edge=Math.max(.12,proceduralHullWidth(d.id,Z,proceduralDeck(d.id,Z,station.x))*scale[0]-d.shellThicknessMetres),x=Math.max(-edge+.12,Math.min(edge-.12,seat[0]));
   const feet=[[x-.10,floor,z],[x+.10,floor,z]],hands=s.role==='Helmsman'?rowingSteeringPose(boat).hands:
-    [-1,1].map(side=>[seat[0]+side*.14,seat[1]+.18,seat[2]+Math.cos(yaw)*.22]);
+    [-1,1].map(side=>[seat[0]+side*.14,seat[1]+.18,seat[2]+Math.cos(stance)*.22]);
+  // A side-mounted steering oar is not directly in front of the bench. Turn
+  // toward its real grips without moving the seat or the planted foot targets.
+  const yaw=s.role==='Helmsman'?Math.atan2((hands[0][0]+hands[1][0])*.5-seat[0],(hands[0][2]+hands[1][2])*.5-seat[2]):stance;
   return {seat,feet,hands,body:{position:seat,yaw,lean:0},stationId:s.stationKey??s.id,drive:false,effort:0};
 }
 export function updateCrewRowingAttendance(company,boat){
@@ -280,6 +283,7 @@ export function proceduralCrewRoute(s,target,boat,company=null){
   // Narrow yacht side decks may lie between regular grid columns. Include the
   // actual centre of each authored cabin/walkway gap, without shrinking people.
   const xColumns=[...Array.from({length:columns+1},(_,i)=>-boat.beam/2+i*boat.beam/columns),...flights.map(f=>f.x*sx)];
+  if(d.cockpit)for(const side of[-1,1])xColumns.push(side*Math.max(0,d.cockpit.halfWidth*sx-margin-.02));
   for(const b of d.structures??[])for(const side of [-1,1]){
     const edge=(b.centre[0]+side*b.size[0]/2)*sx,outside=side*proceduralDeckWidth(d.id,b.centre[2])*sx;
     xColumns.push((edge+outside)*.5);
@@ -291,6 +295,13 @@ export function proceduralCrewRoute(s,target,boat,company=null){
     if(i<0||i>nx||j<0||j>nz)return null;const key=j*width+i;if(points.has(key))return points.get(key);
     const x=xColumns[i]/sx,z=(lo+j*(hi-lo)/nz)/sz,y=floor(x,z),p=[x,y,z],world=physical(p,boat);
     let clear=Math.abs(x)+margin/sx<proceduralDeckWidth(d.id,z);
+    const c=d.cockpit;
+    if(clear&&c){
+      const entry=flights.some(f=>f.zoneId==='cockpit'&&Math.abs(x-f.x)<=f.width/2-margin/sx&&z>=f.z0-margin/sz&&z<=f.z1+margin/sz);
+      const sideWall=Math.abs(Math.abs(x)-c.halfWidth)*sx<margin&&z>=c.bounds[0]-margin/sz&&z<=c.bounds[1]+margin/sz;
+      const endWall=Math.min(Math.abs(z-c.bounds[0]),Math.abs(z-c.bounds[1]))*sz<margin&&Math.abs(x)<c.halfWidth+margin/sx;
+      if(sideWall||(endWall&&!entry))clear=false;
+    }
     if(clear)for(const m of d.masts??[])if(Math.hypot(x*sx,(z-m.z)*sz)<(m.radius??0)*sx+.27){clear=false;break;}
     if(clear)for(const b of d.structures??[])if(Math.abs(x-b.centre[0])<b.size[0]/2+margin/sx&&Math.abs(z-b.centre[2])<b.size[2]/2+margin/sz&&y<b.centre[1]+b.size[1]/2+.02){clear=false;break;}
     const h=d.hatch;
