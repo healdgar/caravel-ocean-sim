@@ -169,6 +169,9 @@ class CanopyImport(unittest.TestCase):
         provenance = json.loads((self.output / "provenance.json").read_bytes())
         self.assertIsNone(provenance["generatorSnapshot"], "an unknown historical generator revision is not invented")
         self.assertNotIn(str(self.folder), json.dumps(provenance), "portable provenance excludes local absolute paths")
+        self.assertEqual(manifest["collarObservations"], provenance["collarObservations"])
+        self.assertEqual(manifest["collarObservations"][0]["stemIndex"], 0)
+        self.assertLess(manifest["collarObservations"][0]["maximumHeightErrorMetres"], .003)
 
     def test_modified_binary_receipt_and_leaf_transform_mismatch_are_rejected_before_replacement(self):
         self.prepare()
@@ -222,23 +225,36 @@ class CanopyImport(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "basal|Detailed wood root"):
             self.prepare()
 
-    def test_offset_basal_stool_is_seated_by_its_real_cap_footprint_not_a_phantom_central_trunk(self):
+    def test_surviving_offset_stems_keep_collar_height_and_declared_plant_envelope_without_invented_seed_containment(self):
         stem = self.source["stems"][0]
         y = stem["z_ground"]-stem["collar_sink_m"]
         caps = np.array([[16+.14, y, 16], [16, y, 16+.14], [16-.14, y, 16], [16, y, 16-.14]], dtype="<f4")
+        instances = np.frombuffer(self.raw["fixture_instances.bin"], dtype="<f4").reshape(-1, 8)
 
         def materials(points):
             return {"fixture_bark": {"positions": points, "uv": np.tile([.5, 0], (len(points), 1)), "normals": np.tile([0, -1, 0], (len(points), 1))}}
 
         self.assertTrue(np.linalg.norm(caps-np.array([16, y, 16]), axis=1).min() > .1)
-        IMPORTER.validate_collar_centres([stem], materials(caps))
-        for delta in ([0, .01, 0], [.4, 0, 0]):
-            with self.assertRaises(ValueError, msg="actual lifted or displaced stools retain the original 3 mm rejection"):
-                IMPORTER.validate_collar_centres([stem], materials(caps+delta))
+        IMPORTER.validate_collar_centres([stem], materials(caps), instances)
+        # Peer stems may die: a seed need not lie inside the surviving stool.
+        for surviving in (caps[:1], np.array([[16+.14, y, 16], [16+.20, y, 16+.1]], dtype="<f4")):
+            observed = IMPORTER.validate_collar_centres([stem], materials(surviving), instances)
+            self.assertEqual(observed[0]["stemIndex"], 0)
+            self.assertGreater(observed[0]["maximumHorizontalOffsetMetres"], .1)
+            self.assertLess(observed[0]["maximumHeightErrorMetres"], .003)
+            self.assertEqual(len(observed[0]["caps"]), len(surviving))
+        for delta in ([0, .004, 0], [20, 0, 0]):
+            with self.assertRaises(ValueError, msg="lifted collars and caps beyond the source plant envelope are rejected"):
+                IMPORTER.validate_collar_centres([stem], materials(caps+delta), instances)
         centre = np.array([[16, y, 16]], dtype="<f4")
-        IMPORTER.validate_collar_centres([stem], materials(centre))
+        IMPORTER.validate_collar_centres([stem], materials(centre), instances)
         with self.assertRaises(ValueError):
-            IMPORTER.validate_collar_centres([stem], materials(centre+[0, .004, 0]))
+            IMPORTER.validate_collar_centres([stem], materials(centre+[0, .004, 0]), instances)
+        other = dict(stem, index=1, x=26)
+        other_instance = instances.copy()
+        other_instance[0, 0] = 26
+        with self.assertRaises(ValueError, msg="nearest-stem assignment cannot silently leave another authored stem without any basal cap"):
+            IMPORTER.validate_collar_centres([stem, other], materials(centre+[10, 0, 0]), np.concatenate((instances, other_instance)))
 
     def test_glb_headers_and_native_nonfinite_data_are_not_silently_accepted(self):
         raw = self.raw["fixture_canopy.glb"]
