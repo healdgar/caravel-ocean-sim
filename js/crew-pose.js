@@ -164,6 +164,19 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
   for(const [name,weight]of [['pelvis',.18],['spine_01',.45],['spine_02',.37]]){
     const node=poseNodeIndex(a,name);if(node>=0){const angle=lean*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
   }
+  let workspaceForward=0;
+  if(boat.modelId==='victory'&&hands&&requestedLean>0){
+    // The long gun's operator stands beside its truck. Move the bent hip within
+    // a bounded standing workspace, rather than extending either actual arm.
+    for(const [i,side]of ['l','r'].entries()){
+      const target=actorLocal(hands[i],s),shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),hand=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
+      const reach=Math.hypot(...poseSub(elbow,shoulder))+Math.hypot(...poseSub(hand,elbow))-.015;
+      const across=(target[0]-shoulder[0])**2+(target[1]-shoulder[1])**2;
+      workspaceForward=Math.max(workspaceForward,target[2]-shoulder[2]-Math.sqrt(Math.max(0,reach*reach-across)));
+    }
+    workspaceForward=Math.max(0,Math.min(.30-.08*fraction,workspaceForward));
+    if(workspaceForward){const p=posePosition(a.world[pelvis]);p[2]+=workspaceForward;poseMoveBone(a,pelvis,p);}
+  }
   // As in the rowing stance, lower the pelvis only as much as the genuine leg
   // lengths require. Never lengthen bones to manufacture a planted boot.
   let lower=0;
@@ -186,7 +199,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
     if(a.updateBranch)a.updateBranch(f.node);else a.update();
     (s.grips??={})['foot_'+side]=p.target;
   }
-  s.gunContacts={feet,lean,requestedLean,reachExcessBefore:reachExcess};
+  s.gunContacts={feet,lean,requestedLean,reachExcessBefore:reachExcess,workspaceForward};
   const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s);
   s.moisturePoints=[feet[0].sole.map((v,i)=>(v+feet[1].sole[i])*.5),point('pelvis'),point('spine_02'),point('Head')];
 }
