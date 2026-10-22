@@ -1054,7 +1054,8 @@ Both 89-frame samples used identical scene settings with Stats closed; the GPU
 candidate's median and p95 frame spans were both 16.7 ms. This short comparison
 does not establish sustained thermal or physical-iPhone performance.
 
-The combined native suite passes **738/738**, with no skips or cancellations.
+The combined native suite passes **738/738**, with no skips or cancellations;
+the subsequent expanded GPU guard run passes **11/11** with unchanged runtime.
 It exercises source and packaged pages, every registered ship, canonical GPU
 dispatch and shared buffers, deliberate bypass failures, recoil, accessories,
 wetness, mobile controls, offline startup and strict pose parity. Seven generic

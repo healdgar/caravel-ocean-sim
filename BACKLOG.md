@@ -54,6 +54,12 @@ qualification is complete; publication and deployed-byte verification follow.
   require the actual canonical pose pipeline, rejecting a recoil-only dispatch
   as well as CPU animation, full or partial mesh uploads and skipped dispatch.
   Final visible Chrome review has no console warnings/errors.
+- Final review strengthened the command guard against CPU staging-buffer copies
+  and canonical dispatches with zero x/y/z or insufficient x workgroups. Actual
+  production-frame mutants fail and restored frames pass in source and packaged
+  pages. The expanded native/static/accessory guard run passes **11/11** in
+  **10.972 seconds**, receipt `/tmp/waterworld-gpu-expanded-147.log`; runtime
+  bytes are unchanged from the 738-test combined qualification.
 - The user is downloading a macOS update and authorized work until restart.
   Stop promptly when asked, preserve all checkouts/assets, and keep the one-night
   heartbeat paused. Root alone runs validation; direct authors run no tests.
