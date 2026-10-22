@@ -174,5 +174,28 @@ export function loadCrewGLB(bytes) {
   }
   if(count===0||count>100000)throw Error('Crew mesh exceeds budget');
   const vertices=new Uint8Array(count*60);let offset=0;for(const c of chunks){vertices.set(c,offset);offset+=c.length;}
+  // Once per prepared crew asset, measure the actual skinned boots in their
+  // authored bind posture. Walking IK uses these soles, not guessed ankles.
+  animator.sample(null,0);animator.footContacts={};
+  const contactFloats=new Float32Array(vertices.buffer,vertices.byteOffset,vertices.byteLength/4),contactJoints=new Uint16Array(vertices.buffer,vertices.byteOffset,vertices.byteLength/2);
+  for(const side of ['l','r']){
+    const node=animator.nodeIndex('foot_'+side);if(node<0)continue;
+    const slots=new Set(animator.joints.map((n,i)=>animator.names[n]==='foot_'+side||animator.names[n]==='ball_'+side?i:-1).filter(i=>i>=0)),points=[];
+    for(let i=0;i<count;i++){
+      let influence=0;for(let k=0;k<4;k++)if(slots.has(contactJoints[i*30+18+k]))influence+=contactFloats[i*15+11+k];
+      if(influence<.5)continue;
+      const point=[0,0,0];
+      for(let k=0;k<4;k++){
+        const at=contactJoints[i*30+18+k]*16,w=contactFloats[i*15+11+k];
+        for(let c=0;c<3;c++)point[c]+=w*(animator.palette[at+c]*contactFloats[i*15]+animator.palette[at+4+c]*contactFloats[i*15+1]+animator.palette[at+8+c]*contactFloats[i*15+2]+animator.palette[at+12+c]);
+      }
+      points.push({index:i,point});
+    }
+    if(!points.length)continue;
+    const ankle=Array.from(animator.world[node].subarray(12,15)),min=[0,1,2].map(c=>Math.min(...points.map(p=>p.point[c]))),max=[0,1,2].map(c=>Math.max(...points.map(p=>p.point[c])));
+    animator.footContacts[side]=Object.freeze({node,ankle:Object.freeze(ankle),ankleAboveSole:ankle[1]-min[1],
+      min:Object.freeze(min.map((v,i)=>v-ankle[i])),max:Object.freeze(max.map((v,i)=>v-ankle[i])),
+      restWorld:Object.freeze(Array.from(animator.world[node])),vertices:Object.freeze(points.map(p=>p.index))});
+  }
   return {asset,animator,vertices,indices:new Uint32Array(indices),vertexCount:count};
 }

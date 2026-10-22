@@ -90,6 +90,20 @@ export function rowingHullWidth(id,z,y){return hullLoftWidth(rowingDesign(id).pr
 export function rowingHullDeck(id,z){return hullLoftDeck(rowingDesign(id).profile,z);}
 export function rowingDeck(id,z){const d=rowingDesign(id);return d.floorHeight+hullLoftSheer(d.profile,z);}
 export function rowingDeckWidth(id,z){const d=rowingDesign(id);return Math.max(0,hullLoftWidth(d.profile,z,rowingDeck(id,z))-.05/(d.runtime.beam/d.frame.beam));}
+const rowingBenchDescriptorsCache=new Map();
+// Design-space thwarts are physical obstacles as well as seats. The mesh and
+// walking contacts consume the same full-beam plank and supporting legs.
+export function rowingBenchDescriptors(id){
+  if(rowingBenchDescriptorsCache.has(id))return rowingBenchDescriptorsCache.get(id);
+  const d=rowingDesign(id),sx=d.runtime.beam/d.frame.beam;
+  const zs=[...new Set([...d.stations.map(s=>s.seat[2]),...Object.values(d.crewStations).map(s=>s.z)])].sort((a,b)=>a-b);
+  const benches=zs.flatMap(z=>{
+    const y=d.seatHeight+hullLoftSheer(d.profile,z),w=Math.max(0,rowingHullWidth(id,z,y)-d.shellThicknessMetres/sx);
+    return w<.1?[]:[{id:'bench.'+z,z,top:y,min:[-w,y-.032,z-.065],max:[w,y,z+.065],
+      supports:[-1,1].map(side=>({a:[side*w*.65,rowingDeck(id,z),z],b:[side*w*.65,y-.02,z],radius:.022,sides:6}))}];
+  });
+  deepFreeze(benches);rowingBenchDescriptorsCache.set(id,benches);return benches;
+}
 const rowingRigContexts=new Map();
 export function rowingRigContext(id){
   if(rowingRigContexts.has(id))return rowingRigContexts.get(id);

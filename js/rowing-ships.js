@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import {createMeshWriter} from './mesh-writer.js';
-import {rowingDesign,rowingDeck,rowingHullWidth,rowingHullDeck,rowingRigContext} from './models/rowing.js';
+import {rowingDesign,rowingDeck,rowingHullWidth,rowingHullDeck,rowingRigContext,rowingBenchDescriptors} from './models/rowing.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 import {rowingAnchorFitting,rowingSurfaceSpar,proceduralRigContext} from './additional-rig.js';
@@ -102,11 +102,10 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
     }
   }
   group('deck.floorboards','deck.main',floorStart);
-  const benchesStart=out.length,benchZs=[...new Set([...d.stations.map(s=>s.seat[2]),...Object.values(d.crewStations).map(s=>s.z)])].sort((a,b)=>a-b);
-  for(const z of benchZs){
-    const y=d.seatHeight+hullLoftSheer(p,z),w=Math.max(0,rowingHullWidth(modelId,z,y)-d.shellThicknessMetres/sx);if(w<.1)continue;
-    box([-w,y-.032,z-.065],[w,y,z+.065],1);
-    for(const side of [-1,1])tube([side*w*.65,rowingDeck(modelId,z),z],[side*w*.65,y-.02,z],.022,1,.022,6);
+  const benchesStart=out.length;
+  for(const bench of rowingBenchDescriptors(modelId)){
+    box(bench.min,bench.max,1);
+    for(const leg of bench.supports)tube(leg.a,leg.b,leg.radius,1,leg.radius,leg.sides);
   }
   group('rowing.benches','deck.main',benchesStart);
   const framesStart=out.length;

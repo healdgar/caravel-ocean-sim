@@ -1,7 +1,7 @@
 import { gltfQuatMultiply } from './gltf.js';
 import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
-import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel } from './crew-work.js';
+import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts } from './crew-work.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
 
@@ -90,9 +90,50 @@ export function poseSeatedCrew(a,s,targets=s.seatedPose){
   const left=point('foot_l'),right=point('foot_r');s.moisturePoints=[left.map((v,i)=>(v+right[i])*.5),point('pelvis'),point('spine_02'),point('Head')];
   return true;
 }
+function poseRowingWalkingFeet(a,s,boat){
+  const contacts=crewRowingWalkContacts(s,boat,a.footContacts??{});if(!contacts)return false;
+  // Keep the imported upper-body gait, but place an untwisted pelvis over the
+  // two real sole targets. Leg lengths and every authored bone scale survive.
+  for(const name of ['root','pelvis']){
+    const node=poseNodeIndex(a,name);if(node<0)continue;
+    a.pose[node].t.set(a.rest[node].t);a.pose[node].r.set(a.rest[node].r);a.pose[node].s.set(a.rest[node].s);
+  }
+  a.update();
+  const pelvis=poseNodeIndex(a,'pelvis'),base=posePosition(a.world[pelvis]),targets=[];
+  for(const [i,side]of ['l','r'].entries()){
+    const f=a.footContacts[side],p=contacts.feet[i].sole.slice();p[1]+=f.ankleAboveSole*s.scale[1];targets.push(actorLocal(p,s));
+  }
+  const restAnkle=(a.footContacts.l.ankle[1]+a.footContacts.r.ankle[1])*.5;
+  const raised=(targets[0][1]+targets[1][1])*.5-restAnkle;
+  poseMoveBone(a,pelvis,[base[0],base[1]+raised-.035,base[2]]);
+  // A high/low step bends the knees rather than stretching the floor leg. Find
+  // the shared pelvis height permitted by the two actual two-bone chains.
+  let lower=0;
+  for(const [i,side]of ['l','r'].entries()){
+    const hip=posePosition(a.world[poseNodeIndex(a,'thigh_'+side)]),knee=posePosition(a.world[poseNodeIndex(a,'calf_'+side)]),ankle=posePosition(a.world[poseNodeIndex(a,'foot_'+side)]),length=Math.hypot(...poseSub(knee,hip))+Math.hypot(...poseSub(ankle,knee))-.006;
+    const horizontal=Math.hypot(targets[i][0]-hip[0],targets[i][2]-hip[2]),height=Math.sqrt(Math.max(0,length*length-horizontal*horizontal));
+    lower=Math.min(lower,targets[i][1]+height-hip[1]);
+  }
+  if(lower<0){const p=posePosition(a.world[pelvis]);p[1]+=lower;poseMoveBone(a,pelvis,p);}
+  for(const [i,side]of ['l','r'].entries()){
+    const sign=side==='l'?1:-1,f=a.footContacts[side],target=targets[i];
+    solveCrewLimb(a,['thigh_'+side,'calf_'+side,'foot_'+side],target,[sign*.25,.35,.85]);
+    // Undo the ankle rotation introduced by leg IK. The measured sole stays
+    // level; its authored boot/toe geometry is unchanged.
+    const foot=f.node,parent=a.parent[foot],q=poseRotation(a.world[parent]),inverse=[-q[0],-q[1],-q[2],q[3]],yaw=contacts.feet[i].yaw-s.yaw,turn=[0,Math.sin(yaw/2),0,Math.cos(yaw/2)],desired=new Float32Array(4),local=new Float32Array(4);
+    gltfQuatMultiply(desired,turn,poseRotation(f.restWorld));gltfQuatMultiply(local,inverse,desired);a.pose[foot].r.set(local);
+    const toe=poseNodeIndex(a,'ball_'+side);if(toe>=0)a.pose[toe].r.set(a.rest[toe].r);
+    if(a.updateBranch)a.updateBranch(foot);else a.update();
+    (s.grips??={})['foot_'+side]=target;
+  }
+  s.walkContacts=contacts;
+  const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s),left=point('foot_l'),right=point('foot_r');
+  s.moisturePoints=[left.map((v,i)=>(v+right[i])*.5),point('pelvis'),point('spine_02'),point('Head')];return true;
+}
 export function poseCrewWork(a,s,boat){
-  const j=s.job;s.grips=null;
+  const j=s.job;s.grips=null;s.walkContacts=null;
   if(!j&&poseSeatedCrew(a,s))return;
+  if(j)poseRowingWalkingFeet(a,s,boat);
   if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
     // The tall first-rate's ratlines are farther apart. Hands can slide along
     // the shroud between them; keep the human gait at a reachable 32 cm stride.

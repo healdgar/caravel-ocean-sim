@@ -5,7 +5,7 @@ import { gltfTRS } from './gltf.js';
 import { resolveShipNode,requirePlayableShipModel } from './ship-models.js';
 import { VICTORY_DESIGN, victorySheer } from './models/victory.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
-import {ROWING_DESIGNS,rowingRigContext} from './models/rowing.js';
+import {ROWING_DESIGNS,rowingRigContext,rowingBenchDescriptors} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS,laterSailStairFlights} from './models/later-sail.js';
 import {proceduralDesign,proceduralDeck,proceduralDeckWidth,proceduralHullWidth} from './models/procedural.js';
 import {laterSailRigContext} from './additional-rig.js';
@@ -46,6 +46,60 @@ const workClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const distance3=(a,b)=>Math.hypot(...a.map((x,i)=>x-b[i]));
 const deckPoint=(x,z,boat)=>[x,boat?crewDeckHeight(boat,z,x):vesselDeck(z),z];
 function physical(p,boat){return [p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat),p[2]*boat.length/12];}
+function crewRowingWalkState(s,boat){
+  const j=s.job;if(!j||!Object.hasOwn(ROWING_DESIGNS,boat.modelId??''))return null;
+  if(j.rowingWalk?.source===j.path)return j.rowingWalk;
+  const points=[],distances=[];let length=0;
+  for(const p of j.path??[]){
+    const point=physical(p,boat),previous=points.at(-1),distance=previous?Math.hypot(point[0]-previous[0],point[2]-previous[2]):0;
+    if(previous&&distance<1e-8)continue;
+    length+=distance;points.push(point);distances.push(length);
+  }
+  if(!points.length)points.push(Array.from(s.position)),distances.push(0);
+  const benches=rowingBenchDescriptors(boat.modelId).map(b=>({...b,min:physical(b.min,boat),max:physical(b.max,boat),z:b.z*boat.length/12,top:b.top*vesselVerticalScale(boat)}));
+  return j.rowingWalk={source:j.path,points,distances,length,distance:0,benches};
+}
+function crewRowingPathPoint(w,distance){
+  const along=workClamp(distance,0,w.length);let i=1;while(i<w.points.length-1&&w.distances[i]<along)i++;
+  const a=w.points[Math.max(0,i-1)],b=w.points[Math.min(i,w.points.length-1)],span=w.distances[Math.min(i,w.distances.length-1)]-w.distances[Math.max(0,i-1)],t=span>1e-9?(along-w.distances[i-1])/span:0;
+  return {point:a.map((v,k)=>v+(b[k]-v)*t),yaw:Math.atan2(b[0]-a[0],b[2]-a[2])};
+}
+// Actual boot soles alternate planted contacts. Swing lifts vertically before
+// advancing over a thwart, then lowers onto its top or the actual floor.
+// This evaluator never advances work, rowing phase or attendance.
+export function crewRowingWalkContacts(s,boat,footprints){
+  const w=crewRowingWalkState(s,boat);if(!w)return null;
+  const sy=vesselVerticalScale(boat),sx=boat.beam/3.6,sz=boat.length/12,stride=.60,smooth=t=>{t=workClamp(t,0,1);return t*t*(3-2*t);};
+  const contact=(distance,side)=>{
+    const f=footprints[side],q=crewRowingPathPoint(w,distance),sign=side==='l'?1:-1,lateral=Math.abs(f.ankle[0])*s.scale[0];
+    const p=q.point.slice();p[0]+=Math.cos(q.yaw)*sign*lateral;p[2]-=Math.sin(q.yaw)*sign*lateral;
+    const radius=Math.hypot(Math.max(Math.abs(f.min[0]),Math.abs(f.max[0]))*s.scale[0],Math.max(Math.abs(f.min[2]),Math.abs(f.max[2]))*s.scale[2]);
+    let support=null;
+    for(const b of w.benches)if(p[0]+radius>b.min[0]&&p[0]-radius<b.max[0]&&p[2]+radius>b.min[2]&&p[2]-radius<b.max[2]&&(!support||Math.abs(p[2]-b.z)<Math.abs(p[2]-support.z)))support=b;
+    if(support){p[2]=support.z;p[1]=support.top;}
+    else p[1]=proceduralDeck(boat.modelId,p[2]/sz,p[0]/sx)*sy;
+    return {sole:p,yaw:q.yaw,support:support?.id??'floor',radius};
+  };
+  const feet=[];
+  for(const [index,side]of ['l','r'].entries()){
+    if(!footprints[side])throw Error('Walking crew requires measured '+side+' boot');
+    if(!['approach','return','lookout-approach','lookout-return'].includes(s.job.stage)){
+      const f=footprints[side],sign=side==='l'?1:-1,p=Array.from(s.position),lateral=Math.abs(f.ankle[0])*s.scale[0];p[0]+=Math.cos(s.yaw)*sign*lateral;p[2]-=Math.sin(s.yaw)*sign*lateral;
+      const radius=Math.hypot(Math.max(Math.abs(f.min[0]),Math.abs(f.max[0]))*s.scale[0],Math.max(Math.abs(f.min[2]),Math.abs(f.max[2]))*s.scale[2]);
+      const b=w.benches.find(b=>p[0]+radius>b.min[0]&&p[0]-radius<b.max[0]&&p[2]+radius>b.min[2]&&p[2]-radius<b.max[2]);
+      p[1]=b?b.top:proceduralDeck(boat.modelId,p[2]/sz,p[0]/sx)*sy;feet.push({sole:p,yaw:s.yaw,support:b?.id??'floor',swing:false});continue;
+    }
+    const offset=index*.5,cycle=w.distance/stride+offset,base=Math.floor(cycle),phase=cycle-base,at=(base-offset)*stride+stride*.25,a=contact(at,side);
+    if(phase<=.5){feet.push({...a,swing:false});continue;}
+    const b=contact(at+stride,side),t=(phase-.5)*2,e=smooth((t-.18)/.64),radius=Math.max(a.radius,b.radius),low=a.sole.map((v,k)=>v+(b.sole[k]-v)*e);
+    let clearance=Math.max(a.sole[1],b.sole[1]);
+    for(const bench of w.benches)if(Math.max(a.sole[0],b.sole[0])+radius>bench.min[0]&&Math.min(a.sole[0],b.sole[0])-radius<bench.max[0]&&Math.max(a.sole[2],b.sole[2])+radius>bench.min[2]&&Math.min(a.sole[2],b.sole[2])-radius<bench.max[2])clearance=Math.max(clearance,bench.top);
+    clearance+=.08;
+    low[1]=t<.18?a.sole[1]+(clearance-a.sole[1])*smooth(t/.18):t>.82?clearance+(b.sole[1]-clearance)*smooth((t-.82)/.18):clearance;
+    feet.push({sole:low,yaw:a.yaw+Math.atan2(Math.sin(b.yaw-a.yaw),Math.cos(b.yaw-a.yaw))*e,support:null,swing:true});
+  }
+  return {feet,benches:w.benches,distance:w.distance};
+}
 function homePoint(s,boat){return deckPoint(s.home[0],s.home[1],boat);}
 function climbRoot(mast,side,rung,boat){
   const p=resolveShipNode(boat,`mast.${crewMastName(boat,mast)}.runner`,{space:'design',side,step:rung});
@@ -435,6 +489,7 @@ export function stepCrewWork(s,company,boat,dt) {
       // Yield locally to another body rather than walking through it.
       const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2])<.54);
       if(!occupied || d<.02){
+        const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));
         j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;
         if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
         if(d<=.02){j.cursor++;if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}if(j.cursor>=j.path.length){
