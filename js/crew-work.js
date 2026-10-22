@@ -173,7 +173,7 @@ export function victoryCrewRoute(s,target,boat,{gunCorridor=false}={}){
   };
   // Enter/leave a flight at its landing, then use the outboard corridor. The
   // centreline remains clear for hatch gratings, capstans and mast heels.
-  const outer=z=>side*Math.min(gunCorridor?.54:1.3,modelDeckWidth(boat,z)-.12);
+  const outer=z=>side*Math.min(gunCorridor?.54:z<=VICTORY_DESIGN.decks.forecastle.end?.41:.90,modelDeckWidth(boat,z)-.34/(boat.beam/3.6));
   add(s.x,start);add(outer(start),start);
   const along=(from,to)=>{
     const direction=Math.sign(to-from),count=Math.max(1,Math.ceil(Math.abs(to-from)/.35));
