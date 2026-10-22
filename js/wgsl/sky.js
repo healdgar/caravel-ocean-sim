@@ -235,12 +235,23 @@ fn surfaceAir(color:vec3f,world:vec3f)->vec3f {
   // stripe, particularly when heavy rain raised the veil to ~25% at 100 m.
   // Approximate local illumination with diffuse sky and a continuous aerosol
   // phase lobe. Rain retains its extinction while weakening direct illumination.
-  let cosine=clamp(dot(direction,F.sunDir.xyz),-1.0,1.0);
-  let localSun=sunIlluminance()*step(0.0,F.sunDir.y)*phaseHG(cosine,.8)*.06*mix(1.0,.15,rain);
-  let localMoon=lunarIlluminance()*phaseHG(dot(direction,lunarDirection()),.8)*.06*mix(1.0,.15,rain);
-  let localAir=zenith*mix(.45,.25,rain)+localSun+localMoon;
-  let distantAir=mix(skyAtmo(direction),zenith*.55,rain*.7);
-  let air=mix(localAir,distantAir,smoothstep(500.0,2500.0,d))+lightningCloud(direction);
+  // Outside the blend interval one path has exactly zero weight. All sky
+  // lookups use explicit LODs, so skipping it needs no neighbouring lanes.
+  var air:vec3f;
+  if(d<2500.0){
+    let cosine=clamp(dot(direction,F.sunDir.xyz),-1.0,1.0);
+    let localSun=sunIlluminance()*step(0.0,F.sunDir.y)*phaseHG(cosine,.8)*.06*mix(1.0,.15,rain);
+    let localMoon=lunarIlluminance()*phaseHG(dot(direction,lunarDirection()),.8)*.06*mix(1.0,.15,rain);
+    let localAir=zenith*mix(.45,.25,rain)+localSun+localMoon;
+    air=localAir;
+    if(d>500.0){
+      let distantAir=mix(skyAtmo(direction),zenith*.55,rain*.7);
+      air=mix(localAir,distantAir,smoothstep(500.0,2500.0,d));
+    }
+  }else{
+    air=mix(skyAtmo(direction),zenith*.55,rain*.7);
+  }
+  air+=lightningCloud(direction);
   return color*transmission+air*(1.0-transmission);
 }
 
