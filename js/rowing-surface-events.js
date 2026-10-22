@@ -42,7 +42,9 @@ function rowingSurfaceAcceptedWater(boat,time){
   };
   return {water,sample};
 }
-function rowingSurfaceKinematics(boat,pose,point,water){
+// Use the same prescribed stroke and rigid-body velocity as the force model.
+// These are captured at contact, before dry confirmation can finish the lift.
+function rowingSurfaceVelocity(boat,pose,point){
   const h=boat.heading*Math.PI/180,p=boat.pitch??0,ch=Math.cos(h),sh=Math.sin(h),cp=Math.cos(p),sp=Math.sin(p);
   const u=boat.surgeVelocity??0,v=boat.leewayVelocity??0,w=boat.heaveVelocity??0,pr=boat.pitchVelocity??0,rr=boat.rollVelocity??0,yr=boat.yawRate??0;
   if(![u,v,w,pr,rr,yr].every(Number.isFinite))return null;
@@ -50,9 +52,9 @@ function rowingSurfaceKinematics(boat,pose,point,water){
   const centre=rowingSurfaceRotate(pose.axes,cg).map((x,i)=>x+[boat.x,boat.heave,boat.z][i]);
   const omega=[pr*ch-rr*sh*cp,-yr-rr*sp,pr*sh+rr*ch*cp],spin=rowingSurfaceCross(omega,rowingSurfaceSub(point,centre));
   const stroke=rowingSurfaceRotate(pose.axes,pose.bladeVelocity),translation=[u*sh+v*ch,w,-u*ch+v*sh];
-  return translation.map((x,i)=>x+spin[i]+stroke[i]-water.velocity[i]);
+  return translation.map((x,i)=>x+spin[i]+stroke[i]);
 }
-function rowingSurfaceCrossing(previous,current,entering){
+function rowingSurfaceCrossing(previous,current,entering,sample,width){
   let crossing=null;
   for(let i=0;i<current.gaps.length;i++){
     const a=previous.gaps[i],b=current.gaps[i];
@@ -60,7 +62,16 @@ function rowingSurfaceCrossing(previous,current,entering){
     const t=a/(a-b);
     if(crossing&&(entering?t>=crossing.t:t<=crossing.t))continue;
     crossing={t,time:previous.time+(current.time-previous.time)*t,
-      point:previous.corners[i].map((x,k)=>x+(current.corners[i][k]-x)*t)};
+      point:previous.corners[i].map((x,k)=>x+(current.corners[i][k]-x)*t),
+      velocity:previous.velocities[i].map((x,k)=>x+(current.velocities[i][k]-x)*t)};
+  }
+  if(crossing){
+    const water=sample(crossing.point[0],crossing.point[2]),normal=rowingSurfaceNormal(sample,crossing.point,width);
+    const bladeNormal=previous.normal.map((x,i)=>x+(current.normal[i]-x)*crossing.t),length=Math.hypot(...bladeNormal);
+    if(!water||!normal||!(length>1e-8))return null;
+    // Keep the accepted contact's motion through delayed dry confirmation.
+    crossing.relativeVelocity=crossing.velocity.map((x,i)=>x-water.velocity[i]);
+    crossing.surfaceNormal=normal;crossing.bladeNormal=bladeNormal.map(x=>x/length);
   }
   return crossing;
 }
@@ -100,13 +111,12 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
   }
   function eventFor(vessel,boat,pose,crossing,kind,load,sample,time,dt){
     if(!crossing||!load||time-load.time>L.maxDt*1.01||time-crossing.time>SURFACE_WAVE_LIMITS.maxEventAge)return null;
-    const point=crossing.point,water=sample(point[0],point[2]),normal=rowingSurfaceNormal(sample,point,pose.bladeWidth);
-    if(!water||!normal)return null;
-    const relative=rowingSurfaceKinematics(boat,pose,point,water);if(!relative)return null;
+    const point=crossing.point,normal=crossing.surfaceNormal,relative=crossing.relativeVelocity;
+    if(!sample(point[0],point[2])||![normal,relative,crossing.bladeNormal].every(rowingSurfacePoint))return null;
     const normalSpeed=rowingSurfaceDot(relative,normal),closingSpeed=kind==='entry'?-normalSpeed:normalSpeed;
     if(!(closingSpeed>1e-5))return null;
     const wetArea=Math.min(load.wetArea,pose.bladeLength*pose.bladeWidth);
-    const impulse=rowingSurfaceImpulse({wetArea,bladeWidth:pose.bladeWidth,relativeVelocity:relative,normal:pose.worldNormal,force:load.force,dt:Math.min(dt,load.dt)});
+    const impulse=rowingSurfaceImpulse({wetArea,bladeWidth:pose.bladeWidth,relativeVelocity:relative,normal:crossing.bladeNormal,force:load.force,dt:Math.min(dt,load.dt)});
     if(!impulse)return null;
     // Emergence can use the last fresh submerged reaction, but never extend
     // that old load over a longer interval or invent extra reaction work.
@@ -151,7 +161,9 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
       for(const pose of poses){
         const cornerWater=pose.worldCorners.map(p=>sample(p[0],p[2]));
         if(!pose.waterValid||cornerWater.some(q=>!q)){record.stations.delete(pose.stationId);continue;}
-        const current={time,corners:pose.worldCorners.map(p=>[...p]),gaps:pose.worldCorners.map((p,i)=>p[1]-cornerWater[i].height)};
+        const velocities=pose.worldCorners.map(p=>rowingSurfaceVelocity(boat,pose,p));
+        if(velocities.some(v=>!rowingSurfacePoint(v))){record.stations.delete(pose.stationId);continue;}
+        const current={time,corners:pose.worldCorners.map(p=>[...p]),velocities,normal:[...pose.worldNormal],gaps:pose.worldCorners.map((p,i)=>p[1]-cornerWater[i].height)};
         const low=Math.min(...current.gaps),dry=low>=L.dryClearance,wet=low<=-L.entryDepth&&pose.wetArea>0;
         let history=record.stations.get(pose.stationId);
         const load=loadMap.get(pose.stationId);
@@ -159,7 +171,7 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
           history={...current,wet:!dry,dryTime:0,crossing:null,lastLoad:load??null};record.stations.set(pose.stationId,history);continue;
         }
         if(history.wet){
-          if(low>0&&!history.crossing)history.crossing=rowingSurfaceCrossing(history,current,false);
+          if(low>0&&!history.crossing)history.crossing=rowingSurfaceCrossing(history,current,false,sample,pose.bladeWidth);
           if(low<=0){history.crossing=null;history.dryTime=0;}
           history.dryTime=dry?history.dryTime+dt:0;
           if(history.dryTime>=L.drySeconds){
@@ -168,7 +180,7 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
             history.wet=false;history.crossing=null;history.dryTime=0;
           }
         }else{
-          if(low<=0&&!history.crossing)history.crossing=rowingSurfaceCrossing(history,current,true);
+          if(low<=0&&!history.crossing)history.crossing=rowingSurfaceCrossing(history,current,true,sample,pose.bladeWidth);
           if(low>0)history.crossing=null;
           if(wet){
             const event=eventFor(vessel,boat,pose,history.crossing,'entry',load,sample,time,dt);
@@ -176,7 +188,7 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
             history.wet=true;history.crossing=null;history.dryTime=0;
           }
         }
-        history.time=time;history.corners=current.corners;history.gaps=current.gaps;if(load)history.lastLoad=load;
+        history.time=time;history.corners=current.corners;history.velocities=current.velocities;history.normal=current.normal;history.gaps=current.gaps;if(load)history.lastLoad=load;
       }
       // Rotate station priority even when several synchronized catches exceed
       // the frame budget; every real station gets a turn across later cycles.
