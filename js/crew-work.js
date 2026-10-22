@@ -338,17 +338,32 @@ export function proceduralCrewRoute(s,target,boat,company=null){
   // Narrow yacht side decks may lie between regular grid columns. Include the
   // actual centre of each authored cabin/walkway gap, without shrinking people.
   const xColumns=[...Array.from({length:columns+1},(_,i)=>-boat.beam/2+i*boat.beam/columns),...flights.map(f=>f.x*sx)];
+  if(rowingBody){
+    xColumns.push(0,s.x*sx,target[0]*sx);
+    for(const m of d.masts??[])for(const side of[-1,1])xColumns.push(side*((m.radius??0)*sx+.272));
+  }
   if(d.cockpit)for(const side of[-1,1])xColumns.push(side*Math.max(0,d.cockpit.halfWidth*sx-margin-.02));
   for(const b of d.structures??[])for(const side of [-1,1]){
     const edge=(b.centre[0]+side*b.size[0]/2)*sx,outside=side*proceduralDeckWidth(d.id,b.centre[2])*sx;
     xColumns.push((edge+outside)*.5);
   }
-  xColumns.sort((a,b)=>a-b);const nx=xColumns.length-1,nz=Math.ceil((hi-lo)/pitch),width=nx+1;
+  xColumns.sort((a,b)=>a-b);
+  if(rowingBody)for(let i=xColumns.length-1;i>0;i--)if(Math.abs(xColumns[i]-xColumns[i-1])<1e-8)xColumns.splice(i,1);
+  const zRows=Array.from({length:Math.ceil((hi-lo)/pitch)+1},(_,i)=>lo+i*(hi-lo)/Math.ceil((hi-lo)/pitch));
+  if(rowingBody){
+    const benches=rowingBenchDescriptors(d.id);
+    for(let i=1;i<benches.length;i++)zRows.push((benches[i-1].z+benches[i].z)*sz*.5);
+    zRows.push(s.z*sz,target[2]*sz);
+    for(const m of d.masts??[])zRows.push(m.z*sz);
+    zRows.sort((a,b)=>a-b);
+    for(let i=zRows.length-1;i>0;i--)if(Math.abs(zRows[i]-zRows[i-1])<1e-8)zRows.splice(i,1);
+  }
+  const nx=xColumns.length-1,nz=zRows.length-1,width=nx+1;
   const floor=(x,z)=>{const f=flights.find(f=>Math.abs(x-f.x)<=f.width/2&&z>=f.z0&&z<=f.z1);return f?f.y0+(f.y1-f.y0)*(z-f.z0)/(f.z1-f.z0):proceduralDeck(d.id,z,x);};
   const start=s.job?.position??[s.x,crewDeckHeight(boat,s.z,s.x),s.z],points=new Map();
   const make=(i,j)=>{
     if(i<0||i>nx||j<0||j>nz)return null;const key=j*width+i;if(points.has(key))return points.get(key);
-    const x=xColumns[i]/sx,z=(lo+j*(hi-lo)/nz)/sz,y=floor(x,z),p=[x,y,z],world=physical(p,boat);
+    const x=xColumns[i]/sx,z=zRows[j]/sz,y=floor(x,z),p=[x,y,z],world=physical(p,boat);
     let clear=Math.abs(x)+margin/sx<proceduralDeckWidth(d.id,z);
     const c=d.cockpit;
     if(clear&&c){
@@ -366,7 +381,8 @@ export function proceduralCrewRoute(s,target,boat,company=null){
   };
   const nearest=p=>{
     let I=0;for(let i=1;i<xColumns.length;i++)if(Math.abs(xColumns[i]-p[0]*sx)<Math.abs(xColumns[I]-p[0]*sx))I=i;
-    const J=Math.round((p[2]*sz-lo)/(hi-lo)*nz);let best=null,cost=Infinity;
+    let J=rowingBody?0:Math.round((p[2]*sz-lo)/(hi-lo)*nz);if(rowingBody)for(let j=1;j<zRows.length;j++)if(Math.abs(zRows[j]-p[2]*sz)<Math.abs(zRows[J]-p[2]*sz))J=j;
+    let best=null,cost=Infinity;
     for(let radius=0;radius<=3;radius++)for(let j=J-radius;j<=J+radius;j++)for(let i=I-radius;i<=I+radius;i++){
       const node=make(i,j);if(!node)continue;const delta=distance3(node.world,physical(p,boat));if(delta<cost){best=node;cost=delta;}
     }
