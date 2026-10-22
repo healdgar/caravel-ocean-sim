@@ -35,14 +35,16 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
     boat.rowingState={phase:0,rate:.45,effortPort:.6,effortStarboard:.6,cadence:.45};
     for(const phase of [.08,.30,.60,.88]){
       boat.rowingState.phase=phase;stepCompany(company,boat,0,2);assert.equal(boat.rowingState.phase,phase);
-      const subjects=[company.crew.find(s=>s.stationId&&s.sex==='female'),company.crew.find(s=>s.stationId&&s.sex==='male'),company.crew.find(s=>s.role==='Helmsman'),company.crew.find(s=>s.role==='Captain')].filter(Boolean);
+      // Include the full beam at midships, both sides and the narrow bow/stern;
+      // sampling the first pair alone misses the worst cross-body grip reach.
+      const subjects=company.crew;
       for(const s of subjects){
         const targets=crewSeatedPose(s,boat),a=meshes[s.sex].animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);
         const at=name=>crewProposedWorld(s,Array.from(a.world[a.nodeIndex(name)].subarray(12,15)));
         assert.ok(a.palette.every(Number.isFinite),id+' finite seated skin');
         assert.ok(crewProposedDistance(at('pelvis'),targets.seat)<.025,id+' pelvis rests at its own bench');
         for(const [i,side]of ['l','r'].entries()){
-          assert.ok(crewProposedDistance(at('hand_'+side),targets.hands[i])<.08,id+' '+s.id+' '+phase+' actual hand reaches shaft');
+          assert.ok(crewProposedDistance(at('hand_'+side),targets.hands[i])<.08,id+' '+s.id+' '+phase+' actual hand reaches shaft '+JSON.stringify({side,hand:at('hand_'+side),target:targets.hands[i],seat:targets.seat,pelvis:at('pelvis'),root:Array.from(s.position),scale:Array.from(s.scale),lean:targets.body.lean}));
           assert.ok(crewProposedDistance(at('foot_'+side),targets.feet[i])<.08,id+' actual boot reaches the authored floor');
         }
         assert.ok(at('Head')[1]<targets.seat[1]+1.2,'seated workers are not standing templates');
@@ -67,7 +69,7 @@ test('solo Gipsy Moth physically visits independent sail controls and hatch with
         const s=company.crew[0],a=mesh.animator,grip=resolveShipNode(boat,'hatch.grip');a.sample('Idle',s.time);poseCrewWork(a,s,boat);
         for(const [side,sign]of [['l',1],['r',-1]]){
           const hand=crewProposedWorld(s,Array.from(a.world[a.nodeIndex('hand_'+side)].subarray(12,15))),target=[grip[0]+sign*.10,grip[1],grip[2]];
-          assert.ok(crewProposedDistance(hand,target)<.08,'solo sailor reaches actual aft lid grip rather than the far hinge through the cabin');
+          assert.ok(crewProposedDistance(hand,target)<.08,'solo sailor reaches actual aft lid grip rather than the far hinge through the cabin '+JSON.stringify({side,hand,target,root:Array.from(s.position),yaw:s.yaw,lean:s.climbPitch}));
         }
         hatchPoseChecked=true;
       }
@@ -112,7 +114,7 @@ test('blocked new-model assignments back off and invalidate immediately for a ne
   // A disconnected start has no authored deck path. Never teleport it onto a
   // route, and do not explore the entire graph again on every display frame.
   company.crew[0].x=100;company.crew[0].position[0]=100*boat.beam/3.6;issueCaptainOrder(company,boat,'furl');stepCompany(company,boat,.1,3);
-  const attempts=company.routeAttempts;assert.ok(attempts>0);assert.equal(company.crew[0].job,null);
+  const attempts=company.routeAttempts;assert.ok(attempts>0);assert.equal(company.crew[0].job??null,null);
   for(let i=0;i<5;i++)stepCompany(company,boat,.1,3);assert.equal(company.routeAttempts,attempts);
   issueCaptainOrder(company,boat,'reduced');stepCompany(company,boat,.1,3);assert.ok(company.routeAttempts>attempts,'new orders invalidate blocked-path retry backoff');
   assert.equal(company.crew[0].x,100,'planner failure never supplies a wall bypass or teleport');

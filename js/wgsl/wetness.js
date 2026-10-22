@@ -129,12 +129,24 @@ fn levelAt(world:vec3f)->f32 {
   let i=id.x;if(i>=arrayLength(&probes)){return;}let probe=probes[i];
   if(I.previous.w>.5 || probe.uvKind.w<.5){moisture[i]=vec2f(0);return;}
   let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);
-  let p=rig.position;let world=wetWorld(p);let floor=deckFloor(p.z);
-  let inFootprint=p.z>deckMinZ() && p.z<deckMinZ()+deckLength() && abs(p.x)<deckWidth(p.z)-.10 && p.y>=modelHullDeck(p.z,hull.rig.w)-.08;
-  let sheltered=inFootprint && p.z>=wetShelteredStart() && p.y<floor-.08;
+  let p=rig.position;let world=wetWorld(p);let modern=hull.rig.w>=3.5;
+  let floor=deckFloorAt(p.z,p.x);let rail=deckRailAt(p.z,p.x);
+  let rim=modelHullDeck(p.z,hull.rig.w);var threshold=rim-.08;var width=deckWidth(p.z)-.10;
+  if(modern){
+    let inset=.012/(hull.size.x/3.6);
+    // Lower only actual interior/crew probes to the open floor. The outside
+    // shell must still receive sea contact below the gunwale.
+    let interior=probe.uvKind.z==3.0 || abs(p.x)<modelHullWidth(p.z,p.y,hull.rig.w)-inset;
+    if(interior){threshold=floor-.08;}
+    width=modelHullWidth(p.z,rim,hull.rig.w)-inset;
+  }
+  let inFootprint=p.z>deckMinZ() && p.z<deckMinZ()+deckLength() && abs(p.x)<width && p.y>=threshold;
+  // A historical quarterdeck roof is not a generic shelter on an open canoe,
+  // rowing vessel, yacht cockpit or the clipper's authored deck arrangement.
+  let sheltered=!modern && inFootprint && p.z>=wetShelteredStart() && p.y<floor-.08;
   var water=smoothstep(-.025,.08,levelAt(world)-world.y);
   var spray=mistAt(p);
-  if(inFootprint && p.y<=floor+deckRail(p.z)){
+  if(inFootprint && p.y<=floor+rail){
     let wash=sampleDeck(deckUV(p));
     water=smoothstep(.0003,.003,wash.x)*smoothstep(-.015,.035,wash.x-(p.y-floor)*shipY(hull.right.w));
     if(p.y<floor-.08){water=0.0;}

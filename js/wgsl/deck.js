@@ -6,12 +6,14 @@ import { HULL_PROFILE } from './hull.js';
 import { INTERACTION_TYPES, INTERACTION_SEA } from './interaction.js';
 import {coupleSurfaceHeight} from './surface-coupling.js';
 import { QUARTERDECK_START } from '../hull.js';
+import {LATER_SAIL_DESIGNS,laterSailStairFlights} from '../models/later-sail.js';
 
 export const DECK_COLS = 32;
 export const DECK_ROWS = 96;
 // Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
 export const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
 fn deckWidth(z:f32)->f32 {
+  ${Object.values(LATER_SAIL_DESIGNS).filter(d=>d.cockpit).map(d=>`if(abs(hull.rig.w-${d.modelCode}.0)<.1){return max(.012,modelHullWidth(z,modelHullDeck(z,hull.rig.w),hull.rig.w)-.045);}`).join('\n')}
   if(hull.rig.w>.5){return max(.012,modelHullWidth(z,modelVesselDeck(z,hull.rig.w),hull.rig.w)-.045);}
   return max(0.015,hullBreadth(z)-0.145);
 }
@@ -21,12 +23,23 @@ fn deckFloor(z:f32)->f32 {
 fn deckRail(z:f32)->f32 {
   return modelDeckBarrier(z,hull.rig.w);
 }
+fn deckFloorAt(z:f32,x:f32)->f32 {
+  if(hull.rig.w>=3.5){
+    ${Object.values(LATER_SAIL_DESIGNS).map(d=>`if(abs(hull.rig.w-${d.modelCode}.0)<.1){${laterSailStairFlights(d.id).map(f=>`if(abs(x-${f.x.toFixed(7)})<=${(f.width/2).toFixed(7)}&&z>=${f.z0.toFixed(7)}&&z<=${f.z1.toFixed(7)}){return mix(${f.y0.toFixed(7)},${f.y1.toFixed(7)},(z-${f.z0.toFixed(7)})/${(f.z1-f.z0).toFixed(7)});}`).join('')}}`).join('\n')}
+    return modelVesselDeckAt(z,x,hull.rig.w);
+  }
+  return deckFloor(z);
+}
+fn deckRailAt(z:f32,x:f32)->f32 {
+  if(hull.rig.w>=3.5){return modelDeckBarrierAt(z,x,hull.rig.w);}
+  return deckRail(z);
+}
 fn deckMinZ()->f32 {return select(-6.4,-6.0,hull.rig.w>.5);}
 fn deckLength()->f32 {return 12.0;}
 fn deckUV(p:vec3f)->vec2f { return vec2f(p.x/(2.0*deckWidth(p.z))+0.5,(p.z-deckMinZ())/deckLength()); }
 fn deckPoint(uv:vec2f)->vec3f {
   let z=uv.y*deckLength()+deckMinZ();
-  return vec3f((uv.x*2.0-1.0)*deckWidth(z),deckFloor(z),z);
+  let x=(uv.x*2.0-1.0)*deckWidth(z);return vec3f(x,deckFloorAt(z,x),z);
 }
 `;
 // Float32 retains small drainage/drying increments at high frame rates. Explicit
@@ -46,6 +59,19 @@ const DECK_TRANSFORM = /* wgsl */ `
 fn deckWorld(p:vec3f)->vec3f {
   return hull.origin.xyz+hull.right.xyz*p.x*(hull.size.x/3.6)+hull.up.xyz*p.y*shipY(hull.right.w)-hull.forward.xyz*p.z*(hull.size.y/12.0);
 }
+// A cockpit's coaming is an internal barrier, except at its real stair opening.
+// The legacy four ships retain their existing exchange arithmetic.
+fn deckInteriorCrest(a:vec3f,b:vec3f)->f32 {
+  ${Object.values(LATER_SAIL_DESIGNS).filter(d=>d.cockpit).map(d=>{
+    const c=d.cockpit,flights=laterSailStairFlights(d.id).filter(f=>f.zoneId==='cockpit');
+    return `if(abs(hull.rig.w-${d.modelCode}.0)<.1){
+      let A=a.z>${c.bounds[0]}&&a.z<${c.bounds[1]}&&abs(a.x)<${c.halfWidth};let B=b.z>${c.bounds[0]}&&b.z<${c.bounds[1]}&&abs(b.x)<${c.halfWidth};
+      if(A!=B){let p=(a+b)*.5;${flights.map(f=>`if(abs(p.x-${f.x.toFixed(7)})<=${(f.width/2).toFixed(7)}&&p.z>=${f.z0.toFixed(7)}&&p.z<=${f.z1.toFixed(7)}){return -1000000.0;}`).join('')}
+        return ${c.coamingHeight}+modelHullDeck(p.z,hull.rig.w)-${d.profile.deck};}
+    }`;
+  }).join('\n')}
+  return -1000000.0;
+}
 // UV is on one perimeter face. Return the actual cap lead, rather than a
 // dimensioned-in-metres offset accidentally multiplied by vessel scale.
 fn deckLip(uv:vec2f,sideFace:bool)->vec3f {
@@ -53,8 +79,9 @@ fn deckLip(uv:vec2f,sideFace:bool)->vec3f {
   if(sideFace){
     let side=select(-1.0,1.0,uv.x>.5);
     let nina=deckWidth(p.z)+.04;
-    let victory=modelHullWidth(p.z,p.y+deckRail(p.z),hull.rig.w);
+    let victory=modelHullWidth(p.z,p.y+deckRailAt(p.z,p.x),hull.rig.w);
     p.x=side*select(nina,victory,hull.rig.w>.5);
+    if(hull.rig.w>=3.5){p.y=deckFloorAt(p.z,p.x);}
   }
   return p;
 }
@@ -85,7 +112,15 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
   if(abs(pa.y-pb.y)*shipY(hull.right.w)>0.8){return 0.0;} // solid cabin face
   let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
   let dh=deckWorld(pa).y+wa*hull.up.y-deckWorld(pb).y-wb*hull.up.y;
-  let donor=select(wb,wa,dh>0.0);
+  var donor=select(wb,wa,dh>0.0);
+  if(hull.rig.w>=3.5){
+    let crest=deckInteriorCrest(pa,pb);
+    if(crest> -10000.0){
+      let p=(pa+pb)*.5;let top=deckWorld(vec3f(p.x,crest,p.z)).y;
+      let bottom=select(deckWorld(pb).y,deckWorld(pa).y,dh>0.0);
+      donor=max(0.0,donor-max(0.0,(top-bottom)/max(hull.up.y,.35)));
+    }
+  }
   let area=select(cellArea(pb),cellArea(pa),dh>0.0);
   let face=select((deckWidth(pa.z)+deckWidth(pb.z))*(hull.size.x/3.6)/f32(DECK_SIZE.x),deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
   // Limit the head conductance as well as donor volume. sqrt(head) alone
@@ -110,7 +145,7 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
     if(!onBoundary){continue;}
     var uv=(vec2f(c)+.5)/vec2f(DECK_SIZE);
     if(sideFace){uv.x=select(0.0,1.0,positive);}else{uv.y=select(0.0,1.0,positive);}
-    let lip=deckLip(uv,sideFace);let barrier=deckRail(lip.z);
+    let lip=deckLip(uv,sideFace);let barrier=deckRailAt(lip.z,lip.x);
     let rail=deckWorld(lip+vec3f(0.0,barrier,0.0));
     // Convert vertical separation to normal WORLD depth once. shipY converts
     // the local rail through deckWorld; applying it again here breaks scale.
@@ -175,11 +210,11 @@ fn corner(v:u32)->vec2f {
   let uv=select(vec2f(along,select(0.0,1.0,side>0.0)),vec2f(select(0.0,1.0,side>0.0),along),sideFace);
   let water=sampleDeck(uv);
   var p=deckLip(uv,sideFace);let incoming=water.w<0.0;let flow=abs(water.w);
-  let verticalScale=shipY(hull.right.w);let barrier=deckRail(p.z)*verticalScale;
+  let verticalScale=shipY(hull.right.w);let barrier=deckRailAt(p.z,p.x)*verticalScale;
   // Invert the same bounded weir law to recover an incoming crest head. Start
   // on that cap lead and travel INWARD; outgoing water leaves toward the sea.
   let head=pow(flow/1.3,2.0/3.0);
-  let outlet=select(min(water.x,0.10),water.x,water.x>deckRail(p.z)*shipY(hull.right.w));
+  let outlet=select(min(water.x,0.10),water.x,water.x>barrier);
   let start=select(.03+outlet,barrier+head,incoming);
   let fallHeight=select(max(.1,deckWorld(p).y+start*hull.up.y+.4),max(.02,(start-water.x)*max(hull.up.y,.35)),incoming);
   let duration=clamp(sqrt(2.0*fallHeight/9.81),.06,.85);let t=fall*duration;
@@ -200,9 +235,10 @@ fn corner(v:u32)->vec2f {
   // Central height differences stay continuous across cell boundaries; facet
   // derivatives and derivatives of bilinear heights both expose the grid.
   let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
-  let xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
+  var xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
+  if(hull.rig.w>=3.5){let dx=2.0*deckWidth(in.local.z)*texel.x;xSlope+=(deckFloorAt(in.local.z,in.local.x+dx)-deckFloorAt(in.local.z,in.local.x-dx))*shipY(hull.right.w)/(2.0*dx);}
   let dz=texel.y*deckLength();
-  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloor(in.local.z+dz)-deckFloor(in.local.z-dz))*shipY(hull.right.w))/(2.0*dz);
+  let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloorAt(in.local.z+dz,in.local.x)-deckFloorAt(in.local.z-dz,in.local.x))*shipY(hull.right.w))/(2.0*dz);
   let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));
   var n=normalize(hull.up.xyz-hull.right.xyz*gradient.x/(hull.size.x/3.6)+hull.forward.xyz*gradient.y/(hull.size.y/12.0));
   n=normalize(n+hull.right.xyz*ripple.x+hull.forward.xyz*ripple.y);
@@ -215,7 +251,7 @@ fn corner(v:u32)->vec2f {
   if(!curtain && w.x<=0.001){discard;}
   if(curtain && (in.curtain.y<=0.002 || in.curtain.x>=1.0)){discard;}
   // Do not bridge the vertical cabin face with a diagonal water polygon.
-  if(!curtain && abs((in.local.y-deckFloor(in.local.z))*shipY(hull.right.w)-w.x-0.008)>0.10){discard;}
+  if(!curtain && abs((in.local.y-deckFloorAt(in.local.z,in.local.x))*shipY(hull.right.w)-w.x-0.008)>0.10){discard;}
   if(curtain){n=normalize(face/max(length(face),0.00001)+hull.forward.xyz*ripple.x+hull.up.xyz*ripple.y);}
   n=select(-n,n,dot(n,v)>=0.0);
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);

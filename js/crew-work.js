@@ -507,6 +507,7 @@ export function stepCrewWork(s,company,boat,dt) {
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId))&&j.rung>0&&!j.lookoutAtStation){
     const runner=crewRunnerMetrics(boat,j.mast,j.side);s.climbPitch=runner.lean;s.yaw=runner.yaw;
   }else if(boat.modelId==='victory'&&j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
+  else if(hasExtendedCrewModel(boat.modelId)&&proceduralDesign(boat.modelId).cockpit&&j.kind==='hatch'&&j.stage==='working'&&active)s.climbPitch=.36*(1-(boat.hatchesClosed??0));
   else if(j.kind==='gunnery'&&j.stage==='working'&&active&&!['ready','recoil','spent'].includes(j.gun.stage))s.climbPitch=j.gunRole==='loader'&&boat.modelId==='victory'?.45:.10;
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin(s.climbPitch/2),cx=Math.cos(s.climbPitch/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
