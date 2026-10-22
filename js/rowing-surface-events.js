@@ -204,12 +204,20 @@ export function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE
   }
   function flush({time,dt,hidden=false,resetSea=false}={}){
     if(!validFrame(time,dt,hidden,resetSea))return [];
+    // A field discontinuity observed while draining must also break crossing
+    // history, even if a fresh packet arrives before the next collection.
+    for(const [id,record] of vessels){
+      const accepted=rowingSurfaceAcceptedWater(record.boat,time);
+      if(!accepted||accepted.water!==record.water||record.boat.revision!==record.revision||record.boat.modelId!==record.modelId
+        ||rowingSurfaceBoatMoved(record.position,record.boat,dt))vessels.delete(id);
+    }
+    stats.trackedStations=Array.from(vessels.values()).reduce((sum,r)=>sum+r.stations.size,0);
     const queue=pending;pending=[];stats.pending=0;
     const available=Math.max(0,Math.min(maxEvents,SURFACE_WAVE_LIMITS.emitters-(surfaceWaves.stats?.queued??SURFACE_WAVE_LIMITS.emitters)));
     const emitted=[];
     for(const item of queue){
       const boat=item.boat,event=item.event,accepted=rowingSurfaceAcceptedWater(boat,time),age=time-event.time;
-      if(emitted.length>=available||!accepted||accepted.water!==item.water||boat.revision!==item.revision||boat.modelId!==item.modelId
+      if(emitted.length>=available||!vessels.has(event.vesselId)||!accepted||accepted.water!==item.water||boat.revision!==item.revision||boat.modelId!==item.modelId
         ||rowingSurfaceBoatMoved(item.position,boat,dt)||age<0||age>SURFACE_WAVE_LIMITS.maxEventAge||!accepted.sample(event.x,event.z)){
         stats.dropped++;continue;
       }
