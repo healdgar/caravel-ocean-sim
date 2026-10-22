@@ -261,12 +261,13 @@ fn surfaceGpuSupportsPair(initial:SurfaceGpuVectorPair,reference:SurfaceGpuVecto
 // Finite differences must share an origin. Subtracting two absolute design
 // positions loses the thin furled sheet's tangent in f32. These factored rest
 // differences preserve the original .0005 stencil without changing contacts.
-fn surfaceGpuRestDifference(surface:SurfaceGpuSurface,uv:vec2f,anchor:vec2f)->vec3f {
-  let delta=uv-anchor;let ba=surface.b.xyz-surface.a.xyz;let ca=surface.c.xyz-surface.a.xyz;
+fn surfaceGpuRestDifference(surface:SurfaceGpuSurface,anchor:vec2f,delta:vec2f)->vec3f {
+ let ba=surface.b.xyz-surface.a.xyz;let ca=surface.c.xyz-surface.a.xyz;
   if(surface.info.y<3.5){return ba*delta.x+ca*delta.y;}
   let da=surface.d.xyz-surface.a.xyz;let twist=surface.a.xyz-surface.b.xyz+surface.c.xyz-surface.d.xyz;
-  var p=ba*delta.x+da*delta.y+twist*(delta.x*anchor.y+delta.y*uv.x);
-  p.y+=surface.a.w*4.0*(delta.x*(1.0-uv.x-anchor.x)*anchor.y+uv.x*(1.0-uv.x)*delta.y);return p;
+  var p=ba*delta.x+da*delta.y+twist*(delta.x*anchor.y+delta.y*anchor.x+delta.x*delta.y);
+  let edgeChange=delta.x*(1.0-2.0*anchor.x-delta.x);
+  p.y+=surface.a.w*4.0*(edgeChange*anchor.y+(anchor.x*(1.0-anchor.x)+edgeChange)*delta.y);return p;
 }
 fn surfaceGpuClothRotate(surface:SurfaceGpuSurface,point:vec3f,pose:SurfaceGpuPose)->vec3f {
   if(surface.info.x!=1.0){return surfaceGpuRotateVector(surface,point,pose);}
@@ -274,22 +275,21 @@ fn surfaceGpuClothRotate(surface:SurfaceGpuSurface,point:vec3f,pose:SurfaceGpuPo
   let angle=-atan2(surface.a.z-surface.b.z,surface.a.y-surface.b.y)*pose.dip;
   return surfaceGpuRotate(opened,vec3f(1,0,0),angle);
 }
-fn surfaceGpuClothNear(index:u32,uv:vec2f,anchor:vec2f)->SurfaceGpuRelative {
+fn surfaceGpuClothDelta(index:u32,anchor:vec2f,uvChange:vec2f)->SurfaceGpuRelative {
   let surface=surfaceGpuDescriptor(index);let pose=surfaceGpuPose(index);let triangle=surface.info.y<3.5;
-  let restDifference=surfaceGpuRestDifference(surface,uv,anchor);var gatheredDifference:vec3f;
-  if(surface.info.x==4.0){gatheredDifference=(surface.c.xyz-surface.a.xyz)*(uv.y-anchor.y);}
+  let restDifference=surfaceGpuRestDifference(surface,anchor,uvChange);var gatheredDifference:vec3f;
+  if(surface.info.x==4.0){gatheredDifference=(surface.c.xyz-surface.a.xyz)*uvChange.y;}
   else if(triangle){let axis=surface.b.xyz-surface.a.xyz;let length2=dot(axis,axis);gatheredDifference=axis*(dot(restDifference,axis)/length2);}
-  else{gatheredDifference=(surface.b.xyz-surface.a.xyz)*(uv.x-anchor.x);}
+  else{gatheredDifference=(surface.b.xyz-surface.a.xyz)*uvChange.x;}
   let deployed=clamp(pose.deployed,0.0,1.0);let fill=clamp(pose.fill,0.0,1.0);let factor=.012+.988*deployed;
   let flatDifference=mix(gatheredDifference,restDifference,factor);
-  let uvChange=uv-anchor;
   let U=SurfaceGpuScalarPair(anchor.x,uvChange.x);let V=SurfaceGpuScalarPair(anchor.y,uvChange.y);
   var envelope=surfaceGpuPairMultiply(surfaceGpuPairMultiply(U,V),surfaceGpuPositivePair(SurfaceGpuScalarPair(1.0-anchor.x-anchor.y,-uvChange.x-uvChange.y)));
   envelope.value*=27.0;envelope.change*=27.0;
   if(!triangle){
     var wave=surfaceGpuSinPair(SurfaceGpuScalarPair(3.141592653589793*anchor.y,3.141592653589793*uvChange.y));
     if(anchor.y<=0.0||anchor.y>=1.0){let next=wave.value+wave.change;wave.value=0.0;wave.change=next;}
-    if(uv.y<=0.0||uv.y>=1.0){wave.change=-wave.value;}
+    if(uvChange.y<=-anchor.y||uvChange.y>=1.0-anchor.y){wave.change=-wave.value;}
     envelope=surfaceGpuPairMultiply(surfaceGpuPairMultiply(U,SurfaceGpuScalarPair(1.0-anchor.x,-uvChange.x)),wave);envelope.value*=4.0;envelope.change*=4.0;
   }
   let slack=1.0-smoothstep(.2,.85,fill);let flutterScale=min(max(surfaceGpuLive[0].y,0.0)/4.0,1.0)*surface.c.w*slack*slack;
@@ -303,8 +303,11 @@ fn surfaceGpuClothNear(index:u32,uv:vec2f,anchor:vec2f)->SurfaceGpuRelative {
   if(surfaceGpuModel[0].w!=0.0){point=surfaceGpuSupportsPair(point,reference,surfaceGpuUnit(surfaceGpuClothRotate(surface,axis,pose)),index,surface,pose,anchor,uvChange,origin);}
   return SurfaceGpuRelative(origin.high+(origin.low+point.value),point.change);
 }
+fn surfaceGpuClothNear(index:u32,uv:vec2f,anchor:vec2f)->SurfaceGpuRelative {
+  return surfaceGpuClothDelta(index,anchor,uv-anchor);
+}
 fn surfaceGpuCloth(index:u32,uv:vec2f)->vec3f {
-  let point=surfaceGpuClothNear(index,uv,uv);return point.origin+point.offset;
+  let point=surfaceGpuClothDelta(index,uv,vec2f(0));return point.origin+point.offset;
 }
 fn surfaceGpuAttachment(position:vec4f,binding:vec4f)->vec3f {
   if(position.w<0.0||binding.x==0.0){return position.xyz;}
@@ -358,8 +361,10 @@ fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
   let kind=u32(vertexMetadata.x);let index=u32(vertexMetadata.y);var p=position;var n=normal;
   if(kind==1u){
     let uv=vertexMetadata.zw;let e=.0005;p=surfaceGpuCloth(index,uv);
-    let du=surfaceGpuClothNear(index,uv+vec2f(e,0),uv).offset-surfaceGpuClothNear(index,uv-vec2f(e,0),uv).offset;
-    let dv=surfaceGpuClothNear(index,uv+vec2f(0,e),uv).offset-surfaceGpuClothNear(index,uv-vec2f(0,e),uv).offset;n=surfaceGpuUnit(cross(du,dv));
+    // Keep the stencil delta explicit: forming UV+e and subtracting UV
+    // rounds the step differently at each vertex before the paired evaluator.
+    let du=surfaceGpuClothDelta(index,uv,vec2f(e,0)).offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
+    let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;n=surfaceGpuUnit(cross(du,dv));
   }else if(kind==2u){
     let surface=surfaceGpuDescriptor(index);let pose=surfaceGpuPose(index);let origin=surfaceGpuYard(surface,vec3f(0),pose);
     let axes=mat3x3f(surfaceGpuYard(surface,vec3f(1,0,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,1,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,0,1),pose)-origin);
