@@ -40,7 +40,7 @@ export function crewNavigationObstacles(boat){
     add('gun.'+gun.id+'.'+name,'gun',A.map((v,i)=>Math.min(v,v+delta[i])),B.map((v,i)=>Math.max(v,v+delta[i])),{gunId:gun.id,meshGroup:gun.meshGroup,reservation:'full-recoil'});
   };
   for(const gun of createGunDefinitions(id)){
-    const side=gun.sideSign,z=gun.station[2],y=gun.breechDesign[1],floor=gun.floorDesign,extra={gunId:gun.id,meshGroup:gun.meshGroup,reservation:'fixed'};
+    const side=gun.sideSign,z=gun.centre?.[2]??gun.muzzleDesign[2],y=gun.breechDesign[1],floor=gun.floorDesign,extra={gunId:gun.id,meshGroup:gun.meshGroup,reservation:'fixed'};
     if(id==='victory'){
       const r=gun.weatherDeck?(gun.kind==='carronade'?.055:.032):({lower:.040,middle:.035,upper:.030}[gun.deck]??.040);
       const a=gun.breechDesign,b=gun.muzzleDesign;
