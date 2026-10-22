@@ -40,6 +40,7 @@ import { createSurfaceWaves } from './surface-waves.js';
 import { createSpindrift } from './spindrift.js';
 import { createSurfaceWetness } from './wetness.js';
 import {createRowingWaterProbe} from './rowing-water.js';
+import {createRowingSurfaceEvents} from './rowing-surface-events.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import { createWaterOptics } from './water-optics.js';
 import { createUnderwater } from './underwater.js';
@@ -393,6 +394,7 @@ async function main() {
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
   const waterFilterPipe=await computePipe(WATER_FILTER,'water reflections filter');
   const surfaceWaves=await createSurfaceWaves({device,computePipe});
+  const rowingSurfaceEvents=createRowingSurfaceEvents(surfaceWaves);
   const waterOptics=await createWaterOptics({device,shader,seaView:fullArr(dispTex),seaSampler:samplerSim,format:HDR,surfaceWaves});
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
@@ -1588,6 +1590,9 @@ async function main() {
     updateBoat(dt,needSpectrum||elapsed>.5);
     dolphins.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);dolphinControls.update(now);
     marineLife.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);marineControls.update(now);
+    const rowingSurfaceTime=simTime+dt,rowingSurfaceWrapped=rowingSurfaceTime>LOOP;
+    rowingSurfaceEvents.flush({time:rowingSurfaceWrapped?rowingSurfaceTime-LOOP:rowingSurfaceTime,dt,
+      hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
     surfaceWaves.update(boat,dt);
     instruments.update(now);
     helm.update(now);
@@ -1632,6 +1637,8 @@ async function main() {
       if(ship.showProw)v.anchorRenderer.update(v.anchor,ship);
       v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
     }
+    rowingSurfaceEvents.collect(followerEnabled?vessels:[vessels[0]],{time:simTime,dt,
+      hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
     gunEffects.setProjectiles(shipGuns.state.projectiles);
     hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     gunEffects.update(dt,{wind:[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed],eye:[cam.x,cam.y,cam.z]});
