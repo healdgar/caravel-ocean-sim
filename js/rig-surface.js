@@ -11,12 +11,20 @@ const surfaceDot=(a,b)=>a.reduce((sum,x,i)=>sum+x*b[i],0);
 const surfaceCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const surfaceMix=(a,b,t)=>a.map((x,i)=>x+(b[i]-x)*t);
 const surfaceFinitePoint=p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite);
+const surfaceCheckedGeometry=new WeakSet(),surfacePreparedViews=new WeakMap();
+function surfaceFrozenData(value){
+  if(!value||!Object.isFrozen(value))return false;
+  const prototype=Object.getPrototypeOf(value);
+  if(prototype!==Object.prototype&&prototype!==Array.prototype&&prototype!==null)return false;
+  return Object.values(Object.getOwnPropertyDescriptors(value)).every(d=>Object.hasOwn(d,'value'));
+}
 function surfaceUnit(p){const length=Math.hypot(...p);if(!(length>1e-12))throw Error('Degenerate rig surface axis');return surfaceMultiply(p,1/length);}
 function surfaceRotate(p,axis,angle){
   const a=surfaceUnit(axis),c=Math.cos(angle),s=Math.sin(angle),cross=surfaceCross(a,p),dot=surfaceDot(a,p);
   return p.map((x,i)=>x*c+cross[i]*s+a[i]*dot*(1-c));
 }
 function surfaceCheck(surface){
+  if(surfaceCheckedGeometry.has(surface))return;
   if(!surface||!Number.isInteger(surface.id)||surface.id<1||!surfaceKinds.has(surface.kind)
     ||!Number.isInteger(surface.mast)||surface.mast<0||surface.mast>2
     ||!Array.isArray(surface.corners)||![3,4].includes(surface.corners.length)||!surface.corners.every(surfaceFinitePoint)
@@ -24,6 +32,9 @@ function surfaceCheck(surface){
   if((surface.kind==='square'&&surface.corners.length!==4)||(surface.kind==='lateen'&&surface.corners.length!==3))throw Error('Invalid corner count for '+surface.kind);
   const [a,b,c]=surface.corners;
   if(Math.hypot(...surfaceCross(surfaceSubtract(b,a),surfaceSubtract(c,a)))<1e-10)throw Error('Degenerate rig surface corners');
+  // A shallow freeze does not protect coordinate arrays or accessor results.
+  // Mutable/public descriptors therefore retain every original validation.
+  if(surfaceFrozenData(surface)&&surfaceFrozenData(surface.corners)&&surface.corners.every(surfaceFrozenData)&&surfaceFrozenData(surface.pivot))surfaceCheckedGeometry.add(surface);
 }
 
 // Quad corners: head port, head starboard, foot starboard, foot port.
@@ -117,7 +128,25 @@ export function withRigSupportCache(context){
     const axis=Object.freeze(surfaceSubtract(s.b,s.a));
     return Object.freeze({...s,_surfaceAxis:axis,_surfaceLength2:surfaceDot(axis,axis)});
   }));
+  surfacePreparedViews.set(prepared,{data:null});
   return {...context,_surfaceCollisionSupports:prepared};
+}
+// Only arrays created here have a private preparation record. An identically
+// named public property, or an uncached live context, cannot select this path.
+function surfacePreparedSupportData(supports){
+  const view=surfacePreparedViews.get(supports);if(!view)return null;
+  if(view.data)return view.data;
+  const data=[];
+  for(const s of supports){
+    if(!surfaceFrozenData(s)||!surfaceFrozenData(s.a)||!surfaceFrozenData(s.b)||!surfaceFrozenData(s._surfaceAxis)
+      ||!surfaceFinitePoint(s.a)||!surfaceFinitePoint(s.b)||!surfaceFinitePoint(s._surfaceAxis)
+      ||!Number.isFinite(s._surfaceLength2)||s._surfaceLength2<1e-12||!Number.isFinite(s.r??0)
+      ||(s.rEnd!==undefined&&!Number.isFinite(s.rEnd)))return null;
+    data.push(Object.freeze({ax:s.a[0],ay:s.a[1],az:s.a[2],bx:s.b[0],by:s.b[1],bz:s.b[2],
+      x:s._surfaceAxis[0],y:s._surfaceAxis[1],z:s._surfaceAxis[2],length2:s._surfaceLength2,
+      r:s.r??0,rEnd:s.rEnd,kind:s.kind,mast:s.mast,surface:s.surface}));
+  }
+  return view.data=Object.freeze(data);
 }
 export function withRigPoseContext(context,state={},poses=null){
   const live=poses??new Map((context.surfaces??[]).map(s=>[s.id,rigSurfacePose(s,state)]));
@@ -129,13 +158,20 @@ export function withRigPoseContext(context,state={},poses=null){
   });
   // Dynamic endpoints belong to this one pose view. They are deliberately
   // separate from the immutable authored-support preparation above.
-  return {...context,state,poses:live,_surfaceActiveSupports:[...stationary,...moving]};
+  const active=[...stationary,...moving];
+  if(surfacePreparedSupportData(stationary)){
+    for(const support of moving){Object.freeze(support.a);Object.freeze(support.b);Object.freeze(support._surfaceAxis);Object.freeze(support);}
+    Object.freeze(active);surfacePreparedViews.set(active,{data:null});
+  }
+  return {...context,state,poses:live,_surfaceActiveSupports:active};
 }
 function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
   const pin=surfaceSewnWeight(surface,u,v);if(pin===0)return point;
   const clearance=surface.contactClearance??.045,band=surface.contactBand??.25;
   if(!Number.isFinite(clearance)||clearance<0||!Number.isFinite(band)||band<=0)throw Error('Invalid surface contact margin');
   const p=[...point],supports=context._surfaceActiveSupports??context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
+  const prepared=surfacePreparedSupportData(supports);
+  if(prepared)return surfaceApplyPreparedSupports(p,reference,normal,surface,pose,prepared,pin,clearance,band);
   for(const support of supports){
     if((support.kind==='spar'||support.kind==='sail-stay')&&support.surface===surface.id)continue; // own sewn spar/luff stay
     const {a,b}=support;let r=(support.r??0)+clearance;
@@ -166,6 +202,45 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
     }
   }
   return p;
+}
+
+// The array loop above remains the independent public/mutable fallback. Keep
+// its support order, +0 reduce seed, expression association, hypot arguments,
+// normal fallbacks, taper interpolation and sequential point updates exactly.
+function surfaceApplyPreparedSupports(p,reference,normal,surface,pose,supports,pin,clearance,band){
+  let px=p[0],py=p[1],pz=p[2];
+  for(const support of supports){
+    if((support.kind==='spar'||support.kind==='sail-stay')&&support.surface===surface.id)continue;
+    const {ax,ay,az,bx,by,bz,x,y,z,length2}=support;let r=support.r+clearance;
+    if(!Number.isFinite(r)||r<0||(support.rEnd!==undefined&&support.rEnd+clearance<0))throw Error('Invalid rig support descriptor');
+    const t=surfaceClamp((((0+(px-ax)*x)+(py-ay)*y)+(pz-az)*z)/length2);
+    const qx=ax+(bx-ax)*t,qy=ay+(by-ay)*t,qz=az+(bz-az)*t,dx=px-qx,dy=py-qy,dz=pz-qz;
+    if(support.rEnd!==undefined)r=support.r+(support.rEnd-support.r)*t+clearance;
+    const mastBarrier=(support.kind==='mast'||support.kind==='spar')&&support.mast===surface.mast&&surface.mastContactSide;
+    if(mastBarrier&&mastBarrier!=='fore'&&mastBarrier!=='aft')throw Error('Invalid authored mast contact side');
+    const directionX=mastBarrier?0:normal[0],directionY=mastBarrier?0:normal[1],directionZ=mastBarrier?(mastBarrier==='fore'?-1:1):normal[2];
+    let projection=(((0+directionX*x)+directionY*y)+directionZ*z)/length2;
+    let nx=directionX-x*projection,ny=directionY-y*projection,nz=directionZ-z*projection;
+    if(Math.hypot(nx,ny,nz)<1e-10){
+      const rx=reference[0]-qx,ry=reference[1]-qy,rz=reference[2]-qz;
+      projection=(((0+rx*x)+ry*y)+rz*z)/length2;nx=rx-x*projection;ny=ry-y*projection;nz=rz-z*projection;
+      if(Math.hypot(nx,ny,nz)<1e-10){
+        const vertical=Math.abs(y)/Math.sqrt(length2)<.9,cx=vertical?0:1,cy=vertical?1:0;
+        nx=y*0-z*cy;ny=z*cx-x*0;nz=x*cy-y*cx;
+      }
+    }
+    const length=Math.hypot(nx,ny,nz);if(!(length>1e-12))throw Error('Degenerate rig surface axis');
+    const inverse=1/length;nx*=inverse;ny*=inverse;nz*=inverse;
+    const signed=((0+dx*nx)+dy*ny)+dz*nz,distance=Math.hypot(dx-nx*signed,dy-ny*signed,dz-nz*signed);
+    if(distance>=r+band)continue;
+    const restSide=((0+(reference[0]-qx)*nx)+(reference[1]-qy)*ny)+(reference[2]-qz)*nz;
+    const side=mastBarrier?1:Math.abs(restSide)>1e-8?Math.sign(restSide):surface.kind==='lateen'?Math.sign(pose.side)||-1:-Math.sign(pose.pressure)||-1;
+    const penetration=r-side*signed;
+    if(penetration>0){const weight=(1-surfaceSmooth(r,r+band,distance))*pin;
+      px+=nx*side*penetration*weight;py+=ny*side*penetration*weight;pz+=nz*side*penetration*weight;
+    }
+  }
+  p[0]=px;p[1]=py;p[2]=pz;return p;
 }
 
 export function surfaceClothPoint(surface,u,v,pose,context={},time=0,wind=0){
