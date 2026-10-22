@@ -38,8 +38,8 @@ test('GPU rig packs every ready model without altering indexed positions, normal
     assert.equal(packed[3],context._surfaceCollisionSupports.length+(context.spars?.length??0));
     assert.equal(packed[4],packed[2]+packed[3]*4);assert.equal(packed[5],context.lines.length);
     assert.equal(packed[6],packed[4]+context.lines.length*10);assert.equal(packed[7],packed[6]+4);
-    assert.equal(packed[11],packed[7]+1,'residual tail begins after unchanged high records');
-    assert.equal(packed.length,(packed[7]+1)*8);
+    assert.equal(packed[11],packed[7]+1,'local table begins after unchanged global records');
+    assert.equal(packed.length,(packed[11]+packed[1]*(4+3*packed[3]))*4);
     const categories=new Set();
     for(let i=0;i<count;i++){
       const at=i*9,m=i*12,kind=Math.floor(asset.vertices[at+6]),code=Math.round((asset.vertices[at+6]-kind)*64);
@@ -63,31 +63,34 @@ test('GPU rig packs every ready model without altering indexed positions, normal
   }
 });
 
-test('static descriptor residuals retain original authored double coordinates beyond the first float32 rounding',()=>{
+// The previous high/low reconstruction assertion tested stored bytes only.
+// Native Metal tracing showed its compensated low terms optimized to zero.
+// Validate pivot-local source differences instead; independent frozen CPU
+// rest/pose goldens and native position/normal gates remain unchanged.
+test('pivot-local tables reconstruct authored corners and static/moving support frames without global subtraction on the GPU',()=>{
   for(const model of rigGPUDataTestModels.filter(m=>m.rig.backend==='surfaces-v1')){
-    const data=createRigGPUData(rigGPUDataTestCache.get(model.id)),packed=data.model,tail=packed[11]*4,context=proceduralRigContext(model.id);
-    let retained=0;
-    const coordinate=(at,value,label)=>{
-      const high=Math.fround(value),low=Math.fround(value-high);
-      assert.equal(packed[at],high,label+' high');assert.equal(packed[tail+at],low,label+' residual');
-      if(low!==0){retained++;assert.ok(Math.abs((packed[at]+packed[tail+at])-value)<Math.max(1e-20,Math.abs(value)*1e-14),label+' double reconstruction');}
-    };
+    const data=createRigGPUData(rigGPUDataTestCache.get(model.id)),packed=data.model,context=proceduralRigContext(model.id),stride=4+3*packed[3];
+    const supports=[...context._surfaceCollisionSupports,...(context.spars??[]).map(s=>({a:s.a,b:s.b,r:s.radius,movingOwner:s.surface}))];
+    const surfaces=new Map(context.surfaces.map(s=>[s.id,s]));
+    const subtract=(a,b)=>a.map((v,k)=>v-b[k]);
     for(const [i,surface]of context.surfaces.entries()){
-      const at=(packed[0]+i*10)*4;
-      for(let k=0;k<3;k++)coordinate(at+4+k,surface.pivot[k],model.id+' pivot '+surface.id+'/'+k);
-      for(const [j,p]of surface.corners.entries())for(let k=0;k<3;k++)coordinate(at+8+j*4+k,p[k],model.id+' corner '+surface.id+'/'+j+'/'+k);
+      const base=(packed[11]+i*stride)*4,global=(packed[0]+i*10)*4,pivot=surface.pivot;
+      assert.deepEqual(packed.subarray(global+4,global+7),Float32Array.from(pivot),model.id+' global pivot unchanged');
+      for(let corner=0;corner<4;corner++){
+        const point=surface.corners[corner]??surface.corners[2],local=subtract(point,pivot),at=base+corner*4;
+        assert.deepEqual(packed.subarray(at,at+4),Float32Array.from([...local,0]),model.id+' local corner '+i+'/'+corner);
+        for(let k=0;k<3;k++)assert.ok(Math.abs(packed[at+k]+pivot[k]-point[k])<=Math.max(1e-9,Math.abs(local[k])*1e-7),model.id+' reconstructed corner');
+      }
+      for(const [j,support]of supports.entries()){
+        const moving=support.movingOwner!==undefined,owner=moving?surfaces.get(support.movingOwner).pivot:pivot;
+        const bridge=moving?subtract(owner,pivot):[0,0,0],at=base+16+j*12;
+        assert.deepEqual(packed.subarray(at,at+12),Float32Array.from([...subtract(support.a,owner),support.r??0,
+          ...subtract(support.b,owner),support.rEnd??support.r??0,...bridge,0]),model.id+' exact support frame '+i+'/'+j);
+        const info=(packed[2]+j*4)*4+8;
+        assert.equal(packed[info+2]>=0,moving,model.id+' existing owner metadata agrees');
+      }
     }
-    const supports=context._surfaceCollisionSupports;
-    for(const [i,support]of supports.entries()){
-      const at=(packed[2]+i*4)*4;
-      for(let k=0;k<3;k++){coordinate(at+k,support.a[k],model.id+' supportA '+i+'/'+k);coordinate(at+4+k,support.b[k],model.id+' supportB '+i+'/'+k);}
-    }
-    for(const [i,spar]of (context.spars??[]).entries()){
-      const at=(packed[2]+(supports.length+i)*4)*4;
-      for(let k=0;k<3;k++){coordinate(at+k,spar.a[k],model.id+' sparA '+i+'/'+k);coordinate(at+4+k,spar.b[k],model.id+' sparB '+i+'/'+k);}
-    }
-    for(let i=0;i<12;i++)assert.equal(packed[tail+i],0,model.id+' integer header remains exact');
-    if(context.surfaces.length||supports.length)assert.ok(retained>0,model.id+' real descriptor precision is retained');
+    assert.equal(packed.length,(packed[11]+context.surfaces.length*stride)*4,model.id+' no residual/emulation tail');
   }
 });
 

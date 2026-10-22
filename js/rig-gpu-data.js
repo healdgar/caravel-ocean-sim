@@ -10,10 +10,13 @@ import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 
 // Binding 3 is a vec4 array. All offsets stored in it are vec4 offsets.
 // Header: [surfaces,count,supports,count], [ropes,count,steering,hatch],
-// [backend (0 legacy / 1 surfaces), vertexCount, rowingBasis, residualOffset].
-// Descriptor highs occupy the original records. A matching vec4 tail contains
-// f32(original f64 - high); residualOffset is its vec4 offset, or 0 for legacy.
-// This preserves authored luff/support coordinates without per-frame repacks.
+// [backend (0 legacy / 1 surfaces), vertexCount, rowingBasis, localTableOffset].
+// Original global records remain unchanged. The appended pivot-local table
+// has one (4 + 3*supportCount)-vec4 block per sail: four local corners, then
+// support A/B/bridge records. Static endpoints subtract the sail's authored
+// pivot. Moving endpoints subtract their owner's authored pivot; the bridge
+// is ownerPivot-sailPivot. All differences are computed once from original
+// JS doubles before float32 upload. No shader float64 emulation is required.
 // Surface (10 vec4): [kind,corners,control,mast], [pivot,braceLimit],
 // [A,footRise], [B,belly], [C,flutter], [D,pressureSpeed],
 // [camberAxis,pinBand], [hingeAxis,sewnEdgeMask],
@@ -112,8 +115,10 @@ export function createRigGPUData(asset){
     ...(context.supports??[]),...(context.masts??[]).map((m,i)=>({a:m.foot,b:m.head,r:m.radius,rEnd:m.tipRadius,kind:'mast',mast:m.index??i})),
   ]),...(context.spars??[]).map(s=>({a:s.a,b:s.b,r:s.radius,kind:'spar',sparKind:s.kind,mast:s.mast,surface:s.surface,movingOwner:s.surface}))];
   const surfaceOffset=3,supportOffset=surfaceOffset+surfaces.length*10,ropeOffset=supportOffset+supports.length*4;
-  const steeringOffset=ropeOffset+context.lines.length*10,hatchOffset=steeringOffset+4,packed=new Float64Array((hatchOffset+1)*4);
-  packed.set([surfaceOffset,surfaces.length,supportOffset,supports.length,ropeOffset,context.lines.length,steeringOffset,hatchOffset,1,count,Number(rowing),hatchOffset+1]);
+  const steeringOffset=ropeOffset+context.lines.length*10,hatchOffset=steeringOffset+4;
+  const localTableOffset=hatchOffset+1,localStride=4+supports.length*3;
+  const packed=new Float32Array((localTableOffset+surfaces.length*localStride)*4);
+  packed.set([surfaceOffset,surfaces.length,supportOffset,supports.length,ropeOffset,context.lines.length,steeringOffset,hatchOffset,1,count,Number(rowing),localTableOffset]);
   for(const [i,s]of surfaces.entries())packed.set(rigGPUSurfaceRecord(s),(surfaceOffset+i*10)*4);
   for(const [i,s]of supports.entries()){
     const face=s.kind==='mast'||s.kind==='spar'&&(s.sparKind===undefined||s.sparKind==='yard');
@@ -125,6 +130,16 @@ export function createRigGPUData(asset){
   const wheel=design.steering.wheel;
   packed.set([...design.steering.pivot,Number(!!wheel),...(wheel?.centre??[0,0,0]),wheel?.turnRatio??12,...(wheel?.axis??[0,0,1]),0,0,0,0,0],steeringOffset*4);
   const hatch=design.hatch;packed.set(hatch?[hatch.centre[0],hatch.centre[1],hatch.centre[2]-hatch.size[2]/2,0]:[0,0,0,0],hatchOffset*4);
+  for(let sail=0;sail<surfaces.length;sail++){
+    const surface=surfaces[sail],pivot=surface.pivot,base=(localTableOffset+sail*localStride)*4;
+    for(let corner=0;corner<4;corner++)packed.set([...rigGPUSub(surface.corners[corner]??surface.corners[2],pivot),0],base+corner*4);
+    for(let support=0;support<supports.length;support++){
+      const descriptor=supports[support],moving=descriptor.movingOwner!==undefined;
+      const origin=moving?surfaces[rigGPUSurfaceIndex(indices,descriptor.movingOwner)].pivot:pivot;
+      const bridge=moving?rigGPUSub(origin,pivot):[0,0,0],at=base+16+support*12;
+      packed.set([...rigGPUSub(descriptor.a,origin),descriptor.r??0,...rigGPUSub(descriptor.b,origin),descriptor.rEnd??descriptor.r??0,...bridge,0],at);
+    }
+  }
   const restContext={...withRigPoseContext(context,{}),time:0,wind:0},ropeSamples=new Map();
   const scale=[design.runtime.beam/design.frame.beam,design.frame.verticalScale,design.runtime.length/design.frame.length];
   const restBoat=rowing?{modelId:id,...design.runtime,rowingState:{phase:0,rate:0,effortPort:0,effortStarboard:0},rudder:0}:null;
@@ -154,13 +169,8 @@ export function createRigGPUData(asset){
     else if(!rowing&&kind===18&&hatch)vertices.set([7,0,0,0],meta);
   }
   if(!packed.every(Number.isFinite)||!vertices.every(Number.isFinite))throw Error('Non-finite GPU rig asset');
-  // Keep every descriptor's original double through this final conversion.
-  // Reading a previously rounded Float32Array here would lose the residual.
-  const gpuModel=new Float32Array(packed.length*2);gpuModel.set(packed);
-  for(let i=0;i<packed.length;i++)gpuModel[packed.length+i]=packed[i]-gpuModel[i];
-  if(!gpuModel.every(Number.isFinite))throw Error('GPU rig descriptor exceeds float32 range');
   const surfaceStateOffset=12,bladeStateOffset=surfaceStateOffset+surfaces.length*8,bladeCount=restBlades.length;
-  const data=Object.freeze({model:gpuModel,vertices,frameFloatCount:bladeStateOffset+bladeCount*16,surfaceStateOffset,bladeStateOffset,
+  const data=Object.freeze({model:packed,vertices,frameFloatCount:bladeStateOffset+bladeCount*16,surfaceStateOffset,bladeStateOffset,
     bladeCount,surfaceCount:surfaces.length,modelId:id});
   rigGPUPrivate.set(data,{frame:design.frame,runtime:design.runtime,surfaces,rowing,stations:rowing?design.stations:[]});return data;
 }
