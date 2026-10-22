@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import {modelDeck,modelDeckWidth,vesselVerticalScale} from './hull.js';
 import {createGunDefinitions} from './gunnery-models.js';
-import {VICTORY_MASTS,victoryMastPoint} from './models/victory.js';
+import {VICTORY_MASTS,victoryMastPoint,victoryHullHalfWidth,victorySheer} from './models/victory.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
@@ -29,6 +29,12 @@ export function crewNavigationObstacles(boat){
   const obstacles=[],add=(name,kind,min,max,extra={})=>obstacles.push(Object.freeze({id:name,kind,min:Object.freeze(min),max:Object.freeze(max),...extra}));
   const box=(name,kind,a,b,extra={})=>add(name,kind,crewNavigationPhysical(a,scale),crewNavigationPhysical(b,scale),extra);
   const tube=(name,kind,a,b,r,extra={})=>box(name,kind,a.map((v,i)=>Math.min(v,b[i])-r),a.map((v,i)=>Math.max(v,b[i])+r),extra);
+  const beam=(name,kind,a,b,width,depth,extra={})=>{
+    const axis=b.map((v,i)=>v-a[i]),n=Math.hypot(...axis);for(let i=0;i<3;i++)axis[i]/=n;
+    const reference=Math.abs(axis[1])<.9?[0,1,0]:[1,0,0],u=[axis[1]*reference[2]-axis[2]*reference[1],axis[2]*reference[0]-axis[0]*reference[2],axis[0]*reference[1]-axis[1]*reference[0]],U=Math.hypot(...u);for(let i=0;i<3;i++)u[i]/=U;
+    const v=[axis[1]*u[2]-axis[2]*u[1],axis[2]*u[0]-axis[0]*u[2],axis[0]*u[1]-axis[1]*u[0]],extent=u.map((q,i)=>Math.abs(q)*width/2+Math.abs(v[i])*depth/2);
+    box(name,kind,a.map((q,i)=>Math.min(q,b[i])-extent[i]),a.map((q,i)=>Math.max(q,b[i])+extent[i]),extra);
+  };
   const swept=(gun,name,a,b)=>{
     const direction=gun.directionDesign.map((v,i)=>v*scale[i]),length=Math.hypot(...direction),delta=direction.map(v=>-v/length*gun.recoilLength),A=crewNavigationPhysical(a,scale),B=crewNavigationPhysical(b,scale);
     add('gun.'+gun.id+'.'+name,'gun',A.map((v,i)=>Math.min(v,v+delta[i])),B.map((v,i)=>Math.max(v,v+delta[i])),{gunId:gun.id,meshGroup:gun.meshGroup,reservation:'full-recoil'});
@@ -43,6 +49,18 @@ export function crewNavigationObstacles(boat){
         const x=a[0]+side*.15,lo=Math.min(x-side*.25,x+side*.015),hi=Math.max(x-side*.25,x+side*.015);
         swept(gun,'carriage',[lo,floor+.055,z-.086],[hi,floor+.18,z+.086]);
         for(const X of[x-side*.21,x-side*.005])swept(gun,'trucks.'+X,[X-.042,floor,z-.126],[X+.042,floor+.084,z+.126]);
+      }else{
+        // The semantic battery gun group includes its curved port lining,
+        // raised hinged lid and lashings. Those remain fixed under recoil.
+        const centreX=gun.muzzleDesign[0]-side*.195,inset=centreX-side*.14,baseY=y-victorySheer(z),low=baseY-.105,high=baseY+.105,a=z-.235/2,b=z+.235/2,points=[];
+        for(const Z of[a,b])for(const base of[low,high]){
+          const Y=base+victorySheer(Z);points.push([inset,Y,Z],[side*victoryHullHalfWidth(Z,Y),Y,Z]);
+        }
+        for(let k=0;k<=3;k++){
+          const Z=a+(b-a)*k/3,Y=high+.008+victorySheer(Z),X=side*victoryHullHalfWidth(Z,Y)+side*.004;points.push([X,Y,Z],[X+side*.17,Y+.085,Z]);
+        }
+        box('gun.'+gun.id+'.port','gun',[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))),[0,1,2].map(i=>Math.max(...points.map(p=>p[i]))),extra);
+        for(const Z of[z-.068,z+.068])tube('gun.'+gun.id+'.lashing.'+Z,'gun',[centreX+side*.12,y+.105+.075,Z],[centreX+side*.08,y+.105+.22,Z],.004,extra);
       }
     }else{
       const additional=Object.hasOwn(ADDITIONAL_DESIGNS,id),x=additional?gun.centre[0]:gun.muzzleDesign[0]-side*.49;
@@ -78,7 +96,12 @@ export function crewNavigationObstacles(boat){
       const h=ADDITIONAL_DESIGNS[id].hatch,x=h.centre[0],z=h.centre[2],y=modelDeck(boat,z);
       box('hatch.main','hatch',[x-h.size[0]/2-.025,y-.03,z-h.size[2]/2-.025],[x+h.size[0]/2+.025,Math.max(y+.12,h.centre[1]+h.size[1]),z+h.size[2]/2+.025],{reservation:'fixed'});
     }else{
-      const y=modelDeck(boat,-3.15);box('hatch.main','hatch',[-.518,y,-3.688],[.518,y+.12,-2.612],{reservation:'fixed'});
+      const hatchExtra={reservation:'fixed',meshGroup:'hatch.frame'};
+      for(const x of[-.48,.48])beam('hatch.side.'+x,'hatch',[x,modelDeck(boat,-3)+.03,-2.65],[x,modelDeck(boat,-3.6)+.03,-3.65],.075,.09,hatchExtra);
+      for(const z of[-2.65,-3.65])beam('hatch.end.'+z,'hatch',[-.48,modelDeck(boat,z)+.03,z],[.48,modelDeck(boat,z)+.03,z],.075,.09,hatchExtra);
+      for(let x=-.4;x<.45;x+=.10)beam('hatch.grating.long.'+x,'hatch',[x,modelDeck(boat,-2.68),-2.68],[x,modelDeck(boat,-3.62),-3.62],.027,.035,hatchExtra);
+      for(let z=-2.75;z>-3.65;z-=.12)beam('hatch.grating.cross.'+z,'hatch',[-.43,modelDeck(boat,z)+.016,z],[.43,modelDeck(boat,z)+.016,z],.025,.025,hatchExtra);
+      const lidFloor=modelDeck(boat,-2.65)+.085;box('hatch.cover','hatch',[-.44,lidFloor,-3.61],[.44,lidFloor,-2.65],{reservation:'fixed',meshGroup:'hatch.cover'});
       const foreFloor=modelDeck(boat,-4.8);
       for(const side of[-1,1]){const x=side*.35;box('bitt.'+side,'bitt',[x-.055,foreFloor,-4.855],[x+.055,foreFloor+.36,-4.745],{reservation:'fixed',meshGroup:'deck.fore.bitts'});}
       box('bitts.crossbeam','bitt',[-.50,foreFloor+.23,-4.85],[.50,foreFloor+.33,-4.75],{reservation:'fixed',meshGroup:'deck.fore.bitts'});
