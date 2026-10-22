@@ -303,7 +303,7 @@ function crewWorkPassingDetour(s,company,boat,p,target){
     const candidate=[p,point(back),point(front),finish];
     if(candidate.some(q=>Math.abs(q[1]*sy-from[1])>.12)||!crewWorkBodiesClear(s,company,boat,candidate))continue;
     if(candidate.slice(1).some((q,i)=>!crewWorkSegmentClear(s,boat,candidate[i],q)))continue;
-    j.path=[...candidate.slice(1),...j.path.slice(index+1)];j.cursor=0;j.blockedTime=0;return true;
+    j.path=[...candidate.slice(1),...j.path.slice(index+1)];j.cursor=0;j.passing=true;j.passingDirection=Math.sign(axis[2]);j.blockedTime=0;return true;
   }
   return false;
 }
