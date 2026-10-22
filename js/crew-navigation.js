@@ -133,8 +133,17 @@ function crewNavigationRigAccess(p,body,boat,scale){
     if(!Number.isInteger(access.mast)||![-1,1].includes(access.side))return false;
     const z=p[2]/scale[2],channel=victoryChainwale(access.mast,access.side,z),x=access.side*p[0],
       inner=Math.min(access.side*channel.inner,access.side*channel.outer)*scale[0],outer=Math.max(access.side*channel.inner,access.side*channel.outer)*scale[0];
-    return z*scale[2]-body.radius>=channel.z0*scale[2]&&z*scale[2]+body.radius<=channel.z1*scale[2]&&
-      x-body.radius>=inner&&x+body.radius<=outer&&Math.abs(p[1]-channel.y*scale[1])<.05;
+    const front=victoryChainwale(access.mast,access.side,z-body.radius/scale[2]),aft=victoryChainwale(access.mast,access.side,z+body.radius/scale[2]);
+    if(Math.abs(front.floorLevel-aft.floorLevel)>1e-8)return false;
+    if(!(z*scale[2]-body.radius>=channel.z0*scale[2]&&z*scale[2]+body.radius<=channel.z1*scale[2]&&x-body.radius>=inner&&x+body.radius<=outer))return false;
+    // A centre inside the rectangle is insufficient on a curved, sheered
+    // channel: every point of the unchanged standing footprint needs support.
+    for(let i=0;i<16;i++){
+      const angle=i*Math.PI/8,Z=(p[2]+Math.sin(angle)*body.radius)/scale[2],X=access.side*(p[0]+Math.cos(angle)*body.radius),support=victoryChainwale(access.mast,access.side,Z),
+        lo=Math.min(access.side*support.inner,access.side*support.outer)*scale[0],hi=Math.max(access.side*support.inner,access.side*support.outer)*scale[0];
+      if(X<lo||X>hi||Math.abs(p[1]-support.y*scale[1])>=.05)return false;
+    }
+    return true;
   }
   // A legacy low ratline can sit above and just outside the deck edge.
   // Permit only its actual sloped boarding lead from a safe inboard footing;

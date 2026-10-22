@@ -259,7 +259,7 @@ function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
   if(!path?.length)return null;
   const start=s.job?.position?.slice()??[s.x,s.position[1]?(s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z],points=[start],options=crewWorkNavigationOptions({...s,job},boat),dense=[];
   const waypoints=path.slice(),access=options?.rigAccess;
-  if(boat.modelId!=='victory'&&access?.entry){
+  if(access?.entry){
     const scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12],entry=access.entry.map((v,i)=>v/scale[i]);
     if(distance3(physical(waypoints.at(-1),boat),access.point)<1e-6)waypoints.splice(waypoints.length-1,0,entry);
     else if(distance3(physical(start,boat),access.point)<1e-6){

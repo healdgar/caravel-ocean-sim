@@ -504,15 +504,17 @@ export function createVictoryMesh({groups,parts}={}){
     const rigStart=out.length;
     for(const side of [-1,1]){
       const channelStart=out.length,channel=victoryChainwale(index,side,m.z+m.shrouds.lowerStart),segments=12,
-        channelQuad=(a,b,c,d,n)=>quad(a,b,c,d,1,[n,n,n,n]);
-      for(let k=0;k<segments;k++){
-        const za=channel.z0+(channel.z1-channel.z0)*k/segments,zb=channel.z0+(channel.z1-channel.z0)*(k+1)/segments,
-          a=victoryChainwale(index,side,za),b=victoryChainwale(index,side,zb),t=channel.thickness;
+        channelQuad=(a,b,c,d,n)=>quad(a,b,c,d,1,[n,n,n,n]),
+        breaks=[VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.poop.start].filter(z=>z>channel.z0&&z<channel.z1),
+        stops=[...Array.from({length:segments+1},(_,k)=>channel.z0+(channel.z1-channel.z0)*k/segments),...breaks].sort((a,b)=>a-b);
+      for(let k=0;k<stops.length-1;k++){
+        const za=stops[k],zb=stops[k+1],mid=(za+zb)/2,
+          a=victoryChainwale(index,side,za,mid),b=victoryChainwale(index,side,zb,mid),t=channel.thickness;
         channelQuad([a.inner,a.y,za],[a.outer,a.y,za],[b.outer,b.y,zb],[b.inner,b.y,zb],[0,1,0]);
         channelQuad([a.outer,a.y-t,za],[a.outer,a.y,za],[b.outer,b.y,zb],[b.outer,b.y-t,zb],[side,0,0]);
         channelQuad([a.inner,a.y-t,za],[b.inner,b.y-t,zb],[b.outer,b.y-t,zb],[a.outer,a.y-t,za],[0,-1,0]);
-        if(k===0)channelQuad([a.inner,a.y-t,za],[a.outer,a.y-t,za],[a.outer,a.y,za],[a.inner,a.y,za],[0,0,-1]);
-        if(k===segments-1)channelQuad([b.inner,b.y,zb],[b.outer,b.y,zb],[b.outer,b.y-t,zb],[b.inner,b.y-t,zb],[0,0,1]);
+        if(k===0||breaks.includes(za))channelQuad([a.inner,a.y-t,za],[a.outer,a.y-t,za],[a.outer,a.y,za],[a.inner,a.y,za],[0,0,-1]);
+        if(k===stops.length-2||breaks.includes(zb))channelQuad([b.inner,b.y,zb],[b.outer,b.y,zb],[b.outer,b.y-t,zb],[b.inner,b.y-t,zb],[0,0,1]);
       }
       group('chainwale.'+m.id+'.'+side,'hull',channelStart);
       const top=victoryMastPoint(index,m.platform+.25),roots=[];

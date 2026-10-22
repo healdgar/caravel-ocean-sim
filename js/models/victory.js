@@ -165,12 +165,12 @@ export function victoryAnchorCathead(side=-1){
 export function victoryMastPoint(index,y){const m=VICTORY_MASTS[index],foot=victoryVesselDeck(m.z);return [0,y,m.z+m.rake*(y-foot)/(m.height-foot)];}
 // The side channels join the hull continuously and carry the lower deadeyes.
 // Their top is also the authored footing for entering the lower ratlines.
-export function victoryChainwale(index,side,z){
+export function victoryChainwale(index,side,z,deckZ=z){
   const m=VICTORY_MASTS[index],c=VICTORY_DESIGN.chainwales;
   if(!m||![-1,1].includes(side))throw Error('Invalid Victory chainwale');
   const z0=m.z+m.shrouds.lowerStart-c.endMargin,z1=m.z+m.shrouds.lowerStart+6*m.shrouds.lowerStep+c.endMargin,
-    y=victoryVesselDeck(z)+c.rise,w=victoryHullHalfWidth(z,y);
-  return {z0,z1,y,inner:side*(w-c.inset),outer:side*(w+c.outset),thickness:c.thickness};
+    floorLevel=victoryVesselDeck(deckZ)-victorySheer(deckZ),y=floorLevel+victorySheer(z)+c.rise,w=victoryHullHalfWidth(z,y);
+  return {z0,z1,y,floorLevel,inner:side*(w-c.inset),outer:side*(w+c.outset),thickness:c.thickness};
 }
 export function victoryShroud(index,side,k,upper=false){
   const m=VICTORY_MASTS[index];
