@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-// Real source/Pages startups, resources and submitted GPU work. No substituted
-// forest renderer, shader, frame source, culling result or asset response.
+// Explicit forestImpostor=auto DEBUG comparison on real source/Pages startups.
+// This retains the rejected individual-atlas path's resource/GPU regressions;
+// forest-canopy-runtime-gpu.test.mjs covers the atlas-free production default.
+// No substituted renderer, shader, frame, culling result or asset response.
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {readFile} from 'node:fs/promises';
@@ -142,7 +144,7 @@ function assertVisibleCounts(snapshot){
   return visible;
 }
 
-for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps prototypes immutable and culls/draws roots on GPU after camera movement`,{timeout:360000},async t=>{
+for(const path of ['/','/docs/index.html'])test(`${path} explicit debug atlas comparison keeps prototypes immutable and culls/draws roots on GPU after camera movement`,{timeout:360000},async t=>{
   const expected=JSON.parse(await readFile(new URL('../assets/forest-scenery/saba/manifest.json',import.meta.url),'utf8'));
   const page=await browser.newPage({viewport:{width:640,height:480}}),errors=[],requests=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(/init failed|GPU error:|Shader compile error/i.test(m.text()))errors.push(m.text());});
@@ -150,13 +152,14 @@ for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps proto
   await page.addInitScript(instrumentProductionForest);
   let releaseNative;const nativeGate=new Promise(resolve=>releaseNative=resolve);
   // Delay actual responses, then continue their unchanged production request.
-  // This proves first readiness without substituting geometry or atlas bytes.
+  // This proves debug-atlas readiness without substituting any source bytes.
+  // Solid-canopy geometry is a separate optional asset, never native payload.
   await page.route('**/assets/forest-scenery/**',async route=>{
     const path=new URL(route.request().url()).pathname;
-    if(!path.includes('/impostors/')&&(/\/(vertices|indices)\.bin(?:\.[a-f0-9]{16})?\.gz$/.test(path)||path.endsWith('.png')))await nativeGate;
+    if(!path.includes('/impostors/')&&!path.includes('/canopy/')&&(/\/(vertices|indices)\.bin(?:\.[a-f0-9]{16})?\.gz$/.test(path)||path.endsWith('.png')))await nativeGate;
     await route.continue();
   });
-  const query=new URLSearchParams({landfall:'coast',view:'free',boat:'0',prow:'0',boatX:'0',boatZ:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'35',windSpeed:'0',swellHs:'0',ui:'0',w:'640',h:'480'});
+  const query=new URLSearchParams({forestImpostor:'auto',landfall:'coast',view:'free',boat:'0',prow:'0',boatX:'0',boatZ:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'35',windSpeed:'0',swellHs:'0',ui:'0',w:'640',h:'480'});
   try{
     await page.goto(origin+path+'?'+query);
     await page.waitForFunction(()=>productionForestGPU.callback||window.oceanStartup?.state==='failed'||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:240000});
@@ -203,6 +206,6 @@ for(const path of ['/','/docs/index.html'])test(`${path} real forest keeps proto
     for(let frame=initial.frame+1;frame<=moved.frame;frame++)assertGPUFrame(moved,frame,moved.manifest);
     const afterVisible=assertVisibleCounts(moved);
     assert.deepEqual(moved.errors,[]);assert.equal(moved.lost,null);assert.deepEqual(errors,[]);
-    t.diagnostic(JSON.stringify({path,roots:initial.rootUpload,prototypes:5,visibleBefore:beforeVisible,visibleAfter:afterVisible,frames:moved.frame,immutableUploads:initial.writes.length}));
+    t.diagnostic(JSON.stringify({path,debugComparison:'forestImpostor=auto; no appearance certification',roots:initial.rootUpload,prototypes:5,visibleBefore:beforeVisible,visibleAfter:afterVisible,frames:moved.frame,immutableUploads:initial.writes.length}));
   }finally{releaseNative();await page.close();}
 });
