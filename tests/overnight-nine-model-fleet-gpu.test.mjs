@@ -75,6 +75,9 @@ for(const path of ['/', '/docs/index.html'])test(`${path} nine distinct real mod
   try{
     await page.goto(nineOrigin+path+'?'+query);await page.waitForFunction(()=>nineFleetGPU.callback||window.oceanStartup?.state==='failed'||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:300000});
     assert.equal(await page.locator('#err').textContent(),'',errors.join('\n'));assert.ok(await page.evaluate(()=>!!window.oceanFleet));
+    // RAF is controlled by this fixture. Complete the actual first GPU frame
+    // before clicking through the startup dialog, as a real user must.
+    await nineStep(page);await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     await page.getByRole('button',{name:'Camera views',exact:true}).click();await page.getByRole('button',{name:'View fleet',exact:true}).click();
     let frame;for(let i=0;i<8;i++)frame=await nineStep(page);const s=await nineSnapshot(page);
     assert.equal(s.startup,'ready');assert.equal(s.active,9);assert.equal(s.assets,9);assert.equal(s.config,8);assert.deepEqual(s.rows.map(v=>v.model),nineModels);assert.deepEqual(s.rows.map(v=>v.code),nineCodes);
