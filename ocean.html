@@ -34,7 +34,7 @@
   #hud { display:none; position:fixed; bottom:124px; left:14px; max-width:calc(100vw - 28px); font:10px/1.4 ui-monospace,monospace; color:var(--muted); pointer-events:none; text-shadow:0 1px 2px #000; }
   .show-performance #hud { display:block; }
   #hud .help { display:none; }
-  #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; gap:4px; z-index:8; }
+  #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; max-width:calc(100vw - 24px); z-index:8; }
   #camera-dock > button { background:var(--glass); border-color:#ffffff30; box-shadow:0 2px 12px #0002; }
   #camera-dock > button[aria-expanded=true] { color:var(--gold); border-color:var(--gold); }
   #sailing-instruments { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); left:max(12px,env(safe-area-inset-left)); z-index:5; display:flex; flex-wrap:wrap; width:344px; max-width:calc(100vw - 16px); box-sizing:border-box; border:1px solid #ffffff26; border-radius:10px; background:var(--glass); pointer-events:none; box-shadow:0 4px 20px #0002; }
@@ -65,7 +65,7 @@
   #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); color:#fff; text-shadow:0 1px 4px #000; font-size:11px; pointer-events:none; animation:hint-away 1s 7s forwards; }
   .has-looked #look-hint { display:none; }
   @keyframes hint-away { to { opacity:0; } }
-  #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
+  #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
   #panel.hidden { display:none; }
   .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 10px 6px 14px; flex:none; border-bottom:1px solid #ffffff20; }
   .panel-header strong { font-weight:550; }
@@ -114,6 +114,8 @@
   #gpu-profile { border:1px solid #ffffff24; border-radius:6px; margin-bottom:8px; font:10px/1.5 ui-monospace,monospace; }
   #gpu-profile summary { padding:0 8px; }
   #gpu-profile pre { margin:0; padding:0 8px 8px; max-height:160px; overflow:auto; white-space:pre-wrap; }
+  #performance-summary { margin:0 0 10px; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .performance-open #hud { display:none; }
   .landfall-stages,.landfall-weather { display:flex; flex-wrap:wrap; gap:5px; }
   .landfall-stages button,.landfall-weather button { flex:1; padding:7px; }
   #landfall-panel p { font-size:12px; }
@@ -138,7 +140,7 @@
     .instrument-wind { padding:4px 8px 4px 0; }
     .instrument-wind svg { width:40px; height:40px; }
     #sailing-cue { padding:3px 9px; font-size:9px; }
-    #camera-dock { top:calc(var(--instruments-bottom) + 6px); right:50%; transform:translateX(50%); gap:4px; }
+    #camera-dock { top:calc(var(--instruments-bottom) + 6px); right:50%; transform:translateX(50%); justify-content:center; width:max-content; max-width:calc(100vw - 8px); gap:4px; }
     .icon-button { width:44px; height:44px; min-height:44px; padding:12px; }
     #camera-dock > button { border-radius:9px; }
     #helm-controls { bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); max-width:calc(100vw - 16px); width:400px; grid-template-columns:1fr; gap:7px; padding:8px 10px; }
@@ -148,8 +150,8 @@
     .sail-buttons button { height:44px; padding:6px; }
     #look-hint { bottom:164px; font-size:10px; }
     #hud { bottom:166px; font-size:9px; }
-    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
-    .share-open #helm-controls,.sea-settings-open #helm-controls,.ship-settings-open #helm-controls,.captain-open #helm-controls,.landfall-open #helm-controls,.camera-open #helm-controls { visibility:hidden; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
+    .share-open #helm-controls,.sea-settings-open #helm-controls,.ship-settings-open #helm-controls,.captain-open #helm-controls,.landfall-open #helm-controls,.camera-open #helm-controls,.performance-open #helm-controls { visibility:hidden; }
     .panel-body { padding:8px 12px 12px; }
     #panel label { min-height:40px; grid-template-columns:minmax(0,1fr) minmax(75px,34%) 30px; }
     #panel input[type=range],#sail-controls input[type=range] { height:40px; }
@@ -159,14 +161,15 @@
     .panel-body button,summary { min-height:44px; }
     #share-panel { right:8px; }
   }
+  @media (max-width:360px) { #camera-dock { gap:0; } }
   @media (max-height:480px) and (min-width:640px) {
     #sailing-instruments { left:max(8px,env(safe-area-inset-left)); transform:none; width:310px; }
-    #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; }
+    #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; max-width:calc(100vw - 334px); }
     .icon-button { width:44px; height:44px; min-height:44px; }
     .sail-buttons button { height:44px; }
     #helm-controls { width:520px; grid-template-columns:1.35fr 1fr; gap:14px; }
     #look-hint { bottom:102px; }
-    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { left:auto; width:350px; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { left:auto; width:350px; }
   }
   @media (prefers-reduced-motion:reduce) { #look-hint { animation:none; } }
   #err { position:fixed; inset:0; display:none; padding:40px; color:#f88; font:16px system-ui; white-space:pre-wrap; background:#000; z-index:20; }
@@ -3351,7 +3354,7 @@ function createProceduralShipDefinition(id,{status='planned'}={}){
     if(station.pivot)add(role+'.pivot',station.pivot);
   }
   const rig=defineRig({id:id+'-rig',backend:'surfaces-v1',masts,sails,fittings},nodes,{planned:status!=='ready'});
-  return deepFreeze({id,modelCode:d.modelCode,gpuPose:false,name:d.name,revision:d.revision,status,development:true,hullFamily:d.family,
+  return deepFreeze({id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status,development:true,hullFamily:d.family,
     geometry:row?'rowing-procedural-v1':'later-sail-procedural-v1',designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,
     capabilities:{...(d.capabilities??{}),sailing:d.surfaces.length>0,rowing:row,yardTransfer:d.surfaces.some(s=>s.kind==='lateen'),
       anchors:!!(row?d.equipment.anchor:d.equipment.anchors),gunnery:false},nodes,rig,referenceMeasurements:d.references??d.referenceMeasurements});
@@ -3568,13 +3571,13 @@ function shipAdditionalDefinition(id){
   }
   const fittings=[];
   if(d.lookout){const name=d.masts[d.lookout.mast].id,p=context.mastPoint(d.lookout.mast,d.lookout.height);add('lookout.'+name,p,'station');fittings.push({id:name+'-lookout',kind:'crows-nest',mast:name,node:'lookout.'+name,provenance:d.lookout.placement});}
-  return {id,modelCode:d.modelCode,gpuPose:false,name:d.name,revision:d.revision,status:'ready',development:true,hullFamily:d.family,geometry:'additional-procedural-v1',
+  return {id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status:'ready',development:true,hullFamily:d.family,geometry:'additional-procedural-v1',
     designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,nodes,capabilities:{yardTransfer:d.surfaces.some(s=>s.kind==='lateen')},
     rig:defineRig({id:id+'-rig',backend:'surfaces-v1',masts:d.masts.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings},nodes),referenceMeasurements:d.references};
 }
 const SHIP_MODELS=deepFreeze({
   victory:victoryDefinition(),
-  nina:{id:'nina',modelCode:0,gpuPose:false,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
+  nina:{id:'nina',modelCode:0,gpuPose:true,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
     designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,nodes:ninaDefinitionNodes,
     rig:rigFor('nina',['lateen','lateen','lateen'],ninaDefinitionNodes),
     referenceMeasurements:[replicaReport('sanger-nina','Sanger Ships Niña',[
@@ -6245,8 +6248,337 @@ fn canvasTransmission(thickness:f32,incidence:f32)->vec3f {
 }
 `;
 
+// ---- js/wgsl/rig-surfaces.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+// Descriptor-driven rigs share the canonical GPU pose output. These helpers
+// mirror rig-surface.js; immutable model/vertex data is uploaded only once.
+const GPU_RIG_SURFACES=/* wgsl */ `
+struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
+  sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3>, lateenPressure:vec4f };
+@group(0)@binding(0)var<uniform>hull:Hull;
+@group(0)@binding(1)var<storage,read>vesselPoseSource:array<f32>;
+struct VesselPoseVertex {position:vec4f,normal:vec4f};
+@group(0)@binding(2)var<storage,read_write>vesselPoseOutput:array<VesselPoseVertex>;
+@group(0)@binding(3)var<storage,read>surfaceGpuModel:array<vec4f>;
+@group(0)@binding(4)var<storage,read>surfaceGpuVertices:array<vec4f>;
+@group(0)@binding(5)var<storage,read>surfaceGpuLive:array<vec4f>;
+struct SurfaceGpuSurface {
+  info:vec4f,pivot:vec4f,a:vec4f,b:vec4f,c:vec4f,d:vec4f,
+  camber:vec4f,hinge:vec4f,transfer:vec4f,contact:vec4f
+};
+struct SurfaceGpuPose {yaw:f32,deployed:f32,fill:f32,side:f32,opening:f32,dip:f32,pressure:f32};
+struct SurfaceGpuFrame {across:vec3f,up:vec3f};
+struct SurfaceGpuRelative {origin:vec3f,offset:vec3f};
+struct SurfaceGpuScalarPair {value:f32,change:f32};
+struct SurfaceGpuVectorPair {value:vec3f,change:vec3f};
+fn surfaceGpuUnit(p:vec3f)->vec3f {
+  let n=length(p);if(n>1e-12){return p/n;}return vec3f(0,1,0);
+}
+fn surfaceGpuRotate(p:vec3f,axis:vec3f,angle:f32)->vec3f {
+  let a=surfaceGpuUnit(axis);let c=cos(angle);let s=sin(angle);
+  return p*c+cross(a,p)*s+a*dot(a,p)*(1.0-c);
+}
+// Each cloth surface owns a pivot-local frame. Contact calculations never
+// subtract two large absolute design coordinates; global translation happens
+// once, only when a final render position is written.
+fn surfaceGpuOrigin(index:u32)->vec3f {
+  return surfaceGpuModel[u32(surfaceGpuModel[0].x)+index*10u+1u].xyz;
+}
+fn surfaceGpuLocalBase(index:u32)->u32 {
+  return u32(surfaceGpuModel[2].w)+index*(4u+u32(surfaceGpuModel[0].w)*3u);
+}
+fn surfaceGpuDescriptor(index:u32)->SurfaceGpuSurface {
+  let at=u32(surfaceGpuModel[0].x)+index*10u;let localAt=surfaceGpuLocalBase(index);
+  let pivot=surfaceGpuModel[at+1u];let a=surfaceGpuModel[at+2u];let b=surfaceGpuModel[at+3u];let c=surfaceGpuModel[at+4u];let d=surfaceGpuModel[at+5u];
+  return SurfaceGpuSurface(surfaceGpuModel[at],vec4f(0,0,0,pivot.w),vec4f(surfaceGpuModel[localAt].xyz,a.w),vec4f(surfaceGpuModel[localAt+1u].xyz,b.w),vec4f(surfaceGpuModel[localAt+2u].xyz,c.w),
+    vec4f(surfaceGpuModel[localAt+3u].xyz,d.w),surfaceGpuModel[at+6u],surfaceGpuModel[at+7u],surfaceGpuModel[at+8u],surfaceGpuModel[at+9u]);
+}
+fn surfaceGpuPose(index:u32)->SurfaceGpuPose {
+  let at=3u+index*2u;let a=surfaceGpuLive[at];let b=surfaceGpuLive[at+1u];
+  return SurfaceGpuPose(a.x,a.y,a.z,a.w,b.x,b.y,b.z);
+}
+fn surfaceGpuRest(surface:SurfaceGpuSurface,uv:vec2f)->vec3f {
+  if(surface.info.y<3.5){return surface.a.xyz+(surface.b.xyz-surface.a.xyz)*uv.x+(surface.c.xyz-surface.a.xyz)*uv.y;}
+  var p=mix(mix(surface.a.xyz,surface.b.xyz,uv.x),mix(surface.d.xyz,surface.c.xyz,uv.x),uv.y);
+  p.y+=surface.a.w*4.0*uv.x*(1.0-uv.x)*uv.y;return p;
+}
+fn surfaceGpuRotateVector(surface:SurfaceGpuSurface,p:vec3f,pose:SurfaceGpuPose)->vec3f {
+  if(surface.info.x==2.0||surface.info.x==4.0){return surfaceGpuRotate(p,surface.b.xyz-surface.a.xyz,pose.yaw);}
+  if(surface.info.x==3.0&&dot(surface.hinge.xyz,surface.hinge.xyz)>0.0){return surfaceGpuRotate(p,surface.hinge.xyz,pose.yaw);}
+  return surfaceGpuRotate(p,vec3f(0,1,0),pose.yaw);
+}
+fn surfaceGpuYard(surface:SurfaceGpuSurface,p:vec3f,pose:SurfaceGpuPose)->vec3f {
+  if(surface.info.x==1.0){
+    let angle=-atan2(surface.a.z-surface.b.z,surface.a.y-surface.b.y)*pose.dip;
+    var q=surfaceGpuRotate(p-surface.pivot.xyz,vec3f(1,0,0),angle);
+    let radius=surface.transfer.x+pose.dip*surface.transfer.y;
+    q.x+=pose.side*radius;q.z+=sqrt(max(0.0,1.0-pose.side*pose.side))*radius;q.y+=pose.dip*surface.transfer.z;
+    return surface.pivot.xyz+q;
+  }
+  var pivot=surface.pivot.xyz;if(surface.info.x==2.0||surface.info.x==4.0){pivot=surface.a.xyz;}
+  return pivot+surfaceGpuRotateVector(surface,p-pivot,pose);
+}
+fn surfaceGpuYardVector(surface:SurfaceGpuSurface,p:vec3f,pose:SurfaceGpuPose)->vec3f {
+  if(surface.info.x==1.0){let angle=-atan2(surface.a.z-surface.b.z,surface.a.y-surface.b.y)*pose.dip;return surfaceGpuRotate(p,vec3f(1,0,0),angle);}
+  return surfaceGpuRotateVector(surface,p,pose);
+}
+fn surfaceGpuYardWorld(index:u32,p:vec3f,pose:SurfaceGpuPose)->vec3f {
+  let origin=surfaceGpuOrigin(index);return origin+surfaceGpuYard(surfaceGpuDescriptor(index),p-origin,pose);
+}
+fn surfaceGpuClothMotion(surface:SurfaceGpuSurface,point:vec3f,pose:SurfaceGpuPose)->vec3f {
+  var p=point;
+  if(surface.info.x==1.0){p=surface.a.xyz+surfaceGpuRotate(p-surface.a.xyz,surface.b.xyz-surface.a.xyz,-pose.side*pose.opening);}
+  return surfaceGpuYard(surface,p,pose);
+}
+// A paired value is its centre plus an explicitly small stencil change.
+// Factoring the changes keeps a furled sheet's derivative through contact
+// pushes, without widening the stencil or changing collision branches.
+fn surfaceGpuClampChange(value:f32,change:f32)->f32 {
+  if(value<=0.0){return clamp(value+change,0.0,1.0);}
+  if(value>=1.0){return clamp(value-1.0+change,-1.0,0.0);}
+  return clamp(change,-value,1.0-value);
+}
+fn surfaceGpuPositivePair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  let next=pair.value+pair.change;
+  if(pair.value>0.0&&next>0.0){return pair;}
+  if(pair.value<=0.0&&next<=0.0){return SurfaceGpuScalarPair(0,0);}
+  let value=max(0.0,pair.value);return SurfaceGpuScalarPair(value,max(0.0,next)-value);
+}
+fn surfaceGpuPairMultiply(a:SurfaceGpuScalarPair,b:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  return SurfaceGpuScalarPair(a.value*b.value,a.value*b.change+a.change*b.value+a.change*b.change);
+}
+fn surfaceGpuSmoothPair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  let x=clamp(pair.value,0.0,1.0);let d=surfaceGpuClampChange(pair.value,pair.change);
+  return SurfaceGpuScalarPair(x*x*(3.0-2.0*x),d*(6.0*x*(1.0-x)+d*(3.0-6.0*x-2.0*d)));
+}
+fn surfaceGpuSinPair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
+  return SurfaceGpuScalarPair(sin(pair.value),2.0*cos(pair.value+pair.change*.5)*sin(pair.change*.5));
+}
+fn surfaceGpuLengthChange(value:vec3f,change:vec3f)->f32 {
+  let denominator=length(value)+length(value+change);
+  if(denominator>1e-20){return (2.0*dot(value,change)+dot(change,change))/denominator;}return 0.0;
+}
+fn surfaceGpuUnitPair(pair:SurfaceGpuVectorPair)->SurfaceGpuVectorPair {
+  let size=length(pair.value);let nextSize=length(pair.value+pair.change);
+  if(size<=1e-12||nextSize<=1e-12){let value=surfaceGpuUnit(pair.value);return SurfaceGpuVectorPair(value,surfaceGpuUnit(pair.value+pair.change)-value);}
+  let value=pair.value/size;
+  return SurfaceGpuVectorPair(value,(pair.change-value*surfaceGpuLengthChange(pair.value,pair.change))/nextSize);
+}
+fn surfaceGpuDotPair(a:SurfaceGpuVectorPair,b:SurfaceGpuVectorPair)->SurfaceGpuScalarPair {
+  return SurfaceGpuScalarPair(dot(a.value,b.value),dot(a.value,b.change)+dot(a.change,b.value)+dot(a.change,b.change));
+}
+fn surfaceGpuSewnPair(surface:SurfaceGpuSurface,anchor:vec2f,change:vec2f)->SurfaceGpuScalarPair {
+  let mask=u32(surface.hinge.w);let band=surface.camber.w;var weight=SurfaceGpuScalarPair(1,0);
+  if((mask&1u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair(anchor.x/band,change.x/band)));}
+  if((mask&2u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair((1.0-anchor.x)/band,-change.x/band)));}
+  if((mask&4u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair(anchor.y/band,change.y/band)));}
+  if((mask&8u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair((1.0-anchor.y)/band,-change.y/band)));}
+  if((mask&16u)!=0u){weight=surfaceGpuPairMultiply(weight,surfaceGpuSmoothPair(SurfaceGpuScalarPair((1.0-anchor.x-anchor.y)/band,(-change.x-change.y)/band)));}
+  return weight;
+}
+fn surfaceGpuContactSide(value:f32,mastBarrier:bool,surface:SurfaceGpuSurface,pose:SurfaceGpuPose)->f32 {
+  if(mastBarrier){return 1.0;}if(abs(value)>1e-8){return sign(value);}
+  var side=-sign(pose.pressure);if(surface.info.x==1.0){side=sign(pose.side);}if(side==0.0){side=-1.0;}return side;
+}
+fn surfaceGpuSupportsPair(initial:SurfaceGpuVectorPair,reference:SurfaceGpuVectorPair,normal:vec3f,index:u32,surface:SurfaceGpuSurface,pose:SurfaceGpuPose,anchor:vec2f,uvChange:vec2f,origin:vec3f)->SurfaceGpuVectorPair {
+  let pin=surfaceGpuSewnPair(surface,anchor,uvChange);if(pin.value==0.0&&pin.change==0.0){return initial;}
+  let clearance=surface.transfer.w;let band=surface.contact.x;var p=initial;
+  let start=u32(surfaceGpuModel[0].z);let count=u32(surfaceGpuModel[0].w);
+  for(var i=0u;i<count;i++){
+    let at=start+i*4u;let info=surfaceGpuModel[at+2u];let flags=u32(info.w);
+    if((flags&2u)!=0u&&info.y==f32(index)){continue;}
+    let localAt=surfaceGpuLocalBase(index)+4u+i*3u;let A=surfaceGpuModel[localAt];let B=surfaceGpuModel[localAt+1u];
+    var a=A.xyz;var b=B.xyz;var axis=b-a;
+    if(info.z>=0.0){
+      let owner=u32(info.z);let descriptor=surfaceGpuDescriptor(owner);let ownerPose=surfaceGpuPose(owner);let bridge=surfaceGpuModel[localAt+2u].xyz;
+      a=surfaceGpuYard(descriptor,a,ownerPose)+bridge;b=surfaceGpuYard(descriptor,b,ownerPose)+bridge;axis=surfaceGpuYardVector(descriptor,axis,ownerPose);
+    }
+    let length2=dot(axis,axis);if(length2<1e-12){continue;}a-=origin;b-=origin;
+    // Interpolate from the closer endpoint. A masthead contact therefore
+    // never computes a small gap as a six-metre endpoint cancellation.
+    var endpoint=a;var segmentAxis=axis;var radiusA=A.w;var radiusB=B.w;
+    if(dot(p.value-b,p.value-b)<dot(p.value-a,p.value-a)){endpoint=b;segmentAxis=-axis;radiusA=B.w;radiusB=A.w;}
+    let projection=dot(p.value-endpoint,segmentAxis)/length2;let coordinate=clamp(projection,0.0,1.0);
+    let coordinateChange=surfaceGpuClampChange(projection,dot(p.change,segmentAxis)/length2);
+    let q=SurfaceGpuVectorPair(endpoint+segmentAxis*coordinate,segmentAxis*coordinateChange);
+    let delta=SurfaceGpuVectorPair(p.value-q.value,p.change-q.change);
+    let radius=SurfaceGpuScalarPair(radiusA+(radiusB-radiusA)*coordinate+clearance,(radiusB-radiusA)*coordinateChange);
+    let mastBarrier=(flags&1u)!=0u&&info.x==surface.info.w&&surface.contact.y!=0.0;
+    var direction=normal;if(mastBarrier){direction=vec3f(0,0,surface.contact.y);}
+    var contactNormal=SurfaceGpuVectorPair(direction-axis*dot(direction,axis)/length2,vec3f(0));
+    let restReference=SurfaceGpuVectorPair(reference.value-q.value,reference.change-q.change);
+    if(length(contactNormal.value)<1e-10){
+      contactNormal=SurfaceGpuVectorPair(restReference.value-axis*dot(restReference.value,axis)/length2,restReference.change-axis*dot(restReference.change,axis)/length2);
+      var fallback=vec3f(1,0,0);if(abs(axis.y)/sqrt(length2)<.9){fallback=vec3f(0,1,0);}fallback=cross(axis,fallback);
+      if(length(contactNormal.value)<1e-10){
+        let query=contactNormal.value+contactNormal.change;contactNormal.value=fallback;
+        if(length(query)<1e-10){contactNormal.change=vec3f(0);}else{contactNormal.change=query-fallback;}
+      }else if(length(contactNormal.value+contactNormal.change)<1e-10){contactNormal.change=fallback-contactNormal.value;}
+    }
+    contactNormal=surfaceGpuUnitPair(contactNormal);
+    let signed=surfaceGpuDotPair(delta,contactNormal);
+    let transverse=SurfaceGpuVectorPair(delta.value-contactNormal.value*signed.value,delta.change-contactNormal.value*signed.change-contactNormal.change*signed.value-contactNormal.change*signed.change);
+    let distance=SurfaceGpuScalarPair(length(transverse.value),surfaceGpuLengthChange(transverse.value,transverse.change));
+    let restSide=surfaceGpuDotPair(restReference,contactNormal);
+    let side=surfaceGpuContactSide(restSide.value,mastBarrier,surface,pose);let nextSide=surfaceGpuContactSide(restSide.value+restSide.change,mastBarrier,surface,pose);
+    let penetration=surfaceGpuPositivePair(SurfaceGpuScalarPair(radius.value-side*signed.value,radius.change-nextSide*signed.change+(side-nextSide)*signed.value));
+    if(penetration.value==0.0&&penetration.change==0.0){continue;}
+    let tension=surfaceGpuSmoothPair(SurfaceGpuScalarPair((distance.value-radius.value)/band,(distance.change-radius.change)/band));
+    let weight=surfaceGpuPairMultiply(SurfaceGpuScalarPair(1.0-tension.value,-tension.change),pin);
+    let correction=surfaceGpuPairMultiply(surfaceGpuPairMultiply(penetration,weight),SurfaceGpuScalarPair(side,nextSide-side));
+    p.value+=contactNormal.value*correction.value;
+    p.change+=contactNormal.value*correction.change+contactNormal.change*correction.value+contactNormal.change*correction.change;
+  }
+  return p;
+}
+// Finite differences must share an origin. Subtracting two absolute design
+// positions loses the thin furled sheet's tangent in f32. These factored rest
+// differences preserve the original .0005 stencil without changing contacts.
+fn surfaceGpuRestDifference(surface:SurfaceGpuSurface,anchor:vec2f,delta:vec2f)->vec3f {
+  let ba=surface.b.xyz-surface.a.xyz;let ca=surface.c.xyz-surface.a.xyz;
+  if(surface.info.y<3.5){return ba*delta.x+ca*delta.y;}
+  let da=surface.d.xyz-surface.a.xyz;let twist=surface.a.xyz-surface.b.xyz+surface.c.xyz-surface.d.xyz;
+  var p=ba*delta.x+da*delta.y+twist*(delta.x*anchor.y+delta.y*anchor.x+delta.x*delta.y);
+  let edgeChange=delta.x*(1.0-2.0*anchor.x-delta.x);
+  p.y+=surface.a.w*4.0*(edgeChange*anchor.y+(anchor.x*(1.0-anchor.x)+edgeChange)*delta.y);return p;
+}
+fn surfaceGpuClothRotate(surface:SurfaceGpuSurface,point:vec3f,pose:SurfaceGpuPose)->vec3f {
+  if(surface.info.x!=1.0){return surfaceGpuRotateVector(surface,point,pose);}
+  let opened=surfaceGpuRotate(point,surface.b.xyz-surface.a.xyz,-pose.side*pose.opening);
+  let angle=-atan2(surface.a.z-surface.b.z,surface.a.y-surface.b.y)*pose.dip;
+  return surfaceGpuRotate(opened,vec3f(1,0,0),angle);
+}
+fn surfaceGpuClothDelta(index:u32,anchor:vec2f,uvChange:vec2f)->SurfaceGpuRelative {
+  let surface=surfaceGpuDescriptor(index);let pose=surfaceGpuPose(index);let rest=surfaceGpuRest(surface,anchor);let triangle=surface.info.y<3.5;
+  let restDifference=surfaceGpuRestDifference(surface,anchor,uvChange);var gathered:vec3f;var gatheredDifference:vec3f;
+  if(surface.info.x==4.0){gathered=mix(surface.a.xyz,surface.c.xyz,anchor.y);gatheredDifference=(surface.c.xyz-surface.a.xyz)*uvChange.y;}
+  else if(triangle){let axis=surface.b.xyz-surface.a.xyz;let length2=dot(axis,axis);gathered=mix(surface.a.xyz,surface.b.xyz,dot(rest-surface.a.xyz,axis)/length2);gatheredDifference=axis*(dot(restDifference,axis)/length2);}
+  else{gathered=surfaceGpuRest(surface,vec2f(anchor.x,0));gatheredDifference=(surface.b.xyz-surface.a.xyz)*uvChange.x;}
+  let deployed=clamp(pose.deployed,0.0,1.0);let fill=clamp(pose.fill,0.0,1.0);let factor=.012+.988*deployed;
+  let flat=mix(gathered,rest,factor);let flatDifference=mix(gatheredDifference,restDifference,factor);
+  let U=SurfaceGpuScalarPair(anchor.x,uvChange.x);let V=SurfaceGpuScalarPair(anchor.y,uvChange.y);
+  var envelope=surfaceGpuPairMultiply(surfaceGpuPairMultiply(U,V),surfaceGpuPositivePair(SurfaceGpuScalarPair(1.0-anchor.x-anchor.y,-uvChange.x-uvChange.y)));
+  envelope.value*=27.0;envelope.change*=27.0;
+  if(!triangle){
+    var wave=surfaceGpuSinPair(SurfaceGpuScalarPair(3.141592653589793*anchor.y,3.141592653589793*uvChange.y));
+    if(anchor.y<=0.0||anchor.y>=1.0){let next=wave.value+wave.change;wave.value=0.0;wave.change=next;}
+    if(uvChange.y<=-anchor.y||uvChange.y>=1.0-anchor.y){wave.change=-wave.value;}
+    envelope=surfaceGpuPairMultiply(surfaceGpuPairMultiply(U,SurfaceGpuScalarPair(1.0-anchor.x,-uvChange.x)),wave);envelope.value*=4.0;envelope.change*=4.0;
+  }
+  let slack=1.0-smoothstep(.2,.85,fill);let flutterScale=min(max(surfaceGpuLive[0].y,0.0)/4.0,1.0)*surface.c.w*slack*slack;
+  var flutter=surfaceGpuSinPair(SurfaceGpuScalarPair(surfaceGpuLive[0].x*6.0+anchor.x*17.0+anchor.y*13.0,uvChange.x*17.0+uvChange.y*13.0));
+  flutter.value*=flutterScale;flutter.change*=flutterScale;
+  var side=1.0;if(surface.info.x==1.0){side=pose.side;}
+  var camber=surfaceGpuPairMultiply(SurfaceGpuScalarPair(surface.b.w*pose.pressure*side*(.12+.88*fill)+flutter.value,flutter.change),envelope);camber.value*=deployed;camber.change*=deployed;
+  let axis=surfaceGpuUnit(surface.camber.xyz);let origin=surfaceGpuClothMotion(surface,flat,pose);
+  let reference=SurfaceGpuVectorPair(vec3f(0),surfaceGpuClothRotate(surface,flatDifference,pose));
+  var point=SurfaceGpuVectorPair(surfaceGpuClothRotate(surface,axis*camber.value,pose),surfaceGpuClothRotate(surface,flatDifference+axis*camber.change,pose));
+  if(surfaceGpuModel[0].w!=0.0){point=surfaceGpuSupportsPair(point,reference,surfaceGpuUnit(surfaceGpuClothRotate(surface,axis,pose)),index,surface,pose,anchor,uvChange,origin);}
+  return SurfaceGpuRelative(surfaceGpuOrigin(index)+(origin+point.value),point.change);
+}
+fn surfaceGpuClothNear(index:u32,uv:vec2f,anchor:vec2f)->SurfaceGpuRelative {
+  return surfaceGpuClothDelta(index,anchor,uv-anchor);
+}
+fn surfaceGpuCloth(index:u32,uv:vec2f)->vec3f {
+  let point=surfaceGpuClothDelta(index,uv,vec2f(0));return point.origin+point.offset;
+}
+fn surfaceGpuAttachment(position:vec4f,binding:vec4f)->vec3f {
+  if(position.w<0.0||binding.x==0.0){return position.xyz;}
+  let index=u32(position.w);
+  if(binding.x==1.0){return surfaceGpuCloth(index,binding.yz);}
+  return surfaceGpuYardWorld(index,position.xyz,surfaceGpuPose(index));
+}
+fn surfaceGpuSineDifference(a:f32,b:f32)->f32 {
+  return 2.0*cos(3.141592653589793*(a+b)*.5)*sin(3.141592653589793*(a-b)*.5);
+}
+fn surfaceGpuRopeNear(index:u32,coordinate:f32,anchorCoordinate:f32)->SurfaceGpuRelative {
+  let at=u32(surfaceGpuModel[1].x)+index*10u;let edge=surfaceGpuModel[at+8u];let edgeEnd=surfaceGpuModel[at+9u];let t=clamp(coordinate,0.0,1.0);let anchor=clamp(anchorCoordinate,0.0,1.0);
+  if(edgeEnd.y!=0.0){let end=vec2f(edge.w,edgeEnd.x);return surfaceGpuClothNear(u32(edge.x),mix(edge.yz,end,t),mix(edge.yz,end,anchor));}
+  let a=surfaceGpuAttachment(surfaceGpuModel[at],surfaceGpuModel[at+1u]);let b=surfaceGpuAttachment(surfaceGpuModel[at+2u],surfaceGpuModel[at+3u]);
+  let info=surfaceGpuModel[at+6u];let leads=surfaceGpuModel[at+7u];var lazy=0.0;
+  if(info.w!=0.0){
+    var workingSide=leads.x;
+    if(leads.y==0.0){var owner=surfaceGpuModel[at].w;if(owner<0.0){owner=surfaceGpuModel[at+2u].w;}if(owner<0.0){owner=edge.x;}workingSide=surfaceGpuPose(u32(owner)).side;}
+    lazy=1.0-smoothstep(-.25,.25,info.z*workingSide);
+  }
+  var workingOrigin=mix(a,b,anchor);workingOrigin.y-=sin(3.141592653589793*anchor)*info.x;
+  var workingDifference=(b-a)*(t-anchor);workingDifference.y-=surfaceGpuSineDifference(t,anchor)*info.x;
+  if(lazy==0.0){return SurfaceGpuRelative(workingOrigin,workingDifference);}
+  var looseOrigin:vec3f;var looseDifference:vec3f;
+  if(leads.w!=0.0){
+    let lead=surfaceGpuAttachment(surfaceGpuModel[at+4u],surfaceGpuModel[at+5u]);let split=leads.z;var q=(t-split)/(1.0-split);var anchorQ=(anchor-split)/(1.0-split);
+    if(t<split){q=t/split;}if(anchor<split){anchorQ=anchor/split;looseOrigin=mix(a,lead,anchorQ);}else{looseOrigin=mix(lead,b,anchorQ);}
+    if(t<split&&anchor<split){looseDifference=(lead-a)*(q-anchorQ);}
+    else if(t>=split&&anchor>=split){looseDifference=(b-lead)*(q-anchorQ);}
+    else if(t<split){looseDifference=(lead-a)*(q-1.0)-(b-lead)*anchorQ;}
+    else{looseDifference=(b-lead)*q+(lead-a)*(1.0-anchorQ);}
+    looseOrigin.y-=sin(3.141592653589793*anchorQ)*info.y;looseDifference.y-=surfaceGpuSineDifference(q,anchorQ)*info.y;
+  }else{
+    looseOrigin=mix(a,b,anchor);looseOrigin.y-=sin(3.141592653589793*anchor)*(info.x+info.y);
+    looseDifference=(b-a)*(t-anchor);looseDifference.y-=surfaceGpuSineDifference(t,anchor)*(info.x+info.y);
+  }
+  return SurfaceGpuRelative(mix(workingOrigin,looseOrigin,lazy),mix(workingDifference,looseDifference,lazy));
+}
+fn surfaceGpuRope(index:u32,coordinate:f32)->vec3f {
+  let point=surfaceGpuRopeNear(index,coordinate,coordinate);return point.origin+point.offset;
+}
+fn surfaceGpuRopeFrame(axis:vec3f,preferred:vec3f)->SurfaceGpuFrame {
+  let direction=surfaceGpuUnit(axis);let projected=cross(direction,cross(preferred,direction));var across:vec3f;
+  if(length(projected)>1e-12){across=surfaceGpuUnit(projected);}
+  else if(surfaceGpuModel[2].z!=0.0){across=vec3f(0,1,0);}
+  else{across=surfaceGpuUnit(cross(direction,vec3f(0,0,1)));}
+  return SurfaceGpuFrame(across,cross(direction,across));
+}
+fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
+  let vertexMetadata=surfaceGpuVertices[vertex*3u];let data=surfaceGpuVertices[vertex*3u+1u];let auxiliary=surfaceGpuVertices[vertex*3u+2u];
+  let kind=u32(vertexMetadata.x);let index=u32(vertexMetadata.y);var p=position;var n=normal;
+  if(kind==1u){
+    let uv=vertexMetadata.zw;let e=.0005;p=surfaceGpuCloth(index,uv);
+    let du=surfaceGpuClothDelta(index,uv,vec2f(e,0)).offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
+    let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;n=surfaceGpuUnit(cross(du,dv));
+  }else if(kind==2u){
+    let surface=surfaceGpuDescriptor(index);let pose=surfaceGpuPose(index);let origin=surfaceGpuYard(surface,vec3f(0),pose);
+    let axes=mat3x3f(surfaceGpuYard(surface,vec3f(1,0,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,1,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,0,1),pose)-origin);
+    p=surfaceGpuOrigin(index)+(origin+axes*(position-surfaceGpuOrigin(index)));n=surfaceGpuUnit(axes*normal);
+  }else if(kind==3u){
+    let t=vertexMetadata.z;let frame=surfaceGpuRopeFrame(surfaceGpuRopeNear(index,min(1.0,t+.001),t).offset-surfaceGpuRopeNear(index,max(0.0,t-.001),t).offset,auxiliary.xyz);
+    p=surfaceGpuRope(index,t)+frame.across*data.x+frame.up*data.y;n=surfaceGpuUnit(frame.across*data.z+frame.up*data.w);
+  }else if(kind==4u){
+    let at=3u+u32(surfaceGpuLive[2].x)*2u+index*4u;let axes=mat3x3f(surfaceGpuLive[at+1u].xyz,surfaceGpuLive[at+2u].xyz,surfaceGpuLive[at+3u].xyz);
+    let scale=surfaceGpuLive[1].xyz;p=(surfaceGpuLive[at].xyz+axes*data.xyz)/scale;n=surfaceGpuUnit((axes*auxiliary.xyz)*scale);
+  }else if(kind==5u||kind==6u){
+    let at=u32(surfaceGpuModel[1].z);var pivot=surfaceGpuModel[at].xyz;var axis=vec3f(0,1,0);var angle=surfaceGpuLive[0].z;
+    if(kind==6u){pivot=surfaceGpuModel[at+1u].xyz;axis=surfaceGpuModel[at+2u].xyz;angle*=surfaceGpuModel[at+1u].w;}
+    p=pivot+surfaceGpuRotate(position-pivot,axis,angle);n=surfaceGpuUnit(surfaceGpuRotate(normal,axis,angle));
+  }else if(kind==7u){
+    let pivot=surfaceGpuModel[u32(surfaceGpuModel[1].w)].xyz;let q=position-pivot;let c=cos(surfaceGpuLive[0].w);let s=sin(surfaceGpuLive[0].w);
+    p=vec3f(position.x,pivot.y+c*q.y+s*q.z,pivot.z-s*q.y+c*q.z);n=vec3f(normal.x,c*normal.y+s*normal.z,-s*normal.y+c*normal.z);
+  }
+  return VesselPoseVertex(vec4f(p,0),vec4f(n,0));
+}
+`;
+
+// ---- js/wgsl/vessel-recoil.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// Runs after canonical ship deformation. Each record owns one indexed vertex;
+// no original vertex buffer is rewritten and no position is read back to CPU.
+const VESSEL_RECOIL_UPDATE=/* wgsl */ `
+struct VesselRecoilVertex {position:vec4f,normal:vec4f};
+@group(0)@binding(0)var<storage,read_write>vesselRecoilPosed:array<VesselRecoilVertex>;
+@group(0)@binding(1)var<storage,read>vesselRecoilRecords:array<vec2u>;
+@group(0)@binding(2)var<storage,read>vesselRecoilDeltas:array<vec4f>;
+@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
+  if(id.x>=arrayLength(&vesselRecoilRecords)){return;}
+  let record=vesselRecoilRecords[id.x];
+  if(record.x>=arrayLength(&vesselRecoilPosed)||record.y>=arrayLength(&vesselRecoilDeltas)){return;}
+  let delta=vesselRecoilDeltas[record.y].xyz;if(all(delta==vec3f(0))){return;}
+  vesselRecoilPosed[record.x].position+=vec4f(delta,0);
+}
+`;
+
 // ---- js/wgsl/vessel-pose.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
+
 
 // The canonical deformation is evaluated once per original indexed vertex.
 // Original local/material/UV data stays in the unmodified source vertex buffer.
@@ -6263,6 +6595,18 @@ struct VesselPoseVertex {position:vec4f,normal:vec4f};
   let uv=vec2f(vesselPoseSource[at+7u],vesselPoseSource[at+8u]);
   let rig=rigVertex(position,normal,vesselPoseSource[at+6u],uv);
   vesselPoseOutput[vertex]=VesselPoseVertex(vec4f(rig.position,0),vec4f(rig.normal,0));
+}
+`;
+
+// All descriptor-driven models enter the same canonical compute pose stage.
+// The original Niña/Victory shader and 208-byte Hull contract stay intact.
+const VESSEL_SURFACE_POSE_UPDATE=GPU_RIG_SURFACES+/* wgsl */ `
+@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
+  let vertex=id.x;let at=vertex*9u;
+  if(vertex>=arrayLength(&vesselPoseOutput)||at+8u>=arrayLength(&vesselPoseSource)||vertex*3u+2u>=arrayLength(&surfaceGpuVertices)){return;}
+  let position=vec3f(vesselPoseSource[at],vesselPoseSource[at+1u],vesselPoseSource[at+2u]);
+  let normal=vec3f(vesselPoseSource[at+3u],vesselPoseSource[at+4u],vesselPoseSource[at+5u]);
+  vesselPoseOutput[vertex]=surfaceGpuVertex(vertex,position,normal);
 }
 `;
 
@@ -8722,6 +9066,21 @@ fn levelAt(world:vec3f)->f32 {
 }
 `;
 
+// Reuse the authoritative indexed pose already produced on the GPU. Crew
+// probes have a sentinel index and retain their separately updated positions.
+// This variant needs neither a second rig evaluator nor a position readback.
+function withPosedWetnessProbes(source=WET_UPDATE){
+  const sample=/let\s+rig\s*=\s*rigVertex\(\s*probe\.position\.xyz\s*,\s*vec3f\(\s*0\s*,\s*1\s*,\s*0\s*\)\s*,\s*probe\.position\.w\s*,\s*probe\.uvKind\.xy\s*\)\s*;\s*let\s+p\s*=\s*rig\.position\s*;/g;
+  if(source.match(sample)?.length!==1)throw Error('Unrecognized wetness pose sample');
+  return source.replace(sample,`var p=probe.position.xyz;
+  let sourceIndex=wetPoseSourceVertices[i];
+  if(sourceIndex!=0xffffffffu&&sourceIndex<arrayLength(&wetPosedVertices)){p=wetPosedVertices[sourceIndex].position.xyz;}`)+/* wgsl */ `
+struct WetPosedVertex {position:vec4f,normal:vec4f};
+@group(0) @binding(7) var<storage,read> wetPosedVertices:array<WetPosedVertex>;
+@group(0) @binding(8) var<storage,read> wetPoseSourceVertices:array<u32>;
+`;
+}
+
 // ---- js/wgsl/sim.js ----
 
 
@@ -11076,6 +11435,77 @@ struct AnchorVertex {
   return vec4f(surfaceAir(radiance,v.world)*alpha,alpha);
 }
 `;
+
+// Keep ANCHOR_RENDER intact: the crew-tool renderer shares its material and
+// ordinary position/normal interface. Only the anchor uses these templates.
+const anchorGPUVertexStart=ANCHOR_RENDER.indexOf('@vertex fn vs(');
+const anchorGPUFragmentStart=ANCHOR_RENDER.indexOf('@fragment fn fs(');
+if(anchorGPUVertexStart<0||anchorGPUFragmentStart<anchorGPUVertexStart)throw Error('Anchor GPU shader interface changed');
+const ANCHOR_GPU_RENDER=ANCHOR_RENDER.slice(0,anchorGPUVertexStart)+/* wgsl */`
+// Header: scale/rodeRadius/heading/stowed; iron origin/splash age;
+// fairlead/splash active; splash origin; then 49 physical catenary knots.
+@group(0) @binding(7) var<storage,read> anchorGPUState:array<vec4f>;
+struct AnchorGPUPoint {position:vec3f,normal:vec3f,kind:vec2f};
+fn anchorGPUUnit(v:vec3f)->vec3f {let n=length(v);if(n>1e-12){return v/n;}return vec3f(0,1,0);}
+fn anchorGPUWorld(p:vec3f)->vec3f {
+  return select(p,A.origin.xyz+A.right.xyz*p.x+A.up.xyz*p.y+A.aft.xyz*p.z,A.origin.w>.5);
+}
+fn anchorGPUNormal(n:vec3f)->vec3f {return select(n,A.right.xyz*n.x+A.up.xyz*n.y+A.aft.xyz*n.z,A.origin.w>.5);}
+fn anchorGPUIron(p:vec3f)->vec3f {
+  let scale=anchorGPUState[0].x;let angle=anchorGPUState[0].z;let q=p*scale;let c=cos(angle);let s=sin(angle);
+  return anchorGPUState[1].xyz+vec3f(c*q.x-s*q.z,q.y,s*q.x+c*q.z);
+}
+fn anchorGPUCircle(angle:f32,r:f32)->vec3f {return vec3f(cos(angle)*r,sin(angle)*r,0);}
+fn anchorGPUTube(a:vec3f,b:vec3f,radius:f32,endpoint:f32,angle:f32,baseAngle:f32,sides:f32,kind:f32)->AnchorGPUPoint {
+  let axis=b-a;if(length(axis)<1e-6){return AnchorGPUPoint(a,vec3f(0,1,0),vec2f(kind,1));}
+  let direction=normalize(axis);var seed=vec3f(0,1,0);if(abs(direction.y)>.9){seed=vec3f(1,0,0);}
+  let across=normalize(cross(direction,seed));let up=cross(direction,across);
+  let p=mix(a,b,endpoint)+radius*(across*cos(angle)+up*sin(angle));
+  let edge=radius*(across*(cos(baseAngle+2.0*PI/sides)-cos(baseAngle))+up*(sin(baseAngle+2.0*PI/sides)-sin(baseAngle)));
+  return AnchorGPUPoint(p,anchorGPUUnit(cross(edge,axis)),vec2f(kind,1));
+}
+fn anchorGPUSplashRing(segment:f32,corner:u32)->vec3f {
+  let age=anchorGPUState[1].w;let scale=sqrt(anchorGPUState[0].x);let radius=(.22+age*1.7)*scale;let inner=radius*.85;
+  let a=segment*PI/12.0;let b=(segment+1.0)*PI/12.0;
+  let p0=vec3f(cos(a)*inner,.025,sin(a)*inner);let p1=vec3f(cos(b)*inner,.025,sin(b)*inner);
+  let p2=vec3f(cos(a)*radius,.03,sin(a)*radius);let p3=vec3f(cos(b)*radius,.03,sin(b)*radius);
+  if(corner==0u){return p0;}if(corner==1u||corner==4u){return p2;}if(corner==2u||corner==3u){return p1;}return p3;
+}
+fn anchorGPUSplashDrop(segment:f32,corner:u32)->vec3f {
+  let age=anchorGPUState[1].w;let scale=sqrt(anchorGPUState[0].x);let a=segment*PI/8.0;
+  let radius=(.2+age*(.7+sin(segment*7.0)*.25))*scale;let height=max(0.0,age*3.8-age*age*5.5)*scale;
+  let width=.06*(1.0-age/.75)*scale;let origin=vec3f(cos(a)*radius,0,sin(a)*radius);
+  if(corner==0u){return origin+vec3f(-width,.025,0);}if(corner==1u){return origin+vec3f(width,.025,0);}return origin+vec3f(0,height+.03,width);
+}
+fn anchorGPUExpand(position:vec3f,normal:vec3f,kind:vec2f)->AnchorGPUPoint {
+  let mode=u32(round(kind.x));let scale=anchorGPUState[0].x;
+  if(mode<2u){
+    let a=anchorGPUState[0].z;let c=cos(a);let s=sin(a);
+    return AnchorGPUPoint(anchorGPUIron(position),vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z),kind);
+  }
+  if(mode==4u){
+    let segment=u32(round(position.x));return anchorGPUTube(anchorGPUState[4u+segment].xyz,anchorGPUState[5u+segment].xyz,
+      anchorGPUState[0].y,position.y,position.z,normal.x,5.0,2.0);
+  }
+  if(mode==5u){
+    let a=position.x*PI/5.0;let b=(position.x+1.0)*PI/5.0;let origin=anchorGPUState[2].xyz;
+    return anchorGPUTube(origin+anchorGPUCircle(a,.10*scale),origin+anchorGPUCircle(b,.10*scale),.025*scale,position.y,position.z,normal.x,4.0,0.0);
+  }
+  let corner=u32(round(position.y));let age=anchorGPUState[1].w;let fade=max(0.0,1.0-age/1.6);
+  if(mode==6u){
+    let first=(corner/3u)*3u;let p=anchorGPUSplashRing(position.x,corner);
+    let a=anchorGPUSplashRing(position.x,first);let b=anchorGPUSplashRing(position.x,first+1u);let c=anchorGPUSplashRing(position.x,first+2u);
+    return AnchorGPUPoint(anchorGPUState[3].xyz+p,anchorGPUUnit(cross(b-a,c-a)),vec2f(3,.48*fade));
+  }
+  let p=anchorGPUSplashDrop(position.x,corner);let a=anchorGPUSplashDrop(position.x,0u);let b=anchorGPUSplashDrop(position.x,1u);let c=anchorGPUSplashDrop(position.x,2u);
+  return AnchorGPUPoint(anchorGPUState[3].xyz+p,anchorGPUUnit(cross(b-a,c-a)),vec2f(3,.5*fade));
+}
+@vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f)->AnchorVertex {
+  let expanded=anchorGPUExpand(position,normal,kind);let world=anchorGPUWorld(expanded.position);let n=anchorGPUNormal(expanded.normal);
+  var out:AnchorVertex;out.position=F.viewProj*vec4f(world-F.camPos.xyz,1);
+  out.world=world;out.normal=n;out.kind=expanded.kind;return out;
+}
+`+ANCHOR_RENDER.slice(anchorGPUFragmentStart);
 
 // ---- js/wgsl/dolphins.js ----
 
@@ -13938,109 +14368,100 @@ async function createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyV
 }
 
 // ---- js/anchor.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 
 
 
-// One anchor, a 48-span hemp rode, and one short-lived impact splash. No new
-// textures, compute fields, readbacks, per-particle objects, or shadow maps.
-async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics=null}) {
-  const module=await shader(ANCHOR_RENDER,'anchor and hemp rode');
-  const vertices=new Float32Array(4096*8);let cursor=0,solidCount=0,totalCount=0,stowedCache='',shapeScale=1;
-  const buffer=device.createBuffer({label:'anchor dynamic geometry',size:vertices.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
-  const poseBuffer=device.createBuffer({label:'anchor pose',size:64,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-  const pose=new Float32Array(16),axis=[0,0,0];
-  const pipes=await Promise.all([false,true].map(transparent=>device.createRenderPipelineAsync({label:transparent?'anchor splash':'anchor and rode',layout:'auto',
-    vertex:{module,entryPoint:'vs',buffers:[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}]},
-    fragment:{module,entryPoint:'fs',targets:[{format,...(transparent?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
-    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:!transparent,depthCompare:'greater'},multisample:{count:samples}})));
-  const resources=[{buffer:frameUBO},transView,skyView,sampler,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer}];
-  const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))}));
-  const shadowGroups=pipes.map(pipe=>shadows.bind(pipe));
-  const submerged=waterOptics?await waterOptics.capture({source:ANCHOR_RENDER,pipeline:pipes[0],
-    vertex:{buffers:[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}]},groups:2}):null;
-  const submergedGroup=submerged?.bindGroup(resources),submergedShadows=submerged?shadows.bind(submerged.pipeline):null;
-  const add=(p,n,kind=0,alpha=1)=>{if(cursor+8>vertices.length)throw new Error('Anchor geometry budget exceeded');vertices.set([p[0],p[1],p[2],n[0],n[1],n[2],kind,alpha],cursor);cursor+=8;};
-  const triangle=(a,b,c,kind,alpha=1)=>{
-    const u=b.map((n,i)=>n-a[i]),v=c.map((n,i)=>n-a[i]),n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...n)||1;
-    for(let i=0;i<3;i++)n[i]/=length;add(a,n,kind,alpha);add(b,n,kind,alpha);add(c,n,kind,alpha);
+const ANCHOR_GPU_RODE_SPANS=48;
+const ANCHOR_GPU_STATE_FLOATS=(4+ANCHOR_GPU_RODE_SPANS+1)*4;
+
+// Asset construction only. Unit iron triangles retain the previous shape;
+// tube/splash records are immutable parameters expanded by the vertex shader.
+function createAnchorGPUTemplate(){
+  const data=[];
+  const add=(p,n,kind)=>data.push(...p,...n,kind,1);
+  const tri=(a,b,c,kind)=>{
+    const u=b.map((v,i)=>v-a[i]),v=c.map((v,i)=>v-a[i]),n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...n)||1;
+    for(let i=0;i<3;i++)n[i]/=length;add(a,n,kind);add(b,n,kind);add(c,n,kind);
   };
-  const tube=(a,b,radius,kind,sides=6)=>{
-    radius*=shapeScale;
-    const d=b.map((n,i)=>n-a[i]),length=Math.hypot(...d);if(length<1e-6)return;
-    for(let i=0;i<3;i++)d[i]/=length;
-    const seed=Math.abs(d[1])>.9?[1,0,0]:[0,1,0];
-    const u=[d[1]*seed[2]-d[2]*seed[1],d[2]*seed[0]-d[0]*seed[2],d[0]*seed[1]-d[1]*seed[0]],l=Math.hypot(...u);
-    for(let i=0;i<3;i++)u[i]/=l;
-    const v=[d[1]*u[2]-d[2]*u[1],d[2]*u[0]-d[0]*u[2],d[0]*u[1]-d[1]*u[0]];
-    const point=(p,j)=>p.map((n,i)=>n+radius*(u[i]*Math.cos(j*2*Math.PI/sides)+v[i]*Math.sin(j*2*Math.PI/sides)));
+  const tube=(a,b,r,kind,sides)=>{
+    const d=b.map((v,i)=>v-a[i]),length=Math.hypot(...d);for(let i=0;i<3;i++)d[i]/=length;
+    const seed=Math.abs(d[1])>.9?[1,0,0]:[0,1,0],u=[d[1]*seed[2]-d[2]*seed[1],d[2]*seed[0]-d[0]*seed[2],d[0]*seed[1]-d[1]*seed[0]],m=Math.hypot(...u);
+    for(let i=0;i<3;i++)u[i]/=m;const v=[d[1]*u[2]-d[2]*u[1],d[2]*u[0]-d[0]*u[2],d[0]*u[1]-d[1]*u[0]];
+    const point=(p,j)=>p.map((x,i)=>x+r*(u[i]*Math.cos(j*2*Math.PI/sides)+v[i]*Math.sin(j*2*Math.PI/sides)));
+    for(let j=0;j<sides;j++){const aa=point(a,j),ab=point(a,j+1),ba=point(b,j),bb=point(b,j+1);tri(aa,ab,ba,kind);tri(ba,ab,bb,kind);}
+  };
+  tube([0,-.55,0],[0,.56,0],.065,0,8);tube([0,.42,-.77],[0,.42,.77],.11,1,4);
+  for(const side of [-1,1]){
+    tube([0,-.52,0],[side*.32,-.61,0],.065,0,6);tube([side*.32,-.61,0],[side*.61,-.28,0],.065,0,6);
+    const a=[side*.46,-.43,-.18],b=[side*.46,-.43,.18],tip=[side*.67,-.16,0];
+    tri(a,b,tip,0);tri([side*.44,-.46,0],a,tip,0);tri(b,[side*.44,-.46,0],tip,0);
+  }
+  for(let i=0;i<12;i++)tube([Math.cos(i*Math.PI/6)*.12,.65+Math.sin(i*Math.PI/6)*.12,0],
+    [Math.cos((i+1)*Math.PI/6)*.12,.65+Math.sin((i+1)*Math.PI/6)*.12,0],.025,0,4);
+  const ironCount=data.length/8;
+  const templateTube=(segment,sides,kind)=>{
     for(let j=0;j<sides;j++){
-      const aa=point(a,j),ab=point(a,j+1),ba=point(b,j),bb=point(b,j+1);
-      triangle(aa,ab,ba,kind);triangle(ba,ab,bb,kind);
+      const a=j*Math.PI*2/sides,b=(j+1)*Math.PI*2/sides;
+      for(const [endpoint,angle]of [[0,a],[0,b],[1,a],[1,a],[0,b],[1,b]])add([segment,endpoint,angle],[a,0,0],kind);
     }
   };
+  for(let i=0;i<ANCHOR_GPU_RODE_SPANS;i++)templateTube(i,5,4);
+  for(let i=0;i<10;i++)templateTube(i,4,5);
+  const solidCount=data.length/8;
+  for(let i=0;i<24;i++)for(let corner=0;corner<6;corner++)add([i,corner,0],[0,0,0],6);
+  const ringCount=data.length/8-solidCount;
+  for(let i=0;i<16;i++)for(let corner=0;corner<3;corner++)add([i,corner,0],[0,0,0],7);
+  return Object.freeze({vertices:new Float32Array(data),ironCount,solidCount,ringCount,totalCount:data.length/8});
+}
+
+// Coordinates remain exactly the physical anchor/catenary values. Stowed data
+// lives in hull-local metres; the unchanged 64-byte actor pose places it.
+function writeAnchorGPUState(state,boat,target){
+  if(!(target instanceof Float32Array)||target.length!==ANCHOR_GPU_STATE_FLOATS)throw Error('Anchor GPU state has wrong shape');
+  const equipment=anchorEquipment(boat),stowed=state.phase==='stowed';
+  if(stowed){
+    boat={...boat,x:0,z:0,heave:0,heading:0,pitch:0,roll:0};const p=anchorFairlead(boat);
+    state={...state,position:{x:p.x,y:p.y-anchorEyeOffset(boat),z:p.z},splash:null};
+  }
+  const fairlead=anchorFairlead(boat),p=state.position,age=state.splash?state.time-state.splash.at:-1;
+  const active=!!state.splash&&age>=0&&age<1.6;
+  target.set([equipment.renderScale,equipment.rodeRadius,(stowed?0:state.worldHeading??0)*Math.PI/180,Number(stowed),
+    p.x,p.y,p.z,age,fairlead.x,fairlead.y,fairlead.z,Number(active),state.splash?.x??0,state.splash?.y??0,state.splash?.z??0,0]);
+  const knots=anchorRodePoints(state,boat,ANCHOR_GPU_RODE_SPANS);
+  for(let i=0;i<knots.length;i++){const q=knots[i];target.set([q.x,q.y,q.z,0],16+i*4);}
+  return active?(age<.75?192:144):0;
+}
+
+async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics=null}){
+  const module=await shader(ANCHOR_GPU_RENDER,'anchor and hemp rode'),template=createAnchorGPUTemplate();
+  const buffer=device.createBuffer({label:'anchor immutable templates',size:template.vertices.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
+  device.queue.writeBuffer(buffer,0,template.vertices);
+  const poseBuffer=device.createBuffer({label:'anchor pose',size:64,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+  const stateBuffer=device.createBuffer({label:'anchor compact physical state',size:ANCHOR_GPU_STATE_FLOATS*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+  const pose=new Float32Array(16),values=new Float32Array(ANCHOR_GPU_STATE_FLOATS),axis=[0,0,0];let solidCount=0,totalCount=0,stowedCache='';
+  const layout=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
+  const pipes=await Promise.all([false,true].map(transparent=>device.createRenderPipelineAsync({label:transparent?'anchor splash':'anchor and rode',layout:'auto',
+    vertex:{module,entryPoint:'vs',buffers:layout},fragment:{module,entryPoint:'fs',targets:[{format,...(transparent?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
+    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:!transparent,depthCompare:'greater'},multisample:{count:samples}})));
+  const resources=[{buffer:frameUBO},transView,skyView,sampler,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer},{buffer:stateBuffer}];
+  const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))}));
+  const shadowGroups=pipes.map(pipe=>shadows.bind(pipe));
+  const submerged=waterOptics?await waterOptics.capture({source:ANCHOR_GPU_RENDER,pipeline:pipes[0],vertex:{buffers:layout},groups:2}):null;
+  const submergedGroup=submerged?.bindGroup(resources),submergedShadows=submerged?shadows.bind(submerged.pipeline):null;
   return {
     update(state,boat){
-      const equipment=anchorEquipment(boat),scale=equipment.renderScale;
       if(state.phase==='stowed'){
         const heading=(boat.heading??0)*Math.PI/180;
         boatRotate(axis,1,0,0,heading,boat.pitch??0,boat.roll??0);pose.set(axis,0);
         boatRotate(axis,0,1,0,heading,boat.pitch??0,boat.roll??0);pose.set(axis,4);
         boatRotate(axis,0,0,1,heading,boat.pitch??0,boat.roll??0);pose.set(axis,8);
         pose.set([boat.x??0,boat.heave??0,boat.z??0,1],12);device.queue.writeBuffer(poseBuffer,0,pose);
-        const key=`${boat.modelId??'nina'}/${boat.length}/${boat.beam}/${scale}`;if(stowedCache===key)return;stowedCache=key;
-        // The common idle state uploads only its 64-byte transform. Build its
-        // iron/fairlead geometry once in hull-local metres, not every frame.
-        boat={...boat,x:0,z:0,heave:0,heading:0,pitch:0,roll:0};const p=anchorFairlead(boat);
-        state={...state,position:{x:p.x,y:p.y-anchorEyeOffset(boat),z:p.z},splash:null};
-      }else{
-        stowedCache='';pose.fill(0);device.queue.writeBuffer(poseBuffer,0,pose);
-      }
-      cursor=0;shapeScale=scale;const angle=(state.phase==='stowed'?(boat.heading??0):(state.worldHeading??0))*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle),origin=state.position;
-      const point=(x,y,z)=>{
-        x*=scale;y*=scale;z*=scale;
-        const p=[0,0,0];
-        if(state.phase==='stowed')boatRotate(p,x,y,z,angle,boat.pitch??0,boat.roll??0);
-        else{p[0]=c*x-s*z;p[1]=y;p[2]=s*x+c*z;}
-        return p.map((n,i)=>n+[origin.x,origin.y,origin.z][i]);
-      };
-      // Stocked wrought-iron anchor: shank, timber stock, curved arms and flukes.
-      tube(point(0,-.55,0),point(0,.56,0),.065,0,8);
-      tube(point(0,.42,-.77),point(0,.42,.77),.11,1,4);
-      for(const side of [-1,1]){
-        tube(point(0,-.52,0),point(side*.32,-.61,0),.065,0,6);
-        tube(point(side*.32,-.61,0),point(side*.61,-.28,0),.065,0,6);
-        const a=point(side*.46,-.43,-.18),b=point(side*.46,-.43,.18),tip=point(side*.67,-.16,0);
-        triangle(a,b,tip,0);triangle(point(side*.44,-.46,0),a,tip,0);triangle(b,point(side*.44,-.46,0),tip,0);
-      }
-      for(let i=0;i<12;i++)tube(point(Math.cos(i*Math.PI/6)*.12,.65+Math.sin(i*Math.PI/6)*.12,0),point(Math.cos((i+1)*Math.PI/6)*.12,.65+Math.sin((i+1)*Math.PI/6)*.12,0),.025,0,4);
-      shapeScale=1;
-      const rope=anchorRodePoints(state,boat);
-      for(let i=0;i<rope.length-1;i++)tube(Object.values(rope[i]),Object.values(rope[i+1]),equipment.rodeRadius,2,5);
-      // Fairlead ring makes the rope's attachment readable at close range.
-      const p=anchorFairlead(boat);
-      for(let i=0;i<10;i++)tube([p.x+Math.cos(i*Math.PI/5)*.10*scale,p.y+Math.sin(i*Math.PI/5)*.10*scale,p.z],
-        [p.x+Math.cos((i+1)*Math.PI/5)*.10*scale,p.y+Math.sin((i+1)*Math.PI/5)*.10*scale,p.z],.025*scale,0,4);
-      solidCount=cursor/8;
-      if(state.splash){
-        const age=state.time-state.splash.at;
-        if(age>=0&&age<1.6){
-          const splash=state.splash,fade=Math.max(0,1-age/1.6),splashScale=Math.sqrt(scale),radius=(.22+age*1.7)*splashScale;
-          for(let i=0;i<24;i++){
-            const a=i*Math.PI/12,b=(i+1)*Math.PI/12,inner=radius*.85;
-            const p0=[splash.x+Math.cos(a)*inner,splash.y+.025,splash.z+Math.sin(a)*inner];
-            const p1=[splash.x+Math.cos(b)*inner,splash.y+.025,splash.z+Math.sin(b)*inner];
-            const p2=[splash.x+Math.cos(a)*radius,splash.y+.03,splash.z+Math.sin(a)*radius];
-            const p3=[splash.x+Math.cos(b)*radius,splash.y+.03,splash.z+Math.sin(b)*radius];
-            triangle(p0,p2,p1,3,.48*fade);triangle(p1,p2,p3,3,.48*fade);
-          }
-          if(age<.75)for(let i=0;i<16;i++){
-            const a=i*Math.PI/8,r=(.2+age*(.7+Math.sin(i*7)*.25))*splashScale,height=Math.max(0,age*3.8-age*age*5.5)*splashScale,width=.06*(1-age/.75)*splashScale;
-            const x=splash.x+Math.cos(a)*r,z=splash.z+Math.sin(a)*r;
-            triangle([x-width,splash.y+.025,z],[x+width,splash.y+.025,z],[x,splash.y+height+.03,z+width],3,.5*fade);
-          }
-        }
-      }
-      totalCount=cursor/8;device.queue.writeBuffer(buffer,0,vertices,0,cursor);
+        const key=`${boat.modelId??'nina'}/${boat.length}/${boat.beam}/${anchorEquipment(boat).renderScale}`;
+        if(stowedCache===key)return;stowedCache=key;
+      }else{stowedCache='';pose.fill(0);device.queue.writeBuffer(poseBuffer,0,pose);}
+      solidCount=template.solidCount;totalCount=solidCount+writeAnchorGPUState(state,boat,values);
+      device.queue.writeBuffer(stateBuffer,0,values);
     },
     drawSubmerged(pass){
       if(!submerged||!solidCount)return;
@@ -14048,12 +14469,9 @@ async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,e
     },
     draw(pass){
       pass.setVertexBuffer(0,buffer);
-      for(let i=0;i<2;i++){
-        const count=i?totalCount-solidCount:solidCount;if(!count)continue;
-        pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);pass.setBindGroup(1,shadowGroups[i]);pass.draw(count,1,i?solidCount:0);
-      }
+      for(let i=0;i<2;i++){const count=i?totalCount-solidCount:solidCount;if(!count)continue;pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);pass.setBindGroup(1,shadowGroups[i]);pass.draw(count,1,i?solidCount:0);}
     },
-    destroy(){buffer.destroy();poseBuffer.destroy();},
+    destroy(){buffer.destroy();poseBuffer.destroy();stateBuffer.destroy();},
   };
 }
 
@@ -17011,7 +17429,215 @@ function createLaterSailAssetPose(asset){
   return createAdditionalAssetPose(asset,{design:laterSailDesign(id),context:laterSailRigContext(id),steeringPose:laterSailSteeringPose});
 }
 
+// ---- js/rig-gpu-data.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// Immutable asset preparation and compact per-vessel inputs for the GPU rig.
+// CPU cloth/rope sampling below runs only while an asset is constructed.
+
+
+
+
+
+
+// Binding 3 is a vec4 array. All offsets stored in it are vec4 offsets.
+// Header: [surfaces,count,supports,count], [ropes,count,steering,hatch],
+// [backend (0 legacy / 1 surfaces), vertexCount, rowingBasis, localTableOffset].
+// Original global records remain unchanged. The appended pivot-local table
+// has one (4 + 3*supportCount)-vec4 block per sail: four local corners, then
+// support A/B/bridge records. Static endpoints subtract the sail's authored
+// pivot. Moving endpoints subtract their owner's authored pivot; the bridge
+// is ownerPivot-sailPivot. All differences are computed once from original
+// JS doubles before float32 upload. No shader float64 emulation is required.
+// Surface (10 vec4): [kind,corners,control,mast], [pivot,braceLimit],
+// [A,footRise], [B,belly], [C,flutter], [D,pressureSpeed],
+// [camberAxis,pinBand], [hingeAxis,sewnEdgeMask],
+// [yardClearance,transferArc,transferLift,contactClearance],
+// [contactBand,mastSide (-1 fore / 1 aft / 0 none),0,0].
+// Support (4 vec4): [a,r], [b,rEnd], [mast,surface,movingOwner,flags], 0.
+// Flags: 1 mast-face barrier; 2 skips its owning canvas. Missing indices = -1.
+// Rope (10 vec4): a/b/lazyLead each [XYZ,surface] + [type,u,v,0],
+// [sag,lazySag,side,paired], [workingSide,override,leadSplit,hasLazyLead],
+// [edgeSurface,u0,v0,u1], [v1,isClothEdge,0,0]. Endpoint type: fixed0/cloth1/spar2.
+// Steering (4 vec4): [pivot,hasWheel], [wheelCentre,ratio], [wheelAxis,0], 0.
+// Hatch (1 vec4): [hinge,0].
+// Binding 4 is three vec4 per indexed vertex: [category,index,u,v],
+// [positionData,0], [normalData,0]. For ropes the latter two instead hold
+// [c,s,nc,ns] and [preferredAcross,0]. For blades they are rest basis coordinates.
+// Categories: static0/cloth1/spar2/rope3/blade4/rudder-or-tiller5/wheel6/hatch7.
+// Binding 5 header: [time,wind,rudderRadians,hatchOpeningRadians], [scale,0],
+// [surfaceCount,bladeCount,0,0], followed by 2 vec4 per surface and 4 per blade.
+// Surface live: [yaw,deployed,fill,side], [opening,dip,pressure,0].
+// Blade live: centre/along/across/normal, each XYZ, in hull-local metres.
+const RIG_GPU_LAYOUT=Object.freeze({
+  headerVec4:3,surfaceVec4:10,supportVec4:4,ropeVec4:10,steeringVec4:4,hatchVec4:1,
+  vertexFloats:12,frameHeaderFloats:12,surfaceStateFloats:8,bladeStateFloats:16,
+});
+const rigGPUPrivate=new WeakMap();
+const rigGPUKinds=Object.freeze({square:0,lateen:1,headsail:2,gaff:3,bermudan:4});
+const rigGPUEdges=Object.freeze({u0:1,u1:2,v0:4,v1:8,diagonal:16});
+const rigGPUSub=(a,b)=>a.map((v,i)=>v-b[i]);
+const rigGPUMul=(a,s)=>a.map(v=>v*s);
+const rigGPUDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
+const rigGPUCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function rigGPUUnit(v,fallback=[0,1,0]){const n=Math.hypot(...v);return n>1e-12?rigGPUMul(v,1/n):[...fallback];}
+function rigGPUDesign(id){
+  if(Object.hasOwn(ADDITIONAL_DESIGNS,id))return additionalDesign(id);
+  if(Object.hasOwn(LATER_SAIL_DESIGNS,id))return laterSailDesign(id);
+  if(Object.hasOwn(ROWING_DESIGNS,id))return rowingDesign(id);
+  throw Error('No GPU rig descriptor for '+id);
+}
+function rigGPUFrameBasis(axis){
+  const direction=rigGPUUnit(axis),reference=Math.abs(direction[1])<.9?[0,1,0]:[1,0,0];
+  const across=rigGPUUnit(rigGPUCross(direction,reference));
+  return {across,up:rigGPUCross(direction,across)};
+}
+function rigGPUSurfaceIndex(indices,id){
+  const index=indices.get(id);if(index===undefined)throw Error('Unknown GPU rig surface '+id);return index;
+}
+function rigGPUSurfaceRecord(s){
+  const kind=rigGPUKinds[s.kind];if(kind===undefined)throw Error('Unsupported GPU rig surface '+s.kind);
+  const [a,b,c,d=c]=s.corners,axis=s.camberAxis??(s.kind==='square'?[0,0,1]:[1,0,0]);
+  const sewn=s.sewnEdges??((s.kind==='gaff'&&s.corners.length===4)||s.kind==='bermudan'?['v0','u0']:['v0']);
+  const sewnMask=sewn.reduce((bits,edge)=>{if(!rigGPUEdges[edge])throw Error('Unknown GPU sewn edge '+edge);return bits|rigGPUEdges[edge];},0);
+  const contactSide=s.mastContactSide===undefined?0:s.mastContactSide==='fore'?-1:s.mastContactSide==='aft'?1:null;
+  if(contactSide===null)throw Error('Invalid GPU mast contact side');
+  return [kind,s.corners.length,surfaceControlIndex(s),s.mast,...s.pivot,s.braceLimit??(s.kind==='square'?Math.PI/3:1.2),
+    ...a,s.footRise??0,...b,s.belly??.2,...c,s.flutter??.035,...d,s.pressureSpeed??1.5,
+    ...axis,s.contactPinBand??.06,...(s.hingeAxis??[0,1,0]),sewnMask,
+    s.yardClearance??.2,s.transferArc??.22,s.transferLift??Math.hypot(...rigGPUSub(b,a))*.15,s.contactClearance??.045,
+    s.contactBand??.25,contactSide,0,0];
+}
+function rigGPUAttachment(a,indices){
+  if(Array.isArray(a)&&a.length===3)return [...a,-1,0,0,0,0];
+  if(!a||a.surface===undefined)throw Error('Invalid GPU rope attachment');
+  const index=rigGPUSurfaceIndex(indices,a.surface);
+  if(a.uv?.length===2)return [0,0,0,index,1,...a.uv,0];
+  if(a.point?.length===3)return [...a.point,index,2,0,0,0];
+  throw Error('GPU rope attachment requires UV or spar point');
+}
+function rigGPURopeRecord(line,indices,context){
+  const edge=line.clothEdge,edgeIndex=line.surface===undefined?-1:rigGPUSurfaceIndex(indices,line.surface);
+  // A sewn edge has no independent endpoints; the shader samples its canvas.
+  const zero=[0,0,0,-1,0,0,0,0];
+  const a=edge?zero:rigGPUAttachment(line.a,indices),b=edge?zero:rigGPUAttachment(line.b,indices);
+  const lead=line.lazyLead===undefined?zero:rigGPUAttachment(line.lazyLead,indices);
+  const binding=line.a?.surface??line.b?.surface??line.surface;
+  const surface=binding===undefined?null:context.surfaces[rigGPUSurfaceIndex(indices,binding)];
+  const paired=line.paired??(line.kind==='sheet'&&surface?.kind!=='square');
+  if(paired&&(!surface||![-1,1].includes(line.side)))throw Error('GPU paired sheet needs its working side');
+  return [...a,...b,...lead,line.sag??(line.kind==='sheet'?.04:0),line.lazySag??.25,line.side??0,Number(paired),
+    line.workingSide??0,Number(line.workingSide!==undefined),line.leadSplit??.72,Number(line.lazyLead!==undefined),
+    edgeIndex,edge?.[0][0]??0,edge?.[0][1]??0,edge?.[1][0]??0,edge?.[1][1]??0,Number(!!edge),0,0];
+}
+
+function createRigGPUData(asset){
+  const source=asset?.vertices,model=asset?.model,id=model?.id??asset?.modelId,backend=model?.rig?.backend;
+  if(!(source instanceof Float32Array)||!source.length||source.length%9)throw Error('GPU rig needs nine-float indexed source vertices');
+  if(!id||!['lateen3','square1805','surfaces-v1'].includes(backend))throw Error('Unsupported GPU rig backend '+backend);
+  const count=source.length/9,vertices=new Float32Array(count*RIG_GPU_LAYOUT.vertexFloats);
+  if(backend!=='surfaces-v1'){
+    const data=Object.freeze({model:new Float32Array([3,0,3,0,3,0,3,3,0,count,0,0]),vertices,
+      frameFloatCount:12,surfaceStateOffset:12,bladeStateOffset:12,bladeCount:0,surfaceCount:0,modelId:id});
+    rigGPUPrivate.set(data,{frame:model.designFrame,runtime:model.runtime,surfaces:[],rowing:false});return data;
+  }
+  const design=rigGPUDesign(id),context=proceduralRigContext(id),rowing=Object.hasOwn(ROWING_DESIGNS,id);
+  const surfaces=context.surfaces,indices=new Map(surfaces.map((s,i)=>[s.id,i]));
+  const supports=[...(context._surfaceCollisionSupports??[
+    ...(context.supports??[]),...(context.masts??[]).map((m,i)=>({a:m.foot,b:m.head,r:m.radius,rEnd:m.tipRadius,kind:'mast',mast:m.index??i})),
+  ]),...(context.spars??[]).map(s=>({a:s.a,b:s.b,r:s.radius,kind:'spar',sparKind:s.kind,mast:s.mast,surface:s.surface,movingOwner:s.surface}))];
+  const surfaceOffset=3,supportOffset=surfaceOffset+surfaces.length*10,ropeOffset=supportOffset+supports.length*4;
+  const steeringOffset=ropeOffset+context.lines.length*10,hatchOffset=steeringOffset+4;
+  const localTableOffset=hatchOffset+1,localStride=4+supports.length*3;
+  const packed=new Float32Array((localTableOffset+surfaces.length*localStride)*4);
+  packed.set([surfaceOffset,surfaces.length,supportOffset,supports.length,ropeOffset,context.lines.length,steeringOffset,hatchOffset,1,count,Number(rowing),localTableOffset]);
+  for(const [i,s]of surfaces.entries())packed.set(rigGPUSurfaceRecord(s),(surfaceOffset+i*10)*4);
+  for(const [i,s]of supports.entries()){
+    const face=s.kind==='mast'||s.kind==='spar'&&(s.sparKind===undefined||s.sparKind==='yard');
+    const own=s.kind==='spar'||s.kind==='sail-stay',owner=s.movingOwner===undefined?-1:rigGPUSurfaceIndex(indices,s.movingOwner);
+    const surface=s.surface===undefined?-1:rigGPUSurfaceIndex(indices,s.surface);
+    packed.set([...s.a,s.r??0,...s.b,s.rEnd??s.r??0,s.mast??-1,surface,owner,Number(face)+2*Number(own),0,0,0,0],(supportOffset+i*4)*4);
+  }
+  for(const [i,line]of context.lines.entries())packed.set(rigGPURopeRecord(line,indices,context),(ropeOffset+i*10)*4);
+  const wheel=design.steering.wheel;
+  packed.set([...design.steering.pivot,Number(!!wheel),...(wheel?.centre??[0,0,0]),wheel?.turnRatio??12,...(wheel?.axis??[0,0,1]),0,0,0,0,0],steeringOffset*4);
+  const hatch=design.hatch;packed.set(hatch?[hatch.centre[0],hatch.centre[1],hatch.centre[2]-hatch.size[2]/2,0]:[0,0,0,0],hatchOffset*4);
+  for(let sail=0;sail<surfaces.length;sail++){
+    const surface=surfaces[sail],pivot=surface.pivot,base=(localTableOffset+sail*localStride)*4;
+    for(let corner=0;corner<4;corner++)packed.set([...rigGPUSub(surface.corners[corner]??surface.corners[2],pivot),0],base+corner*4);
+    for(let support=0;support<supports.length;support++){
+      const descriptor=supports[support],moving=descriptor.movingOwner!==undefined;
+      const origin=moving?surfaces[rigGPUSurfaceIndex(indices,descriptor.movingOwner)].pivot:pivot;
+      const bridge=moving?rigGPUSub(origin,pivot):[0,0,0],at=base+16+support*12;
+      packed.set([...rigGPUSub(descriptor.a,origin),descriptor.r??0,...rigGPUSub(descriptor.b,origin),descriptor.rEnd??descriptor.r??0,...bridge,0],at);
+    }
+  }
+  const restContext={...withRigPoseContext(context,{}),time:0,wind:0},ropeSamples=new Map();
+  const scale=[design.runtime.beam/design.frame.beam,design.frame.verticalScale,design.runtime.length/design.frame.length];
+  const restBoat=rowing?{modelId:id,...design.runtime,rowingState:{phase:0,rate:0,effortPort:0,effortStarboard:0},rudder:0}:null;
+  const restBlades=rowing?design.stations.map(s=>rowingStationPose(restBoat,s.id)):[];
+  if(rowing)restBlades.push(rowingSteeringPose(restBoat));
+  for(let i=0;i<count;i++){
+    const at=i*9,meta=i*12,material=source[at+6],kind=Math.floor(material),code=Math.round((material-kind)*64),index=indices.get(code);
+    if((kind===9||kind===13)&&index!==undefined)vertices.set([1,index,source[at+7],source[at+8]],meta);
+    else if(kind===10&&index!==undefined)vertices.set([2,index,0,0],meta);
+    else if(kind===12&&source[at+7]>=100){
+      const lineIndex=Math.round(source[at+7]-100),line=context.lines[lineIndex],t=source[at+8];
+      if(!line||line.static)throw Error('Invalid GPU running-rig vertex');
+      const key=lineIndex+'/'+t;let sample=ropeSamples.get(key);
+      if(!sample){
+        const point=surfaceRopePoint(line,t,restContext),a=surfaceRopePoint(line,Math.max(0,t-.001),restContext),b=surfaceRopePoint(line,Math.min(1,t+.001),restContext);
+        sample={point,...rigGPUFrameBasis(rigGPUSub(b,a))};ropeSamples.set(key,sample);
+      }
+      const q=[source[at]-sample.point[0],source[at+1]-sample.point[1],source[at+2]-sample.point[2]],normal=Array.from(source.subarray(at+3,at+6));
+      vertices.set([3,lineIndex,t,0,rigGPUDot(q,sample.across),rigGPUDot(q,sample.up),rigGPUDot(normal,sample.across),rigGPUDot(normal,sample.up),...sample.across,0],meta);
+    }else if(rowing&&(kind===16||kind===17)){
+      const blade=kind===17?design.stations.length:code,pose=restBlades[blade];if(!pose)throw Error('Invalid GPU rowing material tag');
+      const q=[source[at]*scale[0]-pose.bladeCentre[0],source[at+1]*scale[1]-pose.bladeCentre[1],source[at+2]*scale[2]-pose.bladeCentre[2]];
+      const normal=rigGPUUnit([source[at+3]/scale[0],source[at+4]/scale[1],source[at+5]/scale[2]]),basis=[pose.bladeAlong,pose.bladeAcross,pose.bladeNormal];
+      vertices.set([4,blade,0,0,...basis.map(axis=>rigGPUDot(q,axis)),0,...basis.map(axis=>rigGPUDot(normal,axis)),0],meta);
+    }else if(!rowing&&(kind===7||kind===14))vertices.set([5,0,0,0],meta);
+    else if(!rowing&&kind===8&&code===1&&wheel)vertices.set([6,0,0,0],meta);
+    else if(!rowing&&kind===18&&hatch)vertices.set([7,0,0,0],meta);
+  }
+  if(!packed.every(Number.isFinite)||!vertices.every(Number.isFinite))throw Error('Non-finite GPU rig asset');
+  const surfaceStateOffset=12,bladeStateOffset=surfaceStateOffset+surfaces.length*8,bladeCount=restBlades.length;
+  const data=Object.freeze({model:packed,vertices,frameFloatCount:bladeStateOffset+bladeCount*16,surfaceStateOffset,bladeStateOffset,
+    bladeCount,surfaceCount:surfaces.length,modelId:id});
+  rigGPUPrivate.set(data,{frame:design.frame,runtime:design.runtime,surfaces,rowing,stations:rowing?design.stations:[]});return data;
+}
+
+function createRigGPUFrame(data){
+  if(!rigGPUPrivate.has(data))throw Error('Unknown GPU rig asset');return new Float32Array(data.frameFloatCount);
+}
+
+// O(surfaces + physical blades), independent of cloth tessellation, rope
+// segments and indexed vertex count. No positions/normals travel back to CPU.
+function writeRigGPUFrame(data,boat,time,wind,target){
+  const prepared=rigGPUPrivate.get(data);
+  if(!prepared)throw Error('Unknown GPU rig asset');
+  if(!(target instanceof Float32Array)||target.length!==data.frameFloatCount)throw Error('Compact GPU rig frame has wrong shape');
+  if(boat.modelId!==undefined&&boat.modelId!==data.modelId)throw Error('GPU rig frame belongs to another ship model');
+  if(!Number.isFinite(time)||!Number.isFinite(wind))throw Error('Invalid GPU rig frame time or wind');
+  const {frame,runtime,surfaces,rowing,stations}=prepared,scale=[(boat.beam??runtime.beam)/frame.beam,frame.verticalScale,(boat.length??runtime.length)/frame.length];
+  if(!scale.every(v=>Number.isFinite(v)&&v>0))throw Error('Invalid GPU rig dimensions');
+  const rudder=(boat.rudder??0)*Math.PI/180,closed=Math.max(0,Math.min(1,boat.hatchesClosed??0));
+  if(!Number.isFinite(rudder)||!Number.isFinite(closed))throw Error('Invalid GPU rig controls');
+  target.set([time,wind,rudder,(1-closed)*Math.PI/2,...scale,0,surfaces.length,data.bladeCount,0,0]);
+  for(let i=0;i<surfaces.length;i++){
+    const pose=rigSurfacePose(surfaces[i],boat.sailState??{});
+    target.set([pose.yaw,pose.deployed,pose.fill,pose.side,pose.opening,pose.dip,pose.pressure,0],data.surfaceStateOffset+i*8);
+  }
+  if(rowing){
+    for(let i=0;i<data.bladeCount;i++){
+      const pose=i<stations.length?rowingStationPose(boat,stations[i].id,{time}):rowingSteeringPose(boat,{time});
+      target.set([...pose.bladeCentre,0,...pose.bladeAlong,0,...pose.bladeAcross,0,...pose.bladeNormal,0],data.bladeStateOffset+i*16);
+    }
+  }
+  return target;
+}
+
 // ---- js/ship-mesh.js ----
+
 
 
 
@@ -17028,6 +17654,7 @@ function createShipAssetCache() {
   return {
     get(modelId = 'nina') {
       const model = requirePlayableShipModel(modelId);
+      if(model.gpuPose!==true)throw Error('Ship graphics require the shared WebGPU pose pipeline: '+model.id);
       const key = JSON.stringify([model.id, model.revision]);
       if (!assets.has(key)) {
         // Do not let a planned rig accidentally reuse Niña's mesh or animation.
@@ -17037,12 +17664,9 @@ function createShipAssetCache() {
         if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
         const groups = [], raw = builders[model.id]({ groups });
         const { vertices, indices } = indexCaravelMesh(raw);
-        const asset={ model, vertices, indices, groups: deepFreeze(groups) };
+        const asset={ model, vertices, indices, groups: deepFreeze(groups),gpuPose:true };
         if(model.rig?.backend==='surfaces-v1'){
-          asset.gpuPose=false;
-          if(Object.hasOwn(ROWING_DESIGNS,model.id))asset.pose=createRowingAssetPose(asset);
-          else if(Object.hasOwn(LATER_SAIL_DESIGNS,model.id))asset.pose=createLaterSailAssetPose(asset);
-          else asset.pose=createAdditionalAssetPose(asset);
+          asset.rigGPUData=createRigGPUData(asset);
         }
         assets.set(key, Object.freeze(asset));
       }
@@ -17692,16 +18316,71 @@ function crewWorkLabel(s){
 
 // Crew receives this vessel's shadow layer, while the anchor uses the fleet.
 // Replace the exact shared snippet, which remains stable in flattened builds.
-const GUNNERY_TOOL_RENDER=ANCHOR_RENDER.replace(SCENE_SHADOW_SAMPLE,SHADOW_SAMPLE);
+const GUNNERY_TOOL_GPU_GEOMETRY=/* wgsl */`
+struct GunneryToolShape {a:vec4f,b:vec4f};
+struct GunneryToolVertex {position:vec3f,normal:vec3f,kind:vec2f};
+fn gunneryToolVertex(p:vec3f,n:vec3f,index:u32)->GunneryToolVertex {
+  let shape=gunneryToolShapes[index];
+  let d=normalize(shape.b.xyz-shape.a.xyz);
+  let seed=select(vec3f(0,1,0),vec3f(1,0,0),abs(d.y)>.9);
+  let u=normalize(cross(d,seed));let v=cross(d,u);
+  let point=mix(shape.a.xyz,shape.b.xyz,p.x)+(u*p.y+v*p.z)*shape.a.w;
+  let normal=select(u*n.x+v*n.y,d*n.z,abs(n.z)>.5);
+  return GunneryToolVertex(point,normal,vec2f(shape.b.w,1));
+}
+`;
+const GUNNERY_TOOL_RENDER=ANCHOR_RENDER.replace(SCENE_SHADOW_SAMPLE,SHADOW_SAMPLE)
+  .replace(/@vertex\s+fn\s+vs\s*\([\s\S]*?\)\s*->\s*AnchorVertex\s*\{/,
+    '@vertex fn vs(@location(0) templatePosition:vec3f,@location(1) templateNormal:vec3f,@location(2) templateKind:vec2f,@builtin(instance_index) toolIndex:u32)->AnchorVertex {\nlet tool=gunneryToolVertex(templatePosition,templateNormal,toolIndex);let position=tool.position;let normal=tool.normal;let kind=tool.kind;')
+  +GUNNERY_TOOL_GPU_GEOMETRY+'\n@group(0) @binding(7) var<storage,read> gunneryToolShapes:array<GunneryToolShape>;';
 
-const GUNNERY_TOOL_SHADOW=SHADOW_FRAME+/* wgsl */`
+const GUNNERY_TOOL_SHADOW=SHADOW_FRAME+GUNNERY_TOOL_GPU_GEOMETRY+/* wgsl */`
 struct GunneryToolPose {right:vec4f,up:vec4f,aft:vec4f,origin:vec4f};
 @group(0) @binding(0) var<uniform> S:ShadowFrame;
 @group(0) @binding(1) var<uniform> P:GunneryToolPose;
-@vertex fn vs(@location(0) position:vec3f)->@builtin(position) vec4f {
+@group(0) @binding(2) var<storage,read> gunneryToolShapes:array<GunneryToolShape>;
+@vertex fn vs(@location(0) templatePosition:vec3f,@location(1) templateNormal:vec3f,@builtin(instance_index) toolIndex:u32)->@builtin(position) vec4f {
+  let position=gunneryToolVertex(templatePosition,templateNormal,toolIndex).position;
   return S.lightView*vec4f(P.right.xyz*position.x+P.up.xyz*position.y+P.aft.xyz*position.z,1);
 }
 `;
+
+// Immutable unit tubes. Endpoint/radius/kind records are the only live upload;
+// the visible, submerged and shadow vertex stages expand these same records.
+function createGunneryToolTemplate(){
+  const values=[],ranges=[];
+  const put=(t,c,s,nc,ns,cap)=>values.push(t,c,s,nc,ns,cap,0,1);
+  for(const sides of [5,6,8]){
+    const first=values.length/8;
+    for(let j=0;j<sides;j++){
+      const a=j*Math.PI*2/sides,b=(j+1)*Math.PI*2/sides,c=Math.cos(a),s=Math.sin(a),cc=Math.cos(b),ss=Math.sin(b);
+      for(const[t,x,y]of[[0,c,s],[0,cc,ss],[1,c,s],[1,c,s],[0,cc,ss],[1,cc,ss]])put(t,x,y,x,y,0);
+      for(const[t,x,y,n]of[[0,0,0,-1],[0,cc,ss,-1],[0,c,s,-1],[1,0,0,1],[1,c,s,1],[1,cc,ss,1]])put(t,x,y,0,0,n);
+    }
+    ranges.push({sides,first,count:values.length/8-first});
+  }
+  return {vertices:new Float32Array(values),ranges};
+}
+
+function writeGunneryToolInstances(company,boat,target){
+  const buckets=[[],[],[]];let vertices=0;
+  const tube=(a,b,radius,kind,sides=6)=>{
+    if(Math.hypot(...b.map((v,i)=>v-a[i]))<1e-5)return;
+    vertices+=sides*12;if(vertices>4096)throw Error('Gunnery tools exceed bounded geometry');
+    buckets[sides===5?0:sides===6?1:2].push(...a,radius,...b,kind);
+  };
+  for(const sailor of company.crew){
+    const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
+    if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
+    if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
+    tube(tool.a,tool.b,.021,1);
+    const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
+    tube(tool.b.map((x,i)=>x-d[i]/n*.12),tool.b,tool.kind==='sponge'?.065:.044,tool.kind==='sponge'?2:1);
+  }
+  let at=0;const ranges=[];
+  for(const bucket of buckets){if(at+bucket.length>target.length)throw Error('Gunnery tool instance budget exceeded');ranges.push({first:at/8,count:bucket.length/8});target.set(bucket,at);at+=bucket.length;}
+  return {ranges,count:at/8,vertices};
+}
 
 function buildGunneryToolVertices(company,boat,vertices){
   let cursor=0;
@@ -17732,31 +18411,33 @@ function buildGunneryToolVertices(company,boat,vertices){
 }
 
 async function createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared=null}){
-  const B=GPUBufferUsage,vertices=new Float32Array(4096*8),pose=new Float32Array(16),axis=[0,0,0];let count=0;
-  const vertex=device.createBuffer({label:'crew gun tools',size:vertices.byteLength,usage:B.VERTEX|B.COPY_DST});
+  const B=GPUBufferUsage,template=createGunneryToolTemplate(),instances=new Float32Array(68*8),pose=new Float32Array(16),axis=[0,0,0];let count=0,ranges=[];
+  const vertex=device.createBuffer({label:'immutable crew gun tool tubes',size:template.vertices.byteLength,usage:B.VERTEX|B.COPY_DST});
+  device.queue.writeBuffer(vertex,0,template.vertices);
+  const shapeBuffer=device.createBuffer({label:'crew gun tool endpoints',size:instances.byteLength,usage:B.STORAGE|B.COPY_DST});
   const poseBuffer=device.createBuffer({label:'crew gun tool pose',size:64,usage:B.UNIFORM|B.COPY_DST});
   const layout=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
   const module=shared?null:await shader(GUNNERY_TOOL_RENDER,'gun tools material'),shadowModule=shared?null:await shader(GUNNERY_TOOL_SHADOW,'gun tool shadows');
   const pipeline=shared?.pipeline??await device.createRenderPipelineAsync({label:'crew gun tools',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
   const shadowPipeline=shared?.shadowPipeline??await device.createRenderPipelineAsync({label:'crew gun tool shadows',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}});
-  const resources=[{buffer:frameUBO},transView,skyView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer}];
+  const resources=[{buffer:frameUBO},transView,skyView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer},{buffer:shapeBuffer}];
   const bind=(pipe,items)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:items.map((resource,binding)=>({binding,resource}))});
-  const group=bind(pipeline,resources),lighting=shadows.bind(pipeline),shadow=bind(shadowPipeline,[{buffer:shadows.uniform},{buffer:poseBuffer}]);
+  const group=bind(pipeline,resources),lighting=shadows.bind(pipeline),shadow=bind(shadowPipeline,[{buffer:shadows.uniform},{buffer:poseBuffer},{buffer:shapeBuffer}]);
   const submerged=waterOptics?await waterOptics.capture({source:GUNNERY_TOOL_RENDER,pipeline,vertex:{buffers:layout},groups:2}):null;
   const submergedGroup=submerged?.bindGroup(resources),submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
   return {
     assets:{pipeline,shadowPipeline},
     update(company,boat,enabled){
-      count=enabled?buildGunneryToolVertices(company,boat,vertices):0;if(!count)return;
+      const state=enabled?writeGunneryToolInstances(company,boat,instances):{count:0,ranges:[]};count=state.count;ranges=state.ranges;if(!count)return;
       const h=(boat.heading??0)*Math.PI/180;
       for(const[i,vector]of[[0,[1,0,0]],[4,[0,1,0]],[8,[0,0,1]]]){boatRotate(axis,...vector,h,boat.pitch??0,boat.roll??0);pose.set(axis,i);}
       pose.set([boat.x??0,boat.heave??0,boat.z??0,1],12);
-      device.queue.writeBuffer(vertex,0,vertices,0,count*8);device.queue.writeBuffer(poseBuffer,0,pose);
+      device.queue.writeBuffer(shapeBuffer,0,instances,0,count*8);device.queue.writeBuffer(poseBuffer,0,pose);
     },
-    draw(pass){if(!count)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,lighting);pass.setVertexBuffer(0,vertex);pass.draw(count);},
-    drawShadow(pass){if(!count)return;pass.setPipeline(shadowPipeline);pass.setBindGroup(0,shadow);pass.setVertexBuffer(0,vertex);pass.draw(count);},
-    drawSubmerged(pass){if(!count||!submerged)return;submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedLighting);pass.setVertexBuffer(0,vertex);pass.draw(count);},
-    destroy(){vertex.destroy();poseBuffer.destroy();},
+    draw(pass){if(!count)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,lighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
+    drawShadow(pass){if(!count)return;pass.setPipeline(shadowPipeline);pass.setBindGroup(0,shadow);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
+    drawSubmerged(pass){if(!count||!submerged)return;submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedLighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
+    destroy(){vertex.destroy();shapeBuffer.destroy();poseBuffer.destroy();},
   };
 }
 
@@ -18302,7 +18983,8 @@ function writeCrewWetnessData(data,company,boat){
 // vessel state. Weak ownership releases the template with its source mesh.
 const wetnessTemplates=new WeakMap();
 
-async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,crewCount=12}) {
+async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,crewCount=12,posed=null}) {
+  if(posed&&posed.vertexCount!==mesh.length/9)throw Error('Wetness requires the matching indexed vessel pose');
   let templates=wetnessTemplates.get(mesh);if(!templates){templates=new Map();wetnessTemplates.set(mesh,templates);}
   let template=templates.get(crewCount);
   if(!template){template=createWetnessData(mesh,crewCount);templates.set(crewCount,template);}
@@ -18312,10 +18994,17 @@ async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,cr
   const lookup=buffer('wetness vertex lookup',data.lookup.byteLength,B.STORAGE|B.COPY_DST);
   const state=buffer('surface moisture',data.points.length/8*8,B.STORAGE|B.COPY_SRC|B.COPY_DST);
   device.queue.writeBuffer(points,0,data.points);device.queue.writeBuffer(lookup,0,data.lookup);
+  let poseSources=null;
+  if(posed){
+    const indices=new Uint32Array(data.points.length/8);indices.fill(0xffffffff);
+    for(let i=1;i<template.sourceVertices.length;i++)indices[i]=template.sourceVertices[i]/9;
+    poseSources=buffer('wetness indexed pose sources',indices.byteLength,B.STORAGE|B.COPY_DST);
+    device.queue.writeBuffer(poseSources,0,indices);
+  }
   const mist=buffer('wetting spray grid',WET_GRID.reduce((a,b)=>a*b)*4,B.STORAGE);
   const sea=device.createTexture({label:'wetting sea heights',size:[WET_SEA_SIZE,WET_SEA_SIZE],format:'r32float',usage:T.STORAGE_BINDING|T.TEXTURE_BINDING});
   const view=sea.createView();
-  const pipes=await Promise.all([[WET_CLEAR,'wetting grid clear'],[WET_DEPOSIT,'spray deposition'],[WET_SEA,'wetting sea heights'],[WET_UPDATE,'surface moisture']].map(([code,label])=>computePipe(code,label)));
+  const pipes=await Promise.all([[WET_CLEAR,'wetting grid clear'],[WET_DEPOSIT,'spray deposition'],[WET_SEA,'wetting sea heights'],[posed?withPosedWetnessProbes():WET_UPDATE,'surface moisture']].map(([code,label])=>computePipe(code,label)));
   const bind=(p,resources)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const b=buffer=>({buffer});let groups,needsClear=true;
   return {state,lookup,points,crewOffset:data.crewOffset,crewCount:data.crewCount,probeCount:data.points.length/8,
@@ -18323,9 +19012,10 @@ async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,cr
       groups=[bind(pipes[0],[b(mist)]),
         bind(pipes[1],[b(hullUBO),b(interaction.uniform),b(mist),b(interaction.drops),b(interaction.sheets),b(spindrift.plumes)]),
         bind(pipes[2],[b(frameUBO),b(hullUBO),seaView,seaSampler,view]),
-        bind(pipes[3],[b(hullUBO),b(interaction.uniform),b(points),b(state),b(mist),view,interaction.deck.view])];
+        bind(pipes[3],[b(hullUBO),b(interaction.uniform),b(points),b(state),b(mist),view,interaction.deck.view,...(posed?[b(posed.buffer),b(poseSources)]:[])])];
     },
     updateGeometry(posedMesh){
+      if(posed)throw Error('GPU-posed wetness cannot accept CPU geometry uploads');
       if(posedMesh.length!==mesh.length)throw Error('Wetness geometry must match its source asset');
       for(let i=1;i<data.crewOffset;i++){
         const from=template.sourceVertices[i],to=i*8;
@@ -18346,7 +19036,7 @@ async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,cr
         else pass.dispatchWorkgroups(Math.ceil((i===0?WET_GRID.reduce((a,b)=>a*b):i===1?SPRAY_COUNT:data.points.length/8)/64));
       }
     },
-    destroy(){for(const resource of [points,lookup,state,mist,sea])resource.destroy();},
+    destroy(){for(const resource of [points,lookup,state,mist,sea])resource.destroy();poseSources?.destroy();},
   };
 }
 
@@ -18439,9 +19129,109 @@ function placeOrbitCamera(camera,orbit,x,y,z,radius) {
   camera.pitch=-orbit.elevation;
 }
 
+// ---- js/vessel-recoil.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+
+
+const vesselRecoilOwners=new WeakMap();
+function vesselRecoilDefinition(map){
+  if(!map||!Array.isArray(map.guns)||!Number.isSafeInteger(map.vertexCount)||map.vertexCount<1)throw Error('GPU recoil needs an indexed gun map');
+  const owned=new Set(),ids=new Set(),guns=[];let count=0;
+  for(const gun of map.guns){
+    if(!Number.isSafeInteger(gun.id)||gun.id<0||ids.has(gun.id)||!gun.axis||gun.axis.length!==3
+      ||!Array.from(gun.axis).every(Number.isFinite)||!(Math.hypot(...gun.axis)>0)
+      ||!(gun.indices instanceof Uint32Array))throw Error('Invalid GPU recoil gun descriptor');
+    ids.add(gun.id);
+    for(const index of gun.indices){
+      if(index>=map.vertexCount||owned.has(index))throw Error('GPU recoil vertex ownership overlaps or exceeds its model');
+      owned.add(index);count++;
+    }
+    guns.push(Object.freeze({id:gun.id,axis:Object.freeze(Array.from(gun.axis)),indices:new Uint32Array(gun.indices)}));
+  }
+  const records=new Uint32Array(count*2);let at=0;
+  for(let slot=0;slot<guns.length;slot++)for(const index of guns[slot].indices){records[at++]=index;records[at++]=slot;}
+  return {guns:Object.freeze(guns),records,recordCount:count,vertexCount:map.vertexCount};
+}
+function vesselRecoilCompatible(asset,definition){
+  if(asset.vertexCount!==definition.vertexCount||asset.recordCount!==definition.recordCount||asset.guns.length!==definition.guns.length)return false;
+  for(let i=0;i<asset.guns.length;i++){
+    const a=asset.guns[i],b=definition.guns[i];
+    if(a.id!==b.id||a.indices.length!==b.indices.length||a.axis.some((v,j)=>!Object.is(v,b.axis[j])))return false;
+    for(let j=0;j<a.indices.length;j++)if(a.indices[j]!==b.indices[j])return false;
+  }
+  return true;
+}
+
+async function createVesselRecoil({device,computePipe,posedBuffer,recoilMap,shared=null}){
+  const definition=vesselRecoilDefinition(recoilMap);
+  if(!definition.guns.length||!definition.recordCount)return null;
+  if(!posedBuffer)throw Error('GPU recoil needs the canonical posed vertex buffer');
+  let assets=shared,owner=shared&&vesselRecoilOwners.get(shared);
+  if(shared){
+    if(shared.device!==device)throw Error('GPU recoil assets belong to another graphics device');
+    if(!owner||owner.destroyed)throw Error('GPU recoil assets are no longer available');
+    if(!vesselRecoilCompatible(shared,definition))throw Error('GPU recoil assets belong to another gun layout');
+  }else{
+    const pipeline=await computePipe(VESSEL_RECOIL_UPDATE,'shared vessel recoil');
+    const records=device.createBuffer({label:'immutable gun recoil vertex ownership',size:definition.records.byteLength,
+      usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+    device.queue.writeBuffer(records,0,definition.records);
+    assets=Object.freeze({device,pipeline,records,recordCount:definition.recordCount,guns:definition.guns,vertexCount:definition.vertexCount});
+    owner={references:0,destroyed:false};vesselRecoilOwners.set(assets,owner);
+  }
+  const values=new Float32Array(assets.guns.length*4),deltas=device.createBuffer({label:'per-vessel gun recoil deltas',size:values.byteLength,
+    usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+  let group;
+  try{
+    group=device.createBindGroup({layout:assets.pipeline.getBindGroupLayout(0),entries:[posedBuffer,assets.records,deltas]
+      .map((buffer,binding)=>({binding,resource:{buffer}}))});
+  }catch(error){deltas.destroy();if(!owner.references){assets.records.destroy();owner.destroyed=true;}throw error;}
+  owner.references++;let destroyed=false,active=false;
+  return {assets,
+    update(guns,boat){
+      if(destroyed)return false;
+      const scale=gunModelScale(boat);
+      if(!scale.every(v=>Number.isFinite(v)&&v>0))throw Error('Invalid GPU recoil vessel dimensions');
+      let changed=false;active=false;
+      for(let slot=0;slot<assets.guns.length;slot++){
+        const gun=assets.guns[slot],value=guns?.get?guns.get(gun.id):guns?.[gun.id];
+        const offset=Math.max(0,Number.isFinite(value?.offset)?value.offset:Number.isFinite(value)?value:0);
+        const direction=gunModelDirection({directionDesign:gun.axis},scale);
+        for(let component=0;component<3;component++){
+          const delta=offset===0?0:Math.fround(-direction[component]*offset/scale[component]),at=slot*4+component;
+          if(!Number.isFinite(delta))throw Error('Non-finite GPU recoil delta');
+          if(values[at]!==delta){values[at]=delta;changed=true;}
+          active||=delta!==0;
+        }
+      }
+      if(changed)device.queue.writeBuffer(deltas,0,values);
+      return changed;
+    },
+    // Canonical pose must reset every visible vessel before this dispatch.
+    // Applying recoil twice without that reset would accumulate translation.
+    encode(pass,enabled=true){
+      if(!enabled||destroyed||!active)return false;
+      pass.setPipeline(assets.pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(assets.recordCount/64));return true;
+    },
+    destroy(){
+      if(destroyed)return;destroyed=true;deltas.destroy();owner.references--;
+      if(!owner.references){assets.records.destroy();owner.destroyed=true;}
+    },
+  };
+}
+
 // ---- js/vessel-pose.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 
+
+
+
+const vesselPosePipelineCache=new WeakMap();
+async function vesselPosePipeline(device,computePipe,generic){
+  let modes=vesselPosePipelineCache.get(device);if(!modes){modes=new Map();vesselPosePipelineCache.set(device,modes);}
+  if(!modes.has(generic))modes.set(generic,computePipe(generic?VESSEL_SURFACE_POSE_UPDATE:VESSEL_POSE_UPDATE,'shared vessel deformation'));
+  try{return await modes.get(generic);}catch(error){modes.delete(generic);throw error;}
+}
 
 const POSED_VERTEX_LAYOUT=Object.freeze({arrayStride:32,attributes:Object.freeze([
   Object.freeze({shaderLocation:4,offset:0,format:'float32x3'}),
@@ -18459,20 +19249,39 @@ function withPosedVesselVertices(source){
     .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
 }
 
-async function createVesselPose({device,computePipe,sourceBuffer,vertexCount,hullUBO,shared=null}){
+async function createVesselPose({device,computePipe,sourceBuffer,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null}){
   if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
   if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
-  const pipeline=shared?.pipeline??await computePipe(VESSEL_POSE_UPDATE,'shared vessel deformation');
+  if(shared&&(shared.rigData??null)!==rigData)throw new Error('Vessel pose metadata belongs to another model');
+  if(rigData&&(!(rigData.model instanceof Float32Array)||!(rigData.vertices instanceof Float32Array)||rigData.vertices.length!==vertexCount*12))throw Error('GPU rig metadata must match every indexed vertex');
+  const pipeline=shared?.pipeline??await vesselPosePipeline(device,computePipe,!!rigData);
   const buffer=device.createBuffer({label:'posed vessel vertices',size:vertexCount*32,
     usage:GPUBufferUsage.STORAGE|GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_SRC});
-  const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[hullUBO,sourceBuffer,buffer].map((resource,binding)=>({binding,resource:{buffer:resource}}))});
-  const assets=shared??Object.freeze({device,pipeline});let destroyed=false;
+  const resources=[hullUBO,sourceBuffer,buffer],state=rigData?createRigGPUFrame(rigData):null;
+  let modelBuffer=shared?.modelBuffer??null,metadataBuffer=shared?.metadataBuffer??null,stateBuffer=null;
+  if(rigData){
+    const upload=(label,data)=>{const value=device.createBuffer({label,size:data.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(value,0,data);return value;};
+    if(!shared){modelBuffer=upload('shared rig descriptors',rigData.model);metadataBuffer=upload('shared indexed rig bindings',rigData.vertices);}
+    stateBuffer=device.createBuffer({label:'vessel compact rig state',size:state.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+    resources.push(modelBuffer,metadataBuffer,stateBuffer);
+  }
+  // The descriptor shader reads its compact state rather than Hull. Automatic
+  // layouts omit that unused binding; retain the original binding numbers.
+  const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource:{buffer:resource}})).filter(entry=>!rigData||entry.binding!==0)});
+  const recoil=recoilMap?.guns?.length?await createVesselRecoil({device,computePipe,posedBuffer:buffer,recoilMap,shared:shared?.recoilAssets??null}):null;
+  const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null});let destroyed=false,initialized=!rigData;
   return {buffer,assets,vertexCount,
+    update(boat,time,wind){
+      if(destroyed||!rigData)return false;
+      writeRigGPUFrame(rigData,boat,time,wind,state);device.queue.writeBuffer(stateBuffer,0,state);initialized=true;return true;
+    },
+    updateRecoil(guns,boat){return recoil?.update(guns,boat)??false;},
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;
-      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));return true;
+      if(!initialized)throw Error('GPU rig state must be updated before dispatch');
+      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));recoil?.encode(pass);return true;
     },
-    destroy(){if(!destroyed){destroyed=true;buffer.destroy();}},
+    destroy(){if(!destroyed){destroyed=true;recoil?.destroy();buffer.destroy();stateBuffer?.destroy();}},
   };
 }
 
@@ -20050,6 +20859,7 @@ function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,getPositio
 // normal rendering retains its single compute pass and samples only frame time.
 const GPU_PASS_NAMES = [
   'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
+  ...Array.from({length:8},(_,i)=>['escort-'+(i+1)+' Solid shadows','escort-'+(i+1)+' Canvas shadows']).flat(),
   'Submerged geometry', 'Ocean + sky', 'Water reflection filter', 'Ship + spray', 'Underwater medium',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
@@ -20079,14 +20889,21 @@ function decodeGPUTimestamps(values,names,used) {
 }
 
 function createGPUProfiler(device, requested=false) {
-  const supported=device.features.has('timestamp-query'), detailed=requested && supported;
-  const names=detailed?GPU_PASS_NAMES:['Frame'], count=names.length*2, bytes=count*8;
-  const query=supported?device.createQuerySet({type:'timestamp',count}):null;
-  const resolve=supported?device.createBuffer({label:'timing resolve',size:bytes,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC}):null;
-  const staging=supported?device.createBuffer({label:'timing read',size:bytes,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}):null;
-  const descriptors=names.map((_,i)=>({querySet:query,beginningOfPassWriteIndex:i*2,endOfPassWriteIndex:i*2+1}));
-  const first={querySet:query,beginningOfPassWriteIndex:0},last={querySet:query,endOfPassWriteIndex:1};
-  const used=new Uint8Array(names.length), pendingUsed=new Uint8Array(names.length);
+  const supported=device.features.has('timestamp-query'), modes=new Map();
+  let detailed=!!requested&&supported,epoch=0,active=null,pendingCapture=null;
+  // Allocate detailed resources only when opened. Closing restores the original
+  // endpoint-only schedule used by automatic resolution, without pass splits.
+  function timingMode(detail){
+    if(modes.has(detail))return modes.get(detail);
+    const names=detail?GPU_PASS_NAMES:['Frame'],count=names.length*2,bytes=count*8;
+    const query=device.createQuerySet({type:'timestamp',count});
+    const resolve=device.createBuffer({label:'timing resolve',size:bytes,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC});
+    const staging=device.createBuffer({label:'timing read',size:bytes,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+    const descriptors=names.map((_,i)=>({querySet:query,beginningOfPassWriteIndex:i*2,endOfPassWriteIndex:i*2+1}));
+    const mode={detail,names,count,bytes,query,resolve,staging,descriptors,used:new Uint8Array(names.length),
+      first:{querySet:query,beginningOfPassWriteIndex:0},last:{querySet:query,endOfPassWriteIndex:1}};
+    modes.set(detail,mode);return mode;
+  }
   const latest={},smoothed={},samples=[];
   let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,droppedSamples=0,reading=Promise.resolve(),error='';
   function snapshot() {
@@ -20097,34 +20914,42 @@ function createGPUProfiler(device, requested=false) {
       samples:samples.map(s=>({...s,passes:{...s.passes}}))};
   }
   return {
-    supported,detailed,get totalMs(){return totalMs;},snapshot,
-    beginFrame(index){frame=index;collecting=supported&&!pending&&!error&&(index&7)===0;used.fill(0);},
+    supported,get detailed(){return detailed;},get totalMs(){return totalMs;},snapshot,
+    setDetailed(value){
+      const next=!!value&&supported;if(next===detailed)return detailed;
+      detailed=next;epoch++;collecting=false;active=null;totalMs=0;sampleCount=0;droppedSamples=0;samples.length=0;
+      for(const key of Object.keys(latest))delete latest[key];for(const key of Object.keys(smoothed))delete smoothed[key];
+      return detailed;
+    },
+    beginFrame(index){frame=index;collecting=supported&&!pending&&!error&&(index&7)===0;active=collecting?timingMode(detailed):null;active?.used.fill(0);},
     writes(name){
       if(!collecting)return undefined;
-      if(!detailed){used[0]=1;return name==='Waves + effects'?first:name==='Composite'?last:undefined;}
-      const i=names.indexOf(name);
+      if(!active.detail){active.used[0]=1;return name==='Waves + effects'?active.first:name==='Composite'?active.last:undefined;}
+      const i=active.names.indexOf(name);
       if(i<0)throw new Error(`Unknown GPU timing pass: ${name}`);
-      used[i]=1;return descriptors[i];
+      active.used[i]=1;return active.descriptors[i];
     },
     resolve(encoder){
       if(!collecting)return false;
-      encoder.resolveQuerySet(query,0,count,resolve,0);
-      encoder.copyBufferToBuffer(resolve,0,staging,0,bytes);
-      pendingUsed.set(used);pendingFrame=frame;pending=true;collecting=false;return true;
+      encoder.resolveQuerySet(active.query,0,active.count,active.resolve,0);
+      encoder.copyBufferToBuffer(active.resolve,0,active.staging,0,active.bytes);
+      pendingCapture={mode:active,used:active.used.slice(),epoch};pendingFrame=frame;pending=true;collecting=false;return true;
     },
     read(){
       if(!pending)return reading;
-      reading=staging.mapAsync(GPUMapMode.READ).then(()=>{
-        const values=new BigUint64Array(staging.getMappedRange());
-        const decoded=decodeGPUTimestamps(values,names,pendingUsed);
-        staging.unmap();
+      const capture=pendingCapture,mode=capture.mode;
+      reading=mode.staging.mapAsync(GPUMapMode.READ).then(()=>{
+        const values=new BigUint64Array(mode.staging.getMappedRange());
+        const decoded=decodeGPUTimestamps(values,mode.names,capture.used);
+        mode.staging.unmap();
+        if(capture.epoch!==epoch)return; // A hidden/reopened panel must not mix timing modes.
         if(!decoded){droppedSamples++;return;}
         for(const [name,ms] of Object.entries(decoded.passes)){
           latest[name]=ms;smoothed[name]=sampleCount?smoothed[name]*.8+ms*.2:ms;
         }
         const elapsed=decoded.windowMs;
         totalMs=sampleCount?totalMs*.8+elapsed*.2:elapsed;sampleCount++;
-        if(detailed&&pendingFrame>=120){
+        if(mode.detail&&pendingFrame>=120){
           samples.push({frame:pendingFrame,totalMs:elapsed,passes:{...latest}});
           if(samples.length>512)samples.shift();
         }
@@ -20135,8 +20960,10 @@ function createGPUProfiler(device, requested=false) {
     text(){
       if(!supported)return 'GPU pass timing unavailable: timestamp-query unsupported.';
       if(error)return `GPU pass timing unavailable: ${error}`;
+      if(!detailed)return `GPU endpoints  ${totalMs.toFixed(2)} ms\nDetailed pass timing is off.`;
       const lines=[`GPU ${detailed?'sampled window':'endpoints'}  ${totalMs.toFixed(2)} ms`, 'Smoothed pass spans (overlap; not additive):'];
       for(const name of GPU_PASS_NAMES.filter(n=>!n.startsWith('Bloom '))){
+        if((name.startsWith('escort-')||name.startsWith('Companion '))&&!(name in latest&&latest[name]>0))continue;
         if(name==='Composite'){
           lines.push(`Bloom                   ${(smoothed.Bloom||0).toFixed(2)} ms`);
         }
@@ -20146,7 +20973,7 @@ function createGPUProfiler(device, requested=false) {
       if(droppedSamples)lines.push(`Discarded invalid timestamp samples: ${droppedSamples}`);
       return lines.join('\n');
     },
-    destroy(){query?.destroy();resolve?.destroy();staging?.destroy();},
+    destroy(){for(const mode of modes.values()){mode.query.destroy();mode.resolve.destroy();mode.staging.destroy();}},
   };
 }
 
@@ -21690,7 +22517,8 @@ async function main() {
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   async function shipRenderAsset(modelId){
     if(renderAssets.has(modelId))return renderAssets.get(modelId);
-    const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose??asset.model.gpuPose??(modelId==='victory');
+    const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose;
+    if(gpuPose!==true||typeof asset.pose==='function')throw Error('Ship rendering cannot bypass shared WebGPU deformation');
     fleetModelCode(asset.model); // A future model needs an explicit hull backend.
     const source=gpuPose?withPosedVesselVertices(CARAVEL):CARAVEL;
     const vertexLayouts=[{arrayStride:36,attributes:[
@@ -21713,9 +22541,10 @@ async function main() {
     const vertexBuffer=mkBuf(mesh.byteLength,GU.VERTEX|GU.COPY_DST|(render.gpuPose?GU.STORAGE:0),spec.id+' geometry');
     device.queue.writeBuffer(vertexBuffer,0,mesh);
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
-    const pose=render.gpuPose?await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets}):null;
+    const recoilMap=createGunRecoilMap(asset);
+    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap});
     if(pose)render.poseAssets=pose.assets;
-    const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length});
+    const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
     const shadows=await createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose});
     let crew=null;
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
@@ -21724,7 +22553,7 @@ async function main() {
     const rowingWater=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?await createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interaction.setShadows(shadows);
     vessels.push({...spec,boat:null,asset,render,hullUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
-      rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap:createGunRecoilMap(asset)});
+      rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap});
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   const spindrift=await createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
@@ -21917,15 +22746,24 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const profiler=createGPUProfiler(device,qs.get('profile')==='1');
   let profileSummary='Waiting for frame timing…';
-  let profilePanel=null, profileDetails=null, profileToggle=null;
-  if(qs.get('profile')==='1'){
-    profileDetails=document.createElement('details');profileDetails.id='gpu-profile';
-    profileDetails.open=!matchMedia('(max-width:900px), (pointer:coarse)').matches;
-    profileToggle=document.createElement('summary');profileToggle.textContent='Performance';
-    profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
-    profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
-    document.body.append(profileDetails);
+  const performancePanel=document.createElement('section');performancePanel.id='performance-panel';
+  performancePanel.hidden=qs.get('profile')!=='1'||matchMedia('(max-width:900px), (pointer:coarse)').matches;
+  performancePanel.setAttribute('aria-labelledby','performance-title');
+  performancePanel.innerHTML='<div class="panel-header"><strong id="performance-title">Performance</strong></div><div class="panel-body"></div>';
+  const profileDetails=document.createElement('details');profileDetails.id='gpu-profile';profileDetails.open=true;
+  const profileToggle=document.createElement('summary');profileToggle.textContent='GPU pass timing';
+  const profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
+  profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
+  const performanceSummary=document.createElement('pre');performanceSummary.id='performance-summary';performanceSummary.textContent=profileSummary;
+  performancePanel.querySelector('.panel-body').append(performanceSummary,profileDetails);document.body.append(performancePanel);
+  let performanceButton=null;
+  function setPerformanceOpen(open){
+    performancePanel.hidden=!open;profiler.setDetailed(open);
+    performanceButton?.setAttribute('aria-pressed',String(open));performanceButton?.setAttribute('aria-expanded',String(open));
+    document.body.classList.toggle('performance-open',open);document.body.classList.toggle('show-performance',open);
+    if(open){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
   }
+  document.body.classList.toggle('performance-open',!performancePanel.hidden);
 
   // --------------------------------------------------------------------------------------
   // Uniform data
@@ -22268,7 +23106,7 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const panel = document.getElementById('panel');
   function setPanelOpen(open) {
-    if(open){setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);}
+    if(open){setPerformanceOpen(false);setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);}
     panel.classList.toggle('hidden', !open);
     document.body.classList.toggle('sea-settings-open', open);
     seaSettingsButton.setAttribute('aria-expanded', String(open));
@@ -22288,7 +23126,7 @@ async function main() {
   collapseBoat.onclick = () => {setBoatOpen(false);shipSettingsButton.focus();};
   boatPanel.querySelector('.panel-header').append(collapseBoat);
   function setBoatOpen(open){
-    if(open){setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setCameraOpen(false);setShareOpen(false);}
+    if(open){setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setCameraOpen(false);setShareOpen(false);}
     boatPanel.hidden=!open;shipSettingsButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('ship-settings-open',open);
     if(open)collapseBoat.focus({preventScroll:true});
   }
@@ -22353,7 +23191,7 @@ async function main() {
   cameraClose.onclick=()=>{setCameraOpen(false);cameraButton.focus();};cameraPanel.querySelector('.panel-header').append(cameraClose);
   panel.before(cameraPanel);
   function setCameraOpen(open){
-    if(open){setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setShareOpen(false);}
+    if(open){setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setShareOpen(false);}
     cameraPanel.hidden=!open;cameraButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('camera-open',open);
     if(open)cameraClose.focus({preventScroll:true});
   }
@@ -22391,7 +23229,7 @@ async function main() {
   captainHide.onclick=()=>{setCaptainOpen(false);captainButton.focus();};captainPanel.querySelector('.panel-header').append(captainHide);
   function setCaptainOpen(open){
     captainPanel.hidden=!open;document.body.classList.toggle('captain-open',open);captainButton.setAttribute('aria-expanded',String(open));
-    if(open){setPanelOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);if(document.pointerLockElement)document.exitPointerLock();captainHide.focus({preventScroll:true});}
+    if(open){setPerformanceOpen(false);setPanelOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);if(document.pointerLockElement)document.exitPointerLock();captainHide.focus({preventScroll:true});}
   }
   captainButton.onclick=()=>setCaptainOpen(captainPanel.hidden);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!captainPanel.hidden)captainHide.click();});
@@ -22447,7 +23285,7 @@ async function main() {
   shareInput.type = 'url'; shareInput.readOnly = true; shareInput.setAttribute('aria-label', 'Share link');
   shareInput.addEventListener('click', () => shareInput.select());
   const closeShare = controlIcon(document.createElement('button'),'close','Close share link');
-  function setShareOpen(open){sharePanel.hidden=!open;shareButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('share-open',open);}
+  function setShareOpen(open){if(open)setPerformanceOpen(false);sharePanel.hidden=!open;shareButton.setAttribute('aria-expanded',String(open));document.body.classList.toggle('share-open',open);}
   closeShare.onclick = () => { setShareOpen(false); shareButton.focus(); };
   const shareStatus = document.createElement('span'); shareStatus.setAttribute('role', 'status');
   sharePanel.append(shareInput, closeShare, shareStatus);
@@ -22468,10 +23306,22 @@ async function main() {
   cameraDock.append(captainButton);
   panel.before(sharePanel);
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,
-    onOpen:()=>{setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
+    onOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
     getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}needSpectrum=true;envFull=true;}});
   controlIcon(cameraDock.querySelector('#landfall-button'),'map','Landfall');
   cameraDock.append(seaSettingsButton,shipSettingsButton,shareButton);
+  performanceButton=document.createElement('button');performanceButton.id='performance-toggle';performanceButton.type='button';performanceButton.className='icon-button';
+  performanceButton.title='Performance stats';performanceButton.setAttribute('aria-label','Performance stats');performanceButton.setAttribute('aria-controls','performance-panel');
+  performanceButton.setAttribute('aria-pressed',String(!performancePanel.hidden));performanceButton.setAttribute('aria-expanded',String(!performancePanel.hidden));
+  performanceButton.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 3v18h18M7 16v-4m5 4V7m5 9v-7"/></svg>';
+  const performanceClose=controlIcon(document.createElement('button'),'close','Hide performance stats');
+  performanceClose.onclick=()=>{setPerformanceOpen(false);performanceButton.focus();};performancePanel.querySelector('.panel-header').append(performanceClose);
+  performanceButton.onclick=()=>{
+    const open=performancePanel.hidden;
+    if(open){setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);landfallUI.close();if(document.pointerLockElement)document.exitPointerLock();}
+    setPerformanceOpen(open);
+  };
+  cameraDock.append(performanceButton);
   panel.before(cameraDock);
   addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
@@ -22479,6 +23329,7 @@ async function main() {
     if(!cameraPanel.hidden)cameraClose.click();
     if(!panel.classList.contains('hidden'))hideSea.click();
     if(!sharePanel.hidden)closeShare.click();
+    if(!performancePanel.hidden)performanceClose.click();
   });
   // Keep controls in the visible viewport, including browser bars and keyboards.
   const layoutControls=()=>{
@@ -22619,7 +23470,6 @@ async function main() {
   const hideSea=controlIcon(document.createElement('button'),'close','Hide sea settings');
   hideSea.onclick=()=>{setPanelOpen(false);seaSettingsButton.focus();};seaHeader.append(seaTitle,hideSea);
   const seaBody=document.createElement('div');seaBody.className='panel-body';panel.append(seaHeader,seaBody);
-  if(profileDetails)seaBody.append(profileDetails);
   const astronomyControls=document.createElement('details');astronomyControls.id='astronomy-controls';
   const astronomySummary=document.createElement('summary');astronomySummary.textContent='Sun, Moon and stars';astronomyControls.append(astronomySummary);
   const skyMode=document.createElement('select');skyMode.id='sky-mode';skyMode.innerHTML='<option value="manual">Manual Sun</option><option value="astronomy">Astronomical sky</option>';skyMode.value=astronomy.mode;
@@ -22744,7 +23594,7 @@ async function main() {
   }
   if(qs.get('dolphins')==='1'){dolphins.state.trigger(boat,{terrain,vessels:followerEnabled?dolphinVessels:dolphinPlayer});dolphinControls.notice(dolphins.state.event);}
   const lookHint=document.createElement('div');lookHint.id='look-hint';lookHint.textContent='Drag to look around';document.body.append(lookHint);
-  if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }
+  if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true;performancePanel.hidden=true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }
   if(qs.get('ui')==='0')dolphinControls.toast.style.display='none';
   if(qs.get('profile')==='1')document.body.classList.add('show-performance');
 
@@ -22836,9 +23686,8 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
-      if(profilePanel)profilePanel.textContent=profileSummary+'\n'+profiler.text();
-      if(profileToggle)profileToggle.textContent=`Performance · ${fps.toFixed(1)} FPS · ${Math.round(resolution.scale*100)}%`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      if(!performancePanel.hidden){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
       updateResolutionStatus();
       updateCrewUI();
       updateAnchorUI();gunControls.update();fleetViewButton.disabled=!followerEnabled;
@@ -22903,11 +23752,9 @@ async function main() {
       if(!index||followerEnabled){v.crew?.update(ship,dt,P.windSpeed);v.wetness.updateCrew(v.crew?.state,ship);}
       if(!index||followerEnabled){
         v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
-        for(const range of updateGunRecoilVertices(v.recoilMap,v.mesh,v.gunnery.state.guns,ship)){
-          device.queue.writeBuffer(v.vertexBuffer,range.byteOffset,v.mesh.buffer,range.byteOffset,range.byteLength);
-        }
+        v.pose.updateRecoil(v.gunnery.state.guns,ship);
       }
-      if(v.asset.pose?.(ship,simTime,P.windSpeed,v.mesh)){device.queue.writeBuffer(v.vertexBuffer,0,v.mesh);v.wetness.updateGeometry(v.mesh);}
+      if(!index||followerEnabled)v.pose.update(ship,simTime,P.windSpeed);
       if(ship.showProw)v.anchorRenderer.update(v.anchor,ship);
       v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
     }
@@ -23176,8 +24023,8 @@ async function main() {
     const blob = await oc.convertToBlob({ type: 'image/png' });
     const nm = shotSeq > 1 ? shotName.replace('.png', `_${shotIdx}.png`) : shotName;
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
-    if(profilePanel){
-      await profiler.settled();profilePanel.textContent=profileSummary+'\n'+profiler.text();
+    if(qs.get('profile')==='1'||!performancePanel.hidden){
+      await profiler.settled();performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();
       await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,resolution:{mode:resolution.mode,scale:resolution.scale,targetFPS:resolution.targetFPS},parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);

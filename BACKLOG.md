@@ -13,8 +13,8 @@ generation remain CPU work. See `GPU_ARCHITECTURE.md`.
 Integration is isolated in
 `/Users/alexwall/.codex/worktrees/overnight-models/waterworld`, branch
 `codex/gpu-rig-integration`, based on public documentation HEAD `379881a`.
-It excludes the unpublished primary crew-route work. The last public runtime
-remains `3ba18f9`; none of this morning's changes is published yet.
+It excludes the unpublished primary crew-route work. Source and packaged
+qualification is complete; publication and deployed-byte verification follow.
 
 - Stats-button source is `b634c53`, adding live CPU/FPS/resolution and optional
   GPU detail, plus bounded escort timing names. Native source/packaged, desktop
@@ -38,16 +38,22 @@ remains `3ba18f9`; none of this morning's changes is published yet.
   CPU oracle. All original frozen samples pass via exact source records.
   Node/Chrome exact-bit mesh deduplication yields different Cloud indices;
   verified original Node records avoid mismatching frozen indices. Current
-  strict normal gate still catches one Cloud vertex (0.000166 unit-vector error,
-  gate0.0001); coordinate residuals and compensated contact math are being fixed.
-  No thresholds or expected golden values changed. Full release qualification
-  and publication remain pending.
+  strict position/normal gates now pass every vertex for seven models in five
+  states. Pivot-local immutable sail/support records avoid global-coordinate
+  Float32 cancellation; Metal had optimized the attempted precision residuals
+  away. No thresholds or expected golden values changed.
 - Controlled native Metal1920×1080, fixed100%, oneFlyingCloud, Statsclosed:
-  public379881a averaged5.35FPS/median185.9msCPU; candidate52.87FPS/4.2msCPU.
-  Both89-frame samples had no errors. Candidate median frame16.7ms, p9533.3ms;
+  public379881a averaged5.28FPS/median188.8msCPU; candidate60.00FPS/2.9msCPU.
+  Both89-frame samples had no errors. Candidate median/p95 frame16.7ms;
   this does not establish sustained60FPS or physical-iPhone performance.
-  Receipt `/tmp/waterworld-gpu-compare-128.jsonl`; visible Chrome proof
-  `shots/flying-cloud-gpu-review.png` showed54FPS with detailed Stats open.
+  Receipt `/tmp/waterworld-gpu-final-compare-146.jsonl`; visible Chrome proof
+  `shots/flying-cloud-gpu-final.png` shows the final rig and detailed Stats.
+- Final combined native Metal suite passes **738/738**, zero failures, skips
+  or cancellations, in **398.751 seconds**. Receipt
+  `/tmp/waterworld-gpu-final-full-145.log`. Source and packaged model contracts
+  require the actual canonical pose pipeline, rejecting a recoil-only dispatch
+  as well as CPU animation, full or partial mesh uploads and skipped dispatch.
+  Final visible Chrome review has no console warnings/errors.
 - The user is downloading a macOS update and authorized work until restart.
   Stop promptly when asked, preserve all checkouts/assets, and keep the one-night
   heartbeat paused. Root alone runs validation; direct authors run no tests.

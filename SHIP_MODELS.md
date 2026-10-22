@@ -155,8 +155,8 @@ qualification and exact deployed-byte verification before publication.
 |---|---|---|
 | Niña | Three lateen courses | Current authored 20 × 6 m caravel; ready |
 | HMS Victory | Eight square sails, three headsails, gaff spanker | Own three-decker hull and `square1805` backend; ready |
-| Pinta | Square fore/main courses, lateen mizzen | Development caravel, own loft/decks/equipment; `surfaces-v1`, CPU posed |
-| Santa María | Square fore/main, main topsail, spritsail, lateen mizzen | Development nao, main/forecastle/quarter/poop zones and fore lookout; `surfaces-v1`, CPU posed |
+| Pinta | Square fore/main courses, lateen mizzen | Own caravel loft/decks/equipment; shared `surfaces-v1` GPU pose |
+| Santa María | Square fore/main, main topsail, spritsail, lateen mizzen | Own nao, main/forecastle/quarter/poop zones and fore lookout; shared `surfaces-v1` GPU pose |
 | Oseberg-based vessel | One square sail, 30 oars, steering oar | Independent clinker-style hull and bench/stroke layout; published |
 | Lusoria | One square sail, 24 oars, steering oar | Late-Roman riverine reconstruction; published |
 | Taíno-style canoe | 24 paddlers and steering paddle; no mast or sail | Independent dugout; no anchor or guns; published |
@@ -251,9 +251,11 @@ has its own combined, rendered and deployed-byte evidence above. Finite-mast,
 standing-rig and other-spar gates cover representative tested poses, not every
 running-line or whole-rig interaction.
 
-Performance follow-up, not an admission gate: measure sustained target-device
-cost. Flying Cloud remains CPU-heavy. The nine-vessel bound and compact viewport
-checks are not guarantees of 60 FPS on Mac or 30 FPS on a physical iPhone.
+All nine models now use the shared GPU pose stage, including AI fleet vessels.
+Flying Cloud's paired native Metal check improved from 5.28 to 60.00 FPS at fixed
+1080p. Sustained target-device cost remains a follow-up: the nine-vessel bound,
+short Mac measurement and compact viewport checks do not guarantee 60 FPS on
+every Mac or 30 FPS on a physical iPhone.
 
 ## Validation
 

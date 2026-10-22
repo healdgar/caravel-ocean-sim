@@ -409,10 +409,10 @@ Two pooled wake banks and three shadow texture arrays have one layer per active
 vessel, with variable hull masks and probe dispatch; disabled rows allocate none.
 The nine-ship limit is a resource bound, not a device performance guarantee.
 
-Pinta/Santa María and the five additional vessels evaluate cloth,
-spars, ropes and attachments through one
-CPU pose, uploading the same vertices used by visible, shadow, submerged and
-wetness paths. Victory retains shared GPU deformation. The new passive lateral
+Every vessel evaluates cloth, spars, ropes and attachments through the shared
+GPU pose stage. Visible, shadow, submerged and wetness paths reuse its output;
+each ship supplies compact state rather than uploading animated mesh vertices.
+The passive lateral
 model integrates the loaded hull silhouette and actual exposed keel geometry;
 its distributed forces supply sway, yaw and roll moments alongside sail moments.
 An inferred geometric centre of lateral area is not a calibrated dynamic CLR.
@@ -1045,10 +1045,22 @@ These short desktop observations do not establish sustained thermal or iPhone
 performance. Native mode keeps full pixel resolution; Auto can trade sharpness
 while preserving geometry, simulation and rendering features.
 
-The nine-model release has no sustained target-device performance qualification
-yet. Flying Cloud remains CPU-heavy; release qualification does not establish
-60 FPS for that vessel. CPU poses preserve one authoritative geometry across
-rendering and forces.
+October 22's shared GPU pose correction removes per-frame JavaScript mesh
+deformation from every ship, including AI fleets, and moves anchor/rode and
+crew-tool expansion to GPU templates. On this Mac's native Apple Metal adapter,
+a paired fixed 1920 × 1080, 100% resolution, single Flying Cloud comparison
+measured **5.28 → 60.00 FPS**, with median CPU frame work **188.8 → 2.9 ms**.
+Both 89-frame samples used identical scene settings with Stats closed; the GPU
+candidate's median and p95 frame spans were both 16.7 ms. This short comparison
+does not establish sustained thermal or physical-iPhone performance.
+
+The combined native suite passes **738/738**, with no skips or cancellations.
+It exercises source and packaged pages, every registered ship, canonical GPU
+dispatch and shared buffers, deliberate bypass failures, recoil, accessories,
+wetness, mobile controls, offline startup and strict pose parity. Seven generic
+models in five states match independent CPU geometry and the original frozen
+samples at unchanged 20 µm position and 0.0001 normal tolerances. Physics keeps
+sparse CPU state and sampling; rendered vertices stay on the GPU.
 The nine-vessel resource limit does not imply 60 FPS on every Mac
 or 30 FPS on an iPhone; only device-specific measurements can establish that.
 
@@ -1229,7 +1241,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The published game supports nine model types and up to nine active vessels. Flying Cloud remains CPU-heavy; whole-rig running-line clearance and the blade-to-wave gap correction remain unfinished. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
+- The game supports nine model types and up to nine active vessels through shared GPU rendering. Sustained target-device performance and whole-rig running-line clearance remain unqualified. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
