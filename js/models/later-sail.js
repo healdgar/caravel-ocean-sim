@@ -72,14 +72,20 @@ function laterSailTrackGaff(design,surface){
     luffTrack:{kind:'tapered-mast-hoops',clearance}};
 }
 function laterSailStayHead(design,surface){
-  const m=design.masts[surface.mast],head=surface.corners[1],at=laterSailMastAt(design,surface.mast,head[1]);
+  const m=design.masts[surface.mast],head=[...surface.corners[1]],tier=surface.name.includes('topmast-staysail')?'topsail':surface.name.includes('topgallant-staysail')?'topgallant':surface.name.includes('royal-staysail')?'royal':null;
+  const yard=tier?design.surfaces.find(s=>s.kind==='square'&&s.mast===surface.mast&&s.name===m.id+'-'+tier)?.spars.find(s=>s.kind==='yard'):null;
+  const yardClearance=.05/design.frame.verticalScale;
+  // These staysails set below their named yard tier. A head just above the
+  // crossing yard leaves descending sewn cloth threaded through the spar.
+  if(yard)head[1]=Math.min(head[1],yard.a[1]-yard.radius-yardClearance);
+  const at=laterSailMastAt(design,surface.mast,head[1]);
   const foot=laterSailMastAt(design,surface.mast,laterSailDeckOf(design,m.z)),top=laterSailMastAt(design,surface.mast,m.height),axis=top.map((v,i)=>v-foot[i]);
   const clearance=.012/design.frame.verticalScale,stayRadius=.008/(design.runtime.beam/design.frame.beam);
   const offset=(laterSailMastRadiusAt(design,surface.mast,head[1])+stayRadius+clearance)*Math.hypot(...axis)/axis[1];
   // A stay terminates at a tang outside the mast. Placing the pinned head on
   // the axis leaves the actual canvas embedded even when free cloth collides.
   return {...surface,mastContactSide:'fore',corners:[surface.corners[0],[0,head[1],at[2]-offset],surface.corners[2]],
-    headFitting:{kind:'mast-fore-tang',clearance,stayRadius}};
+    headFitting:{kind:'mast-fore-tang',clearance,stayRadius,...(yard?{belowYard:yard.id,verticalClearance:yardClearance}:{})}};
 }
 function laterSailCloudCrew(){
   const ids=['ines','tomas','beatriz','duarte','joao','catarina','leonor','rui','maria','afonso','isabel','pedro'];

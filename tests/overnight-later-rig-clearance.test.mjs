@@ -119,6 +119,14 @@ test('foreign foremast yards do not pull the actual main royal across the inter-
   }
 });
 
+test('named clipper staysail pinned heads set below their actual matching yard tier',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'];
+  for(const s of d.surfaces.filter(s=>s.headFitting?.belowYard)){
+    const yard=d.surfaces.flatMap(s=>s.spars??[]).find(p=>p.id===s.headFitting.belowYard);
+    assert.ok(yard);assert.ok((yard.a[1]-yard.radius-s.corners[1][1])*d.frame.verticalScale>=.05-1e-9,'actual pinned cloth head cannot thread down through its named finite yard');
+  }
+});
+
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
   const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
   for(const [yaw,set]of [[0,[1,1,1]],[.67,[1,1,1]],[-.67,[1,1,1]],[.35,[.20,.40,.65]]]){
