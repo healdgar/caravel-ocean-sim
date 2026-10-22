@@ -1,28 +1,121 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Grown temperate specimens are authored visual proxies, not surveyed Saba flora.
 import {FRAME_WGSL} from './wgsl/common.js';
-import {CANOPY_VERTEX_LAYOUT} from './canopy-scenery.js';
 
 export const FOREST_ASSETS=Object.freeze({
   'manifest.json':'assets/forest-scenery/saba/manifest.json',
   'vertices.bin':'assets/forest-scenery/saba/vertices.bin',
   'indices.bin':'assets/forest-scenery/saba/indices.bin',
   'roots.bin':'assets/forest-scenery/saba/roots.bin',
+  'leaf-oak-0-albedo.png':'assets/forest-scenery/saba/leaf-oak-0-albedo.png',
+  'leaf-oak-0-normal.png':'assets/forest-scenery/saba/leaf-oak-0-normal.png',
+  'leaf-oak-1-albedo.png':'assets/forest-scenery/saba/leaf-oak-1-albedo.png',
+  'leaf-oak-1-normal.png':'assets/forest-scenery/saba/leaf-oak-1-normal.png',
+  'leaf-oak-2-albedo.png':'assets/forest-scenery/saba/leaf-oak-2-albedo.png',
+  'leaf-oak-2-normal.png':'assets/forest-scenery/saba/leaf-oak-2-normal.png',
+  'leaf-maple-0-albedo.png':'assets/forest-scenery/saba/leaf-maple-0-albedo.png',
+  'leaf-maple-0-normal.png':'assets/forest-scenery/saba/leaf-maple-0-normal.png',
+  'leaf-maple-1-albedo.png':'assets/forest-scenery/saba/leaf-maple-1-albedo.png',
+  'leaf-maple-1-normal.png':'assets/forest-scenery/saba/leaf-maple-1-normal.png',
+  'leaf-maple-2-albedo.png':'assets/forest-scenery/saba/leaf-maple-2-albedo.png',
+  'leaf-maple-2-normal.png':'assets/forest-scenery/saba/leaf-maple-2-normal.png',
+  'leaf-birch-0-albedo.png':'assets/forest-scenery/saba/leaf-birch-0-albedo.png',
+  'leaf-birch-0-normal.png':'assets/forest-scenery/saba/leaf-birch-0-normal.png',
+  'leaf-birch-1-albedo.png':'assets/forest-scenery/saba/leaf-birch-1-albedo.png',
+  'leaf-birch-1-normal.png':'assets/forest-scenery/saba/leaf-birch-1-normal.png',
+  'leaf-birch-2-albedo.png':'assets/forest-scenery/saba/leaf-birch-2-albedo.png',
+  'leaf-birch-2-normal.png':'assets/forest-scenery/saba/leaf-birch-2-normal.png',
+  'leaf-elm-0-albedo.png':'assets/forest-scenery/saba/leaf-elm-0-albedo.png',
+  'leaf-elm-0-normal.png':'assets/forest-scenery/saba/leaf-elm-0-normal.png',
+  'leaf-elm-1-albedo.png':'assets/forest-scenery/saba/leaf-elm-1-albedo.png',
+  'leaf-elm-1-normal.png':'assets/forest-scenery/saba/leaf-elm-1-normal.png',
+  'leaf-elm-2-albedo.png':'assets/forest-scenery/saba/leaf-elm-2-albedo.png',
+  'leaf-elm-2-normal.png':'assets/forest-scenery/saba/leaf-elm-2-normal.png',
+  'leaf-chestnut-0-albedo.png':'assets/forest-scenery/saba/leaf-chestnut-0-albedo.png',
+  'leaf-chestnut-0-normal.png':'assets/forest-scenery/saba/leaf-chestnut-0-normal.png',
+  'leaf-chestnut-1-albedo.png':'assets/forest-scenery/saba/leaf-chestnut-1-albedo.png',
+  'leaf-chestnut-1-normal.png':'assets/forest-scenery/saba/leaf-chestnut-1-normal.png',
+  'leaf-chestnut-2-albedo.png':'assets/forest-scenery/saba/leaf-chestnut-2-albedo.png',
+  'leaf-chestnut-2-normal.png':'assets/forest-scenery/saba/leaf-chestnut-2-normal.png',
+  'oak-bark-albedo.png':'assets/forest-scenery/saba/oak-bark-albedo.png',
+  'oak-bark-normal.png':'assets/forest-scenery/saba/oak-bark-normal.png',
+  'oak-bark-roughness.png':'assets/forest-scenery/saba/oak-bark-roughness.png',
+  'oak-wounds-albedo.png':'assets/forest-scenery/saba/oak-wounds-albedo.png',
+  'oak-wounds-normal.png':'assets/forest-scenery/saba/oak-wounds-normal.png',
+  'oak-wounds-roughness.png':'assets/forest-scenery/saba/oak-wounds-roughness.png',
+  'maple-bark-albedo.png':'assets/forest-scenery/saba/maple-bark-albedo.png',
+  'maple-bark-normal.png':'assets/forest-scenery/saba/maple-bark-normal.png',
+  'maple-bark-roughness.png':'assets/forest-scenery/saba/maple-bark-roughness.png',
+  'maple-wounds-albedo.png':'assets/forest-scenery/saba/maple-wounds-albedo.png',
+  'maple-wounds-normal.png':'assets/forest-scenery/saba/maple-wounds-normal.png',
+  'maple-wounds-roughness.png':'assets/forest-scenery/saba/maple-wounds-roughness.png',
+  'birch-bark-albedo.png':'assets/forest-scenery/saba/birch-bark-albedo.png',
+  'birch-bark-normal.png':'assets/forest-scenery/saba/birch-bark-normal.png',
+  'birch-bark-roughness.png':'assets/forest-scenery/saba/birch-bark-roughness.png',
+  'birch-wounds-albedo.png':'assets/forest-scenery/saba/birch-wounds-albedo.png',
+  'birch-wounds-normal.png':'assets/forest-scenery/saba/birch-wounds-normal.png',
+  'birch-wounds-roughness.png':'assets/forest-scenery/saba/birch-wounds-roughness.png',
+  'elm-bark-albedo.png':'assets/forest-scenery/saba/elm-bark-albedo.png',
+  'elm-bark-normal.png':'assets/forest-scenery/saba/elm-bark-normal.png',
+  'elm-bark-roughness.png':'assets/forest-scenery/saba/elm-bark-roughness.png',
+  'elm-wounds-albedo.png':'assets/forest-scenery/saba/elm-wounds-albedo.png',
+  'elm-wounds-normal.png':'assets/forest-scenery/saba/elm-wounds-normal.png',
+  'elm-wounds-roughness.png':'assets/forest-scenery/saba/elm-wounds-roughness.png',
+  'chestnut-bark-albedo.png':'assets/forest-scenery/saba/chestnut-bark-albedo.png',
+  'chestnut-bark-normal.png':'assets/forest-scenery/saba/chestnut-bark-normal.png',
+  'chestnut-bark-roughness.png':'assets/forest-scenery/saba/chestnut-bark-roughness.png',
+  'chestnut-wounds-albedo.png':'assets/forest-scenery/saba/chestnut-wounds-albedo.png',
+  'chestnut-wounds-normal.png':'assets/forest-scenery/saba/chestnut-wounds-normal.png',
+  'chestnut-wounds-roughness.png':'assets/forest-scenery/saba/chestnut-wounds-roughness.png',
 });
 export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut']);
 export const FOREST_ROOT_FLOATS=12;
+export const FOREST_VERTEX_LAYOUT=Object.freeze({arrayStride:56,attributes:[
+  {shaderLocation:0,offset:0,format:'float32x3'},
+  {shaderLocation:1,offset:12,format:'float32x3'},
+  {shaderLocation:2,offset:24,format:'float32x2'},
+  {shaderLocation:5,offset:32,format:'float32x2'},
+  {shaderLocation:6,offset:40,format:'float32x3'},
+  {shaderLocation:7,offset:52,format:'float32'},
+]});
 const finite=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isFinite);
 const uint=n=>Number.isSafeInteger(n)&&n>=0;
+const forestMapReceipt=(value,encoding)=>value&&/^[a-z0-9-]+\.png$/.test(value.file)&&uint(value.bytes)&&value.bytes>0&&value.bytes<=8*1024*1024&&/^[a-f0-9]{64}$/.test(value.sha256)&&value.encoding===encoding;
+export function validateForestMaterials(prototypes){
+  let count=0;const receipts=new Map();
+  for(const p of prototypes){
+    if(!Array.isArray(p.nativeMaterials)||!p.nativeMaterials.length||p.nativeMaterials.length>16)throw Error('Forest requires native materials');
+    for(const material of p.nativeMaterials){
+      if(!forestMapReceipt(material.albedo,'srgb')||!forestMapReceipt(material.normal,'linear')||
+        (material.roughnessMap&&!forestMapReceipt(material.roughnessMap,'linear'))||
+        (material.wrap!==undefined&&!['clamp','repeat'].includes(material.wrap))||
+        (material.clearcoat!==undefined&&!(Number.isFinite(material.clearcoat)&&material.clearcoat>=0&&material.clearcoat<=1))||
+        !['roughness','underside','transmission','opacityThreshold'].every(key=>Number.isFinite(material[key])&&material[key]>=0&&material[key]<=1)||
+        !finite(material.undersideReference,3)||material.undersideReference.some(v=>v<0||v>1))throw Error('Invalid native forest material');
+      for(const kind of ['albedo','normal','roughnessMap'].filter(key=>material[key])){
+        const r=material[kind],identity=[r.bytes,r.sha256,r.encoding].join(':');
+        if(receipts.has(r.file)&&receipts.get(r.file)!==identity)throw Error('Conflicting native forest surface receipt');receipts.set(r.file,identity);
+      }
+      count++;
+    }
+  }
+  if(count>128)throw Error('Forest native material layer limit exceeded');
+  return count;
+}
 export function validateForestScenery(m){
-  if(m?.format!=='waterworld.forest-instances'||m.version!==1||m.units!=='metres'||m.upAxis!=='Y'||m.vertexStride!==52||m.rootStride!==48||
+  if(m?.format!=='waterworld.forest-instances'||![1,2].includes(m.version)||m.units!=='metres'||m.upAxis!=='Y'||m.vertexStride!==(m.version===2?56:52)||m.rootStride!==48||
     !uint(m.rootCount)||!m.rootCount||m.rootCount>250000||!Array.isArray(m.prototypes)||!m.prototypes.length||m.prototypes.length>32)throw Error('Unsupported instanced forest');
-  for(const [name,stride,count]of[['vertices.bin',52,'vertexCount'],['indices.bin',4,'indexCount'],['roots.bin',48,'rootCount']]){
+  for(const [name,stride,count]of[['vertices.bin',m.vertexStride,'vertexCount'],['indices.bin',4,'indexCount'],['roots.bin',48,'rootCount']]){
     const f=m.files?.[name];if(!uint(f?.[count])||!f[count]||f.bytes!==f[count]*stride||f.bytes>192*1024*1024||!/^[a-f0-9]{64}$/.test(f.sha256))throw Error('Invalid forest stream receipt: '+name);
   }
   if(m.files['roots.bin'].rootCount!==m.rootCount)throw Error('Forest root count mismatch');
   const c=m.coverage;
   if(c?.kind!=='occupied-cells'||!finite(c.originXZ,2)||!(c.cellMetres>0)||!finite(c.dimensions,2)||!c.dimensions.every(n=>uint(n)&&n>0)||
     !Array.isArray(c.cells)||new Set(c.cells).size!==c.cells.length||c.cells.some(n=>!uint(n)||n>=c.dimensions[0]*c.dimensions[1]))throw Error('Invalid forest occupied coverage');
+  const native=m.version===2&&m.materialContract==='gene-surfaces-v3';
+  if(m.version===2&&!native)throw Error('Current forest requires native material contract');
+  if(m.materialContract&&!native)throw Error('Unsupported forest material contract');
+  if(native)validateForestMaterials(m.prototypes);
   let nextIndex=0,nextRoot=0;
   for(const [i,p]of m.prototypes.entries()){
     if(p.id!==i||!FOREST_SPECIES.includes(p.species)||!finite(p.low,3)||!finite(p.high,3)||p.low.some((v,k)=>v>p.high[k])||
@@ -43,14 +136,20 @@ export function decodeForestScenery(manifest,streams){
   validateForestScenery(manifest);
   for(const name of ['vertices.bin','indices.bin','roots.bin'])if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
   const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=new Float32Array(streams['roots.bin']);
-  for(let i=0;i<vertices.length;i+=13){
-    if(!vertices.subarray(i,i+13).every(Number.isFinite)||Math.abs(Math.hypot(...vertices.subarray(i+3,i+6))-1)>.001||![3,4].includes(vertices[i+6])||vertices[i+7]<0||vertices[i+7]>1||vertices.subarray(i+10,i+13).some(v=>v<0))throw Error('Invalid forest vertex');
+  const stride=manifest.vertexStride/4;
+  for(let i=0;i<vertices.length;i+=stride){
+    if(!vertices.subarray(i,i+stride).every(Number.isFinite)||Math.abs(Math.hypot(...vertices.subarray(i+3,i+6))-1)>.001||!uint(vertices[i+6])||vertices[i+6]<3||vertices[i+7]<0||vertices[i+7]>1||vertices.subarray(i+10,i+13).some(v=>v<0))throw Error('Invalid forest vertex');
   }
   for(const p of manifest.prototypes){
     for(const key of ['wood','leaf','far'])for(let j=p[key].firstIndex;j<p[key].firstIndex+p[key].indexCount;j++){
-      const v=indices[j]*13;if(v>=vertices.length)throw Error('Forest index outside stream');
-      if((key==='wood'&&vertices[v+6]!==3)||(key==='leaf'&&vertices[v+6]!==4))throw Error('Forest material range mismatch');
+      const v=indices[j]*stride;if(v>=vertices.length)throw Error('Forest index outside stream');
+      if((key==='wood'&&vertices[v+6]!==3)||(key==='far'&&![3,4].includes(vertices[v+6]))||
+        (key==='leaf'&&(vertices[v+6]<4||vertices[v+6]>=4+(p.nativeMaterials?.length??1))))throw Error('Forest material range mismatch');
       for(let k=0;k<3;k++)if(vertices[v+k]<p.low[k]-.001||vertices[v+k]>p.high[k]+.001)throw Error('Forest vertex outside prototype bound');
+      if(manifest.version===2){const material=vertices[v+13];if(key==='far'?material!==-1:!uint(material)||material>=p.nativeMaterials.length)throw Error('Forest native material index mismatch');}
+      if(manifest.version===2&&(j-p[key].firstIndex)%3===0){
+        const material=vertices[v+13];for(let corner=1;corner<3;corner++)if(vertices[indices[j+corner]*stride+13]!==material)throw Error('Forest triangle crosses native material groups');
+      }
     }
     for(let i=p.firstRoot;i<p.firstRoot+p.rootCount;i++){
       const r=roots.subarray(i*12,i*12+12);
@@ -60,12 +159,27 @@ export function decodeForestScenery(manifest,streams){
   return {manifest,vertices,indices,roots};
 }
 export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS}={}){
-  const load=async n=>{const r=await fetchAsset(assets[n]);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
+  const load=async n=>{if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n]);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   const pairs=await Promise.all(['vertices.bin','indices.bin','roots.bin'].map(async n=>[n,await(await load(n)).arrayBuffer()]));
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
   for(const [name,raw]of pairs){const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)),v=>v.toString(16).padStart(2,'0')).join('');if(hash!==manifest.files[name].sha256)throw Error('Forest digest mismatch: '+name);}
-  return decodeForestScenery(manifest,Object.fromEntries(pairs));
+  // Old 42-tree stand packs use their separate loader. A regional production
+  // forest must never silently borrow that stand's generic foliage image.
+  if(manifest.version!==2||manifest.materialContract!=='gene-surfaces-v3')throw Error('Regional forest requires current native surfaces');
+  validateForestMaterials(manifest.prototypes);
+  const textures={},pending=new Map();
+  await Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
+    const receipt=material[kind];if(pending.has(receipt.file))return pending.get(receipt.file);
+    const request=(async()=>{
+      const raw=await(await load(receipt.file)).arrayBuffer();
+      if(raw.byteLength!==receipt.bytes)throw Error('Incomplete forest surface: '+receipt.file);
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)),v=>v.toString(16).padStart(2,'0')).join('');
+      if(hash!==receipt.sha256)throw Error('Forest surface digest mismatch: '+receipt.file);
+      textures[receipt.file]=raw;
+    })();pending.set(receipt.file,request);return request;
+  }))));
+  return {...decodeForestScenery(manifest,Object.fromEntries(pairs)),textures};
 }
 const coverageSets=new WeakMap();
 export function forestCoversPoint(manifest,x,z){
@@ -80,6 +194,91 @@ export function excludeForestRoots(trees,manifest){
   return new Float32Array(out);
 }
 
+// Native pigment is sRGB; alpha is coverage, and normals are linear. Generate
+// linear, coverage-weighted mips once on the GPU. Thresholding averaged alpha
+// would delete subpixel leaves and turn an otherwise dense forest into haze.
+export const FOREST_SURFACE_MIPS_WGSL=/* wgsl */`
+@group(0)@binding(0)var forestMipAlbedo:texture_2d_array<f32>;
+@group(0)@binding(1)var forestMipNormal:texture_2d_array<f32>;
+@group(0)@binding(2)var forestMipColourOut:texture_storage_2d_array<rgba16float,write>;
+@group(0)@binding(3)var forestMipNormalOut:texture_storage_2d_array<rgba16float,write>;
+@group(0)@binding(4)var forestMipRoughness:texture_2d_array<f32>;
+@group(0)@binding(5)var<storage,read>forestMipOptics:array<vec4f>;
+fn forestMipLinear(c:vec3f)->vec3f{
+ return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));
+}
+@compute @workgroup_size(8,8,1)fn forestSurfaceInit(@builtin(global_invocation_id)id:vec3u){
+ let size=textureDimensions(forestMipColourOut);if(any(id.xy>=size)||id.z>=textureNumLayers(forestMipColourOut)){return;}
+ let p=vec2i(id.xy);let layer=i32(id.z);let c=textureLoad(forestMipAlbedo,p,layer,0);
+ let n=normalize(textureLoad(forestMipNormal,p,layer,0).xyz*2.-1.);
+ var roughness=forestMipOptics[id.z].x;
+ if(forestMipOptics[id.z].y>0.){roughness=textureLoad(forestMipRoughness,p,layer,0).r;}
+ textureStore(forestMipColourOut,p,layer,vec4f(forestMipLinear(c.rgb)*c.a,c.a));
+ textureStore(forestMipNormalOut,p,layer,vec4f(n*c.a,roughness*c.a));
+}
+@compute @workgroup_size(8,8,1)fn forestSurfaceMips(@builtin(global_invocation_id)id:vec3u){
+ let size=textureDimensions(forestMipColourOut);if(any(id.xy>=size)||id.z>=textureNumLayers(forestMipColourOut)){return;}
+ let edge=vec2i(textureDimensions(forestMipAlbedo))-1;let p=vec2i(id.xy)*2;let layer=i32(id.z);
+ var colour=vec4f(0);var normal=vec4f(0);
+ for(var y=0;y<2;y++){for(var x=0;x<2;x++){
+   let q=min(p+vec2i(x,y),edge);colour+=textureLoad(forestMipAlbedo,q,layer,0);normal+=textureLoad(forestMipNormal,q,layer,0);
+ }}
+ textureStore(forestMipColourOut,vec2i(id.xy),layer,colour*.25);
+ textureStore(forestMipNormalOut,vec2i(id.xy),layer,normal*.25);
+}
+`;
+
+export async function createForestLeafSurfaces({device,shader,pack}){
+  const layerCount=validateForestMaterials(pack.manifest.prototypes),materials=pack.manifest.prototypes.flatMap(p=>p.nativeMaterials);
+  const images=[],families=[],textures=[],temporary=[];
+  try{
+    const optics=new Float32Array(layerCount*12);
+    for(const [index,material]of materials.entries()){
+      const maps={};for(const kind of ['albedo','normal','roughnessMap'].filter(key=>material[key])){
+        const raw=pack.textures?.[material[kind].file];if(!(raw instanceof ArrayBuffer)||raw.byteLength!==material[kind].bytes)throw Error('Missing native forest surface: '+material[kind].file);
+        const image=await createImageBitmap(new Blob([raw],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none'});images.push(image);maps[kind]=image;
+      }
+      const {width,height}=maps.albedo;
+      if(width<1||height<1||width>2048||height>2048||(width&(width-1))||(height&(height-1))||Object.values(maps).some(image=>image.width!==width||image.height!==height))throw Error('Native material maps require matching power-of-two dimensions');
+      let family=families.find(f=>f.width===width&&f.height===height);
+      if(!family){family={width,height,id:families.length,rows:[],levels:1+Math.floor(Math.log2(Math.max(width,height)))};families.push(family);}
+      if(families.length>4)throw Error('Native forest texture dimension family limit exceeded');
+      optics.set([material.roughness,material.underside,material.transmission,material.opacityThreshold,...material.undersideReference,0,
+        family.id,family.rows.length,material.wrap==='repeat'?1:0,material.clearcoat??0],index*12);
+      family.rows.push({maps,material});
+    }
+    const T=GPUTextureUsage;
+    const code=await shader(FOREST_SURFACE_MIPS_WGSL,'forest native surface mipmaps');
+    const init=await device.createComputePipelineAsync({label:'forest initialise native surfaces',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceInit'}});
+    const mip=await device.createComputePipelineAsync({label:'forest filter native coverage',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceMips'}});
+    const encoder=device.createCommandEncoder({label:'forest immutable surface preparation'}),pass=encoder.beginComputePass();
+    const view=(texture,level)=>texture.createView({dimension:'2d-array',baseMipLevel:level,mipLevelCount:1});
+    for(const family of families){
+      const {width,height,rows,levels}=family;
+      const raw=label=>{const t=device.createTexture({label,size:[width,height,rows.length],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});temporary.push(t);return t;};
+      const sources=[raw('forest native source albedo'),raw('forest native source normal'),raw('forest native source roughness')];
+      const target=label=>{const t=device.createTexture({label,size:[width,height,rows.length],format:'rgba16float',mipLevelCount:levels,usage:T.TEXTURE_BINDING|T.STORAGE_BINDING});textures.push(t);return t;};
+      family.albedo=target('forest immutable native pigment and coverage mips');family.normal=target('forest immutable native normal and roughness mips');
+      const rowOptics=new Float32Array(rows.length*4);for(const [layer,row]of rows.entries()){
+        for(const [i,kind]of ['albedo','normal','roughnessMap'].entries())if(row.maps[kind])device.queue.copyExternalImageToTexture({source:row.maps[kind]},{texture:sources[i],origin:[0,0,layer]},[width,height]);
+        rowOptics.set([row.material.roughness,row.maps.roughnessMap?1:0,0,0],layer*4);
+      }
+      const rowBuffer=device.createBuffer({label:'forest surface initial optics',size:rowOptics.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});temporary.push(rowBuffer);device.queue.writeBuffer(rowBuffer,0,rowOptics);
+      for(let level=0;level<levels;level++){
+        const pipeline=level?mip:init;pass.setPipeline(pipeline);
+        const resources=[level?view(family.albedo,level-1):view(sources[0],0),level?view(family.normal,level-1):view(sources[1],0),view(family.albedo,level),view(family.normal,level)];
+        const entries=resources.map((resource,binding)=>({binding,resource}));
+        if(!level)entries.push({binding:4,resource:view(sources[2],0)},{binding:5,resource:{buffer:rowBuffer}});
+        pass.setBindGroup(0,device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries}));
+        pass.dispatchWorkgroups(Math.ceil(Math.max(1,width>>level)/8),Math.ceil(Math.max(1,height>>level)/8),rows.length);
+      }
+    }
+    pass.end();device.queue.submit([encoder.finish()]);await device.queue.onSubmittedWorkDone();
+    return {families,optics,layers:layerCount,destroy(){for(const texture of textures)texture.destroy();}};
+  }catch(error){for(const texture of textures)texture.destroy();throw error;}
+  finally{for(const image of images)image.close();for(const resource of temporary)resource.destroy();}
+}
+
 const ROOT_WGSL=/* wgsl */`
 struct ForestRoot {rootScale:vec4f,yawColour:vec4f,identity:vec4f};
 `;
@@ -87,13 +286,91 @@ export const FOREST_VERTEX_WGSL=ROOT_WGSL+/* wgsl */`
 @group(2)@binding(0)var<storage,read>forestRoots:array<ForestRoot>;
 @group(2)@binding(1)var<storage,read>forestVisible:array<u32>;
 @group(2)@binding(2)var<uniform>forestBin:vec4u;
+struct ForestLeafMaterial {optics:vec4f,underside:vec4f,coordinates:vec4f};
+@group(2)@binding(3)var forestNativeAlbedo0:texture_2d_array<f32>;
+@group(2)@binding(4)var forestNativeNormal0:texture_2d_array<f32>;
+@group(2)@binding(5)var forestNativeSampler:sampler;
+@group(2)@binding(6)var<storage,read>forestNativeMaterials:array<ForestLeafMaterial>;
+@group(2)@binding(7)var forestNativeAlbedo1:texture_2d_array<f32>;
+@group(2)@binding(8)var forestNativeNormal1:texture_2d_array<f32>;
+@group(2)@binding(9)var forestNativeAlbedo2:texture_2d_array<f32>;
+@group(2)@binding(10)var forestNativeNormal2:texture_2d_array<f32>;
+@group(2)@binding(11)var forestNativeAlbedo3:texture_2d_array<f32>;
+@group(2)@binding(12)var forestNativeNormal3:texture_2d_array<f32>;
+@group(2)@binding(13)var forestNativeRepeatSampler:sampler;
+struct ForestVertex {
+ @builtin(position)pos:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,
+ @location(2)kind:vec2f,@location(3)leafUV:vec2f,@location(4)colour:vec3f,
+ @location(5)@interpolate(flat)nativeMaterial:i32,
+};
 @vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
- @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->CanopyVertex{
+ @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
- var o:CanopyVertex;o.world=r.rootScale.xyz+local;
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;
  o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
+ o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+}
+fn forestNativeLinear(c:vec3f)->vec3f{
+ return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));
+}
+struct ForestSurface {pigment:vec4f,detail:vec4f};
+fn forestNativePair(albedo:texture_2d_array<f32>,normal:texture_2d_array<f32>,uv:vec2f,ux:vec2f,uy:vec2f,layer:i32,repeating:bool)->ForestSurface{
+ var result:ForestSurface;
+ if(repeating){result.pigment=textureSampleGrad(albedo,forestNativeRepeatSampler,uv,layer,ux,uy);result.detail=textureSampleGrad(normal,forestNativeRepeatSampler,uv,layer,ux,uy);}
+ else{result.pigment=textureSampleGrad(albedo,forestNativeSampler,uv,layer,ux,uy);result.detail=textureSampleGrad(normal,forestNativeSampler,uv,layer,ux,uy);}
+ return result;
+}
+fn forestReadNative(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->ForestSurface{
+ let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let repeating=material.coordinates.z>0.;
+ if(family==0u){return forestNativePair(forestNativeAlbedo0,forestNativeNormal0,uv,ux,uy,layer,repeating);}
+ if(family==1u){return forestNativePair(forestNativeAlbedo1,forestNativeNormal1,uv,ux,uy,layer,repeating);}
+ if(family==2u){return forestNativePair(forestNativeAlbedo2,forestNativeNormal2,uv,ux,uy,layer,repeating);}
+ return forestNativePair(forestNativeAlbedo3,forestNativeNormal3,uv,ux,uy,layer,repeating);
+}
+fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy:vec2f)->vec3f{
+ let determinant=ux.x*uy.y-ux.y*uy.x;
+ let direction=select(-1.,1.,determinant>=0.);
+ let tangent=dx*uy.y-dy*ux.y;let bitangent=dy*ux.x-dx*uy.x;
+ var n=geometric;
+ if(abs(determinant)>1e-12&&dot(tangent,tangent)>1e-16&&dot(bitangent,bitangent)>1e-16&&dot(detail,detail)>1e-16){
+   let t=normalize(tangent)*direction;let b=normalize(bitangent)*direction;
+   let sampled=normalize(detail);n=normalize(t*sampled.x+b*sampled.y+geometric*sampled.z);
+ }
+ return n;
+}
+@fragment fn forestNativeOpaqueFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
+ let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
+ let geometric=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
+ // This explicitly labelled legacy far approximation is permitted only when
+ // the complete specimen fits three pixels. Its dome UVs are not native UVs.
+ if(in.nativeMaterial<0){
+   let ambient=select(.36+max(geometric.y,0.)*.25,.14+exposure*.47+max(geometric.y,0.)*.08,in.kind.x>3.5);
+   return landFinish(in.world,geometric,in.colour,max(dot(geometric,F.sunDir.xyz),0.),ambient,0.,.95);
+ }
+ let material=forestNativeMaterials[u32(in.nativeMaterial)];let surface=forestReadNative(material,in.leafUV,ux,uy);
+ let colour=surface.pigment.rgb/max(surface.pigment.a,1e-8)*in.colour;
+ let n=forestMappedNormal(geometric,surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
+ let roughness=clamp(surface.detail.a/max(surface.pigment.a,1e-8),0.,1.);
+ return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.),.36+max(n.y,0.)*.25,0.,roughness);
+}
+@fragment fn forestNativeLeafFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
+ let material=forestNativeMaterials[u32(in.nativeMaterial)];
+ let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
+ let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
+ let n=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
+ var colour=pigment.rgb/max(pigment.a,1e-8)*in.colour;
+ if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
+ let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);
+ let diffuse=(max(nDotL,0.)+max(-nDotL,0.)*material.optics.z)*(.22+.78*exposure*exposure);
+ let ambient=.12+exposure*.55+abs(n.y)*.08;
+ let roughness=clamp(surface.detail.a/max(pigment.a,1e-8),0.,1.);
+ let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
+ // The source cutout was supersampled into alpha. Its opacityThreshold is
+ // retained as source metadata, not applied to averaged mip coverage. MSAA
+ // consumes that fractional coverage; transmission never changes opacity.
+ return vec4f(lit.rgb,pigment.a);
 }
 `;
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
@@ -138,9 +415,16 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,mode='auto',nearPixels=3}){
   if(!['auto','near','far'].includes(mode)||!(nearPixels>0&&nearPixels<=3))throw Error('Invalid forest LOD policy');
+  if(samples<2)throw Error('Native forest coverage requires MSAA');
   const m=pack.manifest,allocated=[],B=GPUBufferUsage;
   const make=(data,usage,label)=>{const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
+  let surfaces;
   try{
+    surfaces=await createForestLeafSurfaces({device,shader,pack});
+    const nativeMaterials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');
+    const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
+    const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
+    const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
     const rooted=pack.roots.slice();let excludedRoots=0;
     if(groundSample)for(let i=0;i<rooted.length;i+=12){
       const x=rooted[i],z=rooted[i+2],y=groundSample(x,z);
@@ -166,18 +450,30 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const cull=await device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}});
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
     const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,roots,prototypes,visible,commands,previous,parameters].map((buffer,binding)=>({binding,resource:{buffer}}))});
-    const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[CANOPY_VERTEX_LAYOUT]},
+    const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
       fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragment==='canopyLeafFS'&&samples>1}});
-    const opaque=await pipe('canopyOpaqueFS'),leaf=await pipe('canopyLeafFS');
+      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragment==='forestNativeLeafFS'}});
+    const opaque=await pipe('forestNativeOpaqueFS'),leaf=await pipe('forestNativeLeafFS');
     const bind=(p,ids)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
-    const opaqueGroup=bind(opaque,[0,1,2,3,4,5,6]),leafGroup=bind(leaf,[0,1,2,3,4,5,6,8,10]);
+    const opaqueGroup=bind(opaque,[0,1,2,3,4,5,6]),leafGroup=bind(leaf,[0,1,2,3,4,5,6]);
     const opaqueCloud=clouds.bindVolume(opaque),leafCloud=clouds.bindVolume(leaf);
-    const bins=m.prototypes.map(p=>[0,1].map(tier=>{
-      const offset=make(new Uint32Array([p.firstRoot*2+(tier?p.rootCount:0),0,0,0]),B.UNIFORM,'forest bin offset');
-      const group=pipeline=>device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      return {opaque:group(opaque),leaf:tier?null:group(leaf)};
-    }));
+    let materialBase=0;
+    const bins=m.prototypes.map(p=>{
+      const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
+      return [0,1].map(tier=>{
+        const offset=make(new Uint32Array([p.firstRoot*2+(tier?p.rootCount:0),firstMaterial,p.nativeMaterials.length,0]),B.UNIFORM,'forest bin offset');
+        const group=pipeline=>{
+          const entries=[...[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}})),
+            {binding:5,resource:nativeSampler},{binding:6,resource:{buffer:nativeMaterials}},{binding:13,resource:nativeRepeatSampler}];
+          for(let family=0;family<4;family++){
+            const source=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;
+            entries.push({binding:first,resource:source.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:source.normal.createView({dimension:'2d-array'})});
+          }
+          return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
+        };
+        return {opaque:group(opaque),leaf:tier?null:group(leaf)};
+      });
+    });
     const draw=(pass,pipeline,group,cloud,cutout)=>{
       pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');
       for(const p of m.prototypes)for(const slot of cutout?[1]:[0,2]){
@@ -186,8 +482,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       }
     };
     return {stats:{loaded:true,roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,nearPixels,appearanceErrorSupported:false,mode,
+      materialContract:m.materialContract,nativeMaterialLayers:surfaces.layers,
+      nativeTextureFamilies:surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels})),coverageFiltering:'linear alpha with MSAA',
       species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim},prepare(){},
       encode(pass){pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*3/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.rootCount/64));},
-      drawOpaque(pass){draw(pass,opaque,opaqueGroup,opaqueCloud,false);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);},destroy(){for(const b of allocated)b.destroy();}};
-  }catch(error){for(const b of allocated)b.destroy();throw error;}
+      drawOpaque(pass){draw(pass,opaque,opaqueGroup,opaqueCloud,false);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);},destroy(){for(const b of allocated)b.destroy();surfaces.destroy();}};
+  }catch(error){for(const b of allocated)b.destroy();surfaces?.destroy();throw error;}
 }

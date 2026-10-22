@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {validateForestScenery,decodeForestScenery,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS} from '../js/forest-scenery.js';
+import {validateForestScenery,validateForestMaterials,decodeForestScenery,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
 
 function fixture(){
   const vertices=new Float32Array([3,4,4].flatMap(kind=>[[-1,0,0],[1,0,0],[0,2,0]].flatMap(p=>[...p,0,0,1,kind,.5,0,0,.1,.2,.05])));
@@ -16,6 +17,20 @@ function fixture(){
     coverage:{kind:'occupied-cells',originXZ:[0,0],dimensions:[2,2],cellMetres:64,cells:[0]},
     prototypes:[{id:0,species:'oak',low:[-1,0,0],high:[1,2,0],centre:[0,1,0],radius:Math.sqrt(2)+.0001,firstRoot:0,rootCount:1,
       wood:{firstIndex:0,indexCount:3},leaf:{firstIndex:3,indexCount:3},far:{firstIndex:6,indexCount:3}}]}};
+}
+function nativeFixture(){
+  const f=fixture(),source=new Float32Array(f.streams['vertices.bin']),vertices=new Float32Array(9*14),textures={};
+  for(let i=0;i<9;i++){vertices.set(source.subarray(i*13,i*13+13),i*14);vertices[i*14+13]=i<3?0:i<6?1:-1;}
+  f.streams['vertices.bin']=vertices.buffer;
+  f.manifest.version=2;f.manifest.vertexStride=56;f.manifest.materialContract='gene-surfaces-v3';
+  f.manifest.files['vertices.bin']={vertexCount:9,bytes:vertices.byteLength,sha256:createHash('sha256').update(new Uint8Array(vertices.buffer)).digest('hex')};
+  f.manifest.prototypes[0].nativeMaterials=['bark','foliage'].map((name,index)=>{
+    const receipt=kind=>{const file=`oak-${name}-${kind}.png`,raw=new Uint8Array([137,80,78,71,index,kind==='normal'?1:0]);textures[file]=raw.buffer;
+      return{file,bytes:raw.byteLength,sha256:createHash('sha256').update(raw).digest('hex'),encoding:kind==='albedo'?'srgb':'linear'};};
+    return{name,index,albedo:receipt('albedo'),normal:receipt('normal'),roughnessMap:index?undefined:receipt('roughness'),
+      roughness:.65,underside:index ? .3 : 0,transmission:index ? .13 : 0,opacityThreshold:index ? .35 : 0,undersideReference:[.62,.7,.58],wrap:index?'clamp':'repeat'};
+  });
+  return{...f,textures};
 }
 test('instanced pack preserves prototype vertices and compact roots, and declares no appearance certification',()=>{
   const {manifest,streams}=fixture(),before=structuredClone(streams),pack=decodeForestScenery(manifest,streams);
@@ -40,9 +55,44 @@ test('only occupied cells suppress old roots; explicit bare/coastal cells and ol
   assert.deepEqual(excludeForestRoots(roots,manifest),new Float32Array([...outside,...boundary]));assert.deepEqual(roots,before);
 });
 test('optional loader verifies binary digests before publishing a pack',async()=>{
-  const {manifest,streams}=fixture(),assets=Object.fromEntries(['manifest.json',...Object.keys(streams)].map(n=>[n,n]));
-  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(streams[name]);
+  const {manifest,streams,textures}=nativeFixture(),assets=Object.fromEntries(['manifest.json',...Object.keys(streams),...Object.keys(textures)].map(n=>[n,n]));
+  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(streams[name]??textures[name]);
   assert.equal((await loadForestScenery({assets,fetchAsset})).roots.length,12);
   new Uint8Array(streams['roots.bin'])[0]^=1;
   await assert.rejects(loadForestScenery({assets,fetchAsset}),/digest/i);
+});
+test('native material IDs preserve every source group and explicitly isolate the coarse far approximation',()=>{
+  const {manifest,streams}=nativeFixture(),pack=decodeForestScenery(manifest,streams);
+  assert.equal(FOREST_VERTEX_LAYOUT.arrayStride,56);assert.deepEqual(FOREST_VERTEX_LAYOUT.attributes.at(-1),{shaderLocation:7,offset:52,format:'float32'});
+  assert.equal(validateForestMaterials(manifest.prototypes),2);assert.deepEqual([pack.vertices[13],pack.vertices[55],pack.vertices[97]],[0,1,-1]);
+  for(const edit of [m=>delete m.materialContract,m=>m.prototypes[0].nativeMaterials[0].albedo.encoding='linear',
+    m=>m.prototypes[0].nativeMaterials[1].transmission=1.1,m=>m.prototypes[0].nativeMaterials[0].roughnessMap.file='../escape.png']){
+    const f=nativeFixture();edit(f.manifest);assert.throws(()=>validateForestScenery(f.manifest));
+  }
+  for(const [vertex,value]of [[0,-1],[3,2],[6,0]]){
+    const f=nativeFixture();new Float32Array(f.streams['vertices.bin'])[vertex*14+13]=value;
+    assert.throws(()=>decodeForestScenery(f.manifest,f.streams),/material/i);
+  }
+  const mixed=nativeFixture();new Float32Array(mixed.streams['vertices.bin'])[27]=1;
+  assert.throws(()=>decodeForestScenery(mixed.manifest,mixed.streams),/material groups/);
+});
+test('native surface receipts are verified and an old regional pack cannot borrow generic foliage',async()=>{
+  const {manifest,streams,textures}=nativeFixture(),assets=Object.fromEntries(['manifest.json',...Object.keys(streams),...Object.keys(textures)].map(n=>[n,n]));
+  const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(streams[name]??textures[name]);
+  const loaded=await loadForestScenery({assets,fetchAsset});assert.deepEqual(Object.keys(loaded.textures).sort(),Object.keys(textures).sort());
+  const first=Object.keys(textures)[0];new Uint8Array(textures[first])[4]^=1;
+  await assert.rejects(loadForestScenery({assets,fetchAsset}),/surface digest/i);
+  const old=fixture(),oldAssets=Object.fromEntries(['manifest.json',...Object.keys(old.streams)].map(n=>[n,n]));
+  await assert.rejects(loadForestScenery({assets:oldAssets,fetchAsset:async name=>name==='manifest.json'?Response.json(old.manifest):new Response(old.streams[name])}),/native surfaces/);
+});
+test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
+  const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');
+  assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS|discard/);
+  assert.match(FOREST_VERTEX_WGSL,/@location\(7\)nativeMaterial/);
+  assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
+  assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
+  assert.match(FOREST_SURFACE_MIPS_WGSL,/forestMipLinear\(c\.rgb\)\*c\.a/);
+  assert.match(FOREST_SURFACE_MIPS_WGSL,/colour\*\.25/);assert.doesNotMatch(FOREST_SURFACE_MIPS_WGSL,/discard|step\(/);
+  assert.match(source,/alphaToCoverageEnabled:fragment==='forestNativeLeafFS'/);
+  assert.match(source,/nearPixels=3/);assert.match(source,/nearPixels<=3/);
 });
