@@ -2,8 +2,8 @@
 
 ## October 22 morning: shared WebGPU graphics contract
 
-The user identified severe Flying Cloud slowdown and clarified that every ship,
-including future/fleet models, must use the shared GPU graphics system. CPU
+The user identified severe Flying Cloud slowdown and clarified that all scene
+graphics, including every future/player/AI/fleet/background ship, use WebGPU. CPU
 graphics exceptions need measured performance or transfer-latency justification.
 The new `surfaces-v1` adapters incorrectly selected per-frame CPU deformation;
 the correction extends the existing canonical GPU pose stage, with compact
@@ -17,18 +17,37 @@ It excludes the unpublished primary crew-route work. The last public runtime
 remains `3ba18f9`; none of this morning's changes is published yet.
 
 - Stats-button source is `b634c53`, adding live CPU/FPS/resolution and optional
-  GPU detail, plus bounded escort timing names. Render/mobile qualification is
-  pending.
+  GPU detail, plus bounded escort timing names. Native source/packaged, desktop
+  1140×800/mobile320×568 lifecycle/UI checks pass in receipt122 (10/10 combined).
 - Root froze seven pre-port model references in `20dc609`; tests never regenerate
   them. Old-source red check `/tmp/waterworld-gpu-contract-red-105.log` fails the
   expected CPU-path guards. Integrated static/packing/wetness checks pass 9/9
   in `/tmp/waterworld-gpu-contract-focused-107.log`.
-- Native Metal compiles legacy, descriptor-pose and GPU-posed wetness shaders
-  (`/tmp/waterworld-gpu-compile-108.json`). Every generic vertex is compared
-  against CPU references in five states. Current parity run 111 exposed f32
-  cancellation in furled cloth normals and rope tangents; thresholds remain
-  unchanged while relative-coordinate arithmetic is stabilized. Native runtime
-  dispatch/buffer-sharing/mutation check 113 is in progress.
+- Native Metal observes every registered model's real dispatch, exact shared
+  visible/shadow/submerged/wetness buffer and immutable CPU geometry, in source
+  and packaged production pages (122). Deliberate dispatch/fallback/upload
+  mutations fail the same guard. Partial CPU gun-recoil uploads are removed;
+  real GPU recoil passes every actual gun/scale/return/independent-instance
+  comparison (116). No CPU vertex-animation exception remains.
+- All2784 native crew-tool cases match old geometry, maximum2.15µm position
+  difference (124). Anchor expansion/physics/command guards pass24/24 (130),
+  retaining physical catenary knots, deployment orientation and Victory's
+  >2cm housed-bow clearance. Both accessories upload static templates once and
+  compact commands thereafter.
+- Every generic vertex in seven models/five states is compared with an offline
+  CPU oracle. All original frozen samples pass via exact source records.
+  Node/Chrome exact-bit mesh deduplication yields different Cloud indices;
+  verified original Node records avoid mismatching frozen indices. Current
+  strict normal gate still catches one Cloud vertex (0.000166 unit-vector error,
+  gate0.0001); coordinate residuals and compensated contact math are being fixed.
+  No thresholds or expected golden values changed. Full release qualification
+  and publication remain pending.
+- Controlled native Metal1920×1080, fixed100%, oneFlyingCloud, Statsclosed:
+  public379881a averaged5.35FPS/median185.9msCPU; candidate52.87FPS/4.2msCPU.
+  Both89-frame samples had no errors. Candidate median frame16.7ms, p9533.3ms;
+  this does not establish sustained60FPS or physical-iPhone performance.
+  Receipt `/tmp/waterworld-gpu-compare-128.jsonl`; visible Chrome proof
+  `shots/flying-cloud-gpu-review.png` showed54FPS with detailed Stats open.
 - The user is downloading a macOS update and authorized work until restart.
   Stop promptly when asked, preserve all checkouts/assets, and keep the one-night
   heartbeat paused. Root alone runs validation; direct authors run no tests.

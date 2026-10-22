@@ -162,8 +162,8 @@ fn levelAt(world:vec3f)->f32 {
 // probes have a sentinel index and retain their separately updated positions.
 // This variant needs neither a second rig evaluator nor a position readback.
 export function withPosedWetnessProbes(source=WET_UPDATE){
-  const sample='let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);\n  let p=rig.position;';
-  if(source.split(sample).length!==2)throw Error('Unrecognized wetness pose sample');
+  const sample=/let\s+rig\s*=\s*rigVertex\(\s*probe\.position\.xyz\s*,\s*vec3f\(\s*0\s*,\s*1\s*,\s*0\s*\)\s*,\s*probe\.position\.w\s*,\s*probe\.uvKind\.xy\s*\)\s*;\s*let\s+p\s*=\s*rig\.position\s*;/g;
+  if(source.match(sample)?.length!==1)throw Error('Unrecognized wetness pose sample');
   return source.replace(sample,`var p=probe.position.xyz;
   let sourceIndex=wetPoseSourceVertices[i];
   if(sourceIndex!=0xffffffffu&&sourceIndex<arrayLength(&wetPosedVertices)){p=wetPosedVertices[sourceIndex].position.xyz;}`)+/* wgsl */ `

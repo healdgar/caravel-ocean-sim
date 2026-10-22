@@ -26,17 +26,18 @@ export function assertGPUVesselFrame(frame,renderableIds){
     assert.ok(r.wetness>0,name+' wetness must consume that exact computed buffer');
     assert.equal(r.geometryWrites.length,0,name+' must not upload CPU vertex animation during an ordinary frame');
     assert.equal(r.poseWrites.length,0,name+' posed positions and normals must remain GPU-owned');
-    assert.equal(r.cpuMeshChanged,false,name+' must keep rest geometry unchanged outside explicit gun recoil');
+    assert.equal(r.cpuMeshChanged,false,name+' must keep rest geometry unchanged, including gun recoil');
   }
 }
 
 export function assertNoCPUVesselAnimation(source){
   // An offline reference evaluator remains legal. The production renderer may
-  // upload immutable geometry once and small cannon-recoil subranges, but may
-  // not restore the former full-mesh CPU evaluator/upload/wetting path.
+  // upload immutable geometry once and compact controls, but may not restore
+  // a full-mesh or partial vertex-animation upload in an ordinary frame.
   assert.doesNotMatch(source,/\.asset\s*\.\s*pose\s*(?:\?\.)?\s*\(/,'production must not call an asset CPU pose');
   assert.doesNotMatch(source,/\.wetness\s*\.\s*updateGeometry\s*\(/,'wetness must share GPU posed geometry');
   const frame=source.slice(source.indexOf('function frame('));
   assert.ok(frame.length>source.length*.05,'inspect the actual production frame body');
-  assert.doesNotMatch(frame,/writeBuffer\s*\(\s*\w+\.vertexBuffer\s*,\s*0\s*,\s*\w+\.mesh\s*\)/,'full animated mesh uploads are prohibited');
+  assert.doesNotMatch(frame,/writeBuffer\s*\(\s*\w+\.vertexBuffer\s*,/,'full animated mesh and partial vertex animation uploads are prohibited');
+  assert.doesNotMatch(frame,/\bupdateGunRecoilVertices\s*\(/,'gun recoil must remain on the GPU');
 }

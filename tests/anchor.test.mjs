@@ -191,10 +191,10 @@ test('deployed anchor retains its world orientation while the moored hull yaws',
     // The GPU owns triangle expansion. Scale, heading and anchor origin must
     // remain fixed while fairlead/catenary commands follow the yawing hull.
     // anchor-expansion-gpu.test.mjs also checks the actual expanded triangles.
-    const ironCommands=commands.slice(0,8),rodeCommands=commands.slice(8),position={...state.position};
+    const ironCommands=commands.slice(0,7),rodeCommands=commands.slice(8),position={...state.position};
     boat.heading=154;state.step(1/60,boat,anchorEnv);renderer.update(state,boat);
     assert.equal(state.worldHeading,27);assert.deepEqual(state.position,position);
-    assert.deepEqual(commands.slice(0,8),ironCommands,'GPU anchor commands preserve the seabed orientation');
+    assert.deepEqual(commands.slice(0,7),ironCommands,'GPU anchor commands preserve the seabed orientation; splash age may advance');
     assert.notDeepEqual(commands.slice(8),rodeCommands,'the physical fairlead and rode continue to follow the hull');
     state.weigh();state.step(1/60,boat,anchorEnv);assert.equal(state.worldHeading,27);
   }finally{renderer?.destroy();globalThis.GPUBufferUsage=previous;}

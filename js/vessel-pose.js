@@ -2,6 +2,7 @@
 import {HULL_VERTICAL_SCALE} from './hull.js';
 import {VESSEL_POSE_UPDATE,VESSEL_SURFACE_POSE_UPDATE} from './wgsl/vessel-pose.js';
 import {createRigGPUFrame,writeRigGPUFrame} from './rig-gpu-data.js';
+import {createVesselRecoil} from './vessel-recoil.js';
 
 const vesselPosePipelineCache=new WeakMap();
 async function vesselPosePipeline(device,computePipe,generic){
@@ -26,7 +27,7 @@ export function withPosedVesselVertices(source){
     .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
 }
 
-export async function createVesselPose({device,computePipe,sourceBuffer,vertexCount,hullUBO,shared=null,rigData=null}){
+export async function createVesselPose({device,computePipe,sourceBuffer,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null}){
   if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
   if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
   if(shared&&(shared.rigData??null)!==rigData)throw new Error('Vessel pose metadata belongs to another model');
@@ -45,17 +46,19 @@ export async function createVesselPose({device,computePipe,sourceBuffer,vertexCo
   // The descriptor shader reads its compact state rather than Hull. Automatic
   // layouts omit that unused binding; retain the original binding numbers.
   const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource:{buffer:resource}})).filter(entry=>!rigData||entry.binding!==0)});
-  const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer});let destroyed=false,initialized=!rigData;
+  const recoil=recoilMap?.guns?.length?await createVesselRecoil({device,computePipe,posedBuffer:buffer,recoilMap,shared:shared?.recoilAssets??null}):null;
+  const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null});let destroyed=false,initialized=!rigData;
   return {buffer,assets,vertexCount,
     update(boat,time,wind){
       if(destroyed||!rigData)return false;
       writeRigGPUFrame(rigData,boat,time,wind,state);device.queue.writeBuffer(stateBuffer,0,state);initialized=true;return true;
     },
+    updateRecoil(guns,boat){return recoil?.update(guns,boat)??false;},
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;
       if(!initialized)throw Error('GPU rig state must be updated before dispatch');
-      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));return true;
+      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));recoil?.encode(pass);return true;
     },
-    destroy(){if(!destroyed){destroyed=true;buffer.destroy();stateBuffer?.destroy();}},
+    destroy(){if(!destroyed){destroyed=true;recoil?.destroy();buffer.destroy();stateBuffer?.destroy();}},
   };
 }

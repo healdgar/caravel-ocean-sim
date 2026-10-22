@@ -92,6 +92,26 @@ npm start        # serves http://localhost:8080/
 
 After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [GitHub Pages build](#github-pages-build).
 
+### Graphics architecture
+
+All scene graphics use WebGPU by default, including every player, AI, companion
+and background ship. Models supply data to the shared deformation system;
+visible geometry, shadows, underwater capture and wetness reuse one GPU pose.
+Anchor/rode expansion, cannon recoil and crew tools also remain on the GPU.
+JavaScript prepares assets once and supplies sparse physics, decisions, joints,
+instance transforms and compact controls. Any CPU graphics exception requires a
+measured advantage and regression coverage. See [the execution contract](GPU_ARCHITECTURE.md).
+
+Registry-driven tests exercise every renderable ship, including future model
+entries, and deliberately inject CPU animation, mesh uploads and skipped GPU
+dispatches to verify rejection. Native tests separately compare actual GPU
+geometry with independent CPU references and frozen source samples.
+
+The **Performance stats** dock button opens live FPS, CPU frame work, actual
+render dimensions, resolution mode and vessel counts. GPU pass details enable
+only while the panel is open; closing it restores lightweight endpoint timing.
+GPU timing windows include waits and must not be added together as pass costs.
+
 Startup shows actual graphics, ocean, ship/crew and weather preparation stages.
 The loading screen stays until the first rendered canvas frame completes on the
 GPU. Errors stay visible with Retry; slow first visits get an explanatory hint,

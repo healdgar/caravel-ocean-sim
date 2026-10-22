@@ -68,7 +68,7 @@ test('actual shared GPU surface backend matches every CPU reference vertex and f
           let position=0,normal=0,worst=null,worstPosition=null,worstNormal=null,finite=true;const byCategory={};
           for(let i=0;i<count;i++){
             const p=Math.hypot(...[0,1,2].map(k=>(actual[i*8+k]-expected[i*9+k])*physical[k])),n=Math.hypot(...[0,1,2].map(k=>actual[i*8+4+k]-expected[i*9+3+k]));
-            const detail={vertex:i,material:asset.vertices[i*9+6],position:p,normal:n},category=asset.rigGPUData.vertices[i*12];
+            const detail={vertex:i,material:asset.vertices[i*9+6],position:p,normal:n,uv:Array.from(asset.vertices.slice(i*9+7,i*9+9)),metadata:Array.from(asset.rigGPUData.vertices.slice(i*12,i*12+12)),gpuNormal:Array.from(actual.slice(i*8+4,i*8+7)),cpuNormal:Array.from(expected.slice(i*9+3,i*9+6))},category=asset.rigGPUData.vertices[i*12];
             if(!Number.isFinite(p+n))finite=false;if(p>position||n>normal)worst=detail;if(p>position)worstPosition=detail;if(n>normal)worstNormal=detail;
             const prior=byCategory[category]??={position:0,normal:0};if(p>prior.position){prior.position=p;prior.worstPosition=detail;}if(n>prior.normal){prior.normal=n;prior.worstNormal=detail;}
             position=Math.max(position,p);normal=Math.max(normal,n);

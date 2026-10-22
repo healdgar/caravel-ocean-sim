@@ -51,7 +51,7 @@ test('native GPU profiler allocates lazily, discards pending old epochs and rest
       const endpointSnapshot=profiler.snapshot(),closedText=profiler.text();profiler.destroy();await device.queue.onSubmittedWorkDone();device.destroy();
       // A real device without requested timestamp-query support must still
       // permit the CPU/FPS UI; do not pretend an unsupported feature exists.
-      const plain=await adapter.requestDevice(),unsupported=createGPUProfiler(plain,true);unsupported.beginFrame(0);
+      const plain=await(await navigator.gpu.requestAdapter()).requestDevice(),unsupported=createGPUProfiler(plain,true);unsupported.beginFrame(0);
       const unsupportedResult={supported:unsupported.supported,detailed:unsupported.detailed,writes:unsupported.writes('Waves + effects')??null,enabled:unsupported.setDetailed(true),text:unsupported.text()};unsupported.destroy();plain.destroy();
       return {errors,before,endpoint,whilePending:whilePending??null,pendingSnapshot,pendingQueries,discarded,detailed,detailedSnapshot,detailQueryCounts,cleared,closedDiscarded,closed,endpointSnapshot,closedText,unsupported:unsupportedResult,names:GPU_PASS_NAMES,buffers};
     });

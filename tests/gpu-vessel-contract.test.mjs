@@ -27,13 +27,15 @@ test('production renderer never restores CPU asset posing or whole-mesh animatio
 });
 
 test('source guard rejects the former CPU deformation/upload path without outlawing offline or compact state work',()=>{
-  const valid='function frame() { '.repeat(1)+'device.queue.writeBuffer(v.vertexBuffer,range.byteOffset,v.mesh.buffer,range.byteOffset,range.byteLength); v.pose.update(ship,time,wind); }';
+  const valid='function frame() { device.queue.writeBuffer(v.hullUBO,0,v.hullData); v.pose.update(ship,time,wind); }';
   assertNoCPUVesselAnimation(valid);
   for(const forbidden of [
     'v.asset.pose?.(ship,time,wind,v.mesh);',
     'device.queue.writeBuffer(v.vertexBuffer,0,v.mesh);',
+    'device.queue.writeBuffer(v.vertexBuffer,range.byteOffset,v.mesh.buffer,range.byteOffset,range.byteLength);',
+    'updateGunRecoilVertices(v.recoilMap,v.mesh,v.gunnery.state.guns,ship);',
     'v.wetness.updateGeometry(v.mesh);',
-  ])assert.throws(()=>assertNoCPUVesselAnimation(valid.replace('v.pose.update(ship,time,wind);',forbidden)),/CPU pose|full animated mesh|wetness/);
+  ])assert.throws(()=>assertNoCPUVesselAnimation(valid.replace('v.pose.update(ship,time,wind);',forbidden)),/CPU pose|full animated mesh|wetness|recoil/);
 });
 
 test('observational guard rejects disabled dispatch, CPU animation and geometry uploads independently',()=>{

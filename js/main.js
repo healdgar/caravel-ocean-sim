@@ -10,7 +10,7 @@ import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
 import { createGunportSafety } from './gunport-safety.js';
 import { createHullContactProbe } from './hull-contact.js';
-import { createGunRecoilMap, updateGunRecoilVertices } from './gunnery-models.js';
+import { createGunRecoilMap } from './gunnery-models.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
 import { createAnchorRenderer } from './anchor.js';
@@ -440,7 +440,8 @@ async function main() {
     const vertexBuffer=mkBuf(mesh.byteLength,GU.VERTEX|GU.COPY_DST|(render.gpuPose?GU.STORAGE:0),spec.id+' geometry');
     device.queue.writeBuffer(vertexBuffer,0,mesh);
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
-    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null});
+    const recoilMap=createGunRecoilMap(asset);
+    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap});
     if(pose)render.poseAssets=pose.assets;
     const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
     const shadows=await createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose});
@@ -451,7 +452,7 @@ async function main() {
     const rowingWater=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?await createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interaction.setShadows(shadows);
     vessels.push({...spec,boat:null,asset,render,hullUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
-      rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap:createGunRecoilMap(asset)});
+      rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap});
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   const spindrift=await createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
@@ -1650,9 +1651,7 @@ async function main() {
       if(!index||followerEnabled){v.crew?.update(ship,dt,P.windSpeed);v.wetness.updateCrew(v.crew?.state,ship);}
       if(!index||followerEnabled){
         v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
-        for(const range of updateGunRecoilVertices(v.recoilMap,v.mesh,v.gunnery.state.guns,ship)){
-          device.queue.writeBuffer(v.vertexBuffer,range.byteOffset,v.mesh.buffer,range.byteOffset,range.byteLength);
-        }
+        v.pose.updateRecoil(v.gunnery.state.guns,ship);
       }
       if(!index||followerEnabled)v.pose.update(ship,simTime,P.windSpeed);
       if(ship.showProw)v.anchorRenderer.update(v.anchor,ship);
