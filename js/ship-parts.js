@@ -18,6 +18,11 @@ import {additionalRigContext} from './additional-rig.js';
 import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint} from './rig-surface.js';
 import {anchorEquipment} from './anchor-state.js';
 import {hullLoftBottom,hullLoftPoint} from './hull-loft.js';
+import {ROWING_DESIGNS} from './models/rowing.js';
+import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
+import {proceduralDesign,proceduralHullWidth,proceduralHullDeck,proceduralDeck,proceduralDeckWidth,proceduralKeelHalfWidth,proceduralDraft,proceduralProvisionDays} from './models/procedural.js';
+import {proceduralRigContext} from './additional-rig.js';
+import {proceduralShipNodeTransform} from './procedural-models.js';
 
 const shipPartControlIDs=['fore','main','mizzen'],shipPartControlKeys=['sailFore','sailMain','sailMizzen'];
 const shipPartStationRoles={ines:'captain',tomas:'mate',beatriz:'boatswain',duarte:'foremast-hand',joao:'mainmast-hand',catarina:'mainmast-hand',leonor:'sailmaker',rui:'carpenter',maria:'lookout',afonso:'foredeck-hand',isabel:'mizzen-hand',pedro:'helmsman'};
@@ -31,17 +36,20 @@ const shipPartSpin=(p,a)=>[Math.cos(a)*p[0]-Math.sin(a)*p[1],Math.sin(a)*p[0]+Ma
 const shipPartRigid=(origin,evaluate)=>({position:evaluate(origin),basis:shipPartIdentity().map(e=>shipPartSubtract(evaluate(shipPartAdd(origin,e)),evaluate(origin))),kind:'rigid'});
 
 // Contract shape for later craft. Empty rig arrays are valid for a sail-less
-// craft; oars/paddles remain absent until their shared stroke evaluator exists.
+// craft; oars/paddles bind the same stroke, grip, blade and water-load evaluator.
 export const SHIP_PART_CAPABILITIES=deepFreeze({version:1,
   rig:{optional:true,empty:{masts:[],surfaces:[],controlGroups:[]}},
-  propulsion:{sails:'posed-cloth forces',oars:null,paddles:null},
+  propulsion:{sails:'posed-cloth forces',oars:'posed stroke and immersed blade forces',paddles:'posed stroke and immersed blade forces'},
   strokeRequirements:['pivot','grip','blade','station','evaluateTransform','waterContact','force'],
-  steeringKinds:['rudder','steering-oar','differential-oars','paddles'],
+  steeringKinds:['rudder','steering-oar','steering-paddle','differential-oars','paddles'],
   readiness:'Explicit ready model and part adapter required; no identity fallback.'});
 
 export function getShipParts(modelId='nina'){
   const model=requirePlayableShipModel(modelId),key=model.id+':'+model.revision;
   if(shipPartAdapters.has(key))return shipPartAdapters.get(key);
+  if(Object.hasOwn(ROWING_DESIGNS,model.id)||Object.hasOwn(LATER_SAIL_DESIGNS,model.id)){
+    const parts=deepFreeze(shipPartProceduralAdapter(model));shipPartAdapters.set(key,parts);return parts;
+  }
   if(ADDITIONAL_DESIGNS[model.id]){const parts=deepFreeze(shipPartAdditionalAdapter(model));shipPartAdapters.set(key,parts);return parts;}
   if(!['nina','victory'].includes(model.id))throw Error('No shared-part adapter for '+model.id);
   const victory=model.id==='victory',design=victory?VICTORY_DESIGN:NINA_DESIGN;
@@ -120,6 +128,45 @@ function shipPartAdditionalAdapter(model){
       stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:shipPartStationRoles[name],node:'station.crew.'+name,position:[p.x,weatherDeck(p.z),p.z],route:[...p.route]}))}};
 }
 
+function shipPartProceduralAdapter(model){
+  const id=model.id,d=proceduralDesign(id),row=Object.hasOwn(ROWING_DESIGNS,id),context=proceduralRigContext(id),width=(z,y)=>proceduralHullWidth(id,z,y),skinDeck=z=>proceduralHullDeck(id,z),weatherDeck=(z,x=0)=>proceduralDeck(id,z,x),weatherWidth=z=>proceduralDeckWidth(id,z);
+  const surfaces=model.rig.sails.map((s,index)=>({...s,index,role:s.sailNode,shape:d.surfaces.find(v=>v.id===s.surfaceId).corners.length===3?'triangle':'quadrilateral',poseBackend:'surfaces-v1'}));
+  const controls=shipPartControlIDs.map((name,index)=>({id:name,index,key:shipPartControlKeys[index],surfaceIDs:surfaces.filter(s=>s.controlGroup===name).map(s=>s.id),station:context.controlStations?.[name]??null})).filter(g=>g.surfaceIDs.length);
+  const keel=!d.keel?null:d.keel.kind==='profiled-ballast-fin'?{kind:d.keel.kind,meshGroup:'hull.keel',definition:d.keel,sections:d.keel.sections,
+    halfWidth:(z,y)=>proceduralKeelHalfWidth(id,z,y),historicalEndpoints:null,note:d.keel.provenance}:
+    {kind:'separate-timber',meshGroup:'hull.keel',definition:d.keel,centreline:d.keel.bounds.map(z=>[0,hullLoftBottom(d.profile,z),z]),
+      width:d.keel.width,depth:d.keel.depth,exposedDepth:d.keel.depth,historicalEndpoints:null,note:d.keel.provenance??'Authored exposed timber; not recovered historical endpoints.'};
+  const zones=(d.deckZones??[{id:'main',bounds:[d.profile.stations[0],d.profile.stations.at(-1)],height:d.floorHeight}]).map(z=>({...z,bounds:[...z.bounds],role:'deck.'+z.id}));
+  if(d.cockpit)zones.push({id:'cockpit',bounds:[...d.cockpit.bounds],height:d.cockpit.floorHeight,halfWidth:d.cockpit.halfWidth,role:'deck.cockpit'});
+  const anchor=!!(row?d.equipment.anchor:d.equipment.anchors),oar=row&&d.propulsion.kind==='oar',paddle=row&&d.propulsion.kind==='paddle';
+  const represented=Object.keys(d.crewStations).length,steering=d.steering,hasTiller=Object.hasOwn(model.nodes,'helm.tiller'),hasWheel=Object.hasOwn(model.nodes,'helm.wheel');
+  return {version:1,modelId:id,modelCode:model.modelCode,revision:model.revision,
+    frame:{...d.frame,axes:{x:'starboard',y:'up',z:'aft'},origin:'authored loaded waterline; reported tonnage does not set displacement'},runtime:{...d.runtime},
+    roles:Object.fromEntries(Object.entries(model.nodes).map(([name,n])=>[name,{kind:n.kind,source:'model-node'}])),
+    hull:{family:d.family,profile:{kind:'section-loft',bounds:[d.profile.stations[0],d.profile.stations.at(-1)],draft:-d.profile.levels[0],appendageDraft:proceduralDraft(id),
+      halfWidth:width,skinDeck,weatherDeck,weatherWidth,point:(z,y,side)=>[side*width(z,y),y,z],
+      authoredSurface:(station,baseY,side)=>hullLoftPoint(d.profile,station,baseY,side),authoredParameters:['station','baseY','side'],provenance:d.interpretation},keel,
+      lateral:{kind:'projected-immersed-hull',separateKeel:!!d.keel,
+        create:boat=>createHullLateralDescriptor({modelId:id,length:boat.length,beam:boat.beam,waterline:boat.hydrodynamics?.sinkage??0}),
+        note:'Loaded hull plus actual exposed appendage; geometric lateral area is not a calibrated historical dynamic CLR.'}},
+    decks:{zones,weatherDeck,weatherWidth,gunDeckSchedule:[],structures:d.structures??[],cockpit:d.cockpit??null},
+    steering:{kind:steering.kind,control:row?steering.kind:steering.control,rudder:{role:'helm.rudder',pivot:[...steering.pivot],axis:[0,1,0]},
+      tiller:hasTiller?{role:'helm.tiller',pivot:[...steering.pivot],axis:[0,1,0]}:null,
+      wheel:hasWheel?{role:'helm.wheel',pivot:[...steering.wheel.centre],axis:[...steering.wheel.axis],radiansPerRudderDegree:(steering.wheel.turnRatio??12)*Math.PI/180}:null,
+      steeringOar:row?{role:'helm.steering-oar',pivot:[...steering.pivot],kind:steering.kind}:null,grip:'helm.grip',camera:'helm.camera'},
+    rig:{backend:'surfaces-v1',masts:model.rig.masts,surfaces,controlGroups:controls,transferYards:surfaces.some(s=>s.kind==='lateen'),context},
+    propulsion:{sails:{enabled:surfaces.length>0,backend:'surfaces-v1'},
+      oars:oar?{enabled:true,backend:'rowing-stroke-v1',stations:d.stations,definition:d.propulsion}:null,
+      paddles:paddle?{enabled:true,backend:'rowing-stroke-v1',stations:d.stations,definition:d.propulsion}:null,
+      engine:d.equipment.engine?{...d.equipment.engine,enabled:false}:null},
+    equipment:{anchor:anchor?{limits:anchorEquipment({modelId:id}),port:'anchor.port.fairlead',starboard:'anchor.starboard.fairlead'}:null,guns:[]},
+    loading:{manifest:{...d.loading},provisionDays:proceduralProvisionDays(id),policy:d.loading.designIncludesManifest?'default-manifest-in-design-waterline':'manifest-added-to-design-hull-mass',
+      evaluate:boat=>boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes,id),note:d.loading.interpretation??d.loading.provenance??d.interpretation},
+    crew:{representedCount:represented,loadedCount:d.loading.crew,representativeWatch:d.loading.crew>represented,
+      stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:p.role??p.roles?.[0]??shipPartStationRoles[name]??'sailor',node:'station.crew.'+name,
+        position:[p.x,p.y??weatherDeck(p.z,p.x),p.z],route:p.route?[...p.route]:[p.z,p.z],...(p.stationId?{rowingStation:p.stationId}:{})}))}};
+}
+
 const shipPartDefaultLateen={side:-1,opening:.30,dip:0,fill:0,deployed:1,pressure:1};
 const shipPartDefaultVictory={squareYaw:0,lateenYaw:0,windSide:0,windForward:0,set:[1,1,1],rig:[{fill:0},{fill:0},{fill:0}]};
 function shipPartClothFrame(evaluate,u,v){
@@ -127,6 +174,7 @@ function shipPartClothFrame(evaluate,u,v){
   return {position:p,basis:[du,dv,shipPartUnit(shipPartCross(du,dv))],kind:'surface',parameters:{u,v}};
 }
 function shipPartDesignTransform(boat,model,role,options){
+  if(Object.hasOwn(ROWING_DESIGNS,model.id)||Object.hasOwn(LATER_SAIL_DESIGNS,model.id))return proceduralShipNodeTransform(boat,model,model.nodes[role],options);
   if(model.rig.backend==='surfaces-v1')return shipPartAdditionalTransform(boat,model,role,options);
   const victory=model.id==='victory',node=model.nodes[role],rudder=(boat.rudder??0)*Math.PI/180;
   if(role==='helm.rudder'||role==='helm.tiller'){
