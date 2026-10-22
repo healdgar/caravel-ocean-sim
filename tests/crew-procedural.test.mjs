@@ -30,12 +30,12 @@ test('complete station-owned companies preserve gender balance, identities and n
   }
 });
 
-test('rower hands, pelvis and planted boots follow shared stroke targets without advancing physical phase',()=>{
-  const meshes=Object.fromEntries(['male','female'].map(sex=>[sex,loadCrewGLB(readFileSync(new URL('../assets/crew/'+(sex==='female'?'sailor-female.glb':'sailor.glb'),import.meta.url)))]));
+test('rower hands, pelvis and planted boots follow shared stroke targets without advancing physical phase',t=>{
+  const meshes=Object.fromEntries(['male','female'].map(sex=>[sex,loadCrewGLB(readFileSync(new URL('../assets/crew/'+(sex==='female'?'sailor-female.glb':'sailor.glb'),import.meta.url)))])),readings=[];
   for(const id of ['oseberg','lusoria','taino-canoe']){
     const boat=crewProposedBoat(id),company=createCompany(undefined,id);
     boat.rowingState={phase:0,rate:.45,effortPort:.6,effortStarboard:.6,cadence:.45};
-    for(const phase of [.08,.30,.60,.88]){
+    for(const phase of [0,.08,.22,.30,.44,.60,.75,.88]){
       boat.rowingState.phase=phase;stepCompany(company,boat,0,2);assert.equal(boat.rowingState.phase,phase);
       // Include the full beam at midships, both sides and the narrow bow/stern;
       // sampling the first pair alone misses the worst cross-body grip reach.
@@ -49,7 +49,7 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
         assert.ok(a.palette.every(Number.isFinite),id+' finite seated skin');
         assert.ok(crewProposedDistance(at('pelvis'),targets.seat)<.025,id+' pelvis rests at its own bench');
         for(const [i,side]of ['l','r'].entries()){
-          assert.ok(crewProposedDistance(at('hand_'+side),targets.hands[i])<.08,id+' '+s.id+' '+phase+' actual hand reaches shaft '+JSON.stringify({side,hand:at('hand_'+side),target:targets.hands[i],seat:targets.seat,pelvis:at('pelvis'),root:Array.from(s.position),scale:Array.from(s.scale),lean:targets.body.lean}));
+          readings.push({id,sailor:s.id,phase,side,gap:crewProposedDistance(at('hand_'+side),targets.hands[i]),hand:at('hand_'+side),target:targets.hands[i],seat:targets.seat,pelvis:at('pelvis'),root:Array.from(s.position),scale:Array.from(s.scale),lean:targets.body.lean});
           assert.ok(crewProposedDistance(at('foot_'+side),targets.feet[i])<.08,id+' actual boot reaches the authored floor');
         }
         assert.ok(at('Head')[1]<targets.seat[1]+1.2,'seated workers are not standing templates');
@@ -60,6 +60,9 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
       }
     }
   }
+  readings.sort((a,b)=>b.gap-a.gap);const misses=readings.filter(sample=>sample.gap>=.08);
+  t.diagnostic(JSON.stringify({measuredHands:readings.length,reachFailures:misses.length,worst:readings.slice(0,12)}));
+  assert.equal(misses.length,0,'every actual hand retains the8cm limit across all actors and sampled phases '+JSON.stringify(misses.slice(0,12)));
 });
 
 test('seated work neutralizes idle torso asymmetry without modifying rest lengths or legacy standing actors',()=>{
