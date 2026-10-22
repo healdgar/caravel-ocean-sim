@@ -83,7 +83,7 @@ fn surfaceGpuSupports(point:vec3f,reference:vec3f,normal:vec3f,index:u32,surface
     var direction=normal;if(mastBarrier){direction=vec3f(0,0,surface.contact.y);}
     var contactNormal=direction-axis*dot(direction,axis)/length2;
     if(length(contactNormal)<1e-10){
-      let ref=reference-q;contactNormal=ref-axis*dot(ref,axis)/length2;
+      let restReference=reference-q;contactNormal=restReference-axis*dot(restReference,axis)/length2;
       if(length(contactNormal)<1e-10){var fallback=vec3f(1,0,0);if(abs(axis.y)/sqrt(length2)<.9){fallback=vec3f(0,1,0);}contactNormal=cross(axis,fallback);}
     }
     contactNormal=surfaceGpuUnit(contactNormal);
@@ -152,10 +152,10 @@ fn surfaceGpuRopeFrame(axis:vec3f,preferred:vec3f)->SurfaceGpuFrame {
   return SurfaceGpuFrame(across,cross(direction,across));
 }
 fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
-  let meta=surfaceGpuVertices[vertex*3u];let data=surfaceGpuVertices[vertex*3u+1u];let auxiliary=surfaceGpuVertices[vertex*3u+2u];
-  let kind=u32(meta.x);let index=u32(meta.y);var p=position;var n=normal;
+  let vertexMetadata=surfaceGpuVertices[vertex*3u];let data=surfaceGpuVertices[vertex*3u+1u];let auxiliary=surfaceGpuVertices[vertex*3u+2u];
+  let kind=u32(vertexMetadata.x);let index=u32(vertexMetadata.y);var p=position;var n=normal;
   if(kind==1u){
-    let uv=meta.zw;let e=.0005;p=surfaceGpuCloth(index,uv);
+    let uv=vertexMetadata.zw;let e=.0005;p=surfaceGpuCloth(index,uv);
     let du=surfaceGpuCloth(index,uv+vec2f(e,0))-surfaceGpuCloth(index,uv-vec2f(e,0));
     let dv=surfaceGpuCloth(index,uv+vec2f(0,e))-surfaceGpuCloth(index,uv-vec2f(0,e));n=surfaceGpuUnit(cross(du,dv));
   }else if(kind==2u){
@@ -163,7 +163,7 @@ fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
     let axes=mat3x3f(surfaceGpuYard(surface,vec3f(1,0,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,1,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,0,1),pose)-origin);
     p=origin+axes*position;n=surfaceGpuUnit(axes*normal);
   }else if(kind==3u){
-    let t=meta.z;let frame=surfaceGpuRopeFrame(surfaceGpuRope(index,min(1.0,t+.001))-surfaceGpuRope(index,max(0.0,t-.001)),auxiliary.xyz);
+    let t=vertexMetadata.z;let frame=surfaceGpuRopeFrame(surfaceGpuRope(index,min(1.0,t+.001))-surfaceGpuRope(index,max(0.0,t-.001)),auxiliary.xyz);
     p=surfaceGpuRope(index,t)+frame.across*data.x+frame.up*data.y;n=surfaceGpuUnit(frame.across*data.z+frame.up*data.w);
   }else if(kind==4u){
     let at=3u+u32(surfaceGpuLive[2].x)*2u+index*4u;let axes=mat3x3f(surfaceGpuLive[at+1u].xyz,surfaceGpuLive[at+2u].xyz,surfaceGpuLive[at+3u].xyz);
