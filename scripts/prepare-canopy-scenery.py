@@ -275,58 +275,50 @@ def verify_opaque_block(block, stem, instance):
             and abs(float(trunk_top[0, 1])-(float(bottom[1])+.25*height)) < .002, "Opaque trunk does not join the crown interior")
 
 
-def validate_collar_centres(stems, materials):
+def validate_collar_centres(stems, materials, instances, sample=None):
     """Seat a biological collar, which may contain several offset basal stems.
 
     build_branch_mesh writes each true root cap centre with UV(.5, v0) and
     normal -tangent; v0 is the minimum arc-length UV. A gray-birch stool can
     have no wood at its nominal origin: its peer stems leave a ring around it.
-    Validate their shared collar plane and convex footprint, never require an
-    invented central trunk or inflate the original3mm seating tolerance.
+    A reduced sapling may retain only one of those offset stems. Validate the
+    shared collar height, source plant envelope and nearest-stem ownership;
+    neither surviving wood nor its convex hull must contain the seed origin.
+    The original3mm vertical registration tolerance remains unchanged.
     """
-    for species in {stem["genome"] for stem in stems}:
-        own = [stem for stem in stems if stem["genome"] == species]
+    instances = np.asarray(instances, dtype=np.float64)
+    require(instances.shape == (len(stems), 8) and np.isfinite(instances).all() and np.all(instances[:, 3] > 0), "Invalid collar plant envelopes")
+    observations = []
+    for species in sorted({stem["genome"] for stem in stems}):
+        own = [(index, stem) for index, stem in enumerate(stems) if stem["genome"] == species]
         primitive = materials[f"{species}_bark"]
         uv, normals = primitive["uv"], primitive["normals"]
         basal = (np.abs(uv[:, 0]-.5) < 1e-6) & (np.abs(uv[:, 1]-float(uv[:, 1].min())) < 1e-6) & (normals[:, 1] < -.5)
         centres = np.unique(primitive["positions"][basal], axis=0).astype(np.float64)
         require(len(centres) > 0, "No identifiable biological basal cap centres")
-        nominal = np.asarray([[stem["x"], stem["z_ww"]] for stem in own], dtype=np.float64)
+        nominal = np.asarray([[stem["x"], stem["z_ww"]] for _, stem in own], dtype=np.float64)
         _, owners = cKDTree(nominal).query(centres[:, [0, 2]], k=1, workers=1)
-        for i, stem in enumerate(own):
+        for i, (index, stem) in enumerate(own):
             caps = centres[owners == i]
             target = np.array([stem["x"], stem["z_ground"]-stem["collar_sink_m"], stem["z_ww"]])
             require(len(caps) > 0, "Detailed wood has no basal collar for its authored stem")
-            if len(caps) == 1:
-                require(float(np.linalg.norm(caps[0]-target)) < .003, "Detailed wood root does not match its terrain/collar placement")
-                continue
+            require(float(np.max(np.abs(instances[index, [0, 2]]-target[[0, 2]]))) < .003, "Collar instance has the wrong authored stem origin")
             require(float(np.max(np.abs(caps[:, 1]-target[1]))) < .003, "Basal stool centres do not share the authored collar height")
-            # Monotone-chain convex hull in target-relative XZ coordinates.
-            points = sorted(set(map(tuple, caps[:, [0, 2]]-target[[0, 2]])))
-            cross = lambda a, b, c: (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
-            lower, upper = [], []
-            for p in points:
-                while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
-                    lower.pop()
-                lower.append(p)
-            for p in reversed(points):
-                while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
-                    upper.pop()
-                upper.append(p)
-            hull = lower[:-1]+upper[:-1]
-            if len(points) == 1:
-                hull = points
-            inside = len(hull) >= 3 and all(cross(hull[k], hull[(k+1)%len(hull)], (0, 0)) >= 0 for k in range(len(hull)))
-            distance = 0.0 if inside else math.inf
-            for k, a in enumerate(hull):
-                a, b = np.asarray(a), np.asarray(hull[(k+1)%len(hull)])
-                edge = b-a
-                t = float(np.clip(-a@edge/max(float(edge@edge), 1e-30), 0, 1))
-                distance = min(distance, float(np.linalg.norm(a+edge*t)))
-            require(math.hypot(distance, float(caps[:, 1].mean()-target[1])) < .003, "Nominal collar is outside its biological basal-stem footprint")
+            offsets = caps[:, [0, 2]]-target[[0, 2]]
+            horizontal = np.linalg.norm(offsets, axis=1)
+            radius = float(instances[index, 3])
+            require(float(horizontal.max()) <= radius+.003, "Basal stem leaves its source-declared plant envelope")
+            records = []
+            for cap, offset in zip(caps, offsets):
+                ground = float(sample(float(cap[0]), float(cap[2]))[0]) if sample else None
+                records.append({"position": cap.tolist(), "offsetXZ": offset.tolist(), "heightErrorMetres": float(cap[1]-target[1]),
+                                "terrainHeightMetres": ground, "capAboveTerrainMetres": float(cap[1]-ground) if ground is not None else None})
+            observations.append({"stemIndex": index, "genome": species, "declaredCrownRadiusMetres": radius,
+                                 "maximumHorizontalOffsetMetres": float(horizontal.max()), "maximumHeightErrorMetres": float(np.abs(caps[:, 1]-target[1]).max()), "caps": records})
+    return sorted(observations, key=lambda row: row["stemIndex"])
 
 
-def import_geometry(source, opaque, leaf, instances, primitives):
+def import_geometry(source, opaque, leaf, instances, primitives, collar_observations=None, sample=None):
     stems, species = source["stems"], source["species"]
     materials = {}
     for primitive in primitives:
@@ -348,7 +340,9 @@ def import_geometry(source, opaque, leaf, instances, primitives):
         near_parts.append(coloured(near, bark["colour"]))
         offset += count
     require(offset == len(leaf) and len(opaque) == len(stems)*132, "Unsupported opaque or cutout source count")
-    validate_collar_centres(stems, materials)
+    observed = validate_collar_centres(stems, materials, instances, sample)
+    if collar_observations is not None:
+        collar_observations.extend(observed)
     far_parts = []
     for i, (stem, instance) in enumerate(zip(stems, instances)):
         block = opaque[i*132:(i+1)*132]
@@ -484,7 +478,8 @@ def prepare(manifest_path, region_path, output, forestmodeler=None, force=False)
     sample, region_raw, terrain_receipts = terrain_inputs(region_path, source)
     stems, species, domain = validate_stems(source, instances, sample)
     primitives, transform = glb_primitives(raw["glb"])
-    streams, materials = import_geometry(source, opaque, leaf, instances, primitives)
+    collar_observations = []
+    streams, materials = import_geometry(source, opaque, leaf, instances, primitives, collar_observations, sample)
     require(source["triangles"].get("glb_wood") == len(streams["near"])//3
             and source["triangles"].get("glb_foliage_culled") == len(streams["leaf"])//3, "GLB triangle receipts disagree with imported counts")
     alpha = alpha_fallback()
@@ -493,6 +488,7 @@ def prepare(manifest_path, region_path, output, forestmodeler=None, force=False)
                   "sourceFiles": {names[key]: receipt(value) for key, value in raw.items()},
                   "terrainAtImport": terrain_receipts, "generatorSnapshot": generator_snapshot(forestmodeler),
                   "alphaFallbackAtImport": alpha,
+                  "collarObservations": collar_observations,
                   "coordinates": {"native": "World Y-up metres; copied once, without root transform", "glbNodeApplied": transform},
                   "sourceLimit": "Output byte receipts are verified. Current source snapshot is not evidence that it produced the previous bake."}
     manifest = {"format": FORMAT, "version": 1, "upAxis": "Y", "units": "metres",
@@ -500,6 +496,7 @@ def prepare(manifest_path, region_path, output, forestmodeler=None, force=False)
                 "instanceLayout": source["instanceLayout"], "region": source["region"],
                 "coverage": {"kind": "rectangle", "boundsXZ": domain}, "patchMetres": PATCH_METRES,
                 "patches": patches, "stems": stems, "species": species, "materials": materials,
+                "collarObservations": collar_observations,
                 "textureAlphaErrorMetres": None, "textureAlphaErrorSupported": False,
                 "alphaFallback": alpha,
                 "leafAlphaTexelScope": "Per-patch leafAlphaTexelMetres bounds one base-level texel's affine world diagonal only. This is not alpha reconstruction or silhouette error.",
