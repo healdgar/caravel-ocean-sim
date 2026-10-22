@@ -185,12 +185,13 @@ test('Victory rig access rests on real hull-connected channel tops and rejects u
     for(const [mast,m]of VICTORY_MASTS.entries())for(const side of [-1,1]){
       const group=asset.groups.find(g=>g.id==='chainwale.'+m.id+'.'+side);assert.ok(group,'actual side channel exists');
       const tops=navTopTriangles(asset,group,boat);assert.ok(tops.length>=24,'channel has actual indexed top surfaces');
-      const vertices=tops.flat(),zs=[...new Set(vertices.map(p=>p[2]))].sort((a,b)=>a-b),z0=zs[0],z1=zs.at(-1),radius=CREW_NAVIGATION_BODY.radius;
+      const vertices=tops.flat(),zs=[...new Set(vertices.map(p=>p[2]))].sort((a,b)=>a-b),z0=zs[0],z1=zs.at(-1),radius=CREW_NAVIGATION_BODY.radius,rows=new Map();
+      for(const p of vertices){const key=p[1]+'/'+p[2];if(!rows.has(key))rows.set(key,[]);rows.get(key).push(p);}
       // Derive the contact edge from rendered vertices, then intersect actual
       // hull triangles in the transverse plane. Source coordinates alone do
       // not prove that a separate channel is joined to the hull skin.
-      for(const z of zs){
-        const row=vertices.filter(p=>Math.abs(p[2]-z)<1e-7),inner=row.reduce((a,b)=>side*a[0]<side*b[0]?a:b),outer=row.reduce((a,b)=>side*a[0]>side*b[0]?a:b),thickness=victoryChainwale(mast,side,z/scale[2]).thickness*scale[1];
+      for(const row of rows.values()){
+        const z=row[0][2],inner=row.reduce((a,b)=>side*a[0]<side*b[0]?a:b),outer=row.reduce((a,b)=>side*a[0]>side*b[0]?a:b),thickness=victoryChainwale(mast,side,z/scale[2]).thickness*scale[1];
         let joined=false;
         for(const drop of [0,.25,.5,.75,1]){
           const y=inner[1]-drop*thickness;
