@@ -11,6 +11,8 @@ import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {proceduralDesign} from './models/procedural.js';
+import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } from './crew-motion.js';
+import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -71,6 +73,7 @@ export function createCompany(policy=deckhandDecision,modelId='nina') {
   // Victory; they do not replace the vessel's separate personnel/load manifest.
   const extended=hasExtendedCrewModel(model.id),stations=extended?Object.entries(model.crewStations):CREW_ROSTER.map(identity=>[identity.id,model.crewStations[identity.id]]);
   const activeControls=extended?['fore','main','mizzen'].map((name,index)=>model.rig.sails.some(s=>s.controlGroup===name)?index:-1).filter(i=>i>=0):[0,1,2];
+  const stationBoat={modelId:model.id,model,length:model.runtime.length,beam:model.runtime.beam};
   return {modelId:model.id,activeControls,representativeWatch:model.id==='victory'||(extended?proceduralDesign(model.id).loading.crew>stations.length:!!ADDITIONAL_DESIGNS[model.id]),order:'watch',revision:0,pending:false,crew:stations.map(([key,station],i)=>{
     const identity=extended?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
     person.route??=[person.z,person.z];person.roles??=[person.role.toLowerCase()];
@@ -82,8 +85,15 @@ export function createCompany(policy=deckhandDecision,modelId='nina') {
       const obstacle=flights.filter(f=>f.side===(Math.sign(person.x)||1)&&(direction>0?f.z0>person.z&&f.z0<=end:f.z1<person.z&&f.z1>=end)).sort((a,b)=>direction*(a.z0-b.z0))[0];
       if(obstacle)person.route=[person.z,direction>0?Math.max(person.z,obstacle.z0-.08):Math.min(person.z,obstacle.z1+.08)];
     }
+    // Resolve a clear post before the first visible pose. Never project an
+    // existing actor to a new location when a gun moves or an order changes.
+    if(person.role!=='Helmsman'){
+      const post=crewNavigationStation([person.x,crewDeckHeight(stationBoat,person.z,person.x),person.z],stationBoat);
+      if(!post)throw Error('No clear initial crew post: '+model.id+'/'+person.id);
+      const shift=post[2]-person.z;person.x=post[0];person.z=post[2];person.route=person.route.map(z=>z+shift);
+    }
     const s=createDeckhand(policy);Object.assign(s,person,{route:[...person.route],target:person.route[1],wait:i*.37,
-      time:i*.43,walkTime:i*.27,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
+      time:i*.43,walkTime:i*.27,patrolX:person.x,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
     const look=CREW_APPEARANCES[s.identityId??s.id];
@@ -113,8 +123,8 @@ export function stepCompany(company,boat,dt,wind) {
   for(const s of company.crew){
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
-    if(s.job){s.seatedPose=null;s.moisturePoints=null;}
-    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind);}
+    if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationY=null;}
+    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind,company);}
   }
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
@@ -138,15 +148,50 @@ export function deckhandDecision(observation) {
   return observation.order==='patrol'?'patrol':'standby';
 }
 export function createDeckhand(policy=deckhandDecision) {
-  return {x:-.95,z:-1.9,yaw:0,target:.1,wait:1,time:0,walkTime:0,walk:0,brace:0,
+  return {x:-.95,z:-1.9,yaw:0,target:.1,wait:1,time:0,walkTime:0,walkDistance:0,walk:0,brace:0,
     decisionIn:0,intent:'standby',order:'patrol',policy,visible:true,
     observation:{order:'patrol',hazard:false,roll:0,rollRate:0,wind:0},
     transform:new Float32Array(16),position:new Float32Array(3),rotation:new Float32Array(4),scale:new Float32Array([.95,.95,.95])};
 }
-function stepProceduralDeckhand(s,boat,dt,wind){
-  s.time+=dt;s.walkTime+=dt*.8;s.climbPitch=0;
+function crewFinishPatrol(s){
+  s.target=s.route?(s.target===s.route[1]?s.route[0]:s.route[1]):s.target>0?-2.2:.1;s.wait=2.5;s.navigationPath=null;
+}
+function crewPatrolMotion(s,boat,dt,company){
+  if(s.intent!=='patrol'||s.visible===false||s.route&&s.route[0]===s.route[1])return false;
+  if(s.wait>0){s.wait=Math.max(0,s.wait-dt);return false;}
+  const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),x=s.home?.[0]??s.patrolX??s.x;
+  const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x].join('/');
+  const from=[s.x,s.navigationY??crewDeckHeight(boat,s.z,s.x),s.z];
+  if(!s.navigationPath||s.navigationKey!==key){
+    const to=[x,crewDeckHeight(boat,s.target,x),s.target];
+    s.navigationPath=crewNavigationRoute([from,to],boat);s.navigationKey=key;s.navigationCursor=0;
+  }
+  const path=s.navigationPath;if(!path?.length)return false;
+  while(s.navigationCursor<path.length&&Math.hypot((path[s.navigationCursor][0]-from[0])*sx,(path[s.navigationCursor][1]-from[1])*sy,(path[s.navigationCursor][2]-from[2])*sz)<1e-7)s.navigationCursor++;
+  const target=path[s.navigationCursor];
+  if(!target){crewFinishPatrol(s);return false;}
+  const dx=(target[0]-from[0])*sx,dy=(target[1]-from[1])*sy,dz=(target[2]-from[2])*sz,horizontal=Math.hypot(dx,dz),distance=Math.hypot(horizontal,dy);
+  const motion=crewMotionPolicy(boat,{grade:horizontal>1e-8?dy/horizontal:0,hazard:s.observation.hazard});
+  const desired=horizontal>1e-8?Math.atan2(dx,dz):s.yaw;s.yaw=crewTurnTowards(s.yaw,desired,dt,motion.turnRadiansPerSecond);
+  const angle=Math.atan2(Math.sin(desired-s.yaw),Math.cos(desired-s.yaw));
+  const travel=Math.min(distance,motion.speedMetresPerSecond*Math.max(0,Math.cos(angle))*dt),q=distance>1e-8?travel/distance:0;
+  const next=from.map((v,i)=>v+(target[i]-v)*q);
+  if(!travel||!crewRoutineSegmentClear(s,boat,from,next))return false;
+  if(company?.crew.some(other=>{
+    if(other===s)return false;
+    const y=(other.job?.position?.[1]??other.navigationY??crewDeckHeight(boat,other.z,other.x))*sy;
+    if(Math.abs(next[1]*sy-y)>=1.7)return false;
+    const gap=Math.hypot((next[0]-other.x)*sx,(next[2]-other.z)*sz),before=Math.hypot((from[0]-other.x)*sx,(from[2]-other.z)*sz);
+    return gap<.60&&gap<before-1e-8;
+  }))return false;
+  s.x=next[0];s.z=next[2];s.navigationY=next[1];crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
+  if(distance<=travel+1e-7&&++s.navigationCursor>=path.length)crewFinishPatrol(s);
+  return true;
+}
+function stepProceduralDeckhand(s,boat,dt,wind,company){
+  s.time+=dt;s.climbPitch=0;
   const o=s.observation;o.wind=wind;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;
-  o.hazard=Math.abs(o.roll)>.36||Math.abs(o.rollRate)>.5||wind>23;s.decisionIn-=dt;
+  o.hazard=crewDeckHazard(boat,wind,s.intent==='brace');s.decisionIn-=dt;
   if(o.hazard||s.decisionIn<=0){let intent;try{intent=s.policy(o);}catch{intent=deckhandDecision(o);}s.intent=o.hazard?'brace':['patrol','standby','brace'].includes(intent)?intent:deckhandDecision(o);s.decisionIn=.5;}
   s.brace+=(Number(o.hazard)-s.brace)*(1-Math.exp(-dt*8));
   const seated=crewSeatedPose(s,boat);s.seatedPose=seated;
@@ -155,24 +200,20 @@ function stepProceduralDeckhand(s,boat,dt,wind){
     s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
     const seat=seated.seat,feet=seated.feet;s.moisturePoints=[feet[0].map((v,i)=>(v+feet[1][i])*.5),seat.map((v,i)=>v+(i===1?.10:0)),seat.map((v,i)=>v+(i===1?.50:0)),seat.map((v,i)=>v+(i===1?.95:0))];
   }else{
-    let moving=false;
-    if(s.intent==='patrol'&&s.route[0]!==s.route[1]){
-      if(s.wait>0)s.wait=Math.max(0,s.wait-dt);
-      else{const travel=Math.min(Math.abs(s.target-s.z),.65*dt/(boat.length/12));s.z+=Math.sign(s.target-s.z)*travel;moving=travel>0;if(Math.abs(s.target-s.z)<1e-6){s.target=s.target===s.route[1]?s.route[0]:s.route[1];s.wait=3;}}
-    }
+    const moving=crewPatrolMotion(s,boat,dt,company);
     s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
-    s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
+    s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
     if(s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
   }
   const half=s.yaw/2;s.rotation.set([0,Math.sin(half),0,Math.cos(half)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
 }
-export function stepDeckhand(s,boat,dt,wind=0) {
+export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
-  if(hasExtendedCrewModel(boat.modelId))return stepProceduralDeckhand(s,boat,dt,wind);
+  if(hasExtendedCrewModel(boat.modelId))return stepProceduralDeckhand(s,boat,dt,wind,company);
   s.time+=dt;s.climbPitch=0;
   const o=s.observation;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;o.wind=wind;
   // Hysteresis avoids oscillating between walking and bracing near the threshold.
-  o.hazard=Math.abs(o.roll)>(s.intent==='brace'?.26:.36)||Math.abs(o.rollRate)>(s.intent==='brace'?.3:.5)||wind>(s.intent==='brace'?19:23);
+  o.hazard=crewDeckHazard(boat,wind,s.intent==='brace');
   s.decisionIn-=dt;
   if(o.hazard||s.decisionIn<=0){
     let decision;try{decision=s.policy(o);}catch{decision=deckhandDecision(o);}
@@ -182,21 +223,8 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   // Preserve human proportions when resizing the hull; do not squeeze a person
   // through a walkway narrower than their shoulders.
   s.visible=boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
-  let moving=false;const lengthScale=boat.length/12;
-  if(s.visible&&s.intent==='patrol'){
-    if(s.wait>0)s.wait=Math.max(0,s.wait-dt);
-    else if(s.route&&s.route[0]===s.route[1]){ /* fixed watch station */ }
-    else {
-      const desired=s.target>s.z?0:Math.PI,angle=Math.atan2(Math.sin(desired-s.yaw),Math.cos(desired-s.yaw));
-      s.yaw+=Math.max(-dt*2.5,Math.min(dt*2.5,angle));
-      if(Math.abs(angle)<.1){
-        const delta=s.target-s.z,travel=Math.min(Math.abs(delta),.8*dt/lengthScale);s.z+=Math.sign(delta)*travel;moving=travel>0;
-        if(Math.abs(s.z-s.target)<1e-5){s.target=s.route?(s.target===s.route[1]?s.route[0]:s.route[1]):s.target>0?-2.2:.1;s.wait=2.5;}
-      }
-    }
-  }
+  const moving=crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
-  s.walkTime+=dt*.8; // Authored stride cadence, independent of delivered FPS.
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId])&&s.role!=='Helmsman'){
     const width=Math.max(0,modelDeckWidth(boat,s.z)-.34/(boat.beam/3.6));s.x=Math.max(-width,Math.min(width,s.x));
   }
@@ -215,7 +243,7 @@ export function stepDeckhand(s,boat,dt,wind=0) {
   }else if(s.role==='Helmsman'){
     const grip=resolveShipNode(boat,'helm.grip');s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-HELM_TILLER_DISTANCE)/lengthScale;s.yaw=0;
     s.position.set([grip[0],hullDeck(s.z)*HULL_VERTICAL_SCALE+.028,grip[2]-HELM_TILLER_DISTANCE]);
-  }else s.position.set([s.x*boat.beam/3.6,(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z))*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
+  }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
@@ -241,6 +269,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
+    for(const s of people)s.walkClipDuration=model.animator.clips.get('Walk').duration;
     // A one-person company legitimately has no actors in one sex batch.
     // Bind valid storage buffers, but submit no phantom instance for that batch.
     const poses=new Float32Array(Math.max(1,people.length)*65*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS);
