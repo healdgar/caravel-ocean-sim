@@ -109,6 +109,16 @@ test('a separately braced clipper yard moves the real nearby staysail contact wi
   assert.equal(c._surfaceCollisionSupports,staticSupports);assert.ok(Object.isFrozen(staticSupports));
 });
 
+test('foreign foremast yards do not pull the actual main royal across the inter-mast gap',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'],c=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),boat=clearanceBoat(d,0),target=new Float32Array(asset.vertices),surface=d.surfaces.find(s=>s.id===9),p=rigSurfacePose(surface,boat.sailState);
+  pose(boat,3.1,14,target);
+  const influence=Math.max(...c.masts.map(m=>m.radius),...c.spars.map(s=>s.radius))+(surface.contactClearance??.045)+(surface.contactBand??.25);
+  for(let at=0;at<asset.vertices.length;at+=9)if(Math.floor(asset.vertices[at+6])===9&&Math.round((asset.vertices[at+6]-9)*64)===9){
+    const reference=surfaceClothPoint(surface,asset.vertices[at+7],asset.vertices[at+8],p,{},3.1,14),actual=Array.from(target.subarray(at,at+3));
+    assert.ok(Math.hypot(...clearanceSub(actual,reference))<=influence,'a foreign spar cannot create a nonlocal contact displacement across the mast spacing');
+  }
+});
+
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
   const context=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),target=new Float32Array(asset.vertices);
   for(const [yaw,set]of [[0,[1,1,1]],[.67,[1,1,1]],[-.67,[1,1,1]],[.35,[.20,.40,.65]]]){

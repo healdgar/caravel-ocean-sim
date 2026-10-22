@@ -141,7 +141,7 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
     if(!surfaceFinitePoint(a)||!surfaceFinitePoint(b)||!Number.isFinite(r)||r<0)throw Error('Invalid rig support descriptor');
     const axis=support._surfaceAxis??surfaceSubtract(b,a),length2=support._surfaceLength2??surfaceDot(axis,axis);if(length2<1e-12)throw Error('Degenerate rig support');
     const t=surfaceClamp(surfaceDot(surfaceSubtract(p,a),axis)/length2),q=surfaceMix(a,b,t),delta=surfaceSubtract(p,q);
-    const mastBarrier=((support.kind==='mast'&&support.mast===surface.mast)||support.kind==='spar')&&surface.mastContactSide;
+    const mastBarrier=(support.kind==='mast'||support.kind==='spar')&&support.mast===surface.mast&&surface.mastContactSide;
     if(mastBarrier&&!['fore','aft'].includes(mastBarrier))throw Error('Invalid authored mast contact side');
     const direction=mastBarrier?[0,0,mastBarrier==='fore'?-1:1]:normal;
     let contactNormal=surfaceSubtract(direction,surfaceMultiply(axis,surfaceDot(direction,axis)/length2));

@@ -88,7 +88,7 @@ function laterSailCloudCrew(){
 }
 
 const laterSailCloud={
-  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:2,status:'planned',family:'extreme-clipper',
+  id:'flying-cloud',modelCode:7,name:'Flying Cloud · 1851',revision:3,status:'planned',family:'extreme-clipper',
   frame:laterSailCloudFrame,runtime:laterSailCloudRuntime,
   interpretation:'1851 departure interpretation. Deck length and 41-foot beam select the contemporary report; all hull offsets and loaded draft are authored, not recovered McKay lines.',
   readiness:{backend:'surfaces-v1',requires:['independent loft/freeboard calibration','per-surface spars and cloth/rope clearance','wheel and deckhouse routes','loaded inertia and working crew','rendered and fleet checks']},
@@ -175,7 +175,7 @@ const laterSailMothScale=laterSailMothFrame.verticalScale,laterSailMothX=laterSa
 // changing displacement mass or moving the chosen waterline datum.
 const laterSailMothBilgeScale=.68,laterSailMothShoulderScale=.72;
 const laterSailMoth={
-  id:'gipsy-moth-iv',modelCode:8,name:'Gipsy Moth IV · 1966',revision:3,status:'planned',family:'bermudan-ketch',
+  id:'gipsy-moth-iv',modelCode:8,name:'Gipsy Moth IV · 1966',revision:4,status:'planned',family:'bermudan-ketch',
   frame:laterSailMothFrame,runtime:laterSailMothRuntime,
   interpretation:'Original design-DWL branch before voyage alterations. Builder-archive dimensions and original lead retained; hull/fin offsets, cockpit and sail dimensions are authored pending drawings.',
   readiness:{backend:'surfaces-v1',requires:['physical-mast/control-group separation','Bermudan luff/boom evaluator','profiled ballast keel in hydrostatics/contact/lateral force','recessed cockpit','singlehanded deck jobs','DWL displacement/ballast calibration','rendered clearance and fleet checks']},
@@ -243,13 +243,20 @@ const laterSailMothMizzenAxis=laterSailMastAt(laterSailMoth,1,laterSailMoth.mast
 const laterSailMothMainBoomEnd=Math.min(laterSailMothMainTack[2]+4.75/laterSailMothScale,
   laterSailMothMizzenAtBoom[2]-(laterSailMastRadiusAt(laterSailMoth,1,laterSailMothBoomY)+.065/laterSailMothX+.012/laterSailMothScale)*Math.hypot(...laterSailMothMizzenAxis)/laterSailMothMizzenAxis[1]);
 const laterSailMothMainClew=[0,laterSailMothBoomY,laterSailMothMainBoomEnd],laterSailMothMizzenClew=[0,1.45/laterSailMothScale,laterSailMothMizzenTack[2]+2.75/laterSailMothScale];
+const laterSailMothHeadsailFootY=1.10/laterSailMothScale,laterSailMothMastAtHeadsailFoot=laterSailMastAt(laterSailMoth,0,laterSailMothHeadsailFootY);
+const laterSailMothMainAxis=laterSailMastAt(laterSailMoth,0,laterSailMoth.masts[0].height).map((v,i)=>v-laterSailMastAt(laterSailMoth,0,laterSailDeckOf(laterSailMoth,laterSailMoth.masts[0].z))[i]);
+// Authored non-overlapping working sails, not unrecorded genoa dimensions.
+// A clew behind the mast creates a large overlap that requires different
+// outboard sheet leads and cannot pass through taut lower shrouds on a reach.
+const laterSailMothJibClew=[0,laterSailMothHeadsailFootY,laterSailMothMastAtHeadsailFoot[2]-(laterSailMastRadiusAt(laterSailMoth,0,laterSailMothHeadsailFootY)+.05/laterSailMothScale)*Math.hypot(...laterSailMothMainAxis)/laterSailMothMainAxis[1]];
+const laterSailMothStayClew=[0,laterSailMothHeadsailFootY,laterSailMothJibClew[2]-.35/laterSailMothScale];
 laterSailMoth.surfaces.push(
   laterSailTriangle(1,'mainsail',0,'main','bermudan',[laterSailMothMainTack,laterSailMothMainHead,laterSailMothMainClew],
     {belly:.14,rotationAxis:'luff',mastContactSide:'aft',spars:[{id:'main-boom',kind:'boom',a:laterSailMothMainTack,b:laterSailMothMainClew,radius:.065/laterSailMothX}]}),
   laterSailTriangle(2,'mizzen',1,'mizzen','bermudan',[laterSailMothMizzenTack,laterSailMothMizzenHead,laterSailMothMizzenClew],
     {belly:.10,rotationAxis:'luff',mastContactSide:'aft',spars:[{id:'mizzen-boom',kind:'boom',a:laterSailMothMizzenTack,b:laterSailMothMizzenClew,radius:.05/laterSailMothX}]}),
-  laterSailTriangle(3,'working-jib',0,'fore','headsail',[[0,.90/laterSailMothScale,-5.15],laterSailMastAt(laterSailMoth,0,12.9/laterSailMothScale),[0,1.10/laterSailMothScale,.30]],{belly:.16}),
-  laterSailTriangle(4,'inner-staysail',0,'fore','headsail',[[0,.92/laterSailMothScale,-3.35],laterSailMastAt(laterSailMoth,0,9.70/laterSailMothScale),[0,1.10/laterSailMothScale,.15]],{belly:.11})
+  laterSailTriangle(3,'working-jib',0,'fore','headsail',[[0,.90/laterSailMothScale,-5.15],laterSailMastAt(laterSailMoth,0,12.9/laterSailMothScale),laterSailMothJibClew],{belly:.16,footPlan:'authored non-overlapping working jib'}),
+  laterSailTriangle(4,'inner-staysail',0,'fore','headsail',[[0,.92/laterSailMothScale,-3.35],laterSailMastAt(laterSailMoth,0,9.70/laterSailMothScale),laterSailMothStayClew],{belly:.11,footPlan:'authored non-overlapping working staysail'})
 );
 laterSailMoth.surfaces=laterSailMoth.surfaces.map(s=>s.kind==='headsail'?laterSailStayHead(laterSailMoth,s):s);
 
