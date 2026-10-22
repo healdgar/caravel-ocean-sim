@@ -2,6 +2,8 @@ import { boatForwardSpeed, boatRotate, KNOT_TO_MPS } from './boat.js';
 import { ISLAND } from './terrain-model.js';
 import { resolveShipNode } from './ship-models.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
+import {ROWING_DESIGNS} from './models/rowing.js';
+import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 
 export const FATHOM_METRES = 1.8288;
 // Gameplay equipment assumptions, not measurements of a particular replica.
@@ -13,10 +15,23 @@ export const VICTORY_ANCHOR_LIMITS=Object.freeze({...ANCHOR_LIMITS,anchorMass:40
   rodeRadius:.08,maxRode:260,payRate:2.4,weighRate:.4,maxStiffness:90000});
 export const ADDITIONAL_ANCHOR_LIMITS=Object.freeze(Object.fromEntries(Object.entries(ADDITIONAL_DESIGNS).map(([id,d])=>[id,Object.freeze({...ANCHOR_LIMITS,
   anchorMass:d.family==='nao'?450:320,renderScale:d.family==='nao'?1.25:1.1})])));
+// Authored equipment for gameplay; these are not recovered anchor inventories.
+const laterAnchorProfiles={
+  oseberg:{anchorMass:30,renderScale:.5,rodeRadius:.016,maxDepth:18,maxRode:110,maxStiffness:5000},
+  lusoria:{anchorMass:45,renderScale:.57,rodeRadius:.018,maxDepth:18,maxRode:110,maxStiffness:6000},
+  'flying-cloud':{anchorMass:1800,renderScale:2,rodeRadius:.06,maxDepth:55,maxRode:350,payRate:2.6,weighRate:.45,maxStiffness:65000},
+  'gipsy-moth-iv':{anchorMass:22,renderScale:.45,rodeRadius:.012,maxDepth:30,maxRode:180,payRate:1.5,weighRate:.6,maxStiffness:4500},
+};
+export const LATER_ANCHOR_LIMITS=Object.freeze(Object.fromEntries(Object.entries({...ROWING_DESIGNS,...LATER_SAIL_DESIGNS}).map(([id,d])=>{
+  if(!(Object.hasOwn(ROWING_DESIGNS,id)?d.equipment.anchor:d.equipment.anchors))return [id,null];
+  if(!laterAnchorProfiles[id])throw Error('Missing authored anchor profile: '+id);
+  return [id,Object.freeze({...ANCHOR_LIMITS,...laterAnchorProfiles[id]})];
+})));
 export const anchorEquipment=boat=>{
   const id=boat.modelId??'nina';
   if(id==='nina')return ANCHOR_LIMITS;if(id==='victory')return VICTORY_ANCHOR_LIMITS;
   if(ADDITIONAL_ANCHOR_LIMITS[id])return ADDITIONAL_ANCHOR_LIMITS[id];
+  if(Object.hasOwn(LATER_ANCHOR_LIMITS,id))return LATER_ANCHOR_LIMITS[id];
   throw Error('No anchor equipment for '+id);
 };
 export const anchorEyeOffset=boat=>.65*anchorEquipment(boat).renderScale;
@@ -66,6 +81,7 @@ export function anchorLandVisible(boat,{terrain,settings={},eye}={}) {
 }
 
 export function anchorEligibility(boat,environment={}) {
+  if(anchorEquipment(boat)===null)return {allowed:false,reason:'No anchor fitted',depth:null,depthFathoms:null,source:null,point:null,bed:null};
   const {terrain}=environment,point=anchorFairlead(boat),limits=anchorEquipment(boat);
   const result={allowed:false,reason:'No coastal sounding available',depth:null,depthFathoms:null,
     source:'Simulated coastal sounding',point,bed:null};
@@ -108,8 +124,15 @@ export function anchorTetherForce(state,boat,point) {
 }
 
 export function createAnchorState(boat,options={}) {
+  if(anchorEquipment(boat)===null)return {
+    installed:false,phase:'absent',active:false,status:'No anchor fitted',position:{x:boat.x??0,y:0,z:boat.z??0},
+    embedded:false,rode:0,depth:null,depthFathoms:null,splash:null,reelRate:0,events:[],time:0,
+    force:{x:0,z:0,yaw:0,tension:0},eligibility:anchorEligibility(boat),
+    drop(){return false;},weigh(){return false;},reset(){this.events=[];},
+    step(dt){this.time+=Math.max(0,Math.min(.1,anchorFinite(dt)));this.events=[];return this.force;},
+  };
   let serial=0,pending=[],checkTime=0;
-  const state={phase:'stowed',position:anchorHousedPosition(boat),rode:anchorEyeOffset(boat),
+  const state={installed:true,phase:'stowed',position:anchorHousedPosition(boat),rode:anchorEyeOffset(boat),
     worldHeading:boat.heading??0,
     embedded:false,depth:null,depthFathoms:null,bed:null,velocity:{x:0,y:0,z:0},
     time:0,splash:null,events:[],force:{x:0,z:0,yaw:0,tension:0},reelRate:0,eligibility:{allowed:false,reason:'Checking coastal sounding'},onSurfaceEvent:typeof options.onSurfaceEvent==='function'?options.onSurfaceEvent:null,
@@ -219,6 +242,7 @@ export function createAnchorState(boat,options={}) {
 // Bounded sagging line, clamped to the simulated bed. It straightens as tension
 // rises, instead of drawing a rigid rod from ship to bottom.
 export function anchorRodePoints(state,boat,segments=48) {
+  if(state.installed===false)return [];
   const a=anchorFairlead(boat),b=state.phase==='stowed'?a:{...state.position,y:state.position.y+anchorEyeOffset(boat)},out=[];
   const distance=Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z),slack=Math.max(0,state.rode-distance);
   const sag=Math.min(Math.max(0,(a.y-(state.bed??-120))*.8),Math.sqrt(slack*Math.max(1,state.rode))*.5);

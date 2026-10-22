@@ -9,6 +9,7 @@ import { SAIL_PLAN, lateenClothPoint, lateenYardPoint } from './lateen.js';
 import {additionalDesign,additionalDeck} from './models/additional.js';
 import {additionalRigContext} from './additional-rig.js';
 import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
+import {createProceduralShipDefinition,resolveProceduralShipNode} from './procedural-models.js';
 
 const MAST_IDS=['fore','main','mizzen'];
 const structureNode=(id,position,parent='hull',kind='attachment',motion)=>({id,parent,kind,position,...(motion?{motion}:{})});
@@ -167,6 +168,7 @@ export const SHIP_MODELS=deepFreeze({
   },
   pinta:shipAdditionalDefinition('pinta'),
   'santa-maria':shipAdditionalDefinition('santa-maria'),
+  ...Object.fromEntries(['oseberg','lusoria','taino-canoe','flying-cloud','gipsy-moth-iv'].map(id=>[id,createProceduralShipDefinition(id,{status:'ready'})])),
 });
 
 export function getShipModel(id='nina'){
@@ -187,6 +189,7 @@ export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-
   if(!node)throw Error('Unknown '+model.id+' structure node: '+nodeId);
   if(!['design','vessel'].includes(space))throw Error('Unknown structure coordinate space: '+space);
   if(!(boat.length>0&&boat.beam>0&&Number.isFinite(boat.length)&&Number.isFinite(boat.beam)))throw Error('Structure points require finite positive hull dimensions');
+  if(model.geometry==='rowing-procedural-v1'||model.geometry==='later-sail-procedural-v1')return resolveProceduralShipNode(boat,model,node,{space,time,wind,side,step,height,along,u,v,out});
   if(model.rig.backend==='surfaces-v1'){
     const d=additionalDesign(model.id),context=additionalRigContext(model.id),motion=node.motion,angle=(boat.rudder??0)*Math.PI/180;
     let p;

@@ -1,5 +1,6 @@
 import { boatForwardSpeed, KNOT_TO_MPS } from './boat.js';
 import { sailingState, pointOfSail } from './sailing.js';
+import {ROWING_DESIGNS} from './models/rowing.js';
 
 export function instrumentReadout(boat){
   const s=sailingState(boat),speed=boatForwardSpeed(boat)/KNOT_TO_MPS;
@@ -7,6 +8,7 @@ export function instrumentReadout(boat){
   const direction=angle<3?'Ahead':angle>177?'Astern':`${Math.round(angle)}° ${degrees<0?'port':'starboard'}`;
   let cue=pointOfSail(s.apparentAngle,s.apparentSpeed);
   if(boat.propulsion==='manual')cue='Set-speed mode';
+  else if(Object.hasOwn(ROWING_DESIGNS,boat.modelId??'')&&((boat.rowingEffort??0)>0||s.area<.01))cue=(boat.modelId==='taino-canoe'?'Paddles':'Oars')+((boat.rowingEffort??0)>0?' · '+Math.round((boat.rowingEffort??0)*100)+'% effort':' at rest');
   else if(s.maneuver)cue='Transferring yards · crew handling rig';
   else if(s.forward<0&&angle>=55&&s.rig.some(p=>p.pressure<-.5))cue='Canvas backed · transfer yards';
   else if(speed<-.05)cue=s.forward>0&&Math.abs(boat.rudderTarget??0)>3?'Wind filling sails · centre rudder':'Drifting astern · steering is reversed';

@@ -1,5 +1,6 @@
 import { boatHydrodynamics, boatTargets, boatWaveAttitude, boatWaveSlope, stepBoatSurge, stepBoatSteering, boatSpring } from './boat.js';
 import { requirePlayableShipModel } from './ship-models.js';
+import {getShipParts} from './ship-parts.js';
 
 const AXES=['heave','pitch','roll'];
 
@@ -20,7 +21,8 @@ export function copyVessel(source,{id='companion',modelId=source.modelId??'nina'
     length:sameModel?source.length:model.runtime.length,beam:sameModel?source.beam:model.runtime.beam,
     eye:sameModel?source.eye:(model.nodes['helm.camera']?.position[1]??2.4)*model.designFrame.verticalScale,heading:source.heading,propulsion:'sail',
     sailFore:source.sailFore,sailMain:source.sailMain,sailMizzen:source.sailMizzen,
-    provisionDays:source.provisionDays,cargoTonnes:source.cargoTonnes,speed:source.speed,
+    provisionDays:sameModel?source.provisionDays:getShipParts(model.id).loading.provisionDays,cargoTonnes:sameModel?source.cargoTonnes:0,speed:source.speed,
+    rowingEffort:0,rowingTurn:0,
     x:source.x-Math.sin(h)*distance+Math.cos(h)*side,z:source.z+Math.cos(h)*distance+Math.sin(h)*side,
     rudder:0,rudderTarget:0,yawRate:0,heave:0,pitch:0,roll:0,revision:0,
     target:{heave:0,pitch:0,roll:0},waveSlopeX:0,waveSlopeZ:0,waveSampleTime:-1,waveRevision:-1};

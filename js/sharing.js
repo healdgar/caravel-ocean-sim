@@ -5,6 +5,7 @@ const BOAT_LINK_KEYS = {
   sailFore: 'sailFore', sailMain: 'sailMain', sailMizzen: 'sailMizzen',
   provisionDays: 'provisionDays', cargoTonnes: 'cargoTonnes',
   x:'boatX',z:'boatZ',
+  rowingEffort:'rowingEffort',rowingTurn:'rowingTurn',rowingCadence:'rowingCadence',
 };
 
 export const ROUGH_SEAS = {

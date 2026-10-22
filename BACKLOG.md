@@ -16,6 +16,35 @@ night. Notify on meaningful changes, failures, required input or morning complet
 
 The October 20–21 overnight run and its old cutoff below are historical records.
 
+### Later-vessel integration — local qualification, unpublished
+
+The working registry now integrates the five later vessels. This is **not yet a
+release**: actual crew reach, standing-rig clearance and the full combined native
+suite remain admission gates. The latest public runtime remains `7c0b527` below.
+
+- Own hulls, floors/barriers, appendages, rig/propulsion, equipment and companies:
+  Oseberg 32, Lusoria 26, Taíno-style canoe 30, Flying Cloud 12 represented from
+  a 42-person loading manifest, Gipsy Moth IV one sailor. Interpretive offsets,
+  rig dimensions, loads and coefficients remain authored.
+- Rowing geometry, blade immersion, relative water drag, hand targets and effort
+  share one stroke. Actual FFT/shared-wave height and orbital motion arrive
+  asynchronously; missing/stale/reset fields suppress thrust. Followers command
+  human effort, stroke bias and steering; no motor or direct motion correction.
+- Rowing wood/bench mass uses physical placement, seated crew and floor-level
+  stores. Yacht body sections were refined at fixed waterline/extremes: measured
+  geometry displaces 10,583.20 kg against reported 10,577.77 kg. This is an authored
+  approximation, not measured hull offsets or certified performance.
+- Root's original-four golden hydro check passes exact keys and scalar values
+  in twelve configurations. Actual native GPU wetness preserves exact legacy
+  outputs while distinguishing dry open interiors, external wet shells and the
+  recessed cockpit. Gipsy Moth solo hatch/sail completion and complete body
+  clearance through its cockpit coaming pass their focused CPU checks.
+- Earlier native preflight exposed a singular/plural anchor flag mismatch and a
+  field-clock mismatch; source corrections are integrated and undergoing the
+  next serialized actual-runtime run. Earlier partial results do not qualify
+  the combined source. Root alone holds the testing baton; direct agents author
+  isolated fixes/proposed checks and run no validation.
+
 ### Sun/environment controls checkpoint
 
 - Manual Sun elevation now spans −90°…90°; Sun azimuth, wind direction and swell
