@@ -99,8 +99,9 @@ export function laterSailRigContext(id){
       supports.push({a:[x,y+.045/sy,z],b:top,r:(id==='flying-cloud'?.025:.006)/sx,mast:index,side,kind:'shroud'});
     }
     const z=index===0?(d.bowsprit?.b[2]??-5.55):d.masts[index-1].z+.20;
-    const a=index===0&&d.bowsprit?[...d.bowsprit.b]:[0,laterSailDeck(id,z)+.08/sy,z];
-    supports.push({a,b:mastPoint(index,m.height*.96),r:.012/sx,mast:index,side:0,kind:'stay'});
+    const triatic=id==='gipsy-moth-iv'&&index>0;
+    const a=triatic?[...masts[index-1].head]:index===0&&d.bowsprit?[...d.bowsprit.b]:[0,laterSailDeck(id,z)+.08/sy,z];
+    supports.push({a,b:mastPoint(index,m.height*.96),r:.012/sx,mast:index,side:0,kind:triatic?'triatic-stay':'stay'});
     if(id==='flying-cloud'){
       // Separate topmast shrouds land on a real mast platform, not at a
       // fictitious fourth mast or a shared all-canvas transform.

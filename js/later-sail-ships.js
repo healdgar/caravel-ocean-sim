@@ -5,7 +5,7 @@ import {createMeshWriter} from './mesh-writer.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {laterSailDesign,laterSailHullWidth,laterSailDeck,laterSailDeckWidth,laterSailKeelHalfWidth,laterSailStairFlights} from './models/later-sail.js';
 import {laterSailRigContext,laterSailSteeringPose} from './additional-rig.js';
-import {surfaceRestPoint,rigSurfacePose,surfaceRopePoint} from './rig-surface.js';
+import {surfaceRestPoint,rigSurfacePose,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
 import {createAdditionalAssetPose} from './additional-ships.js';
 
 const laterMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]);
@@ -245,7 +245,7 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   }
   const standingStart=out.length;for(const line of context.lines.filter(line=>line.static))rope(line.a,line.b,line.r??.008,2);
   group('rig.standing','hull',standingStart);
-  const rest={...context,state:{},poses:new Map(context.surfaces.map(s=>[s.id,rigSurfacePose(s,{})])),time:0,wind:0},runningStart=out.length;
+  const rest={...withRigPoseContext(context,{}),time:0,wind:0},runningStart=out.length;
   for(const [index,line]of context.lines.entries())if(!line.static){
     const segments=line.kind==='bolt-rope'?22:line.kind==='sheet'?10:6;
     for(let j=0;j<segments;j++){

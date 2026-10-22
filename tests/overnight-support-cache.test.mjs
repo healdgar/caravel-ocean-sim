@@ -9,7 +9,7 @@ import {proceduralRigContext,laterSailSteeringPose} from '../js/additional-rig.j
 import {createAdditionalShipMesh,createAdditionalAssetPose} from '../js/additional-ships.js';
 import {createRowingShipMesh,createRowingAssetPose} from '../js/rowing-ships.js';
 import {createLaterSailShipMesh} from '../js/later-sail-ships.js';
-import {rigSurfacePose,surfaceClothPoint,surfaceRopePoint} from '../js/rig-surface.js';
+import {rigSurfacePose,surfaceClothPoint,surfaceRopePoint,withRigPoseContext} from '../js/rig-surface.js';
 import {indexCaravelMesh} from '../js/caravel.js';
 
 for(const d of Object.values(PROCEDURAL_DESIGNS))test(`${d.id} static support preparation preserves actual posed vertex bytes and live cloth/rope results`,()=>{
@@ -24,7 +24,7 @@ for(const d of Object.values(PROCEDURAL_DESIGNS))test(`${d.id} static support pr
     const state={set,groupYaw:[yaw,-yaw,yaw],windSide:index===1?-8:7,windForward:6,rig:set.map(deployed=>({deployed,fill,side:index===1?1:-1,opening:.45,dip:0,pressure:1}))};
     const boat={modelId:d.id,...d.runtime,rudder:index*11-8,hatchesClosed:index*.4,sailState:state,rowingState:{phase:.2+index*.17,rate:.45,effortPort:.7,effortStarboard:.5}},time=index+1.4,wind=index===1?22:13;
     cachedPose(boat,time,wind,one);directPose(boat,time,wind,two);assert.deepEqual(new Uint32Array(one.buffer),new Uint32Array(two.buffer),'all actual compact position/normal/material/UV bytes match the uncached evaluator');
-    const poses=new Map(d.surfaces.map(s=>[s.id,rigSurfacePose(s,state)])),live={...context,state,poses,time,wind},direct={...uncached,state,poses,time,wind};
+    const poses=new Map(d.surfaces.map(s=>[s.id,rigSurfacePose(s,state)])),live={...withRigPoseContext(context,state,poses),time,wind},direct={...withRigPoseContext(uncached,state,poses),time,wind};
     for(const surface of d.surfaces)for(const [u,v]of [[0,0],[.2,.3],[.5,.1]]){
       const p=poses.get(surface.id);assert.deepEqual(surfaceClothPoint(surface,u,v,p,live,time,wind),surfaceClothPoint(surface,u,v,p,direct,time,wind));
     }

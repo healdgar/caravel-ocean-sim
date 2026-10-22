@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {LATER_SAIL_DESIGNS,laterSailDesign,laterSailDeck,laterSailStairFlights} from '../js/models/later-sail.js';
 import {ROWING_DESIGNS} from '../js/models/rowing.js';
-import {surfaceControlIndex,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from '../js/rig-surface.js';
+import {surfaceControlIndex,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from '../js/rig-surface.js';
 import {proceduralRigContext,laterSailRigContext,laterSailSteeringPose} from '../js/additional-rig.js';
 import {createProceduralShipDefinition,resolveProceduralShipNode,proceduralShipNodeTransform} from '../js/procedural-models.js';
 import {rowingStationPose,rowingSteeringPose} from '../js/rowing.js';
@@ -53,11 +53,11 @@ test('Bermudan luffs stay on their actual track, feet on independent booms and l
 
 test('sewn bolt ropes follow the curved authoritative cloth rather than straight endpoint chords',()=>{
   for(const d of Object.values(LATER_SAIL_DESIGNS)){
-    const c=laterSailRigContext(d.id),b=boat(d),runtime={...c,state:b.sailState,time:2.1,wind:13};
+    const c=laterSailRigContext(d.id),b=boat(d),runtime={...withRigPoseContext(c,b.sailState),time:2.1,wind:13};
     const lines=c.lines.filter(l=>l.kind==='bolt-rope');assert.ok(lines.length>=d.surfaces.length*3);
     for(const line of lines)for(const t of [0,.37,1]){
       const s=d.surfaces.find(s=>s.id===line.surface),uv=line.clothEdge[0].map((v,i)=>v+(line.clothEdge[1][i]-v)*t);
-      near(surfaceRopePoint(line,t,runtime),surfaceClothPoint(s,...uv,rigSurfacePose(s,b.sailState),c,runtime.time,runtime.wind));
+      near(surfaceRopePoint(line,t,runtime),surfaceClothPoint(s,...uv,rigSurfacePose(s,b.sailState),runtime,runtime.time,runtime.wind));
     }
   }
 });
@@ -85,7 +85,7 @@ test('new structure graphs contain only real masts, equipment and spars; absent 
 
 test('cloth and spar affine frames derive from the same authoritative pose, with no animated-parent translation fiction',()=>{
   for(const d of Object.values(LATER_SAIL_DESIGNS)){
-    const b=boat(d),model=createProceduralShipDefinition(d.id),c=laterSailRigContext(d.id),snapshot=JSON.stringify(b);
+    const b=boat(d),model=createProceduralShipDefinition(d.id),c=withRigPoseContext(laterSailRigContext(d.id),b.sailState),snapshot=JSON.stringify(b);
     for(const surface of model.rig.sails){
       const s=d.surfaces.find(s=>s.id===surface.surfaceId),options={time:3.4,wind:11,u:.21,v:.32},frame=proceduralShipNodeTransform(b,model,surface.sailNode,options),expected=surfaceClothPoint(s,.21,.32,rigSurfacePose(s,b.sailState),c,3.4,11);
       near(frame.position,expected);near(resolveProceduralShipNode(b,model,surface.sailNode,{...options,space:'design'}),expected);

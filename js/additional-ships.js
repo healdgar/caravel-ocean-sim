@@ -5,7 +5,7 @@ import {createMeshWriter} from './mesh-writer.js';
 import {additionalDesign,additionalHullWidth,additionalDeck,additionalStairFlights} from './models/additional.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {additionalRigContext,additionalGunAttachments} from './additional-rig.js';
-import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
+import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
 
 const additionalMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]);
 const additionalMeshSub=(a,b)=>a.map((v,i)=>v-b[i]);
@@ -279,7 +279,7 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   for(const line of context.lines.filter(l=>l.static))rope(line.a,line.b,line.r??.008,2,1,0);
   group('rig.standing','hull',standingStart);
   const runningStart=out.length;
-  const restContext={...context,state:{},poses:new Map(context.surfaces.map(s=>[s.id,rigSurfacePose(s,{})])),time:0,wind:0};
+  const restContext={...withRigPoseContext(context,{}),time:0,wind:0};
   for(const [index,line] of context.lines.entries())if(!line.static){
     const segments=line.kind==='sheet'?10:5;
     for(let j=0;j<segments;j++){
@@ -299,7 +299,7 @@ export function createAdditionalAssetPose(asset,options={}){
   const id=asset.model?.id??asset.modelId,design=options.design??additionalDesign(id),context=options.context??additionalRigContext(id),source=asset.vertices;
   if(!(source instanceof Float32Array)||source.length%9)throw Error('Additional asset pose requires nine-float vertices');
   const surfaces=new Map(context.surfaces.map(s=>[s.id,s])),entries=[],cloth=new Map(),ropes=new Map();
-  const restContext={...context,state:{},poses:new Map(context.surfaces.map(s=>[s.id,rigSurfacePose(s,{})])),time:0,wind:0};
+  const restContext={...withRigPoseContext(context,{}),time:0,wind:0};
   const hatch=design.hatch,hinge=[hatch.centre[0],hatch.centre[1],hatch.centre[2]-hatch.size[2]/2];
   for(let i=0;i<source.length;i+=9){
     const material=source[i+6],kind=Math.floor(material),surfaceId=Math.round((material-kind)*64),p=Array.from(source.subarray(i,i+3)),normal=Array.from(source.subarray(i+3,i+6));
@@ -332,6 +332,7 @@ export function createAdditionalAssetPose(asset,options={}){
       const origin=surfaceYardPoint(s,[0,0,0],pose),axes=[[1,0,0],[0,1,0],[0,0,1]].map(axis=>additionalMeshSub(surfaceYardPoint(s,axis,pose),origin));
       yardTransforms.set(s.id,{origin,axes});
     }
+    runtime._surfaceActiveSupports=withRigPoseContext(context,runtime.state,poses)._surfaceActiveSupports;
     for(const sample of samples){
       const {surface:s,u,v}=sample,pose=poses.get(s.id),e=.0005,p=surfaceClothPoint(s,u,v,pose,runtime,time,wind);
       const du=additionalMeshSub(surfaceClothPoint(s,u+e,v,pose,runtime,time,wind),surfaceClothPoint(s,u-e,v,pose,runtime,time,wind));

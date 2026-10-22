@@ -6,7 +6,7 @@ import {test} from 'node:test';
 import {createLaterSailShipMesh,createLaterSailAssetPose} from '../js/later-sail-ships.js';
 import {LATER_SAIL_DESIGNS,laterSailDesign,laterSailKeelHalfWidth,laterSailStairFlights} from '../js/models/later-sail.js';
 import {laterSailRigContext,laterSailSteeringPose} from '../js/additional-rig.js';
-import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from '../js/rig-surface.js';
+import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from '../js/rig-surface.js';
 import {indexCaravelMesh} from '../js/caravel.js';
 
 const cached=new Map(),near=(a,b,e=3e-5)=>assert.ok(Math.abs(a-b)<=e,`${a} != ${b}`);
@@ -72,7 +72,7 @@ test('stair landing geometry shares exactly the route endpoints and open cockpit
 
 test('actual compact cloth/spar/steering vertices use authoritative poses and retain immutable hull/material bits',()=>{
   for(const d of Object.values(LATER_SAIL_DESIGNS)){
-    const a=asset(d.id),pose=createLaterSailAssetPose(a),b=boat(d),target=new Float32Array(a.vertices),original=new Uint32Array(a.vertices.buffer).slice(),context=laterSailRigContext(d.id),time=2.3,wind=9;
+    const a=asset(d.id),pose=createLaterSailAssetPose(a),b=boat(d),target=new Float32Array(a.vertices),original=new Uint32Array(a.vertices.buffer).slice(),context=withRigPoseContext(laterSailRigContext(d.id),b.sailState),time=2.3,wind=9;
     assert.equal(pose(b,time,wind,target),true);const bits=new Uint32Array(target.buffer);
     let cloth=0,spars=0,wheel=0;
     for(let at=0;at<a.vertices.length;at+=9){
@@ -92,7 +92,7 @@ test('per-instance poses are independent and sewn running rope rings stay centre
   for(const d of Object.values(LATER_SAIL_DESIGNS)){
     const a=asset(d.id),pose=createLaterSailAssetPose(a),b=boat(d),other={...boat(d),rudder:-18,hatchesClosed:1,sailState:{...b.sailState,set:[.2,.9,.75],groupYaw:[-.3,.1,-.4]}},one=new Float32Array(a.vertices),two=new Float32Array(a.vertices);
     pose(b,2,12,one);const first=new Uint32Array(one.buffer).slice();pose(other,7,3,two);pose(b,2,12,one);assert.deepEqual(new Uint32Array(one.buffer),first);assert.notDeepEqual(new Uint32Array(two.buffer),first);
-    const c=laterSailRigContext(d.id),runtime={...c,state:b.sailState,time:2,wind:12},rings=new Map();
+    const c=laterSailRigContext(d.id),runtime={...withRigPoseContext(c,b.sailState),time:2,wind:12},rings=new Map();
     for(let at=0;at<a.vertices.length;at+=9)if(Math.floor(a.vertices[at+6])===12&&a.vertices[at+7]>=100){
       const line=Math.round(a.vertices[at+7]-100),t=a.vertices[at+8],k=line+'/'+t;let r=rings.get(k);if(!r){r={line,t,points:new Map()};rings.set(k,r);}
       const p=Array.from(one.subarray(at,at+3));r.points.set(p.map(v=>Math.round(v*1e6)).join('/'),p);

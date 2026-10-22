@@ -5,7 +5,7 @@ import {deepFreeze,defineRig} from './rig-definition.js';
 import {ROWING_DESIGNS,rowingDesign,rowingDeck} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS,laterSailDesign,laterSailDeck,laterSailStairFlights} from './models/later-sail.js';
 import {proceduralRigContext,laterSailSteeringPose,rowingAnchorFitting,rowingSurfaceSpar} from './additional-rig.js';
-import {rigSurfacePose,surfaceRestPoint,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
+import {rigSurfacePose,surfaceRestPoint,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 
 const proceduralNodeAdd=(a,b)=>a.map((v,i)=>v+b[i]);
@@ -34,7 +34,7 @@ function proceduralNodeRigid(position,transform){
   return {position:origin,basis,kind:'rigid'};
 }
 function proceduralNodeCloth(surface,boat,context,u,v,time,wind){
-  const pose=rigSurfacePose(surface,boat.sailState??{}),sample=(u,v)=>surfaceClothPoint(surface,u,v,pose,context,time,wind),e=.0005;
+  const state=boat.sailState??{},live=withRigPoseContext(context,state),pose=live.poses.get(surface.id),sample=(u,v)=>surfaceClothPoint(surface,u,v,pose,live,time,wind),e=.0005;
   const a=proceduralNodeMul(proceduralNodeSub(sample(u+e,v),sample(u-e,v)),1/(2*e)),b=proceduralNodeMul(proceduralNodeSub(sample(u,v+e),sample(u,v-e)),1/(2*e));
   return {position:sample(u,v),basis:[a,b,proceduralNodeUnit(proceduralNodeCross(a,b))],kind:'surface'};
 }
