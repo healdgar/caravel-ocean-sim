@@ -1,7 +1,9 @@
 # Native Forestmodeler forest
 
-The Saba forest places **21,442 roots** using five shared, immutable native Hero
-prototypes. These temperate species are visual proxies, not surveyed Saba flora.
+The Saba forest package contains **85,451 roots** using five shared, immutable
+native Hero prototypes. Fine Wells Bay terrain rejects 401 sites, leaving
+**85,050 resident roots**. These temperate species are visual proxies, not
+surveyed Saba flora.
 Source authority is Forestmodeler's installed `NativeModelCatalog.json`, verified
 mature USDZs, `TreeSurfaceCatalog.json` and embedded `gene-surfaces-v3` maps.
 
@@ -39,8 +41,13 @@ A root uses **12 Float32 values / 48 bytes**: collar position, uniform scale,
 yaw, linear RGB tint, prototype ID, collar sink and two reserved values.
 
 Deterministic planting requires elevation 18–840 m, slope ≤1.1, vegetation-mask
-byte ≥96, valid coastal crown rims and crown-relative spacing. Crowns may overlap;
-this is not a competition growth simulation. Roots are seated once on rendered
+byte ≥96, valid coastal crown rims and crown-relative spacing. Native planting
+uses a **3 m candidate grid** and minimum stem separation of **0.32 times the
+summed, individually scaled maximum horizontal foliage radii**. Legacy defaults
+remain 6 m and 0.65. Maximum radii include sparse outlying branches; closer stems
+overlap interior foliage without modifying native geometry. This authored
+stand-density policy is not a competition growth simulation. The 250,000-root
+limit fails rather than truncating eligible roots. Roots are seated once on rendered
 terrain triangles, including Wells Bay's near tile. Invalid newly resolved sites
 are rejected. The old 42-tree rectangle is not excluded from native planting.
 
@@ -83,21 +90,23 @@ Landfall loading brings in roots and atlases first. Detailed native geometry
 and maps load in the background; close representations become available after
 their resources are ready. Native map families retain exact source dimensions.
 
-The authoring package `/tmp/waterworld-mature-runtime-218` contains
-**105,237,093 bytes across 87 files**, including catalogs, receipts and inspection
+The authoring package `/tmp/waterworld-mature-dense-runtime-230` contains
+**107,085,210 bytes**, including catalogs, receipts and inspection
 images. This total is not the first-load network cost.
 
 | Buffer | Original bytes | Stored gzip bytes |
 |---|---:|---:|
 | Vertices | 188,946,072 | 78,658,880 |
 | Indices | 34,786,680 | 13,716,582 |
-| Roots | 1,029,216 | 630,632 |
-| **Geometry total** | **224,761,968** | **93,006,094** |
+| Roots | 4,101,648 | 2,477,736 |
+| **Geometry total** | **227,834,400** | **94,853,198** |
 
 The two close-geometry buffers require **92,375,462 compressed bytes**
 (92.4 MB, 88.1 MiB), plus native material maps. Ten normative atlas gzip files
 total **3,474,888 bytes**; decoded atlas data is 80 MiB. Inspection PNGs and
-provenance files are not all fetched at runtime.
+provenance files are not all fetched at runtime. Denser planting changes roots
+and source receipts; native vertex/index buffers, PNGs and atlas gzip bytes
+remain unchanged.
 
 `manifest.files` retains decoded byte counts and SHA-256 hashes, adding
 `gzip: {file, bytes, sha256}` transport receipts. The loader verifies compressed
@@ -129,6 +138,7 @@ uv run --directory ../forestmodeler python \
   /absolute/path/waterworld/scripts/prepare-forest-instances.py \
   --native-dir /tmp/waterworld-mature-hero \
   --region /absolute/path/waterworld/assets/world/saba \
+  --spacing 3 --crown-spacing-factor .32 --max-roots 250000 \
   --output /tmp/waterworld-mature-forest
 
 node ../forestmodeler/scripts/bake_waterworld_impostors.mjs \
@@ -148,8 +158,8 @@ uses WebGPU. Packaging stages a fresh directory, verifies stored/decoded hashes
 and renames atomically. Copy the runtime pack into `assets/forest-scenery/saba`,
 retaining nested `impostors`; build and rendered qualification follow separately.
 
-Root executed mature conversion (211), native import (213), the complete
-full-sphere atlas bake (214) and packaging/integrity checks (218). These local
+Root executed mature conversion (211), denser native import (228), the complete
+full-sphere atlas bake (229) and packaging/integrity checks (230). These local
 receipts establish lineage and bytes, not publication, device frame rate or a
 certified rendered transition.
 
@@ -160,6 +170,8 @@ Focused fixtures were authored for:
   `../forestmodeler/tests/test_waterworld_mature_prototypes.py` (pytest).
 - Native import, explicit material indices, exact maps, rejection of altered
   sources, mature ages and original provenance: `tests/forest-native-import.test.py`.
+- Deterministic denser planting, unchanged site exclusions/prototypes, root
+  layout and failure rather than budget truncation: `tests/forest-instances-import.test.py`.
 - Lossless deterministic gzip, decoded hashes, materials, source mismatches
   and fresh-only output: `tests/forest-runtime-package.test.mjs`.
 
