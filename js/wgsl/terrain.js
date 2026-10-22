@@ -41,9 +41,25 @@ fn landFilteredBump(n:vec3f,dx:vec3f,dy:vec3f,hx:f32,hy:f32)->vec3f{
 }
 `;
 
-const LAND_SAMPLING = /* wgsl */ `
+export const TERRAIN_NEAR_HEIGHT = /* wgsl */ `
+struct NearLand {domain:vec4f,grid:vec4f};
+fn landNearContains(p:vec2f)->bool {
+  let uv=(p-nearTerrain.domain.xy)/nearTerrain.domain.z+0.5;
+  return nearTerrain.domain.w>0.5&&all(uv>=vec2f(0))&&all(uv<=vec2f(1));
+}
+fn landNearHeight(p:vec2f)->f32 {
+  let uv=clamp((p-nearTerrain.domain.xy)/nearTerrain.domain.z+0.5,vec2f(0),vec2f(1));
+  let side=u32(nearTerrain.grid.x);let limit=vec2i(i32(side)-1);
+  let q=uv*vec2f(limit);let i=min(vec2i(floor(q)),max(limit-1,vec2i(0)));let f=q-vec2f(i);
+  let next=min(i+1,limit);let a=nearElevation[u32(i.y)*side+u32(i.x)];
+  let b=nearElevation[u32(i.y)*side+u32(next.x)];let c=nearElevation[u32(next.y)*side+u32(i.x)];let d=nearElevation[u32(next.y)*side+u32(next.x)];
+  return select(d+(1.0-f.x)*(c-d)+(1.0-f.y)*(b-d),a+f.x*(b-a)+f.y*(c-a),f.x+f.y<=1.0);
+}
+`;
+const LAND_SAMPLING = TERRAIN_NEAR_HEIGHT + /* wgsl */ `
 struct Land { domain:vec4f };
 fn landHeight(p:vec2f)->f32 {
+  if(landNearContains(p)){return landNearHeight(p);}
   let uv=(p-LAND.domain.xy)/LAND.domain.z+0.5;
   if(any(uv<vec2f(0))||any(uv>vec2f(1))){return -120.0;}
   let q=uv*vec2f(textureDimensions(elevation)-1u);let i=vec2i(floor(q));let f=fract(q);
@@ -58,6 +74,8 @@ fn landHeight(p:vec2f)->f32 {
 export const COASTAL_WATER = /* wgsl */ `
 @group(2) @binding(0) var<uniform> LAND:Land;
 @group(2) @binding(1) var elevation:texture_2d<f32>;
+@group(2) @binding(2) var<uniform> nearTerrain:NearLand;
+@group(2) @binding(3) var<storage,read> nearElevation:array<f32>;
 ` + LAND_SAMPLING + /* wgsl */ `
 fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
   let bed=landHeight(p);let shallows=smoothstep(-6.0,0.5,bed);
@@ -79,6 +97,8 @@ export const TERRAIN_LIGHT = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(4) var elevation:texture_2d<f32>;
 @group(0) @binding(5) var lightOut:texture_storage_2d<rgba16float,write>;
 @group(0) @binding(6) var<uniform> LAND:Land;
+@group(0) @binding(7) var<uniform> nearTerrain:NearLand;
+@group(0) @binding(8) var<storage,read> nearElevation:array<f32>;
 ` + LAND_SAMPLING + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
@@ -121,6 +141,9 @@ struct Land {domain:vec4f};
 @group(0) @binding(9) var vegetationMask:texture_2d<f32>;
 @group(0) @binding(10) var leafSpray:texture_2d<f32>;
 @group(0) @binding(11) var<uniform> leafMean:vec4f;
+struct NearLand {domain:vec4f,grid:vec4f};
+@group(0) @binding(12) var<uniform> nearTerrain:NearLand;
+@group(0) @binding(13) var nearAlbedo:texture_2d<f32>;
 ` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + TERRAIN_FILTERING + /* wgsl */ `
 struct LandVertex {
   @builtin(position) pos:vec4f,
@@ -187,13 +210,36 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
     sunIlluminance(),skyAtmo(vec3f(0,1,0)),distance(world,F.camPos.xyz)*0.001);
   return vec4f(col*(1.0-ray.color.a)+ray.color.rgb,1.0);
 }
+// Separate planar footprints prevent vertical cliffs from inheriting the
+// overhead image's stretched material grain. Resolved near geometry only.
+fn landOrientedDetail(p:vec3f,n:vec3f,dx:vec3f,dy:vec3f,frequency:f32)->f32 {
+  let w0=pow(abs(n),vec3f(4));let w=w0/max(dot(w0,vec3f(1)),0.0001);
+  var value=0.0;
+  if(w.x>.01){value+=w.x*landFilteredNoise(p.zy*frequency,landMaterialFootprint(dx.zy,dy.zy)*frequency);}
+  if(w.y>.01){value+=w.y*landFilteredNoise(p.xz*frequency,landMaterialFootprint(dx.xz,dy.xz)*frequency);}
+  if(w.z>.01){value+=w.z*landFilteredNoise(p.xy*frequency,landMaterialFootprint(dx.xy,dy.xy)*frequency);}
+  return value;
+}
 fn landOpaque(in:LandVertex)->vec4f{
   let world=in.world;var n=normalize(in.normal);
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let dx=dpdx(world);let dy=dpdy(world);
   // Registered aerial RGB remains the regional colour seed. The neutral detail
   // below adds material scale, never a replacement green/brown island palette.
-  let source=pow(textureSampleGrad(landAlbedo,landSampler,uv,dx.xz/LAND.domain.z,dy.xz/LAND.domain.z).rgb,vec3f(2.2));
+  var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,dx.xz/LAND.domain.z,dy.xz/LAND.domain.z).rgb,vec3f(2.2));
+  let nearGround=in.kind.x>.5&&in.kind.x<1.5&&nearTerrain.domain.w>.5;
+  if(nearGround){
+    let nearUV=(world.xz-nearTerrain.domain.xy)/nearTerrain.domain.z+.5;
+    let fine=textureSampleGrad(nearAlbedo,landSampler,nearUV,dx.xz/nearTerrain.domain.z,dy.xz/nearTerrain.domain.z);
+    let meanLod=max(3.0,log2(max(landMaterialFootprint(dx.xz,dy.xz)*1024.0/nearTerrain.domain.z,1.0)));
+    let mean=textureSampleLevel(nearAlbedo,landSampler,nearUV,meanLod);
+    let fineLinear=pow(fine.rgb,vec3f(2.2));let meanLinear=pow(mean.rgb,vec3f(2.2));
+    // Independent metre-scale aerial detail, normalized to retain the original
+    // regional macro colour. Transparent source water never paints a cliff.
+    let ratio=clamp(fineLinear/max(meanLinear,vec3f(.015)),vec3f(.35),vec3f(2.8));
+    let edge=min(min(nearUV.x,nearUV.y),min(1.0-nearUV.x,1.0-nearUV.y))*nearTerrain.domain.z;
+    source=mix(source,source*ratio,smoothstep(0.0,32.0,edge)*smoothstep(.5,.95,min(fine.a,mean.a)));
+  }
   let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0.0).r;
   let footprint=max(length(dx),length(dy));
   let detailFade=1.0-smoothstep(0.25,2.5,footprint);
@@ -209,6 +255,14 @@ fn landOpaque(in:LandVertex)->vec4f{
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
   if(in.kind.x<2.5){
+    if(nearGround){
+      let rockMass=landOrientedDetail(world,n,dx,dy,.24);
+      let fracture=landOrientedDetail(world+vec3f(19.1,7.3,4.7),n,dx,dy,1.35);
+      let gravel=landOrientedDetail(world,n,dx,dy,7.5);
+      albedo=source*(1.0+rockMass*.22+fracture*.13+gravel*.08);
+      relief=mix(gravel*.018+fracture*.025,rockMass*.28+fracture*.11+gravel*.014,rocky);
+      roughness=clamp(.91+gravel*.08-rocky*.08,.72,.98);
+    }else{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
     // bark never execute these ground-material evaluations.
@@ -224,6 +278,7 @@ fn landOpaque(in:LandVertex)->vec4f{
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006);
     relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky);
     roughness=clamp(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.65,0.98);
+    }
   }else if(!crown){
     let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
     let ridges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);

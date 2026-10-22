@@ -33,7 +33,7 @@ export function seedVegetation(region,sampleHeight,mask){
 // Authored local ground cover. Region-resident patch bounds are cheap; exact
 // roots are expanded lazily only after frustum and projected-extent culling.
 export const GROUND_COVER=Object.freeze({patchSpan:64,grassPerPatch:32,rocksPerPatch:3,variants:4,maxExtent:5.1});
-export function createGroundCoverPatches(region,sampleHeight){
+export function createGroundCoverPatches(region,sampleHeight,extraHeightBounds=null){
   const span=GROUND_COVER.patchSpan,count=Math.ceil(region.span/span),patches=[];
   for(let j=0;j<count;j++)for(let i=0;i<count;i++){
     const x=region.x-region.span*.5+i*span,z=region.z-region.span*.5+j*span;let low=Infinity,high=-Infinity;
@@ -43,6 +43,7 @@ export function createGroundCoverPatches(region,sampleHeight){
     for(let v=0;v<=divisions;v++)for(let u=0;u<=divisions;u++){
       const h=sampleHeight(x+span*u/divisions,z+span*v/divisions);low=Math.min(low,h);high=Math.max(high,h);
     }
+    const extra=extraHeightBounds?.(x,z,span);if(extra){low=Math.min(low,extra.low);high=Math.max(high,extra.high);}
     if(high<1||low>855)continue;
     const id=patches.length,r=GROUND_COVER.maxExtent;
     patches.push({id,seed:(region.vegetationSeed??47231)^Math.imul(i+1,73856093)^Math.imul(j+1,19349663),x,z,ids:[id],

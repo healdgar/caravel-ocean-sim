@@ -22,6 +22,12 @@ from rasterio.fill import fillnodata
 from scipy.ndimage import distance_transform_edt, label, find_objects
 
 ROOT = Path(__file__).resolve().parents[1]
+if '--near-tile' in sys.argv:
+    # Optional bounded export has its own receipts and never replaces the
+    # resident island height/albedo/biome bytes. Root runs acquisition/export.
+    import runpy
+    runpy.run_path(str(ROOT/'scripts/prepare-wells-bay.py'), run_name='__main__')
+    raise SystemExit
 OUT = ROOT / 'assets/world/saba'
 arguments=[arg for arg in sys.argv[1:] if not arg.startswith('--')]
 IMAGERY_ONLY='--imagery-only' in sys.argv
