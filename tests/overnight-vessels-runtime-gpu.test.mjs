@@ -10,7 +10,10 @@ import {createDevServer} from '../server.mjs';
 let server,browser,origin;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
-  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+  // macOS headless Metal dispatches wheel events without applying compositor
+  // scrolling, even on a plain HTML scroll box. Use a real native window for
+  // these interaction gates rather than forcing the application's scrollTop.
+  browser=await chromium.launch({headless:process.env.WEBGPU_BACKEND!=='metal',executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
 });
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 
@@ -183,7 +186,7 @@ test('mixed real fleet keeps rowing water, crew, geometry and command state inde
   }finally{await page.close();}
 });
 
-test('all five later vessels retain unobstructed44px helm and sticky settings on compact portrait and landscape',{timeout:600000},async t=>{
+test('all five later vessels retain unobstructed 44px helm and sticky settings on compact portrait and landscape',{timeout:600000},async t=>{
   const sizes=[{width:320,height:360},{width:402,height:666},{width:844,height:390}],receipts=[];
   for(const id of Object.keys(companies)){
     const {page,errors}=await openRuntime('/docs/index.html',{ship:id,boatRudder:'0',headingHud:'1',speedHud:'1',windHud:'1'});
@@ -243,7 +246,9 @@ test('all five later vessels retain unobstructed44px helm and sticky settings on
         assert.ok(metrics.scrollHeight>metrics.height,context+' fixture exercises a real overflowing settings body');
         // Wheel input exercises real overflow scrolling; no scrollTop, hidden,
         // style, open-state or production command properties are forced.
-        await page.mouse.move(box.x+4,box.y+box.height/2);await page.mouse.wheel(0,metrics.scrollHeight+size.height);
+        await page.mouse.move(box.x+4,box.y+box.height/2);await page.mouse.wheel(0,-metrics.scrollHeight-size.height);
+        await page.waitForFunction(()=>document.querySelector('#boat-panel .panel-body').scrollTop===0,undefined,{polling:20,timeout:5000});
+        await page.mouse.wheel(0,metrics.scrollHeight+size.height);
         await page.waitForFunction(()=>{const el=document.querySelector('#boat-panel .panel-body');return el.scrollTop>0&&el.scrollTop+el.clientHeight>=el.scrollHeight-2;},undefined,{polling:20,timeout:5000});
         const after=await reach(close,context+' after settings scroll');assert.ok(Math.abs(after.y-before.y)<1&&Math.abs(after.x-before.x)<1,context+' Hide remains fixed in its actual header');
         assert.equal(await body.evaluate(el=>el.scrollWidth<=el.clientWidth),true);await page.getByRole('button',{name:'Hide ship settings',exact:true}).click();
