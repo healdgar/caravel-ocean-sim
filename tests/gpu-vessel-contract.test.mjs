@@ -43,3 +43,10 @@ test('observational guard rejects disabled dispatch, CPU animation and geometry 
   const inspect=r=>assertGPUVesselFrame({errors:[],rows:[r]},['future-model']);inspect(row);
   for(const mutation of [{required:false},{cpuPose:true},{pose:false},{dispatches:0},{main:0},{submerged:0},{shadow:0},{wetness:0},{geometryWrites:[{offset:0,bytes:36}]},{poseWrites:[{offset:0,bytes:32}]},{cpuMeshChanged:true}])assert.throws(()=>inspect({...row,...mutation}));
 });
+
+test('source guard rejects CPU staging copies into vessel geometry while preserving sparse probe readback',()=>{
+  const valid='function frame() { encoder.copyBufferToBuffer(v.probe.output,0,v.probe.read,0,64); v.pose.update(ship,time,wind); }';
+  assertNoCPUVesselAnimation(valid);
+  for(const destination of ['v.vertexBuffer','v.pose.buffer'])
+    assert.throws(()=>assertNoCPUVesselAnimation(valid.replace('v.pose.update(ship,time,wind);',`encoder.copyBufferToBuffer(cpuStaging,0,${destination},0,cpuBytes);`)),/CPU staged vertex-animation/);
+});

@@ -40,4 +40,5 @@ export function assertNoCPUVesselAnimation(source){
   assert.ok(frame.length>source.length*.05,'inspect the actual production frame body');
   assert.doesNotMatch(frame,/writeBuffer\s*\(\s*\w+\.vertexBuffer\s*,/,'full animated mesh and partial vertex animation uploads are prohibited');
   assert.doesNotMatch(frame,/\bupdateGunRecoilVertices\s*\(/,'gun recoil must remain on the GPU');
+  assert.doesNotMatch(frame,/copyBufferToBuffer\s*\([^,]+,[^,]+,\s*\w+\.(?:vertexBuffer|pose\.buffer)\s*,/,'CPU staged vertex-animation copies are prohibited');
 }
