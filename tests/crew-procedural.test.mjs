@@ -135,7 +135,10 @@ test('Moth work routes clear the actual cockpit coaming with a complete human en
     const path=proceduralCrewRoute(sailor,target,boat);assert.ok(path,'every actual work station must remain reachable through the real entry');
     for(let i=1;i<path.length;i++){
       const a=[path[i-1][0]*sx,path[i-1][2]*sz],b=[path[i][0]*sx,path[i][2]*sz],samples=Math.max(1,Math.ceil(Math.hypot(...b.map((v,j)=>v-a[j]))/.04));
-      for(let k=0;k<=samples;k++){const p=a.map((v,j)=>v+(b[j]-v)*k/samples);assert.ok(walls.every(wall=>clearance(p,wall)>=.22-1e-6),'human body never passes through a coaming wall or its opening jamb');}
+      for(let k=0;k<=samples;k++){
+        const p=a.map((v,j)=>v+(b[j]-v)*k/samples),distances=walls.map(wall=>clearance(p,wall)),nearest=Math.min(...distances),wall=distances.indexOf(nearest);
+        assert.ok(nearest>=.22-1e-6,'human body never passes through a coaming wall or its opening jamb '+JSON.stringify({target,p,wall:walls[wall],clearance:nearest,edge:[a,b],pathIndex:i}));
+      }
     }
   }
 });
