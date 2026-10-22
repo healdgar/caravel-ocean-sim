@@ -39,6 +39,26 @@ derived SHA-256 hashes, licensing, coordinate assignment and processing limits.
 source downloads. CC BY 4.0 applies to these data derivatives; the project's MIT
 code licence does not replace it. No endorsement by the source provider is implied.
 
+## Wells Bay mapped shoreline
+
+© [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
+[Open Database Licence1.0](https://opendatacommons.org/licenses/odbl/1-0/).
+`assets/world/saba/wells-bay-shoreline.geojson` contains directed closed coastline
+rings from the recorded Overpass reply (snapshot July24,2026; acquired October22).
+The exact query, raw-reply hash and way IDs are retained. Recreate the rings with
+`scripts/prepare-shoreline.py` and the coastal correction with
+`scripts/prepare-wells-bay.py`. Source data and the reconstruction recipe are
+distributed in this public repository; the coastline-derived composite retains
+ODbL terms alongside the original terrain/imagery CC BY attribution. MIT applies
+to project code and does not replace these data licences.
+
+Mapped mean-high-water coastline constrains only unsupported coastal heights
+and imagery support. Its4m safety band is authored, not a certified accuracy.
+Measured ground remains authoritative; inland return gaps retain terrain. The
+32m tile perimeter blends back to the unchanged regional terrain. Neither this
+mapping constraint nor the authored submerged skirt is surveyed bathymetry or a
+reconstructed beach/tide profile.
+
 ## Earlier global terrain prototype and world overview
 
 The earlier Saba terrain prototype derived from [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/),

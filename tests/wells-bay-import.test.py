@@ -56,6 +56,35 @@ class NearTerrainTests(unittest.TestCase):
         self.assertEqual(result[2, 6, 3], 99); self.assertEqual(result[2, 5, 3], 0)
         self.assertTrue(np.all(result[0, :, 3] == 0), 'Unobserved crop exterior is conservative')
 
+    def test_mapped_ocean_removes_false_positive_coast_but_preserves_inland_gaps_and_rocks(self):
+        axis = np.arange(65)*2; x, z = np.meshgrid(axis, axis)
+        coarse = np.full_like(x, 40, dtype=float)
+        measured = x >= 64; measured[32, 48] = False
+        measured[32, 16] = True  # A surveyed offshore rock outranks approximate mapping.
+        fine = np.full_like(coarse, 45)
+        ocean = x < 60; distance = np.maximum(0, 64-x)
+        result = IMPORTER.blend_near_heights(fine, measured, coarse, x, z, 2, ocean, distance)
+        self.assertLess(result[32, 20], 0, 'Positive coarse fill is not evidence of land')
+        self.assertEqual(result[32, 48], 40, 'Unknown inland survey gaps retain terrain')
+        self.assertEqual(result[32, 16], 45, 'Measured rock is never flattened by mapping')
+        self.assertEqual(result[32, 32], 45)
+        np.testing.assert_array_equal(result[0], coarse[0])
+        np.testing.assert_array_equal(result[:, 0], coarse[:, 0])
+
+    def test_shoreline_is_independent_of_colour_with_an_uncertainty_band(self):
+        manifest = dict(latitude=0, longitude=0, localOrigin=dict(x=0, z=0))
+        axis = np.arange(17)*2; x, z = np.meshgrid(axis, axis)
+        ring = [[16/111195, 10/111195], [50/111195, 10/111195],
+                [50/111195, -50/111195], [16/111195, -50/111195], [16/111195, 10/111195]]
+        geo = dict(features=[dict(geometry=dict(type='Polygon', coordinates=[ring]))])
+        ocean, distance, land = IMPORTER.shoreline_context(geo, manifest, x, z, 2)
+        self.assertTrue(ocean[8, 4]); self.assertFalse(ocean[8, 7], '2m from mapping is uncertain')
+        self.assertFalse(ocean[8, 10]); self.assertGreater(distance[8, 4], 4)
+        self.assertTrue(land[8, 10]); self.assertFalse(land[8, 4])
+        ring.pop()
+        with self.assertRaises(ValueError):
+            IMPORTER.shoreline_context(geo, manifest, x, z, 2)
+
     def test_measured_imagery_coverage_is_independent_and_never_invented(self):
         pixels = np.full((4, 4, 4), 255, dtype=np.uint8)
         coverage = np.full((4, 4), .95, dtype=np.float32); coverage[1, 1] = .94
@@ -67,6 +96,15 @@ class NearTerrainTests(unittest.TestCase):
         coverage[0, 0] = np.nan
         with self.assertRaises(ValueError):
             IMPORTER.mask_near_albedo(pixels, coverage)
+
+    def test_mapped_inland_qualifies_missing_returns_but_never_sea_or_shore_band(self):
+        coverage = np.zeros((32, 32), dtype=np.float32)
+        land = np.zeros_like(coverage, dtype=bool); land[:, 12:] = True
+        result = IMPORTER.qualify_inland_imagery(coverage, land)
+        self.assertEqual(result[16, 20], 1, 'Dry inland photograph survives missing ground returns')
+        self.assertEqual(result[16, 8], 0, 'Mapped ocean remains unsupported')
+        self.assertEqual(result[16, 14], 0, 'Conservative shore band remains unsupported')
+        np.testing.assert_array_equal(coverage, np.zeros_like(coverage))
 
 
 if __name__ == '__main__':

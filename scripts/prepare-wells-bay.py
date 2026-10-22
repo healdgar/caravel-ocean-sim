@@ -21,6 +21,7 @@ import rasterio
 from rasterio.transform import Affine
 from rasterio.warp import reproject, Resampling, transform_bounds
 from rasterio.windows import from_bounds, Window
+from rasterio.features import rasterize
 from scipy.ndimage import distance_transform_edt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,12 +62,47 @@ def near_coordinates(manifest, spacing):
     return x, z, lon, lat
 
 
-def blend_near_heights(measured_heights, measured, coarse, x, z, spacing):
+def shoreline_context(geojson, manifest, x, z, spacing, tolerance=4):
+    """Independent mapped shore; never infer water from blue/shadowed imagery.
+
+    Coastline is approximate mean high water, not a bathymetric survey. A 4m
+    uncertainty band cannot override measured ground or certify missing water.
+    """
+    origin = manifest['localOrigin']; shapes = []
+    for feature in geojson['features']:
+        geometry = feature['geometry']
+        if geometry['type'] != 'Polygon':
+            raise ValueError('Expected closed coastline polygons')
+        rings = []
+        for ring in geometry['coordinates']:
+            if len(ring) < 4 or ring[0] != ring[-1]:
+                raise ValueError('Open coastline ring')
+            rings.append([[(lon-manifest['longitude'])*111195*math.cos(math.radians(manifest['latitude']))+origin['x'],
+                           (manifest['latitude']-lat)*111195+origin['z']] for lon, lat in ring])
+        shapes.append((dict(type='Polygon', coordinates=rings), 1))
+    if not shapes or tolerance < 0:
+        raise ValueError('Missing coastline or invalid tolerance')
+    land = rasterize(shapes, out_shape=x.shape, transform=Affine(spacing, 0, x.min()-spacing/2,
+                     0, spacing, z.min()-spacing/2), fill=0, dtype='uint8').astype(bool)
+    if not land.any() or land.all():
+        raise ValueError('Mapped shoreline does not cross the requested coastal tile')
+    distance = np.maximum(0, distance_transform_edt(~land, sampling=spacing)-spacing/2)
+    return (~land) & (distance > tolerance), distance, land
+
+
+def blend_near_heights(measured_heights, measured, coarse, x, z, spacing, confirmed_ocean=None, shore_distance=None):
     # A labelled authored shallow skirt is separate from the measured dry land.
     # It is only a 48m shore transition, never a claimed bathymetric survey.
     distance = np.maximum(0, distance_transform_edt(~measured, sampling=spacing)-spacing/2)
     t = np.clip(distance/48, 0, 1); weight = 1-t*t*(3-2*t)
     authored = np.where(coarse <= 0, coarse*(1-weight)-np.maximum(.05, distance*.15)*weight, coarse)
+    if confirmed_ocean is not None:
+        if confirmed_ocean.shape != coarse.shape or shore_distance is None or shore_distance.shape != coarse.shape:
+            raise ValueError('Mapped shore is not registered to terrain')
+        # Missing inland returns keep their resident surface; confirmed ocean
+        # cannot inherit the coarse gap-filler's positive coastal overhang.
+        ocean_bed = -np.minimum(120, np.maximum(.05, shore_distance*.15))
+        authored = np.where(confirmed_ocean, ocean_bed, authored)
     fine = np.where(measured, measured_heights, authored)
     edge = np.minimum.reduce([x-x.min(), x.max()-x, z-z.min(), z.max()-z])
     t = np.clip(edge/32, 0, 1); blend = t*t*(3-2*t)
@@ -92,6 +128,14 @@ def mask_near_albedo(pixels, dry_coverage, pixel_metres=1, shore_inset_metres=1)
     result = pixels.copy()
     result[:, :, 3] = np.where(supported, pixels[:, :, 3], 0)
     return result
+
+
+def qualify_inland_imagery(coverage, mapped_land, spacing=1, inset=4):
+    """Mapped inland gaps may qualify dry imagery; never classify by RGB hue."""
+    if coverage.shape != mapped_land.shape or spacing <= 0 or inset < 0:
+        raise ValueError('Unregistered inland imagery support')
+    inland = np.maximum(0, distance_transform_edt(mapped_land, sampling=spacing)-spacing/2)
+    return np.maximum(coverage, (inland > inset).astype(np.float32))
 
 
 def prepare(cache, region_path, spacing=2, force=False):
@@ -131,7 +175,10 @@ def prepare(cache, region_path, spacing=2, force=False):
         raise ValueError('The original survey has no dry terrain in the requested crop')
     coarse = np.frombuffer((region_path/'height.bin').read_bytes(), dtype='<i2').astype(np.float64).reshape(parent['gridSize'], -1)/4
     base = triangle_sample(coarse, x, z, parent)
-    final = blend_near_heights(heights, measured, base, x, z, spacing)
+    shore_path = region_path/'wells-bay-shoreline.geojson'
+    shore = json.loads(shore_path.read_text())
+    ocean, shore_distance, _ = shoreline_context(shore, parent, x, z, spacing)
+    final = blend_near_heights(heights, measured, base, x, z, spacing, ocean, shore_distance)
     if not np.isfinite(final).all():
         raise ValueError('Nonfinite near terrain')
     # Request a small true geographic crop. Increasing the old 8m island image's
@@ -154,8 +201,14 @@ def prepare(cache, region_path, spacing=2, force=False):
         latitude = north-(j+.5)/1024*(north-south)
         row = max(0, min(1023, round((wms_bounds[3]-my(latitude))/(wms_bounds[3]-wms_bounds[1])*1024-.5)))
         registered[j] = pixels[row]
-    # Opaque source water is still water. Preserve every registered RGB byte,
-    # but intersect source alpha with independently measured dry DTM support.
+    # Ground-return gaps do not turn dry cliffs/forest into photographed water.
+    # The independent shoreline can also qualify imagery well inside mapped
+    # land. Keep a conservative4m inland buffer plus the existing1m pixel inset.
+    ix, iz = np.meshgrid(x.min()+np.arange(1024)+.5, z.min()+np.arange(1024)+.5)
+    _, _, image_land = shoreline_context(shore, parent, ix, iz, 1)
+    image_coverage = qualify_inland_imagery(image_coverage, image_land)
+    # Opaque source water is still water. Preserve every registered RGB byte;
+    # alpha records independent dry support, never a colour/hue classification.
     image = Image.fromarray(mask_near_albedo(registered, image_coverage))
     with tempfile.TemporaryDirectory(prefix='wells-bay-', dir=region_path) as temporary:
         folder = Path(temporary)
@@ -171,14 +224,22 @@ def prepare(cache, region_path, spacing=2, force=False):
                 verticalDatum='Publisher local DTM heights; no hydrographic datum conversion',
                 processing='Original raster crop; area-average directly to near grid without intermediate16m reduction. Binary measured mask records dry source support.32m perimeter blends to exact resident triangle surface.'),
             authoredWetCells=dict(provenance='Unmeasured cells use resident terrain; a48m dry-shore-distance skirt on wet cells is authored, not surveyed bathymetry or a reconstructed beach.',
-                distanceDepthSlope=.15, shallowMinimumMetres=.05, transitionMetres=48),
+                distanceDepthSlope=.15, shallowMinimumMetres=.05, transitionMetres=48,
+                mappedOceanOverride='Unmeasured cells more than4m outside the independent mapped coastline receive negative authored depth even where the resident gap-fill was positive; measured ground and inland gaps remain unchanged.32m perimeter seam remains exact.',
+                correctedPositiveCoarseNodes=int(np.sum(ocean & ~measured & (base > 0)))),
+            derivedDataLicence='Coastline-derived composite: ODbL1.0; terrain and imagery source attribution remains CC BY4.0',
+            shoreline=dict(sourceFile='assets/world/saba/wells-bay-shoreline.geojson',
+                sourceDataURL='https://raw.githubusercontent.com/healdgar/caravel-ocean-sim/main/assets/world/saba/wells-bay-shoreline.geojson', sha256=digest_file(shore_path),
+                source=shore['source'], attribution=shore['attribution'], licence=shore['licence'],
+                snapshot=shore['snapshot'], uncertaintyMetres=4,
+                interpretation='Approximate mean high water coastline, not a surveyed beach profile, instantaneous tide or measured bathymetry. A mapping constraint only where original dry ground is absent.'),
             imagery=dict(url=url, sourceSHA256=digest_file(image_path), size=1024, derivedSpacingMetres=1,
                 licence='CC BY 4.0', licenceURL='https://creativecommons.org/licenses/by/4.0/',
                 acquisition=parent['imagery']['acquisition'],
-                alphaMask=dict(source='Original hash-verified 0.5m DTM dry-return coverage, independently area-averaged onto the 1m imagery grid',
+                alphaMask=dict(source='Original hash-verified0.5m DTM dry-return coverage OR independent mapped land more than4m inland, registered onto the1m imagery grid',
                     minimumDryCoverage=.95, shoreInsetMetres=1, modifiedChannels=['alpha'],
                     sourceAlpha='Intersected with measured dry support; original RGB retained, including masked pixels'),
-                processing='Independent WMS crop reprojected to local metric domain; RGB preserved. Alpha modified by measured dry support with a 1m shore inset, not by WMS water opacity or authored bathymetry. Native source resolution is not certified by request dimensions.'))
+                processing='Independent WMS crop reprojected to local metric domain; RGB preserved. Alpha qualified by measured dry support or mapped inland support with conservative shore insets, not by colour, WMS water opacity or authored bathymetry. Native source resolution is not certified by request dimensions.'))
         (folder/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
         output.mkdir(exist_ok=True)
         for name in (*files, 'manifest.json'):

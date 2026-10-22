@@ -41,7 +41,7 @@ export function createLandfallUI({dock,active,stage,weather,onWeather,onOpen,get
     <div class="landfall-weather" role="group" aria-label="Landfall weather"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Saba is the first rendered region.</p>
-    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), downsampled, reprojected and modified for terrain, colour and vegetation seeds. World outline: Natural Earth (public domain). Trees and historical cleanup are authored approximations. Shore clearance is approximate; ports and voyage compression are still to come.</p></details>
+    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), downsampled, reprojected and modified for terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain). Trees and historical cleanup are authored approximations. Shore clearance is approximate; ports and voyage compression are still to come.</p></details>
     <button id="landfall-ocean">Return to open ocean</button></div>`;
   const setOpen=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open));document.body.classList.toggle('landfall-open',open);
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
