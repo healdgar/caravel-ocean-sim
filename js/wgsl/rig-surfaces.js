@@ -220,13 +220,16 @@ fn surfaceGpuSupportsPair(initial:SurfaceGpuVectorPair,reference:SurfaceGpuVecto
       let owner=u32(info.z);let descriptor=surfaceGpuDescriptor(owner);let ownerPose=surfaceGpuPose(owner);
       wideA=surfaceGpuWideYard(owner,wideA,ownerPose);wideAxis=surfaceGpuWideMatrix(wideAxis,surfaceGpuYardAxes(descriptor,ownerPose));
     }
-    let relativeA=surfaceGpuWideSubtract(wideA,origin);let a=relativeA.high+relativeA.low;let axis=wideAxis.high+wideAxis.low;
-    let length2=surfaceGpuDot(axis,axis);if(length2<1e-12){continue;}
-    let projection=surfaceGpuDot(p.value-a,axis)/length2;let coordinate=clamp(projection,0.0,1.0);
-    let coordinateChange=surfaceGpuClampChange(projection,surfaceGpuDot(p.change,axis)/length2);
-    let q=SurfaceGpuVectorPair(a+axis*coordinate,axis*coordinateChange);
+    let relativeA=surfaceGpuWideSubtract(wideA,origin);let axis=wideAxis.high+wideAxis.low;
+    let squaredAxis=surfaceGpuWideDot(wideAxis,wideAxis);let length2=squaredAxis.value+squaredAxis.change;if(length2<1e-12){continue;}
+    let relativePoint=surfaceGpuWideSubtract(SurfaceGpuWide(p.value,vec3f(0)),relativeA);
+    let projection=surfaceGpuWideScalarDivide(surfaceGpuWideDot(relativePoint,wideAxis),squaredAxis);
+    let coordinate=clamp(projection.value,0.0,1.0);let coordinateLow=surfaceGpuClampChange(projection.value,projection.change);
+    let coordinateChange=surfaceGpuClampChange(projection.value,projection.change+surfaceGpuDot(p.change,axis)/length2)-coordinateLow;
+    let nearest=surfaceGpuWideAdd(relativeA,surfaceGpuWideScalePair(wideAxis,SurfaceGpuScalarPair(coordinate,coordinateLow)));
+    let q=SurfaceGpuVectorPair(nearest.high+nearest.low,axis*coordinateChange);
     let delta=SurfaceGpuVectorPair(p.value-q.value,p.change-q.change);
-    let radius=SurfaceGpuScalarPair(A.w+(B.w-A.w)*coordinate+clearance,(B.w-A.w)*coordinateChange);
+    let radius=SurfaceGpuScalarPair(fma(B.w-A.w,coordinate,A.w)+((B.w-A.w)*coordinateLow+clearance),(B.w-A.w)*coordinateChange);
     let mastBarrier=(flags&1u)!=0u&&info.x==surface.info.w&&surface.contact.y!=0.0;
     var direction=normal;if(mastBarrier){direction=vec3f(0,0,surface.contact.y);}
     var contactNormal=SurfaceGpuVectorPair(cross(axis,cross(direction,axis))/length2,vec3f(0));
