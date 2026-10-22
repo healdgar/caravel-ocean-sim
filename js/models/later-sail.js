@@ -41,7 +41,7 @@ function laterSailSquare(design,id,name,mast,headY,footY,yardFt,armFt,footFt){
   const z=pivot[2]-standOff,footStandOff=(laterSailMastRadiusAt(design,mast,footY)+clearance)*Math.hypot(...axis)/axis[1];
   const footZ=laterSailMastAt(design,mast,footY)[2]-footStandOff;
   const head=(yardFt-2*armFt)*laterSailFoot/sx,foot=footFt*laterSailFoot/sx;
-  return {id,name,mast,controlGroup:m.controlGroup,kind:'square',pivot,
+  return {id,name,mast,controlGroup:m.controlGroup,kind:'square',pivot,mastContactSide:'fore',
     corners:[[-head/2,headY,z],[head/2,headY,z],[foot/2,footY,footZ],[-foot/2,footY,footZ]],
     belly:Math.min(.18,(headY-footY)*.11),braceLimit:.67,footRise:.035,contactClearance:.035,
     yardStandOff:{kind:'tapered-mast-and-yard',distance:standOff,clearance},
@@ -67,7 +67,7 @@ function laterSailTrackGaff(design,surface){
   const sewnA=[0,a[1],high[2]+(laterSailMastRadiusAt(design,surface.mast,a[1])+rootRadius(a)+clearance)/cosine];
   const sewnD=[0,d[1],low[2]+(laterSailMastRadiusAt(design,surface.mast,d[1])+rootRadius(d)+clearance)/cosine];
   const replacement=p=>p.every((v,i)=>v===a[i])?sewnA:p.every((v,i)=>v===d[i])?sewnD:p;
-  return {...surface,pivot:low,hingeAxis:axis,corners:[sewnA,surface.corners[1],surface.corners[2],sewnD],
+  return {...surface,pivot:low,hingeAxis:axis,mastContactSide:'aft',corners:[sewnA,surface.corners[1],surface.corners[2],sewnD],
     spars:surface.spars?.map(s=>({...s,a:replacement(s.a),b:replacement(s.b)})),
     luffTrack:{kind:'tapered-mast-hoops',clearance}};
 }
@@ -78,7 +78,7 @@ function laterSailStayHead(design,surface){
   const offset=(laterSailMastRadiusAt(design,surface.mast,head[1])+stayRadius+clearance)*Math.hypot(...axis)/axis[1];
   // A stay terminates at a tang outside the mast. Placing the pinned head on
   // the axis leaves the actual canvas embedded even when free cloth collides.
-  return {...surface,corners:[surface.corners[0],[0,head[1],at[2]-offset],surface.corners[2]],
+  return {...surface,mastContactSide:'fore',corners:[surface.corners[0],[0,head[1],at[2]-offset],surface.corners[2]],
     headFitting:{kind:'mast-fore-tang',clearance,stayRadius}};
 }
 function laterSailCloudCrew(){
@@ -236,12 +236,18 @@ for(const [index,points,boomRadius]of [[0,[laterSailMothMainTack,laterSailMothMa
   const m=laterSailMoth.masts[index],foot=laterSailMastAt(laterSailMoth,index,laterSailDeckOf(laterSailMoth,m.z)),top=laterSailMastAt(laterSailMoth,index,m.height),axis=top.map((v,i)=>v-foot[i]);
   for(const [j,point]of points.entries())point[2]+=(laterSailMastRadiusAt(laterSailMoth,index,point[1])+(j===0?boomRadius:0)+.012/laterSailMothScale)*Math.hypot(...axis)/axis[1];
 }
-const laterSailMothMainClew=[0,1.35/laterSailMothScale,laterSailMothMainTack[2]+4.75/laterSailMothScale],laterSailMothMizzenClew=[0,1.45/laterSailMothScale,laterSailMothMizzenTack[2]+2.75/laterSailMothScale];
+const laterSailMothBoomY=1.35/laterSailMothScale,laterSailMothMizzenAtBoom=laterSailMastAt(laterSailMoth,1,laterSailMothBoomY);
+const laterSailMothMizzenAxis=laterSailMastAt(laterSailMoth,1,laterSailMoth.masts[1].height).map((v,i)=>v-laterSailMastAt(laterSailMoth,1,laterSailDeckOf(laterSailMoth,laterSailMoth.masts[1].z))[i]);
+// The finite main boom and its clew terminate ahead of the mizzen shaft, not
+// merely ahead of its centreline. Preserve the authored 4.75 m span as a cap.
+const laterSailMothMainBoomEnd=Math.min(laterSailMothMainTack[2]+4.75/laterSailMothScale,
+  laterSailMothMizzenAtBoom[2]-(laterSailMastRadiusAt(laterSailMoth,1,laterSailMothBoomY)+.065/laterSailMothX+.012/laterSailMothScale)*Math.hypot(...laterSailMothMizzenAxis)/laterSailMothMizzenAxis[1]);
+const laterSailMothMainClew=[0,laterSailMothBoomY,laterSailMothMainBoomEnd],laterSailMothMizzenClew=[0,1.45/laterSailMothScale,laterSailMothMizzenTack[2]+2.75/laterSailMothScale];
 laterSailMoth.surfaces.push(
   laterSailTriangle(1,'mainsail',0,'main','bermudan',[laterSailMothMainTack,laterSailMothMainHead,laterSailMothMainClew],
-    {belly:.14,rotationAxis:'luff',spars:[{id:'main-boom',kind:'boom',a:laterSailMothMainTack,b:laterSailMothMainClew,radius:.065/laterSailMothX}]}),
+    {belly:.14,rotationAxis:'luff',mastContactSide:'aft',spars:[{id:'main-boom',kind:'boom',a:laterSailMothMainTack,b:laterSailMothMainClew,radius:.065/laterSailMothX}]}),
   laterSailTriangle(2,'mizzen',1,'mizzen','bermudan',[laterSailMothMizzenTack,laterSailMothMizzenHead,laterSailMothMizzenClew],
-    {belly:.10,rotationAxis:'luff',spars:[{id:'mizzen-boom',kind:'boom',a:laterSailMothMizzenTack,b:laterSailMothMizzenClew,radius:.05/laterSailMothX}]}),
+    {belly:.10,rotationAxis:'luff',mastContactSide:'aft',spars:[{id:'mizzen-boom',kind:'boom',a:laterSailMothMizzenTack,b:laterSailMothMizzenClew,radius:.05/laterSailMothX}]}),
   laterSailTriangle(3,'working-jib',0,'fore','headsail',[[0,.90/laterSailMothScale,-5.15],laterSailMastAt(laterSailMoth,0,12.9/laterSailMothScale),[0,1.10/laterSailMothScale,.30]],{belly:.16}),
   laterSailTriangle(4,'inner-staysail',0,'fore','headsail',[[0,.92/laterSailMothScale,-3.35],laterSailMastAt(laterSailMoth,0,9.70/laterSailMothScale),[0,1.10/laterSailMothScale,.15]],{belly:.11})
 );

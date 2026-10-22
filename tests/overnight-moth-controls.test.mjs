@@ -22,4 +22,7 @@ test('Moth headsail and mainsail belay on opposite accessible sides aft of the a
     }
   }
   assert.ok(c.controlStations.fore.position[0]>0&&c.controlStations.main.position[0]<0);
+  const mizzen=c.controlStations.mizzen,sx=d.runtime.beam/d.frame.beam;
+  assert.ok(Math.abs(mizzen.position[0])*sx<=d.cockpit.halfWidth*sx-.22-.02,'physical crew envelope remains inside the real cockpit coaming');
+  assert.deepEqual(c.lines[mizzen.lineIndex].b,mizzen.lead,'finite cockpit clearance moves the actual belaying line with its worker');
 });

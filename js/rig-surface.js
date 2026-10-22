@@ -109,13 +109,16 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
   const pin=surfaceSewnWeight(surface,u,v);if(pin===0)return point;
   const clearance=surface.contactClearance??.045,band=surface.contactBand??.25;
   if(!Number.isFinite(clearance)||clearance<0||!Number.isFinite(band)||band<=0)throw Error('Invalid surface contact margin');
-  const p=[...point],supports=[...(context.supports??[]),...(context.masts??[]).map(m=>({a:m.foot,b:m.head,r:m.radius,kind:'mast'}))];
+  const p=[...point],supports=[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
   for(const support of supports){
     const {a,b}=support,r=(support.r??0)+clearance;
     if(!surfaceFinitePoint(a)||!surfaceFinitePoint(b)||!Number.isFinite(r)||r<0)throw Error('Invalid rig support descriptor');
     const axis=surfaceSubtract(b,a),length2=surfaceDot(axis,axis);if(length2<1e-12)throw Error('Degenerate rig support');
     const t=surfaceClamp(surfaceDot(surfaceSubtract(p,a),axis)/length2),q=surfaceMix(a,b,t),delta=surfaceSubtract(p,q);
-    let contactNormal=surfaceSubtract(normal,surfaceMultiply(axis,surfaceDot(normal,axis)/length2));
+    const mastBarrier=support.kind==='mast'&&support.mast===surface.mast&&surface.mastContactSide;
+    if(mastBarrier&&!['fore','aft'].includes(mastBarrier))throw Error('Invalid authored mast contact side');
+    const direction=mastBarrier?[0,0,mastBarrier==='fore'?-1:1]:normal;
+    let contactNormal=surfaceSubtract(direction,surfaceMultiply(axis,surfaceDot(direction,axis)/length2));
     if(Math.hypot(...contactNormal)<1e-10){
       const ref=surfaceSubtract(reference,q);contactNormal=surfaceSubtract(ref,surfaceMultiply(axis,surfaceDot(ref,axis)/length2));
       if(Math.hypot(...contactNormal)<1e-10)contactNormal=surfaceCross(axis,Math.abs(axis[1])/Math.sqrt(length2)<.9?[0,1,0]:[1,0,0]);
@@ -126,7 +129,7 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
     // Keep the sheet on its authored side of the support, including when wind
     // backs it. A smooth tension band acts on actual cloth, never rope opacity.
     const restSide=surfaceDot(surfaceSubtract(reference,q),contactNormal);
-    const side=Math.abs(restSide)>1e-8?Math.sign(restSide):surface.kind==='lateen'?Math.sign(pose.side)||-1:-Math.sign(pose.pressure)||-1;
+    const side=mastBarrier?1:Math.abs(restSide)>1e-8?Math.sign(restSide):surface.kind==='lateen'?Math.sign(pose.side)||-1:-Math.sign(pose.pressure)||-1;
     const penetration=r-side*signed;
     if(penetration>0){
       const weight=(1-surfaceSmooth(r,r+band,distance))*pin;
