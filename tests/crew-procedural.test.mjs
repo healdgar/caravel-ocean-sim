@@ -41,6 +41,9 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
       for(const s of subjects){
         const targets=crewSeatedPose(s,boat),a=meshes[s.sex].animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);
         const at=name=>crewProposedWorld(s,Array.from(a.world[a.nodeIndex(name)].subarray(12,15)));
+        const left=[Math.cos(s.yaw),0,-Math.sin(s.yaw)],ordered=points=>points[0].reduce((n,v,i)=>n+(v-points[1][i])*left[i],0);
+        assert.ok(ordered(targets.feet)>0,id+' '+s.id+' left and right feet must not cross');
+        assert.ok(ordered(targets.hands)>0,id+' '+s.id+' shaft grips must preserve anatomical left/right at this facing');
         assert.ok(a.palette.every(Number.isFinite),id+' finite seated skin');
         assert.ok(crewProposedDistance(at('pelvis'),targets.seat)<.025,id+' pelvis rests at its own bench');
         for(const [i,side]of ['l','r'].entries()){
