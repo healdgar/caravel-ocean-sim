@@ -15,6 +15,12 @@ and rendered review. Pages deployment `7244279543` built at
 sizes/hashes at **05:09:53 UTC**. No physical-iPhone performance result is claimed.
 [Exact receipts](BACKLOG.md#sunenvironment-controls-checkpoint).
 
+**Unpublished candidate:** the integrated source adds five independently built
+vessels—Oseberg, Lusoria, a thirty-person Taíno-style canoe, Flying Cloud and
+Gipsy Moth IV—for **nine model choices and up to nine active vessels**. Final
+combined qualification, rendered checks and publication are pending. The public
+release receipt above applies to the four-model checkpoint, not this candidate.
+
 The published checkpoint reduces repeated crew, vessel and ocean shading work,
 targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater
 and connects hard water contacts to timber groans. It retains underwater lighting,
@@ -329,8 +335,8 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 
 The [ship-model foundation](SHIP_MODELS.md) separates immutable model definitions,
 named attachment points, semantic mesh groups and cached geometry from each
-vessel's live state. The published baseline offers Niña and **HMS Victory
-(1805)**; current development adds Pinta and Santa María below. Choose
+vessel's live state. The published baseline offers **Niña, Pinta, Santa María
+and HMS Victory (1805)**. Choose
 **Ship settings → Vessel**, or [sail Victory](https://healdgar.github.io/caravel-ocean-sim/?ship=victory&boat=1&view=ship).
 Victory has her own 56.69 × 15.85 m hull, three gun decks with an open waist,
 104 represented guns, stern galleries, wheel, boats, stepped masts and fighting
@@ -353,7 +359,7 @@ thrust in sailing mode. Twelve visible sailors represent a working watch; the
 loading manifest accounts for 820 people. Their existing costume set remains
 shared with Niña rather than representing an 1805 uniform reconstruction.
 
-Current development adds separate Pinta and Santa María hulls, decks, equipment,
+The published Pinta and Santa María have separate hulls, decks, equipment,
 crew stations, helms and mixed rigs. Pinta uses two square courses and a lateen
 mizzen; Santa María adds a main topsail and spritsail, four exposed deck zones and
 the requested foremast lookout. Pinta's 25.908 × 7.0104 m size profile comes from
@@ -370,7 +376,8 @@ fleet** frames the enabled ships. An omitted `fleet` parameter preserves the
 legacy same-model escort; `follower=0` still starts alone. Explicit links use,
 for example, `ship=nina&fleet=pinta,santa-maria,victory`; `!pinta` preserves a
 configured disabled row without allocating its GPU vessel. Share links retain
-the roster. These development options are not yet on the public baseline above.
+the roster. The five additional model choices below belong to the unpublished
+candidate; the fleet controls already exist in the published checkpoint.
 
 Immutable geometry, indices and render assets are shared per model; crew geometry,
 one FFT ocean and weather remain shared. Every enabled ship owns its posed
@@ -379,7 +386,8 @@ Two pooled wake banks and three shadow texture arrays have one layer per active
 vessel, with variable hull masks and probe dispatch; disabled rows allocate none.
 The nine-ship limit is a resource bound, not a device performance guarantee.
 
-Pinta/Santa María evaluate cloth, yards, ropes and attachments through one
+Pinta/Santa María and the candidate's five additional vessels evaluate cloth,
+spars, ropes and attachments through one
 CPU pose, uploading the same vertices used by visible, shadow, submerged and
 wetness paths. Victory retains shared GPU deformation. The new passive lateral
 model integrates the loaded hull silhouette and actual exposed keel geometry;
@@ -387,20 +395,46 @@ its distributed forces supply sway, yaw and roll moments alongside sail moments.
 An inferred geometric centre of lateral area is not a calibrated dynamic CLR.
 No fabricated fin, motor thrust or zero-flow steering assist is added.
 
-Followers issue ordinary sail and rudder commands, compensate for leader motion,
+Followers issue ordinary sail and helm commands, compensate for leader motion,
 station rotation and leeway, and trim sail while holding distinct formation slots.
 They commit to tacks and actual sternway recovery; rudder authority requires water
 flow. Avoidance and station-keeping remain authored AI policies, not passage
 planning, a ship-collision solver, combat or hailing. A following ship with no speed
-advantage cannot guarantee closing every gap. Current fleet regression and
-rendered checks passed; these policies are not calibrated historical maneuvers.
+advantage cannot guarantee closing every gap. Published four-model fleet checks
+passed; the nine-model candidate needs its own final combined/rendered qualification.
+These policies are not calibrated historical maneuvers.
 
-The [later vessel programme](SHIP_MODELS.md#later-vessel-programme) has authored
-source definitions/prototypes for an Oseberg-based c.850 vessel, late-Roman
-Lusoria, a thirty-person Taíno-style canoe, **Flying Cloud** and **Gipsy Moth IV**.
-They still require backend integration, crew/propulsion/rendered checks and
-qualification before appearing as playable ships. Victory was brought forward
-at the user's request.
+The [nine-model candidate](SHIP_MODELS.md#later-vessel-programme) integrates the
+five additional hulls, rig/rowing poses, companies, controls and equipment. These
+choices remain **unpublished and under final qualification**:
+
+| Model | Default size and basis | Physical propulsion | Represented / loaded people |
+|---|---|---|---|
+| Oseberg-based vessel, c. 850 | 21.5 × 5 m hull | One square sail, 30 oars, steering oar | 32 / 32 |
+| Lusoria Rhenana interpretation, c. 350 | 18 × 2.8 m hull | One square sail, 24 oars, steering oar | 26 / 26 |
+| Taíno-style canoe, c. 1492 | Authored 14 × 1.8 m | 24 paddlers and a steering paddle; no rig | 30 / 30 |
+| Flying Cloud, 1851 | 68.58 m deck length × 12.50 m beam | Three-mast full rig; wheel and rudder | 12 / 42 |
+| Gipsy Moth IV, 1966 | 16.18 m LOA × 3.20 m beam | Two-mast Bermudan ketch; tiller and rudder | 1 / 1 |
+
+All five are unarmed. The canoe has no anchor, sails or placeholder masts; its
+inapplicable controls are absent. The others have model-owned anchor fittings.
+Gipsy Moth's recorded engine is disabled. Its headsails/main/mizzen controls serve
+two physical masts; Oseberg and Lusoria expose only their one main-sail group.
+
+At the helm, rowing craft use **Rest / Easy / Full** effort and turn demand;
+**Ship settings** gives stroke rate in strokes per minute. Wind and rowing may
+act together where sails exist. Actual blade movement, crew hands/feet, moving
+water contact and bounded human loads share one stroke. Dry recovery adds no
+drive. Rowing followers use those ordinary controls, without motor assistance.
+
+Reported hull/replica dimensions remain distinct from authored offsets, working
+canvas, draft, equipment and loading. The canoe is a regional design target,
+Oseberg is an AD 820 archaeological reference used for a c.850 scenario, and
+Lusoria is a late-Roman riverine reconstruction. Flying Cloud's 25 cloth surfaces
+and 15 yards are implementation counts; its working crossjack cloth, staysails
+and sheet limits are not a certified historical inventory. Gipsy Moth selects the
+original design-DWL branch, keeping later refit figures separate. See the
+[source and uncertainty ledger](SHIP_MODEL_RESEARCH.md).
 
 **Enable sound** in Captain or Sea settings to hear the new voices. The 12 named
 crew each have a distinct, reusable voice saying “Aye captain!”: Inês, Tomás,
@@ -708,7 +742,7 @@ seams; no imported ship model or Blender dependency is required.
 
 ### Ship's company and captain's orders
 
-Twelve named sailors are aboard: six women and six men, using distinct
+Niña's company has twelve named sailors: six women and six men, using distinct
 Quaternius-derived models. The deliberately diverse company includes Black,
 white and East Asian appearances, two redheads, and individual skin tones, hair,
 head/jaw shapes, nose profiles and eye openings. Appearance is fixed per sailor
@@ -730,8 +764,11 @@ separately from boat and sea settings on mobile.
 
 **Show crew** is a display switch, preserved in shared links as `crew=0/1`.
 Hiding characters or the ship does not stop their simulation or sail orders.
-Hulls below 10.5 m long or 3.2 m wide hide the company because these authored
-stations no longer provide sufficient clearance.
+Resized legacy hulls below 10.5 m long or 3.2 m wide hide their company because
+those stations no longer provide sufficient clearance. Candidate rowing craft
+instead use their own narrow-hull stations and full represented complements;
+Gipsy Moth has one working sailor. A representative watch is distinct from the
+personnel mass in the loading model, as the table above records.
 
 The original Quaternius crew remains the active asset family. Workwear has a
 looser shirt silhouette, sewn collars and rolled cuffs, and trousers that bridge
@@ -740,8 +777,8 @@ centre-seam normals avoid artificial creases. Heights, body skin weights,
 joint lengths, animation curves and hand targets are preserved; the belt follows
 the adjacent garment weights through bends.
 Both embedded GLBs total 2.21 MB. Each has 65 joints and Idle, Walk and Brace
-clips; the male model has 15,995 triangles, the female 18,720. Twelve sailors use
-two instanced draws in the ship pass and two in the existing solid shadow pass,
+clips; the male model has 15,995 triangles, the female 18,720. Each company uses
+up to two instanced draws in the ship pass and two in the existing solid shadow pass,
 with independent bone palettes. They receive ship/sail shadows. No render pass
 is added. The automatic-resolution target is now 60 FPS; the expanded
 crew's physical-iPhone performance has not yet been measured.
@@ -963,9 +1000,9 @@ These short desktop observations do not establish sustained thermal or iPhone
 performance. Native mode keeps full pixel resolution; Auto can trade sharpness
 while preserving geometry, simulation and rendering features.
 
-The new four-model/fleet/night source has no sustained performance qualification
-yet. CPU poses deliberately favor one authoritative geometry over premature
-optimization. The nine-vessel resource limit does not imply 60 FPS on every Mac
+The nine-model candidate has no sustained target-device performance qualification
+yet. CPU poses preserve one authoritative geometry across rendering and forces.
+The nine-vessel resource limit does not imply 60 FPS on every Mac
 or 30 FPS on an iPhone; only device-specific measurements can establish that.
 
 ### GPU profiling
@@ -995,6 +1032,11 @@ and native four-vessel, full-Moon and new-Moon captures. Pages deployment
 [BACKLOG.md](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night). These checks do
 not establish historical navigation accuracy, sustained frame rate or physical
 iPhone performance.
+
+The nine-model candidate is a separate qualification boundary. Its integrated
+companies, oar/paddle water probes, optional equipment, mixed rigs and an
+all-nine-model fleet need final combined and rendered clearance before publication.
+Earlier four-model receipts do not establish those results.
 
 With Node.js 20 or newer:
 
@@ -1123,7 +1165,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The published game supports four model types and up to nine active vessels. Five later craft remain unregistered prototypes. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
+- The published game supports four model types and up to nine active vessels. The unpublished candidate integrates nine types; its final combined qualification and release remain pending. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
@@ -1150,7 +1192,8 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/models/additional.js`, `js/additional-rig.js`, `js/additional-ships.js`, `js/rig-surface.js` | Pinta/Santa María hulls and authoritative CPU cloth/yard/rope/attachment poses |
 | `js/astronomy.js`, `js/celestial.js`, `js/wgsl/celestial.js` | Unwrapped geographic sky, Moon/stars, explicit 528-byte Frame and celestial rendering |
 | `js/vendor/`, `js/star-catalog.js` | Pinned local ephemeris code and separately licensed HYG derivative |
-| `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`, `js/models/later-sail.js` | Five planned craft definitions/prototypes; production integration pending |
+| `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`, `js/rowing-water.js`, `js/wgsl/rowing-water.js` | Candidate oared/paddled hulls, shared strokes, actual water probes and human propulsion |
+| `js/models/procedural.js`, `js/models/later-sail.js`, `js/later-sail-ships.js`, `js/procedural-models.js` | Candidate model-owned hull/fin/deck adapters, later sailing vessels and affine attachments |
 | `js/sailing.js`, `js/sail-aerodynamics.js` | Apparent wind, prescribed trim, sail handling, cloth-derived aerodynamic panels and rigid-body loads |
 | `js/lateen.js`, `js/wgsl/lateen.js` | Routine tacks, ordered yard transfers, cloth supports, sheet leads and matching CPU/GPU motion |
 | `js/instruments.js` | Optional signed speed and apparent wind HUD, recovery cues and local preferences |

@@ -3,8 +3,12 @@
 The published registry admits **Niña, HMS Victory (1805), Pinta and Santa
 María**. Pinta/Santa María are explicit development reconstructions with their
 own hulls, equipment and mixed rigs. Up to **eight independently selected AI
-followers plus the player** share one sea/weather simulation. Five later craft
-have authored definitions/prototypes but are not admitted to the playable registry.
+followers plus the player** share one sea/weather simulation.
+
+The **unpublished nine-model candidate** integrates Oseberg, Lusoria, the
+Taíno-style canoe, Flying Cloud and Gipsy Moth IV with their own meshes, companies,
+propulsion, equipment and controls. Final combined qualification and release
+remain pending; registry/backend readiness is not a publication receipt.
 
 **Qualification/release boundary:** published runtime
 `7fba40de2601552757ada1ce490883ced75f06fb` passed **572/572 native Metal suite
@@ -23,6 +27,14 @@ for [exact validation and deployment receipts](BACKLOG.md#published-checkpoint-f
 - `js/models/additional.js`, `js/additional-ships.js`, `js/additional-rig.js`,
   `js/rig-surface.js`: separate Pinta/Santa María lofts, decks, hardware, cloth,
   yards, ropes and authoritative posed surfaces/attachments.
+- `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`: candidate independent
+  oared/paddled hulls, benches and shared blade/crew/force stroke geometry.
+- `js/rowing-water.js`, `js/wgsl/rowing-water.js`: per-vessel moving-water samples
+  from the shared GPU sea, consumed by actual blade immersion/relative flow.
+- `js/models/later-sail.js`, `js/later-sail-ships.js`: candidate clipper/ketch hulls,
+  fin/cockpit, model-owned spars, working cloth and named standing fittings.
+- `js/models/procedural.js`, `js/procedural-models.js`: strict hull/deck/appendage
+  adapters and affine nodes; no fallback to caravel geometry or dummy equipment.
 - `js/mesh-writer.js`: shared nine-float construction primitives, preserving the
   existing Victory construction output.
 - `js/ship-models.js`: model registry, sourced reference measurements, named
@@ -51,8 +63,10 @@ measurements, construction references and unresolved historical calibration.
 
 Stable roles, where present, include `hull`, `deck.main`, `deck.quarter`, `helm.tiller`,
 `helm.grip`, `helm.camera`, `hatch.main`, `anchor.port.fairlead` and the
-corresponding starboard fittings. Each mast has named foot/head/runner points,
-yard/tack/peak points, sail clews and a haul station. Crew identities and costumes
+corresponding starboard fittings. Masts expose foot/head points and actual climb
+runners where provided. Yard, spar, luff, clew and control-station roles reflect
+real equipment; a headsail has no fictitious yard. Rowing nodes expose actual
+blade, grip and foot targets. Crew identities and costumes
 remain independent of ship-owned home stations. This example uses Niña; other
 rigs expose their actual clew identities through `model.rig.sails[].clewNodes`.
 
@@ -94,7 +108,7 @@ Niña/Victory comparison below remains the baseline; Pinta/Santa María add the
 `surfaces-v1` construction/pose backend.
 `getShipParts(id)` exposes their existing hull/profile functions, design frame,
 weather-deck zones, steering pivots, sail surfaces and mast control groups,
-anchor/gun equipment, loading policy and twelve represented crew stations.
+anchor/gun equipment, loading policy and model-owned crew stations.
 It neither rebuilds geometry nor changes existing node, force or animation APIs.
 Planned models retain the playable-model guard. A ready model needs an explicit
 geometry/rig/hull path; unknown backends fail rather than falling back to Niña.
@@ -124,10 +138,11 @@ inheritance for unknown moving descendants, and absent roles throw explicitly.
 `resolveShipNode()` preserves its legacy point-query behavior while supporting
 the explicit new model backends.
 
-The capability design permits absent sails/masts and distinct sail, oar or paddle
-propulsion. Planned rowing source now evaluates stroke pivots, grips, blades,
-stations, water contact and force; that prototype is not yet integrated into
-production crew/control/GPU backends and does not admit those craft to play.
+The candidate uses absent sail/mast/anchor paths for the canoe, distinct oar or
+paddle strokes, and simultaneous wind/human propulsion on Oseberg and Lusoria.
+One stroke drives visible blades, hand/foot targets and moving-water forces.
+Dry recovery does not supply drive. A ready backend still requires root's
+combined/rendered qualification before publication.
 
 ### Defined variants
 
@@ -137,6 +152,15 @@ production crew/control/GPU backends and does not admit those craft to play.
 | HMS Victory | Eight square sails, three headsails, gaff spanker | Own three-decker hull and `square1805` backend; ready |
 | Pinta | Square fore/main courses, lateen mizzen | Development caravel, own loft/decks/equipment; `surfaces-v1`, CPU posed |
 | Santa María | Square fore/main, main topsail, spritsail, lateen mizzen | Development nao, main/forecastle/quarter/poop zones and fore lookout; `surfaces-v1`, CPU posed |
+| Oseberg-based vessel | One square sail, 30 oars, steering oar | Candidate independent clinker-style hull and bench/stroke layout; unpublished |
+| Lusoria | One square sail, 24 oars, steering oar | Candidate late-Roman riverine reconstruction; unpublished |
+| Taíno-style canoe | 24 paddlers and steering paddle; no mast or sail | Candidate independent dugout; no anchor or guns; unpublished |
+| Flying Cloud | 15 square yards/cloth tiers, eight headsails, two gaff sails | Candidate fine-ended clipper, wheel and own working rig; inventory interpretation, unpublished |
+| Gipsy Moth IV | Two Bermudan sails and two headsails on two masts | Candidate original-design ketch, recessed cockpit, fin and tiller; engine disabled, unpublished |
+
+The first four belong to the public receipt above; five additional rows describe
+integrated candidate source, not completed release qualification. Flying Cloud's
+25 cloth surfaces are not a verified historical inventory.
 
 Sails have stable IDs independent of mast IDs; multiple sails can share a mast
 and `fore`, `main` or `mizzen` control group. Fittings attach by node ID. Santa
@@ -156,19 +180,29 @@ tonnage is never converted directly into displacement mass.
 
 ## Current geometry, physics and fleet contract
 
-Pinta/Santa María use one CPU evaluator for cloth, spars, ropes, surface normals
+Pinta/Santa María and the five additional candidate models use one CPU evaluator
+for cloth, spars, ropes, surface normals
 and attachment transforms. `asset.pose(boat,time,wind,targetVertices)` fills each
 instance's geometry; the visible, shadow and submerged passes consume that upload.
 Wetness probe positions refresh from those same posed vertices. Force panels and
 crew targets evaluate the same model-owned surface functions. Victory retains
 its shared GPU pose path; Niña's existing rig path remains explicit. Existing
-three mast-control groups permit multiple actual sails per group.
+three mast-control groups permit multiple actual sails per group. Physical mast
+index is independent of control slot: Oseberg/Lusoria's mast zero uses `main`;
+Gipsy Moth's main mast carries both fore-controlled headsails and main canvas.
+The canoe exposes no sail controls or yard-transfer orders.
+
+Rowing effort, differential stroke demand and cadence act through actual crew
+attendance, blade immersion, moving-water velocity and authored human force/power
+limits. Steering oars/paddles need relative flow. Each active rowing vessel owns
+its sample/readback state; the fleet still shares one FFT ocean. Rowing followers
+write these ordinary human commands, never prescribed velocity or motor thrust.
 
 Loaded hull silhouette strips and actual exposed keel parts generate passive
 crossflow/attached-lift loads and their sway/yaw/roll moments. Sail yaw feeds the
 steering balance. The model does not invent a separate fin for Victory, calibrated
 historical coefficients or a measured dynamic CLR. Formation guidance operates
-physical canvas/rudder controls, with leader/station velocity, leeway compensation
+physical canvas/helm controls, with leader/station velocity, leeway compensation
 and bounded helm feedback. Rudder commands add no motor or zero-flow turn assist.
 
 `fleet` accepts up to eight ordered follower selections. Enabled rows allocate a
@@ -183,6 +217,8 @@ vessel, without enumerating every wake-parity combination.
 
 ## Qualification and remaining boundaries
 
+Published four-model boundary:
+
 1. Passed: root's combined CPU/native Metal suite and production modular/Pages
    fixtures, including posed uploads, tested cloth/rope poses, crew reach/routes,
    wetting, disabled allocation and fleets through nine active vessels.
@@ -193,6 +229,11 @@ vessel, without enumerating every wake-parity combination.
    when defensible source data exist. Current finite/passive equations alone do
    not establish historical performance or seaworthiness.
 
+These completed receipts describe the published four-model source. The nine-model
+candidate adds actual variable companies, rowing-water probes, optional equipment,
+new rig envelopes and an all-nine-model scene; final combined and rendered
+qualification and deployed-byte verification are pending separately.
+
 Performance follow-up, not an admission gate: measure sustained target-device
 cost. The nine-vessel bound is not a guarantee of 60 FPS on Mac or 30 FPS on a
 physical iPhone.
@@ -200,7 +241,7 @@ physical iPhone.
 ## Validation
 
 Existing baseline tests preserve pre-refactor Niña/Victory mesh/index hashes,
-semantic ranges and attachment contracts. Passing new checks cover shared assets,
+semantic ranges and attachment contracts. Published-checkpoint checks cover shared assets,
 ready/planned guards, authoritative cloth/rope/crew/wetness positions, passive
 hull-load invariants, physical follower controls and actual modular/Pages fleets.
 Root's full native Metal suite passed **572/572**, zero skips, in **302.194 seconds**;
@@ -210,19 +251,19 @@ by each model, with no certified historical navigation accuracy.
 
 ## Later vessel programme
 
-Victory was implemented first at the subsequent request. The following five
-later craft now have authored source definitions/prototypes, but production
-registration, crew/propulsion/renderer integration and qualification remain pending.
-The Victory row retains its separate refinement boundary.
+Victory was implemented first at the subsequent request. The five later craft
+now have integrated candidate registry, geometry, crew, propulsion and renderer
+paths. They remain unpublished pending final qualification. Their source subjects
+and principal reconstruction limits are explicit:
 
-| Target | Planned capability | Reference decision before modelling |
+| Target | Candidate capability | Source / reconstruction boundary |
 |---|---|---|
-| Viking longship, c. AD 850 | Sail and oar propulsion, rowing stations, steering oar, shallow open hull | Choose ninth-century evidence/reconstruction; do not silently substitute a later longship or claim an exact AD 850 wreck |
-| Roman galley, c. AD 350 | Oars and sail, coordinated rowing, vessel-specific steering and crew layout | Select a late-Roman vessel class and reconstruction; resolve seagoing versus riverine service and oar-bank arrangement |
-| Caribbean canoe, AD 1492, 30 people | Paddle propulsion and steering, occupied paddling stations, loading-sensitive freeboard | Select regional/cultural references; distinguish 30 occupants from 30 active paddlers and any extra cargo |
+| Viking vessel, c. AD 850 | One square sail, 30 oars, steering oar, open hull | Oseberg AD 820 hull proportions/reconstruction used for the c.850 scenario; draft, offsets and working sail authored |
+| Roman galley, c. AD 350 | 24 oars, one square sail, steering oar | Lusoria Rhenana riverine reconstruction branch; not a trireme; .38 m service draft authored |
+| Caribbean canoe, AD 1492, 30 people | 24 paddlers, five passengers and steering paddler | Greater Antillean design target, 14 × 1.8 m and .42 m draft authored; 30 occupants does not mean 30 drive paddlers |
 | HMS Victory, 1805 configuration | Implemented first pass: own hull, square/fore-and-aft sail groups, crew stations and running rigging | Further dimensional refinement and measured sailing calibration remain; see source ledger |
-| Flying Cloud, 1851 clipper | Full ship rig with separate courses, topsails and upper sails; fine-ended ocean-going hull | Replaces the generic schooner target; obtain lines, deck and sail plans before modelling |
-| Gipsy Moth IV, 1966 yacht | Ketch rig, yacht-scale crew, cockpit helm and handling | Working interpretation of the requested "Gypsy Moth"; distinguish original circumnavigation configuration from later refits |
+| Flying Cloud, 1851 clipper | Separate courses/upper tiers, headsails, Spencer/spanker, wheel | Selected 225 ft deck/41 ft beam report; offsets/draft and cloth/chainplate/trim choices authored; crossjack cloth uncertain |
+| Gipsy Moth IV, 1966 yacht | Two-mast ketch, four sails/three controls, fin, cockpit, tiller | Original design-DWL branch, 53.1 ft LOA/10.5 ft beam; reported original lead retained; later refit figures separate |
 
 The Victory identity/date is the working interpretation of "Admiral Nelson's
 ship". Historical starting points and unresolved choices are recorded in
@@ -245,19 +286,32 @@ The reusable architecture must consequently support:
   simulation/rendering rather than one full-cost animated agent per historical
   occupant.
 
-`js/models/rowing.js`, `js/rowing.js` and `js/rowing-ships.js` contain independent
-Oseberg/Lusoria/Taíno-style source and shared stroke/immersion/force/mesh prototypes.
-`js/models/later-sail.js` contains Flying Cloud and Gipsy Moth IV definitions and
-explicit readiness requirements. These five craft remain planned and unregistered;
-prototype equations or metadata are not playable integration. Historical-complement
-crew simulation remains abstracted: Victory loads 820 people but represents twelve
-workers; Pinta/Santa María likewise represent twelve workers with separate loading
-policies. Optional rig/propulsion/steering/crew/hydrostatics capabilities must stay
-model-owned as these backends enter production.
+Companies and personnel mass are separate model fields. These are candidate
+simulation manifests, not newly established historical complements:
+
+| Model | Represented people | People in loading manifest | Equipment / helm |
+|---|---:|---:|---|
+| Niña | 12 | 12 | Four swivel guns, anchors, tiller/rudder |
+| Pinta | 12 | 30 | Four authored swivel guns, anchors, tiller/rudder |
+| Santa María | 12 | 40 | Four authored swivel guns, anchors, tiller/rudder |
+| HMS Victory | 12 | 820 | 104 guns, anchors, wheel/rudder |
+| Oseberg | 32 | 32 | 30 oars, anchors, steering oar; no guns |
+| Lusoria | 26 | 26 | 24 oars, anchors, steering oar; no guns |
+| Taíno-style canoe | 30 | 30 | 24 paddles plus steering paddle; no anchor/guns/rig |
+| Flying Cloud | 12 | 42 | Anchors, wheel/rudder; no guns |
+| Gipsy Moth IV | 1 | 1 | Anchor, tiller/rudder; engine disabled, no guns |
+
+One of each uses 149 represented actors, not a full historical company for every
+ship. Shared human assets retain human dimensions and reusable identities;
+each vessel owns actor palettes, jobs, rowing attendance, wetness and hand targets.
+Recorded tonnage never supplies simulation kilograms. Moth's original design-DWL
+10.58 t and 3.85 t lead are distinct from empty-hull mass and later restored
+displacement reports. Geometric calibration to one DWL does not validate a
+sailing polar or every historical loading condition.
 
 Reuse ocean/weather, materials, wetness, hull contacts, wake/spray, crew identities,
 orders and attachment evaluation where applicable. Each additional hull needs
 its own displacement/contact representation and validation; a new mesh alone
-does not make the current Niña physics suitable for it. Admit each model only
+does not make the current Niña physics suitable for it. Publish additional models only
 after geometry, propulsion, crew jobs and actual fleet rendering pass their gates;
 record performance separately without claiming physical-device qualification.

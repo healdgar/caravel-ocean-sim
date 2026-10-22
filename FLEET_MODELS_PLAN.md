@@ -1,4 +1,4 @@
-# Shared vessels and fleet programme — 21 October 2026
+# Shared vessels and fleet programme — 22 October 2026
 
 User-authorized order: finish the Victory bow/keel assessment; compare Niña and
 Victory's applicable parts and animations; implement the remaining vessel
@@ -13,6 +13,9 @@ The four-model/fleet/night checkpoint below is qualified and published: root's f
 native Metal suite passed **572/572**, zero skips, in **302.194 seconds**, with
 rendered checks. Pages deployment `7243537555` succeeded at **2026-10-22T04:12:31Z**;
 HTML, manifest and all 53 assets matched exact public sizes/hashes at **04:13:27Z**.
+The subsequent **nine-model candidate is integrated but unpublished**, with final
+combined/native/rendered qualification pending. The receipt above remains the
+public baseline; backend-ready source is not a release receipt.
 Root alone runs tests, builds, rendered checks and profiling. Direct agents may
 author disjoint code and proposed tests; no nested agents. Held `woodland`
 prototype files are unrelated and remain outside these checkpoints.
@@ -67,21 +70,68 @@ prototype files are unrelated and remain outside these checkpoints.
 
 ## Current four-model/fleet/night checkpoint — published and byte-verified
 
-| Checkpoint | Current source | Remaining boundary |
+| Checkpoint | Published scope | Remaining boundary |
 |---|---|---|
 | Shared parts and lateral body | Niña/Victory comparison, semantic transforms, reusable construction, loaded hull/actual-keel strips and sail/water moment balance | Geometry preservation, passive-load and physical-helm regressions passed; original offsets/dynamic CLR remain uncalibrated |
 | Fleet | Up to 8 independently selected/enabled followers plus player; one ocean/weather; per-model immutable assets; per-vessel mutable state; pooled wake/shadow layers | Mixed/maximum-nine modular and Pages allocation/isolation fixtures passed; no device performance guarantee or complete collision solver |
 | New construction/motion | Authoritative CPU surface/yard/rope/attachment pose, GPU upload and wetness-probe refresh for new models; explicit legacy backends | Current force/crew/visible/shadow/submerged/wet consistency checks passed; tested poses do not certify every operating rig configuration |
 | 1492 variants | Pinta and Santa María published with own hull/decks/equipment, three/five actual sails respectively | Reconstruction offsets, working cloth dimensions, loading and gun outfit remain authored |
-| Five later craft | Oseberg/Lusoria/Taíno-style rowing definitions and stroke/mesh prototypes; Flying Cloud/Gipsy Moth IV definitions with readiness requirements | Production registry/crew/control/propulsion/GPU integration, rendered checks and release remain pending |
+| Five later craft at this receipt | Authored Oseberg/Lusoria/canoe prototypes and Flying Cloud/Gipsy Moth IV definitions | They were outside this public runtime; their integrated candidate is recorded separately below |
 | Astronomy/night | Unwrapped clock/location, Sun/Moon/phase and historical stars, cloud/depth/horizon visibility and coherent lunar lighting through explicit 528-byte Frame | Native/integrated/minified checks and full/new-Moon rendered captures passed; no certified navigation accuracy or physical-iPhone performance |
+
+## Nine-model candidate — integrated, unpublished
+
+The candidate wires all nine model choices through their actual hull, rig,
+crew, propulsion, equipment and rendering paths. It can select one of each as
+player plus eight followers; disabled rows still allocate no vessel resources.
+One FFT ocean/weather system remains shared. Per-vessel pose buffers, companies,
+rowing-water samples, wake layers, shadows, wetness, guns/anchors where present,
+and simulation state remain independently owned.
+
+| Model group | Candidate implementation | Remaining release boundary |
+|---|---|---|
+| Oseberg / Lusoria | Independent open hulls, 30/24 oars, one main-controlled square sail, real benches, steering oars and full 32/26-person companies | Final combined geometry/crew/water-force/native/rendered qualification |
+| Taíno-style canoe | Independent dugout, 30 occupants with 24 drive paddlers and steering paddle; no sails, anchor or guns | Same gates; authored regional dimensions and loading remain explicit |
+| Flying Cloud | Independent clipper, 25 cloth surfaces/15 yards, actual working stays and fittings, wheel, 12 workers representing 42 loaded | Rig envelope/source uncertainty and full combined/rendered gates; cloth inventory not historically certified |
+| Gipsy Moth IV | Two physical masts, four sails under three controls, real fin/cockpit/tiller, one sailor; recorded engine disabled | Final combined crew/rig/fin/native/rendered gates; original design-DWL separated from later refits |
+| Mixed fleet | Eight selectable followers, including ordinary human-powered effort/turn policy | All-nine-model source requires its own final qualification and exact deployed-byte receipt |
+
+The source company counts are **12/12/12/12/32/26/30/12/1** for
+Niña/Pinta/Santa María/Victory/Oseberg/Lusoria/canoe/Flying Cloud/Gipsy Moth:
+149 represented actors for one of each. Personnel mass remains model-owned:
+Victory loads 820, Flying Cloud 42, Pinta 30 and Santa María 40; their twelve
+visible workers represent a watch. These manifests are simulation choices,
+not newly verified historical complements.
+
+Rowing controls use Rest/Easy/Full effort, turn demand and stroke rate. One
+stroke drives the blade mesh, crew hand/foot targets, real moving-water contact
+and bounded human loads; dry recovery supplies no drive. Oseberg/Lusoria combine
+that with wind where usable. UI and AI omit nonexistent rig/equipment; no engine
+or zero-flow steering assist is introduced.
+
+Reported length conventions, beam and tonnage remain separate from authored
+offsets, draft, loading and sail/rig geometry. Oseberg supplies AD 820 proportions
+for a c.850 scenario; Lusoria selects a riverine reconstruction; the canoe is an
+authored Greater Antillean target. Flying Cloud selects the contemporary
+225 ft deck/41 ft beam report without claiming its 25 surfaces are a recovered
+inventory. Gipsy Moth selects original design-DWL dimensions/lead, not later
+restoration displacement. See [model contracts and company table](SHIP_MODELS.md)
+and [source limits](SHIP_MODEL_RESEARCH.md). Geometric passivity/clearance does
+not certify historical polars, seaworthiness or navigation accuracy.
+
+The candidate remains pending final combined qualification, rendered checks,
+publication and public byte verification. No sustained Mac or physical-iPhone
+performance result follows from nine-vessel allocation or viewport emulation.
+
+## Shared fleet behaviour
 
 Roster changes apply through reload. `fleet=nina,pinta,santa-maria,victory` selects
 independent followers; `!model-id` retains a disabled row without allocation.
 Legacy links without `fleet` keep the same-model escort; `follower=0` keeps only
-the player. Formation guidance uses ordinary sail/rudder commands, leeway,
+the player. Formation guidance uses ordinary sail/helm commands, leeway,
 leader/station motion and bounded helm feedback. It supplies no motor, zero-flow
-steering assist or forced ship translation/heading. Avoidance is not yet a
+steering assist or forced ship translation/heading. Candidate rowing followers
+add ordinary human effort/differential stroke commands. Avoidance is not yet a
 collision solver, voyage planner, combat or hailing system.
 
 Historical waterline/offset calibration remains unresolved separately from engine
