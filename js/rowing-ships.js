@@ -3,7 +3,7 @@ import {createMeshWriter} from './mesh-writer.js';
 import {rowingDesign,rowingDeck,rowingHullWidth,rowingHullDeck,rowingRigContext} from './models/rowing.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
-import {rowingAnchorFitting,rowingSurfaceSpar} from './additional-rig.js';
+import {rowingAnchorFitting,rowingSurfaceSpar,proceduralRigContext} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
 
 const rowingMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]),rowingMeshSub=(a,b)=>a.map((v,i)=>v-b[i]),rowingMeshMul=(a,s)=>a.map(v=>v*s);
@@ -18,7 +18,7 @@ function rowingMeshBasis(axis,preferred){
 function rowingMeshRestBoat(d){return {modelId:d.id,...d.runtime,rowingState:{phase:0,rate:0,effortPort:0,effortStarboard:0},rudder:0};}
 
 export function createRowingShipMesh(modelId,{groups,parts}={}){
-  const d=rowingDesign(modelId),p=d.profile,context=rowingRigContext(modelId),rest=rowingMeshRestBoat(d),sx=d.runtime.beam/d.frame.beam,sy=d.frame.verticalScale,sz=d.runtime.length/d.frame.length;
+  const d=rowingDesign(modelId),p=d.profile,context=proceduralRigContext(modelId),rest=rowingMeshRestBoat(d),sx=d.runtime.beam/d.frame.beam,sy=d.frame.verticalScale,sz=d.runtime.length/d.frame.length;
   const {out,quad,tri,box,tube,rope,group,tag,unit}=createMeshWriter({groups,parts});
   const physicalGeometry=build=>{
     const writer=createMeshWriter();build(writer);
@@ -178,8 +178,8 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   return new Float32Array(out);
 }
 
-export function createRowingAssetPose(asset){
-  const id=asset.model?.id??asset.modelId,d=rowingDesign(id),source=asset.vertices,restBoat=rowingMeshRestBoat(d),context=rowingRigContext(id),surfaces=new Map(d.surfaces.map(s=>[s.id,s]));
+export function createRowingAssetPose(asset,options={}){
+  const id=asset.model?.id??asset.modelId,d=rowingDesign(id),source=asset.vertices,restBoat=rowingMeshRestBoat(d),context=options.context??proceduralRigContext(id),surfaces=new Map(d.surfaces.map(s=>[s.id,s]));
   if(!(source instanceof Float32Array)||source.length%9)throw Error('Rowing pose requires nine-float asset vertices');
   const scale=[d.runtime.beam/d.frame.beam,d.frame.verticalScale,d.runtime.length/d.frame.length],physical=p=>p.map((v,i)=>v*scale[i]);
   const restPoses=d.stations.map(s=>rowingStationPose(restBoat,s.id));restPoses.push(rowingSteeringPose(restBoat));

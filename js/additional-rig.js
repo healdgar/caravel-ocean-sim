@@ -5,8 +5,10 @@ import {deepFreeze} from './rig-definition.js';
 import {ADDITIONAL_DESIGNS,additionalDesign,additionalDeck,additionalDeckWidth} from './models/additional.js';
 import {LATER_SAIL_DESIGNS,laterSailDesign,laterSailDeck,laterSailDeckWidth} from './models/later-sail.js';
 import {ROWING_DESIGNS,rowingDesign,rowingHullDeck,rowingHullWidth,rowingRigContext} from './models/rowing.js';
+import {withRigSupportCache} from './rig-surface.js';
 const additionalRigCache=new Map();
 const additionalGunCache=new Map();
+const additionalPreparedRowContexts=new Map();
 export function additionalGunAttachments(id){
   if(additionalGunCache.has(id))return additionalGunCache.get(id);
   const d=additionalDesign(id),guns=d.equipment.guns.map((g,index)=>{
@@ -72,7 +74,7 @@ export function additionalRigContext(id){
     const z=m.z+.50,side=mast===1?-1:1;
     lines.push({a:masts[mast].head,b:[side*.55,additionalDeck(id,z)+.08,z],kind:'working-fall',mast,side,r:.009,sag:.025});
   }
-  const context=deepFreeze({surfaces:d.surfaces,masts,supports,lines,mastPoint,anchorCathead});
+  const context=deepFreeze(withRigSupportCache({surfaces:d.surfaces,masts,supports,lines,mastPoint,anchorCathead}));
   additionalRigCache.set(id,context);return context;
 }
 
@@ -175,13 +177,16 @@ export function laterSailRigContext(id){
     const shrouds=supports.filter(s=>s.mast===index&&s.kind==='shroud'),lo=Math.max(...shrouds.map(s=>s.a[1]))+.20/sy,hi=shrouds[0].b[1]-.20/sy;
     m.rungs=Math.max(1,Math.floor((hi-lo)*sy/.32));m.platform=mastPoint(index,m.foot[1]+(m.height-m.foot[1])*.47);
   }
-  const context=deepFreeze({surfaces:d.surfaces,masts,spars,supports,lines,controlStations,mastPoint,runnerPoint,anchorCathead});
+  const context=deepFreeze(withRigSupportCache({surfaces:d.surfaces,masts,spars,supports,lines,controlStations,mastPoint,runnerPoint,anchorCathead}));
   laterRigCache.set(id,context);return context;
 }
 
 export function proceduralRigContext(id){
   if(Object.hasOwn(ADDITIONAL_DESIGNS,id))return additionalRigContext(id);
-  if(Object.hasOwn(ROWING_DESIGNS,id))return rowingRigContext(id);
+  if(Object.hasOwn(ROWING_DESIGNS,id)){
+    if(!additionalPreparedRowContexts.has(id))additionalPreparedRowContexts.set(id,deepFreeze(withRigSupportCache(rowingRigContext(id))));
+    return additionalPreparedRowContexts.get(id);
+  }
   if(Object.hasOwn(LATER_SAIL_DESIGNS,id))return laterSailRigContext(id);
   throw Error('No procedural rig context for '+id);
 }

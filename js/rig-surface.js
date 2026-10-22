@@ -105,15 +105,28 @@ function surfaceSewnWeight(surface,u,v){
   }
   return weight;
 }
+// Canonical model contexts freeze this once and carry it unchanged into their
+// per-vessel runtime view. Only authored static support geometry is prepared;
+// pressure, cloth side, contact clearance, time and sail state remain live.
+export function withRigSupportCache(context){
+  if(context._surfaceCollisionSupports)return context;
+  const supports=[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
+  const prepared=Object.freeze(supports.map(s=>{
+    if(!surfaceFinitePoint(s.a)||!surfaceFinitePoint(s.b))throw Error('Invalid rig support descriptor');
+    const axis=Object.freeze(surfaceSubtract(s.b,s.a));
+    return Object.freeze({...s,_surfaceAxis:axis,_surfaceLength2:surfaceDot(axis,axis)});
+  }));
+  return {...context,_surfaceCollisionSupports:prepared};
+}
 function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
   const pin=surfaceSewnWeight(surface,u,v);if(pin===0)return point;
   const clearance=surface.contactClearance??.045,band=surface.contactBand??.25;
   if(!Number.isFinite(clearance)||clearance<0||!Number.isFinite(band)||band<=0)throw Error('Invalid surface contact margin');
-  const p=[...point],supports=[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
+  const p=[...point],supports=context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map((m,index)=>({a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index}))];
   for(const support of supports){
     const {a,b}=support,r=(support.r??0)+clearance;
     if(!surfaceFinitePoint(a)||!surfaceFinitePoint(b)||!Number.isFinite(r)||r<0)throw Error('Invalid rig support descriptor');
-    const axis=surfaceSubtract(b,a),length2=surfaceDot(axis,axis);if(length2<1e-12)throw Error('Degenerate rig support');
+    const axis=support._surfaceAxis??surfaceSubtract(b,a),length2=support._surfaceLength2??surfaceDot(axis,axis);if(length2<1e-12)throw Error('Degenerate rig support');
     const t=surfaceClamp(surfaceDot(surfaceSubtract(p,a),axis)/length2),q=surfaceMix(a,b,t),delta=surfaceSubtract(p,q);
     const mastBarrier=support.kind==='mast'&&support.mast===surface.mast&&surface.mastContactSide;
     if(mastBarrier&&!['fore','aft'].includes(mastBarrier))throw Error('Invalid authored mast contact side');
