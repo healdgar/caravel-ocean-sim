@@ -4,6 +4,7 @@ import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
+import {loadForestScenery,excludeForestRoots,createForestRenderer,FOREST_VERTEX_WGSL} from './forest-scenery.js';
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto'}){
@@ -12,6 +13,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // never run on the open-ocean startup path. Failure retains all old roots.
   let canopyFailure=null;
   const canopyPromise=canopyMode==='off'?Promise.resolve(null):loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;});
+  let forestFailure=null;
+  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery().catch(error=>{forestFailure=error.message;return null;});
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   const [heightResponse,biomeResponse,albedoResponse,regionResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo),load('assets/world/saba/manifest.json')]);
   const heights=decodeIsland(await heightResponse.arrayBuffer()),biome=decodeBiome(await biomeResponse.arrayBuffer());
@@ -22,7 +25,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const mesh=islandGeometry(heights,nearTile?.bounds),fineMesh=nearTile?terrainNearGeometry(nearTile,mesh):null,originalTrees=islandVegetation(heights,biome),canopyPack=await canopyPromise;
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
-  const trees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees;
+  const canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees,forestPack=await forestPromise;
+  const trees=forestPack?excludeForestRoots(canopyTrees,forestPack.manifest):canopyTrees;
   const groundPatches=createGroundCoverPatches(ISLAND,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const buffer=(data,usage,label)=>{
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
@@ -95,7 +99,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[ISLAND.biomeSize,ISLAND.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:ISLAND.biomeSize},[ISLAND.biomeSize,ISLAND.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const module=await shader(TERRAIN,'island terrain');
+  const module=await shader(TERRAIN+FOREST_VERTEX_WGSL,'island terrain');
   const makePipe=(entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode:'none'},
@@ -184,8 +188,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}]];
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
+  const forest=forestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestPack,groundSample,mode:canopyMode}):null;
+  const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
+  forestStats.replacedProceduralTrees=(canopyTrees.length-trees.length)/8;forestStats.coverage=forestPack?.manifest.coverage??null;
   const canopyStats=importedCanopy?.stats??{loaded:false,mode:canopyMode,error:canopyFailure};
-  canopyStats.replacedProceduralTrees=(originalTrees.length-trees.length)/8;
+  canopyStats.replacedProceduralTrees=(originalTrees.length-canopyTrees.length)/8;
   canopyStats.coverage=canopyPack?.manifest.coverage??null;
   const canopyInspectionLink=canopyPack&&typeof location!=='undefined'?canopyInspectionURL(location.href,canopyPack.manifest):null;
   // Opaque entry points have no leaf texture in their reachable call graph.
@@ -206,15 +213,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let tick=0;
   return {
     waterGroup:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:uniform}},{binding:1,resource:elevation.createView()},{binding:2,resource:{buffer:nearDomain}},{binding:3,resource:{buffer:nearElevation}}]}),
-    triangles:(mesh.indices.length+(fineMesh?.indices.length??0))/3,trees:trees.length/8,forestPatches:forestPatches.length,
+    triangles:(mesh.indices.length+(fineMesh?.indices.length??0))/3,trees:trees.length/8+(forest?.stats.roots??0),forestPatches:forestPatches.length,
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
-    lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,canopyInspectionURL:canopyInspectionLink,
+    lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:updateTrees,
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,ISLAND,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample),
     encode(pass,changed=false){
+      forest?.encode(pass);
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
     },
@@ -245,7 +253,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
         // All imported wood/crowns draw before either family's cutout leaves.
         // Opaque terrain and both solid forest paths retain mobile HSR.
-        if(part==='opaque')importedCanopy?.drawOpaque(pass);
+        if(part==='opaque'){importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);}
         pass.setPipeline(pipe);pass.setBindGroup(0,groups[groupIndex]);pass.setBindGroup(1,cloudGroups[groupIndex]);
         for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
           const batch=treeBatches[lod*TREE_VARIANTS+variant],mesh=treeMeshes[lod][variant][part];if(!batch.count||!mesh.count)continue;
@@ -253,6 +261,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         }
       }
       importedCanopy?.drawCutout(pass);
+      forest?.drawCutout(pass);
     },
   };
 }
