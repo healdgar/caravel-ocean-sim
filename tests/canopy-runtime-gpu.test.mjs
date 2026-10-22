@@ -56,7 +56,12 @@ test('open-ocean startup defers every optional imported canopy asset',{timeout:2
 for(const path of ['/','/docs/index.html'])test(`${path} actual landfall draws the source pack through dedicated opaque and cutout pipelines`,{timeout:240000},async()=>{
   const manifest=JSON.parse(await readFile(new URL('../assets/canopy-scenery/saba/manifest.json',import.meta.url),'utf8')),url=canopyInspectionURL(canopyRuntimeURL(path),manifest),scene=await openCanopyRuntime(url);
   try{
-    assert.ok(scene.requests.some(url=>url.endsWith('/manifest.json')));for(const name of ['near','leaf','far'])assert.ok(scene.requests.some(url=>url.endsWith('/'+name+'.bin')));
+    assert.equal(manifest.format,'waterworld.canopy-runtime');assert.equal(manifest.version,1);assert.equal(manifest.vertexLayout.strideBytes,52);
+    // The packaged build addresses these exact assets by a 16-hex content
+    // digest. Modular source uses the original filenames; query strings do
+    // not change either filename contract or the production loader's SHA gate.
+    const hash=path==='/docs/index.html'?'\\.[a-f0-9]{16}':'',requested=(name,extension)=>scene.requests.some(url=>new RegExp('/'+name+hash+'\\.'+extension+'$').test(new URL(url).pathname));
+    assert.ok(requested('manifest','json'));for(const name of ['near','leaf','far'])assert.ok(requested(name,'bin'));
     assert.deepEqual(scene.receipt.buffers.map(b=>b.label).sort(),['imported canopy far','imported canopy leaf','imported canopy near']);
     assert.ok(scene.receipt.draws['imported canopy canopyOpaqueFS']?.vertices>0,'source detailed wood really draws');assert.ok(scene.receipt.draws['imported canopy canopyLeafFS']?.vertices>0,'source native foliage really draws');
   }finally{await scene.page.close();}
