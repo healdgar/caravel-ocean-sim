@@ -88,6 +88,19 @@ def native_glb_primitives(raw, assets):
         SOURCE.require(set(image) == {"uri"} and SOURCE.basename(image["uri"]) in assets, "Unreceipted native GLB image")
     for texture in document.get("textures", []):
         SOURCE.require(isinstance(texture.get("source"), int) and 0 <= texture["source"] < len(images), "Invalid native image binding")
+    def bound_image(slot):
+        texture = slot.get("index") if isinstance(slot, dict) else None
+        bindings = document.get("textures", [])
+        SOURCE.require(isinstance(texture, int) and 0 <= texture < len(bindings), "Missing native material texture")
+        return images[bindings[texture]["source"]]["uri"]
+    for material in document.get("materials", []):
+        surface = material.get("extras", {}).get("nativeSurface", {})
+        maps = surface.get("maps", {})
+        pbr = material.get("pbrMetallicRoughness", {})
+        SOURCE.require(bound_image(pbr.get("baseColorTexture")) == maps.get("albedo", {}).get("file")
+                       and bound_image(material.get("normalTexture")) == maps.get("normal", {}).get("file"), "Native GLB texture differs from its source map")
+        if surface.get("gltfMetallicRoughness"):
+            SOURCE.require(bound_image(pbr.get("metallicRoughnessTexture")) == surface["gltfMetallicRoughness"]["file"], "Native GLB roughness differs from its source map")
     document.pop("images", None);document.pop("textures", None)
     payload = json.dumps(document, separators=(",", ":")).encode()
     payload += b" "*(-len(payload) % 4)
@@ -277,7 +290,7 @@ def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_d
         p["id"] = len(prototypes);prototypes.append(p)
     exclude = None
     legacy = ROOT/"assets/canopy-scenery/saba/manifest.json"
-    if legacy.is_file():exclude = SOURCE.finite_json(legacy.read_bytes())["coverage"]["boundsXZ"]
+    if native_index is None and legacy.is_file():exclude = SOURCE.finite_json(legacy.read_bytes())["coverage"]["boundsXZ"]
     roots, coverage = place_roots(region, sample, biome, prototypes, spacing=spacing, exclude=exclude)
     vertices, indices, vertex_count, index_count = [], [], 0, 0
     for p in prototypes:
