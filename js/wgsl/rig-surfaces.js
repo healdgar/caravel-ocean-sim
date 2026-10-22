@@ -20,6 +20,14 @@ struct SurfaceGpuFrame {across:vec3f,up:vec3f};
 struct SurfaceGpuRelative {origin:vec3f,offset:vec3f};
 struct SurfaceGpuScalarPair {value:f32,change:f32};
 struct SurfaceGpuVectorPair {value:vec3f,change:vec3f};
+// Compensated products/reductions keep the support's small transverse
+// component when its design coordinates or nearly parallel axes are large.
+fn surfaceGpuDot(a:vec3f,b:vec3f)->f32 {
+  let products=a*b;let productError=fma(a,b,-products);
+  let xy=products.x+products.y;let yPart=xy-products.x;let xyError=(products.x-(xy-yPart))+(products.y-yPart);
+  let xyz=xy+products.z;let zPart=xyz-xy;let xyzError=(xy-(xyz-zPart))+(products.z-zPart);
+  return xyz+(((xyError+xyzError)+productError.x+productError.y)+productError.z);
+}
 fn surfaceGpuUnit(p:vec3f)->vec3f {
   let n=length(p);if(n>1e-12){return p/n;}return vec3f(0,1,0);
 }
@@ -88,7 +96,7 @@ fn surfaceGpuSinPair(pair:SurfaceGpuScalarPair)->SurfaceGpuScalarPair {
 }
 fn surfaceGpuLengthChange(value:vec3f,change:vec3f)->f32 {
   let denominator=length(value)+length(value+change);
-  if(denominator>1e-20){return (2.0*dot(value,change)+dot(change,change))/denominator;}return 0.0;
+  if(denominator>1e-20){return (2.0*surfaceGpuDot(value,change)+surfaceGpuDot(change,change))/denominator;}return 0.0;
 }
 fn surfaceGpuUnitPair(pair:SurfaceGpuVectorPair)->SurfaceGpuVectorPair {
   let size=length(pair.value);let nextSize=length(pair.value+pair.change);
@@ -97,7 +105,7 @@ fn surfaceGpuUnitPair(pair:SurfaceGpuVectorPair)->SurfaceGpuVectorPair {
   return SurfaceGpuVectorPair(value,(pair.change-value*surfaceGpuLengthChange(pair.value,pair.change))/nextSize);
 }
 fn surfaceGpuDotPair(a:SurfaceGpuVectorPair,b:SurfaceGpuVectorPair)->SurfaceGpuScalarPair {
-  return SurfaceGpuScalarPair(dot(a.value,b.value),dot(a.value,b.change)+dot(a.change,b.value)+dot(a.change,b.change));
+  return SurfaceGpuScalarPair(surfaceGpuDot(a.value,b.value),surfaceGpuDot(a.value,b.change)+surfaceGpuDot(a.change,b.value)+surfaceGpuDot(a.change,b.change));
 }
 fn surfaceGpuSewnPair(surface:SurfaceGpuSurface,anchor:vec2f,change:vec2f)->SurfaceGpuScalarPair {
   let mask=u32(surface.hinge.w);let band=surface.camber.w;var weight=SurfaceGpuScalarPair(1,0);
@@ -119,20 +127,25 @@ fn surfaceGpuSupportsPair(initial:SurfaceGpuVectorPair,reference:SurfaceGpuVecto
   for(var i=0u;i<count;i++){
     let at=start+i*4u;let A=surfaceGpuModel[at];let B=surfaceGpuModel[at+1u];let info=surfaceGpuModel[at+2u];let flags=u32(info.w);
     if((flags&2u)!=0u&&info.y==f32(index)){continue;}
-    var a=A.xyz;var b=B.xyz;
-    if(info.z>=0.0){let owner=u32(info.z);let descriptor=surfaceGpuDescriptor(owner);let ownerPose=surfaceGpuPose(owner);a=surfaceGpuYard(descriptor,a,ownerPose);b=surfaceGpuYard(descriptor,b,ownerPose);}
-    let axis=b-a;let length2=dot(axis,axis);if(length2<1e-12){continue;}a-=origin;
-    let projection=dot(p.value-a,axis)/length2;let coordinate=clamp(projection,0.0,1.0);
-    let coordinateChange=surfaceGpuClampChange(projection,dot(p.change,axis)/length2);
+    var a=A.xyz;var axis=B.xyz-A.xyz;
+    if(info.z>=0.0){
+      let owner=u32(info.z);let descriptor=surfaceGpuDescriptor(owner);let ownerPose=surfaceGpuPose(owner);
+      a=surfaceGpuYard(descriptor,a,ownerPose);
+      if(descriptor.info.x==1.0){let angle=-atan2(descriptor.a.z-descriptor.b.z,descriptor.a.y-descriptor.b.y)*ownerPose.dip;axis=surfaceGpuRotate(axis,vec3f(1,0,0),angle);}
+      else{axis=surfaceGpuRotateVector(descriptor,axis,ownerPose);}
+    }
+    let length2=surfaceGpuDot(axis,axis);if(length2<1e-12){continue;}a-=origin;
+    let projection=surfaceGpuDot(p.value-a,axis)/length2;let coordinate=clamp(projection,0.0,1.0);
+    let coordinateChange=surfaceGpuClampChange(projection,surfaceGpuDot(p.change,axis)/length2);
     let q=SurfaceGpuVectorPair(a+axis*coordinate,axis*coordinateChange);
     let delta=SurfaceGpuVectorPair(p.value-q.value,p.change-q.change);
     let radius=SurfaceGpuScalarPair(A.w+(B.w-A.w)*coordinate+clearance,(B.w-A.w)*coordinateChange);
     let mastBarrier=(flags&1u)!=0u&&info.x==surface.info.w&&surface.contact.y!=0.0;
     var direction=normal;if(mastBarrier){direction=vec3f(0,0,surface.contact.y);}
-    var contactNormal=SurfaceGpuVectorPair(direction-axis*dot(direction,axis)/length2,vec3f(0));
+    var contactNormal=SurfaceGpuVectorPair(cross(axis,cross(direction,axis))/length2,vec3f(0));
     let restReference=SurfaceGpuVectorPair(reference.value-q.value,reference.change-q.change);
     if(length(contactNormal.value)<1e-10){
-      contactNormal=SurfaceGpuVectorPair(restReference.value-axis*dot(restReference.value,axis)/length2,restReference.change-axis*dot(restReference.change,axis)/length2);
+      contactNormal=SurfaceGpuVectorPair(restReference.value-axis*surfaceGpuDot(restReference.value,axis)/length2,restReference.change-axis*surfaceGpuDot(restReference.change,axis)/length2);
       var fallback=vec3f(1,0,0);if(abs(axis.y)/sqrt(length2)<.9){fallback=vec3f(0,1,0);}fallback=cross(axis,fallback);
       if(length(contactNormal.value)<1e-10){
         let query=contactNormal.value+contactNormal.change;contactNormal.value=fallback;
