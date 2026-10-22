@@ -2,13 +2,15 @@ import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
-import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance } from './crew-work.js';
+import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
+import {ROWING_DESIGNS} from './models/rowing.js';
+import {proceduralDesign} from './models/procedural.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -57,12 +59,22 @@ const CREW_APPEARANCES={
 };
 const crewLinearColour=rgb=>rgb.map(byte=>{const v=byte/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
 export const CREW_ACTOR_FLOATS=36;
+const crewAdditionalNames={female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid'],male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif']};
+function crewStationIdentity(key,index){
+  const named=CREW_IDENTITIES.find(s=>s.id===key);if(named)return {...named,identityId:named.id};
+  const sex=index%2?'male':'female',n=Math.floor(index/2),pool=CREW_IDENTITIES.filter(s=>s.sex===sex),identity=pool[n%pool.length];
+  return {...identity,id:key,identityId:identity.id,name:crewAdditionalNames[sex][n%crewAdditionalNames[sex].length]};
+}
 export function createCompany(policy=deckhandDecision,modelId='nina') {
   const model=requirePlayableShipModel(modelId);
   // Twelve rendered workers are a representative watch on the much larger
   // Victory; they do not replace the vessel's separate personnel/load manifest.
-  return {modelId: model.id,representativeWatch:model.id==='victory'||!!ADDITIONAL_DESIGNS[model.id],order:'watch',revision:0,pending:false,crew:CREW_ROSTER.map((identity,i)=>{
-    const person={...identity,...model.crewStations[identity.id]};
+  const extended=hasExtendedCrewModel(model.id),stations=extended?Object.entries(model.crewStations):CREW_ROSTER.map(identity=>[identity.id,model.crewStations[identity.id]]);
+  const activeControls=extended?['fore','main','mizzen'].map((name,index)=>model.rig.sails.some(s=>s.controlGroup===name)?index:-1).filter(i=>i>=0):[0,1,2];
+  return {modelId:model.id,activeControls,representativeWatch:model.id==='victory'||(extended?proceduralDesign(model.id).loading.crew>stations.length:!!ADDITIONAL_DESIGNS[model.id]),order:'watch',revision:0,pending:false,crew:stations.map(([key,station],i)=>{
+    const identity=extended?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
+    person.route??=[person.z,person.z];person.roles??=[person.role.toLowerCase()];
+    if(extended&&Object.hasOwn(ROWING_DESIGNS,model.id)&&person.role==='Passenger'&&!stations.slice(0,i).some(([,p])=>p.role==='Passenger')){person.role='Captain';person.roles=['captain'];}
     // Keep short routine rounds on their current deck. Longer work trips use
     // the model's stair paths, including the exact ramp elevations.
     if(ADDITIONAL_DESIGNS[model.id]&&person.route[0]!==person.route[1]){
@@ -74,35 +86,38 @@ export function createCompany(policy=deckhandDecision,modelId='nina') {
       time:i*.43,walkTime:i*.27,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
-    const look=CREW_APPEARANCES[s.id];
+    const look=CREW_APPEARANCES[s.identityId??s.id];
     s.shirt=CREW_SHIRTS[i%6];s.skin=crewLinearColour(look.skin);s.trousers=i%3?[.095,.12,.15]:[.16,.10,.065];
     s.hair=crewLinearColour(look.hair);s.face=[...look.face];return s;
   })};
 }
 export function issueCaptainOrder(company,boat,id) {
   const order=CAPTAIN_ORDERS.find(o=>o.id===id);if(!order)return false;
-  if(id==='transfer')return boat.modelId==='victory'||(ADDITIONAL_DESIGNS[boat.modelId]&&!ADDITIONAL_DESIGNS[boat.modelId].surfaces.some(s=>s.kind==='lateen'))?false:requestYardTransfer(sailingState(boat));
+  if(id==='transfer')return hasExtendedCrewModel(boat.modelId)||boat.modelId==='victory'||(ADDITIONAL_DESIGNS[boat.modelId]&&!ADDITIONAL_DESIGNS[boat.modelId].surfaces.some(s=>s.kind==='lateen'))?false:requestYardTransfer(sailingState(boat));
+  if(order.sails&&hasExtendedCrewModel(boat.modelId)&&!company.activeControls.length&&id!=='weather')return false;
   company.order=id;company.revision++;company.pending=!!order.sails;
   boat.crewSailRate=new Float64Array(3);
-  if(order.sails){boat.propulsion='sail';for(let i=0;i<3;i++)boat[SAIL_KEYS[i]]=order.sails[i];}
+  if(order.sails){if(company.activeControls.length)boat.propulsion='sail';for(const i of company.activeControls)boat[SAIL_KEYS[i]]=order.sails[i];}
   for(const s of company.crew)s.decisionIn=0;
   return true;
 }
 export function stepCompany(company,boat,dt,wind) {
   const order=CAPTAIN_ORDERS.find(o=>o.id===company.order),sails=sailingState(boat);
   // Manual sail settings supersede an outstanding broad order without stale reapplication.
-  if(order.sails&&order.sails.some((value,i)=>Math.abs(value-boat[SAIL_KEYS[i]])>.001)){
+  if(order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-boat[SAIL_KEYS[i]])>.001)){
     company.order='watch';company.pending=false;company.revision++;
-  } else company.pending=!!order.sails&&order.sails.some((value,i)=>Math.abs(value-sails.set[i])>.01);
+  } else company.pending=!!order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-sails.set[i])>.01);
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
+    if(s.job){s.seatedPose=null;s.moisturePoints=null;}
     if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind);}
   }
   updateCrewGunneryAttendance(company,boat);
+  updateCrewRowingAttendance(company,boat);
   return company;
 }
 function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='hatch'&&s.job.stage!=='return');}
@@ -125,8 +140,33 @@ export function createDeckhand(policy=deckhandDecision) {
     observation:{order:'patrol',hazard:false,roll:0,rollRate:0,wind:0},
     transform:new Float32Array(16),position:new Float32Array(3),rotation:new Float32Array(4),scale:new Float32Array([.95,.95,.95])};
 }
+function stepProceduralDeckhand(s,boat,dt,wind){
+  s.time+=dt;s.walkTime+=dt*.8;s.climbPitch=0;
+  const o=s.observation;o.wind=wind;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;
+  o.hazard=Math.abs(o.roll)>.36||Math.abs(o.rollRate)>.5||wind>23;s.decisionIn-=dt;
+  if(o.hazard||s.decisionIn<=0){let intent;try{intent=s.policy(o);}catch{intent=deckhandDecision(o);}s.intent=o.hazard?'brace':['patrol','standby','brace'].includes(intent)?intent:deckhandDecision(o);s.decisionIn=.5;}
+  s.brace+=(Number(o.hazard)-s.brace)*(1-Math.exp(-dt*8));
+  const seated=crewSeatedPose(s,boat);s.seatedPose=seated;
+  if(seated){
+    s.yaw=seated.body.yaw;s.walk=0;
+    s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
+    const seat=seated.seat,feet=seated.feet;s.moisturePoints=[feet[0].map((v,i)=>(v+feet[1][i])*.5),seat.map((v,i)=>v+(i===1?.10:0)),seat.map((v,i)=>v+(i===1?.50:0)),seat.map((v,i)=>v+(i===1?.95:0))];
+  }else{
+    let moving=false;
+    if(s.intent==='patrol'&&s.route[0]!==s.route[1]){
+      if(s.wait>0)s.wait=Math.max(0,s.wait-dt);
+      else{const travel=Math.min(Math.abs(s.target-s.z),.65*dt/(boat.length/12));s.z+=Math.sign(s.target-s.z)*travel;moving=travel>0;if(Math.abs(s.target-s.z)<1e-6){s.target=s.target===s.route[1]?s.route[0]:s.route[1];s.wait=3;}}
+    }
+    s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
+    s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
+    if(s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
+  }
+  const half=s.yaw/2;s.rotation.set([0,Math.sin(half),0,Math.cos(half)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
+}
 export function stepDeckhand(s,boat,dt,wind=0) {
-  dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));s.time+=dt;s.climbPitch=0;
+  dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
+  if(hasExtendedCrewModel(boat.modelId))return stepProceduralDeckhand(s,boat,dt,wind);
+  s.time+=dt;s.climbPitch=0;
   const o=s.observation;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;o.wind=wind;
   // Hysteresis avoids oscillating between walking and bracing near the threshold.
   o.hazard=Math.abs(o.roll)>(s.intent==='brace'?.26:.36)||Math.abs(o.rollRate)>(s.intent==='brace'?.3:.5)||wind>(s.intent==='brace'?19:23);
@@ -198,7 +238,9 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
-    const poses=new Float32Array(people.length*65*16),actors=new Float32Array(people.length*CREW_ACTOR_FLOATS);
+    // A one-person company legitimately has no actors in one sex batch.
+    // Bind valid storage buffers, but submit no phantom instance for that batch.
+    const poses=new Float32Array(Math.max(1,people.length)*65*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS);
     const vertex=shared?.geometry[i].vertex??buffer('crew vertices',model.vertices,B.VERTEX),index=shared?.geometry[i].index??buffer('crew indices',model.indices,B.INDEX);
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
@@ -213,13 +255,18 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
   const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
   let enabled=true,drawEnabled=false;
-  const drawBatch=(pass,b,shadow)=>{pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);};
+  const drawBatch=(pass,b,shadow)=>{if(!b.people.length)return;pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);};
   return {state,assets:{models,pipeline,shadowPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index})=>({vertex,index}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),joints:65,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     update(boat,dt,wind){
-      stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&state.crew[0].visible;
+      stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&state.crew.some(s=>s.visible);
       gunTools.update(state,boat,drawEnabled);
-      if(!drawEnabled)return;
+      if(!drawEnabled){
+        // Hidden rendering does not turn a seated body's moisture samples back
+        // into standing-height probes or change its physical rowing attendance.
+        if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const s of b.people)if(s.seatedPose){const a=b.model.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);}
+        return;
+      }
       for(const b of batches){
         const a=b.model.animator;
         for(let i=0;i<b.people.length;i++){
@@ -231,7 +278,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           b.actors.set(s.shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
           b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female');
           // The tiller station is below the camera; all crew remain visible.
-          b.actors[offset+19]=0;
+          b.actors[offset+19]=Number(!s.visible);
           b.actors[offset+23]=Number(boat.enabled===true);
           b.actors[offset+31]=wetness.crewOffset+state.crew.indexOf(s)*4;
         }
@@ -241,12 +288,12 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     drawSubmerged(pass){
       if(!submerged||!drawEnabled)return;
       submerged.bind(pass);pass.setBindGroup(1,submergedLighting);
-      for(const b of batches){pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);}
+      for(const b of batches){if(!b.people.length)continue;pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);}
       gunTools.drawSubmerged(pass);
     },
     draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},
-    status(){return !state.crew[0].visible?'Crew needs a larger deck':companyStatus(state);},
+    status(){return state.crew.length&&!state.crew.some(s=>s.visible)?hasExtendedCrewModel(modelId)?'Crew hidden':'Crew needs a larger deck':companyStatus(state);},
     destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index]),b.bones,b.actor])resource.destroy();},
   };
 }

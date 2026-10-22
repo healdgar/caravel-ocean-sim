@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+// Proposed integration fixtures; root executes after all model backends merge.
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createCompany,stepCompany,issueCaptainOrder} from '../js/crew.js';
+import {poseCrewWork} from '../js/crew-pose.js';
+import {crewSeatedPose,updateCrewRowingAttendance} from '../js/crew-work.js';
+import {loadCrewGLB} from '../js/gltf.js';
+import {requirePlayableShipModel,resolveShipNode} from '../js/ship-models.js';
+import {proceduralDesign} from '../js/models/procedural.js';
+import {rowingStationPose,rowingSteeringPose} from '../js/rowing.js';
+import {advanceSails,sailingState} from '../js/sailing.js';
+const crewProposedBoat=id=>{const model=requirePlayableShipModel(id);return {modelId:id,model,...model.runtime,heading:0,heave:0,pitch:0,roll:0,rollVelocity:0,rudder:0,sailFore:1,sailMain:1,sailMizzen:1,crew:false,showProw:true,hatchesClosed:0};};
+const crewProposedDistance=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
+const crewProposedWorld=(s,p)=>[0,1,2].map(i=>s.transform[i]*p[0]+s.transform[i+4]*p[1]+s.transform[i+8]*p[2]+s.transform[i+12]);
+
+test('complete station-owned companies preserve gender balance, identities and narrow-boat visibility',()=>{
+  for(const [id,count]of [['oseberg',32],['lusoria',26],['taino-canoe',30],['flying-cloud',12],['gipsy-moth-iv',1]]){
+    const boat=crewProposedBoat(id),company=createCompany(undefined,id);stepCompany(company,boat,0,2);
+    assert.equal(company.crew.length,count,id+' authored complement');assert.equal(new Set(company.crew.map(s=>s.id)).size,count);
+    assert.deepEqual(new Set(company.crew.map(s=>s.stationKey)),new Set(Object.keys(requirePlayableShipModel(id).crewStations)));
+    if(count>1)assert.equal(company.crew.filter(s=>s.sex==='female').length,count/2);
+    assert.ok(company.crew.every(s=>s.visible&&s.position.every(Number.isFinite)&&s.transform.every(Number.isFinite)),id+' actors are not hidden by Niña beam thresholds');
+    assert.ok(new Set(company.crew.map(s=>s.skin.join(','))).size>=Math.min(count,4),id+' retains diverse appearances');
+    if(id==='flying-cloud'){assert.equal(company.representativeWatch,true);assert.equal(proceduralDesign(id).loading.crew,42);}
+    if(id==='gipsy-moth-iv'){assert.equal(company.crew[0].id,'ines');assert.equal(company.crew[0].sex,'female');assert.ok(company.crew[0].roles.includes('helmsman'));}
+  }
+});
+
+test('rower hands, pelvis and planted boots follow shared stroke targets without advancing physical phase',()=>{
+  const meshes=Object.fromEntries(['male','female'].map(sex=>[sex,loadCrewGLB(readFileSync(new URL('../assets/crew/'+(sex==='female'?'sailor-female.glb':'sailor.glb'),import.meta.url)))]));
+  for(const id of ['oseberg','lusoria','taino-canoe']){
+    const boat=crewProposedBoat(id),company=createCompany(undefined,id);
+    boat.rowingState={phase:0,rate:.45,effortPort:.6,effortStarboard:.6,cadence:.45};
+    for(const phase of [.08,.30,.60,.88]){
+      boat.rowingState.phase=phase;stepCompany(company,boat,0,2);assert.equal(boat.rowingState.phase,phase);
+      const subjects=[company.crew.find(s=>s.stationId&&s.sex==='female'),company.crew.find(s=>s.stationId&&s.sex==='male'),company.crew.find(s=>s.role==='Helmsman'),company.crew.find(s=>s.role==='Captain')].filter(Boolean);
+      for(const s of subjects){
+        const targets=crewSeatedPose(s,boat),a=meshes[s.sex].animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);
+        const at=name=>crewProposedWorld(s,Array.from(a.world[a.nodeIndex(name)].subarray(12,15)));
+        assert.ok(a.palette.every(Number.isFinite),id+' finite seated skin');
+        assert.ok(crewProposedDistance(at('pelvis'),targets.seat)<.025,id+' pelvis rests at its own bench');
+        for(const [i,side]of ['l','r'].entries()){
+          assert.ok(crewProposedDistance(at('hand_'+side),targets.hands[i])<.08,id+' '+s.id+' '+phase+' actual hand reaches shaft');
+          assert.ok(crewProposedDistance(at('foot_'+side),targets.feet[i])<.08,id+' actual boot reaches the authored floor');
+        }
+        assert.ok(at('Head')[1]<targets.seat[1]+1.2,'seated workers are not standing templates');
+        assert.equal(s.moisturePoints.length,4);assert.ok(s.moisturePoints.every(p=>p.every(Number.isFinite)));
+        const authoritative=s.stationId?rowingStationPose(boat,s.stationId):s.role==='Helmsman'?rowingSteeringPose(boat):null;
+        if(authoritative)for(let i=0;i<2;i++)assert.ok(crewProposedDistance(targets.hands[i],authoritative.hands[i])<1e-9);
+        assert.equal(boat.rowingState.phase,phase,'rendering/IK never advances rowing physics');
+      }
+    }
+  }
+});
+
+test('solo Gipsy Moth physically visits independent sail controls and hatch without a two-person gate',()=>{
+  const boat=crewProposedBoat('gipsy-moth-iv'),company=createCompany(undefined,boat.modelId),seen=new Set(),masts=new Map(),mesh=loadCrewGLB(readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));let hatchPoseChecked=false;stepCompany(company,boat,0,3);
+  for(const order of ['weather','full']){
+    assert.equal(issueCaptainOrder(company,boat,order),true);
+    let complete=false;
+    for(let i=0;i<2400;i++){
+      advanceSails(boat,.1,3,0);stepCompany(company,boat,.1,3);
+      const job=company.crew[0].job;if(job?.control!==undefined){seen.add(job.control);masts.set(job.control,job.mast);assert.equal(job.kind,'haul');}
+      if(job?.kind==='hatch'&&job.stage==='working'&&!hatchPoseChecked){
+        const s=company.crew[0],a=mesh.animator,grip=resolveShipNode(boat,'hatch.grip');a.sample('Idle',s.time);poseCrewWork(a,s,boat);
+        for(const [side,sign]of [['l',1],['r',-1]]){
+          const hand=crewProposedWorld(s,Array.from(a.world[a.nodeIndex('hand_'+side)].subarray(12,15))),target=[grip[0]+sign*.10,grip[1],grip[2]];
+          assert.ok(crewProposedDistance(hand,target)<.08,'solo sailor reaches actual aft lid grip rather than the far hinge through the cabin');
+        }
+        hatchPoseChecked=true;
+      }
+      assert.ok(company.crew[0].transform.every(Number.isFinite));
+      if(!company.pending&&!company.crew.some(s=>s.job)){complete=true;break;}
+    }
+    assert.ok(complete,order+' finishes with one real sailor and hidden rendering');
+    assert.deepEqual(Array.from(sailingState(boat).set),order==='weather'?[.2,.2,0]:[1,1,1]);
+  }
+  assert.equal(boat.hatchesClosed,1);assert.equal(hatchPoseChecked,true);assert.deepEqual([...seen].sort(),[0,1,2]);assert.deepEqual([...masts].sort((a,b)=>a[0]-b[0]),[[0,0],[1,0],[2,1]],'headsail control is not an invented foremast');
+  assert.equal(company.crew.length,1);assert.equal(company.crew[0].job,null);
+});
+
+test('sail-less canoe never receives nonexistent mast/hatch/gunnery jobs and keeps every occupied blade attended',()=>{
+  const boat=crewProposedBoat('taino-canoe'),company=createCompany(undefined,boat.modelId);stepCompany(company,boat,0,2);
+  assert.equal(company.activeControls.length,0);assert.equal(issueCaptainOrder(company,boat,'full'),false);assert.equal(issueCaptainOrder(company,boat,'transfer'),false);
+  assert.equal(issueCaptainOrder(company,boat,'weather'),true);
+  for(let i=0;i<80;i++)stepCompany(company,boat,.1,2);
+  assert.ok(company.crew.every(s=>!s.job));assert.equal(company.pending,false);assert.equal(boat.rowingAttendance.size,24);
+  const rower=company.crew.find(s=>s.stationId);rower.job={kind:'haul',stage:'approach'};
+  // Attendance is an actual physical eligibility input, independent of drawing.
+  const {stationId}=rower;updateCrewRowingAttendance(company,boat);assert.equal(boat.rowingAttendance.has(stationId),false);boat.rowingState={phase:.2,rate:.45,effortPort:1,effortStarboard:1,cadence:.45};
+  const absent=rowingStationPose(boat,stationId);assert.equal(absent.effort,0);assert.equal(absent.drive,false);
+});

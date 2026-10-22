@@ -5,6 +5,7 @@ import { SPRAY_COUNT } from './wgsl/interaction.js';
 // Moisture belongs to material probes, so furling, steering and crew movement
 // carry it along. Nearby vertices of the same material share a bounded probe.
 export function createWetnessData(mesh,crewCount=12) {
+  if(!Number.isSafeInteger(crewCount)||crewCount<0||crewCount>128)throw Error('Wetness requires an explicit crew count between zero and 128');
   const points=[0,0,0,0,0,0,0,0],sourceVertices=[0],lookup=new Uint32Array(mesh.length/9),seen=new Map();
   for(let i=0;i<mesh.length;i+=9){
     const material=mesh[i+6],base=Math.floor(material);
@@ -18,17 +19,33 @@ export function createWetnessData(mesh,crewCount=12) {
     lookup[i/9]=probe;
   }
   const crewOffset=points.length/8;
-  return {points:new Float32Array([...points,...new Float32Array(crewCount*4*8)]),lookup,crewOffset,sourceVertices:new Uint32Array(sourceVertices)};
+  return {points:new Float32Array([...points,...new Float32Array(crewCount*4*8)]),lookup,crewOffset,crewCount,sourceVertices:new Uint32Array(sourceVertices)};
+}
+
+// Four persistent material samples per actual actor. Posed seated bodies supply
+// pelvis/torso/head samples; standing legacy actors retain their original leads.
+export function writeCrewWetnessData(data,company,boat){
+  const count=data.crewCount??(data.points.length/8-data.crewOffset)/4,crew=company?.crew??[];
+  if(crew.length>count)throw Error('Crew exceeds this vessel’s allocated wetness probes');
+  const sx=boat.beam/3.6,sy=vesselVerticalScale(boat),sz=boat.length/12;
+  data.points.fill(0,data.crewOffset*8);
+  for(const [i,s]of crew.entries())for(let h=0;h<4;h++){
+    const p=s.moisturePoints?.[h]??[s.position[0],s.position[1]+[.08,.5,1.08,1.55][h]*s.scale[1],s.position[2]];
+    if(!p||p.length!==3||!Array.from(p).every(Number.isFinite))throw Error('Non-finite crew wetness point');
+    data.points.set([p[0]/sx,p[1]/sy,p[2]/sz,20,0,0,3,Number(s.visible)],(data.crewOffset+i*4+h)*8);
+  }
+  return data.points.subarray(data.crewOffset*8);
 }
 
 // The hull's probe layout is model data; crew positions and GPU moisture remain
 // vessel state. Weak ownership releases the template with its source mesh.
 const wetnessTemplates=new WeakMap();
 
-export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe}) {
-  let template=wetnessTemplates.get(mesh);
-  if(!template){template=createWetnessData(mesh);wetnessTemplates.set(mesh,template);}
-  const data={points:template.points.slice(),lookup:template.lookup,crewOffset:template.crewOffset},B=GPUBufferUsage,T=GPUTextureUsage;
+export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,computePipe,crewCount=12}) {
+  let templates=wetnessTemplates.get(mesh);if(!templates){templates=new Map();wetnessTemplates.set(mesh,templates);}
+  let template=templates.get(crewCount);
+  if(!template){template=createWetnessData(mesh,crewCount);templates.set(crewCount,template);}
+  const data={points:template.points.slice(),lookup:template.lookup,crewOffset:template.crewOffset,crewCount:template.crewCount},B=GPUBufferUsage,T=GPUTextureUsage;
   const buffer=(label,size,usage)=>device.createBuffer({label,size,usage});
   const points=buffer('wetness probes',data.points.byteLength,B.STORAGE|B.COPY_DST);
   const lookup=buffer('wetness vertex lookup',data.lookup.byteLength,B.STORAGE|B.COPY_DST);
@@ -40,7 +57,7 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
   const pipes=await Promise.all([[WET_CLEAR,'wetting grid clear'],[WET_DEPOSIT,'spray deposition'],[WET_SEA,'wetting sea heights'],[WET_UPDATE,'surface moisture']].map(([code,label])=>computePipe(code,label)));
   const bind=(p,resources)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const b=buffer=>({buffer});let groups,needsClear=true;
-  return {state,lookup,points,crewOffset:data.crewOffset,probeCount:data.points.length/8,
+  return {state,lookup,points,crewOffset:data.crewOffset,crewCount:data.crewCount,probeCount:data.points.length/8,
     connect(interaction,spindrift,seaView,seaSampler){
       groups=[bind(pipes[0],[b(mist)]),
         bind(pipes[1],[b(hullUBO),b(interaction.uniform),b(mist),b(interaction.drops),b(interaction.sheets),b(spindrift.plumes)]),
@@ -56,13 +73,8 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
       device.queue.writeBuffer(points,0,data.points.subarray(0,data.crewOffset*8));
     },
     updateCrew(company,boat){
-      if(!company)return;
-      for(const [i,s] of company.crew.entries())for(let h=0;h<4;h++){
-        const at=(data.crewOffset+i*4+h)*8;
-        data.points.set([s.position[0]/(boat.beam/3.6),(s.position[1]+[.08,.5,1.08,1.55][h]*s.scale[1])/vesselVerticalScale(boat),
-          s.position[2]/(boat.length/12),20,0,0,3,Number(s.visible)],at);
-      }
-      device.queue.writeBuffer(points,data.crewOffset*32,data.points.subarray(data.crewOffset*8));
+      const crewPoints=writeCrewWetnessData(data,company,boat);
+      if(crewPoints.byteLength)device.queue.writeBuffer(points,data.crewOffset*32,crewPoints);
     },
     encode(pass,enabled=true){
       if(!enabled && !needsClear)return;
