@@ -130,8 +130,13 @@ laterSailCloud.surfaces.push(
 );
 
 const laterSailMothScale=laterSailMothFrame.verticalScale,laterSailMothX=laterSailMothRuntime.beam/3.6;
+// Authored V-body refinement, not a recovered builder offset table. Keep the
+// reported-waterline footprint/max beam, draft, sheer and lead-fin geometry
+// fixed; take excess immersed volume out of the bilge/shoulder instead of
+// changing displacement mass or moving the chosen waterline datum.
+const laterSailMothBilgeScale=.68,laterSailMothShoulderScale=.72;
 const laterSailMoth={
-  id:'gipsy-moth-iv',modelCode:8,name:'Gipsy Moth IV · 1966',revision:1,status:'planned',family:'bermudan-ketch',
+  id:'gipsy-moth-iv',modelCode:8,name:'Gipsy Moth IV · 1966',revision:2,status:'planned',family:'bermudan-ketch',
   frame:laterSailMothFrame,runtime:laterSailMothRuntime,
   interpretation:'Original design-DWL branch before voyage alterations. Builder-archive dimensions and original lead retained; hull/fin offsets, cockpit and sail dimensions are authored pending drawings.',
   readiness:{backend:'surfaces-v1',requires:['physical-mast/control-group separation','Bermudan luff/boom evaluator','profiled ballast keel in hydrostatics/contact/lateral force','recessed cockpit','singlehanded deck jobs','DWL displacement/ballast calibration','rendered clearance and fleet checks']},
@@ -140,8 +145,8 @@ const laterSailMoth={
     sheerFore:.20/laterSailMothScale,sheerAft:.10/laterSailMothScale,bowRake:.45,sternRake:.55,
     sections:[
       [0,0,0,0,0,0,0,0,0,0,0,0],
-      [0,0,0,.08,.35,.56,.62,.49,.19,0,0,0],
-      [0,0,0,.40,1.04,1.35,1.40,1.18,.63,0,0,0],
+      [0,0,0,.08,.35,.56,.62,.49,.19,0,0,0].map(w=>w*laterSailMothBilgeScale),
+      [0,0,0,.40,1.04,1.35,1.40,1.18,.63,0,0,0].map(w=>w*laterSailMothShoulderScale),
       [0,0,0,.65,1.33,1.70,1.80,1.61,.96,0,0,0],
       [0,.12,.55,1.05,1.57,1.78,1.80,1.68,1.30,.92,.52,.23],
       [0,.11,.52,1.00,1.50,1.71,1.74,1.62,1.25,.88,.49,.22],
