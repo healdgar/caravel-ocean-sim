@@ -39,11 +39,27 @@ suite remain admission gates. The latest public runtime remains `7c0b527` below.
   outputs while distinguishing dry open interiors, external wet shells and the
   recessed cockpit. Gipsy Moth solo hatch/sail completion and complete body
   clearance through its cockpit coaming pass their focused CPU checks.
-- Earlier native preflight exposed a singular/plural anchor flag mismatch and a
-  field-clock mismatch; source corrections are integrated and undergoing the
-  next serialized actual-runtime run. Earlier partial results do not qualify
-  the combined source. Root alone holds the testing baton; direct agents author
-  isolated fixes/proposed checks and run no validation.
+- Native modular/Pages preflight now passes all five startup/mesh/company and
+  actual rowing-water/thrust checks. The canoe's absent captain controls hide
+  immediately; cadence uses strokes per minute and selecting rowing exits
+  set-speed mode. Variable frame intervals and the 600-second ocean-loop reset
+  retain correct water-field timestamps. These are not device-performance tests.
+- All 1,408 measured hands (88 rowing actors, eight phases, two hands) reach the
+  actual grips within 8 cm using fixed limbs. Real boot vertices clear shared
+  thwarts/supports through sail orders; the scheduler chooses workers with an
+  accessible route rather than sending the captain through occupied seats.
+- The first combined native run passed 657/664, with six failures and one timed
+  out check. Focused reruns resolved crew routing, isolated deck-wash/offline
+  startup timeouts, and the new long-name mobile select overflow. Clipper
+  standing-stay/cloth clearance remains under correction; this is **not** full
+  combined-source clearance. No release has been made from these partial results.
+- Remaining scope includes whole-rig running-line/spar clearance and calibrated
+  historical performance. Blade forces currently react to actual ocean motion;
+  individual blade entry/exit does not yet emit its own surface-wave disturbance.
+  Hull wakes remain active. Player rowing exposes effort and physical steering;
+  unequal-stroke commands currently belong to fleet guidance, not the player UI.
+  Root alone holds the testing baton; direct agents author isolated fixes and
+  proposed checks without running validation.
 
 ### Sun/environment controls checkpoint
 
