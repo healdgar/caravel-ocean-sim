@@ -1,8 +1,9 @@
 import { createCaravelMesh, indexCaravelMesh } from './caravel.js';
 import {createVictoryMesh} from './victory.js';
-import {createAdditionalShipMesh,createAdditionalAssetPose} from './additional-ships.js';
-import {createRowingShipMesh,createRowingAssetPose} from './rowing-ships.js';
-import {createLaterSailShipMesh,createLaterSailAssetPose} from './later-sail-ships.js';
+import {createAdditionalShipMesh} from './additional-ships.js';
+import {createRowingShipMesh} from './rowing-ships.js';
+import {createLaterSailShipMesh} from './later-sail-ships.js';
+import {createRigGPUData} from './rig-gpu-data.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 import { requirePlayableShipModel } from './ship-models.js';
@@ -15,6 +16,7 @@ export function createShipAssetCache() {
   return {
     get(modelId = 'nina') {
       const model = requirePlayableShipModel(modelId);
+      if(model.gpuPose!==true)throw Error('Ship graphics require the shared WebGPU pose pipeline: '+model.id);
       const key = JSON.stringify([model.id, model.revision]);
       if (!assets.has(key)) {
         // Do not let a planned rig accidentally reuse Niña's mesh or animation.
@@ -24,12 +26,9 @@ export function createShipAssetCache() {
         if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
         const groups = [], raw = builders[model.id]({ groups });
         const { vertices, indices } = indexCaravelMesh(raw);
-        const asset={ model, vertices, indices, groups: deepFreeze(groups) };
+        const asset={ model, vertices, indices, groups: deepFreeze(groups),gpuPose:true };
         if(model.rig?.backend==='surfaces-v1'){
-          asset.gpuPose=false;
-          if(Object.hasOwn(ROWING_DESIGNS,model.id))asset.pose=createRowingAssetPose(asset);
-          else if(Object.hasOwn(LATER_SAIL_DESIGNS,model.id))asset.pose=createLaterSailAssetPose(asset);
-          else asset.pose=createAdditionalAssetPose(asset);
+          asset.rigGPUData=createRigGPUData(asset);
         }
         assets.set(key, Object.freeze(asset));
       }

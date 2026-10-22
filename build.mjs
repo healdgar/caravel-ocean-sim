@@ -17,6 +17,10 @@ const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astron
 // Baked stand loading is deferred to landfall; preserve existing module order.
 order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
+order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
+order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
+order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
+order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 // Downloads keep embedded assets. Pages uses identical bytes in independently
 // cacheable, content-addressed files; optional audio/terrain need not travel in
 // the initial HTML. Only these explicit runtime files and manifest MP3s qualify.

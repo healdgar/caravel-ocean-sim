@@ -90,7 +90,7 @@ for(const path of ['/', '/docs/index.html'])test(`${path} nine distinct real mod
       assert.ok(v.vertices>1000&&v.indices>3000&&v.meshFinite&&v.bodyFinite&&v.crewFinite);assert.ok(v.upload);assert.equal(v.hullCode,nineCodes[i]);assert.ok(Math.abs(v.hullBeam-v.beam)<1e-5&&Math.abs(v.hullLength-v.length)<1e-5);
       assert.equal(v.length,v.runtimeLength);assert.equal(v.beam,v.runtimeBeam);assert.equal(v.propulsion,'sail');assert.ok(v.seaTime>=0);assert.ok(frame.draws[v.model+' vessel']?.indices>3000,'actual requested vessel pipeline draws '+v.model);
       assert.equal(v.shadow.length,3);assert.ok(v.shadow.every(t=>t.layer===i&&t.count===1&&t.total===9),'actual shadow-array layers remain model-instance specific');
-      assert.equal(v.gpuPose,v.model==='victory');if(v.cpuPose)assert.notEqual(v.mesh,v.source,'actual sewn canvas/oars receive live CPU poses');
+      assert.equal(v.gpuPose,true,v.model+' uses shared GPU posing');assert.equal(v.cpuPose,false,v.model+' has no CPU mesh animation fallback');assert.equal(v.mesh,v.source,'actual sewn canvas/oars leave rest geometry immutable');
       const row=['oseberg','lusoria','taino-canoe'].includes(v.model);assert.equal(v.rowing,row);assert.ok(v.rowingAlias);
       if(row){assert.ok(v.water&&v.waterSample);assert.equal(v.water.modelId,v.model);assert.ok([v.waterSample.height,...v.waterSample.velocity].every(Number.isFinite));assert.ok(v.rowingEffort>0&&Number.isFinite(v.rowingPhase),'actual followers command real human stroke state');}
       if(v.model==='taino-canoe'){assert.equal(v.sails,0);assert.deepEqual(v.controls,[]);assert.equal(v.anchorPhase,'absent');}

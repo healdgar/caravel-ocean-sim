@@ -34,7 +34,7 @@
   #hud { display:none; position:fixed; bottom:124px; left:14px; max-width:calc(100vw - 28px); font:10px/1.4 ui-monospace,monospace; color:var(--muted); pointer-events:none; text-shadow:0 1px 2px #000; }
   .show-performance #hud { display:block; }
   #hud .help { display:none; }
-  #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; gap:4px; z-index:8; }
+  #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; max-width:calc(100vw - 24px); z-index:8; }
   #camera-dock > button { background:var(--glass); border-color:#ffffff30; box-shadow:0 2px 12px #0002; }
   #camera-dock > button[aria-expanded=true] { color:var(--gold); border-color:var(--gold); }
   #sailing-instruments { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); left:max(12px,env(safe-area-inset-left)); z-index:5; display:flex; flex-wrap:wrap; width:344px; max-width:calc(100vw - 16px); box-sizing:border-box; border:1px solid #ffffff26; border-radius:10px; background:var(--glass); pointer-events:none; box-shadow:0 4px 20px #0002; }
@@ -65,7 +65,7 @@
   #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); color:#fff; text-shadow:0 1px 4px #000; font-size:11px; pointer-events:none; animation:hint-away 1s 7s forwards; }
   .has-looked #look-hint { display:none; }
   @keyframes hint-away { to { opacity:0; } }
-  #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
+  #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
   #panel.hidden { display:none; }
   .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 10px 6px 14px; flex:none; border-bottom:1px solid #ffffff20; }
   .panel-header strong { font-weight:550; }
@@ -114,6 +114,8 @@
   #gpu-profile { border:1px solid #ffffff24; border-radius:6px; margin-bottom:8px; font:10px/1.5 ui-monospace,monospace; }
   #gpu-profile summary { padding:0 8px; }
   #gpu-profile pre { margin:0; padding:0 8px 8px; max-height:160px; overflow:auto; white-space:pre-wrap; }
+  #performance-summary { margin:0 0 10px; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .performance-open #hud { display:none; }
   .landfall-stages,.landfall-weather { display:flex; flex-wrap:wrap; gap:5px; }
   .landfall-stages button,.landfall-weather button { flex:1; padding:7px; }
   #landfall-panel p { font-size:12px; }
@@ -138,7 +140,7 @@
     .instrument-wind { padding:4px 8px 4px 0; }
     .instrument-wind svg { width:40px; height:40px; }
     #sailing-cue { padding:3px 9px; font-size:9px; }
-    #camera-dock { top:calc(var(--instruments-bottom) + 6px); right:50%; transform:translateX(50%); gap:4px; }
+    #camera-dock { top:calc(var(--instruments-bottom) + 6px); right:50%; transform:translateX(50%); justify-content:center; width:max-content; max-width:calc(100vw - 8px); gap:4px; }
     .icon-button { width:44px; height:44px; min-height:44px; padding:12px; }
     #camera-dock > button { border-radius:9px; }
     #helm-controls { bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); max-width:calc(100vw - 16px); width:400px; grid-template-columns:1fr; gap:7px; padding:8px 10px; }
@@ -148,8 +150,8 @@
     .sail-buttons button { height:44px; padding:6px; }
     #look-hint { bottom:164px; font-size:10px; }
     #hud { bottom:166px; font-size:9px; }
-    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
-    .share-open #helm-controls,.sea-settings-open #helm-controls,.ship-settings-open #helm-controls,.captain-open #helm-controls,.landfall-open #helm-controls,.camera-open #helm-controls { visibility:hidden; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); }
+    .share-open #helm-controls,.sea-settings-open #helm-controls,.ship-settings-open #helm-controls,.captain-open #helm-controls,.landfall-open #helm-controls,.camera-open #helm-controls,.performance-open #helm-controls { visibility:hidden; }
     .panel-body { padding:8px 12px 12px; }
     #panel label { min-height:40px; grid-template-columns:minmax(0,1fr) minmax(75px,34%) 30px; }
     #panel input[type=range],#sail-controls input[type=range] { height:40px; }
@@ -159,14 +161,15 @@
     .panel-body button,summary { min-height:44px; }
     #share-panel { right:8px; }
   }
+  @media (max-width:360px) { #camera-dock { gap:0; } }
   @media (max-height:480px) and (min-width:640px) {
     #sailing-instruments { left:max(8px,env(safe-area-inset-left)); transform:none; width:310px; }
-    #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; }
+    #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; max-width:calc(100vw - 334px); }
     .icon-button { width:44px; height:44px; min-height:44px; }
     .sail-buttons button { height:44px; }
     #helm-controls { width:520px; grid-template-columns:1.35fr 1fr; gap:14px; }
     #look-hint { bottom:102px; }
-    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel { left:auto; width:350px; }
+    #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { left:auto; width:350px; }
   }
   @media (prefers-reduced-motion:reduce) { #look-hint { animation:none; } }
   #err { position:fixed; inset:0; display:none; padding:40px; color:#f88; font:16px system-ui; white-space:pre-wrap; background:#000; z-index:20; }

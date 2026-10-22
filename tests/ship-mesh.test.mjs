@@ -83,11 +83,11 @@ test('indexed model assets share one cached mesh with preserved group index rang
   assert.notEqual(createShipAssetCache().get(), asset, 'cache lifetime belongs to the renderer');
 });
 
-test('additional ships receive independent geometry and CPU pose hooks; unknown ships fail', () => {
+test('additional ships receive independent geometry and mandatory GPU data; unknown ships fail', () => {
   const cache = createShipAssetCache();
   for (const id of ['pinta', 'santa-maria']){
     const asset=cache.get(id);assert.equal(asset.model.id,id);assert.equal(cache.get(id),asset);
-    assert.equal(typeof asset.pose,'function');assert.equal(asset.gpuPose,false);
+    assert.notEqual(typeof asset.pose,'function');assert.equal(asset.gpuPose,true);
     assert.notEqual(sha(asset.vertices),NINA_MESH_BASELINE.indexed);
   }
   assert.throws(() => cache.get('unknown-ship'));

@@ -92,6 +92,26 @@ npm start        # serves http://localhost:8080/
 
 After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [GitHub Pages build](#github-pages-build).
 
+### Graphics architecture
+
+All scene graphics use WebGPU by default, including every player, AI, companion
+and background ship. Models supply data to the shared deformation system;
+visible geometry, shadows, underwater capture and wetness reuse one GPU pose.
+Anchor/rode expansion, cannon recoil and crew tools also remain on the GPU.
+JavaScript prepares assets once and supplies sparse physics, decisions, joints,
+instance transforms and compact controls. Any CPU graphics exception requires a
+measured advantage and regression coverage. See [the execution contract](GPU_ARCHITECTURE.md).
+
+Registry-driven tests exercise every renderable ship, including future model
+entries, and deliberately inject CPU animation, mesh uploads and skipped GPU
+dispatches to verify rejection. Native tests separately compare actual GPU
+geometry with independent CPU references and frozen source samples.
+
+The **Performance stats** dock button opens live FPS, CPU frame work, actual
+render dimensions, resolution mode and vessel counts. GPU pass details enable
+only while the panel is open; closing it restores lightweight endpoint timing.
+GPU timing windows include waits and must not be added together as pass costs.
+
 Startup shows actual graphics, ocean, ship/crew and weather preparation stages.
 The loading screen stays until the first rendered canvas frame completes on the
 GPU. Errors stay visible with Retry; slow first visits get an explanatory hint,
@@ -389,10 +409,10 @@ Two pooled wake banks and three shadow texture arrays have one layer per active
 vessel, with variable hull masks and probe dispatch; disabled rows allocate none.
 The nine-ship limit is a resource bound, not a device performance guarantee.
 
-Pinta/Santa María and the five additional vessels evaluate cloth,
-spars, ropes and attachments through one
-CPU pose, uploading the same vertices used by visible, shadow, submerged and
-wetness paths. Victory retains shared GPU deformation. The new passive lateral
+Every vessel evaluates cloth, spars, ropes and attachments through the shared
+GPU pose stage. Visible, shadow, submerged and wetness paths reuse its output;
+each ship supplies compact state rather than uploading animated mesh vertices.
+The passive lateral
 model integrates the loaded hull silhouette and actual exposed keel geometry;
 its distributed forces supply sway, yaw and roll moments alongside sail moments.
 An inferred geometric centre of lateral area is not a calibrated dynamic CLR.
@@ -975,6 +995,17 @@ The scene renders in HDR with 4x MSAA. Post-processing adds up to 8 levels of bl
 
 ## Performance
 
+The chart icon in the scene controls opens **Performance stats**: FPS, frame time,
+CPU frame work, render resolution, vessel count and optional GPU pass timing.
+Closing it restores endpoint-only GPU timing for adaptive resolution.
+
+Graphics run on WebGPU by default for every model. Ships share one GPU pose
+stage across visible, shadow, underwater and wetness passes; adding a model
+must not introduce a JavaScript vertex-animation fallback. CPU exceptions need
+measured performance or transfer-latency evidence. The
+[graphics contract](GPU_ARCHITECTURE.md) and registry-wide regression tests
+enforce this boundary, including deliberate bypass attempts.
+
 The original renderer measured about 6 to 8 ms per frame at 2560 by 1440 on an RTX 5070 Ti, while other programs were also using the GPU. The HUD shows actual animation-frame cadence, plus GPU timestamp intervals when the browser supports `timestamp-query`. FPS uses elapsed wall time independently of the simulation's 100 ms timestep limit, so rates below 10 FPS remain visible.
 
 The render loop reuses large typed arrays and GPU resources, keeping most recurring allocations small.
@@ -1014,10 +1045,23 @@ These short desktop observations do not establish sustained thermal or iPhone
 performance. Native mode keeps full pixel resolution; Auto can trade sharpness
 while preserving geometry, simulation and rendering features.
 
-The nine-model release has no sustained target-device performance qualification
-yet. Flying Cloud remains CPU-heavy; release qualification does not establish
-60 FPS for that vessel. CPU poses preserve one authoritative geometry across
-rendering and forces.
+October 22's shared GPU pose correction removes per-frame JavaScript mesh
+deformation from every ship, including AI fleets, and moves anchor/rode and
+crew-tool expansion to GPU templates. On this Mac's native Apple Metal adapter,
+a paired fixed 1920 × 1080, 100% resolution, single Flying Cloud comparison
+measured **5.28 → 60.00 FPS**, with median CPU frame work **188.8 → 2.9 ms**.
+Both 89-frame samples used identical scene settings with Stats closed; the GPU
+candidate's median and p95 frame spans were both 16.7 ms. This short comparison
+does not establish sustained thermal or physical-iPhone performance.
+
+The combined native suite passes **738/738**, with no skips or cancellations;
+the subsequent expanded GPU guard run passes **11/11** with unchanged runtime.
+It exercises source and packaged pages, every registered ship, canonical GPU
+dispatch and shared buffers, deliberate bypass failures, recoil, accessories,
+wetness, mobile controls, offline startup and strict pose parity. Seven generic
+models in five states match independent CPU geometry and the original frozen
+samples at unchanged 20 µm position and 0.0001 normal tolerances. Physics keeps
+sparse CPU state and sampling; rendered vertices stay on the GPU.
 The nine-vessel resource limit does not imply 60 FPS on every Mac
 or 30 FPS on an iPhone; only device-specific measurements can establish that.
 
@@ -1198,7 +1242,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The published game supports nine model types and up to nine active vessels. Flying Cloud remains CPU-heavy; whole-rig running-line clearance and the blade-to-wave gap correction remain unfinished. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
+- The game supports nine model types and up to nine active vessels through shared GPU rendering. Sustained target-device performance and whole-rig running-line clearance remain unqualified. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.

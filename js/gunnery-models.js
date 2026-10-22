@@ -51,9 +51,9 @@ export function createGunDefinitions(boatOrModelId='nina'){
   if(!GUNNERY_MODEL_GUNS[id])throw new Error('No playable gun attachments for '+id);
   return GUNNERY_MODEL_GUNS[id];
 }
-function gunModelScale(boat){return[(boat.beam??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.beam:NINA_DESIGN.runtime.beam))/3.6,
+export function gunModelScale(boat){return[(boat.beam??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.beam:NINA_DESIGN.runtime.beam))/3.6,
   vesselVerticalScale(boat),(boat.length??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.length:NINA_DESIGN.runtime.length))/12];}
-function gunModelDirection(gun,scale){
+export function gunModelDirection(gun,scale){
   const d=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...d);return d.map(v=>v/n);
 }
 

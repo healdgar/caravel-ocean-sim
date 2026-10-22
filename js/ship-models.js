@@ -153,13 +153,13 @@ function shipAdditionalDefinition(id){
   }
   const fittings=[];
   if(d.lookout){const name=d.masts[d.lookout.mast].id,p=context.mastPoint(d.lookout.mast,d.lookout.height);add('lookout.'+name,p,'station');fittings.push({id:name+'-lookout',kind:'crows-nest',mast:name,node:'lookout.'+name,provenance:d.lookout.placement});}
-  return {id,modelCode:d.modelCode,gpuPose:false,name:d.name,revision:d.revision,status:'ready',development:true,hullFamily:d.family,geometry:'additional-procedural-v1',
+  return {id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status:'ready',development:true,hullFamily:d.family,geometry:'additional-procedural-v1',
     designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,nodes,capabilities:{yardTransfer:d.surfaces.some(s=>s.kind==='lateen')},
     rig:defineRig({id:id+'-rig',backend:'surfaces-v1',masts:d.masts.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings},nodes),referenceMeasurements:d.references};
 }
 export const SHIP_MODELS=deepFreeze({
   victory:victoryDefinition(),
-  nina:{id:'nina',modelCode:0,gpuPose:false,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
+  nina:{id:'nina',modelCode:0,gpuPose:true,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
     designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,nodes:ninaDefinitionNodes,
     rig:rigFor('nina',['lateen','lateen','lateen'],ninaDefinitionNodes),
     referenceMeasurements:[replicaReport('sanger-nina','Sanger Ships Niña',[

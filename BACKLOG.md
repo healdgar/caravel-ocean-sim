@@ -1,5 +1,95 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 22 morning: shared WebGPU graphics contract
+
+The user identified severe Flying Cloud slowdown and clarified that all scene
+graphics, including every future/player/AI/fleet/background ship, use WebGPU. CPU
+graphics exceptions need measured performance or transfer-latency justification.
+The new `surfaces-v1` adapters incorrectly selected per-frame CPU deformation;
+the correction extends the existing canonical GPU pose stage, with compact
+model/state buffers and GPU wetness reuse. Sparse physics/IK and one-time asset
+generation remain CPU work. See `GPU_ARCHITECTURE.md`.
+
+Integration is isolated in
+`/Users/alexwall/.codex/worktrees/overnight-models/waterworld`, branch
+`codex/gpu-rig-integration`, based on public documentation HEAD `379881a`.
+It excludes the unpublished primary crew-route work. Runtime checkpoint
+**`0247d56f65c2aa9b5df7893c6c6c96da08d41ab9`** is published. Pages built at
+**2026-10-22T18:50:17Z**; public bytes verified at **18:50:40Z** match:
+HTML **1,346,197 bytes**, SHA-256
+`ca47154eb9e078f7fbd24219ad5cdeaab11f85e2d6cb776a8440d32ef279b87e`;
+manifest **12,422 bytes**, SHA-256
+`e920744da5f4b83579461046f8a5f55585710304158236996fbe3eb0f18973ff`;
+all **58 assets / 19,931,107 bytes**. Receipt
+`/tmp/waterworld-gpu-public-receipt-148.json`.
+
+- Stats-button source is `b634c53`, adding live CPU/FPS/resolution and optional
+  GPU detail, plus bounded escort timing names. Native source/packaged, desktop
+  1140×800/mobile320×568 lifecycle/UI checks pass in receipt122 (10/10 combined).
+- Root froze seven pre-port model references in `20dc609`; tests never regenerate
+  them. Old-source red check `/tmp/waterworld-gpu-contract-red-105.log` fails the
+  expected CPU-path guards. Integrated static/packing/wetness checks pass 9/9
+  in `/tmp/waterworld-gpu-contract-focused-107.log`.
+- Native Metal observes every registered model's real dispatch, exact shared
+  visible/shadow/submerged/wetness buffer and immutable CPU geometry, in source
+  and packaged production pages (122). Deliberate dispatch/fallback/upload
+  mutations fail the same guard. Partial CPU gun-recoil uploads are removed;
+  real GPU recoil passes every actual gun/scale/return/independent-instance
+  comparison (116). No CPU vertex-animation exception remains.
+- All2784 native crew-tool cases match old geometry, maximum2.15µm position
+  difference (124). Anchor expansion/physics/command guards pass24/24 (130),
+  retaining physical catenary knots, deployment orientation and Victory's
+  >2cm housed-bow clearance. Both accessories upload static templates once and
+  compact commands thereafter.
+- Every generic vertex in seven models/five states is compared with an offline
+  CPU oracle. All original frozen samples pass via exact source records.
+  Node/Chrome exact-bit mesh deduplication yields different Cloud indices;
+  verified original Node records avoid mismatching frozen indices. Current
+  strict position/normal gates now pass every vertex for seven models in five
+  states. Pivot-local immutable sail/support records avoid global-coordinate
+  Float32 cancellation; Metal had optimized the attempted precision residuals
+  away. No thresholds or expected golden values changed.
+- Controlled native Metal1920×1080, fixed100%, oneFlyingCloud, Statsclosed:
+  public379881a averaged5.28FPS/median188.8msCPU; candidate60.00FPS/2.9msCPU.
+  Both89-frame samples had no errors. Candidate median/p95 frame16.7ms;
+  this does not establish sustained60FPS or physical-iPhone performance.
+  Receipt `/tmp/waterworld-gpu-final-compare-146.jsonl`; visible Chrome proof
+  `shots/flying-cloud-gpu-final.png` shows the final rig and detailed Stats.
+- Final combined native Metal suite passes **738/738**, zero failures, skips
+  or cancellations, in **398.751 seconds**. Receipt
+  `/tmp/waterworld-gpu-final-full-145.log`. Source and packaged model contracts
+  require the actual canonical pose pipeline, rejecting a recoil-only dispatch
+  as well as CPU animation, full or partial mesh uploads and skipped dispatch.
+  Final visible Chrome review has no console warnings/errors.
+- Final review strengthened the command guard against CPU staging-buffer copies
+  and canonical dispatches with zero x/y/z or insufficient x workgroups. Actual
+  production-frame mutants fail and restored frames pass in source and packaged
+  pages. The expanded native/static/accessory guard run passes **11/11** in
+  **10.972 seconds**, receipt `/tmp/waterworld-gpu-expanded-147.log`; runtime
+  bytes are unchanged from the 738-test combined qualification.
+- The user is downloading a macOS update and authorized work until restart.
+  Stop promptly when asked, preserve all checkouts/assets, and keep the one-night
+  heartbeat paused. Root alone runs validation; direct authors run no tests.
+
+### Primary checkout integration boundary
+
+The qualified GPU source is copied into this checkout relative to common ancestor
+`379881a`, retaining the unpublished crew/Victory geometry stack. The build order
+retains crew-navigation and crew-motion before crew-work. This combined tree has
+not passed full release qualification; the published 738-test result belongs to
+the isolated release above. Existing dirty standalone HTML and held woodland
+files are preserved byte-for-byte and must not be published as this release.
+The primary focused GPU/accessory run passes **10/11**: all source/native
+commands pass; the deliberately preserved stale `docs/index.html` fails the new
+GPU contract. Receipt `/tmp/waterworld-primary-gpu-source-149.log`. The attempted
+negative name filter also matched the file-level test name, so that packaged
+check ran despite the intended source-only scope. This is not a published-byte
+regression: isolated release source and packaged checks pass 11/11. The three
+held HTML SHA-256 hashes are unchanged before/after source integration.
+
+The restart and crew notes below predate this GPU release and retain their
+qualification limits. Do not push the unqualified primary crew stack.
+
 ## Active overnight authorization: October 21–22, 2026
 
 The user renewed overnight implementation at 21:42 PDT on October 21. Continue

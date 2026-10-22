@@ -18,7 +18,7 @@ function ship(id){const d=ADDITIONAL_DESIGNS[id];return {modelId:id,...d.runtime
 test('development mixed-rig registry contains each actual surface and complete model-owned attachment roles',()=>{
   for(const [id,count,code]of [['pinta',3,2],['santa-maria',5,3]]){
     const d=ADDITIONAL_DESIGNS[id],m=requirePlayableShipModel(id),b=ship(id),parts=getShipParts(id);
-    assert.equal(m.status,'ready');assert.equal(m.development,true);assert.equal(m.modelCode,code);assert.equal(m.gpuPose,false);
+    assert.equal(m.status,'ready');assert.equal(m.development,true);assert.equal(m.modelCode,code);assert.equal(m.gpuPose,true);
     assert.equal(m.geometry,'additional-procedural-v1');assert.equal(m.rig.backend,'surfaces-v1');assert.equal(m.rig.sails.length,count);
     assert.deepEqual(validateRigDefinition(m.rig,m.nodes),[]);assert.equal(m.capabilities.yardTransfer,true);
     assert.deepEqual(parts.decks.zones.map(z=>z.id),d.deckZones.map(z=>z.id));assert.equal(parts.loading.manifest.crew,d.loading.crew);

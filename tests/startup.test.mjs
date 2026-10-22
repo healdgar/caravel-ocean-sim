@@ -137,11 +137,27 @@ test('an explicit whale scene still waits for its requested model and reports fa
 
 test('both downloadable ocean pages start offline without HTTP assets',{timeout:120000},async()=>{
   for(const file of ['ocean.html','ocean.min.html']){
-    const page=await browser.newPage(),external=[];
+    const page=await browser.newPage(),external=[],messages=[],errors=[];
+    const clip=value=>String(value).replace(/data:([^;,\s]+)[;,][^\s"')]+/g,'data:$1;[omitted]').slice(0,1800);
+    const note=(type,message)=>{messages.push({type,message:clip(message)});if(messages.length>30)messages.shift();};
+    let failFast;
+    const pageFailed=new Promise(resolve=>failFast=resolve);
+    page.on('pageerror',error=>{errors.push(clip(error.stack||error.message));note('pageerror',error.stack||error.message);failFast();});
+    page.on('console',message=>note('console:'+message.type(),message.text()));
+    page.on('requestfailed',request=>note('requestfailed',request.url()+' '+request.failure()?.errorText));
     try{
       await page.route(/^https?:/,route=>{external.push(route.request().url());return route.abort();});
-      await page.goto(new URL('../'+file,import.meta.url).href+'?follower=0');
-      await page.waitForFunction(()=>window.oceanStartup.state==='ready');
+      let startupError;
+      try{
+        await page.goto(new URL('../'+file,import.meta.url).href+'?follower=0');
+        await Promise.race([pageFailed,page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed'||!!document.querySelector('#err')?.textContent)]);
+      }catch(error){startupError=clip(error.stack||error.message);}
+      const startup=await page.evaluate(()=>({state:window.oceanStartup?.state,documentState:document.readyState,secure:isSecureContext,gpu:!!navigator.gpu,
+        stage:document.querySelector('#ocean-startup')?.dataset.stage,message:document.querySelector('#ocean-startup-stage')?.textContent,
+        error:document.querySelector('#err')?.textContent,marks:performance.getEntriesByType('mark').filter(mark=>mark.name.startsWith('ocean-startup-')).map(({name,startTime})=>({name,startTime}))}))
+        .catch(error=>({unavailable:clip(error.message)}));
+      const diagnostic=file+' offline startup: '+JSON.stringify({startupError,startup,errors,external,messages},null,2);
+      assert.equal(startupError,undefined,diagnostic);assert.equal(startup.state,'ready',diagnostic);assert.deepEqual(errors,[],diagnostic);
       assert.equal(await page.locator('#ocean-startup').isVisible(),false);assert.deepEqual(external,[]);
       assert.equal(await page.locator('#err').textContent(),'');
     }finally{await page.close();}

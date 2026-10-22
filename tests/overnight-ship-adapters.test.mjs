@@ -9,6 +9,7 @@ import {ROWING_DESIGNS} from '../js/models/rowing.js';
 import {LATER_SAIL_DESIGNS} from '../js/models/later-sail.js';
 import {proceduralShipNodeTransform} from '../js/procedural-models.js';
 import {boatRotate} from '../js/boat.js';
+import {gpuRigCPUOracle} from './helpers/gpu-rig-oracle.mjs';
 
 const designs=[...Object.values(ROWING_DESIGNS),...Object.values(LATER_SAIL_DESIGNS)];
 const near=(a,b,e=2e-8)=>{assert.equal(a.length,b.length);for(let i=0;i<a.length;i++)assert.ok(Math.abs(a[i]-b[i])<=e,`${a} != ${b}`);};
@@ -54,13 +55,13 @@ test('new parts preserve full affine poses through design, vessel and world coor
   }
 });
 
-test('asset cache dispatches each actual builder and authoritative pose without replacing legacy assets',()=>{
+test('asset cache dispatches actual GPU model data while offline reference poses preserve legacy geometry',()=>{
   const cache=createShipAssetCache(),seen=new Set();
   for(const d of designs){
-    const a=cache.get(d.id);assert.equal(cache.get(d.id),a);assert.equal(a.model.id,d.id);assert.equal(a.gpuPose,false);assert.equal(typeof a.pose,'function');assert.ok(a.vertices.length&&a.indices.length);
+    const a=cache.get(d.id);assert.equal(cache.get(d.id),a);assert.equal(a.model.id,d.id);assert.equal(a.gpuPose,true);assert.notEqual(typeof a.pose,'function');assert.ok(a.vertices.length&&a.indices.length);
     assert.equal(seen.has(a.vertices),false);seen.add(a.vertices);
     const first=new Float32Array(a.vertices),second=new Float32Array(a.vertices),b=ship(d),other={...ship(d),rudder:-20,sailState:{...b.sailState,set:[.8,.2,.9],groupYaw:[-.1,.3,-.2]},rowingState:{...b.rowingState,phase:.72}};
-    const source=new Uint32Array(a.vertices.buffer).slice();a.pose(b,2,7,first);const saved=new Uint32Array(first.buffer).slice();a.pose(other,4,11,second);a.pose(b,2,7,first);
+    const oracle=gpuRigCPUOracle(a),source=new Uint32Array(a.vertices.buffer).slice();oracle(b,2,7,first);const saved=new Uint32Array(first.buffer).slice();oracle(other,4,11,second);oracle(b,2,7,first);
     assert.deepEqual(new Uint32Array(first.buffer),saved);assert.deepEqual(new Uint32Array(a.vertices.buffer),source);assert.notDeepEqual(new Uint32Array(first.buffer),new Uint32Array(second.buffer));
   }
   for(const id of ['nina','victory','pinta','santa-maria'])assert.equal(cache.get(id).model.id,id);
