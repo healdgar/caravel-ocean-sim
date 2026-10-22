@@ -1,12 +1,18 @@
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN, victoryHullHalfWidth, victoryHullDeck, victoryVesselDeck, victoryDeckHalfWidth } from './models/victory.js';
+import {ADDITIONAL_DESIGNS,additionalHullWidth,additionalHullDeck,additionalDeck,additionalDeckWidth} from './models/additional.js';
 
-export function vesselVerticalScale(boat){return boat.modelId==='victory'?VICTORY_DESIGN.frame.verticalScale:HULL_VERTICAL_SCALE;}
-export function vesselDraft(boat){return (boat.modelId==='victory'?VICTORY_DESIGN.hull.draft:HULL_DRAFT)*vesselVerticalScale(boat);}
-export function modelDeck(boat,z){return boat.modelId==='victory'?victoryVesselDeck(z):vesselDeck(z);}
-export function modelHullDeck(boat,z){return boat.modelId==='victory'?victoryHullDeck(z):hullDeck(z);}
-export function modelDeckWidth(boat,z){return boat.modelId==='victory'?victoryDeckHalfWidth(z):deckHalfWidth(z);}
-export function modelHullWidth(boat,z,y){return boat.modelId==='victory'?victoryHullHalfWidth(z,y):hullHalfWidth(z,y);}
+export function vesselHull(boatOrId='nina'){
+  const id=typeof boatOrId==='string'?boatOrId:boatOrId.modelId??'nina',profile=VESSEL_HULLS[id];
+  if(!profile)throw Error('No hull geometry for '+id);
+  return profile;
+}
+export function vesselVerticalScale(boat){return vesselHull(boat).frame.verticalScale;}
+export function vesselDraft(boat){const h=vesselHull(boat);return h.draft*h.frame.verticalScale;}
+export function modelDeck(boat,z){return vesselHull(boat).deck(z);}
+export function modelHullDeck(boat,z){return vesselHull(boat).hullDeck(z);}
+export function modelDeckWidth(boat,z){return vesselHull(boat).deckWidth(z);}
+export function modelHullWidth(boat,z,y){return vesselHull(boat).halfWidth(z,y);}
 // Preserve the mesh's original design coordinates; convert to metres at the
 // hull transform. All consumers (including water and crew) share this scale.
 export const HULL_DESIGN_LENGTH = NINA_DESIGN.frame.length;
@@ -92,3 +98,18 @@ export function hullSheerAngle(station, offset) {
   }
   return (low+high)/2;
 }
+
+// Explicit adapters retain each model's actual analytic/section representation.
+// New hulls must supply their geometry here rather than inherit a ship-name
+// fallback. The legacy functions above remain the unchanged Niña public API.
+export const VESSEL_HULLS=Object.freeze({
+  nina:Object.freeze({id:'nina',frame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,
+    bounds:Object.freeze([-6.4,5.6]),draft:HULL_DRAFT,halfWidth:hullHalfWidth,
+    hullDeck,deck:vesselDeck,deckWidth:deckHalfWidth}),
+  victory:Object.freeze({id:'victory',frame:VICTORY_DESIGN.frame,runtime:VICTORY_DESIGN.runtime,
+    bounds:Object.freeze([-6,6]),draft:VICTORY_DESIGN.hull.draft,halfWidth:victoryHullHalfWidth,
+    hullDeck:victoryHullDeck,deck:victoryVesselDeck,deckWidth:victoryDeckHalfWidth}),
+  ...Object.fromEntries(Object.entries(ADDITIONAL_DESIGNS).map(([id,d])=>[id,Object.freeze({id,frame:d.frame,runtime:d.runtime,
+    bounds:Object.freeze([d.profile.stations[0],d.profile.stations.at(-1)]),draft:-d.profile.levels[0]+(d.keel?.depth??0),datumDraft:-d.profile.levels[0],
+    halfWidth:(z,y)=>additionalHullWidth(id,z,y),hullDeck:z=>additionalHullDeck(id,z),deck:z=>additionalDeck(id,z),deckWidth:z=>additionalDeckWidth(id,z)})])),
+});

@@ -29,13 +29,13 @@ test('vessel instances share an immutable model identity while retaining their c
   assert.equal(second.provisionDays,source.provisionDays);assert.equal(second.cargoTonnes,source.cargoTonnes);
 });
 
-test('planned models cannot silently acquire Nina geometry or mutate an existing vessel identity',()=>{
+test('additional models bind their own identities and dimensions; unknown models cannot mutate a vessel',()=>{
   const boat=bindVesselModel({...source}),model=boat.model;
   for(const id of ['pinta','santa-maria']){
-    assert.equal(getShipModel(id).status,'planned');
-    assert.throws(()=>bindVesselModel(boat,id),/planned|not.*ready|not.*playable|unavailable/i);
+    const copy=copyVessel({...source},{modelId:id});assert.equal(copy.model,getShipModel(id));
+    assert.equal(copy.length,getShipModel(id).runtime.length);assert.equal(copy.beam,getShipModel(id).runtime.beam);
+    assert.notEqual(copy.hydrodynamics,boat.hydrodynamics);
     assert.equal(boat.model,model);assert.equal(boat.modelId,'nina');
-    assert.throws(()=>copyVessel({...source,modelId:id}),/planned|not.*ready|not.*playable|unavailable/i);
   }
   assert.throws(()=>bindVesselModel(boat,'unknown-ship'),/unknown|not.*found/i);
   assert.equal(boat.model,model);
@@ -81,9 +81,15 @@ test('a full-canvas leader starting from rest keeps follower sails set; a furled
 
 test('formation following sails for four minutes using ordinary hull forces and remains separated',()=>{
   const lead=copyVessel(source,{distance:0,side:0}),boat=copyVessel(lead),state=createFollower();
-  const a=createVesselProbeState(),b=createVesselProbeState();let minDistance=Infinity;
+  const a=createVesselProbeState(),b=createVesselProbeState();let minDistance=Infinity,captainTrim=0;
   for(let i=0;i<7200;i++){
     const dt=1/30,t=i*dt;
+    // A captain must hold the requested course against real sail/hull yaw.
+    // This order acts through rudder lag, water flow and yaw inertia; it never
+    // overwrites heading or suppresses the forces the escort must also balance.
+    const error=Math.atan2(Math.sin((118-lead.heading)*RAD),Math.cos((118-lead.heading)*RAD))/RAD;
+    captainTrim=Math.max(-20,Math.min(20,captainTrim+error*.06*dt));
+    lead.rudderTarget=Math.max(-35,Math.min(35,error*1.1-(lead.yawRate??0)/RAD*5+captainTrim));
     stepVessel(lead,a,dt,t,7,118*RAD);steerFollower(state,boat,lead,dt,7,118*RAD);stepVessel(boat,b,dt,t,7,118*RAD);
     minDistance=Math.min(minDistance,Math.hypot(boat.x-lead.x,boat.z-lead.z));
   }
@@ -91,6 +97,7 @@ test('formation following sails for four minutes using ordinary hull forces and 
   assert.ok(Math.hypot(boat.x-goalX,boat.z-goalZ)<lead.length,'follower remains within one hull length of its station');
   assert.ok(minDistance>lead.length*2,'physical hulls remain well separated');
   assert.ok(boat.surgeVelocity>1);assert.ok(Math.abs(boat.heading-lead.heading)<5);
+  assert.ok(Math.abs(lead.heading-118)<2,'the captain holds course through physical helm forces');
   assert.equal(boat.sailState.maneuver,undefined,'routine following never transfers yards');
 });
 

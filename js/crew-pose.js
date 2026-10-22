@@ -2,6 +2,7 @@ import { gltfQuatMultiply } from './gltf.js';
 import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode } from './ship-models.js';
 import { crewRunnerMetrics, crewGunneryTool } from './crew-work.js';
+import {ADDITIONAL_DESIGNS} from './models/additional.js';
 
 const poseSub=(a,b)=>a.map((v,i)=>v-b[i]);
 const poseDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
@@ -45,10 +46,10 @@ function actorLocal(p,s){
 }
 export function poseCrewWork(a,s,boat){
   const j=s.job;s.grips=null;
-  if(j && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
+  if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
     // The tall first-rate's ratlines are farther apart. Hands can slide along
     // the shroud between them; keep the human gait at a reachable 32 cm stride.
-    const spacing=boat.modelId==='victory'?crewRunnerMetrics(boat,j.mast,j.side).dy/.32:1;
+    const spacing=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?crewRunnerMetrics(boat,j.mast,j.side).dy/.32:1;
     const phase=j.rung*spacing,targets={};
     for(const [side,offset] of [['l',0],['r',1]]){
       // Alternate hand-over-hand holds with a simplified boot lock on the runner.
@@ -83,6 +84,9 @@ export function poseCrewWork(a,s,boat){
         const height=(s.position[1]+pull)/vesselVerticalScale(boat);
         const p=resolveShipNode(boat,`rig.${['fore','main','mizzen'][j.mast]}.fall`,{space:'design',height});
         hand=actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat),p[2]*boat.length/12],s);
+      }else if(ADDITIONAL_DESIGNS[boat.modelId]){
+        const h=ADDITIONAL_DESIGNS[boat.modelId].hatch;
+        hand=actorLocal([(h.centre[0]+h.size[0]/2)*boat.beam/3.6,h.centre[1]*vesselVerticalScale(boat)+.04*Math.sin(phase),h.centre[2]*boat.length/12+sign*.12],s);
       }else hand=[sign*.16,(boat.modelId==='victory'?.70:.42)+.06*Math.sin(phase),.43];
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*.6,1,.10]);
       (s.grips??={})[`hand_${side}`]=hand;

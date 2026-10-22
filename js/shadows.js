@@ -52,13 +52,14 @@ export function fitVesselShadow(out,hull,sun,bounds,resolution,enabled=true) {
 // Array layers share three texture bindings across the whole scene. Each vessel
 // renders into its own layer; adding a ship does not exhaust mobile texture slots.
 export function createSceneShadows(device,count=2,resolution=2048){
+  if(!Number.isSafeInteger(count)||count<1||count>9)throw new RangeError('Invalid fleet shadow size');
   const T=GPUTextureUsage,B=GPUBufferUsage;
   const textures=['depth32float','depth32float','rgba16float'].map((format,i)=>device.createTexture({label:'fleet shadow '+i,size:[resolution,resolution,count],format,usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING}));
   const uniform=device.createBuffer({label:'fleet shadow frames',size:112*count,usage:B.UNIFORM|B.COPY_DST});
   const frames=new Float32Array(28*count),compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'}),linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
   return {resolution,
     layer(index){return {views:textures.map(t=>t.createView({dimension:'2d',baseArrayLayer:index,arrayLayerCount:1}))};},
-    update(vessels){for(let i=0;i<count;i++)frames.set(vessels[i].shadows.data,i*28);device.queue.writeBuffer(uniform,0,frames);},
+    update(vessels){if(vessels.length!==count)throw new Error('Shadow roster changed without rebuilding resources');for(let i=0;i<count;i++)frames.set(vessels[i].shadows.data,i*28);device.queue.writeBuffer(uniform,0,frames);},
     bind(pipe){return device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[{buffer:uniform},textures[0].createView({dimension:'2d-array'}),compare,textures[1].createView({dimension:'2d-array'}),textures[2].createView({dimension:'2d-array'}),linear].map((resource,binding)=>({binding,resource}))});},
     destroy(){uniform.destroy();for(const t of textures)t.destroy();},
   };

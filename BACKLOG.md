@@ -1,9 +1,59 @@
-# Waterworld backlog and overnight checkpoint
+# Ocean Sailing Simulator backlog and overnight checkpoint
 
 Overnight run: October 20–21, 2026, America/Los_Angeles, with an **08:00 October 21**
 implementation cutoff. That one-night heartbeat is now **paused**. Subsequent
 daytime work follows the user's new requests; earlier active-heartbeat/cutoff
 entries below are historical records, not current scheduling instructions.
+
+## Qualified local checkpoint: four vessels, independent fleets and night
+
+The public name is **Ocean Sailing Simulator**. The last verified published runtime is
+`5959d8e57266d924a112cda575401c525c473bcd`. The new four-model/fleet/night checkpoint
+is **qualified locally, not yet published**. Root's serialized full native Metal
+suite passed **572/572 tests**, **zero skips**, in **302.194 seconds**. Visible
+Chrome review covered Pinta and Santa María; native captures covered the actual
+four-vessel fleet, full Moon and new Moon. Root will append the exact commit,
+release and deployed-byte receipts after publication. No sustained frame-rate,
+physical-iPhone or certified navigation-accuracy result is claimed.
+
+- Development registry: Niña, Victory, Pinta and Santa María. The two new vessels
+  have independent lofts/decks, helms, equipment, loading/crew stations and mixed
+  square/lateen rigs. Pinta uses an enlarged modern-replica size profile; Santa
+  María uses replica reported length/beam and an authored service draft. Offsets,
+  working sail dimensions, ballast and gun outfit remain authored. Unspecified
+  or builders' tonnage does not become displacement mass.
+- Shared semantic parts/construction primitives coexist with explicit model
+  backends. New vessels use one authoritative CPU cloth/yard/rope/attachment pose
+  for forces, crew targets and uploaded visible/shadow/submerged geometry;
+  wetness probes follow the same posed vertices. Niña/Victory retain their
+  existing explicit deformation paths.
+- Cached loaded hull/actual-keel strips supply passive lateral forces and
+  yaw/roll moments; sail yaw joins the steering balance. Follower helm/canvas
+  guidance uses real flow, leeway and station/leader motion. No motor thrust,
+  zero-flow steering assist or calibrated historical CLR/polar is claimed.
+- Fleet UI/query allows eight independently enabled followers plus the player.
+  Disabled rows allocate no GPU vessel; enabled instances own crew/joint/actor,
+  geometry, probes, moisture, guns, anchors and wake state. One ocean/weather,
+  per-model immutable assets, two pooled wake banks and three shadow arrays are
+  shared. Legacy omitted-`fleet` and `follower=0/1` links remain compatible.
+- Astronomical mode has an unwrapped clock/location, actual Sun/Moon positions,
+  phase/terminator, historical catalogue stars and optional constellation lines.
+  Explicit 528-byte production Frame preserves its 384-byte prefix. Lunar energy
+  reaches cloud/sea/ship/crew/terrain/wet/underwater paths. Solar-above-horizon
+  shadow/cloud-map priority is an approximation; the secondary source has no
+  separate map. No certified navigation accuracy, eclipse/libration model or
+  physical-iPhone performance claim. Navigation helpers/instruments come later.
+- Five later craft now have authored definitions/prototypes: Oseberg-based
+  c.850 vessel, late-Roman Lusoria, thirty-person Taíno-style canoe, Flying Cloud
+  and Gipsy Moth IV. They remain planned/unregistered; coherent propulsion,
+  crew/control/GPU integration and qualification are still required.
+
+Passing regression coverage includes immutable geometry and attachment parity,
+passive-load invariants, physical follower controls, actual modular/Pages startup,
+independent mixed fleets through nine vessels, real GPU uploaded poses/moisture,
+and actual 528-byte manual/day/full/new-night scenes. The full-suite result above
+qualifies this bounded four-model checkpoint; five later craft remain unregistered.
+The held woodland prototype and all unrelated history below remain separate.
 
 ## Working rules
 
@@ -15,7 +65,7 @@ entries below are historical records, not current scheduling instructions.
 - Publish only passing checkpoints to the existing GitHub Pages site. Verify deployment and public artifact bytes. Keep measured facts distinct from authored historical/physical assumptions.
 - Avoid new paid generation until existing assets and concrete gaps have been assessed.
 
-## Baseline
+## Original overnight baseline
 
 - Published `bea3a355a7d5d273f958d3622cf014bb3045be68`: crew-served cannon drill, solid round-shot flight/recoil, actual FFT sea contacts, volumetric powder smoke, local flash lighting and reviewed audio.
 - Last complete native Metal suite: 350 tests passed. A final focused control/crew run passed 7 tests after the last small control changes. Current test count can consequently differ from that earlier full run.
@@ -37,11 +87,12 @@ These audits may close with no change when current source already satisfies the 
 ## Remaining requested programme
 
 1. Complete unresolved Victory shape/structure and sail/rig details when current evidence identifies defects; use existing measured GLB/reconstruction ledgers. Preserve real joins and tapered entrance; avoid detached decorative boards.
-2. Finish Pinta and Santa María beyond their validated planned definitions, then enable a three-model fleet. `SHIP_MODELS.md` lists geometry, physics, rig, crew and fleet gates. They must not silently borrow Niña geometry or reported tonnage as displacement.
+2. Publish and verify the locally qualified four-model/fleet checkpoint. Pinta/Santa María now own geometry, physics descriptors and authoritative mixed-rig poses; the combined crew/native/packaged/rendered regression gate passed. Preserve documented rig-clearance limits, reconstruction uncertainty and tonnage/displacement distinctions.
 3. Refine landfall geography/vegetation from meaningful island/river/coastal modules, atmospheric visibility and natural source data. Existing Saba is an MVP; global mapping and explorable interiors are not required. Open-ocean voyage target remains 15–20 minutes without fast-forwarding local simulation.
 4. Continue marine encounters, water interaction/refraction and effects quality based on rendered evidence. Shark/whale/dolphin systems already exist; distinguish defects from missing systems.
 5. Improve crew appearance and functional work/decision hooks where current source/rendered checks show outstanding issues. Preserve diverse identities and half-female crew, without gendered costume/pose bias.
-6. Later vessels: c.850 Viking longship, c.350 Roman galley, 1492 Caribbean canoe for30people, Flying Cloud clipper (replacing generic schooner), Gipsy Moth IV. Resolve source/reconstruction choices and propulsion before declaring playable.
+6. Integrate and qualify the five authored later-vessel prototypes: Oseberg-based c.850 vessel, c.350 Lusoria, 1492 thirty-person Taíno-style canoe, Flying Cloud (replacing generic schooner), Gipsy Moth IV. Definitions and stroke/mesh source are not playable integration.
+7. Build navigation learning helpers/instruments after the qualified astronomical Moon/night runtime. Navigation accuracy remains a separate gate. Keep the sky clock separate from FFT time and retain explicit time/geographic conventions.
 
 ## Uncalibrated or deliberately subsequent systems
 

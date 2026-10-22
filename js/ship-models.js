@@ -6,6 +6,9 @@ import { deepFreeze, defineRig } from './rig-definition.js';
 import { vesselDeck, anchorCathead, TILLER_PIVOT, TILLER_HANDLE, tillerPoint } from './hull.js';
 import { RIG_MASTS, mastPoint, climbingPoint, workingTacklePoint } from './rigging.js';
 import { SAIL_PLAN, lateenClothPoint, lateenYardPoint } from './lateen.js';
+import {additionalDesign,additionalDeck} from './models/additional.js';
+import {additionalRigContext} from './additional-rig.js';
+import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
 
 const MAST_IDS=['fore','main','mizzen'];
 const structureNode=(id,position,parent='hull',kind='attachment',motion)=>({id,parent,kind,position,...(motion?{motion}:{})});
@@ -101,32 +104,69 @@ function victoryDefinition(){
     const clewNodes=clews.map((side,i)=>{const id='sail.'+s.name+'.'+side;add(id,[...s.corners[s.kind==='square'?(i?2:3):2]]);return id;});
     return {id:s.name,mast:VICTORY_MASTS[s.mast].id,kind:s.kind==='spanker'?'gaff':s.kind,controlGroup:s.controlGroup,yardNode:'yard.'+s.name,clewNodes};
   });
-  return {id:'victory',name:'HMS Victory · 1805',revision:1,status:'ready',hullFamily:'first-rate',geometry:'victory-procedural-v1',
+  return {id:'victory',modelCode:1,gpuPose:true,name:'HMS Victory · 1805',revision:1,status:'ready',hullFamily:'first-rate',geometry:'victory-procedural-v1',
     designFrame:VICTORY_DESIGN.frame,runtime:VICTORY_DESIGN.runtime,crewStations:VICTORY_DESIGN.crewStations,nodes,
     rig:defineRig({id:'victory-1805-rig',backend:'square1805',masts:VICTORY_MASTS.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings:[]},nodes),
     referenceMeasurements:[{subject:'historical-report',source:VICTORY_DESIGN.provenance.dimensions,dimensions:[{kind:'gun-deck-length',metres:56.6928,value:186,unit:'ft'},{kind:'extreme-beam',metres:15.8496,value:52,unit:'ft'}],tonnage:{value:2162,unit:'tons',kind:'builders-measurement-not-displacement'}}]};
 }
+// Each node is either hull-fixed or evaluated from the same complete surface
+// context as the mesh. Moving descendants never inherit translation alone.
+function shipAdditionalDefinition(id){
+  const d=additionalDesign(id),context=additionalRigContext(id),nodes={};
+  const add=(name,p,kind='attachment',motion)=>nodes[name]=structureNode(name,[...p],name==='hull'?null:'hull',kind,motion);
+  add('hull',[0,0,0],'frame');
+  for(const zone of d.deckZones){const z=(zone.bounds[0]+zone.bounds[1])*.5;add('deck.'+zone.id,[0,additionalDeck(id,z),z],'frame');}
+  add('helm.tiller',d.steering.pivot,'part',{type:'surface-tiller'});
+  add('helm.rudder',d.steering.pivot,'part',{type:'surface-tiller'});
+  add('helm.grip',d.steering.handle,'attachment',{type:'surface-tiller-grip'});
+  add('helm.camera',[d.helm.x,additionalDeck(id,d.helm.z)+d.helm.eyeAboveDeck/d.frame.verticalScale,d.helm.z]);
+  const h=d.hatch,hinge=[h.centre[0],h.centre[1],h.centre[2]-h.size[2]/2];
+  add('hatch.main',hinge,'part',{type:'surface-hatch'});
+  add('station.hatch',[h.centre[0]+h.size[0]/2+.18,additionalDeck(id,h.centre[2]),h.centre[2]],'station');
+  for(const [name,p]of Object.entries(d.crewStations))add('station.crew.'+name,[p.x,additionalDeck(id,p.z),p.z],'station');
+  for(const side of [-1,1])for(const [key,p]of Object.entries(context.anchorCathead(side)))add(`anchor.${side<0?'port':'starboard'}.${key}`,p);
+  for(const [index,m]of context.masts.entries()){
+    add('mast.'+m.id,m.foot,'frame');add('mast.'+m.id+'.head',m.head);
+    const shrouds=context.supports.filter(s=>s.mast===index&&s.side===-1&&s.kind==='shroud'),lo=Math.max(...shrouds.map(s=>s.a[1]))+.12;
+    const rungs=Math.max(1,Math.floor((shrouds[0].b[1]-.2-lo)*d.frame.verticalScale/.32));
+    add('mast.'+m.id+'.runner',[0,lo,m.z],'attachment',{type:'surface-runner',mast:index,rungs});
+    const fall=context.lines.find(line=>line.kind==='working-fall'&&line.mast===index);
+    if(!fall||!Array.isArray(fall.b))throw Error('Missing '+id+' physical working fall for '+m.id);
+    const lead=fall.b;
+    add('rig.'+m.id+'.fall',lead,'attachment',{type:'surface-working-fall',mast:index});
+    const stanceZ=lead[2]-.18;
+    add('station.haul.'+m.id,[lead[0]+Math.sign(lead[0]||1)*.18,additionalDeck(id,stanceZ),stanceZ],'station');
+  }
+  const sails=d.surfaces.map(s=>{
+    const yard='yard.'+s.name,sail='sail.'+s.name;
+    add(yard,s.pivot,'part',{type:'surface-yard',surface:s.id,point:[...s.pivot]});
+    add(sail,s.pivot,'part',{type:'surface-cloth',surface:s.id,u:s.corners.length===3?1/3:.5,v:s.corners.length===3?1/3:.5});
+    const clews=s.corners.length===3?[['clew',0,1]]:[['clew.port',0,1],['clew.starboard',1,1]];
+    const clewNodes=clews.map(([name,u,v])=>{const n=sail+'.'+name;add(n,s.corners.length===3?s.corners[2]:s.corners[u?2:3],'attachment',{type:'surface-cloth',surface:s.id,u,v});return n;});
+    for(const [i,end]of ['peak','tack'].entries())add(yard+'.'+end,s.corners[i],'attachment',{type:'surface-yard',surface:s.id,point:[...s.corners[i]]});
+    return {id:s.name,surfaceId:s.id,mast:d.masts[s.mast].id,kind:s.kind,controlGroup:s.controlGroup,yardNode:yard,sailNode:sail,clewNodes};
+  });
+  for(const group of MAST_IDS){
+    const primary=d.surfaces.find(s=>s.controlGroup===group);if(!primary)continue;
+    for(const prefix of ['yard.','sail.']){const source=nodes[prefix+primary.name];add(prefix+group,source.position,source.kind,{...source.motion});}
+  }
+  const fittings=[];
+  if(d.lookout){const name=d.masts[d.lookout.mast].id,p=context.mastPoint(d.lookout.mast,d.lookout.height);add('lookout.'+name,p,'station');fittings.push({id:name+'-lookout',kind:'crows-nest',mast:name,node:'lookout.'+name,provenance:d.lookout.placement});}
+  return {id,modelCode:d.modelCode,gpuPose:false,name:d.name,revision:d.revision,status:'ready',development:true,hullFamily:d.family,geometry:'additional-procedural-v1',
+    designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,nodes,capabilities:{yardTransfer:d.surfaces.some(s=>s.kind==='lateen')},
+    rig:defineRig({id:id+'-rig',backend:'surfaces-v1',masts:d.masts.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings},nodes),referenceMeasurements:d.references};
+}
 export const SHIP_MODELS=deepFreeze({
   victory:victoryDefinition(),
-  nina:{id:'nina',name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
+  nina:{id:'nina',modelCode:0,gpuPose:false,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
     designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,nodes:ninaDefinitionNodes,
     rig:rigFor('nina',['lateen','lateen','lateen'],ninaDefinitionNodes),
     referenceMeasurements:[replicaReport('sanger-nina','Sanger Ships Niña',[
       {kind:'deck-length',value:65,unit:'ft',metres:19.812},{kind:'beam',value:18,unit:'ft',metres:5.4864},{kind:'draught',value:7,unit:'ft',metres:2.1336}],
       {value:75,unit:null,kind:'tonnage-unspecified'},'https://www.ninapinta.org/index.html','Modern replica report. Neither historical offsets nor calibrated displacement; not applied to the current 20 × 6 m simulation.')],
   },
-  pinta:{id:'pinta',name:'Pinta',revision:1,status:'planned',hullFamily:'caravel',geometry:null,designFrame:null,runtime:null,crewStations:null,nodes:pintaDefinitionNodes,
-    rig:rigFor('pinta',['square','square','lateen'],pintaDefinitionNodes),
-    referenceMeasurements:[replicaReport('sanger-pinta','Sanger Ships enlarged Pinta',[
-      {kind:'deck-length',value:85,unit:'ft',metres:25.908},{kind:'beam',value:23,unit:'ft',metres:7.0104},{kind:'draught',value:7.5,unit:'ft',metres:2.286}],
-      {value:101,unit:null,kind:'tonnage-unspecified'},'https://www.ninapinta.org/index.html','Modern replica enlarged for visitors. Do not use as original 1492 dimensions or physics mass.')],
-  },
-  'santa-maria':{id:'santa-maria',name:'Santa María',revision:1,status:'planned',hullFamily:'nao',geometry:null,designFrame:null,runtime:null,crewStations:null,nodes:santaDefinitionNodes,
-    rig:rigFor('santa-maria',['square','square','lateen'],santaDefinitionNodes,{topsail:true,lookout:true}),
-    referenceMeasurements:[replicaReport('nao-victoria-santa-maria','Fundación Nao Victoria Santa María',[
-      {kind:'length-unspecified',value:28.30,unit:'m',metres:28.30},{kind:'maximum-beam',value:7.96,unit:'m',metres:7.96},{kind:'hull-depth',value:3.49,unit:'m',metres:3.49}],
-      {value:200,unit:'toneladas',kind:'reported-weight',approximate:true},'https://www.fundacionnaovictoria.org/es/la-construccion-nao-santa-maria/','Modern replica; loading condition unspecified. Puntal is hull depth, not draught. Requires its own nao hull and deck geometry.')],
-  },
+  pinta:shipAdditionalDefinition('pinta'),
+  'santa-maria':shipAdditionalDefinition('santa-maria'),
 });
 
 export function getShipModel(id='nina'){
@@ -135,18 +175,43 @@ export function getShipModel(id='nina'){
 }
 export function requirePlayableShipModel(id='nina'){
   const model=getShipModel(id);
-  if(model.status!=='ready'||!model.geometry||!model.runtime||!model.designFrame||!['lateen3','square1805'].includes(model.rig.backend))throw Error(model.name+' is planned or not playable: geometry, rig animation/forces and clearance must be implemented first');
+  if(model.status!=='ready'||!model.geometry||!model.runtime||!model.designFrame||!['lateen3','square1805','surfaces-v1'].includes(model.rig.backend))throw Error(model.name+' is planned or not playable: geometry, rig animation/forces and clearance must be implemented first');
   return model;
 }
 
 // Points are authored in a model's design frame; output defaults to hull-local
 // metres. Dynamic attachments use the same CPU deformation as mesh/forces.
 // Each dynamic evaluator returns an absolute design point, including its parent.
-export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-1,step=0,height=0,along=0,out=[0,0,0]}={}){
+export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-1,step=0,height=0,along=0,u,v,out=[0,0,0]}={}){
   const model=requirePlayableShipModel(boat.modelId??'nina'),node=model.nodes[nodeId];
   if(!node)throw Error('Unknown '+model.id+' structure node: '+nodeId);
   if(!['design','vessel'].includes(space))throw Error('Unknown structure coordinate space: '+space);
   if(!(boat.length>0&&boat.beam>0&&Number.isFinite(boat.length)&&Number.isFinite(boat.beam)))throw Error('Structure points require finite positive hull dimensions');
+  if(model.rig.backend==='surfaces-v1'){
+    const d=additionalDesign(model.id),context=additionalRigContext(model.id),motion=node.motion,angle=(boat.rudder??0)*Math.PI/180;
+    let p;
+    if(motion?.type==='surface-yard'||motion?.type==='surface-cloth'){
+      const surface=d.surfaces.find(s=>s.id===motion.surface),pose=rigSurfacePose(surface,boat.sailState??{});
+      p=motion.type==='surface-yard'?surfaceYardPoint(surface,motion.point,pose):surfaceClothPoint(surface,u??motion.u,v??motion.v,pose,context,time,wind);
+    }else if(motion?.type==='surface-runner'){
+      if(side!==-1&&side!==1)throw Error('Runner side must be port or starboard');
+      const shrouds=context.supports.filter(s=>s.mast===motion.mast&&s.side===side&&s.kind==='shroud'),lo=Math.max(...shrouds.map(s=>s.a[1]))+.12;
+      const y=lo+Math.max(0,Math.min(motion.rungs,step))*.32/d.frame.verticalScale;
+      const points=shrouds.slice(1,3).map(s=>s.a.map((a,k)=>a+(s.b[k]-a)*(y-s.a[1])/(s.b[1]-s.a[1])));
+      p=points[0].map((a,k)=>(a+points[1][k])*.5);
+    }else if(motion?.type==='surface-working-fall'){
+      const line=context.lines.find(l=>l.kind==='working-fall'&&l.mast===motion.mast);
+      if(!line)throw Error('Missing '+model.id+' physical working fall');
+      const t=height>0?Math.max(0,Math.min(1,(height-line.a[1])/(line.b[1]-line.a[1]))):1;p=surfaceRopePoint(line,t,{...context,state:boat.sailState??{},time,wind});
+    }else if(motion?.type==='surface-tiller'||motion?.type==='surface-tiller-grip'){
+      const base=motion.type==='surface-tiller-grip'?[d.steering.handle[0],d.steering.handle[1],d.steering.handle[2]+along/(boat.length/d.frame.length)]:node.position;
+      const q=delta(base,d.steering.pivot);p=[d.steering.pivot[0]+Math.cos(angle)*q[0]+Math.sin(angle)*q[2],base[1],d.steering.pivot[2]-Math.sin(angle)*q[0]+Math.cos(angle)*q[2]];
+    }else if(motion?.type==='surface-hatch')p=[...node.position];
+    else if(motion)throw Error('Unknown surface structure motion: '+motion.type);
+    else p=[...node.position];
+    const k=space==='design'?[1,1,1]:[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length];
+    for(let i=0;i<3;i++)out[i]=p[i]*k[i];return out;
+  }
   if(model.id==='victory'&&nodeId.endsWith('.runner')){
     const index=['fore','main','mizzen'].findIndex(id=>nodeId==='mast.'+id+'.runner'),t=Math.max(0,Math.min(1,step/29));
     const {root,top}=victoryShroud(index,side,3),p=root.map((v,i)=>v+(top[i]-v)*t);

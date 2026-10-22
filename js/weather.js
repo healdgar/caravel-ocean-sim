@@ -1,4 +1,5 @@
 import { WEATHER_RENDER } from './wgsl/weather.js';
+import {CELESTIAL_FRAME_BYTES} from './wgsl/celestial.js';
 
 export async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler,shader,format,samples}){
   const module=await shader(WEATHER_RENDER,'precipitation and lightning');
@@ -9,7 +10,10 @@ export async function createWeatherRenderer({device,frameUBO,hullUBO,transView,s
       color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}]},
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:samples}})));
   const resources=[{buffer:frameUBO},transView,skyView,sampler,{buffer:uniform},{buffer:hullUBO}];
-  const groups=pipes.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>i===0?[0,2,3,4,5].includes(e.binding):[0,4].includes(e.binding))}));
+  // Lunar precipitation samples atmospheric transmittance. The isolated legacy
+  // Frame keeps a zero-Moon stub, so binding1 is absent from its auto layout.
+  const rainBindings=frameUBO.size>=CELESTIAL_FRAME_BYTES?[0,1,2,3,4,5]:[0,2,3,4,5];
+  const groups=pipes.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>i===0?rainBindings.includes(e.binding):[0,4].includes(e.binding))}));
   return {
     update(weather,settings,dt){
       const angle=settings.windDir*Math.PI/180;

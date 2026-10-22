@@ -61,7 +61,7 @@ export const COASTAL_WATER = /* wgsl */ `
 ` + LAND_SAMPLING + /* wgsl */ `
 fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
   let bed=landHeight(p);let shallows=smoothstep(-6.0,0.5,bed);
-  let sunlight=sunIlluminance()*max(F.sunDir.y,0.0)/PI;
+  let sunlight=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI;
   var col=mix(color,vec3f(0.045,0.17,0.15)*(sunlight+skyAtmo(vec3f(0,1,0))),shallows*0.28);
   let depth=height-bed;
   let surge=smoothstep(-0.05,0.45,height);
@@ -94,7 +94,16 @@ fn main(@builtin(global_invocation_id) id:vec3u){
       visibility*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
     }
   }
-  textureStore(lightOut,vec2i(id.xy),vec4f(visibility,0,0,1));
+  var moonVisibility=0.0;let ml=lunarDirection();
+  if(lunarIrradiance()>0.0){
+    moonVisibility=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*.001,ml);
+    let horizontal=max(length(ml.xz),.01);let direction=ml.xz/horizontal;
+    for(var i=0u;i<16u;i++){
+      let reach=28.0*pow(1.31,f32(i));let rayHeight=h+8.0+reach*ml.y/horizontal;
+      moonVisibility*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
+    }
+  }
+  textureStore(lightOut,vec2i(id.xy),vec4f(visibility,moonVisibility,0,1));
 }
 `;
 
@@ -169,6 +178,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
   let specular=(0.004*(1.0-roughness)+wet*0.06)*pow(max(dot(n,h),0.0),mix(12.0,64.0,1.0-roughness));
   col+=direct*specular;
+  col+=lunarSurface(n,v,albedo*(1.0-wet*.36),mix(roughness,.25,wet),vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
   col+=lightningSurface(n,v,albedo,roughness);
   col=surfaceAir(col,world);
   // Clip cloud integration at the land surface: clouds behind mountains stay
@@ -262,6 +272,7 @@ fn landOpaque(in:LandVertex)->vec4f{
   let visibility=select(.35+.28*max(n.y,0.0),.32+in.kind.y*.32,grass);
   let wet=(1.0-smoothstep(1.0,7.0,world.y))*.5;
   var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
+  color+=lunarSurface(n,normalize(F.camPos.xyz-world),albedo,.84,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
   color+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.84);
   return vec4f(surfaceAir(color,world),1);
 }

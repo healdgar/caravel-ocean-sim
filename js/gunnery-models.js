@@ -4,6 +4,8 @@ import {VICTORY_DESIGN,victorySheer,victoryHullHalfWidth,victoryVesselDeck} from
 import {deckHalfWidth,vesselVerticalScale} from './hull.js';
 import {boatRotate,boatForwardSpeed} from './boat.js';
 import {deepFreeze} from './rig-definition.js';
+import {ADDITIONAL_DESIGNS} from './models/additional.js';
+import {additionalGunAttachments} from './additional-rig.js';
 
 // Attachments are authored in exactly the same design frame as the mesh. Gun
 // id order follows the legacy geometry traversal, independent of crew or state.
@@ -39,7 +41,8 @@ function gunneryVictoryDefinitions(){
   }
   return result;
 }
-const GUNNERY_MODEL_GUNS=deepFreeze({nina:gunneryNinaDefinitions(),victory:gunneryVictoryDefinitions()});
+const GUNNERY_MODEL_GUNS=deepFreeze({nina:gunneryNinaDefinitions(),victory:gunneryVictoryDefinitions(),
+  ...Object.fromEntries(Object.keys(ADDITIONAL_DESIGNS).map(id=>[id,additionalGunAttachments(id)]))});
 export function createGunDefinitions(boatOrModelId='nina'){
   const id=typeof boatOrModelId==='string'?boatOrModelId:boatOrModelId.modelId??'nina';
   if(!GUNNERY_MODEL_GUNS[id])throw new Error('No playable gun attachments for '+id);

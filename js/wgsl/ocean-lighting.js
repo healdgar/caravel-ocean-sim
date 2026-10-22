@@ -1,17 +1,18 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {FRAME_WGSL,ATMO_CORE_WGSL,ENV_MIPS} from './common.js';
+import {CELESTIAL_SOLAR_STUB} from './celestial.js';
 
 // No approximation: these frame-wide values are the ocean fragment's original
 // transmittance lookup and five environment lookups, in the original order.
 // The first vec4 remains the sun-visibility producer's independent output.
-export const OCEAN_LIGHTING=FRAME_WGSL+ATMO_CORE_WGSL+/* wgsl */ `
+export const OCEAN_LIGHTING=FRAME_WGSL+ATMO_CORE_WGSL+CELESTIAL_SOLAR_STUB+/* wgsl */ `
 @group(0)@binding(0)var<uniform>F:Frame;
 @group(0)@binding(1)var transLUT:texture_2d<f32>;
 @group(0)@binding(2)var sampC:sampler;
 @group(0)@binding(3)var envCube:texture_cube<f32>;
 @group(0)@binding(4)var<storage,read_write>oceanLighting:array<vec4f,4>;
 @compute @workgroup_size(1)fn main(){
-  let sunlight=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*oceanLighting[0].x;
+  let sunlight=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*oceanLighting[0].x*celestialSolarVisibility();
   let skyUp=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS-1}.0).rgb;
   let skyHemi=skyUp*0.4+0.15*(
     textureSampleLevel(envCube,sampC,vec3f(0.94,0.34,0.0),${ENV_MIPS-2}.0).rgb+

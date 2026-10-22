@@ -1,7 +1,9 @@
 import { HULL_DRAFT, HULL_VERTICAL_SCALE, vesselDeck, vesselDraft } from './hull.js';
 import { SQUARE_RIG_MASTS } from './rigging.js';
 import { SAIL_PLAN, createLateenPoses, advanceLateenRig } from './lateen.js';
-import { createSailGeometry, createVictorySailGeometry, updateSailGeometry, sailPanelForce } from './sail-aerodynamics.js';
+import { createSailGeometry, createVictorySailGeometry, createSurfaceSailGeometry, updateSailGeometry, sailPanelForce } from './sail-aerodynamics.js';
+import {ADDITIONAL_DESIGNS} from './models/additional.js';
+import {additionalRigContext} from './additional-rig.js';
 export { SAIL_PLAN, runningRiggingLines } from './lateen.js';
 
 // Authored caravel sail plan and aerodynamic response; not a calibrated polar.
@@ -32,6 +34,8 @@ const sailClamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const sailSmooth = (lo, hi, x) => { const t = sailClamp((x - lo) / (hi - lo), 0, 1); return t * t * (3 - 2 * t); };
 
 export function sailingState(boat) {
+  const id=boat.modelId??'nina',design=Object.hasOwn(ADDITIONAL_DESIGNS,id)?ADDITIONAL_DESIGNS[id]:null;
+  if(!design&&id!=='nina'&&id!=='victory')throw Error('No sailing model for '+id);
   if (!boat.sailState) boat.sailState = {
     set: new Float64Array(SAIL_KEYS.map(key => sailClamp(boat[key] ?? 1, 0, 1))),
     squareYaw: 0, lateenYaw: 0, tack: 1, canvasTack: 1, forward: 0, side: 0, area: 0,
@@ -40,8 +44,42 @@ export function sailingState(boat) {
     pitchMoment:0, yawMoment:0, heaveForce:0, panelSide:new Float64Array(3), panelMoment:new Float64Array(3),
   };
   boat.sailState.rig??=createLateenPoses(boat.sailState.set);
-  boat.sailState.geometry??=boat.modelId==='victory'?createVictorySailGeometry():createSailGeometry();
+  if(!boat.sailState.geometry){
+    if(design){
+      const active=new Set(design.surfaces.map(s=>s.mast));
+      for(let i=0;i<3;i++)if(!active.has(i))boat.sailState.set[i]=boat.sailState.rig[i].deployed=0;
+      boat.sailState.geometry=createSurfaceSailGeometry(design,additionalRigContext(id));
+    }else boat.sailState.geometry=id==='victory'?createVictorySailGeometry():createSailGeometry();
+  }
   return boat.sailState;
+}
+
+function advanceSurfaceRig(s,boat,dt){
+  const surfaces=s.geometry.design.surfaces,lateenMasts=[...new Set(surfaces.filter(p=>p.kind==='lateen').map(p=>p.mast))].sort((a,b)=>a-b);
+  if(lateenMasts.length){
+    const m=s.maneuver;
+    // Reuse the working transfer lifecycle, but never raise/pass/lower a square
+    // mast slot. Gathering all canvas during a lateen transfer remains allowed.
+    if(m&&['raise','pass','lower'].includes(m.stage)&&!lateenMasts.includes(m.mast)){
+      const next=lateenMasts.find(i=>i>=m.mast);if(next===undefined)m.stage='sheet';else m.mast=next;
+    }
+    // Crew assigned to a square mast must not gate the separate lateen yard
+    // transfer. This proxy only supplies the controls consumed by the legacy
+    // lifecycle; it never aliases or advances another vessel's state.
+    const transferBoat=s.surfaceTransferBoat??={crewRigRate:new Float64Array(3)};
+    for(let i=0;i<3;i++){
+      transferBoat[SAIL_KEYS[i]]=boat[SAIL_KEYS[i]];
+      transferBoat.crewRigRate[i]=lateenMasts.includes(i)?boat.crewRigRate?.[i]??1:1;
+    }
+    advanceLateenRig(s,transferBoat,dt);
+    if(m)for(let i=0;i<3;i++)s.set[i]=s.rig[i].deployed;
+    s.canvasTack=-lateenMasts.reduce((sum,i)=>sum+s.rig[i].side,0)/lateenMasts.length;
+  }else{s.maneuver=null;s.canvasTack=s.tack;}
+  const active=new Set(surfaces.map(p=>p.mast));
+  for(let i=0;i<3;i++){
+    if(!active.has(i))s.set[i]=s.rig[i].deployed=0;
+    if(!lateenMasts.includes(i)){s.rig[i].dip=0;s.rig[i].deployed=s.set[i];s.rig[i].side=-s.tack;}
+  }
 }
 
 export function apparentWind(out, heading, speed, sideways, windSpeed, windDirection) {
@@ -64,6 +102,10 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
   // This reconstruction's yard/shroud envelope permits 23 degrees of brace.
   // Forces use that physical stop too; do not draw one trim and simulate another.
   if(boat.modelId==='victory')s.squareTarget=sailClamp(s.squareTarget,-.4,.4);
+  if(s.geometry.surfaceRig){
+    const squares=s.geometry.design.surfaces.filter(p=>p.kind==='square'),limit=squares.length?Math.max(...squares.map(p=>p.braceLimit??Math.PI/3)):0;
+    s.squareTarget=sailClamp(s.squareTarget,-limit,limit);
+  }
   for (let i = 0; i < 3; i++) s.set[i] += sailClamp(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1) - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i]??1), dt * 0.18 * (boat.crewSailRate?.[i]??1));
   // Yards and lateen take time to brace/tack; forces use this actual trim.
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
@@ -71,7 +113,8 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
   if(boat.modelId==='victory'){
     for(let i=0;i<3;i++){s.rig[i].deployed=s.set[i];s.rig[i].side=-s.tack;}
     s.canvasTack=s.tack;
-  }else advanceLateenRig(s,boat,dt);
+  }else if(s.geometry.surfaceRig)advanceSurfaceRig(s,boat,dt);
+  else advanceLateenRig(s,boat,dt);
   // Pressure loads fill the canvas with a short response time. This state only
   // advances with time; querying forces never changes the geometry underneath it.
   for(const p of s.rig)p.fill+=((p.targetFill??0)-p.fill)*(1-Math.exp(-dt*4));
@@ -86,7 +129,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   const geometry=s.geometry,panels=updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
   const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0,yawRate=boat.yawRate??0,heaveRate=boat.heaveVelocity??0;
   const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
-  const datum=vesselDraft(boat),cg=(boat.hydrodynamics?.centreOfGravity??datum)-datum;
+  const datum=boat.hydrodynamics?.datumDraft??vesselDraft(boat),cg=(boat.hydrodynamics?.centreOfGravity??datum)-datum;
   const relativeDirection=windDirection-(boat.heading??0)*Math.PI/180;
   const windX=Math.cos(relativeDirection),windZ=Math.sin(relativeDirection);
   // Heading is rotation about -worldY. In the heading-aligned load frame,
@@ -96,7 +139,7 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   const ox=pitchRate,oy=-yawRate-rollRate*sp,oz=rollRate*cp;
   for(let m=0;m<3;m++){
     let fill=0,area=0;
-    const group=geometry.victory?geometry.groups[m]:panels,start=geometry.victory?0:m*geometry.indices.length,count=geometry.victory?group.length:geometry.indices.length;
+    const group=geometry.groups?geometry.groups[m]:panels,start=geometry.groups?0:m*geometry.indices.length,count=geometry.groups?group.length:geometry.indices.length;
     for(let j=0;j<count;j++){
       const panel=group[start+j];
       const [x,y,z]=panel.point,[nx,ny,nz]=panel.normal;
@@ -118,6 +161,14 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   }
   s.lateenFill=s.area>0?s.lateenFill/s.area:0;
   if(geometry.victory)s.squareFill=s.lateenFill;
+  if(geometry.surfaceRig){
+    let squareArea=0,squareFill=0,otherArea=0,otherFill=0;
+    for(const surface of geometry.surfaces){
+      const fill=s.rig[surface.sail.mast].fill,area=surface.totalArea;
+      if(surface.sail.kind==='square'){squareArea+=area;squareFill+=fill*area;}else{otherArea+=area;otherFill+=fill*area;}
+    }
+    s.squareFill=squareArea?squareFill/squareArea:0;s.lateenFill=otherArea?otherFill/otherArea:0;
+  }
   return s;
 }
 

@@ -42,9 +42,9 @@ async function step(page){
 }
 
 test('a selectable Victory fleet renders with independent ship state, correct captain height and a model-preserving share link',{timeout:180000},async()=>{
-  const source=await readFile(new URL('../js/main.js',import.meta.url),'utf8'),marker='vessels[0].boat=boat;vessels[1].boat=companion;';
+  const source=await readFile(new URL('../js/main.js',import.meta.url),'utf8'),marker='window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};';
   assert.ok(source.includes(marker),'fixture must expose actual runtime vessel records');
-  const fixture=source.replace(marker,marker+'window.victoryFixture={boat,companion,vessels,shipAsset,shipAssets};');
+  const fixture=source.replace(marker,marker+'window.victoryFixture={...window.oceanFleet,shipAssets};');
   const page=await browser.newPage({viewport:{width:480,height:360}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   page.on('console',msg=>{if(msg.text().includes(' error ')||msg.text().includes('init failed'))errors.push(msg.text());});
   try{
@@ -54,12 +54,12 @@ test('a selectable Victory fleet renders with independent ship state, correct ca
     await page.waitForFunction(()=>victoryCheck.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#err').textContent(),'',errors.join('\n'));
     const frame=await step(page);
-    assert.equal(frame.render.caravel,2);assert.equal(frame.render.crew,2);
+    assert.equal(frame.render['victory vessel'],2);assert.equal(frame.render.crew,2);
     assert.equal(frame.render.ocean,1);assert.equal(frame.compute['fft rows'],1);
     assert.equal(frame.compute['height probe'],2);assert.equal(frame.render['solid shadows'],2);assert.equal(frame.render['canvas shadows'],2);
     await page.waitForFunction(()=>victoryFixture.vessels.every(v=>!v.probe.pending));
     const state=await page.evaluate(async()=>{
-      const {boat,companion,vessels,shipAsset,shipAssets}=victoryFixture;
+      const {vessels,shipAssets}=victoryFixture,[player,following]=vessels,boat=player.boat,companion=following.boat,shipAsset=player.asset;
       const {VICTORY_DESIGN,victoryVesselDeck}=await import('/js/models/victory.js');
       const {boatEyePosition}=await import('/js/boat.js');
       const eye=boatEyePosition(new Float64Array(3),{...boat,x:0,z:0,heave:0,heading:0,pitch:0,roll:0});
@@ -67,7 +67,7 @@ test('a selectable Victory fleet renders with independent ship state, correct ca
         separateRig:boat.sailState!==companion.sailState,separateHull:vessels[0].hullUBO!==vessels[1].hullUBO,
         separateWetness:vessels[0].wetness.state!==vessels[1].wetness.state,
         companies:vessels.map(v=>v.crew.state.modelId),sameModel:boat.model===companion.model,
-        sharedGeometry:shipAssets.get('victory')===shipAsset,
+        sharedGeometry:shipAssets.get('victory')===shipAsset&&following.asset===shipAsset,
         modelFlags:vessels.map(v=>v.hullData[23]),yScales:vessels.map(v=>v.hullData[3]),
         eyeAboveDeck:eye[1]-victoryVesselDeck(VICTORY_DESIGN.helm.z)*VICTORY_DESIGN.frame.verticalScale,
         finite:Array.from(vessels[0].hullData).every(Number.isFinite)};
@@ -94,7 +94,7 @@ for(const entry of ['ocean.html','ocean.min.html','docs/index.html'])test(`Victo
     await page.waitForFunction(()=>victoryCheck.callback||victoryCheck.startupFailure||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#err').textContent(),'');assert.deepEqual(errors,[]);
     assert.equal(await page.evaluate(()=>typeof victoryCheck.callback),'function');
-    const frame=await step(page);assert.equal(frame.render.caravel,1);assert.equal(frame.render.crew,1);assert.equal(frame.render.ocean,1);
+    const frame=await step(page);assert.equal(frame.render['victory vessel'],1);assert.equal(frame.render.crew,1);assert.equal(frame.render.ocean,1);
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();assert.equal(await page.locator('#ship-model').inputValue(),'victory');
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

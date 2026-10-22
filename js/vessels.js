@@ -13,16 +13,18 @@ export function bindVesselModel(boat,modelId=boat.modelId??'nina'){
 }
 
 // Mutable simulation state never aliases the source ship's rig, crew or probe.
-export function copyVessel(source,{id='companion',distance=source.length*2.8,side=source.length*1.5}={}){
+export function copyVessel(source,{id='companion',modelId=source.modelId??'nina',distance=source.length*2.8,side=source.length*1.5}={}){
+  const model=requirePlayableShipModel(modelId),sameModel=model.id===(source.modelId??'nina');
   const h=source.heading*Math.PI/180;
   const boat={id,enabled:false,showProw:true,effects:source.effects,crew:source.crew!==false,
-    length:source.length,beam:source.beam,eye:source.eye,heading:source.heading,propulsion:'sail',
+    length:sameModel?source.length:model.runtime.length,beam:sameModel?source.beam:model.runtime.beam,
+    eye:sameModel?source.eye:(model.nodes['helm.camera']?.position[1]??2.4)*model.designFrame.verticalScale,heading:source.heading,propulsion:'sail',
     sailFore:source.sailFore,sailMain:source.sailMain,sailMizzen:source.sailMizzen,
     provisionDays:source.provisionDays,cargoTonnes:source.cargoTonnes,speed:source.speed,
     x:source.x-Math.sin(h)*distance+Math.cos(h)*side,z:source.z+Math.cos(h)*distance+Math.sin(h)*side,
     rudder:0,rudderTarget:0,yawRate:0,heave:0,pitch:0,roll:0,revision:0,
     target:{heave:0,pitch:0,roll:0},waveSlopeX:0,waveSlopeZ:0,waveSampleTime:-1,waveRevision:-1};
-  bindVesselModel(boat,source.modelId??'nina');
+  bindVesselModel(boat,model.id);
   boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes,boat.modelId);
   boat.heave=-boat.hydrodynamics.sinkage;
   return boat;

@@ -1,12 +1,12 @@
 # Night sky and celestial navigation
 
-2026-10-21. **Proposed; source audit only. No astronomy runtime, dependency, fixtures, rendered checks or performance results have been added.**
+2026-10-21. **Runtime qualified locally in root's 572/572 native Metal suite, zero skips, with rendered full/new-Moon and four-vessel checks. Publication remains pending. Navigation lessons/instruments and certified navigation accuracy remain deferred.**
 
 ## Outcome
 
 One geographic position and astronomical clock determine the Sun, Moon, stars, lighting and navigation readings. Moon phase, constellation placement and horizon altitude must agree with the scene. Optional lessons explain observations without changing the underlying sky.
 
-Implement after the active water/terrain checkpoint. Preserve manual scene lighting and existing share links.
+Manual scene lighting remains the default. Enable **Sun, Moon and stars → Astronomical sky**, or use `skyMode=astronomy`. Existing manual share links retain their lighting.
 
 ## Existing integration points
 
@@ -34,7 +34,7 @@ Ship heading and camera orientation never rotate the geographical sky. Deck moti
 
 ## Sources and dependencies
 
-**Ephemerides:** prefer locally vendored [Astronomy Engine](https://github.com/cosinekitty/astronomy), pinned to reviewed bytes/commit. Its author targets roughly ±1 arcminute and compares against NOVAS/JPL; that is an upstream claim, not a Waterworld accuracy result. Preserve its [MIT notice](https://github.com/cosinekitty/astronomy/blob/master/LICENSE). Avoid large ephemeris downloads for the first release.
+**Ephemerides:** prefer locally vendored [Astronomy Engine](https://github.com/cosinekitty/astronomy), pinned to reviewed bytes/commit. Its author targets roughly ±1 arcminute and compares against NOVAS/JPL; that is an upstream claim, not an Ocean Sailing Simulator accuracy result. Preserve its [MIT notice](https://github.com/cosinekitty/astronomy/blob/master/LICENSE). Avoid large ephemeris downloads for the first release.
 
 Its [official position example](https://github.com/cosinekitty/astronomy/blob/master/demo/nodejs/positions.js) demonstrates observer-based equator-of-date coordinates followed by horizon conversion. The [API](https://github.com/cosinekitty/astronomy/blob/master/source/js/README.md) supplies phase/illumination and rotations, but `DefineStar` has only eight slots. Use a generic catalogue-vector path for the sky. Record the library’s UTC/UT1 approximation and TT/Delta-T model in the adapter.
 
@@ -79,7 +79,12 @@ First lessons: identify pole/bright stars; measure altitude; take a noon-Sun lat
 
 Offer period presentation separately from modern training instruments. [Royal Museums Greenwich](https://www.rmg.co.uk/stories/space-astronomy/what-mariners-astrolabe) describes the mariner’s astrolabe, its use by about 1470, and Columbus carrying an astrolabe/quadrant. Nina should not acquire an unlabeled modern sextant as historical equipment. Rough seas, lost horizons and clouds should constrain actual sights.
 
-## Acceptance gates before release
+## Evidence requirements and navigation/device follow-up
+
+The current sky/rendering checkpoint passed the runtime qualification recorded
+below. Navigation accuracy, instruments and physical-device rows remain follow-up
+requirements, not capabilities certified by that checkpoint. Deployment still
+requires its own public-byte receipt.
 
 | Gate | Required evidence |
 | --- | --- |
@@ -99,4 +104,17 @@ Offer period presentation separately from modern training instruments. [Royal Mu
 3. Optional constellation/altitude hints and period instrument presentation; sight correction lessons.
 4. Multi-sight fixes, chronometer/almanac training and optional advanced celestial events.
 
-No implementation or numerical/render validation was performed for this document.
+## Implemented runtime contract
+
+- `js/astronomy.js`: unwrapped epoch/elapsed clock, UT-like ISO/proleptic Gregorian dates, geographic observer, pinned Astronomy Engine topocentric Sun/Moon directions, phase/photometry/limb orientation and J2000-to-horizon rotation. Geographic displacement uses a spherical great-circle calculation anchored to the edited observer; global route compression remains a separate system.
+- `js/celestial.js` and `js/star-catalog.js`: magnitude-filtered HYG v4.1 stars with Cartesian proper motion, historical precession/nutation, stellar flux/colour, atmospheric extinction and cached 512² stellar cube. Proper-motion positions refresh on day-scale date changes; the Earth/horizon rotation refreshes each ephemeris second, cube at two-second intervals. Star positions are geometric catalogue directions; stellar refraction/annual aberration/parallax are not navigation-qualified.
+- Optional authored constellation connections respect scene depth, local horizon and reconstructed cloud opacity. These are simple guide lines, without lessons, labels or a sextant.
+- Moon disc uses actual angular radius and Moon-to-Sun geometry, with a procedural tonal surface. Its full-disc integral is normalized to ephemeris irradiance; background stars are occulted by both lunar hemispheres. Explicit discs are excluded from the environment cube, matching the existing Sun/direct-BRDF split; reflected lunar glints enter through the lunar surface BRDF. Star cubemap flux accounts for face-dependent texel solid angle. No detailed lunar texture, libration or eclipses are claimed.
+- Sun and Moon remain separate simultaneous lights. Lunar terms reach ocean slope glints/foam, sky/reflections, clouds, hull/sail transmission, crew, terrain/vegetation, deck water, anchor, spindrift, marine skin/splashes and underwater scattering/caustics. Cloud lighting fields and ship shadow maps prioritize the Sun while it is above the horizon, otherwise the Moon. This is a physical-dominance approximation: separate cloud attenuation can occasionally make the Moon locally stronger near sunset. The weaker simultaneous source does not get an independent ship/cloud light-field shadow map. Terrain separately caches solar/lunar cloud and relief visibility.
+- Night adaptation is an explicit bounded exposure multiplier, independent of solar/lunar irradiance; dark moonless and full-Moon energy still differ. Airglow is a weak authored floor, not a calibrated sky model.
+- Production **Frame is explicitly 528 bytes /132 floats**, preserving the first384 bytes unchanged: Moon direction/irradiance at384, disc-right/radius400, disc-up/phase416, Moon-to-Sun/Lambert432, mode/stars/constellation/lunar-shadow flags448, catalogue rotation464–527. `withCelestialFrame()` specializes every production Frame-bearing shader in `main.shader()`. Legacy isolated384-byte shaders use exact zero-Moon stubs. This is a documented schema extension, not reused reserved components.
+- `window.oceanAstronomy`: `.clock`, `.state`, `.set({mode,date,latitude,longitude,rate,stars,constellations})`, `.update(elapsedSeconds)`. Share links preserve current astronomical date/location/rate and guide settings. Old manual links remain manual.
+
+`tests/astronomy.test.mjs` adds independent raw USNO modern/1805 and NASA/JPL1492 references with declared geometric/topocentric/parallax/time conventions, clock/share/geographic and historical-star invariants. `tests/celestial-gpu.test.mjs` uses the actual528-byte production specialization to check limb orientation, angular extent, horizon rejection and material light. Root executed these in the full native Metal suite: **572/572 tests passed**, **zero skips**, in **302.194 seconds**. Native actual four-vessel, full-Moon and new-Moon captures supplemented the suite; Pinta and Santa María were also reviewed in visible Chrome. This qualifies the bounded runtime checkpoint locally; publication and deployed-byte verification remain pending. No2-arcminute navigation, sustained performance or physical iPhone qualification is asserted.
+
+Still deferred: navigation lessons/hints, measured altitude/sextant/astrolabe UI, sight reduction and fixes, calendars other than explicit proleptic Gregorian, tides, eclipse/libration and calibrated stellar/airglow radiometry.

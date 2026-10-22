@@ -130,3 +130,53 @@ not bundled. Registration, rejected artifacts and modelling limits are recorded
 in `VICTORY_RESEARCH.md`; these measurements are not Admiralty construction offsets.
 
 Reference SHA-256: `f54976c233c708811065981f00a1be9ff6b3c6a56880b34b36d391720cd3453e`.
+
+## Astronomy Engine and stellar catalogue
+
+Astronomical Sun/Moon positions, topocentric coordinates, precession/nutation,
+photometric lunar phase and horizon rotations use **Astronomy Engine**, Don Cross,
+MIT, pinned commit `865d3da7d8112bbc7911238052c6af4aaf877181`:
+https://github.com/cosinekitty/astronomy/tree/865d3da7d8112bbc7911238052c6af4aaf877181 .
+The unmodified browser distribution is enclosed in a local namespace in
+`js/vendor/astronomy-engine.js`; its complete copyright/permission notice remains
+inside that file and in `js/vendor/astronomy.LICENSE`.
+
+`js/star-catalog.js` is a **modified HYG v4.1 data derivative**, by David Nash /
+Astronexus, pinned commit `c7f7f883fe678cc7680169a50ccd7dcc49b060ce`:
+https://github.com/astronexus/HYG-Database/tree/c7f7f883fe678cc7680169a50ccd7dcc49b060ce/hyg/CURRENT .
+The derivative selects stars of visual magnitude ≤5.5 and retains J2000 Cartesian
+position/velocity, V magnitude, B−V colour index, HIP identifiers and proper names.
+**CC BY-SA 4.0 applies to this catalogue derivative**, separately from the MIT
+simulator code: https://creativecommons.org/licenses/by-sa/4.0/ . Its original
+notice is `js/vendor/hyg.LICENSE`. Illustrative constellation connections are
+locally authored guides, not official IAU boundaries. Pinning, byte hashes and
+sources are recorded in `js/vendor/README.md`.
+
+Saved USNO/NASA/JPL reference responses in `tests/data/astronomy` retain their
+request/convention provenance. Government reference data do not imply endorsement.
+
+Astronomy Engine permission notice (also retained here for minified standalone distributions):
+
+```text
+MIT License
+
+Copyright (c) 2019-2025 Don Cross <cosinekitty@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

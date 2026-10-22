@@ -37,16 +37,16 @@ function instrumentGunneryRuntime(){
 
 async function gunneryRuntimePage(model){
   const source=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-  const marker='vessels[1].gunnery=companionGuns;',controls='const gunControls=createGunneryControls(captainBody,shipGuns);',event='sceneAudio.gunneryEvent(event);';
+  const marker='window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};',controls='const gunControls=createGunneryControls(captainBody,shipGuns);',event='sceneAudio.gunneryEvent(event);';
   for(const s of [marker,controls,event])assert.ok(source.includes(s),'native fixture must instrument current production integration: '+s);
-  const fixture=source.replace(marker,marker+'window.gunneryFixture={boat,companion,vessels,shipGuns,gunEffects,gunSea,shipAsset,events:[]};')
+  const fixture=source.replace(marker,marker+'window.gunneryFixture={boat,vessels,shipGuns,gunEffects,gunSea,shipAsset,events:[]};')
     .replace(controls,controls+'window.gunneryFixture.controls=gunControls;')
     .replace(event,event+'window.gunneryFixture?.events.push({type:event.type,shotId:event.shotId,time:event.time,position:event.position,kind:event.kind});');
   const capture=!!process.env.GUNNERY_RUNTIME_SHOTS,page=await gunneryRuntimeBrowser.newPage({viewport:capture?{width:960,height:600}:{width:480,height:360}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.text().includes('init failed'))errors.push(m.text());});
   await page.addInitScript(instrumentGunneryRuntime);
   await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:fixture}));
-  await page.goto(`http://localhost:${gunneryRuntimePort}/?ship=${model}&view=ship&follower=0&boatHeading=0&sunElev=30&clouds=0&windSpeed=1&swellHs=.1&orbitElevation=12&orbitYaw=90&orbitDistance=${model==='victory'?65:34}&sailFore=0&sailMain=0&sailMizzen=0&w=${capture?960:144}&h=${capture?600:108}`);
+  await page.goto(`http://localhost:${gunneryRuntimePort}/?ship=${model}&view=ship&fleet=${model==='victory'?'nina':'victory'}&boatHeading=0&sunElev=30&clouds=0&windSpeed=1&swellHs=.1&orbitElevation=12&orbitYaw=90&orbitDistance=${model==='victory'?65:34}&sailFore=0&sailMain=0&sailMizzen=0&w=${capture?960:144}&h=${capture?600:108}`);
   await page.waitForFunction(()=>gunneryRuntime.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
   assert.equal(await page.locator('#err').textContent(),'',errors.join('\n'));
   return {page,errors};
@@ -128,8 +128,8 @@ for(const model of ['nina','victory'])test(`${model}: captain UI, attended loadi
     await gunneryRuntimeCapture(page,`gunnery-${model}-broadside.png`);
     for(const [label,value]of Object.entries({sawBall,sawFlash,sawCrown,sawProbe,sawResolve,sawRecoil}))assert.equal(value,true,label);
     assert.ok(maxSmoke<=256);assert.ok(shotFrame>1,'no immediate click-to-shot bypass');
-    const stable=await page.evaluate(()=>({events:gunneryFixture.events,other:gunneryFixture.vessels[1].gunnery.state.guns.every(g=>g.stage==='secured'),errors:gunneryRuntime.errors}));
-    assert.equal(stable.other,true);assert.deepEqual(stable.errors,[]);assert.deepEqual(errors,[]);
+    const stable=await page.evaluate(()=>({events:gunneryFixture.events,other:gunneryFixture.vessels.slice(1).map(v=>({modelId:v.boat.modelId,secured:v.gunnery.state.guns.every(g=>g.stage==='secured')})),errors:gunneryRuntime.errors}));
+    assert.equal(stable.other.length,1);assert.notEqual(stable.other[0].modelId,model);assert.equal(stable.other[0].secured,true);assert.deepEqual(stable.errors,[]);assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
 

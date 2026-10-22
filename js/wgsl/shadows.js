@@ -164,8 +164,11 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
 
 // Identical filtering, with one independently fitted footprint per ship. Array
 // layers retain the same three sampled textures even in a coastal scene.
-export const SCENE_SHADOW_SAMPLE = SHADOW_SAMPLE
-  .replace(/var<uniform>\s*SH:ShadowFrame;/,'var<uniform> shadowFrames:array<ShadowFrame,2>;')
+export function createSceneShadowSample(count=2){
+  if(!Number.isSafeInteger(count)||count<1||count>9)throw new RangeError('Invalid fleet shadow count');
+  const layers=Array.from({length:count},(_,i)=>i);
+  return SHADOW_SAMPLE
+  .replace(/var<uniform>\s*SH:ShadowFrame;/,'var<uniform> shadowFrames:array<ShadowFrame,'+count+'>;')
   .replaceAll('texture_depth_2d;','texture_depth_2d_array;')
   .replace(/var\s+canvasFilter:texture_2d<f32>;/,'var canvasFilter:texture_2d_array<f32>;')
   .replace(/fn vesselShadow\(world:vec3f,normal:vec3f\)->vec3f\s*\{/,'fn vesselLayerShadow(world:vec3f,normal:vec3f,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
@@ -177,9 +180,16 @@ export const SCENE_SHADOW_SAMPLE = SHADOW_SAMPLE
   .replaceAll('canvasFilter,shadowLinear,q,0.0','canvasFilter,shadowLinear,q,layer,0.0')
   .replaceAll('canvasFilter,shadowLinear,uv,0.0','canvasFilter,shadowLinear,uv,layer,0.0') + /* wgsl */ `
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
-  return vesselLayerShadow(world,normal,0)*vesselLayerShadow(world,normal,1);
+  return ${layers.map(i=>'vesselLayerShadow(world,normal,'+i+')').join('*')};
 }
 fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
-  return waterVesselLayerShadow(world,normal,view,variance,0)*waterVesselLayerShadow(world,normal,view,variance,1);
+  return ${layers.map(i=>'waterVesselLayerShadow(world,normal,view,variance,'+i+')').join('*')};
 }
 `;
+}
+export const SCENE_SHADOW_SAMPLE=createSceneShadowSample();
+export function withSceneShadowCount(source,count){
+  if(!source.includes(SCENE_SHADOW_SAMPLE))return source;
+  if(source.split(SCENE_SHADOW_SAMPLE).length!==2)throw new Error('Ambiguous scene shadow sampler');
+  return source.replace(SCENE_SHADOW_SAMPLE,createSceneShadowSample(count));
+}

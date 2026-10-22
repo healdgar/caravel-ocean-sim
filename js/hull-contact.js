@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import {HULL_DRAFT, hullSurfacePoint, vesselVerticalScale} from './hull.js';
 import {VICTORY_DESIGN, victoryHullPoint} from './models/victory.js';
+import {ADDITIONAL_DESIGNS} from './models/additional.js';
+import {hullLoftPoint,hullLoftBottom} from './hull-loft.js';
 import {boatRotate,boatForwardSpeed} from './boat.js';
 import {HULL_CONTACT_QUERY, HULL_CONTACT_COUNT, HULL_CONTACT_RECORD_BYTES,
   HULL_CONTACT_FLAGS} from './wgsl/hull-contact.js';
@@ -16,7 +18,7 @@ const hullContactFinitePoint=p=>p?.length===3&&Array.from(p).every(Number.isFini
 const hullContactWallTime=()=>globalThis.performance?.now?.()??Date.now();
 
 export function createHullContactDefinitions(modelId='nina'){
-  if(!['nina','victory'].includes(modelId))throw Error(`No underside geometry for ${modelId}`);
+  if(!['nina','victory'].includes(modelId)&&!ADDITIONAL_DESIGNS[modelId])throw Error(`No underside geometry for ${modelId}`);
   const points=[];
   const add=(id,position,normal,source)=>points.push({id,position,normal,source});
   if(modelId==='nina'){
@@ -35,7 +37,7 @@ export function createHullContactDefinitions(modelId='nina'){
       const z=-6.4+i*12/112;
       add(`keel.${i}`,[0,-HULL_DRAFT-.075,z],[0,-1,0],{group:'hull.keel-stem',station:z});
     }
-  }else{
+  }else if(modelId==='victory'){
     // Both station and base-Y values are vertices of Victory's current loft.
     // victoryHullPoint includes the submerged end rake and local sheer.
     for(const station of [-4.5,-2.5,0,3])for(const side of [-1,1]){
@@ -48,6 +50,16 @@ export function createHullContactDefinitions(modelId='nina'){
     for(const station of [-2.5,1.5])add(`keel.${station}`,
       victoryHullPoint(station,-VICTORY_DESIGN.hull.draft,0),[0,-1,0],
       {group:'hull.planking',station,baseY:-VICTORY_DESIGN.hull.draft});
+  }else{
+    const d=ADDITIONAL_DESIGNS[modelId],profile=d.profile,baseY=profile.levels[1];
+    for(const station of [-4.2,-3,0,3])for(const side of [-1,1]){
+      const p=hullLoftPoint(profile,station,baseY,side),e=1e-5;
+      const up=hullContactSubtract(hullLoftPoint(profile,station,baseY+e,side),hullLoftPoint(profile,station,baseY-e,side));
+      const along=hullContactSubtract(hullLoftPoint(profile,station+e,baseY,side),hullLoftPoint(profile,station-e,baseY,side));
+      let normal=hullContactNormalize(hullContactCross(up,along));if(normal[0]*side<0)normal=normal.map(v=>-v);
+      add(`bilge.${station}.${side<0?'port':'starboard'}`,p,normal,{group:'hull.planking',station,baseY});
+    }
+    for(const station of [-3,1.5])add(`keel.${station}`,[0,hullLoftBottom(profile,station)-d.keel.depth,station],[0,-1,0],{group:'hull.keel',station});
   }
   const values=new Float32Array(HULL_CONTACT_COUNT*8);
   points.forEach((p,i)=>{values.set([...p.position,i,...p.normal,0],i*8);});

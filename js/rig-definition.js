@@ -34,7 +34,7 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
 
   if (!name(rig.id)) fail('rig.id', 'expected an ID');
   if (!name(rig.backend)) fail('rig.backend', 'expected a backend ID');
-  else if (!planned && !['lateen3','square1805'].includes(rig.backend)) fail('rig.backend', `${rig.backend} is not a ready runtime backend`);
+  else if (!planned && !['lateen3','square1805','surfaces-v1'].includes(rig.backend)) fail('rig.backend', `${rig.backend} is not a ready runtime backend`);
 
   const nodeIDs = new Set();
   for (const [key, node] of Object.entries(nodes)) {
@@ -69,8 +69,8 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
   const fittings = list(rig.fittings, 'rig.fittings');
   const mastIDs = uniqueIDs(masts, 'rig.masts');
   uniqueIDs(sails, 'rig.sails'); uniqueIDs(fittings, 'rig.fittings');
-  if (!masts.length) fail('rig.masts', 'requires at least one mast');
-  if (!sails.length) fail('rig.sails', 'requires at least one sail');
+  if (!masts.length && (rig.backend!=='surfaces-v1'||sails.length)) fail('rig.masts', 'requires at least one mast');
+  if (!sails.length && rig.backend!=='surfaces-v1') fail('rig.sails', 'requires at least one sail');
   masts.forEach((mast, i) => {
     if (!record(mast)) return;
     for (const key of ['node', 'headNode', 'climbNode']) reference(mast[key], `rig.masts[${i}].${key}`);
@@ -81,6 +81,8 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
     if (!mastIDs.has(sail.mast)) fail(`${path}.mast`, `unknown mast ${sail.mast}`);
     if (!['lateen', 'square','headsail','gaff'].includes(sail.kind)) fail(`${path}.kind`, 'unknown sail kind');
     if (!name(sail.controlGroup)) fail(`${path}.controlGroup`, 'expected a control group ID');
+    if (rig.backend==='surfaces-v1' && !['fore','main','mizzen'].includes(sail.controlGroup)) fail(`${path}.controlGroup`, 'surfaces-v1 requires a supported canvas control group');
+    if (rig.backend==='surfaces-v1' && (!Number.isInteger(sail.surfaceId)||sail.surfaceId<1)) fail(`${path}.surfaceId`, 'requires a positive authored surface ID');
     reference(sail.yardNode, `${path}.yardNode`);
     const clews = list(sail.clewNodes, `${path}.clewNodes`);
     const expected = ['lateen','headsail','gaff'].includes(sail.kind) ? 1 : sail.kind === 'square' ? 2 : 0;
@@ -88,6 +90,7 @@ export function validateRigDefinition(rig, nodes, { planned = false } = {}) {
     if (new Set(clews).size !== clews.length) fail(`${path}.clewNodes`, 'duplicate clew nodes');
     clews.forEach((id, j) => reference(id, `${path}.clewNodes[${j}]`));
   });
+  if(rig.backend==='surfaces-v1' && new Set(sails.map(s=>s?.surfaceId)).size!==sails.length)fail('rig.sails','duplicate authored surface IDs');
   fittings.forEach((fitting, i) => {
     if (!record(fitting)) return;
     if (!name(fitting.kind)) fail(`rig.fittings[${i}].kind`, 'expected a fitting kind');

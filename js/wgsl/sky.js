@@ -1,3 +1,4 @@
+import { CELESTIAL_LIGHT_STUB, CELESTIAL_STAR_STUB, CELESTIAL_SOLAR_STUB } from './celestial.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 // Hillaire atmosphere + Joshbrew volumetric clouds.
 import { FRAME_WGSL, ATMO_CORE_WGSL, NOISE_WGSL, SKY_W, SKY_H, ENV_SIZE } from './common.js';
@@ -182,7 +183,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
 // Functions for rendering the sky (background, env cube, ocean fog).
 // Requires: F (Frame), transLUT, skyLUT, sampC declared by the including module.
-export const SKY_RENDER_FUNCS = NOISE_WGSL + /* wgsl */ `
+export const SKY_RENDER_FUNCS = NOISE_WGSL + CELESTIAL_LIGHT_STUB + CELESTIAL_SOLAR_STUB + /* wgsl */ `
 const SKY_W: f32 = ${SKY_W}.0;
 const SKY_H: f32 = ${SKY_H}.0;
 
@@ -193,7 +194,10 @@ fn sampleTrans(r: f32, mu: f32) -> vec3f {
 }
 
 fn sunIlluminance() -> vec3f {
-  return sampleTrans(camR(), F.sunDir.y) * F.sunDir.w;
+  // The transmittance LUT alone clamps rays which cross the solid planet.
+  // High night exposure otherwise turns its residual into orange glowing foam.
+  // Keep scattered twilight in skyAtmo; direct rays obey the visible solar cap.
+  return sampleTrans(camR(), F.sunDir.y) * F.sunDir.w * celestialSolarVisibility();
 }
 
 // Broad light from the discharging cloud. Evaluate at draw time so a brief
@@ -233,7 +237,8 @@ fn surfaceAir(color:vec3f,world:vec3f)->vec3f {
   // phase lobe. Rain retains its extinction while weakening direct illumination.
   let cosine=clamp(dot(direction,F.sunDir.xyz),-1.0,1.0);
   let localSun=sunIlluminance()*step(0.0,F.sunDir.y)*phaseHG(cosine,.8)*.06*mix(1.0,.15,rain);
-  let localAir=zenith*mix(.45,.25,rain)+localSun;
+  let localMoon=lunarIlluminance()*phaseHG(dot(direction,lunarDirection()),.8)*.06*mix(1.0,.15,rain);
+  let localAir=zenith*mix(.45,.25,rain)+localSun+localMoon;
   let distantAir=mix(skyAtmo(direction),zenith*.55,rain*.7);
   let air=mix(localAir,distantAir,smoothstep(500.0,2500.0,d))+lightningCloud(direction);
   return color*transmission+air*(1.0-transmission);
@@ -267,7 +272,7 @@ fn skyViewUV(dir: vec3f) -> vec2f {
 }
 
 fn skyAtmo(dir: vec3f) -> vec3f {
-  return textureSampleLevel(skyLUT, sampC, skyViewUV(dir), 0.0).rgb * F.sunDir.w;
+  return textureSampleLevel(skyLUT, sampC, skyViewUV(dir), 0.0).rgb * F.sunDir.w+lunarSky(dir);
 }
 `;
 
@@ -297,7 +302,10 @@ fn skyRadiance(dirIn: vec3f, withSun: bool) -> vec3f {
   var L = skyAtmo(dir);
   let volume = marchClouds(F.camPos.xyz * 0.001, dir, 32u, 0.5, sunIlluminance(), skyAtmo(vec3f(0,1,0)));
   L = L * (1.0 - volume.color.a) + volume.color.rgb;
-  if (withSun) { L += sunDisk(dir) * volumeSunVisibility(F.camPos.xyz * 0.001, dir); }
+  if (withSun) {
+    L += sunDisk(dir) * volumeSunVisibility(F.camPos.xyz * 0.001, dir);
+    L += lunarDisk(dirIn)*volumeSunVisibility(F.camPos.xyz*.001,dirIn);
+  }
   return L;
 }
 `;
@@ -309,7 +317,7 @@ export const ENV_CUBE = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var dst: texture_storage_2d_array<rgba16float, write>;
 @group(0) @binding(5) var<storage, read> sunVis: array<f32, 4>;
-` + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + /* wgsl */ `
+` + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + CELESTIAL_STAR_STUB + /* wgsl */ `
 const ENV: f32 = ${ENV_SIZE}.0;
 fn faceDir(face: u32, uv: vec2f) -> vec3f {
   let u = uv.x * 2.0 - 1.0;
@@ -331,13 +339,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let dir = normalize(faceDir(face, (vec2f(id.xy) + 0.5) / ENV));
   var L: vec3f;
   if (dir.y >= 0.0) {
-    L = skyRadiance(dir, false);
+    L = skyRadiance(dir, false)+celestialStarBackground(dir)*volumeSunVisibility(F.camPos.xyz*.001,dir);
   } else {
     // below the horizon: what a reflected ray would see -> far, hazy ocean
     let hz = skyRadiance(normalize(vec3f(dir.x, 0.004, dir.z)), false);
     // Match the sea's cloud-shadowed upwelling light. An unshadowed fallback
     // makes the shaded hull receive bright teal light from an otherwise dark sea.
-    let body = F.waterCol.rgb * (sunIlluminance() * sunVis[0] * max(F.sunDir.y, 0.0) * 0.8 + skyAtmo(vec3f(0.0, 1.0, 0.0)) * 1.6);
+    let body = F.waterCol.rgb * (sunIlluminance() * sunVis[0] * max(F.sunDir.y, 0.0) * 0.8 + lunarIlluminance()*sunVis[1]*max(lunarDirection().y,0.0)*.8 + skyAtmo(vec3f(0.0, 1.0, 0.0)) * 1.6);
     L = mix(hz * 0.75, body, clamp(-dir.y * 6.0, 0.0, 1.0));
   }
   textureStore(dst, id.xy, face, vec4f(L, 1.0));
@@ -400,6 +408,7 @@ fn main(@builtin(local_invocation_index) k: u32) {
     var acc = 0.0;
     for (var i = 0u; i < 7u; i++) { acc += part[i]; }
     sunVis[0] = acc / 7.0;
+    sunVis[1]=select(1.0,volumeSunVisibility(F.camPos.xyz*.001,lunarDirection()),lunarIrradiance()>0.0);
   }
 }
 `;

@@ -1,3 +1,4 @@
+import {CELESTIAL_CAUSTIC_STUB} from './celestial.js';
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {FRAME_WGSL,ATMO_CORE_WGSL,CASCADES} from './common.js';
 import {SKY_RENDER_FUNCS,SUN_DISK} from './sky.js';
@@ -10,7 +11,7 @@ import {surfaceWaveSource} from './surface-coupling.js';
 // folded/multiple light paths are bounded rather than accumulated. No noise or
 // preanimated caustic texture is used. See GPU Gems, chapter 2 (Guardado/Crespo).
 export function waterCausticFunctions({derivatives='derivTex',sampler='sampR',surfaceWaves=false,shadows=true}={}){
-  return /* wgsl */ `
+  return CELESTIAL_CAUSTIC_STUB+/* wgsl */ `
 fn causticSlope(p:vec2f,footprint:f32)->vec2f {
   var slope=vec2f(0);
   // Long swells transport the patch; the resolved 7 m, 1.4 m and .26 m bands
@@ -31,7 +32,7 @@ fn causticSlope(p:vec2f,footprint:f32)->vec2f {
 fn causticLightSlope(p:vec2f,footprint:f32)->vec2f {
   let slope=causticSlope(p,footprint);
   let normal=normalize(vec3f(-slope.x,1,-slope.y));
-  let down=refract(-normalize(F.sunDir.xyz),normal,1.0/WATER_REFRACTIVE_INDEX);
+  let down=refract(-normalize(causticSourceDirection()),normal,1.0/WATER_REFRACTIVE_INDEX);
   return down.xz/max(-down.y,.15);
 }
 fn waterCausticPixelFootprint(receiver:vec3f)->f32 {
@@ -44,17 +45,17 @@ fn waterCausticPixelFootprint(receiver:vec3f)->f32 {
 }
 fn waterCausticFactorFiltered(receiver:vec3f,surfaceY:f32,pixelFootprint:f32)->vec3f {
   let depth=surfaceY-receiver.y;
-  if(depth<=.035||depth>=40.0||F.sunDir.y<=.015||sunVis[0]<=.001){return vec3f(1);}
-  let light=sunIlluminance()*sunVis[0];
+  if(depth<=.035||depth>=40.0||causticSourceDirection().y<=.015){return vec3f(1);}
+  let light=causticSourceLight();
   let sky=skyAtmo(vec3f(0,1,0));
   let direct=dot(light,vec3f(.2126,.7152,.0722));
   let diffuse=dot(sky,vec3f(.2126,.7152,.0722));
-  let strength=smoothstep(.015,.15,F.sunDir.y)*direct/max(direct+diffuse*3.0,.0001)
+  let strength=smoothstep(.015,.15,causticSourceDirection().y)*direct/max(direct+diffuse*3.0,.00000001)
     *smoothstep(.035,.25,depth)*exp(-depth*(.045+max(optics.x,0.0)*.07))*(1.0-smoothstep(20.0,40.0,depth));
   if(strength<.0001){return vec3f(1);}
   let beam=max(.035,depth*(.018+min(max(optics.x,0.0),4.0)*.006));
   let footprint=max(beam,pixelFootprint*1.25);
-  let flat=refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
+  let flat=refract(-normalize(causticSourceDirection()),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
   var entry=receiver.xz-depth*flat.xz/max(-flat.y,.15);
   entry=receiver.xz-depth*causticLightSlope(entry,footprint);
   let dx=(causticLightSlope(entry+vec2f(footprint,0),footprint)-causticLightSlope(entry-vec2f(footprint,0),footprint))/(2.0*footprint);
@@ -117,9 +118,9 @@ fn underwaterBoundary(world:vec3f,normal:vec3f,view:vec3f,skyHemi:vec3f,foam:f32
     let dir=normalize(airRay);
     // Sky LUT and solar disc share the ordinary above-water illumination. Local
     // surface slopes distort the window; the medium pass attenuates the eye leg.
-    transmitted=(textureSampleLevel(envCube,sampR,normalize(vec3f(dir.x,max(dir.y,.0005),dir.z)),0.0).rgb+sunDisk(dir)*sunVis[0])*(1.0-reflectance);
+    transmitted=(textureSampleLevel(envCube,sampR,normalize(vec3f(dir.x,max(dir.y,.0005),dir.z)),0.0).rgb+sunDisk(dir)*sunVis[0]+lunarDisk(dir)*sunVis[1])*(1.0-reflectance);
   }
-  let reflected=F.waterCol.rgb*(skyHemi*1.5+sunIlluminance()*sunVis[0]*max(F.sunDir.y,0.0)*.22);
+  let reflected=F.waterCol.rgb*(skyHemi*1.5+(sunIlluminance()*sunVis[0]*max(F.sunDir.y,0.0)+lunarIlluminance()*sunVis[1]*max(lunarDirection().y,0.0))*.22);
   let bubbles=foamLight*.3+skyHemi*.06;
   return mix(transmitted+reflected*reflectance,bubbles,clamp(foam*.85,0.0,.95));
 }
@@ -178,7 +179,7 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
   if(receiverVisible){
     radiance=raw.rgb*waterCausticFactorFiltered(receiver,surfaceY,waterCausticPixelFootprint(receiver));
   }
-  let lightDown=refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
+  let lightDown=refract(-normalize(causticSourceDirection()),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);
   let lightCos=max(-lightDown.y,.25);
   if(receiverVisible){radiance*=waterTransmittance(endDepth/lightCos,optics.x);}
   let transmission=waterTransmittance(path,optics.x);
@@ -194,9 +195,12 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
   let sampleDepth=max(0.0,surfaceY-sampleWorld.y);
   let entry=sampleWorld.xz-sampleDepth*lightDown.xz/lightCos;
   let sunShadow=${shadows?'vesselShadow(vec3f(entry.x,surfaceY,entry.y),vec3f(0,1,0))':'vec3f(1)'};
+  let moonDown=refract(-lunarDirection(),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX);let moonCos=max(-moonDown.y,.25);
+  let moon=lunarIlluminance()*sunVis[1]*(1.0-waterFresnel(max(lunarDirection().y,0.0)));
   let scatterAlbedo=clamp(F.waterCol.rgb,vec3f(0),vec3f(.85));
   let scatter=scatterAlbedo*(sky*1.4*underwaterLightIntegral(path,eyeDepth,ray.y,.65,optics.x)
-    +sun*sunShadow*underwaterPhase(dot(ray,towardLight))*underwaterLightIntegral(path,eyeDepth,ray.y,lightCos,optics.x));
+    +sun*solarShadowVisibility(sunShadow)*underwaterPhase(dot(ray,normalize(-refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX))))*underwaterLightIntegral(path,eyeDepth,ray.y,lightCos,optics.x)
+    +moon*lunarShadowVisibility(sunShadow)*underwaterPhase(dot(ray,normalize(-moonDown)))*underwaterLightIntegral(path,eyeDepth,ray.y,moonCos,optics.x));
   return vec4f(max(vec3f(0),radiance*transmission+scatter),1);
 }
 `;

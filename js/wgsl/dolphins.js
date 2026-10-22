@@ -64,7 +64,9 @@ fn dolphinSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f)->vec3f {
   let spec=vesselSpecular(n,eye,sun,rough,f0)*direct*max(dot(n,sun),0.0);
   let waterReflection=textureSampleLevel(envCube,sampC,reflect(-eye,n),coatRough*8.0).rgb*vesselEnvironment(n,eye,coatRough,coatF0);
   let waterGlint=vesselSpecular(n,eye,sun,coatRough,coatF0)*direct*max(dot(n,sun),0.0);
-  return (diffuse+reflected+spec)*(1.0-coatF)+waterReflection+waterGlint+lightningSurface(n,eye,albedo,coatRough);
+  let moonSkin=lunarSurface(n,eye,albedo,rough,f0,vec3f(sunVis[1]));
+  let moonCoat=lunarSurface(n,eye,vec3f(0),coatRough,coatF0,vec3f(sunVis[1]));
+  return (diffuse+reflected+spec+moonSkin)*(1.0-coatF)+waterReflection+waterGlint+moonCoat+lightningSurface(n,eye,albedo,coatRough);
 }
 @fragment fn dolphinFS(v:DolphinVertex)->@location(0) vec4f {
   return vec4f(surfaceAir(dolphinSkinRadiance(v.world,v.normal,v.albedo),v.world),1);
@@ -75,9 +77,9 @@ fn dolphinWaterColor(world:vec3f,normal:vec3f,foam:f32)->vec3f {
   let eye=normalize(F.camPos.xyz-world);var n=normalize(normal);if(dot(n,eye)<0.0){n=-n;}
   let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-eye,n),1.6).rgb;
-  let light=skyAtmo(vec3f(0,1,0))*.55+direct*max(F.sunDir.y,.08)*.22+lightningLight()*.25;
+  let light=skyAtmo(vec3f(0,1,0))*.55+direct*max(F.sunDir.y,.08)*.22+lunarIlluminance()*sunVis[1]*max(lunarDirection().y,.08)*.22+lightningLight()*.25;
   let spec=vesselSpecular(n,eye,F.sunDir.xyz,.19,vec3f(.025))*direct*max(dot(n,F.sunDir.xyz),0.0);
-  return mix(reflected*.85+spec,light,foam);
+  return mix(reflected*.85+spec+lunarSurface(n,eye,vec3f(0),.19,vec3f(.025),vec3f(sunVis[1])),light,foam);
 }
 fn dolphinEffectData(s:DolphinSplash)->vec4f {return vec4f(s.root.z,s.root.w,s.shape.y,s.shape.z);}
 @vertex fn dolphinRippleVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) id:u32)->DolphinEffect {

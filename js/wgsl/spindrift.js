@@ -1,3 +1,4 @@
+import {CELESTIAL_LIGHT_STUB} from './celestial.js';
 import { FRAME_WGSL, ATMO_CORE_WGSL, NOISE_WGSL, FOAM_MODEL } from './common.js';
 import { HULL_PROFILE } from './hull.js';
 import { SHADOW_SAMPLE } from './shadows.js';
@@ -204,6 +205,9 @@ ${SPINDRIFT_STATE}
 ${NOISE_WGSL}
 ${SPINDRIFT_VOLUME}
 ${SHADOW_SAMPLE}
+${CELESTIAL_LIGHT_STUB}
+fn camR()->f32{return RG+F.atmo.y;}
+fn sampleTrans(r:f32,mu:f32)->vec3f{return textureSampleLevel(transmittance,lightSampler,transRMuToUV(r,mu),0).rgb;}
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> plumes: array<CrestPlume>;
 @group(0) @binding(2) var environment: texture_cube<f32>;
@@ -250,7 +254,9 @@ struct CrestVertex {
   let sunlight=textureSampleLevel(transmittance,lightSampler,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb;
   // Normalized scattering replaces the unbounded orange sheet illumination.
   let phase=phaseMie(dot(-view,F.sunDir.xyz),.5);
-  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*vesselShadow(center,vec3f(0,1,0))+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
+  let moonPhase=phaseMie(dot(-view,lunarDirection()),.5);
+  let moon=lunarIlluminance()*sunVisibility.y*moonPhase*lunarShadowVisibility(vesselShadow(center,vec3f(0,1,0)));
+  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*step(0.0,F.sunDir.y)*solarShadowVisibility(vesselShadow(center,vec3f(0,1,0)))+moon+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
   let fade=smoothstep(0.0,.08,age)*(1.0-smoothstep(.35,1.0,age/p.launch.w));
   o.shape=vec3f((.65+.70*p.shape.x)*fade*smoothstep(1.0,4.0,distanceToEye)
     *(1.0-smoothstep(55.0,80.0,distanceToEye)),p.shape.y+parcel*7.1,age);

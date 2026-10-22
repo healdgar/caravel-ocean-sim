@@ -159,7 +159,16 @@ test('reefing unloads torque gradually without resetting angular motion',()=>{
   b.sailFore=b.sailMain=b.sailMizzen=0;
   stepBoatSurge(b,0,1/60,20,windAt(75));
   assert.ok(Math.abs(b.roll-angle)<.002);
-  sail(b,30,20,75);assert.ok(Math.abs(b.roll)<.0001);
+  sail(b,30,20,75);
+  // Furled canvas supplies no torque, but the hull still arrests the leeway
+  // built up under sail. That underwater force acts below the centre of mass;
+  // demanding zero heel while it persists would hide the new force lever.
+  assert.equal(b.sailState.rollMoment,0);
+  assert.ok(Math.abs(b.roll)<Math.abs(angle)*.01);
+  const drift=Math.abs(b.leewayVelocity),residual=Math.abs(b.roll);
+  sail(b,90,20,75);
+  assert.ok(Math.abs(b.leewayVelocity)<drift*.2);
+  assert.ok(Math.abs(b.roll)<residual*.1&&Math.abs(b.roll)<.0001);
 });
 
 test('sail forces act on wave roll itself and can damp it without removing mean heel',()=>{

@@ -4,6 +4,7 @@ import { SPINDRIFT_STATE, SPINDRIFT_COUNT } from './spindrift.js';
 import { VESSEL_RIG } from './vessel.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
 import { QUARTERDECK_START, QUARTERDECK_HEIGHT } from '../hull.js';
+import {ADDITIONAL_DESIGNS} from '../models/additional.js';
 
 export const WET_GRID=[24,32,48];
 export const WET_SEA_SIZE=32;
@@ -17,6 +18,10 @@ fn wetLocal(world:vec3f)->vec3f {
 }
 fn wetWorld(p:vec3f)->vec3f {return rotateHull(p*vec3f(hull.size.x/3.6,shipY(hull.right.w),hull.size.y/12.0))+hull.origin.xyz;}
 fn wetIndex(p:vec3u)->u32 {return (p.z*wetSize.y+p.y)*wetSize.x+p.x;}
+fn wetShelteredStart()->f32 {
+  ${Object.values(ADDITIONAL_DESIGNS).map(d=>`if(abs(hull.rig.w-${d.modelCode}.0)<.1){return ${d.deckZones.find(zone=>zone.id==='quarter').bounds[0].toFixed(5)};}`).join('\n')}
+  return select(${QUARTERDECK_START},1.65,hull.rig.w>.5);
+}
 `;
 // Absorbed moisture and a short-lived surface film have separate lifetimes.
 // Rates are authored visual approximations; they do not add mass to the ship.
@@ -126,7 +131,7 @@ fn levelAt(world:vec3f)->f32 {
   let rig=rigVertex(probe.position.xyz,vec3f(0,1,0),probe.position.w,probe.uvKind.xy);
   let p=rig.position;let world=wetWorld(p);let floor=deckFloor(p.z);
   let inFootprint=p.z>deckMinZ() && p.z<deckMinZ()+deckLength() && abs(p.x)<deckWidth(p.z)-.10 && p.y>=modelHullDeck(p.z,hull.rig.w)-.08;
-  let sheltered=inFootprint && p.z>=select(${QUARTERDECK_START},1.65,hull.rig.w>.5) && p.y<floor-.08;
+  let sheltered=inFootprint && p.z>=wetShelteredStart() && p.y<floor-.08;
   var water=smoothstep(-.025,.08,levelAt(world)-world.y);
   var spray=mistAt(p);
   if(inFootprint && p.y<=floor+deckRail(p.z)){

@@ -3,6 +3,11 @@ import { LATEEN_MOTION } from './lateen.js';
 import {VICTORY_MOTION} from './victory.js';
 import {VICTORY_DESIGN,VICTORY_SAILS,victoryHatchPivot} from '../models/victory.js';
 import {createGunDefinitions} from '../gunnery-models.js';
+import {ADDITIONAL_DESIGNS} from '../models/additional.js';
+import {additionalGunAttachments} from '../additional-rig.js';
+const additionalGunFlashWGSL=Object.values(ADDITIONAL_DESIGNS).map(d=>{
+ const guns=additionalGunAttachments(d.id);return guns.length?`const gunFlashModel${d.modelCode}=array<vec3f,${guns.length}>(${guns.map(g=>'vec3f('+g.muzzleDesign.join(',')+')').join(',')});`:'';
+}).join('\n');
 // Shared deformation keeps visible geometry, wetness and shadow casters coincident.
 export const VESSEL_RIG = /* wgsl */ `
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
@@ -10,11 +15,13 @@ struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, ri
 fn rotateHull(p:vec3f)->vec3f { return hull.right.xyz*p.x+hull.up.xyz*p.y-hull.forward.xyz*p.z; }
 const gunFlashNina=array<vec3f,4>(${createGunDefinitions('nina').map(g=>'vec3f('+g.muzzleDesign.join(',')+')').join(',')});
 const gunFlashVictory=array<vec3f,104>(${createGunDefinitions('victory').map(g=>'vec3f('+g.muzzleDesign.join(',')+')').join(',')});
+${additionalGunFlashWGSL}
 fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f {
   let energy=abs(hull.up.w);if(energy<.0001){return vec3f(0);}
   let index=u32(max(0.0,hull.forward.w));
   var local=gunFlashNina[min(index,3u)];
-  if(hull.rig.w>.5){local=gunFlashVictory[min(index,103u)];}
+  if(hull.rig.w>.5&&hull.rig.w<1.5){local=gunFlashVictory[min(index,103u)];}
+  ${Object.values(ADDITIONAL_DESIGNS).map(d=>{const guns=additionalGunAttachments(d.id);return guns.length?`if(abs(hull.rig.w-${d.modelCode}.0)<.1){local=gunFlashModel${d.modelCode}[min(index,${guns.length-1}u)];}`:'';}).join('\n')}
   let scale=vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
   let light=hull.origin.xyz+rotateHull(local*scale);
   let delta=light-world;let d=max(.25,length(delta));let l=delta/d;
@@ -29,6 +36,9 @@ struct RigVertex { position:vec3f, normal:vec3f, scale:vec3f };
 fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
   var scale=vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0);
   var local=position;var localN=normal;
+  // Descriptor-driven models upload one authoritative CPU pose. Every consumer
+  // reads this same vertex stream; the legacy rig must not deform it again.
+  if(hull.rig.w>=1.5){return RigVertex(local,localN,scale);}
   if(hull.rig.w>.5){
     let base=u32(material);let id=u32(round(fract(material)*64.0));
     if(id>0u && id<=${VICTORY_SAILS.length}u){

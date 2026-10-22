@@ -1,3 +1,4 @@
+import { CELESTIAL_LIGHT_STUB } from './celestial.js';
 import { HULL_DRAFT } from '../hull.js';
 import { HULL_PROFILE } from './hull.js';
 // Local hull response and spray. Bounded visual approximation, not a fluid solver.
@@ -383,7 +384,9 @@ export const SPRAY_UPDATE = FRAME_WGSL + WAKE_SAMPLE + /* wgsl */ `
 `;
 
 // Both populations share the ocean's sky/sun illumination and reverse-Z depth buffer.
-export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + SHADOW_SAMPLE + /* wgsl */ `
+export const WATER_EFFECTS = FRAME_WGSL + ATMO_CORE_WGSL + NOISE_WGSL + INTERACTION_TYPES + SHADOW_SAMPLE + CELESTIAL_LIGHT_STUB + /* wgsl */ `
+fn camR()->f32{return RG+F.atmo.y;}
+fn sampleTrans(r:f32,mu:f32)->vec3f{return textureSampleLevel(transLUT,effectSamp,transRMuToUV(r,mu),0).rgb;}
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> I: Interaction;
 @group(0) @binding(2) var<storage, read> sheets: array<Sheet, ${SHEET_COUNT}>;
@@ -434,10 +437,11 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
 }
 fn sprayLight(p: vec3f) -> vec3f {
   let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
-  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * vesselShadow(p,vec3f(0,1,0));
+  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * step(0.0,F.sunDir.y)*solarShadowVisibility(vesselShadow(p,vec3f(0,1,0)));
   let view = normalize(F.camPos.xyz - p);
   let scatter = pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
-  return sky * 0.85 + sun * (0.12 + scatter * 0.65)+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
+  let moon=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(vesselShadow(p,vec3f(0,1,0)));
+  return sky * 0.85 + sun * (0.12 + scatter * 0.65)+moon*(.12+.65*pow(max(dot(-view,lunarDirection()),0.0),12.0))+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
 }
 @fragment fn sheetFS(o: EffectVertex) -> @location(0) vec4f {
   let n = normalize(o.normal + vec3f(0.0, 0.0001, 0.0));

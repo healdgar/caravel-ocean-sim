@@ -31,11 +31,11 @@ struct AnchorVertex {
   color*=select(grain,1.0,water);
   let rough=select(select(.8,.38,iron),.5,water);
   let f0=select(vec3f(.035),vec3f(.13),iron);
-  let sun=sunIlluminance()*sunVis[0]*vesselShadow(v.world,n);
+  let sun=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y)*solarShadowVisibility(vesselShadow(v.world,n));
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
   let sea=textureSampleLevel(envCube,sampC,vec3f(0,-1,0),7).rgb;
   var radiance=color*vesselAmbient(n,sky,sea)+sun*(color/PI+vesselSpecular(n,eye,F.sunDir.xyz,rough,f0))*max(dot(n,F.sunDir.xyz),0.0);
-  radiance+=lightningSurface(n,eye,color,rough);
+  radiance+=lunarSurface(n,eye,color,rough,f0,sunVis[1]*lunarShadowVisibility(vesselShadow(v.world,n)))+lightningSurface(n,eye,color,rough);
   let alpha=select(1.0,clamp(v.kind.y,0.0,1.0),water);
   return vec4f(surfaceAir(radiance,v.world)*alpha,alpha);
 }

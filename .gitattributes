@@ -1,1 +1,3 @@
 *.bin binary
+# Preserve whitespace in the original USNO API reference responses.
+tests/data/astronomy/usno-*.json whitespace=-blank-at-eol

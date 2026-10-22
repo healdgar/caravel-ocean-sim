@@ -6,6 +6,7 @@ import {createHullContactDefinitions,createHullContactConsumer,createHullContact
 import {HULL_CONTACT_COUNT,HULL_CONTACT_RECORD_BYTES,HULL_CONTACT_FLAGS as FLAGS} from '../js/wgsl/hull-contact.js';
 import {createCaravelMesh} from '../js/caravel.js';
 import {createVictoryMesh} from '../js/victory.js';
+import {createAdditionalShipMesh} from '../js/additional-ships.js';
 import {NINA_DESIGN} from '../js/models/nina.js';
 import {VICTORY_DESIGN} from '../js/models/victory.js';
 import {segmentTriangleDistance} from '../scripts/rig-clearance.mjs';
@@ -21,7 +22,8 @@ const near=(a,b,tolerance=2e-6)=>assert.ok(Math.abs(a-b)<=tolerance,`${a} versus
 const vertexKey=p=>Array.from(p,v=>Math.fround(v)).join(',');
 
 test('ten authored underside probes lie on actual current hull meshes, including the Niña keel bottom',()=>{
-  for(const [modelId,builder,skinGroup] of [['nina',createCaravelMesh,'hull'],['victory',createVictoryMesh,'hull.planking']]){
+  for(const [modelId,builder,skinGroup] of [['nina',createCaravelMesh,'hull'],['victory',createVictoryMesh,'hull.planking'],
+    ...['pinta','santa-maria'].map(id=>[id,options=>createAdditionalShipMesh(id,options),'hull.planking'])]){
     const definitions=createHullContactDefinitions(modelId),groups=[],raw=builder({groups});
     assert.equal(definitions.points.length,10);assert.equal(definitions.values.byteLength,320);
     const skin=groups.find(g=>g.id===skinGroup);assert.ok(skin);
@@ -45,7 +47,7 @@ test('ten authored underside probes lie on actual current hull meshes, including
       }
     }
   }
-  assert.throws(()=>createHullContactDefinitions('pinta'),/No underside geometry/);
+  assert.throws(()=>createHullContactDefinitions('unknown-ship'),/No underside geometry/);
 });
 
 test('bilge pairs mirror exactly and transforms preserve scale, attitude, loading datum and compass heading',()=>{

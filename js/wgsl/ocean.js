@@ -1,3 +1,4 @@
+import { CELESTIAL_STAR_STUB } from './celestial.js';
 import { HULL_PROFILE } from './hull.js';
 import { WAKE_SAMPLE, FLEET_WAKE_SAMPLE } from './interaction.js';
 import { SCENE_WAKE_SAMPLE, surfaceWaveSource } from './surface-coupling.js';
@@ -16,7 +17,7 @@ const RENDER_BINDINGS = /* wgsl */ `
 `;
 
 // Full-resolution atmosphere with reconstructed volumetric cloud radiance.
-export const SKY_BG = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + /* wgsl */ `
+export const SKY_BG = FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SKY_RENDER_FUNCS + SKY_CLOUD_FUNCS + CELESTIAL_STAR_STUB + /* wgsl */ `
 @group(0) @binding(4) var<storage,read> sunVis:array<f32,4>;
 @group(1) @binding(4) var cloudScreen:texture_2d<f32>;
 struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
@@ -37,23 +38,35 @@ struct VO { @builtin(position) pos: vec4f, @location(0) ndc: vec2f };
   // HDR solar disc. Use the same full-precision solar visibility as the boat.
   let haze=F.reserved.x*(1.0-smoothstep(-.02,.3,dir.y))*.8;
   let L = mix(skyAtmo(d2) * (1.0 - volume.a) + volume.rgb + sunDisk(dir) * sunVis[0],skyAtmo(vec3f(0,1,0))*.55,haze)
-    +lightningCloud(dir)*(.4+volume.a*.6);
+    +lightningCloud(dir)*(.4+volume.a*.6)
+    +lunarDisk(dir)*sunVis[1]+celestialStarBackground(dir)*(1.0-smoothstep(.95,.995,volume.a))*(1.0-volume.a);
   return vec4f(L, 1.0);
 }
 `;
 
-const OCEAN_HULL_MASK = /* wgsl */ `
-  if(F.post.w <= 0.5) {
-    ${[0,1].map(vessel=>`{
+function oceanHullMask(count=2){
+  const blocks=Array.from({length:count},(_,vessel)=>/* wgsl */ `{
       let H=hulls[${vessel}];
       if(H.rig.z>.5){
         let relative=in.rel+F.camPos.xyz-H.origin.xyz;
         let q=vec3f(dot(relative,H.right.xyz)/(H.size.x/3.6),dot(relative,H.up.xyz)/shipY(H.right.w),-dot(relative,H.forward.xyz)/(H.size.y/12.0));
         if(modelHullExcludesOcean(q,H.rig.w)) { discard; return vec4f(0); }
       }
-    }`).join('\n')}
+    }`);
+  return /* wgsl */ `
+  if(F.post.w <= 0.5) {
+    ${blocks.join('\n')}
   }
 `;
+}
+const OCEAN_HULL_MASK=oceanHullMask();
+
+export function withFleetHullCount(source,count){
+  if(!Number.isSafeInteger(count)||count<1||count>9)throw new RangeError('Invalid fleet hull count');
+  const declaration=/hulls\s*:\s*array\s*<\s*OceanHull\s*,\s*2\s*>/g;
+  if([...source.matchAll(declaration)].length!==1||!source.includes(OCEAN_HULL_MASK))throw new Error('Unrecognized fleet hull mask');
+  return source.replace(declaration,'hulls:array<OceanHull,'+count+'>').replaceAll(OCEAN_HULL_MASK,oceanHullMask(count));
+}
 
 function oceanSource(coast='',surfaceWaves=false) { return FOAM_MODEL + HULL_PROFILE + (surfaceWaves?SCENE_WAKE_SAMPLE+surfaceWaveSource(0,18,19):FLEET_WAKE_SAMPLE) + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SCENE_SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
@@ -203,8 +216,8 @@ ${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
 
   let sunlight = sunIlluminance() * sunVis[0];
-  let sunE = sunlight * vesselShadow(in.rel+F.camPos.xyz,nrm);
-  let waterSun = sunlight * waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y);
+  let sunE = sunlight * solarShadowVisibility(vesselShadow(in.rel+F.camPos.xyz,nrm));
+  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
   // average radiance of the whole upper hemisphere (incl. the bright horizon band)
   let skyHemi = skyUp * 0.4 + 0.15 * (
@@ -227,6 +240,14 @@ ${OCEAN_HULL_MASK}
   let Fh = fresnelWater(dot(V, Hv));
   let spec = sunE * (Fh * Dm * G / (4.0 * max(V.y, 0.02))) * step(0.0, Ld.y);
 
+  var moonSpec=vec3f(0);let moonE=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(vesselShadow(in.rel+F.camPos.xyz,nrm));
+  if(lunarIrradiance()>0.0){
+    let mh=normalize(V+lunarDirection());let ms=-mh.xz/max(mh.y,1e-3)-sl;
+    let me=(ms.x*ms.x*cov.y+ms.y*ms.y*cov.x-2.0*ms.x*ms.y*cov.z)/det;
+    let md=exp(-.5*me)/(2.0*PI*sqrt(det)*max(pow(mh.y,4.0),1e-6));
+    let mg=1.0/(1.0+lambdaSmith(V,cov)+lambdaSmith(lunarDirection(),cov));
+    moonSpec=moonE*fresnelWater(dot(V,mh))*md*mg/(4.0*max(V.y,.02));
+  }
   // ---- sky reflection ----
   // At grazing angles the *visible* facets are biased towards the viewer (projected-area
   // weighting + masking), so the effective reflector tilts up and sees higher, greyer sky.
@@ -251,7 +272,7 @@ ${OCEAN_HULL_MASK}
   let ambient = skyUp * 1.3 + skyN * 0.5;
   let NdL = max(dot(nrm, Ld), 0.0);
   // upwelling light is diffuse: light it with smooth terms only (no per-pixel normal noise)
-  var body = F.waterCol.rgb * (skyHemi * 1.6 + waterSun * max(Ld.y, 0.0) * 0.8);
+  var body = F.waterCol.rgb * (skyHemi * 1.6 + waterSun * max(Ld.y, 0.0) * 0.8+moonE*max(lunarDirection().y,0.0)*.8);
   // light transmitted through the thin upper part of backlit crests
   let crest = clamp((in.height - 0.05) / 0.9, 0.0, 1.0);
   let toSun = max(dot(Ld, -V), 0.0);
@@ -293,7 +314,7 @@ ${OCEAN_HULL_MASK}
   let foamAmb = skyHemi * 1.0 + skyN * 0.3;
   let foamAmbN = mix(foamAmb, vec3f(dot(foamAmb, vec3f(0.2126, 0.7152, 0.0722))), 0.85);
   // grazing sun is largely self-shadowed by the foam's lumpy micro-structure
-  let foamLit = foamAlb * (sunE * max(dot(nrm, Ld), 0.0) * 0.318 * 0.5 + foamAmbN * 1.55);
+  let foamLit = foamAlb * ((sunE * max(dot(nrm, Ld), 0.0)+moonE*max(dot(nrm,lunarDirection()),0.0)) * 0.318 * 0.5 + foamAmbN * 1.55);
 
   if (F.post.w > 0.5) {
     // debug: r = foam cover, g = clamp(J), b = world foam level-0 weight
@@ -305,7 +326,7 @@ ${OCEAN_HULL_MASK}
     if (F.post.w > 6.5 && F.post.w < 7.5) { return vec4f(skyUp, 1.0); }
     return vec4f(fwl.r, fwl.g, fresh, 1.0) * 0.2;
   }
-  var col = body * (1.0 - Fr) + refl * Fr + spec;
+  var col = body * (1.0 - Fr) + refl * Fr + spec+moonSpec;
   col = mix(col, foamLit, foamMask * 0.95);
   col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
     +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;

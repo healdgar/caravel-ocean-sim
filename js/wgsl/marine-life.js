@@ -112,7 +112,7 @@ fn marineBreathWorld(s:DolphinSplash,p:MarineBreath)->vec3f {
   let alpha=exp(-r2*3.5)*(1.0-smoothstep(.65,1.0,r2))*v.data.y*breakup;
   if(alpha<.001||v.world.y<=dolphinHeight(v.world.xz)){discard;}
   let view=normalize(F.camPos.xyz-v.world);let forward=pow(max(dot(-view,F.sunDir.xyz),0.0),6.0);
-  let light=skyAtmo(vec3f(0,1,0))*.65+sunIlluminance()*sunVis[0]*(.18+.32*forward)+lightningLight()*.25;
+  let light=skyAtmo(vec3f(0,1,0))*.65+sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y)*(.18+.32*forward)+lunarIlluminance()*sunVis[1]*(.18+.32*pow(max(dot(-view,lunarDirection()),0.0),6.0))+lightningLight()*.25;
   return vec4f(surfaceAir(light,v.world)*alpha,alpha);
 }
 @vertex fn marineBreathDropVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) id:u32)->DolphinEffect {

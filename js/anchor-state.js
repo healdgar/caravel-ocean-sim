@@ -1,6 +1,7 @@
 import { boatForwardSpeed, boatRotate, KNOT_TO_MPS } from './boat.js';
 import { ISLAND } from './terrain-model.js';
 import { resolveShipNode } from './ship-models.js';
+import {ADDITIONAL_DESIGNS} from './models/additional.js';
 
 export const FATHOM_METRES = 1.8288;
 // Gameplay equipment assumptions, not measurements of a particular replica.
@@ -10,7 +11,14 @@ export const ANCHOR_LIMITS = Object.freeze({maxDepth:35,maxRode:200,scope:5,maxD
 // curve or a claim that the surviving ship carries this exact bower anchor.
 export const VICTORY_ANCHOR_LIMITS=Object.freeze({...ANCHOR_LIMITS,anchorMass:4000,renderScale:3.1,
   rodeRadius:.08,maxRode:260,payRate:2.4,weighRate:.4,maxStiffness:90000});
-export const anchorEquipment=boat=>boat.modelId==='victory'?VICTORY_ANCHOR_LIMITS:ANCHOR_LIMITS;
+export const ADDITIONAL_ANCHOR_LIMITS=Object.freeze(Object.fromEntries(Object.entries(ADDITIONAL_DESIGNS).map(([id,d])=>[id,Object.freeze({...ANCHOR_LIMITS,
+  anchorMass:d.family==='nao'?450:320,renderScale:d.family==='nao'?1.25:1.1})])));
+export const anchorEquipment=boat=>{
+  const id=boat.modelId??'nina';
+  if(id==='nina')return ANCHOR_LIMITS;if(id==='victory')return VICTORY_ANCHOR_LIMITS;
+  if(ADDITIONAL_ANCHOR_LIMITS[id])return ADDITIONAL_ANCHOR_LIMITS[id];
+  throw Error('No anchor equipment for '+id);
+};
 export const anchorEyeOffset=boat=>.65*anchorEquipment(boat).renderScale;
 const anchorLandmarks = new WeakMap();
 const anchorFinite = (n,fallback=0)=>Number.isFinite(n)?n:fallback;

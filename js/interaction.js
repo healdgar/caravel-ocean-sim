@@ -3,7 +3,7 @@ import { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT, CONTACT_COUNT, SHEET_UPDATE, WATER
 import { boatForwardSpeed } from './boat.js';
 import { createDeckWash } from './deck.js';
 
-export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, skyView, sunVis, shader, computePipe, surfaceWaves=null }) {
+export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, skyView, sunVis, shader, computePipe, surfaceWaves=null,wakeTargets=null }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
@@ -12,8 +12,8 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
   const landings = device.createBuffer({ label: 'spray landing foam', size: WAKE_SIZE * WAKE_SIZE * 4, usage: bu.STORAGE | bu.COPY_SRC });
-  const textures = [0, 1].map(i => device.createTexture({ label: 'local wake ' + i, size: [WAKE_SIZE, WAKE_SIZE], format: 'rgba16float', usage: tu.TEXTURE_BINDING | tu.STORAGE_BINDING | tu.COPY_SRC }));
-  const views = textures.map(t => t.createView());
+  const textures = wakeTargets?.textures??[0, 1].map(i => device.createTexture({ label: 'local wake ' + i, size: [WAKE_SIZE, WAKE_SIZE], format: 'rgba16float', usage: tu.TEXTURE_BINDING | tu.STORAGE_BINDING | tu.COPY_SRC }));
+  const views = wakeTargets?.views??textures.map(t => t.createView());
   const sampler = device.createSampler({ minFilter: 'linear', magFilter: 'linear', mipmapFilter: 'linear' });
   const [contactPipe, wakePipe, sprayPipe, sheetPipe, module] = await Promise.all([
     computePipe(WATER_CONTACTS, 'hull contact'), computePipe(WAKE_UPDATE, 'local wake'), computePipe(SPRAY_UPDATE, 'spray update'), computePipe(SHEET_UPDATE, 'impact sheets'), shader(WATER_EFFECTS, 'water effects'),
@@ -45,7 +45,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   let shadowGroups;
   let current = 0, prevX = 0, prevZ = 0, previousExtent = 0, previousRevision = -1, wasEnabled = false, enabled = false, needsClear = true;
   return {
-    uniform, views, sampler, contacts, drops, sheets, textures, landings, deck,
+    uniform, views, sampler, contacts, drops, sheets, textures, landings, deck,values,
     setShadows(shadows){deck.setShadows(shadows);shadowGroups=renderPipes.map(p=>shadows.bind(p));},
     get current() { return current; },
     update(boat, dt, time, frame, windSpeed, windDir, resetSea = false, precipitation = 0) {
@@ -61,9 +61,10 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
       device.queue.writeBuffer(uniform, 0, values);
       prevX = x; prevZ = z; previousExtent = extent; previousRevision = boat.revision; wasEnabled = enabled;
     },
-    encode(cp) {
+    encode(cp,destination=null) {
       if (!enabled && !needsClear) return;
       needsClear = enabled;
+      if(destination!==null)current=1-destination;
       deck.encode(cp);
       cp.setPipeline(contactPipe); cp.setBindGroup(0, contactGroup); cp.dispatchWorkgroups(1);
       cp.setPipeline(sheetPipe); cp.setBindGroup(0,sheetGroup); cp.dispatchWorkgroups(SHEET_COUNT/64);

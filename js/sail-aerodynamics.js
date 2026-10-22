@@ -2,6 +2,7 @@ import { lateenClothPoint } from './lateen.js';
 import { HULL_VERTICAL_SCALE } from './hull.js';
 import {VICTORY_DESIGN,VICTORY_SAILS} from './models/victory.js';
 import {victoryPose,victoryClothPoint} from './victory-motion.js';
+import {rigSurfacePose,surfaceClothPoint} from './rig-surface.js';
 
 // Low-order force model, not a measured Niña polar. Coefficients depend on
 // incidence to the cloth, never on the controller's requested sheet angle.
@@ -69,10 +70,78 @@ function updateVictorySailGeometry(geometry,boat){
   }return geometry.panels;
 }
 
+const surfaceAeroControls=['fore','main','mizzen'];
+function surfaceAeroContextKey(context){
+  const values=[context.supports?.length??0,context.masts?.length??0];
+  for(const s of context.supports??[])values.push(...s.a,...s.b,s.r??0,s.mast,s.side,s.kind);
+  for(const m of context.masts??[])values.push(...m.foot,...m.head,m.radius);
+  return values;
+}
+function surfaceAeroDescriptorKey(s){
+  return [s.id,s.kind,s.mast,s.controlGroup,...s.pivot,...s.corners.flat(),s.belly,s.footRise,s.braceLimit,
+    s.yardClearance,s.transferArc,s.transferLift,s.contactClearance,s.contactBand,s.contactPinBand,s.flutter,s.pressureSpeed,
+    ...(s.camberAxis??[]),(s.sewnEdges??[]).join(',')];
+}
+
+// The same descriptor/evaluator supplies the render mesh and these mean-load
+// panels. Actual surfaces are grouped by control, not by one assumed sail/mast.
+export function createSurfaceSailGeometry(design,context={},subdivisions=3){
+  if(!design?.id||!design.frame||!Array.isArray(design.surfaces)||!Number.isInteger(subdivisions)||subdivisions<1||subdivisions>16)throw Error('Invalid surface sail geometry');
+  const groups=Array.from({length:3},()=>[]),panels=[],surfaces=[];
+  for(const sail of design.surfaces){
+    const group=surfaceAeroControls.indexOf(sail.controlGroup);
+    if(group<0)throw Error('Unknown surface sail control group: '+sail.controlGroup);
+    const samples=[],indices=[],n=subdivisions,tri=sail.corners.length===3,at=new Map();
+    for(let i=0;i<=n;i++)for(let j=0;j<=(tri?n-i:n);j++){at.set(i+','+j,samples.length);samples.push([i/n,j/n]);}
+    const index=(i,j)=>at.get(i+','+j);
+    for(let i=0;i<n;i++)for(let j=0;j<(tri?n-i:n);j++){
+      indices.push([index(i,j),index(i+1,j),index(i,j+1)]);
+      if(!tri||i+j<n-1)indices.push([index(i+1,j),index(i+1,j+1),index(i,j+1)]);
+    }
+    const surface={sail,group,samples,indices,key:null,revision:0,totalArea:0,
+      points:samples.map(()=>new Float64Array(3)),panels:indices.map(()=>({point:new Float64Array(3),normal:new Float64Array(3),area:0,aspect:1,kind:sail.kind,surfaceId:sail.id}))};
+    groups[group].push(...surface.panels);panels.push(...surface.panels);surfaces.push(surface);
+  }
+  return {surfaceRig:true,modelId:design.id,design,context,surfaces,groups,panels,revision:0,
+    coefficients:{lift:0,drag:0,separation:0},force:new Float64Array(3)};
+}
+
+function updateSurfaceSailGeometry(geometry,boat){
+  const {design,context}=geometry,state=boat.sailState;
+  if(!state)throw Error('Surface sail geometry requires vessel sailing state');
+  const scale=[boat.beam/design.frame.beam,design.frame.verticalScale,boat.length/design.frame.length],contextKey=surfaceAeroContextKey(context);
+  if(!scale.every(v=>Number.isFinite(v)&&v>0))throw Error('Invalid surface sail dimensions');
+  for(const surface of geometry.surfaces){
+    const {sail,samples,indices,points}=surface,pose=rigSurfacePose(sail,state);
+    const values=[...scale,pose.yaw,pose.deployed,pose.fill,pose.pressure,pose.side,pose.opening,pose.dip,...surfaceAeroDescriptorKey(sail),...contextKey];
+    if(surface.key&&values.length===surface.key.length&&values.every((v,i)=>surface.key[i]===v))continue;
+    for(let j=0;j<samples.length;j++){
+      const q=surfaceClothPoint(sail,samples[j][0],samples[j][1],pose,context,0,0);
+      for(let k=0;k<3;k++)points[j][k]=q[k]*scale[k];
+    }
+    let total=0,low=Infinity,high=-Infinity;
+    for(const point of points){low=Math.min(low,point[1]);high=Math.max(high,point[1]);}
+    for(const [j,[a,b,c]]of indices.entries()){
+      const panel=surface.panels[j],A=points[a],B=points[b],C=points[c];
+      const ux=B[0]-A[0],uy=B[1]-A[1],uz=B[2]-A[2],vx=C[0]-A[0],vy=C[1]-A[1],vz=C[2]-A[2];
+      const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,m=Math.hypot(nx,ny,nz);
+      panel.normal[0]=nx/Math.max(m,1e-10);panel.normal[1]=ny/Math.max(m,1e-10);panel.normal[2]=nz/Math.max(m,1e-10);
+      for(let k=0;k<3;k++)panel.point[k]=(A[k]+B[k]+C[k])/3;
+      // Retain the visual bundle while exposing zero aerodynamic area at furl.
+      panel.area=m*.5*pose.deployed/(.012+.988*pose.deployed);total+=panel.area;
+    }
+    const aspect=Math.max(.5,Math.min(12,(high-low)**2/Math.max(total,1e-6)));
+    for(const panel of surface.panels)panel.aspect=aspect;
+    surface.totalArea=total;surface.key=values;surface.revision++;geometry.revision++;
+  }
+  return geometry.panels;
+}
+
 // A coarse triangular mesh samples the actual cloth, including its camber and
 // mast support on the bad tack. Decorative flutter is omitted from mean loads.
 // Cache geometry across rigid-body substeps; no GPU readback is required.
 export function updateSailGeometry(geometry,boat,poses){
+  if(geometry.surfaceRig)return updateSurfaceSailGeometry(geometry,boat);
   if(geometry.victory)return updateVictorySailGeometry(geometry,boat);
   const sx=boat.beam/3.6,sy=HULL_VERTICAL_SCALE,sz=boat.length/12;
   const {samples,indices}=geometry;

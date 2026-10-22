@@ -137,6 +137,56 @@ centre of gravity or damping against sea trials.
 
 ## Original and reconstruction plans
 
+### Keel and lateral-body audit, 21 October 2026
+
+The [National Museum conservation log](https://www.royalnavymuseums.org.uk/hms-victory-conservation-log)
+describes an elm keel, deadwood/hog and oak keelson. This is a timber backbone
+under a deep hull, not a modern yacht's ballast fin. Niña has a separately
+modelled timber keel; Victory's current loft closes at its centreline without a
+separately identified longitudinal keel component.
+
+Before this pass, both ships resisted leeway through the same quadratic
+`length × loaded draft × 0.8` drag approximation. Own hull sections contributed
+to displacement, loading, centre of gravity, inertia and righting, but lateral
+body force, centre of lateral resistance and yaw/roll lever arms were absent.
+The sail solver calculated yaw moment without applying it to steering. These
+are implementation gaps; mesh appearance and existing heel tests do not
+establish hydrodynamic calibration. The shared-vessel work addresses the force
+path first. Captive-test coefficients, original loaded waterlines and historical
+turning/polar calibration remain unavailable.
+
+### Waterline recheck, 21 October 2026 — research only
+
+Newly inspected photographs and drawings do not establish a numerical reduction
+to the current entrance. Distinguish the full rounded upper bow, the curved lower
+entrance, and the separate projecting beakhead. The existing breadths recorded
+above remain authored; agreement with the generated GLB does not validate them.
+
+- [Martin Bodman's 2001 bow photograph](https://www.geograph.org.uk/photo/40216)
+  shows the rounded forward shoulders and separate cutwater/headwork in dry dock.
+  Credit: Martin Bodman, CC BY-SA 2.0. Perspective prevents extracting reliable
+  horizontal waterline offsets from this photograph alone.
+- [Australian War Memorial P00444.137](https://www.awm.gov.au/collection/C42953)
+  shows Victory afloat from the port bow. The museum catalogues it c.1855; it is
+  a later configuration and an unspecified loading condition, not an 1805 offset
+  table. [RMG N4715](https://www.rmg.co.uk/collections/objects/rmgc-object-1041713)
+  is a starboard-bow dry-dock photograph dated 21 October 1924.
+- Peter Goodwin's *HMS Victory Pocket Manual* includes an as-built body plan
+  (printed p.12), sheer/half-breadth plan (p.13) and 1803–1805 lines profile
+  (p.15), available in the [publisher's preview](https://api.pageplace.de/preview/DT0400.9781472834041_A35506836/preview-9781472834041_A35506836.pdf).
+  The 1803–1805 sheet is a side profile, not a measured half-breadth at our chosen
+  loaded waterline. Do not treat it as a new transverse offset schedule.
+- ZAZ0120 contains actual horizontal half-breadths, but RMG explicitly identifies
+  the depicted arrangement as pre-1800–03 despite the drawing's 1830 date. The
+  [Science Museum official-plan reductions](https://collection.sciencemuseumgroup.org.uk/documents/aa110066605/the-model-makers-plans-of-h-m-s-victory-reduced-from-the-official-plans)
+  include 1759/1805 material and the accompanying configuration commentary.
+
+Next dimensional gate: identify and register the appropriate loaded waterline,
+digitize its fore offsets and compare an orthographic rendered section at the
+same longitudinal datum. Photographs support fair curvature, but do not yet
+prove how much narrower this model should become. No hull geometry changed in
+this research pass; reference images were not added to runtime assets.
+
 | Record | What it establishes | Caveat |
 |---|---|---|
 | [RMG ZAZ0122, inboard profile](https://www.rmg.co.uk/collections/objects/rmgc-object-79913) | Deck levels, riders and mast relationships; 1:48 | Museum dates it c.1788, after an earlier mast repositioning, before the 1800–03 reconstruction |

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import { deepFreeze } from '../rig-definition.js';
+import {loftTangent,loftEndTangent,loftCubic} from '../hull-loft.js';
 
 // HMS Victory, 1805 interpretation. Above-water sections measured from the
 // user-supplied Meshy reference, fitted to reported dimensions. Underwater
@@ -17,11 +18,11 @@ function fairVictoryForebody(rows){
   const xs=victoryFrameStations,k=10,span=xs[k]+6,smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
   return rows.map((row,j)=>{
     const w=row[k],h0=xs[k]-xs[k-1],h1=xs[k+1]-xs[k];
-    const end=victoryTangent(h0,h1,(w-row[k-1])/h0,(row[k+1]-w)/h1);
+    const end=loftTangent(h0,h1,(w-row[k-1])/h0,(row[k+1]-w)/h1);
     // Preserve the plan's broad upper battery/forecastle and the fine keel.
     // The correction belongs to the bluff lower entrance around the waterline.
     const y=victoryFrameLevels[j],strength=smooth((y+.6)/.6)*(1-smooth((y-.1)/.956202304));
-    return row.map((value,i)=>i>=k?value:value+(victoryCubic(0,w,2.3*w/span,end,span,(xs[i]+6)/span)-value)*strength);
+    return row.map((value,i)=>i>=k?value:value+(loftCubic(0,w,2.3*w/span,end,span,(xs[i]+6)/span)-value)*strength);
   });
 }
 export const VICTORY_DESIGN=deepFreeze({
@@ -94,34 +95,23 @@ export const VICTORY_MASTS=deepFreeze([
 const victoryDesignClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 // Shape-preserving cubic interpolation: adjacent sections share their tangents.
 // Smoothstep per interval would force a flat tangent at every frame and shelf.
-function victoryTangent(h0,h1,d0,d1){
-  if(d0*d1<=0)return 0;
-  const a=2*h1+h0,b=h1+2*h0;return (a+b)/(a/d0+b/d1);
-}
-function victoryEndTangent(h0,h1,d0,d1){
-  const m=((2*h0+h1)*d0-h0*d1)/(h0+h1);
-  return m*d0<=0?0:d0*d1<0&&Math.abs(m)>3*Math.abs(d0)?3*d0:m;
-}
-function victoryCubic(a,b,ma,mb,span,t){
-  return (2*t*t*t-3*t*t+1)*a+(t*t*t-2*t*t+t)*span*ma+(-2*t*t*t+3*t*t)*b+(t*t*t-t*t)*span*mb;
-}
 export const VICTORY_HULL_TANGENTS=deepFreeze(VICTORY_DESIGN.hull.sections.map(row=>{
   const xs=VICTORY_DESIGN.hull.stations,n=xs.length,ds=xs.slice(1).map((x,i)=>(row[i+1]-row[i])/(x-xs[i]));
-  return row.map((_,i)=>i===0?victoryEndTangent(xs[1]-xs[0],xs[2]-xs[1],ds[0],ds[1]):i===n-1?victoryEndTangent(xs[n-1]-xs[n-2],xs[n-2]-xs[n-3],ds[n-2],ds[n-3]):victoryTangent(xs[i]-xs[i-1],xs[i+1]-xs[i],ds[i-1],ds[i]));
+  return row.map((_,i)=>i===0?loftEndTangent(xs[1]-xs[0],xs[2]-xs[1],ds[0],ds[1]):i===n-1?loftEndTangent(xs[n-1]-xs[n-2],xs[n-2]-xs[n-3],ds[n-2],ds[n-3]):loftTangent(xs[i]-xs[i-1],xs[i+1]-xs[i],ds[i-1],ds[i]));
 }));
 export const VICTORY_STEM_TANGENTS=deepFreeze((()=>{
   const xs=VICTORY_DESIGN.hull.stemLevels,ys=VICTORY_DESIGN.hull.stemRake,n=xs.length,ds=xs.slice(1).map((x,i)=>(ys[i+1]-ys[i])/(x-xs[i]));
-  return ys.map((_,i)=>i===0||i===n-1?0:victoryTangent(xs[i]-xs[i-1],xs[i+1]-xs[i],ds[i-1],ds[i]));
+  return ys.map((_,i)=>i===0||i===n-1?0:loftTangent(xs[i]-xs[i-1],xs[i+1]-xs[i],ds[i-1],ds[i]));
 })());
 export function victoryForeRake(base){
   if(base<=0)return 0;
   const h=VICTORY_DESIGN.hull,xs=h.stemLevels,ys=h.stemRake;let i=0;while(i<xs.length-2&&base>xs[i+1])i++;
   const span=xs[i+1]-xs[i],t=victoryDesignClamp((base-xs[i])/span,0,1);
-  return victoryCubic(ys[i],ys[i+1],VICTORY_STEM_TANGENTS[i],VICTORY_STEM_TANGENTS[i+1],span,t);
+  return loftCubic(ys[i],ys[i+1],VICTORY_STEM_TANGENTS[i],VICTORY_STEM_TANGENTS[i+1],span,t);
 }
 function victorySectionWidth(row,i,t){
   const h=VICTORY_DESIGN.hull,ws=h.sections[row],ms=VICTORY_HULL_TANGENTS[row];
-  return victoryCubic(ws[i],ws[i+1],ms[i],ms[i+1],h.stations[i+1]-h.stations[i],t);
+  return loftCubic(ws[i],ws[i+1],ms[i],ms[i+1],h.stations[i+1]-h.stations[i],t);
 }
 export function victorySheer(z){return .085*(Math.abs(z)/6)**2+.075*Math.max(0,-z/6)**4;}
 export function victoryHullDeck(z){return VICTORY_DESIGN.decks.main+victorySheer(z);}
@@ -141,9 +131,9 @@ export function victoryHullHalfWidth(z,y){
   let j=0;while(j<n-2&&base>ys[j+1])j++;
   const span=ys[j+1]-ys[j],q=victoryDesignClamp((base-ys[j])/span,0,1),a=victorySectionWidth(j,i,t),b=victorySectionWidth(j+1,i,t),d=(b-a)/span;
   const before=victorySectionWidth(Math.max(0,j-1),i,t),after=victorySectionWidth(Math.min(n-1,j+2),i,t);
-  const left=j? victoryTangent(ys[j]-ys[j-1],span,(a-before)/(ys[j]-ys[j-1]),d):victoryEndTangent(span,ys[2]-ys[1],d,(after-b)/(ys[2]-ys[1]));
-  const right=j<n-2?victoryTangent(span,ys[j+2]-ys[j+1],d,(after-b)/(ys[j+2]-ys[j+1])):victoryEndTangent(span,ys[j]-ys[j-1],d,(a-before)/(ys[j]-ys[j-1]));
-  return Math.max(0,victoryCubic(a,b,left,right,span,q));
+  const left=j? loftTangent(ys[j]-ys[j-1],span,(a-before)/(ys[j]-ys[j-1]),d):loftEndTangent(span,ys[2]-ys[1],d,(after-b)/(ys[2]-ys[1]));
+  const right=j<n-2?loftTangent(span,ys[j+2]-ys[j+1],d,(after-b)/(ys[j+2]-ys[j+1])):loftEndTangent(span,ys[j]-ys[j-1],d,(a-before)/(ys[j]-ys[j-1]));
+  return Math.max(0,loftCubic(a,b,left,right,span,q));
 }
 // One loft point for skin, end closures and every attached timber. Stations
 // follow the gun-deck baseline; the submerged ends retract with the stem rake.

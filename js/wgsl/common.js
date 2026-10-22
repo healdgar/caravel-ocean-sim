@@ -45,6 +45,14 @@ const TRANS_W: f32 = 256.0;
 const TRANS_H: f32 = 64.0;
 const MS_SIZE: f32 = 32.0;
 
+// Fraction of an angular disc visible above a spherical opaque planet.
+// Separate from atmosphere transmittance: LUT clamping cannot supply occlusion.
+fn planetDiskVisibility(radius:f32,mu:f32,angularRadius:f32)->f32 {
+  let r=max(radius,RG);let horizon=-sqrt(max(0.0,1.0-(RG/r)*(RG/r)));
+  let d=clamp((mu-horizon)/angularRadius,-1.0,1.0);
+  return (acos(-d)+d*sqrt(max(0.0,1.0-d*d)))/PI;
+}
+
 struct Medium { ext: vec3f, rayS: vec3f, mieS: f32 };
 
 fn medium(h: f32, haze: f32) -> Medium {

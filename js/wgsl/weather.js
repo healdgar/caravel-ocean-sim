@@ -49,7 +49,7 @@ struct WeatherVertex {@builtin(position) position:vec4f,@location(0) uv:vec2f,@l
   var out:WeatherVertex;
   out.position=F.viewProj*vec4f(delta+across*corner.x*width+along*corner.y*halfLength,1);
   out.uv=corner;
-  let ambient=skyAtmo(vec3f(0,1,0))*.7+vec3f(.04,.05,.06)+lightningLight()*.5;
+  let ambient=skyAtmo(vec3f(0,1,0))*.7+select(vec3f(.04,.05,.06),vec3f(0),celestialEnabled())+lunarIlluminance()*.04+lightningLight()*.5;
   out.color=vec4f(ambient,alpha);return out;
 }
 @fragment fn rainFS(v:WeatherVertex)->@location(0) vec4f {

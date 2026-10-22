@@ -5,7 +5,7 @@ import { SPRAY_COUNT } from './wgsl/interaction.js';
 // Moisture belongs to material probes, so furling, steering and crew movement
 // carry it along. Nearby vertices of the same material share a bounded probe.
 export function createWetnessData(mesh,crewCount=12) {
-  const points=[0,0,0,0,0,0,0,0],lookup=new Uint32Array(mesh.length/9),seen=new Map();
+  const points=[0,0,0,0,0,0,0,0],sourceVertices=[0],lookup=new Uint32Array(mesh.length/9),seen=new Map();
   for(let i=0;i<mesh.length;i+=9){
     const material=mesh[i+6],base=Math.floor(material);
     // Kind3 remains reserved for the dynamic crew probes. Iron carries only
@@ -14,11 +14,11 @@ export function createWetnessData(mesh,crewCount=12) {
     if(kind<0)continue;
     const key=[material,...[0,1,2].map(j=>Math.round(mesh[i+j]/.15)),(Math.round(material%1*16)&8)?mesh[i+8]:0].join('/');
     let probe=seen.get(key);
-    if(probe===undefined){probe=points.length/8;seen.set(key,probe);points.push(...mesh.subarray(i,i+3),material,mesh[i+7],mesh[i+8],kind,1);}
+    if(probe===undefined){probe=points.length/8;seen.set(key,probe);sourceVertices.push(i);points.push(...mesh.subarray(i,i+3),material,mesh[i+7],mesh[i+8],kind,1);}
     lookup[i/9]=probe;
   }
   const crewOffset=points.length/8;
-  return {points:new Float32Array([...points,...new Float32Array(crewCount*4*8)]),lookup,crewOffset};
+  return {points:new Float32Array([...points,...new Float32Array(crewCount*4*8)]),lookup,crewOffset,sourceVertices:new Uint32Array(sourceVertices)};
 }
 
 // The hull's probe layout is model data; crew positions and GPU moisture remain
@@ -46,6 +46,14 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
         bind(pipes[1],[b(hullUBO),b(interaction.uniform),b(mist),b(interaction.drops),b(interaction.sheets),b(spindrift.plumes)]),
         bind(pipes[2],[b(frameUBO),b(hullUBO),seaView,seaSampler,view]),
         bind(pipes[3],[b(hullUBO),b(interaction.uniform),b(points),b(state),b(mist),view,interaction.deck.view])];
+    },
+    updateGeometry(posedMesh){
+      if(posedMesh.length!==mesh.length)throw Error('Wetness geometry must match its source asset');
+      for(let i=1;i<data.crewOffset;i++){
+        const from=template.sourceVertices[i],to=i*8;
+        data.points[to]=posedMesh[from];data.points[to+1]=posedMesh[from+1];data.points[to+2]=posedMesh[from+2];
+      }
+      device.queue.writeBuffer(points,0,data.points.subarray(0,data.crewOffset*8));
     },
     updateCrew(company,boat){
       if(!company)return;

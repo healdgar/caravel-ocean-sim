@@ -172,3 +172,142 @@ and **Gipsy Moth IV** (the working interpretation of "Gypsy Moth"). Both are pla
 - [Royal Museums Greenwich's Gipsy Moth IV record](https://www.rmg.co.uk/collections/objects/rmgc-object-13959)
   identifies Chichester's ketch for the 1966–67 voyage. Obtain the original yacht's
   hull and rig plans before choosing dimensions or cockpit/crew attachments.
+
+## Build subjects and specification dossiers — 21 October 2026
+
+Source review only; no new vessel is playable. The choices below refine the
+earlier research leads. `reported` values retain their source's subject and
+measurement convention; `authored` means a game/reconstruction choice. Unresolved
+draught, displacement, ballast and sail areas stay null in historical metadata.
+Each runtime model still needs its own immersed hull, loading manifest, mass
+distribution, steering equipment and actual propulsion attachments.
+
+### Viking c. 850: Oseberg-based coastal sailing/rowing vessel
+
+**Build choice:** an explicitly labelled Oseberg-based interpretation in a c. 850
+scenario, using the actual AD 820 vessel rather than implying an excavated 850
+warship. Reported hull length **21.5 m**, beam **5 m**, **15 oar holes per side**;
+museum crew interpretation **32: 30 rowers, helmsman and lookout**. The source
+does not identify that length as LWL. Oak hull, pine deck/mast/oars.
+[Museum of the Viking Age, current Norwegian account](https://www.vikingtidsmuseet.no/vikingtiden/vikingskip/osebergskipet.html).
+
+Use a low-freeboard, clinker-planked, double-ended hull, structural keel,
+starboard steering oar and one square-sail rig as the reconstruction brief.
+Exact sail area, loaded draught/displacement and ballast require a named sailing
+reconstruction. Prefer the revised **Oseberg Project 2006 / Saga Oseberg** hull
+interpretation: Roskilde's reconstruction team documents corrections to bow,
+keel rocker and displayed hull assembly, prompted by the earlier *Dronningen*
+replica's failed trials. Do not trace the old museum silhouette and claim its
+hydrodynamics are established.
+[Reconstruction team's account and hull drawings](https://www.vikingeskibsmuseet.dk/en/professions/boatyard/building-projects/the-oseberg-ship).
+
+Required parts: 30 physical oar stations, steering-oar pivot/immersion, mast step,
+yard/sheet/brace leads, clinker strakes and removable/working rowing space.
+Crew rendering count may differ from the manifest; mass must not disappear when
+agents are hidden.
+
+### Roman c. 350: Mainz-type lusoria, 18 m reconstruction branch
+
+**Build choice:** a fourth-century river patrol craft, not a classical trireme.
+Use the **18 m × 2.8 m Lusoria Rhenana** reconstruction as the initial proportion
+reference: operator reports **24 rowers, 12 per side**, mast about **9 m**, an
+experimental **20 m² sail**, and roughly **5 tonnes vessel weight**. That last
+figure is not documented loaded displacement; do not add 24 people to a
+five-tonne *displacement* without resolving its loading basis.
+[Replica operator's technical account](https://lusoriarhenana.de/schiff/).
+
+The archaeological basis is incomplete Mainz wrecks I/V. Dreyer's 2020 report
+explains competing **21.5 m versus at most 18 m** reconstructions; retain the
+18 m branch consistently. It describes the later Gallo-Roman boats as
+flat-bottomed, oak-built, smooth-planked and iron-fastened. Oars are primary;
+sail form and steering arrangements retain reconstruction uncertainty. Do not
+combine the longer replica's station spacing with the shorter hull.
+[Living Danube Limes technical report, printed pp. 4–5, 7, 10–11](https://www.donau-uni.ac.at/dam/jcr%3A74a2a26d-90e5-41d6-84e1-cfb3cb91738f/LDL_Technical%20features%20of%20Roman%20Danube%20Ships.pdf).
+
+For proportions seek the actual reconstruction lines and hydrostatic work:
+[Trier University's reconstruction project](https://www.uni-trier.de/universitaet/fachbereiche-faecher/fachbereich-iii/faecher/geschichte/profil/fachgebiete/alte-geschichte-1/nachbauten-antiker-schiffe/roemisches-militaerschiff-lusoria)
+and [Hochschule Trier's 3D reconstruction](https://www.hochschule-trier.de/hauptcampus/technik/labor-fuer-digitale-produktentwicklung-und-fertigung-ldpf/projekte/lusoria-rhenana-3d-rekonstruktion-eines-spaetroemischen-flusskriegsschiffes).
+The c. 350 label is a scenario approximation, not a precise wreck construction
+date. Draft, service complement beyond rowers, loaded mass and verified rig
+dimensions remain unresolved.
+
+### Caribbean c. 1492: 30-occupant Taíno-style dugout
+
+**Build choice:** a Greater Antillean single-log paddled canoe with a **30-person
+capacity**, not automatically 30 active paddlers. Columbus's October account
+describes single-tree canoes holding 40–45 people, smaller variants and
+shovel-shaped paddles; it supplies no usable offsets, beam or loaded draught.
+This is a European observer's translated account, not an Indigenous construction
+manual. [Journal extract, Markham translation, pp. 37–68](https://pressbooks.nvcc.edu/ushistory/chapter/journal-of-christopher-columbus-1492/).
+
+The Florida Museum identifies Caribbean ceiba single-trunk canoe construction;
+its modern Jamaican illustration is a comparative construction reference, not a
+1492 survey. [Caribbean Archaeology Program](https://www.floridamuseum.ufl.edu/caribarch/education/ceiba/).
+No retrieved primary reference establishes our 30-person hull dimensions.
+Start layout exploration at an **authored 14 m × 1.8 m**, then resolve shell
+thickness, occupants/paddle clearances, wood mass, stores, stability and freeboard
+before freezing geometry. This is a design target, not historical metadata.
+Use a dugout shell and paddle propulsion; add neither an inherited European keel
+nor an unsupported sail rig. Paddling stations, steering paddle, cargo and bailer
+positions need explicit attachments.
+
+### Flying Cloud, 1851: McKay full-rigged clipper
+
+**Build choice:** the 1851 American clipper, replacing the generic schooner.
+The Mariners' Museum's **CL17938** record transcribes a Currier composition's
+inscription as keel **208 ft (63.3984 m)**, deck **225 ft (68.58 m)**, and
+knightheads-to-taffrail **235 ft (71.628 m)**; beam **40 ft (12.192 m)** and
+hold depth **21½ ft (6.5532 m)**. These are three distinct length conventions;
+hold depth is not draught. The accession is a c. 1912–25 restrike of an
+1852 composition. Its transcribed **1,139 register tons** conflicts with the
+same record's **1,782 tons** vessel notes. Preserve both reports as unresolved
+tonnage, never kilograms. [Museum catalogue and inscription](https://catalogs.marinersmuseum.org/object/CL17938).
+
+Use an independent fine-ended clipper hull and three-mast full square rig as the
+modelling brief. Exact underwater profile, deck breaks, sail tiers/areas, spar
+positions and crew complement still require plans or a contemporary inventory;
+neither the print nor a tonnage number establishes them. Avoid importing
+Victory's batteries, hull or sail dimensions. A second museum reference is the
+[Smithsonian rigged model TR.319491](https://americanhistory.si.edu/pt/collections/object/nmah_1384460).
+For traceable plans/research, Mystic's **Alexander G. Law Collection, box 3,
+folder 4**, explicitly contains *Flying Cloud* material; those are later model
+research records, not automatically surviving builder's offsets.
+[Collection finding aid](https://research.mysticseaport.org/coll/coll261/).
+
+### Gipsy Moth IV, 1966: original-voyage Bermudan ketch
+
+**Build choice:** Chichester's original-voyage yacht, keeping departure and later
+Sydney keel modifications distinguishable. Builder-archive notes by Jeremy Lines,
+reprinted in February 2024, report **LOA 53.1 ft; LBP 42.7 ft; LWL 38.5 ft;
+beam 10.5 ft; draught 7.75 ft; displacement to DWL 23,320 lb (about 10.58 t);
+original lead 8,490 lb (about 3.85 t)**. **19 Thames Measurement tons** is a
+separate tonnage measure. Additional ballast after trials and an aft keel
+extension in Sydney mean the original DWL figure is not a verified mass for
+every voyage stage. [Builder-archive notes, Nautipedia reprint](https://www.nautipedia.it/2024_02_Review:_Behind_the_scenes_of_a_famous_adventure:_Yard_No._916_GIPSY_MOTH_IV).
+
+The newsletter's original Mailchimp link now redirects; the verified text here
+is the attributed reprint. It identifies **19 digitised Gosport drawings** and
+34 Greenwich drawing entries as further plan leads. Those are the next source
+for keel/rudder profile, mast/boom placement and sail dimensions. A
+[later broker's 1966/2005 specification](https://boatmanager.sandemanyachtcompany.co.uk/uploads/pdf/GIPSY_MOTH_IV%20-%20Sandeman.pdf)
+instead reports **16 tonnes**, **39 ft 1 in LWL**, cold-moulded mahogany and a
+Bermudan ketch. Keep that restored-vessel report separate; do not average it
+with original DWL displacement. The historical voyage is single-handed;
+subsequent training crews are a different manifest.
+[Royal Museums Greenwich's voyage/rig account](https://www.rmg.co.uk/collections/objects/rmgc-object-13959).
+
+Use separate main/mizzen booms, headsail leads, cockpit, steering and ballast/keel
+geometry. Shared force/rig primitives may serve it; three-mast caravel controls
+must not dictate its two-mast structure. Museum painting dimensions are object
+measurements, not yacht dimensions.
+
+### Source-to-model gates
+
+Before any of these enters the playable registry: record the selected subject
+and reconstruction branch; freeze a proportion/attachment drawing; separately
+author permanent mass, ballast, people, provisions and cargo; integrate the
+immersed hull at that load; distinguish geometric lateral centroid from measured
+dynamic CLR; and validate propulsion, steering, working space and animation
+clearances. Oared hulls must not acquire the Niña manifest or sail backend by
+fallback. Reference photographs/plans remain reference material; no source image,
+paid asset or new model was downloaded or promoted in this research pass.

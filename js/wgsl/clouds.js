@@ -168,7 +168,10 @@ fn marchCloudsTo(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor
       let bounce=(0.035+0.18*sqrt(root))*(0.25+0.75*upper)*ao;
       let ambient=(0.10+0.19*upper)*ao;
       let silver=silverPhase*root*pow(max(1.0-diffuse,0.0),0.90)*(1.0-smoothstep(0.02,0.20,density.a))*0.25;
-      let lit=sunColor*((direct+scatter*visibility+bounce)*0.20+silver)+skyColor*(ambient*2.4+0.15);
+      let moonPhase=saturate(dot(rd,lunarDirection())*.5+.5);
+      let moonScatter=.10+.30*pow(moonPhase,4.0);
+      let moonSilver=pow(moonPhase,24.0)*root*pow(max(1.0-diffuse,0.0),.90)*(1.0-smoothstep(.02,.20,density.a))*.25;
+      let lit=sunColor*((direct+scatter*visibility+bounce)*0.20+silver)+lunarCloudLight()*((direct+moonScatter*visibility+bounce)*.20+moonSilver)+skyColor*(ambient*2.4+0.15);
       let air=exp(-t*(0.009+F.atmo.x*0.003));
       let radiance=mix(skyDistance,lit,air);
       let contribution=tr*alpha;color+=contribution*radiance;depth+=contribution*t;weight+=contribution;

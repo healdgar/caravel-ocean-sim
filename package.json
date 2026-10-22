@@ -1,5 +1,5 @@
 {
-  "name": "web-ocean",
+  "name": "ocean-sailing-simulator",
   "version": "1.0.0",
   "description": "Real-time WebGPU ocean renderer: FFT waves, whitecaps, physically based sunset sky.",
   "license": "MIT",

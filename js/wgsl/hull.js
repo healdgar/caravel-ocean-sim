@@ -1,6 +1,10 @@
 import { HULL_DRAFT, HULL_BOW_RAKE, HULL_STERN_RAKE, HULL_SECTION_POWER, HULL_VERTICAL_SCALE, HULL_STATIONS, HULL_BREADTHS, HULL_TANGENTS,QUARTERDECK_START,QUARTERDECK_HEIGHT } from '../hull.js';
 import {VICTORY_DESIGN,VICTORY_HULL_TANGENTS,VICTORY_STEM_TANGENTS} from '../models/victory.js';
+import {ADDITIONAL_DESIGNS} from '../models/additional.js';
+import {hullLoftWGSL} from '../hull-loft.js';
 const victoryHullNX=VICTORY_DESIGN.hull.stations.length,victoryHullNY=VICTORY_DESIGN.hull.levels.length,victoryHullCells=victoryHullNX*victoryHullNY,victoryStemN=VICTORY_DESIGN.hull.stemLevels.length;
+const additionalHullWGSLProfiles=Object.values(ADDITIONAL_DESIGNS).map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
+const additionalHullCases=expression=>Object.values(ADDITIONAL_DESIGNS).map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
 export const HULL_PROFILE = /* wgsl */ `
 const HULL_Y_SCALE:f32 = ${HULL_VERTICAL_SCALE};
 fn hullDeck(z: f32) -> f32 {
@@ -31,8 +35,14 @@ fn hullExcludesOcean(local:vec3f)->bool {
 }
 fn shipY(value:f32)->f32 {return select(HULL_Y_SCALE,value,value>0.0);}
 fn victorySheer(z:f32)->f32 {return .085*pow(abs(z)/6.0,2.0)+.075*pow(max(0.0,-z/6.0),4.0);}
-fn modelHullDeck(z:f32,model:f32)->f32 {if(model>.5){return ${VICTORY_DESIGN.decks.main}+victorySheer(z);}return hullDeck(z);}
-fn modelHullDraft(model:f32)->f32 {return select(${HULL_DRAFT},${VICTORY_DESIGN.hull.draft},model>.5);}
+fn modelHullDeck(z:f32,model:f32)->f32 {
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${d.profile.deck}+additionalHull${d.modelCode}Sheer(z);`)}default:{return -1000000.0;}}}
+ if(model>.5){return ${VICTORY_DESIGN.decks.main}+victorySheer(z);}return hullDeck(z);
+}
+fn modelHullDraft(model:f32)->f32 {
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${-d.profile.levels[0]+(d.keel?.depth??0)};`)}default:{return 0.0;}}}
+ return select(${HULL_DRAFT},${VICTORY_DESIGN.hull.draft},model>.5);
+}
 const VICTORY_HULL_X=array<f32,${victoryHullNX}>(${VICTORY_DESIGN.hull.stations.map(v=>v.toFixed(9)).join(',')});
 const VICTORY_HULL_Y=array<f32,${victoryHullNY}>(${VICTORY_DESIGN.hull.levels.map(v=>v.toFixed(9)).join(',')});
 const VICTORY_HULL_WIDTHS=array<f32,${victoryHullCells}>(${VICTORY_DESIGN.hull.sections.flat().map(v=>v.toFixed(9)).join(',')});
@@ -59,7 +69,9 @@ fn victoryForeRake(base:f32)->f32 {
  let span=VICTORY_STEM_Y[i+1u]-VICTORY_STEM_Y[i];let t=clamp((base-VICTORY_STEM_Y[i])/span,0.0,1.0);
  return victoryCubic(VICTORY_STEM_RAKE[i],VICTORY_STEM_RAKE[i+1u],VICTORY_STEM_SLOPES[i],VICTORY_STEM_SLOPES[i+1u],span,t);
 }
+${additionalHullWGSLProfiles}
 fn modelHullWidth(z:f32,y:f32,model:f32)->f32 {
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return additionalHull${d.modelCode}Width(z,y);`)}default:{return 0.0;}}}
  if(model<.5){return hullHalfWidth(z,y);}
  let base=y-victorySheer(z);let draft=${VICTORY_DESIGN.hull.draft};let depth=clamp(-base/draft,0.0,1.0);
  let rake=victoryForeRake(base);let bow=-6.0+${VICTORY_DESIGN.hull.bowRake}*depth*depth-rake;let stern=6.0-${VICTORY_DESIGN.hull.sternRake}*depth*depth;
@@ -81,6 +93,7 @@ fn modelHullWidth(z:f32,y:f32,model:f32)->f32 {
  return max(0.0,victoryCubic(a,b,left,right,span,q));
 }
 fn modelVesselDeck(z:f32,model:f32)->f32 {
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`var y=${d.profile.deck};`+d.deckZones.map(zone=>`if(z>=${zone.bounds[0]}&&z<=${zone.bounds[1]}){y=max(y,${zone.height});}`).join('')+`return y+additionalHull${d.modelCode}Sheer(z);`)}default:{return -1000000.0;}}}
  if(model<.5){return select(hullDeck(z),${QUARTERDECK_HEIGHT},z>=${QUARTERDECK_START});}
  var y=${VICTORY_DESIGN.decks.main};
  if(z<=${VICTORY_DESIGN.decks.forecastle.end} || z>=${VICTORY_DESIGN.decks.quarter.start}){y=${VICTORY_DESIGN.decks.quarter.height};}
@@ -91,6 +104,7 @@ fn modelVesselDeck(z:f32,model:f32)->f32 {
 // Open quarterdeck rails have an authored low sill; this is a visual boundary,
 // not a collision model of each gap between rail posts.
 fn modelDeckBarrier(z:f32,model:f32)->f32 {
+  if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${d.barrier};`)}default:{return 0.0;}}}
   if(model>.5){
     if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.605-VICTORY_DESIGN.decks.main};}
     return select(.310,.215,z>=${VICTORY_DESIGN.decks.poop.start});

@@ -248,7 +248,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // and underwater multiple scattering are not provided by this material.
     if(vesselWaterCapture){f0=mix(vec3f(vesselWoodDielectricF0()),vec3f(0.55,0.57,0.57),iron.bare);}
   }
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*vesselShadow(in.world,shadowNormal);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,l.y)*solarShadowVisibility(vesselShadow(in.world,shadowNormal));
   // The last cube mip is a face average, not diffuse irradiance. Sampling it
   // along a vertical timber normal mixes in the sea, then counts that green
   // light again below. Use separate sky/sea hemispheres and their projected
@@ -307,6 +307,13 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     col+=direct*transmitted*through*scatter;
     let behind=sky*(1.0-skyVisibility)+bounce*0.22*skyVisibility;
     col+=behind*exp(-opticalDepth)*0.7;
+  }
+  let moonVisibility=sunVis[1]*lunarShadowVisibility(vesselShadow(in.world,shadowNormal));
+  col+=lunarSurface(n,v,diffuse,rough,f0,moonVisibility);
+  if(in.material==9u||in.material==13u){
+    let ml=lunarDirection();let throughMoon=max(dot(-n,ml),0.0);
+    let moonScatter=.70/PI+.30*(34.0/(2.0*PI))*pow(max(dot(-v,ml),0.0),32.0);
+    col+=lunarIlluminance()*moonVisibility*canvasTransmission(canvasDepth,throughMoon)*throughMoon*moonScatter;
   }
   col+=lightningSurface(n,v,albedo,rough)+gunFlashSurface(in.world,n,v,albedo,rough);
   if(in.material==9u || in.material==13u){col+=lightningLight()*albedo*max(dot(-n,lightningDirection()),0.0)*.12;}

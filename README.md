@@ -1,17 +1,24 @@
-# Seasick Simulator
+# Ocean Sailing Simulator
 
-Performance optimizations for [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
+Built on [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU ocean with selectable Niña and HMS Victory sailing ships, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. Niña carries three lateen sails; Victory has a tiered square rig. Both use wind-driven motion, working helms, crew and boat, free-flight and exterior cameras. Sea conditions, sunlight and clouds can be adjusted and shared in a link.
+A real-time WebGPU sailing game with wind-driven ships, crew, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. The development source includes **Niña, Pinta, Santa María and HMS Victory**, independently selectable AI fleets, and an astronomical Sun, Moon and starry night. Boat, free-flight and exterior cameras share the same sea. Conditions, fleet choices and astronomical settings can be saved in a link.
 
-[Open Seasick Simulator](https://healdgar.github.io/caravel-ocean-sim/).
+[Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-The current checkpoint reduces repeated crew, vessel and ocean shading work,
+**Release status:** the last verified published runtime checkpoint is
+`5959d8e57266d924a112cda575401c525c473bcd`. The four-model fleet, passive
+hull/keel moments and astronomical night described below are a qualified local
+checkpoint: the full native Metal suite passed **572/572**, with zero skips,
+and rendered checks passed. Publication and deployed-byte verification remain
+pending; no physical-iPhone performance result is claimed. Root records exact
+validation and deployment receipts in [BACKLOG.md](BACKLOG.md).
+
+The published checkpoint reduces repeated crew, vessel and ocean shading work,
 targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater
 and connects hard water contacts to timber groans. It retains underwater lighting,
 distance-filtered terrain, cast-iron materials, sail shadows and the Wells Bay
-approach. Validation and release receipts are recorded in [the checkpoint log](BACKLOG.md);
-physical-iPhone performance remains unmeasured for this batch.
+approach.
 
 ![HMS Victory with tiered square sails](docs/victory.png)
 
@@ -234,6 +241,40 @@ not an additional shadow-map light. There are no lightning damage mechanics.
 Thunder follows the distance delay; setting **Lightning & thunder** to zero
 disables flashes. The weather clock never fast-forwards ship physics.
 
+## Astronomical sky (development)
+
+Open **Sea settings → Sun, Moon and stars → Astronomical sky**. Set an explicit
+date/time, latitude and east-positive longitude; the default observer is Saba.
+The sky has its own unwrapped clock, separate from the 600-second wave-spectrum
+loop. Real-time progression is the default; a labeled sky-clock rate or pause
+changes astronomy without fast-forwarding ship physics. Manual Sun mode remains
+the default, preserving existing links and authored lighting controls.
+
+Locally pinned Astronomy Engine calculates separate topocentric Sun/Moon
+positions, lunar phase, apparent radius and the illuminated limb. A locally
+attributed HYG catalogue provides magnitude, colour and Cartesian proper motion;
+precession/nutation and the observer's horizon place historical stars. Optional
+constellation lines respect depth, horizon and clouds. The dark and lit Moon
+both occult stars. No runtime map, astronomy API or CDN is required.
+
+Moonlight reaches clouds, reflections, ocean glints/foam, sails, hull, crew,
+vegetation, wet surfaces and underwater scattering/caustics. The Sun is never
+rotated into a fake Moon. Production shaders use an explicit **528-byte Frame**,
+retaining the previous 384-byte prefix. One cloud-light field and ship shadow
+allocation prioritize the Sun above the horizon, then the Moon; the secondary
+simultaneous light has no independent shadow/light-field map. Terrain caches
+both directions. Bounded exposure adaptation is separate from light energy.
+
+Share links store mode, current date/location, rate and star/guide options;
+`window.oceanAstronomy` exposes the state locally. Dates use an explicit
+proleptic Gregorian/UT-like convention, including historical scenarios. This is
+not certified navigation accuracy: historical Earth rotation, stellar apparent
+corrections, procedural Moon detail and airglow retain documented approximations.
+Sextants, lessons and navigation assistance come later. [Implementation and
+reference conventions](ASTRO_NAVIGATION.md); [licenses](THIRD_PARTY_NOTICES.md).
+The current native/packaged suite and rendered night checks passed; publication
+remains pending. Navigation accuracy and physical-iPhone performance are unqualified.
+
 ## Controls
 
 | Input | Action |
@@ -279,7 +320,8 @@ URL parameters are handy for testing. `?w=2560&h=1440` forces the render resolut
 
 The [ship-model foundation](SHIP_MODELS.md) separates immutable model definitions,
 named attachment points, semantic mesh groups and cached geometry from each
-vessel's live state. Niña and **HMS Victory (1805)** are playable. Choose
+vessel's live state. The published baseline offers Niña and **HMS Victory
+(1805)**; current development adds Pinta and Santa María below. Choose
 **Ship settings → Vessel**, or [sail Victory](https://healdgar.github.io/caravel-ocean-sim/?ship=victory&boat=1&view=ship).
 Victory has her own 56.69 × 15.85 m hull, three gun decks with an open waist,
 104 represented guns, stern galleries, wheel, boats, stepped masts and fighting
@@ -302,31 +344,54 @@ thrust in sailing mode. Twelve visible sailors represent a working watch; the
 loading manifest accounts for 820 people. Their existing costume set remains
 shared with Niña rather than representing an 1805 uniform reconstruction.
 
-Pinta and Santa María retain planned rig and [reported specification
-profiles](SHIP_MODEL_RESEARCH.md); their geometry and three-ship toggles remain
-pending. The [later vessel roadmap](SHIP_MODELS.md#later-vessel-programme)
-contains the Viking longship, Roman galley, Caribbean canoe, **Flying Cloud**
-clipper (replacing the generic schooner) and **Gipsy Moth IV** yacht. Victory was
-brought forward at the user's request.
+Current development adds separate Pinta and Santa María hulls, decks, equipment,
+crew stations, helms and mixed rigs. Pinta uses two square courses and a lateen
+mizzen; Santa María adds a main topsail and spritsail, four exposed deck zones and
+the requested foremast lookout. Pinta's 25.908 × 7.0104 m size profile comes from
+an enlarged modern replica. Santa María uses the replica's reported 28.30 × 7.96 m
+profile with an authored 1.95 m service draft. Their underwater offsets, working
+sail dimensions and four small swivel guns are authored interpretations, not
+recovered 1492 plans or inventories. [Source/assumption ledger](SHIP_MODEL_RESEARCH.md).
+Reported tonnage remains separate from displacement and simulation kilograms.
 
-A second copy of the selected model follows by default. Open **Camera views → View both
-ships** to frame the pair; **Ship settings → Following ship** disables it, and
-`follower=0` starts with one ship. Shared links preserve the choice. Hull geometry,
-oak textures, crew geometry, the FFT ocean, clouds and weather are shared. Each
-vessel owns its hull/rig state, 12-person company, water probes, wake, wetness and
-shadow layer. Ocean rendering excludes both hulls, combines both wakes and
-receives both sets of shadows. Disabling the companion stops its physics,
-crew work, probe reads and ongoing effect/shadow work.
+**Ship settings → Fleet** offers up to **eight independently enabled followers**
+plus the player. Choose each follower's model, add/remove or disable rows, then
+apply the selection; resource changes reload the scene. **Camera views → View
+fleet** frames the enabled ships. An omitted `fleet` parameter preserves the
+legacy same-model escort; `follower=0` still starts alone. Explicit links use,
+for example, `ship=nina&fleet=pinta,santa-maria,victory`; `!pinta` preserves a
+configured disabled row without allocating its GPU vessel. Share links retain
+the roster. These development options are not yet on the public baseline above.
 
-The follower operates ordinary sail and rudder commands. It follows a position
-about 2.8 hull lengths astern and 1.5 lengths to starboard, commits to tacks,
-shortens sail for strong wind and close separation, and uses actual sternway
-steering when caught in irons. A sustained bad-tack recovery can request one
-crew-operated yard transfer after clearing the wind. Recovery remains committed
-when the pursuit target crosses the bow. Identical ships cannot reliably close
-a gap while the leader maintains equal or greater speed. Separation steering
-is an initial avoidance policy; passage planning, a ship-collision solver,
-combat and hailing remain future work.
+Immutable geometry, indices and render assets are shared per model; crew geometry,
+one FFT ocean and weather remain shared. Every enabled ship owns its posed
+geometry, hull/rig state, company, guns, anchor, sea probes, moisture and wake.
+Two pooled wake banks and three shadow texture arrays have one layer per active
+vessel, with variable hull masks and probe dispatch; disabled rows allocate none.
+The nine-ship limit is a resource bound, not a device performance guarantee.
+
+Pinta/Santa María evaluate cloth, yards, ropes and attachments through one
+CPU pose, uploading the same vertices used by visible, shadow, submerged and
+wetness paths. Victory retains shared GPU deformation. The new passive lateral
+model integrates the loaded hull silhouette and actual exposed keel geometry;
+its distributed forces supply sway, yaw and roll moments alongside sail moments.
+An inferred geometric centre of lateral area is not a calibrated dynamic CLR.
+No fabricated fin, motor thrust or zero-flow steering assist is added.
+
+Followers issue ordinary sail and rudder commands, compensate for leader motion,
+station rotation and leeway, and trim sail while holding distinct formation slots.
+They commit to tacks and actual sternway recovery; rudder authority requires water
+flow. Avoidance and station-keeping remain authored AI policies, not passage
+planning, a ship-collision solver, combat or hailing. A following ship with no speed
+advantage cannot guarantee closing every gap. Current fleet regression and
+rendered checks passed; these policies are not calibrated historical maneuvers.
+
+The [later vessel programme](SHIP_MODELS.md#later-vessel-programme) has authored
+source definitions/prototypes for an Oseberg-based c.850 vessel, late-Roman
+Lusoria, a thirty-person Taíno-style canoe, **Flying Cloud** and **Gipsy Moth IV**.
+They still require backend integration, crew/propulsion/rendered checks and
+qualification before appearing as playable ships. Victory was brought forward
+at the user's request.
 
 **Enable sound** in Captain or Sea settings to hear the new voices. The 12 named
 crew each have a distinct, reusable voice saying “Aye captain!”: Inês, Tomás,
@@ -350,10 +415,11 @@ and `scripts/audio/voice-selection.json`. Private journals remain in ignored
 
 ### Anchoring
 
-Use **Landfall → Near coast**, slow below **1.5 knots**, then choose **Captain →
+Use **Landfall → Wells Bay approach**, slow below **1.5 knots**, then choose **Captain →
 Drop anchor**. It is available only inside the loaded coastal depth domain,
 with visible land within 2.5 km, safe under-keel clearance, at most 35 m depth,
-and enough of the 200 m hemp rode for 5:1 scope from the bow. Haze, rain,
+and enough hemp rode for 5:1 scope from the bow: 200 m on Niña/Pinta/Santa María,
+260 m on Victory. These are authored equipment assumptions. Haze, rain,
 cloud base and the horizon affect the visibility proxy. Open ocean has no
 valid sounding and cannot be anchored.
 
@@ -365,8 +431,9 @@ retains its world position/orientation while the ship swings. A slack rode
 cannot push; tension acts through ordinary hull inertia and yaw. Holding
 strength is finite and the anchor drags under excess load. **Weigh anchor**
 hauls the ship toward its anchor, breaks it out and retrieves it progressively.
-The starboard spare remains stowed. Both ship copies have the same anchor
-geometry; player commands operate the lead ship’s port anchor.
+The starboard spare remains stowed. Each enabled vessel owns its anchor and rode
+state, with model-specific fittings and equipment; player commands operate the
+lead ship’s port anchor.
 
 ### Dolphins
 
@@ -456,8 +523,9 @@ above-water object transmission for diagnostic comparison.
 Optical basis: [PBRT refraction and Fresnel](https://www.pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission)
 and [volume transmittance](https://www.pbr-book.org/4ed/Volume_Scattering/Transmittance),
 plus [GPU Gems' water-caustics discussion](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-2-rendering-water-caustics).
-Historical night, Moon phases and celestial-navigation work is specified in
-[ASTRO_NAVIGATION.md](ASTRO_NAVIGATION.md); runtime Moon lighting remains pending.
+Current development adds lunar underwater illumination and dominant-light wave
+caustics through the [astronomical sky](#astronomical-sky-development). These
+remain bounded optical approximations; navigation instruments are deferred.
 
 Sail and rig shadows use continuously weighted tent filtering and a smoothed
 blocker estimate at the existing 2048-pixel map size. Canvas edge coverage is
@@ -789,7 +857,7 @@ Physical basis: [Anguelova et al., *Spume Drops Produced by the Wind Tearing of 
 
 ### Deck wash and buoyancy
 
-A 32 × 96 hull-local water field samples the displaced sea and shared scene waves at all four deck boundaries. Overtopping adds water across bow, stern and side caps; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. The raised quarterdeck has its own floor height, and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff share the scene lighting. Falling sheets start at the incoming crest head, use their actual surface normals, sun glints, bubble scattering, Fresnel transparency and directional marine haze. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls retained deck wash.
+A 32 × 96 hull-local water field samples the displaced sea and shared scene waves at all four deck boundaries. Overtopping adds water across bow, stern and side caps; four bounded downhill-flow substeps carry it across the deck and out through modeled scuppers. Deck floors and barriers are model-owned; on Niña, the raised quarterdeck has its own floor height and the cabin blocks flow between the two deck levels. Translucent wash, frothy fronts, inward curtains, and falling runoff share the scene lighting. Falling sheets start at the incoming crest head, use their actual surface normals, sun glints, bubble scattering, Fresnel transparency and directional marine haze. A finer 64 × 192 rendering mesh and smoothed height gradients keep reflections from exposing the simulation grid. Timber darkens and stays glossy after the water drains, then dries. The existing **Wakes & spray** switch also controls retained deck wash.
 
 The field uses float32 storage with explicit bilinear sampling, requiring no optional GPU features. Depth is capped at 1.2 m: this is a visual surface-water approximation, not a vessel flooding, capsize, or flood-mass simulation. Runoff does not yet deposit separate splash particles on the sea. Buoyancy follows sampled wave height and velocity with bounded prediction for readback latency; new sea presets place the hull at its loaded draft relative to the sampled surface. Large crests can still overtop it.
 
@@ -886,6 +954,11 @@ These short desktop observations do not establish sustained thermal or iPhone
 performance. Native mode keeps full pixel resolution; Auto can trade sharpness
 while preserving geometry, simulation and rendering features.
 
+The new four-model/fleet/night source has no sustained performance qualification
+yet. CPU poses deliberately favor one authoritative geometry over premature
+optimization. The nine-vessel resource limit does not imply 60 FPS on every Mac
+or 30 FPS on an iPhone; only device-specific measurements can establish that.
+
 ### GPU profiling
 
 Add `profile=1` to any scene URL for an opt-in timing overlay. It samples waves/effects, sky/clouds, environment reflections, solid/canvas shadows, ocean, reflection filtering, ship/spray, bloom, and composite every eight frames when `timestamp-query` is supported. Normal mode retains the original single compute pass; detailed mode splits it into three for measurement. Unsupported devices render normally and report that timing is unavailable.
@@ -902,6 +975,17 @@ User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabl
 
 ## Validation
 
+The current four-model/fleet/astronomy checkpoint is **qualified locally;
+publication is pending**. Root's serialized full native Metal suite passed
+**572/572 tests**, with **zero skips**, in **302.194 seconds**. CPU, native GPU and
+production modular/Pages fixtures cover posed uploads, immutable assets,
+independent state, nine active vessels, actual 528-byte night scenes and saved
+USNO/JPL references. Root also reviewed Pinta and Santa María in visible Chrome
+and native four-vessel, full-Moon and new-Moon captures. Commit, publication and
+deployed-byte receipts will follow in [BACKLOG.md](BACKLOG.md). These checks do
+not establish historical navigation accuracy, sustained frame rate or physical
+iPhone performance.
+
 With Node.js 20 or newer:
 
 ```
@@ -911,7 +995,7 @@ npm run build
 npm test
 ```
 
-The current checkpoint passed **464 tests** using installed Chrome on
+The published `5959d8e` baseline passed **464 tests** using installed Chrome on
 macOS/Metal with test files serialized (`node --test --test-concurrency=1`), including geometry, lighting, mobile controls, all three distributed
 builds, precipitation, flash illumination, wetting, independent vessel state,
 anchor forces/retrieval/sounding, dolphin wave occlusion and actual Web Audio decoding.
@@ -993,8 +1077,8 @@ attachments and stable LOD dimensions. Native GPU
 tests compare actual canopy coverage and sky gaps at every tier, reject an
 intentionally sparse canopy, and render the same foliage from all three builds.
 The denser stand, opaque far boughs, projected geometry-error selection and shared
-surface-wave integration are undergoing combined validation; the earlier checks
-do not by themselves qualify this working batch.
+surface-wave integration belong to the published `5959d8e` baseline. Those checks
+are separate from the current four-model/fleet/night qualification recorded above.
 
 The storm view held 60 FPS on this Mac in visible Chrome. Physical-iPhone
 performance and the final mix on phone speakers remain unmeasured.
@@ -1008,7 +1092,7 @@ The suite covers:
 
 - Analytical FFT waves across all six cascades, steering, moving-water buoyancy response, hull geometry, and shared settings. Triangle intersections verify unobstructed recessed window panes, quarterdeck camera support and forward sightlines on resized hulls; camera checks cover windward boarding and smooth tack changes.
 - Surge force direction, calm-water equilibrium, mass/inertia response, signed coasting, stale-probe decay, and travelling-wave integration from 10 to 120 FPS. GPU checks verify incident-slope averaging, short-chop filtering, wake exclusion from propulsion, and actual-speed coupling to wakes; shared links preserve the calm-water target.
-- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Recovery checks verify identical propulsion at centered/hard-over helm, passive wind-driven sternway in both directions, reverse steering without helm-induced propulsion, and no yard transfers during wind oscillations. Aerodynamic checks cover actual cloth geometry, continuous incidence/stall response, normal-reversal invariance, pressure/area scaling, and nonpositive still-air energy input across translation, roll and pitch. Recovery time and heading are not prescribed. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses and fixed deck leads; loaded versus slack motion, sewn-rope attachment, and physical triangle-to-rope clearance including rope thickness across both tacks, partial furling and complete yard transfers; application checks verify that torque reaches the hull transform and that furling lets it settle upright.
+- Sailing checks cover apparent wind, wind-angle-dependent drive, independent sail area, trim lag, gradual furling, coasting, mirrored heel/leeway, zero-time startup, and stable integration from 10 to 120 FPS. Recovery checks verify identical propulsion at centered/hard-over helm, passive wind-driven sternway in both directions, reverse steering without helm-induced propulsion, and no yard transfers during wind oscillations. Aerodynamic checks cover actual cloth geometry, continuous incidence/stall response, normal-reversal invariance, pressure/area scaling, and nonpositive still-air energy input across translation, roll and pitch. Recovery time and heading are not prescribed. Wind-roll checks cover vertical shear, sail-height leverage, inertia, righting equilibrium, reefing, roll/pitch energy dissipation, short-chop rejection, long-swell response and sail damping of wave-driven roll. GPU checks exercise actual canvas vertices, finite normals, independent furling, independent yard poses, fixed deck leads, loaded versus slack motion and sewn-rope attachment. Selected legacy Niña/Victory fixture poses measure physical triangle-to-rope clearance including rope thickness; they do not certify every tack, partial furl or full yard transfer, and mixed-yard/retained-yard clearance remains unfinished. Application checks verify that torque reaches the hull transform and that furling lets it settle upright.
 - Dry, stationary, moving, and tilted hull contacts; independent dry-stern/wet-bow contact; foam retention along a moving and turning track, decay after stopping, and eventual clearing; impact sheets; matching buoyancy heights; spray retirement and landing foam; and effect toggling.
 - Gunwale exclusion of the external wave field, including crests above the rails; dry decks below the rails, foredeck and quarterdeck freeboard, overtopping, retained water, downhill flow, scupper drainage, eventual timber drying, bounded deep immersion at large time steps, and resets.
 - Material-probe identity through mesh indexing and rig attachments; GPU contact/spray wetting, dry sheltered surfaces, retained deck wash, differential drying, film drainage, furling sails, moving crew, and resets. Rendered wet/dry comparisons and canvas-shadow samples verify that moisture reaches the visible materials.
@@ -1029,11 +1113,12 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The scene supports two identical Niñas or two Victories and one Saba landfall MVP. Breaking shoreline surf, ports, regional streaming and playable Pinta/Santa María models remain pending.
+- The public baseline supports Niña/Victory pairs. The locally qualified checkpoint supports four model types and up to nine active vessels; publication remains pending. Five later craft remain unregistered prototypes. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.
 - Underwater vessel shadows and wave-driven caustics use bounded optical approximations, with authored water coefficients. Multiple light paths, complete reflected objects and full multiple scattering remain unmodeled.
+- New hull/sail/keel coefficients and formation guidance are authored, not measured historical polars. Original hull offsets and displacement remain uncertain. Night navigation accuracy and physical-iPhone fleet performance are unqualified.
 
 ## How it was made
 
@@ -1049,7 +1134,13 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/resolution.js` | Device-local render scaling toward 60 FPS from delivered frame cadence |
 | `js/vessel-pose.js`, `js/wgsl/vessel-pose.js` | Shared animated Victory vertex positions/normals with independent vessel buffers |
 | `js/wgsl/ocean-lighting.js` | Exact frame-wide ocean lighting cache and guarded shader specialization |
-| `js/boat.js` | Wave response, steering, and world-space eye position |
+| `js/boat.js`, `js/hull-lateral.js` | Wave response, passive distributed hull/keel loads, sail/water yaw moments and steering |
+| `js/fleet.js`, `js/wgsl/fleet-wakes.js`, `js/follower.js` | Enabled fleet allocation, pooled wakes and physical sail/helm formation policy |
+| `js/ship-parts.js`, `js/mesh-writer.js`, `js/ship-mesh.js` | Shared semantic parts, construction primitives and immutable per-model assets |
+| `js/models/additional.js`, `js/additional-rig.js`, `js/additional-ships.js`, `js/rig-surface.js` | Pinta/Santa María hulls and authoritative CPU cloth/yard/rope/attachment poses |
+| `js/astronomy.js`, `js/celestial.js`, `js/wgsl/celestial.js` | Unwrapped geographic sky, Moon/stars, explicit 528-byte Frame and celestial rendering |
+| `js/vendor/`, `js/star-catalog.js` | Pinned local ephemeris code and separately licensed HYG derivative |
+| `js/models/rowing.js`, `js/rowing.js`, `js/rowing-ships.js`, `js/models/later-sail.js` | Five planned craft definitions/prototypes; production integration pending |
 | `js/sailing.js`, `js/sail-aerodynamics.js` | Apparent wind, prescribed trim, sail handling, cloth-derived aerodynamic panels and rigid-body loads |
 | `js/lateen.js`, `js/wgsl/lateen.js` | Routine tacks, ordered yard transfers, cloth supports, sheet leads and matching CPU/GPU motion |
 | `js/instruments.js` | Optional signed speed and apparent wind HUD, recovery cues and local preferences |
@@ -1077,7 +1168,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `build.mjs` | Builds two standalone downloads and the cached-asset Pages site; retains third-party notices |
 | `docs/` | Generated GitHub Pages demo, `.nojekyll`, and README images |
 | `tests/` | Boat math, geometry, sharing, GPU behavior, and standalone startup checks |
-| `THIRD_PARTY_NOTICES.md` | Joshbrew shader provenance and MIT license |
+| `THIRD_PARTY_NOTICES.md` | Cloud/ephemeris code licenses, HYG catalogue and terrain/media provenance |
 | `BREAKING_WAVES.md` | Primary breaking-water research, current limits and proposed shared lifecycle |
 
 ## License
@@ -1212,9 +1303,10 @@ The equations follow NASA Glenn's [lift equation](https://www1.grc.nasa.gov/begi
 and [finite-span induced drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/induced-drag-coefficient/).
 The stall angles, efficiency and separated-flow coefficients are authored
 approximations, not measured Niña data. This is neither a calibrated caravel polar
-nor a cloth/fluid solver. It omits sail interference, aerodynamic yaw/weather helm,
-vertical sail-force coupling to buoyancy, and capsizing. Lateral force drives
-leeway against hull/keel resistance; forward resistance rises above an authored
+nor a cloth/fluid solver. It omits sail interference, full vertical sail-force
+coupling to buoyancy and capsizing. Current development applies sail yaw/weather
+helm and the passive hull/keel moment balance to steering; lateral force drives
+leeway through distributed submerged-profile loads. Forward resistance rises above an authored
 Froude-number threshold. See [SAILING_MODEL.md](SAILING_MODEL.md) for validation
 and the remaining rig limitation.
 
@@ -1359,15 +1451,17 @@ mirror-like rims. A GPU regression compares the unchanged production fragment
 entry points with identical optical inputs across sunlight, solid/canvas/cloud
 shadows, opposing light/view directions, haze, altitude and reflection toggles.
 
-Two 2048 × 2048 sun shadow maps track the moving vessel: one for solid timber,
-metal and rigging, and one for canvas with its warm optical transmission.
+Each enabled vessel has 2048 × 2048 solid and canvas depth layers plus warm
+canvas transmission, pooled across three fleet texture arrays. Astronomical
+mode fits them toward the Sun above the horizon, otherwise the Moon.
 The actual mesh casts onto the deck, hull, sails, displaced ocean, foam, deck wash
 and spray. The shadow and visible passes share sail flutter, steering and hull
 transforms. Filtered edges soften with caster distance; receiver-plane correction
 limits self-shadow speckling on tilted surfaces. Direct sunlight is attenuated
 while sky fill and reflections remain. This replaces the former analytic rail
-shadow approximation. Hiding the ship or placing the sun below the horizon skips
-the passes. `shadows=0` disables them for performance comparisons.
+shadow approximation. Hidden ships skip these passes; manual mode skips them
+with the Sun below the horizon. Astronomical mode may cast moonlit shadows.
+`shadows=0` disables them for performance comparisons.
 
 Water separates surface sunlight from underwater scatter. Sun glitter and foam
 retain the geometric shadow; the water body's colour integrates 32 samples around

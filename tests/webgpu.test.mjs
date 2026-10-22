@@ -226,23 +226,31 @@ for(const entry of ['index.html','ocean.min.html','docs/index.html'])test(`landf
 });
 
 test('indexed ship and direct HDR resolve match the original pixels, including profiled rendering', {timeout:180000}, async()=>{
+  const replaceOnce=(input,needle,replacement)=>{
+    assert.equal(input.split(needle).length,2,'fixture must replace exactly one production fragment: '+needle);
+    return input.replace(needle,replacement);
+  };
   // Start on a sampled frame so the comparison also exercises timestamp writes.
-  const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace('let frameIndex = 0;','let frameIndex = 7;');
+  const source=replaceOnce(await readFile(new URL('../js/main.js',import.meta.url),'utf8'),'let frameIndex = 0;','let frameIndex = 7;');
   // Recreate the previous unindexed/copy schedule only inside this comparison.
   // Hold the ocean flat to isolate indexing/resolve from Metal's FFT rounding;
   // travelling-wave and rough-sea fixtures independently cover the wave fields.
-  const rawMesh=source
-    .replace("import { createShipAssetCache } from './ship-mesh.js';","import { createShipAssetCache } from './ship-mesh.js';\nimport { createCaravelMesh } from './caravel.js';")
-    .replace("shipAssets.get('nina')","((asset,vertices)=>({...asset,vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)}))(shipAssets.get('nina'),createCaravelMesh())")
-    .replace(/prowPass\.setIndexBuffer\(caravelIndexBuffer,\s*'uint32'\);\s*prowPass\.drawIndexed\(caravelIndices\.length\);/,'prowPass.draw(caravelMesh.length/9);');
-  const copiedResolve=input=>input
-    .replace('drawProw?waterView:hdrView','hdrView')
-    .replace('format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });','format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC });')
-    .replace('usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });','usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST });')
-    .replace("const filterPass = enc.beginComputePass",'enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);\n      const filterPass = enc.beginComputePass');
+  let rawMesh=replaceOnce(source,"import { createShipAssetCache } from './ship-mesh.js';","import { createShipAssetCache } from './ship-mesh.js';\nimport { createCaravelMesh } from './caravel.js';");
+  rawMesh=replaceOnce(rawMesh,'const asset=shipAssets.get(modelId),gpuPose=',
+    "const asset=((asset)=>{if(modelId!=='nina')throw new Error('Raw mesh fixture requires Niña');const vertices=createCaravelMesh();return {...asset,vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)};})(shipAssets.get(modelId)),gpuPose=");
+  // The factory's asset feeds each instance's geometry, wetness and shadows.
+  // Both visible and submerged draws use those same raw instance vertices.
+  for(const pass of ['prowPass','underwater'])rawMesh=replaceOnce(rawMesh,
+    `${pass}.setIndexBuffer(v.render.indexBuffer,'uint32');${pass}.drawIndexed(v.asset.indices.length);`,`${pass}.draw(v.mesh.length/9);`);
+  const copiedResolve=input=>{
+    input=replaceOnce(input,'drawProw?waterView:hdrView','hdrView');
+    input=replaceOnce(input,'format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });','format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC });');
+    input=replaceOnce(input,'usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });','usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST });');
+    return replaceOnce(input,'const filterPass = enc.beginComputePass','enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);\n      const filterPass = enc.beginComputePass');
+  };
   const legacy=copiedResolve(rawMesh),indexedCopy=copiedResolve(source);
-  assert.ok(legacy.includes('prowPass.draw(caravelMesh.length/9);'),'legacy fixture must use the unindexed ship draw');
-  assert.ok(legacy.includes('createCaravelMesh())'),'legacy fixture must replace the asset cache geometry with raw vertices');
+  assert.ok(legacy.includes('prowPass.draw(v.mesh.length/9);'),'legacy fixture must use the unindexed ship instance draw');
+  assert.ok(legacy.includes('const vertices=createCaravelMesh();'),'legacy fixture must replace the factory asset geometry with raw vertices');
   assert.ok(indexedCopy.includes('enc.copyTextureToTexture({texture:hdrTex},{texture:waterCopy},[W,H]);'),'copy fixture must retain the intermediate texture copy');
   const captures=[];
   for(const mode of ['legacy','indexedCopy','optimized','profiled']){
@@ -253,12 +261,12 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
       page.on('console',msg=>{if(msg.text().includes('init failed'))initErrors.push(msg.text());});
       await page.addInitScript(instrumentRenderer);
       await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:mode==='indexedCopy'?indexedCopy:source}));
-      await page.goto(`${origin}/?view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
+      await page.goto(`${origin}/?ship=nina&view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
       try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
       const frame=await step(page,1000);
       assert.ok(parseFloat(await page.locator('#fps').textContent())<2,'FPS must reflect a one-second frame, not the 100 ms simulation clamp');
-      assert.equal(frame.render.caravel,1);
+      assert.equal(frame.render['nina vessel'],1);
       const pixels=await page.evaluate(async()=>{
         const texture=check.target,bytesPerRow=Math.ceil(texture.width*4/256)*256;
         const buffer=check.device.createBuffer({size:bytesPerRow*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
@@ -278,22 +286,30 @@ test('indexed ship and direct HDR resolve match the original pixels, including p
 test('early hull exclusion preserves water edges and the complete ship image', {timeout:180000}, async()=>{
   const ocean=await readFile(new URL('../js/wgsl/ocean.js',import.meta.url),'utf8');
   const block=ocean.match(/  \/\/ BEGIN HULL EARLY EXIT[\s\S]*?  \/\/ END HULL EARLY EXIT/)[0];
+  // Keep the mask literal intact: production specializes its fleet count after
+  // assembling the shader. Only its position changes in this baseline.
   const late=process.env.OCEAN_BASELINE?await readFile(process.env.OCEAN_BASELINE,'utf8'):
-    ocean.replace(block,'').replace('  return vec4f(col, 1.0);',block.replace('${OCEAN_HULL_MASK}',"${OCEAN_HULL_MASK.replace('discard; return vec4f(0);','discard;')}")+'\n  return vec4f(col, 1.0);');
+    ocean.replace(block,'').replace('  return vec4f(col, 1.0);',block+'\n  return vec4f(col, 1.0);');
   const main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
+  const hullDraw='prowPass.drawIndexed(v.asset.indices.length);';
+  assert.equal(main.split(hullDraw).length,2,'cutout fixture must suppress exactly the production ship instance draw');
+  const exposed=main.replace(hullDraw,'/* expose ocean cutout */');
   for(const view of ['boat','ship']){
     const captures=[];
     for(const shader of [late,ocean]){
       const page=await browser.newPage({viewport:{width:96,height:72}});
+      const startupErrors=[];page.on('pageerror',error=>startupErrors.push(error.message));
       try{
         await page.addInitScript(instrumentRenderer);
         await page.route('**/js/wgsl/ocean.js',route=>route.fulfill({contentType:'text/javascript',
           body:shader.includes('export const OCEAN_VISIBLE')?shader:shader+'\nexport const OCEAN_VISIBLE=OCEAN;'}));
         // Expose the water cutout in the helm view, so the hull cannot hide a
         // masking regression. The exterior view retains all visible geometry.
-        if(view==='boat')await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:main.replace('prowPass.drawIndexed(caravelIndices.length);','/* expose ocean cutout */')}));
+        if(view==='boat')await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:exposed}));
         await page.goto(`${origin}/?view=${view}&sunElev=35&sunAzim=30&clouds=0&oceanDepth=0&shot=mask.png&frames=100000`);
-        await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});
+        await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000}).catch(async error=>{
+          throw new Error(`${view} ${shader===late?'late':'early'} startup: ${JSON.stringify({startupErrors,state:await page.evaluate(()=>({errors:window.check?.errors,body:document.body.innerText.slice(-2000)}))})}`,{cause:error});
+        });
         await step(page);
         captures.push(await page.evaluate(async()=>{
           const texture=check.target,row=Math.ceil(texture.width*4/256)*256;
@@ -1181,11 +1197,11 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     await page.setViewportSize({width:32,height:24});
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render.caravel,undefined);assert.equal(frame.render.composite,1);
+    assert.equal(frame.render['nina vessel'],undefined);assert.equal(frame.render.composite,1);
     assert.equal(frame.render['solid shadows'],undefined);
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render.caravel,1);assert.equal(frame.render['solid shadows'],1);
+    assert.equal(frame.render['nina vessel'],1);assert.equal(frame.render['solid shadows'],1);
     await slider(page, 'Crest spray', 0);
     await step(page);
     frame = await step(page);
@@ -1585,7 +1601,7 @@ test('sailing controls drive finite hull uniforms through startup, lowering and 
       GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...args){
-        if(buffer.label==='hull transform')check.hull=Array.from(data);
+        if(buffer.label==='player hull')check.hull=Array.from(data);
         return write.call(this,buffer,offset,data,...args);
       };
     });
@@ -1627,8 +1643,8 @@ test('loading controls retain the solved waterline through startup, cargo edits 
       GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...args){
-        if(buffer.label==='hull transform')check.hull=Array.from(data);
-        if(buffer.label==='frame ubo')check.frame=Array.from(data);
+        if(buffer.label==='player hull')check.hull=Array.from(data);
+        if(buffer.label==='frame ubo (celestial528)')check.frame=Array.from(data);
         return write.call(this,buffer,offset,data,...args);
       };
     });
@@ -1672,8 +1688,8 @@ test('captain camera boards to windward and follows tacks in the rendered frame'
       GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
-        if(buffer.label==='frame ubo')check.frame=Array.from(data);
-        if(buffer.label==='hull transform')check.hull=Array.from(data);
+        if(buffer.label==='frame ubo (celestial528)')check.frame=Array.from(data);
+        if(buffer.label==='player hull')check.hull=Array.from(data);
         return write.call(this,buffer,offset,data,...rest);
       };
     });
@@ -1782,8 +1798,8 @@ test('tap helm commands and touch look stay independent, with real sail orders a
       GPUComputePassEncoder.prototype.dispatchWorkgroups=function(){};
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...args){
-        if(buffer.label==='hull transform')check.hull=Array.from(data);
-        if(buffer.label==='frame ubo')check.frame=Array.from(data);
+        if(buffer.label==='player hull')check.hull=Array.from(data);
+        if(buffer.label==='frame ubo (celestial528)')check.frame=Array.from(data);
         return write.call(this,buffer,offset,data,...args);
       };
     });
@@ -2365,7 +2381,7 @@ test('rain variants, lightning illumination and stop controls work in the render
     await page.addInitScript(()=>{
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
-        if(buffer.label==='frame ubo')check.weather=Array.from(data);
+        if(buffer.label==='frame ubo (celestial528)')check.weather=Array.from(data);
         return write.call(this,buffer,offset,data,...rest);
       };
     });
@@ -2457,18 +2473,42 @@ test('selected audio decodes, loops, delays thunder, mutes and resumes through W
 });
 
 test('two vessels share global water but own transforms, probes, wakes, rigs and shadows', {timeout:180000}, async()=>{
-  const source=(await readFile(new URL('../js/main.js',import.meta.url),'utf8')).replace(
-    'vessels[0].boat=boat;vessels[1].boat=companion;',
-    'vessels[0].boat=boat;vessels[1].boat=companion;window.fleetFixture={vessels,boat,companion,followerAI,shipAsset,shipAssets};');
+  const marker='window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};';
+  const original=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
+  assert.ok(original.includes(marker),'instrument the real production fleet integration point');
+  const source=original.replace(marker,marker+'window.fleetFixture={...window.oceanFleet,shipAssets};');
   const page=await browser.newPage({viewport:{width:320,height:240}});
   try{
     await page.addInitScript(instrumentRenderer,{fleet:true});
+    await page.addInitScript(()=>{
+      const allocations=window.fleetAllocations={buffers:[],textures:[]};
+      const createBuffer=GPUDevice.prototype.createBuffer,createTexture=GPUDevice.prototype.createTexture;
+      GPUDevice.prototype.createBuffer=function(desc){const buffer=createBuffer.call(this,desc);allocations.buffers.push({label:desc.label||'',size:buffer.size});return buffer;};
+      GPUDevice.prototype.createTexture=function(desc){const texture=createTexture.call(this,desc);allocations.textures.push({label:desc.label||'',layers:texture.depthOrArrayLayers});return texture;};
+    });
     await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:source}));
+    const ready=async()=>{
+      await page.waitForFunction(()=>typeof check.callback==='function'||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
+      assert.equal(await page.locator('#err').textContent(),'');
+      assert.equal(await page.evaluate(()=>typeof check.callback),'function','the rebuilt scene registered its real render callback');
+      assert.ok(await page.evaluate(()=>!!window.oceanFleet&&fleetFixture.vessels===window.oceanFleet.vessels));
+    };
+    const disabledAllocation=async()=>{
+      const state=await page.evaluate(()=>{
+        const fleet=window.oceanFleet,row=fleet.config[0],labels=fleetAllocations.buffers.map(b=>b.label);
+        return {count:fleet.vessels.length,disabled:row?.enabled===false,rowModel:row?.modelId,
+          phantom:!!row&&fleet.vessels.some(v=>v.id===row.id),escortBuffers:labels.filter(label=>label.startsWith((row?.id??'escort-1')+' ')),
+          hulls:labels.filter(label=>/ hull$/.test(label)).length,wetness:labels.filter(label=>label==='surface moisture').length,
+          crewJoints:labels.filter(label=>label==='crew joints').length,crewActors:labels.filter(label=>label==='crew transforms').length,
+          wakeCount:fleet.wakes.count,wakeLayers:fleet.wakes.textures.map(texture=>texture.depthOrArrayLayers),
+          shadowLayers:fleetAllocations.textures.filter(texture=>/^fleet shadow [012]$/.test(texture.label)).map(texture=>texture.layers)};
+      });
+      assert.deepEqual(state,{count:1,disabled:true,rowModel:'nina',phantom:false,escortBuffers:[],hulls:1,wetness:1,crewJoints:2,crewActors:2,wakeCount:1,wakeLayers:[1,1],shadowLayers:[1,1,1]},'a disabled row retains configuration but allocates no hull, geometry, probe, crew, wetness, wake or shadow layer');
+    };
     await page.goto(`${origin}/?view=ship&landfall=approach&sunElev=35&clouds=0&w=96&h=72`);
-    await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
-    assert.equal(await page.locator('#err').textContent(),'');
+    await ready();
     let frame=await step(page,100);
-    assert.equal(frame.render.caravel,2);assert.equal(frame.render.crew,2);
+    assert.equal(frame.render['nina vessel'],2);assert.equal(frame.render.crew,2);
     assert.equal(frame.compute['height probe'].length,2);assert.equal(frame.compute['local wake'].length,2);
     assert.equal(frame.render['solid shadows'],2);assert.equal(frame.render['canvas shadows'],2);
     assert.equal(frame.render.ocean,1,'the water is drawn once for both vessels');
@@ -2476,35 +2516,41 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     for(let i=0;i<4;i++){await step(page,100);await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));}
     const state=await page.evaluate(()=>{
-      const {vessels,boat,companion,shipAsset,shipAssets}=fleetFixture;
+      const {vessels,shipAssets}=fleetFixture,[player,following]=vessels,boat=player.boat,companion=following.boat,shipAsset=player.asset;
       return {separation:Math.hypot(boat.x-companion.x,boat.z-companion.z),sameRig:boat.sailState===companion.sailState,
         sameModel:boat.model===companion.model&&boat.model===shipAsset.model,modelId:boat.modelId,
-        cachedAsset:shipAssets.get(boat.modelId)===shipAsset,groups:shipAsset.groups.length,
+        sameAsset:player.asset===following.asset,cachedAsset:shipAssets.get(boat.modelId)===shipAsset,groups:shipAsset.groups.length,
         companyModels:vessels.map(v=>v.crew.state.modelId),
         sameHull:vessels[0].hullUBO===vessels[1].hullUBO,sameWetness:vessels[0].wetness.state===vessels[1].wetness.state,
         sameCrewMesh:vessels[0].crew.assets.geometry[0].vertex===vessels[1].crew.assets.geometry[0].vertex,
         probes:vessels.map(v=>v.probe.state.time),positions:vessels.map(v=>Array.from(v.hullData.subarray(16,19)))};
     });
     assert.ok(state.separation>50);assert.equal(state.sameRig,false);assert.equal(state.sameHull,false);assert.equal(state.sameWetness,false);assert.equal(state.sameCrewMesh,true);
-    assert.equal(state.sameModel,true);assert.equal(state.modelId,'nina');assert.equal(state.cachedAsset,true);
+    assert.equal(state.sameModel,true);assert.equal(state.sameAsset,true);assert.equal(state.modelId,'nina');assert.equal(state.cachedAsset,true);
     assert.ok(state.groups>100);assert.deepEqual(state.companyModels,['nina','nina']);
     assert.ok(state.probes.every(t=>t>=0));assert.notDeepEqual(state.positions[0],state.positions[1]);
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
-    await page.locator('#follower-toggle').uncheck();frame=await step(page,100);
-    assert.equal(frame.render.caravel,1);assert.equal(frame.render.crew,1);assert.equal(frame.render['solid shadows'],1);
-    const dormantTime=await page.evaluate(()=>fleetFixture.vessels[1].crew.state.workTime);
+    await Promise.all([page.waitForNavigation({waitUntil:'load',timeout:90000}),page.locator('#follower-toggle').uncheck()]);
+    await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'0');
+    frame=await step(page,100);
+    assert.equal(frame.render['nina vessel'],1);assert.equal(frame.render.crew,1);assert.equal(frame.render['solid shadows'],1);
+    assert.equal(frame.compute['height probe'].length,1);await disabledAllocation();
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     frame=await step(page,100);
     assert.equal(frame.compute['local wake'].length,1,'disabled companion adds no ongoing wake compute');
     assert.equal(frame.compute['surface moisture'].length,1,'disabled companion adds no ongoing wetness compute');
-    assert.equal(await page.evaluate(()=>fleetFixture.vessels[1].crew.state.workTime),dormantTime,'disabled companion does no crew simulation');
-    await page.locator('#follower-toggle').check();frame=await step(page,100);
-    assert.equal(frame.render.caravel,2);assert.deepEqual(frame.errors,[]);
+    assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),1,'disabled companion has no crew simulation object');
+    await page.getByRole('button',{name:'Ship settings',exact:true}).click();
+    await Promise.all([page.waitForNavigation({waitUntil:'load',timeout:90000}),page.locator('#follower-toggle').check()]);
+    await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'1');
+    assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),2);
+    frame=await step(page,100);
+    assert.equal(frame.render['nina vessel'],2);assert.equal(frame.render.crew,2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
     await page.goto(`${origin}/?follower=0&view=ship&sunElev=35&clouds=0&w=96&h=72`);
-    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
-    frame=await step(page,100);assert.equal(frame.render.caravel,1);assert.equal(frame.compute['height probe'].length,1);
+    await ready();
+    frame=await step(page,100);assert.equal(frame.render['nina vessel'],1);assert.equal(frame.compute['height probe'].length,1);
     assert.equal(await page.locator('#follower-toggle').isChecked(),false);
-    assert.equal(await page.evaluate(()=>fleetFixture.vessels[1].crew.state.workTime??0),0);
+    assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),1);await disabledAllocation();
   }finally{await page.close();}
 });
 
@@ -2575,7 +2621,7 @@ test('captain anchor orders connect voices, depth, retrieval and debug dolphin r
     assert.ok(await page.evaluate(()=>encounterFixture.dolphins.state.count>=5&&encounterFixture.dolphins.state.count<=7));
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show ship',{exact:true}).uncheck();
-    const withoutShip=await advance(1);assert.equal(withoutShip.render.caravel,undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
+    const withoutShip=await advance(1);assert.equal(withoutShip.render['nina vessel'],undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
     await page.getByRole('button',{name:'Sea settings',exact:true}).click();
     await page.getByRole('button',{name:'End encounter',exact:true}).click();
     assert.equal((await advance(1)).render.dolphins,undefined);

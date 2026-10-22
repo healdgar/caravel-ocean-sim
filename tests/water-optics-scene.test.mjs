@@ -22,6 +22,8 @@ function instrumentScene(){
   GPUAdapter.prototype.requestDevice=async function(...args){const device=await request.apply(this,args);state.device=device;device.addEventListener('uncapturederror',event=>state.errors.push(event.error.message));return device;};
   const modules=new WeakMap(),makeModule=GPUDevice.prototype.createShaderModule;
   GPUDevice.prototype.createShaderModule=function(descriptor){const module=makeModule.call(this,descriptor);modules.set(module,descriptor.code);return module;};
+  const groups=new WeakMap(),makeGroup=GPUDevice.prototype.createBindGroup;
+  GPUDevice.prototype.createBindGroup=function(descriptor){const group=makeGroup.call(this,descriptor);groups.set(group,descriptor.entries);return group;};
   const families=new WeakMap(),makePipeline=GPUDevice.prototype.createRenderPipelineAsync;
   GPUDevice.prototype.createRenderPipelineAsync=async function(descriptor){
     const pipeline=await makePipeline.call(this,descriptor),source=modules.get(descriptor.vertex.module)||'';
@@ -42,24 +44,48 @@ function instrumentScene(){
     return state.target;
   };
   const passes=new WeakMap(),begin=GPUCommandEncoder.prototype.beginRenderPass;
-  GPUCommandEncoder.prototype.beginRenderPass=function(descriptor){const pass=begin.call(this,descriptor);passes.set(pass,{label:descriptor.label||'',pipeline:null});return pass;};
+  GPUCommandEncoder.prototype.beginRenderPass=function(descriptor){const pass=begin.call(this,descriptor);passes.set(pass,{label:descriptor.label||'',pipeline:null,groups:[],vertices:[],indices:null});return pass;};
   const setPipeline=GPURenderPassEncoder.prototype.setPipeline;
   GPURenderPassEncoder.prototype.setPipeline=function(pipeline){passes.get(this).pipeline=pipeline;return setPipeline.call(this,pipeline);};
+  const setGroup=GPURenderPassEncoder.prototype.setBindGroup;
+  GPURenderPassEncoder.prototype.setBindGroup=function(index,group,...args){passes.get(this).groups[index]=group;return setGroup.call(this,index,group,...args);};
+  const setVertex=GPURenderPassEncoder.prototype.setVertexBuffer;
+  GPURenderPassEncoder.prototype.setVertexBuffer=function(index,buffer,...args){passes.get(this).vertices[index]=buffer;return setVertex.call(this,index,buffer,...args);};
+  const setIndex=GPURenderPassEncoder.prototype.setIndexBuffer;
+  GPURenderPassEncoder.prototype.setIndexBuffer=function(buffer,...args){passes.get(this).indices=buffer;return setIndex.call(this,buffer,...args);};
   for(const method of ['draw','drawIndexed']){
     const draw=GPURenderPassEncoder.prototype[method];
-    GPURenderPassEncoder.prototype[method]=function(...args){const pass=passes.get(this),pipeline=pass.pipeline;state.draws.push({pass:pass.label,label:pipeline.label,family:families.get(pipeline)||null,count:args[0],instances:args[1]??1});return draw.apply(this,args);};
+    GPURenderPassEncoder.prototype[method]=function(...args){
+      const pass=passes.get(this),pipeline=pass.pipeline,vessels=window.oceanFleet?.vessels||[];
+      const geometry=vessels.find(v=>v.vertexBuffer===pass.vertices[0]);
+      const resources=groups.get(pass.groups[0])||[],hull=vessels.find(v=>resources.some(entry=>entry.resource?.buffer===v.hullUBO));
+      const submerged=pass.label==='Submerged geometry';
+      const family=vessels.some(v=>v.render.submerged.pipeline===pipeline)?'hull':families.get(pipeline)||null;
+      state.draws.push({pass:pass.label,label:pipeline.label,family,count:args[0],instances:args[1]??1,
+        vessel:geometry?.id||hull?.id||null,geometry:geometry?.id||null,hull:hull?.id||null,
+        material:geometry?pass.groups[0]===(submerged?geometry.submergedGroup:geometry.bindGroup):null,
+        lighting:geometry?pass.groups[1]===(submerged?geometry.submergedLighting:geometry.lighting):null,
+        indices:geometry?pass.indices===geometry.render.indexBuffer:null});
+      return draw.apply(this,args);
+    };
   }
 }
 
 const fixture=String.raw`
   window.opticsFixture={render(){frameIndex=40;envFull=true;frame(last);},size:()=>[W,H],
     enabled(value){qs.set('waterOptics',value?'1':'0');},
-    wildlife(kind){
-      followerEnabled=false;boat.showProw=false;boat.x=boat.z=200;setCameraMode('free');
+    async wildlife(kind){
+      // Keep the actual two-vessel roster and resources. Move both ships behind
+      // the wildlife camera instead of mutating the immutable fleet selection.
+      for(const [index,v] of window.oceanFleet.vessels.entries()){v.boat.showProw=false;v.boat.x=200+index*40;v.boat.z=200;}
+      setCameraMode('free');
       Object.assign(cam,{x:0,y:22,z:20,yaw:0,pitch:-Math.atan2(22,20)});
       dolphins.state.clear();marineLife.state.clear();
       if(kind==='whale'){
-        marineLife.state.trigger('whale',boat,{vessels:[],behavior:'blow'});
+        // The production whale renderer/GLB is intentionally loaded on demand.
+        // Wait for its actual capture pipeline before freezing an encounter.
+        await marineLife.load();
+        if(!marineLife.state.trigger('whale',boat,{vessels:[],behavior:'blow'}))throw Error('Whale fixture encounter was rejected');
         Object.assign(marineLife.state.animals[0],{x:0,z:0,heading:0,depth:-4,pitch:0,roll:0,scale:1,phase:0});
         marineLife.state.step=()=>{};
       }else{
@@ -106,11 +132,31 @@ function assertValid(frame){assert.deepEqual(frame.errors,[]);assert.ok(frame.dr
 function difference(a,b){let pixels=0,energy=0;for(let i=0;i<a.length;i+=4){const delta=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);if(delta>3)pixels++;energy+=delta;}return {pixels,energy};}
 
 test('the actual Niña fleet captures independent hulls and renders submerged whales and dolphins through water, including after resize',{timeout:180000},async()=>{
-  const {page,errors}=await loadScene('/?view=ship&follower=1&sunElev=45&clouds=0&windSpeed=2&swellHs=.2&turbidity=.2&resolution=native',{source:true});
+  const {page,errors}=await loadScene('/?ship=nina&view=ship&follower=1&sunElev=45&clouds=0&windSpeed=2&swellHs=.2&turbidity=.2&resolution=native',{source:true});
   try{
     const fleet=await render(page);assertValid(fleet);
+    const roster=await page.evaluate(()=>{
+      const vessels=window.oceanFleet.vessels,[player,escort]=vessels;
+      return {rows:vessels.map(v=>({id:v.id,model:v.asset.model.id,label:v.render.pipeline.label,indices:v.asset.indices.length})),
+        sharedAsset:player.asset===escort.asset,sharedRender:player.render===escort.render,sharedIndices:player.render.indexBuffer===escort.render.indexBuffer,
+        uniqueGeometry:new Set(vessels.map(v=>v.vertexBuffer)).size,uniqueUniforms:new Set(vessels.map(v=>v.hullUBO)).size,
+        uniqueCaptureGroups:new Set(vessels.map(v=>v.submergedGroup)).size,uniqueLighting:new Set(vessels.map(v=>v.submergedLighting)).size};
+    });
+    assert.equal(roster.rows.length,2,'legacy follower=1 allocates two actual fleet vessels');
+    assert.deepEqual(roster.rows.map(v=>v.model),['nina','nina']);
+    assert.ok(roster.sharedAsset&&roster.sharedRender&&roster.sharedIndices,'the model factory shares immutable Niña assets and pipelines');
+    for(const property of ['uniqueGeometry','uniqueUniforms','uniqueCaptureGroups','uniqueLighting'])assert.equal(roster[property],2,'each captured vessel owns '+property);
     for(const family of ['hull','crew','anchor'])assert.ok(fleet.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family===family).length>=2,`both vessels submit ${family} geometry`);
-    assert.equal(fleet.draws.filter(draw=>draw.label==='caravel').length,2);
+    for(const vessel of roster.rows){
+      const captures=fleet.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family==='hull'&&draw.vessel===vessel.id);
+      const visible=fleet.draws.filter(draw=>draw.pass!=='Submerged geometry'&&draw.label===vessel.label&&draw.vessel===vessel.id);
+      assert.equal(captures.length,1,vessel.id+' submits exactly one independent underwater hull');
+      assert.equal(visible.length,1,vessel.id+' submits its actual model-factory surface pipeline');
+      for(const draw of [...captures,...visible]){
+        assert.equal(draw.geometry,vessel.id);assert.equal(draw.hull,vessel.id,'capture geometry and hull transform belong to the same ship');
+        assert.equal(draw.count,vessel.indices);assert.equal(draw.instances,1);assert.ok(draw.material&&draw.lighting&&draw.indices,'each draw binds its own material and shadow groups with the shared model indices');
+      }
+    }
     assert.ok((await readScene(page)).count>20,'a loaded hull produces underwater source fragments');
     for(const animal of ['whale','dolphins']){
       await page.evaluate(animal=>opticsFixture.wildlife(animal),animal);

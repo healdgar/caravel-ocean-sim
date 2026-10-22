@@ -20,11 +20,14 @@ test('posed Niña and Victory canvas occludes sky and ocean backgrounds while tr
   try{
     await page.route('**/__sail-opacity',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(`${origin}/__sail-opacity`);
     const source=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-    const descriptorSource=source.match(/const caravelPipe = await device\.createRenderPipelineAsync\((\{[\s\S]*?\n  \})\);/)?.[1];
-    const layoutSource=source.match(/const shipVertexLayouts=([\s\S]*?);\n/)?.[1];
-    assert.ok(descriptorSource&&layoutSource,'use the real renderer pipeline descriptor and layouts');
-    const result=await page.evaluate(async ({descriptorSource,layoutSource})=>{
-      const {CARAVEL}=await import('/js/wgsl/caravel.js'),{createCaravelMesh}=await import('/js/caravel.js'),{createVictoryMesh}=await import('/js/victory.js');
+    const factory=source.match(/async function shipRenderAsset\(modelId\)\{([\s\S]*?)\n  \}/)?.[1];
+    const descriptorSource=factory?.match(/const pipeline=await device\.createRenderPipelineAsync\((\{[\s\S]*?)\);\n/)?.[1];
+    const layoutSource=factory?.match(/const vertexLayouts=([\s\S]*?);\n/)?.[1];
+    const shaderSource=factory?.match(/const source=([^\n]+);\n/)?.[1];
+    assert.ok(descriptorSource&&layoutSource&&shaderSource,'use the real vessel factory pipeline descriptor, layouts and shader specialization');
+    const result=await page.evaluate(async ({descriptorSource,layoutSource,shaderSource})=>{
+      const {CARAVEL}=await import('/js/wgsl/caravel.js'),{createShipAssetCache}=await import('/js/ship-mesh.js');
+      const {withCelestialFrame,CELESTIAL_FRAME_FLOATS}=await import('/js/wgsl/celestial.js');
       const {createLateenPoses,writeLateenUniform}=await import('/js/lateen.js');
       const {POSED_VERTEX_LAYOUT,withPosedVesselVertices,createVesselPose}=await import('/js/vessel-pose.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
@@ -38,39 +41,48 @@ test('posed Niña and Victory canvas occludes sky and ocean backgrounds while tr
       const trans=tex([255,230,190]),sky=tex([35,50,75]),env=tex([35,50,75],6),water=tex([20,30,35]),sea=tex([0,0,0],3),oak=tex([128,128,128]),deck=tex([0,0,0]),filter=tex([255,255,255]);
       const depths=[0,1].map(()=>device.createTexture({size:[4,4],format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING}));
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear'}),compare=device.createSampler({compare:'less-equal'});
-      const frame=buffer(new Float32Array(96),B.UNIFORM),hull=buffer(new Float32Array(52),B.UNIFORM),sun=buffer(new Float32Array([1,0,0,0]),B.STORAGE),shadow=buffer(new Float32Array(28),B.UNIFORM),wet=buffer(new Float32Array(2),B.STORAGE);
+      const frame=buffer(new Float32Array(CELESTIAL_FRAME_FLOATS),B.UNIFORM),hull=buffer(new Float32Array(52),B.UNIFORM),sun=buffer(new Float32Array([1,0,0,0]),B.STORAGE),shadow=buffer(new Float32Array(28),B.UNIFORM),wet=buffer(new Float32Array(2),B.STORAGE);
       const colorMS=device.createTexture({size:[W,H],format:'rgba16float',sampleCount:4,usage:T.RENDER_ATTACHMENT}),output=device.createTexture({size:[W,H],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC}),depth=device.createTexture({size:[W,H],format:'depth32float',sampleCount:4,usage:T.RENDER_ATTACHMENT});
       const read=device.createBuffer({size:bytesPerRow*H,usage:B.COPY_DST|B.MAP_READ});
       const half=value=>{const sign=value&0x8000?-1:1,e=(value>>10)&31,m=value&1023;return sign*(e===0?m*2**-24:e===31?m?NaN:Infinity:(1+m/1024)*2**(e-15));};
-      const report=[];
+      const report=[],shipAssets=createShipAssetCache();
       for(const c of [{name:'Niña lateen',model:0,material:13+1/16,eye:[15,7,-2],range:7},{name:'Victory course',model:1,material:9+1/64,eye:[0,4.3,-15],range:3.8},{name:'Victory headsail',model:1,material:13+9/64,eye:[15,4,-5.4],range:4.5},{name:'Victory spanker',model:1,material:9+12/64,eye:[15,4.5,5],range:3.2}]){
-        const posedShip=!!c.model,shipVertexLayouts=Function('posedShip','POSED_VERTEX_LAYOUT','return ('+layoutSource+');')(posedShip,POSED_VERTEX_LAYOUT);
-        const clothSource=posedShip?withPosedVesselVertices(CARAVEL):CARAVEL;
+        const modelId=c.model?'victory':'nina',asset=shipAssets.get(modelId),gpuPose=asset.gpuPose??asset.model.gpuPose??(modelId==='victory');
+        const vertexLayouts=Function('gpuPose','POSED_VERTEX_LAYOUT','return ('+layoutSource+');')(gpuPose,POSED_VERTEX_LAYOUT);
+        const clothSource=withCelestialFrame(Function('gpuPose','CARAVEL','withPosedVesselVertices','return ('+shaderSource+');')(gpuPose,CARAVEL,withPosedVesselVertices));
         const module=device.createShaderModule({code:clothSource+'\n@fragment fn coverageFS(in:BoatVertex)->@location(0)vec4f{return vec4f(1);}',label:'production cloth opacity'});
         const info=await module.getCompilationInfo();errors.push(...info.messages.filter(m=>m.type==='error').map(m=>m.message));
-        const descriptor=Function('caravelMod','HDR','MSAA','shipVertexLayouts','return ('+descriptorSource+');')(module,'rgba16float',4,shipVertexLayouts);
+        const descriptor=Function('modelId','module','HDR','MSAA','vertexLayouts','return ('+descriptorSource+');')(modelId,module,'rgba16float',4,vertexLayouts);
         const pipeline=await device.createRenderPipelineAsync(descriptor);
         const mask=await device.createRenderPipelineAsync({...descriptor,fragment:{module,entryPoint:'coverageFS',targets:[{format:'rgba16float'}]}});
         const shadowGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{buffer:shadow},depths[0].createView(),compare,depths[1].createView(),filter.createView(),sampler].map((resource,binding)=>({binding,resource}))});
-        const raw=c.model?createVictoryMesh():createCaravelMesh(),selected=[];
-        for(let i=0;i<raw.length;i+=27)if(Math.abs(raw[i+6]-c.material)<1e-6)selected.push(...raw.slice(i,i+27));
+        // Select actual indexed asset triangles; compact only unused vertices.
+        // Their material, UV, normal and triangle order remain production data.
+        const selected=[],indices=[],remap=new Map();
+        for(let i=0;i<asset.indices.length;i+=3)if(Math.abs(asset.vertices[asset.indices[i]*9+6]-c.material)<1e-6){
+          for(let j=0;j<3;j++){
+            const original=asset.indices[i+j];
+            if(!remap.has(original)){remap.set(original,selected.length/9);selected.push(...asset.vertices.subarray(original*9,original*9+9));}
+            indices.push(remap.get(original));
+          }
+        }
         if(!selected.length)throw Error('Missing actual cloth mesh: '+c.name);
-        const mesh=new Float32Array(selected),vertices=buffer(mesh,B.VERTEX|(posedShip?B.STORAGE:0)),lookup=buffer(new Uint32Array(mesh.length/9),B.STORAGE);
-        const pose=posedShip?await createVesselPose({device,sourceBuffer:vertices,vertexCount:mesh.length/9,hullUBO:hull,
+        const mesh=new Float32Array(selected),vertices=buffer(mesh,B.VERTEX|(gpuPose?B.STORAGE:0)),indexBuffer=buffer(new Uint32Array(indices),B.INDEX),lookup=buffer(new Uint32Array(mesh.length/9),B.STORAGE);
+        const pose=gpuPose?await createVesselPose({device,sourceBuffer:vertices,vertexCount:mesh.length/9,hullUBO:hull,
           computePipe:async code=>device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code}),entryPoint:'main'}})}):null;
         const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{buffer:frame},trans.createView(),sky.createView(),sampler,env.createView({dimension:'cube'}),{buffer:sun},{buffer:hull},water.createView(),sea.createView({dimension:'2d-array'}),sampler,oak.createView(),sampler,deck.createView(),{buffer:wet},{buffer:lookup}].map((resource,binding)=>({binding,resource}))});
         const maskGroup=device.createBindGroup({layout:mask.getBindGroupLayout(0),entries:[[0,frame],[6,hull],[13,wet],[14,lookup]].map(([binding,b])=>({binding,resource:{buffer:b}}))});
         for(const deployed of [1,.5])for(const side of [-1,1]){
-          const h=new Float32Array(52);h[0]=h[3]=h[5]=1;h[10]=-1;h[12]=3.6;h[13]=12;h[23]=c.model;h[19]=1.25;h[21]=6;h.set([deployed,deployed,deployed],24);h.set([-.23,.35,.8,.8],28);h.set([6,.2,6,1],32);
+          const h=new Float32Array(52);h[0]=h[3]=h[5]=1;h[10]=-1;h[12]=3.6;h[13]=12;h[23]=asset.model.modelCode;h[19]=1.25;h[21]=6;h.set([deployed,deployed,deployed],24);h.set([-.23,.35,.8,.8],28);h.set([6,.2,6,1],32);
           const rig=createLateenPoses([deployed,deployed,deployed],1);for(const p of rig){p.opening=.3;p.fill=.8;p.pressure=1;}writeLateenUniform(h,{rig});for(let i=0;i<3;i++)if(c.model)h[39+i*4]=.8;
           device.queue.writeBuffer(hull,0,h);
-          const f=new Float32Array(96),eye=c.eye.map((v,i)=>i===(c.name==='Victory course'?2:0)?v*side:v),alongZ=c.name==='Victory course';
+          const f=new Float32Array(CELESTIAL_FRAME_FLOATS),eye=c.eye.map((v,i)=>i===(c.name==='Victory course'?2:0)?v*side:v),alongZ=c.name==='Victory course';
           if(alongZ){f[0]=side/c.range;f[5]=1/c.range;f[10]=-side/40;}else{f[8]=-side/c.range;f[5]=1/c.range;f[2]=side/40;}f[14]=.9;f[15]=1;f.set(eye,16);f.set([0,.2,-Math.sqrt(.96),14],32);f.set([W,H,1/W,1/H],36);f.fill(.01,48,54);f[63]=1;f.set([3,.02,0,0],72);
           async function draw(which,{coverage=false,solar=true,after=false}={}){
             device.queue.writeBuffer(frame,0,f);device.queue.writeBuffer(sun,0,new Float32Array([solar?1:0,0,0,0]));
             const enc=device.createCommandEncoder();if(pose){const cp=enc.beginComputePass();pose.encode(cp);cp.end();}const pass=enc.beginRenderPass({colorAttachments:[{view:colorMS.createView(),resolveTarget:output.createView(),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'discard'}],depthStencilAttachment:{view:depth.createView(),depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}});
             if(!coverage&&!after){pass.setPipeline(backgrounds[which]);pass.draw(3);}
-            pass.setPipeline(coverage?mask:pipeline);pass.setBindGroup(0,coverage?maskGroup:group);if(!coverage)pass.setBindGroup(1,shadowGroup);pass.setVertexBuffer(0,vertices);if(pose)pass.setVertexBuffer(1,pose.buffer);pass.draw(mesh.length/9);
+            pass.setPipeline(coverage?mask:pipeline);pass.setBindGroup(0,coverage?maskGroup:group);if(!coverage)pass.setBindGroup(1,shadowGroup);pass.setVertexBuffer(0,vertices);if(pose)pass.setVertexBuffer(1,pose.buffer);pass.setIndexBuffer(indexBuffer,'uint32');pass.drawIndexed(indices.length);
             if(!coverage&&after){pass.setPipeline(backgrounds[which]);pass.draw(3);}pass.end();
             enc.copyTextureToBuffer({texture:output},{buffer:read,bytesPerRow},[W,H]);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);const colors=Array.from(new Uint16Array(read.getMappedRange()),half);read.unmap();return colors;
           }
@@ -79,10 +91,10 @@ test('posed Niña and Victory canvas occludes sky and ocean backgrounds while tr
           for(let i=0;i<a.length;i+=4){if(coverage[i+3]>.999){pixels++;for(let k=0;k<3;k++){maxDifference=Math.max(maxDifference,Math.abs(a[i+k]-b[i+k]));maxDepthDifference=Math.max(maxDepthDifference,Math.abs(a[i+k]-after[i+k]));light+=a[i+k];dark+=shade[i+k];}}else if(coverage[i+3]<.001)for(let k=0;k<3;k++)backgroundDifference=Math.max(backgroundDifference,Math.abs(a[i+k]-b[i+k]));}
           report.push({name:c.name,deployed,side,pixels,maxDifference,maxDepthDifference,light,dark,backgroundDifference});vertices.label=c.name;
         }
-        pose?.destroy();vertices.destroy();lookup.destroy();
+        pose?.destroy();vertices.destroy();indexBuffer.destroy();lookup.destroy();
       }
       await device.queue.onSubmittedWorkDone();device.destroy();return {errors,report};
-    },{descriptorSource,layoutSource});
+    },{descriptorSource,layoutSource,shaderSource});
     assert.deepEqual(result.errors,[]);
     for(const r of result.report){
       assert.ok(r.pixels>30,JSON.stringify(r));assert.ok(r.backgroundDifference>2,'fixture must expose a strongly changing background');

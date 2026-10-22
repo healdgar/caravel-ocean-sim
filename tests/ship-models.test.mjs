@@ -10,25 +10,25 @@ const ids=['fore','main','mizzen'];
 const boat=()=>({modelId:'nina',length:20,beam:6,rudder:0});
 const near=(a,b)=>{assert.equal(a.length,b.length);for(let i=0;i<a.length;i++)assert.ok(Math.abs(a[i]-b[i])<1e-11,`${a} != ${b}`);};
 
-test('model definitions separate authored geometry, reference measurements and unfinished rigs',()=>{
+test('model definitions separate playable reconstructions from reference measurements',()=>{
   assert.ok(Object.isFrozen(SHIP_MODELS)&&Object.isFrozen(getShipModel().nodes));
   assert.deepEqual(getShipModel().runtime,{length:20,beam:6});
   assert.deepEqual(getShipModel().rig.sails.map(s=>s.kind),['lateen','lateen','lateen']);
   for(const id of ['pinta','santa-maria']){
-    const model=getShipModel(id);assert.equal(model.status,'planned');
-    assert.equal(model.geometry,null);assert.equal(model.runtime,null);
+    const model=getShipModel(id);assert.equal(model.status,'ready');
+    assert.equal(model.geometry,'additional-procedural-v1');assert.ok(model.runtime.length>20);
     assert.deepEqual(model.rig.sails.slice(0,3).map(s=>s.kind),['square','square','lateen']);
-    assert.throws(()=>requirePlayableShipModel(id),/not playable/);
-    assert.throws(()=>resolveShipNode({...boat(),modelId:id},'helm.grip'),/not playable/);
+    assert.equal(requirePlayableShipModel(id),model);
+    assert.ok(resolveShipNode({...boat(),modelId:id},'helm.grip').every(Number.isFinite));
   }
   const nina=getShipModel().referenceMeasurements[0],santa=getShipModel('santa-maria');
   assert.equal(nina.subject,'modern-replica');assert.equal(nina.tonnage.kind,'tonnage-unspecified');assert.equal(nina.tonnage.unit,null);
   assert.ok(!('mass' in nina.tonnage),'unspecified tonnage cannot become a physical mass');
-  assert.equal(santa.referenceMeasurements[0].dimensions.find(d=>d.value===3.49).kind,'hull-depth');
+  assert.equal(santa.referenceMeasurements[0].dimensions.find(d=>d.value===3.49).kind,'hull-depth-not-draft');
   assert.equal(santa.rig.sails.length,5,'multiple sails may share a mast/control group');
   assert.equal(santa.rig.fittings[0].node,'lookout.fore');
-  assert.equal(santa.nodes['lookout.fore'].parent,'mast.fore');
-  assert.match(santa.rig.fittings[0].provenance,/user-requested/);
+  assert.equal(santa.nodes['lookout.fore'].parent,'hull','model-owned absolute design frame');
+  assert.match(santa.rig.fittings[0].provenance,/user-requested/i);
 });
 
 test('static structure points use the same catheads, masts and nonuniform scale as the ship',()=>{
@@ -73,5 +73,9 @@ test('crew identities reuse model-owned stations without sharing live route or p
     const x=a.crew.find(s=>s.id===p.id),y=b.crew.find(s=>s.id===p.id);
     assert.notEqual(x.route,y.route);assert.notEqual(x.route,NINA_DESIGN.crewStations[p.id].route);
   }
-  assert.throws(()=>createCompany(undefined,'pinta'),/not playable/);
+  for(const id of ['pinta','santa-maria']){
+    const company=createCompany(undefined,id);assert.equal(company.modelId,id);assert.equal(company.crew.length,12);
+    assert.notEqual(company.crew[0].route,getShipModel(id).crewStations[company.crew[0].id].route);
+  }
+  assert.throws(()=>createCompany(undefined,'unknown-ship'),/Unknown/);
 });
