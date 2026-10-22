@@ -16,12 +16,11 @@ night. Notify on meaningful changes, failures, required input or morning complet
 
 The October 20–21 overnight run and its old cutoff below are historical records.
 
-### Later-vessel integration — local qualification, unpublished
+### Nine-vessel integration — published and byte-verified
 
-The working registry now integrates the five later vessels. This is **not yet a
-release**: focused crew/rig/native checks pass; the final combined native suite,
-rendered review and public-byte verification remain admission gates. The latest
-public runtime remains `7c0b527` below.
+The registry now integrates all five later vessels alongside the original four.
+Runtime **`c8a660d5135db4cb25ac47e3c3b60b3025bc916f`** passed combined native and
+rendered checks and is published. The prior Sun-control receipt remains below.
 
 - Own hulls, floors/barriers, appendages, rig/propulsion, equipment and companies:
   Oseberg 32, Lusoria 26, Taíno-style canoe 30, Flying Cloud 12 represented from
@@ -77,7 +76,13 @@ public runtime remains `7c0b527` below.
   all five new models and the mixed nine-vessel scene completed; captured scenes
   reported no JavaScript/shader/device errors. A navigation timeout after several
   sequential scene reloads recovered in a fresh review tab without app changes.
-  This checkpoint is prepared for publication; deployed bytes are not yet verified.
+  Pages build **1305173682** built at **2026-10-22T11:03:44Z**. Public bytes were
+  verified at **11:05:32Z**: HTML **1,277,453 bytes**, SHA-256
+  `860f40e6eb288c83e33404a7c5c667880dc4f085dbdc89b131ae78ea5762e9f3`;
+  manifest **11,321 bytes**, SHA-256
+  `de21217564c4051c331411cc3ddcc55f07835fd67b6245493958e705cf140a17`.
+  All **53 assets / 15,875,925 bytes** matched individual sizes/hashes and local
+  files. Held woodland files were excluded from source, build and publication.
 - Remaining scope includes whole-rig running-line/spar clearance and calibrated
   historical performance. Blade forces currently react to actual ocean motion;
   individual blade entry/exit does not yet emit its own surface-wave disturbance.
@@ -216,7 +221,7 @@ These audits may close with no change when current source already satisfies the 
 3. Refine landfall geography/vegetation from meaningful island/river/coastal modules, atmospheric visibility and natural source data. Existing Saba is an MVP; global mapping and explorable interiors are not required. Open-ocean voyage target remains 15–20 minutes without fast-forwarding local simulation.
 4. Continue marine encounters, water interaction/refraction and effects quality based on rendered evidence. Shark/whale/dolphin systems already exist; distinguish defects from missing systems.
 5. Improve crew appearance and functional work/decision hooks where current source/rendered checks show outstanding issues. Preserve diverse identities and half-female crew, without gendered costume/pose bias.
-6. Integrate and qualify the five authored later-vessel prototypes: Oseberg-based c.850 vessel, c.350 Lusoria, 1492 thirty-person Taíno-style canoe, Flying Cloud (replacing generic schooner), Gipsy Moth IV. Definitions and stroke/mesh source are not playable integration.
+6. Preserve the qualified nine-model fleet checkpoint above: Oseberg-based c.850 vessel, c.350 Lusoria, 1492 thirty-person Taíno-style canoe, Flying Cloud (replacing generic schooner), Gipsy Moth IV now have playable integration. Remaining historical calibration, whole-operating-rig coverage and model-specific device performance remain explicit.
 7. Build navigation learning helpers/instruments after the qualified astronomical Moon/night runtime. Navigation accuracy remains a separate gate. Keep the sky clock separate from FFT time and retain explicit time/geographic conventions.
 
 ## Uncalibrated or deliberately subsequent systems
