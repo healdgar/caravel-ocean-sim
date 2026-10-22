@@ -91,6 +91,11 @@ test('cloth and spar affine frames derive from the same authoritative pose, with
       near(frame.position,expected);near(resolveProceduralShipNode(b,model,surface.sailNode,{...options,space:'design'}),expected);
       for(const role of surface.clewNodes){const node=model.nodes[role],q=proceduralShipNodeTransform(b,model,node,{time:3.4,wind:11});near(q.position,surfaceClothPoint(s,node.motion.u,node.motion.v,rigSurfacePose(s,b.sailState),c,3.4,11));}
       const role=surface.yardNode??surface.sparNode;if(role){const node=model.nodes[role],p=proceduralShipNodeTransform(b,model,node);near(p.position,surfaceYardPoint(s,node.motion.point,rigSurfacePose(s,b.sailState)));}
+      if(surface.yardNode){
+        const spar=s.spars.find(p=>p.kind==='yard'),centre=spar.a.map((v,i)=>(v+spar.b[i])*.5);
+        near(resolveProceduralShipNode(b,model,surface.yardNode,{space:'design'}),surfaceYardPoint(s,centre,rigSurfacePose(s,b.sailState)));
+        near(resolveProceduralShipNode(b,model,surface.yardNode,{space:'design'}),resolveProceduralShipNode(b,model,'spar.'+spar.id,{space:'design'}));
+      }
     }
     assert.equal(JSON.stringify(b),snapshot);
     const helm=laterSailSteeringPose(b);near(resolveProceduralShipNode(b,model,'helm.grip',{space:'design'}),helm.handle);

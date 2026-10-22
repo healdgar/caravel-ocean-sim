@@ -112,7 +112,9 @@ export function createProceduralShipDefinition(id,{status='planned'}={}){
       add(role,centre,'part',{type:'procedural-spar',surface:s.id,point:centre});
       for(const end of ['a','b'])add(role+'.'+end,spar[end],'attachment',{type:'procedural-spar',surface:s.id,point:spar[end]});
       if(spar.kind==='yard'){
-        yardNode='yard.'+s.name;add(yardNode,s.pivot,'part',{type:'procedural-spar',surface:s.id,point:s.pivot});
+        // A brace pivot can be on the mast axis. The visible yard attachment
+        // remains at the actual spar centre, shared with spar.<id>.
+        yardNode='yard.'+s.name;add(yardNode,centre,'part',{type:'procedural-spar',surface:s.id,point:centre});
       }
       sparNode??=role;
     }
