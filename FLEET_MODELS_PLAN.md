@@ -8,10 +8,11 @@ Performance is measured, but is not an admission gate for this programme.
 ## Baseline and ownership
 
 Public name: **Ocean Sailing Simulator**.
-Last verified published runtime: `5959d8e57266d924a112cda575401c525c473bcd`.
-The four-model/fleet/night checkpoint below is qualified locally: root's full
+Published runtime: `7fba40de2601552757ada1ce490883ced75f06fb`.
+The four-model/fleet/night checkpoint below is qualified and published: root's full
 native Metal suite passed **572/572**, zero skips, in **302.194 seconds**, with
-rendered checks. Publication and deployed-byte verification remain pending.
+rendered checks. Pages deployment `7243537555` succeeded at **2026-10-22T04:12:31Z**;
+HTML, manifest and all 53 assets matched exact public sizes/hashes at **04:13:27Z**.
 Root alone runs tests, builds, rendered checks and profiling. Direct agents may
 author disjoint code and proposed tests; no nested agents. Held `woodland`
 prototype files are unrelated and remain outside these checkpoints.
@@ -64,14 +65,14 @@ prototype files are unrelated and remain outside these checkpoints.
    with actual completion and explicit limits. Never label metadata or a static
    mesh as a playable vessel.
 
-## Current four-model/fleet/night checkpoint — qualified locally, publication pending
+## Current four-model/fleet/night checkpoint — published and byte-verified
 
 | Checkpoint | Current source | Remaining boundary |
 |---|---|---|
 | Shared parts and lateral body | Niña/Victory comparison, semantic transforms, reusable construction, loaded hull/actual-keel strips and sail/water moment balance | Geometry preservation, passive-load and physical-helm regressions passed; original offsets/dynamic CLR remain uncalibrated |
 | Fleet | Up to 8 independently selected/enabled followers plus player; one ocean/weather; per-model immutable assets; per-vessel mutable state; pooled wake/shadow layers | Mixed/maximum-nine modular and Pages allocation/isolation fixtures passed; no device performance guarantee or complete collision solver |
 | New construction/motion | Authoritative CPU surface/yard/rope/attachment pose, GPU upload and wetness-probe refresh for new models; explicit legacy backends | Current force/crew/visible/shadow/submerged/wet consistency checks passed; tested poses do not certify every operating rig configuration |
-| 1492 variants | Pinta and Santa María locally qualified with own hull/decks/equipment, three/five actual sails respectively | Reconstruction offsets, working cloth dimensions, loading and gun outfit remain authored; publication remains pending |
+| 1492 variants | Pinta and Santa María published with own hull/decks/equipment, three/five actual sails respectively | Reconstruction offsets, working cloth dimensions, loading and gun outfit remain authored |
 | Five later craft | Oseberg/Lusoria/Taíno-style rowing definitions and stroke/mesh prototypes; Flying Cloud/Gipsy Moth IV definitions with readiness requirements | Production registry/crew/control/propulsion/GPU integration, rendered checks and release remain pending |
 | Astronomy/night | Unwrapped clock/location, Sun/Moon/phase and historical stars, cloud/depth/horizon visibility and coherent lunar lighting through explicit 528-byte Frame | Native/integrated/minified checks and full/new-Moon rendered captures passed; no certified navigation accuracy or physical-iPhone performance |
 
@@ -87,8 +88,9 @@ Historical waterline/offset calibration remains unresolved separately from engin
 refactoring. The nine-vessel cap reflects explicit resource limits, not 60 FPS on
 all Macs or 30 FPS on a physical iPhone. Root reviewed Pinta/Santa María in visible
 Chrome and native actual four-vessel/full-Moon/new-Moon captures alongside the
-passing suite. Exact commit/publication/deployed-byte receipts will follow in
-README/backlog; local qualification does not establish deployment.
+passing suite. Exact commit/publication/deployed-byte receipts are recorded in
+[BACKLOG.md](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night);
+physical-device performance remains separate from release verification.
 
 ## Additional authorized work
 

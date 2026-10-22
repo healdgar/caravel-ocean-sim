@@ -1,6 +1,6 @@
 # Night sky and celestial navigation
 
-2026-10-21. **Runtime qualified locally in root's 572/572 native Metal suite, zero skips, with rendered full/new-Moon and four-vessel checks. Publication remains pending. Navigation lessons/instruments and certified navigation accuracy remain deferred.**
+2026-10-21. **Runtime published as `7fba40de2601552757ada1ce490883ced75f06fb` after root's 572/572 native Metal suite, zero skips, and rendered full/new-Moon and four-vessel checks. Public bytes verified 2026-10-22T04:13:27Z. Navigation lessons/instruments and certified navigation accuracy remain deferred.**
 
 ## Outcome
 
@@ -83,8 +83,10 @@ Offer period presentation separately from modern training instruments. [Royal Mu
 
 The current sky/rendering checkpoint passed the runtime qualification recorded
 below. Navigation accuracy, instruments and physical-device rows remain follow-up
-requirements, not capabilities certified by that checkpoint. Deployment still
-requires its own public-byte receipt.
+requirements, not capabilities certified by that checkpoint. Pages deployment
+`7243537555` succeeded at **2026-10-22T04:12:31Z**; HTML, manifest and all 53 assets
+matched exact public sizes/hashes at **04:13:27Z**.
+[Exact release receipts](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night).
 
 | Gate | Required evidence |
 | --- | --- |
@@ -115,6 +117,6 @@ requires its own public-byte receipt.
 - Production **Frame is explicitly 528 bytes /132 floats**, preserving the first384 bytes unchanged: Moon direction/irradiance at384, disc-right/radius400, disc-up/phase416, Moon-to-Sun/Lambert432, mode/stars/constellation/lunar-shadow flags448, catalogue rotation464–527. `withCelestialFrame()` specializes every production Frame-bearing shader in `main.shader()`. Legacy isolated384-byte shaders use exact zero-Moon stubs. This is a documented schema extension, not reused reserved components.
 - `window.oceanAstronomy`: `.clock`, `.state`, `.set({mode,date,latitude,longitude,rate,stars,constellations})`, `.update(elapsedSeconds)`. Share links preserve current astronomical date/location/rate and guide settings. Old manual links remain manual.
 
-`tests/astronomy.test.mjs` adds independent raw USNO modern/1805 and NASA/JPL1492 references with declared geometric/topocentric/parallax/time conventions, clock/share/geographic and historical-star invariants. `tests/celestial-gpu.test.mjs` uses the actual528-byte production specialization to check limb orientation, angular extent, horizon rejection and material light. Root executed these in the full native Metal suite: **572/572 tests passed**, **zero skips**, in **302.194 seconds**. Native actual four-vessel, full-Moon and new-Moon captures supplemented the suite; Pinta and Santa María were also reviewed in visible Chrome. This qualifies the bounded runtime checkpoint locally; publication and deployed-byte verification remain pending. No2-arcminute navigation, sustained performance or physical iPhone qualification is asserted.
+`tests/astronomy.test.mjs` adds independent raw USNO modern/1805 and NASA/JPL1492 references with declared geometric/topocentric/parallax/time conventions, clock/share/geographic and historical-star invariants. `tests/celestial-gpu.test.mjs` uses the actual528-byte production specialization to check limb orientation, angular extent, horizon rejection and material light. Root executed these in the full native Metal suite: **572/572 tests passed**, **zero skips**, in **302.194 seconds**. Native actual four-vessel, full-Moon and new-Moon captures supplemented the suite; Pinta and Santa María were also reviewed in visible Chrome. This bounded runtime checkpoint is published and byte-verified. No2-arcminute navigation, sustained performance or physical iPhone qualification is asserted.
 
 Still deferred: navigation lessons/hints, measured altitude/sextant/astrolabe UI, sight reduction and fixes, calendars other than explicit proleptic Gregorian, tides, eclipse/libration and calibrated stellar/airglow radiometry.

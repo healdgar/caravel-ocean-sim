@@ -5,18 +5,28 @@ implementation cutoff. That one-night heartbeat is now **paused**. Subsequent
 daytime work follows the user's new requests; earlier active-heartbeat/cutoff
 entries below are historical records, not current scheduling instructions.
 
-## Qualified local checkpoint: four vessels, independent fleets and night
+## Published checkpoint: four vessels, independent fleets and night
 
-The public name is **Ocean Sailing Simulator**. The last verified published runtime is
-`5959d8e57266d924a112cda575401c525c473bcd`. The new four-model/fleet/night checkpoint
-is **qualified locally, not yet published**. Root's serialized full native Metal
+The public name is **Ocean Sailing Simulator**. Published runtime
+`7fba40de2601552757ada1ce490883ced75f06fb` contains the qualified four-model/fleet/night
+checkpoint. Root's serialized full native Metal
 suite passed **572/572 tests**, **zero skips**, in **302.194 seconds**. Visible
 Chrome review covered Pinta and Santa María; native captures covered the actual
-four-vessel fleet, full Moon and new Moon. Root will append the exact commit,
-release and deployed-byte receipts after publication. No sustained frame-rate,
+four-vessel fleet, full Moon and new Moon. No sustained frame-rate,
 physical-iPhone or certified navigation-accuracy result is claimed.
 
-- Development registry: Niña, Victory, Pinta and Santa María. The two new vessels
+Root verified Pages deployment **7243537555**, successful at
+**2026-10-22T04:12:31Z**, and exact public bytes at **2026-10-22T04:13:27Z**.
+The release merge preserves the user's README rename commit `915b7f2`; runtime
+bytes match the qualified `5a4ad07` tree.
+
+| Public artifact | Bytes | SHA-256 / result |
+|---|---:|---|
+| Index HTML | 1,134,007 | `5cc2c00084db082a262cba152b37c533d154dc0a6d35ea8f795a2ace628d04f3` |
+| Asset manifest | 11,321 | `de21217564c4051c331411cc3ddcc55f07835fd67b6245493958e705cf140a17` |
+| All 53 assets | 15,875,925 | Every individual size and hash matched local bytes |
+
+- Published registry: Niña, Victory, Pinta and Santa María. The two new vessels
   have independent lofts/decks, helms, equipment, loading/crew stations and mixed
   square/lateen rigs. Pinta uses an enlarged modern-replica size profile; Santa
   María uses replica reported length/beam and an authored service draft. Offsets,
@@ -55,6 +65,13 @@ and actual 528-byte manual/day/full/new-night scenes. The full-suite result abov
 qualifies this bounded four-model checkpoint; five later craft remain unregistered.
 The held woodland prototype and all unrelated history below remain separate.
 
+Fresh public Chrome review after byte verification loaded the four-model fleet
+and astronomical full-Moon scene under the **Ocean Sailing Simulator** title.
+Both completed startup and rendered without console warnings/errors. Local
+captures are `shots/published-four-model-fleet.png` and
+`shots/published-full-moon.png`; the local development preview remains available
+at `http://localhost:8088/`.
+
 ## Working rules
 
 - Follow existing repository structure. Keep project context and checkpoints here.
@@ -87,7 +104,7 @@ These audits may close with no change when current source already satisfies the 
 ## Remaining requested programme
 
 1. Complete unresolved Victory shape/structure and sail/rig details when current evidence identifies defects; use existing measured GLB/reconstruction ledgers. Preserve real joins and tapered entrance; avoid detached decorative boards.
-2. Publish and verify the locally qualified four-model/fleet checkpoint. Pinta/Santa María now own geometry, physics descriptors and authoritative mixed-rig poses; the combined crew/native/packaged/rendered regression gate passed. Preserve documented rig-clearance limits, reconstruction uncertainty and tonnage/displacement distinctions.
+2. Maintain the published four-model/fleet checkpoint. Pinta/Santa María own geometry, physics descriptors and authoritative mixed-rig poses; the combined crew/native/packaged/rendered regression gate and public-byte verification passed. Preserve documented rig-clearance limits, reconstruction uncertainty and tonnage/displacement distinctions.
 3. Refine landfall geography/vegetation from meaningful island/river/coastal modules, atmospheric visibility and natural source data. Existing Saba is an MVP; global mapping and explorable interiors are not required. Open-ocean voyage target remains 15–20 minutes without fast-forwarding local simulation.
 4. Continue marine encounters, water interaction/refraction and effects quality based on rendered evidence. Shark/whale/dolphin systems already exist; distinguish defects from missing systems.
 5. Improve crew appearance and functional work/decision hooks where current source/rendered checks show outstanding issues. Preserve diverse identities and half-female crew, without gendered costume/pose bias.

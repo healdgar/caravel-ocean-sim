@@ -2,17 +2,17 @@
 
 Built on [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
-A real-time WebGPU sailing game with wind-driven ships, crew, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. The development source includes **Niña, Pinta, Santa María and HMS Victory**, independently selectable AI fleets, and an astronomical Sun, Moon and starry night. Boat, free-flight and exterior cameras share the same sea. Conditions, fleet choices and astronomical settings can be saved in a link.
+A real-time WebGPU sailing game with wind-driven ships, crew, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. The published game includes **Niña, Pinta, Santa María and HMS Victory**, independently selectable AI fleets, and an astronomical Sun, Moon and starry night. Boat, free-flight and exterior cameras share the same sea. Conditions, fleet choices and astronomical settings can be saved in a link.
 
 [Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-**Release status:** the last verified published runtime checkpoint is
-`5959d8e57266d924a112cda575401c525c473bcd`. The four-model fleet, passive
-hull/keel moments and astronomical night described below are a qualified local
-checkpoint: the full native Metal suite passed **572/572**, with zero skips,
-and rendered checks passed. Publication and deployed-byte verification remain
-pending; no physical-iPhone performance result is claimed. Root records exact
-validation and deployment receipts in [BACKLOG.md](BACKLOG.md).
+**Release status:** published runtime
+`7fba40de2601552757ada1ce490883ced75f06fb` includes the four-model fleet, passive
+hull/keel moments and astronomical night. The full native Metal suite passed
+**572/572**, with zero skips, plus rendered checks. Pages deployment
+`7243537555` succeeded at **2026-10-22 04:12:31 UTC**; public HTML, manifest and
+all 53 assets matched local sizes/hashes at **04:13:27 UTC**. No physical-iPhone
+performance result is claimed. [Exact receipts](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night).
 
 The published checkpoint reduces repeated crew, vessel and ocean shading work,
 targets 60 FPS with adaptive resolution, broadens contact-driven bow whitewater
@@ -272,8 +272,9 @@ not certified navigation accuracy: historical Earth rotation, stellar apparent
 corrections, procedural Moon detail and airglow retain documented approximations.
 Sextants, lessons and navigation assistance come later. [Implementation and
 reference conventions](ASTRO_NAVIGATION.md); [licenses](THIRD_PARTY_NOTICES.md).
-The current native/packaged suite and rendered night checks passed; publication
-remains pending. Navigation accuracy and physical-iPhone performance are unqualified.
+The current native/packaged suite and rendered night checks passed, and the
+runtime is published with verified bytes. Navigation accuracy and physical-iPhone
+performance are unqualified.
 
 ## Controls
 
@@ -975,14 +976,15 @@ User-supplied iPhone 18 Pro screenshots of build `7d0f4d1`, with profiling enabl
 
 ## Validation
 
-The current four-model/fleet/astronomy checkpoint is **qualified locally;
-publication is pending**. Root's serialized full native Metal suite passed
+The current four-model/fleet/astronomy checkpoint is **published and byte-verified**
+as `7fba40de2601552757ada1ce490883ced75f06fb`. Root's serialized full native Metal suite passed
 **572/572 tests**, with **zero skips**, in **302.194 seconds**. CPU, native GPU and
 production modular/Pages fixtures cover posed uploads, immutable assets,
 independent state, nine active vessels, actual 528-byte night scenes and saved
 USNO/JPL references. Root also reviewed Pinta and Santa María in visible Chrome
-and native four-vessel, full-Moon and new-Moon captures. Commit, publication and
-deployed-byte receipts will follow in [BACKLOG.md](BACKLOG.md). These checks do
+and native four-vessel, full-Moon and new-Moon captures. Pages deployment
+`7243537555` and exact public HTML/manifest/53-asset receipts are recorded in
+[BACKLOG.md](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night). These checks do
 not establish historical navigation accuracy, sustained frame rate or physical
 iPhone performance.
 
@@ -1113,7 +1115,7 @@ GPU fixtures default to SwiftShader and an offscreen render target, so a physica
 
 - Far water is still somewhat darker than the bright horizon sky above it.
 - The water is tuned toward turbid coastal water. The "Water turbidity" slider gives darker, bluer deep water when turned down.
-- The public baseline supports Niña/Victory pairs. The locally qualified checkpoint supports four model types and up to nine active vessels; publication remains pending. Five later craft remain unregistered prototypes. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
+- The published game supports four model types and up to nine active vessels. Five later craft remain unregistered prototypes. Saba is the only 3D landfall module; shoreline surf, ports and regional streaming remain pending.
 - Volumetric clouds can show reconstruction noise during fast movement and repeat over a 16 km field. Direct-sun occlusion is sampled near the camera; moving cloud shadows are not yet projected across the sea.
 - Deck wash is a bounded visual model. It does not add floodwater mass, simulate capsizing or complete underwater immersion, or create separate runoff landing splashes. Severe crests can still overtop the hull and fill the deck-water field up to its 1.2 m depth limit.
 - Vessel shadows retain the nearest canvas layer; overlapping sails do not multiply their transmission. The finite map resolution and bounded soft filter can alias very thin rigging, especially on enlarged ships. The ocean receives vessel shadows but does not cast wave shadows onto the ship.

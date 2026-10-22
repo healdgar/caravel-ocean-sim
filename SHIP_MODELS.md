@@ -1,18 +1,18 @@
 # Reusable ship definitions
 
-The development registry admits **Niña, HMS Victory (1805), Pinta and Santa
+The published registry admits **Niña, HMS Victory (1805), Pinta and Santa
 María**. Pinta/Santa María are explicit development reconstructions with their
 own hulls, equipment and mixed rigs. Up to **eight independently selected AI
 followers plus the player** share one sea/weather simulation. Five later craft
 have authored definitions/prototypes but are not admitted to the playable registry.
 
-**Qualification/release boundary:** the last verified published runtime is
-`5959d8e57266d924a112cda575401c525c473bcd`. The combined four-model/fleet/night checkpoint is qualified
-locally: **572/572 native Metal suite tests passed**, zero skips, in
-**302.194 seconds**, with rendered checks. Publication and deployed-byte
-verification remain pending; physical-iPhone performance is unqualified.
+**Qualification/release boundary:** published runtime
+`7fba40de2601552757ada1ce490883ced75f06fb` passed **572/572 native Metal suite
+tests**, zero skips, in **302.194 seconds**, with rendered checks. Pages deployment
+`7243537555` succeeded at **2026-10-22T04:12:31Z**; public HTML, manifest and all
+53 assets matched sizes/hashes at **04:13:27Z**. Physical-iPhone performance is unqualified.
 Victory was brought forward at the user's request. See [BACKLOG.md](BACKLOG.md)
-for root's validation and subsequent deployment receipts.
+for [exact validation and deployment receipts](BACKLOG.md#published-checkpoint-four-vessels-independent-fleets-and-night).
 
 ## Ownership
 
@@ -187,8 +187,8 @@ vessel, without enumerating every wake-parity combination.
    fixtures, including posed uploads, tested cloth/rope poses, crew reach/routes,
    wetting, disabled allocation and fleets through nine active vessels.
 2. Passed: visible Chrome Pinta/Santa María review and native four-vessel,
-   full-Moon and new-Moon captures. Publication and exact deployed-byte receipts
-   remain pending. Rendered fixtures do not certify every operating rig pose.
+   full-Moon and new-Moon captures. Published HTML, manifest and all 53 assets
+   matched exact local sizes/hashes. Rendered fixtures do not certify every operating rig pose.
 3. Calibrate hull offsets, mass/ballast, sail polars and dynamic lateral response
    when defensible source data exist. Current finite/passive equations alone do
    not establish historical performance or seaworthiness.
@@ -204,7 +204,7 @@ semantic ranges and attachment contracts. Passing new checks cover shared assets
 ready/planned guards, authoritative cloth/rope/crew/wetness positions, passive
 hull-load invariants, physical follower controls and actual modular/Pages fleets.
 Root's full native Metal suite passed **572/572**, zero skips, in **302.194 seconds**;
-the checkpoint is locally qualified, with publication pending. [Astronomy](ASTRO_NAVIGATION.md) adds a
+the checkpoint is published and byte-verified. [Astronomy](ASTRO_NAVIGATION.md) adds a
 separate 528-byte production Frame and actual Moon/stars/night lighting shared
 by each model, with no certified historical navigation accuracy.
 
