@@ -120,6 +120,11 @@ function surfaceSewnWeight(surface,u,v){
 // per-vessel runtime view. Only authored static support geometry is prepared;
 // pressure, cloth side, contact clearance, time and sail state remain live.
 function surfaceMastSupport(m,index){return {a:m.foot,b:m.head,r:m.radius,kind:'mast',mast:m.index??index,...(m.tipRadius===undefined?{}:{rEnd:m.tipRadius})};}
+// A yard shares its mast's authored canvas face. A boom or gaff instead keeps
+// each foreign sail on its own rest side of that finite spar; projecting a
+// fore/aft mast face onto a nearly longitudinal boom invents a sideways wall.
+// Unclassified legacy spars retain their previous yard behavior.
+function surfaceMastFaceSupport(support){return support.kind==='mast'||support.kind==='spar'&&(support.sparKind===undefined||support.sparKind==='yard');}
 export function withRigSupportCache(context){
   if(context._surfaceCollisionSupports)return context;
   const supports=[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
@@ -144,7 +149,7 @@ function surfacePreparedSupportData(supports){
       ||(s.rEnd!==undefined&&!Number.isFinite(s.rEnd)))return null;
     data.push(Object.freeze({ax:s.a[0],ay:s.a[1],az:s.a[2],bx:s.b[0],by:s.b[1],bz:s.b[2],
       x:s._surfaceAxis[0],y:s._surfaceAxis[1],z:s._surfaceAxis[2],length2:s._surfaceLength2,
-      r:s.r??0,rEnd:s.rEnd,kind:s.kind,mast:s.mast,surface:s.surface}));
+      r:s.r??0,rEnd:s.rEnd,kind:s.kind,mast:s.mast,surface:s.surface,...(s.sparKind===undefined?{}:{sparKind:s.sparKind})}));
   }
   view.data=Object.freeze(data);surfacePreparedNormals.set(view.data,{entries:[],fore:[],aft:[]});return view.data;
 }
@@ -169,7 +174,7 @@ export function withRigPoseContext(context,state={},poses=null){
   const stationary=context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
   const moving=context.spars.map(spar=>{
     const owner=surfaceFind(spar.surface,context),pose=live.get(owner.id),a=surfaceYardPoint(owner,spar.a,pose),b=surfaceYardPoint(owner,spar.b,pose),axis=surfaceSubtract(b,a);
-    return {a,b,r:spar.radius,kind:'spar',surface:owner.id,mast:owner.mast,_surfaceAxis:axis,_surfaceLength2:surfaceDot(axis,axis)};
+    return {a,b,r:spar.radius,kind:'spar',surface:owner.id,mast:owner.mast,...(spar.kind===undefined?{}:{sparKind:spar.kind}),_surfaceAxis:axis,_surfaceLength2:surfaceDot(axis,axis)};
   });
   // Dynamic endpoints belong to this one pose view. They are deliberately
   // separate from the immutable authored-support preparation above.
@@ -195,7 +200,7 @@ function surfaceApplySupports(point,reference,normal,surface,pose,context,u,v){
     const axis=support._surfaceAxis??surfaceSubtract(b,a),length2=support._surfaceLength2??surfaceDot(axis,axis);if(length2<1e-12)throw Error('Degenerate rig support');
     const t=surfaceClamp(surfaceDot(surfaceSubtract(p,a),axis)/length2),q=surfaceMix(a,b,t),delta=surfaceSubtract(p,q);
     if(support.rEnd!==undefined)r=(support.r??0)+(support.rEnd-(support.r??0))*t+clearance;
-    const mastBarrier=(support.kind==='mast'||support.kind==='spar')&&support.mast===surface.mast&&surface.mastContactSide;
+    const mastBarrier=surfaceMastFaceSupport(support)&&support.mast===surface.mast&&surface.mastContactSide;
     if(mastBarrier&&!['fore','aft'].includes(mastBarrier))throw Error('Invalid authored mast contact side');
     const direction=mastBarrier?[0,0,mastBarrier==='fore'?-1:1]:normal;
     let contactNormal=surfaceSubtract(direction,surfaceMultiply(axis,surfaceDot(direction,axis)/length2));
@@ -233,7 +238,7 @@ function surfaceApplyPreparedSupports(p,reference,normal,surface,pose,supports,p
     const t=surfaceClamp((((0+(px-ax)*x)+(py-ay)*y)+(pz-az)*z)/length2);
     const qx=ax+(bx-ax)*t,qy=ay+(by-ay)*t,qz=az+(bz-az)*t,dx=px-qx,dy=py-qy,dz=pz-qz;
     if(support.rEnd!==undefined)r=support.r+(support.rEnd-support.r)*t+clearance;
-    const mastBarrier=(support.kind==='mast'||support.kind==='spar')&&support.mast===surface.mast&&surface.mastContactSide;
+    const mastBarrier=surfaceMastFaceSupport(support)&&support.mast===surface.mast&&surface.mastContactSide;
     if(mastBarrier&&mastBarrier!=='fore'&&mastBarrier!=='aft')throw Error('Invalid authored mast contact side');
     let projections;
     if(mastBarrier)projections=mastBarrier==='fore'?normalCache.fore:normalCache.aft;

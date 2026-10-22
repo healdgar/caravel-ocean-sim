@@ -4,12 +4,18 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {deepFreeze} from '../js/rig-definition.js';
 import {rigSurfacePose,surfaceClothPoint,surfaceRestPoint,surfaceRopePoint,withRigSupportCache,withRigPoseContext} from '../js/rig-surface.js';
+import {laterSailRigContext} from '../js/additional-rig.js';
+import {LATER_SAIL_DESIGNS} from '../js/models/later-sail.js';
 
 const supportFastSurface=extra=>({id:1,mast:0,controlGroup:'main',kind:'square',pivot:[0,1,0],
   corners:[[-1,2,.05],[1,2,.05],[1,0,.05],[-1,0,.05]],belly:.12,...extra});
 const supportFastContext=(surface,supports,extra={})=>deepFreeze(withRigSupportCache({surfaces:[surface],supports,masts:[],lines:[],...extra}));
 const supportFastReference=context=>({...context,_surfaceCollisionSupports:Object.freeze([...context._surfaceCollisionSupports])});
 const supportFastBytes=value=>new Uint8Array(new Float64Array(value).buffer);
+function supportFastSegmentPoint(point,a,b){
+  const axis=b.map((v,i)=>v-a[i]),delta=point.map((v,i)=>v-a[i]),length2=axis.reduce((sum,v)=>sum+v*v,0),t=Math.max(0,Math.min(1,delta.reduce((sum,v,i)=>sum+v*axis[i],0)/length2));
+  return {t,distance:Math.hypot(...point.map((v,i)=>v-(a[i]+axis[i]*t)))};
+}
 function supportFastHypots(evaluate){
   const original=Math.hypot;let calls=0;
   Math.hypot=(...values)=>{calls++;return original(...values);};
@@ -125,4 +131,42 @@ test('mutable endpoints, shallow-frozen geometry and frozen accessors never acqu
   ])};
   surfaceClothPoint(surface,.5,.5,pose,spoof);radius=NaN;
   assert.throws(()=>surfaceClothPoint(surface,.5,.5,pose,spoof),/Invalid rig support descriptor/);
+});
+
+test('same-mast booms and gaffs preserve the foreign cloth rest side while legacy yards retain their face',()=>{
+  const surface=supportFastSurface({belly:0,mastContactSide:'fore'}),spar={a:[0,1,.05],b:[.2,1,2.05],r:.05,kind:'spar',surface:2,mast:0},pose=rigSurfacePose(surface,{}),bare=surfaceClothPoint(surface,.3,.5,pose);
+  for(const sparKind of ['boom','gaff']){
+    const context=supportFastContext(surface,[{...spar,sparKind}]),remote=surfaceClothPoint(surface,.3,.5,pose,context),near=surfaceClothPoint(surface,.475,.5,pose,context),original=surfaceClothPoint(surface,.475,.5,pose);
+    assert.deepEqual(supportFastBytes(remote),supportFastBytes(bare),'a remote longitudinal spar cannot invent a sideways mast-face wall');
+    assert.ok(near[0]<original[0],'actual contact keeps the foreign cloth on its original negative-X side');
+    assert.ok(supportFastSegmentPoint(near,spar.a,spar.b).distance>=spar.r+(surface.contactClearance??.045)-1e-12,'real finite boom/gaff contact still separates the cloth');
+    supportFastCompare(context,{},[[.3,.5],[.475,.5],[.475+.0005,.5]]);
+    const sewn=supportFastContext(surface,[{...spar,sparKind,surface:1}]);
+    assert.deepEqual(supportFastBytes(surfaceClothPoint(surface,.475,.5,pose,sewn)),supportFastBytes(original),'own sewn spars remain exempt');
+  }
+  const legacy=supportFastContext(surface,[spar]),yard=supportFastContext(surface,[{...spar,sparKind:'yard'}]);
+  const old=surfaceClothPoint(surface,.3,.5,pose,legacy),classified=surfaceClothPoint(surface,.3,.5,pose,yard);
+  assert.deepEqual(supportFastBytes(old),supportFastBytes(classified),'unclassified legacy spars retain their exact yard behavior');assert.notDeepEqual(supportFastBytes(classified),supportFastBytes(bare));
+});
+
+test('a foreign live gaff keeps genuine moving contact and its spar kind in both pose evaluators',()=>{
+  const main=supportFastSurface({belly:0,mastContactSide:'fore'}),gaff=supportFastSurface({id:2,kind:'gaff',controlGroup:'fore',pivot:[0,1,.05],hingeAxis:[0,1,0]}),spar={kind:'gaff',surface:2,a:[0,1,.05],b:[.2,1,2.05],radius:.05};
+  const context=supportFastContext(main,[],{surfaces:[main,gaff],masts:[{index:0,foot:[0,-2,.8],head:[0,4,.8],radius:.03}],spars:[spar]}),points=[];
+  for(const yaw of [0,.4]){
+    const state={set:[1,1,0],surfaceYaw:{1:0,2:yaw},rig:[{fill:0},{fill:0},{}]},live=withRigPoseContext(context,state),direct=withRigPoseContext(supportFastReference(context),state),obstacle=live._surfaceActiveSupports.find(s=>s.kind==='spar');
+    assert.equal(obstacle.sparKind,'gaff');const p=surfaceClothPoint(main,.475,.5,live.poses.get(1),live);
+    assert.ok(supportFastSegmentPoint(p,obstacle.a,obstacle.b).distance>=spar.radius+(main.contactClearance??.045)-1e-12);
+    assert.deepEqual(supportFastBytes(p),supportFastBytes(surfaceClothPoint(main,.475,.5,direct.poses.get(1),direct)));points.push(p);
+  }
+  assert.notDeepEqual(supportFastBytes(points[0]),supportFastBytes(points[1]),'a truly contacting independently moving gaff still changes cloth');
+});
+
+test('the actual opposite-side clipper course stays outside its mast without a remote spanker boom pull',()=>{
+  const design=LATER_SAIL_DESIGNS['flying-cloud'],context=laterSailRigContext(design.id),course=design.surfaces.find(s=>s.id===11),state={set:[1,1,1],groupYaw:[.67,.67,.67],windSide:9,windForward:7,rig:[0,1,2].map(()=>({fill:1,side:-1}))};
+  const live=withRigPoseContext(context,state),pose=live.poses.get(course.id),boom=live._surfaceActiveSupports.find(s=>s.kind==='spar'&&s.surface===25&&s.sparKind==='boom');
+  assert.ok(boom);const without={...live,_surfaceActiveSupports:live._surfaceActiveSupports.filter(s=>s!==boom)},point=surfaceClothPoint(course,.45,1,pose,live,2.7,18),unpulled=surfaceClothPoint(course,.45,1,pose,without,2.7,18);
+  assert.deepEqual(supportFastBytes(point),supportFastBytes(unpulled),'the physically remote boom cannot undo earlier real mast separation');
+  const mast=context.masts[course.mast],clearance=supportFastSegmentPoint(point,mast.foot,mast.head),radius=mast.radius+(mast.tipRadius-mast.radius)*clearance.t;
+  assert.ok(clearance.distance>radius+1e-5,'the source-traced crossjack point remains outside the actual tapered mizzen mast');
+  assert.ok(supportFastSegmentPoint(point,boom.a,boom.b).distance>boom.r+(course.contactClearance??.045)+(course.contactBand??.25),'the regression point is outside the remote boom contact band');
 });

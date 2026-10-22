@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSurfaceSailGeometry,updateSailGeometry} from '../js/sail-aerodynamics.js';
-import {withRigPoseContext,surfaceClothPoint} from '../js/rig-surface.js';
+import {withRigPoseContext,surfaceClothPoint,rigSurfacePose} from '../js/rig-surface.js';
 
 test('mean-load cloth and its cache follow another surface actual moving spar',()=>{
   const main={id:1,name:'main',mast:0,controlGroup:'main',kind:'square',pivot:[0,2,0],
@@ -58,4 +58,16 @@ for(const kind of ['mast-tip','support-end'])test(`${kind} taper changes actual 
   assert.ok(geometry.revision>firstRevision,'changed physical taper must invalidate panel geometry');
   assert.ok(Math.abs(cloth.points[index][2]-.06)<1e-12,'narrower actual contact radius changes cloth position rather than only its cache key');
   assert.ok(Math.abs(cloth.totalArea-firstArea)>1e-6,'actual tapered contact changes aerodynamic cloth area');
+});
+
+test('changing an actual same-mast spar kind invalidates its foreign cloth force cache',()=>{
+  const course={id:1,mast:0,controlGroup:'main',kind:'square',pivot:[0,1,0],corners:[[-1,2,.05],[1,2,.05],[1,0,.05],[-1,0,.05]],belly:0,mastContactSide:'fore'};
+  const gaff={id:2,mast:0,controlGroup:'fore',kind:'gaff',pivot:[0,1,.05],corners:[[-1,2,.05],[1,2,.05],[1,0,.05],[-1,0,.05]],belly:0,hingeAxis:[0,1,0]};
+  const spar={kind:'boom',surface:2,a:[0,1,.05],b:[.2,1,2.05],radius:.05},design={id:'spar-kind-fixture',frame:{length:12,beam:3.6,verticalScale:1},surfaces:[course,gaff]},context={surfaces:design.surfaces,masts:[{index:0,foot:[0,-2,.8],head:[0,4,.8],radius:.03}],supports:[],spars:[spar]};
+  const state={set:[1,1,0],surfaceYaw:{1:0,2:0},rig:[{fill:0},{fill:0},{}]},boat={length:12,beam:3.6,sailState:state},geometry=createSurfaceSailGeometry(design,context,10),cloth=geometry.surfaces[0],index=cloth.samples.findIndex(([u,v])=>u===.3&&v===.5);
+  assert.ok(index>=0);updateSailGeometry(geometry,boat);const first=[...cloth.points[index]],revision=cloth.revision;
+  assert.deepEqual(first,surfaceClothPoint(course,.3,.5,rigSurfacePose(course,state),{},0,0),'a remote boom leaves the opposite-side reference cloth alone');
+  updateSailGeometry(geometry,boat);assert.equal(cloth.revision,revision);
+  spar.kind='yard';updateSailGeometry(geometry,boat);assert.ok(cloth.revision>revision,'semantic spar classification belongs to the force cache key even with identical endpoints/radius');assert.notDeepEqual([...cloth.points[index]],first);
+  spar.kind='boom';updateSailGeometry(geometry,boat);assert.deepEqual([...cloth.points[index]],first,'restoring the actual boom classification restores the same physical cloth');
 });
