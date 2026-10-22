@@ -3,7 +3,7 @@ import { shroudGeometry } from './rigging.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { gltfTRS } from './gltf.js';
 import { resolveShipNode,requirePlayableShipModel } from './ship-models.js';
-import { VICTORY_DESIGN, victorySheer,victoryStairFlights } from './models/victory.js';
+import { VICTORY_DESIGN, victorySheer,victoryStairFlights,victoryChainwale } from './models/victory.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
 import {ROWING_DESIGNS,rowingRigContext,rowingBenchDescriptors} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS,laterSailStairFlights} from './models/later-sail.js';
@@ -246,9 +246,27 @@ function routeTo(s,target,boat){
 // segment is checked against equipment, including the complete recoil sweep.
 function crewWorkNavigationOptions(s,boat){
   const j=s.job;if(!j||!['rig','lookout'].includes(j.kind))return s.navigationBody;
-  const root=climbRoot(j.mast,j.side,0,boat),sx=boat.beam/3.6,margin=(.30+.03)/sx,
-    x=j.side*Math.min(Math.abs(root[0]),Math.max(0,modelDeckWidth(boat,root[2])-margin)),entry=[x,crewDeckHeight(boat,root[2],x),root[2]];
-  return {...s.navigationBody,rigAccess:{point:physical(root,boat),entry:physical(entry,boat),radius:1.25,mast:j.mast,side:j.side}};
+  const root=climbRoot(j.mast,j.side,0,boat),sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),margin=(.30+.03)/sx,
+    x=j.side*Math.min(Math.abs(root[0]),Math.max(0,modelDeckWidth(boat,root[2])-margin)),entry=[x,crewDeckHeight(boat,root[2],x),root[2]],
+    access={point:physical(root,boat),entry:physical(entry,boat),radius:1.25,mast:j.mast,side:j.side};
+  if(boat.modelId==='victory'){
+    const key=[boat.length,boat.beam,j.mast,j.side,...root].join('/');
+    if(j.navigationAccess?.key===key)return {...s.navigationBody,rigAccess:j.navigationAccess.value};
+    const options={...s.navigationBody,rigAccess:access},channelAtRoot=victoryChainwale(j.mast,j.side,root[2]),
+      outerAtRoot=[channelAtRoot.outer-j.side*(.30+.025)/sx,channelAtRoot.y,root[2]];
+    // Board between actual raised gunport lids, then walk along the rendered
+    // channel. Cache this equipment-only access on the job, never per frame.
+    for(const offset of[0,.6,-.6,1,-1,1.4,-1.4]){
+      const z=root[2]+offset/sz,channel=victoryChainwale(j.mast,j.side,z),
+        inboardX=j.side*Math.max(0,modelDeckWidth(boat,z)-margin),floor=crewDeckHeight(boat,z,inboardX),
+        outboardX=channel.outer-j.side*(.30+.025)/sx,midY=(floor+channel.y)*.5,
+        lead=[[inboardX,floor,z],[inboardX,midY,z],[outboardX,midY,z],[outboardX,channel.y,z],outerAtRoot,root],world=lead.map(p=>physical(p,boat));
+      if(world.slice(1).some((p,i)=>!crewNavigationSegmentClear(world[i],p,boat,options)))continue;
+      access.entry=world[0];access.lead=world.slice(0,-1);break;
+    }
+    j.navigationAccess={key,value:access};
+  }
+  return {...s.navigationBody,rigAccess:access};
 }
 function crewWorkSegmentClear(s,boat,a,b){
   if(hasExtendedCrewModel(boat.modelId))return true;
@@ -260,11 +278,11 @@ function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
   const start=s.job?.position?.slice()??[s.x,s.position[1]?(s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x),s.z],points=[start],options=crewWorkNavigationOptions({...s,job},boat),dense=[];
   const waypoints=path.slice(),access=options?.rigAccess;
   if(access?.entry){
-    const scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12],entry=access.entry.map((v,i)=>v/scale[i]);
-    if(distance3(physical(waypoints.at(-1),boat),access.point)<1e-6)waypoints.splice(waypoints.length-1,0,entry);
+    const scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12],lead=(access.lead??[access.entry]).map(p=>p.map((v,i)=>v/scale[i]));
+    if(distance3(physical(waypoints.at(-1),boat),access.point)<1e-6)waypoints.splice(waypoints.length-1,0,...lead);
     else if(distance3(physical(start,boat),access.point)<1e-6){
       while(waypoints.length&&distance3(physical(waypoints[0],boat),access.point)<1e-6)waypoints.shift();
-      waypoints.unshift(entry);
+      waypoints.unshift(...lead.slice().reverse());
     }
   }
   let previous=start;

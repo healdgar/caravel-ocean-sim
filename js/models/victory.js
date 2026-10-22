@@ -61,7 +61,7 @@ export const VICTORY_DESIGN=deepFreeze({
   helm:{x:.82,z:3.5,eyeAboveDeck:1.6},
   wheel:{centre:[0,1.95,3.7],radius:.18},
   bittsZ:[-5.1,-4.50,1.8,4.22],
-  chainwales:{inset:.08,outset:.30,endMargin:.10,rise:.04-.12/verticalScale,thickness:.025},
+  chainwales:{inset:.08,outset:.32,endMargin:.10,rise:.04-.12/verticalScale,thickness:.025},
   // Authored access lanes clear the complete gun recoil and fixed deck
   // fittings. The fore pair also stays inboard of the forecastle bitts.
   stairs:[{id:'forecastle',x:.30,run:.6,width:.21,treads:7,railOffset:.12,railRadius:.022},
