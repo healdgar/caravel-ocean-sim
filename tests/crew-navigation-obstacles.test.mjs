@@ -11,7 +11,7 @@ import {getShipModel,SHIP_MODELS} from '../js/ship-models.js';
 import {vesselVerticalScale,modelDeck} from '../js/hull.js';
 import {loadCrewGLB} from '../js/gltf.js';
 import {poseCrewWork} from '../js/crew-pose.js';
-import {victoryStairFlights} from '../js/models/victory.js';
+import {VICTORY_MASTS,victoryStairFlights,victoryChainwale} from '../js/models/victory.js';
 
 const navGunModels=['nina','victory','pinta','santa-maria'],navAssets=createShipAssetCache();
 const navBoat=id=>{const model=getShipModel(id);return {modelId:id,model,...model.runtime,roll:0,pitch:0,rollVelocity:0,heading:0,rudder:0,sailFore:1,sailMain:1,sailMizzen:1,crew:false};};
@@ -48,6 +48,24 @@ function navEdgeCutsTriangle(a,b,t){
 function navTriangleCuts(a,b){
   if(a.min.some((v,i)=>v>b.max[i]||a.max[i]<b.min[i]))return false;
   return [0,1,2].some(i=>navEdgeCutsTriangle(a.p[i],a.p[(i+1)%3],b.p)||navEdgeCutsTriangle(b.p[i],b.p[(i+1)%3],a.p));
+}
+// Independent vertical ray against an actual indexed triangle. Navigation's
+// analytic support cannot qualify itself when a rendered board is absent,
+// curves away, or slopes across a discontinuous deck height.
+function navSurfaceHeight(triangle,x,z){
+  const [a,b,c]=triangle,ux=b[0]-a[0],uz=b[2]-a[2],vx=c[0]-a[0],vz=c[2]-a[2],det=ux*vz-uz*vx;
+  if(Math.abs(det)<1e-12)return null;
+  const dx=x-a[0],dz=z-a[2],u=(dx*vz-dz*vx)/det,v=(ux*dz-uz*dx)/det;
+  if(u< -1e-7||v< -1e-7||u+v>1+1e-7)return null;
+  return a[1]+u*(b[1]-a[1])+v*(c[1]-a[1]);
+}
+function navTopTriangles(asset,group,boat){
+  const tops=[];
+  for(let at=group.firstVertex;at<group.firstVertex+group.vertexCount;at+=3){
+    const records=Array.from({length:3},(_,i)=>asset.vertices.subarray(asset.indices[at+i]*9,asset.indices[at+i]*9+9));
+    if(records.every(v=>v[4]>.99999))tops.push(records.map(v=>navPhysical(Array.from(v.subarray(0,3)),boat)));
+  }
+  return tops;
 }
 function navSkin(mesh,s){
   const f=new Float32Array(mesh.vertices.buffer,mesh.vertices.byteOffset,mesh.vertices.byteLength/4),u=new Uint16Array(mesh.vertices.buffer,mesh.vertices.byteOffset,mesh.vertices.byteLength/2),palette=mesh.animator.palette,points=[];
@@ -97,6 +115,9 @@ test('independent mesh oracle detects real triangle penetration without treating
   assert.equal(navTriangleCuts(a,b),true);assert.equal(navTriangleCuts(a,far),false);
   assert.equal(navSweptStandingBody([-1,0,0],[1,0,0],{min:[-.1,.2,-.1],max:[.1,.4,.1]}),true);
   assert.equal(navSweptStandingBody([-1,2,0],[1,2,0],{min:[-.1,.2,-.1],max:[.1,.4,.1]}),false);
+  const ramp=[[0,2,0],[2,4,0],[0,2,2]];
+  assert.equal(navSurfaceHeight(ramp,.5,.5),2.5);assert.equal(navSurfaceHeight(ramp,1.5,1.5),null);
+  assert.equal(navSurfaceHeight([[0,0,0],[0,1,0],[0,0,1]],0,.5),null,'vertical faces do not provide horizontal footing');
 });
 
 test('fixed and full-recoil reservations enclose actual rendered gun vertices at nominal and resized hull scales',()=>{
@@ -142,6 +163,66 @@ test('continuous route checks reject crossing mast or gun space even when both e
   assert.deepEqual(route[0],design(a));assert.deepEqual(route.at(-1),design(b));
   for(let i=1;i<route.length;i++)for(const o of obstacles)assert.equal(navSweptStandingBody(navPhysical(route[i-1],boat),navPhysical(route[i],boat),o),false,'full standing body clears '+o.id);
   const unknown={...boat,modelId:'nonexistent'};assert.equal(crewNavigationObstacles(unknown),null);assert.equal(crewNavigationRoute([design(a),design(b)],unknown),null);
+});
+
+test('segment clearance fails closed for malformed or non-finite physical endpoints',()=>{
+  const boat=navBoat('nina'),good=[-1,modelDeck(boat,0)*vesselVerticalScale(boat),0];
+  const invalid=[null,undefined,[],[0,0],[0,0,0,0],[NaN,0,0],[0,Infinity,0],[0,0,-Infinity],['0',0,0],[[0],0,0],Array(3),'012',0];
+  for(const bad of invalid){
+    assert.equal(crewNavigationSegmentClear(bad,good,boat),false,'invalid start must fail closed');
+    assert.equal(crewNavigationSegmentClear(good,bad,boat),false,'invalid destination must fail closed');
+    assert.equal(crewNavigationClear(bad,boat),false,'invalid stationary body must fail closed');
+  }
+});
+
+test('Victory rig access rests on real hull-connected channel tops and rejects unsupported standing footprints',()=>{
+  const asset=navAssets.get('victory'),hullGroup=asset.groups.find(g=>g.id==='hull.planking');assert.ok(hullGroup);
+  let supported=0,connections=0;
+  for(const size of [.65,1,1.3]){
+    const boat=navBoat('victory');boat.length*=size;boat.beam*=size;
+    const scale=navScale(boat),obstacles=crewNavigationObstacles(boat),hullPoints=navGroupPoints(asset,hullGroup,boat),hullTriangles=[];
+    for(let i=0;i<hullPoints.length;i+=3)hullTriangles.push(navTriangle(hullPoints.slice(i,i+3)));
+    for(const [mast,m]of VICTORY_MASTS.entries())for(const side of [-1,1]){
+      const group=asset.groups.find(g=>g.id==='chainwale.'+m.id+'.'+side);assert.ok(group,'actual side channel exists');
+      const tops=navTopTriangles(asset,group,boat);assert.ok(tops.length>=24,'channel has actual indexed top surfaces');
+      const vertices=tops.flat(),zs=[...new Set(vertices.map(p=>p[2]))].sort((a,b)=>a-b),z0=zs[0],z1=zs.at(-1),radius=CREW_NAVIGATION_BODY.radius;
+      // Derive the contact edge from rendered vertices, then intersect actual
+      // hull triangles in the transverse plane. Source coordinates alone do
+      // not prove that a separate channel is joined to the hull skin.
+      for(const z of zs){
+        const row=vertices.filter(p=>Math.abs(p[2]-z)<1e-7),inner=row.reduce((a,b)=>side*a[0]<side*b[0]?a:b),outer=row.reduce((a,b)=>side*a[0]>side*b[0]?a:b),thickness=victoryChainwale(mast,side,z/scale[2]).thickness*scale[1];
+        let joined=false;
+        for(const drop of [0,.25,.5,.75,1]){
+          const y=inner[1]-drop*thickness;
+          const skins=hullTriangles.filter(t=>side*(side<0?t.max[0]:t.min[0])>0&&y>=t.min[1]-1e-7&&y<=t.max[1]+1e-7&&z>=t.min[2]-1e-7&&z<=t.max[2]+1e-7).map(t=>navSurfaceHeight(t.p.map(p=>[p[1],side*p[0],p[2]]),y,z)).filter(Number.isFinite);
+          if(skins.some(x=>side*inner[0]<=x+.002&&side*outer[0]>=x-.002)){joined=true;break;}
+        }
+        assert.ok(joined,JSON.stringify({mast:m.id,side,size,z,inner,outer,reason:'rendered channel slab is disconnected from actual hull triangles'}));connections++;
+      }
+      let safeEntries=0;
+      for(let sample=1;sample<48;sample++){
+        const z=z0+(z1-z0)*sample/48,channel=victoryChainwale(mast,side,z/scale[2]),outer=side*channel.outer*scale[0],x=side*(outer-radius-.02),y=channel.y*scale[1],p=[x,y,z],rigAccess={point:p,radius:1.25,mast,side};
+        const options={rigAccess};
+        if(!crewNavigationClear(p,boat,options))continue;
+        safeEntries++;supported++;
+        for(const o of obstacles)assert.equal(navSweptStandingBody(p,p,o),false,'rig access retains '+o.id+' clearance');
+        for(let edge=0;edge<16;edge++){
+          const angle=edge*Math.PI/8,q=[x+Math.cos(angle)*radius,y,z+Math.sin(angle)*radius],heights=tops.map(t=>navSurfaceHeight(t,q[0],q[2])).filter(Number.isFinite);
+          assert.ok(heights.some(h=>Math.abs(h-y)<=.05),JSON.stringify({mast:m.id,side,size,p,q,heights,reason:'accepted standing footprint lacks actual channel-top support'}));
+        }
+        const outboard=[side*(outer-radius+.01),y,z];
+        assert.equal(crewNavigationClear(outboard,boat,options),false,'body may not overhang the rendered outer edge');
+        assert.equal(crewNavigationClear(outboard,boat,{rigAccess,radius:0,height:.1}),false,'requesting a shrunken body cannot authorize an edge overhang');
+        for(const height of [-.051,.051])assert.equal(crewNavigationClear([x,y+height,z],boat,options),false,'a runner access point is not a sphere of support above or below its board');
+        for(const end of [z0+radius-.01,z1-radius+.01]){
+          const c=victoryChainwale(mast,side,end/scale[2]),endPoint=[side*(side*c.outer*scale[0]-radius-.02),c.y*scale[1],end];
+          assert.equal(crewNavigationClear(endPoint,boat,{rigAccess:{...rigAccess,point:endPoint}}),false,'body may not overhang either rendered channel end');
+        }
+      }
+      if(mast<2)assert.ok(safeEntries>0,JSON.stringify({mast:m.id,side,size,reason:'fore and main runner channels retain real usable standing entries'}));
+    }
+  }
+  assert.ok(supported>30&&connections>100,'the gate covers both sides, three scales and actual mesh support');
 });
 
 test('every Victory stair joins its real seven-tread mesh and route while a full standing body clears gun recoil',()=>{
