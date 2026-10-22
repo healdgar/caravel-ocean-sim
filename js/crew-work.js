@@ -644,7 +644,7 @@ export function stepCrewWork(s,company,boat,dt) {
       // Yield locally to another body rather than walking through it.
       const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2])<.54);
       const clear=crewWorkSegmentClear(s,boat,p,next);
-      if(clear&&(!occupied || d<.02)){
+      if(clear&&!occupied){
         const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));
         j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
         if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
