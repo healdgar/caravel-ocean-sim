@@ -123,7 +123,7 @@ export function stepCompany(company,boat,dt,wind) {
   for(const s of company.crew){
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
-    if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationY=null;}
+    if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationKey=null;s.navigationY=null;}
     if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,dt,wind,company);}
   }
   updateCrewGunneryAttendance(company,boat);
@@ -162,9 +162,11 @@ function crewPatrolMotion(s,boat,dt,company){
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),x=s.home?.[0]??s.patrolX??s.x;
   const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x].join('/');
   const from=[s.x,s.navigationY??crewDeckHeight(boat,s.z,s.x),s.z];
-  if(!s.navigationPath||s.navigationKey!==key){
-    const to=[x,crewDeckHeight(boat,s.target,x),s.target];
-    s.navigationPath=crewNavigationRoute([from,to],boat);s.navigationKey=key;s.navigationCursor=0;
+  if(s.navigationKey!==key){
+    // Relocate an unsafe destination, never an actor already on deck. Static
+    // no-route results share the same cache key instead of rebuilding each frame.
+    const to=crewNavigationStation([x,crewDeckHeight(boat,s.target,x),s.target],boat);
+    s.navigationPath=to?crewNavigationRoute([from,to],boat):null;s.navigationKey=key;s.navigationCursor=0;
   }
   const path=s.navigationPath;if(!path?.length)return false;
   while(s.navigationCursor<path.length&&Math.hypot((path[s.navigationCursor][0]-from[0])*sx,(path[s.navigationCursor][1]-from[1])*sy,(path[s.navigationCursor][2]-from[2])*sz)<1e-7)s.navigationCursor++;
