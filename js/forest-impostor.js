@@ -189,7 +189,11 @@ fn forestAtlasHitSupported(point:vec3f,centre:vec3f,origin:vec3f,ray:vec3f,dx:ve
 fn forestAtlasFetch(frame:u32,layer:u32,uv:vec2f,lod:f32)->ForestSurface{
  let grid=u32(forestAtlasTable.config.x);let tile=forestAtlasTable.config.y;let border=.5*exp2(ceil(lod))/tile;
  let local=clamp(uv,vec2f(border),vec2f(1.-border));let origin=vec2f(f32(frame%grid),f32(frame/grid));let atlas=(origin+local)/f32(grid);
- var result:ForestSurface;result.pigment=textureSampleLevel(forestAtlasAlbedo,forestAtlasSampler,atlas,i32(layer),lod);result.detail=textureSampleLevel(forestAtlasNormalDepth,forestAtlasSampler,atlas,i32(layer),lod);return result;
+ var result:ForestSurface;result.pigment=textureSampleLevel(forestAtlasAlbedo,forestAtlasSampler,atlas,i32(layer),lod);result.detail=vec4f(0);
+ // The caller already ends this ray at exactly this alpha threshold. Empty
+ // source texels therefore need no normal/depth fetch or reconstruction.
+ if(result.pigment.a>1e-6){result.detail=textureSampleLevel(forestAtlasNormalDepth,forestAtlasSampler,atlas,i32(layer),lod);}
+ return result;
 }
 fn forestAtlasRay(frame:u32,layer:u32,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f,sourceFloor:f32)->ForestAtlasSample{
  let camera=forestAtlasTable.views[frame];let source=forestAtlasTable.prototypes[layer].centreExtent;let extent=source.w;
@@ -224,7 +228,8 @@ struct ForestImpostorOutput {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  let dx=forestAtlasRotate(dpdx(in.plane),-yaw)/scale;let dy=forestAtlasRotate(dpdy(in.plane),-yaw)/scale;
  var pigment=vec4f(0);var normal=vec3f(0);var distance=0.;
  for(var i=0u;i<3u;i++){
-   let sampled=forestAtlasRay(in.frames[i],in.prototype,origin,ray,dx,dy,in.sourceFloor);let weight=in.weights[i];
+   let weight=in.weights[i];if(weight==0.){continue;}
+   let sampled=forestAtlasRay(in.frames[i],in.prototype,origin,ray,dx,dy,in.sourceFloor);
    pigment+=sampled.pigment*weight;normal+=sampled.normal*weight;distance+=sampled.distance*sampled.pigment.a*weight;
  }
  var o:ForestImpostorOutput;o.colour=vec4f(0);o.depth=0.;
