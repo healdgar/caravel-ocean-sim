@@ -13,8 +13,18 @@ generation remain CPU work. See `GPU_ARCHITECTURE.md`.
 Integration is isolated in
 `/Users/alexwall/.codex/worktrees/overnight-models/waterworld`, branch
 `codex/gpu-rig-integration`, based on public documentation HEAD `379881a`.
-It excludes the unpublished primary crew-route work. Source and packaged
-qualification is complete; publication and deployed-byte verification follow.
+It excludes the unpublished primary crew-route work. Runtime checkpoint
+**`0247d56f65c2aa9b5df7893c6c6c96da08d41ab9`** is published. Pages built at
+**2026-10-22T18:50:17Z**; public bytes verified at **18:50:40Z** match:
+HTML **1,346,197 bytes**, SHA-256
+`ca47154eb9e078f7fbd24219ad5cdeaab11f85e2d6cb776a8440d32ef279b87e`;
+manifest **12,422 bytes**, SHA-256
+`e920744da5f4b83579461046f8a5f55585710304158236996fbe3eb0f18973ff`;
+all **58 assets / 19,931,107 bytes**. Receipt
+`/tmp/waterworld-gpu-public-receipt-148.json`.
+Fresh visible Chrome review of the public page shows the final Flying Cloud rig
+at 60.1 FPS with detailed Stats open and no console warnings/errors; proof
+`shots/flying-cloud-gpu-live.png`. This observation remains a short Mac check.
 
 - Stats-button source is `b634c53`, adding live CPU/FPS/resolution and optional
   GPU detail, plus bounded escort timing names. Native source/packaged, desktop
