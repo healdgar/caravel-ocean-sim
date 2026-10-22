@@ -161,7 +161,7 @@ function crewPatrolMotion(s,boat,dt,company){
   if(s.wait>0){s.wait=Math.max(0,s.wait-dt);return false;}
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),x=s.home?.[0]??s.patrolX??s.x;
   const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x].join('/');
-  const from=[s.x,s.navigationY??crewDeckHeight(boat,s.z,s.x),s.z];
+  const from=[s.x,crewDeckHeight(boat,s.z,s.x),s.z];
   if(s.navigationKey!==key){
     // Relocate an unsafe destination, never an actor already on deck. Static
     // no-route results share the same cache key instead of rebuilding each frame.
@@ -178,6 +178,9 @@ function crewPatrolMotion(s,boat,dt,company){
   const angle=Math.atan2(Math.sin(desired-s.yaw),Math.cos(desired-s.yaw));
   const travel=Math.min(distance,motion.speedMetresPerSecond*Math.max(0,Math.cos(angle))*dt),q=distance>1e-8?travel/distance:0;
   const next=from.map((v,i)=>v+(target[i]-v)*q);
+  // Routine rounds remain on one weather deck. Its curved sheer is not the
+  // endpoint chord; actual stair/ramp travel belongs to the job executor.
+  next[1]=crewDeckHeight(boat,next[2],next[0]);
   if(!travel||!crewRoutineSegmentClear(s,boat,from,next))return false;
   if(company?.crew.some(other=>{
     if(other===s)return false;
@@ -186,7 +189,8 @@ function crewPatrolMotion(s,boat,dt,company){
     const gap=Math.hypot((next[0]-other.x)*sx,(next[2]-other.z)*sz),before=Math.hypot((from[0]-other.x)*sx,(from[2]-other.z)*sz);
     return gap<.60&&gap<before-1e-8;
   }))return false;
-  s.x=next[0];s.z=next[2];s.navigationY=next[1];crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
+  const acceptedDistance=Math.hypot((next[0]-from[0])*sx,(next[1]-from[1])*sy,(next[2]-from[2])*sz);
+  s.x=next[0];s.z=next[2];s.navigationY=next[1];crewAdvanceWalk(s,acceptedDistance,{strideMetres:motion.strideMetres});
   if(distance<=travel+1e-7&&++s.navigationCursor>=path.length)crewFinishPatrol(s);
   return true;
 }
