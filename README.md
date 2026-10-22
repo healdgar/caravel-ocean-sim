@@ -686,6 +686,18 @@ bends with wind; cached terrain sunlight avoids cloud ray marching per blade.
 The material adds filtered metre-scale relief between aerial colour and close
 soil/rock grain. These additions do not yet supply a closed distant forest canopy.
 
+**Unpublished canopy integration:** a separate Forestmodeler import adds a
+bounded **80 × 80 m, 42-tree** demonstration near Saba's summit. Its five taxa
+(fir, oak, birch, elm and maple) are temperate examples, not surveyed tropical
+vegetation or whole-island coverage. Actual branch wood and cutout foliage retain
+source linear material colours; procedural roots are replaced only inside the
+imported rectangle. The source has no leaf image, so the existing leaf texture
+supplies alpha only. Auto keeps detail unless the complete near/far patch support
+fits within three render pixels; the opaque far preview is otherwise explicitly
+uncertified. Imported trees are static and add no canopy shadow caster. Combined
+rendered qualification and publication remain pending. See
+[Canopy scenery contract, provenance and inspection controls](CANOPY_SCENERY.md).
+
 ![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
 
 The same sun, sky, atmospheric extinction and volumetric clouds light the sea,
@@ -1227,6 +1239,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/caravel.js` | Niña hull, decks, swivel cannon, lookout, lateen rig and helm geometry |
 | `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`, `js/wgsl/victory.js` | Victory construction, shared square/fore-and-aft rig poses, support contact and rope leads |
 | `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and deterministic procedural tree LOD |
+| `js/canopy-scenery.js`, `scripts/prepare-canopy-scenery.py`, `CANOPY_SCENERY.md` | Unpublished bounded Forestmodeler import, source-coloured baked geometry and conservative LOD contract |
 | `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-loader.js`, `js/marine-ui.js` | Bounded wildlife encounters, deferred marine assets, wet animals, contact effects and debug controls |
 | `js/water-optics.js`, `js/wgsl/water-optics.js` | Shared submerged geometry capture, wave refraction, Fresnel and depth/turbidity attenuation |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
