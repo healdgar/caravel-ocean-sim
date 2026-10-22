@@ -115,9 +115,16 @@ def native_prototype(base, record, index, folder, texture_files):
     source = record.get("source", {})
     SOURCE.require(record.get("species") == species and record.get("directory") == species
                    and record.get("materialContract") == index.get("materialContract") == "gene-surfaces-v3", "Invalid native species/material identity")
-    SOURCE.require(source.get("engine") == index["source"]["growthEngine"] and source.get("age") == index["age"]
-                   and source.get("resolution") == index["resolution"] and source.get("seed") == index["seed"]
-                   and source.get("variant") == 0, "Native cohort identity mismatch")
+    if index.get("mode") == "catalog-mature-usdz":
+        row, asset = source.get("catalogEntry", {}), source.get("asset", {})
+        SOURCE.require(source.get("kind") == "catalog-usdz" and source.get("originalSource") == row.get("source")
+                       and row.get("species") == species and row.get("stage") == "mature" and row.get("tier") == "hero"
+                       and row.get("materialContract") == "gene-surfaces-v3" and record.get("age") == row.get("age")
+                       and asset.get("bytes") == row.get("bytes") and asset.get("sha256") == row.get("sha256"), "Mature catalog identity mismatch")
+    else:
+        SOURCE.require(source.get("engine") == index["source"]["growthEngine"] and source.get("age") == index["age"]
+                       and source.get("resolution") == index["resolution"] and source.get("seed") == index["seed"]
+                       and source.get("variant") == 0, "Native cohort identity mismatch")
     glb_record = record.get("glb", {});glb_name = SOURCE.basename(glb_record.get("file"))
     raw = SOURCE.read_receipted(folder, glb_name, {glb_name: glb_record})
     table = record.get("materialTable")
@@ -180,7 +187,10 @@ def native_prototype(base, record, index, folder, texture_files):
     far = base["streams"]["far"]
     # These are the recorded coarse RGB domes, not bark/leaf-UV surfaces.
     # The renderer's explicit sentinel keeps them off native texture sampling.
-    far = np.column_stack((far, np.full(len(far), -1))).astype("<f4")
+    if far.shape[1] == 13:
+        far = np.column_stack((far, np.full(len(far), -1))).astype("<f4")
+    else:
+        SOURCE.require(far.shape[1] == 14 and np.all(far[:, 13] == -1), "Invalid direct native far material sentinel")
     base["streams"] = {"wood": np.concatenate(wood), "leaf": np.concatenate(leaf), "far": far}
     base["nativeMaterials"] = materials
     base["source"]["native"] = {"glb": {"file": glb_name, **SOURCE.receipt(raw)}, "cohort": source,
@@ -196,6 +206,20 @@ def native_prototype(base, record, index, folder, texture_files):
                 basalRadius=max(.06, float(np.linalg.norm(basal[:, [0, 2]], axis=1).max())),
                 crownRadius=float(np.linalg.norm(leaf[:, [0, 2]], axis=1).max()))
     return base
+
+
+def direct_native_base(record, folder):
+    far = record.get("directFar", {})
+    SOURCE.require(far.get("strideFloats") == 14 and far.get("upAxis") == "Y"
+                   and far.get("generator") == "gardenplans.scenery._build_opaque_crown_dome"
+                   and isinstance(far.get("functionSHA256"), str) and len(far["functionSHA256"]) == 64
+                   and far.get("appearanceErrorSupported") is False, "Unproven direct native far source")
+    name = SOURCE.basename(far.get("file"));raw = SOURCE.read_receipted(folder, name, {name: far})
+    rows = SOURCE.native_stream(raw, 14);SOURCE.validate_triangles(rows, "direct native far")
+    SOURCE.require(len(rows)//3 == far.get("triangles") and np.all(np.isin(rows[:, 6], [3, 4]))
+                   and np.all(rows[:, 13] == -1) and np.all(rows[:, 10:13] >= 0), "Invalid direct native far stream")
+    return {"species": record["species"], "streams": {"far": rows},
+            "source": {"directFar": far, "files": {name: SOURCE.receipt(raw)}}}
 
 
 def hash32(value):
@@ -257,34 +281,50 @@ def place_roots(region, sample, biome, prototypes, *, spacing=6.0, seed=47231, e
 
 
 def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_dir=None):
-    source_dir, region_dir, output = source_dir.resolve(), region_dir.resolve(), output.resolve()
+    source_dir = source_dir.resolve() if source_dir is not None else None
+    region_dir, output = region_dir.resolve(), output.resolve()
     if output.exists():
         SOURCE.require(force and (output/"manifest.json").is_file() and SOURCE.finite_json((output/"manifest.json").read_bytes()).get("format") == FORMAT, "Existing output requires --force and a matching forest format")
     region_raw = (region_dir/"manifest.json").read_bytes();region = SOURCE.finite_json(region_raw)
     identity = {k: region[k] for k in ("id", "gridSize", "spanMetres", "localOrigin")}
     sample, _, terrain_receipts = SOURCE.terrain_inputs(region_dir, {"region": identity})
     biome = (region_dir/SOURCE.basename(region.get("assets", {}).get("biome", "biome.bin"))).read_bytes()
-    native_index, native_records, texture_files = None, {}, {}
+    native_index, native_records, texture_files, source_documents = None, {}, {}, {}
+    direct_native = False
     if native_dir is not None:
         native_dir = native_dir.resolve()
         native_raw = (native_dir/"prototypes.json").read_bytes();native_index = SOURCE.finite_json(native_raw)
-        far_raw = (source_dir/"prototypes.json").read_bytes();far_index = SOURCE.finite_json(far_raw)
         SOURCE.require(native_index.get("format") == "waterworld.native-prototypes" and native_index.get("version") == 1
                        and native_index.get("quality") == "hero" and native_index.get("materialContract") == "gene-surfaces-v3", "Expected current native Hero prototype bundle")
-        SOURCE.require(far_index.get("format") == "waterworld.canopy-prototypes" and far_index.get("version") == 1
-                       and all(native_index.get(key) == far_index.get(key) for key in ("age", "seed", "resolution"))
-                       and native_index["source"]["growthEngine"] == far_index["source"]["growthEngine"], "Native/far growth identities differ")
         native_records = {record["species"]: record for record in native_index["prototypes"]}
         SOURCE.require(set(native_records) == set(SPECIES) and len(native_index["prototypes"]) == len(SPECIES), "Native bundle species mismatch")
-        far_records = {record["species"]: record for record in far_index["prototypes"]}
-        SOURCE.require(set(far_records) == set(SPECIES), "Far source species mismatch")
-        for species in SPECIES:
-            record = far_records[species];filename = SOURCE.basename(record["manifest"])
-            SOURCE.read_receipted(source_dir, filename, {filename: record})
-            SOURCE.require(filename == f"prototype_{species}_waterworld_manifest.json", "Unexpected far prototype name")
+        direct_native = native_index.get("mode") == "catalog-mature-usdz"
+        if direct_native:
+            for name, field in (("source-catalog.json", "catalog"), ("source-surface-catalog.json", "surfaceCatalog")):
+                source_documents[name] = SOURCE.read_receipted(native_dir, name, {name: native_index["source"][field]})
+            catalog = SOURCE.finite_json(source_documents["source-catalog.json"])
+            for record in native_records.values():
+                SOURCE.require(record.get("source", {}).get("catalogEntry") in catalog.get("models", []), "Native asset not present verbatim in original source catalog")
+        else:
+            SOURCE.require(source_dir is not None, "Cached-cohort input requires its explicit far source directory")
+            far_raw = (source_dir/"prototypes.json").read_bytes();far_index = SOURCE.finite_json(far_raw)
+            SOURCE.require(far_index.get("format") == "waterworld.canopy-prototypes" and far_index.get("version") == 1
+                           and all(native_index.get(key) == far_index.get(key) for key in ("age", "seed", "resolution"))
+                           and native_index["source"]["growthEngine"] == far_index["source"]["growthEngine"], "Native/far growth identities differ")
+            far_records = {record["species"]: record for record in far_index["prototypes"]}
+            SOURCE.require(set(far_records) == set(SPECIES), "Far source species mismatch")
+            for species in SPECIES:
+                record = far_records[species];filename = SOURCE.basename(record["manifest"])
+                SOURCE.read_receipted(source_dir, filename, {filename: record})
+                SOURCE.require(filename == f"prototype_{species}_waterworld_manifest.json", "Unexpected far prototype name")
+            source_documents["source-far-index.json"] = far_raw
+        source_documents["source-native-index.json"] = native_raw
+    else:
+        SOURCE.require(source_dir is not None, "Provide native-dir or an explicit legacy source-dir")
     prototypes = []
     for species in SPECIES:
-        p = prototype(source_dir/f"prototype_{species}_waterworld_manifest.json", species, region_dir)
+        p = (direct_native_base(native_records[species], native_dir/species) if direct_native
+             else prototype(source_dir/f"prototype_{species}_waterworld_manifest.json", species, region_dir))
         if native_index:
             p = native_prototype(p, native_records[species], native_index, native_dir/species, texture_files)
         p["id"] = len(prototypes);prototypes.append(p)
@@ -312,19 +352,19 @@ def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_d
                 "files": {n: SOURCE.receipt(raw, **{ {"vertices.bin": "vertexCount", "indices.bin": "indexCount", "roots.bin": "rootCount"}[n]: {"vertices.bin": vertex_count, "indices.bin": index_count, "roots.bin": len(roots)}[n]}) for n, raw in streams.items()}}
     if native_index:
         manifest.update(materialContract="gene-surfaces-v3", vertexAttributes=[*SOURCE.ATTRIBUTES, "nativeMaterial"],
-                        sourceClaim="Current Forestmodeler native Hero wood/roots/wounds and native-size individual folded cutouts, with exact gene-surfaces-v3 materials. No scenery near-mesh simplification. Same-cohort native opaque far domes remain approximate, not appearance-certified; strict whole-support fallback only.",
-                        nativeSource={"index": SOURCE.receipt(native_raw), "farIndex": SOURCE.receipt(far_raw),
-                                      "source": native_index["source"], "quality": native_index["quality"],
-                                      "age": native_index["age"], "resolution": native_index["resolution"]})
+                        sourceClaim=("Catalogued mature native Hero assets; original growth provenance retained verbatim. " if direct_native else "Current Forestmodeler native Hero cohorts. ")
+                                    +"Exact source wood/roots/wounds and native-size individual folded cutouts, with gene-surfaces-v3 materials. No scenery near-mesh simplification. Same-tree Forestmodeler opaque far domes remain approximate, not appearance-certified; strict whole-support fallback only.",
+                        nativeSource={"index": SOURCE.receipt(native_raw), "source": native_index["source"], "quality": native_index["quality"],
+                                      **({"mode": "catalog-mature-usdz", "ages": {key: value["age"] for key, value in native_records.items()}}
+                                         if direct_native else {"farIndex": SOURCE.receipt(far_raw), "age": native_index["age"], "resolution": native_index["resolution"]})})
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix="forest-import-", dir=output.parent))
     try:
         for name, raw in streams.items():(temporary/name).write_bytes(raw)
         for name, raw in texture_files.items():
             (temporary/name).write_bytes(raw);manifest["files"][name] = SOURCE.receipt(raw)
-        if native_index:
-            for name, raw in (("source-native-index.json", native_raw), ("source-far-index.json", far_raw)):
-                (temporary/name).write_bytes(raw);manifest["files"][name] = SOURCE.receipt(raw)
+        for name, raw in source_documents.items():
+            (temporary/name).write_bytes(raw);manifest["files"][name] = SOURCE.receipt(raw)
         (temporary/"manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
         if output.exists():shutil.rmtree(output)
         temporary.rename(output)
@@ -335,11 +375,11 @@ def prepare(source_dir, region_dir, output, *, spacing=6., force=False, native_d
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-dir", type=Path, required=True, help="Folder containing prototype_SPECIES_waterworld_manifest.json native packs")
+    parser.add_argument("--source-dir", type=Path, help="Explicit same-cohort scenery far source; unnecessary for mature catalog-native bundles")
     parser.add_argument("--region", type=Path, default=ROOT/"assets/world/saba")
     parser.add_argument("--output", type=Path, default=ROOT/"assets/forest-scenery/saba")
     parser.add_argument("--spacing", type=float, default=6.)
-    parser.add_argument("--native-dir", type=Path, help="Current native Hero prototype bundle; source-dir supplies only verified same-cohort far domes")
+    parser.add_argument("--native-dir", type=Path, help="Native Hero bundle; mature catalog exports include their own same-tree far streams")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     prepare(args.source_dir, args.region, args.output, spacing=args.spacing, force=args.force, native_dir=args.native_dir)

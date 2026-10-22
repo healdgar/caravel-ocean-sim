@@ -246,6 +246,58 @@ class ForestNativeImport(unittest.TestCase):
             self.assertEqual(len(raw), item["bytes"]);self.assertEqual(receipt(raw)["sha256"], item["sha256"])
         self.assertEqual((output/"leaf-oak-0-albedo.png").read_bytes(), self.maps["leaf-oak-0-albedo.png"])
 
+    def test_mature_catalog_native_only_pack_keeps_each_reported_age_and_original_source(self):
+        region = self.folder/"mature-region";region.mkdir()
+        height = np.full((3, 3), 400, dtype="<i2").tobytes();biome = bytes([255]*16)
+        (region/"height.bin").write_bytes(height);(region/"biome.bin").write_bytes(biome)
+        (region/"manifest.json").write_text(json.dumps({"id": "mature-fixture", "gridSize": 3, "spanMetres": 128.,
+            "localOrigin": {"x": 0., "z": 0.}, "heightSHA256": receipt(height)["sha256"],
+            "vegetation": {"maskSize": 4, "sha256": receipt(biome)["sha256"]}}))
+        native = self.folder/"mature-native";native.mkdir()
+        ages = {"oak": 60, "maple": 50, "birch": 25, "elm": 65, "chestnut": 70}
+        records, catalog_rows = [], []
+        for species, age in ages.items():
+            record, *_ = make_fixture(native/species, species)
+            original = {"engine": "original-baked-engine", "age": age, "resolution": 1., "seed": 42}
+            row = {"species": species, "age": age, "stage": "mature", "tier": "hero", "materialContract": "gene-surfaces-v3",
+                   "file": f"{species}_mature{age}_hero.usdz", "bytes": 123, "sha256": "e"*64, "source": original}
+            record.update(age=age, source={"kind": "catalog-usdz", "catalogEntry": row,
+                          "asset": {"bytes": 123, "sha256": "e"*64}, "originalSource": original})
+            far = np.column_stack((old_base(species)["streams"]["far"], np.full(3, -1))).astype("<f4").tobytes()
+            (native/species/"native-far.bin").write_bytes(far)
+            record["directFar"] = receipt(far, file="native-far.bin", strideFloats=14, upAxis="Y", triangles=1,
+                generator="gardenplans.scenery._build_opaque_crown_dome", functionSHA256="f"*64, appearanceErrorSupported=False)
+            records.append(record);catalog_rows.append(row)
+        catalog = json.dumps({"models": catalog_rows}).encode();surface = b'{}'
+        (native/"source-catalog.json").write_bytes(catalog);(native/"source-surface-catalog.json").write_bytes(surface)
+        index = {"format": "waterworld.native-prototypes", "version": 1, "mode": "catalog-mature-usdz", "quality": "hero",
+                 "materialContract": "gene-surfaces-v3", "source": {"kind": "catalog-usdz", "catalog": receipt(catalog),
+                 "surfaceCatalog": receipt(surface)}, "prototypes": records}
+        (native/"prototypes.json").write_text(json.dumps(index))
+        output = self.folder/"mature-pack"
+        with mock.patch.object(IMPORTER, "ROOT", self.folder), mock.patch.object(IMPORTER, "prototype", side_effect=AssertionError("No scenery near/far source permitted")), redirect_stdout(io.StringIO()):
+            IMPORTER.prepare(None, region, output, native_dir=native)
+        result = json.loads((output/"manifest.json").read_text())
+        self.assertEqual(result["nativeSource"]["ages"], ages)
+        self.assertNotIn("age", result["nativeSource"]);self.assertNotIn("growthEngine", result["nativeSource"]["source"])
+        for prototype in result["prototypes"]:
+            source = prototype["source"]["native"]["cohort"]
+            self.assertEqual(source["catalogEntry"]["age"], ages[prototype["species"]])
+            self.assertEqual(source["originalSource"]["engine"], "original-baked-engine")
+            self.assertEqual(source["originalSource"], source["catalogEntry"]["source"])
+        self.assertEqual((output/"source-catalog.json").read_bytes(), catalog)
+        self.assertEqual((output/"source-surface-catalog.json").read_bytes(), surface)
+
+    def test_mature_record_cannot_relabel_a_catalog_age(self):
+        record = copy.deepcopy(self.record)
+        row = {"species": "oak", "stage": "mature", "tier": "hero", "age": 60,
+               "materialContract": "gene-surfaces-v3", "bytes": 1, "sha256": "a"*64, "source": {"engine": "old"}}
+        record.update(age=24, source={"kind": "catalog-usdz", "catalogEntry": row,
+                                    "originalSource": row["source"], "asset": {"bytes": 1, "sha256": "a"*64}})
+        index = {"mode": "catalog-mature-usdz", "materialContract": "gene-surfaces-v3"}
+        with self.assertRaisesRegex(ValueError, "Mature catalog identity"):
+            IMPORTER.native_prototype(old_base(), record, index, self.folder/"oak", {})
+
 
 if __name__ == "__main__":
     unittest.main()
