@@ -96,6 +96,24 @@ test('actual oar and paddle entry/emergence events stay on real moving blade foo
   t.diagnostic(JSON.stringify(receipts));
 });
 
+test('canoe exit keeps its earlier upward contact motion when dry confirmation outlasts the paddle lift',()=>{
+  const v=rowEventVessel('taino-canoe'),{sink}=rowEventSink(),collector=createRowingSurfaceEvents(sink),delayed=[];
+  rowEventTick(collector,sink,[v],0);
+  for(let i=1;i<=120;i++){
+    advanceRowing(v.boat,1/60,{effort:1,cadence:.45});const time=i/60,events=rowEventTick(collector,sink,[v],time);
+    for(const e of events.filter(event=>event.kind==='emerge'&&event.stationId!=='helm')){
+      const pose=rowEventPose(v,e.stationId);
+      if(pose.bladeVelocity[1]!==0)continue;
+      assert.equal(pose.drive,false,'actual prescribed stroke has reached recovery');
+      assert.ok(Math.min(...pose.worldCorners.map(p=>p[1]))>=ROWING_SURFACE_LIMITS.dryClearance,'the whole real blade is now clear');
+      assert.ok(e.time<time-1e-5&&e.age>0,'the retained physical exit predates its dry confirmation');
+      assert.ok(e.relativeVelocity[1]>0&&e.closingSpeed>0&&e.impulseNs>0,'earlier upward contact motion, rather than zero current lift, supplies the bounded emergence pulse');
+      delayed.push(e.stationId);
+    }
+  }
+  assert.ok(delayed.length>0,'at least one actual canoe emergence must survive the stopped-lift confirmation interval');
+});
+
 test('rising incident water and descending hull produce equivalent relative blade contact without momentum changes',()=>{
   const a=rowEventVessel('oseberg','relative'),b=rowEventVessel('oseberg','relative'),one=rowEventSink(),two=rowEventSink(),A=createRowingSurfaceEvents(one.sink),B=createRowingSurfaceEvents(two.sink),entryA=[],entryB=[];
   for(const v of [a,b]){v.boat.heave=.413;v.boat.rowingState.phase=.22;}
