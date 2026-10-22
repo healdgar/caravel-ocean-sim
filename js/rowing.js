@@ -34,7 +34,8 @@ export function advanceRowing(boat,dt,commands={}){
   const turn=rowingClamp(Number.isFinite(commands.turn)?commands.turn:Number.isFinite(boat.rowingTurn)?boat.rowingTurn:0,-1,1);
   const port=Number.isFinite(commands.port)?rowingClamp(commands.port):requested*(1+Math.min(0,turn));
   const starboard=Number.isFinite(commands.starboard)?rowingClamp(commands.starboard):requested*(1-Math.max(0,turn));
-  const cadence=Number.isFinite(commands.cadence)?rowingClamp(commands.cadence,.12,d.propulsion.maxCadence):d.propulsion.cadence;
+  const requestedCadence=Number.isFinite(commands.cadence)?commands.cadence:Number.isFinite(boat.rowingCadence)?boat.rowingCadence:d.propulsion.cadence;
+  const cadence=rowingClamp(requestedCadence,.12,d.propulsion.maxCadence);
   const previous=Number.isFinite(state.rate)?state.rate:0,target=(port+starboard)>0?cadence:0,decay=Math.exp(-dt*3),next=target+(previous-target)*decay;
   // Exact integral of the first-order cadence response; phase is independent
   // of how a frame interval is partitioned. No vessel momentum is changed here.

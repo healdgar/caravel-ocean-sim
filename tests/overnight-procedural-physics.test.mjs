@@ -6,10 +6,19 @@ import {boatHydrodynamics,hullHydrostatics,stepBoatSurge,stepBoatSteering} from 
 import {createHullLateralDescriptor,evaluateHullLateral} from '../js/hull-lateral.js';
 import {createHullContactDefinitions} from '../js/hull-contact.js';
 import {sailingState,advanceSails,sailForces} from '../js/sailing.js';
-import {rowingStationPose,rowingForces} from '../js/rowing.js';
+import {advanceRowing,rowingStationPose,rowingForces} from '../js/rowing.js';
 const overnightPhysicsIDs=['oseberg','lusoria','taino-canoe','flying-cloud','gipsy-moth-iv'];
 const overnightPhysicsClose=(a,b,e=1e-8)=>assert.ok(Math.abs(a-b)<=e,`${a} != ${b}`);
 const overnightPhysicsBoat=id=>{const d=proceduralDesign(id);return {modelId:id,...d.runtime,propulsion:'sail',speed:0,heading:0,rudder:0,rudderTarget:0,yawRate:0,roll:0,pitch:0,heave:0,revision:0,sailFore:0,sailMain:0,sailMizzen:0,target:{roll:0,pitch:0}};};
+
+test('shared boat rowing cadence is bounded in Hz and explicit commands override the saved control',()=>{
+  const b=overnightPhysicsBoat('lusoria');b.rowingEffort=.5;b.rowingCadence=.55;
+  assert.equal(advanceRowing(b,.1).cadence,.55);
+  assert.equal(advanceRowing(b,.1,{cadence:.3}).cadence,.3);
+  b.rowingCadence=Infinity;assert.equal(advanceRowing(b,.1).cadence,proceduralDesign(b.modelId).propulsion.cadence);
+  b.rowingCadence=0;assert.equal(advanceRowing(b,.1).cadence,.12);
+  b.rowingCadence=1;assert.equal(advanceRowing(b,.1).cadence,proceduralDesign(b.modelId).propulsion.maxCadence);
+});
 
 test('overnight authored hulls have strict independent hydro, keel and contact geometry',()=>{
   for(const id of overnightPhysicsIDs){
