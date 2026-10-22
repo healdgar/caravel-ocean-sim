@@ -1,8 +1,11 @@
 # Baked canopy scenery
 
-**Status:** integrated source, unpublished; actual rendered/full-regression and
-release qualification remain pending. The published nine-ship receipt in README
-does not establish qualification of this scenery integration.
+**Status:** published in `3ba18f9cc6b88cc4be5d116e6110bdcb45f2a8da`.
+Root's serialized native Metal suite passed **709/709**; eight importer checks
+passed separately. Actual modular/Pages rendering, corrupt-pack fallback and
+open-ocean deferred loading pass. Visible Chrome reviewed near, auto and debug far
+geometry; public HTML, manifest and all 58 assets matched tested bytes at
+**2026-10-22 12:59:54 UTC**. See [release receipts](BACKLOG.md#updated-forestmodeler-canopy-pipeline--published).
 
 ## Scope
 
@@ -115,4 +118,4 @@ patches, triangles, replaced procedural roots and unsupported appearance bounds.
 
 Physical-device performance, dense tropical regional coverage, animated imported
 wind response, cast forest shadows and appearance-certified stand transitions
-remain separate work. No new test-pass or publication receipt is claimed here.
+remain separate work; the receipts above do not certify those capabilities.

@@ -91,7 +91,7 @@ rendered checks and is published. The prior Sun-control receipt remains below.
   Root alone holds the testing baton; direct agents author isolated fixes and
   proposed checks without running validation.
 
-### Active follow-up: blade contact waves — unpublished
+### Blade contact waves — published
 
 The next bounded water task connects actual oar/paddle entry and emergence to
 the existing shared surface-wave field. Source is isolated from the published
@@ -103,9 +103,12 @@ Subframe catches can be missed by the snapshot approximation. Focused CPU/native
 GPU checks pass: actual three-model crossings, real shared height/foam output,
 passive impulse limits, stale/disabled/reset rejection and nine-vessel bounds.
 Canoe emergence now retains crossing-time prescribed motion through delayed dry
-confirmation. Full combined and rendered qualification remain pending.
+confirmation. Published with `3ba18f9` after the combined 709/709 native gate and
+rendered review. The native fixture measures only roughly 20 micrometres of
+height: this proves actual shared-field coupling, not a visibly realistic blade
+splash. Richer contact-water shape and appropriate scale remain future work.
 
-### Updated Forestmodeler canopy pipeline — active user priority
+### Updated Forestmodeler canopy pipeline — published
 
 The user requested adaptation to the newly updated local pipeline. Import the
 existing `waterworld.canopy-scenery/v1` bake through a separate native stand
@@ -128,6 +131,46 @@ exact bake receipts and current terrain/mask hashes, preserve Forestmodeler
 outputs, and distinguish observed dirty generator source from unknown bake
 provenance. Importing new Hudson/Columbia regions or growing island-wide assets
 is outside this bounded compatibility pass.
+
+The adapter is now imported, rendered, packaged and published in runtime
+**`3ba18f9cc6b88cc4be5d116e6110bdcb45f2a8da`**. The pack supplies detailed GLB
+wood, native cutout foliage and original opaque domes/trunks in two conservative
+128 m draw batches; runtime vertices append source linear RGB to the existing
+attributes. Existing foliage supplies alpha only. The original instance bytes,
+source manifest, region, terrain hashes and inspection-time source snapshot are
+retained locally. The importer never modifies Forestmodeler or grows new assets.
+
+Initial real imports found a false assumption in our validator: surviving basal
+stems can be displaced from their biological seed, including a single remaining
+stem in a multi-stem stool. Registration now keeps the strict 3 mm collar-height
+check and declared plant-envelope bound, records actual offsets/terrain clearances,
+and does not require nonexistent seed-centred wood. Nearest same-genome assignment
+does not establish biological parent identity or every wood-ground contact.
+
+Root alone ran eight Python importer checks and 22 focused native/CPU checks.
+The first full run passed 708/709: an old tree fixture searched for the former
+seed-variable spelling and stopped before rendering. Its revised hook isolates
+the original renderer with `canopy=off`, preserves the exact original seed and
+retains all foliage/crown thresholds and the intentionally sparse negative case.
+The final serialized installed-Chrome/Metal suite passed **709/709**, zero skips
+or cancellations, in **351.361 seconds**. Visible Chrome reviewed detailed/auto
+source trees and the explicitly uncertified coarse preview without console/GPU
+errors; `shots/canopy-source-auto-review.png` records the local result. Normal
+open-ocean startup fetches no imported assets; a corrupted optional pack preserves
+all original procedural instances exactly.
+
+Pages built at **2026-10-22T12:59:14Z**. At **12:59:54Z**, public HTML, manifest
+and every **58 assets / 19,931,107 bytes** matched tested local bytes. HTML is
+**1,298,006 bytes**, SHA-256
+`8f98010da734ec24966684a2ccccfc631159996f50f4315957742f07ac7c9219`;
+manifest SHA-256
+`e920744da5f4b83579461046f8a5f55585710304158236996fbe3eb0f18973ff`.
+The held two-tree woodland prototype remains excluded. Regional density,
+tropical species, a forest-interior atlas, animated imported wind, forest shadow
+casting and appearance-certified transitions remain open; this 80 m test stand
+does not complete the island forest. See `CANOPY_SCENERY.md` for repeatable import
+commands, exact runtime format, strict three-render-pixel policy and camera-only
+inspection controls.
 
 ### Sun/environment controls checkpoint
 

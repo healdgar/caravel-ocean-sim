@@ -7,14 +7,19 @@ A real-time WebGPU sailing game with wind, oar and paddle propulsion, crew, impa
 [Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
 **Release status:** published runtime
-`c8a660d5135db4cb25ac47e3c3b60b3025bc916f` offers **nine model choices and up to
-nine active vessels**, including Oseberg, Lusoria, a thirty-person Taíno-style
-canoe, Flying Cloud and Gipsy Moth IV. The full native Metal suite passed
-**687/687**, zero skips or cancellations, in **370.783 seconds**; final visible
-Chrome reviews covered the five added models and nine-model fleet without console
-errors. Pages build `1305173682` completed at **2026-10-22 11:03:44 UTC**;
-public HTML, manifest and all 53 assets matched local sizes/hashes at
-**11:05:32 UTC**. No physical-iPhone or sustained frame-rate result is claimed.
+`3ba18f9cc6b88cc4be5d116e6110bdcb45f2a8da` retains **nine model choices and up to
+nine active vessels**, adds the bounded Forestmodeler scenery adapter, and connects
+real oar/paddle crossings to the shared surface-wave field. The full native Metal
+suite passed **709/709**, zero skips or cancellations, in **351.361 seconds**;
+eight Python importer checks pass separately. Visible Chrome reviewed imported
+trees, automatic detail, coarse debug crowns and the rowing scene without console
+errors. Pages built at **2026-10-22 12:59:14 UTC**; public HTML, manifest and all
+**58 assets** matched tested local sizes/hashes at **12:59:54 UTC**. No
+physical-iPhone or sustained frame-rate result is claimed.
+
+The nine-vessel integration `c8a660d` passed **687/687** native checks and rendered
+review of the five added models and mixed fleet; its 53 public assets were verified
+at **2026-10-22 11:05:32 UTC**. [Exact receipts](BACKLOG.md#nine-vessel-integration--published-and-byte-verified).
 
 The preceding Sun-control runtime `7c0b527` passed **573/573** native checks,
 followed by rendered/mobile/offline review; its public bytes matched at
@@ -686,7 +691,7 @@ bends with wind; cached terrain sunlight avoids cloud ray marching per blade.
 The material adds filtered metre-scale relief between aerial colour and close
 soil/rock grain. These additions do not yet supply a closed distant forest canopy.
 
-**Unpublished canopy integration:** a separate Forestmodeler import adds a
+**Published canopy integration:** a separate Forestmodeler import adds a
 bounded **80 × 80 m, 42-tree** demonstration near Saba's summit. Its five taxa
 (fir, oak, birch, elm and maple) are temperate examples, not surveyed tropical
 vegetation or whole-island coverage. Actual branch wood and cutout foliage retain
@@ -695,7 +700,7 @@ imported rectangle. The source has no leaf image, so the existing leaf texture
 supplies alpha only. Auto keeps detail unless the complete near/far patch support
 fits within three render pixels; the opaque far preview is otherwise explicitly
 uncertified. Imported trees are static and add no canopy shadow caster. Combined
-rendered qualification and publication remain pending. See
+native/rendered checks and deployed-byte verification passed in `3ba18f9`. See
 [Canopy scenery contract, provenance and inspection controls](CANOPY_SCENERY.md).
 
 ![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
@@ -1239,7 +1244,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/caravel.js` | Niña hull, decks, swivel cannon, lookout, lateen rig and helm geometry |
 | `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`, `js/wgsl/victory.js` | Victory construction, shared square/fore-and-aft rig poses, support contact and rope leads |
 | `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and deterministic procedural tree LOD |
-| `js/canopy-scenery.js`, `scripts/prepare-canopy-scenery.py`, `CANOPY_SCENERY.md` | Unpublished bounded Forestmodeler import, source-coloured baked geometry and conservative LOD contract |
+| `js/canopy-scenery.js`, `scripts/prepare-canopy-scenery.py`, `CANOPY_SCENERY.md` | Bounded Forestmodeler import, source-coloured baked geometry and conservative LOD contract |
 | `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-loader.js`, `js/marine-ui.js` | Bounded wildlife encounters, deferred marine assets, wet animals, contact effects and debug controls |
 | `js/water-optics.js`, `js/wgsl/water-optics.js` | Shared submerged geometry capture, wave refraction, Fresnel and depth/turbidity attenuation |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |
