@@ -145,7 +145,10 @@ export function laterSailRigContext(id){
   for(const group of ['fore','main','mizzen']){
     const surface=d.surfaces.find(s=>s.controlGroup===group);if(!surface)continue;
     const mast=surface.mast,m=masts[mast],side=group==='main'?-1:1;
-    const z=id==='gipsy-moth-iv'?({fore:-3.05,main:1.45,mizzen:3.20}[group]):Math.min(5.30,m.z+.48);
+    // Both headsail and main working falls belay aft of the yacht cabin, on
+    // opposite sides, matching the headsail sheets. A singlehander need not
+    // squeeze through an impassable cabin-side passage to handle the jib.
+    const z=id==='gipsy-moth-iv'?({fore:1.45,main:1.45,mizzen:3.20}[group]):Math.min(5.30,m.z+.48);
     const x=id==='gipsy-moth-iv'&&group==='mizzen'?side*.27/sx:side*Math.min(laterSailDeckWidth(id,z)-.32/sx,.55/sx);
     const floor=laterSailDeck(id,z,x),lead=[x,floor+.14/sy,z],position=[x+side*.18/sx,floor,z+.20/sy];
     const lineIndex=lines.length;
