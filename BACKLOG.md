@@ -19,8 +19,9 @@ The October 20–21 overnight run and its old cutoff below are historical record
 ### Later-vessel integration — local qualification, unpublished
 
 The working registry now integrates the five later vessels. This is **not yet a
-release**: actual crew reach, standing-rig clearance and the full combined native
-suite remain admission gates. The latest public runtime remains `7c0b527` below.
+release**: focused crew/rig/native checks pass; the final combined native suite,
+rendered review and public-byte verification remain admission gates. The latest
+public runtime remains `7c0b527` below.
 
 - Own hulls, floors/barriers, appendages, rig/propulsion, equipment and companies:
   Oseberg 32, Lusoria 26, Taíno-style canoe 30, Flying Cloud 12 represented from
@@ -50,9 +51,26 @@ suite remain admission gates. The latest public runtime remains `7c0b527` below.
   accessible route rather than sending the captain through occupied seats.
 - The first combined native run passed 657/664, with six failures and one timed
   out check. Focused reruns resolved crew routing, isolated deck-wash/offline
-  startup timeouts, and the new long-name mobile select overflow. Clipper
-  standing-stay/cloth clearance remains under correction; this is **not** full
-  combined-source clearance. No release has been made from these partial results.
+  startup timeouts, and the new long-name mobile select overflow. The final
+  clipper clearance correction passes 48/48 rig/mast/support/cache checks.
+  Foreign booms/gaffs previously inherited the mast's authored cloth face and
+  could pull a distant course into its mast. Explicit spar kinds now preserve
+  foreign cloth's physical rest side; legacy yards retain their original rule.
+  Cloth/stay/mast separation gates retain their original tolerances.
+- Root's native compact UI fixture passes all five models at 320×360, 402×666
+  and 844×390: actual first GPU frame, visible HUD, unobstructed 44px helm targets,
+  real sail/rowing/rudder commands, no horizontal overflow, and real settings
+  scrolling with a fixed reachable Hide. Native Metal uses a visible test window:
+  a plain HTML control reproduces macOS headless Metal's inert wheel scrolling.
+- The scalar prepared-support evaluator and bounded exact-normal memo preserve
+  independent array-loop Float64 results. A complete-tree oracle checks seven
+  procedural models over eight poses, including Float32 mesh bytes, direct cloth,
+  normals, ropes, spars, immutable assets and restored poses. Local harness work
+  fell substantially; a proposed UV cache was reverted after paired native
+  measurements showed no improvement. Flying Cloud remains CPU-heavy; these
+  receipts do not establish 60 FPS or physical-iPhone performance.
+- The final serialized combined native run is in progress. Focused receipts are
+  **not** full combined-source clearance; no new release has been made yet.
 - Remaining scope includes whole-rig running-line/spar clearance and calibrated
   historical performance. Blade forces currently react to actual ocean motion;
   individual blade entry/exit does not yet emit its own surface-wave disturbance.
