@@ -6,7 +6,7 @@ import {test} from 'node:test';
 import {createLaterSailShipMesh,createLaterSailAssetPose} from '../js/later-sail-ships.js';
 import {LATER_SAIL_DESIGNS} from '../js/models/later-sail.js';
 import {laterSailRigContext} from '../js/additional-rig.js';
-import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint} from '../js/rig-surface.js';
+import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint,withRigPoseContext} from '../js/rig-surface.js';
 import {indexCaravelMesh} from '../js/caravel.js';
 
 const clearanceSub=(a,b)=>a.map((v,i)=>v-b[i]),clearanceAdd=(a,b)=>a.map((v,i)=>v+b[i]),clearanceMul=(a,s)=>a.map(v=>v*s);
@@ -91,6 +91,22 @@ for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual sewn fitti
       assert.ok(q.distance-clearanceMastRadius(mast,q.t)>0,`${surface.name} pinned cloth is embedded in its mast`);
     }
   }
+});
+
+test('a separately braced clipper yard moves the real nearby staysail contact without changing its own sail command or another vessel',()=>{
+  const d=LATER_SAIL_DESIGNS['flying-cloud'],c=laterSailRigContext(d.id),{asset,pose}=clearanceAsset(d),base=clearanceBoat(d,0),other={...base,sailState:{...base.sailState,surfaceYaw:{12:.55}}};
+  const stay=d.surfaces.find(s=>s.id===22),one=new Float32Array(asset.vertices),two=new Float32Array(asset.vertices),again=new Float32Array(asset.vertices),staticSupports=c._surfaceCollisionSupports;
+  assert.deepEqual(rigSurfacePose(stay,base.sailState),rigSurfacePose(stay,other.sailState),'only the other physical yard is rebraced');
+  const a=withRigPoseContext(c,base.sailState),b=withRigPoseContext(c,other.sailState);
+  assert.notDeepEqual(a._surfaceActiveSupports.find(s=>s.kind==='spar'&&s.surface===12),b._surfaceActiveSupports.find(s=>s.kind==='spar'&&s.surface===12));
+  pose(base,3.1,14,one);pose(other,3.1,14,two);pose(base,3.1,14,again);
+  let changed=false;
+  for(let at=0;at<asset.vertices.length;at+=9)if(Math.floor(asset.vertices[at+6])===13&&Math.round((asset.vertices[at+6]-13)*64)===22){
+    if([0,1,2].some(i=>one[at+i]!==two[at+i]))changed=true;
+  }
+  assert.ok(changed,'actual nearby staysail cloth responds to another moving spar rather than passing through it');
+  assert.deepEqual(new Uint32Array(one.buffer),new Uint32Array(again.buffer),'dynamic support views cannot contaminate another instance/pose');
+  assert.equal(c._surfaceCollisionSupports,staticSupports);assert.ok(Object.isFrozen(staticSupports));
 });
 
 for(const d of Object.values(LATER_SAIL_DESIGNS))test(`${d.id} actual cloth triangles clear finite standing rigging and other moving spars`,()=>{
