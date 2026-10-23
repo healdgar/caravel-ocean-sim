@@ -117,3 +117,17 @@ test('failed page/PNG loads do not poison retry or leak another pack bitmap',asy
  f.failOnce='/source/normal.png';await assert.rejects(loader.loadPrototype(0),/digest mismatch/);assert.equal(opened.length,1);assert.equal(opened[0].closes,1,'earlier pigment bitmap released on later PNG failure');
  const [a,b]=await Promise.all([loader.loadPrototype(0),loader.loadPrototype(0)]);assert.equal(opened.length,5);a.destroy();assert.equal(opened[1].closes,1);assert.equal(opened[2].closes,1);assert.equal(opened[3].closes,0);assert.equal(opened[4].closes,0);b.destroy();assert.ok(opened.every(x=>x.closes===1));
 }));
+
+test('offline geometry loading verifies original membership without PNG fetches or a decoder',async()=>{
+ const f=fixture(),loader=await load(f),geometry=await loader.loadGeometry(0);
+ assert.equal(geometry.geometryOnly,true);assert.equal(geometry.stats.sourceMembershipVerified,true);assert.equal(geometry.textures.size,0);assert.equal(geometry.indices.length,f.originalIndices.length);assert.deepEqual(geometry.leafOrder,f.order);assert.ok(f.calls.every(url=>!url.endsWith('.png')));assert.ok(f.calls.every(url=>!url.includes('/source/vertices.bin')));
+ geometry.destroy();geometry.destroy();
+ const raw=Buffer.from(f.pageRaw[0].indices);raw.writeUInt32LE(999999,0);f.replaceRaw(f.prototype.pages[0].files.indices,raw);
+ const corrupted=await load(f);await assert.rejects(corrupted.loadGeometry(0),/escapes.*source cluster/);
+});
+
+test('geometry-only requests do not suppress later explicit original texture loading',async()=>bitmapFixture(async opened=>{
+ const f=fixture(),loader=await load(f),[geometry,textured]=await Promise.all([loader.loadGeometry(0),loader.loadPrototype(0)]);
+ assert.equal(geometry.geometryOnly,true);assert.equal(textured.geometryOnly,false);assert.deepEqual(geometry.vertices,textured.vertices);assert.deepEqual(geometry.indices,textured.indices);assert.equal(geometry.textures.size,0);assert.equal(textured.textures.size,2);assert.equal(opened.length,2);
+ geometry.destroy();assert.ok(opened.every(bitmap=>bitmap.closes===0));textured.destroy();assert.ok(opened.every(bitmap=>bitmap.closes===1));
+}));

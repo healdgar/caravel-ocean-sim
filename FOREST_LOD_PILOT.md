@@ -16,12 +16,21 @@ performance fix.** Generated comparison packs remain outside the repository.
   normal, underside, transmission and exposure. Premultiplied linear channels,
   physical source MASK samples, bounded image-depth correction, independently
   filtered/guttered mips and original canopy AO.
-- Paged original leaf geometry for inspection children of at most 32 blades.
+- Paged original leaf geometry for inspection children of at most 32 blades,
+  plus curved two-triangle source leaf ribbons (`js/forest-leaf-ribbons.js`) and
+  offline preauthored ribbon index assets (`scripts/prepare-forest-ribbons.mjs`,
+  `js/forest-ribbon-assets.js`). Both frontiers cover every source blade once
+  while sharing the original 60B vertex records, materials and source IDs;
+  GPU selection refines from two-triangle ribbons to four-triangle blades when
+  projected geometric error exceeds `ribbonErrorPixels`.
   The runtime loader verifies full source membership without fetching the
-  original whole-tree vertex/index/AO buffers. Explicit review permission is
+  original whole-tree vertex/index/AO buffers, and supports geometry-only
+  offline loading without PNG decode overhead. Explicit review permission is
   required before loading unqualified assets.
 - GPU projection, hysteresis, parent-or-children coverage, frustum culling,
-  compaction and indirect draws. Static geometry uploads once. JavaScript
+  serial and parallel index compaction (`--compaction parallel`), per-pixel
+  shared lighting (`--shading pixel`) with exact MSAA coverage, and indirect
+  draws. Static geometry uploads once. JavaScript
   handles initialization, asset I/O and review controls, not frame-loop
   geometry/visibility work. Synchronous readback exists only in this diagnostic
   fixture for counters and timestamps.
@@ -57,9 +66,13 @@ node scripts/prepare-forest-inspection.mjs \
   --pack assets/forest-scenery/saba --out /tmp/forest-inspection-FRESH \
   --prototype 0,2 --nodes-per-page 64
 
+node scripts/prepare-forest-ribbons.mjs \
+  --inspection /tmp/forest-inspection-FRESH --out /tmp/forest-ribbons-FRESH
+
 node scripts/review-forest-lod-pilot.mjs \
   --pilot /tmp/forest-clusters-FRESH --wood /tmp/forest-wood-FRESH \
-  --inspection /tmp/forest-inspection-FRESH --out /tmp/forest-review-FRESH
+  --inspection /tmp/forest-inspection-FRESH --ribbons /tmp/forest-ribbons-FRESH \
+  --shading pixel --compaction parallel --out /tmp/forest-review-FRESH
 
 python3 scripts/compare-forest-lod-pilot.py /tmp/forest-review-FRESH --strict
 ```
@@ -84,12 +97,26 @@ of overlapping pass spans. Reports retain raw counts and qualification status.
 Recorded October23 comparisons on native Metal Chrome at1024×900, four MSAA
 samples, isolated source Lambert lighting:
 
-All44focused regressions pass, serialized by root: source partitioning, woody
-authoring, inspection export/transport, ownership/residency/budget policy and
-four actual Metal GPU modes (billboard and2/4/8-cell meshes). The GPU fixtures
+All 75 focused regressions pass, serialized by root: source partitioning, woody
+authoring, inspection export/transport, curved source ribbon reduction, offline
+preauthored ribbon assets, ownership/residency/budget policy, serial/parallel
+GPU compaction, pixel-depth coverage and four actual Metal GPU modes (billboard
+and 2/4/8-cell meshes). The GPU fixtures
 verify parent-or-complete-children selection, counter reset, nonzero root
 instances, multiple original materials, rendered pixels and hard mixed-frontier
 budget rejection. Log: `/tmp/waterworld-forest-lod-checkpoint-tests.log`.
+
+Preauthored ribbon dense-stand run (`--stand dense --shading pixel --compaction parallel --ribbons /tmp/waterworld-forest-ribbons-pilot-1`, `preparationMs = 0`):
+
+| Case | Submitted triangles | Candidate-only GPU median | Candidate-only GPU p95 | Finite support/coverage gate |
+|---|---:|---:|---:|---|
+| Dense stand, 250 m (`dense-far`) | 208,054 | 1.64 ms | 2.30 ms | Pass (0 px >3px) |
+| Dense stand, 100 m (`dense-middle`) | 1,051,198 | 3.25 ms | 8.04 ms | Pass (0 px >3px) |
+| Dense stand, 55 m (`dense-near`) | 2,058,272 | 4.77 ms | 11.99 ms | Pass (0 px >3px) |
+| Dense stand, 100 m, 60° (`dense-aerial`) | 1,041,632 | 3.39 ms | 9.93 ms | Pass (0 px >3px) |
+| Dense stand, 100 m, low sun (`dense-low-sun`) | 1,046,624 | 3.00 ms | 4.45 ms | Pass (0 px >3px) |
+
+Earlier baseline modes before preauthored hybrid ribbons:
 
 | Case | Submitted triangles | Candidate-only GPU p95 | Finite support/coverage gate |
 |---|---:|---:|---|
@@ -101,14 +128,15 @@ budget rejection. Log: `/tmp/waterworld-forest-lod-checkpoint-tests.log`.
 
 These are different diagnostic cases, not a whole-island or controlled release
 speedup claim. The identical twelve-tree native reference submits4,012,194
-triangles. The far test passes only the saved finite image gate; it is not a
-qualified production envelope. The fast depth mesh still changes visible
-coverage at close range. Eight-tree depth-mesh edge/aerial/low-sun intervals
-were1.44/3.88/3.23ms, but each missed finite support pixels beyond3px. No tested
+triangles. While preauthored hybrid ribbons + pixel shading pass all five saved
+finite image gates (`allFiniteImageGatesPassed: true`) with zero runtime
+reduction overhead, the dense-stand p95 GPU intervals still exceed the 4ms
+pilot target on middle, near and aerial views. No tested
 configuration passes every required gate. Do not promote either experiment by
 loosening the ceiling or hiding those failures.
 
-Receipts/screenshots: `/tmp/waterworld-lod-pilot-dense-2/`,
+Receipts/screenshots: `/tmp/waterworld-lod-pilot-authored-1/`,
+`/tmp/waterworld-lod-pilot-dense-2/`,
 `/tmp/waterworld-lod-pilot-review-13/`,
 `/tmp/waterworld-lod-pilot-grid-1/`,
 `/tmp/waterworld-lod-pilot-grid-2/`, and
@@ -119,7 +147,10 @@ support errors, displayed RGB error and its finite-view limitations.
 The woody source targets were18k/5k/600 triangles. Oak produced
 17,578/4,399/**630** (last target missed); birch16,156/4,861/514. Inspection
 retains303,852 original oak leaf triangles and76,320 birch leaf triangles across
-separate branch pages. Retaining all of them in view is explicitly not the
+separate branch pages; offline ribbon authoring (`prepare-forest-ribbons.mjs`)
+reduces those to151,926 oak triangles (564,153B gzipped,2.90cm bound) and
+38,160 birch triangles (141,688B gzipped,0.83cm bound) while retaining every blade.
+Retaining all of them in view is explicitly not the
 production solution.
 
 No regional rebake/default replacement until appearance and cost pass together.

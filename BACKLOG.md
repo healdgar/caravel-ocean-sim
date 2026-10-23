@@ -36,10 +36,16 @@ Implementation order:
 **Implementation checkpoint:** the bounded two-species pilot is now code, not
 only a design document. [FOREST_LOD_PILOT.md](FOREST_LOD_PILOT.md) records the
 source-leaf hierarchy, original material/depth bakes, three woody LODs, paged
-inspection leaves, GPU refinement/compaction, ownership/budget policy and native
-comparison harness. Every source blade is accounted for; missing pages never
-substitute a full botanical model. New source/loader/policy and native GPU
-regressions validate these mechanisms. The JavaScript policy chooser is an
+inspection leaves, curved two-triangle source leaf ribbons with offline
+preauthored index assets (~706KB gzipped for oak+birch), shared pixel lighting,
+parallel GPU compaction, ownership/budget policy and native comparison harness.
+Every source blade is accounted for; missing pages never
+substitute a full botanical model. All 75 serialized source/loader/policy and
+native GPU regressions validate these mechanisms. With preauthored hybrid
+ribbons, all five saved dense-stand views (`dense-far`, `dense-middle`,
+`dense-near`, `dense-aerial`, `dense-low-sun`) pass the finite 3-pixel support
+and coverage gates (`preparationMs = 0`, median GPU 1.64–4.77ms, p95
+2.30–11.99ms). The JavaScript policy chooser is an
 offline reference, not a frame-loop renderer.
 
 The pilot is deliberately isolated from game startup. Its selected specimen

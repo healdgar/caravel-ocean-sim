@@ -100,11 +100,15 @@ export function forestClusterNodes(prototype,inspection){
  }
  if(inspection){
   check(inspection.prototype.id===prototype.id&&inspection.prototype.leafCount===prototype.leafCount,'Inspection specimen differs');
-  const depth=tiers.length;
-  for(const c of inspection.clusters){
+  const reduced=inspection.reduction;
+  check(!reduced||(reduced.format==='waterworld.forest-ribbon-inspection'&&reduced.version===1&&reduced.appearanceQualified===false),'Invalid derived inspection frontier');
+  const frontiers=reduced?[{depth:tiers.length,representation:'ribbon'},{depth:tiers.length+1,representation:'original'}]:[{depth:tiers.length}];
+  for(const {depth,representation}of frontiers)for(const c of inspection.clusters){
+   if(representation&&c.representation!==representation)continue;
    const parent=nodes.find(p=>p.depth===depth-1&&p.firstLeaf<=c.firstLeaf&&p.firstLeaf+p.leafCount>=c.firstLeaf+c.leafCount);
-   check(parent,'Inspection cluster has no source image parent');
-   nodes.push({...c,depth,parent:nodes.indexOf(parent),childCount:0,native:true});parent.childCount++;
+   check(parent,'Inspection cluster has no source image/reduced parent');
+   if(representation==='ribbon')check(Number.isFinite(c.reductionErrorMetres)&&c.reductionErrorMetres>=0,'Missing source ribbon geometric error');
+   nodes.push({...c,depth,parent:nodes.indexOf(parent),childCount:0,native:true,ribbon:representation==='ribbon'});parent.childCount++;
   }
  }
  for(const parent of nodes.filter(c=>c.childCount)){
@@ -145,7 +149,11 @@ fn worldPoint(p:vec3f,r:Root)->vec3f{return r.positionScale.xyz+rotate(p*r.posit
  let depth=(C.viewProj*vec4f(worldPoint(c.centreExtent.xyz,r),1)).w;let near=depth-radius;let lateral=sqrt(max(0.,distance*distance-depth*depth))+radius;
  let projected=2.*C.positionFocal.w*radius*sqrt(1.+lateral*lateral/max(near*near,.000001))/max(near,.001);
  let threshold=C.screen.w*select(1.12,.88,decisions[id.x]!=0u);
- let requested=select(near<=0.||projected>threshold,f32(c.owner.y)<C.settings.x,C.settings.x>=0.);
+ let geometricError=c.low.w*r.positionScale.w;
+ let errorPixels=C.positionFocal.w*geometricError*sqrt(1.+lateral*lateral/max(near*near,.000001))/max(near-geometricError,.001);
+ let errorLimit=c.high.w*select(1.12,.88,decisions[id.x]!=0u);
+ let automatic=select(near<=0.||projected>threshold,near<=geometricError||errorPixels>errorLimit,c.high.w>0.);
+ let requested=select(automatic,f32(c.owner.y)<C.settings.x,C.settings.x>=0.);
  decisions[id.x]=select(0u,1u,c.owner.z>0u&&requested);
 }
 @compute @workgroup_size(64)fn clusterCull(@builtin(global_invocation_id)id:vec3u){
@@ -272,14 +280,14 @@ function inspectionMaterialBins(inspection){
  const rows=new Float32Array(inspection.vertices.buffer,inspection.vertices.byteOffset,inspection.vertices.byteLength/4),vertexCount=inspection.vertices.byteLength/60,slots=new Map(),counts=new Uint32Array(inspection.materials.length),indices=new Uint32Array(inspection.indices.length),parts=[],clusters=new Map();let next=0,sourceNext=0;
  for(const [bin,m]of inspection.materials.entries()){check(uint(m.index)&&!slots.has(m.index),'Duplicate inspection material');slots.set(m.index,bin);}
  for(const c of inspection.clusters){
-  check(uint(c.sourceNodeID)&&!clusters.has(c.sourceNodeID)&&c.firstIndex===sourceNext&&uint(c.indexCount)&&c.indexCount>0&&c.indexCount%3===0&&c.firstIndex+c.indexCount<=inspection.indices.length,'Inspection cluster index cover overlaps or omits source triangles');
+  check(uint(c.sourceNodeID)&&!clusters.has(c.selectionKey??c.sourceNodeID)&&c.firstIndex===sourceNext&&uint(c.indexCount)&&c.indexCount>0&&c.indexCount%3===0&&c.firstIndex+c.indexCount<=inspection.indices.length,'Inspection cluster index cover overlaps or omits source triangles');
   const groups=new Map(),firstPart=parts.length/4;
   for(let at=c.firstIndex;at<c.firstIndex+c.indexCount;at+=3){
    const ids=inspection.indices.subarray(at,at+3);check(ids.every(id=>id<vertexCount),'Inspection source index exceeds vertices');const material=rows[ids[0]*15+13],bin=slots.get(material);check(bin!==undefined&&ids.every(id=>rows[id*15+13]===material),'Inspection triangle crosses original materials');
    if(!groups.has(bin))groups.set(bin,[]);groups.get(bin).push(ids[0],ids[1],ids[2]);
   }
   for(let bin=0;bin<counts.length;bin++){const own=groups.get(bin);if(!own)continue;parts.push(next,own.length,bin,0);indices.set(own,next);next+=own.length;counts[bin]+=own.length;}
-  clusters.set(c.sourceNodeID,{firstPart,partCount:parts.length/4-firstPart,indexCount:c.indexCount});sourceNext+=c.indexCount;
+  clusters.set(c.selectionKey??c.sourceNodeID,{firstPart,partCount:parts.length/4-firstPart,indexCount:c.indexCount});sourceNext+=c.indexCount;
  }
  check(sourceNext===inspection.indices.length&&next===inspection.indices.length,'Inspection material partition loses original source cover');
  let firstIndex=0;const bins=inspection.materials.map((m,bin)=>{const record={material:m.index,firstIndex,indexCount:counts[bin]};firstIndex+=counts[bin];return record;});
@@ -297,22 +305,72 @@ function maximumClusterFrontierTriangles(nodes,bakedTriangles,nativePasses){
  check(Number.isSafeInteger(total),'Hierarchy triangle budget overflows');return total;
 }
 
-export async function createForestClusterPilotRenderer({device,pack,prototypeID,inspection,captureLayers=1,meshSegments=0,roots=[[0,0,0,1,0]],format='rgba8unorm',samples=4,maxTextureBytes=192*1024*1024,maxTriangles=6_000_000,additionalTriangles=0,inspectionDepthPrepass=false}){
+// Serial is the existing review control. Parallel preserves every material-bin
+// reservation and enqueues contiguous source-index copies instead of making
+// one cull invocation copy an entire cluster's indices by itself.
+export function forestInspectionCompactionShader(mode='serial'){
+ check(['serial','parallel'].includes(mode),'Invalid inspection compaction mode');
+ if(mode==='serial')return FOREST_CLUSTER_PILOT_WGSL;
+ const from='for(var k=0u;k<p.y;k++){selectedLeafIndices[offset+k]=sourceLeafIndices[p.x+k];}';
+ check(FOREST_CLUSTER_PILOT_WGSL.includes(from),'Inspection serial copy source changed');
+ return FOREST_CLUSTER_PILOT_WGSL
+  .replace('@group(2)@binding(0)var<storage,read>sourceLeafIndices:array<u32>;','')
+  .replace('@group(2)@binding(1)var<storage,read_write>selectedLeafIndices:array<u32>;','')
+  .replace('@compute @workgroup_size(1)fn clusterReset(){',`@group(3)@binding(0)var<storage,read_write>inspectionCopyTasks:array<vec4u>;
+@group(3)@binding(1)var<storage,read_write>inspectionCopyState:array<atomic<u32>>;
+@compute @workgroup_size(1)fn clusterReset(){atomicStore(&inspectionCopyState[0],0u);atomicStore(&inspectionCopyState[2],0u);`)
+  .replace(from,`let task=atomicAdd(&inspectionCopyState[0],1u);
+   if(task<atomicLoad(&inspectionCopyState[1])){inspectionCopyTasks[task]=vec4u(p.x,offset,p.y,0u);}
+   else{atomicStore(&inspectionCopyState[2],1u);}`);
+}
+
+export const FOREST_INSPECTION_TASK_FINALIZE_WGSL=/*wgsl*/`
+@group(0)@binding(0)var<storage,read>state:vec4u;
+@group(0)@binding(1)var<storage,read_write>dispatch:vec4u;
+@group(0)@binding(2)var<storage,read_write>commands:array<atomic<u32>>;
+@compute @workgroup_size(1)fn inspectionFinalize(){
+ if(state.z!=0u||state.x>state.y){
+  // Capacity is proven from all immutable material parts times root count.
+  // If that contract is violated, never draw stale/uncopied native indices.
+  atomicSub(&commands[9],atomicLoad(&commands[4])/3u);
+  atomicStore(&commands[4],0u);atomicStore(&commands[10],0u);atomicStore(&commands[11],0u);
+  for(var slot=12u;slot+4u<arrayLength(&commands);slot+=5u){atomicStore(&commands[slot],0u);}
+  dispatch=vec4u(0,1,1,0);return;
+ }
+ let width=min(state.x,state.w);let height=(state.x+max(width,1u)-1u)/max(width,1u);
+ dispatch=vec4u(width,max(height,1u),1u,0u);
+}`;
+
+export const FOREST_INSPECTION_TASK_COPY_WGSL=/*wgsl*/`
+@group(0)@binding(0)var<storage,read>tasks:array<vec4u>;
+@group(0)@binding(1)var<storage,read>source:array<u32>;
+@group(0)@binding(2)var<storage,read_write>selected:array<u32>;
+@group(0)@binding(3)var<storage,read>state:vec4u;
+@compute @workgroup_size(64)fn inspectionCopy(@builtin(workgroup_id)group:vec3u,@builtin(local_invocation_index)lane:u32){
+ let taskID=group.x+group.y*min(state.x,state.w);if(taskID>=min(state.x,state.y)){return;}
+ let task=tasks[taskID];for(var index=lane;index<task.z;index+=64u){selected[task.y+index]=source[task.x+index];}
+}`;
+
+export async function createForestClusterPilotRenderer({device,pack,prototypeID,inspection,captureLayers=1,meshSegments=0,roots=[[0,0,0,1,0]],format='rgba8unorm',samples=4,maxTextureBytes=192*1024*1024,maxTriangles=6_000_000,additionalTriangles=0,inspectionDepthPrepass=false,inspectionShading='sample',inspectionCompaction='serial',ribbonErrorPixels=.25}){
  const prototype=pack.manifest.prototypes.find(p=>p.id===prototypeID);check(prototype,'Missing pilot source species');
  check(samples===4,'Pilot sample masks require four MSAA samples');
  check(captureLayers===1||captureLayers===2,'Pilot supports one/two capture surfaces');
  check([0,2,4,8].includes(meshSegments)&&(!meshSegments||captureLayers===1),'Depth-grid mode requires2/4/8 segments and a single capture surface');
  check(uint(maxTriangles)&&maxTriangles>0&&maxTriangles<=6_000_000,'Pilot hard submitted-triangle budget cannot exceed6M');
+ check(['sample','pixel','pixel-depth'].includes(inspectionShading),'Invalid inspection shading mode');
+ check(['serial','parallel'].includes(inspectionCompaction),'Invalid inspection compaction mode');
+ check(Number.isFinite(ribbonErrorPixels)&&ribbonErrorPixels>=.05&&ribbonErrorPixels<=.75,'Ribbon geometric error limit must be0.05..0.75 pixels');
+ check(inspectionShading!=='pixel-depth'||inspectionDepthPrepass,'Pixel-depth shading requires the original sample depth prepass');
  check(typeof inspectionDepthPrepass==='boolean','Inspection depth-prepass flag must be explicit boolean');
- const selection=inspection?inspectionMaterialBins(inspection):null,{nodes,tiers}=forestClusterNodes(prototype,inspection),finest=tiers.at(-1),bakedTriangles=meshSegments?2*meshSegments*meshSegments:2*captureLayers,finestTriangles=(inspection?inspection.indices.length/3:finest.clusters.length*bakedTriangles)*roots.length,additionalDepthTriangles=inspection&&inspectionDepthPrepass?finestTriangles:0,maximumColourFrontierTriangles=maximumClusterFrontierTriangles(nodes,bakedTriangles,1)*roots.length,maximumFrontierTriangles=maximumClusterFrontierTriangles(nodes,bakedTriangles,inspectionDepthPrepass?2:1)*roots.length;
+ const selection=inspection?inspectionMaterialBins(inspection):null,{nodes,tiers}=forestClusterNodes(prototype,inspection),finest=tiers.at(-1),bakedTriangles=meshSegments?2*meshSegments*meshSegments:2*captureLayers,finestTriangles=nodes.filter(n=>!n.childCount).reduce((sum,n)=>sum+(n.native?n.indexCount/3:bakedTriangles),0)*roots.length,additionalDepthTriangles=inspection&&inspectionDepthPrepass?finestTriangles:0,maximumColourFrontierTriangles=maximumClusterFrontierTriangles(nodes,bakedTriangles,1)*roots.length,maximumFrontierTriangles=maximumClusterFrontierTriangles(nodes,bakedTriangles,inspectionDepthPrepass?2:1)*roots.length;
  check(uint(additionalTriangles)&&maximumFrontierTriangles+additionalTriangles<=maxTriangles,'Pilot maximum submitted frontier exceeds hard triangle budget');
  const firstPage=tiers[0].pages[0],layout=packForestClusterMips(firstPage.mips),bpp=firstPage.mips[0].outputs.albedo.bytes/(firstPage.mips[0].atlasPixels[0]*firstPage.mips[0].atlasPixels[1]);
  check(bpp===4||bpp===8,'Unsupported cluster texel layout');const textureFormat=bpp===4?'rgba8unorm':'rgba16float';
  const pages=tiers.flatMap(t=>t.pages.map(p=>({tier:t,page:p}))),bytes=layout.width*layout.height*pages.length*bpp*3;
  const nativeMaps=new Map();for(const m of inspection?.materials||[])for(const key of ['albedo','normal'])nativeMaps.set(m[key].file,m[key].width*m[key].height*4);const nativeTextureBytes=[...nativeMaps.values()].reduce((a,b)=>a+b,0);
  check(pages.length<=device.limits.maxTextureArrayLayers&&layout.width<=device.limits.maxTextureDimension2D&&layout.height<=device.limits.maxTextureDimension2D&&bytes+nativeTextureBytes<=maxTextureBytes,'Pilot texture pages exceed bounded GPU residency');
- const B=GPUBufferUsage,T=GPUTextureUsage,buffers=[],textures=[],pageIDs=new Map();
- const make=(data,usage,label)=>{check(data.byteLength<=device.limits.maxBufferSize&&(!(usage&B.STORAGE)||data.byteLength<=device.limits.maxStorageBufferBindingSize),'Pilot buffer exceeds device residency limit');const b=device.createBuffer({label,size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST});buffers.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
+ const B=GPUBufferUsage,T=GPUTextureUsage,buffers=[],textures=[],pageIDs=new Map();let bufferBytes=0;
+ const make=(data,usage,label)=>{check(data.byteLength<=device.limits.maxBufferSize&&(!(usage&B.STORAGE)||data.byteLength<=device.limits.maxStorageBufferBindingSize),'Pilot buffer exceeds device residency limit');const b=device.createBuffer({label,size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST});buffers.push(b);bufferBytes+=Math.max(4,data.byteLength);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
  try{
   for(const channel of channels)textures.push(device.createTexture({label:'forest pilot '+channel,size:[layout.width,layout.height,pages.length],format:textureFormat,usage:T.COPY_DST|T.TEXTURE_BINDING}));
   for(const [layer,row]of pages.entries()){
@@ -327,8 +385,8 @@ export async function createForestClusterPilotRenderer({device,pack,prototypeID,
   const data=new ArrayBuffer(nodes.length*160),f=new Float32Array(data),u=new Uint32Array(data);
   for(const [id,c]of nodes.entries()){
    const at=id*40;f.set([...c.centre,c.extent],at);u.set([c.parent<0?0xffffffff:c.parent,c.depth,c.childCount,c.native?(id|0x80000000)>>>0:id],at+4);
-   const low=c.low??c.centre.map(n=>n-c.extent),high=c.high??c.centre.map(n=>n+c.extent);check(vector(low,3)&&vector(high,3)&&low.every((n,i)=>n<=high[i]),'Invalid source cluster bounds');f.set([...low,0,...high,0],at+32);
-   if(c.native){const part=selection.clusters.get(c.sourceNodeID);check(part&&part.indexCount===c.indexCount,'Inspection material cover differs');u.set([part.firstPart,c.indexCount,part.partCount,0],at+8);}
+   const low=c.low??c.centre.map(n=>n-c.extent),high=c.high??c.centre.map(n=>n+c.extent);check(vector(low,3)&&vector(high,3)&&low.every((n,i)=>n<=high[i]),'Invalid source cluster bounds');const errorValue=new Float32Array([c.ribbon?c.reductionErrorMetres:0]);if(errorValue[0]<(c.reductionErrorMetres??0))new Uint32Array(errorValue.buffer)[0]++;check(Number.isFinite(errorValue[0]),'Ribbon error exceeds GPU Float32 range');f.set([...low,errorValue[0],...high,c.ribbon?ribbonErrorPixels:0],at+32);
+   if(c.native){const part=selection.clusters.get(c.selectionKey??c.sourceNodeID);check(part&&part.indexCount===c.indexCount,'Inspection material cover differs');u.set([part.firstPart,c.indexCount,part.partCount,0],at+8);}
    else for(const v of c.views)u.set([v.tile[0],v.tile[1],pageIDs.get(c.maxLeaves+':'+v.page),0],at+8+v.index*4);
   }
   const clusterBuffer=make(new Uint8Array(data),B.STORAGE,'forest pilot immutable source cluster bounds and captures');
@@ -351,7 +409,13 @@ export async function createForestClusterPilotRenderer({device,pack,prototypeID,
   const sourceIndices=make(selection?.indices||new Uint32Array(1),B.STORAGE,'forest inspection immutable material-part source indices');
   const sourceParts=make(selection?.parts||new Uint32Array(4),B.STORAGE,'forest inspection immutable cluster material parts');
   const selectedIndices=make(new Uint32Array(Math.max(1,(inspection?.indices.length||0)*roots.length)),B.STORAGE|B.INDEX,'forest inspection GPU compacted indexed cover');
-  const module=device.createShaderModule({label:'forest pilot cluster detail',code:FOREST_CLUSTER_PILOT_WGSL}),errors=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');check(errors.length===0,errors.map(e=>e.message).join('\n'));
+  const parallelCompaction=!!inspection&&roots.length>0&&inspectionCompaction==='parallel',taskCapacity=parallelCompaction?selection.parts.length/4*roots.length:0;
+  const taskDispatchWidth=Math.min(256,device.limits.maxComputeWorkgroupsPerDimension);
+  check(!parallelCompaction||uint(taskCapacity)&&taskCapacity>0&&taskCapacity<=0xffffffff&&taskCapacity*16<=device.limits.maxBufferSize&&taskCapacity*16<=device.limits.maxStorageBufferBindingSize&&taskCapacity<=taskDispatchWidth*device.limits.maxComputeWorkgroupsPerDimension,'Inspection copy task queue exceeds bounded device buffer/dispatch limits');
+  const copyTasks=parallelCompaction?make(new Uint32Array(taskCapacity*4),B.STORAGE,'forest inspection bounded GPU copy tasks'):null;
+  const copyState=parallelCompaction?make(new Uint32Array([0,taskCapacity,0,taskDispatchWidth]),B.STORAGE,'forest inspection GPU task count/capacity/overflow/width'):null;
+  const copyDispatch=parallelCompaction?make(new Uint32Array([0,1,1,0]),B.STORAGE|B.INDIRECT,'forest inspection separate indirect copy dispatch'):null;
+  const module=device.createShaderModule({label:'forest pilot cluster detail',code:forestInspectionCompactionShader(parallelCompaction?'parallel':'serial')}),errors=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');check(errors.length===0,errors.map(e=>e.message).join('\n'));
   const S=GPUShaderStage,commonLayout=device.createBindGroupLayout({entries:[
    {binding:0,visibility:S.VERTEX|S.FRAGMENT|S.COMPUTE,buffer:{type:'uniform'}},
    ...[1,2,3,4,9].map(binding=>({binding,visibility:S.VERTEX|S.FRAGMENT|([1,2].includes(binding)?S.COMPUTE:0),buffer:{type:'read-only-storage'}})),
@@ -363,15 +427,46 @@ export async function createForestClusterPilotRenderer({device,pack,prototypeID,
   const drawGroup=device.createBindGroup({layout:commonLayout,entries:commonEntries});
   const computeCommon=device.createBindGroup({layout:commonLayout,entries:commonEntries.map(e=>e.binding===9?{binding:9,resource:{buffer:mipBuffer}}:e)});
   const computeGroup=device.createBindGroup({layout:computeLayout,entries:[decisions,visible,commands].map((buffer,binding)=>({binding,resource:{buffer}}))});
-  const indexLayout=device.createBindGroupLayout({entries:[{binding:0,visibility:S.COMPUTE,buffer:{type:'read-only-storage'}},{binding:1,visibility:S.COMPUTE,buffer:{type:'storage'}},{binding:2,visibility:S.COMPUTE,buffer:{type:'read-only-storage'}}]});
-  const indexGroup=device.createBindGroup({layout:indexLayout,entries:[{binding:0,resource:{buffer:sourceIndices}},{binding:1,resource:{buffer:selectedIndices}},{binding:2,resource:{buffer:sourceParts}}]});
-  const pipelineLayout=device.createPipelineLayout({bindGroupLayouts:[commonLayout,computeLayout,indexLayout]});
+  // Parallel culling reads only source parts. Removing unused index bindings
+  // keeps its explicit layout at eight compute storage buffers, the core limit.
+  const indexLayout=device.createBindGroupLayout({entries:[...(parallelCompaction?[]:[{binding:0,visibility:S.COMPUTE,buffer:{type:'read-only-storage'}},{binding:1,visibility:S.COMPUTE,buffer:{type:'storage'}}]),{binding:2,visibility:S.COMPUTE,buffer:{type:'read-only-storage'}}]});
+  const indexGroup=device.createBindGroup({layout:indexLayout,entries:[...(parallelCompaction?[]:[{binding:0,resource:{buffer:sourceIndices}},{binding:1,resource:{buffer:selectedIndices}}]),{binding:2,resource:{buffer:sourceParts}}]});
+  const taskLayout=parallelCompaction?device.createBindGroupLayout({entries:[0,1].map(binding=>({binding,visibility:S.COMPUTE,buffer:{type:'storage'}}))}):null;
+  const taskGroup=parallelCompaction?device.createBindGroup({layout:taskLayout,entries:[copyTasks,copyState].map((buffer,binding)=>({binding,resource:{buffer}}))}):null;
+  const pipelineLayout=device.createPipelineLayout({bindGroupLayouts:[commonLayout,computeLayout,indexLayout,...(parallelCompaction?[taskLayout]:[])]});
   const reset=await device.createComputePipelineAsync({layout:pipelineLayout,compute:{module,entryPoint:'clusterReset'}}),refine=await device.createComputePipelineAsync({layout:pipelineLayout,compute:{module,entryPoint:'clusterRefine'}}),cull=await device.createComputePipelineAsync({layout:pipelineLayout,compute:{module,entryPoint:'clusterCull'}});
+  let finalizePipeline,copyPipeline,finalizeGroup,copyGroup;
+  if(parallelCompaction){
+   const compile=async(code,label)=>{const m=device.createShaderModule({label,code}),errors=(await m.getCompilationInfo()).messages.filter(m=>m.type==='error');check(errors.length===0,errors.map(e=>e.message).join('\n'));return m;};
+   const finalizeModule=await compile(FOREST_INSPECTION_TASK_FINALIZE_WGSL,'forest inspection bounded task dispatch'),copyModule=await compile(FOREST_INSPECTION_TASK_COPY_WGSL,'forest inspection coalesced64-lane copies');
+   const finalizeLayout=device.createBindGroupLayout({entries:[{binding:0,visibility:S.COMPUTE,buffer:{type:'read-only-storage'}},...[1,2].map(binding=>({binding,visibility:S.COMPUTE,buffer:{type:'storage'}}))]});
+   const copyLayout=device.createBindGroupLayout({entries:[0,1,2,3].map(binding=>({binding,visibility:S.COMPUTE,buffer:{type:binding===2?'storage':'read-only-storage'}}))});
+   finalizeGroup=device.createBindGroup({layout:finalizeLayout,entries:[copyState,copyDispatch,commands].map((buffer,binding)=>({binding,resource:{buffer}}))});
+   copyGroup=device.createBindGroup({layout:copyLayout,entries:[copyTasks,sourceIndices,selectedIndices,copyState].map((buffer,binding)=>({binding,resource:{buffer}}))});
+   finalizePipeline=await device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[finalizeLayout]}),compute:{module:finalizeModule,entryPoint:'inspectionFinalize'}});
+   copyPipeline=await device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[copyLayout]}),compute:{module:copyModule,entryPoint:'inspectionCopy'}});
+  }
   const render=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[commonLayout]}),vertex:{module,entryPoint:meshSegments?'clusterMeshVS':'clusterVS'},fragment:{module,entryPoint:meshSegments?'clusterMeshFS':'clusterFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'},multisample:{count:samples}});
-  const native=inspection?await createInspectionDraw({device,inspection,make,textures,commonLayout,format,samples,depthPrepass:inspectionDepthPrepass}):null;
-  return{prototype,nodes,roots,commands,visible,camera,stats:{candidate:true,appearanceStatus:'unqualified',nodes:nodes.length,finestTriangles,additionalTriangles,additionalDepthTriangles,finestSubmittedTriangles:finestTriangles+additionalDepthTriangles,maximumColourFrontierTriangles,maximumFrontierTriangles,maximumSubmittedTriangles:maximumFrontierTriangles+additionalTriangles,captureLayers,meshSegments,inspectionSourceTriangles:inspection?.indices.length/3||0,inspectionDepthPrepass:!!inspection&&inspectionDepthPrepass,inspectionMaterialBins:selection?.bins.map(b=>({...b}))||[],indirectHeaderWords:12,indirectRootStride:binCount*20,textureBytes:bytes+(native?.textureBytes||0),layers:pages.length,layout,bpp},
+  const native=inspection?await createInspectionDraw({device,inspection,make,textures,commonLayout,format,samples,depthPrepass:inspectionDepthPrepass,inspectionShading}):null;
+  return{prototype,nodes,roots,commands,visible,camera,stats:{candidate:true,appearanceStatus:'unqualified',nodes:nodes.length,finestTriangles,additionalTriangles,additionalDepthTriangles,finestSubmittedTriangles:finestTriangles+additionalDepthTriangles,maximumColourFrontierTriangles,maximumFrontierTriangles,maximumSubmittedTriangles:maximumFrontierTriangles+additionalTriangles,captureLayers,meshSegments,inspectionSourceTriangles:inspection?.reduction?.sourceTriangles??(inspection?.indices.length/3||0),inspectionStoredTriangles:inspection?.indices.length/3||0,inspectionReducedTriangles:inspection?.reduction?.reducedTriangles??null,inspectionReduction:inspection?.reduction??null,inspectionRibbonErrorPixels:ribbonErrorPixels,inspectionDepthPrepass:!!inspection&&inspectionDepthPrepass,inspectionShading,inspectionCompaction,parallelInspectionCompaction:parallelCompaction,inspectionCopyTaskCapacity:taskCapacity,inspectionCopyTaskBytes:parallelCompaction?taskCapacity*16+32:0,inspectionCopyLanes:parallelCompaction?64:0,inspectionMaterialBins:selection?.bins.map(b=>({...b}))||[],indirectHeaderWords:12,indirectRootStride:binCount*20,textureBytes:bytes+(native?.textureBytes||0),bufferBytes,layers:pages.length,layout,bpp},
    writeCamera(data){check(data instanceof Float32Array&&data.length===32,'Invalid pilot camera uniforms');data[30]=bpp===4?1:0;data[31]=meshSegments;device.queue.writeBuffer(camera,0,data);},
-   encode(encoder,descriptor={}){const p=encoder.beginComputePass(descriptor);p.setBindGroup(0,computeCommon);p.setBindGroup(1,computeGroup);p.setBindGroup(2,indexGroup);p.setPipeline(reset);p.dispatchWorkgroups(1);p.setPipeline(refine);p.dispatchWorkgroups(Math.ceil(count/64));p.setPipeline(cull);p.dispatchWorkgroups(Math.ceil(count/64));p.end();},
+   encode(encoder,descriptor={}){
+    let firstDescriptor=descriptor,lastDescriptor={label:'forest inspection coalesced index copy'};
+    // Preserve one caller timing interval over all three passes. Never reuse a
+    // query index for both the cull end and the final copy end.
+    if(parallelCompaction&&descriptor.timestampWrites){const {beginningOfPassWriteIndex,endOfPassWriteIndex,...timing}=descriptor.timestampWrites;
+     firstDescriptor={...descriptor,timestampWrites:beginningOfPassWriteIndex===undefined?undefined:{...timing,beginningOfPassWriteIndex}};
+     lastDescriptor={...lastDescriptor,timestampWrites:endOfPassWriteIndex===undefined?undefined:{...timing,endOfPassWriteIndex}};
+    }
+    const p=encoder.beginComputePass(firstDescriptor);p.setBindGroup(0,computeCommon);p.setBindGroup(1,computeGroup);p.setBindGroup(2,indexGroup);if(parallelCompaction)p.setBindGroup(3,taskGroup);
+    p.setPipeline(reset);p.dispatchWorkgroups(1);p.setPipeline(refine);p.dispatchWorkgroups(Math.ceil(count/64));p.setPipeline(cull);p.dispatchWorkgroups(Math.ceil(count/64));p.end();
+    if(parallelCompaction){
+     const finalize=encoder.beginComputePass({label:'forest inspection finalize copy dispatch'});finalize.setPipeline(finalizePipeline);finalize.setBindGroup(0,finalizeGroup);finalize.dispatchWorkgroups(1);finalize.end();
+     // copyDispatch has INDIRECT usage only in this pass; it is not a storage
+     // binding here. Task/state/source reads are separate from selected writes.
+     const copy=encoder.beginComputePass(lastDescriptor);copy.setPipeline(copyPipeline);copy.setBindGroup(0,copyGroup);copy.dispatchWorkgroupsIndirect(copyDispatch,0);copy.end();
+    }
+   },
    draw(pass){pass.setPipeline(render);pass.setBindGroup(0,drawGroup);pass.drawIndirect(commands,0);if(native){pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(selectedIndices,'uint32');if(native.depthPipeline){pass.setPipeline(native.depthPipeline);for(let bin=0;bin<binCount;bin++){pass.setBindGroup(1,native.groups[bin]);for(let root=0;root<roots.length;root++)pass.drawIndexedIndirect(commands,48+(root*binCount+bin)*20);}}pass.setPipeline(native.pipeline);for(let bin=0;bin<binCount;bin++){pass.setBindGroup(1,native.groups[bin]);for(let root=0;root<roots.length;root++)pass.drawIndexedIndirect(commands,48+(root*binCount+bin)*20);}}},
    destroy(){for(const b of buffers)b.destroy();for(const t of textures)t.destroy();}};
  }catch(error){for(const b of buffers)b.destroy();for(const t of textures)t.destroy();throw error;}
@@ -422,7 +517,52 @@ struct LeafInput {@location(0)local:vec3f,@location(1)normal:vec3f,@location(2)k
 }
 `;
 
-async function createInspectionDraw({device,inspection,make,textures,commonLayout,format,samples,depthPrepass}){
+// Keep the physical per-sample shader as the review control. Pixel shading
+// evaluates four source MASK probes but shares normal-map and light evaluation.
+// Probe positions are an explicit approximation, not portable hardware sample
+// locations; rendered support/coverage gates must qualify each intended tier.
+export function forestInspectionShader(mode='sample'){
+ check(['sample','pixel','pixel-depth'].includes(mode),'Invalid inspection shading mode');
+ if(mode==='sample')return INSPECTION_SHADER;
+ const coverage=`
+struct LeafFragment {@location(0)colour:vec4f,@builtin(sample_mask)mask:u32};
+struct LeafCoverage {mask:u32,uv:vec2f,pigment:vec4f};
+fn leafCoverage(uv:vec2f,ux:vec2f,uy:vec2f,y:f32,yx:f32,yy:f32)->LeafCoverage{
+ let offsets=array<vec2f,4>(vec2f(-.125,-.375),vec2f(.375,-.125),vec2f(-.375,.125),vec2f(.125,.375));
+ var o:LeafCoverage;var count=0.;
+ for(var bit=0u;bit<4u;bit++){
+  let q=uv+ux*offsets[bit].x+uy*offsets[bit].y;let pigment=textureSampleLevel(leafPigment,leafSampler,q,0.);
+  if(pigment.a>=M.underside.w&&y+yx*offsets[bit].x+yy*offsets[bit].y>=0.){o.mask|=1u<<bit;o.uv+=q;o.pigment+=pigment;count+=1.;}
+ }
+ if(count>0.){o.uv/=count;o.pigment/=count;}else{o.uv=uv;o.pigment=textureSampleLevel(leafPigment,leafSampler,uv,0.);}
+ return o;
+}
+fn leafOutput(rgb:vec4f,mask:u32)->LeafFragment{var o:LeafFragment;o.colour=rgb;o.mask=mask;return o;}
+`;
+ let code=INSPECTION_SHADER.replaceAll('@interpolate(perspective,sample)','@interpolate(perspective,center)')
+  .replace('struct LeafVertex {',coverage+'struct LeafVertex {')
+  .replace('@fragment fn leafDepthFS(in:LeafVertex,@builtin(sample_index)sampleIndex:u32)->@location(0)vec4f{',
+   '@fragment fn leafDepthFS(in:LeafVertex)->LeafFragment{')
+  .replace('let alpha=textureSampleLevel(leafPigment,leafSampler,in.uv,0.).a;if(in.local.y<0.||alpha<M.underside.w){discard;}return vec4f(0);',
+   'let coverage=leafCoverage(in.uv,dpdx(in.uv),dpdy(in.uv),in.local.y,dpdx(in.local.y),dpdy(in.local.y));if(coverage.mask==0u){discard;}return leafOutput(vec4f(0),coverage.mask);')
+  .replace('@fragment fn leafFS(in:LeafVertex,@builtin(front_facing)front:bool,@builtin(sample_index)sampleIndex:u32)->@location(0)vec4f{',
+   '@fragment fn leafFS(in:LeafVertex,@builtin(front_facing)front:bool)->LeafFragment{')
+  .replace('let pigment=textureSampleLevel(leafPigment,leafSampler,in.uv,0.);if(in.local.y<0.||pigment.a<M.underside.w){discard;}',
+   'let coverage=leafCoverage(in.uv,ux,uy,in.local.y,dpdx(in.local.y),dpdy(in.local.y));let mask=coverage.mask;let pigment=coverage.pigment;if(mask==0u){discard;}')
+  .replace('textureSampleLevel(leafNormals,leafSampler,in.uv,0.)','textureSampleLevel(leafNormals,leafSampler,coverage.uv,0.)')
+  .replace('return vec4f(1);','return leafOutput(vec4f(1),mask);')
+  .replace('return vec4f(1,.3,.2,1);','return leafOutput(vec4f(1,.3,.2,1),mask);')
+  .replace('return vec4f(pow(rgb/(vec3f(1)+rgb),vec3f(1./2.2)),1);','return leafOutput(vec4f(pow(rgb/(vec3f(1)+rgb),vec3f(1./2.2)),1),mask);');
+ if(mode==='pixel-depth')code=code
+  .replace('@fragment fn leafFS(in:LeafVertex,@builtin(front_facing)front:bool)->LeafFragment{','@fragment fn leafFS(in:LeafVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{')
+  .replace('if(mask==0u){discard;}','')
+  .replace('return leafOutput(vec4f(1),mask);','return vec4f(1);')
+  .replace('return leafOutput(vec4f(1,.3,.2,1),mask);','return vec4f(1,.3,.2,1);')
+  .replace('return leafOutput(vec4f(pow(rgb/(vec3f(1)+rgb),vec3f(1./2.2)),1),mask);','return vec4f(pow(rgb/(vec3f(1)+rgb),vec3f(1./2.2)),1);');
+ check(!code.includes('@builtin(sample_index)'),'Pixel shading accidentally retained per-sample execution');return code;
+}
+
+async function createInspectionDraw({device,inspection,make,textures,commonLayout,format,samples,depthPrepass,inspectionShading}){
  const B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage,materials=inspection.materials;
  check(materials.length>0&&materials.length<=16,'Invalid inspection materials');let textureBytes=0;
  const vertices=make(inspection.vertices,B.VERTEX,'forest inspection immutable original60B leaf vertices'),linear=x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
@@ -437,10 +577,11 @@ async function createInspectionDraw({device,inspection,make,textures,commonLayou
   const albedo=image(m.albedo,'srgb'),normal=image(m.normal,'linear'),optics=make(new Float32Array([m.underside,1,m.roughness,m.transmission,...m.undersideReference.map(linear),m.opacityThreshold]),B.UNIFORM,'forest inspection immutable material'+m.index+' optics'),sampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'nearest',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
   groups.push(device.createBindGroup({layout,entries:[{binding:0,resource:{buffer:optics}},{binding:1,resource:sampler},{binding:2,resource:albedo.createView()},{binding:3,resource:normal.createView()}]}));
  }
- const module=device.createShaderModule({label:'forest original leaf inspection',code:INSPECTION_SHADER}),errors=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');check(errors.length===0,errors.map(e=>e.message).join('\n'));
+ const module=device.createShaderModule({label:'forest original leaf inspection',code:forestInspectionShader(inspectionShading)}),errors=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');check(errors.length===0,errors.map(e=>e.message).join('\n'));
  const vertexLayout={arrayStride:60,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'},{shaderLocation:3,offset:32,format:'float32x2'},{shaderLocation:4,offset:40,format:'float32x3'},{shaderLocation:5,offset:52,format:'float32'},{shaderLocation:6,offset:56,format:'float32'}]};
  const pipelineLayout=device.createPipelineLayout({bindGroupLayouts:[commonLayout,layout]}),base={layout:pipelineLayout,vertex:{module,entryPoint:'leafVS',buffers:[vertexLayout]},primitive:{topology:'triangle-list',frontFace:'ccw',cullMode:'none'},multisample:{count:samples,alphaToCoverageEnabled:false}};
- const depthPipeline=depthPrepass?await device.createRenderPipelineAsync({...base,fragment:{module,entryPoint:'leafDepthFS',targets:[{format,writeMask:0}]},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'}}):null;
+ const depthModule=inspectionShading==='pixel-depth'?device.createShaderModule({label:'forest original sample MASK depth',code:INSPECTION_SHADER}):module;
+ const depthPipeline=depthPrepass?await device.createRenderPipelineAsync({...base,vertex:{...base.vertex,module:depthModule},fragment:{module:depthModule,entryPoint:'leafDepthFS',targets:[{format,writeMask:0}]},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'}}):null;
  const pipeline=await device.createRenderPipelineAsync({...base,fragment:{module,entryPoint:'leafFS',targets:[{format}]},depthStencil:{format:'depth32float',depthWriteEnabled:!depthPrepass,depthCompare:depthPrepass?'equal':'less'}});
  return{pipeline,depthPipeline,groups,textureBytes,vertices};
 }

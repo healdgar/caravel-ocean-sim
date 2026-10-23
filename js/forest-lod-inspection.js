@@ -108,11 +108,11 @@ export async function loadForestInspectionPilot(base,{sourceBase,fetchAsset=fetc
   }
  }
  freeze(manifest);let serial=Promise.resolve();
- async function load(id){
+ async function load(id,withImages=true){
   const prototype=manifest.prototypes.find(p=>p.id===id);check(uint(id)&&prototype,'unknown inspection prototype');
   const pages=prototype.pages,totalVertices=pages.reduce((n,p)=>n+p.vertexCount,0),totalIndices=pages.reduce((n,p)=>n+p.indexCount,0),retainedBytes=totalVertices*64+totalIndices*4+prototype.leafCount*4,scratchBytes=totalIndices*4+prototype.leafCount,largestPage=Math.max(...pages.map(p=>p.files.vertices.bytes+p.files.indices.bytes+p.files.sourceIDs.bytes+p.vertexCount));
   const mapRecords=new Map();for(const m of prototype.nativeMaterials)for(const key of ['albedo','normal','roughnessMap'])if(m[key]){const r=m[key],old=mapRecords.get(r.file);check(!old||(same(old,r)&&old.encoding===r.encoding&&old.width===r.width&&old.height===r.height),'conflicting original PNG');mapRecords.set(r.file,r);}
-  const textureBytes=[...mapRecords.values()].reduce((sum,r)=>sum+r.bytes+r.width*r.height*4,0),peakDecodedBytes=retainedBytes+Math.max(scratchBytes+largestPage+384*4,textureBytes);
+  const textureBytes=withImages?[...mapRecords.values()].reduce((sum,r)=>sum+r.bytes+r.width*r.height*4,0):0,peakDecodedBytes=retainedBytes+Math.max(scratchBytes+largestPage+384*4,textureBytes);
   check(totalVertices<=0xffffffff&&totalIndices<=0xffffffff&&peakDecodedBytes<=maxDecodedBytes,'prototype exceeds complete decoded budget; no truncation');
   const vertices=new Uint8Array(totalVertices*60),indices=new Uint32Array(totalIndices),sourceIDs=new Uint32Array(totalVertices),leafRaw=await read(prototype.hierarchy.leafOrder),leafOrder=new Uint32Array(leafRaw.buffer),clusters=[],ranges=new Map(),textures=new Map();let originalIndices=new Uint32Array(totalIndices),coveredLeaves=new Uint8Array(prototype.leafCount),vertexBase=0,indexBase=0;
   for(const id of leafOrder){check(id<prototype.leafCount&&!coveredLeaves[id],'leaf order repeats/omits original blade');coveredLeaves[id]=1;}
@@ -135,14 +135,15 @@ export async function loadForestInspectionPilot(base,{sourceBase,fetchAsset=fetc
     for(let i=0;i<pi.length;i++)indices[indexBase+i]=vertexBase+pi[i];vertexBase+=page.vertexCount;indexBase+=page.indexCount;
    }
    await checked(new Uint8Array(originalIndices.buffer),prototype.sourceLeafRange.indices,'reconstructed complete original leaf index order');originalIndices=null;coveredLeaves=null;
-   for(const [file,r]of mapRecords){const bytes=await responseBytes(sourceBase+file,r.bytes);await checked(bytes,r,'original PNG '+file);check(typeof createImageBitmap==='function','browser PNG decoder required');const bitmap=await createImageBitmap(new Blob([bytes],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none',imageOrientation:'none'});
+   for(const [file,r]of withImages?mapRecords:[]){const bytes=await responseBytes(sourceBase+file,r.bytes);await checked(bytes,r,'original PNG '+file);check(typeof createImageBitmap==='function','browser PNG decoder required');const bitmap=await createImageBitmap(new Blob([bytes],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none',imageOrientation:'none'});
     if(bitmap.width!==r.width||bitmap.height!==r.height){bitmap.close();throw Error('Forest inspection: original PNG dimensions differ');}textures.set(file,Object.freeze({receipt:r,width:r.width,height:r.height,encoding:r.encoding,bytes,bitmap}));
    }
-   let destroyed=false;return Object.freeze({manifest,prototype,vertexStride:60,vertices,indices,sourceIDs,leafOrder,clusters:Object.freeze(clusters),ranges,materials:Object.freeze([...prototype.nativeMaterials]),textures,
+   let destroyed=false;return Object.freeze({manifest,prototype,geometryOnly:!withImages,vertexStride:60,vertices,indices,sourceIDs,leafOrder,clusters:Object.freeze(clusters),ranges,materials:Object.freeze([...prototype.nativeMaterials]),textures,
     immutable:true,stats:Object.freeze({vertexCount:totalVertices,indexCount:totalIndices,triangleCount:totalIndices/3,retainedBytes:retainedBytes+textureBytes,peakDecodedBytes,sourceGeometryFetched:false,sourceMembershipVerified:true,qualification:'Receipt-verified complete source index/leaf membership; source56B content trusted to pinned exporter receipts, no native appearance certificate'}),
     destroy(){if(!destroyed){destroyed=true;for(const {bitmap}of textures.values())bitmap.close();}},
    });
   }catch(error){for(const {bitmap}of textures.values())bitmap.close();throw error;}
  }
- return Object.freeze({manifest,loadPrototype(id){const pending=serial.then(()=>load(id));serial=pending.catch(()=>{});return pending;}});
+ const queue=(id,images)=>{const pending=serial.then(()=>load(id,images));serial=pending.catch(()=>{});return pending;};
+ return Object.freeze({manifest,loadPrototype(id){return queue(id,true);},loadGeometry(id){return queue(id,false);}});
 }
