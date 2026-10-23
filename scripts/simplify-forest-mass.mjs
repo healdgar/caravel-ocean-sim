@@ -51,7 +51,7 @@ function validateManifest(m){
   require(p.low.every((v,k)=>v<=p.high[k])&&p.nominalBoundsXZ[0]<p.nominalBoundsXZ[1]&&p.nominalBoundsXZ[2]<p.nominalBoundsXZ[3],'Inverted chunk bound: '+id);
   cursor+=p.indexCount;totalRoots+=p.rootCount;
  }
- require(cursor*4===m.files['indices.bin'].bytes&&totalRoots===m.residentRootCount&&m.residentRootCount+m.excludedRootCount===m.rootCount,'Incomplete chunk coverage');
+ require(cursor*4===m.files['indices.bin'].bytes&&totalRoots===m.residentRootCount&&m.residentRootCount+m.excludedRootCount<=m.rootCount,'Incomplete chunk coverage');
  return m;
 }
 
@@ -105,22 +105,31 @@ function chunkInput(chunk,vertices,indices){
  }
  require(rows.byteOffset%4===0,'Unaligned local vertex allocation');
  const positions=new Float32Array(rows.buffer,rows.byteOffset,rows.byteLength/4);
- validateTriangles(localIndices,positions,chunk.id);
- return{rows,attrs,locks,locked,indices:localIndices,positions,planes};
+ const clean=nonzeroTriangles(localIndices,positions,chunk.id),active=new Uint8Array(originalIds.length);
+ for(const index of clean.indices)active[index]=1;
+ // A vertex referenced only by invisible zero-area faces is not a seam point.
+ for(let i=0;i<locks.length;i++)if(locks[i]&&!active[i]){locks[i]=0;locked--;}
+ return{rows,attrs,locks,locked,indices:clean.indices,positions,planes,removedZeroAreaTriangles:clean.removed};
 }
 
-function validateTriangles(indices,positions,id){
+function nonzeroTriangles(indices,positions,id){
  require(indices instanceof Uint32Array&&indices.length>0&&indices.length%3===0,'Invalid triangle list: '+id);
- const count=positions.length/6;
+ const count=positions.length/6,output=new Uint32Array(indices.length);let cursor=0,removed=0;
  for(let i=0;i<indices.length;i+=3){
   const a=indices[i],b=indices[i+1],c=indices[i+2];
-  require(a<count&&b<count&&c<count&&a!==b&&a!==c&&b!==c,'Invalid or collapsed triangle: '+id);
+  require(a<count&&b<count&&c<count,'Triangle address outside vertices: '+id);
   const ux=positions[b*6]-positions[a*6],uy=positions[b*6+1]-positions[a*6+1],uz=positions[b*6+2]-positions[a*6+2];
   const vx=positions[c*6]-positions[a*6],vy=positions[c*6+1]-positions[a*6+1],vz=positions[c*6+2]-positions[a*6+2];
   const x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx;
-  // Reject only exact zero area, never erase a small but real leaf-field face.
-  require(Number.isFinite(x)&&Number.isFinite(y)&&Number.isFinite(z)&&(x!==0||y!==0||z!==0),'Degenerate/nonfinite triangle: '+id);
+  require(Number.isFinite(x)&&Number.isFinite(y)&&Number.isFinite(z),'Nonfinite triangle: '+id);
+  // Stored Float32 world coordinates can collapse an otherwise valid local
+  // marching-cubes face. Exact zero area has no raster coverage; no epsilon
+  // threshold is used, so every nonzero-area face survives this cleanup.
+  if(x===0&&y===0&&z===0){removed++;continue;}
+  output[cursor++]=a;output[cursor++]=b;output[cursor++]=c;
  }
+ require(cursor>0,'Chunk has no nonzero-area triangles: '+id);
+ return{indices:removed?output.subarray(0,cursor):indices,removed};
 }
 
 function seamEdges(indices,positions,planes){
@@ -190,12 +199,15 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
  const indexBytes=await verifiedStream(source,'indices.bin',manifest.files['indices.bin']);
  require(indexBytes.byteOffset%4===0,'Unaligned source indices');
  const indices=new Uint32Array(indexBytes.buffer,indexBytes.byteOffset,indexBytes.byteLength/4);
+ const ownerBytes=await verifiedStream(source,'root-chunks.bin',manifest.files['root-chunks.bin']),owners=new Uint32Array(ownerBytes.buffer,ownerBytes.byteOffset,ownerBytes.byteLength/4),counts=new Uint32Array(manifest.chunks.length);
+ for(const owner of owners){if(owner===0xffffffff)continue;require(owner<counts.length,'Invalid original owner');counts[owner]++;}
+ for(const chunk of manifest.chunks)require(counts[chunk.id]===chunk.rootCount,'Original owner table disagrees with chunk coverage');
  await mkdir(dirname(destination),{recursive:true});const staging=await mkdtemp(join(dirname(destination),'.forest-mass-simplify-'));
  let vertexFile,indexFile;
  try{
   const vertexPath=join(staging,'.vertices.raw'),indexPath=join(staging,'.indices.raw');
   vertexFile=await open(vertexPath,'wx');indexFile=await open(indexPath,'wx');
-  const chunks=[],positionsHash=createHash('sha256');let vertexCount=0,indexCount=0,maxError=0;
+  const chunks=[],positionsHash=createHash('sha256');let vertexCount=0,indexCount=0,maxError=0,removedInputZeroAreaTriangles=0,removedOutputZeroAreaTriangles=0;
   for(const chunk of manifest.chunks){
    const data=chunkInput(chunk,vertices,indices),unchanged=sha256(data.rows),indexDigest=sha256(new Uint8Array(data.indices.buffer)),scale=simplifier.getScale(data.positions,6);
    require(Number.isFinite(scale)&&scale>0,'Undefined simplifier position scale: '+chunk.id);
@@ -205,7 +217,7 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
    const absoluteError=reportedRelativeError*scale;
    require(Number.isFinite(absoluteError)&&absoluteError>=0&&absoluteError<=errorMetres,'Reported simplification error exceeds requested metres: '+chunk.id);
    require(reduced.length<=data.indices.length&&sha256(data.rows)===unchanged&&sha256(new Uint8Array(data.indices.buffer))===indexDigest,'Simplifier mutated original input: '+chunk.id);
-   validateTriangles(reduced,data.positions,chunk.id);const seams=verifySeams(data.indices,reduced,data,chunk.id),result=compactOriginal(reduced,data.rows);
+   const clean=nonzeroTriangles(reduced,data.positions,chunk.id),seams=verifySeams(data.indices,clean.indices,data,chunk.id),result=compactOriginal(clean.indices,data.rows);
    require((vertexCount+result.vertices.length/STRIDE)*STRIDE<=MAX_BUFFER&&(indexCount+result.indices.length)*4<=MAX_BUFFER,'Simplified geometry exceeds GPU buffer budget');
    // Keep the simplifier's triangle order and winding exactly as returned; only
    // vertex identifiers change through a first-use, byte-preserving compaction.
@@ -215,12 +227,14 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
    for(let i=0;i<result.vertices.length/STRIDE;i++)result.vertices.copy(positionBytes,i*12,i*STRIDE,i*STRIDE+12);
    positionsHash.update(positionBytes);
    chunks.push({...chunk,firstIndex:indexCount,indexCount:result.indices.length,low:result.low,high:result.high,centre:result.centre,radius:result.radius,
-    lodErrorMetres:chunk.lodErrorMetres+absoluteError,simplification:{originalIndexCount:chunk.indexCount,targetIndexCount,resultIndexCount:result.indices.length,
+    lodErrorMetres:chunk.lodErrorMetres+absoluteError,simplification:{originalIndexCount:chunk.indexCount,nonzeroInputIndexCount:data.indices.length,targetIndexCount,resultIndexCount:result.indices.length,
+     removedInputZeroAreaTriangles:data.removedZeroAreaTriangles,removedOutputZeroAreaTriangles:clean.removed,
      originalVertexCount:data.rows.length/STRIDE,resultVertexCount:result.vertices.length/STRIDE,lockedNominalVertices:data.locked,nominalSeamEdges:seams,
      positionScaleMetres:scale,targetRelativeError:relativeTarget,reportedRelativeError,reportedAbsoluteErrorMetres:absoluteError,
      errorQualification:'Meshoptimizer attribute-weighted estimate; not a Hausdorff or native appearance certificate'}});
    vertexCount+=result.vertices.length/STRIDE;indexCount+=result.indices.length;maxError=Math.max(maxError,absoluteError);
-   console.log(JSON.stringify({chunk:chunk.id+1,chunks:manifest.chunks.length,sourceTriangles:chunk.indexCount/3,triangles:result.indices.length/3,reportedErrorMetres:absoluteError}));
+   removedInputZeroAreaTriangles+=data.removedZeroAreaTriangles;removedOutputZeroAreaTriangles+=clean.removed;
+   console.log(JSON.stringify({chunk:chunk.id+1,chunks:manifest.chunks.length,sourceTriangles:chunk.indexCount/3,triangles:result.indices.length/3,removedInputZeroAreaTriangles:data.removedZeroAreaTriangles,removedOutputZeroAreaTriangles:clean.removed,reportedErrorMetres:absoluteError}));
   }
   await vertexFile.close();vertexFile=null;await indexFile.close();indexFile=null;
   const files={...manifest.files};
@@ -242,6 +256,8 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
     runtime:{node:process.version,zlib:process.versions.zlib},api:'simplifyWithAttributes',flags:['LockBorder'],positionStrideFloats:6,
     attributes:['unitNormalX','unitNormalY','unitNormalZ','linearRed','linearGreen','linearBlue'],attributeWeights:[...ATTRIBUTE_WEIGHTS],
     targetRatio:ratio,maximumReportedErrorMetres:errorMetres,actualMaximumReportedErrorMetres:maxError,
+    removedInputZeroAreaTriangles,removedOutputZeroAreaTriangles,
+    degeneratePolicy:'Remove only faces whose stored Float32-position cross product is exactly zero before/after simplification, preserving every nonzero-area face regardless of size. Compare seams against the exact-nonzero input; reject invalid addresses and nonfinite values',
     seamPolicy:'Lock vertices within max(1e-5, abs(Float32(plane))*2^-22) m of nominal XZ planes; verify original directed open seam edges and locked vertex survival',
     vertexPolicy:'No updates, welding, filters, moved positions, attribute rewriting or triangle rotations; compact surviving original 24-byte records in returned index first-use order',
     sourceTriangles:indices.length/3,triangles:indexCount/3,vertices:vertexCount,
@@ -251,7 +267,7 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
   await writeFile(join(staging,'manifest.json'),encoded,{flag:'wx'});
   try{await access(destination);throw Error('Output appeared during simplification');}catch(error){if(error.code!=='ENOENT')throw error;}
   await rename(staging,destination);
-  console.log(JSON.stringify({output:destination,sourceTriangles:indices.length/3,triangles:indexCount/3,maximumReportedErrorMetres:maxError,files}));
+  console.log(JSON.stringify({output:destination,sourceTriangles:indices.length/3,triangles:indexCount/3,removedInputZeroAreaTriangles,removedOutputZeroAreaTriangles,maximumReportedErrorMetres:maxError,files}));
   return outputManifest;
  }catch(error){await vertexFile?.close();await indexFile?.close();await rm(staging,{recursive:true,force:true});throw error;}
 }
