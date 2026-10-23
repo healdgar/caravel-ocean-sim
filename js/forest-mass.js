@@ -4,6 +4,18 @@
 import {FRAME_WGSL} from './wgsl/common.js';
 import {CANOPY_VERTEX_LAYOUT} from './canopy-scenery.js';
 
+export const FOREST_MASS_VERTEX_LAYOUT=Object.freeze({arrayStride:24,attributes:[
+ {shaderLocation:0,offset:0,format:'float32x3'},
+ {shaderLocation:1,offset:12,format:'snorm8x4'},
+ {shaderLocation:6,offset:16,format:'float16x4'},
+]});
+export const FOREST_MASS_VERTEX_WGSL=/* wgsl */`
+@vertex fn forestMassVS(@location(0)position:vec3f,@location(1)normal:vec4f,@location(6)colour:vec4f)->CanopyVertex{
+ var o:CanopyVertex;o.world=position;o.normal=normalize(normal.xyz);o.kind=vec2f(4.,.8);o.leafUV=vec2f(0);o.colour=colour.rgb;
+ o.pos=F.viewProj*vec4f(position-F.camPos.xyz,1);return o;
+}
+`;
+
 export const FOREST_MASS_ASSETS=Object.freeze({
  'manifest.json':'assets/forest-scenery/saba/mass/manifest.json',
  'vertices.bin.gz':'assets/forest-scenery/saba/mass/vertices.bin.gz',
@@ -21,12 +33,13 @@ const forestMassVector=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isF
 const forestMassReceipt=r=>forestMassUint(r?.bytes)&&r.bytes>0&&typeof r.sha256==='string'&&/^[a-f0-9]{64}$/.test(r.sha256);
 const forestMassSameReceipt=(a,b)=>forestMassReceipt(a)&&forestMassReceipt(b)&&a.bytes===b.bytes&&a.sha256===b.sha256;
 const forestMassUpward=value=>{const n=Math.fround(value);if(n>=value)return n;const bytes=new ArrayBuffer(4),floats=new Float32Array(bytes),words=new Uint32Array(bytes);floats[0]=n;words[0]++;return floats[0];};
+const forestMassHalf=bits=>{const sign=bits&0x8000?-1:1,exponent=(bits>>10)&31,mantissa=bits&1023;return exponent===0?sign*mantissa*2**-24:exponent===31?(mantissa?NaN:sign*Infinity):sign*(1+mantissa/1024)*2**(exponent-15);};
 
 export function validateForestMass(m,forest){
  const source=forest?.manifest??forest;
- if(m?.format!=='waterworld.native-forest-mass'||m.version!==1||m.units!=='metres'||m.upAxis!=='Y'||m.vertexStride!==52||
+ if(m?.format!=='waterworld.native-forest-mass'||!((m.version===1&&m.vertexStride===52)||(m.version===2&&m.vertexStride===24))||m.units!=='metres'||m.upAxis!=='Y'||
   !forestMassUint(source?.rootCount)||!Array.isArray(m.chunks)||!m.chunks.length||m.chunks.length>65535)throw Error('Unsupported native forest mass');
- for(const [name,stride]of [['vertices.bin',52],['indices.bin',4],['root-chunks.bin',4]]){
+ for(const [name,stride]of [['vertices.bin',m.vertexStride],['indices.bin',4],['root-chunks.bin',4]]){
   const item=m.files?.[name],encoded=item?.gzip;
   if(!forestMassReceipt(item)||item.bytes%stride||item.bytes>256*1024*1024||!forestMassReceipt(encoded)||encoded.file!==name+'.gz')throw Error('Invalid native forest mass stream receipt: '+name);
  }
@@ -65,14 +78,21 @@ export function validateForestMass(m,forest){
 function* forestMassChecks(manifest,streams,forest){
  validateForestMass(manifest,forest);
  for(const name of forestMassStreams(manifest))if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete native forest mass stream: '+name);
- const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),rootChunks=new Uint32Array(streams['root-chunks.bin']);
- for(let i=0;i<vertices.length;i+=13){const row=vertices.subarray(i,i+13);
-  if(!row.every(Number.isFinite)||row[6]!==4||row[7]<0||row[7]>1||row.subarray(10,13).some(v=>v<0)||Math.abs(Math.hypot(...row.subarray(3,6))-1)>.001)throw Error('Invalid native forest mass vertex');
-  if(((i/13)&1023)===0)yield;
+ const compact=manifest.version===2,vertices=compact?new Uint8Array(streams['vertices.bin']):new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),rootChunks=new Uint32Array(streams['root-chunks.bin']);
+ const packed=compact?new DataView(streams['vertices.bin']):null,vertexCount=streams['vertices.bin'].byteLength/manifest.vertexStride;
+ for(let i=0;i<vertexCount;i++){
+  if(compact){const at=i*24,x=packed.getFloat32(at,true),y=packed.getFloat32(at+4,true),z=packed.getFloat32(at+8,true),
+    nx=Math.max(-1,packed.getInt8(at+12)/127),ny=Math.max(-1,packed.getInt8(at+13)/127),nz=Math.max(-1,packed.getInt8(at+14)/127),
+    r=forestMassHalf(packed.getUint16(at+16,true)),g=forestMassHalf(packed.getUint16(at+18,true)),b=forestMassHalf(packed.getUint16(at+20,true)),a=forestMassHalf(packed.getUint16(at+22,true));
+   // Quantizing a unit vector to snorm8 changes its component lengths. Check
+   // that quantized envelope, then normalize on GPU; never expand the stream.
+   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!Number.isFinite(r)||!Number.isFinite(g)||!Number.isFinite(b)||!Number.isFinite(a)||r<0||g<0||b<0||a<0||a>1||Math.abs(Math.hypot(nx,ny,nz)-1)>.015)throw Error('Invalid packed native forest mass vertex');
+  }else{const row=vertices.subarray(i*13,i*13+13);if(!row.every(Number.isFinite)||row[6]!==4||row[7]<0||row[7]>1||row.subarray(10,13).some(v=>v<0)||Math.abs(Math.hypot(...row.subarray(3,6))-1)>.001)throw Error('Invalid native forest mass vertex');}
+  if((i&1023)===0)yield;
  }
  for(const p of manifest.chunks)for(let i=p.firstIndex;i<p.firstIndex+p.indexCount;i++){
-  const at=indices[i]*13;if(at>=vertices.length)throw Error('Native forest mass index outside geometry');
-  for(let k=0;k<3;k++)if(vertices[at+k]<p.low[k]-.001||vertices[at+k]>p.high[k]+.001)throw Error('Native forest mass vertex outside chunk bound');
+  const index=indices[i];if(index>=vertexCount)throw Error('Native forest mass index outside geometry');
+  for(let k=0;k<3;k++){const coordinate=compact?packed.getFloat32(index*24+k*4,true):vertices[index*13+k];if(coordinate<p.low[k]-.001||coordinate>p.high[k]+.001)throw Error('Native forest mass vertex outside chunk bound');}
   if((i&4095)===0)yield;
  }
  const counts=new Uint32Array(manifest.chunks.length),roots=forest?.roots;
@@ -149,10 +169,10 @@ export async function createForestMassRenderer({device,module,frameUBO,shader,re
   const nativeResidency=make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest mass shared native residency'),code=await shader(FOREST_MASS_CULL_WGSL,'forest mass GPU cull');
   const cull=await device.createComputePipelineAsync({label:'forest mass GPU block selection',layout:'auto',compute:{module:code,entryPoint:'forestMassCull'}});
   const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,blocks,commands,state,policy,nativeResidency].map((buffer,binding)=>({binding,resource:{buffer}}))});
-  const pipeline=await device.createRenderPipelineAsync({label:'forest mass opaque native density surface',layout:'auto',vertex:{module,entryPoint:'bakedCanopyVS',buffers:[CANOPY_VERTEX_LAYOUT]},fragment:{module,entryPoint:'canopyOpaqueFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
+  const pipeline=await device.createRenderPipelineAsync({label:'forest mass opaque native density surface',layout:'auto',vertex:{module,entryPoint:m.version===2?'forestMassVS':'bakedCanopyVS',buffers:[m.version===2?FOREST_MASS_VERTEX_LAYOUT:CANOPY_VERTEX_LAYOUT]},fragment:{module,entryPoint:'canopyOpaqueFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
   const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.filter(([id])=>id<=6).map(([binding,resource])=>({binding,resource}))});
   const bundle=device.createRenderBundleEncoder({label:'forest mass immutable indirect bundle',colorFormats:[format],depthStencilFormat:'depth32float',sampleCount:samples});bundle.setPipeline(pipeline);bundle.setBindGroup(0,group);bundle.setBindGroup(1,clouds.bindVolume(pipeline));bundle.setVertexBuffer(0,vertices);bundle.setIndexBuffer(indices,'uint32');for(const p of m.chunks)bundle.drawIndexedIndirect(commands,p.id*20);const recorded=[bundle.finish()];
-  const stats={loaded:true,blocks:m.chunks.length,sourceRoots:pack.rootChunks.length,gpuCulling:true,opaque:true,mode,pixelError,preview,finiteValidated:true,sourceReceiptsValidated:true,appearanceErrorSupported:false,geometryErrorSupported:false,nativeValidation:m.validation??null,neighborGuard:!!neighbors,middle:{loaded:!!middle,prototypes:middle?.prototypes.length??0,errorQualification:'Authored native sampling/wood-clustering footprint; no appearance certificate'},
+  const stats={loaded:true,blocks:m.chunks.length,sourceRoots:pack.rootChunks.length,gpuCulling:true,opaque:true,mode,pixelError,preview,finiteValidated:true,sourceReceiptsValidated:true,vertexStride:m.vertexStride,quantization:m.quantization??null,appearanceErrorSupported:false,geometryErrorSupported:false,nativeValidation:m.validation??null,neighborGuard:!!neighbors,middle:{loaded:!!middle,prototypes:middle?.prototypes.length??0,errorQualification:'Authored native sampling/wood-clustering footprint; no appearance certificate'},
    phase:mode==='far'?'forced far debug; pixel threshold bypassed':mode==='near'?'native-only debug; mass disabled':preview?'explicit startup mass preview until native residency':'authored error-limited selection',selectionMetric:'Projected authored leaf-support/sampling footprint; native appearance unqualified',representation:'Continuous surface from original native leaf-area density and source pigment'};
   return{stats,rootChunks:pack.rootChunks,chunks:m.chunks,state,nativeResidency,commands,middle,neighbors,
    encode(pass){pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.chunks.length/64));},drawOpaque(pass){pass.executeBundles(recorded);},destroy(){for(const buffer of allocated)buffer.destroy();}};
