@@ -10,6 +10,12 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { FOREST_ASSETS } from './js/forest-scenery.js';
+import { FOREST_IMPOSTOR_ASSETS } from './js/forest-impostor.js';
+import { FOREST_LIGHT_ASSETS } from './js/forest-light.js';
+import { FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
+import { FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
+import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js'];
@@ -17,6 +23,16 @@ const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astron
 // Baked stand loading is deferred to landfall; preserve existing module order.
 order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/vendor/forest-meshopt.js','js/forest-mass.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-impostor.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-light.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-volume.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
+order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
+order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
@@ -34,6 +50,7 @@ const runtimeAssetTypes = new Map([
   ['assets/world/saba/canopy.png','image/png'],
   ['assets/world/saba/biome.bin','application/octet-stream'],
   ['assets/world/saba/height.bin','application/octet-stream'],
+  ['assets/world/saba/manifest.json','application/json'],
   ['assets/world/land.json','application/json'],
   ['assets/canopy-scenery/saba/manifest.json','application/json'],
   ['assets/canopy-scenery/saba/near.bin','application/octet-stream'],
@@ -41,17 +58,36 @@ const runtimeAssetTypes = new Map([
   ['assets/canopy-scenery/saba/far.bin','application/octet-stream'],
   ['assets/canopy-scenery/saba/instances.bin','application/octet-stream'],
 ]);
+// The optional exporter declares this pack only after real source baking. Never
+// manufacture a near tile to satisfy a build or fetch absent optional assets.
+if(fs.existsSync(path.join(root,'assets/world/saba/wells-bay/manifest.json'))){
+  for(const [name,mime]of [['manifest.json','application/json'],['height.bin','application/octet-stream'],['measured.bin','application/octet-stream'],['albedo.png','image/png']])
+    runtimeAssetTypes.set('assets/world/saba/wells-bay/'+name,mime);
+}
+if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/manifest.json'))){
+  for(const file of [...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
+    if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
+  }
+}
+if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/mass/manifest.json'))){
+  for(const file of Object.values(FOREST_MASS_ASSETS))
+    runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+}
 const runtimeAssetBytes = new Map(), pagesAssets = new Map();
+// Keep core sailing and the native forest atlases embedded in downloads. The
+// lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
+// load those optional buffers from the same versioned public asset instead.
+const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz']);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);
-  if(inlineAssets)return 'data:'+mime+';base64,'+bytes.toString('base64');
+  if(inlineAssets&&!externalDownloadGeometry.has(file))return 'data:'+mime+';base64,'+bytes.toString('base64');
   if(!pagesAssets.has(file)){
     const sha256=createHash('sha256').update(bytes).digest('hex'),ext=path.posix.extname(file);
     const url=file.slice(0,-ext.length)+'.'+sha256.slice(0,16)+ext;
     pagesAssets.set(file,{url,bytes:bytes.length,sha256});
   }
-  return pagesAssets.get(file).url;
+  return (inlineAssets?'https://healdgar.github.io/caravel-ocean-sim/':'')+pagesAssets.get(file).url;
 }
 const stripModuleSyntax = (src,inlineAssets=true) => {
   if(/^import\s*\{[^}]*\bas\b[^}]*\}\s*from/m.test(src)) throw new Error('Standalone modules require canonical import names; aliased imports cannot be flattened.');

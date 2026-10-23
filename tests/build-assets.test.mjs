@@ -26,7 +26,7 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
   assert.ok(!html.includes(`as="fetch" href="${manifest['assets/wildlife/whale.glb'].url}"`),'inactive wildlife must not preload');
 });
 
-test('downloadable ocean pages retain their self-contained media',async()=>{
+test('downloads embed sailing and native forest atlases; optional mature buffers use byte-versioned URLs',async()=>{
   const manifest=JSON.parse(await readFile(new URL('docs/assets-manifest.json',root),'utf8'));
   for(const file of ['ocean.html','ocean.min.html']){
     const html=await readFile(new URL(file,root),'utf8');
@@ -34,6 +34,9 @@ test('downloadable ocean pages retain their self-contained media',async()=>{
       assert.ok(html.includes('data:'+mime+';base64,'),file+' includes '+mime);
     assert.ok(!/href="assets\/[^"\s]+\.[a-f0-9]{16}\./.test(html),'web-only preloads do not leak into offline downloads');
     for(const source of Object.keys(manifest)){
+      if(/^assets\/forest-scenery\/saba\/(mass\/)?(vertices|indices)\.bin\.gz$/.test(source)){
+        assert.ok(html.includes('https://healdgar.github.io/caravel-ocean-sim/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
+      }
       const bytes=await readFile(new URL(source,root));
       assert.ok(html.includes(';base64,'+bytes.toString('base64')),file+' embeds exact bytes: '+source);
     }

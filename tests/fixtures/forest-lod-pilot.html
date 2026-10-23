@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Forest detail pilot</title>
+<style>
+body{margin:0;background:#101820;color:#e6eee5;font:14px system-ui}header{padding:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}label{display:flex;gap:6px;align-items:center}input[type=range]{width:140px}button,select{padding:5px;background:#21333b;color:inherit;border:1px solid #526963;border-radius:4px}.views{display:flex;gap:2px}.views>div{width:50%;position:relative}.views span{position:absolute;left:12px;top:8px;background:#101820b0;padding:4px 8px}canvas{width:100%;height:auto;display:block;background:#000}pre{white-space:pre-wrap;margin:12px;max-height:200px;overflow:auto}#status{color:#bfcba4}
+</style>
+<header>
+ <b>Experimental forest LOD</b><span id="status">Loading reference and baked detail…</span>
+ <label>Tree <select id="species"><option value="0">Oak</option><option value="2">Birch</option></select></label>
+ <label>Distance <input id="distance" type="range" min="12" max="450" value="100"><output id="distanceValue">100 m</output></label>
+ <label>Orbit <input id="yaw" type="range" min="0" max="360" value="35"></label>
+ <label>Elevation <input id="elevation" type="range" min="-5" max="85" value="15"></label>
+ <label>Detail <select id="detail"><option value="-1">GPU automatic</option><option value="0">Coarse clusters</option><option value="1">Fine clusters</option><option value="2">Leaf groups</option><option value="3">Original leaf groups</option></select></label>
+ <label>Refine at <input id="refine" type="range" min="4" max="128" value="16"><output id="refineValue">16 px</output></label>
+ <label><input id="parallax" type="checkbox" checked>Depth correction</label>
+ <label>Display <select id="display"><option value="0">Lit</option><option value="1">Coverage</option><option value="2">Tier colours</option></select></label>
+</header>
+<div class="views"><div><span>Original mature source</span><canvas id="reference"></canvas></div><div><span>Source-baked clusters + reduced wood</span><canvas id="candidate"></canvas></div></div>
+<pre id="stats"></pre>
+<script type="module">
+import {loadForestClusterPilot,createForestClusterPilotRenderer} from '/js/forest-lod-pilot.js';
+import {createForestLODNativeReference} from '/js/forest-lod-native-reference.js';
+import {loadForestRibbonAssets} from '/js/forest-ribbon-assets.js';
+import {reduceForestLeafRibbons,prepareForestRibbonInspection} from '/js/forest-leaf-ribbons.js';
+import {loadForestInspectionPilot} from '/js/forest-lod-inspection.js';
+const query=new URLSearchParams(location.search),width=Number(query.get('w')||1024),height=Number(query.get('h')||900),canvases=[document.querySelector('#reference'),document.querySelector('#candidate')];
+const report=window.forestPilot={state:'loading',errors:[],receipt:null};
+try{
+ const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});if(!adapter||adapter.isFallbackAdapter)throw Error('Native WebGPU required');
+ const info=adapter.info??{};report.adapter={vendor:info.vendor,architecture:info.architecture,description:info.description};if(/swiftshader|llvmpipe|lavapipe/i.test(JSON.stringify(report.adapter)))throw Error('Software adapter refused');
+ const timestamps=adapter.features.has('timestamp-query'),device=await adapter.requestDevice({requiredFeatures:[...(timestamps?['timestamp-query']:[]),...(adapter.features.has('indirect-first-instance')?['indirect-first-instance']:[])]});device.onuncapturederror=e=>report.errors.push(e.error.message);device.lost.then(e=>report.errors.push(e.message));
+ const format=navigator.gpu.getPreferredCanvasFormat(),contexts=canvases.map(c=>{c.width=width;c.height=height;const context=c.getContext('webgpu');context.configure({device,format,alphaMode:'opaque'});return context;});
+ const stand=query.get('stand'),rootsByPrototype=stand?{0:[],2:[]}:undefined;
+ if(stand){const rows=stand==='edge'?2:3;for(let z=0;z<rows;z++)for(let x=0;x<4;x++){const id=(x+z)%2?2:0;rootsByPrototype[id].push([(x-1.5)*7,0,(z-(rows-1)*.5)*7,.88+((x*7+z*3)%5)*.055,(x*1.7+z*.9)%6.28]);}}
+ const native=await createForestLODNativeReference({device,sourceBase:'/source/',woodBase:'/wood/',rootsByPrototype,format,samples:4,woodShading:query.get('shading')?.startsWith('pixel')?'pixel':'sample'});
+ const pack=await loadForestClusterPilot('/pilot/',{allowExperimental:true}),clusters=new Map();
+ const same=(a,b)=>a?.sha256===b?.sha256&&a?.bytes===b?.bytes;
+ if(!same(pack.manifest.source.manifest,native.stats.sourceManifest)||!same(pack.manifest.source.canopyShade.manifest,native.stats.canopyShade))throw Error('Baked cluster source differs from displayed native reference');
+ const inspections=query.get('inspection')==='1'?await loadForestInspectionPilot('/inspection/',{sourceBase:'/source/',allowExperimental:true}):null;
+ const ribbonAssets=query.get('leaves')==='authored'?await loadForestRibbonAssets('/ribbons/',{allowExperimental:true}):null;
+ let worstTriangles=0;
+ for(const p of pack.manifest.prototypes){let inspection=inspections?await inspections.loadPrototype(p.id):null;const preparationStart=performance.now();if(query.get('leaves')==='hybrid'){if(!inspection)throw Error('Explicit hybrid review requires inspection pages');const ribbons=reduceForestLeafRibbons(new Float32Array(inspection.vertices.buffer,inspection.vertices.byteOffset,inspection.vertices.byteLength/4),inspection.indices,undefined,{vertexStride:15});inspection=prepareForestRibbonInspection(inspection,ribbons);}else if(ribbonAssets){if(!inspection)throw Error('Authored ribbons require original inspection pages');inspection=await ribbonAssets.apply(inspection);}const preparationMs=performance.now()-preparationStart;const wood=native.stats.prototypes.find(q=>q.id===p.id),r=await createForestClusterPilotRenderer({device,pack,prototypeID:p.id,inspection,inspectionShading:query.get('shading')||'sample',inspectionDepthPrepass:query.get('shading')==='pixel-depth',inspectionCompaction:query.get('compaction')||'serial',ribbonErrorPixels:Number(query.get('ribbonError')||.25),captureLayers:Number(query.get("layers")||1),meshSegments:Number(query.get("grid")||0),...(rootsByPrototype?{roots:rootsByPrototype[p.id]}:{}),format,samples:4,additionalTriangles:Math.max(...wood.woodTiers.map(t=>t.triangles))});r.stats.reductionPreparationMs=preparationMs;clusters.set(p.id,r);worstTriangles+=r.stats.maximumSubmittedTriangles;inspection?.destroy();}
+ if(worstTriangles>6_000_000)throw Error('Whole pilot combined geometry budget exceeded');
+ const T=GPUTextureUsage,B=GPUBufferUsage,colour=canvases.map(()=>device.createTexture({size:[width,height],sampleCount:4,format,usage:T.RENDER_ATTACHMENT})),depth=canvases.map(()=>device.createTexture({size:[width,height],sampleCount:4,format:'depth32float',usage:T.RENDER_ATTACHMENT}));
+ const querySet=timestamps?device.createQuerySet({type:'timestamp',count:4}):null,queryOut=timestamps?device.createBuffer({size:32,usage:B.QUERY_RESOLVE|B.COPY_SRC}):null,read=device.createBuffer({size:256,usage:B.COPY_DST|B.MAP_READ});
+ const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),norm=a=>a.map(v=>v/Math.hypot(...a));
+ function camera(options){
+  const p=pack.manifest.prototypes.find(p=>p.id===options.prototypeID),low=p.canopyBounds.low,high=p.canopyBounds.high,target=low.map((v,i)=>(v+high[i])*.5),yaw=options.yaw*Math.PI/180,elevation=options.elevation*Math.PI/180;
+  if(stand)target.splice(0,3,0,10,0);
+  const eye=target.map((v,i)=>v+options.distance*[Math.sin(yaw)*Math.cos(elevation),Math.sin(elevation),Math.cos(yaw)*Math.cos(elevation)][i]);
+  const forward=norm(target.map((v,i)=>v-eye[i])),right=norm(cross(forward,[0,1,0])),up=cross(right,forward),fov=50*Math.PI/180,sy=1/Math.tan(fov*.5),sx=sy*height/width,near=.1,far=3000,z=far/(far-near),data=new Float32Array(32);
+  for(let i=0;i<3;i++)data.set([sx*right[i],sy*up[i],z*forward[i],forward[i]],i*4);
+  data.set([-sx*dot(right,eye),-sy*dot(up,eye),-z*dot(forward,eye)-z*near,-dot(forward,eye)],12);
+  data.set([...eye,height*.5*sy],16);data.set(options.sun??[.7,.7,.2,1.25],20);data.set([width,height,options.display??0,options.refinePixels??64],24);data.set([options.detail??-1,options.parallax===false?0:1,1,4],28);return data;
+ }
+ let current={prototypeID:0,distance:Number(query.get('distance')||100),yaw:Number(query.get('yaw')||35),elevation:Number(query.get('elevation')||15),detail:-1,refinePixels:Number(query.get('refine')||16),parallax:true,display:0};
+ async function render(options={}){
+  current={...current,...options};const active=stand?[...clusters.values()]:[clusters.get(current.prototypeID)],r=active[0],data=camera(current);for(const r of active)r.writeCamera(data);native.writeCamera(data);
+  const encoder=device.createCommandEncoder();
+  const descriptor=(i,timestampWrites)=>({colorAttachments:[{view:colour[i].createView(),resolveTarget:contexts[i].getCurrentTexture().createView(),loadOp:'clear',storeOp:'discard',clearValue:[0,0,0,1]}],depthStencilAttachment:{view:depth[i].createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:1},...(timestampWrites?{timestampWrites}:{})});
+  if(!current.candidateOnly){const reference=encoder.beginRenderPass(descriptor(0));for(const r of active)native.draw(reference,{prototypeID:r.prototype.id,reference:true,includeLeaves:true});reference.end();}
+  for(const [i,r]of active.entries())r.encode(encoder,querySet&&i===0?{timestampWrites:{querySet,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1}}:{});
+  const candidate=encoder.beginRenderPass(descriptor(1,querySet?{querySet,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3}:null));
+  let woodTriangles=0,nativeLeafTriangles=0;for(const r of active){native.draw(candidate,{prototypeID:r.prototype.id,reference:current.nativeOriginalWood===true,woodTier:current.detail===0?2:current.distance<60?0:1,includeLeaves:current.nativeOnly===true});const leaves=current.nativeOnly?native.stats.prototypes.find(p=>p.id===r.prototype.id).referenceLeafTriangles:0;nativeLeafTriangles+=leaves;woodTriangles+=native.stats.lastDraw.triangles-leaves;if(!current.nativeOnly)r.draw(candidate);}candidate.end();
+  for(const [i,r]of active.entries())encoder.copyBufferToBuffer(r.commands,0,read,i*48,48);const queryOffset=active.length*48;if(querySet){encoder.resolveQuerySet(querySet,0,4,queryOut,0);encoder.copyBufferToBuffer(queryOut,0,read,queryOffset,32);}
+  device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);const raw=read.getMappedRange(),commands=active.map((_,i)=>Array.from(new Uint32Array(raw,i*48,12))),command=commands.reduce((a,c)=>a.map((x,i)=>x+c[i]),Array(12).fill(0)),ticks=querySet?Array.from(new BigUint64Array(raw,queryOffset,4)):null;read.unmap();
+  const gpuMs=ticks?Number(ticks[3]-ticks[0])/1e6:null,gpuComputeMs=ticks?Number(ticks[1]-ticks[0])/1e6:null,gpuDrawMs=ticks?Number(ticks[3]-ticks[2])/1e6:null;
+  const leafTriangles=current.nativeOnly?nativeLeafTriangles:command[9],submittedLeafTriangles=leafTriangles+(current.nativeOnly?0:command[11]/3);
+  report.receipt={...current,stand:stand||null,width,height,gpuMs,gpuComputeMs,gpuDrawMs,woodTriangles,leafTriangles,submittedLeafTriangles,totalCandidateTriangles:submittedLeafTriangles+woodTriangles,selectedClusters:current.nativeOnly?0:command[1],inspectionClusters:current.nativeOnly?0:command[10],stats:active.map(r=>r.stats),reference:native.stats,errors:[...report.errors]};
+  document.querySelector('#stats').textContent=JSON.stringify(report.receipt,null,2);document.querySelector('#status').textContent='Experimental; appearance not qualified';
+  if(report.errors.length)throw Error(report.errors.join('\n'));return report.receipt;
+ }
+ report.render=render;report.close=()=>{for(const r of clusters.values())r.destroy();native.destroy();device.destroy();};await render();report.state='ready';
+ let busy=false,again=false;async function update(){if(busy){again=true;return;}busy=true;do{again=false;await render({prototypeID:Number(document.querySelector('#species').value),distance:Number(document.querySelector('#distance').value),yaw:Number(document.querySelector('#yaw').value),elevation:Number(document.querySelector('#elevation').value),detail:Number(document.querySelector('#detail').value),refinePixels:Number(document.querySelector('#refine').value),parallax:document.querySelector('#parallax').checked,display:Number(document.querySelector('#display').value)});document.querySelector('#distanceValue').textContent=current.distance+' m';document.querySelector('#refineValue').textContent=current.refinePixels+' px';}while(again);busy=false;}
+ for(const key of ['distance','yaw','elevation'])document.querySelector('#'+key).value=current[key];document.querySelector('#refine').value=current.refinePixels;document.querySelector('#refineValue').textContent=current.refinePixels+' px';document.querySelector('#distanceValue').textContent=current.distance+' m';
+ for(const el of document.querySelectorAll('input,select'))el.addEventListener('input',()=>update().catch(e=>{report.errors.push(e.message);report.state='failed';}));
+}catch(error){report.errors.push(error.stack||error.message);report.state='failed';document.querySelector('#status').textContent='Failed';document.querySelector('#stats').textContent=report.errors.join('\n');throw error;}
+</script>

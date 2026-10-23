@@ -75,5 +75,6 @@
     "depthPerShoreMetre": 0.15,
     "shoreCellCorrectionMetres": 8.0,
     "derivedSpacingMetres": 16.0
-  }
+  },
+  "nearTile": "wells-bay/manifest.json"
 }

@@ -1,0 +1,78 @@
+{
+  "format": "waterworld.terrain-near",
+  "version": 1,
+  "id": "wells-bay",
+  "region": "saba",
+  "domain": {
+    "x": -1536,
+    "z": -6992,
+    "span": 1024,
+    "size": 513,
+    "spacing": 2
+  },
+  "edgeBlendMetres": 32,
+  "baseHeightSHA256": "44a7a266ceebe8c920fbe0fb8a3aa0b159dd89660ccfce37791861615ed93b28",
+  "files": {
+    "height.bin": {
+      "bytes": 1052676,
+      "sha256": "f96f6c800a76b668e5bbf2b2cbe79ea31ad30a09c97a2a0dfc58e6979080e768"
+    },
+    "measured.bin": {
+      "bytes": 263169,
+      "sha256": "860ac988318ebd60cd392a6d0f5bc17b6697ca5d659bef84229754e64df5893b"
+    },
+    "albedo.png": {
+      "bytes": 1063137,
+      "sha256": "40f4ab5de9b803a3331cd4fe56e38526bc46cd5040ebf8aa03d142b34b27b5d1"
+    }
+  },
+  "source": {
+    "url": "https://basisdata.nl/hwh-ortho/Caribisch_NL/LiDAR/caribisch/Saba/02a_DTM_50cm/M_SABA2023.TIF",
+    "sha256": "c72247094f1f08b038c59b88d832a461914047b580ac5e0cc2f8f31848c5c955",
+    "spacingMetres": 0.5,
+    "licence": "CC BY 4.0",
+    "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+    "crs": "EPSG:10641 (publisher assignment; source TIFF LOCAL_CS)",
+    "verticalDatum": "Publisher local DTM heights; no hydrographic datum conversion",
+    "processing": "Original raster crop; area-average directly to near grid without intermediate16m reduction. Binary measured mask records dry source support.32m perimeter blends to exact resident triangle surface."
+  },
+  "authoredWetCells": {
+    "provenance": "Unmeasured cells use resident terrain; a48m dry-shore-distance skirt on wet cells is authored, not surveyed bathymetry or a reconstructed beach.",
+    "distanceDepthSlope": 0.15,
+    "shallowMinimumMetres": 0.05,
+    "transitionMetres": 48,
+    "mappedOceanOverride": "Unmeasured cells more than4m outside the independent mapped coastline receive negative authored depth even where the resident gap-fill was positive; measured ground and inland gaps remain unchanged.32m perimeter seam remains exact.",
+    "correctedPositiveCoarseNodes": 2543
+  },
+  "derivedDataLicence": "Coastline-derived composite: ODbL1.0; terrain and imagery source attribution remains CC BY4.0",
+  "shoreline": {
+    "sourceFile": "assets/world/saba/wells-bay-shoreline.geojson",
+    "sourceDataURL": "https://raw.githubusercontent.com/healdgar/caravel-ocean-sim/main/assets/world/saba/wells-bay-shoreline.geojson",
+    "sha256": "f09a88fd7ba32bc4fb764f9b60f325d0c0e245df7800d1f14b718d366ae169ee",
+    "source": "https://www.openstreetmap.org/copyright",
+    "attribution": "\u00a9 OpenStreetMap contributors",
+    "licence": "ODbL 1.0",
+    "snapshot": "2026-07-24T11:04:51Z",
+    "uncertaintyMetres": 4,
+    "interpretation": "Approximate mean high water coastline, not a surveyed beach profile, instantaneous tide or measured bathymetry. A mapping constraint only where original dry ground is absent."
+  },
+  "imagery": {
+    "url": "https://api.ellipsis-drive.com/v3/ogc/wms/37a9029d-7578-4471-826d-3b40d721b83b?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=007963d5-7a71-4d40-b6ce-b4440306244f_786eb116-19ff-4406-bd3e-3d03bf8b89af&STYLES=&CRS=EPSG%3A3857&BBOX=-7041773.354841999%2C1995374.0431677536%2C-7040697.656813516%2C1996449.7944575395&WIDTH=1024&HEIGHT=1024&FORMAT=image%2Fpng&TRANSPARENT=true",
+    "sourceSHA256": "08a9f64b17b77fe6ee488b9afceb74175ceba2f2dc0a6e03fd61a238b4895cd8",
+    "size": 1024,
+    "derivedSpacingMetres": 1,
+    "licence": "CC BY 4.0",
+    "licenceURL": "https://creativecommons.org/licenses/by/4.0/",
+    "acquisition": "2023\u20132024; publisher describes acquisition around 2023/2024",
+    "alphaMask": {
+      "source": "Original hash-verified0.5m DTM dry-return coverage OR independent mapped land more than4m inland, registered onto the1m imagery grid",
+      "minimumDryCoverage": 0.95,
+      "shoreInsetMetres": 1,
+      "modifiedChannels": [
+        "alpha"
+      ],
+      "sourceAlpha": "Intersected with measured dry support; original RGB retained, including masked pixels"
+    },
+    "processing": "Independent WMS crop reprojected to local metric domain; RGB preserved. Alpha qualified by measured dry support or mapped inland support with conservative shore insets, not by colour, WMS water opacity or authored bathymetry. Native source resolution is not certified by request dimensions."
+  }
+}

@@ -1,0 +1,1314 @@
+{
+  "format": "forestmodeler.native-ios-assets.v1",
+  "models": [
+    {
+      "file": "birch_mature25_hero.usdz",
+      "species": "birch",
+      "stage": "mature",
+      "age": 25.0,
+      "tier": "hero",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "05b5359d79a50055341c89d8acaa30cdfcc6fe2cbb62f4b697c3bc7a2324da7a",
+      "bytes": 4888586,
+      "triangles": 92476,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "154d7ada7a48d67924dfc46af479bb83",
+        "age": 25.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "2e4a6a3e99c79a837ca81fc92632a00d415afcd09ac80e1a84a13a99b2ff0299",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 6443,
+          "members": 1,
+          "triangles": 25772,
+          "representedBefore": 6666.298901429891,
+          "representedAfter": 6666.298901429891
+        },
+        {
+          "archetype": 1,
+          "instances": 6297,
+          "members": 1,
+          "triangles": 25188,
+          "representedBefore": 6583.106290017734,
+          "representedAfter": 6583.106290017734
+        },
+        {
+          "archetype": 2,
+          "instances": 6340,
+          "members": 1,
+          "triangles": 25360,
+          "representedBefore": 6674.025942679273,
+          "representedAfter": 6674.025942679273
+        }
+      ],
+      "foliageRepresentation": "native-size individual cutouts and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.42,
+          "underside": 0.38,
+          "colour": [
+            0.31,
+            0.52,
+            0.21
+          ]
+        },
+        {
+          "gloss": 0.42,
+          "underside": 0.38,
+          "colour": [
+            0.31,
+            0.52,
+            0.21
+          ]
+        },
+        {
+          "gloss": 0.42,
+          "underside": 0.38,
+          "colour": [
+            0.31,
+            0.52,
+            0.21
+          ]
+        }
+      ],
+      "transmission": 0.16105650921764147,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "birch_mature25_photo.usdz",
+      "species": "birch",
+      "stage": "mature",
+      "age": 25.0,
+      "tier": "photo",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "e5817b7b624fa69385eddd69399109619d24ebaee4550effb16d19363834485e",
+      "bytes": 94186148,
+      "triangles": 2808862,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "154d7ada7a48d67924dfc46af479bb83",
+        "age": 25.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "2e4a6a3e99c79a837ca81fc92632a00d415afcd09ac80e1a84a13a99b2ff0299",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 6443,
+          "members": 1,
+          "triangles": 837590,
+          "representedBefore": 6666.298901429891,
+          "representedAfter": 6666.298901429891
+        },
+        {
+          "archetype": 1,
+          "instances": 6297,
+          "members": 1,
+          "triangles": 717858,
+          "representedBefore": 6583.106290017734,
+          "representedAfter": 6583.106290017734
+        },
+        {
+          "archetype": 2,
+          "instances": 6340,
+          "members": 1,
+          "triangles": 1229960,
+          "representedBefore": 6674.025942679273,
+          "representedAfter": 6674.025942679273
+        }
+      ],
+      "foliageRepresentation": "native blade and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.42,
+          "underside": 0.38,
+          "colour": [
+            0.31,
+            0.52,
+            0.21
+          ]
+        },
+        {
+          "gloss": 0.42,
+          "underside": 0.38,
+          "colour": [
+            0.31,
+            0.52,
+            0.21
+          ]
+        },
+        {
+          "gloss": 0.42,
+          "underside": 0.38,
+          "colour": [
+            0.31,
+            0.52,
+            0.21
+          ]
+        }
+      ],
+      "transmission": 0.16105650921764147,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "blueberry_mature8_hero.usdz",
+      "species": "blueberry",
+      "stage": "mature",
+      "age": 8.0,
+      "tier": "hero",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "ce4d59f4d4f6722e1e7137ad737a8181544abedae9495b59260e8eceafa73213",
+      "bytes": 860901,
+      "triangles": 3956,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "b08d6272ec0de28d448d5f2c5db99b14",
+        "age": 8.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "d6ca93e96fb5bfbd6acb8812a80698bb396f710f84fd880010934905ee8137a9",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 73,
+          "members": 1,
+          "triangles": 292,
+          "representedBefore": 76.68893793391736,
+          "representedAfter": 76.68893793391736
+        },
+        {
+          "archetype": 1,
+          "instances": 75,
+          "members": 1,
+          "triangles": 300,
+          "representedBefore": 74.42828573942847,
+          "representedAfter": 74.42828573942847
+        },
+        {
+          "archetype": 2,
+          "instances": 68,
+          "members": 1,
+          "triangles": 272,
+          "representedBefore": 76.88245824385196,
+          "representedAfter": 76.88245824385196
+        }
+      ],
+      "foliageRepresentation": "native-size individual cutouts and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.55,
+          "underside": 0.48,
+          "colour": [
+            0.24,
+            0.44,
+            0.24
+          ]
+        },
+        {
+          "gloss": 0.55,
+          "underside": 0.48,
+          "colour": [
+            0.24,
+            0.44,
+            0.24
+          ]
+        },
+        {
+          "gloss": 0.55,
+          "underside": 0.48,
+          "colour": [
+            0.24,
+            0.44,
+            0.24
+          ]
+        }
+      ],
+      "transmission": 0.11931359658782183,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "blueberry_mature8_photo.usdz",
+      "species": "blueberry",
+      "stage": "mature",
+      "age": 8.0,
+      "tier": "photo",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "3bb30d744aff07fb7b2f09b3278343aae1d66a78cc83263d56a0c07be214a358",
+      "bytes": 1108094,
+      "triangles": 11488,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "b08d6272ec0de28d448d5f2c5db99b14",
+        "age": 8.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "d6ca93e96fb5bfbd6acb8812a80698bb396f710f84fd880010934905ee8137a9",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 73,
+          "members": 1,
+          "triangles": 2336,
+          "representedBefore": 76.68893793391736,
+          "representedAfter": 76.68893793391736
+        },
+        {
+          "archetype": 1,
+          "instances": 75,
+          "members": 1,
+          "triangles": 2400,
+          "representedBefore": 74.42828573942847,
+          "representedAfter": 74.42828573942847
+        },
+        {
+          "archetype": 2,
+          "instances": 68,
+          "members": 1,
+          "triangles": 2176,
+          "representedBefore": 76.88245824385196,
+          "representedAfter": 76.88245824385196
+        }
+      ],
+      "foliageRepresentation": "native blade and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.55,
+          "underside": 0.48,
+          "colour": [
+            0.24,
+            0.44,
+            0.24
+          ]
+        },
+        {
+          "gloss": 0.55,
+          "underside": 0.48,
+          "colour": [
+            0.24,
+            0.44,
+            0.24
+          ]
+        },
+        {
+          "gloss": 0.55,
+          "underside": 0.48,
+          "colour": [
+            0.24,
+            0.44,
+            0.24
+          ]
+        }
+      ],
+      "transmission": 0.11931359658782183,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "chestnut_mature70_hero.usdz",
+      "species": "chestnut",
+      "stage": "mature",
+      "age": 70.0,
+      "tier": "hero",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "04e8e553c9aa38132546e0da77594f33c8598e3c4164fb40f7e5af325f3fd3dc",
+      "bytes": 24791972,
+      "triangles": 669947,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "13e232744e0f85049add80b82da37ebf",
+        "age": 70.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "29fb2fcd2909154e6245cfc20fbc46235de34e3471c5dcf0e69106a14c1123da",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 28987,
+          "members": 1,
+          "triangles": 115948,
+          "representedBefore": 30266.720546922432,
+          "representedAfter": 30266.720546922432
+        },
+        {
+          "archetype": 1,
+          "instances": 28722,
+          "members": 1,
+          "triangles": 114888,
+          "representedBefore": 30063.19493289578,
+          "representedAfter": 30063.19493289578
+        },
+        {
+          "archetype": 2,
+          "instances": 28800,
+          "members": 1,
+          "triangles": 115200,
+          "representedBefore": 30163.86015576872,
+          "representedAfter": 30163.86015576872
+        }
+      ],
+      "foliageRepresentation": "native-size individual cutouts and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.34,
+          "underside": 0.42,
+          "colour": [
+            0.27,
+            0.42,
+            0.17
+          ]
+        },
+        {
+          "gloss": 0.34,
+          "underside": 0.42,
+          "colour": [
+            0.27,
+            0.42,
+            0.17
+          ]
+        },
+        {
+          "gloss": 0.34,
+          "underside": 0.42,
+          "colour": [
+            0.27,
+            0.42,
+            0.17
+          ]
+        }
+      ],
+      "transmission": 0.13296535767236065,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "chestnut_mature70_photo.usdz",
+      "species": "chestnut",
+      "stage": "mature",
+      "age": 70.0,
+      "tier": "photo",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "ed0205ee42c6e8992925c510b5d84a2245c0c20d32ca2b9b41cc74d79835cad8",
+      "bytes": 275451073,
+      "triangles": 8194857,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "13e232744e0f85049add80b82da37ebf",
+        "age": 70.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "29fb2fcd2909154e6245cfc20fbc46235de34e3471c5dcf0e69106a14c1123da",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 28987,
+          "members": 1,
+          "triangles": 2608830,
+          "representedBefore": 30266.720546922432,
+          "representedAfter": 30266.720546922432
+        },
+        {
+          "archetype": 1,
+          "instances": 28722,
+          "members": 1,
+          "triangles": 2814756,
+          "representedBefore": 30063.19493289578,
+          "representedAfter": 30063.19493289578
+        },
+        {
+          "archetype": 2,
+          "instances": 28800,
+          "members": 1,
+          "triangles": 2361600,
+          "representedBefore": 30163.86015576872,
+          "representedAfter": 30163.86015576872
+        }
+      ],
+      "foliageRepresentation": "native blade and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.34,
+          "underside": 0.42,
+          "colour": [
+            0.27,
+            0.42,
+            0.17
+          ]
+        },
+        {
+          "gloss": 0.34,
+          "underside": 0.42,
+          "colour": [
+            0.27,
+            0.42,
+            0.17
+          ]
+        },
+        {
+          "gloss": 0.34,
+          "underside": 0.42,
+          "colour": [
+            0.27,
+            0.42,
+            0.17
+          ]
+        }
+      ],
+      "transmission": 0.13296535767236065,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "elm_mature65_hero.usdz",
+      "species": "elm",
+      "stage": "mature",
+      "age": 65.0,
+      "tier": "hero",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "82b6ab0be24adce54204dfb880fe1a5e2bed11b0f17b44472efb0c2c357ebd5a",
+      "bytes": 37068530,
+      "triangles": 895546,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "fbd56a9c4732319dfd01c144aaf24946",
+        "age": 65.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "efca2ba70f5e42c9f534ed10cbe83804387e6f0bb91e5f5c9b9d604d9702fe34",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 51462,
+          "members": 1,
+          "triangles": 205848,
+          "representedBefore": 54093.32519595843,
+          "representedAfter": 54093.32519595843
+        },
+        {
+          "archetype": 1,
+          "instances": 51713,
+          "members": 1,
+          "triangles": 206852,
+          "representedBefore": 54478.92823023689,
+          "representedAfter": 54478.92823023689
+        },
+        {
+          "archetype": 2,
+          "instances": 51795,
+          "members": 1,
+          "triangles": 207180,
+          "representedBefore": 54189.222772650755,
+          "representedAfter": 54189.222772650755
+        }
+      ],
+      "foliageRepresentation": "native-size individual cutouts and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.22,
+          "underside": 0.45,
+          "colour": [
+            0.24,
+            0.42,
+            0.18
+          ]
+        },
+        {
+          "gloss": 0.22,
+          "underside": 0.45,
+          "colour": [
+            0.24,
+            0.42,
+            0.18
+          ]
+        },
+        {
+          "gloss": 0.22,
+          "underside": 0.45,
+          "colour": [
+            0.24,
+            0.42,
+            0.18
+          ]
+        }
+      ],
+      "transmission": 0.13296535767236065,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "maple_mature50_hero.usdz",
+      "species": "maple",
+      "stage": "mature",
+      "age": 50.0,
+      "tier": "hero",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "79ede74fdd342e5f50ebfea17288acaac06cf149764450e483c3786979bea14f",
+      "bytes": 25876197,
+      "triangles": 664478,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "89897a1e14ead1617d797a3f244c3c40",
+        "age": 50.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "09537c3c88fe438aeb07d2a76b0dc85e6b0dd91c366a3cf16d333db75e304b0e",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 31909,
+          "members": 1,
+          "triangles": 127636,
+          "representedBefore": 33561.701387884335,
+          "representedAfter": 33561.701387884335
+        },
+        {
+          "archetype": 1,
+          "instances": 31729,
+          "members": 1,
+          "triangles": 126916,
+          "representedBefore": 33110.07670622958,
+          "representedAfter": 33110.07670622958
+        },
+        {
+          "archetype": 2,
+          "instances": 31998,
+          "members": 1,
+          "triangles": 127992,
+          "representedBefore": 33677.498089606335,
+          "representedAfter": 33677.498089606335
+        }
+      ],
+      "foliageRepresentation": "native-size individual cutouts and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.25,
+          "underside": 0.55,
+          "colour": [
+            0.27,
+            0.46,
+            0.2
+          ]
+        },
+        {
+          "gloss": 0.25,
+          "underside": 0.55,
+          "colour": [
+            0.27,
+            0.46,
+            0.2
+          ]
+        },
+        {
+          "gloss": 0.25,
+          "underside": 0.55,
+          "colour": [
+            0.27,
+            0.46,
+            0.2
+          ]
+        }
+      ],
+      "transmission": 0.153201690575191,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "maple_mature50_photo.usdz",
+      "species": "maple",
+      "stage": "mature",
+      "age": 50.0,
+      "tier": "photo",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "082da87a25e1d9cf47dad57f11cfa9210282fdc0aaf38ce5bbc6cae31a4b03c2",
+      "bytes": 206856651,
+      "triangles": 5969738,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "89897a1e14ead1617d797a3f244c3c40",
+        "age": 50.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "09537c3c88fe438aeb07d2a76b0dc85e6b0dd91c366a3cf16d333db75e304b0e",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 31909,
+          "members": 1,
+          "triangles": 2042176,
+          "representedBefore": 33561.701387884335,
+          "representedAfter": 33561.701387884335
+        },
+        {
+          "archetype": 1,
+          "instances": 31729,
+          "members": 1,
+          "triangles": 1522992,
+          "representedBefore": 33110.07670622958,
+          "representedAfter": 33110.07670622958
+        },
+        {
+          "archetype": 2,
+          "instances": 31998,
+          "members": 1,
+          "triangles": 2047872,
+          "representedBefore": 33677.498089606335,
+          "representedAfter": 33677.498089606335
+        }
+      ],
+      "foliageRepresentation": "native blade and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.25,
+          "underside": 0.55,
+          "colour": [
+            0.27,
+            0.46,
+            0.2
+          ]
+        },
+        {
+          "gloss": 0.25,
+          "underside": 0.55,
+          "colour": [
+            0.27,
+            0.46,
+            0.2
+          ]
+        },
+        {
+          "gloss": 0.25,
+          "underside": 0.55,
+          "colour": [
+            0.27,
+            0.46,
+            0.2
+          ]
+        }
+      ],
+      "transmission": 0.153201690575191,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "oak_mature60_hero.usdz",
+      "species": "oak",
+      "stage": "mature",
+      "age": 60.0,
+      "tier": "hero",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "cad5089e5e7b88b1d9cdd1dd0c3d3024fda33eaf8203cfded79bdb118452a00e",
+      "bytes": 21657155,
+      "triangles": 576223,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "9c73dd756d619ae7181849bc83f251b1",
+        "age": 60.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "ab1e54cdab8ff8b817627d318e2f1933c17d72d3be1de579e67c40811e1f18f5",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 25297,
+          "members": 1,
+          "triangles": 101188,
+          "representedBefore": 26546.229098234166,
+          "representedAfter": 26546.229098234166
+        },
+        {
+          "archetype": 1,
+          "instances": 25257,
+          "members": 1,
+          "triangles": 101028,
+          "representedBefore": 26459.04447339095,
+          "representedAfter": 26459.04447339095
+        },
+        {
+          "archetype": 2,
+          "instances": 25409,
+          "members": 1,
+          "triangles": 101636,
+          "representedBefore": 26684.101873860433,
+          "representedAfter": 26684.101873860433
+        }
+      ],
+      "foliageRepresentation": "native-size individual cutouts and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.1,
+          "underside": 0.3,
+          "colour": [
+            0.22,
+            0.36,
+            0.19
+          ]
+        },
+        {
+          "gloss": 0.1,
+          "underside": 0.3,
+          "colour": [
+            0.22,
+            0.36,
+            0.19
+          ]
+        },
+        {
+          "gloss": 0.1,
+          "underside": 0.3,
+          "colour": [
+            0.22,
+            0.36,
+            0.19
+          ]
+        }
+      ],
+      "transmission": 0.13296535767236065,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.35,
+          "hasNormal": true
+        }
+      }
+    },
+    {
+      "file": "oak_mature60_photo.usdz",
+      "species": "oak",
+      "stage": "mature",
+      "age": 60.0,
+      "tier": "photo",
+      "surfaceEncoding": "uint8-preserved-v1",
+      "sha256": "af4299e60b97cbf4b56ecc410ee43ab6cdcb7166ee7e45f1551193de099e4642",
+      "bytes": 261182850,
+      "triangles": 7787004,
+      "source": {
+        "engine": "0504005de09ccd3693aa2a84dd8dd820",
+        "plan": "9c73dd756d619ae7181849bc83f251b1",
+        "age": 60.0,
+        "seed": 42,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "situation": "isolated default Environment"
+      },
+      "archiveSha256": "ab1e54cdab8ff8b817627d318e2f1933c17d72d3be1de579e67c40811e1f18f5",
+      "foliageAudit": [
+        {
+          "archetype": 0,
+          "instances": 25297,
+          "members": 1,
+          "triangles": 2074354,
+          "representedBefore": 26546.229098234166,
+          "representedAfter": 26546.229098234166
+        },
+        {
+          "archetype": 1,
+          "instances": 25257,
+          "members": 1,
+          "triangles": 2475186,
+          "representedBefore": 26459.04447339095,
+          "representedAfter": 26459.04447339095
+        },
+        {
+          "archetype": 2,
+          "instances": 25409,
+          "members": 1,
+          "triangles": 2896626,
+          "representedBefore": 26684.101873860433,
+          "representedAfter": 26684.101873860433
+        }
+      ],
+      "foliageRepresentation": "native blade and needle geometry",
+      "opticalTraits": [
+        {
+          "gloss": 0.1,
+          "underside": 0.3,
+          "colour": [
+            0.22,
+            0.36,
+            0.19
+          ]
+        },
+        {
+          "gloss": 0.1,
+          "underside": 0.3,
+          "colour": [
+            0.22,
+            0.36,
+            0.19
+          ]
+        },
+        {
+          "gloss": 0.1,
+          "underside": 0.3,
+          "colour": [
+            0.22,
+            0.36,
+            0.19
+          ]
+        }
+      ],
+      "transmission": 0.13296535767236065,
+      "limitations": [
+        "Mobile frame rate needs device validation, especially needle-heavy trees.",
+        "Unresolved blade positions are render quadrature, not new shoots.",
+        "Web thin-sheet transmission and underside shader are not encoded in USD Preview Surface."
+      ],
+      "materialContract": "gene-surfaces-v3",
+      "surfaceOptics": {
+        "foliage_0": {
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_1": {
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        },
+        "foliage_2": {
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "opacityThreshold": 0.0,
+          "hasNormal": true
+        }
+      }
+    }
+  ]
+}

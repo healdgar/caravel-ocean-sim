@@ -103,7 +103,7 @@ async function coverage(page,baseline=false){
 
 test('the production tree renderer retains detailed perforated foliage and opaque distant crown masses',{timeout:240000},async t=>{
   const terrain=await readFile(new URL('../js/terrain.js',import.meta.url),'utf8'),main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-  const treeMarker='const trees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees;',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
+  const treeMarker='const trees=forestPack?new Float32Array(0):canopyTrees;',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
   for(const marker of [treeMarker,geometryMarker,groundMarker])assert.ok(terrain.includes(marker),'tree fixture marker '+marker);
   assert.ok(main.includes(cameraMarker));
   // Inspect the actual post-filter array with imported scenery explicitly off;
@@ -118,7 +118,7 @@ test('the production tree renderer retains detailed perforated foliage and opaqu
     }
     return new Float32Array(sparse);
   })()`;
-  const fixture=terrain.replace(treeMarker,'const trees=(canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees).slice(0,8);window.treeCheck.instance=Array.from(trees);window.treeCheck.originalSeed=Array.from(originalTrees.subarray(0,8));window.treeCheck.importedScenery=!!canopyPack;')
+  const fixture=terrain.replace(treeMarker,'const trees=(forestPack?new Float32Array(0):canopyTrees).slice(0,8);window.treeCheck.instance=Array.from(trees);window.treeCheck.originalSeed=Array.from(originalTrees.subarray(0,8));window.treeCheck.importedScenery=!!canopyPack;')
     .replace(geometryMarker,geometryFixture)
     .replace(groundMarker,'');
   const results=[];

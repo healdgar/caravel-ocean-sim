@@ -36,7 +36,7 @@ export function terrainSurfaceSample(heights,x,z,region=ISLAND){
   return a+b<=1?heights[k]+a*(heights[k+1]-heights[k])+b*(heights[k+n]-heights[k]):
     heights[k+n+1]+(1-a)*(heights[k+n]-heights[k+n+1])+(1-b)*(heights[k+1]-heights[k+n+1]);
 }
-export function islandGeometry(heights){
+export function islandGeometry(heights,replacedBounds=null){
   const n=ISLAND.size,step=ISLAND.span/(n-1),vertices=new Float32Array(n*n*8),indices=[],submergedIndices=[];
   for(let j=0;j<n;j++)for(let i=0;i<n;i++){
     const k=j*n+i,h=heights[k],x=ISLAND.x+(i/(n-1)-.5)*ISLAND.span,z=ISLAND.z+(j/(n-1)-.5)*ISLAND.span;
@@ -44,10 +44,11 @@ export function islandGeometry(heights){
     const dz=(heights[Math.max(0,j-1)*n+i]-heights[Math.min(n-1,j+1)*n+i])/(2*step);
     const length=Math.hypot(dx,1,dz);
     vertices.set([x,h,z,dx/length,1/length,dz/length,0,0],k*8);
-    if(i<n-1&&j<n-1&&Math.max(h,heights[k+1],heights[k+n],heights[k+n+1])>-.5){
+    const replaced=replacedBounds&&x>=replacedBounds[0]&&x+step<=replacedBounds[1]&&z>=replacedBounds[2]&&z+step<=replacedBounds[3];
+    if(!replaced&&i<n-1&&j<n-1&&Math.max(h,heights[k+1],heights[k+n],heights[k+n+1])>-.5){
       indices.push(k,k+n,k+1,k+1,k+n,k+n+1);
     }
-    if(i<n-1&&j<n-1&&Math.min(h,heights[k+1],heights[k+n],heights[k+n+1])<0&&Math.max(h,heights[k+1],heights[k+n],heights[k+n+1])>-45){
+    if(!replaced&&i<n-1&&j<n-1&&Math.min(h,heights[k+1],heights[k+n],heights[k+n+1])<0&&Math.max(h,heights[k+1],heights[k+n],heights[k+n+1])>-45){
       submergedIndices.push(k,k+n,k+1,k+1,k+n,k+n+1);
     }
   }
@@ -62,12 +63,12 @@ export function islandCoordinates(x,z){
 }
 // Conservative hull envelope against an elevation-derived coastal skirt, not
 // a hydrographic grounding solver. Includes swept substeps to prevent tunneling.
-function islandHullClearance(heights,boat,x,z,region=ISLAND){
+function islandHullClearance(heights,boat,x,z,region=ISLAND,sample=null){
   const radius=Math.hypot(boat.length,boat.beam)*.5+8;
   const threshold=-Math.max(3,(boat.hydrodynamics?.draft??2)+1);
   for(let k=0;k<9;k++){
     const a=k*Math.PI/4,r=k===8?0:radius;
-    if(terrainSample(heights,x+Math.cos(a)*r,z+Math.sin(a)*r,region)>threshold)return false;
+    if((sample?sample(x+Math.cos(a)*r,z+Math.sin(a)*r):terrainSample(heights,x+Math.cos(a)*r,z+Math.sin(a)*r,region))>threshold)return false;
   }
   return true;
 }
@@ -75,24 +76,24 @@ function islandHullClearance(heights,boat,x,z,region=ISLAND){
 // exact, but move a deeper/larger hull offshore before its first simulation step.
 // The broad elevation-derived shelf can exceed 500m; search the entire resident
 // region, using the same footprint/depth margin as the movement constraint.
-export function safeLandfallStart(heights,view,boat,region=ISLAND){
-  const result=(x,z)=>({...view,x,z,moved:x!==view.x||z!==view.z,depth:-terrainSample(heights,x,z,region)});
-  if(islandHullClearance(heights,boat,view.x,view.z,region))return result(view.x,view.z);
+export function safeLandfallStart(heights,view,boat,region=ISLAND,sample=null){
+  const result=(x,z)=>({...view,x,z,moved:x!==view.x||z!==view.z,depth:-(sample?sample(x,z):terrainSample(heights,x,z,region))});
+  if(islandHullClearance(heights,boat,view.x,view.z,region,sample))return result(view.x,view.z);
   const dx=view.x-region.x,dz=view.z-region.z,distance=Math.hypot(dx,dz);
   const ux=distance?dx/distance:1,uz=distance?dz/distance:0;
   const limit=region.span*2+Math.hypot(boat.length,boat.beam);
   for(let d=50;d<=limit;d+=50){
     const x=view.x+ux*d,z=view.z+uz*d;
-    if(islandHullClearance(heights,boat,x,z,region))return result(x,z);
+    if(islandHullClearance(heights,boat,x,z,region,sample))return result(x,z);
   }
   throw new RangeError('No landfall start clears this vessel draft and hull envelope');
 }
-export function constrainIslandMotion(heights,boat,previousX,previousZ){
+export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=null){
   const dx=boat.x-previousX,dz=boat.z-previousZ,distance=Math.hypot(dx,dz);
   const steps=Math.max(1,Math.ceil(distance/8));
   for(let step=1;step<=steps;step++){
     const t=step/steps,x=previousX+dx*t,z=previousZ+dz*t;
-    if(!islandHullClearance(heights,boat,x,z)){
+    if(!islandHullClearance(heights,boat,x,z,ISLAND,sample)){
       const safe=(step-1)/steps;boat.x=previousX+dx*safe;boat.z=previousZ+dz*safe;
       boat.surgeVelocity=0;boat.leewayVelocity=0;boat.leewayDistance=0;return true;
     }

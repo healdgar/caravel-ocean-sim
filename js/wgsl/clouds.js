@@ -204,16 +204,15 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 export const CLOUD_RESOLVE = /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var rawColor:texture_2d<f32>;
-@group(0) @binding(2) var rawDepth:texture_2d<f32>;
+@group(0) @binding(2) var currentDepth:texture_2d<f32>;
 @group(0) @binding(3) var history:texture_2d<f32>;
 @group(0) @binding(4) var historyDepth:texture_2d<f32>;
 @group(0) @binding(5) var linearSampler:sampler;
 @group(0) @binding(6) var resolved:texture_storage_2d<rgba16float,write>;
-@group(0) @binding(7) var depthOut:texture_storage_2d<r32float,write>;
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=vec2i(textureDimensions(resolved));let p=vec2i(id.xy);if(any(p>=size)){return;}
-  let current=textureLoad(rawColor,p,0);let distance=textureLoad(rawDepth,p,0).r;
+  let current=textureLoad(rawColor,p,0);let distance=textureLoad(currentDepth,p,0).r;
   var result=current;
   if(CF.shape.w>0.5 && current.a>0.0001 && distance>0.0){
     let uv=(vec2f(p)+0.5)/vec2f(size);let ndc=uv*vec2f(2,-2)+vec2f(-1,1);
@@ -236,6 +235,6 @@ fn main(@builtin(global_invocation_id) id:vec3u){
       }
     }
   }
-  textureStore(resolved,p,result);textureStore(depthOut,p,vec4f(distance));
+  textureStore(resolved,p,result);
 }
 `;

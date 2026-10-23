@@ -1,0 +1,1258 @@
+{
+  "birch40": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_adolescent11_hero": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_adolescent11_photo": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_ancient45_hero": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_ancient45_photo": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_mature25_hero": {
+    "foliage_0": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    }
+  },
+  "birch_mature25_photo": {
+    "foliage_0": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    }
+  },
+  "birch_old34_hero": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_old34_photo": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_sapling4_hero": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "birch_sapling4_photo": {
+    "foliage": {
+      "underside": 0.38,
+      "transmission": 0.16105650921764147,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry25": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_adolescent4_hero": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_adolescent4_photo": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_ancient45_hero": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_ancient45_photo": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_mature8_hero": {
+    "foliage_0": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    }
+  },
+  "blueberry_mature8_photo": {
+    "foliage_0": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    }
+  },
+  "blueberry_old25_hero": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_old25_photo": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_sapling2_hero": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "blueberry_sapling2_photo": {
+    "foliage": {
+      "underside": 0.48,
+      "transmission": 0.11931359658782183,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut40": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_adolescent32_hero": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_adolescent32_photo": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_ancient400_hero": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_ancient400_photo": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_mature70_hero": {
+    "foliage_0": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    }
+  },
+  "chestnut_mature70_photo": {
+    "foliage_0": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    }
+  },
+  "chestnut_old218_hero": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_old218_photo": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_sapling10_hero": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "chestnut_sapling10_photo": {
+    "foliage": {
+      "underside": 0.42,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "elm_mature65_hero": {
+    "foliage_0": {
+      "underside": 0.45,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.45,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.45,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    }
+  },
+  "fir40": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_adolescent25_hero": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_adolescent25_photo": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_ancient150_hero": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_ancient150_photo": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_mature55_hero": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_mature55_photo": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_old98_hero": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_old98_photo": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_sapling8_hero": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "fir_sapling8_photo": {
+    "foliage": {
+      "underside": 0.75,
+      "transmission": 0.039716046196103735,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch40": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_adolescent20_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_adolescent20_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_ancient165_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_ancient165_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_mature45_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_mature45_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_old99_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_old99_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_sapling7_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "larch_sapling7_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.10355352467660389,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple40": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_adolescent22_hero": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_adolescent22_photo": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_ancient130_hero": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_ancient130_photo": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_mature50_hero": {
+    "foliage_0": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    }
+  },
+  "maple_mature50_photo": {
+    "foliage_0": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    }
+  },
+  "maple_old86_hero": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_old86_photo": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_sapling8_hero": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "maple_sapling8_photo": {
+    "foliage": {
+      "underside": 0.55,
+      "transmission": 0.153201690575191,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak40": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_adolescent27_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_adolescent27_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_ancient300_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_ancient300_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_mature60_hero": {
+    "foliage_0": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": true
+    }
+  },
+  "oak_mature60_photo": {
+    "foliage_0": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_1": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    },
+    "foliage_2": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.0,
+      "hasNormal": true
+    }
+  },
+  "oak_old168_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_old168_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_sapling9_hero": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  },
+  "oak_sapling9_photo": {
+    "foliage": {
+      "underside": 0.3,
+      "transmission": 0.13296535767236065,
+      "undersideReference": [
+        0.62,
+        0.7,
+        0.58
+      ],
+      "opacityThreshold": 0.35,
+      "hasNormal": false
+    }
+  }
+}

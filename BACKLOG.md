@@ -1,5 +1,386 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 23: adopted forest representation redesign
+
+The user requests a complete rethink, with multiple complexity tiers and Manor
+Lords as a reference. [FOREST_LOD_PLAN.md](FOREST_LOD_PLAN.md) is the controlling
+implementation plan; existing forest documents remain current-runtime evidence.
+Research distinguishes Manor Lords' documented automatic LOD, mesh merging and
+GPU instance selection from our proposed WebGPU design. It does not establish
+that game's undisclosed asset tiers or a Nanite implementation.
+
+Replacement ladder: inspection branches/leaves -> nearby source-baked clusters
+-> middle crown/branch meshes with leaf material detail -> merged stands ->
+distant contiguous canopy. Retain source placements, density, crown character,
+colour and lighting. Raw botanical meshes become offline references, not the
+normal detail tier or a missing-page/overflow fallback. Existing .25m fields
+cannot restore fine leaf information; direct-source detail bakes are required.
+
+Implementation order:
+- [ ] Qualify one complex and one slender source tree plus edge/dense mixed
+      stands across all five tiers before a regional rebake.
+- [ ] Export bounded geometry, coverage-aware material/depth detail, provenance,
+      and actual rendered appearance envelopes for each tier.
+- [ ] Implement GPU branch/tree/stand ownership and refinement, with always-
+      resident base cover, hysteresis and bounded transition/streaming costs.
+- [ ] Enforce initial pilot gates of <=6M main forest triangles and <=2M extra
+      shadow/reflection triangles, alongside measured cost and image quality.
+      These are targets, not measured outcomes or a substitute for full-game FPS.
+- [ ] Validate continuous approach, orbit, aerial, inside-stand and grazing views
+      at 1080p, Retina and physical iPhone resolutions, under varied lighting.
+- [ ] Integrate all species/Wells Bay; qualify the exact failing camera and
+      complete game; rebuild and verify published bytes only after passing.
+- [ ] Feed the qualified exporter/adapter back to Forestmodeler without changing
+      biological growth or leaf-area accounting.
+
+**Implementation checkpoint:** the bounded two-species pilot is now code, not
+only a design document. [FOREST_LOD_PILOT.md](FOREST_LOD_PILOT.md) records the
+source-leaf hierarchy, original material/depth bakes, three woody LODs, paged
+inspection leaves, curved two-triangle source leaf ribbons with offline
+preauthored index assets (~706KB gzipped for oak+birch), shared pixel lighting,
+parallel GPU compaction, ownership/budget policy and native comparison harness.
+Every source blade is accounted for; missing pages never
+substitute a full botanical model. All 75 serialized source/loader/policy and
+native GPU regressions validate these mechanisms. With preauthored hybrid
+ribbons, all five saved dense-stand views (`dense-far`, `dense-middle`,
+`dense-near`, `dense-aerial`, `dense-low-sun`) pass the finite 3-pixel support
+and coverage gates (`preparationMs = 0`, median GPU 1.64–4.77ms, p95
+2.30–11.99ms). The JavaScript policy chooser is an
+offline reference, not a frame-loop renderer.
+
+The pilot is deliberately isolated from game startup. Its selected specimen
+pages load eagerly; production demand streaming, merged stands and regional
+integration are unfinished. Loose thresholds fail canopy coverage; tighter
+ones can exceed the GPU gate. Do not describe mechanism tests, finite masks or
+small draw counts as a qualified forest replacement. Current runtime, shipping
+assets and published performance remain unchanged.
+
+
+## October 23: close-forest GPU bottleneck remains open
+
+Reproduced the exact reported free-camera approach at1920x1080, native Metal.
+The old **Ocean + sky** pass includes terrain and every tree. Isolated replay
+measured946.8ms; omitting forests reduced it to0.455ms. The actual native/middle
+indirect commands submit1,541,128,221triangles, including2,995whole native trees.
+These are logical indexed submissions, not unique assets or visible pixels.
+The foliage draw dominates. Moving hosting cannot fix this GPU work.
+
+Bounded accepted candidate: immutable min/max pyramids of both actual triangular
+terrain grids. GPU culling rejects a root only when terrain provably covers its
+entire conservative sphere; underwater, uncertain seams, saddle apertures and
+uncertain external camera positions stay visible. No depth readback, per-frame
+CPU geometry/visibility work, density/LOD/resolution change or previous-frame
+occlusion. `forestOcclusion=off` retains an A/B reference. Profiler display now
+says **Scenery + ocean + sky**; internal timing keys remain unchanged.
+Initial native measurement:1,338,730,820triangles and813–815ms isolated pass,
+about14% lower. This is a limited improvement, **not a resolution of the billion-
+triangle issue, ordinary 60FPS, Retina or physical-iPhone qualification**.
+Final qualification:44serialized source, native GPU, distribution and Stats
+checks pass;4additional packaged/native startup and debug-atlas checks pass.
+Both source and packaged complete-frame A/B suites compare11,059,200channels
+each with ZERO differences across close forest, shore, horizon and underwater.
+Close submissions remain1,338,730,820; the primary representation issue stays
+open. Logs: `/tmp/waterworld-forest-occlusion-regressions.log`,
+`/tmp/waterworld-forest-occlusion-package.log`. Primary checkout untouched.
+
+Rejected experiments are local, not part of the candidate:
+- Early native-alpha exits and a leaf depth prepass: no gain / slower.
+- Fine .25m source-field near crowns:85.4million triangles and32ms isolated,
+  but visibly smooth green lobes instead of native leaves. Failed visual review.
+- Exact spatial wood/leaf meshlet culling with original vertex IDs, GPU
+  compaction and full-source overflow fallback: no useful gain; dense foliage
+  still overlaps, and vertex pulling/overflow negated the rejected work.
+  No CPU rendering path or unbounded simplification was substituted.
+
+Receipts: `/tmp/waterworld-scenery-baseline/`,
+`/tmp/waterworld-scenery-occlusion/`, `/tmp/waterworld-forest-occlusion-pixels/`,
+`/tmp/waterworld-scenery-game-near/`, and
+`/tmp/waterworld-scenery-spatial-clusters/`. Rejected prototype source and bake
+are retained in `/tmp/waterworld-rejected-forest-experiments/`; none ships.
+
+Published code `96428decad04d8ff2dd21baf874422a90e41724a`; Pages built
+2026-10-23T17:57:32Z. Public verification at17:59:16Z matches HTML1,520,815bytes,
+SHA256`a77cc7e2dd5706c35e474ce23b9022ed849574d33a1669d4880585c1a8edc463`.
+Manifest SHA256`a783e4aec72b968dcec07cd8a169d67bc7fb2858353116fcce9f22d191d36252`
+and all158asset records match the prior fully verified asset release. Receipt
+`/tmp/waterworld-forest-occlusion-public-bytes.json`. Fresh live Metal Chrome
+renders four complete1920x1080frames each on normal sailing and close forest,
+without page/GPU errors; only the forest compiles the terrain-cull extension.
+Proof/screenshots: `/tmp/waterworld-forest-occlusion-live/`. This verifies live
+code/rendering, not physical-iPhone performance or the unfinished60FPS target.
+
+Next required representation work: source-baked branch-cluster colour/normal/
+depth detail, with actual native-leaf comparisons at framebuffer/FOV-dependent
+transitions, using paged original inspection branches where a bake fails its
+appearance gate. Whole botanical meshes remain explicit references; there is no
+silent full-tree fallback in the replacement.
+The current .25m moment/density fields already smooth the leaf structure;
+finer surface extraction cannot restore it. Individual leaves are already bent
+single sheets (four triangles), without duplicate back faces. Forestmodeler's
+GAME export removes organs and enlarges selected cards; it is not a lossless
+replacement. Do not relabel the current source-field footprint as a native
+appearance certificate or publish a smooth close-crown fallback as solved.
+
+
+## October 23: normal Safari startup and forest timer stalls
+
+User reports >1minute on physical iPhone's **normal sailing page**, stuck at
+"Building the ships and loading their crew…". Forests are NOT that page's cause.
+Native Safari27.0.1 on this M4 reproduces it: all3startup media transfers finish
+around3.3s; ocean/sky lasts until71.447s, and ship setup is still incomplete at180s.
+Chrome's4–5s fresh-context observations concealed the engine-specific cost.
+The separate4xCPU/network-proxy fetch failure was transient, not a device result;
+repeat6xCPU and8Mbps/80ms desktop proxies reached readiness without errors.
+
+Bounded correction:
+- Cache pending shader/compute programs per device by final rewritten WGSL;
+  rejected entries evict for retry. Mutable ship resources stay independent.
+- Compile the8independent core render pipelines and crew visible/shadow pairs
+  concurrently; overlap independent wetness and water-interaction setup.
+- Remove unreachable unannotated WGSL helper functions, retaining every entry,
+  global declaration, override, annotated helper and transitive dependency.
+- Generate HULL_PROFILE for every allocated fleetSpec's original model code;
+  omit only absent procedural profiles/cases, preserving Niña/Victory arithmetic.
+  Ship/fleet changes reload; hidden allocated vessels stay in the specialization.
+  `shaderModels=all&shaderPrune=off` retains a reference compilation path.
+
+Native Safari local packaged candidate reaches actual first-frame readiness at
+14.379s (16.424s external polling), no GPU/page errors. Its first function-pruned
+candidate without scene hull filtering took88.493s to ready. These observations
+are not controlled cold-driver-cache A/B or physical-iPhone timing. Receipts:
+`/tmp/waterworld-safari-startup.log`, `/tmp/waterworld-safari-candidate/`,
+`/tmp/waterworld-safari-candidate2/`. Initial public startup/network traces:
+`/tmp/waterworld-startup-oct23/` and `/tmp/waterworld-normal-startup-repeat/`.
+
+A second issue affects Landfall:26,945default validation/upload yields can become
+clamped zero-delay timers without scheduler.yield. Real mass-loader reproduction
+with scheduler disabled took98.5048s, including95.7665s in21,143timers. The fixed
+loader processes the SAME210,189,048vertex bytes and202,671,540index bytes with
+all hashes/address/finite checks:2.0503s,82MessageChannel task boundaries,0timers,
+59UI heartbeat deliveries. Native uploads keep1MiBchunks and abort checks;
+explicit injected validation callbacks retain their per-batch semantics.
+Receipts `/tmp/waterworld-forest-yield-{baseline,candidate}.json`.
+The complete island still transfers about248MB before first frame; native-demand
+streaming and further lossless transport work remain open. No assets were reduced.
+
+Qualification:22loader/scheduling checks,14cache/pruning/lifecycle checks, and20
+serialized native GPU/package/startup checks passed. A separate19-case rendering
+pass covers source/Pages ships, full/new Moon, Sun controls, storms, underwater and
+bloom. The new real packaged island regression passes with scheduler disabled:
+5.708s to first-frame ready,242real task boundaries,0timer waits, all native/mass
+vertex and index buffers uploaded completely and native residency confirmed.
+Its initial diagnostic hook missed the shared residency label; corrected the hook
+without relaxing the residency assertion. Seven complete production-canvas A/B
+scenes compare2,752,512channels with ZERO differences against unpruned all-model
+shaders (Niña, Victory, Flying Cloud, mixed fleet, storm, full Moon, underwater).
+All9hulls compare14,229GPU query points/455,328output bytes exactly. The first
+pixel harness deadlocked its own intercepted RAF poll; using independent50mspolling
+fixed it. Final pixel/cache/scheduling run passes11/11. Logs:
+`/tmp/waterworld-startup-{native,render,final-render,pixels-final}.log`.
+
+Final rebuilt-package gate passes11/11: required/delayed/failed media, actual first
+GPU completion, offline downloads, exact158asset bytes and scheduler-free full
+island startup. Release log `/tmp/waterworld-startup-release-check.log`.
+
+Published code checkpoint `edda21df2c3e19ceb005f5c5487e674c3439588d`; Pages built
+at2026-10-23T14:47:51Z. Public HTML matches1,515,019bytes, SHA256
+`8a8ac16337be6c8e37d02cbc3591305a98cc75589db2a3147697fa628fde38bf`.
+Manifest SHA256`a783e4aec72b968dcec07cd8a169d67bc7fb2858353116fcce9f22d191d36252`
+and all158asset records are unchanged from prior full public verification.
+Receipt `/tmp/waterworld-startup-public-bytes.json`. Fresh private Safari on the
+published normal page reached ready at2.1s external polling with WARM driver caches;
+this is distinct from the14.379s initial local candidate and is NOT an iPhone or
+controlled cold-cache result. Receipt `/tmp/waterworld-safari-public/`.
+Fresh public Chrome with phone viewport renders real1206x2280canvas frames:
+5.902sready,67modules,88pipelines, no unused procedural hull functions or forest
+requests and no fatal/page/GPU errors. Two earlier public Chrome attempts hit a
+transient Failed-to-fetch error; the instrumented retry completed. Do not confuse
+those network failures with the reproduced Safari compiler stall. Receipt/image:
+`/tmp/waterworld-startup-live/`. The phone captain's default view can still be
+obscured by its own sail; camera/framing remains a separate issue, unchanged by
+this exact-pixel startup correction. Root owns validation. Primary held crew/
+Victory work and rejected forest experiments stay separate.
+
+## October 22: iPhone bloom timing and bounded filter efficiency
+
+User reports Bloom120ms on iPhone. Root's source audit and native Mac reproduction
+show overlapping render-stage waits: individual bloom passes inherited about11ms
+spans while the whole isolated chain took under1ms. This does not establish the
+physical iPhone's exclusive bloom cost. The normal row now says **Bloom window
+(waits)**. **Measure bloom alone** drains prior GPU work, pauses normal frames,
+and measures three four-chain batches with separate, lazily allocated queries.
+It resumes with fresh cadence/resolution samples, retains current HDR pixels,
+handles pending resize, and adds no fences to normal rendering.
+
+The separable tent's fractional texel phase folds9upsample lookups to4, preserving
+all8levels, RGBA16F, Karis downsample and radius. Independent original-filter
+renders compare688,400final channels, with230one-step rounding differences and
+no larger error. Reference specialization remains bit-identical and can be
+selected with `bloomFilter=reference`. Same-context Mac A/B at1206x1998 measured
+0.168966→0.15178925ms; at3840x2160,0.2961725→0.25827725ms. These are short isolated
+bloom results, not full-game or physical-iPhone FPS claims. Receipt/screenshots:
+`/tmp/waterworld-bloom-ab-final/`; reproducible runner `scripts/benchmark-bloom.mjs`.
+
+Root's19-case native Metal pass covers new filter/timing/UI, old profiling,
+resolution and28medium/bloom cases plus56bit-exact underwater composites.
+Distribution rebuild and19/19packaged/startup checks pass, including offline
+HTML downloads, native resource bytes and actual mobile Stats. Final5/5bloom
+checks also cover the packaged underwater source and resuming real canvas frames.
+The initial packaged test incorrectly watched a minified callback name; it now
+observes GPUCanvasContext.getCurrentTexture instead. Published `57bbdd206e37e245d5c8947f7b973789c9ccd241`; Pages built at
+2026-10-23T05:56:42Z. Fresh deployed HTML matches1,512,169bytes,
+SHA256`e11b59206e5345923141086930c56b5f8696d3d5fa4f56a09be925199dc13973`.
+The manifest hash and all158asset records are unchanged from the previous full
+public verification. Receipt `/tmp/waterworld-bloom-public-bytes.json`.
+Fresh public Apple/Metal Chrome exercised the actual folded pipeline and all15
+bloom passes at1206x1998, measured0.138527ms isolated, resumed real canvas frames,
+and reported no GPU/page errors. Receipt/screenshot `/tmp/waterworld-bloom-live/`.
+This is a Mac with a phone viewport, not a physical-iPhone performance result.
+
+## October 22 evening: native forest release is public
+
+Published `e01bb8cfafae3af8777c9ff5acd9f4559ad6ee34` from the isolated
+`codex/gpu-rig-integration` checkout. GitHub Pages reports built at
+2026-10-23T04:46:40Z (October22local). Public verification at04:48:13Z matches
+HTML1,508,340bytes SHA256`c624e73120919c08906118c2d717239e3ec08ac3173dbddf54fcd7ade69810cf`,
+manifest37,855bytes SHA256`a783e4aec72b968dcec07cd8a169d67bc7fb2858353116fcce9f22d191d36252`,
+and all158assets/274,627,196bytes. Receipt `/tmp/waterworld-public-release-338.json`.
+Fresh public sailing/coast Chrome checks show no errors and the coast compiles
+`instanced forest shaded native crown shell`; screenshots/receipt are in
+`/tmp/waterworld-live-render-337`. Fresh network ready-and-review observations
+were74.9s sailing and31.4s coast, not loopback startup or steady-state frame time;
+cold public startup remains worth investigating. Local final package/startup
+passes10/10, with horizon/approach/coast rendered review336; static1280x900coast
+was58FPS, not a Retina/iPhone or full-sailing60FPS claim.
+
+The817-case sweep326 and targeted reruns329/332 cover all failures/cancellation.
+Two stale forest fixture hooks were repaired without relaxing assertions; offline
+startup keeps its timeout and fully closes the intentionally failed-GPU browser
+before opening distribution tests. The rejected dome pack is excluded. Detailed
+near/middle/far foliage and Wells Bay correction are now public. Remaining close
+terrain realism and strict native appearance qualification stay open.
+Primary crew-route work remains held and was not merged into this release.
+Preserve its dirty files; the release authority is the commit above.
+
+## Current order: native-resolution efficiency, then Wells Bay close terrain
+
+The user reproduced sub-60 FPS across scenes on the M4 Mac, supplying the default
+`?boat=1` view. Root profiles fixed native Retina pixels before changing quality;
+only demonstrated efficiency gains qualify. The user next requested finishing
+Wells Bay's poor close-up island rendering. Earlier grass/rock and canopy work
+was partial, not close-coast completion. After the performance checkpoint, review
+the actual bay at close range, improve shoreline/ground/rock/vegetation detail,
+and require rendered before/after checks at approach and coast scales.
+
+## October 22 afternoon: regional forest and closed-canopy correction
+
+**Release candidate:** the user authorized publication of the tested forest refinement. The user explicitly
+requires individual trees close, reduced geometry between, and a **solid,
+contiguous baked canopy mass** at distance. Individual transparent tree captures
+are not that representation. Transitions must use projected perceptible error,
+including rendered resolution, field of view and viewing angle.
+
+Current local source uses the five catalogued mature Forestmodeler Hero models
+and original gene-surfaces-v3 geometry/maps. The native bridge preserves source
+identity and uses immutable shared GPU buffers and indirect draws. The authored
+stand contains85,451 roots; the fine Wells terrain rejects401. Greater root count
+alone does not establish closed crown coverage. The legacy regional trees and
+42-tree patch are load-failure fallbacks, not additional production layers.
+
+The individual full-sphere atlas experiment was rejected for distant forest:
+250 grounded comparisons against4× supersampled native rendering fail70 cases
+under the unchanged3px silhouette/20% coverage gates. It cannot justify a larger
+production atlas switch. The strict opt-in harness remains
+`scripts/review-forest-atlases.mjs`; receipt
+`/tmp/waterworld-forest-supersampled-243.log`. A closed opaque owner-chunk canopy
+compiler/runtime experiment was tested but rejected: its input was the coarse
+`p.far` crown domes, not original native leaves/wood. Closure and depth tests
+proved opaque geometry, not the requested forest likeness. Active runtime hooks
+were reverted; local branch `codex/rejected-crown-dome-canopy-20261022` preserves
+the experiment. Do not publish it. The replacement must bake the actual assembled
+native wood/leaf geometry, source maps and roots, first for one reviewable stand.
+The replacement now derives continuous leaf-area density and linear pigment from
+original detailed triangles/MASK maps, assembles overlapping trees before surface
+extraction, and clips buried native roots at their collar. Five mature caches
+took27.44s; the537-block/85,050-resident-root assembly took100.37s. Middle geometry
+uses native wood and those fields; distant geometry is opaque, not atlas cards.
+Actual GPU opacity/depth, immutable buffer and projected ownership checks pass.
+The24-view isolated stand review still fails strict native3px/20% coverage gates
+in many views; these remain diagnostic failures, not a certified transition.
+The earlier coast measured2.35FPS at1280×900:8,108 original Hero instances
+submitted3.384billion native triangles;40,344 middle instances added498million.
+The current refinement adds a useful source-derived middle and fixes near
+lighting/coverage. Index-only reduction under a0.35m tool-reported cap retains
+766–2,425 triangles per prototype; interior3D fields recover pigment, density
+normals and own-canopy exposure. Ordinary opaque rasterization preserves real
+mesh depth; no bounding-box fill or per-frame CPU graphics is used. Native
+leaves retain source maps and geometry, with independent stable MSAA masks so
+overlapping filtered leaves accumulate rather than remaining a transparent veil.
+Five-ray exposure improves own-canopy lighting, without claiming inter-tree
+shadows. Far mass270 remains unchanged; projected authored sampling estimates
+retain the3px target and hysteresis, not a native-appearance certificate.
+
+Source and packaged approach/coast views render without GPU errors. Static
+coast is now57.1FPS source/54.5FPS packaged, selecting two native and48,368 middle
+roots; buffer storage remains647MB plus20MB of field textures. Packaged loopback
+startup takes5.52–5.99s. Wind, waves, clouds, ships and crew were disabled: this
+does not prove ordinary-game60FPS, Retina or iPhone performance. Combined run315
+passes63 loader/material/build/GPU checks; Python317 passes10 lighting/volume
+fixtures. Near oak/maple/birch renders verify the coverage/lighting change.
+Receipts: `/tmp/waterworld-close-specimens-coverage-307`,
+`/tmp/waterworld-forest-shell-scenes-313`,
+`/tmp/waterworld-forest-shell-package-316`. The scene remains unpublished.
+The user requested porting the successful technique back to Forestmodeler:
+portable field/surface exporters, a Three.js adapter, tests and local documentation
+are now in `/Users/alexwall/dev/forestmodeler`, without modifying its growth engine
+or existing dirty work. `make test-foliage` passes15Python and36JavaScript checks.
+Actual mature-oak export and Three r160/WebGL2 rendering verify source pigment,
+own-canopy exposure, opaque silhouette/depth, instancing and framebuffer-based
+LOD math. The source/technique guide is `docs/FOLIAGE_LOD.md` there; generated
+render receipts remain local in its ignored `out/` directory. This is a reusable
+rendering extension, not a change to botanical leaf-area accounting.
+Seam-locked reduction287 passed exact spatial joins but saved only2.9% of far
+triangles, so it is not installed. No native-resolution performance target is
+claimed. Public assets are unchanged.
+See FOREST_MASS.md for source receipts and reproducible commands.
+
+Wells correction: independent OSM coastline constrains2,543 unsupported positive
+nodes (measured ground wins;4m safety band;32m seam). Independent near imagery
+and a2m survey mesh remove the photographed blue foreground wall. Original
+terrain source/rings/recipe and separate ODbL/CC BY attribution remain. Close rock
+still exposes limitations of filled heightfields/projected photography; detailed
+beach/swash and cliff-overhang geometry remain unfinished.
+
+Retina audit uses Apple M4 Max/Metal3 at3344×1846 pixels,2.98×1080p. Stable unchanged
+baseline/candidate brackets around41FPS found no repeatable gain from the rejected
+lighting/cache rewrites. CPU frame work is a few milliseconds; rendering dominates.
+Native Retina60 remains unproven. Keep direct cloud-depth history reuse, which
+removes one5.887MiB texture/copy with identical native output across34 frames.
+
+Root is the sole executing validator; agents author source only. Current focused
+checks pass3 geometric-certificate fixtures,10 native-import fixtures,4 placement
+fixtures and22 loader/material/GPU/package tests. These do not qualify the pending
+closed-canopy implementation or a release.
+
+## October 22 evening: forest publication qualification
+
+The release sweep326 covered817cases:812passed, four failed and one was
+cancelled. The old atlas fixture gated the new mass buffers and observed only
+its former residency label; the legacy tree fixture used a replaced source
+marker. Both fixtures now track the actual renderer without relaxing assertions.
+Rerun329 passes the deck-water check, both debug-atlas paths and all legacy-tree
+render checks. The offline check required fully closing the browser used for
+intentional failed GPU startups; a new browser alone retained the old process.
+Final startup run332 passes8/8 with unchanged timeouts and offline assertions.
+No application code changed during these release repairs. All failed/cancelled
+cases have passing focused reruns. Native-looking approximation limits above
+remain; this is not a universal three-pixel appearance certificate.
+
+Release includes registered native forests, source-density middle/far crowns,
+canopy lighting, independent native coverage and Wells Bay near terrain.
+Only manifest-registered assets ship; rejected crown-dome assets are excluded.
+Pages deployment and public-byte verification follow the final build.
+
 ## October 22: scene zoom must not scale the HUD
 
 The canvas wheel handler was passive, allowing Chromium trackpad pinch/Ctrl-wheel
@@ -22,6 +403,8 @@ Published runtime **`5d6ee64194d4aa1a8964754b1fb548fc460aab85`** built at
 `bdc097e2c7dd2a31c8dee90371062de4c6c9b78cd1900ddf5abf04624716957f`,
 the unchanged manifest, and all **58 assets / 19,931,107 bytes**. Receipt
 `/tmp/waterworld-zoom-public-receipt-154.json`.
+Fresh visible Chrome review zoomed the public scene with unchanged HUD sizing
+and no console warnings/errors; proof `shots/scene-zoom-live.png`.
 
 ## October 22 morning: shared WebGPU graphics contract
 
@@ -45,6 +428,9 @@ manifest **12,422 bytes**, SHA-256
 `e920744da5f4b83579461046f8a5f55585710304158236996fbe3eb0f18973ff`;
 all **58 assets / 19,931,107 bytes**. Receipt
 `/tmp/waterworld-gpu-public-receipt-148.json`.
+Fresh visible Chrome review of the public page shows the final Flying Cloud rig
+at 60.1 FPS with detailed Stats open and no console warnings/errors; proof
+`shots/flying-cloud-gpu-live.png`. This observation remains a short Mac check.
 
 - Stats-button source is `b634c53`, adding live CPU/FPS/resolution and optional
   GPU detail, plus bounded escort timing names. Native source/packaged, desktop

@@ -38,7 +38,7 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
   const bgRayVolume = group(rayPipe,1,volumeEntries);
   const bgResolveFrame = group(resolvePipe,1,[[0,{buffer:uniform}]]);
   let width=0,height=0,current=0,valid=false,densityDirty=true,lightDirty=true;
-  let raw,rawDepth,colors=[],depths=[],rayGroup,resolveGroups=[],skyGroups=[];
+  let raw,colors=[],depths=[],rayGroups=[],resolveGroups=[],skyGroups=[];
   let windX=0,windZ=0,previousWindX=0,previousWindZ=0;
   let lastCoverage=NaN,lastThickness=NaN,lastStorm=NaN,lastBase=NaN,lastDensity=NaN,lastHaze=NaN;
   let sunX=NaN,sunY=NaN,sunZ=NaN,skyPipeline;
@@ -48,15 +48,17 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     const nw=Math.max(1,Math.ceil(w*scale)),nh=Math.max(1,Math.ceil(h*scale));
     if(nw===width && nh===height)return;
     width=nw;height=nh;valid=false;
-    for(const t of [raw,rawDepth,...colors,...depths])t?.destroy();
+    for(const t of [raw,...colors,...depths])t?.destroy();
     const target=(label,format)=>device.createTexture({label,size:[width,height],format,
       usage:U.TEXTURE_BINDING|U.STORAGE_BINDING|U.COPY_SRC});
-    raw=target('cloud raw','rgba16float');rawDepth=target('cloud depth','r32float');
+    raw=target('cloud raw','rgba16float');
     colors=[target('cloud history A','rgba16float'),target('cloud history B','rgba16float')];
     depths=[target('cloud depth A','r32float'),target('cloud depth B','r32float')];
-    rayGroup=group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,rawDepth.createView()]]);
-    resolveGroups=[0,1].map(i=>group(resolvePipe,0,[[0,{buffer:frameUBO}],[1,raw.createView()],[2,rawDepth.createView()],
-      [3,colors[1-i].createView()],[4,depths[1-i].createView()],[5,sampler],[6,colors[i].createView()],[7,depths[i].createView()]]));
+    // Ray depth is already the unfiltered temporal depth. Write its history
+    // slot directly; resolve only reads it and the preceding frame's slot.
+    rayGroups=[0,1].map(i=>group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,depths[i].createView()]]));
+    resolveGroups=[0,1].map(i=>group(resolvePipe,0,[[0,{buffer:frameUBO}],[1,raw.createView()],[2,depths[i].createView()],
+      [3,colors[1-i].createView()],[4,depths[1-i].createView()],[5,sampler],[6,colors[i].createView()]]));
     if(skyPipeline)skyGroups=colors.map(t=>group(skyPipeline,1,[[4,t.createView()]]));
   }
 
@@ -96,7 +98,7 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
       pass.setPipeline(mipPipe);
       for(let m=1;m<levels;m++){pass.setBindGroup(0,bgMips[m-1]);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(Math.max(1,n>>m)/4)));}
     }
-    pass.setPipeline(rayPipe);pass.setBindGroup(0,rayGroup);pass.setBindGroup(1,bgRayVolume);pass.dispatchWorkgroups(Math.ceil(width/8),Math.ceil(height/8));
+    pass.setPipeline(rayPipe);pass.setBindGroup(0,rayGroups[current]);pass.setBindGroup(1,bgRayVolume);pass.dispatchWorkgroups(Math.ceil(width/8),Math.ceil(height/8));
     pass.setPipeline(resolvePipe);pass.setBindGroup(0,resolveGroups[current]);pass.setBindGroup(1,bgResolveFrame);pass.dispatchWorkgroups(Math.ceil(width/8),Math.ceil(height/8));
     valid=true;densityDirty=false;lightDirty=false;
   }
@@ -108,6 +110,6 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     get output(){return colors[current];},
     get density(){return density;},
     get historyValid(){return data[27]===1;},
-    destroy(){for(const t of [density,lighting,raw,rawDepth,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
+    destroy(){for(const t of [density,lighting,raw,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
   };
 }

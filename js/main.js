@@ -1,3 +1,6 @@
+import {withSceneHullProfile} from './wgsl/hull.js';
+import {pruneWGSLFunctions} from './wgsl-prune.js';
+import {createGPUProgramCache} from './gpu-program-cache.js';
 import {createAstronomyClock,writeAstronomyFrame} from './astronomy.js';
 import {createCelestialRenderer} from './celestial.js';
 import {withCelestialFrame,CELESTIAL_FRAME_BYTES,CELESTIAL_FRAME_FLOATS} from './wgsl/celestial.js';
@@ -27,6 +30,7 @@ import { COASTAL_WATER } from './wgsl/terrain.js';
 import { LANDFALL_VIEWS } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, landfallCameraYaw } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
+import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution } from './resolution.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower } from './follower.js';
@@ -145,6 +149,7 @@ async function main() {
   const fleetConfig=fleetFromSearch(qs,SHIP_ID);
   const fleetSpecs=[{id:'player',modelId:SHIP_ID},...fleetConfig.flatMap((entry,index)=>entry.enabled?[{...entry,formation:fleetFormation(index)}]:[])];
   const fleetCount=fleetSpecs.length;
+  const sceneModelCodes=fleetSpecs.map(spec=>fleetModelCode(getShipModel(spec.modelId)));
   window.oceanStartup?.stage('adapter','Starting the graphics device…');
   if (!navigator.gpu) fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -164,27 +169,18 @@ async function main() {
   ctx.configure({ device, format: swapFormat, alphaMode: 'opaque', usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
   window.oceanStartup?.stage('ocean-sky','Preparing the ocean and sky…');
 
-  async function shader(code, label) {
-    code=withCelestialFrame(code);
-    code=withSceneShadowCount(code,fleetCount);
+  const {shader,computePipe}=createGPUProgramCache({device,prepare(code){
+    if(qs.get('shaderModels')!=='all')code=withSceneHullProfile(code,sceneModelCodes);
+    code=withCelestialFrame(code);code=withSceneShadowCount(code,fleetCount);
     if(code.includes(SCENE_WAKE_SAMPLE))code=withPooledFleetWakes(code,fleetCount);
-    const m = device.createShaderModule({ code, label });
-    const info = await m.getCompilationInfo();
-    let bad = false;
-    for (const msg of info.messages) {
-      if (msg.type === 'error') bad = true;
-      if (msg.type !== 'info') {
-        const line = code.split('\n')[msg.lineNum - 1];
-        log(`[${label}] ${msg.type} ${msg.lineNum}:${msg.linePos} ${msg.message}\n    ${line}`);
-      }
+    return qs.get('shaderPrune')==='off'?code:pruneWGSLFunctions(code);
+  },report(messages,code,label){
+    for(const msg of messages)if(msg.type!=='info'){
+      const line=code.split('\n')[msg.lineNum-1];
+      log(`[${label}] ${msg.type} ${msg.lineNum}:${msg.linePos} ${msg.message}\n    ${line}`);
     }
-    if (bad) fail('Shader compile error in ' + label + ' (see console)');
-    return m;
-  }
-  async function computePipe(code, label) {
-    const module = await shader(code, label);
-    return device.createComputePipelineAsync({ label, layout: 'auto', compute: { module, entryPoint: 'main' } });
-  }
+    if(messages.some(msg=>msg.type==='error'))fail('Shader compile error in '+label+' (see console)');
+  }});
 
   // --------------------------------------------------------------------------------------
   // Simulation resources
@@ -338,7 +334,8 @@ async function main() {
     shader(createUnderwaterPost(BLOOM_DOWN,'bloom'),'medium bloom source'),
     shader(createUnderwaterPost(COMPOSITE,'composite'),'medium composite source'),
   ]);
-  const oceanPipe = await device.createRenderPipelineAsync({
+  const [oceanPipe,oceanDepthPipe,skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]=await Promise.all([
+    device.createRenderPipelineAsync({
     label: 'ocean', layout: 'auto',
     vertex: {
       module: oceanMod, entryPoint: 'vs',
@@ -348,8 +345,8 @@ async function main() {
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: !OCEAN_DEPTH, depthCompare: OCEAN_DEPTH ? 'equal' : 'greater' },
     multisample: { count: MSAA },
-  });
-  const oceanDepthPipe = OCEAN_DEPTH ? await device.createRenderPipelineAsync({
+  }),
+    OCEAN_DEPTH ? device.createRenderPipelineAsync({
     label: 'ocean visibility', layout: 'auto',
     vertex: {
       module: oceanMod, entryPoint: 'vs',
@@ -359,37 +356,38 @@ async function main() {
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
     multisample: { count: MSAA },
-  }) : null;
-  const skyPipe = await device.createRenderPipelineAsync({
+  }) : null,
+    device.createRenderPipelineAsync({
     label: 'sky', layout: 'auto',
     vertex: { module: skyMod, entryPoint: 'vs' },
     fragment: { module: skyMod, entryPoint: 'fs', targets: [{ format: HDR }] },
     primitive: { topology: 'triangle-list' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'equal' },
     multisample: { count: MSAA },
-  });
-  const downPipe = await device.createRenderPipelineAsync({
+  }),
+    device.createRenderPipelineAsync({
     label: 'bloom down', layout: 'auto',
     vertex: { module: downMod, entryPoint: 'vs' },
     fragment: { module: downMod, entryPoint: 'fs', targets: [{ format: HDR }] },
-  });
-  const upPipe = await device.createRenderPipelineAsync({
+  }),
+    device.createRenderPipelineAsync({
     label: 'bloom up', layout: 'auto',
     vertex: { module: upMod, entryPoint: 'vs' },
     fragment: {
-      module: upMod, entryPoint: 'fs',
+      module: upMod, entryPoint: 'fs', constants:{bloomFoldTent:qs.get('bloomFilter')!=='reference'},
       targets: [{ format: HDR, blend: { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } } }],
     },
-  });
-  const compPipe = await device.createRenderPipelineAsync({
+  }),
+    device.createRenderPipelineAsync({
     label: 'composite', layout: 'auto',
     vertex: { module: compMod, entryPoint: 'vs' },
     fragment: { module: compMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
-  });
-  const mediumDownPipe=await device.createRenderPipelineAsync({label:'medium bloom source',layout:'auto',
-    vertex:{module:mediumDownMod,entryPoint:'vs'},fragment:{module:mediumDownMod,entryPoint:'fs',targets:[{format:HDR}]}});
-  const mediumCompPipe=await device.createRenderPipelineAsync({label:'medium composite source',layout:'auto',
-    vertex:{module:mediumCompMod,entryPoint:'vs'},fragment:{module:mediumCompMod,entryPoint:'fs',targets:[{format:swapFormat}]}});
+  }),
+    device.createRenderPipelineAsync({label:'medium bloom source',layout:'auto',
+    vertex:{module:mediumDownMod,entryPoint:'vs'},fragment:{module:mediumDownMod,entryPoint:'fs',targets:[{format:HDR}]}}),
+    device.createRenderPipelineAsync({label:'medium composite source',layout:'auto',
+    vertex:{module:mediumCompMod,entryPoint:'vs'},fragment:{module:mediumCompMod,entryPoint:'fs',targets:[{format:swapFormat}]}}),
+  ]);
 
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
   const waterFilterPipe=await computePipe(WATER_FILTER,'water reflections filter');
@@ -443,12 +441,14 @@ async function main() {
     const recoilMap=createGunRecoilMap(asset);
     const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap});
     if(pose)render.poseAssets=pose.assets;
-    const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
+    const [wetness,interaction]=await Promise.all([
+      createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose}),
+      createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)}),
+    ]);
     const shadows=await createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose});
     let crew=null;
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
     catch(error){if(index===0)crewError='Crew unavailable';console.warn(spec.id+' crew initialization:',error);}
-    const interaction=await createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWater=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?await createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interaction.setShadows(shadows);
     vessels.push({...spec,boat:null,asset,render,hullUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
@@ -564,8 +564,10 @@ async function main() {
     timestampWrites: undefined,
   };
   let bloomLevels = 0, bloomPasses = [], bgComp = null,bgCompUnderwater=null;
+  let bloomMeasuring=false,bloomMeasureRequested=false,bloomCameraMediumBand=false,bloomFrameReady=false;
 
   function resize() {
+    if(bloomMeasuring)return;
     const dpr = window.devicePixelRatio || 1;
     const nw = Math.max(1, Math.round(canvas.clientWidth * dpr)), nh = Math.max(1, Math.round(canvas.clientHeight * dpr));
     if (nw !== nativeWidth || nh !== nativeHeight) { nativeWidth=nw; nativeHeight=nh; resolution.reset(); }
@@ -573,7 +575,7 @@ async function main() {
     const w = Math.max(1, Math.min(limit, Math.round(forcedWidth || nw * resolution.scale)));
     const h = Math.max(1, Math.min(limit, Math.round(forcedHeight || nh * resolution.scale)));
     if (w === W && h === H) return;
-    W = w; H = h;
+    W = w; H = h;bloomFrameReady=false;
     canvas.width = W; canvas.height = H;
     for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,submergedDepth]) t && t.destroy();
     submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
@@ -654,7 +656,33 @@ async function main() {
   const profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
   profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
   const performanceSummary=document.createElement('pre');performanceSummary.id='performance-summary';performanceSummary.textContent=profileSummary;
-  performancePanel.querySelector('.panel-body').append(performanceSummary,profileDetails);document.body.append(performancePanel);
+  const bloomMeasureButton=document.createElement('button');bloomMeasureButton.type='button';bloomMeasureButton.textContent='Measure bloom alone';bloomMeasureButton.disabled=!hasTS;
+  const bloomMeasureResult=document.createElement('p');bloomMeasureResult.id='bloom-measurement';bloomMeasureResult.setAttribute('role','status');
+  bloomMeasureResult.textContent=hasTS?'Pauses briefly to exclude earlier GPU waits.':'Separate bloom timing needs browser GPU timestamp support.';
+  bloomMeasureButton.addEventListener('click',()=>{bloomMeasureRequested=true;delete bloomMeasureResult.dataset.measurement;bloomMeasureButton.disabled=true;bloomMeasureResult.textContent='Measuring bloom alone…';});
+  performancePanel.querySelector('.panel-body').append(performanceSummary,bloomMeasureButton,bloomMeasureResult,profileDetails);document.body.append(performancePanel);
+  const bloomProfileWrites=(_,name)=>profiler.writes(name);
+  function encodeBloom(encoder,timestamps,mediumBand=bloomCameraMediumBand){
+    for(let i=0;i<bloomPasses.length;i++){
+      const {descriptor,pipeline,underwaterPipeline,bindGroup,underwaterBindGroup,timingName}=bloomPasses[i];
+      descriptor.timestampWrites=timestamps?.(i,timingName);
+      const pass=encoder.beginRenderPass(descriptor);
+      pass.setPipeline(mediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
+      pass.setBindGroup(0,mediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);pass.draw(3);pass.end();
+    }
+  }
+  async function measureBloomAlone(){
+    bloomMeasuring=true;bloomMeasureRequested=false;
+    try{
+      const result=await measureIsolatedGPUStage({device,encode:encodeBloom,passCount:bloomPasses.length,width:W,height:H});
+      bloomMeasureResult.textContent=`Bloom alone: ${result.milliseconds>0?result.milliseconds.toFixed(2)+' ms':'below timer precision'} · ${W} × ${H} · ${bloomPasses.length} passes. Median of ${result.samples.length} isolated batches; earlier GPU work excluded.`;
+      bloomMeasureResult.dataset.measurement=JSON.stringify(result);
+    }catch(error){bloomMeasureResult.textContent='Bloom measurement unavailable: '+(error.message||error);}
+    finally{
+      bloomMeasuring=false;bloomMeasureButton.disabled=!hasTS;
+      last=performance.now();fpsN=0;fpsT=0;resolution.reset();requestAnimationFrame(frame);
+    }
+  }
   let performanceButton=null;
   function setPerformanceOpen(open){
     performancePanel.hidden=!open;profiler.setDetailed(open);
@@ -1575,6 +1603,7 @@ async function main() {
 
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
+    if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
     const cpuFrameStart=performance.now();
     requestAnimationFrame(frame);
     landfallUI.update(now);
@@ -1829,16 +1858,8 @@ async function main() {
     }
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
-    if (P.bloom > 0) {
-      for (const { descriptor, pipeline, underwaterPipeline, bindGroup, underwaterBindGroup, timingName } of bloomPasses) {
-        descriptor.timestampWrites=profiler.writes(timingName);
-        const p = enc.beginRenderPass(descriptor);
-        p.setPipeline(cameraMediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
-        p.setBindGroup(0, cameraMediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);
-        p.draw(3);
-        p.end();
-      }
-    }
+    bloomCameraMediumBand=cameraMediumBand;
+    if(P.bloom>0)encodeBloom(enc,bloomProfileWrites,cameraMediumBand);
 
     compData[0] = frameF[68]; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
     // Neutral white balance: a fixed cool grade turned shaded oak green in daylight.
@@ -1866,7 +1887,7 @@ async function main() {
       enc.copyTextureToBuffer({ texture: swapTex }, { buffer: readBuf, bytesPerRow: bpr }, [W, H]);
     }
     submitList[0] = enc.finish();
-    device.queue.submit(submitList);
+    device.queue.submit(submitList);bloomFrameReady=true;
     for(const v of vessels)v.rowingWater?.readback();
     if(!oceanStartupFirstFrameSubmitted){
       oceanStartupFirstFrameSubmitted=true;

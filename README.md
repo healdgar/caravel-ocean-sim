@@ -6,16 +6,13 @@ A real-time WebGPU sailing game with wind, oar and paddle propulsion, crew, impa
 
 [Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-**Release status:** published runtime
-`3ba18f9cc6b88cc4be5d116e6110bdcb45f2a8da` retains **nine model choices and up to
-nine active vessels**, adds the bounded Forestmodeler scenery adapter, and connects
-real oar/paddle crossings to the shared surface-wave field. The full native Metal
-suite passed **709/709**, zero skips or cancellations, in **351.361 seconds**;
-eight Python importer checks pass separately. Visible Chrome reviewed imported
-trees, automatic detail, coarse debug crowns and the rowing scene without console
-errors. Pages built at **2026-10-22 12:59:14 UTC**; public HTML, manifest and all
-**58 assets** matched tested local sizes/hashes at **12:59:54 UTC**. No
-physical-iPhone or sustained frame-rate result is claimed.
+**Current runtime:** nine vessel choices, independently controlled fleets, source-derived
+forest canopy and distance-based tree detail. Startup reuses identical GPU programs,
+compiles independent pipelines together and omits procedural hull profiles for
+vessels absent from the allocated fleet. All active models retain their original GPU arithmetic.
+Forest validation yields by elapsed work, avoiding thousands of clamped timers on
+browsers without `scheduler.yield`. Geometry, textures, validation and rendering
+quality are unchanged. [Release and qualification receipts](BACKLOG.md).
 
 The nine-vessel integration `c8a660d` passed **687/687** native checks and rendered
 review of the five added models and mixed fleet; its 53 public assets were verified
@@ -81,7 +78,12 @@ abstracted. Damage, penetration, ricochet and AI combat are not yet modeled.
 
 You need a recent Chrome with WebGPU and a reasonably capable GPU. On a laptop, force Chrome onto the dedicated GPU in the Windows graphics settings, or it will fall back to the integrated one.
 
-Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both include the ship's oak material and are self-contained.
+Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both embed sailing assets and the forest view atlases. The optional full-detail mature tree buffers load from versioned public assets; they require a connection.
+
+Normal sailing preloads only wood and two crew models (about 2.8 MB before HTTP
+compression); forest assets load only in Landfall scenes. The island's complete
+forest pack remains large, so its first visit can still depend heavily on download
+speed. The loading overlay stays until the first rendered frame completes on the GPU.
 
 To run from source:
 
@@ -117,7 +119,7 @@ The loading screen stays until the first rendered canvas frame completes on the
 GPU. Errors stay visible with Retry; slow first visits get an explanatory hint,
 without a guessed percentage or failure timeout. Reduced motion and mobile
 safe areas are supported. The website uses separately cached media; the two
-downloadable HTML files retain their embedded assets and work offline.
+downloadable HTML files retain their embedded sailing assets and forest atlases for offline use. Full-detail mature tree geometry remains an optional network download.
 
 Ordinary sailing preloads only the wood texture and two crew models (2.77 MB
 before HTTP compression). The 8.32 MB whale asset loads on the first shark or
@@ -665,19 +667,19 @@ boat's travelled position.
 
 Saba uses Beeldmateriaal Nederland's 2023 bare-earth LiDAR DTM, area-averaged and
 reprojected from the half-metre source to a 513² grid at 16 m spacing across an
-8.192 km region. Its fixed 104,972-triangle mesh preserves the same relief
-throughout approach. Missing forest ground returns receive recorded interpolation;
+8.192 km region. Its regional mesh preserves the same relief
+throughout approach; Wells Bay now has a separate, finer survey tile. Missing forest ground returns receive recorded interpolation;
 the result is visual terrain, with source CRS/datum and shoreline limitations.
 
 Licensed real aerial imagery supplies one registered 1024² colour seed at 8 m per
 pixel. Gentle infrastructure cleanup and bounded shadow lifting preserve broad
 green interior and exposed brown slopes. These approximate surface colours are
 not calibrated reflectance or an exact reconstruction of historical land cover.
-A derived greenness mask, elevation and slope select 17,466 stable trees from
-360,000 seeded candidates in the current Saba pack. Camera distance changes
+A derived vegetation mask, elevation and slope seed the regional forest. Camera distance changes
 detail, not tree identity, position or regional density. The original 8 m colour
-and 16 m elevation limits remain; additional trees do not improve source resolution.
-Eight seeded tree variants use five generations of curved, tapering branches,
+and 16 m elevation limits remain outside the bounded Wells Bay tile. The native forest replaces the entire legacy population. If the new pack is
+unavailable, the earlier stand and procedural trees remain a fallback.
+Those eight seeded tree variants use five generations of curved, tapering branches,
 with children growing from actual parent sections. Hundreds of terminal twig
 sprays carry individual leaf cutouts, veins and transparent gaps at near/middle
 detail. Interior foliage receives authored canopy
@@ -713,17 +715,84 @@ bends with wind; cached terrain sunlight avoids cloud ray marching per blade.
 The material adds filtered metre-scale relief between aerial colour and close
 soil/rock grain. These additions do not yet supply a closed distant forest canopy.
 
-**Published canopy integration:** a separate Forestmodeler import adds a
-bounded **80 × 80 m, 42-tree** demonstration near Saba's summit. Its five taxa
-(fir, oak, birch, elm and maple) are temperate examples, not surveyed tropical
-vegetation or whole-island coverage. Actual branch wood and cutout foliage retain
-source linear material colours; procedural roots are replaced only inside the
-imported rectangle. The source has no leaf image, so the existing leaf texture
-supplies alpha only. Auto keeps detail unless the complete near/far patch support
-fits within three render pixels; the opaque far preview is otherwise explicitly
-uncertified. Imported trees are static and add no canopy shadow caster. Combined
-native/rendered checks and deployed-byte verification passed in `3ba18f9`. See
-[Canopy scenery contract, provenance and inspection controls](CANOPY_SCENERY.md).
+**Forest redesign:** [FOREST_LOD_PLAN.md](FOREST_LOD_PLAN.md) specifies five
+source-derived complexity tiers, branch/tree/stand selection, streamed detail
+and combined appearance/performance gates. It supersedes the intended current
+LOD design. The isolated [implementation pilot](FOREST_LOD_PILOT.md) now includes
+source-baked branch detail, reduced wood, paged inspection leaves and GPU tier
+selection with ownership/budget regressions. Close-view appearance/cost and
+regional integration remain unfinished; the pilot is not loaded by the game.
+The description below records the shipping implementation and its limitations.
+
+**Regional Forestmodeler integration:** five cached mature Hero models—oak
+(60 years), maple (50), birch (25), elm (65) and chestnut (70)—retain their
+original geometry, UVs, normals and `gene-surfaces-v3` bark/leaf maps. These are
+temperate visual proxies, not surveyed Caribbean flora. The deterministic stand
+has **85,451 roots**, of which **85,050** remain on the fine Wells Bay terrain.
+The resident forest replaces all earlier procedural trees and the 42-tree example.
+
+Near views use the shared original models, source MASK coverage and baked
+own-canopy exposure. Independent per-primitive MSAA masks let overlapping small
+leaves accumulate coverage instead of repeatedly selecting identical samples.
+This preserves expected single-layer coverage; it approximates independent
+footprints rather than reconstructing correlated masks lost in mip filtering.
+
+Middle views use reduced native wood and opaque source-density crown meshes.
+GPU interior samples recover source pigment, density-gradient normals and
+canopy exposure from cached 3D fields, so the mesh need not retain thousands of
+triangles just for shading. Short sun rays add local canopy shading; these are
+not inter-tree shadows. Distant blocks combine
+those fields at the actual root positions **before** surface extraction, producing
+an opaque forest mass with source-derived contours and linear leaf pigment.
+Original leaf triangles and MASK maps determine density; coarse crown domes and
+individual-tree view cards do not supply this mass. Cached mature trees avoid
+regrowing decades of branching: five leaf-field caches took 27 seconds and the
+regional assembly took 100 seconds on the authoring Mac.
+
+GPU compute culls blocks/trees, projects their authored sampling footprint through
+actual render pixels, FOV and view angle, selects detail with a 3-pixel target and
+12% hysteresis, and issues indirect draws. Static buffers upload once. The pixel
+target bounds the **authored sampling estimate**, not native appearance: finite
+native/MASK comparisons still expose coverage and silhouette differences. Pigment,
+leaf underside lighting and opaque density are approximations; no universal
+imperceptible transition or performance target is claimed. See
+[Native forest instances](FOREST_INSTANCES.md) and
+[Native-derived canopy pipeline and validation](FOREST_MASS.md). The
+earlier bounded forest checkpoint passed source/package checks: its static
+1280×900 coastal test improved from 2.35 FPS to 54–57 FPS. This validates that
+particular view, not the complete detail-transition architecture.
+Waves, clouds, ships and crew were disabled for this comparison; it does not
+establish 60 FPS for ordinary play, Retina resolution or an iPhone.
+
+The close-forest approach remains a separate performance problem: an exact
+1920×1080 view submits about1.54billion indexed triangles because the current
+transition promotes thousands of complete botanical trees. Conservative GPU
+terrain occlusion removes trees fully hidden behind the rendered hills, without
+changing tree density, detail policy or resolution. The profiler includes those
+trees in **Scenery + ocean + sky**. `forestOcclusion=off` is the comparison path.
+An initial isolated Mac measurement fell from947ms to814ms (about14%); this does
+not make that close view playable or qualify60FPS. A faster near density-shell
+experiment lost visible leaf detail and was rejected. Branch-level source-baked
+detail and its rendered transition qualification remain unfinished; see the
+October23close-forest entry in [BACKLOG.md](BACKLOG.md).
+
+Forest geometry loads only for landfall. Full native detail remains a background
+download; transport verifies encoded and decoded SHA-256 receipts. The local
+meshopt decoder and gzip preserve the packed geometry bytes. Explicit
+`forestImpostor=auto|force` retains the individual-atlas diagnostic; it disables
+the new mass/middle path and is not the production canopy. `forestVolume=ray`
+selects the slower comparison raymarch; `forestVolume=off` disables field shading.
+The reusable field/surface exporters and Three.js adapter are now available
+in Forestmodeler; growth and biological leaf-area accounting remain independent.
+
+**Wells Bay close terrain:** a 1024 m coastal tile derives directly from the
+original 0.5 m DTM at **2 m spacing**, with a separate registered 1024² aerial
+crop. Its 169,052 visible triangles replace covered regional cells and join
+their exact boundary heights/normals. Roots, hull clearance, coastal depth and
+terrain lighting share the fine triangular surface. Ground-return gaps retain
+coarse support; the 48 m wet transition is authored, not surveyed bathymetry.
+This is not a reconstructed beach, harbour or cliff-overhang model. See
+[Near-terrain provenance and controls](WELLS_BAY_NEAR.md).
 
 ![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
 
@@ -993,7 +1062,7 @@ Camera rays, the ocean environment cube and direct-sun visibility sample the sam
 
 ### Post-processing
 
-The scene renders in HDR with 4x MSAA. Post-processing adds up to 8 levels of bloom, AgX tone mapping, a slight white balance shift, and dithering. Small render targets use only the mip levels they support, and setting bloom to zero skips its blur passes.
+The scene renders in HDR with 4x MSAA. Post-processing adds up to 8 levels of bloom, AgX tone mapping, a slight white balance shift, and dithering. Small render targets use only the mip levels they support, and setting bloom to zero skips its blur passes. The standard upsample folds the separable 3 × 3 tent into four bilinear texture reads instead of nine, including the fractional texel phase at odd mip sizes. HDR format, filter footprint, Karis downsampling and all eight levels are retained. Rendered comparisons against the original chain differ by at most one 8-bit rounding step; the nine-read reference remains available with `bloomFilter=reference` for device comparisons.
 
 ## Performance
 
@@ -1074,6 +1143,10 @@ Add `profile=1` to any scene URL for an opt-in timing overlay. It samples waves/
 The default overlay identifies `Ocean visibility: depth first`. The previous `inline` path remains available with `oceanDepth=0`; `oceanDepth=1` explicitly selects the default. Compare the same resolution and scene. Both visibility and shading remain within the `Ocean + sky` span; the new stage does not introduce a render-pass boundary. Capture JSON records `oceanDepth`, and ordinary share links omit this diagnostic flag.
 
 Values are GPU **spans**, not exclusive costs: render stages can overlap or wait on earlier work, especially on tile GPUs. Pass times must not be added; bloom reports its enclosing span. Detailed mode's **sampled GPU window** runs from the earliest measured pass start to the latest measured end, including stages that begin before the first compute pass. It includes waits and is not a frame-rate measurement. Normal mode's cheaper **GPU endpoints** interval covers only first-compute start to composite end. These are different metrics; compare matching modes and use actual FPS/frame cadence for performance. Browser timestamp quantization can round short passes to zero. The overlay also shows render dimensions and device pixel ratio.
+
+**Measure bloom alone** in Performance briefly pauses rendering, drains preceding GPU work, and times three isolated batches of the actual current bloom chain (four repetitions per batch). It reports the median per-chain GPU interval at the displayed render dimensions. It does not reduce resolution or quality. Normal rendering allocates none of these query resources and adds no measurement fences; browsers without timestamp support disable the button. The regular **Bloom window (waits)** row remains an overlapping interval and must not be read as bloom's exclusive execution cost.
+
+`WEBGPU_BACKEND=metal CHROMIUM_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node scripts/benchmark-bloom.mjs` alternates the original and folded kernels in one live scene/context at fixed 1206 × 1998 and 3840 × 2160 pixels. The October22Mac capture measured median isolated chain times of 0.169→0.152ms and 0.296→0.258ms, respectively. This is a small bloom-only improvement (about13% at4K), not a whole-game FPS gain or a physical-iPhone result. The reported iPhone120ms window still requires isolated measurement on that device. Native regression covers final-colour rounding, exact reference fallback, air/water source selection, and the phone-sized diagnostic UI.
 
 For a reproducible local capture, use `?view=ship&profile=1&w=1280&h=720&shot=gpu-check.png&frames=600&sunElev=35&sunAzim=30&boatSpeed=6`. The development server saves the image and `shots/gpu-check.json`, containing scene parameters, per-pass samples, median and p95 frame spans. Samples start at frame 120 and retain at most 512 entries. Screenshot runs use a fixed simulation timestep; asynchronous hull readback can still produce slight pose differences between runs. Close other active GPU scenes before comparing. These diagnostics remain local; GitHub Pages cannot save captures.
 
@@ -1720,7 +1793,8 @@ content-hashed, byte-identical media in `docs/assets/` and a SHA-256 asset manif
 The initial HTML excludes model, audio and terrain payloads; current mandatory
 crew/wood assets preload concurrently, marine assets wait for an encounter,
 audio waits for Enable sound, and terrain loads for land scenes. Both ocean HTML
-downloads remain self-contained.
+downloads embed sailing assets and forest atlases; full-detail mature forest
+buffers are optional versioned network assets.
 Older hashed assets are retained for cached HTML; the build copies only its
 explicit runtime asset list. The site defaults to Boat camera and preserves
 explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder. To update the

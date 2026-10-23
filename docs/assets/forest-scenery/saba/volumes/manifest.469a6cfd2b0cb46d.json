@@ -1,0 +1,1905 @@
+{
+  "format": "waterworld.native-forest-volume",
+  "version": 1,
+  "complete": true,
+  "units": "metres",
+  "upAxis": "Y",
+  "source": {
+    "files": {
+      "vertices.bin": {
+        "bytes": 188946072,
+        "sha256": "8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0"
+      },
+      "indices.bin": {
+        "bytes": 34786680,
+        "sha256": "2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389"
+      },
+      "roots.bin": {
+        "bytes": 4101648,
+        "sha256": "69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b"
+      }
+    },
+    "nativeManifest": {
+      "bytes": 183278,
+      "sha256": "a0b23b57035db726f4a14f3b708df0edfddd11691d31887d882419e07d60de9d"
+    },
+    "nativeFieldManifest": {
+      "bytes": 163510,
+      "sha256": "d1437b0782d0ffc32187995952495a7315e759022092d72ba7dbea9cab126fb9"
+    },
+    "nativeFieldRecipe": {
+      "version": 1,
+      "maximumSupportMetres": 2.647449898511305,
+      "scope": "Maximum recorded prototype sampling/smoothing footprint, not a native appearance certificate."
+    },
+    "nativeSource": {
+      "index": {
+        "bytes": 114424,
+        "sha256": "7158a319fa3bfaf50384cf0e900f63b041df7867f3e05a9753d015a885ef852a"
+      },
+      "source": {
+        "kind": "catalog-usdz",
+        "catalog": {
+          "file": "NativeModelCatalog.json",
+          "bytes": 35805,
+          "sha256": "487e8f5fb14daa2deacbcb6227f29fb7d149d9767e267884ef12d93f4214d3f9"
+        },
+        "surfaceCatalog": {
+          "file": "TreeSurfaceCatalog.json",
+          "bytes": 25215,
+          "sha256": "173689649cb137315e4c85c4c1ae4de88e9a4d0531df0ed06fee1f5cf7587e84"
+        },
+        "files": {
+          "scripts/convert_waterworld_mature_prototypes.py": {
+            "file": "convert_waterworld_mature_prototypes.py",
+            "bytes": 15641,
+            "sha256": "ea28845c1ba4a6497d954043942bbeb6b58b17d448fdbd8ee704205b184f29c5"
+          },
+          "scripts/bake_waterworld_native_prototypes.py": {
+            "file": "bake_waterworld_native_prototypes.py",
+            "bytes": 13937,
+            "sha256": "93349d597b6d184cb3d2e0eb20679bca5dd6b4a8f84cfbc1a1d60da9b9595eb0"
+          },
+          "gardenplans/scenery.py": {
+            "file": "scenery.py",
+            "bytes": 82457,
+            "sha256": "3b7f0ccf560a0e4390437643014e02f6d504d80a18d249ca0235eaf28cebacb3"
+          },
+          "gardenplans/export.py": {
+            "file": "export.py",
+            "bytes": 24496,
+            "sha256": "8476582bc8138a2e7595c5685a8923f8cb8192f34cce9f0b5d0a3ed9872111aa"
+          }
+        }
+      },
+      "quality": "hero",
+      "mode": "catalog-mature-usdz",
+      "ages": {
+        "oak": 60.0,
+        "maple": 50.0,
+        "birch": 25.0,
+        "elm": 65.0,
+        "chestnut": 70.0
+      }
+    },
+    "method": {
+      "file": "scripts/prepare-forest-volume.py",
+      "bytes": 13239,
+      "sha256": "5998266406406ab3b2cbebbea84b65dac76283bd58cd92aa60541db51fe70a2c"
+    },
+    "exposureMethod": {
+      "file": "scripts/prepare-forest-light.py",
+      "bytes": 18284,
+      "sha256": "a67a67f19ebc5cdd6e4a95db7593ef0e1a040b21ed7c4b725485b30269afbb2a"
+    }
+  },
+  "recipe": {
+    "version": 1,
+    "nativeGroundPlaneY": 0,
+    "extinction": 0.5,
+    "fieldChannels": [
+      "linearRGBMomentR",
+      "linearRGBMomentG",
+      "linearRGBMomentB",
+      "leafAreaDensity"
+    ],
+    "fieldEncoding": "Little-endian RGBA16F, linear source moments and density; divide moment by density AFTER interpolation. No colour averaging before interpolation.",
+    "textureOrder": "x fastest, then y, then z; NumPy source[x,y,z,channel] transposed to[z,y,x,channel]",
+    "textureCoordinates": "originXYZ is centre of texel[0,0,0]; uvw=(local-originXYZ+0.5*cellMetres)/(dimensionsXYZ*cellMetres)",
+    "densityUnits": "Leaf square metres per cubic metre",
+    "rootScale": "For uniform scale s, world density=local density/s; world ray step=s*local step. Native root RGB tint multiplies reconstructed pigment once.",
+    "exposure": {
+      "encoding": "R8 UNORM; nearest, ties-to-even",
+      "extinction": 0.5,
+      "rays": [
+        {
+          "directionXYZ": [
+            0,
+            1,
+            0
+          ],
+          "weight": 0.4
+        },
+        {
+          "directionXYZ": [
+            1,
+            0,
+            0
+          ],
+          "weight": 0.15
+        },
+        {
+          "directionXYZ": [
+            -1,
+            0,
+            0
+          ],
+          "weight": 0.15
+        },
+        {
+          "directionXYZ": [
+            0,
+            0,
+            1
+          ],
+          "weight": 0.15
+        },
+        {
+          "directionXYZ": [
+            0,
+            0,
+            -1
+          ],
+          "weight": 0.15
+        }
+      ],
+      "localCellSubtractionFraction": 0.5,
+      "clamp": [
+        0.18,
+        1.0
+      ],
+      "scope": "Static own-canopy hemisphere escape: weighted exp(-0.5*integrated density), not directional or neighboring-tree shadow"
+    },
+    "biologicalClipping": "Texture coordinates and density remain unchanged. Draw bounds and shader reject localY<0; source ground plane is not a green cap.",
+    "maximumTexture3DDimension": 256,
+    "maximumVoxelsPerPrototype": 8000000,
+    "samplingFootprintScope": "sqrt(3)*cellMetres is an authored voxel interpolation footprint, not a native foliage appearance certificate"
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "oak",
+      "originXYZ": [
+        -7.5,
+        -1.5,
+        -7.75
+      ],
+      "cellMetres": 0.25,
+      "dimensionsXYZ": [
+        68,
+        85,
+        86
+      ],
+      "textureLow": [
+        -7.625,
+        -1.625,
+        -7.875
+      ],
+      "textureHigh": [
+        9.375,
+        19.625,
+        13.625
+      ],
+      "low": [
+        -7.625,
+        0.0,
+        -7.875
+      ],
+      "high": [
+        9.375,
+        19.625,
+        13.625
+      ],
+      "nativeGroundPlaneY": 0,
+      "samplingFootprintMetres": 0.4330127018922193,
+      "densityRange": [
+        0.0,
+        9.620980262756348
+      ],
+      "exposureRange": [
+        0.18000000715255737,
+        1.0
+      ],
+      "sourceField": {
+        "file": "prototype-0-oak.npz",
+        "bytes": 1869960,
+        "sha256": "13c03600686a6bac13902fc09d7dc63c39b98933eda52f58c75b7f47288e1f10"
+      },
+      "field": {
+        "file": "prototype-0-oak/field.rgba16f.bin",
+        "bytes": 3976640,
+        "sha256": "e3142eccdb903a6b16891124a27c7eee8227d2a19acc83d18663d258b7d4fc67",
+        "gzip": {
+          "file": "prototype-0-oak/field.rgba16f.bin.gz",
+          "bytes": 798718,
+          "sha256": "43cacdf304118535c610283ffec6cfa692d7947160aec01a7d64ab694c7e6bab"
+        }
+      },
+      "exposure": {
+        "file": "prototype-0-oak/exposure.r8.bin",
+        "bytes": 497080,
+        "sha256": "312303ccebc712e248975f946696dd113f09dd05f7638132522a333b82adf173",
+        "gzip": {
+          "file": "prototype-0-oak/exposure.r8.bin.gz",
+          "bytes": 113339,
+          "sha256": "5ae000096248f35de312281be8a0c969e2816daf9dd8e9ef973ff035646efd60"
+        }
+      },
+      "sourceArrays": {
+        "originXYZ": {
+          "dtype": "<f8",
+          "shape": [
+            3
+          ],
+          "bytes": 24,
+          "sha256": "0821c71f44bfd02c5afd3f7e3510b5c68b7a82ea948e3330673147b474b50704"
+        },
+        "cellMetres": {
+          "dtype": "<f8",
+          "shape": [],
+          "bytes": 8,
+          "sha256": "272f78036db6721f7cf7444315e5f6360426d14c3d446d6ae8a89ef70d134002"
+        },
+        "density": {
+          "dtype": "<f4",
+          "shape": [
+            68,
+            85,
+            86
+          ],
+          "bytes": 1988320,
+          "sha256": "9cfdd4b5befcab9276574bd3d28377f09c2e45b688ad81fefba93d45abe40aed"
+        },
+        "rgbMoment": {
+          "dtype": "<f4",
+          "shape": [
+            68,
+            85,
+            86,
+            3
+          ],
+          "bytes": 5964960,
+          "sha256": "eb1549c7960db6e39b22343d7354cf1df381316b8b5cc2fae38985cc1ef4921f"
+        }
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "repeat",
+          "clearcoat": 0.03200000151991844,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.0548661833109657,
+            0.04457581349895171,
+            0.03551186795215249
+          ],
+          "sourceMaterialPath": "/oak/Materials/bark",
+          "index": 0,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "oak-bark-albedo.png",
+            "bytes": 300022,
+            "sha256": "6f31c17062c75f86c21974100a9c40d80fa4d3087c5f23b05b23651be14c3918",
+            "encoding": "srgb",
+            "width": 512,
+            "height": 1024
+          },
+          "normal": {
+            "file": "oak-bark-normal.png",
+            "bytes": 574672,
+            "sha256": "288e8c40c3d96ece93b7c98960fa22da9bf9ec2b22d5671a7c561e2ee1351e15",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          },
+          "roughnessMap": {
+            "file": "oak-bark-roughness.png",
+            "bytes": 166388,
+            "sha256": "84d1c6fc052df9808375943000cc846cd530c276205d7c7846853a64cc39274c",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          }
+        },
+        {
+          "name": "wounds",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.04373985145293916,
+            0.02862992423753972,
+            0.01747266152941236
+          ],
+          "sourceMaterialPath": "/oak/Materials/wound",
+          "index": 1,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "oak-wounds-albedo.png",
+            "bytes": 43954,
+            "sha256": "d04a8bdfe01d1ce1a927b5270a698a792b83b48495bce8a95760defe82d8aaa5",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "oak-wounds-normal.png",
+            "bytes": 114926,
+            "sha256": "897bf77e618b2a8ecd8c5828074b46b9ac0c7b61933cd5c489a8ff96d2b907f6",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          },
+          "roughnessMap": {
+            "file": "oak-wounds-roughness.png",
+            "bytes": 26127,
+            "sha256": "4ec942c5982941db0e0c19913f9351eb7d30d6f77c4587f615b472dee6f38a75",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_0",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.9399999976158142,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.03503818785843486,
+            0.09303576477090744,
+            0.026717442742828373
+          ],
+          "sourceMaterialPath": "/oak/Materials/foliage_0",
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 2,
+          "albedo": {
+            "file": "leaf-oak-0-albedo.png",
+            "bytes": 16023,
+            "sha256": "3cd50a563054f9d215dc0f73562960fac3f564767a57d501ebbc1d6e20b05e5b",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-oak-0-normal.png",
+            "bytes": 6967,
+            "sha256": "64345604f036737417f524c77adc9e529396e56ae617b1c430524b3cad0ae402",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_1",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.9399999976158142,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.035147333413428024,
+            0.0933665364850528,
+            0.02678819083944675
+          ],
+          "sourceMaterialPath": "/oak/Materials/foliage_1",
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 3,
+          "albedo": {
+            "file": "leaf-oak-1-albedo.png",
+            "bytes": 18409,
+            "sha256": "37c5b493429dc7352e7c14d661069f4177905b27f02522d8264e1db73bf2133b",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-oak-1-normal.png",
+            "bytes": 9318,
+            "sha256": "ff3e82053c6ea2b8b7f3ac7e8ca0cb1814e1151f001f31e28724e5905365b7a2",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_2",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.9399999976158142,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.03496528123165756,
+            0.09281505526940974,
+            0.026668183471952094
+          ],
+          "sourceMaterialPath": "/oak/Materials/foliage_2",
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 4,
+          "albedo": {
+            "file": "leaf-oak-2-albedo.png",
+            "bytes": 15914,
+            "sha256": "ca2db7500808ffd761fafd26b2e045840a1f0a58dc2ba641e0a8399ba5df8fbd",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-oak-2-normal.png",
+            "bytes": 6731,
+            "sha256": "d455e487df35afa01302d8c9a8b91b90032bdc28a96889286e3e7bde47dc7406",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        }
+      ],
+      "appearanceErrorSupported": false
+    },
+    {
+      "id": 1,
+      "species": "maple",
+      "originXYZ": [
+        -8.25,
+        -1.75,
+        -8.0
+      ],
+      "cellMetres": 0.25,
+      "dimensionsXYZ": [
+        65,
+        80,
+        66
+      ],
+      "textureLow": [
+        -8.375,
+        -1.875,
+        -8.125
+      ],
+      "textureHigh": [
+        7.875,
+        18.125,
+        8.375
+      ],
+      "low": [
+        -8.375,
+        0.0,
+        -8.125
+      ],
+      "high": [
+        7.875,
+        18.125,
+        8.375
+      ],
+      "nativeGroundPlaneY": 0,
+      "samplingFootprintMetres": 0.4330127018922193,
+      "densityRange": [
+        0.0,
+        6.687816619873047
+      ],
+      "exposureRange": [
+        0.18000000715255737,
+        1.0
+      ],
+      "sourceField": {
+        "file": "prototype-1-maple.npz",
+        "bytes": 1694123,
+        "sha256": "1dfaf476b7a156cc59822492a82d96a5dbb43effb452423c7ceb0313e6c29e46"
+      },
+      "field": {
+        "file": "prototype-1-maple/field.rgba16f.bin",
+        "bytes": 2745600,
+        "sha256": "5bcc523f09138b3fb0805fad418682ac79a7f0d9c687b60fdf026f36d0485d42",
+        "gzip": {
+          "file": "prototype-1-maple/field.rgba16f.bin.gz",
+          "bytes": 714864,
+          "sha256": "2bfe403deedc0f731e2422bf09755b9caf76b7f006841f5d6e4bf2e58fe84c61"
+        }
+      },
+      "exposure": {
+        "file": "prototype-1-maple/exposure.r8.bin",
+        "bytes": 343200,
+        "sha256": "ab816cbf0c89202dbbc8be6e49e8bf7d43c3aa44b27310369df0a29d2f363a21",
+        "gzip": {
+          "file": "prototype-1-maple/exposure.r8.bin.gz",
+          "bytes": 107123,
+          "sha256": "9cb22fe933e1cac9b6204b182eb842683486a237864b80402f36f37bb23557dc"
+        }
+      },
+      "sourceArrays": {
+        "originXYZ": {
+          "dtype": "<f8",
+          "shape": [
+            3
+          ],
+          "bytes": 24,
+          "sha256": "ab49726dc879a580d4123f5a1c36ecb89a57842c760859237a10e55826549114"
+        },
+        "cellMetres": {
+          "dtype": "<f8",
+          "shape": [],
+          "bytes": 8,
+          "sha256": "272f78036db6721f7cf7444315e5f6360426d14c3d446d6ae8a89ef70d134002"
+        },
+        "density": {
+          "dtype": "<f4",
+          "shape": [
+            65,
+            80,
+            66
+          ],
+          "bytes": 1372800,
+          "sha256": "1a7eb7d7b9a0f0f3c4b69804d2b8ff337dc5d28681d7d98e5037f1f44b239df3"
+        },
+        "rgbMoment": {
+          "dtype": "<f4",
+          "shape": [
+            65,
+            80,
+            66,
+            3
+          ],
+          "bytes": 4118400,
+          "sha256": "dcfdb84b4e34800017cfdc700afd883dd658da4db524b6d5a25e136db9103e27"
+        }
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "repeat",
+          "clearcoat": 0.03999999910593033,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.12707187254331173,
+            0.12079193800085752,
+            0.10878513895370405
+          ],
+          "sourceMaterialPath": "/maple/Materials/bark",
+          "index": 0,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "maple-bark-albedo.png",
+            "bytes": 322095,
+            "sha256": "35263a2726aafef2f4c6fd076d2cad6b2a6b5501f0e847a064e19f4acc4b370f",
+            "encoding": "srgb",
+            "width": 512,
+            "height": 1024
+          },
+          "normal": {
+            "file": "maple-bark-normal.png",
+            "bytes": 484171,
+            "sha256": "359aeec55cb558568906e051a05c97ddd0ceaea8cbc0105d65e0a576a7a8e969",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          },
+          "roughnessMap": {
+            "file": "maple-bark-roughness.png",
+            "bytes": 166084,
+            "sha256": "9b8ba37eea603ae9bff11145460b41d60c19a55990545033dfc1f087be022b19",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          }
+        },
+        {
+          "name": "wounds",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.08576765929615446,
+            0.06427879215144347,
+            0.04265165600112996
+          ],
+          "sourceMaterialPath": "/maple/Materials/wound",
+          "index": 1,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "maple-wounds-albedo.png",
+            "bytes": 51162,
+            "sha256": "e58a59f48ca1d9072a34bfde3bce2550c684b7cc67d8020542030bb9af3b45b0",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "maple-wounds-normal.png",
+            "bytes": 114746,
+            "sha256": "3f29063df69df13429f3b04d640bcaa50c1b950f7a91fed5cf0894a0026216e5",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          },
+          "roughnessMap": {
+            "file": "maple-wounds-roughness.png",
+            "bytes": 25872,
+            "sha256": "467563f7a656df062e1f2d3ed1b6694436c7df728361f57639c180c2e06eabd7",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_0",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.8500000238418579,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.05227200433466855,
+            0.15609822675714127,
+            0.02908652514648393
+          ],
+          "sourceMaterialPath": "/maple/Materials/foliage_0",
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 2,
+          "albedo": {
+            "file": "leaf-maple-0-albedo.png",
+            "bytes": 10390,
+            "sha256": "0b661c4696993d0b151995fabfbf4e0b2c56698e832bb24c34b1ab24824e3041",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-maple-0-normal.png",
+            "bytes": 4698,
+            "sha256": "fd457168eb472e7d896c52e8456735bf85e4b763b658ad4c101cb9aa2fc72dfa",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_1",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.8500000238418579,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.05217626029322825,
+            0.15578184425202868,
+            0.029022697065471073
+          ],
+          "sourceMaterialPath": "/maple/Materials/foliage_1",
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 3,
+          "albedo": {
+            "file": "leaf-maple-1-albedo.png",
+            "bytes": 10203,
+            "sha256": "fb77e8dd91b60bba751d405ab78fb7b917ae4e35af75fa22c27185d88e9d4e22",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-maple-1-normal.png",
+            "bytes": 5159,
+            "sha256": "3153d4e0dc592f279398b7e51aca12f245c31f18e05481178099ea57c4229328",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_2",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.8500000238418579,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.05222430612891136,
+            0.15593530097116998,
+            0.029050969166104675
+          ],
+          "sourceMaterialPath": "/maple/Materials/foliage_2",
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 4,
+          "albedo": {
+            "file": "leaf-maple-2-albedo.png",
+            "bytes": 10847,
+            "sha256": "8e735663d773494823f101a92799d45a2b211a7b7d2cd13d743e1530d4de52fb",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-maple-2-normal.png",
+            "bytes": 5065,
+            "sha256": "15d6e444fc3fc5ec117a594fd1ca362746f223d301d4a7e753fb8537caf3222e",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        }
+      ],
+      "appearanceErrorSupported": false
+    },
+    {
+      "id": 2,
+      "species": "birch",
+      "originXYZ": [
+        -4.0,
+        -1.75,
+        -4.5
+      ],
+      "cellMetres": 0.25,
+      "dimensionsXYZ": [
+        32,
+        44,
+        47
+      ],
+      "textureLow": [
+        -4.125,
+        -1.875,
+        -4.625
+      ],
+      "textureHigh": [
+        3.875,
+        9.125,
+        7.125
+      ],
+      "low": [
+        -4.125,
+        0.0,
+        -4.625
+      ],
+      "high": [
+        3.875,
+        9.125,
+        7.125
+      ],
+      "nativeGroundPlaneY": 0,
+      "samplingFootprintMetres": 0.4330127018922193,
+      "densityRange": [
+        0.0,
+        3.6798017024993896
+      ],
+      "exposureRange": [
+        0.18132653832435608,
+        1.0
+      ],
+      "sourceField": {
+        "file": "prototype-2-birch.npz",
+        "bytes": 280478,
+        "sha256": "cc452f0499120e774ae9619d305bdc67877bd2269c52915e58d6cf057acad126"
+      },
+      "field": {
+        "file": "prototype-2-birch/field.rgba16f.bin",
+        "bytes": 529408,
+        "sha256": "ed1ebd5fc5727498631863f39cc52059bb847b374cfe6cc49a864d08a3fc0896",
+        "gzip": {
+          "file": "prototype-2-birch/field.rgba16f.bin.gz",
+          "bytes": 114293,
+          "sha256": "128acbd87e9c3474f7d28e78b6f400ebab77757171af0ab00641bfcbe7315266"
+        }
+      },
+      "exposure": {
+        "file": "prototype-2-birch/exposure.r8.bin",
+        "bytes": 66176,
+        "sha256": "6e95c7b1cc8592dbd3592fe0c3c9f69029540056fa521100d2bf1b9e042b4b7d",
+        "gzip": {
+          "file": "prototype-2-birch/exposure.r8.bin.gz",
+          "bytes": 18024,
+          "sha256": "618e901a70728e30158e3ffc523f19ddfab2b6ac346e41dc49d7c69dcbc6d18e"
+        }
+      },
+      "sourceArrays": {
+        "originXYZ": {
+          "dtype": "<f8",
+          "shape": [
+            3
+          ],
+          "bytes": 24,
+          "sha256": "b8c83a1506b76c1a43b5c9100ce95b58ab4fc012e8c972955aa64da8450e5801"
+        },
+        "cellMetres": {
+          "dtype": "<f8",
+          "shape": [],
+          "bytes": 8,
+          "sha256": "272f78036db6721f7cf7444315e5f6360426d14c3d446d6ae8a89ef70d134002"
+        },
+        "density": {
+          "dtype": "<f4",
+          "shape": [
+            32,
+            44,
+            47
+          ],
+          "bytes": 264704,
+          "sha256": "6b1e360d392408c225f92be21cd7bec202f228c2a1cb7a7ff891e3153b3e6dd6"
+        },
+        "rgbMoment": {
+          "dtype": "<f4",
+          "shape": [
+            32,
+            44,
+            47,
+            3
+          ],
+          "bytes": 794112,
+          "sha256": "8a0836b99fce41a5d0afbbcd26d9a6dd72b765db461d2655251e71e7a8173bba"
+        }
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "repeat",
+          "clearcoat": 0.014000000432133675,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.6131220083142706,
+            0.5800547057880039,
+            0.5171061216642848
+          ],
+          "sourceMaterialPath": "/birch/Materials/bark",
+          "index": 0,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "birch-bark-albedo.png",
+            "bytes": 386810,
+            "sha256": "39238644cec71518801eafd50aa95e10b93f00d31345d47724d15503861dbf10",
+            "encoding": "srgb",
+            "width": 512,
+            "height": 1024
+          },
+          "normal": {
+            "file": "birch-bark-normal.png",
+            "bytes": 212532,
+            "sha256": "6b81676337b82e468c9e157c4984a58c94ce5f475a36f78de10d76ef2fd4ab12",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          },
+          "roughnessMap": {
+            "file": "birch-bark-roughness.png",
+            "bytes": 165509,
+            "sha256": "66829488b49c016b3fe83abcb80bbca4923253b01fb80dcff6d09a23f156b85a",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          }
+        },
+        {
+          "name": "foliage_0",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.7480000257492065,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.07010187410173309,
+            0.20467069169995056,
+            0.03264406016765511
+          ],
+          "sourceMaterialPath": "/birch/Materials/foliage_0",
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 1,
+          "albedo": {
+            "file": "leaf-birch-0-albedo.png",
+            "bytes": 16615,
+            "sha256": "daa561c938a18874f1efc128b0b9caf7e2f68177f2f0c0f5bbe5014f416f093e",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-birch-0-normal.png",
+            "bytes": 16069,
+            "sha256": "f4fababaf192c89fe65f86adae9b5a3109973f12367b2557be2c7d2b371a4c01",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_1",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.7480000257492065,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.07000449304850252,
+            0.20431076063110565,
+            0.03260087747224578
+          ],
+          "sourceMaterialPath": "/birch/Materials/foliage_1",
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 2,
+          "albedo": {
+            "file": "leaf-birch-1-albedo.png",
+            "bytes": 15676,
+            "sha256": "114b6aa56bceca8847f1bb00e7083825007d85ce48be060f53a1b6dcd8fc4905",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-birch-1-normal.png",
+            "bytes": 14559,
+            "sha256": "2e36c465d4d3bcb05b149e13e77c778ad69b817a3b79617d83fc1ff1604ef67b",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_2",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.7480000257492065,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.07023397436237816,
+            0.20513896838192977,
+            0.0327046031054177
+          ],
+          "sourceMaterialPath": "/birch/Materials/foliage_2",
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 3,
+          "albedo": {
+            "file": "leaf-birch-2-albedo.png",
+            "bytes": 16973,
+            "sha256": "13cb4883748dd2eb523148e9f7f99a91b37e01d99949e486035ca8225a50d623",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-birch-2-normal.png",
+            "bytes": 15909,
+            "sha256": "48e399269841f046c1935af55dc5e357fb28c7bcff11d6c94ebc987897f146b3",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        }
+      ],
+      "appearanceErrorSupported": false
+    },
+    {
+      "id": 3,
+      "species": "elm",
+      "originXYZ": [
+        -9.5,
+        -2.0,
+        -13.25
+      ],
+      "cellMetres": 0.25,
+      "dimensionsXYZ": [
+        84,
+        83,
+        91
+      ],
+      "textureLow": [
+        -9.625,
+        -2.125,
+        -13.375
+      ],
+      "textureHigh": [
+        11.375,
+        18.625,
+        9.375
+      ],
+      "low": [
+        -9.625,
+        0.0,
+        -13.375
+      ],
+      "high": [
+        11.375,
+        18.625,
+        9.375
+      ],
+      "nativeGroundPlaneY": 0,
+      "samplingFootprintMetres": 0.4330127018922193,
+      "densityRange": [
+        0.0,
+        5.001613616943359
+      ],
+      "exposureRange": [
+        0.18000000715255737,
+        1.0
+      ],
+      "sourceField": {
+        "file": "prototype-3-elm.npz",
+        "bytes": 1879663,
+        "sha256": "f55e78490d872ea6ebe8eb8c4b48a9f5a853c4775754190454da7f5d8a084ce0"
+      },
+      "field": {
+        "file": "prototype-3-elm/field.rgba16f.bin",
+        "bytes": 5075616,
+        "sha256": "2c60a29e09507ef958cf3b6e2172c3d26c46069c20713904db82ffe3d44cc278",
+        "gzip": {
+          "file": "prototype-3-elm/field.rgba16f.bin.gz",
+          "bytes": 806346,
+          "sha256": "0d3d3dbea50ed6bf82edc382f1f35839980366e8bc455e786692e433077ab067"
+        }
+      },
+      "exposure": {
+        "file": "prototype-3-elm/exposure.r8.bin",
+        "bytes": 634452,
+        "sha256": "820192a407b1e94bd564db69b53934a69cf8948d0ecb3201617d4b9bfb80290e",
+        "gzip": {
+          "file": "prototype-3-elm/exposure.r8.bin.gz",
+          "bytes": 169486,
+          "sha256": "2696b2f45b707376acff977f55fe0d03a157c6e70dec9ea7702edcb7dbafab7a"
+        }
+      },
+      "sourceArrays": {
+        "originXYZ": {
+          "dtype": "<f8",
+          "shape": [
+            3
+          ],
+          "bytes": 24,
+          "sha256": "fa22ff4392ba1e48a2db7725e8fc930e25a0cf5f1ca0b368f2abd61e100a5827"
+        },
+        "cellMetres": {
+          "dtype": "<f8",
+          "shape": [],
+          "bytes": 8,
+          "sha256": "272f78036db6721f7cf7444315e5f6360426d14c3d446d6ae8a89ef70d134002"
+        },
+        "density": {
+          "dtype": "<f4",
+          "shape": [
+            84,
+            83,
+            91
+          ],
+          "bytes": 2537808,
+          "sha256": "4f84659f9776b986214dfe226e2349c5bf1cf75b7d8181b14f6c04038b625b95"
+        },
+        "rgbMoment": {
+          "dtype": "<f4",
+          "shape": [
+            84,
+            83,
+            91,
+            3
+          ],
+          "bytes": 7613424,
+          "sha256": "3d8c9cbc0ac166a0b6120ebba9b32290aaf14a9d7afbcc34fb26e94a342b3f66"
+        }
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "repeat",
+          "clearcoat": 0.01600000075995922,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.05798256668980413,
+            0.050787447276227825,
+            0.04414423285839497
+          ],
+          "sourceMaterialPath": "/elm/Materials/bark",
+          "index": 0,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "elm-bark-albedo.png",
+            "bytes": 303750,
+            "sha256": "88c2e46bdcaf4eff157c7290c9ab6565e7e13d539ae63b3079c957adbac4fce7",
+            "encoding": "srgb",
+            "width": 512,
+            "height": 1024
+          },
+          "normal": {
+            "file": "elm-bark-normal.png",
+            "bytes": 575178,
+            "sha256": "44fae9dacd9fe191be88ab4affc198e235d0acc1b0496a2baf596b9f382873ad",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          },
+          "roughnessMap": {
+            "file": "elm-bark-roughness.png",
+            "bytes": 165211,
+            "sha256": "ba63241a1b325adca7bdeeac8c8c66039c045f98508279ceaf92a7bde64edc63",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          }
+        },
+        {
+          "name": "wounds",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.04662567470040338,
+            0.03272093129704206,
+            0.021495480110822144
+          ],
+          "sourceMaterialPath": "/elm/Materials/wound",
+          "index": 1,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "elm-wounds-albedo.png",
+            "bytes": 44396,
+            "sha256": "86c7848e7aa82b45e3355b6e2ab64cdbbd900ee9d4d5c585d7f7ce94bc54885f",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "elm-wounds-normal.png",
+            "bytes": 114893,
+            "sha256": "45917aa3221cf29959ce04b732c5842156f4fbb0506fab02d27625fe8a0c1b95",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          },
+          "roughnessMap": {
+            "file": "elm-wounds-roughness.png",
+            "bytes": 26326,
+            "sha256": "2c9c332ce865214b8973f1e0408bbec640ec118121f72384b41b7c5f0912a419",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_0",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.8679999709129333,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.04269830178386282,
+            0.1332034889594794,
+            0.025012907760149635
+          ],
+          "sourceMaterialPath": "/elm/Materials/foliage_0",
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 2,
+          "albedo": {
+            "file": "leaf-elm-0-albedo.png",
+            "bytes": 21381,
+            "sha256": "1fa5daebcbf3826fdf471d3972118d13593ad452e9d21fd532011260d0406f0d",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-elm-0-normal.png",
+            "bytes": 25222,
+            "sha256": "4f5eb56d1dfd36765fe1e40a5fd144bdea523038e52999dd86e734eefeba1dda",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_1",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.8679999709129333,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.04284109393169948,
+            0.13368025789411644,
+            0.025090725161131252
+          ],
+          "sourceMaterialPath": "/elm/Materials/foliage_1",
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 3,
+          "albedo": {
+            "file": "leaf-elm-1-albedo.png",
+            "bytes": 22362,
+            "sha256": "172e8dc498d52bc4e456d4dce8792a613deefab108b8b9230b3b0f8a1dfb0b4c",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-elm-1-normal.png",
+            "bytes": 25046,
+            "sha256": "288427c8345e1756353cacbdeb5e09d268e56ee529b85b27519c43b7377c0b5b",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_2",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.8679999709129333,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.04202995336600675,
+            0.13106652908922528,
+            0.024696217235781078
+          ],
+          "sourceMaterialPath": "/elm/Materials/foliage_2",
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 4,
+          "albedo": {
+            "file": "leaf-elm-2-albedo.png",
+            "bytes": 16961,
+            "sha256": "86badb7a7e03cc250ee37d7a592121a06d2cd7df823da1f302684bd5f093aadd",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-elm-2-normal.png",
+            "bytes": 17925,
+            "sha256": "93ebe1caf032dd722fddffc2caf7e6b2e2e389b5fa5cfcbb9ad2346cef5ed55f",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        }
+      ],
+      "appearanceErrorSupported": false
+    },
+    {
+      "id": 4,
+      "species": "chestnut",
+      "originXYZ": [
+        -7.5,
+        -1.75,
+        -9.75
+      ],
+      "cellMetres": 0.25,
+      "dimensionsXYZ": [
+        78,
+        100,
+        88
+      ],
+      "textureLow": [
+        -7.625,
+        -1.875,
+        -9.875
+      ],
+      "textureHigh": [
+        11.875,
+        23.125,
+        12.125
+      ],
+      "low": [
+        -7.625,
+        0.0,
+        -9.875
+      ],
+      "high": [
+        11.875,
+        23.125,
+        12.125
+      ],
+      "nativeGroundPlaneY": 0,
+      "samplingFootprintMetres": 0.4330127018922193,
+      "densityRange": [
+        0.0,
+        5.5469136238098145
+      ],
+      "exposureRange": [
+        0.18000000715255737,
+        1.0
+      ],
+      "sourceField": {
+        "file": "prototype-4-chestnut.npz",
+        "bytes": 2120377,
+        "sha256": "db959d02788fef2edc1f7e1cd2f981b7299d7e104b0d29f8859cba479c4f2637"
+      },
+      "field": {
+        "file": "prototype-4-chestnut/field.rgba16f.bin",
+        "bytes": 5491200,
+        "sha256": "175d193022a65a5ee4021705ce44c9dcfc2f8ad859113771af4b25789dbc91bc",
+        "gzip": {
+          "file": "prototype-4-chestnut/field.rgba16f.bin.gz",
+          "bytes": 890210,
+          "sha256": "577c7bd75a8eab6126b6faeea5c7a56ddda422f2b1cbab0a89275defb3584be4"
+        }
+      },
+      "exposure": {
+        "file": "prototype-4-chestnut/exposure.r8.bin",
+        "bytes": 686400,
+        "sha256": "54e14234d54016fd36457dbd66bf16d4c24e496cbdc35035bb3759cf9e5c7d09",
+        "gzip": {
+          "file": "prototype-4-chestnut/exposure.r8.bin.gz",
+          "bytes": 152329,
+          "sha256": "52435e192b8ed0d7066ef1b327d5d513910792c684d8b5431e73f0daa8085c09"
+        }
+      },
+      "sourceArrays": {
+        "originXYZ": {
+          "dtype": "<f8",
+          "shape": [
+            3
+          ],
+          "bytes": 24,
+          "sha256": "11cef0339c46980b40328973d70dac473e6ecfc1dd5f026a4b9a942d00583c3e"
+        },
+        "cellMetres": {
+          "dtype": "<f8",
+          "shape": [],
+          "bytes": 8,
+          "sha256": "272f78036db6721f7cf7444315e5f6360426d14c3d446d6ae8a89ef70d134002"
+        },
+        "density": {
+          "dtype": "<f4",
+          "shape": [
+            78,
+            100,
+            88
+          ],
+          "bytes": 2745600,
+          "sha256": "e982ca8ba5c3b4b1b2c1331fbce94d66f1d702a6547650071b0e75633f26fcf2"
+        },
+        "rgbMoment": {
+          "dtype": "<f4",
+          "shape": [
+            78,
+            100,
+            88,
+            3
+          ],
+          "bytes": 8236800,
+          "sha256": "726397049848df76fdc05cd553e987777fb05644c54d15ee956d9678fce84768"
+        }
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "repeat",
+          "clearcoat": 0.017999999225139618,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.07098915370324234,
+            0.05477267395456856,
+            0.040953381699280006
+          ],
+          "sourceMaterialPath": "/chestnut/Materials/bark",
+          "index": 0,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "chestnut-bark-albedo.png",
+            "bytes": 295765,
+            "sha256": "363e805df52e9c3c913626ac9958e8b85baa073fcdf5d42c9a817dc6817ff43b",
+            "encoding": "srgb",
+            "width": 512,
+            "height": 1024
+          },
+          "normal": {
+            "file": "chestnut-bark-normal.png",
+            "bytes": 537490,
+            "sha256": "da0e88d25c595e956f2bcaa070b98257e65fb2bf2eb7a7cefc08a30107dd969a",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          },
+          "roughnessMap": {
+            "file": "chestnut-bark-roughness.png",
+            "bytes": 167445,
+            "sha256": "bf8bb84227e18a8df5592b0b8e399570a6d34b54440eb9519882e32c8cbb90ef",
+            "encoding": "linear",
+            "width": 512,
+            "height": 1024
+          }
+        },
+        {
+          "name": "wounds",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 1.0,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.0,
+          "linearMeanAlbedo": [
+            0.05272299273642697,
+            0.03272273699369682,
+            0.01876562674222165
+          ],
+          "sourceMaterialPath": "/chestnut/Materials/wound",
+          "index": 1,
+          "underside": 0.0,
+          "transmission": 0.0,
+          "undersideReference": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "albedo": {
+            "file": "chestnut-wounds-albedo.png",
+            "bytes": 45377,
+            "sha256": "b829ffd99c2ec301bacde1d0eccf64932fa546281fcfb60bea557125c4c52a27",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "chestnut-wounds-normal.png",
+            "bytes": 114873,
+            "sha256": "b1397c655a62882de51431722cc4b03e031d23aab45ad7b9a29c0f3562bbe747",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          },
+          "roughnessMap": {
+            "file": "chestnut-wounds-roughness.png",
+            "bytes": 26365,
+            "sha256": "77c546db14203e80a9b3ac8e60a3e5b36940db4bdce11721cfa22c06e4923f40",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_0",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.7960000038146973,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.05264858215984177,
+            0.13060730942007454,
+            0.02182438760193949
+          ],
+          "sourceMaterialPath": "/chestnut/Materials/foliage_0",
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 2,
+          "albedo": {
+            "file": "leaf-chestnut-0-albedo.png",
+            "bytes": 20081,
+            "sha256": "85d0dab5131cee9a33409db4f23e1cddb3d67c66783e04a826e0bf22ea3751d2",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-chestnut-0-normal.png",
+            "bytes": 15072,
+            "sha256": "6a94fe4609da64fcaea769b85b825f161ac479250202942d03c4570d59535ef9",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_1",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.7960000038146973,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.052778946557836645,
+            0.1309171997009004,
+            0.021882437361242447
+          ],
+          "sourceMaterialPath": "/chestnut/Materials/foliage_1",
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 3,
+          "albedo": {
+            "file": "leaf-chestnut-1-albedo.png",
+            "bytes": 21819,
+            "sha256": "372b6681fc07a64df7ab985da756be84b19fa4c2ec183aeeea430255dbbbccc5",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-chestnut-1-normal.png",
+            "bytes": 14838,
+            "sha256": "0bd23f596a53f3267a071bae6c935a40912de9c8238cc93f73a873f845877ee4",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "name": "foliage_2",
+          "colour": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "roughness": 0.7960000038146973,
+          "wrap": "clamp",
+          "clearcoat": 0.0,
+          "opacityThreshold": 0.3499999940395355,
+          "linearMeanAlbedo": [
+            0.05249717767293372,
+            0.13024926718987073,
+            0.021758199877945743
+          ],
+          "sourceMaterialPath": "/chestnut/Materials/foliage_2",
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "index": 4,
+          "albedo": {
+            "file": "leaf-chestnut-2-albedo.png",
+            "bytes": 18099,
+            "sha256": "9075364ea6953a4302514962f849f1c3d17c96fa432d2bd44f8be73733a8f249",
+            "encoding": "srgb",
+            "width": 256,
+            "height": 256
+          },
+          "normal": {
+            "file": "leaf-chestnut-2-normal.png",
+            "bytes": 13700,
+            "sha256": "4816220f2edf080391df6b62916c040eee590eb76153395a04f656e10092b358",
+            "encoding": "linear",
+            "width": 256,
+            "height": 256
+          }
+        }
+      ],
+      "appearanceErrorSupported": false
+    }
+  ],
+  "files": {
+    "prototype-0-oak/field.rgba16f.bin": {
+      "bytes": 3976640,
+      "sha256": "e3142eccdb903a6b16891124a27c7eee8227d2a19acc83d18663d258b7d4fc67",
+      "gzip": {
+        "file": "prototype-0-oak/field.rgba16f.bin.gz",
+        "bytes": 798718,
+        "sha256": "43cacdf304118535c610283ffec6cfa692d7947160aec01a7d64ab694c7e6bab"
+      }
+    },
+    "prototype-0-oak/exposure.r8.bin": {
+      "bytes": 497080,
+      "sha256": "312303ccebc712e248975f946696dd113f09dd05f7638132522a333b82adf173",
+      "gzip": {
+        "file": "prototype-0-oak/exposure.r8.bin.gz",
+        "bytes": 113339,
+        "sha256": "5ae000096248f35de312281be8a0c969e2816daf9dd8e9ef973ff035646efd60"
+      }
+    },
+    "prototype-1-maple/field.rgba16f.bin": {
+      "bytes": 2745600,
+      "sha256": "5bcc523f09138b3fb0805fad418682ac79a7f0d9c687b60fdf026f36d0485d42",
+      "gzip": {
+        "file": "prototype-1-maple/field.rgba16f.bin.gz",
+        "bytes": 714864,
+        "sha256": "2bfe403deedc0f731e2422bf09755b9caf76b7f006841f5d6e4bf2e58fe84c61"
+      }
+    },
+    "prototype-1-maple/exposure.r8.bin": {
+      "bytes": 343200,
+      "sha256": "ab816cbf0c89202dbbc8be6e49e8bf7d43c3aa44b27310369df0a29d2f363a21",
+      "gzip": {
+        "file": "prototype-1-maple/exposure.r8.bin.gz",
+        "bytes": 107123,
+        "sha256": "9cb22fe933e1cac9b6204b182eb842683486a237864b80402f36f37bb23557dc"
+      }
+    },
+    "prototype-2-birch/field.rgba16f.bin": {
+      "bytes": 529408,
+      "sha256": "ed1ebd5fc5727498631863f39cc52059bb847b374cfe6cc49a864d08a3fc0896",
+      "gzip": {
+        "file": "prototype-2-birch/field.rgba16f.bin.gz",
+        "bytes": 114293,
+        "sha256": "128acbd87e9c3474f7d28e78b6f400ebab77757171af0ab00641bfcbe7315266"
+      }
+    },
+    "prototype-2-birch/exposure.r8.bin": {
+      "bytes": 66176,
+      "sha256": "6e95c7b1cc8592dbd3592fe0c3c9f69029540056fa521100d2bf1b9e042b4b7d",
+      "gzip": {
+        "file": "prototype-2-birch/exposure.r8.bin.gz",
+        "bytes": 18024,
+        "sha256": "618e901a70728e30158e3ffc523f19ddfab2b6ac346e41dc49d7c69dcbc6d18e"
+      }
+    },
+    "prototype-3-elm/field.rgba16f.bin": {
+      "bytes": 5075616,
+      "sha256": "2c60a29e09507ef958cf3b6e2172c3d26c46069c20713904db82ffe3d44cc278",
+      "gzip": {
+        "file": "prototype-3-elm/field.rgba16f.bin.gz",
+        "bytes": 806346,
+        "sha256": "0d3d3dbea50ed6bf82edc382f1f35839980366e8bc455e786692e433077ab067"
+      }
+    },
+    "prototype-3-elm/exposure.r8.bin": {
+      "bytes": 634452,
+      "sha256": "820192a407b1e94bd564db69b53934a69cf8948d0ecb3201617d4b9bfb80290e",
+      "gzip": {
+        "file": "prototype-3-elm/exposure.r8.bin.gz",
+        "bytes": 169486,
+        "sha256": "2696b2f45b707376acff977f55fe0d03a157c6e70dec9ea7702edcb7dbafab7a"
+      }
+    },
+    "prototype-4-chestnut/field.rgba16f.bin": {
+      "bytes": 5491200,
+      "sha256": "175d193022a65a5ee4021705ce44c9dcfc2f8ad859113771af4b25789dbc91bc",
+      "gzip": {
+        "file": "prototype-4-chestnut/field.rgba16f.bin.gz",
+        "bytes": 890210,
+        "sha256": "577c7bd75a8eab6126b6faeea5c7a56ddda422f2b1cbab0a89275defb3584be4"
+      }
+    },
+    "prototype-4-chestnut/exposure.r8.bin": {
+      "bytes": 686400,
+      "sha256": "54e14234d54016fd36457dbd66bf16d4c24e496cbdc35035bb3759cf9e5c7d09",
+      "gzip": {
+        "file": "prototype-4-chestnut/exposure.r8.bin.gz",
+        "bytes": 152329,
+        "sha256": "52435e192b8ed0d7066ef1b327d5d513910792c684d8b5431e73f0daa8085c09"
+      }
+    }
+  },
+  "appearanceErrorSupported": false,
+  "qualification": {
+    "renderedAccepted": false,
+    "physicalCalibration": false,
+    "scope": "Immutable source-derived foliage textures only; no source geometry/material or far-mass edits, no growth. Root owns rendering and appearance acceptance."
+  },
+  "limitations": [
+    "RGBA16F quantizes source Float32 density/moments. Pairing preserves interpolated ratio semantics, not bit-exact pigment values.",
+    "Cached smoothing and finite source MASK quadrature retain their original uncertainty and source receipts.",
+    "Extinction and five-ray own-canopy exposure are authored approximations. Leaf underside, transmission and detailed self-shadowing are not fully reproduced.",
+    "Foliage only: original/reduced native wood must remain a separate draw. No fitted trunk or coarse crown geometry is emitted.",
+    "Native stand comparisons and GPU/device performance checks remain required before release."
+  ]
+}

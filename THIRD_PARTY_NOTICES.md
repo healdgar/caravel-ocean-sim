@@ -39,6 +39,26 @@ derived SHA-256 hashes, licensing, coordinate assignment and processing limits.
 source downloads. CC BY 4.0 applies to these data derivatives; the project's MIT
 code licence does not replace it. No endorsement by the source provider is implied.
 
+## Wells Bay mapped shoreline
+
+© [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
+[Open Database Licence1.0](https://opendatacommons.org/licenses/odbl/1-0/).
+`assets/world/saba/wells-bay-shoreline.geojson` contains directed closed coastline
+rings from the recorded Overpass reply (snapshot July24,2026; acquired October22).
+The exact query, raw-reply hash and way IDs are retained. Recreate the rings with
+`scripts/prepare-shoreline.py` and the coastal correction with
+`scripts/prepare-wells-bay.py`. Source data and the reconstruction recipe are
+distributed in this public repository; the coastline-derived composite retains
+ODbL terms alongside the original terrain/imagery CC BY attribution. MIT applies
+to project code and does not replace these data licences.
+
+Mapped mean-high-water coastline constrains only unsupported coastal heights
+and imagery support. Its4m safety band is authored, not a certified accuracy.
+Measured ground remains authoritative; inland return gaps retain terrain. The
+32m tile perimeter blends back to the unchanged regional terrain. Neither this
+mapping constraint nor the authored submerged skirt is surveyed bathymetry or a
+reconstructed beach/tide profile.
+
 ## Earlier global terrain prototype and world overview
 
 The earlier Saba terrain prototype derived from [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/),
@@ -161,6 +181,38 @@ Astronomy Engine permission notice (also retained here for minified standalone d
 MIT License
 
 Copyright (c) 2019-2025 Don Cross <cosinekitty@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Meshoptimizer forest transport
+
+The local forest decoder derives from meshoptimizer 1.3.0 by Arseny Kapoulkine.
+Source: https://github.com/zeux/meshoptimizer . The embedded WebAssembly decoder
+is unchanged; the local namespace/export is adapted for the standalone bundle.
+Offline transport uses byte-exact attribute/index sequence encoding, without
+lossy filters. Its complete MIT notice follows, retained in standalone builds.
+
+```text
+MIT License
+
+Copyright (c) 2016-2026 Arseny Kapoulkine
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
