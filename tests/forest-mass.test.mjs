@@ -10,7 +10,7 @@ import {createDevServer} from '../server.mjs';
 import {validateForestMass,decodeForestMass,loadForestMass} from '../js/forest-mass.js';
 
 const receipt=bytes=>({bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')});
-function fixture(){
+function fixture({neighbors=false}={}){
   const vertices=[],indices=[],chunks=[];
   for(const [id,centre]of [[0,[-4,10,-40]],[1,[4,10,-1000]]]){
     const firstIndex=indices.length;
@@ -21,6 +21,7 @@ function fixture(){
   }
   const roots=new Float32Array([[-4,10,-40],[4,10,-1000],[0,10,-400],[0,10,20]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0]));
   const streams={'vertices.bin':new Float32Array(vertices).buffer,'indices.bin':new Uint32Array(indices).buffer,'root-chunks.bin':new Uint32Array([0,1,0xffffffff,0xffffffff]).buffer};
+  if(neighbors)streams['root-neighbors.bin']=new Uint32Array([0,1,0xffffffff,0xffffffff,1,0xffffffff,0xffffffff,0xfffffffe,0xffffffff,0xffffffff,0xffffffff,0xffffffff,0,1,0,1]).buffer;
   const forest={manifest:{rootCount:4,files:{'vertices.bin':receipt(Buffer.from('original detailed native vertices')),'indices.bin':receipt(Buffer.from('original detailed native indices')),'roots.bin':receipt(new Uint8Array(roots.buffer))}},roots};
   const files={},encoded={};for(const [name,raw]of Object.entries(streams)){const bytes=new Uint8Array(raw),gzip=gzipSync(bytes);files[name]={...receipt(bytes),gzip:{file:name+'.gz',...receipt(gzip)}};encoded[name+'.gz']=gzip;}
   const manifest={format:'waterworld.native-forest-mass',version:1,units:'metres',upAxis:'Y',vertexStride:52,chunks,files,appearanceErrorSupported:false,geometryErrorSupported:false,
@@ -64,13 +65,31 @@ test('native mass rejects nonfinite geometry, invalid addresses and inconsistent
   await assert.rejects(()=>loadForestMass({forest:f.forest,assets:f.assets,fetchAsset:async name=>new Response(name==='manifest.json'?JSON.stringify(manifest):name==='vertices.bin.gz'?encoded:f.encoded[name])}),/vertex/);
 });
 
+test('native mass neighbor transport preserves four entries per original root and both sentinels',async()=>{
+  const legacy=fixture();assert.equal(decodeForestMass(legacy.manifest,legacy.streams,legacy.forest).rootNeighbors,null,'absent optional stream retains the legacy owner contract');
+  const f=fixture({neighbors:true}),loaded=await loadForestMass({forest:f.forest,fetchAsset:f.fetchAsset,assets:f.assets});
+  assert.deepEqual(Array.from(loaded.rootNeighbors),Array.from(new Uint32Array(f.streams['root-neighbors.bin'])));assert.equal(loaded.rootNeighbors.length,f.forest.manifest.rootCount*4);
+  for(const change of [m=>m.files['root-neighbors.bin'].bytes-=4,m=>m.files['root-neighbors.bin'].gzip.file='../root-neighbors.bin.gz']){
+    const bad=structuredClone(f.manifest);change(bad);assert.throws(()=>validateForestMass(bad,f.forest),/neighbor receipt/);
+  }
+  const bad=f.streams['root-neighbors.bin'].slice(0);new Uint32Array(bad)[3]=2;
+  assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'root-neighbors.bin':bad},f.forest),/neighbor outside chunk table/,'fourth slot is validated, not silently truncated');
+  assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'root-neighbors.bin':bad.slice(4)},f.forest),/Incomplete/);
+  for(const kind of ['encoded','decoded']){
+    const manifest=structuredClone(f.manifest),encoded={...f.encoded};
+    if(kind==='encoded'){encoded['root-neighbors.bin.gz']=Buffer.from(encoded['root-neighbors.bin.gz']);encoded['root-neighbors.bin.gz'][encoded['root-neighbors.bin.gz'].length>>1]^=1;}
+    else manifest.files['root-neighbors.bin'].sha256='e'.repeat(64);
+    await assert.rejects(()=>loadForestMass({forest:f.forest,assets:f.assets,fetchAsset:async name=>new Response(name==='manifest.json'?JSON.stringify(manifest):encoded[name])}),new RegExp(kind+' digest mismatch'));
+  }
+});
+
 test('native mass GPU uses projected authored error and suppresses exclusively selected original owners',{timeout:120000},async t=>{
   const f=fixture(),server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     const page=await browser.newPage();await page.route('**/__mass_gpu',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__mass_gpu');
     const result=await page.evaluate(async chunks=>{
-      const {FOREST_MASS_CULL_WGSL}=await import('/js/forest-mass.js'),{FOREST_MASS_ROOT_CULL_WGSL}=await import('/js/forest-scenery.js');
+      const {FOREST_MASS_CULL_WGSL}=await import('/js/forest-mass.js'),{FOREST_MASS_ROOT_CULL_WGSL,FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL,FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL}=await import('/js/forest-scenery.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,errors=[],allocated=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const shader=async code=>{const module=device.createShaderModule({code});errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));return module;};
       const writes=new Map(),write=device.queue.writeBuffer.bind(device.queue);device.queue.writeBuffer=(buffer,...args)=>{writes.set(buffer,(writes.get(buffer)??0)+1);return write(buffer,...args);};
@@ -99,7 +118,32 @@ test('native mass GPU uses projected authored error and suppresses exclusively s
         const counts=[values[1],values[11],values[16]],ids=[];for(let tier=0;tier<3;tier++)ids.push(...values.slice(20+tier*3,20+tier*3+counts[tier]));ownership.push({massMode,rootMode,selected:mass.selected,counts,ids:ids.sort(),leafCount:values[6]});
       }
       const immutable={rootWrites:writes.get(roots),blockWrites:writes.get(blocks),prototypeWrites:writes.get(prototype),rootReadUsage:!!(roots.usage&(B.MAP_READ|B.COPY_SRC))};
-      await device.queue.onSubmittedWorkDone();for(const b of allocated)b.destroy();device.destroy();return {errors,cases,ownership,immutable};
+
+      // Isolate neighbor eligibility with GPU-authored block outputs. The real
+      // mass selector/projection is exercised above; no CPU visibility upload.
+      const P=0xffffffff,M=0xfffffffe,N=8,owners=[0,1,0,0,0,-1,1,0];
+      const neighborWords=new Uint32Array([0,1,P,P,0,1,P,P,P,P,P,P,0,P,P,M,P,P,P,1,0,1,P,P,1,P,P,P,0,1,0,1]);
+      const neighborRoots=make(new Float32Array(owners.flatMap((owner,id)=>[id*2-7,10,-400,1,0,1,1,1,0,0,owner,0])),B.STORAGE),neighbors=make(neighborWords,B.STORAGE);
+      const stateInput=make(new Uint32Array(4),B.UNIFORM),stateShader=await shader('@group(0)@binding(0)var<uniform>selectionState:vec4u;@group(0)@binding(1)var<storage,read_write>selectionOutput:array<u32>;@compute @workgroup_size(1)fn selectBlocks(){selectionOutput[0]=selectionState.x;selectionOutput[1]=selectionState.y;}');
+      const statePipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:stateShader,entryPoint:'selectBlocks'}}),stateGroup=device.createBindGroup({layout:statePipe.getBindGroupLayout(0),entries:[stateInput,selected].map((buffer,binding)=>({binding,resource:{buffer}}))});
+      const neighborCases=[],neighborImmutable=[];
+      await run({mode:1}); // Restore the normal in-frustum camera.
+      for(const [variant,source,flags]of [['legacy',FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL,6],['middle',FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL,14]]){
+        const data=new ArrayBuffer(80),af=new Float32Array(data),au=new Uint32Array(data);af.set([0,1,0,2]);au.set([0,N,flags,32],4);au.set([0,3,0,0,3,3,0,0,6,3,0,0],8);af[18]=.01;
+        const proto=make(new Uint8Array(data),B.STORAGE),ids=make(new Uint32Array(N*3).fill(P),B.STORAGE|B.COPY_SRC),indirect=make(new Uint32Array([3,999,0,0,0,3,999,3,0,0,3,999,6,0,0,6,999,0,0,0]),B.STORAGE|B.INDIRECT|B.COPY_SRC),history=make(new Uint32Array(N),B.STORAGE),paramsData=new Float32Array([N,1,3,1]),params=make(paramsData,B.UNIFORM);
+        const sm=await shader(source),resetNeighbors=await device.createComputePipelineAsync({layout:'auto',compute:{module:sm,entryPoint:'forestReset'}}),cullNeighbors=await device.createComputePipelineAsync({layout:'auto',compute:{module:sm,entryPoint:'forestCull'}});
+        const rg=device.createBindGroup({layout:resetNeighbors.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:indirect}},{binding:6,resource:{buffer:params}}]}),cg=device.createBindGroup({layout:cullNeighbors.getBindGroupLayout(0),entries:[frame,neighborRoots,proto,ids,indirect,history,params,residency,selected,neighbors].map((buffer,binding)=>({binding,resource:{buffer}}))});
+        const output=make(new Uint32Array(20+N*3+2),B.COPY_DST|B.MAP_READ);
+        for(const rootMode of [1,2,0])for(const selection of [[0,0],[1,0],[0,1],[1,1],[1,0],[0,0]]){
+          device.queue.writeBuffer(stateInput,0,new Uint32Array([...selection,0,0]));paramsData[3]=rootMode;device.queue.writeBuffer(params,0,paramsData);
+          const e=device.createCommandEncoder(),p=e.beginComputePass();p.setPipeline(statePipe);p.setBindGroup(0,stateGroup);p.dispatchWorkgroups(1);p.setPipeline(resetNeighbors);p.setBindGroup(0,rg);p.dispatchWorkgroups(1);p.setPipeline(cullNeighbors);p.setBindGroup(0,cg);p.dispatchWorkgroups(1);p.end();
+          e.copyBufferToBuffer(indirect,0,output,0,80);e.copyBufferToBuffer(ids,0,output,80,N*12);e.copyBufferToBuffer(selected,0,output,80+N*12,8);device.queue.submit([e.finish()]);await output.mapAsync(GPUMapMode.READ);const values=Array.from(new Uint32Array(output.getMappedRange()));output.unmap();
+          const counts=[values[1],values[11],values[16]],visibleIDs=[];for(let tier=0;tier<3;tier++)visibleIDs.push(...values.slice(20+tier*N,20+tier*N+counts[tier]));
+          neighborCases.push({variant,rootMode,selection,selected:values.slice(20+N*3),counts,leafCount:values[6],ids:visibleIDs.sort((a,b)=>a-b),commands:values.slice(0,20)});
+        }
+        neighborImmutable.push({variant,prototypeWrites:writes.get(proto),rootWrites:writes.get(neighborRoots),neighborWrites:writes.get(neighbors),rootReadUsage:!!(neighborRoots.usage&(B.MAP_READ|B.COPY_SRC)),neighborReadUsage:!!(neighbors.usage&(B.MAP_READ|B.COPY_SRC))});
+      }
+      await device.queue.onSubmittedWorkDone();for(const b of allocated)b.destroy();device.destroy();return {errors,cases,ownership,immutable,neighborCases,neighborImmutable};
     },f.manifest.chunks);
     assert.deepEqual(result.errors,[]);
     for(const name of ['normal','repeat','wide','nonresident'])assert.deepEqual(result.cases[name].selected,[0,1],name+' applies the authored3px projection');
@@ -108,6 +152,15 @@ test('native mass GPU uses projected authored error and suppresses exclusively s
     for(const row of Object.values(result.cases))for(const p of f.manifest.chunks)assert.deepEqual(row.commands.slice(p.id*5,p.id*5+5),[p.indexCount,row.selected[p.id],p.firstIndex,0,0],'indirect counts reset while immutable topology survives');
     for(const row of result.ownership){const expected=[0,1,2].filter(id=>id===2||!row.selected[id]);assert.deepEqual(row.ids,expected,'GPU suppression exclusive across every individual tier '+JSON.stringify(row));assert.equal(row.counts[0],row.leafCount);}
     assert.deepEqual(result.immutable,{rootWrites:1,blockWrites:1,prototypeWrites:1,rootReadUsage:false},'root/geometry metadata stays immutable and has no CPU readback path');
-    t.diagnostic(JSON.stringify({qualification:'Authored footprint selection/ownership only; no native leaf appearance certificate',cases:result.cases,ownership:result.ownership}));
+    const neighborExpected={'0,0':[0,1,2,3,4,5,6,7],'1,0':[0,1,3,4,5,6,7],'0,1':[0,1,2,3,4,5,7],'1,1':[3,5]};
+    for(const row of result.neighborCases){
+      const expected=neighborExpected[row.selection.join(',')],tier=row.rootMode===1?0:row.rootMode===2?1:2;
+      assert.deepEqual(row.selected,row.selection,'fixture selected states are produced by GPU');
+      assert.deepEqual(row.ids,expected,'cross-block crown remains whenever any required block is absent '+JSON.stringify(row));
+      assert.deepEqual(row.counts,[0,1,2].map(i=>i===tier?expected.length:0),'owner guard applies equally to native, middle/far and atlas');assert.equal(row.leafCount,row.counts[0]);
+      for(let command=0;command<4;command++)assert.deepEqual([row.commands[command*5],...row.commands.slice(command*5+2,command*5+5)],[[3,0,0,0],[3,3,0,0],[3,6,0,0],[6,0,0,0]][command],'reset preserves indexed topology');
+    }
+    assert.equal(result.neighborCases.length,36);for(const row of result.neighborImmutable)assert.deepEqual(row,{variant:row.variant,prototypeWrites:1,rootWrites:1,neighborWrites:1,rootReadUsage:false,neighborReadUsage:false},'neighbor/root inputs upload once and never expose CPU readback');
+    t.diagnostic(JSON.stringify({qualification:'Authored footprint selection/ownership only; no native leaf appearance or zero-overlap certificate',cases:result.cases,ownership:result.ownership,neighbors:result.neighborCases}));
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });
