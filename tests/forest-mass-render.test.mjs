@@ -25,7 +25,7 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
     await page.goto('http://127.0.0.1:'+server.address().port+'/__mass_render');
     const result=await page.evaluate(async forest=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{TERRAIN}=await import('/js/wgsl/terrain.js');
-      const {FOREST_MASS_ASSETS,loadForestMass,createForestMassRenderer}=await import('/js/forest-mass.js');
+      const {FOREST_MASS_ASSETS,FOREST_MASS_VERTEX_WGSL,loadForestMass,createForestMassRenderer}=await import('/js/forest-mass.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,errors=[],allocated=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const shader=async code=>{const module=device.createShaderModule({code}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
@@ -37,7 +37,7 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
         if(active&&buffer.label.startsWith('forest mass '))throw Error('Per-frame CPU mass buffer write: '+buffer.label);
         if(buffer.label.startsWith('forest mass '))writes.push({label:buffer.label,offset,bytes:data.byteLength});return write(buffer,offset,data,...rest);
       };
-      const descriptors=[],create=device.createRenderPipelineAsync.bind(device);device.createRenderPipelineAsync=description=>{if(description.label==='forest mass opaque native density surface')descriptors.push({fragment:description.fragment.entryPoint,depth:description.depthStencil,msaa:description.multisample,blend:description.fragment.targets.map(t=>t.blend??null)});return create(description);};
+      const descriptors=[],create=device.createRenderPipelineAsync.bind(device);device.createRenderPipelineAsync=description=>{if(description.label==='forest mass opaque native density surface')descriptors.push({vertex:description.vertex.entryPoint,layout:description.vertex.buffers[0],fragment:description.fragment.entryPoint,depth:description.depthStencil,msaa:description.multisample,blend:description.fragment.targets.map(t=>t.blend??null)});return create(description);};
       const copy=device.createCommandEncoder.bind(device);device.createCommandEncoder=(...args)=>{
         const e=copy(...args),original=e.copyBufferToBuffer.bind(e);e.copyBufferToBuffer=(source,offset,destination,...rest)=>{if(active&&destination.label.startsWith('forest mass immutable'))throw Error('Per-frame immutable mass staging copy');return original(source,offset,destination,...rest);};return e;
       };
@@ -47,7 +47,7 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
       const module=await shader(FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
 @group(1)@binding(0)var<uniform>neutral:vec4f;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo+neutral.xyz,1);}
-`+TERRAIN.slice(start,end));
+`+TERRAIN.slice(start,end)+FOREST_MASS_VERTEX_WGSL);
       const clouds={bindVolume:pipeline=>device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:dummy}}]})};
       const renderer=await createForestMassRenderer({device,module,frameUBO:frame,shader,resources:[[0,{buffer:frame}]],clouds,format:'rgba8unorm',samples:4,pack:guarded,mode:'far'});
       const chunk=pack.manifest.chunks.reduce((best,p)=>p.indexCount>best.indexCount?p:best),W=256,H=256;
@@ -74,7 +74,8 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
     },forest);
     assert.deepEqual(result.errors,[]);assert.equal(result.rootReads,0);assert.deepEqual(result.reads,[]);
     assert.equal(result.stats.finiteValidated,true);assert.equal(result.stats.appearanceErrorSupported,false);assert.equal(result.stats.geometryErrorSupported,false);assert.equal(result.stats.mode,'far');assert.equal(result.stats.preview,false);
-    assert.equal(result.descriptors.length,1);const d=result.descriptors[0];assert.equal(d.fragment,'canopyOpaqueFS');assert.equal(d.depth.depthWriteEnabled,true);assert.equal(d.depth.depthCompare,'greater');assert.equal(d.msaa.alphaToCoverageEnabled,false);assert.ok(d.blend.every(b=>b===null));
+    assert.equal(result.descriptors.length,1);const d=result.descriptors[0];assert.equal(d.vertex,manifest.version===2?'forestMassVS':'bakedCanopyVS');assert.equal(d.layout.arrayStride,manifest.vertexStride);assert.equal(d.fragment,'canopyOpaqueFS');assert.equal(d.depth.depthWriteEnabled,true);assert.equal(d.depth.depthCompare,'greater');assert.equal(d.msaa.alphaToCoverageEnabled,false);assert.ok(d.blend.every(b=>b===null));
+    if(manifest.version===2)assert.deepEqual(d.layout.attributes,[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'snorm8x4'},{shaderLocation:6,offset:16,format:'float16x4'}]);
     for(const name of ['vertices','indices']){const uploads=result.writes.filter(w=>w.label==='forest mass immutable '+name);assert.equal(uploads.length,1);assert.equal(uploads[0].offset,0);assert.equal(uploads[0].bytes,result.sourceSizes[name]);}
     for(const row of result.witnesses){assert.ok(row.covered>100&&row.solid>50&&row.solidColour>50,'actual field-derived mass has an opaque coloured interior');assert.ok(row.maxDepthError<=2,'real per-sample depth occludes later blue backdrop: '+JSON.stringify(row));}
     t.diagnostic(JSON.stringify({input,source:result.source,qualification:'Actual density geometry alpha/depth/GPU witnesses only; native appearance remains unqualified',witnesses:result.witnesses}));

@@ -10,6 +10,9 @@ import {createDevServer} from '../server.mjs';
 import {validateForestMass,decodeForestMass,loadForestMass} from '../js/forest-mass.js';
 
 const receipt=bytes=>({bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')});
+// Independent, bounded [0,1] fixture encoder and general IEEE binary16 reader.
+const unitHalf=n=>{if(n===0)return 0;const e=Math.floor(Math.log2(n));if(e< -14)return Math.round(n*2**24);let m=Math.round((n/2**e-1)*1024),biased=e+15;if(m===1024){m=0;biased++;}return biased*1024+m;};
+const readHalf=n=>{const sign=n&0x8000?-1:1,e=(n>>10)&31,m=n&1023;return sign*(e===31?(m?NaN:Infinity):e===0?m*2**-24:(1+m/1024)*2**(e-15));};
 function fixture({neighbors=false}={}){
   const vertices=[],indices=[],chunks=[];
   for(const [id,centre]of [[0,[-4,10,-40]],[1,[4,10,-1000]]]){
@@ -28,6 +31,16 @@ function fixture({neighbors=false}={}){
     source:{files:structuredClone(forest.manifest.files),nativeFieldManifest:receipt(Buffer.from('original native triangle MASK area and pigment field manifest')),method:{file:'scripts/prepare-forest-mass.py',...receipt(Buffer.from('field assembly source fixture'))},nativeFieldRecipe:{version:1,source:'Synthetic schema fixture only; no appearance claim'}}};
   const fetchAsset=async name=>new Response(name==='manifest.json'?JSON.stringify(manifest):encoded[name],{status:encoded[name]||name==='manifest.json'?200:404});
   const assets=Object.fromEntries(['manifest.json',...Object.keys(encoded)].map(name=>[name,name]));return {manifest,streams,forest,encoded,assets,fetchAsset};
+}
+function compactFixture(){
+  const f=fixture(),source=new Float32Array(f.streams['vertices.bin'].slice(0)),bytes=new ArrayBuffer(source.length/13*24),view=new DataView(bytes);
+  source.set([.2,.5,Math.sqrt(.71)],3); // Non-axis unit normal exercises snorm quantization.
+  for(let i=0;i<source.length/13;i++){
+    for(let k=0;k<3;k++){view.setFloat32(i*24+k*4,source[i*13+k],true);view.setInt8(i*24+12+k,Math.round(source[i*13+3+k]*127));view.setUint16(i*24+16+k*2,unitHalf(source[i*13+10+k]),true);}
+    view.setInt8(i*24+15,0);view.setUint16(i*24+22,unitHalf(1),true);
+  }
+  f.manifest.version=2;f.manifest.vertexStride=24;f.streams['vertices.bin']=bytes;f.encoded['vertices.bin.gz']=gzipSync(new Uint8Array(bytes));
+  f.manifest.files['vertices.bin']={...receipt(new Uint8Array(bytes)),gzip:{file:'vertices.bin.gz',...receipt(f.encoded['vertices.bin.gz'])}};return {...f,source};
 }
 
 test('native mass loader verifies original source identities and both transport hashes',async()=>{
@@ -81,6 +94,58 @@ test('native mass neighbor transport preserves four entries per original root an
     else manifest.files['root-neighbors.bin'].sha256='e'.repeat(64);
     await assert.rejects(()=>loadForestMass({forest:f.forest,assets:f.assets,fetchAsset:async name=>new Response(name==='manifest.json'?JSON.stringify(manifest):encoded[name])}),new RegExp(kind+' digest mismatch'));
   }
+});
+
+test('compact native mass preserves world float32 positions and validates packed normals and linear half colour',async()=>{
+  const f=compactFixture(),decoded=decodeForestMass(f.manifest,f.streams,f.forest),loaded=await loadForestMass({forest:f.forest,fetchAsset:f.fetchAsset,assets:f.assets}),view=new DataView(f.streams['vertices.bin']);
+  assert.ok(decoded.vertices instanceof Uint8Array);assert.equal(decoded.vertices.buffer,f.streams['vertices.bin'],'validation never expands packed geometry');assert.equal(decoded.vertices.byteLength,f.source.length/13*24);assert.deepEqual(loaded.vertices,decoded.vertices);
+  assert.deepEqual(f.manifest.source.files,f.forest.manifest.files,'packing retains original native provenance');
+  const original=new DataView(f.source.buffer);
+  for(let i=0;i<f.source.length/13;i++){
+    const normal=[0,1,2].map(k=>Math.max(-1,view.getInt8(i*24+12+k)/127)),length=Math.hypot(...normal);
+    for(let k=0;k<3;k++){
+      assert.equal(view.getUint32(i*24+k*4,true),original.getUint32((i*13+k)*4,true),'world positions retain every float32 bit');
+      assert.ok(Math.abs(normal[k]/length-f.source[i*13+3+k])<=Math.sqrt(3)/127,'normalized snorm error stays within quantization envelope');
+      assert.ok(Math.abs(readHalf(view.getUint16(i*24+16+k*2,true))-f.source[i*13+10+k])<=Math.max(2**-24,Math.abs(f.source[i*13+10+k])*2**-10),'linear RGB uses half precision, not normalized/sRGB bytes');
+    }
+  }
+  for(const change of [m=>m.version=1,m=>m.vertexStride=52,m=>m.version=3]){const bad=structuredClone(f.manifest);change(bad);assert.throws(()=>validateForestMass(bad,f.forest),/Unsupported/);}
+  for(const change of [v=>v.setFloat32(0,NaN,true),v=>{v.setInt8(12,0);v.setInt8(13,0);v.setInt8(14,0);},v=>{v.setInt8(12,127);v.setInt8(13,127);v.setInt8(14,0);},v=>v.setUint16(16,0x7e00,true),v=>v.setUint16(18,0x7c00,true),v=>v.setUint16(20,0xb800,true),v=>v.setUint16(22,0x7e00,true),v=>v.setUint16(22,0x3e00,true)]){
+    const raw=f.streams['vertices.bin'].slice(0);change(new DataView(raw));assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'vertices.bin':raw},f.forest),/packed.*vertex/);
+  }
+  const negativeEndpoint=f.streams['vertices.bin'].slice(0),endpointView=new DataView(negativeEndpoint);endpointView.setInt8(12,-128);endpointView.setInt8(13,0);endpointView.setInt8(14,0);assert.equal(decodeForestMass(f.manifest,{...f.streams,'vertices.bin':negativeEndpoint},f.forest).finiteValidated,true,'snorm -128 decodes to -1, not below -1');
+  const outside=f.streams['vertices.bin'].slice(0);new DataView(outside).setFloat32(0,f.manifest.chunks[0].high[0]+1,true);assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'vertices.bin':outside},f.forest),/outside chunk bound/);
+  const invalidIndex=f.streams['indices.bin'].slice(0);new Uint32Array(invalidIndex)[0]=f.source.length/13;assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'indices.bin':invalidIndex},f.forest),/index outside geometry/);
+  assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'vertices.bin':f.streams['vertices.bin'].slice(4)},f.forest),/Incomplete/);
+  const raw=f.streams['vertices.bin'].slice(0);new DataView(raw).setUint16(16,0x7e00,true);const encoded=gzipSync(new Uint8Array(raw)),manifest=structuredClone(f.manifest);manifest.files['vertices.bin']={...receipt(new Uint8Array(raw)),gzip:{file:'vertices.bin.gz',...receipt(encoded)}};
+  await assert.rejects(()=>loadForestMass({forest:f.forest,assets:f.assets,fetchAsset:async name=>new Response(name==='manifest.json'?JSON.stringify(manifest):name==='vertices.bin.gz'?encoded:f.encoded[name])}),/packed.*vertex/,'matching transport hashes do not authorize a half NaN');
+});
+
+test('compact native mass GPU vertex fetch decodes normalized snorm and linear half RGB',{timeout:120000},async()=>{
+  const f=compactFixture(),packed=new Uint8Array(72),data=new DataView(packed.buffer),first=new Uint8Array(f.streams['vertices.bin'],0,24);
+  for(const [i,position]of [[-1,-1,.5],[3,-1,.5],[-1,3,.5]].entries()){packed.set(first,i*24);for(let k=0;k<3;k++)data.setFloat32(i*24+k*4,position[k],true);}
+  const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
+  try{
+    browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+    const page=await browser.newPage();await page.route('**/__mass_vertex_fetch',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__mass_vertex_fetch');
+    const result=await page.evaluate(async bytes=>{
+      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{TERRAIN}=await import('/js/wgsl/terrain.js'),{FOREST_MASS_VERTEX_LAYOUT,FOREST_MASS_VERTEX_WGSL}=await import('/js/forest-mass.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const begin=TERRAIN.indexOf('struct CanopyVertex'),end=TERRAIN.indexOf('@vertex fn bakedCanopyVS',begin);if(begin<0||end<=begin)throw Error('Production canopy varying structure missing');
+      const module=device.createShaderModule({code:FRAME_WGSL+'@group(0)@binding(0)var<uniform>F:Frame;'+TERRAIN.slice(begin,end)+FOREST_MASS_VERTEX_WGSL+`
+struct Witness {@location(0)normal:vec4f,@location(1)colour:vec4f};
+@fragment fn witness(in:CanopyVertex)->Witness{return Witness(vec4f(in.normal,1),vec4f(in.colour,1));}`});
+      const compilation=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(compilation.length)throw Error(compilation.map(m=>m.message).join('\n'));
+      const pipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'forestMassVS',buffers:[FOREST_MASS_VERTEX_LAYOUT]},fragment:{module,entryPoint:'witness',targets:[{format:'rgba32float'},{format:'rgba32float'}]}});
+      const vertices=device.createBuffer({size:bytes.length,usage:B.VERTEX|B.COPY_DST}),frame=device.createBuffer({size:384,usage:B.UNIFORM|B.COPY_DST}),fd=new Float32Array(96);fd[0]=fd[5]=fd[10]=fd[15]=1;device.queue.writeBuffer(vertices,0,new Uint8Array(bytes));device.queue.writeBuffer(frame,0,fd);
+      const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:frame}}]}),textures=[0,1].map(()=>device.createTexture({size:[1,1],format:'rgba32float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC})),read=device.createBuffer({size:512,usage:B.COPY_DST|B.MAP_READ});
+      const encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:textures.map(texture=>({view:texture.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,0]}))});pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setVertexBuffer(0,vertices);pass.draw(3);pass.end();for(let i=0;i<2;i++)encoder.copyTextureToBuffer({texture:textures[i]},{buffer:read,offset:i*256,bytesPerRow:256},[1,1]);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);const values=new Float32Array(read.getMappedRange()),normal=Array.from(values.subarray(0,4)),colour=Array.from(values.subarray(64,68));read.unmap();await device.queue.onSubmittedWorkDone();for(const resource of [vertices,frame,read,...textures])resource.destroy();device.destroy();return {errors,normal,colour,layout:FOREST_MASS_VERTEX_LAYOUT};
+    },Array.from(packed));
+    assert.deepEqual(result.errors,[]);assert.deepEqual(result.layout,{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'snorm8x4'},{shaderLocation:6,offset:16,format:'float16x4'}]});
+    const normal=[0,1,2].map(k=>Math.max(-1,data.getInt8(12+k)/127)),length=Math.hypot(...normal),colour=[0,1,2].map(k=>readHalf(data.getUint16(16+k*2,true)));
+    for(let k=0;k<3;k++){assert.ok(Math.abs(result.normal[k]-normal[k]/length)<=1e-6,'production VS normalizes actual snorm fetch');assert.ok(Math.abs(result.colour[k]-colour[k])<=1e-7,'GPU decodes linear binary16 without sRGB/gamma conversion');}
+    assert.equal(result.normal[3],1);assert.equal(result.colour[3],1);
+  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });
 
 test('native mass GPU uses projected authored error and suppresses exclusively selected original owners',{timeout:120000},async t=>{
