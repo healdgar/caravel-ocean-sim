@@ -480,8 +480,15 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
 }
 `;
+// Optional block ownership extends the same GPU cull; its absence preserves
+// the canonical bindings and direct-GPU fixtures. No CPU visibility fallback.
+export const FOREST_MASS_ROOT_CULL_WGSL=FOREST_CULL_WGSL.replace(
+ '@group(0)@binding(7)var<uniform>forestResidency:vec4u;',
+ '@group(0)@binding(7)var<uniform>forestResidency:vec4u;\n@group(0)@binding(8)var<storage,read>forestMassOwnerSelected:array<u32>;'
+).replace('let r=roots[id.x];if(r.rootScale.w<=0.0){return;}',
+ 'let r=roots[id.x];if(r.rootScale.w<=0.0){return;}if(r.identity.z>=0.&&forestMassOwnerSelected[u32(r.identity.z)]==1u){return;}');
 
-export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,mode='auto',nearPixels=3,
+export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
   impostorMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestImpostor')||'auto'}){
   if(!['auto','near','far'].includes(mode)||!(nearPixels>0&&nearPixels<=3))throw Error('Invalid forest LOD policy');
@@ -497,6 +504,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
     const rooted=pack.roots.slice();let excludedRoots=0;
+    if(forestMass){
+      if(forestMass.rootChunks.length!==m.rootCount)throw Error('Native forest mass owner table differs from original root count');
+      for(let i=0;i<rooted.length;i+=12){const owner=forestMass.rootChunks[i/12];rooted[i+10]=owner===0xffffffff?-1:owner;}
+    }
     if(groundSample)for(let i=0;i<rooted.length;i+=12){
       const x=rooted[i],z=rooted[i+2],y=groundSample(x,z);
       if(!Number.isFinite(y))throw Error('Non-finite forest ground sampler');
@@ -519,12 +530,13 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
     const previous=make(new Uint32Array(m.rootCount),B.STORAGE,'forest GPU previous LOD');
     const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,['auto','near','far'].indexOf(mode)]),B.UNIFORM,'forest projected size policy');
-    const residency=make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
-    const compute=await shader(FOREST_CULL_WGSL,'forest GPU cull and compact');
+    const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
+    const compute=await shader(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL,'forest GPU cull and compact');
     const reset=await device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}});
     const cull=await device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}});
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
-    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
+    const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,...(forestMass?[forestMass.state]:[])];
+    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}}))});
     const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
       fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
       depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragment==='forestNativeLeafFS'}});
@@ -546,6 +558,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       });
     });
     const stats={loaded:true,roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,nearPixels,appearanceErrorSupported:false,mode,
+      get backend(){return forestMass?'native / atlas / authored native-density mass':'native / atlas';},
       materialContract:m.materialContract,nativeMaterialLayers:0,nativeTextureFamilies:[],coverageFiltering:'linear alpha with MSAA',native:nativeStatus,
       certifiedGeometryPrototypes:m.prototypes.filter(p=>p.geometryErrorSupported===true).length,
       impostor:{loaded:!!atlas,error:pack.impostorError??null,views:atlas?.views??0,fullSphere:atlas?.fullSphere??false,projectedPixels:impostorPixels,
@@ -579,7 +592,9 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
-        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));nativeStatus.resident=true;nativeStatus.status='resident';pack.releaseNativeCPU?.();return true;
+        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));nativeStatus.resident=true;nativeStatus.status='resident';
+        if(forestMass&&forestMass.stats.mode==='auto')forestMass.stats.phase='authored error-limited selection; native resources resident';
+        pack.releaseNativeCPU?.();return true;
       }catch(error){surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
         if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas)throw error;return false;}
     }

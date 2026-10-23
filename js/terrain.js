@@ -5,6 +5,7 @@ import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL} from './forest-scenery.js';
+import {loadForestMass,createForestMassRenderer} from './forest-mass.js';
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto'}){
@@ -14,6 +15,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let canopyFailure=null;
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery().catch(error=>{forestFailure=error.message;return null;});
+  const forestMassMode=typeof location==='undefined'?canopyMode:new URLSearchParams(location.search).get('forestMass')||canopyMode;
+  if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
+  const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(new URLSearchParams(location.search).get('forestImpostor'));
+  let forestMassFailure=null;
+  // This is a new optional asset, never an alias of the rejected crown pack.
+  // Missing/unqualified transport retains the existing native/atlas forest.
+  const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest}).catch(error=>{forestMassFailure=error.message;return null;}):null);
   // Regional native trees replace the entire old population. The small legacy
   // example is a fallback, never a second stand mixed into the new forest.
   const canopyPromise=forestPromise.then(forest=>forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
@@ -190,8 +198,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}]];
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const forest=forestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestPack,groundSample,mode:canopyMode}):null;
+  const forestMassPack=await forestMassPromise;let forestMass=null;
+  if(forestMassPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
+  const forest=forestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestPack,groundSample,forestMass,mode:canopyMode}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
+  forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};
   forestStats.replacedProceduralTrees=(canopyTrees.length-trees.length)/8;forestStats.coverage=forestPack?.manifest.coverage??null;
   const canopyStats=importedCanopy?.stats??{loaded:false,mode:canopyMode,error:canopyFailure};
   canopyStats.replacedProceduralTrees=(originalTrees.length-canopyTrees.length)/8;
@@ -224,6 +235,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,ISLAND,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample),
     encode(pass,changed=false){
+      forestMass?.encode(pass);
       forest?.encode(pass);
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
@@ -255,7 +267,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
         // All imported wood/crowns draw before either family's cutout leaves.
         // Opaque terrain and both solid forest paths retain mobile HSR.
-        if(part==='opaque'){importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);}
+        if(part==='opaque'){forestMass?.drawOpaque(pass);importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);}
         pass.setPipeline(pipe);pass.setBindGroup(0,groups[groupIndex]);pass.setBindGroup(1,cloudGroups[groupIndex]);
         for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
           const batch=treeBatches[lod*TREE_VARIANTS+variant],mesh=treeMeshes[lod][variant][part];if(!batch.count||!mesh.count)continue;
