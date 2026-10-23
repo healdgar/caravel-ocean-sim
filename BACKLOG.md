@@ -42,6 +42,17 @@ Receipts: `/tmp/waterworld-scenery-baseline/`,
 `/tmp/waterworld-scenery-spatial-clusters/`. Rejected prototype source and bake
 are retained in `/tmp/waterworld-rejected-forest-experiments/`; none ships.
 
+Published code `96428decad04d8ff2dd21baf874422a90e41724a`; Pages built
+2026-10-23T17:57:32Z. Public verification at17:59:16Z matches HTML1,520,815bytes,
+SHA256`a77cc7e2dd5706c35e474ce23b9022ed849574d33a1669d4880585c1a8edc463`.
+Manifest SHA256`a783e4aec72b968dcec07cd8a169d67bc7fb2858353116fcce9f22d191d36252`
+and all158asset records match the prior fully verified asset release. Receipt
+`/tmp/waterworld-forest-occlusion-public-bytes.json`. Fresh live Metal Chrome
+renders four complete1920x1080frames each on normal sailing and close forest,
+without page/GPU errors; only the forest compiles the terrain-cull extension.
+Proof/screenshots: `/tmp/waterworld-forest-occlusion-live/`. This verifies live
+code/rendering, not physical-iPhone performance or the unfinished60FPS target.
+
 Next required representation work: source-baked branch-cluster colour/normal/
 depth detail, with actual native-leaf comparisons at framebuffer/FOV-dependent
 transitions, while keeping whole native trees only where the bake fails.
