@@ -179,6 +179,12 @@ struct ForestVolumeShellVertex {
  var pigment=in.colour;var exposure=textureSampleLevel(forestVolumeEscape,forestVolumeSampler,forestVolumeUVW(in.local),0).r;
  if(densitySum>0.){pigment=moment/densitySum;exposure=escapeMoment/densitySum;}exposure=clamp(exposure,0.,1.);
  var localNormal=vec3f(0,1,0);if(dot(in.normal,in.normal)>1e-16){localNormal=normalize(in.normal);}
+ // The field-shaded reduction profile preserves silhouette positions while
+ // resampling appearance. Recover lobe normals from the original density,
+ // rather than preserving thousands of triangles solely for vertex shading.
+ let h=forestVolumeMeta.originCell.w;let ex=vec3f(h,0,0);let ey=vec3f(0,h,0);let ez=vec3f(0,0,h);
+ let gradient=vec3f(forestVolumeDensity(in.local+ex)-forestVolumeDensity(in.local-ex),forestVolumeDensity(in.local+ey)-forestVolumeDensity(in.local-ey),forestVolumeDensity(in.local+ez)-forestVolumeDensity(in.local-ez));
+ if(dot(gradient,gradient)>1e-16){localNormal=-normalize(gradient);}
  let n=forestVolumeRotate(localNormal,in.yawTint.x);var sunlight=1.;
  if(F.sunDir.y>0.){let sun=forestVolumeRotate(F.sunDir.xyz,-in.yawTint.x);var opticalDepth=0.;
   for(var i=0u;i<4u;i++){opticalDepth+=forestVolumeDensity(in.local+sun*((f32(i)+.5)*.5))*.5;}

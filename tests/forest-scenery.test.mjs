@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
+import {FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from '../js/forest-volume.js';
 import {validateForestScenery,validateForestMaterials,decodeForestScenery,decodeForestSceneryAsync,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
 
 function fixture(){
@@ -180,12 +181,16 @@ test('forest rendering cannot fall back to the legacy generic mask or threshold 
   // become a generic leaf mask or a threshold on filtered native coverage.
   const collar='if(in.world.y<in.nativeSoil){discard;}';
   assert.equal(FOREST_VERTEX_WGSL.split(collar).length-1,3,'only wood, leaf and middle collar clips');
-  assert.doesNotMatch(FOREST_VERTEX_WGSL.replaceAll(collar,''),/leafSpray|tree-foliage|canopyLeafFS|discard/);
+  assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS/);
+  assert.ok(FOREST_VERTEX_WGSL.endsWith(FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL),'volume/shell are separate shader entry points');
+  const nativeShader=FOREST_VERTEX_WGSL.slice(0,-FOREST_VOLUME_WGSL.length-FOREST_VOLUME_SHELL_WGSL.length);
+  assert.doesNotMatch(nativeShader.replaceAll(collar,''),/discard/,'native leaves may discard only biological buried roots; volume ray misses are separate');
   assert.match(FOREST_VERTEX_WGSL,/@location\(7\)nativeMaterial/);
   assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
-  assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
+  assert.match(FOREST_VERTEX_WGSL,/o\.colour=vec4f\(lit\.rgb,pigment\.a\)/);
+  assert.match(FOREST_VERTEX_WGSL,/@builtin\(sample_mask\)mask:u32/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/forestMipLinear\(c\.rgb\)\*c\.a/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/colour\*\.25/);assert.doesNotMatch(FOREST_SURFACE_MIPS_WGSL,/discard|step\(/);
-  assert.match(source,/alphaToCoverageEnabled:fragment==='forestNativeLeafFS'/);
+  assert.match(source,/multisample:\{count:samples,alphaToCoverageEnabled:false\}/);
   assert.match(source,/nearPixels=3/);assert.match(source,/nearPixels<=3/);
 });

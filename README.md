@@ -720,8 +720,17 @@ temperate visual proxies, not surveyed Caribbean flora. The deterministic stand
 has **85,451 roots**, of which **85,050** remain on the fine Wells Bay terrain.
 The resident forest replaces all earlier procedural trees and the 42-tree example.
 
-Near views use the shared original models. Middle views use reduced native wood
-and surfaces extracted from the original leaf-area fields. Distant blocks combine
+Near views use the shared original models, source MASK coverage and baked
+own-canopy exposure. Independent per-primitive MSAA masks let overlapping small
+leaves accumulate coverage instead of repeatedly selecting identical samples.
+This preserves expected single-layer coverage; it approximates independent
+footprints rather than reconstructing correlated masks lost in mip filtering.
+
+Middle views use reduced native wood and opaque source-density crown meshes.
+GPU interior samples recover source pigment, density-gradient normals and
+canopy exposure from cached 3D fields, so the mesh need not retain thousands of
+triangles just for shading. Short sun rays add local canopy shading; these are
+not inter-tree shadows. Distant blocks combine
 those fields at the actual root positions **before** surface extraction, producing
 an opaque forest mass with source-derived contours and linear leaf pigment.
 Original leaf triangles and MASK maps determine density; coarse crown domes and
@@ -738,14 +747,19 @@ leaf underside lighting and opaque density are approximations; no universal
 imperceptible transition or performance target is claimed. See
 [Native forest instances](FOREST_INSTANCES.md) and
 [Native-derived canopy pipeline and validation](FOREST_MASS.md). The
-current candidate is held locally: close coast still selects thousands of costly
-original Hero models and needs further detail/visibility work before publication.
+current forest refinement is release-qualified: the static 1280×900 coastal test improved from
+2.35 FPS to 54–57 FPS, with source and packaged views free of GPU errors.
+Waves, clouds, ships and crew were disabled for this comparison; it does not
+establish 60 FPS for ordinary play, Retina resolution or an iPhone.
 
 Forest geometry loads only for landfall. Full native detail remains a background
 download; transport verifies encoded and decoded SHA-256 receipts. The local
 meshopt decoder and gzip preserve the packed geometry bytes. Explicit
 `forestImpostor=auto|force` retains the individual-atlas diagnostic; it disables
-the new mass/middle path and is not the production canopy.
+the new mass/middle path and is not the production canopy. `forestVolume=ray`
+selects the slower comparison raymarch; `forestVolume=off` disables field shading.
+The reusable field/surface exporters and Three.js adapter are now available
+in Forestmodeler; growth and biological leaf-area accounting remain independent.
 
 **Wells Bay close terrain:** a 1024 m coastal tile derives directly from the
 original 0.5 m DTM at **2 m spacing**, with a separate registered 1024² aerial

@@ -17,6 +17,7 @@ test('actual mature native trees and their depth impostors preserve silhouette a
     const result=await page.evaluate(async()=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js');
       const {loadForestScenery,createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT}=await import('/js/forest-scenery.js');
+      const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const {createForestImpostorResources}=await import('/js/forest-impostor.js');
       const pack=await loadForestScenery();if(!pack.impostors)throw Error('Actual native atlases required: '+pack.impostorError);
       if(pack.manifest.nativeSource?.mode!=='catalog-mature-usdz')throw Error('This witness requires the actual catalogued mature native assets');
@@ -46,14 +47,14 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       const uniform={type:'uniform'},storage={type:'read-only-storage'},texture={viewDimension:'2d-array'};
       const layout0=device.createBindGroupLayout({entries:[{binding:0,visibility:S.VERTEX|S.FRAGMENT,buffer:uniform}]}),layout1=device.createBindGroupLayout({entries:[]});
       const entries=[0,1,2].map(binding=>({binding,visibility:S.VERTEX|S.FRAGMENT,buffer:binding===2?uniform:storage}));
-      entries.push({binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:storage},{binding:13,visibility:S.FRAGMENT,sampler:{}});
+      entries.push({binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:storage},{binding:13,visibility:S.FRAGMENT,sampler:{}},{binding:14,visibility:S.VERTEX,buffer:storage});
       for(const binding of [3,4,7,8,9,10,11,12])entries.push({binding,visibility:S.FRAGMENT,texture});
       const layout2=device.createBindGroupLayout({entries}),layout3=device.createBindGroupLayout({entries:[
         {binding:0,visibility:S.FRAGMENT,texture},{binding:1,visibility:S.FRAGMENT,texture},{binding:2,visibility:S.FRAGMENT,sampler:{}},{binding:3,visibility:S.VERTEX|S.FRAGMENT,buffer:storage}]});
       const layout=device.createPipelineLayout({bindGroupLayouts:[layout0,layout1,layout2,layout3]});
       const pipeline=(entryPoint,impostor=false)=>device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:impostor?'forestImpostorVS':'forestCanopyVS',buffers:impostor?[]:[FOREST_VERTEX_LAYOUT]},
         fragment:{module,entryPoint,targets:[{format:'rgba16float'}]},primitive:{topology:'triangle-list',cullMode:'none'},
-        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:entryPoint!=='forestNativeOpaqueFS'}});
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:entryPoint==='forestImpostorFS'}});
       const opaque=await pipeline('forestNativeOpaqueFS'),leaf=await pipeline('forestNativeLeafFS'),impostor=await pipeline('forestImpostorFS',true);
       const groundCode=await shader(FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
 @vertex fn groundVS(@builtin(vertex_index)i:u32)->@builtin(position)vec4f{
@@ -65,9 +66,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
         primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4}});
       const group0=device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:frame}}]}),group1=device.createBindGroup({layout:layout1,entries:[]}),group3=atlas.bind(impostor);
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear'}),repeatSampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat'});
+      const canopyLight=make(forestLightGPUBytes(),B.STORAGE);
       let materialBase=0;const groups=pack.manifest.prototypes.map(p=>{
         const bin=make(new Uint32Array([p.id,materialBase,p.nativeMaterials.length,0]),B.UNIFORM);materialBase+=p.nativeMaterials.length;
-        const e=[roots,visible,bin].map((buffer,binding)=>({binding,resource:{buffer}}));e.push({binding:5,resource:sampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:repeatSampler});
+        const e=[roots,visible,bin].map((buffer,binding)=>({binding,resource:{buffer}}));e.push({binding:5,resource:sampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:repeatSampler},{binding:14,resource:{buffer:canopyLight}});
         for(let family=0;family<4;family++){const f=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;e.push({binding:first,resource:f.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:f.normal.createView({dimension:'2d-array'})});}
         return device.createBindGroup({layout:layout2,entries:e});
       });

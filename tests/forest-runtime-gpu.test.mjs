@@ -45,7 +45,7 @@ function instrumentProductionForest(){
     const backing=ArrayBuffer.isView(data)?data.buffer:data;
     const start=(ArrayBuffer.isView(data)?data.byteOffset:0)+dataOffset*element;
     const bytes=size===undefined?(ArrayBuffer.isView(data)?data.byteLength:data.byteLength)-dataOffset*element:size*element;
-    const resident=buffer.label==='forest native residency'?new Uint32Array(backing,start,1)[0]:undefined;
+    const resident=['forest native residency','forest mass shared native residency'].includes(buffer.label)?new Uint32Array(backing,start,1)[0]:undefined;
     if(resident!==undefined)r.nativeResident=resident===1;
     if(buffer.label.startsWith('forest '))r.writes.push({frame:r.frame,label:buffer.label,offset,bytes,...(resident===undefined?{}:{resident})});
     if(buffer.label==='forest immutable root transforms'&&offset===0){
@@ -153,10 +153,12 @@ for(const path of ['/','/docs/index.html'])test(`${path} explicit debug atlas co
   let releaseNative;const nativeGate=new Promise(resolve=>releaseNative=resolve);
   // Delay actual responses, then continue their unchanged production request.
   // This proves debug-atlas readiness without substituting any source bytes.
-  // Solid-canopy geometry is a separate optional asset, never native payload.
+  // Only root-level native buffers/maps are gated. Mass/middle/volume files
+  // must load independently so the simulated slow native download cannot
+  // deadlock readiness before the debug atlas has its first frame.
   await page.route('**/assets/forest-scenery/**',async route=>{
     const path=new URL(route.request().url()).pathname;
-    if(!path.includes('/impostors/')&&!path.includes('/canopy/')&&(/\/(vertices|indices)\.bin(?:\.[a-f0-9]{16})?\.gz$/.test(path)||path.endsWith('.png')))await nativeGate;
+    if(/\/assets\/forest-scenery\/saba\/(?:(?:vertices|indices)\.bin(?:\.[a-f0-9]{16})?\.gz|[^/]+\.png)$/.test(path))await nativeGate;
     await route.continue();
   });
   const query=new URLSearchParams({forestImpostor:'auto',landfall:'coast',view:'free',boat:'0',prow:'0',boatX:'0',boatZ:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'35',windSpeed:'0',swellHs:'0',ui:'0',w:'640',h:'480'});
@@ -182,7 +184,7 @@ for(const path of ['/','/docs/index.html'])test(`${path} explicit debug atlas co
     for(const [label,size]of [['forest immutable root transforms',expected.files['roots.bin'].bytes],['forest immutable prototype vertices',expected.files['vertices.bin'].bytes],['forest immutable prototype indices',expected.files['indices.bin'].bytes],['forest prototype bounds and ranges',5*80]]){
       assertUploadedOnce(initial,label,size);
     }
-    assert.deepEqual(initial.writes.filter(w=>w.label==='forest native residency').map(w=>w.resident),[0,1],'one transition after complete native uploads');
+    assert.deepEqual(initial.writes.filter(w=>['forest native residency','forest mass shared native residency'].includes(w.label)).map(w=>w.resident),[0,1],'one transition after complete native uploads');
     assert.equal(initial.buffers.filter(b=>b.readbackAdded).length,1,'only the actual indirect buffer gets diagnostic COPY_SRC');
     for(let frame=1;frame<=initial.frame;frame++)assertGPUFrame(initial,frame,initial.manifest);
     const beforeVisible=assertVisibleCounts(initial);

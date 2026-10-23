@@ -27,8 +27,8 @@ function fixture(){
 
 test('absent light sidecar is neutral and performs no requests',async()=>{
  let requests=0;assert.equal(await loadForestLight({forest:{},fetchAsset:async()=>{requests++;throw Error('unexpected request');}}),null);assert.equal(requests,0);
- const neutral=forestLightGPUBytes();assert.equal(neutral.byteLength,20);assert.deepEqual(Array.from(new Uint32Array(neutral.buffer,0,4)),[0,0,0,0]);
- assert.deepEqual(Array.from(neutral.subarray(16)),[255,255,255,255]);assert.notEqual(forestLightGPUBytes(),neutral);
+ const neutral=forestLightGPUBytes();assert.equal(neutral.byteLength,32);assert.deepEqual(Array.from(new Uint32Array(neutral.buffer,0,4)),[0,0,0,0]);
+ assert.deepEqual(Array.from(neutral.subarray(16)),Array(16).fill(255));assert.notEqual(forestLightGPUBytes(),neutral);
  assert.equal(await loadForestLight({forest:{canopyShade:{file:'bad'}},receipt:null,fetchAsset:async()=>{throw Error('unexpected request');}}),null);
 });
 
@@ -38,7 +38,7 @@ test('loader verifies native lineage and both transport receipts before publishi
  assert.equal(pack.manifest.vertexCount,7);assert.deepEqual(pack.manifest.source.files,f.forest.files);
  assert.deepEqual(FOREST_LIGHT_ASSETS,{'canopy-shade.json':'assets/forest-scenery/saba/canopy-shade.json','canopy-shade.bin.gz':'assets/forest-scenery/saba/canopy-shade.bin.gz'});
  const gpu=forestLightGPUBytes(pack),view=new DataView(gpu.buffer);assert.equal(view.getUint32(0,true),7);
- assert.deepEqual([4,8,12].map(at=>view.getUint32(at,true)),[0,0,0]);assert.deepEqual(gpu.subarray(16),f.raw);
+ assert.deepEqual([4,8,12].map(at=>view.getUint32(at,true)),[0,0,0]);assert.equal(gpu.byteLength,32);assert.deepEqual(gpu.subarray(16,24),f.raw);assert.deepEqual(Array.from(gpu.subarray(24)),Array(8).fill(255));
  for(let vertex=0;vertex<7;vertex++){const word=view.getUint32(16+(vertex>>2)*4,true);assert.equal(((word>>>((vertex&3)*8))&255)/255,f.raw[vertex]/255);}
  gpu[16]=0;assert.equal(pack.bytes[0],255,'GPU packing copies source bytes instead of mutating them');assert.equal(f.raw[0],255);
  assert.throws(()=>forestLightGPUBytes({...pack,sourceValidated:false}),/Unverified/);

@@ -1,0 +1,692 @@
+{
+  "format": "waterworld.native-forest-middle",
+  "version": 1,
+  "units": "metres",
+  "upAxis": "Y",
+  "vertexStride": 52,
+  "source": {
+    "massManifest": {
+      "file": "manifest.json",
+      "bytes": 466058,
+      "sha256": "7b1046a440895b2ee19492b63295f8c4839fb50f3764ccc81a2a620062f98abf"
+    },
+    "files": {
+      "vertices.bin": {
+        "bytes": 188946072,
+        "sha256": "8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0"
+      },
+      "indices.bin": {
+        "bytes": 34786680,
+        "sha256": "2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389"
+      },
+      "roots.bin": {
+        "bytes": 4101648,
+        "sha256": "69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b"
+      }
+    },
+    "middleStreams": {
+      "middle-vertices.bin": {
+        "bytes": 2702440,
+        "sha256": "a1bd03c29fc65b5c436b9d754e43a52de378f56fac9b65da28970ea7b4860657"
+      },
+      "middle-indices.bin": {
+        "bytes": 1023864,
+        "sha256": "9b852fa53812f95ec3411f4d554c7e1874f4aa9f71bde367020ce21154349b58"
+      }
+    },
+    "nativeFieldManifest": {
+      "bytes": 163510,
+      "sha256": "d1437b0782d0ffc32187995952495a7315e759022092d72ba7dbea9cab126fb9"
+    },
+    "nativeFieldRecipe": {
+      "version": 1,
+      "maximumSupportMetres": 2.647449898511305,
+      "scope": "Maximum recorded prototype sampling/smoothing footprint, not a native appearance certificate."
+    },
+    "massMethod": {
+      "file": "scripts/prepare-forest-mass.py",
+      "bytes": 21607,
+      "sha256": "68e3185fa5cb6a4d78e1d468ffbfb191a0acdff8958a1319bad8d4a3554a4192"
+    },
+    "method": {
+      "file": "scripts/simplify-forest-middle.mjs",
+      "bytes": 20465,
+      "sha256": "4dcb4be121df22ff12e01b70091924b5eb51a80e5738d023619baff16456ac4d"
+    },
+    "meshoptimizer": {
+      "version": "1.3.0",
+      "package": {
+        "bytes": 1444,
+        "sha256": "7c0b926331466962d22ab250359fcdea20c225ab243d78474b955fb6af23f74c"
+      },
+      "simplifier": {
+        "file": "meshopt_simplifier.js",
+        "bytes": 67671,
+        "sha256": "c3098ee4cb4fc242b84f064c88898e76e44bf58b0e1f693507f323c08cdbb5ed"
+      },
+      "decoder": {
+        "file": "meshopt_decoder.mjs",
+        "bytes": 29019,
+        "sha256": "10b313edaa0e322b0c1b46443f6c8b186b42139fe1eca189d50c09511d0ebedc"
+      }
+    }
+  },
+  "recipe": {
+    "version": 1,
+    "api": "simplifyWithAttributes",
+    "flags": [
+      "LockBorder"
+    ],
+    "positionStrideFloats": 13,
+    "attributes": [
+      "normalX",
+      "normalY",
+      "normalZ",
+      "linearR",
+      "linearG",
+      "linearB"
+    ],
+    "attributeWeights": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "woodAttributeWeights": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "leafAttributeWeights": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "leafShading": "field",
+    "maximumReportedErrorMetres": 0.35,
+    "leafTargetTriangles": 512,
+    "woodTargetTriangles": 256,
+    "vertexPolicy": "Index-only simplification and exact52-byte record deduplication/first-use compaction; no updated positions, UVs, normals, pigment or exposure",
+    "targetPolicy": "Requested triangle targets do not override the reported error limit; unmet targets are retained and reported truthfully",
+    "zeroAreaPolicy": "Only exactly zero stored-position cross products removed; no tiny nonzero triangles discarded",
+    "shadingPolicy": "Leaf normal/pigment simplification weights are zero because runtime samples original native 3D field; wood retains vertex normal/pigment weights",
+    "qualification": "Tool-reported error under the recorded per-part attribute weights, added to source authored LOD footprint; no native appearance certificate"
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "oak",
+      "firstIndex": 0,
+      "indexCount": 4932,
+      "wood": {
+        "firstIndex": 0,
+        "indexCount": 3168,
+        "simplification": {
+          "originalTriangles": 10310,
+          "nonzeroInputTriangles": 10310,
+          "sourceVertexRecords": 7229,
+          "triangles": 1056,
+          "vertices": 660,
+          "targetTriangles": 256,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 17.78704261779785,
+          "targetRelativeError": 0.019677244126796722,
+          "reportedRelativeError": 0.019506480544805527,
+          "reportedErrorMetres": 0.34696260077370056,
+          "shadingProfile": "vertex",
+          "attributeWeights": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "sourceIndices": {
+            "bytes": 123720,
+            "sha256": "cb5966f7ff03f8cb0b3033e590b07564fef1bc50d45d749b0e054c94064be9f8"
+          },
+          "retainedVertexRecords": {
+            "bytes": 34320,
+            "sha256": "eff00d8b6d7c51c95d4a099545ff054dc00147062be54c9ca5b0fa120129b954"
+          },
+          "qualification": "Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate"
+        }
+      },
+      "leaf": {
+        "firstIndex": 3168,
+        "indexCount": 1764,
+        "simplification": {
+          "originalTriangles": 9240,
+          "nonzeroInputTriangles": 9240,
+          "sourceVertexRecords": 4620,
+          "triangles": 588,
+          "vertices": 294,
+          "targetTriangles": 512,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 18.69384765625,
+          "targetRelativeError": 0.018722737208008766,
+          "reportedRelativeError": 0.018708692863583565,
+          "reportedErrorMetres": 0.3497374542394027,
+          "shadingProfile": "field",
+          "attributeWeights": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sourceIndices": {
+            "bytes": 110880,
+            "sha256": "e5e36165d7ac099c6803b965e9d8d797e0c429b5546c121e91a7b1b7b4ab6afc"
+          },
+          "retainedVertexRecords": {
+            "bytes": 15288,
+            "sha256": "719e8be2a45e5b91c9f7ea1bddcb7738176170e09a756c435a214aad95e182fd"
+          },
+          "qualification": "Meshoptimizer reported position-only error; GPU leaf shading must sample original native field pigment and gradient normals; no native appearance certificate"
+        }
+      },
+      "low": [
+        -5.920400619506836,
+        -0.35950374603271484,
+        -6.200655937194824
+      ],
+      "high": [
+        7.8906965255737305,
+        18.273591995239258,
+        11.930404663085938
+      ],
+      "centre": [
+        0.9851479530334473,
+        8.957044124603271,
+        2.8648743629455566
+      ],
+      "radius": 14.720663886662916,
+      "lodErrorMetres": 3.8632127565351464,
+      "source": {
+        "firstIndex": 0,
+        "indexCount": 58650,
+        "indices": {
+          "bytes": 234600,
+          "sha256": "f67724fcc62fb296d637cca9385fd7be893179e47e51e6ad31015eb34d76772f"
+        }
+      },
+      "simplification": {
+        "reportedErrorMetres": 0.3497374542394027,
+        "targetMet": false
+      }
+    },
+    {
+      "id": 1,
+      "species": "maple",
+      "firstIndex": 4932,
+      "indexCount": 4014,
+      "wood": {
+        "firstIndex": 4932,
+        "indexCount": 2478,
+        "simplification": {
+          "originalTriangles": 10977,
+          "nonzeroInputTriangles": 10977,
+          "sourceVertexRecords": 7886,
+          "triangles": 826,
+          "vertices": 543,
+          "targetTriangles": 256,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 15.538960456848145,
+          "targetRelativeError": 0.02252402901649475,
+          "reportedRelativeError": 0.02250347100198269,
+          "reportedErrorMetres": 0.3496805460416379,
+          "shadingProfile": "vertex",
+          "attributeWeights": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "sourceIndices": {
+            "bytes": 131724,
+            "sha256": "8fb6c51f7fb8810c2c2d4ecb829988897e628e19fbe5e0e46726bb1ab31ced50"
+          },
+          "retainedVertexRecords": {
+            "bytes": 28236,
+            "sha256": "b85a59205d80e0199e520dd8bbdac64078d572b666a3c2d52cf9d86b7b03d410"
+          },
+          "qualification": "Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate"
+        }
+      },
+      "leaf": {
+        "firstIndex": 7410,
+        "indexCount": 1536,
+        "simplification": {
+          "originalTriangles": 8202,
+          "nonzeroInputTriangles": 8202,
+          "sourceVertexRecords": 4103,
+          "triangles": 512,
+          "vertices": 259,
+          "targetTriangles": 512,
+          "targetMet": true,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 17.273317337036133,
+          "targetRelativeError": 0.0202624648809433,
+          "reportedRelativeError": 0.0202340055257082,
+          "reportedErrorMetres": 0.34950839844490034,
+          "shadingProfile": "field",
+          "attributeWeights": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sourceIndices": {
+            "bytes": 98424,
+            "sha256": "02914e118d5f6b9891e778a7b20b62fedbd42d1b558ce7cadf4fcb73e4bc29f5"
+          },
+          "retainedVertexRecords": {
+            "bytes": 13468,
+            "sha256": "15461757388ddbc5c41e6d63b28e03eecbb352bc871fc35b3be7393e39f44740"
+          },
+          "qualification": "Meshoptimizer reported position-only error; GPU leaf shading must sample original native field pigment and gradient normals; no native appearance certificate"
+        }
+      },
+      "low": [
+        -7.00100040435791,
+        -0.6282979249954224,
+        -6.662374019622803
+      ],
+      "high": [
+        6.340600967407227,
+        16.64501953125,
+        6.891711235046387
+      ],
+      "centre": [
+        -0.3301997184753418,
+        8.008360803127289,
+        0.11466860771179199
+      ],
+      "radius": 12.847001811830003,
+      "lodErrorMetres": 3.8631558483373816,
+      "source": {
+        "firstIndex": 58650,
+        "indexCount": 57537,
+        "indices": {
+          "bytes": 230148,
+          "sha256": "6b6434f0f68883d06285d2906f70f59ddda0846758bb9eecda247cad28d06cf5"
+        }
+      },
+      "simplification": {
+        "reportedErrorMetres": 0.3496805460416379,
+        "targetMet": false
+      }
+    },
+    {
+      "id": 2,
+      "species": "birch",
+      "firstIndex": 8946,
+      "indexCount": 2298,
+      "wood": {
+        "firstIndex": 8946,
+        "indexCount": 762,
+        "simplification": {
+          "originalTriangles": 428,
+          "nonzeroInputTriangles": 428,
+          "sourceVertexRecords": 334,
+          "triangles": 254,
+          "vertices": 169,
+          "targetTriangles": 256,
+          "targetMet": true,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 6.9300150871276855,
+          "targetRelativeError": 0.05050493776798248,
+          "reportedRelativeError": 0.0008373997989110649,
+          "reportedErrorMetres": 0.0058031932404113695,
+          "shadingProfile": "vertex",
+          "attributeWeights": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "sourceIndices": {
+            "bytes": 5136,
+            "sha256": "8c805b4cecca0ca392776ad42fc6d5ba90d17d9a8630d5b04ebad1b6202d359a"
+          },
+          "retainedVertexRecords": {
+            "bytes": 8788,
+            "sha256": "938ec63dad061b8807434287d162c61f8d7e7af498ad1f0617af14fb136a5f99"
+          },
+          "qualification": "Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate"
+        }
+      },
+      "leaf": {
+        "firstIndex": 9708,
+        "indexCount": 1536,
+        "simplification": {
+          "originalTriangles": 1500,
+          "nonzeroInputTriangles": 1500,
+          "sourceVertexRecords": 752,
+          "triangles": 512,
+          "vertices": 258,
+          "targetTriangles": 512,
+          "targetMet": true,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 8.864051818847656,
+          "targetRelativeError": 0.039485327899456024,
+          "reportedRelativeError": 0.011645091697573662,
+          "reportedErrorMetres": 0.10322269624252556,
+          "shadingProfile": "field",
+          "attributeWeights": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sourceIndices": {
+            "bytes": 18000,
+            "sha256": "637590b0c911a5d332fcfdfe026258a493e3858d9fa97c24462fc06f73643de4"
+          },
+          "retainedVertexRecords": {
+            "bytes": 13416,
+            "sha256": "5a2f08ee104ae9be9d57ed27fa231dd91a88d26b3b4b0c92d9b5bfd9eeb128fa"
+          },
+          "qualification": "Meshoptimizer reported position-only error; GPU leaf shading must sample original native field pigment and gradient normals; no native appearance certificate"
+        }
+      },
+      "low": [
+        -2.8826358318328857,
+        -0.5065916776657104,
+        -3.067716121673584
+      ],
+      "high": [
+        2.4522266387939453,
+        7.534547805786133,
+        5.796335220336914
+      ],
+      "centre": [
+        -0.21520459651947021,
+        3.513978064060211,
+        1.364309549331665
+      ],
+      "radius": 6.5525663769557605,
+      "lodErrorMetres": 3.6166979985382692,
+      "source": {
+        "firstIndex": 116187,
+        "indexCount": 5784,
+        "indices": {
+          "bytes": 23136,
+          "sha256": "dc906231d8b845982d1e60fcb51c9b2a3a830d96a0de9a952bad2a08ee4066ce"
+        }
+      },
+      "simplification": {
+        "reportedErrorMetres": 0.10322269624252556,
+        "targetMet": true
+      }
+    },
+    {
+      "id": 3,
+      "species": "elm",
+      "firstIndex": 11244,
+      "indexCount": 5226,
+      "wood": {
+        "firstIndex": 11244,
+        "indexCount": 3300,
+        "simplification": {
+          "originalTriangles": 11056,
+          "nonzeroInputTriangles": 11056,
+          "sourceVertexRecords": 7902,
+          "triangles": 1100,
+          "vertices": 657,
+          "targetTriangles": 256,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 17.675025939941406,
+          "targetRelativeError": 0.019801950082182884,
+          "reportedRelativeError": 0.019779814407229424,
+          "reportedErrorMetres": 0.3496087327350068,
+          "shadingProfile": "vertex",
+          "attributeWeights": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "sourceIndices": {
+            "bytes": 132672,
+            "sha256": "5754b449889cd0c6932158f5e38374a7ae1a217612fa198fc30b0e68afa3dfac"
+          },
+          "retainedVertexRecords": {
+            "bytes": 34164,
+            "sha256": "1d7e24b862616a8d0be72ea5807a8cd56b5d102c0f90717514504d48e825d0e7"
+          },
+          "qualification": "Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate"
+        }
+      },
+      "leaf": {
+        "firstIndex": 14544,
+        "indexCount": 1926,
+        "simplification": {
+          "originalTriangles": 9488,
+          "nonzeroInputTriangles": 9488,
+          "sourceVertexRecords": 4744,
+          "triangles": 642,
+          "vertices": 321,
+          "targetTriangles": 512,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 19.81863784790039,
+          "targetRelativeError": 0.017660142853856087,
+          "reportedRelativeError": 0.01742001436650753,
+          "reportedErrorMetres": 0.3452409560350347,
+          "shadingProfile": "field",
+          "attributeWeights": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sourceIndices": {
+            "bytes": 113856,
+            "sha256": "b8d02b388b8feb9e9e80d9f2c0700981b6c7a1d2d577bc8ff89aa4c33b16a8cc"
+          },
+          "retainedVertexRecords": {
+            "bytes": 16692,
+            "sha256": "0a0b02c691adb5bb9798a1eb38ad67010d94e7edc92c2f2e9bcecdcd3c8aacd6"
+          },
+          "qualification": "Meshoptimizer reported position-only error; GPU leaf shading must sample original native field pigment and gradient normals; no native appearance certificate"
+        }
+      },
+      "low": [
+        -8.26025104522705,
+        -0.3970069885253906,
+        -11.58515453338623
+      ],
+      "high": [
+        9.826961517333984,
+        17.133939743041992,
+        8.010807037353516
+      ],
+      "centre": [
+        0.7833552360534668,
+        8.3684663772583,
+        -1.7871737480163574
+      ],
+      "radius": 15.957840707594876,
+      "lodErrorMetres": 3.8630840350307505,
+      "source": {
+        "firstIndex": 121971,
+        "indexCount": 61632,
+        "indices": {
+          "bytes": 246528,
+          "sha256": "06c66471ef8cc017c61e2170a3b15183bae08d4b0c121285b77c56bd8419c937"
+        }
+      },
+      "simplification": {
+        "reportedErrorMetres": 0.3496087327350068,
+        "targetMet": false
+      }
+    },
+    {
+      "id": 4,
+      "species": "chestnut",
+      "firstIndex": 16470,
+      "indexCount": 7275,
+      "wood": {
+        "firstIndex": 16470,
+        "indexCount": 5361,
+        "simplification": {
+          "originalTriangles": 13937,
+          "nonzeroInputTriangles": 13937,
+          "sourceVertexRecords": 9306,
+          "triangles": 1787,
+          "vertices": 939,
+          "targetTriangles": 256,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 21.135677337646484,
+          "targetRelativeError": 0.016559677198529243,
+          "reportedRelativeError": 0.016531191766262054,
+          "reportedErrorMetres": 0.34939793517847306,
+          "shadingProfile": "vertex",
+          "attributeWeights": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "sourceIndices": {
+            "bytes": 167244,
+            "sha256": "f05c39b0e2ae977d9051b10ae7712a846fbe176ca35e108c2e5b0160f531b0ae"
+          },
+          "retainedVertexRecords": {
+            "bytes": 48828,
+            "sha256": "2bfab252507e98fadf26c4e2738df71d663e0670ed890b1963fea552b60b9c96"
+          },
+          "qualification": "Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate"
+        }
+      },
+      "leaf": {
+        "firstIndex": 21831,
+        "indexCount": 1914,
+        "simplification": {
+          "originalTriangles": 10184,
+          "nonzeroInputTriangles": 10184,
+          "sourceVertexRecords": 5094,
+          "triangles": 638,
+          "vertices": 321,
+          "targetTriangles": 512,
+          "targetMet": false,
+          "removedInputZeroAreaTriangles": 0,
+          "removedOutputZeroAreaTriangles": 0,
+          "positionScaleMetres": 21.983386993408203,
+          "targetRelativeError": 0.015921112149953842,
+          "reportedRelativeError": 0.01579960808157921,
+          "reportedErrorMetres": 0.3473288988015355,
+          "shadingProfile": "field",
+          "attributeWeights": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sourceIndices": {
+            "bytes": 122208,
+            "sha256": "b4aa0fb78ab266bccd0143ddce0ae63012b64edfb4a66889578d634f89c2a7a8"
+          },
+          "retainedVertexRecords": {
+            "bytes": 16692,
+            "sha256": "5e1b34ccaac2eb109208d6033aa0be2e6da4956946b03a0b002753427e8b1af7"
+          },
+          "qualification": "Meshoptimizer reported position-only error; GPU leaf shading must sample original native field pigment and gradient normals; no native appearance certificate"
+        }
+      },
+      "low": [
+        -6.340816974639893,
+        -0.2513144016265869,
+        -8.168180465698242
+      ],
+      "high": [
+        10.387020111083984,
+        21.60144805908203,
+        10.533767700195312
+      ],
+      "centre": [
+        2.023101568222046,
+        10.675066828727722,
+        1.1827936172485352
+      ],
+      "radius": 16.63775618871092,
+      "lodErrorMetres": 3.8628732374742167,
+      "source": {
+        "firstIndex": 183603,
+        "indexCount": 72363,
+        "indices": {
+          "bytes": 289452,
+          "sha256": "7680c157634d4bc5f0e5b3c0136f8b899d12e5e7ab3b60c78422a12c0f7c2948"
+        }
+      },
+      "simplification": {
+        "reportedErrorMetres": 0.34939793517847306,
+        "targetMet": false
+      }
+    }
+  ],
+  "files": {
+    "middle-vertices.bin": {
+      "bytes": 229892,
+      "sha256": "dc58dd1d7c1100d1e6e26c07d4d045d397476e7022d90a6c40f4adf7f9a1ef36",
+      "gzip": {
+        "file": "middle-vertices.bin.gz",
+        "bytes": 147903,
+        "sha256": "2f3c123cd6438cd82f80e2f583ba8d9a81a70e91ed9807e573055f472d4e1685"
+      }
+    },
+    "middle-indices.bin": {
+      "bytes": 94980,
+      "sha256": "5b8f51926ded8b79765cfe5a6a197f4a655fb8bf0a02877873c7d235cb0232a9",
+      "gzip": {
+        "file": "middle-indices.bin.gz",
+        "bytes": 27818,
+        "sha256": "968f43c4a5a03c70f213f1a635ed8166652e5315b971f8e0492158acdb140cb5"
+      }
+    }
+  },
+  "appearanceErrorSupported": false,
+  "validation": null
+}

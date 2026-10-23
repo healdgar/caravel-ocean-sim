@@ -8,7 +8,7 @@ import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 
-test('native leaf complementary cutouts diagnose layered hardware alpha-to-coverage against binary area reference',{timeout:120000},async t=>{
+test('native leaves accumulate independent sample coverage while reporting lost source-mask correlation',{timeout:120000},async t=>{
   const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
@@ -18,6 +18,7 @@ test('native leaf complementary cutouts diagnose layered hardware alpha-to-cover
     const result=await page.evaluate(async()=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js');
       const {createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT,FOREST_SURFACE_MIPS_WGSL}=await import('/js/forest-scenery.js');
+      const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),errors=[],buffers=[],textures=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage;
@@ -61,14 +62,15 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       const vertices=make(new Float32Array(rows),B.VERTEX),indices=make(new Uint32Array(indexRows),B.INDEX);
       const layout0=device.createBindGroupLayout({entries:[{binding:0,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}}]}),layout1=device.createBindGroupLayout({entries:[]});
       const entries=[{binding:0,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:1,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:2,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}},
-        {binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:{type:'read-only-storage'}},{binding:13,visibility:S.FRAGMENT,sampler:{}}];
+        {binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:{type:'read-only-storage'}},{binding:13,visibility:S.FRAGMENT,sampler:{}},{binding:14,visibility:S.VERTEX,buffer:{type:'read-only-storage'}}];
       for(const binding of [3,4,7,8,9,10,11,12])entries.push({binding,visibility:S.FRAGMENT,texture:{viewDimension:'2d-array'}});
       const layout2=device.createBindGroupLayout({entries}),layout=device.createPipelineLayout({bindGroupLayouts:[layout0,layout1,layout2]});
       const pipeline=await device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestNativeLeafFS',targets:[{format:'rgba16float'}]},
-        primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:true}});
+        primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:false}});
       const group0=device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:frame}}]}),group1=device.createBindGroup({layout:layout1,entries:[]});
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4}),repeat=device.createSampler({addressModeU:'repeat',addressModeV:'repeat',magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4});
-      const bindings=[roots,visible,bin].map((buffer,binding)=>({binding,resource:{buffer}}));bindings.push({binding:5,resource:sampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:repeat});
+      const canopyLight=make(forestLightGPUBytes(),B.STORAGE);
+      const bindings=[roots,visible,bin].map((buffer,binding)=>({binding,resource:{buffer}}));bindings.push({binding:5,resource:sampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:repeat},{binding:14,resource:{buffer:canopyLight}});
       for(let family=0;family<4;family++){const first=family?5+family*2:3,f=surfaces.families[0];bindings.push({binding:first,resource:f.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:f.normal.createView({dimension:'2d-array'})});}
       const group2=device.createBindGroup({layout:layout2,entries:bindings});
       const target=scale=>{const size=[W*scale,H*scale],resolve=device.createTexture({size,format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING|T.COPY_SRC}),msaa=device.createTexture({size,format:'rgba16float',sampleCount:4,usage:T.RENDER_ATTACHMENT}),depth=device.createTexture({size,format:'depth32float',sampleCount:4,usage:T.RENDER_ATTACHMENT});textures.push(resolve,msaa,depth);return {resolve,msaa,depth};};
@@ -95,7 +97,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       }
       const sourceSHA256=await digest(new TextEncoder().encode(FOREST_VERTEX_WGSL+FOREST_SURFACE_MIPS_WGSL));
       await device.queue.onSubmittedWorkDone();surfaces.destroy();for(const b of buffers)b.destroy();for(const texture of textures)texture.destroy();device.destroy();
-      return {errors,terminalMips,results,sourceSHA256,adapter:Object.fromEntries(['vendor','architecture','device','description'].map(k=>[k,adapter.info?.[k]??''])),policy:{geometry:'Ten immutable full-screen cards; four complementary4×4 binary source masks; no geometric subpixel loss',logical:[W,H],reference:[W*SCALE,H*SCALE],referenceSamples:64,measurement:'White linear R; resolved alpha reported separately',runtime:'Actual native surface mip generator and actual forestNativeLeafFS; hardware MSAA4 alpha-to-coverage/depth; no production change',groundTruth:'Reference resolves original binary source texels at level0, equivalent to their MASK.35 law; complementary union1, identical union.25'}};
+      return {errors,terminalMips,results,sourceSHA256,adapter:Object.fromEntries(['vendor','architecture','device','description'].map(k=>[k,adapter.info?.[k]??''])),policy:{geometry:'Ten immutable full-screen cards; four complementary4×4 binary source masks; no geometric subpixel loss',logical:[W,H],reference:[W*SCALE,H*SCALE],referenceSamples:64,measurement:'White linear R; resolved alpha reported separately',runtime:'Actual native mips/fragment shader, stable independently seeded MSAA4 coverage; averaged mips cannot retain inter-layer source correlation',groundTruth:'Reference resolves original binary source texels at level0, equivalent to their MASK.35 law; complementary union1, identical union.25'}};
     });
     assert.deepEqual(result.errors,[]);
     for(let layer=0;layer<6;layer++){const expected=layer<4?.25:layer===4?1:0;assert.ok(Math.abs(result.terminalMips[layer*4+3]-expected)<.001,'actual terminal source alpha '+layer);}
@@ -103,10 +105,13 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       assert.ok(Math.abs(row.reference.coverage-row.expectedBinaryUnion)<.002,'independent binary area reference '+JSON.stringify(row));
       assert.ok(Number.isFinite(row.runtime.coverage)&&row.runtime.coverage>=0&&row.runtime.coverage<=1,'bounded measured runtime coverage');
       if(row.name==='opaque'||row.name==='empty')assert.ok(Math.abs(row.runtime.coverage-row.expectedBinaryUnion)<.002,'runtime opaque/empty control');
+      if(row.name==='single-quarter')assert.ok(Math.abs(row.runtime.coverage-.25)<.01,'a single native footprint retains its source integrated area');
+      if(row.name==='identical-quarter'||row.name==='complementary-quarter')assert.ok(Math.abs(row.runtime.coverage-(1-.75**4))<.03,'distinct footprints accumulate independent optical coverage, instead of sharing one hardware mask');
     }
     for(const name of ['empty','opaque','single-quarter','identical-quarter','complementary-quarter']){
       const rows=result.results.filter(row=>row.name===name);assert.ok(Math.abs(rows[0].reference.coverage-rows[1].reference.coverage)<.001,'binary reference independent of draw order '+name);
+      assert.ok(Math.abs(rows[0].runtime.coverage-rows[1].runtime.coverage)<.001,'runtime independent of draw order '+name);
     }
-    t.diagnostic(JSON.stringify({...result,interpretation:'Runtime complementary deficit is reported, not hidden by an opacity correction or a passing fidelity claim. Hardware mask correlation remains a measured device-specific conclusion.'}));
+    t.diagnostic(JSON.stringify({...result,interpretation:'Native coverage now integrates distinct leaf footprints independently. Single-layer area and draw-order invariance pass. Deliberately correlated identical/complementary source masks still expose averaged-mip uncertainty; this is not an exact binary-union certificate.'}));
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

@@ -16,6 +16,8 @@ function forestMiddleManifest(m,native,base){
  if(m?.format!=='waterworld.native-forest-middle'||m.version!==1||m.vertexStride!==52||m.units!=='metres'||m.upAxis!=='Y'||m.appearanceErrorSupported!==false||m.geometryErrorSupported===true||m.validation!==null||
   m.recipe?.version!==1||m.recipe.api!=='simplifyWithAttributes'||JSON.stringify(m.recipe.flags)!=='["LockBorder"]'||!Number.isFinite(m.recipe.maximumReportedErrorMetres)||m.recipe.maximumReportedErrorMetres<=0||m.recipe.maximumReportedErrorMetres>.4||
   !Array.isArray(m.prototypes)||!Array.isArray(native?.prototypes)||!Array.isArray(base?.prototypes)||!m.prototypes.length||m.prototypes.length!==native.prototypes.length||m.prototypes.length!==base.prototypes.length)throw Error('Invalid native forest middle manifest');
+ if(m.recipe.leafShading!==undefined&&(!['vertex','field'].includes(m.recipe.leafShading)||
+  JSON.stringify(m.recipe.leafAttributeWeights)!==JSON.stringify(Array(6).fill(m.recipe.leafShading==='field'?0:1))||JSON.stringify(m.recipe.woodAttributeWeights)!=='[1,1,1,1,1,1]'))throw Error('Invalid native forest middle shading profile');
  for(const name of ['vertices.bin','indices.bin','roots.bin'])if(!forestMiddleSame(m.source?.files?.[name],native.files?.[name])||!forestMiddleSame(base.source?.files?.[name],native.files?.[name]))throw Error('Native forest middle source mismatch: '+name);
  for(const name of ['middle-vertices.bin','middle-indices.bin']){
   const item=m.files?.[name];if(!forestMiddleReceipt(item)||item.bytes%(name==='middle-vertices.bin'?52:12)||!forestMiddleReceipt(item.gzip)||item.gzip.bytes>100*1024*1024||item.gzip.file!==name+'.gz'||item.meshopt!==undefined)throw Error('Invalid native forest middle stream: '+name);

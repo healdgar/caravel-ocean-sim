@@ -17,6 +17,7 @@ test('native wood, leaves and generated middle clip buried roots at the instance
     const result=await page.evaluate(async()=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js');
       const {createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT,FOREST_MIDDLE_VERTEX_LAYOUT}=await import('/js/forest-scenery.js');
+      const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage,errors=[],buffers=[],textures=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const shader=async(code,label)=>{const module=device.createShaderModule({code,label}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
@@ -38,11 +39,12 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       const W=128,H=128,fd=new Float32Array(96),frame=make(fd,B.UNIFORM,'collar frame'),rootData=new Float32Array([7,10,2,1,0,1,1,1,0,0,-1,0]),roots=make(rootData,B.STORAGE,'collar instance'),visible=make(new Uint32Array([0]),B.STORAGE,'collar visible ID'),bin=make(new Uint32Array([0,0,2,0]),B.UNIFORM,'collar bin'),materials=make(surfaces.optics,B.STORAGE,'collar exact source optics');
       const layout0=device.createBindGroupLayout({entries:[{binding:0,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}}]}),layout1=device.createBindGroupLayout({entries:[]});
       const entries=[{binding:0,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:1,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:2,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}},
-        {binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:{type:'read-only-storage'}},{binding:13,visibility:S.FRAGMENT,sampler:{}}];
+        {binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:{type:'read-only-storage'}},{binding:13,visibility:S.FRAGMENT,sampler:{}},{binding:14,visibility:S.VERTEX,buffer:{type:'read-only-storage'}}];
       for(const binding of [3,4,7,8,9,10,11,12])entries.push({binding,visibility:S.FRAGMENT,texture:{viewDimension:'2d-array'}});
       const layout2=device.createBindGroupLayout({entries}),layout=device.createPipelineLayout({bindGroupLayouts:[layout0,layout1,layout2]});
       const group0=device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:frame}}]}),group1=device.createBindGroup({layout:layout1,entries:[]}),sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear'});
-      const bindings=[roots,visible,bin].map((buffer,binding)=>({binding,resource:{buffer}}));bindings.push({binding:5,resource:sampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:sampler});
+      const canopyLight=make(forestLightGPUBytes(),B.STORAGE,'collar neutral source canopy light');
+      const bindings=[roots,visible,bin].map((buffer,binding)=>({binding,resource:{buffer}}));bindings.push({binding:5,resource:sampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:sampler},{binding:14,resource:{buffer:canopyLight}});
       for(let family=0;family<4;family++){const first=family?5+family*2:3,f=surfaces.families[0];bindings.push({binding:first,resource:f.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:f.normal.createView({dimension:'2d-array'})});}
       const group2=device.createBindGroup({layout:layout2,entries:bindings});
       const fixtures=[];
@@ -54,7 +56,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
           const corners=[[x0,y0,0,1],[x1,y0,1,1],[x1,y1,1,0],[x0,y1,0,0]];
           for(const id of [0,1,2,0,2,3]){const [x,y,u,v]=corners[id];rows.push(x,y,0,0,0,1,kind,.72,u,v,1,1,1,...(middle?[]:[material]));}
         }
-        const vertices=make(new Float32Array(rows),B.VERTEX,'immutable collar '+name),pipeline=await device.createRenderPipelineAsync({label:'collar '+name,layout,vertex:{module,entryPoint:middle?'forestMiddleVS':'forestCanopyVS',buffers:[middle?FOREST_MIDDLE_VERTEX_LAYOUT:FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint:middle?'forestMiddleFS':name==='leaf'?'forestNativeLeafFS':'forestNativeOpaqueFS',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:name==='leaf'}});
+        const vertices=make(new Float32Array(rows),B.VERTEX,'immutable collar '+name),pipeline=await device.createRenderPipelineAsync({label:'collar '+name,layout,vertex:{module,entryPoint:middle?'forestMiddleVS':'forestCanopyVS',buffers:[middle?FOREST_MIDDLE_VERTEX_LAYOUT:FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint:middle?'forestMiddleFS':name==='leaf'?'forestNativeLeafFS':'forestNativeOpaqueFS',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:false}});
         fixtures.push({name,vertices,pipeline});
       }
       const resolve=device.createTexture({size:[W,H],format:'rgba8unorm',usage:T.RENDER_ATTACHMENT|T.COPY_SRC}),msaa=device.createTexture({size:[W,H],format:'rgba8unorm',sampleCount:4,usage:T.RENDER_ATTACHMENT}),depth=device.createTexture({size:[W,H],format:'depth32float',sampleCount:4,usage:T.RENDER_ATTACHMENT});textures.push(resolve,msaa,depth);

@@ -52,12 +52,14 @@ export async function loadForestLight({forest,receipt=forest?.canopyShade,fetchA
 }
 
 export function forestLightGPUBytes(light=null){
- if(light==null){const neutral=new Uint8Array(20);neutral.fill(255,16);return neutral;}
+ // The runtime array's first word rounds the whole WGSL struct to32B because
+ // its vec4 header has16B alignment. Empty/small fixtures need that minimum.
+ if(light==null){const neutral=new Uint8Array(32);neutral.fill(255,16);return neutral;}
  const count=light.manifest?.vertexCount,bytes=light.bytes;
  if(light.sourceValidated!==true||!forestLightUint(count)||count===0||count>0xffffffff||!(bytes instanceof Uint8Array)||
   bytes.byteLength!==forestLightPadded(count)||bytes.byteLength>forestLightMaxBytes)throw Error('Unverified native forest canopy light GPU data');
  for(let i=count;i<bytes.length;i++)if(bytes[i]!==255)throw Error('Native forest canopy light GPU padding must be neutral 255');
- const result=new Uint8Array(16+bytes.byteLength);new DataView(result.buffer).setUint32(0,count,true);result.set(bytes,16);return result;
+ const result=new Uint8Array(Math.max(32,16+bytes.byteLength));result.fill(255,16);new DataView(result.buffer).setUint32(0,count,true);result.set(bytes,16);return result;
 }
 
 export const FOREST_LIGHT_WGSL=/* wgsl */`

@@ -40,7 +40,7 @@ Each species has an NPZ containing:
 |---|---|
 | `originXYZ` | Float64 centre of voxel `[0,0,0]`, Y-up metres |
 | `cellMetres` | Float64 scalar; 0.25 m in cache 260 |
-| `density[x,y,z]` | Float32 leaf area per volume, m²/m³ |
+| `density[x,y,z]` | Float32 opaque one-sided render-proxy area per volume, m²/m³ |
 | `rgbMoment[x,y,z,3]` | Float32 linear RGB multiplied by density |
 
 Cache 260 uses a 0.30 m geometric quadrature edge, with mixed-MASK patches
@@ -61,6 +61,10 @@ extracts one isosurface. Uniform scale `s` divides density and RGB moments by `s
 so integrated leaf area scales as `s²`; root tint affects RGB moments once.
 Surface pigment is the interpolated RGB moment divided by density.
 
+This is **rendered proxy area**, not biological leaf area. Forestmodeler's card
+tiers carry a `2/opaque_fraction` representation factor. These fields never feed
+growth, carbon, biomass or ecological light calculations.
+
 Region 268 uses a shared 2 m world lattice, density level 0.08 m²/m³ and
 128 m ownership blocks. Neighboring roots contribute through complete field
 halos. Shared-lattice triangle ownership partitions block boundaries without
@@ -78,8 +82,7 @@ terrain/seating helpers, not its crown geometry.
 The intermediate prototypes use the individual density surfaces plus original
 woody membership clustered in 0.15 m spatial cells, separately per source
 material. Their bark pigment comes from original maps. These are reduced render
-meshes, not unchanged native geometry. Optional further simplification is under
-development and has no qualified size or quality claim here.
+meshes, not unchanged native geometry. The current middle refinement is below.
 
 ## Local authoring measurements
 
@@ -148,7 +151,7 @@ Do not relabel finite passing views, source hashes or the footprint projection
 as global visual certification. Neither manifests 268/270 nor this document
 establish a released checkpoint.
 
-## Local integration review — release held
+## Earlier integration review — superseded coastal cost
 
 The installed candidate uses the original compact mesh plus exact transport
 (checkpoint270). Source and packaged Pages builds render the horizon and approach
@@ -156,7 +159,7 @@ views with537 selected mass blocks. Three source views and two packaged views
 completed without GPU/device errors. Local startup took4.7–5.0seconds on this Mac;
 that is loopback loading, not a public-network or iPhone measurement.
 
-The coast is **not release-ready**. At1280×900 in visible-scene settings with
+The earlier coast was **not release-ready**. At1280×900 in visible-scene settings with
 wind/waves/clouds disabled, headless Metal measured2.35FPS:8,108 original Hero
 trees submit3,383,970,921 native triangles, plus40,344 middle trees submitting
 498,152,759 triangles. The forest's buffers alone occupy647,218,092bytes.
@@ -164,10 +167,8 @@ The distant views' roughly118 uncapped frames/second do not establish the
 ordinary game's60FPS target. Receipts: `/tmp/waterworld-native-mass-scenes-279`
 and `/tmp/waterworld-native-mass-package-scenes-288`.
 
-Next, add calibrated source-derived tree detail levels and GPU visibility work
-between original Hero geometry and the middle surface. Do not silently weaken
-the3-pixel policy, force coarse geometry, or claim native equivalence from these
-finite views. Public assets remain unchanged.
+This measured the missing intermediate representation, subsequently addressed
+below. Public assets remain unchanged.
 
 An offline seam-locked simplifier was also exercised. It preserves surviving
 position/normal/colour records and exact shared spatial seams, removes only
@@ -175,6 +176,75 @@ reported exact-zero-area faces, and retains original geometry if seam/attribute
 checks fail. Region287 reduced16,889,295triangles to16,397,951 (2.9%), with no
 fallback chunks. This small saving does not solve coastal cost; **that reduction
 is not installed**. Its error estimate is not a native appearance certificate.
+
+## Native lighting and field-shaded middle refinement
+
+`prepare-forest-light.py` bakes five-ray own-canopy escape at the original native
+vertex addresses. The neutral GPU storage record is 32 bytes, respecting WGSL
+struct alignment. Native positions, UVs, normals and material maps remain exact.
+Own-canopy exposure affects ambient and direct response; terrain/cloud lighting
+still changes normally. This static exposure is not a directional shadow map.
+
+Hardware alpha-to-coverage was giving small overlapping leaf primitives matching
+MSAA masks. `forestNativeLeafFS` now rotates explicit sample masks with stable
+original primitive/root/pixel hashes. A 25% layer remains 25%; four independent
+layers measure about 68%, rather than remaining 25%. The expected independent
+union is 68.36%. Perfectly correlated/complementary binary masks cannot be
+reconstructed from averaged mip alpha; the tests retain that limitation.
+
+`prepare-forest-volume.py` packages source density/pigment moments as x-fastest
+RGBA16F and own-canopy escape as R8. Five immutable fields total 20,045,772
+decoded texture bytes. A bounded box raymarch remains a diagnostic: it improved
+the coast to only 7.68 FPS because overlapping rays remained expensive.
+
+The default middle uses an **actual source-density surface**, not a box or crown
+dome. `simplify-forest-middle.mjs` preserves surviving 52-byte records and changes
+indices only, separately reducing wood and leaf ranges. Pinned meshoptimizer
+1.3.0 reports at most 0.35 m error; triangle targets never override that cap.
+The `field` leaf profile drops normal/pigment attribute weights because the GPU
+resamples them from the original field. Wood retains its shading weights.
+
+| Prototype | Wood triangles | Leaf triangles | Total |
+|---|---:|---:|---:|
+| Oak | 1,056 | 588 | 1,644 |
+| Maple | 826 | 512 | 1,338 |
+| Birch | 254 | 512 | 766 |
+| Elm | 1,100 | 642 | 1,742 |
+| Chestnut | 1,787 | 638 | 2,425 |
+
+The ordinary opaque raster supplies silhouette and depth. Six interior samples
+recover density-weighted source pigment/exposure, six density samples recover
+lobe normals, and four short sun samples add local extinction. No fragment-depth
+override, transparent blending, per-frame CPU geometry or GPU readback occurs.
+Middle wood and foliage share the same GPU-compacted root IDs. Missing or invalid
+optional fields/reduction fall back explicitly; stats retain the error.
+
+The middle policy projects the voxel sampling footprint plus reported reduction
+error through actual framebuffer pixels, FOV and nearest/off-axis depth. Far
+mass retains its previous support estimate and ownership policy. These remain
+**authored approximation estimates**, not native appearance certificates.
+
+Local Metal results at 1280×900, wind/waves/clouds/ships/crew disabled:
+
+| View | Source FPS | Packaged FPS | Selected mass blocks |
+|---|---:|---:|---:|
+| Approach | 122.1 | 122.1 | 537 |
+| Coast | 57.1 | 54.5 | 167 |
+
+The coast now selects two native roots and 48,368 middle roots. Forest buffer
+storage is still 647,238,968 bytes, plus the new field textures. Packaged startup
+was 5.52–5.99 seconds over loopback. These finite static views do not establish
+ordinary-game, native Retina or iPhone frame rate. Close terrain remains a
+separate quality issue. Source receipts: `/tmp/waterworld-forest-shell-scenes-313`;
+packaged receipts: `/tmp/waterworld-forest-shell-package-316`.
+
+Combined regression 315 passes 63 loader/material/build/GPU checks; Python run
+317 passes ten lighting/volume fixtures. The strict native appearance witnesses
+267 remain unqualified. No release or global 3-pixel likeness claim follows.
+
+Forestmodeler now receives portable render-field/surface modules and a Three.js
+adapter, documented in its `docs/FOLIAGE_LOD.md`. These reuse finished mature
+meshes and caches without regrowing trees or changing biological quantities.
 
 ## Reproduce bounded checkpoints
 

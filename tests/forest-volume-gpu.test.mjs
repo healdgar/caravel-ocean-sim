@@ -46,7 +46,8 @@ test('production forest volume integrates density, tint, escape and hit depth on
 // R preserves source pigment/tint for coverage recovery; G/B expose the real
 // ambient/diffuse terms passed by the production optical shader.
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo.r,ambient,diffuse,1);}
-`+FOREST_VERTEX_WGSL+FOREST_VOLUME_WGSL);
+`+FOREST_VERTEX_WGSL);
+      if(!FOREST_VERTEX_WGSL.includes(FOREST_VOLUME_WGSL))throw Error('Production shader must include the exact volume entry points');
       const pipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'forestVolumeVS'},fragment:{module,entryPoint:'forestVolumeFS',targets:[{format:'rgba16float'}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:true}});
       const W=256,H=128,fd=new Float32Array(96);fd[0]=1/.8;fd[5]=1/.4;fd[11]=-1;fd[14]=.1;fd.set([0,10.5,10,0],16);fd.set([.8,0,0],20);fd.set([0,.4,0],24);fd.set([0,0,-1],28);fd.set([0,0,1,1],32);fd.set([W,H,1/W,1/H],36);
       const frame=make(fd,B.UNIFORM,'fixture volume frame'),rootData=new Float32Array([-2.5,10,0,1,0,1,1,1,0,0,-1,0,2.5,10,0,1.5,Math.PI,.5,1,1,0,0,-1,0]),roots=make(rootData,B.STORAGE,'fixture immutable volume roots'),visible=make(new Uint32Array([0,1]),B.STORAGE,'fixture immutable volume visible IDs'),bin=make(new Uint32Array(4),B.UNIFORM,'fixture immutable volume bin');

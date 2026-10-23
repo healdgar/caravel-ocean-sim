@@ -26,6 +26,24 @@ export const FOREST_MASS_ASSETS=Object.freeze({
  'middle-indices.bin.gz':'assets/forest-scenery/saba/mass/middle-indices.bin.gz',
  'root-neighbors.bin.gz':'assets/forest-scenery/saba/mass/root-neighbors.bin.gz',
 });
+// Partition only verified, already-generated middle triangles, once at load.
+// Volumetric foliage reuses their genuine native woody structure, without
+// submitting the old opaque foliage isosurface underneath it.
+export function forestMiddleWoodPartition(vertices,indices,prototypes){
+ if(!(vertices instanceof Float32Array)||vertices.length%13||!(indices instanceof Uint32Array)||!Array.isArray(prototypes))throw Error('Invalid forest middle wood source');
+ const selected=[],ranges=[];
+ for(const p of prototypes){
+  const firstIndex=selected.length;
+  if(!Number.isSafeInteger(p.firstIndex)||!Number.isSafeInteger(p.indexCount)||p.indexCount%3||p.firstIndex<0||p.firstIndex+p.indexCount>indices.length)throw Error('Invalid forest middle wood range');
+  for(let at=p.firstIndex;at<p.firstIndex+p.indexCount;at+=3){
+   const face=indices.subarray(at,at+3),kinds=Array.from(face,id=>id*13+6<vertices.length?vertices[id*13+6]:NaN);
+   if(!kinds.every(kind=>kind===kinds[0]&&(kind===3||kind===4)))throw Error('Mixed or invalid forest middle material triangle');
+   if(kinds[0]===3)selected.push(...face);
+  }
+  ranges.push({...p,firstIndex,indexCount:selected.length-firstIndex});
+ }
+ return {indices:new Uint32Array(selected),prototypes:ranges};
+}
 const forestMassNames=['vertices.bin','indices.bin','root-chunks.bin'];
 const forestMassMiddleNames=['middle-vertices.bin','middle-indices.bin'];
 const forestMassStreams=m=>[...forestMassNames,...(m.prototypes?forestMassMiddleNames:[]),...(m.files['root-neighbors.bin']?['root-neighbors.bin']:[])];
@@ -174,12 +192,16 @@ struct ForestMassBlock {bound:vec4f,lowError:vec4f,high:vec4f,draw:vec4u};
 }
 `;
 
-export async function createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,mode='auto',pixelError=3,preview=false}){
+export async function createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,middlePack=null,mode='auto',pixelError=3,preview=false}){
  if(!['auto','near','far'].includes(mode)||!(pixelError>0&&pixelError<=3)||typeof preview!=='boolean'||pack.finiteValidated!==true)throw Error('Invalid native forest mass render policy/validation');
  const allocated=[],B=GPUBufferUsage,m=pack.manifest,make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const buffer=device.createBuffer({label,size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST});allocated.push(buffer);if(data.byteLength)device.queue.writeBuffer(buffer,0,data);return buffer;};
  try{
   const vertices=make(pack.vertices,B.VERTEX,'forest mass immutable vertices'),indices=make(pack.indices,B.INDEX,'forest mass immutable indices');
-  const middle=pack.middleVertices?{vertices:make(pack.middleVertices,B.VERTEX,'forest middle immutable native-derived vertices'),indices:make(pack.middleIndices,B.INDEX,'forest middle immutable native-derived indices'),prototypes:m.prototypes}:null;
+  if(middlePack&&middlePack.sourceValidated!==true)throw Error('Unverified reduced forest middle');
+  const middleSource=middlePack??(pack.middleVertices?{vertices:pack.middleVertices,indices:pack.middleIndices,prototypes:m.prototypes}:null);
+  const wood=middleSource?forestMiddleWoodPartition(middleSource.vertices,middleSource.indices,middleSource.prototypes):null;
+  const middle=middleSource?{vertices:make(middleSource.vertices,B.VERTEX,'forest middle immutable native-derived vertices'),indices:make(middleSource.indices,B.INDEX,'forest middle immutable native-derived indices'),prototypes:middleSource.prototypes,reduced:!!middlePack,
+   woodIndices:make(wood.indices,B.INDEX,'forest middle immutable native wood indices'),woodPrototypes:wood.prototypes}:null;
   const neighbors=pack.rootNeighbors?make(pack.rootNeighbors,B.STORAGE,'forest mass immutable root neighbors'):null;
   const metadata=new ArrayBuffer(m.chunks.length*64),floats=new Float32Array(metadata),words=new Uint32Array(metadata),draws=new Uint32Array(m.chunks.length*5);
   for(const p of m.chunks){const at=p.id*16,centre=p.centre.map(Math.fround),radius=forestMassUpward(p.radius+Math.hypot(...centre.map((v,k)=>v-p.centre[k])));floats.set([...centre,radius,...p.low,forestMassUpward(p.lodErrorMetres),...p.high,0],at);words.set([p.firstIndex,p.indexCount,p.rootCount,0],at+12);draws.set([p.indexCount,0,p.firstIndex,0,0],p.id*5);}
@@ -191,7 +213,7 @@ export async function createForestMassRenderer({device,module,frameUBO,shader,re
   const pipeline=await device.createRenderPipelineAsync({label:'forest mass opaque native density surface',layout:'auto',vertex:{module,entryPoint:m.version===2?'forestMassVS':'bakedCanopyVS',buffers:[m.version===2?FOREST_MASS_VERTEX_LAYOUT:CANOPY_VERTEX_LAYOUT]},fragment:{module,entryPoint:'canopyOpaqueFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
   const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.filter(([id])=>id<=6).map(([binding,resource])=>({binding,resource}))});
   const bundle=device.createRenderBundleEncoder({label:'forest mass immutable indirect bundle',colorFormats:[format],depthStencilFormat:'depth32float',sampleCount:samples});bundle.setPipeline(pipeline);bundle.setBindGroup(0,group);bundle.setBindGroup(1,clouds.bindVolume(pipeline));bundle.setVertexBuffer(0,vertices);bundle.setIndexBuffer(indices,'uint32');for(const p of m.chunks)bundle.drawIndexedIndirect(commands,p.id*20);const recorded=[bundle.finish()];
-  const stats={loaded:true,blocks:m.chunks.length,sourceRoots:pack.rootChunks.length,gpuCulling:true,opaque:true,mode,pixelError,preview,finiteValidated:true,sourceReceiptsValidated:true,vertexStride:m.vertexStride,quantization:m.quantization??null,appearanceErrorSupported:false,geometryErrorSupported:false,nativeValidation:m.validation??null,neighborGuard:!!neighbors,middle:{loaded:!!middle,prototypes:middle?.prototypes.length??0,errorQualification:'Authored native sampling/wood-clustering footprint; no appearance certificate'},
+  const stats={loaded:true,blocks:m.chunks.length,sourceRoots:pack.rootChunks.length,gpuCulling:true,opaque:true,mode,pixelError,preview,finiteValidated:true,sourceReceiptsValidated:true,vertexStride:m.vertexStride,quantization:m.quantization??null,appearanceErrorSupported:false,geometryErrorSupported:false,nativeValidation:m.validation??null,neighborGuard:!!neighbors,middle:{loaded:!!middle,reduced:!!middlePack,prototypes:middle?.prototypes.length??0,triangles:middle?.prototypes.map(p=>p.indexCount/3)??[],errorQualification:'Authored native sampling/wood-clustering footprint; no appearance certificate'},
    phase:mode==='far'?'forced far debug; pixel threshold bypassed':mode==='near'?'native-only debug; mass disabled':preview?'explicit startup mass preview until native residency':'authored error-limited selection',selectionMetric:'Projected authored leaf-support/sampling footprint; native appearance unqualified',representation:'Continuous surface from original native leaf-area density and source pigment'};
   return{stats,rootChunks:pack.rootChunks,chunks:m.chunks,state,nativeResidency,commands,middle,neighbors,
    encode(pass){pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.chunks.length/64));},drawOpaque(pass){pass.executeBundles(recorded);},destroy(){for(const buffer of allocated)buffer.destroy();}};

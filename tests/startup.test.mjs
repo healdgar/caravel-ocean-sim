@@ -5,11 +5,12 @@ import {after,before,test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 let server,browser,origin;
-before(async()=>{
-  server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
-  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
+const launchStartupBrowser=()=>chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
     ?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']
     :['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+before(async()=>{
+  server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
+  browser=await launchStartupBrowser();
 });
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 
@@ -136,8 +137,13 @@ test('an explicit whale scene still waits for its requested model and reports fa
 });
 
 test('both downloadable ocean pages start offline without HTTP assets',{timeout:120000},async()=>{
+  // Failure-injection pages intentionally abort startup with GPU work pending.
+  // A downloaded distribution gets its own browser, retaining all timeouts.
+  await browser.close();browser=null;
+  const downloadBrowser=await launchStartupBrowser();
+  try{
   for(const file of ['ocean.html','ocean.min.html']){
-    const page=await browser.newPage(),external=[],messages=[],errors=[];
+    const page=await downloadBrowser.newPage(),external=[],messages=[],errors=[];
     const clip=value=>String(value).replace(/data:([^;,\s]+)[;,][^\s"')]+/g,'data:$1;[omitted]').slice(0,1800);
     const note=(type,message)=>{messages.push({type,message:clip(message)});if(messages.length>30)messages.shift();};
     let failFast;
@@ -162,4 +168,5 @@ test('both downloadable ocean pages start offline without HTTP assets',{timeout:
       assert.equal(await page.locator('#err').textContent(),'');
     }finally{await page.close();}
   }
+  }finally{await downloadBrowser.close();}
 });

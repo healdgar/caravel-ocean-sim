@@ -12,7 +12,7 @@ and require rendered before/after checks at approach and coast scales.
 
 ## October 22 afternoon: regional forest and closed-canopy correction
 
-**Release hold:** public still uses the old broad forest. The user explicitly
+**Release candidate:** the user authorized publication of the tested forest refinement. The user explicitly
 requires individual trees close, reduced geometry between, and a **solid,
 contiguous baked canopy mass** at distance. Individual transparent tree captures
 are not that representation. Transitions must use projected perceptible error,
@@ -45,14 +45,38 @@ uses native wood and those fields; distant geometry is opaque, not atlas cards.
 Actual GPU opacity/depth, immutable buffer and projected ownership checks pass.
 The24-view isolated stand review still fails strict native3px/20% coverage gates
 in many views; these remain diagnostic failures, not a certified transition.
-Three source sailing views and two packaged distant views now render with no
-GPU errors;47 focused source/transport/compiler/GPU/package regressions pass.
-Loopback landfall startup takes4.7–5.0s. Coast at1280×900 still measures2.35FPS:
-8,108 original Hero instances submit3.384billion native triangles;40,344 middle
-instances add498million. Buffer storage alone is647MB. The scene is deliberately
-unpublished. Preserve the original quality policy; add intermediate detail levels
-calibrated against native renders and GPU visibility before release. The source-
-derived mass remains installed locally using byte-exact transport270.
+The earlier coast measured2.35FPS at1280×900:8,108 original Hero instances
+submitted3.384billion native triangles;40,344 middle instances added498million.
+The current refinement adds a useful source-derived middle and fixes near
+lighting/coverage. Index-only reduction under a0.35m tool-reported cap retains
+766–2,425 triangles per prototype; interior3D fields recover pigment, density
+normals and own-canopy exposure. Ordinary opaque rasterization preserves real
+mesh depth; no bounding-box fill or per-frame CPU graphics is used. Native
+leaves retain source maps and geometry, with independent stable MSAA masks so
+overlapping filtered leaves accumulate rather than remaining a transparent veil.
+Five-ray exposure improves own-canopy lighting, without claiming inter-tree
+shadows. Far mass270 remains unchanged; projected authored sampling estimates
+retain the3px target and hysteresis, not a native-appearance certificate.
+
+Source and packaged approach/coast views render without GPU errors. Static
+coast is now57.1FPS source/54.5FPS packaged, selecting two native and48,368 middle
+roots; buffer storage remains647MB plus20MB of field textures. Packaged loopback
+startup takes5.52–5.99s. Wind, waves, clouds, ships and crew were disabled: this
+does not prove ordinary-game60FPS, Retina or iPhone performance. Combined run315
+passes63 loader/material/build/GPU checks; Python317 passes10 lighting/volume
+fixtures. Near oak/maple/birch renders verify the coverage/lighting change.
+Receipts: `/tmp/waterworld-close-specimens-coverage-307`,
+`/tmp/waterworld-forest-shell-scenes-313`,
+`/tmp/waterworld-forest-shell-package-316`. The scene remains unpublished.
+The user requested porting the successful technique back to Forestmodeler:
+portable field/surface exporters, a Three.js adapter, tests and local documentation
+are now in `/Users/alexwall/dev/forestmodeler`, without modifying its growth engine
+or existing dirty work. `make test-foliage` passes15Python and36JavaScript checks.
+Actual mature-oak export and Three r160/WebGL2 rendering verify source pigment,
+own-canopy exposure, opaque silhouette/depth, instancing and framebuffer-based
+LOD math. The source/technique guide is `docs/FOLIAGE_LOD.md` there; generated
+render receipts remain local in its ignored `out/` directory. This is a reusable
+rendering extension, not a change to botanical leaf-area accounting.
 Seam-locked reduction287 passed exact spatial joins but saved only2.9% of far
 triangles, so it is not installed. No native-resolution performance target is
 claimed. Public assets are unchanged.
@@ -75,6 +99,25 @@ Root is the sole executing validator; agents author source only. Current focused
 checks pass3 geometric-certificate fixtures,10 native-import fixtures,4 placement
 fixtures and22 loader/material/GPU/package tests. These do not qualify the pending
 closed-canopy implementation or a release.
+
+## October 22 evening: forest publication qualification
+
+The release sweep326 covered817cases:812passed, four failed and one was
+cancelled. The old atlas fixture gated the new mass buffers and observed only
+its former residency label; the legacy tree fixture used a replaced source
+marker. Both fixtures now track the actual renderer without relaxing assertions.
+Rerun329 passes the deck-water check, both debug-atlas paths and all legacy-tree
+render checks. The offline check required fully closing the browser used for
+intentional failed GPU startups; a new browser alone retained the old process.
+Final startup run332 passes8/8 with unchanged timeouts and offline assertions.
+No application code changed during these release repairs. All failed/cancelled
+cases have passing focused reruns. Native-looking approximation limits above
+remain; this is not a universal three-pixel appearance certificate.
+
+Release includes registered native forests, source-density middle/far crowns,
+canopy lighting, independent native coverage and Wells Bay near terrain.
+Only manifest-registered assets ship; rejected crown-dome assets are excluded.
+Pages deployment and public-byte verification follow the final build.
 
 ## October 22: scene zoom must not scale the HUD
 

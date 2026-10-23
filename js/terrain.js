@@ -6,6 +6,7 @@ import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInsp
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL} from './forest-scenery.js';
 import {loadForestMass,createForestMassRenderer,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
+import {loadForestMiddle} from './forest-middle.js';
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto'}){
@@ -198,11 +199,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}]];
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const forestMassPack=await forestMassPromise;let forestMass=null;
-  if(forestMassPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
+  const forestMassPack=await forestMassPromise;let forestMass=null,forestMiddlePack=null,forestMiddleFailure=null;
+  if(forestMassPack&&!forestAtlasDebug)try{
+    forestMiddlePack=await loadForestMiddle({forest:forestPack,mass:forestMassPack});
+    if(forestMiddlePack?.manifest.recipe.leafShading==='field'&&!forestPack.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
+  }catch(error){forestMiddlePack=null;forestMiddleFailure=error.message;}
+  if(forestMassPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,middlePack:forestMiddlePack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
   const forest=forestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestPack,groundSample,forestMass,forestMiddle:forestAtlasDebug?null:forestMass?.middle??null,mode:canopyMode}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};
+  if(forestStats.mass.middle)forestStats.mass.middle.error=forestMiddleFailure;
   forestStats.replacedProceduralTrees=(canopyTrees.length-trees.length)/8;forestStats.coverage=forestPack?.manifest.coverage??null;
   const canopyStats=importedCanopy?.stats??{loaded:false,mode:canopyMode,error:canopyFailure};
   canopyStats.replacedProceduralTrees=(originalTrees.length-canopyTrees.length)/8;
