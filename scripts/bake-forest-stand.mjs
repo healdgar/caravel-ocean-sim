@@ -27,7 +27,7 @@ import {createServer} from 'node:http';
 import {createHash,randomUUID} from 'node:crypto';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {gzipSync} from 'node:zlib';
+import {gzipSync,gunzipSync} from 'node:zlib';
 import {ISLAND,decodeIsland,islandGeometry} from '../js/terrain-model.js';
 import {loadTerrainNear,sampleTerrainNear,terrainNearGeometry} from '../js/terrain-near.js';
 
@@ -37,7 +37,7 @@ const requireValue=(ok,message)=>{if(!ok)throw Error(message);};
 const exists=async path=>{try{await access(path);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}};
 export function parseStandArguments(argv){
  const options={x:-576,z:-5680,span:128,tile:512,referenceTile:4096,timeout:1_800_000,multiview:false};
- const names={'--pack':'pack','--region':'region','--out':'out','--native-baker':'nativeBaker','--playwright-module':'playwrightModule','--browser-executable':'browserExecutable','--x':'x','--z':'z','--tile-pixels':'tile','--reference-pixels':'referenceTile','--timeout-ms':'timeout'};
+ const names={'--pack':'pack','--region':'region','--out':'out','--native-baker':'nativeBaker','--playwright-module':'playwrightModule','--browser-executable':'browserExecutable','--x':'x','--z':'z','--tile-pixels':'tile','--reference-pixels':'referenceTile','--timeout-ms':'timeout','--mass':'mass'};
  for(let i=0;i<argv.length;i++){if(argv[i]==='--help'){options.help=true;continue;}if(argv[i]==='--multiview'){options.multiview=true;continue;}const key=names[argv[i]];requireValue(key&&i+1<argv.length,'Unknown or incomplete argument: '+argv[i]);options[key]=argv[++i];}
  if(options.help)return options;
  for(const name of ['pack','region','out','nativeBaker','playwrightModule'])requireValue(options[name],'Missing '+name);
@@ -97,6 +97,7 @@ export function selectStand(manifest,prototypes,roots,{x,z,span=128}){
 }
 export function nativeStandShader(source){
  const replace=(from,to)=>{requireValue(source.includes(from),'Shared native shader changed: '+from.slice(0,64));source=source.replace(from,to);};
+ replace('@location(3) @interpolate(perspective,sample) colour:vec3f,','@location(3) @interpolate(perspective,sample) colour:vec3f,\n @location(4) @interpolate(flat) sourceGround:f32,');
  replace('struct Camera {centreExtent:vec4f,direction:vec4f,right:vec4f,up:vec4f,controls:vec4f};','struct Camera {centreExtent:vec4f,direction:vec4f,right:vec4f,up:vec4f,controls:vec4f,anchor:vec4f,coarse:vec4f,nearDomain:vec4f};');
  replace('@group(0) @binding(0) var<uniform> C:Camera;',`@group(0) @binding(0) var<uniform> C:Camera;
 struct Root {rootScale:vec4f,yawColour:vec4f,identity:vec4f};
@@ -121,10 +122,11 @@ fn standGround(local:vec2f)->f32{
  let local=root.rootScale.xyz-C.anchor.xyz+vec3f(c*q.x-s*q.z,q.y,s*q.x+c*q.z);
  let relative=local-C.centreExtent.xyz;let extent=C.centreExtent.w;var o:V;
  o.pixel=vec4f(dot(relative,C.right.xyz)/extent,dot(relative,C.up.xyz)/extent,.5-dot(relative,C.direction.xyz)/(2.*extent),1);
- o.local=local;o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);o.uv=uv;o.colour=colour*root.yawColour.yzw;return o;
+ o.local=local;o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);o.uv=uv;o.colour=colour*root.yawColour.yzw;o.sourceGround=root.rootScale.y-C.anchor.y;return o;
 }
 `+source.slice(end);
- replace('if(in.local.y<C.controls.y){discard;}','if(in.local.y<standGround(in.local.xz)){discard;}');
+ replace('if(in.local.y<C.controls.y){discard;}',`if(in.local.y<max(standGround(in.local.xz),in.sourceGround)){discard;}
+ if(C.controls.y>C.controls.x&&(in.local.x<C.controls.x||in.local.x>C.controls.y||in.local.z<C.controls.z||in.local.z>C.controls.w)){discard;}`);
  const alphaStart=source.indexOf(' if(leaf){'),alphaEnd=source.indexOf('\n var n=normalize(in.normal)',alphaStart);requireValue(alphaStart>=0&&alphaEnd>alphaStart,'Missing shared native coverage block');
  source=source.slice(0,alphaStart)+` // Source MASK evaluated before minification: physical LOD0 samples,
  // supersampled in space. No screen-only stochastic/correlated coverage.
@@ -136,12 +138,21 @@ fn standGround(local:vec2f)->f32{
  return vec4f(dot(relative,C.right.xyz)/extent,dot(relative,C.up.xyz)/extent,.5-dot(relative,C.direction.xyz)/(2.*extent),1);
 }
 @fragment fn terrainFS()->Output{var o:Output;o.albedo=vec4f(0);o.normalDepth=vec4f(0);return o;}
+@vertex fn massVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kindShade:vec2f,@location(3)uv:vec2f,@location(4)colour:vec3f)->V{
+ let local=position-C.anchor.xyz;let relative=local-C.centreExtent.xyz;let extent=C.centreExtent.w;var o:V;
+ o.pixel=vec4f(dot(relative,C.right.xyz)/extent,dot(relative,C.up.xyz)/extent,.5-dot(relative,C.direction.xyz)/(2.*extent),1);
+ o.local=local;o.normal=normal;o.uv=uv;o.colour=colour;return o;
+}
+@fragment fn massFS(in:V)->Output{
+ if(in.local.y<standGround(in.local.xz)){discard;}
+ var o:Output;o.albedo=vec4f(in.colour,1);o.normalDepth=vec4f(normalize(in.normal),in.pixel.z);return o;
+}
 `;
 }
 
 // Self-contained because Playwright serializes this function. Node verifies
 // every served source byte; GPU triangle grouping validates exact membership.
-async function initialiseStandGPU({base,prototypes,stand,shader,mipShader,ground,anchor}){
+async function initialiseStandGPU({base,prototypes,stand,shader,mipShader,ground,anchor,mass=false}){
  const adapter=await navigator.gpu?.requestAdapter({powerPreference:'high-performance'});if(!adapter)throw Error('Real WebGPU adapter required');
  const info=adapter.info??{},adapterInfo=Object.fromEntries(['vendor','architecture','device','description'].map(k=>[k,info[k]??'']));
  if(adapter.isFallbackAdapter||/swiftshader|llvmpipe|lavapipe/i.test(JSON.stringify(adapterInfo)))throw Error('Software GPU refused');
@@ -157,8 +168,10 @@ async function initialiseStandGPU({base,prototypes,stand,shader,mipShader,ground
  const layout=device.createPipelineLayout({bindGroupLayouts:[cameraLayout,materialLayout]}),attributes=[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'},{shaderLocation:3,offset:32,format:'float32x2'},{shaderLocation:4,offset:40,format:'float32x3'},{shaderLocation:5,offset:52,format:'float32'}];
  const pipeline=leaf=>device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:'vs',buffers:[{arrayStride:56,attributes}]},fragment:{module,entryPoint:'fs',targets:[{format:'rgba16float'},{format:'rgba16float'}]},primitive:{topology:'triangle-list',cullMode:leaf?'none':'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'},multisample:{count:4}});
  const wood=await pipeline(false),leaf=await pipeline(true),average=await device.createRenderPipelineAsync({layout:'auto',vertex:{module:mip,entryPoint:'vs'},fragment:{module:mip,entryPoint:'fs',targets:[{format:'rgba16float'}]}});
+ const massPipeline=mass?await device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:'massVS',buffers:[{arrayStride:52,attributes:attributes.slice(0,5)}]},fragment:{module,entryPoint:'massFS',targets:[{format:'rgba16float'},{format:'rgba16float'}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'},multisample:{count:4}}):null;
  const terrainPipeline=await device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:'terrainVS',buffers:[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'}]}]},fragment:{module,entryPoint:'terrainFS',targets:[{format:'rgba16float',writeMask:0},{format:'rgba16float',writeMask:0}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'},multisample:{count:4}});
  const owned=[vertices,roots,heights],draws=[],materials=new Map(),terrainMeshes=[];for(let i=0;i<ground.meshes;i++){const v=make(await(await get('__terrain-'+i+'-vertices.bin')).arrayBuffer(),B.VERTEX,'Unchanged resident terrain vertices'),ids=make(await(await get('__terrain-'+i+'-indices.bin')).arrayBuffer(),B.INDEX,'Unchanged resident terrain indices');owned.push(v,ids);terrainMeshes.push({vertices:v,indices:ids,count:ids.size/4});}
+ const massVertices=mass?make(await(await get('__mass-vertices.bin')).arrayBuffer(),B.VERTEX,'Actual leaf-field forest mass'):null,massIndices=mass?make(await(await get('__mass-indices.bin')).arrayBuffer(),B.INDEX,'Actual leaf-field forest mass indices'):null;if(mass)owned.push(massVertices,massIndices);
  const toLinear=x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
  const image=async map=>{const bitmap=await createImageBitmap(await(await get(map.file)).blob(),{premultiplyAlpha:'none',colorSpaceConversion:'none',imageOrientation:'none'});if(bitmap.width!==map.width||bitmap.height!==map.height)throw Error('Native map dimensions differ');
   const texture=device.createTexture({label:map.file,size:[bitmap.width,bitmap.height],format:map.encoding==='srgb'?'rgba8unorm-srgb':'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST|T.RENDER_ATTACHMENT});owned.push(texture);device.queue.copyExternalImageToTexture({source:bitmap},{texture,premultipliedAlpha:false},[bitmap.width,bitmap.height]);bitmap.close();return texture;};
@@ -177,26 +190,34 @@ async function initialiseStandGPU({base,prototypes,stand,shader,mipShader,ground
    if(surface&&a>0){const n=[0,1,2].map(k=>half(surface,i*8+k*2)/a),l=Math.hypot(...n);shade=.35+.65*Math.max(0,(n[0]*.4+n[1]*.7+n[2]*.6)/(l*Math.hypot(.4,.7,.6)));}
    for(let k=0;k<3;k++)pixels[i*4+k]=Math.round(Math.max(0,Math.min(1,encode(Math.max(0,half(src,i*8+k*2)/Math.max(a,1e-8))*shade)))*255);}
   const canvas=new OffscreenCanvas(width,height),context=canvas.getContext('2d');context.putImageData(new ImageData(pixels,width,height),0,0);return new Uint8Array(await(await canvas.convertToBlob({type:'image/png'})).arrayBuffer());};
- const renderOne=async(view,tile,keepReference=false)=>{const size=4096;if(size>device.limits.maxTextureDimension2D)throw Error('4096px reference exceeds device texture limit');
+ const renderOne=async(view,tile,keepReference=false,representation='native')=>{const size=4096;if(size>device.limits.maxTextureDimension2D)throw Error('4096px reference exceeds device texture limit');
   const texture=(format,sampleCount=1)=>device.createTexture({size:[size,size],format,sampleCount,usage:T.RENDER_ATTACHMENT|(sampleCount===1?T.TEXTURE_BINDING|T.COPY_SRC:0)}),targets=[texture('rgba16float'),texture('rgba16float')],ms=[texture('rgba16float',4),texture('rgba16float',4)],depth=texture('depth32float',4),filtered=[],intermediate=[];
   const frame=new Float32Array(32),extent=stand.radius*tile/(tile-4);
-  frame.set([...stand.centre.map((v,k)=>v-anchor[k]),extent]);frame.set(view.direction,4);frame.set(view.right,8);frame.set(view.up,12);frame.set([...anchor,ground.nearOffset],20);frame.set(ground.coarse,24);frame.set(ground.near,28);
+  frame.set([...stand.centre.map((v,k)=>v-anchor[k]),extent]);frame.set(view.direction,4);frame.set(view.right,8);frame.set(view.up,12);if(mass)frame.set([stand.nominal[0]-anchor[0],stand.nominal[1]-anchor[0],stand.nominal[2]-anchor[2],stand.nominal[3]-anchor[2]],16);frame.set([...anchor,ground.nearOffset],20);frame.set(ground.coarse,24);frame.set(ground.near,28);
   const camera=make(frame,B.UNIFORM,'Immutable actual stand camera'),encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:targets.map((target,i)=>({view:ms[i].createView(),resolveTarget:target.createView(),loadOp:'clear',storeOp:'discard',clearValue:[0,0,0,0]})),depthStencilAttachment:{view:depth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:1}});
   pass.setBindGroup(0,device.createBindGroup({layout:cameraLayout,entries:[{binding:0,resource:{buffer:camera}},{binding:1,resource:{buffer:roots}},{binding:2,resource:{buffer:heights}}]}));pass.setBindGroup(1,draws[0].group);
   // Actual resident terrain writes depth only. It cannot add ground pigment or
   // alpha to the forest channels, and it occludes roots on sloping terrain.
   pass.setPipeline(terrainPipeline);for(const mesh of terrainMeshes){pass.setVertexBuffer(0,mesh.vertices);pass.setIndexBuffer(mesh.indices,'uint32');pass.drawIndexed(mesh.count);}
   pass.setVertexBuffer(0,vertices);
-  for(const d of draws){pass.setPipeline(d.leaf?leaf:wood);pass.setBindGroup(1,d.group);pass.setIndexBuffer(d.index,'uint32');pass.drawIndexed(d.indexCount,d.instanceCount,0,0,d.firstInstance);}pass.end();
+  if(representation==='mass'){if(!massPipeline)throw Error('Mass comparison not configured');pass.setPipeline(massPipeline);pass.setVertexBuffer(0,massVertices);pass.setIndexBuffer(massIndices,'uint32');pass.drawIndexed(massIndices.size/4);}
+  else for(const d of draws){pass.setPipeline(d.leaf?leaf:wood);pass.setBindGroup(1,d.group);pass.setIndexBuffer(d.index,'uint32');pass.drawIndexed(d.indexCount,d.instanceCount,0,0,d.firstInstance);}pass.end();
   for(let i=0;i<2;i++){let source=targets[i];for(let n=size/2;n>=tile;n/=2){const target=device.createTexture({size:[n,n],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING|T.COPY_SRC});intermediate.push(target);const p=encoder.beginRenderPass({colorAttachments:[{view:target.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,0]}]});p.setPipeline(average);p.setBindGroup(0,device.createBindGroup({layout:average.getBindGroupLayout(0),entries:[{binding:0,resource:source.createView()}]}));p.draw(3);p.end();source=target;}filtered.push(source);}
   const readTextures=[...filtered,...(keepReference?targets:[])],reads=readTextures.map((texture,i)=>{const n=i<2?tile:size,r=device.createBuffer({size:n*n*8,usage:B.COPY_DST|B.MAP_READ});encoder.copyTextureToBuffer({texture},{buffer:r,bytesPerRow:n*8},[n,n]);return r;});
   device.queue.submit([encoder.finish()]);const all=[];try{for(const r of reads){await r.mapAsync(GPUMapMode.READ);all.push(new Uint8Array(r.getMappedRange()).slice());r.unmap();}}finally{for(const resource of [...targets,...ms,depth,...intermediate,...reads,camera])resource.destroy();}
   if(errors.length)throw Error(errors.join('\n'));return{data:all.slice(0,2),reference:all.slice(2),extent};};
- const upload=async(name,bytes)=>{const r=await fetch(base+'/result/'+name,{method:'POST',body:bytes});if(!r.ok)throw Error(await r.text());return r.json();};
+ const upload=async(name,bytes)=>{
+  let result;const part=4*1024*1024;
+  for(let offset=0;offset<bytes.byteLength;offset+=part){
+   const r=await fetch(base+'/result/'+name+'?offset='+offset+'&total='+bytes.byteLength,{method:'POST',body:bytes.subarray(offset,Math.min(bytes.byteLength,offset+part))});
+   if(!r.ok)throw Error(await r.text());result=await r.json();
+  }
+  return result;
+ };
  const publish=async(name,data,width,height,views,tile)=>{let covered=0;const values=data.map(b=>new DataView(b.buffer));for(let i=0;i<width*height;i++){const a=half(values[0],i*8+6);if(!Number.isFinite(a)||a<0||a>1)throw Error('Invalid stand coverage');if(a>0)covered++;for(let c=0;c<2;c++)for(let k=0;k<4;k++)if(!Number.isFinite(half(values[c],i*8+k*2)))throw Error('Nonfinite stand capture');}
   if(!covered)throw Error('Empty native stand witness');return{tilePixels:tile,atlasPixels:[width,height],views,coveredPixels:covered,outputs:{albedo:await upload(name+'-albedo',data[0]),normalDepth:await upload(name+'-normal-depth',data[1]),png:await upload(name+'-png',await png(data[0],width,height,data[1]))}};};
- globalThis.__nativeStand={async capture(name,views,tile,columns,keepReference=false){const rows=Math.ceil(views.length/columns),width=columns*tile,height=rows*tile,combined=[new Uint8Array(width*height*8),new Uint8Array(width*height*8)],perView=[];let reference=null;
-  for(let i=0;i<views.length;i++){const rendered=await renderOne(views[i],tile,keepReference&&i===0),v={...views[i],column:i%columns,row:Math.floor(i/columns),extent:rendered.extent,capturePixels:4096,captureWorldMetresPerPixel:2*rendered.extent/4096,finalWorldMetresPerPixel:2*rendered.extent/tile};for(let channel=0;channel<2;channel++)for(let y=0;y<tile;y++)combined[channel].set(rendered.data[channel].subarray(y*tile*8,(y+1)*tile*8),((Math.floor(i/columns)*tile+y)*width+i%columns*tile)*8);perView.push(v);
+ globalThis.__nativeStand={async capture(name,views,tile,columns,keepReference=false,representation='native'){const rows=Math.ceil(views.length/columns),width=columns*tile,height=rows*tile,combined=[new Uint8Array(width*height*8),new Uint8Array(width*height*8)],perView=[];let reference=null;
+  for(let i=0;i<views.length;i++){const rendered=await renderOne(views[i],tile,keepReference&&i===0,representation),v={...views[i],column:i%columns,row:Math.floor(i/columns),extent:rendered.extent,capturePixels:4096,captureWorldMetresPerPixel:2*rendered.extent/4096,finalWorldMetresPerPixel:2*rendered.extent/tile};for(let channel=0;channel<2;channel++)for(let y=0;y<tile;y++)combined[channel].set(rendered.data[channel].subarray(y*tile*8,(y+1)*tile*8),((Math.floor(i/columns)*tile+y)*width+i%columns*tile)*8);perView.push(v);
    if(keepReference&&i===0)reference=await publish('reference',rendered.reference,4096,4096,[{...v,column:0,row:0,finalWorldMetresPerPixel:2*rendered.extent/4096}],4096);}
   return{capture:await publish(name,combined,width,height,perView,tile),reference};
  },async close(){await device.queue.onSubmittedWorkDone();for(const resource of owned)resource.destroy();device.destroy();}};
@@ -216,23 +237,44 @@ export async function main(argv=process.argv.slice(2)){
  const heldOutViews=[-15,50].flatMap(elevation=>[22.5,112.5,202.5,292.5].map(azimuth=>standView(azimuth,elevation,0))).map((v,index)=>({...v,index}));
  const shader=nativeStandShader(shared.BAKE_WGSL),staging=out+'.baking-'+randomUUID();await mkdir(staging,{recursive:true});
  const files=new Map(input.files);files.set('__stand-roots.bin',Buffer.from(stand.instanceRows.buffer));files.set('__terrain.bin',Buffer.from(ground.heights.buffer));
+ let massSource=null;
+ if(options.mass){
+  const folder=resolve(options.mass),raw=await readFile(join(folder,'manifest.json')),m=JSON.parse(raw);requireValue(m.format==='waterworld.native-forest-mass'&&m.chunks.length===1,'Comparison requires one native-field witness mass');
+  requireValue(m.chunks[0].nominalBoundsXZ.every((v,k)=>v===stand.nominal[k]),'Mass/native stand bounds differ');
+  for(const name of ['vertices.bin','indices.bin','roots.bin'])requireValue(m.source.files[name].sha256===input.manifest.files[name].sha256,'Mass/native original source differs');
+  for(const name of ['vertices.bin','indices.bin']){const r=m.files[name],encoded=await readFile(join(folder,r.gzip.file));requireValue(sha(encoded)===r.gzip.sha256,'Mass encoded digest differs');let bytes=gunzipSync(encoded);requireValue(bytes.length===r.bytes&&sha(bytes)===r.sha256,'Mass decoded digest differs');
+   if(name==='vertices.bin'&&m.version===2){
+    requireValue(m.vertexStride===24&&bytes.length%24===0,'Invalid compact witness vertices');const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),rows=new Float32Array(bytes.length/24*13);
+    const half=u=>{const sign=u&32768?-1:1,e=u>>10&31,f=u&1023;return e===0?sign*f*2**-24:e===31?(f?NaN:sign*Infinity):sign*(1+f/1024)*2**(e-15);};
+    for(let i=0;i<bytes.length/24;i++){for(let k=0;k<3;k++){rows[i*13+k]=v.getFloat32(i*24+k*4,true);rows[i*13+3+k]=v.getInt8(i*24+12+k)/127;rows[i*13+10+k]=half(v.getUint16(i*24+16+k*2,true));}rows[i*13+6]=4;rows[i*13+7]=.8;}
+    bytes=Buffer.from(rows.buffer); // Offline comparison transport only; runtime uploads the compact bytes directly.
+   }files.set('__mass-'+name,bytes);}
+  massSource={manifest:receipt(raw),source:m.source,files:m.files};
+ }
  for(const [i,mesh]of ground.meshes.entries())for(const kind of ['vertices','indices'])files.set('__terrain-'+i+'-'+kind+'.bin',Buffer.from(mesh[kind].buffer,mesh[kind].byteOffset,mesh[kind].byteLength));
- const columns=options.multiview?4:1,outputs=new Map(),targets=new Map(),outputLayouts=[['capture',captureViews.length,options.tile,columns],['reference',1,options.referenceTile,1],...(options.multiview?[['validation',heldOutViews.length,options.tile,4]]:[])];
+ const columns=options.multiview?4:1,outputs=new Map(),targets=new Map(),outputLayouts=[['capture',captureViews.length,options.tile,columns],['reference',1,options.referenceTile,1],...(options.multiview?[['validation',heldOutViews.length,options.tile,4]]:[]),...(massSource?[['mass',captureViews.length,options.tile,columns],...(options.multiview?[['mass-validation',heldOutViews.length,options.tile,4]]:[])]:[])];
  for(const [name,count,tile,cols]of outputLayouts)for(const kind of ['albedo','normal-depth','png'])targets.set(name+'-'+kind,{file:name+'-'+kind+(kind==='png'?'.png':'.rgba16f.bin'),bytes:kind==='png'?null:Math.ceil(count/cols)*cols*tile*tile*8});
- const token='/'+randomUUID(),server=createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname;
-  if(req.method==='GET'&&path===token+'/bake'){res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Actual native forest stand</title>');return;}
+ const partial=new Map(),token='/'+randomUUID(),server=createServer(async(req,res)=>{try{const requestURL=new URL(req.url,'http://localhost'),path=requestURL.pathname;
+  if(req.method==='GET'&&path===token+'/bake'){res.writeHead(200,{'Content-Type':'text/html','Content-Security-Policy':"default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'"});res.end('<!doctype html><title>Actual native forest stand</title>');return;}
   if(req.method==='GET'&&path.startsWith(token+'/asset/')){const name=decodeURIComponent(path.slice((token+'/asset/').length));requireValue(files.has(name),'Unverified source request');const bytes=files.get(name);res.writeHead(200,{'Content-Type':name.endsWith('.png')?'image/png':'application/octet-stream'});res.end(bytes);return;}
-  if(req.method==='POST'&&path.startsWith(token+'/result/')){const name=path.slice((token+'/result/').length),target=targets.get(name);requireValue(target&&!outputs.has(name),'Unknown/repeated output');const chunks=[];let size=0;for await(const chunk of req){size+=chunk.byteLength;requireValue(size<=(target.bytes??64*1024*1024),'Oversized output');chunks.push(chunk);}const raw=Buffer.concat(chunks);requireValue(target.bytes===null||raw.byteLength===target.bytes,'Incomplete GPU output');if(target.bytes===null)requireValue(raw.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Not PNG');
+  if(req.method==='POST'&&path.startsWith(token+'/result/')){const name=path.slice((token+'/result/').length),target=targets.get(name);requireValue(target&&!outputs.has(name),'Unknown/repeated output');const chunks=[];let size=0;for await(const chunk of req){size+=chunk.byteLength;requireValue(size<=(target.bytes??64*1024*1024),'Oversized output');chunks.push(chunk);}const total=Number(requestURL.searchParams.get('total')),offset=Number(requestURL.searchParams.get('offset'));
+   requireValue(Number.isSafeInteger(total)&&total>0&&total<=(target.bytes??64*1024*1024)&&(target.bytes===null||total===target.bytes)&&Number.isSafeInteger(offset)&&offset>=0&&size<=4*1024*1024,'Invalid output part');
+   const state=partial.get(name)??{total,size:0,chunks:[]};requireValue(state.total===total&&offset===state.size&&state.size+size<=total,'Output parts out of order');
+   state.chunks.push(...chunks);state.size+=size;partial.set(name,state);
+   if(state.size<total){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({pending:true,bytes:state.size}));return;}
+   const raw=Buffer.concat(state.chunks);partial.delete(name);requireValue(target.bytes===null||raw.byteLength===target.bytes,'Incomplete GPU output');if(target.bytes===null)requireValue(raw.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Not PNG');
    await writeFile(join(staging,target.file),raw,{flag:'wx'});const record={file:target.file,...receipt(raw)};if(target.bytes!==null){const compressed=gzipSync(raw,{level:9});await writeFile(join(staging,target.file+'.gz'),compressed,{flag:'wx'});record.gzip={file:target.file+'.gz',...receipt(compressed)};}outputs.set(name,record);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(record));return;}
   res.writeHead(404);res.end('Not found');}catch(error){res.writeHead(400);res.end(error.message);}});
  let browser,timer;try{
   let moduleFile=resolve(options.playwrightModule);if((await stat(moduleFile)).isDirectory())moduleFile=join(moduleFile,'index.mjs');const {chromium}=await import(pathToFileURL(moduleFile).href);
   await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});const base='http://127.0.0.1:'+server.address().port+token;
-  browser=await chromium.launch({executablePath:options.browserExecutable?resolve(options.browserExecutable):undefined,headless:true,args:['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog','--disable-background-networking']});const page=await browser.newPage(),pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));await page.route('**/*',route=>route.request().url().startsWith(base+'/')?route.continue():route.abort());await page.goto(base+'/bake');
-  const work=async()=>{const gpu=await page.evaluate(initialiseStandGPU,{base,prototypes:input.prototypes,stand:{ranges:stand.ranges,centre:stand.centre,radius:stand.radius},shader,mipShader:shared.MIP_WGSL,ground:{coarse:ground.coarse,near:ground.near,nearOffset:ground.nearOffset,meshes:ground.meshes.length},anchor});
+  browser=await chromium.launch({executablePath:options.browserExecutable?resolve(options.browserExecutable):undefined,headless:true,args:['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog','--disable-background-networking']});const page=await browser.newPage(),pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));await page.goto(base+'/bake');
+  const work=async()=>{const gpu=await page.evaluate(initialiseStandGPU,{base,prototypes:input.prototypes,stand:{ranges:stand.ranges,centre:stand.centre,radius:stand.radius,nominal:stand.nominal},shader,mipShader:shared.MIP_WGSL,ground:{coarse:ground.coarse,near:ground.near,nearOffset:ground.nearOffset,meshes:ground.meshes.length},anchor,mass:!!massSource});
    console.log(JSON.stringify({owners:stand.owners.length,halo:stand.halo.length,trianglesPerView:stand.triangles,sourceOnly:'detailed wood+leaf'}));
    const {capture,reference}=await page.evaluate(({views,tile,columns})=>globalThis.__nativeStand.capture('capture',views,tile,columns,true),{views:captureViews,tile:options.tile,columns});
    const validation=options.multiview?(await page.evaluate(({views,tile})=>globalThis.__nativeStand.capture('validation',views,tile,4),{views:heldOutViews,tile:options.tile})).capture:null;
+   const mass=massSource?(await page.evaluate(({views,tile,columns})=>globalThis.__nativeStand.capture('mass',views,tile,columns,false,'mass'),{views:captureViews,tile:options.tile,columns})).capture:null;
+   const massValidation=massSource&&options.multiview?(await page.evaluate(({views,tile})=>globalThis.__nativeStand.capture('mass-validation',views,tile,4,false,'mass'),{views:heldOutViews,tile:options.tile})).capture:null;
    await page.evaluate(()=>globalThis.__nativeStand.close());requireValue(!pageErrors.length,pageErrors.join('\n'));
    for(const [name,expected]of Object.entries(input.receipts)){const bytes=await readFile(join(input.folder,name));requireValue(bytes.byteLength===expected.bytes&&sha(bytes)===expected.sha256,'Native source changed during capture');}
    requireValue(sha(await readFile(input.manifestPath))===input.manifestReceipt.sha256&&sha(await readFile(bakerPath))===sha(bakerSource),'Source recipe changed during capture');
@@ -243,8 +285,8 @@ export async function main(argv=process.argv.slice(2)){
     source:{manifest:input.manifestReceipt,files:input.receipts,terrain:ground.records,terrainDirectory:resolve(options.region),nativeSource:input.manifest.nativeSource,draws:drawReceipts,geometry:'Original detailed wood+leaf only; immutable prototype bytes; instance transforms/yaw/scale/tint from original root identities, production terrain seating. No coarse crown draw membership is read or substituted.'},
     recipe:{file:'scripts/bake-forest-stand.mjs',...receipt(await readFile(fileURLToPath(import.meta.url))),sharedNativeBaker:{file:bakerPath,...receipt(bakerSource)},shader:receipt(Buffer.from(shader)),gpu,sampleCount:4,capturePixels:4096,captureScale:8,finalPixelSamples:256,referencePixelSamples:4,alpha:'Source material MASK cutoff on bilinear LOD0 alpha at each supersampled geometric sample; no ordered-coverage or A2C approximation. No fixed cutoff is applied to an averaged mip.',ground:'Exact resident coarse+near source triangles draw first with depthWrite=true and both colorWriteMasks=0. They contribute no forest pigment/coverage. Actual height sampling additionally rejects buried source fragments.',roughness:'Original map/scalar receipts retained; unlit colour/normal/front-depth capture has no separate per-pixel roughness channel.'},
     channels:{albedo:'Little-endian linear RGBA16F, RGB premultiplied by geometric/source-mask coverage, A coverage; backgroundRGBA0',normalDepth:'Little-endian RGBA16F world-basis normalXYZ and front depth, all premultiplied by same coverage; divide by albedo.A, then normalize normal; backgroundRGBA0',reconstruction:'world=sourceBounds.centre+right*((2u-1)*extent)+up*((1-2v)*extent)+direction*(extent-2*extent*depth); pixel-centre u=(x+.5)/tilePixels,v=(y+.5)/tilePixels,row0top',png:'Inspection derivative only: unpremultiplied sRGB with source-normal Lambert display light; underlying arrays remain unlit'},
-    capture,reference,validation,appearanceErrorSupported:false,limitations:['One128m stand and explicit full native halo only; no whole-island bake.',options.multiview?'Held-out validation directions differ from capture directions.':'First witness has one view only: multiview fusion is forbidden until explicit --multiview capture and held-out validation.','Neither averaged front depth nor averaged normals certify distance to an actual source surface. MSAA reference depth may itself mix4 visible samples. No interpolation/silhouette bound is inferred.','Static source geometry; no wind animation or baked environmental lighting.','This is not a solid hull, proxy crown, hole-fill or leaf-density reconstruction.']};
-   requireValue(outputs.size===(options.multiview?9:6),'Incomplete native stand outputs');await writeFile(join(staging,'manifest.json'),JSON.stringify(document,null,2)+'\n',{flag:'wx'});await rename(staging,out);console.log(JSON.stringify({output:out,owners:stand.owners.length,halo:stand.halo.length,views:captureViews.length,heldOutViews:validation?heldOutViews.length:0,gpu:gpu.adapterInfo}));return document;};
+    capture,reference,validation,mass,massValidation,massSource,appearanceErrorSupported:false,limitations:['One128m stand and explicit full native halo only; no whole-island bake.',options.multiview?'Held-out validation directions differ from capture directions.':'First witness has one view only: multiview fusion is forbidden until explicit --multiview capture and held-out validation.','Neither averaged front depth nor averaged normals certify distance to an actual source surface. MSAA reference depth may itself mix4 visible samples. No interpolation/silhouette bound is inferred.','Static source geometry; no wind animation or baked environmental lighting.',massSource?'Native and mass clipped to identical nominal XZ witness bounds. Field mass is an authored optical approximation, not a native appearance certificate.':'This is not a solid hull, proxy crown, hole-fill or leaf-density reconstruction.']};
+   requireValue(outputs.size===outputLayouts.length*3,'Incomplete native stand outputs');await writeFile(join(staging,'manifest.json'),JSON.stringify(document,null,2)+'\n',{flag:'wx'});await rename(staging,out);console.log(JSON.stringify({output:out,owners:stand.owners.length,halo:stand.halo.length,views:captureViews.length,heldOutViews:validation?heldOutViews.length:0,gpu:gpu.adapterInfo}));return document;};
   return await Promise.race([work(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Explicit stand bake timeout; partial output retained at '+staging)),options.timeout);})]);
  }finally{clearTimeout(timer);await browser?.close();await new Promise(ok=>server.listening?server.close(ok):ok());}
 }
