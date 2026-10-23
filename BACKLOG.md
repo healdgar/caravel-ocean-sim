@@ -1,5 +1,43 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 23: adopted forest representation redesign
+
+The user requests a complete rethink, with multiple complexity tiers and Manor
+Lords as a reference. [FOREST_LOD_PLAN.md](FOREST_LOD_PLAN.md) is the controlling
+implementation plan; existing forest documents remain current-runtime evidence.
+Research distinguishes Manor Lords' documented automatic LOD, mesh merging and
+GPU instance selection from our proposed WebGPU design. It does not establish
+that game's undisclosed asset tiers or a Nanite implementation.
+
+Replacement ladder: inspection branches/leaves -> nearby source-baked clusters
+-> middle crown/branch meshes with leaf material detail -> merged stands ->
+distant contiguous canopy. Retain source placements, density, crown character,
+colour and lighting. Raw botanical meshes become offline references, not the
+normal detail tier or a missing-page/overflow fallback. Existing .25m fields
+cannot restore fine leaf information; direct-source detail bakes are required.
+
+Implementation order:
+- [ ] Qualify one complex and one slender source tree plus edge/dense mixed
+      stands across all five tiers before a regional rebake.
+- [ ] Export bounded geometry, coverage-aware material/depth detail, provenance,
+      and actual rendered appearance envelopes for each tier.
+- [ ] Implement GPU branch/tree/stand ownership and refinement, with always-
+      resident base cover, hysteresis and bounded transition/streaming costs.
+- [ ] Enforce initial pilot gates of <=6M main forest triangles and <=2M extra
+      shadow/reflection triangles, alongside measured cost and image quality.
+      These are targets, not measured outcomes or a substitute for full-game FPS.
+- [ ] Validate continuous approach, orbit, aerial, inside-stand and grazing views
+      at 1080p, Retina and physical iPhone resolutions, under varied lighting.
+- [ ] Integrate all species/Wells Bay; qualify the exact failing camera and
+      complete game; rebuild and verify published bytes only after passing.
+- [ ] Feed the qualified exporter/adapter back to Forestmodeler without changing
+      biological growth or leaf-area accounting.
+
+This checkpoint changes design documents only. Current runtime, assets and
+published performance are unchanged. Do not describe the replacement as built,
+release-qualified or a universal three-pixel match.
+
+
 ## October 23: close-forest GPU bottleneck remains open
 
 Reproduced the exact reported free-camera approach at1920x1080, native Metal.

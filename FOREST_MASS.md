@@ -1,5 +1,9 @@
 # Native-derived forest mass
 
+**Architecture status (October 23):** this documents the current implementation
+and its evidence. The replacement tier/streaming architecture is specified in
+[Forest rendering redesign](FOREST_LOD_PLAN.md); it is not implemented here.
+
 The forest has three representations of the same planted roots: detailed native
 trees close, reduced individual trees between, and a shared opaque foliage mass
 farther away. The mass comes from actual native leaf triangles and their original

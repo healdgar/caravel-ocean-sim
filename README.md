@@ -715,6 +715,12 @@ bends with wind; cached terrain sunlight avoids cloud ray marching per blade.
 The material adds filtered metre-scale relief between aerial colour and close
 soil/rock grain. These additions do not yet supply a closed distant forest canopy.
 
+**Forest redesign:** [FOREST_LOD_PLAN.md](FOREST_LOD_PLAN.md) specifies five
+source-derived complexity tiers, branch/tree/stand selection, streamed detail
+and combined appearance/performance gates. It supersedes the intended current
+LOD design; implementation and qualification remain pending. The description
+below records the shipping implementation and its limitations.
+
 **Regional Forestmodeler integration:** five cached mature Hero models—oak
 (60 years), maple (50), birch (25), elm (65) and chestnut (70)—retain their
 original geometry, UVs, normals and `gene-surfaces-v3` bark/leaf maps. These are
@@ -749,8 +755,9 @@ leaf underside lighting and opaque density are approximations; no universal
 imperceptible transition or performance target is claimed. See
 [Native forest instances](FOREST_INSTANCES.md) and
 [Native-derived canopy pipeline and validation](FOREST_MASS.md). The
-current forest refinement is release-qualified: the static 1280×900 coastal test improved from
-2.35 FPS to 54–57 FPS, with source and packaged views free of GPU errors.
+earlier bounded forest checkpoint passed source/package checks: its static
+1280×900 coastal test improved from 2.35 FPS to 54–57 FPS. This validates that
+particular view, not the complete detail-transition architecture.
 Waves, clouds, ships and crew were disabled for this comparison; it does not
 establish 60 FPS for ordinary play, Retina resolution or an iPhone.
 

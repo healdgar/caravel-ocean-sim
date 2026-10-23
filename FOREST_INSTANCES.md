@@ -1,5 +1,9 @@
 # Native Forestmodeler forest
 
+**Architecture status (October 23):** this documents the current implementation
+and its evidence. The replacement tier/streaming architecture is specified in
+[Forest rendering redesign](FOREST_LOD_PLAN.md); it is not implemented here.
+
 The Saba forest package contains **85,451 roots** using five shared, immutable
 native Hero prototypes. Fine Wells Bay terrain rejects 401 sites, leaving
 **85,050 resident roots**. These temperate species are visual proxies, not
