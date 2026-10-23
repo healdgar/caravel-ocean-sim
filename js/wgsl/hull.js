@@ -3,8 +3,6 @@ import {VICTORY_DESIGN,VICTORY_HULL_TANGENTS,VICTORY_STEM_TANGENTS} from '../mod
 import {PROCEDURAL_DESIGNS,proceduralDraft} from '../models/procedural.js';
 import {hullLoftWGSL} from '../hull-loft.js';
 const victoryHullNX=VICTORY_DESIGN.hull.stations.length,victoryHullNY=VICTORY_DESIGN.hull.levels.length,victoryHullCells=victoryHullNX*victoryHullNY,victoryStemN=VICTORY_DESIGN.hull.stemLevels.length;
-const additionalHullWGSLProfiles=Object.values(PROCEDURAL_DESIGNS).map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
-const additionalHullCases=expression=>Object.values(PROCEDURAL_DESIGNS).map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
 const proceduralDeckWGSL=d=>Number.isFinite(d.floorHeight)?`var y=${d.floorHeight};`:
   `var y=${d.profile.deck};`+(d.deckZones??[]).map(zone=>`if(z>=${zone.bounds[0]}&&z<=${zone.bounds[1]}){y=max(y,${zone.height});}`).join('')+
   (d.cockpit?`if(z>${d.cockpit.bounds[0]}&&z<${d.cockpit.bounds[1]}&&abs(x)<${d.cockpit.halfWidth}){y=${d.cockpit.floorHeight};}`:'');
@@ -15,7 +13,11 @@ const proceduralKeelWGSL=d=>{
     const b=k.sections[i+1];return `if(y<=${b.y}){let t=clamp((y-(${a.y}))/${b.y-a.y},0.0,1.0);let fore=mix(${a.zFore},${b.zFore},t);let aft=mix(${a.zAft},${b.zAft},t);if(z<=fore||z>=aft){return 0.0;}let u=(z-fore)/(aft-fore);let thickness=10.0*(.2969*sqrt(u)-.1260*u-.3516*u*u+.2843*u*u*u-.1036*u*u*u*u);return max(0.0,mix(${a.halfWidth},${b.halfWidth},t)*thickness);}`;
   }).join('')+'return 0.0;';
 };
-export const HULL_PROFILE = /* wgsl */ `
+function createSceneHullProfile(modelCodes=null){
+ const designs=Object.values(PROCEDURAL_DESIGNS).filter(d=>!modelCodes||modelCodes.has(d.modelCode));
+ const additionalHullWGSLProfiles=designs.map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
+ const additionalHullCases=expression=>designs.map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
+ return /* wgsl */ `
 const HULL_Y_SCALE:f32 = ${HULL_VERTICAL_SCALE};
 fn hullDeck(z: f32) -> f32 {
   return select(0.7+0.24*(z/5.6)*(z/5.6),0.7+0.47*pow(max(0.0,-z/6.4),3.0),z<0.0);
@@ -136,3 +138,15 @@ fn modelHullExcludesOcean(local:vec3f,model:f32)->bool {
   return abs(local.x)<modelHullWidth(local.z,local.y,model);
 }
 `;
+}
+export const HULL_PROFILE=createSceneHullProfile();
+const sceneHullProfiles=new Map();
+// The fleet's models are immutable until navigation reloads the scene. Keep
+// their exact loft arithmetic/model IDs; omit only absent procedural profiles.
+export function withSceneHullProfile(source,modelCodes){
+ if(!source.includes(HULL_PROFILE))return source;
+ const codes=[...new Set(modelCodes)].sort((a,b)=>a-b),known=new Set([0,1,...Object.values(PROCEDURAL_DESIGNS).map(d=>d.modelCode)]);
+ if(!codes.length||codes.some(code=>!known.has(code)))throw Error('Unknown scene GPU hull model');
+ const key=codes.join(',');if(!sceneHullProfiles.has(key))sceneHullProfiles.set(key,createSceneHullProfile(new Set(codes)));
+ return source.replaceAll(HULL_PROFILE,sceneHullProfiles.get(key));
+}

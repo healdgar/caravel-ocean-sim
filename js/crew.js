@@ -232,12 +232,12 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
     {shaderLocation:4,offset:44,format:'float32x4'},
   ]}];
-  const module=shared?null:await shader(CREW_RENDER,'crew'),shadowModule=shared?null:await shader(CREW_SHADOW,'crew shadow');
-  const pipeline=shared?.pipeline??await device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
+  const [module,shadowModule]=shared?[null,null]:await Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]);
+  const [pipeline,shadowPipeline]=await Promise.all([shared?.pipeline??device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
     fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
-  const shadowPipeline=shared?.shadowPipeline??await device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}});
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}}),
+    shared?.shadowPipeline??device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})]);
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));

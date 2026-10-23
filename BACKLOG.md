@@ -1,5 +1,67 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 23: normal Safari startup and forest timer stalls
+
+User reports >1minute on physical iPhone's **normal sailing page**, stuck at
+"Building the ships and loading their crew…". Forests are NOT that page's cause.
+Native Safari27.0.1 on this M4 reproduces it: all3startup media transfers finish
+around3.3s; ocean/sky lasts until71.447s, and ship setup is still incomplete at180s.
+Chrome's4–5s fresh-context observations concealed the engine-specific cost.
+The separate4xCPU/network-proxy fetch failure was transient, not a device result;
+repeat6xCPU and8Mbps/80ms desktop proxies reached readiness without errors.
+
+Bounded correction:
+- Cache pending shader/compute programs per device by final rewritten WGSL;
+  rejected entries evict for retry. Mutable ship resources stay independent.
+- Compile the8independent core render pipelines and crew visible/shadow pairs
+  concurrently; overlap independent wetness and water-interaction setup.
+- Remove unreachable unannotated WGSL helper functions, retaining every entry,
+  global declaration, override, annotated helper and transitive dependency.
+- Generate HULL_PROFILE for every allocated fleetSpec's original model code;
+  omit only absent procedural profiles/cases, preserving Niña/Victory arithmetic.
+  Ship/fleet changes reload; hidden allocated vessels stay in the specialization.
+  `shaderModels=all&shaderPrune=off` retains a reference compilation path.
+
+Native Safari local packaged candidate reaches actual first-frame readiness at
+14.379s (16.424s external polling), no GPU/page errors. Its first function-pruned
+candidate without scene hull filtering took88.493s to ready. These observations
+are not controlled cold-driver-cache A/B or physical-iPhone timing. Receipts:
+`/tmp/waterworld-safari-startup.log`, `/tmp/waterworld-safari-candidate/`,
+`/tmp/waterworld-safari-candidate2/`. Initial public startup/network traces:
+`/tmp/waterworld-startup-oct23/` and `/tmp/waterworld-normal-startup-repeat/`.
+
+A second issue affects Landfall:26,945default validation/upload yields can become
+clamped zero-delay timers without scheduler.yield. Real mass-loader reproduction
+with scheduler disabled took98.5048s, including95.7665s in21,143timers. The fixed
+loader processes the SAME210,189,048vertex bytes and202,671,540index bytes with
+all hashes/address/finite checks:2.0503s,82MessageChannel task boundaries,0timers,
+59UI heartbeat deliveries. Native uploads keep1MiBchunks and abort checks;
+explicit injected validation callbacks retain their per-batch semantics.
+Receipts `/tmp/waterworld-forest-yield-{baseline,candidate}.json`.
+The complete island still transfers about248MB before first frame; native-demand
+streaming and further lossless transport work remain open. No assets were reduced.
+
+Qualification:22loader/scheduling checks,14cache/pruning/lifecycle checks, and20
+serialized native GPU/package/startup checks passed. A separate19-case rendering
+pass covers source/Pages ships, full/new Moon, Sun controls, storms, underwater and
+bloom. The new real packaged island regression passes with scheduler disabled:
+5.708s to first-frame ready,242real task boundaries,0timer waits, all native/mass
+vertex and index buffers uploaded completely and native residency confirmed.
+Its initial diagnostic hook missed the shared residency label; corrected the hook
+without relaxing the residency assertion. Seven complete production-canvas A/B
+scenes compare2,752,512channels with ZERO differences against unpruned all-model
+shaders (Niña, Victory, Flying Cloud, mixed fleet, storm, full Moon, underwater).
+All9hulls compare14,229GPU query points/455,328output bytes exactly. The first
+pixel harness deadlocked its own intercepted RAF poll; using independent50mspolling
+fixed it. Final pixel/cache/scheduling run passes11/11. Logs:
+`/tmp/waterworld-startup-{native,render,final-render,pixels-final}.log`.
+
+Final rebuilt-package gate passes11/11: required/delayed/failed media, actual first
+GPU completion, offline downloads, exact158asset bytes and scheduler-free full
+island startup. Release log `/tmp/waterworld-startup-release-check.log`. Publication
+pending below; root owns validation. Primary held crew/Victory work and rejected
+forest experiments stay separate.
+
 ## October 22: iPhone bloom timing and bounded filter efficiency
 
 User reports Bloom120ms on iPhone. Root's source audit and native Mac reproduction
@@ -26,8 +88,15 @@ Distribution rebuild and19/19packaged/startup checks pass, including offline
 HTML downloads, native resource bytes and actual mobile Stats. Final5/5bloom
 checks also cover the packaged underwater source and resuming real canvas frames.
 The initial packaged test incorrectly watched a minified callback name; it now
-observes GPUCanvasContext.getCurrentTexture instead. Public deployment validation
-remains pending.
+observes GPUCanvasContext.getCurrentTexture instead. Published `57bbdd206e37e245d5c8947f7b973789c9ccd241`; Pages built at
+2026-10-23T05:56:42Z. Fresh deployed HTML matches1,512,169bytes,
+SHA256`e11b59206e5345923141086930c56b5f8696d3d5fa4f56a09be925199dc13973`.
+The manifest hash and all158asset records are unchanged from the previous full
+public verification. Receipt `/tmp/waterworld-bloom-public-bytes.json`.
+Fresh public Apple/Metal Chrome exercised the actual folded pipeline and all15
+bloom passes at1206x1998, measured0.138527ms isolated, resumed real canvas frames,
+and reported no GPU/page errors. Receipt/screenshot `/tmp/waterworld-bloom-live/`.
+This is a Mac with a phone viewport, not a physical-iPhone performance result.
 
 ## October 22 evening: native forest release is public
 

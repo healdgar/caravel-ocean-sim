@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Grown temperate specimens are authored visual proxies, not surveyed Saba flora.
 import {FRAME_WGSL} from './wgsl/common.js';
+import {createTaskYieldBudget} from './task-yield.js';
 import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} from './forest-impostor.js';
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
@@ -193,10 +194,13 @@ function* forestGeometryChecks(manifest,streams){
 export function decodeForestScenery(manifest,streams){
   const iterator=forestGeometryChecks(manifest,streams);let next;do{next=iterator.next();}while(!next.done);return next.value;
 }
-const forestLoadYield=()=>globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0));
 function forestLoadAbort(signal){if(signal?.aborted)throw signal.reason??new DOMException('Forest load aborted','AbortError');}
-async function finishForestChecks(iterator,{yieldTask=forestLoadYield,signal}={}){
-  for(;;){forestLoadAbort(signal);const next=iterator.next();if(next.done)return next.value;await yieldTask();}
+async function finishForestChecks(iterator,{yieldTask,signal}={}){
+  const pauseIfNeeded=createTaskYieldBudget();
+  for(;;){
+    forestLoadAbort(signal);const next=iterator.next();if(next.done)return next.value;
+    if(yieldTask)await yieldTask();else{const pause=pauseIfNeeded();if(pause)await pause;}
+  }
 }
 export async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
 export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true}={}){
@@ -674,9 +678,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         surfaces=await createForestLeafSurfaces({device,shader,pack:source});forestLoadAbort(abort.signal);
         const upload=async(data,usage,label)=>{
           const bytes=new Uint8Array(data.buffer,data.byteOffset,data.byteLength),buffer=device.createBuffer({label,size:bytes.byteLength,usage:usage|B.COPY_DST});allocated.push(buffer);candidateBuffers.push(buffer);
-          // Each byte is uploaded once. Yield between transfer chunks rather
-          // than copying hundreds of megabytes in one main-thread call.
-          for(let offset=0;offset<bytes.length;offset+=1024*1024){forestLoadAbort(abort.signal);const size=Math.min(1024*1024,bytes.length-offset);device.queue.writeBuffer(buffer,offset,bytes,offset,size);nativeStatus.uploadedBytes+=size;await forestLoadYield();}
+          // Each byte is uploaded once. Keep transfer chunks bounded and
+          // yield by elapsed work, without a timer delay for every chunk.
+          const pauseIfNeeded=createTaskYieldBudget();
+          for(let offset=0;offset<bytes.length;offset+=1024*1024){forestLoadAbort(abort.signal);const size=Math.min(1024*1024,bytes.length-offset);device.queue.writeBuffer(buffer,offset,bytes,offset,size);nativeStatus.uploadedBytes+=size;const pause=pauseIfNeeded();if(pause)await pause;}
           return buffer;
         };
         nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(source.indices,B.INDEX,'forest immutable prototype indices');

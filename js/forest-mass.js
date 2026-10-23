@@ -2,6 +2,7 @@
 // Native leaf-density masses. Sampling estimates are authored, not certified
 // equivalence to native leaf silhouettes, coverage, pigment or illumination.
 import {FRAME_WGSL} from './wgsl/common.js';
+import {createTaskYieldBudget} from './task-yield.js';
 import {CANOPY_VERTEX_LAYOUT} from './canopy-scenery.js';
 import {ForestMeshoptDecoder} from './vendor/forest-meshopt.js';
 
@@ -161,7 +162,8 @@ export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS
   // rather than merely rendering equivalent triangles after a rotation.
   if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');streams[name]=raw;
  }
- const iterator=forestMassChecks(manifest,streams,forest);for(;;){const next=iterator.next();if(next.done)return next.value;await(globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0)));}
+ const iterator=forestMassChecks(manifest,streams,forest),pauseIfNeeded=createTaskYieldBudget();
+ for(;;){const next=iterator.next();if(next.done)return next.value;const pause=pauseIfNeeded();if(pause)await pause;}
 }
 
 export const FOREST_MASS_CULL_WGSL=FRAME_WGSL+/* wgsl */`

@@ -6,16 +6,13 @@ A real-time WebGPU sailing game with wind, oar and paddle propulsion, crew, impa
 
 [Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
 
-**Release status:** published runtime
-`3ba18f9cc6b88cc4be5d116e6110bdcb45f2a8da` retains **nine model choices and up to
-nine active vessels**, adds the bounded Forestmodeler scenery adapter, and connects
-real oar/paddle crossings to the shared surface-wave field. The full native Metal
-suite passed **709/709**, zero skips or cancellations, in **351.361 seconds**;
-eight Python importer checks pass separately. Visible Chrome reviewed imported
-trees, automatic detail, coarse debug crowns and the rowing scene without console
-errors. Pages built at **2026-10-22 12:59:14 UTC**; public HTML, manifest and all
-**58 assets** matched tested local sizes/hashes at **12:59:54 UTC**. No
-physical-iPhone or sustained frame-rate result is claimed.
+**Current runtime:** nine vessel choices, independently controlled fleets, source-derived
+forest canopy and distance-based tree detail. Startup reuses identical GPU programs,
+compiles independent pipelines together and includes hull profiles only for the
+scene's allocated vessels. All active models retain their original GPU arithmetic.
+Forest validation yields by elapsed work, avoiding thousands of clamped timers on
+browsers without `scheduler.yield`. Geometry, textures, validation and rendering
+quality are unchanged. [Release and qualification receipts](BACKLOG.md).
 
 The nine-vessel integration `c8a660d` passed **687/687** native checks and rendered
 review of the five added models and mixed fleet; its 53 public assets were verified
@@ -82,6 +79,11 @@ abstracted. Damage, penetration, ricochet and AI combat are not yet modeled.
 You need a recent Chrome with WebGPU and a reasonably capable GPU. On a laptop, force Chrome onto the dedicated GPU in the Windows graphics settings, or it will fall back to the integrated one.
 
 Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both embed sailing assets and the forest view atlases. The optional full-detail mature tree buffers load from versioned public assets; they require a connection.
+
+Normal sailing preloads only wood and two crew models (about 2.8 MB before HTTP
+compression); forest assets load only in Landfall scenes. The island's complete
+forest pack remains large, so its first visit can still depend heavily on download
+speed. The loading overlay stays until the first rendered frame completes on the GPU.
 
 To run from source:
 

@@ -5824,8 +5824,6 @@ struct ConstellationVertex{@builtin(position) position:vec4f,@location(0) altitu
 
 
 const victoryHullNX=VICTORY_DESIGN.hull.stations.length,victoryHullNY=VICTORY_DESIGN.hull.levels.length,victoryHullCells=victoryHullNX*victoryHullNY,victoryStemN=VICTORY_DESIGN.hull.stemLevels.length;
-const additionalHullWGSLProfiles=Object.values(PROCEDURAL_DESIGNS).map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
-const additionalHullCases=expression=>Object.values(PROCEDURAL_DESIGNS).map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
 const proceduralDeckWGSL=d=>Number.isFinite(d.floorHeight)?`var y=${d.floorHeight};`:
   `var y=${d.profile.deck};`+(d.deckZones??[]).map(zone=>`if(z>=${zone.bounds[0]}&&z<=${zone.bounds[1]}){y=max(y,${zone.height});}`).join('')+
   (d.cockpit?`if(z>${d.cockpit.bounds[0]}&&z<${d.cockpit.bounds[1]}&&abs(x)<${d.cockpit.halfWidth}){y=${d.cockpit.floorHeight};}`:'');
@@ -5836,7 +5834,11 @@ const proceduralKeelWGSL=d=>{
     const b=k.sections[i+1];return `if(y<=${b.y}){let t=clamp((y-(${a.y}))/${b.y-a.y},0.0,1.0);let fore=mix(${a.zFore},${b.zFore},t);let aft=mix(${a.zAft},${b.zAft},t);if(z<=fore||z>=aft){return 0.0;}let u=(z-fore)/(aft-fore);let thickness=10.0*(.2969*sqrt(u)-.1260*u-.3516*u*u+.2843*u*u*u-.1036*u*u*u*u);return max(0.0,mix(${a.halfWidth},${b.halfWidth},t)*thickness);}`;
   }).join('')+'return 0.0;';
 };
-const HULL_PROFILE = /* wgsl */ `
+function createSceneHullProfile(modelCodes=null){
+ const designs=Object.values(PROCEDURAL_DESIGNS).filter(d=>!modelCodes||modelCodes.has(d.modelCode));
+ const additionalHullWGSLProfiles=designs.map(d=>hullLoftWGSL(d.profile,'additionalHull'+d.modelCode)).join('\n');
+ const additionalHullCases=expression=>designs.map(d=>'case '+d.modelCode+'u: {'+expression(d)+'}').join('\n');
+ return /* wgsl */ `
 const HULL_Y_SCALE:f32 = ${HULL_VERTICAL_SCALE};
 fn hullDeck(z: f32) -> f32 {
   return select(0.7+0.24*(z/5.6)*(z/5.6),0.7+0.47*pow(max(0.0,-z/6.4),3.0),z<0.0);
@@ -5957,6 +5959,18 @@ fn modelHullExcludesOcean(local:vec3f,model:f32)->bool {
   return abs(local.x)<modelHullWidth(local.z,local.y,model);
 }
 `;
+}
+const HULL_PROFILE=createSceneHullProfile();
+const sceneHullProfiles=new Map();
+// The fleet's models are immutable until navigation reloads the scene. Keep
+// their exact loft arithmetic/model IDs; omit only absent procedural profiles.
+function withSceneHullProfile(source,modelCodes){
+ if(!source.includes(HULL_PROFILE))return source;
+ const codes=[...new Set(modelCodes)].sort((a,b)=>a-b),known=new Set([0,1,...Object.values(PROCEDURAL_DESIGNS).map(d=>d.modelCode)]);
+ if(!codes.length||codes.some(code=>!known.has(code)))throw Error('Unknown scene GPU hull model');
+ const key=codes.join(',');if(!sceneHullProfiles.has(key))sceneHullProfiles.set(key,createSceneHullProfile(new Set(codes)));
+ return source.replaceAll(HULL_PROFILE,sceneHullProfiles.get(key));
+}
 
 // ---- js/wgsl/lateen.js ----
 
@@ -19086,12 +19100,12 @@ async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,e
     {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
     {shaderLocation:4,offset:44,format:'float32x4'},
   ]}];
-  const module=shared?null:await shader(CREW_RENDER,'crew'),shadowModule=shared?null:await shader(CREW_SHADOW,'crew shadow');
-  const pipeline=shared?.pipeline??await device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
+  const [module,shadowModule]=shared?[null,null]:await Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]);
+  const [pipeline,shadowPipeline]=await Promise.all([shared?.pipeline??device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
     fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
-  const shadowPipeline=shared?.shadowPipeline??await device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}});
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}}),
+    shared?.shadowPipeline??device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})]);
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
@@ -21475,9 +21489,35 @@ async function loadForestMiddle({forest,mass,receipt=(forest?.manifest??forest)?
  return{manifest,vertices,indices,prototypes:manifest.prototypes,sourceValidated:true};
 }
 
+// ---- js/task-yield.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+// A real browser task boundary lets input/paint run; microtasks alone do not.
+function yieldCooperativeTask(){
+  const taskScheduler=globalThis.scheduler;
+  if(typeof taskScheduler?.yield==='function')return taskScheduler.yield();
+  return new Promise((resolve,reject)=>{
+    if(typeof globalThis.MessageChannel!=='function'){setTimeout(resolve,0);return;}
+    const channel=new MessageChannel(),close=()=>{channel.port1.close();channel.port2.close();};
+    channel.port1.onmessage=()=>{close();resolve();};
+    channel.port1.onmessageerror=()=>{close();reject(Error('Cooperative task message failed'));};
+    try{channel.port2.postMessage(null);}catch(error){close();reject(error);}
+  });
+}
+// Validators keep their existing small checked batches. Only yield when the
+// work budget expires, not once per batch: nested timer fallbacks can otherwise
+// add minutes of idle time on browsers without scheduler.yield.
+function createTaskYieldBudget({budgetMs=8,now=()=>performance.now(),yieldTask=yieldCooperativeTask}={}){
+  let deadline=now()+budgetMs;
+  return()=>{
+    if(now()<deadline)return null;
+    return Promise.resolve(yieldTask()).then(()=>{deadline=now()+budgetMs;});
+  };
+}
+
 // ---- js/forest-scenery.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Grown temperate specimens are authored visual proxies, not surveyed Saba flora.
+
 
 
 
@@ -21670,10 +21710,13 @@ function* forestGeometryChecks(manifest,streams){
 function decodeForestScenery(manifest,streams){
   const iterator=forestGeometryChecks(manifest,streams);let next;do{next=iterator.next();}while(!next.done);return next.value;
 }
-const forestLoadYield=()=>globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0));
 function forestLoadAbort(signal){if(signal?.aborted)throw signal.reason??new DOMException('Forest load aborted','AbortError');}
-async function finishForestChecks(iterator,{yieldTask=forestLoadYield,signal}={}){
-  for(;;){forestLoadAbort(signal);const next=iterator.next();if(next.done)return next.value;await yieldTask();}
+async function finishForestChecks(iterator,{yieldTask,signal}={}){
+  const pauseIfNeeded=createTaskYieldBudget();
+  for(;;){
+    forestLoadAbort(signal);const next=iterator.next();if(next.done)return next.value;
+    if(yieldTask)await yieldTask();else{const pause=pauseIfNeeded();if(pause)await pause;}
+  }
 }
 async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
 async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true}={}){
@@ -22151,9 +22194,10 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         surfaces=await createForestLeafSurfaces({device,shader,pack:source});forestLoadAbort(abort.signal);
         const upload=async(data,usage,label)=>{
           const bytes=new Uint8Array(data.buffer,data.byteOffset,data.byteLength),buffer=device.createBuffer({label,size:bytes.byteLength,usage:usage|B.COPY_DST});allocated.push(buffer);candidateBuffers.push(buffer);
-          // Each byte is uploaded once. Yield between transfer chunks rather
-          // than copying hundreds of megabytes in one main-thread call.
-          for(let offset=0;offset<bytes.length;offset+=1024*1024){forestLoadAbort(abort.signal);const size=Math.min(1024*1024,bytes.length-offset);device.queue.writeBuffer(buffer,offset,bytes,offset,size);nativeStatus.uploadedBytes+=size;await forestLoadYield();}
+          // Each byte is uploaded once. Keep transfer chunks bounded and
+          // yield by elapsed work, without a timer delay for every chunk.
+          const pauseIfNeeded=createTaskYieldBudget();
+          for(let offset=0;offset<bytes.length;offset+=1024*1024){forestLoadAbort(abort.signal);const size=Math.min(1024*1024,bytes.length-offset);device.queue.writeBuffer(buffer,offset,bytes,offset,size);nativeStatus.uploadedBytes+=size;const pause=pauseIfNeeded();if(pause)await pause;}
           return buffer;
         };
         nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(source.indices,B.INDEX,'forest immutable prototype indices');
@@ -22409,6 +22453,7 @@ const ForestMeshoptDecoder = (function () {
 
 
 
+
 const FOREST_MASS_VERTEX_LAYOUT=Object.freeze({arrayStride:24,attributes:[
  {shaderLocation:0,offset:0,format:'float32x3'},
  {shaderLocation:1,offset:12,format:'snorm8x4'},
@@ -22565,7 +22610,8 @@ async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS
   // rather than merely rendering equivalent triangles after a rotation.
   if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');streams[name]=raw;
  }
- const iterator=forestMassChecks(manifest,streams,forest);for(;;){const next=iterator.next();if(next.done)return next.value;await(globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0)));}
+ const iterator=forestMassChecks(manifest,streams,forest),pauseIfNeeded=createTaskYieldBudget();
+ for(;;){const next=iterator.next();if(next.done)return next.value;const pause=pauseIfNeeded();if(pause)await pause;}
 }
 
 const FOREST_MASS_CULL_WGSL=FRAME_WGSL+/* wgsl */`
@@ -24281,7 +24327,87 @@ async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,
   };
 }
 
+// ---- js/wgsl-prune.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+// WGSL has no function pointers. Drop only unreachable, unannotated helpers;
+// retain every entry point and all globals/types/constants/overrides verbatim.
+function pruneWGSLFunctions(code){
+  let masked='',copied=0;
+  for(let i=0;i<code.length;i++){
+    if(code[i]==='"')return code; // Unknown syntax: leave it to the compiler.
+    if(code[i]!=='/'||!['/','*'].includes(code[i+1]))continue;
+    const start=i;masked+=code.slice(copied,start);
+    if(code[i+1]==='/'){i=code.indexOf('\n',i+2);if(i<0)i=code.length;}
+    else{
+      let depth=1;i+=2;
+      while(i<code.length&&depth){
+        if(code[i]==='/'&&code[i+1]==='*'){depth++;i+=2;}
+        else if(code[i]==='*'&&code[i+1]==='/'){depth--;i+=2;}else i++;
+      }
+      if(depth)return code;
+    }
+    masked+=code.slice(start,i).replace(/[^\r\n]/g,' ');copied=i;i--;
+  }
+  masked+=code.slice(copied);
+  const functions=[],names=new Map();let previous=0;
+  for(const match of masked.matchAll(/\bfn\s+([A-Za-z_]\w*)\s*\(/g)){
+    const start=match.index,open=masked.indexOf('{',start);if(open<0||start<previous||names.has(match[1]))return code;
+    let parentheses=0;for(const char of masked.slice(start,open)){if(char==='(')parentheses++;else if(char===')'&&--parentheses<0)return code;}
+    if(parentheses)return code;
+    let end=open+1,depth=1;while(end<masked.length&&depth){if(masked[end]==='{')depth++;else if(masked[end]==='}')depth--;end++;}
+    if(depth)return code;
+    const prefix=masked.slice(previous,start),boundary=Math.max(prefix.lastIndexOf(';'),prefix.lastIndexOf('}'));
+    const annotated=prefix.slice(boundary+1).includes('@')||masked.slice(start,open).includes('@');
+    const item={name:match[1],start,end,annotated,body:masked.slice(start,end)};functions.push(item);names.set(item.name,item);previous=end;
+  }
+  if(!functions.length||[...masked.matchAll(/\bfn\b/g)].length!==functions.length)return code;
+  // References in global declarations/initializers are roots too. Keeping any
+  // matching identifier, not just calls, errs toward retaining extra helpers.
+  let outside='',cursor=0;for(const item of functions){outside+=masked.slice(cursor,item.start);cursor=item.end;}outside+=masked.slice(cursor);
+  const live=new Set(),pending=[];
+  const visit=text=>{for(const token of text.matchAll(/\b[A-Za-z_]\w*\b/g))if(names.has(token[0])&&!live.has(token[0])){live.add(token[0]);pending.push(names.get(token[0]));}};
+  for(const item of functions)if(item.annotated){live.add(item.name);pending.push(item);}
+  visit(outside);if(!pending.length)return code;
+  while(pending.length)visit(pending.pop().body);
+  let result='';cursor=0;
+  for(const item of functions)if(!live.has(item.name)){result+=code.slice(cursor,item.start);cursor=item.end;}
+  return result+code.slice(cursor);
+}
+
+// ---- js/gpu-program-cache.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+// Immutable programs are device-local. Buffers and bind groups stay with their
+// original owners. Keys include the final WGSL, after fleet/frame rewriting.
+function createGPUProgramCache({device,prepare=code=>code,report=()=>{}}){
+  const modules=new Map(),computes=new Map();
+  function remember(cache,key,create){
+    if(cache.has(key))return cache.get(key);
+    const pending=Promise.resolve().then(create);cache.set(key,pending);
+    pending.catch(()=>{if(cache.get(key)===pending)cache.delete(key);});
+    return pending;
+  }
+  function moduleFor(code,label){
+    return remember(modules,code,async()=>{
+      const module=device.createShaderModule({code,label}),info=await module.getCompilationInfo();
+      report(info.messages,code,label);
+      if(info.messages.some(message=>message.type==='error'))throw Error('Shader compile error in '+label);
+      return module;
+    });
+  }
+  return {
+    shader(code,label){return moduleFor(prepare(code),label);},
+    computePipe(code,label){
+      const finalCode=prepare(code);
+      // This factory has one compute descriptor: automatic layout and main.
+      return remember(computes,finalCode,async()=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:await moduleFor(finalCode,label),entryPoint:'main'}}));
+    },
+  };
+}
+
 // ---- js/main.js ----
+
+
+
 
 
 
@@ -24429,6 +24555,7 @@ async function main() {
   const fleetConfig=fleetFromSearch(qs,SHIP_ID);
   const fleetSpecs=[{id:'player',modelId:SHIP_ID},...fleetConfig.flatMap((entry,index)=>entry.enabled?[{...entry,formation:fleetFormation(index)}]:[])];
   const fleetCount=fleetSpecs.length;
+  const sceneModelCodes=fleetSpecs.map(spec=>fleetModelCode(getShipModel(spec.modelId)));
   window.oceanStartup?.stage('adapter','Starting the graphics device…');
   if (!navigator.gpu) fail('WebGPU is not available in this browser.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -24448,27 +24575,18 @@ async function main() {
   ctx.configure({ device, format: swapFormat, alphaMode: 'opaque', usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
   window.oceanStartup?.stage('ocean-sky','Preparing the ocean and sky…');
 
-  async function shader(code, label) {
-    code=withCelestialFrame(code);
-    code=withSceneShadowCount(code,fleetCount);
+  const {shader,computePipe}=createGPUProgramCache({device,prepare(code){
+    if(qs.get('shaderModels')!=='all')code=withSceneHullProfile(code,sceneModelCodes);
+    code=withCelestialFrame(code);code=withSceneShadowCount(code,fleetCount);
     if(code.includes(SCENE_WAKE_SAMPLE))code=withPooledFleetWakes(code,fleetCount);
-    const m = device.createShaderModule({ code, label });
-    const info = await m.getCompilationInfo();
-    let bad = false;
-    for (const msg of info.messages) {
-      if (msg.type === 'error') bad = true;
-      if (msg.type !== 'info') {
-        const line = code.split('\n')[msg.lineNum - 1];
-        log(`[${label}] ${msg.type} ${msg.lineNum}:${msg.linePos} ${msg.message}\n    ${line}`);
-      }
+    return qs.get('shaderPrune')==='off'?code:pruneWGSLFunctions(code);
+  },report(messages,code,label){
+    for(const msg of messages)if(msg.type!=='info'){
+      const line=code.split('\n')[msg.lineNum-1];
+      log(`[${label}] ${msg.type} ${msg.lineNum}:${msg.linePos} ${msg.message}\n    ${line}`);
     }
-    if (bad) fail('Shader compile error in ' + label + ' (see console)');
-    return m;
-  }
-  async function computePipe(code, label) {
-    const module = await shader(code, label);
-    return device.createComputePipelineAsync({ label, layout: 'auto', compute: { module, entryPoint: 'main' } });
-  }
+    if(messages.some(msg=>msg.type==='error'))fail('Shader compile error in '+label+' (see console)');
+  }});
 
   // --------------------------------------------------------------------------------------
   // Simulation resources
@@ -24622,7 +24740,8 @@ async function main() {
     shader(createUnderwaterPost(BLOOM_DOWN,'bloom'),'medium bloom source'),
     shader(createUnderwaterPost(COMPOSITE,'composite'),'medium composite source'),
   ]);
-  const oceanPipe = await device.createRenderPipelineAsync({
+  const [oceanPipe,oceanDepthPipe,skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]=await Promise.all([
+    device.createRenderPipelineAsync({
     label: 'ocean', layout: 'auto',
     vertex: {
       module: oceanMod, entryPoint: 'vs',
@@ -24632,8 +24751,8 @@ async function main() {
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: !OCEAN_DEPTH, depthCompare: OCEAN_DEPTH ? 'equal' : 'greater' },
     multisample: { count: MSAA },
-  });
-  const oceanDepthPipe = OCEAN_DEPTH ? await device.createRenderPipelineAsync({
+  }),
+    OCEAN_DEPTH ? device.createRenderPipelineAsync({
     label: 'ocean visibility', layout: 'auto',
     vertex: {
       module: oceanMod, entryPoint: 'vs',
@@ -24643,37 +24762,38 @@ async function main() {
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
     multisample: { count: MSAA },
-  }) : null;
-  const skyPipe = await device.createRenderPipelineAsync({
+  }) : null,
+    device.createRenderPipelineAsync({
     label: 'sky', layout: 'auto',
     vertex: { module: skyMod, entryPoint: 'vs' },
     fragment: { module: skyMod, entryPoint: 'fs', targets: [{ format: HDR }] },
     primitive: { topology: 'triangle-list' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'equal' },
     multisample: { count: MSAA },
-  });
-  const downPipe = await device.createRenderPipelineAsync({
+  }),
+    device.createRenderPipelineAsync({
     label: 'bloom down', layout: 'auto',
     vertex: { module: downMod, entryPoint: 'vs' },
     fragment: { module: downMod, entryPoint: 'fs', targets: [{ format: HDR }] },
-  });
-  const upPipe = await device.createRenderPipelineAsync({
+  }),
+    device.createRenderPipelineAsync({
     label: 'bloom up', layout: 'auto',
     vertex: { module: upMod, entryPoint: 'vs' },
     fragment: {
       module: upMod, entryPoint: 'fs', constants:{bloomFoldTent:qs.get('bloomFilter')!=='reference'},
       targets: [{ format: HDR, blend: { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } } }],
     },
-  });
-  const compPipe = await device.createRenderPipelineAsync({
+  }),
+    device.createRenderPipelineAsync({
     label: 'composite', layout: 'auto',
     vertex: { module: compMod, entryPoint: 'vs' },
     fragment: { module: compMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
-  });
-  const mediumDownPipe=await device.createRenderPipelineAsync({label:'medium bloom source',layout:'auto',
-    vertex:{module:mediumDownMod,entryPoint:'vs'},fragment:{module:mediumDownMod,entryPoint:'fs',targets:[{format:HDR}]}});
-  const mediumCompPipe=await device.createRenderPipelineAsync({label:'medium composite source',layout:'auto',
-    vertex:{module:mediumCompMod,entryPoint:'vs'},fragment:{module:mediumCompMod,entryPoint:'fs',targets:[{format:swapFormat}]}});
+  }),
+    device.createRenderPipelineAsync({label:'medium bloom source',layout:'auto',
+    vertex:{module:mediumDownMod,entryPoint:'vs'},fragment:{module:mediumDownMod,entryPoint:'fs',targets:[{format:HDR}]}}),
+    device.createRenderPipelineAsync({label:'medium composite source',layout:'auto',
+    vertex:{module:mediumCompMod,entryPoint:'vs'},fragment:{module:mediumCompMod,entryPoint:'fs',targets:[{format:swapFormat}]}}),
+  ]);
 
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
   const waterFilterPipe=await computePipe(WATER_FILTER,'water reflections filter');
@@ -24727,12 +24847,14 @@ async function main() {
     const recoilMap=createGunRecoilMap(asset);
     const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap});
     if(pose)render.poseAssets=pose.assets;
-    const wetness=await createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
+    const [wetness,interaction]=await Promise.all([
+      createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose}),
+      createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)}),
+    ]);
     const shadows=await createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose});
     let crew=null;
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
     catch(error){if(index===0)crewError='Crew unavailable';console.warn(spec.id+' crew initialization:',error);}
-    const interaction=await createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWater=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?await createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interaction.setShadows(shadows);
     vessels.push({...spec,boat:null,asset,render,hullUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
