@@ -132,25 +132,58 @@ function nonzeroTriangles(indices,positions,id){
  return{indices:removed?output.subarray(0,cursor):indices,removed};
 }
 
-function seamEdges(indices,positions,planes){
+function seamEdges(indices,input,keyFor){
+ const {positions,planes}=input;
  const edges=new Map();
  for(let i=0;i<indices.length;i+=3)for(let j=0;j<3;j++){
   const a=indices[i+j],b=indices[i+(j+1)%3];
   if(!planes.some(([axis,plane])=>Math.abs(positions[a*6+axis]-plane)<=planeTolerance(plane)&&Math.abs(positions[b*6+axis]-plane)<=planeTolerance(plane)))continue;
-  const key=a<b?a+','+b:b+','+a,sign=a<b?1:-1,item=edges.get(key);
+  const ka=keyFor(a),kb=keyFor(b);require(ka!==kb,'Zero-length edge survived exact-area cleanup');
+  const key=ka<kb?ka+':'+kb:kb+':'+ka,sign=ka<kb?1:-1,item=edges.get(key);
   if(item){item.count++;item.direction+=sign;}else edges.set(key,{count:1,direction:sign});
+  if(!item)edges.get(key).vertices=ka<kb?[a,b]:[b,a];
  }
- for(const [key,item]of edges){require(item.count<=2&&(item.count!==2||item.direction===0),'Nonmanifold or inconsistently wound nominal seam');if(item.count===2)edges.delete(key);}
+ // Cancel spatially identical, oppositely directed internal edges even if
+ // Float32 quantization gave their coincident endpoints different vertex IDs.
+ // Nonzero directed multiplicity remains part of the exact spatial seam.
+ for(const [key,item]of edges)if(item.direction===0)edges.delete(key);
  return edges;
 }
 
-function verifySeams(before,after,input,id){
- const oldEdges=seamEdges(before,input.positions,input.planes),newEdges=seamEdges(after,input.positions,input.planes);
- require(oldEdges.size===newEdges.size,'Nominal seam edge count changed: '+id);
- for(const [key,item]of oldEdges)require(newEdges.get(key)?.direction===item.direction,'Directed nominal seam changed: '+id);
- const used=new Uint8Array(input.locks.length);for(const index of after)used[index]=1;
- for(let i=0;i<used.length;i++)require(!input.locks[i]||used[i]===1,'Explicitly locked seam vertex disappeared: '+id);
- return oldEdges.size;
+function verifySeams(before,after,input){
+ const keys=new Array(input.locks.length),keyFor=id=>keys[id]??=input.rows.subarray(id*STRIDE,id*STRIDE+12).toString('hex');
+ const attributeKey=id=>input.rows.subarray(id*STRIDE+12,id*STRIDE+15).toString('hex')+':'+input.rows.subarray(id*STRIDE+16,id*STRIDE+22).toString('hex');
+ const coordinate=id=>Array.from(input.positions.subarray(id*6,id*6+3));
+ const oldEdges=seamEdges(before,input,keyFor),newEdges=seamEdges(after,input,keyFor);
+ const diagnostics={oldEdges:oldEdges.size,newEdges:newEdges.size,missingEdges:0,addedEdges:0,changedDirections:0,
+  lockedPositions:0,missingLockedPositions:0,missingLockedAttributeVariants:0,samples:[]};
+ const edgeSample=(type,key,old,next)=>{if(diagnostics.samples.length<4)diagnostics.samples.push({type,positionWords:key,
+  coordinates:(old??next).vertices.map(coordinate),oldDirection:old?.direction??0,newDirection:next?.direction??0});};
+ for(const [key,item]of oldEdges){const next=newEdges.get(key);if(!next){diagnostics.missingEdges++;edgeSample('missing-edge',key,item,next);}
+  else if(next.direction!==item.direction){diagnostics.changedDirections++;edgeSample('changed-direction',key,item,next);}}
+ for(const [key,item]of newEdges)if(!oldEdges.has(key)){diagnostics.addedEdges++;edgeSample('added-edge',key,undefined,item);}
+ const expected=new Map(),used=new Uint8Array(input.locks.length);
+ for(let id=0;id<input.locks.length;id++)if(input.locks[id]){
+  const key=keyFor(id);if(!expected.has(key))expected.set(key,new Map());expected.get(key).set(attributeKey(id),id);
+ }
+ const surviving=new Map();for(const index of after)used[index]=1;
+ for(let id=0;id<used.length;id++)if(used[id]){const key=keyFor(id);if(expected.has(key)){
+  if(!surviving.has(key))surviving.set(key,new Map());surviving.get(key).set(attributeKey(id),id);
+ }}
+ diagnostics.lockedPositions=expected.size;
+ for(const [key,variants]of expected){const kept=surviving.get(key);
+  if(!kept){diagnostics.missingLockedPositions++;if(diagnostics.samples.length<4)diagnostics.samples.push({type:'missing-locked-position',positionWords:key,coordinates:coordinate(variants.values().next().value)});continue;}
+  for(const [attribute,id]of variants)if(!kept.has(attribute)){
+   diagnostics.missingLockedAttributeVariants++;
+   if(diagnostics.samples.length<4){const candidate=kept.values().next().value,normal=input.attrs.subarray(id*6,id*6+3),other=input.attrs.subarray(candidate*6,candidate*6+3);
+    diagnostics.samples.push({type:'locked-normal-or-pigment-changed',positionWords:key,coordinates:coordinate(id),
+     originalNormalPigmentWords:attribute,survivingNormalPigmentWords:attributeKey(candidate),
+     normalAngleDegrees:Math.acos(Math.max(-1,Math.min(1,normal[0]*other[0]+normal[1]*other[1]+normal[2]*other[2])))*180/Math.PI,
+     maxLinearRGBDifference:Math.max(...[0,1,2].map(k=>Math.abs(input.attrs[id*6+3+k]-input.attrs[candidate*6+3+k])))});
+   }
+  }
+ }
+ return{ok:diagnostics.missingEdges===0&&diagnostics.addedEdges===0&&diagnostics.changedDirections===0&&diagnostics.missingLockedPositions===0&&diagnostics.missingLockedAttributeVariants===0,diagnostics};
 }
 
 function compactOriginal(indices,rows){
@@ -207,7 +240,7 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
  try{
   const vertexPath=join(staging,'.vertices.raw'),indexPath=join(staging,'.indices.raw');
   vertexFile=await open(vertexPath,'wx');indexFile=await open(indexPath,'wx');
-  const chunks=[],positionsHash=createHash('sha256');let vertexCount=0,indexCount=0,maxError=0,removedInputZeroAreaTriangles=0,removedOutputZeroAreaTriangles=0;
+  const chunks=[],positionsHash=createHash('sha256');let vertexCount=0,indexCount=0,maxError=0,removedInputZeroAreaTriangles=0,removedOutputZeroAreaTriangles=0,fallbackChunks=0;
   for(const chunk of manifest.chunks){
    const data=chunkInput(chunk,vertices,indices),unchanged=sha256(data.rows),indexDigest=sha256(new Uint8Array(data.indices.buffer)),scale=simplifier.getScale(data.positions,6);
    require(Number.isFinite(scale)&&scale>0,'Undefined simplifier position scale: '+chunk.id);
@@ -217,7 +250,10 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
    const absoluteError=reportedRelativeError*scale;
    require(Number.isFinite(absoluteError)&&absoluteError>=0&&absoluteError<=errorMetres,'Reported simplification error exceeds requested metres: '+chunk.id);
    require(reduced.length<=data.indices.length&&sha256(data.rows)===unchanged&&sha256(new Uint8Array(data.indices.buffer))===indexDigest,'Simplifier mutated original input: '+chunk.id);
-   const clean=nonzeroTriangles(reduced,data.positions,chunk.id),seams=verifySeams(data.indices,clean.indices,data,chunk.id),result=compactOriginal(clean.indices,data.rows);
+   const clean=nonzeroTriangles(reduced,data.positions,chunk.id),seamCheck=verifySeams(data.indices,clean.indices,data);
+   const fallback=seamCheck.ok?null:{reason:'Exact spatial seam/locked normal-pigment preservation failed; original nonzero input retained',candidateIndexCount:clean.indices.length,diagnostics:seamCheck.diagnostics};
+   const appliedError=fallback?0:absoluteError,result=compactOriginal(fallback?data.indices:clean.indices,data.rows);
+   if(fallback){fallbackChunks++;console.warn(JSON.stringify({chunk:chunk.id,fallback}));}
    require((vertexCount+result.vertices.length/STRIDE)*STRIDE<=MAX_BUFFER&&(indexCount+result.indices.length)*4<=MAX_BUFFER,'Simplified geometry exceeds GPU buffer budget');
    // Keep the simplifier's triangle order and winding exactly as returned; only
    // vertex identifiers change through a first-use, byte-preserving compaction.
@@ -227,14 +263,15 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
    for(let i=0;i<result.vertices.length/STRIDE;i++)result.vertices.copy(positionBytes,i*12,i*STRIDE,i*STRIDE+12);
    positionsHash.update(positionBytes);
    chunks.push({...chunk,firstIndex:indexCount,indexCount:result.indices.length,low:result.low,high:result.high,centre:result.centre,radius:result.radius,
-    lodErrorMetres:chunk.lodErrorMetres+absoluteError,simplification:{originalIndexCount:chunk.indexCount,nonzeroInputIndexCount:data.indices.length,targetIndexCount,resultIndexCount:result.indices.length,
+    lodErrorMetres:chunk.lodErrorMetres+appliedError,simplification:{originalIndexCount:chunk.indexCount,nonzeroInputIndexCount:data.indices.length,targetIndexCount,resultIndexCount:result.indices.length,
      removedInputZeroAreaTriangles:data.removedZeroAreaTriangles,removedOutputZeroAreaTriangles:clean.removed,
-     originalVertexCount:data.rows.length/STRIDE,resultVertexCount:result.vertices.length/STRIDE,lockedNominalVertices:data.locked,nominalSeamEdges:seams,
-     positionScaleMetres:scale,targetRelativeError:relativeTarget,reportedRelativeError,reportedAbsoluteErrorMetres:absoluteError,
+     originalVertexCount:data.rows.length/STRIDE,resultVertexCount:result.vertices.length/STRIDE,lockedNominalVertices:data.locked,nominalSeamEdges:seamCheck.diagnostics.oldEdges,
+     seamCheck:seamCheck.diagnostics,fallback,positionScaleMetres:scale,targetRelativeError:relativeTarget,reportedRelativeError,
+     candidateReportedAbsoluteErrorMetres:absoluteError,reportedAbsoluteErrorMetres:appliedError,
      errorQualification:'Meshoptimizer attribute-weighted estimate; not a Hausdorff or native appearance certificate'}});
-   vertexCount+=result.vertices.length/STRIDE;indexCount+=result.indices.length;maxError=Math.max(maxError,absoluteError);
+   vertexCount+=result.vertices.length/STRIDE;indexCount+=result.indices.length;maxError=Math.max(maxError,appliedError);
    removedInputZeroAreaTriangles+=data.removedZeroAreaTriangles;removedOutputZeroAreaTriangles+=clean.removed;
-   console.log(JSON.stringify({chunk:chunk.id+1,chunks:manifest.chunks.length,sourceTriangles:chunk.indexCount/3,triangles:result.indices.length/3,removedInputZeroAreaTriangles:data.removedZeroAreaTriangles,removedOutputZeroAreaTriangles:clean.removed,reportedErrorMetres:absoluteError}));
+   console.log(JSON.stringify({chunk:chunk.id+1,chunks:manifest.chunks.length,sourceTriangles:chunk.indexCount/3,triangles:result.indices.length/3,removedInputZeroAreaTriangles:data.removedZeroAreaTriangles,removedOutputZeroAreaTriangles:clean.removed,reportedErrorMetres:appliedError,fallback:Boolean(fallback)}));
   }
   await vertexFile.close();vertexFile=null;await indexFile.close();indexFile=null;
   const files={...manifest.files};
@@ -256,9 +293,9 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
     runtime:{node:process.version,zlib:process.versions.zlib},api:'simplifyWithAttributes',flags:['LockBorder'],positionStrideFloats:6,
     attributes:['unitNormalX','unitNormalY','unitNormalZ','linearRed','linearGreen','linearBlue'],attributeWeights:[...ATTRIBUTE_WEIGHTS],
     targetRatio:ratio,maximumReportedErrorMetres:errorMetres,actualMaximumReportedErrorMetres:maxError,
-    removedInputZeroAreaTriangles,removedOutputZeroAreaTriangles,
+    removedInputZeroAreaTriangles,removedOutputZeroAreaTriangles,fallbackChunks,
     degeneratePolicy:'Remove only faces whose stored Float32-position cross product is exactly zero before/after simplification, preserving every nonzero-area face regardless of size. Compare seams against the exact-nonzero input; reject invalid addresses and nonfinite values',
-    seamPolicy:'Lock vertices within max(1e-5, abs(Float32(plane))*2^-22) m of nominal XZ planes; verify original directed open seam edges and locked vertex survival',
+    seamPolicy:'Lock vertices within max(1e-5, abs(Float32(plane))*2^-22) m of nominal XZ planes; compare directed edges by exact original XYZ bytes, locked XYZ survival and packed normal/RGB variants separately. Failed candidates retain original nonzero geometry and report diagnostics',
     vertexPolicy:'No updates, welding, filters, moved positions, attribute rewriting or triangle rotations; compact surviving original 24-byte records in returned index first-use order',
     sourceTriangles:indices.length/3,triangles:indexCount/3,vertices:vertexCount,
     qualification:'Reported attribute-weighted simplifier error is added to each authored sampling footprint. No native silhouette, alpha, colour or appearance certificate; rendered before/after validation required'},
@@ -267,7 +304,7 @@ export async function simplifyForestMass({input,output,modulePath=DEFAULT_MODULE
   await writeFile(join(staging,'manifest.json'),encoded,{flag:'wx'});
   try{await access(destination);throw Error('Output appeared during simplification');}catch(error){if(error.code!=='ENOENT')throw error;}
   await rename(staging,destination);
-  console.log(JSON.stringify({output:destination,sourceTriangles:indices.length/3,triangles:indexCount/3,removedInputZeroAreaTriangles,removedOutputZeroAreaTriangles,maximumReportedErrorMetres:maxError,files}));
+  console.log(JSON.stringify({output:destination,sourceTriangles:indices.length/3,triangles:indexCount/3,removedInputZeroAreaTriangles,removedOutputZeroAreaTriangles,fallbackChunks,maximumReportedErrorMetres:maxError,files}));
   return outputManifest;
  }catch(error){await vertexFile?.close();await indexFile?.close();await rm(staging,{recursive:true,force:true});throw error;}
 }
