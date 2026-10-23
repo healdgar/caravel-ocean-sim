@@ -4,7 +4,9 @@
 // This proves opaque depth/GPU ownership, not native-leaf appearance equivalence.
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
+import {createReadStream} from 'node:fs';
 import {readFile,stat} from 'node:fs/promises';
+import {createServer} from 'node:http';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {test} from 'node:test';
@@ -17,19 +19,40 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
   const manifest=JSON.parse(await readFile(join(folder,'manifest.json'),'utf8'));
   assert.equal(manifest.format,'waterworld.native-forest-mass');assert.match(manifest.source.claim,/Original detailed native leaf triangles/);assert.match(manifest.recipe.assembly,/ADD continuous leaf-area density/);
   const allowed=new Set(['manifest.json',...Object.values(manifest.files).map(item=>item.gzip.file)]);
-  const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
+  const diagnostics={phase:'starting servers',pageCrashes:0,browserDisconnected:false,pageErrors:[],failedRequests:[],console:[],assetTransfers:[]};
+  // Real HTTP streams avoid CDP/base64 duplication of the regional100MB files.
+  // The browser still verifies encoded and decoded receipts through the loader.
+  const assetServer=createServer(async(request,response)=>{
+    response.setHeader('Access-Control-Allow-Origin','*');
+    try{
+      if(request.method==='OPTIONS'){response.writeHead(204);response.end();return;}
+      const name=decodeURIComponent(new URL(request.url,'http://127.0.0.1').pathname.slice(1));
+      if(!['GET','HEAD'].includes(request.method)||!allowed.has(name)||name.includes('/')){response.writeHead(404);response.end();return;}
+      const file=join(folder,name),info=await stat(file);if(!info.isFile()){response.writeHead(404);response.end();return;}
+      const transfer={name,bytes:info.size,complete:false};diagnostics.assetTransfers.push(transfer);
+      response.writeHead(200,{'Content-Type':name==='manifest.json'?'application/json':'application/octet-stream','Content-Length':info.size,'Cache-Control':'no-store'});
+      response.once('finish',()=>{transfer.complete=true;});if(request.method==='HEAD'){response.end();return;}
+      const stream=createReadStream(file);stream.on('error',error=>{transfer.error=error.message;response.destroy(error);});response.once('close',()=>stream.destroy());stream.pipe(response);
+    }catch(error){diagnostics.assetTransfers.push({error:error.message});if(!response.headersSent)response.writeHead(500);response.end();}
+  });
+  const server=createDevServer();let browser,closing=false;
   try{
+    server.listen(0,'127.0.0.1');await once(server,'listening');assetServer.listen(0,'127.0.0.1');await once(assetServer,'listening');const assetBase='http://127.0.0.1:'+assetServer.address().port+'/';diagnostics.phase='launching browser';
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+    browser.on('disconnected',()=>{if(!closing)diagnostics.browserDisconnected=true;});
     const page=await browser.newPage();await page.route('**/__mass_render',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
-    await page.route('**/__mass_assets/*',async route=>{const name=decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1));assert.ok(allowed.has(name)&&!name.includes('/'),'bounded actual mass asset');await route.fulfill({contentType:name==='manifest.json'?'application/json':'application/octet-stream',body:await readFile(join(folder,name))});});
+    page.on('crash',()=>{diagnostics.pageCrashes++;});page.on('pageerror',error=>{if(diagnostics.pageErrors.length<20)diagnostics.pageErrors.push(error.message);});
+    page.on('requestfailed',request=>{if(diagnostics.failedRequests.length<20)diagnostics.failedRequests.push({url:request.url(),failure:request.failure()?.errorText});});
+    page.on('console',message=>{if(['error','warning'].includes(message.type())&&diagnostics.console.length<20)diagnostics.console.push(message.text().slice(0,1000));});
     await page.goto('http://127.0.0.1:'+server.address().port+'/__mass_render');
-    const result=await page.evaluate(async forest=>{
+    diagnostics.phase='verifying and rendering actual streamed mass';
+    const result=await page.evaluate(async({forest,assetBase})=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{TERRAIN}=await import('/js/wgsl/terrain.js');
       const {FOREST_MASS_ASSETS,FOREST_MASS_VERTEX_WGSL,loadForestMass,createForestMassRenderer}=await import('/js/forest-mass.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,errors=[],allocated=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const shader=async code=>{const module=device.createShaderModule({code}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
-      const assets=Object.fromEntries(Object.keys(FOREST_MASS_ASSETS).map(name=>[name,'/__mass_assets/'+name])),pack=await loadForestMass({forest,assets});
+      const assets=Object.fromEntries(Object.keys(FOREST_MASS_ASSETS).map(name=>[name,assetBase+name])),pack=await loadForestMass({forest,assets});
       let active=false,rootReads=0;const reads=[];
       const owners=new Proxy(pack.rootChunks,{get(target,key){if(active&&key!=='length'){rootReads++;throw Error('Per-frame CPU root owner read: '+String(key));}const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});
       const guarded=new Proxy({...pack,rootChunks:owners},{get(target,key,receiver){if(active&&['vertices','indices','rootChunks'].includes(key)){reads.push(key);throw Error('Per-frame CPU source read: '+key);}return Reflect.get(target,key,receiver);}});
@@ -71,13 +94,15 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       }
       active=false;await device.queue.onSubmittedWorkDone();const stats={...renderer.stats};renderer.destroy();for(const b of allocated)b.destroy();for(const texture of [colour,msaa,depth])texture.destroy();device.destroy();
       return {errors,witnesses,descriptors,rootReads,reads,writes,stats,source:pack.manifest.source,sourceSizes:{vertices:pack.manifest.files['vertices.bin'].bytes,indices:pack.manifest.files['indices.bin'].bytes}};
-    },forest);
+    },{forest,assetBase});
+    diagnostics.phase='asserting GPU witnesses';
     assert.deepEqual(result.errors,[]);assert.equal(result.rootReads,0);assert.deepEqual(result.reads,[]);
     assert.equal(result.stats.finiteValidated,true);assert.equal(result.stats.appearanceErrorSupported,false);assert.equal(result.stats.geometryErrorSupported,false);assert.equal(result.stats.mode,'far');assert.equal(result.stats.preview,false);
     assert.equal(result.descriptors.length,1);const d=result.descriptors[0];assert.equal(d.vertex,manifest.version===2?'forestMassVS':'bakedCanopyVS');assert.equal(d.layout.arrayStride,manifest.vertexStride);assert.equal(d.fragment,'canopyOpaqueFS');assert.equal(d.depth.depthWriteEnabled,true);assert.equal(d.depth.depthCompare,'greater');assert.equal(d.msaa.alphaToCoverageEnabled,false);assert.ok(d.blend.every(b=>b===null));
     if(manifest.version===2)assert.deepEqual(d.layout.attributes,[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'snorm8x4'},{shaderLocation:6,offset:16,format:'float16x4'}]);
     for(const name of ['vertices','indices']){const uploads=result.writes.filter(w=>w.label==='forest mass immutable '+name);assert.equal(uploads.length,1);assert.equal(uploads[0].offset,0);assert.equal(uploads[0].bytes,result.sourceSizes[name]);}
     for(const row of result.witnesses){assert.ok(row.covered>100&&row.solid>50&&row.solidColour>50,'actual field-derived mass has an opaque coloured interior');assert.ok(row.maxDepthError<=2,'real per-sample depth occludes later blue backdrop: '+JSON.stringify(row));}
-    t.diagnostic(JSON.stringify({input,source:result.source,qualification:'Actual density geometry alpha/depth/GPU witnesses only; native appearance remains unqualified',witnesses:result.witnesses}));
-  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
+    t.diagnostic(JSON.stringify({input,source:result.source,qualification:'Actual density geometry alpha/depth/GPU witnesses only; native appearance remains unqualified',witnesses:result.witnesses,diagnostics}));
+  }catch(error){t.diagnostic(JSON.stringify({input,diagnostics,error:error.message}));throw error;}
+  finally{closing=true;await browser?.close();await Promise.all([server,assetServer].map(s=>new Promise(resolve=>{s.closeAllConnections?.();s.close(resolve);})));}
 });

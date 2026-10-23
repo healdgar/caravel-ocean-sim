@@ -47,13 +47,15 @@ test('native leaf complementary cutouts diagnose layered hardware alpha-to-cover
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(1);}
 `+FOREST_VERTEX_WGSL,module=await shader(code,'actual native leaf coverage shader');
       const W=64,H=16,SCALE=4,frameData=new Float32Array(96);for(let i=0;i<4;i++)frameData[i*5]=1;frameData.set([0,0,1,1],32);
-      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([0,0,0,1,0,1,1,1,0,0,-1,0]),B.STORAGE),visible=make(new Uint32Array([0]),B.STORAGE),bin=make(new Uint32Array([0,0,6,0]),B.UNIFORM),materials=make(surfaces.optics,B.STORAGE);
+      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([0,-2,0,1,0,1,1,1,0,0,-1,0]),B.STORAGE),visible=make(new Uint32Array([0]),B.STORAGE),bin=make(new Uint32Array([0,0,6,0]),B.UNIFORM),materials=make(surfaces.optics,B.STORAGE);
       const rows=[],indexRows=[];
       //0..3: complementary source masks.4..7: identical masks at distinct depths.
       //8: opaque control.9: empty control. Every card covers every raster sample.
       for(let layer=0;layer<10;layer++){
         const material=layer<4?layer:layer<8?0:layer-4,z=layer<8?.15+(layer%4)*.05:.4,base=rows.length/14;
-        for(const [x,y,u,v]of [[-1,-1,0,H],[1,-1,W,H],[1,1,W,0],[-1,1,0,0]])rows.push(x,y,z,0,0,1,4,.72,u,v,1,1,1,material);
+        // Local Y1..3 remains entirely above the collar at worldY-2 while
+        // preserving the original world/clip Y-1..1 coverage reference.
+        for(const [x,y,u,v]of [[-1,-1,0,H],[1,-1,W,H],[1,1,W,0],[-1,1,0,0]])rows.push(x,y+2,z,0,0,1,4,.72,u,v,1,1,1,material);
         indexRows.push(base,base+1,base+2,base,base+2,base+3);
       }
       const vertices=make(new Float32Array(rows),B.VERTEX),indices=make(new Uint32Array(indexRows),B.INDEX);
