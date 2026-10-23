@@ -362,12 +362,13 @@ struct ForestVertex {
  @builtin(position)pos:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,
  @location(2)kind:vec2f,@location(3)leafUV:vec2f,@location(4)colour:vec3f,
  @location(5)@interpolate(flat)nativeMaterial:i32,
+ @location(6)@interpolate(flat)nativeSoil:f32,
 };
 @vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
- var o:ForestVertex;o.world=r.rootScale.xyz+local;
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;
  o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
@@ -378,10 +379,11 @@ struct ForestVertex {
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
+ if(in.world.y<in.nativeSoil){discard;}
  let n=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
  let ambient=select(.36+max(n.y,0.)*.25,.14+exposure*.47+max(n.y,0.)*.08,in.kind.x>3.5);
  return landFinish(in.world,n,in.colour,max(dot(n,F.sunDir.xyz),0.),ambient,0.,.95);
@@ -416,6 +418,9 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
 }
 @fragment fn forestNativeOpaqueFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
+ // Source roots below biological localY0 can extend beyond downhill terrain.
+ // Preserve immutable meshes and clip only visibility, after derivatives.
+ if(in.world.y<in.nativeSoil){discard;}
  let geometric=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
  // This explicitly labelled legacy far approximation is permitted only when
  // the complete specimen fits three pixels. Its dome UVs are not native UVs.
@@ -432,6 +437,7 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
 @fragment fn forestNativeLeafFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
+ if(in.world.y<in.nativeSoil){discard;}
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
  let n=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
  var colour=pigment.rgb/max(pigment.a,1e-8)*in.colour;
