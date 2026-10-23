@@ -118,12 +118,16 @@ export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS
  const manifest=validateForestMass(await(await load('manifest.json')).json(),forest);
  if(!globalThis.crypto?.subtle||typeof DecompressionStream!=='function')throw Error('Native forest mass requires verified gzip transport');
  const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
- const streams=Object.fromEntries(await Promise.all(forestMassStreams(manifest).map(async name=>{
+ const streams={};
+ // Bound decompression/hash peak memory. A whole region can contain hundreds
+ // of MB of GPU data; decoding all large streams concurrently multiplies that
+ // working set before any immutable buffer has been installed.
+ for(const name of forestMassStreams(manifest)){
   const item=manifest.files[name],encoded=await(await load(item.gzip.file)).arrayBuffer();
   if(encoded.byteLength!==item.gzip.bytes||await digest(encoded)!==item.gzip.sha256)throw Error('Native forest mass encoded digest mismatch');
   const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');return[name,raw];
- })));
+  if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');streams[name]=raw;
+ }
  const iterator=forestMassChecks(manifest,streams,forest);for(;;){const next=iterator.next();if(next.done)return next.value;await(globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0)));}
 }
 
