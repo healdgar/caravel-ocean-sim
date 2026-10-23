@@ -349,7 +349,7 @@ def build_field(prototype, vertices, indices, materials, *, cell_metres=.25,
                   "maximumNonzeroCentreDistanceFromAcceptedNativeSampleMetres": math.sqrt(3)*(radius+1)*cell_metres,
                   "oneDimensionalKernelFloat64LE": receipt(kernel.astype("<f8").tobytes()),
                   "oneDimensionalWeights": kernel.tolist(), "paddingVoxelsPerSide": padding},
-              "recipe": {"maximumSupportMetres": math.sqrt(3)*(radius+2)*cell_metres+stats["maximumQuadraturePatchRadiusMetres"],
+              "recipe": {"version": 1, "maximumSupportMetres": math.sqrt(3)*(radius+2)*cell_metres+stats["maximumQuadraturePatchRadiusMetres"],
                   "scope": "Authored smoothing/sampling footprint: Gaussian corner + trilinear deposit + trilinear field interpolation + maximum accepted quadrature patch radius. Not an appearance or native silhouette certificate."},
               "appearanceErrorSupported": False, "surfaceDistanceErrorSupported": False}
     return origin.astype("<f8"), density, colour, report
@@ -433,7 +433,7 @@ def prepare(pack, output, *, species=SPECIES, cell_metres=.25, quadrature_edge_m
             "parameters": {"cellMetres": cell_metres, "quadratureEdgeMetres": quadrature_edge_metres,
                 "maskBoundaryEdgeMetres": quadrature_edge_metres*.25, "sigmaMetres": sigma_metres,
                 "truncate": truncate, "maxVoxelsPerPrototype": max_voxels, "maxPatchesPerPrototype": max_patches},
-            "recipe": {"maximumSupportMetres": max(p["recipe"]["maximumSupportMetres"] for p in records),
+            "recipe": {"version": 1, "maximumSupportMetres": max(p["recipe"]["maximumSupportMetres"] for p in records),
                 "scope": "Maximum recorded prototype sampling/smoothing footprint, not a native appearance certificate."},
             "quadrature": "Equal-area barycentric four-child triangle subdivision; conservative source alpha-pyramid bounds; refine geometric edges to budget and mixed MASK edges four times finer; bilinear original UV MASK and linearized source PNG at terminal centroid; unresolved mixed-patch area reported.",
             "pigment": "Original PNG sRGB decoded before bilinear filtering, multiplied by stored linear vertex RGB once. Leaf front pigment only; source underside/transmission preserved as material provenance, not mixed into a fake lighting bake.",
