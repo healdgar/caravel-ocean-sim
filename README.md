@@ -8,8 +8,8 @@ A real-time WebGPU sailing game with wind, oar and paddle propulsion, crew, impa
 
 **Current runtime:** nine vessel choices, independently controlled fleets, source-derived
 forest canopy and distance-based tree detail. Startup reuses identical GPU programs,
-compiles independent pipelines together and includes hull profiles only for the
-scene's allocated vessels. All active models retain their original GPU arithmetic.
+compiles independent pipelines together and omits procedural hull profiles for
+vessels absent from the allocated fleet. All active models retain their original GPU arithmetic.
 Forest validation yields by elapsed work, avoiding thousands of clamped timers on
 browsers without `scheduler.yield`. Geometry, textures, validation and rendering
 quality are unchanged. [Release and qualification receipts](BACKLOG.md).

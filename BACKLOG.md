@@ -58,9 +58,26 @@ fixed it. Final pixel/cache/scheduling run passes11/11. Logs:
 
 Final rebuilt-package gate passes11/11: required/delayed/failed media, actual first
 GPU completion, offline downloads, exact158asset bytes and scheduler-free full
-island startup. Release log `/tmp/waterworld-startup-release-check.log`. Publication
-pending below; root owns validation. Primary held crew/Victory work and rejected
-forest experiments stay separate.
+island startup. Release log `/tmp/waterworld-startup-release-check.log`.
+
+Published code checkpoint `edda21df2c3e19ceb005f5c5487e674c3439588d`; Pages built
+at2026-10-23T14:47:51Z. Public HTML matches1,515,019bytes, SHA256
+`8a8ac16337be6c8e37d02cbc3591305a98cc75589db2a3147697fa628fde38bf`.
+Manifest SHA256`a783e4aec72b968dcec07cd8a169d67bc7fb2858353116fcce9f22d191d36252`
+and all158asset records are unchanged from prior full public verification.
+Receipt `/tmp/waterworld-startup-public-bytes.json`. Fresh private Safari on the
+published normal page reached ready at2.1s external polling with WARM driver caches;
+this is distinct from the14.379s initial local candidate and is NOT an iPhone or
+controlled cold-cache result. Receipt `/tmp/waterworld-safari-public/`.
+Fresh public Chrome with phone viewport renders real1206x2280canvas frames:
+5.902sready,67modules,88pipelines, no unused procedural hull functions or forest
+requests and no fatal/page/GPU errors. Two earlier public Chrome attempts hit a
+transient Failed-to-fetch error; the instrumented retry completed. Do not confuse
+those network failures with the reproduced Safari compiler stall. Receipt/image:
+`/tmp/waterworld-startup-live/`. The phone captain's default view can still be
+obscured by its own sail; camera/framing remains a separate issue, unchanged by
+this exact-pixel startup correction. Root owns validation. Primary held crew/
+Victory work and rejected forest experiments stay separate.
 
 ## October 22: iPhone bloom timing and bounded filter efficiency
 
