@@ -110,7 +110,7 @@ export function createGPUProfiler(device, requested=false) {
         if(name==='Composite'){
           lines.push(`Bloom window (waits)    ${(smoothed.Bloom||0).toFixed(2)} ms`);
         }
-        lines.push(`${name.padEnd(23)} ${(smoothed[name]||0).toFixed(2)} ms`);
+        lines.push(`${(name==='Ocean + sky'?'Scenery + ocean + sky':name).padEnd(23)} ${(smoothed[name]||0).toFixed(2)} ms`);
       }
       lines.push('GPU windows include waits; they are not FPS.', 'Bloom window is not the cost of bloom alone.', 'Sampled every 8 frames; rounded GPU timestamps.', 'Profiling adds pass boundaries; compare like-for-like.');
       if(droppedSamples)lines.push(`Discarded invalid timestamp samples: ${droppedSamples}`);

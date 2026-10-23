@@ -754,6 +754,18 @@ current forest refinement is release-qualified: the static 1280×900 coastal tes
 Waves, clouds, ships and crew were disabled for this comparison; it does not
 establish 60 FPS for ordinary play, Retina resolution or an iPhone.
 
+The close-forest approach remains a separate performance problem: an exact
+1920×1080 view submits about1.54billion indexed triangles because the current
+transition promotes thousands of complete botanical trees. Conservative GPU
+terrain occlusion removes trees fully hidden behind the rendered hills, without
+changing tree density, detail policy or resolution. The profiler includes those
+trees in **Scenery + ocean + sky**. `forestOcclusion=off` is the comparison path.
+An initial isolated Mac measurement fell from947ms to814ms (about14%); this does
+not make that close view playable or qualify60FPS. A faster near density-shell
+experiment lost visible leaf detail and was rejected. Branch-level source-baked
+detail and its rendered transition qualification remain unfinished; see the
+October23close-forest entry in [BACKLOG.md](BACKLOG.md).
+
 Forest geometry loads only for landfall. Full native detail remains a background
 download; transport verifies encoded and decoded SHA-256 receipts. The local
 meshopt decoder and gzip preserve the packed geometry bytes. Explicit

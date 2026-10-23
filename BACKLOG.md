@@ -1,5 +1,58 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 23: close-forest GPU bottleneck remains open
+
+Reproduced the exact reported free-camera approach at1920x1080, native Metal.
+The old **Ocean + sky** pass includes terrain and every tree. Isolated replay
+measured946.8ms; omitting forests reduced it to0.455ms. The actual native/middle
+indirect commands submit1,541,128,221triangles, including2,995whole native trees.
+These are logical indexed submissions, not unique assets or visible pixels.
+The foliage draw dominates. Moving hosting cannot fix this GPU work.
+
+Bounded accepted candidate: immutable min/max pyramids of both actual triangular
+terrain grids. GPU culling rejects a root only when terrain provably covers its
+entire conservative sphere; underwater, uncertain seams, saddle apertures and
+uncertain external camera positions stay visible. No depth readback, per-frame
+CPU geometry/visibility work, density/LOD/resolution change or previous-frame
+occlusion. `forestOcclusion=off` retains an A/B reference. Profiler display now
+says **Scenery + ocean + sky**; internal timing keys remain unchanged.
+Initial native measurement:1,338,730,820triangles and813–815ms isolated pass,
+about14% lower. This is a limited improvement, **not a resolution of the billion-
+triangle issue, ordinary 60FPS, Retina or physical-iPhone qualification**.
+Final qualification:44serialized source, native GPU, distribution and Stats
+checks pass;4additional packaged/native startup and debug-atlas checks pass.
+Both source and packaged complete-frame A/B suites compare11,059,200channels
+each with ZERO differences across close forest, shore, horizon and underwater.
+Close submissions remain1,338,730,820; the primary representation issue stays
+open. Logs: `/tmp/waterworld-forest-occlusion-regressions.log`,
+`/tmp/waterworld-forest-occlusion-package.log`. Primary checkout untouched.
+
+Rejected experiments are local, not part of the candidate:
+- Early native-alpha exits and a leaf depth prepass: no gain / slower.
+- Fine .25m source-field near crowns:85.4million triangles and32ms isolated,
+  but visibly smooth green lobes instead of native leaves. Failed visual review.
+- Exact spatial wood/leaf meshlet culling with original vertex IDs, GPU
+  compaction and full-source overflow fallback: no useful gain; dense foliage
+  still overlaps, and vertex pulling/overflow negated the rejected work.
+  No CPU rendering path or unbounded simplification was substituted.
+
+Receipts: `/tmp/waterworld-scenery-baseline/`,
+`/tmp/waterworld-scenery-occlusion/`, `/tmp/waterworld-forest-occlusion-pixels/`,
+`/tmp/waterworld-scenery-game-near/`, and
+`/tmp/waterworld-scenery-spatial-clusters/`. Rejected prototype source and bake
+are retained in `/tmp/waterworld-rejected-forest-experiments/`; none ships.
+
+Next required representation work: source-baked branch-cluster colour/normal/
+depth detail, with actual native-leaf comparisons at framebuffer/FOV-dependent
+transitions, while keeping whole native trees only where the bake fails.
+The current .25m moment/density fields already smooth the leaf structure;
+finer surface extraction cannot restore it. Individual leaves are already bent
+single sheets (four triangles), without duplicate back faces. Forestmodeler's
+GAME export removes organs and enlarges selected cards; it is not a lossless
+replacement. Do not relabel the current source-field footprint as a native
+appearance certificate or publish a smooth close-crown fallback as solved.
+
+
 ## October 23: normal Safari startup and forest timer stalls
 
 User reports >1minute on physical iPhone's **normal sailing page**, stuck at
