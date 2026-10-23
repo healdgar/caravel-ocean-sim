@@ -1,0 +1,400 @@
+{
+  "format": "waterworld.native-canopy-light",
+  "version": 1,
+  "complete": true,
+  "vertexCount": 3374037,
+  "sampledVertexCount": 3373727,
+  "unusedVertexCount": 310,
+  "paddingBytes": 3,
+  "encoding": "One UNORM8 byte per unchanged global native vertex index; unused/coarse-only bytes and four-byte alignment padding255",
+  "source": {
+    "files": {
+      "vertices.bin": {
+        "bytes": 188946072,
+        "sha256": "8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0"
+      },
+      "indices.bin": {
+        "bytes": 34786680,
+        "sha256": "2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389"
+      },
+      "roots.bin": {
+        "bytes": 4101648,
+        "sha256": "69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b"
+      }
+    },
+    "nativeManifest": {
+      "bytes": 183278,
+      "sha256": "a0b23b57035db726f4a14f3b708df0edfddd11691d31887d882419e07d60de9d"
+    },
+    "nativeFieldManifest": {
+      "bytes": 163510,
+      "sha256": "d1437b0782d0ffc32187995952495a7315e759022092d72ba7dbea9cab126fb9"
+    },
+    "nativeFieldRecipe": {
+      "version": 1,
+      "maximumSupportMetres": 2.647449898511305,
+      "scope": "Maximum recorded prototype sampling/smoothing footprint, not a native appearance certificate."
+    },
+    "nativeSource": {
+      "index": {
+        "bytes": 114424,
+        "sha256": "7158a319fa3bfaf50384cf0e900f63b041df7867f3e05a9753d015a885ef852a"
+      },
+      "source": {
+        "kind": "catalog-usdz",
+        "catalog": {
+          "file": "NativeModelCatalog.json",
+          "bytes": 35805,
+          "sha256": "487e8f5fb14daa2deacbcb6227f29fb7d149d9767e267884ef12d93f4214d3f9"
+        },
+        "surfaceCatalog": {
+          "file": "TreeSurfaceCatalog.json",
+          "bytes": 25215,
+          "sha256": "173689649cb137315e4c85c4c1ae4de88e9a4d0531df0ed06fee1f5cf7587e84"
+        },
+        "files": {
+          "scripts/convert_waterworld_mature_prototypes.py": {
+            "file": "convert_waterworld_mature_prototypes.py",
+            "bytes": 15641,
+            "sha256": "ea28845c1ba4a6497d954043942bbeb6b58b17d448fdbd8ee704205b184f29c5"
+          },
+          "scripts/bake_waterworld_native_prototypes.py": {
+            "file": "bake_waterworld_native_prototypes.py",
+            "bytes": 13937,
+            "sha256": "93349d597b6d184cb3d2e0eb20679bca5dd6b4a8f84cfbc1a1d60da9b9595eb0"
+          },
+          "gardenplans/scenery.py": {
+            "file": "scenery.py",
+            "bytes": 82457,
+            "sha256": "3b7f0ccf560a0e4390437643014e02f6d504d80a18d249ca0235eaf28cebacb3"
+          },
+          "gardenplans/export.py": {
+            "file": "export.py",
+            "bytes": 24496,
+            "sha256": "8476582bc8138a2e7595c5685a8923f8cb8192f34cce9f0b5d0a3ed9872111aa"
+          }
+        }
+      },
+      "quality": "hero",
+      "mode": "catalog-mature-usdz",
+      "ages": {
+        "oak": 60.0,
+        "maple": 50.0,
+        "birch": 25.0,
+        "elm": 65.0,
+        "chestnut": 70.0
+      }
+    },
+    "method": {
+      "file": "scripts/prepare-forest-light.py",
+      "bytes": 18284,
+      "sha256": "a67a67f19ebc5cdd6e4a95db7593ef0e1a040b21ed7c4b725485b30269afbb2a"
+    }
+  },
+  "recipe": {
+    "version": 1,
+    "extinction": 0.5,
+    "extinctionMeaning": "Authored projected-leaf-area factor multiplying density(m2/m3) and path length(m)",
+    "rays": [
+      {
+        "directionXYZ": [
+          0,
+          1,
+          0
+        ],
+        "weight": 0.4
+      },
+      {
+        "directionXYZ": [
+          1,
+          0,
+          0
+        ],
+        "weight": 0.15
+      },
+      {
+        "directionXYZ": [
+          -1,
+          0,
+          0
+        ],
+        "weight": 0.15
+      },
+      {
+        "directionXYZ": [
+          0,
+          0,
+          1
+        ],
+        "weight": 0.15
+      },
+      {
+        "directionXYZ": [
+          0,
+          0,
+          -1
+        ],
+        "weight": 0.15
+      }
+    ],
+    "localCellSubtractionFraction": 0.5,
+    "clamp": [
+      0.18,
+      1.0
+    ],
+    "integration": "Five axis-aligned cumulative density integrals, subtract half the current cell, then exp(-extinction*integral); weighted transmittance average",
+    "sampling": "Trilinear light grid at unchanged native local positions; zero-density expansion encloses original wood/leaf probes",
+    "quantization": "Nearest UNORM8, ties-to-even; maximum quantization error0.5/255",
+    "maxLightVoxelsPerPrototype": 20000000
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "oak",
+      "membership": {
+        "wood": {
+          "firstIndex": 0,
+          "indexCount": 817113,
+          "indices": {
+            "bytes": 3268452,
+            "sha256": "d8e2bd21480c446d6afc48b29186efe625467c27e7ff06afc5ca12add41628f8"
+          }
+        },
+        "leaf": {
+          "firstIndex": 817113,
+          "indexCount": 911556,
+          "indices": {
+            "bytes": 3646224,
+            "sha256": "1e22c088b5df505566c2f6c7024394541f85cb7f022ddb7e0b8a779de9cbe2f8"
+          }
+        }
+      },
+      "sourceField": {
+        "file": "prototype-0-oak.npz",
+        "bytes": 1869960,
+        "sha256": "13c03600686a6bac13902fc09d7dc63c39b98933eda52f58c75b7f47288e1f10"
+      },
+      "sampledVertexCount": 634302,
+      "expandedGrid": {
+        "originXYZ": [
+          -24.0,
+          -1.5,
+          -26.0
+        ],
+        "shapeXYZ": [
+          201,
+          85,
+          195
+        ],
+        "cellMetres": 0.25
+      },
+      "exposure": {
+        "minimum": 0.18000000715255737,
+        "maximum": 1.0,
+        "mean": 0.2078976911597741
+      }
+    },
+    {
+      "id": 1,
+      "species": "maple",
+      "membership": {
+        "wood": {
+          "firstIndex": 1728801,
+          "indexCount": 845802,
+          "indices": {
+            "bytes": 3383208,
+            "sha256": "635452ea3453844db98724c0c0049ddd57ce55a8350359c93e506ff426b7f084"
+          }
+        },
+        "leaf": {
+          "firstIndex": 2574603,
+          "indexCount": 1147632,
+          "indices": {
+            "bytes": 4590528,
+            "sha256": "7ca6bf63903b3e775946975083f9b3c163beb833602dad68e935f0577eb53859"
+          }
+        }
+      },
+      "sourceField": {
+        "file": "prototype-1-maple.npz",
+        "bytes": 1694123,
+        "sha256": "1dfaf476b7a156cc59822492a82d96a5dbb43effb452423c7ceb0313e6c29e46"
+      },
+      "sampledVertexCount": 768252,
+      "expandedGrid": {
+        "originXYZ": [
+          -20.25,
+          -1.75,
+          -19.75
+        ],
+        "shapeXYZ": [
+          165,
+          80,
+          163
+        ],
+        "cellMetres": 0.25
+      },
+      "exposure": {
+        "minimum": 0.18000000715255737,
+        "maximum": 1.0,
+        "mean": 0.2191257638987877
+      }
+    },
+    {
+      "id": 2,
+      "species": "birch",
+      "membership": {
+        "wood": {
+          "firstIndex": 3722367,
+          "indexCount": 48468,
+          "indices": {
+            "bytes": 193872,
+            "sha256": "7061873a3e3cee3243c0b4dcdb31bccbe20af7a3337a39c51b8acfe46fc4bc04"
+          }
+        },
+        "leaf": {
+          "firstIndex": 3770835,
+          "indexCount": 228960,
+          "indices": {
+            "bytes": 915840,
+            "sha256": "3d74c5e6c8f50373a39bc264164fefe1e2ef16c4494ab084c2c896844d3feb57"
+          }
+        }
+      },
+      "sourceField": {
+        "file": "prototype-2-birch.npz",
+        "bytes": 280478,
+        "sha256": "cc452f0499120e774ae9619d305bdc67877bd2269c52915e58d6cf057acad126"
+      },
+      "sampledVertexCount": 125525,
+      "expandedGrid": {
+        "originXYZ": [
+          -14.25,
+          -1.75,
+          -14.5
+        ],
+        "shapeXYZ": [
+          116,
+          44,
+          117
+        ],
+        "cellMetres": 0.25
+      },
+      "exposure": {
+        "minimum": 0.18174763023853302,
+        "maximum": 1.0,
+        "mean": 0.41523790888056483
+      }
+    },
+    {
+      "id": 3,
+      "species": "elm",
+      "membership": {
+        "wood": {
+          "firstIndex": 3999927,
+          "indexCount": 826998,
+          "indices": {
+            "bytes": 3307992,
+            "sha256": "d8a098f3b7c96adfe14726c07229139f115131275ae93836c19ef3ad66f9f997"
+          }
+        },
+        "leaf": {
+          "firstIndex": 4826925,
+          "indexCount": 1859640,
+          "indices": {
+            "bytes": 7438560,
+            "sha256": "ad32df2741a443bee50e1eb49e6c704287ecb258b453d78763456d3ad8c37bf6"
+          }
+        }
+      },
+      "sourceField": {
+        "file": "prototype-3-elm.npz",
+        "bytes": 1879663,
+        "sha256": "f55e78490d872ea6ebe8eb8c4b48a9f5a853c4775754190454da7f5d8a084ce0"
+      },
+      "sampledVertexCount": 1113748,
+      "expandedGrid": {
+        "originXYZ": [
+          -24.0,
+          -2.0,
+          -25.75
+        ],
+        "shapeXYZ": [
+          201,
+          83,
+          194
+        ],
+        "cellMetres": 0.25
+      },
+      "exposure": {
+        "minimum": 0.18000000715255737,
+        "maximum": 1.0,
+        "mean": 0.2584443090948323
+      }
+    },
+    {
+      "id": 4,
+      "species": "chestnut",
+      "membership": {
+        "wood": {
+          "firstIndex": 6686697,
+          "indexCount": 971733,
+          "indices": {
+            "bytes": 3886932,
+            "sha256": "76dc37fb43c8b225660e4ddd9e9c3f5719b7cc077fe60a65dbeebea58171dda8"
+          }
+        },
+        "leaf": {
+          "firstIndex": 7658430,
+          "indexCount": 1038108,
+          "indices": {
+            "bytes": 4152432,
+            "sha256": "5ae665096d76feeb525cc28e800070ed020f42ef7a06b7040281d25297b18f6a"
+          }
+        }
+      },
+      "sourceField": {
+        "file": "prototype-4-chestnut.npz",
+        "bytes": 2120377,
+        "sha256": "db959d02788fef2edc1f7e1cd2f981b7299d7e104b0d29f8859cba479c4f2637"
+      },
+      "sampledVertexCount": 731900,
+      "expandedGrid": {
+        "originXYZ": [
+          -19.75,
+          -1.75,
+          -21.25
+        ],
+        "shapeXYZ": [
+          166,
+          100,
+          160
+        ],
+        "cellMetres": 0.25
+      },
+      "exposure": {
+        "minimum": 0.18000000715255737,
+        "maximum": 1.0,
+        "mean": 0.2501325782390179
+      }
+    }
+  ],
+  "qualification": {
+    "renderedAccepted": false,
+    "directionalSunShadow": false,
+    "neighborShadow": false,
+    "physicalCalibration": false,
+    "scope": "Static authored own-canopy hemispherical occlusion only; source geometry/materials unchanged. Root owns rendered appearance acceptance."
+  },
+  "files": {
+    "canopy-shade.bin": {
+      "bytes": 3374040,
+      "sha256": "4298d307a3d0982281cd444738b26bdb564cd18c7dbdc9b4511da838fcddbe2f",
+      "gzip": {
+        "file": "canopy-shade.bin.gz",
+        "bytes": 1870555,
+        "sha256": "1a4c04c1eb04d1ae1eca84d49b866422015a166f187792f1f605055b23e8cf7d"
+      }
+    }
+  }
+}

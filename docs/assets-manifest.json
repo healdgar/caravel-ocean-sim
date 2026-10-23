@@ -1,4 +1,24 @@
 {
+  "assets/forest-scenery/saba/vertices.bin.gz": {
+    "url": "assets/forest-scenery/saba/vertices.bin.e45e1be7b39d818e.gz",
+    "bytes": 78658880,
+    "sha256": "e45e1be7b39d818e7534242681795faaa914c47f583ea6dc936bcdc1a9515a05"
+  },
+  "assets/forest-scenery/saba/indices.bin.gz": {
+    "url": "assets/forest-scenery/saba/indices.bin.ff26e388355583e0.gz",
+    "bytes": 13716582,
+    "sha256": "ff26e388355583e0071c453f92bb62508d43a278fc4dc1e8523c769a59b1da8a"
+  },
+  "assets/forest-scenery/saba/mass/vertices.bin.gz": {
+    "url": "assets/forest-scenery/saba/mass/vertices.bin.9d2b0da3a80ea14d.gz",
+    "bytes": 97806735,
+    "sha256": "9d2b0da3a80ea14d37708a3bbb420b8339e377614532b815fc2a1ce389ac0ad9"
+  },
+  "assets/forest-scenery/saba/mass/indices.bin.gz": {
+    "url": "assets/forest-scenery/saba/mass/indices.bin.56f1aa1fa50df97e.gz",
+    "bytes": 36650318,
+    "sha256": "56f1aa1fa50df97ef7a07537147f78576bcac0d7e2ac207110656d3dae02dc27"
+  },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
     "bytes": 8319500,
@@ -53,6 +73,486 @@
     "url": "assets/canopy-scenery/saba/instances.e10761fc2240a199.bin",
     "bytes": 1344,
     "sha256": "e10761fc2240a1993f5e6f4c850a6f5d4f37299c0cf2270ea17be75d57c4510f"
+  },
+  "assets/world/saba/wells-bay/manifest.json": {
+    "url": "assets/world/saba/wells-bay/manifest.ea96929e0544074f.json",
+    "bytes": 4302,
+    "sha256": "ea96929e0544074f31dd5676fc7ffae37203fc3121e6f164295b5a29e2a5c938"
+  },
+  "assets/world/saba/wells-bay/height.bin": {
+    "url": "assets/world/saba/wells-bay/height.f96f6c800a76b668.bin",
+    "bytes": 1052676,
+    "sha256": "f96f6c800a76b668e5bbf2b2cbe79ea31ad30a09c97a2a0dfc58e6979080e768"
+  },
+  "assets/world/saba/wells-bay/measured.bin": {
+    "url": "assets/world/saba/wells-bay/measured.860ac988318ebd60.bin",
+    "bytes": 263169,
+    "sha256": "860ac988318ebd60cd392a6d0f5bc17b6697ca5d659bef84229754e64df5893b"
+  },
+  "assets/world/saba/wells-bay/albedo.png": {
+    "url": "assets/world/saba/wells-bay/albedo.40f4ab5de9b803a3.png",
+    "bytes": 1063137,
+    "sha256": "40f4ab5de9b803a3331cd4fe56e38526bc46cd5040ebf8aa03d142b34b27b5d1"
+  },
+  "assets/forest-scenery/saba/impostors/manifest.json": {
+    "url": "assets/forest-scenery/saba/impostors/manifest.2492b7b533dec0ea.json",
+    "bytes": 436773,
+    "sha256": "2492b7b533dec0ea5b88efacc48590a414ff8ba3239097d9fc64b2562fe6c4ab"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-0-oak/albedo.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-0-oak/albedo.rgba16f.bin.88618c71948ee303.gz",
+    "bytes": 539645,
+    "sha256": "88618c71948ee303ac6ae277df0251091a705c36e2c5b7d78af922531bd36f0b"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-0-oak/normal-depth.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-0-oak/normal-depth.rgba16f.bin.35230921f805c766.gz",
+    "bytes": 1127204,
+    "sha256": "35230921f805c76622a1308926727513487827becf77332121ae8c58fc3f0a93"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-1-maple/albedo.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-1-maple/albedo.rgba16f.bin.b09b572876d9cad9.gz",
+    "bytes": 737718,
+    "sha256": "b09b572876d9cad9130bb126ecf3ef7de69bc3c7ae03c257769505d300947647"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-1-maple/normal-depth.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-1-maple/normal-depth.rgba16f.bin.5185613307e6caf1.gz",
+    "bytes": 1385004,
+    "sha256": "5185613307e6caf19099985838e0e4d0f50ead561aa3179ee00ea142bb9ff532"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-2-birch/albedo.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-2-birch/albedo.rgba16f.bin.e251cd20d92a3f99.gz",
+    "bytes": 444866,
+    "sha256": "e251cd20d92a3f99b4d4b4bb0bcedf7871b1039c73ecc8ac7f93cf0a07fc157a"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-2-birch/normal-depth.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-2-birch/normal-depth.rgba16f.bin.6e8d873b527a984a.gz",
+    "bytes": 779851,
+    "sha256": "6e8d873b527a984a0981e82cd1c1f788dc4de8047dcd8bbd36770527a61101e5"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-3-elm/albedo.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-3-elm/albedo.rgba16f.bin.4d4396c4da331bc7.gz",
+    "bytes": 530673,
+    "sha256": "4d4396c4da331bc7bb8780dbf1ebeb4d9edb076810ddcd71ce1c9bb948c185a9"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-3-elm/normal-depth.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-3-elm/normal-depth.rgba16f.bin.eeda3052dfd66d43.gz",
+    "bytes": 1016168,
+    "sha256": "eeda3052dfd66d4350b302b0c1e23e3baaf7d88e67186f340d5cbfb4925b9aa3"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-4-chestnut/albedo.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-4-chestnut/albedo.rgba16f.bin.8d3491ca8712957e.gz",
+    "bytes": 507676,
+    "sha256": "8d3491ca8712957e935e00e8d4ff5e43c0cbb02e79e5c5990690f79a2bad9f7b"
+  },
+  "assets/forest-scenery/saba/impostors/prototype-4-chestnut/normal-depth.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/impostors/prototype-4-chestnut/normal-depth.rgba16f.bin.7b9f88771697fe3d.gz",
+    "bytes": 1002806,
+    "sha256": "7b9f88771697fe3da1ee172aeac1362984d102853876721193865a430f9b24fd"
+  },
+  "assets/forest-scenery/saba/canopy-shade.json": {
+    "url": "assets/forest-scenery/saba/canopy-shade.f2236de00211102a.json",
+    "bytes": 10887,
+    "sha256": "f2236de00211102a08c955f6f0226139104521137ed9748c9142676eb6304069"
+  },
+  "assets/forest-scenery/saba/canopy-shade.bin.gz": {
+    "url": "assets/forest-scenery/saba/canopy-shade.bin.1a4c04c1eb04d1ae.gz",
+    "bytes": 1870555,
+    "sha256": "1a4c04c1eb04d1ae1eca84d49b866422015a166f187792f1f605055b23e8cf7d"
+  },
+  "assets/forest-scenery/saba/volumes/manifest.json": {
+    "url": "assets/forest-scenery/saba/volumes/manifest.469a6cfd2b0cb46d.json",
+    "bytes": 56073,
+    "sha256": "469a6cfd2b0cb46d9bb1f8cba70d548884482720b89d71493e07aac59f7722fe"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-0-oak/field.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-0-oak/field.rgba16f.bin.43cacdf304118535.gz",
+    "bytes": 798718,
+    "sha256": "43cacdf304118535c610283ffec6cfa692d7947160aec01a7d64ab694c7e6bab"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-0-oak/exposure.r8.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-0-oak/exposure.r8.bin.5ae000096248f35d.gz",
+    "bytes": 113339,
+    "sha256": "5ae000096248f35de312281be8a0c969e2816daf9dd8e9ef973ff035646efd60"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-1-maple/field.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-1-maple/field.rgba16f.bin.2bfe403deedc0f73.gz",
+    "bytes": 714864,
+    "sha256": "2bfe403deedc0f731e2422bf09755b9caf76b7f006841f5d6e4bf2e58fe84c61"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-1-maple/exposure.r8.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-1-maple/exposure.r8.bin.9cb22fe933e1cac9.gz",
+    "bytes": 107123,
+    "sha256": "9cb22fe933e1cac9b6204b182eb842683486a237864b80402f36f37bb23557dc"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-2-birch/field.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-2-birch/field.rgba16f.bin.128acbd87e9c3474.gz",
+    "bytes": 114293,
+    "sha256": "128acbd87e9c3474f7d28e78b6f400ebab77757171af0ab00641bfcbe7315266"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-2-birch/exposure.r8.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-2-birch/exposure.r8.bin.618e901a70728e30.gz",
+    "bytes": 18024,
+    "sha256": "618e901a70728e30158e3ffc523f19ddfab2b6ac346e41dc49d7c69dcbc6d18e"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-3-elm/field.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-3-elm/field.rgba16f.bin.0d3d3dbea50ed6bf.gz",
+    "bytes": 806346,
+    "sha256": "0d3d3dbea50ed6bf82edc382f1f35839980366e8bc455e786692e433077ab067"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-3-elm/exposure.r8.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-3-elm/exposure.r8.bin.2696b2f45b707376.gz",
+    "bytes": 169486,
+    "sha256": "2696b2f45b707376acff977f55fe0d03a157c6e70dec9ea7702edcb7dbafab7a"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-4-chestnut/field.rgba16f.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-4-chestnut/field.rgba16f.bin.577c7bd75a8eab61.gz",
+    "bytes": 890210,
+    "sha256": "577c7bd75a8eab6126b6faeea5c7a56ddda422f2b1cbab0a89275defb3584be4"
+  },
+  "assets/forest-scenery/saba/volumes/prototype-4-chestnut/exposure.r8.bin.gz": {
+    "url": "assets/forest-scenery/saba/volumes/prototype-4-chestnut/exposure.r8.bin.52435e192b8ed0d7.gz",
+    "bytes": 152329,
+    "sha256": "52435e192b8ed0d7066ef1b327d5d513910792c684d8b5431e73f0daa8085c09"
+  },
+  "assets/forest-scenery/saba/middle/manifest.json": {
+    "url": "assets/forest-scenery/saba/middle/manifest.149dfe5ec83d9b27.json",
+    "bytes": 22064,
+    "sha256": "149dfe5ec83d9b274c7925f3c6b3fd4ed13774d3b156455cd714a85659edb0f4"
+  },
+  "assets/forest-scenery/saba/middle/middle-vertices.bin.gz": {
+    "url": "assets/forest-scenery/saba/middle/middle-vertices.bin.2f3c123cd6438cd8.gz",
+    "bytes": 147903,
+    "sha256": "2f3c123cd6438cd82f80e2f583ba8d9a81a70e91ed9807e573055f472d4e1685"
+  },
+  "assets/forest-scenery/saba/middle/middle-indices.bin.gz": {
+    "url": "assets/forest-scenery/saba/middle/middle-indices.bin.968f43c4a5a03c70.gz",
+    "bytes": 27818,
+    "sha256": "968f43c4a5a03c70f213f1a635ed8166652e5315b971f8e0492158acdb140cb5"
+  },
+  "assets/forest-scenery/saba/manifest.json": {
+    "url": "assets/forest-scenery/saba/manifest.7d98919998ed8c52.json",
+    "bytes": 184932,
+    "sha256": "7d98919998ed8c520d72d71183069f7cbfea322e5ba1f6438ba01438ef3346af"
+  },
+  "assets/forest-scenery/saba/roots.bin.gz": {
+    "url": "assets/forest-scenery/saba/roots.bin.89078fcc1ee17963.gz",
+    "bytes": 2477736,
+    "sha256": "89078fcc1ee17963de425f81cfbd80ee20a0b75c00eebbb5d052553088392aa4"
+  },
+  "assets/forest-scenery/saba/leaf-oak-0-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-oak-0-albedo.3cd50a563054f9d2.png",
+    "bytes": 16023,
+    "sha256": "3cd50a563054f9d215dc0f73562960fac3f564767a57d501ebbc1d6e20b05e5b"
+  },
+  "assets/forest-scenery/saba/leaf-oak-0-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-oak-0-normal.64345604f0367374.png",
+    "bytes": 6967,
+    "sha256": "64345604f036737417f524c77adc9e529396e56ae617b1c430524b3cad0ae402"
+  },
+  "assets/forest-scenery/saba/leaf-oak-1-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-oak-1-albedo.37c5b493429dc735.png",
+    "bytes": 18409,
+    "sha256": "37c5b493429dc7352e7c14d661069f4177905b27f02522d8264e1db73bf2133b"
+  },
+  "assets/forest-scenery/saba/leaf-oak-1-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-oak-1-normal.ff3e82053c6ea2b8.png",
+    "bytes": 9318,
+    "sha256": "ff3e82053c6ea2b8b7f3ac7e8ca0cb1814e1151f001f31e28724e5905365b7a2"
+  },
+  "assets/forest-scenery/saba/leaf-oak-2-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-oak-2-albedo.ca2db7500808ffd7.png",
+    "bytes": 15914,
+    "sha256": "ca2db7500808ffd761fafd26b2e045840a1f0a58dc2ba641e0a8399ba5df8fbd"
+  },
+  "assets/forest-scenery/saba/leaf-oak-2-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-oak-2-normal.d455e487df35afa0.png",
+    "bytes": 6731,
+    "sha256": "d455e487df35afa01302d8c9a8b91b90032bdc28a96889286e3e7bde47dc7406"
+  },
+  "assets/forest-scenery/saba/leaf-maple-0-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-maple-0-albedo.0b661c4696993d0b.png",
+    "bytes": 10390,
+    "sha256": "0b661c4696993d0b151995fabfbf4e0b2c56698e832bb24c34b1ab24824e3041"
+  },
+  "assets/forest-scenery/saba/leaf-maple-0-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-maple-0-normal.fd457168eb472e7d.png",
+    "bytes": 4698,
+    "sha256": "fd457168eb472e7d896c52e8456735bf85e4b763b658ad4c101cb9aa2fc72dfa"
+  },
+  "assets/forest-scenery/saba/leaf-maple-1-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-maple-1-albedo.fb77e8dd91b60bba.png",
+    "bytes": 10203,
+    "sha256": "fb77e8dd91b60bba751d405ab78fb7b917ae4e35af75fa22c27185d88e9d4e22"
+  },
+  "assets/forest-scenery/saba/leaf-maple-1-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-maple-1-normal.3153d4e0dc592f27.png",
+    "bytes": 5159,
+    "sha256": "3153d4e0dc592f279398b7e51aca12f245c31f18e05481178099ea57c4229328"
+  },
+  "assets/forest-scenery/saba/leaf-maple-2-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-maple-2-albedo.8e735663d7734948.png",
+    "bytes": 10847,
+    "sha256": "8e735663d773494823f101a92799d45a2b211a7b7d2cd13d743e1530d4de52fb"
+  },
+  "assets/forest-scenery/saba/leaf-maple-2-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-maple-2-normal.15d6e444fc3fc5ec.png",
+    "bytes": 5065,
+    "sha256": "15d6e444fc3fc5ec117a594fd1ca362746f223d301d4a7e753fb8537caf3222e"
+  },
+  "assets/forest-scenery/saba/leaf-birch-0-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-birch-0-albedo.daa561c938a18874.png",
+    "bytes": 16615,
+    "sha256": "daa561c938a18874f1efc128b0b9caf7e2f68177f2f0c0f5bbe5014f416f093e"
+  },
+  "assets/forest-scenery/saba/leaf-birch-0-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-birch-0-normal.f4fababaf192c89f.png",
+    "bytes": 16069,
+    "sha256": "f4fababaf192c89fe65f86adae9b5a3109973f12367b2557be2c7d2b371a4c01"
+  },
+  "assets/forest-scenery/saba/leaf-birch-1-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-birch-1-albedo.114b6aa56bceca88.png",
+    "bytes": 15676,
+    "sha256": "114b6aa56bceca8847f1bb00e7083825007d85ce48be060f53a1b6dcd8fc4905"
+  },
+  "assets/forest-scenery/saba/leaf-birch-1-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-birch-1-normal.2e36c465d4d3bcb0.png",
+    "bytes": 14559,
+    "sha256": "2e36c465d4d3bcb05b149e13e77c778ad69b817a3b79617d83fc1ff1604ef67b"
+  },
+  "assets/forest-scenery/saba/leaf-birch-2-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-birch-2-albedo.13cb4883748dd2eb.png",
+    "bytes": 16973,
+    "sha256": "13cb4883748dd2eb523148e9f7f99a91b37e01d99949e486035ca8225a50d623"
+  },
+  "assets/forest-scenery/saba/leaf-birch-2-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-birch-2-normal.48e399269841f046.png",
+    "bytes": 15909,
+    "sha256": "48e399269841f046c1935af55dc5e357fb28c7bcff11d6c94ebc987897f146b3"
+  },
+  "assets/forest-scenery/saba/leaf-elm-0-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-elm-0-albedo.1fa5daebcbf3826f.png",
+    "bytes": 21381,
+    "sha256": "1fa5daebcbf3826fdf471d3972118d13593ad452e9d21fd532011260d0406f0d"
+  },
+  "assets/forest-scenery/saba/leaf-elm-0-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-elm-0-normal.4f5eb56d1dfd3676.png",
+    "bytes": 25222,
+    "sha256": "4f5eb56d1dfd36765fe1e40a5fd144bdea523038e52999dd86e734eefeba1dda"
+  },
+  "assets/forest-scenery/saba/leaf-elm-1-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-elm-1-albedo.172e8dc498d52bc4.png",
+    "bytes": 22362,
+    "sha256": "172e8dc498d52bc4e456d4dce8792a613deefab108b8b9230b3b0f8a1dfb0b4c"
+  },
+  "assets/forest-scenery/saba/leaf-elm-1-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-elm-1-normal.288427c8345e1756.png",
+    "bytes": 25046,
+    "sha256": "288427c8345e1756353cacbdeb5e09d268e56ee529b85b27519c43b7377c0b5b"
+  },
+  "assets/forest-scenery/saba/leaf-elm-2-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-elm-2-albedo.86badb7a7e03cc25.png",
+    "bytes": 16961,
+    "sha256": "86badb7a7e03cc250ee37d7a592121a06d2cd7df823da1f302684bd5f093aadd"
+  },
+  "assets/forest-scenery/saba/leaf-elm-2-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-elm-2-normal.93ebe1caf032dd72.png",
+    "bytes": 17925,
+    "sha256": "93ebe1caf032dd722fddffc2caf7e6b2e2e389b5fa5cfcbb9ad2346cef5ed55f"
+  },
+  "assets/forest-scenery/saba/leaf-chestnut-0-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-chestnut-0-albedo.85d0dab5131cee9a.png",
+    "bytes": 20081,
+    "sha256": "85d0dab5131cee9a33409db4f23e1cddb3d67c66783e04a826e0bf22ea3751d2"
+  },
+  "assets/forest-scenery/saba/leaf-chestnut-0-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-chestnut-0-normal.6a94fe4609da64fc.png",
+    "bytes": 15072,
+    "sha256": "6a94fe4609da64fcaea769b85b825f161ac479250202942d03c4570d59535ef9"
+  },
+  "assets/forest-scenery/saba/leaf-chestnut-1-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-chestnut-1-albedo.372b6681fc07a64d.png",
+    "bytes": 21819,
+    "sha256": "372b6681fc07a64df7ab985da756be84b19fa4c2ec183aeeea430255dbbbccc5"
+  },
+  "assets/forest-scenery/saba/leaf-chestnut-1-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-chestnut-1-normal.0bd23f596a53f326.png",
+    "bytes": 14838,
+    "sha256": "0bd23f596a53f3267a071bae6c935a40912de9c8238cc93f73a873f845877ee4"
+  },
+  "assets/forest-scenery/saba/leaf-chestnut-2-albedo.png": {
+    "url": "assets/forest-scenery/saba/leaf-chestnut-2-albedo.9075364ea6953a43.png",
+    "bytes": 18099,
+    "sha256": "9075364ea6953a4302514962f849f1c3d17c96fa432d2bd44f8be73733a8f249"
+  },
+  "assets/forest-scenery/saba/leaf-chestnut-2-normal.png": {
+    "url": "assets/forest-scenery/saba/leaf-chestnut-2-normal.4816220f2edf0803.png",
+    "bytes": 13700,
+    "sha256": "4816220f2edf080391df6b62916c040eee590eb76153395a04f656e10092b358"
+  },
+  "assets/forest-scenery/saba/oak-bark-albedo.png": {
+    "url": "assets/forest-scenery/saba/oak-bark-albedo.6f31c17062c75f86.png",
+    "bytes": 300022,
+    "sha256": "6f31c17062c75f86c21974100a9c40d80fa4d3087c5f23b05b23651be14c3918"
+  },
+  "assets/forest-scenery/saba/oak-bark-normal.png": {
+    "url": "assets/forest-scenery/saba/oak-bark-normal.288e8c40c3d96ece.png",
+    "bytes": 574672,
+    "sha256": "288e8c40c3d96ece93b7c98960fa22da9bf9ec2b22d5671a7c561e2ee1351e15"
+  },
+  "assets/forest-scenery/saba/oak-bark-roughness.png": {
+    "url": "assets/forest-scenery/saba/oak-bark-roughness.84d1c6fc052df980.png",
+    "bytes": 166388,
+    "sha256": "84d1c6fc052df9808375943000cc846cd530c276205d7c7846853a64cc39274c"
+  },
+  "assets/forest-scenery/saba/oak-wounds-albedo.png": {
+    "url": "assets/forest-scenery/saba/oak-wounds-albedo.d04a8bdfe01d1ce1.png",
+    "bytes": 43954,
+    "sha256": "d04a8bdfe01d1ce1a927b5270a698a792b83b48495bce8a95760defe82d8aaa5"
+  },
+  "assets/forest-scenery/saba/oak-wounds-normal.png": {
+    "url": "assets/forest-scenery/saba/oak-wounds-normal.897bf77e618b2a8e.png",
+    "bytes": 114926,
+    "sha256": "897bf77e618b2a8ecd8c5828074b46b9ac0c7b61933cd5c489a8ff96d2b907f6"
+  },
+  "assets/forest-scenery/saba/oak-wounds-roughness.png": {
+    "url": "assets/forest-scenery/saba/oak-wounds-roughness.4ec942c5982941db.png",
+    "bytes": 26127,
+    "sha256": "4ec942c5982941db0e0c19913f9351eb7d30d6f77c4587f615b472dee6f38a75"
+  },
+  "assets/forest-scenery/saba/maple-bark-albedo.png": {
+    "url": "assets/forest-scenery/saba/maple-bark-albedo.35263a2726aafef2.png",
+    "bytes": 322095,
+    "sha256": "35263a2726aafef2f4c6fd076d2cad6b2a6b5501f0e847a064e19f4acc4b370f"
+  },
+  "assets/forest-scenery/saba/maple-bark-normal.png": {
+    "url": "assets/forest-scenery/saba/maple-bark-normal.359aeec55cb55856.png",
+    "bytes": 484171,
+    "sha256": "359aeec55cb558568906e051a05c97ddd0ceaea8cbc0105d65e0a576a7a8e969"
+  },
+  "assets/forest-scenery/saba/maple-bark-roughness.png": {
+    "url": "assets/forest-scenery/saba/maple-bark-roughness.9b8ba37eea603ae9.png",
+    "bytes": 166084,
+    "sha256": "9b8ba37eea603ae9bff11145460b41d60c19a55990545033dfc1f087be022b19"
+  },
+  "assets/forest-scenery/saba/maple-wounds-albedo.png": {
+    "url": "assets/forest-scenery/saba/maple-wounds-albedo.e58a59f48ca1d907.png",
+    "bytes": 51162,
+    "sha256": "e58a59f48ca1d9072a34bfde3bce2550c684b7cc67d8020542030bb9af3b45b0"
+  },
+  "assets/forest-scenery/saba/maple-wounds-normal.png": {
+    "url": "assets/forest-scenery/saba/maple-wounds-normal.3f29063df69df134.png",
+    "bytes": 114746,
+    "sha256": "3f29063df69df13429f3b04d640bcaa50c1b950f7a91fed5cf0894a0026216e5"
+  },
+  "assets/forest-scenery/saba/maple-wounds-roughness.png": {
+    "url": "assets/forest-scenery/saba/maple-wounds-roughness.467563f7a656df06.png",
+    "bytes": 25872,
+    "sha256": "467563f7a656df062e1f2d3ed1b6694436c7df728361f57639c180c2e06eabd7"
+  },
+  "assets/forest-scenery/saba/birch-bark-albedo.png": {
+    "url": "assets/forest-scenery/saba/birch-bark-albedo.39238644cec71518.png",
+    "bytes": 386810,
+    "sha256": "39238644cec71518801eafd50aa95e10b93f00d31345d47724d15503861dbf10"
+  },
+  "assets/forest-scenery/saba/birch-bark-normal.png": {
+    "url": "assets/forest-scenery/saba/birch-bark-normal.6b81676337b82e46.png",
+    "bytes": 212532,
+    "sha256": "6b81676337b82e468c9e157c4984a58c94ce5f475a36f78de10d76ef2fd4ab12"
+  },
+  "assets/forest-scenery/saba/birch-bark-roughness.png": {
+    "url": "assets/forest-scenery/saba/birch-bark-roughness.66829488b49c016b.png",
+    "bytes": 165509,
+    "sha256": "66829488b49c016b3fe83abcb80bbca4923253b01fb80dcff6d09a23f156b85a"
+  },
+  "assets/forest-scenery/saba/elm-bark-albedo.png": {
+    "url": "assets/forest-scenery/saba/elm-bark-albedo.88c2e46bdcaf4eff.png",
+    "bytes": 303750,
+    "sha256": "88c2e46bdcaf4eff157c7290c9ab6565e7e13d539ae63b3079c957adbac4fce7"
+  },
+  "assets/forest-scenery/saba/elm-bark-normal.png": {
+    "url": "assets/forest-scenery/saba/elm-bark-normal.44fae9dacd9fe191.png",
+    "bytes": 575178,
+    "sha256": "44fae9dacd9fe191be88ab4affc198e235d0acc1b0496a2baf596b9f382873ad"
+  },
+  "assets/forest-scenery/saba/elm-bark-roughness.png": {
+    "url": "assets/forest-scenery/saba/elm-bark-roughness.ba63241a1b325adc.png",
+    "bytes": 165211,
+    "sha256": "ba63241a1b325adca7bdeeac8c8c66039c045f98508279ceaf92a7bde64edc63"
+  },
+  "assets/forest-scenery/saba/elm-wounds-albedo.png": {
+    "url": "assets/forest-scenery/saba/elm-wounds-albedo.86c7848e7aa82b45.png",
+    "bytes": 44396,
+    "sha256": "86c7848e7aa82b45e3355b6e2ab64cdbbd900ee9d4d5c585d7f7ce94bc54885f"
+  },
+  "assets/forest-scenery/saba/elm-wounds-normal.png": {
+    "url": "assets/forest-scenery/saba/elm-wounds-normal.45917aa3221cf299.png",
+    "bytes": 114893,
+    "sha256": "45917aa3221cf29959ce04b732c5842156f4fbb0506fab02d27625fe8a0c1b95"
+  },
+  "assets/forest-scenery/saba/elm-wounds-roughness.png": {
+    "url": "assets/forest-scenery/saba/elm-wounds-roughness.2c9c332ce865214b.png",
+    "bytes": 26326,
+    "sha256": "2c9c332ce865214b8973f1e0408bbec640ec118121f72384b41b7c5f0912a419"
+  },
+  "assets/forest-scenery/saba/chestnut-bark-albedo.png": {
+    "url": "assets/forest-scenery/saba/chestnut-bark-albedo.363e805df52e9c3c.png",
+    "bytes": 295765,
+    "sha256": "363e805df52e9c3c913626ac9958e8b85baa073fcdf5d42c9a817dc6817ff43b"
+  },
+  "assets/forest-scenery/saba/chestnut-bark-normal.png": {
+    "url": "assets/forest-scenery/saba/chestnut-bark-normal.da0e88d25c595e95.png",
+    "bytes": 537490,
+    "sha256": "da0e88d25c595e956f2bcaa070b98257e65fb2bf2eb7a7cefc08a30107dd969a"
+  },
+  "assets/forest-scenery/saba/chestnut-bark-roughness.png": {
+    "url": "assets/forest-scenery/saba/chestnut-bark-roughness.bf8bb84227e18a8d.png",
+    "bytes": 167445,
+    "sha256": "bf8bb84227e18a8df5592b0b8e399570a6d34b54440eb9519882e32c8cbb90ef"
+  },
+  "assets/forest-scenery/saba/chestnut-wounds-albedo.png": {
+    "url": "assets/forest-scenery/saba/chestnut-wounds-albedo.b829ffd99c2ec301.png",
+    "bytes": 45377,
+    "sha256": "b829ffd99c2ec301bacde1d0eccf64932fa546281fcfb60bea557125c4c52a27"
+  },
+  "assets/forest-scenery/saba/chestnut-wounds-normal.png": {
+    "url": "assets/forest-scenery/saba/chestnut-wounds-normal.b1397c655a62882d.png",
+    "bytes": 114873,
+    "sha256": "b1397c655a62882de51431722cc4b03e031d23aab45ad7b9a29c0f3562bbe747"
+  },
+  "assets/forest-scenery/saba/chestnut-wounds-roughness.png": {
+    "url": "assets/forest-scenery/saba/chestnut-wounds-roughness.77c546db14203e80.png",
+    "bytes": 26365,
+    "sha256": "77c546db14203e80a9b3ac8e60a3e5b36940db4bdce11721cfa22c06e4923f40"
+  },
+  "assets/forest-scenery/saba/mass/manifest.json": {
+    "url": "assets/forest-scenery/saba/mass/manifest.7b1046a440895b2e.json",
+    "bytes": 466058,
+    "sha256": "7b1046a440895b2ee19492b63295f8c4839fb50f3764ccc81a2a620062f98abf"
+  },
+  "assets/forest-scenery/saba/mass/root-chunks.bin.gz": {
+    "url": "assets/forest-scenery/saba/mass/root-chunks.bin.c0e10ef2bd3a3cc9.gz",
+    "bytes": 91407,
+    "sha256": "c0e10ef2bd3a3cc980df8147278301fc65e2e259f96e996949ada00266924e6e"
+  },
+  "assets/forest-scenery/saba/mass/middle-vertices.bin.gz": {
+    "url": "assets/forest-scenery/saba/mass/middle-vertices.bin.30ea93b6a99006d1.gz",
+    "bytes": 1398654,
+    "sha256": "30ea93b6a99006d1b747efb329c28c1f1994ad28287e60193a5bf68ae77f00c1"
+  },
+  "assets/forest-scenery/saba/mass/middle-indices.bin.gz": {
+    "url": "assets/forest-scenery/saba/mass/middle-indices.bin.72f7c1340377e6d8.gz",
+    "bytes": 169358,
+    "sha256": "72f7c1340377e6d878f357da3abbfb68680cec535b313130515bc38d17ef27dd"
+  },
+  "assets/forest-scenery/saba/mass/root-neighbors.bin.gz": {
+    "url": "assets/forest-scenery/saba/mass/root-neighbors.bin.9c4734cc94421186.gz",
+    "bytes": 138805,
+    "sha256": "9c4734cc9442118670d58edc11f2eae0ef641c6ffbaf582717487e78b917b174"
+  },
+  "assets/world/saba/manifest.json": {
+    "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
+    "bytes": 4754,
+    "sha256": "2697c31e9c5d8c957567fc8bf2217b40812fb32aadfa1d1a706b5a984710a89d"
   },
   "assets/tree-foliage.png": {
     "url": "assets/tree-foliage.ad40fb471213f1f4.png",
