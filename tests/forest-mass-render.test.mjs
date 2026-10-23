@@ -40,11 +40,11 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
     server.listen(0,'127.0.0.1');await once(server,'listening');assetServer.listen(0,'127.0.0.1');await once(assetServer,'listening');const assetBase='http://127.0.0.1:'+assetServer.address().port+'/';diagnostics.phase='launching browser';
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     browser.on('disconnected',()=>{if(!closing)diagnostics.browserDisconnected=true;});
-    const page=await browser.newPage();await page.route('**/__mass_render',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
+    const page=await browser.newPage();
     page.on('crash',()=>{diagnostics.pageCrashes++;});page.on('pageerror',error=>{if(diagnostics.pageErrors.length<20)diagnostics.pageErrors.push(error.message);});
     page.on('requestfailed',request=>{if(diagnostics.failedRequests.length<20)diagnostics.failedRequests.push({url:request.url(),failure:request.failure()?.errorText});});
     page.on('console',message=>{if(['error','warning'].includes(message.type())&&diagnostics.console.length<20)diagnostics.console.push(message.text().slice(0,1000));});
-    await page.goto('http://127.0.0.1:'+server.address().port+'/__mass_render');
+    await page.goto('http://127.0.0.1:'+server.address().port+'/tests/fixtures/forest-gpu.html');
     diagnostics.phase='verifying and rendering actual streamed mass';
     const result=await page.evaluate(async({forest,assetBase})=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{TERRAIN}=await import('/js/wgsl/terrain.js');
@@ -83,14 +83,22 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       for(const [index,direction]of [[1,.15,0],[-.3,.6,1],[0,1,.1]].entries()){
         const d=norm(direction),right=norm(cross([0,1,0],d)),up=cross(d,right);fd.fill(0);for(let k=0;k<3;k++){fd[k*4]=right[k]*2;fd[k*4+1]=up[k]*2;fd[k*4+3]=-d[k];}
         fd[14]=.1;fd.set(chunk.centre.map((v,k)=>v+d[k]*chunk.radius*3),16);fd.set(right.map(v=>v*.5),20);fd.set(up.map(v=>v*.5),24);fd.set(d.map(v=>-v),28);fd.set([0,1,0,1],32);fd.set([W,H,1/W,1/H],36);device.queue.writeBuffer(frame,0,fd);
+        let massPasses=0,backdropPasses=0;
         const render=async behind=>{
-          const e=device.createCommandEncoder(),compute=e.beginComputePass();renderer.encode(compute);compute.end();
-          const pass=e.beginRenderPass({colorAttachments:[{view:msaa.createView(),resolveTarget:colour.createView(),loadOp:'clear',storeOp:'discard',clearValue:[0,0,0,0]}],depthStencilAttachment:{view:depth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:0}});renderer.drawOpaque(pass);if(behind){pass.setPipeline(backdrop);pass.draw(3);}pass.end();e.copyTextureToBuffer({texture:colour},{buffer:read,bytesPerRow:W*4},[W,H]);device.queue.submit([e.finish()]);await read.mapAsync(GPUMapMode.READ);const pixels=new Uint8Array(read.getMappedRange()).slice();read.unmap();return pixels;
+          const e=device.createCommandEncoder();if(!behind){const compute=e.beginComputePass();renderer.encode(compute);compute.end();}
+          // Preserve the SAME multisample colours/depths for the backdrop.
+          // A second independent mass raster cannot serve as its own oracle.
+          const pass=e.beginRenderPass({colorAttachments:[{view:msaa.createView(),resolveTarget:colour.createView(),loadOp:behind?'load':'clear',storeOp:'store',clearValue:[0,0,0,0]}],depthStencilAttachment:{view:depth.createView(),depthLoadOp:behind?'load':'clear',depthStoreOp:'store',depthClearValue:0}});
+          if(behind){pass.setPipeline(backdrop);pass.draw(3);backdropPasses++;}else{renderer.drawOpaque(pass);massPasses++;}
+          pass.end();e.copyTextureToBuffer({texture:colour},{buffer:read,bytesPerRow:W*4},[W,H]);device.queue.submit([e.finish()]);await read.mapAsync(GPUMapMode.READ);const pixels=new Uint8Array(read.getMappedRange()).slice();read.unmap();return pixels;
         };
-        const first=await render(false),behind=await render(true);let covered=0,solid=0,solidColour=0,maxDepthError=0;
-        for(let i=0;i<W*H;i++){const at=i*4,a=first[at+3];covered+=a>0?1:0;solid+=a===255?1:0;solidColour+=a===255&&first[at+1]>0?1:0;maxDepthError=Math.max(maxDepthError,Math.abs(behind[at]-first[at]),Math.abs(behind[at+1]-first[at+1]),Math.abs(behind[at+2]-(first[at+2]+255-a)),Math.abs(behind[at+3]-255));}
+        const first=await render(false),behind=await render(true);let covered=0,solid=0,solidColour=0,maxDepthError=0,worstPixel=null;
+        for(let i=0;i<W*H;i++){
+          const at=i*4,a=first[at+3],expected=[first[at],first[at+1],first[at+2]+255-a,255];covered+=a>0?1:0;solid+=a===255?1:0;solidColour+=a===255&&first[at+1]>0?1:0;
+          for(let channel=0;channel<4;channel++){const error=Math.abs(behind[at+channel]-expected[channel]);if(worstPixel===null||error>maxDepthError){maxDepthError=error;worstPixel={x:i%W,y:Math.floor(i/W),channel:'RGBA'[channel],error,first:Array.from(first.subarray(at,at+4)),behind:Array.from(behind.subarray(at,at+4)),expected};}}
+        }
         const canvas=new OffscreenCanvas(W*2,H),ctx=canvas.getContext('2d'),image=ctx.createImageData(W*2,H);for(let y=0;y<H;y++){image.data.set(first.subarray(y*W*4,(y+1)*W*4),y*W*8);image.data.set(behind.subarray(y*W*4,(y+1)*W*4),y*W*8+W*4);}ctx.putImageData(image,0,0);
-        const file='forest-mass-opacity-'+index+'.png',response=await fetch('/__shot?name='+file,{method:'POST',body:await canvas.convertToBlob({type:'image/png'})});if(!response.ok)throw Error('Opacity witness write failed');witnesses.push({file:'shots/'+file,direction:d,chunk:chunk.id,covered,solid,solidColour,maxDepthError});
+        const file='forest-mass-opacity-'+index+'.png',response=await fetch('/__shot?name='+file,{method:'POST',body:await canvas.convertToBlob({type:'image/png'})});if(!response.ok)throw Error('Opacity witness write failed');witnesses.push({file:'shots/'+file,direction:d,chunk:chunk.id,covered,solid,solidColour,maxDepthError,worstPixel,massPasses,backdropPasses});
       }
       active=false;await device.queue.onSubmittedWorkDone();const stats={...renderer.stats};renderer.destroy();for(const b of allocated)b.destroy();for(const texture of [colour,msaa,depth])texture.destroy();device.destroy();
       return {errors,witnesses,descriptors,rootReads,reads,writes,stats,source:pack.manifest.source,sourceSizes:{vertices:pack.manifest.files['vertices.bin'].bytes,indices:pack.manifest.files['indices.bin'].bytes}};
@@ -101,7 +109,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
     assert.equal(result.descriptors.length,1);const d=result.descriptors[0];assert.equal(d.vertex,manifest.version===2?'forestMassVS':'bakedCanopyVS');assert.equal(d.layout.arrayStride,manifest.vertexStride);assert.equal(d.fragment,'canopyOpaqueFS');assert.equal(d.depth.depthWriteEnabled,true);assert.equal(d.depth.depthCompare,'greater');assert.equal(d.msaa.alphaToCoverageEnabled,false);assert.ok(d.blend.every(b=>b===null));
     if(manifest.version===2)assert.deepEqual(d.layout.attributes,[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'snorm8x4'},{shaderLocation:6,offset:16,format:'float16x4'}]);
     for(const name of ['vertices','indices']){const uploads=result.writes.filter(w=>w.label==='forest mass immutable '+name);assert.equal(uploads.length,1);assert.equal(uploads[0].offset,0);assert.equal(uploads[0].bytes,result.sourceSizes[name]);}
-    for(const row of result.witnesses){assert.ok(row.covered>100&&row.solid>50&&row.solidColour>50,'actual field-derived mass has an opaque coloured interior');assert.ok(row.maxDepthError<=2,'real per-sample depth occludes later blue backdrop: '+JSON.stringify(row));}
+    for(const row of result.witnesses){assert.equal(row.massPasses,1);assert.equal(row.backdropPasses,1);assert.ok(row.covered>100&&row.solid>50&&row.solidColour>50,'actual field-derived mass has an opaque coloured interior');assert.ok(row.maxDepthError<=2,'real saved per-sample depth occludes later blue backdrop: '+JSON.stringify(row));}
     t.diagnostic(JSON.stringify({input,source:result.source,qualification:'Actual density geometry alpha/depth/GPU witnesses only; native appearance remains unqualified',witnesses:result.witnesses,diagnostics}));
   }catch(error){t.diagnostic(JSON.stringify({input,diagnostics,error:error.message}));throw error;}
   finally{closing=true;await browser?.close();await Promise.all([server,assetServer].map(s=>new Promise(resolve=>{s.closeAllConnections?.();s.close(resolve);})));}
