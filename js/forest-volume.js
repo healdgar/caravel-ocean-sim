@@ -150,3 +150,42 @@ struct ForestVolumeFragment {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  var o:ForestVolumeFragment;o.colour=vec4f(lit.rgb,clamp(1.-transmittance,0.,1.));o.depth=clip.z/clip.w;return o;
 }
 `;
+
+// Append after FOREST_VOLUME_WGSL. Draw only original-field leaf shell ranges;
+// woody ranges retain forestMiddleVS/FS. Opaque mesh depth restores early depth
+// testing, while local field samples retain source colour/interior perspective.
+// Six 0.25m interior samples and four 0.5m sunlight samples are authored local
+// shading approximations, not complete solar or neighbouring-tree shadows.
+export const FOREST_VOLUME_SHELL_WGSL=/* wgsl */`
+struct ForestVolumeShellVertex {
+ @builtin(position)pos:vec4f,@location(0)world:vec3f,@location(1)local:vec3f,@location(2)normal:vec3f,
+ @location(3)@interpolate(flat)rootScale:vec4f,@location(4)@interpolate(flat)yawTint:vec4f,@location(5)colour:vec3f,
+};
+@vertex fn forestVolumeShellVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(6)colour:vec3f,
+ @builtin(instance_index)instance:u32)->ForestVolumeShellVertex{
+ let root=forestRoots[forestVisible[forestBin.x+instance]];let world=root.rootScale.xyz+forestVolumeRotate(position,root.yawColour.x)*root.rootScale.w;
+ var o:ForestVolumeShellVertex;o.world=world;o.local=position;o.normal=normal;o.colour=colour;o.rootScale=root.rootScale;o.yawTint=root.yawColour;
+ o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);return o;
+}
+@fragment fn forestVolumeShellFS(in:ForestVolumeShellVertex)->@location(0)vec4f{
+ if(in.local.y<forestVolumeMeta.highFloor.w){discard;}
+ let camera=forestVolumeRotate(F.camPos.xyz-in.rootScale.xyz,-in.yawTint.x)/in.rootScale.w;
+ let ray=normalize(in.local-camera);var densitySum=0.;var moment=vec3f(0);var escapeMoment=0.;
+ for(var i=0u;i<6u;i++){
+  let p=in.local+ray*((f32(i)+.5)*.25);if(p.y<forestVolumeMeta.highFloor.w){continue;}
+  let uvw=forestVolumeUVW(p);let field=textureSampleLevel(forestVolumeField,forestVolumeSampler,uvw,0);let density=max(field.a,0.);
+  densitySum+=density;moment+=max(field.rgb,vec3f(0));escapeMoment+=textureSampleLevel(forestVolumeEscape,forestVolumeSampler,uvw,0).r*density;
+ }
+ var pigment=in.colour;var exposure=textureSampleLevel(forestVolumeEscape,forestVolumeSampler,forestVolumeUVW(in.local),0).r;
+ if(densitySum>0.){pigment=moment/densitySum;exposure=escapeMoment/densitySum;}exposure=clamp(exposure,0.,1.);
+ var localNormal=vec3f(0,1,0);if(dot(in.normal,in.normal)>1e-16){localNormal=normalize(in.normal);}
+ let n=forestVolumeRotate(localNormal,in.yawTint.x);var sunlight=1.;
+ if(F.sunDir.y>0.){let sun=forestVolumeRotate(F.sunDir.xyz,-in.yawTint.x);var opticalDepth=0.;
+  for(var i=0u;i<4u;i++){opticalDepth+=forestVolumeDensity(in.local+sun*((f32(i)+.5)*.5))*.5;}
+  sunlight=exp(-forestVolumeMeta.dimensionsExtinction.w*opticalDepth);
+ }
+ let nDotL=dot(n,F.sunDir.xyz);let diffuse=(max(nDotL,0.)+max(-nDotL,0.)*.48)*(.22+.78*exposure*exposure)*sunlight;
+ let lit=landFinish(in.world,n,pigment*in.yawTint.yzw,diffuse,.12+exposure*.55+abs(n.y)*.08,0.,.95);
+ return vec4f(lit.rgb,1.);
+}
+`;
