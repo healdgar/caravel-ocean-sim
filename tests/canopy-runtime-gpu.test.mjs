@@ -33,11 +33,14 @@ function instrumentCanopyRuntime(){
     const data=new Uint8Array(read.getMappedRange());let nonblack=0;for(let y=0;y<texture.height;y++)for(let x=0;x<texture.width;x++){const i=y*row+x*4;if(Math.max(data[i],data[i+1],data[i+2])>2)nonblack++;}read.unmap();read.destroy();return {nonblack,pixels:texture.width*texture.height};
   };
 }
-async function openCanopyRuntime(url,{corrupt=false}={}){
+// This suite exercises the retained 42-tree fallback. Regional native forest
+// rendering and its replacement of every old tree have a separate GPU suite.
+async function openCanopyRuntime(url,{corrupt=false,forestUnavailable=true}={}){
   const page=await browser.newPage({viewport:{width:600,height:420}}),requests=[],errors=[];
   page.on('request',request=>{if(request.url().includes('/assets/canopy-scenery/'))requests.push(request.url());});page.on('pageerror',e=>errors.push(e.message));
   page.on('console',m=>{if(/init failed|GPU error:|Shader compile error/i.test(m.text()))errors.push(m.text());});
   if(corrupt)await page.route('**/assets/canopy-scenery/**/near.bin',async route=>{const response=await route.fetch(),bytes=Buffer.from(await response.body());assert.ok(bytes.length>100);bytes[100]^=1;await route.fulfill({response,body:bytes});});
+  if(forestUnavailable)await page.route('**/assets/forest-scenery/**',route=>route.fulfill({status:404,body:'Optional regional forest unavailable'}));
   await page.addInitScript(instrumentCanopyRuntime);await page.goto(url);
   await page.waitForFunction(()=>canopyRuntimeGPU.callback||window.oceanStartup?.state==='failed'||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:180000});
   assert.equal(await page.locator('#err').textContent(),'',errors.join('\n'));
@@ -67,10 +70,10 @@ for(const path of ['/','/docs/index.html'])test(`${path} actual landfall draws t
   }finally{await scene.page.close();}
 });
 
-test('a corrupt optional canopy pack preserves the exact procedural instance uploads of explicit off mode',{timeout:360000},async()=>{
+test('without a regional forest, a corrupt canopy pack preserves exact procedural uploads of off mode',{timeout:360000},async()=>{
   const url=canopyRuntimeURL('/',{landfall:'approach'}),off=await openCanopyRuntime(url+'&canopy=off');let failed;
   try{
-    failed=await openCanopyRuntime(url,{corrupt:true});assert.deepEqual(off.requests,[]);assert.ok(failed.requests.some(url=>url.endsWith('/near.bin')));
+    failed=await openCanopyRuntime(url,{corrupt:true,forestUnavailable:true});assert.deepEqual(off.requests,[]);assert.ok(failed.requests.some(url=>url.endsWith('/near.bin')));
     assert.deepEqual(off.receipt.buffers,[]);assert.deepEqual(failed.receipt.buffers,[],'failed receipt cannot suppress original roots then allocate a partial imported renderer');
     assert.deepEqual(failed.receipt.trees,off.receipt.trees,'all visible procedural root/scale/species bytes match the deterministic fallback');
     const legacy=Object.entries(off.receipt.draws).filter(([label])=>/^island (trees|canopy and wood)$/.test(label)).reduce((sum,[,draw])=>sum+draw.instances,0);

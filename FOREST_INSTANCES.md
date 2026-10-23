@@ -58,6 +58,16 @@ boulders and terrain remain separate.
 
 ## GPU rendering and distance representations
 
+The current native-derived production path uses original near geometry, reduced
+native wood/leaf-field meshes between, and opaque regional leaf-density masses
+far away. The same planted roots and their overlapping detailed leaf fields
+supply that mass; no generic crown domes or individual-tree atlas cards supply
+its surface. See [the cache/assembly pipeline](FOREST_MASS.md) for provenance,
+projected sampling policy, timings and unresolved native-appearance differences.
+The following atlases remain an explicit `forestImpostor=auto|force` diagnostic
+and a load-failure fallback, not the production distant-canopy representation.
+
+
 Prototype geometry is shared across roots. Uploaded root and prototype buffers
 remain immutable. GPU compute culls bounds, selects representations and compacts
 visible IDs; indexed indirect draws reuse those buffers. Camera movement causes
@@ -86,7 +96,7 @@ pixels. It is distinct from the detailed native model and depth atlas.
 
 ## Loading, compression and offline scope
 
-Landfall loading brings in roots and atlases first. Detailed native geometry
+Landfall loading brings in source roots, optional native-derived mass/middle data and fallback atlases. Detailed native geometry
 and maps load in the background; close representations become available after
 their resources are ready. Native map families retain exact source dimensions.
 

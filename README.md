@@ -81,7 +81,7 @@ abstracted. Damage, penetration, ricochet and AI combat are not yet modeled.
 
 You need a recent Chrome with WebGPU and a reasonably capable GPU. On a laptop, force Chrome onto the dedicated GPU in the Windows graphics settings, or it will fall back to the integrated one.
 
-Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both include the ship's oak material and are self-contained.
+Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both embed sailing assets and the forest view atlases. The optional full-detail mature tree buffers load from versioned public assets; they require a connection.
 
 To run from source:
 
@@ -117,7 +117,7 @@ The loading screen stays until the first rendered canvas frame completes on the
 GPU. Errors stay visible with Retry; slow first visits get an explanatory hint,
 without a guessed percentage or failure timeout. Reduced motion and mobile
 safe areas are supported. The website uses separately cached media; the two
-downloadable HTML files retain their embedded assets and work offline.
+downloadable HTML files retain their embedded sailing assets and forest atlases for offline use. Full-detail mature tree geometry remains an optional network download.
 
 Ordinary sailing preloads only the wood texture and two crew models (2.77 MB
 before HTTP compression). The 8.32 MB whale asset loads on the first shark or
@@ -665,19 +665,19 @@ boat's travelled position.
 
 Saba uses Beeldmateriaal Nederland's 2023 bare-earth LiDAR DTM, area-averaged and
 reprojected from the half-metre source to a 513² grid at 16 m spacing across an
-8.192 km region. Its fixed 104,972-triangle mesh preserves the same relief
-throughout approach. Missing forest ground returns receive recorded interpolation;
+8.192 km region. Its regional mesh preserves the same relief
+throughout approach; Wells Bay now has a separate, finer survey tile. Missing forest ground returns receive recorded interpolation;
 the result is visual terrain, with source CRS/datum and shoreline limitations.
 
 Licensed real aerial imagery supplies one registered 1024² colour seed at 8 m per
 pixel. Gentle infrastructure cleanup and bounded shadow lifting preserve broad
 green interior and exposed brown slopes. These approximate surface colours are
 not calibrated reflectance or an exact reconstruction of historical land cover.
-A derived greenness mask, elevation and slope select 17,466 stable trees from
-360,000 seeded candidates in the current Saba pack. Camera distance changes
+A derived vegetation mask, elevation and slope seed the regional forest. Camera distance changes
 detail, not tree identity, position or regional density. The original 8 m colour
-and 16 m elevation limits remain; additional trees do not improve source resolution.
-Eight seeded tree variants use five generations of curved, tapering branches,
+and 16 m elevation limits remain outside the bounded Wells Bay tile. The native forest replaces the entire legacy population. If the new pack is
+unavailable, the earlier stand and procedural trees remain a fallback.
+Those eight seeded tree variants use five generations of curved, tapering branches,
 with children growing from actual parent sections. Hundreds of terminal twig
 sprays carry individual leaf cutouts, veins and transparent gaps at near/middle
 detail. Interior foliage receives authored canopy
@@ -713,17 +713,48 @@ bends with wind; cached terrain sunlight avoids cloud ray marching per blade.
 The material adds filtered metre-scale relief between aerial colour and close
 soil/rock grain. These additions do not yet supply a closed distant forest canopy.
 
-**Published canopy integration:** a separate Forestmodeler import adds a
-bounded **80 × 80 m, 42-tree** demonstration near Saba's summit. Its five taxa
-(fir, oak, birch, elm and maple) are temperate examples, not surveyed tropical
-vegetation or whole-island coverage. Actual branch wood and cutout foliage retain
-source linear material colours; procedural roots are replaced only inside the
-imported rectangle. The source has no leaf image, so the existing leaf texture
-supplies alpha only. Auto keeps detail unless the complete near/far patch support
-fits within three render pixels; the opaque far preview is otherwise explicitly
-uncertified. Imported trees are static and add no canopy shadow caster. Combined
-native/rendered checks and deployed-byte verification passed in `3ba18f9`. See
-[Canopy scenery contract, provenance and inspection controls](CANOPY_SCENERY.md).
+**Regional Forestmodeler integration:** five cached mature Hero models—oak
+(60 years), maple (50), birch (25), elm (65) and chestnut (70)—retain their
+original geometry, UVs, normals and `gene-surfaces-v3` bark/leaf maps. These are
+temperate visual proxies, not surveyed Caribbean flora. The deterministic stand
+has **85,451 roots**, of which **85,050** remain on the fine Wells Bay terrain.
+The resident forest replaces all earlier procedural trees and the 42-tree example.
+
+Near views use the shared original models. Middle views use reduced native wood
+and surfaces extracted from the original leaf-area fields. Distant blocks combine
+those fields at the actual root positions **before** surface extraction, producing
+an opaque forest mass with source-derived contours and linear leaf pigment.
+Original leaf triangles and MASK maps determine density; coarse crown domes and
+individual-tree view cards do not supply this mass. Cached mature trees avoid
+regrowing decades of branching: five leaf-field caches took 27 seconds and the
+regional assembly took 100 seconds on the authoring Mac.
+
+GPU compute culls blocks/trees, projects their authored sampling footprint through
+actual render pixels, FOV and view angle, selects detail with a 3-pixel target and
+12% hysteresis, and issues indirect draws. Static buffers upload once. The pixel
+target bounds the **authored sampling estimate**, not native appearance: finite
+native/MASK comparisons still expose coverage and silhouette differences. Pigment,
+leaf underside lighting and opaque density are approximations; no universal
+imperceptible transition or performance target is claimed. See
+[Native forest instances](FOREST_INSTANCES.md) and
+[Native-derived canopy pipeline and validation](FOREST_MASS.md). The
+current candidate is held locally: close coast still selects thousands of costly
+original Hero models and needs further detail/visibility work before publication.
+
+Forest geometry loads only for landfall. Full native detail remains a background
+download; transport verifies encoded and decoded SHA-256 receipts. The local
+meshopt decoder and gzip preserve the packed geometry bytes. Explicit
+`forestImpostor=auto|force` retains the individual-atlas diagnostic; it disables
+the new mass/middle path and is not the production canopy.
+
+**Wells Bay close terrain:** a 1024 m coastal tile derives directly from the
+original 0.5 m DTM at **2 m spacing**, with a separate registered 1024² aerial
+crop. Its 169,052 visible triangles replace covered regional cells and join
+their exact boundary heights/normals. Roots, hull clearance, coastal depth and
+terrain lighting share the fine triangular surface. Ground-return gaps retain
+coarse support; the 48 m wet transition is authored, not surveyed bathymetry.
+This is not a reconstructed beach, harbour or cliff-overhang model. See
+[Near-terrain provenance and controls](WELLS_BAY_NEAR.md).
 
 ![Recursive tree branches and alpha-cutout foliage near the Saba coast](docs/trees.png)
 
@@ -1720,7 +1751,8 @@ content-hashed, byte-identical media in `docs/assets/` and a SHA-256 asset manif
 The initial HTML excludes model, audio and terrain payloads; current mandatory
 crew/wood assets preload concurrently, marine assets wait for an encounter,
 audio waits for Enable sound, and terrain loads for land scenes. Both ocean HTML
-downloads remain self-contained.
+downloads embed sailing assets and forest atlases; full-detail mature forest
+buffers are optional versioned network assets.
 Older hashed assets are retained for cached HTML; the build copies only its
 explicit runtime asset list. The site defaults to Boat camera and preserves
 explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder. To update the

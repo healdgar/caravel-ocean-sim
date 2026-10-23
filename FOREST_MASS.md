@@ -148,6 +148,34 @@ Do not relabel finite passing views, source hashes or the footprint projection
 as global visual certification. Neither manifests 268/270 nor this document
 establish a released checkpoint.
 
+## Local integration review — release held
+
+The installed candidate uses the original compact mesh plus exact transport
+(checkpoint270). Source and packaged Pages builds render the horizon and approach
+views with537 selected mass blocks. Three source views and two packaged views
+completed without GPU/device errors. Local startup took4.7–5.0seconds on this Mac;
+that is loopback loading, not a public-network or iPhone measurement.
+
+The coast is **not release-ready**. At1280×900 in visible-scene settings with
+wind/waves/clouds disabled, headless Metal measured2.35FPS:8,108 original Hero
+trees submit3,383,970,921 native triangles, plus40,344 middle trees submitting
+498,152,759 triangles. The forest's buffers alone occupy647,218,092bytes.
+The distant views' roughly118 uncapped frames/second do not establish the
+ordinary game's60FPS target. Receipts: `/tmp/waterworld-native-mass-scenes-279`
+and `/tmp/waterworld-native-mass-package-scenes-288`.
+
+Next, add calibrated source-derived tree detail levels and GPU visibility work
+between original Hero geometry and the middle surface. Do not silently weaken
+the3-pixel policy, force coarse geometry, or claim native equivalence from these
+finite views. Public assets remain unchanged.
+
+An offline seam-locked simplifier was also exercised. It preserves surviving
+position/normal/colour records and exact shared spatial seams, removes only
+reported exact-zero-area faces, and retains original geometry if seam/attribute
+checks fail. Region287 reduced16,889,295triangles to16,397,951 (2.9%), with no
+fallback chunks. This small saving does not solve coastal cost; **that reduction
+is not installed**. Its error estimate is not a native appearance certificate.
+
 ## Reproduce bounded checkpoints
 
 Use fresh output directories and an existing mature native pack. Run authoring
@@ -155,12 +183,12 @@ serially in the Forestmodeler NumPy/SciPy environment; no growth command is need
 Adjust repository paths and the pinned meshoptimizer installation path.
 
 ```sh
-uv run --directory /absolute/path/forestmodeler --with pillow python \
+uv run --with numpy --with scipy --with pillow --with scikit-image python \
   /absolute/path/waterworld/scripts/prepare-forest-fields.py \
   --pack /tmp/waterworld-mature-dense-forest-237 \
   --quadrature-edge-metres .3 --output /tmp/forest-fields-fresh
 
-uv run --directory /absolute/path/forestmodeler --with scikit-image python \
+uv run --with numpy --with scipy --with pillow --with scikit-image python \
   /absolute/path/waterworld/scripts/prepare-forest-mass.py \
   --pack /tmp/waterworld-mature-dense-forest-237 \
   --fields /tmp/forest-fields-fresh \

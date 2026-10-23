@@ -1,5 +1,81 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## Current order: native-resolution efficiency, then Wells Bay close terrain
+
+The user reproduced sub-60 FPS across scenes on the M4 Mac, supplying the default
+`?boat=1` view. Root profiles fixed native Retina pixels before changing quality;
+only demonstrated efficiency gains qualify. The user next requested finishing
+Wells Bay's poor close-up island rendering. Earlier grass/rock and canopy work
+was partial, not close-coast completion. After the performance checkpoint, review
+the actual bay at close range, improve shoreline/ground/rock/vegetation detail,
+and require rendered before/after checks at approach and coast scales.
+
+## October 22 afternoon: regional forest and closed-canopy correction
+
+**Release hold:** public still uses the old broad forest. The user explicitly
+requires individual trees close, reduced geometry between, and a **solid,
+contiguous baked canopy mass** at distance. Individual transparent tree captures
+are not that representation. Transitions must use projected perceptible error,
+including rendered resolution, field of view and viewing angle.
+
+Current local source uses the five catalogued mature Forestmodeler Hero models
+and original gene-surfaces-v3 geometry/maps. The native bridge preserves source
+identity and uses immutable shared GPU buffers and indirect draws. The authored
+stand contains85,451 roots; the fine Wells terrain rejects401. Greater root count
+alone does not establish closed crown coverage. The legacy regional trees and
+42-tree patch are load-failure fallbacks, not additional production layers.
+
+The individual full-sphere atlas experiment was rejected for distant forest:
+250 grounded comparisons against4× supersampled native rendering fail70 cases
+under the unchanged3px silhouette/20% coverage gates. It cannot justify a larger
+production atlas switch. The strict opt-in harness remains
+`scripts/review-forest-atlases.mjs`; receipt
+`/tmp/waterworld-forest-supersampled-243.log`. A closed opaque owner-chunk canopy
+compiler/runtime experiment was tested but rejected: its input was the coarse
+`p.far` crown domes, not original native leaves/wood. Closure and depth tests
+proved opaque geometry, not the requested forest likeness. Active runtime hooks
+were reverted; local branch `codex/rejected-crown-dome-canopy-20261022` preserves
+the experiment. Do not publish it. The replacement must bake the actual assembled
+native wood/leaf geometry, source maps and roots, first for one reviewable stand.
+The replacement now derives continuous leaf-area density and linear pigment from
+original detailed triangles/MASK maps, assembles overlapping trees before surface
+extraction, and clips buried native roots at their collar. Five mature caches
+took27.44s; the537-block/85,050-resident-root assembly took100.37s. Middle geometry
+uses native wood and those fields; distant geometry is opaque, not atlas cards.
+Actual GPU opacity/depth, immutable buffer and projected ownership checks pass.
+The24-view isolated stand review still fails strict native3px/20% coverage gates
+in many views; these remain diagnostic failures, not a certified transition.
+Three source sailing views and two packaged distant views now render with no
+GPU errors;47 focused source/transport/compiler/GPU/package regressions pass.
+Loopback landfall startup takes4.7–5.0s. Coast at1280×900 still measures2.35FPS:
+8,108 original Hero instances submit3.384billion native triangles;40,344 middle
+instances add498million. Buffer storage alone is647MB. The scene is deliberately
+unpublished. Preserve the original quality policy; add intermediate detail levels
+calibrated against native renders and GPU visibility before release. The source-
+derived mass remains installed locally using byte-exact transport270.
+Seam-locked reduction287 passed exact spatial joins but saved only2.9% of far
+triangles, so it is not installed. No native-resolution performance target is
+claimed. Public assets are unchanged.
+See FOREST_MASS.md for source receipts and reproducible commands.
+
+Wells correction: independent OSM coastline constrains2,543 unsupported positive
+nodes (measured ground wins;4m safety band;32m seam). Independent near imagery
+and a2m survey mesh remove the photographed blue foreground wall. Original
+terrain source/rings/recipe and separate ODbL/CC BY attribution remain. Close rock
+still exposes limitations of filled heightfields/projected photography; detailed
+beach/swash and cliff-overhang geometry remain unfinished.
+
+Retina audit uses Apple M4 Max/Metal3 at3344×1846 pixels,2.98×1080p. Stable unchanged
+baseline/candidate brackets around41FPS found no repeatable gain from the rejected
+lighting/cache rewrites. CPU frame work is a few milliseconds; rendering dominates.
+Native Retina60 remains unproven. Keep direct cloud-depth history reuse, which
+removes one5.887MiB texture/copy with identical native output across34 frames.
+
+Root is the sole executing validator; agents author source only. Current focused
+checks pass3 geometric-certificate fixtures,10 native-import fixtures,4 placement
+fixtures and22 loader/material/GPU/package tests. These do not qualify the pending
+closed-canopy implementation or a release.
+
 ## October 22: scene zoom must not scale the HUD
 
 The canvas wheel handler was passive, allowing Chromium trackpad pinch/Ctrl-wheel

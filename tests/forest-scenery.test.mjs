@@ -176,7 +176,11 @@ test('native stream transport verifies both encoded and decoded receipts',async(
 });
 test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
   const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');
-  assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS|discard/);
+  // Biological root clipping may discard buried fragments. It must never
+  // become a generic leaf mask or a threshold on filtered native coverage.
+  const collar='if(in.world.y<in.nativeSoil){discard;}';
+  assert.equal(FOREST_VERTEX_WGSL.split(collar).length-1,3,'only wood, leaf and middle collar clips');
+  assert.doesNotMatch(FOREST_VERTEX_WGSL.replaceAll(collar,''),/leafSpray|tree-foliage|canopyLeafFS|discard/);
   assert.match(FOREST_VERTEX_WGSL,/@location\(7\)nativeMaterial/);
   assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
   assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
