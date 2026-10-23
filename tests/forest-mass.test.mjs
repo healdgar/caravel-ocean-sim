@@ -8,6 +8,7 @@ import {gzipSync} from 'node:zlib';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {validateForestMass,decodeForestMass,loadForestMass} from '../js/forest-mass.js';
+import {ForestMeshoptDecoder} from '../js/vendor/forest-meshopt.js';
 
 const receipt=bytes=>({bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')});
 // Independent, bounded [0,1] fixture encoder and general IEEE binary16 reader.
@@ -41,6 +42,20 @@ function compactFixture(){
   }
   f.manifest.version=2;f.manifest.vertexStride=24;f.streams['vertices.bin']=bytes;f.encoded['vertices.bin.gz']=gzipSync(new Uint8Array(bytes));
   f.manifest.files['vertices.bin']={...receipt(new Uint8Array(bytes)),gzip:{file:'vertices.bin.gz',...receipt(f.encoded['vertices.bin.gz'])}};return {...f,source};
+}
+// Frozen hand-authored v0 ATTRIBUTES constant-record and v1 INDICES streams.
+// One synthetic point tests transport only, never geometric/appearance quality.
+const codecPoint=Uint8Array.from(Buffer.from('0000a0c00000104100001cc200007f00003000340038003c','hex'));
+const codecPointStream=new Uint8Array([0xa0,...new Uint8Array(32),...codecPoint]);
+const codecIndexStream=new Uint8Array([0xd1,0,0,0,0,0,0,0]);
+function installCodecStream(f,name,raw,encoded,mode,stride){
+  const gzip=gzipSync(encoded);f.streams[name]=raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength);f.encoded[name+'.gz']=gzip;
+  f.manifest.files[name]={...receipt(raw),gzip:{file:name+'.gz',...receipt(gzip)},meshopt:{...receipt(encoded),mode,count:raw.byteLength/stride,stride,filter:'NONE'}};
+}
+function codecFixture(){
+  const f=fixture();f.manifest.version=2;f.manifest.vertexStride=24;f.manifest.chunks.splice(1);f.manifest.chunks[0].indexCount=3;
+  const owners=new Uint8Array(new Uint32Array([0,0xffffffff,0xffffffff,0xffffffff]).buffer),gzip=gzipSync(owners);f.streams['root-chunks.bin']=owners.buffer;f.encoded['root-chunks.bin.gz']=gzip;f.manifest.files['root-chunks.bin']={...receipt(owners),gzip:{file:'root-chunks.bin.gz',...receipt(gzip)}};
+  installCodecStream(f,'vertices.bin',codecPoint,codecPointStream,'ATTRIBUTES',24);installCodecStream(f,'indices.bin',new Uint8Array(12),codecIndexStream,'INDICES',4);return f;
 }
 
 test('native mass loader verifies original source identities and both transport hashes',async()=>{
@@ -119,6 +134,26 @@ test('compact native mass preserves world float32 positions and validates packed
   assert.throws(()=>decodeForestMass(f.manifest,{...f.streams,'vertices.bin':f.streams['vertices.bin'].slice(4)},f.forest),/Incomplete/);
   const raw=f.streams['vertices.bin'].slice(0);new DataView(raw).setUint16(16,0x7e00,true);const encoded=gzipSync(new Uint8Array(raw)),manifest=structuredClone(f.manifest);manifest.files['vertices.bin']={...receipt(new Uint8Array(raw)),gzip:{file:'vertices.bin.gz',...receipt(encoded)}};
   await assert.rejects(()=>loadForestMass({forest:f.forest,assets:f.assets,fetchAsset:async name=>new Response(name==='manifest.json'?JSON.stringify(manifest):name==='vertices.bin.gz'?encoded:f.encoded[name])}),/packed.*vertex/,'matching transport hashes do not authorize a half NaN');
+});
+
+test('optional lossless meshopt transport preserves decoded bytes and rejects every untrusted layer',async()=>{
+  assert.equal(ForestMeshoptDecoder.supported,true);await ForestMeshoptDecoder.ready;
+  const direct=new Uint8Array(codecPoint.length);ForestMeshoptDecoder.decodeGltfBuffer(direct,1,24,codecPointStream,'ATTRIBUTES','NONE');assert.deepEqual(direct,codecPoint,'frozen attributes recover exact source bytes');
+  // Pinned meshoptimizer1.3 decoder test vector, MIT: decodeIndexSequence.
+  // A nontrivial sequence witnesses byte/order preservation, not triangle equivalence.
+  const sequence=new Uint8Array([0xd1,0x00,0x04,0xcd,0x01,0x04,0x07,0x98,0x1f,0,0,0,0]),indices=new Uint32Array(6);
+  ForestMeshoptDecoder.decodeGltfBuffer(new Uint8Array(indices.buffer),6,4,sequence,'INDICES','NONE');assert.deepEqual(indices,new Uint32Array([0,1,51,2,49,1000]));
+  const f=codecFixture(),loaded=await loadForestMass({forest:f.forest,fetchAsset:f.fetchAsset,assets:f.assets});assert.deepEqual(loaded.vertices,codecPoint);assert.deepEqual(loaded.indices,new Uint32Array(3));assert.equal(loaded.vertices.byteLength,24);assert.deepEqual(f.manifest.source.files,f.forest.manifest.files);
+  for(const change of [m=>m.files['vertices.bin'].meshopt.mode='TRIANGLES',m=>m.files['vertices.bin'].meshopt.filter='OCTAHEDRAL',m=>m.files['vertices.bin'].meshopt.count++,m=>m.files['vertices.bin'].meshopt.count=0,m=>m.files['vertices.bin'].meshopt.count=1.5,m=>m.files['vertices.bin'].meshopt.stride=52,m=>m.files['vertices.bin'].meshopt.bytes=256*1024*1024+1,m=>m.files['vertices.bin'].meshopt.sha256='bad',m=>m.files['indices.bin'].meshopt.mode='ATTRIBUTES',m=>m.files['indices.bin'].meshopt.mode='TRIANGLES',m=>m.files['indices.bin'].meshopt.stride=2,m=>m.files['root-chunks.bin'].meshopt={...m.files['indices.bin'].meshopt,count:4}]){
+    const bad=structuredClone(f.manifest);change(bad);assert.throws(()=>validateForestMass(bad,f.forest),/meshopt receipt/);
+  }
+  const neighbors=fixture({neighbors:true});neighbors.manifest.files['root-neighbors.bin'].meshopt={...f.manifest.files['vertices.bin'].meshopt,stride:16,count:4};assert.throws(()=>validateForestMass(neighbors.manifest,neighbors.forest),/meshopt receipt/,'root-neighbor ownership transport must remain direct');
+  for(const layer of ['encoded','meshopt','decoded']){
+    const bad=structuredClone(f.manifest);if(layer==='encoded')bad.files['vertices.bin'].gzip.sha256='e'.repeat(64);else if(layer==='meshopt')bad.files['vertices.bin'].meshopt.sha256='e'.repeat(64);else bad.files['vertices.bin'].sha256='e'.repeat(64);
+    await assert.rejects(()=>loadForestMass({forest:f.forest,assets:f.assets,fetchAsset:async name=>new Response(name==='manifest.json'?JSON.stringify(bad):f.encoded[name])}),new RegExp(layer+' digest mismatch'));
+  }
+  const malformed=codecFixture(),invalidHeader=codecPointStream.slice();invalidHeader[0]=0;installCodecStream(malformed,'vertices.bin',codecPoint,invalidHeader,'ATTRIBUTES',24);await assert.rejects(()=>loadForestMass({forest:malformed.forest,assets:malformed.assets,fetchAsset:malformed.fetchAsset}),'matching transport hashes cannot authorize a malformed codec stream');
+  const invalid=codecFixture(),raw=codecPoint.slice(),encoded=codecPointStream.slice();raw.fill(0,12,15);encoded.set(raw,encoded.length-24);installCodecStream(invalid,'vertices.bin',raw,encoded,'ATTRIBUTES',24);await assert.rejects(()=>loadForestMass({forest:invalid.forest,assets:invalid.assets,fetchAsset:invalid.fetchAsset}),/packed.*vertex/,'original decoded SHA still requires finite, valid geometry');
 });
 
 test('compact native mass GPU vertex fetch decodes normalized snorm and linear half RGB',{timeout:120000},async()=>{
