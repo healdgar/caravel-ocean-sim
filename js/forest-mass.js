@@ -3,6 +3,7 @@
 // equivalence to native leaf silhouettes, coverage, pigment or illumination.
 import {FRAME_WGSL} from './wgsl/common.js';
 import {CANOPY_VERTEX_LAYOUT} from './canopy-scenery.js';
+import {ForestMeshoptDecoder} from './vendor/forest-meshopt.js';
 
 export const FOREST_MASS_VERTEX_LAYOUT=Object.freeze({arrayStride:24,attributes:[
  {shaderLocation:0,offset:0,format:'float32x3'},
@@ -34,6 +35,12 @@ const forestMassReceipt=r=>forestMassUint(r?.bytes)&&r.bytes>0&&typeof r.sha256=
 const forestMassSameReceipt=(a,b)=>forestMassReceipt(a)&&forestMassReceipt(b)&&a.bytes===b.bytes&&a.sha256===b.sha256;
 const forestMassUpward=value=>{const n=Math.fround(value);if(n>=value)return n;const bytes=new ArrayBuffer(4),floats=new Float32Array(bytes),words=new Uint32Array(bytes);floats[0]=n;words[0]++;return floats[0];};
 const forestMassHalf=bits=>{const sign=bits&0x8000?-1:1,exponent=(bits>>10)&31,mantissa=bits&1023;return exponent===0?sign*mantissa*2**-24:exponent===31?(mantissa?NaN:sign*Infinity):sign*(1+mantissa/1024)*2**(exponent-15);};
+function forestMassMeshoptReceipt(item,name,stride){
+ if(item.meshopt===undefined)return;
+ const codec=item.meshopt,mode=name==='vertices.bin'||name==='middle-vertices.bin'?'ATTRIBUTES':name==='indices.bin'||name==='middle-indices.bin'?'INDICES':null;
+ if(!mode||!forestMassReceipt(codec)||codec.bytes>256*1024*1024||codec.mode!==mode||codec.stride!==stride||!forestMassUint(codec.count)||!codec.count||codec.count*codec.stride!==item.bytes||
+  (codec.filter!==undefined&&codec.filter!=='NONE'))throw Error('Invalid lossless native forest meshopt receipt: '+name);
+}
 
 export function validateForestMass(m,forest){
  const source=forest?.manifest??forest;
@@ -42,9 +49,10 @@ export function validateForestMass(m,forest){
  for(const [name,stride]of [['vertices.bin',m.vertexStride],['indices.bin',4],['root-chunks.bin',4]]){
   const item=m.files?.[name],encoded=item?.gzip;
   if(!forestMassReceipt(item)||item.bytes%stride||item.bytes>256*1024*1024||!forestMassReceipt(encoded)||encoded.file!==name+'.gz')throw Error('Invalid native forest mass stream receipt: '+name);
+  forestMassMeshoptReceipt(item,name,stride);
  }
  if(m.files['root-chunks.bin'].bytes!==source.rootCount*4)throw Error('Native forest mass owner table length differs from source');
- if(m.files['root-neighbors.bin']){const item=m.files['root-neighbors.bin'];if(!forestMassReceipt(item)||item.bytes!==source.rootCount*16||!forestMassReceipt(item.gzip)||item.gzip.file!=='root-neighbors.bin.gz')throw Error('Invalid native forest mass neighbor receipt');}
+ if(m.files['root-neighbors.bin']){const item=m.files['root-neighbors.bin'];if(!forestMassReceipt(item)||item.bytes!==source.rootCount*16||!forestMassReceipt(item.gzip)||item.gzip.file!=='root-neighbors.bin.gz')throw Error('Invalid native forest mass neighbor receipt');forestMassMeshoptReceipt(item,'root-neighbors.bin',16);}
  for(const name of ['vertices.bin','indices.bin','roots.bin'])if(!forestMassSameReceipt(m.source?.files?.[name],source.files?.[name]))throw Error('Native forest mass source forest mismatch');
  if(!forestMassReceipt(m.source?.nativeFieldManifest)||!forestMassReceipt(m.source?.method)||m.source.method.file!=='scripts/prepare-forest-mass.py'||
   !m.source.nativeFieldRecipe||!(typeof m.source.nativeFieldRecipe.version==='string'?m.source.nativeFieldRecipe.version.length>0:forestMassUint(m.source.nativeFieldRecipe.version)&&m.source.nativeFieldRecipe.version>0))throw Error('Missing native forest field/method provenance');
@@ -62,7 +70,7 @@ export function validateForestMass(m,forest){
  if(next*4!==m.files['indices.bin'].bytes||owners>source.rootCount)throw Error('Incomplete native forest mass ranges/ownership');
  const middle=forestMassMiddleNames.some(name=>m.files[name]!==undefined)||m.prototypes!==undefined;
  if(middle){
-  for(const [name,stride]of [['middle-vertices.bin',52],['middle-indices.bin',4]]){const item=m.files[name];if(!forestMassReceipt(item)||item.bytes%stride||item.bytes>256*1024*1024||!forestMassReceipt(item.gzip)||item.gzip.file!==name+'.gz')throw Error('Invalid native forest middle stream receipt');}
+  for(const [name,stride]of [['middle-vertices.bin',52],['middle-indices.bin',4]]){const item=m.files[name];if(!forestMassReceipt(item)||item.bytes%stride||item.bytes>256*1024*1024||!forestMassReceipt(item.gzip)||item.gzip.file!==name+'.gz')throw Error('Invalid native forest middle stream receipt');forestMassMeshoptReceipt(item,name,stride);}
   if(!Array.isArray(m.prototypes)||!m.prototypes.length||m.prototypes.length!==source.prototypes?.length)throw Error('Incomplete native forest middle registry');
   let middleIndex=0;
   for(const [id,p]of m.prototypes.entries()){
@@ -125,7 +133,14 @@ export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS
  for(const name of forestMassStreams(manifest)){
   const item=manifest.files[name],encoded=await(await load(item.gzip.file)).arrayBuffer();
   if(encoded.byteLength!==item.gzip.bytes||await digest(encoded)!==item.gzip.sha256)throw Error('Native forest mass encoded digest mismatch');
-  const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  let raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  if(item.meshopt){
+   const codec=item.meshopt;if(raw.byteLength!==codec.bytes||await digest(raw)!==codec.sha256)throw Error('Native forest mass meshopt digest mismatch');
+   if(!ForestMeshoptDecoder.supported)throw Error('Lossless native forest meshopt decoding unavailable');await ForestMeshoptDecoder.ready;
+   const decoded=new Uint8Array(item.bytes);ForestMeshoptDecoder.decodeGltfBuffer(decoded,codec.count,codec.stride,new Uint8Array(raw),codec.mode,'NONE');raw=decoded.buffer;
+  }
+  // INDICES is the sequence codec: original index bytes/order must match,
+  // rather than merely rendering equivalent triangles after a rotation.
   if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');streams[name]=raw;
  }
  const iterator=forestMassChecks(manifest,streams,forest);for(;;){const next=iterator.next();if(next.done)return next.value;await(globalThis.scheduler?.yield?globalThis.scheduler.yield():new Promise(resolve=>setTimeout(resolve,0)));}
