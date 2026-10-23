@@ -54,6 +54,7 @@ fn karis(c: vec3f) -> f32 { return 1.0 / (1.0 + luma(c) * 0.25); }
 `;
 
 export const BLOOM_UP = FS_TRI + /* wgsl */ `
+override bloomFoldTent: bool = true;
 struct P { texel: vec4f };   // xy = 1/src size, z = radius, w = weight
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
@@ -62,6 +63,23 @@ fn tap(uv: vec2f) -> vec3f { return textureSampleLevel(src, samp, uv, 0.0).rgb; 
 @fragment fn fs(in: VO) -> @location(0) vec4f {
   let t = U.texel.xy * U.texel.z;
   let uv = in.uv;
+  // The 3×3 tent is separable. Include the bilinear sample's fractional
+  // texel phase, then group its four 1D weights into two linear lookups.
+  // This retains the kernel at odd sizes and edges while using four reads.
+  if (bloomFoldTent && U.texel.z == 1.0) {
+    let size = vec2f(textureDimensions(src));
+    let coord = uv * size - 0.5;
+    let base = floor(coord);
+    let f = coord - base;
+    let left = 3.0 - 2.0 * f;
+    let right = 1.0 + 2.0 * f;
+    let lo = (base - 0.5 + (2.0 - f) / left) / size;
+    let hi = (base + 1.5 + f / right) / size;
+    let weight = right * 0.25;
+    let lower = mix(tap(lo), tap(vec2f(hi.x, lo.y)), weight.x);
+    let upper = mix(tap(vec2f(lo.x, hi.y)), tap(hi), weight.x);
+    return vec4f(mix(lower, upper, weight.y) * U.texel.w, 1.0);
+  }
   var o = tap(uv) * 4.0;
   o += (tap(uv + vec2f(-t.x, 0.0)) + tap(uv + vec2f(t.x, 0.0)) + tap(uv + vec2f(0.0, -t.y)) + tap(uv + vec2f(0.0, t.y))) * 2.0;
   o += tap(uv + vec2f(-t.x, -t.y)) + tap(uv + vec2f(t.x, -t.y)) + tap(uv + vec2f(-t.x, t.y)) + tap(uv + vec2f(t.x, t.y));

@@ -27,6 +27,7 @@ import { COASTAL_WATER } from './wgsl/terrain.js';
 import { LANDFALL_VIEWS } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, landfallCameraYaw } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
+import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution } from './resolution.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower } from './follower.js';
@@ -377,7 +378,7 @@ async function main() {
     label: 'bloom up', layout: 'auto',
     vertex: { module: upMod, entryPoint: 'vs' },
     fragment: {
-      module: upMod, entryPoint: 'fs',
+      module: upMod, entryPoint: 'fs', constants:{bloomFoldTent:qs.get('bloomFilter')!=='reference'},
       targets: [{ format: HDR, blend: { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } } }],
     },
   });
@@ -564,8 +565,10 @@ async function main() {
     timestampWrites: undefined,
   };
   let bloomLevels = 0, bloomPasses = [], bgComp = null,bgCompUnderwater=null;
+  let bloomMeasuring=false,bloomMeasureRequested=false,bloomCameraMediumBand=false,bloomFrameReady=false;
 
   function resize() {
+    if(bloomMeasuring)return;
     const dpr = window.devicePixelRatio || 1;
     const nw = Math.max(1, Math.round(canvas.clientWidth * dpr)), nh = Math.max(1, Math.round(canvas.clientHeight * dpr));
     if (nw !== nativeWidth || nh !== nativeHeight) { nativeWidth=nw; nativeHeight=nh; resolution.reset(); }
@@ -573,7 +576,7 @@ async function main() {
     const w = Math.max(1, Math.min(limit, Math.round(forcedWidth || nw * resolution.scale)));
     const h = Math.max(1, Math.min(limit, Math.round(forcedHeight || nh * resolution.scale)));
     if (w === W && h === H) return;
-    W = w; H = h;
+    W = w; H = h;bloomFrameReady=false;
     canvas.width = W; canvas.height = H;
     for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,submergedDepth]) t && t.destroy();
     submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
@@ -654,7 +657,33 @@ async function main() {
   const profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
   profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
   const performanceSummary=document.createElement('pre');performanceSummary.id='performance-summary';performanceSummary.textContent=profileSummary;
-  performancePanel.querySelector('.panel-body').append(performanceSummary,profileDetails);document.body.append(performancePanel);
+  const bloomMeasureButton=document.createElement('button');bloomMeasureButton.type='button';bloomMeasureButton.textContent='Measure bloom alone';bloomMeasureButton.disabled=!hasTS;
+  const bloomMeasureResult=document.createElement('p');bloomMeasureResult.id='bloom-measurement';bloomMeasureResult.setAttribute('role','status');
+  bloomMeasureResult.textContent=hasTS?'Pauses briefly to exclude earlier GPU waits.':'Separate bloom timing needs browser GPU timestamp support.';
+  bloomMeasureButton.addEventListener('click',()=>{bloomMeasureRequested=true;delete bloomMeasureResult.dataset.measurement;bloomMeasureButton.disabled=true;bloomMeasureResult.textContent='Measuring bloom alone…';});
+  performancePanel.querySelector('.panel-body').append(performanceSummary,bloomMeasureButton,bloomMeasureResult,profileDetails);document.body.append(performancePanel);
+  const bloomProfileWrites=(_,name)=>profiler.writes(name);
+  function encodeBloom(encoder,timestamps,mediumBand=bloomCameraMediumBand){
+    for(let i=0;i<bloomPasses.length;i++){
+      const {descriptor,pipeline,underwaterPipeline,bindGroup,underwaterBindGroup,timingName}=bloomPasses[i];
+      descriptor.timestampWrites=timestamps?.(i,timingName);
+      const pass=encoder.beginRenderPass(descriptor);
+      pass.setPipeline(mediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
+      pass.setBindGroup(0,mediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);pass.draw(3);pass.end();
+    }
+  }
+  async function measureBloomAlone(){
+    bloomMeasuring=true;bloomMeasureRequested=false;
+    try{
+      const result=await measureIsolatedGPUStage({device,encode:encodeBloom,passCount:bloomPasses.length,width:W,height:H});
+      bloomMeasureResult.textContent=`Bloom alone: ${result.milliseconds>0?result.milliseconds.toFixed(2)+' ms':'below timer precision'} · ${W} × ${H} · ${bloomPasses.length} passes. Median of ${result.samples.length} isolated batches; earlier GPU work excluded.`;
+      bloomMeasureResult.dataset.measurement=JSON.stringify(result);
+    }catch(error){bloomMeasureResult.textContent='Bloom measurement unavailable: '+(error.message||error);}
+    finally{
+      bloomMeasuring=false;bloomMeasureButton.disabled=!hasTS;
+      last=performance.now();fpsN=0;fpsT=0;resolution.reset();requestAnimationFrame(frame);
+    }
+  }
   let performanceButton=null;
   function setPerformanceOpen(open){
     performancePanel.hidden=!open;profiler.setDetailed(open);
@@ -1575,6 +1604,7 @@ async function main() {
 
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
+    if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
     const cpuFrameStart=performance.now();
     requestAnimationFrame(frame);
     landfallUI.update(now);
@@ -1829,16 +1859,8 @@ async function main() {
     }
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
-    if (P.bloom > 0) {
-      for (const { descriptor, pipeline, underwaterPipeline, bindGroup, underwaterBindGroup, timingName } of bloomPasses) {
-        descriptor.timestampWrites=profiler.writes(timingName);
-        const p = enc.beginRenderPass(descriptor);
-        p.setPipeline(cameraMediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
-        p.setBindGroup(0, cameraMediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);
-        p.draw(3);
-        p.end();
-      }
-    }
+    bloomCameraMediumBand=cameraMediumBand;
+    if(P.bloom>0)encodeBloom(enc,bloomProfileWrites,cameraMediumBand);
 
     compData[0] = frameF[68]; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
     // Neutral white balance: a fixed cool grade turned shaded oak green in daylight.
@@ -1866,7 +1888,7 @@ async function main() {
       enc.copyTextureToBuffer({ texture: swapTex }, { buffer: readBuf, bytesPerRow: bpr }, [W, H]);
     }
     submitList[0] = enc.finish();
-    device.queue.submit(submitList);
+    device.queue.submit(submitList);bloomFrameReady=true;
     for(const v of vessels)v.rowingWater?.readback();
     if(!oceanStartupFirstFrameSubmitted){
       oceanStartupFirstFrameSubmitted=true;

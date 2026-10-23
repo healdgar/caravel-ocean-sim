@@ -1,5 +1,59 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 22: iPhone bloom timing and bounded filter efficiency
+
+User reports Bloom120ms on iPhone. Root's source audit and native Mac reproduction
+show overlapping render-stage waits: individual bloom passes inherited about11ms
+spans while the whole isolated chain took under1ms. This does not establish the
+physical iPhone's exclusive bloom cost. The normal row now says **Bloom window
+(waits)**. **Measure bloom alone** drains prior GPU work, pauses normal frames,
+and measures three four-chain batches with separate, lazily allocated queries.
+It resumes with fresh cadence/resolution samples, retains current HDR pixels,
+handles pending resize, and adds no fences to normal rendering.
+
+The separable tent's fractional texel phase folds9upsample lookups to4, preserving
+all8levels, RGBA16F, Karis downsample and radius. Independent original-filter
+renders compare688,400final channels, with230one-step rounding differences and
+no larger error. Reference specialization remains bit-identical and can be
+selected with `bloomFilter=reference`. Same-context Mac A/B at1206x1998 measured
+0.168966→0.15178925ms; at3840x2160,0.2961725→0.25827725ms. These are short isolated
+bloom results, not full-game or physical-iPhone FPS claims. Receipt/screenshots:
+`/tmp/waterworld-bloom-ab-final/`; reproducible runner `scripts/benchmark-bloom.mjs`.
+
+Root's19-case native Metal pass covers new filter/timing/UI, old profiling,
+resolution and28medium/bloom cases plus56bit-exact underwater composites.
+Distribution rebuild and19/19packaged/startup checks pass, including offline
+HTML downloads, native resource bytes and actual mobile Stats. Final5/5bloom
+checks also cover the packaged underwater source and resuming real canvas frames.
+The initial packaged test incorrectly watched a minified callback name; it now
+observes GPUCanvasContext.getCurrentTexture instead. Public deployment validation
+remains pending.
+
+## October 22 evening: native forest release is public
+
+Published `e01bb8cfafae3af8777c9ff5acd9f4559ad6ee34` from the isolated
+`codex/gpu-rig-integration` checkout. GitHub Pages reports built at
+2026-10-23T04:46:40Z (October22local). Public verification at04:48:13Z matches
+HTML1,508,340bytes SHA256`c624e73120919c08906118c2d717239e3ec08ac3173dbddf54fcd7ade69810cf`,
+manifest37,855bytes SHA256`a783e4aec72b968dcec07cd8a169d67bc7fb2858353116fcce9f22d191d36252`,
+and all158assets/274,627,196bytes. Receipt `/tmp/waterworld-public-release-338.json`.
+Fresh public sailing/coast Chrome checks show no errors and the coast compiles
+`instanced forest shaded native crown shell`; screenshots/receipt are in
+`/tmp/waterworld-live-render-337`. Fresh network ready-and-review observations
+were74.9s sailing and31.4s coast, not loopback startup or steady-state frame time;
+cold public startup remains worth investigating. Local final package/startup
+passes10/10, with horizon/approach/coast rendered review336; static1280x900coast
+was58FPS, not a Retina/iPhone or full-sailing60FPS claim.
+
+The817-case sweep326 and targeted reruns329/332 cover all failures/cancellation.
+Two stale forest fixture hooks were repaired without relaxing assertions; offline
+startup keeps its timeout and fully closes the intentionally failed-GPU browser
+before opening distribution tests. The rejected dome pack is excluded. Detailed
+near/middle/far foliage and Wells Bay correction are now public. Remaining close
+terrain realism and strict native appearance qualification stay open.
+Primary crew-route work remains held and was not merged into this release.
+Preserve its dirty files; the release authority is the commit above.
+
 ## Current order: native-resolution efficiency, then Wells Bay close terrain
 
 The user reproduced sub-60 FPS across scenes on the M4 Mac, supplying the default

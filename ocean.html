@@ -114,6 +114,7 @@
   #gpu-profile { border:1px solid #ffffff24; border-radius:6px; margin-bottom:8px; font:10px/1.5 ui-monospace,monospace; }
   #gpu-profile summary { padding:0 8px; }
   #gpu-profile pre { margin:0; padding:0 8px 8px; max-height:160px; overflow:auto; white-space:pre-wrap; }
+  #bloom-measurement { margin:8px 0; font:11px/1.5 ui-monospace,monospace; overflow-wrap:anywhere; }
   #performance-summary { margin:0 0 10px; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
   .performance-open #hud { display:none; }
   .landfall-stages,.landfall-weather { display:flex; flex-wrap:wrap; gap:5px; }
@@ -10456,6 +10457,7 @@ fn karis(c: vec3f) -> f32 { return 1.0 / (1.0 + luma(c) * 0.25); }
 `;
 
 const BLOOM_UP = FS_TRI + /* wgsl */ `
+override bloomFoldTent: bool = true;
 struct P { texel: vec4f };   // xy = 1/src size, z = radius, w = weight
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
@@ -10464,6 +10466,23 @@ fn tap(uv: vec2f) -> vec3f { return textureSampleLevel(src, samp, uv, 0.0).rgb; 
 @fragment fn fs(in: VO) -> @location(0) vec4f {
   let t = U.texel.xy * U.texel.z;
   let uv = in.uv;
+  // The 3×3 tent is separable. Include the bilinear sample's fractional
+  // texel phase, then group its four 1D weights into two linear lookups.
+  // This retains the kernel at odd sizes and edges while using four reads.
+  if (bloomFoldTent && U.texel.z == 1.0) {
+    let size = vec2f(textureDimensions(src));
+    let coord = uv * size - 0.5;
+    let base = floor(coord);
+    let f = coord - base;
+    let left = 3.0 - 2.0 * f;
+    let right = 1.0 + 2.0 * f;
+    let lo = (base - 0.5 + (2.0 - f) / left) / size;
+    let hi = (base + 1.5 + f / right) / size;
+    let weight = right * 0.25;
+    let lower = mix(tap(lo), tap(vec2f(hi.x, lo.y)), weight.x);
+    let upper = mix(tap(vec2f(lo.x, hi.y)), tap(hi), weight.x);
+    return vec4f(mix(lower, upper, weight.y) * U.texel.w, 1.0);
+  }
   var o = tap(uv) * 4.0;
   o += (tap(uv + vec2f(-t.x, 0.0)) + tap(uv + vec2f(t.x, 0.0)) + tap(uv + vec2f(0.0, -t.y)) + tap(uv + vec2f(0.0, t.y))) * 2.0;
   o += tap(uv + vec2f(-t.x, -t.y)) + tap(uv + vec2f(t.x, -t.y)) + tap(uv + vec2f(-t.x, t.y)) + tap(uv + vec2f(t.x, t.y));
@@ -23087,16 +23106,57 @@ function createGPUProfiler(device, requested=false) {
       for(const name of GPU_PASS_NAMES.filter(n=>!n.startsWith('Bloom '))){
         if((name.startsWith('escort-')||name.startsWith('Companion '))&&!(name in latest&&latest[name]>0))continue;
         if(name==='Composite'){
-          lines.push(`Bloom                   ${(smoothed.Bloom||0).toFixed(2)} ms`);
+          lines.push(`Bloom window (waits)    ${(smoothed.Bloom||0).toFixed(2)} ms`);
         }
         lines.push(`${name.padEnd(23)} ${(smoothed[name]||0).toFixed(2)} ms`);
       }
-      lines.push('GPU windows include waits; they are not FPS.', 'Sampled every 8 frames; rounded GPU timestamps.', 'Profiling adds pass boundaries; compare like-for-like.');
+      lines.push('GPU windows include waits; they are not FPS.', 'Bloom window is not the cost of bloom alone.', 'Sampled every 8 frames; rounded GPU timestamps.', 'Profiling adds pass boundaries; compare like-for-like.');
       if(droppedSamples)lines.push(`Discarded invalid timestamp samples: ${droppedSamples}`);
       return lines.join('\n');
     },
     destroy(){for(const mode of modes.values()){mode.query.destroy();mode.resolve.destroy();mode.staging.destroy();}},
   };
+}
+
+// ---- js/gpu-benchmark.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+// An opt-in diagnostic: drain preceding work, then measure only this stage.
+// Normal rendering never waits for these fences or allocates these resources.
+function isolatedGPUStageMilliseconds(values,repetitions){
+  if(!values.length||values.length%2||!Number.isInteger(repetitions)||repetitions<1)throw new Error('Invalid isolated GPU capture');
+  let first=values[0],last=values[1];
+  for(let i=0;i<values.length;i+=2){
+    if(values[i+1]<values[i])throw new Error('Reversed isolated GPU timestamps');
+    if(values[i]<first)first=values[i];if(values[i+1]>last)last=values[i+1];
+  }
+  return Number(last-first)/1e6/repetitions;
+}
+
+async function measureIsolatedGPUStage({device,encode,passCount,width,height,repetitions=4,sampleCount=3}){
+  if(!device.features.has('timestamp-query'))throw new Error('GPU timestamps are unavailable on this browser');
+  if(!Number.isInteger(passCount)||passCount<1||passCount>128)throw new Error('Invalid isolated GPU pass count');
+  if(!Number.isInteger(repetitions)||repetitions<1||repetitions>16||!Number.isInteger(sampleCount)||sampleCount<1||sampleCount>9)throw new Error('Invalid isolated GPU batch count');
+  const count=passCount*2,bytes=count*8;
+  const query=device.createQuerySet({label:'isolated stage timestamps',type:'timestamp',count});
+  const resolve=device.createBuffer({label:'isolated stage resolve',size:bytes,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC});
+  const read=device.createBuffer({label:'isolated stage read',size:bytes,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+  const begin=Array.from({length:passCount},(_,i)=>({querySet:query,beginningOfPassWriteIndex:i*2}));
+  const end=Array.from({length:passCount},(_,i)=>({querySet:query,endOfPassWriteIndex:i*2+1}));
+  const both=Array.from({length:passCount},(_,i)=>({...begin[i],...end[i]}));
+  const writes=Array.from({length:repetitions},(_,r)=>i=>repetitions===1?both[i]:r===0?begin[i]:r===repetitions-1?end[i]:undefined);
+  const samples=[];
+  try{
+    for(let sample=0;sample<sampleCount;sample++){
+      await device.queue.onSubmittedWorkDone();
+      const encoder=device.createCommandEncoder({label:'isolated stage measurement'});
+      for(let r=0;r<repetitions;r++)encode(encoder,writes[r]);
+      encoder.resolveQuerySet(query,0,count,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,bytes);
+      device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+      try{samples.push(isolatedGPUStageMilliseconds(new BigUint64Array(read.getMappedRange()),repetitions));}finally{read.unmap();}
+    }
+    const sorted=samples.slice().sort((a,b)=>a-b);
+    return {milliseconds:sorted[Math.floor(sorted.length/2)],samples,repetitions,passCount,width,height,scope:'isolated GPU stage; preceding work drained'};
+  }finally{read.destroy();resolve.destroy();query.destroy();}
 }
 
 // ---- js/resolution.js ----
@@ -24281,6 +24341,7 @@ async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,
 
 
 
+
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -24600,7 +24661,7 @@ async function main() {
     label: 'bloom up', layout: 'auto',
     vertex: { module: upMod, entryPoint: 'vs' },
     fragment: {
-      module: upMod, entryPoint: 'fs',
+      module: upMod, entryPoint: 'fs', constants:{bloomFoldTent:qs.get('bloomFilter')!=='reference'},
       targets: [{ format: HDR, blend: { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } } }],
     },
   });
@@ -24787,8 +24848,10 @@ async function main() {
     timestampWrites: undefined,
   };
   let bloomLevels = 0, bloomPasses = [], bgComp = null,bgCompUnderwater=null;
+  let bloomMeasuring=false,bloomMeasureRequested=false,bloomCameraMediumBand=false,bloomFrameReady=false;
 
   function resize() {
+    if(bloomMeasuring)return;
     const dpr = window.devicePixelRatio || 1;
     const nw = Math.max(1, Math.round(canvas.clientWidth * dpr)), nh = Math.max(1, Math.round(canvas.clientHeight * dpr));
     if (nw !== nativeWidth || nh !== nativeHeight) { nativeWidth=nw; nativeHeight=nh; resolution.reset(); }
@@ -24796,7 +24859,7 @@ async function main() {
     const w = Math.max(1, Math.min(limit, Math.round(forcedWidth || nw * resolution.scale)));
     const h = Math.max(1, Math.min(limit, Math.round(forcedHeight || nh * resolution.scale)));
     if (w === W && h === H) return;
-    W = w; H = h;
+    W = w; H = h;bloomFrameReady=false;
     canvas.width = W; canvas.height = H;
     for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,submergedDepth]) t && t.destroy();
     submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
@@ -24877,7 +24940,33 @@ async function main() {
   const profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
   profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
   const performanceSummary=document.createElement('pre');performanceSummary.id='performance-summary';performanceSummary.textContent=profileSummary;
-  performancePanel.querySelector('.panel-body').append(performanceSummary,profileDetails);document.body.append(performancePanel);
+  const bloomMeasureButton=document.createElement('button');bloomMeasureButton.type='button';bloomMeasureButton.textContent='Measure bloom alone';bloomMeasureButton.disabled=!hasTS;
+  const bloomMeasureResult=document.createElement('p');bloomMeasureResult.id='bloom-measurement';bloomMeasureResult.setAttribute('role','status');
+  bloomMeasureResult.textContent=hasTS?'Pauses briefly to exclude earlier GPU waits.':'Separate bloom timing needs browser GPU timestamp support.';
+  bloomMeasureButton.addEventListener('click',()=>{bloomMeasureRequested=true;delete bloomMeasureResult.dataset.measurement;bloomMeasureButton.disabled=true;bloomMeasureResult.textContent='Measuring bloom alone…';});
+  performancePanel.querySelector('.panel-body').append(performanceSummary,bloomMeasureButton,bloomMeasureResult,profileDetails);document.body.append(performancePanel);
+  const bloomProfileWrites=(_,name)=>profiler.writes(name);
+  function encodeBloom(encoder,timestamps,mediumBand=bloomCameraMediumBand){
+    for(let i=0;i<bloomPasses.length;i++){
+      const {descriptor,pipeline,underwaterPipeline,bindGroup,underwaterBindGroup,timingName}=bloomPasses[i];
+      descriptor.timestampWrites=timestamps?.(i,timingName);
+      const pass=encoder.beginRenderPass(descriptor);
+      pass.setPipeline(mediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
+      pass.setBindGroup(0,mediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);pass.draw(3);pass.end();
+    }
+  }
+  async function measureBloomAlone(){
+    bloomMeasuring=true;bloomMeasureRequested=false;
+    try{
+      const result=await measureIsolatedGPUStage({device,encode:encodeBloom,passCount:bloomPasses.length,width:W,height:H});
+      bloomMeasureResult.textContent=`Bloom alone: ${result.milliseconds>0?result.milliseconds.toFixed(2)+' ms':'below timer precision'} · ${W} × ${H} · ${bloomPasses.length} passes. Median of ${result.samples.length} isolated batches; earlier GPU work excluded.`;
+      bloomMeasureResult.dataset.measurement=JSON.stringify(result);
+    }catch(error){bloomMeasureResult.textContent='Bloom measurement unavailable: '+(error.message||error);}
+    finally{
+      bloomMeasuring=false;bloomMeasureButton.disabled=!hasTS;
+      last=performance.now();fpsN=0;fpsT=0;resolution.reset();requestAnimationFrame(frame);
+    }
+  }
   let performanceButton=null;
   function setPerformanceOpen(open){
     performancePanel.hidden=!open;profiler.setDetailed(open);
@@ -25798,6 +25887,7 @@ async function main() {
 
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
+    if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
     const cpuFrameStart=performance.now();
     requestAnimationFrame(frame);
     landfallUI.update(now);
@@ -26052,16 +26142,8 @@ async function main() {
     }
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
-    if (P.bloom > 0) {
-      for (const { descriptor, pipeline, underwaterPipeline, bindGroup, underwaterBindGroup, timingName } of bloomPasses) {
-        descriptor.timestampWrites=profiler.writes(timingName);
-        const p = enc.beginRenderPass(descriptor);
-        p.setPipeline(cameraMediumBand&&underwaterPipeline?underwaterPipeline:pipeline);
-        p.setBindGroup(0, cameraMediumBand&&underwaterBindGroup?underwaterBindGroup:bindGroup);
-        p.draw(3);
-        p.end();
-      }
-    }
+    bloomCameraMediumBand=cameraMediumBand;
+    if(P.bloom>0)encodeBloom(enc,bloomProfileWrites,cameraMediumBand);
 
     compData[0] = frameF[68]; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
     // Neutral white balance: a fixed cool grade turned shaded oak green in daylight.
@@ -26089,7 +26171,7 @@ async function main() {
       enc.copyTextureToBuffer({ texture: swapTex }, { buffer: readBuf, bytesPerRow: bpr }, [W, H]);
     }
     submitList[0] = enc.finish();
-    device.queue.submit(submitList);
+    device.queue.submit(submitList);bloomFrameReady=true;
     for(const v of vessels)v.rowingWater?.readback();
     if(!oceanStartupFirstFrameSubmitted){
       oceanStartupFirstFrameSubmitted=true;

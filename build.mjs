@@ -29,6 +29,7 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-impostor.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-light.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-volume.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
+order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
