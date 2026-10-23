@@ -6,6 +6,12 @@ This supersedes the intended native-tree/middle-shell transition architecture in
 current implementation, source receipts and experiments. No performance or
 appearance qualification follows from adopting this plan.
 
+The bounded implementation now lives in [FOREST_LOD_PILOT.md](FOREST_LOD_PILOT.md):
+original-leaf cluster captures, woody LODs, paged inspection geometry, GPU
+ownership/refinement, strict policy/loader regressions and native reference
+comparisons. It remains isolated and unqualified; this plan's regional rollout
+and complete representation ladder are not finished.
+
 ## Evidence and research
 
 The reported close approach submits 1,541,128,221 indexed triangles, including

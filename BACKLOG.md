@@ -33,9 +33,21 @@ Implementation order:
 - [ ] Feed the qualified exporter/adapter back to Forestmodeler without changing
       biological growth or leaf-area accounting.
 
-This checkpoint changes design documents only. Current runtime, assets and
-published performance are unchanged. Do not describe the replacement as built,
-release-qualified or a universal three-pixel match.
+**Implementation checkpoint:** the bounded two-species pilot is now code, not
+only a design document. [FOREST_LOD_PILOT.md](FOREST_LOD_PILOT.md) records the
+source-leaf hierarchy, original material/depth bakes, three woody LODs, paged
+inspection leaves, GPU refinement/compaction, ownership/budget policy and native
+comparison harness. Every source blade is accounted for; missing pages never
+substitute a full botanical model. New source/loader/policy and native GPU
+regressions validate these mechanisms. The JavaScript policy chooser is an
+offline reference, not a frame-loop renderer.
+
+The pilot is deliberately isolated from game startup. Its selected specimen
+pages load eagerly; production demand streaming, merged stands and regional
+integration are unfinished. Loose thresholds fail canopy coverage; tighter
+ones can exceed the GPU gate. Do not describe mechanism tests, finite masks or
+small draw counts as a qualified forest replacement. Current runtime, shipping
+assets and published performance remain unchanged.
 
 
 ## October 23: close-forest GPU bottleneck remains open
@@ -93,7 +105,9 @@ code/rendering, not physical-iPhone performance or the unfinished60FPS target.
 
 Next required representation work: source-baked branch-cluster colour/normal/
 depth detail, with actual native-leaf comparisons at framebuffer/FOV-dependent
-transitions, while keeping whole native trees only where the bake fails.
+transitions, using paged original inspection branches where a bake fails its
+appearance gate. Whole botanical meshes remain explicit references; there is no
+silent full-tree fallback in the replacement.
 The current .25m moment/density fields already smooth the leaf structure;
 finer surface extraction cannot restore it. Individual leaves are already bent
 single sheets (four triangles), without duplicate back faces. Forestmodeler's

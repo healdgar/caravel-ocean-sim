@@ -718,8 +718,11 @@ soil/rock grain. These additions do not yet supply a closed distant forest canop
 **Forest redesign:** [FOREST_LOD_PLAN.md](FOREST_LOD_PLAN.md) specifies five
 source-derived complexity tiers, branch/tree/stand selection, streamed detail
 and combined appearance/performance gates. It supersedes the intended current
-LOD design; implementation and qualification remain pending. The description
-below records the shipping implementation and its limitations.
+LOD design. The isolated [implementation pilot](FOREST_LOD_PILOT.md) now includes
+source-baked branch detail, reduced wood, paged inspection leaves and GPU tier
+selection with ownership/budget regressions. Close-view appearance/cost and
+regional integration remain unfinished; the pilot is not loaded by the game.
+The description below records the shipping implementation and its limitations.
 
 **Regional Forestmodeler integration:** five cached mature Hero models—oak
 (60 years), maple (50), birch (25), elm (65) and chestnut (70)—retain their
