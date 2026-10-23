@@ -72,6 +72,7 @@ test('real pinned simplifier retains exact native records, partitions parts and 
   const originalManifest=await readFile(join(source,'manifest.json'));
   const result=await simplifyForestMiddle({mass:source,output,meshoptimizer:TOOLS,errorMetres:.35,leafTriangles:16,woodTriangles:1});
   assert.equal(result.format,'waterworld.native-forest-middle');assert.equal(result.version,1);assert.equal(result.vertexStride,52);
+  assert.equal(result.recipe.leafShading,'vertex');assert.deepEqual(result.recipe.leafAttributeWeights,[1,1,1,1,1,1]);
   assert.equal(result.appearanceErrorSupported,false);assert.deepEqual(result.source.files,f.manifest.source.files);
   assert.deepEqual(result.source.middleStreams,f.manifest.files);
   const v=gunzipSync(await readFile(join(output,'middle-vertices.bin.gz'))),i=gunzipSync(await readFile(join(output,'middle-indices.bin.gz')));
@@ -85,6 +86,7 @@ test('real pinned simplifier retains exact native records, partitions parts and 
    assert.deepEqual(p.source.indices,middleReceipt(f.indexRaw.subarray(f.manifest.prototypes[p.id].firstIndex*4,(f.manifest.prototypes[p.id].firstIndex+f.manifest.prototypes[p.id].indexCount)*4)));
    for(const kind of ['wood','leaf']){
     const part=p[kind],stats=part.simplification;assert.ok(stats.reportedErrorMetres>=0&&stats.reportedErrorMetres<=.35);
+    assert.equal(stats.shadingProfile,'vertex');assert.deepEqual(stats.attributeWeights,[1,1,1,1,1,1]);
     assert.equal(stats.targetMet,stats.triangles<=stats.targetTriangles);assert.equal(stats.triangles,part.indexCount/3);
     assert.ok(stats.triangles<=stats.originalTriangles);
     for(let at=part.firstIndex;at<part.firstIndex+part.indexCount;at++){
@@ -101,6 +103,41 @@ test('real pinned simplifier retains exact native records, partitions parts and 
   assert.deepEqual(gunzipSync(await readFile(join(source,'middle-indices.bin.gz'))),f.indexRaw);
   await assert.rejects(simplifyForestMiddle({mass:source,output,meshoptimizer:TOOLS}),/Fresh middle output/);
  }finally{await rm(temp,{recursive:true,force:true});}
+});
+
+test('field leaf profile omits only resampled shading attributes and retains exact shape records',async()=>{
+ const temp=await mkdtemp(join(tmpdir(),'forest-middle-field-'));
+ try{
+  const f=fixture(),source=join(temp,'source'),output=join(temp,'reduced');await saveFixture(source,f);
+  const result=await simplifyForestMiddle({mass:source,output,meshoptimizer:TOOLS,errorMetres:.35,leafTriangles:16,woodTriangles:1,leafShading:'field'});
+  assert.equal(result.recipe.leafShading,'field');assert.deepEqual(result.recipe.leafAttributeWeights,[0,0,0,0,0,0]);
+  assert.deepEqual(result.recipe.woodAttributeWeights,[1,1,1,1,1,1]);assert.equal(result.recipe.maximumReportedErrorMetres,.35);
+  const v=gunzipSync(await readFile(join(output,'middle-vertices.bin.gz'))),originalRows=outputRows(f.vertices);
+  for(const row of outputRows(v))assert.ok(originalRows.has(row),'field profile changed a position or source record');
+  for(const p of result.prototypes){
+   assert.equal(p.leaf.simplification.shadingProfile,'field');assert.deepEqual(p.leaf.simplification.attributeWeights,[0,0,0,0,0,0]);
+   assert.equal(p.wood.simplification.shadingProfile,'vertex');assert.deepEqual(p.wood.simplification.attributeWeights,[1,1,1,1,1,1]);
+   for(const kind of ['wood','leaf'])assert.ok(p[kind].simplification.reportedErrorMetres<=.35);
+  }
+  assert.deepEqual(await readFile(join(source,'middle-vertices.bin')),f.vertices);
+  assert.deepEqual(await readFile(join(source,'middle-indices.bin')),f.indexRaw);
+  await assert.rejects(simplifyForestMiddle({mass:source,output:join(temp,'bad'),leafShading:'generic'}),/Unsupported --leaf-shading/);
+ }finally{await rm(temp,{recursive:true,force:true});}
+});
+
+test('field profile passes zero weights without weakening the geometric cap or changing wood',()=>{
+ const f=fixture(),groups=splitMiddlePrototype(f.manifest.prototypes[0],f.vertices,f.indices),calls=[];
+ const tool={getScale:()=>1,simplifyWithAttributes:(ids,positions,stride,attributes,attributeStride,weights,locks,target,error)=>{
+  calls.push({weights,error,stride,attributeStride});return[ids,0];
+ }};
+ simplifyMiddleKind(groups.leaf,f.vertices,tool,{targetTriangles:1,errorMetres:.35,shadingProfile:'field'});
+ simplifyMiddleKind(groups.wood,f.vertices,tool,{targetTriangles:1,errorMetres:.35});
+ assert.deepEqual(calls.map(c=>c.weights),[[0,0,0,0,0,0],[1,1,1,1,1,1]]);
+ assert.ok(calls.every(c=>c.error<=.35&&c.stride===13&&c.attributeStride===6));
+ assert.throws(()=>simplifyMiddleKind(groups.wood,f.vertices,tool,{targetTriangles:1,errorMetres:.35,shadingProfile:'field'}),/only for native leaf shells/);
+ assert.throws(()=>simplifyMiddleKind(groups.leaf,f.vertices,tool,{targetTriangles:1,errorMetres:.35,shadingProfile:'unknown'}),/Unsupported middle shading/);
+ assert.throws(()=>simplifyMiddleKind(groups.leaf,f.vertices,{getScale:()=>1,simplifyWithAttributes:ids=>[ids,.351]},
+  {targetTriangles:1,errorMetres:.35,shadingProfile:'field'}),/exceeds requested metres/);
 });
 
 test('raw and meshopt+gzip inputs decode to identical original middle bytes',async()=>{

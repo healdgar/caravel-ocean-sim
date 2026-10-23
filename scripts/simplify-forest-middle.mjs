@@ -13,7 +13,7 @@ const DEFAULT_TOOLS='/tmp/waterworld-meshopt-tools/node_modules/meshoptimizer';
 const PIN=Object.freeze({version:'1.3.0',packageSHA256:'7c0b926331466962d22ab250359fcdea20c225ab243d78474b955fb6af23f74c',
  simplifierSHA256:'c3098ee4cb4fc242b84f064c88898e76e44bf58b0e1f693507f323c08cdbb5ed',
  decoderSHA256:'10b313edaa0e322b0c1b46443f6c8b186b42139fe1eca189d50c09511d0ebedc'});
-const FLAGS=Object.freeze(['LockBorder']),WEIGHTS=Object.freeze([1,1,1,1,1,1]);
+const FLAGS=Object.freeze(['LockBorder']),WEIGHTS=Object.freeze([1,1,1,1,1,1]),FIELD_WEIGHTS=Object.freeze([0,0,0,0,0,0]);
 const require=(ok,message)=>{if(!ok)throw Error(message);};
 export const middleReceipt=raw=>({bytes:raw.byteLength,sha256:createHash('sha256').update(raw).digest('hex')});
 const validReceipt=x=>Number.isSafeInteger(x?.bytes)&&x.bytes>0&&x.bytes<=MAX_BYTES&&/^[a-f0-9]{64}$/.test(x.sha256??'');
@@ -120,16 +120,21 @@ function downwardFloat32(value){
  const bytes=new ArrayBuffer(4),f=new Float32Array(bytes),u=new Uint32Array(bytes);f[0]=value;if(f[0]>value)u[0]--;return f[0];
 }
 
-export function simplifyMiddleKind(ids,source,simplifier,{targetTriangles,errorMetres}){
+export function simplifyMiddleKind(ids,source,simplifier,{targetTriangles,errorMetres,shadingProfile='vertex'}){
  require(uint(targetTriangles)&&targetTriangles>=1&&targetTriangles<=100000&&Number.isFinite(errorMetres)&&errorMetres>0&&errorMetres<=MAX_ERROR,'Unsafe middle reduction target/error');
+ require(shadingProfile==='vertex'||shadingProfile==='field','Unsupported middle shading profile');
  const data=exactPart(ids,source),clean=nonzero(data.indices,data.positions);
+ const kind=data.positions[6];
+ for(let at=6;at<data.positions.length;at+=13)require(data.positions[at]===kind,'Mixed middle part kinds');
+ require(shadingProfile!=='field'||kind===4,'Field shading is valid only for native leaf shells');
+ const weights=shadingProfile==='field'?FIELD_WEIGHTS:WEIGHTS;
  require(clean.indices.length>=3,'Original middle part has no visible triangles');
  const target=Math.min(clean.indices.length,targetTriangles*3),scale=simplifier.getScale(data.positions,13);
  require(Number.isFinite(scale)&&scale>0,'Undefined source middle position scale');
  const relativeError=downwardFloat32(errorMetres/scale);require(relativeError>0&&Number.isFinite(relativeError),'Unrepresentable middle error bound');
  const inputHash=middleReceipt(data.rows),positionsHash=middleReceipt(new Uint8Array(data.positions.buffer)),attrsHash=middleReceipt(new Uint8Array(data.attributes.buffer)),indicesHash=middleReceipt(new Uint8Array(clean.indices.buffer,clean.indices.byteOffset,clean.indices.byteLength));
  let reduced=clean.indices,reportedRelativeError=0;
- if(target<clean.indices.length)[reduced,reportedRelativeError]=simplifier.simplifyWithAttributes(clean.indices,data.positions,13,data.attributes,6,[...WEIGHTS],null,target,relativeError,[...FLAGS]);
+ if(target<clean.indices.length)[reduced,reportedRelativeError]=simplifier.simplifyWithAttributes(clean.indices,data.positions,13,data.attributes,6,[...weights],null,target,relativeError,[...FLAGS]);
  const absoluteError=reportedRelativeError*scale;
  require(Number.isFinite(absoluteError)&&absoluteError>=0&&absoluteError<=errorMetres,'Reported middle simplification error exceeds requested metres');
  require(sameReceipt(middleReceipt(data.rows),inputHash)&&sameReceipt(middleReceipt(new Uint8Array(data.positions.buffer)),positionsHash)&&
@@ -143,9 +148,10 @@ export function simplifyMiddleKind(ids,source,simplifier,{targetTriangles,errorM
  return{vertices,indices:resultIndices,report:{originalTriangles:ids.length/3,nonzeroInputTriangles:clean.indices.length/3,
   sourceVertexRecords:data.rows.length/STRIDE,triangles:resultIndices.length/3,vertices:kept.length,targetTriangles,targetMet:resultIndices.length/3<=targetTriangles,
   removedInputZeroAreaTriangles:clean.removed,removedOutputZeroAreaTriangles:candidate.removed,positionScaleMetres:scale,
-  targetRelativeError:relativeError,reportedRelativeError,reportedErrorMetres:absoluteError,
+  targetRelativeError:relativeError,reportedRelativeError,reportedErrorMetres:absoluteError,shadingProfile,attributeWeights:[...weights],
   sourceIndices:middleReceipt(new Uint8Array(ids.buffer,ids.byteOffset,ids.byteLength)),retainedVertexRecords:middleReceipt(vertices),
-  qualification:'Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate'}};
+  qualification:shadingProfile==='field'?'Meshoptimizer reported position-only error; GPU leaf shading must sample original native field pigment and gradient normals; no native appearance certificate':
+   'Meshoptimizer reported attribute-weighted error only; no Hausdorff, native alpha, colour or appearance certificate'}};
 }
 
 function outputBounds(vertices){
@@ -154,10 +160,11 @@ function outputBounds(vertices){
  const centre=low.map((v,k)=>(v+high[k])*.5);return{low,high,centre,radius:Math.hypot(...low.map((v,k)=>(high[k]-v)*.5))+.001};
 }
 
-export async function simplifyForestMiddle({mass,output,meshoptimizer=DEFAULT_TOOLS,errorMetres=.35,leafTriangles=512,woodTriangles=256}){
+export async function simplifyForestMiddle({mass,output,meshoptimizer=DEFAULT_TOOLS,errorMetres=.35,leafTriangles=512,woodTriangles=256,leafShading='vertex'}){
  require(new Uint8Array(new Uint32Array([1]).buffer)[0]===1,'Little-endian host required for exact middle records');
  require(Number.isFinite(errorMetres)&&errorMetres>0&&errorMetres<=MAX_ERROR,'--error-metres must be positive and at most0.4');
  require([leafTriangles,woodTriangles].every(n=>uint(n)&&n>=1&&n<=100000),'Invalid middle triangle target');
+ require(leafShading==='vertex'||leafShading==='field','Unsupported --leaf-shading profile');
  const source=resolve(mass),destination=resolve(output),nested=relative(source,destination);
  require(destination!==source&&!(nested!== '..'&&!nested.startsWith('..'+sep)&&!isAbsolute(nested)),'Middle output must be outside source pack');
  try{await access(destination);throw Error('Fresh middle output required');}catch(error){if(error.code!=='ENOENT')throw error;}
@@ -170,7 +177,8 @@ export async function simplifyForestMiddle({mass,output,meshoptimizer=DEFAULT_TO
  for(const p of m.prototypes){
   const groups=splitMiddlePrototype(p,vertexRaw,indices),parts={},start=indexCount,localVertices=[];
   for(const kind of ['wood','leaf']){
-   const reduced=simplifyMiddleKind(groups[kind],vertexRaw,tools.simplifier,{targetTriangles:kind==='wood'?woodTriangles:leafTriangles,errorMetres});
+   const reduced=simplifyMiddleKind(groups[kind],vertexRaw,tools.simplifier,{targetTriangles:kind==='wood'?woodTriangles:leafTriangles,errorMetres,
+    shadingProfile:kind==='leaf'?leafShading:'vertex'});
    const localIndices=reduced.indices.slice();for(let i=0;i<localIndices.length;i++)localIndices[i]+=vertexCount;
    parts[kind]={firstIndex:indexCount,indexCount:localIndices.length,simplification:reduced.report};
    vertexParts.push(reduced.vertices);localVertices.push(reduced.vertices);indexParts.push(Buffer.from(localIndices.buffer));
@@ -200,11 +208,14 @@ export async function simplifyForestMiddle({mass,output,meshoptimizer=DEFAULT_TO
     nativeFieldManifest:m.source.nativeFieldManifest,nativeFieldRecipe:m.source.nativeFieldRecipe,massMethod:m.source.method,
     method:{file:'scripts/simplify-forest-middle.mjs',...middleReceipt(method)},meshoptimizer:tools.receipt},
    recipe:{version:1,api:'simplifyWithAttributes',flags:[...FLAGS],positionStrideFloats:13,attributes:['normalX','normalY','normalZ','linearR','linearG','linearB'],
-    attributeWeights:[...WEIGHTS],maximumReportedErrorMetres:errorMetres,leafTargetTriangles:leafTriangles,woodTargetTriangles:woodTriangles,
+    attributeWeights:[...WEIGHTS],woodAttributeWeights:[...WEIGHTS],leafAttributeWeights:[...(leafShading==='field'?FIELD_WEIGHTS:WEIGHTS)],leafShading,
+    maximumReportedErrorMetres:errorMetres,leafTargetTriangles:leafTriangles,woodTargetTriangles:woodTriangles,
     vertexPolicy:'Index-only simplification and exact52-byte record deduplication/first-use compaction; no updated positions, UVs, normals, pigment or exposure',
     targetPolicy:'Requested triangle targets do not override the reported error limit; unmet targets are retained and reported truthfully',
     zeroAreaPolicy:'Only exactly zero stored-position cross products removed; no tiny nonzero triangles discarded',
-    qualification:'Tool-reported attribute-weighted error only, added to source authored LOD footprint; no native appearance certificate'},
+    shadingPolicy:leafShading==='field'?'Leaf normal/pigment simplification weights are zero because runtime samples original native 3D field; wood retains vertex normal/pigment weights':
+     'Wood and leaves retain vertex normal/pigment simplification weights',
+    qualification:'Tool-reported error under the recorded per-part attribute weights, added to source authored LOD footprint; no native appearance certificate'},
    prototypes,files,appearanceErrorSupported:false,validation:null};
   require((await readFile(join(source,'manifest.json'))).equals(original),'Mass manifest changed during middle reduction');
   for(const [name,expected]of [['middle-vertices.bin',vertexHash],['middle-indices.bin',indexHash]])
@@ -216,9 +227,9 @@ export async function simplifyForestMiddle({mass,output,meshoptimizer=DEFAULT_TO
 }
 
 function parseArguments(argv){
- const options={},names={'--mass':'mass','--output':'output','--meshoptimizer':'meshoptimizer','--error-metres':'errorMetres','--leaf-triangles':'leafTriangles','--wood-triangles':'woodTriangles'};
+ const options={},names={'--mass':'mass','--output':'output','--meshoptimizer':'meshoptimizer','--error-metres':'errorMetres','--leaf-triangles':'leafTriangles','--wood-triangles':'woodTriangles','--leaf-shading':'leafShading'};
  for(let i=0;i<argv.length;i++){
-  const key=names[argv[i]];require(key&&i+1<argv.length&&options[key]===undefined,'Expected --mass SOURCE --output FRESH [--meshoptimizer PINNED_PACKAGE] [--error-metres .35] [--leaf-triangles 512] [--wood-triangles 256]');
+  const key=names[argv[i]];require(key&&i+1<argv.length&&options[key]===undefined,'Expected --mass SOURCE --output FRESH [--meshoptimizer PINNED_PACKAGE] [--error-metres .35] [--leaf-triangles 512] [--wood-triangles 256] [--leaf-shading vertex|field]');
   const value=argv[++i];options[key]=['errorMetres','leafTriangles','woodTriangles'].includes(key)?Number(value):value;
  }
  require(options.mass&&options.output,'--mass and --output required');return options;
