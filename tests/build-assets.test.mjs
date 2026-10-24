@@ -35,7 +35,7 @@ test('downloads embed sailing and native forest atlases; optional mature buffers
     assert.ok(!/href="assets\/[^"\s]+\.[a-f0-9]{16}\./.test(html),'web-only preloads do not leak into offline downloads');
     for(const source of Object.keys(manifest)){
       if(/^assets\/forest-scenery\/saba\/(mass\/)?(vertices|indices)\.bin\.gz$/.test(source)){
-        assert.ok(html.includes('https://healdgar.github.io/caravel-ocean-sim/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
+        assert.ok(html.includes('https://sixcailloux.com/waterworld/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
       }
       const bytes=await readFile(new URL(source,root));
       assert.ok(html.includes(';base64,'+bytes.toString('base64')),file+' embeds exact bytes: '+source);

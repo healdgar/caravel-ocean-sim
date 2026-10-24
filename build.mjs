@@ -89,7 +89,7 @@ function runtimeAssetURL(file,mime,inlineAssets){
     const url=file.slice(0,-ext.length)+'.'+sha256.slice(0,16)+ext;
     pagesAssets.set(file,{url,bytes:bytes.length,sha256});
   }
-  return (inlineAssets?'https://healdgar.github.io/caravel-ocean-sim/':'')+pagesAssets.get(file).url;
+  return (inlineAssets?'https://sixcailloux.com/waterworld/':'')+pagesAssets.get(file).url;
 }
 const stripModuleSyntax = (src,inlineAssets=true) => {
   if(/^import\s*\{[^}]*\bas\b[^}]*\}\s*from/m.test(src)) throw new Error('Standalone modules require canonical import names; aliased imports cannot be flattened.');
@@ -193,6 +193,6 @@ fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Ob
 const startupPreloads=['assets/caravel-oak-albedo.webp','assets/crew/sailor.glb',
   'assets/crew/sailor-female.glb']
   .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
-write('docs/index.html', minifyPage(pagesJs).replace('</head>',startupPreloads+'</head>')
+write('docs/index.html', minifyPage(pagesJs).replace('</head>','<meta name="robots" content="noindex, nofollow, noarchive">'+startupPreloads+'</head>')
   .replace('<script type="module">', pagesBootstrap + '<script type="module">'));
 fs.writeFileSync(path.join(root, 'docs', '.nojekyll'), '');

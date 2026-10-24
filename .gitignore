@@ -3,6 +3,8 @@ node_modules/
 shots/
 # local tooling
 .claude/
+.cloudflare/
+.wrangler/
 # Meshy credentials references, task records and generated source assets stay local.
 .meshy/
 # Local sound-generation takes and request records.

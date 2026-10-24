@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node server.mjs",
     "build": "node build.mjs",
+    "deploy": "node scripts/deploy-cloudflare.mjs",
     "meshy": "node scripts/meshy.mjs",
     "audio": "node scripts/audio.mjs",
     "test": "node --test",
