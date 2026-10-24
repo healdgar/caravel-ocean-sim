@@ -208,7 +208,9 @@ export async function createForestMassRenderer({device,module,frameUBO,shader,re
   const metadata=new ArrayBuffer(m.chunks.length*64),floats=new Float32Array(metadata),words=new Uint32Array(metadata),draws=new Uint32Array(m.chunks.length*5);
   for(const p of m.chunks){const at=p.id*16,centre=p.centre.map(Math.fround),radius=forestMassUpward(p.radius+Math.hypot(...centre.map((v,k)=>v-p.centre[k])));floats.set([...centre,radius,...p.low,forestMassUpward(p.lodErrorMetres),...p.high,0],at);words.set([p.firstIndex,p.indexCount,p.rootCount,0],at+12);draws.set([p.indexCount,0,p.firstIndex,0,0],p.id*5);}
   const blocks=make(new Uint8Array(metadata),B.STORAGE,'forest mass immutable block bounds'),commands=make(draws,B.STORAGE|B.INDIRECT,'forest mass GPU indirect draws');
-  const state=make(new Uint32Array(m.chunks.length),B.STORAGE,'forest mass GPU selected blocks'),policy=make(new Float32Array([m.chunks.length,pixelError,['auto','near','far'].indexOf(mode),preview?1:0]),B.UNIFORM,'forest mass authored pixel error policy');
+  const modeIndex=['auto','near','far'].indexOf(mode);
+  let currentPixelError=pixelError;
+  const state=make(new Uint32Array(m.chunks.length),B.STORAGE,'forest mass GPU selected blocks'),policy=make(new Float32Array([m.chunks.length,pixelError,modeIndex,preview?1:0]),B.UNIFORM,'forest mass authored pixel error policy');
   const nativeResidency=make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest mass shared native residency'),code=await shader(FOREST_MASS_CULL_WGSL,'forest mass GPU cull');
   const cull=await device.createComputePipelineAsync({label:'forest mass GPU block selection',layout:'auto',compute:{module:code,entryPoint:'forestMassCull'}});
   const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,blocks,commands,state,policy,nativeResidency].map((buffer,binding)=>({binding,resource:{buffer}}))});
@@ -218,6 +220,7 @@ export async function createForestMassRenderer({device,module,frameUBO,shader,re
   const stats={loaded:true,blocks:m.chunks.length,sourceRoots:pack.rootChunks.length,gpuCulling:true,opaque:true,mode,pixelError,preview,finiteValidated:true,sourceReceiptsValidated:true,vertexStride:m.vertexStride,quantization:m.quantization??null,appearanceErrorSupported:false,geometryErrorSupported:false,nativeValidation:m.validation??null,neighborGuard:!!neighbors,middle:{loaded:!!middle,reduced:!!middlePack,prototypes:middle?.prototypes.length??0,triangles:middle?.prototypes.map(p=>p.indexCount/3)??[],errorQualification:'Authored native sampling/wood-clustering footprint; no appearance certificate'},
    phase:mode==='far'?'forced far debug; pixel threshold bypassed':mode==='near'?'native-only debug; mass disabled':preview?'explicit startup mass preview until native residency':'authored error-limited selection',selectionMetric:'Projected authored leaf-support/sampling footprint; native appearance unqualified',representation:'Continuous surface from original native leaf-area density and source pigment'};
   return{stats,rootChunks:pack.rootChunks,chunks:m.chunks,state,nativeResidency,commands,middle,neighbors,
+   setPixelError(next){if(Number.isFinite(next)&&next>0&&Math.abs(next-currentPixelError)>1e-4){currentPixelError=next;stats.pixelError=next;device.queue.writeBuffer(policy,0,new Float32Array([m.chunks.length,next,modeIndex,preview?1:0]));}},
    encode(pass){pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.chunks.length/64));},drawOpaque(pass){pass.executeBundles(recorded);},destroy(){for(const buffer of allocated)buffer.destroy();}};
  }catch(error){for(const buffer of allocated)buffer.destroy();throw error;}
 }

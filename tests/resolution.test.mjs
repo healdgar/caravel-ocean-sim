@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createAdaptiveResolution} from '../js/resolution.js';
+import {createAdaptiveResolution,createAdaptivePolygons} from '../js/resolution.js';
 
 function run(control, seconds, frameSeconds, workMs = null) {
   const changes=[];
@@ -89,4 +89,25 @@ test('manual modes ignore cadence and a CPU-bound automatic workload respects it
   control.setMode('0.5');assert.equal(control.scale,.5);
   control.setMode('auto');assert.equal(control.scale,.5);
   control.setMode('invalid');assert.equal(control.mode,'auto');
+});
+
+test('adaptive polygon controller scales LOD pixel error and ocean node budgets across device power tiers',()=>{
+  for(const [input,mode,scale] of [['auto','auto',1],['native','native',1],['high','native',1],['0.75','0.75',.75],['medium','0.75',.75],['0.5','0.5',.5],['low','0.5',.5],['0.25','0.25',.25],['mobile','0.25',.25],['fixed','fixed',1]]){
+    const polygons=createAdaptivePolygons(input);
+    assert.equal(polygons.mode,mode);
+    assert.equal(polygons.scale,scale);
+    assert.ok(Math.abs(polygons.pixelError-3/Math.sqrt(scale))<1e-9);
+    assert.ok(Math.abs(polygons.oceanRangeScale-Math.sqrt(scale))<1e-9);
+    assert.equal(polygons.maxNodes(8192),Math.round(8192*scale));
+  }
+  const auto=createAdaptivePolygons('auto'),cost=scale=>.004+.035*scale;
+  const cadence=scale=>Math.max(1/60,cost(scale));
+  const changes=run(auto,60,cadence,scale=>cost(scale)*1000);
+  assert.ok(changes.length>0&&changes.length<10);
+  assert.ok(auto.scale<1&&auto.scale>=auto.minimum);
+  assert.ok(auto.pixelError>3);
+  assert.ok(auto.oceanRangeScale<1);
+  const restored=run(auto,500,1/60,8);
+  assert.ok(restored.length>0);
+  assert.equal(auto.scale,1);
 });

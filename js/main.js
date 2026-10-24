@@ -31,7 +31,7 @@ import { LANDFALL_VIEWS } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, landfallCameraYaw } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
-import { createAdaptiveResolution } from './resolution.js';
+import { createAdaptiveResolution, createAdaptivePolygons } from './resolution.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower } from './follower.js';
 import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,fleetModelCode,fleetViewBounds,createFleetWakePool,validateFleetDevice,MAX_FOLLOWERS} from './fleet.js';
@@ -544,6 +544,8 @@ async function main() {
   const fixedResolution = forcedWidth > 0 || forcedHeight > 0 || !!qs.get('shot');
   const requestedResolution = qs.get('resolution') || 'auto';
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto');
+  const fixedPolygons = fixedResolution && !qs.has('polygons');
+  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto');
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
   let submergedColor,submergedDepth,oceanOpticsGroup;
@@ -922,7 +924,7 @@ async function main() {
     return true;
   }
   function addNode(x0, z0, size, lod) {
-    if (nodeCount >= MAX_NODES) return;
+    if (nodeCount >= polygons.maxNodes(MAX_NODES)) return;
     const o = nodeCount * 4;
     instData[o] = x0; instData[o + 1] = z0; instData[o + 2] = size; instData[o + 3] = lod;
     nodeCount++;
@@ -941,6 +943,8 @@ async function main() {
     return true;
   }
   function selectAll() {
+    const r0 = R0 * polygons.oceanRangeScale;
+    for (let l = 0; l < LODS; l++) ranges[l] = r0 * Math.pow(2, l);
     HB = 4 + 2 * P.swellHs + 0.025 * P.windSpeed * P.windSpeed;
     XB = Math.max(4, HB * P.choppy * 0.65);
     nodeCount = 0;
@@ -1011,7 +1015,7 @@ async function main() {
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed;
     f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
-    f[64] = R0; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
+    f[64] = R0 * polygons.oceanRangeScale; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1); f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
     const strike=weather.strike,dx=strike?strike.x-cam.x:0,dz=strike?strike.z-cam.z:1,range=Math.hypot(dx,dz)||1;
@@ -1454,6 +1458,17 @@ async function main() {
   const resolutionStatus=document.createElement('p');resolutionStatus.id='resolution-status';
   const updateResolutionStatus=()=>{resolutionStatus.textContent=`${W} × ${H} · ${resolution.mode==='fixed'?'fixed by URL':Math.round(resolution.scale*100)+'%'}${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}${resolution.mode==='auto'&&resolution.scale===resolution.minimum?' · minimum resolution':''}`;};
   seaBody.append(resolutionLabel,resolutionStatus);
+  const polygonLabel=document.createElement('label');polygonLabel.className='resolution-control';polygonLabel.textContent='Polygon budget';
+  const polygonInput=document.createElement('select');polygonInput.id='polygon-budget';
+  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','High (100%)'],['0.75','Medium (75%)'],['0.5','Low (50%)'],['0.25','Mobile (25%)'],...(fixedPolygons?[['fixed','Fixed by URL']]:[])]) {
+    const option=document.createElement('option');option.value=value;option.textContent=label;polygonInput.append(option);
+  }
+  polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
+  const polygonStatus=document.createElement('p');polygonStatus.id='polygon-status';
+  const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.scale*100)+'% budget'} · ${polygons.pixelError.toFixed(1)} px LOD threshold${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
+  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);terrain?.setPixelError?.(polygons.pixelError);updatePolygonStatus();});
+  polygonLabel.append(polygonInput);
+  seaBody.append(polygonLabel,polygonStatus);
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
   const seaSliders = new Map();
@@ -1544,7 +1559,7 @@ async function main() {
   let fpsN = 0, fpsT = 0;
   let frameWorkMs=0;
   let shooting = false;
-  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();polygons.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -1608,7 +1623,9 @@ async function main() {
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
-    resolution.sample(elapsed,!document.hidden,profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null);
+    const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
+    resolution.sample(elapsed,!document.hidden,workSample);
+    if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);
     last = now;
@@ -1617,9 +1634,10 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(!performancePanel.hidden){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
       updateResolutionStatus();
+      updatePolygonStatus();
       updateCrewUI();
       updateAnchorUI();gunControls.update();fleetViewButton.disabled=!followerEnabled;
       followerStatus.textContent=followerEnabled?vessels.slice(1).map(v=>v.asset.model.name+': '+v.follower.status+' · '+v.follower.separation.toFixed(0)+' m · '+(boatForwardSpeed(v.boat)/KNOT_TO_MPS).toFixed(1)+' kn').join(' / '):'No active followers';
@@ -1784,7 +1802,7 @@ async function main() {
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
     for(const [i,v] of vessels.entries())v.shadows.encode(enc,profiler,v.crew?.drawShadow,i?v.id+' ':'');
-    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,
+    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
     terrain?.prepare(terrainCamera,frameF);
     submergedPass.timestampWrites=profiler.writes('Submerged geometry');
@@ -1948,7 +1966,7 @@ async function main() {
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
     if(qs.get('profile')==='1'||!performancePanel.hidden){
       await profiler.settled();performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();
-      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,resolution:{mode:resolution.mode,scale:resolution.scale,targetFPS:resolution.targetFPS},parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
+      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,resolution:{mode:resolution.mode,scale:resolution.scale,targetFPS:resolution.targetFPS},polygons:{mode:polygons.mode,scale:polygons.scale,pixelError:polygons.pixelError,targetFPS:polygons.targetFPS},parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
     shotIdx++;
@@ -1961,6 +1979,7 @@ async function main() {
 
   resize();
   updateResolutionStatus();
+  updatePolygonStatus();
   addEventListener('resize', resize);
   window.oceanStartup?.stage('first-frame','Rendering the first view…');
   requestAnimationFrame(frame);

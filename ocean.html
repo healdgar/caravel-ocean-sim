@@ -21023,8 +21023,8 @@ function projectedGroundExtent(x,y,z,extent,camera,margin=0){
 function groundCoverError(x,y,z,radius,height,camera){
   return projectedGroundExtent(x,y,z,Math.hypot(radius*Math.SQRT2,height)*1.2,camera);
 }
-function groundCoverVisible(error,wasVisible=false){
-  return !Number.isFinite(error)||error>=TREE_PIXEL_ERROR*(wasVisible?.88:1);
+function groundCoverVisible(error,wasVisible=false,pixelError=TREE_PIXEL_ERROR){
+  return !Number.isFinite(error)||error>=pixelError*(wasVisible?.88:1);
 }
 const groundGeometryCache=new Map();
 function groundCoverGeometry(variant=0){
@@ -21452,6 +21452,7 @@ function visibleForestIds(patches,camera,viewProjection=null){
 // target. Legacy offline callers without a projection retain distance budgets.
 function selectTreeLods(trees,camera,previous=new Map(),policy=TREE_LOD,candidates=null){
   const selected=[],near=policy.near,middle=policy.middle,h=policy.hysteresis;
+  const pixelThreshold=Number.isFinite(camera?.pixelError)&&camera.pixelError>0?camera.pixelError:Number.isFinite(policy?.pixelError)&&policy.pixelError>0?policy.pixelError:TREE_PIXEL_ERROR;
   const pixels=camera.screenHeight>0&&camera.tanHalfFovY>0&&camera.forward?.length>=3;
   for(const id of candidates??Array.from({length:trees.length/8},(_,i)=>i)){
     const k=id*8,distance=Math.hypot(trees[k]-camera.x,trees[k+1]-camera.y,trees[k+2]-camera.z);
@@ -21461,7 +21462,7 @@ function selectTreeLods(trees,camera,previous=new Map(),policy=TREE_LOD,candidat
       lod=2;
       for(let tier=0;tier<2;tier++){
         const error=treeProjectedError(TREE_GEOMETRY_ERRORS[variant][tier],trees.subarray(k,k+8),camera);
-        if(error<=TREE_PIXEL_ERROR*(old===tier?1+h:1-h)){lod=tier;break;}
+        if(error<=pixelThreshold*(old===tier?1+h:1-h)){lod=tier;break;}
       }
     }
     selected.push({id,lod,distance,variant,...(pixels?{projectedError:treeProjectedError(TREE_GEOMETRY_ERRORS[variant][lod],trees.subarray(k,k+8),camera)}:{})});
@@ -22827,7 +22828,7 @@ async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostor
   const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
   const atlasPromise=loadAtlases?volumePromise.then(volume=>volume.volumes&&!atlasDebug&&!volumeOff?{impostors:null,impostorError:null}:
     loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message}))):Promise.resolve({impostors:null,impostorError:null});
-  const lodPromise=assets===FOREST_ASSETS?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:null,nativeLodError:null});
+  const lodPromise=assets===FOREST_ASSETS&&!atlasDebug?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:null,nativeLodError:null});
   const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);await finishForestChecks(forestRootChecks(manifest,roots));
   let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
@@ -23172,28 +23173,47 @@ const FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL=forestWithMassNeighbors(FOREST_
 const forestWithVolumeCommands=source=>forestCullReplace(source,
  'if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}',
  'if(farLod){atomicAdd(&commands[(pi*4u+3u)*5u+1u],1u);}\n if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}');
-const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(source,
+const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(source,
  'if(id.x>=u32(parameters.y)*4u){return;}',
- 'if(id.x>=u32(parameters.y)*6u){return;}'),
+ 'if(id.x>=u32(parameters.y)*8u){return;}'),
+ 'let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);',
+ `let forwardDir=normalize(F.camFwd.xyz);
+ let cosGaze=clamp(dot(relative/max(length(relative),.0001),forwardDir),0.0,1.0);
+ let sinGaze2=1.0-cosGaze*cosGaze;
+ let gazeAcuity=1.0/(1.0+4.5*sinGaze2+6.0*sinGaze2*sinGaze2);
+ let canopyMask=1.0/(1.0+max(0.0,near-radius)*0.04);
+ let inCanopy=clamp((F.camPos.y-18.0)/24.0,0.0,1.0);
+ let offAxis=sqrt(1.0+lateral*lateral/max(near*near,.0001));
+ let perceptualFocal=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*mix(offAxis,gazeAcuity*canopyMask,inCanopy);
+ let footprint=perceptualFocal*geometricError/max(near-geometricError,.0001);`),
  ` let atlasSupported=(p.roots.z&7u)>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
  let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
- let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));`,
- ` let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
- let midFootprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*midGeomError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-midGeomError,.0001);
+ let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
+ let nearLod=resident&&!farLod&&!midLod;
+ if(!nearLod&&!farLod&&!midLod){return;}`,
+ ` let mid2GeomError=bitcast<f32>(p.leaf.z)*r.rootScale.w;
+ let mid2Footprint=perceptualFocal*mid2GeomError/max(near-mid2GeomError,.0001);
+ let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u);
+ let mid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&near>mid2GeomError&&mid2Footprint<=mid2Threshold;
+ let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
+ let midFootprint=perceptualFocal*midGeomError/max(near-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u);
- let midLod=!farLod&&p.wood.w==1u&&resident&&parameters.w==0.0&&near>radius&&near>midGeomError&&midFootprint<=midThreshold;`),
+ let midLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&near>midGeomError&&midFootprint<=midThreshold;
+ let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
+ if(!nearLod&&!farLod&&!mid2Lod&&!midLod){return;}`),
  ` let command=(pi*4u+select(select(2u,3u,midLod),0u,nearLod))*5u;
  let slot=atomicAdd(&commands[command+1u],1u);
  let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
  visible[base+slot]=id.x;
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}`,
- ` let midCommandBase=u32(parameters.y)*4u+pi*2u;
- let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod)*5u;
+ ` if(mid2Lod){previousLod[id.x]=3u;}
+ let midCommandBase=u32(parameters.y)*4u+pi*4u+select(0u,2u,mid2Lod);
+ let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod||mid2Lod)*5u;
  let slot=atomicAdd(&commands[command+1u],1u);
- let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
+ let base=p.roots.x*4u+p.roots.y*select(select(select(1u,3u,mid2Lod),2u,midLod),0u,nearLod);
  visible[base+slot]=id.x;
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
- if(midLod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
+ if(midLod||mid2Lod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
 
 async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,forestMiddle=forestMass?.middle??null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
@@ -23216,7 +23236,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
       middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id]}))};
     }
     if(pack.impostors&&impostorMode!=='off'&&!volume)atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:m});
-    const nativeMid=Boolean(nativeLod&&middle&&!atlas),commandSlots=nativeMid?6:4;
+    const nativeMid=Boolean(nativeLod&&middle&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -23242,19 +23262,24 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
       const ranges=lp?[lp.woodTiers[0],lp.leafRibbons,reduced??lp.far]:[p.wood,p.leaf,reduced??p.far];
       for(const [i,r]of ranges.entries()){words.set([r.firstIndex,r.indexCount,0,0],base+8+i*4);draws.set([r.indexCount,0,r.firstIndex,0,0],(p.id*4+i)*5);}
       if(nativeMid){
-        floats[base+10]=forestMiddleUpward(Math.max(lp.woodTiers[1].maximumReportedErrorMetres,lp.leafRibbons.maximumPositionErrorUpperMetres));words[base+11]=1;
-        draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*2)*5);
-        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*2+1)*5);
+        floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
+        floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
+        draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
+        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
+        draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
+        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+3)*5);
       }
       if(reduced){floats[base+18]=forestMiddleUpward(reduced.lodErrorMetres);words[base+19]=0;}
       else if(p.geometryErrorSupported===true){floats[base+18]=p.geometryErrorMetres;words[base+19]=1;}
       draws.set(volumeShell?[reduced.leaf.indexCount,0,reduced.leaf.firstIndex,0,0]:[volume?36:6,0,0,0,0],(p.id*4+3)*5);
     }
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest prototype bounds and ranges');
-    const visible=make(new Uint32Array(m.rootCount*3),B.STORAGE,'forest GPU visible root IDs');
+    const visible=make(new Uint32Array(m.rootCount*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
     const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
     const previous=make(new Uint32Array(m.rootCount),B.STORAGE,'forest GPU previous LOD');
-    const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,['auto','near','far'].indexOf(mode)]),B.UNIFORM,'forest projected size policy');
+    const modeIndex=['auto','near','far'].indexOf(mode);
+    let currentNearPixels=nearPixels;
+    const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,modeIndex]),B.UNIFORM,'forest projected size policy');
     const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
     let cullSource=forestMass?.neighbors?(middle?FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL:FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL):middle?(forestMass?FOREST_MASS_MIDDLE_ROOT_CULL_WGSL:FOREST_MIDDLE_ROOT_CULL_WGSL):(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL);
     if(nativeMid)cullSource=forestWithNativeLod(cullSource);
@@ -23285,8 +23310,8 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
     let materialBase=0;
     const bins=m.prototypes.map(p=>{
       const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
-      return [0,1,2].map(tier=>{
-        const offset=make(new Uint32Array([p.firstRoot*3+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
+      return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
+        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
         return{offset,opaque:null,leaf:null,middle:tier===1&&middlePipeline?device.createBindGroup({layout:middlePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           volume:tier===1&&volumePipeline?device.createBindGroup({layout:volumePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           impostor:tier===2&&impostor?device.createBindGroup({layout:impostor.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null};
@@ -23320,7 +23345,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(nativeLod?nativeLod.indices:source.indices,B.INDEX,'forest immutable prototype indices');
         const materials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');candidateBuffers.push(materials);
         const canopyLight=make(forestLightGPUBytes(source.canopyLight),B.STORAGE,'forest immutable native canopy exposure');candidateBuffers.push(canopyLight);
-        for(const p of m.prototypes)for(const tier of nativeMid?[0,2]:middle?[0]:[0,1]){
+        for(const p of m.prototypes)for(const tier of nativeMid?[0,2,3]:middle?[0]:[0,1]){
           const bin=bins[p.id][tier],group=pipeline=>{
             const entries=[...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
               {binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler},{binding:14,resource:{buffer:canopyLight}}];
@@ -23349,7 +23374,8 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
           pass.setBindGroup(2,bins[p.id][slot===2?1:0][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
         }
         if(nativeMid){
-          pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*2+(cutout?1:0))*20);
+          pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?1:0))*20);
+          pass.setBindGroup(2,bins[p.id][3][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);
         }
       }
     };
@@ -23366,6 +23392,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     return {stats,nativeReady,prepare(){},
+      setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([m.rootCount,m.prototypes.length,next,modeIndex]));}},
       encode(pass){pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.rootCount/64));},
       drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
   }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();throw error;}
@@ -23778,7 +23805,9 @@ async function createForestMassRenderer({device,module,frameUBO,shader,resources
   const metadata=new ArrayBuffer(m.chunks.length*64),floats=new Float32Array(metadata),words=new Uint32Array(metadata),draws=new Uint32Array(m.chunks.length*5);
   for(const p of m.chunks){const at=p.id*16,centre=p.centre.map(Math.fround),radius=forestMassUpward(p.radius+Math.hypot(...centre.map((v,k)=>v-p.centre[k])));floats.set([...centre,radius,...p.low,forestMassUpward(p.lodErrorMetres),...p.high,0],at);words.set([p.firstIndex,p.indexCount,p.rootCount,0],at+12);draws.set([p.indexCount,0,p.firstIndex,0,0],p.id*5);}
   const blocks=make(new Uint8Array(metadata),B.STORAGE,'forest mass immutable block bounds'),commands=make(draws,B.STORAGE|B.INDIRECT,'forest mass GPU indirect draws');
-  const state=make(new Uint32Array(m.chunks.length),B.STORAGE,'forest mass GPU selected blocks'),policy=make(new Float32Array([m.chunks.length,pixelError,['auto','near','far'].indexOf(mode),preview?1:0]),B.UNIFORM,'forest mass authored pixel error policy');
+  const modeIndex=['auto','near','far'].indexOf(mode);
+  let currentPixelError=pixelError;
+  const state=make(new Uint32Array(m.chunks.length),B.STORAGE,'forest mass GPU selected blocks'),policy=make(new Float32Array([m.chunks.length,pixelError,modeIndex,preview?1:0]),B.UNIFORM,'forest mass authored pixel error policy');
   const nativeResidency=make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest mass shared native residency'),code=await shader(FOREST_MASS_CULL_WGSL,'forest mass GPU cull');
   const cull=await device.createComputePipelineAsync({label:'forest mass GPU block selection',layout:'auto',compute:{module:code,entryPoint:'forestMassCull'}});
   const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frameUBO,blocks,commands,state,policy,nativeResidency].map((buffer,binding)=>({binding,resource:{buffer}}))});
@@ -23788,6 +23817,7 @@ async function createForestMassRenderer({device,module,frameUBO,shader,resources
   const stats={loaded:true,blocks:m.chunks.length,sourceRoots:pack.rootChunks.length,gpuCulling:true,opaque:true,mode,pixelError,preview,finiteValidated:true,sourceReceiptsValidated:true,vertexStride:m.vertexStride,quantization:m.quantization??null,appearanceErrorSupported:false,geometryErrorSupported:false,nativeValidation:m.validation??null,neighborGuard:!!neighbors,middle:{loaded:!!middle,reduced:!!middlePack,prototypes:middle?.prototypes.length??0,triangles:middle?.prototypes.map(p=>p.indexCount/3)??[],errorQualification:'Authored native sampling/wood-clustering footprint; no appearance certificate'},
    phase:mode==='far'?'forced far debug; pixel threshold bypassed':mode==='near'?'native-only debug; mass disabled':preview?'explicit startup mass preview until native residency':'authored error-limited selection',selectionMetric:'Projected authored leaf-support/sampling footprint; native appearance unqualified',representation:'Continuous surface from original native leaf-area density and source pigment'};
   return{stats,rootChunks:pack.rootChunks,chunks:m.chunks,state,nativeResidency,commands,middle,neighbors,
+   setPixelError(next){if(Number.isFinite(next)&&next>0&&Math.abs(next-currentPixelError)>1e-4){currentPixelError=next;stats.pixelError=next;device.queue.writeBuffer(policy,0,new Float32Array([m.chunks.length,next,modeIndex,preview?1:0]));}},
    encode(pass){pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.chunks.length/64));},drawOpaque(pass){pass.executeBundles(recorded);},destroy(){for(const buffer of allocated)buffer.destroy();}};
  }catch(error){for(const buffer of allocated)buffer.destroy();throw error;}
 }
@@ -23930,14 +23960,19 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     buffer:null,capacity:0,label:`tree instances ${id}`,data:[],count:0,
   }));
   const previousLods=new Map(),forestPatches=createForestPatches(trees),lodStats={near:0,middle:0,far:0,budgetOverflow:0};
-  let lastCamera=null,lastView=null,lastPixels=null;
+  let lastCamera=null,lastView=null,lastPixels=null,currentPixelError=TREE_PIXEL_ERROR;
   let importedCanopy=null;
   function updateTrees(camera,viewProjection){
+    if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0){
+      currentPixelError=camera.pixelError;
+      forestMass?.setPixelError?.(currentPixelError);
+      forest?.setPixelError?.(currentPixelError);
+    }
     // Its stricter projection bound must not inherit the legacy tree batching
     // cache's one-metre/view tolerance when crossing a three-pixel threshold.
     importedCanopy?.prepare(camera,viewProjection);
     const sameView=(!viewProjection&&!lastView)||(viewProjection&&lastView&&lastView.every((v,i)=>Math.abs(v-viewProjection[i])<.004));
-    const pixels=[camera.screenHeight,camera.tanHalfFovY,...(camera.forward??[])];
+    const pixels=[camera.screenHeight,camera.tanHalfFovY,currentPixelError,...(camera.forward??[])];
     const samePixels=lastPixels&&pixels.length===lastPixels.length&&pixels.every((v,i)=>v===lastPixels[i]);
     if(lastCamera&&sameView&&samePixels&&Math.hypot(camera.x-lastCamera.x,camera.y-lastCamera.y,camera.z-lastCamera.z)<1)return;
     lastPixels=pixels;
@@ -23945,7 +23980,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     lodStats.near=0;lodStats.middle=0;lodStats.far=0;lodStats.budgetOverflow=0;
     for(const batch of treeBatches){batch.data=[];batch.count=0;}
     const candidates=visibleForestIds(forestPatches,camera,viewProjection);
-    for(const tree of selectTreeLods(trees,camera,previousLods,undefined,candidates)){
+    for(const tree of selectTreeLods(trees,{...camera,pixelError:currentPixelError},previousLods,undefined,candidates)){
       const batch=treeBatches[tree.lod*TREE_VARIANTS+tree.variant];
       batch.data.push(...trees.subarray(tree.id*8,tree.id*8+8));batch.count++;
       lodStats[['far','middle','near'][tree.lod]]++;if(tree.qualityBudgetOverflow)lodStats.budgetOverflow++;
@@ -23963,16 +23998,16 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
     for(const id of visibleForestIds(groundPatches,camera,viewProjection)){
       const patch=groundPatches[id];
-      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<TREE_PIXEL_ERROR*.88)continue;
+      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*.88)continue;
       const instances=groundCoverInstances(patch,ISLAND,groundSample,biome);groundStats.resident++;
       for(let variant=0;variant<GROUND_COVER.variants;variant++){
-        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<TREE_PIXEL_ERROR*.88)continue;
+        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*.88)continue;
         const data=instances[variant],batch=groundBatches[variant];
         for(let i=0;i<data.length;i+=8){
           const key=id+':'+variant+':'+i,error=groundCoverError(data[i],data[i+1],data[i+2],data[i+3],data[i+4],camera);
           // Hysteresis retains small visible props a little longer; an omitted
           // prop never exceeds the three-pixel geometric extent threshold.
-          if(!groundCoverVisible(error,previousGround.has(key)))continue;
+          if(!groundCoverVisible(error,previousGround.has(key),currentPixelError))continue;
           groundNow.add(key);batch.data.push(...data.subarray(i,i+8));batch.count++;
         }
       }
@@ -24029,6 +24064,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:updateTrees,
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,ISLAND,heightSample),
@@ -24330,7 +24366,7 @@ async function measureIsolatedGPUStage({device,encode,passCount,width,height,rep
 // ---- js/resolution.js ----
 // Delivered cadence drives reductions. Measured work can establish restoration
 // headroom even when presentation is capped at 60 Hz; it never forces a reduction.
-// Resolution is device-local; scene quality settings and simulation stay intact.
+// Resolution and polygon budgets are device-local; simulation stays intact.
 function createAdaptiveResolution(mode = 'auto') {
   const minimum = 0.35, targetFPS = 60, samples = new Float64Array(240), workSamples = new Float64Array(240);
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
@@ -24374,6 +24410,82 @@ function createAdaptiveResolution(mode = 'auto') {
           cost /= work.length - 2 * workTrim;
           // Raising scale 5% increases pixel work about 10%. Require more
           // margin than that and stable target cadence before restoring detail.
+          headroom = fps >= targetFPS * .99 && cost <= budget * .86;
+        }
+        if (headroom) {
+          fastSeconds += seconds;
+          if (fastSeconds >= 10) next = Math.min(1, scale * 1.05);
+        } else fastSeconds = 0;
+      }
+      count = 0; seconds = 0;
+      if (next === scale) return false;
+      scale = next; reset(); return true;
+    },
+  };
+}
+
+const POLYGON_MODE_ALIASES = Object.freeze({
+  auto: 'auto',
+  native: 'native',
+  high: 'native',
+  '1': 'native',
+  fixed: 'fixed',
+  '0.75': '0.75',
+  medium: '0.75',
+  '0.5': '0.5',
+  low: '0.5',
+  '0.25': '0.25',
+  mobile: '0.25',
+});
+
+function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = 0.15, targetFPS = 60 } = {}) {
+  let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
+  let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
+  const samples = new Float64Array(240), workSamples = new Float64Array(240);
+  let count = 0, seconds = 0, settle = 2, fastSeconds = 0, fps = 0;
+  const reset = () => { count = 0; seconds = 0; settle = 2; fastSeconds = 0; };
+  return {
+    get mode() { return mode; },
+    get scale() { return scale; },
+    get fps() { return fps; },
+    get pixelError() { return basePixelError / Math.sqrt(Math.max(minimum, scale)); },
+    get oceanRangeScale() { return Math.sqrt(Math.max(minimum, scale)); },
+    maxNodes(baseMax = 8192) { return Math.max(256, Math.round(baseMax * Math.max(minimum, scale))); },
+    minimum, targetFPS, basePixelError, reset,
+    setMode(next) {
+      const normalized = POLYGON_MODE_ALIASES[next];
+      if (!normalized) return;
+      mode = normalized;
+      scale = mode === 'auto' ? scale : mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
+      reset();
+    },
+    sample(elapsed, visible = true, workMs = null) {
+      if (mode !== 'auto') return false;
+      if (!visible || !Number.isFinite(elapsed) || elapsed <= 0 || elapsed > 1) { reset(); return false; }
+      if (settle > 0) { settle -= elapsed; return false; }
+      samples[count] = elapsed * 1000;
+      workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
+      seconds += elapsed;
+      if ((seconds < 1.5 || count < 12) && count < samples.length) return false;
+      const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
+      let ms = 0;
+      for (let i = trim; i < count - trim; i++) ms += sorted[i];
+      ms /= count - 2 * trim; fps = 1000 / ms;
+      let next = scale;
+      const budget = 1000 / targetFPS;
+      if (ms > budget * 1.01) {
+        // Active 2D surface/stand triangle count scales proportionally to 1/error^2 = scale.
+        const factor = Math.max(0.65, Math.min(0.9, ((1000 / 66) / ms) * 0.96));
+        next = Math.max(minimum, Math.round(scale * factor * 100) / 100);
+        fastSeconds = 0;
+      } else {
+        const work = workSamples.slice(0, count).filter(Number.isFinite).sort();
+        const measured = work.length >= count * .8;
+        let headroom = fps > targetFPS * 1.4;
+        if (measured) {
+          const workTrim = Math.floor(work.length * .1); let cost = 0;
+          for (let i = workTrim; i < work.length - workTrim; i++) cost += work[i];
+          cost /= work.length - 2 * workTrim;
           headroom = fps >= targetFPS * .99 && cost <= budget * .86;
         }
         if (headroom) {
@@ -26130,6 +26242,8 @@ async function main() {
   const fixedResolution = forcedWidth > 0 || forcedHeight > 0 || !!qs.get('shot');
   const requestedResolution = qs.get('resolution') || 'auto';
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto');
+  const fixedPolygons = fixedResolution && !qs.has('polygons');
+  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto');
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
   let submergedColor,submergedDepth,oceanOpticsGroup;
@@ -26508,7 +26622,7 @@ async function main() {
     return true;
   }
   function addNode(x0, z0, size, lod) {
-    if (nodeCount >= MAX_NODES) return;
+    if (nodeCount >= polygons.maxNodes(MAX_NODES)) return;
     const o = nodeCount * 4;
     instData[o] = x0; instData[o + 1] = z0; instData[o + 2] = size; instData[o + 3] = lod;
     nodeCount++;
@@ -26527,6 +26641,8 @@ async function main() {
     return true;
   }
   function selectAll() {
+    const r0 = R0 * polygons.oceanRangeScale;
+    for (let l = 0; l < LODS; l++) ranges[l] = r0 * Math.pow(2, l);
     HB = 4 + 2 * P.swellHs + 0.025 * P.windSpeed * P.windSpeed;
     XB = Math.max(4, HB * P.choppy * 0.65);
     nodeCount = 0;
@@ -26597,7 +26713,7 @@ async function main() {
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed;
     f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
-    f[64] = R0; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
+    f[64] = R0 * polygons.oceanRangeScale; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1); f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
     const strike=weather.strike,dx=strike?strike.x-cam.x:0,dz=strike?strike.z-cam.z:1,range=Math.hypot(dx,dz)||1;
@@ -27040,6 +27156,17 @@ async function main() {
   const resolutionStatus=document.createElement('p');resolutionStatus.id='resolution-status';
   const updateResolutionStatus=()=>{resolutionStatus.textContent=`${W} × ${H} · ${resolution.mode==='fixed'?'fixed by URL':Math.round(resolution.scale*100)+'%'}${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}${resolution.mode==='auto'&&resolution.scale===resolution.minimum?' · minimum resolution':''}`;};
   seaBody.append(resolutionLabel,resolutionStatus);
+  const polygonLabel=document.createElement('label');polygonLabel.className='resolution-control';polygonLabel.textContent='Polygon budget';
+  const polygonInput=document.createElement('select');polygonInput.id='polygon-budget';
+  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','High (100%)'],['0.75','Medium (75%)'],['0.5','Low (50%)'],['0.25','Mobile (25%)'],...(fixedPolygons?[['fixed','Fixed by URL']]:[])]) {
+    const option=document.createElement('option');option.value=value;option.textContent=label;polygonInput.append(option);
+  }
+  polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
+  const polygonStatus=document.createElement('p');polygonStatus.id='polygon-status';
+  const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.scale*100)+'% budget'} · ${polygons.pixelError.toFixed(1)} px LOD threshold${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
+  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);terrain?.setPixelError?.(polygons.pixelError);updatePolygonStatus();});
+  polygonLabel.append(polygonInput);
+  seaBody.append(polygonLabel,polygonStatus);
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
   const seaSliders = new Map();
@@ -27130,7 +27257,7 @@ async function main() {
   let fpsN = 0, fpsT = 0;
   let frameWorkMs=0;
   let shooting = false;
-  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();polygons.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -27194,7 +27321,9 @@ async function main() {
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
-    resolution.sample(elapsed,!document.hidden,profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null);
+    const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
+    resolution.sample(elapsed,!document.hidden,workSample);
+    if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);
     last = now;
@@ -27203,9 +27332,10 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(!performancePanel.hidden){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
       updateResolutionStatus();
+      updatePolygonStatus();
       updateCrewUI();
       updateAnchorUI();gunControls.update();fleetViewButton.disabled=!followerEnabled;
       followerStatus.textContent=followerEnabled?vessels.slice(1).map(v=>v.asset.model.name+': '+v.follower.status+' · '+v.follower.separation.toFixed(0)+' m · '+(boatForwardSpeed(v.boat)/KNOT_TO_MPS).toFixed(1)+' kn').join(' / '):'No active followers';
@@ -27370,7 +27500,7 @@ async function main() {
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
     for(const [i,v] of vessels.entries())v.shadows.encode(enc,profiler,v.crew?.drawShadow,i?v.id+' ':'');
-    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,
+    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
     terrain?.prepare(terrainCamera,frameF);
     submergedPass.timestampWrites=profiler.writes('Submerged geometry');
@@ -27534,7 +27664,7 @@ async function main() {
     await fetch('/__shot?name=' + encodeURIComponent(nm), { method: 'POST', body: blob });
     if(qs.get('profile')==='1'||!performancePanel.hidden){
       await profiler.settled();performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();
-      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,resolution:{mode:resolution.mode,scale:resolution.scale,targetFPS:resolution.targetFPS},parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
+      await fetch('/__shot?name='+encodeURIComponent(nm.replace(/\.png$/i,'')+'.json'),{method:'POST',body:JSON.stringify({width:W,height:H,frame:frameIndex,oceanDepth:OCEAN_DEPTH,resolution:{mode:resolution.mode,scale:resolution.scale,targetFPS:resolution.targetFPS},polygons:{mode:polygons.mode,scale:polygons.scale,pixelError:polygons.pixelError,targetFPS:polygons.targetFPS},parameters:P,boat:{targetKnots:boat.speed,speedKnots:boatForwardSpeed(boat)/KNOT_TO_MPS,acceleration:boat.surgeAcceleration,massKg:boat.hydrodynamics?.mass},profile:profiler.snapshot()},null,2)});
     }
     log('shot saved ' + nm + ' gpu ' + profiler.totalMs.toFixed(2) + 'ms nodes ' + nodeCount);
     shotIdx++;
@@ -27547,6 +27677,7 @@ async function main() {
 
   resize();
   updateResolutionStatus();
+  updatePolygonStatus();
   addEventListener('resize', resize);
   window.oceanStartup?.stage('first-frame','Rendering the first view…');
   requestAnimationFrame(frame);

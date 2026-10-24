@@ -137,14 +137,19 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     buffer:null,capacity:0,label:`tree instances ${id}`,data:[],count:0,
   }));
   const previousLods=new Map(),forestPatches=createForestPatches(trees),lodStats={near:0,middle:0,far:0,budgetOverflow:0};
-  let lastCamera=null,lastView=null,lastPixels=null;
+  let lastCamera=null,lastView=null,lastPixels=null,currentPixelError=TREE_PIXEL_ERROR;
   let importedCanopy=null;
   function updateTrees(camera,viewProjection){
+    if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0){
+      currentPixelError=camera.pixelError;
+      forestMass?.setPixelError?.(currentPixelError);
+      forest?.setPixelError?.(currentPixelError);
+    }
     // Its stricter projection bound must not inherit the legacy tree batching
     // cache's one-metre/view tolerance when crossing a three-pixel threshold.
     importedCanopy?.prepare(camera,viewProjection);
     const sameView=(!viewProjection&&!lastView)||(viewProjection&&lastView&&lastView.every((v,i)=>Math.abs(v-viewProjection[i])<.004));
-    const pixels=[camera.screenHeight,camera.tanHalfFovY,...(camera.forward??[])];
+    const pixels=[camera.screenHeight,camera.tanHalfFovY,currentPixelError,...(camera.forward??[])];
     const samePixels=lastPixels&&pixels.length===lastPixels.length&&pixels.every((v,i)=>v===lastPixels[i]);
     if(lastCamera&&sameView&&samePixels&&Math.hypot(camera.x-lastCamera.x,camera.y-lastCamera.y,camera.z-lastCamera.z)<1)return;
     lastPixels=pixels;
@@ -152,7 +157,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     lodStats.near=0;lodStats.middle=0;lodStats.far=0;lodStats.budgetOverflow=0;
     for(const batch of treeBatches){batch.data=[];batch.count=0;}
     const candidates=visibleForestIds(forestPatches,camera,viewProjection);
-    for(const tree of selectTreeLods(trees,camera,previousLods,undefined,candidates)){
+    for(const tree of selectTreeLods(trees,{...camera,pixelError:currentPixelError},previousLods,undefined,candidates)){
       const batch=treeBatches[tree.lod*TREE_VARIANTS+tree.variant];
       batch.data.push(...trees.subarray(tree.id*8,tree.id*8+8));batch.count++;
       lodStats[['far','middle','near'][tree.lod]]++;if(tree.qualityBudgetOverflow)lodStats.budgetOverflow++;
@@ -170,16 +175,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
     for(const id of visibleForestIds(groundPatches,camera,viewProjection)){
       const patch=groundPatches[id];
-      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<TREE_PIXEL_ERROR*.88)continue;
+      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*.88)continue;
       const instances=groundCoverInstances(patch,ISLAND,groundSample,biome);groundStats.resident++;
       for(let variant=0;variant<GROUND_COVER.variants;variant++){
-        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<TREE_PIXEL_ERROR*.88)continue;
+        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*.88)continue;
         const data=instances[variant],batch=groundBatches[variant];
         for(let i=0;i<data.length;i+=8){
           const key=id+':'+variant+':'+i,error=groundCoverError(data[i],data[i+1],data[i+2],data[i+3],data[i+4],camera);
           // Hysteresis retains small visible props a little longer; an omitted
           // prop never exceeds the three-pixel geometric extent threshold.
-          if(!groundCoverVisible(error,previousGround.has(key)))continue;
+          if(!groundCoverVisible(error,previousGround.has(key),currentPixelError))continue;
           groundNow.add(key);batch.data.push(...data.subarray(i,i+8));batch.count++;
         }
       }
@@ -236,6 +241,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:updateTrees,
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,ISLAND,heightSample),

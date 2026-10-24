@@ -116,3 +116,62 @@ test('native surface arrays preserve source size, linear pigment and fractional 
     assert.equal(result.created.filter(t=>t.label.startsWith('forest immutable')).length,4);
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });
+
+test('perceptual gaze and canopy masking reserve full woody resolution for the closest tree in front of the viewer and respond to polygon budget pixelError',{timeout:120000},async()=>{
+  const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
+  try{
+    browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
+      ?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+    const page=await browser.newPage();await page.route('**/__forest-native-lod-gpu',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__forest-native-lod-gpu');
+    const result=await page.evaluate(async()=>{
+      const {FOREST_MIDDLE_ROOT_CULL_WGSL,forestWithNativeLod}=await import('/js/forest-scenery.js');
+      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+      const B=GPUBufferUsage,make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
+      const frameData=new Float32Array(96);frameData[0]=1/.6;frameData[5]=1/.45;frameData[11]=-1;frameData[14]=.1;
+      frameData.set([0,100,0],16);frameData.set([.6,0,0],20);frameData.set([0,.45,0],24);frameData.set([0,0,-1],28);frameData.set([1920,1080,1/1920,1/1080],36);
+      // Root 0: closest directly in front (z=-16) -> wood0 (nearLod) at 100% budget, wood1 at 25% mobile budget
+      // Root 1: deeper on-axis (z=-25) -> wood1 (midLod)
+      // Root 2: peripheral at closer depth (x=12, z=-22) -> wood2 (mid2Lod) due to gazeAcuity
+      // Root 3: deeper in canopy (z=-110) -> farLod (middle/volumeShell)
+      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([[0,100,-16],[0,100,-25],[12,100,-22],[0,100,-110]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0])),B.STORAGE);
+      const meta=new ArrayBuffer(80),f=new Float32Array(meta),u=new Uint32Array(meta);
+      f.set([0,0,0,2]);u.set([0,4,8,32],4);u.set([0,3,0,0,3,3,0,0,6,3,0,0],8);
+      f[10]=0.08;u[11]=1;f[14]=0.16;u[15]=1;f[18]=0.8;u[19]=0;
+      const prototypes=make(new Uint8Array(meta),B.STORAGE),visible=make(new Uint32Array(16),B.STORAGE|B.COPY_SRC);
+      const commands=make(new Uint32Array(40),B.STORAGE|B.INDIRECT|B.COPY_SRC),previous=make(new Uint32Array(4),B.STORAGE);
+      const parameterData=new Float32Array([4,1,3,0]),parameters=make(parameterData,B.UNIFORM),residency=make(new Uint32Array([1,0,0,0]),B.UNIFORM);
+      const module=device.createShaderModule({code:forestWithNativeLod(FOREST_MIDDLE_ROOT_CULL_WGSL)});
+      errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
+      const reset=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'forestReset'}});
+      const cull=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'forestCull'}});
+      const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
+      const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frame,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
+      const read=device.createBuffer({size:256,usage:B.COPY_DST|B.MAP_READ});
+      async function run(pixelError){
+        parameterData[2]=pixelError;device.queue.writeBuffer(parameters,0,parameterData);
+        device.queue.writeBuffer(previous,0,new Uint32Array(4));
+        const enc=device.createCommandEncoder(),pass=enc.beginComputePass();
+        pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(1);
+        pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(1);pass.end();
+        enc.copyBufferToBuffer(commands,0,read,0,160);enc.copyBufferToBuffer(visible,0,read,160,64);
+        device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const data=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();
+        const c=slot=>data[slot*5+1],vis=(tier,n)=>data.slice(40+tier*4,40+tier*4+n).sort();
+        return {nearCount:c(0),nearLeafCount:c(1),farCount:c(2),mid1Count:c(4),mid1LeafCount:c(5),mid2Count:c(6),mid2LeafCount:c(7),
+          nearIds:vis(0,c(0)),farIds:vis(1,c(2)),mid1Ids:vis(2,c(4)),mid2Ids:vis(3,c(6))};
+      }
+      const highBudget=await run(3),mobileBudget=await run(6);
+      await device.queue.onSubmittedWorkDone();device.destroy();
+      return {errors,highBudget,mobileBudget};
+    });
+    assert.deepEqual(result.errors,[]);
+    assert.deepEqual(result.highBudget.nearIds,[0],'only the closest tree directly in front of the viewer uses full wood0 resolution');
+    assert.equal(result.highBudget.nearLeafCount,1);
+    assert.deepEqual(result.highBudget.mid1Ids,[1],'next on-axis tree steps down to wood1');
+    assert.deepEqual(result.highBudget.mid2Ids,[2],'off-axis peripheral tree at close distance steps down to wood2');
+    assert.deepEqual(result.highBudget.farIds,[3],'deeper canopy tree steps down to middle/far shell');
+    assert.equal(result.mobileBudget.nearCount,0,'mobile polygon budget (6px threshold) steps even the closest tree down from wood0');
+    assert.deepEqual(result.mobileBudget.mid1Ids,[0],'mobile polygon budget shifts the closest tree from wood0 to wood1');
+    assert.deepEqual(result.mobileBudget.mid2Ids,[1,2],'mobile polygon budget shifts the second tree from wood1 to wood2');
+  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
+});

@@ -229,7 +229,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
   const atlasPromise=loadAtlases?volumePromise.then(volume=>volume.volumes&&!atlasDebug&&!volumeOff?{impostors:null,impostorError:null}:
     loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message}))):Promise.resolve({impostors:null,impostorError:null});
-  const lodPromise=assets===FOREST_ASSETS?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:null,nativeLodError:null});
+  const lodPromise=assets===FOREST_ASSETS&&!atlasDebug?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:null,nativeLodError:null});
   const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);await finishForestChecks(forestRootChecks(manifest,roots));
   let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
@@ -574,28 +574,47 @@ export const FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL=forestWithMassNeighbors(
 const forestWithVolumeCommands=source=>forestCullReplace(source,
  'if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}',
  'if(farLod){atomicAdd(&commands[(pi*4u+3u)*5u+1u],1u);}\n if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}');
-const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(source,
+export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(source,
  'if(id.x>=u32(parameters.y)*4u){return;}',
- 'if(id.x>=u32(parameters.y)*6u){return;}'),
+ 'if(id.x>=u32(parameters.y)*8u){return;}'),
+ 'let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);',
+ `let forwardDir=normalize(F.camFwd.xyz);
+ let cosGaze=clamp(dot(relative/max(length(relative),.0001),forwardDir),0.0,1.0);
+ let sinGaze2=1.0-cosGaze*cosGaze;
+ let gazeAcuity=1.0/(1.0+4.5*sinGaze2+6.0*sinGaze2*sinGaze2);
+ let canopyMask=1.0/(1.0+max(0.0,near-radius)*0.04);
+ let inCanopy=clamp((F.camPos.y-18.0)/24.0,0.0,1.0);
+ let offAxis=sqrt(1.0+lateral*lateral/max(near*near,.0001));
+ let perceptualFocal=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*mix(offAxis,gazeAcuity*canopyMask,inCanopy);
+ let footprint=perceptualFocal*geometricError/max(near-geometricError,.0001);`),
  ` let atlasSupported=(p.roots.z&7u)>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
  let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
- let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));`,
- ` let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
- let midFootprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*midGeomError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-midGeomError,.0001);
+ let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
+ let nearLod=resident&&!farLod&&!midLod;
+ if(!nearLod&&!farLod&&!midLod){return;}`,
+ ` let mid2GeomError=bitcast<f32>(p.leaf.z)*r.rootScale.w;
+ let mid2Footprint=perceptualFocal*mid2GeomError/max(near-mid2GeomError,.0001);
+ let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u);
+ let mid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&near>mid2GeomError&&mid2Footprint<=mid2Threshold;
+ let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
+ let midFootprint=perceptualFocal*midGeomError/max(near-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u);
- let midLod=!farLod&&p.wood.w==1u&&resident&&parameters.w==0.0&&near>radius&&near>midGeomError&&midFootprint<=midThreshold;`),
+ let midLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&near>midGeomError&&midFootprint<=midThreshold;
+ let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
+ if(!nearLod&&!farLod&&!mid2Lod&&!midLod){return;}`),
  ` let command=(pi*4u+select(select(2u,3u,midLod),0u,nearLod))*5u;
  let slot=atomicAdd(&commands[command+1u],1u);
  let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
  visible[base+slot]=id.x;
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}`,
- ` let midCommandBase=u32(parameters.y)*4u+pi*2u;
- let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod)*5u;
+ ` if(mid2Lod){previousLod[id.x]=3u;}
+ let midCommandBase=u32(parameters.y)*4u+pi*4u+select(0u,2u,mid2Lod);
+ let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod||mid2Lod)*5u;
  let slot=atomicAdd(&commands[command+1u],1u);
- let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
+ let base=p.roots.x*4u+p.roots.y*select(select(select(1u,3u,mid2Lod),2u,midLod),0u,nearLod);
  visible[base+slot]=id.x;
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
- if(midLod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
+ if(midLod||mid2Lod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,forestMiddle=forestMass?.middle??null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
@@ -618,7 +637,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id]}))};
     }
     if(pack.impostors&&impostorMode!=='off'&&!volume)atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:m});
-    const nativeMid=Boolean(nativeLod&&middle&&!atlas),commandSlots=nativeMid?6:4;
+    const nativeMid=Boolean(nativeLod&&middle&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -644,19 +663,24 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const ranges=lp?[lp.woodTiers[0],lp.leafRibbons,reduced??lp.far]:[p.wood,p.leaf,reduced??p.far];
       for(const [i,r]of ranges.entries()){words.set([r.firstIndex,r.indexCount,0,0],base+8+i*4);draws.set([r.indexCount,0,r.firstIndex,0,0],(p.id*4+i)*5);}
       if(nativeMid){
-        floats[base+10]=forestMiddleUpward(Math.max(lp.woodTiers[1].maximumReportedErrorMetres,lp.leafRibbons.maximumPositionErrorUpperMetres));words[base+11]=1;
-        draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*2)*5);
-        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*2+1)*5);
+        floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
+        floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
+        draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
+        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
+        draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
+        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+3)*5);
       }
       if(reduced){floats[base+18]=forestMiddleUpward(reduced.lodErrorMetres);words[base+19]=0;}
       else if(p.geometryErrorSupported===true){floats[base+18]=p.geometryErrorMetres;words[base+19]=1;}
       draws.set(volumeShell?[reduced.leaf.indexCount,0,reduced.leaf.firstIndex,0,0]:[volume?36:6,0,0,0,0],(p.id*4+3)*5);
     }
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest prototype bounds and ranges');
-    const visible=make(new Uint32Array(m.rootCount*3),B.STORAGE,'forest GPU visible root IDs');
+    const visible=make(new Uint32Array(m.rootCount*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
     const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
     const previous=make(new Uint32Array(m.rootCount),B.STORAGE,'forest GPU previous LOD');
-    const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,['auto','near','far'].indexOf(mode)]),B.UNIFORM,'forest projected size policy');
+    const modeIndex=['auto','near','far'].indexOf(mode);
+    let currentNearPixels=nearPixels;
+    const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,modeIndex]),B.UNIFORM,'forest projected size policy');
     const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
     let cullSource=forestMass?.neighbors?(middle?FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL:FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL):middle?(forestMass?FOREST_MASS_MIDDLE_ROOT_CULL_WGSL:FOREST_MIDDLE_ROOT_CULL_WGSL):(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL);
     if(nativeMid)cullSource=forestWithNativeLod(cullSource);
@@ -687,8 +711,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     let materialBase=0;
     const bins=m.prototypes.map(p=>{
       const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
-      return [0,1,2].map(tier=>{
-        const offset=make(new Uint32Array([p.firstRoot*3+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
+      return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
+        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
         return{offset,opaque:null,leaf:null,middle:tier===1&&middlePipeline?device.createBindGroup({layout:middlePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           volume:tier===1&&volumePipeline?device.createBindGroup({layout:volumePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           impostor:tier===2&&impostor?device.createBindGroup({layout:impostor.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null};
@@ -722,7 +746,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(nativeLod?nativeLod.indices:source.indices,B.INDEX,'forest immutable prototype indices');
         const materials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');candidateBuffers.push(materials);
         const canopyLight=make(forestLightGPUBytes(source.canopyLight),B.STORAGE,'forest immutable native canopy exposure');candidateBuffers.push(canopyLight);
-        for(const p of m.prototypes)for(const tier of nativeMid?[0,2]:middle?[0]:[0,1]){
+        for(const p of m.prototypes)for(const tier of nativeMid?[0,2,3]:middle?[0]:[0,1]){
           const bin=bins[p.id][tier],group=pipeline=>{
             const entries=[...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
               {binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler},{binding:14,resource:{buffer:canopyLight}}];
@@ -751,7 +775,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           pass.setBindGroup(2,bins[p.id][slot===2?1:0][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
         }
         if(nativeMid){
-          pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*2+(cutout?1:0))*20);
+          pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?1:0))*20);
+          pass.setBindGroup(2,bins[p.id][3][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);
         }
       }
     };
@@ -768,6 +793,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     return {stats,nativeReady,prepare(){},
+      setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([m.rootCount,m.prototypes.length,next,modeIndex]));}},
       encode(pass){pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.rootCount/64));},
       drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
   }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();throw error;}

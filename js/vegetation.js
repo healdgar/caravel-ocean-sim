@@ -81,8 +81,8 @@ export function projectedGroundExtent(x,y,z,extent,camera,margin=0){
 export function groundCoverError(x,y,z,radius,height,camera){
   return projectedGroundExtent(x,y,z,Math.hypot(radius*Math.SQRT2,height)*1.2,camera);
 }
-export function groundCoverVisible(error,wasVisible=false){
-  return !Number.isFinite(error)||error>=TREE_PIXEL_ERROR*(wasVisible?.88:1);
+export function groundCoverVisible(error,wasVisible=false,pixelError=TREE_PIXEL_ERROR){
+  return !Number.isFinite(error)||error>=pixelError*(wasVisible?.88:1);
 }
 const groundGeometryCache=new Map();
 export function groundCoverGeometry(variant=0){
@@ -510,6 +510,7 @@ export function visibleForestIds(patches,camera,viewProjection=null){
 // target. Legacy offline callers without a projection retain distance budgets.
 export function selectTreeLods(trees,camera,previous=new Map(),policy=TREE_LOD,candidates=null){
   const selected=[],near=policy.near,middle=policy.middle,h=policy.hysteresis;
+  const pixelThreshold=Number.isFinite(camera?.pixelError)&&camera.pixelError>0?camera.pixelError:Number.isFinite(policy?.pixelError)&&policy.pixelError>0?policy.pixelError:TREE_PIXEL_ERROR;
   const pixels=camera.screenHeight>0&&camera.tanHalfFovY>0&&camera.forward?.length>=3;
   for(const id of candidates??Array.from({length:trees.length/8},(_,i)=>i)){
     const k=id*8,distance=Math.hypot(trees[k]-camera.x,trees[k+1]-camera.y,trees[k+2]-camera.z);
@@ -519,7 +520,7 @@ export function selectTreeLods(trees,camera,previous=new Map(),policy=TREE_LOD,c
       lod=2;
       for(let tier=0;tier<2;tier++){
         const error=treeProjectedError(TREE_GEOMETRY_ERRORS[variant][tier],trees.subarray(k,k+8),camera);
-        if(error<=TREE_PIXEL_ERROR*(old===tier?1+h:1-h)){lod=tier;break;}
+        if(error<=pixelThreshold*(old===tier?1+h:1-h)){lod=tier;break;}
       }
     }
     selected.push({id,lod,distance,variant,...(pixels?{projectedError:treeProjectedError(TREE_GEOMETRY_ERRORS[variant][lod],trees.subarray(k,k+8),camera)}:{})});
