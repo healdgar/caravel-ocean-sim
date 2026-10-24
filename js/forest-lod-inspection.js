@@ -73,7 +73,7 @@ function validate(m){
  * data plus one page and reconstruction scratch; browser/crypto overhead and
  * arbitrarily caller-retained older packs are outside that declared byte bound.
  */
-export async function loadForestInspectionPilot(base,{sourceBase,fetchAsset=fetch,allowExperimental=false,maxDecodedBytes=64*1024*1024}={}){
+export async function loadForestInspectionPilot(base,{sourceBase,fetchAsset=fetch,allowExperimental=false,maxDecodedBytes=128*1024*1024}={}){
  check(allowExperimental===true,'explicit experimental review permission required');
  check(typeof base==='string'&&base&&typeof sourceBase==='string'&&sourceBase&&uint(maxDecodedBytes)&&maxDecodedBytes>0&&maxDecodedBytes<=512*1024*1024,'invalid source URLs or decoded budget');
  check(globalThis.crypto?.subtle&&typeof DecompressionStream==='function','verified gzip transport unavailable');
@@ -91,7 +91,7 @@ export async function loadForestInspectionPilot(base,{sourceBase,fetchAsset=fetc
   check(length===r.bytes,'short decoded page');await checked(bytes,r,r.file+' decoded');return bytes;
  }
  const decode=bytes=>JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
- const manifest=validate(decode(await responseBytes(base+'manifest.json',16*1024*1024))),sourceRaw=await responseBytes(sourceBase+'manifest.json',4*1024*1024),source=decode(sourceRaw),sourceReceipt={bytes:sourceRaw.byteLength,sha256:await hash(sourceRaw)};
+ const manifest=validate(decode(await responseBytes(base+'manifest.json',64*1024*1024))),sourceRaw=await responseBytes(sourceBase+'manifest.json',4*1024*1024),source=decode(sourceRaw),sourceReceipt={bytes:sourceRaw.byteLength,sha256:await hash(sourceRaw)};
  check(source.format==='waterworld.forest-instances'&&source.version===2&&source.vertexStride===56&&source.units==='metres'&&source.upAxis==='Y'&&source.materialContract==='gene-surfaces-v3'&&Array.isArray(source.prototypes),'original native source metadata required');
  check(same(manifest.source.manifest,sourceReceipt)||same(manifest.source.manifest,source.runtimePackaging?.sourceManifest),'inspection source manifest identity differs');
  for(const name of ['vertices.bin','indices.bin','roots.bin'])check(same(manifest.source.files[name],source.files?.[name]),'inspection original source identity differs: '+name);

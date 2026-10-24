@@ -1,0 +1,656 @@
+{
+  "format": "waterworld.forest-native-lod",
+  "version": 1,
+  "units": "metres",
+  "upAxis": "Y",
+  "appearanceErrorSupported": false,
+  "indexCount": 2948613,
+  "source": {
+    "files": {
+      "vertices.bin": {
+        "bytes": 188946072,
+        "sha256": "8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0",
+        "vertexCount": 3374037,
+        "gzip": {
+          "file": "vertices.bin.gz",
+          "bytes": 78658880,
+          "sha256": "e45e1be7b39d818e7534242681795faaa914c47f583ea6dc936bcdc1a9515a05"
+        }
+      },
+      "indices.bin": {
+        "bytes": 34786680,
+        "sha256": "2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389",
+        "indexCount": 8696670,
+        "gzip": {
+          "file": "indices.bin.gz",
+          "bytes": 13716582,
+          "sha256": "ff26e388355583e0071c453f92bb62508d43a278fc4dc1e8523c769a59b1da8a"
+        }
+      },
+      "roots.bin": {
+        "bytes": 4101648,
+        "sha256": "69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b",
+        "rootCount": 85451,
+        "gzip": {
+          "file": "roots.bin.gz",
+          "bytes": 2477736,
+          "sha256": "89078fcc1ee17963de425f81cfbd80ee20a0b75c00eebbb5d052553088392aa4"
+        }
+      }
+    },
+    "canopyShade": {
+      "file": "canopy-shade.json",
+      "bytes": 10887,
+      "sha256": "f2236de00211102a08c955f6f0226139104521137ed9748c9142676eb6304069"
+    },
+    "woodManifest": {
+      "bytes": 68962,
+      "sha256": "77028774cffeead4dadc3e796ba7dceac90d0bd7d0d1316395ceb8e543105dca"
+    },
+    "methods": {
+      "scripts/prepare-forest-native-lod.mjs": {
+        "file": "scripts/prepare-forest-native-lod.mjs",
+        "bytes": 9206,
+        "sha256": "8e586759110e1b66683a7e7bfa98610acd87095d419df6343e67d35150e3ce70"
+      },
+      "scripts/prepare-forest-wood-lods.mjs": {
+        "file": "scripts/prepare-forest-wood-lods.mjs",
+        "bytes": 9301,
+        "sha256": "dea0d3fb7fa173ecfd9e7cd93290fcbb60d336ec418588b1e9fbcf51379467ef"
+      },
+      "js/forest-leaf-ribbons.js": {
+        "file": "js/forest-leaf-ribbons.js",
+        "bytes": 22710,
+        "sha256": "14a53550ace5acb87eb466de0bfca18dd3e7814964f7d8c3c09e561c14640054"
+      }
+    }
+  },
+  "files": {
+    "lod-indices.bin": {
+      "indexCount": 2948613,
+      "bytes": 11794452,
+      "sha256": "c2955113209f699c17424edde6212961a44f988bf232836d1e9eb0ae4f814f35",
+      "gzip": {
+        "file": "lod-indices.bin.gz",
+        "bytes": 6704623,
+        "sha256": "648f9aac99e419cf5f0c0d05eef413ff6b062b9985cd8f85e89b50e42071f1c3"
+      }
+    }
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "oak",
+      "woodTiers": [
+        {
+          "tier": 0,
+          "targetTriangles": 18000,
+          "targetErrorMetres": 0.025,
+          "maximumReportedErrorMetres": 0.024833127856254578,
+          "firstIndex": 0,
+          "indexCount": 52734,
+          "triangles": 17578,
+          "originalTriangles": 272371,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 0,
+              "indexCount": 52482,
+              "triangles": 17494,
+              "reportedErrorMetres": 0.024833127856254578
+            },
+            {
+              "material": 1,
+              "firstIndex": 52482,
+              "indexCount": 252,
+              "triangles": 84,
+              "reportedErrorMetres": 0.021232152357697487
+            }
+          ],
+          "indices": {
+            "bytes": 210936,
+            "sha256": "8b0f5f344eba1cf48457bee15ada3cde4c4dcd5b88c1fa4f0758a56f76a2f6db"
+          }
+        },
+        {
+          "tier": 1,
+          "targetTriangles": 5000,
+          "targetErrorMetres": 0.1,
+          "maximumReportedErrorMetres": 0.051099877804517746,
+          "firstIndex": 52734,
+          "indexCount": 13197,
+          "triangles": 4399,
+          "originalTriangles": 272371,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 52734,
+              "indexCount": 12954,
+              "triangles": 4318,
+              "reportedErrorMetres": 0.051099877804517746
+            },
+            {
+              "material": 1,
+              "firstIndex": 65688,
+              "indexCount": 243,
+              "triangles": 81,
+              "reportedErrorMetres": 0.026196781545877457
+            }
+          ],
+          "indices": {
+            "bytes": 52788,
+            "sha256": "1d5a717e6e62d9261b9eb8ea9cdedfd0ffa7424b804e90625bd153043ad07b33"
+          }
+        },
+        {
+          "tier": 2,
+          "targetTriangles": 600,
+          "targetErrorMetres": 0.35,
+          "maximumReportedErrorMetres": 0.17045168578624725,
+          "firstIndex": 65931,
+          "indexCount": 1890,
+          "triangles": 630,
+          "originalTriangles": 272371,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 65931,
+              "indexCount": 1659,
+              "triangles": 553,
+              "reportedErrorMetres": 0.17045168578624725
+            },
+            {
+              "material": 1,
+              "firstIndex": 67590,
+              "indexCount": 231,
+              "triangles": 77,
+              "reportedErrorMetres": 0.026196781545877457
+            }
+          ],
+          "indices": {
+            "bytes": 7560,
+            "sha256": "9914a7449577d3d724f8d0f99473eef5f44b20422b92a7a8a394c123d495d42b"
+          }
+        }
+      ],
+      "leafRibbons": {
+        "firstIndex": 67821,
+        "indexCount": 455778,
+        "leafCount": 75963,
+        "originalFirstIndex": 817113,
+        "originalIndexCount": 911556,
+        "maximumPositionErrorUpperMetres": 0.029012990567161327,
+        "indices": {
+          "bytes": 1823112,
+          "sha256": "26da76939320e9eb942f646d7d42eedae9389a5f9f2b5bdd4d7f3938f008332f"
+        }
+      },
+      "far": {
+        "firstIndex": 523599,
+        "indexCount": 132,
+        "triangles": 44,
+        "originalFirstIndex": 1728669,
+        "originalIndexCount": 132,
+        "indices": {
+          "bytes": 528,
+          "sha256": "d5f34bacf659131192e32770b5e6b1363758f0fe8bb642f37e020d6d2aa20270"
+        }
+      }
+    },
+    {
+      "id": 1,
+      "species": "maple",
+      "woodTiers": [
+        {
+          "tier": 0,
+          "targetTriangles": 18000,
+          "targetErrorMetres": 0.025,
+          "maximumReportedErrorMetres": 0.02495563216507435,
+          "firstIndex": 523731,
+          "indexCount": 56601,
+          "triangles": 18867,
+          "originalTriangles": 281934,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 523731,
+              "indexCount": 56535,
+              "triangles": 18845,
+              "reportedErrorMetres": 0.02495563216507435
+            },
+            {
+              "material": 1,
+              "firstIndex": 580266,
+              "indexCount": 66,
+              "triangles": 22,
+              "reportedErrorMetres": 0.02324056625366211
+            }
+          ],
+          "indices": {
+            "bytes": 226404,
+            "sha256": "3c5c3191a8240660f81f32ae6dc0aeb23b3ccf8ea95c3b926296bc9c65780fe4"
+          }
+        },
+        {
+          "tier": 1,
+          "targetTriangles": 5000,
+          "targetErrorMetres": 0.1,
+          "maximumReportedErrorMetres": 0.05533749237656593,
+          "firstIndex": 580332,
+          "indexCount": 12438,
+          "triangles": 4146,
+          "originalTriangles": 281934,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 580332,
+              "indexCount": 12411,
+              "triangles": 4137,
+              "reportedErrorMetres": 0.05533749237656593
+            },
+            {
+              "material": 1,
+              "firstIndex": 592743,
+              "indexCount": 27,
+              "triangles": 9,
+              "reportedErrorMetres": 0.025881176814436913
+            }
+          ],
+          "indices": {
+            "bytes": 49752,
+            "sha256": "ed83bf8ecfbedacd405e4a8b21d09664588727b5760bf9cc8e078304d8d9985b"
+          }
+        },
+        {
+          "tier": 2,
+          "targetTriangles": 600,
+          "targetErrorMetres": 0.35,
+          "maximumReportedErrorMetres": 0.13963867723941803,
+          "firstIndex": 592770,
+          "indexCount": 1764,
+          "triangles": 588,
+          "originalTriangles": 281934,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 592770,
+              "indexCount": 1737,
+              "triangles": 579,
+              "reportedErrorMetres": 0.13963867723941803
+            },
+            {
+              "material": 1,
+              "firstIndex": 594507,
+              "indexCount": 27,
+              "triangles": 9,
+              "reportedErrorMetres": 0.025881176814436913
+            }
+          ],
+          "indices": {
+            "bytes": 7056,
+            "sha256": "0e3274a985724576c8e2ee903f9eea1c578d716ffd5fbd5a598d425217c1449a"
+          }
+        }
+      ],
+      "leafRibbons": {
+        "firstIndex": 594534,
+        "indexCount": 573816,
+        "leafCount": 95636,
+        "originalFirstIndex": 2574603,
+        "originalIndexCount": 1147632,
+        "maximumPositionErrorUpperMetres": 0.019792956413229246,
+        "indices": {
+          "bytes": 2295264,
+          "sha256": "da38be494c3eb9a887a50cba15a0528683d3e5b326018402b4340ab9390f2345"
+        }
+      },
+      "far": {
+        "firstIndex": 1168350,
+        "indexCount": 132,
+        "triangles": 44,
+        "originalFirstIndex": 3722235,
+        "originalIndexCount": 132,
+        "indices": {
+          "bytes": 528,
+          "sha256": "3cc1d492d1c2ee5ee5e0212ba8bdf97e54ce5023c916f14801e9eaf006a43d7b"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "species": "birch",
+      "woodTiers": [
+        {
+          "tier": 0,
+          "targetTriangles": 18000,
+          "targetErrorMetres": 0.025,
+          "maximumReportedErrorMetres": 0,
+          "firstIndex": 1168482,
+          "indexCount": 48468,
+          "triangles": 16156,
+          "originalTriangles": 16156,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 1168482,
+              "indexCount": 48468,
+              "triangles": 16156,
+              "reportedErrorMetres": 0
+            }
+          ],
+          "indices": {
+            "bytes": 193872,
+            "sha256": "7061873a3e3cee3243c0b4dcdb31bccbe20af7a3337a39c51b8acfe46fc4bc04"
+          }
+        },
+        {
+          "tier": 1,
+          "targetTriangles": 5000,
+          "targetErrorMetres": 0.1,
+          "maximumReportedErrorMetres": 0.009920715354382992,
+          "firstIndex": 1216950,
+          "indexCount": 14583,
+          "triangles": 4861,
+          "originalTriangles": 16156,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 1216950,
+              "indexCount": 14583,
+              "triangles": 4861,
+              "reportedErrorMetres": 0.009920715354382992
+            }
+          ],
+          "indices": {
+            "bytes": 58332,
+            "sha256": "0fb4601bc4a1fd78f5d03665cb16798c2ab8a4045f8ffbe3756421a24695dea3"
+          }
+        },
+        {
+          "tier": 2,
+          "targetTriangles": 600,
+          "targetErrorMetres": 0.35,
+          "maximumReportedErrorMetres": 0.03956109285354614,
+          "firstIndex": 1231533,
+          "indexCount": 1542,
+          "triangles": 514,
+          "originalTriangles": 16156,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 1231533,
+              "indexCount": 1542,
+              "triangles": 514,
+              "reportedErrorMetres": 0.03956109285354614
+            }
+          ],
+          "indices": {
+            "bytes": 6168,
+            "sha256": "3a89721027914456eb8e63faddcd98ba35c4d7ed7db3a026758b6d6cf1ff15ad"
+          }
+        }
+      ],
+      "leafRibbons": {
+        "firstIndex": 1233075,
+        "indexCount": 114480,
+        "leafCount": 19080,
+        "originalFirstIndex": 3770835,
+        "originalIndexCount": 228960,
+        "maximumPositionErrorUpperMetres": 0.008262108886378546,
+        "indices": {
+          "bytes": 457920,
+          "sha256": "5f63bd91ebfd9417d478b0db04283aa7c88f3f27ed56d0ce1c7bd70d1c8074d2"
+        }
+      },
+      "far": {
+        "firstIndex": 1347555,
+        "indexCount": 132,
+        "triangles": 44,
+        "originalFirstIndex": 3999795,
+        "originalIndexCount": 132,
+        "indices": {
+          "bytes": 528,
+          "sha256": "5cdb4863becb20df2684868df7fe1298ebb5b6e8eff43d00b9549806ba1ba91d"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "species": "elm",
+      "woodTiers": [
+        {
+          "tier": 0,
+          "targetTriangles": 18000,
+          "targetErrorMetres": 0.025,
+          "maximumReportedErrorMetres": 0.024716760963201523,
+          "firstIndex": 1347687,
+          "indexCount": 53733,
+          "triangles": 17911,
+          "originalTriangles": 275666,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 1347687,
+              "indexCount": 53448,
+              "triangles": 17816,
+              "reportedErrorMetres": 0.024716760963201523
+            },
+            {
+              "material": 1,
+              "firstIndex": 1401135,
+              "indexCount": 285,
+              "triangles": 95,
+              "reportedErrorMetres": 0.02454414777457714
+            }
+          ],
+          "indices": {
+            "bytes": 214932,
+            "sha256": "666d40aff1e8ee0ef9028d1d19fb7e9fc9fc2afccacf4f829f6e1cf4e502bd2f"
+          }
+        },
+        {
+          "tier": 1,
+          "targetTriangles": 5000,
+          "targetErrorMetres": 0.1,
+          "maximumReportedErrorMetres": 0.08906146138906479,
+          "firstIndex": 1401420,
+          "indexCount": 14076,
+          "triangles": 4692,
+          "originalTriangles": 275666,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 1401420,
+              "indexCount": 13893,
+              "triangles": 4631,
+              "reportedErrorMetres": 0.046299759298563004
+            },
+            {
+              "material": 1,
+              "firstIndex": 1415313,
+              "indexCount": 183,
+              "triangles": 61,
+              "reportedErrorMetres": 0.08906146138906479
+            }
+          ],
+          "indices": {
+            "bytes": 56304,
+            "sha256": "21238f4a3bb1f1efb12bb06f2bb935d174f88e7391e5815744a1f1497fffe52d"
+          }
+        },
+        {
+          "tier": 2,
+          "targetTriangles": 600,
+          "targetErrorMetres": 0.35,
+          "maximumReportedErrorMetres": 0.16846032440662384,
+          "firstIndex": 1415496,
+          "indexCount": 1923,
+          "triangles": 641,
+          "originalTriangles": 275666,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 1415496,
+              "indexCount": 1731,
+              "triangles": 577,
+              "reportedErrorMetres": 0.16846032440662384
+            },
+            {
+              "material": 1,
+              "firstIndex": 1417227,
+              "indexCount": 192,
+              "triangles": 64,
+              "reportedErrorMetres": 0.08906146138906479
+            }
+          ],
+          "indices": {
+            "bytes": 7692,
+            "sha256": "6d57ea93ad2913bc0bcb9de42cf6606b7b827c80982e0b6386dd4dded5109033"
+          }
+        }
+      ],
+      "leafRibbons": {
+        "firstIndex": 1417419,
+        "indexCount": 929820,
+        "leafCount": 154970,
+        "originalFirstIndex": 4826925,
+        "originalIndexCount": 1859640,
+        "maximumPositionErrorUpperMetres": 0.009309442512218881,
+        "indices": {
+          "bytes": 3719280,
+          "sha256": "b4e6818e6490b1bb0018976b93affbbdddb7569fd0dc2451ad4f4a36a3c7047d"
+        }
+      },
+      "far": {
+        "firstIndex": 2347239,
+        "indexCount": 132,
+        "triangles": 44,
+        "originalFirstIndex": 6686565,
+        "originalIndexCount": 132,
+        "indices": {
+          "bytes": 528,
+          "sha256": "d7c26491dd177234b8bd92e4e2a77e3e04ca5d3e52e957337251bf150285c7e6"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "species": "chestnut",
+      "woodTiers": [
+        {
+          "tier": 0,
+          "targetTriangles": 18000,
+          "targetErrorMetres": 0.025,
+          "maximumReportedErrorMetres": 0.024946851655840874,
+          "firstIndex": 2347371,
+          "indexCount": 66258,
+          "triangles": 22086,
+          "originalTriangles": 323911,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 2347371,
+              "indexCount": 65742,
+              "triangles": 21914,
+              "reportedErrorMetres": 0.024946851655840874
+            },
+            {
+              "material": 1,
+              "firstIndex": 2413113,
+              "indexCount": 516,
+              "triangles": 172,
+              "reportedErrorMetres": 0.024918342009186745
+            }
+          ],
+          "indices": {
+            "bytes": 265032,
+            "sha256": "2ac0d585c039976470a18e3dee48c6b3877d97a28cb13d6e68a9e66baae6f74a"
+          }
+        },
+        {
+          "tier": 1,
+          "targetTriangles": 5000,
+          "targetErrorMetres": 0.1,
+          "maximumReportedErrorMetres": 0.08673147857189178,
+          "firstIndex": 2413629,
+          "indexCount": 13758,
+          "triangles": 4586,
+          "originalTriangles": 323911,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 2413629,
+              "indexCount": 13395,
+              "triangles": 4465,
+              "reportedErrorMetres": 0.059137243777513504
+            },
+            {
+              "material": 1,
+              "firstIndex": 2427024,
+              "indexCount": 363,
+              "triangles": 121,
+              "reportedErrorMetres": 0.08673147857189178
+            }
+          ],
+          "indices": {
+            "bytes": 55032,
+            "sha256": "85b4717452a3cd6fe8b03fc4a13f00b0d2802a72988ee931c0cb813edded0670"
+          }
+        },
+        {
+          "tier": 2,
+          "targetTriangles": 600,
+          "targetErrorMetres": 0.35,
+          "maximumReportedErrorMetres": 0.19327965378761292,
+          "firstIndex": 2427387,
+          "indexCount": 2040,
+          "triangles": 680,
+          "originalTriangles": 323911,
+          "parts": [
+            {
+              "material": 0,
+              "firstIndex": 2427387,
+              "indexCount": 1653,
+              "triangles": 551,
+              "reportedErrorMetres": 0.19327965378761292
+            },
+            {
+              "material": 1,
+              "firstIndex": 2429040,
+              "indexCount": 387,
+              "triangles": 129,
+              "reportedErrorMetres": 0.08673147857189178
+            }
+          ],
+          "indices": {
+            "bytes": 8160,
+            "sha256": "592db4b276bf07756b6a871f9016dcfdf6e85157d06bed38feb3effe65ff8156"
+          }
+        }
+      ],
+      "leafRibbons": {
+        "firstIndex": 2429427,
+        "indexCount": 519054,
+        "leafCount": 86509,
+        "originalFirstIndex": 7658430,
+        "originalIndexCount": 1038108,
+        "maximumPositionErrorUpperMetres": 0.014582258897306005,
+        "indices": {
+          "bytes": 2076216,
+          "sha256": "e2d3f901198fc76fc6d97e55930c7d6a4c9f2c1ac7d60ec661bf2065d607e038"
+        }
+      },
+      "far": {
+        "firstIndex": 2948481,
+        "indexCount": 132,
+        "triangles": 44,
+        "originalFirstIndex": 8696538,
+        "originalIndexCount": 132,
+        "indices": {
+          "bytes": 528,
+          "sha256": "0933695216ff516fce2f1d14ca1caef319c97595ad8171bc1f6b1283f7becf7e"
+        }
+      }
+    }
+  ]
+}

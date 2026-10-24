@@ -5,6 +5,7 @@ import {FRAME_WGSL} from './wgsl/common.js';
 import {createTaskYieldBudget} from './task-yield.js';
 import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} from './forest-impostor.js';
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
+import {loadForestNativeLOD} from './forest-native-lod.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
 
 export const FOREST_ASSETS=Object.freeze({
@@ -228,7 +229,8 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
   const atlasPromise=loadAtlases?volumePromise.then(volume=>volume.volumes&&!atlasDebug&&!volumeOff?{impostors:null,impostorError:null}:
     loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message}))):Promise.resolve({impostors:null,impostorError:null});
-  const [rootBytes,atlas,volume]=await Promise.all([rootsPromise,atlasPromise,volumePromise]),roots=new Float32Array(rootBytes);await finishForestChecks(forestRootChecks(manifest,roots));
+  const lodPromise=assets===FOREST_ASSETS?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:null,nativeLodError:null});
+  const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);await finishForestChecks(forestRootChecks(manifest,roots));
   let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
     const textures={},pending=new Map();
@@ -242,7 +244,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
     }))));
     const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
     const [vertices,indices,,light]=await Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal),materialPromise,lightPromise]);
-    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes},{signal});nativeLoaded=true;return{...geometry,textures,...light};
+    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes},{signal});nativeLoaded=true;return{...geometry,textures,...light,...lod};
   })();
   // Drop only our fulfilled cache reference after successful GPU installation.
   // Existing callers retain their immutable arrays; a later explicit native
@@ -251,8 +253,8 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   // Only a complete full-sphere representation can display a forest without
   // native buffers. Upper-only legacy/missing atlases retain the eager path.
   const deferred=atlas.impostors?.manifest.layout.views.some(view=>view.direction[1]<0);
-  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,...atlas,...volume,loadNative,releaseNativeCPU}:
-    {...await loadNative(),...atlas,...volume,loadNative,releaseNativeCPU};
+  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,...atlas,...volume,...lod,loadNative,releaseNativeCPU}:
+    {...await loadNative(),...atlas,...volume,...lod,loadNative,releaseNativeCPU};
 }
 const coverageSets=new WeakMap();
 export function forestCoversPoint(manifest,x,z){
@@ -572,6 +574,28 @@ export const FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL=forestWithMassNeighbors(
 const forestWithVolumeCommands=source=>forestCullReplace(source,
  'if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}',
  'if(farLod){atomicAdd(&commands[(pi*4u+3u)*5u+1u],1u);}\n if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}');
+const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(source,
+ 'if(id.x>=u32(parameters.y)*4u){return;}',
+ 'if(id.x>=u32(parameters.y)*6u){return;}'),
+ ` let atlasSupported=(p.roots.z&7u)>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
+ let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
+ let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));`,
+ ` let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
+ let midFootprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*midGeomError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-midGeomError,.0001);
+ let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u);
+ let midLod=!farLod&&p.wood.w==1u&&resident&&parameters.w==0.0&&near>radius&&near>midGeomError&&midFootprint<=midThreshold;`),
+ ` let command=(pi*4u+select(select(2u,3u,midLod),0u,nearLod))*5u;
+ let slot=atomicAdd(&commands[command+1u],1u);
+ let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
+ visible[base+slot]=id.x;
+ if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}`,
+ ` let midCommandBase=u32(parameters.y)*4u+pi*2u;
+ let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod)*5u;
+ let slot=atomicAdd(&commands[command+1u],1u);
+ let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
+ visible[base+slot]=id.x;
+ if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
+ if(midLod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,forestMiddle=forestMass?.middle??null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
@@ -583,7 +607,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
   let middle=forestMiddle,volume=null,volumeShell=false,shellIndices=null;
   if(middle&&(!Array.isArray(middle.prototypes)||middle.prototypes.length!==m.prototypes.length||middle.prototypes.some((p,id)=>p.id!==id||p.species!==m.prototypes[id].species)))throw Error('Generated forest middle registry differs from native prototypes');
   const make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
-  const abort=new AbortController(),nativeStatus={status:'deferred',resident:false,error:null,uploadedBytes:0,totalBytes:m.files['vertices.bin'].bytes+m.files['indices.bin'].bytes};
+  const nativeLod=pack.nativeLod?.sourceValidated?pack.nativeLod:null;
+  const abort=new AbortController(),nativeStatus={status:'deferred',resident:false,error:null,uploadedBytes:0,totalBytes:m.files['vertices.bin'].bytes+(nativeLod?nativeLod.manifest.files['lod-indices.bin'].bytes:m.files['indices.bin'].bytes)};
   let atlas,native=null,destroyed=false,terrainVisibility=null;
   try{
     const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
@@ -593,6 +618,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id]}))};
     }
     if(pack.impostors&&impostorMode!=='off'&&!volume)atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:m});
+    const nativeMid=Boolean(nativeLod&&middle&&!atlas),commandSlots=nativeMid?6:4;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -612,10 +638,16 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       rooted[i+9]=Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08);rooted[i+1]=y-rooted[i+9];
     }
     const roots=make(rooted,B.STORAGE,'forest immutable root transforms');
-    const meta=new ArrayBuffer(m.prototypes.length*80),floats=new Float32Array(meta),words=new Uint32Array(meta),draws=new Uint32Array(m.prototypes.length*20);
-    for(const p of m.prototypes){const base=p.id*20,reduced=middle?.prototypes[p.id],radius=reduced?forestMiddleUpward(p.radius+reduced.lodErrorMetres):p.radius;
+    const meta=new ArrayBuffer(m.prototypes.length*80),floats=new Float32Array(meta),words=new Uint32Array(meta),draws=new Uint32Array(m.prototypes.length*commandSlots*5);
+    for(const p of m.prototypes){const base=p.id*20,reduced=middle?.prototypes[p.id],lp=nativeLod?.prototypes[p.id],radius=reduced?forestMiddleUpward(p.radius+reduced.lodErrorMetres):p.radius;
       floats.set([...p.centre,radius],base);words.set([p.firstRoot,p.rootCount,(atlas?((atlas.fullSphere?2:1)|(impostorMode==='force'?4:0)):0)|(reduced?8:0),impostorPixels],base+4);
-      for(const [i,name]of ['wood','leaf','far'].entries()){const r=i===2&&reduced?reduced:p[name];words.set([r.firstIndex,r.indexCount,0,0],base+8+i*4);draws.set([r.indexCount,0,r.firstIndex,0,0],(p.id*4+i)*5);}
+      const ranges=lp?[lp.woodTiers[0],lp.leafRibbons,reduced??lp.far]:[p.wood,p.leaf,reduced??p.far];
+      for(const [i,r]of ranges.entries()){words.set([r.firstIndex,r.indexCount,0,0],base+8+i*4);draws.set([r.indexCount,0,r.firstIndex,0,0],(p.id*4+i)*5);}
+      if(nativeMid){
+        floats[base+10]=forestMiddleUpward(Math.max(lp.woodTiers[1].maximumReportedErrorMetres,lp.leafRibbons.maximumPositionErrorUpperMetres));words[base+11]=1;
+        draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*2)*5);
+        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*2+1)*5);
+      }
       if(reduced){floats[base+18]=forestMiddleUpward(reduced.lodErrorMetres);words[base+19]=0;}
       else if(p.geometryErrorSupported===true){floats[base+18]=p.geometryErrorMetres;words[base+19]=1;}
       draws.set(volumeShell?[reduced.leaf.indexCount,0,reduced.leaf.firstIndex,0,0]:[volume?36:6,0,0,0,0],(p.id*4+3)*5);
@@ -627,6 +659,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,['auto','near','far'].indexOf(mode)]),B.UNIFORM,'forest projected size policy');
     const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
     let cullSource=forestMass?.neighbors?(middle?FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL:FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL):middle?(forestMass?FOREST_MASS_MIDDLE_ROOT_CULL_WGSL:FOREST_MIDDLE_ROOT_CULL_WGSL):(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL);
+    if(nativeMid)cullSource=forestWithNativeLod(cullSource);
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     const compute=await shader(cullSource,'forest GPU cull and compact');
@@ -662,7 +695,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       });
     });
     const stats={loaded:true,roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,terrainOcclusion:!!terrainVisibility,nearPixels,appearanceErrorSupported:false,mode,
-      get backend(){return 'native'+(volumeShell?' / shaded source-field crowns':middle?' / generated opaque middle':'')+(atlas?' / atlas':'')+(forestMass?' / authored native-density mass':'');},
+      get backend(){return 'native'+(nativeLod?' / reduced woody & ribbon LOD':'')+(volumeShell?' / shaded source-field crowns':middle?' / generated opaque middle':'')+(atlas?' / atlas':'')+(forestMass?' / authored native-density mass':'');},
       materialContract:m.materialContract,nativeMaterialLayers:0,nativeTextureFamilies:[],coverageFiltering:'Stable independent native footprint sample masks',native:nativeStatus,
       canopyLight:{loaded:false,error:null,scope:'Static own-canopy hemispheric escape; no inter-tree or directional sun shadow'},
       volume:{loaded:!!volume,mode:volumeShell?'opaque source-field shell':'ray volume',error:pack.volumeError??null,immutableBytes:volume?.immutableBytes??0,samplingFootprints:middle?.prototypes.map(p=>p.lodErrorMetres)??[],qualification:volumeShell?'Source-field shell; reported simplifier error plus voxel footprint, no native appearance certificate':volume?.qualification??null,appearanceErrorSupported:false},
@@ -686,10 +719,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           for(let offset=0;offset<bytes.length;offset+=1024*1024){forestLoadAbort(abort.signal);const size=Math.min(1024*1024,bytes.length-offset);device.queue.writeBuffer(buffer,offset,bytes,offset,size);nativeStatus.uploadedBytes+=size;const pause=pauseIfNeeded();if(pause)await pause;}
           return buffer;
         };
-        nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(source.indices,B.INDEX,'forest immutable prototype indices');
+        nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(nativeLod?nativeLod.indices:source.indices,B.INDEX,'forest immutable prototype indices');
         const materials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');candidateBuffers.push(materials);
         const canopyLight=make(forestLightGPUBytes(source.canopyLight),B.STORAGE,'forest immutable native canopy exposure');candidateBuffers.push(canopyLight);
-        for(const p of m.prototypes)for(let tier=0;tier<(middle?1:2);tier++){
+        for(const p of m.prototypes)for(const tier of nativeMid?[0,2]:middle?[0]:[0,1]){
           const bin=bins[p.id][tier],group=pipeline=>{
             const entries=[...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
               {binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler},{binding:14,resource:{buffer:canopyLight}}];
@@ -697,7 +730,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
               entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
             return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
           };
-          bin.opaque=group(opaque);if(tier===0)bin.leaf=group(leaf);
+          bin.opaque=group(opaque);if(tier!==1)bin.leaf=group(leaf);
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
@@ -712,9 +745,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const nativeReady=deferred?new Promise(resolve=>setTimeout(resolve,0)).then(installNative):Promise.resolve(await installNative());
     const draw=(pass,pipeline,group,cloud,cutout)=>{
       if(!native)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
-      for(const p of m.prototypes)for(const slot of cutout?[1]:middle?[0]:[0,2]){
-        if(!p[['wood','leaf','far'][slot]].indexCount)continue;
-        pass.setBindGroup(2,bins[p.id][slot===2?1:0][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
+      for(const p of m.prototypes){
+        for(const slot of cutout?[1]:middle?[0]:[0,2]){
+          if(!p[['wood','leaf','far'][slot]].indexCount)continue;
+          pass.setBindGroup(2,bins[p.id][slot===2?1:0][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
+        }
+        if(nativeMid){
+          pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*2+(cutout?1:0))*20);
+        }
       }
     };
     const drawMiddle=pass=>{
@@ -730,7 +768,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     return {stats,nativeReady,prepare(){},
-      encode(pass){pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*4/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.rootCount/64));},
+      encode(pass){pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.rootCount/64));},
       drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
   }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();throw error;}
 }

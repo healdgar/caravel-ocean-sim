@@ -351,7 +351,7 @@ export const FOREST_INSPECTION_TASK_COPY_WGSL=/*wgsl*/`
  let task=tasks[taskID];for(var index=lane;index<task.z;index+=64u){selected[task.y+index]=source[task.x+index];}
 }`;
 
-export async function createForestClusterPilotRenderer({device,pack,prototypeID,inspection,captureLayers=1,meshSegments=0,roots=[[0,0,0,1,0]],format='rgba8unorm',samples=4,maxTextureBytes=192*1024*1024,maxTriangles=6_000_000,additionalTriangles=0,inspectionDepthPrepass=false,inspectionShading='sample',inspectionCompaction='serial',ribbonErrorPixels=.25}){
+export async function createForestClusterPilotRenderer({device,pack,prototypeID,inspection,captureLayers=1,meshSegments=0,roots=[[0,0,0,1,0]],format='rgba8unorm',samples=4,maxTextureBytes=448*1024*1024,maxTriangles=6_000_000,additionalTriangles=0,inspectionDepthPrepass=false,inspectionShading='sample',inspectionCompaction='serial',ribbonErrorPixels=.25}){
  const prototype=pack.manifest.prototypes.find(p=>p.id===prototypeID);check(prototype,'Missing pilot source species');
  check(samples===4,'Pilot sample masks require four MSAA samples');
  check(captureLayers===1||captureLayers===2,'Pilot supports one/two capture surfaces');

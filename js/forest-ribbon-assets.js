@@ -32,7 +32,7 @@ export function validateForestRibbonAssets(m){
  return m;
 }
 
-export async function loadForestRibbonAssets(base,{fetchAsset=fetch,allowExperimental=false,maxAdditionalBytes=16*1024*1024}={}){
+export async function loadForestRibbonAssets(base,{fetchAsset=fetch,allowExperimental=false,maxAdditionalBytes=32*1024*1024}={}){
  check(allowExperimental===true,'explicit experimental review permission required');check(typeof base==='string'&&base&&uint(maxAdditionalBytes)&&maxAdditionalBytes>0&&maxAdditionalBytes<=128*1024*1024,'invalid URL/residency limit');base=base.replace(/\/$/,'')+'/';
  async function read(url,limit){const r=await fetchAsset(url);check(r.ok,'asset unavailable: '+url);const reader=r.body.getReader(),parts=[];let total=0;try{for(;;){const {done,value}=await reader.read();if(done)break;total+=value.byteLength;check(total<=limit,'response exceeds receipt/budget');parts.push(value);}}catch(e){await reader.cancel().catch(()=>{});throw e;}const out=new Uint8Array(total);let at=0;for(const p of parts){out.set(p,at);at+=p.length;}return out;}
  const manifest=freeze(validateForestRibbonAssets(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(await read(base+'manifest.json',16*1024*1024)))));let serial=Promise.resolve();

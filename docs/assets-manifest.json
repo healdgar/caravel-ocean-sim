@@ -159,6 +159,16 @@
     "bytes": 1870555,
     "sha256": "1a4c04c1eb04d1ae1eca84d49b866422015a166f187792f1f605055b23e8cf7d"
   },
+  "assets/forest-scenery/saba/lod/manifest.json": {
+    "url": "assets/forest-scenery/saba/lod/manifest.5e5c0769d47390e1.json",
+    "bytes": 19887,
+    "sha256": "5e5c0769d47390e11024563b195ff7b4fedddd9911cce8d9f849025559e319ac"
+  },
+  "assets/forest-scenery/saba/lod/lod-indices.bin.gz": {
+    "url": "assets/forest-scenery/saba/lod/lod-indices.bin.648f9aac99e419cf.gz",
+    "bytes": 6704623,
+    "sha256": "648f9aac99e419cf5f0c0d05eef413ff6b062b9985cd8f85e89b50e42071f1c3"
+  },
   "assets/forest-scenery/saba/volumes/manifest.json": {
     "url": "assets/forest-scenery/saba/volumes/manifest.469a6cfd2b0cb46d.json",
     "bytes": 56073,

@@ -7,7 +7,7 @@ body{margin:0;background:#101820;color:#e6eee5;font:14px system-ui}header{paddin
 </style>
 <header>
  <b>Experimental forest LOD</b><span id="status">Loading reference and baked detail…</span>
- <label>Tree <select id="species"><option value="0">Oak</option><option value="2">Birch</option></select></label>
+ <label>Tree <select id="species"><option value="0">Oak</option><option value="1">Maple</option><option value="2">Birch</option><option value="3">Elm</option><option value="4">Chestnut</option></select></label>
  <label>Distance <input id="distance" type="range" min="12" max="450" value="100"><output id="distanceValue">100 m</output></label>
  <label>Orbit <input id="yaw" type="range" min="0" max="360" value="35"></label>
  <label>Elevation <input id="elevation" type="range" min="-5" max="85" value="15"></label>
@@ -29,7 +29,7 @@ const report=window.forestPilot={state:'loading',errors:[],receipt:null};
 try{
  const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});if(!adapter||adapter.isFallbackAdapter)throw Error('Native WebGPU required');
  const info=adapter.info??{};report.adapter={vendor:info.vendor,architecture:info.architecture,description:info.description};if(/swiftshader|llvmpipe|lavapipe/i.test(JSON.stringify(report.adapter)))throw Error('Software adapter refused');
- const timestamps=adapter.features.has('timestamp-query'),device=await adapter.requestDevice({requiredFeatures:[...(timestamps?['timestamp-query']:[]),...(adapter.features.has('indirect-first-instance')?['indirect-first-instance']:[])]});device.onuncapturederror=e=>report.errors.push(e.error.message);device.lost.then(e=>report.errors.push(e.message));
+ const timestamps=adapter.features.has('timestamp-query'),device=await adapter.requestDevice({requiredFeatures:[...(timestamps?['timestamp-query']:[]),...(adapter.features.has('indirect-first-instance')?['indirect-first-instance']:[])],requiredLimits:{maxTextureArrayLayers:Math.min(adapter.limits.maxTextureArrayLayers,1024)}});device.onuncapturederror=e=>report.errors.push(e.error.message);device.lost.then(e=>report.errors.push(e.message));
  const format=navigator.gpu.getPreferredCanvasFormat(),contexts=canvases.map(c=>{c.width=width;c.height=height;const context=c.getContext('webgpu');context.configure({device,format,alphaMode:'opaque'});return context;});
  const stand=query.get('stand'),rootsByPrototype=stand?{0:[],2:[]}:undefined;
  if(stand){const rows=stand==='edge'?2:3;for(let z=0;z<rows;z++)for(let x=0;x<4;x++){const id=(x+z)%2?2:0;rootsByPrototype[id].push([(x-1.5)*7,0,(z-(rows-1)*.5)*7,.88+((x*7+z*3)%5)*.055,(x*1.7+z*.9)%6.28]);}}
@@ -41,7 +41,7 @@ try{
  const ribbonAssets=query.get('leaves')==='authored'?await loadForestRibbonAssets('/ribbons/',{allowExperimental:true}):null;
  let worstTriangles=0;
  for(const p of pack.manifest.prototypes){let inspection=inspections?await inspections.loadPrototype(p.id):null;const preparationStart=performance.now();if(query.get('leaves')==='hybrid'){if(!inspection)throw Error('Explicit hybrid review requires inspection pages');const ribbons=reduceForestLeafRibbons(new Float32Array(inspection.vertices.buffer,inspection.vertices.byteOffset,inspection.vertices.byteLength/4),inspection.indices,undefined,{vertexStride:15});inspection=prepareForestRibbonInspection(inspection,ribbons);}else if(ribbonAssets){if(!inspection)throw Error('Authored ribbons require original inspection pages');inspection=await ribbonAssets.apply(inspection);}const preparationMs=performance.now()-preparationStart;const wood=native.stats.prototypes.find(q=>q.id===p.id),r=await createForestClusterPilotRenderer({device,pack,prototypeID:p.id,inspection,inspectionShading:query.get('shading')||'sample',inspectionDepthPrepass:query.get('shading')==='pixel-depth',inspectionCompaction:query.get('compaction')||'serial',ribbonErrorPixels:Number(query.get('ribbonError')||.25),captureLayers:Number(query.get("layers")||1),meshSegments:Number(query.get("grid")||0),...(rootsByPrototype?{roots:rootsByPrototype[p.id]}:{}),format,samples:4,additionalTriangles:Math.max(...wood.woodTiers.map(t=>t.triangles))});r.stats.reductionPreparationMs=preparationMs;clusters.set(p.id,r);worstTriangles+=r.stats.maximumSubmittedTriangles;inspection?.destroy();}
- if(worstTriangles>6_000_000)throw Error('Whole pilot combined geometry budget exceeded');
+ if(worstTriangles>6_000_000*Math.max(1,pack.manifest.prototypes.length/2))throw Error('Whole pilot combined geometry budget exceeded');
  const T=GPUTextureUsage,B=GPUBufferUsage,colour=canvases.map(()=>device.createTexture({size:[width,height],sampleCount:4,format,usage:T.RENDER_ATTACHMENT})),depth=canvases.map(()=>device.createTexture({size:[width,height],sampleCount:4,format:'depth32float',usage:T.RENDER_ATTACHMENT}));
  const querySet=timestamps?device.createQuerySet({type:'timestamp',count:4}):null,queryOut=timestamps?device.createBuffer({size:32,usage:B.QUERY_RESOLVE|B.COPY_SRC}):null,read=device.createBuffer({size:256,usage:B.COPY_DST|B.MAP_READ});
  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),norm=a=>a.map(v=>v/Math.hypot(...a));

@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { FOREST_ASSETS } from './js/forest-scenery.js';
 import { FOREST_IMPOSTOR_ASSETS } from './js/forest-impostor.js';
 import { FOREST_LIGHT_ASSETS } from './js/forest-light.js';
+import { FOREST_NATIVE_LOD_ASSETS } from './js/forest-native-lod.js';
 import { FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
 import { FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
@@ -28,6 +29,7 @@ order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/vendor/forest-meshopt.js','js/forest-mass.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-impostor.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-light.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-native-lod.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-volume.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
@@ -65,7 +67,7 @@ if(fs.existsSync(path.join(root,'assets/world/saba/wells-bay/manifest.json'))){
     runtimeAssetTypes.set('assets/world/saba/wells-bay/'+name,mime);
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/manifest.json'))){
-  for(const file of [...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_NATIVE_LOD_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
