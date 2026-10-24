@@ -76,8 +76,8 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   const samples = new Float64Array(240), workSamples = new Float64Array(240);
-  let count = 0, seconds = 0, settle = 2, fastSeconds = 0, fps = 0;
-  const reset = () => { count = 0; seconds = 0; settle = 2; fastSeconds = 0; };
+  let count = 0, seconds = 0, settle = 2.5, fastSeconds = 0, fps = 0;
+  const reset = () => { count = 0; seconds = 0; settle = 2.5; fastSeconds = 0; };
   return {
     get mode() { return mode; },
     get scale() { return scale; },
@@ -100,7 +100,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
       samples[count] = elapsed * 1000;
       workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
       seconds += elapsed;
-      if ((seconds < 1.5 || count < 12) && count < samples.length) return false;
+      if ((seconds < 2.0 || count < 12) && count < samples.length) return false;
       const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
       let ms = 0;
       for (let i = trim; i < count - trim; i++) ms += sorted[i];
@@ -124,7 +124,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
         }
         if (headroom) {
           fastSeconds += seconds;
-          if (fastSeconds >= 10) next = Math.min(1, scale * 1.05);
+          if (fastSeconds >= 12) next = Math.min(1, scale * 1.05);
         } else fastSeconds = 0;
       }
       count = 0; seconds = 0;

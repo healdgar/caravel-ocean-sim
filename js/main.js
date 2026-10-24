@@ -546,6 +546,7 @@ async function main() {
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto');
   const fixedPolygons = fixedResolution && !qs.has('polygons');
   const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto');
+  terrain?.setPixelError?.(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
   let submergedColor,submergedDepth,oceanOpticsGroup;
@@ -923,8 +924,9 @@ async function main() {
     }
     return true;
   }
+  let maxOceanNodes = MAX_NODES;
   function addNode(x0, z0, size, lod) {
-    if (nodeCount >= polygons.maxNodes(MAX_NODES)) return;
+    if (nodeCount >= maxOceanNodes) return;
     const o = nodeCount * 4;
     instData[o] = x0; instData[o + 1] = z0; instData[o + 2] = size; instData[o + 3] = lod;
     nodeCount++;
@@ -932,9 +934,11 @@ async function main() {
   function selectNode(x0, z0, size, lod) {
     if (!sphereHit(x0, z0, size, ranges[lod])) return false;
     if (!sphereHit(x0, z0, size, MAX_DIST) || !inFrustum(x0, z0, size)) return true;
-    if (lod === 0 || !sphereHit(x0, z0, size, ranges[lod - 1])) { addNode(x0, z0, size, lod); return true; }
+    if (lod === 0 || nodeCount + 4 > maxOceanNodes || !sphereHit(x0, z0, size, ranges[lod - 1])) { addNode(x0, z0, size, lod); return true; }
     const h = size * 0.5;
-    for (let i = 0; i < 4; i++) {
+    const firstX = ccx >= x0 + h ? 1 : 0, firstZ = ccz >= z0 + h ? 2 : 0;
+    for (let k = 0; k < 4; k++) {
+      const i = k === 0 ? (firstX | firstZ) : k === 3 ? ((firstX ^ 1) | (firstZ ^ 2)) : k === 1 ? ((firstX ^ 1) | firstZ) : (firstX | (firstZ ^ 2));
       const nx = x0 + (i & 1) * h, nz = z0 + (i >> 1) * h;
       if (!selectNode(nx, nz, h, lod - 1)) {
         if (sphereHit(nx, nz, h, MAX_DIST) && inFrustum(nx, nz, h)) addNode(nx, nz, h, lod - 1);
@@ -943,7 +947,8 @@ async function main() {
     return true;
   }
   function selectAll() {
-    const r0 = R0 * polygons.oceanRangeScale;
+    maxOceanNodes = polygons.maxNodes(MAX_NODES);
+    const r0 = Math.max(12, R0 * polygons.oceanRangeScale);
     for (let l = 0; l < LODS; l++) ranges[l] = r0 * Math.pow(2, l);
     HB = 4 + 2 * P.swellHs + 0.025 * P.windSpeed * P.windSpeed;
     XB = Math.max(4, HB * P.choppy * 0.65);
@@ -962,9 +967,15 @@ async function main() {
     const ts = LEAF * Math.pow(2, top);
     const x0 = Math.floor((ccx - MAX_DIST) / ts), x1 = Math.floor((ccx + MAX_DIST) / ts);
     const z0 = Math.floor((ccz - MAX_DIST) / ts), z1 = Math.floor((ccz + MAX_DIST) / ts);
+    const roots = [];
     for (let zi = z0; zi <= z1; zi++) {
-      for (let xi = x0; xi <= x1; xi++) selectNode(xi * ts, zi * ts, ts, top);
+      for (let xi = x0; xi <= x1; xi++) {
+        const rx = xi * ts, rz = zi * ts, dx = rx + ts * 0.5 - ccx, dz = rz + ts * 0.5 - ccz;
+        roots.push({ rx, rz, d2: dx * dx + dz * dz });
+      }
     }
+    roots.sort((a, b) => a.d2 - b.d2);
+    for (const root of roots) selectNode(root.rx, root.rz, ts, top);
   }
 
   // --------------------------------------------------------------------------------------
@@ -1015,7 +1026,7 @@ async function main() {
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed;
     f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
-    f[64] = R0 * polygons.oceanRangeScale; f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
+    f[64] = Math.max(12, R0 * polygons.oceanRangeScale); f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1); f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
     const strike=weather.strike,dx=strike?strike.x-cam.x:0,dz=strike?strike.z-cam.z:1,range=Math.hypot(dx,dz)||1;
@@ -1624,8 +1635,8 @@ async function main() {
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
     const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
-    resolution.sample(elapsed,!document.hidden,workSample);
-    if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
+    if(resolution.sample(elapsed,!document.hidden,workSample))polygons.reset();
+    else if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);
     last = now;

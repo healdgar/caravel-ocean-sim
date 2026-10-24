@@ -574,7 +574,7 @@ export const FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL=forestWithMassNeighbors(
 const forestWithVolumeCommands=source=>forestCullReplace(source,
  'if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}',
  'if(farLod){atomicAdd(&commands[(pi*4u+3u)*5u+1u],1u);}\n if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}');
-export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(source,
+export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(source,
  'if(id.x>=u32(parameters.y)*4u){return;}',
  'if(id.x>=u32(parameters.y)*8u){return;}'),
  'let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);',
@@ -598,17 +598,18 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let mid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&near>mid2GeomError&&mid2Footprint<=mid2Threshold;
  let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(near-midGeomError,.0001);
- let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u);
+ let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u);
  let midLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&near>midGeomError&&midFootprint<=midThreshold;
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
  if(!nearLod&&!farLod&&!mid2Lod&&!midLod){return;}`),
+ 'previousLod[id.x]=select(select(0u,2u,midLod),1u,nearLod);',
+ 'previousLod[id.x]=select(select(select(0u,3u,mid2Lod),2u,midLod),1u,nearLod);'),
  ` let command=(pi*4u+select(select(2u,3u,midLod),0u,nearLod))*5u;
  let slot=atomicAdd(&commands[command+1u],1u);
  let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
  visible[base+slot]=id.x;
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}`,
- ` if(mid2Lod){previousLod[id.x]=3u;}
- let midCommandBase=u32(parameters.y)*4u+pi*4u+select(0u,2u,mid2Lod);
+ ` let midCommandBase=u32(parameters.y)*4u+pi*4u+select(0u,2u,mid2Lod);
  let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod||mid2Lod)*5u;
  let slot=atomicAdd(&commands[command+1u],1u);
  let base=p.roots.x*4u+p.roots.y*select(select(select(1u,3u,mid2Lod),2u,midLod),0u,nearLod);
@@ -683,9 +684,9 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,modeIndex]),B.UNIFORM,'forest projected size policy');
     const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
     let cullSource=forestMass?.neighbors?(middle?FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL:FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL):middle?(forestMass?FOREST_MASS_MIDDLE_ROOT_CULL_WGSL:FOREST_MIDDLE_ROOT_CULL_WGSL):(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL);
+    if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     if(nativeMid)cullSource=forestWithNativeLod(cullSource);
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
-    if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     const compute=await shader(cullSource,'forest GPU cull and compact');
     const reset=await device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}});
     const cull=await device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}});
