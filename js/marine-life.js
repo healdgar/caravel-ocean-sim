@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {createMarineLifeState,MARINE_ANIMAL_LIMIT,MARINE_EFFECT_LIMIT,MARINE_EFFECT_SECONDS} from './marine-life-state.js';
-import {MARINE_LIFE_RENDER,MARINE_EFFECT_INIT,MARINE_MIST_COUNT,MARINE_BREATH_DROP_COUNT,MARINE_FALLOUT_COUNT} from './wgsl/marine-life.js';
-import {DOLPHIN_RIPPLE_SEGMENTS,DOLPHIN_RIPPLE_RINGS,DOLPHIN_RIPPLE_ROWS,DOLPHIN_SHEET_SEGMENTS,DOLPHIN_SHEET_ROWS,DOLPHIN_DROP_COUNT} from './wgsl/dolphins.js';
+import {MARINE_LIFE_RENDER,MARINE_EFFECT_INIT,MARINE_MIST_COUNT,MARINE_BREATH_DROP_COUNT,MARINE_FALLOUT_COUNT,MARINE_IMPACT_SEGMENTS,MARINE_IMPACT_ROWS,MARINE_IMPACT_DROP_COUNT} from './wgsl/marine-life.js';
+import {DOLPHIN_RIPPLE_SEGMENTS,DOLPHIN_RIPPLE_RINGS,DOLPHIN_RIPPLE_ROWS} from './wgsl/dolphins.js';
 import {loadMarineGLB} from './marine-asset.js';
 import {createMarineRig,marineStrokeAmplitude} from './marine-rig.js';
 import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
@@ -199,9 +199,10 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
   const bones=buffer('whale joint poses',whaleRig.update(0,0),B.STORAGE);
   const values=new Float32Array(MARINE_ANIMAL_LIMIT*8),effectValues=new Float32Array(MARINE_EFFECT_LIMIT*12);
   const animals=buffer('marine animal poses',values,B.STORAGE),effects=buffer('marine surface events',effectValues,B.STORAGE);
-  const origins=buffer('marine emission origins',new Float32Array(MARINE_EFFECT_LIMIT*4),B.STORAGE);
+  const origins=buffer('marine emission origins',new Float32Array(MARINE_EFFECT_LIMIT*(1+MARINE_IMPACT_DROP_COUNT)*4),B.STORAGE);
   const seededBirthKeys=new Float64Array(MARINE_EFFECT_LIMIT),birthSeed=new Float32Array(4);
   const landings=buffer('marine droplet contacts',new Float32Array(MARINE_EFFECT_LIMIT*MARINE_BREATH_DROP_COUNT*4),B.STORAGE);
+  const sheetContacts=buffer('marine sheet contacts',new Float32Array(MARINE_EFFECT_LIMIT*MARINE_IMPACT_SEGMENTS*(MARINE_IMPACT_ROWS+1)*4),B.STORAGE);
   const meshes={};for(const kind of ['shark','whale']){
     const mesh=kind==='whale'?whaleModel:createMarineMesh(kind),stride=kind==='whale'?11:9,num=mesh.vertices.length/stride;
     const data=new ArrayBuffer(num*68),f=new Float32Array(data),j=new Uint16Array(data);
@@ -215,18 +216,21 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
   const source=sceneSource(MARINE_LIFE_RENDER);
   const module=await shader(source,'marine wildlife');
   const layout=[{arrayStride:68,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'float32x2'},{shaderLocation:4,offset:44,format:'uint16x4'},{shaderLocation:5,offset:52,format:'float32x4'}]}];
-  const kinds=[['dolphin',layout,'marine animals'],['dolphinRipple',[],'marine ripples'],['dolphinSplash',[],'marine splash crowns'],['dolphinDrop',[],'marine spray'],['marineBlow',[],'whale breath mist'],['marineBreathDrop',[],'whale breath water'],['marineFallout',[],'whale breath fallout']];
+  const kinds=[['dolphin',layout,'marine animals'],['dolphinRipple',[],'marine ripples'],['marineImpactSheet',[],'marine impact water sheet'],['marineImpactDrop',[],'marine impact drops'],['marineBlow',[],'whale breath mist'],['marineBreathDrop',[],'whale breath water'],['marineFallout',[],'marine water fallout']];
   const pipelines=await Promise.all(kinds.map(([kind,buffers,label],i)=>device.createRenderPipelineAsync({label,layout:'auto',
     vertex:{module,entryPoint:kind+'VS',buffers},fragment:{module,entryPoint:kind+'FS',targets:[{format,...(i?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})));
-  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects},{buffer:origins},{buffer:landings},...textures.map(t=>t.createView()),{buffer:bones}];
+  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects},{buffer:origins},{buffer:landings},...textures.map(t=>t.createView()),{buffer:bones},{buffer:sheetContacts}];
   const bodyBindings=[0,1,2,3,4,5,6,7,8,12,13,14,15];
-  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?bodyBindings:i===1?[0,1,2,3,4,5,6,7,9]:i===4?[0,1,2,3,5,6,7,9,10]:i===5?[0,1,2,3,4,5,6,7,9,10,11]:i===6?[0,1,2,3,4,5,6,7,9,11]:[0,1,2,3,4,5,6,7,9,10]).includes(e.binding))}));
+  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?bodyBindings:i===1?[0,1,2,3,4,5,6,7,9]:i===2?[0,1,2,3,4,5,6,7,9,10,16]:i===4?[0,1,2,3,5,6,7,9,10]:i===3||i===5?[0,1,2,3,4,5,6,7,9,10,11]:[0,1,2,3,4,5,6,7,9,11]).includes(e.binding))}));
   const waveGroups=pipelines.map(pipe=>surfaceWaveGroups(device,pipe,surfaceWaves));
   const birthModule=await shader(sceneSource(MARINE_EFFECT_INIT),'marine emission height');
   const birthPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:birthModule,entryPoint:'marineBirthCS'}});
   const birthGroup=device.createBindGroup({layout:birthPipeline.getBindGroupLayout(0),entries:[0,6,7,9,10,11].map(binding=>({binding,resource:resources[binding]}))});
   const birthWaves=surfaceWaveGroups(device,birthPipeline,surfaceWaves);
+  const sheetContactPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:birthModule,entryPoint:'marineImpactContactCS'}});
+  const sheetContactGroup=device.createBindGroup({layout:sheetContactPipeline.getBindGroupLayout(0),entries:[0,6,7,9,10,16].map(binding=>({binding,resource:resources[binding]}))});
+  const sheetContactWaves=surfaceWaveGroups(device,sheetContactPipeline,surfaceWaves);
   const submerged=waterOptics?await waterOptics.capture({source,pipeline:pipelines[0],vertex:{entryPoint:'dolphinVS',buffers:layout},entry:'dolphinFS',world:'v.world',groups:surfaceWaves?2:1}):null;
   const submergedGroup=submerged?.bindGroup(bodyBindings.map(binding=>({binding,resource:resources[binding]})));
   const submergedWaves=submerged?surfaceWaveGroups(device,submerged.pipeline,surfaceWaves):null;
@@ -234,6 +238,7 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
   let waterCount=0,burstCount=0,blowCount=0,effectCount=0;
   return {state,trigger:(type,boat,options)=>state.trigger(type,boat,options),encode(pass){
       if(!effectCount)return;pass.setPipeline(birthPipeline);pass.setBindGroup(0,birthGroup);if(birthWaves)pass.setBindGroup(1,birthWaves[surfaceWaves.current]);pass.dispatchWorkgroups(effectCount);
+      if(burstCount){pass.setPipeline(sheetContactPipeline);pass.setBindGroup(0,sheetContactGroup);if(sheetContactWaves)pass.setBindGroup(1,sheetContactWaves[surfaceWaves.current]);pass.dispatchWorkgroups(burstCount);}
     },
     update(dt,boat,settings,terrain=null,vessels=[boat]){
       state.step(dt,boat,settings,terrain,vessels);waterCount=0;burstCount=0;blowCount=0;
@@ -269,14 +274,15 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
     draw(pass){
       if(state.active){const mesh=meshes[state.animals[0].type];bind(pass,0);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);}
       if(waterCount){bind(pass,1);pass.draw(DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_RINGS*DOLPHIN_RIPPLE_ROWS*6,waterCount);}
-      if(burstCount){bind(pass,2);pass.draw(DOLPHIN_SHEET_SEGMENTS*DOLPHIN_SHEET_ROWS*6,burstCount);
-        bind(pass,3);pass.draw(6,burstCount*DOLPHIN_DROP_COUNT);}
+      if(burstCount){bind(pass,2);pass.draw(MARINE_IMPACT_SEGMENTS*MARINE_IMPACT_ROWS*6,burstCount);
+        bind(pass,3);pass.draw(6,burstCount*MARINE_IMPACT_DROP_COUNT);
+        bind(pass,6);pass.draw(MARINE_FALLOUT_COUNT*6,burstCount);}
       if(blowCount){
         bind(pass,4);pass.draw(MARINE_MIST_COUNT*6,blowCount,0,waterCount);
         bind(pass,5);pass.draw(MARINE_BREATH_DROP_COUNT*6,blowCount,0,waterCount);
         bind(pass,6);pass.draw(MARINE_FALLOUT_COUNT*6,blowCount,0,waterCount);
       }
     },
-    destroy(){for(const b of [animals,effects,origins,landings,bones,...Object.values(meshes).flatMap(m=>[m.vertex,m.index])])b.destroy();for(const texture of textures)texture.destroy();},
+    destroy(){for(const b of [animals,effects,origins,landings,sheetContacts,bones,...Object.values(meshes).flatMap(m=>[m.vertex,m.index])])b.destroy();for(const texture of textures)texture.destroy();},
   };
 }

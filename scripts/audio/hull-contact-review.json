@@ -8,14 +8,15 @@
     "d1f6a305-acae-4c10-a556-da2a10d06264",
     "aad89777-c053-41cd-9cf8-43fdf90b44db",
     "519fda50-c4d9-49af-a409-96e0ad407d8d",
-    "e98d3a77-b757-47f2-a9fb-bbefa366ea65"
+    "e98d3a77-b757-47f2-a9fb-bbefa366ea65",
+    "8d2a6599-d53c-444e-80f8-3247cdd12fea"
   ],
   "findings": {
     "calmMix": "KEEP",
     "stationaryMix": "KEEP with minor flow-character reservation",
     "provisionalReentryMix": "EDIT: exposed steady wash character, lacked displacement body and pumped"
   },
-  "decision": "Retain quieter accepted light contacts and continuous pressure-driven wash. Suppress the provisional replayed-wash re-entry accent; no accepted bottom-slam asset or underside detector yet.",
+  "decision": "Retain quieter accepted light contacts and continuous pressure-driven wash. Actual bilge/keel GPU return probes now suppress coincident light accents; a separately accepted bottom-slam texture is still absent.",
   "sources": [
     {
       "id": "hull-pressure",
@@ -42,5 +43,16 @@
       "reason": "Argon rejected the edited take: vocal/knock artifacts and an unnatural tail. No asset promoted."
     }
   ],
-  "finalAmbientMix": "KEEP as ambient hull water; separate heavy-impact texture still absent"
+  "finalAmbientMix": "KEEP as ambient hull water; separate heavy-impact texture still absent",
+  "existingAssetAudition": {
+    "source": "assets/audio/voices/anchor-splash.mp3",
+    "purpose": "Possible underside-return accent, not anchor playback",
+    "generationCredits": 0,
+    "edit": "0.82 playback rate, 55 Hz high-pass, 1800 Hz low-pass, 2.7 s with fades, gain 0.42",
+    "context": "Existing rough-reentry wash with trial insertions at 6 s and 14 s",
+    "verdict": "REJECT both alone and in context",
+    "reason": "Distinct hollow point-source plunge/bubble signature, muffled slosh and obvious repetition; insufficient broad rushing hull-water churn.",
+    "limitation": "Argon reported direct audio ingestion; its approximate duration estimates were inaccurate and are not measurement evidence.",
+    "promotion": "None. Isolated WAVs and raw review remain under ignored .audio/argon-review/anchor-hull-audition/."
+  }
 }

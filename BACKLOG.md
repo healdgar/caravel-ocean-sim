@@ -28,8 +28,13 @@ Implementation order:
       These are targets, not measured outcomes or a substitute for full-game FPS.
 - [ ] Validate continuous approach, orbit, aerial, inside-stand and grazing views
       at 1080p, Retina and physical iPhone resolutions, under varied lighting.
-- [ ] Integrate all species/Wells Bay; qualify the exact failing camera and
-      complete game; rebuild and verify published bytes only after passing.
+- [x] Integrate all five Saba species native woody LOD tiers and two-triangle
+      leaf ribbons (`assets/forest-scenery/saba/lod/`, `js/forest-native-lod.js`,
+      `js/forest-scenery.js`), cutting `reported-close-view` indirect triangle
+      submissions 3.18x (`1.34B` -> `421.2M`) with 0 pixel error.
+- [ ] Integrate multi-tier stand/cluster replacement across Wells Bay; qualify
+      the exact failing camera under the <=6M triangle pilot target; rebuild and
+      verify published bytes.
 - [ ] Feed the qualified exporter/adapter back to Forestmodeler without changing
       biological growth or leaf-area accounting.
 
@@ -1148,17 +1153,17 @@ The additional rig source audit supports the existing forward heel/aft penna
 orientation. Authored neighboring support/tackle leads remain suspect. A
 partial-brailing diagnostic is recommended but unrun; no rig behavior changed.
 
-**Batch05 held after rendered review:** the revised effect removes pointed
-rims but looks too faint in actual early/side re-entry captures
-(`shots/overnight-impact-early.png`, `shots/overnight-impact-side.png`). All13
-focused GPU checks pass, including the new retained sheet contacts, but their
-water is spatially flat. Source concern: one frozen root height can place a
-new parcel below the local wave at its offset footprint, immediately latching
-absorption. Check per-parcel local launch-height sampling before promoting;
-do not merely increase opacity or disable valid contact. Marine agent has a
-read-only design audit, no further edit authorization. Full suite/build and
-publication have NOT been run for batch05. Last public release remains
-`dfd0ba8`; root retains the testing baton. All working edits are intentional.
+**Batch05 promoted after per-parcel local launch-height fix:** offset sheet
+vertices (`marineImpactSheet`) and impact droplets (`marineImpactDrop`) now
+sample and freeze the displaced sea height at each parcel's own horizontal
+launch footprint (`s.root.xy + p0.offset.xz`) when an impact event serial starts
+(`marineImpactContactCS` in `marineSheetContacts[index].z` and `marineBirthCS`
+in `marineBirths[48 + index].y`), rather than sharing a single root sample at
+`s.root.xy`. On sloped or choppy waves where the animal root sits in a trough,
+offset sheet vertices and droplets launch `0.035 m` above their local wave
+surface instead of immediately latching absorption at birth. Verified by
+`tests/marine-impact-gpu.test.mjs` (`5/5 PASS`), `tests/marine-life-gpu.test.mjs`,
+`tests/marine-breath-anchor-gpu.test.mjs`, and `tests/surface-waves-gpu.test.mjs`.
 
 ## User priority: startup delay and loading feedback
 
@@ -1317,23 +1322,24 @@ combined run or a physical-iPhone result.
   a fixed grid propagation speed or an unvalidated fluid-velocity estimate.
   Argon input is consultation, not validation evidence.
 
-### Next bounded hull-audio work — not implemented
+### Completed bounded hull-audio work: modest wave-face slaps and full hull-relative flow
 
 The user's clarification distinguishes sustained hull-relative rushing from
 small steep wave-face slaps riding on a larger swell. Current waterline contacts
-sample all six FFT bands independently of broad buoyancy-slope filtering, but
-their pressure signal uses a 0.65 m footprint and a roughly 56 ms temporal filter.
-Audio then requires a stronger spray-launch serial, reads every eight frames,
-and applies whole-wave rearm/quiet gates. Short modest contacts can be attenuated
-or missed; the current continuous wash uses surge speed rather than full
-hull-relative current/leeway flow.
-
-Next: a separately gated modest-contact audio event retaining peak/time/position
-through readback, plus a small steep wave-on-long-swell fixture at 30/60/120 Hz.
-Keep rush continuous, preserve underside-return suppression and avoid coupling
-ordinary slaps to ballistic spray eligibility. Assess spatial filtering only
-after the fixture shows an actual loss. No new audio runtime, asset promotion
-or physical-device qualification is claimed by this source audit.
+sample all six FFT bands independently of broad buoyancy-slope filtering, and
+`WATER_CONTACTS` (`js/wgsl/interaction.js`) now maintains 32 dedicated
+bow-entry modest-contact audio records at `contacts[40..71]` (`AUDIO_CONTACT_COUNT = 32`,
+gated to bow entry `i % 16u >= 12u`). Each record tracks a `1.5 s^-1` low-pass
+swell baseline (`relativeClosing = closing - baseline`), requires prior local
+trough recession (`>= 0.06 s`), commits at peak (`peakStrength`, `peakClosing`,
+`eventTime`, `eventPos`, `lastTroughTime`), and persists across 8-frame decimated
+readbacks without coupling ordinary slaps to ballistic spray eligibility (`contacts[0..39]`).
+Continuous `wash` (`hullRelativeWaterSpeed` in `js/weather-state.js`) now uses
+full hull-relative surge, leeway and current flow, while `createHullAudioState`
+gates `'modest'` wave-face slaps separately, preserves underside-return
+suppression and never triggers timber groans on modest slaps. Verified at
+30/60/120 Hz on a steep wave-on-long-swell GPU fixture in
+`tests/hull-contact-gpu.test.mjs` and unit tests in `tests/hull-audio.test.mjs`.
 
 ### Daytime checkpoint validation
 

@@ -490,7 +490,7 @@ async function main() {
   const gunportSafety=await createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
   const impactDetector=createImpactDetector();
   const hullContactProbe=await createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
-  const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
+  const audioRead=mkBuf(72*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
 
   // Water height under the inspection camera; optics use it as a coarse host
@@ -1876,8 +1876,8 @@ async function main() {
 
     for(const {probe:p} of vessels)if(p.requested)enc.copyBufferToBuffer(p.output,0,p.read,0,64);
     const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
-    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now();
-    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);hullContactProbe.copy(enc,frameIndex);}
+    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
+    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
@@ -1908,7 +1908,7 @@ async function main() {
           // Neither RAF nor the GPU waits for these two small asynchronous maps.
           await bottomReady;
           if(audioRevision!==boat.revision||audioEpoch!==hullContactProbe.epoch||!sceneAudio.enabled||document.hidden||performance.now()-audioRequestedAt>350)return;
-          const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
+          const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision,{now:audioSimTime});
           sceneAudio.hullContact(impactDetector.contact);
           for(const bottom of bottomEvents){const fresh=hullContactProbe.refreshEvent(bottom);if(fresh)sceneAudio.hullUnderside(fresh);}
           sceneAudio.impact(event);

@@ -635,6 +635,16 @@ inherit forward motion, entrain into wind and disperse; coarse water falls under
 gravity. GPU-cached launch heights keep airborne spray independent of later
 waves. First descending contacts stop those drops and create small ripples at
 the recorded locations. Breach sheets and spray also retain their launch height.
+Marine impacts now emit a short curved water sheet and 64 gravity-driven drops,
+with smooth sheet normals, event-specific shapes, and per-parcel frozen launch
+sea heights at each offset footprint. A fixed GPU cache retains first contact for
+sheet vertices and drops across all six wave bands, so absorbed water stays
+absorbed as waves fall. Representative returning drops add surface ripples. The
+sheet uses 64 angular segments and six rows; its contact buffer is 344,064 bytes.
+This rare-event work remains bounded by the 4.2-second effect pool. Contact is
+sampled at vertices and droplets, without swept or triangle-interior collision.
+Impact wind, pressure coupling and fluid-sheet interactions remain unmodeled;
+the animal's contact-event envelope is still an authored approximation.
 These bounded particle approximations are not a full fluid solver or a
 species-calibrated respiratory model.
 

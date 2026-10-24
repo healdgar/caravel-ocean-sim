@@ -6906,7 +6906,9 @@ const WAKE_SIZE = 256;
 const SPRAY_COUNT = 4096;
 const SHEET_COUNT = 128;
 // The first 32 contacts launch bow spray; eight aft contacts drive the stern wake.
+// Optional trailing 32 records retain separately gated bow modest-contact audio events.
 const CONTACT_COUNT = 40;
+const AUDIO_CONTACT_COUNT = 32;
 const INTERACTION_TYPES = /* wgsl */ `
 struct Interaction {
   domain: vec4f,   // world centre xz, extent, texel size
@@ -6967,7 +6969,7 @@ const WATER_CONTACTS = FRAME_WGSL + INTERACTION_TYPES + HULL_PROFILE + /* wgsl *
 @group(0) @binding(2) var<uniform> H: InteractionHull;
 @group(0) @binding(3) var seaTex: texture_2d_array<f32>;
 @group(0) @binding(4) var seaSamp: sampler;
-@group(0) @binding(5) var<storage, read_write> contacts: array<Contact, ${CONTACT_COUNT}>;
+@group(0) @binding(5) var<storage, read_write> contacts: array<Contact>;
 ` + INTERACTION_SEA + /* wgsl */ `
 // Pressure integrates a hull-sized patch; centimetre ripples should not fire a splash.
 // The geometric intersection above still follows the full-resolution surface.
@@ -7042,7 +7044,80 @@ fn pressureSea(p: vec2f) -> f32 {
   contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*peel,wet);
   contacts[i].state = vec4f(signedWater,select(age,0.001,launch),closing,select(old.state.w,old.state.w+1.0,launch));
   if(reset){contacts[i].state.w=0.0;}
-
+  // Separately gated modest-contact audio event at the bow entry. Retains peak,
+  // time and world position across 8-frame readbacks without coupling ordinary
+  // wave-face slaps on a long swell to ballistic spray sheet/droplet eligibility.
+  if(!aft && arrayLength(&contacts) > ${CONTACT_COUNT}u + i){
+    let slot = ${CONTACT_COUNT}u + i;
+    let prev = contacts[slot];
+    let bowEntry = i % 16u >= 12u;
+    let clock = select(prev.point.w + dt, I.phase.x, I.phase.x > prev.point.w);
+    if(reset || !bowEntry){
+      contacts[slot] = Contact(vec4f(p, clock), vec4f(0.0), vec4f(0.0, closing, 1.0, 0.0), vec4f(0.0, 0.0, -1.0, -1.0));
+    } else {
+      let baseline = mix(prev.flow.y, closing, 1.0 - exp(-dt * 1.5));
+      let relativeClosing = closing - baseline;
+      let effectiveClosing = select(closing, max(closing, relativeClosing + 0.28), wet > 0.35 && relativeClosing > 0.16);
+      let slapApproach = max(0.0, effectiveClosing - 0.35);
+      let slapHit = wet * min(3.5, slapApproach * slapApproach * 0.42) * (0.45 + 0.55 * entry) * mix(0.55, 1.0, u);
+      var mode = prev.flow.x;
+      var eventAge = min(10.0, prev.flow.z + dt);
+      let inTrough = closing < 0.24 || relativeClosing < -0.05 || slapHit < 0.012;
+      var receding = select(0.0, prev.flow.w + dt, inTrough);
+      var lastTrough = select(prev.state.z, clock, receding >= 0.06);
+      var eventPos = prev.point.xyz;
+      var eventTime = prev.point.w;
+      var peakStrength = prev.axis.x;
+      var peakClosing = prev.axis.y;
+      var eventWet = prev.axis.z;
+      var slapSerial = prev.axis.w;
+      var candPeak = prev.state.x;
+      var candClosing = prev.state.y;
+      if(mode < 0.5){
+        if(eventAge <= 0.20 && wet > 0.25 && slapHit > peakStrength){
+          peakStrength = slapHit;
+          peakClosing = max(peakClosing, effectiveClosing);
+          eventWet = max(eventWet, wet);
+        }
+        if(receding >= 0.06 && eventAge >= 0.30){
+          mode = 1.0;
+        }
+      } else if(mode < 1.5){
+        if(eventAge >= 0.30 && wet > 0.35 && effectiveClosing >= 0.52 && relativeClosing >= 0.18 && slapHit >= 0.045){
+          mode = 2.0;
+          eventAge = 0.0;
+          receding = 0.0;
+          candPeak = slapHit;
+          candClosing = effectiveClosing;
+          eventWet = wet;
+          eventPos = p;
+          eventTime = clock;
+        }
+      } else {
+        if(slapHit >= candPeak){
+          candPeak = slapHit;
+          candClosing = max(candClosing, effectiveClosing);
+          eventWet = max(eventWet, wet);
+          eventPos = p;
+          eventTime = clock;
+        }
+        if(slapHit < candPeak * 0.96 || eventAge >= 0.055 || wet <= 0.25){
+          mode = 0.0;
+          receding = 0.0;
+          peakStrength = candPeak;
+          peakClosing = candClosing;
+          slapSerial = slapSerial + 1.0;
+          eventAge = max(0.0, clock - eventTime);
+        }
+      }
+      contacts[slot] = Contact(
+        vec4f(eventPos, eventTime),
+        vec4f(peakStrength, peakClosing, eventWet, slapSerial),
+        vec4f(mode, baseline, eventAge, receding),
+        vec4f(candPeak, candClosing, lastTrough, relativeClosing)
+      );
+    }
+  }
 }
 `;
 
@@ -11924,11 +11999,14 @@ fn dolphinEffectData(s:DolphinSplash)->vec4f {return vec4f(s.root.z,s.root.w,s.s
 // ---- js/wgsl/marine-life.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Share moving-wave contact, atmosphere and the same wet skin lighting as the
-// dolphins. Only species-specific motion and the whale exhalation are added.
+// dolphins. Impact water and exhalation have separate, finite parcel dynamics.
 
 const MARINE_MIST_COUNT=96;
 const MARINE_BREATH_DROP_COUNT=64;
 const MARINE_FALLOUT_COUNT=24;
+const MARINE_IMPACT_SEGMENTS=64;
+const MARINE_IMPACT_ROWS=6;
+const MARINE_IMPACT_DROP_COUNT=64;
 // Analytic parcel motion in metres/seconds. Fine condensate follows a decaying
 // exhaled-air jet; heavier entrained water has drag and full gravity.
 const MARINE_BREATH_DYNAMICS=/* wgsl */ `
@@ -11955,6 +12033,57 @@ fn marineBreathParticle(eventAge:f32,id:u32,seed:f32,wind:vec2f,heading:f32,scal
   o.life=select(1.6+b*.7,2.6,coarse);
   o.opacity=select(.075,.7,coarse)*smoothstep(0.0,.045,o.age)*(1.0-smoothstep(o.life*.65,o.life,o.age));
   return o;
+}
+`;
+// A short lamella of water leaves the footprint over .18 seconds. Each row
+// labels a different emission time, with full gravity after release: no row
+// remains tethered to a later wave. Wind and fluid sheet interactions are not
+// modeled here. The existing surface ripples supply wave-attached foam.
+const MARINE_IMPACT_DYNAMICS=/* wgsl */ `
+struct MarineImpactSheet {offset:vec3f,velocity:vec3f,normal:vec3f,age:f32,birth:f32,life:f32,opacity:f32};
+struct MarineImpactDrop {offset:vec3f,velocity:vec3f,age:f32,birth:f32,life:f32,radius:f32,opacity:f32};
+fn marineImpactPhase(seed:f32,key:f32)->f32 {return seed+marineRandom(bitcast<u32>(key))*6.2831853;}
+fn marineImpactSheet(eventAge:f32,angle:f32,row:f32,seed:f32,heading:f32,scale:f32,strength:f32,speed:f32,key:f32)->MarineImpactSheet {
+  let phase=marineImpactPhase(seed,key);let force=clamp(strength,.1,2.6);let footprint=.23*max(.6,scale);
+  let birth=(1.0-row)*.18;let age=eventAge-birth;let t=max(0.0,age);let c=cos(angle);let s=sin(angle);
+  let wrinkle=1.0+.07*sin(angle*2.0+phase)+.035*sin(angle*3.0-phase);
+  let radius=footprint*wrinkle+(.8+force*1.3)*t;
+  let radial=.8+force*1.3;let upward=(1.8+force*2.35)*(.94+.06*sin(angle*2.0+phase));
+  let radiusAngle=footprint*(.14*cos(angle*2.0+phase)+.105*cos(angle*3.0-phase));
+  let upwardAngle=(1.8+force*2.35)*.12*cos(angle*2.0+phase);
+  let tangentAngle=vec3f(c*radiusAngle-s*radius,upwardAngle*t,1.15*(s*radiusAngle+c*radius));
+  // Once emitted, source travel during birth and flight sums to speed*eventAge,
+  // so it has no row derivative. The row derivative includes the complete g.
+  let tangentRow=vec3f(c*radial,upward-9.81*t,1.15*s*radial)*.18;
+  let surfaceNormal=cross(tangentAngle,tangentRow);let normalLength=length(surfaceNormal);
+  var o:MarineImpactSheet;
+  o.offset=dolphinYaw(vec3f(c*radius,.035+upward*t-4.905*t*t,1.15*s*radius-clamp(speed,0.0,12.0)*.22*(birth+t)),heading);
+  o.velocity=dolphinYaw(vec3f(c*radial,upward-9.81*t,1.15*s*radial-clamp(speed,0.0,12.0)*.22),heading);
+  o.normal=dolphinYaw(surfaceNormal/max(normalLength,1e-9),heading);
+  if(normalLength<1e-9){o.normal=vec3f(0,1,0);}
+  o.age=age;o.birth=birth;o.life=(upward+sqrt(upward*upward+2.0*9.81*.035))/9.81;
+  o.opacity=smoothstep(0.0,.025,age)*(1.0-smoothstep(o.life*.68,o.life,age));return o;
+}
+fn marineImpactDrop(eventAge:f32,id:u32,seed:f32,heading:f32,scale:f32,strength:f32,speed:f32,key:f32)->MarineImpactDrop {
+  let hash=id*747796405u+bitcast<u32>(seed)+bitcast<u32>(key);
+  let a=marineRandom(hash);let b=marineRandom(hash+277803737u);let c=marineRandom(hash+1597334677u);
+  let angle=f32(id)*2.3999632+marineImpactPhase(seed,key);let birth=a*.18;let age=eventAge-birth;let t=max(0.0,age);
+  let force=clamp(strength,.1,2.6);let radial=(.8+force*1.3)*(.45+.8*b);let upward=(1.8+force*2.35)*(.72+.42*c);
+  let source=vec3f(cos(angle)*.23*max(.6,scale)*(.75+.25*c),.035,sin(angle)*.23*max(.6,scale)*1.15*(.75+.25*c)-clamp(speed,0.0,12.0)*.22*birth);
+  let launch=vec3f(cos(angle)*radial,upward,sin(angle)*radial*1.15-clamp(speed,0.0,12.0)*.22);
+  var o:MarineImpactDrop;o.offset=dolphinYaw(source+launch*t+vec3f(0,-4.905*t*t,0),heading);
+  o.velocity=dolphinYaw(launch+vec3f(0,-9.81*t,0),heading);o.age=age;o.birth=birth;
+  o.life=(upward+sqrt(upward*upward+2.0*9.81*.035))/9.81;o.radius=(.012+c*.018)*clamp(scale/5.2,.6,2.0);
+  o.opacity=.62*smoothstep(0.0,.02,age)*(1.0-smoothstep(o.life*.82,o.life,age));return o;
+}
+fn marineImpactOpacity(p:MarineImpactDrop,hit:vec4f,key:f32)->f32 {
+  return select(p.opacity,0.0,key>0.0&&hit.x==key&&hit.y>=0.0);
+}
+fn marineSheetContactIndex(key:f32,column:u32,row:u32)->u32 {
+  return ((u32(key)%48u)*${MARINE_IMPACT_SEGMENTS}u+column%${MARINE_IMPACT_SEGMENTS}u)*${MARINE_IMPACT_ROWS+1}u+row;
+}
+fn marineSheetOpacity(p:MarineImpactSheet,hit:vec4f,key:f32)->f32 {
+  return select(p.opacity,0.0,key>0.0&&hit.x==key&&hit.y>=0.0);
 }
 `;
 const marineBodyVertex=/* wgsl */ `
@@ -12007,13 +12136,14 @@ const marineEffects=DOLPHIN_RENDER.slice(marineBodyEnd)
     'let radius=dot(v.uv,v.uv);if(radius>.96||v.world.y<=dolphinHeight(v.world.xz)){discard;}');
 const marineBodyBindings=DOLPHIN_RENDER.slice(0,marineBodyBegin)
   .replace(/@location\(2\)\s*albedo:vec3f};/,'@location(2) albedo:vec3f,@location(3) uv:vec2f,@location(4) species:f32};');
-const MARINE_LIFE_RENDER=marineBodyBindings+marineBodyVertex+marineEffects+MARINE_BREATH_DYNAMICS+/* wgsl */ `
+const MARINE_LIFE_RENDER=marineBodyBindings+marineBodyVertex+marineEffects+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
 @group(0) @binding(10) var<storage,read> marineOrigins:array<vec4f>;
 @group(0) @binding(11) var<storage,read> marineLandings:array<vec4f>;
 @group(0) @binding(12) var marineColor:texture_2d<f32>;
 @group(0) @binding(13) var marineNormal:texture_2d<f32>;
 @group(0) @binding(14) var marineRoughness:texture_2d<f32>;
 @group(0) @binding(15) var<storage,read> marineBones:array<mat4x4f>;
+@group(0) @binding(16) var<storage,read> marineSheetLandings:array<vec4f>;
 fn marineBirthSea(s:DolphinSplash)->f32 {
   let origin=marineOrigins[u32(s.motion.w)%48u];
   if(origin.x==s.motion.w&&s.motion.w>0.0){return origin.y;}
@@ -12021,6 +12151,66 @@ fn marineBirthSea(s:DolphinSplash)->f32 {
 }
 fn marineBreathWorld(s:DolphinSplash,p:MarineBreath)->vec3f {
   return vec3f(s.root.x,marineBirthSea(s)+s.motion.x,s.root.y)+p.offset;
+}
+fn marineImpactWorld(s:DolphinSplash,offset:vec3f)->vec3f {return vec3f(s.root.x,marineBirthSea(s),s.root.y)+offset;}
+fn marineImpactDropBirthSea(s:DolphinSplash,id:u32)->f32 {
+  let index=48u+(u32(s.motion.w)%48u)*${MARINE_IMPACT_DROP_COUNT}u+id%${MARINE_IMPACT_DROP_COUNT}u;
+  if(index<arrayLength(&marineOrigins)){
+    let origin=marineOrigins[index];
+    if(origin.x==s.motion.w&&s.motion.w>0.0){return origin.y;}
+  }
+  return marineBirthSea(s);
+}
+fn marineImpactDropWorld(s:DolphinSplash,id:u32,offset:vec3f)->vec3f {
+  return vec3f(s.root.x,marineImpactDropBirthSea(s,id),s.root.y)+offset;
+}
+fn marineImpactSheetBirthSea(s:DolphinSplash,hit:vec4f)->f32 {
+  if(s.motion.w>0.0&&hit.x==s.motion.w){return hit.z;}
+  return marineBirthSea(s);
+}
+fn marineImpactSheetWorld(s:DolphinSplash,offset:vec3f,hit:vec4f)->vec3f {
+  return vec3f(s.root.x,marineImpactSheetBirthSea(s,hit),s.root.y)+offset;
+}
+struct MarineImpactVertex {@builtin(position) pos:vec4f,@location(0) uv:vec2f,@location(1) world:vec3f,@location(2) data:vec4f,@location(3) normal:vec3f};
+@vertex fn marineImpactSheetVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) id:u32)->MarineImpactVertex {
+  let s=splashes[id];let corner=dolphinCorner(vertex%6u)*.5+.5;let cell=vertex/6u;
+  let segment=cell%${MARINE_IMPACT_SEGMENTS}u;let column=(segment+u32(corner.x))%${MARINE_IMPACT_SEGMENTS}u;
+  let rowIndex=cell/${MARINE_IMPACT_SEGMENTS}u+u32(corner.y);
+  // Geometry and contact share the exact seam sample; only the interpolated
+  // material angle remains unwrapped across the final angular cell.
+  let angle=f32(column)*(2.0*PI)/${MARINE_IMPACT_SEGMENTS}.0;let row=f32(rowIndex)/${MARINE_IMPACT_ROWS}.0;
+  let p=marineImpactSheet(s.root.z,angle,row,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+  let hit=marineSheetLandings[marineSheetContactIndex(s.motion.w,column,rowIndex)];
+  var o:MarineImpactVertex;o.world=marineImpactSheetWorld(s,p.offset,hit);o.normal=p.normal;
+  o.uv=vec2f((f32(segment)+corner.x)*(2.0*PI)/${MARINE_IMPACT_SEGMENTS}.0,row);
+  o.data=vec4f(p.age,marineSheetOpacity(p,hit,s.motion.w),marineImpactPhase(s.shape.y,s.motion.w),s.root.w);
+  o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+}
+@fragment fn marineImpactSheetFS(v:MarineImpactVertex)->@location(0) vec4f {
+  if(v.data.x<=0.0||v.world.y<=dolphinHeight(v.world.xz)){discard;}
+  let edge=smoothstep(0.0,.12,v.uv.y)*(1.0-smoothstep(.82,1.0,v.uv.y));
+  let lace=.62+.2*sin(v.uv.x*11.0+v.data.z)*sin(v.uv.y*9.0+v.data.z)+.18*sin(v.uv.x*17.0-v.uv.y*11.0);
+  let opening=smoothstep(.12,.55,v.data.x);let film=smoothstep(opening*.55,opening*.55+.22,lace);
+  let foam=.08+.22*opening+.08*sin(v.uv.x*5.0+v.data.z)*sin(v.uv.x*5.0+v.data.z);
+  let alpha=v.data.y*edge*film*(.16+.18*foam)*min(1.0,.45+v.data.w);
+  if(alpha<.003){discard;}
+  return vec4f(surfaceAir(dolphinWaterColor(v.world,v.normal,foam),v.world)*alpha,alpha);
+}
+@vertex fn marineImpactDropVS(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->DolphinEffect {
+  let s=splashes[instance/${MARINE_IMPACT_DROP_COUNT}u];let id=instance%${MARINE_IMPACT_DROP_COUNT}u;
+  let p=marineImpactDrop(s.root.z,id,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+  let centre=marineImpactDropWorld(s,id,p.offset);let hit=marineLandings[(u32(s.motion.w)%48u)*${MARINE_BREATH_DROP_COUNT}u+id];
+  let corner=dolphinCorner(vertex);let up=normalize(F.camUp.xyz);let right=normalize(F.camRight.xyz);
+  let stretch=min(.05,abs(dot(p.velocity,up))*.006);
+  var o:DolphinEffect;o.world=centre;o.uv=corner;o.data=vec4f(p.age,marineImpactOpacity(p,hit,s.motion.w),s.shape.y,0);
+  o.pos=F.viewProj*vec4f(centre-F.camPos.xyz+right*corner.x*p.radius+up*corner.y*(p.radius+stretch),1);return o;
+}
+@fragment fn marineImpactDropFS(v:DolphinEffect)->@location(0) vec4f {
+  let r2=dot(v.uv,v.uv);if(r2>=1.0||v.world.y<=dolphinHeight(v.world.xz)){discard;}
+  let alpha=(1.0-smoothstep(.2,1.0,r2))*v.data.y;if(alpha<.001){discard;}
+  let eye=normalize(F.camPos.xyz-v.world);
+  let normal=normalize(normalize(F.camRight.xyz)*v.uv.x+normalize(F.camUp.xyz)*v.uv.y+eye*sqrt(max(.01,1.0-r2)));
+  return vec4f(surfaceAir(dolphinWaterColor(v.world,normal,.12),v.world)*alpha,alpha);
 }
 // Many soft, staggered parcels detach from a brief moving exhalation. There is
 // no connected cone, cylinder, or continuously rising sheet.
@@ -12076,9 +12266,35 @@ fn marineBreathWorld(s:DolphinSplash,p:MarineBreath)->vec3f {
 
 // Fixed-size birth-height cache, keyed by event serial rather than sorted draw
 // order. Only a new event samples the sea; detached spray cannot ride later waves.
-const MARINE_EFFECT_INIT=DOLPHIN_RENDER+MARINE_BREATH_DYNAMICS+/* wgsl */ `
+const MARINE_EFFECT_INIT=DOLPHIN_RENDER+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
 @group(0) @binding(10) var<storage,read_write> marineBirths:array<vec4f>;
 @group(0) @binding(11) var<storage,read_write> marineContacts:array<vec4f>;
+@group(0) @binding(16) var<storage,read_write> marineSheetContacts:array<vec4f>;
+// Separate dispatch preserves the existing birth/breath pipeline's bindings.
+// Every material vertex freezes its own launch-footprint sea height and latches
+// absorption, including waves overtaking rising sheet water. Neither falling
+// waves nor draw-order changes release that latch.
+@compute @workgroup_size(${MARINE_IMPACT_SEGMENTS}) fn marineImpactContactCS(@builtin(workgroup_id) id:vec3u,@builtin(local_invocation_id) local:vec3u){
+  let s=splashes[id.x];if(s.motion.w<=0.0||s.shape.z<.5||s.shape.z>=2.5){return;}
+  let slot=u32(s.motion.w)%48u;let origin=marineBirths[slot];
+  if(origin.x!=s.motion.w){return;}
+  let angle=f32(local.x)*(2.0*PI)/${MARINE_IMPACT_SEGMENTS}.0;
+  for(var row=0u;row<=${MARINE_IMPACT_ROWS}u;row++){
+    let rowFrac=f32(row)/${MARINE_IMPACT_ROWS}.0;
+    let index=marineSheetContactIndex(s.motion.w,local.x,row);
+    var hit=marineSheetContacts[index];
+    if(hit.x!=s.motion.w){
+      let p0=marineImpactSheet(0.0,angle,rowFrac,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+      hit=vec4f(s.motion.w,-1.0,dolphinHeight(s.root.xy+p0.offset.xz),0.0);
+    }
+    if(hit.y<0.0){
+      let p=marineImpactSheet(s.root.z,angle,rowFrac,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+      let world=vec3f(s.root.x,hit.z,s.root.y)+p.offset;
+      if(p.age>0.0&&world.y<=dolphinHeight(world.xz)){hit=vec4f(s.motion.w,s.root.z,hit.z,0.0);}
+    }
+    marineSheetContacts[index]=hit;
+  }
+}
 @compute @workgroup_size(${MARINE_BREATH_DROP_COUNT}) fn marineBirthCS(@builtin(workgroup_id) id:vec3u,@builtin(local_invocation_id) local:vec3u){
   let s=splashes[id.x];let slot=u32(s.motion.w)%48u;
   if(local.x==0u&&s.motion.w>0.0&&marineBirths[slot].x!=s.motion.w){
@@ -12089,9 +12305,35 @@ const MARINE_EFFECT_INIT=DOLPHIN_RENDER+MARINE_BREATH_DYNAMICS+/* wgsl */ `
     marineBirths[slot]=vec4f(s.motion.w,dolphinHeight(anchor),0,0);
   }
   storageBarrier();
-  if(s.motion.w<=0.0||s.shape.z<2.5){return;}
+  if(s.motion.w<=0.0||s.shape.z<.5){return;}
   let index=slot*${MARINE_BREATH_DROP_COUNT}u+local.x;
-  var hit=marineContacts[index];if(hit.x!=s.motion.w){hit=vec4f(s.motion.w,-1,0,0);}
+  var hit=marineContacts[index];
+  if(s.shape.z<2.5){
+    let dropBirthIndex=48u+index;
+    var launchY=marineBirths[slot].y;
+    if(local.x<${MARINE_IMPACT_DROP_COUNT}u){
+      if(dropBirthIndex<arrayLength(&marineBirths)){
+        if(marineBirths[dropBirthIndex].x!=s.motion.w){
+          let p0=marineImpactDrop(0.0,local.x,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+          marineBirths[dropBirthIndex]=vec4f(s.motion.w,dolphinHeight(s.root.xy+p0.offset.xz),0,0);
+        }
+        launchY=marineBirths[dropBirthIndex].y;
+      }else if(hit.x!=s.motion.w){
+        let p0=marineImpactDrop(0.0,local.x,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+        launchY=dolphinHeight(s.root.xy+p0.offset.xz);
+      }
+    }
+    if(hit.x!=s.motion.w){hit=vec4f(s.motion.w,-1,0,0);}
+    if(local.x<${MARINE_IMPACT_DROP_COUNT}u&&hit.y<0.0){
+      let p=marineImpactDrop(s.root.z,local.x,s.shape.y,s.shape.x,s.shape.w,s.root.w,s.motion.x,s.motion.w);
+      let world=vec3f(s.root.x,launchY,s.root.y)+p.offset;
+      // A rising wave can absorb rising water too. Once contact is recorded,
+      // a later falling wave must not resurrect the airborne parcel.
+      if(p.age>0.0&&world.y<=dolphinHeight(world.xz)){hit=vec4f(s.motion.w,s.root.z,world.xz);}
+    }
+    marineContacts[index]=hit;return;
+  }
+  if(hit.x!=s.motion.w){hit=vec4f(s.motion.w,-1,0,0);}
   if(hit.y<0.0){
     let p=marineBreathParticle(s.root.z,local.x,s.shape.y,s.motion.yz,s.shape.x,s.shape.w/5.2,true);
     let world=vec3f(s.root.x,marineBirths[slot].y+s.motion.x,s.root.y)+p.offset;
@@ -15478,9 +15720,10 @@ async function createMarineLife({device,frameUBO,transView,skyView,sampler,envVi
   const bones=buffer('whale joint poses',whaleRig.update(0,0),B.STORAGE);
   const values=new Float32Array(MARINE_ANIMAL_LIMIT*8),effectValues=new Float32Array(MARINE_EFFECT_LIMIT*12);
   const animals=buffer('marine animal poses',values,B.STORAGE),effects=buffer('marine surface events',effectValues,B.STORAGE);
-  const origins=buffer('marine emission origins',new Float32Array(MARINE_EFFECT_LIMIT*4),B.STORAGE);
+  const origins=buffer('marine emission origins',new Float32Array(MARINE_EFFECT_LIMIT*(1+MARINE_IMPACT_DROP_COUNT)*4),B.STORAGE);
   const seededBirthKeys=new Float64Array(MARINE_EFFECT_LIMIT),birthSeed=new Float32Array(4);
   const landings=buffer('marine droplet contacts',new Float32Array(MARINE_EFFECT_LIMIT*MARINE_BREATH_DROP_COUNT*4),B.STORAGE);
+  const sheetContacts=buffer('marine sheet contacts',new Float32Array(MARINE_EFFECT_LIMIT*MARINE_IMPACT_SEGMENTS*(MARINE_IMPACT_ROWS+1)*4),B.STORAGE);
   const meshes={};for(const kind of ['shark','whale']){
     const mesh=kind==='whale'?whaleModel:createMarineMesh(kind),stride=kind==='whale'?11:9,num=mesh.vertices.length/stride;
     const data=new ArrayBuffer(num*68),f=new Float32Array(data),j=new Uint16Array(data);
@@ -15494,18 +15737,21 @@ async function createMarineLife({device,frameUBO,transView,skyView,sampler,envVi
   const source=sceneSource(MARINE_LIFE_RENDER);
   const module=await shader(source,'marine wildlife');
   const layout=[{arrayStride:68,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'float32x2'},{shaderLocation:4,offset:44,format:'uint16x4'},{shaderLocation:5,offset:52,format:'float32x4'}]}];
-  const kinds=[['dolphin',layout,'marine animals'],['dolphinRipple',[],'marine ripples'],['dolphinSplash',[],'marine splash crowns'],['dolphinDrop',[],'marine spray'],['marineBlow',[],'whale breath mist'],['marineBreathDrop',[],'whale breath water'],['marineFallout',[],'whale breath fallout']];
+  const kinds=[['dolphin',layout,'marine animals'],['dolphinRipple',[],'marine ripples'],['marineImpactSheet',[],'marine impact water sheet'],['marineImpactDrop',[],'marine impact drops'],['marineBlow',[],'whale breath mist'],['marineBreathDrop',[],'whale breath water'],['marineFallout',[],'marine water fallout']];
   const pipelines=await Promise.all(kinds.map(([kind,buffers,label],i)=>device.createRenderPipelineAsync({label,layout:'auto',
     vertex:{module,entryPoint:kind+'VS',buffers},fragment:{module,entryPoint:kind+'FS',targets:[{format,...(i?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
     primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})));
-  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects},{buffer:origins},{buffer:landings},...textures.map(t=>t.createView()),{buffer:bones}];
+  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:animals},{buffer:effects},{buffer:origins},{buffer:landings},...textures.map(t=>t.createView()),{buffer:bones},{buffer:sheetContacts}];
   const bodyBindings=[0,1,2,3,4,5,6,7,8,12,13,14,15];
-  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?bodyBindings:i===1?[0,1,2,3,4,5,6,7,9]:i===4?[0,1,2,3,5,6,7,9,10]:i===5?[0,1,2,3,4,5,6,7,9,10,11]:i===6?[0,1,2,3,4,5,6,7,9,11]:[0,1,2,3,4,5,6,7,9,10]).includes(e.binding))}));
+  const groups=pipelines.map((pipe,i)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource})).filter(e=>(i===0?bodyBindings:i===1?[0,1,2,3,4,5,6,7,9]:i===2?[0,1,2,3,4,5,6,7,9,10,16]:i===4?[0,1,2,3,5,6,7,9,10]:i===3||i===5?[0,1,2,3,4,5,6,7,9,10,11]:[0,1,2,3,4,5,6,7,9,11]).includes(e.binding))}));
   const waveGroups=pipelines.map(pipe=>surfaceWaveGroups(device,pipe,surfaceWaves));
   const birthModule=await shader(sceneSource(MARINE_EFFECT_INIT),'marine emission height');
   const birthPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:birthModule,entryPoint:'marineBirthCS'}});
   const birthGroup=device.createBindGroup({layout:birthPipeline.getBindGroupLayout(0),entries:[0,6,7,9,10,11].map(binding=>({binding,resource:resources[binding]}))});
   const birthWaves=surfaceWaveGroups(device,birthPipeline,surfaceWaves);
+  const sheetContactPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:birthModule,entryPoint:'marineImpactContactCS'}});
+  const sheetContactGroup=device.createBindGroup({layout:sheetContactPipeline.getBindGroupLayout(0),entries:[0,6,7,9,10,16].map(binding=>({binding,resource:resources[binding]}))});
+  const sheetContactWaves=surfaceWaveGroups(device,sheetContactPipeline,surfaceWaves);
   const submerged=waterOptics?await waterOptics.capture({source,pipeline:pipelines[0],vertex:{entryPoint:'dolphinVS',buffers:layout},entry:'dolphinFS',world:'v.world',groups:surfaceWaves?2:1}):null;
   const submergedGroup=submerged?.bindGroup(bodyBindings.map(binding=>({binding,resource:resources[binding]})));
   const submergedWaves=submerged?surfaceWaveGroups(device,submerged.pipeline,surfaceWaves):null;
@@ -15513,6 +15759,7 @@ async function createMarineLife({device,frameUBO,transView,skyView,sampler,envVi
   let waterCount=0,burstCount=0,blowCount=0,effectCount=0;
   return {state,trigger:(type,boat,options)=>state.trigger(type,boat,options),encode(pass){
       if(!effectCount)return;pass.setPipeline(birthPipeline);pass.setBindGroup(0,birthGroup);if(birthWaves)pass.setBindGroup(1,birthWaves[surfaceWaves.current]);pass.dispatchWorkgroups(effectCount);
+      if(burstCount){pass.setPipeline(sheetContactPipeline);pass.setBindGroup(0,sheetContactGroup);if(sheetContactWaves)pass.setBindGroup(1,sheetContactWaves[surfaceWaves.current]);pass.dispatchWorkgroups(burstCount);}
     },
     update(dt,boat,settings,terrain=null,vessels=[boat]){
       state.step(dt,boat,settings,terrain,vessels);waterCount=0;burstCount=0;blowCount=0;
@@ -15548,15 +15795,16 @@ async function createMarineLife({device,frameUBO,transView,skyView,sampler,envVi
     draw(pass){
       if(state.active){const mesh=meshes[state.animals[0].type];bind(pass,0);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);}
       if(waterCount){bind(pass,1);pass.draw(DOLPHIN_RIPPLE_SEGMENTS*DOLPHIN_RIPPLE_RINGS*DOLPHIN_RIPPLE_ROWS*6,waterCount);}
-      if(burstCount){bind(pass,2);pass.draw(DOLPHIN_SHEET_SEGMENTS*DOLPHIN_SHEET_ROWS*6,burstCount);
-        bind(pass,3);pass.draw(6,burstCount*DOLPHIN_DROP_COUNT);}
+      if(burstCount){bind(pass,2);pass.draw(MARINE_IMPACT_SEGMENTS*MARINE_IMPACT_ROWS*6,burstCount);
+        bind(pass,3);pass.draw(6,burstCount*MARINE_IMPACT_DROP_COUNT);
+        bind(pass,6);pass.draw(MARINE_FALLOUT_COUNT*6,burstCount);}
       if(blowCount){
         bind(pass,4);pass.draw(MARINE_MIST_COUNT*6,blowCount,0,waterCount);
         bind(pass,5);pass.draw(MARINE_BREATH_DROP_COUNT*6,blowCount,0,waterCount);
         bind(pass,6);pass.draw(MARINE_FALLOUT_COUNT*6,blowCount,0,waterCount);
       }
     },
-    destroy(){for(const b of [animals,effects,origins,landings,bones,...Object.values(meshes).flatMap(m=>[m.vertex,m.index])])b.destroy();for(const texture of textures)texture.destroy();},
+    destroy(){for(const b of [animals,effects,origins,landings,sheetContacts,bones,...Object.values(meshes).flatMap(m=>[m.vertex,m.index])])b.destroy();for(const texture of textures)texture.destroy();},
   };
 }
 
@@ -20348,7 +20596,7 @@ async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaS
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
   const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView,sunVis,shader,computePipe,surfaceWaves});
-  const contacts = device.createBuffer({ label: 'hull contacts', size: CONTACT_COUNT * 64, usage: bu.STORAGE | bu.COPY_SRC });
+  const contacts = device.createBuffer({ label: 'hull contacts', size: (CONTACT_COUNT + AUDIO_CONTACT_COUNT) * 64, usage: bu.STORAGE | bu.COPY_SRC });
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
   const landings = device.createBuffer({ label: 'spray landing foam', size: WAKE_SIZE * WAKE_SIZE * 4, usage: bu.STORAGE | bu.COPY_SRC });
@@ -24298,18 +24546,29 @@ function createWeatherState(random=Math.random){
   };
 }
 
+function hullRelativeWaterSpeed({speed=0,surge=speed,leeway=0,sway=leeway,currentSurge=0,currentSway=0,currentX=0,currentZ=0,heading=0}={}){
+  const u=Number.isFinite(surge)?surge:0,v=Number.isFinite(sway)?sway:0;
+  const cu=Number.isFinite(currentSurge)?currentSurge:0,cv=Number.isFinite(currentSway)?currentSway:0;
+  const cx=Number.isFinite(currentX)?currentX:0,cz=Number.isFinite(currentZ)?currentZ:0;
+  const h=(Number.isFinite(heading)?heading:0)*Math.PI/180;
+  const worldAlong=cx*Math.sin(h)-cz*Math.cos(h),worldAcross=cx*Math.cos(h)+cz*Math.sin(h);
+  return Math.hypot(u-cu-worldAlong,v-cv-worldAcross);
+}
+
 // New GPU contact serials, rather than a timer or wave height, trigger hull slaps.
 // Suppress first samples and resets so loading/teleporting cannot play false impacts.
 function createImpactDetector(count=40){
-  const serials=new Float32Array(count).fill(-1);let revision=-1;
-  return {contact:null,sample(values,boatRevision){
-    let event=null,wet=0,pressure=0,closing=0,impact=0,weight=0,x=0,y=0,z=0,valid=0;
+  const bowLimit=Math.min(32,count),serials=new Float32Array(count).fill(-1),modestSerials=new Float32Array(bowLimit).fill(-1);
+  let revision=-1;
+  return {contact:null,sample(values,boatRevision,{now,staleSeconds=.35}={}){
+    let event=null,modestEvent=null,wet=0,pressure=0,closing=0,relativeClosing=null,lastTroughTime=null,impact=0,weight=0,x=0,y=0,z=0,valid=0;
     const reset=revision!==boatRevision;revision=boatRevision;
+    const hasModest=values?.length>=(count+bowLimit)*16;
     for(let i=0;i<count;i++){
       const at=i*16,serial=values[at+15],strength=values[at+7];
       if(!Number.isFinite(serial)||!Number.isFinite(strength)||!Number.isFinite(values[at])||!Number.isFinite(values[at+1])||!Number.isFinite(values[at+2]))continue;
       // The eight aft records force the stern wake; they are not bow slams.
-      const bow=i<Math.min(32,count),contactWet=weatherClamp(values[at+11]),rise=weatherClamp(values[at+14],-8,8);
+      const bow=i<bowLimit,contactWet=weatherClamp(values[at+11]),rise=weatherClamp(values[at+14],-8,8);
       if(bow){
         const force=weatherClamp(values[at+3],0,4),w=force+.03*contactWet;
         wet+=contactWet;pressure+=force;closing=Math.max(closing,Math.max(0,rise));impact=Math.max(impact,Math.max(0,strength));
@@ -24318,10 +24577,26 @@ function createImpactDetector(count=40){
       if(bow&&!reset&&serials[i]>=0&&serial>serials[i]&&strength>.10&&strength>(event?.strength??-1))
         event={x:values[at],y:values[at+1],z:values[at+2],strength,closing:Math.max(0,rise),wet:contactWet,kind:'light'};
       serials[i]=serial;
+      if(bow&&hasModest){
+        const mat=(count+i)*16,mx=values[mat],my=values[mat+1],mz=values[mat+2],mtime=values[mat+3];
+        const mpeak=values[mat+4],mclosing=values[mat+5],mwet=weatherClamp(values[mat+6]),mserial=values[mat+7];
+        const mage=values[mat+10],mtrough=values[mat+14],mrel=values[mat+15];
+        if(Number.isFinite(mrel)&&mrel>-.5)relativeClosing=Math.max(relativeClosing??0,Math.max(0,mrel));
+        if(Number.isFinite(mtrough)&&mtrough>=0)lastTroughTime=Math.max(lastTroughTime??-Infinity,mtrough);
+        if(!Number.isFinite(mserial))continue;
+        if(reset||modestSerials[i]<0||mserial<modestSerials[i]){modestSerials[i]=mserial;continue;}
+        if(mserial>modestSerials[i]){
+          modestSerials[i]=mserial;
+          const age=Number.isFinite(now)&&Number.isFinite(mtime)?Math.max(Number.isFinite(mage)?mage:0,now-mtime):mage;
+          if([mx,my,mz,mtime,mpeak,mclosing,age].every(Number.isFinite)&&mpeak>=.045&&mclosing>=.5&&mwet>.25&&age>=-.001&&age<=staleSeconds&&mpeak>(modestEvent?.strength??-1)){
+            modestEvent={x:mx,y:my,z:mz,time:mtime,age,strength:mpeak,peakStrength:mpeak,closing:mclosing,peakClosing:mclosing,wet:mwet,probe:i,serial:mserial,kind:'modest'};
+          }
+        }
+      }
     }
-    this.contact={revision:boatRevision,reset,wet:valid?wet/valid:0,pressure:valid?pressure/valid:0,closing,impact,
-      position:weight>1e-8?{x:x/weight,y:y/weight,z:z/weight}:null};
-    return event;
+    this.contact={revision:boatRevision,reset,wet:valid?wet/valid:0,pressure:valid?pressure/valid:0,closing,
+      relativeClosing:relativeClosing??closing,lastTroughTime,impact,position:weight>1e-8?{x:x/weight,y:y/weight,z:z/weight}:null};
+    return event&&event.strength>=.18?event:(modestEvent??event);
   }};
 }
 
@@ -24331,10 +24606,16 @@ function createImpactDetector(count=40){
 // encounter speed gates events; it is not impact pressure or measured energy.
 function createHullAudioState(){
   let time=0,lastContact=-Infinity,revision=null,contact=null,wash=0,quietUntil=0,latched=false,receding=0,lastReturn=null;
+  let modestQuietUntil=0,modestLatched=false,modestReceding=0,lastModestEventTime=-Infinity,returnQuietUntil=0;
   return {
     contact(value){
       if(!value||!Number.isFinite(value.pressure)||!Number.isFinite(value.wet))return false;
-      if(value.reset||revision!==value.revision){latched=false;receding=0;quietUntil=time+1;}
+      if(value.reset||revision!==value.revision){
+        latched=false;receding=0;quietUntil=time+1;
+        modestLatched=false;modestReceding=0;modestQuietUntil=time+1;lastModestEventTime=-Infinity;returnQuietUntil=0;
+      }else if(Number.isFinite(value.lastTroughTime)&&value.lastTroughTime>lastModestEventTime+.12&&time>=returnQuietUntil){
+        modestLatched=false;
+      }
       revision=value.revision;contact=value;lastContact=time;return true;
     },
     underside(event){
@@ -24343,33 +24624,54 @@ function createHullAudioState(){
       if(![event.epoch,event.probe,event.serial].every(Number.isInteger)||event.probe<0||event.probe>=10)return false;
       const key=[event.epoch,event.probe,event.serial].join(':');if(key===lastReturn)return false;
       lastReturn=key;latched=true;receding=0;quietUntil=Math.max(quietUntil,time+3.2);
+      modestLatched=true;modestReceding=0;returnQuietUntil=Math.max(returnQuietUntil,time+3.2);modestQuietUntil=Math.max(modestQuietUntil,returnQuietUntil);
       // Listening rejected the available crash candidates. Continue the wash
       // and suppress a coincident light splash, without substituting a sound.
       return true;
     },
-    update(dt,{speed=0}={}){
+    update(dt,options={}){
       dt=weatherClamp(dt,0,.1);time+=dt;
       const fresh=contact&&time-lastContact<1,wet=fresh?weatherClamp(contact.wet):.8;
       const pressure=fresh?weatherClamp(contact.pressure,0,2):0,closing=fresh?weatherClamp(contact.closing/3):0;
-      const flow=weatherClamp(Math.abs(Number.isFinite(speed)?speed:0)/5);
+      const flow=weatherClamp(hullRelativeWaterSpeed(options)/5);
       const target=weatherClamp(.32*Math.sqrt(flow)*Math.sqrt(wet)+.17*Math.sqrt(pressure)*wet+.08*closing*wet,0,.48);
       wash+=(target-wash)*(1-Math.exp(-dt/(target>wash ? .22 : 1.05)));
       // A new serial at the next bow station can still be the same passing wave.
       // Rearm only after its pressure/rise recedes, rather than every half second.
       if(fresh&&contact.closing<.24&&contact.impact<.09)receding+=dt;else receding=0;
       if(receding>.45)latched=false;
+      const faceClosing=fresh&&Number.isFinite(contact.relativeClosing)?contact.relativeClosing:fresh?contact.closing:0;
+      if(fresh&&faceClosing<.22&&time>=returnQuietUntil)modestReceding+=dt;else modestReceding=0;
+      if(modestReceding>.10)modestLatched=false;
       return {wash,fresh,position:contact?.position??null};
     },
     impact(event){
-      if(!event||!Number.isFinite(event.strength)||event.strength<.18||time<quietUntil)return null;
-      if(![event.x,event.y??0,event.z].every(Number.isFinite))return null;
-      if((event.kind&&event.kind!=='light')||latched)return null;
+      if(!event||!Number.isFinite(event.strength)||![event.x,event.y??0,event.z].every(Number.isFinite))return null;
+      if(event.kind==='modest'){
+        const closing=event.closing,peakClosing=event.peakClosing??closing,peakStrength=event.peakStrength??event.strength;
+        if(![closing,peakClosing,peakStrength].every(Number.isFinite)||peakStrength<.045||closing<.5||peakClosing<closing)return null;
+        if(event.age!==undefined&&(!Number.isFinite(event.age)||event.age<-.001||event.age>.35))return null;
+        if(event.time!==undefined&&!Number.isFinite(event.time))return null;
+        if(time<modestQuietUntil||time<returnQuietUntil||modestLatched)return null;
+        const strength=weatherClamp(peakStrength/1.2);
+        modestLatched=true;modestReceding=0;lastModestEventTime=Number.isFinite(event.time)?event.time:time;
+        modestQuietUntil=time+.65+strength*.35;
+        return {id:'hull-slap',gain:.018+.038*Math.sqrt(strength),rate:.96,
+          position:{x:event.x,y:event.y??0,z:event.z},time:event.time??time,
+          peakStrength,peakClosing,
+          options:{duration:.48,attack:.014,release:.20,lowpassHz:1950,highpassHz:110},kind:'modest'};
+      }
+      if(event.strength<.18||time<quietUntil||(event.kind&&event.kind!=='light')||latched)return null;
       const strength=weatherClamp(event.strength/3.5);
       latched=true;receding=0;quietUntil=time+1.4+strength*.8;
+      modestLatched=true;modestReceding=0;modestQuietUntil=Math.max(modestQuietUntil,quietUntil);
       return {id:'hull-slap',gain:.027+.055*Math.sqrt(strength),rate:.93,position:event,
         options:{duration:.66,attack:.018,release:.24,lowpassHz:1800,highpassHz:90},kind:'light'};
     },
-    reset(){lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;lastReturn=null;},
+    reset(){
+      lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;lastReturn=null;
+      modestQuietUntil=time+1;modestLatched=false;modestReceding=0;lastModestEventTime=-Infinity;returnQuietUntil=0;
+    },
   };
 }
 
@@ -24434,10 +24736,11 @@ function createTimberAudioState(random=Math.random){
   };
 }
 
-function weatherAudioLevels({wind=0,speed=0,intensity=0,type=0,ship=1}){
+function weatherAudioLevels({wind=0,speed=0,leeway=0,currentSurge=0,currentSway=0,currentX=0,currentZ=0,heading=0,intensity=0,type=0,ship=1}){
   const w=weatherClamp(wind/24),heavy=weatherClamp((w-.35)/.65),r=weatherClamp(intensity);
+  const flow=hullRelativeWaterSpeed({speed,leeway,currentSurge,currentSway,currentX,currentZ,heading});
   return {'wind-steady':.48*Math.sqrt(w)*(1-.65*heavy),'wind-strong':.55*heavy,
-    'hull-wash':.4*weatherClamp(Math.abs(speed)/5)*ship,
+    'hull-wash':.4*weatherClamp(flow/5)*ship,
     'rain-light':type===0?.5*Math.sqrt(r)*(1-r*.8):0,'rain-heavy':type===0?.65*r*r:0,
     'sleet-deck':type===2?.5*r*ship:0,'hail-deck':type===3?.6*r*ship:0};
 }
@@ -25139,14 +25442,17 @@ function createSceneAudio({onStatus=()=>{}}={}){
       shipDistance=boat.showProw?1/(1+Math.max(0,Math.hypot(boat.x-listener.x,boat.z-listener.z)-boat.length*.5)/18):0;
       dialogue.update(dt);
       gunsAudio.update(dt);
-      const hullMix=hullAudio.update(dt,{speed:boat.surgeVelocity??0});
+      const flow={speed:boat.surgeVelocity??0,leeway:boat.leewayVelocity??0,heading:boat.heading??0,
+        currentSurge:boat.currentSurge??0,currentSway:boat.currentSway??0,
+        currentX:boat.currentX??settings.currentX??0,currentZ:boat.currentZ??settings.currentZ??0};
+      const hullMix=hullAudio.update(dt,flow);
       const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
       const timberSound=timberAudio.update(dt,{strain,position:boat,revision:boat.revision,audible:enabled&&!hidden&&ready&&shipDistance>.01});
       if(!enabled||hidden||!ready)return;
       if(anchorReeling){anchorPosition={x:boat.x,y:(boat.heave??0)+3,z:boat.z};startLoop('anchor-reel',ALL_SOUNDS['anchor-reel']);}
       mute();
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
-      const levels=weatherAudioLevels({wind,speed:boat.surgeVelocity??0,intensity:weather.intensity,type:weather.type,ship:shipDistance});
+      const levels=weatherAudioLevels({wind,...flow,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
       for(const [id,loop] of loops){
         const gain=id==='anchor-reel'?(anchorReeling ? .3/(1+Math.max(0,Math.hypot(anchorPosition.x-listener.x,anchorPosition.y-listener.y,anchorPosition.z-listener.z)-8)/24):0):levels[id]??0;
@@ -25770,7 +26076,7 @@ async function main() {
   const gunportSafety=await createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
   const impactDetector=createImpactDetector();
   const hullContactProbe=await createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
-  const audioRead=mkBuf(40*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
+  const audioRead=mkBuf(72*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
 
   // Water height under the inspection camera; optics use it as a coarse host
@@ -27156,8 +27462,8 @@ async function main() {
 
     for(const {probe:p} of vessels)if(p.requested)enc.copyBufferToBuffer(p.output,0,p.read,0,64);
     const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
-    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now();
-    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,40*64);hullContactProbe.copy(enc,frameIndex);}
+    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
+    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
@@ -27188,7 +27494,7 @@ async function main() {
           // Neither RAF nor the GPU waits for these two small asynchronous maps.
           await bottomReady;
           if(audioRevision!==boat.revision||audioEpoch!==hullContactProbe.epoch||!sceneAudio.enabled||document.hidden||performance.now()-audioRequestedAt>350)return;
-          const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision);
+          const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision,{now:audioSimTime});
           sceneAudio.hullContact(impactDetector.contact);
           for(const bottom of bottomEvents){const fresh=hullContactProbe.refreshEvent(bottom);if(fresh)sceneAudio.hullUnderside(fresh);}
           sceneAudio.impact(event);

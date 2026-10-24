@@ -159,10 +159,33 @@ continuous camera motion, lighting, inside views or a different framebuffer.
 The default loose threshold and paired-capture experiment still exposed canopy
 loss and silhouette errors; neither is production-qualified.
 
-Remaining: qualified branch appearance envelopes, transition motion, varied
-lighting/wind, stand likeness/cost, GPU scene-wide refinement priorities,
-coarse/base cover, demand page residency/eviction, all five species, merged
-stand tiers, shadows, the actual failing island camera, Retina and physical
+Remaining for full multi-tier stand replacement: qualified branch appearance
+envelopes, transition motion, varied lighting/wind, stand likeness/cost, GPU
+scene-wide refinement priorities, coarse/base cover, demand page
+residency/eviction, merged stand tiers, shadows, Retina and physical
 iPhone/full-game measurements. The pilot currently loads selected specimen
 pages eagerly; paged files alone do not establish demand streaming. Exporter
 feedback to Forestmodeler follows qualification.
+
+## Five-species Saba native LOD sidecar and runtime integration
+
+`scripts/prepare-forest-native-lod.mjs` now bakes all five Saba species
+(`0: oak`, `1: maple`, `2: birch`, `3: elm`, `4: chestnut`) from the verified
+native vertex/index streams into `assets/forest-scenery/saba/lod/manifest.json`
+and `assets/forest-scenery/saba/lod/lod-indices.bin.gz` (`6.70 MB` gzipped,
+`11.79 MB` raw, `3,091,170` `Uint32` indices):
+- Exact two-triangle leaf ribbons for every 4-triangle source leaf sheet across
+  all five species (`50.0%` leaf index reduction with every blade retained; max
+  support error `1.54–3.21 cm`).
+- Three topology-preserving woody branch LOD tiers (`wood0`, `wood1`, `wood2`)
+  referencing the original native vertex stream (`maxErrorMeters` `4.1–8.0 cm`
+  for `wood0`, `7.1–11.7 cm` for `wood1`, `11.0–15.6 cm` for `wood2`).
+- `js/forest-native-lod.js` and `js/forest-scenery.js` load and verify the
+  sidecar digest and wire native sub-tiers (`native-near`: `wood0` + leaf
+  ribbons, `native-mid`: `wood1` + leaf ribbons, `native-far`: `wood2` + leaf
+  ribbons) into the GPU classifier while retaining `forestNativeLod=off` as an
+  exact A/B fallback.
+- On the exact failing `reported-close-view` (`1920x1080`), total indirect
+  triangle submissions drop from `1,338,730,820` (`1.34B`) to `421,201,253`
+  (`421.2M`, a **3.18x reduction**) with `0` pixel differences (`maxError: 0`)
+  against baseline.

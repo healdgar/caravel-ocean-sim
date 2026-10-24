@@ -157,6 +157,40 @@ clear transition, correct camber or workable support handling. These remain
 held experiments: no released force or rig-geometry changes, and no verified
 routine handover or maneuver has been handed off.
 
+### Yard orientation, leads and partial brailing
+
+The traced yards have their low **carro forward**, high **penna aft**, and clew
+aft; reversing them is not supported. The [Italian cultural-heritage record on
+lateen handling](https://www.catalogo.beniculturali.it/detail/DemoEthnoAnthropologicalHeritage/0800687702)
+describes this arrangement, mast-bearing bad-tack sailing, heel-control tackles,
+and fixed/flying shrouds. These surviving practices do not establish Niña's
+exact fifteenth-century operating rig.
+
+In `NINA_RIG_PLATE`, the fore clew's image-x302 nearly matches the mainmast
+foot's x304; the main clew's x371 likewise matches the mizzen foot's x372.
+Neighboring supports therefore occupy the aft cloth-trim corridors. The current
+symmetrical fore/aft stays at mast-z ±1.3, centreline tack leads and working-fall
+routes are authored, not traced rig details. In particular, the main working
+tackle's deck-z remains -0.45 despite its relocated mast; its diagonal fall can
+occupy the fore sail's bay. These leads need mechanical review, not a yard
+reversal, blanket support-side flip or collision exemption.
+
+**Unrun diagnostic recommendation:** retain yard side and dip 0; gather fore
+and main canvas while leaving mizzen set, then repeat one explicit pressure
+reversal and yaw 0→+0.8 path at authored deployment levels 0.75/0.5/0.25.
+Preflight every yard and sewn luff first; stop at a hard obstruction. Preserve
+all material vertices, physical ropes/radii and attachments, and report the
+first failing stage, contacts and exposed area. Gathering an aft sail alone
+does not remove its supports from the forward sail's path. A clear reduced
+endpoint would not establish a traversable path or permit full-canvas recovery.
+
+[RMG drawing PAH5013, approximately 1665](https://www.rmg.co.uk/collections/objects/rmgc-object-144960)
+depicts a half-brailed lateen: evidence for partial gathering, not a 1492 drill.
+Our affine compressed triangle can supply only an optimistic geometry
+diagnostic; a real gathered bundle and controlled rope lengths/load paths remain
+required. No partial-brailing prototype, clearance result, force or released rig
+change follows from this recommendation.
+
 Local experiments and results remain under ignored `shots/lateen-support-work/`.
 Held test files use `.fixture.mjs`, avoiding automatic production test discovery.
 

@@ -119,9 +119,71 @@ test('native underside contacts retain real first-wet events and query all six h
         }
       }
       check(parity<2e-5,`world transform parity ${parity}`);check(mirrorError<2e-5,`roll mirror ${mirrorError}`);
-      device.destroy();return {errors,parity,mirrorError,lastCascadeAndHorizontalInverse:true,firstWetSerial:2};
+      // Small steep wave riding on a long swell at 30/60/120 Hz through WATER_CONTACTS + 8-frame readback.
+      const {WATER_CONTACTS,CONTACT_COUNT,AUDIO_CONTACT_COUNT}=await import('/js/wgsl/interaction.js');
+      const {createImpactDetector,createHullAudioState}=await import('/js/weather-state.js');
+      const totalContacts=CONTACT_COUNT+AUDIO_CONTACT_COUNT;
+      const interactionUBO=device.createBuffer({size:64,usage:B.UNIFORM|B.COPY_DST});
+      const waterContacts=device.createBuffer({size:totalContacts*64,usage:B.STORAGE|B.COPY_SRC|B.COPY_DST});
+      const waterRead=device.createBuffer({size:totalContacts*64,usage:B.MAP_READ|B.COPY_DST});
+      const waterPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code:WATER_CONTACTS}),entryPoint:'main'}});
+      const waterGroup=device.createBindGroup({layout:waterPipe.getBindGroupLayout(0),entries:[
+        {buffer:frame},{buffer:interactionUBO},{buffer:hull},texture.createView({dimension:'2d-array'}),sampler,{buffer:waterContacts}
+      ].map((resource,binding)=>({binding,resource}))});
+      const swellRates={};
+      for(const hz of [30,60,120]){
+        const dt=1/hz,detector=createImpactDetector(CONTACT_COUNT),audio=createHullAudioState();
+        device.queue.writeBuffer(waterContacts,0,new Float32Array(totalContacts*16));
+        const hBuf=new Float32Array(24);
+        boatRotate(hBuf.subarray(0,3),1,0,0,0,0,0);
+        boatRotate(hBuf.subarray(4,7),0,1,0,0,0,0);
+        boatRotate(hBuf.subarray(8,11),0,0,-1,0,0,0);
+        hBuf[3]=NINA_DESIGN.frame.verticalScale;hBuf[12]=NINA_DESIGN.runtime.beam;hBuf[13]=NINA_DESIGN.runtime.length;
+        device.queue.writeBuffer(hull,0,hBuf);
+        let t=0,frameIdx=0,sprayLaunches=0,minWash=Infinity;const slaps=[];
+        const totalSeconds=5.0,steps=Math.round(totalSeconds*hz);
+        for(let stepIdx=0;stepIdx<=steps;stepIdx++){
+          // Long swell (T=7.5s, A=0.45m) + steep riding wave (T=1.25s, A=0.14m) after 1.1s settle.
+          const activeT=Math.max(0,t-1.1);
+          const swell=activeT>0?.45*Math.sin(2*Math.PI*activeT/7.5):0;
+          const chop=activeT>0?-.14*Math.sin(2*Math.PI*activeT/1.25):0;
+          sea([swell+chop,0,0,0,0,0]);
+          const ubo=new Float32Array([0,0,128,.5,0,0,dt,stepIdx===0?1:0,2.2,1,0,0,t,frameIdx,NINA_DESIGN.runtime.length/12,0]);
+          device.queue.writeBuffer(interactionUBO,0,ubo);
+          const enc=device.createCommandEncoder(),cp=enc.beginComputePass();
+          cp.setPipeline(waterPipe);cp.setBindGroup(0,waterGroup);cp.dispatchWorkgroups(1);cp.end();
+          const doRead=(frameIdx&7)===0;
+          if(doRead)enc.copyBufferToBuffer(waterContacts,0,waterRead,0,totalContacts*64);
+          device.queue.submit([enc.finish()]);
+          if(doRead){
+            await waterRead.mapAsync(GPUMapMode.READ);
+            const raw=new Float32Array(waterRead.getMappedRange().slice(0));
+            waterRead.unmap();
+            for(let c=0;c<32;c++)sprayLaunches=Math.max(sprayLaunches,raw[c*16+15]);
+            const event=detector.sample(raw,1,{now:t});
+            audio.contact(detector.contact);
+            const sound=audio.impact(event);
+            if(sound)slaps.push({time:sound.time,gain:sound.gain,peakStrength:sound.peakStrength,peakClosing:sound.peakClosing,pos:sound.position});
+          }
+          const mix=audio.update(dt,{speed:2.2,leeway:.6});
+          if(t>=1.5)minWash=Math.min(minWash,mix.wash);
+          t+=dt;frameIdx++;
+        }
+        swellRates[hz]={count:slaps.length,sprayLaunches,minWash,slaps};
+      }
+      device.destroy();return {errors,parity,mirrorError,lastCascadeAndHorizontalInverse:true,firstWetSerial:2,swellRates};
     });
     assert.deepEqual(result.errors,[]);assert.ok(result.parity<2e-5);assert.ok(result.mirrorError<2e-5);
     assert.equal(result.lastCascadeAndHorizontalInverse,true);assert.equal(result.firstWetSerial,2);
+    for(const hz of [30,60,120]){
+      const r=result.swellRates[hz];
+      assert.equal(r.sprayLaunches,0,`ordinary slaps at ${hz} Hz must not couple to ballistic spray launches`);
+      assert.ok(r.minWash>.12,`continuous rush stays active at ${hz} Hz (${r.minWash})`);
+      assert.equal(r.count,3,`expected 3 steep wave-face slaps on long swell at ${hz} Hz, got ${r.count}`);
+      for(const slap of r.slaps){
+        assert.ok(slap.peakStrength>=.045&&slap.peakClosing>=.52);
+        assert.ok(Number.isFinite(slap.time)&&Number.isFinite(slap.pos.x)&&Number.isFinite(slap.pos.z));
+      }
+    }
   }finally{await browser?.close();server.kill();}
 });

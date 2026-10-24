@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createImpactDetector,createHullAudioState,createTimberAudioState} from '../js/weather-state.js';
+import {createImpactDetector,createHullAudioState,createTimberAudioState,hullRelativeWaterSpeed,weatherAudioLevels} from '../js/weather-state.js';
 
 const hullAudioContact=(changes={})=>({revision:1,reset:false,wet:1,pressure:.2,closing:0,impact:0,position:{x:2,y:0,z:-4},...changes});
 function hullAudioAdvance(state,seconds,contact=hullAudioContact(),speed=3,dt=.05){
@@ -170,4 +170,56 @@ test('timber episode recession and periodic scheduling are consistent at 30/60/1
     assert.equal(state.impact(timberFace()),null);
     timberAdvance(state,.55,{dt});assert.ok(state.impact(timberFace()));
   }
+});
+
+test('continuous wash uses full hull-relative surge, leeway and current flow',()=>{
+  assert.ok(Math.abs(hullRelativeWaterSpeed({speed:3,leeway:4})-5)<1e-12);
+  assert.ok(Math.abs(hullRelativeWaterSpeed({speed:2,heading:0,currentZ:-2}))<1e-12,'following current cancels water-relative surge');
+  assert.ok(Math.abs(hullRelativeWaterSpeed({speed:0,heading:90,currentZ:2})-2)<1e-12,'beam current produces lateral hull flow at anchor');
+  const surgeOnly=createHullAudioState(),withLeeway=createHullAudioState(),anchoredInCurrent=createHullAudioState();
+  for(let t=0;t<2;t+=.05){
+    surgeOnly.contact(hullAudioContact({pressure:.1,closing:0}));surgeOnly.update(.05,{speed:1.5,leeway:0});
+    withLeeway.contact(hullAudioContact({pressure:.1,closing:0}));withLeeway.update(.05,{speed:1.5,leeway:2.0});
+    anchoredInCurrent.contact(hullAudioContact({pressure:.1,closing:0}));anchoredInCurrent.update(.05,{speed:0,heading:0,currentZ:2.5});
+  }
+  assert.ok(withLeeway.update(0,{speed:1.5,leeway:2.0}).wash>surgeOnly.update(0,{speed:1.5,leeway:0}).wash,'leeway increases hull-relative water wash');
+  assert.ok(anchoredInCurrent.update(0,{speed:0,heading:0,currentZ:2.5}).wash>.1,'current past an anchored hull drives continuous wash');
+  assert.ok(weatherAudioLevels({speed:0,leeway:2.5})['hull-wash']>0);
+});
+
+test('modest wave-face slaps retain peak/time/position across 8-frame readback, respect underside suppression and never trigger spray or timber groans',()=>{
+  const detector=createImpactDetector(40),values=new Float32Array(72*16);
+  const station=15,at=station*16,mat=(40+station)*16;
+  // Seed frame: wet bow on a rising long swell, no ballistic spray serial.
+  values[at]=1.8;values[at+1]=.1;values[at+2]=-9.5;values[at+3]=.25;values[at+7]=.05;values[at+11]=1;values[at+14]=.45;values[at+15]=0;
+  values[mat]=1.8;values[mat+1]=.1;values[mat+2]=-9.5;values[mat+3]=1.0;values[mat+4]=0;values[mat+5]=0;values[mat+6]=1;values[mat+7]=0;
+  values[mat+10]=.5;values[mat+14]=.9;values[mat+15]=0;
+  assert.equal(detector.sample(values,1,{now:1.0}),null);
+  // Modest slap occurred at t=1.42s, read back 5 frames later at t=1.50s after instantaneous impact already decayed.
+  values[at]=1.9;values[at+1]=.02;values[at+2]=-9.7;values[at+7]=.02;values[at+14]=.38;values[at+15]=0;
+  values[mat]=1.82;values[mat+1]=.18;values[mat+2]=-9.54;values[mat+3]=1.42;
+  values[mat+4]=.11;values[mat+5]=.88;values[mat+6]=.95;values[mat+7]=1;
+  values[mat+10]=.08;values[mat+14]=1.20;values[mat+15]=.52;
+  const event=detector.sample(values,1,{now:1.50});
+  assert.equal(event.kind,'modest');
+  assert.ok(Math.abs(event.peakStrength-.11)<1e-6&&Math.abs(event.peakClosing-.88)<1e-6);
+  assert.ok(Math.abs(event.time-1.42)<1e-6&&Math.abs(event.age-.08)<1e-6);
+  assert.ok(Math.abs(event.x-1.82)<1e-6&&Math.abs(event.y-.18)<1e-6&&Math.abs(event.z+9.54)<1e-6,'retained event position survives later frame motion');
+  assert.equal(detector.sample(values,1,{now:1.58}),null,'same modest serial cannot replay on subsequent readback');
+
+  const hull=createHullAudioState(),timber=createTimberAudioState(()=>0);
+  hullAudioAdvance(hull,1.1,hullAudioContact({closing:.42,relativeClosing:.05,lastTroughTime:1.2}));
+  timberAdvance(timber,4.1);
+  const sound=hull.impact(event);
+  assert.equal(sound?.id,'hull-slap');assert.equal(sound?.kind,'modest');
+  assert.ok(sound.gain>=.018&&sound.gain<.06);
+  assert.equal(timber.impact(event),null,'modest wave-face slaps do not trigger heavy timber groans');
+  assert.equal(hull.impact({...event,x:1.9,time:1.46}),null,'adjacent bow station on the same wave face stays grouped');
+  // Even while long-swell closing remains .42 (> .24), trough recession in the short wave rearms modest slaps.
+  hullAudioAdvance(hull,.75,hullAudioContact({closing:.42,relativeClosing:.04,lastTroughTime:1.75}));
+  assert.equal(hull.impact({...event,time:2.20})?.kind,'modest','short-wave trough rearms next slap atop long swell');
+  // Underside re-entry suppresses modest slaps during its 3.2s return window.
+  assert.equal(hull.underside({x:0,y:-1,z:-4,kind:'underside-reentry',closing:2.1,age:.08,probe:0,epoch:1,serial:1}),true);
+  hullAudioAdvance(hull,1.2,hullAudioContact({closing:.1,relativeClosing:.02,lastTroughTime:3.1}));
+  assert.equal(hull.impact({...event,time:3.4}),null,'underside return suppresses modest slaps');
 });

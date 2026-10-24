@@ -112,14 +112,17 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       shipDistance=boat.showProw?1/(1+Math.max(0,Math.hypot(boat.x-listener.x,boat.z-listener.z)-boat.length*.5)/18):0;
       dialogue.update(dt);
       gunsAudio.update(dt);
-      const hullMix=hullAudio.update(dt,{speed:boat.surgeVelocity??0});
+      const flow={speed:boat.surgeVelocity??0,leeway:boat.leewayVelocity??0,heading:boat.heading??0,
+        currentSurge:boat.currentSurge??0,currentSway:boat.currentSway??0,
+        currentX:boat.currentX??settings.currentX??0,currentZ:boat.currentZ??settings.currentZ??0};
+      const hullMix=hullAudio.update(dt,flow);
       const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
       const timberSound=timberAudio.update(dt,{strain,position:boat,revision:boat.revision,audible:enabled&&!hidden&&ready&&shipDistance>.01});
       if(!enabled||hidden||!ready)return;
       if(anchorReeling){anchorPosition={x:boat.x,y:(boat.heave??0)+3,z:boat.z};startLoop('anchor-reel',ALL_SOUNDS['anchor-reel']);}
       mute();
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
-      const levels=weatherAudioLevels({wind,speed:boat.surgeVelocity??0,intensity:weather.intensity,type:weather.type,ship:shipDistance});
+      const levels=weatherAudioLevels({wind,...flow,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
       for(const [id,loop] of loops){
         const gain=id==='anchor-reel'?(anchorReeling ? .3/(1+Math.max(0,Math.hypot(anchorPosition.x-listener.x,anchorPosition.y-listener.y,anchorPosition.z-listener.z)-8)/24):0):levels[id]??0;

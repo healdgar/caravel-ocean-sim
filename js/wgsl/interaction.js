@@ -9,7 +9,9 @@ export const WAKE_SIZE = 256;
 export const SPRAY_COUNT = 4096;
 export const SHEET_COUNT = 128;
 // The first 32 contacts launch bow spray; eight aft contacts drive the stern wake.
+// Optional trailing 32 records retain separately gated bow modest-contact audio events.
 export const CONTACT_COUNT = 40;
+export const AUDIO_CONTACT_COUNT = 32;
 export const INTERACTION_TYPES = /* wgsl */ `
 struct Interaction {
   domain: vec4f,   // world centre xz, extent, texel size
@@ -70,7 +72,7 @@ export const WATER_CONTACTS = FRAME_WGSL + INTERACTION_TYPES + HULL_PROFILE + /*
 @group(0) @binding(2) var<uniform> H: InteractionHull;
 @group(0) @binding(3) var seaTex: texture_2d_array<f32>;
 @group(0) @binding(4) var seaSamp: sampler;
-@group(0) @binding(5) var<storage, read_write> contacts: array<Contact, ${CONTACT_COUNT}>;
+@group(0) @binding(5) var<storage, read_write> contacts: array<Contact>;
 ` + INTERACTION_SEA + /* wgsl */ `
 // Pressure integrates a hull-sized patch; centimetre ripples should not fire a splash.
 // The geometric intersection above still follows the full-resolution surface.
@@ -145,7 +147,80 @@ fn pressureSea(p: vec2f) -> f32 {
   contacts[i].flow = vec4f(H.forward.xyz*speed*0.8+outward*peel,wet);
   contacts[i].state = vec4f(signedWater,select(age,0.001,launch),closing,select(old.state.w,old.state.w+1.0,launch));
   if(reset){contacts[i].state.w=0.0;}
-
+  // Separately gated modest-contact audio event at the bow entry. Retains peak,
+  // time and world position across 8-frame readbacks without coupling ordinary
+  // wave-face slaps on a long swell to ballistic spray sheet/droplet eligibility.
+  if(!aft && arrayLength(&contacts) > ${CONTACT_COUNT}u + i){
+    let slot = ${CONTACT_COUNT}u + i;
+    let prev = contacts[slot];
+    let bowEntry = i % 16u >= 12u;
+    let clock = select(prev.point.w + dt, I.phase.x, I.phase.x > prev.point.w);
+    if(reset || !bowEntry){
+      contacts[slot] = Contact(vec4f(p, clock), vec4f(0.0), vec4f(0.0, closing, 1.0, 0.0), vec4f(0.0, 0.0, -1.0, -1.0));
+    } else {
+      let baseline = mix(prev.flow.y, closing, 1.0 - exp(-dt * 1.5));
+      let relativeClosing = closing - baseline;
+      let effectiveClosing = select(closing, max(closing, relativeClosing + 0.28), wet > 0.35 && relativeClosing > 0.16);
+      let slapApproach = max(0.0, effectiveClosing - 0.35);
+      let slapHit = wet * min(3.5, slapApproach * slapApproach * 0.42) * (0.45 + 0.55 * entry) * mix(0.55, 1.0, u);
+      var mode = prev.flow.x;
+      var eventAge = min(10.0, prev.flow.z + dt);
+      let inTrough = closing < 0.24 || relativeClosing < -0.05 || slapHit < 0.012;
+      var receding = select(0.0, prev.flow.w + dt, inTrough);
+      var lastTrough = select(prev.state.z, clock, receding >= 0.06);
+      var eventPos = prev.point.xyz;
+      var eventTime = prev.point.w;
+      var peakStrength = prev.axis.x;
+      var peakClosing = prev.axis.y;
+      var eventWet = prev.axis.z;
+      var slapSerial = prev.axis.w;
+      var candPeak = prev.state.x;
+      var candClosing = prev.state.y;
+      if(mode < 0.5){
+        if(eventAge <= 0.20 && wet > 0.25 && slapHit > peakStrength){
+          peakStrength = slapHit;
+          peakClosing = max(peakClosing, effectiveClosing);
+          eventWet = max(eventWet, wet);
+        }
+        if(receding >= 0.06 && eventAge >= 0.30){
+          mode = 1.0;
+        }
+      } else if(mode < 1.5){
+        if(eventAge >= 0.30 && wet > 0.35 && effectiveClosing >= 0.52 && relativeClosing >= 0.18 && slapHit >= 0.045){
+          mode = 2.0;
+          eventAge = 0.0;
+          receding = 0.0;
+          candPeak = slapHit;
+          candClosing = effectiveClosing;
+          eventWet = wet;
+          eventPos = p;
+          eventTime = clock;
+        }
+      } else {
+        if(slapHit >= candPeak){
+          candPeak = slapHit;
+          candClosing = max(candClosing, effectiveClosing);
+          eventWet = max(eventWet, wet);
+          eventPos = p;
+          eventTime = clock;
+        }
+        if(slapHit < candPeak * 0.96 || eventAge >= 0.055 || wet <= 0.25){
+          mode = 0.0;
+          receding = 0.0;
+          peakStrength = candPeak;
+          peakClosing = candClosing;
+          slapSerial = slapSerial + 1.0;
+          eventAge = max(0.0, clock - eventTime);
+        }
+      }
+      contacts[slot] = Contact(
+        vec4f(eventPos, eventTime),
+        vec4f(peakStrength, peakClosing, eventWet, slapSerial),
+        vec4f(mode, baseline, eventAge, receding),
+        vec4f(candPeak, candClosing, lastTrough, relativeClosing)
+      );
+    }
+  }
 }
 `;
 
