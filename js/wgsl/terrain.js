@@ -369,19 +369,22 @@ fn landOpaque(in:LandVertex)->vec4f{
     relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky);
     roughness=clamp(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.65,0.98);
     }
-  }else if(!crown){
-    let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
-    let ridges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);
-    albedo=vec3f(0.095,0.068,0.038)*(0.82+barkNoise*0.18+in.kind.y*0.16);
-    relief=(ridges-0.5)*0.010*(1.2-in.kind.y)*detailFade;roughness=0.92;
-  }
-  if(crown){
+  }else if(in.kind.x>=9.5){
+    let portShade=clamp(in.kind.y,0.5,1.0);
+    let portBase=select(select(select(vec3f(0.16,0.11,0.065),vec3f(0.34,0.31,0.26),in.kind.x>=10.5),vec3f(0.58,0.54,0.46),in.kind.x>=11.5),vec3f(0.38,0.14,0.075),in.kind.x>=12.5);
+    albedo=portBase*portShade;ambientVisibility=0.45+0.32*max(n.y,0.0);relief=0.0;roughness=0.88;
+  }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);
     let canopyGrain=gnoise(world.xz*0.32+vec2f(world.y*0.17));
     let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
     albedo=leafMean.rgb*mix(vec3f(1),regionalTint,0.2)*(0.78+exposure*0.30+canopyGrain*0.04);
     ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.08;
     relief=0.0;roughness=0.95;
+  }else{
+    let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
+    let ridges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);
+    albedo=vec3f(0.095,0.068,0.038)*(0.82+barkNoise*0.18+in.kind.y*0.16);
+    relief=(ridges-0.5)*0.010*(1.2-in.kind.y)*detailFade;roughness=0.92;
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   if(in.kind.x<2.5){n=landFilteredBump(n,dx,dy,reliefX,reliefY);}
