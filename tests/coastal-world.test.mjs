@@ -272,24 +272,50 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
   }
   assert.ok(sandyVertices > 10, 'coastal mesh marks foreshore vertices with smooth sand weights');
 
-  // Verify upgradeProceduralPackWithRealDEM upgrades pack from synthetic Terrarium tile
+  // Verify upgradeProceduralPackWithRealDEM upgrades pack from synthetic Terrarium DEM + satellite imagery tiles
   const fakeTile = new Uint8ClampedArray(256 * 256 * 4);
+  const fakeSatTile = new Uint8ClampedArray(256 * 256 * 4);
   for (let y = 0; y < 256; y++) {
     for (let x = 0; x < 256; x++) {
-      // Periodic coastal bands across the tile so any sub-window has ~50% land (+24m..+90m) and ~50% sea (-18m)
+      // Periodic coastal bands across the tile so any sub-window has ~50% land (+4m..+90m) and ~50% sea (0m)
       const band = (x + y) % 64;
-      const h = band >= 28 ? 24 + (band - 28) * 1.8 : -18;
+      const h = band >= 28 ? 3 + (band - 28) * 1.8 : 0;
       const val = Math.round((h + 32768) * 256);
       const idx = (y * 256 + x) * 4;
       fakeTile[idx] = (val >> 16) & 255;
       fakeTile[idx + 1] = (val >> 8) & 255;
       fakeTile[idx + 2] = val & 255;
       fakeTile[idx + 3] = 255;
+      // Satellite tile: warm sand near shoreline (band 28..31), modern concrete on band 32..38, lush forest on band 39+
+      if (band < 28) {
+        fakeSatTile[idx] = 18;
+        fakeSatTile[idx + 1] = 56;
+        fakeSatTile[idx + 2] = 78;
+      } else if (band < 32) {
+        fakeSatTile[idx] = 224;
+        fakeSatTile[idx + 1] = 198;
+        fakeSatTile[idx + 2] = 152;
+      } else if (band < 39) {
+        // Modern neutral concrete/roof pixel to verify 1550s historical reforestation
+        fakeSatTile[idx] = 168;
+        fakeSatTile[idx + 1] = 166;
+        fakeSatTile[idx + 2] = 164;
+      } else {
+        fakeSatTile[idx] = 44;
+        fakeSatTile[idx + 1] = 96;
+        fakeSatTile[idx + 2] = 48;
+      }
+      fakeSatTile[idx + 3] = 255;
     }
   }
   const upgraded = await upgradeProceduralPackWithRealDEM(pack, {
     fetchTile: async () => fakeTile,
+    fetchSatelliteTile: async () => fakeSatTile,
   });
   assert.equal(upgraded.demSource.provider, 'aws-terrarium-srtm-etopo1');
+  assert.equal(upgraded.demSource.satelliteOverlay, true);
+  assert.equal(upgraded.demSource.zoom, 13);
+  assert.equal(upgraded.demSource.nearshoreZoom, 14);
   assert.ok(upgraded.portGeometry.triangleCount > 200);
+  assert.ok(upgraded.vegetation.summary.totalCount > 50, 'satellite + DEM upgrade seeds coastal palms and forest');
 });

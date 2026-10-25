@@ -8,32 +8,158 @@ import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL} from './fores
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle} from './forest-middle.js';
 
-function retargetForestPackToProcedural(forestPack, proceduralPack, groundSample) {
+import { portClearanceEnvelope } from './coastal-world.js';
+
+function hash32Forest(value) {
+  let v = value >>> 0;
+  v = Math.imul(v ^ (v >>> 16), 0x7feb352d) >>> 0;
+  v = Math.imul(v ^ (v >>> 15), 0x846ca68b) >>> 0;
+  return (v ^ (v >>> 16)) >>> 0;
+}
+
+export function retargetForestPackToProcedural(forestPack, proceduralPack, groundSample, { isMobile = false } = {}) {
   const protoCount = forestPack.manifest.prototypes.length;
   const buckets = Array.from({ length: protoCount }, () => []);
-  const sources = [
-    ...(proceduralPack.vegetation?.scrub || []),
-    ...(proceduralPack.vegetation?.upland || []),
-  ];
-  for (let i = 0; i < sources.length; i += 8) {
-    const x = sources[i], z = sources[i + 2];
-    const legacyScale = sources[i + 3], yaw = sources[i + 4];
-    const tr = sources[i + 5], tg = sources[i + 6], tb = sources[i + 7];
-    const gy = groundSample(x, z);
-    if (!Number.isFinite(gy) || gy < 2.4) continue;
-    const sx = (groundSample(x + 1, z) - groundSample(x - 1, z)) * 0.5;
-    const sz = (groundSample(x, z + 1) - groundSample(x, z - 1)) * 0.5;
-    const slope = Math.hypot(sx, sz);
-    if (!Number.isFinite(slope) || slope > 1.08) continue;
-    const hash = ((Math.sin(x * 0.071 + z * 0.113 + yaw) * 43758.5453) % 1 + 1) % 1;
-    const protoId = Math.min(protoCount - 1, Math.floor(hash * protoCount));
-    const scale = Math.max(0.45, Math.min(1.32, 0.42 + legacyScale * 0.038));
-    const tintR = 0.88 + ((tr * 3.7) % 0.24);
-    const tintG = 0.90 + ((tg * 3.7) % 0.24);
-    const tintB = 0.86 + ((tb * 3.7) % 0.22);
-    const basal = forestPack.manifest.prototypes[protoId].basalRadius ?? 1.2;
-    const sink = Math.max(0.12, basal * scale * slope + 0.08);
-    buckets[protoId].push(x, gy - sink, z, scale, yaw, tintR, tintG, tintB, protoId, sink, -1, 0);
+  const region = proceduralPack.region;
+  const span = region.span ?? 8192;
+  const x0 = region.x - span * 0.5;
+  const z0 = region.z - span * 0.5;
+  const biome = proceduralPack.biome;
+  const maskSize = region.biomeSize ?? 256;
+  const beaches = proceduralPack.beaches;
+  const port = proceduralPack.port;
+  const seed = (region.vegetationSeed ?? 47231) >>> 0;
+
+  // Saba-style overlapping-crown jittered grid placement (scripts/prepare-forest-instances.py:284-333)
+  // guided by the co-registered satellite vegetation mask (`biome`) and foreshore beach masks.
+  if (biome instanceof Uint8Array && biome.length === maskSize * maskSize) {
+    const spacing = isMobile ? 7.2 : 4.5;
+    const crownSpacingFactor = isMobile ? 0.45 : 0.34;
+    const maxRoots = isMobile ? 16000 : 58000;
+    const gridN = Math.ceil(span / spacing);
+    const cellSize = 18;
+    const hashW = Math.ceil(span / cellSize) + 1;
+    const head = new Int32Array(hashW * hashW).fill(-1);
+    const next = new Int32Array(maxRoots);
+    const rx = new Float32Array(maxRoots);
+    const rz = new Float32Array(maxRoots);
+    const rr = new Float32Array(maxRoots);
+    let totalPlaced = 0;
+
+    const sampleBiomeByte = (wx, wz) => {
+      const u = (wx - x0) / span;
+      const v = (wz - z0) / span;
+      if (u <= 0.005 || u >= 0.995 || v <= 0.005 || v >= 0.995) return 0;
+      const bi = Math.min(maskSize - 1, Math.floor(u * maskSize));
+      const bj = Math.min(maskSize - 1, Math.floor(v * maskSize));
+      const idx = bj * maskSize + bi;
+      if (beaches?.drySandMask?.[idx] > 110 || beaches?.swashMask?.[idx] > 64) return 0;
+      return biome[idx];
+    };
+
+    for (let j = 1; j < gridN - 1 && totalPlaced < maxRoots; j++) {
+      for (let i = 1; i < gridN - 1 && totalPlaced < maxRoots; i++) {
+        const key = hash32Forest(seed ^ Math.imul(i, 73856093) ^ Math.imul(j, 19349663));
+        const x = x0 + (i + 0.5 + (key / 4294967296 - 0.5) * 0.65) * spacing;
+        const z = z0 + (j + 0.5 + (hash32Forest(key) / 4294967296 - 0.5) * 0.65) * spacing;
+        const probByte = sampleBiomeByte(x, z);
+        if (probByte < 76) continue;
+        // Modulate acceptance probability by satellite greenness so forest edges taper naturally
+        if (probByte < 155 && (hash32Forest(key + 5) & 255) > probByte + 48) continue;
+
+        if (port) {
+          const distPort = Math.hypot(x - port.center.x, z - port.center.z);
+          if (distPort < port.clearRadius * 0.72 || !portClearanceEnvelope(port, x, z, 10)) continue;
+        }
+
+        const gy = groundSample(x, z);
+        if (!Number.isFinite(gy) || gy < 2.0 || gy > 845) continue;
+        const sx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
+        const sz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
+        const slope = Math.hypot(sx, sz);
+        if (!Number.isFinite(slope) || slope > 1.08) continue;
+
+        const protoId = hash32Forest(key + 1) % protoCount;
+        const proto = forestPack.manifest.prototypes[protoId];
+        const scale = 0.90 + (hash32Forest(key + 2) / 4294967296) * 0.46;
+        const crownR = (proto.crownRadius ?? 8.5) * scale;
+        const rimCheckR = crownR * 0.65;
+        if (
+          sampleBiomeByte(x + rimCheckR, z) < 32 ||
+          sampleBiomeByte(x - rimCheckR, z) < 32 ||
+          sampleBiomeByte(x, z + rimCheckR) < 32 ||
+          sampleBiomeByte(x, z - rimCheckR) < 32 ||
+          groundSample(x + rimCheckR, z) < 1.0 ||
+          groundSample(x - rimCheckR, z) < 1.0 ||
+          groundSample(x, z + rimCheckR) < 1.0 ||
+          groundSample(x, z - rimCheckR) < 1.0
+        ) {
+          continue;
+        }
+
+        const gx = Math.max(0, Math.min(hashW - 1, Math.floor((x - x0) / cellSize)));
+        const gz = Math.max(0, Math.min(hashW - 1, Math.floor((z - z0) / cellSize)));
+        let collision = false;
+        for (let dz = -1; dz <= 1 && !collision; dz++) {
+          const nz = gz + dz;
+          if (nz < 0 || nz >= hashW) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = gx + dx;
+            if (nx < 0 || nx >= hashW) continue;
+            for (let idx = head[nz * hashW + nx]; idx !== -1; idx = next[idx]) {
+              const ddx = x - rx[idx];
+              const ddz = z - rz[idx];
+              const minD = crownSpacingFactor * (crownR + rr[idx]);
+              if (ddx * ddx + ddz * ddz < minD * minD) {
+                collision = true;
+                break;
+              }
+            }
+            if (collision) break;
+          }
+        }
+        if (collision) continue;
+
+        const cell = gz * hashW + gx;
+        rx[totalPlaced] = x;
+        rz[totalPlaced] = z;
+        rr[totalPlaced] = crownR;
+        next[totalPlaced] = head[cell];
+        head[cell] = totalPlaced;
+        totalPlaced++;
+
+        const basal = proto.basalRadius ?? 1.2;
+        const sink = Math.max(0.12, basal * scale * slope + 0.08);
+        const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
+        const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
+        buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -1, 0);
+      }
+    }
+  }
+
+  // Fallback to explicit scrub/upland arrays if biome grid did not place roots
+  if (buckets.every((b) => b.length === 0)) {
+    const sources = [
+      ...(proceduralPack.vegetation?.scrub || []),
+      ...(proceduralPack.vegetation?.upland || []),
+    ];
+    for (let i = 0; i < sources.length; i += 8) {
+      const x = sources[i], z = sources[i + 2];
+      const legacyScale = sources[i + 3], yaw = sources[i + 4];
+      const gy = groundSample(x, z);
+      if (!Number.isFinite(gy) || gy < 2.0) continue;
+      const sx = (groundSample(x + 1, z) - groundSample(x - 1, z)) * 0.5;
+      const sz = (groundSample(x, z + 1) - groundSample(x, z - 1)) * 0.5;
+      const slope = Math.hypot(sx, sz);
+      if (!Number.isFinite(slope) || slope > 1.08) continue;
+      const hash = ((Math.sin(x * 0.071 + z * 0.113 + yaw) * 43758.5453) % 1 + 1) % 1;
+      const protoId = Math.min(protoCount - 1, Math.floor(hash * protoCount));
+      const scale = Math.max(0.90, Math.min(1.36, 0.72 + legacyScale * 0.085));
+      const tint = 0.92 + ((hash * 7.3) % 0.16);
+      const basal = forestPack.manifest.prototypes[protoId].basalRadius ?? 1.2;
+      const sink = Math.max(0.12, basal * scale * slope + 0.08);
+      buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -1, 0);
+    }
   }
   // Ensure at least one subterranean sentinel root if a small coral cay has 0 upland trees
   if (buckets.every(b => b.length === 0)) {
@@ -74,21 +200,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const hasCustomCoords=search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon')));
   const useProcedural=isKnownSpanishMain||(hasCustomCoords&&regionParam!=='saba');
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
-  const skipNativeForest=useProcedural||isMobile;
+  const skipNativeForest=isMobile;
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
   const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;
   let forestFailure=null;
-  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({skipNative:skipNativeForest,skipRoots:useProcedural}).catch(error=>{forestFailure=error.message;return null;});
+  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({skipNative:skipNativeForest,deferNative:!skipNativeForest&&useProcedural,skipRoots:useProcedural}).catch(error=>{forestFailure=error.message;return null;});
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
   let forestMassFailure=null,forestMiddleFailure=null;
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
-  const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest,manifestOnly:skipNativeForest}).catch(error=>{forestMassFailure=error.message;return null;}):null);
+  const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest,manifestOnly:skipNativeForest||useProcedural}).catch(error=>{forestMassFailure=error.message;return null;}):null);
   const forestMiddlePromise=Promise.all([forestPromise,forestMassPromise]).then(async([forest,mass])=>{
     if(!forest||!mass||forestAtlasDebug)return null;
     try{
@@ -101,12 +227,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // example is a fallback, never a second stand mixed into the new forest.
   const canopyPromise=forestPromise.then(forest=>useProcedural||forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
   const useRealDEM=useProcedural&&search.get('realDEM')!=='off';
+  const proceduralGridOpts=isMobile
+    ?{size:257,biomeSize:256,albedoSize:512,vegetationCandidates:16000,deferSynthesis:useRealDEM}
+    :{size:513,biomeSize:512,albedoSize:1024,vegetationCandidates:24000,deferSynthesis:useRealDEM};
   const proceduralPack=useProcedural?generateProceduralCoastalPack(isKnownSpanishMain?regionParam:{
     id:regionParam||undefined,
     name:search.get('regionName')||undefined,
     latitude:Number(search.get('lat')),
     longitude:Number(search.get('lon')),
-  },{size:193,biomeSize:192,albedoSize:256,vegetationCandidates:16000,deferSynthesis:useRealDEM}):null;
+  },proceduralGridOpts):null;
   if(proceduralPack&&useRealDEM){
     await upgradeProceduralPackWithRealDEM(proceduralPack);
   }
@@ -309,7 +438,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const [forestMassPack,forestMiddlePack]=await Promise.all([forestMassPromise,forestMiddlePromise]);
   let forestMass=null,proceduralMiddle=null;
   if(forestMassPack&&!forestMassPack.manifestOnly&&!proceduralPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,middlePack:forestMiddlePack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
-  if(skipNativeForest&&forestMassPack&&!forestAtlasDebug)try{
+  if((skipNativeForest||proceduralPack)&&forestMassPack&&!forestAtlasDebug)try{
     const middleSource=forestMiddlePack??(forestMassPack.middleVertices?{vertices:forestMassPack.middleVertices,indices:forestMassPack.middleIndices,prototypes:forestMassPack.manifest.prototypes}:null);
     if(middleSource){
       const wood=forestMiddleWoodPartition(middleSource.vertices,middleSource.indices,middleSource.prototypes);
@@ -323,8 +452,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       };
     }
   }catch(error){proceduralMiddle=null;forestMiddleFailure=error.message;}
-  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample):forestPack;
-  const activeForestMiddle=forestAtlasDebug?null:(skipNativeForest?proceduralMiddle:forestMass?.middle??null);
+  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile}):forestPack;
+  const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights,region:activeRegion,near:nearTile}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};

@@ -607,33 +607,148 @@ export function synthesizeCoastalTerrain(regionSpec = 'cartagena') {
   return heights;
 }
 
-export function synthesizeCoastalBeaches(regionSpec, heights) {
+export function computeCoastalShoreDistances(heights, n, span, shoreThreshold = 0.25) {
+  const step = span / (n - 1);
+  const diag = step * Math.SQRT2;
+  const distLand = new Float32Array(n * n).fill(1e6);
+  const distWater = new Float32Array(n * n).fill(1e6);
+  for (let k = 0; k < n * n; k++) {
+    if (heights[k] > shoreThreshold) distLand[k] = 0;
+    else distWater[k] = 0;
+  }
+  const sweep = (arr) => {
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const k = j * n + i;
+        let d = arr[k];
+        if (i > 0) d = Math.min(d, arr[k - 1] + step);
+        if (j > 0) d = Math.min(d, arr[k - n] + step);
+        if (i > 0 && j > 0) d = Math.min(d, arr[k - n - 1] + diag);
+        if (i < n - 1 && j > 0) d = Math.min(d, arr[k - n + 1] + diag);
+        arr[k] = d;
+      }
+    }
+    for (let j = n - 1; j >= 0; j--) {
+      for (let i = n - 1; i >= 0; i--) {
+        const k = j * n + i;
+        let d = arr[k];
+        if (i < n - 1) d = Math.min(d, arr[k + 1] + step);
+        if (j < n - 1) d = Math.min(d, arr[k + n] + step);
+        if (i < n - 1 && j < n - 1) d = Math.min(d, arr[k + n + 1] + diag);
+        if (i > 0 && j < n - 1) d = Math.min(d, arr[k + n - 1] + diag);
+        arr[k] = d;
+      }
+    }
+  };
+  sweep(distLand);
+  sweep(distWater);
+  return { distLand, distWater, step };
+}
+
+function sampleSatelliteEquirectangular(satelliteData, u, v) {
+  if (!satelliteData?.rgba || !satelliteData.size) return null;
+  const s = satelliteData.size;
+  const px = Math.max(0, Math.min(s - 1, Math.floor(u * s)));
+  const py = Math.max(0, Math.min(s - 1, Math.floor(v * s)));
+  const k = (py * s + px) * 4;
+  const r = satelliteData.rgba[k];
+  const g = satelliteData.rgba[k + 1];
+  const b = satelliteData.rgba[k + 2];
+  const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  let localLuma = luma;
+  if (satelliteData.lowLuma && satelliteData.lowSize) {
+    const ls = satelliteData.lowSize;
+    const lx = Math.max(0, Math.min(ls - 1, u * ls - 0.5));
+    const ly = Math.max(0, Math.min(ls - 1, v * ls - 0.5));
+    const x0 = Math.floor(lx), y0 = Math.floor(ly);
+    const x1 = Math.min(ls - 1, x0 + 1), y1 = Math.min(ls - 1, y0 + 1);
+    const ax = lx - x0, ay = ly - y0;
+    const l00 = satelliteData.lowLuma[y0 * ls + x0], l10 = satelliteData.lowLuma[y0 * ls + x1];
+    const l01 = satelliteData.lowLuma[y1 * ls + x0], l11 = satelliteData.lowLuma[y1 * ls + x1];
+    localLuma = (l00 * (1 - ax) + l10 * ax) * (1 - ay) + (l01 * (1 - ax) + l11 * ax) * ay;
+  }
+  const exG = (2 * g) / Math.max(1, r + b);
+  const rawGreen = g > b ? Math.max(0, Math.min(1, (exG - 1.00) * 2.15)) : 0;
+  // Deep closed-canopy tropical forest often has dark emerald shadow reflectance
+  const shadowCanopy =
+    g >= r * 0.94 && g > b * 1.05 && luma >= 15 && luma <= 118
+      ? coastalSmoothstep(0.94, 1.15, g / Math.max(1, r)) * 0.78
+      : 0;
+  const greenness = Math.max(rawGreen, shadowCanopy);
+  // Warm, high-luminance foreshore beach sand chromaticity (R >= G > B, low greenness)
+  const sandChroma =
+    r >= g * 0.88 && g >= b * 1.02 && luma >= 86
+      ? coastalSmoothstep(86, 152, luma) *
+        coastalSmoothstep(0.28, 0.04, greenness) *
+        coastalSmoothstep(0.96, 1.18, (r + g) / Math.max(1, 2 * b))
+      : 0;
+  const maxC = Math.max(r, g, b);
+  const minC = Math.min(r, g, b);
+  const chroma = (maxC - minC) / Math.max(1, maxC);
+  // Modern urban concrete/asphalt/roof detection on non-vegetated inland pixels
+  const isUrban =
+    greenness < 0.14 &&
+    (chroma < 0.25 || b >= g * 0.96 || (minC > 114 && maxC - minC < 52) || (r > g * 1.22 && luma > 96));
+  return { r, g, b, luma, localLuma, greenness, sandChroma, isUrban };
+}
+
+export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, shoreDist = null) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const m = region.biomeSize;
+  const n = region.size;
   const span = region.span;
+  const distInfo = shoreDist ?? computeCoastalShoreDistances(heights, n, span, 0.25);
+  const { distWater, step } = distInfo;
   const swashMask = new Uint8Array(m * m);
   const drySandMask = new Uint8Array(m * m);
   let beachCellCount = 0;
   const cells = [];
+  const baseBeachInland = Math.max(85, step * 2.2);
+  const satWideBeachInland = Math.max(115, step * 2.6);
+  const maxSwashInland = Math.max(42, step * 1.5);
 
   for (let j = 0; j < m; j++) {
-    const z = region.z + ((j + 0.5) / m - 0.5) * span;
+    const v = (j + 0.5) / m;
+    const z = region.z + (v - 0.5) * span;
+    const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
     for (let i = 0; i < m; i++) {
-      const x = region.x + ((i + 0.5) / m - 0.5) * span;
+      const u = (i + 0.5) / m;
+      const x = region.x + (u - 0.5) * span;
+      const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
+      const inlandM = distWater[gj * n + gi];
       const h = terrainSample(heights, x, z, region);
       const sx = (terrainSample(heights, x + 8, z, region) - terrainSample(heights, x - 8, z, region)) / 16;
       const sz = (terrainSample(heights, x, z + 8, region) - terrainSample(heights, x, z - 8, region)) / 16;
       const slope = Math.hypot(sx, sz);
       const idx = j * m + i;
+      const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
+      // When satellite imagery is present, suppress dry beach sand where coastal mangrove/forest
+      // reaches the water's edge, and widen the beach berm where warm spectral sand is detected.
+      const satBeachFactor = sat
+        ? Math.max(0.22, Math.min(1.35, 0.65 + sat.sandChroma * 0.85 - sat.greenness * 0.62))
+        : 1.0;
+      const maxBeachInland = sat && sat.sandChroma > 0.35 ? satWideBeachInland : baseBeachInland;
 
-      // Intertidal wet-sand swash zone: [-1.2m, +1.4m] with gentle coastal gradient
-      if (h >= -1.2 && h <= 1.4 && slope < 0.18) {
-        const swash = Math.round(255 * (1 - Math.abs(h - 0.1) / 1.4) * Math.max(0, 1 - slope / 0.18));
+      // Intertidal wet-sand swash zone: [-1.2m, +1.4m] within foreshore distance of water
+      if (h >= -1.2 && h <= 1.4 && slope < 0.18 && inlandM <= maxSwashInland) {
+        const swash = Math.round(
+          255 *
+            (1 - Math.abs(h - 0.1) / 1.4) *
+            Math.max(0, 1 - slope / 0.18) *
+            coastalSmoothstep(maxSwashInland, maxSwashInland * 0.33, inlandM)
+        );
         swashMask[idx] = Math.max(0, Math.min(255, swash));
       }
-      // Dry-sand foreshore & berm: [0.4m, +6.5m] with gentle slope (< 0.20)
-      if (h >= 0.4 && h <= 6.5 && slope < 0.20) {
-        const sand = Math.round(255 * coastalSmoothstep(6.5, 1.2, h) * Math.max(0, 1 - slope / 0.20));
+      // Dry-sand foreshore & berm: [0.4m, +6.5m] with gentle slope (< 0.20) adjacent to the coast
+      if (h >= 0.4 && h <= 6.5 && slope < 0.20 && inlandM <= maxBeachInland) {
+        const shoreFade = coastalSmoothstep(maxBeachInland, maxBeachInland * 0.38, inlandM);
+        const sand = Math.round(
+          255 *
+            coastalSmoothstep(6.5, 1.2, h) *
+            Math.max(0, 1 - slope / 0.20) *
+            shoreFade *
+            satBeachFactor
+        );
         drySandMask[idx] = Math.max(0, Math.min(255, sand));
       }
       if (swashMask[idx] >= 48 || drySandMask[idx] >= 48) {
@@ -655,35 +770,46 @@ export function synthesizeCoastalBeaches(regionSpec, heights) {
   };
 }
 
-export function placeCoastalPort(regionSpec, heights) {
+export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   // Scan a 2D coastal window around along = 0 to find where the shoreline (h ~ 0)
   // meets navigable harbor water offshore and a buildable coastal terrace inland.
   let bestShoreAlong = 0;
   let bestShoreInland = 0;
   let bestScore = -Infinity;
-  for (const alongProbe of [0, -120, 120, -240, 240, -380, 380]) {
-    for (let inland = -1200; inland <= 800; inland += 16) {
-      const p = worldFromCoastalFrame(region, alongProbe, inland);
-      const h = terrainSample(heights, p.x, p.z, region);
-      const offshoreP = worldFromCoastalFrame(region, alongProbe, inland - 72);
-      const offshoreH = terrainSample(heights, offshoreP.x, offshoreP.z, region);
-      const inlandP = worldFromCoastalFrame(region, alongProbe, inland + 48);
-      const inlandH = terrainSample(heights, inlandP.x, inlandP.z, region);
-      if (h >= -1.0 && h <= 2.6 && offshoreH <= -3.0 && inlandH >= 1.2 && inlandH <= 24) {
-        const score =
-          -Math.abs(h - 0.5) * 4 +
-          Math.min(12, -offshoreH) -
-          Math.abs(inland) * 0.001 -
-          Math.abs(alongProbe) * 0.004;
-        if (score > bestScore) {
-          bestScore = score;
-          bestShoreAlong = alongProbe;
-          bestShoreInland = inland;
-        }
+  const probePoint = (alongProbe, inland) => {
+    const p = worldFromCoastalFrame(region, alongProbe, inland);
+    const h = terrainSample(heights, p.x, p.z, region);
+    const offshoreP = worldFromCoastalFrame(region, alongProbe, inland - 72);
+    const offshoreH = terrainSample(heights, offshoreP.x, offshoreP.z, region);
+    const inlandP = worldFromCoastalFrame(region, alongProbe, inland + 48);
+    const inlandH = terrainSample(heights, inlandP.x, inlandP.z, region);
+    if (h >= -1.0 && h <= 2.6 && offshoreH <= -2.2 && inlandH >= 1.0 && inlandH <= 28) {
+      const score =
+        -Math.abs(h - 0.5) * 4 +
+        Math.min(12, -offshoreH) -
+        Math.abs(inland) * 0.001 -
+        Math.abs(alongProbe) * 0.004;
+      if (score > bestScore) {
+        bestScore = score;
+        bestShoreAlong = alongProbe;
+        bestShoreInland = inland;
       }
     }
+  };
+  for (const alongProbe of [0, -120, 120, -240, 240, -380, 380]) {
+    for (let inland = -1200; inland <= 800; inland += 16) {
+      probePoint(alongProbe, inland);
+    }
     if (bestScore > -Infinity && alongProbe === 0) break;
+  }
+  // If real-world DEM shoreline lies outside the default synthetic bay window, scan wider coastal frame
+  if (bestScore === -Infinity) {
+    for (let alongProbe = -1800; alongProbe <= 1800; alongProbe += 120) {
+      for (let inland = -2200; inland <= 2200; inland += 24) {
+        probePoint(alongProbe, inland);
+      }
+    }
   }
 
   // NMS-style Feature Stamp Terraforming: grade the harbor quay terrace, building pads,
@@ -691,6 +817,8 @@ export function placeCoastalPort(regionSpec, heights) {
   // so every port building sits flush on level ground and the pier reaches deep water.
   const n = region.size;
   const span = region.span;
+  const plazaRadiusAlong = preserveRealCoast ? 72 : 105;
+  const plazaRadiusInland = preserveRealCoast ? 105 : 145;
   for (let j = 0; j < n; j++) {
     const z = region.z + (j / (n - 1) - 0.5) * span;
     for (let i = 0; i < n; i++) {
@@ -710,10 +838,12 @@ export function placeCoastalPort(regionSpec, heights) {
         h = Math.min(h, h * (1 - acrossW * berthW) + targetDepth * (acrossW * berthW));
       }
 
-      // 2. Level Waterfront Quay & Plaza Mayor terrace (relAlong in [-82, +82], relInland in [2, 118])
-      if (relInland >= -2 && relInland <= 145 && Math.abs(relAlong) <= 105) {
-        const alongW = coastalSmoothstep(102, 58, Math.abs(relAlong));
-        const inlandW = coastalSmoothstep(-2, 14, relInland) * coastalSmoothstep(142, 92, relInland);
+      // 2. Level Waterfront Quay & Plaza Mayor terrace
+      if (relInland >= -2 && relInland <= plazaRadiusInland && Math.abs(relAlong) <= plazaRadiusAlong) {
+        const alongW = coastalSmoothstep(plazaRadiusAlong, plazaRadiusAlong * 0.55, Math.abs(relAlong));
+        const inlandW =
+          coastalSmoothstep(-2, 14, relInland) *
+          coastalSmoothstep(plazaRadiusInland, plazaRadiusInland * 0.64, relInland);
         const stampW = alongW * inlandW;
         const targetPlazaY = 2.6 + Math.max(0, relInland - 12) * 0.016;
         h = h * (1 - stampW * 0.88) + targetPlazaY * (stampW * 0.88);
@@ -1177,14 +1307,19 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
   // Optional 3D Corner-model Coconut Palms (Cocos nucifera: seaward-leaning ringed trunk + 12 arching pinnate fronds)
   // along the sandy foreshore berm so tropical beaches have authentic silhouette palms
   if (palms instanceof Float32Array && palms.length >= 8) {
-    const maxPalms = Math.min(palms.length / 8, 128);
+    const maxPalms = Math.min(palms.length / 8, 420);
     const seawardRad = ((portPlacement.shoreBearing ?? 112) + 180) * COASTAL_DEG_TO_RAD;
-    const seaX = Math.sin(seawardRad);
-    const seaZ = -Math.cos(seawardRad);
+    const defaultSeaX = Math.sin(seawardRad);
+    const defaultSeaZ = -Math.cos(seawardRad);
     for (let idx = 0; idx < maxPalms; idx++) {
       const base = idx * 8;
       const px = palms[base], py = palms[base + 1], pz = palms[base + 2];
       const plumeR = palms[base + 3], ht = palms[base + 4], shape = palms[base + 5];
+      const psx = palms[base + 6] || 0, psz = palms[base + 7] || 0;
+      const gradLen = Math.hypot(psx, psz);
+      // Lean seaward down the local beach slope (-sx, -sz) when available
+      const seaX = gradLen > 0.008 ? -psx / gradLen : defaultSeaX;
+      const seaZ = gradLen > 0.008 ? -psz / gradLen : defaultSeaZ;
       const azSpread = (shape - 0.5) * 1.15;
       const leanAngle = Math.atan2(seaZ, seaX) + azSpread;
       const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
@@ -1246,21 +1381,23 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
   };
 }
 
-export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, portPlacement = null) {
+export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, portPlacement = null, satelliteData = null) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const m = region.biomeSize;
   const span = region.span;
   const seed = (region.vegetationSeed ^ 0x7f4a7c15) >>> 0;
-  const beachData = beaches ?? synthesizeCoastalBeaches(region, heights);
+  const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData);
   const mask = new Uint8Array(m * m);
 
   for (let j = 0; j < m; j++) {
-    const z = region.z + ((j + 0.5) / m - 0.5) * span;
+    const v = (j + 0.5) / m;
+    const z = region.z + (v - 0.5) * span;
     for (let i = 0; i < m; i++) {
-      const x = region.x + ((i + 0.5) / m - 0.5) * span;
+      const u = (i + 0.5) / m;
+      const x = region.x + (u - 0.5) * span;
       const idx = j * m + i;
       const h = terrainSample(heights, x, z, region);
-      if (h < 2.2 || beachData.swashMask[idx] > 80 || beachData.drySandMask[idx] > 140) {
+      if (h < 1.5 || beachData.swashMask[idx] > 80 || beachData.drySandMask[idx] > 140) {
         mask[idx] = 0;
         continue;
       }
@@ -1278,32 +1415,55 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
         mask[idx] = 0;
         continue;
       }
-      const u = (i + 0.5) / m;
-      const v = (j + 0.5) / m;
       const patchNoise = coastalFbm2D(u * 6.5 + 1.9, v * 6.5 - 2.4, seed, 4);
-      const moisture = coastalSmoothstep(2.5, 28, h) * coastalSmoothstep(1.12, 0.35, slope);
-      const density = Math.round(255 * Math.min(1, moisture * (0.42 + 0.72 * patchNoise)));
-      mask[idx] = Math.max(0, Math.min(255, density));
+      const moisture = coastalSmoothstep(1.5, 8.5, h) * coastalSmoothstep(1.12, 0.35, slope);
+      const proceduralVeg = Math.min(1, moisture * (0.54 + 0.62 * patchNoise));
+      const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
+      let vegProb = proceduralVeg;
+      if (sat) {
+        // Combine satellite spectral excess-green index with 1550s historical reforestation
+        // of modern urban concrete/roofs so natural beaches/cliffs stay open while cities revert to jungle.
+        const satGreen = Math.min(1, sat.greenness * 1.18);
+        const restoredUrban =
+          sat.isUrban && h > 1.6 && slope < 0.65 && sat.sandChroma < 0.35
+            ? (0.68 + 0.26 * patchNoise) * moisture
+            : 0;
+        vegProb = Math.max(satGreen, restoredUrban, proceduralVeg * 0.65) * coastalSmoothstep(1.12, 0.42, slope);
+      }
+      mask[idx] = Math.max(0, Math.min(255, Math.round(255 * vegProb)));
     }
   }
   return mask;
 }
 
-export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, portPlacement = null, biome = null) {
+export function synthesizeCoastalAlbedo(
+  regionSpec,
+  heights,
+  beaches = null,
+  portPlacement = null,
+  biome = null,
+  satelliteData = null,
+  shoreDist = null
+) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const size = region.albedoSize;
+  const n = region.size;
   const span = region.span;
   const seed = (region.vegetationSeed ^ 0x9e3779b9) >>> 0;
-  const beachData = beaches ?? synthesizeCoastalBeaches(region, heights);
-  const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement);
+  const distInfo = shoreDist ?? computeCoastalShoreDistances(heights, n, span, 0.25);
+  const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData, distInfo);
+  const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement, satelliteData);
   const rgba = new Uint8Array(size * size * 4);
 
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
     const z = region.z + (v - 0.5) * span;
+    const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
     for (let i = 0; i < size; i++) {
       const u = (i + 0.5) / size;
       const x = region.x + (u - 0.5) * span;
+      const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
+      const inlandM = distInfo.distWater[gj * n + gi];
       const h = terrainSample(heights, x, z, region);
       const sx = (terrainSample(heights, x + 8, z, region) - terrainSample(heights, x - 8, z, region)) / 16;
       const sz = (terrainSample(heights, x, z + 8, region) - terrainSample(heights, x, z - 8, region)) / 16;
@@ -1314,9 +1474,9 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
       const fineGrain = (coastalValueNoise2D(u * 68, v * 68, seed ^ 0x55aa55aa) - 0.5) * 14;
 
       // Base inland colour: continuous blend between dry coastal earth, lush forest canopy, and exposed cliff stone
-      const forestR = 118 - veg * 66 + sandNoise * 6;
-      const forestG = 128 - veg * 36 + sandNoise * 6;
-      const forestB = 86 - veg * 42 + sandNoise * 4;
+      const forestR = 112 - veg * 64 + sandNoise * 6;
+      const forestG = 126 - veg * 34 + sandNoise * 6;
+      const forestB = 82 - veg * 40 + sandNoise * 4;
       const cliffWeight = coastalSmoothstep(0.42, 0.78, slope);
       const rockR = 114 + sandNoise * 10 + fineGrain * 0.6;
       const rockG = 108 + sandNoise * 9 + fineGrain * 0.5;
@@ -1325,6 +1485,31 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
       let r = forestR * (1 - cliffWeight) + rockR * cliffWeight;
       let g = forestG * (1 - cliffWeight) + rockG * cliffWeight;
       let b = forestB * (1 - cliffWeight) + rockB * cliffWeight;
+
+      const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
+      if (sat && h > 0.15) {
+        // Bounded local shadow lifting matching scripts/prepare-land-imagery.py:153
+        const lift =
+          Math.min(1.35, Math.max(0.90, Math.pow(Math.max(sat.localLuma, 32) / Math.max(sat.luma, 10), 0.25))) *
+          1.08;
+        const satR = Math.min(255, sat.r * lift);
+        const satG = Math.min(255, sat.g * lift);
+        const satB = Math.min(255, sat.b * lift);
+        if (sat.isUrban && cliffWeight < 0.45 && (inlandM > 45 || sat.sandChroma < 0.3)) {
+          // 1550s historical cleanup: replace modern concrete/roof chromaticity with natural tropical canopy/soil
+          // while preserving subtle topographic luminance texture from the satellite orthophoto
+          const reliefMod = Math.max(0.76, Math.min(1.22, (sat.luma * lift) / Math.max(42, sat.localLuma)));
+          r = r * reliefMod;
+          g = g * reliefMod;
+          b = b * reliefMod;
+        } else {
+          // Co-registered natural satellite orthophoto color (canopy, soil, rocky cliffs, and sandy berms)
+          const satBlend = coastalSmoothstep(0.15, 1.4, h) * 0.78;
+          r = r * (1 - satBlend) + satR * satBlend;
+          g = g * (1 - satBlend) + satG * satBlend;
+          b = b * (1 - satBlend) + satB * satBlend;
+        }
+      }
 
       // Colonial waterfront plaza & town cobble apron (smooth radial blend, no hard ring)
       if (portPlacement && h > 0.2) {
@@ -1343,13 +1528,15 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
         }
       }
 
-      // Continuous dry coral/quartz beach berm & backshore dune sand (no blocky grid threshold)
+      // Foreshore-constrained dry coral/quartz beach berm & backshore dune sand
       const gentleSlope = coastalSmoothstep(0.28, 0.09, slope);
+      const shoreBand = coastalSmoothstep(95, 32, inlandM);
       const bermTop = 5.4 + sandNoise * 1.1;
       const drySandWeight =
         coastalSmoothstep(-0.3, 0.7, h) *
         coastalSmoothstep(bermTop, 1.4, h) *
-        gentleSlope;
+        gentleSlope *
+        shoreBand;
       if (drySandWeight > 0) {
         const dryR = 214 + sandNoise * 8 + fineGrain * 0.7;
         const dryG = 196 + sandNoise * 7 + fineGrain * 0.6;
@@ -1362,7 +1549,8 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
       // Continuous wet intertidal swash sand & wrack line around the waterline [-1.1m, +1.3m]
       const swashWeight =
         Math.max(0, 1 - Math.abs(h - 0.12 - sandNoise * 0.18) / 1.25) *
-        coastalSmoothstep(0.26, 0.08, slope);
+        coastalSmoothstep(0.26, 0.08, slope) *
+        coastalSmoothstep(48, 16, inlandM);
       if (swashWeight > 0) {
         const wetR = 148 + fineGrain * 0.5;
         const wetG = 134 + fineGrain * 0.45;
@@ -1419,9 +1607,20 @@ export const COCONUT_PALM_GENOME_SPEC = Object.freeze({
   }),
 });
 
-export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches = null, portPlacement = null, palmPrototypeId = 5) {
+export function seedCoastalVegetation(
+  regionSpec,
+  heights,
+  biome = null,
+  beaches = null,
+  portPlacement = null,
+  palmPrototypeId = 5,
+  shoreDist = null
+) {
   const region = resolveGlobalCoastalRegion(regionSpec);
-  const beachData = beaches ?? synthesizeCoastalBeaches(region, heights);
+  const n = region.size;
+  const m = region.biomeSize;
+  const distInfo = shoreDist ?? computeCoastalShoreDistances(heights, n, region.span, 0.25);
+  const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, null, distInfo);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement);
   const rand = coastalMulberry32(region.vegetationSeed ?? 47231);
   const candidates = region.vegetationCandidates ?? 16000;
@@ -1457,12 +1656,20 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
     const slope = Math.hypot(sx, sz);
     if (slope > 1.12) continue;
 
-    const prob = vegetationProbability(biomeMask, region.biomeSize, u, v);
+    const prob = vegetationProbability(biomeMask, m, u, v);
     if (prob <= 0 || density > prob * 0.92) continue;
 
-    if (h < 12) {
+    const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
+    const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
+    const inlandM = distInfo.distWater[gj * n + gi];
+    const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
+    const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
+    const bIdx = bj * m + bi;
+    const nearSandyShore = beachData.drySandMask[bIdx] >= 24 || beachData.swashMask[bIdx] >= 16 || inlandM <= 75;
+
+    if (h < 10.5 && nearSandyShore) {
       // Foreshore coconut palm fringe (Corner's model: 18-26m height, 2.75-4.25m plume radius)
-      // & coastal sea-grape / mangrove band just above the beach berm
+      // along sandy beach berms & littoral coves
       const isPalm = region.climate === 'tropical' || region.climate === 'subtropical';
       const tNorm = (baseRadius - 3.2) / 4.4;
       const hNorm = (baseHeight - 8) / 10;
@@ -1512,7 +1719,7 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
             gu < 0.98 &&
             gv > 0.02 &&
             gv < 0.98 &&
-            vegetationProbability(biomeMask, region.biomeSize, gu, gv) > 0 &&
+            vegetationProbability(biomeMask, m, gu, gv) > 0 &&
             (!portPlacement ||
               (Math.hypot(gx - portPlacement.center.x, gz - portPlacement.center.z) >=
                 portPlacement.clearRadius * 0.72 &&
@@ -1556,9 +1763,9 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
       } else {
         scrub.push(...tuple);
       }
-    } else if (h < 32) {
-      // Coastal scrub & lowland woodland transition
-      const tuple = [x, h, z, baseRadius * 0.9, baseHeight * 0.88, shape, sx, sz];
+    } else if (h < 28) {
+      // Lowland coastal woodland & peninsula forest (includes inland plains at 2.4m..28m)
+      const tuple = [x, h, z, baseRadius * 0.96, baseHeight * 0.94, shape, sx, sz];
       allTrees.push(...tuple);
       scrub.push(...tuple);
     } else {
@@ -1584,22 +1791,38 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
   };
 }
 
-export function buildCoastalMesh(regionSpec, heights) {
+export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const n = region.size;
+  const m = region.biomeSize;
   const step = region.span / (n - 1);
+  const distInfo = shoreDist ?? computeCoastalShoreDistances(heights, n, region.span, 0.25);
   const extraVerts = [];
   const baseVertices = new Float32Array(n * n * 8);
   const indices = [];
   const submergedIndices = [];
 
+  const maxMeshBeachInland = Math.max(92, step * 2.2);
   const computeVertexAttribs = (x, z, h, dx, dz) => {
     const length = Math.hypot(dx, 1, dz) || 1;
     const slope = Math.hypot(dx, dz);
-    const sandWeight =
+    const u = Math.max(0, Math.min(1, (x - region.x) / region.span + 0.5));
+    const v = Math.max(0, Math.min(1, (z - region.z) / region.span + 0.5));
+    const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
+    const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
+    const inlandM = distInfo.distWater[gj * n + gi];
+    let sandWeight =
       coastalSmoothstep(-2.4, 0.2, h) *
-      coastalSmoothstep(6.8, 1.6, h) *
-      coastalSmoothstep(0.30, 0.08, slope);
+      coastalSmoothstep(6.2, 1.4, h) *
+      coastalSmoothstep(0.30, 0.08, slope) *
+      coastalSmoothstep(maxMeshBeachInland, maxMeshBeachInland * 0.35, inlandM);
+    if (beaches?.drySandMask && beaches?.swashMask) {
+      const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
+      const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
+      const bIdx = bj * m + bi;
+      const maskSand = Math.max(beaches.drySandMask[bIdx], beaches.swashMask[bIdx]) / 255;
+      sandWeight = Math.max(sandWeight * 0.55, maskSand);
+    }
     // Encode 0.02 + 0.98 * sandWeight in kind.y so the WGSL terrain shader recognizes
     // procedural coastal terrain (kind.y > 0.015) while keeping Saba (kind.y = 0) untouched.
     const encodedSand = Math.min(1, 0.02 + 0.98 * sandWeight);
@@ -1618,8 +1841,9 @@ export function buildCoastalMesh(regionSpec, heights) {
     }
   }
 
-  // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free 3x3 subdivision
-  const subRadius = region.span * 0.22;
+  // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free subdivision
+  const subRadius = region.span * (n >= 513 ? 0.14 : 0.22);
+  const M = n >= 513 ? 2 : 3;
   const cellSub = new Uint8Array((n - 1) * (n - 1));
   for (let j = 0; j < n - 1; j++) {
     const zCell = region.z + ((j + 0.5) / (n - 1) - 0.5) * region.span;
@@ -1636,7 +1860,6 @@ export function buildCoastalMesh(regionSpec, heights) {
     }
   }
 
-  const M = 3;
   const subVertCache = new Map();
   const getSubVertex = (gi, gj, isCollinearEdge, hLinear) => {
     // Coincides with a base grid corner?
@@ -1754,14 +1977,21 @@ export function createCoastalViews(regionSpec, heights, portPlacement = null) {
   });
 }
 
-function finalizeProceduralCoastalPack(pack, heights, elevationSource = 'procedural-geomorphology') {
+function finalizeProceduralCoastalPack(
+  pack,
+  heights,
+  elevationSource = 'procedural-geomorphology',
+  satelliteData = null,
+  preserveRealCoast = false
+) {
   const { region } = pack;
-  const port = placeCoastalPort(region, heights);
-  const beaches = synthesizeCoastalBeaches(region, heights);
-  const mesh = buildCoastalMesh(region, heights);
-  const biome = synthesizeCoastalBiome(region, heights, beaches, port);
-  const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome);
-  const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port);
+  const port = placeCoastalPort(region, heights, { preserveRealCoast });
+  const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
+  const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist);
+  const mesh = buildCoastalMesh(region, heights, beaches, shoreDist);
+  const biome = synthesizeCoastalBiome(region, heights, beaches, port, satelliteData);
+  const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome, satelliteData, shoreDist);
+  const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = createCoastalViews(region, heights, port);
 
@@ -1794,12 +2024,43 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena', override
   return finalizeProceduralCoastalPack({ region }, synthesizeCoastalTerrain(region));
 }
 
-// Fetch real global SRTM + ETOPO1 elevation tiles from AWS Open Data Registry's
-// Mapzen/Tilezen Terrarium service (https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png,
-// CORS-enabled, no API key required) around (region.latitude, region.longitude).
-// Blends real-world coastal topography with navigable nearshore bathymetry and
-// falls back seamlessly to the procedural pack if offline or over open ocean.
-export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null, zoom = 12, timeoutMs = 1100 } = {}) {
+function rasterizeTileGrid(loaded, tx0, ty0, w, h) {
+  const pixels = new Uint8ClampedArray(w * h * 4);
+  if (loaded.every((t) => t.rgba)) {
+    for (const { tx, ty, rgba } of loaded) {
+      const ox = (tx - tx0) * 256;
+      const oy = (ty - ty0) * 256;
+      for (let row = 0; row < 256; row++) {
+        const srcStart = row * 256 * 4;
+        const dstStart = ((oy + row) * w + ox) * 4;
+        pixels.set(rgba.subarray(srcStart, srcStart + 256 * 4), dstStart);
+      }
+    }
+    return pixels;
+  }
+  const canvas =
+    typeof OffscreenCanvas === 'function'
+      ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  for (const { tx, ty, bmp } of loaded) {
+    if (!bmp) continue;
+    ctx.drawImage(bmp, (tx - tx0) * 256, (ty - ty0) * 256);
+    bmp.close();
+  }
+  pixels.set(ctx.getImageData(0, 0, w, h).data);
+  return pixels;
+}
+
+// Fetch real high-resolution SRTM/NED/ETOPO1 elevation tiles from AWS Terrarium
+// (zoom 13 + zoom 14 nearshore = ~9m-18m resolution) AND co-registered Esri World Imagery
+// satellite orthophoto tiles (https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
+// in parallel. Applies Saba's coastal bathymetry skirt model and spectral satellite
+// auto-placement of 3D forests, coconut palms, and sandy beaches.
+export async function upgradeProceduralPackWithRealDEM(
+  pack,
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 1500 } = {}
+) {
   const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
   if (!pack?.region || !effectiveFetch) return ensureFallback(pack);
@@ -1807,13 +2068,13 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
   const n = region.size;
   const span = region.span;
   const cosLat = Math.max(0.1, Math.cos(region.latitude * COASTAL_DEG_TO_RAD));
-  const halfLat = (span * 0.55) / 111195;
-  const halfLon = (span * 0.55) / (111195 * cosLat);
+  const halfLat = (span * 0.51) / 111195;
+  const halfLon = (span * 0.51) / (111195 * cosLat);
   const numTiles = 2 ** zoom;
-  const lonToTileX = (lon) => Math.floor(((lon + 180) / 360) * numTiles);
-  const latToTileY = (lat) => {
+  const lonToTileX = (lon, nTiles = numTiles) => Math.floor(((lon + 180) / 360) * nTiles);
+  const latToTileY = (lat, nTiles = numTiles) => {
     const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
-    return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * numTiles);
+    return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * nTiles);
   };
   const tx0 = lonToTileX(region.longitude - halfLon);
   const tx1 = lonToTileX(region.longitude + halfLon);
@@ -1821,22 +2082,24 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
   const ty1 = latToTileY(region.latitude - halfLat);
   const cols = tx1 - tx0 + 1;
   const rows = ty1 - ty0 + 1;
-  if (cols < 1 || cols > 4 || rows < 1 || rows > 4) return ensureFallback(pack);
+  if (cols < 1 || cols > 6 || rows < 1 || rows > 6) return ensureFallback(pack);
 
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const w = cols * 256;
     const h = rows * 256;
-    const pixels = new Uint8ClampedArray(w * h * 4);
     const tilePromises = [];
+    const satPromises = [];
+    const wantSatellite = Boolean(fetchSatelliteTile || (!fetchTile && typeof fetch === 'function' && typeof createImageBitmap === 'function'));
+
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
-        const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${wrappedX}/${ty}.png`;
+        const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${wrappedX}/${ty}.png`;
         tilePromises.push(
           Promise.resolve(
-            fetchTile ? fetchTile(url, { tx: wrappedX, ty, zoom, signal: controller.signal }) : fetch(url, { signal: controller.signal, mode: 'cors' })
+            fetchTile ? fetchTile(demUrl, { tx: wrappedX, ty, zoom, signal: controller.signal }) : fetch(demUrl, { signal: controller.signal, mode: 'cors' })
           ).then(async (res) => {
             if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) {
               return { tx, ty, rgba: res };
@@ -1849,50 +2112,105 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
             return { tx, ty, bmp };
           })
         );
-      }
-    }
-    const loaded = await Promise.all(tilePromises);
-    clearTimeout(timer);
-
-    if (loaded.every((t) => t.rgba)) {
-      for (const { tx, ty, rgba } of loaded) {
-        const ox = (tx - tx0) * 256;
-        const oy = (ty - ty0) * 256;
-        for (let row = 0; row < 256; row++) {
-          const srcStart = row * 256 * 4;
-          const dstStart = ((oy + row) * w + ox) * 4;
-          pixels.set(rgba.subarray(srcStart, srcStart + 256 * 4), dstStart);
+        if (wantSatellite) {
+          const satUrl = `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${wrappedX}`;
+          satPromises.push(
+            Promise.resolve(
+              fetchSatelliteTile
+                ? fetchSatelliteTile(satUrl, { tx: wrappedX, ty, zoom, signal: controller.signal })
+                : fetch(satUrl, { signal: controller.signal, mode: 'cors' })
+            )
+              .then(async (res) => {
+                if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) {
+                  return { tx, ty, rgba: res };
+                }
+                if (!res?.ok) return null;
+                const bmp = await createImageBitmap(await res.blob(), {
+                  premultiplyAlpha: 'none',
+                  colorSpaceConversion: 'none',
+                });
+                return { tx, ty, bmp };
+              })
+              .catch(() => null)
+          );
         }
       }
-    } else {
-      const canvas =
-        typeof OffscreenCanvas === 'function'
-          ? new OffscreenCanvas(w, h)
-          : Object.assign(document.createElement('canvas'), { width: w, height: h });
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      for (const { tx, ty, bmp } of loaded) {
-        ctx.drawImage(bmp, (tx - tx0) * 256, (ty - ty0) * 256);
-        bmp.close();
-      }
-      pixels.set(ctx.getImageData(0, 0, w, h).data);
     }
-    const decodePx = (px, py) => {
-      const ix = Math.max(0, Math.min(w - 1, px));
-      const iy = Math.max(0, Math.min(h - 1, py));
-      const k = (iy * w + ix) * 4;
-      return pixels[k] * 256 + pixels[k + 1] + pixels[k + 2] / 256 - 32768;
+
+    // Also fetch central 2x2 high-resolution zoom+1 (~9m/px) DEM tiles when using live fetch at zoom 13
+    const nearZoom = zoom + 1;
+    const nearNumTiles = 2 ** nearZoom;
+    const ncx = lonToTileX(region.longitude, nearNumTiles);
+    const ncy = latToTileY(region.latitude, nearNumTiles);
+    const ntx0 = ncx - 1, ntx1 = ncx;
+    const nty0 = ncy - 1, nty1 = ncy;
+    const nearDemPromises = [];
+    if (!fetchTile && zoom === 13 && typeof fetch === 'function' && typeof createImageBitmap === 'function') {
+      for (let ty = nty0; ty <= nty1; ty++) {
+        for (let tx = ntx0; tx <= ntx1; tx++) {
+          const wrappedX = ((tx % nearNumTiles) + nearNumTiles) % nearNumTiles;
+          const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${nearZoom}/${wrappedX}/${ty}.png`;
+          nearDemPromises.push(
+            fetch(url, { signal: controller.signal, mode: 'cors' })
+              .then(async (res) => {
+                if (!res?.ok) return null;
+                const bmp = await createImageBitmap(await res.blob(), {
+                  premultiplyAlpha: 'none',
+                  colorSpaceConversion: 'none',
+                });
+                return { tx, ty, bmp };
+              })
+              .catch(() => null)
+          );
+        }
+      }
+    }
+
+    const [loaded, satLoaded, nearDemLoaded] = await Promise.all([
+      Promise.all(tilePromises),
+      satPromises.length ? Promise.all(satPromises) : Promise.resolve([]),
+      nearDemPromises.length ? Promise.all(nearDemPromises) : Promise.resolve([]),
+    ]);
+    clearTimeout(timer);
+
+    const pixels = rasterizeTileGrid(loaded, tx0, ty0, w, h);
+    let nearPixels = null;
+    const nearW = 512, nearH = 512;
+    if (nearDemLoaded.length === 4 && nearDemLoaded.every(Boolean)) {
+      nearPixels = rasterizeTileGrid(nearDemLoaded, ntx0, nty0, nearW, nearH);
+    } else {
+      for (const item of nearDemLoaded) item?.bmp?.close?.();
+    }
+
+    const decodeGridPx = (buf, gw, gh, px, py) => {
+      const ix = Math.max(0, Math.min(gw - 1, px));
+      const iy = Math.max(0, Math.min(gh - 1, py));
+      const k = (iy * gw + ix) * 4;
+      return buf[k] * 256 + buf[k + 1] + buf[k + 2] / 256 - 32768;
     };
-    const sampleTerrarium = (lat, lon) => {
-      const fx = ((lon + 180) / 360) * numTiles - tx0;
+    const sampleTerrariumGrid = (buf, gw, gh, gx0, gy0, gTiles, lat, lon) => {
+      const fx = ((lon + 180) / 360) * gTiles - gx0;
       const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
-      const fy = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * numTiles - ty0;
+      const fy = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * gTiles - gy0;
       const px = fx * 256 - 0.5;
       const py = fy * 256 - 0.5;
       const x0 = Math.floor(px), y0 = Math.floor(py);
       const ax = px - x0, ay = py - y0;
-      const h00 = decodePx(x0, y0), h10 = decodePx(x0 + 1, y0);
-      const h01 = decodePx(x0, y0 + 1), h11 = decodePx(x0 + 1, y0 + 1);
+      const h00 = decodeGridPx(buf, gw, gh, x0, y0), h10 = decodeGridPx(buf, gw, gh, x0 + 1, y0);
+      const h01 = decodeGridPx(buf, gw, gh, x0, y0 + 1), h11 = decodeGridPx(buf, gw, gh, x0 + 1, y0 + 1);
       return (h00 * (1 - ax) + h10 * ax) * (1 - ay) + (h01 * (1 - ax) + h11 * ax) * ay;
+    };
+    const sampleTerrarium = (lat, lon) => {
+      const baseH = sampleTerrariumGrid(pixels, w, h, tx0, ty0, numTiles, lat, lon);
+      if (!nearPixels) return baseH;
+      const fx = ((lon + 180) / 360) * nearNumTiles - ntx0;
+      const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+      const fy = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * nearNumTiles - nty0;
+      if (fx <= 0.05 || fx >= 1.95 || fy <= 0.05 || fy >= 1.95) return baseH;
+      const nearHVal = sampleTerrariumGrid(nearPixels, nearW, nearH, ntx0, nty0, nearNumTiles, lat, lon);
+      const edge = Math.min(fx, 2 - fx, fy, 2 - fy);
+      const blend = coastalSmoothstep(0.05, 0.25, edge);
+      return baseH * (1 - blend) + nearHVal * blend;
     };
 
     const rawDem = new Float32Array(n * n);
@@ -1906,81 +2224,108 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
         const lon = region.longitude + (x - region.x) / (111195 * cosLat);
         const elev = sampleTerrarium(lat, lon);
         rawDem[j * n + i] = elev;
-        if (elev > 1.0) landCount++;
+        if (elev > 0.25) landCount++;
         if (elev > maxDem) maxDem = elev;
       }
     }
     const landRatio = landCount / (n * n);
     // Require both real land and real water in the 8.2km coastal window
-    if (landRatio < 0.06 || landRatio > 0.88 || maxDem < 6) return ensureFallback(pack);
-
-    // 2-pass Chamfer distance transform (in metres) from shoreline (rawDem = 1.0m)
-    const step = span / (n - 1);
-    const distLand = new Float32Array(n * n).fill(1e6);
-    const distWater = new Float32Array(n * n).fill(1e6);
-    for (let k = 0; k < n * n; k++) {
-      if (rawDem[k] > 1.0) distLand[k] = 0;
-      else distWater[k] = 0;
+    if (landRatio < 0.015 || landRatio > 0.95 || maxDem < 2.5) {
+      for (const item of satLoaded) item?.bmp?.close?.();
+      return ensureFallback(pack);
     }
-    const sweepDist = (arr) => {
-      const diag = step * Math.SQRT2;
-      for (let j = 0; j < n; j++) {
-        for (let i = 0; i < n; i++) {
-          const k = j * n + i;
-          let d = arr[k];
-          if (i > 0) d = Math.min(d, arr[k - 1] + step);
-          if (j > 0) d = Math.min(d, arr[k - n] + step);
-          if (i > 0 && j > 0) d = Math.min(d, arr[k - n - 1] + diag);
-          if (i < n - 1 && j > 0) d = Math.min(d, arr[k - n + 1] + diag);
-          arr[k] = d;
-        }
-      }
-      for (let j = n - 1; j >= 0; j--) {
-        for (let i = n - 1; i >= 0; i--) {
-          const k = j * n + i;
-          let d = arr[k];
-          if (i < n - 1) d = Math.min(d, arr[k + 1] + step);
-          if (j < n - 1) d = Math.min(d, arr[k + n] + step);
-          if (i < n - 1 && j < n - 1) d = Math.min(d, arr[k + n + 1] + diag);
-          if (i > 0 && j < n - 1) d = Math.min(d, arr[k + n - 1] + diag);
-          arr[k] = d;
-        }
-      }
-    };
-    sweepDist(distLand);
-    sweepDist(distWater);
 
+    // Co-register satellite imagery from Web Mercator tiles to the local equirectangular grid
+    let satelliteData = null;
+    if (satLoaded.length === loaded.length && satLoaded.every(Boolean)) {
+      const satGridPixels = rasterizeTileGrid(satLoaded, tx0, ty0, w, h);
+      const satSize = region.albedoSize;
+      const regRgba = new Uint8ClampedArray(satSize * satSize * 4);
+      for (let j = 0; j < satSize; j++) {
+        const z = region.z + ((j + 0.5) / satSize - 0.5) * span;
+        const lat = region.latitude - (z - region.z) / 111195;
+        const rLat = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+        const fy = ((1 - Math.log(Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI) / 2) * numTiles - ty0;
+        const py = Math.max(0, Math.min(h - 1, fy * 256 - 0.5));
+        const y0 = Math.floor(py), y1 = Math.min(h - 1, y0 + 1), ay = py - y0;
+        for (let i = 0; i < satSize; i++) {
+          const x = region.x + ((i + 0.5) / satSize - 0.5) * span;
+          const lon = region.longitude + (x - region.x) / (111195 * cosLat);
+          const fx = ((lon + 180) / 360) * numTiles - tx0;
+          const px = Math.max(0, Math.min(w - 1, fx * 256 - 0.5));
+          const x0 = Math.floor(px), x1 = Math.min(w - 1, x0 + 1), ax = px - x0;
+          const k00 = (y0 * w + x0) * 4, k10 = (y0 * w + x1) * 4;
+          const k01 = (y1 * w + x0) * 4, k11 = (y1 * w + x1) * 4;
+          const dst = (j * satSize + i) * 4;
+          for (let c = 0; c < 3; c++) {
+            const v0 = satGridPixels[k00 + c] * (1 - ax) + satGridPixels[k10 + c] * ax;
+            const v1 = satGridPixels[k01 + c] * (1 - ax) + satGridPixels[k11 + c] * ax;
+            regRgba[dst + c] = Math.round(v0 * (1 - ay) + v1 * ay);
+          }
+          regRgba[dst + 3] = 255;
+        }
+      }
+      // Compute 16x-downsampled local luminance field for Saba-style shadow de-lighting
+      const lowSize = Math.max(8, satSize >> 4);
+      const block = Math.max(1, Math.floor(satSize / lowSize));
+      const lowLuma = new Float32Array(lowSize * lowSize);
+      for (let lj = 0; lj < lowSize; lj++) {
+        for (let li = 0; li < lowSize; li++) {
+          let sum = 0, count = 0;
+          for (let dy = 0; dy < block; dy++) {
+            const sy = Math.min(satSize - 1, lj * block + dy);
+            for (let dx = 0; dx < block; dx++) {
+              const sx = Math.min(satSize - 1, li * block + dx);
+              const k = (sy * satSize + sx) * 4;
+              sum += 0.2126 * regRgba[k] + 0.7152 * regRgba[k + 1] + 0.0722 * regRgba[k + 2];
+              count++;
+            }
+          }
+          lowLuma[lj * lowSize + li] = sum / Math.max(1, count);
+        }
+      }
+      satelliteData = { rgba: regRgba, size: satSize, lowLuma, lowSize };
+    } else {
+      for (const item of satLoaded) item?.bmp?.close?.();
+    }
+
+    // Apply Saba's exact coastal bathymetry model (scripts/prepare-land-imagery.py:76-83):
+    // Measured land elevations > 0.25m are retained verbatim; wet cells use the shore-distance skirt
+    // depth = min(120, 2 + 0.15 * shoreDistanceMetres) so real coastlines, headlands, and bays are preserved 1:1.
+    const { distLand, step } = computeCoastalShoreDistances(rawDem, n, span, 0.25);
     const heights = new Float32Array(n * n);
-    const seed = region.vegetationSeed >>> 0;
-    for (let j = 0; j < n; j++) {
-      const z = region.z + (j / (n - 1) - 0.5) * span;
-      for (let i = 0; i < n; i++) {
-        const k = j * n + i;
-        const x = region.x + (i / (n - 1) - 0.5) * span;
-        const { along } = coastalFrame(region, x, z);
-        const demH = rawDem[k];
-        const micro = (coastalFbm2D((x / span) * 14, (z / span) * 14, seed, 3) - 0.5) * 3.2;
-        if (demH > 1.0) {
-          const inlandM = distWater[k];
-          const beachBlend = coastalSmoothstep(0, 75, inlandM);
-          const foreshore = Math.min(inlandM * 0.042, 3.2);
-          heights[k] = Math.min(895, foreshore * (1 - beachBlend) + (demH + micro * beachBlend) * beachBlend);
-        } else {
-          const offshoreM = distLand[k];
-          const inChannel = Math.exp(-(along * along) / (2 * 320 * 320));
-          const shelfDepth = -(offshoreM * 0.032 + Math.max(0, offshoreM - 160) * 0.048);
-          const channelDepth = -Math.min(24, 11.5 + offshoreM * 0.02) * inChannel * coastalSmoothstep(65, 240, offshoreM);
-          heights[k] = Math.max(-120, Math.min(demH < -2 ? demH : shelfDepth, shelfDepth, channelDepth));
-        }
+    for (let k = 0; k < n * n; k++) {
+      const demH = rawDem[k];
+      if (demH > 0.25) {
+        heights[k] = Math.min(895, demH);
+      } else {
+        const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
+        const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance);
+        heights[k] = Math.max(-120, demH < -2 ? Math.min(demH, -authoredDepth) : -authoredDepth);
       }
     }
 
-    finalizeProceduralCoastalPack(pack, heights, `aws-terrarium-srtm-z${zoom}`);
+    finalizeProceduralCoastalPack(
+      pack,
+      heights,
+      `aws-terrarium-srtm-z${nearPixels ? nearZoom : zoom}`,
+      satelliteData,
+      true
+    );
     pack.demSource = {
       provider: 'aws-terrarium-srtm-etopo1',
-      zoom,
-      tiles: loaded.length,
+      zoom: nearPixels ? nearZoom : zoom,
+      baseZoom: zoom,
+      tiles: loaded.length + (nearPixels ? nearDemLoaded.length : 0),
     };
+    pack.imagerySource = satelliteData
+      ? {
+          provider: 'esri-world-imagery',
+          zoom,
+          textureSize: satelliteData.size,
+          tiles: satLoaded.length,
+        }
+      : null;
     return pack;
   } catch {
     return ensureFallback(pack);
