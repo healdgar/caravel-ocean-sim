@@ -100,4 +100,4 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
   }
   return false;
 }
-export { SPANISH_MAIN_1550_REGIONS, PORT_PREFABS, COCONUT_PALM_GENOME_SPEC, resolveGlobalCoastalRegion, synthesizeCoastalTerrain, synthesizeCoastalBeaches, synthesizeCoastalBiome, synthesizeCoastalAlbedo, placeCoastalPort, portClearanceEnvelope, buildPortPrefabGeometry, seedCoastalVegetation, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './coastal-world.js';
+export { SPANISH_MAIN_1550_REGIONS, PORT_PREFABS, COCONUT_PALM_GENOME_SPEC, coastalUberNoise2D, resolveGlobalCoastalRegion, synthesizeCoastalTerrain, synthesizeCoastalBeaches, synthesizeCoastalBiome, synthesizeCoastalAlbedo, placeCoastalPort, portClearanceEnvelope, buildPortPrefabGeometry, seedCoastalVegetation, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './coastal-world.js';

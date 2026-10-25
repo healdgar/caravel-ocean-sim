@@ -356,21 +356,43 @@ fn landOpaque(in:LandVertex)->vec4f{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
     // bark never execute these ground-material evaluations.
-    let beachSand=select(0.0,clamp(in.kind.y,0.0,1.0),in.kind.x<0.5);
-    let rockKeep=1.0-beachSand*0.92;
+    let isProceduralCoast=in.kind.x<0.5&&in.kind.y>0.015;
+    let beachSand=select(0.0,clamp((in.kind.y-0.02)/0.98,0.0,1.0),isProceduralCoast);
+    let rockKeep=1.0-beachSand*0.94;
     let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
     var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19);}
     let blocks=blockNoise*blockWeight*rockKeep;
-    let stone=landFilteredNoise(materialUV*.82,materialWidth*.82)*rockKeep;
+    let stoneRaw=landFilteredNoise(materialUV*.82,materialWidth*.82);
+    let stone=stoneRaw*rockKeep;
     let pores=landFilteredNoise(materialUV*5.4,materialWidth*5.4);
     let fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11)*rockKeep;
     // Reuse the raw block noise, not its faded value, without another noise call.
     let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065)*rockKeep;
-    let sandRipple=sin(world.x*1.8+world.z*1.3+stone*2.5)*landDetailWeight(materialWidth*0.45)*beachSand*0.025;
-    albedo=source*(1.0+blocks*.14+stone*0.10+pores*(0.055-beachSand*0.025)+sandRipple-(fissure*.075+coarseFissure*.08)*rocky);
+    var baseSource=source;
+    var swashGloss=0.0;
+    var cliffStrata=0.0;
+    if(isProceduralCoast){
+      let gentle=smoothstep(0.32,0.08,1.0-n.y);
+      let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(2.6,6.2+stoneRaw*1.2,world.y))*gentle*beachSand;
+      let swashZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(0.42,1.25+stoneRaw*0.22,world.y))*gentle*beachSand;
+      let wrack=exp(-pow((world.y-(1.08+stoneRaw*0.20))/0.13,2.0))*gentle*beachSand;
+      let shoalZone=(1.0-smoothstep(-5.5,0.12,world.y))*gentle*beachSand;
+      let dryCoralSand=vec3f(0.56,0.46,0.31)*(1.0+stoneRaw*0.06+pores*0.03);
+      let wetSwashSand=vec3f(0.24,0.19,0.13)*(1.0+pores*0.025);
+      let wrackTint=vec3f(0.14,0.12,0.075);
+      let shoalSand=vec3f(0.20,0.34,0.32)*(1.0+stoneRaw*0.05);
+      baseSource=mix(baseSource,dryCoralSand,dryZone*0.85);
+      baseSource=mix(baseSource,wetSwashSand,swashZone*0.88);
+      baseSource=mix(baseSource,wrackTint,wrack*0.45);
+      baseSource=mix(baseSource,shoalSand,shoalZone*0.75);
+      swashGloss=swashZone;
+      cliffStrata=sin(world.y*2.35+blockNoise*2.2)*landDetailWeight(footprint*0.45)*rocky*rockKeep;
+    }
+    let sandRipple=sin(world.x*1.8+world.z*1.3+stoneRaw*2.5)*landDetailWeight(materialWidth*0.45)*beachSand*0.025;
+    albedo=baseSource*(1.0+blocks*.14+stone*0.10+cliffStrata*0.065+pores*(0.055-beachSand*0.025)+sandRipple-(fissure*.075+coarseFissure*.08)*rocky);
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.35;
-    relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky*rockKeep);
-    roughness=clamp(mix(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.78+pores*0.03,beachSand),0.62,0.98);
+    relief=mix(soil,stone*0.14+blocks*.22+cliffStrata*0.035-fissure*0.065-coarseFissure*.10,rocky*rockKeep);
+    roughness=clamp(mix(mix(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.78+pores*0.03,beachSand),0.15,swashGloss),0.14,0.98);
     }
   }else if(in.kind.x>=9.5){
     let portShade=clamp(in.kind.y,0.25,1.0);

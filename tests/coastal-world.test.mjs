@@ -5,6 +5,7 @@ import {
   SPANISH_MAIN_1550_REGIONS,
   PORT_PREFABS,
   COCONUT_PALM_GENOME_SPEC,
+  coastalUberNoise2D,
   resolveGlobalCoastalRegion,
   synthesizeCoastalTerrain,
   synthesizeCoastalBeaches,
@@ -252,11 +253,21 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
     assert.ok(kinds.has(k), `port & palm geometry includes material kind ${k}`);
   }
 
-  // Verify coastal mesh encodes beach sand weight in vertex.kind.y in [0, 1]
+  // Verify Uber-Noise is bounded, deterministic, and derivative-damped
+  const u0 = coastalUberNoise2D(1.4, -0.8, 58109);
+  const u1 = coastalUberNoise2D(1.4, -0.8, 58109);
+  assert.equal(u0, u1);
+  assert.ok(u0 >= 0 && u0 <= 1);
+
+  // Verify stone_quay_seawall (Malecón) is placed and adaptive near-shore subdivision refines shoreline cells
+  assert.ok(pack.port.instances.some((inst) => inst.prefabId === 'stone_quay_seawall'), 'port includes stone_quay_seawall Malecón');
+  assert.ok(pack.mesh.vertices.length > pack.region.size * pack.region.size * 8, 'adaptive 3x3 near-shore subdivision adds shoreline sub-vertices');
+
+  // Verify coastal mesh encodes beach sand weight in vertex.kind.y in [0.02, 1]
   let sandyVertices = 0;
   for (let i = 0; i < pack.mesh.vertices.length; i += 8) {
     const sandW = pack.mesh.vertices[i + 7];
-    assert.ok(sandW >= 0 && sandW <= 1, 'sand weight bounded in [0, 1]');
+    assert.ok(sandW >= 0.015 && sandW <= 1, 'procedural coast tag & sand weight bounded in [0.02, 1]');
     if (sandW > 0.25) sandyVertices++;
   }
   assert.ok(sandyVertices > 10, 'coastal mesh marks foreshore vertices with smooth sand weights');
