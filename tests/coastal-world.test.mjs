@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { test } from 'node:test';
 import {
   SPANISH_MAIN_1550_REGIONS,
@@ -13,6 +14,7 @@ import {
   synthesizeCoastalAlbedo,
   placeCoastalPort,
   portClearanceEnvelope,
+  decode1550BuildingLRMBundle,
   buildPortPrefabGeometry,
   seedCoastalVegetation,
   buildCoastalMesh,
@@ -407,3 +409,18 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
   assert.equal(retargeted.maxRootCapacity, 16000);
   assert.ok(retargeted.roots.length >= 12);
 });
+
+test('decode1550BuildingLRMBundle decodes Hunyuan3D-2mv WW3D building bundle and stamps into port geometry', () => {
+  const raw = fs.readFileSync(new URL('../assets/ports/1550/buildings-1550-lrm.bin', import.meta.url));
+  const templates = decode1550BuildingLRMBundle(raw);
+  assert.ok(templates, 'Expected WW3D bundle to decode');
+  for (const id of ['stone_sea_bastion', 'casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
+    assert.ok(templates[id], `Missing LRM template ${id}`);
+    assert.ok(templates[id].vertexCount > 1000, `Expected >1000 vertices for ${id}`);
+    assert.ok(templates[id].indexCount > 9000, `Expected >3000 triangles for ${id}`);
+  }
+  const pack = generateProceduralCoastalPack('san-juan', { size: 65 });
+  const geom = buildPortPrefabGeometry(pack.port, null, templates);
+  assert.ok(geom.triangleCount > 15000, `Expected LRM port geometry to exceed 15,000 triangles, got ${geom.triangleCount}`);
+});
+

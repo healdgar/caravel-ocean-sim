@@ -49,6 +49,11 @@
     "bytes": 262144,
     "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953"
   },
+  "assets/ports/1550/buildings-1550-lrm.bin": {
+    "url": "assets/ports/1550/buildings-1550-lrm.dc10e52c4885f2b2.bin",
+    "bytes": 310060,
+    "sha256": "dc10e52c4885f2b219e72f2da79fd578a6841e121ccbd7e47d5a7892cbd871dd"
+  },
   "assets/canopy-scenery/saba/manifest.json": {
     "url": "assets/canopy-scenery/saba/manifest.90f2c991ce4e984c.json",
     "bytes": 57430,

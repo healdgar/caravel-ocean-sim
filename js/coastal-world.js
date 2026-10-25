@@ -942,7 +942,63 @@ export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
   return true;
 }
 
-export function buildPortPrefabGeometry(portPlacement, palms = null) {
+let cachedLRMBuildingTemplates = null;
+let pendingLRMBuildingPromise = null;
+
+export function decode1550BuildingLRMBundle(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (bytes.byteLength < 12) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, false) !== 0x57573344) return null; // 'WW3D'
+  const manifestLen = view.getUint32(8, true);
+  if (bytes.byteLength < 12 + manifestLen) return null;
+  let manifest;
+  try {
+    manifest = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + manifestLen)));
+  } catch {
+    return null;
+  }
+  const payloadBase = bytes.byteOffset + 12 + manifestLen;
+  const templates = {};
+  for (const entry of manifest) {
+    const vFloats = new Float32Array(
+      bytes.buffer,
+      payloadBase + entry.vertexByteOffset,
+      entry.vertexCount * 8
+    );
+    const iShorts = new Uint16Array(
+      bytes.buffer,
+      payloadBase + entry.indexByteOffset,
+      entry.indexCount
+    );
+    templates[entry.id] = {
+      id: entry.id,
+      vertices: vFloats,
+      indices: iShorts,
+      vertexCount: entry.vertexCount,
+      indexCount: entry.indexCount,
+    };
+  }
+  return templates;
+}
+
+export async function load1550BuildingLRMTemplates(fetchImpl = typeof fetch === 'function' ? fetch : null) {
+  if (cachedLRMBuildingTemplates) return cachedLRMBuildingTemplates;
+  if (!fetchImpl) return null;
+  if (!pendingLRMBuildingPromise) {
+    pendingLRMBuildingPromise = fetchImpl('assets/ports/1550/buildings-1550-lrm.bin')
+      .then(async (res) => {
+        if (!res?.ok) return null;
+        const decoded = decode1550BuildingLRMBundle(await res.arrayBuffer());
+        if (decoded) cachedLRMBuildingTemplates = decoded;
+        return decoded;
+      })
+      .catch(() => null);
+  }
+  return pendingLRMBuildingPromise;
+}
+
+export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cachedLRMBuildingTemplates) {
   if (!portPlacement?.instances?.length) {
     return {
       vertices: new Float32Array(0),
@@ -967,6 +1023,34 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
       bounds.max[k] = Math.max(bounds.max[k], p[k]);
     }
     return idx;
+  };
+
+  // Stamp a Hunyuan3D-2mv multi-view reconstructed 3D building mesh into world coordinates
+  const emitLRMMesh = (toWorld, tmpl, widthX, y0, y1, lengthZ, cosY, sinY) => {
+    const baseVertex = verts.length / 8;
+    const spanY = Math.max(1.0, y1 - y0);
+    const vArr = tmpl.vertices;
+    const vCount = tmpl.vertexCount;
+    for (let v = 0; v < vCount; v++) {
+      const off = v * 8;
+      const lx = vArr[off] * widthX;
+      const ly = y0 + vArr[off + 1] * spanY;
+      const lz = vArr[off + 2] * lengthZ;
+      const wp = toWorld(lx, ly, lz);
+      const lnx = vArr[off + 3] / Math.max(1, widthX);
+      const lny = vArr[off + 4] / spanY;
+      const lnz = vArr[off + 5] / Math.max(1, lengthZ);
+      let wx = lnx * cosY + lnz * sinY;
+      let wy = lny;
+      let wz = -lnx * sinY + lnz * cosY;
+      const nLen = Math.hypot(wx, wy, wz) || 1;
+      wx /= nLen; wy /= nLen; wz /= nLen;
+      pushVertex(wp, [wx, wy, wz], vArr[off + 6], vArr[off + 7]);
+    }
+    const iArr = tmpl.indices;
+    for (let i = 0; i < iArr.length; i++) {
+      indices.push(baseVertex + iArr[i]);
+    }
   };
 
   const pushQuad = (a, b, c, d, kind, shade) => {
@@ -1021,13 +1105,120 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
     }
   };
 
-  // Helper to emit an overhanging gabled or hipped terracotta roof (kind 13) with timber fascia (kind 10)
+  // Helper to emit an N-sided cylindrical or conical prism (turrets, domes, cannon barrels, round columns)
+  const emitCylinder = (toWorld, cx, cz, y0, y1, r0, r1, segs = 8, kind = 11, shade = 0.88, capTop = true) => {
+    const topCenter = toWorld(cx, y1, cz);
+    for (let s = 0; s < segs; s++) {
+      const a0 = (s / segs) * Math.PI * 2;
+      const a1 = ((s + 1) / segs) * Math.PI * 2;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0);
+      const c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const p00 = toWorld(cx + c0 * r0, y0, cz + s0 * r0);
+      const p10 = toWorld(cx + c1 * r0, y0, cz + s1 * r0);
+      const p11 = toWorld(cx + c1 * r1, y1, cz + s1 * r1);
+      const p01 = toWorld(cx + c0 * r1, y1, cz + s0 * r1);
+      const facetShade = shade * (0.90 + 0.10 * Math.cos(a0 - 0.7));
+      pushQuad(p00, p10, p11, p01, kind, facetShade);
+      if (capTop && r1 > 0.04) {
+        pushTri(p01, p11, topCenter, kind, Math.min(1, shade * 1.05));
+      }
+    }
+  };
+
+  // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
+  const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6) => {
+    const xOut = xFace + depthSign * 0.14;
+    const xIn = xFace - depthSign * 0.55;
+    // Recessed dark barrel-vaulted interior opening (kind 14)
+    emitBox(
+      toWorld,
+      Math.min(xFace, xIn),
+      Math.max(xFace, xIn),
+      yFloor,
+      ySpring + radius * 0.86,
+      zCenter - radius * 0.92,
+      zCenter + radius * 0.92,
+      14,
+      0.28
+    );
+    // Stone jamb piers flanking the arch
+    const jambW = 0.34;
+    emitBox(
+      toWorld,
+      Math.min(xOut, xIn),
+      Math.max(xOut, xIn),
+      yFloor,
+      ySpring,
+      zCenter - radius - jambW,
+      zCenter - radius,
+      11,
+      0.86
+    );
+    emitBox(
+      toWorld,
+      Math.min(xOut, xIn),
+      Math.max(xOut, xIn),
+      yFloor,
+      ySpring,
+      zCenter + radius,
+      zCenter + radius + jambW,
+      11,
+      0.86
+    );
+    // Radial stone voussoir arch ring (kind 11)
+    const rOuter = radius + 0.36;
+    for (let s = 0; s < archSegs; s++) {
+      const a0 = (s / archSegs) * Math.PI;
+      const a1 = ((s + 1) / archSegs) * Math.PI;
+      const z0i = zCenter - Math.cos(a0) * radius, y0i = ySpring + Math.sin(a0) * radius;
+      const z1i = zCenter - Math.cos(a1) * radius, y1i = ySpring + Math.sin(a1) * radius;
+      const z0o = zCenter - Math.cos(a0) * rOuter, y0o = ySpring + Math.sin(a0) * rOuter;
+      const z1o = zCenter - Math.cos(a1) * rOuter, y1o = ySpring + Math.sin(a1) * rOuter;
+      const vShade = 0.85 + (s % 2) * 0.06;
+      if (depthSign < 0) {
+        pushQuad(toWorld(xOut, y0i, z0i), toWorld(xOut, y1i, z1i), toWorld(xOut, y1o, z1o), toWorld(xOut, y0o, z0o), 11, vShade);
+      } else {
+        pushQuad(toWorld(xOut, y1i, z1i), toWorld(xOut, y0i, z0i), toWorld(xOut, y0o, z0o), toWorld(xOut, y1o, z1o), 11, vShade);
+      }
+    }
+  };
+
+  // Helper to emit a cantilevered Spanish Colonial timber balcony with corbel brackets & open wooden balusters (kind 10)
+  const emitBalustradeZ = (toWorld, xWall, outSign, yFloor, z0, z1) => {
+    const xOuter = xWall + outSign * 1.15;
+    const xMin = Math.min(xWall, xOuter), xMax = Math.max(xWall, xOuter);
+    // Planked balcony floor deck
+    emitBox(toWorld, xMin, xMax, yFloor - 0.18, yFloor, z0, z1, 10, 0.78, true);
+    // Top & bottom balustrade rails
+    const rMin = Math.min(xOuter - outSign * 0.14, xOuter), rMax = Math.max(xOuter - outSign * 0.14, xOuter);
+    emitBox(toWorld, rMin, rMax, yFloor + 0.88, yFloor + 1.02, z0, z1, 10, 0.82, true);
+    emitBox(toWorld, rMin, rMax, yFloor, yFloor + 0.12, z0, z1, 10, 0.74);
+    // Carved timber floor corbels (ménsulas) & vertical wooden balusters
+    const spanZ = z1 - z0;
+    const postCount = Math.max(4, Math.floor(spanZ / 1.15));
+    for (let p = 0; p <= postCount; p++) {
+      const pz = z0 + (p / postCount) * spanZ;
+      emitBox(toWorld, rMin, rMax, yFloor + 0.12, yFloor + 0.88, pz - 0.06, pz + 0.06, 10, 0.75);
+      if (p % 2 === 0) {
+        emitBox(toWorld, xMin, xMax, yFloor - 0.46, yFloor - 0.18, pz - 0.09, pz + 0.09, 10, 0.68, true);
+      }
+    }
+  };
+
+  // Helper to emit an overhanging gabled or hipped terracotta roof (kind 13) with timber rafter tails (kind 10) & ridge cap
   const emitRoof = (toWorld, x0, x1, yEave, yPeak, z0, z1, overhang = 0.65, hipRatio = 0.25, wallKind = 12) => {
     const rx0 = x0 - overhang, rx1 = x1 + overhang;
     const rz0 = z0 - overhang, rz1 = z1 + overhang;
     const fasciaH = 0.24;
     // Timber fascia / eaves skirt
     emitBox(toWorld, rx0, rx1, yEave - fasciaH, yEave, rz0, rz1, 10, 0.72, true);
+    // Projecting Spanish timber rafter tails (canecillos) under the eaves
+    const rafterCount = Math.max(4, Math.floor((z1 - z0) / 1.8));
+    for (let r = 0; r <= rafterCount; r++) {
+      const rz = z0 + (r / rafterCount) * (z1 - z0);
+      emitBox(toWorld, rx0 - 0.12, x0 + 0.1, yEave - fasciaH - 0.14, yEave - 0.04, rz - 0.08, rz + 0.08, 10, 0.66, true);
+      emitBox(toWorld, x1 - 0.1, rx1 + 0.12, yEave - fasciaH - 0.14, yEave - 0.04, rz - 0.08, rz + 0.08, 10, 0.66, true);
+    }
     const midX = (x0 + x1) * 0.5;
     const spanZ = rz1 - rz0;
     const zHip0 = rz0 + spanZ * hipRatio;
@@ -1054,6 +1245,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
       pushTri(g00, g10, gr0, wallKind, 0.84);
       pushTri(g11, g01, gr1, wallKind, 0.84);
     }
+    // Raised terracotta ridge tile cap (caballete)
+    if (zHip1 > zHip0 + 0.4) {
+      emitBox(toWorld, midX - 0.22, midX + 0.22, yPeak - 0.08, yPeak + 0.18, zHip0, zHip1, 13, 0.98, false, 0.06);
+    }
   };
 
   for (const inst of portPlacement.instances) {
@@ -1070,8 +1265,24 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
       inst.z - lx * sinY + lz * cosY,
     ];
 
+    const lrmKey = inst.prefabId === 'royal_warehouse' ? 'colonial_town_block' : inst.prefabId;
+    const lrmTmpl = lrmTemplates?.[lrmKey];
+    if (lrmTmpl) {
+      // Grounded coral-limestone foundation plinth anchoring the Hunyuan3D-2mv 3D mesh into sloped coastal terrain
+      const yPlinth = yGround + 0.68;
+      emitBox(toWorld, -hw - 0.55, hw + 0.55, yBase, yPlinth, -hl - 0.55, hl + 0.55, 11, 0.82);
+      const yPeak =
+        inst.prefabId === 'mission_chapel'
+          ? yTop + (inst.roofPitch ?? 3.4) + 5.8
+          : inst.prefabId === 'stone_sea_bastion'
+            ? yTop + 4.8
+            : yTop + (inst.roofPitch ?? 2.6) + 1.2;
+      emitLRMMesh(toWorld, lrmTmpl, inst.width * 1.04, yPlinth - 0.18, yPeak, inst.length * 1.04, cosY, sinY);
+      continue;
+    }
+
     if (inst.prefabId === 'timber_mole_pier') {
-      // Open timber trestle pier: planked deck + side curbs + seabed pilings + cross-bracing + bollards
+      // Open timber trestle pier: planked deck + side curbs + seabed pilings + cross-bracing + bollards + cargo crane
       const deckBottom = yTop - 0.55;
       emitBox(toWorld, -hw, hw, deckBottom, yTop, -hl, hl, 10, 0.86, true);
       // Side wheel-guard curbs
@@ -1080,28 +1291,30 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
       // Longitudinal stringer beams under deck
       emitBox(toWorld, -hw + 0.55, -hw + 1.05, deckBottom - 0.55, deckBottom, -hl + 0.4, hl - 0.4, 10, 0.68, true);
       emitBox(toWorld, hw - 1.05, hw - 0.55, deckBottom - 0.55, deckBottom, -hl + 0.4, hl - 0.4, 10, 0.68, true);
-      // Paired timber pilings every 5.2m + transverse cross-beam caps & mooring bollards
+      // Paired cylindrical timber pilings every 5.2m + transverse cross-beam caps & mooring bollards
       const bays = Math.max(4, Math.floor(inst.length / 5.2));
       for (let b = 0; b <= bays; b++) {
         const z = -hl + 1.2 + (b / bays) * (inst.length - 2.4);
-        const pw = 0.24;
-        emitBox(toWorld, -hw + 0.45 - pw, -hw + 0.45 + pw, yBase, yTop + 0.55, z - pw, z + pw, 10, 0.66);
-        emitBox(toWorld, hw - 0.45 - pw, hw - 0.45 + pw, yBase, yTop + 0.55, z - pw, z + pw, 10, 0.66);
+        emitCylinder(toWorld, -hw + 0.48, z, yBase, yTop + 0.58, 0.26, 0.24, 6, 10, 0.66, true);
+        emitCylinder(toWorld, hw - 0.48, z, yBase, yTop + 0.58, 0.26, 0.24, 6, 10, 0.66, true);
         // Transverse bent beam above water
         emitBox(toWorld, -hw + 0.3, hw - 0.3, deckBottom - 0.95, deckBottom - 0.55, z - 0.18, z + 0.18, 10, 0.62, true);
         if (b % 2 === 0) {
-          // Heavy mooring bollards along the deck edge
-          emitBox(toWorld, -hw + 0.55, -hw + 0.95, yTop + 0.28, yTop + 0.95, z - 0.20, z + 0.20, 14, 0.45);
-          emitBox(toWorld, hw - 0.95, hw - 0.55, yTop + 0.28, yTop + 0.95, z - 0.20, z + 0.20, 14, 0.45);
+          // Heavy iron mooring bollards along the deck edge
+          emitCylinder(toWorld, -hw + 0.75, z, yTop + 0.28, yTop + 0.96, 0.22, 0.26, 6, 14, 0.45, true);
+          emitCylinder(toWorld, hw - 0.75, z, yTop + 0.28, yTop + 0.96, 0.22, 0.26, 6, 14, 0.45, true);
         }
       }
-      // Seaward pier-head stone plinth & iron cresset beacon tower
-      emitBox(toWorld, -1.1, 1.1, yTop, yTop + 1.6, -hl + 0.6, -hl + 2.8, 11, 0.88);
-      emitBox(toWorld, -0.22, 0.22, yTop + 1.6, yTop + 5.2, -hl + 1.48, -hl + 1.92, 10, 0.72);
-      emitBox(toWorld, -0.55, 0.55, yTop + 5.2, yTop + 5.9, -hl + 1.15, -hl + 2.25, 14, 0.55, true);
+      // Seaward pier-head stone plinth, iron cresset beacon tower & timber cargo derrick crane
+      emitBox(toWorld, -1.2, 1.2, yTop, yTop + 1.7, -hl + 0.6, -hl + 3.0, 11, 0.88);
+      emitCylinder(toWorld, 0, -hl + 1.8, yTop + 1.7, yTop + 5.4, 0.24, 0.18, 6, 10, 0.72, true);
+      emitCylinder(toWorld, 0, -hl + 1.8, yTop + 5.4, yTop + 6.2, 0.52, 0.68, 6, 14, 0.52, true);
+      // Timber treadwheel cargo crane mid-pier
+      emitCylinder(toWorld, hw - 1.2, -hl * 0.35, yTop, yTop + 4.8, 0.32, 0.26, 6, 10, 0.76, true);
+      emitBox(toWorld, hw - 1.4, hw + 2.2, yTop + 3.9, yTop + 4.35, -hl * 0.35 - 0.2, -hl * 0.35 + 0.2, 10, 0.74, true);
     } else if (inst.prefabId === 'stone_quay_seawall') {
       // Continuous Colonial Stone Seawall & Wharf (Malecón y Muelle de Piedra):
-      // Battered coral-limestone seawall + stone coping parapet + boat-landing stairs + mooring bollards + paved wharf apron
+      // Battered coral-limestone seawall + stone coping parapet + boat-landing stairs + mooring bollards + arched stone customs gate
       const yCoping = yTop - 0.35;
       emitBox(toWorld, -hw - 0.8, hw + 0.8, yBase, yCoping, -hl - 0.8, hl + 0.4, 11, 0.84, false, 0.6);
       // Heavy cut-stone coping course & paved wharf apron
@@ -1120,35 +1333,49 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
           emitBox(toWorld, stairX - 3.2, stairX + 3.2, sy0, sy1, sz0, -hl + 1.2, 11, 0.78 - stepIdx * 0.04);
         }
       }
-      // Stone & iron mooring bollards along the quay edge
+      // Cylindrical stone & iron mooring bollards along the quay edge
       for (let bx = -hw + 6; bx <= hw - 6; bx += 14) {
         if (Math.abs(bx) < 5 || (Math.abs(bx) > 14 && Math.abs(bx) < 23)) continue;
-        emitBox(toWorld, bx - 0.35, bx + 0.35, yTop + 0.65, yTop + 1.35, -hl + 0.25, -hl + 0.95, 14, 0.42);
+        emitCylinder(toWorld, bx, -hl + 0.6, yTop + 0.65, yTop + 1.38, 0.34, 0.38, 6, 14, 0.42, true);
       }
     } else if (inst.prefabId === 'stone_sea_bastion') {
-      // 16th-century Spanish Stone Sea Bastion (Baluarte):
-      // Battered coral-limestone scarp walls + cordon moulding + crenellated parapet & embrasures + 4 corner garitas + central keep
+      // 16th-century Spanish Stone Sea Bastion (Baluarte / Castillo):
+      // Battered coral-limestone scarp walls + cordon moulding + crenellated parapet & naval cannons
+      // + 4 cylindrical corbeled domed sentry turrets (garitas) + central arched keep
       const yCordon = yTop - 1.6;
-      emitBox(toWorld, -hw - 1.5, hw + 1.5, yBase, yCordon, -hl - 1.5, hl + 1.5, 11, 0.84, false, 1.5);
-      // Projecting stone cordon course
-      emitBox(toWorld, -hw - 0.35, hw + 0.35, yCordon, yCordon + 0.42, -hl - 0.35, hl + 0.35, 11, 0.92, true);
+      emitBox(toWorld, -hw - 1.6, hw + 1.6, yBase, yCordon, -hl - 1.6, hl + 1.6, 11, 0.84, false, 1.6);
+      // Projecting semicircular stone cordon moulding (bocel)
+      emitBox(toWorld, -hw - 0.42, hw + 0.42, yCordon, yCordon + 0.46, -hl - 0.42, hl + 0.42, 11, 0.93, true);
       // Terreplein gun deck
-      emitBox(toWorld, -hw, hw, yCordon + 0.42, yTop - 0.9, -hl, hl, 11, 0.80);
-      // Perimeter crenellated parapet walls with cannon embrasures
-      const wallT = 1.65;
-      const merlonY = yTop + 0.85;
+      emitBox(toWorld, -hw, hw, yCordon + 0.46, yTop - 0.9, -hl, hl, 11, 0.80);
+      // Perimeter crenellated parapet walls with sloped cannon embrasures & naval guns
+      const wallT = 1.75;
+      const merlonY = yTop + 0.92;
       for (const sideZ of [-1, 1]) {
         const zOut = sideZ < 0 ? -hl : hl - wallT;
         const zIn = sideZ < 0 ? -hl + wallT : hl;
         emitBox(toWorld, -hw, hw, yTop - 0.9, yTop, zOut, zIn, 11, 0.86);
         for (let m = -2; m <= 2; m++) {
           const mx = m * 5.2;
-          emitBox(toWorld, mx - 1.65, mx + 1.65, yTop, merlonY, zOut, zIn, 11, 0.90);
+          emitBox(toWorld, mx - 1.65, mx + 1.65, yTop, merlonY, zOut, zIn, 11, 0.90, false, 0.12);
           if (m < 2) {
-            // Dark cannon embrasure throat & gun barrel
+            // Stepped wooden naval gun carriage (kind 10) + bronze/iron cannon barrel (kind 14)
             const ex = mx + 2.6;
-            emitBox(toWorld, ex - 0.55, ex + 0.55, yTop - 0.25, yTop + 0.35, zOut - 0.08, zIn + 0.08, 14, 0.35);
-            emitBox(toWorld, ex - 0.18, ex + 0.18, yTop + 0.05, yTop + 0.42, zOut - 0.85, zIn + 0.2, 14, 0.30, true);
+            const cZ = sideZ < 0 ? zIn + 0.4 : zOut - 0.4;
+            emitBox(toWorld, ex - 0.52, ex + 0.52, yTop - 0.85, yTop + 0.08, cZ - 0.75, cZ + 0.75, 10, 0.72);
+            emitBox(toWorld, ex - 0.58, ex + 0.58, yTop - 0.25, yTop + 0.35, zOut - 0.08, zIn + 0.08, 14, 0.35);
+            emitBox(
+              toWorld,
+              ex - 0.20,
+              ex + 0.20,
+              yTop + 0.06,
+              yTop + 0.46,
+              sideZ < 0 ? zOut - 0.95 : zIn - 0.2,
+              sideZ < 0 ? zIn + 0.2 : zIn + 0.95,
+              14,
+              0.28,
+              true
+            );
           }
         }
       }
@@ -1158,148 +1385,197 @@ export function buildPortPrefabGeometry(portPlacement, palms = null) {
         emitBox(toWorld, xOut, xIn, yTop - 0.9, yTop, -hl + wallT, hl - wallT, 11, 0.84);
         for (let m = -2; m <= 2; m++) {
           const mz = m * 5.8;
-          emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - 1.8, mz + 1.8, 11, 0.88);
+          emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - 1.8, mz + 1.8, 11, 0.88, false, 0.12);
         }
       }
-      // 4 Corner projecting bartizan sentry turrets (garitas)
+      // 4 Corner Cylindrical Bartizan Sentry Turrets (Garitas) with inverted-cone corbels & stone cupolas
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
-          const gx = sx * (hw + 0.2), gz = sz * (hl + 0.2);
-          emitBox(toWorld, gx - 1.25, gx + 1.25, yCordon - 0.8, yCordon + 0.42, gz - 1.25, gz + 1.25, 11, 0.78, true, -0.35);
-          emitBox(toWorld, gx - 1.35, gx + 1.35, yCordon + 0.42, merlonY + 1.6, gz - 1.35, gz + 1.35, 11, 0.90);
-          emitBox(toWorld, gx - 1.45, gx + 1.45, merlonY + 1.6, merlonY + 2.8, gz - 1.45, gz + 1.45, 11, 0.95, false, 1.15);
+          const gx = sx * (hw + 0.35), gz = sz * (hl + 0.35);
+          // Corbeled inverted-cone stone bracket
+          emitCylinder(toWorld, gx, gz, yCordon - 1.4, yCordon + 0.35, 0.35, 1.48, 8, 11, 0.78, false);
+          // Molded stone ring collar
+          emitCylinder(toWorld, gx, gz, yCordon + 0.35, yCordon + 0.65, 1.58, 1.58, 8, 11, 0.92, true);
+          // Cylindrical sentry drum with spy-slit embrasures
+          emitCylinder(toWorld, gx, gz, yCordon + 0.65, merlonY + 1.65, 1.38, 1.38, 8, 11, 0.90, true);
+          emitBox(toWorld, gx - 1.44, gx + 1.44, yCordon + 1.35, merlonY + 1.05, gz - 0.22, gz + 0.22, 14, 0.30);
+          emitBox(toWorld, gx - 0.22, gx + 0.22, yCordon + 1.35, merlonY + 1.05, gz - 1.44, gz + 1.44, 14, 0.30);
+          // Eave cornice + hemispherical stone cupola dome & finial ball
+          emitCylinder(toWorld, gx, gz, merlonY + 1.65, merlonY + 1.88, 1.52, 1.52, 8, 11, 0.94, true);
+          emitCylinder(toWorld, gx, gz, merlonY + 1.88, merlonY + 2.75, 1.42, 0.72, 8, 11, 0.95, false);
+          emitCylinder(toWorld, gx, gz, merlonY + 2.75, merlonY + 3.25, 0.72, 0.14, 8, 11, 0.97, true);
         }
       }
-      // Interior command keep / powder magazine with limewashed walls & hipped terracotta roof
-      const kw = hw * 0.44, kl = hl * 0.46, yKeep = merlonY + 4.2;
-      emitBox(toWorld, -kw - 0.3, kw + 0.3, yTop - 0.9, yTop + 0.6, -kl - 0.3, kl + 0.3, 11, 0.82);
-      emitBox(toWorld, -kw, kw, yTop + 0.6, yKeep, -kl, kl, 12, 0.90);
-      emitRoof(toWorld, -kw, kw, yKeep, yKeep + 2.6, -kl, kl, 0.65, 0.28, 12);
+      // Interior command keep / Gobernador's citadel with arched stone portal, limewashed walls & hipped terracotta roof
+      const kw = hw * 0.46, kl = hl * 0.48, yKeep = merlonY + 4.4;
+      emitBox(toWorld, -kw - 0.35, kw + 0.35, yTop - 0.9, yTop + 0.65, -kl - 0.35, kl + 0.35, 11, 0.84);
+      emitBox(toWorld, -kw, kw, yTop + 0.65, yKeep, -kl, kl, 12, 0.91);
+      emitStoneArchZ(toWorld, -kw, -1, yTop + 0.65, yTop + 2.4, 1.15, 0, 6);
+      emitRoof(toWorld, -kw, kw, yKeep, yKeep + 2.8, -kl, kl, 0.72, 0.26, 12);
     } else if (inst.prefabId === 'casa_de_contratacion') {
       // Royal Customhouse (Casa de la Contratación):
-      // Ashlar stone plinth + ground-floor 5-bay waterfront arcade + 2nd-story cantilevered timber balcony + hipped tile roof
+      // Cut-stone plinth + 5-arch radial stone voussoir waterfront loggia + 2nd-story cantilevered balustrade balcony + hipped tile roof
       const yPlinth = yGround + 0.85;
-      emitBox(toWorld, -hw - 0.8, hw + 0.8, yBase, yPlinth, -hl - 0.8, hl + 0.8, 11, 0.82);
-      // Main two-story stucco block recessed behind front loggia
-      const loggiaD = 2.6;
-      emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl + loggiaD, hl, 12, 0.88);
-      // Upper floor extending over the waterfront loggia
+      emitBox(toWorld, -hw - 0.85, hw + 0.85, yBase, yPlinth, -hl - 0.85, hl + 0.85, 11, 0.82);
+      const loggiaD = 2.65;
+      emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl + loggiaD, hl, 12, 0.89);
       const yMid = yPlinth + (yTop - yPlinth) * 0.48;
-      emitBox(toWorld, -hw, hw, yMid, yTop, -hl, -hl + loggiaD, 12, 0.90, true);
-      // Corner ashlar stone quoins
+      emitBox(toWorld, -hw, hw, yMid, yTop, -hl, -hl + loggiaD, 12, 0.91, true);
+      // Molded stone belt course between ground arcade and piano nobile
+      emitBox(toWorld, -hw - 0.18, hw + 0.18, yMid - 0.22, yMid + 0.12, -hl - 0.18, hl + 0.18, 11, 0.88, true);
+      // Alternating tooth-stone ashlar corner quoins
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
           const qx = sx * hw, qz = sz * hl;
-          emitBox(toWorld, qx - (sx > 0 ? 0.65 : 0.08), qx + (sx < 0 ? 0.65 : 0.08), yPlinth, yTop, qz - (sz > 0 ? 0.65 : 0.08), qz + (sz < 0 ? 0.65 : 0.08), 11, 0.84);
-        }
-      }
-      // Ground-floor waterfront colonnade pillars & dark recessed arcade bays
-      const cols = 6;
-      for (let c = 0; c < cols; c++) {
-        const lz = -hl + 0.6 + (c / (cols - 1)) * (inst.length - 1.2);
-        emitBox(toWorld, -hw - 0.05, -hw + 0.65, yPlinth, yMid, lz - 0.38, lz + 0.38, 11, 0.86);
-        emitBox(toWorld, hw - 0.65, hw + 0.05, yPlinth, yMid, lz - 0.38, lz + 0.38, 11, 0.86);
-        if (c < cols - 1) {
-          const bz = lz + (inst.length - 1.2) / (2 * (cols - 1));
-          // Deep shadowed arcade opening + upper shuttered window
-          emitBox(toWorld, -hw + 0.5, -hw + loggiaD + 0.06, yPlinth + 0.1, yMid - 0.35, bz - 1.1, bz + 1.1, 14, 0.32);
-          emitBox(toWorld, -hw - 0.06, -hw + 0.12, yMid + 0.75, yTop - 0.75, bz - 0.68, bz + 0.68, 14, 0.38);
-          emitBox(toWorld, hw - 0.12, hw + 0.06, yMid + 0.75, yTop - 0.75, bz - 0.68, bz + 0.68, 14, 0.38);
-        }
-      }
-      // Cantilevered 2nd-story timber balcony along both long facades
-      emitBox(toWorld, -hw - 1.05, -hw, yMid - 0.22, yMid + 0.95, -hl + 0.8, hl - 0.8, 10, 0.76, true);
-      emitBox(toWorld, hw, hw + 1.05, yMid - 0.22, yMid + 0.95, -hl + 0.8, hl - 0.8, 10, 0.76, true);
-      emitRoof(toWorld, -hw - 0.2, hw + 0.2, yTop, yTop + (inst.roofPitch ?? 2.8), -hl - 0.2, hl + 0.2, 0.85, 0.22, 12);
-    } else if (inst.prefabId === 'mission_chapel') {
-      // 16th-century Spanish Colonial Iglesia & Bell Tower (Campanario)
-      const yPlinth = yGround + 0.75;
-      emitBox(toWorld, -hw - 0.7, hw + 0.7, yBase, yPlinth, -hl - 0.7, hl + 0.7, 11, 0.82);
-      // Nave walls
-      emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 12, 0.90);
-      // 5 pairs of exterior masonry buttresses along the nave walls
-      for (let b = 0; b < 5; b++) {
-        const bz = -hl + 1.2 + (b / 4) * (inst.length - 2.4);
-        emitBox(toWorld, -hw - 0.65, -hw, yPlinth, yTop - 0.6, bz - 0.42, bz + 0.42, 11, 0.84);
-        emitBox(toWorld, hw, hw + 0.65, yPlinth, yTop - 0.6, bz - 0.42, bz + 0.42, 11, 0.84);
-        if (b < 4) {
-          const wz = bz + (inst.length - 2.4) / 8;
-          emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 2.8, yTop - 1.4, wz - 0.55, wz + 0.55, 14, 0.36);
-        }
-      }
-      // West facade stone portal surround, recessed doorway & choir window
-      emitBox(toWorld, -2.4, 2.4, yPlinth, yPlinth + 5.8, -hl - 0.45, -hl, 11, 0.88);
-      emitBox(toWorld, -1.35, 1.35, yPlinth, yPlinth + 4.4, -hl - 0.52, -hl + 0.1, 14, 0.30);
-      emitBox(toWorld, -1.1, 1.1, yPlinth + 6.5, yTop - 1.1, -hl - 0.12, -hl + 0.1, 14, 0.35);
-      emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 3.4), -hl, hl, 0.75, 0.0, 12);
-      // 3-Stage Spanish Colonial Bell Tower (Campanario) on the front-right corner
-      const tx0 = hw - 2.2, tx1 = hw + 2.6, tz0 = -hl - 1.2, tz1 = -hl + 3.6;
-      const yT1 = yTop + 2.8, yT2 = yT1 + 3.8, yT3 = yT2 + 3.2;
-      emitBox(toWorld, tx0, tx1, yPlinth, yT1, tz0, tz1, 12, 0.92);
-      emitBox(toWorld, tx0 - 0.2, tx1 + 0.2, yT1 - 0.3, yT1, tz0 - 0.2, tz1 + 0.2, 11, 0.88, true);
-      emitBox(toWorld, tx0 + 0.35, tx1 - 0.35, yT1, yT2, tz0 + 0.35, tz1 - 0.35, 12, 0.94);
-      // Belfry arched openings on all 4 sides
-      const tmx = (tx0 + tx1) * 0.5, tmz = (tz0 + tz1) * 0.5;
-      emitBox(toWorld, tx0 + 0.28, tx1 - 0.28, yT1 + 0.65, yT2 - 0.55, tmz - 0.65, tmz + 0.65, 14, 0.32);
-      emitBox(toWorld, tmx - 0.65, tmx + 0.65, yT1 + 0.65, yT2 - 0.55, tz0 + 0.28, tz1 - 0.28, 14, 0.32);
-      emitBox(toWorld, tx0 + 0.15, tx1 - 0.15, yT2 - 0.28, yT2, tz0 + 0.15, tz1 - 0.15, 11, 0.90, true);
-      // Pyramidal terracotta bell-tower roof
-      emitBox(toWorld, tx0 + 0.45, tx1 - 0.45, yT2, yT3, tz0 + 0.45, tz1 - 0.45, 13, 0.95, false, 1.75);
-    } else if (inst.prefabId === 'careening_shed') {
-      // Open-sided timber boatyard pavilion on the beach + careening capstan
-      const yApron = yGround + 0.45;
-      emitBox(toWorld, -hw - 0.6, hw + 0.6, yBase, yApron, -hl - 0.6, hl + 0.6, 10, 0.74);
-      const cols = 4;
-      for (let c = 0; c < cols; c++) {
-        const cz = -hl + 1.0 + (c / (cols - 1)) * (inst.length - 2.0);
-        emitBox(toWorld, -hw + 0.35, -hw + 0.85, yApron, yTop, cz - 0.25, cz + 0.25, 10, 0.78);
-        emitBox(toWorld, hw - 0.85, hw - 0.35, yApron, yTop, cz - 0.25, cz + 0.25, 10, 0.78);
-        emitBox(toWorld, -hw + 0.2, hw - 0.2, yTop - 0.45, yTop, cz - 0.22, cz + 0.22, 10, 0.72, true);
-      }
-      // Pitch-boiling stone hearth & chimney at one end
-      emitBox(toWorld, -1.8, 1.8, yApron, yTop + 2.4, hl - 2.2, hl - 0.2, 11, 0.80, false, 0.45);
-      emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 2.1), -hl, hl, 0.75, 0.12, 10);
-    } else {
-      // Royal Warehouse (Almacén Real) & Colonial Courtyard Town Blocks:
-      // Multi-wing masonry + stone plinth + buttresses/quoins + recessed doors/windows + overhanging terracotta roofs
-      const yPlinth = yGround + 0.68;
-      emitBox(toWorld, -hw - 0.6, hw + 0.6, yBase, yPlinth, -hl - 0.6, hl + 0.6, 11, 0.80);
-      if (inst.prefabId === 'colonial_town_block') {
-        // Two-wing L-shaped courtyard (patio) house + perimeter courtyard wall
-        const mainW = hw * 1.15;
-        emitBox(toWorld, -hw, -hw + mainW, yPlinth, yTop + 1.1, -hl, hl, 12, 0.88);
-        emitRoof(toWorld, -hw, -hw + mainW, yTop + 1.1, yTop + 1.1 + (inst.roofPitch ?? 2.1), -hl, hl, 0.65, 0.22, 12);
-        // Secondary cross-wing
-        const wingL = hl * 0.95;
-        emitBox(toWorld, -hw + mainW * 0.7, hw, yPlinth, yTop - 0.4, -hl, -hl + wingL, 12, 0.85);
-        emitRoof(toWorld, -hw + mainW * 0.7, hw, yTop - 0.4, yTop - 0.4 + 1.8, -hl, -hl + wingL, 0.60, 0.25, 12);
-        // Courtyard enclosure wall with limewashed coping & terracotta cap
-        emitBox(toWorld, hw - 1.1, hw, yPlinth, yPlinth + 3.2, -hl + wingL, hl, 12, 0.82);
-        emitBox(toWorld, -hw + mainW, hw, yPlinth, yPlinth + 3.2, hl - 1.1, hl, 12, 0.82);
-        // Street windows, doors & timber balcony on main wing
-        for (let w = -2; w <= 2; w++) {
-          const wz = w * (hl * 0.36);
-          emitBox(toWorld, -hw - 0.08, -hw + 0.15, yPlinth + 0.8, yPlinth + 2.5, wz - 0.55, wz + 0.55, 14, 0.35);
-          emitBox(toWorld, -hw - 0.08, -hw + 0.15, yPlinth + 3.8, yTop + 0.3, wz - 0.55, wz + 0.55, 14, 0.35);
-        }
-        emitBox(toWorld, -hw - 0.85, -hw, yPlinth + 3.2, yPlinth + 4.1, -hl * 0.65, hl * 0.65, 10, 0.74, true);
-      } else {
-        // Royal Warehouse (Almacén Real): buttressed masonry hall with 4 large arched cargo portals
-        emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 12, 0.87);
-        for (let b = 0; b < 5; b++) {
-          const bz = -hl + 1.0 + (b / 4) * (inst.length - 2.0);
-          emitBox(toWorld, -hw - 0.45, -hw, yPlinth, yTop - 0.3, bz - 0.36, bz + 0.36, 11, 0.82);
-          emitBox(toWorld, hw, hw + 0.45, yPlinth, yTop - 0.3, bz - 0.36, bz + 0.36, 11, 0.82);
-          if (b < 4) {
-            const pz = bz + (inst.length - 2.0) / 8;
-            // Cargo portal & timber lintel
-            emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 0.1, yPlinth + 3.4, pz - 1.05, pz + 1.05, 14, 0.32);
-            emitBox(toWorld, -hw - 0.18, hw + 0.18, yPlinth + 3.4, yPlinth + 3.85, pz - 1.25, pz + 1.25, 10, 0.72, true);
-            // Clerestory window
-            emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 4.6, yTop - 0.9, pz - 0.65, pz + 0.65, 14, 0.38);
+          for (let q = 0; q < 6; q++) {
+            const qy0 = yPlinth + (q / 6) * (yTop - yPlinth);
+            const qy1 = qy0 + (yTop - yPlinth) / 6 - 0.06;
+            const qSpan = q % 2 === 0 ? 0.78 : 0.48;
+            emitBox(
+              toWorld,
+              qx - (sx > 0 ? qSpan : 0.09),
+              qx + (sx < 0 ? qSpan : 0.09),
+              qy0,
+              qy1,
+              qz - (sz > 0 ? qSpan : 0.09),
+              qz + (sz < 0 ? qSpan : 0.09),
+              11,
+              0.85
+            );
           }
         }
-        emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 2.4), -hl, hl, 0.75, 0.15, 12);
+      }
+      // 5-Bay Radial Stone Voussoir Arched Waterfront Colonnade & Upper Shuttered Balcony Doors
+      const bays = 5;
+      const baySpan = (inst.length - 1.6) / bays;
+      for (let b = 0; b < bays; b++) {
+        const bz = -hl + 0.8 + (b + 0.5) * baySpan;
+        emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.05, Math.min(1.32, baySpan * 0.36), bz, 6);
+        emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.05, Math.min(1.32, baySpan * 0.36), bz, 6);
+        // Upper floor tall arched shuttered doors opening onto the balcony + stone pediments
+        emitBox(toWorld, -hw - 0.08, -hw + 0.14, yMid + 0.25, yTop - 0.68, bz - 0.68, bz + 0.68, 14, 0.34);
+        emitBox(toWorld, -hw - 0.16, -hw + 0.18, yTop - 0.68, yTop - 0.42, bz - 0.82, bz + 0.82, 11, 0.86, true);
+        emitBox(toWorld, hw - 0.14, hw + 0.08, yMid + 0.25, yTop - 0.68, bz - 0.68, bz + 0.68, 14, 0.34);
+        emitBox(toWorld, hw - 0.18, hw + 0.16, yTop - 0.68, yTop - 0.42, bz - 0.82, bz + 0.82, 11, 0.86, true);
+      }
+      // Open cantilevered timber balustrade balconies on both long facades
+      emitBalustradeZ(toWorld, -hw, -1, yMid + 0.08, -hl + 0.8, hl - 0.8);
+      emitBalustradeZ(toWorld, hw, 1, yMid + 0.08, -hl + 0.8, hl - 0.8);
+      emitRoof(toWorld, -hw - 0.2, hw + 0.2, yTop, yTop + (inst.roofPitch ?? 2.8), -hl - 0.2, hl + 0.2, 0.85, 0.22, 12);
+    } else if (inst.prefabId === 'mission_chapel') {
+      // 16th-century Spanish Colonial Iglesia, Stepped Espadaña Facade & 3-Stage Arched Campanario
+      const yPlinth = yGround + 0.78;
+      emitBox(toWorld, -hw - 0.75, hw + 0.75, yBase, yPlinth, -hl - 0.75, hl + 0.75, 11, 0.82);
+      // Nave walls + semicircular apse sanctuary at the east (+hl) end
+      emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 12, 0.91);
+      emitCylinder(toWorld, 0, hl + 0.4, yPlinth, yTop - 1.1, hw * 0.62, hw * 0.62, 8, 12, 0.89, true);
+      emitCylinder(toWorld, 0, hl + 0.4, yTop - 1.1, yTop + 0.9, hw * 0.66, 0.18, 8, 13, 0.93, true);
+      // 5 pairs of stepped exterior masonry flying/pilaster buttresses along the nave walls
+      for (let b = 0; b < 5; b++) {
+        const bz = -hl + 1.2 + (b / 4) * (inst.length - 2.4);
+        emitBox(toWorld, -hw - 0.82, -hw, yPlinth, yTop - 0.4, bz - 0.45, bz + 0.45, 11, 0.84, false, 0.18);
+        emitBox(toWorld, hw, hw + 0.82, yPlinth, yTop - 0.4, bz - 0.45, bz + 0.45, 11, 0.84, false, 0.18);
+        if (b < 4) {
+          const wz = bz + (inst.length - 2.4) / 8;
+          emitStoneArchZ(toWorld, -hw, -1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5);
+          emitStoneArchZ(toWorld, hw, 1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5);
+        }
+      }
+      // West facade Plateresque carved stone portal frame, arched doorway, flanking pilasters & rose choir window
+      emitBox(toWorld, -2.85, 2.85, yPlinth, yPlinth + 6.4, -hl - 0.48, -hl, 11, 0.88);
+      emitCylinder(toWorld, -2.35, -hl - 0.48, yPlinth, yPlinth + 5.8, 0.28, 0.24, 6, 11, 0.91, true);
+      emitCylinder(toWorld, 2.35, -hl - 0.48, yPlinth, yPlinth + 5.8, 0.28, 0.24, 6, 11, 0.91, true);
+      emitBox(toWorld, -3.1, 3.1, yPlinth + 5.8, yPlinth + 6.4, -hl - 0.65, -hl, 11, 0.92, true);
+      emitBox(toWorld, -1.45, 1.45, yPlinth, yPlinth + 4.8, -hl - 0.56, -hl + 0.1, 14, 0.28);
+      // Octagonal/rose choir window above portal
+      emitCylinder(toWorld, 0, -hl - 0.22, yPlinth + 7.2, yPlinth + 9.2, 1.15, 1.15, 8, 11, 0.88, true);
+      emitBox(toWorld, -0.82, 0.82, yPlinth + 7.45, yPlinth + 8.95, -hl - 0.36, -hl + 0.08, 14, 0.32);
+      // Stepped baroque stone gable parapet (Espadaña) rising above the west facade
+      const yPeak = yTop + (inst.roofPitch ?? 3.4);
+      emitBox(toWorld, -hw * 0.72, hw * 0.72, yTop, yPeak - 0.6, -hl - 0.35, -hl + 0.35, 12, 0.92);
+      emitBox(toWorld, -hw * 0.38, hw * 0.38, yPeak - 0.6, yPeak + 1.2, -hl - 0.35, -hl + 0.35, 11, 0.90);
+      emitRoof(toWorld, -hw, hw, yTop, yPeak, -hl, hl, 0.78, 0.0, 12);
+      // 3-Stage Spanish Colonial Bell Tower (Campanario) with arched belfries, bronze bells & octagonal cupola
+      const tx0 = hw - 2.2, tx1 = hw + 2.8, tz0 = -hl - 1.3, tz1 = -hl + 3.7;
+      const tmx = (tx0 + tx1) * 0.5, tmz = (tz0 + tz1) * 0.5;
+      const yT1 = yTop + 2.8, yT2 = yT1 + 4.1, yT3 = yT2 + 3.4;
+      emitBox(toWorld, tx0, tx1, yPlinth, yT1, tz0, tz1, 12, 0.92);
+      emitBox(toWorld, tx0 - 0.28, tx1 + 0.28, yT1 - 0.34, yT1, tz0 - 0.28, tz1 + 0.28, 11, 0.90, true);
+      emitBox(toWorld, tx0 + 0.35, tx1 - 0.35, yT1, yT2, tz0 + 0.35, tz1 - 0.35, 12, 0.94);
+      // Arched belfry openings + suspended bronze bell in center of belfry
+      emitStoneArchZ(toWorld, tx1 - 0.35, 1, yT1 + 0.45, yT2 - 1.35, 0.78, tmz, 5);
+      emitStoneArchZ(toWorld, tx0 + 0.35, -1, yT1 + 0.45, yT2 - 1.35, 0.78, tmz, 5);
+      emitBox(toWorld, tmx - 0.72, tmx + 0.72, yT1 + 0.55, yT2 - 0.65, tz0 + 0.26, tz1 - 0.26, 14, 0.30);
+      emitCylinder(toWorld, tmx, tmz, yT1 + 1.45, yT1 + 2.45, 0.58, 0.24, 8, 10, 0.76, true);
+      emitBox(toWorld, tx0 + 0.12, tx1 - 0.12, yT2 - 0.32, yT2, tz0 + 0.12, tz1 - 0.12, 11, 0.91, true);
+      // Octagonal terracotta bell-tower dome & wrought-iron cross finial
+      emitCylinder(toWorld, tmx, tmz, yT2, yT3, 2.05, 0.22, 8, 13, 0.95, true);
+      emitBox(toWorld, tmx - 0.08, tmx + 0.08, yT3, yT3 + 1.35, tmz - 0.08, tmz + 0.08, 14, 0.42);
+      emitBox(toWorld, tmx - 0.48, tmx + 0.48, yT3 + 0.75, yT3 + 0.92, tmz - 0.08, tmz + 0.08, 14, 0.42);
+    } else if (inst.prefabId === 'careening_shed') {
+      // Open-sided timber boatyard pavilion on the beach (Atarazana / Carenero) + king-post roof trusses + pitch furnace
+      const yApron = yGround + 0.45;
+      emitBox(toWorld, -hw - 0.6, hw + 0.6, yBase, yApron, -hl - 0.6, hl + 0.6, 10, 0.74);
+      const cols = 5;
+      for (let c = 0; c < cols; c++) {
+        const cz = -hl + 1.0 + (c / (cols - 1)) * (inst.length - 2.0);
+        emitCylinder(toWorld, -hw + 0.58, cz, yApron, yTop, 0.28, 0.25, 6, 10, 0.78, true);
+        emitCylinder(toWorld, hw - 0.58, cz, yApron, yTop, 0.28, 0.25, 6, 10, 0.78, true);
+        // Tie-beam & king-post truss
+        emitBox(toWorld, -hw + 0.2, hw - 0.2, yTop - 0.42, yTop, cz - 0.20, cz + 0.20, 10, 0.72, true);
+        emitBox(toWorld, -0.18, 0.18, yTop, yTop + 1.85, cz - 0.18, cz + 0.18, 10, 0.70);
+      }
+      // Pitch-boiling stone hearth & tapered chimney at the inland end + wooden careening capstan
+      emitBox(toWorld, -1.9, 1.9, yApron, yTop + 2.6, hl - 2.3, hl - 0.2, 11, 0.80, false, 0.48);
+      emitCylinder(toWorld, 0, -hl + 2.6, yApron, yApron + 1.45, 0.68, 0.52, 8, 10, 0.76, true);
+      emitBox(toWorld, -2.1, 2.1, yApron + 1.15, yApron + 1.32, -hl + 2.48, -hl + 2.72, 10, 0.82, true);
+      emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 2.1), -hl, hl, 0.78, 0.12, 10);
+    } else {
+      // Royal Warehouse (Almacén Real) & Colonial Courtyard Town Blocks (Casa Solariega):
+      const yPlinth = yGround + 0.68;
+      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yPlinth, -hl - 0.65, hl + 0.65, 11, 0.80);
+      if (inst.prefabId === 'colonial_town_block') {
+        // Two-wing L-shaped Spanish Colonial courtyard townhouse (Casa Solariega) + arched courtyard gate + wooden rejas
+        const mainW = hw * 1.15;
+        emitBox(toWorld, -hw, -hw + mainW, yPlinth, yTop + 1.15, -hl, hl, 12, 0.89);
+        emitRoof(toWorld, -hw, -hw + mainW, yTop + 1.15, yTop + 1.15 + (inst.roofPitch ?? 2.1), -hl, hl, 0.68, 0.22, 12);
+        // Secondary cross-wing
+        const wingL = hl * 0.95;
+        emitBox(toWorld, -hw + mainW * 0.7, hw, yPlinth, yTop - 0.35, -hl, -hl + wingL, 12, 0.86);
+        emitRoof(toWorld, -hw + mainW * 0.7, hw, yTop - 0.35, yTop - 0.35 + 1.85, -hl, -hl + wingL, 0.62, 0.25, 12);
+        // Courtyard enclosure wall with terracotta tile coping & radial stone arched carriage portal (zaguán)
+        emitBox(toWorld, hw - 1.1, hw, yPlinth, yPlinth + 3.4, -hl + wingL, hl, 12, 0.84);
+        emitBox(toWorld, hw - 1.25, hw + 0.15, yPlinth + 3.4, yPlinth + 3.72, -hl + wingL, hl, 13, 0.92, true);
+        emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.0, 1.05, (-hl + wingL + hl) * 0.5, 5);
+        emitBox(toWorld, -hw + mainW, hw, yPlinth, yPlinth + 3.4, hl - 1.1, hl, 12, 0.84);
+        emitBox(toWorld, -hw + mainW, hw + 0.15, yPlinth + 3.4, yPlinth + 3.72, hl - 1.25, hl + 0.15, 13, 0.92, true);
+        // Street arched portal, wooden spindle window grilles (rejas) & cantilevered 2nd-story balustrade balcony
+        emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.15, 1.12, 0, 5);
+        for (const wz of [-hl * 0.64, -hl * 0.34, hl * 0.34, hl * 0.64]) {
+          emitBox(toWorld, -hw - 0.14, -hw + 0.14, yPlinth + 0.85, yPlinth + 2.55, wz - 0.58, wz + 0.58, 14, 0.34);
+          emitBox(toWorld, -hw - 0.24, -hw + 0.05, yPlinth + 0.72, yPlinth + 2.68, wz - 0.66, wz + 0.66, 10, 0.72, true);
+        }
+        for (let w = -2; w <= 2; w++) {
+          const wz = w * (hl * 0.34);
+          emitBox(toWorld, -hw - 0.08, -hw + 0.15, yPlinth + 3.65, yTop + 0.45, wz - 0.56, wz + 0.56, 14, 0.34);
+        }
+        emitBalustradeZ(toWorld, -hw, -1, yPlinth + 3.45, -hl * 0.72, hl * 0.72);
+      } else {
+        // Royal Warehouse (Almacén Real): buttressed masonry hall with 4 radial stone voussoir arched cargo portals
+        emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 12, 0.88);
+        for (let b = 0; b < 5; b++) {
+          const bz = -hl + 1.0 + (b / 4) * (inst.length - 2.0);
+          emitBox(toWorld, -hw - 0.55, -hw, yPlinth, yTop - 0.25, bz - 0.40, bz + 0.40, 11, 0.83, false, 0.12);
+          emitBox(toWorld, hw, hw + 0.55, yPlinth, yTop - 0.25, bz - 0.40, bz + 0.40, 11, 0.83, false, 0.12);
+          if (b < 4) {
+            const pz = bz + (inst.length - 2.0) / 8;
+            // Radial stone voussoir cargo portal + timber hoist beam + clerestory oculus
+            emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.25, 1.18, pz, 6);
+            emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.25, 1.18, pz, 6);
+            emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 4.65, yTop - 0.85, pz - 0.65, pz + 0.65, 14, 0.36);
+          }
+        }
+        emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 2.4), -hl, hl, 0.78, 0.15, 12);
       }
     }
   }
@@ -2170,6 +2446,7 @@ export async function upgradeProceduralPackWithRealDEM(
       Promise.all(tilePromises),
       satPromises.length ? Promise.all(satPromises) : Promise.resolve([]),
       nearDemPromises.length ? Promise.all(nearDemPromises) : Promise.resolve([]),
+      !fetchTile ? load1550BuildingLRMTemplates() : Promise.resolve(null),
     ]);
     clearTimeout(timer);
 
@@ -2636,6 +2913,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   forceFirstExplorer = false,
 } = {}) {
   const cellInfo = canonicalCoastalCellId(basePack.region);
+  await load1550BuildingLRMTemplates(fetchImpl);
   const localKey = `waterworld.discovery.v1.${cellInfo.cellId}`;
   let status = 'first_explorer';
   let visits = 1;

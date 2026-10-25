@@ -19,3 +19,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+# Intermediate Hunyuan3D-2mv GLB and turnaround slice PNGs (final WW3D bundle is tracked)
+assets/ports/1550/*.glb
+assets/ports/1550/*.png
+assets/ports/1550/*/*.png

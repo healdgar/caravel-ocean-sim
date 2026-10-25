@@ -1,0 +1,66 @@
+[
+  {
+    "id": "stone_sea_bastion",
+    "name": "Stone Sea Bastion (Baluarte)",
+    "rawHunyuanTriangles": 323298,
+    "decimatedVertices": 1803,
+    "decimatedTriangles": 3600,
+    "glbBytes": 9029972,
+    "materialBreakdownPct": {
+      "10": 11.2,
+      "11": 48.4,
+      "12": 10.7,
+      "13": 27.5,
+      "14": 2.2
+    },
+    "hunyuan3d": true
+  },
+  {
+    "id": "casa_de_contratacion",
+    "name": "Casa de la Contrataci\u00f3n (Customhouse)",
+    "rawHunyuanTriangles": 393286,
+    "decimatedVertices": 1785,
+    "decimatedTriangles": 3600,
+    "glbBytes": 10193844,
+    "materialBreakdownPct": {
+      "10": 3.5,
+      "11": 20.3,
+      "12": 1.6,
+      "13": 64.2,
+      "14": 10.4
+    },
+    "hunyuan3d": true
+  },
+  {
+    "id": "mission_chapel",
+    "name": "Iglesia & Campanario (Mission Chapel)",
+    "rawHunyuanTriangles": 559110,
+    "decimatedVertices": 1613,
+    "decimatedTriangles": 3598,
+    "glbBytes": 10202388,
+    "materialBreakdownPct": {
+      "10": 6.8,
+      "11": 17.9,
+      "12": 4.7,
+      "13": 68.8,
+      "14": 1.9
+    },
+    "hunyuan3d": true
+  },
+  {
+    "id": "colonial_town_block",
+    "name": "Casa Solariega & Almac\u00e9n Real",
+    "rawHunyuanTriangles": 338380,
+    "decimatedVertices": 1774,
+    "decimatedTriangles": 3600,
+    "glbBytes": 8710676,
+    "materialBreakdownPct": {
+      "10": 3.9,
+      "11": 16.1,
+      "12": 0.6,
+      "13": 76.6,
+      "14": 2.9
+    },
+    "hunyuan3d": true
+  }
+]
