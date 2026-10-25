@@ -150,8 +150,9 @@ export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS
  // Bound decompression/hash peak memory. A whole region can contain hundreds
  // of MB of GPU data; decoding all large streams concurrently multiplies that
  // working set before any immutable buffer has been installed.
- for(const name of forestMassStreams(manifest)){
-  const item=manifest.files[name],encoded=await(await load(item.gzip.file)).arrayBuffer();
+ const streamNames=forestMassStreams(manifest),pending=new Map(streamNames.map(name=>[name,load(manifest.files[name].gzip.file).then(r=>r.arrayBuffer()).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
+ for(const name of streamNames){
+  const item=manifest.files[name],res=await pending.get(name);if(!res.ok)throw res.e;const encoded=res.v;
   if(encoded.byteLength!==item.gzip.bytes||await digest(encoded)!==item.gzip.sha256)throw Error('Native forest mass encoded digest mismatch');
   let raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   if(item.meshopt){

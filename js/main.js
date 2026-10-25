@@ -477,27 +477,30 @@ async function main() {
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
   const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
-  const terrain=LAND_STAGE?await createTerrain({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):null;
-  const coastalGroup=terrain?.waterGroup(oceanPipe);
+  const terrainPromise=LAND_STAGE?createTerrain({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):Promise.resolve(null);
   const weather=createWeatherState();
-  const weatherRenderer=await createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   const noAnchorRenderer=Object.freeze({update(){},draw(){},drawSubmerged(){}});
-  await Promise.all(vessels.map(async v=>{v.anchorRenderer=getShipParts(v.modelId).equipment.anchor===null?noAnchorRenderer:await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
-  const dolphins=await createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
+  const [terrain,weatherRenderer,,dolphins,gunEffects,gunSea,gunportSafety,hullContactProbe,probePipe]=await Promise.all([
+    terrainPromise,
+    createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA}),
+    Promise.all(vessels.map(async v=>{v.anchorRenderer=getShipParts(v.modelId).equipment.anchor===null?noAnchorRenderer:await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});})),
+    createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA}),
+    createGunneryEffects({surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA}),
+    createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}),
+    createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe}),
+    createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id}),
+    computePipe(SCENE_HEIGHT_PROBE,'height probe'),
+  ]);
+  const coastalGroup=terrain?.waterGroup(oceanPipe);
   const marineLife=createDeferredMarineLife({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   dolphins.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
   marineLife.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
-  const gunEffects=await createGunneryEffects({surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
-  const gunSea=await createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
-  const gunportSafety=await createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
   const impactDetector=createImpactDetector();
-  const hullContactProbe=await createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
   const audioRead=mkBuf(72*64,GU.MAP_READ|GU.COPY_DST,'audio hull contact readback');
   let audioPending=false;
 
   // Water height under the inspection camera; optics use it as a coarse host
   // scheduling hint. The inspection camera may cross the surface freely.
-  const probePipe=await computePipe(SCENE_HEIGHT_PROBE,'height probe');
   let waterH=0;
   for(const vessel of vessels){
     const output=mkBuf(64,GU.STORAGE|GU.COPY_SRC,vessel.id+' probe output');

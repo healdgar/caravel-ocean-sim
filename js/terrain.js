@@ -75,30 +75,42 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const useProcedural=isKnownSpanishMain||(hasCustomCoords&&regionParam!=='saba');
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
   const skipNativeForest=useProcedural||isMobile;
-  const proceduralPack=useProcedural?generateProceduralCoastalPack(isKnownSpanishMain?regionParam:{
-    id:regionParam||undefined,
-    name:search.get('regionName')||undefined,
-    latitude:Number(search.get('lat')),
-    longitude:Number(search.get('lon')),
-  },{size:193,biomeSize:192,albedoSize:256,vegetationCandidates:16000}):null;
+  const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
+  // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
+  const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
+  const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({skipNative:skipNativeForest,skipRoots:useProcedural}).catch(error=>{forestFailure=error.message;return null;});
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
-  let forestMassFailure=null;
+  let forestMassFailure=null,forestMiddleFailure=null;
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
   const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest,manifestOnly:skipNativeForest}).catch(error=>{forestMassFailure=error.message;return null;}):null);
+  const forestMiddlePromise=Promise.all([forestPromise,forestMassPromise]).then(async([forest,mass])=>{
+    if(!forest||!mass||forestAtlasDebug)return null;
+    try{
+      const middle=await loadForestMiddle({forest,mass});
+      if(middle?.manifest.recipe.leafShading==='field'&&!forest.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
+      return middle;
+    }catch(error){forestMiddleFailure=error.message;return null;}
+  });
   // Regional native trees replace the entire old population. The small legacy
   // example is a fallback, never a second stand mixed into the new forest.
-  const canopyPromise=forestPromise.then(forest=>proceduralPack||forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
-  if(proceduralPack&&search.get('realDEM')!=='off'){
+  const canopyPromise=forestPromise.then(forest=>useProcedural||forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
+  const useRealDEM=useProcedural&&search.get('realDEM')!=='off';
+  const proceduralPack=useProcedural?generateProceduralCoastalPack(isKnownSpanishMain?regionParam:{
+    id:regionParam||undefined,
+    name:search.get('regionName')||undefined,
+    latitude:Number(search.get('lat')),
+    longitude:Number(search.get('lon')),
+  },{size:193,biomeSize:192,albedoSize:256,vegetationCandidates:16000,deferSynthesis:useRealDEM}):null;
+  if(proceduralPack&&useRealDEM){
     await upgradeProceduralPackWithRealDEM(proceduralPack);
   }
   const activeRegion=proceduralPack?proceduralPack.region:ISLAND;
-  const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
@@ -173,7 +185,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     pass.end();device.queue.submit([encoder.finish()]);
   }
-  const leafImage=await createImageBitmap(await (await load('assets/tree-foliage.png')).blob());
+  const leafImage=await leafBitmapPromise;
   // Preserve the exact source foliage's integrated linear colour when its
   // individual leaves are below the geometric LOD threshold. One authoring
   // image readback at load time; opaque fragments never fetch a leaf texture.
@@ -197,17 +209,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const module=await shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
+  const module=await modulePromise;
   const makePipe=(entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
-  const terrainPipe=await makePipe('vs',[meshLayout]);
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
-  const opaqueTreePipe=await makePipe('treeVS',treeBuffers,'opaqueFS'),treePipe=await makePipe('treeVS',treeBuffers,'leafFS');
-  const groundPipe=await makePipe('groundVS',treeBuffers,'groundFS');
+  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,lightPipe]=await Promise.all([
+    makePipe('vs',[meshLayout]),
+    makePipe('treeVS',treeBuffers,'opaqueFS'),
+    makePipe('treeVS',treeBuffers,'leafFS'),
+    makePipe('groundVS',treeBuffers,'groundFS'),
+    computePipe(TERRAIN_LIGHT,'island sunlight'),
+  ]);
   const groundMeshes=Array.from({length:GROUND_COVER.variants},(_,variant)=>{
     const geometry=groundCoverGeometry(variant);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover ${variant}`),count:geometry.length/TREE_VERTEX_FLOATS};
   });
@@ -287,15 +303,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundStats[variant<2?'rocks':'grass']+=batch.count;groundStats.triangles+=batch.count*groundMeshes[variant].count/3;
     }
   }
-  const lightPipe=await computePipe(TERRAIN_LIGHT,'island sunlight');
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}]];
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const forestMassPack=await forestMassPromise;let forestMass=null,forestMiddlePack=null,forestMiddleFailure=null,proceduralMiddle=null;
-  if(forestMassPack&&!forestAtlasDebug)try{
-    forestMiddlePack=await loadForestMiddle({forest:forestPack,mass:forestMassPack});
-    if(forestMiddlePack?.manifest.recipe.leafShading==='field'&&!forestPack.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
-  }catch(error){forestMiddlePack=null;forestMiddleFailure=error.message;}
+  const [forestMassPack,forestMiddlePack]=await Promise.all([forestMassPromise,forestMiddlePromise]);
+  let forestMass=null,proceduralMiddle=null;
   if(forestMassPack&&!forestMassPack.manifestOnly&&!proceduralPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,middlePack:forestMiddlePack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
   if(skipNativeForest&&forestMassPack&&!forestAtlasDebug)try{
     const middleSource=forestMiddlePack??(forestMassPack.middleVertices?{vertices:forestMassPack.middleVertices,indices:forestMassPack.middleIndices,prototypes:forestMassPack.manifest.prototypes}:null);
@@ -331,9 +343,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
   const groundGroup=bind(groundPipe,opaqueResources);
   const cloudGroups=[terrainPipe,opaqueTreePipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
-  const submerged=waterOptics?await waterOptics.capture({source:TERRAIN,pipeline:terrainPipe,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}):null;
+  const [submerged,submergedGround]=waterOptics?await Promise.all([
+    waterOptics.capture({source:TERRAIN,pipeline:terrainPipe,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}),
+    waterOptics.capture({source:TERRAIN,pipeline:groundPipe,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}),
+  ]):[null,null];
   const submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource}))),submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
-  const submergedGround=waterOptics?await waterOptics.capture({source:TERRAIN,pipeline:groundPipe,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}):null;
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);

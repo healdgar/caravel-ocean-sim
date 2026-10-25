@@ -50,7 +50,8 @@ export async function loadForestMiddle({forest,mass,receipt=(forest?.manifest??f
  const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered native forest middle asset: '+name);const r=await fetchAsset(assets[name]);if(!r.ok)throw Error('Native forest middle asset unavailable: '+name);return r.arrayBuffer();};
  const json=await load('manifest.json');if(json.byteLength!==receipt.bytes||await digest(json)!==receipt.sha256)throw Error('Native forest middle manifest digest mismatch');
  const manifest=forestMiddleManifest(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(json)),forest?.manifest??forest,mass?.manifest??mass),streams={};
- for(const name of ['middle-vertices.bin','middle-indices.bin']){const r=manifest.files[name],encoded=await load(r.gzip.file);
+ const pending=new Map(['middle-vertices.bin','middle-indices.bin'].map(name=>[name,load(manifest.files[name].gzip.file).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
+ for(const name of ['middle-vertices.bin','middle-indices.bin']){const r=manifest.files[name],res=await pending.get(name);if(!res.ok)throw res.e;const encoded=res.v;
   if(encoded.byteLength!==r.gzip.bytes||await digest(encoded)!==r.gzip.sha256)throw Error('Native forest middle encoded digest mismatch');
   const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest middle decoded digest mismatch');streams[name]=raw;

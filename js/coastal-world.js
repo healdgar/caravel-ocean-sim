@@ -1754,9 +1754,8 @@ export function createCoastalViews(regionSpec, heights, portPlacement = null) {
   });
 }
 
-export function generateProceduralCoastalPack(regionSpec = 'cartagena') {
-  const region = resolveGlobalCoastalRegion(regionSpec);
-  const heights = synthesizeCoastalTerrain(region);
+function finalizeProceduralCoastalPack(pack, heights, elevationSource = 'procedural-geomorphology') {
+  const { region } = pack;
   const port = placeCoastalPort(region, heights);
   const beaches = synthesizeCoastalBeaches(region, heights);
   const mesh = buildCoastalMesh(region, heights);
@@ -1766,7 +1765,7 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena') {
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = createCoastalViews(region, heights, port);
 
-  return {
+  return Object.assign(pack, {
     region,
     heights,
     mesh,
@@ -1777,8 +1776,22 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena') {
     albedo,
     vegetation,
     views,
-    elevationSource: 'procedural-geomorphology',
-  };
+    elevationSource,
+  });
+}
+
+export function generateProceduralCoastalPack(regionSpec = 'cartagena', overrides = {}) {
+  const mergedSpec =
+    overrides && Object.keys(overrides).length > 0
+      ? typeof regionSpec === 'string'
+        ? { ...(SPANISH_MAIN_1550_REGIONS[regionSpec] || {}), id: regionSpec, ...overrides }
+        : { ...regionSpec, ...overrides }
+      : regionSpec;
+  const region = resolveGlobalCoastalRegion(mergedSpec);
+  if (overrides?.deferSynthesis) {
+    return { region, elevationSource: 'pending-dem' };
+  }
+  return finalizeProceduralCoastalPack({ region }, synthesizeCoastalTerrain(region));
 }
 
 // Fetch real global SRTM + ETOPO1 elevation tiles from AWS Open Data Registry's
@@ -1786,9 +1799,10 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena') {
 // CORS-enabled, no API key required) around (region.latitude, region.longitude).
 // Blends real-world coastal topography with navigable nearshore bathymetry and
 // falls back seamlessly to the procedural pack if offline or over open ocean.
-export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null, zoom = 12 } = {}) {
+export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null, zoom = 12, timeoutMs = 1100 } = {}) {
+  const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
-  if (!pack?.region || !effectiveFetch) return pack;
+  if (!pack?.region || !effectiveFetch) return ensureFallback(pack);
   const { region } = pack;
   const n = region.size;
   const span = region.span;
@@ -1807,11 +1821,11 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
   const ty1 = latToTileY(region.latitude - halfLat);
   const cols = tx1 - tx0 + 1;
   const rows = ty1 - ty0 + 1;
-  if (cols < 1 || cols > 4 || rows < 1 || rows > 4) return pack;
+  if (cols < 1 || cols > 4 || rows < 1 || rows > 4) return ensureFallback(pack);
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3200);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const w = cols * 256;
     const h = rows * 256;
     const pixels = new Uint8ClampedArray(w * h * 4);
@@ -1898,7 +1912,7 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
     }
     const landRatio = landCount / (n * n);
     // Require both real land and real water in the 8.2km coastal window
-    if (landRatio < 0.06 || landRatio > 0.88 || maxDem < 6) return pack;
+    if (landRatio < 0.06 || landRatio > 0.88 || maxDem < 6) return ensureFallback(pack);
 
     // 2-pass Chamfer distance transform (in metres) from shoreline (rawDem = 1.0m)
     const step = span / (n - 1);
@@ -1961,33 +1975,14 @@ export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null,
       }
     }
 
-    const port = placeCoastalPort(region, heights);
-    const beaches = synthesizeCoastalBeaches(region, heights);
-    const mesh = buildCoastalMesh(region, heights);
-    const biome = synthesizeCoastalBiome(region, heights, beaches, port);
-    const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome);
-    const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port);
-    const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
-    const views = createCoastalViews(region, heights, port);
-
-    return Object.assign(pack, {
-      heights,
-      mesh,
-      beaches,
-      port,
-      portGeometry,
-      biome,
-      albedo,
-      vegetation,
-      views,
-      elevationSource: `aws-terrarium-srtm-z${zoom}`,
-      demSource: {
-        provider: 'aws-terrarium-srtm-etopo1',
-        zoom,
-        tiles: loaded.length,
-      },
-    });
-  } catch {
+    finalizeProceduralCoastalPack(pack, heights, `aws-terrarium-srtm-z${zoom}`);
+    pack.demSource = {
+      provider: 'aws-terrarium-srtm-etopo1',
+      zoom,
+      tiles: loaded.length,
+    };
     return pack;
+  } catch {
+    return ensureFallback(pack);
   }
 }

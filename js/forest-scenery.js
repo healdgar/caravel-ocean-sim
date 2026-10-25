@@ -708,22 +708,25 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     if(nativeMid)cullSource=forestWithNativeLod(cullSource);
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
     const compute=await shader(cullSource,'forest GPU cull and compact');
-    const reset=await device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}});
-    const cull=await device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}});
-    const sort=nativeMid?await device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}}):null;
+    const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
+      fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
+      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
+    const [reset,cull,sort,opaque,leaf,middlePipeline,volumePipeline,impostor]=await Promise.all([
+      device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}}),
+      device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}}),
+      nativeMid?device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}}):null,
+      pack.skipNative?null:pipe('forestNativeOpaqueFS'),
+      pack.skipNative?null:pipe('forestNativeLeafFS'),
+      middle?device.createRenderPipelineAsync({label:'instanced forest generated native middle',layout:'auto',vertex:{module,entryPoint:'forestMiddleVS',buffers:[FOREST_MIDDLE_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestMiddleFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}}):null,
+      volume?device.createRenderPipelineAsync({label:volumeShell?'instanced forest shaded native crown shell':'instanced forest native foliage volume',layout:'auto',vertex:{module,entryPoint:volumeShell?'forestVolumeShellVS':'forestVolumeVS',buffers:volumeShell?[FOREST_MIDDLE_VERTEX_LAYOUT]:[]},fragment:{module,entryPoint:volumeShell?'forestVolumeShellFS':'forestVolumeFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:volumeShell?'none':'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:!volumeShell}}):null,
+      atlas?device.createRenderPipelineAsync({label:'instanced forest native depth impostor',layout:'auto',vertex:{module,entryPoint:'forestImpostorVS'},
+        fragment:{module,entryPoint:'forestImpostorFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:true}}):null,
+    ]);
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
     const sortGroup=sort?device.createBindGroup({layout:sort.getBindGroupLayout(0),entries:[{binding:2,resource:{buffer:prototypes}},{binding:3,resource:{buffer:visible}},{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]}):null;
     const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,...(forestMass?[forestMass.state]:[]),...(forestMass?.neighbors?[forestMass.neighbors]:[])];
     const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
-    const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
-      fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
-    const opaque=pack.skipNative?null:await pipe('forestNativeOpaqueFS'),leaf=pack.skipNative?null:await pipe('forestNativeLeafFS');
-    const middlePipeline=middle?await device.createRenderPipelineAsync({label:'instanced forest generated native middle',layout:'auto',vertex:{module,entryPoint:'forestMiddleVS',buffers:[FOREST_MIDDLE_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestMiddleFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}}):null;
-    const volumePipeline=volume?await device.createRenderPipelineAsync({label:volumeShell?'instanced forest shaded native crown shell':'instanced forest native foliage volume',layout:'auto',vertex:{module,entryPoint:volumeShell?'forestVolumeShellVS':'forestVolumeVS',buffers:volumeShell?[FOREST_MIDDLE_VERTEX_LAYOUT]:[]},fragment:{module,entryPoint:volumeShell?'forestVolumeShellFS':'forestVolumeFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:volumeShell?'none':'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:!volumeShell}}):null;
-    const impostor=atlas?await device.createRenderPipelineAsync({label:'instanced forest native depth impostor',layout:'auto',vertex:{module,entryPoint:'forestImpostorVS'},
-      fragment:{module,entryPoint:'forestImpostorFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:true}}):null;
     const bind=(p,ids)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
     const opaqueGroup=opaque?bind(opaque,[0,1,2,3,4,5,6]):null,leafGroup=leaf?bind(leaf,[0,1,2,3,4,5,6]):null;
     const middleGroup=middlePipeline?bind(middlePipeline,[0,1,2,3,4,5,6]):null,middleCloud=middlePipeline?clouds.bindVolume(middlePipeline):null;

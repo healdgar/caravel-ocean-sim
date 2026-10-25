@@ -56,10 +56,11 @@ export async function loadForestVolumes({forest,receipt=forest?.volume,fetchAsse
  const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered native forest volume asset: '+name);const r=await fetchAsset(assets[name]);if(!r.ok)throw Error('Native forest volume asset unavailable: '+name);return r.arrayBuffer();};
  const json=await load('manifest.json');if(json.byteLength!==receipt.bytes||await digest(json)!==receipt.sha256)throw Error('Native forest volume manifest digest mismatch');
  const manifest=forestVolumeManifest(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(json)),forest),prototypes=[];
+ const pending=new Map(manifest.prototypes.flatMap(p=>['field','exposure'].map(key=>[p[key].gzip.file,load(p[key].gzip.file).then(v=>({ok:true,v}),e=>({ok:false,e}))])));
  // Decode one immutable stream at a time; do not multiply the region's peak
  // memory by issuing every 3D field decompression simultaneously.
  for(const p of manifest.prototypes){const row={};for(const key of ['field','exposure']){
-  const r=p[key],encoded=await load(r.gzip.file);if(encoded.byteLength!==r.gzip.bytes||await digest(encoded)!==r.gzip.sha256)throw Error('Native forest volume encoded digest mismatch');
+  const r=p[key],res=await pending.get(r.gzip.file);if(!res.ok)throw res.e;const encoded=res.v;if(encoded.byteLength!==r.gzip.bytes||await digest(encoded)!==r.gzip.sha256)throw Error('Native forest volume encoded digest mismatch');
   const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest volume decoded digest mismatch');row[key]=new Uint8Array(raw);
  }
