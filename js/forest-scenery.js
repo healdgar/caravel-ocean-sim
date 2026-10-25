@@ -676,7 +676,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const basal=m.prototypes[rooted[i+8]].basalRadius??0;
       rooted[i+9]=Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08);rooted[i+1]=y-rooted[i+9];
     }
-    const roots=make(rooted,B.STORAGE,'forest immutable root transforms');
+    let activeRootCount=m.rootCount;
+    const maxRootCapacity=Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount);
+    const roots=device.createBuffer({size:Math.max(4,maxRootCapacity*12*4),usage:B.STORAGE|B.COPY_DST,label:'forest immutable root transforms'});
+    allocated.push(roots);if(rooted.byteLength)device.queue.writeBuffer(roots,0,rooted);
     const meta=new ArrayBuffer(m.prototypes.length*80),floats=new Float32Array(meta),words=new Uint32Array(meta),draws=new Uint32Array(m.prototypes.length*commandSlots*5);
     for(const p of m.prototypes){const base=p.id*20,reduced=middle?.prototypes[p.id],lp=nativeLod?.prototypes[p.id],radius=reduced?forestMiddleUpward(p.radius+reduced.lodErrorMetres):p.radius;
       floats.set([...p.centre,radius],base);words.set([p.firstRoot,p.rootCount,(atlas?((atlas.fullSphere?2:1)|(impostorMode==='force'?4:0)):0)|(reduced?8:0),impostorPixels],base+4);
@@ -695,14 +698,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       draws.set(volumeShell?[reduced.leaf.indexCount,0,reduced.leaf.firstIndex,0,0]:[volume?36:6,0,0,0,0],(p.id*4+3)*5);
     }
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest prototype bounds and ranges');
-    const visible=make(new Uint32Array(m.rootCount*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
+    const visible=make(new Uint32Array(maxRootCapacity*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
     const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
-    const previous=make(new Uint32Array(m.rootCount),B.STORAGE,'forest GPU previous LOD');
+    const previous=make(new Uint32Array(maxRootCapacity),B.STORAGE,'forest GPU previous LOD');
     const modeIndex=['auto','near','far'].indexOf(mode);
     const deferred=(Boolean(middle&&volume)||atlas?.fullSphere)&&mode==='auto'&&!pack.vertices;
     const effectiveModeIndex=(pack.skipNative||deferred)&&mode==='auto'?2:modeIndex;
     let currentNearPixels=nearPixels;
-    const parameters=make(new Float32Array([m.rootCount,m.prototypes.length,nearPixels,effectiveModeIndex]),B.UNIFORM,'forest projected size policy');
+    const parameters=make(new Float32Array([activeRootCount,m.prototypes.length,nearPixels,effectiveModeIndex]),B.UNIFORM,'forest projected size policy');
     const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
     let cullSource=forestMass?.neighbors?(middle?FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL:FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL):middle?(forestMass?FOREST_MASS_MIDDLE_ROOT_CULL_WGSL:FOREST_MIDDLE_ROOT_CULL_WGSL):(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL);
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
@@ -787,7 +790,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
         stats.canopyLight.loaded=!!source.canopyLight;stats.canopyLight.error=source.canopyLightError??null;
         device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));
-        device.queue.writeBuffer(parameters,0,new Float32Array([m.rootCount,m.prototypes.length,currentNearPixels,modeIndex]));
+        device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,modeIndex]));
         nativeStatus.resident=true;nativeStatus.status='resident';
         if(forestMass&&forestMass.stats.mode==='auto')forestMass.stats.phase='authored error-limited selection; native resources resident';
         pack.releaseNativeCPU?.();return true;
@@ -821,8 +824,29 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     return {stats,nativeReady,prepare(){},
-      setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([m.rootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
-      encode(pass){pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(m.rootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}},
+      updatePack(nextPack,nextHeights=null){
+        if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
+        const nextCount=Math.min(maxRootCapacity,nextPack.manifest.rootCount);
+        activeRootCount=nextCount;
+        stats.roots=nextCount;
+        if(nextPack.roots.byteLength){
+          device.queue.writeBuffer(roots,0,nextPack.roots.subarray(0,nextCount*12));
+        }
+        let matBase=0;
+        for(const p of nextPack.manifest.prototypes){
+          const base=p.id*20,firstMaterial=matBase;matBase+=p.nativeMaterials.length;
+          words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
+          for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
+            const bin=bins[p.id]?.[tierIdx];
+            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]));
+          }
+        }
+        device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+        device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,nativeStatus.resident?modeIndex:effectiveModeIndex]));
+        if(nextHeights)terrainVisibility?.update?.(nextHeights);
+      },
+      setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
+      encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}},
       drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
   }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();throw error;}
 }

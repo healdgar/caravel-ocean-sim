@@ -1275,6 +1275,7 @@ async function main() {
   cameraDock.append(captainButton);
   panel.before(sharePanel);
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
+    discovery:terrain?.discovery??null,onUpgradeApplied:()=>{envFull=true;},
     onOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
     getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}needSpectrum=true;envFull=true;}});
   controlIcon(cameraDock.querySelector('#landfall-button'),'map','Landfall');

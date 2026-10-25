@@ -123,6 +123,17 @@
   #landfall-chart svg { width:100%; display:block; background:#142c39; border-radius:5px; }
   #landfall-panel .landfall-credit { font-size:11px; color:var(--muted); }
   #landfall-ocean { margin-top:10px; }
+  #landfall-discovery-banner { position:fixed; top:calc(var(--controls-bottom) + 8px); left:50%; transform:translateX(-50%); width:420px; max-width:calc(100vw - 24px); box-sizing:border-box; padding:12px 14px; border:1px solid #edbd7888; border-radius:10px; background:#101d25f2; box-shadow:0 10px 32px #0007; z-index:6; }
+  #landfall-discovery-banner .discovery-header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
+  #landfall-discovery-banner .discovery-eyebrow,#landfall-discovery-card .discovery-eyebrow { color:var(--gold); font-size:10px; font-weight:600; letter-spacing:.11em; text-transform:uppercase; }
+  #landfall-discovery-banner .discovery-title { margin:0 0 4px; font-size:14px; font-weight:600; color:var(--ink); }
+  #landfall-discovery-banner .discovery-body,#landfall-discovery-card .discovery-body { margin:0; font-size:12px; color:var(--muted); line-height:1.4; }
+  #landfall-discovery-banner .discovery-bar,#landfall-discovery-card .discovery-bar { height:3px; margin:9px 0 2px; overflow:hidden; background:#ffffff18; border-radius:2px; }
+  #landfall-discovery-banner .discovery-bar span,#landfall-discovery-card .discovery-bar span { display:block; width:38%; height:100%; background:var(--gold); animation:ocean-startup-drift 1.6s ease-in-out infinite; }
+  #landfall-discovery-banner .discovery-actions,#landfall-discovery-card .discovery-actions { display:flex; gap:8px; margin-top:10px; }
+  .discovery-swap-btn { flex:1; background:#dbc097; border-color:#edcf9c; color:#1c2528; font-weight:600; }
+  .discovery-swap-btn:hover { background:#edcf9c; }
+  #landfall-discovery-card { margin:10px 0; padding:10px 12px; border:1px solid #edbd7866; border-radius:8px; background:#162834; }
   #anchor-status { color:var(--gold); font-size:12px; }
   #environment-debug,#voice-controls { border-top:1px solid #ffffff20; margin-top:12px; padding-top:6px; }
   #environment-debug p,#voice-controls p { color:var(--muted); font-size:11px; }

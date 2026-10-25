@@ -18,6 +18,11 @@ import {
   buildCoastalMesh,
   generateProceduralCoastalPack,
   upgradeProceduralPackWithRealDEM,
+  canonicalCoastalCellId,
+  build1550HistoricalTerritoryPack,
+  encode1550TerritoryCachePayload,
+  apply1550TerritoryCachePayload,
+  runLandfallDiscoveryPipeline,
 } from '../js/coastal-world.js';
 import { FOREST_SPECIES, FOREST_ROOT_FLOATS } from '../js/forest-scenery.js';
 import {
@@ -317,5 +322,70 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
   assert.equal(upgraded.demSource.zoom, 13);
   assert.equal(upgraded.demSource.nearshoreZoom, 14);
   assert.ok(upgraded.portGeometry.triangleCount > 200);
-  assert.ok(upgraded.vegetation.summary.totalCount > 50, 'satellite + DEM upgrade seeds coastal palms and forest');
+  assert.ok(upgraded.vegetation.stats.totalTrees > 50, 'satellite + DEM upgrade seeds coastal palms and forest');
+
+  // Verify canonical cell snapping, 1550 territory reconstruction, binary cache encoding, and First Explorer discovery workflow
+  const cellA = canonicalCoastalCellId({ latitude: 18.468, longitude: -66.118 });
+  const cellB = canonicalCoastalCellId({ latitude: 18.469, longitude: -66.119 });
+  assert.equal(cellA.cellId, 'cell_18.48_-66.12');
+  assert.equal(cellA.cellId, cellB.cellId);
+
+  const pack1550 = build1550HistoricalTerritoryPack(upgraded);
+  assert.ok(pack1550.territory1550.restoredEstuaryPct > 0);
+  const encoded = encode1550TerritoryCachePayload(pack1550);
+  assert.ok(encoded.byteLength > 16);
+  const decodedPack = apply1550TerritoryCachePayload(upgraded, encoded);
+  assert.ok(decodedPack);
+  assert.equal(decodedPack.territory1550.cellId, pack1550.territory1550.cellId);
+
+  // Simulate First Explorer (cache miss -> PUT) followed by Mariner #2 (cache hit -> GET)
+  let storedPackBytes = null;
+  let storedVisits = 0;
+  const mockFetch = async (url, init = {}) => {
+    if (url.includes('/landfall-discovery')) {
+      if (!storedPackBytes) {
+        return {
+          ok: true,
+          json: async () => ({ status: 'first_explorer', firstExplorer: true, visits: 1, hasOrthophoto: false }),
+        };
+      }
+      storedVisits++;
+      return {
+        ok: true,
+        json: async () => ({ status: 'cached', firstExplorer: false, visits: storedVisits, hasOrthophoto: false }),
+      };
+    }
+    if (url.includes('/landfall-pack') && init.method === 'PUT') {
+      storedPackBytes = new Uint8Array(init.body);
+      storedVisits = 1;
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    if (url.includes('/landfall-pack')) {
+      return {
+        ok: Boolean(storedPackBytes),
+        arrayBuffer: async () => storedPackBytes.buffer,
+      };
+    }
+    return { ok: false };
+  };
+
+  let firstExplorerCalled = false;
+  let upgradeReadyCalled = false;
+  const firstRun = await runLandfallDiscoveryPipeline(upgraded, {
+    fetchImpl: mockFetch,
+    onFirstExplorer: () => { firstExplorerCalled = true; },
+    onUpgradeReady: () => { upgradeReadyCalled = true; },
+  });
+  assert.equal(firstRun.status, 'first_explorer');
+  assert.equal(firstExplorerCalled, true);
+  assert.equal(upgradeReadyCalled, true);
+  assert.ok(storedPackBytes instanceof Uint8Array);
+
+  let cachedReadyVisits = 0;
+  const secondRun = await runLandfallDiscoveryPipeline(upgraded, {
+    fetchImpl: mockFetch,
+    onCachedReady: (info) => { cachedReadyVisits = info.visits; },
+  });
+  assert.equal(secondRun.status, 'cached');
+  assert.equal(cachedReadyVisits, 2);
 });

@@ -2312,10 +2312,14 @@ export async function upgradeProceduralPackWithRealDEM(
       satelliteData,
       true
     );
+    pack.satelliteData = satelliteData;
+    pack.rawDem = rawDem;
     pack.demSource = {
       provider: 'aws-terrarium-srtm-etopo1',
-      zoom: nearPixels ? nearZoom : zoom,
-      baseZoom: zoom,
+      zoom,
+      nearshoreZoom: nearZoom,
+      effectiveZoom: nearPixels ? nearZoom : zoom,
+      satelliteOverlay: Boolean(satelliteData),
       tiles: loaded.length + (nearPixels ? nearDemLoaded.length : 0),
     };
     pack.imagerySource = satelliteData
@@ -2330,4 +2334,479 @@ export async function upgradeProceduralPackWithRealDEM(
   } catch {
     return ensureFallback(pack);
   }
+}
+
+export function canonicalCoastalCellId(regionSpec) {
+  const region = resolveGlobalCoastalRegion(regionSpec);
+  const gridLat = Math.round(region.latitude / 0.04) * 0.04;
+  const gridLon = Math.round(region.longitude / 0.04) * 0.04;
+  const latStr = gridLat.toFixed(2);
+  const lonStr = gridLon.toFixed(2);
+  const cellId = `cell_${latStr}_${lonStr}`;
+  const ns = region.latitude >= 0 ? 'N' : 'S';
+  const ew = region.longitude >= 0 ? 'E' : 'W';
+  const coordLabel = `${Math.abs(region.latitude).toFixed(3)}°${ns}, ${Math.abs(region.longitude).toFixed(3)}°${ew}`;
+  return {
+    cellId,
+    gridLat: Number(latStr),
+    gridLon: Number(lonStr),
+    regionId: region.id,
+    name: region.name || 'Uncharted Coast',
+    coordLabel,
+  };
+}
+
+export function build1550HistoricalTerritoryPack(basePack, options = {}) {
+  const region = resolveGlobalCoastalRegion(basePack.region);
+  const n = region.size;
+  const span = region.span;
+  const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
+  const baseHeights = basePack.heights;
+  const satSource = options.orthophoto1550 || basePack.satelliteData || null;
+  const hasDedicated1550Ortho = Boolean(options.orthophoto1550);
+  const baseShoreDist = computeCoastalShoreDistances(baseHeights, n, span, 0.25);
+  const { distWater, step } = baseShoreDist;
+
+  // Step 1: Hybrid 1550 Geomorphic Reconstruction
+  // - Lock natural hills & headlands (h > 7.5m, e.g. El Morro bluff) and add canopy/bluff micro-relief.
+  // - Carve 20th-century low-lying coastal landfill (modern piers, container yards, airport runways at 0.15m..6.2m)
+  //   back into 1550s winding tidal mangrove estuaries, lagoons, and shoals.
+  const carvedDem = new Float32Array(n * n);
+  let lowCoastalCells = 0;
+  let reclaimedCellsCarved = 0;
+
+  for (let j = 0; j < n; j++) {
+    const v = j / (n - 1);
+    const z = region.z + (v - 0.5) * span;
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      const x = region.x + (u - 0.5) * span;
+      const k = j * n + i;
+      const h = baseHeights[k];
+      const inlandM = distWater[k];
+      const sat = sampleSatelliteEquirectangular(satSource, u, v);
+
+      // Protect the immediate 1550 colonial bastion & careening wharf core so historical structures stay grounded
+      const portClear = basePack.port ? portClearanceEnvelope(x, z, basePack.port) : 0;
+      const inBastionCore = portClear > 0.45;
+
+      if (h > 0.25) {
+        // High-frequency canopy & headland ridge micro-relief (Depth-Anything V2 high-pass detail proxy)
+        const ridgeDetail =
+          (coastalUberNoise2D(x * 0.0055, z * 0.0055, seed + 701, 3, 0.38) - 0.48) * 3.2 +
+          (sat ? (sat.greenness - 0.22) * 2.1 : 0);
+
+        if (h <= 6.2 && inlandM <= 340 && !inBastionCore) {
+          lowCoastalCells++;
+          // Check if 1550 AI orthophoto marks this pixel as water/estuary OR if modern satellite shows urban landfill
+          // or natural tidal creek corridors along low coastal plains.
+          const is1550Water =
+            hasDedicated1550Ortho &&
+            sat &&
+            sat.b > sat.r * 1.08 &&
+            sat.b >= sat.g * 0.84 &&
+            sat.greenness < 0.10;
+          const creekNoise = coastalUberNoise2D(
+            x * 0.0038 + 0.7 * coastalFbm2D(x * 0.0016, z * 0.0016, seed + 719, 2),
+            z * 0.0038 + 0.7 * coastalFbm2D(z * 0.0016 + 9.4, x * 0.0016, seed + 727, 2),
+            seed + 733,
+            3,
+            0.25
+          );
+          const isModernFillCarve =
+            !hasDedicated1550Ortho &&
+            ((sat && sat.isUrban && h <= 5.2 && inlandM <= 260) ||
+              (h <= 3.4 && inlandM <= 180 && creekNoise < 0.34));
+
+          if (is1550Water || isModernFillCarve) {
+            reclaimedCellsCarved++;
+            // Carve into 1550 winding tidal mangrove channel (-2.2m..-0.6m) with occasional mangrove islets (+0.7m)
+            const channelVal = creekNoise;
+            if (channelVal > 0.68 && !is1550Water) {
+              carvedDem[k] = 0.65 + (channelVal - 0.68) * 3.2;
+            } else {
+              carvedDem[k] = -0.65 - (1 - channelVal) * 1.85;
+            }
+            continue;
+          }
+        }
+        // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes
+        const reliefBoost = h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.4, ridgeDetail * 0.45);
+        carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
+      } else {
+        carvedDem[k] = h;
+      }
+    }
+  }
+
+  // Step 2: Recompute 1550 coastal bathymetry skirt + turquoise coral-reef shoal benches
+  const shoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
+  const heights1550 = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    const v = j / (n - 1);
+    const z = region.z + (v - 0.5) * span;
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      const x = region.x + (u - 0.5) * span;
+      const k = j * n + i;
+      const demH = carvedDem[k];
+      if (demH > 0.25) {
+        heights1550[k] = demH;
+      } else {
+        const sat = sampleSatelliteEquirectangular(satSource, u, v);
+        // Optical reef turquoise factor slows nearshore drop-off over coral flats
+        const turquoise = sat
+          ? Math.max(0, Math.min(1, ((sat.g * 0.65 + sat.b * 0.35) / 255 - 0.16) / 0.38))
+          : 0.3;
+        const reefBench = 0.68 + 0.32 * (1 - turquoise * 0.55);
+        const shoreDistance = Math.max(0, shoreDist1550.distLand[k] - step * 0.5);
+        const authoredDepth = Math.min(120, 1.8 + 0.145 * shoreDistance * reefBench);
+        heights1550[k] = Math.max(-120, demH < -2.5 ? Math.min(demH, -authoredDepth) : -authoredDepth);
+      }
+    }
+  }
+
+  // Step 3: Build 100% De-Urbanized 1550 Orthophoto Imagery Seed
+  let sat1550 = satSource;
+  if (satSource && !hasDedicated1550Ortho) {
+    const sz = satSource.size;
+    const rgba1550 = new Uint8ClampedArray(satSource.rgba.length);
+    for (let j = 0; j < sz; j++) {
+      const v = (j + 0.5) / sz;
+      const z = region.z + (v - 0.5) * span;
+      const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
+      for (let i = 0; i < sz; i++) {
+        const u = (i + 0.5) / sz;
+        const x = region.x + (u - 0.5) * span;
+        const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
+        const kGrid = gj * n + gi;
+        const h = heights1550[kGrid];
+        const inlandM = shoreDist1550.distWater[kGrid];
+        const idx = (j * sz + i) * 4;
+        const r = satSource.rgba[idx], g = satSource.rgba[idx + 1], b = satSource.rgba[idx + 2];
+        const mottle = coastalFbm2D(x * 0.009, z * 0.009, seed + 751, 3) - 0.5;
+        if (h <= 0.25) {
+          // 1550 turquoise estuary & coral shoal water
+          const shoal = Math.max(0, Math.min(1, 1 - Math.abs(h) / 14));
+          rgba1550[idx] = Math.round(16 + shoal * 26);
+          rgba1550[idx + 1] = Math.round(48 + shoal * 78 + mottle * 10);
+          rgba1550[idx + 2] = Math.round(68 + shoal * 74 + mottle * 10);
+          rgba1550[idx + 3] = 255;
+        } else if (h <= 3.8 && inlandM <= 75) {
+          // Warm 1550 coral-sand beach berm
+          rgba1550[idx] = Math.min(255, Math.round(224 + mottle * 18));
+          rgba1550[idx + 1] = Math.min(255, Math.round(198 + mottle * 16));
+          rgba1550[idx + 2] = Math.min(255, Math.round(150 + mottle * 14));
+          rgba1550[idx + 3] = 255;
+        } else {
+          // Convert any urban/road/cleared pixels into lush 1550 primary tropical rainforest or mangrove
+          const isMangrove = h < 3.2 && inlandM < 190;
+          const baseR = isMangrove ? 36 : 42;
+          const baseG = isMangrove ? 78 : 88;
+          const baseB = isMangrove ? 38 : 42;
+          const keepNat = g > r * 1.06 && g > b * 1.10 ? 0.45 : 0.0;
+          rgba1550[idx] = Math.max(18, Math.min(140, Math.round(baseR * (1 - keepNat) + r * keepNat + mottle * 16)));
+          rgba1550[idx + 1] = Math.max(38, Math.min(175, Math.round(baseG * (1 - keepNat) + g * keepNat + mottle * 22)));
+          rgba1550[idx + 2] = Math.max(18, Math.min(125, Math.round(baseB * (1 - keepNat) + b * keepNat + mottle * 12)));
+          rgba1550[idx + 3] = 255;
+        }
+      }
+    }
+    sat1550 = {
+      rgba: rgba1550,
+      size: sz,
+      lowLuma: satSource.lowLuma,
+      lowSize: satSource.lowSize,
+    };
+  }
+
+  const upgradedPack = {
+    ...basePack,
+    region,
+    satelliteData: sat1550,
+  };
+  finalizeProceduralCoastalPack(
+    upgradedPack,
+    heights1550,
+    hasDedicated1550Ortho ? 'ai-1550-orthophoto-srtm-hybrid' : 'hybrid-1550-estuary-srtm',
+    sat1550,
+    true
+  );
+
+  const cellInfo = canonicalCoastalCellId(region);
+  const restoredEstuaryPct =
+    lowCoastalCells > 0
+      ? Math.max(4.5, Math.min(48.0, Number(((reclaimedCellsCarved / lowCoastalCells) * 100).toFixed(1))))
+      : 12.4;
+  upgradedPack.territory1550 = {
+    cellId: cellInfo.cellId,
+    name: cellInfo.name,
+    coordLabel: cellInfo.coordLabel,
+    restoredEstuaryPct,
+    reclaimedCellsCarved,
+    palmCount: upgradedPack.vegetation?.stats?.palmCount ?? 0,
+    beachCellCount: upgradedPack.beaches?.beachCellCount ?? 0,
+    hasOrthophoto1550: hasDedicated1550Ortho,
+    discoveredAt: options.discoveredAt || new Date().toISOString(),
+  };
+  return upgradedPack;
+}
+
+export function encode1550TerritoryCachePayload(upgradedPack) {
+  const heights = upgradedPack.heights;
+  const n = upgradedPack.region.size;
+  const metaJson = JSON.stringify(upgradedPack.territory1550 || {});
+  const metaBytes = new TextEncoder().encode(metaJson);
+  const headerBytes = 16;
+  const heightsBytes = n * n * 2;
+  const totalBytes = headerBytes + heightsBytes + metaBytes.byteLength;
+  const buf = new ArrayBuffer(totalBytes);
+  const view = new DataView(buf);
+  // Magic 'WW15' (0x57573135)
+  view.setUint32(0, 0x57573135, false);
+  view.setUint16(4, 1, true); // version 1
+  view.setUint16(6, n, true); // grid size
+  view.setUint32(8, metaBytes.byteLength, true);
+  view.setUint32(12, Math.round((upgradedPack.territory1550?.restoredEstuaryPct || 0) * 10), true);
+  const qHeights = new Int16Array(buf, headerBytes, n * n);
+  for (let i = 0; i < n * n; i++) {
+    // Encode elevation in decimetres (0.1m resolution, range -3276.8m..+3276.7m)
+    qHeights[i] = Math.max(-32767, Math.min(32767, Math.round(heights[i] * 10)));
+  }
+  new Uint8Array(buf, headerBytes + heightsBytes).set(metaBytes);
+  return new Uint8Array(buf);
+}
+
+export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophoto1550 = null) {
+  const bytes = payloadBytes instanceof Uint8Array ? payloadBytes : new Uint8Array(payloadBytes);
+  if (bytes.byteLength < 16) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, false) !== 0x57573135) return null;
+  const n = view.getUint16(6, true);
+  const metaLen = view.getUint32(8, true);
+  const heightsBytes = n * n * 2;
+  if (bytes.byteLength < 16 + heightsBytes + metaLen) return null;
+  const qHeights = new Int16Array(bytes.buffer, bytes.byteOffset + 16, n * n);
+  const decodedHeights = new Float32Array(n * n);
+  for (let i = 0; i < n * n; i++) {
+    decodedHeights[i] = qHeights[i] * 0.1;
+  }
+  let meta = {};
+  try {
+    meta = JSON.parse(new TextDecoder().decode(bytes.subarray(16 + heightsBytes, 16 + heightsBytes + metaLen)));
+  } catch { /* ignore malformed meta */ }
+
+  const region = resolveGlobalCoastalRegion(basePack.region);
+  let heights1550 = decodedHeights;
+  if (n !== region.size) {
+    // Bilinear resample if cached grid size differs (e.g. PC 513 vs Mobile 257)
+    heights1550 = new Float32Array(region.size * region.size);
+    for (let j = 0; j < region.size; j++) {
+      const fy = (j / (region.size - 1)) * (n - 1);
+      const y0 = Math.floor(fy), y1 = Math.min(n - 1, y0 + 1), ay = fy - y0;
+      for (let i = 0; i < region.size; i++) {
+        const fx = (i / (region.size - 1)) * (n - 1);
+        const x0 = Math.floor(fx), x1 = Math.min(n - 1, x0 + 1), ax = fx - x0;
+        const v0 = decodedHeights[y0 * n + x0] * (1 - ax) + decodedHeights[y0 * n + x1] * ax;
+        const v1 = decodedHeights[y1 * n + x0] * (1 - ax) + decodedHeights[y1 * n + x1] * ax;
+        heights1550[j * region.size + i] = v0 * (1 - ay) + v1 * ay;
+      }
+    }
+  }
+  const built = build1550HistoricalTerritoryPack(
+    { ...basePack, heights: heights1550 },
+    { orthophoto1550, discoveredAt: meta.discoveredAt }
+  );
+  built.territory1550 = { ...built.territory1550, ...meta };
+  return built;
+}
+
+export async function runLandfallDiscoveryPipeline(basePack, {
+  apiBase = '/waterworld/api',
+  onFirstExplorer = null,
+  onProgress = null,
+  onUpgradeReady = null,
+  onCachedReady = null,
+  fetchImpl = typeof fetch === 'function' ? fetch : null,
+  forceFirstExplorer = false,
+} = {}) {
+  const cellInfo = canonicalCoastalCellId(basePack.region);
+  const localKey = `waterworld.discovery.v1.${cellInfo.cellId}`;
+  let status = 'first_explorer';
+  let visits = 1;
+  let discoveredAt = new Date().toISOString();
+  let hasOrthophoto = false;
+  let remoteAvailable = false;
+
+  if (!forceFirstExplorer && fetchImpl) {
+    try {
+      const q = new URLSearchParams({
+        cell: cellInfo.cellId,
+        lat: String(basePack.region.latitude),
+        lon: String(basePack.region.longitude),
+        name: cellInfo.name,
+      });
+      const res = await fetchImpl(`${apiBase}/landfall-discovery?${q.toString()}`);
+      if (res && res.ok) {
+        const info = await res.json();
+        remoteAvailable = true;
+        status = info.status || 'first_explorer';
+        visits = Number(info.visits) || 1;
+        discoveredAt = info.discoveredAt || discoveredAt;
+        hasOrthophoto = Boolean(info.hasOrthophoto);
+      }
+    } catch { /* fallback to localStorage when offline */ }
+  }
+
+  if (!remoteAvailable && !forceFirstExplorer && typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(localKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        status = 'cached';
+        visits = (Number(parsed.visits) || 1) + 1;
+        discoveredAt = parsed.discoveredAt || discoveredAt;
+        localStorage.setItem(localKey, JSON.stringify({ ...parsed, visits }));
+      }
+    } catch { /* ignore storage errors */ }
+  }
+
+  // Helper to optionally load a 1550 AI orthophoto if available on the Worker
+  const loadOrthophoto1550 = async () => {
+    if (!hasOrthophoto || !fetchImpl || typeof createImageBitmap !== 'function') return null;
+    try {
+      const res = await fetchImpl(`${apiBase}/landfall-orthophoto?cell=${encodeURIComponent(cellInfo.cellId)}`);
+      if (!res.ok) return null;
+      const bmp = await createImageBitmap(await res.blob());
+      const sz = basePack.region.albedoSize;
+      const canvas = typeof OffscreenCanvas === 'function'
+        ? new OffscreenCanvas(sz, sz)
+        : Object.assign(document.createElement('canvas'), { width: sz, height: sz });
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(bmp, 0, 0, sz, sz);
+      bmp.close?.();
+      const rgba = ctx.getImageData(0, 0, sz, sz).data;
+      const lowSize = Math.max(8, sz >> 4);
+      const block = Math.max(1, Math.floor(sz / lowSize));
+      const lowLuma = new Float32Array(lowSize * lowSize);
+      for (let lj = 0; lj < lowSize; lj++) {
+        for (let li = 0; li < lowSize; li++) {
+          let sum = 0, count = 0;
+          for (let dy = 0; dy < block; dy++) {
+            const sy = Math.min(sz - 1, lj * block + dy);
+            for (let dx = 0; dx < block; dx++) {
+              const sx = Math.min(sz - 1, li * block + dx);
+              const k = (sy * sz + sx) * 4;
+              sum += 0.2126 * rgba[k] + 0.7152 * rgba[k + 1] + 0.0722 * rgba[k + 2];
+              count++;
+            }
+          }
+          lowLuma[lj * lowSize + li] = sum / Math.max(1, count);
+        }
+      }
+      return { rgba, size: sz, lowLuma, lowSize };
+    } catch {
+      return null;
+    }
+  };
+
+  if (status === 'cached' && !forceFirstExplorer) {
+    let upgradedPack = null;
+    const orthophoto1550 = await loadOrthophoto1550();
+    if (remoteAvailable && fetchImpl) {
+      try {
+        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}`);
+        if (res && res.ok) {
+          const buf = new Uint8Array(await res.arrayBuffer());
+          upgradedPack = apply1550TerritoryCachePayload(basePack, buf, orthophoto1550);
+        }
+      } catch { /* fallback to local rebuild */ }
+    }
+    if (!upgradedPack) {
+      upgradedPack = build1550HistoricalTerritoryPack(basePack, { orthophoto1550, discoveredAt });
+    }
+    upgradedPack.territory1550.visits = visits;
+    upgradedPack.territory1550.isFirstExplorer = false;
+    onCachedReady?.({
+      cellId: cellInfo.cellId,
+      name: cellInfo.name,
+      coordLabel: cellInfo.coordLabel,
+      visits,
+      discoveredAt,
+      upgradedPack,
+      stats: upgradedPack.territory1550,
+    });
+    return { status: 'cached', isFirstExplorer: false, visits, upgradedPack };
+  }
+
+  // First Explorer path! Notify the player immediately that they are the first mariner here
+  onFirstExplorer?.({
+    cellId: cellInfo.cellId,
+    name: cellInfo.name,
+    coordLabel: cellInfo.coordLabel,
+    discoveredAt,
+  });
+
+  // Yield briefly so the First Explorer banner renders smoothly while the ship sails at 60 FPS
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  onProgress?.({
+    stage: 'orthophoto',
+    message: `Analyzing satellite coast & 1550 mangrove channels for ${cellInfo.name}…`,
+  });
+
+  const orthophoto1550 = await loadOrthophoto1550();
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  onProgress?.({
+    stage: 'carving',
+    message: 'Removing modern coastal fill & reconstructing 1550 relief, beaches and primary canopy…',
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  const upgradedPack = build1550HistoricalTerritoryPack(basePack, { orthophoto1550, discoveredAt });
+  upgradedPack.territory1550.visits = 1;
+  upgradedPack.territory1550.isFirstExplorer = true;
+
+  // Cache the newly built 1550 territory in Cloudflare R2 (and localStorage) for all future mariners
+  const payload = encode1550TerritoryCachePayload(upgradedPack);
+  if (remoteAvailable && fetchImpl) {
+    try {
+      await fetchImpl(
+        `${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&lat=${encodeURIComponent(basePack.region.latitude)}&lon=${encodeURIComponent(basePack.region.longitude)}&name=${encodeURIComponent(cellInfo.name)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: payload,
+        }
+      );
+    } catch { /* non-fatal if offline */ }
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(
+        localKey,
+        JSON.stringify({
+          cellId: cellInfo.cellId,
+          name: cellInfo.name,
+          lat: basePack.region.latitude,
+          lon: basePack.region.longitude,
+          visits: 1,
+          discoveredAt,
+          restoredEstuaryPct: upgradedPack.territory1550.restoredEstuaryPct,
+        })
+      );
+    } catch { /* ignore quota errors */ }
+  }
+
+  onUpgradeReady?.({
+    cellId: cellInfo.cellId,
+    name: cellInfo.name,
+    coordLabel: cellInfo.coordLabel,
+    visits: 1,
+    discoveredAt,
+    upgradedPack,
+    stats: upgradedPack.territory1550,
+    isFirstExplorer: true,
+  });
+
+  return { status: 'first_explorer', isFirstExplorer: true, visits: 1, upgradedPack };
 }

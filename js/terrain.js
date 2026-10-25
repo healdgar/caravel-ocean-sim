@@ -8,7 +8,7 @@ import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL} from './fores
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle} from './forest-middle.js';
 
-import { portClearanceEnvelope } from './coastal-world.js';
+import { portClearanceEnvelope, runLandfallDiscoveryPipeline, build1550HistoricalTerritoryPack } from './coastal-world.js';
 
 function hash32Forest(value) {
   let v = value >>> 0;
@@ -181,6 +181,7 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
   return {
     ...forestPack,
     roots,
+    maxRootCapacity: maxRoots,
     manifest: {
       ...forestPack.manifest,
       rootCount: firstRoot,
@@ -253,22 +254,22 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   const groundSample=(x,z)=>proceduralPack?terrainSurfaceSample(heights,x,z,activeRegion):sampleTerrainNear(nearTile,heights,x,z);
   const heightSample=(x,z)=>proceduralPack?terrainSample(heights,x,z,activeRegion):(terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z));
-  const mesh=proceduralPack?proceduralPack.mesh:islandGeometry(heights,nearTile?.bounds),fineMesh=nearTile?terrainNearGeometry(nearTile,mesh):null;
+  let mesh=proceduralPack?proceduralPack.mesh:islandGeometry(heights,nearTile?.bounds);const fineMesh=nearTile?terrainNearGeometry(nearTile,mesh):null;
   const originalTrees=proceduralPack?proceduralPack.vegetation.trees:islandVegetation(heights,biome),canopyPack=await canopyPromise;
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
   const canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees,forestPack=await forestPromise;
   const trees=forestPack?new Float32Array(0):canopyTrees;
-  const groundPatches=createGroundCoverPatches(activeRegion,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
+  let groundPatches=createGroundCoverPatches(activeRegion,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const buffer=(data,usage,label)=>{
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
     if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;
   };
-  const vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices');
-  const indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices');
-  const submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices'):indices;
-  const submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
-  const portMesh=proceduralPack?.portGeometry?.indices?.length?{
+  let vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices');
+  let indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices');
+  let submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices'):indices;
+  let submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
+  let portMesh=proceduralPack?.portGeometry?.indices?.length?{
     vertices:buffer(proceduralPack.portGeometry.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices'),
     indices:buffer(proceduralPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices'),
     count:proceduralPack.portGeometry.indices.length,
@@ -481,15 +482,147 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
   let tick=0;
+
+  function regenerateAlbedoMips(){
+    const mEnc=device.createCommandEncoder(),mPass=mEnc.beginComputePass();mPass.setPipeline(mipPipe);
+    for(let m=1;m<albedoMips;m++){
+      mPass.setBindGroup(0,device.createBindGroup({layout:mipPipe.getBindGroupLayout(0),entries:[
+        {binding:0,resource:albedo.createView({baseMipLevel:m-1,mipLevelCount:1})},
+        {binding:1,resource:albedo.createView({baseMipLevel:m,mipLevelCount:1})},
+      ]}));
+      mPass.dispatchWorkgroups(Math.ceil((activeRegion.albedoSize>>m)/8),Math.ceil((activeRegion.albedoSize>>m)/8));
+    }
+    mPass.end();device.queue.submit([mEnc.finish()]);
+  }
+
+  function applyUpgradedPack(upgradedPack,boat=null){
+    if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    heights.set(upgradedPack.heights);
+    device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
+    if(upgradedPack.biome&&upgradedPack.biome.byteLength===biome.byteLength){
+      biome.set(upgradedPack.biome);
+      device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
+    }
+    if(upgradedPack.albedo){
+      device.queue.writeTexture({texture:albedo},upgradedPack.albedo,{bytesPerRow:activeRegion.albedoSize*4},[activeRegion.albedoSize,activeRegion.albedoSize]);
+      regenerateAlbedoMips();
+    }
+    const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null,oldPort=portMesh;
+    mesh=upgradedPack.mesh;
+    vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices 1550');
+    indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices 1550');
+    submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices 1550'):indices;
+    submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
+    portMesh=upgradedPack.portGeometry?.indices?.length?{
+      vertices:buffer(upgradedPack.portGeometry.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices 1550'),
+      indices:buffer(upgradedPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices 1550'),
+      count:upgradedPack.portGeometry.indices.length,
+    }:null;
+    oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
+    oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
+
+    groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
+    groundStats.patches=groundPatches.length;
+    previousGround.clear();
+    lastCamera=null;
+    tick=0;
+
+    if(forest&&forestPack){
+      const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile});
+      forest.updatePack(nextForestPack,heights);
+    }
+    if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
+      const draft=boat.hydrodynamics?.draft??2.1;
+      if(heightSample(boat.x,boat.z)>-draft*1.15){
+        const safe=safeLandfallStart(heights,{x:boat.x,z:boat.z,heading:boat.heading??0},boat,activeRegion,heightSample);
+        boat.x=safe.x;boat.z=safe.z;
+      }
+    }
+    discovery.applied=true;
+    discovery.status='applied';
+    notifyDiscovery();
+    return true;
+  }
+
+  const discoveryListeners=new Set();
+  const discovery={
+    enabled:Boolean(proceduralPack),
+    status:proceduralPack?'checking':'none',
+    isFirstExplorer:false,
+    applied:false,
+    visits:1,
+    message:'',
+    stats:null,
+    upgradedPack:null,
+    subscribe(fn){
+      discoveryListeners.add(fn);
+      fn(discovery);
+      return ()=>discoveryListeners.delete(fn);
+    },
+    swapToUpgraded(boat=null){
+      if(!discovery.upgradedPack){
+        discovery.upgradedPack=build1550HistoricalTerritoryPack(proceduralPack);
+        discovery.stats=discovery.upgradedPack.territory1550;
+      }
+      return applyUpgradedPack(discovery.upgradedPack,boat);
+    },
+  };
+  function notifyDiscovery(){
+    for(const fn of discoveryListeners){
+      try{fn(discovery);}catch{/* ignore UI listener error */}
+    }
+  }
+
+  if(proceduralPack){
+    const forceFirstExplorer=search.get('discover')==='1';
+    setTimeout(()=>{
+      runLandfallDiscoveryPipeline(proceduralPack,{
+        forceFirstExplorer,
+        onFirstExplorer(info){
+          discovery.status='charting';
+          discovery.isFirstExplorer=true;
+          discovery.message=`You are the first mariner to sail to ${info.name} (${info.coordLabel}). Reconstructing 1550 historical territory…`;
+          notifyDiscovery();
+        },
+        onProgress(prog){
+          discovery.status='charting';
+          discovery.message=prog.message;
+          notifyDiscovery();
+        },
+        onUpgradeReady(res){
+          discovery.status='ready';
+          discovery.isFirstExplorer=true;
+          discovery.visits=1;
+          discovery.upgradedPack=res.upgradedPack;
+          discovery.stats=res.stats;
+          discovery.message=`Congratulations on your discovery! The 1550 historical territory for ${res.name} is ready.`;
+          notifyDiscovery();
+        },
+        onCachedReady(res){
+          discovery.status='cached';
+          discovery.isFirstExplorer=false;
+          discovery.visits=res.visits;
+          discovery.upgradedPack=res.upgradedPack;
+          discovery.stats=res.stats;
+          discovery.message=`1550 historical territory charted · Mariner #${res.visits}`;
+          notifyDiscovery();
+        },
+      }).catch(()=>{/* non-fatal */});
+    },120);
+  }
+
   return {
     waterGroup:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:uniform}},{binding:1,resource:elevation.createView()},{binding:2,resource:{buffer:nearDomain}},{binding:3,resource:{buffer:nearElevation}}]}),
-    triangles:(mesh.indices.length+(fineMesh?.indices.length??0))/3,trees:trees.length/8+(forest?.stats.roots??0),forestPatches:forestPatches.length,
+    get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
+    get trees(){return trees.length/8+(forest?.stats.roots??0);},
+    forestPatches:forestPatches.length,
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:updateTrees,
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,region:activeRegion,views:proceduralPack?.views??null,port:proceduralPack?.port??null,
+    discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion),
     encode(pass,changed=false){

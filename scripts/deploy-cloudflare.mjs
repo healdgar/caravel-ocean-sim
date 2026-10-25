@@ -81,7 +81,7 @@ export default {
         status: 204,
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Range',
           'X-Robots-Tag': ROBOTS_HEADER,
         },
@@ -89,6 +89,134 @@ export default {
     }
     if (url.pathname === '/waterworld') {
       return Response.redirect(url.origin + '/waterworld/' + url.search, 308);
+    }
+
+    // Shared 1550 Historical Landfall Discovery & Cache API (backed by Cloudflare R2)
+    if (url.pathname.startsWith('/waterworld/api/') && env.LANDFALL_CACHE) {
+      const corsJson = {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': ROBOTS_HEADER,
+      };
+      const rawCell = (url.searchParams.get('cell') || '').replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 64);
+
+      if (url.pathname === '/waterworld/api/landfall-discovery' && request.method === 'GET') {
+        if (!rawCell) return new Response(JSON.stringify({ error: 'Missing cell' }), { status: 400, headers: corsJson });
+        const metaKey = 'cells/' + rawCell + '/meta.json';
+        const orthoKey = 'orthophotos/' + rawCell + '.jpg';
+        const [metaObj, orthoHead] = await Promise.all([
+          env.LANDFALL_CACHE.get(metaKey),
+          env.LANDFALL_CACHE.head(orthoKey),
+        ]);
+        const hasOrthophoto = Boolean(orthoHead);
+        if (metaObj) {
+          const meta = await metaObj.json();
+          if (meta.status === 'ready') {
+            meta.visits = (Number(meta.visits) || 1) + 1;
+            meta.lastVisited = new Date().toISOString();
+            ctx.waitUntil(env.LANDFALL_CACHE.put(metaKey, JSON.stringify(meta), { httpMetadata: { contentType: 'application/json' } }));
+            return new Response(JSON.stringify({
+              status: 'cached',
+              firstExplorer: false,
+              cellId: rawCell,
+              visits: meta.visits,
+              discoveredAt: meta.discoveredAt,
+              hasOrthophoto,
+            }), { status: 200, headers: corsJson });
+          }
+        }
+        return new Response(JSON.stringify({
+          status: 'first_explorer',
+          firstExplorer: true,
+          cellId: rawCell,
+          visits: 1,
+          discoveredAt: new Date().toISOString(),
+          hasOrthophoto,
+        }), { status: 200, headers: corsJson });
+      }
+
+      if (url.pathname === '/waterworld/api/landfall-pack' && request.method === 'GET') {
+        if (!rawCell) return new Response('Missing cell', { status: 400 });
+        const packObj = await env.LANDFALL_CACHE.get('cells/' + rawCell + '/pack.bin');
+        if (!packObj) return new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+        return new Response(packObj.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=86400',
+            'X-Robots-Tag': ROBOTS_HEADER,
+          },
+        });
+      }
+
+      if (url.pathname === '/waterworld/api/landfall-pack' && request.method === 'PUT') {
+        if (!rawCell) return new Response(JSON.stringify({ error: 'Missing cell' }), { status: 400, headers: corsJson });
+        const buf = await request.arrayBuffer();
+        if (buf.byteLength < 16 || buf.byteLength > 2 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: 'Invalid pack size' }), { status: 400, headers: corsJson });
+        }
+        const view = new DataView(buf);
+        if (view.getUint32(0, false) !== 0x57573135) {
+          return new Response(JSON.stringify({ error: 'Invalid pack header' }), { status: 400, headers: corsJson });
+        }
+        const lat = Number(url.searchParams.get('lat')) || 0;
+        const lon = Number(url.searchParams.get('lon')) || 0;
+        const name = (url.searchParams.get('name') || 'Uncharted Coast').slice(0, 80);
+        const now = new Date().toISOString();
+        const metaKey = 'cells/' + rawCell + '/meta.json';
+        const existingObj = await env.LANDFALL_CACHE.get(metaKey);
+        const existing = existingObj ? await existingObj.json() : null;
+        const meta = {
+          cellId: rawCell,
+          name,
+          lat,
+          lon,
+          status: 'ready',
+          visits: existing?.visits || 1,
+          discoveredAt: existing?.discoveredAt || now,
+          lastVisited: now,
+          bytes: buf.byteLength,
+        };
+        await Promise.all([
+          env.LANDFALL_CACHE.put('cells/' + rawCell + '/pack.bin', buf, { httpMetadata: { contentType: 'application/octet-stream' } }),
+          env.LANDFALL_CACHE.put(metaKey, JSON.stringify(meta), { httpMetadata: { contentType: 'application/json' } }),
+        ]);
+        ctx.waitUntil((async () => {
+          try {
+            const popObj = await env.LANDFALL_CACHE.get('index/popular.json');
+            const list = popObj ? await popObj.json() : [];
+            const idx = list.findIndex((item) => item.cellId === rawCell);
+            if (idx >= 0) list[idx] = meta;
+            else list.push(meta);
+            list.sort((a, b) => (b.visits || 0) - (a.visits || 0));
+            await env.LANDFALL_CACHE.put('index/popular.json', JSON.stringify(list.slice(0, 200)), { httpMetadata: { contentType: 'application/json' } });
+          } catch {}
+        })());
+        return new Response(JSON.stringify({ ok: true, meta }), { status: 200, headers: corsJson });
+      }
+
+      if (url.pathname === '/waterworld/api/landfall-orthophoto' && request.method === 'GET') {
+        if (!rawCell) return new Response('Missing cell', { status: 400 });
+        const orthoObj = await env.LANDFALL_CACHE.get('orthophotos/' + rawCell + '.jpg');
+        if (!orthoObj) return new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+        return new Response(orthoObj.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': IMMUTABLE_CACHE,
+            'X-Robots-Tag': ROBOTS_HEADER,
+          },
+        });
+      }
+
+      if (url.pathname === '/waterworld/api/popular-landfalls' && request.method === 'GET') {
+        const popObj = await env.LANDFALL_CACHE.get('index/popular.json');
+        const list = popObj ? await popObj.json() : [];
+        return new Response(JSON.stringify({ count: list.length, destinations: list }), { status: 200, headers: corsJson });
+      }
     }
     const streamEntry = STREAM_MANIFEST[url.pathname];
     if (streamEntry) {
@@ -159,6 +287,12 @@ const wranglerConfig = {
     binding: 'ASSETS',
     run_worker_first: true,
   },
+  r2_buckets: [
+    {
+      bucket_name: 'waterworld-landfall-cache',
+      binding: 'LANDFALL_CACHE',
+    },
+  ],
 };
 
 const configPath = path.join(cfDir, 'wrangler.jsonc');
