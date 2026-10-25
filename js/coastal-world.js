@@ -882,7 +882,32 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
   return rgba;
 }
 
-export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches = null, portPlacement = null) {
+// Coconut palm (Cocos nucifera L.) genome profile matching Forestmodeler's
+// Corner architectural model (Hallé, Oldeman & Tomlinson 1978; Tomlinson 1990).
+export const COCONUT_PALM_GENOME_SPEC = Object.freeze({
+  species: 'palm',
+  binomial: 'Cocos nucifera',
+  architecturalModel: 'Corner',
+  maxBranchOrder: 1,
+  whorlCount: 7,
+  activeFronds: 28,
+  frondLengthRangeMetres: Object.freeze([4.0, 6.0]),
+  matureHeightRangeMetres: Object.freeze([18.0, 26.0]),
+  plumeSpreadRangeMetres: Object.freeze([5.5, 8.5]),
+  plumeRadiusRangeMetres: Object.freeze([2.75, 4.25]),
+  spreadToHeightRange: Object.freeze([0.22, 0.60]),
+  crownProjectedLAI: Object.freeze({ min: 2.2, mean: 3.3, max: 4.8 }),
+  basalRadiusMetres: 0.42,
+  basalFlare: 0.68,
+  flareHeightMetres: 0.85,
+  wood: Object.freeze({
+    modulusOfRuptureMPa: 46.0,
+    modulusOfElasticityGPa: 7.2,
+    densityKgM3: 760.0,
+  }),
+});
+
+export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches = null, portPlacement = null, palmPrototypeId = 5) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement);
@@ -891,6 +916,7 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
 
   const allTrees = [];
   const palms = [];
+  const palmRoots = [];
   const scrub = [];
   const upland = [];
 
@@ -923,14 +949,44 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
     if (prob <= 0 || density > prob * 0.92) continue;
 
     if (h < 12) {
-      // Foreshore palm fringe & coastal sea-grape / mangrove band just above the beach berm
+      // Foreshore coconut palm fringe (Corner's model: 18-26m height, 2.75-4.25m plume radius)
+      // & coastal sea-grape / mangrove band just above the beach berm
       const isPalm = region.climate === 'tropical' || region.climate === 'subtropical';
-      const r = isPalm ? 3.4 + (baseRadius - 3.2) * 0.65 : baseRadius * 0.85;
-      const ht = isPalm ? 10 + (baseHeight - 8) * 0.9 : baseHeight * 0.75;
+      const tNorm = (baseRadius - 3.2) / 4.4;
+      const hNorm = (baseHeight - 8) / 10;
+      const r = isPalm
+        ? COCONUT_PALM_GENOME_SPEC.plumeRadiusRangeMetres[0] +
+          tNorm * (COCONUT_PALM_GENOME_SPEC.plumeRadiusRangeMetres[1] - COCONUT_PALM_GENOME_SPEC.plumeRadiusRangeMetres[0])
+        : baseRadius * 0.85;
+      const ht = isPalm
+        ? COCONUT_PALM_GENOME_SPEC.matureHeightRangeMetres[0] +
+          hNorm * (COCONUT_PALM_GENOME_SPEC.matureHeightRangeMetres[1] - COCONUT_PALM_GENOME_SPEC.matureHeightRangeMetres[0])
+        : baseHeight * 0.75;
       const tuple = [x, h, z, r, ht, shape, sx, sz];
       allTrees.push(...tuple);
-      if (isPalm) palms.push(...tuple);
-      else scrub.push(...tuple);
+      if (isPalm) {
+        palms.push(...tuple);
+        const scale = ht / 22.0;
+        const yaw = shape * Math.PI * 2;
+        const sink = Math.max(0.12, COCONUT_PALM_GENOME_SPEC.basalRadiusMetres * scale * slope + 0.08);
+        const tint = 0.94 + 0.12 * tNorm;
+        palmRoots.push(
+          x,
+          h - sink,
+          z,
+          scale,
+          yaw,
+          tint,
+          0.96 + 0.08 * hNorm,
+          0.92 + 0.1 * tNorm,
+          palmPrototypeId,
+          sink,
+          -1,
+          0
+        );
+      } else {
+        scrub.push(...tuple);
+      }
     } else if (h < 32) {
       // Coastal scrub & lowland woodland transition
       const tuple = [x, h, z, baseRadius * 0.9, baseHeight * 0.88, shape, sx, sz];
@@ -947,6 +1003,7 @@ export function seedCoastalVegetation(regionSpec, heights, biome = null, beaches
   return {
     trees: new Float32Array(allTrees),
     palms: new Float32Array(palms),
+    palmRoots: new Float32Array(palmRoots),
     scrub: new Float32Array(scrub),
     upland: new Float32Array(upland),
     stats: {

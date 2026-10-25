@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   SPANISH_MAIN_1550_REGIONS,
   PORT_PREFABS,
+  COCONUT_PALM_GENOME_SPEC,
   resolveGlobalCoastalRegion,
   synthesizeCoastalTerrain,
   synthesizeCoastalBeaches,
@@ -16,6 +17,7 @@ import {
   buildCoastalMesh,
   generateProceduralCoastalPack,
 } from '../js/coastal-world.js';
+import { FOREST_SPECIES, FOREST_ROOT_FLOATS } from '../js/forest-scenery.js';
 import {
   terrainSample,
   safeLandfallStart,
@@ -168,9 +170,19 @@ test('coastal vegetation seeds palms, scrub and upland forest while clearing bea
   const biome = synthesizeCoastalBiome(region, heights, beaches, port);
   const veg = seedCoastalVegetation(region, heights, biome, beaches, port);
 
+  assert.ok(FOREST_SPECIES.includes('palm'), 'FOREST_SPECIES registers Forestmodeler palm genome');
+  assert.equal(COCONUT_PALM_GENOME_SPEC.species, 'palm');
+  assert.equal(COCONUT_PALM_GENOME_SPEC.architecturalModel, 'Corner');
   assert.deepEqual(veg.trees, seedCoastalVegetation(region, heights, biome, beaches, port).trees);
   assert.ok(veg.stats.totalTrees > 250, 'dense coastal and upland stand seeded');
   assert.ok(veg.stats.palmCount > 0, 'tropical foreshore seeds palm fringe');
+  assert.equal(veg.palmRoots.length, veg.stats.palmCount * FOREST_ROOT_FLOATS);
+  for (let i = 0; i < veg.palms.length; i += 8) {
+    const r = veg.palms[i + 3];
+    const ht = veg.palms[i + 4];
+    assert.ok(r >= 2.75 && r <= 4.25, 'palm plume radius matches Cocos nucifera band');
+    assert.ok(ht >= 18.0 && ht <= 26.0, 'palm mature height matches Cocos nucifera band');
+  }
   assert.ok(veg.stats.uplandCount > 0, 'upland slopes seed forest stands');
   assert.equal(
     veg.stats.totalTrees,

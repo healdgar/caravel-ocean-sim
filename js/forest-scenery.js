@@ -74,7 +74,7 @@ export const FOREST_ASSETS=Object.freeze({
   'chestnut-wounds-normal.png':'assets/forest-scenery/saba/chestnut-wounds-normal.png',
   'chestnut-wounds-roughness.png':'assets/forest-scenery/saba/chestnut-wounds-roughness.png',
 });
-export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut']);
+export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm']);
 export const FOREST_ROOT_FLOATS=12;
 export const FOREST_VERTEX_LAYOUT=Object.freeze({arrayStride:56,attributes:[
   {shaderLocation:0,offset:0,format:'float32x3'},
