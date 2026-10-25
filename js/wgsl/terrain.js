@@ -356,23 +356,57 @@ fn landOpaque(in:LandVertex)->vec4f{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
     // bark never execute these ground-material evaluations.
+    let beachSand=select(0.0,clamp(in.kind.y,0.0,1.0),in.kind.x<0.5);
+    let rockKeep=1.0-beachSand*0.92;
     let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
     var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19);}
-    let blocks=blockNoise*blockWeight;
-    let stone=landFilteredNoise(materialUV*.82,materialWidth*.82);
+    let blocks=blockNoise*blockWeight*rockKeep;
+    let stone=landFilteredNoise(materialUV*.82,materialWidth*.82)*rockKeep;
     let pores=landFilteredNoise(materialUV*5.4,materialWidth*5.4);
-    let fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11);
+    let fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11)*rockKeep;
     // Reuse the raw block noise, not its faded value, without another noise call.
-    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065);
-    albedo=source*(1.0+blocks*.14+stone*0.10+pores*0.055-(fissure*.075+coarseFissure*.08)*rocky);
-    let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006);
-    relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky);
-    roughness=clamp(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.65,0.98);
+    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065)*rockKeep;
+    let sandRipple=sin(world.x*1.8+world.z*1.3+stone*2.5)*landDetailWeight(materialWidth*0.45)*beachSand*0.025;
+    albedo=source*(1.0+blocks*.14+stone*0.10+pores*(0.055-beachSand*0.025)+sandRipple-(fissure*.075+coarseFissure*.08)*rocky);
+    let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.35;
+    relief=mix(soil,stone*0.14+blocks*.22-fissure*0.065-coarseFissure*.10,rocky*rockKeep);
+    roughness=clamp(mix(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.78+pores*0.03,beachSand),0.62,0.98);
     }
   }else if(in.kind.x>=9.5){
-    let portShade=clamp(in.kind.y,0.5,1.0);
-    let portBase=select(select(select(vec3f(0.16,0.11,0.065),vec3f(0.34,0.31,0.26),in.kind.x>=10.5),vec3f(0.58,0.54,0.46),in.kind.x>=11.5),vec3f(0.38,0.14,0.075),in.kind.x>=12.5);
-    albedo=portBase*portShade;ambientVisibility=0.45+0.32*max(n.y,0.0);relief=0.0;roughness=0.88;
+    let portShade=clamp(in.kind.y,0.25,1.0);
+    let detailA=landOrientedDetail(world,n,dx,dy,1.45);
+    let detailB=landOrientedDetail(world+vec3f(7.3,3.1,11.9),n,dx,dy,5.2);
+    if(in.kind.x<10.5){
+      // Kind 10: Weathered pitch-pine & oak timber (piers, pilings, balconies, beams)
+      let plank=sin(world.y*14.0+detailA*1.6)*detailFade;
+      albedo=vec3f(0.18,0.118,0.068)*portShade*(1.0+detailA*0.16+detailB*0.08+plank*0.06);
+      relief=(detailA*0.022+plank*0.012)*detailFade;roughness=0.86;ambientVisibility=0.40+0.32*max(n.y,0.0);
+    }else if(in.kind.x<11.5){
+      // Kind 11: Coursed coral-limestone ashlar masonry (bastion walls, merlons, plinths, quoins)
+      let courseY=fract(world.y*1.65);let bedJoint=smoothstep(0.0,0.09,courseY)*(1.0-smoothstep(0.91,1.0,courseY));
+      let stagger=floor(world.y*1.65)*0.5;
+      let headCoord=fract((world.x+world.z)*0.72+stagger);
+      let headJoint=smoothstep(0.0,0.07,headCoord)*(1.0-smoothstep(0.93,1.0,headCoord));
+      let mortar=mix(1.0,bedJoint*headJoint,detailFade);
+      let damp=smoothstep(0.2,3.8,world.y);
+      albedo=vec3f(0.39,0.36,0.30)*portShade*(0.76+0.24*damp)*(0.86+0.14*mortar+detailA*0.14+detailB*0.07);
+      relief=(detailA*0.045+detailB*0.018-(1.0-mortar)*0.035)*detailFade;roughness=0.90;ambientVisibility=0.44+0.32*max(n.y,0.0);
+    }else if(in.kind.x<12.5){
+      // Kind 12: Warm Spanish colonial limewashed stucco with aged plaster patina
+      let damp=smoothstep(0.8,3.6,world.y);
+      let warmStucco=mix(vec3f(0.46,0.41,0.33),vec3f(0.66,0.59,0.47),damp);
+      albedo=warmStucco*portShade*(1.0+detailA*0.09+detailB*0.05);
+      relief=(detailA*0.018+detailB*0.009)*detailFade;roughness=0.88;ambientVisibility=0.48+0.34*max(n.y,0.0);
+    }else if(in.kind.x<13.5){
+      // Kind 13: Spanish terracotta barrel roof tiles (tejas)
+      let flute=sin((world.x*3.7+world.z*3.7)*4.2)*detailFade;
+      albedo=vec3f(0.44,0.155,0.078)*portShade*(1.0+detailA*0.14+flute*0.09+detailB*0.06);
+      relief=(flute*0.028+detailA*0.015)*detailFade;roughness=0.82;ambientVisibility=0.46+0.36*max(n.y,0.0);
+    }else{
+      // Kind 14: Deep recessed colonial arcades, portals, cannon embrasures & timber shutters
+      albedo=vec3f(0.048,0.036,0.026)*portShade*(1.0+detailB*0.08);
+      relief=detailB*0.008*detailFade;roughness=0.92;ambientVisibility=0.18+0.14*max(n.y,0.0);
+    }
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);
     let canopyGrain=gnoise(world.xz*0.32+vec2f(world.y*0.17));

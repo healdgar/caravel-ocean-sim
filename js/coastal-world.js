@@ -671,7 +671,7 @@ export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
   return true;
 }
 
-export function buildPortPrefabGeometry(portPlacement) {
+export function buildPortPrefabGeometry(portPlacement, palms = null) {
   if (!portPlacement?.instances?.length) {
     return {
       vertices: new Float32Array(0),
@@ -727,12 +727,70 @@ export function buildPortPrefabGeometry(portPlacement) {
     indices.push(i0, i1, i2);
   };
 
+  // Helper to emit a 3D box (or battered frustum when topExpandX/Z != 0) in local coordinates
+  const emitBox = (toWorld, x0, x1, y0, y1, z0, z1, kind, shade = 0.84, includeBottom = false, topInset = 0) => {
+    const p000 = toWorld(x0, y0, z0);
+    const p100 = toWorld(x1, y0, z0);
+    const p101 = toWorld(x1, y0, z1);
+    const p001 = toWorld(x0, y0, z1);
+    const tx0 = x0 + topInset, tx1 = x1 - topInset;
+    const tz0 = z0 + topInset, tz1 = z1 - topInset;
+    const p010 = toWorld(tx0, y1, tz0);
+    const p110 = toWorld(tx1, y1, tz0);
+    const p111 = toWorld(tx1, y1, tz1);
+    const p011 = toWorld(tx0, y1, tz1);
+
+    pushQuad(p000, p100, p110, p010, kind, shade * 0.94);
+    pushQuad(p100, p101, p111, p110, kind, shade);
+    pushQuad(p101, p001, p011, p111, kind, shade * 0.96);
+    pushQuad(p001, p000, p010, p011, kind, shade * 0.88);
+    pushQuad(p010, p110, p111, p011, kind, Math.min(1, shade * 1.06));
+    if (includeBottom) {
+      pushQuad(p001, p101, p100, p000, kind, shade * 0.65);
+    }
+  };
+
+  // Helper to emit an overhanging gabled or hipped terracotta roof (kind 13) with timber fascia (kind 10)
+  const emitRoof = (toWorld, x0, x1, yEave, yPeak, z0, z1, overhang = 0.65, hipRatio = 0.25, wallKind = 12) => {
+    const rx0 = x0 - overhang, rx1 = x1 + overhang;
+    const rz0 = z0 - overhang, rz1 = z1 + overhang;
+    const fasciaH = 0.24;
+    // Timber fascia / eaves skirt
+    emitBox(toWorld, rx0, rx1, yEave - fasciaH, yEave, rz0, rz1, 10, 0.72, true);
+    const midX = (x0 + x1) * 0.5;
+    const spanZ = rz1 - rz0;
+    const zHip0 = rz0 + spanZ * hipRatio;
+    const zHip1 = rz1 - spanZ * hipRatio;
+    const e00 = toWorld(rx0, yEave, rz0);
+    const e10 = toWorld(rx1, yEave, rz0);
+    const e11 = toWorld(rx1, yEave, rz1);
+    const e01 = toWorld(rx0, yEave, rz1);
+    const r0 = toWorld(midX, yPeak, zHip0);
+    const r1 = toWorld(midX, yPeak, zHip1);
+
+    if (hipRatio > 0.02) {
+      // Hipped roof: 2 side trapezoids + 2 end hip triangles
+      pushQuad(e01, e00, r0, r1, 13, 0.94);
+      pushQuad(e10, e11, r1, r0, 13, 0.88);
+      pushTri(e00, e10, r0, 13, 0.90);
+      pushTri(e11, e01, r1, 13, 0.91);
+    } else {
+      // Gable roof + masonry gable end triangles
+      pushQuad(e01, e00, r0, r1, 13, 0.94);
+      pushQuad(e10, e11, r1, r0, 13, 0.88);
+      const g00 = toWorld(x0, yEave, z0), g10 = toWorld(x1, yEave, z0), gr0 = toWorld(midX, yPeak - 0.08, z0);
+      const g01 = toWorld(x0, yEave, z1), g11 = toWorld(x1, yEave, z1), gr1 = toWorld(midX, yPeak - 0.08, z1);
+      pushTri(g00, g10, gr0, wallKind, 0.84);
+      pushTri(g11, g01, gr1, wallKind, 0.84);
+    }
+  };
+
   for (const inst of portPlacement.instances) {
     const hw = inst.width * 0.5;
     const hl = inst.length * 0.5;
-    const y0 = inst.y - inst.foundationDepth;
-    const y1 = inst.y + inst.height;
-    const y2 = y1 + (inst.roofPitch ?? 0);
+    const yBase = inst.y - inst.foundationDepth;
+    const yGround = inst.y;
+    const yTop = inst.y + inst.height;
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
     const toWorld = (lx, ly, lz) => [
@@ -741,33 +799,269 @@ export function buildPortPrefabGeometry(portPlacement) {
       inst.z - lx * sinY + lz * cosY,
     ];
 
-    const p000 = toWorld(-hw, y0, -hl);
-    const p100 = toWorld(hw, y0, -hl);
-    const p101 = toWorld(hw, y0, hl);
-    const p001 = toWorld(-hw, y0, hl);
-
-    const p010 = toWorld(-hw, y1, -hl);
-    const p110 = toWorld(hw, y1, -hl);
-    const p111 = toWorld(hw, y1, hl);
-    const p011 = toWorld(-hw, y1, hl);
-
-    // 4 exterior walls
-    pushQuad(p000, p100, p110, p010, inst.materialKind, 0.78);
-    pushQuad(p100, p101, p111, p110, inst.materialKind, 0.84);
-    pushQuad(p101, p001, p011, p111, inst.materialKind, 0.80);
-    pushQuad(p001, p000, p010, p011, inst.materialKind, 0.74);
-
-    if (inst.roofPitch > 0) {
-      const r0 = toWorld(0, y2, -hl);
-      const r1 = toWorld(0, y2, hl);
-      // Gable roof slopes + end gables
-      pushQuad(p011, p010, r0, r1, inst.materialKind + 1, 0.92);
-      pushQuad(p110, p111, r1, r0, inst.materialKind + 1, 0.88);
-      pushTri(p010, p110, r0, inst.materialKind, 0.82);
-      pushTri(p111, p011, r1, inst.materialKind, 0.82);
+    if (inst.prefabId === 'timber_mole_pier') {
+      // Open timber trestle pier: planked deck + side curbs + seabed pilings + cross-bracing + bollards
+      const deckBottom = yTop - 0.55;
+      emitBox(toWorld, -hw, hw, deckBottom, yTop, -hl, hl, 10, 0.86, true);
+      // Side wheel-guard curbs
+      emitBox(toWorld, -hw, -hw + 0.34, yTop, yTop + 0.28, -hl, hl, 10, 0.78);
+      emitBox(toWorld, hw - 0.34, hw, yTop, yTop + 0.28, -hl, hl, 10, 0.78);
+      // Longitudinal stringer beams under deck
+      emitBox(toWorld, -hw + 0.55, -hw + 1.05, deckBottom - 0.55, deckBottom, -hl + 0.4, hl - 0.4, 10, 0.68, true);
+      emitBox(toWorld, hw - 1.05, hw - 0.55, deckBottom - 0.55, deckBottom, -hl + 0.4, hl - 0.4, 10, 0.68, true);
+      // Paired timber pilings every 5.2m + transverse cross-beam caps & mooring bollards
+      const bays = Math.max(4, Math.floor(inst.length / 5.2));
+      for (let b = 0; b <= bays; b++) {
+        const z = -hl + 1.2 + (b / bays) * (inst.length - 2.4);
+        const pw = 0.24;
+        emitBox(toWorld, -hw + 0.45 - pw, -hw + 0.45 + pw, yBase, yTop + 0.55, z - pw, z + pw, 10, 0.66);
+        emitBox(toWorld, hw - 0.45 - pw, hw - 0.45 + pw, yBase, yTop + 0.55, z - pw, z + pw, 10, 0.66);
+        // Transverse bent beam above water
+        emitBox(toWorld, -hw + 0.3, hw - 0.3, deckBottom - 0.95, deckBottom - 0.55, z - 0.18, z + 0.18, 10, 0.62, true);
+        if (b % 2 === 0) {
+          // Heavy mooring bollards along the deck edge
+          emitBox(toWorld, -hw + 0.55, -hw + 0.95, yTop + 0.28, yTop + 0.95, z - 0.20, z + 0.20, 14, 0.45);
+          emitBox(toWorld, hw - 0.95, hw - 0.55, yTop + 0.28, yTop + 0.95, z - 0.20, z + 0.20, 14, 0.45);
+        }
+      }
+      // Seaward pier-head stone plinth & iron cresset beacon tower
+      emitBox(toWorld, -1.1, 1.1, yTop, yTop + 1.6, -hl + 0.6, -hl + 2.8, 11, 0.88);
+      emitBox(toWorld, -0.22, 0.22, yTop + 1.6, yTop + 5.2, -hl + 1.48, -hl + 1.92, 10, 0.72);
+      emitBox(toWorld, -0.55, 0.55, yTop + 5.2, yTop + 5.9, -hl + 1.15, -hl + 2.25, 14, 0.55, true);
+    } else if (inst.prefabId === 'stone_sea_bastion') {
+      // 16th-century Spanish Stone Sea Bastion (Baluarte):
+      // Battered coral-limestone scarp walls + cordon moulding + crenellated parapet & embrasures + 4 corner garitas + central keep
+      const yCordon = yTop - 1.6;
+      emitBox(toWorld, -hw - 1.5, hw + 1.5, yBase, yCordon, -hl - 1.5, hl + 1.5, 11, 0.84, false, 1.5);
+      // Projecting stone cordon course
+      emitBox(toWorld, -hw - 0.35, hw + 0.35, yCordon, yCordon + 0.42, -hl - 0.35, hl + 0.35, 11, 0.92, true);
+      // Terreplein gun deck
+      emitBox(toWorld, -hw, hw, yCordon + 0.42, yTop - 0.9, -hl, hl, 11, 0.80);
+      // Perimeter crenellated parapet walls with cannon embrasures
+      const wallT = 1.65;
+      const merlonY = yTop + 0.85;
+      for (const sideZ of [-1, 1]) {
+        const zOut = sideZ < 0 ? -hl : hl - wallT;
+        const zIn = sideZ < 0 ? -hl + wallT : hl;
+        emitBox(toWorld, -hw, hw, yTop - 0.9, yTop, zOut, zIn, 11, 0.86);
+        for (let m = -2; m <= 2; m++) {
+          const mx = m * 5.2;
+          emitBox(toWorld, mx - 1.65, mx + 1.65, yTop, merlonY, zOut, zIn, 11, 0.90);
+          if (m < 2) {
+            // Dark cannon embrasure throat & gun barrel
+            const ex = mx + 2.6;
+            emitBox(toWorld, ex - 0.55, ex + 0.55, yTop - 0.25, yTop + 0.35, zOut - 0.08, zIn + 0.08, 14, 0.35);
+            emitBox(toWorld, ex - 0.18, ex + 0.18, yTop + 0.05, yTop + 0.42, zOut - 0.85, zIn + 0.2, 14, 0.30, true);
+          }
+        }
+      }
+      for (const sideX of [-1, 1]) {
+        const xOut = sideX < 0 ? -hw : hw - wallT;
+        const xIn = sideX < 0 ? -hw + wallT : hw;
+        emitBox(toWorld, xOut, xIn, yTop - 0.9, yTop, -hl + wallT, hl - wallT, 11, 0.84);
+        for (let m = -2; m <= 2; m++) {
+          const mz = m * 5.8;
+          emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - 1.8, mz + 1.8, 11, 0.88);
+        }
+      }
+      // 4 Corner projecting bartizan sentry turrets (garitas)
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const gx = sx * (hw + 0.2), gz = sz * (hl + 0.2);
+          emitBox(toWorld, gx - 1.25, gx + 1.25, yCordon - 0.8, yCordon + 0.42, gz - 1.25, gz + 1.25, 11, 0.78, true, -0.35);
+          emitBox(toWorld, gx - 1.35, gx + 1.35, yCordon + 0.42, merlonY + 1.6, gz - 1.35, gz + 1.35, 11, 0.90);
+          emitBox(toWorld, gx - 1.45, gx + 1.45, merlonY + 1.6, merlonY + 2.8, gz - 1.45, gz + 1.45, 11, 0.95, false, 1.15);
+        }
+      }
+      // Interior command keep / powder magazine with limewashed walls & hipped terracotta roof
+      const kw = hw * 0.44, kl = hl * 0.46, yKeep = merlonY + 4.2;
+      emitBox(toWorld, -kw - 0.3, kw + 0.3, yTop - 0.9, yTop + 0.6, -kl - 0.3, kl + 0.3, 11, 0.82);
+      emitBox(toWorld, -kw, kw, yTop + 0.6, yKeep, -kl, kl, 12, 0.90);
+      emitRoof(toWorld, -kw, kw, yKeep, yKeep + 2.6, -kl, kl, 0.65, 0.28, 12);
+    } else if (inst.prefabId === 'casa_de_contratacion') {
+      // Royal Customhouse (Casa de la Contratación):
+      // Ashlar stone plinth + ground-floor 5-bay waterfront arcade + 2nd-story cantilevered timber balcony + hipped tile roof
+      const yPlinth = yGround + 0.85;
+      emitBox(toWorld, -hw - 0.8, hw + 0.8, yBase, yPlinth, -hl - 0.8, hl + 0.8, 11, 0.82);
+      // Main two-story stucco block recessed behind front loggia
+      const loggiaD = 2.6;
+      emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl + loggiaD, hl, 12, 0.88);
+      // Upper floor extending over the waterfront loggia
+      const yMid = yPlinth + (yTop - yPlinth) * 0.48;
+      emitBox(toWorld, -hw, hw, yMid, yTop, -hl, -hl + loggiaD, 12, 0.90, true);
+      // Corner ashlar stone quoins
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const qx = sx * hw, qz = sz * hl;
+          emitBox(toWorld, qx - (sx > 0 ? 0.65 : 0.08), qx + (sx < 0 ? 0.65 : 0.08), yPlinth, yTop, qz - (sz > 0 ? 0.65 : 0.08), qz + (sz < 0 ? 0.65 : 0.08), 11, 0.84);
+        }
+      }
+      // Ground-floor waterfront colonnade pillars & dark recessed arcade bays
+      const cols = 6;
+      for (let c = 0; c < cols; c++) {
+        const lz = -hl + 0.6 + (c / (cols - 1)) * (inst.length - 1.2);
+        emitBox(toWorld, -hw - 0.05, -hw + 0.65, yPlinth, yMid, lz - 0.38, lz + 0.38, 11, 0.86);
+        emitBox(toWorld, hw - 0.65, hw + 0.05, yPlinth, yMid, lz - 0.38, lz + 0.38, 11, 0.86);
+        if (c < cols - 1) {
+          const bz = lz + (inst.length - 1.2) / (2 * (cols - 1));
+          // Deep shadowed arcade opening + upper shuttered window
+          emitBox(toWorld, -hw + 0.5, -hw + loggiaD + 0.06, yPlinth + 0.1, yMid - 0.35, bz - 1.1, bz + 1.1, 14, 0.32);
+          emitBox(toWorld, -hw - 0.06, -hw + 0.12, yMid + 0.75, yTop - 0.75, bz - 0.68, bz + 0.68, 14, 0.38);
+          emitBox(toWorld, hw - 0.12, hw + 0.06, yMid + 0.75, yTop - 0.75, bz - 0.68, bz + 0.68, 14, 0.38);
+        }
+      }
+      // Cantilevered 2nd-story timber balcony along both long facades
+      emitBox(toWorld, -hw - 1.05, -hw, yMid - 0.22, yMid + 0.95, -hl + 0.8, hl - 0.8, 10, 0.76, true);
+      emitBox(toWorld, hw, hw + 1.05, yMid - 0.22, yMid + 0.95, -hl + 0.8, hl - 0.8, 10, 0.76, true);
+      emitRoof(toWorld, -hw - 0.2, hw + 0.2, yTop, yTop + (inst.roofPitch ?? 2.8), -hl - 0.2, hl + 0.2, 0.85, 0.22, 12);
+    } else if (inst.prefabId === 'mission_chapel') {
+      // 16th-century Spanish Colonial Iglesia & Bell Tower (Campanario)
+      const yPlinth = yGround + 0.75;
+      emitBox(toWorld, -hw - 0.7, hw + 0.7, yBase, yPlinth, -hl - 0.7, hl + 0.7, 11, 0.82);
+      // Nave walls
+      emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 12, 0.90);
+      // 5 pairs of exterior masonry buttresses along the nave walls
+      for (let b = 0; b < 5; b++) {
+        const bz = -hl + 1.2 + (b / 4) * (inst.length - 2.4);
+        emitBox(toWorld, -hw - 0.65, -hw, yPlinth, yTop - 0.6, bz - 0.42, bz + 0.42, 11, 0.84);
+        emitBox(toWorld, hw, hw + 0.65, yPlinth, yTop - 0.6, bz - 0.42, bz + 0.42, 11, 0.84);
+        if (b < 4) {
+          const wz = bz + (inst.length - 2.4) / 8;
+          emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 2.8, yTop - 1.4, wz - 0.55, wz + 0.55, 14, 0.36);
+        }
+      }
+      // West facade stone portal surround, recessed doorway & choir window
+      emitBox(toWorld, -2.4, 2.4, yPlinth, yPlinth + 5.8, -hl - 0.45, -hl, 11, 0.88);
+      emitBox(toWorld, -1.35, 1.35, yPlinth, yPlinth + 4.4, -hl - 0.52, -hl + 0.1, 14, 0.30);
+      emitBox(toWorld, -1.1, 1.1, yPlinth + 6.5, yTop - 1.1, -hl - 0.12, -hl + 0.1, 14, 0.35);
+      emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 3.4), -hl, hl, 0.75, 0.0, 12);
+      // 3-Stage Spanish Colonial Bell Tower (Campanario) on the front-right corner
+      const tx0 = hw - 2.2, tx1 = hw + 2.6, tz0 = -hl - 1.2, tz1 = -hl + 3.6;
+      const yT1 = yTop + 2.8, yT2 = yT1 + 3.8, yT3 = yT2 + 3.2;
+      emitBox(toWorld, tx0, tx1, yPlinth, yT1, tz0, tz1, 12, 0.92);
+      emitBox(toWorld, tx0 - 0.2, tx1 + 0.2, yT1 - 0.3, yT1, tz0 - 0.2, tz1 + 0.2, 11, 0.88, true);
+      emitBox(toWorld, tx0 + 0.35, tx1 - 0.35, yT1, yT2, tz0 + 0.35, tz1 - 0.35, 12, 0.94);
+      // Belfry arched openings on all 4 sides
+      const tmx = (tx0 + tx1) * 0.5, tmz = (tz0 + tz1) * 0.5;
+      emitBox(toWorld, tx0 + 0.28, tx1 - 0.28, yT1 + 0.65, yT2 - 0.55, tmz - 0.65, tmz + 0.65, 14, 0.32);
+      emitBox(toWorld, tmx - 0.65, tmx + 0.65, yT1 + 0.65, yT2 - 0.55, tz0 + 0.28, tz1 - 0.28, 14, 0.32);
+      emitBox(toWorld, tx0 + 0.15, tx1 - 0.15, yT2 - 0.28, yT2, tz0 + 0.15, tz1 - 0.15, 11, 0.90, true);
+      // Pyramidal terracotta bell-tower roof
+      emitBox(toWorld, tx0 + 0.45, tx1 - 0.45, yT2, yT3, tz0 + 0.45, tz1 - 0.45, 13, 0.95, false, 1.75);
+    } else if (inst.prefabId === 'careening_shed') {
+      // Open-sided timber boatyard pavilion on the beach + careening capstan
+      const yApron = yGround + 0.45;
+      emitBox(toWorld, -hw - 0.6, hw + 0.6, yBase, yApron, -hl - 0.6, hl + 0.6, 10, 0.74);
+      const cols = 4;
+      for (let c = 0; c < cols; c++) {
+        const cz = -hl + 1.0 + (c / (cols - 1)) * (inst.length - 2.0);
+        emitBox(toWorld, -hw + 0.35, -hw + 0.85, yApron, yTop, cz - 0.25, cz + 0.25, 10, 0.78);
+        emitBox(toWorld, hw - 0.85, hw - 0.35, yApron, yTop, cz - 0.25, cz + 0.25, 10, 0.78);
+        emitBox(toWorld, -hw + 0.2, hw - 0.2, yTop - 0.45, yTop, cz - 0.22, cz + 0.22, 10, 0.72, true);
+      }
+      // Pitch-boiling stone hearth & chimney at one end
+      emitBox(toWorld, -1.8, 1.8, yApron, yTop + 2.4, hl - 2.2, hl - 0.2, 11, 0.80, false, 0.45);
+      emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 2.1), -hl, hl, 0.75, 0.12, 10);
     } else {
-      // Flat deck / parapet top
-      pushQuad(p010, p110, p111, p011, inst.materialKind, 0.90);
+      // Royal Warehouse (Almacén Real) & Colonial Courtyard Town Blocks:
+      // Multi-wing masonry + stone plinth + buttresses/quoins + recessed doors/windows + overhanging terracotta roofs
+      const yPlinth = yGround + 0.68;
+      emitBox(toWorld, -hw - 0.6, hw + 0.6, yBase, yPlinth, -hl - 0.6, hl + 0.6, 11, 0.80);
+      if (inst.prefabId === 'colonial_town_block') {
+        // Two-wing L-shaped courtyard (patio) house + perimeter courtyard wall
+        const mainW = hw * 1.15;
+        emitBox(toWorld, -hw, -hw + mainW, yPlinth, yTop + 1.1, -hl, hl, 12, 0.88);
+        emitRoof(toWorld, -hw, -hw + mainW, yTop + 1.1, yTop + 1.1 + (inst.roofPitch ?? 2.1), -hl, hl, 0.65, 0.22, 12);
+        // Secondary cross-wing
+        const wingL = hl * 0.95;
+        emitBox(toWorld, -hw + mainW * 0.7, hw, yPlinth, yTop - 0.4, -hl, -hl + wingL, 12, 0.85);
+        emitRoof(toWorld, -hw + mainW * 0.7, hw, yTop - 0.4, yTop - 0.4 + 1.8, -hl, -hl + wingL, 0.60, 0.25, 12);
+        // Courtyard enclosure wall with limewashed coping & terracotta cap
+        emitBox(toWorld, hw - 1.1, hw, yPlinth, yPlinth + 3.2, -hl + wingL, hl, 12, 0.82);
+        emitBox(toWorld, -hw + mainW, hw, yPlinth, yPlinth + 3.2, hl - 1.1, hl, 12, 0.82);
+        // Street windows, doors & timber balcony on main wing
+        for (let w = -2; w <= 2; w++) {
+          const wz = w * (hl * 0.36);
+          emitBox(toWorld, -hw - 0.08, -hw + 0.15, yPlinth + 0.8, yPlinth + 2.5, wz - 0.55, wz + 0.55, 14, 0.35);
+          emitBox(toWorld, -hw - 0.08, -hw + 0.15, yPlinth + 3.8, yTop + 0.3, wz - 0.55, wz + 0.55, 14, 0.35);
+        }
+        emitBox(toWorld, -hw - 0.85, -hw, yPlinth + 3.2, yPlinth + 4.1, -hl * 0.65, hl * 0.65, 10, 0.74, true);
+      } else {
+        // Royal Warehouse (Almacén Real): buttressed masonry hall with 4 large arched cargo portals
+        emitBox(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 12, 0.87);
+        for (let b = 0; b < 5; b++) {
+          const bz = -hl + 1.0 + (b / 4) * (inst.length - 2.0);
+          emitBox(toWorld, -hw - 0.45, -hw, yPlinth, yTop - 0.3, bz - 0.36, bz + 0.36, 11, 0.82);
+          emitBox(toWorld, hw, hw + 0.45, yPlinth, yTop - 0.3, bz - 0.36, bz + 0.36, 11, 0.82);
+          if (b < 4) {
+            const pz = bz + (inst.length - 2.0) / 8;
+            // Cargo portal & timber lintel
+            emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 0.1, yPlinth + 3.4, pz - 1.05, pz + 1.05, 14, 0.32);
+            emitBox(toWorld, -hw - 0.18, hw + 0.18, yPlinth + 3.4, yPlinth + 3.85, pz - 1.25, pz + 1.25, 10, 0.72, true);
+            // Clerestory window
+            emitBox(toWorld, -hw - 0.08, hw + 0.08, yPlinth + 4.6, yTop - 0.9, pz - 0.65, pz + 0.65, 14, 0.38);
+          }
+        }
+        emitRoof(toWorld, -hw, hw, yTop, yTop + (inst.roofPitch ?? 2.4), -hl, hl, 0.75, 0.15, 12);
+      }
+    }
+  }
+
+  // Optional 3D Corner-model Coconut Palms (Cocos nucifera: curved ringed trunk + 12 arching pinnate fronds)
+  // along the sandy foreshore berm so tropical beaches have authentic silhouette palms
+  if (palms instanceof Float32Array && palms.length >= 8) {
+    const maxPalms = Math.min(palms.length / 8, 96);
+    for (let idx = 0; idx < maxPalms; idx++) {
+      const base = idx * 8;
+      const px = palms[base], py = palms[base + 1], pz = palms[base + 2];
+      const plumeR = palms[base + 3], ht = palms[base + 4], shape = palms[base + 5];
+      const leanAngle = shape * Math.PI * 2;
+      const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
+      const leanMag = 1.6 + (shape * 7 % 1) * 1.8;
+      const segs = 5;
+      let prevX = px, prevY = py - 0.35, prevZ = pz, prevR = 0.42;
+      for (let s = 1; s <= segs; s++) {
+        const t = s / segs;
+        const curY = py + t * ht;
+        const curve = t * t * leanMag;
+        const curX = px + leanDirX * curve;
+        const curZ = pz + leanDirZ * curve;
+        const curR = 0.38 * (1 - 0.58 * t);
+        // 4-sided trunk prism segment (kind = 3.0 bark)
+        for (let k = 0; k < 4; k++) {
+          const a0 = (k * Math.PI) / 2, a1 = ((k + 1) * Math.PI) / 2;
+          const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+          pushQuad(
+            [prevX + c0 * prevR, prevY, prevZ + s0 * prevR],
+            [prevX + c1 * prevR, prevY, prevZ + s1 * prevR],
+            [curX + c1 * curR, curY, curZ + s1 * curR],
+            [curX + c0 * curR, curY, curZ + s0 * curR],
+            3,
+            0.45 + 0.45 * t
+          );
+        }
+        prevX = curX; prevY = curY; prevZ = curZ; prevR = curR;
+      }
+      // 12 arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
+      const frondCount = 12;
+      for (let f = 0; f < frondCount; f++) {
+        const tier = f < 6 ? 0 : 1;
+        const az = (f / frondCount) * Math.PI * 2 + shape * 3.1;
+        const fx = Math.cos(az), fz = Math.sin(az);
+        const tx = -fz, tz = fx;
+        const len = plumeR * (tier === 0 ? 1.08 : 0.88);
+        const midR = len * 0.55;
+        const midY = prevY + (tier === 0 ? 0.85 : 1.55);
+        const tipY = prevY - (tier === 0 ? 1.35 : 0.35);
+        const w = 0.58;
+        const rootP = [prevX, prevY + 0.15, prevZ];
+        const midLeft = [prevX + fx * midR - tx * w, midY, prevZ + fz * midR - tz * w];
+        const midRight = [prevX + fx * midR + tx * w, midY, prevZ + fz * midR + tz * w];
+        const tipP = [prevX + fx * len, tipY, prevZ + fz * len];
+        const exposure = tier === 0 ? 0.72 : 0.92;
+        pushTri(rootP, midRight, midLeft, 4, exposure);
+        pushTri(midLeft, midRight, tipP, 4, exposure);
+      }
     }
   }
 
@@ -827,6 +1121,7 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
   const region = resolveGlobalCoastalRegion(regionSpec);
   const size = region.albedoSize;
   const span = region.span;
+  const seed = (region.vegetationSeed ^ 0x9e3779b9) >>> 0;
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement);
   const rgba = new Uint8Array(size * size * 4);
@@ -834,48 +1129,93 @@ export function synthesizeCoastalAlbedo(regionSpec, heights, beaches = null, por
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
     const z = region.z + (v - 0.5) * span;
-    const bj = Math.min(region.biomeSize - 1, Math.floor(v * region.biomeSize));
     for (let i = 0; i < size; i++) {
       const u = (i + 0.5) / size;
       const x = region.x + (u - 0.5) * span;
-      const bi = Math.min(region.biomeSize - 1, Math.floor(u * region.biomeSize));
-      const bIdx = bj * region.biomeSize + bi;
       const h = terrainSample(heights, x, z, region);
       const sx = (terrainSample(heights, x + 8, z, region) - terrainSample(heights, x - 8, z, region)) / 16;
       const sz = (terrainSample(heights, x, z + 8, region) - terrainSample(heights, x, z - 8, region)) / 16;
       const slope = Math.hypot(sx, sz);
 
-      let r = 82, g = 104, b = 72;
-      if (h < 0) {
-        // Shallow shoal & seabed tint
-        const shallow = coastalSmoothstep(-25, 0, h);
-        r = Math.round(28 + shallow * 118);
-        g = Math.round(58 + shallow * 116);
-        b = Math.round(74 + shallow * 82);
-      } else if (beachData.swashMask[bIdx] > 90) {
-        // Wet intertidal sand
-        r = 166; g = 152; b = 124;
-      } else if (beachData.drySandMask[bIdx] > 90) {
-        // Warm dry coral/quartz beach sand
-        r = 218; g = 201; b = 165;
-      } else if (portPlacement && Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z) < portPlacement.clearRadius * 0.65) {
-        // Packed earth & limestone cobble colonial plaza
-        r = 168; g = 148; b = 122;
-      } else if (slope > 0.68) {
-        // Exposed coastal cliff / basalt / limestone rock
-        r = 118; g = 112; b = 104;
-      } else {
-        // Vegetated coastal plain & upland forest canopy
-        const veg = biomeMask[bIdx] / 255;
-        r = Math.round(124 - veg * 68);
-        g = Math.round(132 - veg * 38);
-        b = Math.round(92 - veg * 44);
+      const veg = vegetationProbability(biomeMask, region.biomeSize, u, v);
+      const sandNoise = (coastalFbm2D(u * 22 + 3.1, v * 22 - 1.7, seed, 3) - 0.5) * 2;
+      const fineGrain = (coastalValueNoise2D(u * 68, v * 68, seed ^ 0x55aa55aa) - 0.5) * 14;
+
+      // Base inland colour: continuous blend between dry coastal earth, lush forest canopy, and exposed cliff stone
+      const forestR = 118 - veg * 66 + sandNoise * 6;
+      const forestG = 128 - veg * 36 + sandNoise * 6;
+      const forestB = 86 - veg * 42 + sandNoise * 4;
+      const cliffWeight = coastalSmoothstep(0.42, 0.78, slope);
+      const rockR = 114 + sandNoise * 10 + fineGrain * 0.6;
+      const rockG = 108 + sandNoise * 9 + fineGrain * 0.5;
+      const rockB = 98 + sandNoise * 8 + fineGrain * 0.5;
+
+      let r = forestR * (1 - cliffWeight) + rockR * cliffWeight;
+      let g = forestG * (1 - cliffWeight) + rockG * cliffWeight;
+      let b = forestB * (1 - cliffWeight) + rockB * cliffWeight;
+
+      // Colonial waterfront plaza & town cobble apron (smooth radial blend, no hard ring)
+      if (portPlacement && h > 0.2) {
+        const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
+        const plazaWeight =
+          coastalSmoothstep(portPlacement.clearRadius * 0.78, portPlacement.clearRadius * 0.32, distPort) *
+          coastalSmoothstep(0.3, 1.8, h) *
+          (1 - cliffWeight);
+        if (plazaWeight > 0) {
+          const cobbleR = 166 + fineGrain * 0.8;
+          const cobbleG = 148 + fineGrain * 0.7;
+          const cobbleB = 122 + fineGrain * 0.6;
+          r = r * (1 - plazaWeight) + cobbleR * plazaWeight;
+          g = g * (1 - plazaWeight) + cobbleG * plazaWeight;
+          b = b * (1 - plazaWeight) + cobbleB * plazaWeight;
+        }
+      }
+
+      // Continuous dry coral/quartz beach berm & backshore dune sand (no blocky grid threshold)
+      const gentleSlope = coastalSmoothstep(0.28, 0.09, slope);
+      const bermTop = 5.4 + sandNoise * 1.1;
+      const drySandWeight =
+        coastalSmoothstep(-0.3, 0.7, h) *
+        coastalSmoothstep(bermTop, 1.4, h) *
+        gentleSlope;
+      if (drySandWeight > 0) {
+        const dryR = 214 + sandNoise * 8 + fineGrain * 0.7;
+        const dryG = 196 + sandNoise * 7 + fineGrain * 0.6;
+        const dryB = 158 + sandNoise * 6 + fineGrain * 0.5;
+        r = r * (1 - drySandWeight) + dryR * drySandWeight;
+        g = g * (1 - drySandWeight) + dryG * drySandWeight;
+        b = b * (1 - drySandWeight) + dryB * drySandWeight;
+      }
+
+      // Continuous wet intertidal swash sand & wrack line around the waterline [-1.1m, +1.3m]
+      const swashWeight =
+        Math.max(0, 1 - Math.abs(h - 0.12 - sandNoise * 0.18) / 1.25) *
+        coastalSmoothstep(0.26, 0.08, slope);
+      if (swashWeight > 0) {
+        const wetR = 148 + fineGrain * 0.5;
+        const wetG = 134 + fineGrain * 0.45;
+        const wetB = 106 + fineGrain * 0.4;
+        r = r * (1 - swashWeight) + wetR * swashWeight;
+        g = g * (1 - swashWeight) + wetG * swashWeight;
+        b = b * (1 - swashWeight) + wetB * swashWeight;
+      }
+
+      // Submerged coral sand shallows & offshore seabed transition (h < 0.15m)
+      if (h < 0.15) {
+        const subWeight = coastalSmoothstep(0.15, -0.45, h);
+        const shallow = coastalSmoothstep(-26, -0.6, h);
+        const shoalR = 26 + shallow * 116 + sandNoise * 5;
+        const shoalG = 56 + shallow * 112 + sandNoise * 5;
+        const shoalB = 72 + shallow * 76 + sandNoise * 4;
+        r = r * (1 - subWeight) + shoalR * subWeight;
+        g = g * (1 - subWeight) + shoalG * subWeight;
+        b = b * (1 - subWeight) + shoalB * subWeight;
       }
 
       const outIdx = (j * size + i) * 4;
-      rgba[outIdx] = r;
-      rgba[outIdx + 1] = g;
-      rgba[outIdx + 2] = b;
+      rgba[outIdx] = Math.max(0, Math.min(255, Math.round(r)));
+      rgba[outIdx + 1] = Math.max(0, Math.min(255, Math.round(g)));
+      rgba[outIdx + 2] = Math.max(0, Math.min(255, Math.round(b)));
       rgba[outIdx + 3] = 255;
     }
   }
@@ -1032,7 +1372,14 @@ export function buildCoastalMesh(regionSpec, heights) {
       const dx = (heights[j * n + Math.max(0, i - 1)] - heights[j * n + Math.min(n - 1, i + 1)]) / (2 * step);
       const dz = (heights[Math.max(0, j - 1) * n + i] - heights[Math.min(n - 1, j + 1) * n + i]) / (2 * step);
       const length = Math.hypot(dx, 1, dz) || 1;
-      vertices.set([x, h, z, dx / length, 1 / length, dz / length, 0, 0], k * 8);
+      const slope = Math.hypot(dx, dz);
+      // Encode beach sand weight in kind.y (with kind.x = 0) so the terrain shader
+      // suppresses jagged mountain fissure/block noise across sandy beaches.
+      const sandWeight =
+        coastalSmoothstep(-2.0, 0.2, h) *
+        coastalSmoothstep(6.8, 1.6, h) *
+        coastalSmoothstep(0.28, 0.09, slope);
+      vertices.set([x, h, z, dx / length, 1 / length, dz / length, 0, sandWeight], k * 8);
       if (i < n - 1 && j < n - 1 && Math.max(h, heights[k + 1], heights[k + n], heights[k + n + 1]) > -0.5) {
         indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
       }
@@ -1085,10 +1432,10 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena') {
   const mesh = buildCoastalMesh(region, heights);
   const beaches = synthesizeCoastalBeaches(region, heights);
   const port = placeCoastalPort(region, heights);
-  const portGeometry = buildPortPrefabGeometry(port);
   const biome = synthesizeCoastalBiome(region, heights, beaches, port);
   const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome);
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port);
+  const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = createCoastalViews(region, heights, port);
 
   return {
@@ -1102,5 +1449,217 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena') {
     albedo,
     vegetation,
     views,
+    elevationSource: 'procedural-geomorphology',
   };
+}
+
+// Fetch real global SRTM + ETOPO1 elevation tiles from AWS Open Data Registry's
+// Mapzen/Tilezen Terrarium service (https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png,
+// CORS-enabled, no API key required) around (region.latitude, region.longitude).
+// Blends real-world coastal topography with navigable nearshore bathymetry and
+// falls back seamlessly to the procedural pack if offline or over open ocean.
+export async function upgradeProceduralPackWithRealDEM(pack, { fetchTile = null, zoom = 12 } = {}) {
+  const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
+  if (!pack?.region || !effectiveFetch) return pack;
+  const { region } = pack;
+  const n = region.size;
+  const span = region.span;
+  const cosLat = Math.max(0.1, Math.cos(region.latitude * COASTAL_DEG_TO_RAD));
+  const halfLat = (span * 0.55) / 111195;
+  const halfLon = (span * 0.55) / (111195 * cosLat);
+  const numTiles = 2 ** zoom;
+  const lonToTileX = (lon) => Math.floor(((lon + 180) / 360) * numTiles);
+  const latToTileY = (lat) => {
+    const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+    return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * numTiles);
+  };
+  const tx0 = lonToTileX(region.longitude - halfLon);
+  const tx1 = lonToTileX(region.longitude + halfLon);
+  const ty0 = latToTileY(region.latitude + halfLat);
+  const ty1 = latToTileY(region.latitude - halfLat);
+  const cols = tx1 - tx0 + 1;
+  const rows = ty1 - ty0 + 1;
+  if (cols < 1 || cols > 4 || rows < 1 || rows > 4) return pack;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3200);
+    const w = cols * 256;
+    const h = rows * 256;
+    const pixels = new Uint8ClampedArray(w * h * 4);
+    const tilePromises = [];
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
+        const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${wrappedX}/${ty}.png`;
+        tilePromises.push(
+          Promise.resolve(
+            fetchTile ? fetchTile(url, { tx: wrappedX, ty, zoom, signal: controller.signal }) : fetch(url, { signal: controller.signal, mode: 'cors' })
+          ).then(async (res) => {
+            if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) {
+              return { tx, ty, rgba: res };
+            }
+            if (!res?.ok) throw new Error(`Terrarium HTTP ${res?.status}`);
+            const bmp = await createImageBitmap(await res.blob(), {
+              premultiplyAlpha: 'none',
+              colorSpaceConversion: 'none',
+            });
+            return { tx, ty, bmp };
+          })
+        );
+      }
+    }
+    const loaded = await Promise.all(tilePromises);
+    clearTimeout(timer);
+
+    if (loaded.every((t) => t.rgba)) {
+      for (const { tx, ty, rgba } of loaded) {
+        const ox = (tx - tx0) * 256;
+        const oy = (ty - ty0) * 256;
+        for (let row = 0; row < 256; row++) {
+          const srcStart = row * 256 * 4;
+          const dstStart = ((oy + row) * w + ox) * 4;
+          pixels.set(rgba.subarray(srcStart, srcStart + 256 * 4), dstStart);
+        }
+      }
+    } else {
+      const canvas =
+        typeof OffscreenCanvas === 'function'
+          ? new OffscreenCanvas(w, h)
+          : Object.assign(document.createElement('canvas'), { width: w, height: h });
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      for (const { tx, ty, bmp } of loaded) {
+        ctx.drawImage(bmp, (tx - tx0) * 256, (ty - ty0) * 256);
+        bmp.close();
+      }
+      pixels.set(ctx.getImageData(0, 0, w, h).data);
+    }
+    const decodePx = (px, py) => {
+      const ix = Math.max(0, Math.min(w - 1, px));
+      const iy = Math.max(0, Math.min(h - 1, py));
+      const k = (iy * w + ix) * 4;
+      return pixels[k] * 256 + pixels[k + 1] + pixels[k + 2] / 256 - 32768;
+    };
+    const sampleTerrarium = (lat, lon) => {
+      const fx = ((lon + 180) / 360) * numTiles - tx0;
+      const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+      const fy = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * numTiles - ty0;
+      const px = fx * 256 - 0.5;
+      const py = fy * 256 - 0.5;
+      const x0 = Math.floor(px), y0 = Math.floor(py);
+      const ax = px - x0, ay = py - y0;
+      const h00 = decodePx(x0, y0), h10 = decodePx(x0 + 1, y0);
+      const h01 = decodePx(x0, y0 + 1), h11 = decodePx(x0 + 1, y0 + 1);
+      return (h00 * (1 - ax) + h10 * ax) * (1 - ay) + (h01 * (1 - ax) + h11 * ax) * ay;
+    };
+
+    const rawDem = new Float32Array(n * n);
+    let landCount = 0;
+    let maxDem = -Infinity;
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      const lat = region.latitude - (z - region.z) / 111195;
+      for (let i = 0; i < n; i++) {
+        const x = region.x + (i / (n - 1) - 0.5) * span;
+        const lon = region.longitude + (x - region.x) / (111195 * cosLat);
+        const elev = sampleTerrarium(lat, lon);
+        rawDem[j * n + i] = elev;
+        if (elev > 1.0) landCount++;
+        if (elev > maxDem) maxDem = elev;
+      }
+    }
+    const landRatio = landCount / (n * n);
+    // Require both real land and real water in the 8.2km coastal window
+    if (landRatio < 0.06 || landRatio > 0.88 || maxDem < 6) return pack;
+
+    // 2-pass Chamfer distance transform (in metres) from shoreline (rawDem = 1.0m)
+    const step = span / (n - 1);
+    const distLand = new Float32Array(n * n).fill(1e6);
+    const distWater = new Float32Array(n * n).fill(1e6);
+    for (let k = 0; k < n * n; k++) {
+      if (rawDem[k] > 1.0) distLand[k] = 0;
+      else distWater[k] = 0;
+    }
+    const sweepDist = (arr) => {
+      const diag = step * Math.SQRT2;
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          const k = j * n + i;
+          let d = arr[k];
+          if (i > 0) d = Math.min(d, arr[k - 1] + step);
+          if (j > 0) d = Math.min(d, arr[k - n] + step);
+          if (i > 0 && j > 0) d = Math.min(d, arr[k - n - 1] + diag);
+          if (i < n - 1 && j > 0) d = Math.min(d, arr[k - n + 1] + diag);
+          arr[k] = d;
+        }
+      }
+      for (let j = n - 1; j >= 0; j--) {
+        for (let i = n - 1; i >= 0; i--) {
+          const k = j * n + i;
+          let d = arr[k];
+          if (i < n - 1) d = Math.min(d, arr[k + 1] + step);
+          if (j < n - 1) d = Math.min(d, arr[k + n] + step);
+          if (i < n - 1 && j < n - 1) d = Math.min(d, arr[k + n + 1] + diag);
+          if (i > 0 && j < n - 1) d = Math.min(d, arr[k + n - 1] + diag);
+          arr[k] = d;
+        }
+      }
+    };
+    sweepDist(distLand);
+    sweepDist(distWater);
+
+    const heights = new Float32Array(n * n);
+    const seed = region.vegetationSeed >>> 0;
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const k = j * n + i;
+        const x = region.x + (i / (n - 1) - 0.5) * span;
+        const { along } = coastalFrame(region, x, z);
+        const demH = rawDem[k];
+        const micro = (coastalFbm2D((x / span) * 14, (z / span) * 14, seed, 3) - 0.5) * 3.2;
+        if (demH > 1.0) {
+          const inlandM = distWater[k];
+          const beachBlend = coastalSmoothstep(0, 75, inlandM);
+          const foreshore = Math.min(inlandM * 0.042, 3.2);
+          heights[k] = Math.min(895, foreshore * (1 - beachBlend) + (demH + micro * beachBlend) * beachBlend);
+        } else {
+          const offshoreM = distLand[k];
+          const inChannel = Math.exp(-(along * along) / (2 * 320 * 320));
+          const shelfDepth = -(offshoreM * 0.032 + Math.max(0, offshoreM - 160) * 0.048);
+          const channelDepth = -Math.min(24, 11.5 + offshoreM * 0.02) * inChannel * coastalSmoothstep(65, 240, offshoreM);
+          heights[k] = Math.max(-120, Math.min(demH < -2 ? demH : shelfDepth, shelfDepth, channelDepth));
+        }
+      }
+    }
+
+    const mesh = buildCoastalMesh(region, heights);
+    const beaches = synthesizeCoastalBeaches(region, heights);
+    const port = placeCoastalPort(region, heights);
+    const biome = synthesizeCoastalBiome(region, heights, beaches, port);
+    const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome);
+    const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port);
+    const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
+    const views = createCoastalViews(region, heights, port);
+
+    return Object.assign(pack, {
+      heights,
+      mesh,
+      beaches,
+      port,
+      portGeometry,
+      biome,
+      albedo,
+      vegetation,
+      views,
+      elevationSource: `aws-terrarium-srtm-z${zoom}`,
+      demSource: {
+        provider: 'aws-terrarium-srtm-etopo1',
+        zoom,
+        tiles: loaded.length,
+      },
+    });
+  } catch {
+    return pack;
+  }
 }

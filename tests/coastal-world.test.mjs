@@ -16,6 +16,7 @@ import {
   seedCoastalVegetation,
   buildCoastalMesh,
   generateProceduralCoastalPack,
+  upgradeProceduralPackWithRealDEM,
 } from '../js/coastal-world.js';
 import { FOREST_SPECIES, FOREST_ROOT_FLOATS } from '../js/forest-scenery.js';
 import {
@@ -231,4 +232,53 @@ test('generateProceduralCoastalPack produces complete landfall packs and safe ve
   assert.equal(url.searchParams.get('landfall'), 'coast');
   assert.equal(url.searchParams.get('lat'), '10.423');
   assert.equal(url.searchParams.get('lon'), '-75.548');
+});
+
+test('architectural port materials, 3D palm geometry, beach sand vertex weights, and Terrarium DEM upgrade', async () => {
+  const pack = generateProceduralCoastalPack({
+    ...SPANISH_MAIN_1550_REGIONS.cartagena,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 6000,
+  });
+
+  // Verify port geometry emits architectural materials (10=timber, 11=masonry, 12=stucco, 13=terracotta, 14=recess) + 3D palms (3=trunk, 4=fronds)
+  const kinds = new Set();
+  for (let i = 0; i < pack.portGeometry.vertices.length; i += 8) {
+    kinds.add(Math.round(pack.portGeometry.vertices[i + 6]));
+  }
+  for (const k of [3, 4, 10, 11, 12, 13, 14]) {
+    assert.ok(kinds.has(k), `port & palm geometry includes material kind ${k}`);
+  }
+
+  // Verify coastal mesh encodes beach sand weight in vertex.kind.y in [0, 1]
+  let sandyVertices = 0;
+  for (let i = 0; i < pack.mesh.vertices.length; i += 8) {
+    const sandW = pack.mesh.vertices[i + 7];
+    assert.ok(sandW >= 0 && sandW <= 1, 'sand weight bounded in [0, 1]');
+    if (sandW > 0.25) sandyVertices++;
+  }
+  assert.ok(sandyVertices > 10, 'coastal mesh marks foreshore vertices with smooth sand weights');
+
+  // Verify upgradeProceduralPackWithRealDEM upgrades pack from synthetic Terrarium tile
+  const fakeTile = new Uint8ClampedArray(256 * 256 * 4);
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) {
+      // Periodic coastal bands across the tile so any sub-window has ~50% land (+24m..+90m) and ~50% sea (-18m)
+      const band = (x + y) % 64;
+      const h = band >= 28 ? 24 + (band - 28) * 1.8 : -18;
+      const val = Math.round((h + 32768) * 256);
+      const idx = (y * 256 + x) * 4;
+      fakeTile[idx] = (val >> 16) & 255;
+      fakeTile[idx + 1] = (val >> 8) & 255;
+      fakeTile[idx + 2] = val & 255;
+      fakeTile[idx + 3] = 255;
+    }
+  }
+  const upgraded = await upgradeProceduralPackWithRealDEM(pack, {
+    fetchTile: async () => fakeTile,
+  });
+  assert.equal(upgraded.demSource.provider, 'aws-terrarium-srtm-etopo1');
+  assert.ok(upgraded.portGeometry.triangleCount > 200);
 });
