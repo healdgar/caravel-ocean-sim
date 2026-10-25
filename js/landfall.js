@@ -165,6 +165,13 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
       onUpgradeApplied?.();
     }
   };
+  const triggerRevert=()=>{
+    if(!discovery?.revertToBase)return;
+    const ship=typeof getPosition==='function'?getPosition():null;
+    if(discovery.revertToBase(ship)){
+      onUpgradeApplied?.();
+    }
+  };
 
   if(discovery&&discovery.enabled){
     discovery.subscribe(state=>{
@@ -230,16 +237,41 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
           };
         }
       }else if(state.status==='applied'){
+        const detail=`${pct}% modern coastal fill restored to 1550 tidal estuaries${palms?` · ${palms} coastal palms`:''}`;
         discoveryCard.hidden=false;
         discoveryCard.innerHTML=`<div class="discovery-eyebrow">1550 Historical Territory Active</div>
-          <p class="discovery-body">Sailing the reconstructed 1550 coastline, tidal mangroves, golden beaches and primary forest of ${region.name}.</p>`;
+          <p class="discovery-body">Sailing the reconstructed 1550 AI orthophoto + Depth Anything V2 + SRTM coastline of ${region.name} (${detail}).</p>
+          <div class="discovery-actions"><button type="button" class="discovery-revert-btn">Compare: Switch to 2026 Modern Baseline</button></div>`;
+        discoveryCard.querySelector('.discovery-revert-btn').onclick=triggerRevert;
         discoveryBanner.hidden=false;
-        discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">1550 Historical Territory Active</span>
-          <button type="button" class="icon-button" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-          <p class="discovery-title">Territory Upgraded — Congratulations, Captain!</p>
-          <p class="discovery-body">Now sailing the 1550 historical coastline, tidal mangrove estuaries, beaches and primary canopy of ${region.name}.</p>`;
-        discoveryBanner.querySelector('button').onclick=()=>{discoveryBanner.hidden=true;};
-        appliedHideTimer=setTimeout(()=>{discoveryBanner.hidden=true;},5500);
+        discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">${state.isCurated1550?'Curated 1550 Spanish Main Port':'1550 Historical Territory Active'}</span>
+          <button type="button" class="icon-button" id="discovery-close" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+          <p class="discovery-title">${state.isCurated1550?`1550 Territory Active — ${region.name}`:'Territory Upgraded — Congratulations, Captain!'}</p>
+          <p class="discovery-body">Sailing the reconstructed 1550 coastline, tidal mangrove estuaries, beaches and primary canopy (${detail}).</p>
+          <div class="discovery-actions">
+            <button type="button" id="landfall-upgrade-revert">Compare: 2026 Modern Baseline</button>
+            <button type="button" id="landfall-upgrade-dismiss">Dismiss</button>
+          </div>`;
+        discoveryBanner.querySelector('#landfall-upgrade-revert').onclick=triggerRevert;
+        discoveryBanner.querySelector('#landfall-upgrade-dismiss').onclick=discoveryBanner.querySelector('#discovery-close').onclick=()=>{discoveryBanner.hidden=true;};
+        appliedHideTimer=setTimeout(()=>{discoveryBanner.hidden=true;},8500);
+      }else if(state.status==='reverted'){
+        discoveryCard.hidden=false;
+        discoveryCard.innerHTML=`<div class="discovery-eyebrow">2026 Modern Baseline Active</div>
+          <p class="discovery-body">Viewing the uncarved 2026 modern satellite + SRTM baseline for ${region.name}.</p>
+          <div class="discovery-actions"><button type="button" class="discovery-swap-btn">Switch to 1550 Historical Territory</button></div>`;
+        discoveryCard.querySelector('.discovery-swap-btn').onclick=triggerSwap;
+        discoveryBanner.hidden=false;
+        discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">2026 Modern Baseline Active</span>
+          <button type="button" class="icon-button" id="discovery-close" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+          <p class="discovery-title">Viewing 2026 Modern Baseline — ${region.name}</p>
+          <p class="discovery-body">Modern reclaimed piers, landfill and 2026 coastline restored for comparison.</p>
+          <div class="discovery-actions">
+            <button type="button" class="discovery-swap-btn" id="landfall-upgrade-swap">Switch to 1550 Historical Territory</button>
+            <button type="button" id="landfall-upgrade-dismiss">Dismiss</button>
+          </div>`;
+        discoveryBanner.querySelector('#landfall-upgrade-swap').onclick=triggerSwap;
+        discoveryBanner.querySelector('#landfall-upgrade-dismiss').onclick=discoveryBanner.querySelector('#discovery-close').onclick=()=>{discoveryBanner.hidden=true;};
       }
     });
   }

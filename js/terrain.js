@@ -495,7 +495,18 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     mPass.end();device.queue.submit([mEnc.finish()]);
   }
 
-  function applyUpgradedPack(upgradedPack,boat=null){
+  const baseSnapshot=proceduralPack?{
+    region:activeRegion,
+    heights:new Float32Array(heights),
+    biome:new Uint8Array(biome),
+    albedo:proceduralPack.albedo?new Uint8Array(proceduralPack.albedo):null,
+    mesh:proceduralPack.mesh,
+    portGeometry:proceduralPack.portGeometry,
+    vegetation:proceduralPack.vegetation,
+    beaches:proceduralPack.beaches,
+  }:null;
+
+  function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
     heights.set(upgradedPack.heights);
     device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
@@ -538,8 +549,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         boat.x=safe.x;boat.z=safe.z;
       }
     }
-    discovery.applied=true;
-    discovery.status='applied';
+    discovery.applied=Boolean(isUpgraded);
+    discovery.status=isUpgraded?'applied':'reverted';
     notifyDiscovery();
     return true;
   }
@@ -549,6 +560,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     enabled:Boolean(proceduralPack),
     status:proceduralPack?'checking':'none',
     isFirstExplorer:false,
+    isCurated1550:Boolean(isKnownSpanishMain),
     applied:false,
     visits:1,
     message:'',
@@ -561,10 +573,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     swapToUpgraded(boat=null){
       if(!discovery.upgradedPack){
-        discovery.upgradedPack=build1550HistoricalTerritoryPack(proceduralPack);
+        discovery.upgradedPack=build1550HistoricalTerritoryPack( { ...proceduralPack, heights: baseSnapshot ? baseSnapshot.heights : proceduralPack.heights });
         discovery.stats=discovery.upgradedPack.territory1550;
       }
-      return applyUpgradedPack(discovery.upgradedPack,boat);
+      return applyUpgradedPack(discovery.upgradedPack,boat,true);
+    },
+    revertToBase(boat=null){
+      if(!baseSnapshot)return false;
+      return applyUpgradedPack(baseSnapshot,boat,false);
+    },
+    toggleUpgraded(boat=null){
+      return discovery.applied?discovery.revertToBase(boat):discovery.swapToUpgraded(boat);
     },
   };
   function notifyDiscovery(){
@@ -575,8 +594,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   if(proceduralPack){
     const forceFirstExplorer=search.get('discover')==='1';
+    const autoApplyCurated=isKnownSpanishMain&&!forceFirstExplorer&&search.get('era')!=='2026';
     setTimeout(()=>{
-      runLandfallDiscoveryPipeline(proceduralPack,{
+      runLandfallDiscoveryPipeline({ ...proceduralPack, heights: baseSnapshot.heights },{
         forceFirstExplorer,
         onFirstExplorer(info){
           discovery.status='charting';
@@ -591,12 +611,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         },
         onUpgradeReady(res){
           discovery.status='ready';
-          discovery.isFirstExplorer=true;
+          discovery.isFirstExplorer=!autoApplyCurated;
           discovery.visits=1;
           discovery.upgradedPack=res.upgradedPack;
           discovery.stats=res.stats;
           discovery.message=`Congratulations on your discovery! The 1550 historical territory for ${res.name} is ready.`;
-          notifyDiscovery();
+          if(autoApplyCurated){
+            discovery.swapToUpgraded();
+          }else{
+            notifyDiscovery();
+          }
         },
         onCachedReady(res){
           discovery.status='cached';
@@ -605,7 +629,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           discovery.upgradedPack=res.upgradedPack;
           discovery.stats=res.stats;
           discovery.message=`1550 historical territory charted · Mariner #${res.visits}`;
-          notifyDiscovery();
+          if(autoApplyCurated){
+            discovery.swapToUpgraded();
+          }else{
+            notifyDiscovery();
+          }
         },
       }).catch(()=>{/* non-fatal */});
     },120);

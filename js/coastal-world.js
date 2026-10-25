@@ -2367,104 +2367,109 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const baseShoreDist = computeCoastalShoreDistances(baseHeights, n, span, 0.25);
   const { distWater, step } = baseShoreDist;
 
-  // Step 1: Hybrid 1550 Geomorphic Reconstruction
-  // - Lock natural hills & headlands (h > 7.5m, e.g. El Morro bluff) and add canopy/bluff micro-relief.
-  // - Carve 20th-century low-lying coastal landfill (modern piers, container yards, airport runways at 0.15m..6.2m)
-  //   back into 1550s winding tidal mangrove estuaries, lagoons, and shoals.
-  const carvedDem = new Float32Array(n * n);
+  let heights1550 = options.precomputedHeights1550 || null;
   let lowCoastalCells = 0;
   let reclaimedCellsCarved = 0;
 
-  for (let j = 0; j < n; j++) {
-    const v = j / (n - 1);
-    const z = region.z + (v - 0.5) * span;
-    for (let i = 0; i < n; i++) {
-      const u = i / (n - 1);
-      const x = region.x + (u - 0.5) * span;
-      const k = j * n + i;
-      const h = baseHeights[k];
-      const inlandM = distWater[k];
-      const sat = sampleSatelliteEquirectangular(satSource, u, v);
+  if (!heights1550) {
+    // Step 1: Hybrid 1550 Geomorphic Reconstruction
+    // - Lock natural hills & headlands (h > 7.5m, e.g. El Morro bluff) and add canopy/bluff micro-relief.
+    // - Carve 20th-century low-lying coastal landfill (modern piers, container yards, airport runways at 0.15m..6.2m)
+    //   back into 1550s winding tidal mangrove estuaries, lagoons, and shoals.
+    const carvedDem = new Float32Array(n * n);
 
-      // Protect the immediate 1550 colonial bastion & careening wharf core so historical structures stay grounded
-      const portClear = basePack.port ? portClearanceEnvelope(x, z, basePack.port) : 0;
-      const inBastionCore = portClear > 0.45;
-
-      if (h > 0.25) {
-        // High-frequency canopy & headland ridge micro-relief (Depth-Anything V2 high-pass detail proxy)
-        const ridgeDetail =
-          (coastalUberNoise2D(x * 0.0055, z * 0.0055, seed + 701, 3, 0.38) - 0.48) * 3.2 +
-          (sat ? (sat.greenness - 0.22) * 2.1 : 0);
-
-        if (h <= 6.2 && inlandM <= 340 && !inBastionCore) {
-          lowCoastalCells++;
-          // Check if 1550 AI orthophoto marks this pixel as water/estuary OR if modern satellite shows urban landfill
-          // or natural tidal creek corridors along low coastal plains.
-          const is1550Water =
-            hasDedicated1550Ortho &&
-            sat &&
-            sat.b > sat.r * 1.08 &&
-            sat.b >= sat.g * 0.84 &&
-            sat.greenness < 0.10;
-          const creekNoise = coastalUberNoise2D(
-            x * 0.0038 + 0.7 * coastalFbm2D(x * 0.0016, z * 0.0016, seed + 719, 2),
-            z * 0.0038 + 0.7 * coastalFbm2D(z * 0.0016 + 9.4, x * 0.0016, seed + 727, 2),
-            seed + 733,
-            3,
-            0.25
-          );
-          const isModernFillCarve =
-            !hasDedicated1550Ortho &&
-            ((sat && sat.isUrban && h <= 5.2 && inlandM <= 260) ||
-              (h <= 3.4 && inlandM <= 180 && creekNoise < 0.34));
-
-          if (is1550Water || isModernFillCarve) {
-            reclaimedCellsCarved++;
-            // Carve into 1550 winding tidal mangrove channel (-2.2m..-0.6m) with occasional mangrove islets (+0.7m)
-            const channelVal = creekNoise;
-            if (channelVal > 0.68 && !is1550Water) {
-              carvedDem[k] = 0.65 + (channelVal - 0.68) * 3.2;
-            } else {
-              carvedDem[k] = -0.65 - (1 - channelVal) * 1.85;
-            }
-            continue;
-          }
-        }
-        // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes
-        const reliefBoost = h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.4, ridgeDetail * 0.45);
-        carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
-      } else {
-        carvedDem[k] = h;
-      }
-    }
-  }
-
-  // Step 2: Recompute 1550 coastal bathymetry skirt + turquoise coral-reef shoal benches
-  const shoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
-  const heights1550 = new Float32Array(n * n);
-  for (let j = 0; j < n; j++) {
-    const v = j / (n - 1);
-    const z = region.z + (v - 0.5) * span;
-    for (let i = 0; i < n; i++) {
-      const u = i / (n - 1);
-      const x = region.x + (u - 0.5) * span;
-      const k = j * n + i;
-      const demH = carvedDem[k];
-      if (demH > 0.25) {
-        heights1550[k] = demH;
-      } else {
+    for (let j = 0; j < n; j++) {
+      const v = j / (n - 1);
+      const z = region.z + (v - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const x = region.x + (u - 0.5) * span;
+        const k = j * n + i;
+        const h = baseHeights[k];
+        const inlandM = distWater[k];
         const sat = sampleSatelliteEquirectangular(satSource, u, v);
-        // Optical reef turquoise factor slows nearshore drop-off over coral flats
-        const turquoise = sat
-          ? Math.max(0, Math.min(1, ((sat.g * 0.65 + sat.b * 0.35) / 255 - 0.16) / 0.38))
-          : 0.3;
-        const reefBench = 0.68 + 0.32 * (1 - turquoise * 0.55);
-        const shoreDistance = Math.max(0, shoreDist1550.distLand[k] - step * 0.5);
-        const authoredDepth = Math.min(120, 1.8 + 0.145 * shoreDistance * reefBench);
-        heights1550[k] = Math.max(-120, demH < -2.5 ? Math.min(demH, -authoredDepth) : -authoredDepth);
+
+        // Protect the immediate 1550 colonial bastion & careening wharf core so historical structures stay grounded
+        const portClear = basePack.port ? portClearanceEnvelope(x, z, basePack.port) : 0;
+        const inBastionCore = portClear > 0.45;
+
+        if (h > 0.25) {
+          // High-frequency canopy & headland ridge micro-relief (Depth-Anything V2 high-pass detail proxy)
+          const ridgeDetail =
+            (coastalUberNoise2D(x * 0.0055, z * 0.0055, seed + 701, 3, 0.38) - 0.48) * 3.2 +
+            (sat ? (sat.greenness - 0.22) * 2.1 : 0);
+
+          if (h <= 6.2 && inlandM <= 340 && !inBastionCore) {
+            lowCoastalCells++;
+            // Check if 1550 AI orthophoto marks this pixel as water/estuary OR if modern satellite shows urban landfill
+            // or natural tidal creek corridors along low coastal plains.
+            const is1550Water =
+              hasDedicated1550Ortho &&
+              sat &&
+              sat.b > sat.r * 1.08 &&
+              sat.b >= sat.g * 0.84 &&
+              sat.greenness < 0.10;
+            const creekNoise = coastalUberNoise2D(
+              x * 0.0038 + 0.7 * coastalFbm2D(x * 0.0016, z * 0.0016, seed + 719, 2),
+              z * 0.0038 + 0.7 * coastalFbm2D(z * 0.0016 + 9.4, x * 0.0016, seed + 727, 2),
+              seed + 733,
+              3,
+              0.25
+            );
+            const isModernFillCarve =
+              !hasDedicated1550Ortho &&
+              ((sat && sat.isUrban && h <= 5.2 && inlandM <= 260) ||
+                (h <= 3.4 && inlandM <= 180 && creekNoise < 0.34));
+
+            if (is1550Water || isModernFillCarve) {
+              reclaimedCellsCarved++;
+              // Carve into 1550 winding tidal mangrove channel (-2.2m..-0.6m) with occasional mangrove islets (+0.7m)
+              const channelVal = creekNoise;
+              if (channelVal > 0.68 && !is1550Water) {
+                carvedDem[k] = 0.65 + (channelVal - 0.68) * 3.2;
+              } else {
+                carvedDem[k] = -0.65 - (1 - channelVal) * 1.85;
+              }
+              continue;
+            }
+          }
+          // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes
+          const reliefBoost = h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.4, ridgeDetail * 0.45);
+          carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
+        } else {
+          carvedDem[k] = h;
+        }
+      }
+    }
+
+    // Step 2: Recompute 1550 coastal bathymetry skirt + turquoise coral-reef shoal benches
+    const shoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
+    heights1550 = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) {
+      const v = j / (n - 1);
+      const z = region.z + (v - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const x = region.x + (u - 0.5) * span;
+        const k = j * n + i;
+        const demH = carvedDem[k];
+        if (demH > 0.25) {
+          heights1550[k] = demH;
+        } else {
+          const sat = sampleSatelliteEquirectangular(satSource, u, v);
+          // Optical reef turquoise factor slows nearshore drop-off over coral flats
+          const turquoise = sat
+            ? Math.max(0, Math.min(1, ((sat.g * 0.65 + sat.b * 0.35) / 255 - 0.16) / 0.38))
+            : 0.3;
+          const reefBench = 0.68 + 0.32 * (1 - turquoise * 0.55);
+          const shoreDistance = Math.max(0, shoreDist1550.distLand[k] - step * 0.5);
+          const authoredDepth = Math.min(120, 1.8 + 0.145 * shoreDistance * reefBench);
+          heights1550[k] = Math.max(-120, demH < -2.5 ? Math.min(demH, -authoredDepth) : -authoredDepth);
+        }
       }
     }
   }
+  const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
 
   // Step 3: Build 100% De-Urbanized 1550 Orthophoto Imagery Seed
   let sat1550 = satSource;
@@ -2614,8 +2619,8 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
     }
   }
   const built = build1550HistoricalTerritoryPack(
-    { ...basePack, heights: heights1550 },
-    { orthophoto1550, discoveredAt: meta.discoveredAt }
+    basePack,
+    { orthophoto1550, discoveredAt: meta.discoveredAt, precomputedHeights1550: heights1550 }
   );
   built.territory1550 = { ...built.territory1550, ...meta };
   return built;
