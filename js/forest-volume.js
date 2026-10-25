@@ -165,7 +165,7 @@ struct ForestVolumeShellVertex {
  @builtin(instance_index)instance:u32)->ForestVolumeShellVertex{
  let root=forestRoots[forestVisible[forestBin.x+instance]];let world=root.rootScale.xyz+forestVolumeRotate(position,root.yawColour.x)*root.rootScale.w;
  var o:ForestVolumeShellVertex;o.world=world;o.local=position;o.normal=normal;o.colour=colour;o.rootScale=root.rootScale;o.yawTint=root.yawColour;
- o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);return o;
+ o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestVolumeShellFS(in:ForestVolumeShellVertex)->@location(0)vec4f{
  if(in.local.y<forestVolumeMeta.highFloor.w){discard;}

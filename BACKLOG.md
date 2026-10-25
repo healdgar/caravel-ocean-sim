@@ -1,5 +1,67 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 24: procedural coastal world generation (Spanish Main ~1550 -> global scale)
+
+The user specifies a core architectural direction: **Waterworld needs a system
+for procedurally generating coastal environments within a few kilometers of
+shore so that any coastal location in the world can be modeled and generated as
+a vessel navigates to it.**
+
+Required procedural coastal synthesis elements:
+- **3D Coastal Terrain:** On-demand coastal bathymetry, shoals, cliffs,
+  headlands, river mouths, coves, and inland elevation relief within several
+  kilometers of the shoreline, seeded from regional/global coastline and DEM
+  data plus filtered procedural rock, strata, and soil detail.
+- **Vegetation:** Biome- and elevation-appropriate multi-tier forests, tropical
+  palms, coastal scrub, mangroves, and ground cover driven by the 5-tier
+  perceptual LOD and adaptive polygon budget pipeline (`createAdaptivePolygons`,
+  foveal gaze acuity + canopy masking, native woody tiers, source-field crown
+  shells, and contiguous distant canopy mass).
+- **Beaches:** Gently sloping sandy foreshores, sandbars, spits, wet-sand
+  swash/wave-runup transitions, and surf-zone coastal water optics.
+- **Ports & Settlements (Prefab Elements):** Modular, terrain-conforming
+  historical port prefabs — 16th-century timber/stone piers and jetties,
+  careening beaches, harbor fortifications/bastions, customhouses, warehouses,
+  chapels, and colonial town blocks placed at sheltered anchorages.
+
+Phased rollout:
+1. **Phase 1 — The Spanish Main (~1550):** Bounded historical and geographic
+   scope covering the Caribbean Sea, Tierra Firme, and the West Indies circa
+   1550 (e.g., Cartagena de Indias, Nombre de Dios, Santo Domingo, Havana,
+   San Juan, Curacao, Saba, and the Lesser Antilles).
+2. **Phase 2 — Global Coastal Streaming (MSFS-scale):** Expand the tile-streamed
+   coastal generator and prefab port placement system worldwide so a ship can
+   sail to and make landfall at any coast on Earth, similar in scope to
+   Microsoft Flight Simulator.
+
+## October 24: adaptive polygon budget controller and perceptual 5-tier forest LOD
+
+Implemented device-adaptive polygon budgeting ([`createAdaptivePolygons`](js/resolution.js))
+and perceptual multi-tier forest LOD ([`js/forest-scenery.js`](js/forest-scenery.js)):
+- **Adaptive Polygon Budget Controller:** Automatically adjusts geometric
+  detail (`polygons.scale` across `1.0`, `0.75`, `0.5`, `0.35` -> `pixelError`
+  from `3.0 px` to `8.57 px`) using rolling frame-time and GPU-timestamp windows,
+  coordinated with [`createAdaptiveResolution`](js/resolution.js) so resolution
+  transitions reset the polygon accumulator rather than double-stepping both
+  controllers on the same frame spike. Exposed in the Display settings panel
+  and `?polygons=auto|high|medium|low|<scale>` URL parameter.
+- **Perceptual Gaze & Canopy-Masked 5-Tier Forest LOD:** Evaluates viewing angle
+  relative to the camera's forward gaze (`gazeAcuity`) and depth inside the
+  forest canopy (`canopyMask` using crown-surface distance `midNear = max(dist - radius * 0.45, 1.5)`
+  and high-DPR angular cap `min(F.screen.y, 1080.0)`), reserving full-detail
+  native geometry (`wood0` + `leafRibbons`, Tier 0) for the 3 closest focal
+  trees directly in front of the viewer while transitioning peripheral and
+  deeper canopy trees through `midLod` (`wood1` + `leafRibbons`, 10 trees),
+  `mid2Lod` (`wood2` + `volumeShell` source-field crown shell, ~1,150 triangles/tree),
+  `farLod` (`middle` + `volumeShell`), and `forestMass`.
+- **Measured `reported-close-view` GPU Impact:** Indirect triangle submissions
+  in `reported-close-view` (1920x1080) drop from `1,338,730,820` (`1.34B`) ->
+  `421,210,115` (`421.2M`) -> `57,151,182` (`57.15M`) -> **`18,487,554` (`18.49M`
+  total, with only `4.22M` triangles across all `near` + `mid` + `mid2` trees,
+  meeting the `<= 6M` close/middle forest budget)** with `0` pixel differences
+  (`maxError = 0`) across `reported-close-view`, `shore`, `horizon`, and
+  `underwater`.
+
 ## October 23: adopted forest representation redesign
 
 The user requests a complete rethink, with multiple complexity tiers and Manor
@@ -32,9 +94,13 @@ Implementation order:
       leaf ribbons (`assets/forest-scenery/saba/lod/`, `js/forest-native-lod.js`,
       `js/forest-scenery.js`), cutting `reported-close-view` indirect triangle
       submissions 3.18x (`1.34B` -> `421.2M`) with 0 pixel error.
+- [x] Integrate perceptual gaze-acuity + canopy-masked 5-tier LOD (`near` ->
+      `mid` -> `mid2` with `wood2` + `volumeShell` -> `far` -> `forestMass`)
+      and adaptive polygon budgeting across Saba (`reported-close-view` down to
+      `18.49M` total triangles, `4.22M <= 6M` across `near + mid + mid2`, 0
+      pixel error); rebuild and verify published bytes.
 - [ ] Integrate multi-tier stand/cluster replacement across Wells Bay; qualify
-      the exact failing camera under the <=6M triangle pilot target; rebuild and
-      verify published bytes.
+      the exact failing camera under the <=6M total triangle pilot target.
 - [ ] Feed the qualified exporter/adapter back to Forestmodeler without changing
       biological growth or leaf-area accounting.
 
