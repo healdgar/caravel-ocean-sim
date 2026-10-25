@@ -394,6 +394,17 @@ fn landOpaque(in:LandVertex)->vec4f{
     relief=mix(soil,stone*0.14+blocks*.22+cliffStrata*0.035-fissure*0.065-coarseFissure*.10,rocky*rockKeep);
     roughness=clamp(mix(mix(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.78+pores*0.03,beachSand),0.15,swashGloss),0.14,0.98);
     }
+  }else if(in.kind.x>=19.5){
+    // Camera-projected photorealistic 1550 building texture atlas (u = in.kind.x - 20.0, v = in.kind.y)
+    let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
+    let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
+    let photo=pow(textureSampleGrad(nearAlbedo,landSampler,bldgUV,bldgDx,bldgDy).rgb,vec3f(2.2));
+    let detailA=landOrientedDetail(world,n,dx,dy,1.6);
+    let luma=dot(photo,vec3f(0.299,0.587,0.114));
+    albedo=photo*(0.96+detailA*0.06);
+    relief=(luma-0.35)*0.028*detailFade+detailA*0.012*detailFade;
+    roughness=clamp(0.90-luma*0.12,0.74,0.94);
+    ambientVisibility=0.46+0.36*max(n.y,0.0);
   }else if(in.kind.x>=9.5){
     let portShade=clamp(in.kind.y,0.25,1.0);
     let detailA=landOrientedDetail(world,n,dx,dy,1.45);

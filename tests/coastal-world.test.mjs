@@ -410,17 +410,18 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
   assert.ok(retargeted.roots.length >= 12);
 });
 
-test('decode1550BuildingLRMBundle decodes Hunyuan3D-2mv WW3D building bundle and stamps into port geometry', () => {
+test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle and stamps into port geometry', () => {
   const raw = fs.readFileSync(new URL('../assets/ports/1550/buildings-1550-lrm.bin', import.meta.url));
   const templates = decode1550BuildingLRMBundle(raw);
   assert.ok(templates, 'Expected WW3D bundle to decode');
   for (const id of ['stone_sea_bastion', 'casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
     assert.ok(templates[id], `Missing LRM template ${id}`);
-    assert.ok(templates[id].vertexCount > 1000, `Expected >1000 vertices for ${id}`);
-    assert.ok(templates[id].indexCount > 9000, `Expected >3000 triangles for ${id}`);
+    assert.ok(templates[id].vertexCount >= 1200, `Expected >=1200 unshared flat-normal vertices for ${id}, got ${templates[id].vertexCount}`);
+    assert.ok(templates[id].indexCount >= 1200, `Expected >=400 plumb-rectified triangles for ${id}, got ${templates[id].indexCount}`);
+    assert.equal(templates[id].vertexCount, templates[id].indexCount, `Expected unshared per-face vertices for ${id} to prevent GPU material interpolation`);
   }
   const pack = generateProceduralCoastalPack('san-juan', { size: 65 });
   const geom = buildPortPrefabGeometry(pack.port, null, templates);
-  assert.ok(geom.triangleCount > 15000, `Expected LRM port geometry to exceed 15,000 triangles, got ${geom.triangleCount}`);
+  assert.ok(geom.triangleCount > 5000, `Expected plumb-rectified port geometry to exceed 5,000 triangles, got ${geom.triangleCount}`);
 });
 

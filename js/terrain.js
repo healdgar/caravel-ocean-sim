@@ -206,6 +206,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
   const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
+  const buildingAtlasPromise=useProcedural?load('assets/ports/1550/buildings-1550-photo-atlas.jpg').then(r=>r.blob()).then(b=>createImageBitmap(b)).catch(()=>null):Promise.resolve(null);
   let canopyFailure=null;
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({skipNative:skipNativeForest,deferNative:!skipNativeForest&&useProcedural,skipRoots:useProcedural}).catch(error=>{forestFailure=error.message;return null;});
@@ -301,10 +302,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   cp.end();device.queue.submit([enc.finish()]);
   let nearAlbedo=albedo;
-  if(nearTile){
-    const image=await createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'}));
-    if(image.width!==1024||image.height!==1024)throw Error('Incomplete Wells Bay near imagery');
-    nearAlbedo=device.createTexture({label:'Wells Bay registered near imagery',size:[1024,1024],format:'rgba8unorm',mipLevelCount:11,
+  const buildingAtlasImage=await buildingAtlasPromise;
+  if(nearTile||buildingAtlasImage){
+    const image=nearTile?await createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'})):buildingAtlasImage;
+    if(image.width!==1024||image.height!==1024)throw Error('Incomplete Wells Bay near / 1550 building atlas imagery');
+    nearAlbedo=device.createTexture({label:nearTile?'Wells Bay registered near imagery':'1550 building photorealistic texture atlas',size:[1024,1024],format:'rgba8unorm',mipLevelCount:11,
       usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT});
     device.queue.copyExternalImageToTexture({source:image},{texture:nearAlbedo},[1024,1024]);image.close();
     const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(mipPipe);

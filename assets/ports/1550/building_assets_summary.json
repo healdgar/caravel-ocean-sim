@@ -1,66 +1,70 @@
 [
   {
     "id": "stone_sea_bastion",
-    "name": "Stone Sea Bastion (Baluarte)",
-    "rawHunyuanTriangles": 323298,
-    "decimatedVertices": 1803,
-    "decimatedTriangles": 3600,
-    "glbBytes": 9029972,
+    "name": "Stone Sea Bastion (Baluarte Real)",
+    "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/stone_sea_bastion_photo_front_1792970336921.jpg",
+    "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/stone_sea_bastion_photo_back_1792970362729.jpg",
+    "triangles": 1010,
+    "vertices": 3030,
+    "plumbPlanarPct": 82.0,
+    "glbBytes": 98076,
     "materialBreakdownPct": {
-      "10": 11.2,
-      "11": 48.4,
-      "12": 10.7,
-      "13": 27.5,
-      "14": 2.2
-    },
-    "hunyuan3d": true
+      "10": 7.3,
+      "11": 58.2,
+      "12": 1.0,
+      "13": 0.6,
+      "14": 32.9
+    }
   },
   {
     "id": "casa_de_contratacion",
-    "name": "Casa de la Contrataci\u00f3n (Customhouse)",
-    "rawHunyuanTriangles": 393286,
-    "decimatedVertices": 1785,
-    "decimatedTriangles": 3600,
-    "glbBytes": 10193844,
+    "name": "Casa de la Contrataci\u00f3n (Royal Customhouse)",
+    "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/casa_de_contratacion_photo_front_1792970388823.jpg",
+    "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/casa_de_contratacion_photo_back_1792970415993.jpg",
+    "triangles": 846,
+    "vertices": 2538,
+    "plumbPlanarPct": 91.3,
+    "glbBytes": 82328,
     "materialBreakdownPct": {
-      "10": 3.5,
-      "11": 20.3,
-      "12": 1.6,
-      "13": 64.2,
-      "14": 10.4
-    },
-    "hunyuan3d": true
+      "10": 27.9,
+      "11": 57.4,
+      "12": 2.6,
+      "13": 2.1,
+      "14": 9.9
+    }
   },
   {
     "id": "mission_chapel",
-    "name": "Iglesia & Campanario (Mission Chapel)",
-    "rawHunyuanTriangles": 559110,
-    "decimatedVertices": 1613,
-    "decimatedTriangles": 3598,
-    "glbBytes": 10202388,
+    "name": "Mission Chapel & Bell Tower (Iglesia Colonial)",
+    "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/mission_chapel_photo_front_1792970442758.jpg",
+    "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/mission_chapel_photo_back_1792970471598.jpg",
+    "triangles": 650,
+    "vertices": 1950,
+    "plumbPlanarPct": 86.5,
+    "glbBytes": 63512,
     "materialBreakdownPct": {
-      "10": 6.8,
-      "11": 17.9,
-      "12": 4.7,
-      "13": 68.8,
-      "14": 1.9
-    },
-    "hunyuan3d": true
+      "10": 5.5,
+      "11": 56.3,
+      "12": 1.8,
+      "13": 6.8,
+      "14": 29.5
+    }
   },
   {
     "id": "colonial_town_block",
-    "name": "Casa Solariega & Almac\u00e9n Real",
-    "rawHunyuanTriangles": 338380,
-    "decimatedVertices": 1774,
-    "decimatedTriangles": 3600,
-    "glbBytes": 8710676,
+    "name": "Colonial Courtyard Mansion (Casa Patio)",
+    "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/colonial_townhouse_photo_front_1792970497109.jpg",
+    "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/colonial_townhouse_photo_back_1792970527952.jpg",
+    "triangles": 908,
+    "vertices": 2724,
+    "plumbPlanarPct": 83.9,
+    "glbBytes": 88280,
     "materialBreakdownPct": {
-      "10": 3.9,
-      "11": 16.1,
-      "12": 0.6,
-      "13": 76.6,
-      "14": 2.9
-    },
-    "hunyuan3d": true
+      "10": 49.3,
+      "11": 13.2,
+      "12": 4.4,
+      "13": 6.6,
+      "14": 26.4
+    }
   }
 ]

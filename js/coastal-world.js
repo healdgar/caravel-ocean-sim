@@ -1324,9 +1324,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   const pushQuad = (a, b, c, d, kind, shade) => {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy;
-    let ny = uz * vx - ux * vz;
-    let nz = ux * vy - uy * vx;
+    let nx = uz * vy - uy * vz;
+    let ny = ux * vz - uz * vx;
+    let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
     const i0 = pushVertex(a, [nx, ny, nz], kind, shade);
@@ -1339,9 +1339,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   const pushTri = (a, b, c, kind, shade) => {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy;
-    let ny = uz * vx - ux * vz;
-    let nz = ux * vy - uy * vx;
+    let nx = uz * vy - uy * vz;
+    let ny = ux * vz - uz * vx;
+    let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
     const i0 = pushVertex(a, [nx, ny, nz], kind, shade);
