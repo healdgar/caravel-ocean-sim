@@ -549,13 +549,15 @@ async function main() {
   terrain?.setPixelError?.(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
-  let submergedColor,submergedDepth,oceanOpticsGroup;
+  let submergedColor,aboveWaterColor,submergedDepth,oceanOpticsGroup;
   const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
   const underwaterMedium=await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
     derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA,skipAir:true});
   const opticsEmptyLayout=device.createBindGroupLayout({entries:[]});
   const opticsEmptyGroup=device.createBindGroup({layout:opticsEmptyLayout,entries:[]});
   const submergedPass={label:'Submerged geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
+    depthStencilAttachment:{view:null,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
+  const aboveWaterPass={label:'Above-water geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
     depthStencilAttachment:{view:null,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
   let waterMips = 1, waterMipGroups = [];
   const mainPass = {
@@ -580,14 +582,17 @@ async function main() {
     if (w === W && h === H) return;
     W = w; H = h;bloomFrameReady=false;
     canvas.width = W; canvas.height = H;
-    for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,submergedDepth]) t && t.destroy();
+    for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,aboveWaterColor,submergedDepth]) t && t.destroy();
     submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
+    aboveWaterColor=device.createTexture({label:'above-water radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
     submergedDepth=device.createTexture({label:'submerged visibility',size:[W,H],format:'depth32float',usage:TU.RENDER_ATTACHMENT});
     submergedPass.colorAttachments[0].view=submergedColor.createView();
     submergedPass.depthStencilAttachment.view=submergedDepth.createView();
+    aboveWaterPass.colorAttachments[0].view=aboveWaterColor.createView();
+    aboveWaterPass.depthStencilAttachment.view=submergedDepth.createView();
     oceanOpticsGroup=device.createBindGroup({label:'water transmission',layout:oceanPipe.getBindGroupLayout(3),entries:[
       {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}},
-      {binding:3,resource:{buffer:vessels[0].probe.output}}]});
+      {binding:3,resource:{buffer:vessels[0].probe.output}},{binding:4,resource:aboveWaterColor.createView()}]});
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
@@ -1826,6 +1831,17 @@ async function main() {
       v.crew?.drawSubmerged(underwater);v.anchorRenderer.drawSubmerged(underwater);
     }
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
+    if(cam.y<waterH+Math.min(HB,1.5)){
+      const aboveWater=enc.beginRenderPass(aboveWaterPass);
+      terrain?.drawSubmerged(aboveWater,true);
+      for(const v of vessels){
+        if(!v.boat.showProw)continue;
+        v.render.submerged.bind(aboveWater,true);aboveWater.setBindGroup(0,v.submergedGroup);aboveWater.setBindGroup(1,v.submergedLighting);
+        aboveWater.setVertexBuffer(0,v.vertexBuffer);if(v.pose)aboveWater.setVertexBuffer(1,v.pose.buffer);aboveWater.setIndexBuffer(v.render.indexBuffer,'uint32');aboveWater.drawIndexed(v.asset.indices.length);
+        v.crew?.drawSubmerged(aboveWater,true);v.anchorRenderer.drawSubmerged(aboveWater,true);
+      }
+      dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
+    }
     mainPass.timestampWrites=profiler.writes('Ocean + sky');
     mainPass.colorAttachments[0].storeOp = drawProw||gunTransparent ? 'store' : 'discard';
     mainPass.depthStencilAttachment.depthStoreOp = drawProw||gunTransparent||cameraMediumBand ? 'store' : 'discard';

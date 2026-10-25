@@ -126,7 +126,7 @@ export async function createGunneryTools({device,frameUBO,transView,skyView,samp
     },
     draw(pass){if(!count)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,lighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
     drawShadow(pass){if(!count)return;pass.setPipeline(shadowPipeline);pass.setBindGroup(0,shadow);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
-    drawSubmerged(pass){if(!count||!submerged)return;submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedLighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
+    drawSubmerged(pass,above=false){if(!count||!submerged)return;submerged.bind(pass,above);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedLighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
     destroy(){vertex.destroy();shapeBuffer.destroy();poseBuffer.destroy();},
   };
 }

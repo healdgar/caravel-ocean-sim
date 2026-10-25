@@ -106,7 +106,7 @@ export function lateenYardPoint(mast,point,pose){
   q[1]+=pose.dip*[.85,1.80,1.35][mast];
   return q.map((v,i)=>v+s.pivot[i]);
 }
-export function lateenClothPoint(mast,u,v,pose,time=0,wind=7,contact=true){
+export function lateenClothPoint(mast,u,v,pose,time=0,wind=7,contact=true,poses=null){
   const s=SAIL_PLAN[mast],[a,b]=s.corners,axis=sub(b,a),n=Math.hypot(...axis);
   axis.forEach((x,i)=>axis[i]=x/n);
   // Affine brailing gathers the clew to the middle of the yard. Sending it to
@@ -119,26 +119,33 @@ export function lateenClothPoint(mast,u,v,pose,time=0,wind=7,contact=true){
     (.15*slack*slack*Math.sin(time*7+u*17+v*11)+.003*pose.fill*Math.sin(time*.7)));
   p=rotateAxis(sub(p,a),axis,-pose.side*pose.opening).map((x,i)=>x+a[i]);
   p=lateenYardPoint(mast,p,pose);
-  return contact&&(pose.pressure??1)<.95 ? supportedCanvas(p,mast,v,pose) : p;
+  return contact&&(pose.pressure??1)<.95 ? supportedCanvas(p,mast,v,pose,poses) : p;
 }
 
 // Cloth bears on the existing mast and rig, on the yard's side. A broad,
 // smooth support envelope spans cloth triangles; it never hides a rope.
 // Supports do not move the sewn luff off its yard.
 const RIG_SUPPORTS=standingRiggingLines();
-function supportedCanvas(point,mast,v,pose){
-  const side=pose.side;let x=point[0]*side;
-  const support=(a,b,r)=>{
+function supportedCanvas(point,mast,v,pose,poses){
+  const side=pose.side,luffX=[.46,.40,.34][mast]+pose.dip*.22;let x=point[0]*side;
+  const support=(a,b,r,inboard=false)=>{
     if(point[1]<Math.min(a[1],b[1])-.2||point[1]>Math.max(a[1],b[1])+.2)return;
     const t=rigClamp((point[1]-a[1])/(b[1]-a[1])),p=a.map((n,i)=>mix(n,b[i],t));
-    const d2=(point[1]-p[1])**2+(point[2]-p[2])**2,limit=side*p[0]+r+.10-d2/.65;
-    const h=rigClamp(.5+.5*(x-limit)/.06);x=mix(limit,x,h)+.06*h*(1-h);
+    const d2=(point[1]-p[1])**2+(point[2]-p[2])**2;
+    if(inboard){
+      const limit=side*p[0]-r-.10+d2/.65,h=rigClamp(.5+.5*(limit-x)/.06);
+      x=mix(limit,x,h)-.06*h*(1-h);
+    }else{
+      const limit=side*p[0]+r+.10-d2/.65,h=rigClamp(.5+.5*(x-limit)/.06);
+      x=mix(limit,x,h)+.06*h*(1-h);
+    }
   };
   for(let i=0;i<3;i++){const m=RIG_MASTS[i];support(mastPoint(i,vesselDeck(m.z)),mastPoint(i,m.height),m.r);}
   for(const line of RIG_SUPPORTS){
-    const t=rigClamp((point[1]-line.a[1])/(line.b[1]-line.a[1]));
-    const q=standingRopePoint(line,t,pose),a=[q[0],line.a[1],q[2]],b=[q[0],line.b[1],q[2]];
-    support(a,b,line.r);
+    const owner=poses?.[line.mast]??pose,t=rigClamp((point[1]-line.a[1])/(line.b[1]-line.a[1]));
+    const q=standingRopePoint(line,t,owner),a=[q[0],line.a[1],q[2]],b=[q[0],line.b[1],q[2]];
+    const inboard=line.mast<mast&&line.side*side>0&&owner.side*side<0&&side*q[0]>luffX+line.r+.16;
+    support(a,b,line.r,inboard);
   }
   point[0]=mix(point[0],side*x,rigSmooth(0,.08,v));return point;
 }
@@ -162,7 +169,7 @@ export function runningRiggingLines(){
 
 export function lateenRopePoint(line,t,poses,time=0,wind=7){
   const p=poses[line.mast];let a=line.a,b=line.b;
-  if(line.kind==='sheet')a=lateenClothPoint(line.mast,0,1,p,time,wind);
+  if(line.kind==='sheet')a=lateenClothPoint(line.mast,0,1,p,time,wind,true,poses);
   if(line.kind==='tack')a=lateenYardPoint(line.mast,SAIL_PLAN[line.mast].corners[1],p);
   if(line.kind==='halyard')b=lateenYardPoint(line.mast,line.b,p);
   let point=a.map((x,i)=>mix(x,b[i],t));

@@ -28,13 +28,13 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
     const start=source.indexOf('{',air.index);
     const argument=/\(\s*(\w+)\s*:/.exec(air[0])[1];
     // Keep the normal path reachable to WGSL reflection, retaining every
-    // original resource binding while valid render dimensions bypass air fog.
-    source=source.slice(0,start+1)+`if(F.screen.x>=0.0){return ${argument};}`+source.slice(start+1);
+    // original resource binding while submerged captures bypass air fog.
+    source=source.slice(0,start+1)+`if(F.screen.x>=0.0&&captureMode.x<.5){return ${argument};}`+source.slice(start+1);
   }
   // Terrain already integrates clouds in its normal material path. The ocean
   // must integrate only the air segment before the surface, not that path twice.
   source=source.replace(/let\s+ray\s*=\s*marchCloudsTo\s*\(/,
-    'if(F.screen.x>=0.0){return vec4f(col,1.0);}\n  let ray=marchCloudsTo(');
+    'if(F.screen.x>=0.0&&captureMode.x<.5){return vec4f(col,1.0);}\n  let ray=marchCloudsTo(');
   const marker=new RegExp(`@fragment\\s+fn\\s+${entry}\\s*\\(`).exec(source);
   if(!marker)throw new Error(`Missing capture fragment ${entry}`);
   const argsStart=source.indexOf('(',marker.index),argsEnd=opticsMatching(source,argsStart,'(',')');
@@ -48,6 +48,7 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   return source+/* wgsl */ `
 @group(3) @binding(0) var captureSea:texture_2d_array<f32>;
 @group(3) @binding(1) var captureSeaSampler:sampler;
+@group(3) @binding(4) var<uniform> captureMode:vec4f;
 fn captureDisplacement(p:vec2f)->vec3f{
   var d=vec3f(0);
   for(var c=0u;c<${CASCADES}u;c++){
@@ -63,7 +64,8 @@ fn captureHeight(p:vec2f)->f32{
 ${originalSignature}{
   let material=waterCaptureMaterial(${argumentsList});
   let captureWorld=${world};
-  if(captureWorld.y>captureHeight(captureWorld.xz)+0.015){discard;}
+  let surfaceY=captureHeight(captureWorld.xz);
+  if(select(captureWorld.y>surfaceY+0.015,(captureWorld.y<surfaceY-0.015),captureMode.x>.5)){discard;}
   let eyeDepth=dot(captureWorld-F.camPos.xyz,F.camFwd.xyz);
   if(eyeDepth<=0.0){discard;}
   return vec4f(material.rgb,eyeDepth);
@@ -75,6 +77,12 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
   // Material pipelines and their scene-only groups are immutable. Vessel
   // resources still receive separate bind groups through bindGroup below.
   const captures=new Map();
+  const usage=(globalThis.GPUBufferUsage?.UNIFORM??64)|(globalThis.GPUBufferUsage?.COPY_DST??8);
+  const modeBuffers=[0,1].map(above=>{
+    const b=device.createBuffer({size:16,usage});
+    device.queue.writeBuffer(b,0,new Float32Array([above,0,0,0]));
+    return b;
+  });
   return {
     async capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1}){
       if(groups>3)throw new Error('Water capture reserves bind group 3');
@@ -92,16 +100,18 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
           vertex:{...vertexState,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},
           primitive:{topology:'triangle-list',cullMode:'none'},
           depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:1}});
-        const captureGroups=(captureNeedsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
-          ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[])]}));
+        const makeGroups=modeBuffer=>(captureNeedsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
+          ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[]),{binding:4,resource:{buffer:modeBuffer}}]}));
+        const captureGroups=makeGroups(modeBuffers[0]),aboveCaptureGroups=makeGroups(modeBuffers[1]);
         const emptyGroups=Array.from({length:3-groups},(_,i)=>device.createBindGroup({layout:captured.getBindGroupLayout(i+groups),entries:[]}));
         return {pipeline:captured,entry:'submergedFS',bindGroup(resources,index=0){
           const entries=resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource});
           return device.createBindGroup({layout:captured.getBindGroupLayout(index),entries});
-        },bind(pass){
+        },bind(pass,above=false){
           pass.setPipeline(captured);
           for(let i=groups;i<3;i++)pass.setBindGroup(i,emptyGroups[i-groups]);
-          pass.setBindGroup(3,captureGroups[captureNeedsWaves?surfaceWaves.current:0]);
+          const set=above?aboveCaptureGroups:captureGroups;
+          pass.setBindGroup(3,set[captureNeedsWaves?surfaceWaves.current:0]);
         }};
       })();
       captures.set(key,pending);

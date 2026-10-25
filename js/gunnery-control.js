@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import { createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact } from './gunnery-state.js';
-import { createGunDefinitions, gunMuzzlePose } from './gunnery-models.js';
+import { createGunDefinitions, gunMuzzlePose, gunElevationRange } from './gunnery-models.js';
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
 import { boatRotate } from './boat.js';
 
@@ -86,6 +86,13 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     get selectedSide(){return boat.gunnerySide??null;},
     get ordered(){return pending?.side??null;},
+    get elevation(){return boat.gunneryElevation??0;},
+    get elevationRange(){return gunElevationRange(state.guns[0]);},
+    setElevation(degrees){
+      const range=gunElevationRange(state.guns[0]);
+      const next=Number.isFinite(Number(degrees))?Math.max(range.min,Math.min(range.max,Number(degrees))):0;
+      boat.gunneryElevation=next;for(const g of state.guns)g.elevation=next;return next;
+    },
     // Reuse the two previously reserved Hull axis padding floats. GPU lighting
     // resolves the actual attachment, with no additional binding or larger UBO.
     get flash(){const age=flash?state.time-flash.time:1;return age>=0&&age<.085?{gunId:flash.gunId,energy:flash.side*Math.min(1,Math.cbrt(flash.mass/12))*Math.sin(Math.PI*age/.085)}:null;},

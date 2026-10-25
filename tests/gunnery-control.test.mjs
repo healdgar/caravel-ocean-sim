@@ -55,3 +55,16 @@ test('fresh gunport clearance is required at the order and again at each dischar
  assert.equal(guns.state.projectiles.length,0);assert.equal(guns.blockedReason('port'),held);
  held=null;assert.equal(guns.fire('port'),true);advance(guns,3);assert.equal(events.filter(e=>e.type==='shot').length,2);
 });
+
+test('adjustable quoin elevation clamps to physical battery limits and increases ballistic range',()=>{
+ const runWithElevation=degrees=>{
+  const {guns}=fixture();
+  const applied=guns.setElevation(degrees);
+  guns.prepare('port');advance(guns,34);guns.fire('port');advance(guns,3);
+  const shot=guns.state.projectiles[0];
+  return {applied,vy:shot.velocity[1],speed:Math.hypot(...shot.velocity)};
+ };
+ const low=runWithElevation(-2),level=runWithElevation(0),high=runWithElevation(8),clamped=runWithElevation(50);
+ assert.equal(low.applied,-2);assert.equal(high.applied,8);assert.equal(clamped.applied,14);
+ assert.ok(high.vy>level.vy&&level.vy>low.vy,'quoin elevation directly controls vertical launch velocity');
+});

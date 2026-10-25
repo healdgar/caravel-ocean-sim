@@ -113,7 +113,9 @@ canvas is gathered before a yard moves, and yards are raised, passed abaft their
 masts and lowered individually. Extra main/mizzen hoist clears the quarterdeck.
 
 Routine tacks retain yard sides and reverse canvas pressure, using smooth support
-envelopes against masts and rig. The explicit **Transfer yards** captain order
+envelopes against masts and rig, with each standing rope evaluated from its own
+mast's pose (`poses[line.mast]`) and inboard support when a forward mast's taut
+windward stay overhangs an aft sail's sewn luff. The explicit **Transfer yards** captain order
 moves the yards to leeward. The [Mallorca Maritime Museum's San Miguel account](https://museumaritim.conselldemallorca.es/en/-/san-miguel-un-llaut-gran-de-1899)
 describes lateen sailing with the sail on either side of the mast, with different
 efficiency. It supports distinguishing routine tacking from transfer, not our exact

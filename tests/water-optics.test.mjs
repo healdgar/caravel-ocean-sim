@@ -183,20 +183,80 @@ fn surfaceAir(colour:vec3f,world:vec3f)->vec3f {return colour*.1+vec3f(.3);}
     const group=capture.bindGroup([{buffer:frame},{buffer:height}]);
     const target=device.createTexture({size:[32,32],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC}),depth=device.createTexture({size:[32,32],format:'depth32float',usage:T.RENDER_ATTACHMENT}),read=device.createBuffer({size:32*32*8,usage:B.COPY_DST|B.MAP_READ});
     const half=bits=>{const sign=bits&0x8000?-1:1,e=(bits>>10)&31,m=bits&1023;return sign*(e?(1+m/1024)*2**(e-15):m*2**-24);};
-    async function render(y){
+    async function render(y,aboveMode=false){
       device.queue.writeBuffer(height,0,new Float32Array([y,0,0,0]));
       const enc=device.createCommandEncoder(),pass=enc.beginRenderPass({colorAttachments:[{view:target.createView(),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:depth.createView(),depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}});
-      capture.bind(pass);pass.setBindGroup(0,group);pass.draw(3);pass.end();enc.copyTextureToBuffer({texture:target},{buffer:read,bytesPerRow:256},[32,32]);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);const data=new Uint16Array(read.getMappedRange()),centre=Array.from(data.slice((16*32+16)*4,(16*32+16)*4+4),half),count=Array.from(data).filter(v=>v!==0).length;read.unmap();return {centre,count};
+      capture.bind(pass,aboveMode);pass.setBindGroup(0,group);pass.draw(3);pass.end();enc.copyTextureToBuffer({texture:target},{buffer:read,bytesPerRow:256},[32,32]);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);const data=new Uint16Array(read.getMappedRange()),centre=Array.from(data.slice((16*32+16)*4,(16*32+16)*4+4),half),count=Array.from(data).filter(v=>v!==0).length;read.unmap();return {centre,count};
     }
-    const submerged=await render(-.5),above=await render(.5);
+    const submerged=await render(-.5),above=await render(.5),aboveModeSubmerged=await render(-.5,true),aboveModeAbove=await render(.5,true);
     // Only the capillary cascade raises water. A broad-swell-only clip would
     // incorrectly discard the same now-submerged target.
     device.queue.writeTexture({texture:sea,origin:[0,0,CASCADES-1]},new Uint16Array([0,0x3c00,0,0]),{bytesPerRow:8},[1,1]);
     const raised=await render(.5);frameData.set([0,1,0,0],28);device.queue.writeBuffer(frame,0,frameData);const behindEye=await render(-.5);
-    device.destroy();return {errors,submerged,above,raised,behindEye};
+    device.destroy();return {errors,submerged,above,aboveModeSubmerged,aboveModeAbove,raised,behindEye};
   });
   assert.deepEqual(result.errors,[]);assert.equal(result.above.count,0);assert.equal(result.behindEye.count,0);
+  assert.equal(result.aboveModeSubmerged.count,0,'above-water capture mode discards submerged geometry');
+  assert.ok(result.aboveModeAbove.count>100,'above-water capture mode retains above-water geometry');
+  for(const [index,value] of [.33,.32,.31].entries())assert.ok(Math.abs(result.aboveModeAbove.centre[index]-value)<.0005,'above-water capture preserves aerial perspective');
   assert.ok(result.submerged.count>100&&result.raised.count>100,'submerged capture survives the fine wave bands');
   for(const frame of [result.submerged,result.raised])for(const [index,value] of [.3,.2,.1].entries())assert.ok(Math.abs(frame.centre[index]-value)<.0002,'capture stores raw material radiance before air fog');
   assert.ok(Math.abs(result.submerged.centre[3]-10.5)<.01&&Math.abs(result.raised.centre[3]-9.5)<.01,'capture alpha retains metres of forward eye depth');
+});
+
+test('underwater Snell window refracts captured above-water geometry and bends silhouettes with wave slope',{timeout:120000},async()=>{
+  const result=await probePage(async()=>{
+    const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{WATER_TRANSMISSION,WATER_AIR_TRANSMISSION}=await import('/js/wgsl/water-optics.js');
+    const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
+    const B=GPUBufferUsage,T=GPUTextureUsage,W=64,H=64,sky=[.6,.7,.9];
+    const make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
+    // Underwater camera at y=-4 looking straight up (+Y) at water surface y=0.
+    const frameData=new Float32Array(96);frameData[0]=1;frameData[7]=1;frameData[9]=1;frameData[14]=.1;
+    frameData.set([0,-4,0,0],16);frameData.set([1,0,0,0],20);frameData.set([0,0,1,0],24);frameData.set([0,1,0,0],28);frameData.set([W,H,1/W,1/H],36);
+    const frame=make(frameData,B.UNIFORM),opticsData=new Float32Array([0,1,0,0]),optics=make(opticsData,B.UNIFORM),normal=make(new Float32Array([0,1,0,0]),B.UNIFORM);
+    const output=device.createBuffer({size:W*H*16,usage:B.STORAGE|B.COPY_SRC}),read=device.createBuffer({size:W*H*16,usage:B.COPY_DST|B.MAP_READ});
+    const subSource=device.createTexture({size:[W,H],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+    const aboveSource=device.createTexture({size:[W,H],format:'rgba16float',usage:T.TEXTURE_BINDING|T.COPY_DST});
+    const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
+    const code=FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;`+WATER_TRANSMISSION+WATER_AIR_TRANSMISSION+`
+@group(0)@binding(1)var<uniform>surfaceNormal:vec4f;
+@group(0)@binding(2)var<storage,read_write>colors:array<vec4f>;
+@compute @workgroup_size(8,8)fn main(@builtin(global_invocation_id)i:vec3u){
+ if(i.x>=64u||i.y>=64u){return;}let uv=(vec2f(i.xy)+.5)/64.0;
+ let world=vec3f((uv.x-.5)*8.0,0,(uv.y-.5)*8.0);
+ let view=normalize(F.camPos.xyz-world);
+ let airRay=refract(-view,-normalize(surfaceNormal.xyz),WATER_REFRACTIVE_INDEX);
+ let transmitted=select(vec3f(0),waterAirTransmission(world,normalize(airRay),vec3f(.6,.7,.9)),dot(airRay,airRay)>.00001);
+ colors[i.y*64u+i.x]=vec4f(transmitted,1);
+}`;
+    const module=device.createShaderModule({code}),info=await module.getCompilationInfo();errors.push(...info.messages.filter(m=>m.type==='error').map(m=>m.message));
+    const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
+    const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:frame}},{binding:1,resource:{buffer:normal}},{binding:2,resource:{buffer:output}}]});
+    const sourceGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(3),entries:[{binding:1,resource:sampler},{binding:2,resource:{buffer:optics}},{binding:4,resource:aboveSource.createView()}]});
+    const emptyGroups=[1,2].map(i=>device.createBindGroup({layout:pipeline.getBindGroupLayout(i),entries:[]}));
+    const half=value=>{if(value===0)return 0;const exponent=Math.floor(Math.log2(value));return Math.max(0,Math.min(65535,((exponent+15)<<10)+Math.round((value/2**exponent-1)*1024)));};
+    const luma=p=>p[0]*.2126+p[1]*.7152+p[2]*.0722,skyLuma=luma(sky);
+    async function render({heightAbove=6,slope=0}={}){
+      const pixels=new Uint16Array(W*H*4),forwardDepth=4+heightAbove;
+      for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+        const worldX=((x+.5)/W-.5)*2*forwardDepth,worldZ=((y+.5)/H-.5)*2*forwardDepth;
+        const target=Math.abs(worldX)<1.4&&Math.abs(worldZ)<1.4,colour=target?[.1,.08,.05]:sky,at=(y*W+x)*4;
+        pixels.set([...colour.map(half),half(target?forwardDepth:0)],at);
+      }
+      device.queue.writeTexture({texture:aboveSource},pixels,{bytesPerRow:W*8},[W,H]);
+      device.queue.writeBuffer(normal,0,new Float32Array([slope,Math.sqrt(1-slope*slope),0,0]));
+      const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,emptyGroups[0]);pass.setBindGroup(2,emptyGroups[1]);pass.setBindGroup(3,sourceGroup);pass.dispatchWorkgroups(8,8);pass.end();enc.copyBufferToBuffer(output,0,read,0,W*H*16);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const values=Array.from(new Float32Array(read.getMappedRange()));read.unmap();let sum=0,xSum=0,maximum=0;
+      for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+        const p=values.slice((y*W+x)*4,(y*W+x)*4+3),contrast=Math.max(0,skyLuma-luma(p));
+        sum+=contrast;xSum+=(x+.5)*contrast;maximum=Math.max(maximum,contrast);
+      }
+      return {contrast:maximum,centroidX:xSum/sum};
+    }
+    const flat=await render(),left=await render({slope:-.2}),right=await render({slope:.2});
+    device.destroy();return {errors,flat,left,right};
+  });
+  assert.deepEqual(result.errors,[]);
+  assert.ok(result.flat.contrast>.4,'above-water object is visible through Snell window');
+  assert.ok(Math.abs(result.left.centroidX-result.right.centroidX)>.5,'wave slope refracts the above-water silhouette across Snell window');
 });

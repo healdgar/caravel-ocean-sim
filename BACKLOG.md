@@ -1,5 +1,18 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 24: backlog execution order (3 -> 4 -> 2 -> 1)
+
+User-directed execution sequence:
+1. **Stage 3 — Ships, Rig Mechanics & Physics (COMPLETED):**
+   - Resolved lateen support owner-pose & forward-mast overhanging stay inboard contact sidedness across [`js/lateen.js`](js/lateen.js), [`js/wgsl/lateen.js`](js/wgsl/lateen.js), [`js/sail-aerodynamics.js`](js/sail-aerodynamics.js), [`js/ship-models.js`](js/ship-models.js), and [`CARAVEL_RESEARCH.md`](CARAVEL_RESEARCH.md). Verified with [`tests/rig-support.test.mjs`](tests/rig-support.test.mjs) and 814 GPU poses in [`tests/rig-gpu.test.mjs`](tests/rig-gpu.test.mjs) (`CPU/GPU error 2.53e-6`, `0` clearance failures).
+   - Promoted the pure routine handover controller ([`js/routine-handover.js`](js/routine-handover.js)) and its verification suite ([`tests/routine-handover.test.mjs`](tests/routine-handover.test.mjs)).
+2. **Stage 4 — Rendering, Navigation & Secondary Systems (COMPLETED):**
+   - Implemented underwater looking-up refraction capture (`aboveWaterPass` + `WATER_AIR_TRANSMISSION` / `waterAirTransmission`) for Snell's window in [`js/water-optics.js`](js/water-optics.js), [`js/wgsl/water-optics.js`](js/wgsl/water-optics.js), [`js/wgsl/underwater.js`](js/wgsl/underwater.js), [`js/wgsl/ocean.js`](js/wgsl/ocean.js), [`js/terrain.js`](js/terrain.js), [`js/crew.js`](js/crew.js), [`js/gunnery-tools.js`](js/gunnery-tools.js), [`js/anchor.js`](js/anchor.js), [`js/dolphins.js`](js/dolphins.js), [`js/marine-life.js`](js/marine-life.js), [`js/marine-loader.js`](js/marine-loader.js), and [`js/main.js`](js/main.js), verified in [`tests/water-optics.test.mjs`](tests/water-optics.test.mjs), [`tests/underwater-optics.test.mjs`](tests/underwater-optics.test.mjs), and [`tests/water-optics-scene.test.mjs`](tests/water-optics-scene.test.mjs).
+   - Added historical celestial navigation sight helpers (`horizonDipDegrees`, `celestialNavigationSight` for Polaris *Regimento do Norte* with guard correction and solar meridian *Regimento do Sol*) in [`js/astronomy.js`](js/astronomy.js) and [`js/instruments.js`](js/instruments.js), verified in [`tests/astronomy.test.mjs`](tests/astronomy.test.mjs) and [`tests/instruments.test.mjs`](tests/instruments.test.mjs).
+   - Added adjustable quoin/elevation angle support (`gunElevationRange`, `gunModelDirection`, `gunMuzzlePose`, `setElevation`) across [`js/gunnery-models.js`](js/gunnery-models.js), [`js/gunnery-control.js`](js/gunnery-control.js), and [`js/gunnery-ui.js`](js/gunnery-ui.js), verified in [`tests/gunnery-models.test.mjs`](tests/gunnery-models.test.mjs) and [`tests/gunnery-control.test.mjs`](tests/gunnery-control.test.mjs).
+3. **Stage 2 — Forest Representation & Multi-Tier Stand Replacement (`<= 6M` total triangles)**
+4. **Stage 1 — Procedural Coastal World Generation (Spanish Main ~1550 -> Global Scale)**
+
 ## October 24: procedural coastal world generation (Spanish Main ~1550 -> global scale)
 
 The user specifies a core architectural direction: **Waterworld needs a system

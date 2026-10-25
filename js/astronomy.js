@@ -67,3 +67,59 @@ export function writeAstronomyFrame(frame,clock){
   frame.set(m.up,104);frame[107]=m.phase;frame.set(m.sunDirection,108);frame[111]=m.lambert;
   frame[112]=active?1:0;frame[113]=active&&clock.stars?s.starVisibility:0;frame[114]=active&&clock.constellations?s.starVisibility:0;frame[115]=active&&s.moonShadows?1:0;frame.set(s.starRotation,116);
 }
+
+const POLARIS_STAR=OCEAN_STARS.find(s=>s[0]===11767)||OCEAN_STARS[0];
+export function horizonDipDegrees(eyeHeightMetres=1.7){
+  return (1.76/60)*Math.sqrt(Math.max(0,Number(eyeHeightMetres)||0));
+}
+export function celestialNavigationSight(state,{eyeHeight=state?.observer?.height??1.7}={}){
+  if(!state?.date||!state?.observer||!state?.sun)throw new Error('Celestial navigation sight requires an astronomy state');
+  const A=OceanAstronomyEngine,t=new Date(state.date),o=new A.Observer(state.observer.latitude,state.observer.longitude,Math.max(0,eyeHeight));
+  const dip=horizonDipDegrees(eyeHeight);
+  const years=(t.getTime()-ASTRO_J2000)/ASTRO_YEAR_MS,s=POLARIS_STAR;
+  const eqj=astroUnit([s[2]+s[5]*years,s[3]+s[6]*years,s[4]+s[7]*years]);
+  const m=state.starRotation;
+  const dir=[m[0]*eqj[0]+m[4]*eqj[1]+m[8]*eqj[2],m[1]*eqj[0]+m[5]*eqj[1]+m[9]*eqj[2],m[2]*eqj[0]+m[6]*eqj[1]+m[10]*eqj[2]];
+  const polarisGeoAlt=Math.asin(astroClamp(dir[1],-1,1))/ASTRO_RAD;
+  const polarisAz=((Math.atan2(dir[0],-dir[2])/ASTRO_RAD)%360+360)%360;
+  const eqd=A.RotateVector(A.Rotation_EQJ_EQD(t),new A.Vector(eqj[0],eqj[1],eqj[2],A.MakeTime(t)));
+  const polarisDec=Math.asin(astroClamp(eqd.z/Math.hypot(eqd.x,eqd.y,eqd.z),-1,1))/ASTRO_RAD;
+  const polarisRaHours=((Math.atan2(eqd.y,eqd.x)*12/Math.PI)+24)%24;
+  const gstHours=A.SiderealTime(t),lstHours=((gstHours+state.observer.longitude/15)%24+24)%24;
+  const polarisHaRad=(lstHours-polarisRaHours)*15*ASTRO_RAD;
+  const polarDistance=90-polarisDec,guardCorrection=-polarDistance*Math.cos(polarisHaRad);
+  const sunEq=A.Equator('Sun',t,o,true,true);
+  const sunHaHours=((lstHours-sunEq.ra+36)%24)-12;
+  const localSolarHours=((12+sunHaHours)%24+24)%24;
+  const utcHours=t.getUTCHours()+t.getUTCMinutes()/60+t.getUTCSeconds()/3600+t.getUTCMilliseconds()/3600000;
+  const estimatedLongitude=(((localSolarHours-utcHours)*15+540)%360)-180;
+  const zenithDistance=90-state.sun.geometricAltitude;
+  const meridianLatitude=state.observer.latitude>=sunEq.dec?sunEq.dec+zenithDistance:sunEq.dec-zenithDistance;
+  return {
+    eyeHeightMetres:Math.max(0,eyeHeight),
+    horizonDipDegrees:dip,
+    polaris:{
+      visible:polarisGeoAlt>0&&state.starVisibility>0.05,
+      geometricAltitude:polarisGeoAlt,
+      sextantAltitude:polarisGeoAlt+dip,
+      azimuth:polarisAz,
+      declination:polarisDec,
+      polarDistanceDegrees:polarDistance,
+      guardCorrectionDegrees:guardCorrection,
+      altitudeLatitude:polarisGeoAlt,
+      estimatedLatitude:polarisGeoAlt+guardCorrection,
+    },
+    solar:{
+      visible:state.sun.altitude>0,
+      altitude:state.sun.altitude,
+      geometricAltitude:state.sun.geometricAltitude,
+      sextantAltitude:state.sun.altitude+dip,
+      azimuth:state.sun.azimuth,
+      declination:sunEq.dec,
+      zenithDistance,
+      meridianLatitude,
+      localSolarHours,
+      estimatedLongitude,
+    },
+  };
+}

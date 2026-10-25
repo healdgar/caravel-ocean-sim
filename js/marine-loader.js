@@ -39,7 +39,7 @@ export function createDeferredMarineLife(options,createRenderer=createMarineLife
     },
     encode(pass){renderer?.encode(pass);},
     draw(pass){renderer?.draw(pass);},
-    drawSubmerged(pass){renderer?.drawSubmerged(pass);},
+    drawSubmerged(pass,above=false){renderer?.drawSubmerged(pass,above);},
     destroy(){destroyed=true;state.clear();renderer?.destroy();renderer=null;},
   };
 }

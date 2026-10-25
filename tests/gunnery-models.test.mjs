@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createGunDefinitions,gunMuzzlePose,createGunRecoilMap,updateGunRecoilVertices} from '../js/gunnery-models.js';
+import {createGunDefinitions,gunMuzzlePose,gunElevationRange,createGunRecoilMap,updateGunRecoilVertices} from '../js/gunnery-models.js';
 import {createShipAssetCache} from '../js/ship-mesh.js';
 import {VICTORY_DESIGN,victoryVesselDeck,victorySheer} from '../js/models/victory.js';
 import {NINA_DESIGN} from '../js/models/nina.js';
@@ -130,4 +130,16 @@ test('recoil map rejects indexed vertices shared by static structure instead of 
   const asset={vertices:new Float32Array(27),indices:new Uint32Array([0,1,2,0,1,2]),groups:[
     {firstVertex:0,vertexCount:3,motion:{type:'gun-recoil',gunId:0,axis:[1,0,0]}}]};
   assert.throws(()=>createGunRecoilMap(asset),/shared with fixed/);
+});
+
+test('quoin elevation tilts the muzzle vector within physical carriage and swivel bounds while keeping unit length',()=>{
+  for(const modelId of ['nina','victory']){
+    const boat={...boatFor(modelId),heading:0,pitch:0,roll:0},gun=createGunDefinitions(modelId)[0],range=gunElevationRange(gun);
+    const level=gunMuzzlePose(gun,boat),raised=gunMuzzlePose({...gun,elevation:6},boat),depressed=gunMuzzlePose({...gun,elevation:-3},boat);
+    const clampedHigh=gunMuzzlePose({...gun,elevation:45},boat),atMax=gunMuzzlePose({...gun,elevation:range.max},boat);
+    close(Math.hypot(...raised.direction),1,1e-12);
+    assert.ok(raised.direction[1]>level.direction[1],'positive quoin elevation raises muzzle angle');
+    assert.ok(depressed.direction[1]<level.direction[1],'negative quoin elevation depresses muzzle angle');
+    for(let i=0;i<3;i++)close(clampedHigh.direction[i],atMax.direction[i],1e-12);
+  }
 });

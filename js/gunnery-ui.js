@@ -17,6 +17,17 @@ export function createGunneryControls(parent,gunnery){
   }
   const cease=document.createElement('button');cease.textContent='Cease fire';cease.onclick=()=>{gunnery.cease();update();};section.append(cease);
   const standDown=document.createElement('button');standDown.textContent='Stand down gun crews';standDown.onclick=()=>{gunnery.standDown();update();};section.append(standDown);
+  const range=gunnery.elevationRange??{min:-4,max:10};
+  const elevationRow=document.createElement('label');elevationRow.className='gunnery-elevation';
+  const elevationName=document.createElement('span');elevationName.textContent='Quoin elevation';
+  const elevationInput=document.createElement('input');
+  Object.assign(elevationInput,{type:'range',min:range.min,max:range.max,step:.5,value:gunnery.elevation??0,id:'guns-elevation'});
+  elevationInput.setAttribute('aria-label','Quoin elevation');
+  const elevationOutput=document.createElement('output');elevationOutput.id='guns-elevation-value';
+  const formatElevation=v=>`${v>0?'+':''}${Number(v).toFixed(1)}°`;
+  elevationOutput.textContent=formatElevation(gunnery.elevation??0);
+  elevationInput.oninput=()=>{const v=gunnery.setElevation?.(Number(elevationInput.value))??Number(elevationInput.value);elevationOutput.textContent=formatElevation(v);};
+  elevationRow.append(elevationName,elevationInput,elevationOutput);section.append(elevationRow);
   parent.append(section);
   function update(){
     standDown.disabled=!gunnery.selectedSide;

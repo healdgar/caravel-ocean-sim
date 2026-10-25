@@ -116,9 +116,10 @@ fn underwaterBoundary(world:vec3f,normal:vec3f,view:vec3f,skyHemi:vec3f,foam:f32
   var transmitted=vec3f(0);
   if(reflectance<.99999&&dot(airRay,airRay)>.00001){
     let dir=normalize(airRay);
-    // Sky LUT and solar disc share the ordinary above-water illumination. Local
-    // surface slopes distort the window; the medium pass attenuates the eye leg.
-    transmitted=(textureSampleLevel(envCube,sampR,normalize(vec3f(dir.x,max(dir.y,.0005),dir.z)),0.0).rgb+sunDisk(dir)*sunVis[0]+lunarDisk(dir)*sunVis[1])*(1.0-reflectance);
+    // Sky LUT, solar disc and refracted above-water geometry share the Snell
+    // window. Local surface slopes distort the window; the medium pass attenuates the eye leg.
+    let sky=textureSampleLevel(envCube,sampR,normalize(vec3f(dir.x,max(dir.y,.0005),dir.z)),0.0).rgb+sunDisk(dir)*sunVis[0]+lunarDisk(dir)*sunVis[1];
+    transmitted=waterAirTransmission(world,dir,sky)*(1.0-reflectance);
   }
   let reflected=F.waterCol.rgb*(skyHemi*1.5+(sunIlluminance()*sunVis[0]*max(F.sunDir.y,0.0)+lunarIlluminance()*sunVis[1]*max(lunarDirection().y,0.0))*.22);
   let bubbles=foamLight*.3+skyHemi*.06;

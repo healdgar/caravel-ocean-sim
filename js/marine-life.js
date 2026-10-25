@@ -267,9 +267,9 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
       if(count)device.queue.writeBuffer(effects,0,effectValues,0,count*12);
       effectCount=count;
     },
-    drawSubmerged(pass){
+    drawSubmerged(pass,above=false){
       if(!submerged||!state.active)return;
-      const mesh=meshes[state.animals[0].type];submerged.bind(pass);pass.setBindGroup(0,submergedGroup);if(submergedWaves)pass.setBindGroup(1,submergedWaves[surfaceWaves.current]);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);
+      const mesh=meshes[state.animals[0].type];submerged.bind(pass,above);pass.setBindGroup(0,submergedGroup);if(submergedWaves)pass.setBindGroup(1,submergedWaves[surfaceWaves.current]);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);
     },
     draw(pass){
       if(state.active){const mesh=meshes[state.animals[0].type];bind(pass,0);pass.setVertexBuffer(0,mesh.vertex);pass.setIndexBuffer(mesh.index,'uint32');pass.drawIndexed(mesh.count,state.count);}

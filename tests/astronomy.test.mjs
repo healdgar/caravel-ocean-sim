@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {astronomyDirection,astronomyObserver,computeAstronomy,createAstronomyClock,propagatedStars,writeAstronomyFrame} from '../js/astronomy.js';
+import {astronomyDirection,astronomyObserver,computeAstronomy,createAstronomyClock,propagatedStars,writeAstronomyFrame,horizonDipDegrees,celestialNavigationSight} from '../js/astronomy.js';
 import {createShareLink} from '../js/sharing.js';
 import {SKY_CLOUD_FUNCS,ENV_CUBE} from '../js/wgsl/sky.js';
 import {SKY_BG} from '../js/wgsl/ocean.js';
@@ -74,4 +74,22 @@ test('environment excludes both explicit celestial discs while the actual sky in
   assert.match(SKY_CLOUD_FUNCS,/if \(withSun\) \{[^}]*sunDisk[^}]*lunarDisk[\s\S]*?\}/);
   assert.match(ENV_CUBE,/skyRadiance\(dir, false\)/);
   assert.equal((SKY_BG.match(/lunarDisk\(dir\)/g)||[]).length,1);
+});
+
+test('celestial navigation sight helpers recover Polaris latitude with guard correction and solar meridian sight',()=>{
+  close(horizonDipDegrees(0),0,1e-12);
+  close(horizonDipDegrees(4),1.76*2/60,1e-12);
+  const nightState=computeAstronomy('2026-10-21T02:00:00Z',{latitude:28.5,longitude:-63.238,height:2.5});
+  const nightSight=celestialNavigationSight(nightState);
+  assert.equal(nightSight.polaris.visible,true);
+  close(nightSight.polaris.estimatedLatitude,28.5,0.2,'modern Polaris Regimento do Norte latitude');
+  const columbusNight=computeAstronomy('1492-10-12T04:00:00Z',{latitude:24.1,longitude:-74.5,height:2.5});
+  const columbusSight=celestialNavigationSight(columbusNight);
+  assert.ok(columbusSight.polaris.polarDistanceDegrees>3.0,'1492 Polaris was >3 degrees from the celestial pole');
+  close(columbusSight.polaris.estimatedLatitude,24.1,0.35,'1492 Polaris guard-corrected latitude');
+  const noonState=computeAstronomy('2026-03-20T16:20:00Z',{latitude:17.635,longitude:-63.238,height:2.5});
+  const noonSight=celestialNavigationSight(noonState);
+  assert.equal(noonSight.solar.visible,true);
+  close(noonSight.solar.meridianLatitude,17.635,0.25,'equinox meridian solar latitude');
+  close(noonSight.solar.estimatedLongitude,-63.238,2.5,'apparent solar time longitude');
 });

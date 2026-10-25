@@ -94,9 +94,9 @@ export async function createAnchorRenderer({device,frameUBO,transView,skyView,sa
       solidCount=template.solidCount;totalCount=solidCount+writeAnchorGPUState(state,boat,values);
       device.queue.writeBuffer(stateBuffer,0,values);
     },
-    drawSubmerged(pass){
+    drawSubmerged(pass,above=false){
       if(!submerged||!solidCount)return;
-      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedShadows);pass.setVertexBuffer(0,buffer);pass.draw(solidCount);
+      submerged.bind(pass,above);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedShadows);pass.setVertexBuffer(0,buffer);pass.draw(solidCount);
     },
     draw(pass){
       pass.setVertexBuffer(0,buffer);

@@ -31,7 +31,7 @@ export function createSailGeometry(subdivisions=6){
     indices.push([id(u,v),id(u+1,v),id(u,v+1)]);
     if(u+v<subdivisions-1)indices.push([id(u+1,v),id(u+1,v+1),id(u,v+1)]);
   }
-  return {key:new Float64Array(24).fill(NaN),samples,indices,
+  return {key:new Float64Array(24).fill(NaN),supportKey:new Float64Array(6).fill(NaN),samples,indices,
     panels:Array.from({length:3*indices.length},()=>({
       point:new Float64Array(3),normal:new Float64Array(3),area:0,aspect:1,
     })),coefficients:{lift:0,drag:0,separation:0},force:new Float64Array(3)};
@@ -146,14 +146,20 @@ export function updateSailGeometry(geometry,boat,poses){
   if(geometry.surfaceRig)return updateSurfaceSailGeometry(geometry,boat);
   if(geometry.victory)return updateVictorySailGeometry(geometry,boat);
   const sx=boat.beam/3.6,sy=HULL_VERTICAL_SCALE,sz=boat.length/12;
-  const {samples,indices}=geometry;
+  const {samples,indices,supportKey}=geometry;
+  let supportsMoved=false;
+  for(let m=0;m<3;m++){
+    const p=poses[m],at=m*2;
+    if(supportKey[at]!==p.side||supportKey[at+1]!==p.dip)supportsMoved=true;
+    supportKey[at]=p.side;supportKey[at+1]=p.dip;
+  }
   for(let m=0;m<3;m++){
     const p=poses[m],at=m*8,key=geometry.key;
-    if(key[at]===sx&&key[at+1]===sz&&key[at+2]===p.opening&&key[at+3]===p.side
+    if(!supportsMoved&&key[at]===sx&&key[at+1]===sz&&key[at+2]===p.opening&&key[at+3]===p.side
       &&key[at+4]===p.dip&&key[at+5]===p.deployed&&key[at+6]===p.fill&&key[at+7]===p.pressure)continue;
     key.set([sx,sz,p.opening,p.side,p.dip,p.deployed,p.fill,p.pressure],at);
     const points=samples.map(([u,v])=>{
-      const q=lateenClothPoint(m,u,v,p,0,0);q[0]*=sx;q[1]*=sy;q[2]*=sz;return q;
+      const q=lateenClothPoint(m,u,v,p,0,0,true,poses);q[0]*=sx;q[1]*=sy;q[2]*=sz;return q;
     });
     let total=0;
     for(let j=0;j<indices.length;j++){

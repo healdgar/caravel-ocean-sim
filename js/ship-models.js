@@ -244,10 +244,10 @@ export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-
   // Avoid a divide/multiply round trip at the animated tiller grip.
   if(node.motion?.type==='tiller-grip'&&space==='vessel'){const p=tillerPoint(boat,along);for(let i=0;i<3;i++)out[i]=p[i];return out;}
   function position(n){
-    const mast=n.motion?.mast,pose=boat.sailState?.rig?.[mast]??{side:-1,opening:.30,dip:0,fill:0,deployed:1,pressure:1};
-    if(n.motion?.type==='lateen-cloth')return lateenClothPoint(mast,n.motion.u,n.motion.v,pose,time,wind);
+    const mast=n.motion?.mast,poses=boat.sailState?.rig,pose=poses?.[mast]??{side:-1,opening:.30,dip:0,fill:0,deployed:1,pressure:1};
+    if(n.motion?.type==='lateen-cloth')return lateenClothPoint(mast,n.motion.u,n.motion.v,pose,time,wind,true,poses);
     if(n.motion?.type==='lateen-yard')return lateenYardPoint(mast,n.motion.point,pose);
-    if(n.motion?.type==='runner')return climbingPoint(mast,side,step,boat.sailState?.rig?.[mast]);
+    if(n.motion?.type==='runner')return climbingPoint(mast,side,step,poses?.[mast]);
     if(n.motion?.type==='working-fall')return workingTacklePoint(mast,height);
     if(n.motion?.type==='tiller-grip'){const p=tillerPoint(boat,along);return [p[0]/(boat.beam/model.designFrame.beam),p[1]/model.designFrame.verticalScale,p[2]/(boat.length/model.designFrame.length)];}
     if(n.motion)throw Error('Unknown structure motion: '+n.motion.type);

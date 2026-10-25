@@ -64,20 +64,27 @@ fn standingPoint(line:RigLine,t:f32,pose:vec4f)->vec3f {
   let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
   return mix(point,clear,ease);
 }
-fn canvasSupport(x:f32,p:vec3f,a:vec3f,b:vec3f,r:f32,side:f32)->f32 {
+fn canvasSupport(x:f32,p:vec3f,a:vec3f,b:vec3f,r:f32,side:f32,inboard:bool)->f32 {
   if(p.y<min(a.y,b.y)-.2||p.y>max(a.y,b.y)+.2){return x;}
   let t=clamp((p.y-a.y)/(b.y-a.y),0.0,1.0);let centre=mix(a,b,t);let delta=p.yz-centre.yz;
+  if(inboard){
+    let limit=side*centre.x-r-.10+dot(delta,delta)/.65;
+    let h=clamp(.5+.5*(limit-x)/.06,0.0,1.0);return mix(limit,x,h)-.06*h*(1.0-h);
+  }
   let limit=side*centre.x+r+.10-dot(delta,delta)/.65;
   let h=clamp(.5+.5*(x-limit)/.06,0.0,1.0);return mix(limit,x,h)+.06*h*(1.0-h);
 }
 fn supportedCanvas(p:vec3f,id:u32,v:f32)->vec3f {
-  let pose=hull.lateen[id-1u];let side=pose.y;var x=p.x*side;
+  let mast=id-1u;let pose=hull.lateen[mast];let side=pose.y;
+  let luffX=array<f32,3>(.46,.40,.34)[mast]+pose.z*.22;var x=p.x*side;
   for(var i=0u;i<3u;i++){
-    x=canvasSupport(x,p,rigMastPoint(i,rigMasts[i].w),rigMastPoint(i,rigMasts[i].y),array<f32,3>(${RIG_MASTS.map(m=>m.r)})[i],side);
+    x=canvasSupport(x,p,rigMastPoint(i,rigMasts[i].w),rigMastPoint(i,rigMasts[i].y),array<f32,3>(${RIG_MASTS.map(m=>m.r)})[i],side,false);
   }
   for(var i=0u;i<${RIG_LINES.filter(l=>['shroud','runner','stay','fall','forestay'].includes(l.kind)).length}u;i++){
-    let line=rigLines[i];let t=clamp((p.y-line.a.y)/(line.b.y-line.a.y),0.0,1.0);let q=standingPoint(line,t,pose);
-    x=canvasSupport(x,p,vec3f(q.x,line.a.y,q.z),vec3f(q.x,line.b.y,q.z),line.a.w,side);
+    let line=rigLines[i];let t=clamp((p.y-line.a.y)/(line.b.y-line.a.y),0.0,1.0);
+    let lineMast=u32(line.control.y);let owner=hull.lateen[lineMast];let q=standingPoint(line,t,owner);
+    let inboard=(lineMast<mast)&&(line.control.z*side>0.0)&&(owner.y*side<0.0)&&(side*q.x>luffX+line.a.w+.16);
+    x=canvasSupport(x,p,vec3f(q.x,line.a.y,q.z),vec3f(q.x,line.b.y,q.z),line.a.w,side,inboard);
   }
   return vec3f(mix(p.x,side*x,smoothstep(0.0,.08,v)),p.yz);
 }

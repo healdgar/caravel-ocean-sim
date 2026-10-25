@@ -252,12 +252,18 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
     },
-    drawSubmerged(pass){
-      if(!submerged||(!submergedCount&&!fineMesh?.submergedIndices.length))return;
-      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);
-      if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
+    drawSubmerged(pass,above=false){
+      if(!submerged)return;
+      if(above){
+        submerged.bind(pass,true);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
+        if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
+      }else{
+        if(!submergedCount&&!fineMesh?.submergedIndices.length)return;
+        submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);
+        if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
+      }
       if(submergedGround){
-        submergedGround.bind(pass);pass.setBindGroup(0,submergedGroundGroup);
+        submergedGround.bind(pass,above);pass.setBindGroup(0,submergedGroundGroup);
         for(let i=0;i<groundBatches.length;i++)if(groundBatches[i].count){
           pass.setVertexBuffer(0,groundMeshes[i].buffer);pass.setVertexBuffer(1,groundBatches[i].buffer);pass.draw(groundMeshes[i].count,groundBatches[i].count);
         }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {instrumentReadout} from '../js/instruments.js';
+import {computeAstronomy} from '../js/astronomy.js';
 import {sailingState,advanceSails,sailForces} from '../js/sailing.js';
 import {KNOT_TO_MPS} from '../js/boat.js';
 
@@ -26,4 +27,8 @@ test('wind dial follows the boat, not the camera or the world wind bearing',()=>
   assert.equal(instrumentReadout(b).degrees,-90);
   b.heading=90;advanceSails(b,.1,8,0);sailForces(b,8,0,0);
   assert.equal(instrumentReadout(b).direction,'Astern');
+  const astro=computeAstronomy('2026-10-21T02:00:00Z',{latitude:17.635,longitude:-63.238,height:2});
+  const withNav=instrumentReadout({...b,eye:2.2},astro);
+  assert.ok(withNav.navigation?.polaris.visible);
+  assert.ok(Math.abs(withNav.navigation.polaris.estimatedLatitude-17.635)<0.2);
 });

@@ -324,11 +324,11 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }
     },
-    drawSubmerged(pass){
+    drawSubmerged(pass,above=false){
       if(!submerged||!drawEnabled)return;
-      submerged.bind(pass);pass.setBindGroup(1,submergedLighting);
+      submerged.bind(pass,above);pass.setBindGroup(1,submergedLighting);
       for(const b of batches){if(!b.people.length)continue;pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(b.index,'uint32');pass.drawIndexed(b.model.indices.length,b.people.length);}
-      gunTools.drawSubmerged(pass);
+      gunTools.drawSubmerged(pass,above);
     },
     draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},

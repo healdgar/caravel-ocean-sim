@@ -6,7 +6,7 @@ import { SCENE_SHADOW_SAMPLE } from './shadows.js';
 // Ocean surface + sky background rendering.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
-import { WATER_TRANSMISSION } from './water-optics.js';
+import { WATER_TRANSMISSION, WATER_AIR_TRANSMISSION } from './water-optics.js';
 import { UNDERWATER_INTERFACE, waterCausticFunctions } from './underwater.js';
 
 const RENDER_BINDINGS = /* wgsl */ `
@@ -360,7 +360,7 @@ export function createCoastalOcean(coast,depthFirst){
 export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false){
   const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
     'mix(body,hit.source.rgb*waterCausticFactorFiltered(waterSourcePosition(hit.uv,hit.source.a),world.y,waterCausticPixelFootprint(waterSourcePosition(hit.uv,hit.source.a))),transmission)');
-  const code=oceanSource(coast,surfaceWaves)+transmission
+  const code=oceanSource(coast,surfaceWaves)+transmission+WATER_AIR_TRANSMISSION
     +waterCausticFunctions({surfaceWaves})+UNDERWATER_INTERFACE
     +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')

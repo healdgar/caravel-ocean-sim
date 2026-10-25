@@ -51,10 +51,18 @@ export function createGunDefinitions(boatOrModelId='nina'){
   if(!GUNNERY_MODEL_GUNS[id])throw new Error('No playable gun attachments for '+id);
   return GUNNERY_MODEL_GUNS[id];
 }
+export function gunElevationRange(gun){
+  return gun?.kind==='swivel'?{min:-6,max:14}:{min:-4,max:10};
+}
 export function gunModelScale(boat){return[(boat.beam??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.beam:NINA_DESIGN.runtime.beam))/3.6,
   vesselVerticalScale(boat),(boat.length??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.length:NINA_DESIGN.runtime.length))/12];}
-export function gunModelDirection(gun,scale){
-  const d=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...d);return d.map(v=>v/n);
+export function gunModelDirection(gun,scale,elevationDegrees=0){
+  const d=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...d),base=d.map(v=>v/n);
+  if(!Number.isFinite(elevationDegrees)||Math.abs(elevationDegrees)<1e-12)return base;
+  const range=gunElevationRange(gun),elev=Math.max(range.min,Math.min(range.max,elevationDegrees))*Math.PI/180;
+  const h=Math.hypot(base[0],base[2]);if(h<1e-9)return base;
+  const angle=Math.atan2(base[1],h)+elev;
+  return [base[0]/h*Math.cos(angle),Math.sin(angle),base[2]/h*Math.cos(angle)];
 }
 
 // Matches boatRotate's R_heading R_pitch R_roll order. Its compass heading
@@ -62,8 +70,10 @@ export function gunModelDirection(gun,scale){
 // Translational velocity is physical sailing speed/leeway, never compressed
 // voyage-coordinate speed. Point velocity includes omega cross muzzle offset.
 export function gunMuzzlePose(gun,boat){
-  const scale=gunModelScale(boat),localDirection=gunModelDirection(gun,scale),offset=Math.max(0,Number.isFinite(gun.offset)?gun.offset:0);
-  const localPosition=gun.muzzleDesign.map((v,i)=>v*scale[i]-localDirection[i]*offset),direction=[0,0,0],r=[0,0,0];
+  const scale=gunModelScale(boat),elevation=Number.isFinite(gun.elevation)?gun.elevation:Number.isFinite(boat?.gunneryElevation)?boat.gunneryElevation:0;
+  const baseDirection=gunModelDirection(gun,scale,0),localDirection=elevation?gunModelDirection(gun,scale,elevation):baseDirection;
+  const offset=Math.max(0,Number.isFinite(gun.offset)?gun.offset:0);
+  const localPosition=gun.muzzleDesign.map((v,i)=>v*scale[i]-baseDirection[i]*offset),direction=[0,0,0],r=[0,0,0];
   const heading=(boat.heading??0)*Math.PI/180,pitch=boat.pitch??0,roll=boat.roll??0;
   boatRotate(r,...localPosition,heading,pitch,roll);boatRotate(direction,...localDirection,heading,pitch,roll);
   const ch=Math.cos(heading),sh=Math.sin(heading),cp=Math.cos(pitch),sp=Math.sin(pitch);

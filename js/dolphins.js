@@ -41,9 +41,9 @@ export async function createDolphins({device,frameUBO,transView,skyView,sampler,
       }
       if(state.active)device.queue.writeBuffer(animals,0,values);if(splashCount)device.queue.writeBuffer(splashes,0,splashValues,0,splashCount*12);
     },
-    drawSubmerged(pass){
+    drawSubmerged(pass,above=false){
       if(!submerged||!state.active)return;
-      submerged.bind(pass);pass.setBindGroup(0,submergedGroup);if(submergedWaves)pass.setBindGroup(1,submergedWaves[surfaceWaves.current]);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);
+      submerged.bind(pass,above);pass.setBindGroup(0,submergedGroup);if(submergedWaves)pass.setBindGroup(1,submergedWaves[surfaceWaves.current]);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);
     },
     draw(pass){
       if(state.active){bind(pass,0);pass.setVertexBuffer(0,vertex);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(mesh.indices.length,state.count);}

@@ -1,8 +1,9 @@
 import { boatForwardSpeed, KNOT_TO_MPS } from './boat.js';
 import { sailingState, pointOfSail } from './sailing.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
+import {celestialNavigationSight} from './astronomy.js';
 
-export function instrumentReadout(boat){
+export function instrumentReadout(boat,astronomyState=boat?.astronomy??null){
   const s=sailingState(boat),speed=boatForwardSpeed(boat)/KNOT_TO_MPS;
   const degrees=s.apparentAngle*180/Math.PI,angle=Math.abs(degrees);
   const direction=angle<3?'Ahead':angle>177?'Astern':`${Math.round(angle)}° ${degrees<0?'port':'starboard'}`;
@@ -15,8 +16,9 @@ export function instrumentReadout(boat){
   else if(angle<42&&s.apparentSpeed>=.5)cue='In irons · rudder needs water flow';
   else if(s.rig.some(p=>p.pressure<-.5))cue+=' · bad tack';
   const heading=Math.round(((boat.heading??0)%360+360)%360)%360;
+  const navigation=astronomyState?.date?celestialNavigationSight(astronomyState,{eyeHeight:boat.eye??1.7}):null;
   return {heading:String(heading).padStart(3,'0')+'°',speed:(Math.abs(speed)<.05?0:speed).toFixed(1),motion:speed<-.05?'ASTERN':'AHEAD',
-    wind:(s.apparentSpeed/KNOT_TO_MPS).toFixed(1),degrees,direction,calm:s.apparentSpeed<.5,cue};
+    wind:(s.apparentSpeed/KNOT_TO_MPS).toFixed(1),degrees,direction,calm:s.apparentSpeed<.5,cue,navigation};
 }
 
 // Presentation only: the instruments never change the physics or resolution.

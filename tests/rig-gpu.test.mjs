@@ -64,6 +64,10 @@ test('rendered lateen rig has physical clearance on both tacks, while reefing, l
       for(const side of [-1,1])for(const opening of [.3,.6,1.15])for(const deployed of [0,.25,.5,1])for(const fill of [0,1])for(const pressure of [-1,0,1]){
         const poses=createLateenPoses([deployed,deployed,deployed],side);poses.forEach(p=>Object.assign(p,{opening,fill,pressure}));states.push({poses,time:states.length*.137,label:`set ${side}/${opening}/${deployed}/${fill}/${pressure}`});
       }
+      for(const sides of [[-1,1,-1],[1,-1,1]])for(const pressure of [-1,0]){
+        const poses=createLateenPoses([1,1,1]);poses.forEach((p,m)=>Object.assign(p,{side:sides[m],opening:.3,fill:1,pressure}));
+        states.push({poses,time:0,label:`mixed supports ${sides.join(',')}/${pressure}`});
+      }
       for(const wind of [0,Math.PI]){
         const b={length:20,beam:6,heading:0,sailFore:1,sailMain:1,sailMizzen:1};
         for(let i=0;i<60;i++)advanceSails(b,.1,12,wind);
@@ -97,7 +101,7 @@ test('rendered lateen rig has physical clearance on both tacks, while reefing, l
         const clearance=rigClearance(tris,lines);
         if(Object.keys(clearance.failures).length)failures.push({state:state.label,hits:clearance.failures});
         for(let i=0;i<clothCount;i+=79){
-          const m=Math.round(points[i*9+6]%1*16)-1,expected=lateenClothPoint(m,points[i*9+7],points[i*9+8],state.poses[m],state.time,14);
+          const m=Math.round(points[i*9+6]%1*16)-1,expected=lateenClothPoint(m,points[i*9+7],points[i*9+8],state.poses[m],state.time,14,true,state.poses);
           parity=Math.max(parity,Math.hypot(...p(i).map((v,k)=>v-expected[k])));
           normalError=Math.max(normalError,Math.abs(Math.hypot(...values.subarray(i*8+4,i*8+7))-1));
         }

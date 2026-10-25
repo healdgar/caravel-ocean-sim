@@ -107,3 +107,55 @@ fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
   return mix(body,hit.source.rgb,transmission);
 }
 `;
+
+// Above-water opaque scene radiance and forward camera depth captured for
+// underwater Snell's window transmission (water -> air refraction).
+export const WATER_AIR_TRANSMISSION=/* wgsl */ `
+@group(3)@binding(4)var aboveWaterSource:texture_2d<f32>;
+fn waterAboveSourceSample(uv:vec2f)->vec4f {
+  let dimensions=vec2i(textureDimensions(aboveWaterSource));
+  let pixel=clamp(vec2i(floor(uv*vec2f(dimensions))),vec2i(0),dimensions-1);
+  let nearest=textureLoad(aboveWaterSource,pixel,0);
+  if(nearest.a<=0.0){return vec4f(0);}
+  let filtered=textureSampleLevel(aboveWaterSource,opticsSampler,uv,0.0);
+  let continuous=abs(filtered.a-nearest.a)<max(.02,nearest.a*.005);
+  return vec4f(select(nearest.rgb,filtered.rgb,continuous),nearest.a);
+}
+fn waterAboveSourceValid(uv:vec2f,source:vec4f,surface:vec3f,surfaceDepth:f32)->bool {
+  if(any(uv<=vec2f(0))||any(uv>=vec2f(1))||source.a<=surfaceDepth-.05){return false;}
+  return waterSourcePosition(uv,source.a).y>=surface.y-.035;
+}
+fn waterTraceAboveSource(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,start:vec2f)->WaterSourceHit {
+  var hit:WaterSourceHit;hit.valid=0.0;hit.path=0.0;hit.uv=start;
+  hit.source=waterAboveSourceSample(hit.uv);
+  if(!waterAboveSourceValid(hit.uv,hit.source,world,surfaceDepth)){return hit;}
+  for(var refine=0u;refine<2u;refine++){
+    hit.path=clamp((hit.source.a-surfaceDepth)/alongForward,0.0,1500.0);
+    hit.uv=waterProject(world+ray*hit.path);
+    hit.source=waterAboveSourceSample(hit.uv);
+    if(!waterAboveSourceValid(hit.uv,hit.source,world,surfaceDepth)){return hit;}
+  }
+  hit.path=clamp((hit.source.a-surfaceDepth)/alongForward,0.0,1500.0);hit.valid=1.0;return hit;
+}
+fn waterAirTransmission(world:vec3f,airRay:vec3f,sky:vec3f)->vec3f {
+  if(optics.y<.5){return sky;}
+  let forward=normalize(F.camFwd.xyz);
+  let surfaceDepth=dot(world-F.camPos.xyz,forward);
+  if(surfaceDepth<=0.0){return sky;}
+  let ray=normalize(airRay);
+  let alongForward=dot(ray,forward);
+  if(alongForward<=.001){return sky;}
+  var hit=waterTraceAboveSource(world,ray,alongForward,surfaceDepth,waterProject(world));
+  if(hit.valid<.5){
+    let distances=array<f32,4>(2.0,8.0,24.0,72.0);
+    for(var sample=0u;sample<4u;sample++){
+      hit=waterTraceAboveSource(world,ray,alongForward,surfaceDepth,waterProject(world+ray*distances[sample]));
+      if(hit.valid>.5){break;}
+    }
+  }
+  if(hit.valid<.5){return sky;}
+  let edge=min(min(hit.uv.x,1.0-hit.uv.x),min(hit.uv.y,1.0-hit.uv.y));
+  let available=smoothstep(0.0,.025,edge);
+  return mix(sky,hit.source.rgb,available);
+}
+`;
