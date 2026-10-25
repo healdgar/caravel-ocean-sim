@@ -194,3 +194,10 @@ test('forest rendering cannot fall back to the legacy generic mask or threshold 
   assert.match(source,/multisample:\{count:samples,alphaToCoverageEnabled:false\}/);
   assert.match(source,/nearPixels=3/);assert.match(source,/nearPixels<=3/);
 });
+test('skipNative and skipRoots defer heavy native geometry and Saba roots for procedural/mobile landfalls',async()=>{
+  const f=nativeFixture(),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
+  const fetchAsset=async name=>{requests.push(name);return name==='manifest.json'?Response.json(f.manifest):new Response(new Uint8Array(f.streams[name]??f.textures[name]));};
+  const pack=await loadForestScenery({assets,fetchAsset,loadAtlases:false,loadVolumes:false,skipNative:true,skipRoots:true});
+  assert.equal(pack.skipNative,true);assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.roots.length,0);
+  assert.deepEqual(requests,['manifest.json']);
+});

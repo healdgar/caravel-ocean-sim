@@ -73,22 +73,24 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const isKnownSpanishMain=Boolean(regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam));
   const hasCustomCoords=search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon')));
   const useProcedural=isKnownSpanishMain||(hasCustomCoords&&regionParam!=='saba');
+  const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
+  const skipNativeForest=useProcedural||isMobile;
   const proceduralPack=useProcedural?generateProceduralCoastalPack(isKnownSpanishMain?regionParam:{
     id:regionParam||undefined,
     name:search.get('regionName')||undefined,
     latitude:Number(search.get('lat')),
     longitude:Number(search.get('lon')),
-  },{size:257,biomeSize:256,albedoSize:512,vegetationCandidates:24000}):null;
+  },{size:193,biomeSize:192,albedoSize:256,vegetationCandidates:16000}):null;
   let canopyFailure=null;
   let forestFailure=null;
-  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery().catch(error=>{forestFailure=error.message;return null;});
+  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({skipNative:skipNativeForest,skipRoots:useProcedural}).catch(error=>{forestFailure=error.message;return null;});
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
   let forestMassFailure=null;
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
-  const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest}).catch(error=>{forestMassFailure=error.message;return null;}):null);
+  const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest,manifestOnly:skipNativeForest}).catch(error=>{forestMassFailure=error.message;return null;}):null);
   // Regional native trees replace the entire old population. The small legacy
   // example is a fallback, never a second stand mixed into the new forest.
   const canopyPromise=forestPromise.then(forest=>proceduralPack||forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
@@ -294,8 +296,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     forestMiddlePack=await loadForestMiddle({forest:forestPack,mass:forestMassPack});
     if(forestMiddlePack?.manifest.recipe.leafShading==='field'&&!forestPack.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
   }catch(error){forestMiddlePack=null;forestMiddleFailure=error.message;}
-  if(forestMassPack&&!proceduralPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,middlePack:forestMiddlePack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
-  if(proceduralPack&&forestMassPack&&!forestAtlasDebug)try{
+  if(forestMassPack&&!forestMassPack.manifestOnly&&!proceduralPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,middlePack:forestMiddlePack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
+  if(skipNativeForest&&forestMassPack&&!forestAtlasDebug)try{
     const middleSource=forestMiddlePack??(forestMassPack.middleVertices?{vertices:forestMassPack.middleVertices,indices:forestMassPack.middleIndices,prototypes:forestMassPack.manifest.prototypes}:null);
     if(middleSource){
       const wood=forestMiddleWoodPartition(middleSource.vertices,middleSource.indices,middleSource.prototypes);
@@ -310,7 +312,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
   }catch(error){proceduralMiddle=null;forestMiddleFailure=error.message;}
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample):forestPack;
-  const activeForestMiddle=forestAtlasDebug?null:(proceduralPack?proceduralMiddle:forestMass?.middle??null);
+  const activeForestMiddle=forestAtlasDebug?null:(skipNativeForest?proceduralMiddle:forestMass?.middle??null);
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights,region:activeRegion,near:nearTile}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};

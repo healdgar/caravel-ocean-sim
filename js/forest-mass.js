@@ -140,9 +140,10 @@ function* forestMassChecks(manifest,streams,forest){
  return{manifest,vertices,indices,rootChunks,rootNeighbors,middleVertices,middleIndices,finiteValidated:true};
 }
 export function decodeForestMass(manifest,streams,forest){const iterator=forestMassChecks(manifest,streams,forest);let next;do{next=iterator.next();}while(!next.done);return next.value;}
-export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS}){
+export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false}){
  const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered native forest mass asset: '+name);const response=await fetchAsset(assets[name]);if(!response.ok)throw Error('Native forest mass asset unavailable: '+name);return response;};
  const manifest=validateForestMass(await(await load('manifest.json')).json(),forest);
+ if(manifestOnly)return{manifest,manifestOnly:true};
  if(!globalThis.crypto?.subtle||typeof DecompressionStream!=='function')throw Error('Native forest mass requires verified gzip transport');
  const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
  const streams={};

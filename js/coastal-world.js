@@ -1618,15 +1618,19 @@ export function buildCoastalMesh(regionSpec, heights) {
     }
   }
 
-  // Identify shoreline & harbor cells (`hi > -8 && lo < 14`) for crack-free 3x3 near-shore subdivision
+  // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free 3x3 subdivision
+  const subRadius = region.span * 0.22;
   const cellSub = new Uint8Array((n - 1) * (n - 1));
   for (let j = 0; j < n - 1; j++) {
+    const zCell = region.z + ((j + 0.5) / (n - 1) - 0.5) * region.span;
     for (let i = 0; i < n - 1; i++) {
+      const xCell = region.x + ((i + 0.5) / (n - 1) - 0.5) * region.span;
+      if (Math.hypot(xCell - region.x, zCell - region.z) > subRadius) continue;
       const k = j * n + i;
       const h00 = heights[k], h10 = heights[k + 1], h01 = heights[k + n], h11 = heights[k + n + 1];
       const lo = Math.min(h00, h10, h01, h11);
       const hi = Math.max(h00, h10, h01, h11);
-      if (hi > -8 && lo < 14) {
+      if (hi > -6 && lo < 10) {
         cellSub[j * (n - 1) + i] = 1;
       }
     }
