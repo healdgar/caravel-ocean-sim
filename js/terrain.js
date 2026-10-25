@@ -504,10 +504,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     portGeometry:proceduralPack.portGeometry,
     vegetation:proceduralPack.vegetation,
     beaches:proceduralPack.beaches,
+    views:proceduralPack.views,
+    port:proceduralPack.port,
   }:null;
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
+    if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
     heights.set(upgradedPack.heights);
     device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
     if(upgradedPack.biome&&upgradedPack.biome.byteLength===biome.byteLength){
@@ -649,7 +653,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     prepare:updateTrees,
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
-    height:heightSample,groundSample,region:activeRegion,views:proceduralPack?.views??null,port:proceduralPack?.port??null,
+    height:heightSample,groundSample,region:activeRegion,get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion),

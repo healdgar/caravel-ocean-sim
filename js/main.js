@@ -1274,6 +1274,18 @@ async function main() {
   };
   cameraDock.append(captainButton);
   panel.before(sharePanel);
+  let initial1550AutoRepositioned=false;
+  terrain?.discovery?.subscribe?.(disc=>{
+    if(!initial1550AutoRepositioned&&disc.applied&&disc.isCurated1550&&LAND_STAGE&&!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')){
+      initial1550AutoRepositioned=true;
+      const v=terrain.views?.[LAND_STAGE];
+      if(v){
+        boat.x=v.x;boat.z=v.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
+        if(boat.enabled){cam.x=v.x;cam.z=v.z;}
+      }
+      envFull=true;
+    }
+  });
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
     discovery:terrain?.discovery??null,onUpgradeApplied:()=>{envFull=true;},
     onOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
