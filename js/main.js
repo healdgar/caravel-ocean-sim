@@ -774,7 +774,10 @@ async function main() {
     v.boat.showProw=true;v.follower=createFollower(formation);
     if(terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
   }
-  const shipGuns=createShipGunnery(boat,{muzzleBlock:(gun,pose)=>gunportSafety.block(gun,pose,boat.gunnery.time,boat.revision),onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),onEvent:event=>{
+  const shipGuns=createShipGunnery(boat,{muzzleBlock:(gun,pose)=>gunportSafety.block(gun,pose,boat.gunnery.time,boat.revision),
+    getVessels:()=>followerEnabled?vessels.slice(1):[],
+    getTerrain:()=>terrain,
+    onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),onEvent:event=>{
     sceneAudio.gunneryEvent(event);
     if(event.type==='shot')gunEffects.emitShot({...event,id:event.shotId,chargeKg:event.mass*.3});
     else if(event.type==='impact'&&event.kind==='water'){
@@ -782,6 +785,11 @@ async function main() {
       surfaceWaves.emit({source:'roundshot',id:event.shotId,kind:'entry',x:event.surfacePosition[0],z:event.surfacePosition[2],
         radiusMetres:Math.max(.18,event.radius*2),closingSpeed:Math.max(0,-event.velocity[1]),velocity:event.velocity,massKg:event.mass,
         age:Math.max(0,boat.gunnery.time-event.time)});
+    }else if(event.type==='impact'){
+      gunEffects.emitImpact({...event,id:event.shotId,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
+      gunEffects.emitShot({id:'hit-'+event.shotId,position:event.surfacePosition,direction:event.normal??[0,1,0],chargeKg:Math.max(.8,event.mass*.16)});
+      sceneAudio.impact({x:event.surfacePosition[0],z:event.surfacePosition[2],strength:Math.min(1,Math.cbrt(event.mass/12))});
+      gunControls?.update?.();
     }
   }});
   vessels[0].gunnery=shipGuns;
@@ -1664,7 +1672,7 @@ async function main() {
       updatePolygonStatus();
       updateCrewUI();
       updateAnchorUI();gunControls.update();fleetViewButton.disabled=!followerEnabled;
-      followerStatus.textContent=followerEnabled?vessels.slice(1).map(v=>v.asset.model.name+': '+v.follower.status+' · '+v.follower.separation.toFixed(0)+' m · '+(boatForwardSpeed(v.boat)/KNOT_TO_MPS).toFixed(1)+' kn').join(' / '):'No active followers';
+      followerStatus.textContent=followerEnabled?vessels.slice(1).map(v=>{const dmg=v.boat.damage;const dmgText=dmg&&dmg.hits?` · Hull ${Math.round(dmg.hullIntegrity*100)}%`:'';return v.asset.model.name+': '+v.follower.status+' · '+v.follower.separation.toFixed(0)+' m · '+(boatForwardSpeed(v.boat)/KNOT_TO_MPS).toFixed(1)+' kn'+dmgText;}).join(' / '):'No active followers';
       boatStatus.textContent = boat.enabled
         ? `Pitch ${(boat.pitch / D2R).toFixed(1)}° · Roll ${(boat.roll / D2R).toFixed(1)}° · Heave ${boat.heave.toFixed(2)} m`
         : 'Ship continues to float while the camera explores';

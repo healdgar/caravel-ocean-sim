@@ -180,7 +180,13 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let alpha=film*(.18+foam*.52)*smoothstep(0.0,.035,age)*(1.0-smoothstep(life*.6,life,age));
   if(alpha<.002){discard;}
   let n=normalize(cross(dpdy(v.world),dpdx(v.world)));
-  return vec4f(surfaceAir(gunneryWaterRadiance(v.world,n,foam),v.world)*alpha,alpha);
+  let kind=c.extra.x;
+  let waterRad=gunneryWaterRadiance(v.world,n,foam);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
+  let ambient=skyAtmo(vec3f(0,1,0))*.6+direct*max(F.sunDir.y,.08)*.25+lightningLight()*.25;
+  let solidAlbedo=select(select(vec3f(.46,.33,.20),vec3f(.52,.44,.32),kind>1.5),vec3f(.68,.62,.54),kind>2.5);
+  let rad=select(waterRad,solidAlbedo*ambient,kind>.5);
+  return vec4f(surfaceAir(rad,v.world)*alpha,alpha);
 }
 @vertex fn gunneryDropVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->GunneryWaterVertex{
   let id=instance/${GUNNERY_DROP_COUNT}u;let c=gunneryContacts[id];let drop=f32(instance%${GUNNERY_DROP_COUNT}u);let age=c.root.w;
@@ -200,7 +206,13 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let c=gunneryContacts[v.id];let radius=dot(v.uv,v.uv);if(radius>=1.0||c.root.w>3.0||v.world.y<c.root.y){discard;}
   let eye=normalize(F.camPos.xyz-v.world);let n=normalize(normalize(F.camRight.xyz)*v.uv.x+normalize(F.camUp.xyz)*v.uv.y+eye*sqrt(max(.001,1.0-radius)));
   let alpha=(1.0-smoothstep(.3,1.0,radius))*.7;
-  return vec4f(surfaceAir(gunneryWaterRadiance(v.world,n,.45),v.world)*alpha,alpha);
+  let kind=c.extra.x;
+  let waterRad=gunneryWaterRadiance(v.world,n,.45);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
+  let ambient=skyAtmo(vec3f(0,1,0))*.55+direct*max(dot(n,F.sunDir.xyz),.12)*.32+lightningLight()*.25;
+  let fragAlbedo=select(select(vec3f(.38,.24,.12),vec3f(.44,.36,.25),kind>1.5),vec3f(.64,.42,.28),kind>2.5);
+  let rad=select(waterRad,fragAlbedo*ambient,kind>.5);
+  return vec4f(surfaceAir(rad,v.world)*alpha,alpha);
 }
 @vertex fn gunneryRingVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryWaterVertex{
   let c=gunneryContacts[id];let ring=vertex/(${GUNNERY_RING_SEGMENTS}u*6u);let uv=gunneryCorner(vertex);let segment=(vertex/6u)%${GUNNERY_RING_SEGMENTS}u;
@@ -212,7 +224,8 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   return GunneryWaterVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,vec2f(crossSection,angle),id*${GUNNERY_RING_COUNT}u+ring);
 }
 @fragment fn gunneryRingFS(v:GunneryWaterVertex)->@location(0)vec4f{
-  let c=gunneryContacts[v.id/${GUNNERY_RING_COUNT}u];let ring=v.id%${GUNNERY_RING_COUNT}u;let age=c.root.w-f32(ring)*.15;if(age<=0.0||age>=8.0){discard;}
+  let c=gunneryContacts[v.id/${GUNNERY_RING_COUNT}u];if(c.extra.x>.5){discard;}
+  let ring=v.id%${GUNNERY_RING_COUNT}u;let age=c.root.w-f32(ring)*.15;if(age<=0.0||age>=8.0){discard;}
   let edge=1.0-smoothstep(.3,1.0,abs(v.uv.x));let broken=.7+.2*sin(v.uv.y*13.0+c.detail.x*71.0)+.1*sin(v.uv.y*29.0-c.detail.x*49.0);
   let alpha=edge*broken*exp(-age*.48)*smoothstep(0.0,.08,age)*(1.0-smoothstep(5.5,8.0,age))*.55;
   let n=normalize(cross(dpdy(v.world),dpdx(v.world)));

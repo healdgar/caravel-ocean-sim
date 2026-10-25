@@ -27,8 +27,9 @@ export function createGunneryEffectState(){
     const velocity=gunneryFxVector(event.velocity),speed=Math.hypot(...velocity);
     if(speed<.1)return false;
     if(impacts.length===GUNNERY_FX_LIMITS.impacts)impacts.shift();
+    const kindCode=event.kind==='ship'?1:event.kind==='terrain'?2:event.kind==='building'?3:0;
     impacts.push({id:event.id??++serial,position:gunneryFxVector(event.position),velocity,age:0,seed:(++serial*.61803398875)%1,
-      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0]});return true;
+      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0],kindCode});return true;
   }
   function setProjectiles(values=[]){
     projectiles.length=0;
@@ -138,7 +139,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       ordered.sort((a,b)=>b.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0)-a.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0));
       for(const p of ordered)writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);
       for(const p of state.projectiles)balls.set([...p.position,p.radius],ballCount++*4);
-      for(const e of state.impacts){contacts.set([...e.position,e.age,...e.velocity,e.scale,e.seed,...e.wind,0,0,0,0],impactCount++*16);}
+      for(const e of state.impacts){contacts.set([...e.position,e.age,...e.velocity,e.scale,e.seed,...e.wind,e.kindCode??0,0,0,0],impactCount++*16);}
       if(volumeCount)device.queue.writeBuffer(volumeBuffer,0,volumes,0,volumeCount*20);
       if(ballCount)device.queue.writeBuffer(ballBuffer,0,balls,0,ballCount*4);
       if(impactCount)device.queue.writeBuffer(contactBuffer,0,contacts,0,impactCount*16);

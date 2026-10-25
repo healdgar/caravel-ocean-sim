@@ -28,9 +28,28 @@ export function createGunneryControls(parent,gunnery){
   elevationOutput.textContent=formatElevation(gunnery.elevation??0);
   elevationInput.oninput=()=>{const v=gunnery.setElevation?.(Number(elevationInput.value))??Number(elevationInput.value);elevationOutput.textContent=formatElevation(v);};
   elevationRow.append(elevationName,elevationInput,elevationOutput);section.append(elevationRow);
+  const damageStatus=document.createElement('p');damageStatus.id='guns-damage-status';damageStatus.setAttribute('role','status');
+  damageStatus.hidden=true;section.append(damageStatus);
   parent.append(section);
+  function formatDamage(r){
+    if(!r)return '';
+    if(r.kind==='ship'){
+      const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging (${Math.round(r.rigIntegrity*100)}% rig)`:`hull (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
+      return `Struck ${r.targetName} ${zone} · ${r.energyKj} kJ${r.sunk?' · Foundering':''}`;
+    }
+    if(r.kind==='building'){
+      return `Struck ${r.buildingName} · ${Math.round(r.integrity*100)}% integrity (${r.state}) · ${r.energyKj} kJ`;
+    }
+    if(r.kind==='terrain'){
+      return `Shore strike (${r.elevation} m elev) · ${r.craterRadius} m crater · ${r.energyKj} kJ`;
+    }
+    return '';
+  }
   function update(){
     standDown.disabled=!gunnery.selectedSide;
+    const latest=formatDamage(gunnery.lastDamageReport);
+    damageStatus.hidden=!latest;
+    if(latest&&damageStatus.textContent!==latest)damageStatus.textContent=latest;
     for(const r of rows){
       const s=gunnery.summary(r.side),ordered=gunnery.ordered===r.side;
       const held=s.ready===s.total?gunnery.blockedReason(r.side):null;

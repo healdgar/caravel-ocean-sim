@@ -4,40 +4,414 @@ import { createGunDefinitions, gunMuzzlePose, gunElevationRange } from './gunner
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
 import { boatRotate } from './boat.js';
 
+export function applyRigidHullImpulse(boat, worldPosition, impulse) {
+  const h = boat?.hydrodynamics;
+  if (!h || !worldPosition || !impulse) return;
+  const centre = [0, 0, 0];
+  boatRotate(centre, 0, h.centreOfGravity - (h.draft - h.sinkage), 0, (boat.heading ?? 0) * Math.PI / 180, boat.pitch ?? 0, boat.roll ?? 0);
+  const r = worldPosition.map((x, i) => x - ([boat.x ?? 0, boat.heave ?? 0, boat.z ?? 0][i] + centre[i]));
+  const heading = (boat.heading ?? 0) * Math.PI / 180, sn = Math.sin(heading), cs = Math.cos(heading);
+  boat.surgeVelocity = (boat.surgeVelocity ?? 0) + (impulse[0] * sn - impulse[2] * cs) / (h.mass + h.addedMass);
+  boat.leewayVelocity = (boat.leewayVelocity ?? 0) + (impulse[0] * cs + impulse[2] * sn) / (h.mass * 1.8);
+  boat.heaveVelocity = (boat.heaveVelocity ?? 0) + impulse[1] / (h.mass + h.addedMass);
+  const torque = [r[1] * impulse[2] - r[2] * impulse[1], r[2] * impulse[0] - r[0] * impulse[2], r[0] * impulse[1] - r[1] * impulse[0]];
+  const axis = (x, y, z) => { const a = [0, 0, 0]; boatRotate(a, x, y, z, (boat.heading ?? 0) * Math.PI / 180, boat.pitch ?? 0, boat.roll ?? 0); return a; };
+  const dot = (a, b) => a.reduce((n, x, i) => n + x * b[i], 0);
+  const yawI = h.mass * ((boat.length ?? 20) ** 2 + (boat.beam ?? 6) ** 2) / 12 * 1.5;
+  const axes = [axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)], inertia = [h.pitchInertia, yawI, h.rollInertia];
+  const omega = [0, 0, 0];
+  for (let j = 0; j < 3; j++) { const d = dot(torque, axes[j]) / inertia[j]; for (let i = 0; i < 3; i++) omega[i] += axes[j][i] * d; }
+  // Convert a principal-axis angular impulse back to this integrator's Euler
+  // rates. Directly adding body-axis rates is wrong on a pitched/heeled ship.
+  const cosPitch = Math.max(0.1, Math.cos(boat.pitch ?? 0));
+  const omegaH = [cs * omega[0] + sn * omega[2], omega[1], -sn * omega[0] + cs * omega[2]], dRoll = omegaH[2] / cosPitch;
+  boat.pitchVelocity = (boat.pitchVelocity ?? 0) + omegaH[0];
+  boat.rollVelocity = (boat.rollVelocity ?? 0) + dRoll;
+  boat.yawRate = (boat.yawRate ?? 0) - omegaH[1] - Math.sin(boat.pitch ?? 0) * dRoll;
+}
+
+export function createVesselDamageState(boat) {
+  if (boat.damage) return boat.damage;
+  const mass = boat.hydrodynamics?.mass ?? 120000;
+  boat.damage = {
+    maxHullEnergy: Math.max(400000, mass * 18),
+    maxRigEnergy: Math.max(150000, mass * 6),
+    hullIntegrity: 1,
+    rigIntegrity: 1,
+    mastIntegrity: { fore: 1, main: 1, mizzen: 1 },
+    hullDamageJoules: 0,
+    rigDamageJoules: 0,
+    hits: 0,
+    hullHits: 0,
+    rigHits: 0,
+    breaches: 0,
+    floodingTonnes: 0,
+    sunk: false,
+    lastHit: null,
+  };
+  return boat.damage;
+}
+
+function vesselWorldToLocal(boat, worldPt) {
+  const dx = worldPt[0] - (boat.x ?? 0), dy = worldPt[1] - (boat.heave ?? 0), dz = worldPt[2] - (boat.z ?? 0);
+  const yaw = (boat.heading ?? 0) * Math.PI / 180, pitch = boat.pitch ?? 0, roll = boat.roll ?? 0;
+  const ax = [0, 0, 0], ay = [0, 0, 0], az = [0, 0, 0];
+  boatRotate(ax, 1, 0, 0, yaw, pitch, roll);
+  boatRotate(ay, 0, 1, 0, yaw, pitch, roll);
+  boatRotate(az, 0, 0, 1, yaw, pitch, roll);
+  return [
+    dx * ax[0] + dy * ax[1] + dz * ax[2],
+    dx * ay[0] + dy * ay[1] + dz * ay[2],
+    dx * az[0] + dy * az[1] + dz * az[2],
+  ];
+}
+
+function vesselLocalToWorldNormal(boat, localNormal) {
+  const out = [0, 0, 0];
+  boatRotate(out, localNormal[0], localNormal[1], localNormal[2], (boat.heading ?? 0) * Math.PI / 180, boat.pitch ?? 0, boat.roll ?? 0);
+  const len = Math.hypot(out[0], out[1], out[2]) || 1;
+  return [out[0] / len, out[1] / len, out[2] / len];
+}
+
+export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat = null) {
+  if (!targetBoat || targetBoat === sourceBoat || targetBoat.showProw === false) return null;
+  const L = targetBoat.length ?? 20, B = targetBoat.beam ?? 6;
+  const boundR = Math.max(L, B) * 1.1 + 12;
+  const midX = (from[0] + to[0]) * 0.5 - (targetBoat.x ?? 0);
+  const midZ = (from[2] + to[2]) * 0.5 - (targetBoat.z ?? 0);
+  const segLen = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  if (Math.hypot(midX, midZ) > boundR + segLen) return null;
+
+  const p0 = vesselWorldToLocal(targetBoat, from);
+  const p1 = vesselWorldToLocal(targetBoat, to);
+  const halfL = L * 0.52 + radius;
+  const halfB = B * 0.52 + radius;
+  const draft = (targetBoat.hydrodynamics?.draft ?? 2.2) + radius;
+  const baseFreeboard = Math.max(4.6, (targetBoat.hydrodynamics?.freeboard ?? 1.8) * 2.1 + B * 0.35) + radius;
+  const mastTop = Math.max(14, L * 0.85) + radius;
+
+  const classifyLocal = (lx, ly, lz) => {
+    const castleLift = lz > L * 0.1 ? B * 0.28 : lz < -L * 0.22 ? B * 0.16 : 0;
+    const freeboard = baseFreeboard + castleLift;
+    if (Math.abs(lz) <= halfL && ly >= -draft && ly <= freeboard) {
+      const taper = Math.max(0.32, 1 - 0.55 * (lz / halfL) ** 2);
+      const maxX = halfB * taper;
+      if (Math.abs(lx) <= maxX) {
+        const nx = lx / Math.max(0.2, maxX), ny = (ly - (freeboard - draft) * 0.5) / Math.max(0.5, (freeboard + draft) * 0.5), nz = lz / halfL;
+        return { hitZone: 'hull', mastGroup: null, localNormal: [nx, ny * 0.35, nz * 0.4] };
+      }
+    }
+    if (ly > baseFreeboard - radius && ly <= mastTop && (targetBoat.model?.rig?.sails?.length ?? 1) > 0) {
+      const mastW = B * 0.85 + radius, mastD = L * 0.14 + radius;
+      for (const [group, zCenter] of [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]]) {
+        if (Math.abs(lx) <= mastW && Math.abs(lz - zCenter) <= mastD) {
+          return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
+        }
+      }
+    }
+    return null;
+  };
+
+  const steps = Math.min(48, Math.max(4, Math.ceil(segLen / 0.45)));
+  let prevT = 0;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const lx = p0[0] + (p1[0] - p0[0]) * t;
+    const ly = p0[1] + (p1[1] - p0[1]) * t;
+    const lz = p0[2] + (p1[2] - p0[2]) * t;
+    const hit = classifyLocal(lx, ly, lz);
+    if (hit) {
+      let low = prevT, high = t, bestHit = hit, bestLocal = [lx, ly, lz];
+      if (i > 0) {
+        for (let b = 0; b < 10; b++) {
+          const mid = (low + high) * 0.5;
+          const mx = p0[0] + (p1[0] - p0[0]) * mid;
+          const my = p0[1] + (p1[1] - p0[1]) * mid;
+          const mz = p0[2] + (p1[2] - p0[2]) * mid;
+          const mHit = classifyLocal(mx, my, mz);
+          if (mHit) { high = mid; bestHit = mHit; bestLocal = [mx, my, mz]; } else { low = mid; }
+        }
+      }
+      return {
+        fraction: high,
+        kind: 'ship',
+        targetBoat,
+        targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
+        targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
+        hitZone: bestHit.hitZone,
+        mastGroup: bestHit.mastGroup,
+        waterline: bestHit.hitZone === 'hull' && bestLocal[1] <= 0.75,
+        localPosition: bestLocal,
+        normal: vesselLocalToWorldNormal(targetBoat, bestHit.localNormal),
+      };
+    }
+    prevT = t;
+  }
+  return null;
+}
+
+export function applyShipImpactDamage(targetBoat, event) {
+  if (!targetBoat || !event) return null;
+  const damage = createVesselDamageState(targetBoat);
+  const vel = event.velocity ?? [200, 0, 0];
+  const speed = Math.hypot(vel[0], vel[1], vel[2]);
+  const mass = event.mass ?? 5.4;
+  const energy = event.energy ?? (0.5 * mass * speed * speed);
+  const pos = event.surfacePosition ?? event.position ?? [targetBoat.x ?? 0, targetBoat.heave ?? 0, targetBoat.z ?? 0];
+  const scale = event.hitZone === 'rigging' ? 0.35 : 1.0;
+  applyRigidHullImpulse(targetBoat, pos, [vel[0] * mass * scale, vel[1] * mass * scale, vel[2] * mass * scale]);
+
+  damage.hits++;
+  if (event.hitZone === 'rigging') {
+    damage.rigHits++;
+    damage.rigDamageJoules += energy;
+    const group = event.mastGroup && Object.hasOwn(damage.mastIntegrity, event.mastGroup) ? event.mastGroup : 'main';
+    damage.mastIntegrity[group] = Math.max(0, damage.mastIntegrity[group] - (energy / damage.maxRigEnergy) * 1.8);
+    damage.rigIntegrity = (damage.mastIntegrity.fore + damage.mastIntegrity.main + damage.mastIntegrity.mizzen) / 3;
+    const sailKey = group === 'fore' ? 'sailFore' : group === 'mizzen' ? 'sailMizzen' : 'sailMain';
+    if (typeof targetBoat[sailKey] === 'number') {
+      targetBoat[sailKey] = Math.min(targetBoat[sailKey], damage.mastIntegrity[group]);
+    }
+  } else {
+    damage.hullHits++;
+    damage.hullDamageJoules += energy;
+    damage.hullIntegrity = Math.max(0, 1 - damage.hullDamageJoules / damage.maxHullEnergy);
+    const nearWaterline = event.waterline || pos[1] <= (targetBoat.heave ?? 0) + 0.85;
+    if (nearWaterline) {
+      damage.breaches++;
+      const floodAdd = (mass / 12) * (1.2 + (1 - damage.hullIntegrity) * 2.4);
+      damage.floodingTonnes = +(damage.floodingTonnes + floodAdd).toFixed(3);
+      targetBoat.cargoTonnes = Math.min(80, (targetBoat.cargoTonnes ?? 0) + floodAdd);
+      targetBoat.revision = (targetBoat.revision ?? 0) + 1;
+    }
+    if (damage.hullIntegrity <= 0) damage.sunk = true;
+  }
+  const report = {
+    kind: 'ship',
+    targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
+    targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
+    hitZone: event.hitZone ?? 'hull',
+    mastGroup: event.mastGroup ?? null,
+    hullIntegrity: +damage.hullIntegrity.toFixed(3),
+    rigIntegrity: +damage.rigIntegrity.toFixed(3),
+    breaches: damage.breaches,
+    floodingTonnes: damage.floodingTonnes,
+    sunk: damage.sunk,
+    energyKj: +(energy / 1000).toFixed(1),
+  };
+  damage.lastHit = report;
+  return report;
+}
+
+export function sweepBuildingSegment(from, to, radius = 0.08, port) {
+  const instances = port?.instances;
+  if (!Array.isArray(instances) || !instances.length) return null;
+  let best = null;
+  for (const inst of instances) {
+    const cs = Math.cos(-(inst.yaw ?? 0)), sn = Math.sin(-(inst.yaw ?? 0));
+    const toLocal = (p) => {
+      const dx = p[0] - inst.x, dy = p[1] - inst.baseY, dz = p[2] - inst.z;
+      return [dx * cs - dz * sn, dy, dx * sn + dz * cs];
+    };
+    const p0 = toLocal(from), p1 = toLocal(to);
+    const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+    const minB = [-inst.width * 0.5 - radius, -radius, -inst.depth * 0.5 - radius];
+    const maxB = [inst.width * 0.5 + radius, inst.height + (inst.roofHeight ?? 0) + radius, inst.depth * 0.5 + radius];
+    let tMin = 0, tMax = 1, hitAxis = 0, hitSign = 1;
+    let valid = true;
+    for (let a = 0; a < 3; a++) {
+      if (Math.abs(d[a]) < 1e-9) {
+        if (p0[a] < minB[a] || p0[a] > maxB[a]) { valid = false; break; }
+      } else {
+        let t1 = (minB[a] - p0[a]) / d[a], t2 = (maxB[a] - p0[a]) / d[a], s = -1;
+        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; s = 1; }
+        if (t1 > tMin) { tMin = t1; hitAxis = a; hitSign = s; }
+        if (t2 < tMax) tMax = t2;
+        if (tMin > tMax) { valid = false; break; }
+      }
+    }
+    if (!valid || tMin < 0 || tMin > 1) continue;
+    if (!best || tMin < best.fraction) {
+      const ln = [0, 0, 0]; ln[hitAxis] = hitSign;
+      const wcs = Math.cos(inst.yaw ?? 0), wsn = Math.sin(inst.yaw ?? 0);
+      const normal = [ln[0] * wcs - ln[2] * wsn, ln[1], ln[0] * wsn + ln[2] * wcs];
+      best = {
+        fraction: tMin,
+        kind: 'building',
+        building: inst,
+        buildingId: inst.id,
+        buildingName: inst.label ?? inst.prefabId,
+        prefabId: inst.prefabId,
+        normal,
+      };
+    }
+  }
+  return best;
+}
+
+export function applyBuildingImpactDamage(building, event) {
+  if (!building || !event) return null;
+  if (!building.damageState) {
+    const isBastion = building.prefabId === 'stone_sea_bastion';
+    const isTimber = building.prefabId === 'timber_mole_pier' || building.prefabId === 'careening_shed';
+    building.damageState = {
+      maxEnergy: isBastion ? 25000000 : isTimber ? 2500000 : 8500000,
+      integrity: 1,
+      damageJoules: 0,
+      hits: 0,
+      state: 'intact',
+    };
+  }
+  const d = building.damageState;
+  const vel = event.velocity ?? [200, 0, 0];
+  const speed = Math.hypot(vel[0], vel[1], vel[2]);
+  const mass = event.mass ?? 5.4;
+  const energy = event.energy ?? (0.5 * mass * speed * speed);
+  d.hits++;
+  d.damageJoules += energy;
+  d.integrity = Math.max(0, 1 - d.damageJoules / d.maxEnergy);
+  d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
+  return {
+    kind: 'building',
+    buildingId: building.id,
+    buildingName: building.label ?? building.prefabId,
+    prefabId: building.prefabId,
+    integrity: +d.integrity.toFixed(3),
+    state: d.state,
+    hits: d.hits,
+    energyKj: +(energy / 1000).toFixed(1),
+  };
+}
+
+export function sweepTerrainSegment(from, to, radius = 0.08, terrain) {
+  const sampleFn = terrain?.groundSample ?? terrain?.height;
+  if (typeof sampleFn !== 'function') return null;
+  const segLen = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const steps = Math.min(64, Math.max(1, Math.ceil(segLen / 0.75)));
+  const sampleH = (x, z) => sampleFn(x, z);
+  let prevT = 0;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = from[0] + (to[0] - from[0]) * t;
+    const y = from[1] + (to[1] - from[1]) * t;
+    const z = from[2] + (to[2] - from[2]) * t;
+    const h = sampleH(x, z);
+    if (h > 0.05 && y - radius <= h) {
+      let low = prevT, high = t;
+      if (i > 0) {
+        for (let b = 0; b < 12; b++) {
+          const mid = (low + high) * 0.5;
+          const mx = from[0] + (to[0] - from[0]) * mid;
+          const my = from[1] + (to[1] - from[1]) * mid;
+          const mz = from[2] + (to[2] - from[2]) * mid;
+          const mh = sampleH(mx, mz);
+          if (mh > 0.05 && my - radius <= mh) high = mid; else low = mid;
+        }
+      }
+      const hx = from[0] + (to[0] - from[0]) * high;
+      const hz = from[2] + (to[2] - from[2]) * high;
+      const elevation = sampleH(hx, hz);
+      const dx = (sampleH(hx - 1, hz) - sampleH(hx + 1, hz)) * 0.5;
+      const dz = (sampleH(hx, hz - 1) - sampleH(hx, hz + 1)) * 0.5;
+      const nLen = Math.hypot(dx, 1, dz) || 1;
+      return {
+        fraction: high,
+        kind: 'terrain',
+        elevation,
+        normal: [dx / nLen, 1 / nLen, dz / nLen],
+      };
+    }
+    prevT = t;
+  }
+  return null;
+}
+
+export function applyTerrainImpactDamage(terrain, event) {
+  if (!terrain || !event) return null;
+  terrain.landImpacts ??= [];
+  const vel = event.velocity ?? [200, 0, 0];
+  const speed = Math.hypot(vel[0], vel[1], vel[2]);
+  const mass = event.mass ?? 5.4;
+  const energy = event.energy ?? (0.5 * mass * speed * speed);
+  const pos = event.surfacePosition ?? event.position ?? [0, 0, 0];
+  const craterRadius = +(0.35 * Math.cbrt(mass / 5.4) * Math.max(0.7, Math.cbrt(energy / 120000))).toFixed(2);
+  const record = {
+    position: [...pos],
+    normal: event.normal ?? [0, 1, 0],
+    energyKj: +(energy / 1000).toFixed(1),
+    craterRadius,
+    elevation: +(event.elevation ?? pos[1] ?? 0).toFixed(1),
+    time: event.time ?? 0,
+  };
+  if (terrain.landImpacts.length >= 64) terrain.landImpacts.shift();
+  terrain.landImpacts.push(record);
+  return {
+    kind: 'terrain',
+    craterCount: terrain.landImpacts.length,
+    craterRadius,
+    elevation: record.elevation,
+    energyKj: record.energyKj,
+  };
+}
+
+export function createGunnerySolidSweep({ sourceBoat, getVessels = () => [], getTerrain = () => null } = {}) {
+  return function sweep(from, to, projectile) {
+    const radius = projectile?.radius ?? 0.08;
+    let best = null;
+    const vessels = getVessels() ?? [];
+    for (const entry of vessels) {
+      const targetBoat = entry?.boat ?? entry;
+      const hit = sweepShipSegment(from, to, radius, targetBoat, sourceBoat);
+      if (hit && (!best || hit.fraction < best.fraction)) best = hit;
+    }
+    const terrain = getTerrain();
+    if (terrain?.port) {
+      const bHit = sweepBuildingSegment(from, to, radius, terrain.port);
+      if (bHit && (!best || bHit.fraction < best.fraction)) best = bHit;
+    }
+    if (terrain) {
+      const tHit = sweepTerrainSegment(from, to, radius, terrain);
+      if (tHit && (!best || tHit.fraction < best.fraction)) best = tHit;
+    }
+    return best;
+  };
+}
+
+export function resolveSolidGunneryImpact(event, { getTerrain = () => null } = {}) {
+  if (!event || event.type !== 'impact') return null;
+  if (event.kind === 'ship' && event.targetBoat) {
+    return applyShipImpactDamage(event.targetBoat, event);
+  }
+  if (event.kind === 'building' && event.building) {
+    return applyBuildingImpactDamage(event.building, event);
+  }
+  if (event.kind === 'terrain') {
+    const terrain = getTerrain();
+    if (terrain) return applyTerrainImpactDamage(terrain, event);
+  }
+  return null;
+}
+
 // Explicit orders govern the drill. There is no automatic reload or repeated
 // firing. The captain's spoken order has the same duration with sound muted.
-export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null}={}){
+export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null,getVessels=()=>[],getTerrain=()=>null,sweep=null}={}){
   const state=createGunneryState(createGunDefinitions(boat));boat.gunnery=state;
+  createVesselDamageState(boat);
   const previousStages=new Array(state.guns.length);
-  let pending=null,prepared=false,lastReady=false,flash=null;
+  const solidSweep=sweep??createGunnerySolidSweep({sourceBoat:boat,getVessels,getTerrain});
+  const damageLog=[];
+  let pending=null,prepared=false,lastReady=false,flash=null,lastDamageReport=null;
   const attended=gun=>!gun.visibleCrew||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
   const canFire=side=>sideValid(side)&&boat.gunnerySide===side&&!pending&&!state.queue.length&&
     state.guns.filter(g=>g.side===side).every(g=>g.stage==='ready'&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)));
   function recoil(event){
-    const h=boat.hydrodynamics;if(!h)return;
-    const impulse=event.impulse,centre=[0,0,0];
-    boatRotate(centre,0,h.centreOfGravity-(h.draft-h.sinkage),0,boat.heading*Math.PI/180,boat.pitch,boat.roll);
-    const r=event.position.map((x,i)=>x-([boat.x,boat.heave,boat.z][i]+centre[i]));
-    const heading=boat.heading*Math.PI/180,sn=Math.sin(heading),cs=Math.cos(heading);
-    boat.surgeVelocity=(boat.surgeVelocity??0)+(impulse[0]*sn-impulse[2]*cs)/(h.mass+h.addedMass);
-    boat.leewayVelocity=(boat.leewayVelocity??0)+(impulse[0]*cs+impulse[2]*sn)/(h.mass*1.8);
-    boat.heaveVelocity=(boat.heaveVelocity??0)+impulse[1]/(h.mass+h.addedMass);
-    const torque=[r[1]*impulse[2]-r[2]*impulse[1],r[2]*impulse[0]-r[0]*impulse[2],r[0]*impulse[1]-r[1]*impulse[0]];
-    const axis=(x,y,z)=>{const a=[0,0,0];boatRotate(a,x,y,z,boat.heading*Math.PI/180,boat.pitch,boat.roll);return a;};
-    const dot=(a,b)=>a.reduce((n,x,i)=>n+x*b[i],0);
-    const yawI=h.mass*(boat.length**2+boat.beam**2)/12*1.5;
-    const axes=[axis(1,0,0),axis(0,1,0),axis(0,0,1)],inertia=[h.pitchInertia,yawI,h.rollInertia];
-    const omega=[0,0,0];for(let j=0;j<3;j++){const d=dot(torque,axes[j])/inertia[j];for(let i=0;i<3;i++)omega[i]+=axes[j][i]*d;}
-    // Convert a principal-axis angular impulse back to this integrator's Euler
-    // rates. Directly adding body-axis rates is wrong on a pitched/heeled ship.
-    const omegaH=[cs*omega[0]+sn*omega[2],omega[1],-sn*omega[0]+cs*omega[2]],dRoll=omegaH[2]/Math.cos(boat.pitch);
-    boat.pitchVelocity=(boat.pitchVelocity??0)+omegaH[0];
-    boat.rollVelocity=(boat.rollVelocity??0)+dRoll;
-    boat.yawRate=(boat.yawRate??0)-omegaH[1]-Math.sin(boat.pitch)*dRoll;
+    applyRigidHullImpulse(boat,event.position,event.impulse);
   }
   return {
     state,
+    damageLog,
+    get lastDamageReport(){return lastDamageReport;},
     prepare(side){
       if(!sideValid(side))return false;
       if(pending||state.queue.length||state.guns.some(g=>g.loading&&g.side!==side))return false;
@@ -63,8 +437,16 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       for(const gun of state.guns)previousStages[gun.index]=gun.stage;
       const events=stepGunnery(state,dt,{deferSeaCollision:true,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
+        sweep:solidSweep,
         gunAttended:attended,canFire:(gun,pose)=>attended(gun)&&!muzzleBlock(gun,pose),
-        onEvent:event=>{if(event.type==='shot'){recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}if(event.type!=='ready')onEvent(event);},
+        onEvent:event=>{
+          if(event.type==='shot'){recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}
+          if(event.type==='impact'&&event.kind!=='water'){
+            const report=resolveSolidGunneryImpact(event,{getTerrain});
+            if(report){event.damageReport=report;lastDamageReport=report;if(damageLog.length>=32)damageLog.shift();damageLog.push(report);}
+          }
+          if(event.type!=='ready')onEvent(event);
+        },
       });
       for(const gun of state.guns)if(previousStages[gun.index]!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
         onEvent({type:gun.stage==='ram'?'load':'run-out',gun,position:gunMuzzlePose(gun,boat).position});
