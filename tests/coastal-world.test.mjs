@@ -388,4 +388,22 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
   });
   assert.equal(secondRun.status, 'cached');
   assert.equal(cachedReadyVisits, 2);
+
+  const { retargetForestPackToProcedural } = await import('../js/terrain.js');
+  const fakeForestPack = {
+    manifest: {
+      prototypes: [
+        { id: 0, crownRadius: 8, basalRadius: 1.1 },
+        { id: 1, crownRadius: 9, basalRadius: 1.3 },
+      ],
+    },
+  };
+  const retargeted = retargetForestPackToProcedural(
+    fakeForestPack,
+    secondRun.upgradedPack,
+    () => 12.0,
+    { isMobile: true }
+  );
+  assert.equal(retargeted.maxRootCapacity, 16000);
+  assert.ok(retargeted.roots.length >= 12);
 });

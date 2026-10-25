@@ -29,13 +29,13 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
   const beaches = proceduralPack.beaches;
   const port = proceduralPack.port;
   const seed = (region.vegetationSeed ?? 47231) >>> 0;
+  const maxRoots = isMobile ? 16000 : 58000;
 
   // Saba-style overlapping-crown jittered grid placement (scripts/prepare-forest-instances.py:284-333)
   // guided by the co-registered satellite vegetation mask (`biome`) and foreshore beach masks.
   if (biome instanceof Uint8Array && biome.length === maskSize * maskSize) {
     const spacing = isMobile ? 7.2 : 4.5;
     const crownSpacingFactor = isMobile ? 0.45 : 0.34;
-    const maxRoots = isMobile ? 16000 : 58000;
     const gridN = Math.ceil(span / spacing);
     const cellSize = 18;
     const hashW = Math.ceil(span / cellSize) + 1;
