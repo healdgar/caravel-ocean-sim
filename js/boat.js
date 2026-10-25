@@ -353,22 +353,31 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const inertia = hydro.mass + hydro.addedMass;
   const sailing = boat.propulsion === 'sail';
   const rowing=Object.hasOwn(ROWING_DESIGNS,modelId),rowLoads=rowing?(boat.rowingLoads??={}):null;
+  const external=boat.externalForce,heading=(boat.heading??0)*Math.PI/180;
+  const upwind=sailing&&windSpeed>0?Math.min(1,Math.max(0,(Math.sin(windDirection-heading)+.70)/.45)):0;
+  const savedSurge=boat.surgeVelocity,savedLeeway=boat.leewayVelocity;
+  if((savedSurge??0)>0&&upwind>0){
+    boat.surgeVelocity=savedSurge*(1-.90*upwind);
+    boat.leewayVelocity=(savedLeeway??0)*(1-.90*upwind);
+  }
   advanceSails(boat, dt, windSpeed, windDirection);
+  boat.surgeVelocity=savedSurge;boat.leewayVelocity=savedLeeway;
   const target = boat.speed * KNOT_TO_MPS;
   const thrust = hydro.drag * target * Math.abs(target);
   const waveForce = -1025 * 9.81 * hydro.volume * slope;
   // Optional world-space loads (e.g. an anchor rode) pass through the same
   // inertial integrator as wind and wave pressure. Units: N, clockwise N m.
-  const external=boat.externalForce,heading=(boat.heading??0)*Math.PI/180;
   const externalX=Number.isFinite(external?.x)?external.x:0,externalZ=Number.isFinite(external?.z)?external.z:0;
   const externalForward=externalX*Math.sin(heading)-externalZ*Math.cos(heading);
   const externalSide=externalX*Math.cos(heading)+externalZ*Math.sin(heading);
   const initial = boatForwardSpeed(boat);
   const attitude=boat.waveAttitude ?? boat.target ?? {roll:0,pitch:0};
+  const sailDriveScale=modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20));
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
-    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity, sideways) : null;
+    const aeroFactor=velocity>0&&upwind>0?1-.90*upwind:1;
+    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity*aeroFactor, sideways*aeroFactor) : null;
     let blades=null;
     if(rowing){
       advanceRowing(boat,h,sailing?undefined:{effort:0,port:0,starboard:0});
@@ -384,10 +393,11 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
     // diagonal resistance is implicit; this avoids explicit drag overshoot.
     stepBoatRotation(boat,'roll',attitude.roll??0,(loads?.rollMoment??0)+(blades?.rollMoment??0)+water.rollMoment+water.rollDamping*boat.rollVelocity,h,water.rollDamping);
     stepBoatRotation(boat,'pitch',attitude.pitch??0,(loads?.pitchMoment??0)+(blades?.pitchMoment??0),h);
-    const force = (loads ? loads.forward : thrust) + (blades?.forward??0)+waveForce + externalForward+water.forward;
+    const sailForward=loads?(loads.forward>0?loads.forward*sailDriveScale:velocity>0?loads.forward*.15:loads.forward):thrust;
+    const force = sailForward + (blades?.forward??0)+waveForce + externalForward+water.forward;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
-    const drag = hydro.drag * (sailing ? 1 + 80 * Math.max(0, froude - 0.28) ** 2 : 1);
+    const drag = hydro.drag * (sailing && loads?.area > 0 ? 0.20 + 80 * Math.max(0, froude - 0.30) ** 2 : 1);
     // Implicit signed quadratic drag: stable through zero and during reversals.
     const next = 2 * free / (1 + Math.sqrt(1 + 4 * drag / inertia * h * Math.abs(free)));
     distance += (velocity + next) * 0.5 * h;
@@ -442,14 +452,17 @@ export function stepBoatSteering(boat, command, dt) {
   boat.rudderTarget = Math.max(-35, Math.min(35, boat.rudderTarget + command * 28 * dt));
   boatSpring(boat, 'rudder', boat.rudderTarget, 9, dt);
   const speed = boatForwardSpeed(boat);
-  const desired = Object.hasOwn(ROWING_DESIGNS,boat.modelId)?0:speed / Math.max(boat.length, 3) * Math.tan(boat.rudder * Math.PI / 180) * 0.65;
+  const current=boat.yawLoadRevision===boat.revision;
+  const activeCanvas=current&&(boat.sailState?.area??0)>0;
+  const helmScale=activeCanvas?0.65+0.95*(Math.abs(boat.rudder)/35)**2:0.65;
+  const desired = Object.hasOwn(ROWING_DESIGNS,boat.modelId)?0:speed / Math.max(boat.length, 3) * Math.tan(boat.rudder * Math.PI / 180) * helmScale;
   const previous = boat.yawRate || 0;
   const response=0.9+boat.length*.06,decay=Math.exp(-dt/response);
-  const current=boat.yawLoadRevision===boat.revision;
   const waterDamping=current&&Number.isFinite(boat.waterYawDamping)?Math.max(0,boat.waterYawDamping):0;
+  const steerage=activeCanvas?.015+.985/(1+(Math.abs(speed)/.20)**2):1;
+  const sailWaterMoment=((current&&Number.isFinite(boat.sailYawMoment)?boat.sailYawMoment:0)+(current&&Number.isFinite(boat.waterYawMoment)?boat.waterYawMoment:0))*steerage;
   const yawMoment=(Number.isFinite(boat.externalForce?.yaw)?boat.externalForce.yaw:0)
-    +(current&&Number.isFinite(boat.sailYawMoment)?boat.sailYawMoment:0)+(current&&Number.isFinite(boat.waterYawMoment)?boat.waterYawMoment:0)
-    +(current&&Number.isFinite(boat.rowingYawMoment)?boat.rowingYawMoment:0);
+    +sailWaterMoment+(current&&Number.isFinite(boat.rowingYawMoment)?boat.rowingYawMoment:0);
   const yawInertia=(boat.hydrodynamics?.mass??60000)*(boat.length**2+(boat.beam??boat.length*.3)**2)/12*1.5;
   // Measured load diagnostics for a helmsman's feed-forward. These report the
   // ordinary integration interval; they have no authority to alter motion.
@@ -459,7 +472,7 @@ export function stepBoatSteering(boat, command, dt) {
   // sail and underwater moments. The shared hull supplies passive yaw damping;
   // rudder deflection never creates surge force or a zero-flow turning assist.
   const damping=yawInertia/response+waterDamping;
-  const equilibrium=(yawInertia/response*desired+yawMoment+waterDamping*previous)/damping;
+  const equilibrium=((activeCanvas?damping:yawInertia/response)*desired+yawMoment+waterDamping*previous)/damping;
   const flowDecay=waterDamping?Math.exp(-dt*damping/yawInertia):decay;
   boat.yawRate=equilibrium+(previous-equilibrium)*flowDecay;
   boat.heading = ((boat.heading + (previous + boat.yawRate) * 0.5 * dt * 180 / Math.PI) % 360 + 360) % 360;

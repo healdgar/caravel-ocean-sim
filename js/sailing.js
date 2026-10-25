@@ -92,7 +92,7 @@ export function apparentWind(out, heading, speed, sideways, windSpeed, windDirec
   // Retain the last tack near a dead run or calm to avoid chattering across the stern.
   if (Math.abs(out.windSide) > 0.12) out.tack = out.windSide < 0 ? 1 : -1;
   const angle = Math.abs(out.apparentAngle), degrees = angle * 180 / Math.PI;
-  out.squareTarget = out.tack * sailClamp((Math.PI / 2 - angle + 0.23) * (1 - sailSmooth(110, 165, degrees)), -Math.PI / 3, Math.PI / 3);
+  out.squareTarget = out.tack * sailClamp((Math.PI / 2 - angle + 0.23) * (1 - sailSmooth(110, 165, degrees)), 0, Math.PI / 3);
   out.lateenTarget = -out.tack * sailClamp(angle * 0.5 - 0.12, 0.08, 1.2);
   return out;
 }

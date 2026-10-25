@@ -241,3 +241,25 @@ test('wind-driven sternway gives reverse rudder response without helm-triggered 
   const stopped=vessel({rudder:30,rudderTarget:30,surgeVelocity:0});
   stepBoatSteering(stopped,0,1);assert.equal(stopped.heading,0,'rudder alone cannot turn a stopped ship');
 });
+
+test('straight rudder holds course at steerageway and full helm completes a tack across the wind',()=>{
+  const reach=vessel({rudder:0,rudderTarget:0,revision:1});
+  for(let i=0;i<60*30;i++){stepBoatSurge(reach,0,1/30,8,windAt(90));stepBoatSteering(reach,0,1/30);}
+  assert.ok(reach.surgeVelocity>4.5*KNOT_TO_MPS,'beam reach achieves realistic sailing headway');
+  assert.ok(Math.abs(reach.yawRate)*180/Math.PI<.03,'centred rudder tracks straight once steerageway is established');
+  const tacking=vessel({rudder:0,rudderTarget:0,revision:1});
+  for(let i=0;i<60*30;i++){
+    stepBoatSurge(tacking,0,1/30,8,windAt(75));
+    tacking.waterYawMoment=tacking.sailYawMoment=tacking.rowingYawMoment=tacking.waterYawDamping=0;
+  }
+  assert.ok(tacking.surgeVelocity>4*KNOT_TO_MPS,'close-hauled entry speed supports tacking');
+  let turned=0,minSpeed=tacking.surgeVelocity;
+  for(let i=0;i<30*30&&turned<135;i++){
+    const before=tacking.heading;
+    stepBoatSurge(tacking,0,1/30,8,windAt(75));stepBoatSteering(tacking,1,1/30);
+    let delta=tacking.heading-before;if(delta>180)delta-=360;if(delta<-180)delta+=360;
+    turned+=delta;minSpeed=Math.min(minSpeed,tacking.surgeVelocity);
+  }
+  assert.ok(turned>=135,`helm completes tack across the wind (turned ${turned.toFixed(1)} deg)`);
+  assert.ok(minSpeed>2*KNOT_TO_MPS,'vessel retains headway through the eye of the wind');
+});
