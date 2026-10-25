@@ -182,15 +182,26 @@ struct ForestMassBlock {bound:vec4f,lowError:vec4f,high:vec4f,draw:vec4u};
  for(var a=0u;a<2u;a++){let row=vec3f(F.viewProj[0][a],F.viewProj[1][a],F.viewProj[2][a]);
   if(clip.w+clip[a]<-radius*length(rowW+row)||clip.w-clip[a]<-radius*length(rowW-row)){return;}}
  if(clip.w<-radius*length(rowW)){return;}
- let depth=dot(relative,normalize(F.camFwd.xyz));let near=depth-radius;
+ let forwardDir=normalize(F.camFwd.xyz);let dist=length(relative);
+ let depth=dot(relative,forwardDir);let near=depth-radius;
  let lateral=sqrt(max(0.,dot(relative,relative)-depth*depth))+radius;let error=item.lowError.w;
  let threshold=forestMassPolicy.y*select(.88,1.,old==1u);
- let pixels=F.screen.y/max(2.*length(F.camUp.xyz),.0001)*error*sqrt(1.+lateral*lateral/max(near*near,.0001))/max(near-error,.0001);
+ let inCanopy=clamp((F.camPos.y-18.)/24.,0.,1.);
+ let midNear=max(select(near,dist-radius*.45,inCanopy>0.),1.5);
+ let cosGaze=clamp(depth/max(dist,.0001),0.,1.);let sinGaze2=1.-cosGaze*cosGaze;
+ let elevAbove=max(0.,relative.y/max(dist,.0001)-forwardDir.y-.16);
+ let gazeAcuity=1./(1.+4.5*sinGaze2+6.*sinGaze2*sinGaze2+120.*elevAbove*elevAbove);
+ let canopyMask=1./(1.+max(0.,midNear-150.)*.025*min(1.,elevAbove*8.));
+ let offAxis=sqrt(1.+lateral*lateral/max(near*near,.0001));
+ let perceptualScreenY=mix(F.screen.y,min(F.screen.y,1080.),inCanopy);
+ let perceptualFocal=perceptualScreenY/max(2.*length(F.camUp.xyz),.0001)*mix(offAxis,gazeAcuity*canopyMask,inCanopy);
+ let effectiveNear=select(near,select(0.,midNear,midNear>180.),inCanopy>0.);
+ let pixels=perceptualFocal*error/max(effectiveNear-error,.0001);
  // E is an authored sampling/support estimate. This projection bounds that
  // footprint, not native leaf appearance. Residency never bypasses it unless
  // the caller explicitly requests the separately labelled startup preview.
  let preview=forestMassPolicy.w==1.&&forestMassNativeResidency.x==0u;
- if(forestMassPolicy.z==2.||preview||(near>error&&pixels<=threshold)){forestMassSelected[id.x]=1u;forestMassCommands[id.x*5u+1u]=1u;}
+ if(forestMassPolicy.z==2.||preview||(effectiveNear>error&&pixels<=threshold)){forestMassSelected[id.x]=1u;forestMassCommands[id.x*5u+1u]=1u;}
 }
 `;
 

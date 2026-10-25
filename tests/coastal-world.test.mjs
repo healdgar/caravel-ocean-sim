@@ -1,0 +1,222 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT.
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import {
+  SPANISH_MAIN_1550_REGIONS,
+  PORT_PREFABS,
+  resolveGlobalCoastalRegion,
+  synthesizeCoastalTerrain,
+  synthesizeCoastalBeaches,
+  synthesizeCoastalBiome,
+  synthesizeCoastalAlbedo,
+  placeCoastalPort,
+  portClearanceEnvelope,
+  buildPortPrefabGeometry,
+  seedCoastalVegetation,
+  buildCoastalMesh,
+  generateProceduralCoastalPack,
+} from '../js/coastal-world.js';
+import {
+  terrainSample,
+  safeLandfallStart,
+  constrainIslandMotion,
+} from '../js/terrain-model.js';
+import { coastalRegionStageURL } from '../js/landfall.js';
+import { vegetationProbability } from '../js/vegetation.js';
+
+test('Spanish Main ~1550 gazetteer resolves all curated ports with deterministic metadata', () => {
+  const expectedIds = [
+    'saba',
+    'cartagena',
+    'nombre-de-dios',
+    'santo-domingo',
+    'havana',
+    'san-juan',
+  ];
+  assert.deepEqual(Object.keys(SPANISH_MAIN_1550_REGIONS), expectedIds);
+  for (const id of expectedIds) {
+    const r = resolveGlobalCoastalRegion(id);
+    assert.equal(r.id, id);
+    assert.equal(r.era, 1550);
+    assert.ok(r.latitude > 8 && r.latitude < 25);
+    assert.ok(r.longitude > -85 && r.longitude < -60);
+    assert.ok(r.span >= 4096);
+    assert.ok(r.size >= 65);
+    assert.ok(Object.isFrozen(r));
+  }
+  assert.throws(() => resolveGlobalCoastalRegion('atlantis'), /Unknown Spanish Main/);
+  assert.throws(() => resolveGlobalCoastalRegion({ latitude: 95, longitude: 0 }), /latitude/);
+  assert.throws(() => resolveGlobalCoastalRegion({ latitude: 10, longitude: 195 }), /longitude/);
+});
+
+test('global coastal resolver generates deterministic region descriptors for any coordinate worldwide', () => {
+  const globalSites = [
+    { name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, expectedClimate: 'temperate' },
+    { name: 'Acapulco · Manila Galleon Port', latitude: 16.849, longitude: -99.908, expectedClimate: 'tropical' },
+    { name: 'NagasakiBay', latitude: 32.75, longitude: 129.867, expectedClimate: 'subtropical' },
+    { name: 'Bergen · Fjord Coast', latitude: 60.391, longitude: 5.322, expectedClimate: 'subpolar' },
+  ];
+  for (const site of globalSites) {
+    const a = resolveGlobalCoastalRegion(site);
+    const b = resolveGlobalCoastalRegion(site);
+    assert.deepEqual(a, b, 'global coordinate resolution is strictly deterministic');
+    assert.equal(a.climate, site.expectedClimate);
+    assert.ok(a.shoreBearing >= 0 && a.shoreBearing < 360);
+    assert.ok(a.peakElevationMetres >= 40 && a.peakElevationMetres <= 900);
+  }
+
+  // Verify coastline ring normal inference
+  const rings = [[[-75.6, 10.4], [-75.5, 10.4], [-75.5, 10.5]]];
+  const withRings = resolveGlobalCoastalRegion({
+    latitude: 10.38,
+    longitude: -75.55,
+    coastlineRings: rings,
+  });
+  assert.ok(Number.isFinite(withRings.shoreBearing));
+});
+
+test('3D coastal terrain and bathymetry synthesize navigable channels, beaches, headlands and inland relief', () => {
+  for (const id of ['cartagena', 'nombre-de-dios', 'saba']) {
+    const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS[id], size: 65, biomeSize: 64, albedoSize: 64 });
+    const heights = synthesizeCoastalTerrain(region);
+    assert.equal(heights.length, region.size ** 2);
+    let minH = Infinity;
+    let maxH = -Infinity;
+    for (const h of heights) {
+      assert.ok(Number.isFinite(h));
+      minH = Math.min(minH, h);
+      maxH = Math.max(maxH, h);
+    }
+    assert.ok(minH <= -25 && minH >= -120, `offshore seabed reaches navigable depth (${minH}m)`);
+    assert.ok(maxH >= 60 && maxH <= 895, `inland relief rises to coastal hills/peaks (${maxH}m)`);
+
+    const mesh = buildCoastalMesh(region, heights);
+    assert.ok(mesh.indices.length > 0 && mesh.indices.length % 3 === 0);
+    assert.ok(mesh.submergedIndices.length > 0 && mesh.submergedIndices.length % 3 === 0);
+    for (let i = 0; i < mesh.vertices.length; i += 8) {
+      const nLen = Math.hypot(mesh.vertices[i + 3], mesh.vertices[i + 4], mesh.vertices[i + 5]);
+      assert.ok(Math.abs(nLen - 1) < 1e-4, 'unit surface normal');
+    }
+  }
+});
+
+test('coastal beaches and procedural RGBA albedo distinguish swash zones, dry sand berms, cliffs and forest', () => {
+  const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS.cartagena, size: 65, biomeSize: 64, albedoSize: 64 });
+  const heights = synthesizeCoastalTerrain(region);
+  const beaches = synthesizeCoastalBeaches(region, heights);
+  assert.equal(beaches.swashMask.length, region.biomeSize ** 2);
+  assert.equal(beaches.drySandMask.length, region.biomeSize ** 2);
+  assert.ok(beaches.beachCellCount > 16, 'sheltered bay produces a sandy foreshore');
+  assert.ok(beaches.cells.length > 0);
+  for (const cell of beaches.cells) {
+    assert.ok(cell.elevation >= 0.4 && cell.elevation <= 6.5);
+    assert.ok(cell.slope < 0.2);
+  }
+
+  const port = placeCoastalPort(region, heights);
+  const biome = synthesizeCoastalBiome(region, heights, beaches, port);
+  const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome);
+  assert.equal(albedo.length, region.albedoSize * region.albedoSize * 4);
+  for (let i = 3; i < albedo.length; i += 4) {
+    assert.equal(albedo[i], 255, 'opaque terrain albedo');
+  }
+});
+
+test('16th-century port prefabs place grounded waterfront piers, sea bastions and colonial buildings with valid 3D geometry', () => {
+  assert.ok(Object.keys(PORT_PREFABS).length >= 7);
+  const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS['santo-domingo'], size: 65, biomeSize: 64, albedoSize: 64 });
+  const heights = synthesizeCoastalTerrain(region);
+  const port = placeCoastalPort(region, heights);
+
+  assert.equal(port.regionId, 'santo-domingo');
+  assert.equal(port.era, 1550);
+  assert.ok(port.instances.length >= 7);
+  assert.ok(port.berth.depth >= 4.5, 'mooring berth clears deep-draft vessels');
+
+  const prefabIds = new Set(port.instances.map((i) => i.prefabId));
+  for (const required of ['timber_mole_pier', 'stone_sea_bastion', 'casa_de_contratacion', 'royal_warehouse', 'mission_chapel']) {
+    assert.ok(prefabIds.has(required), `port includes ${required}`);
+  }
+
+  // Pier center blocks hull clearance, while open berth clears hull envelope
+  const pier = port.instances.find((i) => i.prefabId === 'timber_mole_pier');
+  assert.equal(portClearanceEnvelope(port, pier.x, pier.z, 4), false);
+  assert.equal(portClearanceEnvelope(port, port.berth.x, port.berth.z, 4), true);
+
+  const geom = buildPortPrefabGeometry(port);
+  assert.equal(geom.instanceCount, port.instances.length);
+  assert.ok(geom.triangleCount >= port.instances.length * 10);
+  assert.equal(geom.indices.length, geom.triangleCount * 3);
+  for (let i = 0; i < geom.vertices.length; i += 8) {
+    assert.ok(geom.vertices.subarray(i, i + 8).every(Number.isFinite));
+    const nLen = Math.hypot(geom.vertices[i + 3], geom.vertices[i + 4], geom.vertices[i + 5]);
+    assert.ok(Math.abs(nLen - 1) < 1e-4);
+  }
+});
+
+test('coastal vegetation seeds palms, scrub and upland forest while clearing beaches and port footprints', () => {
+  const region = resolveGlobalCoastalRegion({
+    ...SPANISH_MAIN_1550_REGIONS['nombre-de-dios'],
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 12000,
+  });
+  const heights = synthesizeCoastalTerrain(region);
+  const beaches = synthesizeCoastalBeaches(region, heights);
+  const port = placeCoastalPort(region, heights);
+  const biome = synthesizeCoastalBiome(region, heights, beaches, port);
+  const veg = seedCoastalVegetation(region, heights, biome, beaches, port);
+
+  assert.deepEqual(veg.trees, seedCoastalVegetation(region, heights, biome, beaches, port).trees);
+  assert.ok(veg.stats.totalTrees > 250, 'dense coastal and upland stand seeded');
+  assert.ok(veg.stats.palmCount > 0, 'tropical foreshore seeds palm fringe');
+  assert.ok(veg.stats.uplandCount > 0, 'upland slopes seed forest stands');
+  assert.equal(
+    veg.stats.totalTrees,
+    veg.stats.palmCount + veg.stats.scrubCount + veg.stats.uplandCount
+  );
+
+  for (let i = 0; i < veg.trees.length; i += 8) {
+    const x = veg.trees[i];
+    const y = veg.trees[i + 1];
+    const z = veg.trees[i + 2];
+    assert.ok(y >= 2.4 && y <= 855, 'rooted above intertidal swash');
+    assert.ok(Math.abs(y - terrainSample(heights, x, z, region)) < 0.05);
+    assert.equal(portClearanceEnvelope(port, x, z, 10), true, 'tree clears port buildings and piers');
+    const u = (x - region.x) / region.span + 0.5;
+    const v = (z - region.z) / region.span + 0.5;
+    assert.ok(vegetationProbability(biome, region.biomeSize, u, v) > 0);
+  }
+});
+
+test('generateProceduralCoastalPack produces complete landfall packs and safe vessel starts for Spanish Main and global ports', () => {
+  for (const spec of [
+    { ...SPANISH_MAIN_1550_REGIONS.havana, size: 65, biomeSize: 64, albedoSize: 64, vegetationCandidates: 6000 },
+    { name: 'Cartagena Global Probe', latitude: 10.423, longitude: -75.548, size: 65, biomeSize: 64, albedoSize: 64, vegetationCandidates: 6000 },
+  ]) {
+    const pack = generateProceduralCoastalPack(spec);
+    assert.ok(pack.heights instanceof Float32Array);
+    assert.ok(pack.biome instanceof Uint8Array);
+    assert.ok(pack.albedo instanceof Uint8Array);
+    assert.ok(pack.vegetation.trees instanceof Float32Array);
+    assert.ok(pack.portGeometry.vertices instanceof Float32Array);
+
+    const caravel = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
+    for (const [stageName, view] of Object.entries(pack.views)) {
+      const start = safeLandfallStart(pack.heights, view, caravel, pack.region);
+      const boat = { ...caravel, ...start, surgeVelocity: 3, leewayVelocity: 0.1 };
+      assert.equal(
+        constrainIslandMotion(pack.heights, boat, start.x, start.z, null, pack.region),
+        false,
+        `${pack.region.id} ${stageName} start clears vessel hull envelope`
+      );
+    }
+  }
+
+  const url = coastalRegionStageURL('https://example.com/ocean.html', 'cartagena', 'coast', 'clear');
+  assert.equal(url.searchParams.get('region'), 'cartagena');
+  assert.equal(url.searchParams.get('landfall'), 'coast');
+  assert.equal(url.searchParams.get('lat'), '10.423');
+  assert.equal(url.searchParams.get('lon'), '-75.548');
+});

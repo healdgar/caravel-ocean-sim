@@ -57,9 +57,9 @@ export function islandGeometry(heights,replacedBounds=null){
 export function islandVegetation(heights,mask,region=ISLAND){
   return seedVegetation(region,(x,z)=>terrainSample(heights,x,z,region),mask);
 }
-export function islandCoordinates(x,z){
-  return {latitude:ISLAND.latitude-(z-ISLAND.z)/111195,
-    longitude:ISLAND.longitude+(x-ISLAND.x)/(111195*Math.cos(ISLAND.latitude*Math.PI/180))};
+export function islandCoordinates(x,z,region=ISLAND){
+  return {latitude:region.latitude-(z-region.z)/111195,
+    longitude:region.longitude+(x-region.x)/(111195*Math.cos(region.latitude*Math.PI/180))};
 }
 // Conservative hull envelope against an elevation-derived coastal skirt, not
 // a hydrographic grounding solver. Includes swept substeps to prevent tunneling.
@@ -88,15 +88,16 @@ export function safeLandfallStart(heights,view,boat,region=ISLAND,sample=null){
   }
   throw new RangeError('No landfall start clears this vessel draft and hull envelope');
 }
-export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=null){
+export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=null,region=ISLAND){
   const dx=boat.x-previousX,dz=boat.z-previousZ,distance=Math.hypot(dx,dz);
   const steps=Math.max(1,Math.ceil(distance/8));
   for(let step=1;step<=steps;step++){
     const t=step/steps,x=previousX+dx*t,z=previousZ+dz*t;
-    if(!islandHullClearance(heights,boat,x,z,ISLAND,sample)){
+    if(!islandHullClearance(heights,boat,x,z,region,sample)){
       const safe=(step-1)/steps;boat.x=previousX+dx*safe;boat.z=previousZ+dz*safe;
       boat.surgeVelocity=0;boat.leewayVelocity=0;boat.leewayDistance=0;return true;
     }
   }
   return false;
 }
+export { SPANISH_MAIN_1550_REGIONS, PORT_PREFABS, resolveGlobalCoastalRegion, synthesizeCoastalTerrain, synthesizeCoastalBeaches, synthesizeCoastalBiome, synthesizeCoastalAlbedo, placeCoastalPort, portClearanceEnvelope, buildPortPrefabGeometry, seedCoastalVegetation, generateProceduralCoastalPack } from './coastal-world.js';

@@ -49,7 +49,7 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
    let differences=0,maxError=0;for(let i=0;i<captures[0].pixels.length;i++){const error=Math.abs(captures[0].pixels[i]-captures[1].pixels[i]);if(error)differences++;maxError=Math.max(maxError,error);}
    const triangles=c=>c.reduce((sum,v,i)=>i%5===0?sum+v*c[i+1]/3:sum,0),row={name:scene.name,channels:captures[0].pixels.length,differences,maxError,referenceTriangles:triangles(captures[0].commands),occlusionTriangles:triangles(captures[1].commands)};rows.push(row);t.diagnostic(JSON.stringify(row));
    if(output)await writeFile(output+'/receipt.json',JSON.stringify(rows,null,2));assert.equal(differences,0,JSON.stringify(row));
-   if(scene.name==='reported-close-view')assert.ok(row.occlusionTriangles<row.referenceTriangles*.9,'actual native indirect work decreases, without changing pixels');
+   if(scene.name==='reported-close-view'){assert.ok(row.occlusionTriangles<row.referenceTriangles*.9,'actual native indirect work decreases, without changing pixels');assert.ok(row.occlusionTriangles<=6000000,'multi-tier stand replacement keeps close-canopy indirect triangles <= 6M');}
   }
  }finally{await browser?.close();server.closeAllConnections?.();await new Promise(r=>server.close(r));}
 });

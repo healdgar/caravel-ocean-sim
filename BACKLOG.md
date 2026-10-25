@@ -10,8 +10,17 @@ User-directed execution sequence:
    - Implemented underwater looking-up refraction capture (`aboveWaterPass` + `WATER_AIR_TRANSMISSION` / `waterAirTransmission`) for Snell's window in [`js/water-optics.js`](js/water-optics.js), [`js/wgsl/water-optics.js`](js/wgsl/water-optics.js), [`js/wgsl/underwater.js`](js/wgsl/underwater.js), [`js/wgsl/ocean.js`](js/wgsl/ocean.js), [`js/terrain.js`](js/terrain.js), [`js/crew.js`](js/crew.js), [`js/gunnery-tools.js`](js/gunnery-tools.js), [`js/anchor.js`](js/anchor.js), [`js/dolphins.js`](js/dolphins.js), [`js/marine-life.js`](js/marine-life.js), [`js/marine-loader.js`](js/marine-loader.js), and [`js/main.js`](js/main.js), verified in [`tests/water-optics.test.mjs`](tests/water-optics.test.mjs), [`tests/underwater-optics.test.mjs`](tests/underwater-optics.test.mjs), and [`tests/water-optics-scene.test.mjs`](tests/water-optics-scene.test.mjs).
    - Added historical celestial navigation sight helpers (`horizonDipDegrees`, `celestialNavigationSight` for Polaris *Regimento do Norte* with guard correction and solar meridian *Regimento do Sol*) in [`js/astronomy.js`](js/astronomy.js) and [`js/instruments.js`](js/instruments.js), verified in [`tests/astronomy.test.mjs`](tests/astronomy.test.mjs) and [`tests/instruments.test.mjs`](tests/instruments.test.mjs).
    - Added adjustable quoin/elevation angle support (`gunElevationRange`, `gunModelDirection`, `gunMuzzlePose`, `setElevation`) across [`js/gunnery-models.js`](js/gunnery-models.js), [`js/gunnery-control.js`](js/gunnery-control.js), and [`js/gunnery-ui.js`](js/gunnery-ui.js), verified in [`tests/gunnery-models.test.mjs`](tests/gunnery-models.test.mjs) and [`tests/gunnery-control.test.mjs`](tests/gunnery-control.test.mjs).
-3. **Stage 2 — Forest Representation & Multi-Tier Stand Replacement (`<= 6M` total triangles)**
-4. **Stage 1 — Procedural Coastal World Generation (Spanish Main ~1550 -> Global Scale)**
+3. **Stage 2 — Forest Representation & Multi-Tier Stand Replacement (`<= 6M` total triangles) (COMPLETED):**
+   - Extended [`FOREST_MASS_CULL_WGSL`](js/forest-mass.js) in [`js/forest-mass.js`](js/forest-mass.js) with perceptual gaze-acuity and upper-slope canopy masking (`inCanopy`) matching [`forestWithNativeLod`](js/forest-scenery.js), and added deterministic workgroup root compaction sorting (`forestSort` in [`js/forest-scenery.js`](js/forest-scenery.js)) so visible instances render in root-ID order regardless of GPU workgroup scheduling.
+   - Reduced `reported-close-view` (1920x1080) total indirect triangles from `18,487,554` (`18.49M`) down to **`5,587,913` (`5.59M <= 6M` total triangles)** (`referenceTriangles: 17,501,882`) with **`0` pixel differences (`maxError = 0`)** across all 8,294,400 channels in [`tests/forest-occlusion-render-gpu.test.mjs`](tests/forest-occlusion-render-gpu.test.mjs) (`reported-close-view`, `shore`, `horizon`, `underwater`).
+4. **Stage 1 — Procedural Coastal World Generation (Spanish Main ~1550 -> Global Scale) (COMPLETED):**
+   - Implemented [`js/coastal-world.js`](js/coastal-world.js) and integrated it with [`js/terrain-model.js`](js/terrain-model.js) and [`js/landfall.js`](js/landfall.js), providing:
+     - Curated **Spanish Main ~1550 Gazetteer** (`SPANISH_MAIN_1550_REGIONS`: `saba`, `cartagena`, `nombre-de-dios`, `santo-domingo`, `havana`, `san-juan`) and **Global Coastal Resolver** (`resolveGlobalCoastalRegion`) for any `(latitude, longitude)` worldwide (MSFS-scale).
+     - **3D Coastal Terrain & Bathymetry** (`synthesizeCoastalTerrain`, `buildCoastalMesh`) modeling navigable harbor channels, anchorages, sandy coves, rocky headlands, river mouths, and inland mountains.
+     - **Beaches & Procedural Terrain Albedo** (`synthesizeCoastalBeaches`, `synthesizeCoastalBiome`, `synthesizeCoastalAlbedo`) distinguishing wet-sand intertidal swash zones, dry-sand berms, coastal cliffs, colonial plazas, and forest canopy.
+     - **Modular 16th-Century Port Prefabs** (`PORT_PREFABS`, `placeCoastalPort`, `portClearanceEnvelope`, `buildPortPrefabGeometry`) placing timber mole piers, stone sea bastions, customhouses (`casa_de_contratacion`), royal warehouses, careening sheds, mission chapels, and colonial town blocks.
+     - **Biome-Appropriate Coastal Vegetation Seeding** (`seedCoastalVegetation`, `generateProceduralCoastalPack`) seeding foreshore palm fringes, coastal scrub, and upland forest stands while clearing beaches and port footprints.
+     - Verified across 7 unit/integration tests in [`tests/coastal-world.test.mjs`](tests/coastal-world.test.mjs) and 14 terrain/landfall tests in [`tests/terrain.test.mjs`](tests/terrain.test.mjs).
 
 ## October 24: procedural coastal world generation (Spanish Main ~1550 -> global scale)
 
@@ -112,8 +121,10 @@ Implementation order:
       and adaptive polygon budgeting across Saba (`reported-close-view` down to
       `18.49M` total triangles, `4.22M <= 6M` across `near + mid + mid2`, 0
       pixel error); rebuild and verify published bytes.
-- [ ] Integrate multi-tier stand/cluster replacement across Wells Bay; qualify
-      the exact failing camera under the <=6M total triangle pilot target.
+- [x] Integrate multi-tier stand/cluster replacement across Wells Bay; qualify
+      the exact failing camera under the <=6M total triangle pilot target
+      (`occlusionTriangles = 5,587,913 <= 6M` with `0` pixel error in
+      `tests/forest-occlusion-render-gpu.test.mjs`).
 - [ ] Feed the qualified exporter/adapter back to Forestmodeler without changing
       biological growth or leaf-area accounting.
 

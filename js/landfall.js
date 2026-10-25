@@ -1,4 +1,5 @@
-import { ISLAND, LANDFALL_VIEWS, islandCoordinates } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, resolveGlobalCoastalRegion } from './terrain-model.js';
+export { SPANISH_MAIN_1550_REGIONS, resolveGlobalCoastalRegion } from './coastal-world.js';
 
 export const LANDFALL_WEATHER = Object.freeze({
   clear:{sunElev:32,sunAzim:225,haze:0.8,clouds:0.3,cloudBase:1.2,cloudDepth:1.8,cloudDensity:1,cloudAnvil:0.05},
@@ -26,6 +27,16 @@ export function landfallStageURL(href,stage,weather='clear'){
   url.searchParams.set('landfall',stage);url.searchParams.set('view','boat');url.searchParams.set('boat','1');
   url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed','4');url.searchParams.set('weather',weather);
   for(const [key,value]of Object.entries(LANDFALL_SEA[stage]))url.searchParams.set(key,String(value));
+  return url;
+}
+
+export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',weather='clear'){
+  const region=resolveGlobalCoastalRegion(regionSpec);
+  const url=landfallStageURL(href,stage,weather);
+  url.searchParams.set('region',region.id);
+  url.searchParams.set('lat',String(region.latitude));
+  url.searchParams.set('lon',String(region.longitude));
+  url.searchParams.set('boatHeading',String(region.shoreBearing??112));
   return url;
 }
 
