@@ -11662,6 +11662,8 @@ fn landOpaque(in:LandVertex)->vec4f{
   // Different cliff projections and their blend can stretch coordinates much
   // faster than world position. Filter that actual mapping, before branching.
   let materialWidth=landMaterialFootprint(dpdx(materialUV),dpdy(materialUV));
+  let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
+  let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
@@ -11719,8 +11721,6 @@ fn landOpaque(in:LandVertex)->vec4f{
     }
   }else if(in.kind.x>=19.5){
     // Camera-projected photorealistic 1550 building texture atlas (u = in.kind.x - 20.0, v = in.kind.y)
-    let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
-    let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
     let photo=pow(textureSampleGrad(nearAlbedo,landSampler,bldgUV,bldgDx,bldgDy).rgb,vec3f(2.2));
     let detailA=landOrientedDetail(world,n,dx,dy,1.6);
     let luma=dot(photo,vec3f(0.299,0.587,0.114));
