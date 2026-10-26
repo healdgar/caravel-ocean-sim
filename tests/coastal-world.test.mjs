@@ -416,15 +416,16 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   assert.ok(templates, 'Expected WW3D bundle to decode');
   for (const id of ['stone_sea_bastion', 'casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
     assert.ok(templates[id], `Missing LRM template ${id}`);
-    assert.ok(templates[id].vertexCount >= 1200, `Expected >=1200 unshared flat-normal vertices for ${id}, got ${templates[id].vertexCount}`);
-    assert.ok(templates[id].indexCount >= 1200, `Expected >=400 plumb-rectified triangles for ${id}, got ${templates[id].indexCount}`);
+    assert.ok(templates[id].vertexCount >= 10000, `Expected >=10,000 unshared flat-normal vertices for high-detail ${id}, got ${templates[id].vertexCount}`);
+    assert.ok(templates[id].indexCount >= 10000, `Expected >=3,400 plumb-rectified triangles for high-detail ${id}, got ${templates[id].indexCount}`);
     assert.equal(templates[id].vertexCount, templates[id].indexCount, `Expected unshared per-face vertices for ${id} to prevent GPU material interpolation`);
   }
   const pack = generateProceduralCoastalPack('san-juan', { size: 65 });
   const geom = buildPortPrefabGeometry(pack.port, null, templates);
-  assert.ok(geom.triangleCount > 5000, `Expected plumb-rectified port geometry to exceed 5,000 triangles, got ${geom.triangleCount}`);
+  assert.ok(geom.triangleCount > 20000, `Expected high-detail plumb port geometry to exceed 20,000 triangles, got ${geom.triangleCount}`);
 
-  // Verify top-down map footprints in WW15 payload place buildings at exact (x, z), exact width × length scale, and exact yaw
+  // Verify top-down map footprints in WW15 payload subdivide large city blocks into true-scale 16th-century buildings
+  // (eave height 7.8m–10.2m, comfortably below the 18m–22m mature tropical forest trees) aligned to the map footprint yaw
   const packWithFootprints = build1550HistoricalTerritoryPack(pack);
   packWithFootprints.territory1550.clusterU = 0.42;
   packWithFootprints.territory1550.clusterV = 0.48;
@@ -437,11 +438,14 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   const encodedFp = encode1550TerritoryCachePayload(packWithFootprints);
   const appliedFp = apply1550TerritoryCachePayload(pack, encodedFp);
   assert.equal(appliedFp.port.hasOrthophotoFootprints, true);
-  const bastionInst = appliedFp.port.instances.find((inst) => inst.prefabId === 'stone_sea_bastion');
+  const orthoInstances = appliedFp.port.instances.filter((inst) => inst.fromOrthophotoFootprint);
+  assert.ok(orthoInstances.length >= 24, `Expected large map city blocks to subdivide into >=24 true-scale colonial buildings, got ${orthoInstances.length}`);
+  const bastionInst = orthoInstances.find((inst) => inst.prefabId === 'stone_sea_bastion');
   assert.ok(bastionInst, 'Expected stone_sea_bastion placed from top-down footprint');
-  assert.equal(bastionInst.width, 128, 'Footprint width must not be clamped');
-  assert.equal(bastionInst.length, 144, 'Footprint length must not be clamped');
   assert.equal(bastionInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');
-  assert.ok(bastionInst.height > 30, 'Building height scales proportionally to footprint dimensions');
+  for (const inst of orthoInstances) {
+    assert.ok(inst.height >= 7.5 && inst.height <= 11.0, `Expected true human/tree scale eave height (7.5m–11.0m vs 18m–22m trees), got ${inst.height} for ${inst.prefabId}`);
+    assert.ok(inst.width <= 44 && inst.length <= 48, `Expected individual building footprint <=44m×48m, got ${inst.width}×${inst.length} for ${inst.prefabId}`);
+  }
 });
 

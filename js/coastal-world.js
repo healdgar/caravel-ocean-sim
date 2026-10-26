@@ -1205,56 +1205,100 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     let warehouseAssigned = false;
     for (let i = 0; i < fps.length; i++) {
       const fp = fps[i];
-      let prefabId = fp.prefabId || 'colonial_town_block';
+      let basePrefabId = fp.prefabId || 'colonial_town_block';
       if (!fp.prefabId) {
-        if (i === bastionIdx) prefabId = 'stone_sea_bastion';
-        else if (i === casaIdx) prefabId = 'casa_de_contratacion';
-        else if (i === chapelIdx) prefabId = 'mission_chapel';
+        if (i === bastionIdx) basePrefabId = 'stone_sea_bastion';
+        else if (i === casaIdx) basePrefabId = 'casa_de_contratacion';
+        else if (i === chapelIdx) basePrefabId = 'mission_chapel';
         else if (!warehouseAssigned && fp.inlandM < 180) {
-          prefabId = 'royal_warehouse';
+          basePrefabId = 'royal_warehouse';
           warehouseAssigned = true;
         }
       }
-      const prefab = PORT_PREFABS[prefabId] || PORT_PREFABS.colonial_town_block;
-      const groundY = terrainSurfaceSample(heights, fp.x, fp.z, region);
-      const y = Math.max(2.2, groundY);
-      // Match the exact width & length of the top-down footprint on the map (no miniature clamping!)
-      const scaleW = Math.max(12, fp.width);
-      const scaleL = Math.max(14, fp.length);
-      const minSpan = Math.min(scaleW, scaleL);
-      const heightRatio =
-        prefabId === 'mission_chapel'
-          ? 0.56
-          : prefabId === 'casa_de_contratacion'
-            ? 0.40
-            : prefabId === 'stone_sea_bastion'
-              ? 0.34
-              : 0.36;
-      const pitchRatio =
-        prefabId === 'mission_chapel'
-          ? 0.18
-          : prefabId === 'stone_sea_bastion'
-            ? 0.08
-            : 0.13;
-      const scaledHeight = Math.max(prefab.height, minSpan * heightRatio);
-      const scaledPitch = Math.max(prefab.roofPitch ?? 2.4, minSpan * pitchRatio);
 
-      instances.push({
-        prefabId,
-        label: prefab.label,
-        x: fp.x,
-        y,
-        z: fp.z,
-        yaw: fp.yaw,
-        length: scaleL,
-        width: scaleW,
-        height: scaledHeight,
-        foundationDepth: Math.max(prefab.foundationDepth, 6.0),
-        materialKind: prefab.materialKind,
-        roofPitch: scaledPitch,
-        waterfront: prefab.waterfront,
-        fromOrthophotoFootprint: true,
-      });
+      // Subdivide large top-down map city blocks (manzanas) into true-scale 16th-century buildings
+      // (20m–32m wide, 7.8m–10.2m eave height — half the height of the 18m–22m tropical forest trees)
+      // arranged across the exact oriented footprint (fp.x, fp.z, fp.width, fp.length, fp.yaw).
+      const targetW = basePrefabId === 'stone_sea_bastion' ? 38 : basePrefabId === 'mission_chapel' ? 24 : 26;
+      const targetL = basePrefabId === 'stone_sea_bastion' ? 42 : basePrefabId === 'mission_chapel' ? 34 : 30;
+      const cols = Math.min(3, Math.max(1, Math.round(fp.width / targetW)));
+      const rows = Math.min(3, Math.max(1, Math.round(fp.length / targetL)));
+      const alleyGap = 3.6;
+      const cellW = Math.max(14, (fp.width - (cols - 1) * alleyGap) / cols);
+      const cellL = Math.max(16, (fp.length - (rows - 1) * alleyGap) / rows);
+      const cosYaw = Math.cos(fp.yaw);
+      const sinYaw = Math.sin(fp.yaw);
+
+      for (let rIdx = 0; rIdx < rows; rIdx++) {
+        for (let cIdx = 0; cIdx < cols; cIdx++) {
+          // For 3x3 colonial perimeter blocks (manzana cerrada), leave the center cell open as a cobbled plaza
+          if (cols === 3 && rows === 3 && cIdx === 1 && rIdx === 1) continue;
+
+          const isPrimaryCell = cIdx === 0 && rIdx === 0;
+          const subPrefabId =
+            isPrimaryCell
+              ? basePrefabId
+              : (cIdx + rIdx + i) % 4 === 0 && fp.inlandM < 180
+                ? 'royal_warehouse'
+                : 'colonial_town_block';
+          const prefab = PORT_PREFABS[subPrefabId] || PORT_PREFABS.colonial_town_block;
+
+          const localX = (cIdx - (cols - 1) * 0.5) * (cellW + alleyGap);
+          const localZ = (rIdx - (rows - 1) * 0.5) * (cellL + alleyGap);
+          const subX = fp.x + localX * cosYaw + localZ * sinYaw;
+          const subZ = fp.z - localX * sinYaw + localZ * cosYaw;
+
+          const maxW =
+            subPrefabId === 'stone_sea_bastion' ? 44 : subPrefabId === 'mission_chapel' ? 25 : 32;
+          const maxL =
+            subPrefabId === 'stone_sea_bastion' ? 48 : subPrefabId === 'mission_chapel' ? 38 : 36;
+          const scaleW = Math.min(maxW, Math.max(14, cellW));
+          const scaleL = Math.min(maxL, Math.max(16, cellL));
+
+          // True 16th-century human & tree scale:
+          // - 2-story colonial houses/warehouses: 7.8m–8.9m eaves (~10.5m–11.5m roof ridge vs 18m–22m trees)
+          // - Casa de la Contratación: 9.4m eaves (~12.2m roof ridge)
+          // - Stone Sea Bastion: 9.8m ramparts (~14.6m central keep peak)
+          // - Mission Chapel: 10.2m nave eaves (~13.0m nave ridge, ~19.4m 3-stage bell tower peak)
+          const heightVar = ((cIdx * 3 + rIdx * 5 + i) % 3) * 0.45;
+          const trueHeight =
+            subPrefabId === 'mission_chapel'
+              ? 10.2
+              : subPrefabId === 'stone_sea_bastion'
+                ? 9.8
+                : subPrefabId === 'casa_de_contratacion'
+                  ? 9.4
+                  : 7.8 + heightVar;
+          const truePitch =
+            subPrefabId === 'mission_chapel'
+              ? 3.2
+              : subPrefabId === 'casa_de_contratacion'
+                ? 2.8
+                : subPrefabId === 'stone_sea_bastion'
+                  ? 2.2
+                  : 2.5;
+
+          const groundY = terrainSurfaceSample(heights, subX, subZ, region);
+          const y = Math.max(2.2, groundY);
+
+          instances.push({
+            prefabId: subPrefabId,
+            label: prefab.label,
+            x: subX,
+            y,
+            z: subZ,
+            yaw: fp.yaw,
+            length: scaleL,
+            width: scaleW,
+            height: trueHeight,
+            foundationDepth: Math.max(prefab.foundationDepth, 6.0),
+            materialKind: prefab.materialKind,
+            roofPitch: truePitch,
+            waterfront: prefab.waterfront,
+            fromOrthophotoFootprint: true,
+          });
+        }
+      }
     }
   } else {
     // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
@@ -1642,16 +1686,19 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const lrmKey = inst.prefabId === 'royal_warehouse' ? 'colonial_town_block' : inst.prefabId;
     const lrmTmpl = lrmTemplates?.[lrmKey];
     if (lrmTmpl) {
-      // Grounded coral-limestone foundation plinth anchoring the Hunyuan3D-2mv 3D mesh into sloped coastal terrain
-      const yPlinth = yGround + 0.68;
+      // Grounded coral-limestone foundation plinth anchoring the 3D colonial building into sloped coastal terrain
+      const yPlinth = yGround + 0.65;
       emitBox(toWorld, -hw - 0.55, hw + 0.55, yBase, yPlinth, -hl - 0.55, hl + 0.55, 11, 0.82);
-      const minSpan = Math.min(inst.width, inst.length);
+      // In buildings-1550-lrm.bin, ly=1.0 is the highest architectural point:
+      // - colonial_town_block / casa_de_contratacion: roof ridge (yTop + roofPitch -> ~10.4m–12.2m)
+      // - stone_sea_bastion: central command keep peak (yTop + 4.8m -> ~14.6m, ramparts at ~8.8m)
+      // - mission_chapel: 3-stage bell tower peak (yTop + 9.2m -> ~19.4m, nave ridge at ~13.0m)
       const peakExtra =
         inst.prefabId === 'mission_chapel'
-          ? (inst.roofPitch ?? 3.4) + Math.max(5.8, minSpan * 0.24)
+          ? 9.2
           : inst.prefabId === 'stone_sea_bastion'
-            ? Math.max(4.8, minSpan * 0.16)
-            : (inst.roofPitch ?? 2.6) + Math.max(1.2, minSpan * 0.06);
+            ? 4.8
+            : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
       // LRM mesh vertices are normalized to [-0.46, +0.46] (span 0.92), so scale by 1/0.92 = 1.087 to cover 100% of the footprint
       emitLRMMesh(toWorld, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY);
@@ -2174,6 +2221,21 @@ export function synthesizeCoastalAlbedo(
           r = r * reliefMod;
           g = g * reliefMod;
           b = b * reliefMod;
+        } else if (
+          satelliteData?.is1550Orthophoto &&
+          ((sat.r > 92 && sat.r - sat.g >= 18 && sat.r - sat.b >= 34) ||
+            (portPlacement && !portClearanceEnvelope(portPlacement, x, z, 8)))
+        ) {
+          // Replace 2D painted terracotta roof pixels on the ground beneath & between 3D colonial buildings
+          // with warm 1550 Spanish colonial coral-limestone cobblestone & flagstone courtyard paving
+          const reliefMod = Math.max(0.88, Math.min(1.12, (sat.luma * lift) / Math.max(48, sat.localLuma)));
+          const cobbleR = (168 + fineGrain * 0.85) * reliefMod;
+          const cobbleG = (150 + fineGrain * 0.75) * reliefMod;
+          const cobbleB = (124 + fineGrain * 0.65) * reliefMod;
+          const satBlend = coastalSmoothstep(0.15, 1.4, h) * 0.86;
+          r = r * (1 - satBlend) + cobbleR * satBlend;
+          g = g * (1 - satBlend) + cobbleG * satBlend;
+          b = b * (1 - satBlend) + cobbleB * satBlend;
         } else {
           // Co-registered natural satellite orthophoto color (canopy, soil, rocky cliffs, and sandy berms)
           const satBlend = coastalSmoothstep(0.15, 1.4, h) * 0.78;

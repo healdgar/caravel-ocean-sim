@@ -406,39 +406,50 @@ fn landOpaque(in:LandVertex)->vec4f{
     roughness=clamp(0.90-luma*0.12,0.74,0.94);
     ambientVisibility=0.46+0.36*max(n.y,0.0);
   }else if(in.kind.x>=9.5){
-    let portShade=clamp(in.kind.y,0.25,1.0);
+    let portShade=clamp(in.kind.y,0.22,1.0);
     let detailA=landOrientedDetail(world,n,dx,dy,1.45);
     let detailB=landOrientedDetail(world+vec3f(7.3,3.1,11.9),n,dx,dy,5.2);
     if(in.kind.x<10.5){
-      // Kind 10: Weathered pitch-pine & oak timber (piers, pilings, balconies, beams)
-      let plank=sin(world.y*14.0+detailA*1.6)*detailFade;
-      albedo=vec3f(0.18,0.118,0.068)*portShade*(1.0+detailA*0.16+detailB*0.08+plank*0.06);
-      relief=(detailA*0.022+plank*0.012)*detailFade;roughness=0.86;ambientVisibility=0.40+0.32*max(n.y,0.0);
+      // Kind 10: Weathered Spanish cedar & pitch-pine timber (piers, balconies, shutters, rafters)
+      let plank=sin(world.y*14.0+(world.x+world.z)*3.5+detailA*1.6)*detailFade;
+      let grain=sin((world.x-world.z)*18.0+world.y*6.0)*detailFade;
+      albedo=vec3f(0.22,0.135,0.075)*portShade*(1.0+detailA*0.16+detailB*0.08+plank*0.07+grain*0.04);
+      relief=(detailA*0.024+plank*0.014+grain*0.008)*detailFade;roughness=0.84;ambientVisibility=0.42+0.34*max(n.y,0.0);
     }else if(in.kind.x<11.5){
-      // Kind 11: Coursed coral-limestone ashlar masonry (bastion walls, merlons, plinths, quoins)
+      // Kind 11: Coursed coral-limestone ashlar masonry (bastion walls, quoins, arches, buttresses)
+      let courseIdx=floor(world.y*1.65);
       let courseY=fract(world.y*1.65);let bedJoint=smoothstep(0.0,0.09,courseY)*(1.0-smoothstep(0.91,1.0,courseY));
-      let stagger=floor(world.y*1.65)*0.5;
-      let headCoord=fract((world.x+world.z)*0.72+stagger);
+      let stagger=courseIdx*0.5;
+      let blockCoord=(world.x+world.z)*0.72+stagger;
+      let blockIdx=floor(blockCoord);
+      let headCoord=fract(blockCoord);
       let headJoint=smoothstep(0.0,0.07,headCoord)*(1.0-smoothstep(0.93,1.0,headCoord));
       let mortar=mix(1.0,bedJoint*headJoint,detailFade);
+      let blockVar=sin(courseIdx*7.13+blockIdx*13.71)*0.055*detailFade;
       let damp=smoothstep(0.2,3.8,world.y);
-      albedo=vec3f(0.39,0.36,0.30)*portShade*(0.76+0.24*damp)*(0.86+0.14*mortar+detailA*0.14+detailB*0.07);
-      relief=(detailA*0.045+detailB*0.018-(1.0-mortar)*0.035)*detailFade;roughness=0.90;ambientVisibility=0.44+0.32*max(n.y,0.0);
+      let stoneBase=mix(vec3f(0.36,0.33,0.27),vec3f(0.48,0.44,0.37),damp)+vec3f(blockVar);
+      albedo=stoneBase*portShade*(0.84+0.16*mortar+detailA*0.14+detailB*0.07);
+      relief=(detailA*0.048+detailB*0.020-(1.0-mortar)*0.038)*detailFade;roughness=0.89;ambientVisibility=0.45+0.33*max(n.y,0.0);
     }else if(in.kind.x<12.5){
-      // Kind 12: Warm Spanish colonial limewashed stucco with aged plaster patina
-      let damp=smoothstep(0.8,3.6,world.y);
-      let warmStucco=mix(vec3f(0.46,0.41,0.33),vec3f(0.66,0.59,0.47),damp);
-      albedo=warmStucco*portShade*(1.0+detailA*0.09+detailB*0.05);
-      relief=(detailA*0.018+detailB*0.009)*detailFade;roughness=0.88;ambientVisibility=0.48+0.34*max(n.y,0.0);
+      // Kind 12: Warm Spanish colonial limewashed stucco (cream/ochre plaster with rising-damp patina)
+      let damp=smoothstep(0.6,3.4,world.y);
+      let trowel=sin(world.x*2.4+world.z*2.1+detailA*2.2)*0.025*detailFade;
+      let warmStucco=mix(vec3f(0.52,0.46,0.36),vec3f(0.76,0.69,0.56),damp)+vec3f(trowel);
+      albedo=warmStucco*portShade*(1.0+detailA*0.08+detailB*0.05);
+      relief=(detailA*0.018+detailB*0.010+trowel*0.4)*detailFade;roughness=0.86;ambientVisibility=0.50+0.36*max(n.y,0.0);
     }else if(in.kind.x<13.5){
-      // Kind 13: Spanish terracotta barrel roof tiles (tejas)
-      let flute=sin((world.x*3.7+world.z*3.7)*4.2)*detailFade;
-      albedo=vec3f(0.44,0.155,0.078)*portShade*(1.0+detailA*0.14+flute*0.09+detailB*0.06);
-      relief=(flute*0.028+detailA*0.015)*detailFade;roughness=0.82;ambientVisibility=0.46+0.36*max(n.y,0.0);
+      // Kind 13: Spanish terracotta barrel roof tiles (tejas curvas with course steps & kiln variation)
+      let flute=sin((world.x*3.8+world.z*3.8)*4.2)*detailFade;
+      let courseStep=smoothstep(0.0,0.14,fract(world.y*2.4));
+      let kilnVar=sin(floor(world.x*3.2)*5.3+floor(world.z*3.2)*9.7)*0.045*detailFade;
+      let tileCol=vec3f(0.50+kilnVar,0.175+kilnVar*0.45,0.085+kilnVar*0.25)*(0.90+0.12*courseStep);
+      albedo=tileCol*portShade*(1.0+detailA*0.13+flute*0.10+detailB*0.06);
+      relief=(flute*0.032+(courseStep-0.5)*0.018+detailA*0.014)*detailFade;roughness=0.80;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }else{
-      // Kind 14: Deep recessed colonial arcades, portals, cannon embrasures & timber shutters
-      albedo=vec3f(0.048,0.036,0.026)*portShade*(1.0+detailB*0.08);
-      relief=detailB*0.008*detailFade;roughness=0.92;ambientVisibility=0.18+0.14*max(n.y,0.0);
+      // Kind 14: Deep recessed colonial openings, arched portals & wrought-iron reja bars
+      let reja=smoothstep(0.42,0.48,abs(fract((world.x+world.z)*3.6)-0.5))*smoothstep(0.40,0.47,abs(fract(world.y*2.2)-0.5));
+      albedo=mix(vec3f(0.085,0.072,0.058),vec3f(0.042,0.032,0.024),reja)*portShade*(1.0+detailB*0.08);
+      relief=(detailB*0.008-(1.0-reja)*0.012)*detailFade;roughness=0.90;ambientVisibility=0.20+0.16*max(n.y,0.0);
     }
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);

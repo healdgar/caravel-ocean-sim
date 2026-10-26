@@ -50,9 +50,9 @@
     "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
-    "url": "assets/ports/1550/buildings-1550-lrm.2e6e779efa3f0247.bin",
-    "bytes": 348700,
-    "sha256": "2e6e779efa3f0247e161b35d53327c1cbef820a92265d520d82f52d34538d725"
+    "url": "assets/ports/1550/buildings-1550-lrm.f22f7fa629d96fc8.bin",
+    "bytes": 1930936,
+    "sha256": "f22f7fa629d96fc8610ca3a905b36990fea6bf76331ffa29ad230a99d71aca89"
   },
   "assets/canopy-scenery/saba/manifest.json": {
     "url": "assets/canopy-scenery/saba/manifest.90f2c991ce4e984c.json",
@@ -570,9 +570,9 @@
     "sha256": "ad40fb471213f1f45acef13d9e51c4a26ae1e60a6e066fa165e1d5b5ea76b24b"
   },
   "assets/ports/1550/buildings-1550-photo-atlas.jpg": {
-    "url": "assets/ports/1550/buildings-1550-photo-atlas.86575535eb20c366.jpg",
-    "bytes": 346522,
-    "sha256": "86575535eb20c366b5f2b622ceaff5f481c4b21bdd763bb777944760182a473c"
+    "url": "assets/ports/1550/buildings-1550-photo-atlas.aa9ada36140bf586.jpg",
+    "bytes": 382788,
+    "sha256": "aa9ada36140bf5864f48c58252546201892313cb575c763895279d098c75aa9f"
   },
   "assets/world/saba/manifest.json": {
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
