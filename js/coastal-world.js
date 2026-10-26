@@ -1203,7 +1203,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
 
     let warehouseAssigned = false;
-    for (let i = 0; i < fps.length; i++) {
+    let orthoCount = 0;
+    const maxOrthoBuildings = 24;
+    for (let i = 0; i < fps.length && orthoCount < maxOrthoBuildings; i++) {
       const fp = fps[i];
       let basePrefabId = fp.prefabId || 'colonial_town_block';
       if (!fp.prefabId) {
@@ -1219,26 +1221,23 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       // Subdivide large top-down map city blocks (manzanas) into true-scale 16th-century buildings
       // (20m–32m wide, 7.8m–10.2m eave height — half the height of the 18m–22m tropical forest trees)
       // arranged across the exact oriented footprint (fp.x, fp.z, fp.width, fp.length, fp.yaw).
-      const targetW = basePrefabId === 'stone_sea_bastion' ? 38 : basePrefabId === 'mission_chapel' ? 24 : 26;
-      const targetL = basePrefabId === 'stone_sea_bastion' ? 42 : basePrefabId === 'mission_chapel' ? 34 : 30;
-      const cols = Math.min(3, Math.max(1, Math.round(fp.width / targetW)));
-      const rows = Math.min(3, Math.max(1, Math.round(fp.length / targetL)));
-      const alleyGap = 3.6;
+      const targetW = basePrefabId === 'stone_sea_bastion' ? 42 : basePrefabId === 'mission_chapel' ? 28 : 34;
+      const targetL = basePrefabId === 'stone_sea_bastion' ? 46 : basePrefabId === 'mission_chapel' ? 38 : 38;
+      const cols = Math.min(2, Math.max(1, Math.round(fp.width / targetW)));
+      const rows = Math.min(2, Math.max(1, Math.round(fp.length / targetL)));
+      const alleyGap = 3.8;
       const cellW = Math.max(14, (fp.width - (cols - 1) * alleyGap) / cols);
       const cellL = Math.max(16, (fp.length - (rows - 1) * alleyGap) / rows);
       const cosYaw = Math.cos(fp.yaw);
       const sinYaw = Math.sin(fp.yaw);
 
-      for (let rIdx = 0; rIdx < rows; rIdx++) {
-        for (let cIdx = 0; cIdx < cols; cIdx++) {
-          // For 3x3 colonial perimeter blocks (manzana cerrada), leave the center cell open as a cobbled plaza
-          if (cols === 3 && rows === 3 && cIdx === 1 && rIdx === 1) continue;
-
+      for (let rIdx = 0; rIdx < rows && orthoCount < maxOrthoBuildings; rIdx++) {
+        for (let cIdx = 0; cIdx < cols && orthoCount < maxOrthoBuildings; cIdx++) {
           const isPrimaryCell = cIdx === 0 && rIdx === 0;
           const subPrefabId =
             isPrimaryCell
               ? basePrefabId
-              : (cIdx + rIdx + i) % 4 === 0 && fp.inlandM < 180
+              : (cIdx + rIdx + i) % 3 === 0 && fp.inlandM < 180
                 ? 'royal_warehouse'
                 : 'colonial_town_block';
           const prefab = PORT_PREFABS[subPrefabId] || PORT_PREFABS.colonial_town_block;
@@ -1297,6 +1296,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
             waterfront: prefab.waterfront,
             fromOrthophotoFootprint: true,
           });
+          orthoCount++;
         }
       }
     }
@@ -1316,6 +1316,12 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     // 8. Colonial Town Blocks flanking the plaza
     addPrefab('colonial_town_block', 28, 88, 0, 3.8);
     addPrefab('colonial_town_block', -44, 48, 0, 3.2);
+  }
+
+  for (const inst of instances) {
+    inst._cosNegYaw = Math.cos(-inst.yaw);
+    inst._sinNegYaw = Math.sin(-inst.yaw);
+    inst._boundR = Math.hypot(inst.width, inst.length) * 0.5;
   }
 
   const center = orthoFootprints
@@ -1344,11 +1350,19 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
 
 export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
   if (!portPlacement?.instances) return true;
+  if (portPlacement.center) {
+    const cdx = x - portPlacement.center.x;
+    const cdz = z - portPlacement.center.z;
+    const maxClusterR = 620 + hullRadius;
+    if (cdx * cdx + cdz * cdz > maxClusterR * maxClusterR) return true;
+  }
   for (const inst of portPlacement.instances) {
     const dx = x - inst.x;
     const dz = z - inst.z;
-    const c = Math.cos(-inst.yaw);
-    const s = Math.sin(-inst.yaw);
+    const rBound = (inst._boundR ?? Math.hypot(inst.width, inst.length) * 0.5) + hullRadius;
+    if (dx * dx + dz * dz > rBound * rBound) continue;
+    const c = inst._cosNegYaw ?? Math.cos(-inst.yaw);
+    const s = inst._sinNegYaw ?? Math.sin(-inst.yaw);
     const localX = dx * c - dz * s;
     const localZ = dx * s + dz * c;
     const halfW = inst.width * 0.5 + hullRadius;
@@ -1443,27 +1457,37 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     return idx;
   };
 
-  // Stamp a Hunyuan3D-2mv multi-view reconstructed 3D building mesh into world coordinates
-  const emitLRMMesh = (toWorld, tmpl, widthX, y0, y1, lengthZ, cosY, sinY) => {
+  // Stamp a reconstructed 3D building mesh into world coordinates with zero per-vertex array allocations
+  const emitLRMMesh = (instX, instZ, tmpl, widthX, y0, y1, lengthZ, cosY, sinY) => {
     const baseVertex = verts.length / 8;
     const spanY = Math.max(1.0, y1 - y0);
+    const invW = 1 / Math.max(1, widthX);
+    const invY = 1 / spanY;
+    const invL = 1 / Math.max(1, lengthZ);
     const vArr = tmpl.vertices;
     const vCount = tmpl.vertexCount;
     for (let v = 0; v < vCount; v++) {
       const off = v * 8;
       const lx = vArr[off] * widthX;
-      const ly = y0 + vArr[off + 1] * spanY;
+      const py = y0 + vArr[off + 1] * spanY;
       const lz = vArr[off + 2] * lengthZ;
-      const wp = toWorld(lx, ly, lz);
-      const lnx = vArr[off + 3] / Math.max(1, widthX);
-      const lny = vArr[off + 4] / spanY;
-      const lnz = vArr[off + 5] / Math.max(1, lengthZ);
+      const px = instX + lx * cosY + lz * sinY;
+      const pz = instZ - lx * sinY + lz * cosY;
+      const lnx = vArr[off + 3] * invW;
+      const lny = vArr[off + 4] * invY;
+      const lnz = vArr[off + 5] * invL;
       let wx = lnx * cosY + lnz * sinY;
       let wy = lny;
       let wz = -lnx * sinY + lnz * cosY;
       const nLen = Math.hypot(wx, wy, wz) || 1;
       wx /= nLen; wy /= nLen; wz /= nLen;
-      pushVertex(wp, [wx, wy, wz], vArr[off + 6], vArr[off + 7]);
+      verts.push(px, py, pz, wx, wy, wz, vArr[off + 6], vArr[off + 7]);
+      if (px < bounds.min[0]) bounds.min[0] = px;
+      if (px > bounds.max[0]) bounds.max[0] = px;
+      if (py < bounds.min[1]) bounds.min[1] = py;
+      if (py > bounds.max[1]) bounds.max[1] = py;
+      if (pz < bounds.min[2]) bounds.min[2] = pz;
+      if (pz > bounds.max[2]) bounds.max[2] = pz;
     }
     const iArr = tmpl.indices;
     for (let i = 0; i < iArr.length; i++) {
@@ -1701,7 +1725,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
             : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
       // LRM mesh vertices are normalized to [-0.46, +0.46] (span 0.92), so scale by 1/0.92 = 1.087 to cover 100% of the footprint
-      emitLRMMesh(toWorld, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY);
+      emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY);
       continue;
     }
 

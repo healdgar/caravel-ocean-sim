@@ -4,16 +4,16 @@
     "name": "Stone Sea Bastion (Baluarte Real)",
     "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/stone_sea_bastion_photo_front_1792970336921.jpg",
     "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/stone_sea_bastion_photo_back_1792970362729.jpg",
-    "triangles": 3446,
-    "vertices": 10338,
-    "plumbPlanarPct": 85.0,
-    "glbBytes": 331940,
+    "triangles": 2498,
+    "vertices": 7494,
+    "plumbPlanarPct": 86.7,
+    "glbBytes": 240928,
     "materialBreakdownPct": {
-      "10": 30.6,
-      "11": 57.0,
-      "12": 0.3,
-      "13": 0.7,
-      "14": 11.4
+      "10": 26.1,
+      "11": 60.7,
+      "12": 0.4,
+      "13": 1.0,
+      "14": 11.8
     }
   },
   {
@@ -21,16 +21,16 @@
     "name": "Casa de la Contrataci\u00f3n (Royal Customhouse)",
     "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/casa_de_contratacion_photo_front_1792970388823.jpg",
     "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/casa_de_contratacion_photo_back_1792970415993.jpg",
-    "triangles": 4188,
-    "vertices": 12564,
-    "plumbPlanarPct": 86.2,
-    "glbBytes": 403176,
+    "triangles": 2640,
+    "vertices": 7920,
+    "plumbPlanarPct": 90.1,
+    "glbBytes": 254560,
     "materialBreakdownPct": {
-      "10": 37.5,
-      "11": 48.7,
-      "12": 0.5,
-      "13": 0.6,
-      "14": 12.6
+      "10": 36.7,
+      "11": 53.0,
+      "12": 0.8,
+      "13": 1.0,
+      "14": 8.5
     }
   },
   {
@@ -38,16 +38,16 @@
     "name": "Mission Chapel & Bell Tower (Iglesia Colonial)",
     "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/mission_chapel_photo_front_1792970442758.jpg",
     "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/mission_chapel_photo_back_1792970471598.jpg",
-    "triangles": 3936,
-    "vertices": 11808,
-    "plumbPlanarPct": 84.4,
-    "glbBytes": 378984,
+    "triangles": 2176,
+    "vertices": 6528,
+    "plumbPlanarPct": 89.2,
+    "glbBytes": 210016,
     "materialBreakdownPct": {
-      "10": 18.7,
-      "11": 57.7,
-      "12": 1.1,
-      "13": 1.5,
-      "14": 20.9
+      "10": 11.0,
+      "11": 67.6,
+      "12": 2.0,
+      "13": 2.8,
+      "14": 16.5
     }
   },
   {
@@ -55,16 +55,16 @@
     "name": "Colonial Courtyard Mansion (Casa Patio)",
     "frontIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/colonial_townhouse_photo_front_1792970497109.jpg",
     "backIsometricPath": "/Users/alexwall/.gemini/antigravity/brain/132ecd3d-5aee-4e5a-9be2-bd47c7a7d28c/colonial_townhouse_photo_back_1792970527952.jpg",
-    "triangles": 7356,
-    "vertices": 22068,
-    "plumbPlanarPct": 85.3,
-    "glbBytes": 707304,
+    "triangles": 4056,
+    "vertices": 12168,
+    "plumbPlanarPct": 89.8,
+    "glbBytes": 390504,
     "materialBreakdownPct": {
-      "10": 36.5,
-      "11": 45.1,
-      "12": 0.5,
-      "13": 0.8,
-      "14": 17.0
+      "10": 37.4,
+      "11": 47.1,
+      "12": 1.0,
+      "13": 1.5,
+      "14": 13.0
     }
   }
 ]

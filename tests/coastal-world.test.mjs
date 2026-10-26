@@ -416,13 +416,13 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   assert.ok(templates, 'Expected WW3D bundle to decode');
   for (const id of ['stone_sea_bastion', 'casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
     assert.ok(templates[id], `Missing LRM template ${id}`);
-    assert.ok(templates[id].vertexCount >= 10000, `Expected >=10,000 unshared flat-normal vertices for high-detail ${id}, got ${templates[id].vertexCount}`);
-    assert.ok(templates[id].indexCount >= 10000, `Expected >=3,400 plumb-rectified triangles for high-detail ${id}, got ${templates[id].indexCount}`);
+    assert.ok(templates[id].vertexCount >= 6000, `Expected >=6,000 unshared flat-normal vertices for high-detail ${id}, got ${templates[id].vertexCount}`);
+    assert.ok(templates[id].indexCount >= 6000, `Expected >=2,000 plumb-rectified triangles for high-detail ${id}, got ${templates[id].indexCount}`);
     assert.equal(templates[id].vertexCount, templates[id].indexCount, `Expected unshared per-face vertices for ${id} to prevent GPU material interpolation`);
   }
   const pack = generateProceduralCoastalPack('san-juan', { size: 65 });
   const geom = buildPortPrefabGeometry(pack.port, null, templates);
-  assert.ok(geom.triangleCount > 20000, `Expected high-detail plumb port geometry to exceed 20,000 triangles, got ${geom.triangleCount}`);
+  assert.ok(geom.triangleCount > 12000, `Expected high-detail plumb port geometry to exceed 12,000 triangles, got ${geom.triangleCount}`);
 
   // Verify top-down map footprints in WW15 payload subdivide large city blocks into true-scale 16th-century buildings
   // (eave height 7.8m–10.2m, comfortably below the 18m–22m mature tropical forest trees) aligned to the map footprint yaw
@@ -439,7 +439,7 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   const appliedFp = apply1550TerritoryCachePayload(pack, encodedFp);
   assert.equal(appliedFp.port.hasOrthophotoFootprints, true);
   const orthoInstances = appliedFp.port.instances.filter((inst) => inst.fromOrthophotoFootprint);
-  assert.ok(orthoInstances.length >= 24, `Expected large map city blocks to subdivide into >=24 true-scale colonial buildings, got ${orthoInstances.length}`);
+  assert.ok(orthoInstances.length >= 12 && orthoInstances.length <= 24, `Expected large map city blocks to subdivide into 12..24 true-scale colonial buildings, got ${orthoInstances.length}`);
   const bastionInst = orthoInstances.find((inst) => inst.prefabId === 'stone_sea_bastion');
   assert.ok(bastionInst, 'Expected stone_sea_bastion placed from top-down footprint');
   assert.equal(bastionInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');

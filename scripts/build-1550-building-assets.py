@@ -160,86 +160,55 @@ class PlumbArchitecturalMeshBuilder:
             self.add_box(x0, x1, y0, y1, z_wall, z_wall + depth, kind, shade, cap_top=cap_top, cap_bottom=cap_bottom)
 
     def add_recessed_window_x(self, x_wall, out_sign, y0, y1, z0, z1, has_shutters: bool = True, has_reja: bool = False):
-        """Adds a detailed Spanish colonial window with stone surround, sill corbels, dark glazing, iron reja bars, and open timber shutters."""
-        fw = 0.014
-        # Stone jambs, lintel, and projecting sill
-        self.add_wall_feature_x(x_wall, out_sign, y0, y1 + fw, z0 - fw, z0, 11.0, 0.88, depth=0.018)
-        self.add_wall_feature_x(x_wall, out_sign, y0, y1 + fw, z1, z1 + fw, 11.0, 0.88, depth=0.018)
+        """Adds a Spanish colonial window with stone surround, projecting sill, dark reja glazing (Kind 14), and open timber shutters."""
+        fw = 0.015
+        # Projecting stone lintel & sill + dark recessed opening (Kind 14 shader renders reja/mullion bars)
         self.add_wall_feature_x(x_wall, out_sign, y1, y1 + fw * 1.3, z0 - fw * 1.2, z1 + fw * 1.2, 11.0, 0.92, depth=0.024)
         self.add_wall_feature_x(x_wall, out_sign, y0 - fw * 1.1, y0, z0 - fw * 1.4, z1 + fw * 1.4, 11.0, 0.90, depth=0.028)
-        # Deep dark window pane
-        self.add_wall_feature_x(x_wall, out_sign, y0, y1, z0, z1, 14.0, 0.28, depth=0.008)
-        # Center wooden mullion & transom cross
-        mz = 0.5 * (z0 + z1)
-        my = 0.54 * y1 + 0.46 * y0
-        self.add_wall_feature_x(x_wall, out_sign, y0, y1, mz - 0.004, mz + 0.004, 10.0, 0.64, depth=0.012)
-        self.add_wall_feature_x(x_wall, out_sign, my - 0.004, my + 0.004, z0, z1, 10.0, 0.64, depth=0.012)
-        if has_reja:
-            # Projecting wrought-iron window grille cage
-            for rz in np.linspace(z0 + 0.012, z1 - 0.012, 3):
-                self.add_wall_feature_x(x_wall, out_sign, y0, y1, float(rz) - 0.003, float(rz) + 0.003, 14.0, 0.36, depth=0.022)
+        self.add_wall_feature_x(x_wall, out_sign, y0, y1, z0, z1, 14.0, 0.28, depth=0.010, cap_top=False, cap_bottom=False)
         if has_shutters:
             sw = max(0.018, (z1 - z0) * 0.42)
-            self.add_wall_feature_x(x_wall, out_sign, y0, y1, z0 - fw - sw, z0 - fw, 10.0, 0.72, depth=0.016)
-            self.add_wall_feature_x(x_wall, out_sign, y0, y1, z1 + fw, z1 + fw + sw, 10.0, 0.70, depth=0.016)
+            self.add_wall_feature_x(x_wall, out_sign, y0, y1, z0 - sw, z0, 10.0, 0.72, depth=0.016)
+            self.add_wall_feature_x(x_wall, out_sign, y0, y1, z1, z1 + sw, 10.0, 0.70, depth=0.016)
 
     def add_recessed_window_z(self, z_wall, out_sign, x0, x1, y0, y1, has_shutters: bool = True, has_reja: bool = False):
-        fw = 0.014
-        self.add_wall_feature_z(z_wall, out_sign, x0 - fw, x0, y0, y1 + fw, 11.0, 0.88, depth=0.018)
-        self.add_wall_feature_z(z_wall, out_sign, x1, x1 + fw, y0, y1 + fw, 11.0, 0.88, depth=0.018)
+        fw = 0.015
         self.add_wall_feature_z(z_wall, out_sign, x0 - fw * 1.2, x1 + fw * 1.2, y1, y1 + fw * 1.3, 11.0, 0.92, depth=0.024)
         self.add_wall_feature_z(z_wall, out_sign, x0 - fw * 1.4, x1 + fw * 1.4, y0 - fw * 1.1, y0, 11.0, 0.90, depth=0.028)
-        self.add_wall_feature_z(z_wall, out_sign, x0, x1, y0, y1, 14.0, 0.28, depth=0.008)
-        mx = 0.5 * (x0 + x1)
-        my = 0.54 * y1 + 0.46 * y0
-        self.add_wall_feature_z(z_wall, out_sign, mx - 0.004, mx + 0.004, y0, y1, 10.0, 0.64, depth=0.012)
-        self.add_wall_feature_z(z_wall, out_sign, x0, x1, my - 0.004, my + 0.004, 10.0, 0.64, depth=0.012)
-        if has_reja:
-            for rx in np.linspace(x0 + 0.012, x1 - 0.012, 3):
-                self.add_wall_feature_z(z_wall, out_sign, float(rx) - 0.003, float(rx) + 0.003, y0, y1, 14.0, 0.36, depth=0.022)
+        self.add_wall_feature_z(z_wall, out_sign, x0, x1, y0, y1, 14.0, 0.28, depth=0.010, cap_top=False, cap_bottom=False)
         if has_shutters:
             sw = max(0.018, (x1 - x0) * 0.42)
-            self.add_wall_feature_z(z_wall, out_sign, x0 - fw - sw, x0 - fw, y0, y1, 10.0, 0.72, depth=0.016)
-            self.add_wall_feature_z(z_wall, out_sign, x1 + fw, x1 + fw + sw, y0, y1, 10.0, 0.70, depth=0.016)
+            self.add_wall_feature_z(z_wall, out_sign, x0 - sw, x0, y0, y1, 10.0, 0.72, depth=0.016)
+            self.add_wall_feature_z(z_wall, out_sign, x1, x1 + sw, y0, y1, 10.0, 0.70, depth=0.016)
 
     def add_arched_portal_x(self, x_wall, out_sign, y0, y1, z_center, half_w, is_timber_door: bool = True):
-        """Adds a stone-framed semicircular arched portal with jamb pilasters, radial keystone arch, and timber or dark interior."""
+        """Adds a stone-framed semicircular arched portal with jamb pilasters, keystone arch, and timber or dark interior."""
         pw = 0.022
         z0, z1 = z_center - half_w, z_center + half_w
         y_spring = y0 + (y1 - y0) * 0.68
-        # Stone jamb piers & impost capitals
-        self.add_wall_feature_x(x_wall, out_sign, y0, y1, z0 - pw, z0, 11.0, 0.87, depth=0.026)
-        self.add_wall_feature_x(x_wall, out_sign, y0, y1, z1, z1 + pw, 11.0, 0.87, depth=0.026)
-        self.add_wall_feature_x(x_wall, out_sign, y_spring - 0.012, y_spring + 0.010, z0 - pw * 1.3, z0 + 0.006, 11.0, 0.92, depth=0.032)
-        self.add_wall_feature_x(x_wall, out_sign, y_spring - 0.012, y_spring + 0.010, z1 - 0.006, z1 + pw * 1.3, 11.0, 0.92, depth=0.032)
-        # Arch spandrel header & projecting keystone
+        self.add_wall_feature_x(x_wall, out_sign, y0, y1, z0 - pw, z0, 11.0, 0.87, depth=0.026, cap_top=False, cap_bottom=False)
+        self.add_wall_feature_x(x_wall, out_sign, y0, y1, z1, z1 + pw, 11.0, 0.87, depth=0.026, cap_top=False, cap_bottom=False)
         self.add_wall_feature_x(x_wall, out_sign, y_spring, y1 + 0.018, z0 - pw, z1 + pw, 11.0, 0.89, depth=0.022)
         self.add_wall_feature_x(x_wall, out_sign, y1 - 0.015, y1 + 0.028, z_center - 0.018, z_center + 0.018, 11.0, 0.95, depth=0.032)
-        # Deep shadowed tympanum arch & lower doorway
-        self.add_wall_feature_x(x_wall, out_sign, y_spring, y1 - 0.008, z0 + 0.006, z1 - 0.006, 14.0, 0.26, depth=0.010)
+        self.add_wall_feature_x(x_wall, out_sign, y_spring, y1 - 0.008, z0, z1, 14.0, 0.26, depth=0.010, cap_top=False, cap_bottom=False)
         if is_timber_door:
-            self.add_wall_feature_x(x_wall, out_sign, y0, y_spring, z0, z1, 10.0, 0.66, depth=0.010)
-            # Center door seam & iron hinge straps
-            self.add_wall_feature_x(x_wall, out_sign, y0, y_spring, z_center - 0.004, z_center + 0.004, 14.0, 0.28, depth=0.014)
+            self.add_wall_feature_x(x_wall, out_sign, y0, y_spring, z0, z1, 10.0, 0.66, depth=0.010, cap_top=False, cap_bottom=False)
         else:
-            self.add_wall_feature_x(x_wall, out_sign, y0, y_spring, z0, z1, 14.0, 0.25, depth=0.008)
+            self.add_wall_feature_x(x_wall, out_sign, y0, y_spring, z0, z1, 14.0, 0.25, depth=0.008, cap_top=False, cap_bottom=False)
 
     def add_arched_portal_z(self, z_wall, out_sign, y0, y1, x_center, half_w, is_timber_door: bool = True):
         pw = 0.022
         x0, x1 = x_center - half_w, x_center + half_w
         y_spring = y0 + (y1 - y0) * 0.68
-        self.add_wall_feature_z(z_wall, out_sign, x0 - pw, x0, y0, y1, 11.0, 0.87, depth=0.026)
-        self.add_wall_feature_z(z_wall, out_sign, x1, x1 + pw, y0, y1, 11.0, 0.87, depth=0.026)
-        self.add_wall_feature_z(z_wall, out_sign, x0 - pw * 1.3, x0 + 0.006, y_spring - 0.012, y_spring + 0.010, 11.0, 0.92, depth=0.032)
-        self.add_wall_feature_z(z_wall, out_sign, x1 - 0.006, x1 + pw * 1.3, y_spring - 0.012, y_spring + 0.010, 11.0, 0.92, depth=0.032)
+        self.add_wall_feature_z(z_wall, out_sign, x0 - pw, x0, y0, y1, 11.0, 0.87, depth=0.026, cap_top=False, cap_bottom=False)
+        self.add_wall_feature_z(z_wall, out_sign, x1, x1 + pw, y0, y1, 11.0, 0.87, depth=0.026, cap_top=False, cap_bottom=False)
         self.add_wall_feature_z(z_wall, out_sign, x0 - pw, x1 + pw, y_spring, y1 + 0.018, 11.0, 0.89, depth=0.022)
         self.add_wall_feature_z(z_wall, out_sign, x_center - 0.018, x_center + 0.018, y1 - 0.015, y1 + 0.028, 11.0, 0.95, depth=0.032)
-        self.add_wall_feature_z(z_wall, out_sign, x0 + 0.006, x1 - 0.006, y_spring, y1 - 0.008, 14.0, 0.26, depth=0.010)
+        self.add_wall_feature_z(z_wall, out_sign, x0, x1, y_spring, y1 - 0.008, 14.0, 0.26, depth=0.010, cap_top=False, cap_bottom=False)
         if is_timber_door:
-            self.add_wall_feature_z(z_wall, out_sign, x0, x1, y0, y_spring, 10.0, 0.66, depth=0.010)
-            self.add_wall_feature_z(z_wall, out_sign, x_center - 0.004, x_center + 0.004, y0, y_spring, 14.0, 0.28, depth=0.014)
+            self.add_wall_feature_z(z_wall, out_sign, x0, x1, y0, y_spring, 10.0, 0.66, depth=0.010, cap_top=False, cap_bottom=False)
         else:
-            self.add_wall_feature_z(z_wall, out_sign, x0, x1, y0, y_spring, 14.0, 0.25, depth=0.008)
+            self.add_wall_feature_z(z_wall, out_sign, x0, x1, y0, y_spring, 14.0, 0.25, depth=0.008, cap_top=False, cap_bottom=False)
 
     def add_cylinder(self, cx, cz, y0, y1, r0, r1, segs: int = 8, kind: float = 11.0, shade: float = 0.90, cap_top: bool = True):
         top_center = [cx, y1, cz]
@@ -260,14 +229,14 @@ class PlumbArchitecturalMeshBuilder:
     def add_eave_rafter_tails(self, x0, x1, z0, z1, y_eave, overhang: float = 0.038):
         """Adds projecting carved timber rafter tails (canecillos) around the perimeter under the roof eaves."""
         ry0, ry1 = y_eave - 0.028, y_eave - 0.008
-        for rz in np.linspace(z0 + 0.04, z1 - 0.04, max(4, int(round((z1 - z0) * 10)))):
+        for rz in np.linspace(z0 + 0.05, z1 - 0.05, 5):
             zf = float(rz)
-            self.add_box(x0 - overhang * 0.92, x0, ry0, ry1, zf - 0.008, zf + 0.008, 10.0, 0.68, cap_bottom=True)
-            self.add_box(x1, x1 + overhang * 0.92, ry0, ry1, zf - 0.008, zf + 0.008, 10.0, 0.68, cap_bottom=True)
-        for rx in np.linspace(x0 + 0.04, x1 - 0.04, max(4, int(round((x1 - x0) * 10)))):
+            self.add_box(x0 - overhang * 0.92, x0, ry0, ry1, zf - 0.009, zf + 0.009, 10.0, 0.68, cap_top=False, cap_bottom=True)
+            self.add_box(x1, x1 + overhang * 0.92, ry0, ry1, zf - 0.009, zf + 0.009, 10.0, 0.68, cap_top=False, cap_bottom=True)
+        for rx in np.linspace(x0 + 0.05, x1 - 0.05, 4):
             xf = float(rx)
-            self.add_box(xf - 0.008, xf + 0.008, ry0, ry1, z0 - overhang * 0.92, z0, 10.0, 0.68, cap_bottom=True)
-            self.add_box(xf - 0.008, xf + 0.008, ry0, ry1, z1, z1 + overhang * 0.92, 10.0, 0.68, cap_bottom=True)
+            self.add_box(xf - 0.009, xf + 0.009, ry0, ry1, z0 - overhang * 0.92, z0, 10.0, 0.68, cap_top=False, cap_bottom=True)
+            self.add_box(xf - 0.009, xf + 0.009, ry0, ry1, z1, z1 + overhang * 0.92, 10.0, 0.68, cap_top=False, cap_bottom=True)
 
     def add_hipped_roof(self, x0, x1, y_eave, y_peak, z0, z1, overhang: float = 0.038, hip_ratio: float = 0.25, wall_kind: float = 12.0, add_rafters: bool = True):
         """Adds a tiered terracotta barrel-tile roof (kind 13) with stone cornice, timber rafter tails, stepped tile courses, and ridge cap."""
