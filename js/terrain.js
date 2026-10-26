@@ -79,7 +79,7 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       }
 
       const gy = groundSample(x, z);
-      if (!Number.isFinite(gy) || gy < 1.25 || gy > 845) return -1;
+      if (!Number.isFinite(gy) || gy < 0.75 || gy > 845) return -1;
       const sx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
       const sz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
       const slope = Math.hypot(sx, sz);
@@ -99,16 +99,16 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       const scaleSpan = 0.44 + inlandBlend * 0.26;
       const scale = scaleMin + (hash32Forest(key + 2) / 4294967296) * scaleSpan;
       const crownR = (proto.crownRadius ?? 8.5) * scale;
-      const rimCheckR = Math.min(9.5, crownR * 0.38);
+      const rimCheckR = Math.min(5.5, crownR * 0.25);
       if (
         sampleBiomeByte(x + rimCheckR, z) < 24 ||
         sampleBiomeByte(x - rimCheckR, z) < 24 ||
         sampleBiomeByte(x, z + rimCheckR) < 24 ||
         sampleBiomeByte(x, z - rimCheckR) < 24 ||
-        groundSample(x + rimCheckR, z) < 0.55 ||
-        groundSample(x - rimCheckR, z) < 0.55 ||
-        groundSample(x, z + rimCheckR) < 0.55 ||
-        groundSample(x, z - rimCheckR) < 0.55
+        groundSample(x + rimCheckR, z) < 0.45 ||
+        groundSample(x - rimCheckR, z) < 0.45 ||
+        groundSample(x, z + rimCheckR) < 0.45 ||
+        groundSample(x, z - rimCheckR) < 0.45
       ) {
         return -1;
       }
@@ -146,7 +146,7 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       totalPlaced++;
 
       const basal = proto.basalRadius ?? 1.2;
-      const sink = Math.max(0.12, basal * scale * slope + 0.08);
+      const sink = Math.min(0.65, Math.max(0.12, basal * scale * slope * 0.45 + 0.08));
       const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
       const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
       const rTint = isTrop ? tint * 0.78 : tint;

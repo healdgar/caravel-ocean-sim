@@ -387,7 +387,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
  let tierId=forestBin.z>>16u;
- let coverageScale=select(1.,select(1.42,1.95,tierId==3u),tierId>=2u);
+ let coverageScale=select(1.,select(1.48,2.10,tierId==3u),tierId>=2u);
  let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
@@ -401,7 +401,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let inflate=select(.095,.205,tierId==3u);let uvOff=leafUV-vec2f(.5,.5);
+  let inflate=select(.042,.085,tierId==3u)/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
  }
  let local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
@@ -479,19 +479,24 @@ struct ForestNativeLeafOutput {@location(0)colour:vec4f,@builtin(sample_mask)mas
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
  if(in.world.y<in.nativeSoil){discard;}
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
+ let tierId=forestBin.z>>16u;
+ let uvR=length((in.leafUV-vec2f(.5,.5))*vec2f(1.85,1.55));
+ let clusterPad=clamp(1.-uvR*uvR,0.,1.)*select(0.,select(.36,.64,tierId==3u),tierId>=2u);
+ let effAlpha=max(pigment.a,clusterPad);
  let n=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
- var colour=pigment.rgb/max(pigment.a,1e-8)*in.colour;
+ let padColour=forestNativeLinear(material.underside.rgb)*1.12*in.colour;
+ var colour=mix(padColour,pigment.rgb/max(pigment.a,1e-8)*in.colour,clamp(pigment.a*4.,0.,1.));
  if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
  let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);
  let diffuse=(max(nDotL,0.)+max(-nDotL,0.)*material.optics.z)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
  let ambient=(.12+exposure*.55+abs(n.y)*.08)*in.canopyAO;
- let roughness=clamp(surface.detail.a/max(pigment.a,1e-8),0.,1.);
+ let roughness=mix(.52,clamp(surface.detail.a/max(pigment.a,1e-8),0.,1.),clamp(pigment.a*4.,0.,1.));
  let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
  // Independent native leaf footprints must not all select identical hardware
  // sample bits at small projected sizes. Stable per-primitive/root masks keep
  // expected filtered source coverage, including sub-sample fractions. This is
  // independent-footprint integration, not recovery of correlated source masks.
- var o:ForestNativeLeafOutput;o.colour=vec4f(lit.rgb,pigment.a);o.mask=forestLeafSampleMask(pigment.a,in.coverageSeed,in.pos.xy);return o;
+ var o:ForestNativeLeafOutput;o.colour=vec4f(lit.rgb,effAlpha);o.mask=forestLeafSampleMask(effAlpha,in.coverageSeed,in.pos.xy);return o;
 }
 `+FOREST_IMPOSTOR_WGSL+FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL;
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
@@ -613,11 +618,11 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  if(!nearLod&&!farLod&&!midLod){return;}`,
  ` let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.34,isCoastalRoot))*r.rootScale.w;
  let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
- let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u);
+ let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let mid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
  let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.065,isCoastalRoot))*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
- let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u);
+ let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let midLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
  if(!nearLod&&!farLod&&!mid2Lod&&!midLod){return;}`),
@@ -689,10 +694,11 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const sx=(groundSample(x+1,z)-groundSample(x-1,z))*.5,sz=(groundSample(x,z+1)-groundSample(x,z-1))*.5,slope=Math.hypot(sx,sz);
       // A measured near tile can expose a cliff/beach hidden by coarse data.
       // Reject that root once; never leave it floating or grow a replacement.
-      const minY=(!forestMass&&rooted[i+10]<0)?1.15:18;
+      const minY=(!forestMass&&rooted[i+10]<0)?0.75:18;
       if(y<minY||y>845||!Number.isFinite(slope)||slope>1.1){rooted[i+3]=0;excludedRoots++;continue;}
       const basal=m.prototypes[rooted[i+8]].basalRadius??0;
-      rooted[i+9]=Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08);rooted[i+1]=y-rooted[i+9];
+      const maxSink=(!forestMass&&rooted[i+10]<0)?0.65:Infinity;
+      rooted[i+9]=Math.min(maxSink,Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08));rooted[i+1]=y-rooted[i+9];
     }
     let activeRootCount=m.rootCount;
     const maxRootCapacity=Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount);

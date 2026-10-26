@@ -208,7 +208,7 @@ struct ForestVolumeShellVertex {
   sunlight=exp(-forestVolumeMeta.dimensionsExtinction.w*opticalDepth);
  }
  let nDotL=dot(n,F.sunDir.xyz);let diffuse=(max(nDotL,0.)+max(-nDotL,0.)*.48)*(.22+.78*exposure*exposure)*sunlight;
- let lit=landFinish(in.world,n,pigment*in.yawTint.yzw,diffuse,.12+exposure*.55+abs(n.y)*.08,0.,.95);
+ let lit=landFinish(in.world,n,pigment*in.yawTint.yzw,diffuse,.12+exposure*.55+abs(n.y)*.08,0.,.52);
  return vec4f(lit.rgb,1.);
 }
 `;
