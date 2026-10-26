@@ -3683,7 +3683,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
     const orthophoto1550 = await loadOrthophoto1550();
     if (remoteAvailable && fetchImpl) {
       try {
-        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}`);
+        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&v=4`);
         if (res && res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
           upgradedPack = apply1550TerritoryCachePayload(basePack, buf, orthophoto1550);

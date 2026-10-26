@@ -145,7 +145,7 @@ export default {
           headers: {
             'Content-Type': 'application/octet-stream',
             'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'public, max-age=86400',
+            'Cache-Control': 'public, max-age=60, must-revalidate',
             'X-Robots-Tag': ROBOTS_HEADER,
           },
         });
