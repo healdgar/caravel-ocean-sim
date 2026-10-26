@@ -54,6 +54,11 @@
     "bytes": 1160216,
     "sha256": "070f343b9c5ba729b3ab9e2a88a279ab5b823c5fb72d9963baaecd5d59b109ad"
   },
+  "assets/world/land.json": {
+    "url": "assets/world/land.171586c7917a28dc.json",
+    "bytes": 85183,
+    "sha256": "171586c7917a28dc7046d5394fea20b8d3a09ba76e3bc4e1e4a5481ce2b7698a"
+  },
   "assets/canopy-scenery/saba/manifest.json": {
     "url": "assets/canopy-scenery/saba/manifest.90f2c991ce4e984c.json",
     "bytes": 57430,
@@ -573,11 +578,6 @@
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
     "bytes": 4754,
     "sha256": "2697c31e9c5d8c957567fc8bf2217b40812fb32aadfa1d1a706b5a984710a89d"
-  },
-  "assets/world/land.json": {
-    "url": "assets/world/land.171586c7917a28dc.json",
-    "bytes": 85183,
-    "sha256": "171586c7917a28dc7046d5394fea20b8d3a09ba76e3bc4e1e4a5481ce2b7698a"
   },
   "assets/audio/wind-steady.mp3": {
     "url": "assets/audio/wind-steady.e5c687baf7da295c.mp3",

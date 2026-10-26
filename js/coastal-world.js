@@ -1124,10 +1124,158 @@ export function validateOrthophotoScale1550(regionSpec, satelliteData = null, pr
   };
 }
 
+function extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints) {
+  const n = region.size;
+  const span = region.span;
+  const distInfo = computeCoastalShoreDistances(heights, n, span, 0.25);
+  const coreFloats = new Float32Array(n * n);
+  for (let k = 0; k < n * n; k++) {
+    coreFloats[k] = heights[k] > 0.25 && (distInfo.distWater[k] >= 17.5 || heights[k] > 8.0) ? 1.0 : -1.0;
+  }
+  const coreDist = computeCoastalShoreDistances(coreFloats, n, span, 0.0);
+  const isProtrusion = new Uint8Array(n * n);
+  for (let k = 0; k < n * n; k++) {
+    if (heights[k] > 0.20 && coreDist.distLand[k] > 20.5) isProtrusion[k] = 1;
+  }
+
+  const bldgs = orthoFootprints?.footprints || [];
+  const clusterX = orthoFootprints?.clusterX ?? region.x;
+  const clusterZ = orthoFootprints?.clusterZ ?? region.z;
+  const vis = new Uint8Array(n * n);
+  const rawPiers = [];
+  const step = span / (n - 1);
+  const searchR = Math.ceil(46 / step);
+
+  for (let idx = 0; idx < n * n; idx++) {
+    if (!isProtrusion[idx] || vis[idx]) continue;
+    const q = [idx];
+    vis[idx] = 1;
+    const cells = [];
+    let minD = Infinity;
+    let maxD = -Infinity;
+    let tipX = 0, tipZ = 0, baseX = 0, baseZ = 0, sumX = 0, sumZ = 0;
+    while (q.length) {
+      const c = q.pop();
+      const cj = Math.floor(c / n);
+      const ci = c - cj * n;
+      const wx = region.x + (ci / (n - 1) - 0.5) * span;
+      const wz = region.z + (cj / (n - 1) - 0.5) * span;
+      const d = coreDist.distLand[c];
+      cells.push([ci, cj]);
+      sumX += wx;
+      sumZ += wz;
+      if (d < minD) {
+        minD = d;
+        baseX = wx;
+        baseZ = wz;
+      }
+      if (d > maxD) {
+        maxD = d;
+        tipX = wx;
+        tipZ = wz;
+      }
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const ni = ci + dx, nj = cj + dz;
+          if (ni >= 0 && ni < n && nj >= 0 && nj < n) {
+            const nk = nj * n + ni;
+            if (isProtrusion[nk] && !vis[nk]) {
+              vis[nk] = 1;
+              q.push(nk);
+            }
+          }
+        }
+      }
+    }
+    const blobAreaM2 = cells.length * step * step;
+    if (cells.length < 2 || blobAreaM2 < 24 || blobAreaM2 > 6500) continue;
+
+    // Carve narrow AI boat/pier outlines in the harbor back into navigable water depth
+    for (const [ci, cj] of cells) {
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const ni = ci + dx, nj = cj + dz;
+          if (ni >= 0 && ni < n && nj >= 0 && nj < n) {
+            const nk = nj * n + ni;
+            if (coreDist.distLand[nk] > 18.0 && heights[nk] > -2.4) {
+              heights[nk] = -Math.min(10.5, 2.4 + 0.15 * Math.max(0, coreDist.distLand[nk] - 17.5));
+            }
+          }
+        }
+      }
+    }
+
+    const cx = sumX / cells.length;
+    const cz = sumZ / cells.length;
+    let minBldgDist = Math.hypot(cx - clusterX, cz - clusterZ);
+    for (const b of bldgs) {
+      const bd = Math.hypot(cx - b.x, cz - b.z);
+      if (bd < minBldgDist) minBldgDist = bd;
+    }
+
+    if (blobAreaM2 >= 65 && minBldgDist <= 310 && minD <= 42 + step) {
+      const bi = Math.round(((baseX - region.x) / span + 0.5) * (n - 1));
+      const bj = Math.round(((baseZ - region.z) / span + 0.5) * (n - 1));
+      const shoreMinD = Math.max(6.0, 15.5 - step * 0.85);
+      const shoreMaxD = 18.5 + step * 0.85;
+      let rootX = baseX, rootZ = baseZ, bestRDist = Infinity;
+      for (let dj = -searchR; dj <= searchR; dj++) {
+        const nj = bj + dj;
+        if (nj < 0 || nj >= n) continue;
+        for (let di = -searchR; di <= searchR; di++) {
+          const ni = bi + di;
+          if (ni < 0 || ni >= n) continue;
+          const nk = nj * n + ni;
+          if (coreDist.distLand[nk] >= shoreMinD && coreDist.distLand[nk] <= shoreMaxD && heights[nk] > 0.35) {
+            const wx = region.x + (ni / (n - 1) - 0.5) * span;
+            const wz = region.z + (nj / (n - 1) - 0.5) * span;
+            const dd = Math.hypot(wx - baseX, wz - baseZ);
+            if (dd < bestRDist) {
+              bestRDist = dd;
+              rootX = wx;
+              rootZ = wz;
+            }
+          }
+        }
+      }
+      const dx = tipX - rootX;
+      const dz = tipZ - rootZ;
+      const reach = Math.hypot(dx, dz);
+      if (reach >= 14 && bestRDist < 55) {
+        rawPiers.push({
+          cells: cells.length,
+          rootX,
+          rootZ,
+          tipX,
+          tipZ,
+          reach,
+          ux: dx / reach,
+          uz: dz / reach,
+        });
+      }
+    }
+  }
+
+  rawPiers.sort((a, b) => b.reach - a.reach);
+  const selected = [];
+  for (const p of rawPiers) {
+    if (selected.length >= 5) break;
+    const tooClose = selected.some(
+      (s) => Math.hypot(p.rootX - s.rootX, p.rootZ - s.rootZ) < 18 || Math.hypot(p.tipX - s.tipX, p.tipZ - s.tipZ) < 18
+    );
+    if (!tooClose) selected.push(p);
+  }
+  return selected;
+}
+
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const orthoFootprints = extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist);
   const hasOrthoFootprints = Boolean(orthoFootprints?.footprints?.length >= 4);
+  const extractedHarborPiers =
+    hasOrthoFootprints || satelliteData?.is1550Orthophoto
+      ? extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints)
+      : [];
   const clusterFrame = orthoFootprints
     ? coastalFrame(region, orthoFootprints.clusterX, orthoFootprints.clusterZ)
     : null;
@@ -1343,10 +1491,57 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     });
   };
 
-  // 1. Timber mole pier extending from the harbor shoreline into deep water (only if pier tip is over actual water)
-  const pierTipPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 32);
-  if (terrainSample(heights, pierTipPos.x, pierTipPos.z, region) <= -0.5) {
-    addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+  // 1. Timber mole piers & stone quays derived from harbor boat/pier outlines (or fallback shoreline pier)
+  if (extractedHarborPiers.length > 0) {
+    const pierPrefab = PORT_PREFABS.timber_mole_pier;
+    const quayPrefab = PORT_PREFABS.stone_quay_seawall;
+    for (const hp of extractedHarborPiers) {
+      const pierYaw = Math.atan2(-hp.ux, -hp.uz);
+      const pierLen = Math.min(76, Math.max(24, hp.reach + 7));
+      const pierX = hp.rootX + hp.ux * (pierLen * 0.5 - 5.5);
+      const pierZ = hp.rootZ + hp.uz * (pierLen * 0.5 - 5.5);
+      const quayW = Math.min(38, Math.max(20, hp.reach * 0.55));
+      const quayX = hp.rootX - hp.ux * 2.5;
+      const quayZ = hp.rootZ - hp.uz * 2.5;
+      const rootGroundY = Math.max(1.2, Math.min(2.8, terrainSurfaceSample(heights, hp.rootX, hp.rootZ, region)));
+      instances.push({
+        prefabId: 'stone_quay_seawall',
+        label: quayPrefab.label,
+        x: quayX,
+        y: rootGroundY,
+        z: quayZ,
+        yaw: pierYaw,
+        length: 11,
+        width: quayW,
+        height: 1.4,
+        foundationDepth: 5.5,
+        materialKind: quayPrefab.materialKind,
+        roofPitch: 0,
+        waterfront: true,
+        fromOrthophotoFootprint: true,
+      });
+      instances.push({
+        prefabId: 'timber_mole_pier',
+        label: pierPrefab.label,
+        x: pierX,
+        y: rootGroundY - 0.15,
+        z: pierZ,
+        yaw: pierYaw,
+        length: pierLen,
+        width: pierPrefab.width,
+        height: 1.4,
+        foundationDepth: pierPrefab.foundationDepth,
+        materialKind: pierPrefab.materialKind,
+        roofPitch: 0,
+        waterfront: true,
+        fromOrthophotoFootprint: true,
+      });
+    }
+  } else {
+    const pierTipPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 32);
+    if (terrainSample(heights, pierTipPos.x, pierTipPos.z, region) <= -0.5) {
+      addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+    }
   }
 
   if (hasOrthoFootprints) {
@@ -1915,22 +2110,24 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Heavy cut-stone coping course & paved wharf apron
       emitBox(toWorld, -hw, hw, yCoping, yTop, -hl, hl, 11, 0.92, true);
       // Low seaward parapet wall with gaps for the central timber pier & two boat-landing stairways
-      emitBox(toWorld, -hw, -22, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      emitBox(toWorld, -15, -5.5, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      emitBox(toWorld, 5.5, 15, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      emitBox(toWorld, 22, hw, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      // Stepped stone boat-landing stairs at x in [-22, -15] and [15, 22]
-      for (const stairX of [-18.5, 18.5]) {
+      const qs = Math.min(1, hw / 26);
+      emitBox(toWorld, -hw, -22 * qs, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
+      emitBox(toWorld, -15 * qs, -5.5 * qs, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
+      emitBox(toWorld, 5.5 * qs, 15 * qs, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
+      emitBox(toWorld, 22 * qs, hw, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
+      // Stepped stone boat-landing stairs
+      for (const stairX of [-18.5 * qs, 18.5 * qs]) {
         for (let stepIdx = 0; stepIdx < 5; stepIdx++) {
           const sy1 = yTop - stepIdx * 0.42;
           const sy0 = sy1 - 0.45;
           const sz0 = -hl - 0.4 - stepIdx * 0.45;
-          emitBox(toWorld, stairX - 3.2, stairX + 3.2, sy0, sy1, sz0, -hl + 1.2, 11, 0.78 - stepIdx * 0.04);
+          emitBox(toWorld, stairX - 3.2 * qs, stairX + 3.2 * qs, sy0, sy1, sz0, -hl + 1.2, 11, 0.78 - stepIdx * 0.04);
         }
       }
       // Cylindrical stone & iron mooring bollards along the quay edge
-      for (let bx = -hw + 6; bx <= hw - 6; bx += 14) {
-        if (Math.abs(bx) < 5 || (Math.abs(bx) > 14 && Math.abs(bx) < 23)) continue;
+      const bStep = Math.max(6, 14 * qs);
+      for (let bx = -hw + 4 * qs; bx <= hw - 4 * qs; bx += bStep) {
+        if (Math.abs(bx) < 5 * qs || (Math.abs(bx) > 14 * qs && Math.abs(bx) < 23 * qs)) continue;
         emitCylinder(toWorld, bx, -hl + 0.6, yTop + 0.65, yTop + 1.38, 0.34, 0.38, 6, 14, 0.42, true);
       }
     } else if (inst.prefabId === 'stone_sea_bastion') {
@@ -2398,14 +2595,15 @@ export function synthesizeCoastalAlbedo(
         } else if (
           satelliteData?.is1550Orthophoto &&
           ((sat.r > 92 && sat.r - sat.g >= 18 && sat.r - sat.b >= 34) ||
+            (inlandM <= 95 && sat.greenness < 0.08 && sat.luma < sat.localLuma * 0.85) ||
             (portPlacement && !portClearanceEnvelope(portPlacement, x, z, 8)))
         ) {
-          // Replace 2D painted terracotta roof pixels on the ground beneath & between 3D colonial buildings
+          // Replace 2D painted terracotta/shingle roof & shadow pixels on the ground beneath & between 3D colonial buildings
           // with warm 1550 Spanish colonial coral-limestone cobblestone & flagstone courtyard paving
-          const reliefMod = Math.max(0.88, Math.min(1.12, (sat.luma * lift) / Math.max(48, sat.localLuma)));
-          const cobbleR = (168 + fineGrain * 0.85) * reliefMod;
-          const cobbleG = (150 + fineGrain * 0.75) * reliefMod;
-          const cobbleB = (124 + fineGrain * 0.65) * reliefMod;
+          const reliefMod = Math.max(0.92, Math.min(1.10, (sat.luma * lift) / Math.max(48, sat.localLuma)));
+          const cobbleR = (176 + fineGrain * 0.85) * reliefMod;
+          const cobbleG = (158 + fineGrain * 0.75) * reliefMod;
+          const cobbleB = (130 + fineGrain * 0.65) * reliefMod;
           const satBlend = coastalSmoothstep(0.15, 1.4, h) * 0.86;
           r = r * (1 - satBlend) + cobbleR * satBlend;
           g = g * (1 - satBlend) + cobbleG * satBlend;
