@@ -26670,6 +26670,22 @@ struct ForestVolumeShellVertex {
  let h=forestVolumeMeta.originCell.w;let ex=vec3f(h,0,0);let ey=vec3f(0,h,0);let ez=vec3f(0,0,h);
  let gradient=vec3f(forestVolumeDensity(in.local+ex)-forestVolumeDensity(in.local-ex),forestVolumeDensity(in.local+ey)-forestVolumeDensity(in.local-ey),forestVolumeDensity(in.local+ez)-forestVolumeDensity(in.local-ez));
  if(dot(gradient,gradient)>1e-16){localNormal=-normalize(gradient);}
+ // 3D object-space botanical bough-lobe & leaf-rosette normal detail and serrated silhouette edge
+ let lp=in.local+vec3f(in.yawTint.x*1.7,0.,in.yawTint.x*2.3);
+ let bough=sin(lp.x*2.3)*cos(lp.y*2.7-lp.z*2.1)+.55*sin(lp.z*3.8-lp.x*3.1);
+ let rosette=sin(lp.x*8.9+lp.y*7.3)*cos(lp.z*9.1-lp.y*6.4);
+ let geomN= select(vec3f(0,1,0),normalize(in.normal),dot(in.normal,in.normal)>1e-16);
+ let rimDot=abs(dot(geomN,ray));
+ if(rimDot<.34&&(bough*.45+rosette*.55)+rimDot*2.1<.22){discard;}
+ let clumpGrad=vec3f(
+  cos(lp.x*2.3)*cos(lp.y*2.7-lp.z*2.1)+.65*cos(lp.x*8.9+lp.y*7.3)*cos(lp.z*9.1-lp.y*6.4),
+  -sin(lp.x*2.3)*sin(lp.y*2.7-lp.z*2.1)+.55*sin(lp.x*8.9+lp.y*7.3)*sin(lp.z*9.1-lp.y*6.4),
+  cos(lp.z*3.8-lp.x*3.1)-.65*sin(lp.x*8.9+lp.y*7.3)*sin(lp.z*9.1-lp.y*6.4)
+ );
+ localNormal=normalize(localNormal+clumpGrad*.38);
+ let clumpAO=clamp(.78+.22*bough+.14*rosette,.44,1.16);
+ exposure=clamp(exposure*clumpAO,0.,1.);
+ pigment*=(.92+.10*rosette);
  let n=forestVolumeRotate(localNormal,in.yawTint.x);var sunlight=1.;
  if(F.sunDir.y>0.){let sun=forestVolumeRotate(F.sunDir.xyz,-in.yawTint.x);var opticalDepth=0.;
   for(var i=0u;i<4u;i++){opticalDepth+=forestVolumeDensity(in.local+sun*((f32(i)+.5)*.5))*.5;}
@@ -27297,7 +27313,9 @@ fn forestCoverageHash(value:u32)->u32{var x=value;x=(x^(x>>16u))*0x7feb352du;x=(
 fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
- let coverage=clamp(alpha,0.,1.)*f32(samples);let whole=u32(floor(coverage));
+ let tierId=forestBin.z>>16u;
+ let coverageScale=select(1.,select(1.42,1.95,tierId==3u),tierId>=2u);
+ let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
  return ((bits<<rotation)|(bits>>(samples-rotation)))&((1u<<samples)-1u);
@@ -27305,7 +27323,15 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
 @vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
+ let tierId=forestBin.z>>16u;
+ var posLocal=position;
+ if(kind.x>=3.5&&tierId>=2u){
+  let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
+  let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
+  let inflate=select(.095,.205,tierId==3u);let uvOff=leafUV-vec2f(.5,.5);
+  posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
+ }
+ let local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
  var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;
  o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
@@ -27494,28 +27520,30 @@ const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCull
  let dist=length(relative);
  let isCoastalRoot=r.identity.z<0.0;
  let inCanopy=select(clamp((F.camPos.y-18.0)/24.0,0.0,1.0),1.0,isCoastalRoot);
- let midNear=max(select(near,dist-radius*select(0.45,0.82,isCoastalRoot),inCanopy>0.0),1.5);
+ let crownFront=min(radius*0.22,8.5*r.rootScale.w);
+ let midNear=max(select(near,dist-select(radius*0.45,crownFront,isCoastalRoot),inCanopy>0.0),1.5);
  let cosGaze=clamp(dot(relative/max(dist,.0001),forwardDir),0.0,1.0);
  let sinGaze2=1.0-cosGaze*cosGaze;
  let gazeAcuity=1.0/(1.0+4.5*sinGaze2+6.0*sinGaze2*sinGaze2);
- let canopyMask=1.0/(1.0+max(0.0,midNear-2.0)*0.04);
- let coastalMidScale=select(1.0,1.0/(1.0+max(0.0,midNear-2.0)*0.18),isCoastalRoot);
+ let canopyMask=1.0/(1.0+max(0.0,midNear-2.0)*select(0.04,0.025,isCoastalRoot));
  let offAxis=sqrt(1.0+lateral*lateral/max(near*near,.0001));
  let perceptualScreenY=mix(F.screen.y,min(F.screen.y,1080.0),inCanopy);
- let perceptualFocal=perceptualScreenY/max(2.0*length(F.camUp.xyz),.0001)*mix(offAxis,gazeAcuity*canopyMask,inCanopy);
- let midFocal=perceptualFocal*coastalMidScale;
- let footprint=perceptualFocal*geometricError/max(near-geometricError,.0001);`),
+ let baseFocal=perceptualScreenY/max(2.0*length(F.camUp.xyz),.0001);
+ let perceptualFocal=baseFocal*mix(offAxis,select(gazeAcuity,1.0,isCoastalRoot)*canopyMask,inCanopy);
+ let farFocal=select(perceptualFocal,baseFocal,isCoastalRoot);
+ let farDist=select(near,midNear,isCoastalRoot);
+ let footprint=farFocal*geometricError/max(farDist-geometricError,.0001);`),
  ` let atlasSupported=(p.roots.z&7u)>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
  let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
  let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
  let nearLod=resident&&!farLod&&!midLod;
  if(!nearLod&&!farLod&&!midLod){return;}`,
- ` let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.14,isCoastalRoot))*r.rootScale.w;
- let mid2Footprint=midFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
+ ` let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.34,isCoastalRoot))*r.rootScale.w;
+ let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u);
  let mid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
- let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.07,isCoastalRoot))*r.rootScale.w;
- let midFootprint=midFocal*midGeomError/max(midNear-midGeomError,.0001);
+ let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.065,isCoastalRoot))*r.rootScale.w;
+ let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u);
  let midLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
@@ -27605,10 +27633,12 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
       if(nativeMid){
         floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
+        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*0.42)*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*0.16)*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
-        draws.set([lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
+        draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
-        draws.set(volumeShell?[reduced.leaf.indexCount,0,reduced.leaf.firstIndex,0,0]:[lp.leafRibbons.indexCount,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+3)*5);
+        draws.set([mid2LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+3)*5);
       }
       if(reduced){floats[base+18]=forestMiddleUpward(reduced.lodErrorMetres);words[base+19]=0;}
       else if(p.geometryErrorSupported===true){floats[base+18]=p.geometryErrorMetres;words[base+19]=1;}
@@ -27659,9 +27689,9 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
     const bins=m.prototypes.map(p=>{
       const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
       return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
-        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
+        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
         return{offset,opaque:null,leaf:null,middle:tier===1&&middlePipeline?device.createBindGroup({layout:middlePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
-          volume:(tier===1||(tier===3&&volumeShell))&&volumePipeline?device.createBindGroup({layout:volumePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
+          volume:tier===1&&volumePipeline?device.createBindGroup({layout:volumePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           impostor:tier===2&&impostor?device.createBindGroup({layout:impostor.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null};
       });
     });
@@ -27701,7 +27731,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
               entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
             return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
           };
-          bin.opaque=group(opaque);if(tier!==1&&!(tier===3&&volumeShell))bin.leaf=group(leaf);
+          bin.opaque=group(opaque);if(tier!==1)bin.leaf=group(leaf);
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
@@ -27724,7 +27754,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         }
         if(nativeMid){
           pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?1:0))*20);
-          if(!cutout||!volumeShell){pass.setBindGroup(2,bins[p.id][3][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);}
+          pass.setBindGroup(2,bins[p.id][3][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);
         }
       }
     };
@@ -27734,7 +27764,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
     };
     const drawVolumes=pass=>{
       if(!volumePipeline)return;pass.setPipeline(volumePipeline);pass.setBindGroup(0,volumeGroup);pass.setBindGroup(1,volumeCloud);if(volumeShell)pass.setVertexBuffer(0,middle.vertices);pass.setIndexBuffer(volumeShell?shellIndices:volume.indices,'uint32');
-      for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][1].volume);pass.setBindGroup(3,volume.bind(volumePipeline,p.id));pass.drawIndexedIndirect(commands,(p.id*4+3)*20);if(nativeMid&&volumeShell){pass.setBindGroup(2,bins[p.id][3].volume);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+3)*20);}}
+      for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][1].volume);pass.setBindGroup(3,volume.bind(volumePipeline,p.id));pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     const drawImpostors=pass=>{
       if(!impostor)return;pass.setPipeline(impostor);pass.setBindGroup(0,impostorGroup);pass.setBindGroup(1,impostorCloud);pass.setBindGroup(3,impostorAtlas);pass.setIndexBuffer(atlas.indices,'uint32');
@@ -27756,7 +27786,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
           words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
           for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
             const bin=bins[p.id]?.[tierIdx];
-            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,p.nativeMaterials.length,samples]));
+            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|p.nativeMaterials.length,samples]));
           }
         }
         device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));

@@ -186,6 +186,22 @@ struct ForestVolumeShellVertex {
  let h=forestVolumeMeta.originCell.w;let ex=vec3f(h,0,0);let ey=vec3f(0,h,0);let ez=vec3f(0,0,h);
  let gradient=vec3f(forestVolumeDensity(in.local+ex)-forestVolumeDensity(in.local-ex),forestVolumeDensity(in.local+ey)-forestVolumeDensity(in.local-ey),forestVolumeDensity(in.local+ez)-forestVolumeDensity(in.local-ez));
  if(dot(gradient,gradient)>1e-16){localNormal=-normalize(gradient);}
+ // 3D object-space botanical bough-lobe & leaf-rosette normal detail and serrated silhouette edge
+ let lp=in.local+vec3f(in.yawTint.x*1.7,0.,in.yawTint.x*2.3);
+ let bough=sin(lp.x*2.3)*cos(lp.y*2.7-lp.z*2.1)+.55*sin(lp.z*3.8-lp.x*3.1);
+ let rosette=sin(lp.x*8.9+lp.y*7.3)*cos(lp.z*9.1-lp.y*6.4);
+ let geomN= select(vec3f(0,1,0),normalize(in.normal),dot(in.normal,in.normal)>1e-16);
+ let rimDot=abs(dot(geomN,ray));
+ if(rimDot<.34&&(bough*.45+rosette*.55)+rimDot*2.1<.22){discard;}
+ let clumpGrad=vec3f(
+  cos(lp.x*2.3)*cos(lp.y*2.7-lp.z*2.1)+.65*cos(lp.x*8.9+lp.y*7.3)*cos(lp.z*9.1-lp.y*6.4),
+  -sin(lp.x*2.3)*sin(lp.y*2.7-lp.z*2.1)+.55*sin(lp.x*8.9+lp.y*7.3)*sin(lp.z*9.1-lp.y*6.4),
+  cos(lp.z*3.8-lp.x*3.1)-.65*sin(lp.x*8.9+lp.y*7.3)*sin(lp.z*9.1-lp.y*6.4)
+ );
+ localNormal=normalize(localNormal+clumpGrad*.38);
+ let clumpAO=clamp(.78+.22*bough+.14*rosette,.44,1.16);
+ exposure=clamp(exposure*clumpAO,0.,1.);
+ pigment*=(.92+.10*rosette);
  let n=forestVolumeRotate(localNormal,in.yawTint.x);var sunlight=1.;
  if(F.sunDir.y>0.){let sun=forestVolumeRotate(F.sunDir.xyz,-in.yawTint.x);var opticalDepth=0.;
   for(var i=0u;i<4u;i++){opticalDepth+=forestVolumeDensity(in.local+sun*((f32(i)+.5)*.5))*.5;}

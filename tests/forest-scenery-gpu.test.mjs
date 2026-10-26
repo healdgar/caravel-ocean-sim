@@ -162,13 +162,14 @@ test('perceptual gaze and canopy masking reserve full woody resolution for the c
       }
       const highBudget=await run(3),mobileBudget=await run(6);
       // Verify sea-level coastal camera (y=6.0m) with coastal roots (identity.z = -1.0)
-      // unlocks inCanopy=1.0 and mid2Lod (wood2 + volumeShell) instead of forcing all trees into 300k-tri leafRibbons
+      // steps smoothly through all 4 progressive tiers: nearLod -> mid1Lod -> mid2Lod -> farLod
       frameData.set([0,6,0],16);device.queue.writeBuffer(frame,0,frameData);
+      f[18]=0.3822;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
       const coastalRootsData=new Float32Array([
-        [0,6,-14],   // Root 0: immediate shoreline tree (14m) -> near/mid1
-        [0,6,-55],   // Root 1: mid-range coastal tree (55m) -> mid2Lod (wood2 + volumeShell, NO leafRibbons)
-        [18,6,-45],  // Root 2: off-axis coastal tree (48m) -> mid2Lod (wood2 + volumeShell, NO leafRibbons)
-        [0,6,-195],  // Root 3: distant coastal tree (195m) -> farLod (volumeShell)
+        [0,6,-14],   // Root 0: immediate shoreline tree (14m) -> nearLod (wood0 + 100% leafRibbons)
+        [0,6,-40],   // Root 1: near-mid coastal tree (40m) -> mid1Lod (wood1 + 42% inflated leafRibbons)
+        [18,6,-95],  // Root 2: mid-range coastal tree (97m) -> mid2Lod (wood2 + 16% inflated leafRibbons)
+        [0,6,-195],  // Root 3: distant coastal tree (195m) -> farLod (botanical volumeShell)
       ].flatMap(p=>[...p,1,0,1,1,1,0,0,-1,0]));
       device.queue.writeBuffer(roots,0,coastalRootsData);
       const coastalSeaLevel=await run(3);
@@ -184,8 +185,12 @@ test('perceptual gaze and canopy masking reserve full woody resolution for the c
     assert.equal(result.mobileBudget.nearCount,0,'mobile polygon budget (6px threshold) steps even the closest tree down from wood0');
     assert.deepEqual(result.mobileBudget.mid1Ids,[0],'mobile polygon budget shifts the closest tree from wood0 to wood1');
     assert.deepEqual(result.mobileBudget.mid2Ids,[1,2],'mobile polygon budget shifts the second tree from wood1 to wood2');
-    assert.equal(result.coastalSeaLevel.nearLeafCount + result.coastalSeaLevel.mid1LeafCount, 1, 'at sea level (y=6m), only the immediate <28m shoreline tree draws cutout leafRibbons');
-    assert.deepEqual(result.coastalSeaLevel.mid2Ids,[1,2],'mid-range coastal trees (45m-55m) at sea level use mid2Lod (wood2 + volumeShell)');
-    assert.deepEqual(result.coastalSeaLevel.farIds,[3],'distant coastal trees (195m) at sea level use farLod');
+    assert.deepEqual(result.coastalSeaLevel.nearIds,[0],'immediate shoreline tree (14m) uses nearLod (wood0 + 100% leafRibbons)');
+    assert.deepEqual(result.coastalSeaLevel.mid1Ids,[1],'near-mid coastal tree (40m) uses mid1Lod (wood1 + 42% leafRibbons)');
+    assert.deepEqual(result.coastalSeaLevel.mid2Ids,[2],'mid-range coastal tree (87m) uses mid2Lod (wood2 + 16% leafRibbons)');
+    assert.deepEqual(result.coastalSeaLevel.farIds,[3],'distant coastal tree (195m) uses farLod (botanical volumeShell)');
+    assert.equal(result.coastalSeaLevel.nearLeafCount,1);
+    assert.equal(result.coastalSeaLevel.mid1LeafCount,1);
+    assert.equal(result.coastalSeaLevel.mid2LeafCount,1);
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });
