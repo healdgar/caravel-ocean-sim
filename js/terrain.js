@@ -30,6 +30,7 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
   const port = proceduralPack.port;
   const seed = (region.vegetationSeed ?? 47231) >>> 0;
   const maxRoots = isMobile ? 16000 : 58000;
+  const targetRootBudget = isMobile ? 2600 : 6200;
 
   // Saba-style overlapping-crown jittered grid placement (scripts/prepare-forest-instances.py:284-333)
   // guided by the co-registered satellite/1550-map vegetation mask (`biome`) and foreshore beach masks.
@@ -162,15 +163,15 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
     };
 
     // Single uniform full-territory Poisson-disc canopy pass (zero inner-vs-outer square grid boundary)
-    const uniformSpacing = Math.max(isMobile ? 9.5 : 5.8, span / (isMobile ? 260 : 420));
+    const uniformSpacing = Math.max(isMobile ? 10.5 : 6.8, span / (isMobile ? 220 : 340));
     runForestPass(
       x0,
       z0,
       span,
       uniformSpacing,
-      0.96,
-      0.52,
-      maxRoots,
+      1.04,
+      0.56,
+      targetRootBudget,
       seed ^ 0x9e3779b9
     );
   }
@@ -714,7 +715,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(above){
         submerged.bind(pass,true);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
         if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
-        if(portMesh){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);}
       }else{
         if(!submergedCount&&!fineMesh?.submergedIndices.length)return;
         submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);

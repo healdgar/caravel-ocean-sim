@@ -75,11 +75,31 @@ fn forestTerrainHidden(centre:vec3f,radius:f32)->bool{
  }
  return false;
 }
+fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f)->bool{
+ if(identity.z>=0.){return false;}
+ let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
+ if(camera.y<=1.5||distXZ<=45.){return false;}
+ let coarse=forestTerrainDomains.coarse.xyz;let n=textureDimensions(forestTerrainCoarse,0).x;
+ let crownHalfH=max(4.5,(centre.y-rootScale.y)*1.18);let treeTop=centre.y+crownHalfH;
+ var canopyWallSlices=0u;
+ for(var slice=1u;slice<=4u;slice++){
+  let t=f32(slice)*.2;let p=mix(camera,centre,t);
+  if(forestTerrainInside(p.xz,p.xz,coarse,n)){
+   let cell=vec2i(floor((p.xz-coarse.xy)/coarse.z));
+   let bounds=textureLoad(forestTerrainCoarse,cell,0).rg;
+   let rayTopY=mix(camera.y,treeTop,t);
+   if(bounds.r>max(1.5,rayTopY+.5)){return true;}
+   if(camera.y<28.&&distXZ>155.&&bounds.g>=1.6&&rayTopY<bounds.g+16.5){canopyWallSlices+=1u;}
+  }
+ }
+ if(canopyWallSlices>=2u&&distXZ>210.){return true;}
+ return false;
+}
 `;
 export function withForestTerrainOcclusion(source){
  const marker='previousLod[id.x]=select(select(0u,2u,midLod),1u,nearLod);';
  if(!source.includes(marker)||source.includes('fn forestTerrainHidden('))throw Error('Forest terrain occlusion source mismatch');
- return source.replace(marker,marker+'\n if(forestTerrainHidden(world,radius)){return;}')+FOREST_TERRAIN_OCCLUSION_WGSL;
+ return source.replace(marker,marker+'\n if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity)){return;}')+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 export function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;

@@ -581,27 +581,30 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  'let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);',
  `let forwardDir=normalize(F.camFwd.xyz);
  let dist=length(relative);
- let inCanopy=clamp((F.camPos.y-18.0)/24.0,0.0,1.0);
- let midNear=max(select(near,dist-radius*0.45,inCanopy>0.0),1.5);
+ let isCoastalRoot=r.identity.z<0.0;
+ let inCanopy=select(clamp((F.camPos.y-18.0)/24.0,0.0,1.0),1.0,isCoastalRoot);
+ let midNear=max(select(near,dist-radius*select(0.45,0.82,isCoastalRoot),inCanopy>0.0),1.5);
  let cosGaze=clamp(dot(relative/max(dist,.0001),forwardDir),0.0,1.0);
  let sinGaze2=1.0-cosGaze*cosGaze;
  let gazeAcuity=1.0/(1.0+4.5*sinGaze2+6.0*sinGaze2*sinGaze2);
  let canopyMask=1.0/(1.0+max(0.0,midNear-2.0)*0.04);
+ let coastalMidScale=select(1.0,1.0/(1.0+max(0.0,midNear-2.0)*0.18),isCoastalRoot);
  let offAxis=sqrt(1.0+lateral*lateral/max(near*near,.0001));
  let perceptualScreenY=mix(F.screen.y,min(F.screen.y,1080.0),inCanopy);
  let perceptualFocal=perceptualScreenY/max(2.0*length(F.camUp.xyz),.0001)*mix(offAxis,gazeAcuity*canopyMask,inCanopy);
+ let midFocal=perceptualFocal*coastalMidScale;
  let footprint=perceptualFocal*geometricError/max(near-geometricError,.0001);`),
  ` let atlasSupported=(p.roots.z&7u)>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
  let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
  let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
  let nearLod=resident&&!farLod&&!midLod;
  if(!nearLod&&!farLod&&!midLod){return;}`,
- ` let mid2GeomError=bitcast<f32>(p.leaf.z)*r.rootScale.w;
- let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
+ ` let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.14,isCoastalRoot))*r.rootScale.w;
+ let mid2Footprint=midFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u);
  let mid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
- let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
- let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
+ let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.07,isCoastalRoot))*r.rootScale.w;
+ let midFootprint=midFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u);
  let midLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
@@ -626,7 +629,8 @@ var<workgroup> forestSortCount:u32;
  let cmdSlot=select(pi*4u+tier*2u,u32(parameters.y)*4u+pi*4u+(tier-2u)*2u,tier>=2u);
  if(lid.x==0u){forestSortCount=select(0u,atomicLoad(&commands[cmdSlot*5u+1u]),(wg.x>>2u)<u32(parameters.y));}
  let count=workgroupUniformLoad(&forestSortCount);let base=p.roots.x*4u+p.roots.y*tier;
- for(var step=0u;step<count;step++){
+ let sortSteps=min(count,64u);
+ for(var step=0u;step<sortSteps;step++){
   let parity=step&1u;
   for(var i=lid.x*2u+parity;i+1u<count;i+=128u){
    let a=visible[base+i];let b=visible[base+i+1u];

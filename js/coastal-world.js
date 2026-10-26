@@ -2177,7 +2177,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
   // 2-tier 3D Corner-model Palms (Cocos nucifera coconut palms on foreshore + Roystonea regia royal palms & Sabal palmetto in lowland/inland canopy)
   if (palms instanceof Float32Array && palms.length >= 8) {
-    const maxPalms = Math.min(palms.length / 8, 1800);
+    const maxPalms = Math.min(palms.length / 8, 520);
     const seawardRad = ((portPlacement.shoreBearing ?? 112) + 180) * COASTAL_DEG_TO_RAD;
     const defaultSeaX = Math.sin(seawardRad);
     const defaultSeaZ = -Math.cos(seawardRad);
@@ -2195,8 +2195,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
       const isForeshore = py < 9.5;
       const leanMag = isForeshore ? 2.1 + ((shape * 7) % 1) * 2.2 : 0.55 + ((shape * 7) % 1) * 0.85;
-      // Tier 0 (first 500 palms): 5-segment curved trunk + 12 arching fronds; Tier 1 (palms 500..1800): 3-segment trunk + 6 arching fronds
-      const isNearTier = idx < 500;
+      // Tier 0 (first 160 palms): 5-segment curved trunk + 12 arching fronds; Tier 1 (palms 160..520): 3-segment trunk + 6 arching fronds
+      const isNearTier = idx < 160;
       const segs = isNearTier ? 5 : 3;
       let prevX = px, prevY = py - 0.35, prevZ = pz, prevR = 0.42;
       for (let s = 1; s <= segs; s++) {
