@@ -1,4 +1,5 @@
 import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, resolveGlobalCoastalRegion } from './terrain-model.js';
+import { snapCoordinateToCoastlineRings } from './coastal-world.js';
 export { SPANISH_MAIN_1550_REGIONS, resolveGlobalCoastalRegion } from './coastal-world.js';
 
 export const LANDFALL_WEATHER = Object.freeze({
@@ -139,7 +140,9 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
       svg.addEventListener('click',ev=>{
         const rect=svg.getBoundingClientRect();if(!rect.width||!rect.height)return;
         const x=(ev.clientX-rect.left)/rect.width*720,y=(ev.clientY-rect.top)/rect.height*360;
-        const lat=Math.max(-85,Math.min(85,90-y/2)),lon=Math.max(-180,Math.min(180,x/2-180));
+        let lat=Math.max(-85,Math.min(85,90-y/2)),lon=Math.max(-180,Math.min(180,x/2-180));
+        const snapped=snapCoordinateToCoastlineRings(lat,lon,rings,3.5);
+        if(snapped){lat=snapped.latitude;lon=snapped.longitude;}
         latInput.value=lat.toFixed(3);lonInput.value=lon.toFixed(3);
         dot.setAttribute('cx',String((lon+180)*2));dot.setAttribute('cy',String((90-lat)*2));
       });

@@ -22563,7 +22563,7 @@ function extractOrthophotoBuildingFootprints(regionSpec, heights, satelliteData,
       const kH = hj * n + hi;
       const h = heights[kH];
       const inlandM = distWater[kH];
-      if (h < 0.45 || h > 68 || inlandM < 32 || inlandM > 960) continue;
+      if (h < 0.45 || h > 68 || inlandM < 8 || inlandM > 960) continue;
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
       if (!sat) continue;
       // 1550 AI orthophoto terracotta barrel-tile & weathered timber/shingle roof signature
@@ -22733,7 +22733,7 @@ function extractOrthophotoBuildingFootprints(regionSpec, heights, satelliteData,
     let overlaps = false;
     for (const existing of footprints) {
       const minSep = 0.42 * (Math.min(c.width, c.length) + Math.min(existing.width, existing.length));
-      if (Math.hypot(c.x - existing.x, c.z - existing.z) < Math.max(18, minSep)) {
+      if (Math.hypot(c.x - existing.x, c.z - existing.z) < Math.max(8, minSep)) {
         overlaps = true;
         break;
       }
@@ -22744,6 +22744,131 @@ function extractOrthophotoBuildingFootprints(regionSpec, heights, satelliteData,
   return footprints.length >= 4 ? { clusterX, clusterZ, footprints } : null;
 }
 
+function validateOrthophotoScale1550(regionSpec, satelliteData = null, precomputedFootprints = null) {
+  const region = resolveGlobalCoastalRegion(regionSpec);
+  const pre = precomputedFootprints || satelliteData?.precomputedFootprints || null;
+
+  if (Number.isFinite(pre?.span) && pre.span >= 1200 && pre.span <= 2600) {
+    return {
+      spanM: Math.round(pre.span),
+      metersPerPixel: Number((pre.span / 1024).toFixed(3)),
+      footprintScale: 1,
+    };
+  }
+
+  if (Array.isArray(pre?.footprints) && pre.footprints.length >= 3) {
+    const widths = pre.footprints
+      .filter((fp) => fp.prefabId !== 'stone_sea_bastion')
+      .map((fp) => Number(fp.width) || 20)
+      .sort((a, b) => a - b);
+    const allWidths = (widths.length >= 2 ? widths : pre.footprints.map((fp) => Number(fp.width) || 20)).sort(
+      (a, b) => a - b
+    );
+    const medW = allWidths[Math.floor(allWidths.length * 0.5)] || 20;
+    if (medW > 28) {
+      // Footprints were measured against an unvalidated wide map span; rescale to true ~20m single-building width
+      const footprintScale = 20.0 / medW;
+      const spanM = Math.round(Math.max(1350, Math.min(2300, region.span * footprintScale)));
+      return {
+        spanM,
+        metersPerPixel: Number((spanM / 1024).toFixed(3)),
+        footprintScale: spanM / region.span,
+      };
+    }
+    const spanM =
+      region.span > 2600
+        ? Math.round(Math.max(1350, Math.min(2300, 1024 * (medW / 13.0))))
+        : Math.round(region.span);
+    return {
+      spanM,
+      metersPerPixel: Number((spanM / 1024).toFixed(3)),
+      footprintScale: 1,
+    };
+  }
+
+  if (satelliteData?.rgba && satelliteData?.size && (satelliteData.is1550Orthophoto || satelliteData.allowFootprints)) {
+    const sz = satelliteData.size;
+    const rgba = satelliteData.rgba;
+    const gSize = 256;
+    const mask = new Uint8Array(gSize * gSize);
+    for (let gz = 0; gz < gSize; gz++) {
+      const sy = Math.min(sz - 1, Math.floor(((gz + 0.5) / gSize) * sz));
+      for (let gx = 0; gx < gSize; gx++) {
+        const sx = Math.min(sz - 1, Math.floor(((gx + 0.5) / gSize) * sz));
+        const k = (sy * sz + sx) * 4;
+        const r = rgba[k], g = rgba[k + 1], b = rgba[k + 2];
+        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        const isRoof =
+          (r > 92 && r < 236 && g < 164 && r - g >= 24 && r - b >= 42) ||
+          (r > 90 && r < 200 && r - g >= 16 && r - b >= 30 && luma < 122 && g > b + 8);
+        if (isRoof) mask[gz * gSize + gx] = 1;
+      }
+    }
+    const visited = new Uint8Array(gSize * gSize);
+    const q = new Int32Array(gSize * gSize);
+    const pxScale = 1024 / gSize;
+    const bldgPxWidths = [];
+    for (let idx = 0; idx < gSize * gSize; idx++) {
+      if (!mask[idx] || visited[idx]) continue;
+      let head = 0, tail = 0;
+      q[tail++] = idx;
+      visited[idx] = 1;
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      while (head < tail) {
+        const cur = q[head++];
+        const gz = Math.floor(cur / gSize);
+        const gx = cur - gz * gSize;
+        if (gx < minX) minX = gx;
+        if (gx > maxX) maxX = gx;
+        if (gz < minZ) minZ = gz;
+        if (gz > maxZ) maxZ = gz;
+        for (let dz = -1; dz <= 1; dz++) {
+          const nz = gz + dz;
+          if (nz < 0 || nz >= gSize) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dz === 0) continue;
+            const nx = gx + dx;
+            if (nx < 0 || nx >= gSize) continue;
+            const nIdx = nz * gSize + nx;
+            if (mask[nIdx] && !visited[nIdx]) {
+              visited[nIdx] = 1;
+              q[tail++] = nIdx;
+            }
+          }
+        }
+      }
+      if (tail >= 2 && tail <= 90) {
+        const wPx = (Math.min(maxX - minX + 1, maxZ - minZ + 1) + 0.5) * pxScale;
+        if (wPx >= 6 && wPx <= 28) bldgPxWidths.push(wPx);
+      }
+    }
+    bldgPxWidths.sort((a, b) => a - b);
+    const medBldgPx = bldgPxWidths.length >= 3 ? bldgPxWidths[Math.floor(bldgPxWidths.length * 0.5)] : 13.0;
+    const mpp = Math.max(1.32, Math.min(2.25, 20.0 / medBldgPx));
+    const spanM = Math.round(1024 * mpp);
+    return {
+      spanM,
+      metersPerPixel: Number(mpp.toFixed(3)),
+      footprintScale: spanM / region.span,
+    };
+  }
+
+  if (satelliteData?.is1550Orthophoto) {
+    const spanM = 1600;
+    return {
+      spanM,
+      metersPerPixel: Number((spanM / 1024).toFixed(3)),
+      footprintScale: spanM / region.span,
+    };
+  }
+
+  return {
+    spanM: region.span,
+    metersPerPixel: Number((region.span / 1024).toFixed(3)),
+    footprintScale: 1,
+  };
+}
+
 function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const orthoFootprints = extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist);
@@ -22751,6 +22876,9 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const clusterFrame = orthoFootprints
     ? coastalFrame(region, orthoFootprints.clusterX, orthoFootprints.clusterZ)
     : null;
+  const scaleFactor = Math.min(1, region.span / 4096);
+  const probeOffshoreM = Math.max(24, 72 * scaleFactor);
+  const probeInlandM = Math.max(18, 48 * scaleFactor);
 
   // Scan a 2D coastal window (anchored to the 1550 orthophoto settlement cluster when present)
   // to find where the shoreline (h ~ 0) meets navigable harbor water offshore and buildable land inland.
@@ -22760,11 +22888,23 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const probePoint = (alongProbe, inland) => {
     const p = worldFromCoastalFrame(region, alongProbe, inland);
     const h = terrainSample(heights, p.x, p.z, region);
-    const offshoreP = worldFromCoastalFrame(region, alongProbe, inland - 72);
+    const offshoreP = worldFromCoastalFrame(region, alongProbe, inland - probeOffshoreM);
     const offshoreH = terrainSample(heights, offshoreP.x, offshoreP.z, region);
-    const inlandP = worldFromCoastalFrame(region, alongProbe, inland + 48);
+    const offshoreMidP = worldFromCoastalFrame(region, alongProbe, inland - probeOffshoreM * 2.2);
+    const offshoreMidH = terrainSample(heights, offshoreMidP.x, offshoreMidP.z, region);
+    const offshoreFarP = worldFromCoastalFrame(region, alongProbe, inland - probeOffshoreM * 3.8);
+    const offshoreFarH = terrainSample(heights, offshoreFarP.x, offshoreFarP.z, region);
+    const inlandP = worldFromCoastalFrame(region, alongProbe, inland + probeInlandM);
     const inlandH = terrainSample(heights, inlandP.x, inlandP.z, region);
-    if (h >= -1.2 && h <= 2.8 && offshoreH <= -2.0 && inlandH >= 0.8 && inlandH <= 38) {
+    if (
+      h >= -1.2 &&
+      h <= 2.8 &&
+      offshoreH <= -2.0 &&
+      offshoreMidH <= -2.5 &&
+      offshoreFarH <= -3.0 &&
+      inlandH >= 0.8 &&
+      inlandH <= 38
+    ) {
       const clusterDistPenalty = clusterFrame
         ? Math.hypot(alongProbe - clusterFrame.along, inland - clusterFrame.inland) * 0.018
         : Math.abs(inland) * 0.001 + Math.abs(alongProbe) * 0.004;
@@ -22777,23 +22917,59 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     }
   };
   if (clusterFrame) {
-    for (let dAlong = -560; dAlong <= 560; dAlong += 32) {
-      for (let dInland = -640; dInland <= 520; dInland += 16) {
+    const scanAlong = Math.round(560 * Math.max(0.45, scaleFactor));
+    const scanInland = Math.round(640 * Math.max(0.45, scaleFactor));
+    const scanStep = Math.max(8, Math.round(24 * Math.max(0.45, scaleFactor)));
+    for (let dAlong = -scanAlong; dAlong <= scanAlong; dAlong += scanStep) {
+      for (let dInland = -scanInland; dInland <= scanInland; dInland += scanStep) {
         probePoint(clusterFrame.along + dAlong, clusterFrame.inland + dInland);
       }
     }
   }
   for (const alongProbe of [0, -120, 120, -240, 240, -380, 380]) {
     for (let inland = -1200; inland <= 800; inland += 16) {
-      probePoint(alongProbe, inland);
+      probePoint(alongProbe * scaleFactor, inland * scaleFactor);
     }
     if (bestScore > -Infinity && alongProbe === 0 && !clusterFrame) break;
   }
   // If real-world DEM shoreline lies outside the default synthetic bay window, scan wider coastal frame
   if (bestScore === -Infinity) {
-    for (let alongProbe = -1800; alongProbe <= 1800; alongProbe += 120) {
-      for (let inland = -2200; inland <= 2200; inland += 24) {
+    const halfSpan = region.span * 0.45;
+    const stepScan = Math.max(12, Math.round(region.span / 96));
+    for (let alongProbe = -halfSpan; alongProbe <= halfSpan; alongProbe += stepScan) {
+      for (let inland = -halfSpan; inland <= halfSpan; inland += stepScan) {
         probePoint(alongProbe, inland);
+      }
+    }
+  }
+  // Ultimate fallback: scan heightfield cells directly for any true coastline (never default to (0,0) inland!)
+  if (bestScore === -Infinity) {
+    const n = region.size;
+    const span = region.span;
+    const targetX = orthoFootprints ? orthoFootprints.clusterX : region.x;
+    const targetZ = orthoFootprints ? orthoFootprints.clusterZ : region.z;
+    for (let j = 4; j < n - 4; j += 2) {
+      const wz = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 4; i < n - 4; i += 2) {
+        const h = heights[j * n + i];
+        if (h < -0.8 || h > 2.2) continue;
+        const hN = heights[Math.max(0, j - 3) * n + i];
+        const hS = heights[Math.min(n - 1, j + 3) * n + i];
+        const hW = heights[j * n + Math.max(0, i - 3)];
+        const hE = heights[j * n + Math.min(n - 1, i + 3)];
+        const minNeighbor = Math.min(hN, hS, hW, hE);
+        const maxNeighbor = Math.max(hN, hS, hW, hE);
+        if (minNeighbor <= -1.5 && maxNeighbor >= 1.2) {
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const distPenalty = Math.hypot(wx - targetX, wz - targetZ) * 0.02;
+          const score = -minNeighbor - distPenalty;
+          if (score > bestScore) {
+            bestScore = score;
+            const cf = coastalFrame(region, wx, wz);
+            bestShoreAlong = cf.along;
+            bestShoreInland = cf.inland;
+          }
+        }
       }
     }
   }
@@ -22804,6 +22980,8 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const span = region.span;
   const plazaRadiusAlong = preserveRealCoast ? 72 : 105;
   const plazaRadiusInland = preserveRealCoast ? 105 : 145;
+  const berthHalfW = Math.max(18, 36 * scaleFactor);
+  const berthMaxOffshore = Math.max(80, 190 * scaleFactor);
   for (let j = 0; j < n; j++) {
     const z = region.z + (j / (n - 1) - 0.5) * span;
     for (let i = 0; i < n; i++) {
@@ -22815,10 +22993,12 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       const k = j * n + i;
       let h = heights[k];
 
-      // 1. Dredged harbor berth & pier approach channel (relInland in [-180, -8], |relAlong| < 64)
-      if (relInland < -4 && Math.abs(relAlong) < 76) {
-        const acrossW = Math.exp(-(relAlong * relAlong) / (2 * 36 * 36));
-        const berthW = coastalSmoothstep(-4, -38, relInland) * coastalSmoothstep(-190, -110, relInland);
+      // 1. Dredged harbor berth & pier approach channel (ONLY deepens existing water/shoals h <= 0.25; NEVER carves dry land into a lake!)
+      if (h <= 0.25 && relInland < -4 && Math.abs(relAlong) < berthHalfW * 2.1) {
+        const acrossW = Math.exp(-(relAlong * relAlong) / (2 * berthHalfW * berthHalfW));
+        const berthW =
+          coastalSmoothstep(-4, -Math.max(18, 38 * scaleFactor), relInland) *
+          coastalSmoothstep(-berthMaxOffshore, -berthMaxOffshore * 0.58, relInland);
         const targetDepth = -Math.min(11.5, 4.2 + (-relInland) * 0.085);
         h = Math.min(h, h * (1 - acrossW * berthW) + targetDepth * (acrossW * berthW));
       }
@@ -22847,16 +23027,17 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     }
   }
 
-  // Grade flat building pads directly under each top-down footprint
+  // Grade flat building pads directly under each top-down single-building footprint (never elevating water)
   if (hasOrthoFootprints) {
     const step = span / (n - 1);
+    const padMargin = Math.max(step * 1.5, 4.5);
     for (const fp of orthoFootprints.footprints) {
       const padY = Math.max(2.6, terrainSample(heights, fp.x, fp.z, region));
       const cosY = Math.cos(fp.yaw);
       const sinY = Math.sin(fp.yaw);
       const hw = fp.width * 0.5;
       const hl = fp.length * 0.5;
-      const rad = Math.hypot(hw + 16, hl + 16);
+      const rad = Math.hypot(hw + padMargin, hl + padMargin);
       const i0 = Math.max(0, Math.floor(((fp.x - rad - region.x) / span + 0.5) * (n - 1)));
       const i1 = Math.min(n - 1, Math.ceil(((fp.x + rad - region.x) / span + 0.5) * (n - 1)));
       const j0 = Math.max(0, Math.floor(((fp.z - rad - region.z) / span + 0.5) * (n - 1)));
@@ -22864,16 +23045,17 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       for (let j = j0; j <= j1; j++) {
         const wz = region.z + (j / (n - 1) - 0.5) * span;
         for (let i = i0; i <= i1; i++) {
+          const k = j * n + i;
+          if (heights[k] <= 0.15) continue;
           const wx = region.x + (i / (n - 1) - 0.5) * span;
           const dx = wx - fp.x;
           const dz = wz - fp.z;
           const lx = Math.abs(dx * cosY - dz * sinY);
           const lz = Math.abs(dx * sinY + dz * cosY);
-          if (lx > hw + 16 || lz > hl + 16) continue;
-          const wxBlend = Math.max(0, Math.min(1, 1 - (lx - hw) / Math.max(step, 16)));
-          const wzBlend = Math.max(0, Math.min(1, 1 - (lz - hl) / Math.max(step, 16)));
+          if (lx > hw + padMargin || lz > hl + padMargin) continue;
+          const wxBlend = Math.max(0, Math.min(1, 1 - (lx - hw) / padMargin));
+          const wzBlend = Math.max(0, Math.min(1, 1 - (lz - hl) / padMargin));
           const wBlend = wxBlend * wzBlend * 0.90;
-          const k = j * n + i;
           heights[k] = heights[k] * (1 - wBlend) + padY * wBlend;
         }
       }
@@ -22906,8 +23088,11 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     });
   };
 
-  // 1. Timber mole pier extending from the harbor shoreline into deep water
-  addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+  // 1. Timber mole pier extending from the harbor shoreline into deep water (only if pier tip is over actual water)
+  const pierTipPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 32);
+  if (terrainSample(heights, pierTipPos.x, pierTipPos.z, region) <= -0.5) {
+    addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+  }
 
   if (hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
@@ -22947,103 +23132,65 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       }
     }
 
+    // 1 Footprint Rectangle = 1 Single 3D Building (1:1 match to the scale-validated 1550 orthophoto)
     let warehouseAssigned = false;
-    let orthoCount = 0;
-    const maxOrthoBuildings = 24;
-    for (let i = 0; i < fps.length && orthoCount < maxOrthoBuildings; i++) {
+    const maxOrthoBuildings = 32;
+    for (let i = 0; i < fps.length && i < maxOrthoBuildings; i++) {
       const fp = fps[i];
-      let basePrefabId = fp.prefabId || 'colonial_town_block';
+      let prefabId = fp.prefabId || 'colonial_town_block';
       if (!fp.prefabId) {
-        if (i === bastionIdx) basePrefabId = 'stone_sea_bastion';
-        else if (i === casaIdx) basePrefabId = 'casa_de_contratacion';
-        else if (i === chapelIdx) basePrefabId = 'mission_chapel';
-        else if (!warehouseAssigned && fp.inlandM < 180) {
-          basePrefabId = 'royal_warehouse';
+        if (i === bastionIdx) prefabId = 'stone_sea_bastion';
+        else if (i === casaIdx) prefabId = 'casa_de_contratacion';
+        else if (i === chapelIdx) prefabId = 'mission_chapel';
+        else if (!warehouseAssigned && fp.inlandM < 120) {
+          prefabId = 'royal_warehouse';
           warehouseAssigned = true;
         }
       }
+      const prefab = PORT_PREFABS[prefabId] || PORT_PREFABS.colonial_town_block;
+      const maxW = prefabId === 'stone_sea_bastion' ? 44 : prefabId === 'mission_chapel' ? 28 : 38;
+      const maxL = prefabId === 'stone_sea_bastion' ? 48 : prefabId === 'mission_chapel' ? 42 : 44;
+      const scaleW = Math.min(maxW, Math.max(9, fp.width));
+      const scaleL = Math.min(maxL, Math.max(11, fp.length));
 
-      // Subdivide large top-down map city blocks (manzanas) into true-scale 16th-century buildings
-      // (20m–32m wide, 7.8m–10.2m eave height — half the height of the 18m–22m tropical forest trees)
-      // arranged across the exact oriented footprint (fp.x, fp.z, fp.width, fp.length, fp.yaw).
-      const targetW = basePrefabId === 'stone_sea_bastion' ? 42 : basePrefabId === 'mission_chapel' ? 28 : 34;
-      const targetL = basePrefabId === 'stone_sea_bastion' ? 46 : basePrefabId === 'mission_chapel' ? 38 : 38;
-      const cols = Math.min(2, Math.max(1, Math.round(fp.width / targetW)));
-      const rows = Math.min(2, Math.max(1, Math.round(fp.length / targetL)));
-      const alleyGap = 3.8;
-      const cellW = Math.max(14, (fp.width - (cols - 1) * alleyGap) / cols);
-      const cellL = Math.max(16, (fp.length - (rows - 1) * alleyGap) / rows);
-      const cosYaw = Math.cos(fp.yaw);
-      const sinYaw = Math.sin(fp.yaw);
+      // True 16th-century human & tree scale (half the height of 18m–24m mature tropical forest trees)
+      const heightVar = (i % 3) * 0.45;
+      const trueHeight =
+        prefabId === 'mission_chapel'
+          ? 10.2
+          : prefabId === 'stone_sea_bastion'
+            ? 9.8
+            : prefabId === 'casa_de_contratacion'
+              ? 9.4
+              : 7.8 + heightVar;
+      const truePitch =
+        prefabId === 'mission_chapel'
+          ? 3.2
+          : prefabId === 'casa_de_contratacion'
+            ? 2.8
+            : prefabId === 'stone_sea_bastion'
+              ? 2.2
+              : 2.5;
 
-      for (let rIdx = 0; rIdx < rows && orthoCount < maxOrthoBuildings; rIdx++) {
-        for (let cIdx = 0; cIdx < cols && orthoCount < maxOrthoBuildings; cIdx++) {
-          const isPrimaryCell = cIdx === 0 && rIdx === 0;
-          const subPrefabId =
-            isPrimaryCell
-              ? basePrefabId
-              : (cIdx + rIdx + i) % 3 === 0 && fp.inlandM < 180
-                ? 'royal_warehouse'
-                : 'colonial_town_block';
-          const prefab = PORT_PREFABS[subPrefabId] || PORT_PREFABS.colonial_town_block;
+      const groundY = terrainSurfaceSample(heights, fp.x, fp.z, region);
+      const y = Math.max(2.2, groundY);
 
-          const localX = (cIdx - (cols - 1) * 0.5) * (cellW + alleyGap);
-          const localZ = (rIdx - (rows - 1) * 0.5) * (cellL + alleyGap);
-          const subX = fp.x + localX * cosYaw + localZ * sinYaw;
-          const subZ = fp.z - localX * sinYaw + localZ * cosYaw;
-
-          const maxW =
-            subPrefabId === 'stone_sea_bastion' ? 44 : subPrefabId === 'mission_chapel' ? 25 : 32;
-          const maxL =
-            subPrefabId === 'stone_sea_bastion' ? 48 : subPrefabId === 'mission_chapel' ? 38 : 36;
-          const scaleW = Math.min(maxW, Math.max(14, cellW));
-          const scaleL = Math.min(maxL, Math.max(16, cellL));
-
-          // True 16th-century human & tree scale:
-          // - 2-story colonial houses/warehouses: 7.8m–8.9m eaves (~10.5m–11.5m roof ridge vs 18m–22m trees)
-          // - Casa de la Contratación: 9.4m eaves (~12.2m roof ridge)
-          // - Stone Sea Bastion: 9.8m ramparts (~14.6m central keep peak)
-          // - Mission Chapel: 10.2m nave eaves (~13.0m nave ridge, ~19.4m 3-stage bell tower peak)
-          const heightVar = ((cIdx * 3 + rIdx * 5 + i) % 3) * 0.45;
-          const trueHeight =
-            subPrefabId === 'mission_chapel'
-              ? 10.2
-              : subPrefabId === 'stone_sea_bastion'
-                ? 9.8
-                : subPrefabId === 'casa_de_contratacion'
-                  ? 9.4
-                  : 7.8 + heightVar;
-          const truePitch =
-            subPrefabId === 'mission_chapel'
-              ? 3.2
-              : subPrefabId === 'casa_de_contratacion'
-                ? 2.8
-                : subPrefabId === 'stone_sea_bastion'
-                  ? 2.2
-                  : 2.5;
-
-          const groundY = terrainSurfaceSample(heights, subX, subZ, region);
-          const y = Math.max(2.2, groundY);
-
-          instances.push({
-            prefabId: subPrefabId,
-            label: prefab.label,
-            x: subX,
-            y,
-            z: subZ,
-            yaw: fp.yaw,
-            length: scaleL,
-            width: scaleW,
-            height: trueHeight,
-            foundationDepth: Math.max(prefab.foundationDepth, 6.0),
-            materialKind: prefab.materialKind,
-            roofPitch: truePitch,
-            waterfront: prefab.waterfront,
-            fromOrthophotoFootprint: true,
-          });
-          orthoCount++;
-        }
-      }
+      instances.push({
+        prefabId,
+        label: prefab.label,
+        x: fp.x,
+        y,
+        z: fp.z,
+        yaw: fp.yaw,
+        length: scaleL,
+        width: scaleW,
+        height: trueHeight,
+        foundationDepth: Math.max(prefab.foundationDepth, 6.0),
+        materialKind: prefab.materialKind,
+        roofPitch: truePitch,
+        waterfront: prefab.waterfront,
+        fromOrthophotoFootprint: true,
+      });
     }
   } else {
     // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
@@ -23773,10 +23920,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     }
   }
 
-  // Optional 3D Corner-model Coconut Palms (Cocos nucifera: seaward-leaning ringed trunk + 12 arching pinnate fronds)
-  // along the sandy foreshore berm so tropical beaches have authentic silhouette palms
+  // 2-tier 3D Corner-model Palms (Cocos nucifera coconut palms on foreshore + Roystonea regia royal palms & Sabal palmetto in lowland/inland canopy)
   if (palms instanceof Float32Array && palms.length >= 8) {
-    const maxPalms = Math.min(palms.length / 8, 420);
+    const maxPalms = Math.min(palms.length / 8, 1800);
     const seawardRad = ((portPlacement.shoreBearing ?? 112) + 180) * COASTAL_DEG_TO_RAD;
     const defaultSeaX = Math.sin(seawardRad);
     const defaultSeaZ = -Math.cos(seawardRad);
@@ -23786,14 +23932,17 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       const plumeR = palms[base + 3], ht = palms[base + 4], shape = palms[base + 5];
       const psx = palms[base + 6] || 0, psz = palms[base + 7] || 0;
       const gradLen = Math.hypot(psx, psz);
-      // Lean seaward down the local beach slope (-sx, -sz) when available
+      // Lean seaward down the local beach slope (-sx, -sz) when available; inland royal/sabal palms stand more upright
       const seaX = gradLen > 0.008 ? -psx / gradLen : defaultSeaX;
       const seaZ = gradLen > 0.008 ? -psz / gradLen : defaultSeaZ;
       const azSpread = (shape - 0.5) * 1.15;
       const leanAngle = Math.atan2(seaZ, seaX) + azSpread;
       const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
-      const leanMag = 2.1 + ((shape * 7) % 1) * 2.2;
-      const segs = 5;
+      const isForeshore = py < 9.5;
+      const leanMag = isForeshore ? 2.1 + ((shape * 7) % 1) * 2.2 : 0.55 + ((shape * 7) % 1) * 0.85;
+      // Tier 0 (first 500 palms): 5-segment curved trunk + 12 arching fronds; Tier 1 (palms 500..1800): 3-segment trunk + 6 arching fronds
+      const isNearTier = idx < 500;
+      const segs = isNearTier ? 5 : 3;
       let prevX = px, prevY = py - 0.35, prevZ = pz, prevR = 0.42;
       for (let s = 1; s <= segs; s++) {
         const t = s / segs;
@@ -23818,18 +23967,19 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
         }
         prevX = curX; prevY = curY; prevZ = curZ; prevR = curR;
       }
-      // 12 arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
-      const frondCount = 12;
+      // Arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
+      const frondCount = isNearTier ? 12 : 6;
+      const halfFronds = frondCount >> 1;
       for (let f = 0; f < frondCount; f++) {
-        const tier = f < 6 ? 0 : 1;
+        const tier = f < halfFronds ? 0 : 1;
         const az = (f / frondCount) * Math.PI * 2 + shape * 3.1;
         const fx = Math.cos(az), fz = Math.sin(az);
         const tx = -fz, tz = fx;
-        const len = plumeR * (tier === 0 ? 1.08 : 0.88);
+        const len = plumeR * (tier === 0 ? 1.12 : 0.92);
         const midR = len * 0.55;
-        const midY = prevY + (tier === 0 ? 0.85 : 1.55);
+        const midY = prevY + (tier === 0 ? 0.95 : 1.65);
         const tipY = prevY - (tier === 0 ? 1.35 : 0.35);
-        const w = 0.58;
+        const w = isNearTier ? 0.62 : 0.78;
         const rootP = [prevX, prevY + 0.15, prevZ];
         const midLeft = [prevX + fx * midR - tx * w, midY, prevZ + fz * midR - tz * w];
         const midRight = [prevX + fx * midR + tx * w, midY, prevZ + fz * midR + tz * w];
@@ -24149,7 +24299,11 @@ function seedCoastalVegetation(
 
     if (portPlacement) {
       const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
-      if (distPort < portPlacement.clearRadius * 0.72 || !portClearanceEnvelope(portPlacement, x, z, 10)) {
+      const hullMargin = portPlacement.hasOrthophotoFootprints ? 4 : 10;
+      if (
+        (!portPlacement.hasOrthophotoFootprints && distPort < portPlacement.clearRadius * 0.72) ||
+        !portClearanceEnvelope(portPlacement, x, z, hullMargin)
+      ) {
         continue;
       }
     }
@@ -24169,11 +24323,12 @@ function seedCoastalVegetation(
     const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
     const bIdx = bj * m + bi;
     const nearSandyShore = beachData.drySandMask[bIdx] >= 24 || beachData.swashMask[bIdx] >= 16 || inlandM <= 75;
+    const isPalmClimate = region.climate === 'tropical' || region.climate === 'subtropical';
+    const isLowlandOrInlandPalm = isPalmClimate && h <= 110 && (nearSandyShore || shape < 0.48);
 
-    if (h < 10.5 && nearSandyShore) {
-      // Foreshore coconut palm fringe (Corner's model: 18-26m height, 2.75-4.25m plume radius)
-      // along sandy beach berms & littoral coves
-      const isPalm = region.climate === 'tropical' || region.climate === 'subtropical';
+    if ((h < 10.5 && nearSandyShore) || isLowlandOrInlandPalm) {
+      // Foreshore coconut palm fringe (Cocos nucifera: 18-26m height) + lowland/inland Roystonea regia & Sabal palmetto palms
+      const isPalm = isPalmClimate;
       const tNorm = (baseRadius - 3.2) / 4.4;
       const hNorm = (baseHeight - 8) / 10;
       const r = isPalm
@@ -24224,9 +24379,10 @@ function seedCoastalVegetation(
             gv < 0.98 &&
             vegetationProbability(biomeMask, m, gu, gv) > 0 &&
             (!portPlacement ||
-              (Math.hypot(gx - portPlacement.center.x, gz - portPlacement.center.z) >=
-                portPlacement.clearRadius * 0.72 &&
-                portClearanceEnvelope(portPlacement, gx, gz, 10)))
+              ((portPlacement.hasOrthophotoFootprints ||
+                Math.hypot(gx - portPlacement.center.x, gz - portPlacement.center.z) >=
+                  portPlacement.clearRadius * 0.72) &&
+                portClearanceEnvelope(portPlacement, gx, gz, portPlacement.hasOrthophotoFootprints ? 4 : 10)))
           ) {
             const gsx = (terrainSample(heights, gx + 12, gz, region) - terrainSample(heights, gx - 12, gz, region)) / 24;
             const gsz = (terrainSample(heights, gx, gz + 12, region) - terrainSample(heights, gx, gz - 12, region)) / 24;
@@ -24345,7 +24501,8 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
   }
 
   // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free subdivision
-  const subRadius = region.span * (n >= 513 ? 0.14 : 0.22);
+  // (Only subdivide coarse 257x257 mobile grids; full 513x513 Saba-resolution grids use a single uniform grid with zero inner seam)
+  const subRadius = n >= 513 ? 0 : region.span * 0.22;
   const M = n >= 513 ? 2 : 3;
   const cellSub = new Uint8Array((n - 1) * (n - 1));
   for (let j = 0; j < n - 1; j++) {
@@ -24458,25 +24615,59 @@ function createCoastalViews(regionSpec, heights, portPlacement = null) {
   const heading = region.shoreBearing ?? 112;
   const shoreAlong = portPlacement?.center?.shoreAlong ?? 0;
   const shoreInland = portPlacement?.center?.shoreInland ?? -350;
-  const rawHorizon = worldFromCoastalFrame(region, shoreAlong - 300, shoreInland - 9500);
-  const rawApproach = worldFromCoastalFrame(region, shoreAlong - 120, shoreInland - 2600);
-  const rawCoast = worldFromCoastalFrame(region, shoreAlong, shoreInland - 780);
-  const rawHarbor = worldFromCoastalFrame(region, shoreAlong, shoreInland - 260);
+  const viewScale = Math.min(1, region.span / 3200);
+  const rawHorizon = worldFromCoastalFrame(
+    region,
+    shoreAlong - 300 * viewScale,
+    shoreInland - Math.max(2200, 9500 * viewScale)
+  );
+  const rawApproach = worldFromCoastalFrame(
+    region,
+    shoreAlong - 120 * viewScale,
+    shoreInland - Math.max(720, 2600 * viewScale)
+  );
+  const rawCoast = worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(240, 780 * viewScale));
+  const rawHarbor = worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(110, 260 * viewScale));
+
+  const snapToNavigableBay = (pos) => {
+    if (terrainSample(heights, pos.x, pos.z, region) <= -4.2) return pos;
+    const n = region.size;
+    const span = region.span;
+    let bestX = pos.x, bestZ = pos.z, bestDist2 = Infinity;
+    for (let j = 2; j < n - 2; j += 2) {
+      const wz = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 2; i < n - 2; i += 2) {
+        const wx = region.x + (i / (n - 1) - 0.5) * span;
+        const h = heights[j * n + i];
+        if (h <= -4.5) {
+          const d2 = (wx - pos.x) * (wx - pos.x) + (wz - pos.z) * (wz - pos.z);
+          if (d2 < bestDist2) {
+            bestDist2 = d2;
+            bestX = wx;
+            bestZ = wz;
+          }
+        }
+      }
+    }
+    return { x: bestX, z: bestZ };
+  };
 
   const caravel = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
-  const wrap = (pos, pitch = 1) =>
-    safeLandfallStart(
+  const wrap = (pos, pitch = 1, snapBay = false) => {
+    const startPos = snapBay ? snapToNavigableBay(pos) : pos;
+    return safeLandfallStart(
       heights,
-      { x: pos.x, z: pos.z, y: 6, yaw: heading, pitch, heading },
+      { x: startPos.x, z: startPos.z, y: 6, yaw: heading, pitch, heading },
       caravel,
       region
     );
+  };
 
   return Object.freeze({
-    horizon: Object.freeze(wrap(rawHorizon, 1)),
-    approach: Object.freeze(wrap(rawApproach, 4)),
-    coast: Object.freeze(wrap(rawCoast, 1)),
-    harbor: Object.freeze(wrap(rawHarbor, 1)),
+    horizon: Object.freeze(wrap(rawHorizon, 1, false)),
+    approach: Object.freeze(wrap(rawApproach, 4, false)),
+    coast: Object.freeze(wrap(rawCoast, 1, true)),
+    harbor: Object.freeze(wrap(rawHarbor, 1, true)),
   });
 }
 
@@ -24556,19 +24747,142 @@ function rasterizeTileGrid(loaded, tx0, ty0, w, h) {
   return pixels;
 }
 
+let _cachedCoastlineRings = null;
+async function loadCoastlineRingsForSnap(fetchFn) {
+  if (_cachedCoastlineRings) return _cachedCoastlineRings;
+  try {
+    const res = await fetchFn("data:application/json;base64,W1tbLTU5LjU3MiwtODAuMDRdLFstNTkuODY2LC04MC41NV0sWy02MC4xNiwtODEuMF0sWy02Mi4yNTUsLTgwLjg2M10sWy02NC40ODgsLTgwLjkyMl0sWy02NS43NDIsLTgwLjU4OV0sWy02NS43NDIsLTgwLjU1XSxbLTY2LjI5LC04MC4yNTZdLFstNjQuMDM4LC04MC4yOTVdLFstNjEuODgzLC04MC4zOTNdLFstNjEuMTM5LC03OS45ODFdLFstNjAuNjEsLTc5LjYyOV0sWy01OS41NzIsLTgwLjA0XV0sW1stMTU5LjIwOCwtNzkuNDk3XSxbLTE2MS4xMjgsLTc5LjYzNF0sWy0xNjIuNDQsLTc5LjI4MV0sWy0xNjMuMDI3LC03OC45MjldLFstMTYzLjA2NywtNzguODddLFstMTYzLjcxMywtNzguNTk2XSxbLTE2My43MTMsLTc4LjU5Nl0sWy0xNjMuMTA2LC03OC4yMjNdLFstMTYxLjI0NSwtNzguMzhdLFstMTYwLjI0NiwtNzguNjk0XSxbLTE1OS40ODIsLTc5LjA0Nl0sWy0xNTkuMjA4LC03OS40OTddXSxbWy00NS4xNTUsLTc4LjA0N10sWy00My45MjEsLTc4LjQ3OF0sWy00My40OSwtNzkuMDg2XSxbLTQzLjM3MiwtNzkuNTE3XSxbLTQzLjMzMywtODAuMDI2XSxbLTQ0Ljg4MSwtODAuMzRdLFstNDYuNTA2LC04MC41OTRdLFstNDguMzg2LC04MC44MjldLFstNTAuNDgyLC04MS4wMjVdLFstNTIuODUyLC04MC45NjddLFstNTQuMTY0LC04MC42MzRdLFstNTMuOTg4LC04MC4yMjJdLFstNTEuODUzLC03OS45NDhdLFstNTAuOTkxLC03OS42MTVdLFstNTAuMzY1LC03OS4xODNdLFstNDkuOTE0LC03OC44MTFdLFstNDkuMzA3LC03OC40NTldLFstNDguNjYxLC03OC4wNDddLFstNDguNjYxLC03OC4wNDddLFstNDguMTUxLC03OC4wNDddLFstNDYuNjYzLC03Ny44MzFdLFstNDUuMTU1LC03OC4wNDddXSxbWy0xMjEuMjEyLC03My41MDFdLFstMTE5LjkxOSwtNzMuNjU4XSxbLTExOC43MjQsLTczLjQ4MV0sWy0xMTkuMjkyLC03My44MzRdLFstMTIwLjIzMiwtNzQuMDg5XSxbLTEyMS42MjMsLTc0LjAxXSxbLTEyMi42MjIsLTczLjY1OF0sWy0xMjIuNjIyLC03My42NThdLFstMTIyLjQwNiwtNzMuMzI1XSxbLTEyMS4yMTIsLTczLjUwMV1dLFtbLTEyNS41NiwtNzMuNDgxXSxbLTEyNC4wMzIsLTczLjg3M10sWy0xMjQuNjE5LC03My44MzRdLFstMTI1LjkxMiwtNzMuNzM2XSxbLTEyNy4yODMsLTczLjQ2Ml0sWy0xMjcuMjgzLC03My40NjJdLFstMTI2LjU1OCwtNzMuMjQ2XSxbLTEyNS41NiwtNzMuNDgxXV0sW1stOTguOTgyLC03MS45MzNdLFstOTcuODg1LC03Mi4wNzFdLFstOTYuNzg4LC03MS45NTNdLFstOTYuMiwtNzIuNTIxXSxbLTk2Ljk4NCwtNzIuNDQzXSxbLTk4LjE5OCwtNzIuNDgyXSxbLTk5LjQzMiwtNzIuNDQzXSxbLTEwMC43ODMsLTcyLjUwMl0sWy0xMDEuODAyLC03Mi4zMDZdLFstMTAyLjMzMSwtNzEuODk0XSxbLTEwMi4zMzEsLTcxLjg5NF0sWy0xMDEuNzA0LC03MS43MThdLFstMTAwLjQzMSwtNzEuODU1XSxbLTk4Ljk4MiwtNzEuOTMzXV0sW1stNjguNDUxLC03MC45NTZdLFstNjguMzM0LC03MS40MDZdLFstNjguNTEsLTcxLjc5OF0sWy02OC43ODQsLTcyLjE3MV0sWy02OS45NTksLTcyLjMwOF0sWy03MS4wNzYsLTcyLjUwNF0sWy03Mi4zODgsLTcyLjQ4NF0sWy03MS44OTgsLTcyLjA5Ml0sWy03My4wNzQsLTcyLjIyOV0sWy03NC4xOSwtNzIuMzY3XSxbLTc0Ljk1NCwtNzIuMDczXSxbLTc1LjAxMywtNzEuNjYxXSxbLTczLjkxNiwtNzEuMjY5XSxbLTczLjkxNiwtNzEuMjY5XSxbLTczLjIzLC03MS4xNTJdLFstNzIuMDc1LC03MS4xOTFdLFstNzEuNzgxLC03MC42ODFdLFstNzEuNzIyLC03MC4zMDldLFstNzEuNzQyLC02OS41MDZdLFstNzEuMTc0LC02OS4wMzVdLFstNzAuMjUzLC02OC44NzldLFstNjkuNzI0LC02OS4yNTFdLFstNjkuNDg5LC02OS42MjNdLFstNjkuMDU5LC03MC4wNzRdLFstNjguNzI2LC03MC41MDVdLFstNjguNDUxLC03MC45NTZdXSxbWy01OC42MTQsLTY0LjE1Ml0sWy01OS4wNDUsLTY0LjM2OF0sWy01OS43ODksLTY0LjIxMV0sWy02MC42MTIsLTY0LjMwOV0sWy02MS4yOTcsLTY0LjU0NF0sWy02Mi4wMjIsLTY0Ljc5OV0sWy02Mi41MTIsLTY1LjA5M10sWy02Mi42NDksLTY1LjQ4NV0sWy02Mi41OSwtNjUuODU3XSxbLTYyLjEyLC02Ni4xOV0sWy02Mi44MDYsLTY2LjQyNl0sWy02My43NDYsLTY2LjUwNF0sWy02NC4yOTQsLTY2LjgzN10sWy02NC44ODIsLTY3LjE1XSxbLTY1LjUwOCwtNjcuNTgyXSxbLTY1LjY2NSwtNjcuOTU0XSxbLTY1LjMxMywtNjguMzY1XSxbLTY0Ljc4NCwtNjguNjc5XSxbLTYzLjk2MSwtNjguOTE0XSxbLTYzLjE5NywtNjkuMjI4XSxbLTYyLjc4NiwtNjkuNjE5XSxbLTYyLjU3MSwtNjkuOTkyXSxbLTYyLjI3NywtNzAuMzg0XSxbLTYxLjgwNywtNzAuNzE3XSxbLTYxLjUxMywtNzEuMDg5XSxbLTYxLjM3NiwtNzIuMDFdLFstNjEuMDgyLC03Mi4zODJdLFstNjEuMDA0LC03Mi43NzRdLFstNjAuNjksLTczLjE2Nl0sWy02MC44MjcsLTczLjY5NV0sWy02MS4zNzYsLTc0LjEwN10sWy02MS45NjMsLTc0LjQ0XSxbLTYzLjI5NSwtNzQuNTc3XSxbLTYzLjc0NiwtNzQuOTNdLFstNjQuMzUzLC03NS4yNjNdLFstNjUuODYxLC03NS42MzVdLFstNjcuMTkzLC03NS43OTJdLFstNjguNDQ2LC03Ni4wMDddLFstNjkuNzk4LC03Ni4yMjNdLFstNzAuNjAxLC03Ni42MzRdLFstNzIuMjA3LC03Ni42NzRdLFstNzMuOTcsLTc2LjYzNF0sWy03NS41NTYsLTc2LjcxM10sWy03Ny4yNCwtNzYuNzEzXSxbLTc2LjkyNywtNzcuMTA1XSxbLTc1LjM5OSwtNzcuMjgxXSxbLTc0LjI4MywtNzcuNTU1XSxbLTczLjY1NiwtNzcuOTA4XSxbLTc0Ljc3MywtNzguMjIyXSxbLTc2LjQ5NiwtNzguMTI0XSxbLTc3LjkyNiwtNzguMzc4XSxbLTc3Ljk4NSwtNzguNzldLFstNzguMDI0LC03OS4xODJdLFstNzYuODQ5LC03OS41MTVdLFstNzYuNjMzLC03OS44ODddLFstNzUuMzYsLTgwLjI2XSxbLTczLjI0NSwtODAuNDE2XSxbLTcxLjQ0MywtODAuNjkxXSxbLTcwLjAxMywtODEuMDA0XSxbLTY4LjE5MiwtODEuMzE4XSxbLTY1LjcwNCwtODEuNDc0XSxbLTYzLjI1NiwtODEuNzQ5XSxbLTYxLjU1MiwtODIuMDQzXSxbLTU5LjY5MSwtODIuMzc2XSxbLTU4LjcxMiwtODIuODQ2XSxbLTU4LjIyMiwtODMuMjE4XSxbLTU3LjAwOCwtODIuODY2XSxbLTU1LjM2MywtODIuNTcyXSxbLTUzLjYyLC04Mi4yNThdLFstNTEuNTQ0LC04Mi4wMDRdLFstNDkuNzYxLC04MS43MjldLFstNDcuMjc0LC04MS43MV0sWy00NC44MjYsLTgxLjg0N10sWy00Mi44MDgsLTgyLjA4Ml0sWy00Mi4xNjIsLTgxLjY1MV0sWy00MC43NzEsLTgxLjM1N10sWy0zOC4yNDUsLTgxLjMzN10sWy0zNi4yNjcsLTgxLjEyMl0sWy0zNC4zODYsLTgwLjkwNl0sWy0zMi4zMSwtODAuNzY5XSxbLTMwLjA5NywtODAuNTkzXSxbLTI4LjU1LC04MC4zMzhdLFstMjkuMjU1LC03OS45ODVdLFstMjkuNjg2LC03OS42MzNdLFstMjkuNjg2LC03OS4yNl0sWy0zMS42MjUsLTc5LjI5OV0sWy0zMy42ODEsLTc5LjQ1Nl0sWy0zNS42NCwtNzkuNDU2XSxbLTM1LjkxNCwtNzkuMDg0XSxbLTM1Ljc3NywtNzguMzM5XSxbLTM1LjMyNywtNzguMTI0XSxbLTMzLjg5NywtNzcuODg5XSxbLTMyLjIxMiwtNzcuNjUzXSxbLTMwLjk5OCwtNzcuMzZdLFstMjkuNzg0LC03Ny4wNjZdLFstMjguODgzLC03Ni42NzRdLFstMjcuNTEyLC03Ni40OTddLFstMjYuMTYsLTc2LjM2XSxbLTI1LjQ3NSwtNzYuMjgyXSxbLTIzLjkyOCwtNzYuMjQzXSxbLTIyLjQ1OSwtNzYuMTA1XSxbLTIxLjIyNSwtNzUuOTA5XSxbLTIwLjAxLC03NS42NzRdLFstMTguOTE0LC03NS40MzldLFstMTcuNTIzLC03NS4xMjZdLFstMTYuNjQyLC03NC43OTNdLFstMTUuNzAxLC03NC40OTldLFstMTUuNDA4LC03NC4xMDddLFstMTYuNDY1LC03My44NzJdLFstMTYuMTEzLC03My40Nl0sWy0xNS40NDcsLTczLjE0N10sWy0xNC40MDksLTcyLjk1MV0sWy0xMy4zMTIsLTcyLjcxNV0sWy0xMi4yOTQsLTcyLjQwMl0sWy0xMS41MSwtNzIuMDFdLFstMTEuMDIsLTcxLjU0XSxbLTEwLjI5NiwtNzEuMjY1XSxbLTkuMTAxLC03MS4zMjRdLFstOC42MTEsLTcxLjY1N10sWy03LjQxNywtNzEuNjk3XSxbLTcuMzc3LC03MS4zMjRdLFstNi44NjgsLTcwLjkzMl0sWy01Ljc5MSwtNzEuMDNdLFstNS41MzYsLTcxLjQwM10sWy00LjM0MiwtNzEuNDYxXSxbLTMuMDQ5LC03MS4yODVdLFstMS43OTUsLTcxLjE2N10sWy0wLjY1OSwtNzEuMjI2XSxbLTAuMjI5LC03MS42MzhdLFswLjg2OCwtNzEuMzA1XSxbMS44ODcsLTcxLjEyOF0sWzMuMDIzLC03MC45OTFdLFs0LjEzOSwtNzAuODU0XSxbNS4xNTgsLTcwLjYxOV0sWzYuMjc0LC03MC40NjJdLFs3LjEzNiwtNzAuMjQ3XSxbNy43NDMsLTY5Ljg5NF0sWzguNDg3LC03MC4xNDldLFs5LjUyNSwtNzAuMDExXSxbMTAuMjUsLTcwLjQ4Ml0sWzEwLjgxOCwtNzAuODM0XSxbMTEuOTU0LC03MC42MzhdLFsxMi40MDQsLTcwLjI0N10sWzEzLjQyMywtNjkuOTcyXSxbMTQuNzM1LC03MC4wMzFdLFsxNS4xMjcsLTcwLjQwM10sWzE1Ljk0OSwtNzAuMDMxXSxbMTcuMDI3LC02OS45MTNdLFsxOC4yMDIsLTY5Ljg3NF0sWzE5LjI1OSwtNjkuODk0XSxbMjAuMzc2LC03MC4wMTFdLFsyMS40NTMsLTcwLjA3XSxbMjEuOTIzLC03MC40MDNdLFsyMi41NjksLTcwLjY5N10sWzIzLjY2NiwtNzAuNTIxXSxbMjQuODQxLC03MC40ODJdLFsyNS45NzcsLTcwLjQ4Ml0sWzI3LjA5NCwtNzAuNDYyXSxbMjguMDkzLC03MC4zMjVdLFsyOS4xNSwtNzAuMjA3XSxbMzAuMDMyLC02OS45MzNdLFszMC45NzIsLTY5Ljc1N10sWzMxLjk5LC02OS42NTldLFszMi43NTQsLTY5LjM4NF0sWzMzLjMwMiwtNjguODM2XSxbMzMuODcsLTY4LjUwM10sWzM0LjkwOCwtNjguNjU5XSxbMzUuMywtNjkuMDEyXSxbMzYuMTYyLC02OS4yNDddLFszNy4yLC02OS4xNjldLFszNy45MDUsLTY5LjUyMV0sWzM4LjY0OSwtNjkuNzc2XSxbMzkuNjY4LC02OS41NDFdLFs0MC4wMiwtNjkuMTFdLFs0MC45MjEsLTY4LjkzNF0sWzQxLjk1OSwtNjguNjAxXSxbNDIuOTM5LC02OC40NjNdLFs0NC4xMTQsLTY4LjI2N10sWzQ0Ljg5NywtNjguMDUyXSxbNDUuNzIsLTY3LjgxN10sWzQ2LjUwMywtNjcuNjAxXSxbNDcuNDQzLC02Ny43MTldLFs0OC4zNDQsLTY3LjM2Nl0sWzQ4Ljk5MSwtNjcuMDkyXSxbNDkuOTMxLC02Ny4xMTFdLFs1MC43NTMsLTY2Ljg3Nl0sWzUwLjk0OSwtNjYuNTIzXSxbNTEuNzkyLC02Ni4yNDldLFs1Mi42MTQsLTY2LjA1M10sWzUzLjYxMywtNjUuODk2XSxbNTQuNTM0LC02NS44MThdLFs1NS40MTUsLTY1Ljg3N10sWzU2LjM1NSwtNjUuOTc1XSxbNTcuMTU4LC02Ni4yNDldLFs1Ny4yNTYsLTY2LjY4XSxbNTguMTM3LC02Ny4wMTNdLFs1OC43NDUsLTY3LjI4OF0sWzU5LjkzOSwtNjcuNDA1XSxbNjAuNjA1LC02Ny42OF0sWzYxLjQyOCwtNjcuOTU0XSxbNjIuMzg3LC02OC4wMTNdLFs2My4xOSwtNjcuODE3XSxbNjQuMDUyLC02Ny40MDVdLFs2NC45OTIsLTY3LjYyMV0sWzY1Ljk3MiwtNjcuNzM4XSxbNjYuOTEyLC02Ny44NTZdLFs2Ny44OTEsLTY3LjkzNF0sWzY4Ljg5LC02Ny45MzRdLFs2OS43MTMsLTY4Ljk3M10sWzY5LjY3MywtNjkuMjI4XSxbNjkuNTU2LC02OS42NzhdLFs2OC41OTYsLTY5LjkzM10sWzY3LjgxMywtNzAuMzA1XSxbNjcuOTUsLTcwLjY5N10sWzY5LjA2NiwtNzAuNjc4XSxbNjguOTI5LC03MS4wNjldLFs2OC40MiwtNzEuNDQyXSxbNjcuOTUsLTcxLjg1M10sWzY4LjcxNCwtNzIuMTY3XSxbNjkuODY5LC03Mi4yNjVdLFs3MS4wMjUsLTcyLjA4OF0sWzcxLjU3MywtNzEuNjk3XSxbNzEuOTA2LC03MS4zMjRdLFs3Mi40NTUsLTcxLjAxMV0sWzczLjA4MSwtNzAuNzE3XSxbNzMuMzM2LC03MC4zNjRdLFs3My44NjUsLTY5Ljg3NF0sWzc0LjQ5MiwtNjkuNzc2XSxbNzUuNjI4LC02OS43MzddLFs3Ni42MjYsLTY5LjYxOV0sWzc3LjY0NSwtNjkuNDYzXSxbNzguMTM1LC02OS4wNzFdLFs3OC40MjgsLTY4LjY5OF0sWzc5LjExNCwtNjguMzI2XSxbODAuMDkzLC02OC4wNzJdLFs4MC45MzUsLTY3Ljg3Nl0sWzgxLjQ4NCwtNjcuNTQyXSxbODIuMDUyLC02Ny4zNjZdLFs4Mi43NzYsLTY3LjIwOV0sWzgzLjc3NSwtNjcuMzA3XSxbODQuNjc2LC02Ny4yMDldLFs4NS42NTYsLTY3LjA5Ml0sWzg2Ljc1MiwtNjcuMTVdLFs4Ny40NzcsLTY2Ljg3Nl0sWzg3Ljk4NiwtNjYuMjFdLFs4OC4zNTgsLTY2LjQ4NF0sWzg4LjgyOCwtNjYuOTU1XSxbODkuNjcxLC02Ny4xNV0sWzkwLjYzLC02Ny4yMjldLFs5MS41OSwtNjcuMTExXSxbOTIuNjA5LC02Ny4xOV0sWzkzLjU0OSwtNjcuMjA5XSxbOTQuMTc1LC02Ny4xMTFdLFs5NS4wMTgsLTY3LjE3XSxbOTUuNzgxLC02Ny4zODZdLFs5Ni42ODIsLTY3LjI0OV0sWzk3Ljc2LC02Ny4yNDldLFs5OC42OCwtNjcuMTExXSxbOTkuNzE4LC02Ny4yNDldLFsxMDAuMzg0LC02Ni45MTVdLFsxMDAuODkzLC02Ni41ODJdLFsxMDEuNTc5LC02Ni4zMDhdLFsxMDIuODMyLC02NS41NjNdLFsxMDMuNDc5LC02NS43XSxbMTA0LjI0MywtNjUuOTc1XSxbMTA0LjkwOCwtNjYuMzI4XSxbMTA2LjE4MiwtNjYuOTM1XSxbMTA3LjE2MSwtNjYuOTU1XSxbMTA4LjA4MSwtNjYuOTU1XSxbMTA5LjE1OSwtNjYuODM3XSxbMTEwLjIzNiwtNjYuN10sWzExMS4wNTgsLTY2LjQyNl0sWzExMS43NDQsLTY2LjEzMl0sWzExMi44NiwtNjYuMDkyXSxbMTEzLjYwNSwtNjUuODc3XSxbMTE0LjM4OCwtNjYuMDczXSxbMTE0Ljg5NywtNjYuMzg2XSxbMTE1LjYwMiwtNjYuN10sWzExNi42OTksLTY2LjY2MV0sWzExNy4zODUsLTY2LjkxNV0sWzExOC41NzksLTY3LjE3XSxbMTE5LjgzMywtNjcuMjY4XSxbMTIwLjg3MSwtNjcuMTldLFsxMjEuNjU0LC02Ni44NzZdLFsxMjIuMzIsLTY2LjU2M10sWzEyMy4yMjEsLTY2LjQ4NF0sWzEyNC4xMjIsLTY2LjYyMV0sWzEyNS4xNiwtNjYuNzE5XSxbMTI2LjEsLTY2LjU2M10sWzEyNy4wMDEsLTY2LjU2M10sWzEyNy44ODMsLTY2LjY2MV0sWzEyOC44MDMsLTY2Ljc1OV0sWzEyOS43MDQsLTY2LjU4Ml0sWzEzMC43ODEsLTY2LjQyNl0sWzEzMS44LC02Ni4zODZdLFsxMzIuOTM2LC02Ni4zODZdLFsxMzMuODU2LC02Ni4yODhdLFsxMzQuNzU3LC02Ni4yMV0sWzEzNS4wMzIsLTY1LjcyXSxbMTM1LjA3MSwtNjUuMzA5XSxbMTM1LjY5NywtNjUuNTgzXSxbMTM1Ljg3NCwtNjYuMDM0XSxbMTM2LjIwNywtNjYuNDQ1XSxbMTM2LjYxOCwtNjYuNzc4XSxbMTM3LjQ2LC02Ni45NTVdLFsxMzguNTk2LC02Ni44OTZdLFsxMzkuOTA4LC02Ni44NzZdLFsxNDAuODA5LC02Ni44MTddLFsxNDIuMTIyLC02Ni44MTddLFsxNDMuMDYyLC02Ni43OThdLFsxNDQuMzc0LC02Ni44MzddLFsxNDUuNDksLTY2LjkxNV0sWzE0Ni4xOTYsLTY3LjIyOV0sWzE0Ni4wLC02Ny42MDFdLFsxNDYuNjQ2LC02Ny44OTVdLFsxNDcuNzIzLC02OC4xM10sWzE0OC44NCwtNjguMzg1XSxbMTUwLjEzMiwtNjguNTYxXSxbMTUxLjQ4NCwtNjguNzE4XSxbMTUyLjUwMiwtNjguODc1XSxbMTUzLjYzOCwtNjguODk1XSxbMTU0LjI4NSwtNjguNTYxXSxbMTU1LjE2NiwtNjguODM2XSxbMTU1LjkzLC02OS4xNDldLFsxNTYuODExLC02OS4zODRdLFsxNTguMDI2LC02OS40ODJdLFsxNTkuMTgxLC02OS42XSxbMTU5LjY3MSwtNjkuOTkyXSxbMTYwLjgwNywtNzAuMjI3XSxbMTYxLjU3LC03MC41OF0sWzE2Mi42ODcsLTcwLjczNl0sWzE2My44NDIsLTcwLjcxN10sWzE2NC45MiwtNzAuNzc2XSxbMTY2LjExNCwtNzAuNzU2XSxbMTY3LjMwOSwtNzAuODM0XSxbMTY4LjQyNiwtNzAuOTcxXSxbMTY5LjQ2NCwtNzEuMjA3XSxbMTcwLjUwMiwtNzEuNDAzXSxbMTcxLjIwNywtNzEuNjk3XSxbMTcxLjA4OSwtNzIuMDg4XSxbMTcwLjU2LC03Mi40NDFdLFsxNzAuMTEsLTcyLjg5Ml0sWzE2OS43NTcsLTczLjI0NV0sWzE2OS4yODcsLTczLjY1Nl0sWzE2Ny45NzUsLTczLjgxM10sWzE2Ny4zODcsLTc0LjE2NV0sWzE2Ni4wOTUsLTc0LjM4MV0sWzE2NS42NDQsLTc0Ljc3M10sWzE2NC45NTksLTc1LjE0NV0sWzE2NC4yMzQsLTc1LjQ1OV0sWzE2My44MjMsLTc1Ljg3XSxbMTYzLjU2OCwtNzYuMjQzXSxbMTYzLjQ3LC03Ni42OTNdLFsxNjMuNDksLTc3LjA2Nl0sWzE2NC4wNTgsLTc3LjQ1N10sWzE2NC4yNzMsLTc3LjgzXSxbMTY0Ljc0MywtNzguMTgzXSxbMTY2LjYwNCwtNzguMzJdLFsxNjYuOTk2LC03OC43NTFdLFsxNjUuMTk0LC03OC45MDddLFsxNjMuNjY2LC03OS4xMjNdLFsxNjEuNzY2LC03OS4xNjJdLFsxNjAuOTI0LC03OS43M10sWzE2MC43NDgsLTgwLjIwMV0sWzE2MC4zMTcsLTgwLjU3M10sWzE1OS43ODgsLTgwLjk0NV0sWzE2MS4xMiwtODEuMjc5XSxbMTYxLjYyOSwtODEuNjldLFsxNjIuNDkxLC04Mi4wNjJdLFsxNjMuNzA1LC04Mi4zOTVdLFsxNjUuMDk2LC04Mi43MDldLFsxNjYuNjA0LC04My4wMjJdLFsxNjguODk2LC04My4zMzZdLFsxNjkuNDA1LC04My44MjZdLFsxNzIuMjg0LC04NC4wNDFdLFsxNzIuNDc3LC04NC4xMThdLFsxNzMuMjI0LC04NC40MTRdLFsxNzUuOTg2LC04NC4xNTldLFsxNzguMjc3LC04NC40NzNdLFsxODAsLTg0LjcxM10sWzE4MCwtOTBdLFstMTgwLC05MF0sWy0xODAsLTg0LjcxM10sWy0xNzkuOTQyLC04NC43MjFdLFstMTc5LjA1OSwtODQuMTM5XSxbLTE3Ny4yNTcsLTg0LjQ1M10sWy0xNzcuMTQxLC04NC40MThdLFstMTc2Ljg2MiwtODQuMzM0XSxbLTE3Ni41MjQsLTg0LjIzMl0sWy0xNzYuMjMsLTg0LjE0M10sWy0xNzYuMDg1LC04NC4wOTldLFstMTc1LjkzNCwtODQuMTAyXSxbLTE3NS44MywtODQuMTE4XSxbLTE3NC4zODMsLTg0LjUzNF0sWy0xNzMuMTE3LC04NC4xMThdLFstMTcyLjg4OSwtODQuMDYxXSxbLTE2OS45NTEsLTgzLjg4NV0sWy0xNjkuMCwtODQuMTE4XSxbLTE2OC41MywtODQuMjM3XSxbLTE2Ny4wMjIsLTg0LjU3XSxbLTE2NC4xODIsLTg0LjgyNV0sWy0xNjEuOTMsLTg1LjEzOV0sWy0xNTguMDcxLC04NS4zNzRdLFstMTU1LjE5MiwtODUuMV0sWy0xNTAuOTQyLC04NS4yOTZdLFstMTQ4LjUzMywtODUuNjA5XSxbLTE0NS44ODksLTg1LjMxNV0sWy0xNDMuMTA4LC04NS4wNDFdLFstMTQyLjg5MiwtODQuNTddLFstMTQ2LjgyOSwtODQuNTMxXSxbLTE1MC4wNjEsLTg0LjI5Nl0sWy0xNTAuOTAzLC04My45MDRdLFstMTUzLjU4NiwtODMuNjg5XSxbLTE1My40MSwtODMuMjM4XSxbLTE1My4wMzgsLTgyLjgyN10sWy0xNTIuNjY2LC04Mi40NTRdLFstMTUyLjg2MiwtODIuMDQzXSxbLTE1NC41MjYsLTgxLjc2OF0sWy0xNTUuMjksLTgxLjQxNl0sWy0xNTYuODM3LC04MS4xMDJdLFstMTU0LjQwOSwtODEuMTYxXSxbLTE1Mi4wOTgsLTgxLjAwNF0sWy0xNTAuNjQ4LC04MS4zMzddLFstMTQ4Ljg2NiwtODEuMDQzXSxbLTE0Ny4yMjEsLTgwLjY3MV0sWy0xNDYuNDE4LC04MC4zMzhdLFstMTQ2Ljc3LC03OS45MjZdLFstMTQ4LjA2MywtNzkuNjUyXSxbLTE0OS41MzIsLTc5LjM1OF0sWy0xNTEuNTg4LC03OS4yOTldLFstMTUzLjM5LC03OS4xNjJdLFstMTU1LjMyOSwtNzkuMDY0XSxbLTE1NS45NzYsLTc4LjY5Ml0sWy0xNTcuMjY4LC03OC4zNzhdLFstMTU4LjA1MiwtNzguMDI2XSxbLTE1OC4zNjUsLTc2Ljg4OV0sWy0xNTcuODc1LC03Ni45ODddLFstMTU2Ljk3NSwtNzcuMzAxXSxbLTE1NS4zMjksLTc3LjIwM10sWy0xNTMuNzQzLC03Ny4wNjZdLFstMTUyLjkyLC03Ny40OTddLFstMTUxLjMzNCwtNzcuMzk5XSxbLTE1MC4wMDIsLTc3LjE4M10sWy0xNDguNzQ4LC03Ni45MDldLFstMTQ3LjYxMiwtNzYuNTc2XSxbLTE0Ni4xMDQsLTc2LjQ3OF0sWy0xNDYuMTQ0LC03Ni4xMDVdLFstMTQ2LjQ5NiwtNzUuNzMzXSxbLTE0Ni4yMDIsLTc1LjM4XSxbLTE0NC45MSwtNzUuMjA0XSxbLTE0NC4zMjIsLTc1LjUzN10sWy0xNDIuNzk0LC03NS4zNDFdLFstMTQxLjYzOSwtNzUuMDg2XSxbLTE0MC4yMDksLTc1LjA2N10sWy0xMzguODU4LC03NC45NjldLFstMTM3LjUwNiwtNzQuNzM0XSxbLTEzNi40MjksLTc0LjUxOF0sWy0xMzUuMjE1LC03NC4zMDNdLFstMTM0LjQzMSwtNzQuMzYxXSxbLTEzMy43NDYsLTc0LjQ0XSxbLTEzMi4yNTcsLTc0LjMwM10sWy0xMzAuOTI1LC03NC40NzldLFstMTI5LjU1NCwtNzQuNDU5XSxbLTEyOC4yNDIsLTc0LjMyMl0sWy0xMjYuODkxLC03NC40Ml0sWy0xMjUuNDAyLC03NC41MThdLFstMTI0LjAxMSwtNzQuNDc5XSxbLTEyMi41NjIsLTc0LjQ5OV0sWy0xMjEuMDc0LC03NC41MThdLFstMTE5LjcwMywtNzQuNDc5XSxbLTExOC42ODQsLTc0LjE4NV0sWy0xMTcuNDcsLTc0LjAyOF0sWy0xMTYuMjE2LC03NC4yNDRdLFstMTE1LjAyMiwtNzQuMDY4XSxbLTExMy45NDQsLTczLjcxNV0sWy0xMTMuMjk4LC03NC4wMjhdLFstMTEyLjk0NSwtNzQuMzgxXSxbLTExMi4yOTksLTc0LjcxNF0sWy0xMTEuMjYxLC03NC40Ml0sWy0xMTAuMDY2LC03NC43OTNdLFstMTA4LjcxNSwtNzQuOTFdLFstMTA3LjU1OSwtNzUuMTg0XSxbLTEwNi4xNDksLTc1LjEyNl0sWy0xMDQuODc2LC03NC45NDldLFstMTAzLjM2OCwtNzQuOTg4XSxbLTEwMi4wMTcsLTc1LjEyNl0sWy0xMDAuNjQ2LC03NS4zMDJdLFstMTAwLjExNywtNzQuODcxXSxbLTEwMC43NjMsLTc0LjUzOF0sWy0xMDEuMjUzLC03NC4xODVdLFstMTAyLjU0NSwtNzQuMTA3XSxbLTEwMy4xMTMsLTczLjczNF0sWy0xMDMuMzI5LC03My4zNjJdLFstMTAzLjY4MSwtNzIuNjE4XSxbLTEwMi45MTcsLTcyLjc1NV0sWy0xMDEuNjA1LC03Mi44MTNdLFstMTAwLjMxMywtNzIuNzU1XSxbLTk5LjEzNywtNzIuOTExXSxbLTk4LjExOSwtNzMuMjA1XSxbLTk3LjY4OCwtNzMuNTU4XSxbLTk2LjMzNywtNzMuNjE3XSxbLTk1LjA0NCwtNzMuNDhdLFstOTMuNjczLC03My4yODRdLFstOTIuNDM5LC03My4xNjZdLFstOTEuNDIxLC03My40MDFdLFstOTAuMDg5LC03My4zMjNdLFstODkuMjI3LC03Mi41NTldLFstODguNDI0LC03My4wMDldLFstODcuMjY4LC03My4xODZdLFstODYuMDE1LC03My4wODhdLFstODUuMTkyLC03My40OF0sWy04My44OCwtNzMuNTE5XSxbLTgyLjY2NiwtNzMuNjM2XSxbLTgxLjQ3MSwtNzMuODUyXSxbLTgwLjY4NywtNzMuNDhdLFstODAuMjk2LC03My4xMjddLFstNzkuMjk3LC03My41MTldLFstNzcuOTI2LC03My40MjFdLFstNzYuOTA3LC03My42MzZdLFstNzYuMjIyLC03My45N10sWy03NC44OSwtNzMuODcyXSxbLTczLjg1MiwtNzMuNjU2XSxbLTcyLjgzNCwtNzMuNDAxXSxbLTcxLjYxOSwtNzMuMjY0XSxbLTcwLjIwOSwtNzMuMTQ3XSxbLTY4LjkzNiwtNzMuMDA5XSxbLTY3Ljk1NywtNzIuNzk0XSxbLTY3LjM2OSwtNzIuNDhdLFstNjcuMTM0LC03Mi4wNDldLFstNjcuMjUyLC03MS42MzhdLFstNjcuNTY1LC03MS4yNDZdLFstNjcuOTE3LC03MC44NTRdLFstNjguMjMxLC03MC40NjJdLFstNjguNDg1LC03MC4xMDldLFstNjguNTQ0LC02OS43MTddLFstNjguNDQ2LC02OS4zMjZdLFstNjcuOTc2LC02OC45NTNdLFstNjcuNTg1LC02OC41NDJdLFstNjcuNDI4LC02OC4xNV0sWy02Ny42MjQsLTY3LjcxOV0sWy02Ny43NDEsLTY3LjMyN10sWy02Ny4yNTIsLTY2Ljg3Nl0sWy02Ni43MDMsLTY2LjU4Ml0sWy02Ni4wNTcsLTY2LjIxXSxbLTY1LjM3MSwtNjUuODk2XSxbLTY0LjU2OCwtNjUuNjAzXSxbLTY0LjE3NywtNjUuMTcxXSxbLTYzLjYyOCwtNjQuODk3XSxbLTYzLjAwMSwtNjQuNjQyXSxbLTYyLjA0MiwtNjQuNTg0XSxbLTYxLjQxNSwtNjQuMjddLFstNjAuNzEsLTY0LjA3NF0sWy01OS44ODcsLTYzLjk1N10sWy01OS4xNjMsLTYzLjcwMl0sWy01OC41OTUsLTYzLjM4OF0sWy01Ny44MTEsLTYzLjI3MV0sWy01Ny4yMjQsLTYzLjUyNV0sWy01Ny41OTYsLTYzLjg1OV0sWy01OC42MTQsLTY0LjE1Ml1dLFtbLTY3Ljc1LC01My44NV0sWy02Ni40NSwtNTQuNDVdLFstNjUuMDUsLTU0LjddLFstNjUuNSwtNTUuMl0sWy02Ni40NSwtNTUuMjVdLFstNjYuOTYsLTU0Ljg5N10sWy02Ny4yOTEsLTU1LjMwMV0sWy02OC4xNDksLTU1LjYxMl0sWy02OS4yMzIsLTU1LjQ5OV0sWy02OS45NTgsLTU1LjE5OF0sWy03MS4wMDYsLTU1LjA1NF0sWy03Mi4yNjQsLTU0LjQ5NV0sWy03My4yODUsLTUzLjk1OF0sWy03NC42NjMsLTUyLjgzN10sWy03My44MzgsLTUzLjA0N10sWy03Mi40MzQsLTUzLjcxNV0sWy03MS4xMDgsLTU0LjA3NF0sWy03MC41OTIsLTUzLjYxNl0sWy03MC4yNjcsLTUyLjkzMV0sWy02OS4zNDYsLTUyLjUxOF0sWy02OC42MzQsLTUyLjYzNl0sWy02OC42MzQsLTUyLjYzNl0sWy02OC4yNSwtNTMuMV0sWy02Ny43NSwtNTMuODVdXSxbWy01OC41NSwtNTEuMV0sWy01Ny43NSwtNTEuNTVdLFstNTguMDUsLTUxLjldLFstNTkuNCwtNTIuMl0sWy01OS44NSwtNTEuODVdLFstNjAuNywtNTIuM10sWy02MS4yLC01MS44NV0sWy02MCwtNTEuMjVdLFstNTkuMTUsLTUxLjVdLFstNTguNTUsLTUxLjFdXSxbWzcwLjI4LC00OS43MV0sWzY4Ljc0NSwtNDkuNzc1XSxbNjguNzIsLTQ5LjI0Ml0sWzY4Ljg2OCwtNDguODNdLFs2OC45MzUsLTQ4LjYyNV0sWzY5LjU4LC00OC45NF0sWzcwLjUyNSwtNDkuMDY1XSxbNzAuNTYsLTQ5LjI1NV0sWzcwLjI4LC00OS43MV1dLFtbMTQ1LjM5OCwtNDAuNzkzXSxbMTQ2LjM2NCwtNDEuMTM4XSxbMTQ2LjkwOSwtNDEuMDAxXSxbMTQ3LjY4OSwtNDAuODA4XSxbMTQ4LjI4OSwtNDAuODc1XSxbMTQ4LjM2LC00Mi4wNjJdLFsxNDguMDE3LC00Mi40MDddLFsxNDcuOTE0LC00My4yMTJdLFsxNDcuNTY1LC00Mi45MzhdLFsxNDYuODcsLTQzLjYzNV0sWzE0Ni42NjMsLTQzLjU4MV0sWzE0Ni4wNDgsLTQzLjU1XSxbMTQ1LjQzMiwtNDIuNjk0XSxbMTQ1LjI5NSwtNDIuMDM0XSxbMTQ0LjcxOCwtNDEuMTYzXSxbMTQ0Ljc0NCwtNDAuNzA0XSxbMTQ1LjM5OCwtNDAuNzkzXV0sW1sxNzMuMDIsLTQwLjkxOV0sWzE3My4yNDcsLTQxLjMzMl0sWzE3My45NTgsLTQwLjkyN10sWzE3NC4yNDgsLTQxLjM0OV0sWzE3NC4yNDksLTQxLjc3XSxbMTczLjg3NiwtNDIuMjMzXSxbMTczLjIyMywtNDIuOTddLFsxNzIuNzExLC00My4zNzJdLFsxNzMuMDgsLTQzLjg1M10sWzE3Mi4zMDksLTQzLjg2Nl0sWzE3MS40NTMsLTQ0LjI0M10sWzE3MS4xODUsLTQ0Ljg5N10sWzE3MC42MTcsLTQ1LjkwOV0sWzE2OS44MzEsLTQ2LjM1Nl0sWzE2OS4zMzIsLTQ2LjY0MV0sWzE2OC40MTEsLTQ2LjYyXSxbMTY3Ljc2NCwtNDYuMjldLFsxNjYuNjc3LC00Ni4yMl0sWzE2Ni41MDksLTQ1Ljg1M10sWzE2Ny4wNDYsLTQ1LjExMV0sWzE2OC4zMDQsLTQ0LjEyNF0sWzE2OC45NDksLTQzLjkzNl0sWzE2OS42NjgsLTQzLjU1NV0sWzE3MC41MjUsLTQzLjAzMl0sWzE3MS4xMjUsLTQyLjUxM10sWzE3MS41NywtNDEuNzY3XSxbMTcxLjk0OSwtNDEuNTE0XSxbMTcyLjA5NywtNDAuOTU2XSxbMTcyLjc5OSwtNDAuNDk0XSxbMTczLjAyLC00MC45MTldXSxbWzE3NC42MTIsLTM2LjE1Nl0sWzE3NS4zMzcsLTM3LjIwOV0sWzE3NS4zNTgsLTM2LjUyNl0sWzE3NS44MDksLTM2Ljc5OV0sWzE3NS45NTgsLTM3LjU1NV0sWzE3Ni43NjMsLTM3Ljg4MV0sWzE3Ny40MzksLTM3Ljk2MV0sWzE3OC4wMSwtMzcuNThdLFsxNzguNTE3LC0zNy42OTVdLFsxNzguMjc1LC0zOC41ODNdLFsxNzcuOTcsLTM5LjE2Nl0sWzE3Ny4yMDcsLTM5LjE0Nl0sWzE3Ni45NCwtMzkuNDVdLFsxNzcuMDMzLC0zOS44OF0sWzE3Ni44ODYsLTQwLjA2Nl0sWzE3Ni41MDgsLTQwLjYwNV0sWzE3Ni4wMTIsLTQxLjI5XSxbMTc1LjI0LC00MS42ODhdLFsxNzUuMDY4LC00MS40MjZdLFsxNzQuNjUxLC00MS4yODJdLFsxNzUuMjI4LC00MC40NTldLFsxNzQuOSwtMzkuOTA5XSxbMTczLjgyNCwtMzkuNTA5XSxbMTczLjg1MiwtMzkuMTQ3XSxbMTc0LjU3NSwtMzguNzk4XSxbMTc0Ljc0MywtMzguMDI4XSxbMTc0LjY5NywtMzcuMzgxXSxbMTc0LjI5MiwtMzYuNzExXSxbMTc0LjMxOSwtMzYuNTM1XSxbMTczLjg0MSwtMzYuMTIyXSxbMTczLjA1NCwtMzUuMjM3XSxbMTcyLjYzNiwtMzQuNTI5XSxbMTczLjAwNywtMzQuNDUxXSxbMTczLjU1MSwtMzUuMDA2XSxbMTc0LjMyOSwtMzUuMjY1XSxbMTc0LjYxMiwtMzYuMTU2XV0sW1sxNjcuMTIsLTIyLjE2XSxbMTY2Ljc0LC0yMi40XSxbMTY2LjE5LC0yMi4xM10sWzE2NS40NzQsLTIxLjY4XSxbMTY0LjgzLC0yMS4xNV0sWzE2NC4xNjgsLTIwLjQ0NV0sWzE2NC4wMywtMjAuMTA2XSxbMTY0LjQ2LC0yMC4xMl0sWzE2NS4wMiwtMjAuNDZdLFsxNjUuNDYsLTIwLjhdLFsxNjUuNzgsLTIxLjA4XSxbMTY2LjYsLTIxLjddLFsxNjcuMTIsLTIyLjE2XV0sW1sxNzguMzc0LC0xNy4zNF0sWzE3OC43MTgsLTE3LjYyOF0sWzE3OC41NTMsLTE4LjE1MV0sWzE3Ny45MzMsLTE4LjI4OF0sWzE3Ny4zODEsLTE4LjE2NF0sWzE3Ny4yODUsLTE3LjcyNV0sWzE3Ny42NzEsLTE3LjM4MV0sWzE3OC4xMjYsLTE3LjUwNV0sWzE3OC4zNzQsLTE3LjM0XV0sW1sxNzkuMzY0LC0xNi44MDFdLFsxNzguNzI1LC0xNy4wMTJdLFsxNzguNTk3LC0xNi42MzldLFsxNzkuMDk3LC0xNi40MzRdLFsxNzkuNDE0LC0xNi4zNzldLFsxODAsLTE2LjA2N10sWzE4MCwtMTYuNTU1XSxbMTc5LjM2NCwtMTYuODAxXV0sW1stMTc5LjkxNywtMTYuNTAyXSxbLTE4MCwtMTYuNTU1XSxbLTE4MCwtMTYuMDY3XSxbLTE3OS43OTMsLTE2LjAyMV0sWy0xNzkuOTE3LC0xNi41MDJdXSxbWzE2Ny44NDUsLTE2LjQ2Nl0sWzE2Ny41MTUsLTE2LjU5OF0sWzE2Ny4xOCwtMTYuMTZdLFsxNjcuMjE3LC0xNS44OTJdLFsxNjcuODQ1LC0xNi40NjZdXSxbWzE2Ny4xMDgsLTE0LjkzNF0sWzE2Ny4yNywtMTUuNzRdLFsxNjcuMDAxLC0xNS42MTVdLFsxNjYuNzkzLC0xNS42NjldLFsxNjYuNjUsLTE1LjM5M10sWzE2Ni42MjksLTE0LjYyNl0sWzE2Ny4xMDgsLTE0LjkzNF1dLFtbNTAuMDU3LC0xMy41NTZdLFs1MC4yMTcsLTE0Ljc1OV0sWzUwLjQ3NywtMTUuMjI3XSxbNTAuMzc3LC0xNS43MDZdLFs1MC4yLC0xNi4wXSxbNDkuODYxLC0xNS40MTRdLFs0OS42NzMsLTE1LjcxXSxbNDkuODYzLC0xNi40NTFdLFs0OS43NzUsLTE2Ljg3NV0sWzQ5LjQ5OSwtMTcuMTA2XSxbNDkuNDM2LC0xNy45NTNdLFs0OS4wNDIsLTE5LjExOV0sWzQ4LjU0OSwtMjAuNDk3XSxbNDcuOTMxLC0yMi4zOTJdLFs0Ny41NDgsLTIzLjc4Ml0sWzQ3LjA5NiwtMjQuOTQyXSxbNDYuMjgyLC0yNS4xNzhdLFs0NS40MSwtMjUuNjAxXSxbNDQuODM0LC0yNS4zNDZdLFs0NC4wNCwtMjQuOTg4XSxbNDMuNzY0LC0yNC40NjFdLFs0My42OTgsLTIzLjU3NF0sWzQzLjM0NiwtMjIuNzc3XSxbNDMuMjU0LC0yMi4wNTddLFs0My40MzMsLTIxLjMzNl0sWzQzLjg5NCwtMjEuMTYzXSxbNDMuODk2LC0yMC44M10sWzQ0LjM3NCwtMjAuMDcyXSxbNDQuNDY0LC0xOS40MzVdLFs0NC4yMzIsLTE4Ljk2Ml0sWzQ0LjA0MywtMTguMzMxXSxbNDMuOTYzLC0xNy40MV0sWzQ0LjMxMiwtMTYuODVdLFs0NC40NDcsLTE2LjIxNl0sWzQ0Ljk0NSwtMTYuMTc5XSxbNDUuNTAzLC0xNS45NzRdLFs0NS44NzMsLTE1Ljc5M10sWzQ2LjMxMiwtMTUuNzhdLFs0Ni44ODIsLTE1LjIxXSxbNDcuNzA1LC0xNC41OTRdLFs0OC4wMDUsLTE0LjA5MV0sWzQ3Ljg2OSwtMTMuNjY0XSxbNDguMjk0LC0xMy43ODRdLFs0OC44NDUsLTEzLjA4OV0sWzQ4Ljg2NCwtMTIuNDg4XSxbNDkuMTk1LC0xMi4wNDFdLFs0OS41NDQsLTEyLjQ3XSxbNDkuODA5LC0xMi44OTVdLFs1MC4wNTcsLTEzLjU1Nl1dLFtbMTQzLjU2MiwtMTMuNzY0XSxbMTQzLjkyMiwtMTQuNTQ4XSxbMTQ0LjU2NCwtMTQuMTcxXSxbMTQ0Ljg5NSwtMTQuNTk0XSxbMTQ1LjM3NSwtMTQuOTg1XSxbMTQ1LjI3MiwtMTUuNDI4XSxbMTQ1LjQ4NSwtMTYuMjg2XSxbMTQ1LjYzNywtMTYuNzg1XSxbMTQ1Ljg4OSwtMTYuOTA3XSxbMTQ2LjE2LC0xNy43NjJdLFsxNDYuMDY0LC0xOC4yOF0sWzE0Ni4zODcsLTE4Ljk1OF0sWzE0Ny40NzEsLTE5LjQ4MV0sWzE0OC4xNzgsLTE5Ljk1Nl0sWzE0OC44NDgsLTIwLjM5MV0sWzE0OC43MTcsLTIwLjYzM10sWzE0OS4yODksLTIxLjI2MV0sWzE0OS42NzgsLTIyLjM0M10sWzE1MC4wNzcsLTIyLjEyM10sWzE1MC40ODMsLTIyLjU1Nl0sWzE1MC43MjcsLTIyLjQwMl0sWzE1MC45LC0yMy40NjJdLFsxNTEuNjA5LC0yNC4wNzZdLFsxNTIuMDc0LC0yNC40NThdLFsxNTIuODU1LC0yNS4yNjhdLFsxNTMuMTM2LC0yNi4wNzFdLFsxNTMuMTYyLC0yNi42NDFdLFsxNTMuMDkzLC0yNy4yNl0sWzE1My41NjksLTI4LjExXSxbMTUzLjUxMiwtMjguOTk1XSxbMTUzLjMzOSwtMjkuNDU4XSxbMTUzLjA2OSwtMzAuMzVdLFsxNTMuMDksLTMwLjkyNF0sWzE1Mi44OTIsLTMxLjY0XSxbMTUyLjQ1LC0zMi41NV0sWzE1MS43MDksLTMzLjA0MV0sWzE1MS4zNDQsLTMzLjgxNl0sWzE1MS4wMTEsLTM0LjMxXSxbMTUwLjcxNCwtMzUuMTczXSxbMTUwLjMyOCwtMzUuNjcyXSxbMTUwLjA3NSwtMzYuNDJdLFsxNDkuOTQ2LC0zNy4xMDldLFsxNDkuOTk3LC0zNy40MjVdLFsxNDkuNDI0LC0zNy43NzNdLFsxNDguMzA1LC0zNy44MDldLFsxNDcuMzgyLC0zOC4yMTldLFsxNDYuOTIyLC0zOC42MDddLFsxNDYuMzE4LC0zOS4wMzZdLFsxNDUuNDksLTM4LjU5NF0sWzE0NC44NzcsLTM4LjQxN10sWzE0NS4wMzIsLTM3Ljg5Nl0sWzE0NC40ODYsLTM4LjA4NV0sWzE0My42MSwtMzguODA5XSxbMTQyLjc0NSwtMzguNTM4XSxbMTQyLjE3OCwtMzguMzhdLFsxNDEuNjA3LC0zOC4zMDldLFsxNDAuNjM5LC0zOC4wMTldLFsxMzkuOTkyLC0zNy40MDNdLFsxMzkuODA3LC0zNi42NDRdLFsxMzkuNTc0LC0zNi4xMzhdLFsxMzkuMDgzLC0zNS43MzNdLFsxMzguMTIxLC0zNS42MTJdLFsxMzguNDQ5LC0zNS4xMjddLFsxMzguMjA4LC0zNC4zODVdLFsxMzcuNzE5LC0zNS4wNzddLFsxMzYuODI5LC0zNS4yNjFdLFsxMzcuMzUyLC0zNC43MDddLFsxMzcuNTA0LC0zNC4xM10sWzEzNy44OSwtMzMuNjRdLFsxMzcuODEsLTMyLjldLFsxMzYuOTk3LC0zMy43NTNdLFsxMzYuMzcyLC0zNC4wOTVdLFsxMzUuOTg5LC0zNC44OV0sWzEzNS4yMDgsLTM0LjQ3OV0sWzEzNS4yMzksLTMzLjk0OF0sWzEzNC42MTMsLTMzLjIyM10sWzEzNC4wODYsLTMyLjg0OF0sWzEzNC4yNzQsLTMyLjYxN10sWzEzMi45OTEsLTMyLjAxMV0sWzEzMi4yODgsLTMxLjk4M10sWzEzMS4zMjYsLTMxLjQ5Nl0sWzEyOS41MzYsLTMxLjU5XSxbMTI4LjI0MSwtMzEuOTQ4XSxbMTI3LjEwMywtMzIuMjgyXSxbMTI2LjE0OSwtMzIuMjE2XSxbMTI1LjA4OSwtMzIuNzI5XSxbMTI0LjIyMiwtMzIuOTU5XSxbMTI0LjAyOSwtMzMuNDg0XSxbMTIzLjY2LC0zMy44OV0sWzEyMi44MTEsLTMzLjkxNF0sWzEyMi4xODMsLTM0LjAwM10sWzEyMS4yOTksLTMzLjgyMV0sWzEyMC41OCwtMzMuOTNdLFsxMTkuODk0LC0zMy45NzZdLFsxMTkuMjk5LC0zNC41MDldLFsxMTkuMDA3LC0zNC40NjRdLFsxMTguNTA2LC0zNC43NDddLFsxMTguMDI1LC0zNS4wNjVdLFsxMTcuMjk2LC0zNS4wMjVdLFsxMTYuNjI1LC0zNS4wMjVdLFsxMTUuNTY0LC0zNC4zODZdLFsxMTUuMDI3LC0zNC4xOTddLFsxMTUuMDQ5LC0zMy42MjNdLFsxMTUuNTQ1LC0zMy40ODddLFsxMTUuNzE1LC0zMy4yNl0sWzExNS42NzksLTMyLjldLFsxMTUuODAyLC0zMi4yMDVdLFsxMTUuNjksLTMxLjYxMl0sWzExNS4xNjEsLTMwLjYwMl0sWzExNC45OTcsLTMwLjAzMV0sWzExNS4wNCwtMjkuNDYxXSxbMTE0LjY0MiwtMjguODFdLFsxMTQuNjE2LC0yOC41MTZdLFsxMTQuMTc0LC0yOC4xMThdLFsxMTQuMDQ5LC0yNy4zMzVdLFsxMTMuNDc3LC0yNi41NDNdLFsxMTMuMzM5LC0yNi4xMTddLFsxMTMuNzc4LC0yNi41NDldLFsxMTMuNDQxLC0yNS42MjFdLFsxMTMuOTM3LC0yNS45MTFdLFsxMTQuMjMzLC0yNi4yOThdLFsxMTQuMjE2LC0yNS43ODZdLFsxMTMuNzIxLC0yNC45OTldLFsxMTMuNjI1LC0yNC42ODRdLFsxMTMuMzk0LC0yNC4zODVdLFsxMTMuNTAyLC0yMy44MDZdLFsxMTMuNzA3LC0yMy41Nl0sWzExMy44NDMsLTIzLjA2XSxbMTEzLjczNywtMjIuNDc1XSxbMTE0LjE1LC0yMS43NTZdLFsxMTQuMjI1LC0yMi41MTddLFsxMTQuNjQ4LC0yMS44M10sWzExNS40NiwtMjEuNDk1XSxbMTE1Ljk0NywtMjEuMDY5XSxbMTE2LjcxMiwtMjAuNzAyXSxbMTE3LjE2NiwtMjAuNjI0XSxbMTE3LjQ0MiwtMjAuNzQ3XSxbMTE4LjIzLC0yMC4zNzRdLFsxMTguODM2LC0yMC4yNjNdLFsxMTguOTg4LC0yMC4wNDRdLFsxMTkuMjUyLC0xOS45NTNdLFsxMTkuODA1LC0xOS45NzddLFsxMjAuODU2LC0xOS42ODRdLFsxMjEuNCwtMTkuMjRdLFsxMjEuNjU1LC0xOC43MDVdLFsxMjIuMjQyLC0xOC4xOThdLFsxMjIuMjg3LC0xNy43OTldLFsxMjIuMzEzLC0xNy4yNTVdLFsxMjMuMDEzLC0xNi40MDVdLFsxMjMuNDM0LC0xNy4yNjldLFsxMjMuODU5LC0xNy4wNjldLFsxMjMuNTAzLC0xNi41OTddLFsxMjMuODE3LC0xNi4xMTFdLFsxMjQuMjU4LC0xNi4zMjhdLFsxMjQuMzgsLTE1LjU2N10sWzEyNC45MjYsLTE1LjA3NV0sWzEyNS4xNjcsLTE0LjY4XSxbMTI1LjY3LC0xNC41MV0sWzEyNS42ODYsLTE0LjIzMV0sWzEyNi4xMjUsLTE0LjM0N10sWzEyNi4xNDMsLTE0LjA5Nl0sWzEyNi41ODMsLTEzLjk1M10sWzEyNy4wNjYsLTEzLjgxOF0sWzEyNy44MDUsLTE0LjI3N10sWzEyOC4zNiwtMTQuODY5XSxbMTI4Ljk4NiwtMTQuODc2XSxbMTI5LjYyMSwtMTQuOTddLFsxMjkuNDEsLTE0LjQyMV0sWzEyOS44ODksLTEzLjYxOV0sWzEzMC4zMzksLTEzLjM1N10sWzEzMC4xODQsLTEzLjEwOF0sWzEzMC42MTgsLTEyLjUzNl0sWzEzMS4yMjMsLTEyLjE4NF0sWzEzMS43MzUsLTEyLjMwMl0sWzEzMi41NzUsLTEyLjExNF0sWzEzMi41NTcsLTExLjYwM10sWzEzMS44MjUsLTExLjI3NF0sWzEzMi4zNTcsLTExLjEyOV0sWzEzMy4wMiwtMTEuMzc2XSxbMTMzLjU1MSwtMTEuNzg3XSxbMTM0LjM5MywtMTIuMDQyXSxbMTM0LjY3OSwtMTEuOTQxXSxbMTM1LjI5OCwtMTIuMjQ5XSxbMTM1Ljg4MywtMTEuOTYyXSxbMTM2LjI1OCwtMTIuMDQ5XSxbMTM2LjQ5MiwtMTEuODU3XSxbMTM2Ljk1MiwtMTIuMzUyXSxbMTM2LjY4NSwtMTIuODg3XSxbMTM2LjMwNSwtMTMuMjkxXSxbMTM1Ljk2MiwtMTMuMzI1XSxbMTM2LjA3OCwtMTMuNzI0XSxbMTM1Ljc4NCwtMTQuMjI0XSxbMTM1LjQyOSwtMTQuNzE1XSxbMTM1LjUsLTE0Ljk5OF0sWzEzNi4yOTUsLTE1LjU1XSxbMTM3LjA2NSwtMTUuODcxXSxbMTM3LjU4LC0xNi4yMTVdLFsxMzguMzAzLC0xNi44MDhdLFsxMzguNTg1LC0xNi44MDddLFsxMzkuMTA5LC0xNy4wNjNdLFsxMzkuMjYxLC0xNy4zNzJdLFsxNDAuMjE1LC0xNy43MTFdLFsxNDAuODc1LC0xNy4zNjldLFsxNDEuMDcxLC0xNi44MzJdLFsxNDEuMjc0LC0xNi4zODldLFsxNDEuMzk4LC0xNS44NDFdLFsxNDEuNzAyLC0xNS4wNDVdLFsxNDEuNTYzLC0xNC41NjFdLFsxNDEuNjM2LC0xNC4yN10sWzE0MS41MiwtMTMuNjk4XSxbMTQxLjY1MSwtMTIuOTQ1XSxbMTQxLjg0MywtMTIuNzQyXSxbMTQxLjY4NywtMTIuNDA4XSxbMTQxLjkyOSwtMTEuODc3XSxbMTQyLjExOCwtMTEuMzI4XSxbMTQyLjE0NCwtMTEuMDQzXSxbMTQyLjUxNSwtMTAuNjY4XSxbMTQyLjc5NywtMTEuMTU3XSxbMTQyLjg2NywtMTEuNzg1XSxbMTQzLjExNiwtMTEuOTA2XSxbMTQzLjE1OSwtMTIuMzI2XSxbMTQzLjUyMiwtMTIuODM0XSxbMTQzLjU5NywtMTMuNF0sWzE0My41NjIsLTEzLjc2NF1dLFtbMTYyLjExOSwtMTAuNDgzXSxbMTYyLjM5OSwtMTAuODI2XSxbMTYxLjcsLTEwLjgyXSxbMTYxLjMyLC0xMC4yMDVdLFsxNjEuOTE3LC0xMC40NDddLFsxNjIuMTE5LC0xMC40ODNdXSxbWzEyMC43MTYsLTEwLjI0XSxbMTIwLjI5NSwtMTAuMjU5XSxbMTE4Ljk2OCwtOS41NThdLFsxMTkuOSwtOS4zNjFdLFsxMjAuNDI2LC05LjY2Nl0sWzEyMC43NzYsLTkuOTddLFsxMjAuNzE2LC0xMC4yNF1dLFtbMTYwLjg1MiwtOS44NzNdLFsxNjAuNDYzLC05Ljg5NV0sWzE1OS44NDksLTkuNzk0XSxbMTU5LjY0LC05LjY0XSxbMTU5LjcwMywtOS4yNDNdLFsxNjAuMzYzLC05LjRdLFsxNjAuNjg5LC05LjYxXSxbMTYwLjg1MiwtOS44NzNdXSxbWzE2MS42OCwtOS42XSxbMTYxLjUyOSwtOS43ODRdLFsxNjAuNzg4LC04LjkxOF0sWzE2MC41OCwtOC4zMl0sWzE2MC45MiwtOC4zMl0sWzE2MS4yOCwtOS4xMl0sWzE2MS42OCwtOS42XV0sW1sxMjQuNDM2LC0xMC4xNF0sWzEyMy41OCwtMTAuMzZdLFsxMjMuNDYsLTEwLjI0XSxbMTIzLjU1LC05LjldLFsxMjMuOTgsLTkuMjldLFsxMjQuOTY5LC04Ljg5M10sWzEyNS4wODYsLTguNjU3XSxbMTI1Ljk0NywtOC40MzJdLFsxMjYuNjQ1LC04LjM5OF0sWzEyNi45NTcsLTguMjczXSxbMTI3LjMzNiwtOC4zOTddLFsxMjYuOTY4LC04LjY2OF0sWzEyNS45MjYsLTkuMTA2XSxbMTI1LjA4OSwtOS4zOTNdLFsxMjQuNDM2LC0xMC4xNF1dLFtbMTE3LjksLTguMDk2XSxbMTE4LjI2MSwtOC4zNjJdLFsxMTguODc4LC04LjI4MV0sWzExOS4xMjcsLTguNzA2XSxbMTE3Ljk3LC04LjkwN10sWzExNy4yNzgsLTkuMDQxXSxbMTE2Ljc0LC05LjAzM10sWzExNy4wODQsLTguNDU3XSxbMTE3LjYzMiwtOC40NDldLFsxMTcuOSwtOC4wOTZdXSxbWzEyMi45MDQsLTguMDk0XSxbMTIyLjc1NywtOC42NV0sWzEyMS4yNTQsLTguOTM0XSxbMTE5LjkyNCwtOC44MV0sWzExOS45MjEsLTguNDQ1XSxbMTIwLjcxNSwtOC4yMzddLFsxMjEuMzQyLC04LjUzN10sWzEyMi4wMDcsLTguNDYxXSxbMTIyLjkwNCwtOC4wOTRdXSxbWzE1OS44NzUsLTguMzM3XSxbMTU5LjkxNywtOC41MzhdLFsxNTkuMTM0LC04LjExNF0sWzE1OC41ODYsLTcuNzU1XSxbMTU4LjIxMSwtNy40MjJdLFsxNTguMzYsLTcuMzJdLFsxNTguODIsLTcuNTZdLFsxNTkuNjQsLTguMDJdLFsxNTkuODc1LC04LjMzN11dLFtbMTU3LjUzOCwtNy4zNDhdLFsxNTcuMzM5LC03LjQwNV0sWzE1Ni45MDIsLTcuMTc3XSxbMTU2LjQ5MSwtNi43NjZdLFsxNTYuNTQzLC02LjU5OV0sWzE1Ny4xNCwtNy4wMjJdLFsxNTcuNTM4LC03LjM0OF1dLFtbMTA4LjYyMywtNi43NzhdLFsxMTAuNTM5LC02Ljg3N10sWzExMC43NiwtNi40NjVdLFsxMTIuNjE1LC02Ljk0Nl0sWzExMi45NzksLTcuNTk0XSxbMTE0LjQ3OSwtNy43NzddLFsxMTUuNzA2LC04LjM3MV0sWzExNC41NjUsLTguNzUyXSxbMTEzLjQ2NSwtOC4zNDldLFsxMTIuNTYsLTguMzc2XSxbMTExLjUyMiwtOC4zMDJdLFsxMTAuNTg2LC04LjEyM10sWzEwOS40MjgsLTcuNzQxXSxbMTA4LjY5NCwtNy42NDJdLFsxMDguMjc4LC03Ljc2N10sWzEwNi40NTQsLTcuMzU1XSxbMTA2LjI4MSwtNi45MjVdLFsxMDUuMzY1LC02Ljg1MV0sWzEwNi4wNTIsLTUuODk2XSxbMTA3LjI2NSwtNS45NTVdLFsxMDguMDcyLC02LjM0Nl0sWzEwOC40ODcsLTYuNDIyXSxbMTA4LjYyMywtNi43NzhdXSxbWzEzNC43MjUsLTYuMjE0XSxbMTM0LjIxLC02Ljg5NV0sWzEzNC4xMTMsLTYuMTQyXSxbMTM0LjI5LC01Ljc4M10sWzEzNC41LC01LjQ0NV0sWzEzNC43MjcsLTUuNzM4XSxbMTM0LjcyNSwtNi4yMTRdXSxbWzE1NS44OCwtNi44Ml0sWzE1NS42LC02LjkyXSxbMTU1LjE2NywtNi41MzZdLFsxNTQuNzI5LC01LjkwMV0sWzE1NC41MTQsLTUuMTM5XSxbMTU0LjY1MywtNS4wNDJdLFsxNTQuNzYsLTUuMzRdLFsxNTUuMDYzLC01LjU2N10sWzE1NS41NDgsLTYuMjAxXSxbMTU2LjAyLC02LjU0XSxbMTU1Ljg4LC02LjgyXV0sW1sxNTEuOTgzLC01LjQ3OF0sWzE1MS40NTksLTUuNTZdLFsxNTEuMzAxLC01Ljg0MV0sWzE1MC43NTQsLTYuMDg0XSxbMTUwLjI0MSwtNi4zMThdLFsxNDkuNzEsLTYuMzE3XSxbMTQ4Ljg5LC02LjAyNl0sWzE0OC4zMTksLTUuNzQ3XSxbMTQ4LjQwMiwtNS40MzhdLFsxNDkuMjk4LC01LjU4NF0sWzE0OS44NDYsLTUuNTA2XSxbMTQ5Ljk5NiwtNS4wMjZdLFsxNTAuMTQsLTUuMDAxXSxbMTUwLjIzNywtNS41MzJdLFsxNTAuODA3LC01LjQ1Nl0sWzE1MS4wOSwtNS4xMTRdLFsxNTEuNjQ4LC00Ljc1N10sWzE1MS41MzgsLTQuMTY4XSxbMTUyLjEzNywtNC4xNDldLFsxNTIuMzM5LC00LjMxM10sWzE1Mi4zMTksLTQuODY4XSxbMTUxLjk4MywtNS40NzhdXSxbWzEyNy4yNDksLTMuNDU5XSxbMTI2Ljg3NSwtMy43OTFdLFsxMjYuMTg0LC0zLjYwN10sWzEyNS45ODksLTMuMTc3XSxbMTI3LjAwMSwtMy4xMjldLFsxMjcuMjQ5LC0zLjQ1OV1dLFtbMTMwLjQ3MSwtMy4wOTRdLFsxMzAuODM1LC0zLjg1OF0sWzEyOS45OTEsLTMuNDQ2XSxbMTI5LjE1NSwtMy4zNjNdLFsxMjguNTkxLC0zLjQyOV0sWzEyNy44OTksLTMuMzkzXSxbMTI4LjEzNiwtMi44NDRdLFsxMjkuMzcxLC0yLjgwMl0sWzEzMC40NzEsLTMuMDk0XV0sW1sxNTMuMTQsLTQuNV0sWzE1Mi44MjcsLTQuNzY2XSxbMTUyLjYzOSwtNC4xNzZdLFsxNTIuNDA2LC0zLjc5XSxbMTUxLjk1MywtMy40NjJdLFsxNTEuMzg0LC0zLjAzNV0sWzE1MC42NjIsLTIuNzQxXSxbMTUwLjk0LC0yLjVdLFsxNTEuNDgsLTIuNzhdLFsxNTEuODIsLTMuMF0sWzE1Mi4yNCwtMy4yNF0sWzE1Mi42NCwtMy42Nl0sWzE1My4wMiwtMy45OF0sWzE1My4xNCwtNC41XV0sW1sxMzQuMTQzLC0xLjE1Ml0sWzEzNC40MjMsLTIuNzY5XSxbMTM1LjQ1OCwtMy4zNjhdLFsxMzYuMjkzLC0yLjMwN10sWzEzNy40NDEsLTEuNzA0XSxbMTM4LjMzLC0xLjcwM10sWzEzOS4xODUsLTIuMDUxXSxbMTM5LjkyNywtMi40MDldLFsxNDEuMCwtMi42XSxbMTQyLjczNSwtMy4yODldLFsxNDQuNTg0LC0zLjg2MV0sWzE0NS4yNzMsLTQuMzc0XSxbMTQ1LjgzLC00Ljg3Nl0sWzE0NS45ODIsLTUuNDY2XSxbMTQ3LjY0OCwtNi4wODRdLFsxNDcuODkxLC02LjYxNF0sWzE0Ni45NzEsLTYuNzIyXSxbMTQ3LjE5MiwtNy4zODhdLFsxNDguMDg1LC04LjA0NF0sWzE0OC43MzQsLTkuMTA1XSxbMTQ5LjMwNywtOS4wNzFdLFsxNDkuMjY3LC05LjUxNF0sWzE1MC4wMzksLTkuNjg0XSxbMTQ5LjczOSwtOS44NzNdLFsxNTAuODAyLC0xMC4yOTRdLFsxNTAuNjkxLC0xMC41ODNdLFsxNTAuMDI4LC0xMC42NTJdLFsxNDkuNzgyLC0xMC4zOTNdLFsxNDguOTIzLC0xMC4yODFdLFsxNDcuOTEzLC0xMC4xM10sWzE0Ny4xMzUsLTkuNDkyXSxbMTQ2LjU2OCwtOC45NDNdLFsxNDYuMDQ4LC04LjA2N10sWzE0NC43NDQsLTcuNjNdLFsxNDMuODk3LC03LjkxNV0sWzE0My4yODYsLTguMjQ1XSxbMTQzLjQxNCwtOC45ODNdLFsxNDIuNjI4LC05LjMyN10sWzE0Mi4wNjgsLTkuMTZdLFsxNDEuMDM0LC05LjExOF0sWzE0MC4xNDMsLTguMjk3XSxbMTM5LjEyOCwtOC4wOTZdLFsxMzguODgxLC04LjM4MV0sWzEzNy42MTQsLTguNDEyXSxbMTM4LjAzOSwtNy41OThdLFsxMzguNjY5LC03LjMyXSxbMTM4LjQwOCwtNi4yMzNdLFsxMzcuOTI4LC01LjM5M10sWzEzNS45ODksLTQuNTQ3XSxbMTM1LjE2NSwtNC40NjNdLFsxMzMuNjYzLC0zLjUzOV0sWzEzMy4zNjgsLTQuMDI1XSxbMTMyLjk4NCwtNC4xMTNdLFsxMzIuNzU3LC0zLjc0Nl0sWzEzMi43NTQsLTMuMzEyXSxbMTMxLjk5LC0yLjgyMV0sWzEzMy4wNjcsLTIuNDZdLFsxMzMuNzgsLTIuNDhdLFsxMzMuNjk2LC0yLjIxNV0sWzEzMi4yMzIsLTIuMjEzXSxbMTMxLjgzNiwtMS42MTddLFsxMzAuOTQzLC0xLjQzM10sWzEzMC41MiwtMC45MzhdLFsxMzEuODY4LC0wLjY5NV0sWzEzMi4zOCwtMC4zN10sWzEzMy45ODYsLTAuNzhdLFsxMzQuMTQzLC0xLjE1Ml1dLFtbMTI1LjI0MSwxLjQyXSxbMTI0LjQzNywwLjQyOF0sWzEyMy42ODYsMC4yMzZdLFsxMjIuNzIzLDAuNDMxXSxbMTIxLjA1NywwLjM4MV0sWzEyMC4xODMsMC4yMzddLFsxMjAuMDQxLC0wLjUyXSxbMTIwLjkzNiwtMS40MDldLFsxMjEuNDc2LC0wLjk1Nl0sWzEyMy4zNDEsLTAuNjE2XSxbMTIzLjI1OCwtMS4wNzZdLFsxMjIuODIzLC0wLjkzMV0sWzEyMi4zODksLTEuNTE3XSxbMTIxLjUwOCwtMS45MDRdLFsxMjIuNDU1LC0zLjE4Nl0sWzEyMi4yNzIsLTMuNTNdLFsxMjMuMTcxLC00LjY4NF0sWzEyMy4xNjIsLTUuMzQxXSxbMTIyLjYyOSwtNS42MzVdLFsxMjIuMjM2LC01LjI4M10sWzEyMi43MiwtNC40NjRdLFsxMjEuNzM4LC00Ljg1MV0sWzEyMS40ODksLTQuNTc1XSxbMTIxLjYxOSwtNC4xODhdLFsxMjAuODk4LC0zLjYwMl0sWzEyMC45NzIsLTIuNjI4XSxbMTIwLjMwNSwtMi45MzJdLFsxMjAuMzksLTQuMDk4XSxbMTIwLjQzMSwtNS41MjhdLFsxMTkuNzk3LC01LjY3M10sWzExOS4zNjcsLTUuMzhdLFsxMTkuNjU0LC00LjQ1OV0sWzExOS40OTksLTMuNDk0XSxbMTE5LjA3OCwtMy40ODddLFsxMTguNzY4LC0yLjgwMl0sWzExOS4xODEsLTIuMTQ3XSxbMTE5LjMyMywtMS4zNTNdLFsxMTkuODI2LDAuMTU0XSxbMTIwLjAzNiwwLjU2Nl0sWzEyMC44ODYsMS4zMDldLFsxMjEuNjY3LDEuMDE0XSxbMTIyLjkyOCwwLjg3NV0sWzEyNC4wNzgsMC45MTddLFsxMjUuMDY2LDEuNjQzXSxbMTI1LjI0MSwxLjQyXV0sW1sxMjguNjg4LDEuMTMyXSxbMTI4LjYzNiwwLjI1OF0sWzEyOC4xMiwwLjM1Nl0sWzEyNy45NjgsLTAuMjUyXSxbMTI4LjM4LC0wLjc4XSxbMTI4LjEsLTAuOV0sWzEyNy42OTYsLTAuMjY3XSxbMTI3LjM5OSwxLjAxMl0sWzEyNy42MDEsMS44MTFdLFsxMjcuOTMyLDIuMTc1XSxbMTI4LjAwNCwxLjYyOV0sWzEyOC41OTUsMS41NDFdLFsxMjguNjg4LDEuMTMyXV0sW1sxMDUuODE4LC01Ljg1Ml0sWzEwNC43MSwtNS44NzNdLFsxMDMuODY4LC01LjAzN10sWzEwMi41ODQsLTQuMjJdLFsxMDIuMTU2LC0zLjYxNF0sWzEwMS4zOTksLTIuOF0sWzEwMC45MDMsLTIuMDVdLFsxMDAuMTQyLC0wLjY1XSxbOTkuMjY0LDAuMTgzXSxbOTguOTcsMS4wNDNdLFs5OC42MDEsMS44MjRdLFs5Ny43LDIuNDUzXSxbOTcuMTc3LDMuMzA5XSxbOTYuNDI0LDMuODY5XSxbOTUuMzgxLDQuOTcxXSxbOTUuMjkzLDUuNDhdLFs5NS45MzcsNS40NF0sWzk3LjQ4NSw1LjI0Nl0sWzk4LjM2OSw0LjI2OF0sWzk5LjE0MywzLjU5XSxbOTkuNjk0LDMuMTc0XSxbMTAwLjY0MSwyLjA5OV0sWzEwMS42NTgsMi4wODRdLFsxMDIuNDk4LDEuMzk5XSxbMTAzLjA3NywwLjU2MV0sWzEwMy44MzgsMC4xMDVdLFsxMDMuNDM4LC0wLjcxMl0sWzEwNC4wMTEsLTEuMDU5XSxbMTA0LjM3LC0xLjA4NV0sWzEwNC41MzksLTEuNzgyXSxbMTA0Ljg4OCwtMi4zNF0sWzEwNS42MjIsLTIuNDI5XSxbMTA2LjEwOSwtMy4wNjJdLFsxMDUuODU3LC00LjMwNl0sWzEwNS44MTgsLTUuODUyXV0sW1sxMTcuODc2LDEuODI4XSxbMTE4Ljk5NywwLjkwMl0sWzExNy44MTIsMC43ODRdLFsxMTcuNDc4LDAuMTAyXSxbMTE3LjUyMiwtMC44MDRdLFsxMTYuNTYsLTEuNDg4XSxbMTE2LjUzNCwtMi40ODRdLFsxMTYuMTQ4LC00LjAxM10sWzExNi4wMDEsLTMuNjU3XSxbMTE0Ljg2NSwtNC4xMDddLFsxMTQuNDY5LC0zLjQ5Nl0sWzExMy43NTYsLTMuNDM5XSxbMTEzLjI1NywtMy4xMTldLFsxMTIuMDY4LC0zLjQ3OF0sWzExMS43MDMsLTIuOTk0XSxbMTExLjA0OCwtMy4wNDldLFsxMTAuMjI0LC0yLjkzNF0sWzExMC4wNzEsLTEuNTkzXSxbMTA5LjU3MiwtMS4zMTVdLFsxMDkuMDkyLC0wLjQ2XSxbMTA4Ljk1MywwLjQxNV0sWzEwOS4wNjksMS4zNDJdLFsxMDkuNjYzLDIuMDA2XSxbMTEwLjM5NiwxLjY2NF0sWzExMS4xNjksMS44NTFdLFsxMTEuMzcsMi42OTddLFsxMTEuNzk3LDIuODg2XSxbMTEyLjk5NiwzLjEwMl0sWzExMy43MTMsMy44OTRdLFsxMTQuMjA0LDQuNTI2XSxbMTE0LjYsNC45XSxbMTE1LjQ1MSw1LjQ0OF0sWzExNi4yMjEsNi4xNDNdLFsxMTYuNzI1LDYuOTI1XSxbMTE3LjEzLDYuOTI4XSxbMTE3LjY0Myw2LjQyMl0sWzExNy42ODksNS45ODddLFsxMTguMzQ4LDUuNzA5XSxbMTE5LjE4Miw1LjQwOF0sWzExOS4xMTEsNS4wMTZdLFsxMTguNDQsNC45NjddLFsxMTguNjE4LDQuNDc4XSxbMTE3Ljg4Miw0LjEzOF0sWzExNy4zMTMsMy4yMzRdLFsxMTguMDQ4LDIuMjg4XSxbMTE3Ljg3NiwxLjgyOF1dLFtbMTI2LjM3Nyw4LjQxNV0sWzEyNi40NzksNy43NV0sWzEyNi41MzcsNy4xODldLFsxMjYuMTk3LDYuMjc0XSxbMTI1LjgzMSw3LjI5NF0sWzEyNS4zNjQsNi43ODZdLFsxMjUuNjgzLDYuMDVdLFsxMjUuMzk3LDUuNTgxXSxbMTI0LjIyLDYuMTYxXSxbMTIzLjkzOSw2Ljg4NV0sWzEyNC4yNDQsNy4zNjFdLFsxMjMuNjEsNy44MzRdLFsxMjMuMjk2LDcuNDE5XSxbMTIyLjgyNiw3LjQ1N10sWzEyMi4wODUsNi44OTldLFsxMjEuOTIsNy4xOTJdLFsxMjIuMzEyLDguMDM1XSxbMTIyLjk0Miw4LjMxNl0sWzEyMy40ODgsOC42OTNdLFsxMjMuODQxLDguMjRdLFsxMjQuNjAxLDguNTE0XSxbMTI0Ljc2NSw4Ljk2XSxbMTI1LjQ3MSw4Ljk4N10sWzEyNS40MTIsOS43Nl0sWzEyNi4yMjMsOS4yODZdLFsxMjYuMzA3LDguNzgyXSxbMTI2LjM3Nyw4LjQxNV1dLFtbODEuMjE4LDYuMTk3XSxbODAuMzQ4LDUuOTY4XSxbNzkuODcyLDYuNzYzXSxbNzkuNjk1LDguMjAxXSxbODAuMTQ4LDkuODI0XSxbODAuODM5LDkuMjY4XSxbODEuMzA0LDguNTY0XSxbODEuNzg4LDcuNTIzXSxbODEuNjM3LDYuNDgyXSxbODEuMjE4LDYuMTk3XV0sW1stNjAuOTM1LDEwLjExXSxbLTYxLjc3LDEwXSxbLTYxLjk1LDEwLjA5XSxbLTYxLjY2LDEwLjM2NV0sWy02MS42OCwxMC43Nl0sWy02MS4xMDUsMTAuODldLFstNjAuODk1LDEwLjg1NV0sWy02MC45MzUsMTAuMTFdXSxbWzEyMy45ODIsMTAuMjc5XSxbMTIzLjYyMyw5Ljk1XSxbMTIzLjMxLDkuMzE4XSxbMTIyLjk5Niw5LjAyMl0sWzEyMi4zOCw5LjcxM10sWzEyMi41ODYsOS45ODFdLFsxMjIuODM3LDEwLjI2MV0sWzEyMi45NDcsMTAuODgyXSxbMTIzLjQ5OSwxMC45NDFdLFsxMjMuMzM4LDEwLjI2N10sWzEyNC4wNzgsMTEuMjMzXSxbMTIzLjk4MiwxMC4yNzldXSxbWzExOC41MDUsOS4zMTZdLFsxMTcuMTc0LDguMzY3XSxbMTE3LjY2NCw5LjA2N10sWzExOC4zODcsOS42ODRdLFsxMTguOTg3LDEwLjM3Nl0sWzExOS41MTEsMTEuMzddLFsxMTkuNjksMTAuNTU0XSxbMTE5LjAyOSwxMC4wMDRdLFsxMTguNTA1LDkuMzE2XV0sW1sxMjEuODg0LDExLjg5Ml0sWzEyMi40ODQsMTEuNTgyXSxbMTIzLjEyLDExLjU4NF0sWzEyMy4xMDEsMTEuMTY2XSxbMTIyLjYzOCwxMC43NDFdLFsxMjIuMDAzLDEwLjQ0MV0sWzEyMS45NjcsMTAuOTA2XSxbMTIyLjAzOCwxMS40MTZdLFsxMjEuODg0LDExLjg5Ml1dLFtbMTI1LjUwMywxMi4xNjNdLFsxMjUuNzgzLDExLjA0Nl0sWzEyNS4wMTIsMTEuMzExXSxbMTI1LjAzMywxMC45NzZdLFsxMjUuMjc3LDEwLjM1OV0sWzEyNC44MDIsMTAuMTM1XSxbMTI0Ljc2LDEwLjgzOF0sWzEyNC40NTksMTAuODldLFsxMjQuMzAzLDExLjQ5NV0sWzEyNC44OTEsMTEuNDE2XSxbMTI0Ljg3OCwxMS43OTRdLFsxMjQuMjY3LDEyLjU1OF0sWzEyNS4yMjcsMTIuNTM2XSxbMTI1LjUwMywxMi4xNjNdXSxbWzEyMS41MjcsMTMuMDddLFsxMjEuMjYyLDEyLjIwNl0sWzEyMC44MzQsMTIuNzA0XSxbMTIwLjMyMywxMy40NjZdLFsxMjEuMTgsMTMuNDNdLFsxMjEuNTI3LDEzLjA3XV0sW1sxMjEuMzIxLDE4LjUwNF0sWzEyMS45MzgsMTguMjE5XSxbMTIyLjI0NiwxOC40NzldLFsxMjIuMzM3LDE4LjIyNV0sWzEyMi4xNzQsMTcuODFdLFsxMjIuNTE2LDE3LjA5NF0sWzEyMi4yNTIsMTYuMjYyXSxbMTIxLjY2MywxNS45MzFdLFsxMjEuNTA1LDE1LjEyNV0sWzEyMS43MjksMTQuMzI4XSxbMTIyLjI1OSwxNC4yMThdLFsxMjIuNzAxLDE0LjMzN10sWzEyMy45NSwxMy43ODJdLFsxMjMuODU1LDEzLjIzOF0sWzEyNC4xODEsMTIuOTk4XSxbMTI0LjA3NywxMi41MzddLFsxMjMuMjk4LDEzLjAyOF0sWzEyMi45MjksMTMuNTUzXSxbMTIyLjY3MSwxMy4xODZdLFsxMjIuMDM1LDEzLjc4NF0sWzEyMS4xMjYsMTMuNjM3XSxbMTIwLjYyOSwxMy44NThdLFsxMjAuNjc5LDE0LjI3MV0sWzEyMC45OTIsMTQuNTI1XSxbMTIwLjY5MywxNC43NTddLFsxMjAuNTY0LDE0LjM5Nl0sWzEyMC4wNywxNC45NzFdLFsxMTkuOTIxLDE1LjQwNl0sWzExOS44ODQsMTYuMzY0XSxbMTIwLjI4NiwxNi4wMzVdLFsxMjAuMzksMTcuNTk5XSxbMTIwLjcxNiwxOC41MDVdLFsxMjEuMzIxLDE4LjUwNF1dLFtbLTY1LjU5MSwxOC4yMjhdLFstNjUuODQ3LDE3Ljk3Nl0sWy02Ni42LDE3Ljk4Ml0sWy02Ny4xODQsMTcuOTQ3XSxbLTY3LjI0MiwxOC4zNzRdLFstNjcuMTAxLDE4LjUyMV0sWy02Ni4yODIsMTguNTE1XSxbLTY1Ljc3MSwxOC40MjddLFstNjUuNTkxLDE4LjIyOF1dLFtbLTc2LjkwMywxNy44NjhdLFstNzcuMjA2LDE3LjcwMV0sWy03Ny43NjYsMTcuODYyXSxbLTc4LjMzOCwxOC4yMjZdLFstNzguMjE4LDE4LjQ1NV0sWy03Ny43OTcsMTguNTI0XSxbLTc3LjU3LDE4LjQ5MV0sWy03Ni44OTcsMTguNDAxXSxbLTc2LjM2NSwxOC4xNjFdLFstNzYuMiwxNy44ODddLFstNzYuOTAzLDE3Ljg2OF1dLFtbLTcyLjU4LDE5Ljg3Ml0sWy03MS43MTIsMTkuNzE0XSxbLTcxLjU4NywxOS44ODVdLFstNzAuODA3LDE5Ljg4XSxbLTcwLjIxNCwxOS42MjNdLFstNjkuOTUxLDE5LjY0OF0sWy02OS43NjksMTkuMjkzXSxbLTY5LjIyMiwxOS4zMTNdLFstNjkuMjU0LDE5LjAxNV0sWy02OC44MDksMTguOTc5XSxbLTY4LjMxOCwxOC42MTJdLFstNjguNjg5LDE4LjIwNV0sWy02OS4xNjUsMTguNDIzXSxbLTY5LjYyNCwxOC4zODFdLFstNjkuOTUzLDE4LjQyOF0sWy03MC4xMzMsMTguMjQ2XSxbLTcwLjUxNywxOC4xODRdLFstNzAuNjY5LDE4LjQyN10sWy03MS4wLDE4LjI4M10sWy03MS40LDE3LjU5OV0sWy03MS42NTgsMTcuNzU4XSxbLTcxLjcwOCwxOC4wNDVdLFstNzIuMzcyLDE4LjIxNV0sWy03Mi44NDQsMTguMTQ2XSxbLTczLjQ1NSwxOC4yMThdLFstNzMuOTIyLDE4LjAzMV0sWy03NC40NTgsMTguMzQzXSxbLTc0LjM3LDE4LjY2NV0sWy03My40NSwxOC41MjZdLFstNzIuNjk1LDE4LjQ0Nl0sWy03Mi4zMzUsMTguNjY4XSxbLTcyLjc5MiwxOS4xMDJdLFstNzIuNzg0LDE5LjQ4NF0sWy03My40MTUsMTkuNjRdLFstNzMuMTksMTkuOTE2XSxbLTcyLjU4LDE5Ljg3Ml1dLFtbMTEwLjMzOSwxOC42NzhdLFsxMDkuNDc1LDE4LjE5OF0sWzEwOC42NTUsMTguNTA4XSxbMTA4LjYyNiwxOS4zNjhdLFsxMDkuMTE5LDE5LjgyMV0sWzExMC4yMTIsMjAuMTAxXSxbMTEwLjc4NywyMC4wNzhdLFsxMTEuMDEsMTkuNjk2XSxbMTEwLjU3MSwxOS4yNTZdLFsxMTAuMzM5LDE4LjY3OF1dLFtbLTE1NS41NDIsMTkuMDgzXSxbLTE1NS42ODgsMTguOTE2XSxbLTE1NS45MzcsMTkuMDU5XSxbLTE1NS45MDgsMTkuMzM5XSxbLTE1Ni4wNzMsMTkuNzAzXSxbLTE1Ni4wMjQsMTkuODE0XSxbLTE1NS44NSwxOS45NzddLFstMTU1LjkxOSwyMC4xNzRdLFstMTU1Ljg2MSwyMC4yNjddLFstMTU1Ljc4NSwyMC4yNDldLFstMTU1LjQwMiwyMC4wOF0sWy0xNTUuMjI1LDE5Ljk5M10sWy0xNTUuMDYyLDE5Ljg1OV0sWy0xNTQuODA3LDE5LjUwOV0sWy0xNTQuODMxLDE5LjQ1M10sWy0xNTUuMjIyLDE5LjI0XSxbLTE1NS41NDIsMTkuMDgzXV0sW1stMTU2LjA3OSwyMC42NDRdLFstMTU2LjQxNCwyMC41NzJdLFstMTU2LjU4NywyMC43ODNdLFstMTU2LjcwMiwyMC44NjRdLFstMTU2LjcxMSwyMC45MjddLFstMTU2LjYxMywyMS4wMTJdLFstMTU2LjI1NywyMC45MTddLFstMTU1Ljk5NiwyMC43NjRdLFstMTU2LjA3OSwyMC42NDRdXSxbWy0xNTYuNzU4LDIxLjE3N10sWy0xNTYuNzg5LDIxLjA2OV0sWy0xNTcuMzI1LDIxLjA5OF0sWy0xNTcuMjUsMjEuMjJdLFstMTU2Ljc1OCwyMS4xNzddXSxbWy0xNTcuNjUzLDIxLjMyMl0sWy0xNTcuNzA3LDIxLjI2NF0sWy0xNTcuNzc5LDIxLjI3N10sWy0xNTguMTI3LDIxLjMxMl0sWy0xNTguMjU0LDIxLjUzOV0sWy0xNTguMjkzLDIxLjU3OV0sWy0xNTguMDI1LDIxLjcxN10sWy0xNTcuOTQyLDIxLjY1M10sWy0xNTcuNjUzLDIxLjMyMl1dLFtbLTE1OS4zNDUsMjEuOTgyXSxbLTE1OS40NjQsMjEuODgzXSxbLTE1OS44MDEsMjIuMDY1XSxbLTE1OS43NDksMjIuMTM4XSxbLTE1OS41OTYsMjIuMjM2XSxbLTE1OS4zNjYsMjIuMjE1XSxbLTE1OS4zNDUsMjEuOTgyXV0sW1stNzkuNjgsMjIuNzY1XSxbLTc5LjI4MSwyMi4zOTldLFstNzguMzQ3LDIyLjUxMl0sWy03Ny45OTMsMjIuMjc3XSxbLTc3LjE0NiwyMS42NThdLFstNzYuNTI0LDIxLjIwN10sWy03Ni4xOTUsMjEuMjIxXSxbLTc1LjU5OCwyMS4wMTddLFstNzUuNjcxLDIwLjczNV0sWy03NC45MzQsMjAuNjk0XSxbLTc0LjE3OCwyMC4yODVdLFstNzQuMjk3LDIwLjA1XSxbLTc0Ljk2MiwxOS45MjNdLFstNzUuNjM1LDE5Ljg3NF0sWy03Ni4zMjQsMTkuOTUzXSxbLTc3Ljc1NSwxOS44NTVdLFstNzcuMDg1LDIwLjQxM10sWy03Ny40OTMsMjAuNjczXSxbLTc4LjEzNywyMC43NF0sWy03OC40ODMsMjEuMDI5XSxbLTc4LjcyLDIxLjU5OF0sWy03OS4yODUsMjEuNTU5XSxbLTgwLjIxNywyMS44MjddLFstODAuNTE4LDIyLjAzN10sWy04MS44MjEsMjIuMTkyXSxbLTgyLjE3LDIyLjM4N10sWy04MS43OTUsMjIuNjM3XSxbLTgyLjc3NiwyMi42ODhdLFstODMuNDk0LDIyLjE2OV0sWy04My45MDksMjIuMTU1XSxbLTg0LjA1MiwyMS45MTFdLFstODQuNTQ3LDIxLjgwMV0sWy04NC45NzUsMjEuODk2XSxbLTg0LjQ0NywyMi4yMDVdLFstODQuMjMsMjIuNTY2XSxbLTgzLjc3OCwyMi43ODhdLFstODMuMjY4LDIyLjk4M10sWy04Mi41MSwyMy4wNzldLFstODIuMjY4LDIzLjE4OV0sWy04MS40MDQsMjMuMTE3XSxbLTgwLjYxOSwyMy4xMDZdLFstNzkuNjgsMjIuNzY1XV0sW1stNzcuNTM1LDIzLjc2XSxbLTc3Ljc4LDIzLjcxXSxbLTc4LjAzNCwyNC4yODZdLFstNzguNDA4LDI0LjU3Nl0sWy03OC4xOTEsMjUuMjFdLFstNzcuODksMjUuMTddLFstNzcuNTQsMjQuMzRdLFstNzcuNTM1LDIzLjc2XV0sW1sxMjEuMTc2LDIyLjc5MV0sWzEyMC43NDcsMjEuOTcxXSxbMTIwLjIyLDIyLjgxNV0sWzEyMC4xMDYsMjMuNTU2XSxbMTIwLjY5NSwyNC41MzhdLFsxMjEuNDk1LDI1LjI5NV0sWzEyMS45NTEsMjQuOTk4XSxbMTIxLjc3OCwyNC4zOTRdLFsxMjEuMTc2LDIyLjc5MV1dLFtbLTc3LjgyLDI2LjU4XSxbLTc4LjkxLDI2LjQyXSxbLTc4Ljk4LDI2Ljc5XSxbLTc4LjUxLDI2Ljg3XSxbLTc3Ljg1LDI2Ljg0XSxbLTc3LjgyLDI2LjU4XV0sW1stNzcsMjYuNTldLFstNzcuMTczLDI1Ljg3OV0sWy03Ny4zNTYsMjYuMDA3XSxbLTc3LjM0LDI2LjUzXSxbLTc3Ljc4OCwyNi45MjVdLFstNzcuNzksMjcuMDRdLFstNzcsMjYuNTldXSxbWzEzNC42MzgsMzQuMTQ5XSxbMTM0Ljc2NiwzMy44MDZdLFsxMzQuMjAzLDMzLjIwMV0sWzEzMy43OTMsMzMuNTIyXSxbMTMzLjI4LDMzLjI5XSxbMTMzLjAxNSwzMi43MDVdLFsxMzIuMzYzLDMyLjk4OV0sWzEzMi4zNzEsMzMuNDY0XSxbMTMyLjkyNCwzNC4wNl0sWzEzMy40OTMsMzMuOTQ1XSxbMTMzLjkwNCwzNC4zNjVdLFsxMzQuNjM4LDM0LjE0OV1dLFtbMzQuNTc2LDM1LjY3Ml0sWzMzLjkwMSwzNS4yNDZdLFszMy45NzQsMzUuMDU5XSxbMzQuMDA1LDM0Ljk3OF0sWzMyLjk4LDM0LjU3Ml0sWzMyLjQ5LDM0LjcwMl0sWzMyLjI1NywzNS4xMDNdLFszMi43MzIsMzUuMTRdLFszMi44MDIsMzUuMTQ2XSxbMzIuOTQ3LDM1LjM4N10sWzMzLjY2NywzNS4zNzNdLFszNC41NzYsMzUuNjcyXV0sW1syMy43LDM1LjcwNV0sWzI0LjI0NywzNS4zNjhdLFsyNS4wMjUsMzUuNDI1XSxbMjUuNzY5LDM1LjM1NF0sWzI1Ljc0NSwzNS4xOF0sWzI2LjI5LDM1LjNdLFsyNi4xNjUsMzUuMDA1XSxbMjQuNzI1LDM0LjkyXSxbMjQuNzM1LDM1LjA4NV0sWzIzLjUxNSwzNS4yOF0sWzIzLjcsMzUuNzA1XV0sW1sxNS41MiwzOC4yMzFdLFsxNS4xNiwzNy40NDRdLFsxNS4zMSwzNy4xMzRdLFsxNS4xLDM2LjYyXSxbMTQuMzM1LDM2Ljk5N10sWzEzLjgyNywzNy4xMDVdLFsxMi40MzEsMzcuNjEzXSxbMTIuNTcxLDM4LjEyNl0sWzEzLjc0MSwzOC4wMzVdLFsxNC43NjEsMzguMTQ0XSxbMTUuNTIsMzguMjMxXV0sW1s5LjIxLDQxLjIxXSxbOS44MSw0MC41XSxbOS42NywzOS4xNzddLFs5LjIxNSwzOS4yNF0sWzguODA3LDM4LjkwN10sWzguNDI4LDM5LjE3Ml0sWzguMzg4LDQwLjM3OF0sWzguMTYsNDAuOTVdLFs4LjcxLDQwLjldLFs5LjIxLDQxLjIxXV0sW1sxNDAuOTc2LDM3LjE0Ml0sWzE0MC42LDM2LjM0NF0sWzE0MC43NzQsMzUuODQzXSxbMTQwLjI1MywzNS4xMzhdLFsxMzguOTc2LDM0LjY2OF0sWzEzNy4yMTgsMzQuNjA2XSxbMTM1Ljc5MywzMy40NjVdLFsxMzUuMTIxLDMzLjg0OV0sWzEzNS4wNzksMzQuNTk3XSxbMTMzLjM0LDM0LjM3Nl0sWzEzMi4xNTcsMzMuOTA1XSxbMTMwLjk4NiwzMy44ODZdLFsxMzIuMCwzMy4xNV0sWzEzMS4zMzMsMzEuNDVdLFsxMzAuNjg2LDMxLjAzXSxbMTMwLjIwMiwzMS40MThdLFsxMzAuNDQ4LDMyLjMxOV0sWzEyOS44MTUsMzIuNjFdLFsxMjkuNDA4LDMzLjI5Nl0sWzEzMC4zNTQsMzMuNjA0XSxbMTMwLjg3OCwzNC4yMzNdLFsxMzEuODg0LDM0Ljc1XSxbMTMyLjYxOCwzNS40MzNdLFsxMzQuNjA4LDM1LjczMl0sWzEzNS42NzgsMzUuNTI3XSxbMTM2LjcyNCwzNy4zMDVdLFsxMzcuMzkxLDM2LjgyN10sWzEzOC44NTgsMzcuODI3XSxbMTM5LjQyNiwzOC4yMTZdLFsxNDAuMDU1LDM5LjQzOV0sWzEzOS44ODMsNDAuNTYzXSxbMTQwLjMwNiw0MS4xOTVdLFsxNDEuMzY5LDQxLjM3OV0sWzE0MS45MTQsMzkuOTkyXSxbMTQxLjg4NSwzOS4xODFdLFsxNDAuOTU5LDM4LjE3NF0sWzE0MC45NzYsMzcuMTQyXV0sW1s5LjU2LDQyLjE1Ml0sWzkuMjMsNDEuMzhdLFs4Ljc3Niw0MS41ODRdLFs4LjU0NCw0Mi4yNTddLFs4Ljc0Niw0Mi42MjhdLFs5LjM5LDQzLjAxXSxbOS41Niw0Mi4xNTJdXSxbWzE0My45MSw0NC4xNzRdLFsxNDQuNjEzLDQzLjk2MV0sWzE0NS4zMjEsNDQuMzg1XSxbMTQ1LjU0Myw0My4yNjJdLFsxNDQuMDYsNDIuOTg4XSxbMTQzLjE4NCw0MS45OTVdLFsxNDEuNjExLDQyLjY3OV0sWzE0MS4wNjcsNDEuNTg1XSxbMTM5Ljk1NSw0MS41N10sWzEzOS44MTgsNDIuNTY0XSxbMTQwLjMxMiw0My4zMzNdLFsxNDEuMzgxLDQzLjM4OV0sWzE0MS42NzIsNDQuNzcyXSxbMTQxLjk2OCw0NS41NTFdLFsxNDMuMTQzLDQ0LjUxXSxbMTQzLjkxLDQ0LjE3NF1dLFtbLTYzLjY2NCw0Ni41NV0sWy02Mi45MzksNDYuNDE2XSxbLTYyLjAxMiw0Ni40NDNdLFstNjIuNTA0LDQ2LjAzM10sWy02Mi44NzQsNDUuOTY4XSxbLTY0LjE0Myw0Ni4zOTNdLFstNjQuMzkzLDQ2LjcyN10sWy02NC4wMTUsNDcuMDM2XSxbLTYzLjY2NCw0Ni41NV1dLFtbLTYxLjgwNiw0OS4xMDVdLFstNjIuMjkzLDQ5LjA4N10sWy02My41ODksNDkuNDAxXSxbLTY0LjUxOSw0OS44NzNdLFstNjQuMTczLDQ5Ljk1N10sWy02Mi44NTgsNDkuNzA2XSxbLTYxLjgzNiw0OS4yODldLFstNjEuODA2LDQ5LjEwNV1dLFtbLTEyMy41MSw0OC41MV0sWy0xMjQuMDEzLDQ4LjM3MV0sWy0xMjUuNjU1LDQ4LjgyNV0sWy0xMjUuOTU1LDQ5LjE4XSxbLTEyNi44NSw0OS41M10sWy0xMjcuMDMsNDkuODE1XSxbLTEyOC4wNTksNDkuOTk1XSxbLTEyOC40NDUsNTAuNTM5XSxbLTEyOC4zNTgsNTAuNzcxXSxbLTEyNy4zMDksNTAuNTUzXSxbLTEyNi42OTUsNTAuNDAxXSxbLTEyNS43NTUsNTAuMjk1XSxbLTEyNS40MTUsNDkuOTVdLFstMTI0LjkyMSw0OS40NzVdLFstMTIzLjkyMyw0OS4wNjJdLFstMTIzLjUxLDQ4LjUxXV0sW1stNTYuMTM0LDUwLjY4N10sWy01Ni43OTYsNDkuODEyXSxbLTU2LjE0Myw1MC4xNV0sWy01NS40NzEsNDkuOTM2XSxbLTU1LjgyMiw0OS41ODddLFstNTQuOTM1LDQ5LjMxM10sWy01NC40NzQsNDkuNTU3XSxbLTUzLjQ3Nyw0OS4yNDldLFstNTMuNzg2LDQ4LjUxN10sWy01My4wODYsNDguNjg4XSxbLTUyLjk1OSw0OC4xNTddLFstNTIuNjQ4LDQ3LjUzNl0sWy01My4wNjksNDYuNjU1XSxbLTUzLjUyMSw0Ni42MThdLFstNTQuMTc5LDQ2LjgwN10sWy01My45NjIsNDcuNjI1XSxbLTU0LjI0LDQ3Ljc1Ml0sWy01NS40MDEsNDYuODg1XSxbLTU1Ljk5Nyw0Ni45Ml0sWy01NS4yOTEsNDcuMzldLFstNTYuMjUxLDQ3LjYzM10sWy01Ny4zMjUsNDcuNTczXSxbLTU5LjI2Niw0Ny42MDNdLFstNTkuNDE5LDQ3Ljg5OV0sWy01OC43OTcsNDguMjUyXSxbLTU5LjIzMiw0OC41MjNdLFstNTguMzkyLDQ5LjEyNl0sWy01Ny4zNTksNTAuNzE4XSxbLTU2LjczOSw1MS4yODddLFstNTUuODcxLDUxLjYzMl0sWy01NS40MDcsNTEuNTg4XSxbLTU1LjYsNTEuMzE3XSxbLTU2LjEzNCw1MC42ODddXSxbWy0xMzIuNzEsNTQuMDRdLFstMTMyLjcxLDU0LjA0XSxbLTEzMi43MSw1NC4wNF0sWy0xMzIuNzEsNTQuMDRdLFstMTMxLjc1LDU0LjEyXSxbLTEzMi4wNDksNTIuOTg1XSxbLTEzMS4xNzksNTIuMThdLFstMTMxLjU3OCw1Mi4xODJdLFstMTMyLjE4LDUyLjY0XSxbLTEzMi41NSw1My4xXSxbLTEzMy4wNTUsNTMuNDExXSxbLTEzMy4yNCw1My44NTFdLFstMTMzLjE4LDU0LjE3XSxbLTEzMi43MSw1NC4wNF1dLFtbMTQzLjY0OCw1MC43NDhdLFsxNDQuNjU0LDQ4Ljk3Nl0sWzE0My4xNzQsNDkuMzA3XSxbMTQyLjU1OSw0Ny44NjJdLFsxNDMuNTMzLDQ2LjgzN10sWzE0My41MDUsNDYuMTM4XSxbMTQyLjc0OCw0Ni43NDFdLFsxNDIuMDkyLDQ1Ljk2N10sWzE0MS45MDcsNDYuODA2XSxbMTQyLjAxOCw0Ny43OF0sWzE0MS45MDQsNDguODU5XSxbMTQyLjEzNiw0OS42MTVdLFsxNDIuMTgsNTAuOTUyXSxbMTQxLjU5NCw1MS45MzVdLFsxNDEuNjgzLDUzLjMwMl0sWzE0Mi42MDcsNTMuNzYyXSxbMTQyLjIxLDU0LjIyNV0sWzE0Mi42NTUsNTQuMzY2XSxbMTQyLjkxNSw1My43MDVdLFsxNDMuMjYxLDUyLjc0MV0sWzE0My4yMzUsNTEuNzU3XSxbMTQzLjY0OCw1MC43NDhdXSxbWy02Ljc4OSw1Mi4yNl0sWy04LjU2Miw1MS42NjldLFstOS45NzcsNTEuODJdLFstOS4xNjYsNTIuODY1XSxbLTkuNjg5LDUzLjg4MV0sWy04LjMyOCw1NC42NjVdLFstNy41NzIsNTUuMTMyXSxbLTYuNzM0LDU1LjE3M10sWy01LjY2Miw1NC41NTVdLFstNi4xOTgsNTMuODY4XSxbLTYuMDMzLDUzLjE1M10sWy02Ljc4OSw1Mi4yNl1dLFtbMTIuNjksNTUuNjFdLFsxMi4wOSw1NC44XSxbMTEuMDQ0LDU1LjM2NV0sWzEwLjkwNCw1NS43OF0sWzEyLjM3MSw1Ni4xMTFdLFsxMi42OSw1NS42MV1dLFtbLTE1My4wMDYsNTcuMTE2XSxbLTE1NC4wMDUsNTYuNzM1XSxbLTE1NC41MTYsNTYuOTkzXSxbLTE1NC42NzEsNTcuNDYxXSxbLTE1My43NjMsNTcuODE3XSxbLTE1My4yMjksNTcuOTY5XSxbLTE1Mi41NjUsNTcuOTAxXSxbLTE1Mi4xNDEsNTcuNTkxXSxbLTE1My4wMDYsNTcuMTE2XV0sW1stMy4wMDUsNTguNjM1XSxbLTQuMDc0LDU3LjU1M10sWy0zLjA1NSw1Ny42OV0sWy0xLjk1OSw1Ny42ODVdLFstMi4yMiw1Ni44N10sWy0zLjExOSw1NS45NzRdLFstMi4wODUsNTUuOTFdLFstMS4xMTUsNTQuNjI1XSxbLTAuNDMsNTQuNDY0XSxbMC4xODUsNTMuMzI1XSxbMC40Nyw1Mi45M10sWzEuNjgyLDUyLjc0XSxbMS41Niw1Mi4xXSxbMS4wNTEsNTEuODA3XSxbMS40NSw1MS4yODldLFswLjU1LDUwLjc2Nl0sWy0wLjc4OCw1MC43NzVdLFstMi40OSw1MC41XSxbLTIuOTU2LDUwLjY5N10sWy0zLjYxNyw1MC4yMjhdLFstNC41NDMsNTAuMzQyXSxbLTUuMjQ1LDQ5Ljk2XSxbLTUuNzc3LDUwLjE2XSxbLTQuMzEsNTEuMjFdLFstMy40MTUsNTEuNDI2XSxbLTQuOTg0LDUxLjU5M10sWy01LjI2Nyw1MS45OTFdLFstNC4yMjIsNTIuMzAxXSxbLTQuNzcsNTIuODRdLFstNC41OCw1My40OTVdLFstMy4wOTIsNTMuNDA0XSxbLTIuOTQ1LDUzLjk4NV0sWy0zLjYzLDU0LjYxNV0sWy00Ljg0NCw1NC43OTFdLFstNS4wODMsNTUuMDYyXSxbLTQuNzE5LDU1LjUwOF0sWy01LjA0OCw1NS43ODRdLFstNS41ODYsNTUuMzExXSxbLTUuNjQ1LDU2LjI3NV0sWy02LjE1LDU2Ljc4NV0sWy01Ljc4Nyw1Ny44MTldLFstNS4wMSw1OC42M10sWy00LjIxMSw1OC41NTFdLFstMy4wMDUsNTguNjM1XV0sW1stMTY1LjU3OSw1OS45MV0sWy0xNjYuMTkzLDU5Ljc1NF0sWy0xNjYuODQ4LDU5Ljk0MV0sWy0xNjcuNDU1LDYwLjIxM10sWy0xNjYuNDY4LDYwLjM4NF0sWy0xNjUuNjc0LDYwLjI5NF0sWy0xNjUuNTc5LDU5LjkxXV0sW1stNzkuMjY2LDYyLjE1OV0sWy03OS42NTgsNjEuNjMzXSxbLTgwLjEsNjEuNzE4XSxbLTgwLjM2Miw2Mi4wMTZdLFstODAuMzE1LDYyLjA4Nl0sWy03OS45MjksNjIuMzg2XSxbLTc5LjUyLDYyLjM2NF0sWy03OS4yNjYsNjIuMTU5XV0sW1stODEuODk4LDYyLjcxMV0sWy04My4wNjksNjIuMTU5XSxbLTgzLjc3NSw2Mi4xODJdLFstODMuOTk0LDYyLjQ1M10sWy04My4yNSw2Mi45MTRdLFstODEuODc3LDYyLjkwNV0sWy04MS44OTgsNjIuNzExXV0sW1stMTcxLjczMiw2My43ODNdLFstMTcxLjExNCw2My41OTJdLFstMTcwLjQ5MSw2My42OTVdLFstMTY5LjY4Myw2My40MzFdLFstMTY4LjY4OSw2My4yOThdLFstMTY4Ljc3Miw2My4xODldLFstMTY5LjUyOSw2Mi45NzddLFstMTcwLjI5MSw2My4xOTRdLFstMTcwLjY3MSw2My4zNzZdLFstMTcxLjU1Myw2My4zMThdLFstMTcxLjc5MSw2My40MDZdLFstMTcxLjczMiw2My43ODNdXSxbWy04NS4xNjEsNjUuNjU3XSxbLTg0Ljk3Niw2NS4yMThdLFstODQuNDY0LDY1LjM3Ml0sWy04My44ODMsNjUuMTFdLFstODIuNzg4LDY0Ljc2N10sWy04MS42NDIsNjQuNDU1XSxbLTgxLjU1Myw2My45OF0sWy04MC44MTcsNjQuMDU3XSxbLTgwLjEwMyw2My43MjZdLFstODAuOTkxLDYzLjQxMV0sWy04Mi41NDcsNjMuNjUyXSxbLTgzLjEwOSw2NC4xMDJdLFstODQuMSw2My41N10sWy04NS41MjMsNjMuMDUyXSxbLTg1Ljg2Nyw2My42MzddLFstODcuMjIyLDYzLjU0MV0sWy04Ni4zNTMsNjQuMDM2XSxbLTg2LjIyNSw2NC44MjNdLFstODUuODg0LDY1LjczOV0sWy04NS4xNjEsNjUuNjU3XV0sW1stMTQuNTA5LDY2LjQ1Nl0sWy0xNC43NCw2NS44MDldLFstMTMuNjEsNjUuMTI3XSxbLTE0LjkxLDY0LjM2NF0sWy0xNy43OTQsNjMuNjc5XSxbLTE4LjY1Niw2My40OTZdLFstMTkuOTczLDYzLjY0NF0sWy0yMi43NjMsNjMuOTZdLFstMjEuNzc4LDY0LjQwMl0sWy0yMy45NTUsNjQuODkxXSxbLTIyLjE4NCw2NS4wODVdLFstMjIuMjI3LDY1LjM3OV0sWy0yNC4zMjYsNjUuNjExXSxbLTIzLjY1MSw2Ni4yNjNdLFstMjIuMTM1LDY2LjQxXSxbLTIwLjU3Niw2NS43MzJdLFstMTkuMDU3LDY2LjI3N10sWy0xNy43OTksNjUuOTk0XSxbLTE2LjE2OCw2Ni41MjddLFstMTQuNTA5LDY2LjQ1Nl1dLFtbLTc1Ljg2Niw2Ny4xNDldLFstNzYuOTg3LDY3LjA5OV0sWy03Ny4yMzYsNjcuNTg4XSxbLTc2LjgxMiw2OC4xNDldLFstNzUuODk1LDY4LjI4N10sWy03NS4xMTUsNjguMDFdLFstNzUuMTAzLDY3LjU4Ml0sWy03NS4yMTYsNjcuNDQ0XSxbLTc1Ljg2Niw2Ny4xNDldXSxbWy0xNzUuMDE0LDY2LjU4NF0sWy0xNzQuMzQsNjYuMzM2XSxbLTE3NC41NzIsNjcuMDYyXSxbLTE3MS44NTcsNjYuOTEzXSxbLTE2OS45LDY1Ljk3N10sWy0xNzAuODkxLDY1LjU0MV0sWy0xNzIuNTMsNjUuNDM4XSxbLTE3Mi41NTUsNjQuNDYxXSxbLTE3Mi45NTUsNjQuMjUzXSxbLTE3My44OTIsNjQuMjgzXSxbLTE3NC42NTQsNjQuNjMxXSxbLTE3NS45ODQsNjQuOTIzXSxbLTE3Ni4yMDcsNjUuMzU3XSxbLTE3Ny4yMjMsNjUuNTJdLFstMTc4LjM2LDY1LjM5MV0sWy0xNzguOTAzLDY1Ljc0XSxbLTE3OC42ODYsNjYuMTEyXSxbLTE3OS44ODQsNjUuODc1XSxbLTE3OS40MzMsNjUuNDA0XSxbLTE4MCw2NC45OF0sWy0xODAsNjguOTY0XSxbLTE3Ny41NSw2OC4yXSxbLTE3NC45MjgsNjcuMjA2XSxbLTE3NS4wMTQsNjYuNTg0XV0sW1stOTUuNjQ4LDY5LjEwOF0sWy05Ni4yNyw2OC43NTddLFstOTcuNjE3LDY5LjA2XSxbLTk4LjQzMiw2OC45NTFdLFstOTkuNzk3LDY5LjRdLFstOTguOTE3LDY5LjcxXSxbLTk4LjIxOCw3MC4xNDRdLFstOTcuMTU3LDY5Ljg2XSxbLTk2LjU1Nyw2OS42OF0sWy05Ni4yNTcsNjkuNDldLFstOTUuNjQ4LDY5LjEwOF1dLFtbMTgwLDcwLjgzMl0sWzE3OC45MDMsNzAuNzgxXSxbMTc4LjcyNSw3MS4wOTldLFsxODAsNzEuNTE2XSxbMTgwLDcwLjgzMl1dLFtbLTE3OC42OTQsNzAuODkzXSxbLTE4MCw3MC44MzJdLFstMTgwLDcxLjUxNl0sWy0xNzkuODcyLDcxLjU1OF0sWy0xNzkuMDI0LDcxLjU1Nl0sWy0xNzcuNTc4LDcxLjI2OV0sWy0xNzcuNjY0LDcxLjEzM10sWy0xNzguNjk0LDcwLjg5M11dLFtbLTkwLjU0Nyw2OS40OThdLFstOTAuNTUyLDY4LjQ3NV0sWy04OS4yMTUsNjkuMjU5XSxbLTg4LjAyLDY4LjYxNV0sWy04OC4zMTgsNjcuODczXSxbLTg3LjM1LDY3LjE5OV0sWy04Ni4zMDYsNjcuOTIyXSxbLTg1LjU3Nyw2OC43ODRdLFstODUuNTIyLDY5Ljg4Ml0sWy04NC4xMDEsNjkuODA1XSxbLTgyLjYyMiw2OS42NThdLFstODEuMjgsNjkuMTYyXSxbLTgxLjIyLDY4LjY2Nl0sWy04MS45NjQsNjguMTMzXSxbLTgxLjI1OSw2Ny41OTddLFstODEuMzg2LDY3LjExMV0sWy04My4zNDQsNjYuNDEyXSxbLTg0LjczNSw2Ni4yNTddLFstODUuNzY5LDY2LjU1OF0sWy04Ni4wNjgsNjYuMDU2XSxbLTg3LjAzMSw2NS4yMTNdLFstODcuMzIzLDY0Ljc3Nl0sWy04OC40ODMsNjQuMDk5XSxbLTg5LjkxNCw2NC4wMzNdLFstOTAuNzA0LDYzLjYxXSxbLTkwLjc3LDYyLjk2XSxbLTkxLjkzMyw2Mi44MzVdLFstOTMuMTU3LDYyLjAyNV0sWy05NC4yNDIsNjAuODk5XSxbLTk0LjYyOSw2MC4xMV0sWy05NC42ODUsNTguOTQ5XSxbLTkzLjIxNSw1OC43ODJdLFstOTIuNzY1LDU3Ljg0Nl0sWy05Mi4yOTcsNTcuMDg3XSxbLTkwLjg5OCw1Ny4yODVdLFstODkuMDM5LDU2Ljg1Ml0sWy04OC4wNCw1Ni40NzJdLFstODcuMzI0LDU1Ljk5OV0sWy04Ni4wNzEsNTUuNzI0XSxbLTg1LjAxMiw1NS4zMDNdLFstODMuMzYsNTUuMjQ1XSxbLTgyLjI3Myw1NS4xNDhdLFstODIuNDM2LDU0LjI4Ml0sWy04Mi4xMjUsNTMuMjc3XSxbLTgxLjQwMSw1Mi4xNThdLFstNzkuOTEzLDUxLjIwOF0sWy03OS4xNDMsNTEuNTM0XSxbLTc4LjYwMiw1Mi41NjJdLFstNzkuMTI0LDU0LjE0MV0sWy03OS44Myw1NC42NjhdLFstNzguMjI5LDU1LjEzNl0sWy03Ny4wOTYsNTUuODM4XSxbLTc2LjU0MSw1Ni41MzRdLFstNzYuNjIzLDU3LjIwM10sWy03Ny4zMDIsNTguMDUyXSxbLTc4LjUxNyw1OC44MDVdLFstNzcuMzM3LDU5Ljg1M10sWy03Ny43NzMsNjAuNzU4XSxbLTc4LjEwNyw2Mi4zMl0sWy03Ny40MTEsNjIuNTVdLFstNzUuNjk2LDYyLjI3OV0sWy03NC42NjgsNjIuMTgxXSxbLTczLjg0LDYyLjQ0NF0sWy03Mi45MDksNjIuMTA1XSxbLTcxLjY3Nyw2MS41MjVdLFstNzEuMzc0LDYxLjEzN10sWy02OS41OSw2MS4wNjJdLFstNjkuNjIsNjAuMjIxXSxbLTY5LjI4OCw1OC45NTddLFstNjguMzc1LDU4LjgwMV0sWy02Ny42NSw1OC4yMTJdLFstNjYuMjAyLDU4Ljc2N10sWy02NS4yNDUsNTkuODcxXSxbLTY0LjU4Myw2MC4zMzZdLFstNjMuODA1LDU5LjQ0M10sWy02Mi41MDIsNTguMTY3XSxbLTYxLjM5Niw1Ni45NjhdLFstNjEuNzk5LDU2LjMzOV0sWy02MC40NjksNTUuNzc2XSxbLTU5LjU3LDU1LjIwNF0sWy01Ny45NzUsNTQuOTQ1XSxbLTU3LjMzMyw1NC42MjddLFstNTYuOTM3LDUzLjc4XSxbLTU2LjE1OCw1My42NDhdLFstNTUuNzU2LDUzLjI3MV0sWy01NS42ODMsNTIuMTQ3XSxbLTU2LjQwOSw1MS43NzFdLFstNTcuMTI3LDUxLjQyXSxbLTU4Ljc3NSw1MS4wNjRdLFstNjAuMDMzLDUwLjI0M10sWy02MS43MjQsNTAuMDgxXSxbLTYzLjg2Miw1MC4yOTFdLFstNjUuMzYzLDUwLjI5OF0sWy02Ni4zOTksNTAuMjI5XSxbLTY3LjIzNiw0OS41MTFdLFstNjguNTExLDQ5LjA2OF0sWy02OS45NTQsNDcuNzQ1XSxbLTcxLjEwNCw0Ni44MjJdLFstNzAuMjU1LDQ2Ljk4Nl0sWy02OC42NSw0OC4zXSxbLTY2LjU1Miw0OS4xMzNdLFstNjUuMDU2LDQ5LjIzM10sWy02NC4xNzEsNDguNzQyXSxbLTY1LjExNSw0OC4wNzFdLFstNjQuNzk5LDQ2Ljk5M10sWy02NC40NzIsNDYuMjM5XSxbLTYzLjE3Myw0NS43MzldLFstNjEuNTIxLDQ1Ljg4NF0sWy02MC41MTgsNDcuMDA4XSxbLTYwLjQ0OSw0Ni4yODNdLFstNTkuODAzLDQ1LjkyXSxbLTYxLjA0LDQ1LjI2NV0sWy02My4yNTUsNDQuNjddLFstNjQuMjQ3LDQ0LjI2Nl0sWy02NS4zNjQsNDMuNTQ1XSxbLTY2LjEyMyw0My42MTldLFstNjYuMTYyLDQ0LjQ2NV0sWy02NC40MjUsNDUuMjkyXSxbLTY2LjAyNiw0NS4yNTldLFstNjcuMTM3LDQ1LjEzOF0sWy02Ni45NjUsNDQuODFdLFstNjguMDMyLDQ0LjMyNV0sWy02OS4wNiw0My45OF0sWy03MC4xMTYsNDMuNjg0XSxbLTcwLjY5LDQzLjAzXSxbLTcwLjgxNSw0Mi44NjVdLFstNzAuODI1LDQyLjMzNV0sWy03MC40OTUsNDEuODA1XSxbLTcwLjA4LDQxLjc4XSxbLTcwLjE4NSw0Mi4xNDVdLFstNjkuODg1LDQxLjkyM10sWy02OS45NjUsNDEuNjM3XSxbLTcwLjY0LDQxLjQ3NV0sWy03MS4xMiw0MS40OTVdLFstNzEuODYsNDEuMzJdLFstNzIuMjk1LDQxLjI3XSxbLTcyLjg3Niw0MS4yMjFdLFstNzMuNzEsNDAuOTMxXSxbLTcyLjI0MSw0MS4xMl0sWy03MS45NDUsNDAuOTNdLFstNzMuMzQ1LDQwLjYzXSxbLTczLjk4Miw0MC42MjhdLFstNzMuOTUyLDQwLjc1MV0sWy03NC4yNTcsNDAuNDc0XSxbLTczLjk2Miw0MC40MjhdLFstNzQuMTc4LDM5LjcwOV0sWy03NC45MDYsMzguOTRdLFstNzQuOTgsMzkuMTk2XSxbLTc1LjIsMzkuMjQ4XSxbLTc1LjUyOCwzOS40OThdLFstNzUuMzIsMzguOTZdLFstNzUuMDgzLDM4Ljc4MV0sWy03NS4wNTcsMzguNDA0XSxbLTc1LjM3NywzOC4wMTZdLFstNzUuOTQsMzcuMjE3XSxbLTc2LjAzMSwzNy4yNTddLFstNzUuNzIyLDM3LjkzN10sWy03Ni4yMzMsMzguMzE5XSxbLTc2LjM1LDM5LjE1XSxbLTc2LjU0MywzOC43MThdLFstNzYuMzI5LDM4LjA4M10sWy03Ni45NiwzOC4yMzNdLFstNzYuMzAyLDM3LjkxOF0sWy03Ni4yNTksMzYuOTY2XSxbLTc1Ljk3MiwzNi44OTddLFstNzUuODY4LDM2LjU1MV0sWy03NS43MjcsMzUuNTUxXSxbLTc2LjM2MywzNC44MDhdLFstNzcuMzk4LDM0LjUxMl0sWy03OC4wNTUsMzMuOTI1XSxbLTc4LjU1NCwzMy44NjFdLFstNzkuMDYxLDMzLjQ5NF0sWy03OS4yMDMsMzMuMTU5XSxbLTgwLjMwMSwzMi41MDldLFstODAuODY1LDMyLjAzM10sWy04MS4zMzYsMzEuNDRdLFstODEuNDksMzAuNzNdLFstODEuMzE0LDMwLjAzNl0sWy04MC45OCwyOS4xOF0sWy04MC41MzYsMjguNDcyXSxbLTgwLjUzLDI4LjA0XSxbLTgwLjA1NywyNi44OF0sWy04MC4wODgsMjYuMjA2XSxbLTgwLjEzMSwyNS44MTddLFstODAuMzgxLDI1LjIwNl0sWy04MC42OCwyNS4wOF0sWy04MS4xNzIsMjUuMjAxXSxbLTgxLjMzLDI1LjY0XSxbLTgxLjcxLDI1Ljg3XSxbLTgyLjI0LDI2LjczXSxbLTgyLjcwNSwyNy40OTVdLFstODIuODU1LDI3Ljg4Nl0sWy04Mi42NSwyOC41NV0sWy04Mi45MywyOS4xXSxbLTgzLjcxLDI5LjkzN10sWy04NC4xLDMwLjA5XSxbLTg1LjEwOSwyOS42MzZdLFstODUuMjg4LDI5LjY4Nl0sWy04NS43NzMsMzAuMTUzXSxbLTg2LjQsMzAuNF0sWy04Ny41MywzMC4yNzRdLFstODguNDE4LDMwLjM4NV0sWy04OS4xOCwzMC4zMTZdLFstODkuNjA1LDMwLjE3Nl0sWy04OS40MTQsMjkuODk0XSxbLTg5LjQzLDI5LjQ4OV0sWy04OS4yMTgsMjkuMjkxXSxbLTg5LjQwOCwyOS4xNl0sWy04OS43NzksMjkuMzA3XSxbLTkwLjE1NSwyOS4xMTddLFstOTAuODgsMjkuMTQ5XSxbLTkxLjYyNywyOS42NzddLFstOTIuNDk5LDI5LjU1Ml0sWy05My4yMjYsMjkuNzg0XSxbLTkzLjg0OCwyOS43MTRdLFstOTQuNjksMjkuNDhdLFstOTUuNiwyOC43MzldLFstOTYuNTk0LDI4LjMwN10sWy05Ny4xNCwyNy44M10sWy05Ny4zNywyNy4zOF0sWy05Ny4zOCwyNi42OV0sWy05Ny4zMywyNi4yMV0sWy05Ny4xNCwyNS44N10sWy05Ny4xMzksMjUuODY4XSxbLTk3LjE0MiwyNS44NjZdLFstOTcuNTI4LDI0Ljk5Ml0sWy05Ny43MDMsMjQuMjcyXSxbLTk3Ljc3NiwyMi45MzNdLFstOTcuODcyLDIyLjQ0NF0sWy05Ny42OTksMjEuODk5XSxbLTk3LjM4OSwyMS40MTFdLFstOTcuMTg5LDIwLjYzNV0sWy05Ni41MjYsMTkuODkxXSxbLTk2LjI5MiwxOS4zMl0sWy05NS45MDEsMTguODI4XSxbLTk0LjgzOSwxOC41NjNdLFstOTQuNDI2LDE4LjE0NF0sWy05My41NDksMTguNDI0XSxbLTkyLjc4NiwxOC41MjVdLFstOTIuMDM3LDE4LjcwNV0sWy05MS40MDgsMTguODc2XSxbLTkwLjc3MiwxOS4yODRdLFstOTAuNTM0LDE5Ljg2N10sWy05MC40NTEsMjAuNzA4XSxbLTkwLjI3OSwyMS4wXSxbLTg5LjYwMSwyMS4yNjJdLFstODguNTQ0LDIxLjQ5NF0sWy04Ny42NTgsMjEuNDU5XSxbLTg3LjA1MiwyMS41NDRdLFstODYuODEyLDIxLjMzMV0sWy04Ni44NDYsMjAuODVdLFstODcuMzgzLDIwLjI1NV0sWy04Ny42MjEsMTkuNjQ2XSxbLTg3LjQzNywxOS40NzJdLFstODcuNTg2LDE5LjA0XSxbLTg3LjgzNywxOC4yNl0sWy04OC4wOTEsMTguNTE3XSxbLTg4LjMsMTguNV0sWy04OC4yOTYsMTguMzUzXSxbLTg4LjEwNywxOC4zNDldLFstODguMTIzLDE4LjA3N10sWy04OC4yODUsMTcuNjQ0XSxbLTg4LjE5OCwxNy40OV0sWy04OC4zMDMsMTcuMTMyXSxbLTg4LjI0LDE3LjAzNl0sWy04OC4zNTUsMTYuNTMxXSxbLTg4LjU1MiwxNi4yNjZdLFstODguNzMyLDE2LjIzNF0sWy04OC45MzEsMTUuODg3XSxbLTg4LjYwNSwxNS43MDZdLFstODguNTE4LDE1Ljg1Nl0sWy04OC4yMjUsMTUuNzI4XSxbLTg4LjEyMSwxNS42ODldLFstODcuOTAyLDE1Ljg2NV0sWy04Ny42MTYsMTUuODc5XSxbLTg3LjUyMywxNS43OTddLFstODcuMzY4LDE1Ljg0N10sWy04Ni45MDMsMTUuNzU3XSxbLTg2LjQ0MSwxNS43ODNdLFstODYuMTE5LDE1Ljg5M10sWy04Ni4wMDIsMTYuMDA1XSxbLTg1LjY4MywxNS45NTRdLFstODUuNDQ0LDE1Ljg4Nl0sWy04NS4xODIsMTUuOTA5XSxbLTg0Ljk4NCwxNS45OTZdLFstODQuNTI3LDE1Ljg1N10sWy04NC4zNjgsMTUuODM1XSxbLTg0LjA2MywxNS42NDhdLFstODMuNzc0LDE1LjQyNF0sWy04My40MSwxNS4yNzFdLFstODMuMTQ3LDE0Ljk5Nl0sWy04My4yMzMsMTQuOV0sWy04My4yODQsMTQuNjc3XSxbLTgzLjE4MiwxNC4zMTFdLFstODMuNDEyLDEzLjk3XSxbLTgzLjUyLDEzLjU2OF0sWy04My41NTIsMTMuMTI3XSxbLTgzLjQ5OCwxMi44NjldLFstODMuNDczLDEyLjQxOV0sWy04My42MjYsMTIuMzIxXSxbLTgzLjcyLDExLjg5M10sWy04My42NTEsMTEuNjI5XSxbLTgzLjg1NSwxMS4zNzNdLFstODMuODA5LDExLjEwM10sWy04My42NTYsMTAuOTM5XSxbLTgzLjQwMiwxMC4zOTZdLFstODMuMDE2LDkuOTkzXSxbLTgyLjU0Niw5LjU2Nl0sWy04Mi4xODcsOS4yMDhdLFstODIuMjA4LDguOTk2XSxbLTgxLjgwOSw4Ljk1MV0sWy04MS43MTQsOS4wMzJdLFstODEuNDM5LDguNzg2XSxbLTgwLjk0Nyw4Ljg1OV0sWy04MC41MjIsOS4xMTFdLFstNzkuOTE1LDkuMzEzXSxbLTc5LjU3Myw5LjYxMl0sWy03OS4wMjEsOS41NTNdLFstNzkuMDU4LDkuNDU1XSxbLTc4LjUwMSw5LjQyXSxbLTc4LjA1Niw5LjI0OF0sWy03Ny43MjksOC45NDddLFstNzcuMzUzLDguNjddLFstNzYuODM3LDguNjM5XSxbLTc2LjA4Niw5LjMzN10sWy03NS42NzUsOS40NDNdLFstNzUuNjY1LDkuNzc0XSxbLTc1LjQ4LDEwLjYxOV0sWy03NC45MDcsMTEuMDgzXSxbLTc0LjI3NywxMS4xMDJdLFstNzQuMTk3LDExLjMxXSxbLTczLjQxNSwxMS4yMjddLFstNzIuNjI4LDExLjczMl0sWy03Mi4yMzgsMTEuOTU2XSxbLTcxLjc1NCwxMi40MzddLFstNzEuNCwxMi4zNzZdLFstNzEuMTM3LDEyLjExM10sWy03MS4zMzIsMTEuNzc2XSxbLTcxLjM2LDExLjU0XSxbLTcxLjk0NywxMS40MjNdLFstNzEuNjIxLDEwLjk2OV0sWy03MS42MzMsMTAuNDQ2XSxbLTcyLjA3NCw5Ljg2Nl0sWy03MS42OTYsOS4wNzJdLFstNzEuMjY1LDkuMTM3XSxbLTcxLjA0LDkuODZdLFstNzEuMzUsMTAuMjEyXSxbLTcxLjQwMSwxMC45NjldLFstNzAuMTU1LDExLjM3NV0sWy03MC4yOTQsMTEuODQ3XSxbLTY5Ljk0MywxMi4xNjJdLFstNjkuNTg0LDExLjQ2XSxbLTY4Ljg4MywxMS40NDNdLFstNjguMjMzLDEwLjg4Nl0sWy02OC4xOTQsMTAuNTU1XSxbLTY3LjI5NiwxMC41NDZdLFstNjYuMjI4LDEwLjY0OV0sWy02NS42NTUsMTAuMjAxXSxbLTY0Ljg5LDEwLjA3N10sWy02NC4zMjksMTAuMzldLFstNjQuMzE4LDEwLjY0MV0sWy02My4wNzksMTAuNzAyXSxbLTYxLjg4MSwxMC43MTZdLFstNjIuNzMsMTAuNDJdLFstNjIuMzg4LDkuOTQ4XSxbLTYxLjU4OSw5Ljg3M10sWy02MC44MzEsOS4zODFdLFstNjAuNjcxLDguNThdLFstNjAuMTUsOC42MDNdLFstNTkuNzU4LDguMzY3XSxbLTU5LjEwMiw3Ljk5OV0sWy01OC40ODMsNy4zNDhdLFstNTguNDU1LDYuODMzXSxbLTU4LjA3OCw2LjgwOV0sWy01Ny41NDIsNi4zMjFdLFstNTcuMTQ3LDUuOTczXSxbLTU1Ljk0OSw1Ljc3M10sWy01NS44NDIsNS45NTNdLFstNTUuMDMzLDYuMDI1XSxbLTUzLjk1OCw1Ljc1N10sWy01My42MTgsNS42NDZdLFstNTIuODgyLDUuNDFdLFstNTEuODIzLDQuNTY2XSxbLTUxLjY1OCw0LjE1Nl0sWy01MS4zMTcsNC4yMDNdLFstNTEuMDcsMy42NTFdLFstNTAuNTA5LDEuOTAxXSxbLTQ5Ljk3NCwxLjczN10sWy00OS45NDcsMS4wNDZdLFstNTAuNjk5LDAuMjIzXSxbLTUwLjM4OCwtMC4wNzhdLFstNDguNjIsLTAuMjM1XSxbLTQ4LjU4NCwtMS4yMzhdLFstNDcuODI1LC0wLjU4Ml0sWy00Ni41NjcsLTAuOTQxXSxbLTQ0LjkwNiwtMS41NTJdLFstNDQuNDE4LC0yLjEzOF0sWy00NC41ODIsLTIuNjkxXSxbLTQzLjQxOSwtMi4zODNdLFstNDEuNDczLC0yLjkxMl0sWy0zOS45NzksLTIuODczXSxbLTM4LjUsLTMuNzAxXSxbLTM3LjIyMywtNC44MjFdLFstMzYuNDUzLC01LjEwOV0sWy0zNS41OTgsLTUuMTQ5XSxbLTM1LjIzNSwtNS40NjVdLFstMzQuODk2LC02LjczOF0sWy0zNC43MywtNy4zNDNdLFstMzUuMTI4LC04Ljk5Nl0sWy0zNS42MzcsLTkuNjQ5XSxbLTM3LjA0NywtMTEuMDQxXSxbLTM3LjY4NCwtMTIuMTcxXSxbLTM4LjQyNCwtMTMuMDM4XSxbLTM4LjY3NCwtMTMuMDU4XSxbLTM4Ljk1MywtMTMuNzkzXSxbLTM4Ljg4MiwtMTUuNjY3XSxbLTM5LjE2MSwtMTcuMjA4XSxbLTM5LjI2NywtMTcuODY4XSxbLTM5LjU4MywtMTguMjYyXSxbLTM5Ljc2MSwtMTkuNTk5XSxbLTQwLjc3NSwtMjAuOTA0XSxbLTQwLjk0NSwtMjEuOTM3XSxbLTQxLjc1NCwtMjIuMzcxXSxbLTQxLjk4OCwtMjIuOTddLFstNDMuMDc1LC0yMi45NjhdLFstNDQuNjQ4LC0yMy4zNTJdLFstNDUuMzUyLC0yMy43OTddLFstNDYuNDcyLC0yNC4wODldLFstNDcuNjQ5LC0yNC44ODVdLFstNDguNDk1LC0yNS44NzddLFstNDguNjQxLC0yNi42MjRdLFstNDguNDc1LC0yNy4xNzZdLFstNDguNjYxLC0yOC4xODZdLFstNDguODg4LC0yOC42NzRdLFstNDkuNTg3LC0yOS4yMjRdLFstNTAuNjk3LC0zMC45ODRdLFstNTEuNTc2LC0zMS43NzhdLFstNTIuMjU2LC0zMi4yNDVdLFstNTIuNzEyLC0zMy4xOTddLFstNTMuMzc0LC0zMy43NjhdLFstNTMuODA2LC0zNC4zOTddLFstNTQuOTM2LC0zNC45NTNdLFstNTUuNjc0LC0zNC43NTNdLFstNTYuMjE1LC0zNC44Nl0sWy01Ny4xNCwtMzQuNDNdLFstNTcuODE4LC0zNC40NjNdLFstNTguNDI3LC0zMy45MDldLFstNTguNDk1LC0zNC40MzJdLFstNTcuMjI2LC0zNS4yODhdLFstNTcuMzYyLC0zNS45NzddLFstNTYuNzM3LC0zNi40MTNdLFstNTYuNzg4LC0zNi45MDFdLFstNTcuNzQ5LC0zOC4xODRdLFstNTkuMjMyLC0zOC43Ml0sWy02MS4yMzcsLTM4LjkyOF0sWy02Mi4zMzYsLTM4LjgyOF0sWy02Mi4xMjYsLTM5LjQyNF0sWy02Mi4zMzEsLTQwLjE3M10sWy02Mi4xNDYsLTQwLjY3N10sWy02Mi43NDYsLTQxLjAyOV0sWy02My43NzEsLTQxLjE2N10sWy02NC43MzIsLTQwLjgwM10sWy02NS4xMTgsLTQxLjA2NF0sWy02NC45NzksLTQyLjA1OF0sWy02NC4zMDMsLTQyLjM1OV0sWy02My43NTYsLTQyLjA0NF0sWy02My40NTgsLTQyLjU2M10sWy02NC4zNzksLTQyLjg3M10sWy02NS4xODIsLTQzLjQ5NV0sWy02NS4zMjksLTQ0LjUwMV0sWy02NS41NjUsLTQ1LjAzN10sWy02Ni41MSwtNDUuMDRdLFstNjcuMjk0LC00NS41NTJdLFstNjcuNTgxLC00Ni4zMDJdLFstNjYuNTk3LC00Ny4wMzRdLFstNjUuNjQxLC00Ny4yMzZdLFstNjUuOTg1LC00OC4xMzNdLFstNjcuMTY2LC00OC42OTddLFstNjcuODE2LC00OS44N10sWy02OC43MjksLTUwLjI2NF0sWy02OS4xMzgsLTUwLjczMl0sWy02OC44MTUsLTUxLjc3MV0sWy02OC4xNSwtNTIuMzVdLFstNjguNTcxLC01Mi4yOTldLFstNjkuNDYxLC01Mi4yOTJdLFstNjkuOTQzLC01Mi41MzhdLFstNzAuODQ1LC01Mi44OTldLFstNzEuMDA2LC01My44MzNdLFstNzEuNDMsLTUzLjg1Nl0sWy03Mi41NTgsLTUzLjUzMV0sWy03My43MDMsLTUyLjgzNV0sWy03NC45NDcsLTUyLjI2M10sWy03NS4yNiwtNTEuNjI5XSxbLTc0Ljk3NywtNTEuMDQzXSxbLTc1LjQ4LC01MC4zNzhdLFstNzUuNjA4LC00OC42NzRdLFstNzUuMTgzLC00Ny43MTJdLFstNzQuMTI3LC00Ni45MzldLFstNzUuNjQ0LC00Ni42NDhdLFstNzQuNjkyLC00NS43NjRdLFstNzQuMzUyLC00NC4xMDNdLFstNzMuMjQsLTQ0LjQ1NV0sWy03Mi43MTgsLTQyLjM4M10sWy03My4zODksLTQyLjExN10sWy03My43MDEsLTQzLjM2Nl0sWy03NC4zMzIsLTQzLjIyNV0sWy03NC4wMTgsLTQxLjc5NV0sWy03My42NzcsLTM5Ljk0Ml0sWy03My4yMTgsLTM5LjI1OV0sWy03My41MDUsLTM4LjI4M10sWy03My41ODgsLTM3LjE1Nl0sWy03My4xNjcsLTM3LjEyNF0sWy03Mi41NTMsLTM1LjUwOV0sWy03MS44NjIsLTMzLjkwOV0sWy03MS40MzgsLTMyLjQxOV0sWy03MS42NjksLTMwLjkyMV0sWy03MS4zNywtMzAuMDk2XSxbLTcxLjQ5LC0yOC44NjFdLFstNzAuOTA1LC0yNy42NF0sWy03MC43MjUsLTI1LjcwNl0sWy03MC40MDQsLTIzLjYyOV0sWy03MC4wOTEsLTIxLjM5M10sWy03MC4xNjQsLTE5Ljc1Nl0sWy03MC4zNzIsLTE4LjM0OF0sWy03MS4zNzUsLTE3Ljc3NF0sWy03MS40NjIsLTE3LjM2M10sWy03My40NDUsLTE2LjM1OV0sWy03NS4yMzgsLTE1LjI2Nl0sWy03Ni4wMDksLTE0LjY0OV0sWy03Ni40MjMsLTEzLjgyM10sWy03Ni4yNTksLTEzLjUzNV0sWy03Ny4xMDYsLTEyLjIyM10sWy03OC4wOTIsLTEwLjM3OF0sWy03OS4wMzcsLTguMzg3XSxbLTc5LjQ0NiwtNy45MzFdLFstNzkuNzYsLTcuMTk0XSxbLTgwLjUzNywtNi41NDJdLFstODEuMjUsLTYuMTM3XSxbLTgwLjkyNiwtNS42OV0sWy04MS40MTEsLTQuNzM3XSxbLTgxLjEsLTQuMDM2XSxbLTgwLjMwMiwtMy40MDVdLFstNzkuNzcsLTIuNjU3XSxbLTc5Ljk4NywtMi4yMjFdLFstODAuMzY5LC0yLjY4NV0sWy04MC45NjgsLTIuMjQ3XSxbLTgwLjc2NSwtMS45NjVdLFstODAuOTM0LC0xLjA1N10sWy04MC41ODMsLTAuOTA3XSxbLTgwLjM5OSwtMC4yODRdLFstODAuMDIxLDAuMzZdLFstODAuMDkxLDAuNzY4XSxbLTc5LjU0MywwLjk4M10sWy03OC44NTUsMS4zODFdLFstNzguOTkxLDEuNjkxXSxbLTc4LjYxOCwxLjc2Nl0sWy03OC42NjIsMi4yNjddLFstNzguNDI4LDIuNjNdLFstNzcuOTMyLDIuNjk3XSxbLTc3LjUxLDMuMzI1XSxbLTc3LjEyOCwzLjg1XSxbLTc3LjQ5Niw0LjA4OF0sWy03Ny4zMDgsNC42NjhdLFstNzcuNTMzLDUuNTgzXSxbLTc3LjMxOSw1Ljg0NV0sWy03Ny40NzcsNi42OTFdLFstNzcuODgyLDcuMjI0XSxbLTc4LjIxNSw3LjUxMl0sWy03OC40MjksOC4wNTJdLFstNzguMTgyLDguMzE5XSxbLTc4LjQzNSw4LjM4OF0sWy03OC42MjIsOC43MThdLFstNzkuMTIsOC45OTZdLFstNzkuNTU4LDguOTMyXSxbLTc5Ljc2LDguNTg0XSxbLTgwLjE2NCw4LjMzM10sWy04MC4zODMsOC4yOTldLFstODAuNDgxLDguMDldLFstODAuMDA0LDcuNTQ3XSxbLTgwLjI3Nyw3LjQyXSxbLTgwLjQyMSw3LjI3MV0sWy04MC44ODYsNy4yMjFdLFstODEuMDYsNy44MThdLFstODEuMTksNy42NDhdLFstODEuNTE5LDcuNzA3XSxbLTgxLjcyMSw4LjEwOV0sWy04Mi4xMzEsOC4xNzVdLFstODIuMzkxLDguMjkyXSxbLTgyLjgyLDguMjkxXSxbLTgyLjg1MSw4LjA3NF0sWy04Mi45NjYsOC4yMjVdLFstODMuNTA4LDguNDQ3XSxbLTgzLjcxMSw4LjY1N10sWy04My41OTYsOC44MzFdLFstODMuNjMzLDkuMDUyXSxbLTgzLjkxLDkuMjkxXSxbLTg0LjMwMyw5LjQ4N10sWy04NC42NDgsOS42MTVdLFstODQuNzEzLDkuOTA4XSxbLTg0Ljk3NiwxMC4wODddLFstODQuOTExLDkuNzk2XSxbLTg1LjExMSw5LjU1N10sWy04NS4zMzksOS44MzRdLFstODUuNjYxLDkuOTMzXSxbLTg1Ljc5NywxMC4xMzVdLFstODUuNzkyLDEwLjQzOV0sWy04NS42NTksMTAuNzU0XSxbLTg1Ljk0MiwxMC44OTVdLFstODUuNzEzLDExLjA4OV0sWy04Ni4wNTgsMTEuNDA0XSxbLTg2LjUyNiwxMS44MDddLFstODYuNzQ2LDEyLjE0NF0sWy04Ny4xNjcsMTIuNDU4XSxbLTg3LjY2OSwxMi45MV0sWy04Ny41NTcsMTMuMDY1XSxbLTg3LjM5MiwxMi45MTRdLFstODcuMzE3LDEyLjk4NV0sWy04Ny40ODksMTMuMjk3XSxbLTg3Ljc5MywxMy4zODVdLFstODcuOTA0LDEzLjE0OV0sWy04OC40ODMsMTMuMTY0XSxbLTg4Ljg0MywxMy4yNl0sWy04OS4yNTcsMTMuNDU5XSxbLTg5LjgxMiwxMy41MjFdLFstOTAuMDk2LDEzLjczNV0sWy05MC42MDksMTMuOTFdLFstOTEuMjMyLDEzLjkyOF0sWy05MS42OSwxNC4xMjZdLFstOTIuMjI4LDE0LjUzOV0sWy05My4zNTksMTUuNjE1XSxbLTkzLjg3NSwxNS45NF0sWy05NC42OTIsMTYuMjAxXSxbLTk1LjI1LDE2LjEyOF0sWy05Ni4wNTMsMTUuNzUyXSxbLTk2LjU1NywxNS42NTRdLFstOTcuMjY0LDE1LjkxN10sWy05OC4wMTMsMTYuMTA3XSxbLTk4Ljk0OCwxNi41NjZdLFstOTkuNjk3LDE2LjcwNl0sWy0xMDAuODMsMTcuMTcxXSxbLTEwMS42NjYsMTcuNjQ5XSxbLTEwMS45MTksMTcuOTE2XSxbLTEwMi40NzgsMTcuOTc2XSxbLTEwMy41MDEsMTguMjkyXSxbLTEwMy45MTcsMTguNzQ5XSxbLTEwNC45OTIsMTkuMzE2XSxbLTEwNS40OTMsMTkuOTQ3XSxbLTEwNS43MzEsMjAuNDM0XSxbLTEwNS4zOTgsMjAuNTMyXSxbLTEwNS41MDEsMjAuODE3XSxbLTEwNS4yNzEsMjEuMDc2XSxbLTEwNS4yNjYsMjEuNDIyXSxbLTEwNS42MDMsMjEuODcxXSxbLTEwNS42OTMsMjIuMjY5XSxbLTEwNi4wMjksMjIuNzc0XSxbLTEwNi45MSwyMy43NjhdLFstMTA3LjkxNSwyNC41NDldLFstMTA4LjQwMiwyNS4xNzJdLFstMTA5LjI2LDI1LjU4MV0sWy0xMDkuNDQ0LDI1LjgyNV0sWy0xMDkuMjkyLDI2LjQ0M10sWy0xMDkuODAxLDI2LjY3Nl0sWy0xMTAuMzkyLDI3LjE2Ml0sWy0xMTAuNjQxLDI3Ljg2XSxbLTExMS4xNzksMjcuOTQxXSxbLTExMS43NiwyOC40NjhdLFstMTEyLjIyOCwyOC45NTVdLFstMTEyLjI3MiwyOS4yNjddLFstMTEyLjgxLDMwLjAyMV0sWy0xMTMuMTY0LDMwLjc4N10sWy0xMTMuMTQ5LDMxLjE3MV0sWy0xMTMuODcyLDMxLjU2OF0sWy0xMTQuMjA2LDMxLjUyNF0sWy0xMTQuNzc2LDMxLjhdLFstMTE0LjkzNywzMS4zOTNdLFstMTE0Ljc3MSwzMC45MTRdLFstMTE0LjY3NCwzMC4xNjNdLFstMTE0LjMzMSwyOS43NV0sWy0xMTMuNTg5LDI5LjA2Ml0sWy0xMTMuNDI0LDI4LjgyNl0sWy0xMTMuMjcyLDI4Ljc1NV0sWy0xMTMuMTQsMjguNDExXSxbLTExMi45NjIsMjguNDI1XSxbLTExMi43NjIsMjcuNzhdLFstMTEyLjQ1OCwyNy41MjZdLFstMTEyLjI0NSwyNy4xNzJdLFstMTExLjYxNywyNi42NjNdLFstMTExLjI4NSwyNS43MzNdLFstMTEwLjk4OCwyNS4yOTVdLFstMTEwLjcxLDI0LjgyNl0sWy0xMTAuNjU1LDI0LjI5OV0sWy0xMTAuMTczLDI0LjI2Nl0sWy0xMDkuNzcyLDIzLjgxMV0sWy0xMDkuNDA5LDIzLjM2NV0sWy0xMDkuNDMzLDIzLjE4Nl0sWy0xMDkuODU0LDIyLjgxOF0sWy0xMTAuMDMxLDIyLjgyM10sWy0xMTAuMjk1LDIzLjQzMV0sWy0xMTAuOTUsMjQuMDAxXSxbLTExMS42NzEsMjQuNDg0XSxbLTExMi4xODIsMjQuNzM5XSxbLTExMi4xNDksMjUuNDddLFstMTEyLjMwMSwyNi4wMTJdLFstMTEyLjc3NywyNi4zMjJdLFstMTEzLjQ2NSwyNi43NjhdLFstMTEzLjU5NywyNi42NF0sWy0xMTMuODQ5LDI2LjldLFstMTE0LjQ2NiwyNy4xNDJdLFstMTE1LjA1NSwyNy43MjNdLFstMTE0Ljk4MiwyNy43OThdLFstMTE0LjU3LDI3Ljc0Ml0sWy0xMTQuMTk5LDI4LjExNV0sWy0xMTQuMTYyLDI4LjU2Nl0sWy0xMTQuOTMyLDI5LjI3OV0sWy0xMTUuNTE5LDI5LjU1Nl0sWy0xMTUuODg3LDMwLjE4MV0sWy0xMTYuMjU4LDMwLjgzNl0sWy0xMTYuNzIxLDMxLjYzNl0sWy0xMTcuMTI4LDMyLjUzNV0sWy0xMTcuMjk2LDMzLjA0Nl0sWy0xMTcuOTQ0LDMzLjYyMV0sWy0xMTguNDExLDMzLjc0MV0sWy0xMTguNTIsMzQuMDI4XSxbLTExOS4wODEsMzQuMDc4XSxbLTExOS40MzksMzQuMzQ5XSxbLTEyMC4zNjgsMzQuNDQ3XSxbLTEyMC42MjMsMzQuNjA5XSxbLTEyMC43NDQsMzUuMTU3XSxbLTEyMS43MTUsMzYuMTYyXSxbLTEyMi41NDcsMzcuNTUyXSxbLTEyMi41MTIsMzcuNzg0XSxbLTEyMi45NTMsMzguMTE0XSxbLTEyMy43MjcsMzguOTUyXSxbLTEyMy44NjUsMzkuNzY3XSxbLTEyNC4zOTgsNDAuMzEzXSxbLTEyNC4xNzksNDEuMTQyXSxbLTEyNC4yMTQsNDIuMF0sWy0xMjQuNTMzLDQyLjc2Nl0sWy0xMjQuMTQyLDQzLjcwOF0sWy0xMjMuODk5LDQ1LjUyM10sWy0xMjQuMDgsNDYuODY1XSxbLTEyNC4zOTYsNDcuNzJdLFstMTI0LjY4Nyw0OC4xODVdLFstMTI0LjU2Niw0OC4zOF0sWy0xMjMuMTIsNDguMDRdLFstMTIyLjU4Nyw0Ny4wOTZdLFstMTIyLjM0LDQ3LjM2XSxbLTEyMi41LDQ4LjE4XSxbLTEyMi44NCw0OS4wXSxbLTEyMi45NzQsNDkuMDAzXSxbLTEyNC45MSw0OS45ODVdLFstMTI1LjYyNSw1MC40MTddLFstMTI3LjQzNiw1MC44MzFdLFstMTI3Ljk5Myw1MS43MTZdLFstMTI3Ljg1LDUyLjMzXSxbLTEyOS4xMyw1Mi43NTVdLFstMTI5LjMwNSw1My41NjJdLFstMTMwLjUxNSw1NC4yODhdLFstMTMwLjUzNiw1NC44MDNdLFstMTMxLjA4Niw1NS4xNzldLFstMTMxLjk2Nyw1NS40OThdLFstMTMyLjI1LDU2LjM3XSxbLTEzMy41MzksNTcuMTc5XSxbLTEzNC4wNzgsNTguMTIzXSxbLTEzNS4wMzgsNTguMTg4XSxbLTEzNi42MjgsNTguMjEyXSxbLTEzNy44LDU4LjVdLFstMTM5Ljg2OCw1OS41MzhdLFstMTQwLjgyNSw1OS43MjddLFstMTQyLjU3NCw2MC4wODRdLFstMTQzLjk1OSw1OS45OTldLFstMTQ1LjkyNSw2MC40NTldLFstMTQ3LjExNCw2MC44ODVdLFstMTQ4LjIyNCw2MC42NzNdLFstMTQ4LjAxOCw1OS45NzhdLFstMTQ4LjU3MSw1OS45MTRdLFstMTQ5LjcyOCw1OS43MDZdLFstMTUwLjYwOCw1OS4zNjhdLFstMTUxLjcxNiw1OS4xNTZdLFstMTUxLjg1OSw1OS43NDVdLFstMTUxLjQxLDYwLjcyNl0sWy0xNTAuMzQ3LDYxLjAzNF0sWy0xNTAuNjIxLDYxLjI4NF0sWy0xNTEuODk2LDYwLjcyN10sWy0xNTIuNTc4LDYwLjA2Ml0sWy0xNTQuMDE5LDU5LjM1XSxbLTE1My4yODcsNTguODY1XSxbLTE1NC4yMzIsNTguMTQ2XSxbLTE1NS4zMDcsNTcuNzI4XSxbLTE1Ni4zMDgsNTcuNDIzXSxbLTE1Ni41NTYsNTYuOThdLFstMTU4LjExNyw1Ni40NjRdLFstMTU4LjQzMyw1NS45OTRdLFstMTU5LjYwMyw1NS41NjddLFstMTYwLjI5LDU1LjY0NF0sWy0xNjEuMjIzLDU1LjM2NV0sWy0xNjIuMjM4LDU1LjAyNF0sWy0xNjMuMDY5LDU0LjY5XSxbLTE2NC43ODYsNTQuNDA0XSxbLTE2NC45NDIsNTQuNTcyXSxbLTE2My44NDgsNTUuMDM5XSxbLTE2Mi44Nyw1NS4zNDhdLFstMTYxLjgwNCw1NS44OTVdLFstMTYwLjU2NCw1Ni4wMDhdLFstMTYwLjA3LDU2LjQxOF0sWy0xNTguNjg0LDU3LjAxN10sWy0xNTguNDYxLDU3LjIxN10sWy0xNTcuNzIzLDU3LjU3XSxbLTE1Ny41NSw1OC4zMjhdLFstMTU3LjA0Miw1OC45MTldLFstMTU4LjE5NSw1OC42MTZdLFstMTU4LjUxNyw1OC43ODhdLFstMTU5LjA1OSw1OC40MjRdLFstMTU5LjcxMiw1OC45MzJdLFstMTU5Ljk4MSw1OC41NzNdLFstMTYwLjM1NSw1OS4wNzFdLFstMTYxLjM1NSw1OC42NzFdLFstMTYxLjk2OSw1OC42NzJdLFstMTYyLjA1NSw1OS4yNjddLFstMTYxLjg3NCw1OS42MzRdLFstMTYyLjUxOCw1OS45OV0sWy0xNjMuODE4LDU5Ljc5OF0sWy0xNjQuNjYyLDYwLjI2OF0sWy0xNjUuMzQ2LDYwLjUwOF0sWy0xNjUuMzUxLDYxLjA3NF0sWy0xNjYuMTIxLDYxLjVdLFstMTY1LjczNCw2Mi4wNzVdLFstMTY0LjkxOSw2Mi42MzNdLFstMTY0LjU2Miw2My4xNDZdLFstMTYzLjc1Myw2My4yMTldLFstMTYzLjA2Nyw2My4wNl0sWy0xNjIuMjYsNjMuNTQyXSxbLTE2MS41MzQsNjMuNDU2XSxbLTE2MC43NzMsNjMuNzY2XSxbLTE2MC45NTgsNjQuMjIzXSxbLTE2MS41MTgsNjQuNDAzXSxbLTE2MC43NzgsNjQuNzg5XSxbLTE2MS4zOTIsNjQuNzc3XSxbLTE2Mi40NTMsNjQuNTZdLFstMTYyLjc1OCw2NC4zMzldLFstMTYzLjU0Niw2NC41NTldLFstMTY0Ljk2MSw2NC40NDddLFstMTY2LjQyNSw2NC42ODddLFstMTY2Ljg0NSw2NS4wODldLFstMTY4LjExLDY1LjY3XSxbLTE2Ni43MDUsNjYuMDg4XSxbLTE2NC40NzUsNjYuNTc3XSxbLTE2My42NTMsNjYuNTc3XSxbLTE2My43ODksNjYuMDc3XSxbLTE2MS42NzgsNjYuMTE2XSxbLTE2Mi40OSw2Ni43MzVdLFstMTYzLjcyLDY3LjExN10sWy0xNjQuNDMxLDY3LjYxNl0sWy0xNjUuMzksNjguMDQzXSxbLTE2Ni43NjQsNjguMzU5XSxbLTE2Ni4yMDUsNjguODgzXSxbLTE2NC40MzEsNjguOTE2XSxbLTE2My4xNjksNjkuMzcxXSxbLTE2Mi45Myw2OS44NThdLFstMTYxLjkwOSw3MC4zMzNdLFstMTYwLjkzNSw3MC40NDhdLFstMTU5LjAzOSw3MC44OTJdLFstMTU4LjEyLDcwLjgyNV0sWy0xNTYuNTgxLDcxLjM1OF0sWy0xNTUuMDY4LDcxLjE0OF0sWy0xNTQuMzQ0LDcwLjY5Nl0sWy0xNTMuOSw3MC44OV0sWy0xNTIuMjEsNzAuODNdLFstMTUyLjI3LDcwLjZdLFstMTUwLjc0LDcwLjQzXSxbLTE0OS43Miw3MC41M10sWy0xNDcuNjEzLDcwLjIxNF0sWy0xNDUuNjksNzAuMTJdLFstMTQ0LjkyLDY5Ljk5XSxbLTE0My41ODksNzAuMTUzXSxbLTE0Mi4wNzMsNjkuODUyXSxbLTE0MC45ODYsNjkuNzEyXSxbLTEzOS4xMiw2OS40NzFdLFstMTM3LjU0Niw2OC45OV0sWy0xMzYuNTA0LDY4Ljg5OF0sWy0xMzUuNjI2LDY5LjMxNV0sWy0xMzQuNDE1LDY5LjYyOF0sWy0xMzIuOTI5LDY5LjUwNV0sWy0xMzEuNDMxLDY5Ljk0NV0sWy0xMjkuNzk1LDcwLjE5NF0sWy0xMjkuMTA4LDY5Ljc3OV0sWy0xMjguMzYyLDcwLjAxM10sWy0xMjguMTM4LDcwLjQ4NF0sWy0xMjcuNDQ3LDcwLjM3N10sWy0xMjUuNzU2LDY5LjQ4MV0sWy0xMjQuNDI1LDcwLjE1OV0sWy0xMjQuMjksNjkuNF0sWy0xMjMuMDYxLDY5LjU2NF0sWy0xMjIuNjgzLDY5Ljg1Nl0sWy0xMjEuNDcyLDY5Ljc5OF0sWy0xMTkuOTQzLDY5LjM3OF0sWy0xMTcuNjAzLDY5LjAxMV0sWy0xMTYuMjI2LDY4Ljg0MV0sWy0xMTUuMjQ3LDY4LjkwNl0sWy0xMTMuODk4LDY4LjM5OV0sWy0xMTUuMzA1LDY3LjkwM10sWy0xMTMuNDk3LDY3LjY4OF0sWy0xMTAuNzk4LDY3LjgwNl0sWy0xMDkuOTQ2LDY3Ljk4MV0sWy0xMDguODgsNjcuMzgyXSxbLTEwNy43OTIsNjcuODg4XSxbLTEwOC44MTMsNjguMzEyXSxbLTEwOC4xNjcsNjguNjU0XSxbLTEwNi45NSw2OC43XSxbLTEwNi4xNSw2OC44XSxbLTEwNS4zNDMsNjguNTYxXSxbLTEwNC4zMzgsNjguMDE4XSxbLTEwMy4yMjEsNjguMDk4XSxbLTEwMS40NTQsNjcuNjQ3XSxbLTk5LjkwMiw2Ny44MDZdLFstOTguNDQzLDY3Ljc4Ml0sWy05OC41NTksNjguNDA0XSxbLTk3LjY2OSw2OC41NzldLFstOTYuMTIsNjguMjRdLFstOTYuMTI2LDY3LjI5NF0sWy05NS40ODksNjguMDkxXSxbLTk0LjY4NSw2OC4wNjRdLFstOTQuMjMzLDY5LjA2OV0sWy05NS4zMDQsNjkuNjg2XSxbLTk2LjQ3MSw3MC4wOV0sWy05Ni4zOTEsNzEuMTk1XSxbLTk1LjIwOSw3MS45Ml0sWy05My44OSw3MS43Nl0sWy05Mi44NzgsNzEuMzE5XSxbLTkxLjUyLDcwLjE5MV0sWy05Mi40MDcsNjkuN10sWy05MC41NDcsNjkuNDk4XV0sW1stMTE0LjE2Nyw3My4xMjFdLFstMTE0LjY2Niw3Mi42NTNdLFstMTEyLjQ0MSw3Mi45NTVdLFstMTExLjA1LDcyLjQ1XSxbLTEwOS45Miw3Mi45NjFdLFstMTA5LjAwNyw3Mi42MzNdLFstMTA4LjE4OCw3MS42NTFdLFstMTA3LjY4Niw3Mi4wNjVdLFstMTA4LjM5Niw3My4wOV0sWy0xMDcuNTE2LDczLjIzNl0sWy0xMDYuNTIzLDczLjA3Nl0sWy0xMDUuNDAyLDcyLjY3M10sWy0xMDQuNzc1LDcxLjY5OF0sWy0xMDQuNDY1LDcwLjk5M10sWy0xMDIuNzg1LDcwLjQ5OF0sWy0xMDAuOTgxLDcwLjAyNF0sWy0xMDEuMDg5LDY5LjU4NF0sWy0xMDIuNzMxLDY5LjUwNF0sWy0xMDIuMDkzLDY5LjEyXSxbLTEwMi40Myw2OC43NTNdLFstMTA0LjI0LDY4LjkxXSxbLTEwNS45Niw2OS4xOF0sWy0xMDcuMTIzLDY5LjExOV0sWy0xMDksNjguNzhdLFstMTExLjk2Nyw2OC42MDRdLFstMTEzLjMxMyw2OC41MzZdLFstMTEzLjg1NSw2OS4wMDddLFstMTE1LjIyLDY5LjI4XSxbLTExNi4xMDgsNjkuMTY4XSxbLTExNy4zNCw2OS45Nl0sWy0xMTYuNjc1LDcwLjA2N10sWy0xMTUuMTMxLDcwLjIzN10sWy0xMTMuNzIxLDcwLjE5Ml0sWy0xMTIuNDE2LDcwLjM2Nl0sWy0xMTQuMzUsNzAuNl0sWy0xMTYuNDg3LDcwLjUyXSxbLTExNy45MDUsNzAuNTQxXSxbLTExOC40MzIsNzAuOTA5XSxbLTExNi4xMTMsNzEuMzA5XSxbLTExNy42NTYsNzEuMjk1XSxbLTExOS40MDIsNzEuNTU5XSxbLTExOC41NjMsNzIuMzA4XSxbLTExNy44NjYsNzIuNzA2XSxbLTExNS4xODksNzMuMzE1XSxbLTExNC4xNjcsNzMuMTIxXV0sW1stMTA0LjUsNzMuNDJdLFstMTA1LjM4LDcyLjc2XSxbLTEwNi45NCw3My40Nl0sWy0xMDYuNiw3My42XSxbLTEwNS4yNiw3My42NF0sWy0xMDQuNSw3My40Ml1dLFtbLTc2LjM0LDczLjEwM10sWy03Ni4yNTEsNzIuODI2XSxbLTc3LjMxNCw3Mi44NTZdLFstNzguMzkyLDcyLjg3N10sWy03OS40ODYsNzIuNzQyXSxbLTc5Ljc3Niw3Mi44MDNdLFstODAuODc2LDczLjMzM10sWy04MC44MzQsNzMuNjkzXSxbLTgwLjM1Myw3My43Nl0sWy03OC4wNjQsNzMuNjUyXSxbLTc2LjM0LDczLjEwM11dLFtbLTg2LjU2Miw3My4xNTddLFstODUuNzc0LDcyLjUzNF0sWy04NC44NSw3My4zNF0sWy04Mi4zMTYsNzMuNzUxXSxbLTgwLjYsNzIuNzE3XSxbLTgwLjc0OSw3Mi4wNjJdLFstNzguNzcxLDcyLjM1Ml0sWy03Ny44MjUsNzIuNzVdLFstNzUuNjA2LDcyLjI0NF0sWy03NC4yMjksNzEuNzY3XSxbLTc0LjA5OSw3MS4zMzFdLFstNzIuMjQyLDcxLjU1N10sWy03MS4yLDcwLjkyXSxbLTY4Ljc4Niw3MC41MjVdLFstNjcuOTE1LDcwLjEyMl0sWy02Ni45NjksNjkuMTg2XSxbLTY4LjgwNSw2OC43Ml0sWy02Ni40NSw2OC4wNjddLFstNjQuODYyLDY3Ljg0OF0sWy02My40MjUsNjYuOTI4XSxbLTYxLjg1Miw2Ni44NjJdLFstNjIuMTYzLDY2LjE2XSxbLTYzLjkxOCw2NC45OTldLFstNjUuMTQ5LDY1LjQyNl0sWy02Ni43MjEsNjYuMzg4XSxbLTY4LjAxNSw2Ni4yNjNdLFstNjguMTQxLDY1LjY5XSxbLTY3LjA5LDY1LjEwOF0sWy02NS43MzIsNjQuNjQ4XSxbLTY1LjMyLDY0LjM4M10sWy02NC42NjksNjMuMzkzXSxbLTY1LjAxNCw2Mi42NzRdLFstNjYuMjc1LDYyLjk0NV0sWy02OC43ODMsNjMuNzQ2XSxbLTY3LjM3LDYyLjg4NF0sWy02Ni4zMjgsNjIuMjhdLFstNjYuMTY2LDYxLjkzMV0sWy02OC44NzcsNjIuMzNdLFstNzEuMDIzLDYyLjkxMV0sWy03Mi4yMzUsNjMuMzk4XSxbLTcxLjg4Niw2My42OF0sWy03My4zNzgsNjQuMTk0XSxbLTc0LjgzNCw2NC42NzldLFstNzQuODE5LDY0LjM4OV0sWy03Ny43MSw2NC4yM10sWy03OC41NTYsNjQuNTczXSxbLTc3Ljg5Nyw2NS4zMDldLFstNzYuMDE4LDY1LjMyN10sWy03My45Niw2NS40NTVdLFstNzQuMjk0LDY1LjgxMl0sWy03My45NDUsNjYuMzExXSxbLTcyLjY1MSw2Ny4yODVdLFstNzIuOTI2LDY3LjcyN10sWy03My4zMTIsNjguMDY5XSxbLTc0Ljg0Myw2OC41NTVdLFstNzYuODY5LDY4Ljg5NV0sWy03Ni4yMjksNjkuMTQ4XSxbLTc3LjI4Nyw2OS43N10sWy03OC4xNjksNjkuODI2XSxbLTc4Ljk1Nyw3MC4xNjddLFstNzkuNDkyLDY5Ljg3Ml0sWy04MS4zMDUsNjkuNzQzXSxbLTg0Ljk0NSw2OS45NjddLFstODcuMDYsNzAuMjZdLFstODguNjgyLDcwLjQxMV0sWy04OS41MTMsNzAuNzYyXSxbLTg4LjQ2OCw3MS4yMThdLFstODkuODg4LDcxLjIyM10sWy05MC4yMDUsNzIuMjM1XSxbLTg5LjQzNyw3My4xMjldLFstODguNDA4LDczLjUzOF0sWy04NS44MjYsNzMuODA0XSxbLTg2LjU2Miw3My4xNTddXSxbWy0xMDAuMzU2LDczLjg0NF0sWy05OS4xNjQsNzMuNjMzXSxbLTk3LjM4LDczLjc2XSxbLTk3LjEyLDczLjQ3XSxbLTk4LjA1NCw3Mi45OTFdLFstOTYuNTQsNzIuNTZdLFstOTYuNzIsNzEuNjZdLFstOTguMzYsNzEuMjczXSxbLTk5LjMyMyw3MS4zNTZdLFstMTAwLjAxNSw3MS43MzhdLFstMTAyLjUsNzIuNTFdLFstMTAyLjQ4LDcyLjgzXSxbLTEwMC40MzgsNzIuNzA2XSxbLTEwMS41NCw3My4zNl0sWy0xMDAuMzU2LDczLjg0NF1dLFtbMTQzLjYwNCw3My4yMTJdLFsxNDIuMDg4LDczLjIwNV0sWzE0MC4wMzgsNzMuMzE3XSxbMTM5Ljg2Myw3My4zN10sWzE0MC44MTIsNzMuNzY1XSxbMTQyLjA2Miw3My44NThdLFsxNDMuNDgzLDczLjQ3NV0sWzE0My42MDQsNzMuMjEyXV0sW1stOTMuMTk2LDcyLjc3Ml0sWy05NC4yNjksNzIuMDI1XSxbLTk1LjQxLDcyLjA2Ml0sWy05Ni4wMzQsNzIuOTRdLFstOTYuMDE4LDczLjQzN10sWy05NS40OTYsNzMuODYyXSxbLTk0LjUwNCw3NC4xMzVdLFstOTIuNDIsNzQuMV0sWy05MC41MSw3My44NTddLFstOTIuMDA0LDcyLjk2Nl0sWy05My4xOTYsNzIuNzcyXV0sW1stMTIwLjQ2LDcxLjRdLFstMTIzLjA5Miw3MC45MDJdLFstMTIzLjYyLDcxLjM0XSxbLTEyNS45MjksNzEuODY5XSxbLTEyNS41OTMsNzIuMTk1XSxbLTEyNC44MDcsNzMuMDIzXSxbLTEyMy45NCw3My42OF0sWy0xMjQuOTE4LDc0LjI5M10sWy0xMjEuNTM4LDc0LjQ0OV0sWy0xMjAuMTEsNzQuMjQxXSxbLTExNy41NTYsNzQuMTg2XSxbLTExNi41ODQsNzMuODk2XSxbLTExNS41MTEsNzMuNDc1XSxbLTExNi43NjgsNzMuMjIzXSxbLTExOS4yMiw3Mi41Ml0sWy0xMjAuNDYsNzEuODJdLFstMTIwLjQ2LDcxLjRdXSxbWzE1MC43MzIsNzUuMDg0XSxbMTQ5LjU3Niw3NC42ODldLFsxNDcuOTc3LDc0Ljc3OF0sWzE0Ni4xMTksNzUuMTczXSxbMTQ2LjM1OCw3NS40OTddLFsxNDguMjIyLDc1LjM0Nl0sWzE1MC43MzIsNzUuMDg0XV0sW1stOTMuNjEzLDc0Ljk4XSxbLTk0LjE1Nyw3NC41OTJdLFstOTUuNjA5LDc0LjY2N10sWy05Ni44MjEsNzQuOTI4XSxbLTk2LjI4OSw3NS4zNzhdLFstOTQuODUxLDc1LjY0N10sWy05My45NzgsNzUuMjk2XSxbLTkzLjYxMyw3NC45OF1dLFtbMTQ1LjA4Niw3NS41NjNdLFsxNDQuMyw3NC44Ml0sWzE0MC42MTQsNzQuODQ4XSxbMTM4Ljk1NSw3NC42MTFdLFsxMzYuOTc0LDc1LjI2Ml0sWzEzNy41MTIsNzUuOTQ5XSxbMTM4LjgzMSw3Ni4xMzddLFsxNDEuNDcyLDc2LjA5M10sWzE0NS4wODYsNzUuNTYzXV0sW1stOTguNSw3Ni43Ml0sWy05Ny43MzYsNzYuMjU3XSxbLTk3LjcwNCw3NS43NDNdLFstOTguMTYsNzVdLFstOTkuODA5LDc0Ljg5N10sWy0xMDAuODg0LDc1LjA1N10sWy0xMDAuODYzLDc1LjY0MV0sWy0xMDIuNTAyLDc1LjU2NF0sWy0xMDIuNTY2LDc2LjMzN10sWy0xMDEuNDksNzYuMzA1XSxbLTk5Ljk4Myw3Ni42NDZdLFstOTguNTc3LDc2LjU4OV0sWy05OC41LDc2LjcyXV0sW1stMTA4LjIxMSw3Ni4yMDJdLFstMTA3LjgxOSw3NS44NDZdLFstMTA2LjkyOSw3Ni4wMTNdLFstMTA1Ljg4MSw3NS45NjldLFstMTA1LjcwNSw3NS40OF0sWy0xMDYuMzEzLDc1LjAwNV0sWy0xMDkuNyw3NC44NV0sWy0xMTIuMjIzLDc0LjQxN10sWy0xMTMuNzQ0LDc0LjM5NF0sWy0xMTMuODcxLDc0LjcyXSxbLTExMS43OTQsNzUuMTYyXSxbLTExNi4zMTIsNzUuMDQzXSxbLTExNy43MSw3NS4yMjJdLFstMTE2LjM0Niw3Ni4xOTldLFstMTE1LjQwNSw3Ni40NzldLFstMTEyLjU5MSw3Ni4xNDFdLFstMTEwLjgxNCw3NS41NDldLFstMTA5LjA2Nyw3NS40NzNdLFstMTEwLjQ5Nyw3Ni40M10sWy0xMDkuNTgxLDc2Ljc5NF0sWy0xMDguNTQ5LDc2LjY3OF0sWy0xMDguMjExLDc2LjIwMl1dLFtbNTcuNTM2LDcwLjcyXSxbNTYuOTQ1LDcwLjYzM10sWzUzLjY3Nyw3MC43NjNdLFs1My40MTIsNzEuMjA3XSxbNTEuNjAyLDcxLjQ3NV0sWzUxLjQ1Niw3Mi4wMTVdLFs1Mi40NzgsNzIuMjI5XSxbNTIuNDQ0LDcyLjc3NV0sWzU0LjQyOCw3My42MjhdLFs1My41MDgsNzMuNzVdLFs1NS45MDIsNzQuNjI3XSxbNTUuNjMyLDc1LjA4MV0sWzU3Ljg2OSw3NS42MDldLFs2MS4xNyw3Ni4yNTJdLFs2NC40OTgsNzYuNDM5XSxbNjYuMjExLDc2LjgxXSxbNjguMTU3LDc2Ljk0XSxbNjguODUyLDc2LjU0NV0sWzY4LjE4MSw3Ni4yMzRdLFs2NC42MzcsNzUuNzM4XSxbNjEuNTg0LDc1LjI2MV0sWzU4LjQ3Nyw3NC4zMDldLFs1Ni45ODcsNzMuMzMzXSxbNTUuNDE5LDcyLjM3MV0sWzU1LjYyMyw3MS41NDFdLFs1Ny41MzYsNzAuNzJdXSxbWy05NC42ODQsNzcuMDk4XSxbLTkzLjU3NCw3Ni43NzZdLFstOTEuNjA1LDc2Ljc3OV0sWy05MC43NDIsNzYuNDVdLFstOTAuOTcsNzYuMDc0XSxbLTg5LjgyMiw3NS44NDhdLFstODkuMTg3LDc1LjYxXSxbLTg3LjgzOCw3NS41NjZdLFstODYuMzc5LDc1LjQ4Ml0sWy04NC43OSw3NS42OTldLFstODIuNzUzLDc1Ljc4NF0sWy04MS4xMjksNzUuNzE0XSxbLTgwLjA1OCw3NS4zMzddLFstNzkuODM0LDc0LjkyM10sWy04MC40NTgsNzQuNjU3XSxbLTgxLjk0OSw3NC40NDJdLFstODMuMjI5LDc0LjU2NF0sWy04Ni4wOTcsNzQuNDFdLFstODguMTUsNzQuMzkyXSxbLTg5Ljc2NSw3NC41MTZdLFstOTIuNDIyLDc0LjgzOF0sWy05Mi43NjgsNzUuMzg3XSxbLTkyLjg5LDc1Ljg4M10sWy05My44OTQsNzYuMzE5XSxbLTk1Ljk2Miw3Ni40NDFdLFstOTcuMTIxLDc2Ljc1MV0sWy05Ni43NDUsNzcuMTYxXSxbLTk0LjY4NCw3Ny4wOThdXSxbWy0xMTYuMTk5LDc3LjY0NV0sWy0xMTYuMzM2LDc2Ljg3N10sWy0xMTcuMTA2LDc2LjUzXSxbLTExOC4wNCw3Ni40ODFdLFstMTE5Ljg5OSw3Ni4wNTNdLFstMTIxLjUsNzUuOV0sWy0xMjIuODU1LDc2LjExN10sWy0xMjIuODU1LDc2LjExN10sWy0xMjEuMTU4LDc2Ljg2NV0sWy0xMTkuMTA0LDc3LjUxMl0sWy0xMTcuNTcsNzcuNDk4XSxbLTExNi4xOTksNzcuNjQ1XV0sW1sxMDYuOTcsNzYuOTc0XSxbMTA3LjI0LDc2LjQ4XSxbMTA4LjE1NCw3Ni43MjNdLFsxMTEuMDc3LDc2LjcxXSxbMTEzLjMzMSw3Ni4yMjJdLFsxMTQuMTM0LDc1Ljg0OF0sWzExMy44ODUsNzUuMzI4XSxbMTEyLjc3OSw3NS4wMzJdLFsxMTAuMTUxLDc0LjQ3N10sWzEwOS40LDc0LjE4XSxbMTEwLjY0LDc0LjA0XSxbMTEyLjExOSw3My43ODhdLFsxMTMuMDE5LDczLjk3N10sWzExMy41Myw3My4zMzVdLFsxMTMuOTY5LDczLjU5NV0sWzExNS41NjgsNzMuNzUzXSxbMTE4Ljc3Niw3My41ODhdLFsxMTkuMDIsNzMuMTJdLFsxMjMuMjAxLDcyLjk3MV0sWzEyMy4yNTgsNzMuNzM1XSxbMTI1LjM4LDczLjU2XSxbMTI2Ljk3Nyw3My41NjVdLFsxMjguNTkxLDczLjAzOV0sWzEyOS4wNTIsNzIuMzk5XSxbMTI4LjQ2LDcxLjk4XSxbMTI5LjcxNiw3MS4xOTNdLFsxMzEuMjg5LDcwLjc4N10sWzEzMi4yNTMsNzEuODM2XSxbMTMzLjg1OCw3MS4zODZdLFsxMzUuNTYyLDcxLjY1NV0sWzEzNy40OTgsNzEuMzQ4XSxbMTM4LjIzNCw3MS42MjhdLFsxMzkuODcsNzEuNDg4XSxbMTM5LjE0OCw3Mi40MTZdLFsxNDAuNDY4LDcyLjg0OV0sWzE0OS41LDcyLjJdLFsxNTAuMzUxLDcxLjYwN10sWzE1Mi45NjksNzAuODQyXSxbMTU3LjAwNyw3MS4wMzFdLFsxNTguOTk4LDcwLjg2N10sWzE1OS44Myw3MC40NTNdLFsxNTkuNzA5LDY5LjcyMl0sWzE2MC45NDEsNjkuNDM3XSxbMTYyLjI3OSw2OS42NDJdLFsxNjQuMDUyLDY5LjY2OF0sWzE2NS45NCw2OS40NzJdLFsxNjcuODM2LDY5LjU4M10sWzE2OS41NzgsNjguNjk0XSxbMTcwLjgxNyw2OS4wMTRdLFsxNzAuMDA4LDY5LjY1M10sWzE3MC40NTMsNzAuMDk3XSxbMTczLjY0NCw2OS44MThdLFsxNzUuNzI0LDY5Ljg3N10sWzE3OC42LDY5LjRdLFsxODAsNjguOTY0XSxbMTgwLDY0Ljk4XSxbMTc5Ljk5Myw2NC45NzRdLFsxNzguNzA3LDY0LjUzNV0sWzE3Ny40MTEsNjQuNjA4XSxbMTc4LjMxMyw2NC4wNzZdLFsxNzguOTA4LDYzLjI1Ml0sWzE3OS4zNyw2Mi45ODNdLFsxNzkuNDg3LDYyLjU2OV0sWzE3OS4yMjgsNjIuMzA0XSxbMTc3LjM2NCw2Mi41MjJdLFsxNzQuNTY5LDYxLjc2OV0sWzE3My42OCw2MS42NTNdLFsxNzIuMTUsNjAuOTVdLFsxNzAuNjk4LDYwLjMzNl0sWzE3MC4zMzEsNTkuODgyXSxbMTY4LjkwMSw2MC41NzNdLFsxNjYuMjk1LDU5Ljc4OV0sWzE2NS44NCw2MC4xNl0sWzE2NC44NzcsNTkuNzMyXSxbMTYzLjUzOSw1OS44NjldLFsxNjMuMjE3LDU5LjIxMV0sWzE2Mi4wMTcsNTguMjQzXSxbMTYyLjA1Myw1Ny44MzldLFsxNjMuMTkyLDU3LjYxNV0sWzE2My4wNTgsNTYuMTU5XSxbMTYyLjEzLDU2LjEyMl0sWzE2MS43MDEsNTUuMjg2XSxbMTYyLjExNyw1NC44NTVdLFsxNjAuMzY5LDU0LjM0NF0sWzE2MC4wMjIsNTMuMjAzXSxbMTU4LjUzMSw1Mi45NTldLFsxNTguMjMxLDUxLjk0M10sWzE1Ni43OSw1MS4wMTFdLFsxNTYuNDIsNTEuN10sWzE1NS45OTIsNTMuMTU5XSxbMTU1LjQzNCw1NS4zODFdLFsxNTUuOTE0LDU2Ljc2OF0sWzE1Ni43NTgsNTcuMzY1XSxbMTU2LjgxLDU3LjgzMl0sWzE1OC4zNjQsNTguMDU2XSxbMTYwLjE1MSw1OS4zMTVdLFsxNjEuODcyLDYwLjM0M10sWzE2My42Nyw2MS4xNDFdLFsxNjQuNDc0LDYyLjU1MV0sWzE2My4yNTgsNjIuNDY2XSxbMTYyLjY1OCw2MS42NDNdLFsxNjAuMTIyLDYwLjU0NF0sWzE1OS4zMDIsNjEuNzc0XSxbMTU2LjcyMSw2MS40MzVdLFsxNTQuMjE4LDU5Ljc1OF0sWzE1NS4wNDQsNTkuMTQ1XSxbMTUyLjgxMiw1OC44ODRdLFsxNTEuMjY2LDU4Ljc4MV0sWzE1MS4zMzgsNTkuNTA0XSxbMTQ5Ljc4NCw1OS42NTZdLFsxNDguNTQ1LDU5LjE2NF0sWzE0NS40ODcsNTkuMzM2XSxbMTQyLjE5OCw1OS4wNF0sWzEzOC45NTgsNTcuMDg4XSxbMTM1LjEyNiw1NC43M10sWzEzNi43MDIsNTQuNjA0XSxbMTM3LjE5Myw1My45NzddLFsxMzguMTY1LDUzLjc1NV0sWzEzOC44MDUsNTQuMjU1XSxbMTM5LjkwMSw1NC4xOV0sWzE0MS4zNDUsNTMuMDldLFsxNDEuMzc5LDUyLjIzOV0sWzE0MC41OTcsNTEuMjRdLFsxNDAuNTEzLDUwLjA0NV0sWzE0MC4wNjIsNDguNDQ3XSxbMTM4LjU1NSw0Ny4wXSxbMTM4LjIyLDQ2LjMwOF0sWzEzNi44NjIsNDUuMTQzXSxbMTM1LjUxNSw0My45ODldLFsxMzQuODcsNDMuMzk4XSxbMTMzLjUzNyw0Mi44MTJdLFsxMzIuOTA2LDQyLjc5OV0sWzEzMi4yNzgsNDMuMjg0XSxbMTMwLjkzNiw0Mi41NTNdLFsxMzAuNzgsNDIuMjJdLFsxMzAuNCw0Mi4yOF0sWzEyOS45NjYsNDEuOTQxXSxbMTI5LjY2Nyw0MS42MDFdLFsxMjkuNzA1LDQwLjg4M10sWzEyOS4xODgsNDAuNjYyXSxbMTI5LjAxLDQwLjQ4NV0sWzEyOC42MzMsNDAuMTldLFsxMjcuOTY4LDQwLjAyNl0sWzEyNy41MzQsMzkuNzU3XSxbMTI3LjUwMiwzOS4zMjRdLFsxMjcuMzg1LDM5LjIxNF0sWzEyNy43ODMsMzkuMDUxXSxbMTI4LjM1LDM4LjYxMl0sWzEyOS4yMTMsMzcuNDMyXSxbMTI5LjQ2MSwzNi43ODRdLFsxMjkuNDY4LDM1LjYzMl0sWzEyOS4wOTEsMzUuMDgzXSxbMTI4LjE4NiwzNC44OTFdLFsxMjcuMzg2LDM0LjQ3Nl0sWzEyNi40ODYsMzQuMzldLFsxMjYuMzc0LDM0LjkzNV0sWzEyNi41NTksMzUuNjg1XSxbMTI2LjExNywzNi43MjZdLFsxMjYuODYsMzYuODk0XSxbMTI2LjE3NSwzNy43NV0sWzEyNS42ODksMzcuOTRdLFsxMjUuNTY4LDM3Ljc1Ml0sWzEyNS4yNzUsMzcuNjY5XSxbMTI1LjI0LDM3Ljg1N10sWzEyNC45ODEsMzcuOTQ5XSxbMTI0LjcxMiwzOC4xMDhdLFsxMjQuOTg2LDM4LjU0OV0sWzEyNS4yMjIsMzguNjY2XSxbMTI1LjEzMywzOC44NDldLFsxMjUuMzg3LDM5LjM4OF0sWzEyNS4zMjEsMzkuNTUyXSxbMTI0LjczNywzOS42Nl0sWzEyNC4yNjYsMzkuOTI5XSxbMTIyLjg2OCwzOS42MzhdLFsxMjIuMTMyLDM5LjE3XSxbMTIxLjA1NSwzOC44OThdLFsxMjEuNTg2LDM5LjM2MV0sWzEyMS4zNzcsMzkuNzVdLFsxMjIuMTY5LDQwLjQyMl0sWzEyMS42NDEsNDAuOTQ2XSxbMTIwLjc2OSw0MC41OTRdLFsxMTkuNjQsMzkuODk4XSxbMTE5LjAyMywzOS4yNTJdLFsxMTguMDQzLDM5LjIwNF0sWzExNy41MzMsMzguNzM4XSxbMTE4LjA2LDM4LjA2Ml0sWzExOC44NzgsMzcuODk3XSxbMTE4LjkxMiwzNy40NDhdLFsxMTkuNzAzLDM3LjE1Nl0sWzEyMC44MjMsMzcuODddLFsxMjEuNzExLDM3LjQ4MV0sWzEyMi4zNTgsMzcuNDU1XSxbMTIyLjUyLDM2LjkzMV0sWzEyMS4xMDQsMzYuNjUxXSxbMTIwLjYzNywzNi4xMTJdLFsxMTkuNjY1LDM1LjYxXSxbMTE5LjE1MSwzNC45MV0sWzEyMC4yMjcsMzQuMzZdLFsxMjAuNjIsMzMuMzc3XSxbMTIxLjIyOSwzMi40Nl0sWzEyMS45MDgsMzEuNjkyXSxbMTIxLjg5MiwzMC45NDldLFsxMjEuMjY0LDMwLjY3Nl0sWzEyMS41MDMsMzAuMTQzXSxbMTIyLjA5MiwyOS44MzNdLFsxMjEuOTM4LDI5LjAxOF0sWzEyMS42ODUsMjguMjI2XSxbMTIxLjEyNiwyOC4xMzZdLFsxMjAuMzk2LDI3LjA1M10sWzExOS41ODYsMjUuNzQxXSxbMTE4LjY1NywyNC41NDddLFsxMTcuMjgyLDIzLjYyNV0sWzExNS44OTEsMjIuNzgzXSxbMTE0Ljc2NCwyMi42NjhdLFsxMTQuMTUzLDIyLjIyNF0sWzExMy44MDcsMjIuNTQ4XSxbMTEzLjI0MSwyMi4wNTJdLFsxMTEuODQ0LDIxLjU1XSxbMTEwLjc4NiwyMS4zOTddLFsxMTAuNDQ0LDIwLjM0MV0sWzEwOS44OSwyMC4yODJdLFsxMDkuNjI4LDIxLjAwOF0sWzEwOS44NjUsMjEuMzk1XSxbMTA4LjUyMywyMS43MTVdLFsxMDguMDUsMjEuNTUyXSxbMTA2LjcxNSwyMC42OTddLFsxMDUuODgyLDE5Ljc1Ml0sWzEwNS42NjIsMTkuMDU4XSxbMTA2LjQyNywxOC4wMDRdLFsxMDcuMzYyLDE2LjY5OF0sWzEwOC4yNjksMTYuMDhdLFsxMDguODc3LDE1LjI3N10sWzEwOS4zMzUsMTMuNDI2XSxbMTA5LjIsMTEuNjY3XSxbMTA4LjM2NiwxMS4wMDhdLFsxMDcuMjIxLDEwLjM2NV0sWzEwNi40MDUsOS41MzFdLFsxMDUuMTU4LDguNl0sWzEwNC43OTUsOS4yNDFdLFsxMDUuMDc2LDkuOTE5XSxbMTA0LjMzNCwxMC40ODddLFsxMDMuNDk3LDEwLjYzM10sWzEwMy4wOTEsMTEuMTU0XSxbMTAyLjU4NSwxMi4xODddLFsxMDEuNjg3LDEyLjY0Nl0sWzEwMC44MzIsMTIuNjI3XSxbMTAwLjk3OSwxMy40MTNdLFsxMDAuMDk4LDEzLjQwN10sWzEwMC4wMTksMTIuMzA3XSxbOTkuNDc5LDEwLjg0Nl0sWzk5LjE1NCw5Ljk2M10sWzk5LjIyMiw5LjIzOV0sWzk5Ljg3NCw5LjIwOF0sWzEwMC4yOCw4LjI5NV0sWzEwMC40NTksNy40M10sWzEwMS4wMTcsNi44NTddLFsxMDEuNjIzLDYuNzQxXSxbMTAyLjE0MSw2LjIyMl0sWzEwMi4zNzEsNi4xMjhdLFsxMDIuOTYyLDUuNTI0XSxbMTAzLjM4MSw0Ljg1NV0sWzEwMy40MzksNC4xODJdLFsxMDMuMzMyLDMuNzI3XSxbMTAzLjQzLDMuMzgzXSxbMTAzLjUwMywyLjc5MV0sWzEwMy44NTUsMi41MTZdLFsxMDQuMjQ4LDEuNjMxXSxbMTA0LjIyOSwxLjI5M10sWzEwMy41MiwxLjIyNl0sWzEwMi41NzQsMS45NjddLFsxMDEuMzkxLDIuNzYxXSxbMTAxLjI3NCwzLjI3XSxbMTAwLjY5NSwzLjkzOV0sWzEwMC41NTcsNC43NjddLFsxMDAuMTk3LDUuMzEyXSxbMTAwLjMwNiw2LjA0MV0sWzEwMC4wODYsNi40NjRdLFs5OS42OTEsNi44NDhdLFs5OS41Miw3LjM0NF0sWzk4Ljk4OCw3LjkwOF0sWzk4LjUwNCw4LjM4Ml0sWzk4LjM0LDcuNzk0XSxbOTguMTUsOC4zNV0sWzk4LjI1OSw4Ljk3NF0sWzk4LjU1NCw5LjkzM10sWzk4LjQ1NywxMC42NzVdLFs5OC43NjUsMTEuNDQxXSxbOTguNDI4LDEyLjAzM10sWzk4LjUxLDEzLjEyMl0sWzk4LjEwNCwxMy42NDFdLFs5Ny43NzgsMTQuODM3XSxbOTcuNTk3LDE2LjEwMV0sWzk3LjE2NSwxNi45MjldLFs5Ni41MDYsMTYuNDI3XSxbOTUuMzY5LDE1LjcxNF0sWzk0LjgwOCwxNS44MDRdLFs5NC4xODksMTYuMDM4XSxbOTQuNTM0LDE3LjI3N10sWzk0LjMyNSwxOC4yMTRdLFs5My41NDEsMTkuMzY3XSxbOTMuNjYzLDE5LjcyN10sWzkzLjA3OCwxOS44NTVdLFs5Mi4zNjksMjAuNjcxXSxbOTIuMDgzLDIxLjE5Ml0sWzkyLjAyNSwyMS43MDJdLFs5MS44MzUsMjIuMTgzXSxbOTEuNDE3LDIyLjc2NV0sWzkwLjQ5NiwyMi44MDVdLFs5MC41ODcsMjIuMzkzXSxbOTAuMjczLDIxLjgzNl0sWzg5Ljg0NywyMi4wMzldLFs4OS43MDIsMjEuODU3XSxbODkuNDE5LDIxLjk2Nl0sWzg5LjAzMiwyMi4wNTZdLFs4OC44ODksMjEuNjkxXSxbODguMjA4LDIxLjcwM10sWzg2Ljk3NiwyMS40OTVdLFs4Ny4wMzMsMjAuNzQzXSxbODYuNDk5LDIwLjE1Ml0sWzg1LjA2LDE5LjQ3OV0sWzgzLjk0MSwxOC4zMDJdLFs4My4xODksMTcuNjcxXSxbODIuMTkzLDE3LjAxN10sWzgyLjE5MSwxNi41NTddLFs4MS42OTMsMTYuMzFdLFs4MC43OTIsMTUuOTUyXSxbODAuMzI1LDE1Ljg5OV0sWzgwLjAyNSwxNS4xMzZdLFs4MC4yMzMsMTMuODM2XSxbODAuMjg2LDEzLjAwNl0sWzc5Ljg2MiwxMi4wNTZdLFs3OS44NTgsMTAuMzU3XSxbNzkuMzQxLDEwLjMwOV0sWzc4Ljg4NSw5LjU0Nl0sWzc5LjE5LDkuMjE3XSxbNzguMjc4LDguOTMzXSxbNzcuOTQxLDguMjUzXSxbNzcuNTQsNy45NjZdLFs3Ni41OTMsOC44OTldLFs3Ni4xMywxMC4zXSxbNzUuNzQ3LDExLjMwOF0sWzc1LjM5NiwxMS43ODFdLFs3NC44NjUsMTIuNzQyXSxbNzQuNjE3LDEzLjk5M10sWzc0LjQ0NCwxNC42MTddLFs3My41MzQsMTUuOTkxXSxbNzMuMTIsMTcuOTI5XSxbNzIuODIxLDE5LjIwOF0sWzcyLjgyNSwyMC40MTldLFs3Mi42MzEsMjEuMzU2XSxbNzEuMTc1LDIwLjc1OF0sWzcwLjQ3MSwyMC44NzddLFs2OS4xNjQsMjIuMDg5XSxbNjkuNjQ1LDIyLjQ1MV0sWzY5LjM1LDIyLjg0M10sWzY4LjE3NywyMy42OTJdLFs2Ny40NDQsMjMuOTQ1XSxbNjcuMTQ2LDI0LjY2NF0sWzY2LjM3MywyNS40MjVdLFs2NC41MzEsMjUuMjM3XSxbNjIuOTA2LDI1LjIxOV0sWzYxLjQ5NywyNS4wNzhdLFs1OS42MTYsMjUuMzhdLFs1OC41MjYsMjUuNjFdLFs1Ny4zOTcsMjUuNzRdLFs1Ni45NzEsMjYuOTY2XSxbNTYuNDkyLDI3LjE0M10sWzU1LjcyNCwyNi45NjVdLFs1NC43MTUsMjYuNDgxXSxbNTMuNDkzLDI2LjgxMl0sWzUyLjQ4NCwyNy41ODFdLFs1MS41MjEsMjcuODY2XSxbNTAuODUzLDI4LjgxNV0sWzUwLjExNSwzMC4xNDhdLFs0OS41NzcsMjkuOTg2XSxbNDguOTQxLDMwLjMxN10sWzQ4LjU2OCwyOS45MjddLFs0Ny45NzQsMjkuOTc2XSxbNDguMTgzLDI5LjUzNF0sWzQ4LjA5NCwyOS4zMDZdLFs0OC40MTYsMjguNTUyXSxbNDguODA4LDI3LjY5XSxbNDkuMywyNy40NjFdLFs0OS40NzEsMjcuMTFdLFs1MC4xNTMsMjYuNjldLFs1MC4yMTMsMjYuMjc3XSxbNTAuMTEzLDI1Ljk0NF0sWzUwLjI0LDI1LjYwOF0sWzUwLjUyOCwyNS4zMjhdLFs1MC42NjEsMjUuMF0sWzUwLjgxLDI0Ljc1NV0sWzUwLjc0NCwyNS40ODJdLFs1MS4wMTMsMjYuMDA3XSxbNTEuMjg2LDI2LjExNV0sWzUxLjU4OSwyNS44MDFdLFs1MS42MDcsMjUuMjE2XSxbNTEuMzksMjQuNjI4XSxbNTEuNTgsMjQuMjQ1XSxbNTEuNzU4LDI0LjI5NF0sWzUxLjc5NCwyNC4wMl0sWzUyLjU3NywyNC4xNzddLFs1My40MDQsMjQuMTUxXSxbNTQuMDA4LDI0LjEyMl0sWzU0LjY5MywyNC43OThdLFs1NS40MzksMjUuNDM5XSxbNTYuMDcxLDI2LjA1NV0sWzU2LjM2MiwyNi4zOTZdLFs1Ni40ODYsMjYuMzA5XSxbNTYuMzkxLDI1Ljg5Nl0sWzU2LjI2MSwyNS43MTVdLFs1Ni4zOTcsMjQuOTI1XSxbNTYuODQ1LDI0LjI0Ml0sWzU3LjQwNCwyMy44NzldLFs1OC4xMzcsMjMuNzQ4XSxbNTguNzI5LDIzLjU2Nl0sWzU5LjE4LDIyLjk5Ml0sWzU5LjQ1LDIyLjY2XSxbNTkuODA4LDIyLjUzNF0sWzU5LjgwNiwyMi4zMV0sWzU5LjQ0MiwyMS43MTRdLFs1OS4yODIsMjEuNDM0XSxbNTguODYxLDIxLjExNF0sWzU4LjQ4OCwyMC40MjldLFs1OC4wMzQsMjAuNDgyXSxbNTcuODI2LDIwLjI0M10sWzU3LjY2NiwxOS43MzZdLFs1Ny43ODksMTkuMDY4XSxbNTcuNjk1LDE4Ljk0NV0sWzU3LjIzNCwxOC45NDhdLFs1Ni42MSwxOC41NzRdLFs1Ni41MTIsMTguMDg3XSxbNTYuMjg0LDE3Ljg3Nl0sWzU1LjY2MSwxNy44ODRdLFs1NS4yNywxNy42MzJdLFs1NS4yNzUsMTcuMjI4XSxbNTQuNzkxLDE2Ljk1MV0sWzU0LjIzOSwxNy4wNDVdLFs1My41NywxNi43MDhdLFs1My4xMDksMTYuNjUxXSxbNTIuMzg1LDE2LjM4M10sWzUyLjE5MiwxNS45MzhdLFs1Mi4xNjgsMTUuNTk3XSxbNTEuMTcyLDE1LjE3NV0sWzQ5LjU3NSwxNC43MDldLFs0OC42NzksMTQuMDAzXSxbNDguMjM5LDEzLjk0OF0sWzQ3LjkzOSwxNC4wMDddLFs0Ny4zNTQsMTMuNTkyXSxbNDYuNzE3LDEzLjRdLFs0NS44NzgsMTMuMzQ4XSxbNDUuNjI1LDEzLjI5MV0sWzQ1LjQwNiwxMy4wMjddLFs0NS4xNDQsMTIuOTU0XSxbNDQuOTksMTIuN10sWzQ0LjQ5NSwxMi43MjJdLFs0NC4xNzUsMTIuNTg2XSxbNDMuNDgzLDEyLjYzN10sWzQzLjIyMywxMy4yMjFdLFs0My4yNTIsMTMuNzY4XSxbNDMuMDg4LDE0LjA2M10sWzQyLjg5MiwxNC44MDJdLFs0Mi42MDUsMTUuMjEzXSxbNDIuODA1LDE1LjI2Ml0sWzQyLjcwMywxNS43MTldLFs0Mi44MjQsMTUuOTEyXSxbNDIuNzc5LDE2LjM0OF0sWzQyLjY1LDE2Ljc3NV0sWzQyLjM0OCwxNy4wNzZdLFs0Mi4yNzEsMTcuNDc1XSxbNDEuNzU1LDE3LjgzM10sWzQxLjIyMSwxOC42NzJdLFs0MC45MzksMTkuNDg3XSxbNDAuMjQ4LDIwLjE3NV0sWzM5LjgwMiwyMC4zMzldLFszOS4xNCwyMS4yOTJdLFszOS4wMjQsMjEuOTg3XSxbMzkuMDY2LDIyLjU4XSxbMzguNDkzLDIzLjY4OF0sWzM4LjAyNCwyNC4wNzldLFszNy40ODQsMjQuMjg2XSxbMzcuMTU1LDI0Ljg1OV0sWzM3LjIwOSwyNS4wODRdLFszNi45MzIsMjUuNjAzXSxbMzYuNjQsMjUuODI2XSxbMzYuMjQ5LDI2LjU3XSxbMzUuNjQsMjcuMzc3XSxbMzUuMTMsMjguMDYzXSxbMzQuNjMyLDI4LjA1OF0sWzM0Ljc4OCwyOC42MDddLFszNC44MzIsMjguOTU4XSxbMzQuOTU2LDI5LjM1N10sWzM0LjkyMywyOS41MDFdLFszNC42NDIsMjkuMDk5XSxbMzQuNDI3LDI4LjM0NF0sWzM0LjE1NCwyNy44MjNdLFszMy45MjIsMjcuNjQ5XSxbMzMuNTg4LDI3Ljk3MV0sWzMzLjEzNywyOC40MThdLFszMi40MjMsMjkuODUxXSxbMzIuMzIsMjkuNzZdLFszMi43MzUsMjguNzA1XSxbMzMuMzQ5LDI3LjddLFszNC4xMDUsMjYuMTQyXSxbMzQuNDc0LDI1LjU5OV0sWzM0Ljc5NSwyNS4wMzRdLFszNS42OTMsMjMuOTI3XSxbMzUuNDk0LDIzLjc1M10sWzM1LjUyNiwyMy4xMDJdLFszNi42OTEsMjIuMjA1XSxbMzYuODY2LDIyLjBdLFszNy4xODksMjEuMDE5XSxbMzYuOTY5LDIwLjgzOF0sWzM3LjExNSwxOS44MDhdLFszNy40ODIsMTguNjE0XSxbMzcuODYzLDE4LjM2OF0sWzM4LjQxLDE3Ljk5OF0sWzM4Ljk5MSwxNi44NDFdLFszOS4yNjYsMTUuOTIzXSxbMzkuODE0LDE1LjQzNl0sWzQxLjE3OSwxNC40OTFdLFs0MS43MzUsMTMuOTIxXSxbNDIuMjc3LDEzLjM0NF0sWzQyLjU5LDEzLjBdLFs0My4wODEsMTIuN10sWzQzLjMxOCwxMi4zOV0sWzQzLjI4NiwxMS45NzVdLFs0Mi43MTYsMTEuNzM2XSxbNDMuMTQ1LDExLjQ2Ml0sWzQzLjQ3MSwxMS4yNzhdLFs0My42NjcsMTAuODY0XSxbNDQuMTE4LDEwLjQ0Nl0sWzQ0LjYxNCwxMC40NDJdLFs0NS41NTcsMTAuNjk4XSxbNDYuNjQ2LDEwLjgxN10sWzQ3LjUyNiwxMS4xMjddLFs0OC4wMjIsMTEuMTkzXSxbNDguMzc5LDExLjM3NV0sWzQ4Ljk0OCwxMS40MTFdLFs0OS4yNjgsMTEuNDNdLFs0OS43MjksMTEuNTc5XSxbNTAuMjU5LDExLjY4XSxbNTAuNzMyLDEyLjAyMl0sWzUxLjExMSwxMi4wMjVdLFs1MS4xMzQsMTEuNzQ4XSxbNTEuMDQyLDExLjE2N10sWzUxLjA0NSwxMC42NDFdLFs1MC44MzQsMTAuMjhdLFs1MC41NTIsOS4xOTldLFs1MC4wNzEsOC4wODJdLFs0OS40NTMsNi44MDVdLFs0OC41OTQsNS4zMzldLFs0Ny43NDEsNC4yMTldLFs0Ni41NjUsMi44NTVdLFs0NS41NjQsMi4wNDZdLFs0NC4wNjgsMS4wNTNdLFs0My4xMzYsMC4yOTJdLFs0Mi4wNDIsLTAuOTE5XSxbNDEuODExLC0xLjQ0Nl0sWzQxLjU4NSwtMS42ODNdLFs0MC44ODUsLTIuMDgzXSxbNDAuNjM4LC0yLjVdLFs0MC4yNjMsLTIuNTczXSxbNDAuMTIxLC0zLjI3OF0sWzM5LjgsLTMuNjgxXSxbMzkuNjA1LC00LjM0Nl0sWzM5LjIwMiwtNC42NzddLFszOC43NCwtNS45MDldLFszOC44LC02LjQ3Nl0sWzM5LjQ0LC02Ljg0XSxbMzkuNDcsLTcuMV0sWzM5LjE5NSwtNy43MDRdLFszOS4yNTIsLTguMDA4XSxbMzkuMTg3LC04LjQ4NV0sWzM5LjUzNiwtOS4xMTJdLFszOS45NSwtMTAuMDk4XSxbNDAuMzE3LC0xMC4zMTddLFs0MC40NzksLTEwLjc2NV0sWzQwLjQzNywtMTEuNzYyXSxbNDAuNTYxLC0xMi42MzldLFs0MC42LC0xNC4yMDJdLFs0MC43NzYsLTE0LjY5Ml0sWzQwLjQ3NywtMTUuNDA2XSxbNDAuMDg5LC0xNi4xMDFdLFszOS40NTMsLTE2LjcyMV0sWzM4LjUzOCwtMTcuMTAxXSxbMzcuNDExLC0xNy41ODZdLFszNi4yODEsLTE4LjY2XSxbMzUuODk2LC0xOC44NDJdLFszNS4xOTgsLTE5LjU1M10sWzM0Ljc4NiwtMTkuNzg0XSxbMzQuNzAyLC0yMC40OTddLFszNS4xNzYsLTIxLjI1NF0sWzM1LjM3MywtMjEuODQxXSxbMzUuMzg2LC0yMi4xNF0sWzM1LjU2MywtMjIuMDldLFszNS41MzQsLTIzLjA3MV0sWzM1LjM3MiwtMjMuNTM1XSxbMzUuNjA3LC0yMy43MDZdLFszNS40NTksLTI0LjEyM10sWzM1LjA0MSwtMjQuNDc4XSxbMzQuMjE2LC0yNC44MTZdLFszMy4wMTMsLTI1LjM1N10sWzMyLjU3NSwtMjUuNzI3XSxbMzIuNjYsLTI2LjE0OF0sWzMyLjkxNiwtMjYuMjE2XSxbMzIuODMsLTI2Ljc0Ml0sWzMyLjU4LC0yNy40N10sWzMyLjQ2MiwtMjguMzAxXSxbMzIuMjAzLC0yOC43NTJdLFszMS41MjEsLTI5LjI1N10sWzMxLjMyNiwtMjkuNDAyXSxbMzAuOTAyLC0yOS45MV0sWzMwLjYyMywtMzAuNDI0XSxbMzAuMDU2LC0zMS4xNF0sWzI4LjkyNSwtMzIuMTcyXSxbMjguMjIsLTMyLjc3Ml0sWzI3LjQ2NSwtMzMuMjI3XSxbMjYuNDE5LC0zMy42MTVdLFsyNS45MSwtMzMuNjY3XSxbMjUuNzgxLC0zMy45NDVdLFsyNS4xNzMsLTMzLjc5N10sWzI0LjY3OCwtMzMuOTg3XSxbMjMuNTk0LC0zMy43OTRdLFsyMi45ODgsLTMzLjkxNl0sWzIyLjU3NCwtMzMuODY0XSxbMjEuNTQzLC0zNC4yNTldLFsyMC42ODksLTM0LjQxN10sWzIwLjA3MSwtMzQuNzk1XSxbMTkuNjE3LC0zNC44MTldLFsxOS4xOTMsLTM0LjQ2M10sWzE4Ljg1NSwtMzQuNDQ0XSxbMTguNDI1LC0zMy45OThdLFsxOC4zNzgsLTM0LjEzNl0sWzE4LjI0NSwtMzMuODY4XSxbMTguMjUsLTMzLjI4MV0sWzE3LjkyNSwtMzIuNjExXSxbMTguMjQ4LC0zMi40MjldLFsxOC4yMjIsLTMxLjY2Ml0sWzE3LjU2NywtMzAuNzI2XSxbMTcuMDY1LC0yOS44NzldLFsxNy4wNjMsLTI5Ljg3Nl0sWzE2LjM0NSwtMjguNTc3XSxbMTUuNjAyLC0yNy44MjFdLFsxNS4yMTEsLTI3LjA5MV0sWzE0Ljk5LC0yNi4xMTddLFsxNC43NDMsLTI1LjM5M10sWzE0LjQwOCwtMjMuODUzXSxbMTQuMzg2LC0yMi42NTddLFsxNC4yNTgsLTIyLjExMV0sWzEzLjg2OSwtMjEuNjk5XSxbMTMuMzUyLC0yMC44NzNdLFsxMi44MjcsLTE5LjY3M10sWzEyLjYwOSwtMTkuMDQ1XSxbMTEuNzk1LC0xOC4wNjldLFsxMS43MzQsLTE3LjMwMl0sWzExLjY0LC0xNi42NzNdLFsxMS43NzksLTE1Ljc5NF0sWzEyLjEyNCwtMTQuODc4XSxbMTIuMTc2LC0xNC40NDldLFsxMi41LC0xMy41NDhdLFsxMi43MzksLTEzLjEzOF0sWzEzLjMxMywtMTIuNDg0XSxbMTMuNjM0LC0xMi4wMzldLFsxMy43MzksLTExLjI5OF0sWzEzLjY4NywtMTAuNzMxXSxbMTMuMzg3LC0xMC4zNzRdLFsxMy4xMjEsLTkuNzY3XSxbMTIuODc1LC05LjE2N10sWzEyLjkyOSwtOC45NTldLFsxMy4yMzcsLTguNTYzXSxbMTIuOTMzLC03LjU5Nl0sWzEyLjcyOCwtNi45MjddLFsxMi4yMjcsLTYuMjk0XSxbMTIuMzIzLC02LjFdLFsxMi4xODIsLTUuNzldLFsxMS45MTUsLTUuMDM4XSxbMTEuMDk0LC0zLjk3OV0sWzEwLjA2NiwtMi45NjldLFs5LjQwNSwtMi4xNDRdLFs4Ljc5OCwtMS4xMTFdLFs4LjgzLC0wLjc3OV0sWzkuMDQ5LC0wLjQ1OV0sWzkuMjkxLDAuMjY5XSxbOS40OTMsMS4wMV0sWzkuMzA2LDEuMTYxXSxbOS42NDksMi4yODRdLFs5Ljc5NSwzLjA3M10sWzkuNDA0LDMuNzM0XSxbOC45NDgsMy45MDRdLFs4Ljc0NSw0LjM1Ml0sWzguNDg5LDQuNDk2XSxbOC41LDQuNzcyXSxbNy40NjIsNC40MTJdLFs3LjA4Myw0LjQ2NV0sWzYuNjk4LDQuMjQxXSxbNS44OTgsNC4yNjNdLFs1LjM2Myw0Ljg4OF0sWzUuMDM0LDUuNjEyXSxbNC4zMjYsNi4yNzFdLFszLjU3NCw2LjI1OF0sWzIuNjkyLDYuMjU5XSxbMS44NjUsNi4xNDJdLFsxLjA2LDUuOTI5XSxbLTAuNTA4LDUuMzQ0XSxbLTEuMDY0LDUuMF0sWy0xLjk2NSw0LjcxMV0sWy0yLjg1Niw0Ljk5NV0sWy0zLjMxMSw0Ljk4NF0sWy00LjAwOSw1LjE4XSxbLTQuNjUsNS4xNjhdLFstNS44MzQsNC45OTRdLFstNi41MjksNC43MDVdLFstNy41MTksNC4zMzhdLFstNy43MTIsNC4zNjVdLFstNy45NzQsNC4zNTZdLFstOS4wMDUsNC44MzNdLFstOS45MTMsNS41OTRdLFstMTAuNzY1LDYuMTQxXSxbLTExLjQzOSw2Ljc4Nl0sWy0xMS43MDgsNi44Nl0sWy0xMi40MjgsNy4yNjNdLFstMTIuOTQ5LDcuNzk5XSxbLTEzLjEyNCw4LjE2NF0sWy0xMy4yNDcsOC45MDNdLFstMTMuNjg1LDkuNDk1XSxbLTE0LjA3NCw5Ljg4Nl0sWy0xNC4zMywxMC4wMTZdLFstMTQuNTgsMTAuMjE0XSxbLTE0LjY5MywxMC42NTZdLFstMTQuODM5LDEwLjg3N10sWy0xNS4xMywxMS4wNDFdLFstMTUuNjY0LDExLjQ1OF0sWy0xNi4wODUsMTEuNTI1XSxbLTE2LjMxNSwxMS44MDddLFstMTYuMzA5LDExLjk1OV0sWy0xNi42MTQsMTIuMTcxXSxbLTE2LjY3NywxMi4zODVdLFstMTYuODQxLDEzLjE1MV0sWy0xNi43MTQsMTMuNTk1XSxbLTE3LjEyNiwxNC4zNzNdLFstMTcuNjI1LDE0LjczXSxbLTE3LjE4NSwxNC45MTldLFstMTYuNzAxLDE1LjYyMl0sWy0xNi40NjMsMTYuMTM1XSxbLTE2LjU1LDE2LjY3NF0sWy0xNi4yNzEsMTcuMTY3XSxbLTE2LjE0NiwxOC4xMDldLFstMTYuMjU3LDE5LjA5N10sWy0xNi4zNzgsMTkuNTk0XSxbLTE2LjI3OCwyMC4wOTNdLFstMTYuNTM2LDIwLjU2OF0sWy0xNy4wNjMsMjEuMF0sWy0xNy4wMiwyMS40MjJdLFstMTYuOTczLDIxLjg4Nl0sWy0xNi41ODksMjIuMTU4XSxbLTE2LjI2MiwyMi42NzldLFstMTYuMzI2LDIzLjAxOF0sWy0xNS45ODMsMjMuNzI0XSxbLTE1LjQyNiwyNC4zNTldLFstMTUuMDg5LDI0LjUyXSxbLTE0LjgyNSwyNS4xMDRdLFstMTQuODAxLDI1LjYzNl0sWy0xNC40NCwyNi4yNTVdLFstMTMuNzc0LDI2LjYxOV0sWy0xMy4xNCwyNy42NF0sWy0xMi42MTksMjguMDM4XSxbLTExLjY4OSwyOC4xNDldLFstMTAuOTAxLDI4LjgzMl0sWy0xMC40LDI5LjA5OV0sWy05LjU2NSwyOS45MzRdLFstOS44MTUsMzEuMTc4XSxbLTkuNDM1LDMyLjAzOF0sWy05LjMwMSwzMi41NjVdLFstOC42NTcsMzMuMjRdLFstNy42NTQsMzMuNjk3XSxbLTYuOTEyLDM0LjExXSxbLTYuMjQ0LDM1LjE0Nl0sWy01LjkzLDM1Ljc2XSxbLTUuMTk0LDM1Ljc1NV0sWy00LjU5MSwzNS4zMzFdLFstMy42NCwzNS40XSxbLTIuNjA0LDM1LjE3OV0sWy0yLjE3LDM1LjE2OV0sWy0xLjIwOSwzNS43MTVdLFstMC4xMjcsMzUuODg5XSxbMC41MDQsMzYuMzAxXSxbMS40NjcsMzYuNjA2XSxbMy4xNjIsMzYuNzg0XSxbNC44MTYsMzYuODY1XSxbNS4zMiwzNi43MTZdLFs2LjI2MiwzNy4xMTFdLFs3LjMzMSwzNy4xMTldLFs3LjczNywzNi44ODZdLFs4LjQyMSwzNi45NDZdLFs5LjUxLDM3LjM1XSxbMTAuMjEsMzcuMjNdLFsxMC4xODEsMzYuNzI0XSxbMTEuMDI5LDM3LjA5Ml0sWzExLjEsMzYuOV0sWzEwLjYsMzYuNDFdLFsxMC41OTMsMzUuOTQ4XSxbMTAuOTQsMzUuNjk5XSxbMTAuODA4LDM0LjgzM10sWzEwLjE1LDM0LjMzMV0sWzEwLjM0LDMzLjc4Nl0sWzEwLjg1NywzMy43NjldLFsxMS4xMDksMzMuMjkzXSxbMTEuNDg5LDMzLjEzN10sWzEyLjY2MywzMi43OTNdLFsxMy4wODMsMzIuODc5XSxbMTMuOTE5LDMyLjcxMl0sWzE1LjI0NiwzMi4yNjVdLFsxNS43MTQsMzEuMzc2XSxbMTYuNjEyLDMxLjE4Ml0sWzE4LjAyMSwzMC43NjNdLFsxOS4wODYsMzAuMjY2XSxbMTkuNTc0LDMwLjUyNl0sWzIwLjA1MywzMC45ODZdLFsxOS44MiwzMS43NTJdLFsyMC4xMzQsMzIuMjM4XSxbMjAuODU0LDMyLjcwN10sWzIxLjU0MywzMi44NDNdLFsyMi44OTYsMzIuNjM4XSxbMjMuMjM3LDMyLjE5Ml0sWzIzLjYwOSwzMi4xODddLFsyMy45MjcsMzIuMDE3XSxbMjQuOTIxLDMxLjg5OV0sWzI1LjE2NSwzMS41NjldLFsyNi40OTUsMzEuNTg2XSxbMjcuNDU4LDMxLjMyMV0sWzI4LjQ1MSwzMS4wMjZdLFsyOC45MTQsMzAuODddLFsyOS42ODMsMzEuMTg3XSxbMzAuMDk1LDMxLjQ3NF0sWzMwLjk3NywzMS41NTZdLFszMS42ODgsMzEuNDNdLFszMS45NjEsMzAuOTM0XSxbMzIuMTkzLDMxLjI2XSxbMzIuOTk0LDMxLjAyNF0sWzMzLjc3MywzMC45NjhdLFszNC4yNjYsMzEuMjE5XSxbMzQuNTU3LDMxLjU0OV0sWzM0LjQ4OCwzMS42MDZdLFszNC43NTMsMzIuMDczXSxbMzQuOTU2LDMyLjgyOF0sWzM1LjA5OSwzMy4wODFdLFszNS4xMjYsMzMuMDkxXSxbMzUuNDgyLDMzLjkwNl0sWzM1Ljk4LDM0LjYxXSxbMzUuOTk4LDM0LjY0NV0sWzM1LjkwNSwzNS40MV0sWzM2LjE1LDM1LjgyMV0sWzM1Ljc4MiwzNi4yNzVdLFszNi4xNjEsMzYuNjUxXSxbMzUuNTUxLDM2LjU2NV0sWzM0LjcxNCwzNi43OTVdLFszNC4wMjcsMzYuMjJdLFszMi41MDksMzYuMTA3XSxbMzEuNywzNi42NDRdLFszMC42MjIsMzYuNjc4XSxbMzAuMzkxLDM2LjI2M10sWzI5LjcsMzYuMTQ0XSxbMjguNzMzLDM2LjY3N10sWzI3LjY0MSwzNi42NTldLFsyNy4wNDksMzcuNjU0XSxbMjYuMzE4LDM4LjIwOF0sWzI2LjgwNSwzOC45ODZdLFsyNi4xNzEsMzkuNDY0XSxbMjcuMjgsNDAuNDJdLFsyOC44Miw0MC40Nl0sWzI5LjI0LDQxLjIyXSxbMzEuMTQ2LDQxLjA4OF0sWzMyLjM0OCw0MS43MzZdLFszMy41MTMsNDIuMDE5XSxbMzUuMTY4LDQyLjA0XSxbMzYuOTEzLDQxLjMzNl0sWzM4LjM0OCw0MC45NDldLFszOS41MTMsNDEuMTAzXSxbNDAuMzczLDQxLjAxNF0sWzQxLjU1NCw0MS41MzZdLFs0MS43MDMsNDEuOTYzXSxbNDEuNDUzLDQyLjY0NV0sWzQwLjg3NSw0My4wMTRdLFs0MC4zMjEsNDMuMTI5XSxbMzkuOTU1LDQzLjQzNV0sWzM4LjY4LDQ0LjI4XSxbMzcuNTM5LDQ0LjY1N10sWzM2LjY3NSw0NS4yNDVdLFszNy40MDMsNDUuNDA0XSxbMzguMjMzLDQ2LjI0MV0sWzM3LjY3NCw0Ni42MzddLFszOS4xNDgsNDcuMDQ1XSxbMzkuMTIxLDQ3LjI2M10sWzM4LjIyNCw0Ny4xMDJdLFszNy40MjUsNDcuMDIyXSxbMzYuNzYsNDYuNjk5XSxbMzUuODI0LDQ2LjY0Nl0sWzM0Ljk2Miw0Ni4yNzNdLFszNS4wMjEsNDUuNjUxXSxbMzUuNTEsNDUuNDFdLFszNi41Myw0NS40N10sWzM2LjMzNSw0NS4xMTNdLFszNS4yNCw0NC45NF0sWzMzLjg4Myw0NC4zNjJdLFszMy4zMjYsNDQuNTY1XSxbMzMuNTQ3LDQ1LjAzNV0sWzMyLjQ1NCw0NS4zMjhdLFszMi42MzEsNDUuNTE5XSxbMzMuNTg4LDQ1Ljg1Ml0sWzMzLjI5OSw0Ni4wODFdLFszMS43NDQsNDYuMzMzXSxbMzEuNjc1LDQ2LjcwNl0sWzMwLjc0OSw0Ni41ODNdLFszMC4zNzgsNDYuMDMyXSxbMjkuNjAzLDQ1LjI5M10sWzI5LjYyNyw0NS4wMzZdLFsyOS4xNDIsNDQuODJdLFsyOC44MzgsNDQuOTE0XSxbMjguNTU4LDQzLjcwOF0sWzI4LjAzOSw0My4yOTNdLFsyNy42NzQsNDIuNTc4XSxbMjcuOTk3LDQyLjAwOF0sWzI4LjExNSw0MS42MjNdLFsyOC45ODksNDEuM10sWzI4LjgwNyw0MS4wNTVdLFsyNy42MTksNDEuMF0sWzI3LjE5Myw0MC42OTFdLFsyNi4zNTgsNDAuMTUyXSxbMjYuMDQzLDQwLjYxOF0sWzI2LjA1Nyw0MC44MjRdLFsyNS40NDgsNDAuODUyXSxbMjQuOTI2LDQwLjk0N10sWzIzLjcxNSw0MC42ODddLFsyNC40MDgsNDAuMTI1XSxbMjMuOSwzOS45NjJdLFsyMy4zNDMsMzkuOTYxXSxbMjIuODE0LDQwLjQ3Nl0sWzIyLjYyNiw0MC4yNTddLFsyMi44NSwzOS42NTldLFsyMy4zNSwzOS4xOV0sWzIyLjk3MywzOC45NzFdLFsyMy41MywzOC41MV0sWzI0LjAyNSwzOC4yMl0sWzI0LjA0LDM3LjY1NV0sWzIzLjExNSwzNy45Ml0sWzIzLjQxLDM3LjQxXSxbMjIuNzc1LDM3LjMwNV0sWzIzLjE1NCwzNi40MjJdLFsyMi40OSwzNi40MV0sWzIxLjY3LDM2Ljg0NV0sWzIxLjI5NSwzNy42NDVdLFsyMS4xMiwzOC4zMV0sWzIwLjczLDM4Ljc3XSxbMjAuMjE4LDM5LjM0XSxbMjAuMTUsMzkuNjI1XSxbMTkuOTgsMzkuNjk1XSxbMTkuOTYsMzkuOTE1XSxbMTkuNDA2LDQwLjI1MV0sWzE5LjMxOSw0MC43MjddLFsxOS40MDQsNDEuNDA5XSxbMTkuNTQsNDEuNzJdLFsxOS4zNzIsNDEuODc4XSxbMTkuMTYyLDQxLjk1NV0sWzE4Ljg4Miw0Mi4yODFdLFsxOC40NSw0Mi40OF0sWzE3LjUxLDQyLjg1XSxbMTYuOTMsNDMuMjFdLFsxNi4wMTYsNDMuNTA3XSxbMTUuMTc1LDQ0LjI0M10sWzE1LjM3Niw0NC4zMThdLFsxNC45Miw0NC43MzldLFsxNC45MDIsNDUuMDc2XSxbMTQuMjU5LDQ1LjIzNF0sWzEzLjk1Miw0NC44MDJdLFsxMy42NTcsNDUuMTM3XSxbMTMuNjgsNDUuNDg0XSxbMTMuNzE1LDQ1LjVdLFsxMy45MzgsNDUuNTkxXSxbMTMuMTQyLDQ1LjczN10sWzEyLjMyOSw0NS4zODJdLFsxMi4zODQsNDQuODg1XSxbMTIuMjYxLDQ0LjYwMV0sWzEyLjU4OSw0NC4wOTFdLFsxMy41MjcsNDMuNTg4XSxbMTQuMDMsNDIuNzYxXSxbMTUuMTQzLDQxLjk1NV0sWzE1LjkyNiw0MS45NjFdLFsxNi4xNyw0MS43NF0sWzE1Ljg4OSw0MS41NDFdLFsxNi43ODUsNDEuMThdLFsxNy41MTksNDAuODc3XSxbMTguMzc3LDQwLjM1Nl0sWzE4LjQ4LDQwLjE2OV0sWzE4LjI5NCwzOS44MTFdLFsxNy43MzksNDAuMjc4XSxbMTYuODcsNDAuNDQyXSxbMTYuNDQ5LDM5Ljc5NV0sWzE3LjE3MiwzOS40MjVdLFsxNy4wNTMsMzguOTAzXSxbMTYuNjM1LDM4Ljg0NF0sWzE2LjEwMSwzNy45ODZdLFsxNS42ODQsMzcuOTA5XSxbMTUuNjg4LDM4LjIxNV0sWzE1Ljg5MiwzOC43NTFdLFsxNi4xMDksMzguOTY0XSxbMTUuNzE5LDM5LjU0NF0sWzE1LjQxNCw0MC4wNDhdLFsxNC45OTgsNDAuMTczXSxbMTQuNzAzLDQwLjYwNV0sWzE0LjA2MSw0MC43ODZdLFsxMy42MjgsNDEuMTg4XSxbMTIuODg4LDQxLjI1M10sWzEyLjEwNyw0MS43MDVdLFsxMS4xOTIsNDIuMzU2XSxbMTAuNTEyLDQyLjkzMl0sWzEwLjIsNDMuOTJdLFs5LjcwMyw0NC4wMzZdLFs4Ljg4OSw0NC4zNjZdLFs4LjQyOSw0NC4yMzFdLFs3Ljg1MSw0My43NjddLFs3LjQzNSw0My42OTRdLFs2LjUyOSw0My4xMjldLFs0LjU1Nyw0My40XSxbMy4xMDEsNDMuMDc1XSxbMi45ODYsNDIuNDczXSxbMy4wMzksNDEuODkyXSxbMi4wOTIsNDEuMjI2XSxbMC44MSw0MS4wMTVdLFswLjcyMSw0MC42NzhdLFswLjEwNyw0MC4xMjRdLFstMC4yNzksMzkuMzFdLFswLjExMSwzOC43MzldLFstMC40NjcsMzguMjkyXSxbLTAuNjgzLDM3LjY0Ml0sWy0xLjQzOCwzNy40NDNdLFstMi4xNDYsMzYuNjc0XSxbLTMuNDE2LDM2LjY1OV0sWy00LjM2OSwzNi42NzhdLFstNC45OTUsMzYuMzI1XSxbLTUuMzc3LDM1Ljk0N10sWy01Ljg2NiwzNi4wM10sWy02LjIzNywzNi4zNjhdLFstNi41MiwzNi45NDNdLFstNy40NTQsMzcuMDk4XSxbLTcuODU2LDM2LjgzOF0sWy04LjM4MywzNi45NzldLFstOC44OTksMzYuODY5XSxbLTguNzQ2LDM3LjY1MV0sWy04Ljg0LDM4LjI2Nl0sWy05LjI4NywzOC4zNTldLFstOS41MjYsMzguNzM3XSxbLTkuNDQ3LDM5LjM5Ml0sWy05LjA0OCwzOS43NTVdLFstOC45NzcsNDAuMTU5XSxbLTguNzY5LDQwLjc2MV0sWy04Ljc5MSw0MS4xODRdLFstOC45OTEsNDEuNTQ0XSxbLTkuMDM1LDQxLjg4MV0sWy04Ljk4NCw0Mi41OTNdLFstOS4zOTMsNDMuMDI3XSxbLTcuOTc4LDQzLjc0OF0sWy02Ljc1NSw0My41NjhdLFstNS40MTIsNDMuNTc0XSxbLTQuMzQ4LDQzLjQwNF0sWy0zLjUxOCw0My40NTZdLFstMS45MDEsNDMuNDIzXSxbLTEuMzg0LDQ0LjAyM10sWy0xLjE5NCw0Ni4wMTVdLFstMi4yMjYsNDcuMDY1XSxbLTIuOTYzLDQ3LjU3XSxbLTQuNDkyLDQ3Ljk1NV0sWy00LjU5Miw0OC42ODRdLFstMy4yOTYsNDguOTAyXSxbLTEuNjE3LDQ4LjY0NF0sWy0xLjkzMyw0OS43NzZdLFstMC45ODksNDkuMzQ3XSxbMS4zMzksNTAuMTI3XSxbMS42MzksNTAuOTQ3XSxbMi41MTMsNTEuMTQ4XSxbMy4zMTUsNTEuMzQ2XSxbMy44Myw1MS42Ml0sWzQuNzA2LDUzLjA5Ml0sWzYuMDc0LDUzLjUxXSxbNi45MDUsNTMuNDgyXSxbNy4xMDEsNTMuNjk0XSxbNy45MzYsNTMuNzQ4XSxbOC4xMjIsNTMuNTI4XSxbOC44MDEsNTQuMDIxXSxbOC41NzIsNTQuMzk2XSxbOC41MjYsNTQuOTYzXSxbOC4xMiw1NS41MThdLFs4LjA5LDU2LjU0XSxbOC4yNTcsNTYuODFdLFs4LjU0NCw1Ny4xMV0sWzkuNDI1LDU3LjE3Ml0sWzkuNzc2LDU3LjQ0OF0sWzEwLjU4LDU3LjczXSxbMTAuNTQ2LDU3LjIxNl0sWzEwLjI1LDU2Ljg5XSxbMTAuMzcsNTYuNjFdLFsxMC45MTIsNTYuNDU5XSxbMTAuNjY4LDU2LjA4MV0sWzEwLjM3LDU2LjE5XSxbOS42NSw1NS40N10sWzkuOTIyLDU0Ljk4M10sWzkuOTQsNTQuNTk3XSxbMTAuOTUsNTQuMzY0XSxbMTAuOTQsNTQuMDA5XSxbMTEuOTU2LDU0LjE5Nl0sWzEyLjUxOCw1NC40NzFdLFsxMy42NDgsNTQuMDc1XSxbMTQuMTIsNTMuNzU3XSxbMTQuODAzLDU0LjA1MV0sWzE2LjM2NCw1NC41MTNdLFsxNy42MjMsNTQuODUyXSxbMTguNjIxLDU0LjY4M10sWzE4LjY5Niw1NC40MzldLFsxOS42NjEsNTQuNDI2XSxbMTkuODg4LDU0Ljg2Nl0sWzIxLjI2OCw1NS4xOV0sWzIxLjA1Niw1Ni4wMzFdLFsyMS4wOTEsNTYuNzg0XSxbMjEuNTgyLDU3LjQxMl0sWzIyLjUyNCw1Ny43NTNdLFsyMy4zMTgsNTcuMDA2XSxbMjQuMTIxLDU3LjAyNl0sWzI0LjMxMyw1Ny43OTRdLFsyNC40MjksNTguMzgzXSxbMjQuMDYxLDU4LjI1OF0sWzIzLjQyNyw1OC42MTNdLFsyMy4zNCw1OS4xODddLFsyNC42MDQsNTkuNDY2XSxbMjUuODY0LDU5LjYxMV0sWzI2Ljk0OSw1OS40NDZdLFsyNy45ODEsNTkuNDc2XSxbMjkuMTE4LDYwLjAyOF0sWzI4LjA3LDYwLjUwM10sWzI2LjI1NSw2MC40MjRdLFsyNC40OTcsNjAuMDU3XSxbMjIuODcsNTkuODQ2XSxbMjIuMjkxLDYwLjM5Ml0sWzIxLjMyMiw2MC43Ml0sWzIxLjU0NSw2MS43MDVdLFsyMS4wNTksNjIuNjA3XSxbMjEuNTM2LDYzLjE5XSxbMjIuNDQzLDYzLjgxOF0sWzI0LjczMSw2NC45MDJdLFsyNS4zOTgsNjUuMTEyXSxbMjUuMjk0LDY1LjUzNF0sWzIzLjkwNCw2Ni4wMDddLFsyMi4xODMsNjUuNzI0XSxbMjEuMjE0LDY1LjAyNl0sWzIxLjM3LDY0LjQxNF0sWzE5Ljc3OSw2My42MV0sWzE3Ljg0OCw2Mi43NV0sWzE3LjEyLDYxLjM0MV0sWzE3LjgzMSw2MC42MzddLFsxOC43ODgsNjAuMDgyXSxbMTcuODY5LDU4Ljk1NF0sWzE2LjgyOSw1OC43Ml0sWzE2LjQ0OCw1Ny4wNDFdLFsxNS44OCw1Ni4xMDRdLFsxNC42NjcsNTYuMjAxXSxbMTQuMTAxLDU1LjQwOF0sWzEyLjk0Myw1NS4zNjJdLFsxMi42MjUsNTYuMzA3XSxbMTEuNzg4LDU3LjQ0Ml0sWzExLjAyNyw1OC44NTZdLFsxMC4zNTcsNTkuNDddLFs4LjM4Miw1OC4zMTNdLFs3LjA0OSw1OC4wNzldLFs1LjY2Niw1OC41ODhdLFs1LjMwOCw1OS42NjNdLFs0Ljk5Miw2MS45NzFdLFs1LjkxMyw2Mi42MTVdLFs4LjU1NCw2My40NTRdLFsxMC41MjgsNjQuNDg2XSxbMTIuMzU4LDY1Ljg4XSxbMTQuNzYxLDY3LjgxMV0sWzE2LjQzNiw2OC41NjNdLFsxOS4xODQsNjkuODE4XSxbMjEuMzc4LDcwLjI1NV0sWzIzLjAyNCw3MC4yMDJdLFsyNC41NDcsNzEuMDMxXSxbMjYuMzcsNzAuOTg2XSxbMjguMTY2LDcxLjE4NV0sWzMxLjI5NCw3MC40NTRdLFszMC4wMDUsNzAuMTg2XSxbMzEuMTAxLDY5LjU1OF0sWzMyLjEzMyw2OS45MDZdLFszMy43NzYsNjkuMzAyXSxbMzYuNTE0LDY5LjA2M10sWzQwLjI5Miw2Ny45MzJdLFs0MS4wNiw2Ny40NTddLFs0MS4xMjYsNjYuNzkyXSxbNDAuMDE2LDY2LjI2Nl0sWzM4LjM4Myw2Ni4wXSxbMzMuOTE5LDY2Ljc2XSxbMzMuMTg1LDY2LjYzM10sWzM0LjgxNSw2NS45XSxbMzQuOTQ0LDY0LjQxNF0sWzM2LjIzMSw2NC4xMDldLFszNy4wMTMsNjMuODVdLFszNy4xNDIsNjQuMzM1XSxbMzYuNTE4LDY0Ljc4XSxbMzcuMTc2LDY1LjE0M10sWzM5LjU5NCw2NC41MjFdLFs0MC40MzYsNjQuNzY1XSxbMzkuNzYzLDY1LjQ5N10sWzQyLjA5Myw2Ni40NzZdLFs0My4wMTYsNjYuNDE5XSxbNDMuOTUsNjYuMDY5XSxbNDQuNTMyLDY2Ljc1Nl0sWzQzLjY5OCw2Ny4zNTJdLFs0NC4xODgsNjcuOTUxXSxbNDMuNDUzLDY4LjU3MV0sWzQ2LjI1LDY4LjI1XSxbNDYuODIxLDY3LjY5XSxbNDUuNTU1LDY3LjU2N10sWzQ1LjU2Miw2Ny4wMV0sWzQ2LjM0OSw2Ni42NjhdLFs0Ny44OTQsNjYuODg1XSxbNDguMTM5LDY3LjUyM10sWzUwLjIyOCw2Ny45OTldLFs1My43MTgsNjguODU3XSxbNTQuNDcyLDY4LjgwOF0sWzUzLjQ4Niw2OC4yMDFdLFs1NC43MjYsNjguMDk3XSxbNTUuNDQzLDY4LjQzOV0sWzU3LjMxNyw2OC40NjZdLFs1OC44MDIsNjguODgxXSxbNTkuOTQyLDY4LjI3OV0sWzYxLjA3OCw2OC45NDFdLFs2MC4wMyw2OS41Ml0sWzYwLjU1LDY5Ljg1XSxbNjMuNTA0LDY5LjU0N10sWzY0Ljg4OCw2OS4yMzVdLFs2OC41MTIsNjguMDkyXSxbNjkuMTgxLDY4LjYxNl0sWzY4LjE2NCw2OS4xNDRdLFs2OC4xMzUsNjkuMzU3XSxbNjYuOTMsNjkuNDU1XSxbNjcuMjYsNjkuOTI5XSxbNjYuNzI1LDcwLjcwOV0sWzY2LjY5NSw3MS4wMjldLFs2OC41NCw3MS45MzVdLFs2OS4xOTYsNzIuODQ0XSxbNjkuOTQsNzMuMDRdLFs3Mi41ODgsNzIuNzc2XSxbNzIuNzk2LDcyLjIyXSxbNzEuODQ4LDcxLjQwOV0sWzcyLjQ3LDcxLjA5XSxbNzIuNzkyLDcwLjM5MV0sWzcyLjU2NSw2OS4wMjFdLFs3My42NjgsNjguNDA4XSxbNzMuMjM5LDY3Ljc0XSxbNzEuMjgsNjYuMzJdLFs3Mi40MjMsNjYuMTczXSxbNzIuODIxLDY2LjUzM10sWzczLjkyMSw2Ni43ODldLFs3NC4xODcsNjcuMjg0XSxbNzUuMDUyLDY3Ljc2XSxbNzQuNDY5LDY4LjMyOV0sWzc0LjkzNiw2OC45ODldLFs3My44NDIsNjkuMDcxXSxbNzMuNjAyLDY5LjYyOF0sWzc0LjQsNzAuNjMyXSxbNzMuMTAxLDcxLjQ0N10sWzc0Ljg5MSw3Mi4xMjFdLFs3NC42NTksNzIuODMyXSxbNzUuMTU4LDcyLjg1NV0sWzc1LjY4Myw3Mi4zXSxbNzUuMjg5LDcxLjMzNl0sWzc2LjM1OSw3MS4xNTNdLFs3NS45MDMsNzEuODc0XSxbNzcuNTc3LDcyLjI2N10sWzc5LjY1Miw3Mi4zMl0sWzgxLjUsNzEuNzVdLFs4MC42MTEsNzIuNTgzXSxbODAuNTExLDczLjY0OF0sWzgyLjI1LDczLjg1XSxbODQuNjU1LDczLjgwNl0sWzg2LjgyMiw3My45MzddLFs4Ni4wMSw3NC40Nl0sWzg3LjE2Nyw3NS4xMTddLFs4OC4zMTYsNzUuMTQ0XSxbOTAuMjYsNzUuNjRdLFs5Mi45MDEsNzUuNzczXSxbOTMuMjM0LDc2LjA0N10sWzk1Ljg2LDc2LjE0XSxbOTYuNjc4LDc1LjkxNl0sWzk4LjkyMiw3Ni40NDddLFsxMDAuNzYsNzYuNDNdLFsxMDEuMDM1LDc2Ljg2Ml0sWzEwMS45OTEsNzcuMjg3XSxbMTA0LjM1Miw3Ny42OThdLFsxMDYuMDY3LDc3LjM3NF0sWzEwNC43MDUsNzcuMTI4XSxbMTA2Ljk3LDc2Ljk3NF1dLFtbLTkzLjg0LDc3LjUyXSxbLTk0LjI5Niw3Ny40OTFdLFstOTYuMTcsNzcuNTU1XSxbLTk2LjQzNiw3Ny44MzVdLFstOTQuNDIzLDc3LjgyXSxbLTkzLjcyMSw3Ny42MzRdLFstOTMuODQsNzcuNTJdXSxbWy0xMTAuMTg3LDc3LjY5N10sWy0xMTIuMDUxLDc3LjQwOV0sWy0xMTMuNTM0LDc3LjczMl0sWy0xMTIuNzI1LDc4LjA1MV0sWy0xMTEuMjY0LDc4LjE1M10sWy0xMDkuODU0LDc3Ljk5Nl0sWy0xMTAuMTg3LDc3LjY5N11dLFtbMjQuNzI0LDc3Ljg1NF0sWzIyLjQ5LDc3LjQ0NV0sWzIwLjcyNiw3Ny42NzddLFsyMS40MTYsNzcuOTM1XSxbMjAuODEyLDc4LjI1NV0sWzIyLjg4NCw3OC40NTVdLFsyMy4yODEsNzguMDhdLFsyNC43MjQsNzcuODU0XV0sW1stMTA5LjY2Myw3OC42MDJdLFstMTEwLjg4MSw3OC40MDddLFstMTEyLjU0Miw3OC40MDhdLFstMTEyLjUyNiw3OC41NTFdLFstMTExLjUsNzguODVdLFstMTEwLjk2NCw3OC44MDRdLFstMTA5LjY2Myw3OC42MDJdXSxbWy05NS44Myw3OC4wNTddLFstOTcuMzEsNzcuODUxXSxbLTk4LjEyNCw3OC4wODNdLFstOTguNTUzLDc4LjQ1OF0sWy05OC42MzIsNzguODcyXSxbLTk3LjMzNyw3OC44MzJdLFstOTYuNzU0LDc4Ljc2Nl0sWy05NS41NTksNzguNDE4XSxbLTk1LjgzLDc4LjA1N11dLFtbLTEwMC4wNiw3OC4zMjVdLFstOTkuNjcxLDc3LjkwOF0sWy0xMDEuMzA0LDc4LjAxOV0sWy0xMDIuOTUsNzguMzQzXSxbLTEwNS4xNzYsNzguMzhdLFstMTA0LjIxLDc4LjY3N10sWy0xMDUuNDIsNzguOTE4XSxbLTEwNS40OTIsNzkuMzAyXSxbLTEwMy41MjksNzkuMTY1XSxbLTEwMC44MjUsNzguOF0sWy0xMDAuMDYsNzguMzI1XV0sW1sxMDUuMDc1LDc4LjMwN10sWzk5LjQzOCw3Ny45MjFdLFsxMDEuMjY1LDc5LjIzNF0sWzEwMi4wODYsNzkuMzQ2XSxbMTAyLjgzOCw3OS4yODFdLFsxMDUuMzcyLDc4LjcxM10sWzEwNS4wNzUsNzguMzA3XV0sW1sxOC4yNTIsNzkuNzAyXSxbMjEuNTQ0LDc4Ljk1Nl0sWzE5LjAyNyw3OC41NjNdLFsxOC40NzIsNzcuODI3XSxbMTcuNTk0LDc3LjYzOF0sWzE3LjExOCw3Ni44MDldLFsxNS45MTMsNzYuNzddLFsxMy43NjMsNzcuMzhdLFsxNC42Nyw3Ny43MzZdLFsxMy4xNzEsNzguMDI1XSxbMTEuMjIyLDc4Ljg2OV0sWzEwLjQ0NSw3OS42NTJdLFsxMy4xNzEsODAuMDFdLFsxMy43MTksNzkuNjZdLFsxNS4xNDMsNzkuNjc0XSxbMTUuNTIzLDgwLjAxNl0sWzE2Ljk5MSw4MC4wNTFdLFsxOC4yNTIsNzkuNzAyXV0sW1syNS40NDgsODAuNDA3XSxbMjcuNDA4LDgwLjA1Nl0sWzI1LjkyNSw3OS41MThdLFsyMy4wMjQsNzkuNF0sWzIwLjA3NSw3OS41NjddLFsxOS44OTcsNzkuODQyXSxbMTguNDYyLDc5Ljg2XSxbMTcuMzY4LDgwLjMxOV0sWzIwLjQ1Niw4MC41OThdLFsyMS45MDgsODAuMzU4XSxbMjIuOTE5LDgwLjY1N10sWzI1LjQ0OCw4MC40MDddXSxbWzUxLjEzNiw4MC41NDddLFs0OS43OTQsODAuNDE1XSxbNDguODk0LDgwLjM0XSxbNDguNzU1LDgwLjE3NV0sWzQ3LjU4Niw4MC4wMV0sWzQ2LjUwMyw4MC4yNDddLFs0Ny4wNzIsODAuNTU5XSxbNDQuODQ3LDgwLjU5XSxbNDYuNzk5LDgwLjc3Ml0sWzQ4LjMxOCw4MC43ODRdLFs0OC41MjMsODAuNTE1XSxbNDkuMDk3LDgwLjc1NF0sWzUwLjA0LDgwLjkxOV0sWzUxLjUyMyw4MC43XSxbNTEuMTM2LDgwLjU0N11dLFtbOTkuOTQsNzguODgxXSxbOTcuNzU4LDc4Ljc1Nl0sWzk0Ljk3Myw3OS4wNDVdLFs5My4zMTMsNzkuNDI3XSxbOTIuNTQ1LDgwLjE0NF0sWzkxLjE4MSw4MC4zNDFdLFs5My43NzgsODEuMDI1XSxbOTUuOTQxLDgxLjI1XSxbOTcuODg0LDgwLjc0N10sWzEwMC4xODcsNzkuNzhdLFs5OS45NCw3OC44ODFdXSxbWy04Ny4wMiw3OS42Nl0sWy04NS44MTQsNzkuMzM3XSxbLTg3LjE4OCw3OS4wMzldLFstODkuMDM1LDc4LjI4N10sWy05MC44MDQsNzguMjE1XSxbLTkyLjg3Nyw3OC4zNDNdLFstOTMuOTUxLDc4Ljc1MV0sWy05My45MzYsNzkuMTE0XSxbLTkzLjE0NSw3OS4zOF0sWy05NC45NzQsNzkuMzcyXSxbLTk2LjA3Niw3OS43MDVdLFstOTYuNzEsODAuMTU4XSxbLTk2LjAxNiw4MC42MDJdLFstOTUuMzIzLDgwLjkwN10sWy05NC4yOTgsODAuOTc3XSxbLTk0LjczNSw4MS4yMDZdLFstOTIuNDEsODEuMjU3XSxbLTkxLjEzMyw4MC43MjNdLFstODkuNDUsODAuNTA5XSxbLTg3LjgxLDgwLjMyXSxbLTg3LjAyLDc5LjY2XV0sW1stNjguNSw4My4xMDZdLFstNjUuODI3LDgzLjAyOF0sWy02My42OCw4Mi45XSxbLTYxLjg1LDgyLjYyOV0sWy02MS44OTQsODIuMzYyXSxbLTY0LjMzNCw4MS45MjhdLFstNjYuNzUzLDgxLjcyNV0sWy02Ny42NTgsODEuNTAxXSxbLTY1LjQ4LDgxLjUwN10sWy02Ny44NCw4MC45XSxbLTY5LjQ3LDgwLjYxN10sWy03MS4xOCw3OS44XSxbLTczLjI0Myw3OS42MzRdLFstNzMuODgsNzkuNDNdLFstNzYuOTA4LDc5LjMyM10sWy03NS41MjksNzkuMTk4XSxbLTc2LjIyLDc5LjAxOV0sWy03NS4zOTMsNzguNTI2XSxbLTc2LjM0NCw3OC4xODNdLFstNzcuODg5LDc3LjldLFstNzguMzYzLDc3LjUwOV0sWy03OS43Niw3Ny4yMV0sWy03OS42Miw3Ni45ODNdLFstNzcuOTExLDc3LjAyMl0sWy03Ny44ODksNzYuNzc4XSxbLTgwLjU2MSw3Ni4xNzhdLFstODMuMTc0LDc2LjQ1NF0sWy04Ni4xMTIsNzYuMjk5XSxbLTg3LjYsNzYuNDJdLFstODkuNDkxLDc2LjQ3Ml0sWy04OS42MTYsNzYuOTUyXSxbLTg3Ljc2Nyw3Ny4xNzhdLFstODguMjYsNzcuOV0sWy04Ny42NSw3Ny45N10sWy04NC45NzYsNzcuNTM5XSxbLTg2LjM0LDc4LjE4XSxbLTg3Ljk2Miw3OC4zNzJdLFstODcuMTUyLDc4Ljc1OV0sWy04NS4zNzksNzguOTk3XSxbLTg1LjA5NSw3OS4zNDVdLFstODYuNTA3LDc5LjczNl0sWy04Ni45MzIsODAuMjUxXSxbLTg0LjE5OCw4MC4yMDhdLFstODMuNDA5LDgwLjFdLFstODEuODQ4LDgwLjQ2NF0sWy04NC4xLDgwLjU4XSxbLTg3LjU5OSw4MC41MTZdLFstODkuMzY3LDgwLjg1Nl0sWy05MC4yLDgxLjI2XSxbLTkxLjM2OCw4MS41NTNdLFstOTEuNTg3LDgxLjg5NF0sWy05MC4xLDgyLjA4NV0sWy04OC45MzIsODIuMTE4XSxbLTg2Ljk3LDgyLjI4XSxbLTg1LjUsODIuNjUyXSxbLTg0LjI2LDgyLjZdLFstODMuMTgsODIuMzJdLFstODIuNDIsODIuODZdLFstODEuMSw4My4wMl0sWy03OS4zMDcsODMuMTMxXSxbLTc2LjI1LDgzLjE3Ml0sWy03NS43MTksODMuMDY0XSxbLTcyLjgzMiw4My4yMzNdLFstNzAuNjY2LDgzLjE3XSxbLTY4LjUsODMuMTA2XV0sW1stMjcuMSw4My41Ml0sWy0yMC44NDUsODIuNzI3XSxbLTIyLjY5Miw4Mi4zNDJdLFstMjYuNTE4LDgyLjI5OF0sWy0zMS45LDgyLjJdLFstMzEuMzk2LDgyLjAyMl0sWy0yNy44NTcsODIuMTMyXSxbLTI0Ljg0NCw4MS43ODddLFstMjIuOTAzLDgyLjA5M10sWy0yMi4wNzIsODEuNzM0XSxbLTIzLjE3LDgxLjE1M10sWy0yMC42MjQsODEuNTI1XSxbLTE1Ljc2OCw4MS45MTJdLFstMTIuNzcsODEuNzE5XSxbLTEyLjIwOSw4MS4yOTJdLFstMTYuMjg1LDgwLjU4XSxbLTE2Ljg1LDgwLjM1XSxbLTIwLjA0Niw4MC4xNzddLFstMTcuNzMsODAuMTI5XSxbLTE4LjksNzkuNF0sWy0xOS43MDUsNzguNzUxXSxbLTE5LjY3NCw3Ny42MzldLFstMTguNDczLDc2Ljk4Nl0sWy0yMC4wMzUsNzYuOTQ0XSxbLTIxLjY3OSw3Ni42MjhdLFstMTkuODM0LDc2LjA5OF0sWy0xOS41OTksNzUuMjQ4XSxbLTIwLjY2OCw3NS4xNTZdLFstMTkuMzczLDc0LjI5Nl0sWy0yMS41OTQsNzQuMjI0XSxbLTIwLjQzNSw3My44MTddLFstMjAuNzYyLDczLjQ2NF0sWy0yMi4xNzIsNzMuMzFdLFstMjMuNTY2LDczLjMwN10sWy0yMi4zMTMsNzIuNjI5XSxbLTIyLjMsNzIuMTg0XSxbLTI0LjI3OCw3Mi41OThdLFstMjQuNzkzLDcyLjMzXSxbLTIzLjQ0Myw3Mi4wOF0sWy0yMi4xMzMsNzEuNDY5XSxbLTIxLjc1NCw3MC42NjRdLFstMjMuNTM2LDcwLjQ3MV0sWy0yNC4zMDcsNzAuODU2XSxbLTI1LjU0Myw3MS40MzFdLFstMjUuMjAxLDcwLjc1Ml0sWy0yNi4zNjMsNzAuMjI2XSxbLTIzLjcyNyw3MC4xODRdLFstMjIuMzQ5LDcwLjEyOV0sWy0yNS4wMjksNjkuMjU5XSxbLTI3Ljc0Nyw2OC40N10sWy0zMC42NzQsNjguMTI1XSxbLTMxLjc3Nyw2OC4xMjFdLFstMzIuODExLDY3LjczNV0sWy0zNC4yMDIsNjYuNjhdLFstMzYuMzUzLDY1Ljk3OV0sWy0zNy4wNDQsNjUuOTM4XSxbLTM4LjM3NSw2NS42OTJdLFstMzkuODEyLDY1LjQ1OF0sWy00MC42NjksNjQuODRdLFstNDAuNjgzLDY0LjEzOV0sWy00MS4xODksNjMuNDgyXSxbLTQyLjgxOSw2Mi42ODJdLFstNDIuNDE3LDYxLjkwMV0sWy00Mi44NjYsNjEuMDc0XSxbLTQzLjM3OCw2MC4wOThdLFstNDQuNzg4LDYwLjAzN10sWy00Ni4yNjQsNjAuODUzXSxbLTQ4LjI2Myw2MC44NThdLFstNDkuMjMzLDYxLjQwN10sWy00OS45LDYyLjM4M10sWy01MS42MzMsNjMuNjI3XSxbLTUyLjE0LDY0LjI3OF0sWy01Mi4yNzcsNjUuMTc3XSxbLTUzLjY2Miw2Ni4xXSxbLTUzLjMwMiw2Ni44MzddLFstNTMuOTY5LDY3LjE4OV0sWy01Mi45OCw2OC4zNThdLFstNTEuNDc1LDY4LjczXSxbLTUxLjA4LDY5LjE0OF0sWy01MC44NzEsNjkuOTI5XSxbLTUyLjAxNCw2OS41NzVdLFstNTIuNTU4LDY5LjQyNl0sWy01My40NTYsNjkuMjg0XSxbLTU0LjY4Myw2OS42MV0sWy01NC43NSw3MC4yODldLFstNTQuMzU5LDcwLjgyMV0sWy01My40MzEsNzAuODM2XSxbLTUxLjM5LDcwLjU3XSxbLTUzLjEwOSw3MS4yMDVdLFstNTQuMDA0LDcxLjU0N10sWy01NSw3MS40MDddLFstNTUuODM1LDcxLjY1NF0sWy01NC43MTgsNzIuNTg2XSxbLTU1LjMyNiw3Mi45NTldLFstNTYuMTIsNzMuNjVdLFstNTcuMzI0LDc0LjcxXSxbLTU4LjU5Nyw3NS4wOTldLFstNTguNTg1LDc1LjUxN10sWy02MS4yNjksNzYuMTAyXSxbLTYzLjM5Miw3Ni4xNzVdLFstNjYuMDY0LDc2LjEzNV0sWy02OC41MDQsNzYuMDYxXSxbLTY5LjY2NSw3Ni4zOF0sWy03MS40MDMsNzcuMDA5XSxbLTY4Ljc3Nyw3Ny4zMjNdLFstNjYuNzY0LDc3LjM3Nl0sWy03MS4wNDMsNzcuNjM2XSxbLTczLjI5Nyw3OC4wNDRdLFstNzMuMTU5LDc4LjQzM10sWy02OS4zNzMsNzguOTE0XSxbLTY1LjcxMSw3OS4zOTRdLFstNjUuMzI0LDc5Ljc1OF0sWy02OC4wMjMsODAuMTE3XSxbLTY3LjE1MSw4MC41MTZdLFstNjMuNjg5LDgxLjIxNF0sWy02Mi4yMzQsODEuMzIxXSxbLTYyLjY1MSw4MS43N10sWy02MC4yODIsODIuMDM0XSxbLTU3LjIwNyw4Mi4xOTFdLFstNTQuMTM0LDgyLjJdLFstNTMuMDQzLDgxLjg4OF0sWy01MC4zOTEsODIuNDM5XSxbLTQ4LjAwNCw4Mi4wNjVdLFstNDYuNiw4MS45ODZdLFstNDQuNTIzLDgxLjY2MV0sWy00Ni45MDEsODIuMl0sWy00Ni43NjQsODIuNjI4XSxbLTQzLjQwNiw4My4yMjVdLFstMzkuODk4LDgzLjE4XSxbLTM4LjYyMiw4My41NDldLFstMzUuMDg4LDgzLjY0NV0sWy0yNy4xLDgzLjUyXV1dCg==");
+    if (res && res.ok) {
+      _cachedCoastlineRings = await res.json();
+      return _cachedCoastlineRings;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function snapCoordinateToCoastlineRings(lat, lon, rings, maxDeg = 3.5) {
+  if (!Array.isArray(rings) || rings.length === 0) return null;
+  const cosLat = Math.max(0.1, Math.cos(lat * COASTAL_DEG_TO_RAD));
+  let bestLat = lat, bestLon = lon, bestScore = Infinity;
+  for (const ring of rings) {
+    if (!Array.isArray(ring) || ring.length < 2) continue;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [x0, y0] = ring[i];
+      const [x1, y1] = ring[i + 1];
+      const dx = x1 - x0, dy = y1 - y0;
+      const lenSq = dx * dx + dy * dy;
+      const t = lenSq > 1e-12 ? Math.max(0, Math.min(1, ((lon - x0) * dx + (lat - y0) * dy) / lenSq)) : 0;
+      const px = x0 + t * dx;
+      const py = y0 + t * dy;
+      const dLon = (px - lon) * cosLat;
+      const dLat = py - lat;
+      const degDist = Math.hypot(dLon, dLat);
+      if (degDist > maxDeg) continue;
+      // Weight latitude 2.4x so inland clicks on a peninsula snap East/West to the coast at the same latitude
+      const score = Math.hypot(dLon, dLat * 2.4);
+      if (score < bestScore) {
+        bestScore = score;
+        bestLat = Number(py.toFixed(4));
+        bestLon = Number(px.toFixed(4));
+      }
+    }
+  }
+  return bestScore < Infinity ? { latitude: bestLat, longitude: bestLon } : null;
+}
+
+// Search a ~300km x 300km regional AWS Terrarium DEM mosaic (2x2 tiles at zoom 8)
+// to locate the true 0m shoreline for ANY inland or offshore coordinate worldwide.
+async function findNearestCoastlineInRealDEM(lat, lon, fetchFn = null, _triedWest = false) {
+  const effectiveFetch = fetchFn || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
+  if (!effectiveFetch) return null;
+  const z = 8;
+  const nTiles = 2 ** z;
+  const fx = ((lon + 180) / 360) * nTiles;
+  const rLat = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+  const fy = ((1 - Math.log(Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI) / 2) * nTiles;
+  const tx0 = Math.floor(fx - 0.5);
+  const ty0 = Math.max(0, Math.min(nTiles - 2, Math.floor(fy - 0.5)));
+  const w = 512, h = 512;
+  try {
+    const reqs = [];
+    for (let ty = ty0; ty <= ty0 + 1; ty++) {
+      for (let tx = tx0; tx <= tx0 + 1; tx++) {
+        const wrappedX = ((tx % nTiles) + nTiles) % nTiles;
+        const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${wrappedX}/${ty}.png`;
+        reqs.push(
+          Promise.resolve(effectiveFetch(url, { mode: 'cors' })).then(async (res) => {
+            if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) return { tx, ty, rgba: res };
+            if (!res?.ok) return null;
+            const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+            return { tx, ty, bmp };
+          }).catch(() => null)
+        );
+      }
+    }
+    const loaded = await Promise.all(reqs);
+    if (!loaded.every(Boolean)) {
+      for (const item of loaded) item?.bmp?.close?.();
+      return null;
+    }
+    const pixels = rasterizeTileGrid(loaded, tx0, ty0, w, h);
+    const elev = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const k = i * 4;
+      elev[i] = pixels[k] * 256 + pixels[k + 1] + pixels[k + 2] / 256 - 32768;
+    }
+    const cx = (fx - tx0) * 256;
+    const cy = (fy - ty0) * 256;
+    let bestPx = -1, bestPy = -1, bestScore = Infinity;
+    for (let py = 4; py < h - 4; py++) {
+      for (let px = 4; px < w - 4; px++) {
+        const e = elev[py * w + px];
+        if (e <= 0.35 || e > 250) continue;
+        // Require adjacent sea-level water (<= 0.05m) AND open water 3 pixels (~1.6km) further in that direction
+        const hasWater =
+          (elev[py * w + (px - 1)] <= 0.05 && elev[py * w + (px - 3)] <= 0.0) ||
+          (elev[py * w + (px + 1)] <= 0.05 && elev[py * w + (px + 3)] <= 0.0) ||
+          (elev[(py - 1) * w + px] <= 0.05 && elev[(py - 3) * w + px] <= 0.0) ||
+          (elev[(py + 1) * w + px] <= 0.05 && elev[(py + 3) * w + px] <= 0.0);
+        if (!hasWater) continue;
+        const dx = px - cx;
+        const dy = (py - cy) * 2.0; // Prefer East/West coast snap at the same latitude
+        const score = dx * dx + dy * dy;
+        if (score < bestScore) {
+          bestScore = score;
+          bestPx = px;
+          bestPy = py;
+        }
+      }
+    }
+    if (bestPx >= 0) {
+      const outTileX = tx0 + (bestPx + 0.5) / 256;
+      const outTileY = ty0 + (bestPy + 0.5) / 256;
+      const outLon = (outTileX / nTiles) * 360 - 180;
+      const nMerc = Math.PI - (2 * Math.PI * outTileY) / nTiles;
+      const outLat = Math.atan(0.5 * (Math.exp(nMerc) - Math.exp(-nMerc))) * COASTAL_RAD_TO_DEG;
+      return { latitude: Number(outLat.toFixed(4)), longitude: Number(outLon.toFixed(4)) };
+    }
+    // If user typed a positive longitude (e.g. 81.312 instead of -81.312 for 81.312°W) that landed in landlocked Eurasia, try -lon!
+    if (!_triedWest && lon > 30 && lon < 130 && lat > 5 && lat < 50) {
+      return findNearestCoastlineInRealDEM(lat, -lon, effectiveFetch, true);
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 // Fetch real high-resolution SRTM/NED/ETOPO1 elevation tiles from AWS Terrarium
-// (zoom 13 + zoom 14 nearshore = ~9m-18m resolution) AND co-registered Esri World Imagery
+// (zoom 13 = ~18m resolution) AND co-registered Esri World Imagery
 // satellite orthophoto tiles (https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
 // in parallel. Applies Saba's coastal bathymetry skirt model and spectral satellite
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
 async function upgradeProceduralPackWithRealDEM(
   pack,
-  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 1500 } = {}
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 12000, _snapAttempted = false } = {}
 ) {
   const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
   if (!pack?.region || !effectiveFetch) return ensureFallback(pack);
-  const { region } = pack;
+  let { region } = pack;
   const n = region.size;
   const span = region.span;
   const cosLat = Math.max(0.1, Math.cos(region.latitude * COASTAL_DEG_TO_RAD));
@@ -24589,6 +24903,7 @@ async function upgradeProceduralPackWithRealDEM(
   if (cols < 1 || cols > 6 || rows < 1 || rows > 6) return ensureFallback(pack);
 
   try {
+    const lrmPromise = !fetchTile ? load1550BuildingLRMTemplates() : Promise.resolve(null);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const w = cols * 256;
@@ -24641,42 +24956,17 @@ async function upgradeProceduralPackWithRealDEM(
       }
     }
 
-    // Also fetch central 2x2 high-resolution zoom+1 (~9m/px) DEM tiles when using live fetch at zoom 13
+    // Single uniform tile grid across the entire territory (no inner 2x2 Z14 square composite seam)
     const nearZoom = zoom + 1;
-    const nearNumTiles = 2 ** nearZoom;
-    const ncx = lonToTileX(region.longitude, nearNumTiles);
-    const ncy = latToTileY(region.latitude, nearNumTiles);
-    const ntx0 = ncx - 1, ntx1 = ncx;
-    const nty0 = ncy - 1, nty1 = ncy;
     const nearDemPromises = [];
-    if (!fetchTile && zoom === 13 && typeof fetch === 'function' && typeof createImageBitmap === 'function') {
-      for (let ty = nty0; ty <= nty1; ty++) {
-        for (let tx = ntx0; tx <= ntx1; tx++) {
-          const wrappedX = ((tx % nearNumTiles) + nearNumTiles) % nearNumTiles;
-          const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${nearZoom}/${wrappedX}/${ty}.png`;
-          nearDemPromises.push(
-            fetch(url, { signal: controller.signal, mode: 'cors' })
-              .then(async (res) => {
-                if (!res?.ok) return null;
-                const bmp = await createImageBitmap(await res.blob(), {
-                  premultiplyAlpha: 'none',
-                  colorSpaceConversion: 'none',
-                });
-                return { tx, ty, bmp };
-              })
-              .catch(() => null)
-          );
-        }
-      }
-    }
 
     const [loaded, satLoaded, nearDemLoaded] = await Promise.all([
       Promise.all(tilePromises),
       satPromises.length ? Promise.all(satPromises) : Promise.resolve([]),
       nearDemPromises.length ? Promise.all(nearDemPromises) : Promise.resolve([]),
-      !fetchTile ? load1550BuildingLRMTemplates() : Promise.resolve(null),
     ]);
     clearTimeout(timer);
+    await lrmPromise;
 
     const pixels = rasterizeTileGrid(loaded, tx0, ty0, w, h);
     let nearPixels = null;
@@ -24721,6 +25011,9 @@ async function upgradeProceduralPackWithRealDEM(
     const rawDem = new Float32Array(n * n);
     let landCount = 0;
     let maxDem = -Infinity;
+    const landElevs = [];
+    let sumWaterX = 0, sumWaterZ = 0, waterCount = 0;
+    let sumLandX = 0, sumLandZ = 0;
     for (let j = 0; j < n; j++) {
       const z = region.z + (j / (n - 1) - 0.5) * span;
       const lat = region.latitude - (z - region.z) / 111195;
@@ -24729,15 +25022,70 @@ async function upgradeProceduralPackWithRealDEM(
         const lon = region.longitude + (x - region.x) / (111195 * cosLat);
         const elev = sampleTerrarium(lat, lon);
         rawDem[j * n + i] = elev;
-        if (elev > 0.25) landCount++;
+        if (elev > 0.25) {
+          landCount++;
+          sumLandX += x - region.x;
+          sumLandZ += z - region.z;
+          if ((i + j) % 2 === 0) landElevs.push(elev);
+        } else {
+          waterCount++;
+          sumWaterX += x - region.x;
+          sumWaterZ += z - region.z;
+        }
         if (elev > maxDem) maxDem = elev;
       }
     }
     const landRatio = landCount / (n * n);
-    // Require both real land and real water in the 8.2km coastal window
-    if (landRatio < 0.015 || landRatio > 0.95 || maxDem < 2.5) {
+    // If user clicked or entered coordinates slightly inland (landRatio > 0.94) or offshore (landRatio < 0.02),
+    // search the surrounding ~300km x 300km real AWS Terrarium Zoom-8 DEM to snap to the true 0m shoreline and retry once!
+    if ((landRatio < 0.02 || landRatio > 0.94) && !_snapAttempted && !fetchTile && typeof fetch === 'function') {
+      for (const item of satLoaded) item?.bmp?.close?.();
+      let snapped = await findNearestCoastlineInRealDEM(region.latitude, region.longitude, fetch);
+      if (!snapped) {
+        const rings = await loadCoastlineRingsForSnap(fetch);
+        snapped = snapCoordinateToCoastlineRings(region.latitude, region.longitude, rings, 3.5);
+      }
+      if (snapped && (Math.abs(snapped.latitude - region.latitude) > 1e-3 || Math.abs(snapped.longitude - region.longitude) > 1e-3)) {
+        pack.region = resolveGlobalCoastalRegion({
+          ...region,
+          latitude: snapped.latitude,
+          longitude: snapped.longitude,
+          ...(snapped.shoreBearing !== undefined ? { shoreBearing: snapped.shoreBearing } : {}),
+        });
+        return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, timeoutMs, _snapAttempted: true });
+      }
+    }
+    // Require real land and real water in the coastal window (allow flat barrier islands down to 0.35m!)
+    if (landRatio < 0.015 || landRatio > 0.97 || maxDem < 0.35) {
       for (const item of satLoaded) item?.bmp?.close?.();
       return ensureFallback(pack);
+    }
+
+    // Damp SRTM tree-canopy / bridge radar spikes on flat low-lying coastal plains (e.g. Florida barrier islands where median land < 7m)
+    landElevs.sort((a, b) => a - b);
+    const medLand = landElevs.length ? landElevs[Math.floor(landElevs.length * 0.5)] : 5;
+    if (medLand < 7.0) {
+      const softCap = Math.max(4.0, medLand + 3.0);
+      maxDem = 0;
+      for (let k = 0; k < n * n; k++) {
+        if (rawDem[k] > softCap) {
+          rawDem[k] = softCap + (rawDem[k] - softCap) * 0.22;
+        }
+        if (rawDem[k] > maxDem) maxDem = rawDem[k];
+      }
+    }
+
+    // Infer true shoreBearing from the real DEM water-to-land center of mass for custom coordinates
+    if (!Object.hasOwn(SPANISH_MAIN_1550_REGIONS, region.id) && waterCount > 50 && landCount > 50) {
+      const dx = sumLandX / landCount - sumWaterX / waterCount;
+      const dz = sumLandZ / landCount - sumWaterZ / waterCount;
+      const demBearing = Math.round(((Math.atan2(dx, -dz) * COASTAL_RAD_TO_DEG) % 360 + 360) % 360);
+      region = Object.freeze({
+        ...region,
+        shoreBearing: demBearing,
+        peakElevationMetres: Math.max(4, Math.round(maxDem)),
+      });
+      pack.region = region;
     }
 
     // Co-register satellite imagery from Web Mercator tiles to the local equirectangular grid
@@ -24862,13 +25210,55 @@ function canonicalCoastalCellId(regionSpec) {
 }
 
 function build1550HistoricalTerritoryPack(basePack, options = {}) {
-  const region = resolveGlobalCoastalRegion(basePack.region);
+  const baseRegion = resolveGlobalCoastalRegion(basePack.region);
+  const satSource = options.orthophoto1550 || basePack.satelliteData || null;
+  const hasDedicated1550Ortho = Boolean(options.orthophoto1550);
+  const rawPrecomputedFootprints = options.precomputedFootprints || satSource?.precomputedFootprints || null;
+
+  // Validate physical ground scale (metersPerPixel & spanM) of the AI 1550 orthophoto / footprints
+  const scaleInfo =
+    hasDedicated1550Ortho || rawPrecomputedFootprints
+      ? validateOrthophotoScale1550(
+          baseRegion,
+          satSource ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho } : null,
+          rawPrecomputedFootprints
+        )
+      : { spanM: baseRegion.span, metersPerPixel: Number((baseRegion.span / 1024).toFixed(3)), footprintScale: 1 };
+
+  const region =
+    scaleInfo.spanM !== baseRegion.span
+      ? resolveGlobalCoastalRegion({ ...baseRegion, span: scaleInfo.spanM })
+      : baseRegion;
+  const precomputedFootprints =
+    rawPrecomputedFootprints && Math.abs(scaleInfo.footprintScale - 1) > 1e-3
+      ? {
+          ...rawPrecomputedFootprints,
+          span: region.span,
+          metersPerPixel: scaleInfo.metersPerPixel,
+          footprints: rawPrecomputedFootprints.footprints.map((fp) => ({
+            ...fp,
+            width: Number((fp.width * scaleInfo.footprintScale).toFixed(1)),
+            length: Number((fp.length * scaleInfo.footprintScale).toFixed(1)),
+            inlandM: Number(((fp.inlandM ?? 64) * scaleInfo.footprintScale).toFixed(1)),
+          })),
+        }
+      : rawPrecomputedFootprints;
+
   const n = region.size;
   const span = region.span;
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
-  const baseHeights = basePack.heights || options.precomputedHeights1550;
-  const satSource = options.orthophoto1550 || basePack.satelliteData || null;
-  const hasDedicated1550Ortho = Boolean(options.orthophoto1550);
+  const rawBaseHeights = basePack.heights || options.precomputedHeights1550;
+  let baseHeights = rawBaseHeights;
+  if (rawBaseHeights && Math.abs(region.span - baseRegion.span) > 1.0) {
+    baseHeights = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const x = region.x + (i / (n - 1) - 0.5) * span;
+        baseHeights[j * n + i] = terrainSample(rawBaseHeights, x, z, baseRegion);
+      }
+    }
+  }
   const baseShoreDist = computeCoastalShoreDistances(baseHeights, n, span, 0.25);
   const { distWater, step } = baseShoreDist;
 
@@ -24906,12 +25296,13 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
 
           if (h <= 6.2 && inlandM <= 340 && !inBastionCore) {
             lowCoastalCells++;
-            // Shadow-proof 1550 water check: requires blue/turquoise excess so dark building/wall shadows on land are never carved into water
+            // Shadow-proof 1550 water check: includes deep teal bay & tributary river channels (e.g. Havana Bay, Río Ozama)
             const is1550Water =
               hasDedicated1550Ortho &&
               sat &&
-              ((sat.b - sat.r >= 7 && sat.b >= sat.g * 0.78 && sat.greenness < 0.08 && sat.luma < 176 && sat.luma >= 26) ||
-                (sat.g - sat.r >= 8 && sat.b - sat.r >= 1 && sat.b > 75 && sat.luma < 172 && sat.luma >= 28));
+              ((sat.b - sat.r >= 6 && sat.b >= sat.g * 0.76 && sat.luma < 185 && sat.luma >= 15) ||
+                (sat.b - sat.r >= 9 && sat.b >= sat.g * 0.70 && sat.g - sat.b <= 18 && sat.luma < 180 && sat.luma >= 16) ||
+                (sat.g - sat.r >= 12 && sat.b - sat.r >= 5 && sat.b >= 55 && sat.b >= sat.g * 0.73 && sat.luma < 180));
             const creekNoise = coastalUberNoise2D(
               x * 0.0038 + 0.7 * coastalFbm2D(x * 0.0016, z * 0.0016, seed + 719, 2),
               z * 0.0038 + 0.7 * coastalFbm2D(z * 0.0016 + 9.4, x * 0.0016, seed + 727, 2),
@@ -24922,7 +25313,7 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
             const isModernFillCarve =
               !hasDedicated1550Ortho &&
               ((sat && sat.isUrban && h <= 5.2 && inlandM <= 260) ||
-                (h <= 3.4 && inlandM <= 180 && creekNoise < 0.34));
+                (h <= 2.2 && inlandM <= 36 && creekNoise < 0.28));
 
             if (is1550Water || isModernFillCarve) {
               reclaimedCellsCarved++;
@@ -24936,16 +25327,18 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
               continue;
             }
           }
-          // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes
-          const reliefBoost = h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.4, ridgeDetail * 0.45);
+          // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes (kept subtle on flat barrier islands)
+          const reliefBoost =
+            h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.25, ridgeDetail * Math.min(0.45, Math.max(0.06, (h - 1.5) * 0.07)));
           carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
         } else {
           // If 1550 orthophoto shows land/forest/settlement here, elevate above sea level
           const is1550Land =
             hasDedicated1550Ortho &&
             sat &&
-            !((sat.b - sat.r >= 7 && sat.b >= sat.g * 0.78 && sat.greenness < 0.08 && sat.luma < 176) ||
-              (sat.g - sat.r >= 8 && sat.b - sat.r >= 1 && sat.b > 75 && sat.luma < 172));
+            !((sat.b - sat.r >= 6 && sat.b >= sat.g * 0.76 && sat.luma < 185) ||
+              (sat.b - sat.r >= 9 && sat.b >= sat.g * 0.70 && sat.g - sat.b <= 18 && sat.luma < 180) ||
+              (sat.g - sat.r >= 12 && sat.b - sat.r >= 5 && sat.b >= 55 && sat.b >= sat.g * 0.73 && sat.luma < 180));
           carvedDem[k] = is1550Land ? 2.4 + sat.greenness * 1.8 : h;
         }
       }
@@ -24981,7 +25374,6 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
 
   // Step 3: Build 100% De-Urbanized 1550 Orthophoto Imagery Seed
-  const precomputedFootprints = options.precomputedFootprints || satSource?.precomputedFootprints || null;
   let sat1550 = satSource
     ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho, precomputedFootprints }
     : precomputedFootprints
@@ -25062,11 +25454,14 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
     cellId: cellInfo.cellId,
     name: cellInfo.name,
     coordLabel: cellInfo.coordLabel,
+    span: region.span,
+    metersPerPixel: scaleInfo.metersPerPixel,
     restoredEstuaryPct,
     reclaimedCellsCarved,
     palmCount: upgradedPack.vegetation?.stats?.palmCount ?? 0,
     beachCellCount: upgradedPack.beaches?.beachCellCount ?? 0,
     hasOrthophoto1550: hasDedicated1550Ortho,
+    baseElevationSource: basePack.elevationSource || 'procedural-geomorphology',
     discoveredAt: options.discoveredAt || new Date().toISOString(),
   };
   return upgradedPack;
@@ -25116,6 +25511,14 @@ function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophoto1550 =
     meta = JSON.parse(new TextDecoder().decode(bytes.subarray(16 + heightsBytes, 16 + heightsBytes + metaLen)));
   } catch { /* ignore malformed meta */ }
 
+  // Reject unverified legacy R2 cache entries that were baked from synthetic procedural fallback before real-DEM verification
+  const isVerifiedCache = Boolean(
+    meta.curated1550 ||
+    meta.baseElevationSource?.startsWith('aws-terrarium') ||
+    basePack.elevationSource === 'procedural-geomorphology'
+  );
+  if (!isVerifiedCache) return null;
+
   const region = resolveGlobalCoastalRegion(basePack.region);
   let heights1550 = decodedHeights;
   if (n !== region.size) {
@@ -25135,7 +25538,13 @@ function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophoto1550 =
   }
   const precomputedFootprints =
     Array.isArray(meta.footprints) && meta.footprints.length >= 4
-      ? { clusterU: meta.clusterU, clusterV: meta.clusterV, footprints: meta.footprints }
+      ? {
+          clusterU: meta.clusterU,
+          clusterV: meta.clusterV,
+          span: meta.span,
+          metersPerPixel: meta.metersPerPixel,
+          footprints: meta.footprints,
+        }
       : null;
   const built = build1550HistoricalTerritoryPack(basePack, {
     orthophoto1550,
@@ -25143,7 +25552,13 @@ function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophoto1550 =
     precomputedHeights1550: heights1550,
     precomputedFootprints,
   });
-  built.territory1550 = { ...built.territory1550, ...meta };
+  built.territory1550 = {
+    ...built.territory1550,
+    ...meta,
+    span: built.region.span,
+    metersPerPixel: built.territory1550.metersPerPixel,
+    footprints: precomputedFootprints?.footprints || built.territory1550.footprints,
+  };
   return built;
 }
 
@@ -25156,6 +25571,10 @@ async function runLandfallDiscoveryPipeline(basePack, {
   fetchImpl = typeof fetch === 'function' ? fetch : null,
   forceFirstExplorer = false,
 } = {}) {
+  // Never run 1550 reconstruction on a synthetic random fallback if live DEM fetch is available
+  if (basePack.elevationSource === 'procedural-geomorphology' && fetchImpl && typeof createImageBitmap === 'function') {
+    await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000 });
+  }
   const cellInfo = canonicalCoastalCellId(basePack.region);
   await load1550BuildingLRMTemplates(fetchImpl);
   const localKey = `waterworld.discovery.v1.${cellInfo.cellId}`;
@@ -25242,7 +25661,7 @@ async function runLandfallDiscoveryPipeline(basePack, {
     const orthophoto1550 = await loadOrthophoto1550();
     if (remoteAvailable && fetchImpl) {
       try {
-        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}`);
+        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&v=5`);
         if (res && res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
           upgradedPack = apply1550TerritoryCachePayload(basePack, buf, orthophoto1550);
@@ -25293,9 +25712,10 @@ async function runLandfallDiscoveryPipeline(basePack, {
   upgradedPack.territory1550.visits = 1;
   upgradedPack.territory1550.isFirstExplorer = true;
 
-  // Cache the newly built 1550 territory in Cloudflare R2 (and localStorage) for all future mariners
+  // Cache the newly built 1550 territory in Cloudflare R2 (ONLY if built from real SRTM DEM, never synthetic fallback!)
   const payload = encode1550TerritoryCachePayload(upgradedPack);
-  if (remoteAvailable && fetchImpl) {
+  const isRealDemBacked = basePack.elevationSource !== 'procedural-geomorphology' || Boolean(orthophoto1550);
+  if (remoteAvailable && fetchImpl && isRealDemBacked) {
     try {
       await fetchImpl(
         `${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&lat=${encodeURIComponent(basePack.region.latitude)}&lon=${encodeURIComponent(basePack.region.longitude)}&name=${encodeURIComponent(cellInfo.name)}`,
@@ -26455,10 +26875,15 @@ function createForestTerrainOcclusion({device,heights,region,near=null}){
  let seaBoundary=true;for(let i=0;i<region.size;i++)for(const at of[i,(region.size-1)*region.size+i,i*region.size,i*region.size+region.size-1])if(heights[at]>0)seaBoundary=false;
  const data=new Float32Array([...coarse.domain,fine?1:0,...(fine?.domain??coarse.domain),seaBoundary?1:0]);uniform=device.createBuffer({label:'forest immutable terrain domains',size:32,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(uniform,0,data);
  return {entries:[{binding:10,resource:{buffer:uniform}},{binding:11,resource:coarseView},{binding:12,resource:fineView}],
-  update(nextHeights){
+  update(nextHeights,nextRegion=region){
    if(!textures[0]||!(nextHeights instanceof Float32Array)||nextHeights.length!==region.size*region.size)return;
-   const nextCoarse=forestTerrainPyramid(nextHeights,region);
+   const activeReg=nextRegion||region;
+   const nextCoarse=forestTerrainPyramid(nextHeights,activeReg);
    for(const [level,values]of nextCoarse.levels.entries()){const n=nextCoarse.cells>>level;device.queue.writeTexture({texture:textures[0],mipLevel:level},values,{bytesPerRow:n*8},[n,n]);}
+   if(uniform){
+    const nextData=new Float32Array([...nextCoarse.domain,fine?1:0,...(fine?.domain??nextCoarse.domain),seaBoundary?1:0]);
+    device.queue.writeBuffer(uniform,0,nextData);
+   }
   },
   destroy(){uniform.destroy();for(const texture of textures)texture.destroy();}};
  }catch(error){uniform?.destroy();for(const texture of textures)texture.destroy();throw error;}
@@ -26636,8 +27061,9 @@ function* forestRootChecks(manifest,roots){
 }
 function* forestGeometryChecks(manifest,streams){
   validateForestScenery(manifest);
-  for(const name of ['vertices.bin','indices.bin','roots.bin'])if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
-  const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=new Float32Array(streams['roots.bin']);
+  const requiredStreams=streams?.skipRoots?['vertices.bin','indices.bin']:['vertices.bin','indices.bin','roots.bin'];
+  for(const name of requiredStreams)if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
+  const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=streams?.skipRoots?new Float32Array(0):new Float32Array(streams['roots.bin']);
   const stride=manifest.vertexStride/4;
   for(let i=0;i<vertices.length;i+=stride){
     if(!vertices.subarray(i,i+stride).every(Number.isFinite)||Math.abs(Math.hypot(...vertices.subarray(i+3,i+6))-1)>.001||!uint(vertices[i+6])||vertices[i+6]<3||vertices[i+7]<0||vertices[i+7]>1||vertices.subarray(i+10,i+13).some(v=>v<0))throw Error('Invalid forest vertex');
@@ -26656,7 +27082,7 @@ function* forestGeometryChecks(manifest,streams){
       if((j&4095)===0)yield;
     }
   }
-  yield* forestRootChecks(manifest,roots);
+  if(!streams?.skipRoots)yield* forestRootChecks(manifest,roots);
   return {manifest,vertices,indices,roots};
 }
 function decodeForestScenery(manifest,streams){
@@ -26710,7 +27136,7 @@ async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostor
     }))));
     const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
     const [vertices,indices,,light]=await Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal),materialPromise,lightPromise]);
-    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes},{signal});nativeLoaded=true;return{...geometry,textures,...light,...lod};
+    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots},{signal});nativeLoaded=true;return{...geometry,textures,...light,...lod};
   })();
   // Drop only our fulfilled cache reference after successful GPU installation.
   // Existing callers retain their immutable arrays; a later explicit native
@@ -27290,7 +27716,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     return {stats,nativeReady,prepare(){},
-      updatePack(nextPack,nextHeights=null){
+      updatePack(nextPack,nextHeights=null,nextRegion=null){
         if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
         const nextCount=Math.min(maxRootCapacity,nextPack.manifest.rootCount);
         activeRootCount=nextCount;
@@ -27301,6 +27727,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         let matBase=0;
         for(const p of nextPack.manifest.prototypes){
           const base=p.id*20,firstMaterial=matBase;matBase+=p.nativeMaterials.length;
+          if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
           words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
           for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
             const bin=bins[p.id]?.[tierIdx];
@@ -27309,7 +27736,7 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         }
         device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
         device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,nativeStatus.resident?modeIndex:effectiveModeIndex]));
-        if(nextHeights)terrainVisibility?.update?.(nextHeights);
+        if(nextHeights)terrainVisibility?.update?.(nextHeights,nextRegion);
       },
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
       encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}},
@@ -27907,29 +28334,26 @@ function retargetForestPackToProcedural(forestPack, proceduralPack, groundSample
         const sink = Math.max(0.12, basal * scale * slope + 0.08);
         const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
         const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
-        buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -1, 0);
+        const isTrop = region.climate === 'tropical' || region.climate === 'subtropical';
+        const rTint = isTrop ? tint * 0.78 : tint;
+        const gTint = isTrop ? tint * 1.12 : tint;
+        const bTint = isTrop ? tint * 0.68 : tint;
+        buckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -1, 0);
       }
     };
 
-    // Pass 1: Dense primary canopy in the 3800m × 3800m coastal & settlement window
-    const focusSpan = Math.min(span, 3800);
-    const focusCenterX = port?.center?.x ?? region.x;
-    const focusCenterZ = port?.center?.z ?? region.z;
-    const focusX0 = Math.max(x0, Math.min(x0 + span - focusSpan, focusCenterX - focusSpan * 0.5));
-    const focusZ0 = Math.max(z0, Math.min(z0 + span - focusSpan, focusCenterZ - focusSpan * 0.5));
+    // Single uniform full-territory Poisson-disc canopy pass (zero inner-vs-outer square grid boundary)
+    const uniformSpacing = Math.max(isMobile ? 9.5 : 5.8, span / (isMobile ? 260 : 420));
     runForestPass(
-      focusX0,
-      focusZ0,
-      focusSpan,
-      isMobile ? 11.5 : 7.4,
-      0.98,
+      x0,
+      z0,
+      span,
+      uniformSpacing,
+      0.96,
       0.52,
-      Math.floor(maxRoots * 0.68),
+      maxRoots,
       seed ^ 0x9e3779b9
     );
-
-    // Pass 2: Full-territory 8192m × 8192m hinterland canopy coverage
-    runForestPass(x0, z0, span, isMobile ? 21.0 : 13.5, 1.18, 0.58, maxRoots, seed ^ 0x85ebca6b);
   }
 
   // Fallback to explicit scrub/upland arrays if biome grid did not place roots
@@ -27992,9 +28416,11 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   // never run on the open-ocean startup path. Failure retains all old roots.
   const search=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
   const regionParam=search.get('region');
-  const isKnownSpanishMain=Boolean(regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam));
   const hasCustomCoords=search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon')));
-  const useProcedural=isKnownSpanishMain||(hasCustomCoords&&regionParam!=='saba');
+  const presetMatch=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
+  const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(Number(search.get('lat'))-presetMatch.latitude)<0.05&&Math.abs(Number(search.get('lon'))-presetMatch.longitude)<0.05)));
+  const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(Number(search.get('lat'))-ISLAND.latitude)>0.05||Math.abs(Number(search.get('lon'))-ISLAND.longitude)>0.05);
+  const useProcedural=isKnownSpanishMain||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
   const skipNativeForest=isMobile;
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
@@ -28036,7 +28462,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   if(proceduralPack&&useRealDEM){
     await upgradeProceduralPackWithRealDEM(proceduralPack);
   }
-  const activeRegion=proceduralPack?proceduralPack.region:ISLAND;
+  let activeRegion=proceduralPack?proceduralPack.region:ISLAND;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
@@ -28306,6 +28732,11 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    if(upgradedPack.region?.span&&upgradedPack.region.span!==activeRegion.span){
+      activeRegion=Object.freeze({...activeRegion,span:upgradedPack.region.span});
+      proceduralPack.region=activeRegion;
+      device.queue.writeBuffer(uniform,0,new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,1]));
+    }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
     if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
     heights.set(upgradedPack.heights);
@@ -28340,7 +28771,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
 
     if(forest&&forestPack){
       const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile});
-      forest.updatePack(nextForestPack,heights);
+      forest.updatePack(nextForestPack,heights,activeRegion);
     }
     if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
       const draft=boat.hydrodynamics?.draft??2.1;
@@ -28394,7 +28825,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
 
   if(proceduralPack){
     const forceFirstExplorer=search.get('discover')==='1';
-    const autoApplyCurated=isKnownSpanishMain&&!forceFirstExplorer&&search.get('era')!=='2026';
+    const autoApply1550=!forceFirstExplorer&&search.get('era')!=='2026';
     setTimeout(()=>{
       runLandfallDiscoveryPipeline({ ...proceduralPack, heights: baseSnapshot.heights },{
         forceFirstExplorer,
@@ -28411,12 +28842,12 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
         },
         onUpgradeReady(res){
           discovery.status='ready';
-          discovery.isFirstExplorer=!autoApplyCurated;
+          discovery.isFirstExplorer=!autoApply1550;
           discovery.visits=1;
           discovery.upgradedPack=res.upgradedPack;
           discovery.stats=res.stats;
           discovery.message=`Congratulations on your discovery! The 1550 historical territory for ${res.name} is ready.`;
-          if(autoApplyCurated){
+          if(autoApply1550){
             discovery.swapToUpgraded();
           }else{
             notifyDiscovery();
@@ -28429,7 +28860,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
           discovery.upgradedPack=res.upgradedPack;
           discovery.stats=res.stats;
           discovery.message=`1550 historical territory charted · Mariner #${res.visits}`;
-          if(autoApplyCurated){
+          if(autoApply1550){
             discovery.swapToUpgraded();
           }else{
             notifyDiscovery();
@@ -28449,7 +28880,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     prepare:updateTrees,
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
-    height:heightSample,groundSample,region:activeRegion,get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
+    height:heightSample,groundSample,get region(){return activeRegion;},get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion),
@@ -28508,6 +28939,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
 }
 
 // ---- js/landfall.js ----
+
 
 
 const LANDFALL_WEATHER = Object.freeze({
@@ -28648,7 +29080,9 @@ function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=nul
       svg.addEventListener('click',ev=>{
         const rect=svg.getBoundingClientRect();if(!rect.width||!rect.height)return;
         const x=(ev.clientX-rect.left)/rect.width*720,y=(ev.clientY-rect.top)/rect.height*360;
-        const lat=Math.max(-85,Math.min(85,90-y/2)),lon=Math.max(-180,Math.min(180,x/2-180));
+        let lat=Math.max(-85,Math.min(85,90-y/2)),lon=Math.max(-180,Math.min(180,x/2-180));
+        const snapped=snapCoordinateToCoastlineRings(lat,lon,rings,3.5);
+        if(snapped){lat=snapped.latitude;lon=snapped.longitude;}
         latInput.value=lat.toFixed(3);lonInput.value=lon.toFixed(3);
         dot.setAttribute('cx',String((lon+180)*2));dot.setAttribute('cy',String((90-lat)*2));
       });
@@ -31994,6 +32428,11 @@ async function main() {
       if(v){
         boat.x=v.x;boat.z=v.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
         if(boat.enabled){cam.x=v.x;cam.z=v.z;}
+        else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw;cam.pitch=v.pitch;}
+        if(vessels.length>1){
+          const escorts=safeEscortPositions(boat,vessels.slice(1),terrain,boat.heading);
+          for(let i=1;i<vessels.length;i++){vessels[i].x=escorts[i-1].x;vessels[i].z=escorts[i-1].z;vessels[i].heading=boat.heading;}
+        }
       }
       envFull=true;
     }

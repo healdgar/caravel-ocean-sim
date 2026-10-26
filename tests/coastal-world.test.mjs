@@ -448,5 +448,11 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
     assert.ok(inst.height >= 7.5 && inst.height <= 11.0, `Expected true human/tree scale eave height (7.5m–11.0m vs 18m–22m trees), got ${inst.height} for ${inst.prefabId}`);
     assert.ok(inst.width <= 44 && inst.length <= 48, `Expected individual building footprint <=44m×48m, got ${inst.width}×${inst.length} for ${inst.prefabId}`);
   }
+
+  // Verify 513x513 full-resolution mesh has zero inner-square subdivision seam on any arbitrary port coordinate
+  const fullPack = generateProceduralCoastalPack({ latitude: 29.894, longitude: -81.312 }, { size: 513, biomeSize: 128, albedoSize: 128, vegetationCandidates: 4000 });
+  assert.equal(fullPack.mesh.vertices.length, 513 * 513 * 8, 'Expected single uniform 513x513 vertex grid with zero inner-square subdivision seam');
+  assert.ok(fullPack.vegetation.palms.length / 8 >= 200, `Expected abundant 3D palms across subtropical canopy, got ${fullPack.vegetation.palms.length / 8}`);
 });
+
 

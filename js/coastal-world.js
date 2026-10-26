@@ -1145,9 +1145,21 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     const h = terrainSample(heights, p.x, p.z, region);
     const offshoreP = worldFromCoastalFrame(region, alongProbe, inland - probeOffshoreM);
     const offshoreH = terrainSample(heights, offshoreP.x, offshoreP.z, region);
+    const offshoreMidP = worldFromCoastalFrame(region, alongProbe, inland - probeOffshoreM * 2.2);
+    const offshoreMidH = terrainSample(heights, offshoreMidP.x, offshoreMidP.z, region);
+    const offshoreFarP = worldFromCoastalFrame(region, alongProbe, inland - probeOffshoreM * 3.8);
+    const offshoreFarH = terrainSample(heights, offshoreFarP.x, offshoreFarP.z, region);
     const inlandP = worldFromCoastalFrame(region, alongProbe, inland + probeInlandM);
     const inlandH = terrainSample(heights, inlandP.x, inlandP.z, region);
-    if (h >= -1.2 && h <= 2.8 && offshoreH <= -2.0 && inlandH >= 0.8 && inlandH <= 38) {
+    if (
+      h >= -1.2 &&
+      h <= 2.8 &&
+      offshoreH <= -2.0 &&
+      offshoreMidH <= -2.5 &&
+      offshoreFarH <= -3.0 &&
+      inlandH >= 0.8 &&
+      inlandH <= 38
+    ) {
       const clusterDistPenalty = clusterFrame
         ? Math.hypot(alongProbe - clusterFrame.along, inland - clusterFrame.inland) * 0.018
         : Math.abs(inland) * 0.001 + Math.abs(alongProbe) * 0.004;
@@ -2163,10 +2175,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     }
   }
 
-  // Optional 3D Corner-model Coconut Palms (Cocos nucifera: seaward-leaning ringed trunk + 12 arching pinnate fronds)
-  // along the sandy foreshore berm so tropical beaches have authentic silhouette palms
+  // 2-tier 3D Corner-model Palms (Cocos nucifera coconut palms on foreshore + Roystonea regia royal palms & Sabal palmetto in lowland/inland canopy)
   if (palms instanceof Float32Array && palms.length >= 8) {
-    const maxPalms = Math.min(palms.length / 8, 420);
+    const maxPalms = Math.min(palms.length / 8, 1800);
     const seawardRad = ((portPlacement.shoreBearing ?? 112) + 180) * COASTAL_DEG_TO_RAD;
     const defaultSeaX = Math.sin(seawardRad);
     const defaultSeaZ = -Math.cos(seawardRad);
@@ -2176,14 +2187,17 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const plumeR = palms[base + 3], ht = palms[base + 4], shape = palms[base + 5];
       const psx = palms[base + 6] || 0, psz = palms[base + 7] || 0;
       const gradLen = Math.hypot(psx, psz);
-      // Lean seaward down the local beach slope (-sx, -sz) when available
+      // Lean seaward down the local beach slope (-sx, -sz) when available; inland royal/sabal palms stand more upright
       const seaX = gradLen > 0.008 ? -psx / gradLen : defaultSeaX;
       const seaZ = gradLen > 0.008 ? -psz / gradLen : defaultSeaZ;
       const azSpread = (shape - 0.5) * 1.15;
       const leanAngle = Math.atan2(seaZ, seaX) + azSpread;
       const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
-      const leanMag = 2.1 + ((shape * 7) % 1) * 2.2;
-      const segs = 5;
+      const isForeshore = py < 9.5;
+      const leanMag = isForeshore ? 2.1 + ((shape * 7) % 1) * 2.2 : 0.55 + ((shape * 7) % 1) * 0.85;
+      // Tier 0 (first 500 palms): 5-segment curved trunk + 12 arching fronds; Tier 1 (palms 500..1800): 3-segment trunk + 6 arching fronds
+      const isNearTier = idx < 500;
+      const segs = isNearTier ? 5 : 3;
       let prevX = px, prevY = py - 0.35, prevZ = pz, prevR = 0.42;
       for (let s = 1; s <= segs; s++) {
         const t = s / segs;
@@ -2208,18 +2222,19 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         }
         prevX = curX; prevY = curY; prevZ = curZ; prevR = curR;
       }
-      // 12 arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
-      const frondCount = 12;
+      // Arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
+      const frondCount = isNearTier ? 12 : 6;
+      const halfFronds = frondCount >> 1;
       for (let f = 0; f < frondCount; f++) {
-        const tier = f < 6 ? 0 : 1;
+        const tier = f < halfFronds ? 0 : 1;
         const az = (f / frondCount) * Math.PI * 2 + shape * 3.1;
         const fx = Math.cos(az), fz = Math.sin(az);
         const tx = -fz, tz = fx;
-        const len = plumeR * (tier === 0 ? 1.08 : 0.88);
+        const len = plumeR * (tier === 0 ? 1.12 : 0.92);
         const midR = len * 0.55;
-        const midY = prevY + (tier === 0 ? 0.85 : 1.55);
+        const midY = prevY + (tier === 0 ? 0.95 : 1.65);
         const tipY = prevY - (tier === 0 ? 1.35 : 0.35);
-        const w = 0.58;
+        const w = isNearTier ? 0.62 : 0.78;
         const rootP = [prevX, prevY + 0.15, prevZ];
         const midLeft = [prevX + fx * midR - tx * w, midY, prevZ + fz * midR - tz * w];
         const midRight = [prevX + fx * midR + tx * w, midY, prevZ + fz * midR + tz * w];
@@ -2563,11 +2578,12 @@ export function seedCoastalVegetation(
     const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
     const bIdx = bj * m + bi;
     const nearSandyShore = beachData.drySandMask[bIdx] >= 24 || beachData.swashMask[bIdx] >= 16 || inlandM <= 75;
+    const isPalmClimate = region.climate === 'tropical' || region.climate === 'subtropical';
+    const isLowlandOrInlandPalm = isPalmClimate && h <= 110 && (nearSandyShore || shape < 0.48);
 
-    if (h < 10.5 && nearSandyShore) {
-      // Foreshore coconut palm fringe (Corner's model: 18-26m height, 2.75-4.25m plume radius)
-      // along sandy beach berms & littoral coves
-      const isPalm = region.climate === 'tropical' || region.climate === 'subtropical';
+    if ((h < 10.5 && nearSandyShore) || isLowlandOrInlandPalm) {
+      // Foreshore coconut palm fringe (Cocos nucifera: 18-26m height) + lowland/inland Roystonea regia & Sabal palmetto palms
+      const isPalm = isPalmClimate;
       const tNorm = (baseRadius - 3.2) / 4.4;
       const hNorm = (baseHeight - 8) / 10;
       const r = isPalm
@@ -2740,7 +2756,8 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
   }
 
   // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free subdivision
-  const subRadius = region.span * (n >= 513 ? 0.14 : 0.22);
+  // (Only subdivide coarse 257x257 mobile grids; full 513x513 Saba-resolution grids use a single uniform grid with zero inner seam)
+  const subRadius = n >= 513 ? 0 : region.span * 0.22;
   const M = n >= 513 ? 2 : 3;
   const cellSub = new Uint8Array((n - 1) * (n - 1));
   for (let j = 0; j < n - 1; j++) {
@@ -2985,19 +3002,142 @@ function rasterizeTileGrid(loaded, tx0, ty0, w, h) {
   return pixels;
 }
 
+let _cachedCoastlineRings = null;
+async function loadCoastlineRingsForSnap(fetchFn) {
+  if (_cachedCoastlineRings) return _cachedCoastlineRings;
+  try {
+    const res = await fetchFn('assets/world/land.json');
+    if (res && res.ok) {
+      _cachedCoastlineRings = await res.json();
+      return _cachedCoastlineRings;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function snapCoordinateToCoastlineRings(lat, lon, rings, maxDeg = 3.5) {
+  if (!Array.isArray(rings) || rings.length === 0) return null;
+  const cosLat = Math.max(0.1, Math.cos(lat * COASTAL_DEG_TO_RAD));
+  let bestLat = lat, bestLon = lon, bestScore = Infinity;
+  for (const ring of rings) {
+    if (!Array.isArray(ring) || ring.length < 2) continue;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [x0, y0] = ring[i];
+      const [x1, y1] = ring[i + 1];
+      const dx = x1 - x0, dy = y1 - y0;
+      const lenSq = dx * dx + dy * dy;
+      const t = lenSq > 1e-12 ? Math.max(0, Math.min(1, ((lon - x0) * dx + (lat - y0) * dy) / lenSq)) : 0;
+      const px = x0 + t * dx;
+      const py = y0 + t * dy;
+      const dLon = (px - lon) * cosLat;
+      const dLat = py - lat;
+      const degDist = Math.hypot(dLon, dLat);
+      if (degDist > maxDeg) continue;
+      // Weight latitude 2.4x so inland clicks on a peninsula snap East/West to the coast at the same latitude
+      const score = Math.hypot(dLon, dLat * 2.4);
+      if (score < bestScore) {
+        bestScore = score;
+        bestLat = Number(py.toFixed(4));
+        bestLon = Number(px.toFixed(4));
+      }
+    }
+  }
+  return bestScore < Infinity ? { latitude: bestLat, longitude: bestLon } : null;
+}
+
+// Search a ~300km x 300km regional AWS Terrarium DEM mosaic (2x2 tiles at zoom 8)
+// to locate the true 0m shoreline for ANY inland or offshore coordinate worldwide.
+export async function findNearestCoastlineInRealDEM(lat, lon, fetchFn = null, _triedWest = false) {
+  const effectiveFetch = fetchFn || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
+  if (!effectiveFetch) return null;
+  const z = 8;
+  const nTiles = 2 ** z;
+  const fx = ((lon + 180) / 360) * nTiles;
+  const rLat = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+  const fy = ((1 - Math.log(Math.tan(rLat) + 1 / Math.cos(rLat)) / Math.PI) / 2) * nTiles;
+  const tx0 = Math.floor(fx - 0.5);
+  const ty0 = Math.max(0, Math.min(nTiles - 2, Math.floor(fy - 0.5)));
+  const w = 512, h = 512;
+  try {
+    const reqs = [];
+    for (let ty = ty0; ty <= ty0 + 1; ty++) {
+      for (let tx = tx0; tx <= tx0 + 1; tx++) {
+        const wrappedX = ((tx % nTiles) + nTiles) % nTiles;
+        const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${wrappedX}/${ty}.png`;
+        reqs.push(
+          Promise.resolve(effectiveFetch(url, { mode: 'cors' })).then(async (res) => {
+            if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) return { tx, ty, rgba: res };
+            if (!res?.ok) return null;
+            const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+            return { tx, ty, bmp };
+          }).catch(() => null)
+        );
+      }
+    }
+    const loaded = await Promise.all(reqs);
+    if (!loaded.every(Boolean)) {
+      for (const item of loaded) item?.bmp?.close?.();
+      return null;
+    }
+    const pixels = rasterizeTileGrid(loaded, tx0, ty0, w, h);
+    const elev = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const k = i * 4;
+      elev[i] = pixels[k] * 256 + pixels[k + 1] + pixels[k + 2] / 256 - 32768;
+    }
+    const cx = (fx - tx0) * 256;
+    const cy = (fy - ty0) * 256;
+    let bestPx = -1, bestPy = -1, bestScore = Infinity;
+    for (let py = 4; py < h - 4; py++) {
+      for (let px = 4; px < w - 4; px++) {
+        const e = elev[py * w + px];
+        if (e <= 0.35 || e > 250) continue;
+        // Require adjacent sea-level water (<= 0.05m) AND open water 3 pixels (~1.6km) further in that direction
+        const hasWater =
+          (elev[py * w + (px - 1)] <= 0.05 && elev[py * w + (px - 3)] <= 0.0) ||
+          (elev[py * w + (px + 1)] <= 0.05 && elev[py * w + (px + 3)] <= 0.0) ||
+          (elev[(py - 1) * w + px] <= 0.05 && elev[(py - 3) * w + px] <= 0.0) ||
+          (elev[(py + 1) * w + px] <= 0.05 && elev[(py + 3) * w + px] <= 0.0);
+        if (!hasWater) continue;
+        const dx = px - cx;
+        const dy = (py - cy) * 2.0; // Prefer East/West coast snap at the same latitude
+        const score = dx * dx + dy * dy;
+        if (score < bestScore) {
+          bestScore = score;
+          bestPx = px;
+          bestPy = py;
+        }
+      }
+    }
+    if (bestPx >= 0) {
+      const outTileX = tx0 + (bestPx + 0.5) / 256;
+      const outTileY = ty0 + (bestPy + 0.5) / 256;
+      const outLon = (outTileX / nTiles) * 360 - 180;
+      const nMerc = Math.PI - (2 * Math.PI * outTileY) / nTiles;
+      const outLat = Math.atan(0.5 * (Math.exp(nMerc) - Math.exp(-nMerc))) * COASTAL_RAD_TO_DEG;
+      return { latitude: Number(outLat.toFixed(4)), longitude: Number(outLon.toFixed(4)) };
+    }
+    // If user typed a positive longitude (e.g. 81.312 instead of -81.312 for 81.312°W) that landed in landlocked Eurasia, try -lon!
+    if (!_triedWest && lon > 30 && lon < 130 && lat > 5 && lat < 50) {
+      return findNearestCoastlineInRealDEM(lat, -lon, effectiveFetch, true);
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 // Fetch real high-resolution SRTM/NED/ETOPO1 elevation tiles from AWS Terrarium
-// (zoom 13 + zoom 14 nearshore = ~9m-18m resolution) AND co-registered Esri World Imagery
+// (zoom 13 = ~18m resolution) AND co-registered Esri World Imagery
 // satellite orthophoto tiles (https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
 // in parallel. Applies Saba's coastal bathymetry skirt model and spectral satellite
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
 export async function upgradeProceduralPackWithRealDEM(
   pack,
-  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 1500 } = {}
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 12000, _snapAttempted = false } = {}
 ) {
   const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
   if (!pack?.region || !effectiveFetch) return ensureFallback(pack);
-  const { region } = pack;
+  let { region } = pack;
   const n = region.size;
   const span = region.span;
   const cosLat = Math.max(0.1, Math.cos(region.latitude * COASTAL_DEG_TO_RAD));
@@ -3018,6 +3158,7 @@ export async function upgradeProceduralPackWithRealDEM(
   if (cols < 1 || cols > 6 || rows < 1 || rows > 6) return ensureFallback(pack);
 
   try {
+    const lrmPromise = !fetchTile ? load1550BuildingLRMTemplates() : Promise.resolve(null);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const w = cols * 256;
@@ -3070,42 +3211,17 @@ export async function upgradeProceduralPackWithRealDEM(
       }
     }
 
-    // Also fetch central 2x2 high-resolution zoom+1 (~9m/px) DEM tiles when using live fetch at zoom 13
+    // Single uniform tile grid across the entire territory (no inner 2x2 Z14 square composite seam)
     const nearZoom = zoom + 1;
-    const nearNumTiles = 2 ** nearZoom;
-    const ncx = lonToTileX(region.longitude, nearNumTiles);
-    const ncy = latToTileY(region.latitude, nearNumTiles);
-    const ntx0 = ncx - 1, ntx1 = ncx;
-    const nty0 = ncy - 1, nty1 = ncy;
     const nearDemPromises = [];
-    if (!fetchTile && zoom === 13 && typeof fetch === 'function' && typeof createImageBitmap === 'function') {
-      for (let ty = nty0; ty <= nty1; ty++) {
-        for (let tx = ntx0; tx <= ntx1; tx++) {
-          const wrappedX = ((tx % nearNumTiles) + nearNumTiles) % nearNumTiles;
-          const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${nearZoom}/${wrappedX}/${ty}.png`;
-          nearDemPromises.push(
-            fetch(url, { signal: controller.signal, mode: 'cors' })
-              .then(async (res) => {
-                if (!res?.ok) return null;
-                const bmp = await createImageBitmap(await res.blob(), {
-                  premultiplyAlpha: 'none',
-                  colorSpaceConversion: 'none',
-                });
-                return { tx, ty, bmp };
-              })
-              .catch(() => null)
-          );
-        }
-      }
-    }
 
     const [loaded, satLoaded, nearDemLoaded] = await Promise.all([
       Promise.all(tilePromises),
       satPromises.length ? Promise.all(satPromises) : Promise.resolve([]),
       nearDemPromises.length ? Promise.all(nearDemPromises) : Promise.resolve([]),
-      !fetchTile ? load1550BuildingLRMTemplates() : Promise.resolve(null),
     ]);
     clearTimeout(timer);
+    await lrmPromise;
 
     const pixels = rasterizeTileGrid(loaded, tx0, ty0, w, h);
     let nearPixels = null;
@@ -3150,6 +3266,9 @@ export async function upgradeProceduralPackWithRealDEM(
     const rawDem = new Float32Array(n * n);
     let landCount = 0;
     let maxDem = -Infinity;
+    const landElevs = [];
+    let sumWaterX = 0, sumWaterZ = 0, waterCount = 0;
+    let sumLandX = 0, sumLandZ = 0;
     for (let j = 0; j < n; j++) {
       const z = region.z + (j / (n - 1) - 0.5) * span;
       const lat = region.latitude - (z - region.z) / 111195;
@@ -3158,15 +3277,70 @@ export async function upgradeProceduralPackWithRealDEM(
         const lon = region.longitude + (x - region.x) / (111195 * cosLat);
         const elev = sampleTerrarium(lat, lon);
         rawDem[j * n + i] = elev;
-        if (elev > 0.25) landCount++;
+        if (elev > 0.25) {
+          landCount++;
+          sumLandX += x - region.x;
+          sumLandZ += z - region.z;
+          if ((i + j) % 2 === 0) landElevs.push(elev);
+        } else {
+          waterCount++;
+          sumWaterX += x - region.x;
+          sumWaterZ += z - region.z;
+        }
         if (elev > maxDem) maxDem = elev;
       }
     }
     const landRatio = landCount / (n * n);
-    // Require both real land and real water in the 8.2km coastal window
-    if (landRatio < 0.015 || landRatio > 0.95 || maxDem < 2.5) {
+    // If user clicked or entered coordinates slightly inland (landRatio > 0.94) or offshore (landRatio < 0.02),
+    // search the surrounding ~300km x 300km real AWS Terrarium Zoom-8 DEM to snap to the true 0m shoreline and retry once!
+    if ((landRatio < 0.02 || landRatio > 0.94) && !_snapAttempted && !fetchTile && typeof fetch === 'function') {
+      for (const item of satLoaded) item?.bmp?.close?.();
+      let snapped = await findNearestCoastlineInRealDEM(region.latitude, region.longitude, fetch);
+      if (!snapped) {
+        const rings = await loadCoastlineRingsForSnap(fetch);
+        snapped = snapCoordinateToCoastlineRings(region.latitude, region.longitude, rings, 3.5);
+      }
+      if (snapped && (Math.abs(snapped.latitude - region.latitude) > 1e-3 || Math.abs(snapped.longitude - region.longitude) > 1e-3)) {
+        pack.region = resolveGlobalCoastalRegion({
+          ...region,
+          latitude: snapped.latitude,
+          longitude: snapped.longitude,
+          ...(snapped.shoreBearing !== undefined ? { shoreBearing: snapped.shoreBearing } : {}),
+        });
+        return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, timeoutMs, _snapAttempted: true });
+      }
+    }
+    // Require real land and real water in the coastal window (allow flat barrier islands down to 0.35m!)
+    if (landRatio < 0.015 || landRatio > 0.97 || maxDem < 0.35) {
       for (const item of satLoaded) item?.bmp?.close?.();
       return ensureFallback(pack);
+    }
+
+    // Damp SRTM tree-canopy / bridge radar spikes on flat low-lying coastal plains (e.g. Florida barrier islands where median land < 7m)
+    landElevs.sort((a, b) => a - b);
+    const medLand = landElevs.length ? landElevs[Math.floor(landElevs.length * 0.5)] : 5;
+    if (medLand < 7.0) {
+      const softCap = Math.max(4.0, medLand + 3.0);
+      maxDem = 0;
+      for (let k = 0; k < n * n; k++) {
+        if (rawDem[k] > softCap) {
+          rawDem[k] = softCap + (rawDem[k] - softCap) * 0.22;
+        }
+        if (rawDem[k] > maxDem) maxDem = rawDem[k];
+      }
+    }
+
+    // Infer true shoreBearing from the real DEM water-to-land center of mass for custom coordinates
+    if (!Object.hasOwn(SPANISH_MAIN_1550_REGIONS, region.id) && waterCount > 50 && landCount > 50) {
+      const dx = sumLandX / landCount - sumWaterX / waterCount;
+      const dz = sumLandZ / landCount - sumWaterZ / waterCount;
+      const demBearing = Math.round(((Math.atan2(dx, -dz) * COASTAL_RAD_TO_DEG) % 360 + 360) % 360);
+      region = Object.freeze({
+        ...region,
+        shoreBearing: demBearing,
+        peakElevationMetres: Math.max(4, Math.round(maxDem)),
+      });
+      pack.region = region;
     }
 
     // Co-register satellite imagery from Web Mercator tiles to the local equirectangular grid
@@ -3328,7 +3502,18 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const n = region.size;
   const span = region.span;
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
-  const baseHeights = basePack.heights || options.precomputedHeights1550;
+  const rawBaseHeights = basePack.heights || options.precomputedHeights1550;
+  let baseHeights = rawBaseHeights;
+  if (rawBaseHeights && Math.abs(region.span - baseRegion.span) > 1.0) {
+    baseHeights = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const x = region.x + (i / (n - 1) - 0.5) * span;
+        baseHeights[j * n + i] = terrainSample(rawBaseHeights, x, z, baseRegion);
+      }
+    }
+  }
   const baseShoreDist = computeCoastalShoreDistances(baseHeights, n, span, 0.25);
   const { distWater, step } = baseShoreDist;
 
@@ -3383,7 +3568,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
             const isModernFillCarve =
               !hasDedicated1550Ortho &&
               ((sat && sat.isUrban && h <= 5.2 && inlandM <= 260) ||
-                (h <= 3.4 && inlandM <= 180 && creekNoise < 0.34));
+                (h <= 2.2 && inlandM <= 36 && creekNoise < 0.28));
 
             if (is1550Water || isModernFillCarve) {
               reclaimedCellsCarved++;
@@ -3397,8 +3582,9 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
               continue;
             }
           }
-          // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes
-          const reliefBoost = h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.4, ridgeDetail * 0.45);
+          // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes (kept subtle on flat barrier islands)
+          const reliefBoost =
+            h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.25, ridgeDetail * Math.min(0.45, Math.max(0.06, (h - 1.5) * 0.07)));
           carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
         } else {
           // If 1550 orthophoto shows land/forest/settlement here, elevate above sea level
@@ -3530,6 +3716,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
     palmCount: upgradedPack.vegetation?.stats?.palmCount ?? 0,
     beachCellCount: upgradedPack.beaches?.beachCellCount ?? 0,
     hasOrthophoto1550: hasDedicated1550Ortho,
+    baseElevationSource: basePack.elevationSource || 'procedural-geomorphology',
     discoveredAt: options.discoveredAt || new Date().toISOString(),
   };
   return upgradedPack;
@@ -3578,6 +3765,14 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
   try {
     meta = JSON.parse(new TextDecoder().decode(bytes.subarray(16 + heightsBytes, 16 + heightsBytes + metaLen)));
   } catch { /* ignore malformed meta */ }
+
+  // Reject unverified legacy R2 cache entries that were baked from synthetic procedural fallback before real-DEM verification
+  const isVerifiedCache = Boolean(
+    meta.curated1550 ||
+    meta.baseElevationSource?.startsWith('aws-terrarium') ||
+    basePack.elevationSource === 'procedural-geomorphology'
+  );
+  if (!isVerifiedCache) return null;
 
   const region = resolveGlobalCoastalRegion(basePack.region);
   let heights1550 = decodedHeights;
@@ -3631,6 +3826,10 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   fetchImpl = typeof fetch === 'function' ? fetch : null,
   forceFirstExplorer = false,
 } = {}) {
+  // Never run 1550 reconstruction on a synthetic random fallback if live DEM fetch is available
+  if (basePack.elevationSource === 'procedural-geomorphology' && fetchImpl && typeof createImageBitmap === 'function') {
+    await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000 });
+  }
   const cellInfo = canonicalCoastalCellId(basePack.region);
   await load1550BuildingLRMTemplates(fetchImpl);
   const localKey = `waterworld.discovery.v1.${cellInfo.cellId}`;
@@ -3717,7 +3916,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
     const orthophoto1550 = await loadOrthophoto1550();
     if (remoteAvailable && fetchImpl) {
       try {
-        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&v=4`);
+        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&v=5`);
         if (res && res.ok) {
           const buf = new Uint8Array(await res.arrayBuffer());
           upgradedPack = apply1550TerritoryCachePayload(basePack, buf, orthophoto1550);
@@ -3768,9 +3967,10 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   upgradedPack.territory1550.visits = 1;
   upgradedPack.territory1550.isFirstExplorer = true;
 
-  // Cache the newly built 1550 territory in Cloudflare R2 (and localStorage) for all future mariners
+  // Cache the newly built 1550 territory in Cloudflare R2 (ONLY if built from real SRTM DEM, never synthetic fallback!)
   const payload = encode1550TerritoryCachePayload(upgradedPack);
-  if (remoteAvailable && fetchImpl) {
+  const isRealDemBacked = basePack.elevationSource !== 'procedural-geomorphology' || Boolean(orthophoto1550);
+  if (remoteAvailable && fetchImpl && isRealDemBacked) {
     try {
       await fetchImpl(
         `${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&lat=${encodeURIComponent(basePack.region.latitude)}&lon=${encodeURIComponent(basePack.region.longitude)}&name=${encodeURIComponent(cellInfo.name)}`,

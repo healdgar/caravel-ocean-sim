@@ -170,8 +170,9 @@ function* forestRootChecks(manifest,roots){
 }
 function* forestGeometryChecks(manifest,streams){
   validateForestScenery(manifest);
-  for(const name of ['vertices.bin','indices.bin','roots.bin'])if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
-  const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=new Float32Array(streams['roots.bin']);
+  const requiredStreams=streams?.skipRoots?['vertices.bin','indices.bin']:['vertices.bin','indices.bin','roots.bin'];
+  for(const name of requiredStreams)if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
+  const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=streams?.skipRoots?new Float32Array(0):new Float32Array(streams['roots.bin']);
   const stride=manifest.vertexStride/4;
   for(let i=0;i<vertices.length;i+=stride){
     if(!vertices.subarray(i,i+stride).every(Number.isFinite)||Math.abs(Math.hypot(...vertices.subarray(i+3,i+6))-1)>.001||!uint(vertices[i+6])||vertices[i+6]<3||vertices[i+7]<0||vertices[i+7]>1||vertices.subarray(i+10,i+13).some(v=>v<0))throw Error('Invalid forest vertex');
@@ -190,7 +191,7 @@ function* forestGeometryChecks(manifest,streams){
       if((j&4095)===0)yield;
     }
   }
-  yield* forestRootChecks(manifest,roots);
+  if(!streams?.skipRoots)yield* forestRootChecks(manifest,roots);
   return {manifest,vertices,indices,roots};
 }
 export function decodeForestScenery(manifest,streams){
@@ -244,7 +245,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
     }))));
     const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
     const [vertices,indices,,light]=await Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal),materialPromise,lightPromise]);
-    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes},{signal});nativeLoaded=true;return{...geometry,textures,...light,...lod};
+    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots},{signal});nativeLoaded=true;return{...geometry,textures,...light,...lod};
   })();
   // Drop only our fulfilled cache reference after successful GPU installation.
   // Existing callers retain their immutable arrays; a later explicit native
@@ -835,6 +836,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         let matBase=0;
         for(const p of nextPack.manifest.prototypes){
           const base=p.id*20,firstMaterial=matBase;matBase+=p.nativeMaterials.length;
+          if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
           words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
           for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
             const bin=bins[p.id]?.[tierIdx];

@@ -153,29 +153,26 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
         const sink = Math.max(0.12, basal * scale * slope + 0.08);
         const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
         const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
-        buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -1, 0);
+        const isTrop = region.climate === 'tropical' || region.climate === 'subtropical';
+        const rTint = isTrop ? tint * 0.78 : tint;
+        const gTint = isTrop ? tint * 1.12 : tint;
+        const bTint = isTrop ? tint * 0.68 : tint;
+        buckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -1, 0);
       }
     };
 
-    // Pass 1: Dense primary canopy in the 3800m × 3800m coastal & settlement window
-    const focusSpan = Math.min(span, 3800);
-    const focusCenterX = port?.center?.x ?? region.x;
-    const focusCenterZ = port?.center?.z ?? region.z;
-    const focusX0 = Math.max(x0, Math.min(x0 + span - focusSpan, focusCenterX - focusSpan * 0.5));
-    const focusZ0 = Math.max(z0, Math.min(z0 + span - focusSpan, focusCenterZ - focusSpan * 0.5));
+    // Single uniform full-territory Poisson-disc canopy pass (zero inner-vs-outer square grid boundary)
+    const uniformSpacing = Math.max(isMobile ? 9.5 : 5.8, span / (isMobile ? 260 : 420));
     runForestPass(
-      focusX0,
-      focusZ0,
-      focusSpan,
-      isMobile ? 11.5 : 7.4,
-      0.98,
+      x0,
+      z0,
+      span,
+      uniformSpacing,
+      0.96,
       0.52,
-      Math.floor(maxRoots * 0.68),
+      maxRoots,
       seed ^ 0x9e3779b9
     );
-
-    // Pass 2: Full-territory 8192m × 8192m hinterland canopy coverage
-    runForestPass(x0, z0, span, isMobile ? 21.0 : 13.5, 1.18, 0.58, maxRoots, seed ^ 0x85ebca6b);
   }
 
   // Fallback to explicit scrub/upland arrays if biome grid did not place roots
@@ -238,9 +235,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // never run on the open-ocean startup path. Failure retains all old roots.
   const search=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
   const regionParam=search.get('region');
-  const isKnownSpanishMain=Boolean(regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam));
   const hasCustomCoords=search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon')));
-  const useProcedural=isKnownSpanishMain||(hasCustomCoords&&regionParam!=='saba');
+  const presetMatch=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
+  const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(Number(search.get('lat'))-presetMatch.latitude)<0.05&&Math.abs(Number(search.get('lon'))-presetMatch.longitude)<0.05)));
+  const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(Number(search.get('lat'))-ISLAND.latitude)>0.05||Math.abs(Number(search.get('lon'))-ISLAND.longitude)>0.05);
+  const useProcedural=isKnownSpanishMain||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
   const skipNativeForest=isMobile;
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
@@ -645,7 +644,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   if(proceduralPack){
     const forceFirstExplorer=search.get('discover')==='1';
-    const autoApplyCurated=isKnownSpanishMain&&!forceFirstExplorer&&search.get('era')!=='2026';
+    const autoApply1550=!forceFirstExplorer&&search.get('era')!=='2026';
     setTimeout(()=>{
       runLandfallDiscoveryPipeline({ ...proceduralPack, heights: baseSnapshot.heights },{
         forceFirstExplorer,
@@ -662,12 +661,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         },
         onUpgradeReady(res){
           discovery.status='ready';
-          discovery.isFirstExplorer=!autoApplyCurated;
+          discovery.isFirstExplorer=!autoApply1550;
           discovery.visits=1;
           discovery.upgradedPack=res.upgradedPack;
           discovery.stats=res.stats;
           discovery.message=`Congratulations on your discovery! The 1550 historical territory for ${res.name} is ready.`;
-          if(autoApplyCurated){
+          if(autoApply1550){
             discovery.swapToUpgraded();
           }else{
             notifyDiscovery();
@@ -680,7 +679,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           discovery.upgradedPack=res.upgradedPack;
           discovery.stats=res.stats;
           discovery.message=`1550 historical territory charted · Mariner #${res.visits}`;
-          if(autoApplyCurated){
+          if(autoApply1550){
             discovery.swapToUpgraded();
           }else{
             notifyDiscovery();
