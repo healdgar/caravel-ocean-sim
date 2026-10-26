@@ -30,15 +30,14 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
   const port = proceduralPack.port;
   const seed = (region.vegetationSeed ?? 47231) >>> 0;
   const maxRoots = isMobile ? 16000 : 58000;
-  const targetRootBudget = isMobile ? 2600 : 6200;
 
-  // Saba-style overlapping-crown jittered grid placement (scripts/prepare-forest-instances.py:284-333)
-  // guided by the co-registered satellite/1550-map vegetation mask (`biome`) and foreshore beach masks.
-  // Uses a two-pass coprime permutation so 3D forest trees bake uniformly across 100% of the map's forest area
-  // (instead of exhausting `maxRoots` in the northernmost strip of an 8192m × 8192m coastal territory).
+  // Grid-free 2D Poisson-disc + closed-canopy grove expansion guided by the co-registered
+  // satellite/1550-map vegetation mask (`biome`) and foreshore beach masks.
+  // Eliminates all 1D/2D grid-walk row/lattice artifacts while interlocking neighboring crowns
+  // into a continuous closed-canopy forest across the entire territory.
   if (biome instanceof Uint8Array && biome.length === maskSize * maskSize) {
-    const crownSpacingFactor = isMobile ? 0.45 : 0.34;
-    const cellSize = 20;
+    const crownSpacingFactor = isMobile ? 0.52 : 0.44;
+    const cellSize = 24;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
     const next = new Int32Array(maxRoots);
@@ -46,6 +45,12 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
     const rz = new Float32Array(maxRoots);
     const rr = new Float32Array(maxRoots);
     let totalPlaced = 0;
+
+    const isTrop = region.climate === 'tropical' || region.climate === 'subtropical';
+    const portCx = port ? port.center.x : region.x;
+    const portCz = port ? port.center.z : region.z;
+    // Broad-crowned spreading prototypes (oak=0, elm=3, chestnut=4, maple=1) form closed canopy
+    const broadTable = [0, 3, 4, 0, 3, 4, 0, 1];
 
     const sampleBiomeByte = (wx, wz) => {
       const u = (wx - x0) / span;
@@ -58,122 +63,125 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       return biome[idx];
     };
 
-    const gcd = (a, b) => {
-      while (b !== 0) {
-        const t = b;
-        b = a % b;
-        a = t;
+    const tryPlaceTree = (x, z, key) => {
+      if (totalPlaced >= maxRoots) return -1;
+      if (x <= x0 + 32 || x >= x0 + span - 32 || z <= z0 + 32 || z >= z0 + span - 32) return -1;
+
+      const probByte = sampleBiomeByte(x, z);
+      if (probByte < 68) return -1;
+      if (probByte < 145 && (hash32Forest(key + 5) & 255) > probByte + 64) return -1;
+
+      if (port) {
+        const clearEnv = !portClearanceEnvelope(port, x, z, port.hasOrthophotoFootprints ? 8 : 10);
+        const clearRad =
+          !port.hasOrthophotoFootprints && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.72;
+        if (clearEnv || clearRad) return -1;
       }
-      return a;
-    };
 
-    const runForestPass = (passOriginX, passOriginZ, passSpan, spacing, scaleMin, scaleSpan, targetBudget, passSeed) => {
-      const gridN = Math.max(4, Math.ceil(passSpan / spacing));
-      const totalCells = gridN * gridN;
-      let stride = Math.max(1, Math.floor(totalCells * 0.61803398875) | 1);
-      while (gcd(stride, totalCells) !== 1) stride += 2;
-      let cellIdx = hash32Forest(passSeed) % totalCells;
+      const gy = groundSample(x, z);
+      if (!Number.isFinite(gy) || gy < 1.25 || gy > 845) return -1;
+      const sx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
+      const sz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
+      const slope = Math.hypot(sx, sz);
+      if (!Number.isFinite(slope) || slope > 1.08) return -1;
 
-      for (let step = 0; step < totalCells && totalPlaced < targetBudget; step++) {
-        cellIdx = (cellIdx + stride) % totalCells;
-        const j = Math.floor(cellIdx / gridN);
-        const i = cellIdx - j * gridN;
-        const key = hash32Forest(passSeed ^ Math.imul(i, 73856093) ^ Math.imul(j, 19349663));
-        const x = passOriginX + (i + 0.5 + (key / 4294967296 - 0.5) * 0.68) * spacing;
-        const z = passOriginZ + (j + 0.5 + (hash32Forest(key) / 4294967296 - 0.5) * 0.68) * spacing;
-        if (x <= x0 + 32 || x >= x0 + span - 32 || z <= z0 + 32 || z >= z0 + span - 32) continue;
+      const protoId =
+        protoCount >= 5
+          ? broadTable[hash32Forest(key + 1) & 7] % protoCount
+          : hash32Forest(key + 1) % protoCount;
+      const proto = forestPack.manifest.prototypes[protoId];
 
-        const probByte = sampleBiomeByte(x, z);
-        if (probByte < 68) continue;
-        if (probByte < 155 && (hash32Forest(key + 5) & 255) > probByte + 52) continue;
+      // Smoothly transition crown scale from architectural/palm scale near the port (1.12..1.56)
+      // to broad interlocking canopy crowns across the inland territory (1.58..2.28)
+      const distPort = Math.hypot(x - portCx, z - portCz);
+      const inlandBlend = Math.max(0, Math.min(1, (distPort - 220) / 680));
+      const scaleMin = 1.12 + inlandBlend * 0.46;
+      const scaleSpan = 0.44 + inlandBlend * 0.26;
+      const scale = scaleMin + (hash32Forest(key + 2) / 4294967296) * scaleSpan;
+      const crownR = (proto.crownRadius ?? 8.5) * scale;
+      const rimCheckR = Math.min(9.5, crownR * 0.38);
+      if (
+        sampleBiomeByte(x + rimCheckR, z) < 24 ||
+        sampleBiomeByte(x - rimCheckR, z) < 24 ||
+        sampleBiomeByte(x, z + rimCheckR) < 24 ||
+        sampleBiomeByte(x, z - rimCheckR) < 24 ||
+        groundSample(x + rimCheckR, z) < 0.55 ||
+        groundSample(x - rimCheckR, z) < 0.55 ||
+        groundSample(x, z + rimCheckR) < 0.55 ||
+        groundSample(x, z - rimCheckR) < 0.55
+      ) {
+        return -1;
+      }
 
-        if (port) {
-          const clearEnv = !portClearanceEnvelope(port, x, z, port.hasOrthophotoFootprints ? 8 : 10);
-          const clearRad =
-            !port.hasOrthophotoFootprints && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.72;
-          if (clearEnv || clearRad) continue;
-        }
-
-        const gy = groundSample(x, z);
-        if (!Number.isFinite(gy) || gy < 1.25 || gy > 845) continue;
-        const sx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
-        const sz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
-        const slope = Math.hypot(sx, sz);
-        if (!Number.isFinite(slope) || slope > 1.08) continue;
-
-        const protoId = hash32Forest(key + 1) % protoCount;
-        const proto = forestPack.manifest.prototypes[protoId];
-        const scale = scaleMin + (hash32Forest(key + 2) / 4294967296) * scaleSpan;
-        const crownR = (proto.crownRadius ?? 8.5) * scale;
-        const rimCheckR = crownR * 0.45;
-        if (
-          sampleBiomeByte(x + rimCheckR, z) < 24 ||
-          sampleBiomeByte(x - rimCheckR, z) < 24 ||
-          sampleBiomeByte(x, z + rimCheckR) < 24 ||
-          sampleBiomeByte(x, z - rimCheckR) < 24 ||
-          groundSample(x + rimCheckR, z) < 0.55 ||
-          groundSample(x - rimCheckR, z) < 0.55 ||
-          groundSample(x, z + rimCheckR) < 0.55 ||
-          groundSample(x, z - rimCheckR) < 0.55
-        ) {
-          continue;
-        }
-
-        const gx = Math.max(0, Math.min(hashW - 1, Math.floor((x - x0) / cellSize)));
-        const gz = Math.max(0, Math.min(hashW - 1, Math.floor((z - z0) / cellSize)));
-        let collision = false;
-        for (let dz = -1; dz <= 1 && !collision; dz++) {
-          const nz = gz + dz;
-          if (nz < 0 || nz >= hashW) continue;
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = gx + dx;
-            if (nx < 0 || nx >= hashW) continue;
-            for (let idx = head[nz * hashW + nx]; idx !== -1; idx = next[idx]) {
-              const ddx = x - rx[idx];
-              const ddz = z - rz[idx];
-              const minD = crownSpacingFactor * (crownR + rr[idx]);
-              if (ddx * ddx + ddz * ddz < minD * minD) {
-                collision = true;
-                break;
-              }
+      const gx = Math.max(0, Math.min(hashW - 1, Math.floor((x - x0) / cellSize)));
+      const gz = Math.max(0, Math.min(hashW - 1, Math.floor((z - z0) / cellSize)));
+      let collision = false;
+      for (let dz = -1; dz <= 1 && !collision; dz++) {
+        const nz = gz + dz;
+        if (nz < 0 || nz >= hashW) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = gx + dx;
+          if (nx < 0 || nx >= hashW) continue;
+          for (let idx = head[nz * hashW + nx]; idx !== -1; idx = next[idx]) {
+            const ddx = x - rx[idx];
+            const ddz = z - rz[idx];
+            const minD = crownSpacingFactor * (crownR + rr[idx]);
+            if (ddx * ddx + ddz * ddz < minD * minD) {
+              collision = true;
+              break;
             }
-            if (collision) break;
           }
+          if (collision) break;
         }
-        if (collision) continue;
-
-        const cell = gz * hashW + gx;
-        rx[totalPlaced] = x;
-        rz[totalPlaced] = z;
-        rr[totalPlaced] = crownR;
-        next[totalPlaced] = head[cell];
-        head[cell] = totalPlaced;
-        totalPlaced++;
-
-        const basal = proto.basalRadius ?? 1.2;
-        const sink = Math.max(0.12, basal * scale * slope + 0.08);
-        const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
-        const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
-        const isTrop = region.climate === 'tropical' || region.climate === 'subtropical';
-        const rTint = isTrop ? tint * 0.78 : tint;
-        const gTint = isTrop ? tint * 1.12 : tint;
-        const bTint = isTrop ? tint * 0.68 : tint;
-        buckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -1, 0);
       }
+      if (collision) return -1;
+
+      const placedIdx = totalPlaced;
+      const cell = gz * hashW + gx;
+      rx[placedIdx] = x;
+      rz[placedIdx] = z;
+      rr[placedIdx] = crownR;
+      next[placedIdx] = head[cell];
+      head[cell] = placedIdx;
+      totalPlaced++;
+
+      const basal = proto.basalRadius ?? 1.2;
+      const sink = Math.max(0.12, basal * scale * slope + 0.08);
+      const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
+      const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
+      const rTint = isTrop ? tint * 0.78 : tint;
+      const gTint = isTrop ? tint * 1.12 : tint;
+      const bTint = isTrop ? tint * 0.68 : tint;
+      buckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -1, 0);
+      return placedIdx;
     };
 
-    // Single uniform full-territory Poisson-disc canopy pass (zero inner-vs-outer square grid boundary)
-    const uniformSpacing = Math.max(isMobile ? 10.5 : 6.8, span / (isMobile ? 220 : 340));
-    runForestPass(
-      x0,
-      z0,
-      span,
-      uniformSpacing,
-      1.04,
-      0.56,
-      targetRootBudget,
-      seed ^ 0x9e3779b9
-    );
+    // Grid-free 2D independent hash sampling + golden-angle interlocking canopy cluster growth
+    const maxCandidates = maxRoots * 5;
+    const baseSeed = (seed ^ 0x9e3779b9) >>> 0;
+    for (let step = 0; step < maxCandidates && totalPlaced < maxRoots; step++) {
+      const h1 = hash32Forest(baseSeed + Math.imul(step, 0x9e3779b1));
+      const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0xc2b2ae35);
+      const u = h1 / 4294967296;
+      const v = h2 / 4294967296;
+      const sx = x0 + u * span;
+      const sz = z0 + v * span;
+      const rootIdx = tryPlaceTree(sx, sz, h2);
+      if (rootIdx < 0) continue;
+
+      // Expand into a tightly interlocking closed-canopy grove around the accepted tree
+      const baseR = rr[rootIdx];
+      const baseAngle = (hash32Forest(h2 + 17) / 4294967296) * Math.PI * 2;
+      for (let c = 0; c < 8 && totalPlaced < maxRoots; c++) {
+        const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
+        const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.45;
+        const ringMul = c < 4 ? 0.96 : 1.68;
+        const dist = baseR * ringMul * (0.90 + ((cKey >>> 10) & 1023) / 1024 * 0.32);
+        const nx = sx + Math.cos(angle) * dist;
+        const nz = sz + Math.sin(angle) * dist;
+        tryPlaceTree(nx, nz, cKey);
+      }
+    }
   }
 
   // Fallback to explicit scrub/upland arrays if biome grid did not place roots

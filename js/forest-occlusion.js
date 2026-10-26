@@ -89,10 +89,10 @@ fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f)->bool{
    let bounds=textureLoad(forestTerrainCoarse,cell,0).rg;
    let rayTopY=mix(camera.y,treeTop,t);
    if(bounds.r>max(1.5,rayTopY+.5)){return true;}
-   if(camera.y<28.&&distXZ>155.&&bounds.g>=1.6&&rayTopY<bounds.g+16.5){canopyWallSlices+=1u;}
+   if(camera.y<13.5&&distXZ>320.&&bounds.r>=2.4&&rayTopY<bounds.r+14.5){canopyWallSlices+=1u;}
   }
  }
- if(canopyWallSlices>=2u&&distXZ>210.){return true;}
+ if(canopyWallSlices>=3u&&distXZ>340.){return true;}
  return false;
 }
 `;

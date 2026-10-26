@@ -677,7 +677,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const sx=(groundSample(x+1,z)-groundSample(x-1,z))*.5,sz=(groundSample(x,z+1)-groundSample(x,z-1))*.5,slope=Math.hypot(sx,sz);
       // A measured near tile can expose a cliff/beach hidden by coarse data.
       // Reject that root once; never leave it floating or grow a replacement.
-      if(y<18||y>840||!Number.isFinite(slope)||slope>1.1){rooted[i+3]=0;excludedRoots++;continue;}
+      const minY=(!forestMass&&rooted[i+10]<0)?1.15:18;
+      if(y<minY||y>845||!Number.isFinite(slope)||slope>1.1){rooted[i+3]=0;excludedRoots++;continue;}
       const basal=m.prototypes[rooted[i+8]].basalRadius??0;
       rooted[i+9]=Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08);rooted[i+1]=y-rooted[i+9];
     }
@@ -817,7 +818,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       }
     };
     const drawMiddle=pass=>{
-      if(!middlePipeline)return;pass.setPipeline(middlePipeline);pass.setBindGroup(0,middleGroup);pass.setBindGroup(1,middleCloud);pass.setVertexBuffer(0,middle.vertices);pass.setIndexBuffer(middle.indices,'uint32');
+      if(!middlePipeline||(!forestMass&&nativeMid&&volumeShell))return;pass.setPipeline(middlePipeline);pass.setBindGroup(0,middleGroup);pass.setBindGroup(1,middleCloud);pass.setVertexBuffer(0,middle.vertices);pass.setIndexBuffer(middle.indices,'uint32');
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][1].middle);pass.drawIndexedIndirect(commands,(p.id*4+2)*20);}
     };
     const drawVolumes=pass=>{
