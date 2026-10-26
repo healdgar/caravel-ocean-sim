@@ -771,11 +771,38 @@ export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = nu
 }
 
 export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelliteData, shoreDist = null) {
-  if (!satelliteData?.rgba || !satelliteData?.size) return null;
-  if (!satelliteData.is1550Orthophoto && !satelliteData.allowFootprints) return null;
+  if (!satelliteData) return null;
   const region = resolveGlobalCoastalRegion(regionSpec);
   const n = region.size;
   const span = region.span;
+
+  if (Array.isArray(satelliteData.precomputedFootprints?.footprints) && satelliteData.precomputedFootprints.footprints.length >= 4) {
+    const pre = satelliteData.precomputedFootprints;
+    const clusterX = region.x + ((pre.clusterU ?? 0.5) - 0.5) * span;
+    const clusterZ = region.z + ((pre.clusterV ?? 0.5) - 0.5) * span;
+    const footprints = pre.footprints.map((fp) => {
+      const x = Number.isFinite(fp.u) ? region.x + (fp.u - 0.5) * span : fp.x;
+      const z = Number.isFinite(fp.v) ? region.z + (fp.v - 0.5) * span : fp.z;
+      const y = Math.max(1.8, terrainSample(heights, x, z, region));
+      const width = fp.width ?? 22;
+      const length = fp.length ?? 26;
+      return {
+        x,
+        z,
+        y,
+        yaw: fp.yaw ?? 0,
+        width,
+        length,
+        area: width * length,
+        inlandM: fp.inlandM ?? 64,
+        prefabId: fp.prefabId || null,
+      };
+    });
+    return { clusterX, clusterZ, footprints };
+  }
+
+  if (!satelliteData.rgba || !satelliteData.size) return null;
+  if (!satelliteData.is1550Orthophoto && !satelliteData.allowFootprints) return null;
   const distInfo = shoreDist ?? computeCoastalShoreDistances(heights, n, span, 0.25);
   const { distWater } = distInfo;
 
@@ -791,11 +818,19 @@ export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelli
       const kH = hj * n + hi;
       const h = heights[kH];
       const inlandM = distWater[kH];
-      if (h < 0.45 || h > 62 || inlandM < 4 || inlandM > 960) continue;
+      if (h < 0.45 || h > 68 || inlandM < 32 || inlandM > 960) continue;
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
       if (!sat) continue;
-      // 1550 AI orthophoto terracotta barrel-tile roof signature
-      if (sat.r > 120 && sat.r - sat.g > 20 && sat.r - sat.b > 38 && sat.g >= sat.b * 0.84) {
+      // 1550 AI orthophoto terracotta barrel-tile & weathered timber/shingle roof signature
+      const isTerracotta = sat.r > 92 && sat.r < 236 && sat.g < 164 && sat.r - sat.g >= 24 && sat.r - sat.b >= 42;
+      const isBrownShingle =
+        sat.r > 90 &&
+        sat.r < 200 &&
+        sat.r - sat.g >= 16 &&
+        sat.r - sat.b >= 30 &&
+        sat.luma < 122 &&
+        sat.g > sat.b + 8;
+      if (isTerracotta || isBrownShingle) {
         mask[gz * gSize + gx] = 1;
       }
     }
@@ -842,7 +877,7 @@ export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelli
         }
       }
     }
-    if (pts.length >= 1 && pts.length <= 2400) {
+    if (pts.length >= 2 && pts.length <= 2400) {
       const count = pts.length;
       rawBlobs.push({
         cx: sumX / count,
@@ -864,7 +899,7 @@ export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelli
     let localWeight = 0;
     for (const other of rawBlobs) {
       const d = Math.hypot(other.cx - b.cx, other.cz - b.cz);
-      if (d <= 550) localWeight += other.count * (1 - d / 650);
+      if (d <= 650) localWeight += other.count * (1 - d / 750);
     }
     const centerBias = -Math.hypot(b.cx - region.x, b.cz - region.z) * 0.015;
     const score = localWeight + centerBias;
@@ -878,75 +913,82 @@ export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelli
   let wSum = 0, clusterX = 0, clusterZ = 0;
   const clusterBlobs = [];
   for (const b of rawBlobs) {
-    if (Math.hypot(b.cx - seedX, b.cz - seedZ) <= 620) {
+    if (Math.hypot(b.cx - seedX, b.cz - seedZ) <= 920) {
       clusterBlobs.push(b);
       clusterX += b.cx * b.count;
       clusterZ += b.cz * b.count;
       wSum += b.count;
     }
   }
-  if (wSum < 10) return null;
+  if (wSum < 6) return null;
   clusterX /= wSum;
   clusterZ /= wSum;
 
-  const defaultYaw = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
-  const candidates = [];
-  for (const b of clusterBlobs) {
-    let cxx = 0, czz = 0, cxz = 0;
-    for (const [px, pz] of b.pts) {
-      const dx = px - b.cx, dz = pz - b.cz;
-      cxx += dx * dx;
-      czz += dz * dz;
-      cxz += dx * dz;
-    }
-    const yaw = b.pts.length >= 3 ? 0.5 * Math.atan2(2 * cxz, cxx - czz) : defaultYaw;
-    const cosA = Math.cos(yaw), sinA = Math.sin(yaw);
-    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
-    for (const [px, pz] of b.pts) {
-      const dx = px - b.cx, dz = pz - b.cz;
-      const u = dx * cosA + dz * sinA;
-      const v = -dx * sinA + dz * cosA;
-      if (u < minU) minU = u;
-      if (u > maxU) maxU = u;
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
-    }
-    const spanLen = Math.max(cellStep, maxU - minU + cellStep * 0.9);
-    const spanWid = Math.max(cellStep * 0.8, maxV - minV + cellStep * 0.9);
-    const subU = spanLen > 52 ? Math.min(6, Math.round(spanLen / 28)) : 1;
-    const subV = spanWid > 46 ? Math.min(4, Math.round(spanWid / 24)) : 1;
-    for (let su = 0; su < subU; su++) {
-      const offsetU = subU === 1 ? 0 : ((su + 0.5) / subU - 0.5) * spanLen * 0.84;
-      for (let sv = 0; sv < subV; sv++) {
-        const offsetV = subV === 1 ? 0 : ((sv + 0.5) / subV - 0.5) * spanWid * 0.84;
-        const fx = b.cx + cosA * offsetU - sinA * offsetV;
-        const fz = b.cz + sinA * offsetU + cosA * offsetV;
-        const hGround = terrainSample(heights, fx, fz, region);
-        if (hGround < 0.4) continue;
-        const subL = Math.max(15, Math.min(34, spanLen / subU));
-        const subW = Math.max(12, Math.min(24, spanWid / subV));
-        candidates.push({
-          x: fx,
-          z: fz,
-          y: hGround,
-          yaw,
-          length: subL,
-          width: subW,
-          area: subL * subW,
-          inlandM: b.meanInland,
-        });
+  // Minimum-Area Oriented Bounding Box (Rotating Calipers) so square & courtyard blocks lock onto true wall angles
+  const computeMinAreaOBB = (pts, mx, mz) => {
+    let bestArea = Infinity;
+    let bestX = mx, bestZ = mz, bestW = 24, bestL = 28, bestYaw = 0;
+    for (let deg = -45; deg < 45; deg += 3) {
+      const a = deg * COASTAL_DEG_TO_RAD;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (const [px, pz] of pts) {
+        const dx = px - mx, dz = pz - mz;
+        const u = dx * ca + dz * sa;
+        const v = -dx * sa + dz * ca;
+        if (u < u0) u0 = u;
+        if (u > u1) u1 = u;
+        if (v < v0) v0 = v;
+        if (v > v1) v1 = v;
+      }
+      const su = Math.max(cellStep * 0.9, u1 - u0 + cellStep * 0.75);
+      const sv = Math.max(cellStep * 0.9, v1 - v0 + cellStep * 0.75);
+      const area = su * sv;
+      if (area < bestArea) {
+        bestArea = area;
+        const cu = 0.5 * (u0 + u1);
+        const cv = 0.5 * (v0 + v1);
+        bestX = mx + cu * ca - cv * sa;
+        bestZ = mz + cu * sa + cv * ca;
+        if (su <= sv) {
+          bestW = su;
+          bestL = sv;
+          bestYaw = -a;
+        } else {
+          bestW = sv;
+          bestL = su;
+          bestYaw = -(a + Math.PI * 0.5);
+        }
       }
     }
+    return { x: bestX, z: bestZ, width: bestW, length: bestL, yaw: bestYaw, area: bestW * bestL };
+  };
+
+  const candidates = [];
+  for (const b of clusterBlobs) {
+    const obb = computeMinAreaOBB(b.pts, b.cx, b.cz);
+    const hGround = terrainSample(heights, obb.x, obb.z, region);
+    if (hGround < 0.4) continue;
+    candidates.push({
+      x: obb.x,
+      z: obb.z,
+      y: hGround,
+      yaw: obb.yaw,
+      length: obb.length,
+      width: obb.width,
+      area: obb.area,
+      inlandM: b.meanInland,
+    });
   }
 
-  // Sort by area descending and enforce non-overlapping minimum center spacing (19m)
   candidates.sort((a, b) => b.area - a.area);
   const footprints = [];
   for (const c of candidates) {
-    if (footprints.length >= 28) break;
+    if (footprints.length >= 32) break;
     let overlaps = false;
     for (const existing of footprints) {
-      if (Math.hypot(c.x - existing.x, c.z - existing.z) < 19) {
+      const minSep = 0.42 * (Math.min(c.width, c.length) + Math.min(existing.width, existing.length));
+      if (Math.hypot(c.x - existing.x, c.z - existing.z) < Math.max(18, minSep)) {
         overlaps = true;
         break;
       }
@@ -954,12 +996,13 @@ export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelli
     if (!overlaps) footprints.push(c);
   }
 
-  return footprints.length >= 5 ? { clusterX, clusterZ, footprints } : null;
+  return footprints.length >= 4 ? { clusterX, clusterZ, footprints } : null;
 }
 
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const orthoFootprints = extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist);
+  const hasOrthoFootprints = Boolean(orthoFootprints?.footprints?.length >= 4);
   const clusterFrame = orthoFootprints
     ? coastalFrame(region, orthoFootprints.clusterX, orthoFootprints.clusterZ)
     : null;
@@ -989,8 +1032,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   };
   if (clusterFrame) {
-    for (let dAlong = -480; dAlong <= 480; dAlong += 32) {
-      for (let dInland = -520; dInland <= 420; dInland += 16) {
+    for (let dAlong = -560; dAlong <= 560; dAlong += 32) {
+      for (let dInland = -640; dInland <= 520; dInland += 16) {
         probePoint(clusterFrame.along + dAlong, clusterFrame.inland + dInland);
       }
     }
@@ -1010,8 +1053,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   }
 
-  // NMS-style Feature Stamp Terraforming: grade the harbor quay terrace, building pads,
-  // commanding headland bastion platform, and navigable pier berth directly into `heights`
+  // NMS-style Feature Stamp Terraforming: grade the harbor pier berth and level foundation pads
   // so every port building sits flush on level ground and the pier reaches deep water.
   const n = region.size;
   const span = region.span;
@@ -1036,25 +1078,61 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         h = Math.min(h, h * (1 - acrossW * berthW) + targetDepth * (acrossW * berthW));
       }
 
-      // 2. Level Waterfront Quay & Plaza Mayor terrace
-      if (relInland >= -2 && relInland <= plazaRadiusInland && Math.abs(relAlong) <= plazaRadiusAlong) {
-        const alongW = coastalSmoothstep(plazaRadiusAlong, plazaRadiusAlong * 0.55, Math.abs(relAlong));
-        const inlandW =
-          coastalSmoothstep(-2, 14, relInland) *
-          coastalSmoothstep(plazaRadiusInland, plazaRadiusInland * 0.64, relInland);
-        const stampW = alongW * inlandW;
-        const targetPlazaY = 2.6 + Math.max(0, relInland - 12) * 0.016;
-        h = h * (1 - stampW * 0.88) + targetPlazaY * (stampW * 0.88);
-      }
+      if (!hasOrthoFootprints) {
+        // 2. Level Waterfront Quay & Plaza Mayor terrace (synthetic ports without top-down footprints)
+        if (relInland >= -2 && relInland <= plazaRadiusInland && Math.abs(relAlong) <= plazaRadiusAlong) {
+          const alongW = coastalSmoothstep(plazaRadiusAlong, plazaRadiusAlong * 0.55, Math.abs(relAlong));
+          const inlandW =
+            coastalSmoothstep(-2, 14, relInland) *
+            coastalSmoothstep(plazaRadiusInland, plazaRadiusInland * 0.64, relInland);
+          const stampW = alongW * inlandW;
+          const targetPlazaY = 2.6 + Math.max(0, relInland - 12) * 0.016;
+          h = h * (1 - stampW * 0.88) + targetPlazaY * (stampW * 0.88);
+        }
 
-      // 3. Commanding Starboard Headland Battery (El Morro) at (relAlong ~ +110, relInland ~ +10)
-      const dBastion = Math.hypot(relAlong - 110, relInland - 10);
-      if (dBastion < 48) {
-        const bW = coastalSmoothstep(48, 22, dBastion);
-        h = h * (1 - bW * 0.9) + 4.8 * (bW * 0.9);
+        // 3. Commanding Starboard Headland Battery (El Morro) at (relAlong ~ +110, relInland ~ +10)
+        const dBastion = Math.hypot(relAlong - 110, relInland - 10);
+        if (dBastion < 48) {
+          const bW = coastalSmoothstep(48, 22, dBastion);
+          h = h * (1 - bW * 0.9) + 4.8 * (bW * 0.9);
+        }
       }
 
       heights[k] = h;
+    }
+  }
+
+  // Grade flat building pads directly under each top-down footprint
+  if (hasOrthoFootprints) {
+    const step = span / (n - 1);
+    for (const fp of orthoFootprints.footprints) {
+      const padY = Math.max(2.6, terrainSample(heights, fp.x, fp.z, region));
+      const cosY = Math.cos(fp.yaw);
+      const sinY = Math.sin(fp.yaw);
+      const hw = fp.width * 0.5;
+      const hl = fp.length * 0.5;
+      const rad = Math.hypot(hw + 16, hl + 16);
+      const i0 = Math.max(0, Math.floor(((fp.x - rad - region.x) / span + 0.5) * (n - 1)));
+      const i1 = Math.min(n - 1, Math.ceil(((fp.x + rad - region.x) / span + 0.5) * (n - 1)));
+      const j0 = Math.max(0, Math.floor(((fp.z - rad - region.z) / span + 0.5) * (n - 1)));
+      const j1 = Math.min(n - 1, Math.ceil(((fp.z + rad - region.z) / span + 0.5) * (n - 1)));
+      for (let j = j0; j <= j1; j++) {
+        const wz = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = i0; i <= i1; i++) {
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const dx = wx - fp.x;
+          const dz = wz - fp.z;
+          const lx = Math.abs(dx * cosY - dz * sinY);
+          const lz = Math.abs(dx * sinY + dz * cosY);
+          if (lx > hw + 16 || lz > hl + 16) continue;
+          const wxBlend = Math.max(0, Math.min(1, 1 - (lx - hw) / Math.max(step, 16)));
+          const wzBlend = Math.max(0, Math.min(1, 1 - (lz - hl) / Math.max(step, 16)));
+          const wBlend = wxBlend * wzBlend * 0.90;
+          const k = j * n + i;
+          heights[k] = heights[k] * (1 - wBlend) + padY * wBlend;
+        }
+      }
+      fp.y = padY;
     }
   }
 
@@ -1083,61 +1161,84 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     });
   };
 
-  // 1. Timber mole pier extending from the stone quay into deep water
+  // 1. Timber mole pier extending from the harbor shoreline into deep water
   addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
-  // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
-  addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
-  // 3. Careening shed on the sheltered sandy foreshore
-  addPrefab('careening_shed', -75, 16, 12, 2.2);
 
-  if (orthoFootprints?.footprints?.length >= 5) {
+  if (hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
-    // Pick headland/seaward footprint for stone_sea_bastion
+    const hasPreassigned = fps.some((f) => Boolean(f.prefabId));
     let bastionIdx = 0;
-    let bestBastionScore = Infinity;
-    for (let i = 0; i < fps.length; i++) {
-      const s = fps[i].inlandM - fps[i].y * 1.5;
-      if (s < bestBastionScore) {
-        bestBastionScore = s;
-        bastionIdx = i;
-      }
-    }
-    const used = new Set([bastionIdx]);
-    // Pick largest near-waterfront footprint for casa_de_contratacion
     let casaIdx = -1;
-    for (let i = 0; i < fps.length; i++) {
-      if (used.has(i)) continue;
-      if (casaIdx === -1 || fps[i].area - fps[i].inlandM * 1.2 > fps[casaIdx].area - fps[casaIdx].inlandM * 1.2) {
-        casaIdx = i;
-      }
-    }
-    if (casaIdx >= 0) used.add(casaIdx);
-    // Pick largest inland plaza footprint for mission_chapel
     let chapelIdx = -1;
-    for (let i = 0; i < fps.length; i++) {
-      if (used.has(i)) continue;
-      if (chapelIdx === -1 || fps[i].area + fps[i].inlandM * 0.5 > fps[chapelIdx].area + fps[chapelIdx].inlandM * 0.5) {
-        chapelIdx = i;
+
+    if (!hasPreassigned) {
+      let bestBastionScore = Infinity;
+      for (let i = 0; i < fps.length; i++) {
+        const s = fps[i].inlandM - fps[i].y * 1.5;
+        if (s < bestBastionScore) {
+          bestBastionScore = s;
+          bastionIdx = i;
+        }
+      }
+      const used = new Set([bastionIdx]);
+      for (let i = 0; i < fps.length; i++) {
+        if (used.has(i)) continue;
+        if (casaIdx === -1 || fps[i].area - fps[i].inlandM * 1.2 > fps[casaIdx].area - fps[casaIdx].inlandM * 1.2) {
+          casaIdx = i;
+        }
+      }
+      if (casaIdx >= 0) used.add(casaIdx);
+      for (let i = 0; i < fps.length; i++) {
+        if (used.has(i)) continue;
+        const aspect = fps[i].length / Math.max(1, fps[i].width);
+        const curScore = aspect * 65 + fps[i].area * 0.12;
+        const bestChapelScore =
+          chapelIdx === -1
+            ? -Infinity
+            : (fps[chapelIdx].length / Math.max(1, fps[chapelIdx].width)) * 65 + fps[chapelIdx].area * 0.12;
+        if (curScore > bestChapelScore) {
+          chapelIdx = i;
+        }
       }
     }
-    if (chapelIdx >= 0) used.add(chapelIdx);
 
     let warehouseAssigned = false;
     for (let i = 0; i < fps.length; i++) {
       const fp = fps[i];
-      let prefabId = 'colonial_town_block';
-      if (i === bastionIdx) prefabId = 'stone_sea_bastion';
-      else if (i === casaIdx) prefabId = 'casa_de_contratacion';
-      else if (i === chapelIdx) prefabId = 'mission_chapel';
-      else if (!warehouseAssigned && fp.inlandM < 180) {
-        prefabId = 'royal_warehouse';
-        warehouseAssigned = true;
+      let prefabId = fp.prefabId || 'colonial_town_block';
+      if (!fp.prefabId) {
+        if (i === bastionIdx) prefabId = 'stone_sea_bastion';
+        else if (i === casaIdx) prefabId = 'casa_de_contratacion';
+        else if (i === chapelIdx) prefabId = 'mission_chapel';
+        else if (!warehouseAssigned && fp.inlandM < 180) {
+          prefabId = 'royal_warehouse';
+          warehouseAssigned = true;
+        }
       }
-      const prefab = PORT_PREFABS[prefabId];
+      const prefab = PORT_PREFABS[prefabId] || PORT_PREFABS.colonial_town_block;
       const groundY = terrainSurfaceSample(heights, fp.x, fp.z, region);
-      const y = Math.max(1.8, groundY);
-      const scaleW = prefabId === 'stone_sea_bastion' ? Math.max(22, fp.width) : Math.max(12, Math.min(26, fp.width));
-      const scaleL = prefabId === 'stone_sea_bastion' ? Math.max(24, fp.length) : Math.max(15, Math.min(34, fp.length));
+      const y = Math.max(2.2, groundY);
+      // Match the exact width & length of the top-down footprint on the map (no miniature clamping!)
+      const scaleW = Math.max(12, fp.width);
+      const scaleL = Math.max(14, fp.length);
+      const minSpan = Math.min(scaleW, scaleL);
+      const heightRatio =
+        prefabId === 'mission_chapel'
+          ? 0.56
+          : prefabId === 'casa_de_contratacion'
+            ? 0.40
+            : prefabId === 'stone_sea_bastion'
+              ? 0.34
+              : 0.36;
+      const pitchRatio =
+        prefabId === 'mission_chapel'
+          ? 0.18
+          : prefabId === 'stone_sea_bastion'
+            ? 0.08
+            : 0.13;
+      const scaledHeight = Math.max(prefab.height, minSpan * heightRatio);
+      const scaledPitch = Math.max(prefab.roofPitch ?? 2.4, minSpan * pitchRatio);
+
       instances.push({
         prefabId,
         label: prefab.label,
@@ -1147,16 +1248,20 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         yaw: fp.yaw,
         length: scaleL,
         width: scaleW,
-        height: prefab.height,
-        foundationDepth: Math.max(prefab.foundationDepth, 4.5),
+        height: scaledHeight,
+        foundationDepth: Math.max(prefab.foundationDepth, 6.0),
         materialKind: prefab.materialKind,
-        roofPitch: prefab.roofPitch,
+        roofPitch: scaledPitch,
         waterfront: prefab.waterfront,
         fromOrthophotoFootprint: true,
       });
     }
   } else {
-    // 3. Sea bastion (Castillo) guarding the harbor entrance on the starboard headland battery
+    // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
+    addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
+    // 3. Careening shed on the sheltered sandy foreshore
+    addPrefab('careening_shed', -75, 16, 12, 2.2);
+    // 4. Sea bastion (Castillo) guarding the harbor entrance on the starboard headland battery
     addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
     // 5. Casa de la Contratación (Customhouse) facing the waterfront plaza
     addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
@@ -1182,6 +1287,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     shoreBearing: region.shoreBearing ?? 112,
     center: { x: center.x, z: center.z, shoreAlong: bestShoreAlong, shoreInland: bestShoreInland },
     clearRadius: 155,
+    hasOrthophotoFootprints: hasOrthoFootprints,
     berth: {
       x: berthPos.x,
       z: berthPos.z,
@@ -1539,13 +1645,16 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Grounded coral-limestone foundation plinth anchoring the Hunyuan3D-2mv 3D mesh into sloped coastal terrain
       const yPlinth = yGround + 0.68;
       emitBox(toWorld, -hw - 0.55, hw + 0.55, yBase, yPlinth, -hl - 0.55, hl + 0.55, 11, 0.82);
-      const yPeak =
+      const minSpan = Math.min(inst.width, inst.length);
+      const peakExtra =
         inst.prefabId === 'mission_chapel'
-          ? yTop + (inst.roofPitch ?? 3.4) + 5.8
+          ? (inst.roofPitch ?? 3.4) + Math.max(5.8, minSpan * 0.24)
           : inst.prefabId === 'stone_sea_bastion'
-            ? yTop + 4.8
-            : yTop + (inst.roofPitch ?? 2.6) + 1.2;
-      emitLRMMesh(toWorld, lrmTmpl, inst.width * 1.04, yPlinth - 0.18, yPeak, inst.length * 1.04, cosY, sinY);
+            ? Math.max(4.8, minSpan * 0.16)
+            : (inst.roofPitch ?? 2.6) + Math.max(1.2, minSpan * 0.06);
+      const yPeak = yTop + peakExtra;
+      // LRM mesh vertices are normalized to [-0.46, +0.46] (span 0.92), so scale by 1/0.92 = 1.087 to cover 100% of the footprint
+      emitLRMMesh(toWorld, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY);
       continue;
     }
 
@@ -1933,6 +2042,9 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData);
   const mask = new Uint8Array(m * m);
 
+  const is1550Ortho = Boolean(satelliteData?.is1550Orthophoto);
+  const minTreeElev = is1550Ortho ? 1.2 : 1.5;
+
   for (let j = 0; j < m; j++) {
     const v = (j + 0.5) / m;
     const z = region.z + (v - 0.5) * span;
@@ -1941,13 +2053,15 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
       const x = region.x + (u - 0.5) * span;
       const idx = j * m + i;
       const h = terrainSample(heights, x, z, region);
-      if (h < 1.5 || beachData.swashMask[idx] > 80 || beachData.drySandMask[idx] > 140) {
+      if (h < minTreeElev || beachData.swashMask[idx] > 80 || beachData.drySandMask[idx] > 140) {
         mask[idx] = 0;
         continue;
       }
       if (portPlacement) {
         const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
-        if (distPort < portPlacement.clearRadius * 0.72 || !portClearanceEnvelope(portPlacement, x, z, 12)) {
+        const clearEnvelope = !portClearanceEnvelope(portPlacement, x, z, is1550Ortho ? 8 : 12);
+        const clearCircle = !portPlacement.hasOrthophotoFootprints && distPort < portPlacement.clearRadius * 0.72;
+        if (clearEnvelope || clearCircle) {
           mask[idx] = 0;
           continue;
         }
@@ -1960,19 +2074,33 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
         continue;
       }
       const patchNoise = coastalFbm2D(u * 6.5 + 1.9, v * 6.5 - 2.4, seed, 4);
-      const moisture = coastalSmoothstep(1.5, 8.5, h) * coastalSmoothstep(1.12, 0.35, slope);
+      const moisture = coastalSmoothstep(minTreeElev, 7.5, h) * coastalSmoothstep(1.12, 0.35, slope);
       const proceduralVeg = Math.min(1, moisture * (0.54 + 0.62 * patchNoise));
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
       let vegProb = proceduralVeg;
       if (sat) {
-        // Combine satellite spectral excess-green index with 1550s historical reforestation
-        // of modern urban concrete/roofs so natural beaches/cliffs stay open while cities revert to jungle.
-        const satGreen = Math.min(1, sat.greenness * 1.18);
-        const restoredUrban =
-          sat.isUrban && h > 1.6 && slope < 0.65 && sat.sandChroma < 0.35
-            ? (0.68 + 0.26 * patchNoise) * moisture
-            : 0;
-        vegProb = Math.max(satGreen, restoredUrban, proceduralVeg * 0.65) * coastalSmoothstep(1.12, 0.42, slope);
+        if (is1550Ortho) {
+          // Top-down 1550 map is ground truth: bake forest into all green forest/canopy areas of the map,
+          // and keep dirt plazas, streets, courtyards, beaches, and building roofs open.
+          const isForest1550 =
+            sat.greenness > 0.036 ||
+            (sat.g >= sat.r - 3 && sat.g > sat.b + 6 && sat.luma >= 16 && sat.luma <= 148);
+          const isWarmClearingOrRoof =
+            (sat.r > sat.g + 8 && sat.r > sat.b + 18) || sat.sandChroma > 0.34;
+          vegProb =
+            isForest1550 && !isWarmClearingOrRoof
+              ? Math.min(1, 0.72 + sat.greenness * 1.15) * coastalSmoothstep(1.12, 0.42, slope)
+              : 0;
+        } else {
+          // Combine 2026 satellite spectral excess-green index with 1550s historical reforestation
+          // of modern urban concrete/roofs so natural beaches/cliffs stay open while cities revert to jungle.
+          const satGreen = Math.min(1, sat.greenness * 1.18);
+          const restoredUrban =
+            sat.isUrban && h > 1.6 && slope < 0.65 && sat.sandChroma < 0.35
+              ? (0.68 + 0.26 * patchNoise) * moisture
+              : 0;
+          vegProb = Math.max(satGreen, restoredUrban, proceduralVeg * 0.65) * coastalSmoothstep(1.12, 0.42, slope);
+        }
       }
       mask[idx] = Math.max(0, Math.min(255, Math.round(255 * vegProb)));
     }
@@ -2947,14 +3075,12 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
 
           if (h <= 6.2 && inlandM <= 340 && !inBastionCore) {
             lowCoastalCells++;
-            // Check if 1550 AI orthophoto marks this pixel as water/estuary OR if modern satellite shows urban landfill
-            // or natural tidal creek corridors along low coastal plains.
+            // Shadow-proof 1550 water check: requires blue/turquoise excess so dark building/wall shadows on land are never carved into water
             const is1550Water =
               hasDedicated1550Ortho &&
               sat &&
-              sat.b > sat.r * 1.08 &&
-              sat.b >= sat.g * 0.84 &&
-              sat.greenness < 0.10;
+              ((sat.b - sat.r >= 7 && sat.b >= sat.g * 0.78 && sat.greenness < 0.08 && sat.luma < 176 && sat.luma >= 26) ||
+                (sat.g - sat.r >= 8 && sat.b - sat.r >= 1 && sat.b > 75 && sat.luma < 172 && sat.luma >= 28));
             const creekNoise = coastalUberNoise2D(
               x * 0.0038 + 0.7 * coastalFbm2D(x * 0.0016, z * 0.0016, seed + 719, 2),
               z * 0.0038 + 0.7 * coastalFbm2D(z * 0.0016 + 9.4, x * 0.0016, seed + 727, 2),
@@ -2983,7 +3109,13 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
           const reliefBoost = h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.4, ridgeDetail * 0.45);
           carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
         } else {
-          carvedDem[k] = h;
+          // If 1550 orthophoto shows land/forest/settlement here, elevate above sea level
+          const is1550Land =
+            hasDedicated1550Ortho &&
+            sat &&
+            !((sat.b - sat.r >= 7 && sat.b >= sat.g * 0.78 && sat.greenness < 0.08 && sat.luma < 176) ||
+              (sat.g - sat.r >= 8 && sat.b - sat.r >= 1 && sat.b > 75 && sat.luma < 172));
+          carvedDem[k] = is1550Land ? 2.4 + sat.greenness * 1.8 : h;
         }
       }
     }
@@ -3018,7 +3150,12 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
 
   // Step 3: Build 100% De-Urbanized 1550 Orthophoto Imagery Seed
-  let sat1550 = satSource ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho } : null;
+  const precomputedFootprints = options.precomputedFootprints || satSource?.precomputedFootprints || null;
+  let sat1550 = satSource
+    ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho, precomputedFootprints }
+    : precomputedFootprints
+      ? { is1550Orthophoto: true, precomputedFootprints }
+      : null;
   if (satSource && !hasDedicated1550Ortho) {
     const sz = satSource.size;
     const rgba1550 = new Uint8ClampedArray(satSource.rgba.length);
@@ -3068,6 +3205,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
       size: sz,
       lowLuma: satSource.lowLuma,
       lowSize: satSource.lowSize,
+      precomputedFootprints,
     };
   }
 
@@ -3164,10 +3302,16 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
       }
     }
   }
-  const built = build1550HistoricalTerritoryPack(
-    basePack,
-    { orthophoto1550, discoveredAt: meta.discoveredAt, precomputedHeights1550: heights1550 }
-  );
+  const precomputedFootprints =
+    Array.isArray(meta.footprints) && meta.footprints.length >= 4
+      ? { clusterU: meta.clusterU, clusterV: meta.clusterV, footprints: meta.footprints }
+      : null;
+  const built = build1550HistoricalTerritoryPack(basePack, {
+    orthophoto1550,
+    discoveredAt: meta.discoveredAt,
+    precomputedHeights1550: heights1550,
+    precomputedFootprints,
+  });
   built.territory1550 = { ...built.territory1550, ...meta };
   return built;
 }

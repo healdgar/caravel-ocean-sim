@@ -32,12 +32,12 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
   const maxRoots = isMobile ? 16000 : 58000;
 
   // Saba-style overlapping-crown jittered grid placement (scripts/prepare-forest-instances.py:284-333)
-  // guided by the co-registered satellite vegetation mask (`biome`) and foreshore beach masks.
+  // guided by the co-registered satellite/1550-map vegetation mask (`biome`) and foreshore beach masks.
+  // Uses a two-pass coprime permutation so 3D forest trees bake uniformly across 100% of the map's forest area
+  // (instead of exhausting `maxRoots` in the northernmost strip of an 8192m × 8192m coastal territory).
   if (biome instanceof Uint8Array && biome.length === maskSize * maskSize) {
-    const spacing = isMobile ? 7.2 : 4.5;
     const crownSpacingFactor = isMobile ? 0.45 : 0.34;
-    const gridN = Math.ceil(span / spacing);
-    const cellSize = 18;
+    const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
     const next = new Int32Array(maxRoots);
@@ -57,23 +57,44 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       return biome[idx];
     };
 
-    for (let j = 1; j < gridN - 1 && totalPlaced < maxRoots; j++) {
-      for (let i = 1; i < gridN - 1 && totalPlaced < maxRoots; i++) {
-        const key = hash32Forest(seed ^ Math.imul(i, 73856093) ^ Math.imul(j, 19349663));
-        const x = x0 + (i + 0.5 + (key / 4294967296 - 0.5) * 0.65) * spacing;
-        const z = z0 + (j + 0.5 + (hash32Forest(key) / 4294967296 - 0.5) * 0.65) * spacing;
+    const gcd = (a, b) => {
+      while (b !== 0) {
+        const t = b;
+        b = a % b;
+        a = t;
+      }
+      return a;
+    };
+
+    const runForestPass = (passOriginX, passOriginZ, passSpan, spacing, scaleMin, scaleSpan, targetBudget, passSeed) => {
+      const gridN = Math.max(4, Math.ceil(passSpan / spacing));
+      const totalCells = gridN * gridN;
+      let stride = Math.max(1, Math.floor(totalCells * 0.61803398875) | 1);
+      while (gcd(stride, totalCells) !== 1) stride += 2;
+      let cellIdx = hash32Forest(passSeed) % totalCells;
+
+      for (let step = 0; step < totalCells && totalPlaced < targetBudget; step++) {
+        cellIdx = (cellIdx + stride) % totalCells;
+        const j = Math.floor(cellIdx / gridN);
+        const i = cellIdx - j * gridN;
+        const key = hash32Forest(passSeed ^ Math.imul(i, 73856093) ^ Math.imul(j, 19349663));
+        const x = passOriginX + (i + 0.5 + (key / 4294967296 - 0.5) * 0.68) * spacing;
+        const z = passOriginZ + (j + 0.5 + (hash32Forest(key) / 4294967296 - 0.5) * 0.68) * spacing;
+        if (x <= x0 + 32 || x >= x0 + span - 32 || z <= z0 + 32 || z >= z0 + span - 32) continue;
+
         const probByte = sampleBiomeByte(x, z);
-        if (probByte < 76) continue;
-        // Modulate acceptance probability by satellite greenness so forest edges taper naturally
-        if (probByte < 155 && (hash32Forest(key + 5) & 255) > probByte + 48) continue;
+        if (probByte < 68) continue;
+        if (probByte < 155 && (hash32Forest(key + 5) & 255) > probByte + 52) continue;
 
         if (port) {
-          const distPort = Math.hypot(x - port.center.x, z - port.center.z);
-          if (distPort < port.clearRadius * 0.72 || !portClearanceEnvelope(port, x, z, 10)) continue;
+          const clearEnv = !portClearanceEnvelope(port, x, z, port.hasOrthophotoFootprints ? 8 : 10);
+          const clearRad =
+            !port.hasOrthophotoFootprints && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.72;
+          if (clearEnv || clearRad) continue;
         }
 
         const gy = groundSample(x, z);
-        if (!Number.isFinite(gy) || gy < 2.0 || gy > 845) continue;
+        if (!Number.isFinite(gy) || gy < 1.25 || gy > 845) continue;
         const sx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
         const sz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
         const slope = Math.hypot(sx, sz);
@@ -81,18 +102,18 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
 
         const protoId = hash32Forest(key + 1) % protoCount;
         const proto = forestPack.manifest.prototypes[protoId];
-        const scale = 0.90 + (hash32Forest(key + 2) / 4294967296) * 0.46;
+        const scale = scaleMin + (hash32Forest(key + 2) / 4294967296) * scaleSpan;
         const crownR = (proto.crownRadius ?? 8.5) * scale;
-        const rimCheckR = crownR * 0.65;
+        const rimCheckR = crownR * 0.45;
         if (
-          sampleBiomeByte(x + rimCheckR, z) < 32 ||
-          sampleBiomeByte(x - rimCheckR, z) < 32 ||
-          sampleBiomeByte(x, z + rimCheckR) < 32 ||
-          sampleBiomeByte(x, z - rimCheckR) < 32 ||
-          groundSample(x + rimCheckR, z) < 1.0 ||
-          groundSample(x - rimCheckR, z) < 1.0 ||
-          groundSample(x, z + rimCheckR) < 1.0 ||
-          groundSample(x, z - rimCheckR) < 1.0
+          sampleBiomeByte(x + rimCheckR, z) < 24 ||
+          sampleBiomeByte(x - rimCheckR, z) < 24 ||
+          sampleBiomeByte(x, z + rimCheckR) < 24 ||
+          sampleBiomeByte(x, z - rimCheckR) < 24 ||
+          groundSample(x + rimCheckR, z) < 0.55 ||
+          groundSample(x - rimCheckR, z) < 0.55 ||
+          groundSample(x, z + rimCheckR) < 0.55 ||
+          groundSample(x, z - rimCheckR) < 0.55
         ) {
           continue;
         }
@@ -134,7 +155,27 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
         const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
         buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -1, 0);
       }
-    }
+    };
+
+    // Pass 1: Dense primary canopy in the 3800m × 3800m coastal & settlement window
+    const focusSpan = Math.min(span, 3800);
+    const focusCenterX = port?.center?.x ?? region.x;
+    const focusCenterZ = port?.center?.z ?? region.z;
+    const focusX0 = Math.max(x0, Math.min(x0 + span - focusSpan, focusCenterX - focusSpan * 0.5));
+    const focusZ0 = Math.max(z0, Math.min(z0 + span - focusSpan, focusCenterZ - focusSpan * 0.5));
+    runForestPass(
+      focusX0,
+      focusZ0,
+      focusSpan,
+      isMobile ? 11.5 : 7.4,
+      0.98,
+      0.52,
+      Math.floor(maxRoots * 0.68),
+      seed ^ 0x9e3779b9
+    );
+
+    // Pass 2: Full-territory 8192m × 8192m hinterland canopy coverage
+    runForestPass(x0, z0, span, isMobile ? 21.0 : 13.5, 1.18, 0.58, maxRoots, seed ^ 0x85ebca6b);
   }
 
   // Fallback to explicit scrub/upland arrays if biome grid did not place roots

@@ -423,5 +423,25 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   const pack = generateProceduralCoastalPack('san-juan', { size: 65 });
   const geom = buildPortPrefabGeometry(pack.port, null, templates);
   assert.ok(geom.triangleCount > 5000, `Expected plumb-rectified port geometry to exceed 5,000 triangles, got ${geom.triangleCount}`);
+
+  // Verify top-down map footprints in WW15 payload place buildings at exact (x, z), exact width × length scale, and exact yaw
+  const packWithFootprints = build1550HistoricalTerritoryPack(pack);
+  packWithFootprints.territory1550.clusterU = 0.42;
+  packWithFootprints.territory1550.clusterV = 0.48;
+  packWithFootprints.territory1550.footprints = [
+    { u: 0.41, v: 0.44, width: 128, length: 144, yaw: -0.22, prefabId: 'stone_sea_bastion', inlandM: 48 },
+    { u: 0.38, v: 0.50, width: 96, length: 120, yaw: -0.22, prefabId: 'casa_de_contratacion', inlandM: 88 },
+    { u: 0.35, v: 0.47, width: 64, length: 112, yaw: -0.22, prefabId: 'mission_chapel', inlandM: 104 },
+    { u: 0.40, v: 0.52, width: 84, length: 96, yaw: -0.22, prefabId: 'colonial_town_block', inlandM: 112 },
+  ];
+  const encodedFp = encode1550TerritoryCachePayload(packWithFootprints);
+  const appliedFp = apply1550TerritoryCachePayload(pack, encodedFp);
+  assert.equal(appliedFp.port.hasOrthophotoFootprints, true);
+  const bastionInst = appliedFp.port.instances.find((inst) => inst.prefabId === 'stone_sea_bastion');
+  assert.ok(bastionInst, 'Expected stone_sea_bastion placed from top-down footprint');
+  assert.equal(bastionInst.width, 128, 'Footprint width must not be clamped');
+  assert.equal(bastionInst.length, 144, 'Footprint length must not be clamped');
+  assert.equal(bastionInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');
+  assert.ok(bastionInst.height > 30, 'Building height scales proportionally to footprint dimensions');
 });
 
