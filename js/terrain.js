@@ -552,6 +552,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    if(upgradedPack.region?.span&&upgradedPack.region.span!==activeRegion.span){
+      activeRegion=Object.freeze({...activeRegion,span:upgradedPack.region.span});
+      proceduralPack.region=activeRegion;
+      device.queue.writeBuffer(uniform,0,new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,1]));
+    }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
     if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
     heights.set(upgradedPack.heights);
@@ -586,7 +591,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
     if(forest&&forestPack){
       const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile});
-      forest.updatePack(nextForestPack,heights);
+      forest.updatePack(nextForestPack,heights,activeRegion);
     }
     if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
       const draft=boat.hydrodynamics?.draft??2.1;
@@ -695,7 +700,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     prepare:updateTrees,
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
-    height:heightSample,groundSample,region:activeRegion,get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
+    height:heightSample,groundSample,get region(){return activeRegion;},get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion),

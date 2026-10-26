@@ -424,8 +424,8 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   const geom = buildPortPrefabGeometry(pack.port, null, templates);
   assert.ok(geom.triangleCount > 12000, `Expected high-detail plumb port geometry to exceed 12,000 triangles, got ${geom.triangleCount}`);
 
-  // Verify top-down map footprints in WW15 payload subdivide large city blocks into true-scale 16th-century buildings
-  // (eave height 7.8m–10.2m, comfortably below the 18m–22m mature tropical forest trees) aligned to the map footprint yaw
+  // Verify top-down map footprints in WW15 payload validate the AI 1550 orthophoto physical scale
+  // and place 1 single 3D building per footprint rectangle (1:1, zero city-block pellet subdivision)
   const packWithFootprints = build1550HistoricalTerritoryPack(pack);
   packWithFootprints.territory1550.clusterU = 0.42;
   packWithFootprints.territory1550.clusterV = 0.48;
@@ -438,8 +438,9 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   const encodedFp = encode1550TerritoryCachePayload(packWithFootprints);
   const appliedFp = apply1550TerritoryCachePayload(pack, encodedFp);
   assert.equal(appliedFp.port.hasOrthophotoFootprints, true);
+  assert.ok(appliedFp.region.span >= 1350 && appliedFp.region.span <= 2300, `Expected AI 1550 orthophoto scale validation to adjust span into 1350..2300m, got ${appliedFp.region.span}`);
   const orthoInstances = appliedFp.port.instances.filter((inst) => inst.fromOrthophotoFootprint);
-  assert.ok(orthoInstances.length >= 12 && orthoInstances.length <= 24, `Expected large map city blocks to subdivide into 12..24 true-scale colonial buildings, got ${orthoInstances.length}`);
+  assert.equal(orthoInstances.length, 4, `Expected 1:1 single building per footprint rectangle (zero pellet subdivision), got ${orthoInstances.length}`);
   const bastionInst = orthoInstances.find((inst) => inst.prefabId === 'stone_sea_bastion');
   assert.ok(bastionInst, 'Expected stone_sea_bastion placed from top-down footprint');
   assert.equal(bastionInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');

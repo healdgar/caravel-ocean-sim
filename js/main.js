@@ -1282,6 +1282,11 @@ async function main() {
       if(v){
         boat.x=v.x;boat.z=v.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
         if(boat.enabled){cam.x=v.x;cam.z=v.z;}
+        else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw;cam.pitch=v.pitch;}
+        if(vessels.length>1){
+          const escorts=safeEscortPositions(boat,vessels.slice(1),terrain,boat.heading);
+          for(let i=1;i<vessels.length;i++){vessels[i].x=escorts[i-1].x;vessels[i].z=escorts[i-1].z;vessels[i].heading=boat.heading;}
+        }
       }
       envFull=true;
     }

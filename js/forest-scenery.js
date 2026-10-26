@@ -824,7 +824,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     return {stats,nativeReady,prepare(){},
-      updatePack(nextPack,nextHeights=null){
+      updatePack(nextPack,nextHeights=null,nextRegion=null){
         if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
         const nextCount=Math.min(maxRootCapacity,nextPack.manifest.rootCount);
         activeRootCount=nextCount;
@@ -843,7 +843,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         }
         device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
         device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,nativeStatus.resident?modeIndex:effectiveModeIndex]));
-        if(nextHeights)terrainVisibility?.update?.(nextHeights);
+        if(nextHeights)terrainVisibility?.update?.(nextHeights,nextRegion);
       },
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
       encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}},

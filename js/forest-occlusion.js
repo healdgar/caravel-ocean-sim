@@ -92,10 +92,15 @@ export function createForestTerrainOcclusion({device,heights,region,near=null}){
  let seaBoundary=true;for(let i=0;i<region.size;i++)for(const at of[i,(region.size-1)*region.size+i,i*region.size,i*region.size+region.size-1])if(heights[at]>0)seaBoundary=false;
  const data=new Float32Array([...coarse.domain,fine?1:0,...(fine?.domain??coarse.domain),seaBoundary?1:0]);uniform=device.createBuffer({label:'forest immutable terrain domains',size:32,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(uniform,0,data);
  return {entries:[{binding:10,resource:{buffer:uniform}},{binding:11,resource:coarseView},{binding:12,resource:fineView}],
-  update(nextHeights){
+  update(nextHeights,nextRegion=region){
    if(!textures[0]||!(nextHeights instanceof Float32Array)||nextHeights.length!==region.size*region.size)return;
-   const nextCoarse=forestTerrainPyramid(nextHeights,region);
+   const activeReg=nextRegion||region;
+   const nextCoarse=forestTerrainPyramid(nextHeights,activeReg);
    for(const [level,values]of nextCoarse.levels.entries()){const n=nextCoarse.cells>>level;device.queue.writeTexture({texture:textures[0],mipLevel:level},values,{bytesPerRow:n*8},[n,n]);}
+   if(uniform){
+    const nextData=new Float32Array([...nextCoarse.domain,fine?1:0,...(fine?.domain??nextCoarse.domain),seaBoundary?1:0]);
+    device.queue.writeBuffer(uniform,0,nextData);
+   }
   },
   destroy(){uniform.destroy();for(const texture of textures)texture.destroy();}};
  }catch(error){uniform?.destroy();for(const texture of textures)texture.destroy();throw error;}
