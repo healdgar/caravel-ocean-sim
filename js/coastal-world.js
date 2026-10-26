@@ -1178,10 +1178,41 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   // If real-world DEM shoreline lies outside the default synthetic bay window, scan wider coastal frame
   if (bestScore === -Infinity) {
     const halfSpan = region.span * 0.45;
-    const stepScan = Math.max(16, Math.round(region.span / 64));
+    const stepScan = Math.max(12, Math.round(region.span / 96));
     for (let alongProbe = -halfSpan; alongProbe <= halfSpan; alongProbe += stepScan) {
       for (let inland = -halfSpan; inland <= halfSpan; inland += stepScan) {
         probePoint(alongProbe, inland);
+      }
+    }
+  }
+  // Ultimate fallback: scan heightfield cells directly for any true coastline (never default to (0,0) inland!)
+  if (bestScore === -Infinity) {
+    const n = region.size;
+    const span = region.span;
+    const targetX = orthoFootprints ? orthoFootprints.clusterX : region.x;
+    const targetZ = orthoFootprints ? orthoFootprints.clusterZ : region.z;
+    for (let j = 4; j < n - 4; j += 2) {
+      const wz = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 4; i < n - 4; i += 2) {
+        const h = heights[j * n + i];
+        if (h < -0.8 || h > 2.2) continue;
+        const hN = heights[Math.max(0, j - 3) * n + i];
+        const hS = heights[Math.min(n - 1, j + 3) * n + i];
+        const hW = heights[j * n + Math.max(0, i - 3)];
+        const hE = heights[j * n + Math.min(n - 1, i + 3)];
+        const minNeighbor = Math.min(hN, hS, hW, hE);
+        const maxNeighbor = Math.max(hN, hS, hW, hE);
+        if (minNeighbor <= -1.5 && maxNeighbor >= 1.2) {
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const distPenalty = Math.hypot(wx - targetX, wz - targetZ) * 0.02;
+          const score = -minNeighbor - distPenalty;
+          if (score > bestScore) {
+            bestScore = score;
+            const cf = coastalFrame(region, wx, wz);
+            bestShoreAlong = cf.along;
+            bestShoreInland = cf.inland;
+          }
+        }
       }
     }
   }
@@ -1205,8 +1236,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       const k = j * n + i;
       let h = heights[k];
 
-      // 1. Dredged harbor berth & pier approach channel
-      if (relInland < -4 && Math.abs(relAlong) < berthHalfW * 2.1) {
+      // 1. Dredged harbor berth & pier approach channel (ONLY deepens existing water/shoals h <= 0.25; NEVER carves dry land into a lake!)
+      if (h <= 0.25 && relInland < -4 && Math.abs(relAlong) < berthHalfW * 2.1) {
         const acrossW = Math.exp(-(relAlong * relAlong) / (2 * berthHalfW * berthHalfW));
         const berthW =
           coastalSmoothstep(-4, -Math.max(18, 38 * scaleFactor), relInland) *
@@ -1300,8 +1331,11 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     });
   };
 
-  // 1. Timber mole pier extending from the harbor shoreline into deep water
-  addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+  // 1. Timber mole pier extending from the harbor shoreline into deep water (only if pier tip is over actual water)
+  const pierTipPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 32);
+  if (terrainSample(heights, pierTipPos.x, pierTipPos.z, region) <= -0.5) {
+    addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+  }
 
   if (hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();

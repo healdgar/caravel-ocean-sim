@@ -282,7 +282,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   if(proceduralPack&&useRealDEM){
     await upgradeProceduralPackWithRealDEM(proceduralPack);
   }
-  const activeRegion=proceduralPack?proceduralPack.region:ISLAND;
+  let activeRegion=proceduralPack?proceduralPack.region:ISLAND;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
