@@ -170,6 +170,23 @@ fn landHeight(p:vec2f)->f32 {
   let uv=(p-LAND.domain.xy)/LAND.domain.z+0.5;
   let outVec=max(vec2f(0.0),abs(uv-vec2f(0.5))-vec2f(0.5));
   let outDist=length(outVec);
+  if(outDist>0.001 && nearTerrain.domain.w<-0.5){
+    let ruv=(p-nearTerrain.domain.xy)/nearTerrain.domain.z+0.5;
+    let rOut=length(max(vec2f(0.0),abs(ruv-vec2f(0.5))-vec2f(0.5)));
+    if(rOut<0.45){
+      let hReg=landNearHeight(p);
+      if(outDist<0.04){
+        let uvClamped0=clamp(uv,vec2f(0.0),vec2f(1.0));
+        let q0=uvClamped0*vec2f(textureDimensions(elevation)-1u);let i0=vec2i(floor(q0));let f0=fract(q0);
+        let limit0=vec2i(textureDimensions(elevation))-1;
+        let h0=mix(mix(textureLoad(elevation,i0,0).r,textureLoad(elevation,min(i0+vec2i(1,0),limit0),0).r,f0.x),
+          mix(textureLoad(elevation,min(i0+vec2i(0,1),limit0),0).r,textureLoad(elevation,min(i0+vec2i(1,1),limit0),0).r,f0.x),f0.y);
+        return mix(h0,hReg,smoothstep(0.0,0.04,outDist));
+      }
+      return mix(hReg,-120.0,smoothstep(0.0,0.4,rOut));
+    }
+    return -120.0;
+  }
   if(outDist>1.25){return -120.0;}
   let uvClamped=clamp(uv,vec2f(0.0),vec2f(1.0));
   let q=uvClamped*vec2f(textureDimensions(elevation)-1u);let i=vec2i(floor(q));let f=fract(q);
@@ -180,13 +197,96 @@ fn landHeight(p:vec2f)->f32 {
 }
 `;
 
-// Visual shore response and nearshore wave refraction/shoaling.
+// Visual shore response, nearshore wave shoaling/breaking, and breakwater shelter.
 export const COASTAL_WATER = /* wgsl */ `
 @group(2) @binding(0) var<uniform> LAND:Land;
 @group(2) @binding(1) var elevation:texture_2d<f32>;
 @group(2) @binding(2) var<uniform> nearTerrain:NearLand;
 @group(2) @binding(3) var<storage,read> nearElevation:array<f32>;
 ` + LAND_SAMPLING + /* wgsl */ `
+struct CoastalWaveState {
+  swellScale: f32,
+  chopScale: f32,
+  breakFoam: f32,
+  leeSlope: vec2f,
+  leeHeight: f32,
+};
+fn coastalWaveState(p:vec2f)->CoastalWaveState{
+  let swellProp=select(normalize(F.windP[0].xy+vec2f(1e-5,0.0)),vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
+  let upSwell=-swellProp;
+  let sideSwell=vec2f(-upSwell.y,upSwell.x);
+  let dir0=upSwell;
+  let dirL=normalize(upSwell+sideSwell*0.32);
+  let dirR=normalize(upSwell-sideSwell*0.32);
+  let steps=array<f32,8>(36.0,85.0,165.0,280.0,450.0,700.0,1080.0,1620.0);
+  var transC=1.0;
+  var transL=1.0;
+  var transR=1.0;
+  var fetchDist=1800.0;
+  for(var i=0u;i<8u;i++){
+    let d=steps[i];
+    let hC=landHeight(p+dir0*d);
+    let hL=landHeight(p+dirL*d);
+    let hR=landHeight(p+dirR*d);
+    let bC=smoothstep(-0.35,1.15,hC);
+    let bL=smoothstep(-0.35,1.15,hL);
+    let bR=smoothstep(-0.35,1.15,hR);
+    if(bC>0.35 && fetchDist>d){fetchDist=d;}
+    transC*=1.0-bC*0.92;
+    transL*=1.0-bL*0.88;
+    transR*=1.0-bR*0.88;
+  }
+  let rawTransmit=clamp(0.50*transC+0.25*transL+0.25*transR,0.0,1.0);
+  let bed=landHeight(p);
+  let hE=landHeight(p+vec2f(14.0,0.0));
+  let hW=landHeight(p-vec2f(14.0,0.0));
+  let hN=landHeight(p+vec2f(0.0,14.0));
+  let hS=landHeight(p-vec2f(0.0,14.0));
+  let bedSmooth=0.2*(bed+hE+hW+hN+hS);
+  let gx=(hE-hW)/28.0;
+  let gz=(hN-hS)/28.0;
+  let gLen=length(vec2f(gx,gz));
+  let shoreDir=select(swellProp,vec2f(gx,gz)/max(gLen,1e-4),gLen>0.002);
+  let onshoreAlign=clamp(dot(swellProp,shoreDir)*0.75+0.42,0.0,1.0);
+  let seawardExposure=rawTransmit*onshoreAlign;
+  let shoalBoost=1.0+0.38*seawardExposure*smoothstep(-16.0,-3.2,bedSmooth)*(1.0-smoothstep(-2.4,-0.15,bedSmooth));
+  let surfDissipation=1.0-smoothstep(-4.2,-0.1,bedSmooth);
+  let swellScale=clamp(rawTransmit*shoalBoost*surfDissipation,0.0,1.45);
+  let fetchFactor=smoothstep(25.0,620.0,fetchDist);
+  let chopScale=mix(0.34+0.36*fetchFactor,1.0,rawTransmit)*(1.0-0.62*smoothstep(-1.4,0.25,bedSmooth));
+  var breakFoam=0.0;
+  var extraSlope=vec2f(0.0);
+  var extraHeight=0.0;
+  let relP=p-LAND.domain.xy;
+  if(bedSmooth>-15.0 && bedSmooth<0.85 && seawardExposure>0.08){
+    let propDir=normalize(mix(swellProp,shoreDir,0.65));
+    let surfPhase=dot(relP,swellProp)*0.095-bedSmooth*1.12-F.camPos.w*2.15+gnoise(p*0.024)*1.95;
+    let waveSaw=fract(surfPhase/(2.0*PI));
+    let boreCrest=smoothstep(0.58,0.86,waveSaw)*(1.0-smoothstep(0.86,0.99,waveSaw));
+    let boreTrail=smoothstep(0.22,0.88,waveSaw)*(0.50+0.50*gnoise(p*0.13+vec2f(F.camPos.w*0.11)));
+    let surfBand=smoothstep(-11.0,-2.2,bedSmooth)*(1.0-smoothstep(-0.08,0.52,bedSmooth));
+    let swashBand=smoothstep(-1.3,-0.05,bedSmooth)*(1.0-smoothstep(0.06,0.62,bedSmooth))*(0.55+0.45*sin(dot(relP,swellProp)*0.08-F.camPos.w*1.8+gnoise(p*0.04)*2.2));
+    breakFoam=clamp(seawardExposure*(surfBand*(boreCrest*0.92+boreTrail*0.44)+swashBand*0.58),0.0,1.0);
+    let borePitch=(boreCrest*2.0-0.36)*surfBand*seawardExposure;
+    extraHeight+=boreCrest*0.38*surfBand*seawardExposure;
+    extraSlope+=propDir*(borePitch*0.20);
+  }
+  let leeWeight=(1.0-rawTransmit)*(1.0-smoothstep(-0.85,0.25,bed))*mix(0.45,1.0,fetchFactor);
+  if(leeWeight>0.02){
+    let leeDir1=normalize(vec2f(swellProp.x*0.48-swellProp.y*0.877,swellProp.x*0.877+swellProp.y*0.48));
+    let leeDir2=normalize(vec2f(swellProp.x*0.76+swellProp.y*0.65,-swellProp.x*0.65+swellProp.y*0.76));
+    let k1=0.28;
+    let k2=0.52;
+    let ph1=dot(relP,leeDir1)*k1-F.camPos.w*1.65+gnoise(p*0.018)*1.8;
+    let ph2=dot(relP,leeDir2)*k2-F.camPos.w*2.15+gnoise(p*0.031+vec2f(7.3,2.9))*1.6;
+    let env=0.62+0.38*gnoise(p*0.012-leeDir1*F.camPos.w*0.08);
+    let amp1=0.105*leeWeight*env;
+    let amp2=0.062*leeWeight*env;
+    extraHeight+=amp1*sin(ph1)+amp2*sin(ph2);
+    extraSlope+=leeDir1*(amp1*k1*cos(ph1))+leeDir2*(amp2*k2*cos(ph2));
+  }
+  return CoastalWaveState(swellScale,chopScale,breakFoam,extraSlope,extraHeight);
+}
 fn coastalRefractSlope(p:vec2f,sl:vec2f)->vec2f{
   let bed=landHeight(p);
   if(bed<=-28.0){return sl;}
@@ -203,7 +303,7 @@ fn coastalRefractSlope(p:vec2f,sl:vec2f)->vec2f{
   let slCrossShore=dot(sl,tangDir);
   var refracted=shoreDir*slAlongShore*(1.0+refractW*0.35)+tangDir*slCrossShore*(1.0-refractW*0.68);
   let shoalBand=smoothstep(-14.0,-1.8,bed)*(1.0-smoothstep(-0.8,0.6,bed));
-  let shoalWave=cos(bed*2.4+F.camPos.w*1.9)*0.045*shoalBand;
+  let shoalWave=cos(bed*1.15+F.camPos.w*1.9)*0.045*shoalBand;
   refracted+=shoreDir*shoalWave;
   return refracted*shelterDamp;
 }
@@ -338,11 +438,17 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   col+=lunarSurface(n,v,albedo*(1.0-wet*.36),mix(roughness,.25,wet),vec3f(.035),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
   col+=lightningSurface(n,v,albedo,roughness);
   col=surfaceAir(col,world);
-  // Clip cloud integration at the land surface: clouds behind mountains stay
-  // hidden; low clouds in front veil the slopes using the existing volume.
-  let ray=marchCloudsTo(F.camPos.xyz*0.001,normalize(world-F.camPos.xyz),12u,0.5,
-    sunIlluminance(),skyAtmo(vec3f(0,1,0)),distance(world,F.camPos.xyz)*0.001);
-  return vec4f(col*(1.0-ray.color.a)+ray.color.rgb,1.0);
+  // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
+  // stay hidden and low clouds in front veil upper slopes, while low coastal plains
+  // and beaches share the same clear aerial perspective as the ocean and forest canopy.
+  let mountainVeil=smoothstep(320.0,580.0,world.y);
+  if(mountainVeil>0.001){
+    let ray=marchCloudsTo(F.camPos.xyz*0.001,normalize(world-F.camPos.xyz),12u,0.5,
+      sunIlluminance(),skyAtmo(vec3f(0,1,0)),distance(world,F.camPos.xyz)*0.001);
+    let veilAlpha=ray.color.a*mountainVeil;
+    return vec4f(col*(1.0-veilAlpha)+ray.color.rgb*mountainVeil,1.0);
+  }
+  return vec4f(col,1.0);
 }
 fn landOpaque(in:LandVertex)->vec4f{
   let world=in.world;var n=normalize(in.normal);

@@ -507,10 +507,29 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
     indices:buffer(fineMesh.indices,GPUBufferUsage.INDEX,'Wells Bay near indices'),
     submerged:buffer(fineMesh.submergedIndices,GPUBufferUsage.INDEX,'Wells Bay submerged near indices')}:null;
-  const nearDomain=buffer(new Float32Array(nearTile?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,0,0,0]:[0,0,1,0,1,0,0,0]),GPUBufferUsage.UNIFORM,'Wells Bay near domain');
+  const regionalElevationSize=!nearTile&&proceduralPack?256:0;
+  const regionalElevationData=regionalElevationSize?new Float32Array(regionalElevationSize*regionalElevationSize):null;
+  const nearDomain=buffer(new Float32Array(nearTile?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,0,0,0]:regionalElevationSize?[activeRegion.x,activeRegion.z,activeRegion.span*5,-1,regionalElevationSize,0,0,0]:[0,0,1,0,1,0,0,0]),GPUBufferUsage.UNIFORM,'Wells Bay near domain');
   // Four exact height loads from immutable storage avoid consuming another
   // sampled-texture slot in the already texture-heavy ocean fragment stage.
-  const nearElevation=buffer(nearTile?.heights??new Float32Array([-120]),GPUBufferUsage.STORAGE,'Wells Bay immutable near elevation');
+  const nearElevation=buffer(nearTile?.heights??regionalElevationData??new Float32Array([-120]),GPUBufferUsage.STORAGE,'Wells Bay immutable near elevation');
+  function updateRegionalElevationGrid(){
+    if(!regionalElevationData||!regionalElevationSize)return;
+    const regSpan=activeRegion.span*5;
+    const x0=activeRegion.x-regSpan*0.5;
+    const z0=activeRegion.z-regSpan*0.5;
+    const inv=regSpan/(regionalElevationSize-1);
+    for(let j=0;j<regionalElevationSize;j++){
+      const z=z0+j*inv;
+      const row=j*regionalElevationSize;
+      for(let i=0;i<regionalElevationSize;i++){
+        regionalElevationData[row+i]=heightSample(x0+i*inv,z);
+      }
+    }
+    device.queue.writeBuffer(nearDomain,0,new Float32Array([activeRegion.x,activeRegion.z,regSpan,-1,regionalElevationSize,0,0,0]));
+    device.queue.writeBuffer(nearElevation,0,regionalElevationData);
+  }
+  updateRegionalElevationGrid();
   const uniform=buffer(new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,proceduralPack?0.22:1]),GPUBufferUsage.UNIFORM,'land domain');
   const elevation=device.createTexture({label:'island elevation',size:[activeRegion.size,activeRegion.size],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
@@ -842,6 +861,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       secX:secPack.secX,
       secZ:secPack.secZ,
       key:`${secPack.secX},${secPack.secZ}`,
+      elevationSource:secPack.elevationSource,
       region:sReg,
       heights:secPack.heights,
       rawHeights:secPack.rawHeights,
@@ -866,6 +886,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   function restitchNeighborSection(adjRec){
     if(!adjRec?.rawHeights)return;
     const sReg=adjRec.region;
+    const isRealDemSection=Boolean(adjRec.elevationSource?.startsWith('aws-terrarium'));
     const connectedEdges={
       west:Boolean(getSectionAt(adjRec.secX-1,adjRec.secZ,true)),
       east:Boolean(getSectionAt(adjRec.secX+1,adjRec.secZ,true)),
@@ -873,14 +894,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       south:Boolean(getSectionAt(adjRec.secX,adjRec.secZ+1,true)),
     };
     const stitched=new Float32Array(adjRec.rawHeights);
-    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true});
+    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true,isRealDemSection});
     smoothCoastlineAndForeshoreBeaches(stitched,sReg,{
       port:null,
       shoreBearing:sReg.shoreBearing??0,
       connectedEdges,
       taperOuterBorders:false,
     });
-    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true});
+    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true,isRealDemSection});
     adjRec.heights.set(stitched);
     adjRec.beaches=synthesizeCoastalBeaches(sReg,adjRec.heights,null);
     const rebuiltMesh=buildCoastalMesh(sReg,adjRec.heights,adjRec.beaches);
@@ -904,6 +925,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function rebuildNeighborTreeInstances(){
     if(!proceduralPack)return;
+    updateRegionalElevationGrid();
     if(forest&&forestPack){
       trees=new Float32Array(0);
       forestPatches=[];
@@ -950,76 +972,48 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(sectionStreamBusy||!proceduralPack||!sectionQueue.length)return;
     sectionStreamBusy=true;
     const myEpoch=sectionEpoch;
-    const demUpgradeQueue=[];
-    // Pass 1: Synthesize Stage 1 stitched coastal sections in topological distance order (cardinals before diagonals/2nd ring)
+    // Synthesize neighboring coastal sections in topological distance order (cardinals before diagonals/2nd ring)
+    // using real AWS Terrarium SRTM DEM geography (shared tile cache) so bays, islands, and lagoons appear directly.
     sectionQueue.sort((a,b)=>(Math.abs(a.secX)+Math.abs(a.secZ))-(Math.abs(b.secX)+Math.abs(b.secZ)));
+    let streamedCount=0;
     while(sectionQueue.length&&myEpoch===sectionEpoch){
       const {secX,secZ,wantRealDEM}=sectionQueue.shift();
       const key=`${secX},${secZ}`;
       try{
         if(!loadedSections.has(key)){
-          const fastPack=await generateCoastalNeighborSection(
+          const useDem=Boolean(wantRealDEM&&search.get('realDEM')!=='off');
+          const secPack=await generateCoastalNeighborSection(
             {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
             secX,
             secZ,
             getSectionAt,
             {
-              size:65,
-              biomeSize:64,
-              albedoSize:128,
-              vegetationCandidates:1600,
-              useRealDEM:false,
+              size:isMobile?65:129,
+              biomeSize:isMobile?64:128,
+              albedoSize:isMobile?128:256,
+              vegetationCandidates:isMobile?1600:3600,
+              useRealDEM:useDem,
               use1550:Boolean(discovery?.applied),
               taperUnconnectedOuter:true,
             }
           );
           if(myEpoch!==sectionEpoch)break;
-          const rec=buildSectionGPURecord(fastPack);
+          const rec=buildSectionGPURecord(secPack);
           loadedSections.set(key,rec);
           for(const [dx,dz] of [[-1,0],[1,0],[0,-1],[0,1]]){
             const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
             if(adj)restitchNeighborSection(adj);
           }
-          rebuildNeighborTreeInstances();
-        }
-        if(wantRealDEM&&search.get('realDEM')!=='off'){
-          demUpgradeQueue.push({secX,secZ,key});
+          streamedCount++;
+          if(streamedCount===4||sectionQueue.length===0){
+            rebuildNeighborTreeInstances();
+          }
         }
       }catch{/* non-fatal section stream */}
       await new Promise(r=>setTimeout(r,8));
     }
-    // Pass 2: Upgrade streamed sections with higher-resolution mesh & DEM ridge relief in background
-    for(const {secX,secZ,key} of demUpgradeQueue){
-      if(myEpoch!==sectionEpoch)break;
-      try{
-        await new Promise(r=>setTimeout(r,20));
-        if(myEpoch!==sectionEpoch)break;
-        const demPack=await generateCoastalNeighborSection(
-          {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
-          secX,
-          secZ,
-          getSectionAt,
-          {
-            size:isMobile?65:129,
-            biomeSize:isMobile?64:128,
-            albedoSize:isMobile?128:256,
-            vegetationCandidates:isMobile?1600:3600,
-            useRealDEM:true,
-            use1550:Boolean(discovery?.applied),
-            taperUnconnectedOuter:true,
-          }
-        );
-        if(myEpoch!==sectionEpoch)break;
-        const prev=loadedSections.get(key);
-        const nextRec=buildSectionGPURecord(demPack);
-        loadedSections.set(key,nextRec);
-        destroySectionRecord(prev);
-        for(const [dx,dz] of [[-1,0],[1,0],[0,-1],[0,1]]){
-          const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
-          if(adj)restitchNeighborSection(adj);
-        }
-        rebuildNeighborTreeInstances();
-      }catch{/* non-fatal DEM upgrade */}
+    if(myEpoch===sectionEpoch&&streamedCount>0){
+      rebuildNeighborTreeInstances();
     }
     sectionStreamBusy=false;
   }
@@ -1172,6 +1166,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forest.updatePack(nextForestPack,heights,activeRegion);
     }
     resetStreamedSections();
+    updateRegionalElevationGrid();
     if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
       const draft=boat.hydrodynamics?.draft??2.1;
       if(heightSample(boat.x,boat.z)>-draft*1.15){
@@ -1302,6 +1297,22 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion),
+    waveShelter(x,z,swellDirRad=0){
+      const sx=-Math.cos(swellDirRad),sz=-Math.sin(swellDirRad);
+      const px=-sz,pz=sx;
+      const steps=[36,85,165,280,450,700,1080,1620];
+      let tC=1,tL=1,tR=1;
+      for(let i=0;i<steps.length;i++){
+        const d=steps[i];
+        if(heightSample(x+sx*d,z+sz*d)>0.1)tC*=0.12;
+        if(heightSample(x+(sx+px*0.32)*d,z+(sz+pz*0.32)*d)>0.1)tL*=0.16;
+        if(heightSample(x+(sx-px*0.32)*d,z+(sz-pz*0.32)*d)>0.1)tR*=0.16;
+      }
+      const transmit=Math.max(0,Math.min(1,0.5*tC+0.25*tL+0.25*tR));
+      const bed=heightSample(x,z);
+      const surfDamp=bed>-4.2?Math.max(0.18,1-Math.max(0,Math.min(1,(bed+4.2)/4.1))*0.82):1;
+      return Math.max(0.22,transmit*surfDamp*0.78+0.22);
+    },
     encode(pass,changed=false){
       forestMass?.encode(pass);
       forest?.encode(pass);

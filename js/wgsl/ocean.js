@@ -158,11 +158,13 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   var jxz = 0.0;
   var cov = vec3f(0.0);
   // wind gusts ("cat's paws"): patches where the short ripples are stronger or calmer
+  ${coast ? 'let cws = coastalWaveState(xz);' : ''}
   let gustN = textureSample(foamTex, sampR, xz * 0.011 + F.windP[0].xy * (F.camPos.w * 0.0004)).b;
   let gust = mix(0.35, 1.2, smoothstep(0.3, 0.72, gustN));
   for (var c = 0u; c < ${CASCADES}u; c++) {
     let uv = xz * F.cascInvL[c >> 2u][c & 3u];
-    let gk = mix(1.0, gust, select(0.0, select(0.5, 1.0, c >= 4u), c >= 3u));
+    let cw = ${coast ? 'select(cws.chopScale, cws.swellScale, c <= 1u)' : '1.0'};
+    let gk = mix(1.0, gust, select(0.0, select(0.5, 1.0, c >= 4u), c >= 3u)) * cw;
     let dv = textureSample(derivTex, sampR, uv, c) * gk;
     // Moments carry the same filtered jxz in alpha, saving one anisotropic
     // displacement sample per cascade. jxz scales linearly, moments quadratically.
@@ -189,7 +191,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let dx = I.domain.w;
   let wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
   var sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
-  ${coast?'sl = coastalRefractSlope(xz, sl);':''}
+  ${coast?'sl = coastalRefractSlope(xz, sl) + cws.leeSlope;':''}
   let nrm = normalize(vec3f(-sl.x, 1.0, -sl.y));
   // specular anti-aliasing: slope variation across the pixel widens the lobe
   let dsx = dpdx(sl);
@@ -275,7 +277,8 @@ ${OCEAN_HULL_MASK}
   // upwelling light is diffuse: light it with smooth terms only (no per-pixel normal noise)
   var body = F.waterCol.rgb * (skyHemi * 1.6 + waterSun * max(Ld.y, 0.0) * 0.8+moonE*max(lunarDirection().y,0.0)*.8);
   // light transmitted through the thin upper part of backlit crests
-  let crest = clamp((in.height - 0.05) / 0.9, 0.0, 1.0);
+  let effHeight = ${coast ? 'in.height * clamp(cws.swellScale, 0.12, 1.35) + cws.leeHeight' : 'in.height'};
+  let crest = clamp((effHeight - 0.05) / 0.9, 0.0, 1.0);
   let toSun = max(dot(Ld, -V), 0.0);
   let thin = pow(clamp(0.5 - 0.5 * dot(Ld, nrm), 0.0, 1.0), 3.0);
   let k1 = F.sssCol.w * crest * crest * pow(toSun, 4.0) * thin * exp(-dist / 600.0);
@@ -288,7 +291,8 @@ ${OCEAN_HULL_MASK}
   let cheb = max(dc.x, dc.y);
   let w0 = 1.0 - smoothstep(0.30 * F.lodP.z, 0.45 * F.lodP.z, cheb);
   let w1 = 1.0 - smoothstep(0.30 * F.lodP.w, 0.45 * F.lodP.w, cheb);
-  let fwl = mix(fw1, fw0, w0) * w1;
+  let swellFoamDamp = ${coast ? 'mix(0.05, 1.0, clamp(cws.swellScale, 0.0, 1.0))' : '1.0'};
+  let fwl = mix(fw1, fw0, w0) * w1 * swellFoamDamp;
   let fresh = breakingCompression(jxx,jzz,jxz,F.foamP.x);
   // The clipmaps age white water; they must not suppress a newly breaking crest
   // inside their footprint while their temporal accumulator is still catching up.
@@ -296,6 +300,7 @@ ${OCEAN_HULL_MASK}
   // aged foam breaks into wind-aligned streaks; fresh crest foam stays dense
   let freshK = clamp(fwl.g * 2.0 + fresh, 0.0, 1.0);
   cover *= mix(mix(0.35,1.0,smoothstep(0.25,0.75,streak)), 1.0, freshK);
+  ${coast ? 'cover = max(cover, cws.breakFoam * 0.92);' : ''}
   // soft threshold: thin foam is a translucent film, dense foam is opaque white
   // dense foam has crisp edges, thin decaying foam a soft translucent margin
   let soft = 0.04 + 0.14 * (1.0 - clamp(cover, 0.0, 1.0));
@@ -305,6 +310,7 @@ ${OCEAN_HULL_MASK}
   foamMask = max(foamMask, smoothstep(0.55,0.95,fwl.g)*smoothstep(0.35,0.75,pat)*0.85*F.foamP.z);
   foamMask = max(foamMask, fresh*smoothstep(0.28,0.68,pat)*0.8*F.foamP.z);
   foamMask = max(foamMask,cover*0.22*smoothstep(0.3,0.75,pat));
+  ${coast ? 'foamMask = max(foamMask, cws.breakFoam * (0.58 + 0.42 * smoothstep(0.22, 0.78, pat)));' : ''}
   // submerged bubbles brighten and tint the water just beneath foam
   body += F.sssCol.rgb * (waterSun * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
   body += vec3f(0.10, 0.32, 0.30) * skyUp * fwl.g * 0.35;
@@ -331,7 +337,7 @@ ${OCEAN_HULL_MASK}
   col = mix(col, foamLit, foamMask * 0.95);
   col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
     +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;
-  ${coast?'col = coastalWater(col, in.xz, in.height, foamLit);':''}
+  ${coast?'col = coastalWater(col, in.xz, effHeight, foamLit);':''}
 
   // ---- aerial perspective ----
   // aerial perspective: atmosphere extinction plus a marine haze floor

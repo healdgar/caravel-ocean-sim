@@ -4879,6 +4879,41 @@ export async function findNearestCoastlineInRealDEM(lat, lon, fetchFn = null, _t
   return null;
 }
 
+const _terrariumTileRgbaCache = new Map();
+
+function fetchCachedTerrariumTileRgba(demUrl, signal) {
+  let cached = _terrariumTileRgbaCache.get(demUrl);
+  if (cached) return cached;
+  const p = fetch(demUrl, { signal, mode: 'cors' })
+    .then(async (res) => {
+      if (!res?.ok) throw new Error(`Terrarium HTTP ${res?.status}`);
+      const bmp = await createImageBitmap(await res.blob(), {
+        premultiplyAlpha: 'none',
+        colorSpaceConversion: 'none',
+      });
+      const canvas =
+        typeof OffscreenCanvas === 'function'
+          ? new OffscreenCanvas(256, 256)
+          : Object.assign(document.createElement('canvas'), { width: 256, height: 256 });
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close();
+      const rgba = new Uint8ClampedArray(256 * 256 * 4);
+      rgba.set(ctx.getImageData(0, 0, 256, 256).data);
+      return rgba;
+    })
+    .catch((err) => {
+      _terrariumTileRgbaCache.delete(demUrl);
+      throw err;
+    });
+  if (_terrariumTileRgbaCache.size >= 96) {
+    const oldestKey = _terrariumTileRgbaCache.keys().next().value;
+    _terrariumTileRgbaCache.delete(oldestKey);
+  }
+  _terrariumTileRgbaCache.set(demUrl, p);
+  return p;
+}
+
 // Fetch real high-resolution SRTM/NED/ETOPO1 elevation tiles from AWS Terrarium
 // (zoom 13 = ~18m resolution) AND co-registered Esri World Imagery
 // satellite orthophoto tiles (https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
@@ -4886,7 +4921,7 @@ export async function findNearestCoastlineInRealDEM(lat, lon, fetchFn = null, _t
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
 export async function upgradeProceduralPackWithRealDEM(
   pack,
-  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false } = {}
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false } = {}
 ) {
   const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
@@ -4894,9 +4929,10 @@ export async function upgradeProceduralPackWithRealDEM(
   let { region } = pack;
   const n = region.size;
   const span = region.span;
+  const sampleSpan = demSpan || span;
   const cosLat = Math.max(0.1, Math.cos(region.latitude * COASTAL_DEG_TO_RAD));
-  const halfLat = (span * 0.51) / 111195;
-  const halfLon = (span * 0.51) / (111195 * cosLat);
+  const halfLat = (sampleSpan * 0.51) / 111195;
+  const halfLon = (sampleSpan * 0.51) / (111195 * cosLat);
   const numTiles = 2 ** zoom;
   const lonToTileX = (lon, nTiles = numTiles) => Math.floor(((lon + 180) / 360) * nTiles);
   const latToTileY = (lat, nTiles = numTiles) => {
@@ -4919,26 +4955,28 @@ export async function upgradeProceduralPackWithRealDEM(
     const h = rows * 256;
     const tilePromises = [];
     const satPromises = [];
-    const wantSatellite = Boolean(fetchSatelliteTile || (!fetchTile && typeof fetch === 'function' && typeof createImageBitmap === 'function'));
+    const wantSatellite =
+      !isNeighborSection &&
+      Boolean(fetchSatelliteTile || (!fetchTile && typeof fetch === 'function' && typeof createImageBitmap === 'function'));
 
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
         const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${wrappedX}/${ty}.png`;
         tilePromises.push(
-          Promise.resolve(
-            fetchTile ? fetchTile(demUrl, { tx: wrappedX, ty, zoom, signal: controller.signal }) : fetch(demUrl, { signal: controller.signal, mode: 'cors' })
-          ).then(async (res) => {
-            if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) {
-              return { tx, ty, rgba: res };
-            }
-            if (!res?.ok) throw new Error(`Terrarium HTTP ${res?.status}`);
-            const bmp = await createImageBitmap(await res.blob(), {
-              premultiplyAlpha: 'none',
-              colorSpaceConversion: 'none',
-            });
-            return { tx, ty, bmp };
-          })
+          fetchTile
+            ? Promise.resolve(fetchTile(demUrl, { tx: wrappedX, ty, zoom, signal: controller.signal })).then(async (res) => {
+                if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) {
+                  return { tx, ty, rgba: res };
+                }
+                if (!res?.ok) throw new Error(`Terrarium HTTP ${res?.status}`);
+                const bmp = await createImageBitmap(await res.blob(), {
+                  premultiplyAlpha: 'none',
+                  colorSpaceConversion: 'none',
+                });
+                return { tx, ty, bmp };
+              })
+            : fetchCachedTerrariumTileRgba(demUrl, controller.signal).then((rgba) => ({ tx, ty, rgba }))
         );
         if (wantSatellite) {
           const satUrl = `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${wrappedX}`;
@@ -5024,11 +5062,13 @@ export async function upgradeProceduralPackWithRealDEM(
     let sumWaterX = 0, sumWaterZ = 0, waterCount = 0;
     let sumLandX = 0, sumLandZ = 0;
     for (let j = 0; j < n; j++) {
-      const z = region.z + (j / (n - 1) - 0.5) * span;
-      const lat = region.latitude - (z - region.z) / 111195;
+      const vNorm = j / (n - 1) - 0.5;
+      const z = region.z + vNorm * span;
+      const lat = region.latitude - (vNorm * sampleSpan) / 111195;
       for (let i = 0; i < n; i++) {
-        const x = region.x + (i / (n - 1) - 0.5) * span;
-        const lon = region.longitude + (x - region.x) / (111195 * cosLat);
+        const uNorm = i / (n - 1) - 0.5;
+        const x = region.x + uNorm * span;
+        const lon = region.longitude + (uNorm * sampleSpan) / (111195 * cosLat);
         const elev = sampleTerrarium(lat, lon);
         rawDem[j * n + i] = elev;
         if (elev > 0.25) {
@@ -5061,31 +5101,33 @@ export async function upgradeProceduralPackWithRealDEM(
           longitude: snapped.longitude,
           ...(snapped.shoreBearing !== undefined ? { shoreBearing: snapped.shoreBearing } : {}),
         });
-        return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, timeoutMs, _snapAttempted: true });
+        return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, demSpan, timeoutMs, _snapAttempted: true });
       }
     }
-    // Require real land and real water in the primary coastal window (neighbor sections may be up to 100% inland hills/forest!)
-    if ((isNeighborSection ? landRatio < 0.002 : landRatio < 0.015 || landRatio > 0.97) || maxDem < 0.35) {
+    // Require real land and real water in the primary coastal window (neighbor sections preserve any real DEM land/water ratio!)
+    if (!isNeighborSection && (landRatio < 0.015 || landRatio > 0.97 || maxDem < 0.35)) {
       for (const item of satLoaded) item?.bmp?.close?.();
       return ensureFallback(pack);
     }
 
     // Damp SRTM tree-canopy / bridge radar spikes on flat low-lying coastal plains (e.g. Florida barrier islands where median land < 7m)
-    landElevs.sort((a, b) => a - b);
-    const medLand = landElevs.length ? landElevs[Math.floor(landElevs.length * 0.5)] : 5;
-    if (medLand < 7.0) {
-      const softCap = Math.max(4.0, medLand + 3.0);
-      maxDem = 0;
-      for (let k = 0; k < n * n; k++) {
-        if (rawDem[k] > softCap) {
-          rawDem[k] = softCap + (rawDem[k] - softCap) * 0.22;
+    if (!isNeighborSection) {
+      landElevs.sort((a, b) => a - b);
+      const medLand = landElevs.length ? landElevs[Math.floor(landElevs.length * 0.5)] : 5;
+      if (medLand < 7.0) {
+        const softCap = Math.max(4.0, medLand + 3.0);
+        maxDem = 0;
+        for (let k = 0; k < n * n; k++) {
+          if (rawDem[k] > softCap) {
+            rawDem[k] = softCap + (rawDem[k] - softCap) * 0.22;
+          }
+          if (rawDem[k] > maxDem) maxDem = rawDem[k];
         }
-        if (rawDem[k] > maxDem) maxDem = rawDem[k];
       }
     }
 
     // Infer true shoreBearing from the real DEM water-to-land center of mass for custom coordinates
-    if (!Object.hasOwn(SPANISH_MAIN_1550_REGIONS, region.id) && waterCount > 50 && landCount > 50) {
+    if (!isNeighborSection && !Object.hasOwn(SPANISH_MAIN_1550_REGIONS, region.id) && waterCount > 50 && landCount > 50) {
       const dx = sumLandX / landCount - sumWaterX / waterCount;
       const dz = sumLandZ / landCount - sumWaterZ / waterCount;
       const demBearing = Math.round(((Math.atan2(dx, -dz) * COASTAL_RAD_TO_DEG) % 360 + 360) % 360);
@@ -5849,6 +5891,14 @@ export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
       out.push({ dx, dz, edge, landCells });
     }
   };
+  // Include coastal bay/island flanking corners along active longitudinal borders (e.g. Southwest (-1, 1) for Isla de Tierra Bomba)
+  if (hasEdge.has('0,1')) {
+    pushUnique(-1, 1, 'southwest', southLand);
+    pushUnique(1, 1, 'southeast', Math.max(eastLand, southLand));
+  }
+  if (hasEdge.has('0,-1') && hasEdge.has('1,0')) {
+    pushUnique(1, -1, 'northeast', Math.min(eastLand, northLand));
+  }
   // Extend a 2nd coastal ring along active lateral and longitudinal shorelines so distant coastlines remain visible from the boat viewpoint
   if (hasEdge.has('-1,0')) {
     pushUnique(-2, 0, 'west-2', westLand);
@@ -5867,8 +5917,8 @@ export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
   }
   if (hasEdge.has('0,1')) {
     pushUnique(0, 2, 'south-2', southLand);
-    if (hasEdge.has('-1,1')) pushUnique(-1, 2, 'south-southwest-2', Math.min(westLand, southLand));
-    if (hasEdge.has('1,1')) pushUnique(1, 2, 'south-southeast-2', Math.min(eastLand, southLand));
+    if (hasEdge.has('-1,1')) pushUnique(-1, 2, 'south-southwest-2', southLand);
+    if (hasEdge.has('1,1')) pushUnique(1, 2, 'south-southeast-2', Math.max(eastLand, southLand));
   }
   return out;
 }
@@ -6001,7 +6051,7 @@ export function stitchCoastalSectionBorders(
   secX,
   secZ,
   getNeighborSection,
-  { taperUnconnectedOuter = true } = {}
+  { taperUnconnectedOuter = true, isRealDemSection = false } = {}
 ) {
   const n = region.size;
   const span = region.span;
@@ -6025,7 +6075,7 @@ export function stitchCoastalSectionBorders(
     return terrainSample(srcHeights, cx, cz, nr);
   };
 
-  const blendBand = 0.24;
+  const blendBand = isRealDemSection ? 0.14 : 0.24;
   const xWest = region.x - span * 0.5;
   const xEast = region.x + span * 0.5;
   const zNorth = region.z - span * 0.5;
@@ -6118,6 +6168,7 @@ export function stitchCoastalSectionBorders(
     const connE = hasEast;
     const connN = hasNorth;
     const connS = hasSouth;
+    const maxOuterEdge = isRealDemSection ? 0.11 : 0.39;
     for (let j = 0; j < n; j++) {
       const v = j / (n - 1);
       const z = region.z + (v - 0.5) * span;
@@ -6131,12 +6182,14 @@ export function stitchCoastalSectionBorders(
         const dX = Math.min(dW, dE);
         const dZ = Math.min(dN, dS);
         const dEdge = Math.min(dX, dZ);
-        if (dEdge >= 0.39) continue;
+        if (dEdge >= maxOuterEdge) continue;
         const k = j * n + i;
         if (heights[k] <= -16) continue;
         const capeMajor = coastalFbm2D(x * 0.00048, z * 0.00048, seed + 947, 3);
         const capeMinor = coastalFbm2D(x * 0.0016, z * 0.0016, seed + 1319, 2);
-        const margin = Math.max(0.055, Math.min(0.38, 0.06 + 0.24 * capeMajor + 0.08 * capeMinor));
+        const margin = isRealDemSection
+          ? Math.max(0.035, Math.min(0.10, 0.035 + 0.045 * capeMajor + 0.02 * capeMinor))
+          : Math.max(0.055, Math.min(0.38, 0.06 + 0.24 * capeMajor + 0.08 * capeMinor));
         const oX = Math.max(0, margin - dX);
         const oZ = Math.max(0, margin - dZ);
         const pen = Math.hypot(oX, oZ);
@@ -6163,7 +6216,7 @@ export function stitchCoastalSectionBorders(
 
 // Generate a continuous neighboring coastal section at section coordinates (secX, secZ) relative to basePack.
 // Propagates connected neighbor boundary elevation profiles C0/C1-continuously with matching coastal orientation,
-// 1550 rainforest biome/albedo, and optional high-pass SRTM ridge detail on inland hills.
+// 1550 rainforest biome/albedo, and real SRTM DEM surrounding geography (islands, bays, lagoons, and hills).
 export async function generateCoastalNeighborSection(
   basePack,
   secX,
@@ -6183,9 +6236,10 @@ export async function generateCoastalNeighborSection(
 ) {
   const baseRegion = basePack.region;
   const span = baseRegion.span;
+  const geoSpan = baseRegion.demGeoSpan || (span < 4000 ? 6800 : span);
   const cosLat = Math.max(0.1, Math.cos(baseRegion.latitude * COASTAL_DEG_TO_RAD));
-  const secLat = Number((baseRegion.latitude - (secZ * span) / 111195).toFixed(6));
-  const secLon = Number((baseRegion.longitude + (secX * span) / (111195 * cosLat)).toFixed(6));
+  const secLat = Number((baseRegion.latitude - (secZ * geoSpan) / 111195).toFixed(6));
+  const secLon = Number((baseRegion.longitude + (secX * geoSpan) / (111195 * cosLat)).toFixed(6));
   const secWorldX = baseRegion.x + secX * span;
   const secWorldZ = baseRegion.z + secZ * span;
   const secId = `${baseRegion.id}_sec_${secX}_${secZ}`;
@@ -6503,9 +6557,6 @@ export async function generateCoastalNeighborSection(
     return heights;
   };
 
-  // Always start from the boundary-propagated continuous heightfield so section orientation and shorelines are 100% contiguous
-  const contHeights = synthContinuousHeights();
-
   const sectionPack = {
     region: sectionRegion,
     secX,
@@ -6514,45 +6565,72 @@ export async function generateCoastalNeighborSection(
     elevationSource: 'procedural-continuation',
   };
 
-  // If real DEM tiles are requested, blend only their zero-mean inland ridge relief onto land cells (never flipping land/water!)
+  let contHeights = null;
+  let isRealDemSection = false;
+
+  // Use real AWS Terrarium SRTM DEM geography (bays, islands, lagoons, and hills) when available,
+  // smoothly stitched around the (0, 0) center quad via a globally continuous 2D border transition field.
   if (useRealDEM && (fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function'))) {
     try {
       const demProbe = { region: sectionRegion, skipPortPlacement: true };
       await upgradeProceduralPackWithRealDEM(demProbe, {
         fetchTile,
-        fetchSatelliteTile,
+        fetchSatelliteTile: null,
+        zoom: geoSpan >= 5000 ? 12 : 13,
+        demSpan: geoSpan,
         timeoutMs: 8000,
         isNeighborSection: true,
         _snapAttempted: true,
       });
       if (demProbe.rawDem && demProbe.rawDem.length === size * size) {
-        let sumDem = 0, cntDem = 0;
-        for (let k = 0; k < size * size; k++) {
-          if (demProbe.rawDem[k] > 0.5) {
-            sumDem += demProbe.rawDem[k];
-            cntDem++;
-          }
-        }
-        if (cntDem > 16) {
-          const meanDem = sumDem / cntDem;
-          for (let j = 0; j < size; j++) {
-            const v = j / (size - 1);
-            const dv = Math.min(v, 1 - v);
-            for (let i = 0; i < size; i++) {
-              const u = i / (size - 1);
-              const du = Math.min(u, 1 - u);
-              const edgeFade = coastalSmoothstep(0.0, 0.18, Math.min(du, dv));
-              const k = j * size + i;
-              if (contHeights[k] > 2.0 && demProbe.rawDem[k] > 0.5) {
-                const demDelta = Math.max(-6, Math.min(48, (demProbe.rawDem[k] - meanDem) * 0.45));
-                contHeights[k] = Math.max(1.2, contHeights[k] + demDelta * edgeFade);
+        contHeights = new Float32Array(size * size);
+        const elevScale = span < geoSpan ? Math.max(0.45, Math.sqrt(span / geoSpan)) : 1.0;
+        const baseSrc = basePack.rawHeights || basePack.heights;
+        const half0 = span * 0.5;
+        const blendDist = span * 0.25;
+        const blendedDem = new Float32Array(size * size);
+        for (let j = 0; j < size; j++) {
+          const v = j / (size - 1);
+          const z = secWorldZ + (v - 0.5) * span;
+          for (let i = 0; i < size; i++) {
+            const u = i / (size - 1);
+            const x = secWorldX + (u - 0.5) * span;
+            const k = j * size + i;
+            const rawH = demProbe.rawDem[k];
+            let h = rawH > 0.25 ? Math.min(895, 0.25 + (rawH - 0.25) * elevScale) : Math.min(-6.0, Math.max(-120, rawH));
+            if (baseSrc) {
+              const cx = Math.max(baseRegion.x - half0 + 1e-3, Math.min(baseRegion.x + half0 - 1e-3, x));
+              const cz = Math.max(baseRegion.z - half0 + 1e-3, Math.min(baseRegion.z + half0 - 1e-3, z));
+              const d0 = Math.hypot(x - cx, z - cz);
+              if (d0 < blendDist) {
+                const w0 = 1 - coastalSmoothstep(0, blendDist, d0);
+                const hBaseEdge = terrainSample(baseSrc, cx, cz, baseRegion);
+                const effBase = hBaseEdge <= 0.25 ? Math.min(hBaseEdge, -10.5) : hBaseEdge;
+                h = effBase * w0 + h * (1 - w0);
               }
             }
+            blendedDem[k] = h;
           }
         }
-        sectionPack.elevationSource = demProbe.elevationSource || 'aws-terrarium-srtm-z13';
+        const { distLand, step } = computeCoastalShoreDistances(blendedDem, size, span, 0.25);
+        for (let k = 0; k < size * size; k++) {
+          const bh = blendedDem[k];
+          if (bh > 0.25) {
+            contHeights[k] = bh;
+          } else {
+            const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
+            const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance);
+            contHeights[k] = Math.max(-120, bh < -2 ? Math.min(bh, -authoredDepth) : -authoredDepth);
+          }
+        }
+        isRealDemSection = true;
+        sectionPack.elevationSource = demProbe.elevationSource || `aws-terrarium-srtm-z${geoSpan >= 5000 ? 12 : 13}`;
       }
-    } catch { /* retain boundary-propagated continuous coast */ }
+    } catch { /* fallback to boundary-propagated continuous coast */ }
+  }
+
+  if (!contHeights) {
+    contHeights = synthContinuousHeights();
   }
 
   const connectedEdges = {
@@ -6570,6 +6648,7 @@ export async function generateCoastalNeighborSection(
   const stitched = new Float32Array(rawHeights);
   stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
     taperUnconnectedOuter,
+    isRealDemSection,
   });
   smoothCoastlineAndForeshoreBeaches(stitched, sectionRegion, {
     connectedEdges,
@@ -6577,6 +6656,7 @@ export async function generateCoastalNeighborSection(
   });
   stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
     taperUnconnectedOuter,
+    isRealDemSection,
   });
 
   const port = {

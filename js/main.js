@@ -750,7 +750,9 @@ async function main() {
   if(LAND_STAGE){const view=activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE];Object.assign(cam,view);cam.yaw=view.yaw*D2R;cam.pitch=view.pitch*D2R;cam.speed=45;}
   if (qs.get('cam')) {
     const v = qs.get('cam').split(',').map(Number);
-    cam.x = v[0]; cam.y = v[1]; cam.z = v[2]; cam.yaw = (v[3] || 0) * D2R; cam.pitch = (v[4] || 0) * D2R;
+    if (v.length >= 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])) {
+      cam.x = v[0]; cam.y = v[1]; cam.z = v[2]; cam.yaw = (v[3] || 0) * D2R; cam.pitch = (v[4] || 0) * D2R;
+    }
   }
   if (qs.get('fov')) cam.fovY = Number(qs.get('fov')) * D2R;
   const param = (key, fallback, min, max) => {
@@ -1058,7 +1060,7 @@ async function main() {
     writeAstronomyFrame(f,astronomy);
     f[36] = W; f[37] = H; f[38] = 1 / W; f[39] = 1 / H;
     for (let c = 0; c < C; c++) { f[40 + c] = CASC_L[c]; f[48 + c] = 1 / CASC_L[c]; }
-    f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed;
+    f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed; f[59] = P.swellDir * D2R + 2 * Math.PI;
     f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
     f[64] = Math.max(12, R0 * polygons.oceanRangeScale); f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
@@ -2127,7 +2129,11 @@ async function main() {
       }).catch(()=>{audioPending=false;});
     }
     for(const v of vessels){const p=v.probe;if(p.requested){p.pending=true;p.read.mapAsync(GPUMapMode.READ).then(()=>{
-      const heights=new Float32Array(p.read.getMappedRange(0,64));
+      const heights=new Float32Array(p.read.getMappedRange(0,64)).slice();
+      const shelter=terrain?.waveShelter?terrain.waveShelter(v.boat.x,v.boat.z,P.swellDir*D2R):1;
+      if(shelter<0.999){
+        for(let i=0;i<12;i++)heights[i]*=shelter;
+      }
       if(v.id==='player')waterH=heights[9];
       acceptVesselProbe(v.boat,p.state,heights,p.time,p.revision,p.length,p.beam);p.read.unmap();p.pending=false;
     },()=>{p.pending=false;});}}
