@@ -445,11 +445,27 @@ fn landOpaque(in:LandVertex)->vec4f{
       let tileCol=vec3f(0.50+kilnVar,0.175+kilnVar*0.45,0.085+kilnVar*0.25)*(0.90+0.12*courseStep);
       albedo=tileCol*portShade*(1.0+detailA*0.13+flute*0.10+detailB*0.06);
       relief=(flute*0.032+(courseStep-0.5)*0.018+detailA*0.014)*detailFade;roughness=0.80;ambientVisibility=0.48+0.36*max(n.y,0.0);
-    }else{
+    }else if(in.kind.x<14.5){
       // Kind 14: Deep recessed colonial openings, arched portals & wrought-iron reja bars
       let reja=smoothstep(0.42,0.48,abs(fract((world.x+world.z)*3.6)-0.5))*smoothstep(0.40,0.47,abs(fract(world.y*2.2)-0.5));
       albedo=mix(vec3f(0.085,0.072,0.058),vec3f(0.042,0.032,0.024),reja)*portShade*(1.0+detailB*0.08);
       relief=(detailB*0.008-(1.0-reja)*0.012)*detailFade;roughness=0.90;ambientVisibility=0.20+0.16*max(n.y,0.0);
+    }else if(in.kind.x<15.5){
+      // Kind 15: Layered palm-thatch & bundled reed roof (guano / palma real for bohíos, caneyes & palafitos)
+      let straw=sin((world.x*5.2+world.z*5.2)*4.6+detailA*2.0)*detailFade;
+      let tierStep=smoothstep(0.0,0.22,fract(world.y*1.9));
+      let bundleVar=sin(floor(world.x*2.6)*7.1+floor(world.z*2.6)*11.3)*0.04*detailFade;
+      let thatchCol=vec3f(0.36+bundleVar,0.27+bundleVar*0.7,0.145+bundleVar*0.4)*(0.86+0.16*tierStep);
+      albedo=thatchCol*portShade*(1.0+detailA*0.14+straw*0.11+detailB*0.07);
+      relief=(straw*0.036+(tierStep-0.5)*0.024+detailA*0.018)*detailFade;roughness=0.93;ambientVisibility=0.44+0.36*max(n.y,0.0);
+    }else{
+      // Kind 16: River-cobble courtyard pavement & packed-earth bastion terreplein (empedrado / terraplén)
+      let cobbleX=fract(world.x*2.4+sin(world.z*3.1)*0.25)-0.5;
+      let cobbleZ=fract(world.z*2.4+cos(world.x*3.1)*0.25)-0.5;
+      let cobble=smoothstep(0.42,0.18,sqrt(cobbleX*cobbleX+cobbleZ*cobbleZ));
+      let baseEarth=mix(vec3f(0.28,0.25,0.20),vec3f(0.40,0.36,0.30),cobble*detailFade);
+      albedo=baseEarth*portShade*(1.0+detailA*0.15+detailB*0.09);
+      relief=(detailA*0.032+(cobble-0.5)*0.022)*detailFade;roughness=0.91;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);

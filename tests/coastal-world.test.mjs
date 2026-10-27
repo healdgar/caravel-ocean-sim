@@ -455,4 +455,82 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   assert.ok(fullPack.vegetation.palms.length / 8 >= 200, `Expected abundant 3D palms across subtropical canopy, got ${fullPack.vegetation.palms.length / 8}`);
 });
 
+test('bay-iterated 1550 port primitives iterate horizontal bays without stretching cross-sections or roof pitch', () => {
+  const newPrimitives = [
+    'single_nave_solar',
+    'l_wing_u_wing_solar',
+    'modular_patio_cloister',
+    'royal_atarazanas_arsenal',
+    'open_lonja_loggia',
+    'walled_mule_corral',
+    'bastion_trace_fortress',
+    'torreon_atalaya_farol',
+    'curtain_wall_and_gate',
+    'stone_arch_bridge',
+    'thatched_bohio_palafito',
+    'astillero_and_moored_hull',
+  ];
+  for (const id of newPrimitives) {
+    assert.ok(PORT_PREFABS[id], `Expected PORT_PREFABS to register ${id}`);
+  }
+
+  // Verify horizontal bay iteration: lengthening a building adds discrete architectural bays (triangles)
+  // while keeping wing roof ridge height constant (never stretching roof pitch vertically)
+  const buildSingleInstance = (prefabId, width, length, height = 8.0) =>
+    buildPortPrefabGeometry({
+      instances: [
+        {
+          prefabId,
+          x: 0,
+          y: 3.0,
+          z: 0,
+          yaw: 0,
+          width,
+          length,
+          height,
+          foundationDepth: 4.0,
+          materialKind: PORT_PREFABS[prefabId].materialKind,
+          roofPitch: PORT_PREFABS[prefabId].roofPitch,
+          waterfront: PORT_PREFABS[prefabId].waterfront,
+          fromOrthophotoFootprint: true,
+        },
+      ],
+    });
+
+  const shortHall = buildSingleInstance('single_nave_solar', 9.5, 15.0, 7.8);
+  const longHall = buildSingleInstance('single_nave_solar', 9.5, 34.0, 7.8);
+  assert.ok(longHall.triangleCount > shortHall.triangleCount + 180, 'Lengthening single_nave_solar iterates additional window & rafter bays');
+  assert.ok(Math.abs(longHall.bounds.max[1] - shortHall.bounds.max[1]) < 1e-4, 'Roof ridge elevation remains constant when iterating horizontal bays');
+
+  const smallCloister = buildSingleInstance('modular_patio_cloister', 22.0, 24.0, 8.2);
+  const largeCloister = buildSingleInstance('modular_patio_cloister', 36.0, 42.0, 8.2);
+  assert.ok(largeCloister.triangleCount > smallCloister.triangleCount + 400, 'Expanding modular_patio_cloister iterates additional courtyard arch bays');
+  assert.ok(Math.abs(largeCloister.bounds.max[1] - smallCloister.bounds.max[1]) < 1e-4, 'Cloister wing depth (5.8m) and roof ridge height stay constant across footprint sizes');
+
+  const narrowArsenal = buildSingleInstance('royal_atarazanas_arsenal', 16.0, 28.0, 8.4);
+  const wideArsenal = buildSingleInstance('royal_atarazanas_arsenal', 38.0, 38.0, 8.4);
+  assert.ok(wideArsenal.triangleCount > narrowArsenal.triangleCount + 250, 'Widening royal_atarazanas_arsenal iterates additional parallel gabled halls');
+
+  const shortBridge = buildSingleInstance('stone_arch_bridge', 7.2, 18.0, 4.6);
+  const longBridge = buildSingleInstance('stone_arch_bridge', 7.2, 38.0, 4.6);
+  assert.ok(longBridge.triangleCount > shortBridge.triangleCount + 180, 'Lengthening stone_arch_bridge iterates additional cutwater piers and stone arches');
+
+  // Verify all 12 new primitives emit finite unit-normal geometry and include new material kinds 15 (palm thatch) and 16 (cobbled/terreplein)
+  const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS.cartagena, size: 65, biomeSize: 64, albedoSize: 64 });
+  const heights = synthesizeCoastalTerrain(region);
+  const port = placeCoastalPort(region, heights);
+  const geom = buildPortPrefabGeometry(port);
+  const emittedKinds = new Set();
+  for (let i = 0; i < geom.vertices.length; i += 8) {
+    assert.ok(geom.vertices.subarray(i, i + 8).every(Number.isFinite));
+    const nLen = Math.hypot(geom.vertices[i + 3], geom.vertices[i + 4], geom.vertices[i + 5]);
+    assert.ok(Math.abs(nLen - 1) < 1e-4, 'unit normal on bay-iterated port vertex');
+    emittedKinds.add(Math.round(geom.vertices[i + 6]));
+  }
+  for (const k of [10, 11, 12, 13, 14, 15, 16]) {
+    assert.ok(emittedKinds.has(k), `Expected bay-iterated port geometry to emit material kind ${k}`);
+  }
+});
+
+
 
