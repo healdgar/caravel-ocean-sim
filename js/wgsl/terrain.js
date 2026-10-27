@@ -208,11 +208,23 @@ struct CoastalWaveState {
   swellScale: f32,
   chopScale: f32,
   breakFoam: f32,
-  leeSlope: vec2f,
-  leeHeight: f32,
+  dispOffset: vec3f,
+  extraSlope: vec2f,
+  shoreDir: vec2f,
+  refractWeight: f32,
 };
 fn coastalWaveState(p:vec2f)->CoastalWaveState{
-  let swellProp=select(normalize(F.windP[0].xy+vec2f(1e-5,0.0)),vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
+  let bed=landHeight(p);
+  if(bed<=-58.0){
+    return CoastalWaveState(1.0,1.0,0.0,vec3f(0.0),vec2f(0.0),vec2f(1.0,0.0),0.0);
+  }
+  let windProp=normalize(F.windP[0].xy+vec2f(1e-5,0.0));
+  let swellProp=select(windProp,vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
+  let swellHs=select(1.2,F.cascL[1].z,F.cascL[1].w>1.0);
+  let swellLen=clamp(select(95.0,F.cascL[1].w,F.cascL[1].w>1.0),30.0,300.0);
+  let windSpeed=F.windP[0].z;
+  let windHs=0.14*clamp(windSpeed,0.0,24.0);
+  let hsTotal=clamp(sqrt(swellHs*swellHs+windHs*windHs),0.0,4.5);
   let upSwell=-swellProp;
   let sideSwell=vec2f(-upSwell.y,upSwell.x);
   let dir0=upSwell;
@@ -237,41 +249,92 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     transR*=1.0-bR*0.88;
   }
   let rawTransmit=clamp(0.50*transC+0.25*transL+0.25*transR,0.0,1.0);
-  let bed=landHeight(p);
-  let hE=landHeight(p+vec2f(14.0,0.0));
-  let hW=landHeight(p-vec2f(14.0,0.0));
-  let hN=landHeight(p+vec2f(0.0,14.0));
-  let hS=landHeight(p-vec2f(0.0,14.0));
-  let bedSmooth=0.2*(bed+hE+hW+hN+hS);
-  let gx=(hE-hW)/28.0;
-  let gz=(hN-hS)/28.0;
-  let gLen=length(vec2f(gx,gz));
-  let shoreDir=select(swellProp,vec2f(gx,gz)/max(gLen,1e-4),gLen>0.002);
-  let onshoreAlign=clamp(dot(swellProp,shoreDir)*0.75+0.42,0.0,1.0);
-  let seawardExposure=rawTransmit*onshoreAlign;
-  let shoalBoost=1.0+0.38*seawardExposure*smoothstep(-16.0,-3.2,bedSmooth)*(1.0-smoothstep(-2.4,-0.15,bedSmooth));
-  let surfDissipation=1.0-smoothstep(-4.2,-0.1,bedSmooth);
-  let swellScale=clamp(rawTransmit*shoalBoost*surfDissipation,0.0,1.45);
-  let fetchFactor=smoothstep(25.0,620.0,fetchDist);
-  let chopScale=mix(0.34+0.36*fetchFactor,1.0,rawTransmit)*(1.0-0.62*smoothstep(-1.4,0.25,bedSmooth));
-  var breakFoam=0.0;
-  var extraSlope=vec2f(0.0);
-  var extraHeight=0.0;
-  let relP=p-LAND.domain.xy;
-  if(bedSmooth>-15.0 && bedSmooth<0.85 && seawardExposure>0.08){
-    let propDir=normalize(mix(swellProp,shoreDir,0.65));
-    let surfPhase=dot(relP,swellProp)*0.095-bedSmooth*1.12-F.camPos.w*2.15+gnoise(p*0.024)*1.95;
-    let waveSaw=fract(surfPhase/(2.0*PI));
-    let boreCrest=smoothstep(0.58,0.86,waveSaw)*(1.0-smoothstep(0.86,0.99,waveSaw));
-    let boreTrail=smoothstep(0.22,0.88,waveSaw)*(0.50+0.50*gnoise(p*0.13+vec2f(F.camPos.w*0.11)));
-    let surfBand=smoothstep(-11.0,-2.2,bedSmooth)*(1.0-smoothstep(-0.08,0.52,bedSmooth));
-    let swashBand=smoothstep(-1.3,-0.05,bedSmooth)*(1.0-smoothstep(0.06,0.62,bedSmooth))*(0.55+0.45*sin(dot(relP,swellProp)*0.08-F.camPos.w*1.8+gnoise(p*0.04)*2.2));
-    breakFoam=clamp(seawardExposure*(surfBand*(boreCrest*0.92+boreTrail*0.44)+swashBand*0.58),0.0,1.0);
-    let borePitch=(boreCrest*2.0-0.36)*surfBand*seawardExposure;
-    extraHeight+=boreCrest*0.38*surfBand*seawardExposure;
-    extraSlope+=propDir*(borePitch*0.20);
+  let hE=landHeight(p+vec2f(16.0,0.0));
+  let hW=landHeight(p-vec2f(16.0,0.0));
+  let hN=landHeight(p+vec2f(0.0,16.0));
+  let hS=landHeight(p-vec2f(0.0,16.0));
+  let bedNear=0.2*(bed+hE+hW+hN+hS);
+  var bedSmooth=bedNear;
+  var gx=(hE-hW)/32.0;
+  var gz=(hN-hS)/32.0;
+  if(bedNear>-36.0){
+    let hE2=landHeight(p+vec2f(44.0,0.0));
+    let hW2=landHeight(p-vec2f(44.0,0.0));
+    let hN2=landHeight(p+vec2f(0.0,44.0));
+    let hS2=landHeight(p-vec2f(0.0,44.0));
+    bedSmooth=0.52*bedNear+0.12*(hE2+hW2+hN2+hS2);
+    gx=0.50*gx+0.50*(hE2-hW2)/88.0;
+    gz=0.50*gz+0.50*(hN2-hS2)/88.0;
   }
-  let leeWeight=(1.0-rawTransmit)*(1.0-smoothstep(-0.85,0.25,bed))*mix(0.45,1.0,fetchFactor);
+  let gLen=length(vec2f(gx,gz));
+  // shoreDir points up-slope (cross-shore toward the beach); tangDir points along-shore (parallel to depth contours).
+  let shoreDir=select(swellProp,vec2f(gx,gz)/max(gLen,1e-4),gLen>0.0015);
+  let onshoreAlign=clamp(dot(swellProp,shoreDir)*0.75+0.45,0.0,1.0);
+  let beachFactor=1.0-smoothstep(0.18,0.38,gLen);
+  let seawardExposure=clamp(rawTransmit*(0.25+0.75*onshoreAlign),0.0,1.0);
+  let h=max(0.0,-bedSmooth);
+  let breakDepth=clamp(1.3+1.35*hsTotal*seawardExposure,1.5,5.8);
+  // Ocean-floor drag boosts 3D swell height during shoaling (Green's law) and collapses it only inside the surf zone after breaking.
+  let shoalBoost=1.0+0.46*seawardExposure*smoothstep(18.0,breakDepth,h)*smoothstep(0.5,breakDepth*0.75,h);
+  let surfDiss=mix(0.18,1.0,smoothstep(0.10,min(breakDepth*0.75,2.4),h));
+  let swellScale=clamp(rawTransmit*shoalBoost*surfDiss,0.0,1.48);
+  let fetchFactor=smoothstep(25.0,620.0,fetchDist);
+  let chopScale=mix(0.42+0.36*fetchFactor,1.0,rawTransmit)*(1.0-0.65*smoothstep(-1.2,0.25,bedNear));
+  let refractWeight=(1.0-smoothstep(1.0,26.0,h))*smoothstep(0.0015,0.016,gLen)*beachFactor;
+  var breakFoam=0.0;
+  var dispOffset=vec3f(0.0);
+  var extraSlope=vec2f(0.0);
+  let relP=p-LAND.domain.xy;
+  if(bedSmooth>-20.0 && bedSmooth<0.85 && seawardExposure>0.05 && hsTotal>0.05 && beachFactor>0.02){
+    // Snell's law refraction: along-shore wavenumber k_parallel is conserved while ocean-floor drag
+    // delays phase in the shallows (+shoreDir), bending wave crests parallel to the beach.
+    let k0=clamp(2.0*PI/swellLen,0.055,0.11);
+    let omega=clamp(sqrt(9.81*k0)*1.65,1.35,2.05);
+    let hNorm=clamp(h/16.0,0.0,1.0);
+    let dragLag=4.6*beachFactor*(1.0-sqrt(hNorm+0.015));
+    let peelMod=gnoise(p*0.005)*0.55;
+    let psi=dot(relP,swellProp)*k0+dragLag-F.camPos.w*omega+peelMod;
+    let kShoal=4.6*beachFactor*clamp(gLen,0.022,0.12)/(32.0*sqrt(hNorm+0.015));
+    let kLocal=swellProp*k0+shoreDir*kShoal;
+    let propDir=normalize(kLocal);
+    // Shoaling & surf-zone 3D breaker envelope: rises sharply over the bar and rolls into the swash zone.
+    let shoalIn=smoothstep(18.0,5.0,h);
+    let boreSust=mix(0.24,1.0,smoothstep(0.06,breakDepth,h))*(1.0-smoothstep(-0.04,0.65,bedNear));
+    let groupEnv=0.78+0.22*sin(psi*0.27-F.camPos.w*0.22+gnoise(p*0.0035)*1.4);
+    let waveAmp=clamp(0.54*hsTotal,0.0,1.25)*seawardExposure*beachFactor*shoalIn*boreSust*groupEnv;
+    // Bottom-drag asymmetry: trough slows on the seabed while the crest overtakes it and pitches forward (+propDir).
+    let skewAlpha=mix(0.22,0.78,smoothstep(11.0,1.4,h));
+    let cnoidalGamma=mix(0.10,0.38,smoothstep(11.0,1.4,h));
+    let sinPsi=sin(psi);
+    let cosPsi=cos(psi);
+    let theta=psi-skewAlpha*cosPsi;
+    let dThetaDpsi=1.0+skewAlpha*sinPsi;
+    let sinT=sin(theta);
+    let cosT=cos(theta);
+    let sin2T=2.0*sinT*cosT;
+    let cos2T=cosT*cosT-sinT*sinT;
+    let waveProfile=cosT+cnoidalGamma*(cos2T-0.28);
+    let dWaveDpsi=-(sinT+2.0*cnoidalGamma*sin2T)*dThetaDpsi;
+    let boreHeight=waveAmp*waveProfile;
+    let pitchFactor=smoothstep(10.0,1.2,h)*(1.0-smoothstep(-0.08,0.55,bedNear));
+    let horizSurge=waveAmp*(0.75+0.65*pitchFactor)*(sin(theta+0.35)+0.30*cnoidalGamma*sin(2.0*theta+0.45));
+    dispOffset+=vec3f(propDir.x*horizSurge,boreHeight,propDir.y*horizSurge);
+    extraSlope+=kLocal*(waveAmp*dWaveDpsi*1.35);
+    // Crashing breaker foam on the pitching shoreward face, its immediate turbulent roller, and the swash lip.
+    let frontFace=smoothstep(0.22,0.90,cos(theta-0.46));
+    let breakBand=smoothstep(breakDepth+2.2,breakDepth*0.65,h)*(1.0-smoothstep(-0.04,0.48,bedNear));
+    let crestBreak=frontFace*breakBand;
+    let rollerPhase=smoothstep(0.0,0.86,cos(theta+0.16));
+    let innerSurf=smoothstep(breakDepth*1.1,0.45,h)*(1.0-smoothstep(0.02,0.55,bedNear));
+    let rollerTex=0.60+0.40*gnoise(p*0.14-propDir*F.camPos.w*0.35);
+    let rollerWake=rollerPhase*innerSurf*rollerTex;
+    let swashZone=smoothstep(-0.85,-0.04,bedNear)*(1.0-smoothstep(0.05,0.52,bedNear));
+    let swashPulse=smoothstep(0.12,0.88,cos(theta-0.24));
+    let swashEdge=swashZone*(0.22+0.78*swashPulse);
+    let energyMask=clamp(hsTotal/0.65,0.0,1.0);
+    breakFoam=clamp(energyMask*seawardExposure*beachFactor*groupEnv*(crestBreak*0.95+rollerWake*0.52+swashEdge*0.56),0.0,1.0);
+  }
+  let leeWeight=(1.0-rawTransmit)*(1.0-smoothstep(-0.85,0.25,bed))*mix(0.45,1.0,fetchFactor)*clamp(hsTotal/0.8,0.0,1.0);
   if(leeWeight>0.02){
     let leeDir1=normalize(vec2f(swellProp.x*0.48-swellProp.y*0.877,swellProp.x*0.877+swellProp.y*0.48));
     let leeDir2=normalize(vec2f(swellProp.x*0.76+swellProp.y*0.65,-swellProp.x*0.65+swellProp.y*0.76));
@@ -280,42 +343,48 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     let ph1=dot(relP,leeDir1)*k1-F.camPos.w*1.65+gnoise(p*0.018)*1.8;
     let ph2=dot(relP,leeDir2)*k2-F.camPos.w*2.15+gnoise(p*0.031+vec2f(7.3,2.9))*1.6;
     let env=0.62+0.38*gnoise(p*0.012-leeDir1*F.camPos.w*0.08);
-    let amp1=0.105*leeWeight*env;
-    let amp2=0.062*leeWeight*env;
-    extraHeight+=amp1*sin(ph1)+amp2*sin(ph2);
+    let amp1=0.095*leeWeight*env;
+    let amp2=0.058*leeWeight*env;
+    dispOffset.y+=amp1*sin(ph1)+amp2*sin(ph2);
     extraSlope+=leeDir1*(amp1*k1*cos(ph1))+leeDir2*(amp2*k2*cos(ph2));
   }
-  return CoastalWaveState(swellScale,chopScale,breakFoam,extraSlope,extraHeight);
+  return CoastalWaveState(swellScale,chopScale,breakFoam,dispOffset,extraSlope,shoreDir,refractWeight);
 }
-fn coastalRefractSlope(p:vec2f,sl:vec2f)->vec2f{
-  let bed=landHeight(p);
-  if(bed<=-28.0){return sl;}
-  let eps=8.0;
-  let gx=(landHeight(p+vec2f(eps,0.0))-landHeight(p-vec2f(eps,0.0)))/(2.0*eps);
-  let gz=(landHeight(p+vec2f(0.0,eps))-landHeight(p-vec2f(0.0,eps)))/(2.0*eps);
-  let gLen=length(vec2f(gx,gz));
-  let shelterDamp=mix(1.0,0.48,smoothstep(-5.5,0.2,bed));
-  if(gLen<0.002){return sl*shelterDamp;}
-  let shoreDir=vec2f(gx,gz)/gLen;
-  let tangDir=vec2f(-shoreDir.y,shoreDir.x);
-  let refractW=smoothstep(-26.0,-1.5,bed)*clamp(gLen*9.0,0.0,0.78);
-  let slAlongShore=dot(sl,shoreDir);
-  let slCrossShore=dot(sl,tangDir);
-  var refracted=shoreDir*slAlongShore*(1.0+refractW*0.35)+tangDir*slCrossShore*(1.0-refractW*0.68);
-  let shoalBand=smoothstep(-14.0,-1.8,bed)*(1.0-smoothstep(-0.8,0.6,bed));
-  let shoalWave=cos(bed*1.15+F.camPos.w*1.9)*0.045*shoalBand;
-  refracted+=shoreDir*shoalWave;
+fn coastalRefractDisp(d:vec3f,cws:CoastalWaveState)->vec3f{
+  let rw=cws.refractWeight;
+  if(rw<=0.001){return d;}
+  let tangDir=vec2f(-cws.shoreDir.y,cws.shoreDir.x);
+  let dCrossShore=dot(d.xz,cws.shoreDir);
+  let dAlongShore=dot(d.xz,tangDir);
+  let xzRef=cws.shoreDir*dCrossShore*(1.0+rw*0.28)+tangDir*dAlongShore*(1.0-rw*0.68);
+  return vec3f(xzRef.x,d.y,xzRef.y);
+}
+fn coastalRefractSlope(p:vec2f,sl:vec2f,cws:CoastalWaveState)->vec2f{
+  let rw=cws.refractWeight;
+  let shelterDamp=mix(0.52,1.0,clamp(cws.swellScale+0.25,0.0,1.0));
+  if(rw<=0.001){return sl*shelterDamp;}
+  let tangDir=vec2f(-cws.shoreDir.y,cws.shoreDir.x);
+  let slCrossShore=dot(sl,cws.shoreDir);
+  let slAlongShore=dot(sl,tangDir);
+  let refracted=cws.shoreDir*slCrossShore*(1.0+rw*0.35)+tangDir*slAlongShore*(1.0-rw*0.72);
   return refracted*shelterDamp;
 }
+fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
+  let bed=landHeight(p);
+  if(bed<=-18.0 || bed>=0.75){return cws.breakFoam;}
+  let h=max(0.08,-bed);
+  let frontSlope=max(0.0,-dot(sl,cws.shoreDir));
+  let dragRatio=max(0.0,height+0.12)/max(h,0.45);
+  let depthBreak=smoothstep(0.18,0.56,dragRatio)*smoothstep(0.09,0.32,frontSlope)*smoothstep(-12.5,-0.5,bed)*(1.0-smoothstep(-0.06,0.45,bed));
+  return clamp(max(cws.breakFoam,depthBreak*clamp(cws.swellScale*1.15,0.0,1.0)),0.0,1.0);
+}
 fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
-  let bed=landHeight(p);let shallows=smoothstep(-6.0,0.5,bed);
+  let bed=landHeight(p);let shallows=smoothstep(-7.5,0.4,bed);
   let sunlight=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI;
-  var col=mix(color,vec3f(0.045,0.17,0.15)*(sunlight+skyAtmo(vec3f(0,1,0))),shallows*0.28);
+  var col=mix(color,vec3f(0.042,0.175,0.155)*(sunlight+skyAtmo(vec3f(0,1,0))),shallows*0.30);
   let depth=height-bed;
-  let surge=smoothstep(-0.05,0.45,height);
-  let broken=0.55+0.45*gnoise(p*0.17+vec2f(F.camPos.w*0.06));
-  let foam=(1.0-smoothstep(0.35,3.0,abs(depth)))*surge*broken;
-  return mix(col,foamLight,foam*0.7);
+  let swashRim=(1.0-smoothstep(0.02,0.32,abs(depth)))*smoothstep(-0.20,0.35,height)*(0.45+0.55*gnoise(p*0.22));
+  return mix(col,foamLight,swashRim*0.42);
 }
 `;
 

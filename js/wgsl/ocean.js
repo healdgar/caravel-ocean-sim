@@ -107,14 +107,19 @@ struct VSOut {
   let mk = clamp((d - 0.8 * R) / (0.2 * R), 0.0, 1.0);
   xz -= fract(g * 0.5) * 2.0 * spacing * mk;
   let eff = spacing * (1.0 + mk);
+  ${coast ? 'let cws = coastalWaveState(xz);' : ''}
   var disp = vec3f(0.0);
   for (var c = 0u; c < ${CASCADES}u; c++) {
     let texel = F.cascL[c >> 2u][c & 3u] / TEX_N;
     let lod = log2(max(eff / texel, 1.0)) + 0.5;
     if (lod < 8.0) {
-      disp += textureSampleLevel(dispTex, sampR, xz * F.cascInvL[c >> 2u][c & 3u], c, lod).xyz;
+      let cw = ${coast ? 'select(cws.chopScale, cws.swellScale, c <= 1u)' : '1.0'};
+      var d = textureSampleLevel(dispTex, sampR, xz * F.cascInvL[c >> 2u][c & 3u], c, lod).xyz * cw;
+      ${coast ? 'if (c <= 1u) { d = coastalRefractDisp(d, cws); }' : ''}
+      disp += d;
     }
   }
+  ${coast ? 'disp += cws.dispOffset;' : ''}
   var o: VSOut;
   let displacedXZ = xz + disp.xz;
   disp.y += wakeAt(displacedXZ).x;
@@ -191,7 +196,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let dx = I.domain.w;
   let wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
   var sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
-  ${coast?'sl = coastalRefractSlope(xz, sl) + cws.leeSlope;':''}
+  ${coast?'sl = coastalRefractSlope(xz, sl, cws) + cws.extraSlope;':''}
   let nrm = normalize(vec3f(-sl.x, 1.0, -sl.y));
   // specular anti-aliasing: slope variation across the pixel widens the lobe
   let dsx = dpdx(sl);
@@ -277,7 +282,7 @@ ${OCEAN_HULL_MASK}
   // upwelling light is diffuse: light it with smooth terms only (no per-pixel normal noise)
   var body = F.waterCol.rgb * (skyHemi * 1.6 + waterSun * max(Ld.y, 0.0) * 0.8+moonE*max(lunarDirection().y,0.0)*.8);
   // light transmitted through the thin upper part of backlit crests
-  let effHeight = ${coast ? 'in.height * clamp(cws.swellScale, 0.12, 1.35) + cws.leeHeight' : 'in.height'};
+  let effHeight = in.height;
   let crest = clamp((effHeight - 0.05) / 0.9, 0.0, 1.0);
   let toSun = max(dot(Ld, -V), 0.0);
   let thin = pow(clamp(0.5 - 0.5 * dot(Ld, nrm), 0.0, 1.0), 3.0);
@@ -291,16 +296,16 @@ ${OCEAN_HULL_MASK}
   let cheb = max(dc.x, dc.y);
   let w0 = 1.0 - smoothstep(0.30 * F.lodP.z, 0.45 * F.lodP.z, cheb);
   let w1 = 1.0 - smoothstep(0.30 * F.lodP.w, 0.45 * F.lodP.w, cheb);
-  let swellFoamDamp = ${coast ? 'mix(0.05, 1.0, clamp(cws.swellScale, 0.0, 1.0))' : '1.0'};
+  let swellFoamDamp = ${coast ? 'mix(0.02, 1.0, clamp(cws.swellScale, 0.0, 1.0))' : '1.0'};
   let fwl = mix(fw1, fw0, w0) * w1 * swellFoamDamp;
-  let fresh = breakingCompression(jxx,jzz,jxz,F.foamP.x);
+  let fresh = breakingCompression(jxx,jzz,jxz,F.foamP.x) * swellFoamDamp;
   // The clipmaps age white water; they must not suppress a newly breaking crest
   // inside their footprint while their temporal accumulator is still catching up.
   var cover = clamp(max(max(fwl.r*0.75,fwl.g*0.95),fresh*0.8)*F.foamP.z,0.0,0.95);
   // aged foam breaks into wind-aligned streaks; fresh crest foam stays dense
   let freshK = clamp(fwl.g * 2.0 + fresh, 0.0, 1.0);
   cover *= mix(mix(0.35,1.0,smoothstep(0.25,0.75,streak)), 1.0, freshK);
-  ${coast ? 'cover = max(cover, cws.breakFoam * 0.92);' : ''}
+  ${coast ? 'let shoreBreak = coastalBreakerFoam(xz, effHeight, sl, cws); cover = max(cover, shoreBreak * 0.92);' : ''}
   // soft threshold: thin foam is a translucent film, dense foam is opaque white
   // dense foam has crisp edges, thin decaying foam a soft translucent margin
   let soft = 0.04 + 0.14 * (1.0 - clamp(cover, 0.0, 1.0));
@@ -310,7 +315,7 @@ ${OCEAN_HULL_MASK}
   foamMask = max(foamMask, smoothstep(0.55,0.95,fwl.g)*smoothstep(0.35,0.75,pat)*0.85*F.foamP.z);
   foamMask = max(foamMask, fresh*smoothstep(0.28,0.68,pat)*0.8*F.foamP.z);
   foamMask = max(foamMask,cover*0.22*smoothstep(0.3,0.75,pat));
-  ${coast ? 'foamMask = max(foamMask, cws.breakFoam * (0.58 + 0.42 * smoothstep(0.22, 0.78, pat)));' : ''}
+  ${coast ? 'foamMask = max(foamMask, shoreBreak * (0.58 + 0.42 * smoothstep(0.22, 0.78, pat)));' : ''}
   // submerged bubbles brighten and tint the water just beneath foam
   body += F.sssCol.rgb * (waterSun * 0.05 + ambient * 0.35) * clamp(cover, 0.0, 1.0);
   body += vec3f(0.10, 0.32, 0.30) * skyUp * fwl.g * 0.35;

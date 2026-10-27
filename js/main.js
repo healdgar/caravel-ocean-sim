@@ -503,6 +503,7 @@ async function main() {
     computePipe(SCENE_HEIGHT_PROBE,'height probe'),
   ]);
   const coastalGroup=terrain?.waterGroup(oceanPipe);
+  const coastalDepthGroup=OCEAN_DEPTH?terrain?.waterGroup(oceanDepthPipe):null;
   const marineLife=createDeferredMarineLife({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   dolphins.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
   marineLife.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
@@ -1060,6 +1061,7 @@ async function main() {
     writeAstronomyFrame(f,astronomy);
     f[36] = W; f[37] = H; f[38] = 1 / W; f[39] = 1 / H;
     for (let c = 0; c < C; c++) { f[40 + c] = CASC_L[c]; f[48 + c] = 1 / CASC_L[c]; }
+    f[46] = P.swellHs; f[47] = P.swellLength;
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed; f[59] = P.swellDir * D2R + 2 * Math.PI;
     f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
@@ -1287,6 +1289,7 @@ async function main() {
   };
   cameraDock.append(captainButton);
   panel.before(sharePanel);
+  const seaSliders = new Map();
   let initial1550AutoRepositioned=false;
   terrain?.discovery?.subscribe?.(disc=>{
     if(!initial1550AutoRepositioned&&disc.applied&&disc.isCurated1550&&LAND_STAGE&&!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')){
@@ -1304,7 +1307,13 @@ async function main() {
           const start=terrain.safeStart(esc.boat,esc.boat);esc.boat.x=start.x;esc.boat.z=start.z;
         }
       }
-      if(typeof envFull!=='undefined')envFull=true;
+      if(terrain.region&&terrain.region.id!=='saba'&&(!qs.has('swellDir')||Number(qs.get('swellDir'))===22)&&(!qs.has('windDir')||Number(qs.get('windDir'))===118)){
+        const naturalSea=coastalSeaForRegion(terrain.region,LAND_STAGE);
+        P.swellDir=naturalSea.swellDir;P.windDir=naturalSea.windDir;
+        for(const k of ['swellDir','windDir']){const s=seaSliders.get(k);if(s){s.input.value=String(P[k]);s.output.textContent=String(P[k]);}}
+        needSpectrum=true;
+      }
+      envFull=true;
     }
   });
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
@@ -1626,7 +1635,6 @@ async function main() {
   seaBody.append(polygonLabel,polygonStatus);
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
-  const seaSliders = new Map();
   const stormButton=document.createElement('button');stormButton.textContent='Thunderstorm';
   const dryButton=document.createElement('button');dryButton.textContent='Stop precipitation & lightning';
   const applyWeather=settings=>{Object.assign(P,settings);typeSelect.value=String(P.precipitation);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}envFull=true;};
@@ -2023,6 +2031,10 @@ async function main() {
       if (OCEAN_DEPTH) {
         rp.setPipeline(oceanDepthPipe);
         rp.setBindGroup(0, bgOceanDepth[wakeIndex()]);
+        if (coastalDepthGroup) {
+          rp.setBindGroup(1, opticsEmptyGroup);
+          rp.setBindGroup(2, coastalDepthGroup);
+        }
         rp.drawIndexed(GRID * GRID * 6, nodeCount);
       }
       rp.setPipeline(oceanPipe);

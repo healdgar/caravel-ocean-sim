@@ -1123,10 +1123,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
-    if(upgradedPack.region?.span&&upgradedPack.region.span!==activeRegion.span){
-      activeRegion=Object.freeze({...activeRegion,span:upgradedPack.region.span});
-      proceduralPack.region=activeRegion;
-      device.queue.writeBuffer(uniform,0,new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,0.22]));
+    if(upgradedPack.region){
+      const nextSpan=upgradedPack.region.span||activeRegion.span;
+      const nextBearing=Number.isFinite(upgradedPack.region.shoreBearing)?upgradedPack.region.shoreBearing:activeRegion.shoreBearing;
+      if(nextSpan!==activeRegion.span||nextBearing!==activeRegion.shoreBearing){
+        activeRegion=Object.freeze({...activeRegion,span:nextSpan,shoreBearing:nextBearing});
+        proceduralPack.region=activeRegion;
+        device.queue.writeBuffer(uniform,0,new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,0.22]));
+      }
     }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
     if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
