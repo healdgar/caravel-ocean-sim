@@ -614,6 +614,98 @@ test('coastline smoothing removes beach potholes, aligns regional swells, and st
       `Expected unconnected outer section boundary to round below sea level (<= -14m), got ${eastSection.heights[j * n + (n - 1)]}`
     );
   }
+
+  // Verify multi-quad contiguity across cardinal + diagonal corner sections ((1,0), (0,1), (1,1) for Havana SE inland) with zero water trenches
+  assert.ok(
+    dirs.some(d => d.dx === 1 && d.dz === 1),
+    'Expected detectCoastalContinuationDirs to include diagonal corner (1, 1) when East (1, 0) and South (0, 1) borders carry land'
+  );
+  const plannedSet = new Set(dirs.map(d => `${d.dx},${d.dz}`));
+  const loadedMap = new Map([['0,0', basePack]]);
+  const getMultiSectionAt = (sx, sz, includePlanned = false) => {
+    const rec = loadedMap.get(`${sx},${sz}`);
+    if (rec) return rec;
+    if (includePlanned && plannedSet.has(`${sx},${sz}`)) return { planned: true, secX: sx, secZ: sz };
+    return null;
+  };
+  const sec10 = await generateCoastalNeighborSection(basePack, 1, 0, getMultiSectionAt, {
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 800,
+    useRealDEM: false,
+  });
+  loadedMap.set('1,0', sec10);
+  const sec01 = await generateCoastalNeighborSection(basePack, 0, 1, getMultiSectionAt, {
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 800,
+    useRealDEM: false,
+  });
+  loadedMap.set('0,1', sec01);
+  const sec11 = await generateCoastalNeighborSection(basePack, 1, 1, getMultiSectionAt, {
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 800,
+    useRealDEM: false,
+  });
+  loadedMap.set('1,1', sec11);
+
+  // Check seam between (0, 1) East edge and (1, 1) West edge: must match within 0.05m and preserve inland elevation (> 2m) without any water trench
+  for (let j = 6; j < n - 6; j++) {
+    const hSouthEastEdge = sec01.heights[j * n + (n - 1)];
+    const hCornerWestEdge = sec11.heights[j * n + 0];
+    assert.ok(
+      Math.abs(hSouthEastEdge - hCornerWestEdge) < 0.05,
+      `Expected seamless stitch between (0,1) East and (1,1) West at row ${j}: ${hSouthEastEdge} vs ${hCornerWestEdge}`
+    );
+    assert.ok(
+      hCornerWestEdge > 2.0,
+      `Expected inland seam between (0,1) and (1,1) to stay above water (>2m, no water trench), got ${hCornerWestEdge} at row ${j}`
+    );
+  }
+
+  // Verify 3D closed-canopy forest retargeting populates trees across extraSections as well as the center section
+  const { retargetForestPackToProcedural } = await import('../js/terrain.js');
+  const stubManifest = {
+    bounds: [
+      [-basePack.region.span * 0.5, 0, -basePack.region.span * 0.5],
+      [basePack.region.span * 1.5, 180, basePack.region.span * 1.5],
+    ],
+    prototypes: [
+      { id: 0, crownRadius: 8, basalRadius: 1.1 },
+      { id: 1, crownRadius: 9, basalRadius: 1.3 },
+    ],
+  };
+  const stubPack = {
+    manifest: stubManifest,
+    roots: new Float32Array(256 * 12),
+    rootCount: 256,
+    maxRootCapacity: 256,
+  };
+  const multiForest = retargetForestPackToProcedural(
+    stubPack,
+    basePack,
+    () => 12.0,
+    { isMobile: false, extraSections: [sec10, sec01, sec11], maxRootCapacity: 64000 }
+  );
+  let centerTrees = 0;
+  let neighborTrees = 0;
+  const halfSpan = basePack.region.span * 0.5;
+  const totalRoots = multiForest.roots.length / 12;
+  for (let i = 0; i < totalRoots; i++) {
+    const x = multiForest.roots[i * 12 + 0];
+    const z = multiForest.roots[i * 12 + 2];
+    if (Math.abs(x - basePack.region.x) <= halfSpan && Math.abs(z - basePack.region.z) <= halfSpan) {
+      centerTrees++;
+    } else {
+      neighborTrees++;
+    }
+  }
+  assert.ok(centerTrees > 500, `Expected center section to have >500 3D forest roots, got ${centerTrees}`);
+  assert.ok(neighborTrees > 1000, `Expected neighbor sections to have >1000 3D forest roots, got ${neighborTrees}`);
 });
 
 

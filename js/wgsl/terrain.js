@@ -324,14 +324,18 @@ struct LandVertex {
 // one shared cutout fragment would still make solid ground a feedback shader.
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
-  let sunlight=textureSampleLevel(landLight,sampC,uv,0.0).r;
+  let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.06,edgeDist);
+  let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rg;
+  let cloudSunVis=select(0.0,volumeSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
+  let sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
   let direct=sunIlluminance()*sunlight;
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7.0).rgb;
   var col=albedo*(1.0-wet*0.36)*(direct*diffuse/PI+ambient*ambientVisibility);
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
   let specular=(0.004*(1.0-roughness)+wet*0.06)*pow(max(dot(n,h),0.0),mix(12.0,64.0,1.0-roughness));
   col+=direct*specular;
-  col+=lunarSurface(n,v,albedo*(1.0-wet*.36),mix(roughness,.25,wet),vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
+  col+=lunarSurface(n,v,albedo*(1.0-wet*.36),mix(roughness,.25,wet),vec3f(.035),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
   col+=lightningSurface(n,v,albedo,roughness);
   col=surfaceAir(col,world);
   // Clip cloud integration at the land surface: clouds behind mountains stay

@@ -13,8 +13,13 @@ import {
   runLandfallDiscoveryPipeline,
   build1550HistoricalTerritoryPack,
   detectCoastalContinuationDirs,
+  prepareSectionConnectedBorders,
   stitchCoastalSectionBorders,
   generateCoastalNeighborSection,
+  smoothCoastlineAndForeshoreBeaches,
+  synthesizeCoastalBeaches,
+  synthesizeCoastalBiome,
+  synthesizeCoastalAlbedo,
   buildCoastalMesh,
 } from './coastal-world.js';
 
@@ -25,61 +30,75 @@ function hash32Forest(value) {
   return (v ^ (v >>> 16)) >>> 0;
 }
 
-export function retargetForestPackToProcedural(forestPack, proceduralPack, groundSample, { isMobile = false } = {}) {
+export function retargetForestPackToProcedural(
+  forestPack,
+  proceduralPack,
+  groundSample,
+  { isMobile = false, extraSections = [], maxRootCapacity = null } = {}
+) {
   const protoCount = forestPack.manifest.prototypes.length;
   const buckets = Array.from({ length: protoCount }, () => []);
-  const region = proceduralPack.region;
-  const span = region.span ?? 8192;
-  const x0 = region.x - span * 0.5;
-  const z0 = region.z - span * 0.5;
-  const biome = proceduralPack.biome;
-  const maskSize = region.biomeSize ?? 256;
-  const beaches = proceduralPack.beaches;
-  const port = proceduralPack.port;
-  const seed = (region.vegetationSeed ?? 47231) >>> 0;
-  const maxRoots = isMobile ? 16000 : 58000;
+  const baseMaxRoots = isMobile ? 16000 : 58000;
+  const effectiveMaxCapacity =
+    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 36000 : 128000) : baseMaxRoots);
 
-  // Grid-free 2D Poisson-disc + closed-canopy grove expansion guided by the co-registered
-  // satellite/1550-map vegetation mask (`biome`) and foreshore beach masks.
-  // Eliminates all 1D/2D grid-walk row/lattice artifacts while interlocking neighboring crowns
-  // into a continuous closed-canopy forest across the entire territory.
-  if (biome instanceof Uint8Array && biome.length === maskSize * maskSize) {
+  const seedSectionCanopy = (secPack, secMaxRoots) => {
+    const region = secPack.region;
+    const span = region.span ?? 8192;
+    const x0 = region.x - span * 0.5;
+    const z0 = region.z - span * 0.5;
+    const biome = secPack.biome;
+    const maskSize = region.biomeSize ?? 256;
+    const beaches = secPack.beaches;
+    const port = secPack.port;
+    const seed = (region.vegetationSeed ?? 47231) >>> 0;
+    if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return;
+
     const crownSpacingFactor = isMobile ? 0.52 : 0.44;
     const cellSize = 24;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
-    const next = new Int32Array(maxRoots);
-    const rx = new Float32Array(maxRoots);
-    const rz = new Float32Array(maxRoots);
-    const rr = new Float32Array(maxRoots);
+    const next = new Int32Array(secMaxRoots);
+    const rx = new Float32Array(secMaxRoots);
+    const rz = new Float32Array(secMaxRoots);
+    const rr = new Float32Array(secMaxRoots);
     let totalPlaced = 0;
 
     const isTrop = region.climate === 'tropical' || region.climate === 'subtropical';
-    const portCx = port ? port.center.x : region.x;
-    const portCz = port ? port.center.z : region.z;
-    // Broad-crowned spreading prototypes (oak=0, elm=3, chestnut=4, maple=1) form closed canopy
+    const portCx = port ? port.center.x : proceduralPack.region.x;
+    const portCz = port ? port.center.z : proceduralPack.region.z;
     const broadTable = [0, 3, 4, 0, 3, 4, 0, 1];
+    const borderMargin = 6;
 
     const sampleBiomeByte = (wx, wz) => {
       const u = (wx - x0) / span;
       const v = (wz - z0) / span;
-      if (u <= 0.005 || u >= 0.995 || v <= 0.005 || v >= 0.995) return 0;
-      const bi = Math.min(maskSize - 1, Math.floor(u * maskSize));
-      const bj = Math.min(maskSize - 1, Math.floor(v * maskSize));
+      if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return 0;
+      const uc = Math.max(0.001, Math.min(0.999, u));
+      const vc = Math.max(0.001, Math.min(0.999, v));
+      const bi = Math.min(maskSize - 1, Math.floor(uc * maskSize));
+      const bj = Math.min(maskSize - 1, Math.floor(vc * maskSize));
       const idx = bj * maskSize + bi;
       if (beaches?.drySandMask?.[idx] > 110 || beaches?.swashMask?.[idx] > 64) return 0;
       return biome[idx];
     };
 
     const tryPlaceTree = (x, z, key) => {
-      if (totalPlaced >= maxRoots) return -1;
-      if (x <= x0 + 32 || x >= x0 + span - 32 || z <= z0 + 32 || z >= z0 + span - 32) return -1;
+      if (totalPlaced >= secMaxRoots) return -1;
+      if (
+        x <= x0 + borderMargin ||
+        x >= x0 + span - borderMargin ||
+        z <= z0 + borderMargin ||
+        z >= z0 + span - borderMargin
+      ) {
+        return -1;
+      }
 
       const probByte = sampleBiomeByte(x, z);
       if (probByte < 68) return -1;
       if (probByte < 145 && (hash32Forest(key + 5) & 255) > probByte + 64) return -1;
 
-      if (port) {
+      if (port && port.clearRadius > 0) {
         const clearEnv = !portClearanceEnvelope(port, x, z, port.hasOrthophotoFootprints ? 8 : 10);
         const clearRad =
           !port.hasOrthophotoFootprints && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.72;
@@ -99,20 +118,14 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
           : hash32Forest(key + 1) % protoCount;
       const proto = forestPack.manifest.prototypes[protoId];
 
-      // Smoothly transition crown scale from architectural/palm scale near the port (1.12..1.56)
-      // to broad interlocking canopy crowns across the inland territory (1.58..2.28)
       const distPort = Math.hypot(x - portCx, z - portCz);
       const inlandBlend = Math.max(0, Math.min(1, (distPort - 220) / 680));
       const scaleMin = 1.12 + inlandBlend * 0.46;
       const scaleSpan = 0.44 + inlandBlend * 0.26;
       const scale = scaleMin + (hash32Forest(key + 2) / 4294967296) * scaleSpan;
       const crownR = (proto.crownRadius ?? 8.5) * scale;
-      const rimCheckR = Math.min(5.5, crownR * 0.25);
+      const rimCheckR = Math.min(5.0, crownR * 0.22);
       if (
-        sampleBiomeByte(x + rimCheckR, z) < 24 ||
-        sampleBiomeByte(x - rimCheckR, z) < 24 ||
-        sampleBiomeByte(x, z + rimCheckR) < 24 ||
-        sampleBiomeByte(x, z - rimCheckR) < 24 ||
         groundSample(x + rimCheckR, z) < 0.45 ||
         groundSample(x - rimCheckR, z) < 0.45 ||
         groundSample(x, z + rimCheckR) < 0.45 ||
@@ -164,10 +177,9 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       return placedIdx;
     };
 
-    // Grid-free 2D independent hash sampling + golden-angle interlocking canopy cluster growth
-    const maxCandidates = maxRoots * 5;
+    const maxCandidates = secMaxRoots * 5;
     const baseSeed = (seed ^ 0x9e3779b9) >>> 0;
-    for (let step = 0; step < maxCandidates && totalPlaced < maxRoots; step++) {
+    for (let step = 0; step < maxCandidates && totalPlaced < secMaxRoots; step++) {
       const h1 = hash32Forest(baseSeed + Math.imul(step, 0x9e3779b1));
       const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0xc2b2ae35);
       const u = h1 / 4294967296;
@@ -177,10 +189,9 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
       const rootIdx = tryPlaceTree(sx, sz, h2);
       if (rootIdx < 0) continue;
 
-      // Expand into a tightly interlocking closed-canopy grove around the accepted tree
       const baseR = rr[rootIdx];
       const baseAngle = (hash32Forest(h2 + 17) / 4294967296) * Math.PI * 2;
-      for (let c = 0; c < 8 && totalPlaced < maxRoots; c++) {
+      for (let c = 0; c < 8 && totalPlaced < secMaxRoots; c++) {
         const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
         const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.45;
         const ringMul = c < 4 ? 0.96 : 1.68;
@@ -189,6 +200,17 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
         const nz = sz + Math.sin(angle) * dist;
         tryPlaceTree(nx, nz, cKey);
       }
+    }
+  };
+
+  seedSectionCanopy(proceduralPack, baseMaxRoots);
+  if (Array.isArray(extraSections) && extraSections.length > 0) {
+    const perSecBudget = isMobile ? 3500 : 12000;
+    for (const sec of extraSections) {
+      const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
+      const remaining = effectiveMaxCapacity - currentTotal;
+      if (remaining < 64) break;
+      seedSectionCanopy(sec, Math.min(perSecBudget, remaining));
     }
   }
 
@@ -236,7 +258,7 @@ export function retargetForestPackToProcedural(forestPack, proceduralPack, groun
   return {
     ...forestPack,
     roots,
-    maxRootCapacity: maxRoots,
+    maxRootCapacity: effectiveMaxCapacity,
     manifest: {
       ...forestPack.manifest,
       rootCount: firstRoot,
@@ -575,7 +597,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       };
     }
   }catch(error){proceduralMiddle=null;forestMiddleFailure=error.message;}
-  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile}):forestPack;
+  const streamMaxRoots=isMobile?36000:128000;
+  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights,region:activeRegion,near:nearTile}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
@@ -605,16 +628,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const cloudLight=clouds.bindVolume(lightPipe,true);
   let tick=0;
 
-  function regenerateAlbedoMips(){
+  function regenerateTextureMips(tex,texSize){
+    const mips=1+Math.log2(texSize);
     const mEnc=device.createCommandEncoder(),mPass=mEnc.beginComputePass();mPass.setPipeline(mipPipe);
-    for(let m=1;m<albedoMips;m++){
+    for(let m=1;m<mips;m++){
       mPass.setBindGroup(0,device.createBindGroup({layout:mipPipe.getBindGroupLayout(0),entries:[
-        {binding:0,resource:albedo.createView({baseMipLevel:m-1,mipLevelCount:1})},
-        {binding:1,resource:albedo.createView({baseMipLevel:m,mipLevelCount:1})},
+        {binding:0,resource:tex.createView({baseMipLevel:m-1,mipLevelCount:1})},
+        {binding:1,resource:tex.createView({baseMipLevel:m,mipLevelCount:1})},
       ]}));
-      mPass.dispatchWorkgroups(Math.ceil((activeRegion.albedoSize>>m)/8),Math.ceil((activeRegion.albedoSize>>m)/8));
+      mPass.dispatchWorkgroups(Math.ceil((texSize>>m)/8),Math.ceil((texSize>>m)/8));
     }
     mPass.end();device.queue.submit([mEnc.finish()]);
+  }
+
+  function regenerateAlbedoMips(){
+    regenerateTextureMips(albedo,activeRegion.albedoSize);
   }
 
   // Section-by-section continuous coastal world streaming
@@ -624,7 +652,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let sectionEpoch=0;
   let lastStreamCheckCam={x:NaN,z:NaN};
 
-  const getSectionAt=(sx,sz)=>{
+  const getSectionAt=(sx,sz,includePlanned=false)=>{
     if(sx===0&&sz===0){
       return {
         secX:0,
@@ -634,8 +662,43 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         rawHeights:proceduralPack?.rawHeights||heights,
       };
     }
-    return loadedSections.get(`${sx},${sz}`)||null;
+    const loaded=loadedSections.get(`${sx},${sz}`);
+    if(loaded)return loaded;
+    if(includePlanned&&queuedSections.has(`${sx},${sz}`)){
+      return {planned:true,secX:sx,secZ:sz};
+    }
+    return null;
   };
+
+  function doesNeighborBorderHaveLand(sx,sz){
+    const checkEdge=(neighbor,edge)=>{
+      if(!neighbor?.heights||!neighbor?.region?.size)return false;
+      const nSize=neighbor.region.size;
+      const nH=neighbor.rawHeights||neighbor.heights;
+      const minCells=Math.max(4,Math.floor(nSize*0.05));
+      let land=0;
+      if(edge==='east'){
+        const i1=Math.max(0,nSize-3);
+        for(let j=0;j<nSize;j++)if(Math.max(nH[j*nSize+(nSize-1)],nH[j*nSize+i1])>0.25)land++;
+      }else if(edge==='west'){
+        const i1=Math.min(nSize-1,2);
+        for(let j=0;j<nSize;j++)if(Math.max(nH[j*nSize],nH[j*nSize+i1])>0.25)land++;
+      }else if(edge==='south'){
+        const j1=Math.max(0,nSize-3);
+        for(let i=0;i<nSize;i++)if(Math.max(nH[(nSize-1)*nSize+i],nH[j1*nSize+i])>0.25)land++;
+      }else if(edge==='north'){
+        const j1=Math.min(nSize-1,2);
+        for(let i=0;i<nSize;i++)if(Math.max(nH[i],nH[j1*nSize+i])>0.25)land++;
+      }
+      return land>=minCells;
+    };
+    return (
+      checkEdge(getSectionAt(sx-1,sz),'east')||
+      checkEdge(getSectionAt(sx+1,sz),'west')||
+      checkEdge(getSectionAt(sx,sz-1),'south')||
+      checkEdge(getSectionAt(sx,sz+1),'north')
+    );
+  }
 
   function destroySectionRecord(rec){
     if(!rec)return;
@@ -661,7 +724,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       indices:buffer(secPack.portGeometry.indices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) palm indices`),
       count:secPack.portGeometry.indices.length,
     }:null;
-    const sUniform=buffer(new Float32Array([sReg.x,sReg.z,sReg.span,1]),GPUBufferUsage.UNIFORM,`coastal section (${secPack.secX},${secPack.secZ}) domain`);
+    const sUniform=buffer(new Float32Array([sReg.x,sReg.z,sReg.span,0]),GPUBufferUsage.UNIFORM,`coastal section (${secPack.secX},${secPack.secZ}) domain`);
     const sAlbedoMips=1+Math.log2(sReg.albedoSize);
     const sAlbedo=device.createTexture({
       label:`coastal section (${secPack.secX},${secPack.secZ}) albedo`,
@@ -671,15 +734,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT,
     });
     device.queue.writeTexture({texture:sAlbedo},secPack.albedo,{bytesPerRow:sReg.albedoSize*4},[sReg.albedoSize,sReg.albedoSize]);
-    const sEnc=device.createCommandEncoder(),sPass=sEnc.beginComputePass();sPass.setPipeline(mipPipe);
-    for(let m=1;m<sAlbedoMips;m++){
-      sPass.setBindGroup(0,device.createBindGroup({layout:mipPipe.getBindGroupLayout(0),entries:[
-        {binding:0,resource:sAlbedo.createView({baseMipLevel:m-1,mipLevelCount:1})},
-        {binding:1,resource:sAlbedo.createView({baseMipLevel:m,mipLevelCount:1})},
-      ]}));
-      sPass.dispatchWorkgroups(Math.ceil((sReg.albedoSize>>m)/8),Math.ceil((sReg.albedoSize>>m)/8));
-    }
-    sPass.end();device.queue.submit([sEnc.finish()]);
+    regenerateTextureMips(sAlbedo,sReg.albedoSize);
     const sBiome=device.createTexture({
       label:`coastal section (${secPack.secX},${secPack.secZ}) biome`,
       size:[sReg.biomeSize,sReg.biomeSize],
@@ -702,7 +757,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       region:sReg,
       heights:secPack.heights,
       rawHeights:secPack.rawHeights,
+      biome:secPack.biome,
       beaches:secPack.beaches,
+      port:secPack.port,
       vegetation:secPack.vegetation,
       vertices:sVerts,
       indices:sIdx,
@@ -720,13 +777,41 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function restitchNeighborSection(adjRec){
     if(!adjRec?.rawHeights)return;
+    const sReg=adjRec.region;
+    const connectedEdges={
+      west:Boolean(getSectionAt(adjRec.secX-1,adjRec.secZ,true)),
+      east:Boolean(getSectionAt(adjRec.secX+1,adjRec.secZ,true)),
+      north:Boolean(getSectionAt(adjRec.secX,adjRec.secZ-1,true)),
+      south:Boolean(getSectionAt(adjRec.secX,adjRec.secZ+1,true)),
+    };
     const stitched=new Float32Array(adjRec.rawHeights);
-    stitchCoastalSectionBorders(stitched,adjRec.region,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true});
+    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:false});
+    smoothCoastlineAndForeshoreBeaches(stitched,sReg,{
+      port:null,
+      shoreBearing:sReg.shoreBearing??0,
+      connectedEdges,
+      taperOuterBorders:false,
+    });
+    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true});
     adjRec.heights.set(stitched);
-    const rebuiltMesh=buildCoastalMesh(adjRec.region,adjRec.heights,adjRec.beaches);
-    if(rebuiltMesh.vertices.byteLength===adjRec.vertices.size){
-      device.queue.writeBuffer(adjRec.vertices,0,rebuiltMesh.vertices);
-    }
+    adjRec.beaches=synthesizeCoastalBeaches(adjRec.heights,sReg,null);
+    const rebuiltMesh=buildCoastalMesh(sReg,adjRec.heights,adjRec.beaches);
+    const oldVerts=adjRec.vertices;
+    const oldIdx=adjRec.indices;
+    const oldSubIdx=adjRec.submergedIndices&&adjRec.submergedIndices!==adjRec.indices?adjRec.submergedIndices:null;
+    adjRec.vertices=buffer(rebuiltMesh.vertices,GPUBufferUsage.VERTEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched vertices`);
+    adjRec.indices=buffer(rebuiltMesh.indices,GPUBufferUsage.INDEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched indices`);
+    adjRec.indexCount=rebuiltMesh.indices.length;
+    adjRec.submergedIndices=rebuiltMesh.submergedIndices?buffer(rebuiltMesh.submergedIndices,GPUBufferUsage.INDEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched submerged`):adjRec.indices;
+    adjRec.submergedCount=rebuiltMesh.submergedIndices?.length??rebuiltMesh.indices.length;
+    oldVerts?.destroy?.();
+    oldIdx?.destroy?.();
+    oldSubIdx?.destroy?.();
+    adjRec.biome=synthesizeCoastalBiome(adjRec.heights,sReg,null,adjRec.beaches);
+    device.queue.writeTexture({texture:adjRec.biomeTexture},adjRec.biome,{bytesPerRow:sReg.biomeSize},[sReg.biomeSize,sReg.biomeSize]);
+    const rebuiltAlbedo=synthesizeCoastalAlbedo(adjRec.heights,adjRec.biome,sReg,null,adjRec.beaches);
+    device.queue.writeTexture({texture:adjRec.albedo},rebuiltAlbedo,{bytesPerRow:sReg.albedoSize*4},[sReg.albedoSize,sReg.albedoSize]);
+    regenerateTextureMips(adjRec.albedo,sReg.albedoSize);
   }
 
   function rebuildNeighborTreeInstances(){
@@ -748,6 +833,24 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     trees=merged;
     forestPatches=createForestPatches(trees);
+    if(forest&&forestPack){
+      const extraSections=Array.from(loadedSections.values());
+      const centerPack={
+        ...proceduralPack,
+        region:activeRegion,
+        heights,
+        biome,
+        beaches:proceduralPack.beaches,
+        port:proceduralPack.port,
+      };
+      const nextForestPack=retargetForestPackToProcedural(
+        forestPack,
+        centerPack,
+        groundSample,
+        {isMobile,extraSections,maxRootCapacity:streamMaxRoots}
+      );
+      forest.updatePack(nextForestPack,heights,activeRegion);
+    }
     lastCamera=null;
   }
 
@@ -785,7 +888,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           }
           rebuildNeighborTreeInstances();
         }
-        // Stage 2: Upgrade streamed section with real AWS Terrarium SRTM DEM + 1550 satellite reforestation in background
+        // Stage 2: Upgrade streamed section with higher-resolution mesh & DEM ridge relief in background
         if(wantRealDEM&&search.get('realDEM')!=='off'){
           await new Promise(r=>setTimeout(r,30));
           if(myEpoch!==sectionEpoch)break;
@@ -821,7 +924,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     sectionStreamBusy=false;
   }
 
-  function enqueueCoastalSection(secX,secZ,{priority=false,wantRealDEM=true}={}){
+  function enqueueCoastalSection(secX,secZ,{priority=false,wantRealDEM=true,deferProcess=false}={}){
     if(!proceduralPack||(secX===0&&secZ===0))return;
     if(Math.abs(secX)>4||Math.abs(secZ)>4)return;
     const key=`${secX},${secZ}`;
@@ -830,7 +933,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const item={secX,secZ,wantRealDEM};
     if(priority)sectionQueue.unshift(item);
     else sectionQueue.push(item);
-    setTimeout(()=>processSectionStreamQueue(),20);
+    if(!deferProcess)setTimeout(()=>processSectionStreamQueue(),20);
   }
 
   function seedInitialCoastalSections(){
@@ -841,7 +944,32 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       activeRegion.shoreBearing
     );
     for(const {dx,dz} of dirs){
-      enqueueCoastalSection(dx,dz,{wantRealDEM:true});
+      enqueueCoastalSection(dx,dz,{wantRealDEM:true,deferProcess:true});
+    }
+    const connectedCenter={
+      west:queuedSections.has('-1,0')||loadedSections.has('-1,0'),
+      east:queuedSections.has('1,0')||loadedSections.has('1,0'),
+      north:queuedSections.has('0,-1')||loadedSections.has('0,-1'),
+      south:queuedSections.has('0,1')||loadedSections.has('0,1'),
+    };
+    if(connectedCenter.west||connectedCenter.east||connectedCenter.north||connectedCenter.south){
+      const modified=prepareSectionConnectedBorders(heights,activeRegion.size,connectedCenter);
+      if(proceduralPack.rawHeights&&proceduralPack.rawHeights!==heights){
+        prepareSectionConnectedBorders(proceduralPack.rawHeights,activeRegion.size,connectedCenter);
+      }
+      if(modified){
+        device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
+        const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
+        mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches);
+        vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices border-synced');
+        indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices border-synced');
+        submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices border-synced'):indices;
+        submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
+        oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
+      }
+    }
+    if(sectionQueue.length){
+      setTimeout(()=>processSectionStreamQueue(),20);
     }
   }
 
@@ -869,17 +997,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if((sx===0&&sz===0)||Math.abs(sx)>4||Math.abs(sz)>4)continue;
         const key=`${sx},${sz}`;
         if(loadedSections.has(key)||queuedSections.has(key))continue;
-        // Stream section if it borders any loaded section (or (0,0)) and is within 1.45 * span of camera
+        // Stream section only if it borders a loaded section along an edge with land and is within 1.45 * span of camera
         const secCenterX=activeRegion.x+sx*span;
         const secCenterZ=activeRegion.z+sz*span;
         if(Math.hypot(camera.x-secCenterX,camera.z-secCenterZ)>span*1.45)continue;
-        const hasLoadedNeighbor=
-          (Math.abs(sx)+Math.abs(sz)===1)||
-          loadedSections.has(`${sx-1},${sz}`)||
-          loadedSections.has(`${sx+1},${sz}`)||
-          loadedSections.has(`${sx},${sz-1}`)||
-          loadedSections.has(`${sx},${sz+1}`);
-        if(hasLoadedNeighbor){
+        if(doesNeighborBorderHaveLand(sx,sz)){
           enqueueCoastalSection(sx,sz,{priority:dx===0&&dz===0,wantRealDEM:true});
         }
       }
@@ -944,7 +1066,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     tick=0;
 
     if(forest&&forestPack){
-      const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile});
+      const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots});
       forest.updatePack(nextForestPack,heights,activeRegion);
     }
     resetStreamedSections();
