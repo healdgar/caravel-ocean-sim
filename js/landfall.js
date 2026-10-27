@@ -15,6 +15,22 @@ export const LANDFALL_SEA = Object.freeze({
   coast:Object.freeze({swellDir:22,swellHs:1.2,swellLength:95,windSpeed:5.5,windDir:118}),
 });
 
+// Compute natural shoreward swell and coastal breeze directions from a region's shoreward bearing.
+// In the wave spectrum (js/wgsl/sim.js), direction angle theta propagates along (cos(theta), sin(theta))
+// in world (X=East, Z=South), whereas compass bearing B points along (sin(B), -cos(B)) -> theta = B - 90°.
+export function coastalSeaForRegion(regionSpec,stage='coast'){
+  const base=LANDFALL_SEA[stage]||LANDFALL_SEA.coast;
+  if(!regionSpec)return base;
+  const region=typeof regionSpec==='string'||(regionSpec.latitude!==undefined&&regionSpec.shoreBearing===undefined)
+    ?resolveGlobalCoastalRegion(regionSpec)
+    :regionSpec;
+  if(!region||region.id==='saba')return base;
+  const shoreBearing=Number.isFinite(region.shoreBearing)?region.shoreBearing:112;
+  const swellDir=((Math.round(shoreBearing-90)%360)+360)%360;
+  const windDir=(swellDir+36)%360;
+  return Object.freeze({...base,swellDir,windDir});
+}
+
 // Preset yaw is absolute in free view, but boarding uses a relative look angle.
 // Explicit camera links already carry their intended angle and take precedence.
 export function landfallCameraYaw(stage,mode,explicitCamera,currentYaw){
@@ -38,6 +54,8 @@ export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',
   url.searchParams.set('lat',String(region.latitude));
   url.searchParams.set('lon',String(region.longitude));
   url.searchParams.set('boatHeading',String(region.shoreBearing??112));
+  const sea=coastalSeaForRegion(region,stage);
+  for(const [key,value]of Object.entries(sea))url.searchParams.set(key,String(value));
   return url;
 }
 

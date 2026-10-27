@@ -188,7 +188,8 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let wp = in.rel.xz + F.camPos.xz;
   let dx = I.domain.w;
   let wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
-  let sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
+  var sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
+  ${coast?'sl = coastalRefractSlope(xz, sl);':''}
   let nrm = normalize(vec3f(-sl.x, 1.0, -sl.y));
   // specular anti-aliasing: slope variation across the pixel widens the lobe
   let dsx = dpdx(sl);

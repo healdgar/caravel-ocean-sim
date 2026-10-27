@@ -168,22 +168,45 @@ struct Land { domain:vec4f };
 fn landHeight(p:vec2f)->f32 {
   if(landNearContains(p)){return landNearHeight(p);}
   let uv=(p-LAND.domain.xy)/LAND.domain.z+0.5;
-  if(any(uv<vec2f(0))||any(uv>vec2f(1))){return -120.0;}
-  let q=uv*vec2f(textureDimensions(elevation)-1u);let i=vec2i(floor(q));let f=fract(q);
+  let outVec=max(vec2f(0.0),abs(uv-vec2f(0.5))-vec2f(0.5));
+  let outDist=length(outVec);
+  if(outDist>1.25){return -120.0;}
+  let uvClamped=clamp(uv,vec2f(0.0),vec2f(1.0));
+  let q=uvClamped*vec2f(textureDimensions(elevation)-1u);let i=vec2i(floor(q));let f=fract(q);
   let limit=vec2i(textureDimensions(elevation))-1;
-  return mix(mix(textureLoad(elevation,i,0).r,textureLoad(elevation,min(i+vec2i(1,0),limit),0).r,f.x),
+  let hSample=mix(mix(textureLoad(elevation,i,0).r,textureLoad(elevation,min(i+vec2i(1,0),limit),0).r,f.x),
     mix(textureLoad(elevation,min(i+vec2i(0,1),limit),0).r,textureLoad(elevation,min(i+vec2i(1,1),limit),0).r,f.x),f.y);
+  return mix(hSample,-120.0,smoothstep(0.0,1.15,outDist));
 }
 `;
 
-// Visual shore response only. The heightfield's underwater skirt is authored;
-// this does not pretend to be a surveyed shallow-water wave simulation.
+// Visual shore response and nearshore wave refraction/shoaling.
 export const COASTAL_WATER = /* wgsl */ `
 @group(2) @binding(0) var<uniform> LAND:Land;
 @group(2) @binding(1) var elevation:texture_2d<f32>;
 @group(2) @binding(2) var<uniform> nearTerrain:NearLand;
 @group(2) @binding(3) var<storage,read> nearElevation:array<f32>;
 ` + LAND_SAMPLING + /* wgsl */ `
+fn coastalRefractSlope(p:vec2f,sl:vec2f)->vec2f{
+  let bed=landHeight(p);
+  if(bed<=-28.0){return sl;}
+  let eps=8.0;
+  let gx=(landHeight(p+vec2f(eps,0.0))-landHeight(p-vec2f(eps,0.0)))/(2.0*eps);
+  let gz=(landHeight(p+vec2f(0.0,eps))-landHeight(p-vec2f(0.0,eps)))/(2.0*eps);
+  let gLen=length(vec2f(gx,gz));
+  let shelterDamp=mix(1.0,0.48,smoothstep(-5.5,0.2,bed));
+  if(gLen<0.002){return sl*shelterDamp;}
+  let shoreDir=vec2f(gx,gz)/gLen;
+  let tangDir=vec2f(-shoreDir.y,shoreDir.x);
+  let refractW=smoothstep(-26.0,-1.5,bed)*clamp(gLen*9.0,0.0,0.78);
+  let slAlongShore=dot(sl,shoreDir);
+  let slCrossShore=dot(sl,tangDir);
+  var refracted=shoreDir*slAlongShore*(1.0+refractW*0.35)+tangDir*slCrossShore*(1.0-refractW*0.68);
+  let shoalBand=smoothstep(-14.0,-1.8,bed)*(1.0-smoothstep(-0.8,0.6,bed));
+  let shoalWave=cos(bed*2.4+F.camPos.w*1.9)*0.045*shoalBand;
+  refracted+=shoreDir*shoalWave;
+  return refracted*shelterDamp;
+}
 fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
   let bed=landHeight(p);let shallows=smoothstep(-6.0,0.5,bed);
   let sunlight=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI;

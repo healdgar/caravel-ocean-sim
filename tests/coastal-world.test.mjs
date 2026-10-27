@@ -25,6 +25,10 @@ import {
   encode1550TerritoryCachePayload,
   apply1550TerritoryCachePayload,
   runLandfallDiscoveryPipeline,
+  smoothCoastlineAndForeshoreBeaches,
+  detectCoastalContinuationDirs,
+  stitchCoastalSectionBorders,
+  generateCoastalNeighborSection,
 } from '../js/coastal-world.js';
 import { FOREST_SPECIES, FOREST_ROOT_FLOATS } from '../js/forest-scenery.js';
 import {
@@ -32,7 +36,7 @@ import {
   safeLandfallStart,
   constrainIslandMotion,
 } from '../js/terrain-model.js';
-import { coastalRegionStageURL } from '../js/landfall.js';
+import { coastalRegionStageURL, coastalSeaForRegion } from '../js/landfall.js';
 import { vegetationProbability } from '../js/vegetation.js';
 
 test('Spanish Main ~1550 gazetteer resolves all curated ports with deterministic metadata', () => {
@@ -531,6 +535,87 @@ test('bay-iterated 1550 port primitives iterate horizontal bays without stretchi
     assert.ok(emittedKinds.has(k), `Expected bay-iterated port geometry to emit material kind ${k}`);
   }
 });
+
+test('coastline smoothing removes beach potholes, aligns regional swells, and stitches section-by-section maps seamlessly', async () => {
+  const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS.havana, size: 65, biomeSize: 64, albedoSize: 64 });
+  const n = region.size;
+  const noisyHeights = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      // Diagonal shoreline with a hard -2.0m cliff step and artificial beach potholes
+      const s = i + j - 60;
+      noisyHeights[j * n + i] = s > 0 ? 1.8 + s * 0.12 : -2.0 - Math.abs(s) * 0.4;
+    }
+  }
+  // Punch isolated potholes into the dry beach zone
+  const potholeIdx1 = 34 * n + 30;
+  const potholeIdx2 = 36 * n + 32;
+  noisyHeights[potholeIdx1] = -0.8;
+  noisyHeights[potholeIdx2] = 0.02;
+
+  smoothCoastlineAndForeshoreBeaches(noisyHeights, region);
+  assert.ok(noisyHeights[potholeIdx1] > 1.2, `Expected beach pothole 1 to be filled (>1.2m), got ${noisyHeights[potholeIdx1]}`);
+  assert.ok(noisyHeights[potholeIdx2] > 1.4, `Expected beach pothole 2 to be filled (>1.4m), got ${noisyHeights[potholeIdx2]}`);
+  // Verify first wet cell (30,30) and second wet cell (29,30) next to shoreline are graded gently rather than jumping to -2.0m..-2.4m
+  const firstWetCell = noisyHeights[30 * n + 30];
+  const secondWetCell = noisyHeights[30 * n + 29];
+  assert.ok(firstWetCell > -0.65 && firstWetCell < 0.65, `Expected first wet cell on littoral ramp near 0m, got ${firstWetCell}`);
+  assert.ok(secondWetCell > -1.25 && secondWetCell < firstWetCell, `Expected monotonic littoral ramp at second wet cell, got ${secondWetCell}`);
+
+  // Verify regional swell and wind directions orient naturally to each port's shoreBearing
+  const havanaSea = coastalSeaForRegion('havana', 'coast');
+  const cartagenaSea = coastalSeaForRegion('cartagena', 'coast');
+  const sabaSea = coastalSeaForRegion('saba', 'coast');
+  assert.equal(sabaSea.swellDir, 22);
+  assert.equal(havanaSea.swellDir, (SPANISH_MAIN_1550_REGIONS.havana.shoreBearing - 90 + 360) % 360);
+  assert.equal(cartagenaSea.swellDir, (SPANISH_MAIN_1550_REGIONS.cartagena.shoreBearing - 90 + 360) % 360);
+  const havanaUrl = coastalRegionStageURL('https://example.com/ocean.html', 'havana', 'coast', 'clear');
+  assert.equal(Number(havanaUrl.searchParams.get('swellDir')), havanaSea.swellDir);
+  assert.equal(Number(havanaUrl.searchParams.get('windDir')), havanaSea.windDir);
+
+  // Verify section-by-section neighbor generation and C0/C1 border stitching
+  const basePack = generateProceduralCoastalPack({
+    ...SPANISH_MAIN_1550_REGIONS.havana,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 1500,
+  });
+  const dirs = detectCoastalContinuationDirs(basePack.rawHeights || basePack.heights, basePack.region.size, basePack.region.shoreBearing);
+  assert.ok(dirs.length >= 2, 'Expected coastal continuation detector to identify adjacent coastal sections');
+
+  const getSectionAt = (sx, sz) => (sx === 0 && sz === 0 ? basePack : null);
+  const eastSection = await generateCoastalNeighborSection(basePack, 1, 0, getSectionAt, {
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 800,
+    useRealDEM: false,
+  });
+  assert.equal(eastSection.secX, 1);
+  assert.equal(eastSection.secZ, 0);
+  assert.equal(eastSection.region.x, basePack.region.x + basePack.region.span);
+  assert.equal(eastSection.region.z, basePack.region.z);
+
+  // Verify shared border (West edge i=0 of eastSection vs East edge i=n-1 of basePack) matches with < 0.05m tolerance
+  const baseSrc = basePack.rawHeights || basePack.heights;
+  for (let j = 4; j < n - 4; j++) {
+    const hBaseEast = baseSrc[j * n + (n - 1)];
+    const hNeighborWest = eastSection.heights[j * n + 0];
+    assert.ok(
+      Math.abs(hBaseEast - hNeighborWest) < 0.05,
+      `Expected seamless border stitch at row ${j}: baseEast=${hBaseEast}, neighborWest=${hNeighborWest}`
+    );
+  }
+  // Verify unconnected outer East border (i=n-1 of eastSection) tapers below sea level (<= -14m) so no square cliff ends in the ocean
+  for (let j = 0; j < n; j++) {
+    assert.ok(
+      eastSection.heights[j * n + (n - 1)] <= -14,
+      `Expected unconnected outer section boundary to round below sea level (<= -14m), got ${eastSection.heights[j * n + (n - 1)]}`
+    );
+  }
+});
+
 
 
 

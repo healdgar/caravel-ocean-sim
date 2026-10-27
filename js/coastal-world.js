@@ -3809,11 +3809,20 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
       const lo = Math.min(h00, h10, h01, h11);
       const hi = Math.max(h00, h10, h01, h11);
       if (!cellSub[j * (n - 1) + i]) {
+        const useMainDiag = Math.abs(h00 - h11) < Math.abs(h10 - h01) - 0.01;
         if (hi > -0.5) {
-          indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
+          if (useMainDiag) {
+            indices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
+          } else {
+            indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
+          }
         }
         if (lo < 0 && hi > -45) {
-          submergedIndices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
+          if (useMainDiag) {
+            submergedIndices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
+          } else {
+            submergedIndices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
+          }
         }
         continue;
       }
@@ -3841,6 +3850,7 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
         return getSubVertex(i * M + si, j * M + sj, isCollinear, hLin);
       };
 
+      const useSubMainDiag = Math.abs(h00 - h11) < Math.abs(h10 - h01) - 0.01;
       for (let sj = 0; sj < M; sj++) {
         for (let si = 0; si < M; si++) {
           const v00 = gridIdx(si, sj);
@@ -3848,10 +3858,18 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
           const v01 = gridIdx(si, sj + 1);
           const v11 = gridIdx(si + 1, sj + 1);
           if (hi > -0.5) {
-            indices.push(v00, v01, v10, v10, v01, v11);
+            if (useSubMainDiag) {
+              indices.push(v00, v01, v11, v00, v11, v10);
+            } else {
+              indices.push(v00, v01, v10, v10, v01, v11);
+            }
           }
           if (lo < 0 && hi > -45) {
-            submergedIndices.push(v00, v01, v10, v10, v01, v11);
+            if (useSubMainDiag) {
+              submergedIndices.push(v00, v01, v11, v00, v11, v10);
+            } else {
+              submergedIndices.push(v00, v01, v10, v10, v01, v11);
+            }
           }
         }
       }
@@ -3930,6 +3948,214 @@ export function createCoastalViews(regionSpec, heights, portPlacement = null) {
   });
 }
 
+// Smooth stair-stepped / blocky DEM & 1550 coastline contours, eliminate the -1.8m..-2.0m
+// shoreline cliff step via a continuous signed-distance littoral ramp, fill beach potholes
+// (local depressions in coastal sand), and round unconnected outer borders into natural capes.
+export function smoothCoastlineAndForeshoreBeaches(
+  heights,
+  region,
+  { preservePortCore = null, connectedEdges = null, taperOuterBorders = false } = {}
+) {
+  const n = region.size;
+  const span = region.span;
+  const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
+
+  const isPortProtected = (i, j) => {
+    if (!preservePortCore) return false;
+    const x = region.x + (i / (n - 1) - 0.5) * span;
+    const z = region.z + (j / (n - 1) - 0.5) * span;
+    return !portClearanceEnvelope(preservePortCore, x, z, 14);
+  };
+
+  // Pass 1: Morphological despeckling of 1-cell water pits on land/beaches and 1-cell dry spikes in water
+  const work = new Float32Array(heights);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = 1; j < n - 1; j++) {
+      for (let i = 1; i < n - 1; i++) {
+        if (isPortProtected(i, j)) continue;
+        const k = j * n + i;
+        const h = work[k];
+        if (Math.abs(h) > 8.5) continue;
+        let dryCount = 0, wetCount = 0;
+        let drySum = 0, wetSum = 0;
+        for (let dj = -1; dj <= 1; dj++) {
+          for (let di = -1; di <= 1; di++) {
+            if (di === 0 && dj === 0) continue;
+            const nh = work[(j + dj) * n + (i + di)];
+            if (nh > 0.28) {
+              dryCount++;
+              drySum += nh;
+            } else if (nh <= 0.12) {
+              wetCount++;
+              wetSum += nh;
+            }
+          }
+        }
+        // Isolated water pit / pothole surrounded by dry beach or land
+        if (h <= 0.25 && dryCount >= 5) {
+          heights[k] = drySum / dryCount;
+        } else if (h > 0.25 && h < 4.5 && wetCount >= 6) {
+          // Isolated 1-cell dry speckle in bay
+          heights[k] = wetSum / wetCount;
+        }
+      }
+    }
+    work.set(heights);
+  }
+
+  // Pass 2: Continuous signed-distance littoral ramp across the 0.0m shoreline contour
+  // Eliminates the discontinuous jump from +0.25m..+2.4m down to -1.8m..-2.0m at shoreDistance=0
+  const shoreDist = computeCoastalShoreDistances(heights, n, span, 0.25);
+  const { distWater, distLand, step } = shoreDist;
+  const sdf = new Float32Array(n * n);
+  const sdfTmp = new Float32Array(n * n);
+  for (let k = 0; k < n * n; k++) {
+    sdf[k] = heights[k] > 0.25
+      ? Math.max(0.1, distWater[k] - step * 0.45)
+      : -Math.max(0.1, distLand[k] - step * 0.45);
+  }
+
+  // Smooth the signed distance field with 3 separable Gaussian [1, 2, 1]/4 passes
+  // so the sdf = 0 contour is a C2 curve with zero grid-aligned staircase blockiness
+  for (let iter = 0; iter < 3; iter++) {
+    for (let j = 0; j < n; j++) {
+      const row = j * n;
+      sdfTmp[row] = sdf[row];
+      sdfTmp[row + n - 1] = sdf[row + n - 1];
+      for (let i = 1; i < n - 1; i++) {
+        sdfTmp[row + i] = 0.25 * sdf[row + i - 1] + 0.5 * sdf[row + i] + 0.25 * sdf[row + i + 1];
+      }
+    }
+    for (let j = 1; j < n - 1; j++) {
+      const row = j * n;
+      for (let i = 0; i < n; i++) {
+        sdf[row + i] = 0.25 * sdfTmp[row - n + i] + 0.5 * sdfTmp[row + i] + 0.25 * sdfTmp[row + n + i];
+      }
+    }
+  }
+
+  const maxLittoralM = Math.max(48, step * 2.8);
+  const maxBeachM = Math.max(44, step * 2.5);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      if (isPortProtected(i, j)) continue;
+      const k = j * n + i;
+      const s = sdf[k];
+      const h = heights[k];
+      if (s <= 0 && s >= -maxLittoralM && h < 5.5) {
+        // Continuous multi-cell nearshore shoal ramp: 0.0m at s=0, ~-0.45m at 1st wet cell, -2.1m at maxLittoralM
+        const dSea = -s;
+        const uSea = Math.min(1, dSea / maxLittoralM);
+        const targetSea = -(0.12 + 1.98 * Math.pow(uSea, 0.92));
+        const wRamp = 1 - coastalSmoothstep(0.35, 1.0, uSea);
+        heights[k] = h * (1 - wRamp) + Math.max(h, targetSea) * wRamp;
+      } else if (s > 0 && s <= maxBeachM && h < 8.5) {
+        // Continuous multi-cell foreshore beach ramp: 0.05m at s=0, ~+0.42m at 1st dry cell, rising smoothly inland
+        const uLand = Math.min(1, s / maxBeachM);
+        const minBeachFloor = 0.05 + 1.45 * uLand;
+        const gentleBeachTarget = Math.max(minBeachFloor, Math.min(h, 0.08 + 2.35 * Math.pow(uLand, 0.92)));
+        const wBeach = (1 - coastalSmoothstep(0.3, 1.0, uLand)) * (1 - coastalSmoothstep(5.0, 8.5, h));
+        heights[k] = Math.max(minBeachFloor, h * (1 - wBeach * 0.78) + gentleBeachTarget * (wBeach * 0.78));
+      }
+    }
+  }
+
+  // Pass 3: Fill beach potholes (depression filling across coastal sand & low foreshore <= 185m from water)
+  for (let iter = 0; iter < 3; iter++) {
+    work.set(heights);
+    for (let j = 1; j < n - 1; j++) {
+      for (let i = 1; i < n - 1; i++) {
+        if (isPortProtected(i, j)) continue;
+        const k = j * n + i;
+        const s = sdf[k];
+        const h = work[k];
+        if (s < -step * 1.5 || s > 185 || h > 8.2) continue;
+        let sum8 = 0;
+        let higherCount = 0;
+        for (let dj = -1; dj <= 1; dj++) {
+          for (let di = -1; di <= 1; di++) {
+            if (di === 0 && dj === 0) continue;
+            const nh = work[(j + dj) * n + (i + di)];
+            sum8 += nh;
+            if (nh > h + 0.04) higherCount++;
+          }
+        }
+        const mean8 = sum8 * 0.125;
+        // Fill local pothole / sunken pit if lower than neighbor mean
+        if (h < mean8 - 0.025 && higherCount >= 4) {
+          heights[k] = mean8 * 0.84 + h * 0.16;
+        }
+        // Enforce positive monotonic foreshore floor on dry side of smoothed contour so no puddle forms in a beach
+        if (s > 0.25 && s <= 95 && heights[k] < 6.0) {
+          const foreshoreFloor = Math.min(1.65, 0.06 + 0.022 * s);
+          if (heights[k] < foreshoreFloor) {
+            heights[k] = foreshoreFloor;
+          }
+        }
+      }
+    }
+  }
+
+  // Pass 4: Isotropic 3x3 Gaussian contour polish along the littoral & beach zone (|sdf| <= 52m, |h| <= 6.5m)
+  const smoothBandM = Math.max(46, step * 3.4);
+  for (let iter = 0; iter < 2; iter++) {
+    work.set(heights);
+    for (let j = 1; j < n - 1; j++) {
+      for (let i = 1; i < n - 1; i++) {
+        if (isPortProtected(i, j)) continue;
+        const k = j * n + i;
+        const s = sdf[k];
+        const h = work[k];
+        if (Math.abs(s) > smoothBandM || h > 6.5 || h < -8.0) continue;
+        const g =
+          (work[(j - 1) * n + (i - 1)] +
+            2 * work[(j - 1) * n + i] +
+            work[(j - 1) * n + (i + 1)] +
+            2 * work[j * n + (i - 1)] +
+            4 * h +
+            2 * work[j * n + (i + 1)] +
+            work[(j + 1) * n + (i - 1)] +
+            2 * work[(j + 1) * n + i] +
+            work[(j + 1) * n + (i + 1)]) *
+          0.0625;
+        const w = (1 - coastalSmoothstep(smoothBandM * 0.45, smoothBandM, Math.abs(s))) * (1 - coastalSmoothstep(4.2, 6.5, Math.max(0, h)));
+        heights[k] = h * (1 - w * 0.82) + g * (w * 0.82);
+      }
+    }
+  }
+
+  // Optional Pass 5: Round any unconnected outer world boundary into a natural cape/shoal
+  if (taperOuterBorders) {
+    const connW = Boolean(connectedEdges?.west);
+    const connE = Boolean(connectedEdges?.east);
+    const connN = Boolean(connectedEdges?.north);
+    const connS = Boolean(connectedEdges?.south);
+    for (let j = 0; j < n; j++) {
+      const v = j / (n - 1);
+      const z = region.z + (v - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const x = region.x + (u - 0.5) * span;
+        let dEdge = 1.0;
+        if (!connW && u < dEdge) dEdge = u;
+        if (!connE && 1 - u < dEdge) dEdge = 1 - u;
+        if (!connN && v < dEdge) dEdge = v;
+        if (!connS && 1 - v < dEdge) dEdge = 1 - v;
+        if (dEdge >= 0.11) continue;
+        const k = j * n + i;
+        if (heights[k] <= -14) continue;
+        const capeNoise = coastalFbm2D(x * 0.0022, z * 0.0022, seed + 941, 2);
+        const margin = 0.055 + 0.045 * capeNoise;
+        if (dEdge >= margin) continue;
+        const t = coastalSmoothstep(0.0, margin, dEdge);
+        const shelfDepth = -16 - (1 - t) * 8;
+        heights[k] = shelfDepth * (1 - t) + heights[k] * t;
+      }
+    }
+  }
+  return heights;
+}
+
 function finalizeProceduralCoastalPack(
   pack,
   heights,
@@ -3938,8 +4164,33 @@ function finalizeProceduralCoastalPack(
   preserveRealCoast = false
 ) {
   const { region } = pack;
+  // Retain un-tapered raw heights so adjacent streaming sections stitch C0/C1-continuously
+  if (!pack.rawHeights) {
+    pack.rawHeights = new Float32Array(heights);
+  }
+  smoothCoastlineAndForeshoreBeaches(heights, region, {
+    connectedEdges: pack.connectedEdges || null,
+    taperOuterBorders: Boolean(pack.taperOuterBorders),
+  });
   const preShoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
-  const port = placeCoastalPort(region, heights, { preserveRealCoast, satelliteData, shoreDist: preShoreDist });
+  const port = pack.skipPortPlacement
+    ? {
+        regionId: region.id,
+        name: region.name,
+        era: 1550,
+        center: { x: region.x, z: region.z, elevation: 2.5, shoreAlong: 0 },
+        berth: { x: region.x, z: region.z, depth: 8, heading: region.shoreBearing ?? 112 },
+        clearRadius: 0,
+        instances: [],
+      }
+    : placeCoastalPort(region, heights, { preserveRealCoast, satelliteData, shoreDist: preShoreDist });
+  if (!pack.skipPortPlacement) {
+    smoothCoastlineAndForeshoreBeaches(heights, region, {
+      preservePortCore: port,
+      connectedEdges: pack.connectedEdges || null,
+      taperOuterBorders: Boolean(pack.taperOuterBorders),
+    });
+  }
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist);
   const mesh = buildCoastalMesh(region, heights, beaches, shoreDist);
@@ -3947,7 +4198,7 @@ function finalizeProceduralCoastalPack(
   const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome, satelliteData, shoreDist);
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
-  const views = createCoastalViews(region, heights, port);
+  const views = pack.skipPortPlacement ? null : createCoastalViews(region, heights, port);
 
   return Object.assign(pack, {
     region,
@@ -4136,7 +4387,7 @@ export async function findNearestCoastlineInRealDEM(lat, lon, fetchFn = null, _t
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
 export async function upgradeProceduralPackWithRealDEM(
   pack,
-  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 12000, _snapAttempted = false } = {}
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false } = {}
 ) {
   const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
@@ -4297,7 +4548,7 @@ export async function upgradeProceduralPackWithRealDEM(
     const landRatio = landCount / (n * n);
     // If user clicked or entered coordinates slightly inland (landRatio > 0.94) or offshore (landRatio < 0.02),
     // search the surrounding ~300km x 300km real AWS Terrarium Zoom-8 DEM to snap to the true 0m shoreline and retry once!
-    if ((landRatio < 0.02 || landRatio > 0.94) && !_snapAttempted && !fetchTile && typeof fetch === 'function') {
+    if (!isNeighborSection && (landRatio < 0.02 || landRatio > 0.94) && !_snapAttempted && !fetchTile && typeof fetch === 'function') {
       for (const item of satLoaded) item?.bmp?.close?.();
       let snapped = await findNearestCoastlineInRealDEM(region.latitude, region.longitude, fetch);
       if (!snapped) {
@@ -4314,8 +4565,8 @@ export async function upgradeProceduralPackWithRealDEM(
         return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, timeoutMs, _snapAttempted: true });
       }
     }
-    // Require real land and real water in the coastal window (allow flat barrier islands down to 0.35m!)
-    if (landRatio < 0.015 || landRatio > 0.97 || maxDem < 0.35) {
+    // Require real land and real water in the primary coastal window (neighbor sections may be up to 100% inland hills/forest!)
+    if ((isNeighborSection ? landRatio < 0.002 : landRatio < 0.015 || landRatio > 0.97) || maxDem < 0.35) {
       for (const item of satLoaded) item?.bmp?.close?.();
       return ensureFallback(pack);
     }
@@ -5031,4 +5282,346 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   });
 
   return { status: 'first_explorer', isFirstExplorer: true, visits: 1, upgradedPack };
+}
+
+// Inspect a section's border elevations to determine which neighboring sections (secX + dx, secZ + dz)
+// continue the coastline or landmass across the section boundary.
+export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
+  if (!heights || heights.length < n * n) return [];
+  let westLand = 0, eastLand = 0, northLand = 0, southLand = 0;
+  let westShallow = 0, eastShallow = 0, northShallow = 0, southShallow = 0;
+  for (let t = 0; t < n; t++) {
+    const hw = heights[t * n];
+    const he = heights[t * n + (n - 1)];
+    const hn = heights[t];
+    const hs = heights[(n - 1) * n + t];
+    if (hw > 0.15) westLand++; else if (hw > -14) westShallow++;
+    if (he > 0.15) eastLand++; else if (he > -14) eastShallow++;
+    if (hn > 0.15) northLand++; else if (hn > -14) northShallow++;
+    if (hs > 0.15) southLand++; else if (hs > -14) southShallow++;
+  }
+  const rad = (shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
+  const shoreDirX = Math.sin(rad);
+  const shoreDirZ = -Math.cos(rad);
+  // Along-coast tangent vector
+  const tangX = -shoreDirZ;
+  const tangZ = shoreDirX;
+
+  const candidates = [
+    { dx: -1, dz: 0, edge: 'west', land: westLand, shallow: westShallow },
+    { dx: 1, dz: 0, edge: 'east', land: eastLand, shallow: eastShallow },
+    { dx: 0, dz: -1, edge: 'north', land: northLand, shallow: northShallow },
+    { dx: 0, dz: 1, edge: 'south', land: southLand, shallow: southShallow },
+  ];
+  const active = candidates.filter((c) => c.land >= 2 || c.shallow >= Math.max(6, Math.floor(n * 0.08)));
+  // Sort so along-coast shoreline extensions (where both land and water meet the border) load first,
+  // followed by inland massif continuations
+  active.sort((a, b) => {
+    const aCoastMix = a.land > 0 && a.land < n * 0.92 ? 1000 : 0;
+    const bCoastMix = b.land > 0 && b.land < n * 0.92 ? 1000 : 0;
+    const aTang = Math.abs(a.dx * tangX + a.dz * tangZ) * 200;
+    const bTang = Math.abs(b.dx * tangX + b.dz * tangZ) * 200;
+    return (bCoastMix + bTang + b.land) - (aCoastMix + aTang + a.land);
+  });
+  return active.map(({ dx, dz, edge, land }) => ({ dx, dz, edge, landCells: land }));
+}
+
+// Stitch a coastal section's heightfield C0/C1-continuously to all already-loaded neighboring sections
+// along shared world borders, and organically round any unconnected outer world boundary into a natural cape.
+export function stitchCoastalSectionBorders(
+  heights,
+  region,
+  secX,
+  secZ,
+  getNeighborSection,
+  { taperUnconnectedOuter = true } = {}
+) {
+  const n = region.size;
+  const span = region.span;
+  const westSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX - 1, secZ) : null;
+  const eastSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX + 1, secZ) : null;
+  const northSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX, secZ - 1) : null;
+  const southSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX, secZ + 1) : null;
+
+  const sampleNeighborEdge = (neighbor, wx, wz) => {
+    const srcHeights = neighbor.rawHeights || neighbor.heights;
+    const nr = neighbor.region;
+    const half = nr.span * 0.5 - 1e-3;
+    const cx = Math.max(nr.x - half, Math.min(nr.x + half, wx));
+    const cz = Math.max(nr.z - half, Math.min(nr.z + half, wz));
+    return terrainSample(srcHeights, cx, cz, nr);
+  };
+
+  const blendBand = 0.16;
+  const xWest = region.x - span * 0.5;
+  const xEast = region.x + span * 0.5;
+  const zNorth = region.z - span * 0.5;
+  const zSouth = region.z + span * 0.5;
+
+  // 1. Smooth interior transition band + exact boundary lock on West and East borders
+  if (westSec?.heights) {
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      const hEdge = sampleNeighborEdge(westSec, xWest, z);
+      const delta = hEdge - heights[j * n];
+      heights[j * n] = hEdge;
+      for (let i = 1; i < n; i++) {
+        const u = i / (n - 1);
+        if (u >= blendBand) break;
+        const w = 1 - coastalSmoothstep(0, blendBand, u);
+        heights[j * n + i] += delta * w;
+      }
+    }
+  }
+  if (eastSec?.heights) {
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      const hEdge = sampleNeighborEdge(eastSec, xEast, z);
+      const delta = hEdge - heights[j * n + (n - 1)];
+      heights[j * n + (n - 1)] = hEdge;
+      for (let i = n - 2; i >= 0; i--) {
+        const u = (n - 1 - i) / (n - 1);
+        if (u >= blendBand) break;
+        const w = 1 - coastalSmoothstep(0, blendBand, u);
+        heights[j * n + i] += delta * w;
+      }
+    }
+  }
+
+  // 2. Smooth interior transition band + exact boundary lock on North and South borders
+  if (northSec?.heights) {
+    for (let i = 0; i < n; i++) {
+      const x = region.x + (i / (n - 1) - 0.5) * span;
+      const hEdge = sampleNeighborEdge(northSec, x, zNorth);
+      const delta = hEdge - heights[i];
+      heights[i] = hEdge;
+      for (let j = 1; j < n; j++) {
+        const v = j / (n - 1);
+        if (v >= blendBand) break;
+        const w = 1 - coastalSmoothstep(0, blendBand, v);
+        // Preserve exact West/East locked vertices at i=0 and i=n-1
+        const ewWeight = (westSec && i === 0) || (eastSec && i === n - 1) ? 0 : 1;
+        heights[j * n + i] += delta * w * ewWeight;
+      }
+    }
+  }
+  if (southSec?.heights) {
+    for (let i = 0; i < n; i++) {
+      const x = region.x + (i / (n - 1) - 0.5) * span;
+      const hEdge = sampleNeighborEdge(southSec, x, zSouth);
+      const delta = hEdge - heights[(n - 1) * n + i];
+      heights[(n - 1) * n + i] = hEdge;
+      for (let j = n - 2; j >= 0; j--) {
+        const v = (n - 1 - j) / (n - 1);
+        if (v >= blendBand) break;
+        const w = 1 - coastalSmoothstep(0, blendBand, v);
+        const ewWeight = (westSec && i === 0) || (eastSec && i === n - 1) ? 0 : 1;
+        heights[j * n + i] += delta * w * ewWeight;
+      }
+    }
+  }
+
+  // 3. Round any unconnected outer world boundary into a natural cape/submarine shelf so no square edge is visible
+  if (taperUnconnectedOuter) {
+    const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
+    const connW = Boolean(westSec);
+    const connE = Boolean(eastSec);
+    const connN = Boolean(northSec);
+    const connS = Boolean(southSec);
+    for (let j = 0; j < n; j++) {
+      const v = j / (n - 1);
+      const z = region.z + (v - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const x = region.x + (u - 0.5) * span;
+        let dEdge = 1.0;
+        if (!connW && u < dEdge) dEdge = u;
+        if (!connE && 1 - u < dEdge) dEdge = 1 - u;
+        if (!connN && v < dEdge) dEdge = v;
+        if (!connS && 1 - v < dEdge) dEdge = 1 - v;
+        if (dEdge >= 0.13) continue;
+        const k = j * n + i;
+        if (heights[k] <= -16) continue;
+        const capeNoise = coastalFbm2D(x * 0.0021, z * 0.0021, seed + 947, 2);
+        const margin = 0.065 + 0.055 * capeNoise;
+        if (dEdge >= margin) continue;
+        // Do not alter vertices on a connected border, while ensuring vertices on an unconnected outer edge reach shelfDepth
+        const onConnectedEdge =
+          (connW && i === 0) || (connE && i === n - 1) || (connN && j === 0) || (connS && j === n - 1);
+        if (onConnectedEdge) continue;
+        let connLock = 1.0;
+        if (dEdge > 0) {
+          if (connW && u < 0.08) connLock = Math.min(connLock, u / 0.08);
+          if (connE && 1 - u < 0.08) connLock = Math.min(connLock, (1 - u) / 0.08);
+          if (connN && v < 0.08) connLock = Math.min(connLock, v / 0.08);
+          if (connS && 1 - v < 0.08) connLock = Math.min(connLock, (1 - v) / 0.08);
+        }
+        const t = coastalSmoothstep(0.0, margin, dEdge);
+        const blend = 1 - (1 - t) * connLock;
+        const shelfDepth = -16 - (1 - t) * 10;
+        heights[k] = shelfDepth * (1 - blend) + heights[k] * blend;
+      }
+    }
+  }
+  return heights;
+}
+
+// Generate a continuous neighboring coastal section at section coordinates (secX, secZ) relative to basePack.
+// Supports both synchronous procedural continuation + asynchronous real AWS Terrarium DEM + 1550 reforestation upgrade.
+export async function generateCoastalNeighborSection(
+  basePack,
+  secX,
+  secZ,
+  getNeighborSection = null,
+  {
+    size = 129,
+    biomeSize = 128,
+    albedoSize = 256,
+    vegetationCandidates = 4500,
+    useRealDEM = true,
+    use1550 = true,
+    fetchTile = null,
+    fetchSatelliteTile = null,
+    taperUnconnectedOuter = true,
+  } = {}
+) {
+  const baseRegion = basePack.region;
+  const span = baseRegion.span;
+  const cosLat = Math.max(0.1, Math.cos(baseRegion.latitude * COASTAL_DEG_TO_RAD));
+  const secLat = Number((baseRegion.latitude - (secZ * span) / 111195).toFixed(6));
+  const secLon = Number((baseRegion.longitude + (secX * span) / (111195 * cosLat)).toFixed(6));
+  const secWorldX = baseRegion.x + secX * span;
+  const secWorldZ = baseRegion.z + secZ * span;
+  const secId = `${baseRegion.id}_sec_${secX}_${secZ}`;
+
+  const sectionRegion = resolveGlobalCoastalRegion({
+    id: secId,
+    name: `${baseRegion.name} (${secX >= 0 ? '+' : ''}${secX}, ${secZ >= 0 ? '+' : ''}${secZ})`,
+    latitude: secLat,
+    longitude: secLon,
+    shoreBearing: baseRegion.shoreBearing,
+    harborShelter: baseRegion.harborShelter,
+    peakElevationMetres: baseRegion.peakElevationMetres,
+    climate: baseRegion.climate,
+    x: secWorldX,
+    z: secWorldZ,
+    span,
+    size,
+    biomeSize,
+    albedoSize,
+    vegetationCandidates,
+  });
+
+  // Synthesize continuous procedural terrain that continues baseRegion's coastal geometry in world space
+  const synthContinuousHeights = () => {
+    const heights = new Float32Array(size * size);
+    const rad = (baseRegion.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
+    const shoreDirX = Math.sin(rad);
+    const shoreDirZ = -Math.cos(rad);
+    const tangX = -shoreDirZ;
+    const tangZ = shoreDirX;
+    const seed = baseRegion.seed || coastalHashCoords(baseRegion.latitude, baseRegion.longitude);
+    const peak = baseRegion.peakElevationMetres ?? 260;
+
+    for (let j = 0; j < size; j++) {
+      const z = secWorldZ + (j / (size - 1) - 0.5) * span;
+      for (let i = 0; i < size; i++) {
+        const x = secWorldX + (i / (size - 1) - 0.5) * span;
+        const dx = (x - baseRegion.x) / span;
+        const dz = (z - baseRegion.z) / span;
+        const across = dx * shoreDirX + dz * shoreDirZ;
+        const along = dx * tangX + dz * tangZ;
+        const coastWobble =
+          0.18 * (coastalFbm2D(x * 0.00045, z * 0.00045, seed + 19, 3) - 0.5) +
+          0.08 * Math.sin(along * 2.1 + 0.7);
+        const signedShore = across + coastWobble;
+        if (signedShore > 0) {
+          const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
+          const ramp = coastalSmoothstep(0, 0.55, signedShore);
+          heights[j * size + i] = Math.min(895, 0.35 + signedShore * 22 + ramp * peak * (0.28 + 0.72 * ridge));
+        } else {
+          const seaDistM = Math.abs(signedShore) * span;
+          heights[j * size + i] = -Math.min(120, 0.5 + 0.12 * seaDistM);
+        }
+      }
+    }
+    return heights;
+  };
+
+  const sectionPack = {
+    region: sectionRegion,
+    secX,
+    secZ,
+    skipPortPlacement: true,
+    elevationSource: 'procedural-continuation',
+  };
+
+  let upgradedWithDem = false;
+  if (useRealDEM && (fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function'))) {
+    try {
+      await upgradeProceduralPackWithRealDEM(sectionPack, {
+        fetchTile,
+        fetchSatelliteTile,
+        timeoutMs: 9000,
+        isNeighborSection: true,
+        _snapAttempted: true,
+      });
+      if (sectionPack.heights && sectionPack.elevationSource?.startsWith('aws-terrarium')) {
+        upgradedWithDem = true;
+      }
+    } catch { /* fallback to continuous procedural coast */ }
+  }
+
+  if (!upgradedWithDem) {
+    const rawH = synthContinuousHeights();
+    sectionPack.rawHeights = new Float32Array(rawH);
+    finalizeProceduralCoastalPack(sectionPack, rawH, 'procedural-continuation', null, false);
+  } else if (use1550) {
+    // Apply 1550 reforestation & estuary restoration to the neighbor section
+    const built1550 = build1550HistoricalTerritoryPack(sectionPack);
+    Object.assign(sectionPack, built1550);
+  }
+
+  // Keep pristine un-tapered heights for future outer neighbors to stitch against
+  const rawHeights = new Float32Array(sectionPack.rawHeights || sectionPack.heights);
+  sectionPack.rawHeights = rawHeights;
+
+  // Stitch shared borders to all currently loaded neighbors and round unconnected outer borders
+  const stitched = new Float32Array(rawHeights);
+  stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, getNeighborSection, {
+    taperUnconnectedOuter,
+  });
+  smoothCoastlineAndForeshoreBeaches(stitched, sectionRegion, {
+    taperOuterBorders: false,
+  });
+  // Re-lock exact border rows/cols and outer cape taper after littoral smoothing so shared seams have 0.000m error
+  stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, getNeighborSection, {
+    taperUnconnectedOuter,
+  });
+
+  const shoreDist = computeCoastalShoreDistances(stitched, size, span, 0.25);
+  const beaches = synthesizeCoastalBeaches(sectionRegion, stitched, sectionPack.satelliteData, shoreDist);
+  const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist);
+  const biome = synthesizeCoastalBiome(sectionRegion, stitched, beaches, sectionPack.port, sectionPack.satelliteData);
+  const albedo = synthesizeCoastalAlbedo(
+    sectionRegion,
+    stitched,
+    beaches,
+    sectionPack.port,
+    biome,
+    sectionPack.satelliteData,
+    shoreDist
+  );
+  const vegetation = seedCoastalVegetation(sectionRegion, stitched, biome, beaches, sectionPack.port, 5, shoreDist);
+  const portGeometry = buildPortPrefabGeometry(sectionPack.port, vegetation.palms);
+
+  return Object.assign(sectionPack, {
+    heights: stitched,
+    beaches,
+    mesh,
+    biome,
+    albedo,
+    vegetation,
+    portGeometry,
+  });
 }

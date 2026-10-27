@@ -8,7 +8,15 @@ import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL} from './fores
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle} from './forest-middle.js';
 
-import { portClearanceEnvelope, runLandfallDiscoveryPipeline, build1550HistoricalTerritoryPack } from './coastal-world.js';
+import {
+  portClearanceEnvelope,
+  runLandfallDiscoveryPipeline,
+  build1550HistoricalTerritoryPack,
+  detectCoastalContinuationDirs,
+  stitchCoastalSectionBorders,
+  generateCoastalNeighborSection,
+  buildCoastalMesh,
+} from './coastal-world.js';
 
 function hash32Forest(value) {
   let v = value >>> 0;
@@ -342,14 +350,36 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     albedoImage=await createImageBitmap(await albedoResponse.blob());
     if(albedoImage.width!==ISLAND.albedoSize||albedoImage.height!==ISLAND.albedoSize)throw new Error('Incomplete Saba imagery seed');
   }
-  const groundSample=(x,z)=>proceduralPack?terrainSurfaceSample(heights,x,z,activeRegion):sampleTerrainNear(nearTile,heights,x,z);
-  const heightSample=(x,z)=>proceduralPack?terrainSample(heights,x,z,activeRegion):(terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z));
+  const loadedSections=new Map();
+  const findNeighborSection=(x,z)=>{
+    if(!proceduralPack||!loadedSections.size)return null;
+    const sx=Math.round((x-activeRegion.x)/activeRegion.span);
+    const sz=Math.round((z-activeRegion.z)/activeRegion.span);
+    if(sx===0&&sz===0)return null;
+    return loadedSections.get(`${sx},${sz}`)||null;
+  };
+  const groundSample=(x,z)=>{
+    if(proceduralPack){
+      const sec=findNeighborSection(x,z);
+      if(sec)return terrainSurfaceSample(sec.heights,x,z,sec.region);
+      return terrainSurfaceSample(heights,x,z,activeRegion);
+    }
+    return sampleTerrainNear(nearTile,heights,x,z);
+  };
+  const heightSample=(x,z)=>{
+    if(proceduralPack){
+      const sec=findNeighborSection(x,z);
+      if(sec)return terrainSample(sec.heights,x,z,sec.region);
+      return terrainSample(heights,x,z,activeRegion);
+    }
+    return terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z);
+  };
   let mesh=proceduralPack?proceduralPack.mesh:islandGeometry(heights,nearTile?.bounds);const fineMesh=nearTile?terrainNearGeometry(nearTile,mesh):null;
   const originalTrees=proceduralPack?proceduralPack.vegetation.trees:islandVegetation(heights,biome),canopyPack=await canopyPromise;
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
   const canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees,forestPack=await forestPromise;
-  const trees=forestPack?new Float32Array(0):canopyTrees;
+  let trees=forestPack?new Float32Array(0):canopyTrees;
   let groundPatches=createGroundCoverPatches(activeRegion,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const buffer=(data,usage,label)=>{
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
@@ -459,15 +489,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const treeBatches=Array.from({length:3*TREE_VARIANTS},(_,id)=>({
     buffer:null,capacity:0,label:`tree instances ${id}`,data:[],count:0,
   }));
-  const previousLods=new Map(),forestPatches=createForestPatches(trees),lodStats={near:0,middle:0,far:0,budgetOverflow:0};
+  const previousLods=new Map();let forestPatches=createForestPatches(trees);const lodStats={near:0,middle:0,far:0,budgetOverflow:0};
   let lastCamera=null,lastView=null,lastPixels=null,currentPixelError=TREE_PIXEL_ERROR;
   let importedCanopy=null;
+  let checkCameraSectionStreaming=null;
   function updateTrees(camera,viewProjection){
     if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0){
       currentPixelError=camera.pixelError;
       forestMass?.setPixelError?.(currentPixelError);
       forest?.setPixelError?.(currentPixelError);
     }
+    checkCameraSectionStreaming?.(camera);
     // Its stricter projection bound must not inherit the legacy tree batching
     // cache's one-metre/view tolerance when crossing a three-pixel threshold.
     importedCanopy?.prepare(camera,viewProjection);
@@ -585,6 +617,279 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     mPass.end();device.queue.submit([mEnc.finish()]);
   }
 
+  // Section-by-section continuous coastal world streaming
+  const queuedSections=new Set();
+  const sectionQueue=[];
+  let sectionStreamBusy=false;
+  let sectionEpoch=0;
+  let lastStreamCheckCam={x:NaN,z:NaN};
+
+  const getSectionAt=(sx,sz)=>{
+    if(sx===0&&sz===0){
+      return {
+        secX:0,
+        secZ:0,
+        region:activeRegion,
+        heights,
+        rawHeights:proceduralPack?.rawHeights||heights,
+      };
+    }
+    return loadedSections.get(`${sx},${sz}`)||null;
+  };
+
+  function destroySectionRecord(rec){
+    if(!rec)return;
+    rec.vertices?.destroy?.();
+    if(rec.submergedIndices&&rec.submergedIndices!==rec.indices)rec.submergedIndices.destroy?.();
+    rec.indices?.destroy?.();
+    rec.portMesh?.vertices?.destroy?.();
+    rec.portMesh?.indices?.destroy?.();
+    rec.uniform?.destroy?.();
+    rec.albedo?.destroy?.();
+    rec.biomeTexture?.destroy?.();
+  }
+
+  function buildSectionGPURecord(secPack){
+    const sReg=secPack.region;
+    const sMesh=secPack.mesh;
+    const sVerts=buffer(sMesh.vertices,GPUBufferUsage.VERTEX,`coastal section (${secPack.secX},${secPack.secZ}) vertices`);
+    const sIdx=buffer(sMesh.indices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) indices`);
+    const sSubIdx=sMesh.submergedIndices?buffer(sMesh.submergedIndices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) submerged`):sIdx;
+    const sSubCount=sMesh.submergedIndices?.length??sMesh.indices.length;
+    const sPort=secPack.portGeometry?.indices?.length?{
+      vertices:buffer(secPack.portGeometry.vertices,GPUBufferUsage.VERTEX,`coastal section (${secPack.secX},${secPack.secZ}) palms`),
+      indices:buffer(secPack.portGeometry.indices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) palm indices`),
+      count:secPack.portGeometry.indices.length,
+    }:null;
+    const sUniform=buffer(new Float32Array([sReg.x,sReg.z,sReg.span,1]),GPUBufferUsage.UNIFORM,`coastal section (${secPack.secX},${secPack.secZ}) domain`);
+    const sAlbedoMips=1+Math.log2(sReg.albedoSize);
+    const sAlbedo=device.createTexture({
+      label:`coastal section (${secPack.secX},${secPack.secZ}) albedo`,
+      size:[sReg.albedoSize,sReg.albedoSize],
+      format:'rgba8unorm',
+      mipLevelCount:sAlbedoMips,
+      usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.writeTexture({texture:sAlbedo},secPack.albedo,{bytesPerRow:sReg.albedoSize*4},[sReg.albedoSize,sReg.albedoSize]);
+    const sEnc=device.createCommandEncoder(),sPass=sEnc.beginComputePass();sPass.setPipeline(mipPipe);
+    for(let m=1;m<sAlbedoMips;m++){
+      sPass.setBindGroup(0,device.createBindGroup({layout:mipPipe.getBindGroupLayout(0),entries:[
+        {binding:0,resource:sAlbedo.createView({baseMipLevel:m-1,mipLevelCount:1})},
+        {binding:1,resource:sAlbedo.createView({baseMipLevel:m,mipLevelCount:1})},
+      ]}));
+      sPass.dispatchWorkgroups(Math.ceil((sReg.albedoSize>>m)/8),Math.ceil((sReg.albedoSize>>m)/8));
+    }
+    sPass.end();device.queue.submit([sEnc.finish()]);
+    const sBiome=device.createTexture({
+      label:`coastal section (${secPack.secX},${secPack.secZ}) biome`,
+      size:[sReg.biomeSize,sReg.biomeSize],
+      format:'r8unorm',
+      usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST,
+    });
+    device.queue.writeTexture({texture:sBiome},secPack.biome,{bytesPerRow:sReg.biomeSize},[sReg.biomeSize,sReg.biomeSize]);
+    const secOpaqueResources=[
+      [0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],
+      [5,lighting.createView()],[6,{buffer:sUniform}],[7,sAlbedo.createView()],
+      [8,landSampler],[9,sBiome.createView()],[11,{buffer:leafMean}],
+      [12,{buffer:nearDomain}],[13,nearAlbedo.createView()],
+    ];
+    const terrainGroup=bind(terrainPipe,secOpaqueResources);
+    const submergedSecGroup=submerged?.bindGroup(secOpaqueResources.map(([binding,resource])=>({binding,resource})));
+    return {
+      secX:secPack.secX,
+      secZ:secPack.secZ,
+      key:`${secPack.secX},${secPack.secZ}`,
+      region:sReg,
+      heights:secPack.heights,
+      rawHeights:secPack.rawHeights,
+      beaches:secPack.beaches,
+      vegetation:secPack.vegetation,
+      vertices:sVerts,
+      indices:sIdx,
+      indexCount:sMesh.indices.length,
+      submergedIndices:sSubIdx,
+      submergedCount:sSubCount,
+      portMesh:sPort,
+      uniform:sUniform,
+      albedo:sAlbedo,
+      biomeTexture:sBiome,
+      terrainGroup,
+      submergedGroup:submergedSecGroup,
+    };
+  }
+
+  function restitchNeighborSection(adjRec){
+    if(!adjRec?.rawHeights)return;
+    const stitched=new Float32Array(adjRec.rawHeights);
+    stitchCoastalSectionBorders(stitched,adjRec.region,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true});
+    adjRec.heights.set(stitched);
+    const rebuiltMesh=buildCoastalMesh(adjRec.region,adjRec.heights,adjRec.beaches);
+    if(rebuiltMesh.vertices.byteLength===adjRec.vertices.size){
+      device.queue.writeBuffer(adjRec.vertices,0,rebuiltMesh.vertices);
+    }
+  }
+
+  function rebuildNeighborTreeInstances(){
+    if(!proceduralPack)return;
+    const baseTrees=forestPack?new Float32Array(0):canopyTrees;
+    let totalFloats=baseTrees.length;
+    for(const sec of loadedSections.values()){
+      totalFloats+=sec.vegetation?.trees?.length||0;
+    }
+    const merged=new Float32Array(totalFloats);
+    merged.set(baseTrees,0);
+    let offset=baseTrees.length;
+    for(const sec of loadedSections.values()){
+      const st=sec.vegetation?.trees;
+      if(st?.length){
+        merged.set(st,offset);
+        offset+=st.length;
+      }
+    }
+    trees=merged;
+    forestPatches=createForestPatches(trees);
+    lastCamera=null;
+  }
+
+  async function processSectionStreamQueue(){
+    if(sectionStreamBusy||!proceduralPack||!sectionQueue.length)return;
+    sectionStreamBusy=true;
+    const myEpoch=sectionEpoch;
+    while(sectionQueue.length&&myEpoch===sectionEpoch){
+      const {secX,secZ,wantRealDEM}=sectionQueue.shift();
+      const key=`${secX},${secZ}`;
+      try{
+        // Stage 1: Fast stitched coastal continuation so adjacent sections appear seamlessly without waiting on network
+        if(!loadedSections.has(key)){
+          const fastPack=await generateCoastalNeighborSection(
+            {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
+            secX,
+            secZ,
+            getSectionAt,
+            {
+              size:65,
+              biomeSize:64,
+              albedoSize:128,
+              vegetationCandidates:1600,
+              useRealDEM:false,
+              use1550:Boolean(discovery?.applied),
+              taperUnconnectedOuter:true,
+            }
+          );
+          if(myEpoch!==sectionEpoch)break;
+          const rec=buildSectionGPURecord(fastPack);
+          loadedSections.set(key,rec);
+          for(const [dx,dz] of [[-1,0],[1,0],[0,-1],[0,1]]){
+            const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
+            if(adj)restitchNeighborSection(adj);
+          }
+          rebuildNeighborTreeInstances();
+        }
+        // Stage 2: Upgrade streamed section with real AWS Terrarium SRTM DEM + 1550 satellite reforestation in background
+        if(wantRealDEM&&search.get('realDEM')!=='off'){
+          await new Promise(r=>setTimeout(r,30));
+          if(myEpoch!==sectionEpoch)break;
+          const demPack=await generateCoastalNeighborSection(
+            {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
+            secX,
+            secZ,
+            getSectionAt,
+            {
+              size:isMobile?65:129,
+              biomeSize:isMobile?64:128,
+              albedoSize:isMobile?128:256,
+              vegetationCandidates:isMobile?1600:3600,
+              useRealDEM:true,
+              use1550:Boolean(discovery?.applied),
+              taperUnconnectedOuter:true,
+            }
+          );
+          if(myEpoch!==sectionEpoch)break;
+          const prev=loadedSections.get(key);
+          const nextRec=buildSectionGPURecord(demPack);
+          loadedSections.set(key,nextRec);
+          destroySectionRecord(prev);
+          for(const [dx,dz] of [[-1,0],[1,0],[0,-1],[0,1]]){
+            const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
+            if(adj)restitchNeighborSection(adj);
+          }
+          rebuildNeighborTreeInstances();
+        }
+      }catch{/* non-fatal section stream */}
+      await new Promise(r=>setTimeout(r,24));
+    }
+    sectionStreamBusy=false;
+  }
+
+  function enqueueCoastalSection(secX,secZ,{priority=false,wantRealDEM=true}={}){
+    if(!proceduralPack||(secX===0&&secZ===0))return;
+    if(Math.abs(secX)>4||Math.abs(secZ)>4)return;
+    const key=`${secX},${secZ}`;
+    if(loadedSections.has(key)||queuedSections.has(key))return;
+    queuedSections.add(key);
+    const item={secX,secZ,wantRealDEM};
+    if(priority)sectionQueue.unshift(item);
+    else sectionQueue.push(item);
+    setTimeout(()=>processSectionStreamQueue(),20);
+  }
+
+  function seedInitialCoastalSections(){
+    if(!proceduralPack)return;
+    const dirs=detectCoastalContinuationDirs(
+      proceduralPack.rawHeights||heights,
+      activeRegion.size,
+      activeRegion.shoreBearing
+    );
+    for(const {dx,dz} of dirs){
+      enqueueCoastalSection(dx,dz,{wantRealDEM:true});
+    }
+  }
+
+  function resetStreamedSections(){
+    sectionEpoch++;
+    sectionQueue.length=0;
+    queuedSections.clear();
+    for(const rec of loadedSections.values())destroySectionRecord(rec);
+    loadedSections.clear();
+    lastStreamCheckCam={x:NaN,z:NaN};
+    rebuildNeighborTreeInstances();
+    seedInitialCoastalSections();
+  }
+
+  checkCameraSectionStreaming=camera=>{
+    if(!proceduralPack||!camera||!Number.isFinite(camera.x)||!Number.isFinite(camera.z))return;
+    if(Math.hypot(camera.x-lastStreamCheckCam.x,camera.z-lastStreamCheckCam.z)<activeRegion.span*0.12)return;
+    lastStreamCheckCam={x:camera.x,z:camera.z};
+    const span=activeRegion.span;
+    const camSecX=Math.round((camera.x-activeRegion.x)/span);
+    const camSecZ=Math.round((camera.z-activeRegion.z)/span);
+    for(let dz=-1;dz<=1;dz++){
+      for(let dx=-1;dx<=1;dx++){
+        const sx=camSecX+dx,sz=camSecZ+dz;
+        if((sx===0&&sz===0)||Math.abs(sx)>4||Math.abs(sz)>4)continue;
+        const key=`${sx},${sz}`;
+        if(loadedSections.has(key)||queuedSections.has(key))continue;
+        // Stream section if it borders any loaded section (or (0,0)) and is within 1.45 * span of camera
+        const secCenterX=activeRegion.x+sx*span;
+        const secCenterZ=activeRegion.z+sz*span;
+        if(Math.hypot(camera.x-secCenterX,camera.z-secCenterZ)>span*1.45)continue;
+        const hasLoadedNeighbor=
+          (Math.abs(sx)+Math.abs(sz)===1)||
+          loadedSections.has(`${sx-1},${sz}`)||
+          loadedSections.has(`${sx+1},${sz}`)||
+          loadedSections.has(`${sx},${sz-1}`)||
+          loadedSections.has(`${sx},${sz+1}`);
+        if(hasLoadedNeighbor){
+          enqueueCoastalSection(sx,sz,{priority:dx===0&&dz===0,wantRealDEM:true});
+        }
+      }
+    }
+  };
+
+  if(proceduralPack){
+    setTimeout(()=>seedInitialCoastalSections(),45);
+  }
+
   let baseSnapshot=proceduralPack&&!preloaded1550?{
     region:activeRegion,
     heights:new Float32Array(heights),
@@ -607,6 +912,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
     if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
+    if(upgradedPack.rawHeights)proceduralPack.rawHeights=upgradedPack.rawHeights;
     heights.set(upgradedPack.heights);
     device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
     if(upgradedPack.biome&&upgradedPack.biome.byteLength===biome.byteLength){
@@ -641,6 +947,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile});
       forest.updatePack(nextForestPack,heights,activeRegion);
     }
+    resetStreamedSections();
     if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
       const draft=boat.hydrodynamics?.draft??2.1;
       if(heightSample(boat.x,boat.z)>-draft*1.15){
@@ -752,6 +1059,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,get region(){return activeRegion;},get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
+    get streamedSectionCount(){return loadedSections.size;},
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
     constrain:(boat,x,z)=>constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion),
@@ -766,10 +1074,19 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(above){
         submerged.bind(pass,true);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
         if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
+        for(const sec of loadedSections.values()){
+          if(!sec.submergedGroup||!sec.indexCount)continue;
+          pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
+        }
       }else{
-        if(!submergedCount&&!fineMesh?.submergedIndices.length)return;
-        submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);
+        if(!submergedCount&&!fineMesh?.submergedIndices.length&&!loadedSections.size)return;
+        submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);
+        if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
         if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
+        for(const sec of loadedSections.values()){
+          if(!sec.submergedGroup||!sec.submergedCount)continue;
+          pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
+        }
       }
       if(submergedGround){
         submergedGround.bind(pass,above);pass.setBindGroup(0,submergedGroundGroup);
@@ -784,6 +1101,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
       if(portMesh){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);}
+      for(const sec of loadedSections.values()){
+        pass.setBindGroup(0,sec.terrainGroup);
+        pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
+        if(sec.portMesh){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);}
+      }
       // Opaque ground props have no cutout/depth reconstruction and no cloud
       // ray march per blade. They remain in Apple's opaque visibility path.
       pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);

@@ -28,7 +28,7 @@ import { createVolumetricClouds } from './clouds.js';
 import { createTerrain } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
 import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS } from './terrain-model.js';
-import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, landfallCameraYaw } from './landfall.js';
+import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution, createAdaptivePolygons } from './resolution.js';
@@ -1460,8 +1460,12 @@ async function main() {
   cameraBody.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
   const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
-  if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],LANDFALL_SEA[LAND_STAGE]);
+  if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],coastalSeaForRegion(terrain?.region,LAND_STAGE));
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
+  if(LAND_STAGE&&terrain?.region&&terrain.region.id!=='saba'&&Number(qs.get('swellDir'))===22&&Number(qs.get('windDir'))===118){
+    const naturalSea=coastalSeaForRegion(terrain.region,LAND_STAGE);
+    P.swellDir=naturalSea.swellDir;P.windDir=naturalSea.windDir;
+  }
   // Old signed-azimuth links retain their direction on the full-circle controls.
   for(const key of ['windDir','swellDir','sunAzim'])if(P[key]<0||P[key]>360)P[key]=((P[key]%360)+360)%360;
   P.sunElev=Math.max(-90,Math.min(90,P.sunElev));
