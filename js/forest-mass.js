@@ -113,8 +113,8 @@ function* forestMassChecks(manifest,streams,forest){
     r=forestMassHalf(packed.getUint16(at+16,true)),g=forestMassHalf(packed.getUint16(at+18,true)),b=forestMassHalf(packed.getUint16(at+20,true)),a=forestMassHalf(packed.getUint16(at+22,true));
    // Quantizing a unit vector to snorm8 changes its component lengths. Check
    // that quantized envelope, then normalize on GPU; never expand the stream.
-   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!Number.isFinite(r)||!Number.isFinite(g)||!Number.isFinite(b)||!Number.isFinite(a)||r<0||g<0||b<0||a<0||a>1||Math.abs(Math.hypot(nx,ny,nz)-1)>.015)throw Error('Invalid packed native forest mass vertex');
-  }else{const row=vertices.subarray(i*13,i*13+13);if(!row.every(Number.isFinite)||row[6]!==4||row[7]<0||row[7]>1||row.subarray(10,13).some(v=>v<0)||Math.abs(Math.hypot(...row.subarray(3,6))-1)>.001)throw Error('Invalid native forest mass vertex');}
+   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!Number.isFinite(r)||!Number.isFinite(g)||!Number.isFinite(b)||!Number.isFinite(a)||r<0||g<0||b<0||a<0||a>1||Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.015)throw Error('Invalid packed native forest mass vertex');
+  }else{const o=i*13;for(let k=0;k<13;k++)if(!Number.isFinite(vertices[o+k]))throw Error('Invalid native forest mass vertex');const nx=vertices[o+3],ny=vertices[o+4],nz=vertices[o+5];if(vertices[o+6]!==4||vertices[o+7]<0||vertices[o+7]>1||vertices[o+10]<0||vertices[o+11]<0||vertices[o+12]<0||Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001)throw Error('Invalid native forest mass vertex');}
   if((i&1023)===0)yield;
  }
  for(const p of manifest.chunks)for(let i=p.firstIndex;i<p.firstIndex+p.indexCount;i++){
@@ -134,15 +134,16 @@ function* forestMassChecks(manifest,streams,forest){
  if(rootNeighbors)for(let i=0;i<rootNeighbors.length;i++){const id=rootNeighbors[i];if(id!==0xffffffff&&id!==0xfffffffe&&id>=manifest.chunks.length)throw Error('Native forest mass neighbor outside chunk table');if((i&4095)===0)yield;}
  let middleVertices=null,middleIndices=null;
  if(manifest.prototypes){middleVertices=new Float32Array(streams['middle-vertices.bin']);middleIndices=new Uint32Array(streams['middle-indices.bin']);
-  for(let i=0;i<middleVertices.length;i+=13){const row=middleVertices.subarray(i,i+13);if(!row.every(Number.isFinite)||![3,4].includes(row[6])||row[7]<0||row[7]>1||row.subarray(10,13).some(v=>v<0)||Math.abs(Math.hypot(...row.subarray(3,6))-1)>.001)throw Error('Invalid native forest middle vertex');if(((i/13)&1023)===0)yield;}
+  for(let i=0;i<middleVertices.length;i+=13){for(let k=0;k<13;k++)if(!Number.isFinite(middleVertices[i+k]))throw Error('Invalid native forest middle vertex');const nx=middleVertices[i+3],ny=middleVertices[i+4],nz=middleVertices[i+5],v6=middleVertices[i+6];if((v6!==3&&v6!==4)||middleVertices[i+7]<0||middleVertices[i+7]>1||middleVertices[i+10]<0||middleVertices[i+11]<0||middleVertices[i+12]<0||Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001)throw Error('Invalid native forest middle vertex');if(((i/13)&1023)===0)yield;}
   for(const p of manifest.prototypes)for(let i=p.firstIndex;i<p.firstIndex+p.indexCount;i++){const at=middleIndices[i]*13;if(at>=middleVertices.length)throw Error('Native forest middle index outside geometry');if(p.low)for(let k=0;k<3;k++)if(middleVertices[at+k]<p.low[k]-.001||middleVertices[at+k]>p.high[k]+.001)throw Error('Native forest middle vertex outside prototype');if((i&4095)===0)yield;}
  }
  return{manifest,vertices,indices,rootChunks,rootNeighbors,middleVertices,middleIndices,finiteValidated:true};
 }
 export function decodeForestMass(manifest,streams,forest){const iterator=forestMassChecks(manifest,streams,forest);let next;do{next=iterator.next();}while(!next.done);return next.value;}
-export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false}){
+export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false,onManifest}){
  const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered native forest mass asset: '+name);const response=await fetchAsset(assets[name]);if(!response.ok)throw Error('Native forest mass asset unavailable: '+name);return response;};
  const manifest=validateForestMass(await(await load('manifest.json')).json(),forest);
+ onManifest?.(manifest);
  if(manifestOnly)return{manifest,manifestOnly:true};
  if(!globalThis.crypto?.subtle||typeof DecompressionStream!=='function')throw Error('Native forest mass requires verified gzip transport');
  const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');

@@ -3349,12 +3349,24 @@ export function synthesizeCoastalAlbedo(
       const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
       const inlandM = distInfo.distWater[gj * n + gi];
       const h = terrainSample(heights, x, z, region);
+      const sandNoise = (coastalFbm2D(u * 22 + 3.1, v * 22 - 1.7, seed, 3) - 0.5) * 2;
+      if (h <= -0.45) {
+        const shallow = coastalSmoothstep(-26, -0.6, h);
+        const shoalR = 26 + shallow * 116 + sandNoise * 5;
+        const shoalG = 56 + shallow * 112 + sandNoise * 5;
+        const shoalB = 72 + shallow * 76 + sandNoise * 4;
+        const outIdx = (j * size + i) * 4;
+        rgba[outIdx] = Math.max(0, Math.min(255, Math.round(shoalR)));
+        rgba[outIdx + 1] = Math.max(0, Math.min(255, Math.round(shoalG)));
+        rgba[outIdx + 2] = Math.max(0, Math.min(255, Math.round(shoalB)));
+        rgba[outIdx + 3] = 255;
+        continue;
+      }
       const sx = (terrainSample(heights, x + 8, z, region) - terrainSample(heights, x - 8, z, region)) / 16;
       const sz = (terrainSample(heights, x, z + 8, region) - terrainSample(heights, x, z - 8, region)) / 16;
       const slope = Math.hypot(sx, sz);
 
       const veg = vegetationProbability(biomeMask, region.biomeSize, u, v);
-      const sandNoise = (coastalFbm2D(u * 22 + 3.1, v * 22 - 1.7, seed, 3) - 0.5) * 2;
       const fineGrain = (coastalValueNoise2D(u * 68, v * 68, seed ^ 0x55aa55aa) - 0.5) * 14;
 
       // Base inland colour: continuous blend between dry coastal earth, lush forest canopy, and exposed cliff stone
@@ -4494,26 +4506,27 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const n = region.size;
   const span = region.span;
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
-  const rawBaseHeights = basePack.heights || options.precomputedHeights1550;
-  let baseHeights = rawBaseHeights;
-  if (rawBaseHeights && Math.abs(region.span - baseRegion.span) > 1.0) {
-    baseHeights = new Float32Array(n * n);
-    for (let j = 0; j < n; j++) {
-      const z = region.z + (j / (n - 1) - 0.5) * span;
-      for (let i = 0; i < n; i++) {
-        const x = region.x + (i / (n - 1) - 0.5) * span;
-        baseHeights[j * n + i] = terrainSample(rawBaseHeights, x, z, baseRegion);
-      }
-    }
-  }
-  const baseShoreDist = computeCoastalShoreDistances(baseHeights, n, span, 0.25);
-  const { distWater, step } = baseShoreDist;
 
   let heights1550 = options.precomputedHeights1550 || null;
   let lowCoastalCells = 0;
   let reclaimedCellsCarved = 0;
 
   if (!heights1550) {
+    const rawBaseHeights = basePack.heights;
+    let baseHeights = rawBaseHeights;
+    if (rawBaseHeights && Math.abs(region.span - baseRegion.span) > 1.0) {
+      baseHeights = new Float32Array(n * n);
+      for (let j = 0; j < n; j++) {
+        const z = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = 0; i < n; i++) {
+          const x = region.x + (i / (n - 1) - 0.5) * span;
+          baseHeights[j * n + i] = terrainSample(rawBaseHeights, x, z, baseRegion);
+        }
+      }
+    }
+    const baseShoreDist = computeCoastalShoreDistances(baseHeights, n, span, 0.25);
+    const { distWater, step } = baseShoreDist;
+
     // Step 1: Hybrid 1550 Geomorphic Reconstruction
     // - Lock natural hills & headlands (h > 7.5m, e.g. El Morro bluff) and add canopy/bluff micro-relief.
     // - Carve 20th-century low-lying coastal landfill (modern piers, container yards, airport runways at 0.15m..6.2m)
@@ -4532,7 +4545,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
         const sat = sampleSatelliteEquirectangular(satSource, u, v);
 
         // Protect the immediate 1550 colonial bastion & careening wharf core so historical structures stay grounded
-        const portClear = basePack.port ? portClearanceEnvelope(x, z, basePack.port) : 0;
+        const portClear = basePack.port ? portClearanceEnvelope(basePack.port, x, z) : 0;
         const inBastionCore = portClear > 0.45;
 
         if (h > 0.25) {
@@ -4618,8 +4631,6 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
       }
     }
   }
-  const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
-
   // Step 3: Build 100% De-Urbanized 1550 Orthophoto Imagery Seed
   let sat1550 = satSource
     ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho, precomputedFootprints }
@@ -4627,6 +4638,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
       ? { is1550Orthophoto: true, precomputedFootprints }
       : null;
   if (satSource && !hasDedicated1550Ortho) {
+    const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
     const sz = satSource.size;
     const rgba1550 = new Uint8ClampedArray(satSource.rgba.length);
     for (let j = 0; j < sz; j++) {
@@ -4762,7 +4774,8 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
   const isVerifiedCache = Boolean(
     meta.curated1550 ||
     meta.baseElevationSource?.startsWith('aws-terrarium') ||
-    basePack.elevationSource === 'procedural-geomorphology'
+    basePack.elevationSource === 'procedural-geomorphology' ||
+    basePack.elevationSource === 'pending-dem'
   );
   if (!isVerifiedCache) return null;
 
@@ -4818,12 +4831,20 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   fetchImpl = typeof fetch === 'function' ? fetch : null,
   forceFirstExplorer = false,
 } = {}) {
-  // Never run 1550 reconstruction on a synthetic random fallback if live DEM fetch is available
-  if (basePack.elevationSource === 'procedural-geomorphology' && fetchImpl && typeof createImageBitmap === 'function') {
-    await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000 });
-  }
+  const ensureBaseDem = async () => {
+    if (
+      (basePack.elevationSource === 'procedural-geomorphology' || basePack.elevationSource === 'pending-dem' || !basePack.heights) &&
+      fetchImpl &&
+      typeof createImageBitmap === 'function'
+    ) {
+      await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000 });
+    }
+    if (!basePack.heights && basePack.region) {
+      finalizeProceduralCoastalPack(basePack, synthesizeCoastalTerrain(basePack.region));
+    }
+  };
   const cellInfo = canonicalCoastalCellId(basePack.region);
-  await load1550BuildingLRMTemplates(fetchImpl);
+  const lrmPromise = load1550BuildingLRMTemplates(fetchImpl);
   const localKey = `waterworld.discovery.v1.${cellInfo.cellId}`;
   let status = 'first_explorer';
   let visits = 1;
@@ -4850,6 +4871,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
       }
     } catch { /* fallback to localStorage when offline */ }
   }
+  await lrmPromise;
 
   if (!remoteAvailable && !forceFirstExplorer && typeof localStorage !== 'undefined') {
     try {
@@ -4905,17 +4927,22 @@ export async function runLandfallDiscoveryPipeline(basePack, {
 
   if (status === 'cached' && !forceFirstExplorer) {
     let upgradedPack = null;
-    const orthophoto1550 = await loadOrthophoto1550();
-    if (remoteAvailable && fetchImpl) {
+    const [orthophoto1550, packBuf] = await Promise.all([
+      loadOrthophoto1550(),
+      remoteAvailable && fetchImpl
+        ? fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&v=5`)
+            .then((res) => (res && res.ok ? res.arrayBuffer() : null))
+            .then((ab) => (ab ? new Uint8Array(ab) : null))
+            .catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    if (packBuf) {
       try {
-        const res = await fetchImpl(`${apiBase}/landfall-pack?cell=${encodeURIComponent(cellInfo.cellId)}&v=5`);
-        if (res && res.ok) {
-          const buf = new Uint8Array(await res.arrayBuffer());
-          upgradedPack = apply1550TerritoryCachePayload(basePack, buf, orthophoto1550);
-        }
+        upgradedPack = apply1550TerritoryCachePayload(basePack, packBuf, orthophoto1550);
       } catch { /* fallback to local rebuild */ }
     }
     if (!upgradedPack) {
+      await ensureBaseDem();
       upgradedPack = build1550HistoricalTerritoryPack(basePack, { orthophoto1550, discoveredAt });
     }
     upgradedPack.territory1550.visits = visits;
@@ -4932,6 +4959,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
     return { status: 'cached', isFirstExplorer: false, visits, upgradedPack };
   }
 
+  await ensureBaseDem();
   // First Explorer path! Notify the player immediately that they are the first mariner here
   onFirstExplorer?.({
     cellId: cellInfo.cellId,
@@ -4940,21 +4968,21 @@ export async function runLandfallDiscoveryPipeline(basePack, {
     discoveredAt,
   });
 
-  // Yield briefly so the First Explorer banner renders smoothly while the ship sails at 60 FPS
-  await new Promise((resolve) => setTimeout(resolve, 650));
+  // Yield a frame so the First Explorer banner renders smoothly while the ship sails at 60 FPS
+  await new Promise((resolve) => setTimeout(resolve, 16));
   onProgress?.({
     stage: 'orthophoto',
     message: `Analyzing satellite coast & 1550 mangrove channels for ${cellInfo.name}…`,
   });
 
   const orthophoto1550 = await loadOrthophoto1550();
-  await new Promise((resolve) => setTimeout(resolve, 550));
+  await new Promise((resolve) => setTimeout(resolve, 16));
   onProgress?.({
     stage: 'carving',
     message: 'Removing modern coastal fill & reconstructing 1550 relief, beaches and primary canopy…',
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 450));
+  await new Promise((resolve) => setTimeout(resolve, 16));
   const upgradedPack = build1550HistoricalTerritoryPack(basePack, { orthophoto1550, discoveredAt });
   upgradedPack.territory1550.visits = 1;
   upgradedPack.territory1550.isFirstExplorer = true;

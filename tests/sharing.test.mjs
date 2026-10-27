@@ -91,3 +91,12 @@ test('shared links restore the following ship switch',()=>{
     assert.equal(link.searchParams.get('follower'),followingShip?'1':'0');
   }
 });
+
+test('shared links preserve landfall region and coordinate parameters',()=>{
+  const link=new URL(createShareLink('https://example.com/?landfall=coast&weather=clear&region=havana&lat=23.135&lon=-82.358',{},boat,'boat'));
+  assert.equal(link.searchParams.get('landfall'),'coast');
+  assert.equal(link.searchParams.get('weather'),'clear');
+  assert.equal(link.searchParams.get('region'),'havana');
+  assert.equal(link.searchParams.get('lat'),'23.135');
+  assert.equal(link.searchParams.get('lon'),'-82.358');
+});

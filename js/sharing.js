@@ -29,7 +29,7 @@ export function createShareLink(href, settings, boat, cameraMode, camera=null) {
   const url = new URL(href);
   url.search = ''; url.hash = '';
   const scene=new URL(href).searchParams;
-  for(const key of ['landfall','weather'])if(scene.has(key))url.searchParams.set(key,scene.get(key));
+  for(const key of ['landfall','weather','region','lat','lon'])if(scene.has(key))url.searchParams.set(key,scene.get(key));
   const setNumber = (key, value) => {
     if (Number.isFinite(value)) url.searchParams.set(key, String(Number(value.toFixed(6))));
   };

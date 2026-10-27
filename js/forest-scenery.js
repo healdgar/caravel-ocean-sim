@@ -163,8 +163,9 @@ export function validateForestScenery(m){
 function* forestRootChecks(manifest,roots){
   if(!(roots instanceof Float32Array)||roots.byteLength!==manifest.files['roots.bin'].bytes)throw Error('Incomplete forest roots');
   for(const p of manifest.prototypes)for(let i=p.firstRoot;i<p.firstRoot+p.rootCount;i++){
-    const r=roots.subarray(i*12,i*12+12);
-    if(!r.every(Number.isFinite)||r[3]<=0||r[3]>5||r[8]!==p.id||r[9]<0||r.subarray(5,8).some(v=>v<=0||v>2)||!forestCoversPoint(manifest,r[0],r[2]))throw Error('Invalid forest root transform');
+    const o=i*12,r0=roots[o],r2=roots[o+2],r3=roots[o+3],r5=roots[o+5],r6=roots[o+6],r7=roots[o+7],r8=roots[o+8],r9=roots[o+9];
+    for(let k=0;k<12;k++)if(!Number.isFinite(roots[o+k]))throw Error('Invalid forest root transform');
+    if(r3<=0||r3>5||r8!==p.id||r9<0||r5<=0||r5>2||r6<=0||r6>2||r7<=0||r7>2||!forestCoversPoint(manifest,r0,r2))throw Error('Invalid forest root transform');
     if((i&1023)===0)yield;
   }
 }
@@ -175,7 +176,9 @@ function* forestGeometryChecks(manifest,streams){
   const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=streams?.skipRoots?new Float32Array(0):new Float32Array(streams['roots.bin']);
   const stride=manifest.vertexStride/4;
   for(let i=0;i<vertices.length;i+=stride){
-    if(!vertices.subarray(i,i+stride).every(Number.isFinite)||Math.abs(Math.hypot(...vertices.subarray(i+3,i+6))-1)>.001||!uint(vertices[i+6])||vertices[i+6]<3||vertices[i+7]<0||vertices[i+7]>1||vertices.subarray(i+10,i+13).some(v=>v<0))throw Error('Invalid forest vertex');
+    for(let k=0;k<stride;k++)if(!Number.isFinite(vertices[i+k]))throw Error('Invalid forest vertex');
+    const nx=vertices[i+3],ny=vertices[i+4],nz=vertices[i+5],v6=vertices[i+6],v7=vertices[i+7];
+    if(Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001||!uint(v6)||v6<3||v7<0||v7>1||vertices[i+10]<0||vertices[i+11]<0||vertices[i+12]<0)throw Error('Invalid forest vertex');
     if(((i/stride)&1023)===0)yield;
   }
   for(const p of manifest.prototypes){
@@ -206,7 +209,7 @@ async function finishForestChecks(iterator,{yieldTask,signal}={}){
   }
 }
 export async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
-export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false}={}){
+export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,onManifest,onRoots}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
@@ -224,6 +227,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   // forest must never silently borrow that stand's generic foliage image.
   if(manifest.version!==2||manifest.materialContract!=='gene-surfaces-v3')throw Error('Regional forest requires current native surfaces');
   validateForestMaterials(manifest.prototypes);
+  onManifest?.(manifest);
   const rootsPromise=skipRoots?Promise.resolve(new ArrayBuffer(0)):stream('roots.bin');
   const volumePromise=loadVolumes?loadForestVolumes({forest:manifest,fetchAsset}).then(volumes=>({volumes,volumeError:null})).catch(error=>({volumes:null,volumeError:error.message})):Promise.resolve({volumes:null,volumeError:null});
   const atlasDebug=typeof location!=='undefined'&&['auto','force'].includes(new URLSearchParams(location.search).get('forestImpostor'));
@@ -232,6 +236,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
     loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message}))):Promise.resolve({impostors:null,impostorError:null});
   const lodPromise=!skipNative&&assets===FOREST_ASSETS&&!atlasDebug?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:null,nativeLodError:null});
   const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);if(!skipRoots)await finishForestChecks(forestRootChecks(manifest,roots));
+  onRoots?.({manifest,roots,...volume});
   let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
     const textures={},pending=new Map();
@@ -254,7 +259,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   // Only a complete full-sphere representation can display a forest without
   // native buffers. Upper-only legacy/missing atlases retain the eager path.
   const deferred=skipNative||deferNative||atlas.impostors?.manifest.layout.views.some(view=>view.direction[1]<0);
-  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,skipNative,...atlas,...volume,...lod,loadNative,releaseNativeCPU}:
+  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,skipNative,deferNative,...atlas,...volume,...lod,loadNative,releaseNativeCPU}:
     {...await loadNative(),...atlas,...volume,...lod,loadNative,releaseNativeCPU};
 }
 const coverageSets=new WeakMap();
@@ -823,7 +828,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       }catch(error){surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
         if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas&&!(middle&&volume))throw error;return false;}
     }
-    const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,0)).then(installNative):Promise.resolve(await installNative());
+    const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,pack.deferNative?1500:0)).then(installNative):Promise.resolve(await installNative());
     const draw=(pass,pipeline,group,cloud,cutout)=>{
       if(!native)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
       for(const p of m.prototypes){

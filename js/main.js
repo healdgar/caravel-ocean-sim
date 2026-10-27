@@ -27,7 +27,7 @@ import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { createVolumetricClouds } from './clouds.js';
 import { createTerrain } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
-import { LANDFALL_VIEWS } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, landfallCameraYaw } from './landfall.js';
 import { createGPUProfiler } from './profiler.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
@@ -76,7 +76,16 @@ const qs = new URLSearchParams(location.search);
 const astronomy=createAstronomyClock(qs,{x:Number(qs.get('boatX'))||0,z:Number(qs.get('boatZ'))||0});
 const READY_SHIPS=readyFleetModels();
 const SHIP_ID=READY_SHIPS.some(model=>model.id===qs.get('ship'))?qs.get('ship'):'nina';
-const HAS_CUSTOM_COORDS=qs.has('lat')&&qs.has('lon')&&Number.isFinite(Number(qs.get('lat')))&&Number.isFinite(Number(qs.get('lon')));
+const rawLat=qs.has('lat')?Number(qs.get('lat')):qs.has('latitude')?Number(qs.get('latitude')):NaN;
+const rawLon=qs.has('lon')?Number(qs.get('lon')):qs.has('longitude')?Number(qs.get('longitude')):NaN;
+const matchedSpanishMain=Number.isFinite(rawLat)&&Number.isFinite(rawLon)
+  ?Object.values(SPANISH_MAIN_1550_REGIONS).find(r=>Math.abs(rawLat-r.latitude)<0.05&&Math.abs(rawLon-r.longitude)<0.05)??null
+  :null;
+const hasExplicitLatLon=qs.has('lat')&&qs.has('lon')&&Number.isFinite(Number(qs.get('lat')))&&Number.isFinite(Number(qs.get('lon')));
+const hasFallbackLandfallCoords=!hasExplicitLatLon&&Number.isFinite(rawLat)&&Number.isFinite(rawLon)&&
+  (Math.abs(rawLat-ISLAND.latitude)>0.12||Math.abs(rawLon-ISLAND.longitude)>0.12)&&
+  (qs.has('landfall')||qs.has('region')||(Boolean(matchedSpanishMain)&&qs.has('boatZ')&&Math.abs(Number(qs.get('boatZ'))-ISLAND.z)<4000));
+const HAS_CUSTOM_COORDS=hasExplicitLatLon||hasFallbackLandfallCoords;
 const HAS_COASTAL_REGION=(qs.has('region')&&qs.get('region')!=='saba')||HAS_CUSTOM_COORDS;
 const LAND_STAGE=(qs.has('landfall')||HAS_COASTAL_REGION)?(Object.hasOwn(LANDFALL_VIEWS,qs.get('landfall'))?qs.get('landfall'):HAS_COASTAL_REGION?'coast':'approach'):null;
 const LAND_WEATHER=Object.hasOwn(LANDFALL_WEATHER,qs.get('weather'))?qs.get('weather'):'clear';
@@ -396,6 +405,9 @@ async function main() {
   const surfaceWaves=await createSurfaceWaves({device,computePipe});
   const rowingSurfaceEvents=createRowingSurfaceEvents(surfaceWaves);
   const waterOptics=await createWaterOptics({device,shader,seaView:fullArr(dispTex),seaSampler:samplerSim,format:HDR,surfaceWaves});
+  // Start volumetric clouds and landfall terrain/forest loading immediately in parallel with ship and crew setup
+  const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
+  const terrainPromise=LAND_STAGE?cloudsPromise.then(clouds=>createTerrain({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA})):Promise.resolve(null);
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
   const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
@@ -473,11 +485,10 @@ async function main() {
     entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&[0,4,9,12,13,14,15,18,19].includes(e.binding))})):[];
   const bgSky=bg(skyPipe,[{buffer:frameUBO},transView,skyView,sampClamp,{buffer:sunVisBuf},celestial.view],'sky');
   window.oceanStartup?.stage('weather-wildlife','Preparing weather, scenery and wildlife…');
-  const clouds = await createVolumetricClouds({ device, frameUBO, transView, skyView, sampler:sampClamp, computePipe });
+  const clouds = await cloudsPromise;
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
   const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
-  const terrainPromise=LAND_STAGE?createTerrain({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA}):Promise.resolve(null);
   const weather=createWeatherState();
   const noAnchorRenderer=Object.freeze({update(){},draw(){},drawSubmerged(){}});
   const [terrain,weatherRenderer,,dolphins,gunEffects,gunSea,gunportSafety,hullContactProbe,probePipe]=await Promise.all([
@@ -1280,15 +1291,18 @@ async function main() {
       initial1550AutoRepositioned=true;
       const v=terrain.views?.[LAND_STAGE];
       if(v){
-        boat.x=v.x;boat.z=v.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
-        if(boat.enabled){cam.x=v.x;cam.z=v.z;}
-        else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw;cam.pitch=v.pitch;}
-        if(vessels.length>1){
-          const escorts=safeEscortPositions(boat,vessels.slice(1),terrain,boat.heading);
-          for(let i=1;i<vessels.length;i++){vessels[i].x=escorts[i-1].x;vessels[i].z=escorts[i-1].z;vessels[i].heading=boat.heading;}
+        const safe=terrain.safeStart({x:v.x,z:v.z},boat);
+        boat.x=safe.x;boat.z=safe.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
+        if(boat.enabled){cam.x=boat.x;cam.z=boat.z;}
+        else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw*D2R;cam.pitch=v.pitch*D2R;}
+        for(const esc of vessels.slice(1)){
+          const L=Math.max(boat.length,esc.asset.model.runtime.length),formation=esc.formation;
+          esc.boat=copyVessel(boat,{id:esc.id,modelId:esc.modelId,distance:L*formation.trail,side:L*formation.side});
+          esc.boat.showProw=true;
+          const start=terrain.safeStart(esc.boat,esc.boat);esc.boat.x=start.x;esc.boat.z=start.z;
         }
       }
-      envFull=true;
+      if(typeof envFull!=='undefined')envFull=true;
     }
   });
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,

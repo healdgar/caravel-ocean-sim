@@ -243,11 +243,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // createTerrain is itself deferred until landfall; optional stand downloads
   // never run on the open-ocean startup path. Failure retains all old roots.
   const search=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
-  const regionParam=search.get('region');
-  const hasCustomCoords=search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon')));
+  const rawLat=search.has('lat')?Number(search.get('lat')):search.has('latitude')?Number(search.get('latitude')):NaN;
+  const rawLon=search.has('lon')?Number(search.get('lon')):search.has('longitude')?Number(search.get('longitude')):NaN;
+  const hasExplicitLatLon=search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon')));
+  const hasCustomCoords=hasExplicitLatLon||(Number.isFinite(rawLat)&&Number.isFinite(rawLon)&&(Math.abs(rawLat-ISLAND.latitude)>0.12||Math.abs(rawLon-ISLAND.longitude)>0.12));
+  const coordPresetMatch=hasCustomCoords
+    ?Object.values(SPANISH_MAIN_1550_REGIONS).find(r=>Math.abs(rawLat-r.latitude)<0.05&&Math.abs(rawLon-r.longitude)<0.05)??null
+    :null;
+  const regionParam=search.get('region')||(coordPresetMatch?coordPresetMatch.id:null);
   const presetMatch=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
-  const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(Number(search.get('lat'))-presetMatch.latitude)<0.05&&Math.abs(Number(search.get('lon'))-presetMatch.longitude)<0.05)));
-  const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(Number(search.get('lat'))-ISLAND.latitude)>0.05||Math.abs(Number(search.get('lon'))-ISLAND.longitude)>0.05);
+  const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
+  const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05);
   const useProcedural=isKnownSpanishMain||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
   const skipNativeForest=isMobile;
@@ -257,19 +263,37 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;
   let forestFailure=null;
-  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({skipNative:skipNativeForest,deferNative:!skipNativeForest&&useProcedural,skipRoots:useProcedural}).catch(error=>{forestFailure=error.message;return null;});
+  let resolveForestManifest,resolveForestRoots;
+  const forestManifestPromise=new Promise(r=>{resolveForestManifest=r;});
+  const forestRootsPromise=new Promise(r=>{resolveForestRoots=r;});
+  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
+    skipNative:skipNativeForest,
+    deferNative:!skipNativeForest&&useProcedural,
+    skipRoots:useProcedural,
+    onManifest:resolveForestManifest,
+    onRoots:resolveForestRoots,
+  }).catch(error=>{forestFailure=error.message;resolveForestManifest(null);resolveForestRoots(null);return null;});
+  if(canopyMode==='off'){resolveForestManifest(null);resolveForestRoots(null);}
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
-  let forestMassFailure=null,forestMiddleFailure=null;
+  let forestMassFailure=null,forestMiddleFailure=null,resolveMassManifest;
+  const massManifestPromise=new Promise(r=>{resolveMassManifest=r;});
+  const massOnly=skipNativeForest||useProcedural;
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
-  const forestMassPromise=forestPromise.then(forest=>forest&&forestMassMode!=='off'?loadForestMass({forest,manifestOnly:skipNativeForest||useProcedural}).catch(error=>{forestMassFailure=error.message;return null;}):null);
-  const forestMiddlePromise=Promise.all([forestPromise,forestMassPromise]).then(async([forest,mass])=>{
-    if(!forest||!mass||forestAtlasDebug)return null;
+  const forestMassPromise=(massOnly?forestManifestPromise:forestRootsPromise).then(forest=>{
+    if(!forest||forestMassMode==='off'){resolveMassManifest(null);return null;}
+    return loadForestMass({forest,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
+  });
+  const forestMiddlePromise=Promise.all([forestManifestPromise,massManifestPromise]).then(async([forestManifest,massManifest])=>{
+    if(!forestManifest||!massManifest||forestAtlasDebug)return null;
     try{
-      const middle=await loadForestMiddle({forest,mass});
-      if(middle?.manifest.recipe.leafShading==='field'&&!forest.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
+      const middle=await loadForestMiddle({forest:forestManifest,mass:massManifest});
+      if(middle?.manifest.recipe.leafShading==='field'){
+        const forest=await forestPromise;
+        if(!forest?.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
+      }
       return middle;
     }catch(error){forestMiddleFailure=error.message;return null;}
   });
@@ -277,18 +301,34 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // example is a fallback, never a second stand mixed into the new forest.
   const canopyPromise=forestPromise.then(forest=>useProcedural||forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
   const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026';
-  const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!(isMobile&&autoCurated1550);
+  const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!autoCurated1550;
   const proceduralGridOpts=isMobile
-    ?{size:257,biomeSize:256,albedoSize:512,vegetationCandidates:12000,deferSynthesis:useRealDEM}
-    :{size:513,biomeSize:512,albedoSize:1024,vegetationCandidates:24000,deferSynthesis:useRealDEM};
+    ?{size:257,biomeSize:256,albedoSize:512,vegetationCandidates:12000,deferSynthesis:useRealDEM||autoCurated1550}
+    :{size:513,biomeSize:512,albedoSize:1024,vegetationCandidates:24000,deferSynthesis:useRealDEM||autoCurated1550};
   const proceduralPack=useProcedural?generateProceduralCoastalPack(isKnownSpanishMain?regionParam:{
     id:regionParam||undefined,
     name:search.get('regionName')||undefined,
-    latitude:Number(search.get('lat')),
-    longitude:Number(search.get('lon')),
+    latitude:rawLat,
+    longitude:rawLon,
   },proceduralGridOpts):null;
-  if(proceduralPack&&useRealDEM){
-    await upgradeProceduralPackWithRealDEM(proceduralPack);
+  let preloaded1550=null;
+  if(proceduralPack){
+    if(autoCurated1550){
+      try{
+        const res=await runLandfallDiscoveryPipeline(proceduralPack);
+        if(res?.upgradedPack?.heights){
+          preloaded1550=res;
+          Object.assign(proceduralPack,res.upgradedPack);
+        }
+      }catch{/* fallback below */}
+    }
+    if(!proceduralPack.heights){
+      if(useRealDEM){
+        await upgradeProceduralPackWithRealDEM(proceduralPack);
+      }else{
+        Object.assign(proceduralPack,generateProceduralCoastalPack(proceduralPack.region,{...proceduralGridOpts,deferSynthesis:false}));
+      }
+    }
   }
   let activeRegion=proceduralPack?proceduralPack.region:ISLAND;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
@@ -545,7 +585,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     mPass.end();device.queue.submit([mEnc.finish()]);
   }
 
-  const baseSnapshot=proceduralPack?{
+  let baseSnapshot=proceduralPack&&!preloaded1550?{
     region:activeRegion,
     heights:new Float32Array(heights),
     biome:new Uint8Array(biome),
@@ -617,14 +657,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const discoveryListeners=new Set();
   const discovery={
     enabled:Boolean(proceduralPack),
-    status:proceduralPack?'checking':'none',
+    status:preloaded1550?'applied':proceduralPack?'checking':'none',
     isFirstExplorer:false,
     isCurated1550:Boolean(isKnownSpanishMain),
-    applied:false,
-    visits:1,
-    message:'',
-    stats:null,
-    upgradedPack:null,
+    applied:Boolean(preloaded1550),
+    visits:preloaded1550?.visits||1,
+    message:preloaded1550?`1550 historical territory charted · Mariner #${preloaded1550.visits||1}`:'',
+    stats:preloaded1550?.upgradedPack?.territory1550||null,
+    upgradedPack:preloaded1550?.upgradedPack||null,
     subscribe(fn){
       discoveryListeners.add(fn);
       fn(discovery);
@@ -638,6 +678,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       return applyUpgradedPack(discovery.upgradedPack,boat,true);
     },
     revertToBase(boat=null){
+      if(!baseSnapshot&&proceduralPack){
+        baseSnapshot=generateProceduralCoastalPack(activeRegion,{...proceduralGridOpts,deferSynthesis:false});
+      }
       if(!baseSnapshot)return false;
       return applyUpgradedPack(baseSnapshot,boat,false);
     },
@@ -651,7 +694,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
   }
 
-  if(proceduralPack){
+  if(proceduralPack&&!preloaded1550){
     const forceFirstExplorer=search.get('discover')==='1';
     const autoApply1550=!forceFirstExplorer&&search.get('era')!=='2026';
     setTimeout(()=>{

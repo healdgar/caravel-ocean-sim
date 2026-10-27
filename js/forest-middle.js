@@ -57,8 +57,10 @@ export async function loadForestMiddle({forest,mass,receipt=(forest?.manifest??f
   if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest middle decoded digest mismatch');streams[name]=raw;
  }
  const vertices=new Float32Array(streams['middle-vertices.bin']),indices=new Uint32Array(streams['middle-indices.bin']);
- for(let at=0;at<vertices.length;at+=13){const row=vertices.subarray(at,at+13);
-  if(!row.every(Number.isFinite)||![3,4].includes(row[6])||row[7]<0||row[7]>1||row.subarray(10,13).some(v=>v<0||v>1)||Math.abs(Math.hypot(...row.subarray(3,6))-1)>.001)throw Error('Invalid native forest middle vertex');
+ for(let at=0;at<vertices.length;at+=13){
+  for(let k=0;k<13;k++)if(!Number.isFinite(vertices[at+k]))throw Error('Invalid native forest middle vertex');
+  const nx=vertices[at+3],ny=vertices[at+4],nz=vertices[at+5],v6=vertices[at+6],v7=vertices[at+7],v10=vertices[at+10],v11=vertices[at+11],v12=vertices[at+12];
+  if((v6!==3&&v6!==4)||v7<0||v7>1||v10<0||v10>1||v11<0||v11>1||v12<0||v12>1||Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001)throw Error('Invalid native forest middle vertex');
  }
  for(const p of manifest.prototypes){const low=[Infinity,Infinity,Infinity],high=[-Infinity,-Infinity,-Infinity];
   for(const kind of ['wood','leaf']){const part=p[kind],used=new Set();
