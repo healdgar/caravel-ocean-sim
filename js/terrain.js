@@ -41,9 +41,9 @@ export function retargetForestPackToProcedural(
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const buckets = Array.from({ length: protoCount }, () => []);
-  const baseMaxRoots = isMobile ? 16000 : 58000;
+  const baseMaxRoots = isMobile ? 6000 : 14000;
   const effectiveMaxCapacity =
-    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 48000 : 160000) : baseMaxRoots);
+    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 28000));
 
   const activeClimate =
     climateProfile ??
@@ -98,7 +98,7 @@ export function retargetForestPackToProcedural(
     const seed = (region.vegetationSeed ?? 47231) >>> 0;
     if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return;
 
-    const crownSpacingFactor = isMobile ? 0.52 : 0.44;
+    const crownSpacingFactor = isMobile ? 0.58 : 0.52;
     const cellSize = 24;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -247,7 +247,7 @@ export function retargetForestPackToProcedural(
       const rTint = tint * climateTint[0];
       const gTint = tint * climateTint[1];
       const bTint = tint * climateTint[2];
-      buckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -1, 0);
+      buckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -2, 0);
       return placedIdx;
     };
 
@@ -279,7 +279,7 @@ export function retargetForestPackToProcedural(
 
   seedSectionCanopy(proceduralPack, baseMaxRoots);
   if (Array.isArray(extraSections) && extraSections.length > 0) {
-    const perSecBudget = isMobile ? 5000 : 16000;
+    const perSecBudget = isMobile ? 2500 : 5500;
     for (const sec of extraSections) {
       const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
       const remaining = effectiveMaxCapacity - currentTotal;
@@ -309,12 +309,12 @@ export function retargetForestPackToProcedural(
       const tint = 0.92 + ((hash * 7.3) % 0.16);
       const basal = forestPack.manifest.prototypes[protoId].basalRadius ?? 1.2;
       const sink = Math.max(0.12, basal * scale * slope + 0.08);
-      buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -1, 0);
+      buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -2, 0);
     }
   }
   // Ensure at least one subterranean sentinel root if a small coral cay has 0 upland trees
   if (buckets.every(b => b.length === 0)) {
-    buckets[0].push(proceduralPack.region.x, -500, proceduralPack.region.z, 0, 0, 1, 1, 1, 0, 0, -1, 0);
+    buckets[0].push(proceduralPack.region.x, -500, proceduralPack.region.z, 0, 0, 1, 1, 1, 0, 0, -2, 0);
   }
   let firstRoot = 0;
   const prototypes = forestPack.manifest.prototypes.map((p, id) => {
@@ -507,8 +507,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
     indices:buffer(fineMesh.indices,GPUBufferUsage.INDEX,'Wells Bay near indices'),
     submerged:buffer(fineMesh.submergedIndices,GPUBufferUsage.INDEX,'Wells Bay submerged near indices')}:null;
-  const regionalElevationSize=!nearTile&&proceduralPack?256:0;
+  const regionalElevationSize=!nearTile&&proceduralPack?257:0;
   const regionalElevationData=regionalElevationSize?new Float32Array(regionalElevationSize*regionalElevationSize):null;
+  const getRegionalOcclusionRegion=()=>regionalElevationSize?{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span*5,size:regionalElevationSize}:activeRegion;
   const nearDomain=buffer(new Float32Array(nearTile?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,0,0,0]:regionalElevationSize?[activeRegion.x,activeRegion.z,activeRegion.span*5,-1,regionalElevationSize,0,0,0]:[0,0,1,0,1,0,0,0]),GPUBufferUsage.UNIFORM,'Wells Bay near domain');
   // Four exact height loads from immutable storage avoid consuming another
   // sampled-texture slot in the already texture-heavy ocean fragment stage.
@@ -704,10 +705,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       };
     }
   }catch(error){proceduralMiddle=null;forestMiddleFailure=error.message;}
-  const streamMaxRoots=isMobile?48000:160000;
+  const streamMaxRoots=isMobile?24000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
-  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights,region:activeRegion,near:nearTile}}):null;
+  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};
   if(forestStats.mass.middle)forestStats.mass.middle.error=forestMiddleFailure;
@@ -944,7 +945,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         groundSample,
         {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}
       );
-      forest.updatePack(nextForestPack,heights,activeRegion);
+      forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
       lastCamera=null;
       return;
     }
@@ -1161,12 +1162,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     lastCamera=null;
     tick=0;
 
-    if(forest&&forestPack){
-      const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate});
-      forest.updatePack(nextForestPack,heights,activeRegion);
-    }
     resetStreamedSections();
     updateRegionalElevationGrid();
+    if(forest&&forestPack){
+      const nextForestPack=retargetForestPackToProcedural(forestPack,upgradedPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate});
+      forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
+    }
     if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
       const draft=boat.hydrodynamics?.draft??2.1;
       if(heightSample(boat.x,boat.z)>-draft*1.15){

@@ -75,24 +75,52 @@ fn forestTerrainHidden(centre:vec3f,radius:f32)->bool{
  }
  return false;
 }
-fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f)->bool{
- if(identity.z>=0.){return false;}
- let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
- if(camera.y<=1.5||distXZ<=45.){return false;}
- let coarse=forestTerrainDomains.coarse.xyz;let n=textureDimensions(forestTerrainCoarse,0).x;
- let crownHalfH=max(4.5,(centre.y-rootScale.y)*1.18);let treeTop=centre.y+crownHalfH;
- var canopyWallSlices=0u;
- for(var slice=1u;slice<=4u;slice++){
-  let t=f32(slice)*.2;let p=mix(camera,centre,t);
-  if(forestTerrainInside(p.xz,p.xz,coarse,n)){
-   let cell=vec2i(floor((p.xz-coarse.xy)/coarse.z));
-   let bounds=textureLoad(forestTerrainCoarse,cell,0).rg;
-   let rayTopY=mix(camera.y,treeTop,t);
-   if(bounds.r>max(1.5,rayTopY+.5)){return true;}
-   if(camera.y<13.5&&distXZ>320.&&bounds.r>=2.4&&rayTopY<bounds.r+14.5){canopyWallSlices+=1u;}
-  }
+fn forestTerrainSampleBounds(p:vec2f)->vec2f{
+ let fine=forestTerrainDomains.fine.xyz;let fineN=textureDimensions(forestTerrainFine,0).x;
+ if(forestTerrainDomains.coarse.w>.5&&forestTerrainInside(p,p,fine,fineN)){
+  let cell=vec2i(floor((p-fine.xy)/fine.z));return textureLoad(forestTerrainFine,cell,0).rg;
  }
- if(canopyWallSlices>=3u&&distXZ>340.){return true;}
+ let coarse=forestTerrainDomains.coarse.xyz;let coarseN=textureDimensions(forestTerrainCoarse,0).x;
+ if(forestTerrainInside(p,p,coarse,coarseN)){
+  let cell=vec2i(floor((p-coarse.xy)/coarse.z));return textureLoad(forestTerrainCoarse,cell,0).rg;
+ }
+ return vec2f(-120.,-120.);
+}
+fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
+ if(identity.z>-1.5){return 0u;}
+ let camera=F.camPos.xyz;let toCam=camera.xz-centre.xz;let distXZ=length(toCam);
+ if(camera.y<=1.5||distXZ<=55.){return 0u;}
+ let dirToCam=toCam/distXZ;
+ let crownHalfH=max(4.5,(centre.y-rootScale.y)*1.18);let treeTop=centre.y+crownHalfH;
+ let probeDists=array<f32,5>(28.,56.,88.,125.,168.);
+ var standSteps=0u;
+ for(var i=0u;i<5u;i++){
+  let dFront=probeDists[i];
+  if(dFront>=distXZ-16.){break;}
+  let pXZ=centre.xz+dirToCam*dFront;
+  let bounds=forestTerrainSampleBounds(pXZ);
+  let t=1.-dFront/distXZ;
+  let rayTopY=mix(camera.y,treeTop,t);
+  if(bounds.r>max(1.6,rayTopY+.4)){return 99u;}
+  if(bounds.r>=1.85&&rayTopY<bounds.g+16.5){standSteps+=1u;}
+ }
+ return standSteps;
+}
+fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32)->bool{
+ if(identity.z>-1.5){return false;}
+ let standSteps=forestCoastalStandSteps(centre,rootScale,identity);
+ if(standSteps>=99u){return true;}
+ let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
+ if(camera.y<42.){
+  if(standSteps>=4u&&distXZ>220.){return true;}
+  if(standSteps>=3u&&distXZ>180.&&(rootId&3u)!=0u){return true;}
+  if(standSteps==2u&&distXZ>340.&&(rootId&1u)!=0u){return true;}
+ }else{
+  if(standSteps>=4u&&distXZ>520.&&(rootId&3u)!=0u){return true;}
+  if(standSteps==3u&&distXZ>720.&&(rootId&1u)!=0u){return true;}
+ }
+ if(distXZ>1800.&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
+ if(distXZ>3800.&&(rootId&1u)!=0u){return true;}
  return false;
 }
 `;
@@ -101,7 +129,8 @@ export function withForestTerrainOcclusion(source){
  const marker4='previousLod[id.x]=select(select(select(0u,3u,mid2Lod),2u,midLod),1u,nearLod);';
  const marker=source.includes(marker4)?marker4:marker3;
  if(!source.includes(marker)||source.includes('fn forestTerrainHidden('))throw Error('Forest terrain occlusion source mismatch');
- return source.replace(marker,'if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity)){return;}\n '+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
+ const next=source.replace('var coastalStandSteps=0u;','var coastalStandSteps=forestCoastalStandSteps(world,r.rootScale,r.identity);');
+ return next.replace(marker,'if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x)){return;}\n '+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 export function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;
@@ -123,7 +152,7 @@ export function createForestTerrainOcclusion({device,heights,region,near=null}){
    }
    let nextSeaBoundary=true;for(let i=0;i<activeReg.size;i++)for(const at of[i,(activeReg.size-1)*activeReg.size+i,i*activeReg.size,i*activeReg.size+activeReg.size-1])if(nextHeights[at]>0)nextSeaBoundary=false;
    if(uniform){
-    const useFine=fine&&activeReg===region;
+    const useFine=Boolean(fine&&activeReg.x===region.x&&activeReg.z===region.z);
     const nextData=new Float32Array([...nextCoarse.domain,useFine?1:0,...(useFine?fine.domain:nextCoarse.domain),nextSeaBoundary?1:0]);
     device.queue.writeBuffer(uniform,0,nextData);
    }
