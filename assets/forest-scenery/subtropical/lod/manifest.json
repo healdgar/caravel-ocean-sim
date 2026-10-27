@@ -1,0 +1,206 @@
+{
+  "format": "waterworld.forest-native-lod",
+  "version": 1,
+  "units": "metres",
+  "upAxis": "Y",
+  "vertexStride": 56,
+  "sourceManifest": {
+    "file": "../manifest.json",
+    "rootsSha256": "5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963",
+    "nearVerticesSha256": "221f8306f17062d66c059aa78f47342c602c37eabb63f1b730b0ce9c92737351"
+  },
+  "files": {
+    "lod-vertices.bin": {
+      "bytes": 22285536,
+      "sha256": "298f2048e86c7241f2704b1550b9ff9e41f1f2d98f8cbcfcd77f2bfaaece9fee",
+      "gzip": {
+        "file": "lod-vertices.bin.gz",
+        "bytes": 7427801,
+        "sha256": "ce8b99b0c5b3e3bc871e06f1936e025bdec272089d4d7585e45164ae71116700"
+      },
+      "vertexCount": 397956,
+      "nearVertexCount": 295464,
+      "ribbonVertexCount": 102492
+    },
+    "lod-indices.bin": {
+      "bytes": 1320264,
+      "sha256": "ce887c13245a57663d801736a230d8950811971db7e76601e6808ba06dd471fe",
+      "gzip": {
+        "file": "lod-indices.bin.gz",
+        "bytes": 366251,
+        "sha256": "c83a128ac35e33d5a9618256d56ba23b9ede7ec3406b7504dd43e22f1467c404"
+      },
+      "indexCount": 330066
+    }
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "royal_palm",
+      "woodTiers": [
+        {
+          "tier": "near",
+          "firstIndex": 0,
+          "indexCount": 32112,
+          "triangles": 10704,
+          "maxGeometricErrorMetres": 0.0
+        },
+        {
+          "tier": "mid1",
+          "firstIndex": 32112,
+          "indexCount": 6540,
+          "triangles": 2180,
+          "maxGeometricErrorMetres": 2.5325
+        },
+        {
+          "tier": "mid2",
+          "firstIndex": 38652,
+          "indexCount": 1797,
+          "triangles": 599,
+          "maxGeometricErrorMetres": 2.8166
+        }
+      ],
+      "leafRibbons": {
+        "sourceCardCount": 22416,
+        "mid1": {
+          "firstIndex": 40449,
+          "indexCount": 56094,
+          "triangles": 18698,
+          "cardCount": 9349
+        },
+        "mid2": {
+          "firstIndex": 96543,
+          "indexCount": 20718,
+          "triangles": 6906,
+          "cardCount": 3453
+        }
+      }
+    },
+    {
+      "id": 1,
+      "species": "palm",
+      "woodTiers": [
+        {
+          "tier": "near",
+          "firstIndex": 117261,
+          "indexCount": 34986,
+          "triangles": 11662,
+          "maxGeometricErrorMetres": 0.0
+        },
+        {
+          "tier": "mid1",
+          "firstIndex": 152247,
+          "indexCount": 6930,
+          "triangles": 2310,
+          "maxGeometricErrorMetres": 2.5175
+        },
+        {
+          "tier": "mid2",
+          "firstIndex": 159177,
+          "indexCount": 2115,
+          "triangles": 705,
+          "maxGeometricErrorMetres": 2.5177
+        }
+      ],
+      "leafRibbons": {
+        "sourceCardCount": 24612,
+        "mid1": {
+          "firstIndex": 161292,
+          "indexCount": 61566,
+          "triangles": 20522,
+          "cardCount": 10261
+        },
+        "mid2": {
+          "firstIndex": 222858,
+          "indexCount": 22830,
+          "triangles": 7610,
+          "cardCount": 3805
+        }
+      }
+    },
+    {
+      "id": 2,
+      "species": "ceiba",
+      "woodTiers": [
+        {
+          "tier": "near",
+          "firstIndex": 245688,
+          "indexCount": 12087,
+          "triangles": 4029,
+          "maxGeometricErrorMetres": 0.0
+        },
+        {
+          "tier": "mid1",
+          "firstIndex": 257775,
+          "indexCount": 5589,
+          "triangles": 1863,
+          "maxGeometricErrorMetres": 2.9342
+        },
+        {
+          "tier": "mid2",
+          "firstIndex": 263364,
+          "indexCount": 1746,
+          "triangles": 582,
+          "maxGeometricErrorMetres": 2.9414
+        }
+      ],
+      "leafRibbons": {
+        "sourceCardCount": 4864,
+        "mid1": {
+          "firstIndex": 265110,
+          "indexCount": 12030,
+          "triangles": 4010,
+          "cardCount": 2005
+        },
+        "mid2": {
+          "firstIndex": 277140,
+          "indexCount": 4374,
+          "triangles": 1458,
+          "cardCount": 729
+        }
+      }
+    },
+    {
+      "id": 3,
+      "species": "mangrove",
+      "woodTiers": [
+        {
+          "tier": "near",
+          "firstIndex": 281514,
+          "indexCount": 10395,
+          "triangles": 3465,
+          "maxGeometricErrorMetres": 0.0
+        },
+        {
+          "tier": "mid1",
+          "firstIndex": 291909,
+          "indexCount": 4080,
+          "triangles": 1360,
+          "maxGeometricErrorMetres": 1.3226
+        },
+        {
+          "tier": "mid2",
+          "firstIndex": 295989,
+          "indexCount": 1077,
+          "triangles": 359,
+          "maxGeometricErrorMetres": 1.5492
+        }
+      ],
+      "leafRibbons": {
+        "sourceCardCount": 9680,
+        "mid1": {
+          "firstIndex": 297066,
+          "indexCount": 24048,
+          "triangles": 8016,
+          "cardCount": 4008
+        },
+        "mid2": {
+          "firstIndex": 321114,
+          "indexCount": 8952,
+          "triangles": 2984,
+          "cardCount": 1492
+        }
+      }
+    }
+  ]
+}

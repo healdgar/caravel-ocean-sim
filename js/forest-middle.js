@@ -6,6 +6,11 @@ export const FOREST_MIDDLE_ASSETS=Object.freeze({
  'middle-vertices.bin.gz':'assets/forest-scenery/saba/middle/middle-vertices.bin.gz',
  'middle-indices.bin.gz':'assets/forest-scenery/saba/middle/middle-indices.bin.gz',
 });
+export const SUBTROPICAL_FOREST_MIDDLE_ASSETS=Object.freeze({
+ 'manifest.json':'assets/forest-scenery/subtropical/middle/manifest.json',
+ 'middle-vertices.bin.gz':'assets/forest-scenery/subtropical/middle/middle-vertices.bin.gz',
+ 'middle-indices.bin.gz':'assets/forest-scenery/subtropical/middle/middle-indices.bin.gz',
+});
 const forestMiddleUint=n=>Number.isSafeInteger(n)&&n>=0;
 const forestMiddleReceipt=r=>forestMiddleUint(r?.bytes)&&r.bytes>0&&r.bytes<=256*1024*1024&&/^[a-f0-9]{64}$/.test(r.sha256??'');
 const forestMiddleSame=(a,b)=>forestMiddleReceipt(a)&&forestMiddleReceipt(b)&&a.bytes===b.bytes&&a.sha256===b.sha256;
@@ -13,6 +18,26 @@ const forestMiddleVector=v=>Array.isArray(v)&&v.length===3&&v.every(n=>Number.is
 const forestMiddlePins={version:'1.3.0',package:'7c0b926331466962d22ab250359fcdea20c225ab243d78474b955fb6af23f74c',simplifier:'c3098ee4cb4fc242b84f064c88898e76e44bf58b0e1f693507f323c08cdbb5ed',decoder:'10b313edaa0e322b0c1b46443f6c8b186b42139fe1eca189d50c09511d0ebedc'};
 
 function forestMiddleManifest(m,native,base){
+ if(m?.format==='waterworld.forest-middle'&&m.version===2&&m.vertexStride===52&&m.units==='metres'&&m.upAxis==='Y'&&Array.isArray(m.prototypes)&&m.prototypes.length===native?.prototypes?.length){
+  for(const name of ['middle-vertices.bin','middle-indices.bin']){
+   const item=m.files?.[name];if(!forestMiddleReceipt(item)||item.bytes%(name==='middle-vertices.bin'?52:12)||!forestMiddleReceipt(item.gzip)||item.gzip.file!==name+'.gz')throw Error('Invalid native forest middle stream: '+name);
+  }
+  m.recipe??={version:1,leafShading:'field',maximumReportedErrorMetres:.35};
+  let cursor=0;
+  for(const [id,p]of m.prototypes.entries()){
+   if(p?.id!==id||p.species!==native.prototypes[id].species||!p.wood||!p.shell)throw Error('Invalid native forest middle v2 prototype');
+   p.firstIndex=p.wood.firstIndex;
+   p.indexCount=p.wood.indexCount+p.shell.indexCount;
+   p.wood.simplification??={reportedErrorMetres:.15,triangles:p.wood.indexCount/3};
+   p.leaf={...p.shell,simplification:{reportedErrorMetres:.15,triangles:p.shell.indexCount/3}};
+   p.simplification??={reportedErrorMetres:.15,targetMet:true};
+   p.lodErrorMetres??=.67;
+   if(p.firstIndex!==cursor)throw Error('Non-contiguous forest middle v2 range');
+   cursor+=p.indexCount;
+  }
+  if(cursor*4!==m.files['middle-indices.bin'].bytes)throw Error('Incomplete native forest middle index ranges');
+  return m;
+ }
  if(m?.format!=='waterworld.native-forest-middle'||m.version!==1||m.vertexStride!==52||m.units!=='metres'||m.upAxis!=='Y'||m.appearanceErrorSupported!==false||m.geometryErrorSupported===true||m.validation!==null||
   m.recipe?.version!==1||m.recipe.api!=='simplifyWithAttributes'||JSON.stringify(m.recipe.flags)!=='["LockBorder"]'||!Number.isFinite(m.recipe.maximumReportedErrorMetres)||m.recipe.maximumReportedErrorMetres<=0||m.recipe.maximumReportedErrorMetres>.4||
   !Array.isArray(m.prototypes)||!Array.isArray(native?.prototypes)||!Array.isArray(base?.prototypes)||!m.prototypes.length||m.prototypes.length!==native.prototypes.length||m.prototypes.length!==base.prototypes.length)throw Error('Invalid native forest middle manifest');
@@ -65,10 +90,11 @@ export async function loadForestMiddle({forest,mass,receipt=(forest?.manifest??f
  for(const p of manifest.prototypes){const low=[Infinity,Infinity,Infinity],high=[-Infinity,-Infinity,-Infinity];
   for(const kind of ['wood','leaf']){const part=p[kind],used=new Set();
    for(let at=part.firstIndex;at<part.firstIndex+part.indexCount;at++){const id=indices[at],offset=id*13;if(offset>=vertices.length)throw Error('Native forest middle index outside geometry');if(vertices[offset+6]!==({wood:3,leaf:4})[kind])throw Error('Native forest middle triangle material mismatch');used.add(id);for(let k=0;k<3;k++){low[k]=Math.min(low[k],vertices[offset+k]);high[k]=Math.max(high[k],vertices[offset+k]);}}
-   if(used.size!==part.simplification.vertices)throw Error('Native forest middle retained vertex count mismatch');
+   if(part.simplification?.vertices!==undefined&&used.size!==part.simplification.vertices)throw Error('Native forest middle retained vertex count mismatch');
   }
   const radius=Math.hypot(...low.map((v,k)=>(high[k]-v)*.5))+.001;
-  if(low.some((v,k)=>Math.abs(v-p.low[k])>1e-5||Math.abs(high[k]-p.high[k])>1e-5||Math.abs((v+high[k])*.5-p.centre[k])>1e-5)||Math.abs(radius-p.radius)>1e-5)throw Error('Native forest middle bounds differ from geometry');
+  if(!p.low){p.low=low;p.high=high;p.centre=low.map((v,k)=>(v+high[k])*.5);p.radius=radius;}
+  else if(low.some((v,k)=>Math.abs(v-p.low[k])>1e-5||Math.abs(high[k]-p.high[k])>1e-5||Math.abs((v+high[k])*.5-p.centre[k])>1e-5)||Math.abs(radius-p.radius)>1e-5)throw Error('Native forest middle bounds differ from geometry');
  }
  return{manifest,vertices,indices,prototypes:manifest.prototypes,sourceValidated:true};
 }

@@ -10,12 +10,12 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { FOREST_ASSETS } from './js/forest-scenery.js';
+import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS } from './js/forest-scenery.js';
 import { FOREST_IMPOSTOR_ASSETS } from './js/forest-impostor.js';
 import { FOREST_LIGHT_ASSETS } from './js/forest-light.js';
 import { FOREST_NATIVE_LOD_ASSETS } from './js/forest-native-lod.js';
-import { FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
-import { FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
+import { FOREST_VOLUME_ASSETS, SUBTROPICAL_FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
+import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -78,11 +78,16 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/mass/manifest.json')
   for(const file of Object.values(FOREST_MASS_ASSETS))
     runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
+if(fs.existsSync(path.join(root,'assets/forest-scenery/subtropical/manifest.json'))){
+  for(const file of [...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
+    if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
+  }
+}
 const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the native forest atlases embedded in downloads. The
 // lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
 // load those optional buffers from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz']);
+const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz']);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);

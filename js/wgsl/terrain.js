@@ -325,7 +325,7 @@ struct LandVertex {
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
-  let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.06,edgeDist);
+  let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.36,edgeDist);
   let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rg;
   let cloudSunVis=select(0.0,volumeSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
   let sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);

@@ -547,6 +547,468 @@ function coastalInferBearingFromRings(lat, lon, rings) {
   return bestBearing;
 }
 
+const CLIMATE_MONTH_KEYS = Object.freeze([
+  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+]);
+const CLIMATE_PROFILE_CACHE = new Map();
+
+function normalizeSpeciesWeights(weights) {
+  let sum = 0;
+  for (const v of Object.values(weights)) {
+    if (Number.isFinite(v) && v > 0) sum += v;
+  }
+  if (sum <= 1e-9) return weights;
+  const out = {};
+  for (const [k, v] of Object.entries(weights)) {
+    out[k] = Math.round((Math.max(0, v) / sum) * 10000) / 10000;
+  }
+  return Object.freeze(out);
+}
+
+// Classify Köppen-Geiger climate zone and derive ecological plant species mix weights
+// from 12 monthly mean temperatures (°C), 12 monthly precipitation rates (mm/day), and mean relative humidity (%).
+export function classifyKoppenClimateFromNormals({
+  monthlyTempC,
+  monthlyPrecipMmDay,
+  monthlyPrecipMm: rawMonthlyPrecipMm,
+  meanHumidityPct,
+  meanRelHumidityPct,
+  latitude = 15,
+  longitude = -75,
+  source = 'bioclimatic-model',
+} = {}) {
+  const effectiveHumidityPct = Number.isFinite(meanHumidityPct)
+    ? meanHumidityPct
+    : Number.isFinite(meanRelHumidityPct)
+    ? meanRelHumidityPct
+    : 76;
+  const temps = Array.isArray(monthlyTempC) && monthlyTempC.length === 12
+    ? monthlyTempC.map(Number)
+    : Array(12).fill(26);
+  const monthlyPrecipMm = Array.isArray(rawMonthlyPrecipMm) && rawMonthlyPrecipMm.length === 12
+    ? rawMonthlyPrecipMm.map(v => Math.max(0, Number(v) || 0))
+    : (Array.isArray(monthlyPrecipMmDay) && monthlyPrecipMmDay.length === 12
+        ? monthlyPrecipMmDay.map(v => Math.max(0, Number(v) || 0) * 30.4375)
+        : Array(12).fill(4.2 * 30.4375));
+
+  const meanAnnualTempC = temps.reduce((a, b) => a + b, 0) / 12;
+  const coldestMonthTempC = Math.min(...temps);
+  const warmestMonthTempC = Math.max(...temps);
+  const annualPrecipMm = monthlyPrecipMm.reduce((a, b) => a + b, 0);
+  const driestMonthPrecipMm = Math.min(...monthlyPrecipMm);
+  const wettestMonthPrecipMm = Math.max(...monthlyPrecipMm);
+  const drySeasonMonths = monthlyPrecipMm.filter(p => p < 60).length;
+
+  const isNorthern = latitude >= 0;
+  const summerIndices = isNorthern ? [3, 4, 5, 6, 7, 8] : [9, 10, 11, 0, 1, 2];
+  const winterIndices = isNorthern ? [9, 10, 11, 0, 1, 2] : [3, 4, 5, 6, 7, 8];
+  const summerPrecipMm = summerIndices.reduce((acc, idx) => acc + monthlyPrecipMm[idx], 0);
+  const winterPrecipMm = winterIndices.reduce((acc, idx) => acc + monthlyPrecipMm[idx], 0);
+  const driestSummerMm = Math.min(...summerIndices.map(idx => monthlyPrecipMm[idx]));
+  const wettestWinterMm = Math.max(...winterIndices.map(idx => monthlyPrecipMm[idx]));
+
+  const precipSeasonOffset = summerPrecipMm >= 0.7 * Math.max(1, annualPrecipMm)
+    ? 280
+    : winterPrecipMm >= 0.7 * Math.max(1, annualPrecipMm)
+      ? 0
+      : 140;
+  const aridityThresholdMm = Math.max(120, 20 * meanAnnualTempC + precipSeasonOffset);
+
+  let koppenCode = 'Am';
+  let koppenLabel = 'Tropical Monsoon Coast';
+  let climateZone = 'tropical';
+
+  if (annualPrecipMm < 0.5 * aridityThresholdMm) {
+    koppenCode = meanAnnualTempC >= 18 ? 'BWh' : 'BWk';
+    koppenLabel = meanAnnualTempC >= 18 ? 'Hot Arid Coastal Desert' : 'Cool Arid Steppe Coast';
+    climateZone = 'arid';
+  } else if (annualPrecipMm < aridityThresholdMm) {
+    koppenCode = meanAnnualTempC >= 18 ? 'BSh' : 'BSk';
+    koppenLabel = meanAnnualTempC >= 18 ? 'Tropical / Subtropical Semi-Arid Scrub' : 'Temperate Semi-Arid Coast';
+    climateZone = 'arid';
+  } else if (coldestMonthTempC >= 18.0) {
+    climateZone = 'tropical';
+    if (driestMonthPrecipMm >= 60.0) {
+      koppenCode = 'Af';
+      koppenLabel = 'Equatorial / Tropical Rainforest';
+    } else if (driestMonthPrecipMm >= 100.0 - annualPrecipMm / 25.0) {
+      koppenCode = 'Am';
+      koppenLabel = 'Tropical Monsoon Forest';
+    } else {
+      koppenCode = 'Aw';
+      koppenLabel = 'Tropical Wet-Dry Savanna & Gallery Forest';
+    }
+  } else if (
+    coldestMonthTempC >= 9.5 ||
+    (Math.abs(latitude) < 34.0 && warmestMonthTempC >= 21.5 && coldestMonthTempC > 5.0)
+  ) {
+    if (
+      Math.abs(latitude) >= 27.5 &&
+      driestSummerMm < 40.0 &&
+      driestSummerMm < wettestWinterMm / 3.0
+    ) {
+      koppenCode = warmestMonthTempC >= 22.0 ? 'Csa' : 'Csb';
+      koppenLabel = 'Mediterranean Warm-Summer Coast';
+      climateZone = 'mediterranean';
+    } else {
+      koppenCode = driestMonthPrecipMm < 30.0 ? 'Cwa' : 'Cfa';
+      koppenLabel = 'Humid Subtropical Coast';
+      climateZone = 'subtropical';
+    }
+  } else if (warmestMonthTempC < 15.0 || Math.abs(latitude) >= 58.0) {
+    koppenCode = 'Dfc';
+    koppenLabel = 'Subpolar / Boreal Fjord Coast';
+    climateZone = 'boreal';
+  } else {
+    koppenCode = coldestMonthTempC < -2.0 ? 'Dfb' : 'Cfb';
+    koppenLabel = coldestMonthTempC < -2.0 ? 'Humid Continental Hardwood Coast' : 'Oceanic Temperate Broadleaf Coast';
+    climateZone = 'temperate';
+  }
+
+  // Use the tropical/subtropical plant mix (royal_palm, palm, ceiba, mangrove) for all tropical,
+  // subtropical, and warm semi-arid/arid coastal regions.
+  const isTropicalOrSubtropical =
+    climateZone === 'tropical' ||
+    climateZone === 'subtropical' ||
+    (climateZone === 'arid' && (meanAnnualTempC >= 18.0 || Math.abs(latitude) < 33.5));
+  const forestPackKind = isTropicalOrSubtropical ? 'subtropical' : 'temperate';
+
+  const moistureNorm = Math.max(0, Math.min(1.5, annualPrecipMm / 1800));
+  const humidityNorm = Math.max(0, Math.min(1.2, (effectiveHumidityPct - 45) / 45));
+  const warmthNorm = Math.max(0, Math.min(1.2, (coldestMonthTempC - 8) / 16));
+  const drySeasonIntensity = Math.max(0, Math.min(1, drySeasonMonths / 8));
+
+  let uplandForestWeights;
+  let coastalStrandWeights;
+  let lagoonMangroveWeights;
+  let canopyDensityMultiplier = 1.0;
+  let foliageTint = [0.82, 1.08, 0.72];
+
+  if (forestPackKind === 'subtropical') {
+    // Dynamically balance the 4 tropical/subtropical species (royal_palm, palm, ceiba, mangrove)
+    // according to local rainfall, dry-season length, humidity, and winter minimum temperature:
+    // - Af (Rainforest): tall emergent Ceiba pentandra + Cuban Royal Palm + Coconut Palm + estuarine Mangrove
+    // - Am (Monsoon): abundant Cuban Royal Palm + Coconut Palm + Ceiba + Mangrove
+    // - Aw (Wet-Dry Savanna): sunlit Royal Palm & Coconut Palm groves with gallery Ceiba and lagoon Mangroves
+    // - Cfa/Cwa (Humid Subtropical): Sabal/Royal Palm + broadleaf Ceiba hammock + coastal Palm & Mangrove
+    // - BSh/BWh (Warm Semi-Arid/Arid): Coconut/Date Palm & Royal Palm oasis mix
+    const ceibaShare =
+      climateZone === 'arid'
+        ? 0.06
+        : Math.max(0.10, Math.min(0.55, 0.14 + 0.28 * moistureNorm - 0.12 * drySeasonIntensity + 0.05 * warmthNorm));
+    const royalPalmShare =
+      climateZone === 'arid'
+        ? 0.28
+        : Math.max(0.24, Math.min(0.44, 0.32 + 0.06 * warmthNorm + 0.04 * drySeasonIntensity));
+    const coconutPalmShare =
+      climateZone === 'arid'
+        ? 0.50
+        : Math.max(0.14, Math.min(0.42, 0.24 + 0.14 * drySeasonIntensity - 0.08 * moistureNorm));
+    const mangroveUplandShare =
+      climateZone === 'arid'
+        ? 0.16
+        : Math.max(0.10, Math.min(0.22, 0.11 + 0.05 * humidityNorm + 0.03 * moistureNorm));
+
+    uplandForestWeights = normalizeSpeciesWeights({
+      royal_palm: royalPalmShare,
+      palm: coconutPalmShare,
+      ceiba: ceibaShare,
+      mangrove: mangroveUplandShare,
+    });
+    coastalStrandWeights = normalizeSpeciesWeights({
+      palm: 0.52 + 0.08 * drySeasonIntensity,
+      royal_palm: 0.28,
+      mangrove: 0.14 + 0.06 * moistureNorm,
+      ceiba: 0.06,
+    });
+    lagoonMangroveWeights = normalizeSpeciesWeights({
+      mangrove: 0.62 + 0.08 * humidityNorm,
+      palm: 0.22,
+      royal_palm: 0.10,
+      ceiba: 0.06,
+    });
+
+    canopyDensityMultiplier =
+      climateZone === 'arid'
+        ? 0.52
+        : Math.max(0.75, Math.min(1.22, 0.78 + 0.28 * moistureNorm + 0.08 * humidityNorm));
+    foliageTint =
+      koppenCode === 'Af'
+        ? [0.76, 1.14, 0.66]
+        : koppenCode === 'Aw' || climateZone === 'arid'
+          ? [0.88, 1.06, 0.70]
+          : [0.80, 1.11, 0.68];
+  } else {
+    // Temperate / Mediterranean / Boreal broadleaf & mixed stand modulation
+    const oakShare =
+      climateZone === 'mediterranean'
+        ? 0.46
+        : climateZone === 'boreal'
+          ? 0.12
+          : Math.max(0.20, Math.min(0.42, 0.26 + 0.12 * warmthNorm));
+    const mapleShare =
+      climateZone === 'mediterranean'
+        ? 0.10
+        : Math.max(0.18, Math.min(0.34, 0.28 - 0.04 * drySeasonIntensity));
+    const birchShare =
+      climateZone === 'boreal'
+        ? 0.46
+        : climateZone === 'mediterranean'
+          ? 0.04
+          : Math.max(0.10, Math.min(0.32, 0.22 - 0.12 * warmthNorm));
+    const elmShare = Math.max(0.08, Math.min(0.22, 0.14 + 0.04 * moistureNorm));
+    const chestnutShare =
+      climateZone === 'mediterranean'
+        ? 0.26
+        : Math.max(0.06, Math.min(0.20, 0.12 + 0.06 * warmthNorm));
+
+    uplandForestWeights = normalizeSpeciesWeights({
+      oak: oakShare,
+      maple: mapleShare,
+      birch: birchShare,
+      elm: elmShare,
+      chestnut: chestnutShare,
+    });
+    coastalStrandWeights = normalizeSpeciesWeights({
+      oak: oakShare * 1.15,
+      birch: birchShare * 1.1,
+      elm: elmShare * 1.2,
+      maple: mapleShare * 0.8,
+      chestnut: chestnutShare * 0.8,
+    });
+    lagoonMangroveWeights = normalizeSpeciesWeights({
+      elm: 0.34,
+      birch: 0.28,
+      maple: 0.20,
+      oak: 0.12,
+      chestnut: 0.06,
+    });
+    canopyDensityMultiplier =
+      climateZone === 'mediterranean'
+        ? 0.78
+        : Math.max(0.72, Math.min(1.15, 0.82 + 0.22 * moistureNorm));
+    foliageTint =
+      climateZone === 'mediterranean'
+        ? [0.94, 0.98, 0.78]
+        : [0.92, 1.02, 0.88];
+  }
+
+  return Object.freeze({
+    source,
+    latitude: Number(latitude.toFixed(4)),
+    longitude: Number(longitude.toFixed(4)),
+    koppenCode,
+    koppenLabel,
+    climate: climateZone,
+    climateZone,
+    forestPackKind,
+    meanAnnualTempC: Number(meanAnnualTempC.toFixed(1)),
+    coldestMonthTempC: Number(coldestMonthTempC.toFixed(1)),
+    warmestMonthTempC: Number(warmestMonthTempC.toFixed(1)),
+    annualPrecipMm: Math.round(annualPrecipMm),
+    driestMonthPrecipMm: Math.round(driestMonthPrecipMm),
+    wettestMonthPrecipMm: Math.round(wettestMonthPrecipMm),
+    drySeasonMonths,
+    meanHumidityPct: Math.round(effectiveHumidityPct),
+    canopyDensityMultiplier: Number(canopyDensityMultiplier.toFixed(3)),
+    foliageTint: Object.freeze(foliageTint),
+    speciesWeights: uplandForestWeights,
+    uplandForestWeights,
+    coastalStrandWeights,
+    lagoonMangroveWeights,
+  });
+}
+
+// Instantaneous bioclimatic estimator from (latitude, longitude) and regional geography.
+export function estimateLocalClimateProfile(latitude = 10.423, longitude = -75.548, region = null) {
+  const lat = Number.isFinite(Number(latitude)) ? Number(latitude) : region?.latitude ?? 10.423;
+  const lon = Number.isFinite(Number(longitude)) ? Number(longitude) : region?.longitude ?? -75.548;
+  const absLat = Math.abs(lat);
+  const latRad = absLat * COASTAL_DEG_TO_RAD;
+
+  // Base sea-level mean temperature and seasonal amplitude
+  const baseMeanTemp = 28.4 - 22.5 * Math.pow(Math.sin(latRad), 1.35);
+  const seasonalAmp = Math.min(14.5, 1.1 + 11.8 * Math.pow(Math.sin(latRad), 1.25));
+
+  // Regional trade-wind / monsoon / ocean-current moisture & temperature adjustments
+  const isCaribbean = lat >= 7 && lat <= 25 && lon >= -92 && lon <= -58;
+  const isPanamaIsthmus = lat >= 7 && lat <= 10.1 && lon >= -83 && lon <= -77;
+  const isSubtropicalWestAtlantic = lat > 25 && lat <= 34 && lon >= -85 && lon <= -74;
+  const isMediterranean = lat >= 30 && lat <= 45 && lon >= -10 && lon <= 36;
+  const isSubtropicalAridBelt =
+    absLat >= 18 &&
+    absLat <= 31 &&
+    !isCaribbean &&
+    !isSubtropicalWestAtlantic &&
+    ((lon >= -118 && lon <= -104) || (lon >= -18 && lon <= 58) || (lon >= 112 && lon <= 125));
+
+  let annualRainMm = 1450;
+  let dryRatio = 0.25;
+  let wetRatio = 1.85;
+  let meanHumidity = 78;
+
+  if (isPanamaIsthmus) {
+    annualRainMm = 2850;
+    dryRatio = 0.48;
+    wetRatio = 1.65;
+    meanHumidity = 85;
+  } else if (isCaribbean) {
+    // Distinguish southern Caribbean dry-season Savanna/Monsoon (Cartagena, Havana) from wetter trade-wind islands (San Juan, Saba, Santo Domingo)
+    const tradeWindWetness = coastalSmoothstep(-78, -62, lon) * 0.45 + coastalSmoothstep(10, 19, lat) * 0.25;
+    annualRainMm = Math.round(1180 + tradeWindWetness * 920);
+    dryRatio = 0.10 + tradeWindWetness * 0.36;
+    wetRatio = 1.95 - tradeWindWetness * 0.25;
+    meanHumidity = Math.round(77 + tradeWindWetness * 7);
+  } else if (isSubtropicalWestAtlantic) {
+    annualRainMm = 1340;
+    dryRatio = 0.52;
+    wetRatio = 1.55;
+    meanHumidity = 76;
+  } else if (isMediterranean) {
+    annualRainMm = 580;
+    dryRatio = 0.08;
+    wetRatio = 2.15;
+    meanHumidity = 64;
+  } else if (isSubtropicalAridBelt) {
+    annualRainMm = 260;
+    dryRatio = 0.05;
+    wetRatio = 2.1;
+    meanHumidity = 52;
+  } else if (absLat < 12) {
+    annualRainMm = 2350;
+    dryRatio = 0.55;
+    wetRatio = 1.55;
+    meanHumidity = 84;
+  } else if (absLat < 23.5) {
+    annualRainMm = 1520;
+    dryRatio = 0.18;
+    wetRatio = 1.9;
+    meanHumidity = 79;
+  } else if (absLat < 35) {
+    annualRainMm = 1120;
+    dryRatio = 0.45;
+    wetRatio = 1.55;
+    meanHumidity = 73;
+  } else {
+    annualRainMm = 940;
+    dryRatio = 0.65;
+    wetRatio = 1.35;
+    meanHumidity = 74;
+  }
+
+  const isNorthern = lat >= 0;
+  const monthlyTempC = [];
+  const monthlyPrecipMmDay = [];
+  const meanDailyMm = annualRainMm / 365.25;
+
+  for (let m = 0; m < 12; m++) {
+    // Peak warmth in July (m=6) for Northern Hemisphere, January (m=0) for Southern Hemisphere
+    const phase = ((m - (isNorthern ? 6 : 0)) / 12) * Math.PI * 2;
+    const temp = baseMeanTemp + seasonalAmp * Math.cos(phase);
+    monthlyTempC.push(temp);
+
+    // Mediterranean has dry summer; tropics/subtropics have wet summer/autumn
+    const rainPhase = isMediterranean ? phase + Math.PI : phase - 0.45;
+    const seasonWave = 0.5 + 0.5 * Math.cos(rainPhase);
+    const mult = dryRatio + (wetRatio - dryRatio) * seasonWave;
+    monthlyPrecipMmDay.push(meanDailyMm * mult);
+  }
+
+  return classifyKoppenClimateFromNormals({
+    monthlyTempC,
+    monthlyPrecipMmDay,
+    meanHumidityPct: meanHumidity,
+    latitude: lat,
+    longitude: lon,
+    source: 'bioclimatic-model',
+  });
+}
+
+// Fetch real 30-year monthly climatological normals (T2M, PRECTOTCORR, RH2M) from the public,
+// zero-API-key NASA POWER Climatology API, with local caching and automatic offline fallback.
+export async function fetchPublicClimateProfile(
+  latitude,
+  longitude,
+  { fetchImpl = globalThis.fetch, timeoutMs = 4500, region = null } = {}
+) {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return estimateLocalClimateProfile(10.423, -75.548, region);
+  }
+  const cacheKey = `${lat.toFixed(1)},${lon.toFixed(1)}`;
+  if (CLIMATE_PROFILE_CACHE.has(cacheKey)) {
+    return CLIMATE_PROFILE_CACHE.get(cacheKey);
+  }
+  const storageKey = `waterworld_climate_v1_${cacheKey}`;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.koppenCode && parsed.uplandForestWeights) {
+          CLIMATE_PROFILE_CACHE.set(cacheKey, parsed);
+          return parsed;
+        }
+      }
+    }
+  } catch { /* ignore storage access errors */ }
+
+  if (typeof fetchImpl !== 'function') {
+    const est = estimateLocalClimateProfile(lat, lon, region);
+    CLIMATE_PROFILE_CACHE.set(cacheKey, est);
+    return est;
+  }
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const url =
+      `https://power.larc.nasa.gov/api/temporal/climatology/point` +
+      `?parameters=T2M,PRECTOTCORR,RH2M&community=RE` +
+      `&longitude=${encodeURIComponent(lon.toFixed(3))}` +
+      `&latitude=${encodeURIComponent(lat.toFixed(3))}&format=JSON`;
+    const res = await fetchImpl(url, controller ? { signal: controller.signal } : undefined);
+    if (!res.ok) throw new Error(`NASA POWER HTTP ${res.status}`);
+    const data = await res.json();
+    const param = data?.properties?.parameter;
+    const t2m = param?.T2M;
+    const prec = param?.PRECTOTCORR;
+    const rh = param?.RH2M;
+    if (!t2m || !prec) throw new Error('Incomplete NASA POWER climatology payload');
+
+    const monthlyTempC = CLIMATE_MONTH_KEYS.map(k => Number(t2m[k]));
+    const monthlyPrecipMmDay = CLIMATE_MONTH_KEYS.map(k => Number(prec[k]));
+    if (monthlyTempC.some(v => !Number.isFinite(v) || v < -80 || v > 65)) {
+      throw new Error('Invalid monthly temperature values');
+    }
+    const meanHumidityPct = Number.isFinite(Number(rh?.ANN)) ? Number(rh.ANN) : 76;
+
+    const profile = classifyKoppenClimateFromNormals({
+      monthlyTempC,
+      monthlyPrecipMmDay,
+      meanHumidityPct,
+      latitude: lat,
+      longitude: lon,
+      source: 'nasa-power-climatology',
+    });
+    CLIMATE_PROFILE_CACHE.set(cacheKey, profile);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(storageKey, JSON.stringify(profile));
+      }
+    } catch { /* ignore quota error */ }
+    return profile;
+  } catch {
+    const fallback = estimateLocalClimateProfile(lat, lon, region);
+    CLIMATE_PROFILE_CACHE.set(cacheKey, fallback);
+    return fallback;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   if (typeof spec === 'string') {
     const preset = SPANISH_MAIN_1550_REGIONS[spec];
@@ -824,6 +1286,13 @@ function sampleSatelliteEquirectangular(satelliteData, u, v) {
   return { r, g, b, luma, localLuma, greenness, sandChroma, isUrban };
 }
 
+function coastalSampleClamped(heights, x, z, region) {
+  const half = region.span * 0.5 - 1e-3;
+  const cx = Math.max(region.x - half, Math.min(region.x + half, x));
+  const cz = Math.max(region.z - half, Math.min(region.z + half, z));
+  return terrainSample(heights, cx, cz, region);
+}
+
 export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, shoreDist = null) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const m = region.biomeSize;
@@ -848,9 +1317,9 @@ export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = nu
       const x = region.x + (u - 0.5) * span;
       const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
       const inlandM = distWater[gj * n + gi];
-      const h = terrainSample(heights, x, z, region);
-      const sx = (terrainSample(heights, x + 8, z, region) - terrainSample(heights, x - 8, z, region)) / 16;
-      const sz = (terrainSample(heights, x, z + 8, region) - terrainSample(heights, x, z - 8, region)) / 16;
+      const h = coastalSampleClamped(heights, x, z, region);
+      const sx = (coastalSampleClamped(heights, x + 8, z, region) - coastalSampleClamped(heights, x - 8, z, region)) / 16;
+      const sz = (coastalSampleClamped(heights, x, z + 8, region) - coastalSampleClamped(heights, x, z - 8, region)) / 16;
       const slope = Math.hypot(sx, sz);
       const idx = j * m + i;
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
@@ -3278,8 +3747,8 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
           continue;
         }
       }
-      const sx = (terrainSample(heights, x + 12, z, region) - terrainSample(heights, x - 12, z, region)) / 24;
-      const sz = (terrainSample(heights, x, z + 12, region) - terrainSample(heights, x, z - 12, region)) / 24;
+      const sx = (coastalSampleClamped(heights, x + 12, z, region) - coastalSampleClamped(heights, x - 12, z, region)) / 24;
+      const sz = (coastalSampleClamped(heights, x, z + 12, region) - coastalSampleClamped(heights, x, z - 12, region)) / 24;
       const slope = Math.hypot(sx, sz);
       if (slope > 1.12) {
         mask[idx] = 0;
@@ -3362,8 +3831,8 @@ export function synthesizeCoastalAlbedo(
         rgba[outIdx + 3] = 255;
         continue;
       }
-      const sx = (terrainSample(heights, x + 8, z, region) - terrainSample(heights, x - 8, z, region)) / 16;
-      const sz = (terrainSample(heights, x, z + 8, region) - terrainSample(heights, x, z - 8, region)) / 16;
+      const sx = (coastalSampleClamped(heights, x + 8, z, region) - coastalSampleClamped(heights, x - 8, z, region)) / 16;
+      const sz = (coastalSampleClamped(heights, x, z + 8, region) - coastalSampleClamped(heights, x, z - 8, region)) / 16;
       const slope = Math.hypot(sx, sz);
 
       const veg = vegetationProbability(biomeMask, region.biomeSize, u, v);
@@ -3372,12 +3841,12 @@ export function synthesizeCoastalAlbedo(
 
       // Base inland colour: continuous blend between coastal earth, deep 1550 tropical rainforest canopy, and cliff stone
       const canopyBlend = coastalSmoothstep(0.08, 0.72, veg);
-      const soilR = 98 + sandNoise * 6;
-      const soilG = 104 + sandNoise * 6;
-      const soilB = 72 + sandNoise * 4;
-      const lushR = 39 + canopyMottle * 7 + fineGrain * 0.35;
-      const lushG = 86 + canopyMottle * 11 + fineGrain * 0.45;
-      const lushB = 40 + canopyMottle * 6 + fineGrain * 0.3;
+      const soilR = 88 + sandNoise * 6;
+      const soilG = 96 + sandNoise * 6;
+      const soilB = 64 + sandNoise * 4;
+      const lushR = 29 + canopyMottle * 6 + fineGrain * 0.30;
+      const lushG = 66 + canopyMottle * 10 + fineGrain * 0.40;
+      const lushB = 30 + canopyMottle * 5 + fineGrain * 0.25;
       const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
       const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
       const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
@@ -3423,8 +3892,11 @@ export function synthesizeCoastalAlbedo(
           g = g * (1 - satBlend) + cobbleG * satBlend;
           b = b * (1 - satBlend) + cobbleB * satBlend;
         } else {
-          // Co-registered natural satellite orthophoto color (canopy, soil, rocky cliffs, and sandy berms)
-          const satBlend = coastalSmoothstep(0.15, 1.4, h) * 0.78;
+          // Co-registered natural satellite orthophoto color (canopy, soil, rocky cliffs, and sandy berms),
+          // fading smoothly near outer section borders so ground albedo matches stitched neighbor quads seamlessly.
+          const edgeDist = Math.min(Math.min(u, 1 - u), Math.min(v, 1 - v));
+          const borderFade = coastalSmoothstep(0.0, 0.14, edgeDist);
+          const satBlend = coastalSmoothstep(0.15, 1.4, h) * 0.78 * borderFade;
           r = r * (1 - satBlend) + satR * satBlend;
           g = g * (1 - satBlend) + satG * satBlend;
           b = b * (1 - satBlend) + satB * satBlend;
@@ -3432,7 +3904,7 @@ export function synthesizeCoastalAlbedo(
       }
 
       // Colonial waterfront plaza & town cobble apron (smooth radial blend, no hard ring)
-      if (portPlacement && h > 0.2) {
+      if (portPlacement && portPlacement.clearRadius > 0 && h > 0.2) {
         const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
         const plazaWeight =
           coastalSmoothstep(portPlacement.clearRadius * 0.78, portPlacement.clearRadius * 0.32, distPort) *
@@ -3575,8 +4047,8 @@ export function seedCoastalVegetation(
       }
     }
 
-    const sx = (terrainSample(heights, x + 12, z, region) - terrainSample(heights, x - 12, z, region)) / 24;
-    const sz = (terrainSample(heights, x, z + 12, region) - terrainSample(heights, x, z - 12, region)) / 24;
+    const sx = (coastalSampleClamped(heights, x + 12, z, region) - coastalSampleClamped(heights, x - 12, z, region)) / 24;
+    const sz = (coastalSampleClamped(heights, x, z + 12, region) - coastalSampleClamped(heights, x, z - 12, region)) / 24;
     const slope = Math.hypot(sx, sz);
     if (slope > 1.12) continue;
 
@@ -3651,8 +4123,8 @@ export function seedCoastalVegetation(
                   portPlacement.clearRadius * 0.72) &&
                 portClearanceEnvelope(portPlacement, gx, gz, portPlacement.hasOrthophotoFootprints ? 4 : 10)))
           ) {
-            const gsx = (terrainSample(heights, gx + 12, gz, region) - terrainSample(heights, gx - 12, gz, region)) / 24;
-            const gsz = (terrainSample(heights, gx, gz + 12, region) - terrainSample(heights, gx, gz - 12, region)) / 24;
+            const gsx = (coastalSampleClamped(heights, gx + 12, gz, region) - coastalSampleClamped(heights, gx - 12, gz, region)) / 24;
+            const gsz = (coastalSampleClamped(heights, gx, gz + 12, region) - coastalSampleClamped(heights, gx, gz - 12, region)) / 24;
             const gSlope = Math.hypot(gsx, gsz);
             if (gSlope <= 1.05) {
               const gr = Math.max(
@@ -3800,10 +4272,10 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
     const v = gj / (M * (n - 1));
     const x = region.x + (u - 0.5) * region.span;
     const z = region.z + (v - 0.5) * region.span;
-    const h = isCollinearEdge ? hLinear : terrainSample(heights, x, z, region);
+    const h = isCollinearEdge ? hLinear : coastalSampleClamped(heights, x, z, region);
     const eps = step / M;
-    const dx = (terrainSample(heights, x - eps, z, region) - terrainSample(heights, x + eps, z, region)) / (2 * eps);
-    const dz = (terrainSample(heights, x, z - eps, region) - terrainSample(heights, x, z + eps, region)) / (2 * eps);
+    const dx = (coastalSampleClamped(heights, x - eps, z, region) - coastalSampleClamped(heights, x + eps, z, region)) / (2 * eps);
+    const dz = (coastalSampleClamped(heights, x, z - eps, region) - coastalSampleClamped(heights, x, z + eps, region)) / (2 * eps);
     const idx = n * n + extraVerts.length / 8;
     extraVerts.push(...computeVertexAttribs(x, z, h, dx, dz));
     subVertCache.set(key, idx);
@@ -4181,10 +4653,20 @@ function finalizeProceduralCoastalPack(
   preserveRealCoast = false
 ) {
   const { region } = pack;
-  // Retain un-tapered raw heights so adjacent streaming sections stitch C0/C1-continuously
-  if (!pack.rawHeights) {
-    pack.rawHeights = new Float32Array(heights);
+  if (!pack.skipPortPlacement && !pack.taperOuterBorders) {
+    const dirs = detectCoastalContinuationDirs(heights, region.size, region.shoreBearing);
+    const dirSet = new Set(dirs.map((d) => `${d.dx},${d.dz}`));
+    const autoConnected = pack.connectedEdges || {
+      west: dirSet.has('-1,0'),
+      east: dirSet.has('1,0'),
+      north: dirSet.has('0,-1'),
+      south: dirSet.has('0,1'),
+    };
+    pack.connectedEdges = autoConnected;
+    prepareSectionConnectedBorders(heights, region.size, autoConnected);
   }
+  // Retain un-tapered raw heights so adjacent streaming sections stitch C0/C1-continuously
+  pack.rawHeights = new Float32Array(heights);
   smoothCoastlineAndForeshoreBeaches(heights, region, {
     connectedEdges: pack.connectedEdges || null,
     taperOuterBorders: Boolean(pack.taperOuterBorders),
@@ -5302,16 +5784,19 @@ export async function runLandfallDiscoveryPipeline(basePack, {
 }
 
 // Inspect a section's border elevations to determine which neighboring sections (secX + dx, secZ + dz)
-// continue the coastline or landmass across the section boundary (including diagonal inland corners).
+// continue the coastline or landmass across the section boundary (including diagonal corners and 2nd-ring coastal horizon).
 export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
   if (!heights || heights.length < n * n) return [];
-  const inset = Math.min(4, Math.max(1, Math.floor(n * 0.04)));
+  const inset1 = Math.min(4, Math.max(1, Math.floor(n * 0.03)));
+  const inset2 = Math.min(12, Math.max(2, Math.floor(n * 0.075)));
+  const inset3 = Math.min(36, Math.max(4, Math.floor(n * 0.105)));
+  const inset4 = Math.min(72, Math.max(6, Math.floor(n * 0.135)));
   let westLand = 0, eastLand = 0, northLand = 0, southLand = 0;
   for (let t = 0; t < n; t++) {
-    const hw = Math.max(heights[t * n], heights[t * n + inset]);
-    const he = Math.max(heights[t * n + (n - 1)], heights[t * n + (n - 1 - inset)]);
-    const hn = Math.max(heights[t], heights[inset * n + t]);
-    const hs = Math.max(heights[(n - 1) * n + t], heights[(n - 1 - inset) * n + t]);
+    const hw = Math.max(heights[t * n], heights[t * n + inset1], heights[t * n + inset2], heights[t * n + inset3], heights[t * n + inset4]);
+    const he = Math.max(heights[t * n + (n - 1)], heights[t * n + (n - 1 - inset1)], heights[t * n + (n - 1 - inset2)], heights[t * n + (n - 1 - inset3)], heights[t * n + (n - 1 - inset4)]);
+    const hn = Math.max(heights[t], heights[inset1 * n + t], heights[inset2 * n + t], heights[inset3 * n + t], heights[inset4 * n + t]);
+    const hs = Math.max(heights[(n - 1) * n + t], heights[(n - 1 - inset1) * n + t], heights[(n - 1 - inset2) * n + t], heights[(n - 1 - inset3) * n + t], heights[(n - 1 - inset4) * n + t]);
     if (hw > 0.25) westLand++;
     if (he > 0.25) eastLand++;
     if (hn > 0.25) northLand++;
@@ -5323,7 +5808,7 @@ export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
   const tangX = -shoreDirZ;
   const tangZ = shoreDirX;
 
-  const minLandCells = Math.max(2, Math.floor(n * 0.04));
+  const minLandCells = Math.max(2, Math.floor(n * 0.025));
   const candidates = [
     { dx: -1, dz: 0, edge: 'west', land: westLand },
     { dx: 1, dz: 0, edge: 'east', land: eastLand },
@@ -5353,26 +5838,84 @@ export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
   for (const d of diagCandidates) {
     if (hasEdge.has(d.c1) && hasEdge.has(d.c2)) {
       out.push({ dx: d.dx, dz: d.dz, edge: d.edge, landCells: d.land });
+      hasEdge.add(`${d.dx},${d.dz}`);
     }
+  }
+
+  const pushUnique = (dx, dz, edge, landCells) => {
+    const key = `${dx},${dz}`;
+    if (!hasEdge.has(key)) {
+      hasEdge.add(key);
+      out.push({ dx, dz, edge, landCells });
+    }
+  };
+  // Extend a 2nd coastal ring along active lateral and longitudinal shorelines so distant coastlines remain visible from the boat viewpoint
+  if (hasEdge.has('-1,0')) {
+    pushUnique(-2, 0, 'west-2', westLand);
+    if (hasEdge.has('-1,-1')) pushUnique(-2, -1, 'northwest-2', Math.min(westLand, northLand));
+    if (hasEdge.has('-1,1')) pushUnique(-2, 1, 'southwest-2', Math.min(westLand, southLand));
+  }
+  if (hasEdge.has('1,0')) {
+    pushUnique(2, 0, 'east-2', eastLand);
+    if (hasEdge.has('1,-1')) pushUnique(2, -1, 'northeast-2', Math.min(eastLand, northLand));
+    if (hasEdge.has('1,1')) pushUnique(2, 1, 'southeast-2', Math.min(eastLand, southLand));
+  }
+  if (hasEdge.has('0,-1')) {
+    pushUnique(0, -2, 'north-2', northLand);
+    if (hasEdge.has('-1,-1')) pushUnique(-1, -2, 'north-northwest-2', Math.min(westLand, northLand));
+    if (hasEdge.has('1,-1')) pushUnique(1, -2, 'north-northeast-2', Math.min(eastLand, northLand));
+  }
+  if (hasEdge.has('0,1')) {
+    pushUnique(0, 2, 'south-2', southLand);
+    if (hasEdge.has('-1,1')) pushUnique(-1, 2, 'south-southwest-2', Math.min(westLand, southLand));
+    if (hasEdge.has('1,1')) pushUnique(1, 2, 'south-southeast-2', Math.min(eastLand, southLand));
   }
   return out;
 }
 
-// Lift any 1..3-cell border dip on connected edges of a section so adjacent sections meet at full inland elevation
-export function prepareSectionConnectedBorders(heights, region, connectedEdges = null) {
-  if (!heights || !region || !connectedEdges) return false;
-  const n = region.size;
-  const inset = Math.min(4, Math.max(2, Math.floor(n * 0.025)));
+// Lift any 1..6-cell border dip on connected edges of a section so adjacent sections meet at full inland elevation
+export function prepareSectionConnectedBorders(heights, regionOrSize, connectedEdges = null) {
+  const n = typeof regionOrSize === 'number' ? regionOrSize : regionOrSize?.size;
+  if (!heights || !n || !connectedEdges) return false;
+  const countEdgeLand = (edge, d) => {
+    let c = 0;
+    for (let t = 0; t < n; t++) {
+      const h =
+        edge === 'west'
+          ? heights[t * n + d]
+          : edge === 'east'
+            ? heights[t * n + (n - 1 - d)]
+            : edge === 'north'
+              ? heights[d * n + t]
+              : heights[(n - 1 - d) * n + t];
+      if (h > 0.45) c++;
+    }
+    return c;
+  };
+  const edgeMaxInset = (edge) => {
+    const c2 = countEdgeLand(edge, 2);
+    const c20 = countEdgeLand(edge, Math.min(n - 1, 20));
+    // If the edge already has untapered land right up to d=2, only sync the outermost 3 cells
+    if (c2 >= 8 && c2 >= c20 * 0.7) return 3;
+    return Math.min(20, Math.max(5, Math.floor(n * 0.038)));
+  };
   let modified = false;
   if (connectedEdges.west) {
+    const maxInset = edgeMaxInset('west');
     for (let j = 0; j < n; j++) {
-      const hIn = heights[j * n + inset];
-      if (hIn > 0.45) {
-        for (let i = 0; i < inset; i++) {
-          const w = 1 - i / inset;
-          const target = hIn * (0.94 + 0.06 * (i / inset));
-          if (heights[j * n + i] < target - 0.15) {
-            heights[j * n + i] = heights[j * n + i] * (1 - w * 0.92) + target * (w * 0.92);
+      let bestIn = heights[j * n + maxInset];
+      let bestIdx = maxInset;
+      for (let k = 2; k <= maxInset; k++) {
+        if (heights[j * n + k] > bestIn) {
+          bestIn = heights[j * n + k];
+          bestIdx = k;
+        }
+      }
+      if (bestIn > 0.45) {
+        for (let i = 0; i < bestIdx; i++) {
+          const target = bestIn * (0.94 + 0.06 * (i / bestIdx));
+          if (heights[j * n + i] < target) {
+            heights[j * n + i] = target;
             modified = true;
           }
         }
@@ -5380,15 +5923,22 @@ export function prepareSectionConnectedBorders(heights, region, connectedEdges =
     }
   }
   if (connectedEdges.east) {
+    const maxInset = edgeMaxInset('east');
     for (let j = 0; j < n; j++) {
-      const hIn = heights[j * n + (n - 1 - inset)];
-      if (hIn > 0.45) {
-        for (let d = 0; d < inset; d++) {
+      let bestIn = heights[j * n + (n - 1 - maxInset)];
+      let bestD = maxInset;
+      for (let d = 2; d <= maxInset; d++) {
+        if (heights[j * n + (n - 1 - d)] > bestIn) {
+          bestIn = heights[j * n + (n - 1 - d)];
+          bestD = d;
+        }
+      }
+      if (bestIn > 0.45) {
+        for (let d = 0; d < bestD; d++) {
           const i = n - 1 - d;
-          const w = 1 - d / inset;
-          const target = hIn * (0.94 + 0.06 * (d / inset));
-          if (heights[j * n + i] < target - 0.15) {
-            heights[j * n + i] = heights[j * n + i] * (1 - w * 0.92) + target * (w * 0.92);
+          const target = bestIn * (0.94 + 0.06 * (d / bestD));
+          if (heights[j * n + i] < target) {
+            heights[j * n + i] = target;
             modified = true;
           }
         }
@@ -5396,14 +5946,21 @@ export function prepareSectionConnectedBorders(heights, region, connectedEdges =
     }
   }
   if (connectedEdges.north) {
+    const maxInset = edgeMaxInset('north');
     for (let i = 0; i < n; i++) {
-      const hIn = heights[inset * n + i];
-      if (hIn > 0.45) {
-        for (let j = 0; j < inset; j++) {
-          const w = 1 - j / inset;
-          const target = hIn * (0.94 + 0.06 * (j / inset));
-          if (heights[j * n + i] < target - 0.15) {
-            heights[j * n + i] = heights[j * n + i] * (1 - w * 0.92) + target * (w * 0.92);
+      let bestIn = heights[maxInset * n + i];
+      let bestJ = maxInset;
+      for (let j = 2; j <= maxInset; j++) {
+        if (heights[j * n + i] > bestIn) {
+          bestIn = heights[j * n + i];
+          bestJ = j;
+        }
+      }
+      if (bestIn > 0.45) {
+        for (let j = 0; j < bestJ; j++) {
+          const target = bestIn * (0.94 + 0.06 * (j / bestJ));
+          if (heights[j * n + i] < target) {
+            heights[j * n + i] = target;
             modified = true;
           }
         }
@@ -5411,15 +5968,22 @@ export function prepareSectionConnectedBorders(heights, region, connectedEdges =
     }
   }
   if (connectedEdges.south) {
+    const maxInset = edgeMaxInset('south');
     for (let i = 0; i < n; i++) {
-      const hIn = heights[(n - 1 - inset) * n + i];
-      if (hIn > 0.45) {
-        for (let d = 0; d < inset; d++) {
+      let bestIn = heights[(n - 1 - maxInset) * n + i];
+      let bestD = maxInset;
+      for (let d = 2; d <= maxInset; d++) {
+        if (heights[(n - 1 - d) * n + i] > bestIn) {
+          bestIn = heights[(n - 1 - d) * n + i];
+          bestD = d;
+        }
+      }
+      if (bestIn > 0.45) {
+        for (let d = 0; d < bestD; d++) {
           const j = n - 1 - d;
-          const w = 1 - d / inset;
-          const target = hIn * (0.94 + 0.06 * (d / inset));
-          if (heights[j * n + i] < target - 0.15) {
-            heights[j * n + i] = heights[j * n + i] * (1 - w * 0.92) + target * (w * 0.92);
+          const target = bestIn * (0.94 + 0.06 * (d / bestD));
+          if (heights[j * n + i] < target) {
+            heights[j * n + i] = target;
             modified = true;
           }
         }
@@ -5547,7 +6111,7 @@ export function stitchCoastalSectionBorders(
     }
   }
 
-  // 3. Round any truly unconnected outer world boundary into a natural cape/submarine shelf so no square edge is visible
+  // 3. Carve any unconnected outer world boundary into an organic multi-scale cape/bay contour with rounded corners
   if (taperUnconnectedOuter) {
     const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
     const connW = hasWest;
@@ -5560,28 +6124,34 @@ export function stitchCoastalSectionBorders(
       for (let i = 0; i < n; i++) {
         const u = i / (n - 1);
         const x = region.x + (u - 0.5) * span;
-        let dEdge = 1.0;
-        if (!connW && u < dEdge) dEdge = u;
-        if (!connE && 1 - u < dEdge) dEdge = 1 - u;
-        if (!connN && v < dEdge) dEdge = v;
-        if (!connS && 1 - v < dEdge) dEdge = 1 - v;
-        if (dEdge >= 0.13) continue;
+        const dW = !connW ? u : 1.0;
+        const dE = !connE ? 1 - u : 1.0;
+        const dN = !connN ? v : 1.0;
+        const dS = !connS ? 1 - v : 1.0;
+        const dX = Math.min(dW, dE);
+        const dZ = Math.min(dN, dS);
+        const dEdge = Math.min(dX, dZ);
+        if (dEdge >= 0.39) continue;
         const k = j * n + i;
         if (heights[k] <= -16) continue;
-        const capeNoise = coastalFbm2D(x * 0.0021, z * 0.0021, seed + 947, 2);
-        const margin = 0.065 + 0.055 * capeNoise;
-        if (dEdge >= margin) continue;
+        const capeMajor = coastalFbm2D(x * 0.00048, z * 0.00048, seed + 947, 3);
+        const capeMinor = coastalFbm2D(x * 0.0016, z * 0.0016, seed + 1319, 2);
+        const margin = Math.max(0.055, Math.min(0.38, 0.06 + 0.24 * capeMajor + 0.08 * capeMinor));
+        const oX = Math.max(0, margin - dX);
+        const oZ = Math.max(0, margin - dZ);
+        const pen = Math.hypot(oX, oZ);
+        if (pen <= 0) continue;
         const onConnectedEdge =
           (connW && i === 0) || (connE && i === n - 1) || (connN && j === 0) || (connS && j === n - 1);
         if (onConnectedEdge) continue;
         let connLock = 1.0;
         if (dEdge > 0) {
-          if (connW && u < 0.08) connLock = Math.min(connLock, u / 0.08);
-          if (connE && 1 - u < 0.08) connLock = Math.min(connLock, (1 - u) / 0.08);
-          if (connN && v < 0.08) connLock = Math.min(connLock, v / 0.08);
-          if (connS && 1 - v < 0.08) connLock = Math.min(connLock, (1 - v) / 0.08);
+          if (connW && u < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, u));
+          if (connE && 1 - u < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, 1 - u));
+          if (connN && v < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, v));
+          if (connS && 1 - v < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, 1 - v));
         }
-        const t = coastalSmoothstep(0.0, margin, dEdge);
+        const t = 1 - coastalSmoothstep(0.0, margin, Math.min(margin, pen));
         const blend = 1 - (1 - t) * connLock;
         const shelfDepth = -16 - (1 - t) * 10;
         heights[k] = shelfDepth * (1 - blend) + heights[k] * blend;
@@ -5703,6 +6273,58 @@ export async function generateCoastalNeighborSection(
       }
     }
 
+    const calcLandFrac = (prof) => {
+      if (!prof) return 0;
+      let c = 0;
+      for (let i = 0; i < size; i++) {
+        if (prof[i] > 0.25) c++;
+      }
+      return c / size;
+    };
+    const buildEnclosedWaterMask = (prof, landFrac) => {
+      if (!prof) return null;
+      const mask = new Float32Array(size);
+      const maxLeft = new Float32Array(size);
+      const maxRight = new Float32Array(size);
+      let ml = -999;
+      for (let i = 0; i < size; i++) {
+        if (prof[i] > ml) ml = prof[i];
+        maxLeft[i] = ml;
+      }
+      let mr = -999;
+      for (let i = size - 1; i >= 0; i--) {
+        if (prof[i] > mr) mr = prof[i];
+        maxRight[i] = mr;
+      }
+      for (let i = 0; i < size; i++) {
+        if (maxLeft[i] > 0.65 && maxRight[i] > 0.65) {
+          mask[i] = 1.0;
+        } else {
+          mask[i] = 0.0;
+        }
+      }
+      // Smooth the enclosed water mask over ~6 cells so the transition between coastal spit and open ocean is gradual
+      const smoothed = new Float32Array(size);
+      for (let i = 0; i < size; i++) {
+        let s = 0, cnt = 0;
+        for (let d = -5; d <= 5; d++) {
+          const idx = Math.max(0, Math.min(size - 1, i + d));
+          s += mask[idx];
+          cnt++;
+        }
+        smoothed[i] = s / cnt;
+      }
+      return smoothed;
+    };
+    const westLandFrac = calcLandFrac(westProfile);
+    const eastLandFrac = calcLandFrac(eastProfile);
+    const northLandFrac = calcLandFrac(northProfile);
+    const southLandFrac = calcLandFrac(southProfile);
+    const westEnclosed = buildEnclosedWaterMask(westProfile, westLandFrac);
+    const eastEnclosed = buildEnclosedWaterMask(eastProfile, eastLandFrac);
+    const northEnclosed = buildEnclosedWaterMask(northProfile, northLandFrac);
+    const southEnclosed = buildEnclosedWaterMask(southProfile, southLandFrac);
+
     const sample1D = (prof, t) => {
       const clamped = Math.max(0, Math.min(1, t));
       const f = clamped * (size - 1);
@@ -5712,24 +6334,61 @@ export async function generateCoastalNeighborSection(
       return prof[i0] * (1 - a) + prof[i1] * a;
     };
 
-    const evalEdgePropagation = (prof, tCoord, dNorm, x, z, dirSeed, lockLowT, lockHighT) => {
-      const dRamp = coastalSmoothstep(0.0, 0.32, dNorm);
-      const lowDamp = lockLowT ? coastalSmoothstep(0.0, 0.22, tCoord) : 1.0;
-      const highDamp = lockHighT ? coastalSmoothstep(0.0, 0.22, 1.0 - tCoord) : 1.0;
-      const meander =
-        (coastalFbm2D(x * 0.00052, z * 0.00052, seed + dirSeed, 3) - 0.5) *
-        0.22 *
-        dRamp *
-        lowDamp *
-        highDamp;
+    const evalEdgePropagation = (
+      prof,
+      enclosedMask,
+      profLandFrac,
+      tCoord,
+      dNorm,
+      x,
+      z,
+      dirSeed,
+      lockLowT,
+      lockHighT
+    ) => {
+      const dRamp = coastalSmoothstep(0.0, 0.26, dNorm);
+      const lowDamp = lockLowT ? coastalSmoothstep(0.0, 0.2, tCoord) : 1.0;
+      const highDamp = lockHighT ? coastalSmoothstep(0.0, 0.2, 1.0 - tCoord) : 1.0;
+      const fbmLarge = coastalFbm2D(x * 0.00038, z * 0.00038, seed + dirSeed, 3) - 0.5;
+      const fbmMeso = coastalFbm2D(x * 0.0011, z * 0.0011, seed + dirSeed + 71, 3) - 0.5;
+      // Preserve diagonal coastline trajectory when a shoreline clips the corner of a border profile
+      let cornerDrift = 0;
+      if (prof[0] <= 0.25 && prof[size - 1] > 0.25 && profLandFrac < 0.22 && !lockHighT) {
+        cornerDrift = -0.82 * dNorm;
+      } else if (prof[0] > 0.25 && prof[size - 1] <= 0.25 && profLandFrac < 0.22 && !lockLowT) {
+        cornerDrift = 0.82 * dNorm;
+      } else if (prof[0] <= 0.25 && prof[size - 1] > 0.25 && profLandFrac > 0.88 && !lockLowT) {
+        cornerDrift = 0.82 * dNorm;
+      } else if (prof[0] > 0.25 && prof[size - 1] <= 0.25 && profLandFrac > 0.88 && !lockHighT) {
+        cornerDrift = -0.82 * dNorm;
+      }
+      const meander = cornerDrift + (fbmLarge * 0.42 + fbmMeso * 0.22) * dRamp * lowDamp * highDamp;
       const hBase = sample1D(prof, tCoord + meander);
+      const enclosed = enclosedMask ? sample1D(enclosedMask, tCoord + meander) : 0;
       const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
       const micro = (coastalFbm2D(x * 0.0024, z * 0.0024, seed + 109, 3) - 0.48) * 5.2;
+
+      // Only close off water segments that are enclosed by land on both sides (lagoons, estuaries, creeks)
+      // or lie along a predominantly inland border; never turn the open sea side of a coastline into land.
+      if (enclosed > 0.05 && hBase <= 0.25) {
+        const bayReach = 0.26 + 0.34 * coastalFbm2D(x * 0.00042, z * 0.00042, seed + dirSeed + 313, 3);
+        const inlandClose = coastalSmoothstep(bayReach * 0.42, bayReach, dNorm) * enclosed;
+        const valleyFloor = 4.2 + 14.0 * ridge + Math.max(0, micro);
+        const closedH = hBase * (1 - inlandClose) + valleyFloor * inlandClose;
+        if (closedH > 0.25) {
+          const hillGain = dRamp * Math.min(peak * 0.42, (6.0 + closedH * 0.5) * (0.35 + 0.65 * ridge));
+          return Math.max(2.4, Math.min(895, closedH + hillGain));
+        }
+        return closedH;
+      }
+
       if (hBase > 0.25) {
-        const hillGain = dRamp * Math.min(peak * 0.48, (6.5 + hBase * 0.55) * (0.32 + 0.68 * ridge) + micro);
+        const inlandRise = profLandFrac >= 0.35 ? coastalSmoothstep(0.06, 0.22, dNorm) * 3.8 : 0;
+        const hillGain =
+          inlandRise + dRamp * Math.min(peak * 0.52, (7.5 + hBase * 0.58) * (0.34 + 0.66 * ridge) + micro);
         return Math.max(0.55, Math.min(895, hBase + hillGain));
       }
-      return Math.max(-120, hBase - dRamp * (4.5 + 16.0 * dNorm));
+      return Math.max(-120, hBase - dRamp * (5.0 + 18.0 * dNorm));
     };
 
     const hasAnyProfile = Boolean(westProfile || eastProfile || northProfile || southProfile);
@@ -5753,25 +6412,69 @@ export async function generateCoastalNeighborSection(
           let hSum = 0;
           if (westProfile) {
             const w = 1 / Math.pow(Math.max(1e-4, u), 2.35);
-            const hW = evalEdgePropagation(westProfile, v, u, x, z, 31, Boolean(northProfile), Boolean(southProfile));
+            const hW = evalEdgePropagation(
+              westProfile,
+              westEnclosed,
+              westLandFrac,
+              v,
+              u,
+              x,
+              z,
+              31,
+              Boolean(northProfile),
+              Boolean(southProfile)
+            );
             wSum += w;
             hSum += w * hW;
           }
           if (eastProfile) {
             const w = 1 / Math.pow(Math.max(1e-4, 1 - u), 2.35);
-            const hE = evalEdgePropagation(eastProfile, v, 1 - u, x, z, 47, Boolean(northProfile), Boolean(southProfile));
+            const hE = evalEdgePropagation(
+              eastProfile,
+              eastEnclosed,
+              eastLandFrac,
+              v,
+              1 - u,
+              x,
+              z,
+              47,
+              Boolean(northProfile),
+              Boolean(southProfile)
+            );
             wSum += w;
             hSum += w * hE;
           }
           if (northProfile) {
             const w = 1 / Math.pow(Math.max(1e-4, v), 2.35);
-            const hN = evalEdgePropagation(northProfile, u, v, x, z, 61, Boolean(westProfile), Boolean(eastProfile));
+            const hN = evalEdgePropagation(
+              northProfile,
+              northEnclosed,
+              northLandFrac,
+              u,
+              v,
+              x,
+              z,
+              61,
+              Boolean(westProfile),
+              Boolean(eastProfile)
+            );
             wSum += w;
             hSum += w * hN;
           }
           if (southProfile) {
             const w = 1 / Math.pow(Math.max(1e-4, 1 - v), 2.35);
-            const hS = evalEdgePropagation(southProfile, u, 1 - v, x, z, 79, Boolean(westProfile), Boolean(eastProfile));
+            const hS = evalEdgePropagation(
+              southProfile,
+              southEnclosed,
+              southLandFrac,
+              u,
+              1 - v,
+              x,
+              z,
+              79,
+              Boolean(westProfile),
+              Boolean(eastProfile)
+            );
             wSum += w;
             hSum += w * hS;
           }
@@ -5866,7 +6569,7 @@ export async function generateCoastalNeighborSection(
   // Smooth coastline & foreshore beaches while protecting connected borders, then lock exact borders & round outer capes
   const stitched = new Float32Array(rawHeights);
   stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
-    taperUnconnectedOuter: false,
+    taperUnconnectedOuter,
   });
   smoothCoastlineAndForeshoreBeaches(stitched, sectionRegion, {
     connectedEdges,

@@ -29,8 +29,20 @@ import {
   detectCoastalContinuationDirs,
   stitchCoastalSectionBorders,
   generateCoastalNeighborSection,
+  classifyKoppenClimateFromNormals,
+  estimateLocalClimateProfile,
+  fetchPublicClimateProfile,
 } from '../js/coastal-world.js';
-import { FOREST_SPECIES, FOREST_ROOT_FLOATS } from '../js/forest-scenery.js';
+import {
+  FOREST_SPECIES,
+  FOREST_ROOT_FLOATS,
+  SUBTROPICAL_FOREST_ASSETS,
+  loadForestScenery,
+} from '../js/forest-scenery.js';
+import {
+  SUBTROPICAL_FOREST_MIDDLE_ASSETS,
+  loadForestMiddle,
+} from '../js/forest-middle.js';
 import {
   terrainSample,
   safeLandfallStart,
@@ -706,6 +718,153 @@ test('coastline smoothing removes beach potholes, aligns regional swells, and st
   }
   assert.ok(centerTrees > 500, `Expected center section to have >500 3D forest roots, got ${centerTrees}`);
   assert.ok(neighborTrees > 1000, `Expected neighbor sections to have >1000 3D forest roots, got ${neighborTrees}`);
+});
+
+test('subtropical forest scenery pack, public NASA POWER climate lookup, and climate-driven species mix', async () => {
+  // 1. Verify Köppen-Geiger climate classification and species weight mixes across global climate normals
+  const af = classifyKoppenClimateFromNormals({
+    latitude: 9.55,
+    longitude: -79.65,
+    monthlyTempC: [26.5, 26.8, 27.1, 27.3, 27.0, 26.8, 26.7, 26.7, 26.6, 26.4, 26.3, 26.4],
+    monthlyPrecipMm: [140, 95, 85, 190, 340, 360, 380, 370, 350, 410, 460, 280],
+    meanRelHumidityPct: 84,
+  });
+  assert.equal(af.koppenCode, 'Af');
+  assert.equal(af.forestPackKind, 'subtropical');
+  assert.ok(af.uplandForestWeights.ceiba > 0.30, 'Rainforest (Af) has high emergent Ceiba weight');
+
+  const aw = classifyKoppenClimateFromNormals({
+    latitude: 10.42,
+    longitude: -75.55,
+    monthlyTempC: [26.8, 27.0, 27.4, 28.0, 28.4, 28.4, 28.2, 28.2, 28.1, 27.8, 27.6, 27.1],
+    monthlyPrecipMm: [4, 2, 5, 32, 115, 105, 95, 110, 130, 220, 145, 38],
+    meanRelHumidityPct: 78,
+  });
+  assert.equal(aw.koppenCode, 'Aw');
+  assert.equal(aw.forestPackKind, 'subtropical');
+  assert.ok(
+    aw.uplandForestWeights.palm > af.uplandForestWeights.palm,
+    'Tropical savanna (Aw) increases drought-tolerant palm share vs wet rainforest (Af)'
+  );
+
+  const cfb = classifyKoppenClimateFromNormals({
+    latitude: 50.8,
+    longitude: -1.1,
+    monthlyTempC: [5.2, 5.4, 7.2, 9.5, 12.8, 15.6, 17.8, 17.6, 15.1, 11.8, 8.1, 5.8],
+    monthlyPrecipMm: [75, 55, 58, 52, 56, 54, 58, 65, 68, 88, 92, 84],
+    meanRelHumidityPct: 79,
+  });
+  assert.equal(cfb.koppenCode, 'Cfb');
+  assert.equal(cfb.forestPackKind, 'temperate');
+  assert.ok(cfb.uplandForestWeights.oak > 0.25);
+
+  // 2. Verify fetchPublicClimateProfile parses NASA POWER 30-year climatology JSON and falls back cleanly offline
+  const mockNasaPowerResponse = {
+    properties: {
+      parameter: {
+        T2M: {
+          JAN: 25.7, FEB: 25.8, MAR: 26.2, APR: 26.8, MAY: 27.4, JUN: 27.6,
+          JUL: 27.4, AUG: 27.5, SEP: 27.5, OCT: 27.1, NOV: 26.6, DEC: 26.0,
+        },
+        PRECTOTCORR: {
+          JAN: 0.4, FEB: 0.3, MAR: 0.5, APR: 1.4, MAY: 3.9, JUN: 3.5,
+          JUL: 3.1, AUG: 3.7, SEP: 4.4, OCT: 7.2, NOV: 4.8, DEC: 1.2,
+        },
+        RH2M: { ANN: 79.2 },
+      },
+    },
+  };
+  const liveProfile = await fetchPublicClimateProfile(10.423, -75.548, {
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => mockNasaPowerResponse,
+    }),
+  });
+  assert.equal(liveProfile.source, 'nasa-power-climatology');
+  assert.equal(liveProfile.koppenCode, 'Aw');
+  assert.equal(liveProfile.forestPackKind, 'subtropical');
+
+  // 3. Load the 5-tier subtropical forest scenery pack & middle LOD pack and verify all 4 tropical species
+  const fetchLocalAsset = async (url) => {
+    const buf = fs.readFileSync(url);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => ab,
+      json: async () => JSON.parse(buf.toString('utf8')),
+      blob: async () => new Blob([ab]),
+    };
+  };
+  const subtropicalPack = await loadForestScenery({
+    assets: SUBTROPICAL_FOREST_ASSETS,
+    fetchAsset: fetchLocalAsset,
+    decodeImage: async () => ({ width: 512, height: 512, close() {} }),
+  });
+  assert.deepEqual(
+    subtropicalPack.manifest.prototypes.map((p) => p.species),
+    ['royal_palm', 'palm', 'ceiba', 'mangrove']
+  );
+  assert.ok(subtropicalPack.volumes?.prototypes?.length === 4, 'Subtropical pack includes 4 3D optical volume fields');
+  const subtropicalMiddle = await loadForestMiddle({
+    forest: subtropicalPack.manifest,
+    assets: SUBTROPICAL_FOREST_MIDDLE_ASSETS,
+    fetchAsset: fetchLocalAsset,
+  });
+  assert.equal(subtropicalMiddle.prototypes.length, 4);
+
+  // 4. Verify retargetForestPackToProcedural places all 4 subtropical species and adapts mix to climate
+  const { retargetForestPackToProcedural } = await import('../js/terrain.js');
+  const cartagenaBase = generateProceduralCoastalPack({
+    ...SPANISH_MAIN_1550_REGIONS.cartagena,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 4000,
+  });
+  const cartagena1550 = await runLandfallDiscoveryPipeline(cartagenaBase);
+  const pack1550 = cartagena1550.upgradedPack;
+
+  // Verify Cartagena 1550 rawHeights matches heights and detects North (0, -1), North-2 (0, -2), East (1, 0), and South (0, 1) continuations
+  const cartagenaDirs = detectCoastalContinuationDirs(
+    pack1550.rawHeights,
+    pack1550.region.size,
+    pack1550.region.shoreBearing
+  );
+  assert.ok(
+    cartagenaDirs.some((d) => d.dx === 0 && d.dz === -1) &&
+      cartagenaDirs.some((d) => d.dx === 0 && d.dz === -2),
+    'Cartagena 1550 detects North (0, -1) and (0, -2) continuation quads on the left of the northeast view'
+  );
+  assert.ok(
+    cartagenaDirs.some((d) => d.dx === 1 && d.dz === 0) &&
+      cartagenaDirs.some((d) => d.dx === 1 && d.dz === -1),
+    'Cartagena 1550 detects East (1, 0) and Northeast (1, -1) continuation quads'
+  );
+
+  const groundFn = (x, z) => terrainSample(pack1550.heights, x, z, pack1550.region);
+  const retargetedAw = retargetForestPackToProcedural(subtropicalPack, pack1550, groundFn, {
+    climateProfile: aw,
+  });
+  const retargetedAf = retargetForestPackToProcedural(subtropicalPack, pack1550, groundFn, {
+    climateProfile: af,
+  });
+
+  const countsAw = Object.fromEntries(
+    retargetedAw.manifest.prototypes.map((p) => [p.species, p.rootCount])
+  );
+  const countsAf = Object.fromEntries(
+    retargetedAf.manifest.prototypes.map((p) => [p.species, p.rootCount])
+  );
+  for (const sp of ['royal_palm', 'palm', 'ceiba', 'mangrove']) {
+    assert.ok(countsAw[sp] > 0, `Expected ${sp} to be placed in Cartagena subtropical forest, got ${countsAw[sp]}`);
+  }
+  const ceibaShareAf = countsAf.ceiba / Math.max(1, retargetedAf.manifest.rootCount);
+  const ceibaShareAw = countsAw.ceiba / Math.max(1, retargetedAw.manifest.rootCount);
+  assert.ok(
+    ceibaShareAf > ceibaShareAw,
+    `Expected humid rainforest (Af) to have higher Ceiba canopy fraction (${ceibaShareAf.toFixed(3)}) than dry savanna (Aw, ${ceibaShareAw.toFixed(3)})`
+  );
 });
 
 

@@ -14,6 +14,17 @@ export const FOREST_VOLUME_ASSETS=Object.freeze({
  'prototype-4-chestnut/field.rgba16f.bin.gz':'assets/forest-scenery/saba/volumes/prototype-4-chestnut/field.rgba16f.bin.gz',
  'prototype-4-chestnut/exposure.r8.bin.gz':'assets/forest-scenery/saba/volumes/prototype-4-chestnut/exposure.r8.bin.gz',
 });
+export const SUBTROPICAL_FOREST_VOLUME_ASSETS=Object.freeze({
+ 'manifest.json':'assets/forest-scenery/subtropical/volumes/manifest.json',
+ 'prototype-0-royal-palm/field.rgba16f.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/field.rgba16f.bin.gz',
+ 'prototype-0-royal-palm/exposure.r8.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/exposure.r8.bin.gz',
+ 'prototype-1-palm/field.rgba16f.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-1-palm/field.rgba16f.bin.gz',
+ 'prototype-1-palm/exposure.r8.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-1-palm/exposure.r8.bin.gz',
+ 'prototype-2-ceiba/field.rgba16f.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/field.rgba16f.bin.gz',
+ 'prototype-2-ceiba/exposure.r8.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/exposure.r8.bin.gz',
+ 'prototype-3-mangrove/field.rgba16f.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/field.rgba16f.bin.gz',
+ 'prototype-3-mangrove/exposure.r8.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/exposure.r8.bin.gz',
+});
 const forestVolumeMaxBytes=256*1024*1024;
 const forestVolumeUint=n=>Number.isSafeInteger(n)&&n>=0;
 const forestVolumeVector=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isFinite);
@@ -21,6 +32,25 @@ const forestVolumeReceipt=r=>forestVolumeUint(r?.bytes)&&r.bytes>0&&r.bytes<=for
 const forestVolumeSame=(a,b)=>forestVolumeReceipt(a)&&forestVolumeReceipt(b)&&a.bytes===b.bytes&&a.sha256===b.sha256;
 const forestVolumeHalf=b=>{const s=b&0x8000?-1:1,e=(b>>10)&31,m=b&1023;return e===0?s*m*2**-24:e===31?(m?NaN:s*Infinity):s*(1+m/1024)*2**(e-15);};
 function forestVolumeManifest(m,forest=null){
+ if(m?.format==='waterworld.forest-volumes'&&m.version===1&&m.units==='metres'&&m.upAxis==='Y'&&Array.isArray(m.prototypes)&&m.prototypes.length>=1&&m.prototypes.length<=16){
+  if(forest&&(!Array.isArray(forest.prototypes)||forest.prototypes.length!==m.prototypes.length))throw Error('Native forest volume specimen count mismatch');
+  m.recipe??={version:1,nativeGroundPlaneY:0,extinction:.5};
+  m.files??={};
+  for(const [id,p]of m.prototypes.entries()){
+   if(p?.id!==id||typeof p.species!=='string'||!/^[a-z_]+$/.test(p.species)||!forestVolumeVector(p.originXYZ,3)||!forestVolumeVector(p.dimensionsXYZ,3)||
+    p.dimensionsXYZ.some(n=>!forestVolumeUint(n)||n<2||n>256)||!Number.isFinite(p.cellMetres)||p.cellMetres<=0||p.cellMetres>4||
+    !forestVolumeVector(p.low,3)||!forestVolumeVector(p.high,3)||!Number.isFinite(p.samplingFootprintMetres)||p.samplingFootprintMetres<Math.sqrt(3)*p.cellMetres-1e-6||
+    (forest&&(p.id!==forest.prototypes[id].id||p.species!==forest.prototypes[id].species)))throw Error('Invalid native forest volume specimen');
+   const voxels=p.dimensionsXYZ.reduce((a,b)=>a*b,1),slug=p.species.replaceAll('_','-'),stem=`prototype-${id}-${slug}/`;
+   for(const [key,suffix,stride]of [['field','field.rgba16f.bin',8],['exposure','exposure.r8.bin',1]]){
+    const rawEntry=p[key]??p.files?.[suffix];
+    if(!forestVolumeReceipt(rawEntry)||rawEntry.bytes!==voxels*stride||!forestVolumeReceipt(rawEntry.gzip)||rawEntry.gzip.file!==stem+suffix+'.gz')throw Error('Invalid native forest volume stream: '+key);
+    p[key]={...rawEntry,file:stem+suffix};
+    m.files[stem+suffix]=p[key];
+   }
+  }
+  return m;
+ }
  if(m?.format!=='waterworld.native-forest-volume'||m.version!==1||m.recipe?.version!==1||m.recipe.nativeGroundPlaneY!==0||m.recipe.extinction!==.5||
   !forestVolumeReceipt(m.source?.nativeFieldManifest)||!forestVolumeReceipt(m.source?.method)||m.source.method.file!=='scripts/prepare-forest-volume.py'||
   !Array.isArray(m.prototypes)||m.prototypes.length<1||m.prototypes.length>16||!m.files||m.appearanceErrorSupported===true||m.geometryErrorSupported===true)throw Error('Invalid native forest volume manifest');
@@ -79,18 +109,18 @@ export function createForestVolumeResources({device,pack}){
  const allocated=[],rows=[],bindings=new WeakMap(),T=GPUTextureUsage,B=GPUBufferUsage;let immutableBytes=0;
  try{
   const sampler=device.createSampler({label:'forest volume immutable trilinear sampler',minFilter:'linear',magFilter:'linear',mipmapFilter:'nearest',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',addressModeW:'clamp-to-edge'});
-  for(const p of manifest.prototypes){const raw=pack.prototypes[p.id],size=p.dimensionsXYZ;
+  for(const p of manifest.prototypes){const raw=pack.prototypes[p.id],size=p.dimensionsXYZ,clampedLow=[p.low[0],Math.max(0,p.low[1]),p.low[2]];
    if(size.some(n=>n>device.limits.maxTextureDimension3D)||!(raw?.field instanceof Uint8Array)||raw.field.byteLength!==p.field.bytes||!(raw.exposure instanceof Uint8Array)||raw.exposure.byteLength!==p.exposure.bytes)throw Error('Incomplete/oversized native forest volume upload');
    const texture=(format,label)=>{const t=device.createTexture({label,dimension:'3d',size,format,mipLevelCount:1,usage:T.TEXTURE_BINDING|T.COPY_DST});allocated.push(t);return t;};
    const field=texture('rgba16float','forest volume immutable native pigment density'),exposure=texture('r8unorm','forest volume immutable native escape');
    for(const [texture,bytes,stride]of [[field,raw.field,8],[exposure,raw.exposure,1]])device.queue.writeTexture({texture},bytes,{bytesPerRow:size[0]*stride,rowsPerImage:size[1]},size);
-   const targetStep=Math.max(.35,Math.min(.5,p.cellMetres*.5)),diagonal=Math.hypot(...p.low.map((v,k)=>p.high[k]-v)),maxStep=Math.max(targetStep,diagonal/64);
-   const values=new Float32Array([...p.originXYZ,p.cellMetres,...size,manifest.recipe.extinction,...p.low,targetStep,...p.high,0]);
+   const targetStep=Math.max(.35,Math.min(.5,p.cellMetres*.5)),diagonal=Math.hypot(...clampedLow.map((v,k)=>p.high[k]-v)),maxStep=Math.max(targetStep,diagonal/64);
+   const values=new Float32Array([...p.originXYZ,p.cellMetres,...size,manifest.recipe.extinction,...clampedLow,targetStep,...p.high,0]);
    const metadata=device.createBuffer({label:'forest volume immutable voxel metadata',size:64,usage:B.UNIFORM|B.COPY_DST});allocated.push(metadata);device.queue.writeBuffer(metadata,0,values);
    immutableBytes+=raw.field.byteLength+raw.exposure.byteLength+64;rows.push({field,exposure,metadata,maxStep});
   }
   const indices=device.createBuffer({label:'forest volume immutable procedural box indices',size:144,usage:B.INDEX|B.COPY_DST});allocated.push(indices);device.queue.writeBuffer(indices,0,Uint32Array.from({length:36},(_,i)=>i));immutableBytes+=144;
-  return{prototypes:manifest.prototypes,fieldBounds:manifest.prototypes.map(p=>({low:p.low,high:p.high})),samplingFootprints:manifest.prototypes.map(p=>Math.max(p.samplingFootprintMetres,Math.sqrt(3)*rows[p.id].maxStep)),
+  return{prototypes:manifest.prototypes,fieldBounds:manifest.prototypes.map(p=>({low:[p.low[0],Math.max(0,p.low[1]),p.low[2]],high:p.high})),samplingFootprints:manifest.prototypes.map(p=>Math.max(p.samplingFootprintMetres,Math.sqrt(3)*rows[p.id].maxStep)),
    indices,indexCount:36,immutableBytes,appearanceErrorSupported:false,outsideCameraOnly:true,
    qualification:'Authored native density/escape sampling and bounded ray steps; no global native silhouette/appearance certificate',
    bind(pipeline,pid){if(!forestVolumeUint(pid)||pid>=rows.length)throw Error('Invalid native forest volume prototype');let groups=bindings.get(pipeline);if(!groups){groups=[];bindings.set(pipeline,groups);}if(!groups[pid]){const r=rows[pid];groups[pid]=device.createBindGroup({layout:pipeline.getBindGroupLayout(3),entries:[{binding:0,resource:r.field.createView({dimension:'3d'})},{binding:1,resource:r.exposure.createView({dimension:'3d'})},{binding:2,resource:sampler},{binding:3,resource:{buffer:r.metadata}}]});}return groups[pid];},

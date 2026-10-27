@@ -6,7 +6,7 @@ import {createTaskYieldBudget} from './task-yield.js';
 import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} from './forest-impostor.js';
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
-import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
+import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
 
 export const FOREST_ASSETS=Object.freeze({
   'manifest.json':'assets/forest-scenery/saba/manifest.json',
@@ -74,7 +74,61 @@ export const FOREST_ASSETS=Object.freeze({
   'chestnut-wounds-normal.png':'assets/forest-scenery/saba/chestnut-wounds-normal.png',
   'chestnut-wounds-roughness.png':'assets/forest-scenery/saba/chestnut-wounds-roughness.png',
 });
-export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm']);
+export const SUBTROPICAL_FOREST_ASSETS=Object.freeze({
+  'manifest.json':'assets/forest-scenery/subtropical/manifest.json',
+  'vertices.bin':'assets/forest-scenery/subtropical/vertices.bin.gz',
+  'indices.bin':'assets/forest-scenery/subtropical/indices.bin.gz',
+  'roots.bin':'assets/forest-scenery/subtropical/roots.bin.gz',
+  'royal-palm-bark-albedo.png':'assets/forest-scenery/subtropical/royal-palm-bark-albedo.png',
+  'royal-palm-bark-normal.png':'assets/forest-scenery/subtropical/royal-palm-bark-normal.png',
+  'royal-palm-bark-roughness.png':'assets/forest-scenery/subtropical/royal-palm-bark-roughness.png',
+  'royal-palm-wounds-albedo.png':'assets/forest-scenery/subtropical/royal-palm-wounds-albedo.png',
+  'royal-palm-wounds-normal.png':'assets/forest-scenery/subtropical/royal-palm-wounds-normal.png',
+  'royal-palm-wounds-roughness.png':'assets/forest-scenery/subtropical/royal-palm-wounds-roughness.png',
+  'royal-palm-foliage-0-albedo.png':'assets/forest-scenery/subtropical/royal-palm-foliage-0-albedo.png',
+  'royal-palm-foliage-0-normal.png':'assets/forest-scenery/subtropical/royal-palm-foliage-0-normal.png',
+  'royal-palm-foliage-1-albedo.png':'assets/forest-scenery/subtropical/royal-palm-foliage-1-albedo.png',
+  'royal-palm-foliage-1-normal.png':'assets/forest-scenery/subtropical/royal-palm-foliage-1-normal.png',
+  'royal-palm-foliage-2-albedo.png':'assets/forest-scenery/subtropical/royal-palm-foliage-2-albedo.png',
+  'royal-palm-foliage-2-normal.png':'assets/forest-scenery/subtropical/royal-palm-foliage-2-normal.png',
+  'palm-bark-albedo.png':'assets/forest-scenery/subtropical/palm-bark-albedo.png',
+  'palm-bark-normal.png':'assets/forest-scenery/subtropical/palm-bark-normal.png',
+  'palm-bark-roughness.png':'assets/forest-scenery/subtropical/palm-bark-roughness.png',
+  'palm-wounds-albedo.png':'assets/forest-scenery/subtropical/palm-wounds-albedo.png',
+  'palm-wounds-normal.png':'assets/forest-scenery/subtropical/palm-wounds-normal.png',
+  'palm-wounds-roughness.png':'assets/forest-scenery/subtropical/palm-wounds-roughness.png',
+  'palm-foliage-0-albedo.png':'assets/forest-scenery/subtropical/palm-foliage-0-albedo.png',
+  'palm-foliage-0-normal.png':'assets/forest-scenery/subtropical/palm-foliage-0-normal.png',
+  'palm-foliage-1-albedo.png':'assets/forest-scenery/subtropical/palm-foliage-1-albedo.png',
+  'palm-foliage-1-normal.png':'assets/forest-scenery/subtropical/palm-foliage-1-normal.png',
+  'palm-foliage-2-albedo.png':'assets/forest-scenery/subtropical/palm-foliage-2-albedo.png',
+  'palm-foliage-2-normal.png':'assets/forest-scenery/subtropical/palm-foliage-2-normal.png',
+  'ceiba-bark-albedo.png':'assets/forest-scenery/subtropical/ceiba-bark-albedo.png',
+  'ceiba-bark-normal.png':'assets/forest-scenery/subtropical/ceiba-bark-normal.png',
+  'ceiba-bark-roughness.png':'assets/forest-scenery/subtropical/ceiba-bark-roughness.png',
+  'ceiba-wounds-albedo.png':'assets/forest-scenery/subtropical/ceiba-wounds-albedo.png',
+  'ceiba-wounds-normal.png':'assets/forest-scenery/subtropical/ceiba-wounds-normal.png',
+  'ceiba-wounds-roughness.png':'assets/forest-scenery/subtropical/ceiba-wounds-roughness.png',
+  'ceiba-foliage-0-albedo.png':'assets/forest-scenery/subtropical/ceiba-foliage-0-albedo.png',
+  'ceiba-foliage-0-normal.png':'assets/forest-scenery/subtropical/ceiba-foliage-0-normal.png',
+  'ceiba-foliage-1-albedo.png':'assets/forest-scenery/subtropical/ceiba-foliage-1-albedo.png',
+  'ceiba-foliage-1-normal.png':'assets/forest-scenery/subtropical/ceiba-foliage-1-normal.png',
+  'ceiba-foliage-2-albedo.png':'assets/forest-scenery/subtropical/ceiba-foliage-2-albedo.png',
+  'ceiba-foliage-2-normal.png':'assets/forest-scenery/subtropical/ceiba-foliage-2-normal.png',
+  'mangrove-bark-albedo.png':'assets/forest-scenery/subtropical/mangrove-bark-albedo.png',
+  'mangrove-bark-normal.png':'assets/forest-scenery/subtropical/mangrove-bark-normal.png',
+  'mangrove-bark-roughness.png':'assets/forest-scenery/subtropical/mangrove-bark-roughness.png',
+  'mangrove-wounds-albedo.png':'assets/forest-scenery/subtropical/mangrove-wounds-albedo.png',
+  'mangrove-wounds-normal.png':'assets/forest-scenery/subtropical/mangrove-wounds-normal.png',
+  'mangrove-wounds-roughness.png':'assets/forest-scenery/subtropical/mangrove-wounds-roughness.png',
+  'mangrove-foliage-0-albedo.png':'assets/forest-scenery/subtropical/mangrove-foliage-0-albedo.png',
+  'mangrove-foliage-0-normal.png':'assets/forest-scenery/subtropical/mangrove-foliage-0-normal.png',
+  'mangrove-foliage-1-albedo.png':'assets/forest-scenery/subtropical/mangrove-foliage-1-albedo.png',
+  'mangrove-foliage-1-normal.png':'assets/forest-scenery/subtropical/mangrove-foliage-1-normal.png',
+  'mangrove-foliage-2-albedo.png':'assets/forest-scenery/subtropical/mangrove-foliage-2-albedo.png',
+  'mangrove-foliage-2-normal.png':'assets/forest-scenery/subtropical/mangrove-foliage-2-normal.png',
+});
+export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm','royal_palm','ceiba','mangrove']);
 export const FOREST_ROOT_FLOATS=12;
 export const FOREST_VERTEX_LAYOUT=Object.freeze({arrayStride:56,attributes:[
   {shaderLocation:0,offset:0,format:'float32x3'},
@@ -209,7 +263,7 @@ async function finishForestChecks(iterator,{yieldTask,signal}={}){
   }
 }
 export async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
-export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,onManifest,onRoots}={}){
+export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,onManifest,onRoots}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
@@ -229,7 +283,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,i
   validateForestMaterials(manifest.prototypes);
   onManifest?.(manifest);
   const rootsPromise=skipRoots?Promise.resolve(new ArrayBuffer(0)):stream('roots.bin');
-  const volumePromise=loadVolumes?loadForestVolumes({forest:manifest,fetchAsset}).then(volumes=>({volumes,volumeError:null})).catch(error=>({volumes:null,volumeError:error.message})):Promise.resolve({volumes:null,volumeError:null});
+  const volumePromise=loadVolumes?loadForestVolumes({forest:manifest,fetchAsset,assets:volumeAssets}).then(volumes=>({volumes,volumeError:null})).catch(error=>({volumes:null,volumeError:error.message})):Promise.resolve({volumes:null,volumeError:null});
   const atlasDebug=typeof location!=='undefined'&&['auto','force'].includes(new URLSearchParams(location.search).get('forestImpostor'));
   const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
   const atlasPromise=loadAtlases?volumePromise.then(volume=>volume.volumes&&!atlasDebug&&!volumeOff?{impostors:null,impostorError:null}:
@@ -678,10 +732,12 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
   let atlas,native=null,destroyed=false,terrainVisibility=null;
   try{
     const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
-    if(pack.volumes&&middle?.woodIndices&&mode==='auto'&&impostorMode!=='force'&&!volumeOff){
+    const volumeForce=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='force';
+    const isSubtropicalPack=m.prototypes.some(p=>p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove');
+    if(pack.volumes&&(!isSubtropicalPack||volumeForce)&&middle?.woodIndices&&mode==='auto'&&impostorMode!=='force'&&!volumeOff){
       volume=createForestVolumeResources({device,pack:pack.volumes});
       volumeShell=middle.reduced&&new URLSearchParams(typeof location==='undefined'?'':location.search).get('forestVolume')!=='ray';shellIndices=middle.indices;
-      middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id]}))};
+      middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:isSubtropicalPack?0.045:(volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id])}))};
     }
     if(pack.impostors&&impostorMode!=='off'&&!volume)atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:m});
     const nativeMid=Boolean(nativeLod&&middle&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
@@ -732,7 +788,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const visible=make(new Uint32Array(maxRootCapacity*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
     const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
     const previous=make(new Uint32Array(maxRootCapacity),B.STORAGE,'forest GPU previous LOD');
-    const modeIndex=['auto','near','far'].indexOf(mode);
+    const modeIndex=(isSubtropicalPack&&!volume&&mode==='auto')?1:['auto','near','far'].indexOf(mode);
     const deferred=(Boolean(middle&&volume)||atlas?.fullSphere)&&mode==='auto'&&!pack.vertices;
     const effectiveModeIndex=(pack.skipNative||deferred)&&mode==='auto'?2:modeIndex;
     let currentNearPixels=nearPixels;
