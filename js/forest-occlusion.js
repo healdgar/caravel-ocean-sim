@@ -96,7 +96,7 @@ fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
  var standSteps=0u;
  for(var i=0u;i<5u;i++){
   let dFront=probeDists[i];
-  if(dFront>=distXZ-16.){break;}
+  if(dFront>=distXZ-40.||dFront>=distXZ*0.65){break;}
   let pXZ=centre.xz+dirToCam*dFront;
   let bounds=forestTerrainSampleBounds(pXZ);
   let t=1.-dFront/distXZ;
@@ -106,18 +106,17 @@ fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
  }
  return standSteps;
 }
-fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32)->bool{
+fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32)->bool{
  if(identity.z>-1.5){return false;}
- let standSteps=forestCoastalStandSteps(centre,rootScale,identity);
  if(standSteps>=99u){return true;}
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
  if(camera.y<42.){
-  if(standSteps>=4u&&distXZ>220.){return true;}
-  if(standSteps>=3u&&distXZ>180.&&(rootId&3u)!=0u){return true;}
-  if(standSteps==2u&&distXZ>340.&&(rootId&1u)!=0u){return true;}
+  if(standSteps>=4u&&distXZ>280.){return true;}
+  if(standSteps>=3u&&distXZ>360.&&(rootId&3u)!=0u){return true;}
+  if(standSteps==2u&&distXZ>520.&&(rootId&1u)!=0u){return true;}
  }else{
-  if(standSteps>=4u&&distXZ>520.&&(rootId&3u)!=0u){return true;}
-  if(standSteps==3u&&distXZ>720.&&(rootId&1u)!=0u){return true;}
+  if(standSteps>=4u&&distXZ>580.&&(rootId&3u)!=0u){return true;}
+  if(standSteps==3u&&distXZ>780.&&(rootId&1u)!=0u){return true;}
  }
  if(distXZ>1800.&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
  if(distXZ>3800.&&(rootId&1u)!=0u){return true;}
@@ -129,8 +128,10 @@ export function withForestTerrainOcclusion(source){
  const marker4='previousLod[id.x]=select(select(select(0u,3u,mid2Lod),2u,midLod),1u,nearLod);';
  const marker=source.includes(marker4)?marker4:marker3;
  if(!source.includes(marker)||source.includes('fn forestTerrainHidden('))throw Error('Forest terrain occlusion source mismatch');
- const next=source.replace('var coastalStandSteps=0u;','var coastalStandSteps=forestCoastalStandSteps(world,r.rootScale,r.identity);');
- return next.replace(marker,'if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x)){return;}\n '+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
+ const hasStandVar=source.includes('var coastalStandSteps=0u;');
+ const next=hasStandVar?source.replace('var coastalStandSteps=0u;','var coastalStandSteps=forestCoastalStandSteps(world,r.rootScale,r.identity);'):source;
+ const standArg=hasStandVar?'coastalStandSteps':'forestCoastalStandSteps(world,r.rootScale,r.identity)';
+ return next.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,${standArg})){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 export function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;
