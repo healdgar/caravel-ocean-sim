@@ -173,7 +173,7 @@ test('modular and Pages manual Sun controls cover full angles and restore daylig
     const {page,errors}=await fleetRuntimeOpen(path,{view:'free',cam:'0,8,45,0,0',skyMode:'manual',sunElev:'30',sunAzim:'-85',windDir:'-90',swellDir:'-450',windSpeed:'2',swellHs:'.1',clouds:'.35',cloudQuality:'.25',astroDate:'2026-10-21T16:00:00Z',astroRate:'0'});
     try{
       const slider=async(key,value)=>page.locator('#sea-'+key).evaluate((input,value)=>{input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}));},value);
-      await fleetRuntimeStep(page);await page.getByRole('button',{name:'Sea settings',exact:true}).click();await page.locator('#astronomy-controls summary').click();
+      await fleetRuntimeStep(page);await page.getByRole('button',{name:'Sea settings',exact:true}).click();if(!(await page.locator('#astronomy-controls').evaluate(d=>d.open)))await page.locator('#astronomy-controls summary').click();
       for(const width of [320,768]){
         await page.setViewportSize({width,height:666});
         const layout=await page.locator('#astronomy-date').evaluate(input=>({width:input.getBoundingClientRect().width,overflow:input.closest('.panel-body').scrollWidth>input.closest('.panel-body').clientWidth}));

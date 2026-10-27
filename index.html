@@ -76,7 +76,11 @@
   #panel input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
   #panel output { text-align:right; font-size:11px; color:var(--muted); }
   #panel #astronomy-controls .astronomy-date-control { grid-template-columns:minmax(0,1fr); gap:6px; padding:6px 0; }
+  #panel #astronomy-controls .astronomy-slider-row,#landfall-panel .landfall-sun-sliders label { display:grid; grid-template-columns:minmax(0,1fr) 96px 42px; gap:5px; align-items:center; min-height:36px; }
   #astronomy-date { width:100%; min-width:0; }
+  #landfall-panel .landfall-sun-sliders { margin:10px 0 4px; padding-top:8px; border-top:1px solid #ffffff20; }
+  #landfall-panel .landfall-sun-sliders input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
+  #landfall-panel .landfall-sun-sliders output { text-align:right; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
   #panel .panel-body > button { margin:4px 3px 4px 0; }
   #boat-panel label { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; margin:2px 0; }
   #boat-panel select { min-width:0; max-width:100%; }

@@ -83,6 +83,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
     <p>Start at the horizon, on approach, or off Wells Bay. Detailed beach and breaking surf are still to come. Sailing physics remain at normal speed.</p>
     <div class="landfall-weather" role="group" aria-label="Landfall weather"></div>
+    <div id="landfall-sun-sliders" class="landfall-sun-sliders"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Click any coastline on the chart to set coordinates.</p>
     <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), AWS Terrarium SRTM Z13/Z14, and Esri World Imagery, downsampled, reprojected and modified for 1550 terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain).</p></details>

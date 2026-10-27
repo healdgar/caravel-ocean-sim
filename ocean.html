@@ -76,7 +76,11 @@
   #panel input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
   #panel output { text-align:right; font-size:11px; color:var(--muted); }
   #panel #astronomy-controls .astronomy-date-control { grid-template-columns:minmax(0,1fr); gap:6px; padding:6px 0; }
+  #panel #astronomy-controls .astronomy-slider-row,#landfall-panel .landfall-sun-sliders label { display:grid; grid-template-columns:minmax(0,1fr) 96px 42px; gap:5px; align-items:center; min-height:36px; }
   #astronomy-date { width:100%; min-width:0; }
+  #landfall-panel .landfall-sun-sliders { margin:10px 0 4px; padding-top:8px; border-top:1px solid #ffffff20; }
+  #landfall-panel .landfall-sun-sliders input[type=range] { width:100%; min-width:0; accent-color:var(--gold); }
+  #landfall-panel .landfall-sun-sliders output { text-align:right; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
   #panel .panel-body > button { margin:4px 3px 4px 0; }
   #boat-panel label { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; margin:2px 0; }
   #boat-panel select { min-width:0; max-width:100%; }
@@ -31525,6 +31529,7 @@ function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=nul
     <div class="landfall-stages" role="group" aria-label="Landfall starting point"></div>
     <p>Start at the horizon, on approach, or off Wells Bay. Detailed beach and breaking surf are still to come. Sailing physics remain at normal speed.</p>
     <div class="landfall-weather" role="group" aria-label="Landfall weather"></div>
+    <div id="landfall-sun-sliders" class="landfall-sun-sliders"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Click any coastline on the chart to set coordinates.</p>
     <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), AWS Terrarium SRTM Z13/Z14, and Esri World Imagery, downsampled, reprojected and modified for 1550 terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain).</p></details>
@@ -34974,7 +34979,7 @@ async function main() {
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
     discovery:terrain?.discovery??null,onUpgradeApplied:()=>{envFull=true;},
     onOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
-    getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}needSpectrum=true;envFull=true;}});
+    getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}for(const k of ['sunElev','sunAzim']){const m=landfallMirrorSliders[k];if(m&&P[k]!==undefined){m.input.value=String(P[k]);m.output.textContent=String(P[k]);}}needSpectrum=true;envFull=true;}});
   controlIcon(cameraDock.querySelector('#landfall-button'),'map','Landfall');
   cameraDock.append(seaSettingsButton,shipSettingsButton,shareButton);
   performanceButton=document.createElement('button');performanceButton.id='performance-toggle';performanceButton.type='button';performanceButton.className='icon-button';
@@ -35141,20 +35146,102 @@ async function main() {
   const hideSea=controlIcon(document.createElement('button'),'close','Hide sea settings');
   hideSea.onclick=()=>{setPanelOpen(false);seaSettingsButton.focus();};seaHeader.append(seaTitle,hideSea);
   const seaBody=document.createElement('div');seaBody.className='panel-body';panel.append(seaHeader,seaBody);
-  const astronomyControls=document.createElement('details');astronomyControls.id='astronomy-controls';
-  const astronomySummary=document.createElement('summary');astronomySummary.textContent='Sun, Moon and stars';astronomyControls.append(astronomySummary);
+  const astronomyControls=document.createElement('details');astronomyControls.id='astronomy-controls';astronomyControls.open=true;
+  const astronomySummary=document.createElement('summary');astronomySummary.textContent='Sun, Moon & sky time';astronomyControls.append(astronomySummary);
   const skyMode=document.createElement('select');skyMode.id='sky-mode';skyMode.innerHTML='<option value="manual">Manual Sun</option><option value="astronomy">Astronomical sky</option>';skyMode.value=astronomy.mode;
   const skyDate=document.createElement('input');skyDate.id='astronomy-date';skyDate.type='datetime-local';skyDate.step='1';skyDate.value=astronomy.state.date.slice(0,19);
   const astroInputs={};
+  const MONTH_NAMES=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const MONTH_DAYS=[31,28,31,30,31,30,31,31,30,31,30,31];
+  function formatTimeOfDay(hours){
+    const totalMin=((Math.round(hours*60)%1440)+1440)%1440;
+    return `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+  }
+  function formatDayOfYear(doy){
+    let rem=Math.max(1,Math.min(365,Math.round(doy)));
+    for(let m=0;m<12;m++){
+      if(rem<=MONTH_DAYS[m]||m===11)return `${MONTH_NAMES[m]} ${rem}`;
+      rem-=MONTH_DAYS[m];
+    }
+    return 'Dec 31';
+  }
+  function getLocalAstroDecomp(){
+    const utcMs=astronomy.epochMs+astronomy.elapsedSeconds*1000;
+    const lon=Number(astronomy.state?.observer?.longitude??astronomy.anchor.longitude)||0;
+    const tzMs=(lon/15)*3600000;
+    const localDate=new Date(utcMs+tzMs);
+    const year=localDate.getUTCFullYear();
+    const startOfYearMs=Date.UTC(year,0,1,0,0,0);
+    const dayOfYear=Math.max(1,Math.min(365,Math.floor((localDate.getTime()-startOfYearMs)/86400000)+1));
+    const hours=localDate.getUTCHours()+localDate.getUTCMinutes()/60+localDate.getUTCSeconds()/3600;
+    return {year,dayOfYear,hours,tzMs};
+  }
+  function buildUtcIsoFromLocal(year,dayOfYear,hours,tzMs){
+    const localMs=Date.UTC(year,0,1,0,0,0)+(Math.max(1,Math.min(365,Math.round(dayOfYear)))-1)*86400000+Math.round(hours*3600000);
+    return new Date(localMs-tzMs).toISOString();
+  }
+  const initDecomp=getLocalAstroDecomp();
+  const timeOfDayRow=document.createElement('label');timeOfDayRow.className='astronomy-slider-row';
+  const timeOfDaySpan=document.createElement('span');timeOfDaySpan.textContent='Time of day (local)';
+  const timeOfDayInput=document.createElement('input');Object.assign(timeOfDayInput,{type:'range',min:0,max:24,step:0.05,value:initDecomp.hours.toFixed(2),id:'astronomy-time-of-day'});timeOfDayInput.setAttribute('aria-label','Time of day (local)');
+  const timeOfDayOut=document.createElement('output');timeOfDayOut.textContent=formatTimeOfDay(initDecomp.hours);
+  timeOfDayRow.append(timeOfDaySpan,timeOfDayInput,timeOfDayOut);
+  const dayOfYearRow=document.createElement('label');dayOfYearRow.className='astronomy-slider-row';
+  const dayOfYearSpan=document.createElement('span');dayOfYearSpan.textContent='Time of year';
+  const dayOfYearInput=document.createElement('input');Object.assign(dayOfYearInput,{type:'range',min:1,max:365,step:1,value:String(initDecomp.dayOfYear),id:'astronomy-day-of-year'});dayOfYearInput.setAttribute('aria-label','Time of year');
+  const dayOfYearOut=document.createElement('output');dayOfYearOut.textContent=formatDayOfYear(initDecomp.dayOfYear);
+  dayOfYearRow.append(dayOfYearSpan,dayOfYearInput,dayOfYearOut);
+  const sunSliderAnchor=document.createElement('div');
+  astronomyControls.append(timeOfDayRow,dayOfYearRow,sunSliderAnchor);
   function astroControl(text,element){const label=document.createElement('label');label.textContent=text;if(element===skyDate)label.className='astronomy-date-control';label.append(element);astronomyControls.append(label);}
   astroControl('Sky mode',skyMode);astroControl('Date / time (UT-like, proleptic Gregorian)',skyDate);
   for(const [key,label,min,max,value] of [['latitude','Latitude (north +)',-90,90,astronomy.anchor.latitude],['longitude','Longitude (east +)',-180,180,astronomy.anchor.longitude],['rate','Sky clock rate',0,3600,astronomy.rate]]){const input=document.createElement('input');input.type='number';input.min=min;input.max=max;input.step=key==='rate'?'1':'.001';input.value=value;input.id='astronomy-'+key;astroInputs[key]=input;astroControl(label,input);}
   for(const [key,label] of [['stars','Stars'],['constellations','Constellation guide lines']]){const input=document.createElement('input');input.type='checkbox';input.checked=astronomy[key];input.id='astronomy-'+key;astroInputs[key]=input;astroControl(label,input);}
   const astroStatus=document.createElement('p');astroStatus.id='astronomy-status';astronomyControls.append(astroStatus);
-  const skyHelp=document.createElement('p');skyHelp.textContent='Sun elevation: 0° is the horizon; negative angles move below it, reaching full night by −18°. Astronomical sky supplies the Moon and stars from the date and location. Moving a Sun slider selects Manual Sun.';astronomyControls.append(skyHelp);
-  function applyAstronomy(values){try{astronomy.set(values,boat);envFull=true;astroStatus.textContent=astronomy.mode==='astronomy'?'Real Sun/Moon directions; sky clock is separate from wave simulation.':'Manual Sun controls active.';}catch(error){astroStatus.textContent=error.message;}}
-  skyMode.onchange=()=>applyAstronomy({mode:skyMode.value});skyDate.onchange=()=>applyAstronomy({date:skyDate.value+'Z'});
-  astroInputs.latitude.onchange=astroInputs.longitude.onchange=()=>applyAstronomy({latitude:astroInputs.latitude.value,longitude:astroInputs.longitude.value});
+  const skyHelp=document.createElement('p');skyHelp.textContent='Use Time of day & Time of year for astronomical Sun, Moon & stars at this latitude/longitude, or Sun elevation & azimuth for direct manual angles.';astronomyControls.append(skyHelp);
+  const landfallMirrorSliders={};
+  function syncAstronomySliders(syncSunAngles=false){
+    skyMode.value=astronomy.mode;
+    if(astronomy.state?.date)skyDate.value=astronomy.state.date.slice(0,19);
+    const dec=getLocalAstroDecomp();
+    timeOfDayInput.value=dec.hours.toFixed(2);
+    timeOfDayOut.textContent=formatTimeOfDay(dec.hours);
+    dayOfYearInput.value=String(dec.dayOfYear);
+    dayOfYearOut.textContent=formatDayOfYear(dec.dayOfYear);
+    if(landfallMirrorSliders.timeOfDay){
+      landfallMirrorSliders.timeOfDay.input.value=timeOfDayInput.value;
+      landfallMirrorSliders.timeOfDay.output.textContent=timeOfDayOut.textContent;
+    }
+    if(landfallMirrorSliders.dayOfYear){
+      landfallMirrorSliders.dayOfYear.input.value=dayOfYearInput.value;
+      landfallMirrorSliders.dayOfYear.output.textContent=dayOfYearOut.textContent;
+    }
+    if(syncSunAngles&&astronomy.mode==='astronomy'&&astronomy.state?.sun){
+      P.sunElev=Math.max(-90,Math.min(90,Number(astronomy.state.sun.altitude.toFixed(1))));
+      P.sunAzim=Number((((astronomy.state.sun.azimuth%360)+360)%360).toFixed(1));
+      for(const k of ['sunElev','sunAzim']){
+        const s=seaSliders?.get(k);
+        if(s){s.input.value=String(P[k]);s.output.textContent=String(P[k]);}
+        const m=landfallMirrorSliders[k];
+        if(m){m.input.value=String(P[k]);m.output.textContent=String(P[k]);}
+      }
+    }
+  }
+  function applyAstronomy(values,syncSunAngles=false){try{astronomy.set(values,boat);envFull=true;syncAstronomySliders(syncSunAngles);astroStatus.textContent=astronomy.mode==='astronomy'?'Real Sun/Moon directions; sky clock is separate from wave simulation.':'Manual Sun controls active.';}catch(error){astroStatus.textContent=error.message;}}
+  timeOfDayInput.addEventListener('input',()=>{
+    const hrs=Number(timeOfDayInput.value);
+    const dec=getLocalAstroDecomp();
+    applyAstronomy({mode:'astronomy',date:buildUtcIsoFromLocal(dec.year,dec.dayOfYear,hrs,dec.tzMs)},true);
+  });
+  dayOfYearInput.addEventListener('input',()=>{
+    const doy=Number(dayOfYearInput.value);
+    const dec=getLocalAstroDecomp();
+    const hrs=(astronomy.mode==='manual'&&(astronomy.state?.sun?.altitude??0)<=0&&P.sunElev>2)?14.5:dec.hours;
+    applyAstronomy({mode:'astronomy',date:buildUtcIsoFromLocal(dec.year,doy,hrs,dec.tzMs)},true);
+  });
+  skyMode.onchange=()=>applyAstronomy({mode:skyMode.value},skyMode.value==='astronomy');
+  skyDate.onchange=()=>applyAstronomy({mode:'astronomy',date:skyDate.value+'Z'},true);
+  astroInputs.latitude.onchange=astroInputs.longitude.onchange=()=>applyAstronomy({latitude:astroInputs.latitude.value,longitude:astroInputs.longitude.value},astronomy.mode==='astronomy');
   astroInputs.rate.onchange=()=>applyAstronomy({rate:astroInputs.rate.value});for(const key of ['stars','constellations'])astroInputs[key].onchange=()=>applyAstronomy({[key]:astroInputs[key].checked});
   seaBody.append(astronomyControls);
   window.oceanAstronomy={clock:astronomy,get state(){return astronomy.state;},set(values){applyAstronomy(values);skyMode.value=astronomy.mode;skyDate.value=astronomy.state.date.slice(0,19);return astronomy.state;},update(elapsed=0){return astronomy.update(elapsed,boat);}};
@@ -35249,6 +35336,7 @@ async function main() {
   ];
   for (const [key, label, min, max, step, kind] of SLIDERS) {
     const row = document.createElement('label');
+    if(key==='sunElev'||key==='sunAzim')row.className='astronomy-slider-row';
     const name = document.createElement('span'); name.textContent = label;
     const val = document.createElement('output'); val.textContent = String(P[key]);
     const inp = document.createElement('input');
@@ -35257,13 +35345,41 @@ async function main() {
     seaSliders.set(key, { input: inp, output: val });
     inp.addEventListener('input', () => {
       P[key] = Number(inp.value); val.textContent = inp.value;
-      if(key==='sunElev'||key==='sunAzim'){if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});skyMode.value='manual';}
+      if(key==='sunElev'||key==='sunAzim'){
+        if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});
+        skyMode.value='manual';
+        const m=landfallMirrorSliders[key];
+        if(m){m.input.value=inp.value;m.output.textContent=inp.value;}
+      }
       if (kind === 'spec') needSpectrum = true;
       envFull = true;
     });
     row.append(name, inp, val);
-    (key==='sunElev'||key==='sunAzim'?astronomyControls:seaBody).appendChild(row);
+    (key==='sunElev'||key==='sunAzim'?sunSliderAnchor:seaBody).appendChild(row);
   }
+  const landfallSunBox=document.getElementById('landfall-sun-sliders');
+  if(landfallSunBox){
+    const addMirror=(key,labelText,srcInput,srcOut)=>{
+      const row=document.createElement('label');
+      const name=document.createElement('span');name.textContent=labelText;
+      const out=document.createElement('output');out.textContent=srcOut.textContent;
+      const inp=document.createElement('input');
+      Object.assign(inp,{type:'range',min:srcInput.min,max:srcInput.max,step:srcInput.step,value:srcInput.value,id:'landfall-'+key});
+      inp.setAttribute('aria-label',labelText);
+      inp.addEventListener('input',()=>{
+        srcInput.value=inp.value;
+        srcInput.dispatchEvent(new Event('input',{bubbles:true}));
+      });
+      row.append(name,inp,out);
+      landfallSunBox.append(row);
+      landfallMirrorSliders[key]={input:inp,output:out};
+    };
+    addMirror('timeOfDay','Time of day (local)',timeOfDayInput,timeOfDayOut);
+    addMirror('dayOfYear','Time of year',dayOfYearInput,dayOfYearOut);
+    addMirror('sunElev','Sun elevation (°)',seaSliders.get('sunElev').input,seaSliders.get('sunElev').output);
+    addMirror('sunAzim','Sun azimuth (°)',seaSliders.get('sunAzim').input,seaSliders.get('sunAzim').output);
+  }
+  syncAstronomySliders(astronomy.mode==='astronomy');
   const dolphinControls=createDolphinControls({parent:seaBody,encounter:dolphins.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   const marineControls=createMarineControls({parent:dolphinControls.root,encounter:marineLife.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,notice:dolphinControls.notice,
