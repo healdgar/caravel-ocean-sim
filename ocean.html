@@ -4184,7 +4184,12 @@ function advanceSails(boat, dt, windSpeed, windDirection) {
     const squares=s.geometry.design.surfaces.filter(p=>p.kind==='square'),limit=squares.length?Math.max(...squares.map(p=>p.braceLimit??Math.PI/3)):0;
     s.squareTarget=sailClamp(s.squareTarget,-limit,limit);
   }
-  for (let i = 0; i < 3; i++) s.set[i] += sailClamp(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1) - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i]??1), dt * 0.18 * (boat.crewSailRate?.[i]??1));
+  const mastGroups = ['fore', 'main', 'mizzen'];
+  for (let i = 0; i < 3; i++) {
+    const mastCap = boat.damage?.sunk ? 0 : (boat.damage?.mastIntegrity?.[mastGroups[i]] ?? 1);
+    const targetSet = Math.min(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1), mastCap);
+    s.set[i] += sailClamp(targetSet - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i] ?? 1), dt * 0.18 * (boat.crewSailRate?.[i] ?? 1));
+  }
   // Yards and lateen take time to brace/tack; forces use this actual trim.
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
   s.lateenYaw += sailClamp(s.lateenTarget - s.lateenYaw, -dt * 0.65, dt * 0.65);
@@ -12989,20 +12994,52 @@ fn gunneryVolumeLocal(v:GunneryVolume,p:vec3f)->vec3f{
   let d=p-v.centre.xyz;return vec3f(dot(d,v.axisX.xyz)/v.axisX.w,dot(d,v.axisY.xyz)/v.axisY.w,dot(d,v.axisZ.xyz)/v.axisZ.w);
 }
 fn gunneryVolumeRay(v:GunneryVolume,ray:vec3f)->vec3f{return vec3f(dot(ray,v.axisX.xyz)/v.axisX.w,dot(ray,v.axisY.xyz)/v.axisY.w,dot(ray,v.axisZ.xyz)/v.axisZ.w);}
+fn gunneryHash3(p:vec3f)->f32{
+  var q=fract(p*vec3f(.1031,.1030,.0973));
+  q+=dot(q,q.yxz+33.33);
+  return fract((q.x+q.y)*q.z);
+}
+fn gunneryNoise3(p:vec3f)->f32{
+  let i=floor(p);let f=fract(p);let u=f*f*(3.0-2.0*f);
+  return mix(
+    mix(mix(gunneryHash3(i+vec3f(0,0,0)),gunneryHash3(i+vec3f(1,0,0)),u.x),
+        mix(gunneryHash3(i+vec3f(0,1,0)),gunneryHash3(i+vec3f(1,1,0)),u.x),u.y),
+    mix(mix(gunneryHash3(i+vec3f(0,0,1)),gunneryHash3(i+vec3f(1,0,1)),u.x),
+        mix(gunneryHash3(i+vec3f(0,1,1)),gunneryHash3(i+vec3f(1,1,1)),u.x),u.y),
+    u.z);
+}
+fn gunneryCloudFbm(p:vec3f)->f32{
+  var q=p;
+  let n0=gunneryNoise3(q);q=q*2.07+vec3f(13.7,-7.3,5.1);
+  let n1=gunneryNoise3(q);q=q*2.11+vec3f(-9.1,11.3,-17.9);
+  let n2=gunneryNoise3(q);
+  // Blend smooth value FBM with inverted-ridge cumulus billows for cauliflower crowns.
+  let fbm=n0*.55+n1*.30+n2*.15;
+  let billow=(1.0-abs(n0*2.0-1.0))*.58+(1.0-abs(n1*2.0-1.0))*.42;
+  return mix(fbm,billow,.52);
+}
 fn gunneryDensity(local:vec3f,age:f32,seed:f32)->f32{
-  // Compact support guarantees no cube edge can appear. Two low-frequency
-  // domain-warped eddies create connected billows, rather than tiny smoke dots.
-  let support=1.0-smoothstep(.65,1.0,dot(local,local));if(support<=0.0){return 0.0;}
-  let p=local+sin(local.yzx*3.3+vec3f(seed,seed*.7,-seed)+age*.36)*.075;
+  // Compact support guarantees no cube edge can appear. Multi-octave 3D cloud FBM
+  // and billowing cumulus turret lobes create crisp cauliflower cloud contours.
+  let r2Init=dot(local,local);
+  let support=1.0-smoothstep(.52,1.0,r2Init);if(support<=0.0){return 0.0;}
+  let warp=vec3f(
+    sin(local.y*3.2+local.z*2.1+seed+age*.32),
+    cos(local.x*2.9-local.z*2.6-seed*.7+age*.44),
+    sin(local.x*3.4+local.y*2.3-seed+age*.28)
+  )*.095;
+  let p=local+warp;
   let r2=dot(p,p);if(r2>=1.0){return 0.0;}
-  let turn=seed*.71;let a=vec3f(cos(turn)*.29,.23,sin(turn)*.21);
-  let b=vec3f(-sin(turn)*.29,-.22,cos(turn)*.22);
-  let c=vec3f(sin(turn)*.3,-.08,-cos(turn)*.25);
-  let lobes=exp(-dot(p-a,p-a)*6.0)+exp(-dot(p-b,p-b)*6.7)+exp(-dot(p-c,p-c)*7.0);
-  let billow=smoothstep(.08,.72,lobes);
-  let eddy=sin(p.x*5.1+seed+age*.45)*sin(p.y*4.7-seed*.3)*sin(p.z*4.3+age*.27);
-  let detail=sin(p.x*12.0+p.z*4.0+seed)*sin(p.y*10.0-p.z*5.0-age*.3);
-  return support*billow*max(.12,.56+eddy*.38+detail*.12);
+  let turn=seed*.71;
+  let a=vec3f(cos(turn)*.32,.26,sin(turn)*.24);
+  let b=vec3f(-sin(turn)*.33,-.18,cos(turn)*.26);
+  let c=vec3f(sin(turn)*.31,-.06,-cos(turn)*.29);
+  let d=vec3f(-cos(turn)*.22,.34,-sin(turn)*.22);
+  let lobes=exp(-dot(p-a,p-a)*4.6)+exp(-dot(p-b,p-b)*5.1)+exp(-dot(p-c,p-c)*5.3)+exp(-dot(p-d,p-d)*5.6);
+  let macroShape=smoothstep(.05,.62,lobes);
+  let fbm=gunneryCloudFbm(p*3.4+vec3f(seed*1.7,-age*.26,seed*2.3));
+  let erode=smoothstep(.22,.78,macroShape*(.55+fbm*.85)-(1.0-support)*.34);
+  return support*erode*(.45+fbm*.95);
 }
 fn gunnerySceneDistance(pixel:vec2f,ray:vec3f)->f32{
   let size=textureDimensions(gunnerySceneDepth);let uv=clamp(vec2i(pixel),vec2i(0),vec2i(size)-1);
@@ -13011,6 +13048,10 @@ fn gunnerySceneDistance(pixel:vec2f,ray:vec3f)->f32{
   // plane. No guessed 0.1/depth conversion or detached screen-space billboard.
   let clipRay=F.viewProj*vec4f(ray,0);let clipOrigin=F.viewProj*vec4f(0,0,0,1);
   return max(0.0,(clipOrigin.z-depth*clipOrigin.w)/(depth*clipRay.w-clipRay.z));
+}
+fn gunneryHgPhase(cosTheta:f32,g:f32)->f32{
+  let g2=g*g;
+  return (1.0-g2)/(4.0*PI*pow(max(.01,1.0+g2-2.0*g*cosTheta),1.5));
 }
 struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)@interpolate(flat)id:u32};
 @vertex fn gunneryVolumeVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryVolumeVertex{
@@ -13028,17 +13069,22 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let enter=max(0.0,max(low.x,max(low.y,low.z)));
   let scene=gunnerySceneDistance(v.position.xy,ray);
   let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter){discard;}
-  let stepSize=(exit-enter)/12.0;var transmittance=1.0;var radiance=vec3f(0);
-  let ambient=skyAtmo(vec3f(0,1,0))*.58+lightningLight()*.2;
+  let stepSize=(exit-enter)/16.0;var transmittance=1.0;var radiance=vec3f(0);
+  let jitter=fract(sin(dot(v.position.xy,vec2f(12.9898,78.233))+volume.optical.z)*43758.5453);
+  let skyZenith=skyAtmo(vec3f(0,1,0));
+  let skyHorizon=skyAtmo(normalize(vec3f(F.sunDir.x,.12,F.sunDir.z)));
+  let lightning=lightningLight()*.25;
   let sunlight=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
   let sunLocal=gunneryVolumeRay(volume,F.sunDir.xyz);
-  let phase=.075+.11*pow(max(0.0,dot(ray,F.sunDir.xyz)),4.0);
-  for(var sample=0u;sample<12u;sample++){
-    let distance=enter+(f32(sample)+.5)*stepSize;let world=F.camPos.xyz+ray*distance;
+  let cosTheta=dot(ray,F.sunDir.xyz);
+  // Dual-lobe Henyey-Greenstein phase function (silver-lining forward scatter + cloud back-scatter).
+  let phase=mix(gunneryHgPhase(cosTheta,.62),gunneryHgPhase(cosTheta,-.28),.32)*1.85+.085;
+  for(var sample=0u;sample<16u;sample++){
+    let distance=enter+(f32(sample)+.15+.7*jitter)*stepSize;
     let local=origin+direction*distance;
     var density=gunneryDensity(local,volume.optical.y,volume.optical.z);
-    // A small soft intersection margin removes hard slices at timber and sea.
-    density*=smoothstep(0.0,.16,scene-distance);
+    // Soft intersection margin removes hard slices at timber and sea.
+    density*=smoothstep(0.0,.28,scene-distance);
     if(density<.001){continue;}
     var emission=vec3f(0);var extinction=volume.optical.x*density;
     if(volume.centre.w>.5){
@@ -13046,14 +13092,21 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       emission=mix(vec3f(15.0,2.2,.15),vec3f(38.0,25.0,8.0),flame*flame)*volume.optical.x;
       extinction=density*4.0;
     }else{
-      // Three finite sunlight samples give a dark dense core and bright billow
-      // edges. Smoke itself is not emissive at night after the short flash.
-      let lightStep=min(volume.axisX.w,min(volume.axisY.w,volume.axisZ.w))*.58;
+      // Three finite sunlight samples + Beer-Powder multi-scattering give cumulus
+      // cloud self-shadowing: bright silver-lined crowns and warm/cool shadowed bellies.
+      let lightStep=min(volume.axisX.w,min(volume.axisY.w,volume.axisZ.w))*.52;
       var shadowDepth=0.0;
       for(var lightSample=1u;lightSample<=3u;lightSample++){
         shadowDepth+=gunneryDensity(local+sunLocal*lightStep*f32(lightSample),volume.optical.y,volume.optical.z)*lightStep*volume.optical.x;
       }
-      emission=vec3f(.84,.83,.79)*(ambient+sunlight*phase*exp(-shadowDepth));
+      let beer=exp(-shadowDepth*.85);
+      let multiScatter=exp(-shadowDepth*.24)*.42;
+      let powder=1.0-.52*exp(-shadowDepth*2.2);
+      let directTransfer=(beer*powder+multiScatter)*phase;
+      let heightGrad=clamp(local.y*.5+.5,0.0,1.0);
+      let ambient=mix(skyHorizon*.44,skyZenith*.76,heightGrad)+lightning;
+      let cloudAlbedo=mix(vec3f(.76,.77,.79),vec3f(.93,.91,.87), clamp(beer+.25,0.0,1.0));
+      emission=cloudAlbedo*(ambient+sunlight*directTransfer);
     }
     let opacity=1.0-exp(-extinction*stepSize);
     radiance+=transmittance*opacity*emission;transmittance*=1.0-opacity;
@@ -13979,7 +14032,7 @@ function createRowingSurfaceEvents(surfaceWaves,{maxEvents=ROWING_SURFACE_LIMITS
 
 
 
-const GUNNERY_FX_LIMITS=Object.freeze({shots:64,smoke:192,impacts:40,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
+const GUNNERY_FX_LIMITS=Object.freeze({shots:64,smoke:256,impacts:40,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
 const gunneryFxFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
 const gunneryFxVector=(v,fallback=[0,0,0])=>fallback.map((n,i)=>gunneryFxFinite(v?.[i],n));
 const gunneryFxClamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -13995,7 +14048,7 @@ function createGunneryEffectState(){
     if(length<1e-8)return false;
     if(shots.length===GUNNERY_FX_LIMITS.shots)shots.shift();
     shots.push({id:event.id??++serial,position:gunneryFxVector(event.position),direction:direction.map(v=>v/length),age:0,
-      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.chargeKg,3)/3),.45,1.8),seed:(++serial*.61803398875)%1,
+      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.chargeKg,3)/2.2),.82,2.25),seed:(++serial*.61803398875)%1,
       drift:[0,0,0],driftVelocity:[0,0,0]});return true;
   }
   function emitImpact(event={}){
@@ -14046,22 +14099,22 @@ function createGunneryEffectState(){
 function gunnerySmokeParcel(shot,index){
   const t=shot.age-index*.022;if(t<0)return null;
   const direction=shot.direction,scale=shot.scale;
-  const travel=(.2+index*.48)+(4.4-index*.7)*(1-Math.exp(-t/(.27+index*.085)))*scale;
-  const across=(.17+.92*Math.pow(t,.7))*scale*(1-index*.09);
-  const along=(.32+Math.min(t,.35)*(4.5-index*.6)+t*.27)*scale;
+  const travel=(.45+index*1.15)+(11.5-index*1.45)*(1-Math.exp(-t/(.28+index*.085)))*scale;
+  const across=(.55+3.25*Math.pow(t,.68))*scale*(1-index*.07);
+  const along=(.85+Math.min(t,.45)*(8.2-index*.95)+t*.92)*scale;
   const centre=shot.position.map((v,k)=>v+direction[k]*travel+shot.drift[k]);
-  centre[1]+=(.24*t+.16*(1-Math.exp(-t/.7)))*scale;
-  const eddy=across*Math.min(1,t*.8)*.28,phase=shot.seed*37+index*2.4;
+  centre[1]+=(.58*t+.65*(1-Math.exp(-t/.85)))*scale;
+  const eddy=across*Math.min(1,t*.8)*.26,phase=shot.seed*37+index*2.4;
   const transverse=[direction[2],0,-direction[0]],transverseLength=Math.hypot(...transverse)||1;
   for(let k=0;k<3;k++)centre[k]+=transverse[k]/transverseLength*Math.sin(phase)*eddy;
-  centre[1]+=Math.cos(phase)*eddy;
+  centre[1]+=Math.cos(phase)*eddy*.65;
+  const vertical=across*(1.08+.14*Math.sin(shot.seed*17+index)+.18*Math.min(1,t*.35));
   // Random phase changes contours; no per-frame random spawning or even rows.
   // Black powder produces a substantial condensed aerosol load. A single
   // fresh discharge must obscure its own gun, and adjacent guns must combine
-  // into a dense bank before dilution clears it. This remains a visual mass
-  // calibration; the expanding volume and wind entrainment are unchanged.
-  const extinction=(11.1-index*1.8)*scale**3/(across*across*along)*Math.exp(-t/9)*(1-gunneryFxClamp((t-13)/5,0,1));
-  return {centre,radii:[across,across*(1+.12*Math.sin(shot.seed*17+index)),along],direction,extinction,age:t,seed:shot.seed*79+index*11};
+  // into a dense cloud-like bank before dilution clears it.
+  const extinction=(135-index*18)*scale**3/(across*across*along)*Math.exp(-t/10.5)*(1-gunneryFxClamp((t-13)/5,0,1));
+  return {centre,radii:[across,vertical,along],direction,extinction,age:t,seed:shot.seed*79+index*11};
 }
 
 async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,surfaceWaves=null}){
@@ -14104,7 +14157,7 @@ async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,e
       if(!state.active)return;
       const eye=gunneryFxVector(options.eye),ordered=[];
       for(const shot of state.shots){
-        for(let k=0;k<3;k++){const p=gunnerySmokeParcel(shot,k);if(p)ordered.push({...p,type:0});}
+        for(let k=0;k<4;k++){const p=gunnerySmokeParcel(shot,k);if(p)ordered.push({...p,type:0});}
         if(shot.age<GUNNERY_FX_LIMITS.flashSeconds){
           const t=shot.age/GUNNERY_FX_LIMITS.flashSeconds;
           ordered.push({centre:shot.position.map((v,k)=>v+shot.direction[k]*(.55+1.1*t)*shot.scale),direction:shot.direction,
@@ -14645,10 +14698,14 @@ function followerRowing(state,boat,leader,{course,heading,speed,windFrom,windSpe
   // instead of diverting a rowed course or entering a sail recovery maneuver.
   const usableWind=windSpeed>.5&&angle>=70*RAD;
   const stormScale=windSpeed>28?.18:windSpeed>20?.4:1;
-  const canvas=resting||!usableWind?0:Math.min(effort,stormScale);
-  for(const key of SAIL_KEYS)boat[key]=keys.includes(key)?canvas:0;
+  const canvas=resting||!usableWind||boat.damage?.sunk?0:Math.min(effort,stormScale);
+  for(const key of SAIL_KEYS){
+    const group=key==='sailFore'?'fore':key==='sailMizzen'?'mizzen':'main';
+    const mastCap=boat.damage?.mastIntegrity?.[group]??1;
+    boat[key]=keys.includes(key)?Math.min(canvas,mastCap):0;
+  }
   state.course=((course/RAD)%360+360)%360;
-  state.status=resting?'Resting at station':separation<L*1.8?'Rowing clear':'Rowing to follow';
+  state.status=boat.damage?.sunk?'Foundering':resting?'Resting at station':separation<L*1.8?'Rowing clear':'Rowing to follow';
   return state;
 }
 
@@ -14664,7 +14721,8 @@ function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neighbors=nu
   let dx=goalX-boat.x,dz=goalZ-boat.z;
   const separation=Math.hypot(boat.x-leader.x,boat.z-leader.z);state.separation=separation;
   const errorDistance=Math.hypot(dx,dz),lookAhead=L*1.8;
-  const leaderSpeed=boatForwardSpeed(leader),leaderSway=Number.isFinite(leader.leewayVelocity)?leader.leewayVelocity:0;
+  const rawLeaderSpeed=boatForwardSpeed(leader),leaderSpeed=Number.isFinite(rawLeaderSpeed)?rawLeaderSpeed:0;
+  const leaderSway=Number.isFinite(leader.leewayVelocity)?leader.leewayVelocity:0;
   const leaderYaw=Number.isFinite(leader.yawRate)?leader.yawRate:0;
   const leaderVX=Math.sin(h)*leaderSpeed+Math.cos(h)*leaderSway,leaderVZ=-Math.cos(h)*leaderSpeed+Math.sin(h)*leaderSway;
   const groundSpeed=Math.hypot(leaderVX,leaderVZ),guidanceTime=lookAhead/Math.max(.5,groundSpeed);
@@ -14684,7 +14742,8 @@ function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neighbors=nu
     if(d<clearance){const away=d>.01?[ax/d,az/d]:[Math.cos(h)*Math.sign(side||1),Math.sin(h)*Math.sign(side||1)];
       const strength=(1-d/clearance)*L*6;dx+=away[0]*strength;dz+=away[1]*strength;}
   }
-  const heading=boat.heading*RAD,speed=boatForwardSpeed(boat);
+  const rawSpeed=boatForwardSpeed(boat),speed=Number.isFinite(rawSpeed)?rawSpeed:0;
+  const heading=boat.heading*RAD;
   const leeway=speed>.35?clamp(Math.atan2(boat.leewayVelocity??0,speed),-30*RAD,30*RAD):0;
   const track=Math.hypot(dx,dz)>1e-6?Math.atan2(dx,-dz):h;
   let course=wrap(track-leeway);
@@ -14769,7 +14828,13 @@ function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neighbors=nu
   // Only a stopped leader with no requested canvas asks the companion to stop.
   const leaderSailing=leaderCanvas>.01;
   const activeKeys=followerSailKeys(boat);
-  for(const key of SAIL_KEYS)boat[key]=activeKeys.includes(key)?(!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas):0;
+  for(const key of SAIL_KEYS){
+    const group=key==='sailFore'?'fore':key==='sailMizzen'?'mizzen':'main';
+    const mastCap=boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[group]??1);
+    const desired=activeKeys.includes(key)?(!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas):0;
+    boat[key]=Math.min(desired,mastCap);
+  }
+  if(boat.damage?.sunk)state.status='Foundering';
   state.course=((course/RAD)%360+360)%360;
   return state;
 }
@@ -27945,8 +28010,8 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
   }
 
   // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free subdivision
-  // (Only subdivide coarse 257x257 mobile grids; full 513x513 Saba-resolution grids use a single uniform grid with zero inner seam)
-  const subRadius = n >= 513 ? 0 : region.span * 0.22;
+  // (Uniform 257x257 mobile and 513x513 full-resolution grids avoid inner-square subdivision overhead)
+  const subRadius = n === 257 || n >= 513 ? 0 : region.span * 0.22;
   const M = n >= 513 ? 2 : 3;
   const cellSub = new Uint8Array((n - 1) * (n - 1));
   for (let j = 0; j < n - 1; j++) {
@@ -28002,7 +28067,7 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
             indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
           }
         }
-        if (lo < 0 && hi > -45) {
+        if (lo < 0 && hi > -22) {
           if (useMainDiag) {
             submergedIndices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
           } else {
@@ -28049,7 +28114,7 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
               indices.push(v00, v01, v10, v10, v01, v11);
             }
           }
-          if (lo < 0 && hi > -45) {
+          if (lo < 0 && hi > -22) {
             if (useSubMainDiag) {
               submergedIndices.push(v00, v01, v11, v00, v11, v10);
             } else {
@@ -31614,20 +31679,24 @@ fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
  }
  return standSteps;
 }
-fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32)->bool{
+fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32,pixelError:f32)->bool{
  if(identity.z>-1.5){return false;}
  if(standSteps>=99u){return true;}
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
- if(camera.y<42.){
-  if(standSteps>=4u&&distXZ>280.){return true;}
-  if(standSteps>=3u&&distXZ>360.&&(rootId&3u)!=0u){return true;}
-  if(standSteps==2u&&distXZ>520.&&(rootId&1u)!=0u){return true;}
+ let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0);
+ if(camera.y<48.){
+  if(standSteps>=4u&&distXZ>135.*budgetScale){return true;}
+  if(standSteps>=3u&&distXZ>165.*budgetScale&&(rootId&7u)!=0u){return true;}
+  if(standSteps>=2u&&distXZ>195.*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps>=1u&&distXZ>280.*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(pixelError>4.2&&standSteps>=1u&&distXZ>155.*budgetScale&&(rootId&3u)!=0u){return true;}
  }else{
-  if(standSteps>=4u&&distXZ>580.&&(rootId&3u)!=0u){return true;}
-  if(standSteps==3u&&distXZ>780.&&(rootId&1u)!=0u){return true;}
+  if(standSteps>=4u&&distXZ>340.*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps==3u&&distXZ>460.*budgetScale&&(rootId&1u)!=0u){return true;}
  }
- if(distXZ>1800.&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
- if(distXZ>3800.&&(rootId&1u)!=0u){return true;}
+ if(distXZ>1100.*budgetScale&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
+ if(distXZ>1900.*budgetScale&&(rootId&1u)!=0u){return true;}
+ if(distXZ>2800.*budgetScale&&(rootId&3u)!=0u){return true;}
  return false;
 }
 `;
@@ -31639,7 +31708,7 @@ function withForestTerrainOcclusion(source){
  const hasStandVar=source.includes('var coastalStandSteps=0u;');
  const next=hasStandVar?source.replace('var coastalStandSteps=0u;','var coastalStandSteps=forestCoastalStandSteps(world,r.rootScale,r.identity);'):source;
  const standArg=hasStandVar?'coastalStandSteps':'forestCoastalStandSteps(world,r.rootScale,r.identity)';
- return next.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,${standArg})){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
+ return next.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,${standArg},parameters.z)){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;
@@ -31948,14 +32017,14 @@ function createSubtropicalNativeLod(manifest){
   const prototypes=manifest.prototypes.map((p,id)=>{
     const origWoodTris=Math.floor(p.wood.indexCount/3);
     const isPalm=p.species==='royal_palm'||p.species==='palm';
-    const woodFracs=isPalm?[0.22,0.16,0.11]:[0.55,0.42,0.32],woodErrs=[0,0.08,0.22];
+    const woodFracs=isPalm?[0.20,0.12,0.07]:[0.44,0.26,0.14],woodErrs=[0,0.08,0.22];
     const woodTiers=woodFracs.map((frac,tier)=>{
       const tris=Math.max(4,Math.floor(origWoodTris*frac)),indexCount=tris*3,firstIndex=cursor;
       cursor+=indexCount;
       return{tier,firstIndex,indexCount,triangles:tris,originalTriangles:origWoodTris,maximumReportedErrorMetres:woodErrs[tier]};
     });
     const origLeafQuads=Math.floor(p.leaf.indexCount/6);
-    const keepQuads=Math.max(8,Math.floor(origLeafQuads*0.52)),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
+    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isPalm?0.44:0.38))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
     cursor+=leafIndexCount;
     const leafRibbons={firstIndex:leafFirstIndex,indexCount:leafIndexCount,leafCount:keepQuads,originalFirstIndex:p.leaf.firstIndex,originalIndexCount:p.leaf.indexCount,maximumPositionErrorUpperMetres:0.04};
     const farFirstIndex=cursor,farIndexCount=p.far.indexCount;
@@ -32224,7 +32293,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
  let tierId=forestBin.z>>16u;
- let coverageScale=select(1.,select(1.48,2.10,tierId==3u),tierId>=2u);
+ let coverageScale=select(1.,select(1.62,2.35,tierId==3u),tierId>=2u);
  let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
@@ -32243,7 +32312,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let baseInflate=select(select(.042,.135,tierId==3u),select(.34,.72,tierId==3u),isSubBroadleaf);
+  let baseInflate=select(select(.07,.20,tierId==3u),select(.42,.88,tierId==3u),isSubBroadleaf);
   let inflate=baseInflate/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
   if(tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normal+vec3f(0.,uvOff.y*0.6,0.));}
@@ -32469,21 +32538,23 @@ const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCull
  let nearLod=resident&&!farLod&&!midLod;
  if(!nearLod&&!farLod&&!midLod){return;}`,
  ` let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>radius&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
- let coastalFarDist=select(1450.0,950.0,coastalStandSteps>=2u)*select(1.0,0.90,previousLod[id.x]==0u);
+ let coastalBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
+ let coastalLodScale=coastalBudgetScale*coastalBudgetScale*mix(0.38,1.0,gazeAcuity);
+ let coastalFarDist=select(1320.0,780.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
  let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
  let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);
  let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.34,isCoastalRoot))*r.rootScale.w;
  let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let stdMid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
- let coastalMid2Min=select(select(360.0,185.0,coastalStandSteps==1u),90.0,coastalStandSteps>=2u)*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
+ let coastalMid2Min=select(select(310.0,150.0,coastalStandSteps==1u),72.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMid2Lod=!farLod&&resident&&parameters.w==0.0&&p.leaf.w==1u&&dist>coastalMid2Min;
  let mid2Lod=select(stdMid2Lod,coastalMid2Lod,isSubtropicalCoastal);
  let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.065,isCoastalRoot))*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
- let coastalMid1Min=select(130.0,58.0,coastalStandSteps>=1u)*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
+ let coastalMid1Min=select(105.0,44.0,coastalStandSteps>=1u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMidLod=!farLod&&!mid2Lod&&resident&&parameters.w==0.0&&p.wood.w==1u&&dist>coastalMid1Min;
  let midLod=select(stdMidLod,coastalMidLod,isSubtropicalCoastal);
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
@@ -32577,8 +32648,8 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
         const isBroadleafSub=isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove');
-        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.56:0.42))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.28:0.16))*6);
+        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.36:0.28))*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.15:0.11))*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
         draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
@@ -33240,7 +33311,7 @@ function retargetForestPackToProcedural(
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const buckets = Array.from({ length: protoCount }, () => []);
-  const baseMaxRoots = isMobile ? 6000 : 14000;
+  const baseMaxRoots = isMobile ? 3200 : 14000;
   const effectiveMaxCapacity =
     maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 28000));
 
@@ -33478,7 +33549,7 @@ function retargetForestPackToProcedural(
 
   seedSectionCanopy(proceduralPack, baseMaxRoots);
   if (Array.isArray(extraSections) && extraSections.length > 0) {
-    const perSecBudget = isMobile ? 2500 : 5500;
+    const perSecBudget = isMobile ? 1200 : 5500;
     for (const sec of extraSections) {
       const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
       const remaining = effectiveMaxCapacity - currentTotal;
@@ -33876,10 +33947,11 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
     for(const id of visibleForestIds(groundPatches,camera,viewProjection)){
       const patch=groundPatches[id];
-      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*.88)continue;
+      const groundCullScale=isMobile&&currentPixelError>3.8?1.35:.88;
+      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*groundCullScale)continue;
       const instances=groundCoverInstances(patch,activeRegion,groundSample,biome);groundStats.resident++;
       for(let variant=0;variant<GROUND_COVER.variants;variant++){
-        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*.88)continue;
+        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*(isMobile?1.45:.88))continue;
         const data=instances[variant],batch=groundBatches[variant];
         for(let i=0;i<data.length;i+=8){
           const key=id+':'+variant+':'+i,error=groundCoverError(data[i],data[i+1],data[i+2],data[i+3],data[i+4],camera);
@@ -33926,7 +33998,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   trees=forestPack?new Float32Array(0):canopyTrees;
   forestPatches=createForestPatches(trees);
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const streamMaxRoots=isMobile?24000:56000;
+  const streamMaxRoots=isMobile?10000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
@@ -34505,6 +34577,28 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     },120);
   }
 
+  function isSectionVisible(secRegion,cam=lastCamera,matrix=lastView,maxDist=Infinity){
+    if(!secRegion)return false;
+    const span=secRegion.span??8192,half=span*0.5;
+    if(cam&&Number.isFinite(cam.x)&&Number.isFinite(cam.z)){
+      const dx=Math.max(secRegion.x-half-cam.x,0,cam.x-(secRegion.x+half));
+      const dz=Math.max(secRegion.z-half-cam.z,0,cam.z-(secRegion.z+half));
+      if(dx*dx+dz*dz>maxDist*maxDist)return false;
+    }
+    if(matrix&&matrix.length>=16&&cam&&Number.isFinite(cam.x)){
+      const p=[secRegion.x-cam.x,120-(cam.y??6),secRegion.z-cam.z];
+      const radius=Math.hypot(half,320,half);
+      for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
+        const ax=matrix[3]+(axis===3?0:sign*matrix[axis]);
+        const ay=matrix[7]+(axis===3?0:sign*matrix[4+axis]);
+        const az=matrix[11]+(axis===3?0:sign*matrix[8+axis]);
+        const d=matrix[15]+(axis===3?0:sign*matrix[12+axis]);
+        if(ax*p[0]+ay*p[1]+az*p[2]+d<-radius*Math.hypot(ax,ay,az))return false;
+      }
+    }
+    return true;
+  }
+
   return {
     waterGroup:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:uniform}},{binding:1,resource:elevation.createView()},{binding:2,resource:{buffer:nearDomain}},{binding:3,resource:{buffer:nearElevation}}]}),
     get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
@@ -34516,6 +34610,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,get region(){return activeRegion;},get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
+    get ports(){const list=proceduralPack?.port?[proceduralPack.port]:[];for(const sec of loadedSections.values())if(sec.port)list.push(sec.port);return list;},
     get streamedSectionCount(){return loadedSections.size;},
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
@@ -34548,7 +34643,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
         submerged.bind(pass,true);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
         if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
         for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.indexCount)continue;
+          if(!sec.submergedGroup||!sec.indexCount||!isSectionVisible(sec.region,lastCamera,lastView))continue;
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
         }
       }else{
@@ -34557,7 +34652,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
         if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
         if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
         for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.submergedCount)continue;
+          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,2800))continue;
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
         }
       }
@@ -34575,6 +34670,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
       if(portMesh){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);}
       for(const sec of loadedSections.values()){
+        if(!isSectionVisible(sec.region,camera,viewProjection))continue;
         pass.setBindGroup(0,sec.terrainGroup);
         pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
         if(sec.portMesh){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);}
@@ -35147,14 +35243,16 @@ const POLYGON_MODE_ALIASES = Object.freeze({
   low: '0.5',
   '0.25': '0.25',
   mobile: '0.25',
+  '0.1': '0.1',
+  'ultra-low': '0.1',
 });
 
-function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = 0.15, targetFPS = 60 } = {}) {
+function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = 0.06, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   const samples = new Float64Array(240), workSamples = new Float64Array(240);
-  let count = 0, seconds = 0, settle = 2.5, fastSeconds = 0, fps = 0;
-  const reset = () => { count = 0; seconds = 0; settle = 2.5; fastSeconds = 0; };
+  let count = 0, seconds = 0, settle = 1.6, fastSeconds = 0, fps = 0;
+  const reset = () => { count = 0; seconds = 0; settle = 1.6; fastSeconds = 0; };
   return {
     get mode() { return mode; },
     get scale() { return scale; },
@@ -35177,7 +35275,7 @@ function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, mini
       samples[count] = elapsed * 1000;
       workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
       seconds += elapsed;
-      if ((seconds < 2.0 || count < 12) && count < samples.length) return false;
+      if ((seconds < 1.4 || count < 12) && count < samples.length) return false;
       const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
       let ms = 0;
       for (let i = trim; i < count - trim; i++) ms += sorted[i];
@@ -35186,7 +35284,7 @@ function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, mini
       const budget = 1000 / targetFPS;
       if (ms > budget * 1.01) {
         // Active 2D surface/stand triangle count scales proportionally to 1/error^2 = scale.
-        const factor = Math.max(0.65, Math.min(0.9, ((1000 / 66) / ms) * 0.96));
+        const factor = Math.max(0.55, Math.min(0.9, ((1000 / 66) / ms) * 0.96));
         next = Math.max(minimum, Math.round(scale * factor * 100) / 100);
         fastSeconds = 0;
       } else {
@@ -36273,6 +36371,15 @@ function applyShipImpactDamage(targetBoat, event) {
       damage.floodingTonnes = +(damage.floodingTonnes + floodAdd).toFixed(3);
       targetBoat.cargoTonnes = Math.min(80, (targetBoat.cargoTonnes ?? 0) + floodAdd);
       targetBoat.revision = (targetBoat.revision ?? 0) + 1;
+      if (targetBoat.hydrodynamics && Number.isFinite(targetBoat.length) && Number.isFinite(targetBoat.beam)) {
+        targetBoat.hydrodynamics = boatHydrodynamics(
+          targetBoat.length,
+          targetBoat.beam,
+          targetBoat.provisionDays ?? 30,
+          targetBoat.cargoTonnes,
+          targetBoat.modelId,
+        );
+      }
     }
     if (damage.hullIntegrity <= 0) damage.sunk = true;
   }
@@ -36489,8 +36596,10 @@ function createGunnerySolidSweep({ sourceBoat, getVessels = () => [], getTerrain
       if (hit && (!best || hit.fraction < best.fraction)) best = hit;
     }
     const terrain = getTerrain();
-    if (terrain?.port) {
-      const bHit = sweepBuildingSegment(from, to, radius, terrain.port);
+    const ports = terrain?.ports ?? (terrain?.port ? [terrain.port] : []);
+    for (const port of ports) {
+      if (!port) continue;
+      const bHit = sweepBuildingSegment(from, to, radius, port);
       if (bHit && (!best || bHit.fraction < best.fraction)) best = bHit;
     }
     if (terrain) {
@@ -36642,7 +36751,8 @@ function createGunneryControls(parent,gunnery){
   function formatDamage(r){
     if(!r)return '';
     if(r.kind==='ship'){
-      const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging (${Math.round(r.rigIntegrity*100)}% rig)`:`hull (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
+      const partLabel=r.hitPartId?` [${r.hitPartId}]`:'';
+      const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging${partLabel} (${Math.round(r.rigIntegrity*100)}% rig)`:`hull${partLabel} (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
       return `Struck ${r.targetName} ${zone} · ${r.energyKj} kJ${r.sunk?' · Foundering':''}`;
     }
     if(r.kind==='building'){
@@ -38609,7 +38719,7 @@ async function main() {
   seaBody.append(resolutionLabel,resolutionStatus);
   const polygonLabel=document.createElement('label');polygonLabel.className='resolution-control';polygonLabel.textContent='Polygon budget';
   const polygonInput=document.createElement('select');polygonInput.id='polygon-budget';
-  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','High (100%)'],['0.75','Medium (75%)'],['0.5','Low (50%)'],['0.25','Mobile (25%)'],...(fixedPolygons?[['fixed','Fixed by URL']]:[])]) {
+  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','High (100%)'],['0.75','Medium (75%)'],['0.5','Low (50%)'],['0.25','Mobile (25%)'],['0.1','Ultra-low (10%)'],...(fixedPolygons?[['fixed','Fixed by URL']]:[])]) {
     const option=document.createElement('option');option.value=value;option.textContent=label;polygonInput.append(option);
   }
   polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
@@ -38801,8 +38911,9 @@ async function main() {
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
     const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
-    if(resolution.sample(elapsed,!document.hidden,workSample))polygons.reset();
-    else if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
+    const resChanged = resolution.sample(elapsed,!document.hidden,workSample);
+    if(resChanged&&elapsed<1/42)polygons.reset();
+    if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);
     last = now;

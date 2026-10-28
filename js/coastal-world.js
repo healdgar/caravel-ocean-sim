@@ -4561,8 +4561,8 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
   }
 
   // Identify near-harbor shoreline cells (`hi > -6 && lo < 10` within central coastal zone) for crack-free subdivision
-  // (Only subdivide coarse 257x257 mobile grids; full 513x513 Saba-resolution grids use a single uniform grid with zero inner seam)
-  const subRadius = n >= 513 ? 0 : region.span * 0.22;
+  // (Uniform 257x257 mobile and 513x513 full-resolution grids avoid inner-square subdivision overhead)
+  const subRadius = n === 257 || n >= 513 ? 0 : region.span * 0.22;
   const M = n >= 513 ? 2 : 3;
   const cellSub = new Uint8Array((n - 1) * (n - 1));
   for (let j = 0; j < n - 1; j++) {
@@ -4618,7 +4618,7 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
             indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
           }
         }
-        if (lo < 0 && hi > -45) {
+        if (lo < 0 && hi > -22) {
           if (useMainDiag) {
             submergedIndices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
           } else {
@@ -4665,7 +4665,7 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
               indices.push(v00, v01, v10, v10, v01, v11);
             }
           }
-          if (lo < 0 && hi > -45) {
+          if (lo < 0 && hi > -22) {
             if (useSubMainDiag) {
               submergedIndices.push(v00, v01, v11, v00, v11, v10);
             } else {

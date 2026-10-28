@@ -43,10 +43,14 @@ function followerRowing(state,boat,leader,{course,heading,speed,windFrom,windSpe
   // instead of diverting a rowed course or entering a sail recovery maneuver.
   const usableWind=windSpeed>.5&&angle>=70*RAD;
   const stormScale=windSpeed>28?.18:windSpeed>20?.4:1;
-  const canvas=resting||!usableWind?0:Math.min(effort,stormScale);
-  for(const key of SAIL_KEYS)boat[key]=keys.includes(key)?canvas:0;
+  const canvas=resting||!usableWind||boat.damage?.sunk?0:Math.min(effort,stormScale);
+  for(const key of SAIL_KEYS){
+    const group=key==='sailFore'?'fore':key==='sailMizzen'?'mizzen':'main';
+    const mastCap=boat.damage?.mastIntegrity?.[group]??1;
+    boat[key]=keys.includes(key)?Math.min(canvas,mastCap):0;
+  }
   state.course=((course/RAD)%360+360)%360;
-  state.status=resting?'Resting at station':separation<L*1.8?'Rowing clear':'Rowing to follow';
+  state.status=boat.damage?.sunk?'Foundering':resting?'Resting at station':separation<L*1.8?'Rowing clear':'Rowing to follow';
   return state;
 }
 
@@ -62,7 +66,8 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   let dx=goalX-boat.x,dz=goalZ-boat.z;
   const separation=Math.hypot(boat.x-leader.x,boat.z-leader.z);state.separation=separation;
   const errorDistance=Math.hypot(dx,dz),lookAhead=L*1.8;
-  const leaderSpeed=boatForwardSpeed(leader),leaderSway=Number.isFinite(leader.leewayVelocity)?leader.leewayVelocity:0;
+  const rawLeaderSpeed=boatForwardSpeed(leader),leaderSpeed=Number.isFinite(rawLeaderSpeed)?rawLeaderSpeed:0;
+  const leaderSway=Number.isFinite(leader.leewayVelocity)?leader.leewayVelocity:0;
   const leaderYaw=Number.isFinite(leader.yawRate)?leader.yawRate:0;
   const leaderVX=Math.sin(h)*leaderSpeed+Math.cos(h)*leaderSway,leaderVZ=-Math.cos(h)*leaderSpeed+Math.sin(h)*leaderSway;
   const groundSpeed=Math.hypot(leaderVX,leaderVZ),guidanceTime=lookAhead/Math.max(.5,groundSpeed);
@@ -82,7 +87,8 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
     if(d<clearance){const away=d>.01?[ax/d,az/d]:[Math.cos(h)*Math.sign(side||1),Math.sin(h)*Math.sign(side||1)];
       const strength=(1-d/clearance)*L*6;dx+=away[0]*strength;dz+=away[1]*strength;}
   }
-  const heading=boat.heading*RAD,speed=boatForwardSpeed(boat);
+  const rawSpeed=boatForwardSpeed(boat),speed=Number.isFinite(rawSpeed)?rawSpeed:0;
+  const heading=boat.heading*RAD;
   const leeway=speed>.35?clamp(Math.atan2(boat.leewayVelocity??0,speed),-30*RAD,30*RAD):0;
   const track=Math.hypot(dx,dz)>1e-6?Math.atan2(dx,-dz):h;
   let course=wrap(track-leeway);
@@ -167,7 +173,13 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   // Only a stopped leader with no requested canvas asks the companion to stop.
   const leaderSailing=leaderCanvas>.01;
   const activeKeys=followerSailKeys(boat);
-  for(const key of SAIL_KEYS)boat[key]=activeKeys.includes(key)?(!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas):0;
+  for(const key of SAIL_KEYS){
+    const group=key==='sailFore'?'fore':key==='sailMizzen'?'mizzen':'main';
+    const mastCap=boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[group]??1);
+    const desired=activeKeys.includes(key)?(!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas):0;
+    boat[key]=Math.min(desired,mastCap);
+  }
+  if(boat.damage?.sunk)state.status='Foundering';
   state.course=((course/RAD)%360+360)%360;
   return state;
 }

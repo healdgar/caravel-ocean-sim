@@ -107,7 +107,12 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
     const squares=s.geometry.design.surfaces.filter(p=>p.kind==='square'),limit=squares.length?Math.max(...squares.map(p=>p.braceLimit??Math.PI/3)):0;
     s.squareTarget=sailClamp(s.squareTarget,-limit,limit);
   }
-  for (let i = 0; i < 3; i++) s.set[i] += sailClamp(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1) - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i]??1), dt * 0.18 * (boat.crewSailRate?.[i]??1));
+  const mastGroups = ['fore', 'main', 'mizzen'];
+  for (let i = 0; i < 3; i++) {
+    const mastCap = boat.damage?.sunk ? 0 : (boat.damage?.mastIntegrity?.[mastGroups[i]] ?? 1);
+    const targetSet = Math.min(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1), mastCap);
+    s.set[i] += sailClamp(targetSet - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i] ?? 1), dt * 0.18 * (boat.crewSailRate?.[i] ?? 1));
+  }
   // Yards and lateen take time to brace/tack; forces use this actual trim.
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
   s.lateenYaw += sailClamp(s.lateenTarget - s.lateenYaw, -dt * 0.65, dt * 0.65);

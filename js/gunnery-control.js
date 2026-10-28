@@ -2,7 +2,7 @@
 import { createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact } from './gunnery-state.js';
 import { createGunDefinitions, gunMuzzlePose, gunElevationRange } from './gunnery-models.js';
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
-import { boatRotate } from './boat.js';
+import { boatRotate, boatHydrodynamics } from './boat.js';
 import { SHIP_MODELS } from './ship-models.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
@@ -247,6 +247,15 @@ export function applyShipImpactDamage(targetBoat, event) {
       damage.floodingTonnes = +(damage.floodingTonnes + floodAdd).toFixed(3);
       targetBoat.cargoTonnes = Math.min(80, (targetBoat.cargoTonnes ?? 0) + floodAdd);
       targetBoat.revision = (targetBoat.revision ?? 0) + 1;
+      if (targetBoat.hydrodynamics && Number.isFinite(targetBoat.length) && Number.isFinite(targetBoat.beam)) {
+        targetBoat.hydrodynamics = boatHydrodynamics(
+          targetBoat.length,
+          targetBoat.beam,
+          targetBoat.provisionDays ?? 30,
+          targetBoat.cargoTonnes,
+          targetBoat.modelId,
+        );
+      }
     }
     if (damage.hullIntegrity <= 0) damage.sunk = true;
   }
@@ -463,8 +472,10 @@ export function createGunnerySolidSweep({ sourceBoat, getVessels = () => [], get
       if (hit && (!best || hit.fraction < best.fraction)) best = hit;
     }
     const terrain = getTerrain();
-    if (terrain?.port) {
-      const bHit = sweepBuildingSegment(from, to, radius, terrain.port);
+    const ports = terrain?.ports ?? (terrain?.port ? [terrain.port] : []);
+    for (const port of ports) {
+      if (!port) continue;
+      const bHit = sweepBuildingSegment(from, to, radius, port);
       if (bHit && (!best || bHit.fraction < best.fraction)) best = bHit;
     }
     if (terrain) {

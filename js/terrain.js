@@ -41,7 +41,7 @@ export function retargetForestPackToProcedural(
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const buckets = Array.from({ length: protoCount }, () => []);
-  const baseMaxRoots = isMobile ? 6000 : 14000;
+  const baseMaxRoots = isMobile ? 3200 : 14000;
   const effectiveMaxCapacity =
     maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 28000));
 
@@ -279,7 +279,7 @@ export function retargetForestPackToProcedural(
 
   seedSectionCanopy(proceduralPack, baseMaxRoots);
   if (Array.isArray(extraSections) && extraSections.length > 0) {
-    const perSecBudget = isMobile ? 2500 : 5500;
+    const perSecBudget = isMobile ? 1200 : 5500;
     for (const sec of extraSections) {
       const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
       const remaining = effectiveMaxCapacity - currentTotal;
@@ -677,10 +677,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
     for(const id of visibleForestIds(groundPatches,camera,viewProjection)){
       const patch=groundPatches[id];
-      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*.88)continue;
+      const groundCullScale=isMobile&&currentPixelError>3.8?1.35:.88;
+      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*groundCullScale)continue;
       const instances=groundCoverInstances(patch,activeRegion,groundSample,biome);groundStats.resident++;
       for(let variant=0;variant<GROUND_COVER.variants;variant++){
-        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*.88)continue;
+        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*(isMobile?1.45:.88))continue;
         const data=instances[variant],batch=groundBatches[variant];
         for(let i=0;i<data.length;i+=8){
           const key=id+':'+variant+':'+i,error=groundCoverError(data[i],data[i+1],data[i+2],data[i+3],data[i+4],camera);
@@ -727,7 +728,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   trees=forestPack?new Float32Array(0):canopyTrees;
   forestPatches=createForestPatches(trees);
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const streamMaxRoots=isMobile?24000:56000;
+  const streamMaxRoots=isMobile?10000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
@@ -1306,6 +1307,28 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },120);
   }
 
+  function isSectionVisible(secRegion,cam=lastCamera,matrix=lastView,maxDist=Infinity){
+    if(!secRegion)return false;
+    const span=secRegion.span??8192,half=span*0.5;
+    if(cam&&Number.isFinite(cam.x)&&Number.isFinite(cam.z)){
+      const dx=Math.max(secRegion.x-half-cam.x,0,cam.x-(secRegion.x+half));
+      const dz=Math.max(secRegion.z-half-cam.z,0,cam.z-(secRegion.z+half));
+      if(dx*dx+dz*dz>maxDist*maxDist)return false;
+    }
+    if(matrix&&matrix.length>=16&&cam&&Number.isFinite(cam.x)){
+      const p=[secRegion.x-cam.x,120-(cam.y??6),secRegion.z-cam.z];
+      const radius=Math.hypot(half,320,half);
+      for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
+        const ax=matrix[3]+(axis===3?0:sign*matrix[axis]);
+        const ay=matrix[7]+(axis===3?0:sign*matrix[4+axis]);
+        const az=matrix[11]+(axis===3?0:sign*matrix[8+axis]);
+        const d=matrix[15]+(axis===3?0:sign*matrix[12+axis]);
+        if(ax*p[0]+ay*p[1]+az*p[2]+d<-radius*Math.hypot(ax,ay,az))return false;
+      }
+    }
+    return true;
+  }
+
   return {
     waterGroup:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:uniform}},{binding:1,resource:elevation.createView()},{binding:2,resource:{buffer:nearDomain}},{binding:3,resource:{buffer:nearElevation}}]}),
     get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
@@ -1317,6 +1340,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:heightSample,groundSample,get region(){return activeRegion;},get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
+    get ports(){const list=proceduralPack?.port?[proceduralPack.port]:[];for(const sec of loadedSections.values())if(sec.port)list.push(sec.port);return list;},
     get streamedSectionCount(){return loadedSections.size;},
     discovery,applyUpgradedPack,
     safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
@@ -1349,7 +1373,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         submerged.bind(pass,true);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
         if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
         for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.indexCount)continue;
+          if(!sec.submergedGroup||!sec.indexCount||!isSectionVisible(sec.region,lastCamera,lastView))continue;
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
         }
       }else{
@@ -1358,7 +1382,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
         if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
         for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.submergedCount)continue;
+          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,2800))continue;
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
         }
       }
@@ -1376,6 +1400,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
       if(portMesh){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);}
       for(const sec of loadedSections.values()){
+        if(!isSectionVisible(sec.region,camera,viewProjection))continue;
         pass.setBindGroup(0,sec.terrainGroup);
         pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
         if(sec.portMesh){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);}

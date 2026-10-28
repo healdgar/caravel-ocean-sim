@@ -276,14 +276,14 @@ function createSubtropicalNativeLod(manifest){
   const prototypes=manifest.prototypes.map((p,id)=>{
     const origWoodTris=Math.floor(p.wood.indexCount/3);
     const isPalm=p.species==='royal_palm'||p.species==='palm';
-    const woodFracs=isPalm?[0.22,0.16,0.11]:[0.55,0.42,0.32],woodErrs=[0,0.08,0.22];
+    const woodFracs=isPalm?[0.20,0.12,0.07]:[0.44,0.26,0.14],woodErrs=[0,0.08,0.22];
     const woodTiers=woodFracs.map((frac,tier)=>{
       const tris=Math.max(4,Math.floor(origWoodTris*frac)),indexCount=tris*3,firstIndex=cursor;
       cursor+=indexCount;
       return{tier,firstIndex,indexCount,triangles:tris,originalTriangles:origWoodTris,maximumReportedErrorMetres:woodErrs[tier]};
     });
     const origLeafQuads=Math.floor(p.leaf.indexCount/6);
-    const keepQuads=Math.max(8,Math.floor(origLeafQuads*0.52)),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
+    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isPalm?0.44:0.38))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
     cursor+=leafIndexCount;
     const leafRibbons={firstIndex:leafFirstIndex,indexCount:leafIndexCount,leafCount:keepQuads,originalFirstIndex:p.leaf.firstIndex,originalIndexCount:p.leaf.indexCount,maximumPositionErrorUpperMetres:0.04};
     const farFirstIndex=cursor,farIndexCount=p.far.indexCount;
@@ -552,7 +552,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
  let tierId=forestBin.z>>16u;
- let coverageScale=select(1.,select(1.48,2.10,tierId==3u),tierId>=2u);
+ let coverageScale=select(1.,select(1.62,2.35,tierId==3u),tierId>=2u);
  let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
@@ -571,7 +571,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let baseInflate=select(select(.042,.135,tierId==3u),select(.34,.72,tierId==3u),isSubBroadleaf);
+  let baseInflate=select(select(.07,.20,tierId==3u),select(.42,.88,tierId==3u),isSubBroadleaf);
   let inflate=baseInflate/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
   if(tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normal+vec3f(0.,uvOff.y*0.6,0.));}
@@ -797,21 +797,23 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let nearLod=resident&&!farLod&&!midLod;
  if(!nearLod&&!farLod&&!midLod){return;}`,
  ` let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>radius&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
- let coastalFarDist=select(1450.0,950.0,coastalStandSteps>=2u)*select(1.0,0.90,previousLod[id.x]==0u);
+ let coastalBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
+ let coastalLodScale=coastalBudgetScale*coastalBudgetScale*mix(0.38,1.0,gazeAcuity);
+ let coastalFarDist=select(1320.0,780.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
  let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
  let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);
  let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.34,isCoastalRoot))*r.rootScale.w;
  let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let stdMid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
- let coastalMid2Min=select(select(360.0,185.0,coastalStandSteps==1u),90.0,coastalStandSteps>=2u)*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
+ let coastalMid2Min=select(select(310.0,150.0,coastalStandSteps==1u),72.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMid2Lod=!farLod&&resident&&parameters.w==0.0&&p.leaf.w==1u&&dist>coastalMid2Min;
  let mid2Lod=select(stdMid2Lod,coastalMid2Lod,isSubtropicalCoastal);
  let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.065,isCoastalRoot))*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
- let coastalMid1Min=select(130.0,58.0,coastalStandSteps>=1u)*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
+ let coastalMid1Min=select(105.0,44.0,coastalStandSteps>=1u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMidLod=!farLod&&!mid2Lod&&resident&&parameters.w==0.0&&p.wood.w==1u&&dist>coastalMid1Min;
  let midLod=select(stdMidLod,coastalMidLod,isSubtropicalCoastal);
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
@@ -905,8 +907,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
         const isBroadleafSub=isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove');
-        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.56:0.42))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.28:0.16))*6);
+        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.36:0.28))*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.15:0.11))*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
         draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);

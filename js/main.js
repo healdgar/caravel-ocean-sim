@@ -1681,7 +1681,7 @@ async function main() {
   seaBody.append(resolutionLabel,resolutionStatus);
   const polygonLabel=document.createElement('label');polygonLabel.className='resolution-control';polygonLabel.textContent='Polygon budget';
   const polygonInput=document.createElement('select');polygonInput.id='polygon-budget';
-  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','High (100%)'],['0.75','Medium (75%)'],['0.5','Low (50%)'],['0.25','Mobile (25%)'],...(fixedPolygons?[['fixed','Fixed by URL']]:[])]) {
+  for(const [value,label] of [['auto','Auto · 60 FPS'],['native','High (100%)'],['0.75','Medium (75%)'],['0.5','Low (50%)'],['0.25','Mobile (25%)'],['0.1','Ultra-low (10%)'],...(fixedPolygons?[['fixed','Fixed by URL']]:[])]) {
     const option=document.createElement('option');option.value=value;option.textContent=label;polygonInput.append(option);
   }
   polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
@@ -1873,8 +1873,9 @@ async function main() {
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
     const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
-    if(resolution.sample(elapsed,!document.hidden,workSample))polygons.reset();
-    else if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
+    const resChanged = resolution.sample(elapsed,!document.hidden,workSample);
+    if(resChanged&&elapsed<1/42)polygons.reset();
+    if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);
     last = now;

@@ -106,20 +106,24 @@ fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
  }
  return standSteps;
 }
-fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32)->bool{
+fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32,pixelError:f32)->bool{
  if(identity.z>-1.5){return false;}
  if(standSteps>=99u){return true;}
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
- if(camera.y<42.){
-  if(standSteps>=4u&&distXZ>280.){return true;}
-  if(standSteps>=3u&&distXZ>360.&&(rootId&3u)!=0u){return true;}
-  if(standSteps==2u&&distXZ>520.&&(rootId&1u)!=0u){return true;}
+ let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0);
+ if(camera.y<48.){
+  if(standSteps>=4u&&distXZ>135.*budgetScale){return true;}
+  if(standSteps>=3u&&distXZ>165.*budgetScale&&(rootId&7u)!=0u){return true;}
+  if(standSteps>=2u&&distXZ>195.*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps>=1u&&distXZ>280.*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(pixelError>4.2&&standSteps>=1u&&distXZ>155.*budgetScale&&(rootId&3u)!=0u){return true;}
  }else{
-  if(standSteps>=4u&&distXZ>580.&&(rootId&3u)!=0u){return true;}
-  if(standSteps==3u&&distXZ>780.&&(rootId&1u)!=0u){return true;}
+  if(standSteps>=4u&&distXZ>340.*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps==3u&&distXZ>460.*budgetScale&&(rootId&1u)!=0u){return true;}
  }
- if(distXZ>1800.&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
- if(distXZ>3800.&&(rootId&1u)!=0u){return true;}
+ if(distXZ>1100.*budgetScale&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
+ if(distXZ>1900.*budgetScale&&(rootId&1u)!=0u){return true;}
+ if(distXZ>2800.*budgetScale&&(rootId&3u)!=0u){return true;}
  return false;
 }
 `;
@@ -131,7 +135,7 @@ export function withForestTerrainOcclusion(source){
  const hasStandVar=source.includes('var coastalStandSteps=0u;');
  const next=hasStandVar?source.replace('var coastalStandSteps=0u;','var coastalStandSteps=forestCoastalStandSteps(world,r.rootScale,r.identity);'):source;
  const standArg=hasStandVar?'coastalStandSteps':'forestCoastalStandSteps(world,r.rootScale,r.identity)';
- return next.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,${standArg})){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
+ return next.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,${standArg},parameters.z)){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 export function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;

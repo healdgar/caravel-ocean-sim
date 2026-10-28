@@ -34,7 +34,8 @@ export function createGunneryControls(parent,gunnery){
   function formatDamage(r){
     if(!r)return '';
     if(r.kind==='ship'){
-      const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging (${Math.round(r.rigIntegrity*100)}% rig)`:`hull (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
+      const partLabel=r.hitPartId?` [${r.hitPartId}]`:'';
+      const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging${partLabel} (${Math.round(r.rigIntegrity*100)}% rig)`:`hull${partLabel} (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
       return `Struck ${r.targetName} ${zone} · ${r.energyKj} kJ${r.sunk?' · Foundering':''}`;
     }
     if(r.kind==='building'){

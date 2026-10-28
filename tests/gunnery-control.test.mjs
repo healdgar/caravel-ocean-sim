@@ -4,6 +4,8 @@ import {test} from 'node:test';
 import {createShipGunnery,createVesselDamageState,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep} from '../js/gunnery-control.js';
 import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
 import {boatHydrodynamics} from '../js/boat.js';
+import {createFollower,steerFollower} from '../js/follower.js';
+import {advanceSails} from '../js/sailing.js';
 import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort} from '../js/coastal-world.js';
 function fixture(options={}){
  const boat={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0};
@@ -93,6 +95,7 @@ test('cannonballs strike other ships in hull and rigging zones, imparting 6-DOF 
  assert.equal(hullReport.breaches,1);
  assert.ok(hullReport.floodingTonnes>0,'waterline penetration causes flooding');
  assert.ok(target.cargoTonnes>0,'flooding increases vessel load');
+ assert.ok(target.hydrodynamics.sinkage>0,'waterline breach immediately updates hull hydrostatics sinkage');
  assert.ok(Math.abs(target.leewayVelocity)>0,'impact transfers lateral momentum to struck hull');
  assert.ok(Math.abs(target.rollVelocity)>0,'off-centre hull strike imparts roll impulse');
 
@@ -105,6 +108,11 @@ test('cannonballs strike other ships in hull and rigging zones, imparting 6-DOF 
  assert.equal(rigReport.hitZone,'rigging');
  assert.ok(rigReport.rigIntegrity<1);
  assert.ok(target.sailMain<1,'damaged mainmast rigging reduces deployed main canvas');
+ const followerState=createFollower();
+ steerFollower(followerState,target,source,0.1,12,Math.PI*0.5);
+ assert.ok(target.sailMain<=target.damage.mastIntegrity.main+1e-6,'follower helm preserves rigging damage cap on damaged mast');
+ advanceSails(target,10,12,Math.PI*0.5);
+ assert.ok(target.sailState.set[1]<=target.damage.mastIntegrity.main+1e-6,'advanceSails caps deployed sail state to mast integrity');
 });
 
 test('cannonballs strike 16th-century port buildings and coastal land, recording structural damage and craters',()=>{

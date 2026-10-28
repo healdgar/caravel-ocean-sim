@@ -70,14 +70,16 @@ const POLYGON_MODE_ALIASES = Object.freeze({
   low: '0.5',
   '0.25': '0.25',
   mobile: '0.25',
+  '0.1': '0.1',
+  'ultra-low': '0.1',
 });
 
-export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = 0.15, targetFPS = 60 } = {}) {
+export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = 0.06, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   const samples = new Float64Array(240), workSamples = new Float64Array(240);
-  let count = 0, seconds = 0, settle = 2.5, fastSeconds = 0, fps = 0;
-  const reset = () => { count = 0; seconds = 0; settle = 2.5; fastSeconds = 0; };
+  let count = 0, seconds = 0, settle = 1.6, fastSeconds = 0, fps = 0;
+  const reset = () => { count = 0; seconds = 0; settle = 1.6; fastSeconds = 0; };
   return {
     get mode() { return mode; },
     get scale() { return scale; },
@@ -100,7 +102,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
       samples[count] = elapsed * 1000;
       workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
       seconds += elapsed;
-      if ((seconds < 2.0 || count < 12) && count < samples.length) return false;
+      if ((seconds < 1.4 || count < 12) && count < samples.length) return false;
       const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
       let ms = 0;
       for (let i = trim; i < count - trim; i++) ms += sorted[i];
@@ -109,7 +111,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
       const budget = 1000 / targetFPS;
       if (ms > budget * 1.01) {
         // Active 2D surface/stand triangle count scales proportionally to 1/error^2 = scale.
-        const factor = Math.max(0.65, Math.min(0.9, ((1000 / 66) / ms) * 0.96));
+        const factor = Math.max(0.55, Math.min(0.9, ((1000 / 66) / ms) * 0.96));
         next = Math.max(minimum, Math.round(scale * factor * 100) / 100);
         fastSeconds = 0;
       } else {

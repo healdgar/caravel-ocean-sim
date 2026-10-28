@@ -3,7 +3,7 @@ import {GUNNERY_RENDER,GUNNERY_DEPTH_RESOLVE,GUNNERY_CROWN_SEGMENTS,GUNNERY_CROW
 import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
 import {surfaceWaveGroups} from './surface-bindings.js';
 
-export const GUNNERY_FX_LIMITS=Object.freeze({shots:64,smoke:192,impacts:40,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
+export const GUNNERY_FX_LIMITS=Object.freeze({shots:64,smoke:256,impacts:40,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
 const gunneryFxFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
 const gunneryFxVector=(v,fallback=[0,0,0])=>fallback.map((n,i)=>gunneryFxFinite(v?.[i],n));
 const gunneryFxClamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -19,7 +19,7 @@ export function createGunneryEffectState(){
     if(length<1e-8)return false;
     if(shots.length===GUNNERY_FX_LIMITS.shots)shots.shift();
     shots.push({id:event.id??++serial,position:gunneryFxVector(event.position),direction:direction.map(v=>v/length),age:0,
-      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.chargeKg,3)/3),.45,1.8),seed:(++serial*.61803398875)%1,
+      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.chargeKg,3)/2.2),.82,2.25),seed:(++serial*.61803398875)%1,
       drift:[0,0,0],driftVelocity:[0,0,0]});return true;
   }
   function emitImpact(event={}){
@@ -70,22 +70,22 @@ export function createGunneryEffectState(){
 export function gunnerySmokeParcel(shot,index){
   const t=shot.age-index*.022;if(t<0)return null;
   const direction=shot.direction,scale=shot.scale;
-  const travel=(.2+index*.48)+(4.4-index*.7)*(1-Math.exp(-t/(.27+index*.085)))*scale;
-  const across=(.17+.92*Math.pow(t,.7))*scale*(1-index*.09);
-  const along=(.32+Math.min(t,.35)*(4.5-index*.6)+t*.27)*scale;
+  const travel=(.45+index*1.15)+(11.5-index*1.45)*(1-Math.exp(-t/(.28+index*.085)))*scale;
+  const across=(.55+3.25*Math.pow(t,.68))*scale*(1-index*.07);
+  const along=(.85+Math.min(t,.45)*(8.2-index*.95)+t*.92)*scale;
   const centre=shot.position.map((v,k)=>v+direction[k]*travel+shot.drift[k]);
-  centre[1]+=(.24*t+.16*(1-Math.exp(-t/.7)))*scale;
-  const eddy=across*Math.min(1,t*.8)*.28,phase=shot.seed*37+index*2.4;
+  centre[1]+=(.58*t+.65*(1-Math.exp(-t/.85)))*scale;
+  const eddy=across*Math.min(1,t*.8)*.26,phase=shot.seed*37+index*2.4;
   const transverse=[direction[2],0,-direction[0]],transverseLength=Math.hypot(...transverse)||1;
   for(let k=0;k<3;k++)centre[k]+=transverse[k]/transverseLength*Math.sin(phase)*eddy;
-  centre[1]+=Math.cos(phase)*eddy;
+  centre[1]+=Math.cos(phase)*eddy*.65;
+  const vertical=across*(1.08+.14*Math.sin(shot.seed*17+index)+.18*Math.min(1,t*.35));
   // Random phase changes contours; no per-frame random spawning or even rows.
   // Black powder produces a substantial condensed aerosol load. A single
   // fresh discharge must obscure its own gun, and adjacent guns must combine
-  // into a dense bank before dilution clears it. This remains a visual mass
-  // calibration; the expanding volume and wind entrainment are unchanged.
-  const extinction=(11.1-index*1.8)*scale**3/(across*across*along)*Math.exp(-t/9)*(1-gunneryFxClamp((t-13)/5,0,1));
-  return {centre,radii:[across,across*(1+.12*Math.sin(shot.seed*17+index)),along],direction,extinction,age:t,seed:shot.seed*79+index*11};
+  // into a dense cloud-like bank before dilution clears it.
+  const extinction=(135-index*18)*scale**3/(across*across*along)*Math.exp(-t/10.5)*(1-gunneryFxClamp((t-13)/5,0,1));
+  return {centre,radii:[across,vertical,along],direction,extinction,age:t,seed:shot.seed*79+index*11};
 }
 
 export async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,surfaceWaves=null}){
@@ -128,7 +128,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       if(!state.active)return;
       const eye=gunneryFxVector(options.eye),ordered=[];
       for(const shot of state.shots){
-        for(let k=0;k<3;k++){const p=gunnerySmokeParcel(shot,k);if(p)ordered.push({...p,type:0});}
+        for(let k=0;k<4;k++){const p=gunnerySmokeParcel(shot,k);if(p)ordered.push({...p,type:0});}
         if(shot.age<GUNNERY_FX_LIMITS.flashSeconds){
           const t=shot.age/GUNNERY_FX_LIMITS.flashSeconds;
           ordered.push({centre:shot.position.map((v,k)=>v+shot.direction[k]*(.55+1.1*t)*shot.scale),direction:shot.direction,
