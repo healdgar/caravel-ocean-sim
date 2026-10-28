@@ -201,3 +201,29 @@ test('cannonballs strike 16th-century port buildings and coastal land, recording
  assert.ok(escort.damage.hullIntegrity<1);
  assert.equal(guns.state.projectiles.length,0,'solid hits remove projectiles before sea splash');
 });
+
+test('readyAtQuarters and manGunStationsImmediate prepare two HMS Victories for immediate broadside fire',async()=>{
+ const {manGunStationsImmediate}=await import('../js/crew-work.js');
+ const {getShipModel}=await import('../js/ship-models.js');
+ const {createCompany,stepCompany}=await import('../js/crew.js');
+ const vModel=getShipModel('victory');
+ const lead={id:'player',modelId:'victory',model:vModel,length:vModel.runtime.length,beam:vModel.runtime.beam,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,showProw:true};
+ lead.hydrodynamics=boatHydrodynamics(lead.length,lead.beam,30,0,'victory');
+ const target={id:'escort-1',modelId:'victory',model:vModel,length:vModel.runtime.length,beam:vModel.runtime.beam,heading:0,x:lead.length*1.22,z:0,heave:0,pitch:0,roll:0,showProw:true};
+ target.hydrodynamics=boatHydrodynamics(target.length,target.beam,30,0,'victory');
+ const company=createCompany(undefined,'victory');
+ const events=[];
+ const guns=createShipGunnery(lead,{getVessels:()=>[target],onEvent:e=>events.push(e)});
+ assert.equal(guns.readyAtQuarters('starboard'),true);
+ assert.equal(manGunStationsImmediate(company,lead),true);
+ assert.equal(guns.summary('starboard').ready,52,'all 52 starboard guns are ready at quarters');
+ assert.equal(guns.canFire('starboard'),true,'starboard broadside can fire immediately on frame 0');
+ assert.equal(guns.fire('starboard'),true);
+ for(let i=0;i<360;i++){
+  stepCompany(company,lead,1/60,6);
+  guns.update(1/60,[4,0,0]);
+ }
+ const shipHits=events.filter(e=>e.type==='impact'&&e.kind==='ship');
+ assert.ok(shipHits.length>=40,`expected most of the 52-gun broadside to strike the abeam Victory, got ${shipHits.length}`);
+ assert.ok(target.damage.hullIntegrity<1);
+});

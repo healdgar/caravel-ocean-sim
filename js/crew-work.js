@@ -490,6 +490,31 @@ export function updateCrewGunneryAttendance(company,boat){
     if(hands.some(s=>s.job.gunRole==='loader')&&hands.some(s=>s.job.gunRole==='tackle'))boat.gunneryAttendance.add(gun.id);
   }
 }
+export function manGunStationsImmediate(company,boat){
+  const guns=boat.gunnery?.guns;
+  if(!guns||!company?.crew||!boat.gunnerySide)return false;
+  const weather=guns.filter(g=>g.weatherDeck),limit=boat.modelId==='victory'?4:2;
+  const selected=new Set();
+  for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side).slice(0,limit))selected.add(gun.id);
+  for(const gun of weather)gun.visibleCrew=selected.has(gun.id);
+  const targets=guns.filter(g=>selected.has(g.id)&&g.side===boat.gunnerySide);
+  const ordered=boat.modelId==='victory'?[...targets].sort((a,b)=>b.station[2]-a.station[2]):targets;
+  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id));
+  for(const s of available){s.job=null;s.navigationPath=null;s.navigationKey=null;}
+  for(const gun of ordered)for(const role of['loader','tackle']){
+    const sailor=available.shift();if(!sailor)break;
+    const station=crewGunStation(gun,role,boat),world=physical(station,boat);
+    sailor.home??=[sailor.x,sailor.z];
+    sailor.x=station[0];sailor.z=station[2];
+    sailor.position.set([world[0],world[1]+.028,world[2]]);
+    sailor.yaw=(gun.sideSign??Math.sign(gun.directionDesign[0]))*Math.PI/2;
+    sailor.job={kind:'gunnery',gun,gunRole:role,stage:'working',elapsed:1,rung:0,revision:company.revision,path:[station],cursor:1,position:station};
+    sailor.intent='work';sailor.work=1;sailor.walk=0;
+  }
+  company.gunneryActive=true;
+  updateCrewGunneryAttendance(company,boat);
+  return true;
+}
 // Boat-local metre targets shared by actual hand IK and the visible tool mesh.
 export function crewGunneryTool(s,boat){
   const j=s.job;if(j?.kind!=='gunnery'||j.stage!=='working'||s.intent!=='work')return null;

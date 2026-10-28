@@ -77,7 +77,9 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   state.stationVelocityZ=leaderVZ+leaderYaw*offsetX;
   dx+=(groundSpeed>.25?state.stationVelocityX:Math.sin(h)*.5)*guidanceTime;
   dz+=(groundSpeed>.25?state.stationVelocityZ:-Math.cos(h)*.5)*guidanceTime;
-  if(separation<L*1.8){
+  const stationDist=Math.hypot(trail,side);
+  const minClearance=Math.min(L*1.8,Math.max(L*0.65,stationDist*0.78));
+  if(separation<minClearance){
     const awayX=(boat.x-leader.x)/Math.max(separation,.01),awayZ=(boat.z-leader.z)/Math.max(separation,.01);
     dx+=awayX*L*5;dz+=awayZ*L*5;
   }
@@ -112,7 +114,7 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
     // retain the yard side; they never trigger repeated full yard transfers.
     if(state.tackAge>35&&relative*state.tack<-.35&&errorDistance>L*4){state.tack*=-1;state.tackAge=0;}
     course=windFrom+state.tack*noGo;state.status='Tacking to follow';
-  }else{state.status=separation<L*1.8?'Keeping clear':'Following';if(Math.abs(relative)>.2)state.tack=Math.sign(relative);}
+  }else{state.status=separation<minClearance?'Keeping clear':state.formation?.broadside?'Broadside station':'Following';if(Math.abs(relative)>.2)state.tack=Math.sign(relative);}
   state.ironsTime=Math.abs(wrap(heading-windFrom))<42*RAD&&speed<.35?state.ironsTime+dt:0;
   let rudder;
   if(!state.recovering&&state.ironsTime>4){state.recovering=true;state.recoveryTack=state.tack||1;}
@@ -168,7 +170,8 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
   const stationForward=state.stationVelocityX*Math.sin(heading)-state.stationVelocityZ*Math.cos(heading);
   const stationScale=clamp((leaderCanvas>.01?leaderCanvas:.9)+forwardError/(L*4)+(stationForward-speed)*.15,.12,1);
   const stormScale=windSpeed>28?.18:windSpeed>20?.4:1;
-  const canvas=separation<L*1.3?.05:Math.min(stationScale,stormScale);
+  const minCanvasDist=Math.min(L*1.3,Math.max(L*0.55,stationDist*0.72));
+  const canvas=separation<minCanvasDist?.05:Math.min(stationScale,stormScale);
   // A newly sailing leader is still accelerating at its formation station.
   // Only a stopped leader with no requested canvas asks the companion to stop.
   const leaderSailing=leaderCanvas>.01;

@@ -3,7 +3,7 @@ import {GUNNERY_RENDER,GUNNERY_DEPTH_RESOLVE,GUNNERY_CROWN_SEGMENTS,GUNNERY_CROW
 import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
 import {surfaceWaveGroups} from './surface-bindings.js';
 
-export const GUNNERY_FX_LIMITS=Object.freeze({shots:64,smoke:256,impacts:40,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
+export const GUNNERY_FX_LIMITS=Object.freeze({shots:128,smoke:512,impacts:96,projectiles:128,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
 const gunneryFxFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
 const gunneryFxVector=(v,fallback=[0,0,0])=>fallback.map((n,i)=>gunneryFxFinite(v?.[i],n));
 const gunneryFxClamp=(n,a,b)=>Math.max(a,Math.min(b,n));

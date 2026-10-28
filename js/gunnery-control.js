@@ -246,7 +246,6 @@ export function applyShipImpactDamage(targetBoat, event) {
       const floodAdd = (mass / 12) * (1.2 + (1 - damage.hullIntegrity) * 2.4);
       damage.floodingTonnes = +(damage.floodingTonnes + floodAdd).toFixed(3);
       targetBoat.cargoTonnes = Math.min(80, (targetBoat.cargoTonnes ?? 0) + floodAdd);
-      targetBoat.revision = (targetBoat.revision ?? 0) + 1;
       if (targetBoat.hydrodynamics && Number.isFinite(targetBoat.length) && Number.isFinite(targetBoat.beam)) {
         targetBoat.hydrodynamics = boatHydrodynamics(
           targetBoat.length,
@@ -528,6 +527,15 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       boat.gunnerySide=side;prepared=true;lastReady=false;
       const count=prepareGunnery(state,side);if(count||changed)onOrder('prepare',boat);
       return count>0||changed;
+    },
+    readyAtQuarters(side){
+      if(!sideValid(side))return false;
+      pending=null;state.queue.length=0;
+      boat.gunnerySide=side;prepared=true;lastReady=true;
+      for(const g of state.guns)if(g.side===side){
+        g.stage='ready';g.loading=false;g.progress=1;g.offset=0;g.queued=false;
+      }
+      return true;
     },
     fire(side){
       if(!canFire(side))return false;

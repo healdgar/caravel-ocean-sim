@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import {bindVesselModel,copyVessel,createVesselProbeState,acceptVesselProbe,stepVessel} from '../js/vessels.js';
 import {getShipModel} from '../js/ship-models.js';
 import {createFollower,steerFollower} from '../js/follower.js';
+import {broadsideFormation} from '../js/fleet.js';
 import {sailingState,advanceSails,sailForces} from '../js/sailing.js';
 
 const RAD=Math.PI/180;
@@ -148,4 +149,18 @@ test('a leader crossing the wind cannot reverse a committed backed recovery',()=
   assert.equal(state.recoveryTack,side,'heading clear of the wind alone cannot end recovery');
   boat.surgeVelocity=.5;steerFollower(state,boat,lead,.1,9,Math.PI/2);
   assert.equal(state.recovering,false);assert.equal(state.recoveryTack,0,'positive forward escape releases the commitment');
+});
+
+test('two HMS Victories in broadsideFormation hold close beam-to-beam parallel station without repelling or furling',()=>{
+  const formation=broadsideFormation(0,{side:'starboard',rangeLengths:1.22});
+  assert.equal(formation.trail,0);assert.equal(formation.side,1.22);assert.equal(formation.broadside,true);
+  const victory=getShipModel('victory');
+  const lead=copyVessel({...source,modelId:'victory',length:victory.runtime.length,beam:victory.runtime.beam,heading:0,sailFore:0.55,sailMain:0.55,sailMizzen:0.55},{id:'player',modelId:'victory',distance:0,side:0});
+  const escort=copyVessel(lead,{id:'escort-1',modelId:'victory',distance:lead.length*formation.trail,side:lead.length*formation.side});
+  lead.surgeVelocity=escort.surgeVelocity=2.16;
+  const state=createFollower(formation);
+  steerFollower(state,escort,lead,0.1,7.5,300*RAD);
+  assert.equal(state.status,'Broadside station');
+  assert.ok(escort.sailMain>0.4,'companion Victory retains fighting sails at close broadside range');
+  assert.ok(Math.abs(escort.rudderTarget)<5,'parallel beam-to-beam station requires no emergency avoidance helm');
 });

@@ -25,6 +25,13 @@ export function fleetFormation(index){
   if(!Number.isSafeInteger(index)||index<0||index>=MAX_FOLLOWERS)throw new RangeError('Invalid formation station');
   return {trail:2.8*(1+Math.floor(index/2)),side:index%2?-1.5:1.5};
 }
+export function broadsideFormation(index,{side='starboard',rangeLengths=1.22}={}){
+  if(!Number.isSafeInteger(index)||index<0||index>=MAX_FOLLOWERS)throw new RangeError('Invalid formation station');
+  const sign=side==='port'?-1:1;
+  const span=Number.isFinite(rangeLengths)&&rangeLengths>0.75?rangeLengths:1.22;
+  if(index===0)return {trail:0,side:sign*span,broadside:true};
+  return {trail:2.2*Math.ceil(index/2),side:index%2?sign*span:0,broadside:true};
+}
 export function fleetModelCode(model){
   const code=model.modelCode??({nina:0,victory:1})[model.id];
   if(!Number.isSafeInteger(code)||code<0)throw new Error('Missing GPU hull backend for '+model.id);
