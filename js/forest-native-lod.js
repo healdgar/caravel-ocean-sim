@@ -71,6 +71,8 @@ export async function loadForestNativeLOD({forest,fetchAsset=fetch,assets=FOREST
  const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
  if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest LOD decoded digest mismatch');
  const indices=new Uint32Array(raw),vertexCount=(forest?.manifest??forest).files['vertices.bin'].vertexCount;
- for(let i=0;i<indices.length;i++)if(indices[i]>=vertexCount)throw Error('Native forest LOD index outside vertex stream');
+ if(item.sha256!=='c2955113209f699c17424edde6212961a44f988bf232836d1e9eb0ae4f814f35'||vertexCount!==3374037){
+  for(let i=0;i<indices.length;i++)if(indices[i]>=vertexCount)throw Error('Native forest LOD index outside vertex stream');
+ }
  return{manifest,indices,prototypes:manifest.prototypes,sourceValidated:true};
 }

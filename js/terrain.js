@@ -383,7 +383,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     makePipe(module,'vs',[meshLayout]),
-    makePipe(module,'treeVS',treeBuffers,'opaqueFS'),
+    makePipe(module,'treeVS',treeBuffers,'fs'),
     makePipe(module,'treeVS',treeBuffers,'leafFS'),
     makePipe(module,'groundVS',treeBuffers,'groundFS'),
     computePipe(TERRAIN_LIGHT,'island sunlight'),
@@ -419,9 +419,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const massOnly=skipNativeForest||useProcedural;
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
-  const forestMassPromise=(massOnly?forestManifestPromise:forestRootsPromise).then(forest=>{
-    if(!forest||forestMassMode==='off'||useSubtropicalForest){resolveMassManifest(null);return null;}
-    return loadForestMass({forest,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
+  const forestMassPromise=forestManifestPromise.then(forestManifest=>{
+    if(!forestManifest||forestMassMode==='off'||useSubtropicalForest){resolveMassManifest(null);return null;}
+    return loadForestMass({forest:forestManifest,rootsPromise:massOnly?null:forestRootsPromise,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
   });
   const forestMiddlePromise=Promise.all([forestManifestPromise,massManifestPromise]).then(async([forestManifest,massManifest])=>{
     if(!forestManifest||(!massManifest&&!(useSubtropicalForest&&forceSubtropicalVolume))||(useSubtropicalForest&&!forceSubtropicalVolume)||forestAtlasDebug)return null;
@@ -476,12 +476,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
   }else{
-    const [heightResponse,biomeResponse,albedoResponse,regionResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo),load('assets/world/saba/manifest.json')]);
-    const albedoBitmapPromise=albedoResponse.blob().then(b=>createImageBitmap(b));albedoBitmapPromise.catch(()=>{});
-    const [heightBuf,biomeBuf,baseManifest]=await Promise.all([heightResponse.arrayBuffer(),biomeResponse.arrayBuffer(),regionResponse.json()]);
-    heights=decodeIsland(heightBuf);biome=decodeBiome(biomeBuf);
     const nearDisabled=typeof location!=='undefined'&&search.get('nearTerrain')==='off';
-    if(!nearDisabled)try{nearTile=await loadTerrainNear({baseManifest,baseHeights:heights});}catch(error){nearFailure=error.message;}
+    const heightBufPromise=load(ISLAND.assets.height).then(r=>r.arrayBuffer());
+    const biomeBufPromise=load(ISLAND.assets.biome).then(r=>r.arrayBuffer());
+    const albedoBitmapPromise=load(ISLAND.assets.albedo).then(r=>r.blob()).then(b=>createImageBitmap(b));albedoBitmapPromise.catch(()=>{});
+    const baseManifestPromise=load('assets/world/saba/manifest.json').then(r=>r.json());
+    const nearPromise=nearDisabled?Promise.resolve(null):Promise.all([heightBufPromise,baseManifestPromise]).then(([heightBuf,baseManifest])=>
+      loadTerrainNear({baseManifest,baseHeights:decodeIsland(heightBuf)})).catch(error=>{nearFailure=error.message;return null;});
+    const [heightBuf,biomeBuf]=await Promise.all([heightBufPromise,biomeBufPromise]);
+    heights=decodeIsland(heightBuf);biome=decodeBiome(biomeBuf);
+    nearTile=await nearPromise;
     albedoImage=await albedoBitmapPromise;
     if(albedoImage.width!==ISLAND.albedoSize||albedoImage.height!==ISLAND.albedoSize)throw new Error('Incomplete Saba imagery seed');
   }

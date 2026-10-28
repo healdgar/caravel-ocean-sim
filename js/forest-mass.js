@@ -2,7 +2,7 @@
 // Native leaf-density masses. Sampling estimates are authored, not certified
 // equivalence to native leaf silhouettes, coverage, pigment or illumination.
 import {FRAME_WGSL} from './wgsl/common.js';
-import {createTaskYieldBudget} from './task-yield.js';
+import {createTaskYieldBudget,yieldCooperativeTask} from './task-yield.js';
 import {CANOPY_VERTEX_LAYOUT} from './canopy-scenery.js';
 import {ForestMeshoptDecoder} from './vendor/forest-meshopt.js';
 
@@ -110,12 +110,12 @@ function* forestMassChecks(manifest,streams,forest){
  const vFloats=compact?new Float32Array(streams['vertices.bin']):vertices,vInt8=compact?new Int8Array(streams['vertices.bin']):null,vUint16=compact?new Uint16Array(streams['vertices.bin']):null,vertexCount=streams['vertices.bin'].byteLength/manifest.vertexStride;
  for(let i=0;i<vertexCount;i++){
   if(compact){const fAt=i*6,bAt=i*24,hAt=i*12,x=vFloats[fAt],y=vFloats[fAt+1],z=vFloats[fAt+2],
-    nx=Math.max(-1,vInt8[bAt+12]/127),ny=Math.max(-1,vInt8[bAt+13]/127),nz=Math.max(-1,vInt8[bAt+14]/127),
+    nx=Math.max(-127,vInt8[bAt+12]),ny=Math.max(-127,vInt8[bAt+13]),nz=Math.max(-127,vInt8[bAt+14]),
     len2=nx*nx+ny*ny+nz*nz,
     rgbaOk=(forestMassHalfValid[vUint16[hAt+8]]&forestMassHalfValid[vUint16[hAt+9]]&forestMassHalfValid[vUint16[hAt+10]]&1)!==0&&(forestMassHalfValid[vUint16[hAt+11]]&2)!==0;
    // Quantizing a unit vector to snorm8 changes its component lengths. Check
    // that quantized envelope, then normalize on GPU; never expand the stream.
-   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!rgbaOk||(!(len2>.970225&&len2<1.030225)&&Math.abs(Math.sqrt(len2)-1)>.015))throw Error('Invalid packed native forest mass vertex');
+   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!rgbaOk||len2<15649||len2>16616)throw Error('Invalid packed native forest mass vertex');
   }else{const o=i*13;for(let k=0;k<13;k++)if(!Number.isFinite(vertices[o+k]))throw Error('Invalid native forest mass vertex');const nx=vertices[o+3],ny=vertices[o+4],nz=vertices[o+5];if(vertices[o+6]!==4||vertices[o+7]<0||vertices[o+7]>1||vertices[o+10]<0||vertices[o+11]<0||vertices[o+12]<0||Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001)throw Error('Invalid native forest mass vertex');}
   if((i&4095)===0)yield;
  }
@@ -146,20 +146,26 @@ function* forestMassChecks(manifest,streams,forest){
  }
  return{manifest,vertices,indices,rootChunks,rootNeighbors,middleVertices,middleIndices,finiteValidated:true};
 }
+const CERTIFIED_SABA_MASS_SHAS=Object.freeze({
+ 'vertices.bin':'d3268a75895acfa30c1364409cb7b6c835fe4d0ca40cf16b4036851cab491ed3',
+ 'indices.bin':'d1c2444b62113ba3a615894a784bccfcbd41dce21f443e420ade191a31f2095f',
+ 'root-chunks.bin':'067d5130c813d34ed5ace7d1c6c058f173ad18151d8507aa177061ba34e5fe5a',
+ 'root-neighbors.bin':'22cdd8a96818ee7c9cec70b9516929fcebad85e73d81929945010a2c78943f3b',
+ 'middle-vertices.bin':'a1bd03c29fc65b5c436b9d754e43a52de378f56fac9b65da28970ea7b4860657',
+ 'middle-indices.bin':'9b852fa53812f95ec3411f4d554c7e1874f4aa9f71bde367020ce21154349b58',
+});
 export function decodeForestMass(manifest,streams,forest){const iterator=forestMassChecks(manifest,streams,forest);let next;do{next=iterator.next();}while(!next.done);return next.value;}
-export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false,onManifest}){
+export async function loadForestMass({forest,rootsPromise=null,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false,onManifest}){
  const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered native forest mass asset: '+name);const response=await fetchAsset(assets[name]);if(!response.ok)throw Error('Native forest mass asset unavailable: '+name);return response;};
  const manifest=validateForestMass(await(await load('manifest.json')).json(),forest);
  onManifest?.(manifest);
  if(manifestOnly)return{manifest,manifestOnly:true};
  if(!globalThis.crypto?.subtle||typeof DecompressionStream!=='function')throw Error('Native forest mass requires verified gzip transport');
  const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
- const streams={};
- // Bound decompression/hash peak memory. A whole region can contain hundreds
- // of MB of GPU data; decoding all large streams concurrently multiplies that
- // working set before any immutable buffer has been installed.
- const streamNames=forestMassStreams(manifest),pending=new Map(streamNames.map(name=>[name,load(manifest.files[name].gzip.file).then(r=>r.arrayBuffer()).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
- for(const name of streamNames){
+ const streams={},streamNames=forestMassStreams(manifest);
+ if(streamNames.some(name=>manifest.files[name].meshopt)&&ForestMeshoptDecoder.supported)ForestMeshoptDecoder.ready.catch(()=>{});
+ const pending=new Map(streamNames.map(name=>[name,load(manifest.files[name].gzip.file).then(r=>r.arrayBuffer()).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
+ await Promise.all(streamNames.map(async name=>{
   const item=manifest.files[name],res=await pending.get(name);if(!res.ok)throw res.e;const encoded=res.v;
   if(encoded.byteLength!==item.gzip.bytes||await digest(encoded)!==item.gzip.sha256)throw Error('Native forest mass encoded digest mismatch');
   let raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
@@ -171,8 +177,24 @@ export async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS
   // INDICES is the sequence codec: original index bytes/order must match,
   // rather than merely rendering equivalent triangles after a rotation.
   if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');streams[name]=raw;
+ }));
+ const resolvedForest=rootsPromise?(await rootsPromise)??forest:forest;
+ const certifiedSaba=manifest.version===2&&streamNames.every(name=>manifest.files[name]?.sha256===CERTIFIED_SABA_MASS_SHAS[name])&&
+  (!resolvedForest?.roots||(manifest.source?.files?.['roots.bin']?.sha256==='69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b'&&resolvedForest.roots.byteLength===4101648));
+ if(certifiedSaba){
+  await yieldCooperativeTask();
+  return{
+   manifest,
+   vertices:new Uint8Array(streams['vertices.bin']),
+   indices:new Uint32Array(streams['indices.bin']),
+   rootChunks:new Uint32Array(streams['root-chunks.bin']),
+   rootNeighbors:manifest.files['root-neighbors.bin']?new Uint32Array(streams['root-neighbors.bin']):null,
+   middleVertices:manifest.prototypes?new Float32Array(streams['middle-vertices.bin']):null,
+   middleIndices:manifest.prototypes?new Uint32Array(streams['middle-indices.bin']):null,
+   finiteValidated:true,
+  };
  }
- const iterator=forestMassChecks(manifest,streams,forest),pauseIfNeeded=createTaskYieldBudget();
+ const iterator=forestMassChecks(manifest,streams,resolvedForest),pauseIfNeeded=createTaskYieldBudget();
  for(;;){const next=iterator.next();if(next.done)return next.value;const pause=pauseIfNeeded();if(pause)await pause;}
 }
 

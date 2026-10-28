@@ -239,8 +239,13 @@ export default {
       const { readable, writable } = new TransformStream();
       ctx.waitUntil((async () => {
         try {
+          let nextPartPromise = env.ASSETS.fetch(new Request(new URL(streamEntry.parts[0], url.origin)));
           for (let i = 0; i < streamEntry.parts.length; i++) {
-            const partRes = await env.ASSETS.fetch(new Request(new URL(streamEntry.parts[i], url.origin)));
+            const partPromise = nextPartPromise;
+            nextPartPromise = i + 1 < streamEntry.parts.length
+              ? env.ASSETS.fetch(new Request(new URL(streamEntry.parts[i + 1], url.origin)))
+              : null;
+            const partRes = await partPromise;
             if (!partRes.ok || !partRes.body) throw new Error('Missing asset part ' + i);
             await partRes.body.pipeTo(writable, { preventClose: i < streamEntry.parts.length - 1 });
           }

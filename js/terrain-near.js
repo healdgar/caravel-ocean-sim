@@ -68,10 +68,10 @@ export async function loadTerrainNear({baseManifest,baseHeights,fetchAsset=fetch
   const load=async path=>{const r=await fetchAsset(path);if(!r.ok)throw Error('Near terrain unavailable: '+path);return r;};
   const manifest=await(await load(WELLS_BAY_NEAR_ASSETS.manifest)).json();validateTerrainNear(manifest,baseManifest,region);
   const [height,measured,albedo]=await Promise.all([load(WELLS_BAY_NEAR_ASSETS.height),load(WELLS_BAY_NEAR_ASSETS.measured),load(WELLS_BAY_NEAR_ASSETS.albedo)].map(async p=>(await p).arrayBuffer()));
-  for(const [name,data]of [['height.bin',height],['measured.bin',measured],['albedo.png',albedo]]){
+  await Promise.all([['height.bin',height],['measured.bin',measured],['albedo.png',albedo]].map(async([name,data])=>{
     const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),v=>v.toString(16).padStart(2,'0')).join('');
     if(data.byteLength!==manifest.files[name].bytes||sha!==manifest.files[name].sha256)throw Error('Near terrain digest mismatch: '+name);
-  }
+  }));
   return {...decodeTerrainNear(manifest,baseManifest,height,measured,baseHeights,region),albedo};
 }
 

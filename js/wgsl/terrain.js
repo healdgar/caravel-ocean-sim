@@ -166,33 +166,26 @@ fn landNearHeight(p:vec2f)->f32 {
 const LAND_SAMPLING = TERRAIN_NEAR_HEIGHT + /* wgsl */ `
 struct Land { domain:vec4f };
 fn landHeight(p:vec2f)->f32 {
-  if(landNearContains(p)){return landNearHeight(p);}
+  let nearMode=nearTerrain.domain.w;
   let uv=(p-LAND.domain.xy)/LAND.domain.z+0.5;
-  let outVec=max(vec2f(0.0),abs(uv-vec2f(0.5))-vec2f(0.5));
-  let outDist=length(outVec);
-  if(outDist>0.001 && nearTerrain.domain.w<-0.5){
+  let outDist=length(max(vec2f(0.0),abs(uv-vec2f(0.5))-vec2f(0.5)));
+  var rOut=1.0;
+  if(nearMode<-0.5 && outDist>0.001){
     let ruv=(p-nearTerrain.domain.xy)/nearTerrain.domain.z+0.5;
-    let rOut=length(max(vec2f(0.0),abs(ruv-vec2f(0.5))-vec2f(0.5)));
-    if(rOut<0.45){
-      let hReg=landNearHeight(p);
-      if(outDist<0.04){
-        let uvClamped0=clamp(uv,vec2f(0.0),vec2f(1.0));
-        let q0=uvClamped0*vec2f(textureDimensions(elevation)-1u);let i0=vec2i(floor(q0));let f0=fract(q0);
-        let limit0=vec2i(textureDimensions(elevation))-1;
-        let h0=mix(mix(textureLoad(elevation,i0,0).r,textureLoad(elevation,min(i0+vec2i(1,0),limit0),0).r,f0.x),
-          mix(textureLoad(elevation,min(i0+vec2i(0,1),limit0),0).r,textureLoad(elevation,min(i0+vec2i(1,1),limit0),0).r,f0.x),f0.y);
-        return mix(h0,hReg,smoothstep(0.0,0.04,outDist));
-      }
-      return mix(hReg,-120.0,smoothstep(0.0,0.4,rOut));
-    }
-    return -120.0;
+    rOut=length(max(vec2f(0.0),abs(ruv-vec2f(0.5))-vec2f(0.5)));
+    if(rOut>=0.45){return -120.0;}
+  }else if(outDist>1.25){return -120.0;}
+  let useNear=landNearContains(p)||(nearMode<-0.5 && outDist>0.001);
+  var hNear=0.0;
+  if(useNear){
+    hNear=landNearHeight(p);
+    if(nearMode>0.5||outDist>=0.04){return select(hNear,mix(hNear,-120.0,smoothstep(0.0,0.4,rOut)),nearMode<-0.5);}
   }
-  if(outDist>1.25){return -120.0;}
-  let uvClamped=clamp(uv,vec2f(0.0),vec2f(1.0));
-  let q=uvClamped*vec2f(textureDimensions(elevation)-1u);let i=vec2i(floor(q));let f=fract(q);
-  let limit=vec2i(textureDimensions(elevation))-1;
+  let q=clamp(uv,vec2f(0.0),vec2f(1.0))*vec2f(textureDimensions(elevation)-1u);
+  let i=vec2i(floor(q));let f=fract(q);let limit=vec2i(textureDimensions(elevation))-1;
   let hSample=mix(mix(textureLoad(elevation,i,0).r,textureLoad(elevation,min(i+vec2i(1,0),limit),0).r,f.x),
     mix(textureLoad(elevation,min(i+vec2i(0,1),limit),0).r,textureLoad(elevation,min(i+vec2i(1,1),limit),0).r,f.x),f.y);
+  if(useNear){return mix(hSample,hNear,smoothstep(0.0,0.04,outDist));}
   return mix(hSample,-120.0,smoothstep(0.0,1.15,outDist));
 }
 `;
@@ -237,12 +230,9 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
   var fetchDist=1800.0;
   for(var i=0u;i<8u;i++){
     let d=steps[i];
-    let hC=landHeight(p+dir0*d);
-    let hL=landHeight(p+dirL*d);
-    let hR=landHeight(p+dirR*d);
-    let bC=smoothstep(-0.35,1.15,hC);
-    let bL=smoothstep(-0.35,1.15,hL);
-    let bR=smoothstep(-0.35,1.15,hR);
+    let bC=smoothstep(-0.35,1.15,landHeight(p+dir0*d));
+    let bL=smoothstep(-0.35,1.15,landHeight(p+dirL*d));
+    let bR=smoothstep(-0.35,1.15,landHeight(p+dirR*d));
     if(bC>0.35 && fetchDist>d){fetchDist=d;}
     transC*=1.0-bC*0.92;
     transL*=1.0-bL*0.88;
@@ -399,29 +389,23 @@ export const TERRAIN_LIGHT = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(7) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(8) var<storage,read> nearElevation:array<f32>;
 ` + LAND_SAMPLING + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
+fn skyBodyVisibility(p:vec2f,h:f32,dir:vec3f)->f32{
+  var v=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*0.001,dir);
+  let horizontal=max(length(dir.xz),0.01);let direction=dir.xz/horizontal;
+  for(var i=0u;i<16u;i++){
+    let reach=28.0*pow(1.31,f32(i));
+    let rayHeight=h+8.0+reach*dir.y/horizontal;
+    v*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
+  }
+  return v;
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=textureDimensions(lightOut);if(any(id.xy>=size)){return;}
   let p=(vec2f(id.xy)+0.5)/vec2f(size)*LAND.domain.z-LAND.domain.z*0.5+LAND.domain.xy;
-  let h=landHeight(p);var visibility=0.0;
-  if(F.sunDir.y>0.0){
-    visibility=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*0.001,F.sunDir.xyz);
-    let horizontal=max(length(F.sunDir.xz),0.01);let direction=F.sunDir.xz/horizontal;
-    for(var i=0u;i<16u;i++){
-      let reach=28.0*pow(1.31,f32(i));
-      let rayHeight=h+8.0+reach*F.sunDir.y/horizontal;
-      visibility*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
-    }
-  }
-  var moonVisibility=0.0;let ml=lunarDirection();
-  if(lunarIrradiance()>0.0){
-    moonVisibility=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*.001,ml);
-    let horizontal=max(length(ml.xz),.01);let direction=ml.xz/horizontal;
-    for(var i=0u;i<16u;i++){
-      let reach=28.0*pow(1.31,f32(i));let rayHeight=h+8.0+reach*ml.y/horizontal;
-      moonVisibility*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
-    }
-  }
+  let h=landHeight(p);
+  var visibility=0.0;if(F.sunDir.y>0.0){visibility=skyBodyVisibility(p,h,F.sunDir.xyz);}
+  var moonVisibility=0.0;if(lunarIrradiance()>0.0){moonVisibility=skyBodyVisibility(p,h,lunarDirection());}
   textureStore(lightOut,vec2i(id.xy),vec4f(visibility,moonVisibility,0,1));
 }
 `;

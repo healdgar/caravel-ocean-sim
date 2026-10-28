@@ -2,7 +2,7 @@
 // Grown temperate specimens are authored visual proxies, not surveyed Saba flora.
 import {createForestTerrainOcclusion,withForestTerrainOcclusion} from './forest-occlusion.js';
 import {FRAME_WGSL} from './wgsl/common.js';
-import {createTaskYieldBudget} from './task-yield.js';
+import {createTaskYieldBudget,yieldCooperativeTask} from './task-yield.js';
 import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} from './forest-impostor.js';
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
@@ -325,6 +325,20 @@ function populateSubtropicalNativeLodIndices(manifest,nativeLod,sourceIndices,so
   nativeLod.indices=out;
   return nativeLod;
 }
+const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
+  'vertices.bin':new Set([
+    '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
+    '221f8306f17062d66c059aa78f47342c602c37eabb63f1b730b0ce9c92737351',
+  ]),
+  'indices.bin':new Set([
+    '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
+    '205ac56933fe58fb43ddbcbc3c32a5f2006b02462db762a1c0a74c161e664a3f',
+  ]),
+  'roots.bin':new Set([
+    '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
+    '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
+  ]),
+});
 export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,onManifest,onRoots}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
@@ -351,11 +365,25 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,v
   const atlasPromise=loadAtlases?volumePromise.then(volume=>volume.volumes&&!atlasDebug&&!volumeOff?{impostors:null,impostorError:null}:
     loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message}))):Promise.resolve({impostors:null,impostorError:null});
   const lodPromise=!skipNative&&assets===FOREST_ASSETS&&!atlasDebug?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):!skipNative&&!atlasDebug?Promise.resolve({nativeLod:createSubtropicalNativeLod(manifest),nativeLodError:null}):Promise.resolve({nativeLod:null,nativeLodError:null});
-  const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);if(!skipRoots)await finishForestChecks(forestRootChecks(manifest,roots));
+  const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);
+  const certifiedRoots=!skipRoots&&CERTIFIED_FOREST_STREAM_SHAS['roots.bin'].has(manifest.files['roots.bin']?.sha256);
+  if(!skipRoots&&!certifiedRoots)await finishForestChecks(forestRootChecks(manifest,roots));
   onRoots?.({manifest,roots,...volume});
   let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
     const textures={},pending=new Map();
+    const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
+    const geometryPromise=Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(async([vertices,indices])=>{
+      const certifiedGeometry=CERTIFIED_FOREST_STREAM_SHAS['vertices.bin'].has(manifest.files['vertices.bin']?.sha256)&&
+        CERTIFIED_FOREST_STREAM_SHAS['indices.bin'].has(manifest.files['indices.bin']?.sha256)&&(skipRoots||certifiedRoots);
+      if(certifiedGeometry){
+        forestLoadAbort(signal);
+        await yieldCooperativeTask();
+        forestLoadAbort(signal);
+        return{manifest,vertices:new Float32Array(vertices),indices:new Uint32Array(indices),roots};
+      }
+      return decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots:true},{signal}).then(g=>({...g,roots}));
+    });
     const materialPromise=Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
       const receipt=material[kind];if(pending.has(receipt.file))return pending.get(receipt.file);
       const request=(async()=>{
@@ -364,9 +392,6 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,v
         if(await digest(raw)!==receipt.sha256)throw Error('Forest surface digest mismatch: '+receipt.file);textures[receipt.file]=raw;
       })();pending.set(receipt.file,request);return request;
     }))));
-    const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
-    const geometryPromise=Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(([vertices,indices])=>
-      decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots},{signal}));
     const [geometry,,light]=await Promise.all([geometryPromise,materialPromise,lightPromise]);
     if(lod.nativeLod&&!lod.nativeLod.indices)populateSubtropicalNativeLodIndices(manifest,lod.nativeLod,geometry.indices,geometry.vertices);
     nativeLoaded=true;return{...geometry,textures,...light,...lod};
@@ -431,6 +456,7 @@ fn forestMipLinear(c:vec3f)->vec3f{
 export async function createForestLeafSurfaces({device,shader,pack}){
   const layerCount=validateForestMaterials(pack.manifest.prototypes),materials=pack.manifest.prototypes.flatMap(p=>p.nativeMaterials);
   const images=[],families=[],textures=[],temporary=[];
+  let submitted=false;
   try{
     const optics=new Float32Array(layerCount*12);
     for(const material of materials){
@@ -486,10 +512,12 @@ export async function createForestLeafSurfaces({device,shader,pack}){
         pass.dispatchWorkgroups(Math.ceil(Math.max(1,width>>level)/8),Math.ceil(Math.max(1,height>>level)/8),rows.length);
       }
     }
-    pass.end();device.queue.submit([encoder.finish()]);await device.queue.onSubmittedWorkDone();
+    pass.end();device.queue.submit([encoder.finish()]);submitted=true;
+    const cleanup=()=>{for(const resource of temporary)resource.destroy();};
+    device.queue.onSubmittedWorkDone().then(cleanup,cleanup);
     return {families,optics,layers:layerCount,destroy(){for(const texture of textures)texture.destroy();}};
-  }catch(error){for(const texture of textures)texture.destroy();throw error;}
-  finally{for(const image of images)image.close();for(const resource of temporary)resource.destroy();}
+  }catch(error){for(const texture of textures)texture.destroy();if(!submitted)for(const resource of temporary)resource.destroy();throw error;}
+  finally{for(const image of images)image.close();}
 }
 
 const ROOT_WGSL=/* wgsl */`

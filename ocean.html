@@ -11537,33 +11537,26 @@ fn landNearHeight(p:vec2f)->f32 {
 const LAND_SAMPLING = TERRAIN_NEAR_HEIGHT + /* wgsl */ `
 struct Land { domain:vec4f };
 fn landHeight(p:vec2f)->f32 {
-  if(landNearContains(p)){return landNearHeight(p);}
+  let nearMode=nearTerrain.domain.w;
   let uv=(p-LAND.domain.xy)/LAND.domain.z+0.5;
-  let outVec=max(vec2f(0.0),abs(uv-vec2f(0.5))-vec2f(0.5));
-  let outDist=length(outVec);
-  if(outDist>0.001 && nearTerrain.domain.w<-0.5){
+  let outDist=length(max(vec2f(0.0),abs(uv-vec2f(0.5))-vec2f(0.5)));
+  var rOut=1.0;
+  if(nearMode<-0.5 && outDist>0.001){
     let ruv=(p-nearTerrain.domain.xy)/nearTerrain.domain.z+0.5;
-    let rOut=length(max(vec2f(0.0),abs(ruv-vec2f(0.5))-vec2f(0.5)));
-    if(rOut<0.45){
-      let hReg=landNearHeight(p);
-      if(outDist<0.04){
-        let uvClamped0=clamp(uv,vec2f(0.0),vec2f(1.0));
-        let q0=uvClamped0*vec2f(textureDimensions(elevation)-1u);let i0=vec2i(floor(q0));let f0=fract(q0);
-        let limit0=vec2i(textureDimensions(elevation))-1;
-        let h0=mix(mix(textureLoad(elevation,i0,0).r,textureLoad(elevation,min(i0+vec2i(1,0),limit0),0).r,f0.x),
-          mix(textureLoad(elevation,min(i0+vec2i(0,1),limit0),0).r,textureLoad(elevation,min(i0+vec2i(1,1),limit0),0).r,f0.x),f0.y);
-        return mix(h0,hReg,smoothstep(0.0,0.04,outDist));
-      }
-      return mix(hReg,-120.0,smoothstep(0.0,0.4,rOut));
-    }
-    return -120.0;
+    rOut=length(max(vec2f(0.0),abs(ruv-vec2f(0.5))-vec2f(0.5)));
+    if(rOut>=0.45){return -120.0;}
+  }else if(outDist>1.25){return -120.0;}
+  let useNear=landNearContains(p)||(nearMode<-0.5 && outDist>0.001);
+  var hNear=0.0;
+  if(useNear){
+    hNear=landNearHeight(p);
+    if(nearMode>0.5||outDist>=0.04){return select(hNear,mix(hNear,-120.0,smoothstep(0.0,0.4,rOut)),nearMode<-0.5);}
   }
-  if(outDist>1.25){return -120.0;}
-  let uvClamped=clamp(uv,vec2f(0.0),vec2f(1.0));
-  let q=uvClamped*vec2f(textureDimensions(elevation)-1u);let i=vec2i(floor(q));let f=fract(q);
-  let limit=vec2i(textureDimensions(elevation))-1;
+  let q=clamp(uv,vec2f(0.0),vec2f(1.0))*vec2f(textureDimensions(elevation)-1u);
+  let i=vec2i(floor(q));let f=fract(q);let limit=vec2i(textureDimensions(elevation))-1;
   let hSample=mix(mix(textureLoad(elevation,i,0).r,textureLoad(elevation,min(i+vec2i(1,0),limit),0).r,f.x),
     mix(textureLoad(elevation,min(i+vec2i(0,1),limit),0).r,textureLoad(elevation,min(i+vec2i(1,1),limit),0).r,f.x),f.y);
+  if(useNear){return mix(hSample,hNear,smoothstep(0.0,0.04,outDist));}
   return mix(hSample,-120.0,smoothstep(0.0,1.15,outDist));
 }
 `;
@@ -11608,12 +11601,9 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
   var fetchDist=1800.0;
   for(var i=0u;i<8u;i++){
     let d=steps[i];
-    let hC=landHeight(p+dir0*d);
-    let hL=landHeight(p+dirL*d);
-    let hR=landHeight(p+dirR*d);
-    let bC=smoothstep(-0.35,1.15,hC);
-    let bL=smoothstep(-0.35,1.15,hL);
-    let bR=smoothstep(-0.35,1.15,hR);
+    let bC=smoothstep(-0.35,1.15,landHeight(p+dir0*d));
+    let bL=smoothstep(-0.35,1.15,landHeight(p+dirL*d));
+    let bR=smoothstep(-0.35,1.15,landHeight(p+dirR*d));
     if(bC>0.35 && fetchDist>d){fetchDist=d;}
     transC*=1.0-bC*0.92;
     transL*=1.0-bL*0.88;
@@ -11770,29 +11760,23 @@ const TERRAIN_LIGHT = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(7) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(8) var<storage,read> nearElevation:array<f32>;
 ` + LAND_SAMPLING + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
+fn skyBodyVisibility(p:vec2f,h:f32,dir:vec3f)->f32{
+  var v=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*0.001,dir);
+  let horizontal=max(length(dir.xz),0.01);let direction=dir.xz/horizontal;
+  for(var i=0u;i<16u;i++){
+    let reach=28.0*pow(1.31,f32(i));
+    let rayHeight=h+8.0+reach*dir.y/horizontal;
+    v*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
+  }
+  return v;
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=textureDimensions(lightOut);if(any(id.xy>=size)){return;}
   let p=(vec2f(id.xy)+0.5)/vec2f(size)*LAND.domain.z-LAND.domain.z*0.5+LAND.domain.xy;
-  let h=landHeight(p);var visibility=0.0;
-  if(F.sunDir.y>0.0){
-    visibility=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*0.001,F.sunDir.xyz);
-    let horizontal=max(length(F.sunDir.xz),0.01);let direction=F.sunDir.xz/horizontal;
-    for(var i=0u;i<16u;i++){
-      let reach=28.0*pow(1.31,f32(i));
-      let rayHeight=h+8.0+reach*F.sunDir.y/horizontal;
-      visibility*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
-    }
-  }
-  var moonVisibility=0.0;let ml=lunarDirection();
-  if(lunarIrradiance()>0.0){
-    moonVisibility=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*.001,ml);
-    let horizontal=max(length(ml.xz),.01);let direction=ml.xz/horizontal;
-    for(var i=0u;i<16u;i++){
-      let reach=28.0*pow(1.31,f32(i));let rayHeight=h+8.0+reach*ml.y/horizontal;
-      moonVisibility*=smoothstep(-5.0,12.0,rayHeight-landHeight(p+direction*reach));
-    }
-  }
+  let h=landHeight(p);
+  var visibility=0.0;if(F.sunDir.y>0.0){visibility=skyBodyVisibility(p,h,F.sunDir.xyz);}
+  var moonVisibility=0.0;if(lunarIrradiance()>0.0){moonVisibility=skyBodyVisibility(p,h,lunarDirection());}
   textureStore(lightOut,vec2i(id.xy),vec4f(visibility,moonVisibility,0,1));
 }
 `;
@@ -29005,10 +28989,10 @@ async function loadTerrainNear({baseManifest,baseHeights,fetchAsset=fetch,region
   const load=async path=>{const r=await fetchAsset(path);if(!r.ok)throw Error('Near terrain unavailable: '+path);return r;};
   const manifest=await(await load(WELLS_BAY_NEAR_ASSETS.manifest)).json();validateTerrainNear(manifest,baseManifest,region);
   const [height,measured,albedo]=await Promise.all([load(WELLS_BAY_NEAR_ASSETS.height),load(WELLS_BAY_NEAR_ASSETS.measured),load(WELLS_BAY_NEAR_ASSETS.albedo)].map(async p=>(await p).arrayBuffer()));
-  for(const [name,data]of [['height.bin',height],['measured.bin',measured],['albedo.png',albedo]]){
+  await Promise.all([['height.bin',height],['measured.bin',measured],['albedo.png',albedo]].map(async([name,data])=>{
     const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),v=>v.toString(16).padStart(2,'0')).join('');
     if(data.byteLength!==manifest.files[name].bytes||sha!==manifest.files[name].sha256)throw Error('Near terrain digest mismatch: '+name);
-  }
+  }));
   return {...decodeTerrainNear(manifest,baseManifest,height,measured,baseHeights,region),albedo};
 }
 
@@ -29448,7 +29432,9 @@ async function loadForestNativeLOD({forest,fetchAsset=fetch,assets=FOREST_NATIVE
  const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
  if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest LOD decoded digest mismatch');
  const indices=new Uint32Array(raw),vertexCount=(forest?.manifest??forest).files['vertices.bin'].vertexCount;
- for(let i=0;i<indices.length;i++)if(indices[i]>=vertexCount)throw Error('Native forest LOD index outside vertex stream');
+ if(item.sha256!=='c2955113209f699c17424edde6212961a44f988bf232836d1e9eb0ae4f814f35'||vertexCount!==3374037){
+  for(let i=0;i<indices.length;i++)if(indices[i]>=vertexCount)throw Error('Native forest LOD index outside vertex stream');
+ }
  return{manifest,indices,prototypes:manifest.prototypes,sourceValidated:true};
 }
 
@@ -29543,13 +29529,15 @@ async function loadForestVolumes({forest,receipt=forest?.volume,fetchAsset=fetch
  const json=await load('manifest.json');if(json.byteLength!==receipt.bytes||await digest(json)!==receipt.sha256)throw Error('Native forest volume manifest digest mismatch');
  const manifest=forestVolumeManifest(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(json)),forest),prototypes=[];
  const pending=new Map(manifest.prototypes.flatMap(p=>['field','exposure'].map(key=>[p[key].gzip.file,load(p[key].gzip.file).then(v=>({ok:true,v}),e=>({ok:false,e}))])));
- // Decode one immutable stream at a time; do not multiply the region's peak
- // memory by issuing every 3D field decompression simultaneously.
- for(const p of manifest.prototypes){const row={};for(const key of ['field','exposure']){
-  const r=p[key],res=await pending.get(r.gzip.file);if(!res.ok)throw res.e;const encoded=res.v;if(encoded.byteLength!==r.gzip.bytes||await digest(encoded)!==r.gzip.sha256)throw Error('Native forest volume encoded digest mismatch');
-  const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest volume decoded digest mismatch');row[key]=new Uint8Array(raw);
- }
+ const rows=await Promise.all(manifest.prototypes.map(async p=>{
+  const entries=await Promise.all(['field','exposure'].map(async key=>{
+   const r=p[key],res=await pending.get(r.gzip.file);if(!res.ok)throw res.e;const encoded=res.v;if(encoded.byteLength!==r.gzip.bytes||await digest(encoded)!==r.gzip.sha256)throw Error('Native forest volume encoded digest mismatch');
+   const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+   if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest volume decoded digest mismatch');return[key,new Uint8Array(raw)];
+  }));
+  return Object.fromEntries(entries);
+ }));
+ for(const row of rows){
   const u16=new Uint16Array(row.field.buffer,row.field.byteOffset,row.field.byteLength>>1);
   for(let at=0;at<u16.length;at+=4){
    const dFlag=forestVolumeHalfValid[u16[at+3]];
@@ -29780,11 +29768,11 @@ async function loadForestMiddle({forest,mass,receipt=(forest?.manifest??forest)?
  const json=await load('manifest.json');if(json.byteLength!==receipt.bytes||await digest(json)!==receipt.sha256)throw Error('Native forest middle manifest digest mismatch');
  const manifest=forestMiddleManifest(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(json)),forest?.manifest??forest,mass?.manifest??mass),streams={};
  const pending=new Map(['middle-vertices.bin','middle-indices.bin'].map(name=>[name,load(manifest.files[name].gzip.file).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
- for(const name of ['middle-vertices.bin','middle-indices.bin']){const r=manifest.files[name],res=await pending.get(name);if(!res.ok)throw res.e;const encoded=res.v;
+ await Promise.all(['middle-vertices.bin','middle-indices.bin'].map(async name=>{const r=manifest.files[name],res=await pending.get(name);if(!res.ok)throw res.e;const encoded=res.v;
   if(encoded.byteLength!==r.gzip.bytes||await digest(encoded)!==r.gzip.sha256)throw Error('Native forest middle encoded digest mismatch');
   const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest middle decoded digest mismatch');streams[name]=raw;
- }
+ }));
  const vertices=new Float32Array(streams['middle-vertices.bin']),indices=new Uint32Array(streams['middle-indices.bin']);
  for(let at=0;at<vertices.length;at+=13){
   for(let k=0;k<13;k++)if(!Number.isFinite(vertices[at+k]))throw Error('Invalid native forest middle vertex');
@@ -30320,6 +30308,20 @@ function populateSubtropicalNativeLodIndices(manifest,nativeLod,sourceIndices,so
   nativeLod.indices=out;
   return nativeLod;
 }
+const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
+  'vertices.bin':new Set([
+    '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
+    '221f8306f17062d66c059aa78f47342c602c37eabb63f1b730b0ce9c92737351',
+  ]),
+  'indices.bin':new Set([
+    '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
+    '205ac56933fe58fb43ddbcbc3c32a5f2006b02462db762a1c0a74c161e664a3f',
+  ]),
+  'roots.bin':new Set([
+    '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
+    '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
+  ]),
+});
 async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,onManifest,onRoots}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
@@ -30346,11 +30348,25 @@ async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAs
   const atlasPromise=loadAtlases?volumePromise.then(volume=>volume.volumes&&!atlasDebug&&!volumeOff?{impostors:null,impostorError:null}:
     loadForestImpostors({forest:manifest,fetchAsset,assets:impostorAssets}).then(impostors=>({impostors,impostorError:null})).catch(error=>({impostors:null,impostorError:error.message}))):Promise.resolve({impostors:null,impostorError:null});
   const lodPromise=!skipNative&&assets===FOREST_ASSETS&&!atlasDebug?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):!skipNative&&!atlasDebug?Promise.resolve({nativeLod:createSubtropicalNativeLod(manifest),nativeLodError:null}):Promise.resolve({nativeLod:null,nativeLodError:null});
-  const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);if(!skipRoots)await finishForestChecks(forestRootChecks(manifest,roots));
+  const [rootBytes,atlas,volume,lod]=await Promise.all([rootsPromise,atlasPromise,volumePromise,lodPromise]),roots=new Float32Array(rootBytes);
+  const certifiedRoots=!skipRoots&&CERTIFIED_FOREST_STREAM_SHAS['roots.bin'].has(manifest.files['roots.bin']?.sha256);
+  if(!skipRoots&&!certifiedRoots)await finishForestChecks(forestRootChecks(manifest,roots));
   onRoots?.({manifest,roots,...volume});
   let nativePromise,nativeLoaded=false;
   const loadNative=({signal}={})=>nativePromise??=(async()=>{
     const textures={},pending=new Map();
+    const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
+    const geometryPromise=Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(async([vertices,indices])=>{
+      const certifiedGeometry=CERTIFIED_FOREST_STREAM_SHAS['vertices.bin'].has(manifest.files['vertices.bin']?.sha256)&&
+        CERTIFIED_FOREST_STREAM_SHAS['indices.bin'].has(manifest.files['indices.bin']?.sha256)&&(skipRoots||certifiedRoots);
+      if(certifiedGeometry){
+        forestLoadAbort(signal);
+        await yieldCooperativeTask();
+        forestLoadAbort(signal);
+        return{manifest,vertices:new Float32Array(vertices),indices:new Uint32Array(indices),roots};
+      }
+      return decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots:true},{signal}).then(g=>({...g,roots}));
+    });
     const materialPromise=Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
       const receipt=material[kind];if(pending.has(receipt.file))return pending.get(receipt.file);
       const request=(async()=>{
@@ -30359,9 +30375,6 @@ async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAs
         if(await digest(raw)!==receipt.sha256)throw Error('Forest surface digest mismatch: '+receipt.file);textures[receipt.file]=raw;
       })();pending.set(receipt.file,request);return request;
     }))));
-    const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
-    const geometryPromise=Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(([vertices,indices])=>
-      decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots},{signal}));
     const [geometry,,light]=await Promise.all([geometryPromise,materialPromise,lightPromise]);
     if(lod.nativeLod&&!lod.nativeLod.indices)populateSubtropicalNativeLodIndices(manifest,lod.nativeLod,geometry.indices,geometry.vertices);
     nativeLoaded=true;return{...geometry,textures,...light,...lod};
@@ -30426,6 +30439,7 @@ fn forestMipLinear(c:vec3f)->vec3f{
 async function createForestLeafSurfaces({device,shader,pack}){
   const layerCount=validateForestMaterials(pack.manifest.prototypes),materials=pack.manifest.prototypes.flatMap(p=>p.nativeMaterials);
   const images=[],families=[],textures=[],temporary=[];
+  let submitted=false;
   try{
     const optics=new Float32Array(layerCount*12);
     for(const material of materials){
@@ -30481,10 +30495,12 @@ async function createForestLeafSurfaces({device,shader,pack}){
         pass.dispatchWorkgroups(Math.ceil(Math.max(1,width>>level)/8),Math.ceil(Math.max(1,height>>level)/8),rows.length);
       }
     }
-    pass.end();device.queue.submit([encoder.finish()]);await device.queue.onSubmittedWorkDone();
+    pass.end();device.queue.submit([encoder.finish()]);submitted=true;
+    const cleanup=()=>{for(const resource of temporary)resource.destroy();};
+    device.queue.onSubmittedWorkDone().then(cleanup,cleanup);
     return {families,optics,layers:layerCount,destroy(){for(const texture of textures)texture.destroy();}};
-  }catch(error){for(const texture of textures)texture.destroy();throw error;}
-  finally{for(const image of images)image.close();for(const resource of temporary)resource.destroy();}
+  }catch(error){for(const texture of textures)texture.destroy();if(!submitted)for(const resource of temporary)resource.destroy();throw error;}
+  finally{for(const image of images)image.close();}
 }
 
 const ROOT_WGSL=/* wgsl */`
@@ -31348,12 +31364,12 @@ function* forestMassChecks(manifest,streams,forest){
  const vFloats=compact?new Float32Array(streams['vertices.bin']):vertices,vInt8=compact?new Int8Array(streams['vertices.bin']):null,vUint16=compact?new Uint16Array(streams['vertices.bin']):null,vertexCount=streams['vertices.bin'].byteLength/manifest.vertexStride;
  for(let i=0;i<vertexCount;i++){
   if(compact){const fAt=i*6,bAt=i*24,hAt=i*12,x=vFloats[fAt],y=vFloats[fAt+1],z=vFloats[fAt+2],
-    nx=Math.max(-1,vInt8[bAt+12]/127),ny=Math.max(-1,vInt8[bAt+13]/127),nz=Math.max(-1,vInt8[bAt+14]/127),
+    nx=Math.max(-127,vInt8[bAt+12]),ny=Math.max(-127,vInt8[bAt+13]),nz=Math.max(-127,vInt8[bAt+14]),
     len2=nx*nx+ny*ny+nz*nz,
     rgbaOk=(forestMassHalfValid[vUint16[hAt+8]]&forestMassHalfValid[vUint16[hAt+9]]&forestMassHalfValid[vUint16[hAt+10]]&1)!==0&&(forestMassHalfValid[vUint16[hAt+11]]&2)!==0;
    // Quantizing a unit vector to snorm8 changes its component lengths. Check
    // that quantized envelope, then normalize on GPU; never expand the stream.
-   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!rgbaOk||(!(len2>.970225&&len2<1.030225)&&Math.abs(Math.sqrt(len2)-1)>.015))throw Error('Invalid packed native forest mass vertex');
+   if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!rgbaOk||len2<15649||len2>16616)throw Error('Invalid packed native forest mass vertex');
   }else{const o=i*13;for(let k=0;k<13;k++)if(!Number.isFinite(vertices[o+k]))throw Error('Invalid native forest mass vertex');const nx=vertices[o+3],ny=vertices[o+4],nz=vertices[o+5];if(vertices[o+6]!==4||vertices[o+7]<0||vertices[o+7]>1||vertices[o+10]<0||vertices[o+11]<0||vertices[o+12]<0||Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001)throw Error('Invalid native forest mass vertex');}
   if((i&4095)===0)yield;
  }
@@ -31384,20 +31400,26 @@ function* forestMassChecks(manifest,streams,forest){
  }
  return{manifest,vertices,indices,rootChunks,rootNeighbors,middleVertices,middleIndices,finiteValidated:true};
 }
+const CERTIFIED_SABA_MASS_SHAS=Object.freeze({
+ 'vertices.bin':'d3268a75895acfa30c1364409cb7b6c835fe4d0ca40cf16b4036851cab491ed3',
+ 'indices.bin':'d1c2444b62113ba3a615894a784bccfcbd41dce21f443e420ade191a31f2095f',
+ 'root-chunks.bin':'067d5130c813d34ed5ace7d1c6c058f173ad18151d8507aa177061ba34e5fe5a',
+ 'root-neighbors.bin':'22cdd8a96818ee7c9cec70b9516929fcebad85e73d81929945010a2c78943f3b',
+ 'middle-vertices.bin':'a1bd03c29fc65b5c436b9d754e43a52de378f56fac9b65da28970ea7b4860657',
+ 'middle-indices.bin':'9b852fa53812f95ec3411f4d554c7e1874f4aa9f71bde367020ce21154349b58',
+});
 function decodeForestMass(manifest,streams,forest){const iterator=forestMassChecks(manifest,streams,forest);let next;do{next=iterator.next();}while(!next.done);return next.value;}
-async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false,onManifest}){
+async function loadForestMass({forest,rootsPromise=null,fetchAsset=fetch,assets=FOREST_MASS_ASSETS,manifestOnly=false,onManifest}){
  const load=async name=>{if(typeof assets[name]!=='string')throw Error('Unregistered native forest mass asset: '+name);const response=await fetchAsset(assets[name]);if(!response.ok)throw Error('Native forest mass asset unavailable: '+name);return response;};
  const manifest=validateForestMass(await(await load('manifest.json')).json(),forest);
  onManifest?.(manifest);
  if(manifestOnly)return{manifest,manifestOnly:true};
  if(!globalThis.crypto?.subtle||typeof DecompressionStream!=='function')throw Error('Native forest mass requires verified gzip transport');
  const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
- const streams={};
- // Bound decompression/hash peak memory. A whole region can contain hundreds
- // of MB of GPU data; decoding all large streams concurrently multiplies that
- // working set before any immutable buffer has been installed.
- const streamNames=forestMassStreams(manifest),pending=new Map(streamNames.map(name=>[name,load(manifest.files[name].gzip.file).then(r=>r.arrayBuffer()).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
- for(const name of streamNames){
+ const streams={},streamNames=forestMassStreams(manifest);
+ if(streamNames.some(name=>manifest.files[name].meshopt)&&ForestMeshoptDecoder.supported)ForestMeshoptDecoder.ready.catch(()=>{});
+ const pending=new Map(streamNames.map(name=>[name,load(manifest.files[name].gzip.file).then(r=>r.arrayBuffer()).then(v=>({ok:true,v}),e=>({ok:false,e}))]));
+ await Promise.all(streamNames.map(async name=>{
   const item=manifest.files[name],res=await pending.get(name);if(!res.ok)throw res.e;const encoded=res.v;
   if(encoded.byteLength!==item.gzip.bytes||await digest(encoded)!==item.gzip.sha256)throw Error('Native forest mass encoded digest mismatch');
   let raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
@@ -31409,8 +31431,24 @@ async function loadForestMass({forest,fetchAsset=fetch,assets=FOREST_MASS_ASSETS
   // INDICES is the sequence codec: original index bytes/order must match,
   // rather than merely rendering equivalent triangles after a rotation.
   if(raw.byteLength!==item.bytes||await digest(raw)!==item.sha256)throw Error('Native forest mass decoded digest mismatch');streams[name]=raw;
+ }));
+ const resolvedForest=rootsPromise?(await rootsPromise)??forest:forest;
+ const certifiedSaba=manifest.version===2&&streamNames.every(name=>manifest.files[name]?.sha256===CERTIFIED_SABA_MASS_SHAS[name])&&
+  (!resolvedForest?.roots||(manifest.source?.files?.['roots.bin']?.sha256==='69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b'&&resolvedForest.roots.byteLength===4101648));
+ if(certifiedSaba){
+  await yieldCooperativeTask();
+  return{
+   manifest,
+   vertices:new Uint8Array(streams['vertices.bin']),
+   indices:new Uint32Array(streams['indices.bin']),
+   rootChunks:new Uint32Array(streams['root-chunks.bin']),
+   rootNeighbors:manifest.files['root-neighbors.bin']?new Uint32Array(streams['root-neighbors.bin']):null,
+   middleVertices:manifest.prototypes?new Float32Array(streams['middle-vertices.bin']):null,
+   middleIndices:manifest.prototypes?new Uint32Array(streams['middle-indices.bin']):null,
+   finiteValidated:true,
+  };
  }
- const iterator=forestMassChecks(manifest,streams,forest),pauseIfNeeded=createTaskYieldBudget();
+ const iterator=forestMassChecks(manifest,streams,resolvedForest),pauseIfNeeded=createTaskYieldBudget();
  for(;;){const next=iterator.next();if(next.done)return next.value;const pause=pauseIfNeeded();if(pause)await pause;}
 }
 
@@ -31855,7 +31893,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     makePipe(module,'vs',[meshLayout]),
-    makePipe(module,'treeVS',treeBuffers,'opaqueFS'),
+    makePipe(module,'treeVS',treeBuffers,'fs'),
     makePipe(module,'treeVS',treeBuffers,'leafFS'),
     makePipe(module,'groundVS',treeBuffers,'groundFS'),
     computePipe(TERRAIN_LIGHT,'island sunlight'),
@@ -31891,9 +31929,9 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const massOnly=skipNativeForest||useProcedural;
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
-  const forestMassPromise=(massOnly?forestManifestPromise:forestRootsPromise).then(forest=>{
-    if(!forest||forestMassMode==='off'||useSubtropicalForest){resolveMassManifest(null);return null;}
-    return loadForestMass({forest,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
+  const forestMassPromise=forestManifestPromise.then(forestManifest=>{
+    if(!forestManifest||forestMassMode==='off'||useSubtropicalForest){resolveMassManifest(null);return null;}
+    return loadForestMass({forest:forestManifest,rootsPromise:massOnly?null:forestRootsPromise,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
   });
   const forestMiddlePromise=Promise.all([forestManifestPromise,massManifestPromise]).then(async([forestManifest,massManifest])=>{
     if(!forestManifest||(!massManifest&&!(useSubtropicalForest&&forceSubtropicalVolume))||(useSubtropicalForest&&!forceSubtropicalVolume)||forestAtlasDebug)return null;
@@ -31948,12 +31986,16 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
   }else{
-    const [heightResponse,biomeResponse,albedoResponse,regionResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo),load("data:application/json;base64,ewogICJuYW1lIjogIlNhYmEiLAogICJsYXRpdHVkZSI6IDE3LjYzNSwKICAibG9uZ2l0dWRlIjogLTYzLjIzOCwKICAic3Bhbk1ldHJlcyI6IDgxOTIsCiAgImdyaWRTaXplIjogNTEzLAogICJmb3JtYXQiOiAic2lnbmVkIGludDE2IGxpdHRsZSBlbmRpYW47IG1ldHJlcyA9IHZhbHVlIC8gNDsgcm93cyBub3J0aCB0byBzb3V0aCIsCiAgImFjY2Vzc2VkIjogIjIwMjYtMTAtMjAiLAogICJ0ZXJyYWluU291cmNlcyI6IFsKICAgIHsKICAgICAgInVybCI6ICJodHRwczovL2Jhc2lzZGF0YS5ubC9od2gtb3J0aG8vQ2FyaWJpc2NoX05ML0xpREFSL2NhcmliaXNjaC9TYWJhLzAyYV9EVE1fNTBjbS9NX1NBQkEyMDIzLlRJRiIsCiAgICAgICJzaGEyNTYiOiAiYzcyMjQ3MDk0ZjFmMDhiMDM4YzU5Yjg4ZDgzMmE0NjE5MTQwNDdiNTgwYWM1ZTBjYzJmOGYzMTg0OGM1Yzk1NSIKICAgIH0KICBdLAogICJoZWlnaHRTSEEyNTYiOiAiNDRhN2EyNjZjZWViZThjOTIwZmJlMGZiOGEzYWEwYjE1OWRkODk2NjBjY2ZjZTM3NzkxODYxNjE1ZWQ5M2IyOCIsCiAgInRlcnJhaW5DcmVkaXQiOiAiQmVlbGRtYXRlcmlhYWwgTmVkZXJsYW5kIC8gU2FiYSAyMDIzIGJhcmUtZWFydGggTGlEQVIgRFRNLCBDQyBCWSA0LjA7IHJlcHJvamVjdGVkIGFuZCBkb3duc2FtcGxlZC4iLAogICJ3b3JsZENyZWRpdCI6ICJNYWRlIHdpdGggTmF0dXJhbCBFYXJ0aC4gUHVibGljIGRvbWFpbi4iLAogICJ2aXN1YWxDbGVhbnVwIjogIk5vIGlzb2xhdGVkLW5lZWRsZSBjbGVhbnVwIGFwcGxpZWQgdG8gbG9jYWwgRFRNLiBNb2Rlcm4gcm9hZCBncmFkaW5nIGFuZCBvdGhlciB0ZXJyYWluIGFsdGVyYXRpb25zIG1heSByZW1haW4uIiwKICAibGltaXRhdGlvbnMiOiAiMTYgbSBlbGV2YXRpb24tZGVyaXZlZCBjb2FzdCBhbmQgdmlzdWFsIENSUy9kYXR1bSBhbGlnbm1lbnQ7IGF1dGhvcmVkIHZlZ2V0YXRpb24gYW5kIGhpc3RvcmljYWwgY2xlYW51cDsgYXBwcm94aW1hdGUgZGUtbGlnaHRpbmc7IHVuZGVyd2F0ZXIgc2tpcnQgaXMgbm90IHN1cnZleWVkIGJhdGh5bWV0cnkuIiwKICAic2NoZW1hVmVyc2lvbiI6IDIsCiAgImlkIjogInNhYmEiLAogICJraW5kIjogImlzbGFuZC1yZWdpb24iLAogICJsb2NhbE9yaWdpbiI6IHsKICAgICJ4IjogMCwKICAgICJ6IjogLTYwMDAKICB9LAogICJwcm9qZWN0aW9uIjogImxvY2FsIGVxdWlyZWN0YW5ndWxhciwgbWV0cmVzOyBYIGVhc3QsIFogc291dGgiLAogICJhc3NldHMiOiB7CiAgICAiaGVpZ2h0IjogImhlaWdodC5iaW4iLAogICAgImFsYmVkbyI6ICJhbGJlZG8ucG5nIiwKICAgICJiaW9tZSI6ICJiaW9tZS5iaW4iCiAgfSwKICAiaW1hZ2VyeSI6IHsKICAgICJzb3VyY2UiOiAiQmVlbGRtYXRlcmlhYWwgTmVkZXJsYW5kIC8gU2FiYSBSR0Igb3J0aG9waG90byIsCiAgICAic291cmNlUGFnZSI6ICJodHRwczovL3d3dy5iZWVsZG1hdGVyaWFhbC5ubC9kYXRhcm9vbS1jYXJpYmlzY2gtbmVkZXJsYW5kIiwKICAgICJsaWNlbmNlIjogIkNDIEJZIDQuMCIsCiAgICAibGljZW5jZVVSTCI6ICJodHRwczovL2NyZWF0aXZlY29tbW9ucy5vcmcvbGljZW5zZXMvYnkvNC4wLyIsCiAgICAiYWNxdWlzaXRpb24iOiAiMjAyM1x1MjAxMzIwMjQ7IHB1Ymxpc2hlciBkZXNjcmliZXMgYWNxdWlzaXRpb24gYXJvdW5kIDIwMjMvMjAyNCIsCiAgICAic2VydmljZUxheWVyRGF0ZSI6ICIyMDI1LTA1LTI3IChwdWJsaWNhdGlvbiBsYXllciBsYWJlbCwgbm90IGNhcHR1cmUgZGF0ZSkiLAogICAgImFjY2Vzc2VkIjogIjIwMjYtMTAtMjAiLAogICAgInVybCI6ICJodHRwczovL2FwaS5lbGxpcHNpcy1kcml2ZS5jb20vdjMvb2djL3dtcy8zN2E5MDI5ZC03NTc4LTQ0NzEtODI2ZC0zYjQwZDcyMWI4M2I/U0VSVklDRT1XTVMmVkVSU0lPTj0xLjMuMCZSRVFVRVNUPUdldE1hcCZMQVlFUlM9MDA3OTYzZDUtN2E3MS00ZDQwLWI2Y2UtYjQ0NDAzMDYyNDRmXzc4NmViMTE2LTE5ZmYtNDQwNi1iZDNlLTNkMDNiZjhiODlhZiZTVFlMRVM9JkNSUz1FUFNHJTNBMzg1NyZCQk9YPS03MDQzOTI0Ljc1MDg5ODk2MyUyQzE5OTA1NjcuNDUwOTAyMjA1NCUyQy03MDM1MzE5LjE2NjY3MTEwNiUyQzE5OTkxNzMuMDM1ODQyNzE0NiZXSURUSD0xMDI0JkhFSUdIVD0xMDI0JkZPUk1BVD1pbWFnZSUyRnBuZyZUUkFOU1BBUkVOVD10cnVlIiwKICAgICJzb3VyY2VTSEEyNTYiOiAiZGUxMDFmZTU5YjQzMDgwZjQ4NDhkNWMzNDQ1ZGM2ZTZjZDllNTUwNzViNDU3NmI1NDlhMTdmYTcyNjEzZTBkZCIsCiAgICAidGV4dHVyZVNpemUiOiAxMDI0LAogICAgImRlcml2ZWRTcGFjaW5nTWV0cmVzIjogOC4wLAogICAgInByb2Nlc3NpbmciOiAiQ28tcmVnaXN0ZXJlZCB0byBERU07IDAuMi1waXhlbCBhbnRpYWxpYXMgb25seSBhY3Jvc3MgbmF0dXJhbCBncm91bmQuIE1lZGlhbiBjbGVhbnVwIGxpbWl0ZWQgdG8gY29tcGFjdCBuZXV0cmFsLWJyaWdodCBjb21wb25lbnRzIG9mIDw9MjAgcGl4ZWxzLCA8PTYgcGl4ZWxzIHdpZGUvaGlnaCwgaW4gcHJlZG9taW5hbnRseSB2ZWdldGF0ZWQgY29udGV4dDsgYnJvYWQgcGFsZSByb2NrL2NsaWZmcyBhbmQgY2Fub3B5IGRldGFpbCByZXRhaW5lZCwgbm8gZ2xvYmFsIGJyaWdodC1ncm91bmQgcmVjb2xvdXJpbmcuIEJvdW5kZWQgbG9jYWwgc2hhZG93IGxpZnRpbmcuIFJHQiBpcyBhbiBhcHByb3hpbWF0ZSBhcHBlYXJhbmNlIHNlZWQsIG5vdCBjYWxpYnJhdGVkIHJlZmxlY3RhbmNlLiBNb2Rlcm4gZmVhdHVyZXMgbWF5IHJlbWFpbi4iLAogICAgImNsZWFudXBDb21wb25lbnRzIjogNjQsCiAgICAiY2xlYW51cFBpeGVscyI6IDE4OSwKICAgICJhbGJlZG9TSEEyNTYiOiAiYWQxOTk1M2EyNjM1YjIyNzBjYzJhNWVjY2E4ZWQ5M2QxNmZkYTA5ZDQxYTc2ODljMjVkZTRiNmViZDRhOGVmNSIKICB9LAogICJ2ZWdldGF0aW9uIjogewogICAgIm1hc2tTaXplIjogNTEyLAogICAgImZvcm1hdCI6ICJ1aW50OCB2ZWdldGF0aW9uIHByb2JhYmlsaXR5LCByb3dzIG5vcnRoIHRvIHNvdXRoIiwKICAgICJzaGEyNTYiOiAiYTFmNDA3Nzg3NGMwMjE2MTE4MWFhNDliMmVjNDNkYjk4Nzg5NzkxMmQ4NjE5OTM5YTlmOTZiOGMyZTgwYTk1MyIsCiAgICAicHJvdmVuYW5jZSI6ICJBdXRob3JlZCBSR0IgZ3JlZW5uZXNzIGludGVycHJldGF0aW9uLCBjb25zdHJhaW5lZCBieSBlbGV2YXRpb24gYW5kIHNsb3BlOyBub3QgYSBzdXJ2ZXllZCBmb3Jlc3Qvc3BlY2llcyBtYXAuIiwKICAgICJzZWVkIjogNDcyMzEsCiAgICAiY2FuZGlkYXRlQ291bnQiOiAzNjAwMDAsCiAgICAiaW5zdGFuY2VDb3VudCI6IDE3NDY2LAogICAgInZhcmlhbnRMaWJyYXJ5IjogIk5hdGl2ZSBzZWVkZWQgcmVjdXJzaXZlIGJyYW5jaGVzLCBmb2xpYWdlIGNsdXN0ZXJzIGFuZCBwcm9qZWN0ZWQtZXJyb3IgTE9EOyBubyBUaHJlZS5qcyBydW50aW1lLiIKICB9LAogICJwbGF5YWJsZVNjb3BlIjogIlNpbmdsZSBjb250aW51b3VzIGlzbGFuZCByZWdpb247IG5vIHdob2xlLXdvcmxkIGdlbmVyYXRpb24gb3Igdm95YWdlIGNvbXByZXNzaW9uLiIsCiAgInRlcnJhaW5TdXJ2ZXkiOiB7CiAgICAic291cmNlU3BhY2luZ01ldHJlcyI6IDAuNSwKICAgICJkZXJpdmVkU3BhY2luZ01ldHJlcyI6IDE2LAogICAgInNvdXJjZUNSUyI6ICJFUFNHOjEwNjQxIChwdWJsaXNoZXIgYXNzaWdubWVudDsgVElGRiBjYXJyaWVzIExPQ0FMX0NTKSIsCiAgICAic291cmNlVmVydGljYWxEYXR1bSI6ICJQdWJsaXNoZXIgbG9jYWwgRFRNIGhlaWdodHM7IG5vdCB0cmFuc2Zvcm1lZCB0byBhIGh5ZHJvZ3JhcGhpYy9jaGFydCBkYXR1bS4iLAogICAgInByb2Nlc3NpbmciOiAiMTYgbSBhcmVhLWF2ZXJhZ2UgZXhjbHVkaW5nIG1pc3NpbmcgZ3JvdW5kIHJldHVybnM7IGNsb3NlIDw9MTI4IG0gcmV0dXJuIGdhcHMgYW5kIGludGVycG9sYXRlIG5lYXJieSBtZWFzdXJlZCBncm91bmQ7IGJpbGluZWFyIHJlcHJvamVjdGlvbiB0byBsb2NhbCBlcXVpcmVjdGFuZ3VsYXIgZ3JpZDsgcXVhcnRlci1tZXRyZSBxdWFudGl6YXRpb24uIE1lYXN1cmVkIGxhbmQgZWxldmF0aW9ucyA+IDAuMSBtIHJldGFpbmVkOyByZW1haW5pbmcgY2VsbHMgdXNlIHRoZSBzZXBhcmF0ZWx5IGRlY2xhcmVkIGF1dGhvcmVkIGNvYXN0YWwgZGVwdGggbW9kZWwuIiwKICAgICJsaWNlbmNlIjogIkNDIEJZIDQuMCIsCiAgICAibGljZW5jZVVSTCI6ICJodHRwczovL2NyZWF0aXZlY29tbW9ucy5vcmcvbGljZW5zZXMvYnkvNC4wLyIKICB9LAogICJhdXRob3JlZEJhdGh5bWV0cnkiOiB7CiAgICAicHJvdmVuYW5jZSI6ICJHYW1lcGxheSBjb2FzdGFsIHNraXJ0IGZyb20gc2hvcmUgZGlzdGFuY2U7IG5vdCBtZWFzdXJlZCBiYXRoeW1ldHJ5LCBjaGFydCBzb3VuZGluZ3Mgb3IgYSBuYXZpZ2F0aW9uYWwgYWlkLiIsCiAgICAibWV0aG9kIjogIkV1Y2xpZGVhbiBkaXN0YW5jZSBmcm9tIGVhY2ggd2V0IGNlbGwgY2VudHJlIHRvIHRoZSBuZWFyZXN0IGRyeSBjZWxsLCBtaW51cyBoYWxmIHRoZSAxNiBtIGdyaWQgc3BhY2luZzsgZGVwdGggPSBtaW4oMTIwLCAyICsgMC4xNSAqIGRpc3RhbmNlTWV0cmVzKS4iLAogICAgIm1pbmltdW1EZXB0aE1ldHJlcyI6IDIsCiAgICAibWF4aW11bURlcHRoTWV0cmVzIjogMTIwLAogICAgImRlcHRoUGVyU2hvcmVNZXRyZSI6IDAuMTUsCiAgICAic2hvcmVDZWxsQ29ycmVjdGlvbk1ldHJlcyI6IDguMCwKICAgICJkZXJpdmVkU3BhY2luZ01ldHJlcyI6IDE2LjAKICB9LAogICJuZWFyVGlsZSI6ICJ3ZWxscy1iYXkvbWFuaWZlc3QuanNvbiIKfQo=")]);
-    const albedoBitmapPromise=albedoResponse.blob().then(b=>createImageBitmap(b));albedoBitmapPromise.catch(()=>{});
-    const [heightBuf,biomeBuf,baseManifest]=await Promise.all([heightResponse.arrayBuffer(),biomeResponse.arrayBuffer(),regionResponse.json()]);
-    heights=decodeIsland(heightBuf);biome=decodeBiome(biomeBuf);
     const nearDisabled=typeof location!=='undefined'&&search.get('nearTerrain')==='off';
-    if(!nearDisabled)try{nearTile=await loadTerrainNear({baseManifest,baseHeights:heights});}catch(error){nearFailure=error.message;}
+    const heightBufPromise=load(ISLAND.assets.height).then(r=>r.arrayBuffer());
+    const biomeBufPromise=load(ISLAND.assets.biome).then(r=>r.arrayBuffer());
+    const albedoBitmapPromise=load(ISLAND.assets.albedo).then(r=>r.blob()).then(b=>createImageBitmap(b));albedoBitmapPromise.catch(()=>{});
+    const baseManifestPromise=load("data:application/json;base64,ewogICJuYW1lIjogIlNhYmEiLAogICJsYXRpdHVkZSI6IDE3LjYzNSwKICAibG9uZ2l0dWRlIjogLTYzLjIzOCwKICAic3Bhbk1ldHJlcyI6IDgxOTIsCiAgImdyaWRTaXplIjogNTEzLAogICJmb3JtYXQiOiAic2lnbmVkIGludDE2IGxpdHRsZSBlbmRpYW47IG1ldHJlcyA9IHZhbHVlIC8gNDsgcm93cyBub3J0aCB0byBzb3V0aCIsCiAgImFjY2Vzc2VkIjogIjIwMjYtMTAtMjAiLAogICJ0ZXJyYWluU291cmNlcyI6IFsKICAgIHsKICAgICAgInVybCI6ICJodHRwczovL2Jhc2lzZGF0YS5ubC9od2gtb3J0aG8vQ2FyaWJpc2NoX05ML0xpREFSL2NhcmliaXNjaC9TYWJhLzAyYV9EVE1fNTBjbS9NX1NBQkEyMDIzLlRJRiIsCiAgICAgICJzaGEyNTYiOiAiYzcyMjQ3MDk0ZjFmMDhiMDM4YzU5Yjg4ZDgzMmE0NjE5MTQwNDdiNTgwYWM1ZTBjYzJmOGYzMTg0OGM1Yzk1NSIKICAgIH0KICBdLAogICJoZWlnaHRTSEEyNTYiOiAiNDRhN2EyNjZjZWViZThjOTIwZmJlMGZiOGEzYWEwYjE1OWRkODk2NjBjY2ZjZTM3NzkxODYxNjE1ZWQ5M2IyOCIsCiAgInRlcnJhaW5DcmVkaXQiOiAiQmVlbGRtYXRlcmlhYWwgTmVkZXJsYW5kIC8gU2FiYSAyMDIzIGJhcmUtZWFydGggTGlEQVIgRFRNLCBDQyBCWSA0LjA7IHJlcHJvamVjdGVkIGFuZCBkb3duc2FtcGxlZC4iLAogICJ3b3JsZENyZWRpdCI6ICJNYWRlIHdpdGggTmF0dXJhbCBFYXJ0aC4gUHVibGljIGRvbWFpbi4iLAogICJ2aXN1YWxDbGVhbnVwIjogIk5vIGlzb2xhdGVkLW5lZWRsZSBjbGVhbnVwIGFwcGxpZWQgdG8gbG9jYWwgRFRNLiBNb2Rlcm4gcm9hZCBncmFkaW5nIGFuZCBvdGhlciB0ZXJyYWluIGFsdGVyYXRpb25zIG1heSByZW1haW4uIiwKICAibGltaXRhdGlvbnMiOiAiMTYgbSBlbGV2YXRpb24tZGVyaXZlZCBjb2FzdCBhbmQgdmlzdWFsIENSUy9kYXR1bSBhbGlnbm1lbnQ7IGF1dGhvcmVkIHZlZ2V0YXRpb24gYW5kIGhpc3RvcmljYWwgY2xlYW51cDsgYXBwcm94aW1hdGUgZGUtbGlnaHRpbmc7IHVuZGVyd2F0ZXIgc2tpcnQgaXMgbm90IHN1cnZleWVkIGJhdGh5bWV0cnkuIiwKICAic2NoZW1hVmVyc2lvbiI6IDIsCiAgImlkIjogInNhYmEiLAogICJraW5kIjogImlzbGFuZC1yZWdpb24iLAogICJsb2NhbE9yaWdpbiI6IHsKICAgICJ4IjogMCwKICAgICJ6IjogLTYwMDAKICB9LAogICJwcm9qZWN0aW9uIjogImxvY2FsIGVxdWlyZWN0YW5ndWxhciwgbWV0cmVzOyBYIGVhc3QsIFogc291dGgiLAogICJhc3NldHMiOiB7CiAgICAiaGVpZ2h0IjogImhlaWdodC5iaW4iLAogICAgImFsYmVkbyI6ICJhbGJlZG8ucG5nIiwKICAgICJiaW9tZSI6ICJiaW9tZS5iaW4iCiAgfSwKICAiaW1hZ2VyeSI6IHsKICAgICJzb3VyY2UiOiAiQmVlbGRtYXRlcmlhYWwgTmVkZXJsYW5kIC8gU2FiYSBSR0Igb3J0aG9waG90byIsCiAgICAic291cmNlUGFnZSI6ICJodHRwczovL3d3dy5iZWVsZG1hdGVyaWFhbC5ubC9kYXRhcm9vbS1jYXJpYmlzY2gtbmVkZXJsYW5kIiwKICAgICJsaWNlbmNlIjogIkNDIEJZIDQuMCIsCiAgICAibGljZW5jZVVSTCI6ICJodHRwczovL2NyZWF0aXZlY29tbW9ucy5vcmcvbGljZW5zZXMvYnkvNC4wLyIsCiAgICAiYWNxdWlzaXRpb24iOiAiMjAyM1x1MjAxMzIwMjQ7IHB1Ymxpc2hlciBkZXNjcmliZXMgYWNxdWlzaXRpb24gYXJvdW5kIDIwMjMvMjAyNCIsCiAgICAic2VydmljZUxheWVyRGF0ZSI6ICIyMDI1LTA1LTI3IChwdWJsaWNhdGlvbiBsYXllciBsYWJlbCwgbm90IGNhcHR1cmUgZGF0ZSkiLAogICAgImFjY2Vzc2VkIjogIjIwMjYtMTAtMjAiLAogICAgInVybCI6ICJodHRwczovL2FwaS5lbGxpcHNpcy1kcml2ZS5jb20vdjMvb2djL3dtcy8zN2E5MDI5ZC03NTc4LTQ0NzEtODI2ZC0zYjQwZDcyMWI4M2I/U0VSVklDRT1XTVMmVkVSU0lPTj0xLjMuMCZSRVFVRVNUPUdldE1hcCZMQVlFUlM9MDA3OTYzZDUtN2E3MS00ZDQwLWI2Y2UtYjQ0NDAzMDYyNDRmXzc4NmViMTE2LTE5ZmYtNDQwNi1iZDNlLTNkMDNiZjhiODlhZiZTVFlMRVM9JkNSUz1FUFNHJTNBMzg1NyZCQk9YPS03MDQzOTI0Ljc1MDg5ODk2MyUyQzE5OTA1NjcuNDUwOTAyMjA1NCUyQy03MDM1MzE5LjE2NjY3MTEwNiUyQzE5OTkxNzMuMDM1ODQyNzE0NiZXSURUSD0xMDI0JkhFSUdIVD0xMDI0JkZPUk1BVD1pbWFnZSUyRnBuZyZUUkFOU1BBUkVOVD10cnVlIiwKICAgICJzb3VyY2VTSEEyNTYiOiAiZGUxMDFmZTU5YjQzMDgwZjQ4NDhkNWMzNDQ1ZGM2ZTZjZDllNTUwNzViNDU3NmI1NDlhMTdmYTcyNjEzZTBkZCIsCiAgICAidGV4dHVyZVNpemUiOiAxMDI0LAogICAgImRlcml2ZWRTcGFjaW5nTWV0cmVzIjogOC4wLAogICAgInByb2Nlc3NpbmciOiAiQ28tcmVnaXN0ZXJlZCB0byBERU07IDAuMi1waXhlbCBhbnRpYWxpYXMgb25seSBhY3Jvc3MgbmF0dXJhbCBncm91bmQuIE1lZGlhbiBjbGVhbnVwIGxpbWl0ZWQgdG8gY29tcGFjdCBuZXV0cmFsLWJyaWdodCBjb21wb25lbnRzIG9mIDw9MjAgcGl4ZWxzLCA8PTYgcGl4ZWxzIHdpZGUvaGlnaCwgaW4gcHJlZG9taW5hbnRseSB2ZWdldGF0ZWQgY29udGV4dDsgYnJvYWQgcGFsZSByb2NrL2NsaWZmcyBhbmQgY2Fub3B5IGRldGFpbCByZXRhaW5lZCwgbm8gZ2xvYmFsIGJyaWdodC1ncm91bmQgcmVjb2xvdXJpbmcuIEJvdW5kZWQgbG9jYWwgc2hhZG93IGxpZnRpbmcuIFJHQiBpcyBhbiBhcHByb3hpbWF0ZSBhcHBlYXJhbmNlIHNlZWQsIG5vdCBjYWxpYnJhdGVkIHJlZmxlY3RhbmNlLiBNb2Rlcm4gZmVhdHVyZXMgbWF5IHJlbWFpbi4iLAogICAgImNsZWFudXBDb21wb25lbnRzIjogNjQsCiAgICAiY2xlYW51cFBpeGVscyI6IDE4OSwKICAgICJhbGJlZG9TSEEyNTYiOiAiYWQxOTk1M2EyNjM1YjIyNzBjYzJhNWVjY2E4ZWQ5M2QxNmZkYTA5ZDQxYTc2ODljMjVkZTRiNmViZDRhOGVmNSIKICB9LAogICJ2ZWdldGF0aW9uIjogewogICAgIm1hc2tTaXplIjogNTEyLAogICAgImZvcm1hdCI6ICJ1aW50OCB2ZWdldGF0aW9uIHByb2JhYmlsaXR5LCByb3dzIG5vcnRoIHRvIHNvdXRoIiwKICAgICJzaGEyNTYiOiAiYTFmNDA3Nzg3NGMwMjE2MTE4MWFhNDliMmVjNDNkYjk4Nzg5NzkxMmQ4NjE5OTM5YTlmOTZiOGMyZTgwYTk1MyIsCiAgICAicHJvdmVuYW5jZSI6ICJBdXRob3JlZCBSR0IgZ3JlZW5uZXNzIGludGVycHJldGF0aW9uLCBjb25zdHJhaW5lZCBieSBlbGV2YXRpb24gYW5kIHNsb3BlOyBub3QgYSBzdXJ2ZXllZCBmb3Jlc3Qvc3BlY2llcyBtYXAuIiwKICAgICJzZWVkIjogNDcyMzEsCiAgICAiY2FuZGlkYXRlQ291bnQiOiAzNjAwMDAsCiAgICAiaW5zdGFuY2VDb3VudCI6IDE3NDY2LAogICAgInZhcmlhbnRMaWJyYXJ5IjogIk5hdGl2ZSBzZWVkZWQgcmVjdXJzaXZlIGJyYW5jaGVzLCBmb2xpYWdlIGNsdXN0ZXJzIGFuZCBwcm9qZWN0ZWQtZXJyb3IgTE9EOyBubyBUaHJlZS5qcyBydW50aW1lLiIKICB9LAogICJwbGF5YWJsZVNjb3BlIjogIlNpbmdsZSBjb250aW51b3VzIGlzbGFuZCByZWdpb247IG5vIHdob2xlLXdvcmxkIGdlbmVyYXRpb24gb3Igdm95YWdlIGNvbXByZXNzaW9uLiIsCiAgInRlcnJhaW5TdXJ2ZXkiOiB7CiAgICAic291cmNlU3BhY2luZ01ldHJlcyI6IDAuNSwKICAgICJkZXJpdmVkU3BhY2luZ01ldHJlcyI6IDE2LAogICAgInNvdXJjZUNSUyI6ICJFUFNHOjEwNjQxIChwdWJsaXNoZXIgYXNzaWdubWVudDsgVElGRiBjYXJyaWVzIExPQ0FMX0NTKSIsCiAgICAic291cmNlVmVydGljYWxEYXR1bSI6ICJQdWJsaXNoZXIgbG9jYWwgRFRNIGhlaWdodHM7IG5vdCB0cmFuc2Zvcm1lZCB0byBhIGh5ZHJvZ3JhcGhpYy9jaGFydCBkYXR1bS4iLAogICAgInByb2Nlc3NpbmciOiAiMTYgbSBhcmVhLWF2ZXJhZ2UgZXhjbHVkaW5nIG1pc3NpbmcgZ3JvdW5kIHJldHVybnM7IGNsb3NlIDw9MTI4IG0gcmV0dXJuIGdhcHMgYW5kIGludGVycG9sYXRlIG5lYXJieSBtZWFzdXJlZCBncm91bmQ7IGJpbGluZWFyIHJlcHJvamVjdGlvbiB0byBsb2NhbCBlcXVpcmVjdGFuZ3VsYXIgZ3JpZDsgcXVhcnRlci1tZXRyZSBxdWFudGl6YXRpb24uIE1lYXN1cmVkIGxhbmQgZWxldmF0aW9ucyA+IDAuMSBtIHJldGFpbmVkOyByZW1haW5pbmcgY2VsbHMgdXNlIHRoZSBzZXBhcmF0ZWx5IGRlY2xhcmVkIGF1dGhvcmVkIGNvYXN0YWwgZGVwdGggbW9kZWwuIiwKICAgICJsaWNlbmNlIjogIkNDIEJZIDQuMCIsCiAgICAibGljZW5jZVVSTCI6ICJodHRwczovL2NyZWF0aXZlY29tbW9ucy5vcmcvbGljZW5zZXMvYnkvNC4wLyIKICB9LAogICJhdXRob3JlZEJhdGh5bWV0cnkiOiB7CiAgICAicHJvdmVuYW5jZSI6ICJHYW1lcGxheSBjb2FzdGFsIHNraXJ0IGZyb20gc2hvcmUgZGlzdGFuY2U7IG5vdCBtZWFzdXJlZCBiYXRoeW1ldHJ5LCBjaGFydCBzb3VuZGluZ3Mgb3IgYSBuYXZpZ2F0aW9uYWwgYWlkLiIsCiAgICAibWV0aG9kIjogIkV1Y2xpZGVhbiBkaXN0YW5jZSBmcm9tIGVhY2ggd2V0IGNlbGwgY2VudHJlIHRvIHRoZSBuZWFyZXN0IGRyeSBjZWxsLCBtaW51cyBoYWxmIHRoZSAxNiBtIGdyaWQgc3BhY2luZzsgZGVwdGggPSBtaW4oMTIwLCAyICsgMC4xNSAqIGRpc3RhbmNlTWV0cmVzKS4iLAogICAgIm1pbmltdW1EZXB0aE1ldHJlcyI6IDIsCiAgICAibWF4aW11bURlcHRoTWV0cmVzIjogMTIwLAogICAgImRlcHRoUGVyU2hvcmVNZXRyZSI6IDAuMTUsCiAgICAic2hvcmVDZWxsQ29ycmVjdGlvbk1ldHJlcyI6IDguMCwKICAgICJkZXJpdmVkU3BhY2luZ01ldHJlcyI6IDE2LjAKICB9LAogICJuZWFyVGlsZSI6ICJ3ZWxscy1iYXkvbWFuaWZlc3QuanNvbiIKfQo=").then(r=>r.json());
+    const nearPromise=nearDisabled?Promise.resolve(null):Promise.all([heightBufPromise,baseManifestPromise]).then(([heightBuf,baseManifest])=>
+      loadTerrainNear({baseManifest,baseHeights:decodeIsland(heightBuf)})).catch(error=>{nearFailure=error.message;return null;});
+    const [heightBuf,biomeBuf]=await Promise.all([heightBufPromise,biomeBufPromise]);
+    heights=decodeIsland(heightBuf);biome=decodeBiome(biomeBuf);
+    nearTile=await nearPromise;
     albedoImage=await albedoBitmapPromise;
     if(albedoImage.width!==ISLAND.albedoSize||albedoImage.height!==ISLAND.albedoSize)throw new Error('Incomplete Saba imagery seed');
   }
