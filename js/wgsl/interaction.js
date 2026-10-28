@@ -123,8 +123,12 @@ fn pressureSea(p: vec2f) -> f32 {
   // Gradient of the actual planking, including the fine entry and changing
   // section flare. Splash direction must change with the rebuilt hull.
   let eps=0.04;
-  let dz=(modelHullWidth(z+eps,localY,H.rig.w)-modelHullWidth(z-eps,localY,H.rig.w))/(2.0*eps)*H.size.x/3.6/(H.size.y/12.0);
-  let dy=(modelHullWidth(z,localY+eps,H.rig.w)-modelHullWidth(z,localY-eps,H.rig.w))/(2.0*eps)*H.size.x/3.6/shipY(H.right.w);
+  var hw=array<f32,4>(0.0,0.0,0.0,0.0);
+  let sz=array<f32,4>(z+eps,z-eps,z,z);
+  let sy=array<f32,4>(localY,localY,localY+eps,localY-eps);
+  for(var s=0u;s<4u;s++){hw[s]=modelHullWidth(sz[s],sy[s],H.rig.w);}
+  let dz=(hw[0]-hw[1])/(2.0*eps)*H.size.x/3.6/(H.size.y/12.0);
+  let dy=(hw[2]-hw[3])/(2.0*eps)*H.size.x/3.6/shipY(H.right.w);
   let normal=normalize(H.right.xyz*side+H.forward.xyz*dz-H.up.xyz*dy);
   let outward=normalize(vec3f(normal.x,0.0,normal.z)+H.right.xyz*side*0.12);
   let entry=clamp(dot(outward,H.forward.xyz),0.0,1.0);

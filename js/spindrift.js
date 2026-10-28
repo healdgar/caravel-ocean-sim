@@ -5,15 +5,17 @@ export async function createSpindrift({ device, frameUBO, hullUBO, seaView, deri
   const usage = GPUBufferUsage;
   const control = device.createBuffer({ label: 'crest spray control', size: 16, usage: usage.UNIFORM | usage.COPY_DST });
   const plumes = device.createBuffer({ label: 'crest spray plumes', size: SPINDRIFT_COUNT * SPINDRIFT_STRIDE, usage: usage.STORAGE | usage.COPY_SRC });
-  const [updatePipe, module] = await Promise.all([computePipe(SPINDRIFT_UPDATE, 'crest spray update'), shader(SPINDRIFT_RENDER, 'crest spray')]);
-  const renderPipe = await device.createRenderPipelineAsync({
-    label: 'crest spray', layout: 'auto', vertex: { module, entryPoint: 'crestVS' },
-    fragment: { module, entryPoint: 'crestFS', targets: [{ format: 'rgba16float', blend: {
-      color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-    } }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
-  });
+  const [updatePipe, renderPipe] = await Promise.all([
+    computePipe(SPINDRIFT_UPDATE, 'crest spray update'),
+    shader(SPINDRIFT_RENDER, 'crest spray').then(module => device.createRenderPipelineAsync({
+      label: 'crest spray', layout: 'auto', vertex: { module, entryPoint: 'crestVS' },
+      fragment: { module, entryPoint: 'crestFS', targets: [{ format: 'rgba16float', blend: {
+        color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+      } }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
+    })),
+  ]);
   const buffer = buffer => ({ buffer });
   const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
   const updateGroup = bind(updatePipe, [buffer(frameUBO), buffer(control), buffer(hullUBO), seaView, derivView, seaSampler, buffer(plumes)]);

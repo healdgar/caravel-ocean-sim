@@ -7,7 +7,8 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
   const uniform = device.createBuffer({ size: 64, usage: bu.UNIFORM | bu.COPY_DST });
-  const deck = await createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView,sunVis,shader,computePipe,surfaceWaves});
+  const deckPromise = createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView,sunVis,shader,computePipe,surfaceWaves});
+  deckPromise.catch(()=>{});
   const contacts = device.createBuffer({ label: 'hull contacts', size: (CONTACT_COUNT + AUDIO_CONTACT_COUNT) * 64, usage: bu.STORAGE | bu.COPY_SRC });
   const sheets=device.createBuffer({label:'impact sheets',size:SHEET_COUNT*64,usage:bu.STORAGE|bu.COPY_SRC});
   const drops = device.createBuffer({ label: 'spray particles', size: SPRAY_COUNT * 48, usage: bu.STORAGE | bu.COPY_SRC });
@@ -15,8 +16,18 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const textures = wakeTargets?.textures??[0, 1].map(i => device.createTexture({ label: 'local wake ' + i, size: [WAKE_SIZE, WAKE_SIZE], format: 'rgba16float', usage: tu.TEXTURE_BINDING | tu.STORAGE_BINDING | tu.COPY_SRC }));
   const views = wakeTargets?.views??textures.map(t => t.createView());
   const sampler = device.createSampler({ minFilter: 'linear', magFilter: 'linear', mipmapFilter: 'linear' });
-  const [contactPipe, wakePipe, sprayPipe, sheetPipe, module] = await Promise.all([
-    computePipe(WATER_CONTACTS, 'hull contact'), computePipe(WAKE_UPDATE, 'local wake'), computePipe(SPRAY_UPDATE, 'spray update'), computePipe(SHEET_UPDATE, 'impact sheets'), shader(WATER_EFFECTS, 'water effects'),
+  const [deck, contactPipe, wakePipe, sprayPipe, sheetPipe, renderPipes] = await Promise.all([
+    deckPromise,
+    computePipe(WATER_CONTACTS, 'hull contact'), computePipe(WAKE_UPDATE, 'local wake'), computePipe(SPRAY_UPDATE, 'spray update'), computePipe(SHEET_UPDATE, 'impact sheets'),
+    shader(WATER_EFFECTS, 'water effects').then(module => Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({
+      label: kind === 'sheet' ? 'bow sheets' : 'spray', layout: 'auto',
+      vertex: { module, entryPoint: kind + 'VS' },
+      fragment: { module, entryPoint: kind + 'FS', targets: [{ format: 'rgba16float', blend: {
+        color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+      } }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
+    })))),
   ]);
   const buffer = b => ({ buffer: b });
   const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
@@ -24,15 +35,6 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const sheetGroup=bind(sheetPipe,[buffer(frameUBO),buffer(uniform),seaView,seaSampler,buffer(contacts),buffer(sheets),buffer(landings)]);
   const wakeGroups = views.map((v, i) => bind(wakePipe, [buffer(uniform), buffer(hullUBO), views[1 - i], v, buffer(contacts), buffer(landings)]));
   const sprayGroups = views.map(v => bind(sprayPipe, [buffer(frameUBO), buffer(uniform), seaView, seaSampler, v, sampler, buffer(contacts), buffer(drops), buffer(landings)]));
-  const renderPipes = await Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({
-    label: kind === 'sheet' ? 'bow sheets' : 'spray', layout: 'auto',
-    vertex: { module, entryPoint: kind + 'VS' },
-    fragment: { module, entryPoint: kind + 'FS', targets: [{ format: 'rgba16float', blend: {
-      color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-    } }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
-  })));
   // Auto layouts omit the unused population's binding in each render entry point.
   const renderGroups = views.map(()=>renderPipes.map((pipe, i) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
     { binding: 0, resource: buffer(frameUBO) }, { binding: 1, resource: buffer(uniform) },

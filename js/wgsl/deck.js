@@ -10,11 +10,14 @@ import {LATER_SAIL_DESIGNS,laterSailStairFlights} from '../models/later-sail.js'
 
 export const DECK_COLS = 32;
 export const DECK_ROWS = 96;
+const cockpitDeckCheck=Object.values(LATER_SAIL_DESIGNS).filter(d=>d.cockpit).map(d=>'abs(hull.rig.w-'+d.modelCode+'.0)<.1').join('||');
 // Same footprint and raised decks as the timber mesh. Coordinates are hull-local.
 export const DECK_PROFILE = HULL_PROFILE + /* wgsl */ `
 fn deckWidth(z:f32)->f32 {
-  ${Object.values(LATER_SAIL_DESIGNS).filter(d=>d.cockpit).map(d=>`if(abs(hull.rig.w-${d.modelCode}.0)<.1){return max(.012,modelHullWidth(z,modelHullDeck(z,hull.rig.w),hull.rig.w)-.045);}`).join('\n')}
-  if(hull.rig.w>.5){return max(.012,modelHullWidth(z,modelVesselDeck(z,hull.rig.w),hull.rig.w)-.045);}
+  if(hull.rig.w>.5){
+    let y=select(modelVesselDeck(z,hull.rig.w),modelHullDeck(z,hull.rig.w),${cockpitDeckCheck});
+    return max(.012,modelHullWidth(z,y,hull.rig.w)-.045);
+  }
   return max(0.015,hullBreadth(z)-0.145);
 }
 fn deckFloor(z:f32)->f32 {
@@ -106,11 +109,11 @@ fn cellArea(p:vec3f)->f32 {
   return 2.0*deckWidth(p.z)*(hull.size.x/3.6)/f32(DECK_SIZE.x)*deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y);
 }
 // Positive means water leaves a for b. Each face uses the identical flux on both sides.
-fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
+fn flux(a:vec2i,pa:vec3f,wa:f32,wA:f32,areaA:f32,b:vec2i,dt:f32)->f32 {
   if(any(b<vec2i(0)) || any(b>=DECK_SIZE)){return 0.0;}
-  let pa=cellPoint(a);let pb=cellPoint(b);
+  let pb=cellPoint(b);
   if(abs(pa.y-pb.y)*shipY(hull.right.w)>0.8){return 0.0;} // solid cabin face
-  let wa=textureLoad(previousDeck,a,0).x;let wb=textureLoad(previousDeck,b,0).x;
+  let wb=textureLoad(previousDeck,b,0).x;
   let dh=deckWorld(pa).y+wa*hull.up.y-deckWorld(pb).y-wb*hull.up.y;
   var donor=select(wb,wa,dh>0.0);
   if(hull.rig.w>=3.5){
@@ -121,11 +124,13 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
       donor=max(0.0,donor-max(0.0,(top-bottom)/max(hull.up.y,.35)));
     }
   }
-  let area=select(cellArea(pb),cellArea(pa),dh>0.0);
-  let face=select((deckWidth(pa.z)+deckWidth(pb.z))*(hull.size.x/3.6)/f32(DECK_SIZE.x),deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
+  let wB=select(deckWidth(pb.z),wA,a.y==b.y);
+  let areaB=2.0*wB*(hull.size.x/3.6)/f32(DECK_SIZE.x)*deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y);
+  let area=select(areaB,areaA,dh>0.0);
+  let face=select((wA+wB)*(hull.size.x/3.6)/f32(DECK_SIZE.x),deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y),a.x!=b.x);
   // Limit the head conductance as well as donor volume. sqrt(head) alone
   // oscillates around equilibrium and leaves a checkerboard on pooled water.
-  let conductance=min(2.0*sqrt(9.81*donor)*face,min(cellArea(pa),cellArea(pb))/(8.0*dt));
+  let conductance=min(2.0*sqrt(9.81*donor)*face,min(areaA,areaB)/(8.0*dt));
   let rate=abs(dh)*conductance;
   return sign(dh)*min(rate,donor*area/(4.0*dt));
 }
@@ -133,8 +138,10 @@ fn flux(a:vec2i,b:vec2i,dt:f32)->f32 {
   let c=vec2i(id.xy);if(any(c>=DECK_SIZE)){return;}
   if(I.motion.y<0.5 || I.previous.w>0.5){textureStore(nextDeck,c,vec4f(0.0));return;}
   let dt=max(I.previous.z*0.25,0.00001);
-  let p=cellPoint(c);let area=cellArea(p);let old=textureLoad(previousDeck,c,0);
-  let q=vec4f(flux(c,c+vec2i(1,0),dt),flux(c,c-vec2i(1,0),dt),flux(c,c+vec2i(0,1),dt),flux(c,c-vec2i(0,1),dt));
+  let p=cellPoint(c);let wA=deckWidth(p.z);let area=2.0*wA*(hull.size.x/3.6)/f32(DECK_SIZE.x)*deckLength()*(hull.size.y/12.0)/f32(DECK_SIZE.y);let old=textureLoad(previousDeck,c,0);
+  var q=vec4f(0.0);
+  let steps=array<vec2i,4>(vec2i(1,0),vec2i(-1,0),vec2i(0,1),vec2i(0,-1));
+  for(var d=0u;d<4u;d++){q[d]=flux(c,p,old.x,wA,area,c+steps[d],dt);}
   var depth=max(0.0,old.x-dot(q,vec4f(1.0))*dt/area);
   var ingress=0.0;var boundaryFlow=0.0;var perimeter=0.0;
   // All four perimeter faces participate. Corner cells own two distinct faces;
@@ -235,8 +242,9 @@ fn corner(v:u32)->vec2f {
   // Central height differences stay continuous across cell boundaries; facet
   // derivatives and derivatives of bilinear heights both expose the grid.
   let texel=vec2f(1.0/${DECK_COLS}.0,1.0/${DECK_ROWS}.0);
-  var xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*deckWidth(in.local.z)*texel.x);
-  if(hull.rig.w>=3.5){let dx=2.0*deckWidth(in.local.z)*texel.x;xSlope+=(deckFloorAt(in.local.z,in.local.x+dx)-deckFloorAt(in.local.z,in.local.x-dx))*shipY(hull.right.w)/(2.0*dx);}
+  let wLocal=deckWidth(in.local.z);
+  var xSlope=(sampleDeck(in.uv+vec2f(texel.x,0)).x-sampleDeck(in.uv-vec2f(texel.x,0)).x)/(4.0*wLocal*texel.x);
+  if(hull.rig.w>=3.5){let dx=2.0*wLocal*texel.x;xSlope+=(deckFloorAt(in.local.z,in.local.x+dx)-deckFloorAt(in.local.z,in.local.x-dx))*shipY(hull.right.w)/(2.0*dx);}
   let dz=texel.y*deckLength();
   let zSlope=(sampleDeck(in.uv+vec2f(0,texel.y)).x-sampleDeck(in.uv-vec2f(0,texel.y)).x+(deckFloorAt(in.local.z+dz,in.local.x)-deckFloorAt(in.local.z-dz,in.local.x))*shipY(hull.right.w))/(2.0*dz);
   let gradient=clamp(vec2f(xSlope,zSlope),vec2f(-3.0),vec2f(3.0));

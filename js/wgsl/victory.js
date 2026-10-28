@@ -4,19 +4,22 @@ export const VICTORY_MOTION=/* wgsl */`
 struct VictorySail {a:vec4f,b:vec4f,c:vec4f,d:vec4f,pivot:vec4f,shape:vec4f};
 const victorySails=array<VictorySail,${VICTORY_SAILS.length}>(
 ${VICTORY_SAILS.map(s=>`VictorySail(${s.corners.concat(s.corners.length===3?[s.corners[2]]:[]).map(victoryVec).join(',')},${victoryVec(s.pivot)},vec4f(${s.mast}.0,${s.kind==='square'?0:s.kind==='headsail'?1:2}.0,${s.belly.toFixed(9)},${(s.footRise??0).toFixed(9)}))`).join(',\n')});
-fn victoryRestPoint(id:u32,uv:vec2f)->vec3f {
- let s=victorySails[id-1u];
+fn victorySailRest(s:VictorySail,uv:vec2f)->vec3f {
  if(s.shape.y==1.0){return s.a.xyz*(1.0-uv.x-uv.y)+s.b.xyz*uv.x+s.c.xyz*uv.y;}
  var p=mix(mix(s.a.xyz,s.b.xyz,uv.x),mix(s.d.xyz,s.c.xyz,uv.x),uv.y);
  p.y+=s.shape.w*4.0*uv.x*(1.0-uv.x)*uv.y;return p;
 }
-fn victoryYaw(id:u32)->f32 {let kind=victorySails[id-1u].shape.y;if(kind==2.0){return clamp(hull.sailTrim.y,-.5,.5);}return select(hull.sailTrim.y,clamp(hull.sailTrim.x,-.4,.4),kind==0.0);}
-fn victoryRotate(p:vec3f,id:u32)->vec3f {
- let a=victoryYaw(id);let c=cos(a);let s=sin(a);let sail=victorySails[id-1u];
+fn victoryRestPoint(id:u32,uv:vec2f)->vec3f {return victorySailRest(victorySails[id-1u],uv);}
+fn victorySailYaw(s:VictorySail)->f32 {let kind=s.shape.y;if(kind==2.0){return clamp(hull.sailTrim.y,-.5,.5);}return select(hull.sailTrim.y,clamp(hull.sailTrim.x,-.4,.4),kind==0.0);}
+fn victoryYaw(id:u32)->f32 {return victorySailYaw(victorySails[id-1u]);}
+fn victorySailRotate(sail:VictorySail,p:vec3f)->vec3f {
+ let a=victorySailYaw(sail);let c=cos(a);let s=sin(a);
  if(sail.shape.y==1.0){let axis=normalize(sail.a.xyz-sail.b.xyz);return p*c+cross(axis,p)*s+axis*dot(axis,p)*(1.0-c);}
  return vec3f(c*p.x+s*p.z,p.y,-s*p.x+c*p.z);
 }
-fn victoryYardPoint(id:u32,p:vec3f)->vec3f {let pivot=victorySails[id-1u].pivot.xyz;return pivot+victoryRotate(p-pivot,id);}
+fn victoryRotate(p:vec3f,id:u32)->vec3f {return victorySailRotate(victorySails[id-1u],p);}
+fn victorySailYard(s:VictorySail,p:vec3f)->vec3f {let pivot=s.pivot.xyz;return pivot+victorySailRotate(s,p-pivot);}
+fn victoryYardPoint(id:u32,p:vec3f)->vec3f {return victorySailYard(victorySails[id-1u],p);}
 struct VictorySupport {a:vec4f,b:vec4f};
 const victorySupports=array<VictorySupport,${VICTORY_STANDING_LINES.filter(l=>l.kind!=='forestay').length}>(
 ${VICTORY_STANDING_LINES.filter(l=>l.kind!=='forestay').map(l=>`VictorySupport(${victoryVec(l.a)},${victoryVec(l.b)})`).join(',\n')});
@@ -32,12 +35,12 @@ fn victoryContact(point:vec3f,mast:u32,lateral:bool,clothV:f32)->vec3f {
  }
  return p;
 }
-fn victoryClothPoint(id:u32,uv:vec2f)->vec3f {
- let s=victorySails[id-1u];let m=u32(s.shape.x);let square=s.shape.y==0.0;let quad=s.shape.y!=1.0;
- let rest=victoryRestPoint(id,uv);
- let top=victoryRestPoint(id,vec2f(select(uv.x+uv.y*.5,uv.x,quad),0));
- let deployed=hull.sailSet[m];let fill=hull.lateen[m].w;let yaw=victoryYaw(id);
- let normal=victoryRotate(select(vec3f(1,0,0),vec3f(0,0,1),square),id);
+fn victorySailCloth(s:VictorySail,uv:vec2f)->vec3f {
+ let m=u32(s.shape.x);let square=s.shape.y==0.0;let quad=s.shape.y!=1.0;
+ let rest=victorySailRest(s,uv);
+ let top=victorySailRest(s,vec2f(select(uv.x+uv.y*.5,uv.x,quad),0));
+ let deployed=hull.sailSet[m];let fill=hull.lateen[m].w;
+ let normal=victorySailRotate(s,select(vec3f(1,0,0),vec3f(0,0,1),square));
  let pressure=clamp((hull.sailWind.x*normal.x+hull.sailWind.y*normal.z)/1.5,-1.0,1.0);
  var p=mix(top,rest,.012+.988*deployed);
  let envelope=select(27.0*uv.x*uv.y*max(0.0,1.0-uv.x-uv.y),4.0*uv.x*(1.0-uv.x)*sin(3.14159265358979*uv.y),quad);
@@ -45,16 +48,17 @@ fn victoryClothPoint(id:u32,uv:vec2f)->vec3f {
  let ripple=min(hull.rig.y/4.0,1.0)*.035*slack*slack*sin(hull.origin.w*6.0+uv.x*17.0+uv.y*13.0);
  let camber=s.shape.z*envelope*deployed*pressure*(.15+.85*fill)+ripple*envelope*deployed;
  if(square){p.z+=camber;}else{p.x+=camber;}
- let posed=victoryYardPoint(id,p);if(square||s.shape.y==2.0){return victoryContact(posed,m,s.shape.y==2.0,uv.y);}return posed;
+ let posed=victorySailYard(s,p);if(square||s.shape.y==2.0){return victoryContact(posed,m,s.shape.y==2.0,uv.y);}return posed;
 }
+fn victoryClothPoint(id:u32,uv:vec2f)->vec3f {return victorySailCloth(victorySails[id-1u],uv);}
 struct VictoryLine {a:vec4f,b:vec4f,motion:vec4f};
 const victoryLines=array<VictoryLine,${VICTORY_RUNNING_LINES.length}>(
 ${VICTORY_RUNNING_LINES.map(l=>`VictoryLine(${victoryVec(l.a)},${victoryVec(l.b)},vec4f(${l.sail}.0,${l.kind==='sheet'?1:0}.0,${(l.uv??[0,0]).join(',')}))`).join(',\n')});
 const victoryLineTargets=array<u32,${VICTORY_RUNNING_LINES.length}>(${VICTORY_RUNNING_LINES.map(l=>(l.bSail??0)+'u').join(',')});
 fn victoryRopePoint(index:u32,t:f32)->vec3f {
- let line=victoryLines[index];let id=u32(line.motion.x);
- var a=victoryYardPoint(id,line.a.xyz);
- if(line.motion.y>.5){a=victoryClothPoint(id,line.motion.zw);}
+ let line=victoryLines[index];let id=u32(line.motion.x);let sail=victorySails[id-1u];
+ var a=victorySailYard(sail,line.a.xyz);
+ if(line.motion.y>.5){a=victorySailCloth(sail,line.motion.zw);}
  var b=line.b.xyz;let otherSail=victoryLineTargets[index];
  if(otherSail>0u){b=victoryYardPoint(otherSail,b);}
  return mix(a,b,t);

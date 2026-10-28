@@ -12,16 +12,18 @@ export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,se
   }
   const b=buffer=>({buffer});
   const bind=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({resource,binding}))});
-  const [update,module]=await Promise.all([computePipe(surfaceWaves?SCENE_DECK_UPDATE:DECK_UPDATE,'deck wash'),shader(DECK_RENDER,'deck water')]);
+  const [update,pipes]=await Promise.all([
+    computePipe(surfaceWaves?SCENE_DECK_UPDATE:DECK_UPDATE,'deck wash'),
+    shader(DECK_RENDER,'deck water').then(module=>Promise.all(['washVS','runoffVS'].map(entryPoint=>device.createRenderPipelineAsync({
+      label:entryPoint,layout:'auto',vertex:{module,entryPoint},
+      fragment:{module,entryPoint:'washFS',targets:[{format:'rgba16float',blend:{
+        color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},
+      }}]},primitive:{topology:'triangle-list',cullMode:'none'},
+      depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:4},
+    })))),
+  ]);
   const groups=views.map((v,i)=>bind(update,[b(frameUBO),b(uniform),b(hullUBO),seaView,seaSampler,views[1-i],v]));
   const waveGroups=surfaceWaveGroups(device,update,surfaceWaves);
-  const pipes=await Promise.all(['washVS','runoffVS'].map(entryPoint=>device.createRenderPipelineAsync({
-    label:entryPoint,layout:'auto',vertex:{module,entryPoint},
-    fragment:{module,entryPoint:'washFS',targets:[{format:'rgba16float',blend:{
-      color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},
-    }}]},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:4},
-  })));
   // Four substeps always finish in texture zero; timber reads that same wetness field.
   const renderGroups=pipes.map(p=>bind(p,[b(frameUBO),b(hullUBO),views[0],sampler,envView,transView,b(sunVis),skyView]));
   let shadowGroups;

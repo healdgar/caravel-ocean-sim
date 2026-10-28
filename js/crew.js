@@ -256,18 +256,33 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   return s;
 }
 
+let preloadedCrewModels=null;
+export function preloadCrewModels(){
+  if(!preloadedCrewModels&&typeof fetch==='function'){
+    preloadedCrewModels=Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
+      const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
+    })).catch(err=>{preloadedCrewModels=null;throw err;});
+  }
+  return preloadedCrewModels;
+}
+
 export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
-  const models=shared?.models??await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
+  const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
-  })),B=GPUBufferUsage,state=createCompany(undefined,modelId);
-  if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
+  })));
+  modelsPromise.catch(()=>{});
+  const B=GPUBufferUsage,state=createCompany(undefined,modelId);
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const layout=[{arrayStride:60,attributes:[
     {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
     {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
     {shaderLocation:4,offset:44,format:'float32x4'},
   ]}];
-  const [module,shadowModule]=shared?[null,null]:await Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]);
+  const [models,[module,shadowModule]]=await Promise.all([
+    modelsPromise,
+    shared?Promise.resolve([null,null]):Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]),
+  ]);
+  if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
   const [pipeline,shadowPipeline]=await Promise.all([shared?.pipeline??device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
     fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}}),

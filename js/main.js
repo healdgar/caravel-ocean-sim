@@ -37,12 +37,16 @@ import { createFollower, steerFollower } from './follower.js';
 import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,fleetModelCode,fleetViewBounds,createFleetWakePool,validateFleetDevice,MAX_FOLLOWERS} from './fleet.js';
 import {withPooledFleetWakes} from './wgsl/fleet-wakes.js';
 import {SCENE_WAKE_SAMPLE} from './wgsl/surface-coupling.js';
-import {withSceneShadowCount} from './wgsl/shadows.js';
+import {withSceneShadowCount, SHADOW_CAST} from './wgsl/shadows.js';
 import { createVesselShadows, createSceneShadows } from './shadows.js';
 import { createWaterInteraction } from './interaction.js';
+import { WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, SHEET_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
+import { SCENE_DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
 import { createSurfaceWaves } from './surface-waves.js';
 import { createSpindrift } from './spindrift.js';
+import { SPINDRIFT_UPDATE, SPINDRIFT_RENDER } from './wgsl/spindrift.js';
 import { createSurfaceWetness } from './wetness.js';
+import { WET_CLEAR, WET_DEPOSIT, WET_SEA, withPosedWetnessProbes } from './wgsl/wetness.js';
 import {createRowingWaterProbe} from './rowing-water.js';
 import {createRowingSurfaceEvents} from './rowing-surface-events.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
@@ -50,11 +54,12 @@ import { createWaterOptics } from './water-optics.js';
 import { createUnderwater } from './underwater.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { createVesselPose, POSED_VERTEX_LAYOUT, withPosedVesselVertices } from './vessel-pose.js';
+import { VESSEL_POSE_UPDATE, VESSEL_SURFACE_POSE_UPDATE } from './wgsl/vessel-pose.js';
 import {getShipModel} from './ship-models.js';
 import {getShipParts} from './ship-parts.js';
 import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel } from './crew-work.js';
-import { createCrew, CAPTAIN_ORDERS } from './crew.js';
+import { createCrew, preloadCrewModels, CAPTAIN_ORDERS } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -270,13 +275,34 @@ async function main() {
   const HDR = 'rgba16float';
 
   // Kick off all ocean, atmosphere, cloud, and landfall shader/pipeline compilations and asset fetches concurrently
+  const oakImagePromise = fetch('assets/caravel-oak-albedo.webp').then(r => r.blob()).then(b => createImageBitmap(b));
+  oakImagePromise.catch(() => {});
+  preloadCrewModels()?.catch(() => {});
   const rgba8MipPipePromise = computePipe(RGBA8_MIPS, 'rgba8 mips');
   const waterFilterPipePromise = computePipe(WATER_FILTER, 'water reflections filter');
   const surfaceWavesPromise = createSurfaceWaves({ device, computePipe });
   const waterOpticsPromise = surfaceWavesPromise.then(sw => createWaterOptics({ device, shader, seaView: fullArr(dispTex), seaSampler: samplerSim, format: HDR, surfaceWaves: sw }));
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
   const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA }) : Promise.resolve(null);
-  for (const p of [rgba8MipPipePromise, waterFilterPipePromise, surfaceWavesPromise, waterOpticsPromise, cloudsPromise, terrainPromise]) p.catch(() => {});
+  const prewarmPromises = [
+    computePipe(SCENE_DECK_UPDATE, 'deck wash'),
+    shader(DECK_RENDER, 'deck water'),
+    computePipe(WATER_CONTACTS, 'hull contact'),
+    computePipe(WAKE_UPDATE, 'local wake'),
+    computePipe(SPRAY_UPDATE, 'spray update'),
+    computePipe(SHEET_UPDATE, 'impact sheets'),
+    shader(WATER_EFFECTS, 'water effects'),
+    computePipe(WET_CLEAR, 'wetting grid clear'),
+    computePipe(WET_DEPOSIT, 'spray deposition'),
+    computePipe(WET_SEA, 'wetting sea heights'),
+    computePipe(withPosedWetnessProbes(), 'surface moisture'),
+    shader(withPosedVesselVertices(SHADOW_CAST), 'vessel shadows'),
+    computePipe(SPINDRIFT_UPDATE, 'crest spray update'),
+    shader(SPINDRIFT_RENDER, 'crest spray'),
+    ...(sceneModelCodes.some(c => c <= 1) ? [computePipe(VESSEL_POSE_UPDATE, 'shared vessel deformation')] : []),
+    ...(sceneModelCodes.some(c => c >= 2) ? [computePipe(VESSEL_SURFACE_POSE_UPDATE, 'shared vessel deformation')] : []),
+  ];
+  for (const p of [rgba8MipPipePromise, waterFilterPipePromise, surfaceWavesPromise, waterOpticsPromise, cloudsPromise, terrainPromise, ...prewarmPromises]) p.catch(() => {});
 
   const oceanModPromise = shader(withCachedOceanLighting(withFleetHullCount(createOpticalOcean(LAND_STAGE ? COASTAL_WATER : '', OCEAN_DEPTH, true, true), fleetCount)), 'ocean');
   const renderPipesPromise = Promise.all([
@@ -413,8 +439,6 @@ async function main() {
   const [oceanPipe,oceanDepthPipe,skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]=await renderPipesPromise;
 
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
-  const oakImagePromise = fetch('assets/caravel-oak-albedo.webp').then(r => r.blob()).then(b => createImageBitmap(b));
-  oakImagePromise.catch(() => {});
   const [waterFilterPipe, surfaceWaves, waterOptics] = await Promise.all([
     waterFilterPipePromise,
     surfaceWavesPromise,
@@ -476,6 +500,9 @@ async function main() {
     device.queue.writeBuffer(vertexBuffer,0,mesh);
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
     const recoilMap=createGunRecoilMap(asset);
+    const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
+    const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
+    interactionPromise.catch(()=>{});rowingWaterPromise?.catch(()=>{});
     const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
@@ -483,8 +510,8 @@ async function main() {
     const [wetness,shadows,interaction,rowingWater]=await Promise.all([
       wetnessPromise,
       shadowsPromise,
-      createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)}),
-      Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null,
+      interactionPromise,
+      rowingWaterPromise,
     ]);
     let crew=null;
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}

@@ -42,19 +42,22 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
   if(hull.rig.w>.5){
     let base=u32(material);let id=u32(round(fract(material)*64.0));
     if(id>0u && id<=${VICTORY_SAILS.length}u){
+      let sail=victorySails[id-1u];
       if(base==9u || base==13u || base==19u){
-        local=victoryClothPoint(id,uv);
-        if(base==19u){local+=victoryRotate(position-victoryRestPoint(id,uv),id);localN=victoryRotate(normal,id);}
-        else{
-          let du=vec2f(.0005,0);let dv=vec2f(0,.0005);
-          localN=normalize(cross(victoryClothPoint(id,uv+du)-victoryClothPoint(id,uv-du),victoryClothPoint(id,uv+dv)-victoryClothPoint(id,uv-dv)));
-        }
-      }else if(base==10u){local=victoryYardPoint(id,position);localN=victoryRotate(normal,id);}
+        let offsets=array<vec2f,5>(vec2f(0,0),vec2f(.0005,0),vec2f(-.0005,0),vec2f(0,.0005),vec2f(0,-.0005));
+        var pts=array<vec3f,5>(vec3f(0),vec3f(0),vec3f(0),vec3f(0),vec3f(0));
+        let sampleCount=select(5u,1u,base==19u);
+        for(var s=0u;s<sampleCount;s++){pts[s]=victorySailCloth(sail,uv+offsets[s]);}
+        local=pts[0];
+        if(base==19u){local+=victorySailRotate(sail,position-victorySailRest(sail,uv));localN=victorySailRotate(sail,normal);}
+        else{localN=normalize(cross(pts[1]-pts[2],pts[3]-pts[4]));}
+      }else if(base==10u){local=victorySailYard(sail,position);localN=victorySailRotate(sail,normal);}
     }else if(base==12u && uv.x>=100.0){
       let index=u32(round(uv.x-100.0));let line=victoryLines[index];let t=uv.y;
       let oldAxis=normalize(line.b.xyz-line.a.xyz);
-      let newAxis=normalize(victoryRopePoint(index,1.0)-victoryRopePoint(index,0.0));
-      local=victoryRopePoint(index,t)+ropeFrame(position-mix(line.a.xyz,line.b.xyz,t),oldAxis,newAxis);
+      let a0=victoryRopePoint(index,0.0);let b1=victoryRopePoint(index,1.0);
+      let newAxis=normalize(b1-a0);
+      local=mix(a0,b1,t)+ropeFrame(position-mix(line.a.xyz,line.b.xyz,t),oldAxis,newAxis);
       localN=ropeFrame(normal,oldAxis,newAxis);
     }else if(base==7u || base==8u){
       let pivot=vec3f(${VICTORY_DESIGN.wheel.centre.join(',')});let a=hull.size.w*.07;let c=cos(a);let s=sin(a);let p=position-pivot;
@@ -95,21 +98,28 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
   if(base==12u && uv.x>=100.0){
     let index=u32(round(uv.x-100.0));let line=rigLines[index];let t=uv.y;
     let oldAxis=normalize(line.b.xyz-line.a.xyz);
-    let newAxis=normalize(rigRopePoint(index,min(1.0,t+.001))-rigRopePoint(index,max(0.0,t-.001)));
-    local=rigRopePoint(index,t)+ropeFrame(position-mix(line.a.xyz,line.b.xyz,t),oldAxis,newAxis);
+    var rPts=array<vec3f,3>(vec3f(0),vec3f(0),vec3f(0));
+    let rTs=array<f32,3>(t,min(1.0,t+.001),max(0.0,t-.001));
+    for(var s=0u;s<3u;s++){rPts[s]=rigRopePoint(index,rTs[s]);}
+    let newAxis=normalize(rPts[1]-rPts[2]);
+    local=rPts[0]+ropeFrame(position-mix(line.a.xyz,line.b.xyz,t),oldAxis,newAxis);
     localN=ropeFrame(normal,oldAxis,newAxis);
   }else if(id>0u && id<=3u){
-    local=sailPoint(position,uv,id,base,false);
-    if(base==19u){
-      let rest=sailRestPoint(id,uv);
-      local=sailPoint(rest,uv,id,13u,false)+clothRotation(id,position-rest);
+    let isCloth=base==9u || base==13u;
+    let sampleBase=select(base,13u,base==19u);
+    let rest0=sailRestPoint(id,uv);
+    let offsets=array<vec2f,5>(vec2f(0,0),vec2f(.0005,0),vec2f(-.0005,0),vec2f(0,.0005),vec2f(0,-.0005));
+    var pts=array<vec3f,5>(vec3f(0),vec3f(0),vec3f(0),vec3f(0),vec3f(0));
+    let sampleCount=select(1u,5u,isCloth);
+    for(var s=0u;s<sampleCount;s++){
+      let suv=uv+offsets[s];
+      let sp=select(select(position,rest0,base==19u),sailRestPoint(id,suv),s>0u);
+      pts[s]=sailPoint(sp,suv,id,sampleBase,false);
     }
-    if(base==9u || base==13u){
-      let du=vec2f(.0005,0);let dv=vec2f(0,.0005);
-      let tangent=sailPoint(sailRestPoint(id,uv+du),uv+du,id,base,false)-sailPoint(sailRestPoint(id,uv-du),uv-du,id,base,false);
-      let vertical=sailPoint(sailRestPoint(id,uv+dv),uv+dv,id,base,false)-sailPoint(sailRestPoint(id,uv-dv),uv-dv,id,base,false);
-      localN=normalize(cross(tangent,vertical));
-    }else if(base==10u){localN=yardRotation(id,normal);}
+    local=pts[0];
+    if(base==19u){local+=clothRotation(id,position-rest0);}
+    if(isCloth){localN=normalize(cross(pts[1]-pts[2],pts[3]-pts[4]));}
+    else if(base==10u){localN=yardRotation(id,normal);}
     else{localN=clothRotation(id,normal);}
   }
   return RigVertex(local,localN,scale);

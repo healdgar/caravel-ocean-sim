@@ -91,8 +91,9 @@ fn ${prefix}Width(z:f32,y:f32)->f32 {
   if(z<fore-.00000001||z>aft+.00000001){return 0.0;}
   let station=select(z*${profile.stations.at(-1)}/aft,z*${profile.stations[0]}/fore,z<0.0);
   var j=0u;while(j<${ny-2}u&&base>${prefix}Y[j+1u]){j++;}
-  let a=${prefix}Row(j,station);let b=${prefix}Row(j+1u,station);let span=${prefix}Y[j+1u]-${prefix}Y[j];let d=(b-a)/span;
-  let before=${prefix}Row(u32(max(0,i32(j)-1)),station);let after=${prefix}Row(min(${ny-1}u,j+2u),station);var left:f32;var right:f32;
+  var rows=array<f32,4>(0.0,0.0,0.0,0.0);
+  for(var r=0u;r<4u;r++){rows[r]=${prefix}Row(u32(clamp(i32(j)+i32(r)-1,0,${ny-1})),station);}
+  let before=rows[0];let a=rows[1];let b=rows[2];let after=rows[3];let span=${prefix}Y[j+1u]-${prefix}Y[j];let d=(b-a)/span;var left:f32;var right:f32;
   if(j>0u){let h=${prefix}Y[j]-${prefix}Y[j-1u];left=victoryTangent(h,span,(a-before)/h,d);}
   else{let h=${prefix}Y[2]-${prefix}Y[1];left=victoryEndTangent(span,h,d,(after-b)/h);}
   if(j<${ny-2}u){let h=${prefix}Y[j+2u]-${prefix}Y[j+1u];right=victoryTangent(span,h,d,(after-b)/h);}
