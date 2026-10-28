@@ -72,6 +72,43 @@ test('adjustable quoin elevation clamps to physical battery limits and increases
  assert.ok(high.vy>level.vy&&level.vy>low.vy,'quoin elevation directly controls vertical launch velocity');
 });
 
+test('captain holds fire while steady on the roll and orders give-fire as the hull rolls through the optimal angle with ripple scatter',()=>{
+ const {boat,guns,events}=fixture();
+ guns.setElevation(2);
+ guns.prepare('port');
+ advance(guns,34);
+ assert.equal(guns.summary('port').ready,2);
+ // Simulate a 6-second ocean wave roll of +/- 6 degrees (port rail dips when boat.roll > 0).
+ // At t = 2.1s (just after the spoken order), boat.roll is +5.8 deg (port rail dipped -5.8 deg into the trough).
+ const omega=2*Math.PI/6,amp=6*Math.PI/180,phase=-0.9;
+ let simTime=0;
+ const stepRolling=duration=>{
+  for(let t=0;t<duration-1e-8;t+=0.02){
+   const dt=Math.min(0.02,duration-t);
+   simTime+=dt;
+   boat.roll=amp*Math.sin(omega*simTime+phase);
+   boat.rollVelocity=amp*omega*Math.cos(omega*simTime+phase);
+   guns.update(dt,[0,0,0]);
+  }
+ };
+ assert.equal(guns.fire('port'),true);
+ assert.equal(guns.orderStage,'laying');
+ stepRolling(GUNNERY_ORDER_SECONDS['fire-port']+0.1);
+ // At t ~ 2.2s, port side is rolled down ~5.7 deg in the trough: must hold steady and NOT fire into the water!
+ assert.equal(guns.orderStage,'steady');
+ assert.equal(events.filter(e=>e.type==='shot').length,0,'guns hold fire while hull is rolled into the wave trough');
+ stepRolling(3.0);
+ const giveFireEvents=events.filter(e=>e.type==='give-fire');
+ const shotEvents=events.filter(e=>e.type==='shot');
+ assert.equal(giveFireEvents.length,1,'captain shouts give-fire once as hull approaches optimal roll angle');
+ assert.equal(shotEvents.length,2,'both guns discharge on the uproll');
+ // Verify shots fired near the target elevation (with natural scatter between gun 0 and gun 1 as the hull continued rolling)
+ const pitch0=Math.asin(shotEvents[0].direction[1])*180/Math.PI;
+ const pitch1=Math.asin(shotEvents[1].direction[1])*180/Math.PI;
+ assert.ok(Math.abs(pitch0-pitch1)>0.08,'staggered broadside shots exhibit natural vertical scatter as the boat rolls');
+ assert.ok(pitch0>1.5&&pitch0<6.5&&pitch1>1.5&&pitch1<6.5,'both shots fire within the optimal uproll elevation window instead of into the trough');
+});
+
 test('cannonballs strike other ships in hull and rigging zones, imparting 6-DOF impulse, flooding and sail damage',()=>{
  const source={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0};
  const target={id:'escort-1',modelId:'nina',model:{name:'La Niña',rig:{sails:[{controlGroup:'fore'},{controlGroup:'main'},{controlGroup:'mizzen'}]}},

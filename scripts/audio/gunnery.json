@@ -37,6 +37,17 @@
     {"id":"captain-guns-prepare","speaker":"captain","text":"[shouts] Hands to the guns. Load round shot!"},
     {"id":"captain-guns-fire-port","speaker":"captain","text":"[shouts] Port battery! Fire!"},
     {"id":"captain-guns-fire-starboard","speaker":"captain","text":"[shouts] Starboard battery! Fire!"},
+    {"id":"captain-guns-lay-port-depress","speaker":"captain","text":"[shouts] Port battery, depress two degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-port-point-blank","speaker":"captain","text":"[shouts] Port battery, quoins to point-blank! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-port-elev-2","speaker":"captain","text":"[shouts] Port battery, elevate two degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-port-elev-5","speaker":"captain","text":"[shouts] Port battery, elevate five degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-port-elev-8","speaker":"captain","text":"[shouts] Port battery, elevate eight degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-starboard-depress","speaker":"captain","text":"[shouts] Starboard battery, depress two degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-starboard-point-blank","speaker":"captain","text":"[shouts] Starboard battery, quoins to point-blank! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-starboard-elev-2","speaker":"captain","text":"[shouts] Starboard battery, elevate two degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-starboard-elev-5","speaker":"captain","text":"[shouts] Starboard battery, elevate five degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-lay-starboard-elev-8","speaker":"captain","text":"[shouts] Starboard battery, elevate eight degrees! Ready, steady on the roll!"},
+    {"id":"captain-guns-give-fire","speaker":"captain","text":"[shouts] As she bears, give fire!"},
     {"id":"captain-guns-cease","speaker":"captain","text":"[shouts] Cease fire!"},
     {"id":"crew-guns-ready","speaker":"tomas","text":"[shouts] Guns ready, captain!"}
   ]

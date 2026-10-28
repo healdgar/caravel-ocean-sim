@@ -6,8 +6,21 @@ export const GUNNERY_ORDER_SECONDS=Object.freeze({
   prepare:GUNNERY_AUDIO_ASSETS['captain-guns-prepare'].seconds,
   'fire-port':GUNNERY_AUDIO_ASSETS['captain-guns-fire-port'].seconds,
   'fire-starboard':GUNNERY_AUDIO_ASSETS['captain-guns-fire-starboard'].seconds,
+  'give-fire':GUNNERY_AUDIO_ASSETS['captain-guns-give-fire']?.seconds??2,
   cease:GUNNERY_AUDIO_ASSETS['captain-guns-cease'].seconds,
 });
+export function gunneryElevationBand(elevationDegrees=0){
+  const deg=Number.isFinite(Number(elevationDegrees))?Number(elevationDegrees):0;
+  if(deg<=-1)return 'depress';
+  if(deg<1)return 'point-blank';
+  if(deg<3.5)return 'elev-2';
+  if(deg<6.5)return 'elev-5';
+  return 'elev-8';
+}
+export function gunneryLayOrderClip(side,elevationDegrees=0){
+  const s=side==='starboard'?'starboard':'port';
+  return `captain-guns-lay-${s}-${gunneryElevationBand(elevationDegrees)}`;
+}
 export function gunnerySoundSpeed(temperatureC=15){
   return 331.3+.606*Math.max(-30,Math.min(50,Number.isFinite(temperatureC)?temperatureC:15));
 }
@@ -19,7 +32,7 @@ export function gunnerySoundDelay(source,ear,temperatureC=15){
 // within 100 ms share an acoustic voice, while every physical gun still fires.
 // This gives a rolling broadside without creating fifty full-length sources.
 export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}),temperature=()=>15}={}){
-  let clock=0,voiceUntil=0,pendingOrder=null,pendingReady=null,lastOrder='',lastOrderAt=-100,lastMechanical=-100,lastReadyAt=-100;
+  let clock=0,voiceUntil=0,pendingOrder=null,pendingGiveFire=null,pendingReady=null,lastOrder='',lastOrderAt=-100,lastMechanical=-100,lastReadyAt=-100;
   const arrivals=[],seenShots=new Set(),shotHistory=[];
   const maxArrivals=32;
   function positionOf(event){
@@ -33,7 +46,13 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
     voiceUntil=clock+seconds+.12;
     return true;
   }
-  function startOrder(request){return playSpeech('captain-guns-'+request.id,request.position);}
+  function startOrder(request){
+    if((request.id==='fire-port'||request.id==='fire-starboard')&&request.elevation!==null&&request.elevation!==undefined){
+      const clip=gunneryLayOrderClip(request.id.slice(5),request.elevation);
+      if(GUNNERY_AUDIO_ASSETS[clip])return playSpeech(clip,request.position);
+    }
+    return playSpeech('captain-guns-'+request.id,request.position);
+  }
   function enqueue(id,position,gain,report=false){
     const ear=listener(),distance=Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z);
     if(!Number.isFinite(distance)||distance>18000)return false;
@@ -61,14 +80,20 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
       if(id===lastOrder&&clock-lastOrderAt<.8)return false;
       const position=positionOf(boat);if(!position)return false;
       lastOrder=id;lastOrderAt=clock;
-      if(id.startsWith('fire-')||id==='cease')pendingReady=null;
-      const request={id,position};
+      if(id.startsWith('fire-')||id==='cease'){pendingReady=null;if(id==='cease')pendingGiveFire=null;}
+      const elevation=boat?.gunnery||Number.isFinite(boat?.gunneryElevation)?(boat.gunneryElevation??0):null;
+      const request={id,position,elevation};
       if(clock<voiceUntil){pendingOrder=request;return true;}
       return startOrder(request);
     },
     event(event){
       if(!event||!available())return false;
       const position=positionOf(event);if(!position)return false;
+      if(event.type==='give-fire'){
+        pendingReady=null;
+        if(clock<voiceUntil){pendingGiveFire={position};return true;}
+        return playSpeech('captain-guns-give-fire',position);
+      }
       if(event.type==='shot'){
         pendingReady=null;
         // IDs identify discharges, not permanent guns, so reloads remain audible.
@@ -102,6 +127,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
       // from the actual core ready transition, never an assumed load timer.
       if(clock>=voiceUntil){
         if(pendingOrder){const next=pendingOrder;pendingOrder=null;startOrder(next);}
+        else if(pendingGiveFire){const next=pendingGiveFire;pendingGiveFire=null;playSpeech('captain-guns-give-fire',next.position);}
         else if(pendingReady){const next=pendingReady;pendingReady=null;playSpeech('crew-guns-ready',next.position);}
       }
       arrivals.sort((a,b)=>a.at-b.at);
@@ -110,7 +136,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         play(event.id,event.gain*Math.exp(-event.range/18000),event.position,1,true);
       }
     },
-    clear(){arrivals.length=0;pendingOrder=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;seenShots.clear();shotHistory.length=0;},
+    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;seenShots.clear();shotHistory.length=0;},
     get pending(){return arrivals.length;},
     get busy(){return clock<voiceUntil;},
   };

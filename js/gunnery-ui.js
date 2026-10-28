@@ -53,8 +53,14 @@ export function createGunneryControls(parent,gunnery){
     if(latest&&damageStatus.textContent!==latest)damageStatus.textContent=latest;
     for(const r of rows){
       const s=gunnery.summary(r.side),ordered=gunnery.ordered===r.side;
+      const rs=ordered?gunnery.rollStatus?.(r.side):null;
+      const fmtDeg=v=>`${v>0?'+':''}${Number(v).toFixed(1)}°`;
+      const orderText=rs?.stage==='firing'?`As she bears · give fire! (${fmtDeg(rs.worldElevation)})`
+        :rs?.stage==='steady'?`Steady on the roll · ${fmtDeg(rs.worldElevation)} → ${fmtDeg(rs.targetElevation)}`
+        :rs?`Laying quoins (${fmtDeg(rs.targetElevation)}) · ready & steady`
+        :'Captain’s order · stand clear';
       const held=s.ready===s.total?gunnery.blockedReason(r.side):null;
-      const text=ordered?'Captain’s order · stand clear':s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
+      const text=ordered?orderText:s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
       if(r.status.textContent!==text)r.status.textContent=text;
       r.fire.disabled=!gunnery.canFire(r.side);
       r.prepare.disabled=!!gunnery.ordered||!!s.queued||s.loading>0||(s.ready===s.total&&gunnery.selectedSide===r.side)||['port','starboard'].some(side=>side!==r.side&&gunnery.summary(side).loading>0);

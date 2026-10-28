@@ -35,6 +35,61 @@ export const GUNNERY_AUDIO_ASSETS = {
     "loop": false,
     "seconds": 2.24
   },
+  "captain-guns-lay-port-depress": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-depress.mp3",
+    "loop": false,
+    "seconds": 5.68
+  },
+  "captain-guns-lay-port-point-blank": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-point-blank.mp3",
+    "loop": false,
+    "seconds": 4.8
+  },
+  "captain-guns-lay-port-elev-2": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-elev-2.mp3",
+    "loop": false,
+    "seconds": 5.92
+  },
+  "captain-guns-lay-port-elev-5": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-elev-5.mp3",
+    "loop": false,
+    "seconds": 5.2
+  },
+  "captain-guns-lay-port-elev-8": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-elev-8.mp3",
+    "loop": false,
+    "seconds": 4.64
+  },
+  "captain-guns-lay-starboard-depress": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-depress.mp3",
+    "loop": false,
+    "seconds": 5.2
+  },
+  "captain-guns-lay-starboard-point-blank": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-point-blank.mp3",
+    "loop": false,
+    "seconds": 6.32
+  },
+  "captain-guns-lay-starboard-elev-2": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-elev-2.mp3",
+    "loop": false,
+    "seconds": 5.36
+  },
+  "captain-guns-lay-starboard-elev-5": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-elev-5.mp3",
+    "loop": false,
+    "seconds": 5.52
+  },
+  "captain-guns-lay-starboard-elev-8": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-elev-8.mp3",
+    "loop": false,
+    "seconds": 4.88
+  },
+  "captain-guns-give-fire": {
+    "url": "assets/audio/gunnery/captain-guns-give-fire.mp3",
+    "loop": false,
+    "seconds": 2
+  },
   "captain-guns-cease": {
     "url": "assets/audio/gunnery/captain-guns-cease.mp3",
     "loop": false,

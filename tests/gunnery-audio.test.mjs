@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {GUNNERY_AUDIO_ASSETS} from '../js/gunnery-audio-assets.js';
-import {GUNNERY_ORDER_SECONDS,gunnerySoundSpeed,gunnerySoundDelay,createGunneryAudio} from '../js/gunnery-audio.js';
+import {GUNNERY_ORDER_SECONDS,gunneryElevationBand,gunneryLayOrderClip,gunnerySoundSpeed,gunnerySoundDelay,createGunneryAudio} from '../js/gunnery-audio.js';
 import {GUNNERY_RECIPES} from '../scripts/gunnery-audio.mjs';
 import {soundRequest} from '../scripts/audio.mjs';
 
@@ -65,15 +65,31 @@ test('mute clears pending gunfire and speech without replaying obsolete arrivals
   assert.equal(played.length,1);
 });
 
+test('captain shouts quoin elevation and steady-on-the-roll orders followed by give-fire on the roll',()=>{
+  const {played,sound}=audioFixture();
+  assert.equal(gunneryElevationBand(-2),'depress');
+  assert.equal(gunneryElevationBand(0),'point-blank');
+  assert.equal(gunneryElevationBand(2),'elev-2');
+  assert.equal(gunneryElevationBand(5),'elev-5');
+  assert.equal(gunneryElevationBand(9),'elev-8');
+  assert.equal(gunneryLayOrderClip('port',2),'captain-guns-lay-port-elev-2');
+  assert.equal(gunneryLayOrderClip('starboard',0),'captain-guns-lay-starboard-point-blank');
+  sound.order('fire-port',{x:0,y:2,z:0,gunneryElevation:2});
+  assert.equal(played.at(-1)[0],'captain-guns-lay-port-elev-2');
+  sound.event({type:'give-fire',position:audioPoint});
+  sound.update(6.5);
+  assert.equal(played.at(-1)[0],'captain-guns-give-fire');
+});
+
 test('authored cannon assets are complete, offline, checksum pinned and retain decoded headroom',async()=>{
   const provenance=JSON.parse(await fs.readFile(new URL('../assets/audio/gunnery/provenance.json',import.meta.url),'utf8'));
-  assert.equal(provenance.length,9);
+  assert.equal(provenance.length,20);
   for(const source of provenance){
     const asset=GUNNERY_AUDIO_ASSETS[source.id];assert.ok(asset&&!asset.loop);
     const bytes=await fs.readFile(new URL('../'+asset.url,import.meta.url));
     assert.equal(createHash('sha256').update(bytes).digest('hex'),source.sha256);
-    assert.ok(asset.seconds>.5&&asset.seconds<6);
-    const pcm=execFileSync('ffmpeg',['-v','error','-i',new URL('../'+asset.url,import.meta.url).pathname,'-f','f32le','-ac','1','-ar','44100','pipe:1'],{maxBuffer:3*1024*1024});
+    assert.ok(asset.seconds>.5&&asset.seconds<7);
+    const pcm=execFileSync('ffmpeg',['-v','error','-i',new URL('../'+asset.url,import.meta.url).pathname,'-f','f32le','-ac','1','-ar','44100','pipe:1'],{maxBuffer:4*1024*1024});
     let peak=0;for(let i=0;i<pcm.length;i+=4){const n=pcm.readFloatLE(i);assert.ok(Number.isFinite(n));peak=Math.max(peak,Math.abs(n));}
     assert.ok(peak>1e-3&&peak<.78,source.id+' must be audible and below clipping');
   }

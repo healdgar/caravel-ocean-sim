@@ -531,7 +531,26 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     fire(side){
       if(!canFire(side))return false;
-      const order='fire-'+side;pending={side,at:state.time+GUNNERY_ORDER_SECONDS[order]};onOrder(order,boat);return true;
+      const order='fire-'+side;
+      const targetElevation=Number.isFinite(boat.gunneryElevation)?boat.gunneryElevation:0;
+      const sideSign=side==='port'?-1:1;
+      const initRollDeg=sideSign*(boat.roll??0)*180/Math.PI;
+      const initRateDeg=sideSign*(boat.rollVelocity??0)*180/Math.PI;
+      pending={
+        side,
+        stage:'laying',
+        at:state.time+GUNNERY_ORDER_SECONDS[order],
+        targetElevation,
+        effectiveQuoin:targetElevation,
+        minRollDeg:initRollDeg,
+        maxRollDeg:initRollDeg,
+        maxAbsRollSeen:Math.max(Math.abs(initRollDeg),Math.abs(initRateDeg)*0.25),
+        prevError:null,
+        fireAt:null,
+        interval:0.14,
+      };
+      onOrder(order,boat);
+      return true;
     },
     cease(){
       pending=null;state.queue.length=0;for(const g of state.guns)g.queued=false;
@@ -542,7 +561,60 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       for(const g of state.guns){g.queued=false;g.loading=false;}
     },
     update(dt,wind){
-      if(pending&&state.time+1e-8>=pending.at){fireGunnery(state,pending.side);pending=null;}
+      if(pending){
+        const sideSign=pending.side==='port'?-1:1;
+        const rollElevDeg=sideSign*(boat.roll??0)*180/Math.PI;
+        const rollRateDeg=sideSign*(boat.rollVelocity??0)*180/Math.PI;
+        pending.minRollDeg=Math.min(pending.minRollDeg,rollElevDeg);
+        pending.maxRollDeg=Math.max(pending.maxRollDeg,rollElevDeg);
+        pending.maxAbsRollSeen=Math.max(pending.maxAbsRollSeen,Math.abs(rollElevDeg),Math.abs(rollRateDeg)*0.25);
+        if(state.time+1e-8>=pending.at){
+          if(pending.stage==='laying'){
+            const range=gunElevationRange(state.guns[0]);
+            if(pending.minRollDeg<=0.15&&pending.maxRollDeg>=-0.15){
+              pending.effectiveQuoin=pending.targetElevation;
+            }else{
+              const meanHeel=0.5*(pending.minRollDeg+pending.maxRollDeg);
+              pending.effectiveQuoin=Math.max(range.min,Math.min(range.max,pending.targetElevation-meanHeel));
+            }
+            pending.stage='steady';
+          }
+          if(pending.stage==='steady'){
+            const readyCount=state.guns.filter(g=>g.side===pending.side&&g.stage==='ready'&&!g.queued).length;
+            const interval=readyCount>8?Math.max(0.04,1.1/readyCount):0.14;
+            const isFlatCalm=pending.maxAbsRollSeen<1e-3&&Math.abs(rollElevDeg)<1e-3&&Math.abs(rollRateDeg)<1e-3;
+            const giveFireLead=isFlatCalm?0:0.35;
+            const rippleHalf=0.5*Math.max(0,readyCount-1)*interval;
+            const leadSeconds=giveFireLead+rippleHalf;
+            const predWorldElev=pending.effectiveQuoin+rollElevDeg+rollRateDeg*leadSeconds;
+            const ePred=predWorldElev-pending.targetElevation;
+            const waitTime=Math.max(0,state.time-pending.at);
+            const crossedZero=pending.prevError!==null&&pending.prevError*ePred<=0&&Math.abs(pending.prevError-ePred)<6;
+            const withinWindow=Math.abs(ePred)<=0.45+0.35*waitTime;
+            const goodRollDirection=pending.targetElevation<-1?(rollRateDeg<=0.2||waitTime>2.8):(rollRateDeg>=-0.2||waitTime>2.8);
+            const portsClear=state.guns.filter(g=>g.side===pending.side&&g.stage==='ready').every(g=>attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)));
+            pending.prevError=ePred;
+            if(isFlatCalm||(portsClear&&(((crossedZero||withinWindow)&&goodRollDirection)||waitTime>=5.2))){
+              onEvent({
+                type:'give-fire',
+                side:pending.side,
+                targetElevation:pending.targetElevation,
+                worldElevation:+(pending.effectiveQuoin+rollElevDeg).toFixed(2),
+                rollDegrees:+rollElevDeg.toFixed(2),
+                position:[boat.x??0,(boat.heave??0)+3,boat.z??0],
+              });
+              pending.stage='firing';
+              pending.fireAt=state.time+giveFireLead;
+              pending.interval=interval;
+            }
+          }
+          if(pending&&pending.stage==='firing'&&state.time+1e-8>=pending.fireAt){
+            for(const g of state.guns)if(g.side===pending.side)g.elevation=pending.effectiveQuoin;
+            fireGunnery(state,pending.side,{interval:pending.interval});
+            pending=null;
+          }
+        }
+      }
       for(const gun of state.guns)previousStages[gun.index]=gun.stage;
       const events=stepGunnery(state,dt,{deferSeaCollision:true,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
@@ -577,6 +649,14 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     get selectedSide(){return boat.gunnerySide??null;},
     get ordered(){return pending?.side??null;},
+    get orderStage(){return pending?.stage??null;},
+    rollStatus(side){
+      if(!pending||pending.side!==side)return null;
+      const sideSign=side==='port'?-1:1;
+      const rollElevDeg=sideSign*(boat.roll??0)*180/Math.PI;
+      const worldElev=(pending.effectiveQuoin??pending.targetElevation)+rollElevDeg;
+      return {stage:pending.stage,targetElevation:pending.targetElevation,worldElevation:+worldElev.toFixed(1),rollDegrees:+rollElevDeg.toFixed(1)};
+    },
     get elevation(){return boat.gunneryElevation??0;},
     get elevationRange(){return gunElevationRange(state.guns[0]);},
     setElevation(degrees){

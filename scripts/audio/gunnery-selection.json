@@ -6,6 +6,17 @@
   "captain-guns-prepare":{"take":"02"},
   "captain-guns-fire-port":{"take":"01"},
   "captain-guns-fire-starboard":{"take":"01"},
+  "captain-guns-lay-port-depress":{"take":"01"},
+  "captain-guns-lay-port-point-blank":{"take":"01"},
+  "captain-guns-lay-port-elev-2":{"take":"01"},
+  "captain-guns-lay-port-elev-5":{"take":"01"},
+  "captain-guns-lay-port-elev-8":{"take":"01"},
+  "captain-guns-lay-starboard-depress":{"take":"01"},
+  "captain-guns-lay-starboard-point-blank":{"take":"01"},
+  "captain-guns-lay-starboard-elev-2":{"take":"01"},
+  "captain-guns-lay-starboard-elev-5":{"take":"01"},
+  "captain-guns-lay-starboard-elev-8":{"take":"01"},
+  "captain-guns-give-fire":{"take":"01"},
   "captain-guns-cease":{"take":"01"},
   "crew-guns-ready":{"take":"01"}
 }

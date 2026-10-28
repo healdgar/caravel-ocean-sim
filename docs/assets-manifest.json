@@ -1109,6 +1109,61 @@
     "bytes": 20414,
     "sha256": "49b766e3398acc14737a4eafed0e7ec2bf2ed9aac21a26de1c575583bb385a04"
   },
+  "assets/audio/gunnery/captain-guns-lay-port-depress.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-depress.f4fbce11ef8541b2.mp3",
+    "bytes": 55781,
+    "sha256": "f4fbce11ef8541b226b5a67d9f01f09ac9385320657e62dbb3ed40ca135c121f"
+  },
+  "assets/audio/gunnery/captain-guns-lay-port-point-blank.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-point-blank.161fb14b4b47f2f2.mp3",
+    "bytes": 49634,
+    "sha256": "161fb14b4b47f2f2fffea4fe72192a1dfa94ff7ddd7452eb962b119f27d09b7c"
+  },
+  "assets/audio/gunnery/captain-guns-lay-port-elev-2.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-elev-2.7f7e65d831966321.mp3",
+    "bytes": 57235,
+    "sha256": "7f7e65d831966321f37b3957b493b275347309970203b7510bb65b4bb5bed3f6"
+  },
+  "assets/audio/gunnery/captain-guns-lay-port-elev-5.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-elev-5.ad430fa1758d38d8.mp3",
+    "bytes": 52018,
+    "sha256": "ad430fa1758d38d85c37ce823c0b160f769dc0f41c3b613d8aa792378ca28a4a"
+  },
+  "assets/audio/gunnery/captain-guns-lay-port-elev-8.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-port-elev-8.93dacaa938f6fc0c.mp3",
+    "bytes": 47659,
+    "sha256": "93dacaa938f6fc0cffe194cb6f8ef56a769cd50622aa374743f54802b6a720be"
+  },
+  "assets/audio/gunnery/captain-guns-lay-starboard-depress.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-depress.a7e7f1380c096bbe.mp3",
+    "bytes": 52129,
+    "sha256": "a7e7f1380c096bbef3fe2b4e54edd2673dd10484e8eccc52b0525eb5d9024d15"
+  },
+  "assets/audio/gunnery/captain-guns-lay-starboard-point-blank.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-point-blank.d3b297461cc79d7c.mp3",
+    "bytes": 59163,
+    "sha256": "d3b297461cc79d7c19bf3b2ebc13dfa60f501e12e4f0785a3ba459eb1413e071"
+  },
+  "assets/audio/gunnery/captain-guns-lay-starboard-elev-2.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-elev-2.1e6c3c0449f80d7d.mp3",
+    "bytes": 51673,
+    "sha256": "1e6c3c0449f80d7dbe6f66a372f4402ae84c533a839f83e739ec57f4e5d8690b"
+  },
+  "assets/audio/gunnery/captain-guns-lay-starboard-elev-5.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-elev-5.4e0182f21ae14494.mp3",
+    "bytes": 52743,
+    "sha256": "4e0182f21ae1449441b40d8287c2b71086ce261b828af6d05ed76597d147da61"
+  },
+  "assets/audio/gunnery/captain-guns-lay-starboard-elev-8.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-lay-starboard-elev-8.ecc09a0de4d8b52f.mp3",
+    "bytes": 47775,
+    "sha256": "ecc09a0de4d8b52f3757dbdb9f9a5abeb6b732bd0e3cf8c76c1e5d4191b6ea08"
+  },
+  "assets/audio/gunnery/captain-guns-give-fire.mp3": {
+    "url": "assets/audio/gunnery/captain-guns-give-fire.6a8a9caa705da5d1.mp3",
+    "bytes": 20011,
+    "sha256": "6a8a9caa705da5d19db3090dfee017d6b4a3205408406a7bff8bd31e492b7eb6"
+  },
   "assets/audio/gunnery/captain-guns-cease.mp3": {
     "url": "assets/audio/gunnery/captain-guns-cease.0a8b8a4c82ddcc74.mp3",
     "bytes": 19845,
