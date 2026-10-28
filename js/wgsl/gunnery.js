@@ -96,6 +96,19 @@ fn gunneryDensity(local:vec3f,age:f32,seed:f32)->f32{
   let erode=smoothstep(.22,.78,macroShape*(.55+fbm*.85)-(1.0-support)*.34);
   return support*erode*(.45+fbm*.95);
 }
+fn gunneryShadowDensity(local:vec3f,age:f32,seed:f32)->f32{
+  // Fast macro-envelope density for sunlight self-shadowing rays. Avoids
+  // evaluating 3-octave 3D FBM inside the nested shadow loop on mobile GPUs.
+  let r2Init=dot(local,local);
+  let support=1.0-smoothstep(.52,1.0,r2Init);if(support<=0.0){return 0.0;}
+  let turn=seed*.71;
+  let a=vec3f(cos(turn)*.32,.26,sin(turn)*.24);
+  let b=vec3f(-sin(turn)*.33,-.18,cos(turn)*.26);
+  let c=vec3f(sin(turn)*.31,-.06,-cos(turn)*.29);
+  let d=vec3f(-cos(turn)*.22,.34,-sin(turn)*.22);
+  let lobes=exp(-dot(local-a,local-a)*4.6)+exp(-dot(local-b,local-b)*5.1)+exp(-dot(local-c,local-c)*5.3)+exp(-dot(local-d,local-d)*5.6);
+  return support*smoothstep(.05,.62,lobes)*.82;
+}
 fn gunnerySceneDistance(pixel:vec2f,ray:vec3f)->f32{
   let size=textureDimensions(gunnerySceneDepth);let uv=clamp(vec2i(pixel),vec2i(0),vec2i(size)-1);
   let depth=textureLoad(gunnerySceneDepth,uv,0).x;if(depth<=0.0){return 1e8;}
@@ -152,7 +165,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       let lightStep=min(volume.axisX.w,min(volume.axisY.w,volume.axisZ.w))*.52;
       var shadowDepth=0.0;
       for(var lightSample=1u;lightSample<=3u;lightSample++){
-        shadowDepth+=gunneryDensity(local+sunLocal*lightStep*f32(lightSample),volume.optical.y,volume.optical.z)*lightStep*volume.optical.x;
+        shadowDepth+=gunneryShadowDensity(local+sunLocal*lightStep*f32(lightSample),volume.optical.y,volume.optical.z)*lightStep*volume.optical.x;
       }
       let beer=exp(-shadowDepth*.85);
       let multiScatter=exp(-shadowDepth*.24)*.42;

@@ -109,7 +109,7 @@ export function hullHydrostatics(length,beam,waterline=0,modelId='nina'){
     waterplaneMoment:mix('waterplaneMoment')*sx**3*sz,longitudinalMoment:mix('longitudinalMoment')*sx*sz**3};
 }
 const provisionSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(120,value)):DEFAULT_PROVISION_DAYS;
-const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(40,value)):0;
+const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(100,value)):0;
 
 export function boatHydrodynamics(length, beam, provisionDays, cargoTonnes=0,modelId='nina') {
   if(additionalHydroDesign(modelId))return additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,modelId);

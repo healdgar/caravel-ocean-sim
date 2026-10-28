@@ -620,8 +620,9 @@ function assignProceduralCrewWork(company,boat){
     const target=resolveShipNode(boat,'station.hatch',{space:'design'});
     for(const s of free())if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
   }
+  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
   for(const control of controls){
-    if(Math.abs((boat[SAIL_KEYS[control.index]]??1)-sails.set[control.index])<=1e-6)continue;
+    if(Math.abs(Math.min(boat[SAIL_KEYS[control.index]]??1,mastCap(control.index))-sails.set[control.index])<=1e-6)continue;
     const station=context.controlStations?.[control.name];if(!station)continue;
     const mast=station.mast??control.surfaces[0].mast,runner='mast.'+crewMastName(boat,mast)+'.runner';
     const climbing=!solo&&control.surfaces.some(s=>s.kind==='square')&&(model.nodes[runner]?.motion?.rungs??0)>0;
@@ -637,7 +638,8 @@ function assignProceduralCrewWork(company,boat){
 }
 export function assignCrewWork(company,boat) {
   if(hasExtendedCrewModel(boat.modelId)){assignProceduralCrewWork(company,boat);return;}
-  const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs((boat[key]??1)-sails.set[i])>.008);
+  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
+  const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs(Math.min(boat[key]??1,mastCap(i))-sails.set[i])>.008);
   company.workTime??=0;
   assignGunCrew(company,boat);
   for(const s of company.crew){
@@ -792,8 +794,9 @@ export function stepCrewWork(s,company,boat,dt) {
       s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
+      const ctrlIdx=j.control??j.mast,mastCap=boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][ctrlIdx]]??1);
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
-        :!sailingState(boat).maneuver && Math.abs((boat[SAIL_KEYS[j.control??j.mast]]??1)-sailingState(boat).set[j.control??j.mast])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
+        :!sailingState(boat).maneuver && Math.abs(Math.min(boat[SAIL_KEYS[ctrlIdx]]??1,mastCap)-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
       if(done){if(j.kind==='rig'||j.kind==='lookout'){crewWorkDescend(s);s.nextWatch=company.workTime+45;}
         else startReturn(s,boat,company);}
     }else if(j.stage==='waiting-return'&&j.elapsed>.5){startReturn(s,boat,company);

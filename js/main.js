@@ -1874,7 +1874,7 @@ async function main() {
     const elapsed = Math.max(0, (now - last) / 1000);
     const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
     const resChanged = resolution.sample(elapsed,!document.hidden,workSample);
-    if(resChanged&&elapsed<1/42)polygons.reset();
+    if(resChanged&&elapsed<1/28)polygons.reset();
     if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);

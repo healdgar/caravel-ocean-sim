@@ -4618,7 +4618,7 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
             indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
           }
         }
-        if (lo < 0 && hi > -22) {
+        if (lo < 0 && hi > (n === 257 ? -24 : -42)) {
           if (useMainDiag) {
             submergedIndices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
           } else {
@@ -4665,7 +4665,7 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
               indices.push(v00, v01, v10, v10, v01, v11);
             }
           }
-          if (lo < 0 && hi > -22) {
+          if (lo < 0 && hi > (n === 257 ? -24 : -42)) {
             if (useSubMainDiag) {
               submergedIndices.push(v00, v01, v11, v00, v11, v10);
             } else {

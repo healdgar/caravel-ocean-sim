@@ -4187,7 +4187,9 @@ function advanceSails(boat, dt, windSpeed, windDirection) {
   const mastGroups = ['fore', 'main', 'mizzen'];
   for (let i = 0; i < 3; i++) {
     const mastCap = boat.damage?.sunk ? 0 : (boat.damage?.mastIntegrity?.[mastGroups[i]] ?? 1);
-    const targetSet = Math.min(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1), mastCap);
+    const key = SAIL_KEYS[i];
+    if (mastCap < 1 && typeof boat[key] === 'number' && boat[key] > mastCap) boat[key] = mastCap;
+    const targetSet = Math.min(sailClamp(boat[key] ?? 1, 0, 1), mastCap);
     s.set[i] += sailClamp(targetSet - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i] ?? 1), dt * 0.18 * (boat.crewSailRate?.[i] ?? 1));
   }
   // Yards and lateen take time to brace/tack; forces use this actual trim.
@@ -4827,7 +4829,7 @@ function hullHydrostatics(length,beam,waterline=0,modelId='nina'){
     waterplaneMoment:mix('waterplaneMoment')*sx**3*sz,longitudinalMoment:mix('longitudinalMoment')*sx*sz**3};
 }
 const provisionSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(120,value)):DEFAULT_PROVISION_DAYS;
-const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(40,value)):0;
+const cargoSetting=value=>Number.isFinite(value)?Math.max(0,Math.min(100,value)):0;
 
 function boatHydrodynamics(length, beam, provisionDays, cargoTonnes=0,modelId='nina') {
   if(additionalHydroDesign(modelId))return additionalBoatHydrodynamics(length,beam,provisionDays,cargoTonnes,modelId);
@@ -13041,6 +13043,19 @@ fn gunneryDensity(local:vec3f,age:f32,seed:f32)->f32{
   let erode=smoothstep(.22,.78,macroShape*(.55+fbm*.85)-(1.0-support)*.34);
   return support*erode*(.45+fbm*.95);
 }
+fn gunneryShadowDensity(local:vec3f,age:f32,seed:f32)->f32{
+  // Fast macro-envelope density for sunlight self-shadowing rays. Avoids
+  // evaluating 3-octave 3D FBM inside the nested shadow loop on mobile GPUs.
+  let r2Init=dot(local,local);
+  let support=1.0-smoothstep(.52,1.0,r2Init);if(support<=0.0){return 0.0;}
+  let turn=seed*.71;
+  let a=vec3f(cos(turn)*.32,.26,sin(turn)*.24);
+  let b=vec3f(-sin(turn)*.33,-.18,cos(turn)*.26);
+  let c=vec3f(sin(turn)*.31,-.06,-cos(turn)*.29);
+  let d=vec3f(-cos(turn)*.22,.34,-sin(turn)*.22);
+  let lobes=exp(-dot(local-a,local-a)*4.6)+exp(-dot(local-b,local-b)*5.1)+exp(-dot(local-c,local-c)*5.3)+exp(-dot(local-d,local-d)*5.6);
+  return support*smoothstep(.05,.62,lobes)*.82;
+}
 fn gunnerySceneDistance(pixel:vec2f,ray:vec3f)->f32{
   let size=textureDimensions(gunnerySceneDepth);let uv=clamp(vec2i(pixel),vec2i(0),vec2i(size)-1);
   let depth=textureLoad(gunnerySceneDepth,uv,0).x;if(depth<=0.0){return 1e8;}
@@ -13097,7 +13112,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       let lightStep=min(volume.axisX.w,min(volume.axisY.w,volume.axisZ.w))*.52;
       var shadowDepth=0.0;
       for(var lightSample=1u;lightSample<=3u;lightSample++){
-        shadowDepth+=gunneryDensity(local+sunLocal*lightStep*f32(lightSample),volume.optical.y,volume.optical.z)*lightStep*volume.optical.x;
+        shadowDepth+=gunneryShadowDensity(local+sunLocal*lightStep*f32(lightSample),volume.optical.y,volume.optical.z)*lightStep*volume.optical.x;
       }
       let beer=exp(-shadowDepth*.85);
       let multiScatter=exp(-shadowDepth*.24)*.42;
@@ -14166,7 +14181,8 @@ async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,e
         }
       }
       ordered.sort((a,b)=>b.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0)-a.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0));
-      for(const p of ordered)writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);
+      const maxVolumes=GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots;
+      for(const p of ordered){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);}
       for(const p of state.projectiles)balls.set([...p.position,p.radius],ballCount++*4);
       for(const e of state.impacts){contacts.set([...e.position,e.age,...e.velocity,e.scale,e.seed,...e.wind,e.kindCode??0,0,0,0],impactCount++*16);}
       if(volumeCount)device.queue.writeBuffer(volumeBuffer,0,volumes,0,volumeCount*20);
@@ -21018,8 +21034,9 @@ function assignProceduralCrewWork(company,boat){
     const target=resolveShipNode(boat,'station.hatch',{space:'design'});
     for(const s of free())if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
   }
+  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
   for(const control of controls){
-    if(Math.abs((boat[SAIL_KEYS[control.index]]??1)-sails.set[control.index])<=1e-6)continue;
+    if(Math.abs(Math.min(boat[SAIL_KEYS[control.index]]??1,mastCap(control.index))-sails.set[control.index])<=1e-6)continue;
     const station=context.controlStations?.[control.name];if(!station)continue;
     const mast=station.mast??control.surfaces[0].mast,runner='mast.'+crewMastName(boat,mast)+'.runner';
     const climbing=!solo&&control.surfaces.some(s=>s.kind==='square')&&(model.nodes[runner]?.motion?.rungs??0)>0;
@@ -21035,7 +21052,8 @@ function assignProceduralCrewWork(company,boat){
 }
 function assignCrewWork(company,boat) {
   if(hasExtendedCrewModel(boat.modelId)){assignProceduralCrewWork(company,boat);return;}
-  const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs((boat[key]??1)-sails.set[i])>.008);
+  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
+  const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs(Math.min(boat[key]??1,mastCap(i))-sails.set[i])>.008);
   company.workTime??=0;
   assignGunCrew(company,boat);
   for(const s of company.crew){
@@ -21190,8 +21208,9 @@ function stepCrewWork(s,company,boat,dt) {
       s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
+      const ctrlIdx=j.control??j.mast,mastCap=boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][ctrlIdx]]??1);
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
-        :!sailingState(boat).maneuver && Math.abs((boat[SAIL_KEYS[j.control??j.mast]]??1)-sailingState(boat).set[j.control??j.mast])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
+        :!sailingState(boat).maneuver && Math.abs(Math.min(boat[SAIL_KEYS[ctrlIdx]]??1,mastCap)-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
       if(done){if(j.kind==='rig'||j.kind==='lookout'){crewWorkDescend(s);s.nextWatch=company.workTime+45;}
         else startReturn(s,boat,company);}
     }else if(j.stage==='waiting-return'&&j.elapsed>.5){startReturn(s,boat,company);
@@ -28067,7 +28086,7 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
             indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
           }
         }
-        if (lo < 0 && hi > -22) {
+        if (lo < 0 && hi > (n === 257 ? -24 : -42)) {
           if (useMainDiag) {
             submergedIndices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
           } else {
@@ -28114,7 +28133,7 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
               indices.push(v00, v01, v10, v10, v01, v11);
             }
           }
-          if (lo < 0 && hi > -22) {
+          if (lo < 0 && hi > (n === 257 ? -24 : -42)) {
             if (useSubMainDiag) {
               submergedIndices.push(v00, v01, v11, v00, v11, v10);
             } else {
@@ -31684,15 +31703,13 @@ fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u
  if(standSteps>=99u){return true;}
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
  let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0);
- if(camera.y<48.){
-  if(standSteps>=4u&&distXZ>135.*budgetScale){return true;}
-  if(standSteps>=3u&&distXZ>165.*budgetScale&&(rootId&7u)!=0u){return true;}
-  if(standSteps>=2u&&distXZ>195.*budgetScale&&(rootId&3u)!=0u){return true;}
-  if(standSteps>=1u&&distXZ>280.*budgetScale&&(rootId&1u)!=0u){return true;}
-  if(pixelError>4.2&&standSteps>=1u&&distXZ>155.*budgetScale&&(rootId&3u)!=0u){return true;}
- }else{
-  if(standSteps>=4u&&distXZ>340.*budgetScale&&(rootId&3u)!=0u){return true;}
-  if(standSteps==3u&&distXZ>460.*budgetScale&&(rootId&1u)!=0u){return true;}
+ let yFactor=clamp((camera.y-36.0)/24.0,0.0,1.0);
+ if(standSteps>=4u&&distXZ>mix(135.0,340.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
+ if(standSteps>=3u&&distXZ>mix(165.0,460.0,yFactor)*budgetScale&&(rootId&select(7u,1u,yFactor>0.5))!=0u){return true;}
+ if(yFactor<0.85){
+  if(standSteps>=2u&&distXZ>mix(195.0,380.0,yFactor)*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps>=1u&&distXZ>mix(280.0,520.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(pixelError>4.2&&standSteps>=1u&&distXZ>mix(155.0,310.0,yFactor)*budgetScale&&(rootId&3u)!=0u){return true;}
  }
  if(distXZ>1100.*budgetScale&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
  if(distXZ>1900.*budgetScale&&(rootId&1u)!=0u){return true;}
@@ -32315,7 +32332,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
   let baseInflate=select(select(.07,.20,tierId==3u),select(.42,.88,tierId==3u),isSubBroadleaf);
   let inflate=baseInflate/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
-  if(tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normal+vec3f(0.,uvOff.y*0.6,0.));}
+  if(isSubBroadleaf&&tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normal+vec3f(0.,uvOff.y*0.6,0.));}
  }
  let local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
  var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;
@@ -34586,8 +34603,10 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
       if(dx*dx+dz*dz>maxDist*maxDist)return false;
     }
     if(matrix&&matrix.length>=16&&cam&&Number.isFinite(cam.x)){
-      const p=[secRegion.x-cam.x,120-(cam.y??6),secRegion.z-cam.z];
-      const radius=Math.hypot(half,320,half);
+      const peakH=Math.max(480,secRegion.peakElevationMetres??480);
+      const midY=(peakH-50)*0.5,halfY=(peakH+150)*0.5;
+      const p=[secRegion.x-cam.x,midY-(cam.y??6),secRegion.z-cam.z];
+      const radius=Math.hypot(half,halfY,half);
       for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
         const ax=matrix[3]+(axis===3?0:sign*matrix[axis]);
         const ay=matrix[7]+(axis===3?0:sign*matrix[4+axis]);
@@ -34652,7 +34671,7 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
         if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
         if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
         for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,2800))continue;
+          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,4500))continue;
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
         }
       }
@@ -35299,7 +35318,7 @@ function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, mini
         }
         if (headroom) {
           fastSeconds += seconds;
-          if (fastSeconds >= 12) next = Math.min(1, scale * 1.05);
+          if (fastSeconds >= 12) next = Math.min(1, Math.max(scale * 1.12, scale + 0.06));
         } else fastSeconds = 0;
       }
       count = 0; seconds = 0;
@@ -38912,7 +38931,7 @@ async function main() {
     const elapsed = Math.max(0, (now - last) / 1000);
     const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
     const resChanged = resolution.sample(elapsed,!document.hidden,workSample);
-    if(resChanged&&elapsed<1/42)polygons.reset();
+    if(resChanged&&elapsed<1/28)polygons.reset();
     if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let dt = Math.min(0.1, elapsed);

@@ -126,7 +126,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
         }
         if (headroom) {
           fastSeconds += seconds;
-          if (fastSeconds >= 12) next = Math.min(1, scale * 1.05);
+          if (fastSeconds >= 12) next = Math.min(1, Math.max(scale * 1.12, scale + 0.06));
         } else fastSeconds = 0;
       }
       count = 0; seconds = 0;

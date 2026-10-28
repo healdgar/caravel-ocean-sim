@@ -110,7 +110,9 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
   const mastGroups = ['fore', 'main', 'mizzen'];
   for (let i = 0; i < 3; i++) {
     const mastCap = boat.damage?.sunk ? 0 : (boat.damage?.mastIntegrity?.[mastGroups[i]] ?? 1);
-    const targetSet = Math.min(sailClamp(boat[SAIL_KEYS[i]] ?? 1, 0, 1), mastCap);
+    const key = SAIL_KEYS[i];
+    if (mastCap < 1 && typeof boat[key] === 'number' && boat[key] > mastCap) boat[key] = mastCap;
+    const targetSet = Math.min(sailClamp(boat[key] ?? 1, 0, 1), mastCap);
     s.set[i] += sailClamp(targetSet - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i] ?? 1), dt * 0.18 * (boat.crewSailRate?.[i] ?? 1));
   }
   // Yards and lateen take time to brace/tack; forces use this actual trim.

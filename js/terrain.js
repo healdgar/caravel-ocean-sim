@@ -1316,8 +1316,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(dx*dx+dz*dz>maxDist*maxDist)return false;
     }
     if(matrix&&matrix.length>=16&&cam&&Number.isFinite(cam.x)){
-      const p=[secRegion.x-cam.x,120-(cam.y??6),secRegion.z-cam.z];
-      const radius=Math.hypot(half,320,half);
+      const peakH=Math.max(480,secRegion.peakElevationMetres??480);
+      const midY=(peakH-50)*0.5,halfY=(peakH+150)*0.5;
+      const p=[secRegion.x-cam.x,midY-(cam.y??6),secRegion.z-cam.z];
+      const radius=Math.hypot(half,halfY,half);
       for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
         const ax=matrix[3]+(axis===3?0:sign*matrix[axis]);
         const ay=matrix[7]+(axis===3?0:sign*matrix[4+axis]);
@@ -1382,7 +1384,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
         if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
         for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,2800))continue;
+          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,4500))continue;
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
         }
       }

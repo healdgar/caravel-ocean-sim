@@ -137,7 +137,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         }
       }
       ordered.sort((a,b)=>b.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0)-a.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0));
-      for(const p of ordered)writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);
+      const maxVolumes=GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots;
+      for(const p of ordered){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);}
       for(const p of state.projectiles)balls.set([...p.position,p.radius],ballCount++*4);
       for(const e of state.impacts){contacts.set([...e.position,e.age,...e.velocity,e.scale,e.seed,...e.wind,e.kindCode??0,0,0,0],impactCount++*16);}
       if(volumeCount)device.queue.writeBuffer(volumeBuffer,0,volumes,0,volumeCount*20);

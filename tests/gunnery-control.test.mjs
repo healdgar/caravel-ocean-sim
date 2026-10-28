@@ -96,6 +96,9 @@ test('cannonballs strike other ships in hull and rigging zones, imparting 6-DOF 
  assert.ok(hullReport.floodingTonnes>0,'waterline penetration causes flooding');
  assert.ok(target.cargoTonnes>0,'flooding increases vessel load');
  assert.ok(target.hydrodynamics.sinkage>0,'waterline breach immediately updates hull hydrostatics sinkage');
+ const sinkage40=boatHydrodynamics(20,6,30,40).sinkage;
+ const sinkage70=boatHydrodynamics(20,6,30,70).sinkage;
+ assert.ok(sinkage70>sinkage40,'flooding above 40 tonnes continues submerging hull beyond normal merchant cargo limit');
  assert.ok(Math.abs(target.leewayVelocity)>0,'impact transfers lateral momentum to struck hull');
  assert.ok(Math.abs(target.rollVelocity)>0,'off-centre hull strike imparts roll impulse');
 
