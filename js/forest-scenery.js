@@ -228,24 +228,31 @@ function* forestGeometryChecks(manifest,streams){
   const requiredStreams=streams?.skipRoots?['vertices.bin','indices.bin']:['vertices.bin','indices.bin','roots.bin'];
   for(const name of requiredStreams)if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
   const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=streams?.skipRoots?new Float32Array(0):new Float32Array(streams['roots.bin']);
-  const stride=manifest.vertexStride/4;
-  for(let i=0;i<vertices.length;i+=stride){
+  const stride=manifest.vertexStride/4,isV2=manifest.version===2;
+  for(let i=0,vIdx=0;i<vertices.length;i+=stride,vIdx++){
     for(let k=0;k<stride;k++)if(!Number.isFinite(vertices[i+k]))throw Error('Invalid forest vertex');
-    const nx=vertices[i+3],ny=vertices[i+4],nz=vertices[i+5],v6=vertices[i+6],v7=vertices[i+7];
-    if(Math.abs(Math.sqrt(nx*nx+ny*ny+nz*nz)-1)>.001||!uint(v6)||v6<3||v7<0||v7>1||vertices[i+10]<0||vertices[i+11]<0||vertices[i+12]<0)throw Error('Invalid forest vertex');
-    if(((i/stride)&1023)===0)yield;
+    const nx=vertices[i+3],ny=vertices[i+4],nz=vertices[i+5],len2=nx*nx+ny*ny+nz*nz,v6=vertices[i+6],v7=vertices[i+7];
+    if((!(len2>.998001&&len2<1.002001)&&Math.abs(Math.sqrt(len2)-1)>.001)||!uint(v6)||v6<3||v7<0||v7>1||vertices[i+10]<0||vertices[i+11]<0||vertices[i+12]<0)throw Error('Invalid forest vertex');
+    if((vIdx&4095)===0)yield;
   }
   for(const p of manifest.prototypes){
-    for(const key of ['wood','leaf','far'])for(let j=p[key].firstIndex;j<p[key].firstIndex+p[key].indexCount;j++){
-      const v=indices[j]*stride;if(v>=vertices.length)throw Error('Forest index outside stream');
-      if((key==='wood'&&vertices[v+6]!==3)||(key==='far'&&![3,4].includes(vertices[v+6]))||
-        (key==='leaf'&&(vertices[v+6]<4||vertices[v+6]>=4+(p.nativeMaterials?.length??1))))throw Error('Forest material range mismatch');
-      for(let k=0;k<3;k++)if(vertices[v+k]<p.low[k]-.001||vertices[v+k]>p.high[k]+.001)throw Error('Forest vertex outside prototype bound');
-      if(manifest.version===2){const material=vertices[v+13];if(key==='far'?material!==-1:!uint(material)||material>=p.nativeMaterials.length)throw Error('Forest native material index mismatch');}
-      if(manifest.version===2&&(j-p[key].firstIndex)%3===0){
-        const material=vertices[v+13];for(let corner=1;corner<3;corner++)if(vertices[indices[j+corner]*stride+13]!==material)throw Error('Forest triangle crosses native material groups');
+    const low0=p.low[0]-.001,low1=p.low[1]-.001,low2=p.low[2]-.001,high0=p.high[0]+.001,high1=p.high[1]+.001,high2=p.high[2]+.001;
+    const nativeCount=p.nativeMaterials?.length??0,matLimit=4+(p.nativeMaterials?.length??1);
+    for(const key of ['wood','leaf','far']){
+      const isWood=key==='wood',isFar=key==='far',first=p[key].firstIndex,end=first+p[key].indexCount;
+      for(let j=first;j<end;j++){
+        const v=indices[j]*stride;if(v>=vertices.length)throw Error('Forest index outside stream');
+        const v6=vertices[v+6];
+        if(isWood?v6!==3:isFar?(v6!==3&&v6!==4):(v6<4||v6>=matLimit))throw Error('Forest material range mismatch');
+        const x=vertices[v],y=vertices[v+1],z=vertices[v+2];
+        if(x<low0||x>high0||y<low1||y>high1||z<low2||z>high2)throw Error('Forest vertex outside prototype bound');
+        if(isV2){
+          const material=vertices[v+13];
+          if(isFar?material!==-1:(!Number.isInteger(material)||material<0||material>=nativeCount))throw Error('Forest native material index mismatch');
+          if((j-first)%3===0&&(vertices[indices[j+1]*stride+13]!==material||vertices[indices[j+2]*stride+13]!==material))throw Error('Forest triangle crosses native material groups');
+        }
+        if((j&16383)===0)yield;
       }
-      if((j&4095)===0)yield;
     }
   }
   if(!streams?.skipRoots)yield* forestRootChecks(manifest,roots);
@@ -358,8 +365,9 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,v
       })();pending.set(receipt.file,request);return request;
     }))));
     const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
-    const [vertices,indices,,light]=await Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal),materialPromise,lightPromise]);
-    const geometry=await decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots},{signal});
+    const geometryPromise=Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(([vertices,indices])=>
+      decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots},{signal}));
+    const [geometry,,light]=await Promise.all([geometryPromise,materialPromise,lightPromise]);
     if(lod.nativeLod&&!lod.nativeLod.indices)populateSubtropicalNativeLodIndices(manifest,lod.nativeLod,geometry.indices,geometry.vertices);
     nativeLoaded=true;return{...geometry,textures,...light,...lod};
   })();
@@ -425,11 +433,27 @@ export async function createForestLeafSurfaces({device,shader,pack}){
   const images=[],families=[],textures=[],temporary=[];
   try{
     const optics=new Float32Array(layerCount*12);
-    for(const [index,material]of materials.entries()){
-      const maps={};for(const kind of ['albedo','normal','roughnessMap'].filter(key=>material[key])){
+    for(const material of materials){
+      for(const kind of ['albedo','normal','roughnessMap'].filter(key=>material[key])){
         const raw=pack.textures?.[material[kind].file];if(!(raw instanceof ArrayBuffer)||raw.byteLength!==material[kind].bytes)throw Error('Missing native forest surface: '+material[kind].file);
-        const image=await createImageBitmap(new Blob([raw],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none'});images.push(image);maps[kind]=image;
       }
+    }
+    const T=GPUTextureUsage;
+    const pipelinesPromise=shader(FOREST_SURFACE_MIPS_WGSL,'forest native surface mipmaps').then(code=>Promise.all([
+      device.createComputePipelineAsync({label:'forest initialise native surfaces',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceInit'}}),
+      device.createComputePipelineAsync({label:'forest filter native coverage',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceMips'}}),
+    ]));
+    pipelinesPromise.catch(()=>{});
+    const decodedMaps=await Promise.all(materials.map(async material=>{
+      const entries=await Promise.all(['albedo','normal','roughnessMap'].filter(key=>material[key]).map(async kind=>{
+        const raw=pack.textures[material[kind].file];
+        const image=await createImageBitmap(new Blob([raw],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
+        images.push(image);return[kind,image];
+      }));
+      return Object.fromEntries(entries);
+    }));
+    for(const [index,material]of materials.entries()){
+      const maps=decodedMaps[index];
       const {width,height}=maps.albedo;
       if(width<1||height<1||width>2048||height>2048||(width&(width-1))||(height&(height-1))||Object.values(maps).some(image=>image.width!==width||image.height!==height))throw Error('Native material maps require matching power-of-two dimensions');
       let family=families.find(f=>f.width===width&&f.height===height);
@@ -439,10 +463,7 @@ export async function createForestLeafSurfaces({device,shader,pack}){
         family.id,family.rows.length,material.wrap==='repeat'?1:0,material.clearcoat??0],index*12);
       family.rows.push({maps,material});
     }
-    const T=GPUTextureUsage;
-    const code=await shader(FOREST_SURFACE_MIPS_WGSL,'forest native surface mipmaps');
-    const init=await device.createComputePipelineAsync({label:'forest initialise native surfaces',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceInit'}});
-    const mip=await device.createComputePipelineAsync({label:'forest filter native coverage',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceMips'}});
+    const [init,mip]=await pipelinesPromise;
     const encoder=device.createCommandEncoder({label:'forest immutable surface preparation'}),pass=encoder.beginComputePass();
     const view=(texture,level)=>texture.createView({dimension:'2d-array',baseMipLevel:level,mipLevelCount:1});
     for(const family of families){
@@ -881,14 +902,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     if(nativeMid)cullSource=forestWithNativeLod(cullSource);
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
-    const compute=await shader(cullSource,'forest GPU cull and compact');
+    const computePromise=shader(cullSource,'forest GPU cull and compact');
     const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
       fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
       depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
     const [reset,cull,sort,opaque,leaf,middlePipeline,volumePipeline,impostor]=await Promise.all([
-      device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}}),
-      device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}}),
-      nativeMid?device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}}):null,
+      computePromise.then(compute=>device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}})),
+      computePromise.then(compute=>device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}})),
+      nativeMid?computePromise.then(compute=>device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}})):null,
       pack.skipNative?null:pipe('forestNativeOpaqueFS'),
       pack.skipNative?null:pipe('forestNativeLeafFS'),
       middle?device.createRenderPipelineAsync({label:'instanced forest generated native middle',layout:'auto',vertex:{module,entryPoint:'forestMiddleVS',buffers:[FOREST_MIDDLE_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestMiddleFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}}):null,
@@ -929,12 +950,12 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         mode:impostorMode,appearanceErrorSupported:false,qualification:'Authored initial policy; native rendered comparisons required'},
       species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};
     async function installNative(){
-      let surfaces;const candidateBuffers=[];
+      let surfaces,surfacesPromise;const candidateBuffers=[];
       try{
         forestLoadAbort(abort.signal);
         for(const name of ['vertices.bin','indices.bin'])if(m.files[name].bytes>device.limits.maxBufferSize){nativeStatus.status='unsupported';throw Error('Native forest '+name+' exceeds device maxBufferSize ('+device.limits.maxBufferSize+')');}
         nativeStatus.status='loading';const source=pack.vertices?pack:await pack.loadNative({signal:abort.signal});forestLoadAbort(abort.signal);
-        surfaces=await createForestLeafSurfaces({device,shader,pack:source});forestLoadAbort(abort.signal);
+        surfacesPromise=createForestLeafSurfaces({device,shader,pack:source});surfacesPromise.catch(()=>{});
         const upload=async(data,usage,label)=>{
           const bytes=new Uint8Array(data.buffer,data.byteOffset,data.byteLength),buffer=device.createBuffer({label,size:bytes.byteLength,usage:usage|B.COPY_DST});allocated.push(buffer);candidateBuffers.push(buffer);
           // Each byte is uploaded once. Keep transfer chunks bounded and
@@ -944,6 +965,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           return buffer;
         };
         nativeStatus.status='uploading';const vertices=await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'),indices=await upload(nativeLod?nativeLod.indices:source.indices,B.INDEX,'forest immutable prototype indices');
+        surfaces=await surfacesPromise;forestLoadAbort(abort.signal);
         const materials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');candidateBuffers.push(materials);
         const canopyLight=make(forestLightGPUBytes(source.canopyLight),B.STORAGE,'forest immutable native canopy exposure');candidateBuffers.push(canopyLight);
         for(const p of m.prototypes)for(const tier of nativeMid?(middle?[0,2,3]:[0,1,2,3]):middle?[0]:[0,1]){
@@ -964,7 +986,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         nativeStatus.resident=true;nativeStatus.status='resident';
         if(forestMass&&forestMass.stats.mode==='auto')forestMass.stats.phase='authored error-limited selection; native resources resident';
         pack.releaseNativeCPU?.();return true;
-      }catch(error){surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
+      }catch(error){if(!surfaces&&surfacesPromise)surfaces=await surfacesPromise.catch(()=>null);surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
         if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas&&!(middle&&volume))throw error;return false;}
     }
     const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,pack.deferNative?1500:0)).then(installNative):Promise.resolve(await installNative());

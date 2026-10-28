@@ -371,7 +371,30 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const skipNativeForest=isMobile;
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
+  const mipPipePromise=Promise.resolve(mipPipe),cloudsResolvedPromise=Promise.resolve(clouds),waterOpticsResolvedPromise=Promise.resolve(waterOptics);
+  mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
+  const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
+  const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
+  const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
+  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
+    vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
+    primitive:{topology:'triangle-list',cullMode:'none'},
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
+  const terrainPipesPromise=modulePromise.then(module=>Promise.all([
+    makePipe(module,'vs',[meshLayout]),
+    makePipe(module,'treeVS',treeBuffers,'opaqueFS'),
+    makePipe(module,'treeVS',treeBuffers,'leafFS'),
+    makePipe(module,'groundVS',treeBuffers,'groundFS'),
+    computePipe(TERRAIN_LIGHT,'island sunlight'),
+    module,
+  ]));
+  terrainPipesPromise.catch(()=>{});
+  const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
+    wo.capture({source:TERRAIN,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}),
+    wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}),
+  ]):[null,null]);
+  submergedPipesPromise.catch(()=>{});
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;
   let forestFailure=null;
@@ -409,7 +432,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         assets:useSubtropicalForest?SUBTROPICAL_FOREST_MIDDLE_ASSETS:FOREST_MIDDLE_ASSETS,
       });
       if(middle?.manifest.recipe.leafShading==='field'){
-        const forest=await forestPromise;
+        const forest=await forestRootsPromise;
         if(!forest?.volumes)throw Error('Field-shaded middle requires verified native foliage fields');
       }
       return middle;
@@ -454,10 +477,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     heights=proceduralPack.heights;biome=proceduralPack.biome;
   }else{
     const [heightResponse,biomeResponse,albedoResponse,regionResponse]=await Promise.all([load(ISLAND.assets.height),load(ISLAND.assets.biome),load(ISLAND.assets.albedo),load('assets/world/saba/manifest.json')]);
-    heights=decodeIsland(await heightResponse.arrayBuffer());biome=decodeBiome(await biomeResponse.arrayBuffer());
-    const baseManifest=await regionResponse.json(),nearDisabled=typeof location!=='undefined'&&search.get('nearTerrain')==='off';
+    const albedoBitmapPromise=albedoResponse.blob().then(b=>createImageBitmap(b));albedoBitmapPromise.catch(()=>{});
+    const [heightBuf,biomeBuf,baseManifest]=await Promise.all([heightResponse.arrayBuffer(),biomeResponse.arrayBuffer(),regionResponse.json()]);
+    heights=decodeIsland(heightBuf);biome=decodeBiome(biomeBuf);
+    const nearDisabled=typeof location!=='undefined'&&search.get('nearTerrain')==='off';
     if(!nearDisabled)try{nearTile=await loadTerrainNear({baseManifest,baseHeights:heights});}catch(error){nearFailure=error.message;}
-    albedoImage=await createImageBitmap(await albedoResponse.blob());
+    albedoImage=await albedoBitmapPromise;
     if(albedoImage.width!==ISLAND.albedoSize||albedoImage.height!==ISLAND.albedoSize)throw new Error('Incomplete Saba imagery seed');
   }
   const loadedSections=new Map();
@@ -485,12 +510,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z);
   };
   let mesh=proceduralPack?proceduralPack.mesh:islandGeometry(heights,nearTile?.bounds);const fineMesh=nearTile?terrainNearGeometry(nearTile,mesh):null;
-  const originalTrees=proceduralPack?proceduralPack.vegetation.trees:islandVegetation(heights,biome),canopyPack=await canopyPromise;
+  const originalTrees=proceduralPack?proceduralPack.vegetation.trees:islandVegetation(heights,biome);
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
-  const canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees,forestPack=await forestPromise;
-  let trees=forestPack?new Float32Array(0):canopyTrees;
+  let canopyTrees=originalTrees,trees=originalTrees,forestPatches=[];
   let groundPatches=createGroundCoverPatches(activeRegion,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
+  const nearBitmapPromise=nearTile?createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'})):null;
+  nearBitmapPromise?.catch(()=>{});
   const buffer=(data,usage,label)=>{
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
     if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;
@@ -543,6 +569,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }else{
     device.queue.copyExternalImageToTexture({source:albedoImage},{texture:albedo},[ISLAND.albedoSize,ISLAND.albedoSize]);albedoImage.close();
   }
+  mipPipe=await mipPipePromise;
   const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(mipPipe);
   for(let m=1;m<albedoMips;m++){
     cp.setBindGroup(0,device.createBindGroup({layout:mipPipe.getBindGroupLayout(0),entries:[
@@ -552,7 +579,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   cp.end();device.queue.submit([enc.finish()]);
   let nearAlbedo=albedo;
   if(nearTile){
-    const image=await createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'}));
+    const image=await nearBitmapPromise;
     if(image.width!==1024||image.height!==1024)throw Error('Incomplete Wells Bay near imagery');
     nearAlbedo=device.createTexture({label:'Wells Bay registered near imagery',size:[1024,1024],format:'rgba8unorm',mipLevelCount:11,
       usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT});
@@ -589,21 +616,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const module=await modulePromise;
-  const makePipe=(entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
-    vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
-    primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
-  const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
-  const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
-  const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
-  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,lightPipe]=await Promise.all([
-    makePipe('vs',[meshLayout]),
-    makePipe('treeVS',treeBuffers,'opaqueFS'),
-    makePipe('treeVS',treeBuffers,'leafFS'),
-    makePipe('groundVS',treeBuffers,'groundFS'),
-    computePipe(TERRAIN_LIGHT,'island sunlight'),
-  ]);
+  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,lightPipe,module]=await terrainPipesPromise;
   const groundMeshes=Array.from({length:GROUND_COVER.variants},(_,variant)=>{
     const geometry=groundCoverGeometry(variant);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover ${variant}`),count:geometry.length/TREE_VERTEX_FLOATS};
   });
@@ -619,7 +632,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const treeBatches=Array.from({length:3*TREE_VARIANTS},(_,id)=>({
     buffer:null,capacity:0,label:`tree instances ${id}`,data:[],count:0,
   }));
-  const previousLods=new Map();let forestPatches=createForestPatches(trees);const lodStats={near:0,middle:0,far:0,budgetOverflow:0};
+  const previousLods=new Map();const lodStats={near:0,middle:0,far:0,budgetOverflow:0};
   let lastCamera=null,lastView=null,lastPixels=null,currentPixelError=TREE_PIXEL_ERROR;
   let importedCanopy=null;
   let checkCameraSectionStreaming=null;
@@ -687,7 +700,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}]];
-  if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
+  clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
   const [forestMassPack,forestMiddlePack]=await Promise.all([forestMassPromise,forestMiddlePromise]);
   let forestMass=null,proceduralMiddle=null;
   if(forestMassPack&&!forestMassPack.manifestOnly&&!proceduralPack)try{forestMass=await createForestMassRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:forestMassPack,middlePack:forestMiddlePack,mode:forestAtlasDebug?'near':forestMassMode,preview:false});}catch(error){forestMassFailure=error.message;}
@@ -705,6 +718,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       };
     }
   }catch(error){proceduralMiddle=null;forestMiddleFailure=error.message;}
+  const [canopyPack,forestPack]=await Promise.all([canopyPromise,forestPromise]);
+  canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees;
+  trees=forestPack?new Float32Array(0):canopyTrees;
+  forestPatches=createForestPatches(trees);
+  if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
   const streamMaxRoots=isMobile?24000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
@@ -726,10 +744,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
   const groundGroup=bind(groundPipe,opaqueResources);
   const cloudGroups=[terrainPipe,opaqueTreePipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
-  const [submerged,submergedGround]=waterOptics?await Promise.all([
-    waterOptics.capture({source:TERRAIN,pipeline:terrainPipe,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}),
-    waterOptics.capture({source:TERRAIN,pipeline:groundPipe,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}),
-  ]):[null,null];
+  const [submerged,submergedGround]=await submergedPipesPromise;
   const submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource}))),submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);

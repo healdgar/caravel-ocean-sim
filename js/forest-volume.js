@@ -31,6 +31,7 @@ const forestVolumeVector=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.i
 const forestVolumeReceipt=r=>forestVolumeUint(r?.bytes)&&r.bytes>0&&r.bytes<=forestVolumeMaxBytes&&/^[a-f0-9]{64}$/.test(r.sha256??'');
 const forestVolumeSame=(a,b)=>forestVolumeReceipt(a)&&forestVolumeReceipt(b)&&a.bytes===b.bytes&&a.sha256===b.sha256;
 const forestVolumeHalf=b=>{const s=b&0x8000?-1:1,e=(b>>10)&31,m=b&1023;return e===0?s*m*2**-24:e===31?(m?NaN:s*Infinity):s*(1+m/1024)*2**(e-15);};
+const forestVolumeHalfValid=(()=>{const t=new Uint8Array(65536);for(let b=0;b<65536;b++){const v=forestVolumeHalf(b);if(Number.isFinite(v)&&v>=0)t[b]=v===0?3:1;}return t;})();
 function forestVolumeManifest(m,forest=null){
  if(m?.format==='waterworld.forest-volumes'&&m.version===1&&m.units==='metres'&&m.upAxis==='Y'&&Array.isArray(m.prototypes)&&m.prototypes.length>=1&&m.prototypes.length<=16){
   if(forest&&(!Array.isArray(forest.prototypes)||forest.prototypes.length!==m.prototypes.length))throw Error('Native forest volume specimen count mismatch');
@@ -94,10 +95,12 @@ export async function loadForestVolumes({forest,receipt=forest?.volume,fetchAsse
   const raw=await new Response(new Blob([encoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   if(raw.byteLength!==r.bytes||await digest(raw)!==r.sha256)throw Error('Native forest volume decoded digest mismatch');row[key]=new Uint8Array(raw);
  }
-  const view=new DataView(row.field.buffer,row.field.byteOffset,row.field.byteLength);
-  for(let at=0;at<row.field.byteLength;at+=8){const density=forestVolumeHalf(view.getUint16(at+6,true));
-   if(!Number.isFinite(density)||density<0)throw Error('Nonfinite/negative native forest volume density');
-   for(let c=0;c<3;c++){const value=forestVolumeHalf(view.getUint16(at+c*2,true));if(!Number.isFinite(value)||value<0||(density===0&&value!==0))throw Error('Invalid native forest volume pigment moment');}
+  const u16=new Uint16Array(row.field.buffer,row.field.byteOffset,row.field.byteLength>>1);
+  for(let at=0;at<u16.length;at+=4){
+   const dFlag=forestVolumeHalfValid[u16[at+3]];
+   if(!dFlag)throw Error('Nonfinite/negative native forest volume density');
+   const f0=forestVolumeHalfValid[u16[at]],f1=forestVolumeHalfValid[u16[at+1]],f2=forestVolumeHalfValid[u16[at+2]];
+   if(!(f0&f1&f2&1)||(dFlag===3&&(f0&f1&f2)!==3))throw Error('Invalid native forest volume pigment moment');
   }
   prototypes.push(row);
  }
