@@ -6943,17 +6943,21 @@ struct PartAssemblyPoseVertex {position:vec4f,normal:vec4f};
     for(var i=0u;i<24u;i++){
       let imp=partAssemblyUniform.impacts[i];
       if(imp.w<=0.001){break;}
-      let diff=current.position.xyz-imp.xyz;
-      let dist=length(diff);
-      let radius=0.24+imp.w*0.28;
+      let diffEntry=vec3f((current.position.x-imp.x)*0.65,current.position.y-imp.y,current.position.z-imp.z);
+      let diffExit=vec3f((current.position.x+imp.x)*0.65,current.position.y-imp.y,current.position.z-imp.z);
+      let distEntry=length(diffEntry);
+      let distExit=select(99.0,length(diffExit),imp.y>0.35);
+      let dist=min(distEntry,distExit);
+      let sideWeight=select(0.75,1.0,distEntry<=distExit);
+      let radius=0.38+imp.w*0.42;
       if(dist<radius){
         let falloff=1.0-dist/radius;
         let core=falloff*falloff;
-        localDamage=max(localDamage,clamp(imp.w*falloff*1.45,0.0,1.0));
+        localDamage=max(localDamage,clamp(imp.w*sideWeight*falloff*1.65,0.0,1.0));
         if(desc0.z<=3.5){
           let jag=fract(sin(f32(v)*12.9898+f32(i)*78.233)*43758.5453)-0.5;
-          let inward=vec3f(-sign(select(1.0,current.position.x,abs(current.position.x)>0.02))*0.055,-0.015+jag*0.03,jag*0.025);
-          posedPos+=inward*(core*imp.w);
+          let inward=vec3f(-sign(select(1.0,current.position.x,abs(current.position.x)>0.02))*0.095,-0.025+jag*0.055,jag*0.045);
+          posedPos+=inward*(core*imp.w*sideWeight);
         }
       }
     }
@@ -11275,19 +11279,19 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   let dmg=clamp(in.damage,0.0,1.0);
   if(dmg>0.001){
-    let splNoise=gnoise(vec2f(p.z*26.0+p.y*11.0,p.y*48.0-p.x*19.0));
-    let splFine=gnoise(vec2f(p.z*95.0,p.y*140.0+splNoise*4.0));
-    let rawOak=vec3f(0.56,0.41,0.22)*(0.82+0.36*splFine);
-    let sootTint=mix(vec3f(1.0),vec3f(0.32,0.26,0.21),clamp(dmg*1.15,0.0,1.0));
+    let splNoise=gnoise(vec2f(p.z*24.0+p.y*9.0,p.y*46.0-p.x*17.0));
+    let splFine=gnoise(vec2f(p.z*110.0,p.y*160.0+splNoise*5.0));
+    let rawOak=vec3f(0.74,0.53,0.25)*(0.80+0.42*splFine);
+    let sootTint=mix(vec3f(1.0),vec3f(0.18,0.14,0.11),clamp(dmg*1.25,0.0,1.0));
     albedo*=sootTint;
-    let splinterRing=smoothstep(0.18,0.52,dmg+splNoise*0.18)*(1.0-smoothstep(0.62,0.88,dmg+splNoise*0.14));
+    let splinterRing=smoothstep(0.14,0.46,dmg+splNoise*0.22)*(1.0-smoothstep(0.58,0.84,dmg+splNoise*0.16));
     if(isWood || paintedWood){
-      albedo=mix(albedo,rawOak,splinterRing*0.88);
+      albedo=mix(albedo,rawOak,splinterRing*0.95);
     }
-    let holeCore=smoothstep(0.58,0.86,dmg+splNoise*0.12);
-    albedo=mix(albedo,vec3f(0.015,0.012,0.010),holeCore*0.94);
-    rough=clamp(rough+dmg*0.24,0.04,0.99);
-    metal*=1.0-dmg*0.75;
+    let holeCore=smoothstep(0.52,0.78,dmg+splNoise*0.14);
+    albedo=mix(albedo,vec3f(0.006,0.005,0.004),holeCore*0.97);
+    rough=clamp(rough+dmg*0.28,0.04,0.99);
+    metal*=1.0-dmg*0.85;
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let nl=clamp(dot(n,l),0.0,1.0);
@@ -14387,8 +14391,8 @@ function createGunportSafetyState({maxAge=.3,maxTravel=.5,margin=.1}={}){
   };
 }
 
-async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePipe,surfaceWaves=null}){
-  const B=GPUBufferUsage,limit=128,state=createGunportSafetyState();
+async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePipe,surfaceWaves=null,maxAge=.3,maxTravel=.5,margin=.1}){
+  const B=GPUBufferUsage,limit=128,state=createGunportSafetyState({maxAge,maxTravel,margin});
   const make=(label,usage)=>device.createBuffer({label,size:limit*16,usage});
   const input=make('gunport muzzle positions',B.STORAGE|B.COPY_DST),output=make('gunport sea clearance',B.STORAGE|B.COPY_SRC),readback=make('gunport clearance readback',B.COPY_DST|B.MAP_READ);
   const count=device.createBuffer({label:'gunport query count',size:16,usage:B.UNIFORM|B.COPY_DST});
@@ -15986,8 +15990,10 @@ function createPartAssemblyState(catalog, options = {}) {
       for (let p = 0; p < partCount; p++) {
         const part = catalog.parts[p];
         const dmg = hasAnyPartDamage ? Math.max(0, Math.min(1, Number(partDamage[part.id] ?? 0))) : 0;
+        const spanZ = part.bounds ? part.bounds.max[2] - part.bounds.min[2] : 0;
         const isContinuousSkin =
           part.layer === 0 ||
+          spanZ > 3.2 ||
           part.id.startsWith('hull.planking') ||
           part.id.startsWith('hull.wales') ||
           part.id.startsWith('deck.');
@@ -15995,11 +16001,12 @@ function createPartAssemblyState(catalog, options = {}) {
           !isContinuousSkin &&
           part.triangleCount > 0 &&
           part.triangleCount <= 450 &&
+          spanZ <= 2.2 &&
           part.layer >= 2 &&
           part.layer <= 3;
-        const nextAppear = isBreakable && dmg >= 0.78 ? 0.0 : 1.0;
-        const nextExplode = !isContinuousSkin && dmg > 0.12 && part.triangleCount <= 1500 ? dmg * 0.14 : 0.0;
-        const nextWear = isContinuousSkin ? Math.min(0.32, dmg * 0.4) : dmg;
+        const nextAppear = isBreakable && dmg >= 0.65 ? 0.0 : 1.0;
+        const nextExplode = !isContinuousSkin && dmg > 0.08 && part.triangleCount <= 1500 ? dmg * 0.26 : 0.0;
+        const nextWear = isContinuousSkin ? Math.min(0.28, dmg * 0.35) : dmg;
         const base = p * 4;
         if (
           Math.abs(partState[base + 0] - nextAppear) > 1e-5 ||
@@ -36663,7 +36670,10 @@ function applyShipImpactDamage(targetBoat, event) {
     if (damage.hullIntegrity <= 0) damage.sunk = true;
   }
 
-  const partBudget = (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.25;
+  const partBudget = Math.min(
+    1100000,
+    (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.18
+  );
   const deltaDamage = energy / Math.max(10000, partBudget);
   const prevPartDamage = damage.partDamage[hitPartId] ?? 0;
   const nextPartDamage = Math.min(1, +(prevPartDamage + deltaDamage).toFixed(3));
@@ -36677,25 +36687,26 @@ function applyShipImpactDamage(targetBoat, event) {
       if (!gunneryShipAssetCache) gunneryShipAssetCache = createShipAssetCache();
       const catalog = gunneryShipAssetCache.get(modelId)?.partAssembly;
       if (catalog?.parts) {
-        const splashR = 0.55;
+        const splashR = 0.78;
         for (const part of catalog.parts) {
+          const b = part.bounds;
+          const spanZ = b.max[2] - b.min[2];
           if (
             part.id === hitPartId ||
             part.triangleCount <= 0 ||
-            part.triangleCount > 1500 ||
+            spanZ > 3.2 ||
             part.id.startsWith('hull.planking') ||
             part.id.startsWith('deck.')
           ) {
             continue;
           }
-          const b = part.bounds;
           const dx = designPt[0] < b.min[0] ? b.min[0] - designPt[0] : designPt[0] > b.max[0] ? designPt[0] - b.max[0] : 0;
           const dy = designPt[1] < b.min[1] ? b.min[1] - designPt[1] : designPt[1] > b.max[1] ? designPt[1] - b.max[1] : 0;
           const dz = designPt[2] < b.min[2] ? b.min[2] - designPt[2] : designPt[2] > b.max[2] ? designPt[2] - b.max[2] : 0;
           const d = Math.hypot(dx, dy, dz);
           if (d <= splashR) {
             const falloff = 1 - d / splashR;
-            const add = deltaDamage * (0.45 + 0.55 * falloff);
+            const add = deltaDamage * (0.55 + 0.55 * falloff);
             damage.partDamage[part.id] = Math.min(1, +((damage.partDamage[part.id] ?? 0) + add).toFixed(3));
           }
         }
@@ -36706,10 +36717,11 @@ function applyShipImpactDamage(targetBoat, event) {
   }
 
   if (designPt && event.hitZone !== 'rigging') {
-    const siteSeverity = Math.min(1, Math.max(0.35, Math.cbrt(energy / 95000) * 0.68));
+    const surfaceX = Math.max(-1.55, Math.min(1.55, designPt[0]));
+    const siteSeverity = Math.min(1, Math.max(0.55, Math.cbrt(energy / 95000) * 0.78));
     let merged = false;
     for (const site of damage.impactSites) {
-      if (Math.hypot(site[0] - designPt[0], site[1] - designPt[1], site[2] - designPt[2]) < 0.25) {
+      if (Math.hypot(site[0] - surfaceX, site[1] - designPt[1], site[2] - designPt[2]) < 0.28) {
         site[3] = Math.min(1, +(site[3] + siteSeverity * 0.55).toFixed(3));
         merged = true;
         break;
@@ -36718,7 +36730,7 @@ function applyShipImpactDamage(targetBoat, event) {
     if (!merged) {
       if (damage.impactSites.length >= 24) damage.impactSites.shift();
       damage.impactSites.push([
-        +designPt[0].toFixed(3),
+        +surfaceX.toFixed(3),
         +designPt[1].toFixed(3),
         +designPt[2].toFixed(3),
         +siteSeverity.toFixed(3),
@@ -37954,7 +37966,7 @@ async function main() {
   const dolphinsPromise=createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   const gunEffectsPromise=createGunneryEffects({surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
   const gunSeaPromise=createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
-  const gunportSafetyPromise=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
+  const gunportSafetyPromise=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0});
   const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
   const uniqueShipAssetsPromise=Promise.all([...new Set(fleetSpecs.map(s=>s.modelId))].map(shipRenderAsset));
   for(const p of [dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,probePipePromise,uniqueShipAssetsPromise])p.catch(()=>{});
@@ -38330,10 +38342,26 @@ async function main() {
     if(terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
   }
   const makeGunneryOptions=(ownerBoat,prefix='')=>({
-    muzzleBlock:ownerBoat===boat?(gun,pose)=>gunportSafety.block(gun,pose,ownerBoat.gunnery.time,ownerBoat.revision):()=>null,
+    muzzleBlock:ownerBoat===boat?(gun,pose)=>{
+      const r=gunportSafety.block(gun,pose,ownerBoat.gunnery.time,ownerBoat.revision);
+      return r==='Checking sea at gunports'&&(BROADSIDE_SCENARIO||ownerBoat.gunnery.queue.length>0)?null:r;
+    }:()=>null,
     getVessels:()=>vessels.filter(v=>v.boat!==ownerBoat),
     getTerrain:()=>terrain,
-    onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),
+    onOrder:(id,b)=>{
+      sceneAudio.gunneryOrder(id,b);
+      if(BROADSIDE_SCENARIO&&ownerBoat===boat&&(id==='fire-port'||id==='fire-starboard')){
+        if(typeof setCaptainOpen==='function')setCaptainOpen(false);
+        if(followerEnabled&&vessels[1]?.gunnery){
+          const oppSide=id==='fire-port'?'starboard':'port';
+          if(!vessels[1].gunnery.ordered&&!vessels[1].gunnery.state.queue.length){
+            vessels[1].gunnery.readyAtQuarters(oppSide);
+            if(vessels[1].crew)manGunStationsImmediate(vessels[1].crew.state,vessels[1].boat);
+            vessels[1].gunnery.fire(oppSide);
+          }
+        }
+      }
+    },
     onEvent:event=>{
       sceneAudio.gunneryEvent(event);
       const shotKey=prefix+event.shotId;
@@ -38370,10 +38398,10 @@ async function main() {
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
 
-  const broadsideMidPan=BROADSIDE_SCENARIO&&followerEnabled?(vessels[1].boat.x-boat.x)*0.5:0;
-  const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',BROADSIDE_SCENARIO?24:57.3,-360,360)*D2R,
-    elevation:param('orbitElevation',BROADSIDE_SCENARIO?11.5:14.3,-ORBIT_LIMIT/D2R,ORBIT_LIMIT/D2R)*D2R,
-    distance:param('orbitDistance',BROADSIDE_SCENARIO?52:shipAsset.model.geometry==='rowing-procedural-v1'||shipAsset.model.geometry==='later-sail-procedural-v1'?Math.max(12,shipAsset.model.runtime.length*1.6):SHIP_ID==='victory'?65:32,1,600),
+  const broadsideMidPan=BROADSIDE_SCENARIO&&followerEnabled?(vessels[1].boat.x-boat.x)*0.48:0;
+  const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',BROADSIDE_SCENARIO?28:57.3,-360,360)*D2R,
+    elevation:param('orbitElevation',BROADSIDE_SCENARIO?14:14.3,-ORBIT_LIMIT/D2R,ORBIT_LIMIT/D2R)*D2R,
+    distance:param('orbitDistance',BROADSIDE_SCENARIO?48:shipAsset.model.geometry==='rowing-procedural-v1'||shipAsset.model.geometry==='later-sail-procedural-v1'?Math.max(12,shipAsset.model.runtime.length*1.6):SHIP_ID==='victory'?65:32,1,600),
     panX:param('orbitPanX',broadsideMidPan,-10000,10000),panY:param('orbitPanY',0,-10000,10000),panZ:param('orbitPanZ',0,-10000,10000),
     fleet:qs.get('fleetView')==='1',wildlife:qs.get('dolphinView')==='1',fleetZoom:1,radius:32 };
   const eyePosition = new Float32Array(3);
@@ -38930,7 +38958,10 @@ async function main() {
   window.visualViewport?.addEventListener('resize',layoutControls);
   window.visualViewport?.addEventListener('scroll',layoutControls);
   addEventListener('resize',layoutControls);layoutControls();
-  if(BROADSIDE_SCENARIO&&qs.get('panel')!=='0')setCaptainOpen(true);
+  if(BROADSIDE_SCENARIO&&qs.get('panel')!=='0'){
+    setCaptainOpen(true);
+    requestAnimationFrame(()=>gunControls?.element?.scrollIntoView?.({block:'end'}));
+  }
   const updateHelp = () => {
     const gunHint = BROADSIDE_SCENARIO ? ' · F: fire broadside · G: enemy return fire' : '';
     document.querySelector('#hud .help').textContent = (boat.enabled

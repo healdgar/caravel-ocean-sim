@@ -483,7 +483,7 @@ async function main() {
   const dolphinsPromise=createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
   const gunEffectsPromise=createGunneryEffects({surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
   const gunSeaPromise=createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
-  const gunportSafetyPromise=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe});
+  const gunportSafetyPromise=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0});
   const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
   const uniqueShipAssetsPromise=Promise.all([...new Set(fleetSpecs.map(s=>s.modelId))].map(shipRenderAsset));
   for(const p of [dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,probePipePromise,uniqueShipAssetsPromise])p.catch(()=>{});
@@ -859,10 +859,26 @@ async function main() {
     if(terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
   }
   const makeGunneryOptions=(ownerBoat,prefix='')=>({
-    muzzleBlock:ownerBoat===boat?(gun,pose)=>gunportSafety.block(gun,pose,ownerBoat.gunnery.time,ownerBoat.revision):()=>null,
+    muzzleBlock:ownerBoat===boat?(gun,pose)=>{
+      const r=gunportSafety.block(gun,pose,ownerBoat.gunnery.time,ownerBoat.revision);
+      return r==='Checking sea at gunports'&&(BROADSIDE_SCENARIO||ownerBoat.gunnery.queue.length>0)?null:r;
+    }:()=>null,
     getVessels:()=>vessels.filter(v=>v.boat!==ownerBoat),
     getTerrain:()=>terrain,
-    onOrder:(id,b)=>sceneAudio.gunneryOrder(id,b),
+    onOrder:(id,b)=>{
+      sceneAudio.gunneryOrder(id,b);
+      if(BROADSIDE_SCENARIO&&ownerBoat===boat&&(id==='fire-port'||id==='fire-starboard')){
+        if(typeof setCaptainOpen==='function')setCaptainOpen(false);
+        if(followerEnabled&&vessels[1]?.gunnery){
+          const oppSide=id==='fire-port'?'starboard':'port';
+          if(!vessels[1].gunnery.ordered&&!vessels[1].gunnery.state.queue.length){
+            vessels[1].gunnery.readyAtQuarters(oppSide);
+            if(vessels[1].crew)manGunStationsImmediate(vessels[1].crew.state,vessels[1].boat);
+            vessels[1].gunnery.fire(oppSide);
+          }
+        }
+      }
+    },
     onEvent:event=>{
       sceneAudio.gunneryEvent(event);
       const shotKey=prefix+event.shotId;
@@ -899,10 +915,10 @@ async function main() {
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
 
-  const broadsideMidPan=BROADSIDE_SCENARIO&&followerEnabled?(vessels[1].boat.x-boat.x)*0.5:0;
-  const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',BROADSIDE_SCENARIO?24:57.3,-360,360)*D2R,
-    elevation:param('orbitElevation',BROADSIDE_SCENARIO?11.5:14.3,-ORBIT_LIMIT/D2R,ORBIT_LIMIT/D2R)*D2R,
-    distance:param('orbitDistance',BROADSIDE_SCENARIO?52:shipAsset.model.geometry==='rowing-procedural-v1'||shipAsset.model.geometry==='later-sail-procedural-v1'?Math.max(12,shipAsset.model.runtime.length*1.6):SHIP_ID==='victory'?65:32,1,600),
+  const broadsideMidPan=BROADSIDE_SCENARIO&&followerEnabled?(vessels[1].boat.x-boat.x)*0.48:0;
+  const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',BROADSIDE_SCENARIO?28:57.3,-360,360)*D2R,
+    elevation:param('orbitElevation',BROADSIDE_SCENARIO?14:14.3,-ORBIT_LIMIT/D2R,ORBIT_LIMIT/D2R)*D2R,
+    distance:param('orbitDistance',BROADSIDE_SCENARIO?48:shipAsset.model.geometry==='rowing-procedural-v1'||shipAsset.model.geometry==='later-sail-procedural-v1'?Math.max(12,shipAsset.model.runtime.length*1.6):SHIP_ID==='victory'?65:32,1,600),
     panX:param('orbitPanX',broadsideMidPan,-10000,10000),panY:param('orbitPanY',0,-10000,10000),panZ:param('orbitPanZ',0,-10000,10000),
     fleet:qs.get('fleetView')==='1',wildlife:qs.get('dolphinView')==='1',fleetZoom:1,radius:32 };
   const eyePosition = new Float32Array(3);
@@ -1459,7 +1475,10 @@ async function main() {
   window.visualViewport?.addEventListener('resize',layoutControls);
   window.visualViewport?.addEventListener('scroll',layoutControls);
   addEventListener('resize',layoutControls);layoutControls();
-  if(BROADSIDE_SCENARIO&&qs.get('panel')!=='0')setCaptainOpen(true);
+  if(BROADSIDE_SCENARIO&&qs.get('panel')!=='0'){
+    setCaptainOpen(true);
+    requestAnimationFrame(()=>gunControls?.element?.scrollIntoView?.({block:'end'}));
+  }
   const updateHelp = () => {
     const gunHint = BROADSIDE_SCENARIO ? ' · F: fire broadside · G: enemy return fire' : '';
     document.querySelector('#hud .help').textContent = (boat.enabled

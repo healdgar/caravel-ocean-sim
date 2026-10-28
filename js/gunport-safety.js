@@ -26,8 +26,8 @@ export function createGunportSafetyState({maxAge=.3,maxTravel=.5,margin=.1}={}){
   };
 }
 
-export async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePipe,surfaceWaves=null}){
-  const B=GPUBufferUsage,limit=128,state=createGunportSafetyState();
+export async function createGunportSafety({device,frameUBO,seaView,seaSampler,computePipe,surfaceWaves=null,maxAge=.3,maxTravel=.5,margin=.1}){
+  const B=GPUBufferUsage,limit=128,state=createGunportSafetyState({maxAge,maxTravel,margin});
   const make=(label,usage)=>device.createBuffer({label,size:limit*16,usage});
   const input=make('gunport muzzle positions',B.STORAGE|B.COPY_DST),output=make('gunport sea clearance',B.STORAGE|B.COPY_SRC),readback=make('gunport clearance readback',B.COPY_DST|B.MAP_READ);
   const count=device.createBuffer({label:'gunport query count',size:16,usage:B.UNIFORM|B.COPY_DST});

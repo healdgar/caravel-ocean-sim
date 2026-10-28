@@ -394,7 +394,7 @@ test('syncVesselDamage maps cannonball impact sites and modular part damage into
   assert.equal(state.isDefaultIntact(), true);
 
   const stanchionPart = victoryCatalog.parts.find(
-    (p) => p.id.startsWith('bulwark.') && p.triangleCount > 0 && p.triangleCount <= 450 && p.layer >= 2
+    (p) => p.id.includes('.stanchion.') && p.triangleCount > 0 && p.triangleCount <= 450 && p.layer >= 2
   );
   assert.ok(stanchionPart, 'Victory should have a breakable bulwark modular part');
 

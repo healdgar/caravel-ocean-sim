@@ -97,17 +97,21 @@ struct PartAssemblyPoseVertex {position:vec4f,normal:vec4f};
     for(var i=0u;i<24u;i++){
       let imp=partAssemblyUniform.impacts[i];
       if(imp.w<=0.001){break;}
-      let diff=current.position.xyz-imp.xyz;
-      let dist=length(diff);
-      let radius=0.24+imp.w*0.28;
+      let diffEntry=vec3f((current.position.x-imp.x)*0.65,current.position.y-imp.y,current.position.z-imp.z);
+      let diffExit=vec3f((current.position.x+imp.x)*0.65,current.position.y-imp.y,current.position.z-imp.z);
+      let distEntry=length(diffEntry);
+      let distExit=select(99.0,length(diffExit),imp.y>0.35);
+      let dist=min(distEntry,distExit);
+      let sideWeight=select(0.75,1.0,distEntry<=distExit);
+      let radius=0.38+imp.w*0.42;
       if(dist<radius){
         let falloff=1.0-dist/radius;
         let core=falloff*falloff;
-        localDamage=max(localDamage,clamp(imp.w*falloff*1.45,0.0,1.0));
+        localDamage=max(localDamage,clamp(imp.w*sideWeight*falloff*1.65,0.0,1.0));
         if(desc0.z<=3.5){
           let jag=fract(sin(f32(v)*12.9898+f32(i)*78.233)*43758.5453)-0.5;
-          let inward=vec3f(-sign(select(1.0,current.position.x,abs(current.position.x)>0.02))*0.055,-0.015+jag*0.03,jag*0.025);
-          posedPos+=inward*(core*imp.w);
+          let inward=vec3f(-sign(select(1.0,current.position.x,abs(current.position.x)>0.02))*0.095,-0.025+jag*0.055,jag*0.045);
+          posedPos+=inward*(core*imp.w*sideWeight);
         }
       }
     }

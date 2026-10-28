@@ -820,8 +820,10 @@ export function createPartAssemblyState(catalog, options = {}) {
       for (let p = 0; p < partCount; p++) {
         const part = catalog.parts[p];
         const dmg = hasAnyPartDamage ? Math.max(0, Math.min(1, Number(partDamage[part.id] ?? 0))) : 0;
+        const spanZ = part.bounds ? part.bounds.max[2] - part.bounds.min[2] : 0;
         const isContinuousSkin =
           part.layer === 0 ||
+          spanZ > 3.2 ||
           part.id.startsWith('hull.planking') ||
           part.id.startsWith('hull.wales') ||
           part.id.startsWith('deck.');
@@ -829,11 +831,12 @@ export function createPartAssemblyState(catalog, options = {}) {
           !isContinuousSkin &&
           part.triangleCount > 0 &&
           part.triangleCount <= 450 &&
+          spanZ <= 2.2 &&
           part.layer >= 2 &&
           part.layer <= 3;
-        const nextAppear = isBreakable && dmg >= 0.78 ? 0.0 : 1.0;
-        const nextExplode = !isContinuousSkin && dmg > 0.12 && part.triangleCount <= 1500 ? dmg * 0.14 : 0.0;
-        const nextWear = isContinuousSkin ? Math.min(0.32, dmg * 0.4) : dmg;
+        const nextAppear = isBreakable && dmg >= 0.65 ? 0.0 : 1.0;
+        const nextExplode = !isContinuousSkin && dmg > 0.08 && part.triangleCount <= 1500 ? dmg * 0.26 : 0.0;
+        const nextWear = isContinuousSkin ? Math.min(0.28, dmg * 0.35) : dmg;
         const base = p * 4;
         if (
           Math.abs(partState[base + 0] - nextAppear) > 1e-5 ||

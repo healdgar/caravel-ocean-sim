@@ -270,7 +270,10 @@ export function applyShipImpactDamage(targetBoat, event) {
     if (damage.hullIntegrity <= 0) damage.sunk = true;
   }
 
-  const partBudget = (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.25;
+  const partBudget = Math.min(
+    1100000,
+    (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.18
+  );
   const deltaDamage = energy / Math.max(10000, partBudget);
   const prevPartDamage = damage.partDamage[hitPartId] ?? 0;
   const nextPartDamage = Math.min(1, +(prevPartDamage + deltaDamage).toFixed(3));
@@ -284,25 +287,26 @@ export function applyShipImpactDamage(targetBoat, event) {
       if (!gunneryShipAssetCache) gunneryShipAssetCache = createShipAssetCache();
       const catalog = gunneryShipAssetCache.get(modelId)?.partAssembly;
       if (catalog?.parts) {
-        const splashR = 0.55;
+        const splashR = 0.78;
         for (const part of catalog.parts) {
+          const b = part.bounds;
+          const spanZ = b.max[2] - b.min[2];
           if (
             part.id === hitPartId ||
             part.triangleCount <= 0 ||
-            part.triangleCount > 1500 ||
+            spanZ > 3.2 ||
             part.id.startsWith('hull.planking') ||
             part.id.startsWith('deck.')
           ) {
             continue;
           }
-          const b = part.bounds;
           const dx = designPt[0] < b.min[0] ? b.min[0] - designPt[0] : designPt[0] > b.max[0] ? designPt[0] - b.max[0] : 0;
           const dy = designPt[1] < b.min[1] ? b.min[1] - designPt[1] : designPt[1] > b.max[1] ? designPt[1] - b.max[1] : 0;
           const dz = designPt[2] < b.min[2] ? b.min[2] - designPt[2] : designPt[2] > b.max[2] ? designPt[2] - b.max[2] : 0;
           const d = Math.hypot(dx, dy, dz);
           if (d <= splashR) {
             const falloff = 1 - d / splashR;
-            const add = deltaDamage * (0.45 + 0.55 * falloff);
+            const add = deltaDamage * (0.55 + 0.55 * falloff);
             damage.partDamage[part.id] = Math.min(1, +((damage.partDamage[part.id] ?? 0) + add).toFixed(3));
           }
         }
@@ -313,10 +317,11 @@ export function applyShipImpactDamage(targetBoat, event) {
   }
 
   if (designPt && event.hitZone !== 'rigging') {
-    const siteSeverity = Math.min(1, Math.max(0.35, Math.cbrt(energy / 95000) * 0.68));
+    const surfaceX = Math.max(-1.55, Math.min(1.55, designPt[0]));
+    const siteSeverity = Math.min(1, Math.max(0.55, Math.cbrt(energy / 95000) * 0.78));
     let merged = false;
     for (const site of damage.impactSites) {
-      if (Math.hypot(site[0] - designPt[0], site[1] - designPt[1], site[2] - designPt[2]) < 0.25) {
+      if (Math.hypot(site[0] - surfaceX, site[1] - designPt[1], site[2] - designPt[2]) < 0.28) {
         site[3] = Math.min(1, +(site[3] + siteSeverity * 0.55).toFixed(3));
         merged = true;
         break;
@@ -325,7 +330,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     if (!merged) {
       if (damage.impactSites.length >= 24) damage.impactSites.shift();
       damage.impactSites.push([
-        +designPt[0].toFixed(3),
+        +surfaceX.toFixed(3),
         +designPt[1].toFixed(3),
         +designPt[2].toFixed(3),
         +siteSeverity.toFixed(3),

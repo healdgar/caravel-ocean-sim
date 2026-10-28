@@ -243,19 +243,19 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   let dmg=clamp(in.damage,0.0,1.0);
   if(dmg>0.001){
-    let splNoise=gnoise(vec2f(p.z*26.0+p.y*11.0,p.y*48.0-p.x*19.0));
-    let splFine=gnoise(vec2f(p.z*95.0,p.y*140.0+splNoise*4.0));
-    let rawOak=vec3f(0.56,0.41,0.22)*(0.82+0.36*splFine);
-    let sootTint=mix(vec3f(1.0),vec3f(0.32,0.26,0.21),clamp(dmg*1.15,0.0,1.0));
+    let splNoise=gnoise(vec2f(p.z*24.0+p.y*9.0,p.y*46.0-p.x*17.0));
+    let splFine=gnoise(vec2f(p.z*110.0,p.y*160.0+splNoise*5.0));
+    let rawOak=vec3f(0.74,0.53,0.25)*(0.80+0.42*splFine);
+    let sootTint=mix(vec3f(1.0),vec3f(0.18,0.14,0.11),clamp(dmg*1.25,0.0,1.0));
     albedo*=sootTint;
-    let splinterRing=smoothstep(0.18,0.52,dmg+splNoise*0.18)*(1.0-smoothstep(0.62,0.88,dmg+splNoise*0.14));
+    let splinterRing=smoothstep(0.14,0.46,dmg+splNoise*0.22)*(1.0-smoothstep(0.58,0.84,dmg+splNoise*0.16));
     if(isWood || paintedWood){
-      albedo=mix(albedo,rawOak,splinterRing*0.88);
+      albedo=mix(albedo,rawOak,splinterRing*0.95);
     }
-    let holeCore=smoothstep(0.58,0.86,dmg+splNoise*0.12);
-    albedo=mix(albedo,vec3f(0.015,0.012,0.010),holeCore*0.94);
-    rough=clamp(rough+dmg*0.24,0.04,0.99);
-    metal*=1.0-dmg*0.75;
+    let holeCore=smoothstep(0.52,0.78,dmg+splNoise*0.14);
+    albedo=mix(albedo,vec3f(0.006,0.005,0.004),holeCore*0.97);
+    rough=clamp(rough+dmg*0.28,0.04,0.99);
+    metal*=1.0-dmg*0.85;
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let nl=clamp(dot(n,l),0.0,1.0);
