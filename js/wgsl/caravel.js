@@ -91,16 +91,20 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
   @location(6) wet:vec2f,
+  @location(7) damage: f32,
 };
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let rig=rigVertex(position,normal,material,uv);
+  let rigNormLen=length(rig.normal);
+  let unitRigNormal=select(rig.normal,rig.normal/max(rigNormLen,0.0001),rigNormLen>1.002);
   let relative = rotateHull(rig.position * rig.scale) + hull.origin.xyz - F.camPos.xyz;
   var o: BoatVertex;
   o.pos = F.viewProj * vec4f(relative, 1.0);
   o.world = relative + F.camPos.xyz;
-  o.normal = normalize(rotateHull(rig.normal / rig.scale));
+  o.normal = normalize(rotateHull(unitRigNormal / rig.scale));
   o.local = position;
   o.material = u32(material); o.normalLocal = normal; o.uv=uv;o.wet=moisture[wetLookup[index]];
+  o.damage = select(0.0, clamp(rigNormLen - 1.0, 0.0, 1.0), rigNormLen > 1.002);
   return o;
 }
 fn oceanHeight(p: vec2f) -> f32 {
@@ -236,6 +240,22 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // transient surface film glints; grain valleys retain more water than ridges.
     let timberMoisture=vesselWoodOptics(rough,wet.x,wet.y,relief,grain);
     albedo*=timberMoisture.x;rough=timberMoisture.y;
+  }
+  let dmg=clamp(in.damage,0.0,1.0);
+  if(dmg>0.001){
+    let splNoise=gnoise(vec2f(p.z*26.0+p.y*11.0,p.y*48.0-p.x*19.0));
+    let splFine=gnoise(vec2f(p.z*95.0,p.y*140.0+splNoise*4.0));
+    let rawOak=vec3f(0.56,0.41,0.22)*(0.82+0.36*splFine);
+    let sootTint=mix(vec3f(1.0),vec3f(0.32,0.26,0.21),clamp(dmg*1.15,0.0,1.0));
+    albedo*=sootTint;
+    let splinterRing=smoothstep(0.18,0.52,dmg+splNoise*0.18)*(1.0-smoothstep(0.62,0.88,dmg+splNoise*0.14));
+    if(isWood || paintedWood){
+      albedo=mix(albedo,rawOak,splinterRing*0.88);
+    }
+    let holeCore=smoothstep(0.58,0.86,dmg+splNoise*0.12);
+    albedo=mix(albedo,vec3f(0.015,0.012,0.010),holeCore*0.94);
+    rough=clamp(rough+dmg*0.24,0.04,0.99);
+    metal*=1.0-dmg*0.75;
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let nl=clamp(dot(n,l),0.0,1.0);

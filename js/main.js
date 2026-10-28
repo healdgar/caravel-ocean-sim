@@ -510,7 +510,7 @@ async function main() {
     const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interactionPromise.catch(()=>{});rowingWaterPromise?.catch(()=>{});
-    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap});
+    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length,posed:pose});
     const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose}));
@@ -1998,6 +1998,7 @@ async function main() {
       if(!index||followerEnabled){
         v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
         v.pose.updateRecoil(v.gunnery.state.guns,ship);
+        v.pose.updateDamage?.(ship);
       }
       if(!index||followerEnabled)v.pose.update(ship,simTime,P.windSpeed);
       if(ship.showProw)v.anchorRenderer.update(v.anchor,ship);

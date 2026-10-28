@@ -387,3 +387,32 @@ test('cannonball impacts on ships and 1550 port buildings resolve hitPartId, hit
   assert.ok(bRep.partDamage > 0);
   assert.ok(bastion.damageState.partDamage[bHit.hitPartId] > 0);
 });
+
+test('syncVesselDamage maps cannonball impact sites and modular part damage into live GPU state', () => {
+  const victoryCatalog = createShipAssetCache().get('victory').partAssembly;
+  const state = createPartAssemblyState(victoryCatalog);
+  assert.equal(state.isDefaultIntact(), true);
+
+  const stanchionPart = victoryCatalog.parts.find(
+    (p) => p.id.startsWith('bulwark.') && p.triangleCount > 0 && p.triangleCount <= 450 && p.layer >= 2
+  );
+  assert.ok(stanchionPart, 'Victory should have a breakable bulwark modular part');
+
+  const changed = state.syncVesselDamage({
+    partDamage: {
+      'hull.planking': 0.85,
+      [stanchionPart.id]: 0.9,
+    },
+    impactSites: [[1.65, 1.4, -0.5, 0.75]],
+  });
+  assert.equal(changed, true);
+  assert.equal(state.isDefaultIntact(), false);
+
+  const plankingPose = state.evaluatePartPose('hull.planking');
+  assert.equal(plankingPose.visible, true, 'Continuous hull planking remains visible');
+  assert.equal(plankingPose.explode, 0, 'Continuous hull planking does not translate as a rigid block');
+
+  const stanchionPose = state.evaluatePartPose(stanchionPart.id);
+  assert.equal(stanchionPose.visible, false, 'Shattered modular bulwark part breaks away when heavily damaged');
+  assert.ok(Math.abs(state.impactSites[3] - 0.75) < 1e-5, 'Impact site severity is recorded for localized GPU crater/scorch');
+});

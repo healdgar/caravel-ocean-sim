@@ -6,6 +6,7 @@ export const PART_ASSEMBLY_WGSL = /* wgsl */ `
 struct PartAssemblyUniform {
   control:vec4f,
   params:vec4f,
+  impacts:array<vec4f,24>,
 };
 struct PartEvaluatedVertex {
   position:vec3f,
@@ -90,7 +91,31 @@ struct PartAssemblyPoseVertex {position:vec4f,normal:vec4f};
   let state=partAssemblyStates[partIdx];
   let current=partAssemblyPosed[v];
   let eval=evaluatePartAssemblyVertex(current.position.xyz,current.normal.xyz,attr0,attr1,desc0,desc1,state,partAssemblyUniform);
-  partAssemblyPosed[v].position=vec4f(eval.position,current.position.w);
-  partAssemblyPosed[v].normal=vec4f(eval.normal,eval.wearAndDamage);
+  var posedPos=eval.position;
+  var localDamage=0.0;
+  if(eval.visible>0.5){
+    for(var i=0u;i<24u;i++){
+      let imp=partAssemblyUniform.impacts[i];
+      if(imp.w<=0.001){break;}
+      let diff=current.position.xyz-imp.xyz;
+      let dist=length(diff);
+      let radius=0.24+imp.w*0.28;
+      if(dist<radius){
+        let falloff=1.0-dist/radius;
+        let core=falloff*falloff;
+        localDamage=max(localDamage,clamp(imp.w*falloff*1.45,0.0,1.0));
+        if(desc0.z<=3.5){
+          let jag=fract(sin(f32(v)*12.9898+f32(i)*78.233)*43758.5453)-0.5;
+          let inward=vec3f(-sign(select(1.0,current.position.x,abs(current.position.x)>0.02))*0.055,-0.015+jag*0.03,jag*0.025);
+          posedPos+=inward*(core*imp.w);
+        }
+      }
+    }
+  }
+  let totalDamage=clamp(max(eval.wearAndDamage,localDamage),0.0,1.0);
+  let safeNorm=normalize(select(vec3f(0.0,1.0,0.0),eval.normal,dot(eval.normal,eval.normal)>0.0001));
+  let encodedNorm=select(eval.normal,safeNorm*(1.0+totalDamage),totalDamage>0.001);
+  partAssemblyPosed[v].position=vec4f(posedPos,current.position.w);
+  partAssemblyPosed[v].normal=vec4f(encodedNorm,totalDamage);
 }
 `;

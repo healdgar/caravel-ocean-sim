@@ -10,6 +10,23 @@ import { locatePartAtLocalPoint } from './part-assembly.js';
 
 let gunneryShipAssetCache = null;
 
+function localToShipDesignPoint(targetBoat, localPosition) {
+  if (!targetBoat || !Array.isArray(localPosition)) return null;
+  const modelId = targetBoat.model?.id ?? targetBoat.modelId;
+  const model = modelId ? SHIP_MODELS[modelId] : null;
+  const f = model?.designFrame;
+  const L = targetBoat.length ?? f?.length ?? 20;
+  const B = targetBoat.beam ?? f?.beam ?? 6;
+  const sx = f?.beam ? B / f.beam : 1;
+  const sy = f?.verticalScale ?? 1;
+  const sz = f?.length ? L / f.length : 1;
+  return [
+    localPosition[0] / (sx || 1),
+    localPosition[1] / (sy || 1),
+    localPosition[2] / (sz || 1),
+  ];
+}
+
 function resolveShipHitPart(targetBoat, localPosition, hitZone) {
   if (!targetBoat || !Array.isArray(localPosition)) return null;
   const modelId = targetBoat.model?.id ?? targetBoat.modelId;
@@ -19,17 +36,7 @@ function resolveShipHitPart(targetBoat, localPosition, hitZone) {
     if (!gunneryShipAssetCache) gunneryShipAssetCache = createShipAssetCache();
     const asset = gunneryShipAssetCache.get(modelId);
     if (!asset?.partAssembly) return null;
-    const f = model.designFrame;
-    const L = targetBoat.length ?? f?.length ?? 20;
-    const B = targetBoat.beam ?? f?.beam ?? 6;
-    const sx = f?.beam ? B / f.beam : 1;
-    const sy = f?.verticalScale ?? 1;
-    const sz = f?.length ? L / f.length : 1;
-    const designPt = [
-      localPosition[0] / (sx || 1),
-      localPosition[1] / (sy || 1),
-      localPosition[2] / (sz || 1),
-    ];
+    const designPt = localToShipDesignPoint(targetBoat, localPosition);
     const subAssemblies =
       hitZone === 'rigging'
         ? ['masts-and-spars', 'rigging-and-sails']
@@ -81,6 +88,8 @@ export function applyRigidHullImpulse(boat, worldPosition, impulse) {
 export function createVesselDamageState(boat) {
   if (boat.damage) {
     if (!boat.damage.partDamage) boat.damage.partDamage = {};
+    if (!Array.isArray(boat.damage.impactSites)) boat.damage.impactSites = [];
+    if (!Number.isFinite(boat.damage.revision)) boat.damage.revision = 0;
     return boat.damage;
   }
   const mass = boat.hydrodynamics?.mass ?? 120000;
@@ -99,6 +108,8 @@ export function createVesselDamageState(boat) {
     floodingTonnes: 0,
     sunk: false,
     partDamage: {},
+    impactSites: [],
+    revision: 0,
     lastHit: null,
   };
   return boat.damage;
@@ -260,9 +271,68 @@ export function applyShipImpactDamage(targetBoat, event) {
   }
 
   const partBudget = (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.25;
+  const deltaDamage = energy / Math.max(10000, partBudget);
   const prevPartDamage = damage.partDamage[hitPartId] ?? 0;
-  const nextPartDamage = Math.min(1, +(prevPartDamage + energy / Math.max(10000, partBudget)).toFixed(3));
+  const nextPartDamage = Math.min(1, +(prevPartDamage + deltaDamage).toFixed(3));
   damage.partDamage[hitPartId] = nextPartDamage;
+
+  const designPt = localToShipDesignPoint(targetBoat, localPos);
+  const modelId = targetBoat.model?.id ?? targetBoat.modelId;
+  const model = modelId ? SHIP_MODELS[modelId] : null;
+  if (designPt && model?.status === 'ready') {
+    try {
+      if (!gunneryShipAssetCache) gunneryShipAssetCache = createShipAssetCache();
+      const catalog = gunneryShipAssetCache.get(modelId)?.partAssembly;
+      if (catalog?.parts) {
+        const splashR = 0.55;
+        for (const part of catalog.parts) {
+          if (
+            part.id === hitPartId ||
+            part.triangleCount <= 0 ||
+            part.triangleCount > 1500 ||
+            part.id.startsWith('hull.planking') ||
+            part.id.startsWith('deck.')
+          ) {
+            continue;
+          }
+          const b = part.bounds;
+          const dx = designPt[0] < b.min[0] ? b.min[0] - designPt[0] : designPt[0] > b.max[0] ? designPt[0] - b.max[0] : 0;
+          const dy = designPt[1] < b.min[1] ? b.min[1] - designPt[1] : designPt[1] > b.max[1] ? designPt[1] - b.max[1] : 0;
+          const dz = designPt[2] < b.min[2] ? b.min[2] - designPt[2] : designPt[2] > b.max[2] ? designPt[2] - b.max[2] : 0;
+          const d = Math.hypot(dx, dy, dz);
+          if (d <= splashR) {
+            const falloff = 1 - d / splashR;
+            const add = deltaDamage * (0.45 + 0.55 * falloff);
+            damage.partDamage[part.id] = Math.min(1, +((damage.partDamage[part.id] ?? 0) + add).toFixed(3));
+          }
+        }
+      }
+    } catch {
+      // Ignore optional splash catalog errors.
+    }
+  }
+
+  if (designPt && event.hitZone !== 'rigging') {
+    const siteSeverity = Math.min(1, Math.max(0.35, Math.cbrt(energy / 95000) * 0.68));
+    let merged = false;
+    for (const site of damage.impactSites) {
+      if (Math.hypot(site[0] - designPt[0], site[1] - designPt[1], site[2] - designPt[2]) < 0.25) {
+        site[3] = Math.min(1, +(site[3] + siteSeverity * 0.55).toFixed(3));
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) {
+      if (damage.impactSites.length >= 24) damage.impactSites.shift();
+      damage.impactSites.push([
+        +designPt[0].toFixed(3),
+        +designPt[1].toFixed(3),
+        +designPt[2].toFixed(3),
+        +siteSeverity.toFixed(3),
+      ]);
+    }
+  }
+  damage.revision = (damage.revision ?? 0) + 1;
 
   const report = {
     kind: 'ship',

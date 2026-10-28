@@ -678,6 +678,8 @@ export function createPartAssemblyState(catalog, options = {}) {
 
   let revision = 0;
   let hasPartOverrides = false;
+  let hasImpactSites = false;
+  const impactSites = new Float32Array(24 * 4);
 
   const resolvePartIndex = (partIdOrNumber) => {
     if (typeof partIdOrNumber === 'number') {
@@ -691,12 +693,14 @@ export function createPartAssemblyState(catalog, options = {}) {
     catalog,
     partState,
     uniform,
+    impactSites,
     get revision() {
       return revision;
     },
     isDefaultIntact() {
       return (
         !hasPartOverrides &&
+        !hasImpactSites &&
         Math.abs(uniform[0] - 1.0) < 1e-6 &&
         Math.abs(uniform[1]) < 1e-6 &&
         (Math.abs(uniform[2]) < 1e-6 || uniform[3] === 0) &&
@@ -797,9 +801,81 @@ export function createPartAssemblyState(catalog, options = {}) {
         partState[p * 4 + 2] = 0.0;
         partState[p * 4 + 3] = 1.0;
       }
+      impactSites.fill(0);
       hasPartOverrides = false;
+      hasImpactSites = false;
       revision++;
       return state;
+    },
+    syncVesselDamage(damage) {
+      const partDamage = damage?.partDamage ?? null;
+      const sites = Array.isArray(damage?.impactSites) ? damage.impactSites : null;
+      const hasAnyPartDamage = partDamage && Object.keys(partDamage).length > 0;
+      const hasAnySites = sites && sites.length > 0;
+      if (!hasAnyPartDamage && !hasAnySites && !hasPartOverrides && !hasImpactSites) {
+        return false;
+      }
+      let changed = false;
+      let anyOverrides = false;
+      for (let p = 0; p < partCount; p++) {
+        const part = catalog.parts[p];
+        const dmg = hasAnyPartDamage ? Math.max(0, Math.min(1, Number(partDamage[part.id] ?? 0))) : 0;
+        const isContinuousSkin =
+          part.layer === 0 ||
+          part.id.startsWith('hull.planking') ||
+          part.id.startsWith('hull.wales') ||
+          part.id.startsWith('deck.');
+        const isBreakable =
+          !isContinuousSkin &&
+          part.triangleCount > 0 &&
+          part.triangleCount <= 450 &&
+          part.layer >= 2 &&
+          part.layer <= 3;
+        const nextAppear = isBreakable && dmg >= 0.78 ? 0.0 : 1.0;
+        const nextExplode = !isContinuousSkin && dmg > 0.12 && part.triangleCount <= 1500 ? dmg * 0.14 : 0.0;
+        const nextWear = isContinuousSkin ? Math.min(0.32, dmg * 0.4) : dmg;
+        const base = p * 4;
+        if (
+          Math.abs(partState[base + 0] - nextAppear) > 1e-5 ||
+          Math.abs(partState[base + 1] - nextExplode) > 1e-5 ||
+          Math.abs(partState[base + 2] - nextWear) > 1e-5
+        ) {
+          partState[base + 0] = nextAppear;
+          partState[base + 1] = nextExplode;
+          partState[base + 2] = nextWear;
+          changed = true;
+        }
+        if (nextAppear < 0.999 || nextExplode > 1e-5 || nextWear > 1e-5 || partState[base + 3] < 0.999) {
+          anyOverrides = true;
+        }
+      }
+      let anySites = false;
+      const count = hasAnySites ? Math.min(24, sites.length) : 0;
+      for (let i = 0; i < 24; i++) {
+        const base = i * 4;
+        const s = i < count ? sites[i] : null;
+        const x = s ? Number(s[0]) || 0 : 0;
+        const y = s ? Number(s[1]) || 0 : 0;
+        const z = s ? Number(s[2]) || 0 : 0;
+        const w = s ? Math.max(0, Math.min(1, Number(s[3]) || 0)) : 0;
+        if (
+          Math.abs(impactSites[base + 0] - x) > 1e-5 ||
+          Math.abs(impactSites[base + 1] - y) > 1e-5 ||
+          Math.abs(impactSites[base + 2] - z) > 1e-5 ||
+          Math.abs(impactSites[base + 3] - w) > 1e-5
+        ) {
+          impactSites[base + 0] = x;
+          impactSites[base + 1] = y;
+          impactSites[base + 2] = z;
+          impactSites[base + 3] = w;
+          changed = true;
+        }
+        if (w > 1e-5) anySites = true;
+      }
+      hasPartOverrides = anyOverrides;
+      hasImpactSites = anySites;
+      if (changed) revision++;
+      return changed;
     },
     evaluatePartPose(partIdOrNumber) {
       const idx = resolvePartIndex(partIdOrNumber);
@@ -928,12 +1004,15 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
   });
   device.queue.writeBuffer(stateBuffer, 0, stateController.partState);
 
+  const uniformUpload = new Float32Array(8 + 24 * 4);
+  uniformUpload.set(stateController.uniform, 0);
+  uniformUpload.set(stateController.impactSites, 8);
   const uniformBuffer = device.createBuffer({
     label: `${catalog.modelId} part assembly uniform`,
-    size: stateController.uniform.byteLength,
+    size: uniformUpload.byteLength,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(uniformBuffer, 0, stateController.uniform);
+  device.queue.writeBuffer(uniformBuffer, 0, uniformUpload);
 
   let group;
   try {
@@ -966,8 +1045,11 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
       if (destroyed) return false;
       active = !nextState.isDefaultIntact();
       if (nextState.revision === uploadedRevision) return false;
+      uniformUpload.set(nextState.uniform, 0);
+      if (nextState.impactSites) uniformUpload.set(nextState.impactSites, 8);
+      else uniformUpload.fill(0, 8);
       device.queue.writeBuffer(stateBuffer, 0, nextState.partState);
-      device.queue.writeBuffer(uniformBuffer, 0, nextState.uniform);
+      device.queue.writeBuffer(uniformBuffer, 0, uniformUpload);
       uploadedRevision = nextState.revision;
       return true;
     },
