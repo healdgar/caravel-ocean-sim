@@ -17,7 +17,7 @@ export function crewMotionPolicy(boat,{purpose='patrol',grade=0,constrained=fals
   // heel and angular motion slow it continuously before existing brace stops.
   const balance=1/(1+2.5*roll+.9*rate+.75*pitch),slope=1/(1+1.8*Math.abs(grade)),space=constrained?.72:1;
   return{
-    speedMetresPerSecond:hazard?0:(purpose==='work'?1.4:1.25)*balance*slope*space,
+    speedMetresPerSecond:hazard?0:(purpose==='work'?1.75:1.25)*balance*slope*space,
     turnRadiansPerSecond:hazard?0:3.2*Math.sqrt(balance)*(constrained?.8:1),
     strideMetres:CREW_WALK_CYCLE_METRES,
   };

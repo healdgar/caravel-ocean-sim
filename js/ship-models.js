@@ -95,8 +95,9 @@ function victoryDefinition(){
     add('mast.'+m.id,victoryMastPoint(i,victoryVesselDeck(m.z)),'hull','frame');
     add('mast.'+m.id+'.head',victoryMastPoint(i,m.height));
     add('mast.'+m.id+'.runner',[.8,victoryVesselDeck(m.z),m.z]);
-    add('station.haul.'+m.id,[i===1?-1.05:1.05,victoryVesselDeck(m.z+.5),m.z+.5],'hull','station');
-    add('rig.'+m.id+'.fall',[i===1?-1.13:1.13,victoryVesselDeck(m.z+.5)+.25,m.z+.5]);
+    const haulZ=i===2?m.z+.37:m.z+.5;
+    add('station.haul.'+m.id,[i===1?-1.05:1.05,victoryVesselDeck(haulZ),haulZ],'hull','station');
+    add('rig.'+m.id+'.fall',[i===1?-1.13:1.13,victoryVesselDeck(haulZ)+.25,haulZ]);
   }
   const sails=VICTORY_SAILS.map(s=>{
     add('yard.'+s.name,[...s.pivot],'hull','part');

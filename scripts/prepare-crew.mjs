@@ -49,45 +49,59 @@ function accessor(values,type,componentType=5126){
   }
   g.accessors.push(desc);return g.accessors.length-1;
 }
-const skin=[.36,.18,.10],linen=[.55,.47,.31],trousers=[.095,.12,.15],leather=[.055,.025,.012],hairColor=[.045,.019,.009];
+const skin=[.36,.18,.10],linen=[.55,.47,.31],trousers=[.095,.12,.15],hose=[.22,.195,.165],leather=[.055,.025,.012],hairColor=[.045,.019,.009];
 targetPlayer.sample(null,0);
-// Reduce the superhero bulk around existing bone axes, preserving joint lengths,
+// Reduce the superhero bulk around existing bone axes and neutralize exaggerated
+// jaw/brow features into a clean anatomical base, preserving joint lengths,
 // hands, head and feet. The same weights still drive every animation and IK grip.
 const limbEnds={upperarm:'lowerarm',lowerarm:'hand',thigh:'calf',calf:'foot'};
+const headCenter=Array.from(targetPlayer.world[targetPlayer.names.indexOf('Head')].subarray(12,15));
 const slimAxes=targetPlayer.joints.map(node=>{
   const name=targetPlayer.names[node],start=Array.from(targetPlayer.world[node].subarray(12,15));
   const match=/^(upperarm|lowerarm|thigh|calf)_([lr])$/.exec(name);
   if(match){
     const endNode=targetPlayer.names.indexOf(limbEnds[match[1]]+'_'+match[2]);
     const end=Array.from(targetPlayer.world[endNode].subarray(12,15));
-    return {start,axis:end.map((v,i)=>v-start[i]),scale:{upperarm:.86,lowerarm:.93,thigh:.94,calf:.96}[match[1]]};
+    return {start,axis:end.map((v,i)=>v-start[i]),scale:{upperarm:.84,lowerarm:.91,thigh:.93,calf:.94}[match[1]]};
   }
-  if(/^(spine_|pelvis|clavicle)/.test(name))return {start,axis:[0,1,0],scale:.91,chest:/^spine_0[23]$/.test(name)};
+  if(/^(spine_|pelvis|clavicle|neck_)/.test(name))return {start,axis:[0,1,0],scale:name.startsWith('neck_')?(female?.94:.89):.90,chest:/^spine_0[23]$/.test(name)};
   return null;
 });
+const clamp01=x=>Math.max(0,Math.min(1,x));
+const smooth=(lo,hi,x)=>{const t=clamp01((x-lo)/(hi-lo));return t*t*(3-2*t);};
 function slimBody(pos,joints,weights){
   for(let i=0;i<pos.length/3;i++){
     const original=Array.from(pos.subarray(i*3,i*3+3)),delta=[0,0,0];
+    let headWeight=0;
     for(let k=0;k<4;k++){
-      const bone=slimAxes[joints[i*4+k]],weight=weights[i*4+k];if(!bone||weight===0)continue;
+      const node=targetPlayer.joints[joints[i*4+k]],name=targetPlayer.names[node],weight=weights[i*4+k];
+      if(name==='Head')headWeight+=weight;
+      const bone=slimAxes[joints[i*4+k]];if(!bone||weight===0)continue;
       const {start,axis,scale,chest}=bone,q=original.map((v,j)=>v-start[j]);
       const along=q.reduce((s,v,j)=>s+v*axis[j],0)/axis.reduce((s,v)=>s+v*v,0);
       for(let j=0;j<3;j++)delta[j]+=(q[j]-axis[j]*along)*(scale-1)*weight;
       // Flatten the pronounced front-chest contour without compressing the back.
-      if(chest)delta[2]-=Math.max(0,q[2])*(female?.22:.12)*weight;
+      if(chest)delta[2]-=Math.max(0,q[2])*(female?.22:.14)*weight;
+    }
+    if(!female&&headWeight>.1){
+      // Neutralize the comic-book superhero square jaw and heavy brow ridge so
+      // per-sailor facial uniforms deform around a balanced neutral male head.
+      const jawBand=smooth(1.56,1.615,original[1])*(1-smooth(1.635,1.69,original[1]));
+      const browBand=smooth(1.69,1.72,original[1])*(1-smooth(1.73,1.76,original[1]))*smooth(.04,.095,original[2]);
+      delta[0]-=(original[0]-headCenter[0])*(.045+.055*jawBand)*headWeight;
+      delta[2]-=Math.max(0,original[2]-headCenter[2])*(.035*jawBand+.05*browBand)*headWeight;
     }
     for(let j=0;j<3;j++)pos[i*3+j]+=delta[j];
   }
 }
-const clamp01=x=>Math.max(0,Math.min(1,x));
-const smooth=(lo,hi,x)=>{const t=clamp01((x-lo)/(hi-lo));return t*t*(3-2*t);};
-// Shape the clothed surface as fabric over the body, rather than a coloured
-// muscle suit. Preserve topology, skin weights, joint positions and every clip.
+// Shape the clothed surface as 1550-1650 mariner attire: a bloused canvas/linen
+// slop-shirt, wide knee-gathered Venetian slops (galligaskins), fitted wool
+// stockings/hose on the lower calf, and low leather shoes.
 function drapeWorkwear(pos,colors,joints,weights){
   const waist=female?.99:1.015,shoulder=female?1.47:1.53;
   for(let i=0;i<pos.length/3;i++){
-    const shirt=Math.abs(colors[i*3]-linen[0])<.001,pants=Math.abs(colors[i*3]-trousers[0])<.001;
-    if(!shirt&&!pants)continue;
+    const shirt=Math.abs(colors[i*3]-linen[0])<.001,pants=Math.abs(colors[i*3]-trousers[0])<.001,stocking=Math.abs(colors[i*3]-hose[0])<.001;
+    if(!shirt&&!pants&&!stocking)continue;
     const p=Array.from(pos.subarray(i*3,i*3+3));let torso=0;
     const delta=[0,0,0];
     for(let k=0;k<4;k++){
@@ -96,37 +110,40 @@ function drapeWorkwear(pos,colors,joints,weights){
       const match=/^(upperarm|lowerarm|thigh|calf)_([lr])$/.exec(name);if(!match||w===0)continue;
       const part=match[1],arm=part.includes('arm');if(shirt!==arm)continue;
       const bone=slimAxes[joints[i*4+k]],q=p.map((v,j)=>v-bone.start[j]),length=Math.hypot(...bone.axis);
-      const t=q.reduce((s,v,j)=>s+v*bone.axis[j],0)/(length*length);
+      const t=q.reduce((s,v,j)=>s+v*bone.axis[j],0)/(length*length),tc=clamp01(t);
       const radial=q.map((v,j)=>v-bone.axis[j]*t),radius=Math.hypot(...radial);if(radius<.001)continue;
-      const ends={upperarm:[.067,.055],lowerarm:[.054,.039],thigh:[.106,.076],calf:[.074,.057]}[part];
-      const fit=(ends[0]+(ends[1]-ends[0])*clamp01(t))*(female?.91:1);
-      const blend=arm?.9:smooth(.04,.28,t)*.75;
-      const change=Math.max(-.012,Math.min(.018,fit-radius))*w*blend;
+      const ang=Math.atan2(radial[2],radial[0]);
+      const ends={upperarm:[.067,.055],lowerarm:[.056,.040],thigh:[.112,.086],calf:[.080,.055]}[part];
+      let fit=(ends[0]+(ends[1]-ends[0])*tc)*(female?.91:1);
+      if(part==='lowerarm')fit+=(.0055+.0015*Math.cos(ang*8))*Math.sin(Math.PI*tc)*(1-smooth(.82,.98,tc));
+      else if(part==='thigh')fit+=(.011+.003*Math.cos(ang*10))*Math.sin(Math.PI*tc);
+      else if(part==='calf')fit+=pants?(.008+.002*Math.cos(ang*8))*(1-smooth(.10,.28,tc)):0;
+      const blend=arm?.9:smooth(.04,.28,t)*.78;
+      const change=Math.max(-.012,Math.min(.022,fit-radius))*w*blend;
       for(let j=0;j<3;j++)delta[j]+=radial[j]/radius*change;
     }
     if(shirt&&torso>.01){
       const t=clamp01((p[1]-waist)/(shoulder-waist));
-      const rx=(female?.148:.171)+(female?.032:.038)*smooth(.15,.85,t);
-      const rz=(female?.112:.126)+.014*smooth(.25,.8,t),center=-.027;
+      const rx=(female?.148:.172)+(female?.032:.038)*smooth(.15,.85,t);
+      const rz=(female?.112:.127)+.015*smooth(.25,.8,t),center=-.027;
       const angle=Math.atan2(p[2]-center,p[0]),c=Math.cos(angle),s=Math.sin(angle),power=2.5;
       const radius=(Math.abs(c/rx)**power+Math.abs(s/rz)**power)**(-1/power);
-      const fold=1+.012*Math.cos(angle*9+t*2.5)*Math.sin(Math.PI*t);
+      const fold=1+.014*Math.cos(angle*10+t*2.2)*Math.sin(Math.PI*t);
       const blend=torso*(1-smooth(shoulder-.07,shoulder+.025,p[1]));
       delta[0]+=(c*radius*fold-p[0])*blend;
       delta[2]+=(center+s*radius*fold-p[2])*blend;
     }
     if(pants){
-      // Breeches bridge the seat and groin instead of reproducing the base
-      // body's cleft or genital sculpt. Join the waist to one cloth envelope,
-      // blending back into separate trouser legs below the pelvis.
+      // Venetian slops bridge the seat and groin into one pleated cloth envelope,
+      // blending into full knee-gathered breeches legs below the pelvis.
       const crotch=female?.855:.885,center=-.027;
       const upper=smooth(crotch-.015,crotch+.045,p[1]);
       const t=clamp01((p[1]-crotch)/(waist-crotch));
-      const waistRadius=female?.148:.171;
-      const rx=(female?.181:.199)+(waistRadius-(female?.181:.199))*smooth(.5,1,t);
+      const waistRadius=female?.148:.172;
+      const rx=(female?.182:.201)+(waistRadius-(female?.182:.201))*smooth(.5,1,t);
       const rz=p[2]>=center
-        ?.05+((female?.112:.126)-.05)*smooth(0,.85,t)
-        :(female?.112:.126)+.017*Math.sin(Math.PI*t);
+        ?.05+((female?.112:.127)-.05)*smooth(0,.85,t)
+        :(female?.112:.127)+.018*Math.sin(Math.PI*t);
       const angle=Math.atan2(p[2]-center,p[0]),c=Math.cos(angle),s=Math.sin(angle),power=2.5;
       const radius=(Math.abs(c/rx)**power+Math.abs(s/rz)**power)**(-1/power);
       delta[0]+=(c*radius-p[0])*upper;
@@ -163,7 +180,8 @@ for(let mi=0;mi<g.meshes.length;mi++)for(const p of g.meshes[mi].primitives){
     const x=pos[i],y=pos[i+1],z=pos[i+2];let color=skin,inflate=0;
     if(mi===0)color=hairColor;
     else if(mi===1){const cx=Math.abs(x)-.029;const iris=cx*cx+(y-(female?1.656:1.699))**2<.00006 && z>(female?.069:.074);color=iris?[.024,.013,.006]:[.65,.60,.49];}
-    else if(y<.23){color=leather;inflate=.012;}
+    else if(y<.165){color=leather;inflate=.012;}
+    else if(y<(female?.445:.465)){color=hose;inflate=.012;}
     else if(y<(female?.99:1.015)){color=trousers;inflate=.012;}
     else if((y<(female?1.515:1.565) || Math.abs(x)>.12) && Math.abs(x)<(female?.63:.69)){color=linen;inflate=.012;}
     colors.set(color,i);for(let k=0;k<3;k++)pos[i+k]+=norm[i+k]*inflate;
@@ -212,7 +230,7 @@ function garmentWeights(point){
 for(const [name,rings,color] of [
   ['Leather belt',female?[[.97,.174,.15],[1.01,.174,.15]]:[[.995,.191,.15],[1.035,.191,.15]],leather],
 ]){
-  const pos=[],normal=[],col=[],joint=[],weight=[],idx=[],N=32;
+  const pos=[],normal=[],col=[],joint=[],weight=[],idx=[],N=24;
   for(const [y,rx,rz] of rings)for(let i=0;i<N;i++){
     const a=i/N*Math.PI*2,c=Math.cos(a),s=Math.sin(a),radius=(Math.abs(c/rx)**2.5+Math.abs(s/rz)**2.5)**(-1/2.5);
     const point=[radius*c,y,radius*s-.027],binding=garmentWeights(point);
@@ -223,13 +241,13 @@ for(const [name,rings,color] of [
   addMesh(name,pos,normal,col,joint,weight,idx);
 }
 
-// Rolled cuffs and a sewn neck band give the shirt actual edges. They follow
-// the existing forearm/neck joints and add only 312 triangles per body.
-function clothBand(name,rings,N,point,jointName){
+// Rolled cuffs, knee garters and a sewn neck band give the 1550-1650 slop-shirt
+// and Venetian slops actual cloth edges.
+function clothBand(name,rings,N,point,jointName,bandColor=linen){
   const pos=[],norm=[],col=[],joints=[],weights=[],indices=[];
   for(const [along,radius] of rings)for(let i=0;i<N;i++){
     const angle=i/N*Math.PI*2,p=point(along,radius,angle);
-    pos.push(...p);norm.push(0,1,0);col.push(...linen);joints.push(jointIndex(jointName),0,0,0);weights.push(1,0,0,0);
+    pos.push(...p);norm.push(0,1,0);col.push(...bandColor);joints.push(jointIndex(jointName),0,0,0);weights.push(1,0,0,0);
   }
   for(let r=0;r<rings.length-1;r++)for(let i=0;i<N;i++){const a=r*N+i,b=r*N+(i+1)%N;indices.push(a,a+N,b,b,a+N,b+N);}
   addMesh(name,pos,surfaceNormals(new Float32Array(pos),new Uint32Array(indices),new Float32Array(norm)),col,joints,weights,indices);
@@ -237,13 +255,19 @@ function clothBand(name,rings,N,point,jointName){
 for(const [side,sign] of [['l',1],['r',-1]]){
   const elbow=Array.from(targetPlayer.world[targetPlayer.names.indexOf('lowerarm_'+side)].subarray(12,15));
   const wrist=Array.from(targetPlayer.world[targetPlayer.names.indexOf('hand_'+side)].subarray(12,15));
-  clothBand('Rolled cuff '+side,[[.83,.043],[.85,.047],[.95,.047],[.98,.042]],16,(t,r,a)=>{
+  clothBand('Rolled cuff '+side,[[.83,.043],[.85,.047],[.95,.047],[.98,.042]],12,(t,r,a)=>{
     const center=elbow.map((v,k)=>v+(wrist[k]-v)*t),radius=r*(female?.91:1);
     return [center[0],center[1]+Math.cos(a)*radius,center[2]+Math.sin(a)*radius*sign];
   },'lowerarm_'+side);
+  const knee=Array.from(targetPlayer.world[targetPlayer.names.indexOf('calf_'+side)].subarray(12,15));
+  const ankle=Array.from(targetPlayer.world[targetPlayer.names.indexOf('foot_'+side)].subarray(12,15));
+  clothBand('Knee garter '+side,[[.17,.070],[.24,.065]],12,(t,r,a)=>{
+    const center=knee.map((v,k)=>v+(ankle[k]-v)*t),radius=r*(female?.91:1);
+    return [center[0]+Math.cos(a)*radius,center[1],center[2]+Math.sin(a)*radius-.012];
+  },'calf_'+side,leather);
 }
 const neck=Array.from(targetPlayer.world[targetPlayer.names.indexOf('neck_01')].subarray(12,15));
-clothBand('Linen neck band',[[female?1.488:1.538,1],[female?1.498:1.55,1.055],[female?1.516:1.566,1]],20,(y,r,a)=>[
+clothBand('Linen neck band',[[female?1.488:1.538,1],[female?1.498:1.55,1.055],[female?1.516:1.566,1]],16,(y,r,a)=>[
   Math.cos(a)*(female?.061:.067)*r,y,neck[2]+Math.sin(a)*(female?.057:.062)*r,
 ],'neck_01');
 
@@ -281,7 +305,7 @@ for(const [sourceName,name] of clips){
   g.animations.push(clip);
 }
 g.asset={version:'2.0',generator:'waterworld/scripts/prepare-crew.mjs',copyright:'Quaternius and Gonzalo Furnier (CC0); sailor adaptation CC0'};
-g.extras={sourceRevision:revision,clips:clips.map(c=>c[0]),workwearRevision:2,note:'Slim body with looser cloth silhouette around preserved bones; no historical costume calibration'};
+g.extras={sourceRevision:revision,clips:clips.map(c=>c[0]),workwearRevision:3,note:'Neutral body/face base with 1550-1650 mariner slop-shirt, knee-gathered Venetian slops, knitted hose and low leather shoes'};
 g.buffers=[{byteLength}];const bin=Buffer.concat(buffers);
 let json=Buffer.from(JSON.stringify(g));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
 const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67,0);header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+bin.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);

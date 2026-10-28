@@ -6,7 +6,7 @@ import {createDeckhand,stepDeckhand,createCompany,stepCompany} from '../js/crew.
 import {loadCrewGLB} from '../js/gltf.js';
 import {getShipModel} from '../js/ship-models.js';
 import {createGunDefinitions} from '../js/gunnery-models.js';
-import {createGunneryState,prepareGunnery,stepGunnery,GUNNERY_STAGE_DURATIONS} from '../js/gunnery-state.js';
+import {createGunneryState,prepareGunnery,stepGunnery,GUNNERY_STAGE_DURATIONS,GUNNERY_SWIVEL_STAGE_DURATIONS} from '../js/gunnery-state.js';
 
 const paceBoat={modelId:'nina',length:20,beam:6,roll:0,rollVelocity:0,pitch:0};
 const paceClose=(a,b,e=1e-10)=>assert.ok(Math.abs(a-b)<=e,`${a} differs from ${b}`);
@@ -14,7 +14,7 @@ const paceDistance=(a,b)=>Math.hypot(...Array.from(a,(v,i)=>v-b[i]));
 
 test('purposeful deck pace has physical caps and slows for slope, heel, narrow space and hazards',()=>{
   const patrol=crewMotionPolicy(paceBoat),work=crewMotionPolicy(paceBoat,{purpose:'work'});
-  paceClose(patrol.speedMetresPerSecond,1.25);paceClose(work.speedMetresPerSecond,1.4);
+  paceClose(patrol.speedMetresPerSecond,1.25);paceClose(work.speedMetresPerSecond,1.75);
   assert.ok(patrol.turnRadiansPerSecond>0&&patrol.turnRadiansPerSecond<=4);
   assert.ok(patrol.strideMetres>=1.2&&patrol.strideMetres<=1.4,'a complete human Walk cycle covers two steps');
   for(const purpose of ['patrol','work'])for(const grade of [-2,-.5,0,.5,2])for(const roll of [0,.12,.3]){
@@ -104,6 +104,9 @@ test('seated strokes and gun loading retain their independent physical clocks',(
     assert.deepEqual(rowers.map(s=>s.walkTime),before,'seated rowers have no deck-walking cadence');
   }
   assert.deepEqual(GUNNERY_STAGE_DURATIONS,{swab:6,load:8,ram:7,runout:8,prime:4});
+  assert.deepEqual(GUNNERY_SWIVEL_STAGE_DURATIONS,{swab:2,load:4,ram:2,runout:2,prime:2});
+  const ninaSwivel=createGunneryState([createGunDefinitions('nina')[0]]).guns[0];
+  assert.deepEqual(ninaSwivel.durations,GUNNERY_SWIVEL_STAGE_DURATIONS,'removable-chamber swivel guns use a 12-second drill');
   for(const fps of [30,60,120]){
     const state=createGunneryState([createGunDefinitions('victory').find(g=>g.visibleCrew)]);prepareGunnery(state,'port');
     for(let i=0;i<fps*32;i++)stepGunnery(state,1/fps,{gunAttended:()=>true});

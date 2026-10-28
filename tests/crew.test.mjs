@@ -5,6 +5,7 @@ import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
 import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
+import {selectCrewLOD} from '../js/crew-lod.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
@@ -129,7 +130,7 @@ test('crew climb real runners, operate sails and hatch, hold in danger, and retu
     advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);
     for(const [k,s] of c.crew.entries()){
       const travel=Math.hypot(...Array.from(s.position).map((v,j)=>v-before[k][j]));
-      assert.ok(travel<.16,`${s.id} must traverse paths continuously: ${travel}`);
+      assert.ok(travel<.18,`${s.id} must traverse paths continuously: ${travel}`);
       assert.ok(s.transform.every(Number.isFinite));
       if(s.job?.stage==='ascending')climbing++;
       if(s.job?.stage==='working')working++;
@@ -176,4 +177,17 @@ test('helmsman follows the direct tiller below the quarterdeck at full port and 
       assert.ok(Math.hypot(...world.map((v,i)=>v-target[i]))<.05,'hands reach the actual tiller');
     }
   }
+});
+test('crew LODs build progressive index tiers over the shared skinned vertex buffer',()=>{
+  assert.equal(model.lods?.length,3);
+  const [near,mid,far]=model.lods;
+  assert.equal(near.id,'near');assert.equal(mid.id,'mid');assert.equal(far.id,'far');
+  assert.equal(near.triangles,model.indices.length/3);
+  assert.ok(mid.triangles<near.triangles*.5&&mid.triangles>near.triangles*.15,`mid tier triangles: ${mid.triangles}`);
+  assert.ok(far.triangles<mid.triangles*.6&&far.triangles>=200,`far tier triangles: ${far.triangles}`);
+  for(const tier of model.lods)for(const idx of tier.indices)assert.ok(idx>=0&&idx<model.vertexCount);
+  assert.deepEqual(selectCrewLOD({x:0,z:0,enabled:true},{x:200,y:10,z:200}),{mainTier:0,shadowTier:1,distance:0});
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:10,y:2,z:10}).mainTier,0);
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0}).mainTier,1);
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:120,y:2,z:0}).mainTier,2);
 });

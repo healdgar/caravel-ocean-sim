@@ -283,7 +283,7 @@ test('actual gun teams retain physical routes, body clearance and reachable tool
       const previous=company.crew.map(s=>Array.from(s.position));stepCompany(company,boat,.1,8);
       updateGunRecoilVertices(map,posed,boat.gunnery.guns,boat);
       for(const [index,s]of company.crew.entries()){
-        assert.ok(navDistance(previous[index],s.position)<=.14002,id+' no work-stage teleport');
+        assert.ok(navDistance(previous[index],s.position)<=.17502,id+' no work-stage teleport');
         if(s.job?.kind!=='gunnery')continue;
         if(['approach','return'].includes(s.job.stage)){
           const a=previous[index].slice(),b=Array.from(s.position);a[1]-=.028;b[1]-=.028;
@@ -307,7 +307,7 @@ test('actual gun teams retain physical routes, body clearance and reachable tool
       const before=company.crew.map(s=>Array.from(s.position)),jobs=company.crew.map(s=>s.job&&({kind:s.job.kind,stage:s.job.stage}));
       stepCompany(company,boat,.1,8);stepGunnery(boat.gunnery,.1,environment);
       for(const [i,s]of company.crew.entries()){
-        assert.ok(navDistance(before[i],s.position)<=.14002,id+' real recoil/return cannot teleport a worker');
+        assert.ok(navDistance(before[i],s.position)<=.17502,id+' real recoil/return cannot teleport a worker');
         if(jobs[i]?.kind!=='gunnery')continue;
         if(jobs[i].stage==='return'||s.job?.stage==='return'){
           const a=before[i].slice(),b=Array.from(s.position);a[1]-=.028;b[1]-=.028;

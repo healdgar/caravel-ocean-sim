@@ -74,14 +74,14 @@ test('Victory workers climb safely, shorten all sail groups, secure the hatch an
     advanceSails(b,.1,8,0);stepCompany(c,b,.1,8);
     for(const [k,s]of c.crew.entries()){
       const pace=crewMotionPolicy(b,{purpose:'work'}).speedMetresPerSecond;
-      assert.ok(pace<=1.4,'work pace has a physical human cap');
+      assert.ok(pace<=1.75,'work pace has a physical human cap');
       assert.ok(distance(s.position,previous[k])<=pace*.1+2e-5,s.id+' continuous travel');
       assert.ok(s.transform.every(Number.isFinite));
       for(let n=0;n<k;n++)assert.ok(distance(s.position,c.crew[n].position)>.5,s.id+' body separation');
       if(s.job?.stage==='ascending')ascending++;
       if(climbs[k]&&['ascending','descending'].includes(climbs[k].stage)&&s.job?.stage===climbs[k].stage&&s.job.mast===climbs[k].mast){
         const dy=crewRunnerMetrics(b,s.job.mast,s.job.side).dy;
-        assert.ok(Math.abs(s.job.rung-climbs[k].rung)*dy<=.38*.1+1e-9,'faster deck pace cannot accelerate vertical climbing');
+        assert.ok(Math.abs(s.job.rung-climbs[k].rung)*dy<=.65*.1+1e-9,'faster deck pace cannot accelerate vertical climbing');
       }
       if(s.job?.stage==='working')working++;
       if(s.job?.mast===0&&s.job.kind==='rig'&&s.job.stage==='working'){

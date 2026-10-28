@@ -19,6 +19,7 @@
 // https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/shape-effects-on-drag/
 
 export const GUNNERY_STAGE_DURATIONS=Object.freeze({swab:6,load:8,ram:7,runout:8,prime:4});
+export const GUNNERY_SWIVEL_STAGE_DURATIONS=Object.freeze({swab:2,load:4,ram:2,runout:2,prime:2});
 export const GUNNERY_LIMITS=Object.freeze({guns:128,projectiles:128,events:512,fixedStep:1/120,maxAdvance:.5,maxFlight:30,maxRange:8000});
 const GUNNERY_DRILL=Object.freeze(['swab','load','ram','runout','prime']);
 const gunneryClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -46,9 +47,10 @@ export function createGunneryState(gunDefs=[],options={}){
     const mass=gunneryClamp(gunneryFinite(def.mass,calibre*.45359237),.05,40);
     // Cast iron sphere at 7200 kg/m3. Nominal weights/windage vary historically.
     const diameter=gunneryClamp(gunneryFinite(def.diameter,Math.cbrt(6*mass/(Math.PI*7200))),.015,.25);
-    const carronade=def.kind==='carronade';
+    const carronade=def.kind==='carronade',swivel=def.kind==='swivel'||def.type==='swivel';
     const muzzleSpeed=gunneryClamp(gunneryFinite(def.muzzleSpeed,carronade?300:calibre>=32?487.68:calibre>=24?470:calibre>=12?450:350),1,650);
-    const durations={};for(const stage of GUNNERY_DRILL)durations[stage]=gunneryClamp(gunneryFinite(def.durations?.[stage],GUNNERY_STAGE_DURATIONS[stage]),.01,120);
+    const defaultDurations=swivel?GUNNERY_SWIVEL_STAGE_DURATIONS:GUNNERY_STAGE_DURATIONS;
+    const durations={};for(const stage of GUNNERY_DRILL)durations[stage]=gunneryClamp(gunneryFinite(def.durations?.[stage],defaultDurations[stage]),.01,120);
     return {...def,id,index,side,calibre,mass,diameter,muzzleSpeed,durations,
       dragCoefficient:gunneryClamp(gunneryFinite(def.dragCoefficient,.47),0,2),
       dispersion:gunneryClamp(gunneryFinite(def.dispersion,.004),0,.05),

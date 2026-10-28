@@ -1947,7 +1947,7 @@ async function main() {
       writeLateenUniform(data,sails);device.queue.writeBuffer(v.hullUBO,0,data);
       fleetHullData.set(data.subarray(0,24),index*24);
       v.shadows.update(data,frameF.subarray(frameF[115]>.5?96:32,frameF[115]>.5?99:35),ship.showProw&&qs.get('shadows')!=='0');
-      if(!index||followerEnabled){v.crew?.update(ship,dt,P.windSpeed);v.wetness.updateCrew(v.crew?.state,ship);}
+      if(!index||followerEnabled){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
       if(!index||followerEnabled){
         v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
         v.pose.updateRecoil(v.gunnery.state.guns,ship);

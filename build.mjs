@@ -24,6 +24,7 @@ const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astron
 // Baked stand loading is deferred to landfall; preserve existing module order.
 order.splice(order.indexOf('js/vegetation.js')+1,0,'js/coastal-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
+order.splice(order.indexOf('js/gltf.js'),0,'js/crew-lod.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
@@ -38,6 +39,9 @@ order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
+wgslModules.push('js/wgsl/part-assembly.js');
+order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.js');
+order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 // Downloads keep embedded assets. Pages uses identical bytes in independently

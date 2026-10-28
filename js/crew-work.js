@@ -14,6 +14,7 @@ import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNa
 import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk} from './crew-motion.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
+export const CREW_CLIMB_SPEED=.65;
 const crewWorkControls=['fore','main','mizzen'];
 export function crewMastName(boat,index){return requirePlayableShipModel(boat.modelId??'nina').rig.masts[index]?.id??crewWorkControls[index];}
 const crewExtendedContext=id=>Object.hasOwn(ROWING_DESIGNS,id)?rowingRigContext(id):laterSailRigContext(id);
@@ -403,11 +404,11 @@ export function crewGunStation(gun,role,boat){
       x=['swab','load','ram'].includes(gun.stage)?muzzle[0]+direction[0]*(.18+stroke):gun.stage==='runout'?(muzzle[0]+direction[0]*.18)*(1-progress)+breech[0]*progress:gun.breechDesign[0]*sx;
       // Stand beside the actual truck envelope, following the real work along
       // the bore as the gun runs out. The feet never enter its recoil corridor.
-      const z=gun.station[2]+.126+.31/sz;
-      return[x/sx,modelDeck(boat,z),z];
+      const z=gun.station[2]+.126+.31/sz,edge=modelDeckWidth(boat,z)-.301/sx;
+      return[gun.kind==='carronade'?x/sx:Math.max(-edge,Math.min(edge,x/sx)),modelDeck(boat,z),z];
     }
     x=(gun.breechDesign[0]-sign*.10)*sx-sign*(gun.recoilLength+.34);
-    const z=gun.station[2]-.13;return[x/sx,modelDeck(boat,z),z];
+    const z=gun.station[2]+(Math.abs(gun.station[2]-1.98)<.05?.06:-.13);return[x/sx,modelDeck(boat,z),z];
   }
   if(role==='loader'){
     const x=gun.breechDesign[0]-sign*.15/sx;
@@ -465,7 +466,8 @@ function assignGunCrew(company,boat){
   const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&!s.job);
   const routeKey=[boat.modelId,boat.length,boat.beam,company.revision,boat.gunnerySide].join('/');
   if(company.gunNavigationKey!==routeKey){company.gunNavigationKey=routeKey;company.gunNavigationRetry=new Map();}
-  for(const gun of targets)for(const role of['loader','tackle']){
+  const ordered=boat.modelId==='victory'?[...targets].sort((a,b)=>b.station[2]-a.station[2]):targets;
+  for(const gun of ordered)for(const role of['loader','tackle']){
     if(company.crew.some(s=>s.job?.kind==='gunnery'&&s.job.stage!=='return'&&s.job.gun.id===gun.id&&s.job.gunRole===role))continue;
     const key=gun.id+'/'+role;if((company.gunNavigationRetry.get(key)??0)>company.workTime)continue;
     const target=crewGunStation(gun,role,boat),point=physical(target,boat);
@@ -500,8 +502,9 @@ export function crewGunneryTool(s,boat){
       const breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);
       return {kind:'chamber',a:along(-.12,breech),b:along(.12,breech),hands:[breech.map((v,i)=>v+(i===2?.09:0)),breech.map((v,i)=>v-(i===2?.09:0))]};
     }
-    const stroke=Math.sin((gun.progress??0)*Math.PI*4)*.10,grip=along(.10+stroke);
-    return {kind:stage==='swab'?'sponge':'rammer',a:along(.72+stroke),b:along(-.6+stroke),hands:[grip,along(.26+stroke)]};
+    const handBase=gun.kind==='carronade'?muzzle:[s.position[0]-direction[0]*.18,muzzle[1],muzzle[2]];
+    const stroke=Math.sin((gun.progress??0)*Math.PI*4)*.10,grip=along(.10+stroke,handBase);
+    return {kind:stage==='swab'?'sponge':'rammer',a:along(.72+stroke),b:along(-.6+stroke),hands:[grip,along(.26+stroke,handBase)]};
   }
   if(j.gunRole==='loader'&&stage==='prime'){
     const breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);breech[1]+=.10;
@@ -693,9 +696,19 @@ export function stepCrewWork(s,company,boat,dt) {
     j.elapsed+=dt;
     if(j.kind==='gunnery'&&j.stage==='working'){
       const goal=crewGunStation(j.gun,j.gunRole,boat),from=j.position??[s.x,crewDeckHeight(boat,s.z,s.x),s.z];
-      if(distance3(physical(goal,boat),physical(from,boat))>.025){
-        const path=crewWorkNavigationRoute(s,[from,goal],boat,{exactTarget:true});
-        j.path=path??[];j.cursor=0;j.stage=path?'reposition':'waiting-gun';j.elapsed=0;
+      const a=physical(from,boat),b=physical(goal,boat),d=distance3(a,b);
+      if(d>1e-6){
+        const horizontal=Math.hypot(b[0]-a[0],b[2]-a[2]);
+        const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
+        const maxStep=motion.speedMetresPerSecond*dt;
+        const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(b[0]-other.position[0],b[1]+.028-other.position[1],b[2]-other.position[2])<.54);
+        if(d<=maxStep+1e-6&&!occupied&&crewWorkSegmentClear(s,boat,from,goal)){
+          j.position=goal;s.x=goal[0];s.z=goal[2];
+          if(d>.002){moving=true;crewAdvanceWalk(s,d,{strideMetres:motion.strideMetres});}
+        }else if(d>.025){
+          const path=crewWorkNavigationRoute(s,[from,goal],boat,{exactTarget:true});
+          j.path=path??[];j.cursor=0;j.stage=path?'reposition':'waiting-gun';j.elapsed=0;
+        }
       }
     }
     if(j.stage==='waiting-gun'&&j.elapsed>.5){
@@ -761,7 +774,7 @@ export function stepCrewWork(s,company,boat,dt) {
         j.top=Math.min(rungs,Math.max(0,((lookout.height-root[1])*vesselVerticalScale(boat)+.12)/dy));
       }
       const direction=j.stage==='ascending'?1:-1;
-      j.rung=workClamp(j.rung+direction*.38*dt/dy,0,j.top);
+      j.rung=workClamp(j.rung+direction*CREW_CLIMB_SPEED*dt/dy,0,j.top);
       j.position=climbRoot(j.mast,j.side,j.rung,boat);s.x=j.position[0];s.z=j.position[2];s.yaw=-j.side*Math.PI/2;
       if(j.stage==='ascending'&&j.rung>=j.top){
         j.stage='working';j.elapsed=0;
@@ -805,6 +818,8 @@ export function stepCrewWork(s,company,boat,dt) {
     }else if(j.kind==='hatch'&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
       const grip=resolveShipNode(boat,'hatch.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
     }
+  }else if(j.stage==='working'&&j.kind!=='gunnery'&&j.kind!=='lookout'){
+    s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
   }
   s.climbPitch=0;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId))&&j.rung>0&&!j.lookoutAtStation){

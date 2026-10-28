@@ -228,16 +228,29 @@ export function poseCrewWork(a,s,boat){
     // The tall first-rate's ratlines are farther apart. Hands can slide along
     // the shroud between them; keep the human gait at a reachable 32 cm stride.
     const spacing=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId)?crewRunnerMetrics(boat,j.mast,j.side).dy/.32:1;
-    const phase=j.rung*spacing,targets={};
-    for(const [side,offset] of [['l',0],['r',1]]){
-      // Alternate hand-over-hand holds with a simplified boot lock on the runner.
-      const cycle=(phase+offset)/2,base=Math.floor(cycle)*2-offset,f=cycle-Math.floor(cycle);
-      const swing=Math.max(0,Math.min(1,(f-.55)/.45)),e=swing*swing*(3-2*swing);
-      const foot=base+1+e*2,hand=foot+3;
-      const point=r=>{const p=resolveShipNode(boat,`mast.${crewMastName(boat,j.mast)}.runner`,{space:'design',side:j.side,step:r/spacing});return actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat)+.08,p[2]*boat.length/12+(side==='l'?.025:-.025)],s);};
-      const ft=point(foot),ht=point(hand),sign=side==='l'?1:-1;
-      solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.3,.5,.65]);
-      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.65,1.1,.10]);
+    const phase=j.rung*spacing,base=Math.floor(phase),u=phase-base,targets={};
+    const smooth=(lo,hi)=>{const t=Math.max(0,Math.min(1,(u-lo)/(hi-lo)));return t*t*(3-2*t);};
+    // Two-phase rope shimmy: hands climb hand-over-hand while boots clamp the
+    // line together, then the pelvis/spine crunches to draw both feet up.
+    const crunch=Math.sin(Math.PI*smooth(.42,.96));
+    const pelvis=poseNodeIndex(a,'pelvis');
+    if(pelvis>=0){
+      const p=posePosition(a.world[pelvis]);
+      poseMoveBone(a,pelvis,[p[0],p[1]+.04*crunch,p[2]+.03+.03*crunch]);
+    }
+    for(const [name,weight] of [['spine_01',.06],['spine_02',.05]]){
+      const node=poseNodeIndex(a,name);
+      if(node>=0){const angle=crunch*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
+    }
+    const footBase=base+.20+smooth(.46,.94);
+    const handSteps={l:base+2.65+smooth(.02,.46),r:base+3.15+smooth(.28,.72)};
+    const footSteps={l:footBase+.07,r:footBase-.07};
+    for(const side of ['l','r']){
+      const sign=side==='l'?1:-1;
+      const point=(r,wrap)=>{const p=resolveShipNode(boat,`mast.${crewMastName(boat,j.mast)}.runner`,{space:'design',side:j.side,step:r/spacing});return actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat)+.08,p[2]*boat.length/12+sign*wrap],s);};
+      const ft=point(footSteps[side],.014),ht=point(handSteps[side],.018);
+      solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.12,.55,.78]);
+      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.55,.95,.18]);
       targets[`foot_${side}`]=ft;targets[`hand_${side}`]=ht;
     }
     s.grips=targets;return;

@@ -1,5 +1,7 @@
 // Deliberately bounded glTF 2.0 subset for locally prepared crew assets.
 // No extensions, sparse data, textures, morph targets or matrix-authored nodes.
+import { createCrewLODs } from './crew-lod.js';
+
 export function readGLB(input) {
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input);
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -136,7 +138,7 @@ export function createSkinAnimator(asset) {
     for(const i of branchJoints[node])gltfMatMultiply(matrices[i],world[joints[i]],inverseMatrices[i]);
     return palette;
   }
-  return {rest,parent,order,world,pose:aPose,palette,clips,joints,names,nodeIndex:name=>nameIndices.get(name)??-1,update:updateMatrices,updateBranch,
+  const animator={rest,parent,order,world,pose:aPose,palette,clips,joints,names,nodeIndex:name=>nameIndices.get(name)??-1,update:updateMatrices,updateBranch,
     sample(name,time,other=null,otherTime=0,blend=0){
       if(!Number.isFinite(time)||!Number.isFinite(otherTime)||!Number.isFinite(blend))throw Error('Invalid animation time');
       evaluate(aPose,name,time);
@@ -148,6 +150,38 @@ export function createSkinAnimator(asset) {
       evaluate(bPose,name,time);blendPose(weight);return updateMatrices();
     },
   };
+  if(g.meshes?.length){
+    animator.sample(null,0);animator.footContacts={};
+    for(const side of ['l','r']){
+      const node=animator.nodeIndex('foot_'+side);if(node<0)continue;
+      const slots=new Set(animator.joints.map((n,i)=>animator.names[n]==='foot_'+side||animator.names[n]==='ball_'+side?i:-1).filter(i=>i>=0)),points=[];
+      let baseIndex=0;
+      for(const meshNode of g.nodes)if(meshNode.mesh!==undefined&&meshNode.skin===0){
+        for(const p of g.meshes[meshNode.mesh]?.primitives??[]){
+          const a=p.attributes;if(a?.POSITION===undefined||a?.JOINTS_0===undefined||a?.WEIGHTS_0===undefined)continue;
+          const pos=gltfAccessor(asset,a.POSITION),joint=gltfAccessor(asset,a.JOINTS_0),weight=gltfAccessor(asset,a.WEIGHTS_0),num=pos.length/3;
+          for(let i=0;i<num;i++){
+            let sum=0,influence=0;for(let k=0;k<4;k++)sum+=weight[i*4+k];if(sum<1e-6)continue;
+            for(let k=0;k<4;k++)if(slots.has(joint[i*4+k]))influence+=weight[i*4+k]/sum;
+            if(influence<.5)continue;
+            const point=[0,0,0];
+            for(let k=0;k<4;k++){
+              const at=joint[i*4+k]*16,w=weight[i*4+k]/sum;
+              for(let c=0;c<3;c++)point[c]+=w*(animator.palette[at+c]*pos[i*3]+animator.palette[at+4+c]*pos[i*3+1]+animator.palette[at+8+c]*pos[i*3+2]+animator.palette[at+12+c]);
+            }
+            points.push({index:baseIndex+i,point});
+          }
+          baseIndex+=num;
+        }
+      }
+      if(!points.length)continue;
+      const ankle=Array.from(animator.world[node].subarray(12,15)),min=[0,1,2].map(c=>Math.min(...points.map(p=>p.point[c]))),max=[0,1,2].map(c=>Math.max(...points.map(p=>p.point[c])));
+      animator.footContacts[side]=Object.freeze({node,ankle:Object.freeze(ankle),ankleAboveSole:ankle[1]-min[1],
+        min:Object.freeze(min.map((v,i)=>v-ankle[i])),max:Object.freeze(max.map((v,i)=>v-ankle[i])),
+        restWorld:Object.freeze(Array.from(animator.world[node])),vertices:Object.freeze(points.map(p=>p.index))});
+    }
+  }
+  return animator;
 }
 
 export function loadCrewGLB(bytes) {
@@ -174,28 +208,7 @@ export function loadCrewGLB(bytes) {
   }
   if(count===0||count>100000)throw Error('Crew mesh exceeds budget');
   const vertices=new Uint8Array(count*60);let offset=0;for(const c of chunks){vertices.set(c,offset);offset+=c.length;}
-  // Once per prepared crew asset, measure the actual skinned boots in their
-  // authored bind posture. Walking IK uses these soles, not guessed ankles.
-  animator.sample(null,0);animator.footContacts={};
-  const contactFloats=new Float32Array(vertices.buffer,vertices.byteOffset,vertices.byteLength/4),contactJoints=new Uint16Array(vertices.buffer,vertices.byteOffset,vertices.byteLength/2);
-  for(const side of ['l','r']){
-    const node=animator.nodeIndex('foot_'+side);if(node<0)continue;
-    const slots=new Set(animator.joints.map((n,i)=>animator.names[n]==='foot_'+side||animator.names[n]==='ball_'+side?i:-1).filter(i=>i>=0)),points=[];
-    for(let i=0;i<count;i++){
-      let influence=0;for(let k=0;k<4;k++)if(slots.has(contactJoints[i*30+18+k]))influence+=contactFloats[i*15+11+k];
-      if(influence<.5)continue;
-      const point=[0,0,0];
-      for(let k=0;k<4;k++){
-        const at=contactJoints[i*30+18+k]*16,w=contactFloats[i*15+11+k];
-        for(let c=0;c<3;c++)point[c]+=w*(animator.palette[at+c]*contactFloats[i*15]+animator.palette[at+4+c]*contactFloats[i*15+1]+animator.palette[at+8+c]*contactFloats[i*15+2]+animator.palette[at+12+c]);
-      }
-      points.push({index:i,point});
-    }
-    if(!points.length)continue;
-    const ankle=Array.from(animator.world[node].subarray(12,15)),min=[0,1,2].map(c=>Math.min(...points.map(p=>p.point[c]))),max=[0,1,2].map(c=>Math.max(...points.map(p=>p.point[c])));
-    animator.footContacts[side]=Object.freeze({node,ankle:Object.freeze(ankle),ankleAboveSole:ankle[1]-min[1],
-      min:Object.freeze(min.map((v,i)=>v-ankle[i])),max:Object.freeze(max.map((v,i)=>v-ankle[i])),
-      restWorld:Object.freeze(Array.from(animator.world[node])),vertices:Object.freeze(points.map(p=>p.index))});
-  }
-  return {asset,animator,vertices,indices:new Uint32Array(indices),vertexCount:count};
+  const indexArray=new Uint32Array(indices);
+  const lods=createCrewLODs({vertices,indices:indexArray,vertexCount:count,animator});
+  return {asset,animator,vertices,indices:indexArray,lods,vertexCount:count};
 }

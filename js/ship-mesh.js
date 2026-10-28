@@ -8,6 +8,7 @@ import {ROWING_DESIGNS} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 import { requirePlayableShipModel } from './ship-models.js';
 import { deepFreeze } from './rig-definition.js';
+import { createPartAssemblyCatalog } from './part-assembly.js';
 
 // CPU geometry is immutable model data; transforms, crew poses, moisture and
 // wake state remain per vessel. Consumers may share these buffers for uploads.
@@ -26,7 +27,15 @@ export function createShipAssetCache() {
         if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
         const groups = [], raw = builders[model.id]({ groups });
         const { vertices, indices } = indexCaravelMesh(raw);
-        const asset={ model, vertices, indices, groups: deepFreeze(groups),gpuPose:true };
+        const partAssembly = createPartAssemblyCatalog({
+          domain: 'ship',
+          modelId: model.id,
+          vertices,
+          vertexStride: 9,
+          indices,
+          groups,
+        });
+        const asset={ model, vertices, indices, groups: deepFreeze(groups), partAssembly, gpuPose:true };
         if(model.rig?.backend==='surfaces-v1'){
           asset.rigGPUData=createRigGPUData(asset);
         }

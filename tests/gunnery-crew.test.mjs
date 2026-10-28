@@ -37,7 +37,7 @@ test('both ships walk real gun teams to either battery, complete the drill, then
     assert.equal(company.crew.filter(s=>s.job?.kind==='gunnery').length,expected*2);
     assert.ok(closest>.50,'human bodies remain separated: '+closest);
     const pace=crewMotionPolicy(boat,{purpose:'work'}).speedMetresPerSecond;
-    assert.ok(pace<=1.4,'work pace has a physical human cap');assert.ok(maxMove<=pace*.1+2e-5,'no station teleport: '+maxMove);
+    assert.ok(pace<=1.75,'work pace has a physical human cap');assert.ok(maxMove<=pace*.1+2e-5,'no station teleport: '+maxMove);
     assert.ok(company.crew.filter(s=>['ines','pedro'].includes(s.id)).every(s=>s.job?.kind!=='gunnery'));
     assert.equal(boat.gunnery.projectiles.length,0,'ready never fires without an explicit order');
     for(const s of company.crew.filter(s=>s.job?.kind==='gunnery')){

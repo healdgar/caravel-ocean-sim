@@ -1,5 +1,20 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## October 28: crew movement, gunnery reload, 3-tier crew LODs, 1550–1650 sailor model, and hierarchical part-assembly
+
+Completed and verified across all source, standalone, and Pages builds:
+1. **Crew Movement, Climbing, Rope Shimmy & Gunnery Attendance (COMPLETED):**
+   - Added 12 s breech-chamber swivel gun reload cadence (`GUNNERY_SWIVEL_STAGE_DURATIONS = {swab:2, load:4, ram:2, runout:2, prime:2}` in [`js/gunnery-state.js`](js/gunnery-state.js)) alongside 33 s heavy carriage guns.
+   - Added continuous in-place stepping during `gunnery` `runout` (`d <= maxStep + 1e-6`), resolved *Victory* quarterdeck gun assignment traffic order (aft-to-fore) and long-gun bulwark/bitt station clearance in [`js/crew-work.js`](js/crew-work.js), and aligned *Victory* `station.haul.mizzen` / `rig.mizzen.fall` (`haulZ = m.z + .37`) in [`js/ship-models.js`](js/ship-models.js).
+   - Increased clear-deck `work` walking speed to `1.75 m/s` in [`js/crew-motion.js`](js/crew-motion.js) and climbing speed to `CREW_CLIMB_SPEED = 0.65 m/s` in [`js/crew-work.js`](js/crew-work.js).
+   - Replaced ladder-style climbing on vertical runner ropes with a two-phase rope shimmy animation (hand-over-hand reach, inward knee clamp, sole-to-sole boot lock, rhythmic pelvis/spine crunch and extension) in [`js/crew-pose.js`](js/crew-pose.js).
+2. **Multi-Tier Crew LODs (`near` / `mid` / `far` + Shadow Stepping) (COMPLETED):**
+   - Implemented [`js/crew-lod.js`](js/crew-lod.js) (`CREW_LOD_TIERS`, `createCrewLODs`, `selectCrewLOD`) preserving the shared 60-byte-stride skinned vertex buffer, 65-joint Mixamo skeleton, and `COLOR_0` sentinel regions (`near` `< 28 m` 100%, `mid` `28–85 m` ~28%, `far` `>= 85 m` ~10%, shadow pass `Math.min(2, mainTier + 1)`), wired into [`js/gltf.js`](js/gltf.js), [`js/crew.js`](js/crew.js), [`js/main.js`](js/main.js), and [`build.mjs`](build.mjs).
+3. **1550–1650 Neutral Male Sailor Base Mesh (COMPLETED):**
+   - Updated [`scripts/prepare-crew.mjs`](scripts/prepare-crew.mjs) (`workwearRevision: 3`) and rebuilt [`assets/crew/sailor.glb`](assets/crew/sailor.glb) (`15,923` triangles, `9,480` vertices, `65` joints) with neutral male face/neck/body proportions and 1550–1650 mariner attire (bloused linen slop-shirt, rolled cuffs, pleated Venetian slops gathered below the knee with tied garters `Knee garter l/r`, fitted wool stockings/hose, and low Tudor/Stuart leather shoes).
+4. **Hierarchical Part-Assembly & Per-Part Hit Damage (COMPLETED):**
+   - Implemented [`js/part-assembly.js`](js/part-assembly.js) and [`js/wgsl/part-assembly.js`](js/wgsl/part-assembly.js) integrated across [`js/ship-parts.js`](js/ship-parts.js), [`js/ship-mesh.js`](js/ship-mesh.js), [`js/gunnery-control.js`](js/gunnery-control.js), and [`js/coastal-world.js`](js/coastal-world.js), verified in [`tests/part-assembly.test.mjs`](tests/part-assembly.test.mjs).
+
 ## October 24: backlog execution order (3 -> 4 -> 2 -> 1)
 
 User-directed execution sequence:

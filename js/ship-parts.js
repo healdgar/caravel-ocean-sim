@@ -23,6 +23,7 @@ import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 import {proceduralDesign,proceduralHullWidth,proceduralHullDeck,proceduralDeck,proceduralDeckWidth,proceduralKeelHalfWidth,proceduralDraft,proceduralProvisionDays} from './models/procedural.js';
 import {proceduralRigContext} from './additional-rig.js';
 import {proceduralShipNodeTransform} from './procedural-models.js';
+import {SHIP_SUB_ASSEMBLIES,PART_CUTAWAY_MODES} from './part-assembly.js';
 
 const shipPartControlIDs=['fore','main','mizzen'],shipPartControlKeys=['sailFore','sailMain','sailMizzen'];
 const shipPartStationRoles={ines:'captain',tomas:'mate',beatriz:'boatswain',duarte:'foremast-hand',joao:'mainmast-hand',catarina:'mainmast-hand',leonor:'sailmaker',rui:'carpenter',maria:'lookout',afonso:'foredeck-hand',isabel:'mizzen-hand',pedro:'helmsman'};
@@ -35,6 +36,48 @@ const shipPartPitch=(p,a)=>[p[0],Math.cos(a)*p[1]-Math.sin(a)*p[2],Math.sin(a)*p
 const shipPartSpin=(p,a)=>[Math.cos(a)*p[0]-Math.sin(a)*p[1],Math.sin(a)*p[0]+Math.cos(a)*p[1],p[2]];
 const shipPartRigid=(origin,evaluate)=>({position:evaluate(origin),basis:shipPartIdentity().map(e=>shipPartSubtract(evaluate(shipPartAdd(origin,e)),evaluate(origin))),kind:'rigid'});
 
+function shipPartBuildAssemblyManifest(model,roles,guns=[]){
+  const classifyRole=id=>{
+    if(id.includes('keel')||id.includes('frame')||id.includes('sternpost'))return {subAssembly:'keel-and-frame',subAssemblyIndex:0,layer:0};
+    if(id.startsWith('deck.')||id.startsWith('hatch.')||id.startsWith('station.'))return {subAssembly:'decks-and-interior',subAssemblyIndex:1,layer:1};
+    if(id.startsWith('helm.')||id.startsWith('anchor.')||id.startsWith('gun.')||id.startsWith('rowing.'))return {subAssembly:'ordnance-and-helm',subAssemblyIndex:2,layer:2};
+    if(id.startsWith('mast.')||id.startsWith('lookout.')||id.startsWith('yard.')||id.startsWith('spar.'))return {subAssembly:'masts-and-spars',subAssemblyIndex:4,layer:4};
+    if(id.startsWith('rig.')||id.startsWith('sail.')||id.startsWith('stay.'))return {subAssembly:'rigging-and-sails',subAssemblyIndex:5,layer:5};
+    return {subAssembly:'hull-and-bulwarks',subAssemblyIndex:3,layer:3};
+  };
+  const roleKeys=Object.keys(roles);
+  const rawNodes=roleKeys.map((id,idx)=>{
+    const node=model.nodes[id]??{};
+    const c=classifyRole(id);
+    const pivot=Array.isArray(node.position)?[...node.position]:Array.isArray(node.motion?.point)?[...node.motion.point]:[0,0,0];
+    const side=id.includes('port')?-1:id.includes('starboard')?1:Math.abs(pivot[0])>.15?Math.sign(pivot[0]):0;
+    const isMoving=Boolean(node.motion||id.startsWith('helm.')||id.startsWith('hatch.')||id.startsWith('yard.')||id.startsWith('sail.')||id.startsWith('rowing.'));
+    const explodedOffset=[
+      c.layer===2||c.layer===3?(side!==0?side*1.8:pivot[0]*.35):pivot[0]*.2,
+      c.layer===0?-1.2:c.layer*1.1+Math.max(0,pivot[1])*.2,
+      pivot[2]*.15,
+    ];
+    return {partNumber:idx,id,parent:node.parent??null,...c,cutawaySide:side,isMoving,pivot,explodedOffset};
+  });
+  for(const g of guns){
+    const id=g.meshGroup??('gun.'+g.id);
+    if(roles[id])continue;
+    const pivot=g.breechDesign?[...g.breechDesign]:[0,0,0];
+    const side=g.sideSign??(g.side==='port'?-1:1);
+    rawNodes.push({partNumber:rawNodes.length,id,parent:'hull',subAssembly:'ordnance-and-helm',subAssemblyIndex:2,layer:2,cutawaySide:side,isMoving:true,pivot,explodedOffset:[side*2.2,pivot[1]*.2+0.6,pivot[2]*.15]});
+  }
+  const ordered=[...rawNodes].sort((a,b)=>a.layer-b.layer||a.pivot[1]-b.pivot[1]||a.pivot[2]-b.pivot[2]||a.partNumber-b.partNumber);
+  const win=Math.min(.2,Math.max(.06,1.5/Math.max(1,ordered.length)));
+  const windows=new Array(rawNodes.length);
+  for(let r=0;r<ordered.length;r++){
+    const n=ordered[r],frac=ordered.length>1?r/(ordered.length-1):0;
+    const start=Math.min(1-win,(n.layer/6)*.35+frac*(1-win-(n.layer/6)*.35));
+    windows[n.partNumber]=[+start.toFixed(5),+Math.min(1,start+win).toFixed(5)];
+  }
+  const nodes=rawNodes.map(n=>({...n,assemblyWindow:windows[n.partNumber]}));
+  return {version:1,subAssemblies:SHIP_SUB_ASSEMBLIES,cutawayModes:PART_CUTAWAY_MODES,partCount:nodes.length,nodes,nodesById:Object.fromEntries(nodes.map(n=>[n.id,n]))};
+}
+
 // Contract shape for later craft. Empty rig arrays are valid for a sail-less
 // craft; oars/paddles bind the same stroke, grip, blade and water-load evaluator.
 export const SHIP_PART_CAPABILITIES=deepFreeze({version:1,
@@ -42,6 +85,7 @@ export const SHIP_PART_CAPABILITIES=deepFreeze({version:1,
   propulsion:{sails:'posed-cloth forces',oars:'posed stroke and immersed blade forces',paddles:'posed stroke and immersed blade forces'},
   strokeRequirements:['pivot','grip','blade','station','evaluateTransform','waterContact','force'],
   steeringKinds:['rudder','steering-oar','steering-paddle','differential-oars','paddles'],
+  assembly:{subAssemblies:SHIP_SUB_ASSEMBLIES,cutawayModes:PART_CUTAWAY_MODES,perVertexAttributes:['partNumber','explodedOffset','pivot','layerAndFlags'],perPartState:['appear','explode','wearAndDamage','cutawayVisibility']},
   readiness:'Explicit ready model and part adapter required; no identity fallback.'});
 
 export function getShipParts(modelId='nina'){
@@ -102,6 +146,7 @@ export function getShipParts(modelId='nina'){
       note:'Authored loading and stability; reported capacity/tonnage is separate provenance, not displacement mass.'},
     crew:{representedCount:Object.keys(model.crewStations).length,loadedCount:manifest.crew,representativeWatch:victory,
       stations:Object.entries(model.crewStations).map(([id,p])=>({id,role:shipPartStationRoles[id],node:'station.crew.'+id,position:[p.x,weatherDeck(p.z),p.z],route:[...p.route]}))},
+    assembly:shipPartBuildAssemblyManifest(model,roles,createGunDefinitions(model.id)),
   };
   const frozen=deepFreeze(parts);shipPartAdapters.set(key,frozen);return frozen;
 }
@@ -112,8 +157,9 @@ function shipPartAdditionalAdapter(model){
   const surfaces=model.rig.sails.map(s=>({...s,index:d.surfaces.findIndex(v=>v.id===s.surfaceId),role:s.sailNode,
     shape:d.surfaces.find(v=>v.id===s.surfaceId).corners.length===3?'triangle':'quadrilateral',poseBackend:'surfaces-v1'}));
   const manifest={...BOAT_MANIFEST,...d.loading},controlGroups=shipPartControlIDs.map((name,index)=>({id:name,index,key:shipPartControlKeys[index],surfaceIDs:surfaces.filter(s=>s.controlGroup===name).map(s=>s.id)})).filter(g=>g.surfaceIDs.length);
+  const roles=Object.fromEntries(Object.entries(model.nodes).map(([name,n])=>[name,{kind:n.kind,source:'model-node'}])),guns=createGunDefinitions(id);
   return {version:1,modelId:id,modelCode:model.modelCode,revision:model.revision,frame:{...d.frame,axes:{x:'starboard',y:'up',z:'aft'},origin:'authored loaded waterline; reference tonnage does not set displacement'},runtime:{...d.runtime},
-    roles:Object.fromEntries(Object.entries(model.nodes).map(([name,n])=>[name,{kind:n.kind,source:'model-node'}])),
+    roles,
     hull:{family:d.family,profile:{kind:'section-loft',bounds:[d.profile.stations[0],d.profile.stations.at(-1)],draft:d.profile.draft??-d.profile.levels[0],halfWidth,skinDeck,weatherDeck,weatherWidth,
       point:(z,y,side)=>[side*halfWidth(z,y),y,z],authoredSurface:(station,baseY,side)=>hullLoftPoint(d.profile,station,baseY,side),authoredParameters:['station','baseY','side'],provenance:d.interpretation},
       keel:{kind:'separate-timber',meshGroup:'hull.keel',centreline:d.keel.bounds.map(z=>[0,hullLoftBottom(d.profile,z),z]),width:d.keel.width,depth:d.keel.depth,exposedDepth:d.keel.depth,historicalEndpoints:null,note:'Authored exposed timber; not recovered historical keel endpoints.'},
@@ -122,10 +168,11 @@ function shipPartAdditionalAdapter(model){
     steering:{kind:d.steering.kind,control:d.steering.control,rudder:{role:'helm.rudder',axis:[0,1,0],pivot:[...d.steering.pivot]},tiller:{role:'helm.tiller',axis:[0,1,0],pivot:[...d.steering.pivot]},wheel:null,grip:'helm.grip',camera:'helm.camera'},
     rig:{backend:'surfaces-v1',masts:model.rig.masts,surfaces,controlGroups,transferYards:surfaces.some(s=>s.kind==='lateen'),context},
     propulsion:{sails:{enabled:surfaces.length>0,backend:'surfaces-v1'},oars:null,paddles:null},
-    equipment:{anchor:{limits:anchorEquipment({modelId:id}),port:'anchor.port.fairlead',starboard:'anchor.starboard.fairlead'},guns:createGunDefinitions(id)},
+    equipment:{anchor:{limits:anchorEquipment({modelId:id}),port:'anchor.port.fairlead',starboard:'anchor.starboard.fairlead'},guns},
     loading:{manifest,provisionDays:DEFAULT_PROVISION_DAYS,policy:d.loading.designIncludesManifest?'default-manifest-in-design-waterline':'manifest-added-to-design-hull-mass',evaluate:boat=>boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes,id),note:d.interpretation},
     crew:{representedCount:Object.keys(d.crewStations).length,loadedCount:d.loading.crew,representativeWatch:d.loading.crew>Object.keys(d.crewStations).length,
-      stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:shipPartStationRoles[name],node:'station.crew.'+name,position:[p.x,weatherDeck(p.z),p.z],route:[...p.route]}))}};
+      stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:shipPartStationRoles[name],node:'station.crew.'+name,position:[p.x,weatherDeck(p.z),p.z],route:[...p.route]}))},
+    assembly:shipPartBuildAssemblyManifest(model,roles,guns)};
 }
 
 function shipPartProceduralAdapter(model){
@@ -140,9 +187,10 @@ function shipPartProceduralAdapter(model){
   if(d.cockpit)zones.push({id:'cockpit',bounds:[...d.cockpit.bounds],height:d.cockpit.floorHeight,halfWidth:d.cockpit.halfWidth,role:'deck.cockpit'});
   const anchor=!!(row?d.equipment.anchor:d.equipment.anchors),oar=row&&d.propulsion.kind==='oar',paddle=row&&d.propulsion.kind==='paddle';
   const represented=Object.keys(d.crewStations).length,steering=d.steering,hasTiller=Object.hasOwn(model.nodes,'helm.tiller'),hasWheel=Object.hasOwn(model.nodes,'helm.wheel');
+  const roles=Object.fromEntries(Object.entries(model.nodes).map(([name,n])=>[name,{kind:n.kind,source:'model-node'}]));
   return {version:1,modelId:id,modelCode:model.modelCode,revision:model.revision,
     frame:{...d.frame,axes:{x:'starboard',y:'up',z:'aft'},origin:'authored loaded waterline; reported tonnage does not set displacement'},runtime:{...d.runtime},
-    roles:Object.fromEntries(Object.entries(model.nodes).map(([name,n])=>[name,{kind:n.kind,source:'model-node'}])),
+    roles,
     hull:{family:d.family,profile:{kind:'section-loft',bounds:[d.profile.stations[0],d.profile.stations.at(-1)],draft:-d.profile.levels[0],appendageDraft:proceduralDraft(id),
       halfWidth:width,skinDeck,weatherDeck,weatherWidth,point:(z,y,side)=>[side*width(z,y),y,z],
       authoredSurface:(station,baseY,side)=>hullLoftPoint(d.profile,station,baseY,side),authoredParameters:['station','baseY','side'],provenance:d.interpretation},keel,
@@ -164,7 +212,8 @@ function shipPartProceduralAdapter(model){
       evaluate:boat=>boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes,id),note:d.loading.interpretation??d.loading.provenance??d.interpretation},
     crew:{representedCount:represented,loadedCount:d.loading.crew,representativeWatch:d.loading.crew>represented,
       stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:p.role??p.roles?.[0]??shipPartStationRoles[name]??'sailor',node:'station.crew.'+name,
-        position:[p.x,p.y??weatherDeck(p.z,p.x),p.z],route:p.route?[...p.route]:[p.z,p.z],...(p.stationId?{rowingStation:p.stationId}:{})}))}};
+        position:[p.x,p.y??weatherDeck(p.z,p.x),p.z],route:p.route?[...p.route]:[p.z,p.z],...(p.stationId?{rowingStation:p.stationId}:{})}))},
+    assembly:shipPartBuildAssemblyManifest(model,roles,[])};
 }
 
 const shipPartDefaultLateen={side:-1,opening:.30,dip:0,fill:0,deployed:1,pressure:1};

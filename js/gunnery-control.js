@@ -3,6 +3,54 @@ import { createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySu
 import { createGunDefinitions, gunMuzzlePose, gunElevationRange } from './gunnery-models.js';
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
 import { boatRotate } from './boat.js';
+import { SHIP_MODELS } from './ship-models.js';
+import { createShipAssetCache } from './ship-mesh.js';
+import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
+import { locatePartAtLocalPoint } from './part-assembly.js';
+
+let gunneryShipAssetCache = null;
+
+function resolveShipHitPart(targetBoat, localPosition, hitZone) {
+  if (!targetBoat || !Array.isArray(localPosition)) return null;
+  const modelId = targetBoat.model?.id ?? targetBoat.modelId;
+  const model = modelId ? SHIP_MODELS[modelId] : null;
+  if (!model || model.status !== 'ready') return null;
+  try {
+    if (!gunneryShipAssetCache) gunneryShipAssetCache = createShipAssetCache();
+    const asset = gunneryShipAssetCache.get(modelId);
+    if (!asset?.partAssembly) return null;
+    const f = model.designFrame;
+    const L = targetBoat.length ?? f?.length ?? 20;
+    const B = targetBoat.beam ?? f?.beam ?? 6;
+    const sx = f?.beam ? B / f.beam : 1;
+    const sy = f?.verticalScale ?? 1;
+    const sz = f?.length ? L / f.length : 1;
+    const designPt = [
+      localPosition[0] / (sx || 1),
+      localPosition[1] / (sy || 1),
+      localPosition[2] / (sz || 1),
+    ];
+    const subAssemblies =
+      hitZone === 'rigging'
+        ? ['masts-and-spars', 'rigging-and-sails']
+        : ['keel-and-frame', 'decks-and-interior', 'ordnance-and-helm', 'hull-and-bulwarks'];
+    return locatePartAtLocalPoint(asset.partAssembly, designPt, { subAssemblies });
+  } catch {
+    return null;
+  }
+}
+
+function resolveBuildingHitPart(building, localPosition) {
+  if (!building || !building.prefabId || !PORT_PREFABS[building.prefabId] || !Array.isArray(localPosition)) {
+    return null;
+  }
+  try {
+    const adapter = getBuildingParts(building.prefabId);
+    return adapter.locatePartAtLocalPoint(localPosition);
+  } catch {
+    return null;
+  }
+}
 
 export function applyRigidHullImpulse(boat, worldPosition, impulse) {
   const h = boat?.hydrodynamics;
@@ -31,7 +79,10 @@ export function applyRigidHullImpulse(boat, worldPosition, impulse) {
 }
 
 export function createVesselDamageState(boat) {
-  if (boat.damage) return boat.damage;
+  if (boat.damage) {
+    if (!boat.damage.partDamage) boat.damage.partDamage = {};
+    return boat.damage;
+  }
   const mass = boat.hydrodynamics?.mass ?? 120000;
   boat.damage = {
     maxHullEnergy: Math.max(400000, mass * 18),
@@ -47,6 +98,7 @@ export function createVesselDamageState(boat) {
     breaches: 0,
     floodingTonnes: 0,
     sunk: false,
+    partDamage: {},
     lastHit: null,
   };
   return boat.damage;
@@ -132,6 +184,7 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
           if (mHit) { high = mid; bestHit = mHit; bestLocal = [mx, my, mz]; } else { low = mid; }
         }
       }
+      const hitPart = resolveShipHitPart(targetBoat, bestLocal, bestHit.hitZone);
       return {
         fraction: high,
         kind: 'ship',
@@ -140,6 +193,9 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
         targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
         hitZone: bestHit.hitZone,
         mastGroup: bestHit.mastGroup,
+        hitPartId: hitPart?.id ?? null,
+        hitSubAssembly: hitPart?.subAssembly ?? null,
+        hitLayer: hitPart?.layer ?? null,
         waterline: bestHit.hitZone === 'hull' && bestLocal[1] <= 0.75,
         localPosition: bestLocal,
         normal: vesselLocalToWorldNormal(targetBoat, bestHit.localNormal),
@@ -160,6 +216,14 @@ export function applyShipImpactDamage(targetBoat, event) {
   const pos = event.surfacePosition ?? event.position ?? [targetBoat.x ?? 0, targetBoat.heave ?? 0, targetBoat.z ?? 0];
   const scale = event.hitZone === 'rigging' ? 0.35 : 1.0;
   applyRigidHullImpulse(targetBoat, pos, [vel[0] * mass * scale, vel[1] * mass * scale, vel[2] * mass * scale]);
+
+  const localPos = event.localPosition ?? vesselWorldToLocal(targetBoat, pos);
+  const resolvedPart = event.hitPartId
+    ? { id: event.hitPartId, subAssembly: event.hitSubAssembly ?? null, layer: event.hitLayer ?? null }
+    : resolveShipHitPart(targetBoat, localPos, event.hitZone);
+  const hitPartId = resolvedPart?.id ?? (event.hitZone === 'rigging' ? `sail.${event.mastGroup ?? 'main'}` : 'hull.shell');
+  const hitSubAssembly =
+    resolvedPart?.subAssembly ?? (event.hitZone === 'rigging' ? 'rigging-and-sails' : 'hull-and-bulwarks');
 
   damage.hits++;
   if (event.hitZone === 'rigging') {
@@ -186,12 +250,21 @@ export function applyShipImpactDamage(targetBoat, event) {
     }
     if (damage.hullIntegrity <= 0) damage.sunk = true;
   }
+
+  const partBudget = (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.25;
+  const prevPartDamage = damage.partDamage[hitPartId] ?? 0;
+  const nextPartDamage = Math.min(1, +(prevPartDamage + energy / Math.max(10000, partBudget)).toFixed(3));
+  damage.partDamage[hitPartId] = nextPartDamage;
+
   const report = {
     kind: 'ship',
     targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
     targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
     hitZone: event.hitZone ?? 'hull',
     mastGroup: event.mastGroup ?? null,
+    hitPartId,
+    hitSubAssembly,
+    partDamage: nextPartDamage,
     hullIntegrity: +damage.hullIntegrity.toFixed(3),
     rigIntegrity: +damage.rigIntegrity.toFixed(3),
     breaches: damage.breaches,
@@ -209,14 +282,17 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port) {
   let best = null;
   for (const inst of instances) {
     const cs = Math.cos(-(inst.yaw ?? 0)), sn = Math.sin(-(inst.yaw ?? 0));
+    const baseY = inst.baseY ?? inst.y ?? 0;
+    const depthZ = inst.depth ?? inst.length ?? 20;
+    const roofExtra = inst.roofHeight ?? inst.roofPitch ?? 0;
     const toLocal = (p) => {
-      const dx = p[0] - inst.x, dy = p[1] - inst.baseY, dz = p[2] - inst.z;
+      const dx = p[0] - inst.x, dy = p[1] - baseY, dz = p[2] - inst.z;
       return [dx * cs - dz * sn, dy, dx * sn + dz * cs];
     };
     const p0 = toLocal(from), p1 = toLocal(to);
     const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-    const minB = [-inst.width * 0.5 - radius, -radius, -inst.depth * 0.5 - radius];
-    const maxB = [inst.width * 0.5 + radius, inst.height + (inst.roofHeight ?? 0) + radius, inst.depth * 0.5 + radius];
+    const minB = [-inst.width * 0.5 - radius, -radius, -depthZ * 0.5 - radius];
+    const maxB = [inst.width * 0.5 + radius, inst.height + roofExtra + radius, depthZ * 0.5 + radius];
     let tMin = 0, tMax = 1, hitAxis = 0, hitSign = 1;
     let valid = true;
     for (let a = 0; a < 3; a++) {
@@ -235,6 +311,8 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port) {
       const ln = [0, 0, 0]; ln[hitAxis] = hitSign;
       const wcs = Math.cos(inst.yaw ?? 0), wsn = Math.sin(inst.yaw ?? 0);
       const normal = [ln[0] * wcs - ln[2] * wsn, ln[1], ln[0] * wsn + ln[2] * wcs];
+      const localPosition = [p0[0] + d[0] * tMin, p0[1] + d[1] * tMin, p0[2] + d[2] * tMin];
+      const hitPart = resolveBuildingHitPart(inst, localPosition);
       best = {
         fraction: tMin,
         kind: 'building',
@@ -242,6 +320,10 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port) {
         buildingId: inst.id,
         buildingName: inst.label ?? inst.prefabId,
         prefabId: inst.prefabId,
+        hitPartId: hitPart?.id ?? null,
+        hitSubAssembly: hitPart?.subAssembly ?? null,
+        hitLayer: hitPart?.layer ?? null,
+        localPosition,
         normal,
       };
     }
@@ -252,7 +334,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port) {
 export function applyBuildingImpactDamage(building, event) {
   if (!building || !event) return null;
   if (!building.damageState) {
-    const isBastion = building.prefabId === 'stone_sea_bastion';
+    const isBastion = building.prefabId === 'stone_sea_bastion' || building.prefabId === 'bastion_trace_fortress';
     const isTimber = building.prefabId === 'timber_mole_pier' || building.prefabId === 'careening_shed';
     building.damageState = {
       maxEnergy: isBastion ? 25000000 : isTimber ? 2500000 : 8500000,
@@ -260,8 +342,10 @@ export function applyBuildingImpactDamage(building, event) {
       damageJoules: 0,
       hits: 0,
       state: 'intact',
+      partDamage: {},
     };
   }
+  if (!building.damageState.partDamage) building.damageState.partDamage = {};
   const d = building.damageState;
   const vel = event.velocity ?? [200, 0, 0];
   const speed = Math.hypot(vel[0], vel[1], vel[2]);
@@ -271,11 +355,25 @@ export function applyBuildingImpactDamage(building, event) {
   d.damageJoules += energy;
   d.integrity = Math.max(0, 1 - d.damageJoules / d.maxEnergy);
   d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
+
+  const resolvedPart = event.hitPartId
+    ? { id: event.hitPartId, subAssembly: event.hitSubAssembly ?? null, layer: event.hitLayer ?? null }
+    : resolveBuildingHitPart(building, event.localPosition);
+  const hitPartId = resolvedPart?.id ?? `${building.prefabId ?? 'building'}:walls`;
+  const hitSubAssembly = resolvedPart?.subAssembly ?? 'walls-and-bastions';
+  const partBudget = d.maxEnergy * 0.18;
+  const prevPartDamage = d.partDamage[hitPartId] ?? 0;
+  const nextPartDamage = Math.min(1, +(prevPartDamage + energy / Math.max(25000, partBudget)).toFixed(3));
+  d.partDamage[hitPartId] = nextPartDamage;
+
   return {
     kind: 'building',
     buildingId: building.id,
     buildingName: building.label ?? building.prefabId,
     prefabId: building.prefabId,
+    hitPartId,
+    hitSubAssembly,
+    partDamage: nextPartDamage,
     integrity: +d.integrity.toFixed(3),
     state: d.state,
     hits: d.hits,
