@@ -45,9 +45,9 @@ import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude 
 import { formatJulianDate, localSolarHours, greatCircleKm, windDescription } from './ocean-climate.js';
 import { createEncounterDirector } from './encounters.js';
 
-const STORAGE_KEY = 'waterworld.voyage.v1';
-const wrap360 = (d) => ((d % 360) + 360) % 360;
-const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const VOYAGE_STORAGE_KEY = 'waterworld.voyage.v1';
+const voyageWrap360 = (d) => ((d % 360) + 360) % 360;
+const voyageEscapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 /** Ship's watch and half-hour glass for a local solar time. */
 export function shipWatch(solarHours) {
@@ -186,7 +186,7 @@ export function createVoyageController(cfg) {
     if (!interrupt) { box.hidden = true; box.innerHTML = ''; return; }
     hud.root.hidden = false;
     box.hidden = false;
-    box.innerHTML = `<p class="voyage-callout-title">${escapeHtml(interrupt.title ?? 'The lookout calls')}</p><p class="voyage-callout-text">${escapeHtml(interrupt.text)}</p><div class="voyage-callout-actions"></div>`;
+    box.innerHTML = `<p class="voyage-callout-title">${voyageEscapeHtml(interrupt.title ?? 'The lookout calls')}</p><p class="voyage-callout-text">${voyageEscapeHtml(interrupt.text)}</p><div class="voyage-callout-actions"></div>`;
     const actions = box.querySelector('.voyage-callout-actions');
     for (const choice of interrupt.choices ?? [{ id: 'ok', label: 'Very well' }]) {
       const b = document.createElement('button');
@@ -210,7 +210,7 @@ export function createVoyageController(cfg) {
     } else if (it.type === 'land-ho') {
       if (choiceId === 'stand-in') {
         const brg = it.bearing ?? boat.heading;
-        orderCourse(helmsman, wrap360(brg - voyage.variation), { beat: false });
+        orderCourse(helmsman, voyageWrap360(brg - voyage.variation), { beat: false });
         voyage.compassCourse = helmsman.compassCourse;
         setWarp('watch');
       } else if (choiceId === 'chart') {
@@ -265,17 +265,17 @@ export function createVoyageController(cfg) {
   /** Course laid on the chart in TRUE degrees; the pilot converts with his believed variation. */
   function layCourse(courseTrue, target = null) {
     promoteActive();
-    const compass = wrap360(courseTrue - voyage.pilot.variationEstimate);
+    const compass = voyageWrap360(courseTrue - voyage.pilot.variationEstimate);
     if (target) voyage.destination = { lat: target.lat, lon: target.lon, name: target.name ?? 'Destination' };
     orderCompassCourse(compass);
   }
   function alterCourse(deltaDeg) {
     if (!voyage) return;
-    orderCompassCourse(wrap360(helmsman.compassCourse + deltaDeg));
+    orderCompassCourse(voyageWrap360(helmsman.compassCourse + deltaDeg));
   }
   function keepHerSo() {
     promoteActive();
-    orderCompassCourse(wrap360(boat.heading - voyage.variation));
+    orderCompassCourse(voyageWrap360(boat.heading - voyage.variation));
   }
   function tack() {
     if (!voyage) return;
@@ -315,10 +315,10 @@ export function createVoyageController(cfg) {
       shipName: opts.shipName ?? boat.model?.name ?? 'Niña',
       difficulty: opts.difficulty ?? 'pilot',
       seed: opts.seed ?? Math.floor(Math.random() * 1e9),
-      compassCourse: wrap360(boat.heading - 0),
+      compassCourse: voyageWrap360(boat.heading - 0),
     });
     voyage.passive = passive;
-    voyage.compassCourse = wrap360(boat.heading - voyage.variation);
+    voyage.compassCourse = voyageWrap360(boat.heading - voyage.variation);
     orderCourse(helmsman, voyage.compassCourse);
     helmsman.engaged = !passive;
     manualHelm = passive;
@@ -331,7 +331,7 @@ export function createVoyageController(cfg) {
   }
 
   function resume() {
-    const raw = storage?.getItem?.(STORAGE_KEY);
+    const raw = storage?.getItem?.(VOYAGE_STORAGE_KEY);
     const v = raw ? restoreVoyage(raw) : null;
     if (!v) return null;
     voyage = v;
@@ -347,12 +347,12 @@ export function createVoyageController(cfg) {
   }
 
   function hasSavedVoyage() {
-    try { return Boolean(storage?.getItem?.(STORAGE_KEY)); } catch { return false; }
+    try { return Boolean(storage?.getItem?.(VOYAGE_STORAGE_KEY)); } catch { return false; }
   }
 
   function end({ keepSave = false } = {}) {
     if (!voyage) return;
-    if (!keepSave) try { storage?.removeItem?.(STORAGE_KEY); } catch { /* ignore */ }
+    if (!keepSave) try { storage?.removeItem?.(VOYAGE_STORAGE_KEY); } catch { /* ignore */ }
     voyage = null;
     helmsman.engaged = false;
     if (astronomy) astronomy.rate = 1;
@@ -387,7 +387,7 @@ export function createVoyageController(cfg) {
   function persist(now) {
     if (!voyage || voyage.passive || !storage || now - lastPersist < 5000) return;
     lastPersist = now;
-    try { storage.setItem(STORAGE_KEY, serializeVoyage(voyage)); } catch { /* quota */ }
+    try { storage.setItem(VOYAGE_STORAGE_KEY, serializeVoyage(voyage)); } catch { /* quota */ }
   }
 
   function syncAstronomy() {

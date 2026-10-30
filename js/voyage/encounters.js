@@ -13,19 +13,9 @@
 
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
 import { addLog, addMark, raiseInterrupt } from './passage.js';
+import { mulberry32 } from './ocean-climate.js';
 
-const wrap360 = (d) => ((d % 360) + 360) % 360;
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function rand() {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const encounterWrap360 = (d) => ((d % 360) + 360) % 360;
 
 export const ENCOUNTER_ARCHETYPES = Object.freeze([
   {
@@ -158,8 +148,8 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
     const shipName = arch.names[Math.floor(rand() * arch.names.length)];
     const relSide = rand() < 0.5 ? -1 : 1;
     const relDeg = relSide * (15 + rand() * 65);
-    const bearingDeg = wrap360((boat?.heading ?? 0) + relDeg);
-    const compassBrg = wrap360(bearingDeg - (voyage.variation ?? 0));
+    const bearingDeg = encounterWrap360((boat?.heading ?? 0) + relDeg);
+    const compassBrg = encounterWrap360(bearingDeg - (voyage.variation ?? 0));
     const callout = relativeBearingCall(relDeg);
     const distNm = +(3.2 + rand() * 2.8).toFixed(1);
     const disguised = Boolean(arch.hostile && rand() < (arch.disguisedChance ?? 0));
@@ -253,8 +243,8 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
     if (choiceId === 'avoid') {
       const turnDir = enc.relBearingDeg >= 0 ? -1 : 1;
-      const currentCompass = wrap360((boat?.heading ?? 0) - (voyage.variation ?? 0));
-      const nextCompass = wrap360(currentCompass + turnDir * 33.75);
+      const currentCompass = encounterWrap360((boat?.heading ?? 0) - (voyage.variation ?? 0));
+      const nextCompass = encounterWrap360(currentCompass + turnDir * 33.75);
       env.onOrderCompassCourse?.(nextCompass);
       const escapeChance = enc.actuallyHostile
         ? Math.max(0.25, Math.min(0.92, 0.58 + (shipSpeedKts - enc.speedKts) * 0.08))

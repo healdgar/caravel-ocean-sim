@@ -16,7 +16,9 @@
 import { controlIcon } from '../controls.js';
 import { COMPASS_POINTS_32, compassPointName, formatLatitude, formatLongitude } from './compass.js';
 import { formatJulianDate } from './ocean-climate.js';
+import { NM_PER_LEAGUE } from './passage.js';
 export { COMPASS_POINTS_32, compassPointName } from './compass.js';
+export { NM_PER_LEAGUE } from './passage.js';
 
 // ---------------------------------------------------------------------------------------------
 // Compass points (Spanish names)
@@ -103,7 +105,6 @@ export function rhumbPath(fromLat, fromLon, toLat, toLon, steps = 32) {
 
 /** The Castilian legua of 17½ to the degree used by the Casa de la Contratación. */
 export const LEAGUES_PER_DEGREE = 17.5;
-export const NM_PER_LEAGUE = 60 / LEAGUES_PER_DEGREE; // ≈ 3.43 nm
 export function nmToLeagues(nm) { return nm / NM_PER_LEAGUE; }
 export function leaguesToNm(leagues) { return leagues * NM_PER_LEAGUE; }
 

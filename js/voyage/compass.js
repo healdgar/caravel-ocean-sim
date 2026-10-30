@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Boxing the compass: the 32 points used by 16th-century pilots, plus lookout call phrasing.
 
-const wrap360 = (d) => ((d % 360) + 360) % 360;
+const compassWrap360 = (d) => ((d % 360) + 360) % 360;
 
 /** The 32 points of the mariner's compass, clockwise from north (11.25° apart). */
 export const COMPASS_POINTS_32 = Object.freeze([
@@ -12,13 +12,13 @@ export const COMPASS_POINTS_32 = Object.freeze([
 ]);
 
 export function compassPointIndex(deg) {
-  return Math.round(wrap360(deg) / 11.25) % 32;
+  return Math.round(compassWrap360(deg) / 11.25) % 32;
 }
 export function compassPointName(deg) {
   return COMPASS_POINTS_32[compassPointIndex(deg)];
 }
 export function compassPointBearing(index) {
-  return wrap360(index * 11.25);
+  return compassWrap360(index * 11.25);
 }
 /** Spoken form for log entries: "SW by W" -> "south-west by west". */
 export function compassPointWords(deg) {
@@ -34,7 +34,7 @@ export function compassPointWords(deg) {
     .join(' by ');
 }
 
-const POINT_WORDS = ['', 'a point', 'two points', 'three points', 'four points', 'five points', 'six points', 'seven points'];
+const COMPASS_POINT_WORDS = ['', 'a point', 'two points', 'three points', 'four points', 'five points', 'six points', 'seven points'];
 /**
  * Lookout call for an object at a bearing relative to the bow (deg, + = starboard).
  * e.g. 22.5 -> "two points off the starboard bow", -90 -> "on the larboard beam".
@@ -45,13 +45,13 @@ export function relativeBearingCall(relDeg) {
   const p = Math.round(Math.abs(r) / 11.25);
   if (p === 0) return 'dead ahead';
   if (p === 16) return 'right astern';
-  if (p < 4) return `${POINT_WORDS[p]} off the ${side} bow`;
+  if (p < 4) return `${COMPASS_POINT_WORDS[p]} off the ${side} bow`;
   if (p === 4) return `broad on the ${side} bow`;
-  if (p < 8) return `${POINT_WORDS[8 - p]} forward of the ${side} beam`;
+  if (p < 8) return `${COMPASS_POINT_WORDS[8 - p]} forward of the ${side} beam`;
   if (p === 8) return `on the ${side} beam`;
-  if (p < 12) return `${POINT_WORDS[p - 8]} abaft the ${side} beam`;
+  if (p < 12) return `${COMPASS_POINT_WORDS[p - 8]} abaft the ${side} beam`;
   if (p === 12) return `broad on the ${side} quarter`;
-  return `${POINT_WORDS[16 - p]} off the ${side} quarter`;
+  return `${COMPASS_POINT_WORDS[16 - p]} off the ${side} quarter`;
 }
 
 /** Degrees and minutes for latitude/longitude display: 21.667 -> "21° 40′ N". */

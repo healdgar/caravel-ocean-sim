@@ -9,10 +9,10 @@
 
 import { boatForwardSpeed } from '../boat.js';
 
-const RAD = Math.PI / 180;
-const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-const wrap360 = (d) => ((d % 360) + 360) % 360;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const HELMSMAN_RAD = Math.PI / 180;
+const helmsmanWrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const helmsmanWrap360 = (d) => ((d % 360) + 360) % 360;
+const helmsmanClamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 /** Canvas orders a 1550 master would give, as fractions for [fore, main, mizzen]. */
 export const CANVAS_ORDERS = Object.freeze({
@@ -32,9 +32,9 @@ export function closestPointOfSail(modelId) {
 export function createHelmsman({ compassCourse = 0, engaged = true } = {}) {
   return {
     engaged,
-    compassCourse: wrap360(compassCourse),
-    trueCourse: wrap360(compassCourse),
-    steeredTrue: wrap360(compassCourse),
+    compassCourse: helmsmanWrap360(compassCourse),
+    trueCourse: helmsmanWrap360(compassCourse),
+    steeredTrue: helmsmanWrap360(compassCourse),
     tack: 0, // +1 wind on starboard side of the bow, −1 larboard, 0 not beating
     beat: false, // tack automatically toward the ordered course when it lies upwind
     beatLegHours: 4,
@@ -49,7 +49,7 @@ export function createHelmsman({ compassCourse = 0, engaged = true } = {}) {
 
 /** Order a new compass course (degrees magnetic). */
 export function orderCourse(state, compassCourse, { beat = state.beat } = {}) {
-  state.compassCourse = wrap360(compassCourse);
+  state.compassCourse = helmsmanWrap360(compassCourse);
   state.beat = Boolean(beat);
   state.engaged = true;
   state.legGameSeconds = 0;
@@ -74,20 +74,20 @@ export function orderTack(state) {
  */
 export function steerHelmsman(state, boat, dt, { windSpeed = 7, windDirection = 0, variation = 0, gameDt = dt } = {}) {
   if (!state.engaged) return state;
-  dt = Number.isFinite(dt) ? clamp(dt, 0, 0.25) : 0;
+  dt = Number.isFinite(dt) ? helmsmanClamp(dt, 0, 0.25) : 0;
   const speedRaw = boatForwardSpeed(boat);
   const speed = Number.isFinite(speedRaw) ? speedRaw : 0;
-  const heading = (boat.heading ?? 0) * RAD;
+  const heading = (boat.heading ?? 0) * HELMSMAN_RAD;
   // The compass reads magnetic; the hull turns in true bearings. true = magnetic + variation(E+).
-  const desired = wrap360(state.compassCourse + variation);
+  const desired = helmsmanWrap360(state.compassCourse + variation);
   state.trueCourse = desired;
   const windFrom = Math.atan2(-Math.cos(windDirection), Math.sin(windDirection));
-  const noGo = closestPointOfSail(boat.modelId) * RAD;
-  let course = desired * RAD;
-  const relative = wrap(course - windFrom);
+  const noGo = closestPointOfSail(boat.modelId) * HELMSMAN_RAD;
+  let course = desired * HELMSMAN_RAD;
+  const relative = helmsmanWrap(course - windFrom);
   state.canLieCourse = !(Math.abs(relative) < noGo && windSpeed > 0.6);
   if (!state.canLieCourse) {
-    if (!state.tack) state.tack = Math.sign(wrap(heading - windFrom)) || Math.sign(relative) || 1;
+    if (!state.tack) state.tack = Math.sign(helmsmanWrap(heading - windFrom)) || Math.sign(relative) || 1;
     if (state.beat) {
       state.legGameSeconds += gameDt;
       if (state.legGameSeconds >= state.beatLegHours * 3600) {
@@ -104,38 +104,38 @@ export function steerHelmsman(state, boat, dt, { windSpeed = 7, windDirection = 
   }
 
   // In irons: bear away to a beam reach on the chosen side before trying again.
-  state.ironsTime = Math.abs(wrap(heading - windFrom)) < 42 * RAD && speed < 0.35 ? state.ironsTime + dt : 0;
+  state.ironsTime = Math.abs(helmsmanWrap(heading - windFrom)) < 42 * HELMSMAN_RAD && speed < 0.35 ? state.ironsTime + dt : 0;
   if (!state.recovering && state.ironsTime > 4) state.recovering = true;
-  if (state.recovering && speed > 0.45 && Math.abs(wrap(heading - windFrom)) > 75 * RAD) state.recovering = false;
+  if (state.recovering && speed > 0.45 && Math.abs(helmsmanWrap(heading - windFrom)) > 75 * HELMSMAN_RAD) state.recovering = false;
   let rudder;
   if (state.recovering) {
-    const side = state.tack || Math.sign(wrap(heading - windFrom)) || 1;
-    course = windFrom + side * 100 * RAD;
-    rudder = clamp((wrap(course - heading) / RAD) * 1.4, -35, 35) * (speed < -0.12 ? -1 : 1);
+    const side = state.tack || Math.sign(helmsmanWrap(heading - windFrom)) || 1;
+    course = windFrom + side * 100 * HELMSMAN_RAD;
+    rudder = helmsmanClamp((helmsmanWrap(course - heading) / HELMSMAN_RAD) * 1.4, -35, 35) * (speed < -0.12 ? -1 : 1);
     state.helmTrim = 0;
     state.status = 'In irons · bearing away';
   } else {
-    const error = wrap(course - heading) / RAD;
-    const damping = ((boat.yawRate ?? 0) / RAD) * 5;
+    const error = helmsmanWrap(course - heading) / HELMSMAN_RAD;
+    const damping = ((boat.yawRate ?? 0) / HELMSMAN_RAD) * 5;
     const before = error * 1.1 - damping + state.helmTrim;
     if (speed > 0.4 && Math.abs(error) < 35 && (Math.abs(before) < 35 || Math.sign(before) !== Math.sign(error))) {
-      state.helmTrim = clamp(state.helmTrim + error * 0.06 * dt, -20, 20);
+      state.helmTrim = helmsmanClamp(state.helmTrim + error * 0.06 * dt, -20, 20);
     } else if (speed <= 0.4) {
       state.helmTrim *= Math.exp(-dt * 0.1);
     }
-    rudder = clamp(error * 1.1 - damping + state.helmTrim, -35, 35);
+    rudder = helmsmanClamp(error * 1.1 - damping + state.helmTrim, -35, 35);
     if (speed < -0.12) rudder = -rudder;
     if (speed > 0.4 && Number.isFinite(boat.steeringLoadAcceleration) && Number.isFinite(boat.steeringResponse)) {
       // Same flow-gated inversion of the measured helm response as the follower policy.
       const blend = 1 - Math.exp(-dt * 2);
       state.loadAcceleration = (state.loadAcceleration ?? boat.steeringLoadAcceleration) + (boat.steeringLoadAcceleration - (state.loadAcceleration ?? boat.steeringLoadAcceleration)) * blend;
-      const rate = boat.yawRate ?? 0, targetRate = clamp((error * RAD) / 15, -0.035, 0.035);
+      const rate = boat.yawRate ?? 0, targetRate = helmsmanClamp((error * HELMSMAN_RAD) / 15, -0.035, 0.035);
       const requested = rate + boat.steeringResponse * ((targetRate - rate) * 0.5 - state.loadAcceleration);
-      rudder = clamp(Math.atan((requested * Math.max(boat.length ?? 20, 3)) / (speed * 0.65)) / RAD, -35, 35);
+      rudder = helmsmanClamp(Math.atan((requested * Math.max(boat.length ?? 20, 3)) / (speed * 0.65)) / HELMSMAN_RAD, -35, 35);
       state.helmTrim *= Math.exp(-dt * 0.5);
     }
   }
-  state.steeredTrue = wrap360(course / RAD);
+  state.steeredTrue = helmsmanWrap360(course / HELMSMAN_RAD);
   boat.propulsion = 'sail';
   boat.rudderTarget = rudder;
   return state;

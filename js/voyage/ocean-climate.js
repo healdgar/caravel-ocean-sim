@@ -16,35 +16,35 @@
 export const EARTH_RADIUS_M = 6371000;
 export const METRES_PER_NM = 1852;
 export const DAY_MS = 86400000;
-const RAD = Math.PI / 180;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const smooth = (a, b, x) => {
-  const t = clamp((x - a) / (b - a), 0, 1);
+const CLIMATE_RAD = Math.PI / 180;
+const climateClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const climateSmooth = (a, b, x) => {
+  const t = climateClamp((x - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
 };
-const wrap360 = (d) => ((d % 360) + 360) % 360;
-const wrapLon = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
+const climateWrap360 = (d) => ((d % 360) + 360) % 360;
+const climateWrapLon = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
 
 // ---------------------------------------------------------------------------------------------
 // Direction conventions
 // ---------------------------------------------------------------------------------------------
 /** Compass "from" bearing (deg) -> renderer propagation angle θ (deg). */
 export function rendererDirFromCompassFrom(fromBearing) {
-  return wrap360(fromBearing + 90);
+  return climateWrap360(fromBearing + 90);
 }
 /** Renderer propagation angle θ (deg) -> compass "from" bearing (deg). */
 export function compassFromRendererDir(theta) {
-  return wrap360(theta - 90);
+  return climateWrap360(theta - 90);
 }
 /** Velocity vector (east, north) m/s -> { speed, fromBearing, toBearing }. */
 export function vectorToBearing(east, north) {
   const speed = Math.hypot(east, north);
-  const toBearing = wrap360(Math.atan2(east, north) / RAD);
-  return { speed, toBearing, fromBearing: wrap360(toBearing + 180) };
+  const toBearing = climateWrap360(Math.atan2(east, north) / CLIMATE_RAD);
+  return { speed, toBearing, fromBearing: climateWrap360(toBearing + 180) };
 }
 /** Wind blowing FROM bearing at speed -> velocity (east, north) it blows toward. */
 export function windVector(fromBearing, speed) {
-  const to = (fromBearing + 180) * RAD;
+  const to = (fromBearing + 180) * CLIMATE_RAD;
   return { east: Math.sin(to) * speed, north: Math.cos(to) * speed };
 }
 
@@ -80,7 +80,7 @@ export function mulberry32(seed) {
   };
 }
 /** 1D smooth value noise in [-1, 1] over continuous t (units of one lattice step). */
-function noise1(t, seed) {
+function climateNoise1(t, seed) {
   const i = Math.floor(t), f = t - i;
   const u = f * f * (3 - 2 * f);
   const a = hashUnit(i, seed) * 2 - 1, b = hashUnit(i + 1, seed) * 2 - 1;
@@ -103,10 +103,10 @@ export function julianDateParts(ms) {
   const d = new Date(ms - 10 * DAY_MS);
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate(), hours: d.getUTCHours() + d.getUTCMinutes() / 60 };
 }
-const SPANISH_MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const CLIMATE_SPANISH_MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 export function formatJulianDate(ms) {
   const j = julianDateParts(ms);
-  return `${j.day} de ${SPANISH_MONTHS[j.month - 1]} de ${j.year}`;
+  return `${j.day} de ${CLIMATE_SPANISH_MONTHS[j.month - 1]} de ${j.year}`;
 }
 /** Approximate local apparent solar time (hours 0..24) at longitude, incl. equation of time. */
 export function localSolarHours(ms, lon) {
@@ -128,7 +128,7 @@ export function solarDeclination(ms) {
 export function itczLatitude(lon, ms) {
   const season = Math.cos((2 * Math.PI * (dayOfYear(ms) - 220)) / 365.25);
   // The Indian Ocean / South Asian monsoon drags the ITCZ much further north in summer.
-  const indian = smooth(30, 50, lon) * (1 - smooth(100, 125, lon));
+  const indian = climateSmooth(30, 50, lon) * (1 - climateSmooth(100, 125, lon));
   const base = 5 + indian * 3;
   const amp = 4 + indian * 10;
   return base + amp * season;
@@ -136,26 +136,26 @@ export function itczLatitude(lon, ms) {
 
 /** Climatological (no weather systems) wind as compass FROM bearing and speed m/s. */
 export function prevailingWind(lat, lon, ms) {
-  lon = wrapLon(lon);
+  lon = climateWrapLon(lon);
   const itcz = itczLatitude(lon, ms);
   const season = Math.cos((2 * Math.PI * (dayOfYear(ms) - 15)) / 365.25); // +1 mid-Jan (NH winter)
-  const winterNH = clamp(season, 0, 1), winterSH = clamp(-season, 0, 1);
+  const winterNH = climateClamp(season, 0, 1), winterSH = climateClamp(-season, 0, 1);
   const north = lat >= itcz;
   // Latitude measured away from the ITCZ inside the tropics, true latitude poleward.
   const phi = Math.abs(lat - itcz);
   const absLat = Math.abs(lat);
 
   // Each belt: weight, from-bearing (NH; SH mirrored), speed.
-  const doldrums = 1 - smooth(2.5, 6, phi);
-  const trades = smooth(3, 7, phi) * (1 - smooth(25, 31, absLat));
-  const horse = smooth(25, 31, absLat) * (1 - smooth(32, 38, absLat));
-  const westerlies = smooth(33, 39, absLat) * (1 - smooth(60, 66, absLat));
-  const polar = smooth(61, 67, absLat);
+  const doldrums = 1 - climateSmooth(2.5, 6, phi);
+  const trades = climateSmooth(3, 7, phi) * (1 - climateSmooth(25, 31, absLat));
+  const horse = climateSmooth(25, 31, absLat) * (1 - climateSmooth(32, 38, absLat));
+  const westerlies = climateSmooth(33, 39, absLat) * (1 - climateSmooth(60, 66, absLat));
+  const polar = climateSmooth(61, 67, absLat);
 
   const tradeFrom = north ? 60 : 120; // NE trades / SE trades
-  const tradeSpeed = 6.5 + 1.5 * Math.sin(clamp((phi - 4) / 18, 0, 1) * Math.PI);
+  const tradeSpeed = 6.5 + 1.5 * Math.sin(climateClamp((phi - 4) / 18, 0, 1) * Math.PI);
   const westFrom = north ? 250 : 290; // WSW in the north, WNW "roaring forties" in the south
-  const westSpeed = north ? 8 + 3 * winterNH : 10 + 3 * winterSH + 2 * smooth(40, 50, absLat);
+  const westSpeed = north ? 8 + 3 * winterNH : 10 + 3 * winterSH + 2 * climateSmooth(40, 50, absLat);
   const polarFrom = north ? 70 : 110;
 
   let e = 0, n = 0, w = 0;
@@ -170,20 +170,20 @@ export function prevailingWind(lat, lon, ms) {
   add(polar, polarFrom, 6);
   // Doldrums: light, shifting airs – direction wanders slowly with time.
   if (doldrums > 1e-4) {
-    const wander = noise1(ms / (DAY_MS * 0.6), hash32(Math.round(lat), Math.round(lon / 10))) * 180;
-    add(doldrums, wrap360(90 + wander), 1.6);
+    const wander = climateNoise1(ms / (DAY_MS * 0.6), hash32(Math.round(lat), Math.round(lon / 10))) * 180;
+    add(doldrums, climateWrap360(90 + wander), 1.6);
   }
 
   // Indian Ocean monsoon overrides the trades between 40°E–100°E, 10°S–25°N.
-  const monsoonBox = smooth(35, 45, lon) * (1 - smooth(98, 108, lon)) * smooth(-12, -6, lat) * (1 - smooth(24, 30, lat));
+  const monsoonBox = climateSmooth(35, 45, lon) * (1 - climateSmooth(98, 108, lon)) * climateSmooth(-12, -6, lat) * (1 - climateSmooth(24, 30, lat));
   if (monsoonBox > 1e-4) {
     const doy = dayOfYear(ms);
-    const sw = smooth(140, 165, doy) * (1 - smooth(260, 285, doy)); // SW monsoon Jun–Sep
-    const ne = 1 - smooth(75, 100, doy) + smooth(320, 345, doy); // NE monsoon Dec–Mar
+    const sw = climateSmooth(140, 165, doy) * (1 - climateSmooth(260, 285, doy)); // SW monsoon Jun–Sep
+    const ne = 1 - climateSmooth(75, 100, doy) + climateSmooth(320, 345, doy); // NE monsoon Dec–Mar
     const vSw = windVector(225, 9.5), vNe = windVector(45, 6.5);
-    const me = vSw.east * sw + vNe.east * clamp(ne, 0, 1);
-    const mn = vSw.north * sw + vNe.north * clamp(ne, 0, 1);
-    const k = monsoonBox * clamp(sw + ne, 0, 1);
+    const me = vSw.east * sw + vNe.east * climateClamp(ne, 0, 1);
+    const mn = vSw.north * sw + vNe.north * climateClamp(ne, 0, 1);
+    const k = monsoonBox * climateClamp(sw + ne, 0, 1);
     if (w > 0) { e /= w; n /= w; w = 1; }
     e = e * (1 - k) + me * k;
     n = n * (1 - k) + mn * k;
@@ -198,7 +198,7 @@ export function prevailingWind(lat, lon, ms) {
 // ---------------------------------------------------------------------------------------------
 // Travelling weather systems (mid-latitude lows, tropical cyclones)
 // ---------------------------------------------------------------------------------------------
-const SYSTEM_EPOCH_DAYS = 3; // a new batch of candidate systems every three days
+const CLIMATE_SYSTEM_EPOCH_DAYS = 3; // a new batch of candidate systems every three days
 
 /**
  * Deterministic weather systems alive at time `ms` near (lat, lon).
@@ -206,7 +206,7 @@ const SYSTEM_EPOCH_DAYS = 3; // a new batch of candidate systems every three day
  */
 export function weatherSystemsAt(ms, { seed = 1550, lat = null, lon = null, rangeKm = 2500 } = {}) {
   const out = [];
-  const epoch = Math.floor(ms / (DAY_MS * SYSTEM_EPOCH_DAYS));
+  const epoch = Math.floor(ms / (DAY_MS * CLIMATE_SYSTEM_EPOCH_DAYS));
   // Systems live up to ~8 days, so examine the last few batches.
   for (let k = epoch - 3; k <= epoch; k++) {
     const batch = 7;
@@ -215,7 +215,7 @@ export function weatherSystemsAt(ms, { seed = 1550, lat = null, lon = null, rang
       // changes this system's track (keeps systems temporally continuous).
       const r = mulberry32(hash32(seed, k, i));
       const kindRoll = r();
-      const birthMs = (k * SYSTEM_EPOCH_DAYS + r() * SYSTEM_EPOCH_DAYS) * DAY_MS;
+      const birthMs = (k * CLIMATE_SYSTEM_EPOCH_DAYS + r() * CLIMATE_SYSTEM_EPOCH_DAYS) * DAY_MS;
       let sys = null;
       if (kindRoll < 0.78) {
         // Mid-latitude low: forms 35–55°, drifts east ~9 m/s, 4–6 days.
@@ -227,7 +227,7 @@ export function weatherSystemsAt(ms, { seed = 1550, lat = null, lon = null, rang
         if (ageDays < 0 || ageDays > lifeDays) continue;
         const travelKm = ageDays * 86400 * (8 + r() * 4) / 1000;
         const latNow = lat0 + hemi * ageDays * 0.9;
-        const lonNow = wrapLon(lon0 + (travelKm / (111.2 * Math.cos(latNow * RAD))));
+        const lonNow = climateWrapLon(lon0 + (travelKm / (111.2 * Math.cos(latNow * CLIMATE_RAD))));
         const winterBoost = hemi > 0
           ? 0.6 + 0.4 * Math.cos((2 * Math.PI * (dayOfYear(ms) - 15)) / 365.25)
           : 0.6 - 0.4 * Math.cos((2 * Math.PI * (dayOfYear(ms) - 15)) / 365.25);
@@ -253,18 +253,18 @@ export function weatherSystemsAt(ms, { seed = 1550, lat = null, lon = null, rang
         const ageDays = (ms - birthMs) / DAY_MS;
         if (ageDays < 0 || ageDays > lifeDays) continue;
         // Track: westward ~5 m/s in the trades, then recurving poleward and east.
-        const recurve = smooth(0.45, 0.8, ageDays / lifeDays);
+        const recurve = climateSmooth(0.45, 0.8, ageDays / lifeDays);
         const kmDay = 430;
         const west = ageDays * kmDay * (1 - recurve * 0.8);
         const pole = ageDays * kmDay * (0.25 + recurve * 0.75);
         const latNow = lat0 + basin.hemi * pole / 111.2;
-        const lonNow = wrapLon(lon0 + basin.drift * west / (111.2 * Math.cos(latNow * RAD)) + recurve * recurve * ageDays * 2.5);
+        const lonNow = climateWrapLon(lon0 + basin.drift * west / (111.2 * Math.cos(latNow * CLIMATE_RAD)) + recurve * recurve * ageDays * 2.5);
         const age01 = ageDays / lifeDays;
         sys = { kind: 'hurricane', lat: latNow, lon: lonNow, radiusKm: 260 + r() * 200, maxWind: 22 + strength * 30, age01, rain: 1, hemisphere: basin.hemi };
       }
       if (!sys) continue;
       // Grow, mature, decay.
-      sys.intensity = smooth(0, 0.2, sys.age01) * (1 - smooth(0.75, 1, sys.age01));
+      sys.intensity = climateSmooth(0, 0.2, sys.age01) * (1 - climateSmooth(0.75, 1, sys.age01));
       if (lat !== null && lon !== null && greatCircleKm(lat, lon, sys.lat, sys.lon) > rangeKm) continue;
       out.push(sys);
     }
@@ -273,18 +273,18 @@ export function weatherSystemsAt(ms, { seed = 1550, lat = null, lon = null, rang
 }
 
 /** Rankine-like vortex wind contribution of a system at a point (east, north m/s). */
-function systemWind(sys, lat, lon) {
+function climateSystemWind(sys, lat, lon) {
   const dKm = greatCircleKm(lat, lon, sys.lat, sys.lon);
   const rMax = sys.radiusKm * (sys.kind === 'hurricane' ? 0.16 : 0.35);
   if (dKm > sys.radiusKm * 1.6) return null;
-  const speed = sys.maxWind * sys.intensity * (dKm < rMax ? dKm / rMax : Math.pow(rMax / dKm, 0.65)) * (1 - smooth(sys.radiusKm, sys.radiusKm * 1.6, dKm));
+  const speed = sys.maxWind * sys.intensity * (dKm < rMax ? dKm / rMax : Math.pow(rMax / dKm, 0.65)) * (1 - climateSmooth(sys.radiusKm, sys.radiusKm * 1.6, dKm));
   // Bearing from centre to point; cyclonic flow is counter-clockwise in the north (clockwise south),
   // with ~20° of inflow toward the low.
   const brg = initialBearing(sys.lat, sys.lon, lat, lon);
   const tangential = brg + (sys.hemisphere > 0 ? -90 : 90);
   const inflow = sys.hemisphere > 0 ? -20 : 20;
-  const to = (tangential + inflow) * RAD;
-  const near = 1 - smooth(rMax * 0.6, sys.radiusKm, dKm);
+  const to = (tangential + inflow) * CLIMATE_RAD;
+  const near = 1 - climateSmooth(rMax * 0.6, sys.radiusKm, dKm);
   return { east: Math.sin(to) * speed, north: Math.cos(to) * speed, weight: speed, rain: sys.rain * sys.intensity * near, dKm, sys };
 }
 
@@ -301,41 +301,41 @@ export function sampleOceanWeather(lat, lon, ms, { seed = 1550 } = {}) {
   const v = windVector(base.fromBearing, base.speed);
   // Gentle diurnal/synoptic variability: ±18% speed, ±14° direction on ~10 h scales.
   const vs = hash32(seed, Math.round(lat / 4), Math.round(lon / 4));
-  const gustiness = noise1(ms / (DAY_MS * 0.42), vs) * 0.18 + noise1(ms / (DAY_MS * 0.11), vs + 7) * 0.06;
-  const veer = noise1(ms / (DAY_MS * 0.5), vs + 13) * 14;
+  const gustiness = climateNoise1(ms / (DAY_MS * 0.42), vs) * 0.18 + climateNoise1(ms / (DAY_MS * 0.11), vs + 7) * 0.06;
+  const veer = climateNoise1(ms / (DAY_MS * 0.5), vs + 13) * 14;
   let e = v.east * (1 + gustiness), n = v.north * (1 + gustiness);
   {
-    const c = Math.cos(veer * RAD), s = Math.sin(veer * RAD);
+    const c = Math.cos(veer * CLIMATE_RAD), s = Math.sin(veer * CLIMATE_RAD);
     const e2 = e * c + n * s, n2 = -e * s + n * c;
     e = e2; n = n2;
   }
   let rain = 0, nearest = null;
   const systems = weatherSystemsAt(ms, { seed, lat, lon, rangeKm: 2600 });
   for (const sys of systems) {
-    const w = systemWind(sys, lat, lon);
+    const w = climateSystemWind(sys, lat, lon);
     if (!w) continue;
-    const k = clamp(w.weight / Math.max(1, base.speed), 0, 1);
+    const k = climateClamp(w.weight / Math.max(1, base.speed), 0, 1);
     e = e * (1 - k * 0.6) + w.east;
     n = n * (1 - k * 0.6) + w.north;
     rain = Math.max(rain, w.rain);
     if (!nearest || w.dKm / w.sys.radiusKm < nearest.dKm / nearest.sys.radiusKm) nearest = w;
   }
   const wind = vectorToBearing(e, n);
-  const windSpeed = clamp(wind.speed, 0.3, 34);
+  const windSpeed = climateClamp(wind.speed, 0.3, 34);
   const itcz = itczLatitude(lon, ms);
-  const doldrums = 1 - smooth(2.5, 6, Math.abs(lat - itcz));
+  const doldrums = 1 - climateSmooth(2.5, 6, Math.abs(lat - itcz));
   // Convective doldrum showers come and go.
-  const shower = doldrums * clamp(noise1(ms / (DAY_MS * 0.08), vs + 29) * 1.4, 0, 1);
-  rain = clamp(Math.max(rain, shower * 0.7), 0, 1);
+  const shower = doldrums * climateClamp(climateNoise1(ms / (DAY_MS * 0.08), vs + 29) * 1.4, 0, 1);
+  rain = climateClamp(Math.max(rain, shower * 0.7), 0, 1);
   const absLat = Math.abs(lat);
-  const baseClouds = 0.28 + 0.3 * smooth(32, 45, absLat) + 0.35 * doldrums + noise1(ms / (DAY_MS * 0.7), vs + 31) * 0.12;
-  const clouds = clamp(Math.max(baseClouds, rain * 0.95), 0.05, 0.98);
+  const baseClouds = 0.28 + 0.3 * climateSmooth(32, 45, absLat) + 0.35 * doldrums + climateNoise1(ms / (DAY_MS * 0.7), vs + 31) * 0.12;
+  const clouds = climateClamp(Math.max(baseClouds, rain * 0.95), 0.05, 0.98);
   // Wind sea: Pierson–Moskowitz Hs ≈ 0.0246 U², plus a long background swell in westerly belts.
   const windSea = 0.0246 * windSpeed * windSpeed;
-  const background = 0.6 + 1.0 * smooth(30, 50, absLat);
-  const swellHs = clamp(Math.hypot(windSea, background), 0.3, 8);
-  const hurricane = nearest?.sys?.kind === 'hurricane' ? nearest.sys.intensity * (1 - smooth(0, nearest.sys.radiusKm, nearest.dKm)) : 0;
-  const thunder = clamp(Math.max(hurricane * 1.2, shower > 0.5 ? (shower - 0.5) * 1.2 : 0, rain > 0.8 ? (rain - 0.8) * 2 : 0), 0, 1);
+  const background = 0.6 + 1.0 * climateSmooth(30, 50, absLat);
+  const swellHs = climateClamp(Math.hypot(windSea, background), 0.3, 8);
+  const hurricane = nearest?.sys?.kind === 'hurricane' ? nearest.sys.intensity * (1 - climateSmooth(0, nearest.sys.radiusKm, nearest.dKm)) : 0;
+  const thunder = climateClamp(Math.max(hurricane * 1.2, shower > 0.5 ? (shower - 0.5) * 1.2 : 0, rain > 0.8 ? (rain - 0.8) * 2 : 0), 0, 1);
   const windDir = rendererDirFromCompassFrom(wind.fromBearing);
   const beaufort = beaufortNumber(windSpeed);
   return {
@@ -344,15 +344,15 @@ export function sampleOceanWeather(lat, lon, ms, { seed = 1550 } = {}) {
     windDir,
     swellHs,
     swellDir: windDir,
-    swellLength: clamp(40 + windSpeed * 6 + background * 20, 40, 260),
+    swellLength: climateClamp(40 + windSpeed * 6 + background * 20, 40, 260),
     clouds,
     rain,
     thunder,
-    haze: clamp(0.8 + rain * 5 + (absLat < 25 ? 0.6 : 0), 0.5, 8),
-    cloudBase: clamp(1.25 - rain * 0.6, 0.35, 1.6),
-    cloudDepth: clamp(1.6 + rain * 2.8 + doldrums * 1.5, 1, 4.8),
-    cloudDensity: clamp(1 + rain * 0.8, 0.8, 1.9),
-    cloudAnvil: clamp(thunder * 0.9 + doldrums * 0.25, 0, 1),
+    haze: climateClamp(0.8 + rain * 5 + (absLat < 25 ? 0.6 : 0), 0.5, 8),
+    cloudBase: climateClamp(1.25 - rain * 0.6, 0.35, 1.6),
+    cloudDepth: climateClamp(1.6 + rain * 2.8 + doldrums * 1.5, 1, 4.8),
+    cloudDensity: climateClamp(1 + rain * 0.8, 0.8, 1.9),
+    cloudAnvil: climateClamp(thunder * 0.9 + doldrums * 0.25, 0, 1),
     systems,
     nearestSystem: nearest ? { kind: nearest.sys.kind, distanceKm: nearest.dKm, bearing: initialBearing(lat, lon, nearest.sys.lat, nearest.sys.lon), intensity: nearest.sys.intensity, radiusKm: nearest.sys.radiusKm } : null,
     beaufort,
@@ -405,12 +405,12 @@ export const OCEAN_CURRENTS = Object.freeze([
 
 /** Ocean current (east, north) m/s at a point. Includes the Antarctic Circumpolar Current band. */
 export function oceanCurrentAt(lat, lon) {
-  lon = wrapLon(lon);
+  lon = climateWrapLon(lon);
   let e = 0, n = 0, strongest = null, strongestSpeed = 0;
   for (const c of OCEAN_CURRENTS) {
     let best = Infinity, dirE = 0, dirN = 0;
     for (let i = 0; i < c.path.length - 1; i++) {
-      const seg = segmentProximityKm(lat, lon, c.path[i], c.path[i + 1]);
+      const seg = climateSegmentProximityKm(lat, lon, c.path[i], c.path[i + 1]);
       if (seg.dKm < best) { best = seg.dKm; dirE = seg.dirE; dirN = seg.dirN; }
     }
     if (best > c.widthKm * 3) continue;
@@ -420,7 +420,7 @@ export function oceanCurrentAt(lat, lon) {
     if (s > strongestSpeed) { strongestSpeed = s; strongest = c.name; }
   }
   // Antarctic Circumpolar Current – broad eastward set between 45°S and 60°S.
-  const acc = smooth(-62, -55, lat) * (1 - smooth(-48, -42, lat)) * 0.32;
+  const acc = climateSmooth(-62, -55, lat) * (1 - climateSmooth(-48, -42, lat)) * 0.32;
   if (acc > 0) {
     e += acc;
     if (acc > strongestSpeed) { strongestSpeed = acc; strongest = 'Antarctic Circumpolar Current'; }
@@ -429,14 +429,14 @@ export function oceanCurrentAt(lat, lon) {
   return { east: e, north: n, speed: b.speed, setBearing: b.toBearing, name: strongest };
 }
 
-function segmentProximityKm(lat, lon, a, b) {
+function climateSegmentProximityKm(lat, lon, a, b) {
   // Local equirectangular projection around the query point (adequate for jet widths).
-  const kx = 111.32 * Math.cos(lat * RAD), ky = 110.57;
-  const ax = wrapLon(a[1] - lon) * kx, ay = (a[0] - lat) * ky;
-  const bx = wrapLon(b[1] - lon) * kx, by = (b[0] - lat) * ky;
+  const kx = 111.32 * Math.cos(lat * CLIMATE_RAD), ky = 110.57;
+  const ax = climateWrapLon(a[1] - lon) * kx, ay = (a[0] - lat) * ky;
+  const bx = climateWrapLon(b[1] - lon) * kx, by = (b[0] - lat) * ky;
   const vx = bx - ax, vy = by - ay;
   const len2 = vx * vx + vy * vy || 1;
-  const t = clamp(-(ax * vx + ay * vy) / len2, 0, 1);
+  const t = climateClamp(-(ax * vx + ay * vy) / len2, 0, 1);
   const px = ax + vx * t, py = ay + vy * t;
   const len = Math.sqrt(len2);
   return { dKm: Math.hypot(px, py), dirE: vx / len, dirN: vy / len };
@@ -474,29 +474,29 @@ export function magneticVariation1550(lat, lon) {
 // Spherical geometry
 // ---------------------------------------------------------------------------------------------
 export function greatCircleKm(lat1, lon1, lat2, lon2) {
-  const p1 = lat1 * RAD, p2 = lat2 * RAD;
-  const dp = p2 - p1, dl = wrapLon(lon2 - lon1) * RAD;
+  const p1 = lat1 * CLIMATE_RAD, p2 = lat2 * CLIMATE_RAD;
+  const dp = p2 - p1, dl = climateWrapLon(lon2 - lon1) * CLIMATE_RAD;
   const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
   return (2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(a)))) / 1000;
 }
 export function initialBearing(lat1, lon1, lat2, lon2) {
-  const p1 = lat1 * RAD, p2 = lat2 * RAD, dl = wrapLon(lon2 - lon1) * RAD;
+  const p1 = lat1 * CLIMATE_RAD, p2 = lat2 * CLIMATE_RAD, dl = climateWrapLon(lon2 - lon1) * CLIMATE_RAD;
   const y = Math.sin(dl) * Math.cos(p2);
   const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
-  return wrap360(Math.atan2(y, x) / RAD);
+  return climateWrap360(Math.atan2(y, x) / CLIMATE_RAD);
 }
 /** Move a geographic point by local east/north metres (small-step dead reckoning). */
 export function offsetLatLon(lat, lon, eastM, northM) {
-  const newLat = clamp(lat + (northM / EARTH_RADIUS_M) / RAD, -89.5, 89.5);
+  const newLat = climateClamp(lat + (northM / EARTH_RADIUS_M) / CLIMATE_RAD, -89.5, 89.5);
   const midLat = (lat + newLat) / 2;
-  const newLon = wrapLon(lon + (eastM / (EARTH_RADIUS_M * Math.max(0.01, Math.cos(midLat * RAD)))) / RAD);
+  const newLon = climateWrapLon(lon + (eastM / (EARTH_RADIUS_M * Math.max(0.01, Math.cos(midLat * CLIMATE_RAD)))) / CLIMATE_RAD);
   return { lat: newLat, lon: newLon };
 }
 /** East/north metres from point A to point B (local tangent plane; fine for < ~500 km). */
 export function eastNorthMetres(latA, lonA, latB, lonB) {
   const midLat = (latA + latB) / 2;
   return {
-    east: wrapLon(lonB - lonA) * RAD * EARTH_RADIUS_M * Math.cos(midLat * RAD),
-    north: (latB - latA) * RAD * EARTH_RADIUS_M,
+    east: climateWrapLon(lonB - lonA) * CLIMATE_RAD * EARTH_RADIUS_M * Math.cos(midLat * CLIMATE_RAD),
+    north: (latB - latA) * CLIMATE_RAD * EARTH_RADIUS_M,
   };
 }

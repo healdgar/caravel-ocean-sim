@@ -13,9 +13,9 @@
 
 import { EARTH_RADIUS_M, greatCircleKm, initialBearing, offsetLatLon } from './ocean-climate.js';
 
-const RAD = Math.PI / 180;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const wrapLon = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
+const APPROACH_RAD = Math.PI / 180;
+const approachClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const approachWrapLon = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
 
 /** Standard terrestrial refraction coefficient used by navigators' distance-of-horizon tables. */
 export const REFRACTION_K = 0.13;
@@ -47,7 +47,7 @@ export function lookoutEyeHeight(modelId) {
 // ---------------------------------------------------------------------------------------------
 // Coarse coastline index (Natural Earth rings)
 // ---------------------------------------------------------------------------------------------
-const CELL_DEG = 2;
+const APPROACH_CELL_DEG = 2;
 /**
  * Build a bucketed coastline index from rings of [lon, lat] points.
  * Returns { isLand(lat, lon), nearestCoast(lat, lon, maxKm) -> {distanceKm, lat, lon, bearing} | null }.
@@ -64,8 +64,8 @@ export function createCoastlineIndex(rings) {
       minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
       const q = ring[(p + 1) % ring.length];
       // Register the segment in every bucket its bounding box touches.
-      const i0 = Math.floor(Math.min(lon, q[0]) / CELL_DEG), i1 = Math.floor(Math.max(lon, q[0]) / CELL_DEG);
-      const j0 = Math.floor(Math.min(lat, q[1]) / CELL_DEG), j1 = Math.floor(Math.max(lat, q[1]) / CELL_DEG);
+      const i0 = Math.floor(Math.min(lon, q[0]) / APPROACH_CELL_DEG), i1 = Math.floor(Math.max(lon, q[0]) / APPROACH_CELL_DEG);
+      const j0 = Math.floor(Math.min(lat, q[1]) / APPROACH_CELL_DEG), j1 = Math.floor(Math.max(lat, q[1]) / APPROACH_CELL_DEG);
       if (i1 - i0 > 90) continue; // antimeridian-spanning segment; ignore for proximity
       for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
         const k = key(i, j);
@@ -77,7 +77,7 @@ export function createCoastlineIndex(rings) {
   });
 
   function isLand(lat, lon) {
-    lon = wrapLon(lon);
+    lon = approachWrapLon(lon);
     let inside = false;
     for (const box of ringBoxes) {
       if (lat < box.minLat || lat > box.maxLat || lon < box.minLon || lon > box.maxLon) continue;
@@ -93,11 +93,11 @@ export function createCoastlineIndex(rings) {
   }
 
   function nearestCoast(lat, lon, maxKm = 600) {
-    lon = wrapLon(lon);
-    const kx = 111.32 * Math.cos(lat * RAD), ky = 110.57;
-    const reachLat = Math.ceil(maxKm / ky / CELL_DEG) + 1;
-    const reachLon = Math.ceil(maxKm / Math.max(10, kx) / CELL_DEG) + 1;
-    const ci = Math.floor(lon / CELL_DEG), cj = Math.floor(lat / CELL_DEG);
+    lon = approachWrapLon(lon);
+    const kx = 111.32 * Math.cos(lat * APPROACH_RAD), ky = 110.57;
+    const reachLat = Math.ceil(maxKm / ky / APPROACH_CELL_DEG) + 1;
+    const reachLon = Math.ceil(maxKm / Math.max(10, kx) / APPROACH_CELL_DEG) + 1;
+    const ci = Math.floor(lon / APPROACH_CELL_DEG), cj = Math.floor(lat / APPROACH_CELL_DEG);
     let best = null, bestD = Infinity;
     const seen = new Set();
     for (let di = -reachLon; di <= reachLon; di++) for (let dj = -reachLat; dj <= reachLat; dj++) {
@@ -106,16 +106,16 @@ export function createCoastlineIndex(rings) {
       for (const seg of list) {
         if (seen.has(seg)) continue;
         seen.add(seg);
-        const ax = wrapLon(seg[0] - lon) * kx, ay = (seg[1] - lat) * ky;
-        const bx = wrapLon(seg[2] - lon) * kx, by = (seg[3] - lat) * ky;
+        const ax = approachWrapLon(seg[0] - lon) * kx, ay = (seg[1] - lat) * ky;
+        const bx = approachWrapLon(seg[2] - lon) * kx, by = (seg[3] - lat) * ky;
         const vx = bx - ax, vy = by - ay, len2 = vx * vx + vy * vy || 1e-9;
-        const t = clamp(-(ax * vx + ay * vy) / len2, 0, 1);
+        const t = approachClamp(-(ax * vx + ay * vy) / len2, 0, 1);
         const px = ax + vx * t, py = ay + vy * t, d = Math.hypot(px, py);
         if (d < bestD) { bestD = d; best = { x: px, y: py }; }
       }
     }
     if (!best || bestD > maxKm) return null;
-    const cLat = lat + best.y / ky, cLon = wrapLon(lon + best.x / kx);
+    const cLat = lat + best.y / ky, cLon = approachWrapLon(lon + best.x / kx);
     return { distanceKm: bestD, lat: cLat, lon: cLon, bearing: initialBearing(lat, lon, cLat, cLon) };
   }
   return { isLand, nearestCoast, ringCount: rings.length };
@@ -125,16 +125,16 @@ export function createCoastlineIndex(rings) {
 // DEM probe (AWS Terrarium tiles)
 // ---------------------------------------------------------------------------------------------
 export const DEM_PROBE_ZOOM = 6;
-const TILE = 256;
+const APPROACH_TILE = 256;
 export function lonLatToTile(lat, lon, z) {
   const n = 2 ** z;
-  const r = clamp(lat, -85, 85) * RAD;
-  return { x: ((wrapLon(lon) + 180) / 360) * n, y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n };
+  const r = approachClamp(lat, -85, 85) * APPROACH_RAD;
+  return { x: ((approachWrapLon(lon) + 180) / 360) * n, y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n };
 }
 export function tileToLonLat(x, y, z) {
   const n = 2 ** z;
   const lon = (x / n) * 360 - 180;
-  const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) / RAD;
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) / APPROACH_RAD;
   return { lat, lon };
 }
 export function decodeTerrariumRGBA(rgba) {
@@ -148,11 +148,11 @@ export async function fetchTerrariumTile(z, x, y, fetchImpl = typeof fetch === '
   const res = await fetchImpl(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`, { mode: 'cors' });
   if (!res?.ok) return null;
   const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
-  const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(TILE, TILE) : Object.assign(document.createElement('canvas'), { width: TILE, height: TILE });
+  const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(APPROACH_TILE, APPROACH_TILE) : Object.assign(document.createElement('canvas'), { width: APPROACH_TILE, height: APPROACH_TILE });
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bmp, 0, 0);
   bmp.close?.();
-  return decodeTerrariumRGBA(ctx.getImageData(0, 0, TILE, TILE).data);
+  return decodeTerrariumRGBA(ctx.getImageData(0, 0, APPROACH_TILE, APPROACH_TILE).data);
 }
 
 /**
@@ -193,12 +193,12 @@ export function createDemProbe({ loadTile = fetchTerrariumTile, zoom = DEM_PROBE
     if (!t || t.data === undefined) return undefined;
     if (t.data === null) return -1000; // unavailable tile: treat as open sea
     t.used = ++tick;
-    const px = clamp(Math.floor((p.x - tx) * TILE), 0, TILE - 1), py = clamp(Math.floor((p.y - ty) * TILE), 0, TILE - 1);
-    return t.data[py * TILE + px];
+    const px = approachClamp(Math.floor((p.x - tx) * APPROACH_TILE), 0, APPROACH_TILE - 1), py = approachClamp(Math.floor((p.y - ty) * APPROACH_TILE), 0, APPROACH_TILE - 1);
+    return t.data[py * APPROACH_TILE + px];
   }
   /** Request every tile covering a circle of radiusKm around the point. Returns a promise. */
   function prefetch(lat, lon, radiusKm) {
-    const dLat = radiusKm / 110.57, dLon = radiusKm / Math.max(5, 111.32 * Math.cos(lat * RAD));
+    const dLat = radiusKm / 110.57, dLon = radiusKm / Math.max(5, 111.32 * Math.cos(lat * APPROACH_RAD));
     const a = lonLatToTile(lat + dLat, lon - dLon, zoom), b = lonLatToTile(lat - dLat, lon + dLon, zoom);
     const ps = [];
     for (let x = Math.floor(a.x); x <= Math.floor(b.x); x++) for (let y = Math.floor(a.y); y <= Math.floor(b.y); y++) {
@@ -208,7 +208,7 @@ export function createDemProbe({ loadTile = fetchTerrariumTile, zoom = DEM_PROBE
     return Promise.all(ps);
   }
   function coverage(lat, lon, radiusKm) {
-    const dLat = radiusKm / 110.57, dLon = radiusKm / Math.max(5, 111.32 * Math.cos(lat * RAD));
+    const dLat = radiusKm / 110.57, dLon = radiusKm / Math.max(5, 111.32 * Math.cos(lat * APPROACH_RAD));
     const a = lonLatToTile(lat + dLat, lon - dLon, zoom), b = lonLatToTile(lat - dLat, lon + dLon, zoom);
     let total = 0, ready = 0;
     for (let x = Math.floor(a.x); x <= Math.floor(b.x); x++) for (let y = Math.floor(a.y); y <= Math.floor(b.y); y++) {
@@ -273,10 +273,10 @@ export function coastlineToward(probe, shipLat, shipLon, target, stepKm = 1.2) {
 }
 
 export function destinationPoint(lat, lon, bearingDeg, distKm) {
-  const d = (distKm * 1000) / EARTH_RADIUS_M, b = bearingDeg * RAD, p1 = lat * RAD, l1 = lon * RAD;
+  const d = (distKm * 1000) / EARTH_RADIUS_M, b = bearingDeg * APPROACH_RAD, p1 = lat * APPROACH_RAD, l1 = lon * APPROACH_RAD;
   const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
   const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
-  return { lat: p2 / RAD, lon: wrapLon(l2 / RAD) };
+  return { lat: p2 / APPROACH_RAD, lon: approachWrapLon(l2 / APPROACH_RAD) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -310,7 +310,7 @@ export function approachWarpCap({ coastKm = Infinity, sightKm = 40, groundSpeed 
   // Unknown DEM coverage near land: be conservative so a missing island can't be skipped.
   const margin = demComplete ? 8 : 25;
   const remaining = Math.max(0, (coastKm - sightKm - margin) * 1000);
-  return clamp(remaining / (speed * leadSeconds), 30, 3600);
+  return approachClamp(remaining / (speed * leadSeconds), 30, 3600);
 }
 
 /**
@@ -318,12 +318,12 @@ export function approachWarpCap({ coastKm = Infinity, sightKm = 40, groundSpeed 
  * is at local world (shipX, shipZ) and geographic (shipLat, shipLon). World X = east, Z = south.
  */
 export function regionLocalOrigin({ shipLat, shipLon, shipX = 0, shipZ = 0, regionLat, regionLon }) {
-  const dLat = regionLat - shipLat, dLon = wrapLon(regionLon - shipLon);
+  const dLat = regionLat - shipLat, dLon = approachWrapLon(regionLon - shipLon);
   const mid = (regionLat + shipLat) / 2;
-  const east = dLon * RAD * EARTH_RADIUS_M * Math.cos(mid * RAD);
-  const north = dLat * RAD * EARTH_RADIUS_M;
+  const east = dLon * APPROACH_RAD * EARTH_RADIUS_M * Math.cos(mid * APPROACH_RAD);
+  const north = dLat * APPROACH_RAD * EARTH_RADIUS_M;
   return { x: shipX + east, z: shipZ - north, east, north };
 }
 
 /** Nearest landfall point for "Land ho!" calls, re-exported for convenience. */
-export { offsetLatLon };
+export { offsetLatLon } from './ocean-climate.js';

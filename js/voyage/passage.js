@@ -29,9 +29,9 @@ import {
 import { compassPointName, compassPointWords, formatLatitude } from './compass.js';
 import { boatForwardSpeed } from '../boat.js';
 
-const RAD = Math.PI / 180;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const wrap360 = (d) => ((d % 360) + 360) % 360;
+const PASSAGE_RAD = Math.PI / 180;
+const passageClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const passageWrap360 = (d) => ((d % 360) + 360) % 360;
 
 /** Spanish legua used by Casa de Contratación pilots: 17½ leagues to a degree of latitude. */
 export const NM_PER_LEAGUE = 60 / 17.5;
@@ -98,7 +98,7 @@ export function createVoyage({
     lonUncNm: 0,
     distanceLoggedNm: 0,
     distanceTrueNm: 0,
-    compassCourse: wrap360(compassCourse),
+    compassCourse: passageWrap360(compassCourse),
     canvas: 'full',
     pilot: {
       // The variation the pilot believes applies (what he knew at the port of departure).
@@ -154,7 +154,7 @@ export function addMark(voyage, mark) {
 
 /** Ground-referenced hull velocity (east, north m/s) from the live vessel. */
 export function hullVelocity(boat) {
-  const h = (boat.heading ?? 0) * RAD;
+  const h = (boat.heading ?? 0) * PASSAGE_RAD;
   const s = boatForwardSpeed(boat);
   const surge = Number.isFinite(s) ? s : 0;
   const sway = Number.isFinite(boat.leewayVelocity) ? boat.leewayVelocity : 0;
@@ -200,11 +200,11 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
     const r = mulberry32(hash32(voyage.seed, watch, 17));
     voyage.pilot.watchScatter = 0.94 + r() * 0.12;
   }
-  const compassHeading = wrap360((boat.heading ?? 0) - voyage.variation);
-  const drBearing = wrap360(compassHeading + voyage.pilot.variationEstimate);
+  const compassHeading = passageWrap360((boat.heading ?? 0) - voyage.variation);
+  const drBearing = passageWrap360(compassHeading + voyage.pilot.variationEstimate);
   const estSpeed = Math.max(0, v.surge) * voyage.pilot.logBias * voyage.pilot.watchScatter;
   const drDist = estSpeed * gameDt;
-  const dp = offsetLatLon(voyage.dr.lat, voyage.dr.lon, Math.sin(drBearing * RAD) * drDist, Math.cos(drBearing * RAD) * drDist);
+  const dp = offsetLatLon(voyage.dr.lat, voyage.dr.lon, Math.sin(drBearing * PASSAGE_RAD) * drDist, Math.cos(drBearing * PASSAGE_RAD) * drDist);
   voyage.dr.lat = dp.lat;
   voyage.dr.lon = dp.lon;
   const loggedNm = drDist / METRES_PER_NM;
@@ -221,7 +221,7 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
     voyage.trueTrack.push([voyage.true.lat, voyage.true.lon, voyage.dateMs]);
     voyage.drTrack.push([voyage.dr.lat, voyage.dr.lon, voyage.dateMs]);
     const cap = 6000;
-    if (voyage.trueTrack.length > cap) { voyage.trueTrack = decimate(voyage.trueTrack); voyage.drTrack = decimate(voyage.drTrack); }
+    if (voyage.trueTrack.length > cap) { voyage.trueTrack = passageDecimate(voyage.trueTrack); voyage.drTrack = passageDecimate(voyage.drTrack); }
   }
 
   // --- Weather (sampled on voyage time so it evolves exactly as fast as the sun moves).
@@ -250,9 +250,9 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
   const scurvy = elapsedDays > 56 ? (elapsedDays - 56) * 0.004 : 0;
   const thirst = voyage.provisions.water <= 0 ? 0.06 : 0;
   const hunger = voyage.provisions.food <= 0 ? 0.03 : 0;
-  voyage.crewHealth = clamp(voyage.crewHealth - (scurvy + thirst + hunger) * days, 0, 1);
+  voyage.crewHealth = passageClamp(voyage.crewHealth - (scurvy + thirst + hunger) * days, 0, 1);
   const moraleDrift = -0.004 - (voyage.provisions.water < 7 ? 0.02 : 0) - (voyage.crewHealth < 0.7 ? 0.015 : 0);
-  voyage.morale = clamp(voyage.morale + moraleDrift * days, 0, 1);
+  voyage.morale = passageClamp(voyage.morale + moraleDrift * days, 0, 1);
   for (const [key, label] of [['water', 'water'], ['food', 'biscuit and salt meat']]) {
     for (const threshold of [14, 7, 3]) {
       const flag = `${key}${threshold}`;
@@ -345,7 +345,7 @@ export function voyageSnapshot(voyage) {
     latUncNm: voyage.latUncNm,
     lonUncNm: voyage.lonUncNm,
     courseCompass: voyage.compassCourse,
-    courseTrue: wrap360(voyage.compassCourse + voyage.pilot.variationEstimate),
+    courseTrue: passageWrap360(voyage.compassCourse + voyage.pilot.variationEstimate),
     destination: voyage.destination,
     marks: voyage.marks,
     discoveries: voyage.discoveries ?? [],
@@ -378,14 +378,14 @@ export function restoreVoyage(json) {
   return v;
 }
 
-function decimate(track) {
+function passageDecimate(track) {
   return track.filter((_, i) => i % 2 === 0 || i === track.length - 1);
 }
 
 // ---------------------------------------------------------------------------------------------
 // Weather driver: eases the renderer/physics settings toward the voyage weather.
 // ---------------------------------------------------------------------------------------------
-const SKY_KEYS = ['clouds', 'rain', 'thunder', 'haze', 'cloudBase', 'cloudDepth', 'cloudDensity', 'cloudAnvil'];
+const PASSAGE_SKY_KEYS = ['clouds', 'rain', 'thunder', 'haze', 'cloudBase', 'cloudDepth', 'cloudDensity', 'cloudAnvil'];
 
 /**
  * Creates a driver that writes voyage weather into the live settings object `P` each frame.
@@ -407,7 +407,7 @@ export function createWeatherDriver({ minSpectrumSeconds = 9, gameTauHours = 1.2
       let dd = ((weather.windDir - P.windDir + 540) % 360) - 180;
       P.windDir = Number((((P.windDir + dd * k) % 360 + 360) % 360).toFixed(2));
       let envDelta = 0;
-      for (const key of SKY_KEYS) {
+      for (const key of PASSAGE_SKY_KEYS) {
         if (weather[key] === undefined) continue;
         const before = P[key] ?? weather[key];
         P[key] = before + (weather[key] - before) * k;

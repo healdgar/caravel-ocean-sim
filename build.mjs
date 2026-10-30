@@ -44,6 +44,18 @@ order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
+order.splice(
+  order.indexOf('js/main.js'),
+  0,
+  'js/voyage/compass.js',
+  'js/voyage/ocean-climate.js',
+  'js/voyage/landfall-approach.js',
+  'js/voyage/helmsman.js',
+  'js/voyage/passage.js',
+  'js/voyage/encounters.js',
+  'js/voyage/chart-drawer.js',
+  'js/voyage/voyage-controller.js',
+);
 // Downloads keep embedded assets. Pages uses identical bytes in independently
 // cacheable, content-addressed files; optional audio/terrain need not travel in
 // the initial HTML. Only these explicit runtime files and manifest MP3s qualify.
