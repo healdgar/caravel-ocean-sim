@@ -516,10 +516,11 @@ fn sheetPoint(s: Sheet, u: f32, q: f32) -> vec3f {
 }
 fn sprayLight(p: vec3f) -> vec3f {
   let sky = textureSampleLevel(envCube, effectSamp, vec3f(0,1,0), 5.0).rgb;
-  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * step(0.0,F.sunDir.y)*solarShadowVisibility(vesselShadow(p,vec3f(0,1,0)));
+  let shadowSample = vesselShadow(p,vec3f(0,1,0));
+  let sun = textureSampleLevel(transLUT, effectSamp, transRMuToUV(RG + F.atmo.y, F.sunDir.y), 0.0).rgb * F.sunDir.w * sunVis[0] * step(0.0,F.sunDir.y)*solarShadowVisibility(shadowSample);
   let view = normalize(F.camPos.xyz - p);
   let scatter = pow(max(dot(-view, F.sunDir.xyz), 0.0), 12.0);
-  let moon=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(vesselShadow(p,vec3f(0,1,0)));
+  let moon=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(shadowSample);
   return sky * 0.85 + sun * (0.12 + scatter * 0.65)+moon*(.12+.65*pow(max(dot(-view,lunarDirection()),0.0),12.0))+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
 }
 @fragment fn sheetFS(o: EffectVertex) -> @location(0) vec4f {

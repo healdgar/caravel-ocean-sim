@@ -59,7 +59,7 @@ test('centering rudder lets yaw decay and results stay stable at lower frame rat
   assert.ok(Math.abs(a.rudder)<1e-6);
 });
 
-import { boatEyePosition, stepBoatView } from '../js/boat.js';
+import { boatEyePosition, stepBoatView, stepDeckWalk, resetDeckWalk, deckStationLabel } from '../js/boat.js';
 import { HELM_EYE_X, HELM_EYE_Z, HELM_EYE_HEIGHT } from '../js/hull.js';
 test('boarding uses the ship world position and eye height independently of a spectator camera', () => {
   const boat={x:100,z:-30,heave:2,eye:HELM_EYE_HEIGHT,length:12,beam:3.6,heading:90,pitch:0,roll:0};
@@ -236,4 +236,26 @@ test('filtered pressure slopes orient both axes independently of fine surface sa
   assert.ok(Math.abs(north.pitch-Math.atan(.2))<1e-12);
   assert.ok(Math.abs(east.roll-Math.atan(-.2))<1e-12);
   assert.ok(Math.abs(east.pitch-Math.atan(.1))<1e-12);
+});
+
+test('deck walking moves viewpoint across main deck and bow while clamping to hull bulwarks', () => {
+  const boat={modelId:'nina',x:0,z:0,heave:0,eye:HELM_EYE_HEIGHT,length:20,beam:6,heading:0,pitch:0,roll:0};
+  const helmOut=new Float64Array(3),walkOut=new Float64Array(3);
+  boatEyePosition(helmOut,boat);
+  assert.equal(deckStationLabel(boat),'Deck');
+
+  for(let i=0;i<60;i++)stepDeckWalk(boat,1,0,0,1/30);
+  boatEyePosition(walkOut,boat);
+  assert.ok(walkOut[2]<helmOut[2]-4,'walking forward advances viewpoint toward the bow (-Z)');
+  assert.ok(walkOut[1]<helmOut[1]-0.2,'stepping off the quarterdeck onto the waist lowers eye height to the main deck');
+  assert.equal(deckStationLabel(boat),'Waist');
+
+  for(let i=0;i<180;i++)stepDeckWalk(boat,1,-1,0,1/30);
+  boatEyePosition(walkOut,boat);
+  assert.equal(deckStationLabel(boat),'Bow');
+  assert.ok(Math.abs(walkOut[0])<boat.beam*0.5,'bulwark clamping keeps the walker inside the hull beam');
+
+  resetDeckWalk(boat);
+  boatEyePosition(walkOut,boat);
+  assert.deepEqual(Array.from(walkOut),Array.from(helmOut));
 });

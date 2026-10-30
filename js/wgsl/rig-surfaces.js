@@ -279,29 +279,50 @@ fn surfaceGpuRopeFrame(axis:vec3f,preferred:vec3f)->SurfaceGpuFrame {
   return SurfaceGpuFrame(across,cross(direction,across));
 }
 fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
+  let nLen=length(normal);
+  let hasDmg=nLen>1.002;
+  let dmgScale=select(1.0,nLen,hasDmg);
+  let unitN=select(normal,normal/max(nLen,0.0001),hasDmg);
   let vertexMetadata=surfaceGpuVertices[vertex*3u];let data=surfaceGpuVertices[vertex*3u+1u];let auxiliary=surfaceGpuVertices[vertex*3u+2u];
-  let kind=u32(vertexMetadata.x);let index=u32(vertexMetadata.y);var p=position;var n=normal;
+  let kind=u32(vertexMetadata.x);let index=u32(vertexMetadata.y);
+  if(kind==0u){return VesselPoseVertex(vec4f(position,0),vec4f(normal,0));}
+  var p=position;var n=unitN;
   if(kind==1u){
-    let uv=vertexMetadata.zw;let e=.0005;p=surfaceGpuCloth(index,uv);
+    let uv=vertexMetadata.zw;
+    let surface=surfaceGpuDescriptor(index);
+    let restPos=surfaceGpuOrigin(index)+surfaceGpuRest(surface,uv);
+    let clothDelta=position-restPos;
+    if(hasDmg && length(clothDelta)>=0.45){
+      return VesselPoseVertex(vec4f(position,0),vec4f(normal,0));
+    }
+    let e=.0005;p=surfaceGpuCloth(index,uv);
+    if(hasDmg){
+      let pose=surfaceGpuPose(index);
+      p+=surfaceGpuClothRotate(surface,clothDelta,pose)*clamp(pose.set,0.25,1.0);
+    }
     let du=surfaceGpuClothDelta(index,uv,vec2f(e,0)).offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
-    let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;n=surfaceGpuUnit(cross(du,dv));
+    let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;
+    n=surfaceGpuUnit(cross(du,dv))*dmgScale;
+    return VesselPoseVertex(vec4f(p,0),vec4f(n,0));
   }else if(kind==2u){
+    if(nLen>1.05){return VesselPoseVertex(vec4f(position,0),vec4f(normal,0));}
     let surface=surfaceGpuDescriptor(index);let pose=surfaceGpuPose(index);let origin=surfaceGpuYard(surface,vec3f(0),pose);
     let axes=mat3x3f(surfaceGpuYard(surface,vec3f(1,0,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,1,0),pose)-origin,surfaceGpuYard(surface,vec3f(0,0,1),pose)-origin);
-    p=surfaceGpuOrigin(index)+(origin+axes*(position-surfaceGpuOrigin(index)));n=surfaceGpuUnit(axes*normal);
+    p=surfaceGpuOrigin(index)+(origin+axes*(position-surfaceGpuOrigin(index)));n=surfaceGpuUnit(axes*unitN)*dmgScale;
   }else if(kind==3u){
+    if(nLen>1.05){return VesselPoseVertex(vec4f(position,0),vec4f(normal,0));}
     let t=vertexMetadata.z;let frame=surfaceGpuRopeFrame(surfaceGpuRopeNear(index,min(1.0,t+.001),t).offset-surfaceGpuRopeNear(index,max(0.0,t-.001),t).offset,auxiliary.xyz);
-    p=surfaceGpuRope(index,t)+frame.across*data.x+frame.up*data.y;n=surfaceGpuUnit(frame.across*data.z+frame.up*data.w);
+    p=surfaceGpuRope(index,t)+frame.across*data.x+frame.up*data.y;n=surfaceGpuUnit(frame.across*data.z+frame.up*data.w)*dmgScale;
   }else if(kind==4u){
     let at=3u+u32(surfaceGpuLive[2].x)*2u+index*4u;let axes=mat3x3f(surfaceGpuLive[at+1u].xyz,surfaceGpuLive[at+2u].xyz,surfaceGpuLive[at+3u].xyz);
-    let scale=surfaceGpuLive[1].xyz;p=(surfaceGpuLive[at].xyz+axes*data.xyz)/scale;n=surfaceGpuUnit((axes*auxiliary.xyz)*scale);
+    let scale=surfaceGpuLive[1].xyz;p=(surfaceGpuLive[at].xyz+axes*data.xyz)/scale;n=surfaceGpuUnit((axes*auxiliary.xyz)*scale)*dmgScale;
   }else if(kind==5u||kind==6u){
     let at=u32(surfaceGpuModel[1].z);var pivot=surfaceGpuModel[at].xyz;var axis=vec3f(0,1,0);var angle=surfaceGpuLive[0].z;
     if(kind==6u){pivot=surfaceGpuModel[at+1u].xyz;axis=surfaceGpuModel[at+2u].xyz;angle*=surfaceGpuModel[at+1u].w;}
-    p=pivot+surfaceGpuRotate(position-pivot,axis,angle);n=surfaceGpuUnit(surfaceGpuRotate(normal,axis,angle));
+    p=pivot+surfaceGpuRotate(position-pivot,axis,angle);n=surfaceGpuUnit(surfaceGpuRotate(unitN,axis,angle))*dmgScale;
   }else if(kind==7u){
     let pivot=surfaceGpuModel[u32(surfaceGpuModel[1].w)].xyz;let q=position-pivot;let c=cos(surfaceGpuLive[0].w);let s=sin(surfaceGpuLive[0].w);
-    p=vec3f(position.x,pivot.y+c*q.y+s*q.z,pivot.z-s*q.y+c*q.z);n=vec3f(normal.x,c*normal.y+s*normal.z,-s*normal.y+c*normal.z);
+    p=vec3f(position.x,pivot.y+c*q.y+s*q.z,pivot.z-s*q.y+c*q.z);n=surfaceGpuUnit(vec3f(unitN.x,c*unitN.y+s*unitN.z,-s*unitN.y+c*unitN.z))*dmgScale;
   }
   return VesselPoseVertex(vec4f(p,0),vec4f(n,0));
 }

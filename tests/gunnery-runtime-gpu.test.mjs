@@ -115,6 +115,39 @@ for(const model of ['nina','victory'])test(`${model}: captain UI, attended loadi
     assert.equal(ordered.side,'starboard');assert.equal(ordered.shots,0);
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
     const initialOrderFrame=await gunneryRuntimeStep(page);assert.equal(initialOrderFrame.shots,0,'a click must finish the captain order before firing');
+    const battleHud=await page.evaluate(()=>{
+      const root=document.querySelector('#helm-controls'),deck=root?.querySelector('.helm-battle-deck');
+      const style=root?getComputedStyle(root):null;
+      const rect=sel=>{const r=document.querySelector(sel)?.getBoundingClientRect();return r?{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}:null;};
+      return {
+        battle:root?.dataset.battle,
+        deckVisible:Boolean(deck&&!deck.hidden&&getComputedStyle(deck).display!=='none'),
+        backdrop:style?.backdropFilter||style?.webkitBackdropFilter||'none',
+        bgImage:style?.backgroundImage||'',
+        rudderKicker:document.querySelector('#helm-rudder-kicker')?.textContent,
+        sailsKicker:document.querySelector('#helm-sails-kicker')?.textContent,
+        hasTrainBtn:Boolean(document.querySelector('#helm-train-target')),
+        hasSteerBearBtn:Boolean(document.querySelector('#helm-steer-bear')),
+        ammoRect:rect('.helm-ammo-pills'),
+        elevInputRect:rect('#helm-elevation'),
+        elevOutRect:rect('#helm-elevation-value'),
+        travInputRect:rect('#helm-traverse'),
+        travOutRect:rect('#helm-traverse-value'),
+      };
+    });
+    assert.equal(battleHud.battle,'true','lower helm dock transitions to battle mode');
+    assert.equal(battleHud.deckVisible,true,'context-specific battle controls are visible in lower dock');
+    assert.equal(battleHud.backdrop,'none','expensive backdrop-filter blur is omitted in favor of nautical wood');
+    assert.ok(battleHud.bgImage.includes('gradient'),'nautical wood grain backdrop is applied');
+    assert.equal(battleHud.rudderKicker,'BATTLE HELM');
+    assert.equal(battleHud.sailsKicker,'FIGHTING RIG');
+    assert.equal(battleHud.hasTrainBtn,true);
+    assert.equal(battleHud.hasSteerBearBtn,true);
+    assert.ok(battleHud.elevInputRect.width>=56,`elevation slider is spacious (${battleHud.elevInputRect.width}px)`);
+    assert.ok(battleHud.travInputRect.width>=56,`train slider is spacious (${battleHud.travInputRect.width}px)`);
+    assert.ok(battleHud.elevInputRect.right<=battleHud.elevOutRect.left+1,'elevation slider does not overlap its readout');
+    assert.ok(battleHud.travInputRect.right<=battleHud.travOutRect.left+1,'train slider does not overlap its readout');
+    assert.ok(battleHud.elevOutRect.right<=battleHud.travInputRect.left,'elevation readout does not overlap train control');
     let maxSmoke=0,sawBall=false,sawFlash=false,sawCrown=false,sawProbe=false,sawResolve=false,sawRecoil=false,shotFrame=null,impactFrame=null,last=null;
     for(let i=0;i<180;i++){
       last=await gunneryRuntimeStep(page);maxSmoke=Math.max(maxSmoke,last.counts.volumes);sawBall||=!!last.render.gunneryBall;sawFlash||=last.counts.volumes>0;

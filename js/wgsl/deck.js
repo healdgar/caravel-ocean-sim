@@ -265,7 +265,8 @@ fn corner(v:u32)->vec2f {
   let f=0.02+0.98*pow(clamp(1.0-abs(dot(n,v)),0.0,1.0),5.0);
   let reflection=textureSampleLevel(envCube,sampC,reflect(-v,n),2.0).rgb;
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),6.0).rgb;
-  let sun=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*step(0.0,F.sunDir.y)*solarShadowVisibility(vesselShadow(in.world,n));
+  let shadowSample=vesselShadow(in.world,n);
+  let sun=textureSampleLevel(transLUT,sampC,transRMuToUV(RG+F.atmo.y,F.sunDir.y),0.0).rgb*F.sunDir.w*sunVis[0]*step(0.0,F.sunDir.y)*solarShadowVisibility(shadowSample);
   let pattern=clamp(0.5+gnoise(flowUV*1.7)+gnoise(flowUV*4.1)*0.3,0.0,1.0);
   let front=(1.0-smoothstep(0.015,0.11,w.x))*smoothstep(0.003,0.018,w.x)*w.z;
   let froth=clamp(w.y*(0.4+pattern*0.6)+front*0.55,0.0,0.85);
@@ -273,7 +274,7 @@ fn corner(v:u32)->vec2f {
   // Entrained bubbles scatter light from either side of a thin water sheet.
   let scatter=pow(max(dot(-v,F.sunDir.xyz),0.0),12.0);
   let foamLight=vec3f(0.88,0.90,0.91)*(ambient*1.1+sun*(0.12+0.28*abs(dot(n,F.sunDir.xyz))+scatter*0.35));
-  let moonFoam=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(vesselShadow(in.world,n))*(.12+.28*abs(dot(n,lunarDirection()))+.35*pow(max(dot(-v,lunarDirection()),0.0),12.0));
+  let moonFoam=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(shadowSample)*(.12+.28*abs(dot(n,lunarDirection()))+.35*pow(max(dot(-v,lunarDirection()),0.0),12.0));
   let color=mix(reflection,foamLight+vec3f(.88,.90,.91)*moonFoam,froth);
   var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
   if(curtain){

@@ -173,6 +173,8 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     climate: 'tropical',
     coastalArchetype: 'volcanic-island',
     portType: 'careening-anchorage',
+    settlementKind: 'colonial-port',
+    hasColonialPort: true,
     shoreBearing: 112,
     peakElevationMetres: 870,
     span: 8192,
@@ -195,6 +197,8 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     climate: 'tropical',
     coastalArchetype: 'sheltered-bay',
     portType: 'fortified-harbor',
+    settlementKind: 'colonial-port',
+    hasColonialPort: true,
     shoreBearing: 82,
     peakElevationMetres: 165,
     span: 8192,
@@ -217,6 +221,8 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     climate: 'tropical',
     coastalArchetype: 'estuary-bay',
     portType: 'silver-terminal',
+    settlementKind: 'colonial-port',
+    hasColonialPort: true,
     shoreBearing: 168,
     peakElevationMetres: 310,
     span: 8192,
@@ -239,6 +245,8 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     climate: 'tropical',
     coastalArchetype: 'river-mouth',
     portType: 'river-citadel',
+    settlementKind: 'colonial-port',
+    hasColonialPort: true,
     shoreBearing: 15,
     peakElevationMetres: 210,
     span: 8192,
@@ -261,6 +269,8 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     climate: 'subtropical',
     coastalArchetype: 'harbor-channel',
     portType: 'rendezvous-basin',
+    settlementKind: 'colonial-port',
+    hasColonialPort: true,
     shoreBearing: 145,
     peakElevationMetres: 140,
     span: 8192,
@@ -283,6 +293,8 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     climate: 'tropical',
     coastalArchetype: 'headland-bay',
     portType: 'headland-fortress',
+    settlementKind: 'colonial-port',
+    hasColonialPort: true,
     shoreBearing: 132,
     peakElevationMetres: 260,
     span: 8192,
@@ -296,6 +308,61 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     procedural: true,
   }),
 });
+
+// Gazetteer of actual c. 1550 colonial and Old World maritime ports.
+// Landfalls outside these historical ports default to uninhabited 1550 wilderness anchorages
+// rather than placing anachronistic Spanish colonial settlements (e.g. in Boston or uncolonized North America).
+export const HISTORICAL_1550_PORTS = Object.freeze([
+  { id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238 },
+  { id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548 },
+  { id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476 },
+  { id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883 },
+  { id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352 },
+  { id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118 },
+  { id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131 },
+  { id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537 },
+  { id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211 },
+  { id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177 },
+  { id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569 },
+  { id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485 },
+  { id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908 },
+  { id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829 },
+  { id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954 },
+  { id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148 },
+  { id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511 },
+  { id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388 },
+  { id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851 },
+  { id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32 },
+  { id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893 },
+  { id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136 },
+  { id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396 },
+  { id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43 },
+  { id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251 },
+  { id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908 },
+  { id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218 },
+  { id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605 },
+  { id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828 },
+  { id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249 },
+  { id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867 },
+]);
+
+export function hasHistorical1550ColonialPort(latitude, longitude, regionId = null, maxDistDeg = 0.32) {
+  if (typeof regionId === 'string' && Object.hasOwn(SPANISH_MAIN_1550_REGIONS, regionId)) {
+    return true;
+  }
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  const cosLat = Math.max(0.15, Math.cos(lat * COASTAL_DEG_TO_RAD));
+  for (const port of HISTORICAL_1550_PORTS) {
+    const dLat = lat - port.latitude;
+    const dLon = (lon - port.longitude) * cosLat;
+    if (Math.hypot(dLat, dLon) <= maxDistDeg) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export const PORT_PREFABS = Object.freeze({
   timber_mole_pier: Object.freeze({
@@ -1025,8 +1092,15 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   if (!spec || typeof spec !== 'object') {
     throw new TypeError('Coastal region spec must be a region ID or coordinate descriptor');
   }
-  if (typeof spec.id === 'string' && SPANISH_MAIN_1550_REGIONS[spec.id] && spec.latitude === undefined) {
-    return Object.freeze({ ...SPANISH_MAIN_1550_REGIONS[spec.id], ...spec });
+  if (typeof spec.id === 'string' && SPANISH_MAIN_1550_REGIONS[spec.id]) {
+    const preset = SPANISH_MAIN_1550_REGIONS[spec.id];
+    if (
+      spec.latitude === undefined ||
+      (Math.abs(Number(spec.latitude) - preset.latitude) < 0.05 &&
+        Math.abs(Number(spec.longitude) - preset.longitude) < 0.05)
+    ) {
+      return Object.freeze({ ...preset, ...spec });
+    }
   }
   const latitude = Number(spec.latitude);
   const longitude = Number(spec.longitude);
@@ -1048,7 +1122,20 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const portTypes = ['fortified-harbor', 'headland-fortress', 'silver-terminal', 'river-citadel', 'rendezvous-basin', 'careening-anchorage'];
   const idx = Math.floor(rand() * archetypes.length);
   const coastalArchetype = spec.coastalArchetype ?? archetypes[idx];
-  const portType = spec.portType ?? portTypes[idx];
+  const explicitNoPort =
+    spec.hasColonialPort === false ||
+    spec.settlementKind === 'wilderness-anchorage' ||
+    spec.portType === 'wilderness-anchorage' ||
+    spec.portType === 'none';
+  const explicitColonialPort =
+    spec.hasColonialPort === true ||
+    spec.settlementKind === 'colonial-port' ||
+    (!explicitNoPort && Boolean(spec.portType) && portTypes.includes(spec.portType));
+  const hasColonialPort = explicitNoPort
+    ? false
+    : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id);
+  const settlementKind = hasColonialPort ? 'colonial-port' : 'wilderness-anchorage';
+  const portType = spec.portType ?? (hasColonialPort ? portTypes[idx] : 'wilderness-anchorage');
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
   const shoreBearing = Number.isFinite(spec.shoreBearing)
     ? ((spec.shoreBearing % 360) + 360) % 360
@@ -1076,6 +1163,8 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     climate,
     coastalArchetype,
     portType,
+    settlementKind,
+    hasColonialPort,
     shoreBearing,
     peakElevationMetres,
     span,
@@ -1160,7 +1249,7 @@ export function synthesizeCoastalTerrain(regionSpec = 'cartagena') {
         const bayIndent = 520 * Math.exp(-(along * along) / (2 * 680 * 680));
         const headlandLeft = 360 * Math.exp(-((along + 1100) ** 2) / (2 * 420 * 420));
         const headlandRight = 320 * Math.exp(-((along - 1100) ** 2) / (2 * 420 * 420));
-        const morroPromontory = 34 * Math.exp(-((along - 115) ** 2) / (2 * 55 * 55));
+        const morroPromontory = region.hasColonialPort !== false ? 34 * Math.exp(-((along - 115) ** 2) / (2 * 55 * 55)) : 0;
         const shoreLineInland = -350 + bayIndent - headlandLeft - headlandRight - morroPromontory - macroWarping - mesoDetail * 0.4;
         signedShore = inland - shoreLineInland;
       }
@@ -1184,10 +1273,10 @@ export function synthesizeCoastalTerrain(regionSpec = 'cartagena') {
       let h;
       if (signedShore <= 0) {
         const offshoreDist = -signedShore;
-        const nearShoreSlope = 0.024 * bayShelter + 0.055 * (1 - bayShelter);
-        const deepShelf = Math.max(0, offshoreDist - 180) * 0.055;
+        const nearShoreSlope = 0.052 * bayShelter + 0.075 * (1 - bayShelter);
+        const deepShelf = Math.max(0, offshoreDist - 95) * 0.085;
         const baseDepth = -Math.min(120, offshoreDist * nearShoreSlope + deepShelf);
-        const channelDepth = -Math.min(28, 14.5 + offshoreDist * 0.022) * inChannel * coastalSmoothstep(-140, -380, signedShore);
+        const channelDepth = -Math.min(28, 14.5 + offshoreDist * 0.025) * inChannel * coastalSmoothstep(-32, -135, signedShore);
         h = Math.max(-120, Math.min(baseDepth, channelDepth));
       } else {
         // Foreshore beach zone (0..320m inland in the sheltered bay) transitions to coastal terrace and derivative-eroded mountains
@@ -1195,8 +1284,13 @@ export function synthesizeCoastalTerrain(regionSpec = 'cartagena') {
         const inlandRise = Math.max(0, signedShore - 300);
         const mountainFactor = coastalSmoothstep(80, 1950, inlandRise);
         const hillHeight = peak * mountainFactor * (0.32 + 0.68 * uber) + Math.max(0, mesoDetail) * mountainFactor * 0.38;
-        // Port terrace flattening near the sheltered harbor shore (along ~ [-280, +280], signedShore ~ [10, 320])
-        const terraceMask = Math.exp(-(along * along) / (2 * 320 * 320)) * coastalSmoothstep(8, 65, signedShore) * coastalSmoothstep(420, 210, signedShore);
+        // Port terrace flattening near the sheltered harbor shore (only for historical colonial ports)
+        const terraceMask =
+          region.hasColonialPort !== false
+            ? Math.exp(-(along * along) / (2 * 320 * 320)) *
+              coastalSmoothstep(8, 65, signedShore) *
+              coastalSmoothstep(420, 210, signedShore)
+            : 0;
         const rawLand = beachRamp + hillHeight;
         const terraced = rawLand * (1 - terraceMask * 0.72) + 3.4 * (terraceMask * 0.72);
         h = terraced * (1 - riverMask * 0.92) - 3.2 * riverMask;
@@ -1381,6 +1475,7 @@ export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = nu
 export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelliteData, shoreDist = null) {
   if (!satelliteData) return null;
   const region = resolveGlobalCoastalRegion(regionSpec);
+  if (region.hasColonialPort === false && !satelliteData.allowFootprints) return null;
   const n = region.size;
   const span = region.span;
 
@@ -1961,10 +2056,13 @@ function extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints) {
 
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
-  const orthoFootprints = extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist);
+  const allowColonialPort = region.hasColonialPort !== false;
+  const orthoFootprints = allowColonialPort
+    ? extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist)
+    : null;
   const hasOrthoFootprints = Boolean(orthoFootprints?.footprints?.length >= 4);
   const extractedHarborPiers =
-    hasOrthoFootprints || satelliteData?.is1550Orthophoto
+    allowColonialPort && (hasOrthoFootprints || satelliteData?.is1550Orthophoto)
       ? extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints)
       : [];
   const clusterFrame = orthoFootprints
@@ -2097,8 +2195,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         h = Math.min(h, h * (1 - acrossW * berthW) + targetDepth * (acrossW * berthW));
       }
 
-      if (!hasOrthoFootprints) {
-        // 2. Level Waterfront Quay & Plaza Mayor terrace (synthetic ports without top-down footprints)
+      if (allowColonialPort && !hasOrthoFootprints) {
+        // 2. Level Waterfront Quay & Plaza Mayor terrace (synthetic colonial ports without top-down footprints)
         if (relInland >= -2 && relInland <= plazaRadiusInland && Math.abs(relAlong) <= plazaRadiusAlong) {
           const alongW = coastalSmoothstep(plazaRadiusAlong, plazaRadiusAlong * 0.55, Math.abs(relAlong));
           const inlandW =
@@ -2228,14 +2326,14 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         fromOrthophotoFootprint: true,
       });
     }
-  } else {
+  } else if (allowColonialPort) {
     const pierTipPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 32);
     if (terrainSample(heights, pierTipPos.x, pierTipPos.z, region) <= -0.5) {
       addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
     }
   }
 
-  if (hasOrthoFootprints) {
+  if (allowColonialPort && hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
     const hasPreassigned = fps.some((f) => Boolean(f.prefabId));
     let bastionIdx = 0;
@@ -2371,7 +2469,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         fromOrthophotoFootprint: true,
       });
     }
-  } else {
+  } else if (allowColonialPort) {
     // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
     addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
     // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
@@ -2402,9 +2500,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
   }
 
-  for (const inst of instances) {
-    inst._cosNegYaw = Math.cos(-inst.yaw);
-    inst._sinNegYaw = Math.sin(-inst.yaw);
+  for (let idx = 0; idx < instances.length; idx++) {
+    const inst = instances[idx];
+    inst.id ??= `${inst.prefabId}_${idx}`;
+    inst.baseY ??= inst.y ?? 0;
+    inst.depth ??= inst.length ?? 16;
+    inst._cosNegYaw = Math.cos(inst.yaw);
+    inst._sinNegYaw = Math.sin(inst.yaw);
     inst._boundR = Math.hypot(inst.width, inst.length) * 0.5;
   }
 
@@ -2417,10 +2519,12 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   return {
     regionId: region.id,
     portType: region.portType,
+    settlementKind: region.settlementKind ?? (allowColonialPort ? 'colonial-port' : 'wilderness-anchorage'),
+    hasColonialPort: allowColonialPort,
     era: region.era,
     shoreBearing: region.shoreBearing ?? 112,
     center: { x: center.x, z: center.z, shoreAlong: bestShoreAlong, shoreInland: bestShoreInland },
-    clearRadius: 155,
+    clearRadius: allowColonialPort ? 155 : 0,
     hasOrthophotoFootprints: hasOrthoFootprints,
     berth: {
       x: berthPos.x,
@@ -2445,8 +2549,8 @@ export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
     const dz = z - inst.z;
     const rBound = (inst._boundR ?? Math.hypot(inst.width, inst.length) * 0.5) + hullRadius;
     if (dx * dx + dz * dz > rBound * rBound) continue;
-    const c = inst._cosNegYaw ?? Math.cos(-inst.yaw);
-    const s = inst._sinNegYaw ?? Math.sin(-inst.yaw);
+    const c = inst._cosNegYaw ?? Math.cos(inst.yaw);
+    const s = inst._sinNegYaw ?? Math.sin(inst.yaw);
     const localX = dx * c - dz * s;
     const localZ = dx * s + dz * c;
     const halfW = inst.width * 0.5 + hullRadius;
@@ -2515,7 +2619,8 @@ export async function load1550BuildingLRMTemplates(fetchImpl = typeof fetch === 
 }
 
 export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cachedLRMBuildingTemplates) {
-  if (!portPlacement?.instances?.length) {
+  const hasPalms = palms instanceof Float32Array && palms.length >= 8;
+  if (!portPlacement?.instances?.length && !hasPalms) {
     return {
       vertices: new Float32Array(0),
       indices: new Uint32Array(0),
@@ -2675,6 +2780,25 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     indices.push(i0, i1, i2);
   };
 
+  const pushSubdividedQuad = (p00, p10, p11, p01, nu, nv, kind, shade) => {
+    if (nu <= 1 && nv <= 1) {
+      pushQuad(p00, p10, p11, p01, kind, shade);
+      return;
+    }
+    const bilerp = (u, v) => [
+      (1 - u) * (1 - v) * p00[0] + u * (1 - v) * p10[0] + u * v * p11[0] + (1 - u) * v * p01[0],
+      (1 - u) * (1 - v) * p00[1] + u * (1 - v) * p10[1] + u * v * p11[1] + (1 - u) * v * p01[1],
+      (1 - u) * (1 - v) * p00[2] + u * (1 - v) * p10[2] + u * v * p11[2] + (1 - u) * v * p01[2],
+    ];
+    for (let j = 0; j < nv; j++) {
+      const v0 = j / nv, v1 = (j + 1) / nv;
+      for (let i = 0; i < nu; i++) {
+        const u0 = i / nu, u1 = (i + 1) / nu;
+        pushQuad(bilerp(u0, v0), bilerp(u1, v0), bilerp(u1, v1), bilerp(u0, v1), kind, shade);
+      }
+    }
+  };
+
   // Helper to emit a 3D box (or battered frustum when topExpandX/Z != 0) in local coordinates
   const emitBox = (toWorld, x0, x1, y0, y1, z0, z1, kind, shade = 0.84, includeBottom = false, topInset = 0) => {
     const p000 = toWorld(x0, y0, z0);
@@ -2688,11 +2812,18 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const p111 = toWorld(tx1, y1, tz1);
     const p011 = toWorld(tx0, y1, tz1);
 
-    pushQuad(p000, p100, p110, p010, kind, shade * 0.94);
-    pushQuad(p100, p101, p111, p110, kind, shade);
-    pushQuad(p101, p001, p011, p111, kind, shade * 0.96);
-    pushQuad(p001, p000, p010, p011, kind, shade * 0.88);
-    pushQuad(p010, p110, p111, p011, kind, Math.min(1, shade * 1.06));
+    const spanX = Math.abs(x1 - x0);
+    const spanY = Math.abs(y1 - y0);
+    const spanZ = Math.abs(z1 - z0);
+    const nx = spanX >= 4.8 ? Math.min(6, Math.max(2, Math.round(spanX / 3.8))) : 1;
+    const ny = spanY >= 3.8 ? Math.min(3, Math.max(2, Math.round(spanY / 3.2))) : 1;
+    const nz = spanZ >= 4.8 ? Math.min(6, Math.max(2, Math.round(spanZ / 3.8))) : 1;
+
+    pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
+    pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
+    pushSubdividedQuad(p101, p001, p011, p111, nx, ny, kind, shade * 0.96);
+    pushSubdividedQuad(p001, p000, p010, p011, nz, ny, kind, shade * 0.88);
+    pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06));
     if (includeBottom) {
       pushQuad(p001, p101, p100, p000, kind, shade * 0.65);
     }
@@ -3859,6 +3990,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
   // 2-tier 3D Corner-model Palms (Cocos nucifera coconut palms on foreshore + Roystonea regia royal palms & Sabal palmetto in lowland/inland canopy)
   if (palms instanceof Float32Array && palms.length >= 8) {
+    portPlacement.palms = palms;
     activeInstIndex = portPlacement.instances.length;
     activePrefabId = 'palm_grove';
     activeInstTag = 'palms';
@@ -3938,21 +4070,24 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
   const outVertices = new Float32Array(verts);
   const outIndices = new Uint32Array(indices);
-  const partAssembly = createPartAssemblyCatalog({
-    domain: 'building',
-    modelId: portPlacement.regionId ?? 'port',
-    vertices: outVertices,
-    vertexStride: 8,
-    indices: outIndices,
-    groups,
-  });
+  const instCount = portPlacement?.instances?.length ?? 0;
+  const partAssembly = instCount
+    ? createPartAssemblyCatalog({
+        domain: 'building',
+        modelId: portPlacement.regionId ?? 'port',
+        vertices: outVertices,
+        vertexStride: 8,
+        indices: outIndices,
+        groups,
+      })
+    : null;
 
   return {
     vertices: outVertices,
     indices: outIndices,
     groups,
     partAssembly,
-    instanceCount: portPlacement.instances.length,
+    instanceCount: instCount,
     triangleCount: indices.length / 3,
     bounds,
   };
@@ -4708,26 +4843,29 @@ export function createCoastalViews(regionSpec, heights, portPlacement = null) {
   const rawHarbor = worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(110, 260 * viewScale));
 
   const snapToNavigableBay = (pos) => {
-    if (terrainSample(heights, pos.x, pos.z, region) <= -4.2) return pos;
+    if (terrainSample(heights, pos.x, pos.z, region) <= -10.5) return pos;
     const n = region.size;
     const span = region.span;
-    let bestX = pos.x, bestZ = pos.z, bestDist2 = Infinity;
-    for (let j = 2; j < n - 2; j += 2) {
-      const wz = region.z + (j / (n - 1) - 0.5) * span;
-      for (let i = 2; i < n - 2; i += 2) {
-        const wx = region.x + (i / (n - 1) - 0.5) * span;
-        const h = heights[j * n + i];
-        if (h <= -4.5) {
-          const d2 = (wx - pos.x) * (wx - pos.x) + (wz - pos.z) * (wz - pos.z);
-          if (d2 < bestDist2) {
-            bestDist2 = d2;
-            bestX = wx;
-            bestZ = wz;
+    for (const targetDepth of [-11.0, -4.5]) {
+      let bestX = pos.x, bestZ = pos.z, bestDist2 = Infinity;
+      for (let j = 2; j < n - 2; j += 2) {
+        const wz = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = 2; i < n - 2; i += 2) {
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const h = heights[j * n + i];
+          if (h <= targetDepth) {
+            const d2 = (wx - pos.x) * (wx - pos.x) + (wz - pos.z) * (wz - pos.z);
+            if (d2 < bestDist2) {
+              bestDist2 = d2;
+              bestX = wx;
+              bestZ = wz;
+            }
           }
         }
       }
+      if (bestDist2 < Infinity) return { x: bestX, z: bestZ };
     }
-    return { x: bestX, z: bestZ };
+    return pos;
   };
 
   const caravel = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
@@ -5242,8 +5380,12 @@ function fetchCachedTerrariumTileRgba(demUrl, signal) {
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
 export async function upgradeProceduralPackWithRealDEM(
   pack,
-  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false } = {}
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false, snapToCoast = true } = {}
 ) {
+  // snapToCoast:false pins region.latitude/longitude (and x/z) exactly: used when
+  // the caller has already placed the region in the world frame (late spawn), so
+  // the land can never jump to a different geographic spot than the ship's track.
+  if (snapToCoast === false) _snapAttempted = true;
   const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
   if (!pack?.region || !effectiveFetch) return ensureFallback(pack);
@@ -5420,6 +5562,9 @@ export async function upgradeProceduralPackWithRealDEM(
           ...region,
           latitude: snapped.latitude,
           longitude: snapped.longitude,
+          hasColonialPort: undefined,
+          settlementKind: undefined,
+          portType: undefined,
           ...(snapped.shoreBearing !== undefined ? { shoreBearing: snapped.shoreBearing } : {}),
         });
         return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, demSpan, timeoutMs, _snapAttempted: true });
@@ -5456,6 +5601,11 @@ export async function upgradeProceduralPackWithRealDEM(
         ...region,
         shoreBearing: demBearing,
         peakElevationMetres: Math.max(4, Math.round(maxDem)),
+        // Orientation/peak only: the geographic anchor and world frame never move here.
+        latitude: region.latitude,
+        longitude: region.longitude,
+        x: region.x,
+        z: region.z,
       });
       pack.region = region;
     }
@@ -5525,7 +5675,8 @@ export async function upgradeProceduralPackWithRealDEM(
         heights[k] = Math.min(895, demH);
       } else {
         const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
-        const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance);
+        const deepDrop = Math.max(0, shoreDistance - 28) * 0.14;
+        const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance + deepDrop);
         heights[k] = Math.max(-120, demH < -2 ? Math.min(demH, -authoredDepth) : -authoredDepth);
       }
     }
@@ -5585,7 +5736,10 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const baseRegion = resolveGlobalCoastalRegion(basePack.region);
   const satSource = options.orthophoto1550 || basePack.satelliteData || null;
   const hasDedicated1550Ortho = Boolean(options.orthophoto1550);
-  const rawPrecomputedFootprints = options.precomputedFootprints || satSource?.precomputedFootprints || null;
+  const rawPrecomputedFootprints =
+    baseRegion.hasColonialPort === false
+      ? null
+      : options.precomputedFootprints || satSource?.precomputedFootprints || null;
 
   // Validate physical ground scale (metersPerPixel & spanM) of the AI 1550 orthophoto / footprints
   const scaleInfo =
@@ -5738,7 +5892,8 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
             : 0.3;
           const reefBench = 0.68 + 0.32 * (1 - turquoise * 0.55);
           const shoreDistance = Math.max(0, shoreDist1550.distLand[k] - step * 0.5);
-          const authoredDepth = Math.min(120, 1.8 + 0.145 * shoreDistance * reefBench);
+          const deepDrop = Math.max(0, shoreDistance - 28) * 0.14;
+          const authoredDepth = Math.min(120, 1.8 + 0.145 * shoreDistance * reefBench + deepDrop);
           heights1550[k] = Math.max(-120, demH < -2.5 ? Math.min(demH, -authoredDepth) : -authoredDepth);
         }
       }
@@ -5823,11 +5978,14 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
       ? Math.max(4.5, Math.min(48.0, Number(((reclaimedCellsCarved / lowCoastalCells) * 100).toFixed(1))))
       : 12.4;
   upgradedPack.territory1550 = {
+    schemaVersion: 2,
     cellId: cellInfo.cellId,
     name: cellInfo.name,
     coordLabel: cellInfo.coordLabel,
     span: region.span,
     metersPerPixel: scaleInfo.metersPerPixel,
+    settlementKind: region.settlementKind,
+    hasColonialPort: Boolean(region.hasColonialPort),
     restoredEstuaryPct,
     reclaimedCellsCarved,
     palmCount: upgradedPack.vegetation?.stats?.palmCount ?? 0,
@@ -5893,6 +6051,10 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
   if (!isVerifiedCache) return null;
 
   const region = resolveGlobalCoastalRegion(basePack.region);
+  // Reject legacy v1 cached heightfields for wilderness anchorages (which had a pre-flattened Plaza Mayor pad baked in)
+  if (region.hasColonialPort === false && (meta.schemaVersion ?? 1) < 2 && !meta.curated1550) {
+    return null;
+  }
   let heights1550 = decodedHeights;
   if (n !== region.size) {
     // Bilinear resample if cached grid size differs (e.g. PC 513 vs Mobile 257)
@@ -5943,6 +6105,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   onCachedReady = null,
   fetchImpl = typeof fetch === 'function' ? fetch : null,
   forceFirstExplorer = false,
+  snapToCoast = true,
 } = {}) {
   const ensureBaseDem = async () => {
     if (
@@ -5950,7 +6113,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
       fetchImpl &&
       typeof createImageBitmap === 'function'
     ) {
-      await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000 });
+      await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000, snapToCoast });
     }
     if (!basePack.heights && basePack.region) {
       finalizeProceduralCoastalPack(basePack, synthesizeCoastalTerrain(basePack.region));
@@ -5958,7 +6121,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   };
   const cellInfo = canonicalCoastalCellId(basePack.region);
   const lrmPromise = load1550BuildingLRMTemplates(fetchImpl);
-  const localKey = `waterworld.discovery.v1.${cellInfo.cellId}`;
+  const localKey = `waterworld.discovery.v2.${cellInfo.cellId}`;
   let status = 'first_explorer';
   let visits = 1;
   let discoveredAt = new Date().toISOString();
@@ -6083,9 +6246,13 @@ export async function runLandfallDiscoveryPipeline(basePack, {
 
   // Yield a frame so the First Explorer banner renders smoothly while the ship sails at 60 FPS
   await new Promise((resolve) => setTimeout(resolve, 16));
+  const estuaryKind =
+    basePack.region?.climate === 'temperate' || basePack.region?.climate === 'subpolar'
+      ? '1550 tidal estuaries & salt marshes'
+      : '1550 mangrove channels';
   onProgress?.({
     stage: 'orthophoto',
-    message: `Analyzing satellite coast & 1550 mangrove channels for ${cellInfo.name}…`,
+    message: `Analyzing satellite coast & ${estuaryKind} for ${cellInfo.name}…`,
   });
 
   const orthophoto1550 = await loadOrthophoto1550();
@@ -6553,6 +6720,7 @@ export async function generateCoastalNeighborSection(
     fetchTile = null,
     fetchSatelliteTile = null,
     taperUnconnectedOuter = true,
+    skipStaticPalms = false,
   } = {}
 ) {
   const baseRegion = basePack.region;
@@ -7004,10 +7172,13 @@ export async function generateCoastalNeighborSection(
     null,
     shoreDist
   );
-  const vegetation = seedCoastalVegetation(sectionRegion, stitched, biome, beaches, port, 5, shoreDist);
-  const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
+  const vegetation = skipStaticPalms
+    ? { trees: new Float32Array(0), palms: new Float32Array(0), treeCount: 0, palmCount: 0 }
+    : seedCoastalVegetation(sectionRegion, stitched, biome, beaches, port, 5, shoreDist);
+  const portGeometry = skipStaticPalms ? null : buildPortPrefabGeometry(port, vegetation.palms);
 
   return Object.assign(sectionPack, {
+    connectedEdges,
     heights: stitched,
     beaches,
     mesh,

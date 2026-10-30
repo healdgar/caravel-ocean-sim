@@ -175,7 +175,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
   // Knees and the hip hinge supply the reach. The actor remains upright/yaw-only,
   // while measured boots keep the same contacts and all limb lengths survive.
   poseMoveBone(a,pelvis,[base[0],base[1]+lift-drop,base[2]+.08*fraction]);
-  for(const [name,weight]of [['pelvis',.18],['spine_01',.45],['spine_02',.37]]){
+  if(Math.abs(lean)>1e-6)for(const [name,weight]of [['pelvis',.18],['spine_01',.45],['spine_02',.37]]){
     const node=poseNodeIndex(a,name);if(node>=0){const angle=lean*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
   }
   let workspaceForward=0;

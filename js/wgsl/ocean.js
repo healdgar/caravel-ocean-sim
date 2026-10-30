@@ -224,7 +224,8 @@ ${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
 
   let sunlight = sunIlluminance() * sunVis[0];
-  let sunE = sunlight * solarShadowVisibility(vesselShadow(in.rel+F.camPos.xyz,nrm));
+  let surfaceShadow = vesselShadow(in.rel+F.camPos.xyz,nrm);
+  let sunE = sunlight * solarShadowVisibility(surfaceShadow);
   let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
   // average radiance of the whole upper hemisphere (incl. the bright horizon band)
@@ -248,7 +249,7 @@ ${OCEAN_HULL_MASK}
   let Fh = fresnelWater(dot(V, Hv));
   let spec = sunE * (Fh * Dm * G / (4.0 * max(V.y, 0.02))) * step(0.0, Ld.y);
 
-  var moonSpec=vec3f(0);let moonE=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(vesselShadow(in.rel+F.camPos.xyz,nrm));
+  var moonSpec=vec3f(0);let moonE=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(surfaceShadow);
   if(lunarIrradiance()>0.0){
     let mh=normalize(V+lunarDirection());let ms=-mh.xz/max(mh.y,1e-3)-sl;
     let me=(ms.x*ms.x*cov.y+ms.y*ms.y*cov.x-2.0*ms.x*ms.y*cov.z)/det;

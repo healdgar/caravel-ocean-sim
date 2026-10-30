@@ -61,7 +61,9 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       limiter.threshold.value=-10;limiter.knee.value=12;limiter.ratio.value=5;limiter.attack.value=.003;limiter.release.value=.2;
       master.connect(limiter).connect(context.destination);
     }
-    enabled=true;await context.resume();mute();
+    enabled=true;
+    const resumePromise=context.resume().catch(()=>{});
+    mute();
     if(buffers.size<Object.keys(ALL_SOUNDS).length&&!loading){
       loading=Promise.allSettled(Object.entries(ALL_SOUNDS).map(async([id,asset])=>{
         if(buffers.has(id))return;
@@ -69,10 +71,12 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         buffers.set(id,await context.decodeAudioData(await response.arrayBuffer()));
       })).then(()=>{ready=true;loading=null;startLoops();status();});
     }
-    status();await loading;timberAudio.reset();
+    status();await loading;await resumePromise;timberAudio.reset();
   }
   return {
     get enabled(){return enabled;},get ready(){return ready;},
+    enable,
+    resume(){if(enabled&&context&&context.state!=='running')context.resume().then(()=>mute()).catch(()=>{});},
     async toggle(){
       if(enabled){enabled=false;stopEvents();mute();await context?.suspend();status();}
       else try{await enable();}catch(error){enabled=false;mute();status();throw error;}

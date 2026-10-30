@@ -1,4 +1,4 @@
-import { HELM_EYE_X, HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale, vesselVerticalScale, vesselDraft } from './hull.js';
+import { HELM_EYE_X, HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale, vesselVerticalScale, vesselDraft, vesselHull, modelDeck, modelDeckWidth } from './hull.js';
 import {VICTORY_DESIGN,victoryHullHalfWidth,victoryHullDeck} from './models/victory.js';
 import {PROCEDURAL_DESIGNS,proceduralHullWidth,proceduralHullDeck,proceduralDeck,proceduralKeelHalfWidth,proceduralProvisionDays} from './models/procedural.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
@@ -350,7 +350,24 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
       force:{},state:{cgY:hydro.centreOfGravity-(hydro.datumDraft??vesselDraft(boat))}};
   }
   const lateralState=lateral.state,lateralInertia=hydro.mass*(1+lateral.descriptor.addedMassRatio);
-  const inertia = hydro.mass + hydro.addedMass;
+  const floodMass = Math.max(0, (boat.damage?.floodingTonnes ?? 0) * 1000);
+  const inertia = hydro.mass + hydro.addedMass + floodMass * 0.45;
+  const isSunk = Boolean(boat.damage?.sunk);
+  const sinkRatio = (boat.damage?.floodingSinkage ?? 0) / Math.max(0.8, hydro.draft);
+  const effFreeboard = Math.max(1.2, Math.min(2.6, hydro.freeboard ?? 1.8));
+  const sinkProgress = isSunk ? Math.min(1, (boat.damage?.sinkingDepth ?? 0) / (effFreeboard * 1.5)) : 0;
+  const rigInt = Math.max(0, Math.min(1, boat.damage?.rigIntegrity ?? 1));
+  const hullInt = Math.max(0, Math.min(1, boat.damage?.hullIntegrity ?? 1));
+  const mState = boat.damage?.mastState;
+  const brokenSpars = mState ? (mState.fore || 0) + (mState.main || 0) + (mState.mizzen || 0) : 0;
+  const rigWreckageDrag = 1 + (1 - rigInt) * 6.5 + brokenSpars * 2.8 + (1 - hullInt) * 3.2;
+  const floodDragMul = isSunk ? (14 + sinkProgress * 55) : (1 + Math.min(5.5, sinkRatio * 2.6)) * rigWreckageDrag;
+  const rigDrive = rigInt * rigInt * Math.max(0.08, 1 - brokenSpars * 0.18);
+  const hullDrive = 0.65 + 0.35 * hullInt;
+  const driveFactor = isSunk
+    ? Math.max(0, 1 - sinkProgress * 1.8) * 0.08
+    : Math.max(0.04, (1 - Math.min(0.75, sinkRatio * 0.45)) * rigDrive * hullDrive);
+  const baseSailDragCoeff = 0.20 + 0.80 * (1 - rigInt);
   const sailing = boat.propulsion === 'sail';
   const rowing=Object.hasOwn(ROWING_DESIGNS,modelId),rowLoads=rowing?(boat.rowingLoads??={}):null;
   const external=boat.externalForce,heading=(boat.heading??0)*Math.PI/180;
@@ -363,8 +380,8 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   advanceSails(boat, dt, windSpeed, windDirection);
   boat.surgeVelocity=savedSurge;boat.leewayVelocity=savedLeeway;
   const target = boat.speed * KNOT_TO_MPS;
-  const thrust = hydro.drag * target * Math.abs(target);
-  const waveForce = -1025 * 9.81 * hydro.volume * slope;
+  const thrust = hydro.drag * target * Math.abs(target) * driveFactor;
+  const waveForce = -1025 * 9.81 * hydro.volume * slope * (1 - sinkProgress * 0.85);
   // Optional world-space loads (e.g. an anchor rode) pass through the same
   // inertial integrator as wind and wave pressure. Units: N, clockwise N m.
   const externalX=Number.isFinite(external?.x)?external.x:0,externalZ=Number.isFinite(external?.z)?external.z:0;
@@ -372,7 +389,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const externalSide=externalX*Math.cos(heading)+externalZ*Math.sin(heading);
   const initial = boatForwardSpeed(boat);
   const attitude=boat.waveAttitude ?? boat.target ?? {roll:0,pitch:0};
-  const sailDriveScale=modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20));
+  const sailDriveScale=(modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor;
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
@@ -386,18 +403,19 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
       blades=rowingForces(rowLoads,boat,{surge:velocity,sway:sideways,sampleWater:boat.rowingWater?.sample??boatNoRowingWater});
     }
     lateralState.surge=velocity;lateralState.sway=sideways;lateralState.yawRate=boat.yawRate??0;
-    lateralState.rollRate=boat.rollVelocity;lateralState.pitchRate=boat.pitchVelocity;lateralState.heaveRate=boat.heaveVelocity??0;
+    lateralState.rollRate=boat.rollVelocity;lateralState.pitchRate=boat.pitchVelocity;lateralState.heaveRate=isSunk?0:(boat.heaveVelocity??0);
     lateralState.roll=boat.roll;lateralState.pitch=boat.pitch;
     const water=evaluateHullLateral(lateral.force,lateral.descriptor,lateralState);
+    const waterRollMom=isSunk?water.rollMoment*(1-sinkProgress*0.9):water.rollMoment;
     // Put each local force at its actual depth/longitudinal station. Its
     // diagonal resistance is implicit; this avoids explicit drag overshoot.
-    stepBoatRotation(boat,'roll',attitude.roll??0,(loads?.rollMoment??0)+(blades?.rollMoment??0)+water.rollMoment+water.rollDamping*boat.rollVelocity,h,water.rollDamping);
+    stepBoatRotation(boat,'roll',attitude.roll??0,(loads?.rollMoment??0)+(blades?.rollMoment??0)+waterRollMom+water.rollDamping*boat.rollVelocity,h,water.rollDamping);
     stepBoatRotation(boat,'pitch',attitude.pitch??0,(loads?.pitchMoment??0)+(blades?.pitchMoment??0),h);
     const sailForward=loads?(loads.forward>0?loads.forward*sailDriveScale:velocity>0?loads.forward*.15:loads.forward):thrust;
     const force = sailForward + (blades?.forward??0)+waveForce + externalForward+water.forward;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
-    const drag = hydro.drag * (sailing && loads?.area > 0 ? 0.20 + 80 * Math.max(0, froude - 0.30) ** 2 : 1);
+    const drag = hydro.drag * floodDragMul * (sailing && loads?.area > 0 ? baseSailDragCoeff + 80 * Math.max(0, froude - 0.30) ** 2 : 1);
     // Implicit signed quadratic drag: stable through zero and during reversals.
     const next = 2 * free / (1 + Math.sqrt(1 + 4 * drag / inertia * h * Math.abs(free)));
     distance += (velocity + next) * 0.5 * h;
@@ -481,22 +499,97 @@ export function stepBoatSteering(boat, command, dt) {
   boat.waterYawMoment=boat.sailYawMoment=boat.rowingYawMoment=boat.waterYawDamping=0;
 }
 
+function helmDesignStation(boat){
+  const side=boat.eyeSide??boat.sailState?.tack??1;
+  const additional=additionalHydroDesign(boat.modelId),victory=boat.modelId==='victory',helm=additional?.helm??(victory?VICTORY_DESIGN.helm:null);
+  const baseX=side*(helm?.x??HELM_EYE_X);
+  const baseZ=victory?helm.z-.65*(1-Math.min(1,side*side)):helm?.z??HELM_EYE_Z;
+  const baseEye=additional?Math.max(Number.isFinite(boat.eye)?boat.eye:-Infinity,proceduralDeck(additional.id,helm.z,helm.x)*additional.frame.verticalScale+helm.eyeAboveDeck):boat.eye;
+  return {side,baseX,baseZ,baseEye,helmX:helm?.x??HELM_EYE_X,helmZ:helm?.z??HELM_EYE_Z};
+}
+
+export function resetDeckWalk(boat){
+  boat.deckWalkX=0;
+  boat.deckWalkZ=0;
+  boat.deckWalkY=0;
+  boat.deckWalkYVelocity=0;
+}
+
+export function deckStationLabel(boat){
+  const walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
+  if(Math.hypot(walkX,walkZ)<=0.25)return 'Deck';
+  const {baseZ}=helmDesignStation(boat),z=baseZ+walkZ;
+  if(z<-2.0)return 'Bow';
+  if(z<1.6)return 'Waist';
+  if(z>4.1)return 'Stern';
+  return 'Quarter';
+}
+
+export function stepDeckWalk(boat,forwardInput,strafeInput,viewYaw,dt){
+  if(!(dt>0)||!Number.isFinite(dt))return;
+  hydroModelCode(boat.modelId??'nina');
+  const {side,baseX,baseZ,helmX,helmZ}=helmDesignStation(boat);
+  let walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
+  const mag=Math.hypot(forwardInput,strafeInput);
+  if(mag>1e-5){
+    const fwd=mag>1?forwardInput/mag:forwardInput;
+    const str=mag>1?strafeInput/mag:strafeInput;
+    const speedMps=Math.max(2.2,Math.min(5.2,(boat.length||20)*0.11));
+    const cy=Math.cos(viewYaw||0),sy=Math.sin(viewYaw||0);
+    const dxMeters=(fwd*sy+str*cy)*speedMps*dt;
+    const dzMeters=(-fwd*cy+str*sy)*speedMps*dt;
+    const scaleX=Math.max(0.25,(boat.beam||3.6)/3.6);
+    const scaleZ=Math.max(0.5,(boat.length||12)/12);
+    let curX=baseX+walkX+dxMeters/scaleX;
+    let curZ=baseZ+walkZ+dzMeters/scaleZ;
+    const [zMin,zMax]=vesselHull(boat).bounds;
+    curZ=Math.max(zMin+0.55,Math.min(zMax-0.38,curZ));
+    for(const mz of [-3.55,0.05,3.53]){
+      const mdx=curX,mdz=curZ-mz,md=Math.hypot(mdx,mdz);
+      if(md<0.28){
+        const nx=md>1e-4?mdx/md:(side||1),nz=md>1e-4?mdz/md:0;
+        curX=nx*0.28;curZ=mz+nz*0.28;
+      }
+    }
+    const maxHalfX=Math.max(0.18,modelDeckWidth(boat,curZ)-0.12);
+    curX=Math.max(-maxHalfX,Math.min(maxHalfX,curX));
+    walkX=boat.deckWalkX=curX-baseX;
+    walkZ=boat.deckWalkZ=curZ-baseZ;
+  }
+  if(walkX!==0||walkZ!==0||Math.abs(boat.deckWalkY||0)>1e-5){
+    const curX=baseX+walkX,curZ=baseZ+walkZ;
+    const targetY=(modelDeck(boat,curZ,curX)-modelDeck(boat,helmZ,helmX))*vesselVerticalScale(boat);
+    boat.deckWalkY??=targetY;
+    boatSpring(boat,'deckWalkY',targetY,10,dt);
+  }
+}
+
 // Stand to windward of the billowing canvas. The sailing model retains its tack
 // near a dead run/calm; a critically damped crossing avoids a camera teleport.
 export function stepBoatView(boat,dt){
   const side=boat.sailState?.tack??1;
   boat.eyeSide??=side;
+  if(Math.hypot(boat.deckWalkX||0,boat.deckWalkZ||0)>0.05){
+    boat.eyeSideVelocity=0;
+    return;
+  }
   boatSpring(boat,'eyeSide',side,4,dt);
 }
 // World-space eye anchor; keeping it separate from the vessel allows inspection.
 export function boatEyePosition(out, boat) {
   hydroModelCode(boat.modelId??'nina');
-  const side=boat.eyeSide??boat.sailState?.tack??1;
-  const additional=additionalHydroDesign(boat.modelId),victory=boat.modelId==='victory',helm=additional?.helm??(victory?VICTORY_DESIGN.helm:null);
-  // Cross ahead of the mizzen rather than moving the eye through its trunk.
-  const eyeZ=victory?helm.z-.65*(1-Math.min(1,side*side)):helm?.z??HELM_EYE_Z;
-  const eye=additional?Math.max(Number.isFinite(boat.eye)?boat.eye:-Infinity,proceduralDeck(additional.id,helm.z,helm.x)*additional.frame.verticalScale+helm.eyeAboveDeck):boat.eye;
-  boatRotate(out, side * (helm?.x??HELM_EYE_X) * boat.beam / 3.6, eye, eyeZ * boat.length / 12,
+  const {baseX,baseZ,baseEye,helmX,helmZ}=helmDesignStation(boat);
+  const walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
+  let designX=baseX,designZ=baseZ,eye=baseEye;
+  if(walkX!==0||walkZ!==0||Math.abs(boat.deckWalkY||0)>1e-6){
+    designX=baseX+walkX;
+    designZ=baseZ+walkZ;
+    const deckDelta=Number.isFinite(boat.deckWalkY)
+      ?boat.deckWalkY
+      :(modelDeck(boat,designZ,designX)-modelDeck(boat,helmZ,helmX))*vesselVerticalScale(boat);
+    eye=baseEye+deckDelta;
+  }
+  boatRotate(out, designX * boat.beam / 3.6, eye, designZ * boat.length / 12,
     boat.heading * Math.PI / 180, boat.pitch, boat.roll);
   out[0] += boat.x; out[1] += boat.heave; out[2] += boat.z;
   return out;

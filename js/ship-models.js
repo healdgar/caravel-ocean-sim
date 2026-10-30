@@ -107,7 +107,7 @@ function victoryDefinition(){
     return {id:s.name,mast:VICTORY_MASTS[s.mast].id,kind:s.kind==='spanker'?'gaff':s.kind,controlGroup:s.controlGroup,yardNode:'yard.'+s.name,clewNodes};
   });
   return {id:'victory',modelCode:1,gpuPose:true,name:'HMS Victory · 1805',revision:1,status:'ready',hullFamily:'first-rate',geometry:'victory-procedural-v1',
-    designFrame:VICTORY_DESIGN.frame,runtime:VICTORY_DESIGN.runtime,crewStations:VICTORY_DESIGN.crewStations,nodes,
+    designFrame:VICTORY_DESIGN.frame,runtime:VICTORY_DESIGN.runtime,crewStations:VICTORY_DESIGN.crewStations,supplementalCrewStations:VICTORY_DESIGN.supplementalCrewStations,nodes,
     rig:defineRig({id:'victory-1805-rig',backend:'square1805',masts:VICTORY_MASTS.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings:[]},nodes),
     referenceMeasurements:[{subject:'historical-report',source:VICTORY_DESIGN.provenance.dimensions,dimensions:[{kind:'gun-deck-length',metres:56.6928,value:186,unit:'ft'},{kind:'extreme-beam',metres:15.8496,value:52,unit:'ft'}],tonnage:{value:2162,unit:'tons',kind:'builders-measurement-not-displacement'}}]};
 }
@@ -126,6 +126,7 @@ function shipAdditionalDefinition(id){
   add('hatch.main',hinge,'part',{type:'surface-hatch'});
   add('station.hatch',[h.centre[0]+h.size[0]/2+.18,additionalDeck(id,h.centre[2]),h.centre[2]],'station');
   for(const [name,p]of Object.entries(d.crewStations))add('station.crew.'+name,[p.x,additionalDeck(id,p.z),p.z],'station');
+  for(const [name,p]of Object.entries(d.supplementalCrewStations??{}))add('station.crew.'+name,[p.x,additionalDeck(id,p.z),p.z],'station');
   for(const side of [-1,1])for(const [key,p]of Object.entries(context.anchorCathead(side)))add(`anchor.${side<0?'port':'starboard'}.${key}`,p);
   for(const [index,m]of context.masts.entries()){
     add('mast.'+m.id,m.foot,'frame');add('mast.'+m.id+'.head',m.head);
@@ -155,7 +156,7 @@ function shipAdditionalDefinition(id){
   const fittings=[];
   if(d.lookout){const name=d.masts[d.lookout.mast].id,p=context.mastPoint(d.lookout.mast,d.lookout.height);add('lookout.'+name,p,'station');fittings.push({id:name+'-lookout',kind:'crows-nest',mast:name,node:'lookout.'+name,provenance:d.lookout.placement});}
   return {id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status:'ready',development:true,hullFamily:d.family,geometry:'additional-procedural-v1',
-    designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,nodes,capabilities:{yardTransfer:d.surfaces.some(s=>s.kind==='lateen')},
+    designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,supplementalCrewStations:d.supplementalCrewStations??null,nodes,capabilities:{yardTransfer:d.surfaces.some(s=>s.kind==='lateen')},
     rig:defineRig({id:id+'-rig',backend:'surfaces-v1',masts:d.masts.map(m=>({id:m.id,node:'mast.'+m.id,headNode:'mast.'+m.id+'.head',climbNode:'mast.'+m.id+'.runner'})),sails,fittings},nodes),referenceMeasurements:d.references};
 }
 export const SHIP_MODELS=deepFreeze({

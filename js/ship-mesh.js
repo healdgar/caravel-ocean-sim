@@ -12,8 +12,9 @@ import { createPartAssemblyCatalog } from './part-assembly.js';
 
 // CPU geometry is immutable model data; transforms, crew poses, moisture and
 // wake state remain per vessel. Consumers may share these buffers for uploads.
+const sharedShipAssets = new Map();
 export function createShipAssetCache() {
-  const assets = new Map();
+  const assets = sharedShipAssets;
   return {
     get(modelId = 'nina') {
       const model = requirePlayableShipModel(modelId);

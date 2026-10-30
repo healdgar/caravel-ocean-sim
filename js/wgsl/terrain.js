@@ -369,7 +369,11 @@ fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
   return clamp(max(cws.breakFoam,depthBreak*clamp(cws.swellScale*1.15,0.0,1.0)),0.0,1.0);
 }
 fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
-  let bed=landHeight(p);let shallows=smoothstep(-7.5,0.4,bed);
+  let bed=landHeight(p);
+  // Deep/open water: the shallows weight and swash rim are both exactly zero
+  // here (ocean height never approaches -58 m), so the result is the input.
+  if(bed<=-58.0){return color;}
+  let shallows=smoothstep(-7.5,0.4,bed);
   let sunlight=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI;
   var col=mix(color,vec3f(0.042,0.175,0.155)*(sunlight+skyAtmo(vec3f(0,1,0))),shallows*0.30);
   let depth=height-bed;
@@ -437,7 +441,8 @@ struct LandVertex {
 };
 @vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f)->LandVertex{
   var o:LandVertex;o.world=position;o.normal=normal;o.kind=kind;o.leafUV=vec2f(0);
-  o.pos=F.viewProj*vec4f(position-F.camPos.xyz,1.0);return o;
+  let shifted=position+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);return o;
 }
 @vertex fn treeVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
   @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
@@ -457,7 +462,7 @@ struct LandVertex {
   var rotated=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
   rotated.y-=dot(rotated.xz,windDirection)*windForce*2.0*position.y;
   o.normal=normalize(rotated);o.leafUV=leafUV;
-  o.kind=kind;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);return o;
+  o.kind=kind;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1.0);return o;
 }
 @vertex fn groundVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
   @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
@@ -470,7 +475,7 @@ struct LandVertex {
   let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(.001));
   let n=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
   var o:LandVertex;o.world=root.xyz+right*p.x+up*p.y+front*p.z+sway;o.normal=normalize(right*n.x+up*n.y+front*n.z);
-  o.kind=kind;o.leafUV=leafUV;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+  o.kind=kind;o.leafUV=leafUV;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
 // The opaque call graph contains neither discard nor a leaf texture fetch.
 // Keep that property for Apple's hidden-surface removal; a runtime branch in
@@ -504,7 +509,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   return vec4f(col,1.0);
 }
 fn landOpaque(in:LandVertex)->vec4f{
-  let world=in.world;var n=normalize(in.normal);
+  let world=in.world;
+  let rawNLen=length(in.normal);
+  let structDmg=clamp(rawNLen-1.0,0.0,1.5);
+  var n=in.normal/max(rawNLen,1e-4);
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let dx=dpdx(world);let dy=dpdy(world);let nx=dpdx(n);let ny=dpdy(n);
   // Registered aerial RGB remains the regional colour seed. The neutral detail
@@ -666,6 +674,16 @@ fn landOpaque(in:LandVertex)->vec4f{
     albedo=vec3f(0.095,0.068,0.038)*(0.82+barkNoise*0.18+in.kind.y*0.16);
     relief=(ridges-0.5)*0.010*(1.2-in.kind.y)*detailFade;roughness=0.92;
   }
+  if(structDmg>0.005){
+    let dmgW=clamp(structDmg,0.0,1.0);
+    let charNoise=gnoise(world.xz*2.8+vec2f(world.y*2.1));
+    let rubbleTint=select(vec3f(0.11,0.085,0.065),vec3f(0.16,0.12,0.08),in.kind.x>=9.5);
+    let sootTint=vec3f(0.042,0.038,0.034);
+    let dmgAlbedo=mix(rubbleTint,sootTint,clamp(dmgW*0.65+charNoise*0.25,0.0,1.0));
+    albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
+    relief+=(charNoise*0.085-0.045)*dmgW*detailFade;
+    roughness=max(roughness,0.94);
+  }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   if(in.kind.x<2.5){n=landFilteredBump(n,dx,dy,reliefX,reliefY);}
   else{
@@ -732,7 +750,7 @@ struct CanopyVertex {
 @vertex fn bakedCanopyVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
   @location(5) leafUV:vec2f,@location(6) colour:vec3f)->CanopyVertex{
   var o:CanopyVertex;o.world=position;o.normal=normal;o.kind=kind;o.leafUV=leafUV;o.colour=colour;
-  o.pos=F.viewProj*vec4f(position-F.camPos.xyz,1);return o;
+  o.pos=F.viewProj*vec4f(earthCurve(position-F.camPos.xyz,F.camPos.y),1);return o;
 }
 // Opaque imported wood/crowns stay in the opaque visibility path. Their call
 // graph has no discard or foliage texture; source RGB replaces shared green.

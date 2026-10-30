@@ -65,10 +65,13 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
   panel.setAttribute('aria-labelledby','landfall-title');
   const isSaba=!region||region.id==='saba';
-  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name}${region.subtitle?' · '+region.subtitle:''}`;
+  const isWilderness=!isSaba&&region.hasColonialPort===false;
+  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name}${region.subtitle?' · '+region.subtitle:isWilderness?' · 1550 Wilderness Coast':''}`;
   const introText=isSaba
     ?'Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.'
-    :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) combines high-resolution SRTM elevation, co-registered satellite land-cover, and 1550 historical shoreline reconstruction.`;
+    :isWilderness
+      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) reconstructs an uncolonized 1550 wilderness coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no colonial settlement.`
+      :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) combines high-resolution SRTM elevation, co-registered satellite land-cover, and 1550 historical shoreline reconstruction.`;
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">${titleText}</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">${introText}</p>
     <div id="landfall-discovery-card" hidden></div>
@@ -95,7 +98,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     const opt=document.createElement('option');opt.value=id;opt.textContent=label;regionSelect.append(opt);
   }
   if(!isSaba&&!Object.hasOwn(SPANISH_MAIN_1550_REGIONS,region.id)){
-    const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°)`;regionSelect.append(opt);
+    const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}° · ${isWilderness?'1550 Wilderness Coast':'1550 Port'})`;regionSelect.append(opt);
     regionSelect.value='custom';
   }else{
     regionSelect.value=isSaba?'saba':region.id;
@@ -119,7 +122,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
   button.onclick=()=>setOpen(panel.hidden);panel.querySelector('.panel-header button').onclick=()=>setOpen(false);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){setOpen(false);button.focus();}});
-  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast',isSaba?'Wells Bay approach':'Harbor / coast approach']]){
+  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast',isSaba?'Wells Bay approach':isWilderness?'Wilderness coast approach':'Harbor / coast approach']]){
     const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-pressed',String(active&&stage===id));
     b.onclick=()=>{
       if(isSaba){
@@ -301,6 +304,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
   let last=0;return {close:()=>setOpen(false),update(now){if(!active||panel.hidden||now-last<1000)return;last=now;
     const p=getPosition(),geo=islandCoordinates(p.x,p.z,region);
     const ns=geo.latitude>=0?'N':'S',ew=geo.longitude>=0?'E':'W';
-    panel.querySelector('#landfall-position').textContent=`${Math.abs(geo.latitude).toFixed(3)}° ${ns} · ${Math.abs(geo.longitude).toFixed(3)}° ${ew}${p.coastBlocked?' · Shore clearance reached':''}`;
+    const groundNote=p.aground||p.coastBlocked?' · Run aground':p.shoalScraping?' · Scraping shoal':'';
+    panel.querySelector('#landfall-position').textContent=`${Math.abs(geo.latitude).toFixed(3)}° ${ns} · ${Math.abs(geo.longitude).toFixed(3)}° ${ew}${groundNote}`;
   }};
 }

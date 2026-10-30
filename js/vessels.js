@@ -51,16 +51,44 @@ export function acceptVesselProbe(boat,state,heights,time,revision,length,beam){
 }
 
 export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0,terrain=null){
+  const dmg=boat.damage;
+  const extraSink=dmg?Math.max(0,(dmg.floodingSinkage??0)-Math.max(0,boat.hydrodynamics.sinkage)):0;
+  if(boat.settledWreck||dmg?.settledWreck){
+    boat.settledWreck=true;
+    boat.surgeVelocity=0;boat.surgeAcceleration=0;boat.leewayVelocity=0;boat.leewayDistance=0;
+    boat.yawRate=0;boat.rollVelocity=0;boat.pitchVelocity=0;boat.heaveVelocity=0;
+    boat.waterYawMoment=boat.sailYawMoment=boat.rowingYawMoment=boat.waterYawDamping=0;
+    boat.heave=-boat.hydrodynamics.sinkage-extraSink;
+    boat.roll=(dmg?.floodingRoll??0)+(boat.groundingRoll??0);
+    boat.pitch=(dmg?.floodingPitch??0)+(boat.groundingPitch??0);
+    return;
+  }
   const previousX=boat.x,previousZ=boat.z,age=Math.max(0,time-probe.time);
   const predicted=boat.waveAttitude??={heave:0,pitch:0,roll:0};
   const fresh=age<.25&&probe.revision===boat.revision;
-  for(const key of AXES)predicted[key]=boat.target[key]+(fresh?probe.rate[key]:0)*Math.min(age,.25);
-  const distance=stepBoatSurge(boat,boatWaveSlope(boat,time),dt,windSpeed,windDirection);
-  const previousHeading=boat.heading*Math.PI/180,previousYaw=boat.yawRate;
-  stepBoatSteering(boat,steering,dt);
-  const heading=previousHeading+(previousYaw+boat.yawRate)*dt*.25;
-  boat.x+=Math.sin(heading)*distance+Math.cos(heading)*boat.leewayDistance;
-  boat.z-=Math.cos(heading)*distance-Math.sin(heading)*boat.leewayDistance;
-  if(terrain)boat.coastBlocked=terrain.constrain(boat,previousX,previousZ);
-  boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage,boat.hydrodynamics.heaveOmega,dt,fresh?probe.rate.heave:0);
+  const waveDecay=dmg?.sunk?Math.exp(-(dmg.sinkingDepth??0)/5):1;
+  for(const key of AXES)predicted[key]=(boat.target[key]+(fresh?probe.rate[key]:0)*Math.min(age,.25))*waveDecay;
+  if(dmg){
+    predicted.roll+=(dmg.floodingRoll??0);
+    predicted.pitch+=(dmg.floodingPitch??0);
+  }
+  if(boat.groundingRoll)predicted.roll+=boat.groundingRoll;
+  if(boat.groundingPitch)predicted.pitch+=boat.groundingPitch;
+  const distance=dmg?.restingOnBottom?0:stepBoatSurge(boat,boatWaveSlope(boat,time)*waveDecay,dt,windSpeed,windDirection);
+  if(dmg?.restingOnBottom){
+    const damp=Math.exp(-Math.max(0,dt)*8);
+    boat.surgeVelocity=(boat.surgeVelocity??0)*damp;
+    boat.leewayVelocity=(boat.leewayVelocity??0)*damp;
+    boat.yawRate=(boat.yawRate??0)*damp;
+    boatSpring(boat,'roll',predicted.roll,6,dt,0);
+    boatSpring(boat,'pitch',predicted.pitch,6,dt,0);
+  }else{
+    const previousHeading=boat.heading*Math.PI/180,previousYaw=boat.yawRate;
+    stepBoatSteering(boat,steering,dt);
+    const heading=previousHeading+(previousYaw+boat.yawRate)*dt*.25;
+    boat.x+=Math.sin(heading)*distance+Math.cos(heading)*boat.leewayDistance;
+    boat.z-=Math.cos(heading)*distance-Math.sin(heading)*boat.leewayDistance;
+    if(terrain)boat.coastBlocked=terrain.constrain(boat,previousX,previousZ);
+  }
+  boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage-extraSink,boat.hydrodynamics.heaveOmega,dt,fresh?(probe.rate.heave*waveDecay):0);
 }

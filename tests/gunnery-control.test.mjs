@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createShipGunnery,createVesselDamageState,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep} from '../js/gunnery-control.js';
+import {createShipGunnery,createPortGunnery,createVesselDamageState,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage} from '../js/gunnery-control.js';
+import {constrainIslandMotion} from '../js/terrain-model.js';
 import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
 import {boatHydrodynamics} from '../js/boat.js';
 import {createFollower,steerFollower} from '../js/follower.js';
 import {advanceSails} from '../js/sailing.js';
-import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort} from '../js/coastal-world.js';
+import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
+import {bakeBuildingImpactDeformations} from '../js/part-assembly.js';
 function fixture(options={}){
  const boat={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0};
  boat.hydrodynamics=boatHydrodynamics(20,6);const events=[],orders=[];
@@ -226,4 +228,366 @@ test('readyAtQuarters and manGunStationsImmediate prepare two HMS Victories for 
  const shipHits=events.filter(e=>e.type==='impact'&&e.kind==='ship');
  assert.ok(shipHits.length>=40,`expected most of the 52-gun broadside to strike the abeam Victory, got ${shipHits.length}`);
  assert.ok(target.damage.hullIntegrity<1);
+});
+
+test('fireLoaded fires the 48 ready guns while weather-deck guns finish loading, fireAtWill auto-cycles, and fullWatch populates 24 Victory deckhands',async()=>{
+ const {getShipModel}=await import('../js/ship-models.js');
+ const {createCompany,stepCompany}=await import('../js/crew.js');
+ const vModel=getShipModel('victory');
+ const boat={id:'player',modelId:'victory',model:vModel,length:vModel.runtime.length,beam:vModel.runtime.beam,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,showProw:true,sailFore:1,sailMain:1,sailMizzen:1};
+ boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,30,0,'victory');
+ const company=createCompany(undefined,'victory',{fullWatch:true});
+ assert.equal(company.crew.length,24,'fullWatch populates 24 visible hands across Victory weather decks');
+ const events=[];
+ const guns=createShipGunnery(boat,{onEvent:e=>events.push(e)});
+ stepCompany(company,boat,0,6);
+ assert.equal(guns.prepare('port'),true);
+ for(let i=0;i<335;i++){
+  stepCompany(company,boat,0.1,6);
+  guns.update(0.1,[0,0,0]);
+ }
+ const partial=guns.summary('port');
+ assert.ok(partial.ready>=48,'at least 48 guns are ready after 33.5s');
+ assert.equal(guns.canFireLoaded('port'),true,'canFireLoaded is true when 48 of 52 guns are ready');
+ if(partial.ready<partial.total){
+  assert.equal(guns.fireLoaded('port'),true,'fireLoaded fires the ready guns without waiting for all 52');
+  for(let i=0;i<120;i++){
+   stepCompany(company,boat,0.1,6);
+   guns.update(0.1,[0,0,0]);
+  }
+  const shotsFired=events.filter(e=>e.type==='shot').length;
+  assert.equal(shotsFired,partial.ready,'all 48 ready guns discharged');
+ }
+ assert.equal(guns.setFireAtWill(true,'port'),true);
+ assert.equal(guns.fireAtWill,true);
+ for(let i=0;i<150;i++){
+  stepCompany(company,boat,0.1,6);
+  guns.update(0.1,[0,0,0]);
+ }
+ assert.ok(events.filter(e=>e.type==='shot').length>=52,'remaining weather-deck guns finish loading without stalling and fire under fireAtWill');
+ guns.cease();
+ assert.equal(guns.fireAtWill,false,'cease disables fireAtWill');
+});
+
+test('3D aerial aiming trajectory arcs predict range, respond to quoin elevation, and detect ship hull vs rigging impacts',async()=>{
+ const {getShipModel}=await import('../js/ship-models.js');
+ const vModel=getShipModel('victory');
+ const player={id:'player',modelId:'victory',model:vModel,length:vModel.runtime.length,beam:vModel.runtime.beam,heading:0,x:0,z:0,heave:0,pitch:0,roll:0.03,showProw:true};
+ player.hydrodynamics=boatHydrodynamics(player.length,player.beam,30,0,'victory');
+ const enemy={id:'enemy-1',modelId:'victory',model:vModel,length:vModel.runtime.length,beam:vModel.runtime.beam,heading:0,x:-140,z:0,heave:0,pitch:0,roll:0,showProw:true};
+ enemy.hydrodynamics=boatHydrodynamics(enemy.length,enemy.beam,30,0,'victory');
+ const vessels=[{id:'player',boat:player},{id:'enemy-1',boat:enemy}];
+ const guns=createShipGunnery(player,{getVessels:()=>vessels});
+ guns.prepare('port');
+ guns.setElevation(0);
+ const hullArcs=guns.computeAimTrajectories({wind:[0,0,0]});
+ assert.ok(hullArcs.length>10,'produces 3D ribbon segments and impact rings');
+ assert.equal(guns.aimSummary.side,'port');
+ assert.equal(guns.aimSummary.hitKind,'ship');
+ assert.equal(guns.aimSummary.hitZone,'hull','0° quoin at 140m strikes enemy hull');
+ guns.setElevation(7.5);
+ const rigArcs=guns.computeAimTrajectories({wind:[0,0,0]});
+ assert.ok(rigArcs.length>10);
+ assert.equal(guns.aimSummary.hitKind,'ship');
+ assert.equal(guns.aimSummary.hitZone,'rigging','+7.5° quoin at 140m strikes enemy rigging/sails');
+ guns.setShowTrajectory(false);
+ assert.deepEqual(guns.computeAimTrajectories({wind:[0,0,0]}),[]);
+ assert.equal(guns.aimSummary,null);
+
+ // Swivel rail guns on La Nina swivel ±45° fore/aft and train onto off-beam targets
+ const ninaModel=getShipModel('nina');
+ const nina={id:'nina-1',modelId:'nina',model:ninaModel,length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,showProw:true};
+ nina.hydrodynamics=boatHydrodynamics(20,6);
+ const offBeamTarget={id:'target-1',modelId:'nina',model:ninaModel,length:20,beam:6,heading:0,x:-40,z:-28,heave:0,pitch:0,roll:0,showProw:true};
+ offBeamTarget.hydrodynamics=boatHydrodynamics(20,6);
+ const ninaGuns=createShipGunnery(nina,{getVessels:()=>[{boat:nina},{boat:offBeamTarget}]});
+ assert.equal(ninaGuns.isSwivelBattery,true);
+ assert.deepEqual(ninaGuns.traverseRange,{min:-45,max:45});
+ assert.equal(ninaGuns.setTraverse(60),45,'swivel traverse clamps to ±45°');
+ ninaGuns.prepare('port');
+ const trained=ninaGuns.trainOnTarget('port');
+ assert.ok(trained&&trained.traverse>25&&trained.traverse<=45,`expected swivel gun to train ~35° forward onto off-beam target, got ${trained?.traverse}`);
+ const swivelArcs=ninaGuns.computeAimTrajectories({wind:[0,0,0]});
+ assert.ok(swivelArcs.length>=4);
+ assert.equal(ninaGuns.aimSummary.hitKind,'ship','swiveled trajectory strikes the off-beam target vessel');
+});
+
+test('shore structure foundation scarps, rotated building OBBs, and coastal palms/trees intersect cannonfire and deform 3D meshes',()=>{
+ const region=resolveGlobalCoastalRegion({id:'cartagena',name:'Cartagena',latitude:10.423,longitude:-75.548,size:65,biomeSize:64,albedoSize:64});
+ const heights=synthesizeCoastalTerrain(region);
+ const port=placeCoastalPort(region,heights);
+ const bastion=port.instances.find(i=>i.prefabId==='stone_sea_bastion')??port.instances[0];
+ const samplePalms=new Float32Array([
+  bastion.x+28,2.2,bastion.z+12,3.4,9.5,0.4,0.02,-0.02,
+  bastion.x+36,2.5,bastion.z+18,3.2,8.8,0.6,0.01,-0.01,
+ ]);
+ const portGeo=buildPortPrefabGeometry(port,samplePalms);
+ assert.ok(port.palms instanceof Float32Array&&port.palms.length>=8,'port exposes 3D coastal palms for gunnery sweeps');
+
+ // 1. Low horizontal cannon shot (y = 2.0 m) against a sea bastion (baseY = 4.6 m, foundationDepth = 4.5 m)
+ const lowShotY=Math.max(1.2,(bastion.baseY??bastion.y??4.6)-2.4);
+ const hitScarp=sweepBuildingSegment([bastion.x-35,lowShotY,bastion.z],[bastion.x+35,lowShotY,bastion.z],0.08,port);
+ assert.ok(hitScarp,'low horizontal broadside intersects bastion stone scarp below baseY');
+ assert.equal(hitScarp.building,bastion);
+
+ // 2. Rotated building OBB alignment with buildPortPrefabGeometry toWorld convention
+ const rotInst={
+  id:'rot-warehouse',
+  prefabId:'customs_aduana_warehouse',
+  x:200,
+  y:2.0,
+  baseY:2.0,
+  z:300,
+  yaw:Math.PI/3,
+  width:24,
+  depth:10,
+  height:7,
+  foundationDepth:3.5,
+ };
+ const cosY=Math.cos(rotInst.yaw),sinY=Math.sin(rotInst.yaw);
+ // Point at local (+10, 3.0, 0) in coastal-world toWorld coordinates:
+ const tipWx=rotInst.x+10*cosY;
+ const tipWz=rotInst.z-10*sinY;
+ const rotHit=sweepBuildingSegment([tipWx-6*sinY,5.0,tipWz-6*cosY],[tipWx+6*sinY,5.0,tipWz+6*cosY],0.08,{instances:[rotInst]});
+ assert.ok(rotHit,'rotated building OBB intersects at its exact rotated world extremity');
+
+ // 3. Subdivided port mesh deformation & normal-magnitude structural damage encoding
+ const bReport=applyBuildingImpactDamage(bastion,{
+  position:[bastion.x,bastion.baseY+2.5,bastion.z-(bastion.depth??16)*0.5],
+  surfacePosition:[bastion.x,bastion.baseY+2.5,bastion.z-(bastion.depth??16)*0.5],
+  localPosition:[0,2.5,-(bastion.depth??16)*0.5],
+  normal:[0,0,-1],
+  velocity:[0,0,280],
+  mass:10.9,
+  ammo:'round',
+ });
+ assert.ok(bReport&&bastion.damageState.pendingBakes.length>0);
+ const vertsCopy=new Float32Array(portGeo.vertices);
+ const dirty=bakeBuildingImpactDeformations(vertsCopy,bastion.damageState.pendingBakes.splice(0),8);
+ assert.ok(dirty&&dirty.byteLength>0,'mid-wall cannonball hit deforms subdivided building vertices');
+ let maxNormalLen=1.0;
+ for(let i=0;i<vertsCopy.length;i+=8){
+  const nLen=Math.hypot(vertsCopy[i+3],vertsCopy[i+4],vertsCopy[i+5]);
+  if(nLen>maxNormalLen)maxNormalLen=nLen;
+ }
+ assert.ok(maxNormalLen>1.15,`expected structural damage encoded into normal length > 1.15, got ${maxNormalLen}`);
+
+ // 4. Scenery sweep against coastal 3D palms and procedural trees
+ const px=port.palms[0],py=port.palms[1],pz=port.palms[2];
+ const terrainMock={
+  ports:[port],
+  height:()=>1.8,
+  treeData:new Float32Array([50,2.0,50,1.2,0,1,0,0]),
+ };
+ const palmHit=sweepScenerySegment([px-8,py+3.5,pz],[px+8,py+3.5,pz],0.08,terrainMock);
+ assert.ok(palmHit&&palmHit.kind==='scenery'&&palmHit.sceneryType==='palm','cannonball intersects coastal 3D palm trunk/crown');
+ const sReport=applySceneryImpactDamage(terrainMock,{
+  ...palmHit,
+  position:[px,py+3.5,pz],
+  velocity:[240,0,0],
+  mass:5.4,
+  ammo:'hot',
+ });
+ assert.equal(sReport.kind,'scenery');
+ assert.ok(port.sceneryBakes?.length>0,'palm impact queues 3D scenery-tree deformation bake');
+ assert.ok(port.sceneryFires?.length>0,'hot shot on palm ignites coastal scenery fire');
+ const palmDirty=bakeBuildingImpactDeformations(vertsCopy,port.sceneryBakes.splice(0),8);
+ assert.ok(palmDirty&&palmDirty.byteLength>0,'palm impact bends and chars 3D palm vertices in portMesh');
+});
+
+test('ship-to-ship collision detection prevents vessels from sailing through each other, applies 6-DOF rebound impulse, and inflicts hull/bowsprit/flooding damage',()=>{
+ const boatA={
+  id:'ship-a',
+  modelId:'nina',
+  length:20,
+  beam:6,
+  heading:90, // facing +X (East)
+  x:-4.5,
+  z:0,
+  heave:0,
+  pitch:0,
+  roll:0,
+  propulsion:'sail',
+  surgeVelocity:4.8,
+  leewayVelocity:0,
+  yawRate:0,
+  showProw:true,
+ };
+ boatA.hydrodynamics=boatHydrodynamics(20,6);
+
+ const boatB={
+  id:'ship-b',
+  modelId:'nina',
+  length:20,
+  beam:6,
+  heading:0, // facing -Z (North), broadside presented to boatA's bow
+  x:0,
+  z:0,
+  heave:0,
+  pitch:0,
+  roll:0,
+  propulsion:'sail',
+  surgeVelocity:0.5,
+  leewayVelocity:0,
+  yawRate:0,
+  showProw:true,
+ };
+ boatB.hydrodynamics=boatHydrodynamics(20,6);
+
+ const vessels=[{id:'ship-a',boat:boatA},{id:'ship-b',boat:boatB}];
+ const collisionCallbacks=[];
+ const events=resolveVesselCollisions(vessels,1/60,{
+  onCollision:ev=>collisionCallbacks.push(ev),
+ });
+
+ assert.equal(events.length,1,'detects T-bone ramming collision between boatA bow and boatB port beam');
+ assert.equal(collisionCallbacks.length,1);
+ assert.ok(boatA.x<-4.5,'depenetrates ramming boatA backward along contact normal');
+ assert.ok(boatB.x>0,'depenetrates struck boatB laterally away from ramming bow');
+ assert.ok(boatA.surgeVelocity<4.8,'ramming vessel loses forward surge velocity upon impact');
+ assert.ok(boatB.leewayVelocity>0.2,'rammed vessel receives lateral leeway velocity impulse');
+ assert.ok(Math.abs(boatB.rollVelocity)>0,'above-waterline collision impulse heels/rolls the struck vessel');
+
+ // Structural damage verification on both colliding ships
+ assert.ok(boatA.damage&&boatA.damage.hullIntegrity<1,'ramming vessel takes stem/hull damage');
+ assert.ok(boatA.damage.rigIntegrity<1,'ramming vessel takes bowsprit/fore-rigging shock damage');
+ assert.ok(boatA.damage.pendingBakes.length>0,'ramming vessel queues 3D hull deformation bake');
+
+ assert.ok(boatB.damage&&boatB.damage.hullIntegrity<1,'rammed vessel takes beam hull planking damage');
+ assert.ok(boatB.damage.waterlineBreaches>=1,'vessel rammed amidships at 4.8 m/s suffers a waterline breach');
+ assert.ok(boatB.damage.breachArea>0,'rammed vessel has positive flooding breach area');
+ assert.ok(boatB.damage.pendingBakes.length>0,'rammed vessel queues 3D hull crater deformation bake');
+});
+
+test('impact with shoals, reef, stone, and sand models substrate-scaled hull damage, allowing gentle beaching on sand while wrecking vessels on river/coastal rocks and reefs',()=>{
+ // 1. Substrate classification across sand beach, shoal bar, coral reef, and river/headland stone
+ const sandSub=classifyGroundingSubstrate(
+  (x,z)=>z*0.02, // gentle 0.02 slope foreshore
+  0,-25,
+  {id:'cartagena',coastalClass:'barrier-lagoon'},
+  {beaches:[{x:0,z:-20,length:80}]}
+ );
+ assert.equal(sandSub.substrate,'sand','gentle beach foreshore classifies as sand');
+
+ const shoalSub=classifyGroundingSubstrate(
+  (x,z)=>-1.1+(x*0.015), // flat shallow river/harbor bar
+  0,0,
+  {id:'london',coastalClass:'river-port'}
+ );
+ assert.equal(shoalSub.substrate,'shoal','shallow river/harbor bar classifies as shoal');
+
+ const reefSub=classifyGroundingSubstrate(
+  (x,z)=>-1.2+Math.sin(x*0.6)*0.75+Math.cos(z*0.6)*0.75, // rough submerged coral ledge
+  1.2,0.8,
+  {id:'nassau',coastalClass:'coral-archipelago',reefBarrier:true}
+ );
+ assert.equal(reefSub.substrate,'reef','submerged jagged coral ledge classifies as reef');
+
+ const stoneSub=classifyGroundingSubstrate(
+  (x,z)=>z*0.42, // steep rocky gorge / headland scarp
+  0,-2.5,
+  {id:'quebec',coastalClass:'river-gorge',hasRiver:true}
+ );
+ assert.equal(stoneSub.substrate,'stone','steep river gorge / rocky headland classifies as stone');
+
+ // 2. Gentle beaching on sand (< 1.05 m/s) causes zero hull damage or breaches
+ const sandBoat={
+  id:'sand-boat',
+  modelId:'nina',
+  length:20,
+  beam:6,
+  draft:1.9,
+  heading:0,
+  x:0,
+  z:-18,
+  heave:0,
+  pitch:0,
+  roll:0,
+  propulsion:'sail',
+  surgeVelocity:0.75,
+ };
+ sandBoat.hydrodynamics=boatHydrodynamics(20,6);
+ const gentleSandSample=(x,z)=>-1.2+(z+18)*-0.02; // gentle sandy shoaling toward -Z
+ constrainIslandMotion(null,sandBoat,0,-17.8,gentleSandSample,{id:'cartagena',coastalClass:'barrier-lagoon'},{
+  beaches:[{x:0,z:-20,length:100}],
+ });
+ assert.equal(sandBoat.aground,true,'vessel grounds on shallow sandy foreshore');
+ assert.equal(sandBoat.groundingContact?.substrate,'sand');
+ assert.equal(sandBoat.damage?.hits??0,0,'gentle beaching on sand below 1.05 m/s inflicts zero hull damage');
+ assert.equal(sandBoat.damage?.waterlineBreaches??0,0,'gentle beaching on sand opens no underwater breaches');
+
+ // 3. River gorge / coastal rock strike at navigation speed inflicts heavy keel/garboard/stem damage,
+ //    underwater breaches, 3D lower-hull craters, and progressive wave/current pounding until wrecked on the rocks
+ const rockBoat={
+  id:'rock-boat',
+  modelId:'nina',
+  length:20,
+  beam:6,
+  draft:1.9,
+  heading:0, // sailing North (-Z) up a narrow rocky river gorge
+  x:0,
+  z:0,
+  heave:0,
+  pitch:0,
+  roll:0,
+  propulsion:'sail',
+  surgeVelocity:4.4, // ~8.5 knots approach/river current speed
+ };
+ rockBoat.hydrodynamics=boatHydrodynamics(20,6);
+ const groundingEvents=[];
+ // Steep rocky river ledge rising sharply ahead at z < -4
+ const riverRockSample=(x,z)=>z<-3.5?-0.45+(-3.5-z)*0.48:-8.0;
+ const grounded=constrainIslandMotion(
+  null,
+  rockBoat,
+  0,
+  0.8,
+  riverRockSample,
+  {id:'quebec',coastalClass:'river-gorge',hasRiver:true},
+  {onGrounding:(b,contact,report)=>groundingEvents.push({contact,report})}
+ );
+ assert.equal(grounded,true,'vessel is arrested by submerged river gorge rocks');
+ assert.equal(rockBoat.aground,true,'vessel is marked aground on the rocks');
+ assert.equal(rockBoat.groundingContact?.substrate,'stone','contact substrate is classified as stone');
+ assert.equal(groundingEvents.length,1,'fires onGrounding callback with contact and damage report');
+ assert.ok(rockBoat.damage&&rockBoat.damage.hullIntegrity<0.95,'rock strike inflicts immediate structural hull damage');
+ assert.ok((rockBoat.damage.partDamage['keel.main']??0)>0 || (rockBoat.damage.partDamage['hull.stem']??0)>0,'damages keel or forefoot stem timbers');
+ assert.ok(rockBoat.damage.waterlineBreaches>=1 && rockBoat.damage.breachArea>0,'jagged rock impact rips an underwater hull breach');
+ assert.ok(rockBoat.damage.pendingBakes.length>0,'queues 3D lower-hull stove-in crater deformation bake');
+
+ // 4. Continuous wave/current pounding while stranded on the rocks batters and floods the vessel into a wreck on the rocks
+ const rockTerrain={height:riverRockSample,region:{id:'quebec',coastalClass:'river-gorge',hasRiver:true}};
+ for(let step=0;step<180;step++){
+  stepVesselDamage(rockBoat,0.5,rockTerrain);
+  if(rockBoat.damage.sunk&&rockBoat.damage.settledWreck)break;
+ }
+ assert.equal(rockBoat.damage.sunk,true,'vessel stranded on breached river/coastal rocks floods and founders');
+ assert.equal(rockBoat.damage.wreckedOnRocks,true,'vessel is marked wreckedOnRocks');
+ assert.ok(rockBoat.damage.maxSinkDepth<=2.5,'vessel wrecked on shallow rocks settles onto the ledge rather than sinking into deep abyss');
+});
+
+test('town fortifications (bastion, star fortress, watchtower, curtain wall & gate) are staffed with garrison soldiers who patrol ramparts and man embrasures',()=>{
+ const pack=generateProceduralCoastalPack('cartagena',{size:65,biomeSize:64,albedoSize:64,vegetationCandidates:120});
+ const pg=createPortGunnery(pack.port);
+ assert.ok(pg.garrison&&pg.soldiers.length>=36,`expected at least 36 fortification soldiers, got ${pg.soldiers.length}`);
+ const byPrefab=new Set(pg.soldiers.map(s=>s.buildingPrefabId));
+ for(const prefabId of ['stone_sea_bastion','bastion_trace_fortress','torreon_atalaya_farol','curtain_wall_and_gate']){
+  assert.ok(byPrefab.has(prefabId),`expected garrison soldiers on ${prefabId}`);
+  const unit=pg.soldiers.filter(s=>s.buildingPrefabId===prefabId);
+  assert.ok(unit.length>=4,`${prefabId} has ${unit.length} soldiers`);
+  for(let i=0;i<unit.length;i++){
+   const s=unit[i];
+   assert.ok(s.position.every(Number.isFinite)&&s.transform.every(Number.isFinite));
+   assert.ok(Math.abs(s.position[1]-(s.ly+0.028))<1e-4,`${s.id} grounded at fortification deck elevation`);
+   for(let j=i+1;j<unit.length;j++){
+    const d=Math.hypot(s.position[0]-unit[j].position[0],s.position[1]-unit[j].position[1],s.position[2]-unit[j].position[2]);
+    assert.ok(d>=0.65,`${s.id} and ${unit[j].id} maintain garrison separation (${d.toFixed(2)}m)`);
+   }
+  }
+ }
+ // Step port gunnery & garrison so rampart sentries walk their patrol routes
+ const initialPositions=pg.soldiers.map(s=>Array.from(s.position));
+ for(let step=0;step<60;step++)pg.update(0.1,[4,0,0]);
+ const patrolled=pg.soldiers.filter((s,i)=>Math.hypot(s.position[0]-initialPositions[i][0],s.position[2]-initialPositions[i][2])>0.25);
+ assert.ok(patrolled.length>=12,`expected rampart/bastion sentries to patrol along walls, got ${patrolled.length} moving`);
 });

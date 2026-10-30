@@ -372,7 +372,7 @@ function crewWorkPassingDetour(s,company,boat,p,target){
 function crewWorkYieldIdle(s,company,boat,p,next){
   if(hasExtendedCrewModel(boat.modelId))return false;
   const wanted=physical(next,boat);wanted[1]+=.028;
-  const mayYield=o=>!o.job||(o.job.kind==='gunnery'&&o.job.stage==='working'&&o.job.gun.stage==='ready');
+  const mayYield=o=>!o.job||(o.job.kind==='gunnery'&&o.job.stage==='working'&&(o.job.gun.stage==='ready'||(s.job?.kind==='gunnery'&&o.job.gunRole==='tackle'&&s.job.gunRole==='loader')));
   const blocker=company.crew.filter(o=>o!==s&&mayYield(o)&&o.role!=='Helmsman'&&o.id!=='ines'&&o.position&&distance3(o.position,wanted)<.68).sort((a,b)=>distance3(a.position,wanted)-distance3(b.position,wanted))[0];
   if(!blocker)return false;
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),start=[blocker.x,(blocker.position[1]-.028)/sy,blocker.z],choices=[];
@@ -459,11 +459,13 @@ function assignGunCrew(company,boat){
     const j=s.job;
     if(j?.kind==='gunnery'&&!['return','waiting-return'].includes(j.stage)&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
     // An aloft worker climbs down normally; there is no cannon-station teleport.
-    if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&['ascending','working'].includes(j.stage))crewWorkDescend(s);
+    if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&['ascending','working','lookout-approach'].includes(j.stage))crewWorkDescend(s);
+    else if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&j.stage==='approach')startReturn(s,boat,company);
     else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat,company);
   }
   if(!active)return;
-  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&!s.job);
+  const onDeck=s=>(s.job?.rung??0)<=0&&Math.abs(s.x)+.26/(boat.beam/3.6)<=modelDeckWidth(boat,s.z);
+  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&(!s.job||(onDeck(s)&&(['return','waiting-return'].includes(s.job.stage)||s.job.kind==='yield'))));
   const routeKey=[boat.modelId,boat.length,boat.beam,company.revision,boat.gunnerySide].join('/');
   if(company.gunNavigationKey!==routeKey){company.gunNavigationKey=routeKey;company.gunNavigationRetry=new Map();}
   const ordered=boat.modelId==='victory'?[...targets].sort((a,b)=>b.station[2]-a.station[2]):targets;
@@ -485,8 +487,13 @@ export function updateCrewGunneryAttendance(company,boat){
   boat.gunneryAttendance??=new Set();boat.gunneryAttendance.clear();
   if(!boat.gunnery)return;
   for(const gun of boat.gunnery.guns.filter(g=>g.visibleCrew&&g.side===boat.gunnerySide)){
-    const hands=company.crew.filter(s=>s.job?.kind==='gunnery'&&s.job.gun.id===gun.id&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard&&
-      distance3(physical(crewGunStation(gun,s.job.gunRole,boat),boat),[s.position[0],s.position[1]-.028,s.position[2]])<.035&&crewNavigationClear([s.position[0],s.position[1]-.028,s.position[2]],boat,s.navigationBody));
+    const hands=company.crew.filter(s=>{
+      if(s.job?.kind!=='gunnery'||s.job.gun.id!==gun.id||s.intent!=='work'||s.observation.hazard)return false;
+      const pos=[s.position[0],s.position[1]-.028,s.position[2]];
+      if(!crewNavigationClear(pos,boat,s.navigationBody))return false;
+      const d=distance3(physical(crewGunStation(gun,s.job.gunRole,boat),boat),pos);
+      return (s.job.stage==='working'&&d<.035)||(s.job.arrivedAtGun&&['working','reposition','waiting-gun'].includes(s.job.stage)&&d<1.15);
+    });
     if(hands.some(s=>s.job.gunRole==='loader')&&hands.some(s=>s.job.gunRole==='tackle'))boat.gunneryAttendance.add(gun.id);
   }
 }
@@ -722,16 +729,18 @@ export function stepCrewWork(s,company,boat,dt) {
   if(active){
     j.elapsed+=dt;
     if(j.kind==='gunnery'&&j.stage==='working'){
+      j.arrivedAtGun=true;
       const goal=crewGunStation(j.gun,j.gunRole,boat),from=j.position??[s.x,crewDeckHeight(boat,s.z,s.x),s.z];
       const a=physical(from,boat),b=physical(goal,boat),d=distance3(a,b);
       if(d>1e-6){
         const horizontal=Math.hypot(b[0]-a[0],b[2]-a[2]);
         const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
-        const maxStep=motion.speedMetresPerSecond*dt;
-        const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(b[0]-other.position[0],b[1]+.028-other.position[1],b[2]-other.position[2])<.54);
-        if(d<=maxStep+1e-6&&!occupied&&crewWorkSegmentClear(s,boat,from,goal)){
-          j.position=goal;s.x=goal[0];s.z=goal[2];
-          if(d>.002){moving=true;crewAdvanceWalk(s,d,{strideMetres:motion.strideMetres});}
+        const maxStep=motion.speedMetresPerSecond*dt,travel=Math.min(d,maxStep),q=travel/d;
+        const next=d<=maxStep+1e-6?goal:from.map((x,i)=>x+(goal[i]-x)*q),nextWorld=physical(next,boat);
+        const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(nextWorld[0]-other.position[0],nextWorld[1]+.028-other.position[1],nextWorld[2]-other.position[2])<.54);
+        if(!occupied&&crewWorkSegmentClear(s,boat,from,next)){
+          j.position=next;s.x=next[0];s.z=next[2];
+          if(travel>.002){moving=true;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});}
         }else if(d>.025){
           const path=crewWorkNavigationRoute(s,[from,goal],boat,{exactTarget:true});
           j.path=path??[];j.cursor=0;j.stage=path?'reposition':'waiting-gun';j.elapsed=0;
@@ -741,6 +750,7 @@ export function stepCrewWork(s,company,boat,dt) {
     if(j.stage==='waiting-gun'&&j.elapsed>.5){
       const goal=crewGunStation(j.gun,j.gunRole,boat),path=crewWorkNavigationRoute(s,[goal],boat,{exactTarget:true});j.elapsed=0;
       if(path){j.path=path;j.cursor=0;j.stage='reposition';}
+      else if(j.arrivedAtGun&&distance3(physical(goal,boat),[s.position[0],s.position[1]-.028,s.position[2]])<1.15){j.stage='working';}
     }
     if(j.stage==='traffic-hold'){
       const resume=j.trafficResume,requester=company.crew.find(o=>o.id===resume?.requester);
@@ -774,7 +784,8 @@ export function stepCrewWork(s,company,boat,dt) {
           if(j.stage==='traffic-hold'){}
           else if(j.stage==='lookout-return')j.stage='descending';
           else if(j.stage==='lookout-approach'){j.stage='working';j.lookoutAtStation=true;}
-          else j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';j.elapsed=0;
+          else{j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';if(j.kind==='gunnery')j.arrivedAtGun=true;}
+          j.elapsed=0;
         }}
         j.blockedTime=0;
       }else{

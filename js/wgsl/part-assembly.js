@@ -57,8 +57,7 @@ fn evaluatePartAssemblyVertex(
   let flyIn=1.0-appear;
   let scaleIn=smoothstep(0.0,0.28,appear);
   let arcLift=sin(appear*3.14159265)*flyIn*u.params.y;
-  let damageJitter=explodedOffset*(wearAndDamage*0.045);
-  let displacement=explodedOffset*(explode+flyIn*u.params.x)+vec3f(0.0,arcLift,0.0)+damageJitter;
+  let displacement=explodedOffset*(explode+flyIn*u.params.x)+vec3f(0.0,arcLift,0.0);
   let posedPos=pivot+(position-pivot)*scaleIn+displacement;
   return PartEvaluatedVertex(posedPos,normal,appear,wearAndDamage,cutawayVis,1.0);
 }
@@ -91,35 +90,13 @@ struct PartAssemblyPoseVertex {position:vec4f,normal:vec4f};
   let state=partAssemblyStates[partIdx];
   let current=partAssemblyPosed[v];
   let eval=evaluatePartAssemblyVertex(current.position.xyz,current.normal.xyz,attr0,attr1,desc0,desc1,state,partAssemblyUniform);
-  var posedPos=eval.position;
-  var localDamage=0.0;
-  if(eval.visible>0.5){
-    for(var i=0u;i<24u;i++){
-      let imp=partAssemblyUniform.impacts[i];
-      if(imp.w<=0.001){break;}
-      let diffEntry=vec3f((current.position.x-imp.x)*0.65,current.position.y-imp.y,current.position.z-imp.z);
-      let diffExit=vec3f((current.position.x+imp.x)*0.65,current.position.y-imp.y,current.position.z-imp.z);
-      let distEntry=length(diffEntry);
-      let distExit=select(99.0,length(diffExit),imp.y>0.35);
-      let dist=min(distEntry,distExit);
-      let sideWeight=select(0.75,1.0,distEntry<=distExit);
-      let radius=0.38+imp.w*0.42;
-      if(dist<radius){
-        let falloff=1.0-dist/radius;
-        let core=falloff*falloff;
-        localDamage=max(localDamage,clamp(imp.w*sideWeight*falloff*1.65,0.0,1.0));
-        if(desc0.z<=3.5){
-          let jag=fract(sin(f32(v)*12.9898+f32(i)*78.233)*43758.5453)-0.5;
-          let inward=vec3f(-sign(select(1.0,current.position.x,abs(current.position.x)>0.02))*0.095,-0.025+jag*0.055,jag*0.045);
-          posedPos+=inward*(core*imp.w*sideWeight);
-        }
-      }
-    }
-  }
-  let totalDamage=clamp(max(eval.wearAndDamage,localDamage),0.0,1.0);
-  let safeNorm=normalize(select(vec3f(0.0,1.0,0.0),eval.normal,dot(eval.normal,eval.normal)>0.0001));
-  let encodedNorm=select(eval.normal,safeNorm*(1.0+totalDamage),totalDamage>0.001);
-  partAssemblyPosed[v].position=vec4f(posedPos,current.position.w);
-  partAssemblyPosed[v].normal=vec4f(encodedNorm,totalDamage);
+  let normLen=length(eval.normal);
+  let bakedDamage=select(0.0,clamp(normLen-1.0,0.0,1.5),normLen>1.002);
+  let partWearDamage=eval.wearAndDamage*0.55;
+  let totalDamage=clamp(max(bakedDamage,partWearDamage),0.0,1.48);
+  let unitNorm=select(eval.normal,eval.normal/max(normLen,0.0001),normLen>0.0001);
+  let outNorm=select(eval.normal,unitNorm*(1.0+totalDamage),totalDamage>0.002);
+  partAssemblyPosed[v].position=vec4f(eval.position,current.position.w);
+  partAssemblyPosed[v].normal=vec4f(outNorm,totalDamage);
 }
 `;

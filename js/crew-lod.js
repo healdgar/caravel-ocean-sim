@@ -111,6 +111,8 @@ export function createCrewLODs(model){
   });
 }
 
+export const CREW_CULL_DISTANCE=420;
+
 export function selectCrewLOD(boat,camera=null){
   if(!camera||boat?.enabled===true||!Number.isFinite(camera.x)||!Number.isFinite(camera.z)){
     return {mainTier:0,shadowTier:1,distance:0};
@@ -120,5 +122,6 @@ export function selectCrewLOD(boat,camera=null){
   const distance=Math.hypot(camera.x-bx,cy-by,camera.z-bz);
   const mainTier=distance<CREW_LOD_TIERS[0].maxDistance?0:distance<CREW_LOD_TIERS[1].maxDistance?1:2;
   const shadowTier=Math.min(CREW_LOD_TIERS.length-1,mainTier+1);
+  if(distance>CREW_CULL_DISTANCE)return {mainTier,shadowTier,distance,culled:true};
   return {mainTier,shadowTier,distance};
 }

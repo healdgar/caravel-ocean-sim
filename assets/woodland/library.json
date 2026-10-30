@@ -1,0 +1,208 @@
+{
+  "format": "waterworld.woodland",
+  "version": 1,
+  "source": "healdgar/forestmodeler",
+  "sourceCommit": "fb6173c433a8905536c31bcbd24467aa367c9f57",
+  "units": "metres",
+  "upAxis": "Y",
+  "rootsIncluded": false,
+  "seasons": [
+    "leafy"
+  ],
+  "azimuths": 8,
+  "elevationsDegrees": [
+    0,
+    35,
+    70
+  ],
+  "atlas": {
+    "width": 2048,
+    "height": 384,
+    "colour": "colour.png",
+    "normal": "normal.png",
+    "depth": "depth.png",
+    "colourSpace": "sRGB",
+    "normalSpace": "object-y-up",
+    "depthEncoding": "(R*256+G)/65535; near=0, far=1",
+    "imageOrigin": "top-left",
+    "uncompressedBytes": 9437184
+  },
+  "plants": [
+    {
+      "id": "oak-101-20",
+      "species": "Quercus rubra",
+      "seed": 101,
+      "age": 20.0,
+      "sourceFingerprint": "4933fb152acf4934343f15fdb569a76b1cf0d70f8fd623dca02df31a38faa92f",
+      "sourceReceipts": {
+        "colour.png": {
+          "bytes": 53214,
+          "sha256": "c1f510c30c1a41503edf05d1eca130b7e720a2fe5f0f92b78c6a0526b16b3638"
+        },
+        "normal.png": {
+          "bytes": 156498,
+          "sha256": "bcd3a2514418958758d6fb43b31f92f8f3d164d51d8c7f568fba97f1ba4cb28b"
+        },
+        "depth.png": {
+          "bytes": 185268,
+          "sha256": "b222d2ebe31512c398dc8dc5506db3ddbec2a3f8a0cdd36affc34039f5f7bdf6"
+        },
+        "woodland-near.json": {
+          "bytes": 70125,
+          "sha256": "fde7e3c2d839d8ad9fdc3040a7bef290fcaa6900202c2a5f49a16476ef27e304"
+        },
+        "woodland-middle.json": {
+          "bytes": 7354,
+          "sha256": "cb10ffac1936211d09c53b1a4a70c03237f87415508e102fb79f0e175741215f"
+        }
+      },
+      "sourceManifest": "oak-101-20-source.json",
+      "bounds": [
+        [
+          -1.8775514364242554,
+          -0.058511827141046524,
+          -1.4371483325958252
+        ],
+        [
+          2.05961012840271,
+          8.119834899902344,
+          3.1841440200805664
+        ]
+      ],
+      "centre": [
+        0.0910293459892273,
+        4.030661536380649,
+        0.8734978437423706
+      ],
+      "radius": 4.483633648497362,
+      "sourceHeight": 8.119834899902344,
+      "horizontalRadius": 3.1841440200805664,
+      "woodColourSRGB": [
+        0.3,
+        0.27,
+        0.24
+      ],
+      "wood": [
+        "oak-101-20-wood-near.json",
+        "oak-101-20-wood-middle.json"
+      ],
+      "woodDisplacement": [
+        0.0,
+        0.0
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "tileSize": 124,
+      "padding": 2
+    },
+    {
+      "id": "birch-101-20",
+      "species": "Betula populifolia",
+      "seed": 101,
+      "age": 20.0,
+      "sourceFingerprint": "5f95e34e45082cd44f970c48166b96e0b5e9d07a7186d965f6ce701f2dc3f1c4",
+      "sourceReceipts": {
+        "colour.png": {
+          "bytes": 49026,
+          "sha256": "e131e83b051c4ba7f31a16506953e0c0de498fb35bb9176e5d5f088d3d1b85a0"
+        },
+        "normal.png": {
+          "bytes": 148993,
+          "sha256": "b58499ad20100b54a6b6c6181510211a25a2fd32149361896fe8e29a492ed952"
+        },
+        "depth.png": {
+          "bytes": 158776,
+          "sha256": "5e54bc1a7030c3f230e64441fc841c6e6b0279e8cb5005c967fa8c6b5280a731"
+        },
+        "woodland-near.json": {
+          "bytes": 61570,
+          "sha256": "8d7a7127eb1d4a11134cc984ef6e194364c221f8e7c5b1f1d21bd0050084cce9"
+        },
+        "woodland-middle.json": {
+          "bytes": 8229,
+          "sha256": "8ae33de29796bb3b4197808bc2398f3edb1cd6ab2ee724baec1f218e72444944"
+        }
+      },
+      "sourceManifest": "birch-101-20-source.json",
+      "bounds": [
+        [
+          -1.210472822189331,
+          -0.08611466735601425,
+          -0.9045244455337524
+        ],
+        [
+          1.5697606801986694,
+          3.9042088985443115,
+          1.5795564651489258
+        ]
+      ],
+      "centre": [
+        0.1796439290046692,
+        1.9090471155941486,
+        0.33751600980758667
+      ],
+      "radius": 2.4027740884480795,
+      "sourceHeight": 3.9042088985443115,
+      "horizontalRadius": 1.5795564651489258,
+      "woodColourSRGB": [
+        0.82,
+        0.8,
+        0.76
+      ],
+      "wood": [
+        "birch-101-20-wood-near.json",
+        "birch-101-20-wood-middle.json"
+      ],
+      "woodDisplacement": [
+        0.0,
+        0.0
+      ],
+      "origin": [
+        1024,
+        0
+      ],
+      "tileSize": 124,
+      "padding": 2
+    }
+  ],
+  "limits": [
+    "North American source taxa; no Caribbean species or coverage survey claim.",
+    "One front depth per baked view; hidden surfaces and all viewing angles are not recovered.",
+    "The three-pixel runtime ceiling bounds atlas texel footprint, not complete surface error.",
+    "Source wood reduction displacement is not a full-plant geometry error bound.",
+    "Individual overlapping crowns are not a coherent stand-volume compiler."
+  ],
+  "processing": "Exact leafy 8x3 tile/padding crop and side-by-side packing; no resampling; native wood only.",
+  "files": {
+    "colour.png": {
+      "bytes": 74426,
+      "sha256": "1170ce11df0d1cf13deabebfa7eac4a20e2027d381bd38bfab9340a818205b0b"
+    },
+    "normal.png": {
+      "bytes": 208034,
+      "sha256": "45143aac94f601dee711818061a0bdba2d8a39d3869784166a1d8e5ad3bd0117"
+    },
+    "depth.png": {
+      "bytes": 281644,
+      "sha256": "63937ffdf77f92f8c5adfcda4797d0c78d43320c1f4e4a129639bfff1513a5f4"
+    },
+    "oak-101-20-wood-near.json": {
+      "bytes": 56816,
+      "sha256": "fd6e05047f24f7a2643862a1902600e8135864f8074a5aaad8e3ff83c1383bac"
+    },
+    "oak-101-20-wood-middle.json": {
+      "bytes": 4951,
+      "sha256": "337a020a8e9d7ce1d13092274498c6c8dd4404fa61228e01781f7341dc99e747"
+    },
+    "birch-101-20-wood-near.json": {
+      "bytes": 48147,
+      "sha256": "6de19242486357bc064eb62b83726fdb34364a8568977f99e65d725a68ba4853"
+    },
+    "birch-101-20-wood-middle.json": {
+      "bytes": 5818,
+      "sha256": "99d706c2421ec7ee7d2ecb6e0c0677469a036d93085c797724ad36364e9ef2bd"
+    }
+  }
+}

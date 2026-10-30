@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import {
   SPANISH_MAIN_1550_REGIONS,
+  HISTORICAL_1550_PORTS,
+  hasHistorical1550ColonialPort,
   PORT_PREFABS,
   COCONUT_PALM_GENOME_SPEC,
   coastalUberNoise2D,
@@ -866,6 +868,137 @@ test('subtropical forest scenery pack, public NASA POWER climate lookup, and cli
     `Expected humid rainforest (Af) to have higher Ceiba canopy fraction (${ceibaShareAf.toFixed(3)}) than dry savanna (Aw, ${ceibaShareAw.toFixed(3)})`
   );
 });
+
+test('deep-draft HMS Victory at Cartagena coast spawns with clear forward sea room, sails freely offshore, and runs aground at the beach', () => {
+  const pack = generateProceduralCoastalPack({
+    ...SPANISH_MAIN_1550_REGIONS.cartagena,
+    size: 129,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 1500,
+  });
+  const victory = {
+    length: 68,
+    beam: 15.8,
+    heading: 82,
+    hydrodynamics: { draft: 8.8 },
+  };
+  const view = { ...pack.views.coast, heading: 82 };
+  const start = safeLandfallStart(pack.heights, view, victory, pack.region);
+  const boat = {
+    ...victory,
+    x: start.x,
+    z: start.z,
+    heading: 82,
+    surgeVelocity: 4.0,
+    leewayVelocity: 0.1,
+  };
+  // Advance 25 metres forward along heading 82°: must NOT falsely ground offshore
+  const rad = (82 * Math.PI) / 180;
+  const prevX = boat.x;
+  const prevZ = boat.z;
+  boat.x += Math.sin(rad) * 25;
+  boat.z -= Math.cos(rad) * 25;
+  const blockedOffshore = constrainIslandMotion(pack.heights, boat, prevX, prevZ, null, pack.region);
+  assert.equal(blockedOffshore, false, 'HMS Victory sails freely offshore without hitting an invisible -9.8m contour wall');
+  assert.equal(boat.aground, false);
+  assert.ok(boat.surgeVelocity > 2.5, 'HMS Victory retains forward headway in navigable coastal water');
+
+  // Now march shoreward until the hull reaches the actual beach/shoal and verify genuine grounding + refloating
+  let grounded = false;
+  const shoreRad = (pack.region.shoreBearing * Math.PI) / 180;
+  const sx = Math.sin(shoreRad);
+  const sz = -Math.cos(shoreRad);
+  for (let step = 0; step < 300; step++) {
+    const px = boat.x;
+    const pz = boat.z;
+    boat.x += sx * 8;
+    boat.z += sz * 8;
+    boat.surgeVelocity = 3.0;
+    if (constrainIslandMotion(pack.heights, boat, px, pz, null, pack.region)) {
+      grounded = true;
+      assert.equal(boat.aground, true, 'Boat is marked aground when running onto the beach/shoal');
+      assert.ok(Number.isFinite(boat.groundingRoll) && Number.isFinite(boat.groundingPitch));
+      // Backing/steering offshore toward deeper water must allow refloating
+      const gx = boat.x;
+      const gz = boat.z;
+      boat.x -= sx * 12;
+      boat.z -= sz * 12;
+      boat.surgeVelocity = -1.5;
+      const blockedBackingOff = constrainIslandMotion(pack.heights, boat, gx, gz, null, pack.region);
+      assert.equal(blockedBackingOff, false, 'Vessel can back or steer off a shoal into deeper water');
+      break;
+    }
+  }
+  assert.equal(grounded, true, 'HMS Victory genuinely runs aground when driven onto the Cartagena beach');
+});
+
+test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorages without Spanish colonial ports, while historical 1550 ports retain full fortifications', () => {
+  assert.ok(HISTORICAL_1550_PORTS.length >= 25, 'historical 1550 port gazetteer includes c. 1550 colonial and Old World maritime hubs');
+  assert.equal(hasHistorical1550ColonialPort(42.3601, -71.0589), false, 'Boston was uncolonized wilderness in 1550');
+  assert.equal(hasHistorical1550ColonialPort(40.70, -74.01), false, 'New York Harbor was uncolonized wilderness in 1550');
+  assert.equal(hasHistorical1550ColonialPort(10.423, -75.548), true, 'Cartagena de Indias was a fortified Spanish port in 1550');
+  assert.equal(hasHistorical1550ColonialPort(38.707, -9.136), true, 'Lisbon was an Old World maritime port in 1550');
+
+  const bostonPack = generateProceduralCoastalPack({
+    name: 'Boston Harbor',
+    latitude: 42.3601,
+    longitude: -71.0589,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 3000,
+  });
+
+  assert.equal(bostonPack.region.hasColonialPort, false);
+  assert.equal(bostonPack.region.settlementKind, 'wilderness-anchorage');
+  assert.equal(bostonPack.region.portType, 'wilderness-anchorage');
+  assert.equal(bostonPack.port.hasColonialPort, false);
+  assert.equal(bostonPack.port.settlementKind, 'wilderness-anchorage');
+  assert.equal(bostonPack.port.instances.length, 0, 'no Spanish bastions, piers, or colonial buildings placed in 1550 Boston');
+  assert.equal(bostonPack.port.clearRadius, 0, 'no circular cobblestone plaza or forest clearing around 1550 Boston');
+  assert.equal(bostonPack.portGeometry.instanceCount, 0);
+  assert.equal(bostonPack.portGeometry.triangleCount, 0);
+  assert.ok(bostonPack.port.berth.depth >= 4.5, 'wilderness coast still locates a safe natural anchorage berth');
+  assert.ok(Number.isFinite(bostonPack.views.coast.x) && Number.isFinite(bostonPack.views.coast.z));
+
+  // Verify 1550 territory cache roundtrip preserves schemaVersion 2 & wilderness-anchorage metadata,
+  // while legacy v1 cached payloads (from before wilderness gating) are rejected so flattened Plaza Mayor pads are not reused.
+  const upgradedBoston = build1550HistoricalTerritoryPack(bostonPack);
+  assert.equal(upgradedBoston.territory1550.schemaVersion, 2);
+  assert.equal(upgradedBoston.territory1550.hasColonialPort, false);
+  assert.equal(upgradedBoston.territory1550.settlementKind, 'wilderness-anchorage');
+  assert.equal(upgradedBoston.port.instances.length, 0);
+
+  const v2Bytes = encode1550TerritoryCachePayload(upgradedBoston);
+  const decodedV2 = apply1550TerritoryCachePayload(bostonPack, v2Bytes);
+  assert.ok(decodedV2, 'schemaVersion 2 wilderness cache payload is accepted');
+  assert.equal(decodedV2.port.instances.length, 0);
+
+  const legacyPack = {
+    ...upgradedBoston,
+    territory1550: { ...upgradedBoston.territory1550, schemaVersion: undefined },
+  };
+  const legacyV1Bytes = encode1550TerritoryCachePayload(legacyPack);
+  const decodedLegacy = apply1550TerritoryCachePayload(bostonPack, legacyV1Bytes);
+  assert.equal(decodedLegacy, null, 'legacy v1 cached heightfield is rejected for wilderness anchorages');
+
+  // Verify historical 1550 Old World / Spanish Main coordinates resolved purely by lat/lon still place full ports
+  const lisbonPack = generateProceduralCoastalPack({
+    name: 'Lisbon Tagus Approach',
+    latitude: 38.707,
+    longitude: -9.136,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 2000,
+  });
+  assert.equal(lisbonPack.region.hasColonialPort, true);
+  assert.equal(lisbonPack.region.settlementKind, 'colonial-port');
+  assert.ok(lisbonPack.port.instances.length >= 7, 'historical 1550 port coordinate places full 16th-century waterfront');
+});
+
+
 
 
 

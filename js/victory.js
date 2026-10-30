@@ -160,6 +160,44 @@ export function createVictoryMesh({groups,parts}={}){
   }
   deck(-6,6,VICTORY_DESIGN.decks.main,'deck.main');deck(-6,VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,'deck.forecastle');
   deck(VICTORY_DESIGN.decks.quarter.start,6,VICTORY_DESIGN.decks.quarter.height,'deck.quarter');deck(VICTORY_DESIGN.decks.poop.start,6,VICTORY_DESIGN.decks.poop.height,'deck.poop');
+  // Internal gun decks, orlop platform and transverse oak deck beams inside the hull.
+  const intZs=[-4.4,-3.5,-2.6,-1.7,-.8,.1,1.0,1.9,2.8,3.7,4.6];
+  for(const [id,baseH]of [['orlop',-.42],['lower',.04],['middle',.54],['upper',1.04]]){
+    const dStart=out.length;
+    for(let i=0;i<intZs.length-1;i++){
+      const z0=intZs[i],z1=intZs[i+1],y0=baseH+victorySheer(z0),y1=baseH+victorySheer(z1);
+      const w0=Math.max(.08,victoryHullHalfWidth(z0,y0)-.175),w1=Math.max(.08,victoryHullHalfWidth(z1,y1)-.175);
+      quad([-w0,y0,z0],[w0,y0,z0],[w1,y1,z1],[-w1,y1,z1],0,null,[[-w0*4,z0*2],[w0*4,z0*2],[w1*4,z1*2],[-w1*4,z1*2]]);
+      quad([-w0,y0-.025,z0],[-w1,y1-.025,z1],[w1,y1-.025,z1],[w0,y0-.025,z0],1);
+    }
+    group(`deck.${id}.internal`,'deck.main',dStart);
+    if(id!=='orlop'){
+      const bStart=out.length;
+      for(let i=1;i<intZs.length-1;i++){
+        const z=intZs[i],y=baseH+victorySheer(z),w=Math.max(.08,victoryHullHalfWidth(z,y)-.175);
+        box([-w,y-.055,z-.028],[w,y-.012,z+.028],1);
+      }
+      group(`frames.beams.${id}`,'hull',bStart);
+    }
+  }
+  // Copper-lined Grand Magazine (forward hold), After Magazine, and amidships Shot Locker below the orlop deck.
+  for(const [magId,z0,z1,yBot,yTop,wFrac,matWall]of [
+    ['magazine.grand',-4.05,-2.55,-.72,-.22,.64,24],
+    ['magazine.aft',2.65,3.65,-.66,-.20,.58,24],
+    ['magazine.shot_locker',-.55,.55,-.76,-.26,.48,1],
+  ]){
+    const mStart=out.length,zm=(z0+z1)*.5,sh=victorySheer(zm);
+    const hw=Math.max(.18,victoryHullHalfWidth(zm,yTop+sh)*wFrac);
+    box([-hw,yBot+sh,z0],[hw,yTop+sh,z1],matWall);
+    if(magId!=='magazine.shot_locker'){
+      const rows=magId==='magazine.grand'?4:2;
+      for(let r=0;r<rows;r++){
+        const rz=z0+.18+(z1-z0-.36)*(r+.5)/rows;
+        box([-hw*.82,yBot+sh+.04,rz-.08],[hw*.82,yTop+sh-.04,rz+.08],1);
+      }
+    }
+    group(magId,'deck.main',mStart);
+  }
   // The waist has an open view down onto the upper deck; raised ends are
   // enclosed by joined bulkheads, not isolated floating deck plates.
   for(const [z,top,bottom]of [[VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.forecastle.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.quarter.height,VICTORY_DESIGN.decks.main],[VICTORY_DESIGN.decks.poop.start,VICTORY_DESIGN.decks.poop.height,VICTORY_DESIGN.decks.quarter.height]]){
@@ -371,7 +409,8 @@ export function createVictoryMesh({groups,parts}={}){
   group('bow.knee','hull',kneeStart);
   group('bow.cutwater','hull',stemStart);
   for(const side of [-1,1]){
-    const cat=victoryAnchorCathead(side);tube(cat.root,cat.tip,.055,21,.047,8);
+    const catStart=out.length,cat=victoryAnchorCathead(side);tube(cat.root,cat.tip,.055,21,.047,8);
+    group(`anchor.cathead.${side<0?'port':'starboard'}`,'hull',catStart);
     const railStart=out.length,rails=[];
     for(let i=0;i<3;i++){
       const start=out.length;
@@ -403,6 +442,7 @@ export function createVictoryMesh({groups,parts}={}){
   tube([-.16,1.726,-6.84],[.16,1.726,-6.84],.021,20,.021,4);
   group('bow.grating','hull',gratingStart);
   // Bowsprit, jibboom and flying jibboom are stepped spars, not an oversize mast.
+  const bowspritStart=out.length;
   tube([0,2.1,-4.8],[0,3.06,-8.25],.14,1,.075,16);
   tube([0,2.92,-7.75],[0,3.28,-10.56],.062,1,.022,12);
   tube([0,2.88,-8.0],[0,1.78,-8.0],.035,20,.025,8);
@@ -410,6 +450,7 @@ export function createVictoryMesh({groups,parts}={}){
     const z=-5.55,y=.88+victorySheer(z),root=[side*victoryHullHalfWidth(z,y),y,z];
     rope(root,[0,end===-8.2?3.04:3.27,end],.011,20,6,.015);
   }
+  group('bow.bowsprit','hull',bowspritStart);
   // Compact heraldic shield and crown on the knee, replacing a floating ring.
   // Decoration remains an authored simplification of the 1803 royal arms.
   const armsStart=out.length,shield=[[-.13,2.23,-7.18],[-.14,2.43,-7.18],[.14,2.43,-7.18],[.13,2.23,-7.18],[0,2.12,-7.18]],centre=[0,2.30,-7.19];
@@ -484,8 +525,12 @@ export function createVictoryMesh({groups,parts}={}){
   // Lower masts, overlapping topmasts and topgallants, open fighting tops,
   // trestletrees, crosstrees and rope-rung shrouds.
   for(const [index,m]of VICTORY_MASTS.entries()){
-    const start=out.length,foot=victoryMastPoint(index,victoryVesselDeck(m.z));
-    tube(foot,victoryMastPoint(index,m.platform+.48),m.radius,21,m.radius*.72,18);
+    const trunkStart=out.length,foot=victoryMastPoint(index,victoryVesselDeck(m.z));
+    tube(victoryMastPoint(index,-.42),foot,m.radius*.96,1,m.radius*.94,10);
+    group('mast.trunk.'+m.id,'mast.'+m.id,trunkStart);
+    const start=out.length,stumpTop=victoryMastPoint(index,foot[1]+.38),shaftBot=victoryMastPoint(index,foot[1]+.382);
+    tube(foot,stumpTop,m.radius,21,m.radius*.96,18);
+    tube(shaftBot,victoryMastPoint(index,m.platform+.48),m.radius*.95,21,m.radius*.72,18);
     tube(victoryMastPoint(index,m.platform-.25),victoryMastPoint(index,m.topmastPlatform+.3),m.radius*.58,1,m.radius*.34,14);
     tube(victoryMastPoint(index,m.topmastPlatform-.22),victoryMastPoint(index,m.height),m.radius*.29,1,.015,10);
     for(let y=foot[1]+.25;y<m.platform;y+=.3){const p=victoryMastPoint(index,y);ring(p,m.radius*.97,.009,20,'y',12);}

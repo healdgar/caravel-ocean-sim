@@ -14,7 +14,7 @@ export const FOREST_MASS_VERTEX_LAYOUT=Object.freeze({arrayStride:24,attributes:
 export const FOREST_MASS_VERTEX_WGSL=/* wgsl */`
 @vertex fn forestMassVS(@location(0)position:vec3f,@location(1)normal:vec4f,@location(6)colour:vec4f)->CanopyVertex{
  var o:CanopyVertex;o.world=position;o.normal=normalize(normal.xyz);o.kind=vec2f(4.,.8);o.leafUV=vec2f(0);o.colour=colour.rgb;
- o.pos=F.viewProj*vec4f(position-F.camPos.xyz,1);return o;
+ o.pos=F.viewProj*vec4f(earthCurve(position-F.camPos.xyz,F.camPos.y),1);return o;
 }
 `;
 

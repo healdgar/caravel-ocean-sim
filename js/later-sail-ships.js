@@ -160,14 +160,22 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
     const start=out.length,low=s.centre[1]-s.size[1]/2,top=s.centre[1]+s.size[1]/2;
     const floor=z=>laterSailDeck(id,z,s.x0);
     for(const side of [-1,1]){
-      const x=side<0?s.x0:s.x1;quad([x,floor(s.z0),s.z0],[x,floor(s.z1),s.z1],[x,top,s.z1],[x,top,s.z0],23);
+      const x=side<0?s.x0:s.x1;
       for(let j=0;j<4;j++){
+        const zA=s.z0+(s.z1-s.z0)*(j/4),zB=s.z0+(s.z1-s.z0)*((j+1)/4);
+        quad([x,floor(zA),zA],[x,floor(zB),zB],[x,top,zB],[x,top,zA],23);
         const z=s.z0+(s.z1-s.z0)*(j+.5)/4,w=Math.min(.18/sz,(s.z1-s.z0)/12),y=low+(top-low)*.58,Y=y+.17/sy;
         quad([x+side*.003,y,z-w],[x+side*.003,y,z+w],[x+side*.003,Y,z+w],[x+side*.003,Y,z-w],11);
       }
     }
-    for(const z of [s.z0,s.z1])quad([s.x0,floor(z),z],[s.x1,floor(z),z],[s.x1,top,z],[s.x0,top,z],23);
-    const roofZ=[s.z0,...[hatch.z0,hatch.z1].filter(z=>z>s.z0&&z<s.z1),s.z1],roofX=[s.x0,...[hatch.x0,hatch.x1].filter(x=>x>s.x0&&x<s.x1),s.x1];
+    for(const z of [s.z0,s.z1]){
+      for(let k=0;k<4;k++){
+        const xA=s.x0+(s.x1-s.x0)*(k/4),xB=s.x0+(s.x1-s.x0)*((k+1)/4);
+        quad([xA,floor(z),z],[xB,floor(z),z],[xB,top,z],[xA,top,z],23);
+      }
+    }
+    const roofZ=[...new Set([s.z0,s.z0+(s.z1-s.z0)*.25,s.z0+(s.z1-s.z0)*.5,s.z0+(s.z1-s.z0)*.75,...[hatch.z0,hatch.z1].filter(z=>z>s.z0&&z<s.z1),s.z1])].sort((a,b)=>a-b);
+    const roofX=[...new Set([s.x0,s.x0+(s.x1-s.x0)*.25,0,s.x0+(s.x1-s.x0)*.75,...[hatch.x0,hatch.x1].filter(x=>x>s.x0&&x<s.x1),s.x1])].sort((a,b)=>a-b);
     for(let i=0;i<roofZ.length-1;i++)for(let j=0;j<roofX.length-1;j++){
       const z=roofZ[i],Z=roofZ[i+1],x=roofX[j],X=roofX[j+1];if(laterMeshInside(hatch,(x+X)/2,(z+Z)/2)&&Math.abs(top-h.centre[1])<.15/sy)continue;
       quad([x,top,z],[x,top,Z],[X,top,Z],[X,top,z],cloud?0:23);
@@ -202,7 +210,8 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
     for(let i=0;i<8;i++){const a=i*Math.PI/4;tube(w.centre,laterMeshAdd(w.centre,[Math.cos(a)*w.radius*1.14,Math.sin(a)*w.radius*1.14,0]),.025/sx,material,.025/sx,6);}
     tube(laterMeshAdd(w.centre,[0,0,-.08]),laterMeshAdd(w.centre,[0,0,.08]),.065/sx,material,.065/sx,8);
     group('helm.wheel','helm.tiller',start,{type:'wheel'});
-    const base=laterSailDeck(id,w.centre[2]);box([-.10,base,w.centre[2]-.10],[.10,w.centre[1]-.12/sy,w.centre[2]+.10],1);
+    const pedestalStart=out.length,base=laterSailDeck(id,w.centre[2]);box([-.10,base,w.centre[2]-.10],[.10,w.centre[1]-.12/sy,w.centre[2]+.10],1);
+    group('helm.pedestal','hull',pedestalStart);
   }else{
     const start=out.length,handle=d.steering.handle;tube([stock[0],handle[1],stock[2]],handle,.035/sx,7,.022/sx,8);
     group('helm.tiller','helm.tiller',start,{type:'tiller'});

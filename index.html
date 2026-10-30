@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ocean Sailing Simulator</title>
 <style>
-  :root { color-scheme:dark; --view-top:0px; --view-height:100dvh; --keyboard-inset:0px; --controls-bottom:108px; --instruments-bottom:92px; --ink:#f3eee3; --muted:#b8c4c7; --gold:#edbd78; --glass:#101d25e8; }
+  :root { color-scheme:dark; --in-oklab: ; --view-top:0px; --view-height:100dvh; --keyboard-inset:0px; --controls-bottom:108px; --instruments-bottom:92px; --ink:#f3eee3; --muted:#c6baa8; --gold:#edbd78; --glass:#101d25e8; --nautical-wood-tex:none; --nautical-border:color-mix(in oklab,#edbd78 48%,#5c3a21 52%); }
+  @supports (background:linear-gradient(in oklab,white,black)) { :root { --in-oklab:in oklab; } }
   html,body { margin:0; height:100%; background:#000; overflow:hidden; font:13px/1.4 system-ui,sans-serif; color:var(--ink); }
   [hidden] { display:none!important; }
   #c { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
@@ -55,14 +56,63 @@
   #sailing-wind-knots { font:500 20px/1.3 ui-monospace,monospace; }
   #sailing-wind-direction { white-space:nowrap; font-size:9px; color:var(--muted); }
   #sailing-cue { flex:0 0 100%; box-sizing:border-box; padding:4px 12px; border-top:1px solid #ffffff18; font-size:10px; color:var(--gold); }
-  #helm-controls { position:fixed; z-index:5; bottom:calc(var(--keyboard-inset) + max(12px,env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); width:560px; max-width:calc(100vw - 24px); box-sizing:border-box; display:grid; grid-template-columns:1.35fr 1fr; gap:18px; padding:12px 14px; border:1px solid #ffffff30; border-radius:12px; background:var(--glass); box-shadow:0 6px 24px #0003; }
+  #helm-controls { position:fixed; z-index:5; bottom:calc(var(--keyboard-inset) + max(12px,env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); width:560px; max-width:calc(100vw - 24px); box-sizing:border-box; display:grid; grid-template-columns:1.35fr 1fr; gap:18px; padding:12px 14px; border:1px solid var(--nautical-border); border-radius:14px; background-color:#2b180e; background-image:linear-gradient(180deg var(--in-oklab),#ffe5ba1a 0%,transparent 20%,#07030170 100%),repeating-linear-gradient(180deg,transparent 0 28px,#0a040266 28px 29px,#ffdfad14 29px 30px),var(--nautical-wood-tex),linear-gradient(168deg var(--in-oklab),#432818 0%,#2d1a0f 52%,#1c0f08 100%); background-size:100% 100%,100% 30px,220px 220px,100% 100%; background-blend-mode:normal,normal,soft-light,normal; contain:layout style; box-shadow:0 12px 28px -6px #000000b8,inset 0 1px 0 0 #ffdca852,inset 0 -1px 0 0 #090402aa,inset 0 0 0 1px #70462644; }
+  #helm-controls[data-battle=true] { width:890px; gap:6px 10px; padding:7px 10px; border-color:color-mix(in oklab,#edbd78 62%,#6b4226 38%); box-shadow:0 14px 30px -6px #000000cc,inset 0 1px 0 0 #ffe8c266,inset 0 -1px 0 0 #090402bb,inset 0 0 0 1px #8c593255; }
+  #helm-controls[data-battle=true] .helm-rudder,#helm-controls[data-battle=true] .helm-sails,#helm-controls[data-battle=true] .helm-rowing { display:flex; align-items:center; justify-content:space-between; gap:8px; background:color-mix(in oklab,#140b06 58%,transparent); border:1px solid color-mix(in oklab,#edbd78 24%,#ffffff 8%); border-radius:9px; padding:3px 8px; box-shadow:inset 0 1px 3px #00000066; }
+  #helm-controls[data-battle=true] .helm-label { margin-bottom:0; flex-direction:column; align-items:flex-start; gap:1px; min-width:86px; flex:none; }
+  #helm-controls[data-battle=true] .rudder-controls,#helm-controls[data-battle=true] .sail-buttons { flex:1; min-width:0; }
+  #helm-controls[data-battle=true] #boat-rudder,#helm-controls[data-battle=true] .sail-buttons button,#helm-controls[data-battle=true] .rudder-controls .icon-button { height:28px; min-height:28px; padding:3px 6px; font-size:11px; }
+  #helm-controls[data-battle=true] .rudder-controls .icon-button { width:28px; }
+  #helm-controls button { background:linear-gradient(180deg var(--in-oklab),#4d301d,#2b190e); border:1px solid color-mix(in oklab,#edbd78 34%,#ffffff 12%); box-shadow:inset 0 1px 0 0 #ffdca829,0 1px 2px #00000066; }
+  #helm-controls button:hover:not(:disabled) { background:linear-gradient(180deg var(--in-oklab),#5e3b24,#382113); border-color:color-mix(in oklab,#edbd78 56%,#ffffff 20%); }
+  #helm-controls button[aria-pressed=true] { background:linear-gradient(180deg var(--in-oklab),#f2cf96,#cfa565); border-color:#fae0b4; color:#1f1209; font-weight:600; box-shadow:inset 0 1px 0 0 #ffffff99; }
   .helm-label { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:5px; font-size:11px; }
-  .helm-label output { color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; }
+  .helm-kicker { color:var(--gold); font-size:9px; font-weight:650; letter-spacing:.08em; text-transform:uppercase; margin-right:4px; opacity:.92; }
+  .helm-meta { display:inline-flex; align-items:center; gap:4px; min-width:0; }
+  .helm-label output { color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #helm-controls .helm-quarters-pill { min-height:0; height:15px; padding:0 5px; border-radius:99px; font-size:9px; line-height:13px; color:var(--gold); border-color:#edbd7866; background:color-mix(in oklab,#edbd78 16%,#1a0e07 72%); }
   .rudder-controls { display:flex; align-items:center; gap:4px; }
-  #boat-rudder { width:100%; min-width:0; height:40px; margin:0; accent-color:var(--gold); }
+  #boat-rudder { width:100%; min-width:0; height:40px; margin:0; accent-color:var(--gold); background:linear-gradient(90deg,transparent calc(50% - 1px),#edbd7877 calc(50% - 1px),#edbd7877 calc(50% + 1px),transparent calc(50% + 1px)); }
   .sail-buttons { display:flex; gap:4px; }
   .sail-buttons button { flex:1; min-width:0; padding:7px 8px; height:40px; }
-  #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); color:#fff; text-shadow:0 1px 4px #000; font-size:11px; pointer-events:none; animation:hint-away 1s 7s forwards; }
+  .helm-battle-deck { grid-column:1/-1; display:grid; grid-template-columns:minmax(156px,.82fr) minmax(420px,2fr) minmax(156px,.82fr); gap:6px; align-items:stretch; }
+  .helm-battle-center { display:flex; flex-direction:column; justify-content:space-between; gap:4px; padding:5px 8px; border-radius:9px; background:color-mix(in oklab,#120a05 68%,transparent); border:1px solid color-mix(in oklab,#edbd78 24%,#ffffff 8%); box-shadow:inset 0 1px 3px #00000077; min-width:0; }
+  .helm-battle-bar { display:flex; align-items:center; justify-content:space-between; gap:4px; min-width:0; }
+  .helm-battle-status-group { display:flex; align-items:center; gap:5px; min-width:0; flex:1; overflow:hidden; }
+  .helm-battle-badge { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:99px; background:color-mix(in oklab,#edbd78 20%,#1f1108 78%); border:1px solid #edbd7866; color:var(--gold); font-size:8.5px; font-weight:700; letter-spacing:.08em; white-space:nowrap; }
+  .helm-battle-dot { width:5px; height:5px; border-radius:50%; background:var(--gold); }
+  .helm-battle-badge[data-state=ready] .helm-battle-dot { background:#63e6a2; }
+  .helm-battle-badge[data-state=firing] .helm-battle-dot { background:#ff7b61; }
+  .helm-battle-telemetry { font-size:10px; color:var(--ink); font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .helm-vitality-pill { font-size:9.5px; color:var(--muted); padding:1px 6px; border-radius:99px; background:#00000038; border:1px solid #edbd7833; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .helm-battle-toggles { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
+  #helm-controls .helm-chip-btn { min-height:22px; height:22px; padding:1px 7px; border-radius:99px; font-size:10px; white-space:nowrap; }
+  #helm-controls .helm-chip-gold { border-color:#edbd7877; color:var(--gold); }
+  .helm-battery-card { display:flex; flex-direction:column; justify-content:space-between; gap:4px; padding:5px 7px; border-radius:9px; background:color-mix(in oklab,#140b06 58%,transparent); border:1px solid color-mix(in oklab,#edbd78 24%,#ffffff 8%); box-shadow:inset 0 1px 3px #00000066; min-width:0; }
+  .helm-battery-card[data-active=true] { border-color:#edbd7877; background:color-mix(in oklab,#edbd78 10%,#1a0e07 72%); }
+  .helm-battery-card[data-ready=true] { border-color:#63e6a288; }
+  .helm-battery-head { display:flex; align-items:baseline; justify-content:space-between; gap:4px; }
+  .helm-battery-head strong { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink); white-space:nowrap; }
+  .helm-battery-status { font-size:9.5px; color:var(--muted); font-variant-numeric:tabular-nums; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .helm-battery-meter { position:relative; display:flex; height:3px; border-radius:99px; overflow:hidden; background:#ffffff14; }
+  .helm-meter-ready { height:100%; width:0%; background:linear-gradient(90deg,#d8ab63,#63e6a2); }
+  .helm-meter-loading { height:100%; width:0%; background:#edbd7866; }
+  .helm-battery-actions { display:flex; gap:4px; }
+  #helm-controls .helm-battery-actions button { flex:1; min-width:0; min-height:25px; height:25px; padding:2px 5px; font-size:10px; border-radius:6px; white-space:nowrap; }
+  #helm-controls .helm-fire-btn:not(:disabled) { background:linear-gradient(180deg,color-mix(in oklab,#e58e49 78%,#ffffff 12%),color-mix(in oklab,#b54c28 84%,#000000 10%)); border-color:#f6b67e; color:#fff8ee; font-weight:600; }
+  #helm-controls .helm-fire-loaded-btn:not(:disabled) { border-color:#edbd7888; color:var(--gold); }
+  .helm-ordnance-bar { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:8px; min-width:0; }
+  .helm-ammo-pills { display:inline-flex; align-items:center; gap:3px; flex-shrink:0; }
+  #helm-controls .helm-ammo-pills button { min-height:22px; height:22px; padding:1px 6px; font-size:9.5px; border-radius:99px; }
+  .helm-aim-sliders { display:grid; grid-template-columns:minmax(128px,1fr) minmax(128px,1fr); align-items:center; gap:8px; min-width:0; }
+  .helm-aim-control { display:grid; grid-template-columns:auto minmax(56px,1fr) 40px; align-items:center; gap:5px; padding:2px 7px; border-radius:7px; background:#0c060355; border:1px solid #edbd7829; font-size:9.5px; color:var(--muted); min-width:0; box-sizing:border-box; }
+  .helm-aim-control span { font-weight:600; color:var(--ink); white-space:nowrap; }
+  .helm-aim-control input[type=range] { width:100%; min-width:56px; height:18px; margin:0; accent-color:var(--gold); }
+  .helm-aim-control output { width:40px; text-align:right; font-size:9.5px; color:var(--gold); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; }
+  .helm-magazine-pill { font-size:9.5px; color:var(--muted); padding:1px 6px; border-radius:99px; background:#00000038; border:1px solid #edbd7833; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  @media (max-width:860px) { .helm-ordnance-bar { grid-template-columns:1fr; gap:5px; } .helm-aim-sliders { grid-template-columns:1fr 1fr; } }
+  .battle-ui-open #look-hint { bottom:140px; }
+  #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); padding:3px 10px; border-radius:99px; background:#0d1a23bf; border:1px solid #ffffff26; color:#f2f6f8; text-shadow:0 1px 3px #000; font-size:11px; white-space:nowrap; pointer-events:none; animation:hint-away 1s 8s forwards; }
   .has-looked #look-hint { display:none; }
   @keyframes hint-away { to { opacity:0; } }
   #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
@@ -138,6 +188,85 @@
   .discovery-swap-btn { flex:1; background:#dbc097; border-color:#edcf9c; color:#1c2528; font-weight:600; }
   .discovery-swap-btn:hover { background:#edcf9c; }
   #landfall-discovery-card { margin:10px 0; padding:10px 12px; border:1px solid #edbd7866; border-radius:8px; background:#162834; }
+  /* Chart Course voyage HUD (js/voyage/voyage-controller.js): orders, covert time warp, lookout calls. */
+  #voyage-hud { --v-font:'IM Fell English','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif; position:fixed; left:50%; transform:translateX(-50%); top:calc(var(--controls-bottom) + 8px); width:min(640px,calc(100vw - 24px)); box-sizing:border-box; display:grid; gap:6px; padding:8px 10px; border:1px solid #c9a46a88; border-radius:10px; background:linear-gradient(#1a1610f0,#120f0bf0); color:#f1e3c4; font-family:var(--v-font); box-shadow:0 10px 32px #0007; z-index:6; }
+  #voyage-hud[hidden] { display:none; }
+  #voyage-hud .voyage-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
+  #voyage-hud .voyage-clock { justify-content:space-between; }
+  #voyage-hud .voyage-date { font-size:15px; letter-spacing:.02em; }
+  #voyage-hud .voyage-watch { font-size:12px; font-style:italic; color:#d9c39b; }
+  #voyage-hud .voyage-warp { display:flex; gap:4px; align-items:center; }
+  #voyage-hud .voyage-warp::after { content:attr(data-rate); font:12px/1 system-ui,sans-serif; color:#d9c39b; margin-left:4px; font-variant-numeric:tabular-nums; min-width:9ch; }
+  #voyage-hud button { min-height:30px; padding:3px 9px; font-size:12px; border-radius:6px; }
+  #voyage-hud .voyage-warp button[aria-pressed=true] { background:#c9a46a; border-color:#e9cf9a; color:#1c1a14; font-weight:600; }
+  #voyage-hud .voyage-course { flex:1 1 220px; font-size:14px; text-align:center; font-variant-numeric:tabular-nums; }
+  #voyage-hud .voyage-beat,#voyage-hud .voyage-canvas-label { display:flex; align-items:center; gap:4px; font:12px system-ui,sans-serif; color:#d9c39b; }
+  #voyage-hud select { min-height:30px; font-size:12px; }
+  #voyage-hud .voyage-status { font:12px system-ui,sans-serif; color:#cdbb98; justify-content:space-between; }
+  #voyage-hud .voyage-callout { padding:9px 11px; border:1px solid #e9cf9a; border-radius:8px; background:#2a2115; }
+  #voyage-hud .voyage-callout-title { margin:0 0 3px; font-size:16px; color:#f6d48d; }
+  #voyage-hud .voyage-callout-text { margin:0; font-size:14px; line-height:1.35; }
+  #voyage-hud .voyage-callout-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  #voyage-hud .voyage-callout-actions button:first-child { background:#c9a46a; border-color:#e9cf9a; color:#1c1a14; font-weight:600; }
+  #voyage-hud .voyage-toast { margin:0; font-size:13px; font-style:italic; color:#f1e3c4; }
+  @media (min-width:1160px) { #voyage-hud { top:calc(var(--view-top,0px) + 10px); width:min(540px,calc(100vw - 640px)); } }
+  @media (max-width:640px) { #voyage-hud { top:auto; bottom:calc(var(--keyboard-inset,0px) + 8px); padding:6px 8px; } #voyage-hud .voyage-status { display:none; } #voyage-hud .voyage-course { flex-basis:100%; order:-1; } }
+  /* Chart drawer (js/voyage/chart-drawer.js): a large parchment chart panel for Chart Course voyages. */
+  #chart-drawer { --chart-font:'IM Fell English','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif; --chart-ink:#3a2412; --chart-vellum:#ecdcb6; --chart-vellum-deep:#dcc290; --chart-red:#8b2a1a;
+    position:fixed; z-index:9; inset:calc(var(--view-top) + max(12px,env(safe-area-inset-top))) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));
+    display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid var(--nautical-border); border-radius:10px; background:#101d25f5; box-shadow:0 18px 60px #000a; }
+  #chart-drawer .chart-heading { display:flex; align-items:baseline; gap:10px; min-width:0; }
+  #chart-drawer .chart-heading strong { font:italic 600 16px/1.2 var(--chart-font); color:var(--gold); letter-spacing:.02em; white-space:nowrap; }
+  #chart-drawer .chart-subtitle { font:italic 13px/1.2 var(--chart-font); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #chart-drawer .chart-layout { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 270px; }
+  #chart-drawer .chart-stage { position:relative; min-width:0; min-height:0; overflow:hidden; background:var(--chart-vellum); }
+  #chart-drawer .chart-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; cursor:grab; }
+  #chart-drawer .chart-stage[data-panning=true] .chart-canvas { cursor:grabbing; }
+  #chart-drawer .chart-stage:is([data-tool=rule],[data-tool=dividers]) .chart-canvas { cursor:crosshair; }
+  #chart-drawer .chart-canvas:focus-visible { outline:2px solid var(--chart-ink); outline-offset:-4px; }
+  #chart-drawer .chart-toolbar { position:absolute; top:8px; left:26px; display:flex; flex-wrap:wrap; gap:4px; max-width:calc(100% - 40px); }
+  #chart-drawer .chart-toolbar button,#chart-drawer .chart-readout-actions button,#chart-drawer .chart-warp button { min-height:32px; padding:4px 10px; font:13px/1.2 var(--chart-font); color:var(--chart-ink); background:color-mix(in oklab,var(--chart-vellum) 88%,transparent); border:1px solid #3a241266; border-radius:5px; box-shadow:0 1px 2px #3a241233; }
+  #chart-drawer .chart-toolbar button:hover:not(:disabled),#chart-drawer .chart-readout-actions button:hover:not(:disabled),#chart-drawer .chart-warp button:hover:not(:disabled) { background:#f6ead0; border-color:var(--chart-ink); }
+  #chart-drawer .chart-toolbar button[aria-pressed=true],#chart-drawer .chart-warp button[aria-pressed=true] { background:var(--chart-ink); color:#f3e6c6; border-color:var(--chart-ink); }
+  #chart-drawer button:disabled { opacity:.5; cursor:default; }
+  #chart-drawer .chart-stage :focus-visible,#chart-drawer .chart-side :focus-visible { outline-color:var(--chart-red); }
+  #chart-drawer .chart-readout { position:absolute; left:26px; bottom:10px; max-width:min(560px,calc(100% - 40px)); box-sizing:border-box; padding:6px 10px; border:1px solid #3a241255; border-radius:6px; background:color-mix(in oklab,var(--chart-vellum) 90%,transparent); color:var(--chart-ink); font:italic 13px/1.35 var(--chart-font); box-shadow:0 2px 8px #3a241233; }
+  #chart-drawer .chart-readout-text { margin:0; font-size:14px; }
+  #chart-drawer .chart-cursor { display:block; font-size:12px; opacity:.75; font-variant-numeric:tabular-nums; }
+  #chart-drawer .chart-cursor:empty { display:none; }
+  #chart-drawer .chart-readout-actions { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; }
+  #chart-drawer .chart-readout-actions:not(:has(button:not([hidden]))) { display:none; }
+  #chart-drawer .chart-readout-actions button[data-action=lay]:not(:disabled) { border-color:var(--chart-red); color:var(--chart-red); font-weight:600; }
+  #chart-drawer .chart-sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+  #chart-drawer .chart-side { min-height:0; overflow-y:auto; overscroll-behavior:contain; display:flex; flex-direction:column; gap:4px; padding:10px 14px 14px; border-left:1px solid #3a241288; background:linear-gradient(180deg,#efe2c2,var(--chart-vellum-deep)); color:var(--chart-ink); font-family:var(--chart-font); }
+  #chart-drawer .chart-side-block + .chart-side-block { border-top:1px solid #3a241240; padding-top:6px; }
+  #chart-drawer .chart-side h3 { margin:4px 0 6px; font:600 11px/1.2 var(--chart-font); letter-spacing:.14em; text-transform:uppercase; color:#5c3a21; }
+  #chart-drawer .chart-date-line { margin:0 0 8px; font:italic 15px/1.3 var(--chart-font); }
+  #chart-drawer .chart-warp { display:flex; flex-wrap:wrap; gap:4px; }
+  #chart-drawer .chart-warp button { flex:1 1 auto; }
+  #chart-drawer .chart-provision { display:grid; grid-template-columns:minmax(0,1fr) 74px 54px; gap:6px; align-items:center; min-height:28px; font-size:13px; }
+  #chart-drawer .chart-provision meter { width:100%; }
+  #chart-drawer .chart-provision output { text-align:right; font-variant-numeric:tabular-nums; }
+  #chart-drawer .chart-log-block { flex:1; min-height:120px; }
+  #chart-drawer .chart-log { list-style:none; margin:0; padding:0; display:grid; gap:7px; }
+  #chart-drawer .chart-log li { font:italic 13.5px/1.4 var(--chart-font); }
+  #chart-drawer .chart-log time { display:block; font-style:normal; font-size:11px; letter-spacing:.06em; color:#6b4a2a; }
+  #chart-drawer .chart-log-empty { margin:0; font-style:italic; opacity:.7; }
+  @media (prefers-reduced-motion:no-preference) {
+    #chart-drawer { transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s ease-out; }
+    @starting-style { #chart-drawer { transform:translateY(18px) scale(.985); opacity:0; } }
+  }
+  @media (max-width:720px), (pointer:coarse) and (max-width:1024px) {
+    #chart-drawer { inset:0; border-radius:0; border:0; padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
+    #chart-drawer .chart-layout { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; }
+    #chart-drawer .chart-side { max-height:36dvh; border-left:0; border-top:1px solid #3a241288; }
+    #chart-drawer .chart-toolbar button,#chart-drawer .chart-readout-actions button,#chart-drawer .chart-warp button { min-height:44px; }
+    #chart-drawer .chart-subtitle { display:none; }
+  }
+  @media (max-height:480px) and (min-width:640px) {
+    #chart-drawer .chart-layout { grid-template-columns:minmax(0,1fr) 220px; grid-template-rows:none; }
+    #chart-drawer .chart-side { max-height:none; border-top:0; border-left:1px solid #3a241288; }
+  }
   #anchor-status { color:var(--gold); font-size:12px; }
   #environment-debug,#voice-controls { border-top:1px solid #ffffff20; margin-top:12px; padding-top:6px; }
   #environment-debug p,#voice-controls p { color:var(--muted); font-size:11px; }
@@ -160,6 +289,8 @@
     .icon-button { width:44px; height:44px; min-height:44px; padding:12px; }
     #camera-dock > button { border-radius:9px; }
     #helm-controls { bottom:calc(var(--keyboard-inset) + max(8px,env(safe-area-inset-bottom))); max-width:calc(100vw - 16px); width:400px; grid-template-columns:1fr; gap:7px; padding:8px 10px; }
+    #helm-controls[data-battle=true] { width:460px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 10px); overflow-y:auto; overscroll-behavior:contain; }
+    .helm-battle-deck { grid-template-columns:1fr; gap:5px; }
     .helm-label { margin-bottom:2px; font-size:10px; }
     .helm-label output { font-size:10px; }
     #boat-rudder { height:44px; }
@@ -177,13 +308,16 @@
     .panel-body button,summary { min-height:44px; }
     #share-panel { right:8px; }
   }
-  @media (max-width:360px) { #camera-dock { gap:0; } }
+  @media (max-width:400px) { #camera-dock { gap:0; } #pause-toggle,#performance-toggle { width:24px; min-width:24px; padding:4px; } }
   @media (max-height:480px) and (min-width:640px) {
     #sailing-instruments { left:max(8px,env(safe-area-inset-left)); transform:none; width:310px; }
     #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; max-width:calc(100vw - 334px); }
     .icon-button { width:44px; height:44px; min-height:44px; }
     .sail-buttons button { height:44px; }
     #helm-controls { width:520px; grid-template-columns:1.35fr 1fr; gap:14px; }
+    #helm-controls[data-battle=true] { width:760px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 8px); overflow-y:auto; }
+    .helm-battle-deck { grid-template-columns:1fr 1.65fr 1fr; }
+    .helm-ordnance-bar { grid-template-columns:1fr; gap:4px; }
     #look-hint { bottom:102px; }
     #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { left:auto; width:350px; }
   }

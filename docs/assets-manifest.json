@@ -899,6 +899,11 @@
     "bytes": 4754,
     "sha256": "2697c31e9c5d8c957567fc8bf2217b40812fb32aadfa1d1a706b5a984710a89d"
   },
+  "assets/caravel-oak-albedo.webp": {
+    "url": "assets/caravel-oak-albedo.984a2b77f5f56053.webp",
+    "bytes": 560816,
+    "sha256": "984a2b77f5f56053e7fc8a20d57bd124e6129eee119d99fe4be1e55896b3f2a6"
+  },
   "assets/audio/wind-steady.mp3": {
     "url": "assets/audio/wind-steady.e5c687baf7da295c.mp3",
     "bytes": 270254,
@@ -1173,10 +1178,5 @@
     "url": "assets/audio/gunnery/crew-guns-ready.80d34d7d222a5ab2.mp3",
     "bytes": 17842,
     "sha256": "80d34d7d222a5ab206874dbe821bc78e36d8c1f5b14408d69dcf220cb6e986b0"
-  },
-  "assets/caravel-oak-albedo.webp": {
-    "url": "assets/caravel-oak-albedo.984a2b77f5f56053.webp",
-    "bytes": 560816,
-    "sha256": "984a2b77f5f56053e7fc8a20d57bd124e6129eee119d99fe4be1e55896b3f2a6"
   }
 }

@@ -97,7 +97,8 @@ struct CrewVertex {
   let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
   if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(vesselShadow(v.world,n));
+  let shadowSample=vesselShadow(v.world,n);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS-1}.0).rgb;
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS-1}.0).rgb;
   let ambient=vesselAmbient(n,sky,sea);
@@ -113,7 +114,7 @@ struct CrewVertex {
   let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
-  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(vesselShadow(v.world,n)))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+albedo*(direct*diffuse/PI+ambient)+direct*spec*max(dot(n,sun),0.0)
+  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+albedo*(direct*diffuse/PI+ambient)+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   // Match timber, canvas and land: the same directional sky and marine haze
   // must veil every surface along this view ray, including shadowed sailors.

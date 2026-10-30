@@ -168,7 +168,7 @@ fn forestAtlasFrame(cell:vec2i,grid:i32,fullSphere:bool)->u32{
  // The rooted biological collar is sunk by identity.y world metres. This is
  // a static root-grade approximation on slopes, not a new terrain alpha mask.
  o.sourceFloor=max(select(-1e30,source.material.z,source.material.w>.5),root.identity.y/root.rootScale.w);
- o.pos=F.viewProj*vec4f(plane-F.camPos.xyz,1);return o;
+ o.pos=F.viewProj*vec4f(earthCurve(plane-F.camPos.xyz,F.camPos.y),1);return o;
 }
 struct ForestAtlasSample {pigment:vec4f,normal:vec3f,distance:f32};
 fn forestAtlasHitSupported(point:vec3f,centre:vec3f,origin:vec3f,ray:vec3f,dx:vec3f,dy:vec3f)->bool{
@@ -235,7 +235,7 @@ struct ForestImpostorOutput {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  var o:ForestImpostorOutput;o.colour=vec4f(0);o.depth=0.;
  if(pigment.a<=1e-6||dot(normal,normal)<1e-10){return o;}
  let local=origin+ray*(distance/pigment.a);let world=in.rootScale.xyz+forestAtlasRotate(local,yaw)*scale;
- let projected=F.viewProj*vec4f(world-F.camPos.xyz,1);if(projected.w<=0.){return o;}
+ let projected=F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1);if(projected.w<=0.){return o;}
  let n=normalize(forestAtlasRotate(normal,yaw));let material=forestAtlasTable.prototypes[in.prototype].material;
  let colour=pigment.rgb/pigment.a*in.yawTint.yzw;let nDotL=dot(n,F.sunDir.xyz);
  // The atlas contains mixed wood/foliage pigment without a material-ID plane.

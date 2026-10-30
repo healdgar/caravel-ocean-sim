@@ -7,6 +7,7 @@ import { poseCrewWork } from './crew-pose.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
+import { VICTORY_DESIGN } from './models/victory.js';
 import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
@@ -62,21 +63,27 @@ const CREW_APPEARANCES={
 };
 const crewLinearColour=rgb=>rgb.map(byte=>{const v=byte/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
 export const CREW_ACTOR_FLOATS=36;
-const crewAdditionalNames={female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid'],male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif']};
+const crewAdditionalNames={female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid','Clara','Sofia','Teresa','Margarida','Guiomar','Constança','Violante','Branca'],male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif','Gonçalo','Fernão','Vasco','Diogo','Nuno','Álvaro','Cristóvão','Bartolomeu']};
 function crewStationIdentity(key,index){
   const named=CREW_IDENTITIES.find(s=>s.id===key);if(named)return {...named,identityId:named.id};
   const sex=index%2?'male':'female',n=Math.floor(index/2),pool=CREW_IDENTITIES.filter(s=>s.sex===sex),identity=pool[n%pool.length];
   return {...identity,id:key,identityId:identity.id,name:crewAdditionalNames[sex][n%crewAdditionalNames[sex].length]};
 }
-export function createCompany(policy=deckhandDecision,modelId='nina') {
+export function createCompany(policy=deckhandDecision,modelId='nina',options={}) {
   const model=requirePlayableShipModel(modelId);
-  // Twelve rendered workers are a representative watch on the much larger
-  // Victory; they do not replace the vessel's separate personnel/load manifest.
-  const extended=hasExtendedCrewModel(model.id),stations=extended?Object.entries(model.crewStations):CREW_ROSTER.map(identity=>[identity.id,model.crewStations[identity.id]]);
+  // Twelve rendered workers are a representative watch on larger ships unless
+  // fullWatch is enabled (default in WebGPU createCrew), which populates a
+  // vessel's supplemental weather-deck stations (up to full 40-person crew on Santa María).
+  const extended=hasExtendedCrewModel(model.id);
+  const baseStations=extended?Object.entries(model.crewStations):CREW_ROSTER.map(identity=>[identity.id,model.crewStations[identity.id]]);
+  const extraStations=(!extended&&options?.fullWatch&&model.supplementalCrewStations)
+    ?Object.entries(model.supplementalCrewStations):[];
+  const stations=[...baseStations,...extraStations];
   const activeControls=extended?['fore','main','mizzen'].map((name,index)=>model.rig.sails.some(s=>s.controlGroup===name)?index:-1).filter(i=>i>=0):[0,1,2];
   const stationBoat={modelId:model.id,model,length:model.runtime.length,beam:model.runtime.beam};
-  return {modelId:model.id,activeControls,representativeWatch:model.id==='victory'||(extended?proceduralDesign(model.id).loading.crew>stations.length:!!ADDITIONAL_DESIGNS[model.id]),order:'watch',revision:0,pending:false,crew:stations.map(([key,station],i)=>{
-    const identity=extended?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
+  const manifestCrew=model.id==='victory'?820:extended?proceduralDesign(model.id).loading.crew:(ADDITIONAL_DESIGNS[model.id]?.loading?.crew??12);
+  return {modelId:model.id,activeControls,representativeWatch:stations.length<manifestCrew,order:'watch',revision:0,pending:false,crew:stations.map(([key,station],i)=>{
+    const identity=(extended||i>=CREW_ROSTER.length)?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
     person.route??=[person.z,person.z];person.roles??=[person.role.toLowerCase()];
     if(extended&&Object.hasOwn(ROWING_DESIGNS,model.id)&&person.role==='Passenger'&&!stations.slice(0,i).some(([,p])=>p.role==='Passenger')){person.role='Captain';person.roles=['captain'];}
     // Keep short routine rounds on their current deck. Longer work trips use
@@ -93,7 +100,7 @@ export function createCompany(policy=deckhandDecision,modelId='nina') {
       if(!post)throw Error('No clear initial crew post: '+model.id+'/'+person.id);
       const shift=post[2]-person.z;person.x=post[0];person.z=post[2];person.route=person.route.map(z=>z+shift);
     }
-    const s=createDeckhand(policy);Object.assign(s,person,{route:[...person.route],target:person.route[1],wait:i*.37,
+    const s=createDeckhand(policy);Object.assign(s,person,{crewIndex:i,route:[...person.route],target:person.route[1],wait:i*.37,
       time:i*.43,walkTime:i*.27,patrolX:person.x,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
@@ -272,7 +279,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
   })));
   modelsPromise.catch(()=>{});
-  const B=GPUBufferUsage,state=createCompany(undefined,modelId);
+  const B=GPUBufferUsage,state=createCompany(undefined,modelId,{fullWatch:true});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const layout=[{arrayStride:60,attributes:[
     {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
@@ -319,7 +326,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     update(boat,dt,wind,camera=null){
       const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
-      stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&state.crew.some(s=>s.visible);
+      stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&!lod.culled&&state.crew.some(s=>s.visible);
       gunTools.update(state,boat,drawEnabled);
       if(!drawEnabled){
         // Hidden rendering does not turn a seated body's moisture samples back
@@ -340,7 +347,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           // The tiller station is below the camera; all crew remain visible.
           b.actors[offset+19]=Number(!s.visible);
           b.actors[offset+23]=Number(boat.enabled===true);
-          b.actors[offset+31]=wetness.crewOffset+state.crew.indexOf(s)*4;
+          b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4;
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }
@@ -355,5 +362,507 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},
     status(){return state.crew.length&&!state.crew.some(s=>s.visible)?hasExtendedCrewModel(modelId)?'Crew hidden':'Crew needs a larger deck':companyStatus(state);},
     destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index,...(b.lods?.slice(1).map(l=>l.buffer)??[])]),b.bones,b.actor])resource.destroy();},
+  };
+}
+
+export const FORTIFICATION_PREFAB_IDS = Object.freeze([
+  'stone_sea_bastion',
+  'bastion_trace_fortress',
+  'torreon_atalaya_farol',
+  'curtain_wall_and_gate',
+]);
+
+// 16th-century Spanish Garrison (*Soldados de Presidio*) uniform colours (linear RGB):
+// Tercio crimson, buff leather jerkin, steel breastplate, artillery slate, officer gold-ochre, garrison russet.
+const GARRISON_SHIRTS = Object.freeze([
+  [.42,.06,.05],
+  [.50,.36,.17],
+  [.28,.30,.33],
+  [.14,.20,.28],
+  [.56,.38,.10],
+  [.34,.16,.10],
+]);
+const GARRISON_TROUSERS = Object.freeze([
+  [.12,.09,.08],
+  [.09,.11,.14],
+  [.18,.08,.07],
+  [.15,.13,.10],
+]);
+
+export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
+  if (!inst || !FORTIFICATION_PREFAB_IDS.includes(inst.prefabId)) return [];
+  const hw = (inst.width ?? 24) * 0.5;
+  const hl = (inst.length ?? 28) * 0.5;
+  const yGround = inst.y ?? 0;
+  const yTop = yGround + (inst.height ?? 8);
+  const cosY = Math.cos(inst.yaw ?? 0);
+  const sinY = Math.sin(inst.yaw ?? 0);
+  const wallT = 1.75;
+  const specs = [];
+
+  if (inst.prefabId === 'stone_sea_bastion') {
+    const yDeck = yTop - 0.85;
+    const zSea = -hl + wallT + 1.25;
+    const zLand = hl - wallT - 1.25;
+    for (const [gIdx, k] of [-1, 0, 1].entries()) {
+      const lx = k * (hw * 0.48);
+      specs.push({ lx, ly: yDeck, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
+    }
+    for (const [gIdx, k] of [-0.5, 0.5].entries()) {
+      const lx = k * (hw * 0.50);
+      specs.push({ lx, ly: yDeck, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 3 + gIdx });
+    }
+    const zSpan0 = Math.max(-hl + 3.2, -hl * 0.78);
+    const zSpan1 = Math.min(-1.0, -hl * 0.18);
+    const zSpan2 = Math.max(1.0, hl * 0.18);
+    const zSpan3 = Math.min(hl - 3.2, hl * 0.78);
+    for (const sideX of [-1, 1]) {
+      const lx = sideX * Math.max(2.2, hw - wallT - 0.85);
+      specs.push({ lx, ly: yDeck, lz: (zSpan0 + zSpan1) * 0.5, routeZ: [zSpan0, zSpan1], localYaw: sideX < 0 ? -Math.PI / 2 : Math.PI / 2, role: 'Centinela de Muralla', stationKind: 'rampart' });
+      specs.push({ lx, ly: yDeck, lz: (zSpan2 + zSpan3) * 0.5, routeZ: [zSpan2, zSpan3], localYaw: sideX < 0 ? -Math.PI / 2 : Math.PI / 2, role: 'Alabardero', stationKind: 'rampart' });
+    }
+    const kw = Math.min(6.4, hw * 0.46);
+    specs.push({ lx: -kw - 1.15, ly: yDeck, lz: 0, routeZ: [-1.2, 1.2], localYaw: -Math.PI / 2, role: 'Capitán de Presidio', stationKind: 'citadel' });
+  } else if (inst.prefabId === 'bastion_trace_fortress') {
+    const yDeck = yTop - 0.85;
+    const bOut = 4.2;
+    const zSea = -hl + wallT + 1.25;
+    const zLand = hl - wallT - 1.25;
+    for (const [gIdx, k] of [-1.5, -0.5, 0.5, 1.5].entries()) {
+      const lx = k * (hw * 0.34);
+      specs.push({ lx, ly: yDeck, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
+    }
+    for (const [gIdx, k] of [-0.5, 0.5].entries()) {
+      const lx = k * (hw * 0.34);
+      specs.push({ lx, ly: yDeck, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 4 + gIdx });
+    }
+    // 4 Corner diamond bastions (top surface at yTop + 0.65)
+    const yBastion = yTop + 0.65;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const bx = sx * (hw + 0.3);
+        const bz = sz * (hl + 0.3);
+        specs.push({ lx: bx, ly: yBastion, lz: bz, routeZ: [bz - 1.25, bz + 1.25], localYaw: sz < 0 ? Math.PI : 0, role: 'Arcabucero de Baluarte', stationKind: 'bastion' });
+      }
+    }
+    // 2 Seaward ravelin guards (top surface at yTop - 1.3)
+    const yRavelin = yTop - 1.3;
+    const zRavelin = -hl - bOut - 4.5;
+    for (const sx of [-1, 1]) {
+      specs.push({ lx: sx * 2.4, ly: yRavelin, lz: zRavelin, routeZ: [zRavelin - 1.1, zRavelin + 1.1], localYaw: Math.PI, role: 'Guardia de Revellín', stationKind: 'ravelin' });
+    }
+    // 2 Parade / magazine sentries between the flank barracks
+    for (const sx of [-1, 1]) {
+      specs.push({ lx: sx * 2.2, ly: yDeck, lz: -3.2, routeZ: [-6.0, -0.8], localYaw: Math.PI, role: 'Alabardero', stationKind: 'parade' });
+    }
+  } else if (inst.prefabId === 'torreon_atalaya_farol') {
+    const rBase = Math.min(hw, hl);
+    const yPlinth = yGround + 0.85;
+    if (inst.materialKind === 10) {
+      for (const sx of [-1, 1]) {
+        specs.push({ lx: sx * rBase * 0.35, ly: yTop, lz: -rBase * 0.35, routeZ: [-rBase * 0.35, -rBase * 0.35], localYaw: Math.PI, role: 'Vigía de Atalaya', stationKind: 'crown' });
+        specs.push({ lx: sx * rBase * 0.68, ly: yPlinth, lz: -rBase - 0.35, routeZ: [-rBase - 0.35, -rBase + 0.45], localYaw: Math.PI, role: 'Centinela', stationKind: 'plinth' });
+      }
+    } else {
+      const yCrown = yTop + 0.65;
+      const rCrown = rBase * 0.62;
+      for (let s = 0; s < 4; s++) {
+        const angle = (s + 0.5) * (Math.PI * 0.5);
+        const lx = Math.sin(angle) * rCrown;
+        const lz = Math.cos(angle) * rCrown;
+        specs.push({ lx, ly: yCrown, lz, routeZ: [lz, lz], localYaw: angle, role: 'Vigía de Torreón', stationKind: 'crown' });
+      }
+      for (const sx of [-1, 1]) {
+        specs.push({ lx: sx * 2.2, ly: yPlinth, lz: -rBase - 0.38, routeZ: [-rBase - 0.38, -rBase - 0.38], localYaw: Math.PI, role: 'Alabardero de Torre', stationKind: 'plinth' });
+      }
+    }
+  } else if (inst.prefabId === 'curtain_wall_and_gate') {
+    const wallHW = Math.min(3.4, hw);
+    const yWalk = yTop - 0.90;
+    const yGateTop = yTop + 2.8;
+    const gHW = wallHW + 1.15;
+    const zWingMax = Math.max(6.2, hl - 2.0);
+    const zWingMin = Math.min(zWingMax - 1.2, 4.8);
+    for (const sideZ of [-1, 1]) {
+      const z0 = sideZ < 0 ? -zWingMax : zWingMin;
+      const z1 = sideZ < 0 ? -zWingMin : zWingMax;
+      const zMid = (z0 + z1) * 0.5;
+      specs.push({ lx: -wallHW + 1.25, ly: yWalk, lz: zMid - 0.8, routeZ: [z0, zMid], localYaw: -Math.PI / 2, role: 'Centinela de Muralla', stationKind: 'adarve' });
+      specs.push({ lx: wallHW - 1.25, ly: yWalk, lz: zMid + 0.8, routeZ: [zMid, z1], localYaw: Math.PI / 2, role: 'Arcabucero', stationKind: 'adarve' });
+    }
+    for (const sz of [-1, 1]) {
+      specs.push({ lx: -wallHW * 0.45, ly: yGateTop, lz: sz * 1.4, routeZ: [sz * 1.4, sz * 1.4], localYaw: -Math.PI / 2, role: 'Vigía de Puerta', stationKind: 'gate-roof' });
+      specs.push({ lx: -gHW - 0.35, ly: yGround + 0.65, lz: sz * 2.2, routeZ: [sz * 2.2, sz * 2.2], localYaw: -Math.PI / 2, role: 'Guardia de Puerta', stationKind: 'gate-portal' });
+    }
+  }
+
+  return specs.map((spec, idx) => {
+    const globalIdx = startIndex + idx;
+    const identity = crewStationIdentity(`fort_${inst.id ?? inst.prefabId}_${idx}`, globalIdx);
+    const look = CREW_APPEARANCES[identity.identityId ?? identity.id];
+    const s = createDeckhand();
+    const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
+    const wy = spec.ly + 0.028;
+    const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
+    const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
+    Object.assign(s, {
+      id: `${inst.id ?? inst.prefabId}_soldier_${idx + 1}`,
+      name: identity.name,
+      sex: identity.sex,
+      identityId: identity.identityId,
+      role: spec.role,
+      stationKind: spec.stationKind,
+      gunIndex: spec.gunIndex ?? null,
+      buildingId: inst.id ?? inst.prefabId,
+      buildingPrefabId: inst.prefabId,
+      building: inst,
+      lx: spec.lx,
+      ly: spec.ly,
+      lz: spec.lz,
+      routeZ: [...spec.routeZ],
+      targetZ: spec.routeZ[1],
+      localYaw: spec.localYaw ?? 0,
+      yaw: worldYaw,
+      wait: (globalIdx % 7) * 0.45,
+      time: globalIdx * 0.41,
+      walkTime: globalIdx * 0.29,
+      crewIndex: globalIdx,
+      garrison: true,
+      shirt: GARRISON_SHIRTS[globalIdx % GARRISON_SHIRTS.length],
+      trousers: GARRISON_TROUSERS[globalIdx % GARRISON_TROUSERS.length],
+      skin: crewLinearColour(look.skin),
+      hair: crewLinearColour(look.hair),
+      face: [...look.face],
+    });
+    s.scale.fill((s.sex === 'female' ? 0.99 : 0.97) * (1 + ((globalIdx % 3) - 1) * 0.02));
+    s.position.set([wx, wy, wz]);
+    const half = s.yaw * 0.5;
+    s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
+    gltfTRS(s.transform, s.position, s.rotation, s.scale);
+    return s;
+  });
+}
+
+export function createFortGarrison(port) {
+  const instances = port?.instances ?? [];
+  const origin = [port?.center?.x ?? 0, 0, port?.center?.z ?? 0];
+  const soldiers = [];
+  const byBuilding = new Map();
+  for (const inst of instances) {
+    if (!FORTIFICATION_PREFAB_IDS.includes(inst.prefabId)) continue;
+    const unit = createFortificationSoldiersForInstance(inst, soldiers.length);
+    for (const s of unit) {
+      const relPos = [s.position[0] - origin[0], s.position[1] - origin[1], s.position[2] - origin[2]];
+      gltfTRS(s.transform, relPos, s.rotation, s.scale);
+      s._poseReady = true;
+      soldiers.push(s);
+    }
+    inst.garrisonSoldiers = unit;
+    byBuilding.set(inst.id ?? inst.prefabId, unit);
+  }
+  const garrison = { port, origin, soldiers, byBuilding, time: 0 };
+  if (port && typeof port === 'object') port.garrison = garrison;
+  return garrison;
+}
+
+export function stepFortGarrison(garrison, dt = 0, wind = 0) {
+  if (!garrison?.soldiers?.length) return garrison;
+  dt = Math.max(0, Math.min(0.1, Number.isFinite(dt) ? dt : 0));
+  garrison.time = (garrison.time ?? 0) + dt;
+  const ox = garrison.origin[0], oy = garrison.origin[1], oz = garrison.origin[2];
+  const blend = 1 - Math.exp(-dt * 8);
+  for (const s of garrison.soldiers) {
+    s.time += dt;
+    const inst = s.building;
+    const dmg = inst?.damageState;
+    const ruined = dmg?.state === 'ruined';
+    s.visible = !ruined;
+    if (ruined) {
+      s.walk = 0;
+      s.brace = 0;
+      s.work = 0;
+      continue;
+    }
+    const underFire = (dmg?.fires?.length ?? 0) > 0 || (dmg?.state === 'burning');
+    let moving = false;
+    let working = false;
+
+    if (s.gunIndex !== null && inst?.gunnery?.guns?.[s.gunIndex]) {
+      const gun = inst.gunnery.guns[s.gunIndex];
+      if (gun.dismounted) {
+        s.visible = false;
+        continue;
+      }
+      working = gun.loading || ['swab', 'load', 'ram', 'runout', 'prime', 'recoil'].includes(gun.stage);
+    }
+
+    if (!underFire && !working && s.routeZ && Math.abs(s.routeZ[1] - s.routeZ[0]) > 0.05) {
+      if (s.wait > 0) {
+        s.wait = Math.max(0, s.wait - dt);
+      } else {
+        const dz = s.targetZ - s.lz;
+        const dist = Math.abs(dz);
+        const speed = 1.15;
+        const step = Math.min(dist, speed * dt);
+        if (dist > 1e-4) {
+          s.lz += Math.sign(dz) * step;
+          s.localYaw = dz >= 0 ? 0 : Math.PI;
+          moving = step > 0;
+          crewAdvanceWalk(s, step, { strideMetres: 0.68 });
+          s._poseReady = false;
+        }
+        if (dist - step <= 1e-4) {
+          s.targetZ = Math.abs(s.targetZ - s.routeZ[1]) < 1e-3 ? s.routeZ[0] : s.routeZ[1];
+          s.wait = 2.2 + (s.crewIndex % 5) * 0.45;
+          s.localYaw = s.lx < 0 ? -Math.PI / 2 : Math.PI / 2;
+          s._poseReady = false;
+        }
+      }
+    }
+
+    if (!moving && !underFire && !working && s.walk < 1e-4 && s.brace < 1e-4 && s.work < 1e-4 && s._poseReady) {
+      s.walk = 0;
+      s.brace = 0;
+      s.work = 0;
+      continue;
+    }
+
+    s.walk += (Number(moving) - s.walk) * blend;
+    s.brace += (Number(underFire) - s.brace) * blend;
+    s.work += (Number(working) - s.work) * blend;
+    s.yaw = (s.localYaw ?? 0) - (inst?.yaw ?? 0);
+
+    const cosY = Math.cos(inst?.yaw ?? 0);
+    const sinY = Math.sin(inst?.yaw ?? 0);
+    const wx = (inst?.x ?? 0) + s.lx * cosY + s.lz * sinY;
+    const wy = s.ly + 0.028;
+    const wz = (inst?.z ?? 0) - s.lx * sinY + s.lz * cosY;
+    s.position.set([wx, wy, wz]);
+    const half = s.yaw * 0.5;
+    s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
+    gltfTRS(s.transform, [wx - ox, wy - oy, wz - oz], s.rotation, s.scale);
+    s._poseReady = !moving;
+  }
+  return garrison;
+}
+
+const MAX_FORT_SOLDIERS_PER_BATCH = 64;
+
+export async function createFortSoldiers({
+  device,
+  frameUBO,
+  transView,
+  skyView,
+  sampClamp,
+  envCubeView,
+  sunVisBuf,
+  shadows,
+  shader,
+  format = 'rgba16float',
+  samples = 4,
+  shared = null,
+  port = null,
+}) {
+  const modelsPromise = shared?.models
+    ? Promise.resolve(shared.models)
+    : (preloadedCrewModels ?? Promise.all(['assets/crew/sailor.glb', 'assets/crew/sailor-female.glb'].map(async path => {
+        const response = await fetch(path);
+        if (!response.ok) throw Error('Crew asset unavailable');
+        return loadCrewGLB(await response.arrayBuffer());
+      })));
+  modelsPromise.catch(() => {});
+  const B = GPUBufferUsage;
+  const buffer = (label, data, usage) => {
+    const b = device.createBuffer({ label, size: data.byteLength, usage: usage | B.COPY_DST });
+    device.queue.writeBuffer(b, 0, data);
+    return b;
+  };
+  const layout = [{
+    arrayStride: 60,
+    attributes: [
+      { shaderLocation: 0, offset: 0, format: 'float32x3' },
+      { shaderLocation: 1, offset: 12, format: 'float32x3' },
+      { shaderLocation: 2, offset: 24, format: 'float32x3' },
+      { shaderLocation: 3, offset: 36, format: 'uint16x4' },
+      { shaderLocation: 4, offset: 44, format: 'float32x4' },
+    ],
+  }];
+  const [models, [module, shadowModule]] = await Promise.all([
+    modelsPromise,
+    shared ? Promise.resolve([null, null]) : Promise.all([shader(CREW_RENDER, 'fort crew'), shader(CREW_SHADOW, 'fort crew shadow')]),
+  ]);
+  const [pipeline, shadowPipeline] = await Promise.all([
+    shared?.pipeline ?? device.createRenderPipelineAsync({
+      label: 'fort crew',
+      layout: 'auto',
+      vertex: { module, entryPoint: 'vs', buffers: layout },
+      fragment: { module, entryPoint: 'fs', targets: [{ format }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+      multisample: { count: samples },
+    }),
+    shared?.shadowPipeline ?? device.createRenderPipelineAsync({
+      label: 'fort crew shadow',
+      layout: 'auto',
+      vertex: { module: shadowModule, entryPoint: 'vs', buffers: layout },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
+    }),
+  ]);
+  const hullData = new Float32Array(52);
+  hullData.set([1, 0, 0, 1], 0);
+  hullData.set([0, 1, 0, 0], 4);
+  hullData.set([0, 0, -1, 0], 8);
+  hullData.set([3.6, 12, 1, 1], 12);
+  const fortHullUBO = buffer('fort garrison hull ubo', hullData, B.UNIFORM);
+  const dryMoistureBuf = buffer('fort garrison dry moisture', new Float32Array(16), B.STORAGE);
+  const group = (pipe, resources) => device.createBindGroup({
+    layout: pipe.getBindGroupLayout(0),
+    entries: resources.map((resource, binding) => ({ binding, resource })),
+  });
+  const batches = models.map((model, i) => {
+    const poses = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * 65 * 16);
+    const actors = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * CREW_ACTOR_FLOATS);
+    const vertex = shared?.geometry[i].vertex ?? buffer('fort crew vertices', model.vertices, B.VERTEX);
+    const index = shared?.geometry[i].index ?? buffer('fort crew indices', model.indices, B.INDEX);
+    const lods = shared?.geometry[i].lods ?? (model.lods ?? [{ id: 'near', level: 0, indices: model.indices, indexCount: model.indices.length, triangles: model.indices.length / 3 }]).map((tier, t) => ({
+      ...tier,
+      buffer: t === 0 ? index : buffer('fort crew indices ' + tier.id, tier.indices, B.INDEX),
+    }));
+    const bones = buffer('fort crew joints', poses, B.STORAGE);
+    const actor = buffer('fort crew transforms', actors, B.STORAGE);
+    const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
+    const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView];
+    const main = group(pipeline, mainResources);
+    return { model, people: [], poses, actors, vertex, index, lods, bones, actor, main };
+  });
+  const lighting = shadows.bind(pipeline);
+
+  let activePort = null;
+  let garrison = null;
+  let drawEnabled = false;
+  let activeTier = 0;
+  let sampleTick = 0;
+  let posesDirty = true;
+
+  function syncPort(nextPort) {
+    activePort = nextPort;
+    posesDirty = true;
+    if (!nextPort?.instances?.length) {
+      garrison = null;
+      for (const b of batches) b.people = [];
+      return;
+    }
+    garrison = nextPort.garrison ?? createFortGarrison(nextPort);
+    hullData[16] = garrison.origin[0];
+    hullData[17] = garrison.origin[1];
+    hullData[18] = garrison.origin[2];
+    device.queue.writeBuffer(fortHullUBO, 0, hullData);
+    batches[0].people = garrison.soldiers.filter(s => s.sex === 'male').slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
+    batches[1].people = garrison.soldiers.filter(s => s.sex === 'female').slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
+    for (const b of batches) {
+      const walkDur = b.model.animator.clips.get('Walk').duration;
+      for (let i = 0; i < b.people.length; i++) {
+        const s = b.people[i];
+        s.walkClipDuration = walkDur;
+        const offset = i * CREW_ACTOR_FLOATS;
+        b.actors.set(s.transform, offset);
+        b.actors.set(s.shirt, offset + 16);
+        b.actors.set(s.trousers, offset + 20);
+        b.actors.set(s.skin, offset + 24);
+        b.actors.set(s.hair, offset + 28);
+        b.actors.set(s.face, offset + 32);
+        b.actors[offset + 19] = Number(!s.visible);
+        b.actors[offset + 23] = 1;
+        b.actors[offset + 27] = Number(s.sex === 'female');
+        b.actors[offset + 31] = 0;
+      }
+    }
+  }
+  if (port) syncPort(port);
+
+  return {
+    get state() { return garrison; },
+    get lodLevel() { return activeTier; },
+    setPort(nextPort) { syncPort(nextPort); },
+    update(nextPort, dt, wind = 0, camera = null, stepSimulation = true) {
+      if (nextPort !== activePort || (nextPort && nextPort.garrison && nextPort.garrison !== garrison)) {
+        syncPort(nextPort);
+      }
+      if (!garrison || !garrison.soldiers.length) {
+        drawEnabled = false;
+        return;
+      }
+      if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z)) {
+        const portCullRadius = Math.max(240, activePort?.clearRadius ?? 260) + 440;
+        const dx = camera.x - garrison.origin[0], dz = camera.z - garrison.origin[2];
+        if (dx * dx + dz * dz > portCullRadius * portCullRadius) {
+          drawEnabled = false;
+          return;
+        }
+      }
+      if (stepSimulation && dt > 0) stepFortGarrison(garrison, dt, wind);
+      let minDist = Infinity;
+      let anyVisible = false;
+      if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z)) {
+        for (const s of garrison.soldiers) {
+          if (!s.visible) continue;
+          anyVisible = true;
+          const d = Math.hypot(s.position[0] - camera.x, (s.position[1] ?? 0) - (camera.y ?? 0), s.position[2] - camera.z);
+          if (d < minDist) minDist = d;
+        }
+      } else {
+        minDist = 0;
+        anyVisible = garrison.soldiers.some(s => s.visible);
+      }
+      const lod = selectCrewLOD({ x: 0, z: 0, heave: 0 }, { x: minDist, y: 0, z: 0 });
+      activeTier = lod.mainTier;
+      drawEnabled = !lod.culled && minDist <= 420 && anyVisible;
+      if (!drawEnabled) return;
+
+      const stride = activeTier === 0 ? 1 : activeTier === 1 ? 2 : 4;
+      const shouldSamplePoses = posesDirty || (sampleTick++ % stride) === 0;
+      posesDirty = false;
+      for (const b of batches) {
+        if (!b.people.length) continue;
+        const a = b.model.animator;
+        for (let i = 0; i < b.people.length; i++) {
+          const s = b.people[i];
+          const offset = i * CREW_ACTOR_FLOATS;
+          b.actors.set(s.transform, offset);
+          b.actors[offset + 19] = Number(!s.visible);
+          if (shouldSamplePoses) {
+            a.sample('Idle', s.time, 'Walk', s.walkTime, s.walk);
+            if (s.brace > 0.001) a.blend('Brace', s.time, s.brace);
+            b.poses.set(a.palette, i * 65 * 16);
+          }
+        }
+        if (shouldSamplePoses) {
+          device.queue.writeBuffer(b.bones, 0, b.poses, 0, b.people.length * 65 * 16 * 4);
+        }
+        device.queue.writeBuffer(b.actor, 0, b.actors, 0, b.people.length * CREW_ACTOR_FLOATS * 4);
+      }
+    },
+    draw(pass) {
+      if (!drawEnabled) return;
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(1, lighting);
+      for (const b of batches) {
+        if (!b.people.length) continue;
+        const lod = b.lods?.[activeTier] ?? { buffer: b.index, indexCount: b.model.indices.length };
+        pass.setBindGroup(0, b.main);
+        pass.setVertexBuffer(0, b.vertex);
+        pass.setIndexBuffer(lod.buffer, 'uint32');
+        pass.drawIndexed(lod.indexCount ?? lod.indices.length, b.people.length);
+      }
+    },
+    destroy() {
+      fortHullUBO.destroy();
+      dryMoistureBuf.destroy();
+      for (const b of batches) {
+        b.bones.destroy();
+        b.actor.destroy();
+      }
+    },
   };
 }

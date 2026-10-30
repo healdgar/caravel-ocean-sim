@@ -3,7 +3,7 @@ import {HULL_VERTICAL_SCALE} from './hull.js';
 import {VESSEL_POSE_UPDATE,VESSEL_SURFACE_POSE_UPDATE} from './wgsl/vessel-pose.js';
 import {createRigGPUFrame,writeRigGPUFrame} from './rig-gpu-data.js';
 import {createVesselRecoil} from './vessel-recoil.js';
-import {createPartAssemblyGPU} from './part-assembly.js';
+import {createPartAssemblyGPU,bakeVesselImpactDeformations} from './part-assembly.js';
 
 const vesselPosePipelineCache=new WeakMap();
 async function vesselPosePipeline(device,computePipe,generic){
@@ -28,7 +28,7 @@ export function withPosedVesselVertices(source){
     .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
 }
 
-export async function createVesselPose({device,computePipe,sourceBuffer,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null}){
+export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null}){
   if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
   if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
   if(shared&&(shared.rigData??null)!==rigData)throw new Error('Vessel pose metadata belongs to another model');
@@ -57,9 +57,17 @@ export async function createVesselPose({device,computePipe,sourceBuffer,vertexCo
     },
     updateRecoil(guns,boat){return recoil?.update(guns,boat)??false;},
     updateDamage(boat){
-      if(destroyed||!assembly)return false;
-      assembly.state.syncVesselDamage(boat?.damage);
-      return assembly.update();
+      if(destroyed)return false;
+      const pending=boat?.damage?.pendingBakes;
+      if(mesh instanceof Float32Array&&Array.isArray(pending)&&pending.length>0){
+        const batch=pending.splice(0,6);
+        const range=bakeVesselImpactDeformations(mesh,batch,9);
+        if(range){
+          device.queue.writeBuffer(sourceBuffer,range.byteOffset,mesh.buffer,mesh.byteOffset+range.byteOffset,range.byteLength);
+          return true;
+        }
+      }
+      return false;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;

@@ -4,6 +4,12 @@ import {WAKE_SIZE} from './wgsl/interaction.js';
 
 export const MAX_FOLLOWERS=8;
 export const MAX_FLEET_VESSELS=MAX_FOLLOWERS+1;
+export const FLEET_FACTIONS=Object.freeze(['friendly','enemy']);
+export function normalizeVesselFaction(entry,{broadside=false,index=0}={}){
+  const explicit=typeof entry==='string'?entry:entry?.faction;
+  if(explicit==='enemy'||explicit==='friendly')return explicit;
+  return broadside&&index===0?'enemy':'friendly';
+}
 export function readyFleetModels(){return Object.values(SHIP_MODELS).filter(model=>model.status==='ready').map(model=>requirePlayableShipModel(model.id));}
 
 // A missing fleet retains the original same-model escort. Explicit entries are
@@ -12,14 +18,20 @@ export function fleetFromSearch(search,playerModel='nina'){
   const entries=search.has('fleet')?search.get('fleet').split(',').filter(Boolean):[(search.get('follower')==='0'?'!':'')+playerModel];
   if(entries.length>MAX_FOLLOWERS)throw new RangeError('A fleet supports at most '+MAX_FOLLOWERS+' followers');
   return entries.map((entry,index)=>{
-    const enabled=!entry.startsWith('!'),modelId=enabled?entry:entry.slice(1);
+    const enabled=!entry.startsWith('!'),raw=enabled?entry:entry.slice(1);
+    const colon=raw.indexOf(':');
+    const modelId=colon>=0?raw.slice(0,colon):raw;
+    const rawFaction=colon>=0?raw.slice(colon+1):null;
+    if(rawFaction!==null&&!FLEET_FACTIONS.includes(rawFaction))throw new RangeError('Unknown fleet faction: '+rawFaction);
     requirePlayableShipModel(modelId);
-    return {id:'escort-'+(index+1),modelId,enabled};
+    const item={id:'escort-'+(index+1),modelId,enabled};
+    if(rawFaction)item.faction=rawFaction;
+    return item;
   });
 }
 export function fleetToSearch(entries){
   if(!Array.isArray(entries)||entries.length>MAX_FOLLOWERS)throw new RangeError('Invalid fleet selections');
-  return entries.map(entry=>(entry.enabled===false?'!':'')+requirePlayableShipModel(entry.modelId).id).join(',');
+  return entries.map(entry=>(entry.enabled===false?'!':'')+requirePlayableShipModel(entry.modelId).id+(entry.faction==='enemy'?':enemy':'')).join(',');
 }
 export function fleetFormation(index){
   if(!Number.isSafeInteger(index)||index<0||index>=MAX_FOLLOWERS)throw new RangeError('Invalid formation station');

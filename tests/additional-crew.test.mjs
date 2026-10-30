@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {ADDITIONAL_DESIGNS,additionalDeck,additionalDeckWidth,additionalStairFlights} from '../js/models/additional.js';
 import {additionalRigContext} from '../js/additional-rig.js';
-import {createCompany,stepCompany,issueCaptainOrder} from '../js/crew.js';
+import {createCompany,stepCompany,issueCaptainOrder,companyStatus} from '../js/crew.js';
 import {additionalCrewRoute,crewRunnerMetrics,stepCrewWork} from '../js/crew-work.js';
 import {sailingState,advanceSails} from '../js/sailing.js';
 import {resolveShipNode,requirePlayableShipModel} from '../js/ship-models.js';
@@ -116,4 +116,38 @@ test('a return walker can pass a standby body when its next route waypoint is on
     for(const other of c.crew.filter(o=>o!==s))assert.ok(distance(Array.from(s.position),Array.from(other.position))>=.54-1e-5,'the passing path cannot cross a standby body');
   }
   assert.ok(passed);assert.equal(s.job,null);close(s.x,s.home[0]);close(s.z,s.home[1]);
+});
+
+test('Santa María fullWatch staffs the complete 40-person manifest crew across forecastle, waist, quarterdeck and poop',()=>{
+  const id='santa-maria',b=ship(id),d=ADDITIONAL_DESIGNS[id],c=createCompany(undefined,id,{fullWatch:true}),state=sailingState(b);
+  stepCompany(c,b,0,8);
+  assert.equal(c.crew.length,40);assert.equal(c.representativeWatch,false);
+  assert.equal(companyStatus(c),'Sea watch · 40 aboard');
+  assert.equal(c.crew.filter(s=>s.sex==='female').length,20);
+  assert.equal(c.crew.filter(s=>s.sex==='male').length,20);
+  assert.equal(new Set(c.crew.map(s=>s.name)).size,40,'all 40 Santa María hands have distinct names');
+  const allStations={...d.crewStations,...d.supplementalCrewStations};
+  for(const [i,s]of c.crew.entries()){
+    assert.ok(s.position.every(Number.isFinite));assert.ok(s.transform.every(Number.isFinite));
+    assert.ok(Math.abs(s.x)<additionalDeckWidth(id,s.z),`${s.id} stays inboard`);
+    close(s.position[1],additionalDeck(id,s.z)*d.frame.verticalScale+.028);
+    if(s.role!=='Helmsman')close(s.z,allStations[s.id].z);
+    for(let j=i+1;j<c.crew.length;j++){
+      assert.ok(distance(Array.from(s.position),Array.from(c.crew[j].position))>=.65,`${s.id} and ${c.crew[j].id} maintain initial station separation`);
+    }
+  }
+  assert.equal(issueCaptainOrder(c,b,'weather'),true);
+  const climbed=new Set(),hauled=new Set();let secured=false;
+  for(let tick=0;tick<2400;tick++){
+    const before=c.crew.map(s=>Array.from(s.position));advanceSails(b,.1,8,.8);stepCompany(c,b,.1,8);
+    for(const [i,s]of c.crew.entries()){
+      assert.ok(distance(Array.from(s.position),before[i])<.20,`${s.id} moves continuously`);
+      if(s.job?.rung>0)climbed.add(s.job.mast);
+      if(s.job?.kind==='haul'&&s.job.stage==='working')hauled.add(s.job.mast);
+      if(s.job?.kind==='hatch'&&s.job.stage==='working')secured=true;
+    }
+    if(!c.pending&&!c.crew.some(s=>s.job)&&b.hatchesClosed===1)break;
+  }
+  assert.deepEqual([...climbed].sort(),[0,1]);assert.deepEqual([...hauled].sort(),[0,1,2]);assert.ok(secured);
+  assert.equal(b.hatchesClosed,1);assert.ok(state.set.every((v,i)=>Math.abs(v-[.2,.2,0][i])<.011));assert.ok(c.crew.every(s=>!s.job));
 });

@@ -147,6 +147,7 @@ export function createSkinAnimator(asset) {
     },
     blend(name,time,weight){
       if(!Number.isFinite(time)||!Number.isFinite(weight))throw Error('Invalid animation blend');
+      if(weight<=0)return palette;
       evaluate(bPose,name,time);blendPose(weight);return updateMatrices();
     },
   };

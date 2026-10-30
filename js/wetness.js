@@ -47,11 +47,14 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
   let template=templates.get(crewCount);
   if(!template){template=createWetnessData(mesh,crewCount);templates.set(crewCount,template);}
   const data={points:template.points.slice(),lookup:template.lookup,crewOffset:template.crewOffset,crewCount:template.crewCount},B=GPUBufferUsage,T=GPUTextureUsage;
+  const craterTailWords=512,craterTailOffset=data.lookup.byteLength,craterTail=new Uint32Array(craterTailWords),craterTailF=new Float32Array(craterTail.buffer);
   const buffer=(label,size,usage)=>device.createBuffer({label,size,usage});
   const points=buffer('wetness probes',data.points.byteLength,B.STORAGE|B.COPY_DST);
-  const lookup=buffer('wetness vertex lookup',data.lookup.byteLength,B.STORAGE|B.COPY_DST);
+  const lookup=buffer('wetness vertex lookup',craterTailOffset+craterTail.byteLength,B.STORAGE|B.COPY_DST);
   const state=buffer('surface moisture',data.points.length/8*8,B.STORAGE|B.COPY_SRC|B.COPY_DST);
-  device.queue.writeBuffer(points,0,data.points);device.queue.writeBuffer(lookup,0,data.lookup);
+  craterTail[511]=0xC8A7E000>>>0;
+  device.queue.writeBuffer(points,0,data.points);device.queue.writeBuffer(lookup,0,data.lookup);device.queue.writeBuffer(lookup,craterTailOffset,craterTail);
+  let uploadedCraterRev=0;
   let poseSources=null;
   if(posed){
     const indices=new Uint32Array(data.points.length/8);indices.fill(0xffffffff);
@@ -84,6 +87,28 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
     updateCrew(company,boat){
       const crewPoints=writeCrewWetnessData(data,company,boat);
       if(crewPoints.byteLength)device.queue.writeBuffer(points,data.crewOffset*32,crewPoints);
+    },
+    updateDamage(damage){
+      const rev=damage?.cratersRevision??0;
+      if(rev===uploadedCraterRev)return false;
+      uploadedCraterRev=rev;
+      const craters=Array.isArray(damage?.craters)?damage.craters:[];
+      const count=Math.min(127,craters.length);
+      craterTail.fill(0);
+      for(let i=0;i<count;i++){
+        const c=craters[craters.length-count+i];
+        const base=i*4;
+        craterTailF[base]=Number(c.x)||0;
+        craterTailF[base+1]=Number(c.y)||0;
+        craterTailF[base+2]=Number(c.z)||0;
+        const rEnc=Math.max(0,Math.min(4095,Math.round((Number(c.radius)||0.08)*4000)));
+        const dEnc=Math.max(0,Math.min(4095,Math.round((Number(c.depth)||0.2)*1000)));
+        const hEnc=Math.max(1,Math.min(255,Math.round(Number(c.hits)||1)));
+        craterTail[base+3]=((hEnc<<24)|(dEnc<<12)|rEnc)>>>0;
+      }
+      craterTail[511]=(0xC8A7E000|count)>>>0;
+      device.queue.writeBuffer(lookup,craterTailOffset,craterTail);
+      return true;
     },
     encode(pass,enabled=true){
       if(!enabled && !needsClear)return;

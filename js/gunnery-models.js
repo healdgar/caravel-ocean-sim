@@ -46,23 +46,68 @@ function gunneryVictoryDefinitions(){
 const GUNNERY_MODEL_GUNS=deepFreeze({nina:gunneryNinaDefinitions(),victory:gunneryVictoryDefinitions(),
   ...Object.fromEntries(Object.keys(ADDITIONAL_DESIGNS).map(id=>[id,additionalGunAttachments(id)])),
   ...Object.fromEntries(Object.keys({...ROWING_DESIGNS,...LATER_SAIL_DESIGNS}).map(id=>[id,[]]))});
+function buildFallbackRailBroadside(stations,{calibre=2,kind='swivel',type='swivel',y=0.52,floor=0.12,xHalf=1.42,recoilLength=0.08,recoilDuration=0.45,breechMass=180}={}){
+  const result=[];
+  for(const sign of[-1,1])for(const [i,z]of stations.entries()){
+    const x=sign*xHalf;
+    result.push({id:result.length,side:sign<0?'port':'starboard',sideSign:sign,deck:'weather',
+      meshGroup:`battle.gun.${sign<0?'port':'starboard'}.${i}`,muzzleDesign:[x+sign*.28,y+.02,z],breechDesign:[x-sign*.18,y,z],directionDesign:[sign,0,0],
+      station:[x-sign*.36,floor,z],floorDesign:floor,visibleCrew:false,weatherDeck:true,
+      calibre,type,kind,recoilLength,recoilDuration,breechMass});
+  }
+  return result;
+}
+const NAVAL_BATTLE_FALLBACK_GUNS=deepFreeze({
+  'flying-cloud':buildFallbackRailBroadside([-3.2,-1.1,1.1,3.2],{calibre:9,kind:'long-gun',type:'long-gun',y:0.86,floor:0.32,xHalf:1.48,recoilLength:0.55,recoilDuration:0.65,breechMass:820}),
+  oseberg:buildFallbackRailBroadside([-2.2,2.2],{calibre:2,kind:'swivel',type:'swivel',y:0.52,floor:0.12,xHalf:1.45}),
+  lusoria:buildFallbackRailBroadside([-2.4,2.4],{calibre:2,kind:'swivel',type:'swivel',y:0.48,floor:0.10,xHalf:1.38}),
+  'taino-canoe':buildFallbackRailBroadside([0.0],{calibre:1,kind:'swivel',type:'swivel',y:0.35,floor:0.05,xHalf:1.15,recoilLength:0.06,recoilDuration:0.40,breechMass:120}),
+  'gipsy-moth-iv':buildFallbackRailBroadside([1.4],{calibre:2,kind:'swivel',type:'swivel',y:0.62,floor:0.18,xHalf:1.42}),
+});
 export function createGunDefinitions(boatOrModelId='nina'){
   const id=typeof boatOrModelId==='string'?boatOrModelId:boatOrModelId.modelId??'nina';
   if(!GUNNERY_MODEL_GUNS[id])throw new Error('No playable gun attachments for '+id);
   return GUNNERY_MODEL_GUNS[id];
 }
+export function createNavalBattleGunDefinitions(boatOrModelId='nina'){
+  const id=typeof boatOrModelId==='string'?boatOrModelId:(boatOrModelId?.model?.id??boatOrModelId?.modelId??'nina');
+  const canonical=createGunDefinitions(id);
+  if(canonical.length>0)return canonical;
+  return NAVAL_BATTLE_FALLBACK_GUNS[id]??GUNNERY_MODEL_GUNS.nina;
+}
 export function gunElevationRange(gun){
   return gun?.kind==='swivel'?{min:-6,max:14}:{min:-4,max:10};
 }
-export function gunModelScale(boat){return[(boat.beam??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.beam:NINA_DESIGN.runtime.beam))/3.6,
-  vesselVerticalScale(boat),(boat.length??(boat.modelId==='victory'?VICTORY_DESIGN.runtime.length:NINA_DESIGN.runtime.length))/12];}
-export function gunModelDirection(gun,scale,elevationDegrees=0){
+export function gunTraverseRange(gun){
+  return gun?.kind==='swivel'?{min:-45,max:45}:{min:-8,max:8};
+}
+function defaultModelRuntime(boat){
+  const id=boat?.model?.id??boat?.modelId??'nina';
+  return boat?.model?.runtime??ADDITIONAL_DESIGNS[id]?.runtime??ROWING_DESIGNS[id]?.runtime??LATER_SAIL_DESIGNS[id]?.runtime??(id==='victory'?VICTORY_DESIGN.runtime:NINA_DESIGN.runtime);
+}
+export function gunModelScale(boat){const rt=defaultModelRuntime(boat);return[(boat.beam??rt.beam)/3.6,
+  vesselVerticalScale(boat),(boat.length??rt.length)/12];}
+export function gunModelDirection(gun,scale,elevationDegrees=0,traverseDegrees=0){
   const d=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...d),base=d.map(v=>v/n);
-  if(!Number.isFinite(elevationDegrees)||Math.abs(elevationDegrees)<1e-12)return base;
-  const range=gunElevationRange(gun),elev=Math.max(range.min,Math.min(range.max,elevationDegrees))*Math.PI/180;
+  const hasElev=Number.isFinite(elevationDegrees)&&Math.abs(elevationDegrees)>=1e-12;
+  const hasTrav=Number.isFinite(traverseDegrees)&&Math.abs(traverseDegrees)>=1e-12;
+  if(!hasElev&&!hasTrav)return base;
+  const range=gunElevationRange(gun),elev=hasElev?Math.max(range.min,Math.min(range.max,elevationDegrees))*Math.PI/180:0;
+  const tRange=gunTraverseRange(gun),trav=hasTrav?Math.max(tRange.min,Math.min(tRange.max,traverseDegrees))*Math.PI/180:0;
   const h=Math.hypot(base[0],base[2]);if(h<1e-9)return base;
   const angle=Math.atan2(base[1],h)+elev;
-  return [base[0]/h*Math.cos(angle),Math.sin(angle),base[2]/h*Math.cos(angle)];
+  const cosA=Math.cos(angle),sinA=Math.sin(angle);
+  let hx=base[0]/h,hz=base[2]/h;
+  if(hasTrav){
+    // Positive traverse trains the muzzle forward toward the bow (-Z in local ship space);
+    // negative traverse trains the muzzle aft toward the stern (+Z in local ship space).
+    const sideSign=(gun.sideSign??(base[0]<0?-1:1))<0?-1:1;
+    const ct=Math.cos(trav),st=Math.sin(trav);
+    const nx=hx*ct+sideSign*hz*st;
+    const nz=-sideSign*hx*st+hz*ct;
+    hx=nx;hz=nz;
+  }
+  return [hx*cosA,sinA,hz*cosA];
 }
 
 // Matches boatRotate's R_heading R_pitch R_roll order. Its compass heading
@@ -70,10 +115,28 @@ export function gunModelDirection(gun,scale,elevationDegrees=0){
 // Translational velocity is physical sailing speed/leeway, never compressed
 // voyage-coordinate speed. Point velocity includes omega cross muzzle offset.
 export function gunMuzzlePose(gun,boat){
-  const scale=gunModelScale(boat),elevation=Number.isFinite(gun.elevation)?gun.elevation:Number.isFinite(boat?.gunneryElevation)?boat.gunneryElevation:0;
-  const baseDirection=gunModelDirection(gun,scale,0),localDirection=elevation?gunModelDirection(gun,scale,elevation):baseDirection;
+  const scale=gunModelScale(boat);
+  const elevation=Number.isFinite(gun.elevation)?gun.elevation:Number.isFinite(boat?.gunneryElevation)?boat.gunneryElevation:0;
+  const traverse=Number.isFinite(gun.traverse)?gun.traverse:Number.isFinite(boat?.gunneryTraverse)?boat.gunneryTraverse:0;
+  const baseDirection=gunModelDirection(gun,scale,0,0);
+  const localDirection=(elevation||traverse)?gunModelDirection(gun,scale,elevation,traverse):baseDirection;
   const offset=Math.max(0,Number.isFinite(gun.offset)?gun.offset:0);
-  const localPosition=gun.muzzleDesign.map((v,i)=>v*scale[i]-baseDirection[i]*offset),direction=[0,0,0],r=[0,0,0];
+  let localPosition=gun.muzzleDesign.map((v,i)=>v*scale[i]-baseDirection[i]*offset);
+  if(traverse&&gun.breechDesign){
+    // Swivel pintle / carriage trunnion pivot in scaled local metres
+    const pivot=gun.breechDesign.map((b,i)=>(b*0.65+gun.muzzleDesign[i]*0.35)*scale[i]);
+    const armLen=Math.max(0.15,Math.hypot(
+      gun.muzzleDesign[0]*scale[0]-pivot[0],
+      gun.muzzleDesign[1]*scale[1]-pivot[1],
+      gun.muzzleDesign[2]*scale[2]-pivot[2],
+    )-offset);
+    localPosition=[
+      pivot[0]+localDirection[0]*armLen,
+      pivot[1]+localDirection[1]*armLen,
+      pivot[2]+localDirection[2]*armLen,
+    ];
+  }
+  const direction=[0,0,0],r=[0,0,0];
   const heading=(boat.heading??0)*Math.PI/180,pitch=boat.pitch??0,roll=boat.roll??0;
   boatRotate(r,...localPosition,heading,pitch,roll);boatRotate(direction,...localDirection,heading,pitch,roll);
   const ch=Math.cos(heading),sh=Math.sin(heading),cp=Math.cos(pitch),sp=Math.sin(pitch);

@@ -10,6 +10,22 @@ export const ENV_MIPS = 9;
 // Per-frame uniform block shared by every render / sky shader.
 // Layout must match the Float32Array offsets in main.js (FR_* constants).
 export const FRAME_WGSL = /* wgsl */ `
+// Earth-curvature drop (metres) for a camera-relative position, with standard
+// refraction (k = 0.13 -> effective radius 6371 km / (1 - k)). The ocean stays a
+// flat plane at y = 0, so the eye-height geometric horizon distance is removed
+// first: the drop is exactly zero inside ~8-13 km (landfall range unchanged) and
+// beyond it land sinks so that h < (d - dh)^2 / 2R' is hidden behind the sea.
+// Pure (eye height passed in) so it compiles in every module including Frame.
+fn earthDrop(rel: vec3f, eyeY: f32) -> f32 {
+  let RE = 7.32298851e6;
+  let dh = sqrt(2.0 * RE * max(eyeY, 0.5));
+  let e = max(length(rel.xz) - dh, 0.0);
+  return e * e / (2.0 * RE);
+}
+// Camera-relative position bent by earthDrop: use for clip-space only.
+fn earthCurve(rel: vec3f, eyeY: f32) -> vec3f {
+  return vec3f(rel.x, rel.y - earthDrop(rel, eyeY), rel.z);
+}
 struct Frame {
   viewProj: mat4x4f,   // camera-relative view-projection (reverse-Z, infinite)
   camPos:   vec4f,     // xyz metres, w = time (s)

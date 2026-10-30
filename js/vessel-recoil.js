@@ -65,7 +65,7 @@ export async function createVesselRecoil({device,computePipe,posedBuffer,recoilM
       for(let slot=0;slot<assets.guns.length;slot++){
         const gun=assets.guns[slot],value=guns?.get?guns.get(gun.id):guns?.[gun.id];
         const offset=Math.max(0,Number.isFinite(value?.offset)?value.offset:Number.isFinite(value)?value:0);
-        const direction=gunModelDirection({directionDesign:gun.axis},scale);
+        const direction=offset===0?null:gunModelDirection({directionDesign:gun.axis},scale);
         for(let component=0;component<3;component++){
           const delta=offset===0?0:Math.fround(-direction[component]*offset/scale[component]),at=slot*4+component;
           if(!Number.isFinite(delta))throw Error('Non-finite GPU recoil delta');

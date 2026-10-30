@@ -580,7 +580,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;
  o.normal=vec3f(c*normAdj.x-s*normAdj.z,normAdj.y,s*normAdj.x+c*normAdj.z);
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
- o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.canopyAO=forestNativeCanopyAO(vertex);o.coverageSeed=forestCoverageHash(vertex^(forestVisible[forestBin.x+instance]*0x9e3779b9u));o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
+ o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.canopyAO=forestNativeCanopyAO(vertex);o.coverageSeed=forestCoverageHash(vertex^(forestVisible[forestBin.x+instance]*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
 // Native wood clustering + original-leaf field surface. The reduced mesh has
 // source linear pigment, not native UV/material maps or an atlas cutout.
@@ -589,7 +589,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
  var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
- o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
+ o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
  if(in.world.y<in.nativeSoil){discard;}

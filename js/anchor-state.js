@@ -52,14 +52,23 @@ function anchorHousedPosition(boat) {
   return {x:p.x+offset[0],y:p.y+offset[1],z:p.z+offset[2]};
 }
 
+// The active coastal region (procedural, placed or world-offset terrain); the
+// Saba LiDAR frame is the fallback for terrain objects without a region.
+function anchorTerrainRegion(terrain) {
+  const r=terrain?.region;
+  return r&&Number.isFinite(r.x)&&Number.isFinite(r.z)&&Number.isFinite(r.span)&&r.span>0?r:ISLAND;
+}
+
 function anchorTerrainPoints(terrain) {
-  if(anchorLandmarks.has(terrain))return anchorLandmarks.get(terrain);
+  const region=anchorTerrainRegion(terrain),key=`${region.x},${region.z},${region.span}`;
+  const cached=anchorLandmarks.get(terrain);
+  if(cached&&cached.key===key)return cached.points;
   const points=[];
   for(let j=0;j<=64;j++)for(let i=0;i<=64;i++){
-    const x=ISLAND.x+(i/64-.5)*ISLAND.span,z=ISLAND.z+(j/64-.5)*ISLAND.span,y=terrain.height(x,z);
+    const x=region.x+(i/64-.5)*region.span,z=region.z+(j/64-.5)*region.span,y=terrain.height(x,z);
     if(y>1)points.push({x,y,z});
   }
-  anchorLandmarks.set(terrain,points);return points;
+  anchorLandmarks.set(terrain,{key,points});return points;
 }
 
 export function anchorLandVisible(boat,{terrain,settings={},eye}={}) {
@@ -86,7 +95,8 @@ export function anchorEligibility(boat,environment={}) {
   const result={allowed:false,reason:'No coastal sounding available',depth:null,depthFathoms:null,
     source:'Simulated coastal sounding',point,bed:null};
   if(!terrain?.height)return result;
-  if(Math.abs(point.x-ISLAND.x)>=ISLAND.span/2||Math.abs(point.z-ISLAND.z)>=ISLAND.span/2)return result;
+  const region=anchorTerrainRegion(terrain);
+  if(Math.abs(point.x-region.x)>=region.span/2||Math.abs(point.z-region.z)>=region.span/2)return result;
   const bed=terrain.height(point.x,point.z),depth=-bed;
   if(!Number.isFinite(bed))return result;
   result.bed=bed;result.depth=depth;result.depthFathoms=metresToFathoms(depth);

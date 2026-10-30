@@ -109,11 +109,18 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
   }
   const mastGroups = ['fore', 'main', 'mizzen'];
   for (let i = 0; i < 3; i++) {
-    const mastCap = boat.damage?.sunk ? 0 : (boat.damage?.mastIntegrity?.[mastGroups[i]] ?? 1);
+    const mGroup = mastGroups[i];
+    const mastInt = boat.damage?.sunk ? 0 : sailClamp(boat.damage?.mastIntegrity?.[mGroup] ?? 1, 0, 1);
+    const mState = boat.damage?.mastState?.[mGroup] ?? 0;
+    const stateCap = mState >= 2 ? 0 : mState === 1 ? 0.42 : 1;
+    const mastCap = mastInt * stateCap;
     const key = SAIL_KEYS[i];
     if (mastCap < 1 && typeof boat[key] === 'number' && boat[key] > mastCap) boat[key] = mastCap;
-    const targetSet = Math.min(sailClamp(boat[key] ?? 1, 0, 1), mastCap);
-    s.set[i] += sailClamp(targetSet - s.set[i], -dt * 0.18 * (boat.crewSailRate?.[i] ?? 1), dt * 0.18 * (boat.crewSailRate?.[i] ?? 1));
+    const requested = sailClamp(boat[key] ?? 1, 0, 1);
+    const targetSet = Math.min(requested, mastCap) * (0.25 + 0.75 * mastCap);
+    const losingCanvas = (boat.damage?.sunk || mastCap < 1 - 1e-4) && s.set[i] > targetSet + 1e-4;
+    const rate = losingCanvas ? (boat.damage?.sunk ? 0.85 : 1.8) : 0.18 * (boat.crewSailRate?.[i] ?? 1);
+    s.set[i] += sailClamp(targetSet - s.set[i], -dt * rate, dt * rate);
   }
   // Yards and lateen take time to brace/tack; forces use this actual trim.
   s.squareYaw += sailClamp(s.squareTarget - s.squareYaw, -dt * 0.55, dt * 0.55);
@@ -145,8 +152,15 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
   // subtract all rigid motion, including heave; otherwise rising/turning sails
   // see the air as if those components of their motion did not exist.
   const ox=pitchRate,oy=-yawRate-rollRate*sp,oz=rollRate*cp;
+  const mastGroups=['fore','main','mizzen'];
+  const ripPenalty=(boat.damage?.sailRips??0)>0?Math.max(0.20,1-(boat.damage.sailRips)*0.045):1;
   for(let m=0;m<3;m++){
     let fill=0,area=0;
+    const mGroup=mastGroups[m];
+    const mastInt=boat.damage?.sunk?0:sailClamp(boat.damage?.mastIntegrity?.[mGroup]??1,0,1);
+    const mState=boat.damage?.mastState?.[mGroup]??0;
+    const stateEff=mState>=2?0:mState===1?0.38:1;
+    const mastEff=mastInt*mastInt*stateEff*ripPenalty;
     const group=geometry.groups?geometry.groups[m]:panels,start=geometry.groups?0:m*geometry.indices.length,count=geometry.groups?group.length:geometry.indices.length;
     for(let j=0;j<count;j++){
       const panel=group[start+j];
@@ -161,10 +175,11 @@ export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 
       const [fx,fy,fz]=force;
       const mx=ry*fz-rz*fy,my=rz*fx-rx*fz,mz=rx*fy-ry*fx;
       const rollMoment=-sp*my+cp*mz;
-      s.forward-=fz;s.side+=fx;s.heaveForce+=fy;s.rollMoment+=rollMoment;s.pitchMoment+=mx;s.yawMoment-=my;
-      s.panelSide[m]+=fx;s.panelMoment[m]+=rollMoment;area+=panel.area;
+      const driveFz=fz<0?fz*mastEff:fz;
+      s.forward-=driveFz;s.side+=fx*mastEff;s.heaveForce+=fy;s.rollMoment+=rollMoment*mastEff;s.pitchMoment+=mx*mastEff;s.yawMoment-=my;
+      s.panelSide[m]+=fx*mastEff;s.panelMoment[m]+=rollMoment*mastEff;area+=panel.area;
     }
-    s.rig[m].targetFill=area>0?fill/area:0;
+    s.rig[m].targetFill=area>0?(fill/area)*(0.25+0.75*mastEff):0;
     s.lateenFill+=s.rig[m].fill*area;s.area+=area;
   }
   s.lateenFill=s.area>0?s.lateenFill/s.area:0;
