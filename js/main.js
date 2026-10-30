@@ -97,8 +97,11 @@ const hasFallbackLandfallCoords=!hasExplicitLatLon&&Number.isFinite(rawLat)&&Num
   (Math.abs(rawLat-ISLAND.latitude)>0.12||Math.abs(rawLon-ISLAND.longitude)>0.12)&&
   (qs.has('landfall')||qs.has('region')||(Boolean(matchedSpanishMain)&&qs.has('boatZ')&&Math.abs(Number(qs.get('boatZ'))-ISLAND.z)<4000));
 const HAS_CUSTOM_COORDS=hasExplicitLatLon||hasFallbackLandfallCoords;
-const HAS_COASTAL_REGION=(qs.has('region')&&qs.get('region')!=='saba')||HAS_CUSTOM_COORDS;
-const LAND_STAGE=(qs.has('landfall')||HAS_COASTAL_REGION)?(Object.hasOwn(LANDFALL_VIEWS,qs.get('landfall'))?qs.get('landfall'):HAS_COASTAL_REGION?'coast':'approach'):null;
+const IS_HEADLESS_TEST=qs.has('w')||qs.has('h')||qs.has('shot')||Boolean(window.victoryCheck)||Boolean(window.check);
+const DEFAULT_LISBON_DOCK=!BROADSIDE_SCENARIO&&!IS_HEADLESS_TEST&&qs.get('ocean')!=='1'&&!qs.has('landfall')&&!qs.has('region')&&!HAS_CUSTOM_COORDS&&!qs.has('cam')&&!qs.has('boatX')&&!qs.has('boatZ');
+const HAS_COASTAL_REGION=(qs.has('region')&&qs.get('region')!=='saba')||HAS_CUSTOM_COORDS||DEFAULT_LISBON_DOCK;
+const VALID_LAND_STAGES=new Set([...Object.keys(LANDFALL_VIEWS),'harbor','dock']);
+const LAND_STAGE=(qs.has('landfall')||HAS_COASTAL_REGION)?(VALID_LAND_STAGES.has(qs.get('landfall'))?qs.get('landfall'):DEFAULT_LISBON_DOCK?'dock':HAS_COASTAL_REGION?'coast':'approach'):null;
 const LAND_WEATHER=Object.hasOwn(LANDFALL_WEATHER,qs.get('weather'))?qs.get('weather'):'clear';
 const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
@@ -874,7 +877,7 @@ async function main() {
     modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: SHIP_ID!=='nina'?shipAsset.model.runtime.length:param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
     beam: SHIP_ID!=='nina'?shipAsset.model.runtime.beam:param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', LAND_STAGE?((activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE]).heading??0):BROADSIDE_SCENARIO?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',defaultCanvas,0,1), sailMain:param('sailMain',defaultCanvas,0,1), sailMizzen:param('sailMizzen',defaultCanvas,0,1),
-    speed: param('boatSpeed', BROADSIDE_SCENARIO ? 4.2 : 6, 0, 40), eye: param('boatEye',SHIP_ID!=='nina'?shipAsset.model.nodes['helm.camera'].position[1]*shipAsset.model.designFrame.verticalScale:HELM_EYE_HEIGHT,1,25),
+    speed: param('boatSpeed', LAND_STAGE === 'dock' ? 1.5 : BROADSIDE_SCENARIO ? 4.2 : 6, 0, 40), eye: param('boatEye',SHIP_ID!=='nina'?shipAsset.model.nodes['helm.camera'].position[1]*shipAsset.model.designFrame.verticalScale:HELM_EYE_HEIGHT,1,25),
     provisionDays:param('provisionDays',getShipParts(SHIP_ID).loading.provisionDays,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
     rowingEffort:param('rowingEffort',0,0,1),rowingTurn:param('rowingTurn',0,-1,1),rowingCadence:param('rowingCadence',ROWING_DESIGNS[SHIP_ID]?.propulsion.cadence??.45,.12,.70),
     x:param('boatX',cam.x,-1e7,1e7),z:param('boatZ',cam.z,-1e7,1e7),rudderTarget: param('boatRudder', 0, -35, 35), rudder: param('boatRudder', 0, -35, 35), yawRate: 0,

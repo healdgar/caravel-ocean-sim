@@ -45,6 +45,7 @@ import {
   WARP_TIERS,
 } from '../js/voyage/passage.js';
 import { createEncounterDirector } from '../js/voyage/encounters.js';
+import { createVoyageController } from '../js/voyage/voyage-controller.js';
 
 const MARCH_1550 = Date.UTC(1550, 2, 24, 12);
 const JULY_1550 = Date.UTC(1550, 6, 15, 12);
@@ -327,4 +328,70 @@ test('open-ocean encounter director triggers whale breaches and strange-sail loo
   assert.equal(hailRes.combatStarted, false);
   assert.ok(Math.abs(voyage.dr.lon - voyage.true.lon) < 1.0, 'hailing a friendly pilot refines DR longitude');
   assert.ok(voyage.lonUncNm < 25, 'hailing reduces longitude uncertainty');
+});
+
+test('high-warp ship heading into a continent stops offshore in navigable water and commits terrain offset', () => {
+  // 1. Coarse coastline index forwardCoast & overland guard when terrain is still generating
+  const iberiaRing = [[-9.5, 37.0], [-7.0, 37.0], [-7.0, 42.0], [-9.5, 42.0], [-9.5, 37.0]];
+  const coastIdx = createCoastlineIndex([iberiaRing]);
+  const fwd = coastIdx.forwardCoast(38.7, -9.8, 90, { maxKm: 120, halfAngle: 55 });
+  assert.ok(fwd && fwd.distanceKm > 10 && fwd.distanceKm < 40, 'forwardCoast detects continent ahead');
+
+  // 2. Resident coastal terrain shoreline guard + zero uncommitted worldOffset (trees stay locked to ground)
+  const worldOffset = { x: 0, z: 0 };
+  const mockTerrain = {
+    region: { x: 0, z: -6000, span: 8192 },
+    // Shoreline at z = -6000: south (z > -6000) is -16 m water; north (z < -6000) rises into +35 m land
+    height(x, z) {
+      const lz = z - worldOffset.z;
+      return lz >= -6000 ? -16 : Math.min(35, (-6000 - lz) * 0.25 - 2);
+    },
+    setWorldOffset(dx, dz) {
+      worldOffset.x = dx;
+      worldOffset.z = dz;
+    },
+    getWorldOffset() {
+      return { ...worldOffset };
+    },
+    commitWorldOffset({ boat, camera }) {
+      const dx = worldOffset.x, dz = worldOffset.z;
+      if (boat) { boat.x -= dx; boat.z -= dz; }
+      if (camera) { camera.x -= dx; camera.z -= dz; }
+      worldOffset.x = 0;
+      worldOffset.z = 0;
+      return { dx, dz };
+    },
+  };
+
+  const boat = {
+    x: 0,
+    z: -5200,
+    heading: 0, // Heading due North straight into the continent!
+    surgeVelocity: 4.5,
+    leewayVelocity: 0,
+    modelId: 'nina',
+    hydrodynamics: { draft: 2.0 },
+  };
+  const cam = { x: 0, z: -5180, y: 6 };
+  const P = { windSpeed: 7, windDir: 180, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1, cloudBase: 1.2, cloudDepth: 1.8, cloudDensity: 1, cloudAnvil: 0.05 };
+
+  const ctrl = createVoyageController({
+    boat,
+    P,
+    getTerrain: () => mockTerrain,
+    getCamera: () => cam,
+    loadLandRings: () => Promise.resolve([iberiaRing]),
+    loadTile: () => Promise.resolve(null),
+  });
+  ctrl.start({ lat: 38.70, lon: -9.14, compassCourse: 0 });
+  ctrl.setWarp('crossing');
+
+  for (let i = 0; i < 60; i++) {
+    ctrl.update(0.05, i * 50);
+  }
+
+  assert.equal(worldOffset.x, 0, 'worldOffset.x is committed so trees never detach from ground');
+  assert.equal(worldOffset.z, 0, 'worldOffset.z is committed so trees never detach from ground');
+  assert.ok(mockTerrain.height(boat.x, boat.z) <= -2.2, `ship stopped in navigable water before the shore (bed=${mockTerrain.height(boat.x, boat.z).toFixed(2)}m, z=${boat.z.toFixed(1)})`);
+  assert.equal(ctrl.voyage.tier, 'deck', 'dropped warp to 1× real time upon reaching shoal water ahead');
 });

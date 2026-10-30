@@ -44,11 +44,11 @@ export const WARP_TIERS = Object.freeze([
 ]);
 export const warpTier = (id) => WARP_TIERS.find((t) => t.id === id) ?? WARP_TIERS[0];
 
-/** Default departure: Sanlúcar de Barrameda bar, spring 1550 (proleptic Gregorian UTC). */
+/** Default departure: Lisboa · Ribeira das Naus (Tagus Estuary), spring 1550 (proleptic Gregorian UTC). */
 export const DEFAULT_DEPARTURE = Object.freeze({
-  name: 'Sanlúcar de Barrameda',
-  lat: 36.72,
-  lon: -6.52,
+  name: 'Lisboa · Ribeira das Naus',
+  lat: 38.707,
+  lon: -9.136,
   dateMs: Date.UTC(1550, 2, 24, 8, 0, 0), // = 14 March 1550 Julian
 });
 
@@ -234,7 +234,7 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
     if (prevB !== null && Math.abs(w.beaufort - prevB) >= 2) {
       events.push({ type: 'weather', from: prevB, to: w.beaufort, weather: w });
     }
-    if (w.nearestSystem && w.nearestSystem.intensity > 0.35 && w.nearestSystem.distanceKm < w.nearestSystem.radiusKm * 1.1 && !voyage.stormWarned) {
+    if (!voyage.passive && voyage.distanceTrueNm > 5 && w.nearestSystem && w.nearestSystem.intensity > 0.35 && w.nearestSystem.distanceKm < w.nearestSystem.radiusKm * 1.1 && !voyage.stormWarned) {
       voyage.stormWarned = true;
       events.push({ type: 'storm', system: w.nearestSystem, weather: w });
     } else if (!w.nearestSystem || w.nearestSystem.distanceKm > w.nearestSystem.radiusKm * 1.6) {

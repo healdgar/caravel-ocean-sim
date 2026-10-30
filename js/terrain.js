@@ -402,7 +402,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const coordPresetMatch=hasCustomCoords
     ?Object.values(SPANISH_MAIN_1550_REGIONS).find(r=>Math.abs(rawLat-r.latitude)<0.05&&Math.abs(rawLon-r.longitude)<0.05)??null
     :null;
-  const regionParam=explicitId||search.get('region')||(coordPresetMatch?coordPresetMatch.id:null);
+  const defaultLisbonDeparture=!explicitId&&!explicitObj&&!search.has('region')&&!hasCustomCoords&&!search.has('landfall')&&search.get('ocean')!=='1';
+  const regionParam=explicitId||search.get('region')||(coordPresetMatch?coordPresetMatch.id:null)||(defaultLisbonDeparture?'lisbon':null);
   const presetMatch=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
   const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
   const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05);
@@ -554,11 +555,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(sx===0&&sz===0)return null;
     return loadedSections.get(`${sx},${sz}`)||null;
   };
+  const clampToLoadedLandBorder=(x,z,sampleFn)=>{
+    const h=sampleFn(heights,x,z,activeRegion);
+    if(h>-119)return h;
+    const half=activeRegion.span*0.5-1;
+    const cx=Math.max(activeRegion.x-half,Math.min(activeRegion.x+half,x));
+    const cz=Math.max(activeRegion.z-half,Math.min(activeRegion.z+half,z));
+    const edgeH=sampleFn(heights,cx,cz,activeRegion);
+    return edgeH>-1.5?edgeH:h;
+  };
   const groundSample=(x,z)=>{
     if(proceduralPack){
       const sec=findNeighborSection(x,z);
       if(sec)return terrainSurfaceSample(sec.heights,x,z,sec.region);
-      return terrainSurfaceSample(heights,x,z,activeRegion);
+      return clampToLoadedLandBorder(x,z,terrainSurfaceSample);
     }
     return sampleTerrainNear(nearTile,heights,x,z);
   };
@@ -566,7 +576,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(proceduralPack){
       const sec=findNeighborSection(x,z);
       if(sec)return terrainSample(sec.heights,x,z,sec.region);
-      return terrainSample(heights,x,z,activeRegion);
+      return clampToLoadedLandBorder(x,z,terrainSample);
     }
     return terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z);
   };
@@ -1555,8 +1565,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     get streamedSectionCount(){return loadedSections.size;},
     discovery,applyUpgradedPack,
-    safeStart:(view,boat)=>safeLandfallStart(heights,view,boat,activeRegion,heightSample),
-    constrain(boat,x,z){return constrainIslandMotion(heights,boat,x,z,heightSample,activeRegion,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding});},
+    safeStart(view,boat){return safeLandfallStart(heights,view,boat,this.region,this.height);},
+    constrain(boat,x,z){return constrainIslandMotion(heights,boat,x,z,this.height,this.region,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding});},
     waveShelter(x,z,swellDirRad=0){
       const sx=-Math.cos(swellDirRad),sz=-Math.sin(swellDirRad);
       const px=-sz,pz=sx;

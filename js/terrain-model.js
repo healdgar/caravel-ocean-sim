@@ -370,24 +370,24 @@ export function safeLandfallStart(heights,view,boat,region=ISLAND,sample=null){
   const hasCoastalBearing=Number.isFinite(region?.shoreBearing)&&region!==ISLAND;
   const hRad=((view.heading??region?.shoreBearing??0)*Math.PI)/180;
   const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
-  const hasForwardRoom=(x,z)=>!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*90,z+fwdZ*90,region,sample);
+  const hasForwardRoom=(x,z)=>!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,sample);
   let firstValid=null;
-  for(let d=50;d<=limit;d+=50){
-    const x=view.x+ux*d,z=view.z+uz*d;
-    if(islandHullClearance(heights,boat,x,z,region,sample)){
-      if(!firstValid)firstValid={x,z};
-      if(hasForwardRoom(x,z))return result(x,z);
-    }
-  }
   if(hasCoastalBearing){
     const sbRad=(region.shoreBearing*Math.PI)/180;
     const offX=-Math.sin(sbRad),offZ=Math.cos(sbRad);
-    for(let d=50;d<=limit;d+=50){
+    for(let d=16;d<=limit;d+=16){
       const x=view.x+offX*d,z=view.z+offZ*d;
       if(islandHullClearance(heights,boat,x,z,region,sample)){
         if(!firstValid)firstValid={x,z};
         if(hasForwardRoom(x,z))return result(x,z);
       }
+    }
+  }
+  for(let d=50;d<=limit;d+=50){
+    const x=view.x+ux*d,z=view.z+uz*d;
+    if(islandHullClearance(heights,boat,x,z,region,sample)){
+      if(!firstValid)firstValid={x,z};
+      if(hasForwardRoom(x,z))return result(x,z);
     }
   }
   if(firstValid)return result(firstValid.x,firstValid.z);

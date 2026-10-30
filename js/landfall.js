@@ -13,6 +13,8 @@ export const LANDFALL_SEA = Object.freeze({
   horizon:Object.freeze({swellHs:.65,windSpeed:5.5}),
   approach:Object.freeze({swellHs:.65,windSpeed:5.5}),
   coast:Object.freeze({swellDir:22,swellHs:1.2,swellLength:95,windSpeed:5.5,windDir:118}),
+  harbor:Object.freeze({swellDir:22,swellHs:.55,swellLength:75,windSpeed:5.2,windDir:118}),
+  dock:Object.freeze({swellDir:22,swellHs:.35,swellLength:65,windSpeed:5.0,windDir:118}),
 });
 
 // Compute natural shoreward swell and coastal breeze directions from a region's shoreward bearing.
@@ -27,23 +29,25 @@ export function coastalSeaForRegion(regionSpec,stage='coast'){
   if(!region||region.id==='saba')return base;
   const shoreBearing=Number.isFinite(region.shoreBearing)?region.shoreBearing:112;
   const swellDir=((Math.round(shoreBearing-90)%360)+360)%360;
-  const windDir=(swellDir+36)%360;
+  const windDir=stage==='dock'?((Math.round(shoreBearing-108)%360)+360)%360:(swellDir+36)%360;
   return Object.freeze({...base,swellDir,windDir});
 }
 
 // Preset yaw is absolute in free view, but boarding uses a relative look angle.
 // Explicit camera links already carry their intended angle and take precedence.
 export function landfallCameraYaw(stage,mode,explicitCamera,currentYaw){
-  return LANDFALL_VIEWS[stage]?.heading!==undefined&&mode==='boat'&&!explicitCamera?0:currentYaw;
+  const isKnownStage=LANDFALL_VIEWS[stage]?.heading!==undefined||stage==='dock'||stage==='harbor';
+  return isKnownStage&&mode==='boat'&&!explicitCamera?0:currentYaw;
 }
 
 export function landfallStageURL(href,stage,weather='clear'){
-  const view=LANDFALL_VIEWS[stage];if(!view)throw new RangeError('Unknown landfall stage');
+  const view=LANDFALL_VIEWS[stage]||(stage==='dock'||stage==='harbor'?LANDFALL_VIEWS.coast:null);
+  if(!view)throw new RangeError('Unknown landfall stage');
   const url=new URL(href);
-  for(const key of ['cam','boatX','boatZ','boatHeading','boatRudder','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
+  for(const key of ['ocean','cam','boatX','boatZ','boatHeading','boatRudder','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
   url.searchParams.set('landfall',stage);url.searchParams.set('view','boat');url.searchParams.set('boat','1');
-  url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed','4');url.searchParams.set('weather',weather);
-  for(const [key,value]of Object.entries(LANDFALL_SEA[stage]))url.searchParams.set(key,String(value));
+  url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed',stage==='dock'?'1.5':'4');url.searchParams.set('weather',weather);
+  for(const [key,value]of Object.entries(LANDFALL_SEA[stage]||LANDFALL_SEA.coast))url.searchParams.set(key,String(value));
   return url;
 }
 
@@ -53,7 +57,9 @@ export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',
   url.searchParams.set('region',region.id);
   url.searchParams.set('lat',String(region.latitude));
   url.searchParams.set('lon',String(region.longitude));
-  url.searchParams.set('boatHeading',String(region.shoreBearing??112));
+  const dockTurn=region.id==='lisbon'||region.portType==='royal-arsenal-dock'?77:108;
+  const heading=stage==='dock'?(((region.shoreBearing??112)-dockTurn)%360+360)%360:(region.shoreBearing??112);
+  url.searchParams.set('boatHeading',String(heading));
   const sea=coastalSeaForRegion(region,stage);
   for(const [key,value]of Object.entries(sea))url.searchParams.set(key,String(value));
   return url;
@@ -122,7 +128,13 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
   button.onclick=()=>setOpen(panel.hidden);panel.querySelector('.panel-header button').onclick=()=>setOpen(false);
   addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){setOpen(false);button.focus();}});
-  for(const [id,label] of [['horizon','Horizon'],['approach','Approach'],['coast',isSaba?'Wells Bay approach':isWilderness?'Wilderness coast approach':'Harbor / coast approach']]){
+  const stageButtons=[
+    ['horizon','Horizon'],
+    ['approach','Approach'],
+    ['coast',isSaba?'Wells Bay approach':isWilderness?'Wilderness coast approach':'Harbor / coast approach'],
+    ...(!isSaba&&!isWilderness?[['dock',region.id==='lisbon'?'Lisbon departure dock':'Harbor dock']]:[]),
+  ];
+  for(const [id,label] of stageButtons){
     const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-pressed',String(active&&stage===id));
     b.onclick=()=>{
       if(isSaba){
@@ -146,7 +158,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
       history.replaceState(null,'',url);};
     weatherButtons.set(id,b);panel.querySelector('.landfall-weather').append(b);
   }
-  panel.querySelector('#landfall-ocean').onclick=()=>{const url=new URL(location.href);for(const k of ['landfall','weather','cam','region','lat','lon'])url.searchParams.delete(k);location.assign(url.href);};
+  panel.querySelector('#landfall-ocean').onclick=()=>{const url=new URL(location.href);for(const k of ['landfall','weather','cam','region','lat','lon'])url.searchParams.delete(k);url.searchParams.set('ocean','1');location.assign(url.href);};
   let chartLoaded=false;
   panel.querySelector('details').addEventListener('toggle',async e=>{
     if(!e.target.open||chartLoaded)return;chartLoaded=true;

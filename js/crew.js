@@ -838,9 +838,9 @@ export async function createFortSoldiers({
           }
         }
         if (shouldSamplePoses) {
-          device.queue.writeBuffer(b.bones, 0, b.poses, 0, b.people.length * 65 * 16 * 4);
+          device.queue.writeBuffer(b.bones, 0, b.poses, 0, b.people.length * 65 * 16);
         }
-        device.queue.writeBuffer(b.actor, 0, b.actors, 0, b.people.length * CREW_ACTOR_FLOATS * 4);
+        device.queue.writeBuffer(b.actor, 0, b.actors, 0, b.people.length * CREW_ACTOR_FLOATS);
       }
     },
     draw(pass) {

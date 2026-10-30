@@ -438,29 +438,111 @@ export function createVoyageController(cfg) {
     if (!voyage || !(dt > 0)) return { spectrum: false, env: false };
     const terrain = getTerrain();
     const nearTerrainAtRealtime = Boolean(terrain) && voyage.rate <= 1.05;
+    const prevTrue = { lat: voyage.true.lat, lon: voyage.true.lon };
+    const prevDr = { lat: voyage.dr.lat, lon: voyage.dr.lon };
+    const prevDistTrue = voyage.distanceTrueNm;
+    const prevDistLogged = voyage.distanceLoggedNm;
+    const wasOnCoarseLand = Boolean(coastIndex?.isLand?.(prevTrue.lat, prevTrue.lon));
     const events = stepVoyage(voyage, dt, { boat, ignoreCurrent: nearTerrainAtRealtime });
     handleEvents(events);
 
-    // Slide the streamed terrain by however much further the voyage moved than the hull did,
-    // so land stays at its true bearing and distance during warp.
+    const dxLocal = boat.x - approach.lastBoat.x, dzLocal = boat.z - approach.lastBoat.z;
+    const { eastM, northM } = voyage.lastStep;
+    const extraX = eastM - dxLocal, extraZ = -northM - dzLocal;
+    const extraDist = Math.hypot(extraX, extraZ);
+
+    // Prevent high warp from crossing onto continental land before coastal terrain has spawned.
+    if (!terrain && voyage.rate > 1.05 && extraDist > 1 && !wasOnCoarseLand && coastIndex?.isLand?.(voyage.true.lat, voyage.true.lon)) {
+      let lo = 0, hi = 1;
+      for (let iter = 0; iter < 8; iter++) {
+        const mid = (lo + hi) * 0.5;
+        const mLat = prevTrue.lat + (voyage.true.lat - prevTrue.lat) * mid;
+        const mLon = prevTrue.lon + (voyage.true.lon - prevTrue.lon) * mid;
+        if (coastIndex.isLand(mLat, mLon)) hi = mid;
+        else lo = mid;
+      }
+      const safeFrac = Math.max(0, lo - Math.min(lo, 1500 / Math.max(1500, extraDist)));
+      voyage.true.lat = prevTrue.lat + (voyage.true.lat - prevTrue.lat) * safeFrac;
+      voyage.true.lon = prevTrue.lon + (voyage.true.lon - prevTrue.lon) * safeFrac;
+      voyage.dr.lat = prevDr.lat + (voyage.dr.lat - prevDr.lat) * safeFrac;
+      voyage.dr.lon = prevDr.lon + (voyage.dr.lon - prevDr.lon) * safeFrac;
+      voyage.distanceTrueNm = prevDistTrue + (voyage.distanceTrueNm - prevDistTrue) * safeFrac;
+      voyage.distanceLoggedNm = prevDistLogged + (voyage.distanceLoggedNm - prevDistLogged) * safeFrac;
+      voyage.tier = 'deck';
+      voyage.rate = 1;
+      voyage.targetRate = 1;
+      voyage.warpCap = 1;
+      scanTimer = 0;
+      showToast('Land ahead — dropping to real time off the coast.', 6);
+    }
+
+    // Slide the streamed terrain (or commit onto the hull when commitWorldOffset is available)
+    // so land, trees, and harbour works stay locked together and cannot be warped through.
     if (terrain && approach.spawnedTerrain === terrain && typeof terrain.setWorldOffset === 'function') {
-      const dxLocal = boat.x - approach.lastBoat.x, dzLocal = boat.z - approach.lastBoat.z;
-      const { eastM, northM } = voyage.lastStep;
-      const sx = -(eastM - dxLocal), sz = -(-northM - dzLocal);
+      let safeFrac = 1;
+      const span = terrain.region?.span ?? 8192;
+      const tDist = Math.hypot(
+        boat.x - ((terrain.region?.x ?? 0) + approach.offset.x),
+        boat.z - ((terrain.region?.z ?? 0) + approach.offset.z)
+      );
+      if (extraDist > 1e-4 && tDist < span * 3.5 && typeof terrain.height === 'function') {
+        const draft = boat.hydrodynamics?.draft ?? 2.0;
+        const minSafeBed = -Math.max(3.2, draft * 1.35);
+        const startBed = terrain.height(boat.x, boat.z);
+        const dirX = extraX / extraDist, dirZ = extraZ / extraDist;
+        const bowLead = Math.max(18, (boat.length ?? 22) * 0.65);
+        const steps = Math.max(1, Math.min(2000, Math.ceil(extraDist / 8)));
+        for (let k = 1; k <= steps; k++) {
+          const frac = k / steps;
+          const wx = boat.x + extraX * frac, wz = boat.z + extraZ * frac;
+          const hKeel = terrain.height(wx, wz);
+          const hBow = terrain.height(wx + dirX * bowLead, wz + dirZ * bowLead);
+          const h = Math.max(hKeel, hBow);
+          if (h > minSafeBed && (startBed <= minSafeBed || h > startBed + 0.05)) {
+            safeFrac = (k - 1) / steps;
+            break;
+          }
+        }
+        if (safeFrac < 1) {
+          voyage.true.lat = prevTrue.lat + (voyage.true.lat - prevTrue.lat) * safeFrac;
+          voyage.true.lon = prevTrue.lon + (voyage.true.lon - prevTrue.lon) * safeFrac;
+          voyage.dr.lat = prevDr.lat + (voyage.dr.lat - prevDr.lat) * safeFrac;
+          voyage.dr.lon = prevDr.lon + (voyage.dr.lon - prevDr.lon) * safeFrac;
+          voyage.distanceTrueNm = prevDistTrue + (voyage.distanceTrueNm - prevDistTrue) * safeFrac;
+          voyage.distanceLoggedNm = prevDistLogged + (voyage.distanceLoggedNm - prevDistLogged) * safeFrac;
+          if (voyage.rate > 1.05) {
+            voyage.tier = 'deck';
+            voyage.rate = 1;
+            voyage.targetRate = 1;
+            voyage.warpCap = 1;
+            showToast('Shoal water ahead — dropping to real time before running aground.', 6);
+          }
+        }
+      }
+      const sx = -extraX * safeFrac, sz = -extraZ * safeFrac;
       if (Math.abs(sx) > 1e-4 || Math.abs(sz) > 1e-4) {
         approach.offset.x += sx;
         approach.offset.z += sz;
         terrain.setWorldOffset(approach.offset.x, approach.offset.z);
         approach.committed = false;
       }
-      if (!approach.committed && voyage.rate <= 1.05 && (approach.stage === 'inshore' || approach.stage === 'sighting')) {
-        terrain.commitWorldOffset?.({
+      if (!approach.committed && typeof terrain.commitWorldOffset === 'function') {
+        const preCommitX = boat.x, preCommitZ = boat.z;
+        terrain.commitWorldOffset({
           boat,
           camera: cfg.getCamera?.() ?? null,
           vessels: cfg.getVessels?.() ?? null,
         });
         approach.offset = { x: 0, z: 0 };
         approach.committed = true;
+        if (tDist < span * 2.5 && typeof terrain.constrain === 'function') {
+          const cdx = boat.x - preCommitX, cdz = boat.z - preCommitZ;
+          const cDist = Math.hypot(cdx, cdz);
+          const clampDist = Math.min(cDist, Math.max(0.5, Math.hypot(boat.surgeVelocity ?? 0, boat.leewayVelocity ?? 0) * dt));
+          const cx = cDist > 1e-4 ? boat.x - (cdx / cDist) * clampDist : preCommitX;
+          const cz = cDist > 1e-4 ? boat.z - (cdz / cDist) * clampDist : preCommitZ;
+          terrain.constrain(boat, cx, cz);
+        }
       }
     }
     approach.lastBoat = { x: boat.x, z: boat.z };
@@ -492,8 +574,9 @@ export function createVoyageController(cfg) {
     } else if (!advice) lastAdvice = null;
 
     scanTimer -= dt;
-    if (scanTimer <= 0 && !voyage.passive) {
-      scanTimer = 0.5;
+    const fastNearCoast = voyage.rate > 60 && (approach.coastKm < 180 || Boolean(terrain));
+    if ((scanTimer <= 0 || fastNearCoast) && !voyage.passive) {
+      scanTimer = fastNearCoast ? 0.08 : 0.5;
       runApproach(terrain);
     }
     if (toastTimer > 0) {
@@ -557,8 +640,16 @@ export function createVoyageController(cfg) {
     else if (scan.complete) approach.coastKm = Math.max(175, indexKm);
     else approach.coastKm = Math.min(indexKm, 175); // tiles still loading: stay conservative
 
-    const fwdLand = scan.forwardVisible ?? scan.forwardHighest ?? scan.forwardNearest;
-    const fwdCoastKm = scan.forwardNearest ? scan.forwardNearest.distanceKm : Infinity;
+    const indexForward = coastIndex?.forwardCoast
+      ? coastIndex.forwardCoast(lat, lon, courseDeg, { maxKm: 200, halfAngle: 55 })
+      : null;
+    const fwdLand = scan.forwardVisible ?? scan.forwardHighest ?? scan.forwardNearest ?? (!scan.complete ? indexForward : null);
+    const demFwdKm = scan.forwardNearest ? scan.forwardNearest.distanceKm : Infinity;
+    const fwdCoastKm = !scan.complete && indexForward
+      ? Math.min(demFwdKm, indexForward.distanceKm)
+      : Number.isFinite(demFwdKm)
+      ? demFwdKm
+      : (indexForward ? indexForward.distanceKm : Infinity);
     approach.sightKm = scan.forwardHighest
       ? visibilityRangeKm(eyeM, scan.forwardHighest.elevation)
       : scan.highest
@@ -601,13 +692,31 @@ export function createVoyageController(cfg) {
       inPack,
     });
 
+    // Direct local heightfield probe along the ship's course when terrain is resident.
+    let localWarpCap = 3600;
+    if (terrain && typeof terrain.height === 'function' && terrainDistM < (terrain.region?.span ?? 8192) * 2.5) {
+      const cRad = (courseDeg * Math.PI) / 180;
+      const sinC = Math.sin(cRad), cosC = -Math.cos(cRad);
+      const draft = boat.hydrodynamics?.draft ?? 2.0;
+      const minBed = -Math.max(2.2, draft * 1.15);
+      const startBed = terrain.height(boat.x, boat.z);
+      for (const d of [35, 80, 160, 300, 600, 1200, 2200, 3500]) {
+        const h = terrain.height(boat.x + sinC * d, boat.z + cosC * d);
+        if (h > minBed && (startBed <= minBed || h > startBed + 0.1)) {
+          localWarpCap = d <= 200 ? 1 : Math.max(1, Math.min(240, (d - 160) / (Math.max(1, ground) * 5)));
+          break;
+        }
+      }
+    }
+
     if (approach.suppressLandHo || approach.landHoCalled) {
-      // Departing or player already acknowledged Land Ho and ordered warp: only prevent running straight onto a beach dead ahead.
-      const bowDiff = scan.forwardNearest
-        ? Math.abs((((scan.forwardNearest.bearing - courseDeg + 540) % 360) - 180))
+      // Departing or player already acknowledged Land Ho and ordered warp: govern down when land lies ahead.
+      const fwdTarget = scan.forwardNearest ?? indexForward;
+      const bowDiff = fwdTarget
+        ? Math.abs((((fwdTarget.bearing - courseDeg + 540) % 360) - 180))
         : 180;
-      if (bowDiff <= 35 && fwdCoastKm < 8) {
-        voyage.warpCap = Math.max(1, Math.min(3600, ((fwdCoastKm - 1.2) * 1000) / (Math.max(0.5, ground) * 4)));
+      if (bowDiff <= 55 && fwdCoastKm < 35) {
+        voyage.warpCap = Math.max(1, Math.min(3600, ((fwdCoastKm - 1.8) * 1000) / (Math.max(0.8, ground) * 5)));
       } else {
         voyage.warpCap = 3600;
       }
@@ -623,6 +732,10 @@ export function createVoyageController(cfg) {
         demComplete: scan.complete,
       });
     }
+    if (approach.spawning && fwdCoastKm < 60) {
+      voyage.warpCap = Math.min(voyage.warpCap, fwdCoastKm < 35 ? 1 : 30);
+    }
+    voyage.warpCap = Math.min(voyage.warpCap, localWarpCap);
 
     // Land ho! (only for land ahead of the ship after clearing departure).
     const sighted = scan.forwardVisible ?? (!approach.suppressLandHo && voyage.distanceTrueNm > 25 ? scan.visible : null);
@@ -646,11 +759,11 @@ export function createVoyageController(cfg) {
     }
 
     // Stream the coastal terrain before the land tops the horizon.
-    if ((approach.stage === 'preload' || approach.stage === 'sighting' || (fwdLand && fwdCoastKm < 95 && !approach.suppressLandHo)) && spawnTerrain && !approach.spawning && !terrain) {
-      const landmark = fwdLand ?? scan.visible ?? scan.highest ?? scan.nearest;
-      if (landmark && scan.complete) {
+    if ((approach.stage === 'preload' || approach.stage === 'sighting' || (fwdLand && fwdCoastKm < 95 && (!approach.suppressLandHo || !terrain))) && spawnTerrain && !approach.spawning && !terrain) {
+      const landmark = fwdLand ?? scan.visible ?? scan.highest ?? scan.nearest ?? indexForward;
+      if (landmark && (scan.complete || fwdCoastKm < 65)) {
         approach.spawning = true;
-        const shore = coastlineToward(probe, lat, lon, landmark);
+        const shore = scan.complete ? coastlineToward(probe, lat, lon, landmark) : landmark;
         const region = resolveLandfallRegion(shore.lat, shore.lon);
         const rLat = region.latitude ?? shore.lat, rLon = region.longitude ?? shore.lon;
         const placement = regionLocalOrigin({ shipLat: lat, shipLon: lon, shipX: boat.x, shipZ: boat.z, regionLat: rLat, regionLon: rLon });
@@ -663,7 +776,33 @@ export function createVoyageController(cfg) {
             const now = regionLocalOrigin({ shipLat: voyage.true.lat, shipLon: voyage.true.lon, shipX: boat.x, shipZ: boat.z, regionLat: rLat, regionLon: rLon });
             approach.offset = { x: now.x - placement.x, z: now.z - placement.z };
             t.setWorldOffset?.(approach.offset.x, approach.offset.z);
-            approach.committed = false;
+            if (typeof t.commitWorldOffset === 'function') {
+              t.commitWorldOffset({
+                boat,
+                camera: cfg.getCamera?.() ?? null,
+                vessels: cfg.getVessels?.() ?? null,
+              });
+              approach.offset = { x: 0, z: 0 };
+              approach.committed = true;
+            } else {
+              approach.committed = false;
+            }
+            if (typeof t.height === 'function' && typeof t.safeStart === 'function') {
+              const draft = boat.hydrodynamics?.draft ?? 2.0;
+              if (t.height(boat.x, boat.z) > -Math.max(3.0, draft + 1.0)) {
+                try {
+                  const prevX = boat.x, prevZ = boat.z;
+                  const safe = t.safeStart({ x: boat.x, z: boat.z, heading: boat.heading ?? 0 }, boat);
+                  boat.x = safe.x;
+                  boat.z = safe.z;
+                  const cam = cfg.getCamera?.();
+                  if (cam && Number.isFinite(cam.x) && Number.isFinite(cam.z)) {
+                    cam.x += safe.x - prevX;
+                    cam.z += safe.z - prevZ;
+                  }
+                } catch { /* retain position if safeStart fails */ }
+              }
+            }
             approach.lastBoat = { x: boat.x, z: boat.z };
             void spawnStart;
             emit('terrain', t);

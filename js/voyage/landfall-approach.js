@@ -118,7 +118,54 @@ export function createCoastlineIndex(rings) {
     const cLat = lat + best.y / ky, cLon = approachWrapLon(lon + best.x / kx);
     return { distanceKm: bestD, lat: cLat, lon: cLon, bearing: initialBearing(lat, lon, cLat, cLon) };
   }
-  return { isLand, nearestCoast, ringCount: rings.length };
+
+  function forwardCoast(lat, lon, headingDeg, { maxKm = 200, halfAngle = 55 } = {}) {
+    lon = approachWrapLon(lon);
+    if (!Number.isFinite(headingDeg)) return nearestCoast(lat, lon, maxKm);
+    const kx = 111.32 * Math.cos(lat * APPROACH_RAD), ky = 110.57;
+    const reachLat = Math.ceil(maxKm / ky / APPROACH_CELL_DEG) + 1;
+    const reachLon = Math.ceil(maxKm / Math.max(10, kx) / APPROACH_CELL_DEG) + 1;
+    const ci = Math.floor(lon / APPROACH_CELL_DEG), cj = Math.floor(lat / APPROACH_CELL_DEG);
+    let best = null, bestD = Infinity;
+    const seen = new Set();
+    for (let di = -reachLon; di <= reachLon; di++) for (let dj = -reachLat; dj <= reachLat; dj++) {
+      const list = buckets.get(key(ci + di, cj + dj));
+      if (!list) continue;
+      for (const seg of list) {
+        if (seen.has(seg)) continue;
+        seen.add(seg);
+        const ax = approachWrapLon(seg[0] - lon) * kx, ay = (seg[1] - lat) * ky;
+        const bx = approachWrapLon(seg[2] - lon) * kx, by = (seg[3] - lat) * ky;
+        const vx = bx - ax, vy = by - ay, len2 = vx * vx + vy * vy || 1e-9;
+        for (const t of [approachClamp(-(ax * vx + ay * vy) / len2, 0, 1), 0, 0.5, 1]) {
+          const px = ax + vx * t, py = ay + vy * t, d = Math.hypot(px, py);
+          if (d >= bestD || d > maxKm) continue;
+          const cLat = lat + py / ky, cLon = approachWrapLon(lon + px / kx);
+          const brg = initialBearing(lat, lon, cLat, cLon);
+          const diff = Math.abs((((brg - headingDeg + 540) % 360) - 180));
+          if (diff <= halfAngle) {
+            bestD = d;
+            best = { distanceKm: d, lat: cLat, lon: cLon, bearing: brg };
+          }
+        }
+      }
+    }
+    for (const off of [0, -18, 18, -35, 35]) {
+      if (Math.abs(off) > halfAngle) continue;
+      const brg = (((headingDeg + off) % 360) + 360) % 360;
+      for (let d = 1.5; d <= Math.min(maxKm, bestD); d += d < 15 ? 2 : d < 50 ? 5 : 12) {
+        const p = destinationPoint(lat, lon, brg, d);
+        if (isLand(p.lat, p.lon)) {
+          bestD = d;
+          best = { distanceKm: d, lat: p.lat, lon: p.lon, bearing: brg };
+          break;
+        }
+      }
+    }
+    return best;
+  }
+
+  return { isLand, nearestCoast, forwardCoast, ringCount: rings.length };
 }
 
 // ---------------------------------------------------------------------------------------------

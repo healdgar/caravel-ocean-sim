@@ -61,14 +61,15 @@ test('Spanish Main ~1550 gazetteer resolves all curated ports with deterministic
     'santo-domingo',
     'havana',
     'san-juan',
+    'lisbon',
   ];
   assert.deepEqual(Object.keys(SPANISH_MAIN_1550_REGIONS), expectedIds);
   for (const id of expectedIds) {
     const r = resolveGlobalCoastalRegion(id);
     assert.equal(r.id, id);
     assert.equal(r.era, 1550);
-    assert.ok(r.latitude > 8 && r.latitude < 25);
-    assert.ok(r.longitude > -85 && r.longitude < -60);
+    assert.ok(r.latitude > 8 && r.latitude < 42);
+    assert.ok(r.longitude > -85 && r.longitude < -5);
     assert.ok(r.span >= 4096);
     assert.ok(r.size >= 65);
     assert.ok(Object.isFrozen(r));
@@ -76,6 +77,33 @@ test('Spanish Main ~1550 gazetteer resolves all curated ports with deterministic
   assert.throws(() => resolveGlobalCoastalRegion('atlantis'), /Unknown Spanish Main/);
   assert.throws(() => resolveGlobalCoastalRegion({ latitude: 95, longitude: 0 }), /latitude/);
   assert.throws(() => resolveGlobalCoastalRegion({ latitude: 10, longitude: 195 }), /longitude/);
+});
+
+test('1550 Lisbon departure dock (Ribeira das Naus & Cais da Índia) models L-head embarkation pier, crane, arsenal, and safe dock berth', () => {
+  const pack = generateProceduralCoastalPack('lisbon', {
+    size: 129,
+    biomeSize: 128,
+    albedoSize: 128,
+    vegetationCandidates: 1500,
+  });
+  assert.equal(pack.region.id, 'lisbon');
+  assert.equal(pack.region.portType, 'royal-arsenal-dock');
+  assert.ok(pack.views.dock, 'Lisbon pack exposes a dedicated dock departure view');
+  assert.equal(pack.views.dock.heading, 278, 'Lisbon dock berth faces 278° WNW past Ribeira das Naus and Torre de Belém');
+  assert.ok(pack.views.dock.depth >= 5.5, `Lisbon dock berth has deep navigable water (${pack.views.dock.depth.toFixed(1)}m)`);
+  assert.equal(pack.views.dock.moved, false, 'Lisbon dock berth clears the caravel draft without displacement');
+
+  const labels = pack.port.instances.map((i) => i.label);
+  assert.ok(labels.some((l) => l.includes('Ponte da Casa da Índia')), 'includes Royal Embarkation Pier');
+  assert.ok(labels.some((l) => l.includes('Cais da Ribeira')), 'includes L-head Departure Mole & Crane Wharf');
+  assert.ok(labels.some((l) => l.includes('Paço da Ribeira & Casa da Índia')), 'includes Casa da Índia');
+  assert.ok(labels.some((l) => l.includes('Ribeira das Naus')), 'includes Ribeira das Naus Royal Shipyard');
+  assert.ok(labels.some((l) => l.includes('Torre de Belém')), 'includes Torre de Belém / Baluarte river bastion');
+
+  const piers = pack.port.instances.filter((i) => i.prefabId === 'timber_mole_pier');
+  assert.equal(piers.length, 3, 'Lisbon harbor has main pier, L-head mole, and shipyard fitting-out pier');
+  const distToMole = Math.min(...piers.map((p) => Math.hypot(pack.views.dock.x - p.x, pack.views.dock.z - p.z)));
+  assert.ok(distToMole >= 16 && distToMole <= 46, `dock start sits right alongside the departure mole (${distToMole.toFixed(1)}m)`);
 });
 
 test('global coastal resolver generates deterministic region descriptors for any coordinate worldwide', () => {
