@@ -997,7 +997,7 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
     const day = dayAtSea(s), dateText = formatPeriodDate(s.date, day);
     const tiers = Array.isArray(s.warpTiers) ? s.warpTiers : [];
     const p = s.provisions || {};
-    const sig = [dateText, s.ship?.name ?? '', s.warp ?? '', tiers.map((t) => t.id).join(','), p.daysFood, p.daysWater].join('|');
+    const sig = [dateText, s.ship?.name ?? '', s.warp ?? '', s.tier ?? '', tiers.map((t) => t.id).join(','), p.daysFood, p.daysWater].join('|');
     if (sig !== sideSig) {
       sideSig = sig;
       dateLine.textContent = dateText || '—';
@@ -1009,14 +1009,21 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
           const b = document.createElement('button');
           b.type = 'button'; b.dataset.tier = String(t.id); b.textContent = t.label ?? String(t.id);
           if (Number.isFinite(t.rate)) b.title = `${t.rate.toLocaleString('en-US')}× time`;
-          b.onclick = () => onWarp?.(t.id);
+          b.onclick = () => {
+            onWarp?.(t.id);
+            if (getSnapshot) update(getSnapshot());
+            if (Number(t.rate) > 1) {
+              readoutText.textContent = `Time warp: ${t.label} (${Number(t.rate).toLocaleString('en-US')}×) — press M or Esc to watch from the deck`;
+            }
+          };
           return b;
         }));
         warpGroup.hidden = tiers.length === 0;
       }
       for (const b of warpGroup.children) {
         const t = tiers.find((x) => String(x.id) === b.dataset.tier);
-        b.setAttribute('aria-pressed', String(!!t && (t.rate === s.warp || t.id === s.warp)));
+        const pressed = Boolean(t && (s.tier ? String(t.id) === String(s.tier) : (t.rate === s.warp || t.id === s.warp)));
+        b.setAttribute('aria-pressed', String(pressed));
       }
       for (const [meter, out, val] of [[foodMeter, foodOut, p.daysFood], [waterMeter, waterOut, p.daysWater]]) {
         const ok = Number.isFinite(val);

@@ -228,8 +228,10 @@ export function createDemProbe({ loadTile = fetchTerrariumTile, zoom = DEM_PROBE
  * Returns { visible: {lat, lon, elevation, distanceKm, bearing} | null,
  *           nearest: {lat, lon, distanceKm, bearing} | null, complete: boolean }.
  */
-export function scanForLand(probe, lat, lon, { eyeM = 20, maxKm = 160, ringStepKm = 3, bearings = 72 } = {}) {
+export function scanForLand(probe, lat, lon, { eyeM = 20, maxKm = 160, ringStepKm = 3, bearings = 72, headingDeg = null, forwardHalfAngle = 55 } = {}) {
   let visible = null, nearest = null, highest = null, complete = true;
+  let forwardVisible = null, forwardNearest = null, forwardHighest = null;
+  const hasHeading = Number.isFinite(headingDeg);
   for (let d = ringStepKm; d <= maxKm; d += ringStepKm * (d < 40 ? 1 : 1.5)) {
     const nb = Math.max(24, Math.round(bearings * Math.min(2, d / 40)));
     for (let b = 0; b < nb; b++) {
@@ -238,20 +240,28 @@ export function scanForLand(probe, lat, lon, { eyeM = 20, maxKm = 160, ringStepK
       const h = probe.elevation(p.lat, p.lon);
       if (h === undefined) { complete = false; continue; }
       if (h <= 0.5) continue;
+      const inForward = hasHeading && Math.abs((((brg - headingDeg + 540) % 360) - 180)) <= forwardHalfAngle;
       if (!nearest) nearest = { lat: p.lat, lon: p.lon, distanceKm: d, bearing: brg };
+      if (inForward && !forwardNearest) forwardNearest = { lat: p.lat, lon: p.lon, distanceKm: d, bearing: brg };
       // Land that will top the horizon soonest relative to its distance (prominence ratio).
       const rise = visibilityRangeKm(eyeM, h) - d;
       if (!highest || rise > highest.rise) highest = { lat: p.lat, lon: p.lon, elevation: h, distanceKm: d, bearing: brg, rise };
+      if (inForward && (!forwardHighest || rise > forwardHighest.rise)) {
+        forwardHighest = { lat: p.lat, lon: p.lon, elevation: h, distanceKm: d, bearing: brg, rise };
+      }
       // Above the horizon by a margin that a lookout could make out (≥ 4 m of land showing).
       const showing = h - hiddenHeightM(d * 1000, eyeM);
       if (showing >= 4 && (!visible || showing / d > visible.showing / visible.distanceKm)) {
         visible = { lat: p.lat, lon: p.lon, elevation: h, distanceKm: d, bearing: brg, showing };
       }
+      if (inForward && showing >= 4 && (!forwardVisible || showing / d > forwardVisible.showing / forwardVisible.distanceKm)) {
+        forwardVisible = { lat: p.lat, lon: p.lon, elevation: h, distanceKm: d, bearing: brg, showing };
+      }
     }
     // Once we have the nearest coast and are well beyond any possible visibility, stop early.
     if (nearest && d > nearest.distanceKm + 40 && (visible || d > visibilityRangeKm(eyeM, 3000))) break;
   }
-  return { visible, nearest, highest, complete };
+  return { visible, nearest, highest, forwardVisible, forwardNearest, forwardHighest, complete };
 }
 
 /**

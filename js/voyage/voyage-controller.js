@@ -248,9 +248,19 @@ export function createVoyageController(cfg) {
   }
   function setWarp(id) {
     promoteActive();
-    if (voyage.interrupt && warpTier(id).rate > 60) return showToast('Answer the call before making way at speed.');
+    if (voyage.interrupt) {
+      clearInterrupt(voyage);
+      showCallout(null);
+      if (encounterDirector?.state) encounterDirector.state.active = null;
+    }
     if (hud) hud.root.hidden = false;
     setWarpTier(voyage, id);
+    const tierRate = warpTier(id).rate;
+    if (tierRate > 1 && (approach.suppressLandHo || approach.landHoCalled)) {
+      voyage.warpCap = 3600;
+    }
+    voyage.rate = Math.min(tierRate, voyage.warpCap ?? 3600);
+    updateHud();
     emit('change');
   }
   function orderCompassCourse(compassDeg, { beat } = {}) {
@@ -325,7 +335,8 @@ export function createVoyageController(cfg) {
     encounterDirector = createEncounterDirector({ seed: voyage.seed ^ 0x1550cafe });
     attachExistingTerrain();
     addLog(voyage, `${formatJulianDate(voyage.dateMs)}. Weighed anchor at ${geo.name} and stood out to sea. Variation by the needle ${Math.abs(voyage.pilot.variationEstimate)}° ${voyage.pilot.variationEstimate >= 0 ? 'NE' : 'NW'}.`, 'departure');
-    beginScene({ showHud: !passive, passive });
+    beginScene({ showHud: opts.showHud ?? true, passive });
+    updateHud();
     emit('change');
     return voyage;
   }
@@ -477,9 +488,7 @@ export function createVoyageController(cfg) {
     const adviceKey = advice ? advice.severity + voyage.canvas : null;
     if (advice && adviceKey !== lastAdvice && !voyage.interrupt) {
       lastAdvice = adviceKey;
-      if (advice.severity === 'info') showToast(advice.text, 7);
-      else raiseInterrupt(voyage, { type: 'canvas', title: 'The sailing master', text: advice.text, suggest: advice.severity === 'danger' ? 'storm' : 'reduced', choices: [{ id: 'apply', label: advice.severity === 'danger' ? 'Storm canvas' : 'Shorten sail' }, { id: 'ignore', label: 'Carry on' }] }, 'watch');
-      if (voyage.interrupt) showCallout(voyage.interrupt);
+      showToast(advice.text, 7);
     } else if (!advice) lastAdvice = null;
 
     scanTimer -= dt;
@@ -526,59 +535,119 @@ export function createVoyageController(cfg) {
   async function runApproach(terrain) {
     const lat = voyage.true.lat, lon = voyage.true.lon;
     const eyeM = lookoutEyeHeight(boat.modelId);
+    const v = hullVelocity(boat);
+    const groundEast = v.east + voyage.current.east;
+    const groundNorth = v.north + voyage.current.north;
+    const ground = Math.hypot(groundEast, groundNorth);
+    const courseDeg = ground > 0.25
+      ? voyageWrap360((Math.atan2(groundEast, groundNorth) * 180) / Math.PI)
+      : voyageWrap360(boat.heading ?? 0);
     const indexCoast = coastIndex ? coastIndex.nearestCoast(lat, lon, 600) : null;
     // Unknown (index still loading) counts as "near" so the DEM probe is consulted.
     const indexKm = coastIndex ? (indexCoast ? indexCoast.distanceKm : 600) : 0;
     const scanning = indexKm < 320;
     // The DEM probe is the authority near land (it sees islands the coarse index misses).
     if (scanning) probe.prefetch(lat, lon, 190);
-    const scan = scanning ? scanForLand(probe, lat, lon, { eyeM, maxKm: 170 }) : { visible: null, nearest: null, highest: null, complete: true };
+    const scan = scanning
+      ? scanForLand(probe, lat, lon, { eyeM, maxKm: 170, headingDeg: courseDeg, forwardHalfAngle: 55 })
+      : { visible: null, nearest: null, highest: null, forwardVisible: null, forwardNearest: null, forwardHighest: null, complete: true };
     approach.scan = scan;
     if (!scanning) approach.coastKm = indexKm;
     else if (scan.nearest) approach.coastKm = scan.nearest.distanceKm;
     else if (scan.complete) approach.coastKm = Math.max(175, indexKm);
     else approach.coastKm = Math.min(indexKm, 175); // tiles still loading: stay conservative
-    approach.sightKm = scan.highest ? visibilityRangeKm(eyeM, scan.highest.elevation) : visibilityRangeKm(eyeM, 30);
-    if (approach.suppressLandHo && scan.complete && !scan.visible && voyage.distanceTrueNm > 18) approach.suppressLandHo = false;
+
+    const fwdLand = scan.forwardVisible ?? scan.forwardHighest ?? scan.forwardNearest;
+    const fwdCoastKm = scan.forwardNearest ? scan.forwardNearest.distanceKm : Infinity;
+    approach.sightKm = scan.forwardHighest
+      ? visibilityRangeKm(eyeM, scan.forwardHighest.elevation)
+      : scan.highest
+      ? visibilityRangeKm(eyeM, scan.highest.elevation)
+      : visibilityRangeKm(eyeM, 30);
+
+    if (approach.suppressLandHo && scan.complete && (!scan.forwardVisible || voyage.distanceTrueNm > 12) && voyage.distanceTrueNm > 5) {
+      approach.suppressLandHo = false;
+    }
+
+    // Account for approach.offset when measuring distance to a streamed terrain pack.
+    const terrainDistM = terrain && terrain.region
+      ? Math.hypot(
+          boat.x - ((terrain.region.x ?? 0) + approach.offset.x),
+          boat.z - ((terrain.region.z ?? 0) + approach.offset.z)
+        )
+      : Infinity;
     // Free the departure coast once it is far astern so the destination can be streamed.
-    if (terrain && terrain.region && cfg.disposeTerrain && Math.hypot(boat.x - terrain.region.x, boat.z - terrain.region.z) > 150000) {
+    if (terrain && terrain.region && cfg.disposeTerrain && terrainDistM > 150000) {
       cfg.disposeTerrain(terrain);
       approach.spawnedTerrain = null;
       approach.offset = { x: 0, z: 0 };
       terrain = null;
     }
-    const inPack = Boolean(terrain && terrain.region && (() => {
-      const r = terrain.region;
-      return Math.hypot(boat.x - r.x, boat.z - r.z) < r.span * 0.8;
-    })());
-    approach.stage = approachStage({ coastKm: approach.coastKm, sightKm: approach.sightKm, visible: Boolean(scan.visible), inPack });
-    const v = hullVelocity(boat);
-    const ground = Math.hypot(v.east + voyage.current.east, v.north + voyage.current.north);
-    voyage.warpCap = approachWarpCap({ coastKm: approach.coastKm, sightKm: approach.sightKm, groundSpeed: ground, stage: approach.stage, demComplete: scan.complete });
+    const isDepartureTerrain = Boolean(terrain && terrain === approach.departureTerrain);
+    const inPack = Boolean(
+      terrain &&
+      terrain.region &&
+      !isDepartureTerrain &&
+      !approach.suppressLandHo &&
+      terrainDistM < (terrain.region.span ?? 18000) * 0.8
+    );
 
-    // Land ho!
-    if (scan.visible && !approach.landHoCalled && !approach.suppressLandHo) {
+    const governingCoastKm = approach.suppressLandHo || approach.landHoCalled ? Infinity : fwdCoastKm;
+    const governingVisible = !approach.suppressLandHo && !approach.landHoCalled && Boolean(scan.forwardVisible);
+    approach.stage = approachStage({
+      coastKm: governingCoastKm,
+      sightKm: approach.sightKm,
+      visible: governingVisible,
+      inPack,
+    });
+
+    if (approach.suppressLandHo || approach.landHoCalled) {
+      // Departing or player already acknowledged Land Ho and ordered warp: only prevent running straight onto a beach dead ahead.
+      const bowDiff = scan.forwardNearest
+        ? Math.abs((((scan.forwardNearest.bearing - courseDeg + 540) % 360) - 180))
+        : 180;
+      if (bowDiff <= 35 && fwdCoastKm < 8) {
+        voyage.warpCap = Math.max(1, Math.min(3600, ((fwdCoastKm - 1.2) * 1000) / (Math.max(0.5, ground) * 4)));
+      } else {
+        voyage.warpCap = 3600;
+      }
+    } else if (!Number.isFinite(fwdCoastKm)) {
+      voyage.warpCap = 3600;
+    } else {
+      voyage.warpCap = approachWarpCap({
+        coastKm: fwdCoastKm,
+        sightKm: Math.min(approach.sightKm, 35),
+        groundSpeed: ground,
+        leadSeconds: 8,
+        stage: approach.stage,
+        demComplete: scan.complete,
+      });
+    }
+
+    // Land ho! (only for land ahead of the ship after clearing departure).
+    const sighted = scan.forwardVisible ?? (!approach.suppressLandHo && voyage.distanceTrueNm > 25 ? scan.visible : null);
+    if (sighted && !approach.landHoCalled && !approach.suppressLandHo) {
       approach.landHoCalled = true;
-      const rel = scan.visible.bearing - boat.heading;
+      const rel = sighted.bearing - boat.heading;
       const call = relativeBearingCall(rel);
-      addMark(voyage, { kind: 'land', lat: scan.visible.lat, lon: scan.visible.lon, label: 'Land sighted' });
+      addMark(voyage, { kind: 'land', lat: sighted.lat, lon: sighted.lon, label: 'Land sighted' });
       raiseInterrupt(voyage, {
         type: 'land-ho',
         title: '¡Tierra! Land ho!',
-        text: `The lookout sings out: "Land! Land ${call}!" High ground bearing ${compassPointName(scan.visible.bearing - voyage.variation)} by the compass, perhaps ${(scan.visible.distanceKm / 1.852 / NM_PER_LEAGUE).toFixed(0)} leagues off.`,
-        bearing: scan.visible.bearing,
+        text: `The lookout sings out: "Land! Land ${call}!" High ground bearing ${compassPointName(sighted.bearing - voyage.variation)} by the compass, perhaps ${(sighted.distanceKm / 1.852 / NM_PER_LEAGUE).toFixed(0)} leagues off.`,
+        bearing: sighted.bearing,
         choices: [{ id: 'stand-in', label: 'Stand in toward the land' }, { id: 'hold', label: 'Hold our course' }, { id: 'chart', label: 'Open the chart' }],
-        log: `Land sighted ${call}, bearing ${compassPointName(scan.visible.bearing - voyage.variation)} by the compass.`,
+        log: `Land sighted ${call}, bearing ${compassPointName(sighted.bearing - voyage.variation)} by the compass.`,
       }, 'deck');
       showCallout(voyage.interrupt);
-      emit('land-ho', scan.visible);
-    } else if (!scan.visible && approach.coastKm > approach.sightKm + 30) {
+      emit('land-ho', sighted);
+    } else if (!sighted && fwdCoastKm > approach.sightKm + 30) {
       approach.landHoCalled = false;
     }
 
     // Stream the coastal terrain before the land tops the horizon.
-    if ((approach.stage === 'preload' || approach.stage === 'sighting') && spawnTerrain && !approach.spawning && !terrain) {
-      const landmark = scan.visible ?? scan.highest ?? scan.nearest;
+    if ((approach.stage === 'preload' || approach.stage === 'sighting' || (fwdLand && fwdCoastKm < 95 && !approach.suppressLandHo)) && spawnTerrain && !approach.spawning && !terrain) {
+      const landmark = fwdLand ?? scan.visible ?? scan.highest ?? scan.nearest;
       if (landmark && scan.complete) {
         approach.spawning = true;
         const shore = coastlineToward(probe, lat, lon, landmark);

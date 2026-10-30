@@ -1726,7 +1726,7 @@ async function main() {
     });
     if(qs.get('voyage')==='resume'||(qs.get('voyage')==='1'&&voyageCtl.hasSavedVoyage()&&qs.get('newVoyage')!=='1'))voyageCtl.resume()||voyageCtl.start();
     else if(qs.get('voyage')==='1')voyageCtl.start({difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
-    else voyageCtl.start({passive:true,difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
+    else voyageCtl.start({passive:true,showHud:qs.get('ui')!=='0',difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     window.oceanVoyage=voyageCtl;
   }
   performanceButton=document.createElement('button');performanceButton.id='performance-toggle';performanceButton.type='button';performanceButton.className='icon-button';
@@ -2344,6 +2344,7 @@ async function main() {
     frameIndex++;
 
     astronomy.update(simPaused ? 0 : elapsed,boat);
+    if(voyageCtl?.active&&!voyageCtl.voyage?.passive&&(frameIndex&7)===0)syncAstronomySliders(true);
     weather.step(dt,P,cam);
     writeFrame(simTime);
     weatherRenderer.update(weather,P,dt);

@@ -108,9 +108,10 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
   const rand = mulberry32(seed);
   const state = {
     active: null,
-    nextWhaleCheckHrs: 3.5 + rand() * 5.0,
-    nextSailCheckHrs: 7.0 + rand() * 10.0,
+    nextWhaleCheckHrs: 8.0 + rand() * 10.0,
+    nextSailCheckHrs: 18.0 + rand() * 18.0,
     elapsedVoyageHrs: 0,
+    realCooldownSec: 0,
     totalWhales: 0,
     totalSails: 0,
   };
@@ -212,9 +213,10 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
     const rate = voyage.rate ?? 1;
     const dHrs = (dtRealSec * rate) / 3600;
     state.elapsedVoyageHrs += dHrs;
+    if (state.realCooldownSec > 0) state.realCooldownSec = Math.max(0, state.realCooldownSec - dtRealSec);
 
     if (state.elapsedVoyageHrs >= state.nextWhaleCheckHrs) {
-      state.nextWhaleCheckHrs = state.elapsedVoyageHrs + 4.5 + rand() * 7.5;
+      state.nextWhaleCheckHrs = state.elapsedVoyageHrs + 10.0 + rand() * 14.0;
       const absLat = Math.abs(voyage.true.lat);
       const whaleProb = absLat > 35 ? 0.55 : 0.35;
       if (rand() < whaleProb) {
@@ -222,10 +224,11 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       }
     }
 
-    if (state.elapsedVoyageHrs >= state.nextSailCheckHrs) {
-      state.nextSailCheckHrs = state.elapsedVoyageHrs + 8.0 + rand() * 14.0;
+    if (state.elapsedVoyageHrs >= state.nextSailCheckHrs && state.realCooldownSec <= 0) {
+      state.nextSailCheckHrs = state.elapsedVoyageHrs + 18.0 + rand() * 24.0;
       const sailProb = 0.65;
       if (rand() < sailProb) {
+        state.realCooldownSec = 25;
         return spawnSailEncounter(voyage, boat, env);
       }
     }

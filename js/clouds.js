@@ -71,7 +71,7 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     const optical=Math.max(0.1,Math.min(3,settings.cloudDensity ?? 1));
     densityDirty=coverage!==lastCoverage || thickness!==lastThickness || storm!==lastStorm;
     const lightOffset=frame.length>=132&&frame[115]>.5?96:32;
-    const sunChanged=frame[lightOffset]!==sunX || frame[lightOffset+1]!==sunY || frame[lightOffset+2]!==sunZ;
+    const sunChanged= !Number.isFinite(sunX) || Math.hypot(frame[lightOffset]-sunX, frame[lightOffset+1]-sunY, frame[lightOffset+2]-sunZ) > 0.008;
     lightDirty=densityDirty || sunChanged || optical!==lastDensity;
     const changed=lightDirty || base!==lastBase || optical!==lastDensity || settings.haze!==lastHaze;
     // Large camera jumps invalidate history; ordinary pitch/roll is reprojected.
@@ -83,11 +83,11 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     data[28]=width;data[29]=height;data[30]=frame[70];data[31]=coverage>0.001?1:0;
     device.queue.writeBuffer(uniform,0,data);
     bake[0]=coverage;bake[1]=thickness;bake[2]=storm;bake[3]=optical;bake[4]=frame[lightOffset];bake[5]=frame[lightOffset+1];bake[6]=frame[lightOffset+2];
-    if(lightDirty)device.queue.writeBuffer(bakeUniform,0,bake);
+    if(lightDirty){device.queue.writeBuffer(bakeUniform,0,bake);sunX=frame[lightOffset];sunY=frame[lightOffset+1];sunZ=frame[lightOffset+2];}
     previous.set(frame.subarray(0,16));previous[16]=frame[16];previous[17]=frame[17];previous[18]=frame[18];
     previousWindX=windX;previousWindZ=windZ;
     lastCoverage=coverage;lastThickness=thickness;lastStorm=storm;lastBase=base;lastDensity=optical;lastHaze=settings.haze;
-    sunX=frame[lightOffset];sunY=frame[lightOffset+1];sunZ=frame[lightOffset+2];current=1-current;
+    current=1-current;
     return changed;
   }
 
