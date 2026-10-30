@@ -9,6 +9,7 @@ import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId } from './part-assembly.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
+import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
 export { GROUNDING_SUBSTRATES, classifyGroundingSubstrate };
 
@@ -221,8 +222,50 @@ export function consumeMagazineOrdnance(boat, event = {}) {
   return mag;
 }
 
+export function getMoraleStateLabel(morale = 1, surrendered = false) {
+  if (surrendered) return 'surrendered';
+  if (morale >= 0.72) return 'steady';
+  if (morale >= 0.45) return 'shaken';
+  if (morale >= 0.20) return 'wavering';
+  return 'broken';
+}
+
+export function computeCrewEfficiency(boat) {
+  const damage = boat?.damage;
+  if (!damage) return 1.0;
+  if (damage.surrendered || damage.sunk) return 0.0;
+  const c = damage.crewCasualties;
+  const total = Math.max(1, c?.total ?? 24);
+  const able = Math.max(0, c?.able ?? total);
+  const wounded = Math.max(0, c?.wounded ?? 0);
+  const effectiveHands = (able + wounded * 0.35) / total;
+  const moraleFactor = 0.45 + 0.55 * Math.max(0, Math.min(1, damage.battleMorale ?? 1));
+  return +Math.max(0.15, Math.min(1.0, effectiveHands * moraleFactor)).toFixed(3);
+}
+
+function defaultVesselCrewComplement(boat) {
+  const modelId = boat?.model?.id ?? boat?.modelId ?? 'caravel';
+  if (Number.isFinite(boat?.crewComplement) && boat.crewComplement > 0) return Math.round(boat.crewComplement);
+  if (modelId === 'victory') return 820;
+  if (modelId === 'santa-maria') return 42;
+  if (modelId === 'pinta') return 26;
+  if (modelId === 'nina') return 22;
+  if (modelId === 'taino-canoe') return 12;
+  return Math.max(18, Math.round((boat?.length ?? 20) * 1.2));
+}
+
 export function createVesselDamageState(boat) {
   const magazine = createVesselMagazineState(boat);
+  if (!boat.colors) boat.colors = DEFAULT_SHIP_COLORS;
+  const totalCrew = defaultVesselCrewComplement(boat);
+  const makeCrewCasualties = () => ({
+    total: totalCrew,
+    able: totalCrew,
+    wounded: 0,
+    killed: 0,
+    hitsWithCasualties: 0,
+    lastCasualties: null,
+  });
   const makeCompartments = () => ({
     forePort: { breachArea: 0, waterTonnes: 0 },
     foreStarboard: { breachArea: 0, waterTonnes: 0 },
@@ -236,6 +279,15 @@ export function createVesselDamageState(boat) {
     if (!boat.damage.partDamage) boat.damage.partDamage = {};
     if (!boat.damage.mastState) boat.damage.mastState = { fore: 0, main: 0, mizzen: 0 };
     if (!boat.damage.compartments) boat.damage.compartments = makeCompartments();
+    if (!boat.damage.crewCasualties || !Number.isFinite(boat.damage.crewCasualties.total)) {
+      boat.damage.crewCasualties = makeCrewCasualties();
+    }
+    if (!Number.isFinite(boat.damage.battleMorale)) boat.damage.battleMorale = 1.0;
+    if (!Number.isFinite(boat.damage.moraleShock)) boat.damage.moraleShock = 0;
+    if (typeof boat.damage.surrendered !== 'boolean') boat.damage.surrendered = boat.colors === 'surrender';
+    if (!boat.damage.moraleState) {
+      boat.damage.moraleState = getMoraleStateLabel(boat.damage.battleMorale, boat.damage.surrendered);
+    }
     if (!Array.isArray(boat.damage.impactSites)) boat.damage.impactSites = [];
     if (!Array.isArray(boat.damage.craters)) boat.damage.craters = [];
     if (!Array.isArray(boat.damage.pendingBakes)) boat.damage.pendingBakes = [];
@@ -280,6 +332,12 @@ export function createVesselDamageState(boat) {
     mastIntegrity: { fore: 1, main: 1, mizzen: 1 },
     mastState: { fore: 0, main: 0, mizzen: 0 },
     compartments: makeCompartments(),
+    crewCasualties: makeCrewCasualties(),
+    battleMorale: 1.0,
+    moraleShock: 0,
+    moraleState: 'steady',
+    surrendered: false,
+    surrenderReason: null,
     hullDamageJoules: 0,
     superstructureDamageJoules: 0,
     rigDamageJoules: 0,
@@ -322,6 +380,131 @@ export function createVesselDamageState(boat) {
     lastHit: null,
   };
   return boat.damage;
+}
+
+export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {}) {
+  if (!targetBoat) return null;
+  const damage = createVesselDamageState(targetBoat);
+  const c = damage.crewCasualties;
+  const ammo = event.ammo ?? context.ammo ?? 'round';
+  const energy = Number.isFinite(event.energy) ? Math.max(5000, event.energy) : 120000;
+  const hitZone = event.hitZone ?? context.hitZone ?? 'hull';
+  const cause = context.cause ?? (ammo === 'grape' ? 'grape-hail' : ammo === 'hot' ? 'hot-shot-burns' : hitZone === 'rigging' ? 'falling-spars' : 'oak-splinters');
+
+  // Anti-personnel lethality by ammunition & impact zone:
+  // - Quilted grape shot sweeps weather decks and open gunports with iron balls (3.2x anti-personnel).
+  // - Solid round shot penetrating oak planking / bulwarks throws lethal oak splinters across gun crews.
+  // - Chain shot brings down blocks, yards, and rigging on deck hands.
+  // - Hot shot causes severe burns and smoke panic.
+  const ammoPersonnelMult =
+    ammo === 'grape' ? 3.2 :
+    ammo === 'round' ? (context.penetratedOuter || context.enteredThroughWindow ? 1.55 : 0.85) :
+    ammo === 'hot' ? 1.35 :
+    ammo === 'chain' ? (hitZone === 'rigging' ? 1.15 : 0.75) : 1.0;
+
+  const zoneMult =
+    context.isMagazineBlast ? 6.5 :
+    context.enteredThroughWindow || context.isSuperstructureHit ? 1.45 :
+    hitZone === 'rigging' ? (ammo === 'grape' ? 1.85 : 0.55) : 1.0;
+
+  const crewScale = Math.max(0.65, Math.min(4.2, Math.sqrt(c.total / 28)));
+  const rawSeverity = (energy / 110000) * ammoPersonnelMult * zoneMult * crewScale;
+
+  let newKilled = 0;
+  let newWounded = 0;
+  if (context.isMagazineBlast) {
+    const frac = Math.min(0.65, 0.22 + 0.35 * (context.powderFrac ?? 0.5));
+    newKilled = Math.min(c.able, Math.max(2, Math.round(c.total * frac * 0.55)));
+    newWounded = Math.min(Math.max(0, c.able - newKilled), Math.max(2, Math.round(c.total * frac * 0.45)));
+  } else if (rawSeverity >= 0.18 && c.able > 0) {
+    const deterministic = ((damage.hits ?? 1) * 0.6180339) % 1;
+    newKilled = Math.min(c.able, Math.max(ammo === 'grape' ? 1 : 0, Math.floor(rawSeverity * 0.42 + deterministic * 0.55)));
+    const remAble = Math.max(0, c.able - newKilled);
+    newWounded = Math.min(remAble, Math.max(rawSeverity >= 0.32 ? 1 : 0, Math.floor(rawSeverity * 0.88 + (1 - deterministic) * 0.65)));
+  }
+
+  c.killed += newKilled;
+  c.wounded += newWounded;
+  c.able = Math.max(0, c.total - c.killed - c.wounded);
+  if (newKilled > 0 || newWounded > 0) {
+    c.hitsWithCasualties = (c.hitsWithCasualties ?? 0) + 1;
+  }
+
+  // Propagate casualties to visible 3D deck crew actors if present on the vessel.
+  const crewActors = targetBoat.crewCompany?.crew;
+  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0)) {
+    const designPt = context.designPt ?? [0, 0, 0];
+    const candidates = crewActors
+      .filter(s => s.casualtyState !== 'fallen')
+      .map(s => ({
+        sailor: s,
+        dist: Math.hypot((s.x ?? 0) - (designPt[0] ?? 0), (s.z ?? 0) - (designPt[2] ?? 0)),
+      }))
+      .sort((a, b) => a.dist - b.dist);
+
+    const actorScale = Math.max(1, Math.round(c.total / Math.max(1, crewActors.length)));
+    let actorFallenBudget = Math.ceil(newKilled / actorScale);
+    let actorWoundedBudget = Math.ceil(newWounded / actorScale);
+    for (const item of candidates) {
+      const s = item.sailor;
+      if (actorFallenBudget > 0) {
+        s.casualtyState = 'fallen';
+        s.health = 0;
+        s.collapseYaw = s.yaw ?? 0;
+        actorFallenBudget--;
+      } else if (actorWoundedBudget > 0 && s.casualtyState !== 'wounded') {
+        s.casualtyState = 'wounded';
+        s.health = Math.max(0.25, (s.health ?? 1) - 0.45);
+        actorWoundedBudget--;
+      }
+      if (actorFallenBudget <= 0 && actorWoundedBudget <= 0) break;
+    }
+  }
+
+  // Battle Morale impact: casualties, shock from grape/hot/magazine blasts, hull & rig loss.
+  const casualtyRatio = (c.killed + c.wounded * 0.6) / Math.max(1, c.total);
+  const shockAdd = Math.min(
+    0.45,
+    ((newKilled * 1.6 + newWounded * 0.85) / Math.max(8, c.total)) * 1.35 +
+      (ammo === 'grape' ? 0.055 : ammo === 'hot' ? 0.045 : 0.018) +
+      (context.isMagazineBlast ? 0.38 : 0),
+  );
+  damage.moraleShock = +Math.min(0.65, (damage.moraleShock ?? 0) + shockAdd).toFixed(4);
+  const hullLoss = 1 - Math.max(0, Math.min(1, damage.hullIntegrity ?? 1));
+  const rigLoss = 1 - Math.max(0, Math.min(1, damage.rigIntegrity ?? 1));
+  const firePenalty = Math.min(0.25, (damage.fireIntensity ?? 0) * 0.12);
+  const targetMorale = Math.max(
+    0,
+    Math.min(1, 1.0 - casualtyRatio * 1.15 - hullLoss * 0.42 - rigLoss * 0.18 - firePenalty - damage.moraleShock),
+  );
+  damage.battleMorale = +targetMorale.toFixed(3);
+  damage.moraleState = getMoraleStateLabel(damage.battleMorale, damage.surrendered);
+
+  c.lastCasualties = {
+    killed: newKilled,
+    wounded: newWounded,
+    cause,
+    ammo,
+    ableRemaining: c.able,
+    total: c.total,
+    battleMorale: damage.battleMorale,
+    moraleState: damage.moraleState,
+  };
+
+  // Automatic surrender when battle morale breaks or the crew is decimated under heavy damage (AI/non-player vessels, or if autoSurrender !== false).
+  if (
+    !damage.surrendered &&
+    !damage.sunk &&
+    targetBoat.isPlayerVessel !== true &&
+    (damage.battleMorale <= 0.18 || (c.able / Math.max(1, c.total) <= 0.25 && (damage.hullIntegrity ?? 1) < 0.55))
+  ) {
+    strikeVesselColors(
+      targetBoat,
+      damage.battleMorale <= 0.18 ? 'Crew battle morale broke under fire' : 'Heavy crew casualties & hull damage',
+    );
+  }
+
+  return c.lastCasualties;
 }
 
 export function detonateVesselMagazine(targetBoat, { magId = 'magazine.grand', designPt = [0, -0.48, -3.3], localPos = [0, -1.2, -8.0], cause = 'shot' } = {}) {
@@ -563,6 +746,12 @@ export function detonateVesselMagazine(targetBoat, { magId = 'magazine.grand', d
     mass * (1.85 + 2.85 * powderFrac),
     Math.sign(magZ) * mass * (0.45 + 0.75 * powderFrac),
   ]);
+
+  applyCrewCasualtiesAndMorale(
+    targetBoat,
+    { ammo: cause === 'hot-shot' ? 'hot' : 'round', energy: Math.max(500000, yieldMj * 1000000), hitZone: 'magazine' },
+    { isMagazineBlast: true, powderFrac, designPt, cause: 'magazine-blast' },
+  );
 
   damage.revision = (damage.revision ?? 0) + 1;
   return {
@@ -1485,6 +1674,19 @@ export function applyShipImpactDamage(targetBoat, event) {
   }
   damage.revision = (damage.revision ?? 0) + 1;
 
+  const casualties = applyCrewCasualtiesAndMorale(
+    targetBoat,
+    { ammo, energy, hitZone: event.hitZone ?? 'hull' },
+    {
+      designPt,
+      penetratedOuter,
+      enteredThroughWindow,
+      hitBackWall,
+      isSuperstructureHit,
+    },
+  );
+  const c = damage.crewCasualties;
+
   const mag = targetBoat.magazine ?? damage.magazine;
   const report = {
     kind: 'ship',
@@ -1523,6 +1725,16 @@ export function applyShipImpactDamage(targetBoat, event) {
     floodingSinkage: +(damage.floodingSinkage ?? 0).toFixed(3),
     sunk: damage.sunk,
     energyKj: +(energy / 1000).toFixed(1),
+    casualtiesKilled: casualties?.killed ?? 0,
+    casualtiesWounded: casualties?.wounded ?? 0,
+    crewAble: c?.able ?? 0,
+    crewWounded: c?.wounded ?? 0,
+    crewKilled: c?.killed ?? 0,
+    crewTotal: c?.total ?? 0,
+    battleMorale: +(damage.battleMorale ?? 1).toFixed(3),
+    moraleState: damage.moraleState ?? 'steady',
+    surrendered: Boolean(damage.surrendered),
+    colors: targetBoat.colors ?? DEFAULT_SHIP_COLORS,
   };
   damage.lastHit = report;
   return report;
@@ -1842,6 +2054,52 @@ export function stepVesselDamage(boat, dt, terrain = null) {
   } else if (damage.worldFires?.length) {
     damage.worldFires.length = 0;
     damage.fireIntensity = 0;
+  }
+
+  // 3. Ongoing battle morale & fire/flooding human attrition.
+  if (damage.crewCasualties) {
+    const c = damage.crewCasualties;
+    if ((damage.fireIntensity ?? 0) > 0.45 && c.able > 0 && !damage.sunk) {
+      damage.fireBurnAccum = (damage.fireBurnAccum ?? 0) + (damage.fireIntensity - 0.35) * clampedDt * 0.14;
+      if (damage.fireBurnAccum >= 1) {
+        const burnWounded = Math.min(c.able, Math.floor(damage.fireBurnAccum));
+        damage.fireBurnAccum -= burnWounded;
+        c.wounded += burnWounded;
+        c.able = Math.max(0, c.total - c.killed - c.wounded);
+      }
+    }
+    const quiet = (damage.fireIntensity ?? 0) < 0.1 && (damage.waterlineBreachArea ?? 0) < 0.01;
+    if (quiet && (damage.moraleShock ?? 0) > 0 && !damage.surrendered) {
+      damage.moraleShock = +Math.max(0, damage.moraleShock - 0.008 * clampedDt).toFixed(4);
+    }
+    const casualtyRatio = (c.killed + c.wounded * 0.6) / Math.max(1, c.total);
+    const hullLoss = 1 - Math.max(0, Math.min(1, damage.hullIntegrity ?? 1));
+    const rigLoss = 1 - Math.max(0, Math.min(1, damage.rigIntegrity ?? 1));
+    const firePenalty = Math.min(0.28, (damage.fireIntensity ?? 0) * 0.14);
+    const floodPenalty = Math.min(0.25, ((damage.floodingSinkage ?? 0) / Math.max(0.5, baseFreeboard)) * 0.25);
+    const nextMorale = damage.surrendered
+      ? Math.min(damage.battleMorale ?? 0.15, 0.15)
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            1.0 - casualtyRatio * 1.15 - hullLoss * 0.42 - rigLoss * 0.18 - firePenalty - floodPenalty - (damage.moraleShock ?? 0),
+          ),
+        );
+    damage.battleMorale = +nextMorale.toFixed(3);
+    damage.moraleState = getMoraleStateLabel(damage.battleMorale, damage.surrendered);
+
+    if (
+      !damage.surrendered &&
+      !damage.sunk &&
+      boat.isPlayerVessel !== true &&
+      (damage.battleMorale <= 0.18 || (c.able / Math.max(1, c.total) <= 0.25 && (damage.hullIntegrity ?? 1) < 0.55))
+    ) {
+      strikeVesselColors(
+        boat,
+        damage.battleMorale <= 0.18 ? 'Crew battle morale broke under fire' : 'Heavy crew casualties & hull damage',
+      );
+    }
   }
 }
 
@@ -3503,10 +3761,12 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
         }
       }
       for(const gun of state.guns)previousStages[gun.index]=gun.stage;
+      const crewEfficiency=computeCrewEfficiency(boat);
       const events=stepGunnery(state,dt,{deferSeaCollision,waterHeight,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
         sweep:solidSweep,
-        gunAttended:attended,canFire:(gun,pose)=>attended(gun)&&!muzzleBlock(gun,pose),
+        crewRate:()=>crewEfficiency,
+        gunAttended:gun=>!boat.damage?.surrendered&&attended(gun),canFire:(gun,pose)=>!boat.damage?.surrendered&&attended(gun)&&!muzzleBlock(gun,pose),
         onEvent:event=>{
           if(event.type==='shot'){consumeMagazineOrdnance(boat,event);recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}
           if(event.type==='impact'&&event.kind!=='water'){
@@ -3534,6 +3794,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     canFireLoaded,
     blockedReason(side){
       if(side!==boat.gunnerySide)return null;
+      if(boat.damage?.surrendered)return 'Colors struck (surrendered)';
       if(boat.magazine?.exploded)return 'Magazine exploded';
       if(boat.magazine&&boat.magazine.powderKg<=0)return 'Powder exhausted';
       for(const gun of state.guns){

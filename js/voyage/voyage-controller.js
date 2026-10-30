@@ -222,6 +222,10 @@ export function createVoyageController(cfg) {
       encounterDirector.resolveDecision(choiceId, voyage, boat, helmsman, {
         onOrderCompassCourse: (c) => orderCompassCourse(c),
         onToast: showToast,
+        onHailVessel: (enc) => {
+          setWarp('deck');
+          cfg.onHailVessel?.(enc);
+        },
         onEngageVessel: (enc) => {
           setWarp('deck');
           manualHelm = true;
@@ -553,6 +557,7 @@ export function createVoyageController(cfg) {
       marineLife: cfg.getMarineLife?.() ?? null,
       terrain,
       vessels: cfg.getVessels?.() ?? [],
+      onSightVessel: (enc) => cfg.onSightVessel?.(enc),
       onToast: showToast,
       onInterrupt: showCallout,
     });

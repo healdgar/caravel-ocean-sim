@@ -103,6 +103,10 @@ export function createGunneryControls(parent,gunnery){
       if(r.enteredThroughWindow)extras.push('window entry');
       if(r.hitBackWall)extras.push('struck back wall');
       if(r.fires)extras.push(`${r.fires} fire${r.fires>1?'s':''} burning`);
+      if(r.casualtiesKilled||r.casualtiesWounded){
+        extras.push(`${r.casualtiesKilled||0} killed, ${r.casualtiesWounded||0} wounded (${r.crewAble}/${r.crewTotal} able, morale ${Math.round((r.battleMorale??1)*100)}% ${r.moraleState||'steady'})`);
+      }
+      if(r.surrendered)extras.push('🏳️ STRUCK COLORS (SURRENDERED)');
       if(r.sunk)extras.push('Foundering');
       const extraText=extras.length?` · ${extras.join(', ')}`:'';
       const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging${partLabel} (${Math.round(r.rigIntegrity*100)}% rig)`:`hull${partLabel} (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;

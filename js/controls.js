@@ -82,7 +82,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
   const viewToggleBtn=document.createElement('button');
   viewToggleBtn.type='button';viewToggleBtn.id='helm-view-toggle';viewToggleBtn.className='helm-quarters-pill helm-view-pill';
   viewToggleBtn.textContent='View: Deck';
-  viewToggleBtn.title='Switch camera view (Deck / Ship orbit · B key) · Drag mouse or press ↑↓←→ keys to turn view · W/S/Q/E to walk deck';
+  viewToggleBtn.title="Switch camera view (Deck / Crow's Nest / Ship orbit · V or B key) · Drag mouse or press ↑↓←→ keys to turn view · W/S/Q/E to walk deck";
   viewToggleBtn.onclick=()=>{battleContext?.onToggleView?.();update(performance.now(),true);};
 
   const viewResetBtn=document.createElement('button');
@@ -464,7 +464,12 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       const hullPct=Math.round((dmg?.hullIntegrity??1)*100);
       const rigPct=Math.round((dmg?.rigIntegrity??1)*100);
       const fires=dmg?.worldFires?.length??0;
-      const vitTxt=`Hull ${hullPct}% · Rig ${rigPct}%${fires?` · ${fires}🔥`:''}`;
+      const cas=dmg?.crewCasualties;
+      const moralePct=Math.round((dmg?.battleMorale??1)*100);
+      const crewTxt=cas?` · Crew ${cas.able}/${cas.total} · Morale ${moralePct}%`:'';
+      const vitTxt=dmg?.surrendered
+        ?`🏳️ Colors struck · Hull ${hullPct}%${crewTxt}`
+        :`Hull ${hullPct}% · Rig ${rigPct}%${crewTxt}${fires?` · ${fires}🔥`:''}`;
       if(vitalityPill.textContent!==vitTxt)vitalityPill.textContent=vitTxt;
 
       const mag=gunnery.magazine;
@@ -486,7 +491,8 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       }
       if(gunnery.lastDamageReport?.targetName&&gunnery.lastDamageReport?.energyKj){
         const r=gunnery.lastDamageReport;
-        telemTxt+=` · Hit ${r.energyKj}kJ`;
+        const casHit=(r.casualtiesKilled||r.casualtiesWounded)?` (-${(r.casualtiesKilled||0)+(r.casualtiesWounded||0)} crew · ${Math.round((r.battleMorale??1)*100)}% morale)`:'';
+        telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Hit ${r.energyKj}kJ${casHit}`;
       }
       if(battleTelemetry.textContent!==telemTxt)battleTelemetry.textContent=telemTxt;
     }

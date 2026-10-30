@@ -120,6 +120,7 @@ export function issueCaptainOrder(company,boat,id) {
   return true;
 }
 export function stepCompany(company,boat,dt,wind) {
+  company.boat=boat;if(boat)boat.crewCompany=company;
   const order=CAPTAIN_ORDERS.find(o=>o.id===company.order),sails=sailingState(boat);
   // Manual sail settings supersede an outstanding broad order without stale reapplication.
   if(order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-boat[SAIL_KEYS[i]])>.001)){
@@ -129,27 +130,40 @@ export function stepCompany(company,boat,dt,wind) {
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
+    if(s.casualtyState==='fallen'){
+      s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;s.brace=0;
+      s.climbPitch=Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
+      stepDeckhand(s,boat,0,wind,company);
+      continue;
+    }
+    const sailorDt=s.casualtyState==='wounded'?dt*0.55:dt;
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
     if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationKey=null;s.navigationY=null;}
     const hadJob=!!s.job;
-    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:dt,wind,company);}
+    if(!stepCrewWork(s,company,boat,sailorDt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:sailorDt,wind,company);}
   }
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
   // Hazard/policy changes above can alter attendance during this step. Resolve
   // every seated target from the final Set used by blades and physical forces.
-  if(Object.hasOwn(ROWING_DESIGNS,boat.modelId))for(const s of company.crew)if(!s.job)s.seatedPose=crewSeatedPose(s,boat);
+  if(Object.hasOwn(ROWING_DESIGNS,boat.modelId))for(const s of company.crew)if(!s.job&&s.casualtyState!=='fallen')s.seatedPose=crewSeatedPose(s,boat);
   return company;
 }
 function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='hatch'&&s.job.stage!=='return');}
-export function companyStatus(company) {
-  const bracing=company.crew.filter(s=>s.intent==='brace').length;
-  if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
-  if(company.rigManeuver)return 'Transferring yards · gathering canvas and handling spars';
-  if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
-  if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
-  return company.order==='watch'?`Sea watch · ${company.crew.length} ${company.representativeWatch?'hands representing the watch':'aboard'}${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;
+export function companyStatus(company,boat=company?.boat) {
+  const dmg=boat?.damage;
+  if(dmg?.surrendered)return 'Struck colors (Surrendered 🏳️) · hands standing down';
+  const cas=dmg?.crewCasualties;
+  const casSuffix=cas&&(cas.killed>0||cas.wounded>0)
+    ?` · ${cas.able}/${cas.total} able (${cas.wounded} wounded, ${cas.killed} fallen) · Morale ${Math.round((dmg.battleMorale??1)*100)}% (${dmg.moraleState??'steady'})`
+    :'';
+  const bracing=company.crew.filter(s=>s.casualtyState!=='fallen'&&s.intent==='brace').length;
+  if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}${casSuffix}`;
+  if(company.rigManeuver)return `Transferring yards · gathering canvas and handling spars${casSuffix}`;
+  if(company.order==='weather'&&(boatHatchPending(company)))return `Prepare for heavy weather · securing canvas and hatch${casSuffix}`;
+  if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails${casSuffix}`;
+  return (company.order==='watch'?`Sea watch · ${company.crew.length} ${company.representativeWatch?'hands representing the watch':'aboard'}${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`)+casSuffix;
 }
 export function deckhandDecision(observation) {
   if(observation.hazard)return 'brace';
@@ -342,7 +356,12 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           poseCrewWork(a,s,boat);
           const offset=i*CREW_ACTOR_FLOATS;
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
-          b.actors.set(s.shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
+          const shirt=s.casualtyState==='fallen'
+            ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
+            :s.casualtyState==='wounded'
+              ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
+              :s.shirt;
+          b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
           b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female');
           // The tiller station is below the camera; all crew remain visible.
           b.actors[offset+19]=Number(!s.visible);

@@ -395,3 +395,26 @@ test('high-warp ship heading into a continent stops offshore in navigable water 
   assert.ok(mockTerrain.height(boat.x, boat.z) <= -2.2, `ship stopped in navigable water before the shore (bed=${mockTerrain.height(boat.x, boat.z).toFixed(2)}m, z=${boat.z.toFixed(1)})`);
   assert.equal(ctrl.voyage.tier, 'deck', 'dropped warp to 1× real time upon reaching shoal water ahead');
 });
+
+test('sighting and hailing a vessel invokes onSightVessel and onHailVessel with historical ship colors', () => {
+  const director = createEncounterDirector({ seed: 0x1550beef });
+  const v = createVoyage({ lat: 36.5, lon: -14.0 });
+  const boat = { x: 0, z: 0, heading: 225, surgeVelocity: 3.1, leewayVelocity: 0 };
+  let sightedEnc = null;
+  let hailedEnc = null;
+
+  const enc = director.spawnSailEncounter(v, boat, {
+    onSightVessel: (e) => { sightedEnc = e; },
+  });
+  assert.ok(sightedEnc && sightedEnc === enc, 'onSightVessel fires immediately when a strange sail is sighted');
+  assert.ok(typeof enc.colors === 'string' && enc.colors.length > 0, 'encounter specifies historical ship colors');
+  assert.ok(typeof enc.battleColors === 'string' && enc.battleColors.length > 0, 'encounter specifies battle colors');
+
+  // Force non-hostile to verify peaceful hailing alongside
+  enc.actuallyHostile = false;
+  const outcome = director.resolveDecision('hail', v, boat, createHelmsman(), {
+    onHailVessel: (e) => { hailedEnc = e; },
+  });
+  assert.equal(outcome.hailed, true, 'hailing a friendly/neutral ship marks outcome.hailed = true');
+  assert.equal(hailedEnc, enc, 'onHailVessel fires so the 3D vessel is placed within speaking-trumpet range');
+});

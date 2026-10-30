@@ -88,6 +88,13 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
     state.status='Sunk (wreck)';
     return state;
   }
+  if(boat.damage?.surrendered){
+    boat.colors='surrender';
+    boat.rudder=0;
+    for(const key of SAIL_KEYS)boat[key]=0;
+    state.status='Struck colors (Surrendered 🏳️)';
+    return state;
+  }
   dt=Number.isFinite(dt)?clamp(dt,0,.25):0;
   const isEnemy=state.faction==='enemy';
   const h=leader.heading*RAD,L=Math.max(leader.length,boat.length);
@@ -413,7 +420,7 @@ export function commandFriendlyVessel(vessel,command,{target=null,allies=[],anch
 export function commandFriendlyFleet(vessels,command,options={}){
   if(!Array.isArray(vessels))return 0;
   const allies=options.allies??vessels.filter(v=>(v?.faction??v?.follower?.faction??'friendly')!=='enemy').map(v=>v.boat??v);
-  const enemy=options.target??vessels.find(v=>(v?.faction??v?.follower?.faction)==='enemy'&&!v?.boat?.damage?.sunk)??null;
+  const enemy=options.target??vessels.find(v=>(v?.faction??v?.follower?.faction)==='enemy'&&!v?.boat?.damage?.sunk&&!v?.boat?.damage?.surrendered)??null;
   let count=0;
   for(let i=0;i<vessels.length;i++){
     const v=vessels[i];
@@ -430,6 +437,15 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   const gunnery=vessel.gunnery;
   if(!gunnery||!gunnery.state?.guns?.length)return null;
   const boat=vessel.boat,follower=vessel.follower;
+  if(boat.damage?.surrendered){
+    boat.colors='surrender';
+    if(gunnery.selectedSide||gunnery.ordered||gunnery.state?.queue?.length)gunnery.standDown();
+    if(follower){
+      follower.pendingCaptainFire=null;
+      follower.status='Struck colors (Surrendered 🏳️)';
+    }
+    return {action:'surrendered',reason:boat.damage.surrenderReason??'morale-broken'};
+  }
   const faction=vessel.faction??follower?.faction??'friendly';
   const stepDt=Number.isFinite(dt)?Math.max(0,dt):0;
   if(follower){
@@ -438,12 +454,15 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   }
 
   if(faction==='enemy'){
-    // Find nearest non-sunk opposing vessel (player or friendly).
+    if(boat.battleColors&&boat.colors!==boat.battleColors&&boat.colors!=='surrender'){
+      boat.colors=boat.battleColors;
+    }
+    // Find nearest non-sunk, non-surrendered opposing vessel (player or friendly).
     let nearestTarget=null,nearestDist=Infinity;
     const enemyAllies=[];
     for(const other of vessels){
       const otherBoat=other?.boat??other;
-      if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.showProw===false)continue;
+      if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.damage?.surrendered||otherBoat.showProw===false)continue;
       const otherFaction=other?.faction??other?.follower?.faction??'friendly';
       if(otherFaction==='enemy'){
         enemyAllies.push(otherBoat);
@@ -488,7 +507,7 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   let nearestEnemy=null,nearestEnemyDist=Infinity;
   for(const other of vessels){
     const otherBoat=other?.boat??other;
-    if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.showProw===false)continue;
+    if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.damage?.surrendered||otherBoat.showProw===false)continue;
     const otherFaction=other?.faction??other?.follower?.faction??'friendly';
     if(otherFaction==='enemy'){
       const d=Math.hypot((otherBoat.x??0)-(boat.x??0),(otherBoat.z??0)-(boat.z??0));

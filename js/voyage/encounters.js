@@ -22,7 +22,9 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
     id: 'spanish-merchant-nao',
     title: 'Spanish Merchant Nao',
     names: ['Nuestra Señora de la Concepción', 'San Juan Bautista', 'Santa María de Begoña', 'San Nicolás'],
-    flag: 'Crown of Castile (Casa de Contratación)',
+    flag: 'Crown of Castile (Cross of Burgundy)',
+    colors: 'castile',
+    battleColors: 'castile',
     rig: 'three-masted nao',
     hostile: false,
     speedKts: 5.2,
@@ -35,7 +37,9 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
     id: 'portuguese-carreira',
     title: 'Portuguese Caravel / Nau',
     names: ['São Bento', 'Espírito Santo', 'Santa Cruz de Lisboa', 'São Pantaleão'],
-    flag: 'Kingdom of Portugal',
+    flag: 'Kingdom of Portugal (Order of Christ & Quinas)',
+    colors: 'portugal',
+    battleColors: 'portugal',
     rig: 'lateen caravela redonda',
     hostile: false,
     speedKts: 6.1,
@@ -48,7 +52,9 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
     id: 'french-corsair',
     title: 'French Huguenot Corsair',
     names: ['Le Faucon de Dieppe', 'La Reine des Mers', 'La Salamandre', 'Le Cerf Volant'],
-    flag: 'French privateer (letter of marque)',
+    flag: 'French privateer / Jolly Roger',
+    colors: 'france',
+    battleColors: 'jolly-roger',
     rig: 'weatherly flush-decked patache',
     hostile: true,
     disguisedChance: 0.45,
@@ -64,6 +70,8 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
     title: 'Basque Whaling Nao',
     names: ['Santa Catalina de Pasajes', 'San Sebastián', 'María de Zumaya'],
     flag: 'Guipúzcoa / Señorío de Vizcaya',
+    colors: 'basque',
+    battleColors: 'basque',
     rig: 'stout Biscayan nao',
     hostile: false,
     speedKts: 4.8,
@@ -77,6 +85,8 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
     title: 'Becalmed Caravel in Distress',
     names: ['Santiago el Menor', 'Todos los Santos', 'Madre de Dios'],
     flag: 'Merchant caravel (sprung fore-topmast)',
+    colors: 'portugal',
+    battleColors: 'portugal',
     rig: 'two-masted caravel',
     hostile: false,
     distressed: true,
@@ -162,6 +172,8 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       archetype: arch,
       shipName,
       flag: disguised ? 'Unidentified merchant colors (suspicious trim)' : arch.flag,
+      colors: disguised ? 'castile' : (arch.colors ?? 'castile'),
+      battleColors: arch.battleColors ?? arch.colors ?? 'jolly-roger',
       apparentHostile: arch.hostile && !disguised,
       actuallyHostile: Boolean(arch.hostile),
       disguised,
@@ -183,6 +195,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       }. What are your orders?`,
     };
     state.active = enc;
+    env.onSightVessel?.(enc);
     addMark(voyage, { kind: 'sail', lat: voyage.dr.lat, lon: voyage.dr.lon, label: `Sail (${arch.title})` });
     raiseInterrupt(
       voyage,
@@ -311,9 +324,11 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
         voyage.provisions.water = Math.min(90, voyage.provisions.water + 2.5);
         voyage.provisions.food = Math.min(120, voyage.provisions.food + 2.5);
         voyage.morale = Math.min(1, voyage.morale + 0.04);
-        outcome.summary = `Hailed ${enc.shipName} (${enc.archetype.title}). Compared pilot reckoning (${posStr}) and traded fresh casks.`;
+        outcome.summary = `Hailed ${enc.shipName} (${enc.archetype.title}) within speaking-trumpet range. Compared pilot reckoning (${posStr}) and traded fresh casks.`;
       }
+      outcome.hailed = true;
       addLog(voyage, outcome.summary, 'hail');
+      env.onHailVessel?.(enc);
       env.onToast?.(outcome.summary, 8);
       return outcome;
     }

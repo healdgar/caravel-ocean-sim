@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createShipGunnery,createPortGunnery,createVesselDamageState,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage} from '../js/gunnery-control.js';
+import {createShipGunnery,createPortGunnery,createVesselDamageState,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage,computeCrewEfficiency} from '../js/gunnery-control.js';
 import {constrainIslandMotion} from '../js/terrain-model.js';
 import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
 import {boatHydrodynamics} from '../js/boat.js';
-import {createFollower,steerFollower} from '../js/follower.js';
+import {createFollower,steerFollower,stepVesselCombatAI} from '../js/follower.js';
+import {createCompany,stepCompany} from '../js/crew.js';
+import {SHIP_COLORS,setVesselColors,strikeVesselColors,buildShipColorsGeometry} from '../js/ship-colors.js';
 import {advanceSails} from '../js/sailing.js';
 import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
 import {bakeBuildingImpactDeformations} from '../js/part-assembly.js';
@@ -590,4 +592,74 @@ test('town fortifications (bastion, star fortress, watchtower, curtain wall & ga
  for(let step=0;step<60;step++)pg.update(0.1,[4,0,0]);
  const patrolled=pg.soldiers.filter((s,i)=>Math.hypot(s.position[0]-initialPositions[i][0],s.position[2]-initialPositions[i][2])>0.25);
  assert.ok(patrolled.length>=12,`expected rampart/bastion sentries to patrol along walls, got ${patrolled.length} moving`);
+});
+
+test('ship colors, human crew casualties, battle morale, and surrender signalling work across gunnery and AI',()=>{
+ // 1. Historical ship colors & 3D crow's nest + ensign geometry
+ assert.ok(SHIP_COLORS.portugal && SHIP_COLORS.castile && SHIP_COLORS.france && SHIP_COLORS['jolly-roger'] && SHIP_COLORS.surrender);
+ const geom=buildShipColorsGeometry();
+ assert.ok(geom instanceof Float32Array && geom.length>=1000,'builds 3D crow’s nest basket, flagstaff, stern ensign and masthead pennant vertices');
+
+ // 2. Grape shot inflicts heavier human casualties than solid round shot and marks 3D crew actors wounded/fallen
+ const makeTarget=()=>{
+  const b={id:'enemy-corsair',modelId:'nina',length:20,beam:6,heading:0,x:80,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'jolly-roger'};
+  b.hydrodynamics=boatHydrodynamics(20,6);
+  createVesselDamageState(b);
+  const comp=createCompany(undefined,'nina',{fullWatch:true});
+  stepCompany(comp,b,0.05,8);
+  return {boat:b,company:comp};
+ };
+ const roundTarget=makeTarget();
+ const grapeTarget=makeTarget();
+ const roundReport=applyShipImpactDamage(roundTarget.boat,{
+  ammo:'round',energy:140000,hitZone:'hull',surfacePosition:[80,1.2,0],localPosition:[1.2,1.2,0],designPosition:[0.8,1.1,0],velocity:[-120,0,0],mass:5.4,
+ });
+ const grapeReport=applyShipImpactDamage(grapeTarget.boat,{
+  ammo:'grape',energy:140000,hitZone:'hull',surfacePosition:[80,1.2,0],localPosition:[1.2,1.2,0],designPosition:[0.8,1.1,0],velocity:[-120,0,0],mass:5.4,
+ });
+ const roundCas=roundReport.casualtiesKilled+roundReport.casualtiesWounded;
+ const grapeCas=grapeReport.casualtiesKilled+grapeReport.casualtiesWounded;
+ assert.ok(grapeCas>roundCas,`grape shot (${grapeCas}) inflicts more human casualties than round shot (${roundCas})`);
+ assert.ok(grapeTarget.boat.damage.battleMorale<roundTarget.boat.damage.battleMorale,'grape shot inflicts greater battle morale loss');
+ const affectedActors=grapeTarget.company.crew.filter(s=>s.casualtyState==='wounded'||s.casualtyState==='fallen');
+ assert.ok(affectedActors.length>=1,'visible 3D deck crew actors near impact are marked wounded or fallen');
+ assert.ok(computeCrewEfficiency(grapeTarget.boat)<1.0,'crew casualties and lowered morale reduce gunnery reload efficiency');
+
+ // 3. Repeated broadsides break enemy battle morale and automatically trigger surrender (striking colors to white flag)
+ let surrenderNotified=false;
+ grapeTarget.boat.onSurrender=()=>{surrenderNotified=true;};
+ for(let salvo=0;salvo<6&&!grapeTarget.boat.damage.surrendered;salvo++){
+  applyShipImpactDamage(grapeTarget.boat,{
+   ammo:'grape',energy:180000,hitZone:'hull',surfacePosition:[80,1.2,0],localPosition:[1.2,1.2,0],designPosition:[0.8,1.1,0],velocity:[-140,0,0],mass:5.4,
+  });
+ }
+ assert.equal(grapeTarget.boat.damage.surrendered,true,'vessel surrenders when battle morale breaks');
+ assert.equal(grapeTarget.boat.colors,'surrender','surrendered vessel hoists the white flag of surrender');
+ assert.equal(surrenderNotified,true,'onSurrender callback fires when vessel strikes her colors');
+
+ // 4. Surrendered vessel ceases fire and furls sails, and opposing AI vessels honour the surrender
+ const enemyGuns=createShipGunnery(grapeTarget.boat);
+ const enemyFollower=createFollower({trail:0,side:1.2},{faction:'enemy'});
+ const player={boat:roundTarget.boat,faction:'friendly'};
+ const enemyVessel={boat:grapeTarget.boat,gunnery:enemyGuns,follower:enemyFollower,faction:'enemy'};
+ steerFollower(enemyFollower,grapeTarget.boat,roundTarget.boat,0.1,8,0);
+ assert.ok(enemyFollower.status.includes('Surrendered'),'follower status reflects struck colors');
+ const aiRes=stepVesselCombatAI(enemyVessel,{vessels:[player,enemyVessel],dt:0.1});
+ assert.equal(aiRes.action,'surrendered','surrendered AI vessel stands down from combat');
+
+ // Opposing AI vessel skips surrendered ship as a target
+ const hunterBoat={id:'hunter',modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'portugal'};
+ hunterBoat.hydrodynamics=boatHydrodynamics(20,6);
+ const hunterGuns=createShipGunnery(hunterBoat);
+ const hunterVessel={boat:hunterBoat,gunnery:hunterGuns,follower:createFollower({trail:0,side:1.2},{faction:'enemy'}),faction:'enemy'};
+ grapeTarget.boat.faction='friendly';
+ const hunterRes=stepVesselCombatAI(hunterVessel,{vessels:[hunterVessel,{boat:grapeTarget.boat,faction:'friendly'}],dt:0.1});
+ assert.equal(hunterRes.action,'stand-down','opposing AI vessel ceases fire against a ship that has struck her colors');
+
+ // Manual strikeVesselColors / setVesselColors
+ setVesselColors(hunterBoat,'france');
+ assert.equal(hunterBoat.colors,'france');
+ strikeVesselColors(hunterBoat,'Captain’s order');
+ assert.equal(hunterBoat.colors,'surrender');
+ assert.equal(hunterBoat.damage.surrendered,true);
 });

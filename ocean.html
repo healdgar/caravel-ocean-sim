@@ -5422,6 +5422,45 @@ function helmDesignStation(boat){
   return {side,baseX,baseZ,baseEye,helmX:helm?.x??HELM_EYE_X,helmZ:helm?.z??HELM_EYE_Z};
 }
 
+function crowsNestDesignStation(boat = {}) {
+  const modelId = boat.modelId ?? 'nina';
+  if (modelId === 'victory') {
+    return { x: 0, y: 10.25, z: 0.12, eyeHeight: 11.2, pennantLift: 2.95 };
+  }
+  const additional = additionalHydroDesign(modelId);
+  if (additional?.masts?.length) {
+    let tallest = additional.masts[0];
+    for (const m of additional.masts) {
+      if ((m.height ?? 0) > (tallest.height ?? 0)) tallest = m;
+    }
+    const y = (tallest.height ?? 7.5) * 0.86;
+    const sy = additional.frame?.verticalScale ?? 0.8;
+    return {
+      x: 0,
+      y,
+      z: tallest.z ?? 0,
+      eyeHeight: (y + 0.95) * sy,
+      pennantLift: Math.max(0.9, (tallest.height ?? 7.5) - y + 0.15),
+    };
+  }
+  const sy = vesselVerticalScale(boat);
+  const lengthScale = Math.max(0.85, Math.min(1.45, (boat.length || 20) / 20));
+  const y = 7.75;
+  return {
+    x: 0,
+    y,
+    z: -0.76,
+    eyeHeight: (y + 0.95) * sy * lengthScale,
+    pennantLift: 1.35,
+  };
+}
+
+function setBoatViewStation(boat, station = 'deck') {
+  if (!boat) return 'deck';
+  boat.viewStation = station === 'crows-nest' ? 'crows-nest' : 'deck';
+  return boat.viewStation;
+}
+
 function resetDeckWalk(boat){
   boat.deckWalkX=0;
   boat.deckWalkZ=0;
@@ -5430,6 +5469,7 @@ function resetDeckWalk(boat){
 }
 
 function deckStationLabel(boat){
+  if(boat?.viewStation==='crows-nest')return "Crow's Nest";
   const walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
   if(Math.hypot(walkX,walkZ)<=0.25)return 'Deck';
   const {baseZ}=helmDesignStation(boat),z=baseZ+walkZ;
@@ -5441,6 +5481,7 @@ function deckStationLabel(boat){
 
 function stepDeckWalk(boat,forwardInput,strafeInput,viewYaw,dt){
   if(!(dt>0)||!Number.isFinite(dt))return;
+  if(boat.viewStation==='crows-nest')return;
   hydroModelCode(boat.modelId??'nina');
   const {side,baseX,baseZ,helmX,helmZ}=helmDesignStation(boat);
   let walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
@@ -5483,7 +5524,7 @@ function stepDeckWalk(boat,forwardInput,strafeInput,viewYaw,dt){
 function stepBoatView(boat,dt){
   const side=boat.sailState?.tack??1;
   boat.eyeSide??=side;
-  if(Math.hypot(boat.deckWalkX||0,boat.deckWalkZ||0)>0.05){
+  if(boat.viewStation==='crows-nest'||Math.hypot(boat.deckWalkX||0,boat.deckWalkZ||0)>0.05){
     boat.eyeSideVelocity=0;
     return;
   }
@@ -5492,6 +5533,22 @@ function stepBoatView(boat,dt){
 // World-space eye anchor; keeping it separate from the vessel allows inspection.
 function boatEyePosition(out, boat) {
   hydroModelCode(boat.modelId??'nina');
+  if (boat.viewStation === 'crows-nest') {
+    const cn = crowsNestDesignStation(boat);
+    boatRotate(
+      out,
+      cn.x * (boat.beam || 3.6) / 3.6,
+      cn.eyeHeight,
+      cn.z * (boat.length || 12) / 12,
+      (boat.heading || 0) * Math.PI / 180,
+      boat.pitch || 0,
+      boat.roll || 0,
+    );
+    out[0] += boat.x || 0;
+    out[1] += boat.heave || 0;
+    out[2] += boat.z || 0;
+    return out;
+  }
   const {baseX,baseZ,baseEye,helmX,helmZ}=helmDesignStation(boat);
   const walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
   let designX=baseX,designZ=baseZ,eye=baseEye;
@@ -15851,6 +15908,13 @@ function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neighbors=nu
     state.status='Sunk (wreck)';
     return state;
   }
+  if(boat.damage?.surrendered){
+    boat.colors='surrender';
+    boat.rudder=0;
+    for(const key of SAIL_KEYS)boat[key]=0;
+    state.status='Struck colors (Surrendered 🏳️)';
+    return state;
+  }
   dt=Number.isFinite(dt)?clamp(dt,0,.25):0;
   const isEnemy=state.faction==='enemy';
   const h=leader.heading*RAD,L=Math.max(leader.length,boat.length);
@@ -16176,7 +16240,7 @@ function commandFriendlyVessel(vessel,command,{target=null,allies=[],anchorEnv=n
 function commandFriendlyFleet(vessels,command,options={}){
   if(!Array.isArray(vessels))return 0;
   const allies=options.allies??vessels.filter(v=>(v?.faction??v?.follower?.faction??'friendly')!=='enemy').map(v=>v.boat??v);
-  const enemy=options.target??vessels.find(v=>(v?.faction??v?.follower?.faction)==='enemy'&&!v?.boat?.damage?.sunk)??null;
+  const enemy=options.target??vessels.find(v=>(v?.faction??v?.follower?.faction)==='enemy'&&!v?.boat?.damage?.sunk&&!v?.boat?.damage?.surrendered)??null;
   let count=0;
   for(let i=0;i<vessels.length;i++){
     const v=vessels[i];
@@ -16193,6 +16257,15 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   const gunnery=vessel.gunnery;
   if(!gunnery||!gunnery.state?.guns?.length)return null;
   const boat=vessel.boat,follower=vessel.follower;
+  if(boat.damage?.surrendered){
+    boat.colors='surrender';
+    if(gunnery.selectedSide||gunnery.ordered||gunnery.state?.queue?.length)gunnery.standDown();
+    if(follower){
+      follower.pendingCaptainFire=null;
+      follower.status='Struck colors (Surrendered 🏳️)';
+    }
+    return {action:'surrendered',reason:boat.damage.surrenderReason??'morale-broken'};
+  }
   const faction=vessel.faction??follower?.faction??'friendly';
   const stepDt=Number.isFinite(dt)?Math.max(0,dt):0;
   if(follower){
@@ -16201,12 +16274,15 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   }
 
   if(faction==='enemy'){
-    // Find nearest non-sunk opposing vessel (player or friendly).
+    if(boat.battleColors&&boat.colors!==boat.battleColors&&boat.colors!=='surrender'){
+      boat.colors=boat.battleColors;
+    }
+    // Find nearest non-sunk, non-surrendered opposing vessel (player or friendly).
     let nearestTarget=null,nearestDist=Infinity;
     const enemyAllies=[];
     for(const other of vessels){
       const otherBoat=other?.boat??other;
-      if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.showProw===false)continue;
+      if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.damage?.surrendered||otherBoat.showProw===false)continue;
       const otherFaction=other?.faction??other?.follower?.faction??'friendly';
       if(otherFaction==='enemy'){
         enemyAllies.push(otherBoat);
@@ -16251,7 +16327,7 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   let nearestEnemy=null,nearestEnemyDist=Infinity;
   for(const other of vessels){
     const otherBoat=other?.boat??other;
-    if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.showProw===false)continue;
+    if(!otherBoat||otherBoat===boat||otherBoat.damage?.sunk||otherBoat.damage?.surrendered||otherBoat.showProw===false)continue;
     const otherFaction=other?.faction??other?.follower?.faction??'friendly';
     if(otherFaction==='enemy'){
       const d=Math.hypot((otherBoat.x??0)-(boat.x??0),(otherBoat.z??0)-(boat.z??0));
@@ -23490,7 +23566,7 @@ function assignProceduralCrewWork(company,boat){
   boat.crewSailRate??=new Float64Array(3);boat.crewRigRate??=new Float64Array(3);boat.crewSailRate.fill(0);boat.crewRigRate.fill(0);
   // A helmsman stays with the steering blade on crewed craft. A solo sailor can
   // secure the tiller, do one deck job, then physically return to her helm.
-  const free=()=>company.crew.filter(s=>!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>Number(!!a.stationId)-Number(!!b.stationId));
+  const free=()=>company.crew.filter(s=>s.casualtyState!=='fallen'&&!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>Number(!!a.stationId)-Number(!!b.stationId));
   if(company.order==='weather'&&(boat.hatchesClosed??0)<.999&&model.nodes['station.hatch']&&!company.crew.some(s=>s.job?.kind==='hatch')){
     const target=resolveShipNode(boat,'station.hatch',{space:'design'});
     for(const s of free())if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
@@ -23519,8 +23595,9 @@ function assignCrewWork(company,boat) {
   assignGunCrew(company,boat);
   for(const s of company.crew){
     s.home??=[s.x,s.z];
+    if(s.casualtyState==='fallen'){s.job=null;continue;}
     if(s.job)continue;
-    if(company.gunneryActive)continue;
+    if(company.gunneryActive||boat.damage?.surrendered)continue;
     let job;
     if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
       const [mast]=CLIMBERS[s.id],side=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
@@ -23725,16 +23802,18 @@ function startReturn(s,boat,company=null){
   j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}
 }
 function crewWorkLabel(s){
-  if(s.job?.stage==='traffic-yield'||s.job?.stage==='traffic-hold')return 'Making way';
-  if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';
-  if(!s.job&&s.seatedPose)return s.stationId?s.seatedPose.effort>0?s.seatedPose.drive?'Pulling the blade':'Recovering the blade':'Holding the loom':s.role==='Helmsman'?'Working the steering blade':'Seated at station';
-  if(!s.job)return s.walk>.3?'On rounds':'At station';
+  if(s.casualtyState==='fallen')return 'Fallen in action';
+  const woundPrefix=s.casualtyState==='wounded'?'Wounded · ':'';
+  if(s.job?.stage==='traffic-yield'||s.job?.stage==='traffic-hold')return woundPrefix+'Making way';
+  if(s.intent==='brace')return woundPrefix+(s.job?.rung>0?'Holding fast aloft':'Bracing');
+  if(!s.job&&s.seatedPose)return woundPrefix+(s.stationId?s.seatedPose.effort>0?s.seatedPose.drive?'Pulling the blade':'Recovering the blade':'Holding the loom':s.role==='Helmsman'?'Working the steering blade':'Seated at station');
+  if(!s.job)return woundPrefix+(s.walk>.3?'On rounds':'At station');
   const j=s.job;
-  if(j.stage==='ascending')return 'Climbing a runner';if(j.stage==='descending')return 'Climbing down';
-  if(j.kind==='yield')return 'Making room on deck';
-  if(j.stage==='approach')return 'Going to work';if(j.stage==='return')return 'Returning to station';
-  if(j.kind==='gunnery')return {swab:'Sponging the bore',load:'Loading round shot',ram:'Ramming home',runout:'Hauling the gun out',prime:'Priming the gun',ready:'Standing clear · gun ready',recoil:'Standing clear of recoil',spent:'Awaiting reload'}[j.gun.stage]??'At the guns';
-  return {rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind];
+  if(j.stage==='ascending')return woundPrefix+'Climbing a runner';if(j.stage==='descending')return woundPrefix+'Climbing down';
+  if(j.kind==='yield')return woundPrefix+'Making room on deck';
+  if(j.stage==='approach')return woundPrefix+'Going to work';if(j.stage==='return')return woundPrefix+'Returning to station';
+  if(j.kind==='gunnery')return woundPrefix+({swab:'Sponging the bore',load:'Loading round shot',ram:'Ramming home',runout:'Hauling the gun out',prime:'Priming the gun',ready:'Standing clear · gun ready',recoil:'Standing clear of recoil',spent:'Awaiting reload'}[j.gun.stage]??'At the guns');
+  return woundPrefix+({rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind]);
 }
 
 // ---- js/gunnery-tools.js ----
@@ -24293,6 +24372,7 @@ function issueCaptainOrder(company,boat,id) {
   return true;
 }
 function stepCompany(company,boat,dt,wind) {
+  company.boat=boat;if(boat)boat.crewCompany=company;
   const order=CAPTAIN_ORDERS.find(o=>o.id===company.order),sails=sailingState(boat);
   // Manual sail settings supersede an outstanding broad order without stale reapplication.
   if(order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-boat[SAIL_KEYS[i]])>.001)){
@@ -24302,27 +24382,40 @@ function stepCompany(company,boat,dt,wind) {
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
+    if(s.casualtyState==='fallen'){
+      s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;s.brace=0;
+      s.climbPitch=Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
+      stepDeckhand(s,boat,0,wind,company);
+      continue;
+    }
+    const sailorDt=s.casualtyState==='wounded'?dt*0.55:dt;
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
     if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationKey=null;s.navigationY=null;}
     const hadJob=!!s.job;
-    if(!stepCrewWork(s,company,boat,dt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:dt,wind,company);}
+    if(!stepCrewWork(s,company,boat,sailorDt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:sailorDt,wind,company);}
   }
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
   // Hazard/policy changes above can alter attendance during this step. Resolve
   // every seated target from the final Set used by blades and physical forces.
-  if(Object.hasOwn(ROWING_DESIGNS,boat.modelId))for(const s of company.crew)if(!s.job)s.seatedPose=crewSeatedPose(s,boat);
+  if(Object.hasOwn(ROWING_DESIGNS,boat.modelId))for(const s of company.crew)if(!s.job&&s.casualtyState!=='fallen')s.seatedPose=crewSeatedPose(s,boat);
   return company;
 }
 function boatHatchPending(company){return company.crew.some(s=>s.job?.kind==='hatch'&&s.job.stage!=='return');}
-function companyStatus(company) {
-  const bracing=company.crew.filter(s=>s.intent==='brace').length;
-  if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}`;
-  if(company.rigManeuver)return 'Transferring yards · gathering canvas and handling spars';
-  if(company.order==='weather'&&(boatHatchPending(company)))return 'Prepare for heavy weather · securing canvas and hatch';
-  if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails`;
-  return company.order==='watch'?`Sea watch · ${company.crew.length} ${company.representativeWatch?'hands representing the watch':'aboard'}${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`;
+function companyStatus(company,boat=company?.boat) {
+  const dmg=boat?.damage;
+  if(dmg?.surrendered)return 'Struck colors (Surrendered 🏳️) · hands standing down';
+  const cas=dmg?.crewCasualties;
+  const casSuffix=cas&&(cas.killed>0||cas.wounded>0)
+    ?` · ${cas.able}/${cas.total} able (${cas.wounded} wounded, ${cas.killed} fallen) · Morale ${Math.round((dmg.battleMorale??1)*100)}% (${dmg.moraleState??'steady'})`
+    :'';
+  const bracing=company.crew.filter(s=>s.casualtyState!=='fallen'&&s.intent==='brace').length;
+  if(bracing)return `${bracing} hands bracing · ${CAPTAIN_ORDERS.find(o=>o.id===company.order).label}${casSuffix}`;
+  if(company.rigManeuver)return `Transferring yards · gathering canvas and handling spars${casSuffix}`;
+  if(company.order==='weather'&&(boatHatchPending(company)))return `Prepare for heavy weather · securing canvas and hatch${casSuffix}`;
+  if(company.pending)return `${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · handling sails${casSuffix}`;
+  return (company.order==='watch'?`Sea watch · ${company.crew.length} ${company.representativeWatch?'hands representing the watch':'aboard'}${company.crew.some(s=>s.job?.kind==='lookout'&&s.job.stage==='working')?' · lookout aloft':''}`:`${CAPTAIN_ORDERS.find(o=>o.id===company.order).label} · sail setting reached`)+casSuffix;
 }
 function deckhandDecision(observation) {
   if(observation.hazard)return 'brace';
@@ -24515,7 +24608,12 @@ async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,e
           poseCrewWork(a,s,boat);
           const offset=i*CREW_ACTOR_FLOATS;
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
-          b.actors.set(s.shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
+          const shirt=s.casualtyState==='fallen'
+            ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
+            :s.casualtyState==='wounded'
+              ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
+              :s.shirt;
+          b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
           b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female');
           // The tiller station is below the camera; all crew remain visible.
           b.actors[offset+19]=Number(!s.visible);
@@ -39531,7 +39629,7 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
   const viewToggleBtn=document.createElement('button');
   viewToggleBtn.type='button';viewToggleBtn.id='helm-view-toggle';viewToggleBtn.className='helm-quarters-pill helm-view-pill';
   viewToggleBtn.textContent='View: Deck';
-  viewToggleBtn.title='Switch camera view (Deck / Ship orbit · B key) · Drag mouse or press ↑↓←→ keys to turn view · W/S/Q/E to walk deck';
+  viewToggleBtn.title="Switch camera view (Deck / Crow's Nest / Ship orbit · V or B key) · Drag mouse or press ↑↓←→ keys to turn view · W/S/Q/E to walk deck";
   viewToggleBtn.onclick=()=>{battleContext?.onToggleView?.();update(performance.now(),true);};
 
   const viewResetBtn=document.createElement('button');
@@ -39913,7 +40011,12 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
       const hullPct=Math.round((dmg?.hullIntegrity??1)*100);
       const rigPct=Math.round((dmg?.rigIntegrity??1)*100);
       const fires=dmg?.worldFires?.length??0;
-      const vitTxt=`Hull ${hullPct}% · Rig ${rigPct}%${fires?` · ${fires}🔥`:''}`;
+      const cas=dmg?.crewCasualties;
+      const moralePct=Math.round((dmg?.battleMorale??1)*100);
+      const crewTxt=cas?` · Crew ${cas.able}/${cas.total} · Morale ${moralePct}%`:'';
+      const vitTxt=dmg?.surrendered
+        ?`🏳️ Colors struck · Hull ${hullPct}%${crewTxt}`
+        :`Hull ${hullPct}% · Rig ${rigPct}%${crewTxt}${fires?` · ${fires}🔥`:''}`;
       if(vitalityPill.textContent!==vitTxt)vitalityPill.textContent=vitTxt;
 
       const mag=gunnery.magazine;
@@ -39935,7 +40038,8 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
       }
       if(gunnery.lastDamageReport?.targetName&&gunnery.lastDamageReport?.energyKj){
         const r=gunnery.lastDamageReport;
-        telemTxt+=` · Hit ${r.energyKj}kJ`;
+        const casHit=(r.casualtiesKilled||r.casualtiesWounded)?` (-${(r.casualtiesKilled||0)+(r.casualtiesWounded||0)} crew · ${Math.round((r.battleMorale??1)*100)}% morale)`:'';
+        telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Hit ${r.energyKj}kJ${casHit}`;
       }
       if(battleTelemetry.textContent!==telemTxt)battleTelemetry.textContent=telemTxt;
     }
@@ -40718,8 +40822,681 @@ function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}
   };
 }
 
+// ---- js/ship-colors.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+
+
+
+
+
+
+// Historically grounded 16th-century & Age-of-Sail naval ensigns ("ship's colors").
+const SHIP_COLORS = Object.freeze({
+  portugal: Object.freeze({
+    id: 'portugal',
+    code: 1,
+    name: 'Kingdom of Portugal (Quinas & Cross of Christ)',
+    shortLabel: 'Portugal 🇵🇹',
+    faction: 'portuguese',
+    isHostile: false,
+    isSurrender: false,
+    description: 'Royal white field bearing the crimson Order of Christ cross and the five blue escutcheons (quinas) of Lisbon.',
+  }),
+  castile: Object.freeze({
+    id: 'castile',
+    code: 2,
+    name: 'Crown of Castile (Cross of Burgundy)',
+    shortLabel: 'Castile / Spain 🇪🇸',
+    faction: 'spanish',
+    isHostile: false,
+    isSurrender: false,
+    description: 'White naval ensign with the crimson ragged saltire of Saint Andrew (Cruz de Borgoña) flown by Spanish naos.',
+  }),
+  france: Object.freeze({
+    id: 'france',
+    code: 3,
+    name: 'Kingdom of France (Pavillon Royal / Huguenot)',
+    shortLabel: 'France 🇫🇷',
+    faction: 'french',
+    isHostile: false,
+    isSurrender: false,
+    description: 'Maritime blue field quartered by a white cross with gold fleurs-de-lis flown by Norman and La Rochelle vessels.',
+  }),
+  basque: Object.freeze({
+    id: 'basque',
+    code: 4,
+    name: 'Señorío de Vizcaya (Biscayan Merchant Colors)',
+    shortLabel: 'Vizcaya / Basque',
+    faction: 'basque',
+    isHostile: false,
+    isSurrender: false,
+    description: 'Crimson and white merchant ensign of Bilbao and San Sebastián iron-and-wool traders.',
+  }),
+  england: Object.freeze({
+    id: 'england',
+    code: 5,
+    name: 'Kingdom of England (Tudor St. George Cross)',
+    shortLabel: 'England 🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+    faction: 'english',
+    isHostile: false,
+    isSurrender: false,
+    description: 'White field quartered by the red cross of Saint George.',
+  }),
+  'jolly-roger': Object.freeze({
+    id: 'jolly-roger',
+    code: 6,
+    name: 'Jolly Roger (Pirate / Sea-Rover Colors)',
+    shortLabel: 'Jolly Roger 🏴‍☠️',
+    faction: 'pirate',
+    isHostile: true,
+    isSurrender: false,
+    description: 'Black sea-rover ensign bearing a white skull and crossed bones to demand immediate surrender.',
+  }),
+  'blood-flag': Object.freeze({
+    id: 'blood-flag',
+    code: 7,
+    name: 'Sans Quartier (Red Flag of No Quarter)',
+    shortLabel: 'Blood Flag 🚩',
+    faction: 'corsair',
+    isHostile: true,
+    isSurrender: false,
+    description: 'Solid crimson battle banner signalling combat to the death without quarter.',
+  }),
+  surrender: Object.freeze({
+    id: 'surrender',
+    code: 8,
+    name: 'White Flag of Surrender (Struck Colors)',
+    shortLabel: 'Surrendered 🏳️',
+    faction: 'neutral',
+    isHostile: false,
+    isSurrender: true,
+    description: 'Plain white flag hoisted after striking national colors to signal surrender and ask for quarter.',
+  }),
+});
+
+const DEFAULT_SHIP_COLORS = 'portugal';
+
+function getShipColorsInfo(colorsId) {
+  return SHIP_COLORS[colorsId] ?? SHIP_COLORS[DEFAULT_SHIP_COLORS];
+}
+
+function setVesselColors(boat, colorsId) {
+  if (!boat) return getShipColorsInfo(DEFAULT_SHIP_COLORS);
+  const info = getShipColorsInfo(colorsId);
+  boat.colors = info.id;
+  if (info.isSurrender) {
+    if (boat.damage) boat.damage.surrendered = true;
+  } else if (boat.damage && boat.damage.surrendered && colorsId !== 'surrender') {
+    boat.damage.surrendered = false;
+    boat.damage.surrenderReason = null;
+  }
+  return info;
+}
+
+function hoistBattleColors(boat, battleColorsId = 'jolly-roger') {
+  if (!boat || boat.damage?.surrendered) return getShipColorsInfo(boat?.colors);
+  if (!boat.falseColors && boat.colors && boat.colors !== battleColorsId) {
+    boat.falseColors = boat.colors;
+  }
+  return setVesselColors(boat, battleColorsId);
+}
+
+function strikeVesselColors(boat, reason = 'Struck colors') {
+  if (!boat) return null;
+  if (boat.colors && boat.colors !== 'surrender') {
+    boat.previousColors = boat.colors;
+  }
+  boat.colors = 'surrender';
+  boat.sailSet = 0;
+  boat.targetSpeed = 0;
+  if (boat.damage) {
+    const alreadySurrendered = Boolean(boat.damage.surrendered);
+    boat.damage.surrendered = true;
+    boat.damage.surrenderReason = reason;
+    boat.damage.moraleState = 'broken';
+    if (!alreadySurrendered) {
+      boat.onSurrender?.(boat, boat.damage, reason);
+    }
+  }
+  return SHIP_COLORS.surrender;
+}
+
+const SHIP_COLORS_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + SCENE_SHADOW_SAMPLE + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var transLUT: texture_2d<f32>;
+@group(0) @binding(2) var skyLUT: texture_2d<f32>;
+@group(0) @binding(3) var sampC: sampler;
+@group(0) @binding(4) var envCube: texture_cube<f32>;
+@group(0) @binding(5) var<storage, read> sunVis: array<f32>;
+struct ShipColorsPose {
+  right: vec4f,
+  up: vec4f,
+  aft: vec4f,
+  origin: vec4f,
+  ensignBase: vec4f,
+  crowsNest: vec4f,
+  windAndState: vec4f,
+};
+@group(0) @binding(6) var<uniform> P: ShipColorsPose;
+
+struct ColorsVertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) world: vec3f,
+  @location(1) normal: vec3f,
+  @location(2) uvMode: vec4f,
+};
+
+@vertex fn vs(
+  @location(0) pos: vec3f,
+  @location(1) norm: vec3f,
+  @location(2) uvMode: vec4f,
+) -> ColorsVertexOut {
+  let mode = uvMode.z;
+  let u = uvMode.x;
+  let v = uvMode.y;
+  let sx = P.right.w;
+  let sy = P.up.w;
+  let sz = P.aft.w;
+  let time = P.origin.w;
+  let windSpeed = clamp(P.windAndState.z, 1.5, 22.0);
+  let surrendered = P.windAndState.w > 0.5;
+
+  var localPos = pos;
+  var localNorm = norm;
+
+  if (mode < 0.5) {
+    // mode 0: Crow's nest basket (cesto de gavia) centered on P.crowsNest.xyz
+    let cn = P.crowsNest.xyz;
+    localPos = vec3f((cn.x + pos.x) * sx, (cn.y + pos.y) * sy, (cn.z + pos.z) * sz);
+  } else if (mode < 1.5) {
+    // mode 1: Stern flagstaff pole anchored at P.ensignBase.xyz
+    let base = P.ensignBase.xyz;
+    localPos = vec3f((base.x + pos.x) * sx, (base.y + pos.y) * sy, (base.z + pos.z) * sz);
+  } else {
+    // mode 2 (stern ensign cloth) or mode 3 (masthead pennant)
+    let isPennant = mode > 2.5;
+    let base = select(P.ensignBase.xyz, P.crowsNest.xyz + vec3f(0.0, P.crowsNest.w, 0.0), isPennant);
+    let rake = select(0.42, 0.0, isPennant);
+    // When surrendered, hoist flag slightly lower on the staff (dipped in truce)
+    let hoistDip = select(0.0, -0.32, surrendered && !isPennant);
+    let hoistTopY = base.y + select(2.35, 1.15, isPennant) + hoistDip;
+    let hoistTopZ = base.z + select(0.88, 0.0, isPennant);
+    let flagHeight = select(1.28, 0.24 * (1.0 - 0.72 * u), isPennant);
+    let flagLength = select(2.25, 2.85, isPennant);
+
+    let hoistY = hoistTopY - v * flagHeight;
+    let hoistZ = hoistTopZ - v * flagHeight * rake;
+    let anchorWorld = P.origin.xyz
+      + P.right.xyz * (base.x * sx)
+      + P.up.xyz * (hoistY * sy)
+      + P.aft.xyz * (hoistZ * sz);
+
+    // Stream downwind in world XZ with travelling cloth wave
+    let windDir2 = normalize(select(vec2f(0.7, 0.7), P.windAndState.xy, length(P.windAndState.xy) > 1e-3));
+    let streamDir = normalize(vec3f(windDir2.x, -0.06, windDir2.y));
+    let sideDir = normalize(vec3f(-streamDir.z, 0.0, streamDir.x));
+    let phase = time * (3.2 + 0.38 * windSpeed) - u * 6.8 + v * 0.9;
+    let flutter = (sin(phase) + 0.38 * sin(phase * 2.3 + 1.1)) * (0.06 + 0.16 * u * u);
+    let sag = u * (1.0 - 0.35 * u) * select(0.14, 0.26, surrendered);
+
+    let world = anchorWorld
+      + streamDir * (u * flagLength * max(0.85, sx))
+      + sideDir * (flutter * max(0.85, sx))
+      - vec3f(0.0, sag * sy, 0.0);
+
+    let dWave = cos(phase) * 0.85 * u;
+    let nWorld = normalize(sideDir * select(1.0, -1.0, norm.x < 0.0) - streamDir * dWave * 0.32 + vec3f(0.0, 0.12, 0.0));
+    var out: ColorsVertexOut;
+    out.position = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+    out.world = world;
+    out.normal = nWorld;
+    out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
+    return out;
+  }
+
+  let world = P.origin.xyz + P.right.xyz * localPos.x + P.up.xyz * localPos.y + P.aft.xyz * localPos.z;
+  let nWorld = normalize(P.right.xyz * localNorm.x + P.up.xyz * localNorm.y + P.aft.xyz * localNorm.z);
+  var out: ColorsVertexOut;
+  out.position = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+  out.world = world;
+  out.normal = nWorld;
+  out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
+  return out;
+}
+
+fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
+  let cx = u - 0.46;
+  let cy = v - 0.50;
+  let weave = 0.96 + 0.04 * sin(u * 140.0) * sin(v * 95.0);
+
+  // Border hem shading
+  let border = min(min(u, 1.0 - u), min(v, 1.0 - v));
+  let hem = smoothstep(0.0, 0.025, border);
+
+  if (code == 8) {
+    // White Flag of Surrender / Truce
+    let truceSeam = 0.94 + 0.04 * smoothstep(0.01, 0.03, abs(v - 0.5));
+    return vec3f(0.92, 0.91, 0.87) * weave * truceSeam * (0.92 + 0.08 * hem);
+  }
+  if (code == 7) {
+    // Blood Flag (Sans Quartier — solid crimson)
+    return vec3f(0.58, 0.05, 0.05) * weave * (0.88 + 0.12 * hem);
+  }
+  if (code == 6) {
+    // Jolly Roger (Black field with white skull & crossed bones)
+    var col = vec3f(0.045, 0.045, 0.052);
+    if (isPennant) {
+      let stripe = step(0.38, abs(v - 0.5));
+      col = mix(col, vec3f(0.84, 0.82, 0.76), stripe * 0.7);
+      return col * weave;
+    }
+    // Skull cranium + jaw
+    let sx = (u - 0.46) * 1.45;
+    let sy = (v - 0.42);
+    let cranium = length(vec2f(sx, sy * 1.15)) < 0.19;
+    let jaw = abs(sx) < 0.095 && sy > 0.08 && sy < 0.23;
+    let leftEye = length(vec2f(sx + 0.068, sy + 0.015)) < 0.044;
+    let rightEye = length(vec2f(sx - 0.068, sy + 0.015)) < 0.044;
+    let nose = abs(sx) < 0.024 && sy > 0.02 && sy < 0.075;
+    let teethGroove = sy > 0.145 && sy < 0.175 && (abs(sx) < 0.08) && (fract(sx * 28.0) < 0.35);
+    let skull = (cranium || jaw) && !leftEye && !rightEye && !nose && !teethGroove;
+
+    // Crossed bones behind/below skull
+    let bx = (u - 0.46) * 1.25;
+    let by = (v - 0.52);
+    let d1 = abs(bx * 0.52 - by * 0.85);
+    let d2 = abs(bx * 0.52 + by * 0.85);
+    let span = length(vec2f(bx, by)) < 0.34 && length(vec2f(bx, by)) > 0.15;
+    let bones = span && (d1 < 0.028 || d2 < 0.028);
+
+    if (skull || bones) {
+      col = vec3f(0.88, 0.86, 0.80);
+    }
+    return col * weave;
+  }
+  if (code == 2) {
+    // Castile / Spain — White field with crimson ragged Cross of Burgundy (saltire)
+    var col = vec3f(0.88, 0.85, 0.78);
+    let sx = (u - 0.48);
+    let sy = (v - 0.50);
+    let arm1 = abs(sx * 0.62 - sy * 0.78);
+    let arm2 = abs(sx * 0.62 + sy * 0.78);
+    let notch1 = 0.022 * step(0.45, fract((sx + sy) * 9.5));
+    let notch2 = 0.022 * step(0.45, fract((sx - sy) * 9.5));
+    if (arm1 < 0.055 + notch1 || arm2 < 0.055 + notch2) {
+      col = vec3f(0.66, 0.07, 0.08);
+    }
+    return col * weave;
+  }
+  if (code == 3) {
+    // Kingdom of France — Royal blue field, white cross, gold fleurs-de-lis
+    var col = vec3f(0.08, 0.16, 0.46);
+    let cross = abs(u - 0.44) < 0.065 || abs(v - 0.50) < 0.095;
+    if (cross) {
+      col = vec3f(0.89, 0.88, 0.84);
+    } else {
+      let qx = abs(u - 0.44) - 0.22;
+      let qy = abs(v - 0.50) - 0.24;
+      if (length(vec2f(qx * 1.3, qy)) < 0.065) {
+        col = vec3f(0.82, 0.65, 0.14);
+      }
+    }
+    return col * weave;
+  }
+  if (code == 4) {
+    // Vizcaya / Basque — Crimson field with white saltire & green cross
+    var col = vec3f(0.64, 0.08, 0.09);
+    let sx = u - 0.48;
+    let sy = v - 0.50;
+    if (abs(sx * 0.62 - sy * 0.78) < 0.05 || abs(sx * 0.62 + sy * 0.78) < 0.05) {
+      col = vec3f(0.12, 0.38, 0.18);
+    }
+    if (abs(u - 0.48) < 0.055 || abs(v - 0.50) < 0.085) {
+      col = vec3f(0.89, 0.87, 0.82);
+    }
+    return col * weave;
+  }
+  if (code == 5) {
+    // England — White field with red St. George's Cross
+    var col = vec3f(0.89, 0.87, 0.82);
+    if (abs(u - 0.46) < 0.065 || abs(v - 0.50) < 0.10) {
+      col = vec3f(0.68, 0.07, 0.08);
+    }
+    return col * weave;
+  }
+
+  // Default (code == 1): Kingdom of Portugal — White field, crimson Order of Christ cross,
+  // white inner cross, and central blue Quinas shield with red bordure
+  var col = vec3f(0.89, 0.86, 0.79);
+  let dx = abs(cx);
+  let dy = abs(cy);
+  let armSpan = dx < 0.30 && dy < 0.36;
+  let patteeV = dx < (0.052 + 0.085 * smoothstep(0.18, 0.34, dy));
+  let patteeH = dy < (0.068 + 0.095 * smoothstep(0.15, 0.28, dx));
+  if (armSpan && (patteeV || patteeH)) {
+    col = vec3f(0.66, 0.07, 0.07);
+    let innerV = dx < 0.022 && dy < 0.30;
+    let innerH = dy < 0.028 && dx < 0.25;
+    if (innerV || innerH) {
+      col = vec3f(0.91, 0.89, 0.84);
+    }
+  }
+  // Central Portuguese royal shield & 5 blue Quinas
+  if (dx < 0.095 && dy < 0.125) {
+    col = vec3f(0.68, 0.08, 0.08); // crimson castle bordure
+    if (dx < 0.068 && dy < 0.092) {
+      col = vec3f(0.90, 0.88, 0.83); // silver inner escutcheon
+      let qCenter = dx < 0.018 && dy < 0.024;
+      let qTopBottom = dx < 0.018 && abs(dy - 0.052) < 0.020;
+      let qLeftRight = abs(dx - 0.038) < 0.016 && dy < 0.024;
+      if (qCenter || qTopBottom || qLeftRight) {
+        col = vec3f(0.09, 0.20, 0.52); // 5 blue Quinas
+      }
+    }
+  }
+  return col * weave;
+}
+
+@fragment fn fs(v: ColorsVertexOut) -> @location(0) vec4f {
+  let n = normalize(v.normal);
+  let eye = normalize(F.camPos.xyz - v.world);
+  let mode = v.uvMode.z;
+  let code = i32(round(v.uvMode.w));
+
+  var color = vec3f(0.11, 0.075, 0.042);
+  var rough = 0.78;
+  var f0 = vec3f(0.035);
+
+  if (mode < 1.5) {
+    // Wood & iron bands of the crow's nest basket (mode 0) and stern flagstaff (mode 1)
+    let isIronBand = v.uvMode.x > 0.5;
+    let grain = 0.92 + 0.08 * sin(v.world.y * 95.0 + sin(v.world.x * 55.0) + v.world.z * 48.0);
+    color = select(vec3f(0.115, 0.078, 0.042) * grain, vec3f(0.038, 0.040, 0.044), isIronBand);
+    rough = select(0.76, 0.42, isIronBand);
+    f0 = select(vec3f(0.035), vec3f(0.12), isIronBand);
+  } else {
+    // Woven bunting cloth (stern ensign or masthead pennant)
+    color = evalEnsignColor(clamp(v.uvMode.x, 0.0, 1.0), clamp(v.uvMode.y, 0.0, 1.0), code, mode > 2.5);
+    rough = 0.86;
+  }
+
+  let shadowSample = vesselShadow(v.world, n);
+  let sun = sunIlluminance() * sunVis[0] * step(0.0, F.sunDir.y) * solarShadowVisibility(shadowSample);
+  let sky = textureSampleLevel(envCube, sampC, vec3f(0, 1, 0), 7).rgb;
+  let sea = textureSampleLevel(envCube, sampC, vec3f(0, -1, 0), 7).rgb;
+  let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
+  // Cloth translucency when backlit by the sun
+  let backlit = select(0.0, max(dot(-n, F.sunDir.xyz), 0.0) * 0.38, mode > 1.5);
+  var radiance = color * vesselAmbient(n, sky, sea)
+    + sun * (color / PI * (nDotL + backlit) + vesselSpecular(n, eye, F.sunDir.xyz, rough, f0) * nDotL);
+  radiance += lunarSurface(n, eye, color, rough, f0, sunVis[1] * lunarShadowVisibility(shadowSample))
+    + lightningSurface(n, eye, color, rough);
+  return vec4f(surfaceAir(radiance, v.world), 1.0);
+}
+`;
+
+function buildShipColorsGeometry() {
+  const values = [];
+  const put = (p, n, u, v, mode) => {
+    values.push(p[0], p[1], p[2], n[0], n[1], n[2], u, v, mode, 1);
+  };
+  const addTube = (a, b, r0, r1, sides, mode, ironFlag = 0) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-5) return;
+    const d = [dx / len, dy / len, dz / len];
+    const seed = Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const ux = d[1] * seed[2] - d[2] * seed[1];
+    const uy = d[2] * seed[0] - d[0] * seed[2];
+    const uz = d[0] * seed[1] - d[1] * seed[0];
+    const um = Math.hypot(ux, uy, uz) || 1;
+    const u = [ux / um, uy / um, uz / um];
+    const v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+    for (let i = 0; i < sides; i++) {
+      const t0 = (i / sides) * Math.PI * 2;
+      const t1 = ((i + 1) / sides) * Math.PI * 2;
+      const n0 = [u[0] * Math.cos(t0) + v[0] * Math.sin(t0), u[1] * Math.cos(t0) + v[1] * Math.sin(t0), u[2] * Math.cos(t0) + v[2] * Math.sin(t0)];
+      const n1 = [u[0] * Math.cos(t1) + v[0] * Math.sin(t1), u[1] * Math.cos(t1) + v[1] * Math.sin(t1), u[2] * Math.cos(t1) + v[2] * Math.sin(t1)];
+      const a0 = [a[0] + n0[0] * r0, a[1] + n0[1] * r0, a[2] + n0[2] * r0];
+      const a1 = [a[0] + n1[0] * r0, a[1] + n1[1] * r0, a[2] + n1[2] * r0];
+      const b0 = [b[0] + n0[0] * r1, b[1] + n0[1] * r1, b[2] + n0[2] * r1];
+      const b1 = [b[0] + n1[0] * r1, b[1] + n1[1] * r1, b[2] + n1[2] * r1];
+      put(a0, n0, ironFlag, 0, mode);
+      put(a1, n1, ironFlag, 0, mode);
+      put(b0, n0, ironFlag, 1, mode);
+      put(b0, n0, ironFlag, 1, mode);
+      put(a1, n1, ironFlag, 0, mode);
+      put(b1, n1, ironFlag, 1, mode);
+    }
+  };
+
+  // 1. Mode 0: 3D Crow's Nest Basket (cesto de gavia) centered at origin of lookout station
+  const ringSegs = 12;
+  const rBottom = 0.44;
+  const rTop = 0.56;
+  const hBasket = 0.78;
+  for (let i = 0; i < ringSegs; i++) {
+    const a0 = (i / ringSegs) * Math.PI * 2;
+    const a1 = ((i + 1) / ringSegs) * Math.PI * 2;
+    const c0 = Math.cos(a0), s0 = Math.sin(a0);
+    const c1 = Math.cos(a1), s1 = Math.sin(a1);
+    // Floor ring, mid iron hoop, and top breast-rail ring
+    addTube([c0 * rBottom, 0, s0 * rBottom], [c1 * rBottom, 0, s1 * rBottom], 0.042, 0.042, 6, 0, 0);
+    addTube([c0 * 0.50, hBasket * 0.52, s0 * 0.50], [c1 * 0.50, hBasket * 0.52, s1 * 0.50], 0.026, 0.026, 5, 0, 1);
+    addTube([c0 * rTop, hBasket, s0 * rTop], [c1 * rTop, hBasket, s1 * rTop], 0.046, 0.046, 6, 0, 0);
+    // Vertical oak staves + floor radial knees supporting the basket
+    addTube([c0 * rBottom, 0, s0 * rBottom], [c0 * rTop, hBasket, s0 * rTop], 0.028, 0.024, 5, 0, 0);
+    addTube([c0 * 0.14, -0.22, s0 * 0.14], [c0 * rBottom, 0, s0 * rBottom], 0.032, 0.028, 5, 0, 0);
+  }
+
+  // 2. Mode 1: Angled Stern Flagstaff at the taffrail
+  addTube([0, 0, 0], [0, 2.45, 0.92], 0.036, 0.022, 8, 1, 0);
+  // Gilt truck ball at top of stern staff
+  addTube([0, 2.43, 0.91], [0, 2.52, 0.95], 0.048, 0.015, 8, 1, 1);
+
+  // 3. Mode 2: Two-sided subdivided Stern Ensign Cloth (14 x 8 grid)
+  const nu = 14, nv = 8;
+  for (const side of [1, -1]) {
+    const n = [side, 0, 0];
+    for (let i = 0; i < nu; i++) {
+      const u0 = i / nu, u1 = (i + 1) / nu;
+      for (let j = 0; j < nv; j++) {
+        const v0 = j / nv, v1 = (j + 1) / nv;
+        const p00 = [0, 0, 0], p10 = [0, 0, 0], p01 = [0, 0, 0], p11 = [0, 0, 0];
+        if (side > 0) {
+          put(p00, n, u0, v0, 2);
+          put(p10, n, u1, v0, 2);
+          put(p01, n, u0, v1, 2);
+          put(p01, n, u0, v1, 2);
+          put(p10, n, u1, v0, 2);
+          put(p11, n, u1, v1, 2);
+        } else {
+          put(p00, n, u0, v0, 2);
+          put(p01, n, u0, v1, 2);
+          put(p10, n, u1, v0, 2);
+          put(p01, n, u0, v1, 2);
+          put(p11, n, u1, v1, 2);
+          put(p10, n, u1, v0, 2);
+        }
+      }
+    }
+  }
+
+  // 4. Mode 3: Masthead Pennant / Streamer above the mainmast
+  const pu = 10, pv = 2;
+  for (const side of [1, -1]) {
+    const n = [side, 0, 0];
+    for (let i = 0; i < pu; i++) {
+      const u0 = i / pu, u1 = (i + 1) / pu;
+      for (let j = 0; j < pv; j++) {
+        const v0 = j / pv, v1 = (j + 1) / pv;
+        const p = [0, 0, 0];
+        if (side > 0) {
+          put(p, n, u0, v0, 3);
+          put(p, n, u1, v0, 3);
+          put(p, n, u0, v1, 3);
+          put(p, n, u0, v1, 3);
+          put(p, n, u1, v0, 3);
+          put(p, n, u1, v1, 3);
+        } else {
+          put(p, n, u0, v0, 3);
+          put(p, n, u0, v1, 3);
+          put(p, n, u1, v0, 3);
+          put(p, n, u0, v1, 3);
+          put(p, n, u1, v1, 3);
+          put(p, n, u1, v0, 3);
+        }
+      }
+    }
+  }
+
+  return new Float32Array(values);
+}
+
+async function createShipColorsRenderer({
+  device,
+  frameUBO,
+  transView,
+  skyView,
+  sampClamp,
+  envCubeView,
+  sunVisBuf,
+  shadows,
+  shader,
+  format,
+  samples,
+  maxVessels = 4,
+}) {
+  const B = GPUBufferUsage;
+  const vertices = buildShipColorsGeometry();
+  const vertexCount = vertices.length / 10;
+  const vertexBuffer = device.createBuffer({
+    label: 'ship colors & crows nest geometry',
+    size: vertices.byteLength,
+    usage: B.VERTEX | B.COPY_DST,
+  });
+  device.queue.writeBuffer(vertexBuffer, 0, vertices);
+
+  const layout = [{
+    arrayStride: 40,
+    attributes: [
+      { shaderLocation: 0, offset: 0, format: 'float32x3' },
+      { shaderLocation: 1, offset: 12, format: 'float32x3' },
+      { shaderLocation: 2, offset: 24, format: 'float32x4' },
+    ],
+  }];
+
+  const module = await shader(SHIP_COLORS_RENDER, 'ship colors & crows nest');
+  const pipeline = await device.createRenderPipelineAsync({
+    label: 'ship colors pipeline',
+    layout: 'auto',
+    vertex: { module, entryPoint: 'vs', buffers: layout },
+    fragment: { module, entryPoint: 'fs', targets: [{ format }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+    multisample: { count: samples },
+  });
+
+  const lighting = shadows.bind(pipeline);
+  const slots = [];
+  const axis = [0, 0, 0];
+
+  for (let i = 0; i < maxVessels; i++) {
+    const poseData = new Float32Array(28);
+    const poseBuffer = device.createBuffer({
+      label: `ship colors pose ${i}`,
+      size: poseData.byteLength,
+      usage: B.UNIFORM | B.COPY_DST,
+    });
+    const resources = [
+      { buffer: frameUBO },
+      transView,
+      skyView,
+      sampClamp,
+      envCubeView,
+      { buffer: sunVisBuf },
+      { buffer: poseBuffer },
+    ];
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: resources.map((resource, binding) => ({ binding, resource })),
+    });
+    slots.push({ poseData, poseBuffer, bindGroup, active: false });
+  }
+
+  return {
+    updateVessel(index, boat, time, windDirX = 0.7, windDirZ = 0.7, windSpeed = 8) {
+      const slot = slots[index];
+      if (!slot) return;
+      if (!boat) {
+        slot.active = false;
+        return;
+      }
+      slot.active = true;
+      const hull = vesselHull(boat);
+      const f = hull.frame;
+      const sx = (boat.beam ?? f.beam) / f.beam;
+      const sy = f.verticalScale;
+      const sz = (boat.length ?? f.length) / f.length;
+      const h = (boat.heading ?? 0) * Math.PI / 180;
+      const pitch = boat.pitch ?? 0;
+      const roll = boat.roll ?? 0;
+      const p = slot.poseData;
+
+      boatRotate(axis, 1, 0, 0, h, pitch, roll);
+      p[0] = axis[0]; p[1] = axis[1]; p[2] = axis[2]; p[3] = sx;
+      boatRotate(axis, 0, 1, 0, h, pitch, roll);
+      p[4] = axis[0]; p[5] = axis[1]; p[6] = axis[2]; p[7] = sy;
+      boatRotate(axis, 0, 0, 1, h, pitch, roll);
+      p[8] = axis[0]; p[9] = axis[1]; p[10] = axis[2]; p[11] = sz;
+
+      p[12] = boat.x ?? 0;
+      p[13] = boat.heave ?? 0;
+      p[14] = boat.z ?? 0;
+      p[15] = time ?? 0;
+
+      const sternZ = (hull.bounds?.[1] ?? 5.1) - 0.16;
+      const sternY = modelDeck(boat, sternZ) + 0.65;
+      const colorsInfo = getShipColorsInfo(boat.damage?.surrendered ? 'surrender' : (boat.colors ?? DEFAULT_SHIP_COLORS));
+      p[16] = 0;
+      p[17] = sternY;
+      p[18] = sternZ - 0.08;
+      p[19] = colorsInfo.code;
+
+      const cn = crowsNestDesignStation(boat);
+      p[20] = cn.x;
+      p[21] = cn.y;
+      p[22] = cn.z;
+      p[23] = cn.pennantLift ?? 1.25;
+
+      p[24] = windDirX;
+      p[25] = windDirZ;
+      p[26] = windSpeed;
+      p[27] = boat.damage?.surrendered ? 1.0 : 0.0;
+
+      device.queue.writeBuffer(slot.poseBuffer, 0, p);
+    },
+    draw(pass, count = slots.length) {
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(1, lighting);
+      pass.setVertexBuffer(0, vertexBuffer);
+      const n = Math.min(count, slots.length);
+      for (let i = 0; i < n; i++) {
+        if (!slots[i].active) continue;
+        pass.setBindGroup(0, slots[i].bindGroup);
+        pass.draw(vertexCount);
+      }
+    },
+    destroy() {
+      vertexBuffer.destroy();
+      for (const s of slots) s.poseBuffer.destroy();
+    },
+  };
+}
+
 // ---- js/gunnery-control.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+
 
 
 
@@ -40941,8 +41718,50 @@ function consumeMagazineOrdnance(boat, event = {}) {
   return mag;
 }
 
+function getMoraleStateLabel(morale = 1, surrendered = false) {
+  if (surrendered) return 'surrendered';
+  if (morale >= 0.72) return 'steady';
+  if (morale >= 0.45) return 'shaken';
+  if (morale >= 0.20) return 'wavering';
+  return 'broken';
+}
+
+function computeCrewEfficiency(boat) {
+  const damage = boat?.damage;
+  if (!damage) return 1.0;
+  if (damage.surrendered || damage.sunk) return 0.0;
+  const c = damage.crewCasualties;
+  const total = Math.max(1, c?.total ?? 24);
+  const able = Math.max(0, c?.able ?? total);
+  const wounded = Math.max(0, c?.wounded ?? 0);
+  const effectiveHands = (able + wounded * 0.35) / total;
+  const moraleFactor = 0.45 + 0.55 * Math.max(0, Math.min(1, damage.battleMorale ?? 1));
+  return +Math.max(0.15, Math.min(1.0, effectiveHands * moraleFactor)).toFixed(3);
+}
+
+function defaultVesselCrewComplement(boat) {
+  const modelId = boat?.model?.id ?? boat?.modelId ?? 'caravel';
+  if (Number.isFinite(boat?.crewComplement) && boat.crewComplement > 0) return Math.round(boat.crewComplement);
+  if (modelId === 'victory') return 820;
+  if (modelId === 'santa-maria') return 42;
+  if (modelId === 'pinta') return 26;
+  if (modelId === 'nina') return 22;
+  if (modelId === 'taino-canoe') return 12;
+  return Math.max(18, Math.round((boat?.length ?? 20) * 1.2));
+}
+
 function createVesselDamageState(boat) {
   const magazine = createVesselMagazineState(boat);
+  if (!boat.colors) boat.colors = DEFAULT_SHIP_COLORS;
+  const totalCrew = defaultVesselCrewComplement(boat);
+  const makeCrewCasualties = () => ({
+    total: totalCrew,
+    able: totalCrew,
+    wounded: 0,
+    killed: 0,
+    hitsWithCasualties: 0,
+    lastCasualties: null,
+  });
   const makeCompartments = () => ({
     forePort: { breachArea: 0, waterTonnes: 0 },
     foreStarboard: { breachArea: 0, waterTonnes: 0 },
@@ -40956,6 +41775,15 @@ function createVesselDamageState(boat) {
     if (!boat.damage.partDamage) boat.damage.partDamage = {};
     if (!boat.damage.mastState) boat.damage.mastState = { fore: 0, main: 0, mizzen: 0 };
     if (!boat.damage.compartments) boat.damage.compartments = makeCompartments();
+    if (!boat.damage.crewCasualties || !Number.isFinite(boat.damage.crewCasualties.total)) {
+      boat.damage.crewCasualties = makeCrewCasualties();
+    }
+    if (!Number.isFinite(boat.damage.battleMorale)) boat.damage.battleMorale = 1.0;
+    if (!Number.isFinite(boat.damage.moraleShock)) boat.damage.moraleShock = 0;
+    if (typeof boat.damage.surrendered !== 'boolean') boat.damage.surrendered = boat.colors === 'surrender';
+    if (!boat.damage.moraleState) {
+      boat.damage.moraleState = getMoraleStateLabel(boat.damage.battleMorale, boat.damage.surrendered);
+    }
     if (!Array.isArray(boat.damage.impactSites)) boat.damage.impactSites = [];
     if (!Array.isArray(boat.damage.craters)) boat.damage.craters = [];
     if (!Array.isArray(boat.damage.pendingBakes)) boat.damage.pendingBakes = [];
@@ -41000,6 +41828,12 @@ function createVesselDamageState(boat) {
     mastIntegrity: { fore: 1, main: 1, mizzen: 1 },
     mastState: { fore: 0, main: 0, mizzen: 0 },
     compartments: makeCompartments(),
+    crewCasualties: makeCrewCasualties(),
+    battleMorale: 1.0,
+    moraleShock: 0,
+    moraleState: 'steady',
+    surrendered: false,
+    surrenderReason: null,
     hullDamageJoules: 0,
     superstructureDamageJoules: 0,
     rigDamageJoules: 0,
@@ -41042,6 +41876,131 @@ function createVesselDamageState(boat) {
     lastHit: null,
   };
   return boat.damage;
+}
+
+function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {}) {
+  if (!targetBoat) return null;
+  const damage = createVesselDamageState(targetBoat);
+  const c = damage.crewCasualties;
+  const ammo = event.ammo ?? context.ammo ?? 'round';
+  const energy = Number.isFinite(event.energy) ? Math.max(5000, event.energy) : 120000;
+  const hitZone = event.hitZone ?? context.hitZone ?? 'hull';
+  const cause = context.cause ?? (ammo === 'grape' ? 'grape-hail' : ammo === 'hot' ? 'hot-shot-burns' : hitZone === 'rigging' ? 'falling-spars' : 'oak-splinters');
+
+  // Anti-personnel lethality by ammunition & impact zone:
+  // - Quilted grape shot sweeps weather decks and open gunports with iron balls (3.2x anti-personnel).
+  // - Solid round shot penetrating oak planking / bulwarks throws lethal oak splinters across gun crews.
+  // - Chain shot brings down blocks, yards, and rigging on deck hands.
+  // - Hot shot causes severe burns and smoke panic.
+  const ammoPersonnelMult =
+    ammo === 'grape' ? 3.2 :
+    ammo === 'round' ? (context.penetratedOuter || context.enteredThroughWindow ? 1.55 : 0.85) :
+    ammo === 'hot' ? 1.35 :
+    ammo === 'chain' ? (hitZone === 'rigging' ? 1.15 : 0.75) : 1.0;
+
+  const zoneMult =
+    context.isMagazineBlast ? 6.5 :
+    context.enteredThroughWindow || context.isSuperstructureHit ? 1.45 :
+    hitZone === 'rigging' ? (ammo === 'grape' ? 1.85 : 0.55) : 1.0;
+
+  const crewScale = Math.max(0.65, Math.min(4.2, Math.sqrt(c.total / 28)));
+  const rawSeverity = (energy / 110000) * ammoPersonnelMult * zoneMult * crewScale;
+
+  let newKilled = 0;
+  let newWounded = 0;
+  if (context.isMagazineBlast) {
+    const frac = Math.min(0.65, 0.22 + 0.35 * (context.powderFrac ?? 0.5));
+    newKilled = Math.min(c.able, Math.max(2, Math.round(c.total * frac * 0.55)));
+    newWounded = Math.min(Math.max(0, c.able - newKilled), Math.max(2, Math.round(c.total * frac * 0.45)));
+  } else if (rawSeverity >= 0.18 && c.able > 0) {
+    const deterministic = ((damage.hits ?? 1) * 0.6180339) % 1;
+    newKilled = Math.min(c.able, Math.max(ammo === 'grape' ? 1 : 0, Math.floor(rawSeverity * 0.42 + deterministic * 0.55)));
+    const remAble = Math.max(0, c.able - newKilled);
+    newWounded = Math.min(remAble, Math.max(rawSeverity >= 0.32 ? 1 : 0, Math.floor(rawSeverity * 0.88 + (1 - deterministic) * 0.65)));
+  }
+
+  c.killed += newKilled;
+  c.wounded += newWounded;
+  c.able = Math.max(0, c.total - c.killed - c.wounded);
+  if (newKilled > 0 || newWounded > 0) {
+    c.hitsWithCasualties = (c.hitsWithCasualties ?? 0) + 1;
+  }
+
+  // Propagate casualties to visible 3D deck crew actors if present on the vessel.
+  const crewActors = targetBoat.crewCompany?.crew;
+  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0)) {
+    const designPt = context.designPt ?? [0, 0, 0];
+    const candidates = crewActors
+      .filter(s => s.casualtyState !== 'fallen')
+      .map(s => ({
+        sailor: s,
+        dist: Math.hypot((s.x ?? 0) - (designPt[0] ?? 0), (s.z ?? 0) - (designPt[2] ?? 0)),
+      }))
+      .sort((a, b) => a.dist - b.dist);
+
+    const actorScale = Math.max(1, Math.round(c.total / Math.max(1, crewActors.length)));
+    let actorFallenBudget = Math.ceil(newKilled / actorScale);
+    let actorWoundedBudget = Math.ceil(newWounded / actorScale);
+    for (const item of candidates) {
+      const s = item.sailor;
+      if (actorFallenBudget > 0) {
+        s.casualtyState = 'fallen';
+        s.health = 0;
+        s.collapseYaw = s.yaw ?? 0;
+        actorFallenBudget--;
+      } else if (actorWoundedBudget > 0 && s.casualtyState !== 'wounded') {
+        s.casualtyState = 'wounded';
+        s.health = Math.max(0.25, (s.health ?? 1) - 0.45);
+        actorWoundedBudget--;
+      }
+      if (actorFallenBudget <= 0 && actorWoundedBudget <= 0) break;
+    }
+  }
+
+  // Battle Morale impact: casualties, shock from grape/hot/magazine blasts, hull & rig loss.
+  const casualtyRatio = (c.killed + c.wounded * 0.6) / Math.max(1, c.total);
+  const shockAdd = Math.min(
+    0.45,
+    ((newKilled * 1.6 + newWounded * 0.85) / Math.max(8, c.total)) * 1.35 +
+      (ammo === 'grape' ? 0.055 : ammo === 'hot' ? 0.045 : 0.018) +
+      (context.isMagazineBlast ? 0.38 : 0),
+  );
+  damage.moraleShock = +Math.min(0.65, (damage.moraleShock ?? 0) + shockAdd).toFixed(4);
+  const hullLoss = 1 - Math.max(0, Math.min(1, damage.hullIntegrity ?? 1));
+  const rigLoss = 1 - Math.max(0, Math.min(1, damage.rigIntegrity ?? 1));
+  const firePenalty = Math.min(0.25, (damage.fireIntensity ?? 0) * 0.12);
+  const targetMorale = Math.max(
+    0,
+    Math.min(1, 1.0 - casualtyRatio * 1.15 - hullLoss * 0.42 - rigLoss * 0.18 - firePenalty - damage.moraleShock),
+  );
+  damage.battleMorale = +targetMorale.toFixed(3);
+  damage.moraleState = getMoraleStateLabel(damage.battleMorale, damage.surrendered);
+
+  c.lastCasualties = {
+    killed: newKilled,
+    wounded: newWounded,
+    cause,
+    ammo,
+    ableRemaining: c.able,
+    total: c.total,
+    battleMorale: damage.battleMorale,
+    moraleState: damage.moraleState,
+  };
+
+  // Automatic surrender when battle morale breaks or the crew is decimated under heavy damage (AI/non-player vessels, or if autoSurrender !== false).
+  if (
+    !damage.surrendered &&
+    !damage.sunk &&
+    targetBoat.isPlayerVessel !== true &&
+    (damage.battleMorale <= 0.18 || (c.able / Math.max(1, c.total) <= 0.25 && (damage.hullIntegrity ?? 1) < 0.55))
+  ) {
+    strikeVesselColors(
+      targetBoat,
+      damage.battleMorale <= 0.18 ? 'Crew battle morale broke under fire' : 'Heavy crew casualties & hull damage',
+    );
+  }
+
+  return c.lastCasualties;
 }
 
 function detonateVesselMagazine(targetBoat, { magId = 'magazine.grand', designPt = [0, -0.48, -3.3], localPos = [0, -1.2, -8.0], cause = 'shot' } = {}) {
@@ -41283,6 +42242,12 @@ function detonateVesselMagazine(targetBoat, { magId = 'magazine.grand', designPt
     mass * (1.85 + 2.85 * powderFrac),
     Math.sign(magZ) * mass * (0.45 + 0.75 * powderFrac),
   ]);
+
+  applyCrewCasualtiesAndMorale(
+    targetBoat,
+    { ammo: cause === 'hot-shot' ? 'hot' : 'round', energy: Math.max(500000, yieldMj * 1000000), hitZone: 'magazine' },
+    { isMagazineBlast: true, powderFrac, designPt, cause: 'magazine-blast' },
+  );
 
   damage.revision = (damage.revision ?? 0) + 1;
   return {
@@ -42205,6 +43170,19 @@ function applyShipImpactDamage(targetBoat, event) {
   }
   damage.revision = (damage.revision ?? 0) + 1;
 
+  const casualties = applyCrewCasualtiesAndMorale(
+    targetBoat,
+    { ammo, energy, hitZone: event.hitZone ?? 'hull' },
+    {
+      designPt,
+      penetratedOuter,
+      enteredThroughWindow,
+      hitBackWall,
+      isSuperstructureHit,
+    },
+  );
+  const c = damage.crewCasualties;
+
   const mag = targetBoat.magazine ?? damage.magazine;
   const report = {
     kind: 'ship',
@@ -42243,6 +43221,16 @@ function applyShipImpactDamage(targetBoat, event) {
     floodingSinkage: +(damage.floodingSinkage ?? 0).toFixed(3),
     sunk: damage.sunk,
     energyKj: +(energy / 1000).toFixed(1),
+    casualtiesKilled: casualties?.killed ?? 0,
+    casualtiesWounded: casualties?.wounded ?? 0,
+    crewAble: c?.able ?? 0,
+    crewWounded: c?.wounded ?? 0,
+    crewKilled: c?.killed ?? 0,
+    crewTotal: c?.total ?? 0,
+    battleMorale: +(damage.battleMorale ?? 1).toFixed(3),
+    moraleState: damage.moraleState ?? 'steady',
+    surrendered: Boolean(damage.surrendered),
+    colors: targetBoat.colors ?? DEFAULT_SHIP_COLORS,
   };
   damage.lastHit = report;
   return report;
@@ -42562,6 +43550,52 @@ function stepVesselDamage(boat, dt, terrain = null) {
   } else if (damage.worldFires?.length) {
     damage.worldFires.length = 0;
     damage.fireIntensity = 0;
+  }
+
+  // 3. Ongoing battle morale & fire/flooding human attrition.
+  if (damage.crewCasualties) {
+    const c = damage.crewCasualties;
+    if ((damage.fireIntensity ?? 0) > 0.45 && c.able > 0 && !damage.sunk) {
+      damage.fireBurnAccum = (damage.fireBurnAccum ?? 0) + (damage.fireIntensity - 0.35) * clampedDt * 0.14;
+      if (damage.fireBurnAccum >= 1) {
+        const burnWounded = Math.min(c.able, Math.floor(damage.fireBurnAccum));
+        damage.fireBurnAccum -= burnWounded;
+        c.wounded += burnWounded;
+        c.able = Math.max(0, c.total - c.killed - c.wounded);
+      }
+    }
+    const quiet = (damage.fireIntensity ?? 0) < 0.1 && (damage.waterlineBreachArea ?? 0) < 0.01;
+    if (quiet && (damage.moraleShock ?? 0) > 0 && !damage.surrendered) {
+      damage.moraleShock = +Math.max(0, damage.moraleShock - 0.008 * clampedDt).toFixed(4);
+    }
+    const casualtyRatio = (c.killed + c.wounded * 0.6) / Math.max(1, c.total);
+    const hullLoss = 1 - Math.max(0, Math.min(1, damage.hullIntegrity ?? 1));
+    const rigLoss = 1 - Math.max(0, Math.min(1, damage.rigIntegrity ?? 1));
+    const firePenalty = Math.min(0.28, (damage.fireIntensity ?? 0) * 0.14);
+    const floodPenalty = Math.min(0.25, ((damage.floodingSinkage ?? 0) / Math.max(0.5, baseFreeboard)) * 0.25);
+    const nextMorale = damage.surrendered
+      ? Math.min(damage.battleMorale ?? 0.15, 0.15)
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            1.0 - casualtyRatio * 1.15 - hullLoss * 0.42 - rigLoss * 0.18 - firePenalty - floodPenalty - (damage.moraleShock ?? 0),
+          ),
+        );
+    damage.battleMorale = +nextMorale.toFixed(3);
+    damage.moraleState = getMoraleStateLabel(damage.battleMorale, damage.surrendered);
+
+    if (
+      !damage.surrendered &&
+      !damage.sunk &&
+      boat.isPlayerVessel !== true &&
+      (damage.battleMorale <= 0.18 || (c.able / Math.max(1, c.total) <= 0.25 && (damage.hullIntegrity ?? 1) < 0.55))
+    ) {
+      strikeVesselColors(
+        boat,
+        damage.battleMorale <= 0.18 ? 'Crew battle morale broke under fire' : 'Heavy crew casualties & hull damage',
+      );
+    }
   }
 }
 
@@ -44223,10 +45257,12 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
         }
       }
       for(const gun of state.guns)previousStages[gun.index]=gun.stage;
+      const crewEfficiency=computeCrewEfficiency(boat);
       const events=stepGunnery(state,dt,{deferSeaCollision,waterHeight,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
         sweep:solidSweep,
-        gunAttended:attended,canFire:(gun,pose)=>attended(gun)&&!muzzleBlock(gun,pose),
+        crewRate:()=>crewEfficiency,
+        gunAttended:gun=>!boat.damage?.surrendered&&attended(gun),canFire:(gun,pose)=>!boat.damage?.surrendered&&attended(gun)&&!muzzleBlock(gun,pose),
         onEvent:event=>{
           if(event.type==='shot'){consumeMagazineOrdnance(boat,event);recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}
           if(event.type==='impact'&&event.kind!=='water'){
@@ -44254,6 +45290,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
     canFireLoaded,
     blockedReason(side){
       if(side!==boat.gunnerySide)return null;
+      if(boat.damage?.surrendered)return 'Colors struck (surrendered)';
       if(boat.magazine?.exploded)return 'Magazine exploded';
       if(boat.magazine&&boat.magazine.powderKg<=0)return 'Powder exhausted';
       for(const gun of state.guns){
@@ -45185,6 +46222,10 @@ function createGunneryControls(parent,gunnery){
       if(r.enteredThroughWindow)extras.push('window entry');
       if(r.hitBackWall)extras.push('struck back wall');
       if(r.fires)extras.push(`${r.fires} fire${r.fires>1?'s':''} burning`);
+      if(r.casualtiesKilled||r.casualtiesWounded){
+        extras.push(`${r.casualtiesKilled||0} killed, ${r.casualtiesWounded||0} wounded (${r.crewAble}/${r.crewTotal} able, morale ${Math.round((r.battleMorale??1)*100)}% ${r.moraleState||'steady'})`);
+      }
+      if(r.surrendered)extras.push('🏳️ STRUCK COLORS (SURRENDERED)');
       if(r.sunk)extras.push('Foundering');
       const extraText=extras.length?` · ${extras.join(', ')}`:'';
       const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging${partLabel} (${Math.round(r.rigIntegrity*100)}% rig)`:`hull${partLabel} (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
@@ -47094,7 +48135,9 @@ const ENCOUNTER_ARCHETYPES = Object.freeze([
     id: 'spanish-merchant-nao',
     title: 'Spanish Merchant Nao',
     names: ['Nuestra Señora de la Concepción', 'San Juan Bautista', 'Santa María de Begoña', 'San Nicolás'],
-    flag: 'Crown of Castile (Casa de Contratación)',
+    flag: 'Crown of Castile (Cross of Burgundy)',
+    colors: 'castile',
+    battleColors: 'castile',
     rig: 'three-masted nao',
     hostile: false,
     speedKts: 5.2,
@@ -47107,7 +48150,9 @@ const ENCOUNTER_ARCHETYPES = Object.freeze([
     id: 'portuguese-carreira',
     title: 'Portuguese Caravel / Nau',
     names: ['São Bento', 'Espírito Santo', 'Santa Cruz de Lisboa', 'São Pantaleão'],
-    flag: 'Kingdom of Portugal',
+    flag: 'Kingdom of Portugal (Order of Christ & Quinas)',
+    colors: 'portugal',
+    battleColors: 'portugal',
     rig: 'lateen caravela redonda',
     hostile: false,
     speedKts: 6.1,
@@ -47120,7 +48165,9 @@ const ENCOUNTER_ARCHETYPES = Object.freeze([
     id: 'french-corsair',
     title: 'French Huguenot Corsair',
     names: ['Le Faucon de Dieppe', 'La Reine des Mers', 'La Salamandre', 'Le Cerf Volant'],
-    flag: 'French privateer (letter of marque)',
+    flag: 'French privateer / Jolly Roger',
+    colors: 'france',
+    battleColors: 'jolly-roger',
     rig: 'weatherly flush-decked patache',
     hostile: true,
     disguisedChance: 0.45,
@@ -47136,6 +48183,8 @@ const ENCOUNTER_ARCHETYPES = Object.freeze([
     title: 'Basque Whaling Nao',
     names: ['Santa Catalina de Pasajes', 'San Sebastián', 'María de Zumaya'],
     flag: 'Guipúzcoa / Señorío de Vizcaya',
+    colors: 'basque',
+    battleColors: 'basque',
     rig: 'stout Biscayan nao',
     hostile: false,
     speedKts: 4.8,
@@ -47149,6 +48198,8 @@ const ENCOUNTER_ARCHETYPES = Object.freeze([
     title: 'Becalmed Caravel in Distress',
     names: ['Santiago el Menor', 'Todos los Santos', 'Madre de Dios'],
     flag: 'Merchant caravel (sprung fore-topmast)',
+    colors: 'portugal',
+    battleColors: 'portugal',
     rig: 'two-masted caravel',
     hostile: false,
     distressed: true,
@@ -47234,6 +48285,8 @@ function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       archetype: arch,
       shipName,
       flag: disguised ? 'Unidentified merchant colors (suspicious trim)' : arch.flag,
+      colors: disguised ? 'castile' : (arch.colors ?? 'castile'),
+      battleColors: arch.battleColors ?? arch.colors ?? 'jolly-roger',
       apparentHostile: arch.hostile && !disguised,
       actuallyHostile: Boolean(arch.hostile),
       disguised,
@@ -47255,6 +48308,7 @@ function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       }. What are your orders?`,
     };
     state.active = enc;
+    env.onSightVessel?.(enc);
     addMark(voyage, { kind: 'sail', lat: voyage.dr.lat, lon: voyage.dr.lon, label: `Sail (${arch.title})` });
     raiseInterrupt(
       voyage,
@@ -47383,9 +48437,11 @@ function createEncounterDirector({ seed = 0x1550cafe } = {}) {
         voyage.provisions.water = Math.min(90, voyage.provisions.water + 2.5);
         voyage.provisions.food = Math.min(120, voyage.provisions.food + 2.5);
         voyage.morale = Math.min(1, voyage.morale + 0.04);
-        outcome.summary = `Hailed ${enc.shipName} (${enc.archetype.title}). Compared pilot reckoning (${posStr}) and traded fresh casks.`;
+        outcome.summary = `Hailed ${enc.shipName} (${enc.archetype.title}) within speaking-trumpet range. Compared pilot reckoning (${posStr}) and traded fresh casks.`;
       }
+      outcome.hailed = true;
       addLog(voyage, outcome.summary, 'hail');
+      env.onHailVessel?.(enc);
       env.onToast?.(outcome.summary, 8);
       return outcome;
     }
@@ -48886,6 +49942,10 @@ function createVoyageController(cfg) {
       encounterDirector.resolveDecision(choiceId, voyage, boat, helmsman, {
         onOrderCompassCourse: (c) => orderCompassCourse(c),
         onToast: showToast,
+        onHailVessel: (enc) => {
+          setWarp('deck');
+          cfg.onHailVessel?.(enc);
+        },
         onEngageVessel: (enc) => {
           setWarp('deck');
           manualHelm = true;
@@ -49217,6 +50277,7 @@ function createVoyageController(cfg) {
       marineLife: cfg.getMarineLife?.() ?? null,
       terrain,
       vessels: cfg.getVessels?.() ?? [],
+      onSightVessel: (enc) => cfg.onSightVessel?.(enc),
       onToast: showToast,
       onInterrupt: showCallout,
     });
@@ -49653,6 +50714,7 @@ function createVoyageController(cfg) {
 
 
 
+
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -49762,11 +50824,15 @@ async function main() {
     fleetConfig[0].faction??='enemy';
   }
   const broadsideRangeLengths=qs.has('broadsideRange')&&Number.isFinite(Number(qs.get('broadsideRange')))?Math.max(0.85,Number(qs.get('broadsideRange'))/getShipModel(SHIP_ID).runtime.length):1.22;
-  const fleetSpecs=[{id:'player',modelId:SHIP_ID,faction:'friendly'},...fleetConfig.flatMap((entry,index)=>{
+  const activeFleetSpecs=fleetConfig.flatMap((entry,index)=>{
     if(!entry.enabled)return [];
     const faction=normalizeVesselFaction(entry,{broadside:BROADSIDE_SCENARIO,index});
     return [{...entry,faction,formation:BROADSIDE_SCENARIO?broadsideFormation(index,{side:BROADSIDE_SIDE,rangeLengths:broadsideRangeLengths}):fleetFormation(index)}];
-  })];
+  });
+  const standbyEncounterSpec=activeFleetSpecs.length===0&&qs.get('noEncounterShip')!=='1'&&fleetConfig[0]
+    ?[{...fleetConfig[0],modelId:SHIP_ID,faction:'friendly',dormantEncounter:true,formation:fleetFormation(0)}]
+    :[];
+  const fleetSpecs=[{id:'player',modelId:SHIP_ID,faction:'friendly'},...activeFleetSpecs,...standbyEncounterSpec];
   const fleetCount=fleetSpecs.length;
   const sceneModelCodes=fleetSpecs.map(spec=>fleetModelCode(getShipModel(spec.modelId)));
   window.oceanStartup?.stage('adapter','Starting the graphics device…');
@@ -50131,8 +51197,10 @@ async function main() {
   const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
   const noAnchorRenderer=Object.freeze({update(){},draw(){},drawSubmerged(){}});
   const anchorsPromise=Promise.all(vessels.map(async v=>{v.anchorRenderer=getShipParts(v.modelId).equipment.anchor===null?noAnchorRenderer:await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
-  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise])p.catch(()=>{});
+  const shipColorsPromise=createShipColorsRenderer({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA,maxVessels:Math.max(4,vessels.length)});
+  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise,shipColorsPromise])p.catch(()=>{});
   const spindrift=await spindriftPromise;
+  const shipColorsRenderer=await shipColorsPromise.catch(()=>null);
   for(const v of vessels)v.wetness.connect(v.interaction,spindrift,fullArr(dispTex),samplerSim);
   const wakeIndices=[0,1,2,3],wakeIndex=()=>wakePool.current+2*surfaceWaves.current;
   const bgFoamUpd=[0,1].map(i=>wakeIndices.map(w=>bg(foamUpdPipe,[{buffer:foamUBO},lvl(foamW[1-i],0),lvl(foamW[i],0),
@@ -50476,9 +51544,12 @@ async function main() {
       try{astronomy.set({latitude:terrain.region.latitude,longitude:terrain.region.longitude},boat);}catch{/* ignore */}
     }
   }
-  const followerEnabled=vessels.length>1;
-  let squadronGunneryOrders=qs.get('squadronGuns')==='1'||vessels.slice(1).some(v=>v.faction==='enemy');
+  let followerEnabled=vessels.slice(1).some(v=>!v.dormantEncounter);
+  let squadronGunneryOrders=qs.get('squadronGuns')==='1'||vessels.slice(1).some(v=>!v.dormantEncounter&&v.faction==='enemy');
   const shouldSquadronObeyGunnery=()=>followerEnabled&&(squadronGunneryOrders||vessels.slice(1).some(v=>v.faction==='enemy'));
+  boat.isPlayerVessel=true;
+  boat.colors=qs.get('colors')||DEFAULT_SHIP_COLORS;
+  if(qs.get('view')==='crows-nest')setBoatViewStation(boat,'crows-nest');
   boat.followingShip=followerEnabled;boat.fleet=fleetConfig;vessels[0].boat=boat;vessels[0].faction='friendly';
   boat.partAssembly=vessels[0].asset.partAssembly;
   for(const [idx,v] of vessels.slice(1).entries()){
@@ -50486,14 +51557,29 @@ async function main() {
     v.faction=normalizeVesselFaction(v,{broadside:BROADSIDE_SCENARIO,index:idx});
     v.boat=copyVessel(boat,{id:v.id,modelId:v.modelId,distance:L*formation.trail,side:L*formation.side});
     v.boat.faction=v.faction;
+    v.boat.colors=v.faction==='enemy'?'jolly-roger':'castile';
+    v.boat.battleColors=v.faction==='enemy'?'jolly-roger':'castile';
     v.boat.partAssembly=v.asset.partAssembly;
     if(BROADSIDE_SCENARIO)v.boat.surgeVelocity=boat.surgeVelocity;
-    v.boat.showProw=true;
+    if(v.dormantEncounter){
+      v.boat.showProw=false;
+      v.boat.x=boat.x+50000;
+      v.boat.z=boat.z+50000;
+    }else{
+      v.boat.showProw=true;
+    }
+    v.boat.onSurrender=(surrenderedBoat,dmg,reason)=>{
+      const shipTitle=surrenderedBoat.shipName||v.asset?.model?.name||v.id||'Enemy vessel';
+      const msg=`🏳️ ${shipTitle} has struck her colors and hoisted the white flag of surrender! (${reason})`;
+      voyageCtl?.logExternal?.(msg,'combat');
+      gunControls?.update?.();
+      helm?.update?.(performance.now(),true);
+    };
     v.follower=createFollower(formation,{
       faction:v.faction,
       salvoDelay:BROADSIDE_SCENARIO&&v.faction==='enemy'?8.0:0,
     });
-    if(terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
+    if(!v.dormantEncounter&&terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
   }
   const makeGunneryOptions=(ownerBoat,prefix='')=>({
     deferSeaCollision:ownerBoat===boat,
@@ -50612,6 +51698,11 @@ async function main() {
     if (e.code === 'KeyP' && !e.repeat) setSimPaused(!simPaused);
     if (e.code === 'KeyX') boat.rudderTarget = 0;
     if (e.code === 'KeyB' && !e.repeat) setCameraMode(boat.enabled ? 'free' : 'boat');
+    if (e.code === 'KeyV' && !e.repeat) {
+      setBoatViewStation(boat, boat.viewStation === 'crows-nest' ? 'deck' : 'crows-nest');
+      setCameraMode('boat');
+      helm?.update?.(performance.now(), true);
+    }
     if (e.code === 'KeyF' && !e.repeat && shipGuns.state.guns.length > 0) {
       const side = shipGuns.selectedSide || BROADSIDE_SIDE;
       if (e.shiftKey) {
@@ -50727,25 +51818,28 @@ async function main() {
     const steering=boat.enabled?(keys.KeyD?1:0)-(keys.KeyA?1:0):0;
     if(voyageCtl?.active){voyageCtl.manualSteering(steering!==0);if(steering===0)voyageCtl.steer(dt);}
     if(!vessels[0].bakedWreck||resetSea)stepVessel(boat,vessels[0].probe.state,dt,simTime,P.windSpeed,P.windDir*D2R,steering,terrain);
-    for(const v of vessels.slice(1)){
-      if(v.bakedWreck&&!resetSea){
-        if(v.follower)v.follower.status='Sunk (wreck)';
-        continue;
-      }
-      let steerRef=boat;
-      if(v.faction==='enemy'){
-        let bestDist=Infinity;
-        for(const candidate of vessels){
-          if((candidate.faction??'friendly')==='enemy'||candidate.boat?.damage?.sunk)continue;
-          const d=Math.hypot((candidate.boat.x??0)-(v.boat.x??0),(candidate.boat.z??0)-(v.boat.z??0));
-          if(d<bestDist){bestDist=d;steerRef=candidate.boat;}
+    if(followerEnabled){
+      for(const v of vessels.slice(1)){
+        if(v.dormantEncounter)continue;
+        if(v.bakedWreck&&!resetSea){
+          if(v.follower)v.follower.status='Sunk (wreck)';
+          continue;
         }
+        let steerRef=boat;
+        if(v.faction==='enemy'){
+          let bestDist=Infinity;
+          for(const candidate of vessels){
+            if((candidate.faction??'friendly')==='enemy'||candidate.boat?.damage?.sunk)continue;
+            const d=Math.hypot((candidate.boat.x??0)-(v.boat.x??0),(candidate.boat.z??0)-(v.boat.z??0));
+            if(d<bestDist){bestDist=d;steerRef=candidate.boat;}
+          }
+        }
+        steerFollower(v.follower,v.boat,steerRef,dt,P.windSpeed,P.windDir*D2R,dolphinVessels);
+        stepVesselCombatAI(v,{vessels,dt});
+        stepVessel(v.boat,v.probe.state,dt,simTime,P.windSpeed,P.windDir*D2R,0,terrain);
       }
-      steerFollower(v.follower,v.boat,steerRef,dt,P.windSpeed,P.windDir*D2R,dolphinVessels);
-      stepVesselCombatAI(v,{vessels,dt});
-      stepVessel(v.boat,v.probe.state,dt,simTime,P.windSpeed,P.windDir*D2R,0,terrain);
     }
-    if(dt>0&&!resetSea&&vessels.length>1){
+    if(dt>0&&!resetSea&&followerEnabled&&vessels.length>1){
       resolveVesselCollisions(vessels,dt,{
         terrain,
         onCollision:ev=>{
@@ -51087,9 +52181,19 @@ async function main() {
   }
   cameraButton.onclick=()=>setCameraOpen(cameraPanel.hidden);cameraDock.append(cameraButton);
   const cameraButtons=new Map();
-  for(const [mode,label] of [['boat','Boat camera'],['free','Free camera'],['ship','View ship']]) {
+  for(const [mode,label] of [['boat','Boat camera'],['crows-nest',"Crow's nest"],['free','Free camera'],['ship','View ship']]) {
     const button=document.createElement('button'); button.textContent=label;
-    button.addEventListener('click',()=>{shipOrbit.fleet=false;shipOrbit.wildlife=false;setCameraMode(mode);setCameraOpen(false);cameraButton.focus();});
+    button.addEventListener('click',()=>{
+      shipOrbit.fleet=false;shipOrbit.wildlife=false;
+      if(mode==='crows-nest'){
+        setBoatViewStation(boat,'crows-nest');
+        setCameraMode('boat');
+      }else{
+        if(mode==='boat')setBoatViewStation(boat,'deck');
+        setCameraMode(mode);
+      }
+      setCameraOpen(false);cameraButton.focus();helm?.update?.(performance.now(),true);
+    });
     cameraBody.append(button); cameraButtons.set(mode,button);
   }
   const fleetViewButton=document.createElement('button');fleetViewButton.textContent='View fleet';fleetViewButton.id='view-fleet';fleetViewButton.disabled=!followerEnabled;
@@ -51159,6 +52263,40 @@ async function main() {
   const gunControls=createGunneryControls(captainBody,shipGuns);
   gunControls.element.hidden=shipGuns.state.guns.length===0;
   gunControls.update();
+  const colorsSection=document.createElement('section');colorsSection.className='captain-colors-section';
+  colorsSection.style.cssText='margin:8px 0;padding:8px 0;border-top:1px solid rgba(255,255,255,.12);display:grid;gap:6px';
+  const colorsRow=document.createElement('div');colorsRow.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+  const colorsLabel=document.createElement('label');colorsLabel.textContent='Ship’s colors';colorsLabel.htmlFor='ship-colors-select';
+  const colorsSelect=document.createElement('select');colorsSelect.id='ship-colors-select';
+  for(const info of Object.values(SHIP_COLORS)){
+    const opt=document.createElement('option');opt.value=info.id;opt.textContent=info.name;
+    colorsSelect.append(opt);
+  }
+  colorsSelect.value=boat.colors??DEFAULT_SHIP_COLORS;
+  const strikeBtn=document.createElement('button');strikeBtn.type='button';strikeBtn.id='strike-colors-btn';
+  strikeBtn.textContent='Strike colors (Surrender 🏳️)';
+  const moraleStatus=document.createElement('p');moraleStatus.id='crew-morale-status';moraleStatus.setAttribute('role','status');
+  moraleStatus.style.cssText='margin:0;font-size:.9em;opacity:.92';
+  colorsSelect.onchange=()=>{
+    setVesselColors(boat,colorsSelect.value);
+    updateCrewUI();helm?.update?.(performance.now(),true);
+  };
+  strikeBtn.onclick=()=>{
+    if(boat.damage?.surrendered){
+      setVesselColors(boat,boat.previousColors||DEFAULT_SHIP_COLORS);
+      colorsSelect.value=boat.colors;
+    }else{
+      strikeVesselColors(boat,'Struck colors by Captain’s order');
+      shipGuns.standDown();
+      for(const key of SAIL_KEYS)boat[key]=0;
+      colorsSelect.value='surrender';
+      voyageCtl?.logExternal?.('🏳️ Struck our colors and hoisted the white flag of truce.','combat');
+    }
+    updateCrewUI();helm?.update?.(performance.now(),true);
+  };
+  colorsRow.append(colorsLabel,colorsSelect,strikeBtn);
+  colorsSection.append(colorsRow,moraleStatus);
+  captainBody.append(colorsSection);
   function updateAnchorUI(){
     anchorDrop.hidden=anchorWeigh.hidden=anchor.installed===false;
     anchorDrop.disabled=anchor.active||!anchor.eligibility.allowed;anchorDrop.title=anchor.active?'Anchor already deployed':anchor.eligibility.reason;
@@ -51174,6 +52312,23 @@ async function main() {
   const crewRows=crew?crew.state.crew.map(s=>{const row=document.createElement('li');row.textContent=`${s.name} · ${s.role}`;crewList.append(row);return row;}):[];
   crewDetails.append(crewList);captainBody.append(crewDetails);
   function updateCrewUI(){
+    if(colorsSelect&&document.activeElement!==colorsSelect)colorsSelect.value=boat.colors??DEFAULT_SHIP_COLORS;
+    if(strikeBtn){
+      const isSurr=Boolean(boat.damage?.surrendered||boat.colors==='surrender');
+      strikeBtn.textContent=isSurr?'Re-hoist national colors':'Strike colors (Surrender 🏳️)';
+      strikeBtn.setAttribute('aria-pressed',String(isSurr));
+    }
+    if(moraleStatus){
+      const dmg=boat.damage;
+      const cas=dmg?.crewCasualties;
+      const moralePct=Math.round((dmg?.battleMorale??1)*100);
+      const colorsInfo=getShipColorsInfo(boat.colors);
+      const enemyShip=followerEnabled&&vessels[1]?.boat?.showProw?vessels[1].boat:null;
+      const enemyColors=enemyShip?getShipColorsInfo(enemyShip.colors):null;
+      const enemyMorale=enemyShip?.damage?` · Sighted ship: ${enemyShip.shipName||vessels[1].asset?.model?.name||'Vessel'} (${enemyColors.shortLabel}, Morale ${Math.round((enemyShip.damage.battleMorale??1)*100)}%${enemyShip.damage.surrendered?' · 🏳️ SURRENDERED':''})`:'';
+      const mTxt=`Colors: ${colorsInfo.shortLabel} · Crew: ${cas?`${cas.able}/${cas.total} able (${cas.wounded} wounded, ${cas.killed} fallen)`:'full complement'} · Battle morale: ${moralePct}% (${dmg?.moraleState??'steady'})${enemyMorale}`;
+      if(moraleStatus.textContent!==mTxt)moraleStatus.textContent=mTxt;
+    }
     if(!crew)return;
     const status=crew.status();if(crewStatus.textContent!==status)crewStatus.textContent=status;
     const sails=boat.sailState??sailingState(boat);
@@ -51260,28 +52415,67 @@ async function main() {
       const o=astronomy.state?.observer;
       return o?{latitude:o.latitude,longitude:o.longitude}:{latitude:astronomy.anchor.latitude,longitude:astronomy.anchor.longitude};
     };
+    const activateEncounterVessel=(enc,{mode='sight'}={})=>{
+      if(vessels.length<=1)return;
+      const target=vessels[1];
+      target.dormantEncounter=false;
+      followerEnabled=true;
+      boat.followingShip=true;
+      if(fleetViewButton)fleetViewButton.disabled=false;
+      const isHostile=mode==='engage'?(enc?.actuallyHostile??true):mode==='sight'?Boolean(enc?.apparentHostile):false;
+      target.faction=isHostile?'enemy':'friendly';
+      if(target.follower){
+        target.follower.faction=target.faction;
+        if(mode==='hail'){
+          const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
+          target.follower.formation={trail:0.12,side:sideSign*2.2};
+          target.follower.status=`Hailed (${enc?.shipName||'Consort'})`;
+        }
+      }
+      if(target.boat){
+        target.boat.showProw=true;
+        target.boat.faction=target.faction;
+        target.boat.shipName=enc?.shipName??enc?.archetype?.title??'Strange Sail';
+        target.boat.battleColors=enc?.battleColors??(enc?.actuallyHostile?'jolly-roger':(enc?.colors??'castile'));
+        const chosenColors=mode==='engage'&&enc?.actuallyHostile
+          ?(enc?.battleColors??'jolly-roger')
+          :(enc?.colors??'castile');
+        setVesselColors(target.boat,chosenColors);
+        if(target.boat.damage){
+          target.boat.damage.surrendered=false;
+          target.boat.damage.surrenderReason=null;
+          target.boat.damage.battleMorale=1.0;
+          target.boat.damage.moraleShock=0;
+          target.boat.damage.moraleState='steady';
+        }
+        const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
+        const brgRad=mode==='hail'
+          ?((boat.heading+sideSign*78)*Math.PI)/180
+          :((enc?.bearingDeg??(boat.heading+sideSign*30))*Math.PI)/180;
+        const distM=mode==='hail'?52:mode==='engage'?260:420;
+        target.boat.x=boat.x+Math.sin(brgRad)*distM;
+        target.boat.z=boat.z-Math.cos(brgRad)*distM;
+        target.boat.heading=mode==='hail'?boat.heading:((boat.heading+160)%360+360)%360;
+        target.boat.surgeVelocity=mode==='hail'?(boat.surgeVelocity??2.5):2.8;
+        target.boat.revision=(target.boat.revision??0)+1;
+        if(mode==='hail'||mode==='engage'){
+          const dx=target.boat.x-boat.x,dz=target.boat.z-boat.z;
+          const worldAngle=Math.atan2(dx,-dz);
+          cam.yaw=worldAngle-(boat.heading||0)*D2R;
+        }
+      }
+      updateCrewUI();
+      helm?.update?.(performance.now(),true);
+    };
     voyageCtl=createVoyageController({
       boat,P,astronomy,hudParent:document.body,
       getTerrain:()=>terrain,
       getCamera:()=>cam,
       getVessels:()=>vessels.map(v=>v.boat),
       getMarineLife:()=>{marineLife.load?.().catch(()=>{});return marineLife;},
-      onEngageVessel:enc=>{
-        if(vessels.length>1){
-          followerEnabled=true;
-          const enemy=vessels[1];
-          enemy.faction='enemy';
-          if(enemy.boat){
-            enemy.boat.faction='enemy';
-            const brgRad=((enc?.bearingDeg??(boat.heading+25))*Math.PI)/180;
-            const distM=320;
-            enemy.boat.x=boat.x+Math.sin(brgRad)*distM;
-            enemy.boat.z=boat.z-Math.cos(brgRad)*distM;
-            enemy.boat.heading=((boat.heading+160)%360+360)%360;
-            enemy.boat.revision=(enemy.boat.revision??0)+1;
-          }
-        }
-      },
+      onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
+      onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail'}),
+      onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage'}),
       regionLatLon:(t,x,z)=>islandCoordinates(x,z,t.region),
       onSpectrum:()=>{needSpectrum=true;},
       onEnv:()=>{envFull=true;},
@@ -51497,10 +52691,19 @@ async function main() {
     getShipOrbit:()=>shipOrbit,
     onToggleView:()=>{
       shipOrbit.fleet=false;shipOrbit.wildlife=false;
-      setCameraMode(cameraMode==='boat'?'ship':'boat');
+      if(cameraMode==='boat'&&boat.viewStation!=='crows-nest'){
+        setBoatViewStation(boat,'crows-nest');
+      }else if(cameraMode==='boat'){
+        setBoatViewStation(boat,'deck');
+        setCameraMode('ship');
+      }else{
+        setBoatViewStation(boat,'deck');
+        setCameraMode('boat');
+      }
     },
     onResetView:()=>{
       if(cameraMode==='boat'){
+        setBoatViewStation(boat,'deck');
         resetDeckWalk(boat);
         cam.yaw=0;cam.pitch=-5.5*D2R;
       }else{
@@ -52195,6 +53398,11 @@ async function main() {
           loadOp: 'load', storeOp: gunTransparent?'store':'discard' }],
         depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: gunTransparent||cameraMediumBand?'store':'discard' },
       });
+      for(let i=0;i<vessels.length;i++){
+        const v=vessels[i];
+        const visible=Boolean(v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged)&&!v.boat.damage?.sunk);
+        shipColorsRenderer?.updateVessel(i,visible?v.boat:null,simTime,Math.cos(P.windDir*D2R),Math.sin(P.windDir*D2R),P.windSpeed);
+      }
       for(const v of vessels){
         if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
         prowPass.setPipeline(v.render.pipeline);prowPass.setBindGroup(0,v.bindGroup);prowPass.setBindGroup(1,v.lighting);
@@ -52202,6 +53410,7 @@ async function main() {
         if(!v.boat.damage?.sunk)v.crew?.draw(prowPass);
         if(!v.bakedWreck)v.anchorRenderer.draw(prowPass);
       }
+      shipColorsRenderer?.draw(prowPass,vessels.length);
       fortSoldiers?.draw(prowPass);
       for(const v of vessels)if(!v.bakedWreck)v.interaction.draw(prowPass);
       dolphins.draw(prowPass);marineLife.draw(prowPass);gunEffects.drawProjectiles(prowPass);spindrift.draw(prowPass);if(!gunTransparent)weatherRenderer.draw(prowPass);prowPass.end();

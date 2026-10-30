@@ -508,6 +508,45 @@ function helmDesignStation(boat){
   return {side,baseX,baseZ,baseEye,helmX:helm?.x??HELM_EYE_X,helmZ:helm?.z??HELM_EYE_Z};
 }
 
+export function crowsNestDesignStation(boat = {}) {
+  const modelId = boat.modelId ?? 'nina';
+  if (modelId === 'victory') {
+    return { x: 0, y: 10.25, z: 0.12, eyeHeight: 11.2, pennantLift: 2.95 };
+  }
+  const additional = additionalHydroDesign(modelId);
+  if (additional?.masts?.length) {
+    let tallest = additional.masts[0];
+    for (const m of additional.masts) {
+      if ((m.height ?? 0) > (tallest.height ?? 0)) tallest = m;
+    }
+    const y = (tallest.height ?? 7.5) * 0.86;
+    const sy = additional.frame?.verticalScale ?? 0.8;
+    return {
+      x: 0,
+      y,
+      z: tallest.z ?? 0,
+      eyeHeight: (y + 0.95) * sy,
+      pennantLift: Math.max(0.9, (tallest.height ?? 7.5) - y + 0.15),
+    };
+  }
+  const sy = vesselVerticalScale(boat);
+  const lengthScale = Math.max(0.85, Math.min(1.45, (boat.length || 20) / 20));
+  const y = 7.75;
+  return {
+    x: 0,
+    y,
+    z: -0.76,
+    eyeHeight: (y + 0.95) * sy * lengthScale,
+    pennantLift: 1.35,
+  };
+}
+
+export function setBoatViewStation(boat, station = 'deck') {
+  if (!boat) return 'deck';
+  boat.viewStation = station === 'crows-nest' ? 'crows-nest' : 'deck';
+  return boat.viewStation;
+}
+
 export function resetDeckWalk(boat){
   boat.deckWalkX=0;
   boat.deckWalkZ=0;
@@ -516,6 +555,7 @@ export function resetDeckWalk(boat){
 }
 
 export function deckStationLabel(boat){
+  if(boat?.viewStation==='crows-nest')return "Crow's Nest";
   const walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
   if(Math.hypot(walkX,walkZ)<=0.25)return 'Deck';
   const {baseZ}=helmDesignStation(boat),z=baseZ+walkZ;
@@ -527,6 +567,7 @@ export function deckStationLabel(boat){
 
 export function stepDeckWalk(boat,forwardInput,strafeInput,viewYaw,dt){
   if(!(dt>0)||!Number.isFinite(dt))return;
+  if(boat.viewStation==='crows-nest')return;
   hydroModelCode(boat.modelId??'nina');
   const {side,baseX,baseZ,helmX,helmZ}=helmDesignStation(boat);
   let walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
@@ -569,7 +610,7 @@ export function stepDeckWalk(boat,forwardInput,strafeInput,viewYaw,dt){
 export function stepBoatView(boat,dt){
   const side=boat.sailState?.tack??1;
   boat.eyeSide??=side;
-  if(Math.hypot(boat.deckWalkX||0,boat.deckWalkZ||0)>0.05){
+  if(boat.viewStation==='crows-nest'||Math.hypot(boat.deckWalkX||0,boat.deckWalkZ||0)>0.05){
     boat.eyeSideVelocity=0;
     return;
   }
@@ -578,6 +619,22 @@ export function stepBoatView(boat,dt){
 // World-space eye anchor; keeping it separate from the vessel allows inspection.
 export function boatEyePosition(out, boat) {
   hydroModelCode(boat.modelId??'nina');
+  if (boat.viewStation === 'crows-nest') {
+    const cn = crowsNestDesignStation(boat);
+    boatRotate(
+      out,
+      cn.x * (boat.beam || 3.6) / 3.6,
+      cn.eyeHeight,
+      cn.z * (boat.length || 12) / 12,
+      (boat.heading || 0) * Math.PI / 180,
+      boat.pitch || 0,
+      boat.roll || 0,
+    );
+    out[0] += boat.x || 0;
+    out[1] += boat.heave || 0;
+    out[2] += boat.z || 0;
+    return out;
+  }
   const {baseX,baseZ,baseEye,helmX,helmZ}=helmDesignStation(boat);
   const walkX=boat.deckWalkX||0,walkZ=boat.deckWalkZ||0;
   let designX=baseX,designZ=baseZ,eye=baseEye;

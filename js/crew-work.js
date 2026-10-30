@@ -647,7 +647,7 @@ function assignProceduralCrewWork(company,boat){
   boat.crewSailRate??=new Float64Array(3);boat.crewRigRate??=new Float64Array(3);boat.crewSailRate.fill(0);boat.crewRigRate.fill(0);
   // A helmsman stays with the steering blade on crewed craft. A solo sailor can
   // secure the tiller, do one deck job, then physically return to her helm.
-  const free=()=>company.crew.filter(s=>!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>Number(!!a.stationId)-Number(!!b.stationId));
+  const free=()=>company.crew.filter(s=>s.casualtyState!=='fallen'&&!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>Number(!!a.stationId)-Number(!!b.stationId));
   if(company.order==='weather'&&(boat.hatchesClosed??0)<.999&&model.nodes['station.hatch']&&!company.crew.some(s=>s.job?.kind==='hatch')){
     const target=resolveShipNode(boat,'station.hatch',{space:'design'});
     for(const s of free())if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
@@ -676,8 +676,9 @@ export function assignCrewWork(company,boat) {
   assignGunCrew(company,boat);
   for(const s of company.crew){
     s.home??=[s.x,s.z];
+    if(s.casualtyState==='fallen'){s.job=null;continue;}
     if(s.job)continue;
-    if(company.gunneryActive)continue;
+    if(company.gunneryActive||boat.damage?.surrendered)continue;
     let job;
     if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
       const [mast]=CLIMBERS[s.id],side=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
@@ -882,14 +883,16 @@ function startReturn(s,boat,company=null){
   j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}
 }
 export function crewWorkLabel(s){
-  if(s.job?.stage==='traffic-yield'||s.job?.stage==='traffic-hold')return 'Making way';
-  if(s.intent==='brace')return s.job?.rung>0?'Holding fast aloft':'Bracing';
-  if(!s.job&&s.seatedPose)return s.stationId?s.seatedPose.effort>0?s.seatedPose.drive?'Pulling the blade':'Recovering the blade':'Holding the loom':s.role==='Helmsman'?'Working the steering blade':'Seated at station';
-  if(!s.job)return s.walk>.3?'On rounds':'At station';
+  if(s.casualtyState==='fallen')return 'Fallen in action';
+  const woundPrefix=s.casualtyState==='wounded'?'Wounded · ':'';
+  if(s.job?.stage==='traffic-yield'||s.job?.stage==='traffic-hold')return woundPrefix+'Making way';
+  if(s.intent==='brace')return woundPrefix+(s.job?.rung>0?'Holding fast aloft':'Bracing');
+  if(!s.job&&s.seatedPose)return woundPrefix+(s.stationId?s.seatedPose.effort>0?s.seatedPose.drive?'Pulling the blade':'Recovering the blade':'Holding the loom':s.role==='Helmsman'?'Working the steering blade':'Seated at station');
+  if(!s.job)return woundPrefix+(s.walk>.3?'On rounds':'At station');
   const j=s.job;
-  if(j.stage==='ascending')return 'Climbing a runner';if(j.stage==='descending')return 'Climbing down';
-  if(j.kind==='yield')return 'Making room on deck';
-  if(j.stage==='approach')return 'Going to work';if(j.stage==='return')return 'Returning to station';
-  if(j.kind==='gunnery')return {swab:'Sponging the bore',load:'Loading round shot',ram:'Ramming home',runout:'Hauling the gun out',prime:'Priming the gun',ready:'Standing clear · gun ready',recoil:'Standing clear of recoil',spent:'Awaiting reload'}[j.gun.stage]??'At the guns';
-  return {rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind];
+  if(j.stage==='ascending')return woundPrefix+'Climbing a runner';if(j.stage==='descending')return woundPrefix+'Climbing down';
+  if(j.kind==='yield')return woundPrefix+'Making room on deck';
+  if(j.stage==='approach')return woundPrefix+'Going to work';if(j.stage==='return')return woundPrefix+'Returning to station';
+  if(j.kind==='gunnery')return woundPrefix+({swab:'Sponging the bore',load:'Loading round shot',ram:'Ramming home',runout:'Hauling the gun out',prime:'Priming the gun',ready:'Standing clear · gun ready',recoil:'Standing clear of recoil',spent:'Awaiting reload'}[j.gun.stage]??'At the guns');
+  return woundPrefix+({rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind]);
 }

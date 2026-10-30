@@ -59,7 +59,7 @@ test('centering rudder lets yaw decay and results stay stable at lower frame rat
   assert.ok(Math.abs(a.rudder)<1e-6);
 });
 
-import { boatEyePosition, stepBoatView, stepDeckWalk, resetDeckWalk, deckStationLabel } from '../js/boat.js';
+import { boatEyePosition, stepBoatView, stepDeckWalk, resetDeckWalk, deckStationLabel, crowsNestDesignStation, setBoatViewStation } from '../js/boat.js';
 import { HELM_EYE_X, HELM_EYE_Z, HELM_EYE_HEIGHT } from '../js/hull.js';
 test('boarding uses the ship world position and eye height independently of a spectator camera', () => {
   const boat={x:100,z:-30,heave:2,eye:HELM_EYE_HEIGHT,length:12,beam:3.6,heading:90,pitch:0,roll:0};
@@ -258,4 +258,32 @@ test('deck walking moves viewpoint across main deck and bow while clamping to hu
   resetDeckWalk(boat);
   boatEyePosition(walkOut,boat);
   assert.deepEqual(Array.from(walkOut),Array.from(helmOut));
+});
+
+test("crow's nest view station elevates eye to masthead lookout and pitches/rolls with the mast", () => {
+  const boat = { modelId: 'nina', x: 50, z: -20, heave: 1.5, eye: HELM_EYE_HEIGHT, length: 20, beam: 6, heading: 0, pitch: 0, roll: 0 };
+  const deckOut = new Float64Array(3), nestOut = new Float64Array(3), rolledOut = new Float64Array(3);
+  boatEyePosition(deckOut, boat);
+  assert.equal(deckStationLabel(boat), 'Deck');
+
+  setBoatViewStation(boat, 'crows-nest');
+  assert.equal(boat.viewStation, 'crows-nest');
+  assert.equal(deckStationLabel(boat), "Crow's Nest");
+
+  const cn = crowsNestDesignStation(boat);
+  assert.ok(cn.eyeHeight > 6.0, "crow's nest lookout is high above the main deck");
+  boatEyePosition(nestOut, boat);
+  assert.ok(nestOut[1] > deckOut[1] + 3.0, "crow's nest eye elevation is significantly higher than quarterdeck helm");
+
+  // Rolling the ship swings the masthead lookout laterally
+  boat.roll = 0.2;
+  boatEyePosition(rolledOut, boat);
+  assert.ok(Math.abs(rolledOut[0] - nestOut[0]) > 0.8, 'masthead lookout swings laterally with vessel roll');
+
+  // Returning to deck restores the original deck viewpoint
+  setBoatViewStation(boat, 'deck');
+  boat.roll = 0;
+  const restoredOut = new Float64Array(3);
+  boatEyePosition(restoredOut, boat);
+  assert.deepEqual(Array.from(restoredOut), Array.from(deckOut));
 });
