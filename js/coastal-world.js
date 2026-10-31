@@ -2677,7 +2677,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const dockInlandOffset = isLisbonRoyalDock ? -84 : -62;
   const dockPos = worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset);
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
-  const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 77 : 108)) % 360 + 360) % 360;
+  const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 100 : 108)) % 360 + 360) % 360;
 
   return {
     regionId: region.id,

@@ -190,6 +190,20 @@ export function prevailingWind(lat, lon, ms) {
   } else if (w > 0) {
     e /= w; n /= w;
   }
+
+  // Portuguese Nortada & Iberian-Canary eastern-boundary wind (27°N–41.5°N, 18°W–5°W):
+  // the fair NNE–NE wind along Portugal and Morocco that carried fleets from Lisbon and Cádiz to the Canaries.
+  const iberiaCanary =
+    climateSmooth(27, 32, lat) *
+    (1 - climateSmooth(40.5, 43.5, lat)) *
+    climateSmooth(-18, -13, lon) *
+    (1 - climateSmooth(-5.0, -2.0, lon));
+  if (iberiaCanary > 1e-4) {
+    const vNortada = windVector(42, 6.8);
+    e = e * (1 - iberiaCanary) + vNortada.east * iberiaCanary;
+    n = n * (1 - iberiaCanary) + vNortada.north * iberiaCanary;
+  }
+
   const b = vectorToBearing(e, n);
   // Mixing opposed belts cancels vectors; never let the result collapse to a dead calm.
   return { fromBearing: b.fromBearing, speed: Math.max(b.speed, doldrums > 0.5 ? 0.8 : 2.2) };
@@ -310,14 +324,20 @@ export function sampleOceanWeather(lat, lon, ms, { seed = 1550 } = {}) {
     e = e2; n = n2;
   }
   let rain = 0, nearest = null;
+  const iberiaShelter =
+    climateSmooth(27, 32, lat) *
+    (1 - climateSmooth(40.5, 43.5, lat)) *
+    climateSmooth(-18, -13, climateWrapLon(lon)) *
+    (1 - climateSmooth(-5.0, -2.0, climateWrapLon(lon)));
+  const sysScale = 1 - iberiaShelter * 0.85;
   const systems = weatherSystemsAt(ms, { seed, lat, lon, rangeKm: 2600 });
   for (const sys of systems) {
     const w = climateSystemWind(sys, lat, lon);
     if (!w) continue;
-    const k = climateClamp(w.weight / Math.max(1, base.speed), 0, 1);
-    e = e * (1 - k * 0.6) + w.east;
-    n = n * (1 - k * 0.6) + w.north;
-    rain = Math.max(rain, w.rain);
+    const k = climateClamp((w.weight * sysScale) / Math.max(1, base.speed), 0, 1);
+    e = e * (1 - k * 0.6) + w.east * sysScale;
+    n = n * (1 - k * 0.6) + w.north * sysScale;
+    rain = Math.max(rain, w.rain * sysScale);
     if (!nearest || w.dKm / w.sys.radiusKm < nearest.dKm / nearest.sys.radiusKm) nearest = w;
   }
   const wind = vectorToBearing(e, n);

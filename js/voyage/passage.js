@@ -157,7 +157,9 @@ export function hullVelocity(boat) {
   const h = (boat.heading ?? 0) * PASSAGE_RAD;
   const s = boatForwardSpeed(boat);
   const surge = Number.isFinite(s) ? s : 0;
-  const sway = Number.isFinite(boat.leewayVelocity) ? boat.leewayVelocity : 0;
+  const rawSway = Number.isFinite(boat.leewayVelocity) ? boat.leewayVelocity : 0;
+  const maxSway = Math.max(0, surge) * 0.08;
+  const sway = surge > 0.05 ? Math.max(-maxSway, Math.min(maxSway, rawSway)) : rawSway;
   return { east: Math.sin(h) * surge + Math.cos(h) * sway, north: Math.cos(h) * surge - Math.sin(h) * sway, surge };
 }
 
@@ -184,7 +186,8 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
   const cur = oceanCurrentAt(voyage.true.lat, voyage.true.lon);
   voyage.current = cur;
   // Near a streamed coast at 1× the local frame is authoritative and has no current field.
-  const ce = ignoreCurrent ? 0 : cur.east, cn = ignoreCurrent ? 0 : cur.north;
+  const curScale = ignoreCurrent ? 0 : Math.min(1, Math.max(0, v.surge) / 2.2);
+  const ce = cur.east * curScale, cn = cur.north * curScale;
   const eastM = (v.east + ce) * gameDt, northM = (v.north + cn) * gameDt;
   voyage.lastStep = { eastM, northM, gameDt };
   const np = offsetLatLon(voyage.true.lat, voyage.true.lon, eastM, northM);

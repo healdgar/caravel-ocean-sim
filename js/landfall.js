@@ -27,6 +27,10 @@ export function coastalSeaForRegion(regionSpec,stage='coast'){
     ?resolveGlobalCoastalRegion(regionSpec)
     :regionSpec;
   if(!region||region.id==='saba')return base;
+  if(region.id==='lisbon'||region.portType==='royal-arsenal-dock'){
+    // Fair Portuguese Nortada / Tagus land-breeze (from NE ~42°, propagation θ = 132°) carrying ships down the Tagus Gorge.
+    return Object.freeze({...base,swellDir:stage==='dock'?162:265,windDir:132});
+  }
   const shoreBearing=Number.isFinite(region.shoreBearing)?region.shoreBearing:112;
   const swellDir=((Math.round(shoreBearing-90)%360)+360)%360;
   const windDir=stage==='dock'?((Math.round(shoreBearing-108)%360)+360)%360:(swellDir+36)%360;
@@ -57,7 +61,7 @@ export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',
   url.searchParams.set('region',region.id);
   url.searchParams.set('lat',String(region.latitude));
   url.searchParams.set('lon',String(region.longitude));
-  const dockTurn=region.id==='lisbon'||region.portType==='royal-arsenal-dock'?77:108;
+  const dockTurn=region.id==='lisbon'||region.portType==='royal-arsenal-dock'?100:108;
   const heading=stage==='dock'?(((region.shoreBearing??112)-dockTurn)%360+360)%360:(region.shoreBearing??112);
   url.searchParams.set('boatHeading',String(heading));
   const sea=coastalSeaForRegion(region,stage);

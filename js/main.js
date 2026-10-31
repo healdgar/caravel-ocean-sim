@@ -1748,6 +1748,7 @@ async function main() {
         for(const k of ['swellDir','windDir']){const s=seaSliders.get(k);if(s){s.input.value=String(P[k]);s.output.textContent=String(P[k]);}}
         needSpectrum=true;
       }
+      voyageCtl?.syncToTerrainBoat?.();
       envFull=true;
     }
   });

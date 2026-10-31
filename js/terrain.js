@@ -1447,6 +1447,25 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     groundSample:(x,z)=>groundSample(x-worldOffset.x,z-worldOffset.z),
+    hasLoadedHeightAt(x,z){
+      const lx=x-worldOffset.x,lz=z-worldOffset.z;
+      const half=activeRegion.span*0.5;
+      if(Math.abs(lx-activeRegion.x)<=half&&Math.abs(lz-activeRegion.z)<=half)return true;
+      if(!proceduralPack)return false;
+      const sx=Math.round((lx-activeRegion.x)/activeRegion.span);
+      const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
+      return loadedSections.has(`${sx},${sz}`);
+    },
+    ensureSectionAt(x,z){
+      if(!proceduralPack)return;
+      const lx=x-worldOffset.x,lz=z-worldOffset.z;
+      const sx=Math.round((lx-activeRegion.x)/activeRegion.span);
+      const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
+      if((sx===0&&sz===0)||Math.abs(sx)>4||Math.abs(sz)>4)return;
+      if(!loadedSections.has(`${sx},${sz}`)&&!queuedSections.has(`${sx},${sz}`)){
+        enqueueCoastalSection(sx,sz,{priority:true,wantRealDEM:true});
+      }
+    },
     get region(){return worldOffset.x||worldOffset.z?{...activeRegion,x:activeRegion.x+worldOffset.x,z:activeRegion.z+worldOffset.z}:activeRegion;},
     get baseRegion(){return activeRegion;},
     get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},

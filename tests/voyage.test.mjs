@@ -418,3 +418,56 @@ test('sighting and hailing a vessel invokes onSightVessel and onHailVessel with 
   assert.equal(outcome.hailed, true, 'hailing a friendly/neutral ship marks outcome.hailed = true');
   assert.equal(hailedEnc, enc, 'onHailVessel fires so the 3D vessel is placed within speaking-trumpet range');
 });
+
+test('passive Lisbon departure engages helmsman on warp and keeps waves at 1x in open ocean', () => {
+  let commits = 0;
+  const mockTerrain = {
+    region: { x: 0, z: 0, span: 8192, latitude: 38.707, longitude: -9.136, name: 'Lisboa' },
+    worldOffset: { x: 0, z: 0 },
+    height: () => -60,
+    setWorldOffset(x, z) { this.worldOffset.x = x; this.worldOffset.z = z; },
+    commitWorldOffset({ boat }) {
+      commits++;
+      boat.x -= this.worldOffset.x;
+      boat.z -= this.worldOffset.z;
+      this.worldOffset.x = 0;
+      this.worldOffset.z = 0;
+    },
+  };
+  const boat = {
+    x: -16000, // 16 km offshore in the open Atlantic (> 13.5 km coastal pack radius)
+    z: 5000,
+    heading: 252,
+    length: 22,
+    surgeVelocity: 3.5,
+    leewayVelocity: 0,
+    modelId: 'nina',
+    hydrodynamics: { draft: 2.0 },
+  };
+  const P = { windSpeed: 7, windDir: 132, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1, cloudBase: 1.2, cloudDepth: 1.8, cloudDensity: 1, cloudAnvil: 0.05 };
+  const ctrl = createVoyageController({
+    boat,
+    P,
+    getTerrain: () => mockTerrain,
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  ctrl.start({ passive: true, lat: 38.68, lon: -9.32 });
+  assert.equal(ctrl.helmsman.engaged, false, 'passive start leaves helmsman disengaged');
+
+  ctrl.setWarp('passage');
+  assert.equal(ctrl.helmsman.engaged, true, 'activating warp from passive departure engages helmsman');
+
+  const startX = boat.x;
+  const startDate = ctrl.voyage.dateMs;
+  for (let i = 0; i < 10; i++) {
+    // Simulate 1x real-time wave/hull motion of ~0.175 m per 50ms frame
+    boat.x -= 0.16;
+    boat.z += 0.05;
+    ctrl.update(0.05, i * 50);
+  }
+  assert.equal(commits, 0, 'open-ocean warp does not scroll boat.x/boat.z via commitWorldOffset');
+  assert.ok(Math.abs(boat.x - startX) < 5, 'boat local wave coordinates move at 1x real-time speed');
+  assert.ok(ctrl.voyage.dateMs > startDate + 100000, 'voyage clock advances at warped rate');
+  assert.ok(ctrl.voyage.distanceTrueNm > 0.1, 'geographic distance advances at warped rate');
+});

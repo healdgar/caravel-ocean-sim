@@ -115,7 +115,11 @@ export function steerHelmsman(state, boat, dt, { windSpeed = 7, windDirection = 
     state.helmTrim = 0;
     state.status = 'In irons · bearing away';
   } else {
-    const error = helmsmanWrap(course - heading) / HELMSMAN_RAD;
+    const clampedSway = speed > 0.5 && Number.isFinite(boat.leewayVelocity)
+      ? helmsmanClamp(boat.leewayVelocity, -speed * 0.08, speed * 0.08)
+      : 0;
+    const leewayRad = speed > 0.5 ? Math.atan2(clampedSway, speed) : 0;
+    const error = helmsmanWrap(course - leewayRad - heading) / HELMSMAN_RAD;
     const damping = ((boat.yawRate ?? 0) / HELMSMAN_RAD) * 5;
     const before = error * 1.1 - damping + state.helmTrim;
     if (speed > 0.4 && Math.abs(error) < 35 && (Math.abs(before) < 35 || Math.sign(before) !== Math.sign(error))) {
