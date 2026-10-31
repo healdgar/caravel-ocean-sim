@@ -12792,8 +12792,12 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7.0).rgb;
   var col=albedo*(1.0-wet*0.36)*(direct*diffuse/PI+ambient*ambientVisibility);
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
-  let specular=(0.004*(1.0-roughness)+wet*0.06)*pow(max(dot(n,h),0.0),mix(12.0,64.0,1.0-roughness));
-  col+=direct*specular;
+  let nDotV=max(dot(n,v),0.0);
+  let smoothFilm=clamp((0.36-roughness)/0.28,0.0,1.0)*wet;
+  let fresnel=0.02+0.98*pow(1.0-nDotV,4.5);
+  let specular=(0.004*(1.0-roughness)+wet*0.055+smoothFilm*0.18)*pow(max(dot(n,h),0.0),mix(12.0,128.0,1.0-roughness));
+  let skyRefl=ambient*smoothFilm*fresnel*0.48;
+  col+=direct*specular+skyRefl;
   col+=lunarSurface(n,v,albedo*(1.0-wet*.36),mix(roughness,.25,wet),vec3f(.035),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
   col+=lightningSurface(n,v,albedo,roughness);
   col=surfaceAir(col,world);
@@ -12839,16 +12843,28 @@ fn landOpaque(in:LandVertex)->vec4f{
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
+  var surfaceWet=0.0;
+  var canopyBackscatter=0.0;
   if(in.kind.x<2.5){
+    let canopyWeight=smoothstep(0.14,0.62,vegetation)*(1.0-rocky*0.85);
+    let crownW1=footprint*0.105;let crownW2=footprint*0.046;
+    let crownN1=landFilteredNoise(world.xz*0.105+vec2f(grain*0.75,-grain*0.55),crownW1);
+    let crownN2=landFilteredNoise(world.xz*0.046+vec2f(-grain*0.45,grain*0.65),crownW2);
     if(nearGround){
       let rockMass=landOrientedDetail(world,n,dx,dy,.24);
       let fracture=landOrientedDetail(world+vec3f(19.1,7.3,4.7),n,dx,dy,1.35);
       let gravel=landOrientedDetail(world,n,dx,dy,7.5);
       var joint=0.0;var strata=0.0;
       if(rocky>.01){joint=landOrientedJoint(world+vec3f(19.1,7.3,4.7),n,dx,dy);strata=landNearStrata(world,dx,dy);}
-      albedo=source*(1.0+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*.045-joint*.14));
-      relief=mix(gravel*.018+fracture*.025,rockMass*.28+fracture*.11+gravel*.014+strata*.016-joint*.08,rocky);
-      roughness=clamp(.91+gravel*.08-rocky*.08,.72,.98);
+      let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*canopyWeight;
+      let crownGap=clamp(0.38-abs(crownN1),0.0,0.38)*landDetailWeight(crownW1)*canopyWeight;
+      let basalWetRock=rocky*(1.0-smoothstep(0.2,2.1,world.y));
+      albedo=source*(1.0+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*.065-joint*.16)+crownBillow*0.18-crownGap*0.38)*(1.0-basalWetRock*0.32);
+      relief=mix(gravel*.018+fracture*.025+crownBillow*0.38-crownGap*0.28,rockMass*.28+fracture*.11+gravel*.014+strata*.022-joint*.09,rocky);
+      ambientVisibility*=(1.0-crownGap*0.34)*(1.0-rocky*joint*0.18);
+      surfaceWet=basalWetRock*0.75;
+      roughness=clamp(.91+gravel*.08-rocky*.08-canopyWeight*0.04,.70,.98);
+      canopyBackscatter=canopyWeight*0.16;
     }else{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
@@ -12856,6 +12872,7 @@ fn landOpaque(in:LandVertex)->vec4f{
     let isProceduralCoast=in.kind.x<0.5&&in.kind.y>0.015;
     let beachSand=select(0.0,clamp((in.kind.y-0.02)/0.98,0.0,1.0),isProceduralCoast);
     let rockKeep=1.0-beachSand*0.94;
+    let effCanopy=canopyWeight*(1.0-beachSand);
     let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
     var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19);}
     let blocks=blockNoise*blockWeight*rockKeep;
@@ -12867,29 +12884,56 @@ fn landOpaque(in:LandVertex)->vec4f{
     let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065)*rockKeep;
     var baseSource=source;
     var swashGloss=0.0;
+    var waterFilm=0.0;
     var cliffStrata=0.0;
+    var ledgeStep=0.0;
+    var cragFacet=0.0;
+    let basalWetRock=rocky*rockKeep*(1.0-smoothstep(0.15,2.15,world.y));
     if(isProceduralCoast){
       let gentle=smoothstep(0.32,0.08,1.0-n.y);
+      let cuspWave=sin(world.x*0.042-world.z*0.031+blockNoise*1.5)*0.22;
+      let swashRunup=0.26+0.28*sin(F.camPos.w*1.12+world.x*0.038+world.z*0.032+stoneRaw*1.2)+cuspWave;
       let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(2.6,6.2+stoneRaw*1.2,world.y))*gentle*beachSand;
-      let swashZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(0.42,1.25+stoneRaw*0.22,world.y))*gentle*beachSand;
-      let wrack=exp(-pow((world.y-(1.08+stoneRaw*0.20))/0.13,2.0))*gentle*beachSand;
+      waterFilm=smoothstep(-0.95,-0.15,world.y)*(1.0-smoothstep(swashRunup-0.12,swashRunup+0.22,world.y))*gentle*beachSand;
+      let capillaryZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(swashRunup+0.12,swashRunup+1.15+stoneRaw*0.22,world.y))*gentle*beachSand;
+      let wrack=exp(-pow((world.y-(1.12+cuspWave*0.55+stoneRaw*0.20))/0.14,2.0))*gentle*beachSand;
       let shoalZone=(1.0-smoothstep(-5.5,0.12,world.y))*gentle*beachSand;
-      let dryCoralSand=vec3f(0.56,0.46,0.31)*(1.0+stoneRaw*0.06+pores*0.03);
-      let wetSwashSand=vec3f(0.24,0.19,0.13)*(1.0+pores*0.025);
-      let wrackTint=vec3f(0.14,0.12,0.075);
+      let shellGrit=max(0.0,pores-0.25)*landDetailWeight(materialWidth*5.4)*0.08*(1.0-waterFilm*0.7);
+      let dryCoralSand=vec3f(0.57,0.47,0.32)*(1.0+stoneRaw*0.06+pores*0.035+shellGrit);
+      let dampSand=vec3f(0.34,0.27,0.19)*(1.0+stoneRaw*0.04+pores*0.03);
+      let wetSwashSand=vec3f(0.21,0.17,0.12)*(1.0+pores*0.02);
+      let wrackTint=vec3f(0.13,0.11,0.07)*(1.0+stoneRaw*0.18);
       let shoalSand=vec3f(0.20,0.34,0.32)*(1.0+stoneRaw*0.05);
-      baseSource=mix(baseSource,dryCoralSand,dryZone*0.85);
-      baseSource=mix(baseSource,wetSwashSand,swashZone*0.88);
-      baseSource=mix(baseSource,wrackTint,wrack*0.45);
+      baseSource=mix(baseSource,dryCoralSand,dryZone*0.86);
+      baseSource=mix(baseSource,dampSand,capillaryZone*0.82);
+      baseSource=mix(baseSource,wetSwashSand,waterFilm*0.92);
+      baseSource=mix(baseSource,wrackTint,wrack*0.48);
       baseSource=mix(baseSource,shoalSand,shoalZone*0.75);
-      swashGloss=swashZone;
-      cliffStrata=sin(world.y*2.35+blockNoise*2.2)*landDetailWeight(footprint*0.45)*rocky*rockKeep;
+      swashGloss=max(capillaryZone*0.58,waterFilm*0.96);
     }
-    let sandRipple=sin(world.x*1.8+world.z*1.3+stoneRaw*2.5)*landDetailWeight(materialWidth*0.45)*beachSand*0.025;
-    albedo=baseSource*(1.0+blocks*.14+stone*0.10+cliffStrata*0.065+pores*(0.055-beachSand*0.025)+sandRipple-(fissure*.075+coarseFissure*.08)*rocky);
-    let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.35;
-    relief=mix(soil,stone*0.14+blocks*.22+cliffStrata*0.035-fissure*0.065-coarseFissure*.10,rocky*rockKeep);
-    roughness=clamp(mix(mix(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.78+pores*0.03,beachSand),0.15,swashGloss),0.14,0.98);
+    let strataDetailW=landDetailWeight(footprint*0.45)*rocky*rockKeep;
+    cliffStrata=(sin(world.y*1.95+blockNoise*2.4)*0.65+sin(world.y*4.8-stoneRaw*1.7)*0.35)*strataDetailW;
+    ledgeStep=(smoothstep(-0.22,0.32,cliffStrata)-0.5)*strataDetailW;
+    cragFacet=(abs(stoneRaw)-0.32)*landDetailWeight(materialWidth*0.82)*rocky*rockKeep;
+    let rockTone=mix(vec3f(1.0),mix(vec3f(0.94,0.96,1.04),vec3f(1.06,1.01,0.92),clamp(0.5+0.5*cliffStrata,0.0,1.0)),rocky*rockKeep*0.55);
+    // Dual-scale beach sand ripples: braided cross-shore swash ripples (smoothed under active water film) + fine wind ripples on dry berm
+    let rippleW=landDetailWeight(materialWidth*0.45)*beachSand;
+    let waveRipple=sin(world.x*1.95+world.z*1.42+stoneRaw*2.8)*cos(world.x*0.58-world.z*0.76+stoneRaw*1.5)*(1.0-waterFilm*0.65);
+    let windRipple=sin(world.x*3.3-world.z*2.1+pores*1.6)*(1.0-swashGloss);
+    let sandRipple=(waveRipple*0.024+windRipple*0.014)*rippleW;
+    // Baked distant canopy crown domes & inter-crown shadow pockets on forested terrain
+    let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*effCanopy;
+    let crownGap=clamp(0.40-abs(crownN1),0.0,0.40)*landDetailWeight(crownW1)*effCanopy;
+    let canopyTone=mix(vec3f(1.0),vec3f(1.0+crownN2*0.09,1.0+crownBillow*0.14,1.0-crownN2*0.06),effCanopy);
+    albedo=baseSource*rockTone*canopyTone*(1.0+blocks*.15+stone*0.11+cliffStrata*0.075+ledgeStep*0.06+cragFacet*0.05+pores*(0.055-beachSand*0.025)+sandRipple+crownBillow*0.20-crownGap*0.42-(fissure*.085+coarseFissure*.095)*rocky)*(1.0-basalWetRock*0.34);
+    let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.42+crownBillow*0.42-crownGap*0.32;
+    let rockRelief=stone*0.15+blocks*.24+cliffStrata*0.048+ledgeStep*0.042+cragFacet*0.035-fissure*0.075-coarseFissure*.11;
+    relief=mix(soil,rockRelief,rocky*rockKeep);
+    ambientVisibility*=(1.0-crownGap*0.38)*(1.0-(fissure*0.22+coarseFissure*0.25)*rocky);
+    surfaceWet=max(swashGloss,basalWetRock*0.75);
+    let baseRough=mix(0.89+vegetation*0.03-effCanopy*0.05+pores*0.055-rocky*0.09,0.76+pores*0.03,beachSand);
+    roughness=clamp(mix(baseRough,mix(0.20,0.07,waterFilm),surfaceWet),0.07,0.98);
+    canopyBackscatter=effCanopy*0.18;
     }
   }else if(in.kind.x>=19.5){
     // Camera-projected photorealistic 1550 building texture atlas (u = in.kind.x - 20.0, v = in.kind.y)
@@ -12965,15 +13009,19 @@ fn landOpaque(in:LandVertex)->vec4f{
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);
     let canopyGrain=gnoise(world.xz*0.32+vec2f(world.y*0.17));
+    let clumpBillow=gnoise(world.xz*0.85+vec2f(world.y*0.55,-world.y*0.35))*detailFade;
     let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
-    albedo=leafMean.rgb*mix(vec3f(1),regionalTint,0.2)*(0.78+exposure*0.30+canopyGrain*0.04);
-    ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.08;
-    relief=0.0;roughness=0.95;
+    albedo=leafMean.rgb*mix(vec3f(1),regionalTint,0.2)*(0.76+exposure*0.32+canopyGrain*0.055+clumpBillow*0.045);
+    ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.09;
+    relief=(canopyGrain*0.035+clumpBillow*0.028)*detailFade;
+    roughness=0.88;
+    canopyBackscatter=0.22*exposure;
   }else{
     let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
     let ridges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);
-    albedo=vec3f(0.095,0.068,0.038)*(0.82+barkNoise*0.18+in.kind.y*0.16);
-    relief=(ridges-0.5)*0.010*(1.2-in.kind.y)*detailFade;roughness=0.92;
+    let fissure=smoothstep(0.15,0.75,ridges);
+    albedo=vec3f(0.095,0.068,0.038)*(0.76+fissure*0.12+barkNoise*0.18+in.kind.y*0.16);
+    relief=(ridges-0.5)*0.014*(1.2-in.kind.y)*detailFade;roughness=0.91;
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
@@ -12992,9 +13040,13 @@ fn landOpaque(in:LandVertex)->vec4f{
     let gradient=(reliefX*sx+reliefY*sy)/max(abs(det),0.00001)*sign(det);
     n=normalize(n-clamp(gradient,vec3f(-0.42),vec3f(0.42)));
   }
-  let wet=(1.0-smoothstep(0.5,3.5,world.y))*(0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02));
-  roughness=mix(roughness,0.27,wet);
-  return landFinish(world,n,albedo,max(dot(n,F.sunDir.xyz),0.0),ambientVisibility,wet,roughness);
+  let tidePulse=0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02);
+  let shoreWet=(1.0-smoothstep(0.35,2.2,world.y))*tidePulse*select(0.45,0.22,in.kind.x>=9.5);
+  let wet=clamp(max(shoreWet,surfaceWet),0.0,0.96);
+  roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
+  let nDotL=dot(n,F.sunDir.xyz);
+  let diffuse=max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter;
+  return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
 @fragment fn opaqueFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
@@ -13008,34 +13060,39 @@ fn landOpaque(in:LandVertex)->vec4f{
   let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0).r;
   let luminance=dot(source,vec3f(.2126,.7152,.0722));
   let shade=.72+in.kind.y*.30;
-  let rock=mix(vec3f(luminance)*vec3f(.95,.91,.85),source,.12)*shade;
+  let rockStrata=sin(world.y*5.5+world.x*2.1-world.z*1.7)*0.08;
+  let rock=mix(vec3f(luminance)*vec3f(.96+rockStrata,.91+rockStrata*0.5,.84-rockStrata*0.4),source,.16)*shade*(0.92+0.12*max(n.y,0.0));
   let dry=vec3f(.17,.145,.065);let green=mix(leafMean.rgb,source,.18);
   let foliage=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
   let albedo=select(rock,foliage,grass);
   let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
   let direct=sunIlluminance()*sunlight;
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
-  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.35,grass);
-  let visibility=select(.35+.28*max(n.y,0.0),.32+in.kind.y*.32,grass);
-  let wet=(1.0-smoothstep(1.0,7.0,world.y))*.5;
+  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.38,grass);
+  let visibility=select(.35+.30*max(n.y,0.0),.32+in.kind.y*.32,grass);
+  let wet=(1.0-smoothstep(0.6,3.2,world.y))*.55;
   var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
   color+=lunarSurface(n,normalize(F.camPos.xyz-world),albedo,.84,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
   color+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.84);
   return vec4f(surfaceAir(color,world),1);
 }
 @fragment fn leafFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let world=in.world;var n=normalize(in.normal)*select(-1.0,1.0,front);
+  let world=in.world;
+  let uvCentered=in.leafUV-vec2f(0.5,0.5);
+  let n=normalize(in.normal*select(-1.0,1.0,front)+vec3f(uvCentered.x*0.24,uvCentered.y*0.20,0.0));
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   // Derivative-dependent samples precede discard; this shader alone is cutout.
   let leaf=textureSampleBias(leafSpray,landSampler,in.leafUV,0.1);
   let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
   let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
-  let albedo=pow(leaf.rgb,vec3f(2.2))*mix(vec3f(1),regionalTint,0.2)*(0.78+in.kind.y*0.30);
   let exposure=clamp(in.kind.y,0.0,1.0);let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*0.48)*(0.22+0.78*exposure*exposure);
-  let ambientVisibility=0.12+exposure*0.55+abs(n.y)*0.08;
+  let backlit=max(-nDotL,0.0)*0.52;
+  let warmTrans=mix(vec3f(1.0),vec3f(1.12,1.16,0.78),backlit*exposure);
+  let albedo=pow(leaf.rgb,vec3f(2.2))*mix(vec3f(1),regionalTint,0.2)*warmTrans*(0.76+exposure*0.34);
+  let diffuse=(max(nDotL,0.0)+backlit)*(0.22+0.78*exposure*exposure);
+  let ambientVisibility=0.12+exposure*0.56+abs(n.y)*0.09;
   if(leaf.a<0.015){discard;}
-  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.95);
+  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.78);
   return vec4f(color.rgb,leaf.a);
 }
 // Imported canopy streams already contain absolute Y-up world positions and
@@ -13056,21 +13113,39 @@ struct CanopyVertex {
 // Opaque imported wood/crowns stay in the opaque visibility path. Their call
 // graph has no discard or foliage texture; source RGB replaces shared green.
 @fragment fn canopyOpaqueFS(in:CanopyVertex)->@location(0) vec4f{
-  let n=normalize(in.normal);let exposure=clamp(in.kind.y,0,1);
+  let dx=dpdx(in.world);let dy=dpdy(in.world);
+  let footprint=max(length(dx),length(dy));
   let crown=in.kind.x>3.5;
-  let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.47+max(n.y,0)*.08,crown);
-  return landFinish(in.world,n,in.colour,max(dot(n,F.sunDir.xyz),0),ambient,0,.95);
+  let exposure=clamp(in.kind.y,0.0,1.0);
+  var n=normalize(in.normal);
+  var col=in.colour;
+  var relief=0.0;
+  if(crown){
+    let clump=landFilteredNoise(in.world.xz*0.42+vec2f(in.world.y*0.28),footprint*0.42);
+    let subClump=landFilteredNoise(in.world.xz*1.15-vec2f(in.world.y*0.65),footprint*1.15);
+    relief=(clump*0.16+subClump*0.08)*(0.45+0.55*exposure);
+    col=col*(0.88+0.22*exposure+clump*0.10+subClump*0.06);
+  }
+  let rx=dpdx(relief);let ry=dpdy(relief);
+  if(crown){n=landFilteredBump(n,dx,dy,rx,ry);}
+  let nDotL=dot(n,F.sunDir.xyz);
+  let diffuse=max(nDotL,0.0)+select(0.0,max(-nDotL,0.0)*0.22*exposure,crown);
+  let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.48+max(n.y,0)*.09,crown);
+  return landFinish(in.world,n,col,diffuse,ambient,0,select(0.92,0.86,crown));
 }
 @fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let n=normalize(in.normal)*select(-1.0,1.0,front);
+  let uvCentered=in.leafUV-vec2f(0.5,0.5);
+  let n=normalize(in.normal*select(-1.0,1.0,front)+vec3f(uvCentered.x*0.22,uvCentered.y*0.18,0.0));
   // This borrowed alpha is an explicit approximation: the supplied GLB/native
   // streams contain no leaf image. Never replace their linear RGB with it.
   let alpha=textureSampleBias(leafSpray,landSampler,in.leafUV,.1).a;
   let exposure=clamp(in.kind.y,0,1);let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=(max(nDotL,0)+max(-nDotL,0)*.48)*(.22+.78*exposure*exposure);
-  let ambient=.12+exposure*.55+abs(n.y)*.08;
+  let backlit=max(-nDotL,0)*.50;
+  let warmCol=in.colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.82),backlit*exposure);
+  let diffuse=(max(nDotL,0)+backlit)*(.22+.78*exposure*exposure);
+  let ambient=.12+exposure*.56+abs(n.y)*.09;
   if(alpha<.015){discard;}
-  let color=landFinish(in.world,n,in.colour,diffuse,ambient,0,.95);
+  let color=landFinish(in.world,n,warmCol,diffuse,ambient,0,.78);
   return vec4f(color.rgb,alpha);
 }
 `;
@@ -31735,21 +31810,42 @@ function synthesizeCoastalAlbedo(
       const fineGrain = (coastalValueNoise2D(u * 68, v * 68, seed ^ 0x55aa55aa) - 0.5) * 14;
       const canopyMottle = (coastalFbm2D(x * 0.0085, z * 0.0085, seed ^ 0x3c6ef372, 3) - 0.5) * 2;
 
-      // Base inland colour: continuous blend between coastal earth, deep 1550 tropical rainforest canopy, and cliff stone
+      // Base inland colour: continuous blend between coastal earth, baked 3D-like multi-species canopy domes, and stratified cliff stone
       const canopyBlend = coastalSmoothstep(0.08, 0.72, veg);
       const soilR = 88 + sandNoise * 6;
       const soilG = 96 + sandNoise * 6;
       const soilB = 64 + sandNoise * 4;
-      const lushR = 29 + canopyMottle * 6 + fineGrain * 0.30;
-      const lushG = 66 + canopyMottle * 10 + fineGrain * 0.40;
-      const lushB = 30 + canopyMottle * 5 + fineGrain * 0.25;
+      let lushR = 29 + canopyMottle * 6 + fineGrain * 0.30;
+      let lushG = 66 + canopyMottle * 10 + fineGrain * 0.40;
+      let lushB = 30 + canopyMottle * 5 + fineGrain * 0.25;
+      if (canopyBlend > 0.01) {
+        // Multi-scale baked distant canopy domes: ~11m mid-story crowns + ~24m emergent ceiba/mahogany crowns
+        const c1 = coastalValueNoise2D(x * 0.088 + canopyMottle * 0.7, z * 0.088 - canopyMottle * 0.7, seed ^ 0x1b873593);
+        const c1East = coastalValueNoise2D((x + 3.5) * 0.088 + canopyMottle * 0.7, (z - 2.5) * 0.088 - canopyMottle * 0.7, seed ^ 0x1b873593);
+        const c2 = coastalValueNoise2D(x * 0.042, z * 0.042, seed ^ 0x85ebca6b);
+        const crownDome = Math.max(0, c1 * 0.68 + c2 * 0.32 - 0.18) / 0.82;
+        const crownGap = Math.pow(Math.max(0, 1 - crownDome * 1.35), 1.8);
+        // Sun-side directional crown highlight vs self-shadowed crown back
+        const crownSunSlope = Math.max(-0.45, Math.min(0.55, (c1 - c1East) * 2.4 - (sx * 0.28 - sz * 0.22)));
+        const speciesHue = coastalValueNoise2D(x * 0.026 + 4.1, z * 0.026 - 2.7, seed ^ 0xc2b2ae35);
+        const crownShade = (0.72 + 0.42 * crownDome + 0.34 * crownSunSlope) * (1 - 0.38 * crownGap);
+        lushR = (25 + canopyMottle * 6 + speciesHue * 11 + Math.max(0, crownSunSlope) * 14 + fineGrain * 0.26) * crownShade;
+        lushG = (60 + canopyMottle * 11 + speciesHue * 14 + Math.max(0, crownSunSlope) * 18 + fineGrain * 0.36) * crownShade;
+        lushB = (26 + canopyMottle * 5 + (1 - speciesHue) * 7 + fineGrain * 0.22) * crownShade;
+      }
       const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
       const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
       const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
       const cliffWeight = coastalSmoothstep(0.42, 0.78, slope);
-      const rockR = 114 + sandNoise * 10 + fineGrain * 0.6;
-      const rockG = 108 + sandNoise * 9 + fineGrain * 0.5;
-      const rockB = 98 + sandNoise * 8 + fineGrain * 0.5;
+      // Stratified coastal stone: dipping sedimentary/volcanic beds, mineral warmth & dark wave-splashed basal rock
+      const strataPhase = h * 0.52 + canopyMottle * 2.4 + sandNoise * 1.1;
+      const strataBand = Math.sin(strataPhase) * 0.5 + Math.sin(strataPhase * 2.7 + 1.1) * 0.3;
+      const jointShadow = Math.max(0, Math.abs((fineGrain / 7) + sandNoise * 0.5) - 0.55);
+      const basalSplash = coastalSmoothstep(2.4, 0.2, h) * coastalSmoothstep(36, 8, inlandM);
+      const rockShade = (1 + strataBand * 0.13 - jointShadow * 0.22) * (1 - basalSplash * 0.34);
+      const rockR = (116 + sandNoise * 11 + strataBand * 9 + fineGrain * 0.65) * rockShade;
+      const rockG = (108 + sandNoise * 9 + strataBand * 6 + fineGrain * 0.55) * rockShade;
+      const rockB = (97 + sandNoise * 8 - strataBand * 4 + fineGrain * 0.50) * rockShade;
 
       let r = forestR * (1 - cliffWeight) + rockR * cliffWeight;
       let g = forestG * (1 - cliffWeight) + rockG * cliffWeight;
@@ -31816,33 +31912,52 @@ function synthesizeCoastalAlbedo(
         }
       }
 
-      // Foreshore-constrained dry coral/quartz beach berm & backshore dune sand
+      // Foreshore-constrained dry coral/quartz beach berm & backshore dune sand with beach cusp undulations
       const gentleSlope = coastalSmoothstep(0.28, 0.09, slope);
       const shoreBand = coastalSmoothstep(95, 32, inlandM);
-      const bermTop = 5.4 + sandNoise * 1.1;
+      const cuspWave = Math.sin(x * 0.042 - z * 0.031 + sandNoise * 1.6) * 0.24;
+      const bermRipple = Math.sin(x * 0.22 + z * 0.18 + sandNoise * 2.1) * 3.5;
+      const bermTop = 5.4 + sandNoise * 1.1 + cuspWave * 0.6;
       const drySandWeight =
         coastalSmoothstep(-0.3, 0.7, h) *
         coastalSmoothstep(bermTop, 1.4, h) *
         gentleSlope *
         shoreBand;
       if (drySandWeight > 0) {
-        const dryR = 214 + sandNoise * 8 + fineGrain * 0.7;
-        const dryG = 196 + sandNoise * 7 + fineGrain * 0.6;
-        const dryB = 158 + sandNoise * 6 + fineGrain * 0.5;
+        const dryR = 217 + sandNoise * 8 + bermRipple + fineGrain * 0.72;
+        const dryG = 198 + sandNoise * 7 + bermRipple * 0.9 + fineGrain * 0.62;
+        const dryB = 160 + sandNoise * 6 + bermRipple * 0.7 + fineGrain * 0.52;
         r = r * (1 - drySandWeight) + dryR * drySandWeight;
         g = g * (1 - drySandWeight) + dryG * drySandWeight;
         b = b * (1 - drySandWeight) + dryB * drySandWeight;
       }
 
-      // Continuous wet intertidal swash sand & wrack line around the waterline [-1.1m, +1.3m]
+      // Capillary damp sand transition & high-tide wrack/shell line above active swash
+      const swashCrest = 0.22 + sandNoise * 0.16 + cuspWave * 0.35;
+      const dampWeight =
+        coastalSmoothstep(-0.4, 0.15, h) *
+        coastalSmoothstep(swashCrest + 1.55, swashCrest + 0.35, h) *
+        coastalSmoothstep(0.27, 0.08, slope) *
+        coastalSmoothstep(58, 20, inlandM);
+      if (dampWeight > 0) {
+        const wrackBand = Math.max(0, 1 - Math.abs(h - (swashCrest + 0.88)) / 0.24) * Math.max(0, sandNoise + 0.35);
+        const dampR = 172 - wrackBand * 26 + fineGrain * 0.55;
+        const dampG = 154 - wrackBand * 22 + fineGrain * 0.50;
+        const dampB = 120 - wrackBand * 18 + fineGrain * 0.42;
+        r = r * (1 - dampWeight * 0.75) + dampR * (dampWeight * 0.75);
+        g = g * (1 - dampWeight * 0.75) + dampG * (dampWeight * 0.75);
+        b = b * (1 - dampWeight * 0.75) + dampB * (dampWeight * 0.75);
+      }
+
+      // Continuous wet intertidal swash sand & wave-washed film around the waterline [-1.1m, +1.3m]
       const swashWeight =
-        Math.max(0, 1 - Math.abs(h - 0.12 - sandNoise * 0.18) / 1.25) *
+        Math.max(0, 1 - Math.abs(h - swashCrest * 0.55) / 1.18) *
         coastalSmoothstep(0.26, 0.08, slope) *
         coastalSmoothstep(48, 16, inlandM);
       if (swashWeight > 0) {
-        const wetR = 148 + fineGrain * 0.5;
-        const wetG = 134 + fineGrain * 0.45;
-        const wetB = 106 + fineGrain * 0.4;
+        const wetR = 138 + fineGrain * 0.45;
+        const wetG = 126 + fineGrain * 0.42;
+        const wetB = 102 + fineGrain * 0.38;
         r = r * (1 - swashWeight) + wetR * swashWeight;
         g = g * (1 - swashWeight) + wetG * swashWeight;
         b = b * (1 - swashWeight) + wetB * swashWeight;
@@ -35857,7 +35972,8 @@ fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
   let t=1.-dFront/distXZ;
   let rayTopY=mix(camera.y,treeTop,t);
   if(bounds.r>max(1.6,rayTopY+.4)){return 99u;}
-  if(bounds.g>=0.35&&bounds.r>-1.5&&rayTopY<max(bounds.g,0.5)+16.5){standSteps+=1u;}
+  let flatStandGround=bounds.g>=max(0.35,rootScale.y-dFront*0.025);
+  if(flatStandGround&&bounds.r>-1.5&&rayTopY<max(bounds.g,0.5)+14.5){standSteps+=1u;}
  }
  return standSteps;
 }
@@ -35867,12 +35983,12 @@ fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
  let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0);
  let yFactor=clamp((camera.y-36.0)/24.0,0.0,1.0);
- if(standSteps>=4u&&distXZ>mix(120.0,320.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
- if(standSteps>=3u&&distXZ>mix(145.0,420.0,yFactor)*budgetScale&&(rootId&select(7u,1u,yFactor>0.5))!=0u){return true;}
+ if(standSteps>=4u&&distXZ>mix(190.0,380.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
+ if(standSteps>=3u&&distXZ>mix(240.0,480.0,yFactor)*budgetScale&&(rootId&select(3u,1u,yFactor>0.5))!=0u){return true;}
  if(yFactor<0.85){
-  if(standSteps>=2u&&distXZ>mix(175.0,350.0,yFactor)*budgetScale&&(rootId&3u)!=0u){return true;}
-  if(standSteps>=1u&&distXZ>mix(240.0,480.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
-  if(pixelError>4.2&&standSteps>=1u&&distXZ>mix(145.0,290.0,yFactor)*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps>=2u&&distXZ>mix(290.0,460.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(standSteps>=1u&&distXZ>mix(380.0,580.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(pixelError>4.2&&standSteps>=1u&&distXZ>mix(220.0,360.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
  }
  if(distXZ>880.*budgetScale&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
  if(distXZ>1250.*budgetScale&&(rootId&1u)!=0u){return true;}
@@ -36197,14 +36313,14 @@ function createSubtropicalNativeLod(manifest){
   const prototypes=manifest.prototypes.map((p,id)=>{
     const origWoodTris=Math.floor(p.wood.indexCount/3);
     const isPalm=p.species==='royal_palm'||p.species==='palm';
-    const woodFracs=isPalm?[0.20,0.12,0.07]:[0.44,0.26,0.14],woodErrs=[0,0.08,0.22];
+    const woodFracs=isPalm?[0.22,0.14,0.08]:[0.46,0.28,0.16],woodErrs=[0,0.08,0.22];
     const woodTiers=woodFracs.map((frac,tier)=>{
       const tris=Math.max(4,Math.floor(origWoodTris*frac)),indexCount=tris*3,firstIndex=cursor;
       cursor+=indexCount;
       return{tier,firstIndex,indexCount,triangles:tris,originalTriangles:origWoodTris,maximumReportedErrorMetres:woodErrs[tier]};
     });
     const origLeafQuads=Math.floor(p.leaf.indexCount/6);
-    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isPalm?0.44:0.38))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
+    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isPalm?0.50:0.44))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
     cursor+=leafIndexCount;
     const leafRibbons={firstIndex:leafFirstIndex,indexCount:leafIndexCount,leafCount:keepQuads,originalFirstIndex:p.leaf.firstIndex,originalIndexCount:p.leaf.indexCount,maximumPositionErrorUpperMetres:0.04};
     const farFirstIndex=cursor,farIndexCount=p.far.indexCount;
@@ -36485,19 +36601,40 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let tierId=forestBin.z>>16u;
  let isSubBroadleaf=r.identity.z<-1.5&&forestBin.y>=10u;
  var posLocal=position;var normAdj=normal;
- if(isSubBroadleaf&&posLocal.y>2.2){
+ if(nativeMaterial<0.){
+  if(kind.x<3.5){
+   posLocal=vec3f(posLocal.x*2.6,posLocal.y*0.72,posLocal.z*2.6);
+  }else{
+   let rXZ=length(posLocal.xz);
+   let isTopApex=rXZ<1.1&&posLocal.y>8.0;
+   let isBotApex=rXZ<1.1&&posLocal.y<=8.0;
+   let yRound=select(posLocal.y,select(posLocal.y+1.4,posLocal.y-1.6,isTopApex),isTopApex||isBotApex);
+   let lobe=1.0+0.16*sin(posLocal.x*0.85+posLocal.z*0.95+r.yawColour.x*3.0);
+   let flare=select(1.12,1.38,isSubBroadleaf)*lobe;
+   posLocal=vec3f(posLocal.x*flare,max(0.25,yRound*0.66-0.35),posLocal.z*flare);
+   normAdj=normalize(vec3f(posLocal.x*0.35,max(0.35,normAdj.y+0.25),posLocal.z*0.35));
+  }
+ }else if(isSubBroadleaf&&posLocal.y>2.2){
   let flare=1.+clamp((posLocal.y-2.2)*.18,0.,1.75);
   posLocal=vec3f(posLocal.x*flare,posLocal.y*.82+.4,posLocal.z*flare);
  }
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let baseInflate=select(select(.07,.20,tierId==3u),select(.42,.88,tierId==3u),isSubBroadleaf);
+  let baseInflate=select(select(.08,.22,tierId==3u),select(.44,.92,tierId==3u),isSubBroadleaf);
   let inflate=baseInflate/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
-  if(isSubBroadleaf&&tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normal+vec3f(0.,uvOff.y*0.6,0.));}
+  let domeCurve=select(0.28,0.48,tierId==3u);
+  normAdj=normalize(normAdj+(t1*uvOff.x+t2*uvOff.y)*domeCurve);
+  if(isSubBroadleaf&&tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normAdj+vec3f(0.,uvOff.y*0.55,0.));}
  }
- let local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
+ var local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
+ if(kind.x>=3.5&&posLocal.y>2.0&&F.windP[0].z>0.05){
+  let windAmt=clamp(F.windP[0].z/14.0,0.0,1.6)*clamp((posLocal.y-2.0)*0.055,0.0,0.32);
+  let phase=F.camPos.w*1.65+r.rootScale.x*0.07+r.rootScale.z*0.05+posLocal.x*0.35;
+  let flutter=sin(phase)*0.14+cos(phase*2.1)*0.05;
+  local+=vec3f(F.windP[0].x*flutter*windAmt,0.0,F.windP[0].y*flutter*windAmt);
+ }
  var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;
  o.normal=vec3f(c*normAdj.x-s*normAdj.z,normAdj.y,s*normAdj.x+c*normAdj.z);
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
@@ -36514,9 +36651,22 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
  if(in.world.y<in.nativeSoil){discard;}
- let n=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
- let ambient=select(.36+max(n.y,0.)*.25,.14+exposure*.47+max(n.y,0.)*.08,in.kind.x>3.5);
- return landFinish(in.world,n,in.colour,max(dot(n,F.sunDir.xyz),0.),ambient,0.,.95);
+ var n=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
+ let isCrown=in.kind.x>3.5;
+ var col=in.colour;
+ if(isCrown){
+  let camDist=length(in.world-F.camPos.xyz);
+  let detailW=1.0-smoothstep(180.0,1450.0,camDist);
+  let clumpA=sin(in.world.x*0.72+in.world.y*0.48)*cos(in.world.z*0.72-in.world.y*0.38);
+  let clumpB=sin(in.world.x*1.65-in.world.z*1.45+in.world.y*0.95);
+  let clumpShift=vec3f(cos(in.world.x*0.72)*0.22+cos(in.world.x*1.65)*0.12,clumpA*0.18,-sin(in.world.z*0.72)*0.22)*detailW;
+  n=normalize(n+clumpShift);
+  col=col*(0.88+0.20*exposure+(clumpA*0.10+clumpB*0.05)*detailW);
+ }
+ let nDotL=dot(n,F.sunDir.xyz);
+ let diffuse=max(nDotL,0.)+select(0.,max(-nDotL,0.)*0.20*exposure,isCrown);
+ let ambient=select(.36+max(n.y,0.)*.25,.14+exposure*.48+max(n.y,0.)*.09,isCrown);
+ return landFinish(in.world,n,col,diffuse,ambient,0.,select(.94,.86,isCrown));
 }
 fn forestNativeLinear(c:vec3f)->vec3f{
  return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));
@@ -36555,13 +36705,21 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  // This explicitly labelled legacy far approximation is permitted only when
  // the complete specimen fits three pixels. Its dome UVs are not native UVs.
  if(in.nativeMaterial<0){
-   let isSubtropicalFoliage=in.kind.x>3.5&&in.colour.g>in.colour.r*2.2;
-   let expAtten=select(1.0,.22+.78*exposure*exposure,isSubtropicalFoliage);
-   let aoAtten=select(1.0,0.48,isSubtropicalFoliage);
-   let diffuse=max(dot(geometric,F.sunDir.xyz),0.)*expAtten*aoAtten;
-   let ambient=select(.36+max(geometric.y,0.)*.25,(.14+exposure*.47+max(geometric.y,0.)*.08)*aoAtten,in.kind.x>3.5);
-   let farCol=select(in.colour,vec3f(in.colour.r*0.85+in.colour.g*0.08,in.colour.g*0.36,in.colour.b*0.85+in.colour.g*0.04),isSubtropicalFoliage);
-   return landFinish(in.world,geometric,farCol,diffuse,ambient,0.,.95);
+   let isCrown=in.kind.x>3.5;
+   let isSubtropicalFoliage=isCrown&&in.colour.g>in.colour.r*2.2;
+   let camDist=length(in.world-F.camPos.xyz);
+   let clumpW=select(0.0,1.0-smoothstep(160.0,1500.0,camDist),isCrown);
+   let clumpA=sin(in.world.x*0.68+in.world.y*0.44)*cos(in.world.z*0.68-in.world.y*0.36);
+   let clumpB=sin(in.world.x*1.55-in.world.z*1.38+in.world.y*0.88);
+   let farNorm=normalize(geometric+vec3f(cos(in.world.x*0.68)*0.24+cos(in.world.x*1.55)*0.12,clumpA*0.18,-sin(in.world.z*0.68)*0.24)*clumpW);
+   let expAtten=select(1.0,.24+.76*exposure*exposure,isSubtropicalFoliage);
+   let aoAtten=select(1.0,0.78,isSubtropicalFoliage)*(1.0+(clumpA*0.12+clumpB*0.06)*clumpW);
+   let nDotL=dot(farNorm,F.sunDir.xyz);
+   let diffuse=(max(nDotL,0.)+select(0.,max(-nDotL,0.)*0.18*exposure,isCrown))*expAtten*aoAtten;
+   let ambient=select(.36+max(farNorm.y,0.)*.25,(.14+exposure*.48+max(farNorm.y,0.)*.09)*aoAtten,isCrown);
+   let baseFarCol=select(in.colour,vec3f(in.colour.r*0.68+in.colour.g*0.06,in.colour.g*0.62,in.colour.b*0.65+in.colour.g*0.04),isSubtropicalFoliage);
+   let farCol=baseFarCol*(1.0+(clumpA*0.09+clumpB*0.05)*clumpW);
+   return landFinish(in.world,farNorm,farCol,diffuse,ambient,0.,select(.95,.86,isCrown));
  }
  let material=forestNativeMaterials[u32(in.nativeMaterial)];let surface=forestReadNative(material,in.leafUV,ux,uy);
  let colour=surface.pigment.rgb/max(surface.pigment.a,1e-8)*in.colour;
@@ -36578,17 +36736,23 @@ struct ForestNativeLeafOutput {@location(0)colour:vec4f,@builtin(sample_mask)mas
  if(in.world.y<in.nativeSoil){discard;}
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
  let tierId=forestBin.z>>16u;
- let uvR=length((in.leafUV-vec2f(.5,.5))*vec2f(1.85,1.55));
- let clusterPad=clamp(1.-uvR*uvR,0.,1.)*select(0.,select(.36,.64,tierId==3u),tierId>=2u);
+ let uvOff=in.leafUV-vec2f(.5,.5);
+ let uvR=length(uvOff*vec2f(1.85,1.55));
+ let clusterPad=clamp(1.-uvR*uvR,0.,1.)*select(0.,select(.38,.66,tierId==3u),tierId>=2u);
  let effAlpha=max(pigment.a,clusterPad);
- let n=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
- let padColour=forestNativeLinear(material.underside.rgb)*1.12*in.colour;
+ let mappedN=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
+ let frondCurve=vec3f(uvOff.x*0.18,uvOff.y*0.16,0.0)*select(1.0,1.45,tierId>=2u);
+ let n=normalize(mappedN+frondCurve);
+ let padShade=0.84+0.24*(1.0-min(uvR,1.0)*0.65)+0.12*uvOff.y;
+ let padColour=forestNativeLinear(material.underside.rgb)*(1.12*padShade)*in.colour;
  var colour=mix(padColour,pigment.rgb/max(pigment.a,1e-8)*in.colour,clamp(pigment.a*4.,0.,1.));
  if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
  let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);
- let diffuse=(max(nDotL,0.)+max(-nDotL,0.)*material.optics.z)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
- let ambient=(.12+exposure*.55+abs(n.y)*.08)*in.canopyAO;
- let roughness=mix(.52,clamp(surface.detail.a/max(pigment.a,1e-8),0.,1.),clamp(pigment.a*4.,0.,1.));
+ let backlit=max(-nDotL,0.)*material.optics.z;
+ colour=colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.80),backlit*exposure);
+ let diffuse=(max(nDotL,0.)+backlit)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
+ let ambient=(.12+exposure*.56+abs(n.y)*.09)*in.canopyAO;
+ let roughness=mix(.48,clamp(surface.detail.a/max(pigment.a,1e-8),0.,1.)*0.92,clamp(pigment.a*4.,0.,1.));
  let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
  // Independent native leaf footprints must not all select identical hardware
  // sample bits at small projected sizes. Stable per-primitive/root masks keep
@@ -36719,22 +36883,22 @@ const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCull
  if(!nearLod&&!farLod&&!midLod){return;}`,
  ` let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>radius&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
  let coastalBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
- let coastalLodScale=coastalBudgetScale*coastalBudgetScale*mix(0.38,1.0,gazeAcuity);
- let coastalFarDist=select(1320.0,780.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
+ let coastalLodScale=coastalBudgetScale*coastalBudgetScale*mix(0.68,1.0,gazeAcuity);
+ let coastalFarDist=select(1580.0,980.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
  let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
  let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);
  let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.34,isCoastalRoot))*r.rootScale.w;
  let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let stdMid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
- let coastalMid2Min=select(select(310.0,150.0,coastalStandSteps==1u),72.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
+ let coastalMid2Min=select(select(440.0,230.0,coastalStandSteps==1u),130.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMid2Lod=!farLod&&resident&&parameters.w==0.0&&p.leaf.w==1u&&dist>coastalMid2Min;
  let mid2Lod=select(stdMid2Lod,coastalMid2Lod,isSubtropicalCoastal);
  let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.065,isCoastalRoot))*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
- let coastalMid1Min=select(105.0,44.0,coastalStandSteps>=1u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
+ let coastalMid1Min=select(160.0,82.0,coastalStandSteps>=1u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMidLod=!farLod&&!mid2Lod&&resident&&parameters.w==0.0&&p.wood.w==1u&&dist>coastalMid1Min;
  let midLod=select(stdMidLod,coastalMidLod,isSubtropicalCoastal);
  let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
@@ -36828,8 +36992,8 @@ async function createForestRenderer({device,module,frameUBO,shader,resources,clo
         floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
         const isBroadleafSub=isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove');
-        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.36:0.28))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.15:0.11))*6);
+        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.45:0.36))*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.22:0.17))*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
         draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);

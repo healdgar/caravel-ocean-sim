@@ -102,7 +102,8 @@ fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
   let t=1.-dFront/distXZ;
   let rayTopY=mix(camera.y,treeTop,t);
   if(bounds.r>max(1.6,rayTopY+.4)){return 99u;}
-  if(bounds.g>=0.35&&bounds.r>-1.5&&rayTopY<max(bounds.g,0.5)+16.5){standSteps+=1u;}
+  let flatStandGround=bounds.g>=max(0.35,rootScale.y-dFront*0.025);
+  if(flatStandGround&&bounds.r>-1.5&&rayTopY<max(bounds.g,0.5)+14.5){standSteps+=1u;}
  }
  return standSteps;
 }
@@ -112,12 +113,12 @@ fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
  let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0);
  let yFactor=clamp((camera.y-36.0)/24.0,0.0,1.0);
- if(standSteps>=4u&&distXZ>mix(120.0,320.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
- if(standSteps>=3u&&distXZ>mix(145.0,420.0,yFactor)*budgetScale&&(rootId&select(7u,1u,yFactor>0.5))!=0u){return true;}
+ if(standSteps>=4u&&distXZ>mix(190.0,380.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
+ if(standSteps>=3u&&distXZ>mix(240.0,480.0,yFactor)*budgetScale&&(rootId&select(3u,1u,yFactor>0.5))!=0u){return true;}
  if(yFactor<0.85){
-  if(standSteps>=2u&&distXZ>mix(175.0,350.0,yFactor)*budgetScale&&(rootId&3u)!=0u){return true;}
-  if(standSteps>=1u&&distXZ>mix(240.0,480.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
-  if(pixelError>4.2&&standSteps>=1u&&distXZ>mix(145.0,290.0,yFactor)*budgetScale&&(rootId&3u)!=0u){return true;}
+  if(standSteps>=2u&&distXZ>mix(290.0,460.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(standSteps>=1u&&distXZ>mix(380.0,580.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
+  if(pixelError>4.2&&standSteps>=1u&&distXZ>mix(220.0,360.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
  }
  if(distXZ>880.*budgetScale&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
  if(distXZ>1250.*budgetScale&&(rootId&1u)!=0u){return true;}

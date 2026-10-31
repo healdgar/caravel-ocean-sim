@@ -4502,21 +4502,42 @@ export function synthesizeCoastalAlbedo(
       const fineGrain = (coastalValueNoise2D(u * 68, v * 68, seed ^ 0x55aa55aa) - 0.5) * 14;
       const canopyMottle = (coastalFbm2D(x * 0.0085, z * 0.0085, seed ^ 0x3c6ef372, 3) - 0.5) * 2;
 
-      // Base inland colour: continuous blend between coastal earth, deep 1550 tropical rainforest canopy, and cliff stone
+      // Base inland colour: continuous blend between coastal earth, baked 3D-like multi-species canopy domes, and stratified cliff stone
       const canopyBlend = coastalSmoothstep(0.08, 0.72, veg);
       const soilR = 88 + sandNoise * 6;
       const soilG = 96 + sandNoise * 6;
       const soilB = 64 + sandNoise * 4;
-      const lushR = 29 + canopyMottle * 6 + fineGrain * 0.30;
-      const lushG = 66 + canopyMottle * 10 + fineGrain * 0.40;
-      const lushB = 30 + canopyMottle * 5 + fineGrain * 0.25;
+      let lushR = 29 + canopyMottle * 6 + fineGrain * 0.30;
+      let lushG = 66 + canopyMottle * 10 + fineGrain * 0.40;
+      let lushB = 30 + canopyMottle * 5 + fineGrain * 0.25;
+      if (canopyBlend > 0.01) {
+        // Multi-scale baked distant canopy domes: ~11m mid-story crowns + ~24m emergent ceiba/mahogany crowns
+        const c1 = coastalValueNoise2D(x * 0.088 + canopyMottle * 0.7, z * 0.088 - canopyMottle * 0.7, seed ^ 0x1b873593);
+        const c1East = coastalValueNoise2D((x + 3.5) * 0.088 + canopyMottle * 0.7, (z - 2.5) * 0.088 - canopyMottle * 0.7, seed ^ 0x1b873593);
+        const c2 = coastalValueNoise2D(x * 0.042, z * 0.042, seed ^ 0x85ebca6b);
+        const crownDome = Math.max(0, c1 * 0.68 + c2 * 0.32 - 0.18) / 0.82;
+        const crownGap = Math.pow(Math.max(0, 1 - crownDome * 1.35), 1.8);
+        // Sun-side directional crown highlight vs self-shadowed crown back
+        const crownSunSlope = Math.max(-0.45, Math.min(0.55, (c1 - c1East) * 2.4 - (sx * 0.28 - sz * 0.22)));
+        const speciesHue = coastalValueNoise2D(x * 0.026 + 4.1, z * 0.026 - 2.7, seed ^ 0xc2b2ae35);
+        const crownShade = (0.72 + 0.42 * crownDome + 0.34 * crownSunSlope) * (1 - 0.38 * crownGap);
+        lushR = (25 + canopyMottle * 6 + speciesHue * 11 + Math.max(0, crownSunSlope) * 14 + fineGrain * 0.26) * crownShade;
+        lushG = (60 + canopyMottle * 11 + speciesHue * 14 + Math.max(0, crownSunSlope) * 18 + fineGrain * 0.36) * crownShade;
+        lushB = (26 + canopyMottle * 5 + (1 - speciesHue) * 7 + fineGrain * 0.22) * crownShade;
+      }
       const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
       const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
       const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
       const cliffWeight = coastalSmoothstep(0.42, 0.78, slope);
-      const rockR = 114 + sandNoise * 10 + fineGrain * 0.6;
-      const rockG = 108 + sandNoise * 9 + fineGrain * 0.5;
-      const rockB = 98 + sandNoise * 8 + fineGrain * 0.5;
+      // Stratified coastal stone: dipping sedimentary/volcanic beds, mineral warmth & dark wave-splashed basal rock
+      const strataPhase = h * 0.52 + canopyMottle * 2.4 + sandNoise * 1.1;
+      const strataBand = Math.sin(strataPhase) * 0.5 + Math.sin(strataPhase * 2.7 + 1.1) * 0.3;
+      const jointShadow = Math.max(0, Math.abs((fineGrain / 7) + sandNoise * 0.5) - 0.55);
+      const basalSplash = coastalSmoothstep(2.4, 0.2, h) * coastalSmoothstep(36, 8, inlandM);
+      const rockShade = (1 + strataBand * 0.13 - jointShadow * 0.22) * (1 - basalSplash * 0.34);
+      const rockR = (116 + sandNoise * 11 + strataBand * 9 + fineGrain * 0.65) * rockShade;
+      const rockG = (108 + sandNoise * 9 + strataBand * 6 + fineGrain * 0.55) * rockShade;
+      const rockB = (97 + sandNoise * 8 - strataBand * 4 + fineGrain * 0.50) * rockShade;
 
       let r = forestR * (1 - cliffWeight) + rockR * cliffWeight;
       let g = forestG * (1 - cliffWeight) + rockG * cliffWeight;
@@ -4583,33 +4604,52 @@ export function synthesizeCoastalAlbedo(
         }
       }
 
-      // Foreshore-constrained dry coral/quartz beach berm & backshore dune sand
+      // Foreshore-constrained dry coral/quartz beach berm & backshore dune sand with beach cusp undulations
       const gentleSlope = coastalSmoothstep(0.28, 0.09, slope);
       const shoreBand = coastalSmoothstep(95, 32, inlandM);
-      const bermTop = 5.4 + sandNoise * 1.1;
+      const cuspWave = Math.sin(x * 0.042 - z * 0.031 + sandNoise * 1.6) * 0.24;
+      const bermRipple = Math.sin(x * 0.22 + z * 0.18 + sandNoise * 2.1) * 3.5;
+      const bermTop = 5.4 + sandNoise * 1.1 + cuspWave * 0.6;
       const drySandWeight =
         coastalSmoothstep(-0.3, 0.7, h) *
         coastalSmoothstep(bermTop, 1.4, h) *
         gentleSlope *
         shoreBand;
       if (drySandWeight > 0) {
-        const dryR = 214 + sandNoise * 8 + fineGrain * 0.7;
-        const dryG = 196 + sandNoise * 7 + fineGrain * 0.6;
-        const dryB = 158 + sandNoise * 6 + fineGrain * 0.5;
+        const dryR = 217 + sandNoise * 8 + bermRipple + fineGrain * 0.72;
+        const dryG = 198 + sandNoise * 7 + bermRipple * 0.9 + fineGrain * 0.62;
+        const dryB = 160 + sandNoise * 6 + bermRipple * 0.7 + fineGrain * 0.52;
         r = r * (1 - drySandWeight) + dryR * drySandWeight;
         g = g * (1 - drySandWeight) + dryG * drySandWeight;
         b = b * (1 - drySandWeight) + dryB * drySandWeight;
       }
 
-      // Continuous wet intertidal swash sand & wrack line around the waterline [-1.1m, +1.3m]
+      // Capillary damp sand transition & high-tide wrack/shell line above active swash
+      const swashCrest = 0.22 + sandNoise * 0.16 + cuspWave * 0.35;
+      const dampWeight =
+        coastalSmoothstep(-0.4, 0.15, h) *
+        coastalSmoothstep(swashCrest + 1.55, swashCrest + 0.35, h) *
+        coastalSmoothstep(0.27, 0.08, slope) *
+        coastalSmoothstep(58, 20, inlandM);
+      if (dampWeight > 0) {
+        const wrackBand = Math.max(0, 1 - Math.abs(h - (swashCrest + 0.88)) / 0.24) * Math.max(0, sandNoise + 0.35);
+        const dampR = 172 - wrackBand * 26 + fineGrain * 0.55;
+        const dampG = 154 - wrackBand * 22 + fineGrain * 0.50;
+        const dampB = 120 - wrackBand * 18 + fineGrain * 0.42;
+        r = r * (1 - dampWeight * 0.75) + dampR * (dampWeight * 0.75);
+        g = g * (1 - dampWeight * 0.75) + dampG * (dampWeight * 0.75);
+        b = b * (1 - dampWeight * 0.75) + dampB * (dampWeight * 0.75);
+      }
+
+      // Continuous wet intertidal swash sand & wave-washed film around the waterline [-1.1m, +1.3m]
       const swashWeight =
-        Math.max(0, 1 - Math.abs(h - 0.12 - sandNoise * 0.18) / 1.25) *
+        Math.max(0, 1 - Math.abs(h - swashCrest * 0.55) / 1.18) *
         coastalSmoothstep(0.26, 0.08, slope) *
         coastalSmoothstep(48, 16, inlandM);
       if (swashWeight > 0) {
-        const wetR = 148 + fineGrain * 0.5;
-        const wetG = 134 + fineGrain * 0.45;
-        const wetB = 106 + fineGrain * 0.4;
+        const wetR = 138 + fineGrain * 0.45;
+        const wetG = 126 + fineGrain * 0.42;
+        const wetB = 102 + fineGrain * 0.38;
         r = r * (1 - swashWeight) + wetR * swashWeight;
         g = g * (1 - swashWeight) + wetG * swashWeight;
         b = b * (1 - swashWeight) + wetB * swashWeight;

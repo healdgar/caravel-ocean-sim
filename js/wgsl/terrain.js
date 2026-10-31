@@ -491,8 +491,12 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7.0).rgb;
   var col=albedo*(1.0-wet*0.36)*(direct*diffuse/PI+ambient*ambientVisibility);
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
-  let specular=(0.004*(1.0-roughness)+wet*0.06)*pow(max(dot(n,h),0.0),mix(12.0,64.0,1.0-roughness));
-  col+=direct*specular;
+  let nDotV=max(dot(n,v),0.0);
+  let smoothFilm=clamp((0.36-roughness)/0.28,0.0,1.0)*wet;
+  let fresnel=0.02+0.98*pow(1.0-nDotV,4.5);
+  let specular=(0.004*(1.0-roughness)+wet*0.055+smoothFilm*0.18)*pow(max(dot(n,h),0.0),mix(12.0,128.0,1.0-roughness));
+  let skyRefl=ambient*smoothFilm*fresnel*0.48;
+  col+=direct*specular+skyRefl;
   col+=lunarSurface(n,v,albedo*(1.0-wet*.36),mix(roughness,.25,wet),vec3f(.035),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
   col+=lightningSurface(n,v,albedo,roughness);
   col=surfaceAir(col,world);
@@ -538,16 +542,28 @@ fn landOpaque(in:LandVertex)->vec4f{
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
+  var surfaceWet=0.0;
+  var canopyBackscatter=0.0;
   if(in.kind.x<2.5){
+    let canopyWeight=smoothstep(0.14,0.62,vegetation)*(1.0-rocky*0.85);
+    let crownW1=footprint*0.105;let crownW2=footprint*0.046;
+    let crownN1=landFilteredNoise(world.xz*0.105+vec2f(grain*0.75,-grain*0.55),crownW1);
+    let crownN2=landFilteredNoise(world.xz*0.046+vec2f(-grain*0.45,grain*0.65),crownW2);
     if(nearGround){
       let rockMass=landOrientedDetail(world,n,dx,dy,.24);
       let fracture=landOrientedDetail(world+vec3f(19.1,7.3,4.7),n,dx,dy,1.35);
       let gravel=landOrientedDetail(world,n,dx,dy,7.5);
       var joint=0.0;var strata=0.0;
       if(rocky>.01){joint=landOrientedJoint(world+vec3f(19.1,7.3,4.7),n,dx,dy);strata=landNearStrata(world,dx,dy);}
-      albedo=source*(1.0+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*.045-joint*.14));
-      relief=mix(gravel*.018+fracture*.025,rockMass*.28+fracture*.11+gravel*.014+strata*.016-joint*.08,rocky);
-      roughness=clamp(.91+gravel*.08-rocky*.08,.72,.98);
+      let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*canopyWeight;
+      let crownGap=clamp(0.38-abs(crownN1),0.0,0.38)*landDetailWeight(crownW1)*canopyWeight;
+      let basalWetRock=rocky*(1.0-smoothstep(0.2,2.1,world.y));
+      albedo=source*(1.0+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*.065-joint*.16)+crownBillow*0.18-crownGap*0.38)*(1.0-basalWetRock*0.32);
+      relief=mix(gravel*.018+fracture*.025+crownBillow*0.38-crownGap*0.28,rockMass*.28+fracture*.11+gravel*.014+strata*.022-joint*.09,rocky);
+      ambientVisibility*=(1.0-crownGap*0.34)*(1.0-rocky*joint*0.18);
+      surfaceWet=basalWetRock*0.75;
+      roughness=clamp(.91+gravel*.08-rocky*.08-canopyWeight*0.04,.70,.98);
+      canopyBackscatter=canopyWeight*0.16;
     }else{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
@@ -555,6 +571,7 @@ fn landOpaque(in:LandVertex)->vec4f{
     let isProceduralCoast=in.kind.x<0.5&&in.kind.y>0.015;
     let beachSand=select(0.0,clamp((in.kind.y-0.02)/0.98,0.0,1.0),isProceduralCoast);
     let rockKeep=1.0-beachSand*0.94;
+    let effCanopy=canopyWeight*(1.0-beachSand);
     let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
     var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19);}
     let blocks=blockNoise*blockWeight*rockKeep;
@@ -566,29 +583,56 @@ fn landOpaque(in:LandVertex)->vec4f{
     let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065)*rockKeep;
     var baseSource=source;
     var swashGloss=0.0;
+    var waterFilm=0.0;
     var cliffStrata=0.0;
+    var ledgeStep=0.0;
+    var cragFacet=0.0;
+    let basalWetRock=rocky*rockKeep*(1.0-smoothstep(0.15,2.15,world.y));
     if(isProceduralCoast){
       let gentle=smoothstep(0.32,0.08,1.0-n.y);
+      let cuspWave=sin(world.x*0.042-world.z*0.031+blockNoise*1.5)*0.22;
+      let swashRunup=0.26+0.28*sin(F.camPos.w*1.12+world.x*0.038+world.z*0.032+stoneRaw*1.2)+cuspWave;
       let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(2.6,6.2+stoneRaw*1.2,world.y))*gentle*beachSand;
-      let swashZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(0.42,1.25+stoneRaw*0.22,world.y))*gentle*beachSand;
-      let wrack=exp(-pow((world.y-(1.08+stoneRaw*0.20))/0.13,2.0))*gentle*beachSand;
+      waterFilm=smoothstep(-0.95,-0.15,world.y)*(1.0-smoothstep(swashRunup-0.12,swashRunup+0.22,world.y))*gentle*beachSand;
+      let capillaryZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(swashRunup+0.12,swashRunup+1.15+stoneRaw*0.22,world.y))*gentle*beachSand;
+      let wrack=exp(-pow((world.y-(1.12+cuspWave*0.55+stoneRaw*0.20))/0.14,2.0))*gentle*beachSand;
       let shoalZone=(1.0-smoothstep(-5.5,0.12,world.y))*gentle*beachSand;
-      let dryCoralSand=vec3f(0.56,0.46,0.31)*(1.0+stoneRaw*0.06+pores*0.03);
-      let wetSwashSand=vec3f(0.24,0.19,0.13)*(1.0+pores*0.025);
-      let wrackTint=vec3f(0.14,0.12,0.075);
+      let shellGrit=max(0.0,pores-0.25)*landDetailWeight(materialWidth*5.4)*0.08*(1.0-waterFilm*0.7);
+      let dryCoralSand=vec3f(0.57,0.47,0.32)*(1.0+stoneRaw*0.06+pores*0.035+shellGrit);
+      let dampSand=vec3f(0.34,0.27,0.19)*(1.0+stoneRaw*0.04+pores*0.03);
+      let wetSwashSand=vec3f(0.21,0.17,0.12)*(1.0+pores*0.02);
+      let wrackTint=vec3f(0.13,0.11,0.07)*(1.0+stoneRaw*0.18);
       let shoalSand=vec3f(0.20,0.34,0.32)*(1.0+stoneRaw*0.05);
-      baseSource=mix(baseSource,dryCoralSand,dryZone*0.85);
-      baseSource=mix(baseSource,wetSwashSand,swashZone*0.88);
-      baseSource=mix(baseSource,wrackTint,wrack*0.45);
+      baseSource=mix(baseSource,dryCoralSand,dryZone*0.86);
+      baseSource=mix(baseSource,dampSand,capillaryZone*0.82);
+      baseSource=mix(baseSource,wetSwashSand,waterFilm*0.92);
+      baseSource=mix(baseSource,wrackTint,wrack*0.48);
       baseSource=mix(baseSource,shoalSand,shoalZone*0.75);
-      swashGloss=swashZone;
-      cliffStrata=sin(world.y*2.35+blockNoise*2.2)*landDetailWeight(footprint*0.45)*rocky*rockKeep;
+      swashGloss=max(capillaryZone*0.58,waterFilm*0.96);
     }
-    let sandRipple=sin(world.x*1.8+world.z*1.3+stoneRaw*2.5)*landDetailWeight(materialWidth*0.45)*beachSand*0.025;
-    albedo=baseSource*(1.0+blocks*.14+stone*0.10+cliffStrata*0.065+pores*(0.055-beachSand*0.025)+sandRipple-(fissure*.075+coarseFissure*.08)*rocky);
-    let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.35;
-    relief=mix(soil,stone*0.14+blocks*.22+cliffStrata*0.035-fissure*0.065-coarseFissure*.10,rocky*rockKeep);
-    roughness=clamp(mix(mix(0.89+vegetation*0.035+pores*0.055-rocky*0.08,0.78+pores*0.03,beachSand),0.15,swashGloss),0.14,0.98);
+    let strataDetailW=landDetailWeight(footprint*0.45)*rocky*rockKeep;
+    cliffStrata=(sin(world.y*1.95+blockNoise*2.4)*0.65+sin(world.y*4.8-stoneRaw*1.7)*0.35)*strataDetailW;
+    ledgeStep=(smoothstep(-0.22,0.32,cliffStrata)-0.5)*strataDetailW;
+    cragFacet=(abs(stoneRaw)-0.32)*landDetailWeight(materialWidth*0.82)*rocky*rockKeep;
+    let rockTone=mix(vec3f(1.0),mix(vec3f(0.94,0.96,1.04),vec3f(1.06,1.01,0.92),clamp(0.5+0.5*cliffStrata,0.0,1.0)),rocky*rockKeep*0.55);
+    // Dual-scale beach sand ripples: braided cross-shore swash ripples (smoothed under active water film) + fine wind ripples on dry berm
+    let rippleW=landDetailWeight(materialWidth*0.45)*beachSand;
+    let waveRipple=sin(world.x*1.95+world.z*1.42+stoneRaw*2.8)*cos(world.x*0.58-world.z*0.76+stoneRaw*1.5)*(1.0-waterFilm*0.65);
+    let windRipple=sin(world.x*3.3-world.z*2.1+pores*1.6)*(1.0-swashGloss);
+    let sandRipple=(waveRipple*0.024+windRipple*0.014)*rippleW;
+    // Baked distant canopy crown domes & inter-crown shadow pockets on forested terrain
+    let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*effCanopy;
+    let crownGap=clamp(0.40-abs(crownN1),0.0,0.40)*landDetailWeight(crownW1)*effCanopy;
+    let canopyTone=mix(vec3f(1.0),vec3f(1.0+crownN2*0.09,1.0+crownBillow*0.14,1.0-crownN2*0.06),effCanopy);
+    albedo=baseSource*rockTone*canopyTone*(1.0+blocks*.15+stone*0.11+cliffStrata*0.075+ledgeStep*0.06+cragFacet*0.05+pores*(0.055-beachSand*0.025)+sandRipple+crownBillow*0.20-crownGap*0.42-(fissure*.085+coarseFissure*.095)*rocky)*(1.0-basalWetRock*0.34);
+    let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.42+crownBillow*0.42-crownGap*0.32;
+    let rockRelief=stone*0.15+blocks*.24+cliffStrata*0.048+ledgeStep*0.042+cragFacet*0.035-fissure*0.075-coarseFissure*.11;
+    relief=mix(soil,rockRelief,rocky*rockKeep);
+    ambientVisibility*=(1.0-crownGap*0.38)*(1.0-(fissure*0.22+coarseFissure*0.25)*rocky);
+    surfaceWet=max(swashGloss,basalWetRock*0.75);
+    let baseRough=mix(0.89+vegetation*0.03-effCanopy*0.05+pores*0.055-rocky*0.09,0.76+pores*0.03,beachSand);
+    roughness=clamp(mix(baseRough,mix(0.20,0.07,waterFilm),surfaceWet),0.07,0.98);
+    canopyBackscatter=effCanopy*0.18;
     }
   }else if(in.kind.x>=19.5){
     // Camera-projected photorealistic 1550 building texture atlas (u = in.kind.x - 20.0, v = in.kind.y)
@@ -664,15 +708,19 @@ fn landOpaque(in:LandVertex)->vec4f{
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);
     let canopyGrain=gnoise(world.xz*0.32+vec2f(world.y*0.17));
+    let clumpBillow=gnoise(world.xz*0.85+vec2f(world.y*0.55,-world.y*0.35))*detailFade;
     let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
-    albedo=leafMean.rgb*mix(vec3f(1),regionalTint,0.2)*(0.78+exposure*0.30+canopyGrain*0.04);
-    ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.08;
-    relief=0.0;roughness=0.95;
+    albedo=leafMean.rgb*mix(vec3f(1),regionalTint,0.2)*(0.76+exposure*0.32+canopyGrain*0.055+clumpBillow*0.045);
+    ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.09;
+    relief=(canopyGrain*0.035+clumpBillow*0.028)*detailFade;
+    roughness=0.88;
+    canopyBackscatter=0.22*exposure;
   }else{
     let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
     let ridges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);
-    albedo=vec3f(0.095,0.068,0.038)*(0.82+barkNoise*0.18+in.kind.y*0.16);
-    relief=(ridges-0.5)*0.010*(1.2-in.kind.y)*detailFade;roughness=0.92;
+    let fissure=smoothstep(0.15,0.75,ridges);
+    albedo=vec3f(0.095,0.068,0.038)*(0.76+fissure*0.12+barkNoise*0.18+in.kind.y*0.16);
+    relief=(ridges-0.5)*0.014*(1.2-in.kind.y)*detailFade;roughness=0.91;
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
@@ -691,9 +739,13 @@ fn landOpaque(in:LandVertex)->vec4f{
     let gradient=(reliefX*sx+reliefY*sy)/max(abs(det),0.00001)*sign(det);
     n=normalize(n-clamp(gradient,vec3f(-0.42),vec3f(0.42)));
   }
-  let wet=(1.0-smoothstep(0.5,3.5,world.y))*(0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02));
-  roughness=mix(roughness,0.27,wet);
-  return landFinish(world,n,albedo,max(dot(n,F.sunDir.xyz),0.0),ambientVisibility,wet,roughness);
+  let tidePulse=0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02);
+  let shoreWet=(1.0-smoothstep(0.35,2.2,world.y))*tidePulse*select(0.45,0.22,in.kind.x>=9.5);
+  let wet=clamp(max(shoreWet,surfaceWet),0.0,0.96);
+  roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
+  let nDotL=dot(n,F.sunDir.xyz);
+  let diffuse=max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter;
+  return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
 @fragment fn opaqueFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
@@ -707,34 +759,39 @@ fn landOpaque(in:LandVertex)->vec4f{
   let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0).r;
   let luminance=dot(source,vec3f(.2126,.7152,.0722));
   let shade=.72+in.kind.y*.30;
-  let rock=mix(vec3f(luminance)*vec3f(.95,.91,.85),source,.12)*shade;
+  let rockStrata=sin(world.y*5.5+world.x*2.1-world.z*1.7)*0.08;
+  let rock=mix(vec3f(luminance)*vec3f(.96+rockStrata,.91+rockStrata*0.5,.84-rockStrata*0.4),source,.16)*shade*(0.92+0.12*max(n.y,0.0));
   let dry=vec3f(.17,.145,.065);let green=mix(leafMean.rgb,source,.18);
   let foliage=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
   let albedo=select(rock,foliage,grass);
   let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
   let direct=sunIlluminance()*sunlight;
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
-  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.35,grass);
-  let visibility=select(.35+.28*max(n.y,0.0),.32+in.kind.y*.32,grass);
-  let wet=(1.0-smoothstep(1.0,7.0,world.y))*.5;
+  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.38,grass);
+  let visibility=select(.35+.30*max(n.y,0.0),.32+in.kind.y*.32,grass);
+  let wet=(1.0-smoothstep(0.6,3.2,world.y))*.55;
   var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
   color+=lunarSurface(n,normalize(F.camPos.xyz-world),albedo,.84,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
   color+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.84);
   return vec4f(surfaceAir(color,world),1);
 }
 @fragment fn leafFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let world=in.world;var n=normalize(in.normal)*select(-1.0,1.0,front);
+  let world=in.world;
+  let uvCentered=in.leafUV-vec2f(0.5,0.5);
+  let n=normalize(in.normal*select(-1.0,1.0,front)+vec3f(uvCentered.x*0.24,uvCentered.y*0.20,0.0));
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   // Derivative-dependent samples precede discard; this shader alone is cutout.
   let leaf=textureSampleBias(leafSpray,landSampler,in.leafUV,0.1);
   let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
   let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
-  let albedo=pow(leaf.rgb,vec3f(2.2))*mix(vec3f(1),regionalTint,0.2)*(0.78+in.kind.y*0.30);
   let exposure=clamp(in.kind.y,0.0,1.0);let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*0.48)*(0.22+0.78*exposure*exposure);
-  let ambientVisibility=0.12+exposure*0.55+abs(n.y)*0.08;
+  let backlit=max(-nDotL,0.0)*0.52;
+  let warmTrans=mix(vec3f(1.0),vec3f(1.12,1.16,0.78),backlit*exposure);
+  let albedo=pow(leaf.rgb,vec3f(2.2))*mix(vec3f(1),regionalTint,0.2)*warmTrans*(0.76+exposure*0.34);
+  let diffuse=(max(nDotL,0.0)+backlit)*(0.22+0.78*exposure*exposure);
+  let ambientVisibility=0.12+exposure*0.56+abs(n.y)*0.09;
   if(leaf.a<0.015){discard;}
-  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.95);
+  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.78);
   return vec4f(color.rgb,leaf.a);
 }
 // Imported canopy streams already contain absolute Y-up world positions and
@@ -755,21 +812,39 @@ struct CanopyVertex {
 // Opaque imported wood/crowns stay in the opaque visibility path. Their call
 // graph has no discard or foliage texture; source RGB replaces shared green.
 @fragment fn canopyOpaqueFS(in:CanopyVertex)->@location(0) vec4f{
-  let n=normalize(in.normal);let exposure=clamp(in.kind.y,0,1);
+  let dx=dpdx(in.world);let dy=dpdy(in.world);
+  let footprint=max(length(dx),length(dy));
   let crown=in.kind.x>3.5;
-  let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.47+max(n.y,0)*.08,crown);
-  return landFinish(in.world,n,in.colour,max(dot(n,F.sunDir.xyz),0),ambient,0,.95);
+  let exposure=clamp(in.kind.y,0.0,1.0);
+  var n=normalize(in.normal);
+  var col=in.colour;
+  var relief=0.0;
+  if(crown){
+    let clump=landFilteredNoise(in.world.xz*0.42+vec2f(in.world.y*0.28),footprint*0.42);
+    let subClump=landFilteredNoise(in.world.xz*1.15-vec2f(in.world.y*0.65),footprint*1.15);
+    relief=(clump*0.16+subClump*0.08)*(0.45+0.55*exposure);
+    col=col*(0.88+0.22*exposure+clump*0.10+subClump*0.06);
+  }
+  let rx=dpdx(relief);let ry=dpdy(relief);
+  if(crown){n=landFilteredBump(n,dx,dy,rx,ry);}
+  let nDotL=dot(n,F.sunDir.xyz);
+  let diffuse=max(nDotL,0.0)+select(0.0,max(-nDotL,0.0)*0.22*exposure,crown);
+  let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.48+max(n.y,0)*.09,crown);
+  return landFinish(in.world,n,col,diffuse,ambient,0,select(0.92,0.86,crown));
 }
 @fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let n=normalize(in.normal)*select(-1.0,1.0,front);
+  let uvCentered=in.leafUV-vec2f(0.5,0.5);
+  let n=normalize(in.normal*select(-1.0,1.0,front)+vec3f(uvCentered.x*0.22,uvCentered.y*0.18,0.0));
   // This borrowed alpha is an explicit approximation: the supplied GLB/native
   // streams contain no leaf image. Never replace their linear RGB with it.
   let alpha=textureSampleBias(leafSpray,landSampler,in.leafUV,.1).a;
   let exposure=clamp(in.kind.y,0,1);let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=(max(nDotL,0)+max(-nDotL,0)*.48)*(.22+.78*exposure*exposure);
-  let ambient=.12+exposure*.55+abs(n.y)*.08;
+  let backlit=max(-nDotL,0)*.50;
+  let warmCol=in.colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.82),backlit*exposure);
+  let diffuse=(max(nDotL,0)+backlit)*(.22+.78*exposure*exposure);
+  let ambient=.12+exposure*.56+abs(n.y)*.09;
   if(alpha<.015){discard;}
-  let color=landFinish(in.world,n,in.colour,diffuse,ambient,0,.95);
+  let color=landFinish(in.world,n,warmCol,diffuse,ambient,0,.78);
   return vec4f(color.rgb,alpha);
 }
 `;

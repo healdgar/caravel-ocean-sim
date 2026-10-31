@@ -89,7 +89,7 @@ test('1550 Lisbon departure dock (Ribeira das Naus & Cais da Índia) models L-he
   assert.equal(pack.region.id, 'lisbon');
   assert.equal(pack.region.portType, 'royal-arsenal-dock');
   assert.ok(pack.views.dock, 'Lisbon pack exposes a dedicated dock departure view');
-  assert.equal(pack.views.dock.heading, 278, 'Lisbon dock berth faces 278° WNW past Ribeira das Naus and Torre de Belém');
+  assert.equal(pack.views.dock.heading, 255, 'Lisbon dock berth faces 255° WSW down the Tagus channel past Ribeira das Naus and Torre de Belém');
   assert.ok(pack.views.dock.depth >= 5.5, `Lisbon dock berth has deep navigable water (${pack.views.dock.depth.toFixed(1)}m)`);
   assert.equal(pack.views.dock.moved, false, 'Lisbon dock berth clears the caravel draft without displacement');
 
@@ -1025,6 +1025,29 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   assert.equal(lisbonPack.region.settlementKind, 'colonial-port');
   assert.ok(lisbonPack.port.instances.length >= 7, 'historical 1550 port coordinate places full 16th-century waterfront');
 });
+
+test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes, and multi-tier tree LOD shaders', async () => {
+  const { TERRAIN } = await import('../js/wgsl/terrain.js');
+  const { FOREST_VERTEX_WGSL } = await import('../js/forest-scenery.js');
+
+  // Verify WGSL terrain shader includes wet-film Fresnel reflection, active wave-swash film, capillary damp sand,
+  // dual-scale wave/wind beach ripples, stepped cliff strata, and derivative-filtered baked canopy crown domes
+  assert.match(TERRAIN, /waterFilm/);
+  assert.match(TERRAIN, /capillaryZone/);
+  assert.match(TERRAIN, /waveRipple/);
+  assert.match(TERRAIN, /windRipple/);
+  assert.match(TERRAIN, /ledgeStep/);
+  assert.match(TERRAIN, /cragFacet/);
+  assert.match(TERRAIN, /crownBillow/);
+  assert.match(TERRAIN, /crownGap/);
+  assert.match(TERRAIN, /skyRefl/);
+
+  // Verify WGSL forest LOD shaders include rounded cluster dome curvature, wind flutter, and far/middle crown-clump normal relief
+  assert.match(FOREST_VERTEX_WGSL, /domeCurve/);
+  assert.match(FOREST_VERTEX_WGSL, /frondCurve/);
+  assert.match(FOREST_VERTEX_WGSL, /farNorm/);
+});
+
 
 
 
