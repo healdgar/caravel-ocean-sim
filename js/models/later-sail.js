@@ -346,7 +346,7 @@ const laterSailMoth={
   masts:[{id:'main',controlGroup:'main',z:-1.15,height:14.4/laterSailMothScale,radius:.10/laterSailMothX,rake:.17},
     {id:'mizzen',controlGroup:'mizzen',z:2.7,height:9.8/laterSailMothScale,radius:.075/laterSailMothX,rake:.12}],
   surfaces:[],bowsprit:null,
-  hatch:{centre:[0,1.42/laterSailMothScale,1.10],size:[.62/laterSailMothX,.055/laterSailMothScale,.60/laterSailMothScale]},
+  hatch:{centre:[0,1.42/laterSailMothScale,.92],size:[.62/laterSailMothX,.055/laterSailMothScale,.60/laterSailMothScale]},
   crewStations:{ines:{x:0,z:3.85,route:[3.85,3.85],yaw:0,roles:['captain','helmsman','sail-handler']}},
   loading:{crew:1,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:40,sparesKg:150,designIncludesManifest:true,gmBeamFraction:.14,
     ballastKg:8490*laterSailPound,permanentMassKg:null,referenceDisplacementKg:23320*laterSailPound,

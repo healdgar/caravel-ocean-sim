@@ -172,16 +172,16 @@ export function createCaravelMesh({parts,groups}={}) {
     group(`bulwark.frames:${side}`,'hull',bulwarkFramesStart);
   }
   // Continuous foredeck follows the sheer, as in the reconstruction plan.
-  const bowStart=out.length;
+  const bowStart=out.length,bowA=[0,deck(-4.8)+0.12,-4.8],bowB=[0,2.05,-8.4];
   beam([0,.65,-6.35],[0,deck(-6.4)+.7,-6.48],.12,.16,5);
-  tube([0,1.17,-4.9],[0,2.05,-8.4],0.145,1,0.045,28);
+  tube(bowA,bowB,0.145,1,0.045,28);
   for(const side of [-1,1]){
     tube([side*width(-4.8),deck(-4.8)+0.65,-4.8],[0,2.03,-8.3],0.016,2,0.016,12);
-    tube([side*0.32,0.9,-6.0],[0,2.03,-8.3],0.012,2,0.012,10);
+    tube([side*hullHalfWidth(-6.0,deck(-6.0)),deck(-6.0)+0.12,-6.0],[0,2.03,-8.3],0.012,2,0.012,10);
   }
   for(let i=0;i<9;i++){
-    const t=(6.1+i*.038-4.9)/3.5;
-    torus([0,1.17+t*.88,-6.1-i*.038],.145-.1*t+.004,.015,2,[0,.88,-3.5],32,8);
+    const t=(6.1+i*.038-4.8)/3.6;
+    torus([0,bowA[1]+t*(bowB[1]-bowA[1]),bowA[2]+t*(bowB[2]-bowA[2])],.145-.1*t+.004,.015,2,[0,bowB[1]-bowA[1],bowB[2]-bowA[2]],32,8);
   }
   for(let turn=0;turn<5;turn++)torus([0.86,deck(-3.2)+0.025,-3.2],0.13+turn*0.028,0.013,2,'y',48);
   group('bow.structure','hull',bowStart);
@@ -194,7 +194,7 @@ export function createCaravelMesh({parts,groups}={}) {
   group('hatch.frame','deck.main',hatchFrameStart);
   const hatchCoverStart=out.length;
   quad([-.44,deck(-2.65)+.085,-2.65],[.44,deck(-2.65)+.085,-2.65],
-    [.44,deck(-2.65)+.085,-3.61],[-.44,deck(-2.65)+.085,-3.61],18);
+    [.44,deck(-3.61)+.085,-3.61],[-.44,deck(-3.61)+.085,-3.61],18);
   group('hatch.cover','hull',hatchCoverStart,{type:'hatch'});
   const foreBittsStart=out.length;
   for(const x of [-0.35,0.35])beam([x,vesselDeck(-4.8),-4.8],[x,vesselDeck(-4.8)+0.36,-4.8],0.11,0.11,5);
@@ -228,15 +228,15 @@ export function createCaravelMesh({parts,groups}={}) {
   part('hull',hullStart);
   // Two proud, tarred wales emphasize the sheer and fuller hull sections.
   for(const side of [-1,1])for(const offset of [-0.35,0.25]){
-    const start=out.length;
+    const start=out.length,waleStations=offset>0?stations.filter(z=>z<=QUARTERDECK_START+1e-6):stations;
     const wale=(z,dy,proud=.035)=>{
       const angle=offset<0?sectionAngles.get(z)[dy>0?0:1]:0;
       const p=hullPoint(z,side>0?angle:Math.PI-angle);
       if(offset>0)p[1]+=offset+dy;
       p[0]+=side*proud;return p;
     };
-    for(let i=0;i<stations.length-1;i++){
-      const z=stations[i],Z=stations[i+1];
+    for(let i=0;i<waleStations.length-1;i++){
+      const z=waleStations[i],Z=waleStations[i+1];
       const a=wale(z,-.075),b=wale(Z,-.075),c=wale(Z,.075),d=wale(z,.075);
       quad(a,b,c,d,16,null,[[a[1]*1.6,z*.6],[b[1]*1.6,Z*.6],[c[1]*1.6,Z*.6],[d[1]*1.6,z*.6]]);
       for(const dy of [-0.075,0.075]){
@@ -244,7 +244,7 @@ export function createCaravelMesh({parts,groups}={}) {
         quad(a,b,wale(Z,dy,0),wale(z,dy,0),16);
       }
     }
-    for(const z of [stations[0],stations.at(-1)])quad(wale(z,-.075),wale(z,.075),wale(z,.075,0),wale(z,-.075,0),16);
+    for(const z of [waleStations[0],waleStations.at(-1)])quad(wale(z,-.075),wale(z,.075),wale(z,.075,0),wale(z,-.075,0),16);
     part(`wale:${side}:${offset}`,start);
   }
   // Close the narrow raked stem between the port and starboard planking.

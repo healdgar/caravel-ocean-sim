@@ -124,14 +124,17 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   // Close raised deck fronts against the same width samples as the outer skin.
   for(const zone of zones.filter(d=>d.id!=='main')){
     const fore=zone.bounds[0]>begin,join=fore?zone.bounds[0]:zone.bounds[1],other=zones.filter(d=>d!==zone&&join>=d.bounds[0]&&join<=d.bounds[1]&&d.height<zone.height).sort((a,b)=>b.height-a.height)[0];
-    const low=other?.height??profile.deck,start=out.length;
-    const corridors=flights.filter(f=>f.zoneId===zone.id).map(f=>({...f,foot:f.y0+(f.y1-f.y0)*(join-f.z0)/(f.z1-f.z0)-hullLoftSheer(profile,join)-.025}));
-    const ys=[...new Set([low,...levels.filter(y=>y>low&&y<zone.height),...corridors.map(f=>f.foot).filter(y=>y>low&&y<zone.height),zone.height])].sort((a,b)=>a-b);
-    const xs=[...new Set([-1.8,1.8,...corridors.flatMap(f=>[f.x-f.width*.5,f.x+f.width*.5])])].sort((a,b)=>a-b);
+    const low=other?.height??profile.deck,start=out.length,sheer=hullLoftSheer(profile,join);
+    const corridors=flights.filter(f=>f.zoneId===zone.id).map(f=>({...f,foot:f.y0+(f.y1-f.y0)*(join-f.z0)/(f.z1-f.z0)-sheer-.025}));
+    const tillerY=design.steering.handle[1]-sheer,tillerPort=zone.id==='poop'&&tillerY>low+.05&&tillerY<zone.height-.05?[tillerY-.05,tillerY+.05]:[];
+    const ys=[...new Set([low,...levels.filter(y=>y>low&&y<zone.height),...corridors.map(f=>f.foot).filter(y=>y>low&&y<zone.height),...tillerPort,zone.height])].sort((a,b)=>a-b);
+    const xs=[...new Set([-1.8,1.8,...corridors.flatMap(f=>[f.x-f.width*.5,f.x+f.width*.5]),...(tillerPort.length?[-.09,.09]:[])])].sort((a,b)=>a-b);
     for(let j=0;j<ys.length-1;j++){
-      const a=ys[j],b=ys[j+1],y=a+hullLoftSheer(profile,join),Y=b+hullLoftSheer(profile,join),w=additionalHullWidth(modelId,join,y),W=additionalHullWidth(modelId,join,Y);
+      const a=ys[j],b=ys[j+1],y=a+sheer,Y=b+sheer,w=additionalHullWidth(modelId,join,y),W=additionalHullWidth(modelId,join,Y);
       for(let i=0;i<xs.length-1;i++){
-        const x=xs[i],X=xs[i+1];if(corridors.some(f=>(x+X)*.5>f.x-f.width*.5&&(x+X)*.5<f.x+f.width*.5&&(a+b)*.5>f.foot))continue;
+        const x=xs[i],X=xs[i+1],mx=(x+X)*.5,my=(a+b)*.5;
+        if(corridors.some(f=>mx>f.x-f.width*.5&&mx<f.x+f.width*.5&&my>f.foot))continue;
+        if(tillerPort.length&&Math.abs(mx)<.09&&my>tillerPort[0]&&my<tillerPort[1])continue;
         const width=p=>w+(W-w)*(p[1]-y)/(Y-y);
         let polygon=[[x,y,join],[X,y,join],[X,Y,join],[x,Y,join]];
         polygon=additionalMeshClip(additionalMeshClip(polygon,p=>p[0]+width(p)),p=>width(p)-p[0]);
@@ -166,6 +169,11 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
       if(i===zs.length-2||Math.abs(next-base)>1e-8)quad(b,B,C,c,1);
       if(i%4===0)tube(inset(a),inset(d),.016,1,.016,5,undefined,true);
     }
+    const sternBase=additionalDeck(modelId,end)-hullLoftSheer(profile,end),sternSheer=hullLoftSheer(profile,end),notch=design.steering.handle[1]>sternBase+sternSheer-.05&&design.steering.handle[1]<sternBase+sternSheer+design.barrier+.05,innerX=side*(notch?.09:0);
+    const sA=[innerX,sternBase+sternSheer,end],sB=point(end,sternBase,side),sC=point(end,sternBase+design.barrier,side),sD=[innerX,sternBase+sternSheer+design.barrier,end],sIn=p=>[p[0],p[1],p[2]-.045];
+    quad(sA,sB,sC,sD,1);quad(sIn(sA),sIn(sD),sIn(sC),sIn(sB),1);quad(sD,sC,sIn(sC),sIn(sD),1);
+    if(notch)quad(sA,sD,sIn(sD),sIn(sA),1);
+    tube(sD,sC,.025,1,.025,5,undefined,true);
     group('bulwark.'+(side<0?'port':'starboard'),'hull',start);
   }
   // A continuous transom supports the windows; no floating gallery shelves.
@@ -191,12 +199,13 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     }
   }
   group('hull.frames','hull',frameStart);
-  const stock=design.steering.pivot,postStart=out.length;
-  for(let j=0;j<levels.length-1;j++){
-    const lo=levels[j],hi=levels[j+1];if(lo<profile.levels[0]||hi>sternDeck)continue;
-    const a=point(end,lo,0),b=point(end,hi,0),A=[0,a[1],stock[2]],B=[0,b[1],stock[2]];
+  const stock=design.steering.pivot,postStart=out.length,postLevels=levels.filter(y=>y>=profile.levels[0]&&y<=sternDeck);
+  for(let j=0;j<postLevels.length-1;j++){
+    const lo=postLevels[j],hi=postLevels[j+1],a=point(end,lo,0),b=point(end,hi,0),A=[0,a[1],Math.max(a[2]+.04,stock[2]-.035)],B=[0,b[1],Math.max(b[2]+.04,stock[2]-.035)];
     for(const side of [-1,1])quad([side*.045,a[1],a[2]],[side*.045,A[1],A[2]],[side*.045,B[1],B[2]],[side*.045,b[1],b[2]],1);
     quad([-.045,A[1],A[2]],[.045,A[1],A[2]],[.045,B[1],B[2]],[-.045,B[1],B[2]],1);
+    if(j===0)quad([-.045,a[1],a[2]],[-.045,A[1],A[2]],[.045,A[1],A[2]],[.045,a[1],a[2]],1);
+    if(j===postLevels.length-2)quad([-.045,b[1],b[2]],[.045,b[1],b[2]],[.045,B[1],B[2]],[-.045,B[1],B[2]],1);
   }
   group('hull.sternpost','hull',postStart);
   const rudderStart=out.length,rudderBottom=profile.levels[0]-design.keel.depth,rudderTop=design.steering.handle[1],blade=[[rudderBottom,stock[2]], [rudderBottom+.07,stock[2]+.57],[.12,stock[2]+.54],[.38,stock[2]]];

@@ -132,12 +132,12 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const depthModule=await shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot');
   const depthPipeline=await device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}});
   const volumeEntries=()=>bindings[1].map(binding=>({binding,resource:binding===11?depthTexture.createView():resources[binding]}));
-  function writeVolume(at,centre,direction,radii,type,extinction,age,seed){
+  function writeVolume(at,centre,direction,radii,type,extinction,age,seed,subtype=0){
     let right=[direction[2],0,-direction[0]],length=Math.hypot(...right);
     if(length<1e-6){right=[1,0,0];length=1;}
     right=right.map(v=>v/length);
     const up=[direction[1]*right[2]-direction[2]*right[1],direction[2]*right[0]-direction[0]*right[2],direction[0]*right[1]-direction[1]*right[0]];
-    volumes.set([...centre,type,...right,radii[0],...up,radii[1],...direction,radii[2],extinction,age,seed,0],at*20);
+    volumes.set([...centre,type,...right,radii[0],...up,radii[1],...direction,radii[2],extinction,age,seed,subtype],at*20);
   }
   return {state,emitShot:state.emitShot,emitImpact:state.emitImpact,setProjectiles:state.setProjectiles,setAimArcs:state.setAimArcs,
     get active(){return state.active;},get transparentActive(){return !!(volumeCount||impactCount||arcSegmentCount);},
@@ -220,32 +220,68 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       }
       for(const f of fires){
         if(!f?.position||!(f.intensity>0.02))continue;
-        const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.5),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
-        const pulse=0.88+0.18*Math.sin(age*11.3+seed*19.0);
+        const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.6),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
+        const wind=gunneryFxVector(options.wind);
+        const pulse=0.88+0.14*Math.sin(age*11.3+seed*19.0)+0.08*Math.cos(age*19.7-seed*7.3);
+        const rHoriz=(0.58+0.68*int)*pulse;
+        const rVert=(1.05+1.35*int)*pulse;
+        // 1. Primary roaring shipboard flame volume (direction=[0,1,0] -> radii[2] is vertical)
         ordered.push({
-          centre:[pos[0],pos[1]+0.35*int,pos[2]],
+          centre:[pos[0]+wind[0]*0.04,pos[1]+0.55*rVert,pos[2]+wind[2]*0.04],
           direction:[0,1,0],
-          radii:[(0.55+0.65*int)*pulse,(0.75+1.15*int)*pulse,(0.55+0.65*int)*pulse],
+          radii:[rHoriz,rHoriz,rVert],
           type:1,
-          extinction:0.75+0.65*int,
+          subtype:1.0,
+          extinction:0.95+0.85*int,
           age,
           seed:seed*53,
         });
-        const wind=gunneryFxVector(options.wind);
+        // 2. Upper flickering flame tongues & rising hot embers
+        const tongueFlicker=0.82+0.24*Math.sin(age*16.4+seed*31.0);
         ordered.push({
-          centre:[pos[0]+wind[0]*0.32,pos[1]+1.65+1.4*int,pos[2]+wind[2]*0.32],
+          centre:[
+            pos[0]+wind[0]*0.14+Math.sin(age*6.7+seed*13.0)*0.22*int,
+            pos[1]+1.15*rVert,
+            pos[2]+wind[2]*0.14+Math.cos(age*5.9+seed*17.0)*0.22*int,
+          ],
           direction:[0,1,0],
-          radii:[1.1+1.5*int,1.8+2.2*int,1.1+1.5*int],
-          type:0,
-          extinction:3.2*int,
-          age:age*0.6,
-          seed:seed*97,
+          radii:[rHoriz*0.72*tongueFlicker,rHoriz*0.72*tongueFlicker,rVert*0.85*tongueFlicker],
+          type:1,
+          subtype:1.25,
+          extinction:(0.68+0.62*int)*tongueFlicker,
+          age:age*1.35+1.7,
+          seed:seed*71+13,
         });
+        // 3. Cycling, rising & wind-drifting dark pitch/tar smoke plume (3 overlapping parcels)
+        const period=5.4;
+        for(let pIdx=0;pIdx<3;pIdx++){
+          const phase=((age+pIdx*(period/3)+seed*2.1)%period)/period;
+          const env=Math.sin(phase*Math.PI);
+          if(env<0.04)continue;
+          const rise=(1.35+phase*6.8)*(0.75+0.55*int);
+          const drift=phase*phase*2.4;
+          const radH=(0.95+phase*2.45)*(0.75+0.55*int);
+          const radV=(1.15+phase*2.85)*(0.75+0.55*int);
+          ordered.push({
+            centre:[
+              pos[0]+wind[0]*drift+Math.sin(phase*6.28+seed*11+pIdx)*0.28,
+              pos[1]+rise,
+              pos[2]+wind[2]*drift+Math.cos(phase*6.28+seed*17+pIdx)*0.28,
+            ],
+            direction:[0,1,0],
+            radii:[radH,radH,radV],
+            type:0,
+            subtype:2.0+phase*0.8,
+            extinction:(3.6*int*env)/Math.max(1.0,radH*0.55),
+            age:age*0.45+pIdx*3.1,
+            seed:seed*97+pIdx*29,
+          });
+        }
       }
       ordered.sort((a,b)=>b.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0)-a.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0));
       const maxVolumes=Math.min(256,GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots);
       const selected=ordered.length>maxVolumes?ordered.slice(ordered.length-maxVolumes):ordered;
-      for(const p of selected){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);}
+      for(const p of selected){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed,p.subtype??0);}
       for(const p of state.projectiles){
         if(ballCount>=GUNNERY_FX_LIMITS.projectiles)break;
         const signedRadius=p.ammo==='hot'?-p.radius:p.radius;

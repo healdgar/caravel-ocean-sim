@@ -298,7 +298,7 @@ fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
     let e=.0005;p=surfaceGpuCloth(index,uv);
     if(hasDmg){
       let pose=surfaceGpuPose(index);
-      p+=surfaceGpuClothRotate(surface,clothDelta,pose)*clamp(pose.set,0.25,1.0);
+      p+=surfaceGpuClothRotate(surface,clothDelta,pose)*clamp(pose.deployed,0.25,1.0);
     }
     let du=surfaceGpuClothDelta(index,uv,vec2f(e,0)).offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
     let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;

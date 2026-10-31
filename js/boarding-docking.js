@@ -912,9 +912,15 @@ export function createDockingBoardingState(boat, options = {}) {
       if (s.health <= 0.18) {
         s.wounded = 'incapacitated';
         s.casualtyState = 'fallen';
+        s.woundSeverity = 1.0;
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + 0.25);
+        s.collapseYaw = s.yaw ?? 0;
+        s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
       } else if (s.health < 0.72) {
         s.wounded = 'wounded';
         s.casualtyState = 'wounded';
+        s.woundSeverity = Math.max(0.45, 1 - s.health);
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + 0.12);
       }
     }
 
@@ -1221,6 +1227,7 @@ export function createDockingBoardingState(boat, options = {}) {
         state.statusText = state.mooringTargetKind === 'pier'
           ? `Lines over the bollards on ${state.pier?.label || 'pier'} — hauling taut & making fast…`
           : `Grappling hooks fast on ${state.targetVessel?.boat?.name || 'vessel'} — hauling bulwarks alongside…`;
+        emit('making-fast', { pier: state.pier, vessel: state.targetVessel });
       }
     } else if (state.mooringPhase === 'making-fast') {
       state.lineTension = bdClamp(state.lineTension + dt * 0.85, 0, 1);

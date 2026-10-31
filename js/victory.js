@@ -10,7 +10,7 @@ export function createVictoryMesh({groups,parts}={}){
   const {out,add,sub,mul,cross,unit,tag,group,tri,quad,box,tube,rope,ring}=createMeshWriter({groups,parts});
   const zValues=new Set([...Array.from({length:49},(_,i)=>-6+i/4),...VICTORY_DESIGN.hull.stations]);
   for(const z of [VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.poop.start])zValues.add(z);
-  const portW=.235,portH=.21,batteries=VICTORY_DESIGN.gunDecks.filter(g=>['lower','middle','upper'].includes(g.id));
+  const portW=.235,portH=.21,upperPortH=.16,batteries=VICTORY_DESIGN.gunDecks.filter(g=>['lower','middle','upper'].includes(g.id));
   const ports=batteries.flatMap(g=>Array.from({length:g.count/2},(_,i)=>({deck:g.id,y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1),calibre:g.calibre})));
   const upperPorts=VICTORY_DESIGN.gunDecks.filter(g=>!batteries.includes(g)).flatMap(g=>Array.from({length:g.count/2},(_,i)=>({y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1)})));
   for(const p of ports){zValues.add(p.z-portW/2);zValues.add(p.z+portW/2);}
@@ -222,23 +222,30 @@ export function createVictoryMesh({groups,parts}={}){
   // Upper bulwarks, continuous black rail, and proper openings for the smaller
   // quarterdeck/forecastle battery, which completes the 104-gun total.
   for(const side of [-1,1]){
-    const start=out.length,samples=[];
+    const start=out.length,samples=[],insetPt=p=>[p[0]-side*Math.min(.036,Math.abs(p[0])*.5),p[1],p[2]];
     for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],centre=(z+Z)/2;
       const base=victoryVesselDeck(centre)-victorySheer(centre),waist=centre>VICTORY_DESIGN.decks.forecastle.end&&centre<VICTORY_DESIGN.decks.quarter.start,h=waist?1.58-base:centre>=VICTORY_DESIGN.decks.poop.start?.19:.285;
       const bottom=hullPoint(z,base,side),nextBottom=hullPoint(Z,base,side);
       const top=hullPoint(z,base+h,side),nextTop=hullPoint(Z,base+h,side),gunPort=upperPorts.find(p=>Math.abs(centre-p.z)<portW/2-1e-7);
       if(!waist){
-        const height=gunPort?Math.max(.03,gunPort.y-base-portH/2):h;
-        quad(bottom,nextBottom,hullPoint(Z,base+height,side),hullPoint(z,base+height,side),20);
+        const height=gunPort?Math.max(.03,gunPort.y-base-upperPortH/2):h;
+        const sillA=hullPoint(z,base+height,side),sillB=hullPoint(Z,base+height,side);
+        quad(bottom,nextBottom,sillB,sillA,20);
+        if(gunPort)quad(sillA,sillB,insetPt(sillB),insetPt(sillA),24);
       }
-      samples.push({i,bottom,top,nextTop});
+      samples.push({i,bottom,top,nextTop,gunPort});
+    }
+    for(const p of upperPorts)for(const edgeZ of [p.z-portW/2,p.z+portW/2]){
+      const base=victoryVesselDeck(edgeZ)-victorySheer(edgeZ),sill=base+Math.max(.03,p.y-base-upperPortH/2),cap=base+.285;
+      const a=hullPoint(edgeZ,sill,side),b=hullPoint(edgeZ,cap,side);
+      quad(a,b,insetPt(b),insetPt(a),24);
     }
     group(`bulwark.${side}.skin`,'hull',start);
     const railStart=out.length;
     for(const s of samples)tube(s.top,s.nextTop,.025,20,.025,4,undefined,true);
     group(`bulwark.${side}.rail`,'hull',railStart);
-    for(const s of samples)if(s.i%3===0){
+    for(const s of samples)if(s.i%3===0&&!s.gunPort){
       const postStart=out.length;
       // Both end rings are buried in the waterway/rail; hidden end caps add no
       // visible surface and would duplicate those joined timber interfaces.
@@ -283,8 +290,8 @@ export function createVictoryMesh({groups,parts}={}){
   // turn inward rather than becoming three disconnected rectangular shelves.
   const sternStart=out.length;
   const rear=(fraction,baseY,outset=.21,extra=.12)=>{
-    const t=Math.max(0,Math.min(1,(baseY-.84)/1.44)),arch=(.045+.055*t)*(1-fraction*fraction);
-    const p=hullPoint(6,baseY+arch,1),round=Math.max(0,Math.min(1,(baseY-1.9)/.38));
+    const t=Math.max(0,Math.min(1,(baseY-.73)/1.35)),arch=(.026+.020*t)*(1-fraction*fraction);
+    const p=hullPoint(6,baseY+arch,1),round=Math.max(0,Math.min(1,(baseY-1.74)/.34));
     const corner=1-.035*round*round*(3-2*round)*fraction**8;
     return [fraction*(p[0]+extra)*corner,p[1],p[2]+outset-(.06*fraction*fraction+.055*(baseY-1))*outset/.21];
   };
@@ -296,8 +303,8 @@ export function createVictoryMesh({groups,parts}={}){
       quad(rear(a,y,outset),rear(b,y,outset),rear(b,Y,outset),rear(a,Y,outset),material);
     }
   };
-  for(const [level,y]of [1.03,1.55,2.05].entries()){
-    const low=y-.19,high=y+.23;
+  for(const [level,y]of [.89,1.41,1.90].entries()){
+    const low=y-.16,high=y+.18;
     const rearStart=out.length;
     rearPanel(-1,1,low,high,.21,21,3);
     group(`stern.gallery.${level}.rear`,'hull',rearStart);
@@ -311,50 +318,50 @@ export function createVictoryMesh({groups,parts}={}){
       quad(rear(a,Y,0,0),rear(a,Y),rear(b,Y),rear(b,Y,0,0),21);
     }
     group(`stern.gallery.${level}.returns`,'hull',returnStart);
-    rearPanel(-.985,.985,y-.15,y+.19,.212,20,2);
+    rearPanel(-.985,.985,y-.13,y+.15,.212,20,2);
     const windowStart=out.length;
     for(let col=0;col<9;col++){
       const left=-1+col*2/9+.013,right=-1+(col+1)*2/9-.013;
       for(let i=0;i<2;i++){
         const a=left+(right-left)*i/2,b=left+(right-left)*(i+1)/2;
-        quad(rear(a,y-.115,.216),rear(b,y-.115,.216),rear(b,y+.15,.216),rear(a,y+.15,.216),11);
-        tube(rear(a,y+.015,.226),rear(b,y+.015,.226),.007,25,.007,5,undefined,true);
+        quad(rear(a,y-.095,.216),rear(b,y-.095,.216),rear(b,y+.115,.216),rear(a,y+.115,.216),11);
+        tube(rear(a,y+.01,.226),rear(b,y+.01,.226),.007,25,.007,5,undefined,true);
       }
-      tube(rear(left,y-.14,.222),rear(left,y+.18,.222),.010,25,.010,5);
+      tube(rear(left,y-.115,.222),rear(left,y+.135,.222),.010,25,.010,5,undefined,true);
     }
     group(`stern.gallery.${level}.windows`,'hull',windowStart);
     const trimStart=out.length;
-    for(const Y of [y-.20,y+.22])for(let i=0;i<gallerySegments;i++)tube(rear(-1+2*i/gallerySegments,Y,.235),rear(-1+2*(i+1)/gallerySegments,Y,.235),.025,25,.025,6,undefined,true);
+    for(const Y of [y-.155,y+.16])for(let i=0;i<gallerySegments;i++)tube(rear(-1+2*i/gallerySegments,Y,.235),rear(-1+2*(i+1)/gallerySegments,Y,.235),.018,25,.018,6,undefined,true);
     group(`stern.gallery.${level}.trim`,'hull',trimStart);
     for(const side of [-1,1]){
       const end=hullPoint(6,y,1)[2]+.21,point=(z,baseY,outset=.12)=>{
-        const t=Math.max(0,Math.min(1,(z-5.28)/(end-5.28))),edge=rear(side,baseY,.21,outset);
+        const t=Math.max(0,Math.min(1,(z-5.28)/(end-5.28))),u=Math.min(1,outset/.12),edge=rear(side,baseY,.21*u,outset);
         const Z=5.28+(edge[2]-5.28)*t,sampleZ=Math.min(Z,6),Y=baseY+victorySheer(sampleZ);
         const parent=hullPoint(6,baseY,1),correction=edge[0]-side*(parent[0]+outset);
         return [side*(victoryHullHalfWidth(sampleZ,Y)+outset)+correction*t*t,Y,Z];
       };
       for(let i=0;i<5;i++){
         const a=5.28+(end-5.28)*i/5,b=5.28+(end-5.28)*(i+1)/5;
-        quad(point(a,y-.18),point(b,y-.18),point(b,y+.20),point(a,y+.20),21);
-        for(const Y of [y-.18,y+.20])quad(point(a,Y,.002),point(b,Y,.002),point(b,Y),point(a,Y),21);
+        quad(point(a,low),point(b,low),point(b,high),point(a,high),21);
+        for(const Y of [low,high])quad(point(a,Y,.002),point(b,Y,.002),point(b,Y),point(a,Y),21);
       }
-      for(const z of [5.28,end])quad(point(z,y-.18,.002),point(z,y-.18),point(z,y+.20),point(z,y+.20,.002),21);
+      for(const z of [5.28,end])quad(point(z,low,.002),point(z,low),point(z,high),point(z,high,.002),21);
       for(let k=0;k<4;k++){
         const a=5.32+k*.19,b=a+.145;
         for(let i=0;i<2;i++){
           const z=a+(b-a)*i/2,Z=a+(b-a)*(i+1)/2;
-          quad(point(z,y-.12,.123),point(z,y+.14,.123),point(Z,y+.14,.123),point(Z,y-.12,.123),11);
+          quad(point(z,y-.10,.123),point(z,y+.11,.123),point(Z,y+.11,.123),point(Z,y-.10,.123),11);
         }
-        tube(point(a,y-.15,.13),point(a,y+.17,.13),.009,25,.009,5);
+        tube(point(a,y-.12,.13),point(a,y+.13,.13),.009,25,.009,5,undefined,true);
       }
-      for(let i=0;i<5;i++)tube(point(5.28+(end-5.28)*i/5,y+.22,.15),point(5.28+(end-5.28)*(i+1)/5,y+.22,.15),.022,25,.022,6);
+      for(const [Y,r]of [[y-.145,.016],[y+.16,.018]])for(let i=0;i<5;i++)tube(point(5.28+(end-5.28)*i/5,Y,.145),point(5.28+(end-5.28)*(i+1)/5,Y,.145),r,25,r,5,undefined,true);
     }
   }
   // Gilded crest and simple carved scroll rhythm are authored ornaments.
-  const crown=rear(0,2.28,.235),crestZ=crown[2];
+  const crown=rear(0,2.08,.235),crestZ=crown[2];
   ring([0,crown[1]+.12,crestZ],.13,.028,25,'z',20);
   for(const side of [-1,1])for(let i=0;i<5;i++){
-    const x=side*(.3+i*.19),roof=rear(x/(hullPoint(6,2.28,1)[0]+.12),2.28,.235);
+    const x=side*(.3+i*.19),roof=rear(x/(hullPoint(6,2.08,1)[0]+.12),2.08,.235);
     tube([x-.055,roof[1]-.015,roof[2]],[x+.055,roof[1]+.035,roof[2]],.021,25,.013,6);
   }
   group('stern.galleries','hull',sternStart);

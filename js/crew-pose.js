@@ -219,6 +219,17 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
 }
 export function poseCrewWork(a,s,boat){
   const j=s.job;s.grips=null;s.walkContacts=null;s.gunContacts=null;
+  if(s.casualtyState==='fallen'||(s.knockdownTimer??0)>0){
+    const seed=(s.crewIndex??0)*1.37;
+    const sideSign=((s.crewIndex??0)%2===0)?1:-1;
+    const head=poseNodeIndex(a,'Head');
+    if(head>=0)turnBone(a,head,[0,1,0],[sideSign*0.38,0.86,-0.32]);
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],[0.34+0.06*Math.sin(seed),1.05+0.12*Math.cos(seed),0.14],[0.7,0.8,0.2]);
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],[-0.18,0.88+0.06*Math.sin(seed),0.22],[-0.6,0.9,0.25]);
+    solveCrewLimb(a,['thigh_l','calf_l','foot_l'],[0.18,0.14,-0.08],[0.25,0.4,0.88]);
+    solveCrewLimb(a,['thigh_r','calf_r','foot_r'],[-0.22,0.06,0.06],[-0.25,0.4,0.88]);
+    return;
+  }
   if(!j&&poseSeatedCrew(a,s))return;
   if(j)poseRowingWalkingFeet(a,s,boat);
   if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
@@ -317,5 +328,25 @@ export function poseCrewWork(a,s,boat){
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],target,[sign*.6,1,.3]);
       (s.grips??={})[`hand_${side}`]=target;
     }
+  }else if((s.firePanic??0)>0.15){
+    const panic=Math.min(1,s.firePanic??0);
+    a.blend('Brace',s.time,0.65*panic);
+    const wave=Math.sin(s.time*6.5+(s.crewIndex??0))*0.06;
+    const shieldHand=[0.08+wave,1.46,0.24];
+    const balanceHand=[-0.28,1.12-wave,0.18];
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],shieldHand,[0.6,1.0,0.25]);
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],balanceHand,[-0.6,0.9,0.2]);
+  }else if(s.casualtyState==='wounded'){
+    a.blend('Brace',s.time,0.48);
+    const pelvis=poseNodeIndex(a,'pelvis');
+    if(pelvis>=0){
+      const p=posePosition(a.world[pelvis]);
+      poseMoveBone(a,pelvis,[p[0],p[1]-0.055,p[2]-0.02]);
+    }
+    const spine=poseNodeIndex(a,'spine_02');
+    if(spine>=0)turnBone(a,spine,[0,1,0],[0.08,0.96,0.26]);
+    const breathe=Math.sin(s.time*2.6+(s.crewIndex??0))*0.02;
+    const clutchHand=[0.05,0.98+breathe,0.21];
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],clutchHand,[-0.55,0.85,0.3]);
   }
 }

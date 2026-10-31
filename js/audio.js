@@ -11,7 +11,7 @@ const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 // fetched or started until the listener enables sound with a browser gesture.
 export function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
-  let time=0,nextBird=25;
+  let time=0,nextBird=25,nextFirePop=0,lastBellHalfHour=-1;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
   const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[];
   const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
@@ -43,6 +43,80 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       level.gain.setValueAtTime(target,at+Math.max(attack,seconds-release));level.gain.linearRampToValueAtTime(0,at+seconds);
     }
     source.onended=()=>{pool.delete(source);source.disconnect();for(const filter of filters)filter.disconnect();level.disconnect();pan.disconnect();};source.start(0,offset,duration);return seconds;
+  }
+  function playSynth(kind,position=listener,gain=0.25){
+    if(!enabled||hidden||!ready||!context||context.state!=='running'||voices.size>=8)return false;
+    const now=context.currentTime;
+    const dx=(position?.x??listener.x)-listener.x,dz=(position?.z??listener.z)-listener.z,d=Math.hypot(dx,dz);
+    const range=Math.hypot(dx,((position?.y??position?.heave??0)-listener.y),dz);
+    const atten=1/(1+Math.max(0,range-8)/28);
+    const effGain=weatherClamp(gain*atten,0,0.85);
+    if(effGain<0.005)return false;
+    const pan=context.createStereoPanner();
+    pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*0.85;
+    pan.connect(master);
+    if(kind==='sword'||kind==='grapple'){
+      const freqs=kind==='sword'?[1480,2320,3640]:[620,1140,1890];
+      const dur=kind==='sword'?0.22:0.34;
+      for(let i=0;i<freqs.length;i++){
+        const osc=context.createOscillator(),g=context.createGain();
+        osc.type=i===0?'triangle':'sine';
+        const detune=0.94+Math.random()*0.12;
+        osc.frequency.setValueAtTime(freqs[i]*detune,now);
+        osc.frequency.exponentialRampToValueAtTime(freqs[i]*detune*0.88,now+dur);
+        g.gain.setValueAtTime(0.001,now);
+        g.gain.linearRampToValueAtTime(effGain/(i+1.2),now+0.006);
+        g.gain.exponentialRampToValueAtTime(0.0008,now+dur);
+        osc.connect(g).connect(pan);
+        osc.start(now);osc.stop(now+dur+0.01);
+        if(i===0)osc.onended=()=>pan.disconnect();
+      }
+      return true;
+    }
+    if(kind==='spyglass'){
+      const osc=context.createOscillator(),g=context.createGain();
+      osc.type='triangle';
+      osc.frequency.setValueAtTime(520,now);
+      osc.frequency.exponentialRampToValueAtTime(1180,now+0.065);
+      g.gain.setValueAtTime(0.001,now);
+      g.gain.linearRampToValueAtTime(effGain*0.65,now+0.008);
+      g.gain.exponentialRampToValueAtTime(0.0008,now+0.075);
+      osc.connect(g).connect(pan);
+      osc.start(now);osc.stop(now+0.08);
+      osc.onended=()=>pan.disconnect();
+      return true;
+    }
+    if(kind==='bell'){
+      const partials=[880,1760,2420];
+      for(let i=0;i<partials.length;i++){
+        const osc=context.createOscillator(),g=context.createGain();
+        osc.type='sine';
+        osc.frequency.setValueAtTime(partials[i],now);
+        const dur=1.45/(i+1);
+        g.gain.setValueAtTime(0.001,now);
+        g.gain.linearRampToValueAtTime(effGain*0.55/(i+1),now+0.008);
+        g.gain.exponentialRampToValueAtTime(0.0006,now+dur);
+        osc.connect(g).connect(pan);
+        osc.start(now);osc.stop(now+dur+0.02);
+        if(i===0)osc.onended=()=>pan.disconnect();
+      }
+      return true;
+    }
+    if(kind==='surrender-drum'){
+      const osc=context.createOscillator(),g=context.createGain();
+      osc.type='sine';
+      osc.frequency.setValueAtTime(128,now);
+      osc.frequency.exponentialRampToValueAtTime(58,now+0.42);
+      g.gain.setValueAtTime(0.001,now);
+      g.gain.linearRampToValueAtTime(effGain*0.85,now+0.012);
+      g.gain.exponentialRampToValueAtTime(0.0008,now+0.45);
+      osc.connect(g).connect(pan);
+      osc.start(now);osc.stop(now+0.46);
+      osc.onended=()=>pan.disconnect();
+      return true;
+    }
+    pan.disconnect();
+    return false;
   }
   function startLoop(id,asset){
     if(!asset?.loop||!buffers.has(id)||loops.has(id))return;
@@ -109,7 +183,79 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
       creak(timberAudio.impact(event));
     },
-    update(dt,settings,boat,frame,weather){
+    event(ev,boat){
+      if(!ev||!enabled||hidden||!ready)return false;
+      const pos=ev.position??ev.vessel??boat??listener;
+      const p={x:pos.x??listener.x,y:pos.y??pos.heave??listener.y,z:pos.z??listener.z};
+      switch(ev.type){
+        case 'dock-start':
+          play('wind-strong',.28,p,1.65,true,{offset:.2,duration:.42,highpassHz:520});
+          play('timber-creak',.24,p,1.25,true,{offset:.1,duration:.55});
+          return true;
+        case 'grapple-start':
+          playSynth('grapple',p,.36);
+          play('anchor-release',.38,p,1.18,true,{duration:.85});
+          return true;
+        case 'making-fast':
+          play('timber-creak',.32,p,1.12,true,{offset:.15,duration:.95});
+          play('cannon-run-out',.22,p,.92,true,{duration:.75});
+          return true;
+        case 'dock-complete':
+          play('cannon-rammer',.34,p,.78,true,{duration:.48});
+          play('hull-slap',.25,p,.72,true,{duration:.52,lowpassHz:540});
+          return true;
+        case 'cast-off-start':
+          play('anchor-release',.28,p,1.22,true,{duration:.65});
+          play('hull-slap',.26,p,1.15,true,{duration:.62});
+          return true;
+        case 'boarding-round':{
+          playSynth('sword',p,.34);
+          if(((ev.round??1)%2)===1){
+            play('cannon-report',.24,p,1.68,true,{duration:.26,highpassHz:340});
+          }else{
+            play('cannon-rammer',.26,p,1.35,true,{duration:.35});
+          }
+          const voice=CREW_VOICES[(ev.round??0)%Math.max(1,CREW_VOICES.length)];
+          if(voice)play('crew-'+voice.id,.32,p,.96+((ev.round??0)%3)*.05,true,{duration:.65});
+          return true;
+        }
+        case 'vessel-captured':{
+          playSynth('bell',p,.35);
+          const v1=CREW_VOICES[0],v2=CREW_VOICES[1];
+          if(v1)play('crew-'+v1.id,.46,p,1.04,true);
+          if(v2)play('crew-'+v2.id,.38,p,.98,true,{offset:.08});
+          return true;
+        }
+        case 'boarding-repulsed':
+          playSynth('surrender-drum',p,.38);
+          play('timber-creak',.30,p,.82,true,{duration:.9});
+          return true;
+        case 'prize-disposition':
+          if(ev.choice==='scuttle-repair'){
+            play('cannon-rammer',.36,p,1.28,true,{duration:.45});
+            play('timber-creak',.34,p,1.35,true,{offset:.2,duration:.85});
+            play('anchor-splash',.32,p,.88,true,{duration:1.4});
+          }else{
+            play('cannon-run-out',.28,p,1.08,true,{duration:.75});
+          }
+          return true;
+        case 'sail-handling':
+          play('hull-slap',.22,p,1.38,true,{duration:.42,highpassHz:320});
+          play('timber-creak',.20,p,1.28,true,{offset:.3,duration:.55,highpassHz:260});
+          return true;
+        case 'spyglass':
+          return playSynth('spyglass',listener,.28);
+        case 'surrender':
+          playSynth('surrender-drum',p,.42);
+          play('timber-creak',.26,p,.92,true,{duration:.8});
+          return true;
+        case 'watch-bell':
+          return playSynth('bell',p,.30);
+        default:
+          return false;
+      }
+    },
+    update(dt,settings,boat,frame,weather,activeFires=null){
       time+=dt;volume=weatherClamp(settings.soundVolume??.7);
       listener.x=frame[16];listener.y=frame[17];listener.z=frame[18];
       const right=Math.hypot(frame[20],frame[22])||1;listener.rx=frame[20]/right;listener.rz=frame[22]/right;
@@ -128,6 +274,26 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,...flow,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
+      // Spatial shipboard fire crackle & roar when any vessel is burning nearby
+      const fires=Array.isArray(activeFires)&&activeFires.length?activeFires:(boat?.damage?.worldFires??[]);
+      let fireAudioLevel=0,nearestFirePos=null;
+      for(const f of fires){
+        if(!f?.position||!(f.intensity>0.04))continue;
+        const d=Math.hypot(f.position[0]-listener.x,(f.position[1]??0)-listener.y,f.position[2]-listener.z);
+        const atten=(f.intensity??0.5)/(1+Math.max(0,d-6)/22);
+        if(atten>fireAudioLevel){
+          fireAudioLevel=atten;
+          nearestFirePos={x:f.position[0],y:f.position[1]??1.5,z:f.position[2]};
+        }
+      }
+      if(fireAudioLevel>0.02){
+        levels['sleet-deck']=Math.max(levels['sleet-deck']??0,Math.min(0.42,fireAudioLevel*0.34));
+        levels['wind-strong']=Math.max(levels['wind-strong']??0,Math.min(0.32,fireAudioLevel*0.24));
+        if(time>=nextFirePop&&nearestFirePos){
+          play('timber-creak',Math.min(0.32,fireAudioLevel*0.28),nearestFirePos,1.45+Math.random()*0.35,true,{offset:Math.random()*1.8,duration:0.28+Math.random()*0.25,highpassHz:320});
+          nextFirePop=time+0.38+Math.random()*0.65;
+        }
+      }
       for(const [id,loop] of loops){
         const gain=id==='anchor-reel'?(anchorReeling ? .3/(1+Math.max(0,Math.hypot(anchorPosition.x-listener.x,anchorPosition.y-listener.y,anchorPosition.z-listener.z)-8)/24):0):levels[id]??0;
         loop.gain.gain.setTargetAtTime(gain,context.currentTime,id==='anchor-reel'?.08:.45);

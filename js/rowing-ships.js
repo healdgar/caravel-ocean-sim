@@ -32,7 +32,7 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   const levels=[...new Set([...Array.from({length:25},(_,i)=>p.levels[0]+(p.deck-p.levels[0])*i/24),...(ports.length?[portY-portRY,portY+portRY]:[])])].sort((a,b)=>a-b);
   const fractions=levels.map(y=>(y-p.levels[0])/(p.deck-p.levels[0]));
   const outer=(z,y,side)=>hullLoftPoint(p,z,y,side),inner=(z,t,side)=>{
-    const y=Math.max(p.levels[0]+d.shellThickness,p.levels[0]+(p.deck-p.levels[0])*t),q=hullLoftPoint(p,z,y,side);
+    const y=p.levels[0]+d.shellThickness+(p.deck-p.levels[0]-d.shellThickness)*t,q=hullLoftPoint(p,z,y,side);
     q[0]=side*Math.max(0,Math.abs(q[0])-d.shellThicknessMetres/sx);return q;
   };
   const inPort=(z,y,side)=>ports.some(s=>s.side===side&&Math.abs(z-s.z)<portRZ-1e-8&&Math.abs(y-portY)<portRY-1e-8);
@@ -87,9 +87,9 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   }
   if(d.construction==='clinker-oak'){
     const start=out.length;
-    for(const side of [-1,1])for(let j=2;j<24;j+=2)for(let i=0;i<zs.length-1;i++){
+    for(const side of [-1,1])for(let j=2;j<levels.length-1;j+=2)for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],base=levels[j],A=outer(z,base,side),B=outer(Z,base,side),a=outer(z,base+.010,side),b=outer(Z,base+.010,side);
-      if(inPort((z+Z)*.5,base,side))continue;
+      if(inPort((z+Z)*.5,base,side)||inPort((z+Z)*.5,base+.010,side))continue;
       a[0]+=side*.004/sx;b[0]+=side*.004/sx;quad(A,B,b,a,1);
     }
     group('hull.clinker-laps','hull',start);
@@ -111,7 +111,7 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   const framesStart=out.length;
   for(let i=4;i<zs.length-4;i+=5){
     if(ports.some(s=>Math.abs(zs[i]-s.z)<portRZ+.04))continue;
-    for(const side of [-1,1])for(let j=2;j<24;j+=2)tube(inner(zs[i],j/24,side),inner(zs[i],Math.min(1,(j+2)/24),side),.012,1,.012,5,undefined,true);
+    for(const side of [-1,1])for(let j=2;j<levels.length-2;j+=2)tube(inner(zs[i],fractions[j],side),inner(zs[i],fractions[Math.min(fractions.length-1,j+2)],side),.012,1,.012,5,undefined,true);
   }
   group('hull.frames','hull',framesStart);
   const railStart=out.length;

@@ -1061,6 +1061,7 @@ async function main() {
     company:crew?.state??null,
     getAdditionalVessels:()=>followerEnabled?vessels.slice(1).filter(v=>v?.boat?.showProw):[],
     onEvent:ev=>{
+      sceneAudio.event?.(ev,ev.vessel?.boat??boat);
       if(ev.type==='vessel-captured'){
         if(voyageCtl?.presentPrizeDisposition){
           voyageCtl.presentPrizeDisposition(ev.vessel,ev.plunder);
@@ -1182,7 +1183,9 @@ async function main() {
   }
 
   function setSpyglassActive(active, targetBoat = null) {
+    const prev = spyglassActive;
     spyglassActive = Boolean(active);
+    if (spyglassActive !== prev) sceneAudio.event?.({ type: 'spyglass', active: spyglassActive }, boat);
     spyglassOverlay.hidden = !spyglassActive;
     spyglassOverlay.style.display = spyglassActive ? 'flex' : 'none';
     document.body.classList.toggle('spyglass-active', spyglassActive);
@@ -1789,7 +1792,9 @@ async function main() {
       if(crew?.order(boat,order.id)){
         shipGuns.standDown();
         commandFriendlyFleet(vessels,{type:'crew',id:order.id},{anchorEnv:anchorEnvironment});
-        sceneAudio.order(order.id,{boat});propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();
+        sceneAudio.order(order.id,{boat});
+        if(['full','reduced','furl','transfer'].includes(order.id))sceneAudio.event?.({type:'sail-handling',order:order.id},boat);
+        propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();
       }
     };
     orders.append(button);orderButtons.set(order.id,button);
@@ -1839,6 +1844,7 @@ async function main() {
       colorsSelect.value=boat.colors;
     }else{
       strikeVesselColors(boat,'Struck colors by Captain’s order');
+      sceneAudio.event?.({type:'surrender'},boat);
       shipGuns.standDown();
       for(const key of SAIL_KEYS)boat[key]=0;
       colorsSelect.value='surrender';
@@ -3122,7 +3128,7 @@ async function main() {
     weather.step(dt,P,cam);
     writeFrame(simTime);
     weatherRenderer.update(weather,P,dt);
-    sceneAudio.update(dt,P,boat,frameF,weather);
+    sceneAudio.update(dt,P,boat,frameF,weather,activeFires);
     if (clouds.update(frameF,P,dt)) envFull = true;
     for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
     for(const [index,v] of vessels.entries()){
@@ -3160,7 +3166,12 @@ async function main() {
       const sails=ship.sailState??sailingState(ship);
       data.set(sails.set,24);data[27]=ship.hatchesClosed??0;data[28]=sails.squareYaw;data[29]=sails.lateenYaw;
       data[30]=sails.squareFill;data[31]=sails.lateenFill;data[32]=sails.windSide;data[33]=-sails.windForward;data[34]=sails.apparentSpeed;data[35]=sails.canvasTack;
-      writeLateenUniform(data,sails);device.queue.writeBuffer(v.hullUBO,0,data);
+      writeLateenUniform(data,sails);
+      const fireInt=settlingBake?0:Math.min(2.4,dmg?.fireIntensity??0);
+      const primaryFire=dmg?.fires?.[0];
+      const fireZBin=primaryFire?Math.max(1,Math.min(12,Math.round((primaryFire.localPosition?.[2]??0)/Math.max(0.8,(ship.length??20)/12)+6.5))):6;
+      data[51]=fireInt>0.01?(fireZBin+Math.min(0.98,Math.max(0.01,fireInt/2.5))):0;
+      device.queue.writeBuffer(v.hullUBO,0,data);
       fleetHullData.set(data.subarray(0,24),index*24);
       v.shadows.update(data,frameF.subarray(frameF[115]>.5?96:32,frameF[115]>.5?99:35),ship.showProw&&!v.entirelySubmerged&&qs.get('shadows')!=='0');
       if((!index||followerEnabled)&&dt>0&&!dmg?.sunk){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}

@@ -201,11 +201,33 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
     var density=df.x*smoothstep(0.0,.28,scene-distance);
     if(density<.0015){continue;}
     var emission=vec3f(0);var extinction=volume.optical.x*density;
+    let subtype=volume.optical.w;
     if(volume.centre.w>.5){
-      let flame=max(0.0,1.0-dot(local,local));
-      let coreNoise=.65+.35*df.y;
-      emission=mix(vec3f(16.0,2.6,.18),vec3f(42.0,28.0,9.5),flame*flame*coreNoise)*volume.optical.x;
-      extinction=density*4.2;
+      if(subtype>=0.9){
+        // Shipboard fire (direction=[0,1,0] -> local.z is vertical in [-1, 1])
+        let h=clamp(local.z*0.5+0.5,0.0,1.0);
+        let taper=mix(1.0,0.34,h*h);
+        let rHoriz=length(local.xy)/max(0.22,taper);
+        let advectPos=vec3f(local.x*2.6,local.y*2.6,local.z*2.1-age*4.8)+vec3f(volume.optical.z);
+        let fTurb=gunneryCloudFbm(advectPos);
+        let tongueMask=clamp(1.08-rHoriz+(fTurb-0.46)*(0.55+0.55*h),0.0,1.0);
+        let vertEnv=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.58,1.0,h));
+        let flameShape=tongueMask*vertEnv;
+        if(flameShape<0.01){continue;}
+        let temp=clamp(flameShape*(1.12-0.48*h)+0.28*fTurb,0.0,1.0);
+        let colBase=mix(vec3f(2.2,0.18,0.02),vec3f(24.0,5.8,0.45),smoothstep(0.12,0.58,temp));
+        let colCore=mix(colBase,vec3f(54.0,36.0,12.5),smoothstep(0.58,0.92,temp));
+        // Add rising glowing embers near the top of the upper flame tongue
+        let sparkNoise=gunneryNoise3(advectPos*4.2+vec3f(0.0,0.0,-age*6.0));
+        let sparks=select(0.0,smoothstep(0.82,0.95,sparkNoise)*h*18.0,subtype>1.1);
+        emission=(colCore*flameShape+vec3f(36.0,12.0,1.8)*sparks)*volume.optical.x;
+        extinction=density*flameShape*5.2;
+      }else{
+        let flame=max(0.0,1.0-dot(local,local));
+        let coreNoise=.65+.35*df.y;
+        emission=mix(vec3f(16.0,2.6,.18),vec3f(42.0,28.0,9.5),flame*flame*coreNoise)*volume.optical.x;
+        extinction=density*4.2;
+      }
     }else{
       // Two finite sunlight steps in normalized [-1, 1] local space + Beer-Powder
       // multi-scattering create crisp cauliflower self-shadowing with minimal ALU cost.
@@ -216,17 +238,33 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       let multiScatter=exp(-shadowDepth*.26)*.44;
       let powder=1.0-.58*exp(-shadowDepth*2.6);
       let directTransfer=(beer*powder+multiScatter)*phase;
-      let heightGrad=clamp(local.y*.5+.5,0.0,1.0);
+      let isFireSmoke=subtype>=1.8;
+      let heightGrad=clamp(select(local.y,local.z,isFireSmoke)*.5+.5,0.0,1.0);
       let radialRim=clamp(length(local)*1.08,0.0,1.0);
       let ambientOcclusion=mix(.42,1.0,clamp(heightGrad*.65+radialRim*.35,0.0,1.0));
       let ambient=(mix(skyHorizon*.42,skyZenith*.78,heightGrad)+lightning)*ambientOcclusion;
       // Black powder smoke transitions from warm charcoal soot at discharge to
-      // potassium-sulfate chalky white cumulus with cool blue-grey shadowed bellies.
-      let shadowTint=mix(vec3f(.62,.66,.72),vec3f(.34,.33,.32),sootFactor*.75);
-      let litTint=mix(vec3f(.96,.94,.90),vec3f(.58,.54,.50),sootFactor*.55);
+      // potassium-sulfate chalky white cumulus; shipboard pitch/tar fires emit
+      // dense dark charcoal/black smoke under-lit by roaring flames below.
+      let effSoot=select(sootFactor,0.94,isFireSmoke);
+      let shadowTint=select(
+        mix(vec3f(.62,.66,.72),vec3f(.34,.33,.32),effSoot*.75),
+        vec3f(.11,.10,.10),
+        isFireSmoke
+      );
+      let litTint=select(
+        mix(vec3f(.96,.94,.90),vec3f(.58,.54,.50),effSoot*.55),
+        vec3f(.24,.22,.20),
+        isFireSmoke
+      );
       let cloudAlbedo=mix(shadowTint,litTint,clamp(beer+.22,0.0,1.0));
       let throatCore=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
-      let internalEmber=vec3f(14.0,3.8,.45)*(emberFactor*throatCore*throatCore*density);
+      let fireUnderGlow=select(
+        0.0,
+        (1.0-smoothstep(0.0,0.68,heightGrad))*max(0.0,1.0-length(local.xy)*0.95)*(0.65+0.35*df.y)*max(0.15,2.55-subtype),
+        isFireSmoke
+      );
+      let internalEmber=vec3f(14.0,3.8,.45)*(emberFactor*throatCore*throatCore*density)+vec3f(9.5,2.4,0.28)*(fireUnderGlow*density);
       emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
     }
     let opacity=1.0-exp(-extinction*stepSize);

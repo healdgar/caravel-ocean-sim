@@ -11,17 +11,17 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 // Recorded before introducing semantic groups. This refactor must not alter
 // triangle order, signed zero, UV seams, normals, materials or geometry.
 const NINA_MESH_BASELINE = {
-  raw: '521800c648cb0591d572a633524af5b580ca68000cf0869bfd3a1244aeb5b483',
-  indexed: 'a1638b17eb538d07fb77109b9bbe3f9c8df217987659bf565d341c4c25ef4166',
-  indices: '9495a5d4937b34ce7a964c6bc9d3fbcc2caa5794f6dc165af6e389971a132516',
+  raw: '1bf8d692fc91fb9f2f9616f7d0a47302a7090e7536069d9863b01225eb9f56a3',
+  indexed: '5041b5dc4864de5e4c41515746d19596f9d3b75c9e6566c4249b7b136f6b2007',
+  indices: '3ce62e01b1c6e68b6afe0b9b0673301fa0328d650447cd530823d1b6fabe4ef1',
 };
 
 test('shared construction primitives preserve Victory geometry, material seams and semantic ranges',()=>{
   const groups=[],raw=createVictoryMesh({groups}),{vertices,indices}=indexCaravelMesh(raw);
-  assert.equal(sha(raw),'a1694f95e473dd8cf59ff32548844c9f393113447d4eb98aaba5a5aa76b0330d');
-  assert.equal(sha(vertices),'9ef60af2029f9677c106d800dbfb2fca05c5e312f2ea03ba07dc8e46421108f3');
-  assert.equal(sha(indices),'6775b50bdc66e52f914c0ae67e0ee09408cb77e6832ee4c4c0bf1209c1db9352');
-  assert.equal(groups.length,431);
+  assert.equal(sha(raw),'580151d969ec8ed1a8490484bf3d3ea1c6675c47e1bc6cf7d5680101fed7ac85');
+  assert.equal(sha(vertices),'0148836715ff27c676fe8fac419c4c53763989c3b21f8e4d4e9faf8c2d56a424');
+  assert.equal(sha(indices),'7bf3962661950272f7adc5e105ebbad5a9e34cc635d9b896149e0364d7d5e77b');
+  assert.equal(groups.length,433);
   assert.equal(new Set(groups.map(g=>g.id)).size,groups.length);
   for(const g of groups){
     assert.ok(g.firstVertex>=0&&g.vertexCount>0&&g.firstVertex+g.vertexCount<=indices.length,g.id);

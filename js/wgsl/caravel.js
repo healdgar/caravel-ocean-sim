@@ -613,14 +613,14 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
       let candleExposure=1.0/max(F.post.x,1.0);
       if(in.material==11u){
         let bayX=select(floor(p.z*5.2),floor((p.x+1.0)*4.5),abs(in.normalLocal.z)>0.45);
-        let bayY=floor((p.y-0.80)/0.50);
+        let bayY=floor((p.y-0.65)/0.50);
         let baySeed=fract(sin(bayX*37.1+bayY*91.7)*43758.5453);
         // Individual cabin bays have hanging gimbaled beeswax candle lanterns with gentle flicker
         let t=hull.origin.w;
         let flicker=0.84+0.10*sin(t*6.2+baySeed*19.3)+0.06*sin(t*14.7-baySeed*31.1)+0.04*cos(t*22.9+baySeed*7.3);
         let localU=select(fract(p.z*5.2),fract((p.x+1.0)*4.5),abs(in.normalLocal.z)>0.45)-0.5;
-        let tierCenter=1.03+clamp(bayY,0.0,2.0)*0.51;
-        let localV=(p.y-tierCenter)/0.26;
+        let tierCenter=0.89+clamp(bayY,0.0,2.0)*0.51;
+        let localV=(p.y-tierCenter)/0.24;
         // View-dependent interior parallax shifts the hanging candle flame inside the cabin
         let viewLocal=vec3f(dot(v,hull.right.xyz),dot(v,hull.up.xyz),dot(v,-hull.forward.xyz));
         let parallax=clamp(viewLocal.xy/max(abs(dot(n,v)),0.28),vec2f(-0.45),vec2f(0.45))*0.14;
@@ -633,7 +633,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
         // Intact crown-glass panes attenuate and softly diffuse the candle; shattered holes expose the raw flame
         let transmission=mix(windowPaneMask*0.78,1.15,windowHoleMask)+windowShardRim*0.65;
         col+=candleColor*(candleSchedule*flicker*transmission*candleExposure);
-      }else if(hull.rig.w>.5 && p.z>5.15 && p.y>0.78 && (in.material==25u || in.material==21u || in.material==20u)){
+      }else if(hull.rig.w>.5 && p.z>5.15 && p.y>0.72 && (in.material==25u || in.material==21u || in.material==20u)){
         // Warm candlelight spill onto the gilded stern mullions, balusters, and window frames
         let spillFlicker=0.88+0.08*sin(hull.origin.w*6.8+p.x*5.0+p.y*7.0);
         let mullionWeight=select(0.025,0.055,in.material==25u);

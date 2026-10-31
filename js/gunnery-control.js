@@ -432,32 +432,61 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
 
   // Propagate casualties to visible 3D deck crew actors if present on the vessel.
   const crewActors = targetBoat.crewCompany?.crew;
-  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0)) {
+  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0 || context.isMagazineBlast)) {
     const designPt = context.designPt ?? [0, 0, 0];
     const candidates = crewActors
       .filter(s => s.casualtyState !== 'fallen')
-      .map(s => ({
-        sailor: s,
-        dist: Math.hypot((s.x ?? 0) - (designPt[0] ?? 0), (s.z ?? 0) - (designPt[2] ?? 0)),
-      }))
+      .map(s => {
+        const dx = (s.x ?? 0) - (designPt[0] ?? 0);
+        const dz = (s.z ?? 0) - (designPt[2] ?? 0);
+        return {
+          sailor: s,
+          dx,
+          dz,
+          dist: Math.hypot(dx, dz),
+        };
+      })
       .sort((a, b) => a.dist - b.dist);
 
     const actorScale = Math.max(1, Math.round(c.total / Math.max(1, crewActors.length)));
     let actorFallenBudget = Math.ceil(newKilled / actorScale);
     let actorWoundedBudget = Math.ceil(newWounded / actorScale);
+    const blastSpeed = context.isMagazineBlast ? 3.4 : ammo === 'grape' ? 1.8 : 2.3;
     for (const item of candidates) {
       const s = item.sailor;
+      const invD = item.dist > 1e-3 ? 1 / item.dist : 1;
+      const dirX = item.dist > 1e-3 ? item.dx * invD : (((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1);
+      const dirZ = item.dist > 1e-3 ? item.dz * invD : 0.5;
+      const falloff = Math.max(0.25, 1 - item.dist / 3.8);
       if (actorFallenBudget > 0) {
         s.casualtyState = 'fallen';
         s.health = 0;
-        s.collapseYaw = s.yaw ?? 0;
+        s.woundSeverity = 1.0;
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (ammo === 'hot' || context.isMagazineBlast ? 0.72 : 0.35));
+        s.collapseYaw = Math.atan2(dirX, dirZ);
+        s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
+        s.knockbackVx = dirX * blastSpeed * falloff;
+        s.knockbackVz = dirZ * blastSpeed * falloff;
         actorFallenBudget--;
       } else if (actorWoundedBudget > 0 && s.casualtyState !== 'wounded') {
         s.casualtyState = 'wounded';
         s.health = Math.max(0.25, (s.health ?? 1) - 0.45);
+        s.woundSeverity = Math.min(1, Math.max(0.45, 1 - s.health));
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (ammo === 'hot' || context.isMagazineBlast ? 0.55 : 0.22));
+        s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
+        s.knockbackVx = dirX * blastSpeed * 0.65 * falloff;
+        s.knockbackVz = dirZ * blastSpeed * 0.65 * falloff;
+        if (context.isMagazineBlast || item.dist < 1.6) {
+          s.knockdownTimer = context.isMagazineBlast ? 2.4 : 1.35;
+        }
         actorWoundedBudget--;
+      } else if (context.isMagazineBlast && item.dist < 2.8) {
+        s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4);
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + 0.35);
+        s.knockbackVx = dirX * blastSpeed * 0.45 * falloff;
+        s.knockbackVz = dirZ * blastSpeed * 0.45 * falloff;
       }
-      if (actorFallenBudget <= 0 && actorWoundedBudget <= 0) break;
+      if (actorFallenBudget <= 0 && actorWoundedBudget <= 0 && !context.isMagazineBlast) break;
     }
   }
 
@@ -1081,9 +1110,19 @@ export function applyShipImpactDamage(targetBoat, event) {
   }
 
   // Hot shot (heated to ~900 C in a shot furnace) lodges in timber or canvas and ignites shipboard fires.
-  if (ammo === 'hot') {
+  // Heavy solid-shot battering on damaged upper decks/superstructures can also ignite spilled cartridge powder and tarred oakum.
+  const canCombatIgnite =
+    ammo === 'round' &&
+    !event.waterline &&
+    (localPos?.[1] ?? 1) >= 0.45 &&
+    damage.hullIntegrity < 0.72 &&
+    (damage.hits % 3 === 0) &&
+    damage.fires.length < 3;
+  if (ammo === 'hot' || canCombatIgnite) {
     damage.fireCount = (damage.fireCount ?? 0) + 1;
-    const addIntensity = Math.min(1.2, 0.48 + energy / 550000);
+    const addIntensity = ammo === 'hot'
+      ? Math.min(1.2, 0.48 + energy / 550000)
+      : Math.min(0.92, 0.56 + energy / 680000);
     let mergedFire = false;
     for (const f of damage.fires) {
       const dist = Math.hypot(
@@ -2026,10 +2065,47 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       boatRotate(rot, f.localPosition[0], f.localPosition[1], f.localPosition[2], yaw, pitch, roll);
       damage.worldFires.push({
         position: [(boat.x ?? 0) + rot[0], (boat.heave ?? 0) + rot[1], (boat.z ?? 0) + rot[2]],
+        localPosition: f.localPosition,
+        hitZone: f.hitZone ?? 'hull',
         intensity: f.intensity,
         age: f.age,
         seed: f.seed,
       });
+      // Inject charred timber scorch marks on the hull/superstructure around sustained fires
+      if (!f.scorchBaked && f.age > 1.2 && Array.isArray(damage.craters) && damage.craters.length < 120) {
+        f.scorchBaked = true;
+        const invBeam = 3.6 / Math.max(1.2, boat.beam ?? 6);
+        const invLen = 12 / Math.max(4, boat.length ?? 20);
+        const invVert = 1 / Math.max(0.35, (boat.beam ?? 6) / 6);
+        damage.craters.push({
+          x: (f.localPosition[0] ?? 0) * invBeam,
+          y: (f.localPosition[1] ?? 1.2) * invVert,
+          z: (f.localPosition[2] ?? 0) * invLen,
+          radius: 0.16,
+          depth: 0.14,
+          char: 0.96,
+          breach: 0,
+          hits: 2,
+        });
+      }
+      // Roaring deck fires spread fore/aft along tarred seams or climb into rigging
+      if (!f.spreadDone && f.intensity > 0.88 && f.age > 5.5 && damage.fires.length < 8) {
+        f.spreadDone = true;
+        const spreadZ = ((f.seed ?? 0.5) > 0.5 ? 1 : -1) * 1.65;
+        const climbRig = (f.seed ?? 0.5) > 0.68 && f.hitZone !== 'rigging';
+        damage.fires.push({
+          localPosition: [
+            (f.localPosition[0] ?? 0) * (climbRig ? 0.35 : 0.85),
+            (f.localPosition[1] ?? 1.4) + (climbRig ? 1.85 : 0.12),
+            Math.max(-5.2, Math.min(5.2, (f.localPosition[2] ?? 0) + (climbRig ? 0 : spreadZ))),
+          ],
+          hitZone: climbRig ? 'rigging' : (f.hitZone ?? 'hull'),
+          mastGroup: f.mastGroup ?? 'main',
+          intensity: 0.62,
+          age: 0,
+          seed: ((f.seed ?? 0.37) * 1.6180339) % 1,
+        });
+      }
     }
     damage.fireIntensity = +totalIntensity.toFixed(3);
     // Unchecked shipboard conflagration reaching critical intensity burns down to the powder magazine.

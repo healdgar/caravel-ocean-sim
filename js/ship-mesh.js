@@ -14,33 +14,36 @@ import { createPartAssemblyCatalog } from './part-assembly.js';
 // wake state remain per vessel. Consumers may share these buffers for uploads.
 const sharedShipAssets = new Map();
 export function createShipAssetCache() {
-  const assets = sharedShipAssets;
+  const assets = new Map();
   return {
     get(modelId = 'nina') {
       const model = requirePlayableShipModel(modelId);
       if(model.gpuPose!==true)throw Error('Ship graphics require the shared WebGPU pose pipeline: '+model.id);
       const key = JSON.stringify([model.id, model.revision]);
       if (!assets.has(key)) {
-        // Do not let a planned rig accidentally reuse Niña's mesh or animation.
-        const builders={nina:createCaravelMesh,victory:createVictoryMesh,pinta:options=>createAdditionalShipMesh('pinta',options),'santa-maria':options=>createAdditionalShipMesh('santa-maria',options)};
-        for(const id of Object.keys(ROWING_DESIGNS))builders[id]=options=>createRowingShipMesh(id,options);
-        for(const id of Object.keys(LATER_SAIL_DESIGNS))builders[id]=options=>createLaterSailShipMesh(id,options);
-        if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
-        const groups = [], raw = builders[model.id]({ groups });
-        const { vertices, indices } = indexCaravelMesh(raw);
-        const partAssembly = createPartAssemblyCatalog({
-          domain: 'ship',
-          modelId: model.id,
-          vertices,
-          vertexStride: 9,
-          indices,
-          groups,
-        });
-        const asset={ model, vertices, indices, groups: deepFreeze(groups), partAssembly, gpuPose:true };
-        if(model.rig?.backend==='surfaces-v1'){
-          asset.rigGPUData=createRigGPUData(asset);
+        if (!sharedShipAssets.has(key)) {
+          // Do not let a planned rig accidentally reuse Niña's mesh or animation.
+          const builders={nina:createCaravelMesh,victory:createVictoryMesh,pinta:options=>createAdditionalShipMesh('pinta',options),'santa-maria':options=>createAdditionalShipMesh('santa-maria',options)};
+          for(const id of Object.keys(ROWING_DESIGNS))builders[id]=options=>createRowingShipMesh(id,options);
+          for(const id of Object.keys(LATER_SAIL_DESIGNS))builders[id]=options=>createLaterSailShipMesh(id,options);
+          if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
+          const groups = [], raw = builders[model.id]({ groups });
+          const { vertices, indices } = indexCaravelMesh(raw);
+          const partAssembly = createPartAssemblyCatalog({
+            domain: 'ship',
+            modelId: model.id,
+            vertices,
+            vertexStride: 9,
+            indices,
+            groups,
+          });
+          const shared={ model, vertices, indices, groups: deepFreeze(groups), partAssembly, gpuPose:true };
+          if(model.rig?.backend==='surfaces-v1'){
+            shared.rigGPUData=createRigGPUData(shared);
+          }
+          sharedShipAssets.set(key, Object.freeze(shared));
         }
-        assets.set(key, Object.freeze(asset));
+        assets.set(key, Object.freeze({ ...sharedShipAssets.get(key) }));
       }
       return assets.get(key);
     },

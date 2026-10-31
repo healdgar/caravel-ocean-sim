@@ -975,3 +975,54 @@ test('captured prize vessel supports ally consort, impress crew & plunder cannon
  assert.equal(prize3.boat.showProw,false,'hides scuttled prize hull');
 });
 
+test('crew puppet damage, shipboard fire spread/scorch, and cannon impact audio work end-to-end',async ()=>{
+ const {applyCrewCasualtiesAndMorale,stepVesselDamage}=await import('../js/gunnery-control.js');
+ const {createGunneryAudio}=await import('../js/gunnery-audio.js');
+
+ const ship={id:'target',modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'castile'};
+ ship.hydrodynamics=boatHydrodynamics(20,6);
+ const dmg=createVesselDamageState(ship);
+ const company=createCompany(undefined,'nina',{boat:ship});
+ ship.crewCompany=company;
+
+ // 1. Inflict hot-shot casualties and verify fallen puppets stay pitched prone after stepCompany
+ applyCrewCasualtiesAndMorale(ship,{ammo:'hot',energy:260000,hitZone:'hull'},{designPt:[0,1.1,0],penetratedOuter:true});
+ const fallen=company.crew.filter(s=>s.casualtyState==='fallen');
+ const wounded=company.crew.filter(s=>s.casualtyState==='wounded');
+ assert.ok(fallen.length>=1,'marks at least one deck puppet as fallen');
+ assert.ok(wounded.length>=1,'marks at least one deck puppet as wounded');
+ assert.ok((fallen[0].scorchAmount??0)>0.3,'fallen puppet records scorch/soot amount');
+ assert.ok((wounded[0].woundSeverity??0)>=0.45,'wounded puppet records wound severity');
+
+ // Add an active deck fire near a standing sailor and step company
+ dmg.fires.push({localPosition:[0,1.2,0],hitZone:'hull',intensity:1.05,age:0,seed:0.42});
+ stepCompany(company,ship,0.1,6);
+ assert.ok(Math.abs(fallen[0].climbPitch)>1.2,`fallen puppet retains prone climbPitch (${fallen[0].climbPitch}) instead of resetting to 0`);
+ const rotX=Math.hypot(fallen[0].rotation[0],fallen[0].rotation[2]);
+ assert.ok(rotX>0.5,'fallen puppet quaternion pitches body onto the deck');
+
+ // 2. Step vessel fire damage past spread threshold and verify scorch crater + spread fire
+ for(let i=0;i<60;i++)stepVesselDamage(ship,0.1);
+ assert.ok(dmg.fires.length>=2,'intense shipboard fire spreads along the deck/rigging');
+ assert.ok(dmg.craters.some(c=>(c.char??0)>0.9),'sustained fire bakes charred timber scorch crater');
+
+ // 3. Verify gunnery audio handles water, hull, rigging, and magazine-explosion impact events
+ const played=[];
+ const gAudio=createGunneryAudio({
+  play:(...args)=>{played.push(args);return 0.5;},
+  available:()=>true,
+  listener:()=>({x:0,y:2,z:0}),
+ });
+ assert.equal(gAudio.event({type:'impact',kind:'water',position:{x:20,y:0,z:0}}),true);
+ assert.equal(gAudio.event({type:'impact',kind:'vessel',hitZone:'hull',position:{x:20,y:1.5,z:0}}),false,'rate-limited within 45ms');
+ gAudio.update(0.1);
+ assert.equal(gAudio.event({type:'impact',kind:'vessel',hitZone:'hull',position:{x:20,y:1.5,z:0}}),true);
+ gAudio.update(0.1);
+ assert.equal(gAudio.event({type:'impact',kind:'magazine-explosion',position:{x:20,y:1.5,z:0}}),true);
+ gAudio.update(0.2);
+ assert.ok(played.some(p=>p[0]==='anchor-splash'),'water impact plays splash');
+ assert.ok(played.some(p=>p[0]==='timber-creak'),'hull impact plays splintering timber creak');
+ assert.ok(played.some(p=>p[0]==='thunder-near'),'magazine explosion plays deep thunder blast');
+});
+
+

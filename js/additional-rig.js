@@ -2,7 +2,7 @@
 // Model-owned standing supports and running leads shared by the mesh, cloth
 // contact, force sampling, posed attachments and crew work.
 import {deepFreeze} from './rig-definition.js';
-import {ADDITIONAL_DESIGNS,additionalDesign,additionalDeck,additionalDeckWidth} from './models/additional.js';
+import {ADDITIONAL_DESIGNS,additionalDesign,additionalDeck,additionalDeckWidth,additionalHullWidth} from './models/additional.js';
 import {LATER_SAIL_DESIGNS,laterSailDesign,laterSailDeck,laterSailDeckWidth} from './models/later-sail.js';
 import {ROWING_DESIGNS,rowingDesign,rowingHullDeck,rowingHullWidth,rowingRigContext} from './models/rowing.js';
 import {withRigSupportCache} from './rig-surface.js';
@@ -12,7 +12,7 @@ const additionalPreparedRowContexts=new Map();
 export function additionalGunAttachments(id){
   if(additionalGunCache.has(id))return additionalGunCache.get(id);
   const d=additionalDesign(id),guns=d.equipment.guns.map((g,index)=>{
-    const sign=g.side,z=g.z,floor=additionalDeck(id,z),x=sign*(additionalDeckWidth(id,z)+.015),y=floor+.38;
+    const sign=g.side,z=g.z,floor=additionalDeck(id,z),y=floor+d.barrier,x=sign*Math.max(0,additionalHullWidth(id,z,y)-.022);
     return {id:index,side:sign<0?'port':'starboard',sideSign:sign,deck:'quarter',
       centre:[x,y,z],muzzle:[x+sign*.32,y+.012,z],barrelRadius:.026,barrelLength:.52,
       meshGroup:'gun.'+index,muzzleDesign:[x+sign*.32,y+.012,z],breechDesign:[x-sign*.20,y,z],directionDesign:[sign*.52,.012,0],

@@ -1325,7 +1325,7 @@ const ADDITIONAL_DESIGNS=deepFreeze({
       bottomWidths:[0,.035,.16,.45,.70,.84,.88,.83,.68,.44,.19,.055,0]}),
     deckZones:[{id:'main',bounds:[-6,6],height:.68},{id:'forecastle',bounds:[-6,-4.2],height:1.0},{id:'quarter',bounds:[2.8,6],height:1.24}],
     barrier:.40,keel:{bounds:[-4.95,5.45],depth:.075,width:.07},
-    helm:{x:.65,z:4.6,eyeAboveDeck:1.6},steering:{kind:'rudder',control:'direct-tiller',pivot:[0,-.20,5.62],handle:[0,1.68,4.95]},
+    helm:{x:.65,z:4.6,eyeAboveDeck:1.6},steering:{kind:'rudder',control:'direct-tiller',pivot:[0,-.20,6.02],handle:[0,1.68,4.95]},
     masts:[{id:'fore',z:-3.20,height:9.5,radius:.075,rake:.08},{id:'main',z:0,height:11.6,radius:.095,rake:.10},{id:'mizzen',z:3.7,height:9,radius:.065,rake:.12}],
     surfaces:[additionalSquare(1,'fore-course',0,7.2,-3.38,4.9,4.2,1.5,.28),
       additionalSquare(2,'main-course',1,9.7,-.22,6.0,5.2,1.5,.34),
@@ -1348,7 +1348,7 @@ const ADDITIONAL_DESIGNS=deepFreeze({
       bottomWidths:[0,.045,.23,.57,.83,.98,1.03,1.00,.87,.66,.41,.18,.06]}),
     deckZones:[{id:'main',bounds:[-6,6],height:(3.49-1.95)/santaScale},{id:'forecastle',bounds:[-6,-3.95],height:1.12},{id:'quarter',bounds:[2.10,6],height:1.36},{id:'poop',bounds:[4.65,6],height:1.91}],
     barrier:.38,keel:{bounds:[-5.2,5.65],depth:.09,width:.085},
-    helm:{x:.66,z:3.9,eyeAboveDeck:1.6},steering:{kind:'rudder',control:'direct-tiller',pivot:[0,-.12,5.77],handle:[0,1.80,4.15]},
+    helm:{x:.66,z:3.9,eyeAboveDeck:1.6},steering:{kind:'rudder',control:'direct-tiller',pivot:[0,-.12,6.02],handle:[0,1.80,4.15]},
     masts:[{id:'fore',z:-3.7,height:8.05,radius:.075,rake:.06},{id:'main',z:-.05,height:25/santaScale,radius:.10,rake:.10},{id:'mizzen',z:4.5,height:7.85,radius:.065,rake:.11}],
     surfaces:[additionalSquare(1,'fore-course',0,6.6,-3.87,3.6,3.0,1.8,.24),
       additionalSquare(2,'main-course',1,8.0,-.29,5.1,4.4,2.3,.32),
@@ -1907,7 +1907,7 @@ const laterSailMoth={
   masts:[{id:'main',controlGroup:'main',z:-1.15,height:14.4/laterSailMothScale,radius:.10/laterSailMothX,rake:.17},
     {id:'mizzen',controlGroup:'mizzen',z:2.7,height:9.8/laterSailMothScale,radius:.075/laterSailMothX,rake:.12}],
   surfaces:[],bowsprit:null,
-  hatch:{centre:[0,1.42/laterSailMothScale,1.10],size:[.62/laterSailMothX,.055/laterSailMothScale,.60/laterSailMothScale]},
+  hatch:{centre:[0,1.42/laterSailMothScale,.92],size:[.62/laterSailMothX,.055/laterSailMothScale,.60/laterSailMothScale]},
   crewStations:{ines:{x:0,z:3.85,route:[3.85,3.85],yaw:0,roles:['captain','helmsman','sail-handler']}},
   loading:{crew:1,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:40,sparesKg:150,designIncludesManifest:true,gmBeamFraction:.14,
     ballastKg:8490*laterSailPound,permanentMassKg:null,referenceDisplacementKg:23320*laterSailPound,
@@ -2170,8 +2170,8 @@ const VICTORY_DESIGN=deepFreeze({
   gunDecks:[{id:'lower',count:30,centre:.38,calibre:32,start:-5.12,end:5.05},
     {id:'middle',count:28,centre:.88,calibre:24,start:-4.9,end:4.85},
     {id:'upper',count:30,centre:1.38,calibre:12,start:-5.05,end:5.05},
-    {id:'quarter',count:12,centre:1.88,calibre:12,start:1.98,end:4.12},
-    {id:'forecastle',count:4,centre:1.88,calibre:12,start:-4.8,end:-4.18}],
+    {id:'quarter',count:12,centre:1.83,calibre:12,start:1.98,end:4.12},
+    {id:'forecastle',count:4,centre:1.83,calibre:12,start:-4.8,end:-4.18}],
   crewStations:{
     ines:{x:-.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},
     tomas:{x:.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},
@@ -2802,7 +2802,7 @@ const additionalPreparedRowContexts=new Map();
 function additionalGunAttachments(id){
   if(additionalGunCache.has(id))return additionalGunCache.get(id);
   const d=additionalDesign(id),guns=d.equipment.guns.map((g,index)=>{
-    const sign=g.side,z=g.z,floor=additionalDeck(id,z),x=sign*(additionalDeckWidth(id,z)+.015),y=floor+.38;
+    const sign=g.side,z=g.z,floor=additionalDeck(id,z),y=floor+d.barrier,x=sign*Math.max(0,additionalHullWidth(id,z,y)-.022);
     return {id:index,side:sign<0?'port':'starboard',sideSign:sign,deck:'quarter',
       centre:[x,y,z],muzzle:[x+sign*.32,y+.012,z],barrelRadius:.026,barrelLength:.52,
       meshGroup:'gun.'+index,muzzleDesign:[x+sign*.32,y+.012,z],breechDesign:[x-sign*.20,y,z],directionDesign:[sign*.52,.012,0],
@@ -6769,18 +6769,35 @@ const gunFlashNina=array<vec3f,4>(${createGunDefinitions('nina').map(g=>'vec3f('
 const gunFlashVictory=array<vec3f,104>(${createGunDefinitions('victory').map(g=>'vec3f('+g.muzzleDesign.join(',')+')').join(',')});
 ${additionalGunFlashWGSL}
 fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f {
-  let energy=abs(hull.up.w);if(energy<.0001){return vec3f(0);}
-  let index=u32(max(0.0,hull.forward.w));
-  var local=gunFlashNina[min(index,3u)];
-  if(hull.rig.w>.5&&hull.rig.w<1.5){local=gunFlashVictory[min(index,103u)];}
-  ${Object.values(ADDITIONAL_DESIGNS).map(d=>{const guns=additionalGunAttachments(d.id);return guns.length?`if(abs(hull.rig.w-${d.modelCode}.0)<.1){local=gunFlashModel${d.modelCode}[min(index,${guns.length-1}u)];}`:'';}).join('\n')}
-  let scale=vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
-  let light=hull.origin.xyz+rotateHull(local*scale);
-  let delta=light-world;let d=max(.25,length(delta));let l=delta/d;
-  let halfV=normalize(l+eye);let spec=pow(max(dot(n,halfV),0.0),mix(90.0,8.0,rough));
-  // A finite, warm black-powder flash. Illumination falls with distance, lasts
-  // less than a tenth of a second, and adds no persistent glow to the wood.
-  return vec3f(1.0,.47,.12)*energy*90.0/(1.0+d*d)*(albedo*.31831*max(dot(n,l),0.0)+spec*.07);
+  var result=vec3f(0);
+  let energy=abs(hull.up.w);
+  if(energy>=.0001){
+    let index=u32(max(0.0,hull.forward.w));
+    var local=gunFlashNina[min(index,3u)];
+    if(hull.rig.w>.5&&hull.rig.w<1.5){local=gunFlashVictory[min(index,103u)];}
+    ${Object.values(ADDITIONAL_DESIGNS).map(d=>{const guns=additionalGunAttachments(d.id);return guns.length?`if(abs(hull.rig.w-${d.modelCode}.0)<.1){local=gunFlashModel${d.modelCode}[min(index,${guns.length-1}u)];}`:'';}).join('\n')}
+    let scale=vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
+    let light=hull.origin.xyz+rotateHull(local*scale);
+    let delta=light-world;let d=max(.25,length(delta));let l=delta/d;
+    let halfV=normalize(l+eye);let spec=pow(max(dot(n,halfV),0.0),mix(90.0,8.0,rough));
+    // A finite, warm black-powder flash. Illumination falls with distance, lasts
+    // less than a tenth of a second, and adds no persistent glow to the wood.
+    result+=vec3f(1.0,.47,.12)*energy*90.0/(1.0+d*d)*(albedo*.31831*max(dot(n,l),0.0)+spec*.07);
+  }
+  let firePack=hull.lateenPressure.w;
+  if(firePack>0.5){
+    let fireInt=fract(firePack)*2.5;
+    let fireDesignZ=(floor(firePack)-6.5)*(hull.size.y/12.0);
+    let t=hull.origin.w;
+    let flicker=0.82+0.12*sin(t*13.7)+0.08*cos(t*23.1)+0.05*sin(t*37.3);
+    let fireLocal=vec3f(sin(t*7.1)*0.25,1.85*hull.right.w,fireDesignZ);
+    let fireLight=hull.origin.xyz+rotateHull(fireLocal);
+    let fDelta=fireLight-world;let fd=max(0.6,length(fDelta));let fl=fDelta/fd;
+    let fHalf=normalize(fl+eye);let fSpec=pow(max(dot(n,fHalf),0.0),mix(64.0,6.0,rough));
+    let ndl=max(dot(n,fl),0.0)*0.75+0.25;
+    result+=vec3f(1.0,0.36,0.07)*(fireInt*flicker*38.0/(1.5+fd*fd*0.38))*(albedo*0.31831*ndl+fSpec*0.05);
+  }
+  return result;
 }
 ${LATEEN_MOTION}
 ${VICTORY_MOTION}
@@ -7247,7 +7264,7 @@ fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
     let e=.0005;p=surfaceGpuCloth(index,uv);
     if(hasDmg){
       let pose=surfaceGpuPose(index);
-      p+=surfaceGpuClothRotate(surface,clothDelta,pose)*clamp(pose.set,0.25,1.0);
+      p+=surfaceGpuClothRotate(surface,clothDelta,pose)*clamp(pose.deployed,0.25,1.0);
     }
     let du=surfaceGpuClothDelta(index,uv,vec2f(e,0)).offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
     let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;
@@ -12116,14 +12133,14 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
       let candleExposure=1.0/max(F.post.x,1.0);
       if(in.material==11u){
         let bayX=select(floor(p.z*5.2),floor((p.x+1.0)*4.5),abs(in.normalLocal.z)>0.45);
-        let bayY=floor((p.y-0.80)/0.50);
+        let bayY=floor((p.y-0.65)/0.50);
         let baySeed=fract(sin(bayX*37.1+bayY*91.7)*43758.5453);
         // Individual cabin bays have hanging gimbaled beeswax candle lanterns with gentle flicker
         let t=hull.origin.w;
         let flicker=0.84+0.10*sin(t*6.2+baySeed*19.3)+0.06*sin(t*14.7-baySeed*31.1)+0.04*cos(t*22.9+baySeed*7.3);
         let localU=select(fract(p.z*5.2),fract((p.x+1.0)*4.5),abs(in.normalLocal.z)>0.45)-0.5;
-        let tierCenter=1.03+clamp(bayY,0.0,2.0)*0.51;
-        let localV=(p.y-tierCenter)/0.26;
+        let tierCenter=0.89+clamp(bayY,0.0,2.0)*0.51;
+        let localV=(p.y-tierCenter)/0.24;
         // View-dependent interior parallax shifts the hanging candle flame inside the cabin
         let viewLocal=vec3f(dot(v,hull.right.xyz),dot(v,hull.up.xyz),dot(v,-hull.forward.xyz));
         let parallax=clamp(viewLocal.xy/max(abs(dot(n,v)),0.28),vec2f(-0.45),vec2f(0.45))*0.14;
@@ -12136,7 +12153,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
         // Intact crown-glass panes attenuate and softly diffuse the candle; shattered holes expose the raw flame
         let transmission=mix(windowPaneMask*0.78,1.15,windowHoleMask)+windowShardRim*0.65;
         col+=candleColor*(candleSchedule*flicker*transmission*candleExposure);
-      }else if(hull.rig.w>.5 && p.z>5.15 && p.y>0.78 && (in.material==25u || in.material==21u || in.material==20u)){
+      }else if(hull.rig.w>.5 && p.z>5.15 && p.y>0.72 && (in.material==25u || in.material==21u || in.material==20u)){
         // Warm candlelight spill onto the gilded stern mullions, balusters, and window frames
         let spillFlicker=0.88+0.08*sin(hull.origin.w*6.8+p.x*5.0+p.y*7.0);
         let mullionWeight=select(0.025,0.055,in.material==25u);
@@ -12241,13 +12258,19 @@ const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING +
 struct CrewVertex {
   @builtin(position) position:vec4f, @location(0) world:vec3f,
   @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
-  @location(4) wet:vec2f, @location(5) skin:f32
+  @location(4) wet:vec2f, @location(5) skin:f32,
+  @location(6) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f
 };
 @vertex fn vs(v:CrewInput)->CrewVertex {
   let skin=crewSkin(v);let surface=crewSurface(v);let p=rotateHull((skin*vec4f(surface.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull((skin*vec4f(surface.normal,0)).xyz));out.color=v.color;
-  let actor=actors[v.instance];out.helm=actor.trousers.w;
+  let actor=actors[v.instance];out.helm=floor(actor.trousers.w+0.01);
+  out.bodyPos=v.position;
+  let woundAmt=select(clamp(actor.shirt.w/0.45,0.0,1.0),0.0,actor.shirt.w>0.5);
+  let scorchAmt=clamp(fract(actor.trousers.w)/0.42,0.0,1.0);
+  let bandageSeed=fract(actor.skin.w);
+  out.damage=vec3f(woundAmt,scorchAmt,bandageSeed);
   let base=u32(actor.hair.w);let y=v.position.y;
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.5,y));
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.08,1.55,y));
@@ -12267,6 +12290,18 @@ struct CrewVertex {
   let pixel=vec2u(v.position.xy)%4u;
   let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
   if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
+  let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
+  let bp=v.bodyPos;
+  let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
+  let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
+  // Tattered cloth edges at cuffs and hems when heavily wounded or scorched
+  if(v.skin<0.5 && (woundAmt+scorchAmt)>0.45){
+    let isCuffOrHem=(bp.y>0.16 && bp.y<0.28) || (bp.y>0.68 && bp.y<0.80) || (abs(bp.x)>0.22 && bp.y>0.85 && bp.y<1.08);
+    if(isCuffOrHem){
+      let fray=sin(bp.x*95.0+bp.z*85.0+bSeed*50.0)*0.5+0.5;
+      if(fray*0.65+nHash*0.35 > 1.12-(woundAmt*0.32+scorchAmt*0.25)){discard;}
+    }
+  }
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
@@ -12274,12 +12309,37 @@ struct CrewVertex {
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS-1}.0).rgb;
   let ambient=vesselAmbient(n,sky,sea);
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
-  let albedo=v.color*mix(1.0,mix(.68,.92,v.skin),wet.x);
+  var baseColor=v.color;
+  var roughBias=0.0;
+  if(woundAmt>0.15 || scorchAmt>0.10){
+    // Linen bandages wrapped around brow/head or forearm/calf on wounded sailors
+    let hasHeadBand=bSeed>0.16 && bp.y>1.63 && bp.y<1.71 && bp.z>-0.10;
+    let hasArmBand=bSeed>0.05 && abs(bp.x)>0.16 && bp.y>0.92 && bp.y<1.12 && sign(bp.x)==select(-1.0,1.0,bSeed>0.22);
+    let hasLegBand=bSeed>0.11 && bp.y>0.24 && bp.y<0.42 && sign(bp.x)==select(1.0,-1.0,bSeed>0.20);
+    if(woundAmt>0.25 && (hasHeadBand || hasArmBand || hasLegBand)){
+      let wrapStripe=sin((bp.y*85.0+bp.x*32.0)*6.283)*0.04;
+      var linen=vec3f(0.84,0.80,0.72)+vec3f(wrapStripe);
+      let seep=smoothstep(0.58,0.82,nLow+0.25*woundAmt);
+      linen=mix(linen,vec3f(0.38,0.035,0.025),seep*0.78);
+      baseColor=linen;
+      roughBias=0.22;
+    }else if(woundAmt>0.15){
+      let stainZone=smoothstep(0.52,0.78,nLow+0.22*woundAmt)*smoothstep(0.35,1.45,bp.y);
+      let bloodCol=select(vec3f(0.24,0.025,0.018),vec3f(0.32,0.04,0.03),v.skin>0.5);
+      baseColor=mix(baseColor,bloodCol,stainZone*woundAmt*0.72);
+    }
+    if(scorchAmt>0.08){
+      let sootMask=smoothstep(0.38,0.76,nLow*0.7+nHash*0.3)*scorchAmt;
+      baseColor=mix(baseColor,vec3f(0.065,0.058,0.052),sootMask*0.78);
+      roughBias=max(roughBias,sootMask*0.25);
+    }
+  }
+  let albedo=baseColor*mix(1.0,mix(.68,.92,v.skin),wet.x);
   let view=normalize(F.camPos.xyz-v.world);
   // A little diffuse wrap softens facial terminators. Skin has a broad dry
   // highlight; absorbed water darkens linen, surface water strengthens glints.
   // Roughness values are authored material choices, not measured cloth/skin data.
-  let rough=mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y);
+  let rough=clamp(mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y)+roughBias,0.08,0.99);
   let wrap=.14*v.skin;
   let diffuse=max(0.0,(dot(n,sun)+wrap)/(1.0+wrap))/(1.0+wrap);
   let f0=vec3f(.04);
@@ -14064,11 +14124,33 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
     var density=df.x*smoothstep(0.0,.28,scene-distance);
     if(density<.0015){continue;}
     var emission=vec3f(0);var extinction=volume.optical.x*density;
+    let subtype=volume.optical.w;
     if(volume.centre.w>.5){
-      let flame=max(0.0,1.0-dot(local,local));
-      let coreNoise=.65+.35*df.y;
-      emission=mix(vec3f(16.0,2.6,.18),vec3f(42.0,28.0,9.5),flame*flame*coreNoise)*volume.optical.x;
-      extinction=density*4.2;
+      if(subtype>=0.9){
+        // Shipboard fire (direction=[0,1,0] -> local.z is vertical in [-1, 1])
+        let h=clamp(local.z*0.5+0.5,0.0,1.0);
+        let taper=mix(1.0,0.34,h*h);
+        let rHoriz=length(local.xy)/max(0.22,taper);
+        let advectPos=vec3f(local.x*2.6,local.y*2.6,local.z*2.1-age*4.8)+vec3f(volume.optical.z);
+        let fTurb=gunneryCloudFbm(advectPos);
+        let tongueMask=clamp(1.08-rHoriz+(fTurb-0.46)*(0.55+0.55*h),0.0,1.0);
+        let vertEnv=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.58,1.0,h));
+        let flameShape=tongueMask*vertEnv;
+        if(flameShape<0.01){continue;}
+        let temp=clamp(flameShape*(1.12-0.48*h)+0.28*fTurb,0.0,1.0);
+        let colBase=mix(vec3f(2.2,0.18,0.02),vec3f(24.0,5.8,0.45),smoothstep(0.12,0.58,temp));
+        let colCore=mix(colBase,vec3f(54.0,36.0,12.5),smoothstep(0.58,0.92,temp));
+        // Add rising glowing embers near the top of the upper flame tongue
+        let sparkNoise=gunneryNoise3(advectPos*4.2+vec3f(0.0,0.0,-age*6.0));
+        let sparks=select(0.0,smoothstep(0.82,0.95,sparkNoise)*h*18.0,subtype>1.1);
+        emission=(colCore*flameShape+vec3f(36.0,12.0,1.8)*sparks)*volume.optical.x;
+        extinction=density*flameShape*5.2;
+      }else{
+        let flame=max(0.0,1.0-dot(local,local));
+        let coreNoise=.65+.35*df.y;
+        emission=mix(vec3f(16.0,2.6,.18),vec3f(42.0,28.0,9.5),flame*flame*coreNoise)*volume.optical.x;
+        extinction=density*4.2;
+      }
     }else{
       // Two finite sunlight steps in normalized [-1, 1] local space + Beer-Powder
       // multi-scattering create crisp cauliflower self-shadowing with minimal ALU cost.
@@ -14079,17 +14161,33 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       let multiScatter=exp(-shadowDepth*.26)*.44;
       let powder=1.0-.58*exp(-shadowDepth*2.6);
       let directTransfer=(beer*powder+multiScatter)*phase;
-      let heightGrad=clamp(local.y*.5+.5,0.0,1.0);
+      let isFireSmoke=subtype>=1.8;
+      let heightGrad=clamp(select(local.y,local.z,isFireSmoke)*.5+.5,0.0,1.0);
       let radialRim=clamp(length(local)*1.08,0.0,1.0);
       let ambientOcclusion=mix(.42,1.0,clamp(heightGrad*.65+radialRim*.35,0.0,1.0));
       let ambient=(mix(skyHorizon*.42,skyZenith*.78,heightGrad)+lightning)*ambientOcclusion;
       // Black powder smoke transitions from warm charcoal soot at discharge to
-      // potassium-sulfate chalky white cumulus with cool blue-grey shadowed bellies.
-      let shadowTint=mix(vec3f(.62,.66,.72),vec3f(.34,.33,.32),sootFactor*.75);
-      let litTint=mix(vec3f(.96,.94,.90),vec3f(.58,.54,.50),sootFactor*.55);
+      // potassium-sulfate chalky white cumulus; shipboard pitch/tar fires emit
+      // dense dark charcoal/black smoke under-lit by roaring flames below.
+      let effSoot=select(sootFactor,0.94,isFireSmoke);
+      let shadowTint=select(
+        mix(vec3f(.62,.66,.72),vec3f(.34,.33,.32),effSoot*.75),
+        vec3f(.11,.10,.10),
+        isFireSmoke
+      );
+      let litTint=select(
+        mix(vec3f(.96,.94,.90),vec3f(.58,.54,.50),effSoot*.55),
+        vec3f(.24,.22,.20),
+        isFireSmoke
+      );
       let cloudAlbedo=mix(shadowTint,litTint,clamp(beer+.22,0.0,1.0));
       let throatCore=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
-      let internalEmber=vec3f(14.0,3.8,.45)*(emberFactor*throatCore*throatCore*density);
+      let fireUnderGlow=select(
+        0.0,
+        (1.0-smoothstep(0.0,0.68,heightGrad))*max(0.0,1.0-length(local.xy)*0.95)*(0.65+0.35*df.y)*max(0.15,2.55-subtype),
+        isFireSmoke
+      );
+      let internalEmber=vec3f(14.0,3.8,.45)*(emberFactor*throatCore*throatCore*density)+vec3f(9.5,2.4,0.28)*(fireUnderGlow*density);
       emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
     }
     let opacity=1.0-exp(-extinction*stepSize);
@@ -15248,12 +15346,12 @@ async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,e
   const depthModule=await shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot');
   const depthPipeline=await device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}});
   const volumeEntries=()=>bindings[1].map(binding=>({binding,resource:binding===11?depthTexture.createView():resources[binding]}));
-  function writeVolume(at,centre,direction,radii,type,extinction,age,seed){
+  function writeVolume(at,centre,direction,radii,type,extinction,age,seed,subtype=0){
     let right=[direction[2],0,-direction[0]],length=Math.hypot(...right);
     if(length<1e-6){right=[1,0,0];length=1;}
     right=right.map(v=>v/length);
     const up=[direction[1]*right[2]-direction[2]*right[1],direction[2]*right[0]-direction[0]*right[2],direction[0]*right[1]-direction[1]*right[0]];
-    volumes.set([...centre,type,...right,radii[0],...up,radii[1],...direction,radii[2],extinction,age,seed,0],at*20);
+    volumes.set([...centre,type,...right,radii[0],...up,radii[1],...direction,radii[2],extinction,age,seed,subtype],at*20);
   }
   return {state,emitShot:state.emitShot,emitImpact:state.emitImpact,setProjectiles:state.setProjectiles,setAimArcs:state.setAimArcs,
     get active(){return state.active;},get transparentActive(){return !!(volumeCount||impactCount||arcSegmentCount);},
@@ -15336,32 +15434,68 @@ async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,e
       }
       for(const f of fires){
         if(!f?.position||!(f.intensity>0.02))continue;
-        const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.5),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
-        const pulse=0.88+0.18*Math.sin(age*11.3+seed*19.0);
+        const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.6),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
+        const wind=gunneryFxVector(options.wind);
+        const pulse=0.88+0.14*Math.sin(age*11.3+seed*19.0)+0.08*Math.cos(age*19.7-seed*7.3);
+        const rHoriz=(0.58+0.68*int)*pulse;
+        const rVert=(1.05+1.35*int)*pulse;
+        // 1. Primary roaring shipboard flame volume (direction=[0,1,0] -> radii[2] is vertical)
         ordered.push({
-          centre:[pos[0],pos[1]+0.35*int,pos[2]],
+          centre:[pos[0]+wind[0]*0.04,pos[1]+0.55*rVert,pos[2]+wind[2]*0.04],
           direction:[0,1,0],
-          radii:[(0.55+0.65*int)*pulse,(0.75+1.15*int)*pulse,(0.55+0.65*int)*pulse],
+          radii:[rHoriz,rHoriz,rVert],
           type:1,
-          extinction:0.75+0.65*int,
+          subtype:1.0,
+          extinction:0.95+0.85*int,
           age,
           seed:seed*53,
         });
-        const wind=gunneryFxVector(options.wind);
+        // 2. Upper flickering flame tongues & rising hot embers
+        const tongueFlicker=0.82+0.24*Math.sin(age*16.4+seed*31.0);
         ordered.push({
-          centre:[pos[0]+wind[0]*0.32,pos[1]+1.65+1.4*int,pos[2]+wind[2]*0.32],
+          centre:[
+            pos[0]+wind[0]*0.14+Math.sin(age*6.7+seed*13.0)*0.22*int,
+            pos[1]+1.15*rVert,
+            pos[2]+wind[2]*0.14+Math.cos(age*5.9+seed*17.0)*0.22*int,
+          ],
           direction:[0,1,0],
-          radii:[1.1+1.5*int,1.8+2.2*int,1.1+1.5*int],
-          type:0,
-          extinction:3.2*int,
-          age:age*0.6,
-          seed:seed*97,
+          radii:[rHoriz*0.72*tongueFlicker,rHoriz*0.72*tongueFlicker,rVert*0.85*tongueFlicker],
+          type:1,
+          subtype:1.25,
+          extinction:(0.68+0.62*int)*tongueFlicker,
+          age:age*1.35+1.7,
+          seed:seed*71+13,
         });
+        // 3. Cycling, rising & wind-drifting dark pitch/tar smoke plume (3 overlapping parcels)
+        const period=5.4;
+        for(let pIdx=0;pIdx<3;pIdx++){
+          const phase=((age+pIdx*(period/3)+seed*2.1)%period)/period;
+          const env=Math.sin(phase*Math.PI);
+          if(env<0.04)continue;
+          const rise=(1.35+phase*6.8)*(0.75+0.55*int);
+          const drift=phase*phase*2.4;
+          const radH=(0.95+phase*2.45)*(0.75+0.55*int);
+          const radV=(1.15+phase*2.85)*(0.75+0.55*int);
+          ordered.push({
+            centre:[
+              pos[0]+wind[0]*drift+Math.sin(phase*6.28+seed*11+pIdx)*0.28,
+              pos[1]+rise,
+              pos[2]+wind[2]*drift+Math.cos(phase*6.28+seed*17+pIdx)*0.28,
+            ],
+            direction:[0,1,0],
+            radii:[radH,radH,radV],
+            type:0,
+            subtype:2.0+phase*0.8,
+            extinction:(3.6*int*env)/Math.max(1.0,radH*0.55),
+            age:age*0.45+pIdx*3.1,
+            seed:seed*97+pIdx*29,
+          });
+        }
       }
       ordered.sort((a,b)=>b.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0)-a.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0));
       const maxVolumes=Math.min(256,GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots);
       const selected=ordered.length>maxVolumes?ordered.slice(ordered.length-maxVolumes):ordered;
-      for(const p of selected){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed);}
+      for(const p of selected){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed,p.subtype??0);}
       for(const p of state.projectiles){
         if(ballCount>=GUNNERY_FX_LIMITS.projectiles)break;
         const signedRadius=p.ammo==='hot'?-p.radius:p.radius;
@@ -20545,16 +20679,16 @@ function createCaravelMesh({parts,groups}={}) {
     group(`bulwark.frames:${side}`,'hull',bulwarkFramesStart);
   }
   // Continuous foredeck follows the sheer, as in the reconstruction plan.
-  const bowStart=out.length;
+  const bowStart=out.length,bowA=[0,deck(-4.8)+0.12,-4.8],bowB=[0,2.05,-8.4];
   beam([0,.65,-6.35],[0,deck(-6.4)+.7,-6.48],.12,.16,5);
-  tube([0,1.17,-4.9],[0,2.05,-8.4],0.145,1,0.045,28);
+  tube(bowA,bowB,0.145,1,0.045,28);
   for(const side of [-1,1]){
     tube([side*width(-4.8),deck(-4.8)+0.65,-4.8],[0,2.03,-8.3],0.016,2,0.016,12);
-    tube([side*0.32,0.9,-6.0],[0,2.03,-8.3],0.012,2,0.012,10);
+    tube([side*hullHalfWidth(-6.0,deck(-6.0)),deck(-6.0)+0.12,-6.0],[0,2.03,-8.3],0.012,2,0.012,10);
   }
   for(let i=0;i<9;i++){
-    const t=(6.1+i*.038-4.9)/3.5;
-    torus([0,1.17+t*.88,-6.1-i*.038],.145-.1*t+.004,.015,2,[0,.88,-3.5],32,8);
+    const t=(6.1+i*.038-4.8)/3.6;
+    torus([0,bowA[1]+t*(bowB[1]-bowA[1]),bowA[2]+t*(bowB[2]-bowA[2])],.145-.1*t+.004,.015,2,[0,bowB[1]-bowA[1],bowB[2]-bowA[2]],32,8);
   }
   for(let turn=0;turn<5;turn++)torus([0.86,deck(-3.2)+0.025,-3.2],0.13+turn*0.028,0.013,2,'y',48);
   group('bow.structure','hull',bowStart);
@@ -20567,7 +20701,7 @@ function createCaravelMesh({parts,groups}={}) {
   group('hatch.frame','deck.main',hatchFrameStart);
   const hatchCoverStart=out.length;
   quad([-.44,deck(-2.65)+.085,-2.65],[.44,deck(-2.65)+.085,-2.65],
-    [.44,deck(-2.65)+.085,-3.61],[-.44,deck(-2.65)+.085,-3.61],18);
+    [.44,deck(-3.61)+.085,-3.61],[-.44,deck(-3.61)+.085,-3.61],18);
   group('hatch.cover','hull',hatchCoverStart,{type:'hatch'});
   const foreBittsStart=out.length;
   for(const x of [-0.35,0.35])beam([x,vesselDeck(-4.8),-4.8],[x,vesselDeck(-4.8)+0.36,-4.8],0.11,0.11,5);
@@ -20601,15 +20735,15 @@ function createCaravelMesh({parts,groups}={}) {
   part('hull',hullStart);
   // Two proud, tarred wales emphasize the sheer and fuller hull sections.
   for(const side of [-1,1])for(const offset of [-0.35,0.25]){
-    const start=out.length;
+    const start=out.length,waleStations=offset>0?stations.filter(z=>z<=QUARTERDECK_START+1e-6):stations;
     const wale=(z,dy,proud=.035)=>{
       const angle=offset<0?sectionAngles.get(z)[dy>0?0:1]:0;
       const p=hullPoint(z,side>0?angle:Math.PI-angle);
       if(offset>0)p[1]+=offset+dy;
       p[0]+=side*proud;return p;
     };
-    for(let i=0;i<stations.length-1;i++){
-      const z=stations[i],Z=stations[i+1];
+    for(let i=0;i<waleStations.length-1;i++){
+      const z=waleStations[i],Z=waleStations[i+1];
       const a=wale(z,-.075),b=wale(Z,-.075),c=wale(Z,.075),d=wale(z,.075);
       quad(a,b,c,d,16,null,[[a[1]*1.6,z*.6],[b[1]*1.6,Z*.6],[c[1]*1.6,Z*.6],[d[1]*1.6,z*.6]]);
       for(const dy of [-0.075,0.075]){
@@ -20617,7 +20751,7 @@ function createCaravelMesh({parts,groups}={}) {
         quad(a,b,wale(Z,dy,0),wale(z,dy,0),16);
       }
     }
-    for(const z of [stations[0],stations.at(-1)])quad(wale(z,-.075),wale(z,.075),wale(z,.075,0),wale(z,-.075,0),16);
+    for(const z of [waleStations[0],waleStations.at(-1)])quad(wale(z,-.075),wale(z,.075),wale(z,.075,0),wale(z,-.075,0),16);
     part(`wale:${side}:${offset}`,start);
   }
   // Close the narrow raked stem between the port and starboard planking.
@@ -20974,7 +21108,7 @@ function createVictoryMesh({groups,parts}={}){
   const {out,add,sub,mul,cross,unit,tag,group,tri,quad,box,tube,rope,ring}=createMeshWriter({groups,parts});
   const zValues=new Set([...Array.from({length:49},(_,i)=>-6+i/4),...VICTORY_DESIGN.hull.stations]);
   for(const z of [VICTORY_DESIGN.decks.forecastle.end,VICTORY_DESIGN.decks.quarter.start,VICTORY_DESIGN.decks.poop.start])zValues.add(z);
-  const portW=.235,portH=.21,batteries=VICTORY_DESIGN.gunDecks.filter(g=>['lower','middle','upper'].includes(g.id));
+  const portW=.235,portH=.21,upperPortH=.16,batteries=VICTORY_DESIGN.gunDecks.filter(g=>['lower','middle','upper'].includes(g.id));
   const ports=batteries.flatMap(g=>Array.from({length:g.count/2},(_,i)=>({deck:g.id,y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1),calibre:g.calibre})));
   const upperPorts=VICTORY_DESIGN.gunDecks.filter(g=>!batteries.includes(g)).flatMap(g=>Array.from({length:g.count/2},(_,i)=>({y:g.centre,z:g.start+(g.end-g.start)*i/(g.count/2-1)})));
   for(const p of ports){zValues.add(p.z-portW/2);zValues.add(p.z+portW/2);}
@@ -21186,23 +21320,30 @@ function createVictoryMesh({groups,parts}={}){
   // Upper bulwarks, continuous black rail, and proper openings for the smaller
   // quarterdeck/forecastle battery, which completes the 104-gun total.
   for(const side of [-1,1]){
-    const start=out.length,samples=[];
+    const start=out.length,samples=[],insetPt=p=>[p[0]-side*Math.min(.036,Math.abs(p[0])*.5),p[1],p[2]];
     for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],centre=(z+Z)/2;
       const base=victoryVesselDeck(centre)-victorySheer(centre),waist=centre>VICTORY_DESIGN.decks.forecastle.end&&centre<VICTORY_DESIGN.decks.quarter.start,h=waist?1.58-base:centre>=VICTORY_DESIGN.decks.poop.start?.19:.285;
       const bottom=hullPoint(z,base,side),nextBottom=hullPoint(Z,base,side);
       const top=hullPoint(z,base+h,side),nextTop=hullPoint(Z,base+h,side),gunPort=upperPorts.find(p=>Math.abs(centre-p.z)<portW/2-1e-7);
       if(!waist){
-        const height=gunPort?Math.max(.03,gunPort.y-base-portH/2):h;
-        quad(bottom,nextBottom,hullPoint(Z,base+height,side),hullPoint(z,base+height,side),20);
+        const height=gunPort?Math.max(.03,gunPort.y-base-upperPortH/2):h;
+        const sillA=hullPoint(z,base+height,side),sillB=hullPoint(Z,base+height,side);
+        quad(bottom,nextBottom,sillB,sillA,20);
+        if(gunPort)quad(sillA,sillB,insetPt(sillB),insetPt(sillA),24);
       }
-      samples.push({i,bottom,top,nextTop});
+      samples.push({i,bottom,top,nextTop,gunPort});
+    }
+    for(const p of upperPorts)for(const edgeZ of [p.z-portW/2,p.z+portW/2]){
+      const base=victoryVesselDeck(edgeZ)-victorySheer(edgeZ),sill=base+Math.max(.03,p.y-base-upperPortH/2),cap=base+.285;
+      const a=hullPoint(edgeZ,sill,side),b=hullPoint(edgeZ,cap,side);
+      quad(a,b,insetPt(b),insetPt(a),24);
     }
     group(`bulwark.${side}.skin`,'hull',start);
     const railStart=out.length;
     for(const s of samples)tube(s.top,s.nextTop,.025,20,.025,4,undefined,true);
     group(`bulwark.${side}.rail`,'hull',railStart);
-    for(const s of samples)if(s.i%3===0){
+    for(const s of samples)if(s.i%3===0&&!s.gunPort){
       const postStart=out.length;
       // Both end rings are buried in the waterway/rail; hidden end caps add no
       // visible surface and would duplicate those joined timber interfaces.
@@ -21247,8 +21388,8 @@ function createVictoryMesh({groups,parts}={}){
   // turn inward rather than becoming three disconnected rectangular shelves.
   const sternStart=out.length;
   const rear=(fraction,baseY,outset=.21,extra=.12)=>{
-    const t=Math.max(0,Math.min(1,(baseY-.84)/1.44)),arch=(.045+.055*t)*(1-fraction*fraction);
-    const p=hullPoint(6,baseY+arch,1),round=Math.max(0,Math.min(1,(baseY-1.9)/.38));
+    const t=Math.max(0,Math.min(1,(baseY-.73)/1.35)),arch=(.026+.020*t)*(1-fraction*fraction);
+    const p=hullPoint(6,baseY+arch,1),round=Math.max(0,Math.min(1,(baseY-1.74)/.34));
     const corner=1-.035*round*round*(3-2*round)*fraction**8;
     return [fraction*(p[0]+extra)*corner,p[1],p[2]+outset-(.06*fraction*fraction+.055*(baseY-1))*outset/.21];
   };
@@ -21260,8 +21401,8 @@ function createVictoryMesh({groups,parts}={}){
       quad(rear(a,y,outset),rear(b,y,outset),rear(b,Y,outset),rear(a,Y,outset),material);
     }
   };
-  for(const [level,y]of [1.03,1.55,2.05].entries()){
-    const low=y-.19,high=y+.23;
+  for(const [level,y]of [.89,1.41,1.90].entries()){
+    const low=y-.16,high=y+.18;
     const rearStart=out.length;
     rearPanel(-1,1,low,high,.21,21,3);
     group(`stern.gallery.${level}.rear`,'hull',rearStart);
@@ -21275,50 +21416,50 @@ function createVictoryMesh({groups,parts}={}){
       quad(rear(a,Y,0,0),rear(a,Y),rear(b,Y),rear(b,Y,0,0),21);
     }
     group(`stern.gallery.${level}.returns`,'hull',returnStart);
-    rearPanel(-.985,.985,y-.15,y+.19,.212,20,2);
+    rearPanel(-.985,.985,y-.13,y+.15,.212,20,2);
     const windowStart=out.length;
     for(let col=0;col<9;col++){
       const left=-1+col*2/9+.013,right=-1+(col+1)*2/9-.013;
       for(let i=0;i<2;i++){
         const a=left+(right-left)*i/2,b=left+(right-left)*(i+1)/2;
-        quad(rear(a,y-.115,.216),rear(b,y-.115,.216),rear(b,y+.15,.216),rear(a,y+.15,.216),11);
-        tube(rear(a,y+.015,.226),rear(b,y+.015,.226),.007,25,.007,5,undefined,true);
+        quad(rear(a,y-.095,.216),rear(b,y-.095,.216),rear(b,y+.115,.216),rear(a,y+.115,.216),11);
+        tube(rear(a,y+.01,.226),rear(b,y+.01,.226),.007,25,.007,5,undefined,true);
       }
-      tube(rear(left,y-.14,.222),rear(left,y+.18,.222),.010,25,.010,5);
+      tube(rear(left,y-.115,.222),rear(left,y+.135,.222),.010,25,.010,5,undefined,true);
     }
     group(`stern.gallery.${level}.windows`,'hull',windowStart);
     const trimStart=out.length;
-    for(const Y of [y-.20,y+.22])for(let i=0;i<gallerySegments;i++)tube(rear(-1+2*i/gallerySegments,Y,.235),rear(-1+2*(i+1)/gallerySegments,Y,.235),.025,25,.025,6,undefined,true);
+    for(const Y of [y-.155,y+.16])for(let i=0;i<gallerySegments;i++)tube(rear(-1+2*i/gallerySegments,Y,.235),rear(-1+2*(i+1)/gallerySegments,Y,.235),.018,25,.018,6,undefined,true);
     group(`stern.gallery.${level}.trim`,'hull',trimStart);
     for(const side of [-1,1]){
       const end=hullPoint(6,y,1)[2]+.21,point=(z,baseY,outset=.12)=>{
-        const t=Math.max(0,Math.min(1,(z-5.28)/(end-5.28))),edge=rear(side,baseY,.21,outset);
+        const t=Math.max(0,Math.min(1,(z-5.28)/(end-5.28))),u=Math.min(1,outset/.12),edge=rear(side,baseY,.21*u,outset);
         const Z=5.28+(edge[2]-5.28)*t,sampleZ=Math.min(Z,6),Y=baseY+victorySheer(sampleZ);
         const parent=hullPoint(6,baseY,1),correction=edge[0]-side*(parent[0]+outset);
         return [side*(victoryHullHalfWidth(sampleZ,Y)+outset)+correction*t*t,Y,Z];
       };
       for(let i=0;i<5;i++){
         const a=5.28+(end-5.28)*i/5,b=5.28+(end-5.28)*(i+1)/5;
-        quad(point(a,y-.18),point(b,y-.18),point(b,y+.20),point(a,y+.20),21);
-        for(const Y of [y-.18,y+.20])quad(point(a,Y,.002),point(b,Y,.002),point(b,Y),point(a,Y),21);
+        quad(point(a,low),point(b,low),point(b,high),point(a,high),21);
+        for(const Y of [low,high])quad(point(a,Y,.002),point(b,Y,.002),point(b,Y),point(a,Y),21);
       }
-      for(const z of [5.28,end])quad(point(z,y-.18,.002),point(z,y-.18),point(z,y+.20),point(z,y+.20,.002),21);
+      for(const z of [5.28,end])quad(point(z,low,.002),point(z,low),point(z,high),point(z,high,.002),21);
       for(let k=0;k<4;k++){
         const a=5.32+k*.19,b=a+.145;
         for(let i=0;i<2;i++){
           const z=a+(b-a)*i/2,Z=a+(b-a)*(i+1)/2;
-          quad(point(z,y-.12,.123),point(z,y+.14,.123),point(Z,y+.14,.123),point(Z,y-.12,.123),11);
+          quad(point(z,y-.10,.123),point(z,y+.11,.123),point(Z,y+.11,.123),point(Z,y-.10,.123),11);
         }
-        tube(point(a,y-.15,.13),point(a,y+.17,.13),.009,25,.009,5);
+        tube(point(a,y-.12,.13),point(a,y+.13,.13),.009,25,.009,5,undefined,true);
       }
-      for(let i=0;i<5;i++)tube(point(5.28+(end-5.28)*i/5,y+.22,.15),point(5.28+(end-5.28)*(i+1)/5,y+.22,.15),.022,25,.022,6);
+      for(const [Y,r]of [[y-.145,.016],[y+.16,.018]])for(let i=0;i<5;i++)tube(point(5.28+(end-5.28)*i/5,Y,.145),point(5.28+(end-5.28)*(i+1)/5,Y,.145),r,25,r,5,undefined,true);
     }
   }
   // Gilded crest and simple carved scroll rhythm are authored ornaments.
-  const crown=rear(0,2.28,.235),crestZ=crown[2];
+  const crown=rear(0,2.08,.235),crestZ=crown[2];
   ring([0,crown[1]+.12,crestZ],.13,.028,25,'z',20);
   for(const side of [-1,1])for(let i=0;i<5;i++){
-    const x=side*(.3+i*.19),roof=rear(x/(hullPoint(6,2.28,1)[0]+.12),2.28,.235);
+    const x=side*(.3+i*.19),roof=rear(x/(hullPoint(6,2.08,1)[0]+.12),2.08,.235);
     tube([x-.055,roof[1]-.015,roof[2]],[x+.055,roof[1]+.035,roof[2]],.021,25,.013,6);
   }
   group('stern.galleries','hull',sternStart);
@@ -21747,14 +21888,17 @@ function createAdditionalShipMesh(modelId,{groups,parts}={}){
   // Close raised deck fronts against the same width samples as the outer skin.
   for(const zone of zones.filter(d=>d.id!=='main')){
     const fore=zone.bounds[0]>begin,join=fore?zone.bounds[0]:zone.bounds[1],other=zones.filter(d=>d!==zone&&join>=d.bounds[0]&&join<=d.bounds[1]&&d.height<zone.height).sort((a,b)=>b.height-a.height)[0];
-    const low=other?.height??profile.deck,start=out.length;
-    const corridors=flights.filter(f=>f.zoneId===zone.id).map(f=>({...f,foot:f.y0+(f.y1-f.y0)*(join-f.z0)/(f.z1-f.z0)-hullLoftSheer(profile,join)-.025}));
-    const ys=[...new Set([low,...levels.filter(y=>y>low&&y<zone.height),...corridors.map(f=>f.foot).filter(y=>y>low&&y<zone.height),zone.height])].sort((a,b)=>a-b);
-    const xs=[...new Set([-1.8,1.8,...corridors.flatMap(f=>[f.x-f.width*.5,f.x+f.width*.5])])].sort((a,b)=>a-b);
+    const low=other?.height??profile.deck,start=out.length,sheer=hullLoftSheer(profile,join);
+    const corridors=flights.filter(f=>f.zoneId===zone.id).map(f=>({...f,foot:f.y0+(f.y1-f.y0)*(join-f.z0)/(f.z1-f.z0)-sheer-.025}));
+    const tillerY=design.steering.handle[1]-sheer,tillerPort=zone.id==='poop'&&tillerY>low+.05&&tillerY<zone.height-.05?[tillerY-.05,tillerY+.05]:[];
+    const ys=[...new Set([low,...levels.filter(y=>y>low&&y<zone.height),...corridors.map(f=>f.foot).filter(y=>y>low&&y<zone.height),...tillerPort,zone.height])].sort((a,b)=>a-b);
+    const xs=[...new Set([-1.8,1.8,...corridors.flatMap(f=>[f.x-f.width*.5,f.x+f.width*.5]),...(tillerPort.length?[-.09,.09]:[])])].sort((a,b)=>a-b);
     for(let j=0;j<ys.length-1;j++){
-      const a=ys[j],b=ys[j+1],y=a+hullLoftSheer(profile,join),Y=b+hullLoftSheer(profile,join),w=additionalHullWidth(modelId,join,y),W=additionalHullWidth(modelId,join,Y);
+      const a=ys[j],b=ys[j+1],y=a+sheer,Y=b+sheer,w=additionalHullWidth(modelId,join,y),W=additionalHullWidth(modelId,join,Y);
       for(let i=0;i<xs.length-1;i++){
-        const x=xs[i],X=xs[i+1];if(corridors.some(f=>(x+X)*.5>f.x-f.width*.5&&(x+X)*.5<f.x+f.width*.5&&(a+b)*.5>f.foot))continue;
+        const x=xs[i],X=xs[i+1],mx=(x+X)*.5,my=(a+b)*.5;
+        if(corridors.some(f=>mx>f.x-f.width*.5&&mx<f.x+f.width*.5&&my>f.foot))continue;
+        if(tillerPort.length&&Math.abs(mx)<.09&&my>tillerPort[0]&&my<tillerPort[1])continue;
         const width=p=>w+(W-w)*(p[1]-y)/(Y-y);
         let polygon=[[x,y,join],[X,y,join],[X,Y,join],[x,Y,join]];
         polygon=additionalMeshClip(additionalMeshClip(polygon,p=>p[0]+width(p)),p=>width(p)-p[0]);
@@ -21789,6 +21933,11 @@ function createAdditionalShipMesh(modelId,{groups,parts}={}){
       if(i===zs.length-2||Math.abs(next-base)>1e-8)quad(b,B,C,c,1);
       if(i%4===0)tube(inset(a),inset(d),.016,1,.016,5,undefined,true);
     }
+    const sternBase=additionalDeck(modelId,end)-hullLoftSheer(profile,end),sternSheer=hullLoftSheer(profile,end),notch=design.steering.handle[1]>sternBase+sternSheer-.05&&design.steering.handle[1]<sternBase+sternSheer+design.barrier+.05,innerX=side*(notch?.09:0);
+    const sA=[innerX,sternBase+sternSheer,end],sB=point(end,sternBase,side),sC=point(end,sternBase+design.barrier,side),sD=[innerX,sternBase+sternSheer+design.barrier,end],sIn=p=>[p[0],p[1],p[2]-.045];
+    quad(sA,sB,sC,sD,1);quad(sIn(sA),sIn(sD),sIn(sC),sIn(sB),1);quad(sD,sC,sIn(sC),sIn(sD),1);
+    if(notch)quad(sA,sD,sIn(sD),sIn(sA),1);
+    tube(sD,sC,.025,1,.025,5,undefined,true);
     group('bulwark.'+(side<0?'port':'starboard'),'hull',start);
   }
   // A continuous transom supports the windows; no floating gallery shelves.
@@ -21814,12 +21963,13 @@ function createAdditionalShipMesh(modelId,{groups,parts}={}){
     }
   }
   group('hull.frames','hull',frameStart);
-  const stock=design.steering.pivot,postStart=out.length;
-  for(let j=0;j<levels.length-1;j++){
-    const lo=levels[j],hi=levels[j+1];if(lo<profile.levels[0]||hi>sternDeck)continue;
-    const a=point(end,lo,0),b=point(end,hi,0),A=[0,a[1],stock[2]],B=[0,b[1],stock[2]];
+  const stock=design.steering.pivot,postStart=out.length,postLevels=levels.filter(y=>y>=profile.levels[0]&&y<=sternDeck);
+  for(let j=0;j<postLevels.length-1;j++){
+    const lo=postLevels[j],hi=postLevels[j+1],a=point(end,lo,0),b=point(end,hi,0),A=[0,a[1],Math.max(a[2]+.04,stock[2]-.035)],B=[0,b[1],Math.max(b[2]+.04,stock[2]-.035)];
     for(const side of [-1,1])quad([side*.045,a[1],a[2]],[side*.045,A[1],A[2]],[side*.045,B[1],B[2]],[side*.045,b[1],b[2]],1);
     quad([-.045,A[1],A[2]],[.045,A[1],A[2]],[.045,B[1],B[2]],[-.045,B[1],B[2]],1);
+    if(j===0)quad([-.045,a[1],a[2]],[-.045,A[1],A[2]],[.045,A[1],A[2]],[.045,a[1],a[2]],1);
+    if(j===postLevels.length-2)quad([-.045,b[1],b[2]],[.045,b[1],b[2]],[.045,B[1],B[2]],[-.045,B[1],B[2]],1);
   }
   group('hull.sternpost','hull',postStart);
   const rudderStart=out.length,rudderBottom=profile.levels[0]-design.keel.depth,rudderTop=design.steering.handle[1],blade=[[rudderBottom,stock[2]], [rudderBottom+.07,stock[2]+.57],[.12,stock[2]+.54],[.38,stock[2]]];
@@ -22025,7 +22175,7 @@ function createRowingShipMesh(modelId,{groups,parts}={}){
   const levels=[...new Set([...Array.from({length:25},(_,i)=>p.levels[0]+(p.deck-p.levels[0])*i/24),...(ports.length?[portY-portRY,portY+portRY]:[])])].sort((a,b)=>a-b);
   const fractions=levels.map(y=>(y-p.levels[0])/(p.deck-p.levels[0]));
   const outer=(z,y,side)=>hullLoftPoint(p,z,y,side),inner=(z,t,side)=>{
-    const y=Math.max(p.levels[0]+d.shellThickness,p.levels[0]+(p.deck-p.levels[0])*t),q=hullLoftPoint(p,z,y,side);
+    const y=p.levels[0]+d.shellThickness+(p.deck-p.levels[0]-d.shellThickness)*t,q=hullLoftPoint(p,z,y,side);
     q[0]=side*Math.max(0,Math.abs(q[0])-d.shellThicknessMetres/sx);return q;
   };
   const inPort=(z,y,side)=>ports.some(s=>s.side===side&&Math.abs(z-s.z)<portRZ-1e-8&&Math.abs(y-portY)<portRY-1e-8);
@@ -22080,9 +22230,9 @@ function createRowingShipMesh(modelId,{groups,parts}={}){
   }
   if(d.construction==='clinker-oak'){
     const start=out.length;
-    for(const side of [-1,1])for(let j=2;j<24;j+=2)for(let i=0;i<zs.length-1;i++){
+    for(const side of [-1,1])for(let j=2;j<levels.length-1;j+=2)for(let i=0;i<zs.length-1;i++){
       const z=zs[i],Z=zs[i+1],base=levels[j],A=outer(z,base,side),B=outer(Z,base,side),a=outer(z,base+.010,side),b=outer(Z,base+.010,side);
-      if(inPort((z+Z)*.5,base,side))continue;
+      if(inPort((z+Z)*.5,base,side)||inPort((z+Z)*.5,base+.010,side))continue;
       a[0]+=side*.004/sx;b[0]+=side*.004/sx;quad(A,B,b,a,1);
     }
     group('hull.clinker-laps','hull',start);
@@ -22104,7 +22254,7 @@ function createRowingShipMesh(modelId,{groups,parts}={}){
   const framesStart=out.length;
   for(let i=4;i<zs.length-4;i+=5){
     if(ports.some(s=>Math.abs(zs[i]-s.z)<portRZ+.04))continue;
-    for(const side of [-1,1])for(let j=2;j<24;j+=2)tube(inner(zs[i],j/24,side),inner(zs[i],Math.min(1,(j+2)/24),side),.012,1,.012,5,undefined,true);
+    for(const side of [-1,1])for(let j=2;j<levels.length-2;j+=2)tube(inner(zs[i],fractions[j],side),inner(zs[i],fractions[Math.min(fractions.length-1,j+2)],side),.012,1,.012,5,undefined,true);
   }
   group('hull.frames','hull',framesStart);
   const railStart=out.length;
@@ -22338,11 +22488,15 @@ function createLaterSailShipMesh(id,{groups,parts}={}){
   // Raised weather-deck fronts have real openings at the same stair corridors
   // crew routing consumes; no vertical wall is silently traversed.
   for(const zone of d.deckZones.filter(z=>z.id!=='main')){
-    const start=out.length,join=zone.bounds[0]<=begin?zone.bounds[1]:zone.bounds[0],corridors=flights.filter(f=>f.zoneId===zone.id),width=laterSailHullWidth(id,join,zone.height+hullLoftSheer(p,join));
-    const split=[-width,...corridors.flatMap(f=>[f.x-f.width/2,f.x+f.width/2]),width].sort((a,b)=>a-b);
+    const start=out.length,join=zone.bounds[0]<=begin?zone.bounds[1]:zone.bounds[0],corridors=flights.filter(f=>f.zoneId===zone.id);
+    const y=p.deck+hullLoftSheer(p,join),Y=zone.height+hullLoftSheer(p,join),w0=laterSailHullWidth(id,join,y),w1=laterSailHullWidth(id,join,Y),maxW=Math.max(w0,w1);
+    const split=[-maxW,...corridors.flatMap(f=>[f.x-f.width/2,f.x+f.width/2]),maxW].sort((a,b)=>a-b);
     for(let i=0;i<split.length-1;i++){
-      const x=split[i],X=split[i+1],mx=(x+X)/2;if(Math.abs(mx)>width||corridors.some(f=>Math.abs(mx-f.x)<f.width/2))continue;
-      const y=p.deck+hullLoftSheer(p,join),Y=zone.height+hullLoftSheer(p,join);quad([x,y,join],[X,y,join],[X,Y,join],[x,Y,join],23);
+      const x=split[i],X=split[i+1],mx=(x+X)/2;if(Math.abs(mx)>maxW||corridors.some(f=>Math.abs(mx-f.x)<f.width/2))continue;
+      const wAt=q=>w0+(w1-w0)*(q[1]-y)/(Y-y);
+      let poly=[[x,y,join],[X,y,join],[X,Y,join],[x,Y,join]];
+      poly=laterMeshClip(laterMeshClip(poly,q=>q[0]+wAt(q)),q=>wAt(q)-q[0]);
+      for(let k=1;k<poly.length-1;k++)tri(poly[0],poly[k],poly[k+1],23);
     }
     group('deck.bulkhead.'+zone.id,'hull',start);
   }
@@ -22351,11 +22505,22 @@ function createLaterSailShipMesh(id,{groups,parts}={}){
     for(let i=0;i<zsCockpit.length-1;i++){
       const z=zsCockpit[i],Z=zsCockpit[i+1],y=c.floorHeight+hullLoftSheer(p,z),Y=c.floorHeight+hullLoftSheer(p,Z);
       quad([-c.halfWidth,y,z],[-c.halfWidth,Y,Z],[c.halfWidth,Y,Z],[c.halfWidth,y,z],0);
-      for(const side of [-1,1])quad([side*c.halfWidth,y,z],[side*c.halfWidth,Y,Z],[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,Z),Z],[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,z),z],1);
+      for(const side of [-1,1]){
+        const c0=[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,z),z],c1=[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,Z),Z];
+        quad([side*c.halfWidth,y,z],[side*c.halfWidth,Y,Z],c1,c0,1);
+        tube(c0,c1,.016/sx,1,.016/sx,6,undefined,true);
+      }
     }
     for(const z of c.bounds){
       const flight=flights.find(f=>f.zoneId==='cockpit'&&z>=f.z0&&z<=f.z1),gap=flight?flight.width/2:0,ys=hullLoftSheer(p,z);
-      for(const [x,X]of gap?[[-c.halfWidth,-gap],[gap,c.halfWidth]]:[[-c.halfWidth,c.halfWidth]])quad([x,c.floorHeight+ys,z],[X,c.floorHeight+ys,z],[X,p.deck+ys,z],[x,p.deck+ys,z],1);
+      for(const [x,X]of gap?[[-c.halfWidth,-gap],[gap,c.halfWidth]]:[[-c.halfWidth,c.halfWidth]]){
+        quad([x,c.floorHeight+ys,z],[X,c.floorHeight+ys,z],[X,c.coamingHeight+ys,z],[x,c.coamingHeight+ys,z],1);
+        tube([x,c.coamingHeight+ys,z],[X,c.coamingHeight+ys,z],.016/sx,1,.016/sx,6,undefined,true);
+      }
+      if(flight&&Math.abs(z-c.bounds[0])<1e-6){
+        const z0=flight.z0,ys0=hullLoftSheer(p,z0),yLow0=flight.y0-.10/sy,yLow1=flight.y0+(flight.y1-flight.y0)*(z-z0)/(flight.z1-z0)-.10/sy;
+        for(const side of [-1,1])quad([side*gap,yLow0,z0],[side*gap,yLow1,z],[side*gap,p.deck+ys,z],[side*gap,p.deck+ys0,z0],1);
+      }
     }
     // Separate side benches leave the central standing/helm well open.
     for(const side of [-1,1])box([side<0?-c.halfWidth:.37,c.floorHeight+.28/sy,c.bounds[0]+.25/sz],[side<0?-.37:c.halfWidth,c.floorHeight+.36/sy,c.bounds[1]-.18/sz],0);
@@ -22408,10 +22573,17 @@ function createLaterSailShipMesh(id,{groups,parts}={}){
       const z=zs[i],Z=zs[i+1],base=deckBase((z+Z)/2),a=point(z,base,side),b=point(Z,base,side),A=point(z,base+(cloud?d.barrier:0),side),B=point(Z,base+(cloud?d.barrier:0),side);
       if(cloud){
         const inset=q=>laterMeshAdd(q,[-side*.045/sx,0,0]);quad(inset(a),inset(A),inset(B),inset(b),23);quad(A,B,inset(B),inset(A),1);tube(A,B,.05/sx,1,.05/sx,6,undefined,true);
+        const prev=i?deckBase((zs[i-1]+z)/2):NaN,next=i<zs.length-2?deckBase((Z+zs[i+2])/2):NaN;
+        if(i===0||Math.abs(prev-base)>1e-8)quad(a,A,inset(A),inset(a),23);
+        if(i===zs.length-2||Math.abs(next-base)>1e-8)quad(b,inset(b),inset(B),B,23);
       }else{
         for(const height of [d.barrier*.52,d.barrier])tube(laterMeshAdd(a,[0,height,0]),laterMeshAdd(b,[0,height,0]),.0035/sx,3,.0035/sx,4,undefined,true);
         if(i%7===0)tube(a,laterMeshAdd(a,[0,d.barrier,0]),.018/sx,3,.018/sx,6);
       }
+    }
+    if(cloud){
+      const sternBase=deckBase(end),sternSheer=hullLoftSheer(p,end),s0=[0,sternBase+sternSheer,end],s1=point(end,sternBase,side),s2=point(end,sternBase+d.barrier,side),s3=[0,sternBase+d.barrier+sternSheer,end],sIn=q=>[q[0],q[1],q[2]-.045/sz];
+      quad(s0,s1,s2,s3,20);quad(sIn(s0),sIn(s3),sIn(s2),sIn(s1),23);quad(s3,s2,sIn(s2),sIn(s3),1);tube(s3,s2,.05/sx,1,.05/sx,6,undefined,true);
     }
     group('rail.'+(side<0?'port':'starboard'),'hull',start);
   }
@@ -22420,7 +22592,8 @@ function createLaterSailShipMesh(id,{groups,parts}={}){
   // re-scaled caravel rectangle or Victory's first-rate rudder.
   for(const side of [-1,1])for(let i=1;i<r.outline.length-1;i++)tri([side*r.thickness/2,...r.outline[0]],[side*r.thickness/2,...r.outline[i]],[side*r.thickness/2,...r.outline[i+1]],14);
   for(let i=0;i<r.outline.length;i++){const a=r.outline[i],b=r.outline[(i+1)%r.outline.length];quad([-r.thickness/2,...a],[r.thickness/2,...a],[r.thickness/2,...b],[-r.thickness/2,...b],14);}
-  tube(stock,[stock[0],d.steering.handle[1],stock[2]],.035/sx,14,.035/sx,8);
+  const stockTop=d.steering.wheel?laterSailDeck(id,stock[2])+.04/sy:d.steering.handle[1];
+  tube(stock,[stock[0],stockTop,stock[2]],.035/sx,14,.035/sx,8);
   group('helm.rudder','helm.rudder',rudderStart,{type:'rudder'});
   if(d.steering.wheel){
     const start=out.length,w=d.steering.wheel,material=tag(8,1);
@@ -22428,7 +22601,7 @@ function createLaterSailShipMesh(id,{groups,parts}={}){
     for(let i=0;i<8;i++){const a=i*Math.PI/4;tube(w.centre,laterMeshAdd(w.centre,[Math.cos(a)*w.radius*1.14,Math.sin(a)*w.radius*1.14,0]),.025/sx,material,.025/sx,6);}
     tube(laterMeshAdd(w.centre,[0,0,-.08]),laterMeshAdd(w.centre,[0,0,.08]),.065/sx,material,.065/sx,8);
     group('helm.wheel','helm.tiller',start,{type:'wheel'});
-    const pedestalStart=out.length,base=laterSailDeck(id,w.centre[2]);box([-.10,base,w.centre[2]-.10],[.10,w.centre[1]-.12/sy,w.centre[2]+.10],1);
+    const pedestalStart=out.length,base=laterSailDeck(id,w.centre[2]);box([-.08,base,w.centre[2]+.03],[.08,w.centre[1]+.02/sy,w.centre[2]+.14],1);
     group('helm.pedestal','hull',pedestalStart);
   }else{
     const start=out.length,handle=d.steering.handle;tube([stock[0],handle[1],stock[2]],handle,.035/sx,7,.022/sx,8);
@@ -22436,7 +22609,7 @@ function createLaterSailShipMesh(id,{groups,parts}={}){
   }
   if(d.bowsprit){
     const start=out.length; tube(d.bowsprit.a,d.bowsprit.b,d.bowsprit.radius,1,d.bowsprit.radius*.30,12);
-    for(const side of [-1,1])rope(d.bowsprit.b,[side*laterSailDeckWidth(id,-5),laterSailDeck(id,-5),-5],.020/sx,2);
+    for(const side of [-1,1]){const gy=laterSailDeck(id,-5)+d.barrier;rope(d.bowsprit.b,[side*laterSailHullWidth(id,-5,gy),gy,-5],.020/sx,2);}
     group('bow.bowsprit','hull',start);
   }
   if(d.equipment.anchors)for(const side of [-1,1]){
@@ -22715,33 +22888,36 @@ function writeRigGPUFrame(data,boat,time,wind,target){
 // wake state remain per vessel. Consumers may share these buffers for uploads.
 const sharedShipAssets = new Map();
 function createShipAssetCache() {
-  const assets = sharedShipAssets;
+  const assets = new Map();
   return {
     get(modelId = 'nina') {
       const model = requirePlayableShipModel(modelId);
       if(model.gpuPose!==true)throw Error('Ship graphics require the shared WebGPU pose pipeline: '+model.id);
       const key = JSON.stringify([model.id, model.revision]);
       if (!assets.has(key)) {
-        // Do not let a planned rig accidentally reuse Niña's mesh or animation.
-        const builders={nina:createCaravelMesh,victory:createVictoryMesh,pinta:options=>createAdditionalShipMesh('pinta',options),'santa-maria':options=>createAdditionalShipMesh('santa-maria',options)};
-        for(const id of Object.keys(ROWING_DESIGNS))builders[id]=options=>createRowingShipMesh(id,options);
-        for(const id of Object.keys(LATER_SAIL_DESIGNS))builders[id]=options=>createLaterSailShipMesh(id,options);
-        if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
-        const groups = [], raw = builders[model.id]({ groups });
-        const { vertices, indices } = indexCaravelMesh(raw);
-        const partAssembly = createPartAssemblyCatalog({
-          domain: 'ship',
-          modelId: model.id,
-          vertices,
-          vertexStride: 9,
-          indices,
-          groups,
-        });
-        const asset={ model, vertices, indices, groups: deepFreeze(groups), partAssembly, gpuPose:true };
-        if(model.rig?.backend==='surfaces-v1'){
-          asset.rigGPUData=createRigGPUData(asset);
+        if (!sharedShipAssets.has(key)) {
+          // Do not let a planned rig accidentally reuse Niña's mesh or animation.
+          const builders={nina:createCaravelMesh,victory:createVictoryMesh,pinta:options=>createAdditionalShipMesh('pinta',options),'santa-maria':options=>createAdditionalShipMesh('santa-maria',options)};
+          for(const id of Object.keys(ROWING_DESIGNS))builders[id]=options=>createRowingShipMesh(id,options);
+          for(const id of Object.keys(LATER_SAIL_DESIGNS))builders[id]=options=>createLaterSailShipMesh(id,options);
+          if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
+          const groups = [], raw = builders[model.id]({ groups });
+          const { vertices, indices } = indexCaravelMesh(raw);
+          const partAssembly = createPartAssemblyCatalog({
+            domain: 'ship',
+            modelId: model.id,
+            vertices,
+            vertexStride: 9,
+            indices,
+            groups,
+          });
+          const shared={ model, vertices, indices, groups: deepFreeze(groups), partAssembly, gpuPose:true };
+          if(model.rig?.backend==='surfaces-v1'){
+            shared.rigGPUData=createRigGPUData(shared);
+          }
+          sharedShipAssets.set(key, Object.freeze(shared));
         }
-        assets.set(key, Object.freeze(asset));
+        assets.set(key, Object.freeze({ ...sharedShipAssets.get(key) }));
       }
       return assets.get(key);
     },
@@ -24364,6 +24540,17 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
 }
 function poseCrewWork(a,s,boat){
   const j=s.job;s.grips=null;s.walkContacts=null;s.gunContacts=null;
+  if(s.casualtyState==='fallen'||(s.knockdownTimer??0)>0){
+    const seed=(s.crewIndex??0)*1.37;
+    const sideSign=((s.crewIndex??0)%2===0)?1:-1;
+    const head=poseNodeIndex(a,'Head');
+    if(head>=0)turnBone(a,head,[0,1,0],[sideSign*0.38,0.86,-0.32]);
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],[0.34+0.06*Math.sin(seed),1.05+0.12*Math.cos(seed),0.14],[0.7,0.8,0.2]);
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],[-0.18,0.88+0.06*Math.sin(seed),0.22],[-0.6,0.9,0.25]);
+    solveCrewLimb(a,['thigh_l','calf_l','foot_l'],[0.18,0.14,-0.08],[0.25,0.4,0.88]);
+    solveCrewLimb(a,['thigh_r','calf_r','foot_r'],[-0.22,0.06,0.06],[-0.25,0.4,0.88]);
+    return;
+  }
   if(!j&&poseSeatedCrew(a,s))return;
   if(j)poseRowingWalkingFeet(a,s,boat);
   if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
@@ -24462,6 +24649,26 @@ function poseCrewWork(a,s,boat){
       solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],target,[sign*.6,1,.3]);
       (s.grips??={})[`hand_${side}`]=target;
     }
+  }else if((s.firePanic??0)>0.15){
+    const panic=Math.min(1,s.firePanic??0);
+    a.blend('Brace',s.time,0.65*panic);
+    const wave=Math.sin(s.time*6.5+(s.crewIndex??0))*0.06;
+    const shieldHand=[0.08+wave,1.46,0.24];
+    const balanceHand=[-0.28,1.12-wave,0.18];
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],shieldHand,[0.6,1.0,0.25]);
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],balanceHand,[-0.6,0.9,0.2]);
+  }else if(s.casualtyState==='wounded'){
+    a.blend('Brace',s.time,0.48);
+    const pelvis=poseNodeIndex(a,'pelvis');
+    if(pelvis>=0){
+      const p=posePosition(a.world[pelvis]);
+      poseMoveBone(a,pelvis,[p[0],p[1]-0.055,p[2]-0.02]);
+    }
+    const spine=poseNodeIndex(a,'spine_02');
+    if(spine>=0)turnBone(a,spine,[0,1,0],[0.08,0.96,0.26]);
+    const breathe=Math.sin(s.time*2.6+(s.crewIndex??0))*0.02;
+    const clutchHand=[0.05,0.98+breathe,0.21];
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],clutchHand,[-0.55,0.85,0.3]);
   }
 }
 
@@ -24644,9 +24851,46 @@ function stepCompany(company,boat,dt,wind) {
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
+    // Apply blast knockback velocity (from cannon impacts or magazine explosions) within deck bounds
+    if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
+      const damp=Math.exp(-dt*5.5);
+      const nextX=s.x+(s.knockbackVx??0)*dt;
+      const nextZ=s.z+(s.knockbackVz??0)*dt;
+      const halfW=Math.max(0.18,modelDeckWidth(boat,nextZ)-0.34/Math.max(0.5,boat.beam/3.6));
+      s.x=Math.max(-halfW,Math.min(halfW,nextX));
+      s.z=Math.max(-4.6,Math.min(5.2,nextZ));
+      s.knockbackVx=(s.knockbackVx??0)*damp;
+      s.knockbackVz=(s.knockbackVz??0)*damp;
+    }
+    // Check proximity to active shipboard fires for heat panic & soot/scorch accumulation
+    const fires=boat?.damage?.fires;
+    let nearFire=0;
+    if(Array.isArray(fires)&&fires.length>0){
+      const sx=boat.beam/3.6,sz=boat.length/12;
+      for(const f of fires){
+        const fx=f.localPosition?.[0]??0,fz=f.localPosition?.[2]??0;
+        const d=Math.hypot(s.x*sx-fx,s.z*sz-fz);
+        if(d<3.2){
+          const heat=Math.max(0,1-d/3.2)*(f.intensity??0.6);
+          if(heat>nearFire)nearFire=heat;
+        }
+      }
+    }
+    s.firePanic=nearFire>0.18?Math.min(1,nearFire):Math.max(0,(s.firePanic??0)-dt*1.5);
+    if(nearFire>0.25&&dt>0){
+      s.scorchAmount=Math.min(1,(s.scorchAmount??0)+nearFire*dt*0.22);
+    }
     if(s.casualtyState==='fallen'){
       s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;s.brace=0;
-      s.climbPitch=Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
+      s.climbPitch=(s.fallDir??1)*Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
+      stepDeckhand(s,boat,0,wind,company);
+      continue;
+    }
+    if((s.knockdownTimer??0)>0){
+      s.knockdownTimer=Math.max(0,s.knockdownTimer-dt);
+      const recover=s.knockdownTimer<0.45?s.knockdownTimer/0.45:1;
+      s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;
+      s.climbPitch=(s.fallDir??1)*Math.PI*0.44*recover;
       stepDeckhand(s,boat,0,wind,company);
       continue;
     }
@@ -24732,28 +24976,32 @@ function crewPatrolMotion(s,boat,dt,company){
   return true;
 }
 function stepProceduralDeckhand(s,boat,dt,wind,company){
-  s.time+=dt;s.climbPitch=0;
+  const isDown=s.casualtyState==='fallen'||(s.knockdownTimer??0)>0;
+  s.time+=dt;if(!isDown)s.climbPitch=0;
   const o=s.observation;o.wind=wind;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;
   o.hazard=crewDeckHazard(boat,wind,s.intent==='brace');s.decisionIn-=dt;
   if(o.hazard||s.decisionIn<=0){let intent;try{intent=s.policy(o);}catch{intent=deckhandDecision(o);}s.intent=o.hazard?'brace':['patrol','standby','brace'].includes(intent)?intent:deckhandDecision(o);s.decisionIn=.5;}
   s.brace+=(Number(o.hazard)-s.brace)*(1-Math.exp(-dt*8));
-  const seated=crewSeatedPose(s,boat);s.seatedPose=seated;
+  const seated=isDown?null:crewSeatedPose(s,boat);s.seatedPose=seated;
   if(seated){
     s.yaw=seated.body.yaw;s.walk=0;
     s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
     const seat=seated.seat,feet=seated.feet;s.moisturePoints=[feet[0].map((v,i)=>(v+feet[1][i])*.5),seat.map((v,i)=>v+(i===1?.10:0)),seat.map((v,i)=>v+(i===1?.50:0)),seat.map((v,i)=>v+(i===1?.95:0))];
   }else{
-    const moving=crewPatrolMotion(s,boat,dt,company);
+    const moving=isDown?false:crewPatrolMotion(s,boat,dt,company);
     s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
-    s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
-    if(s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
+    const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
+    s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028+proneLift,s.z*boat.length/12]);
+    if(!isDown&&s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
   }
-  const half=s.yaw/2;s.rotation.set([0,Math.sin(half),0,Math.cos(half)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
+  const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
+  s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
 }
 function stepDeckhand(s,boat,dt,wind=0,company=null) {
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   if(hasExtendedCrewModel(boat.modelId))return stepProceduralDeckhand(s,boat,dt,wind,company);
-  s.time+=dt;s.climbPitch=0;
+  const isDown=s.casualtyState==='fallen'||(s.knockdownTimer??0)>0;
+  s.time+=dt;if(!isDown)s.climbPitch=0;
   const o=s.observation;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;o.wind=wind;
   // Hysteresis avoids oscillating between walking and bracing near the threshold.
   o.hazard=crewDeckHazard(boat,wind,s.intent==='brace');
@@ -24766,16 +25014,17 @@ function stepDeckhand(s,boat,dt,wind=0,company=null) {
   // Preserve human proportions when resizing the hull; do not squeeze a person
   // through a walkway narrower than their shoulders.
   s.visible=boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
-  const moving=crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
+  const moving=isDown?false:crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId])&&s.role!=='Helmsman'){
     const width=Math.max(0,modelDeckWidth(boat,s.z)-.34/(boat.beam/3.6));s.x=Math.max(-width,Math.min(width,s.x));
   }
-  if(s.role==='Helmsman'&&boat.modelId==='victory'){
+  const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
+  if(!isDown&&s.role==='Helmsman'&&boat.modelId==='victory'){
     const station=boat.model?.crewStations?.[s.id]??requirePlayableShipModel('victory').crewStations[s.id];
     s.x=station.x;s.z=station.z;s.yaw=station.yaw??Math.PI;s.climbPitch=.28;
     s.position.set([s.x*boat.beam/3.6,modelDeck(boat,s.z)*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
-  }else if(s.role==='Helmsman'&&ADDITIONAL_DESIGNS[boat.modelId]){
+  }else if(!isDown&&s.role==='Helmsman'&&ADDITIONAL_DESIGNS[boat.modelId]){
     const design=ADDITIONAL_DESIGNS[boat.modelId],grip=resolveShipNode(boat,'helm.grip'),spacing=.40;
     // Stand inboard of the real handle. The boat's own weather deck sets feet;
     // neither the Niña's 2.3-high quarterdeck nor its tiller distance is reused.
@@ -24783,10 +25032,10 @@ function stepDeckhand(s,boat,dt,wind=0,company=null) {
     const station=design.crewStations[s.id];
     if(Math.abs(modelDeck(boat,s.z)-modelDeck(boat,station.z))>.15){s.x=station.x;s.z=station.z;s.yaw=station.yaw??0;}
     s.position.set([s.x*boat.beam/3.6,modelDeck(boat,s.z)*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
-  }else if(s.role==='Helmsman'){
+  }else if(!isDown&&s.role==='Helmsman'){
     const grip=resolveShipNode(boat,'helm.grip');s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-HELM_TILLER_DISTANCE)/lengthScale;s.yaw=0;
     s.position.set([grip[0],hullDeck(s.z)*HULL_VERTICAL_SCALE+.028,grip[2]-HELM_TILLER_DISTANCE]);
-  }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
+  }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028+proneLift,s.z*lengthScale]);
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
@@ -24870,16 +25119,21 @@ async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,e
           poseCrewWork(a,s,boat);
           const offset=i*CREW_ACTOR_FLOATS;
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
+          const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
+          const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
+          const bandageSeed=(s.casualtyState==='wounded'||s.casualtyState==='fallen')?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
           const shirt=s.casualtyState==='fallen'
             ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
             :s.casualtyState==='wounded'
               ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
-          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female');
+          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female')+bandageSeed;
           // The tiller station is below the camera; all crew remain visible.
-          b.actors[offset+19]=Number(!s.visible);
-          b.actors[offset+23]=Number(boat.enabled===true);
+          // Fractional part of shirt.w (< 0.5) carries wound severity to the crew shader.
+          b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
+          // Integer part of trousers.w is boat.enabled; fractional part (< 0.45) carries soot/scorch.
+          b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
           b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4;
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
@@ -41235,12 +41489,13 @@ function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}
     }
     return playSpeech('captain-guns-'+request.id,request.position);
   }
-  function enqueue(id,position,gain,report=false){
+  let lastImpactAt=-100;
+  function enqueue(id,position,gain,report=false,rate=1,options=undefined){
     const ear=listener(),distance=Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z);
     if(!Number.isFinite(distance)||distance>18000)return false;
     const delay=gunnerySoundDelay(position,ear,temperature()),at=clock+delay;
     if(report){
-      const existing=arrivals.find(a=>a.report&&Math.abs(a.at-at)<.10&&Math.hypot(a.position.x-position.x,a.position.z-position.z)<120);
+      const existing=arrivals.find(a=>a.report&&a.id===id&&Math.abs(a.at-at)<.10&&Math.hypot(a.position.x-position.x,a.position.z-position.z)<120);
       if(existing){
         const n=existing.count+1;
         existing.position={x:(existing.position.x*existing.count+position.x)/n,y:(existing.position.y*existing.count+position.y)/n,z:(existing.position.z*existing.count+position.z)/n};
@@ -41253,7 +41508,7 @@ function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}
       if(!report||quiet<0)return false;
       arrivals.splice(quiet,1);
     }
-    arrivals.push({id,position:{...position},at,gain,report,count:1,range:distance});
+    arrivals.push({id,position:{...position},at,gain,report,count:1,range:distance,rate,options});
     return true;
   }
   return {
@@ -41296,6 +41551,32 @@ function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}
         if(clock-lastReadyAt<8)return false;
         lastReadyAt=clock;pendingReady={position};return true;
       }
+      if(event.type==='impact'){
+        if(clock-lastImpactAt<0.045&&event.kind!=='magazine-explosion')return false;
+        lastImpactAt=clock;
+        const kind=event.kind??(event.hitZone?'vessel':'water');
+        if(kind==='magazine-explosion'){
+          enqueue('cannon-report',position,.64,true,.58,{lowpassHz:420});
+          enqueue('thunder-near',position,.55,true,.78,{duration:3.5,lowpassHz:360});
+          return enqueue('timber-creak',position,.48,false,1.55,{offset:.12,duration:.85,highpassHz:220});
+        }
+        if(kind==='water'){
+          const isGrape=event.ammo==='grape';
+          return enqueue(isGrape?'hull-slap':'anchor-splash',position,isGrape?.22:.34,false,isGrape?1.35:.96,{duration:isGrape?.55:1.35,highpassHz:140});
+        }
+        if(event.hitZone==='rigging'){
+          enqueue('hull-slap',position,.28,false,1.45,{duration:.42,highpassHz:420});
+          return enqueue('timber-creak',position,.26,false,1.35,{offset:.35,duration:.65,highpassHz:300});
+        }
+        if(kind==='building'||kind==='terrain'){
+          enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
+          return enqueue('cannon-rammer',position,.22,false,.78,{duration:.38});
+        }
+        // Hull / superstructure timber impact & oak splinters
+        enqueue('cannon-recoil',position,.35,false,1.18,{duration:.48,lowpassHz:920});
+        enqueue('hull-slap',position,.30,false,.84,{duration:.52});
+        return enqueue('timber-creak',position,.38,false,1.42,{offset:.10,duration:.65,highpassHz:240});
+      }
       const id=event.type==='load'||event.type==='ram'?'cannon-rammer':event.type==='run-out'?'cannon-run-out':null;
       if(!id||clock-lastMechanical<.65)return false;
       const ear=listener();
@@ -41315,10 +41596,14 @@ function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}
       arrivals.sort((a,b)=>a.at-b.at);
       while(arrivals.length&&arrivals[0].at<=clock){
         const event=arrivals.shift();
-        play(event.id,event.gain*Math.exp(-event.range/18000),event.position,1,true);
+        if(event.options!==undefined||(event.rate!==undefined&&event.rate!==1)){
+          play(event.id,event.gain*Math.exp(-event.range/18000),event.position,event.rate??1,true,event.options);
+        }else{
+          play(event.id,event.gain*Math.exp(-event.range/18000),event.position,1,true);
+        }
       }
     },
-    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;seenShots.clear();shotHistory.length=0;},
+    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;lastImpactAt=-100;seenShots.clear();shotHistory.length=0;},
     get pending(){return arrivals.length;},
     get busy(){return clock<voiceUntil;},
   };
@@ -42958,9 +43243,15 @@ function createDockingBoardingState(boat, options = {}) {
       if (s.health <= 0.18) {
         s.wounded = 'incapacitated';
         s.casualtyState = 'fallen';
+        s.woundSeverity = 1.0;
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + 0.25);
+        s.collapseYaw = s.yaw ?? 0;
+        s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
       } else if (s.health < 0.72) {
         s.wounded = 'wounded';
         s.casualtyState = 'wounded';
+        s.woundSeverity = Math.max(0.45, 1 - s.health);
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + 0.12);
       }
     }
 
@@ -43267,6 +43558,7 @@ function createDockingBoardingState(boat, options = {}) {
         state.statusText = state.mooringTargetKind === 'pier'
           ? `Lines over the bollards on ${state.pier?.label || 'pier'} — hauling taut & making fast…`
           : `Grappling hooks fast on ${state.targetVessel?.boat?.name || 'vessel'} — hauling bulwarks alongside…`;
+        emit('making-fast', { pier: state.pier, vessel: state.targetVessel });
       }
     } else if (state.mooringPhase === 'making-fast') {
       state.lineTension = bdClamp(state.lineTension + dt * 0.85, 0, 1);
@@ -43957,32 +44249,61 @@ function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {}) {
 
   // Propagate casualties to visible 3D deck crew actors if present on the vessel.
   const crewActors = targetBoat.crewCompany?.crew;
-  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0)) {
+  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0 || context.isMagazineBlast)) {
     const designPt = context.designPt ?? [0, 0, 0];
     const candidates = crewActors
       .filter(s => s.casualtyState !== 'fallen')
-      .map(s => ({
-        sailor: s,
-        dist: Math.hypot((s.x ?? 0) - (designPt[0] ?? 0), (s.z ?? 0) - (designPt[2] ?? 0)),
-      }))
+      .map(s => {
+        const dx = (s.x ?? 0) - (designPt[0] ?? 0);
+        const dz = (s.z ?? 0) - (designPt[2] ?? 0);
+        return {
+          sailor: s,
+          dx,
+          dz,
+          dist: Math.hypot(dx, dz),
+        };
+      })
       .sort((a, b) => a.dist - b.dist);
 
     const actorScale = Math.max(1, Math.round(c.total / Math.max(1, crewActors.length)));
     let actorFallenBudget = Math.ceil(newKilled / actorScale);
     let actorWoundedBudget = Math.ceil(newWounded / actorScale);
+    const blastSpeed = context.isMagazineBlast ? 3.4 : ammo === 'grape' ? 1.8 : 2.3;
     for (const item of candidates) {
       const s = item.sailor;
+      const invD = item.dist > 1e-3 ? 1 / item.dist : 1;
+      const dirX = item.dist > 1e-3 ? item.dx * invD : (((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1);
+      const dirZ = item.dist > 1e-3 ? item.dz * invD : 0.5;
+      const falloff = Math.max(0.25, 1 - item.dist / 3.8);
       if (actorFallenBudget > 0) {
         s.casualtyState = 'fallen';
         s.health = 0;
-        s.collapseYaw = s.yaw ?? 0;
+        s.woundSeverity = 1.0;
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (ammo === 'hot' || context.isMagazineBlast ? 0.72 : 0.35));
+        s.collapseYaw = Math.atan2(dirX, dirZ);
+        s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
+        s.knockbackVx = dirX * blastSpeed * falloff;
+        s.knockbackVz = dirZ * blastSpeed * falloff;
         actorFallenBudget--;
       } else if (actorWoundedBudget > 0 && s.casualtyState !== 'wounded') {
         s.casualtyState = 'wounded';
         s.health = Math.max(0.25, (s.health ?? 1) - 0.45);
+        s.woundSeverity = Math.min(1, Math.max(0.45, 1 - s.health));
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (ammo === 'hot' || context.isMagazineBlast ? 0.55 : 0.22));
+        s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
+        s.knockbackVx = dirX * blastSpeed * 0.65 * falloff;
+        s.knockbackVz = dirZ * blastSpeed * 0.65 * falloff;
+        if (context.isMagazineBlast || item.dist < 1.6) {
+          s.knockdownTimer = context.isMagazineBlast ? 2.4 : 1.35;
+        }
         actorWoundedBudget--;
+      } else if (context.isMagazineBlast && item.dist < 2.8) {
+        s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4);
+        s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + 0.35);
+        s.knockbackVx = dirX * blastSpeed * 0.45 * falloff;
+        s.knockbackVz = dirZ * blastSpeed * 0.45 * falloff;
       }
-      if (actorFallenBudget <= 0 && actorWoundedBudget <= 0) break;
+      if (actorFallenBudget <= 0 && actorWoundedBudget <= 0 && !context.isMagazineBlast) break;
     }
   }
 
@@ -44606,9 +44927,19 @@ function applyShipImpactDamage(targetBoat, event) {
   }
 
   // Hot shot (heated to ~900 C in a shot furnace) lodges in timber or canvas and ignites shipboard fires.
-  if (ammo === 'hot') {
+  // Heavy solid-shot battering on damaged upper decks/superstructures can also ignite spilled cartridge powder and tarred oakum.
+  const canCombatIgnite =
+    ammo === 'round' &&
+    !event.waterline &&
+    (localPos?.[1] ?? 1) >= 0.45 &&
+    damage.hullIntegrity < 0.72 &&
+    (damage.hits % 3 === 0) &&
+    damage.fires.length < 3;
+  if (ammo === 'hot' || canCombatIgnite) {
     damage.fireCount = (damage.fireCount ?? 0) + 1;
-    const addIntensity = Math.min(1.2, 0.48 + energy / 550000);
+    const addIntensity = ammo === 'hot'
+      ? Math.min(1.2, 0.48 + energy / 550000)
+      : Math.min(0.92, 0.56 + energy / 680000);
     let mergedFire = false;
     for (const f of damage.fires) {
       const dist = Math.hypot(
@@ -45551,10 +45882,47 @@ function stepVesselDamage(boat, dt, terrain = null) {
       boatRotate(rot, f.localPosition[0], f.localPosition[1], f.localPosition[2], yaw, pitch, roll);
       damage.worldFires.push({
         position: [(boat.x ?? 0) + rot[0], (boat.heave ?? 0) + rot[1], (boat.z ?? 0) + rot[2]],
+        localPosition: f.localPosition,
+        hitZone: f.hitZone ?? 'hull',
         intensity: f.intensity,
         age: f.age,
         seed: f.seed,
       });
+      // Inject charred timber scorch marks on the hull/superstructure around sustained fires
+      if (!f.scorchBaked && f.age > 1.2 && Array.isArray(damage.craters) && damage.craters.length < 120) {
+        f.scorchBaked = true;
+        const invBeam = 3.6 / Math.max(1.2, boat.beam ?? 6);
+        const invLen = 12 / Math.max(4, boat.length ?? 20);
+        const invVert = 1 / Math.max(0.35, (boat.beam ?? 6) / 6);
+        damage.craters.push({
+          x: (f.localPosition[0] ?? 0) * invBeam,
+          y: (f.localPosition[1] ?? 1.2) * invVert,
+          z: (f.localPosition[2] ?? 0) * invLen,
+          radius: 0.16,
+          depth: 0.14,
+          char: 0.96,
+          breach: 0,
+          hits: 2,
+        });
+      }
+      // Roaring deck fires spread fore/aft along tarred seams or climb into rigging
+      if (!f.spreadDone && f.intensity > 0.88 && f.age > 5.5 && damage.fires.length < 8) {
+        f.spreadDone = true;
+        const spreadZ = ((f.seed ?? 0.5) > 0.5 ? 1 : -1) * 1.65;
+        const climbRig = (f.seed ?? 0.5) > 0.68 && f.hitZone !== 'rigging';
+        damage.fires.push({
+          localPosition: [
+            (f.localPosition[0] ?? 0) * (climbRig ? 0.35 : 0.85),
+            (f.localPosition[1] ?? 1.4) + (climbRig ? 1.85 : 0.12),
+            Math.max(-5.2, Math.min(5.2, (f.localPosition[2] ?? 0) + (climbRig ? 0 : spreadZ))),
+          ],
+          hitZone: climbRig ? 'rigging' : (f.hitZone ?? 'hull'),
+          mastGroup: f.mastGroup ?? 'main',
+          intensity: 0.62,
+          age: 0,
+          seed: ((f.seed ?? 0.37) * 1.6180339) % 1,
+        });
+      }
     }
     damage.fireIntensity = +totalIntensity.toFixed(3);
     // Unchecked shipboard conflagration reaching critical intensity burns down to the powder magazine.
@@ -48344,7 +48712,7 @@ const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
 // fetched or started until the listener enables sound with a browser gesture.
 function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
-  let time=0,nextBird=25;
+  let time=0,nextBird=25,nextFirePop=0,lastBellHalfHour=-1;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
   const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[];
   const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
@@ -48376,6 +48744,80 @@ function createSceneAudio({onStatus=()=>{}}={}){
       level.gain.setValueAtTime(target,at+Math.max(attack,seconds-release));level.gain.linearRampToValueAtTime(0,at+seconds);
     }
     source.onended=()=>{pool.delete(source);source.disconnect();for(const filter of filters)filter.disconnect();level.disconnect();pan.disconnect();};source.start(0,offset,duration);return seconds;
+  }
+  function playSynth(kind,position=listener,gain=0.25){
+    if(!enabled||hidden||!ready||!context||context.state!=='running'||voices.size>=8)return false;
+    const now=context.currentTime;
+    const dx=(position?.x??listener.x)-listener.x,dz=(position?.z??listener.z)-listener.z,d=Math.hypot(dx,dz);
+    const range=Math.hypot(dx,((position?.y??position?.heave??0)-listener.y),dz);
+    const atten=1/(1+Math.max(0,range-8)/28);
+    const effGain=weatherClamp(gain*atten,0,0.85);
+    if(effGain<0.005)return false;
+    const pan=context.createStereoPanner();
+    pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*0.85;
+    pan.connect(master);
+    if(kind==='sword'||kind==='grapple'){
+      const freqs=kind==='sword'?[1480,2320,3640]:[620,1140,1890];
+      const dur=kind==='sword'?0.22:0.34;
+      for(let i=0;i<freqs.length;i++){
+        const osc=context.createOscillator(),g=context.createGain();
+        osc.type=i===0?'triangle':'sine';
+        const detune=0.94+Math.random()*0.12;
+        osc.frequency.setValueAtTime(freqs[i]*detune,now);
+        osc.frequency.exponentialRampToValueAtTime(freqs[i]*detune*0.88,now+dur);
+        g.gain.setValueAtTime(0.001,now);
+        g.gain.linearRampToValueAtTime(effGain/(i+1.2),now+0.006);
+        g.gain.exponentialRampToValueAtTime(0.0008,now+dur);
+        osc.connect(g).connect(pan);
+        osc.start(now);osc.stop(now+dur+0.01);
+        if(i===0)osc.onended=()=>pan.disconnect();
+      }
+      return true;
+    }
+    if(kind==='spyglass'){
+      const osc=context.createOscillator(),g=context.createGain();
+      osc.type='triangle';
+      osc.frequency.setValueAtTime(520,now);
+      osc.frequency.exponentialRampToValueAtTime(1180,now+0.065);
+      g.gain.setValueAtTime(0.001,now);
+      g.gain.linearRampToValueAtTime(effGain*0.65,now+0.008);
+      g.gain.exponentialRampToValueAtTime(0.0008,now+0.075);
+      osc.connect(g).connect(pan);
+      osc.start(now);osc.stop(now+0.08);
+      osc.onended=()=>pan.disconnect();
+      return true;
+    }
+    if(kind==='bell'){
+      const partials=[880,1760,2420];
+      for(let i=0;i<partials.length;i++){
+        const osc=context.createOscillator(),g=context.createGain();
+        osc.type='sine';
+        osc.frequency.setValueAtTime(partials[i],now);
+        const dur=1.45/(i+1);
+        g.gain.setValueAtTime(0.001,now);
+        g.gain.linearRampToValueAtTime(effGain*0.55/(i+1),now+0.008);
+        g.gain.exponentialRampToValueAtTime(0.0006,now+dur);
+        osc.connect(g).connect(pan);
+        osc.start(now);osc.stop(now+dur+0.02);
+        if(i===0)osc.onended=()=>pan.disconnect();
+      }
+      return true;
+    }
+    if(kind==='surrender-drum'){
+      const osc=context.createOscillator(),g=context.createGain();
+      osc.type='sine';
+      osc.frequency.setValueAtTime(128,now);
+      osc.frequency.exponentialRampToValueAtTime(58,now+0.42);
+      g.gain.setValueAtTime(0.001,now);
+      g.gain.linearRampToValueAtTime(effGain*0.85,now+0.012);
+      g.gain.exponentialRampToValueAtTime(0.0008,now+0.45);
+      osc.connect(g).connect(pan);
+      osc.start(now);osc.stop(now+0.46);
+      osc.onended=()=>pan.disconnect();
+      return true;
+    }
+    pan.disconnect();
+    return false;
   }
   function startLoop(id,asset){
     if(!asset?.loop||!buffers.has(id)||loops.has(id))return;
@@ -48442,7 +48884,79 @@ function createSceneAudio({onStatus=()=>{}}={}){
       const sound=hullAudio.impact(event);if(sound)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,true,sound.options);
       creak(timberAudio.impact(event));
     },
-    update(dt,settings,boat,frame,weather){
+    event(ev,boat){
+      if(!ev||!enabled||hidden||!ready)return false;
+      const pos=ev.position??ev.vessel??boat??listener;
+      const p={x:pos.x??listener.x,y:pos.y??pos.heave??listener.y,z:pos.z??listener.z};
+      switch(ev.type){
+        case 'dock-start':
+          play('wind-strong',.28,p,1.65,true,{offset:.2,duration:.42,highpassHz:520});
+          play('timber-creak',.24,p,1.25,true,{offset:.1,duration:.55});
+          return true;
+        case 'grapple-start':
+          playSynth('grapple',p,.36);
+          play('anchor-release',.38,p,1.18,true,{duration:.85});
+          return true;
+        case 'making-fast':
+          play('timber-creak',.32,p,1.12,true,{offset:.15,duration:.95});
+          play('cannon-run-out',.22,p,.92,true,{duration:.75});
+          return true;
+        case 'dock-complete':
+          play('cannon-rammer',.34,p,.78,true,{duration:.48});
+          play('hull-slap',.25,p,.72,true,{duration:.52,lowpassHz:540});
+          return true;
+        case 'cast-off-start':
+          play('anchor-release',.28,p,1.22,true,{duration:.65});
+          play('hull-slap',.26,p,1.15,true,{duration:.62});
+          return true;
+        case 'boarding-round':{
+          playSynth('sword',p,.34);
+          if(((ev.round??1)%2)===1){
+            play('cannon-report',.24,p,1.68,true,{duration:.26,highpassHz:340});
+          }else{
+            play('cannon-rammer',.26,p,1.35,true,{duration:.35});
+          }
+          const voice=CREW_VOICES[(ev.round??0)%Math.max(1,CREW_VOICES.length)];
+          if(voice)play('crew-'+voice.id,.32,p,.96+((ev.round??0)%3)*.05,true,{duration:.65});
+          return true;
+        }
+        case 'vessel-captured':{
+          playSynth('bell',p,.35);
+          const v1=CREW_VOICES[0],v2=CREW_VOICES[1];
+          if(v1)play('crew-'+v1.id,.46,p,1.04,true);
+          if(v2)play('crew-'+v2.id,.38,p,.98,true,{offset:.08});
+          return true;
+        }
+        case 'boarding-repulsed':
+          playSynth('surrender-drum',p,.38);
+          play('timber-creak',.30,p,.82,true,{duration:.9});
+          return true;
+        case 'prize-disposition':
+          if(ev.choice==='scuttle-repair'){
+            play('cannon-rammer',.36,p,1.28,true,{duration:.45});
+            play('timber-creak',.34,p,1.35,true,{offset:.2,duration:.85});
+            play('anchor-splash',.32,p,.88,true,{duration:1.4});
+          }else{
+            play('cannon-run-out',.28,p,1.08,true,{duration:.75});
+          }
+          return true;
+        case 'sail-handling':
+          play('hull-slap',.22,p,1.38,true,{duration:.42,highpassHz:320});
+          play('timber-creak',.20,p,1.28,true,{offset:.3,duration:.55,highpassHz:260});
+          return true;
+        case 'spyglass':
+          return playSynth('spyglass',listener,.28);
+        case 'surrender':
+          playSynth('surrender-drum',p,.42);
+          play('timber-creak',.26,p,.92,true,{duration:.8});
+          return true;
+        case 'watch-bell':
+          return playSynth('bell',p,.30);
+        default:
+          return false;
+      }
+    },
+    update(dt,settings,boat,frame,weather,activeFires=null){
       time+=dt;volume=weatherClamp(settings.soundVolume??.7);
       listener.x=frame[16];listener.y=frame[17];listener.z=frame[18];
       const right=Math.hypot(frame[20],frame[22])||1;listener.rx=frame[20]/right;listener.rz=frame[22]/right;
@@ -48461,6 +48975,26 @@ function createSceneAudio({onStatus=()=>{}}={}){
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,...flow,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
+      // Spatial shipboard fire crackle & roar when any vessel is burning nearby
+      const fires=Array.isArray(activeFires)&&activeFires.length?activeFires:(boat?.damage?.worldFires??[]);
+      let fireAudioLevel=0,nearestFirePos=null;
+      for(const f of fires){
+        if(!f?.position||!(f.intensity>0.04))continue;
+        const d=Math.hypot(f.position[0]-listener.x,(f.position[1]??0)-listener.y,f.position[2]-listener.z);
+        const atten=(f.intensity??0.5)/(1+Math.max(0,d-6)/22);
+        if(atten>fireAudioLevel){
+          fireAudioLevel=atten;
+          nearestFirePos={x:f.position[0],y:f.position[1]??1.5,z:f.position[2]};
+        }
+      }
+      if(fireAudioLevel>0.02){
+        levels['sleet-deck']=Math.max(levels['sleet-deck']??0,Math.min(0.42,fireAudioLevel*0.34));
+        levels['wind-strong']=Math.max(levels['wind-strong']??0,Math.min(0.32,fireAudioLevel*0.24));
+        if(time>=nextFirePop&&nearestFirePos){
+          play('timber-creak',Math.min(0.32,fireAudioLevel*0.28),nearestFirePos,1.45+Math.random()*0.35,true,{offset:Math.random()*1.8,duration:0.28+Math.random()*0.25,highpassHz:320});
+          nextFirePop=time+0.38+Math.random()*0.65;
+        }
+      }
       for(const [id,loop] of loops){
         const gain=id==='anchor-reel'?(anchorReeling ? .3/(1+Math.max(0,Math.hypot(anchorPosition.x-listener.x,anchorPosition.y-listener.y,anchorPosition.z-listener.z)-8)/24):0):levels[id]??0;
         loop.gain.gain.setTargetAtTime(gain,context.currentTime,id==='anchor-reel'?.08:.45);
@@ -54141,6 +54675,7 @@ async function main() {
     company:crew?.state??null,
     getAdditionalVessels:()=>followerEnabled?vessels.slice(1).filter(v=>v?.boat?.showProw):[],
     onEvent:ev=>{
+      sceneAudio.event?.(ev,ev.vessel?.boat??boat);
       if(ev.type==='vessel-captured'){
         if(voyageCtl?.presentPrizeDisposition){
           voyageCtl.presentPrizeDisposition(ev.vessel,ev.plunder);
@@ -54262,7 +54797,9 @@ async function main() {
   }
 
   function setSpyglassActive(active, targetBoat = null) {
+    const prev = spyglassActive;
     spyglassActive = Boolean(active);
+    if (spyglassActive !== prev) sceneAudio.event?.({ type: 'spyglass', active: spyglassActive }, boat);
     spyglassOverlay.hidden = !spyglassActive;
     spyglassOverlay.style.display = spyglassActive ? 'flex' : 'none';
     document.body.classList.toggle('spyglass-active', spyglassActive);
@@ -54869,7 +55406,9 @@ async function main() {
       if(crew?.order(boat,order.id)){
         shipGuns.standDown();
         commandFriendlyFleet(vessels,{type:'crew',id:order.id},{anchorEnv:anchorEnvironment});
-        sceneAudio.order(order.id,{boat});propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();
+        sceneAudio.order(order.id,{boat});
+        if(['full','reduced','furl','transfer'].includes(order.id))sceneAudio.event?.({type:'sail-handling',order:order.id},boat);
+        propulsionInput.value=boat.propulsion;showPropulsionControls();for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;updateCrewUI();
       }
     };
     orders.append(button);orderButtons.set(order.id,button);
@@ -54919,6 +55458,7 @@ async function main() {
       colorsSelect.value=boat.colors;
     }else{
       strikeVesselColors(boat,'Struck colors by Captain’s order');
+      sceneAudio.event?.({type:'surrender'},boat);
       shipGuns.standDown();
       for(const key of SAIL_KEYS)boat[key]=0;
       colorsSelect.value='surrender';
@@ -56202,7 +56742,7 @@ async function main() {
     weather.step(dt,P,cam);
     writeFrame(simTime);
     weatherRenderer.update(weather,P,dt);
-    sceneAudio.update(dt,P,boat,frameF,weather);
+    sceneAudio.update(dt,P,boat,frameF,weather,activeFires);
     if (clouds.update(frameF,P,dt)) envFull = true;
     for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
     for(const [index,v] of vessels.entries()){
@@ -56240,7 +56780,12 @@ async function main() {
       const sails=ship.sailState??sailingState(ship);
       data.set(sails.set,24);data[27]=ship.hatchesClosed??0;data[28]=sails.squareYaw;data[29]=sails.lateenYaw;
       data[30]=sails.squareFill;data[31]=sails.lateenFill;data[32]=sails.windSide;data[33]=-sails.windForward;data[34]=sails.apparentSpeed;data[35]=sails.canvasTack;
-      writeLateenUniform(data,sails);device.queue.writeBuffer(v.hullUBO,0,data);
+      writeLateenUniform(data,sails);
+      const fireInt=settlingBake?0:Math.min(2.4,dmg?.fireIntensity??0);
+      const primaryFire=dmg?.fires?.[0];
+      const fireZBin=primaryFire?Math.max(1,Math.min(12,Math.round((primaryFire.localPosition?.[2]??0)/Math.max(0.8,(ship.length??20)/12)+6.5))):6;
+      data[51]=fireInt>0.01?(fireZBin+Math.min(0.98,Math.max(0.01,fireInt/2.5))):0;
+      device.queue.writeBuffer(v.hullUBO,0,data);
       fleetHullData.set(data.subarray(0,24),index*24);
       v.shadows.update(data,frameF.subarray(frameF[115]>.5?96:32,frameF[115]>.5?99:35),ship.showProw&&!v.entirelySubmerged&&qs.get('shadows')!=='0');
       if((!index||followerEnabled)&&dt>0&&!dmg?.sunk){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}

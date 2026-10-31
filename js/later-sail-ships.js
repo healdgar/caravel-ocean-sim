@@ -120,11 +120,15 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   // Raised weather-deck fronts have real openings at the same stair corridors
   // crew routing consumes; no vertical wall is silently traversed.
   for(const zone of d.deckZones.filter(z=>z.id!=='main')){
-    const start=out.length,join=zone.bounds[0]<=begin?zone.bounds[1]:zone.bounds[0],corridors=flights.filter(f=>f.zoneId===zone.id),width=laterSailHullWidth(id,join,zone.height+hullLoftSheer(p,join));
-    const split=[-width,...corridors.flatMap(f=>[f.x-f.width/2,f.x+f.width/2]),width].sort((a,b)=>a-b);
+    const start=out.length,join=zone.bounds[0]<=begin?zone.bounds[1]:zone.bounds[0],corridors=flights.filter(f=>f.zoneId===zone.id);
+    const y=p.deck+hullLoftSheer(p,join),Y=zone.height+hullLoftSheer(p,join),w0=laterSailHullWidth(id,join,y),w1=laterSailHullWidth(id,join,Y),maxW=Math.max(w0,w1);
+    const split=[-maxW,...corridors.flatMap(f=>[f.x-f.width/2,f.x+f.width/2]),maxW].sort((a,b)=>a-b);
     for(let i=0;i<split.length-1;i++){
-      const x=split[i],X=split[i+1],mx=(x+X)/2;if(Math.abs(mx)>width||corridors.some(f=>Math.abs(mx-f.x)<f.width/2))continue;
-      const y=p.deck+hullLoftSheer(p,join),Y=zone.height+hullLoftSheer(p,join);quad([x,y,join],[X,y,join],[X,Y,join],[x,Y,join],23);
+      const x=split[i],X=split[i+1],mx=(x+X)/2;if(Math.abs(mx)>maxW||corridors.some(f=>Math.abs(mx-f.x)<f.width/2))continue;
+      const wAt=q=>w0+(w1-w0)*(q[1]-y)/(Y-y);
+      let poly=[[x,y,join],[X,y,join],[X,Y,join],[x,Y,join]];
+      poly=laterMeshClip(laterMeshClip(poly,q=>q[0]+wAt(q)),q=>wAt(q)-q[0]);
+      for(let k=1;k<poly.length-1;k++)tri(poly[0],poly[k],poly[k+1],23);
     }
     group('deck.bulkhead.'+zone.id,'hull',start);
   }
@@ -133,11 +137,22 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
     for(let i=0;i<zsCockpit.length-1;i++){
       const z=zsCockpit[i],Z=zsCockpit[i+1],y=c.floorHeight+hullLoftSheer(p,z),Y=c.floorHeight+hullLoftSheer(p,Z);
       quad([-c.halfWidth,y,z],[-c.halfWidth,Y,Z],[c.halfWidth,Y,Z],[c.halfWidth,y,z],0);
-      for(const side of [-1,1])quad([side*c.halfWidth,y,z],[side*c.halfWidth,Y,Z],[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,Z),Z],[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,z),z],1);
+      for(const side of [-1,1]){
+        const c0=[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,z),z],c1=[side*c.halfWidth,c.coamingHeight+hullLoftSheer(p,Z),Z];
+        quad([side*c.halfWidth,y,z],[side*c.halfWidth,Y,Z],c1,c0,1);
+        tube(c0,c1,.016/sx,1,.016/sx,6,undefined,true);
+      }
     }
     for(const z of c.bounds){
       const flight=flights.find(f=>f.zoneId==='cockpit'&&z>=f.z0&&z<=f.z1),gap=flight?flight.width/2:0,ys=hullLoftSheer(p,z);
-      for(const [x,X]of gap?[[-c.halfWidth,-gap],[gap,c.halfWidth]]:[[-c.halfWidth,c.halfWidth]])quad([x,c.floorHeight+ys,z],[X,c.floorHeight+ys,z],[X,p.deck+ys,z],[x,p.deck+ys,z],1);
+      for(const [x,X]of gap?[[-c.halfWidth,-gap],[gap,c.halfWidth]]:[[-c.halfWidth,c.halfWidth]]){
+        quad([x,c.floorHeight+ys,z],[X,c.floorHeight+ys,z],[X,c.coamingHeight+ys,z],[x,c.coamingHeight+ys,z],1);
+        tube([x,c.coamingHeight+ys,z],[X,c.coamingHeight+ys,z],.016/sx,1,.016/sx,6,undefined,true);
+      }
+      if(flight&&Math.abs(z-c.bounds[0])<1e-6){
+        const z0=flight.z0,ys0=hullLoftSheer(p,z0),yLow0=flight.y0-.10/sy,yLow1=flight.y0+(flight.y1-flight.y0)*(z-z0)/(flight.z1-z0)-.10/sy;
+        for(const side of [-1,1])quad([side*gap,yLow0,z0],[side*gap,yLow1,z],[side*gap,p.deck+ys,z],[side*gap,p.deck+ys0,z0],1);
+      }
     }
     // Separate side benches leave the central standing/helm well open.
     for(const side of [-1,1])box([side<0?-c.halfWidth:.37,c.floorHeight+.28/sy,c.bounds[0]+.25/sz],[side<0?-.37:c.halfWidth,c.floorHeight+.36/sy,c.bounds[1]-.18/sz],0);
@@ -190,10 +205,17 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
       const z=zs[i],Z=zs[i+1],base=deckBase((z+Z)/2),a=point(z,base,side),b=point(Z,base,side),A=point(z,base+(cloud?d.barrier:0),side),B=point(Z,base+(cloud?d.barrier:0),side);
       if(cloud){
         const inset=q=>laterMeshAdd(q,[-side*.045/sx,0,0]);quad(inset(a),inset(A),inset(B),inset(b),23);quad(A,B,inset(B),inset(A),1);tube(A,B,.05/sx,1,.05/sx,6,undefined,true);
+        const prev=i?deckBase((zs[i-1]+z)/2):NaN,next=i<zs.length-2?deckBase((Z+zs[i+2])/2):NaN;
+        if(i===0||Math.abs(prev-base)>1e-8)quad(a,A,inset(A),inset(a),23);
+        if(i===zs.length-2||Math.abs(next-base)>1e-8)quad(b,inset(b),inset(B),B,23);
       }else{
         for(const height of [d.barrier*.52,d.barrier])tube(laterMeshAdd(a,[0,height,0]),laterMeshAdd(b,[0,height,0]),.0035/sx,3,.0035/sx,4,undefined,true);
         if(i%7===0)tube(a,laterMeshAdd(a,[0,d.barrier,0]),.018/sx,3,.018/sx,6);
       }
+    }
+    if(cloud){
+      const sternBase=deckBase(end),sternSheer=hullLoftSheer(p,end),s0=[0,sternBase+sternSheer,end],s1=point(end,sternBase,side),s2=point(end,sternBase+d.barrier,side),s3=[0,sternBase+d.barrier+sternSheer,end],sIn=q=>[q[0],q[1],q[2]-.045/sz];
+      quad(s0,s1,s2,s3,20);quad(sIn(s0),sIn(s3),sIn(s2),sIn(s1),23);quad(s3,s2,sIn(s2),sIn(s3),1);tube(s3,s2,.05/sx,1,.05/sx,6,undefined,true);
     }
     group('rail.'+(side<0?'port':'starboard'),'hull',start);
   }
@@ -202,7 +224,8 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   // re-scaled caravel rectangle or Victory's first-rate rudder.
   for(const side of [-1,1])for(let i=1;i<r.outline.length-1;i++)tri([side*r.thickness/2,...r.outline[0]],[side*r.thickness/2,...r.outline[i]],[side*r.thickness/2,...r.outline[i+1]],14);
   for(let i=0;i<r.outline.length;i++){const a=r.outline[i],b=r.outline[(i+1)%r.outline.length];quad([-r.thickness/2,...a],[r.thickness/2,...a],[r.thickness/2,...b],[-r.thickness/2,...b],14);}
-  tube(stock,[stock[0],d.steering.handle[1],stock[2]],.035/sx,14,.035/sx,8);
+  const stockTop=d.steering.wheel?laterSailDeck(id,stock[2])+.04/sy:d.steering.handle[1];
+  tube(stock,[stock[0],stockTop,stock[2]],.035/sx,14,.035/sx,8);
   group('helm.rudder','helm.rudder',rudderStart,{type:'rudder'});
   if(d.steering.wheel){
     const start=out.length,w=d.steering.wheel,material=tag(8,1);
@@ -210,7 +233,7 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
     for(let i=0;i<8;i++){const a=i*Math.PI/4;tube(w.centre,laterMeshAdd(w.centre,[Math.cos(a)*w.radius*1.14,Math.sin(a)*w.radius*1.14,0]),.025/sx,material,.025/sx,6);}
     tube(laterMeshAdd(w.centre,[0,0,-.08]),laterMeshAdd(w.centre,[0,0,.08]),.065/sx,material,.065/sx,8);
     group('helm.wheel','helm.tiller',start,{type:'wheel'});
-    const pedestalStart=out.length,base=laterSailDeck(id,w.centre[2]);box([-.10,base,w.centre[2]-.10],[.10,w.centre[1]-.12/sy,w.centre[2]+.10],1);
+    const pedestalStart=out.length,base=laterSailDeck(id,w.centre[2]);box([-.08,base,w.centre[2]+.03],[.08,w.centre[1]+.02/sy,w.centre[2]+.14],1);
     group('helm.pedestal','hull',pedestalStart);
   }else{
     const start=out.length,handle=d.steering.handle;tube([stock[0],handle[1],stock[2]],handle,.035/sx,7,.022/sx,8);
@@ -218,7 +241,7 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   }
   if(d.bowsprit){
     const start=out.length; tube(d.bowsprit.a,d.bowsprit.b,d.bowsprit.radius,1,d.bowsprit.radius*.30,12);
-    for(const side of [-1,1])rope(d.bowsprit.b,[side*laterSailDeckWidth(id,-5),laterSailDeck(id,-5),-5],.020/sx,2);
+    for(const side of [-1,1]){const gy=laterSailDeck(id,-5)+d.barrier;rope(d.bowsprit.b,[side*laterSailHullWidth(id,-5,gy),gy,-5],.020/sx,2);}
     group('bow.bowsprit','hull',start);
   }
   if(d.equipment.anchors)for(const side of [-1,1]){

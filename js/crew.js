@@ -177,9 +177,46 @@ export function stepCompany(company,boat,dt,wind) {
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew){
+    // Apply blast knockback velocity (from cannon impacts or magazine explosions) within deck bounds
+    if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
+      const damp=Math.exp(-dt*5.5);
+      const nextX=s.x+(s.knockbackVx??0)*dt;
+      const nextZ=s.z+(s.knockbackVz??0)*dt;
+      const halfW=Math.max(0.18,modelDeckWidth(boat,nextZ)-0.34/Math.max(0.5,boat.beam/3.6));
+      s.x=Math.max(-halfW,Math.min(halfW,nextX));
+      s.z=Math.max(-4.6,Math.min(5.2,nextZ));
+      s.knockbackVx=(s.knockbackVx??0)*damp;
+      s.knockbackVz=(s.knockbackVz??0)*damp;
+    }
+    // Check proximity to active shipboard fires for heat panic & soot/scorch accumulation
+    const fires=boat?.damage?.fires;
+    let nearFire=0;
+    if(Array.isArray(fires)&&fires.length>0){
+      const sx=boat.beam/3.6,sz=boat.length/12;
+      for(const f of fires){
+        const fx=f.localPosition?.[0]??0,fz=f.localPosition?.[2]??0;
+        const d=Math.hypot(s.x*sx-fx,s.z*sz-fz);
+        if(d<3.2){
+          const heat=Math.max(0,1-d/3.2)*(f.intensity??0.6);
+          if(heat>nearFire)nearFire=heat;
+        }
+      }
+    }
+    s.firePanic=nearFire>0.18?Math.min(1,nearFire):Math.max(0,(s.firePanic??0)-dt*1.5);
+    if(nearFire>0.25&&dt>0){
+      s.scorchAmount=Math.min(1,(s.scorchAmount??0)+nearFire*dt*0.22);
+    }
     if(s.casualtyState==='fallen'){
       s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;s.brace=0;
-      s.climbPitch=Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
+      s.climbPitch=(s.fallDir??1)*Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
+      stepDeckhand(s,boat,0,wind,company);
+      continue;
+    }
+    if((s.knockdownTimer??0)>0){
+      s.knockdownTimer=Math.max(0,s.knockdownTimer-dt);
+      const recover=s.knockdownTimer<0.45?s.knockdownTimer/0.45:1;
+      s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;
+      s.climbPitch=(s.fallDir??1)*Math.PI*0.44*recover;
       stepDeckhand(s,boat,0,wind,company);
       continue;
     }
@@ -265,28 +302,32 @@ function crewPatrolMotion(s,boat,dt,company){
   return true;
 }
 function stepProceduralDeckhand(s,boat,dt,wind,company){
-  s.time+=dt;s.climbPitch=0;
+  const isDown=s.casualtyState==='fallen'||(s.knockdownTimer??0)>0;
+  s.time+=dt;if(!isDown)s.climbPitch=0;
   const o=s.observation;o.wind=wind;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;
   o.hazard=crewDeckHazard(boat,wind,s.intent==='brace');s.decisionIn-=dt;
   if(o.hazard||s.decisionIn<=0){let intent;try{intent=s.policy(o);}catch{intent=deckhandDecision(o);}s.intent=o.hazard?'brace':['patrol','standby','brace'].includes(intent)?intent:deckhandDecision(o);s.decisionIn=.5;}
   s.brace+=(Number(o.hazard)-s.brace)*(1-Math.exp(-dt*8));
-  const seated=crewSeatedPose(s,boat);s.seatedPose=seated;
+  const seated=isDown?null:crewSeatedPose(s,boat);s.seatedPose=seated;
   if(seated){
     s.yaw=seated.body.yaw;s.walk=0;
     s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
     const seat=seated.seat,feet=seated.feet;s.moisturePoints=[feet[0].map((v,i)=>(v+feet[1][i])*.5),seat.map((v,i)=>v+(i===1?.10:0)),seat.map((v,i)=>v+(i===1?.50:0)),seat.map((v,i)=>v+(i===1?.95:0))];
   }else{
-    const moving=crewPatrolMotion(s,boat,dt,company);
+    const moving=isDown?false:crewPatrolMotion(s,boat,dt,company);
     s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
-    s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
-    if(s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
+    const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
+    s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028+proneLift,s.z*boat.length/12]);
+    if(!isDown&&s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
   }
-  const half=s.yaw/2;s.rotation.set([0,Math.sin(half),0,Math.cos(half)]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
+  const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
+  s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
 }
 export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   if(hasExtendedCrewModel(boat.modelId))return stepProceduralDeckhand(s,boat,dt,wind,company);
-  s.time+=dt;s.climbPitch=0;
+  const isDown=s.casualtyState==='fallen'||(s.knockdownTimer??0)>0;
+  s.time+=dt;if(!isDown)s.climbPitch=0;
   const o=s.observation;o.order=s.order;o.roll=boat.roll??0;o.rollRate=boat.rollVelocity??0;o.wind=wind;
   // Hysteresis avoids oscillating between walking and bracing near the threshold.
   o.hazard=crewDeckHazard(boat,wind,s.intent==='brace');
@@ -299,16 +340,17 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   // Preserve human proportions when resizing the hull; do not squeeze a person
   // through a walkway narrower than their shoulders.
   s.visible=boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
-  const moving=crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
+  const moving=isDown?false:crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId])&&s.role!=='Helmsman'){
     const width=Math.max(0,modelDeckWidth(boat,s.z)-.34/(boat.beam/3.6));s.x=Math.max(-width,Math.min(width,s.x));
   }
-  if(s.role==='Helmsman'&&boat.modelId==='victory'){
+  const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
+  if(!isDown&&s.role==='Helmsman'&&boat.modelId==='victory'){
     const station=boat.model?.crewStations?.[s.id]??requirePlayableShipModel('victory').crewStations[s.id];
     s.x=station.x;s.z=station.z;s.yaw=station.yaw??Math.PI;s.climbPitch=.28;
     s.position.set([s.x*boat.beam/3.6,modelDeck(boat,s.z)*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
-  }else if(s.role==='Helmsman'&&ADDITIONAL_DESIGNS[boat.modelId]){
+  }else if(!isDown&&s.role==='Helmsman'&&ADDITIONAL_DESIGNS[boat.modelId]){
     const design=ADDITIONAL_DESIGNS[boat.modelId],grip=resolveShipNode(boat,'helm.grip'),spacing=.40;
     // Stand inboard of the real handle. The boat's own weather deck sets feet;
     // neither the Niña's 2.3-high quarterdeck nor its tiller distance is reused.
@@ -316,10 +358,10 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
     const station=design.crewStations[s.id];
     if(Math.abs(modelDeck(boat,s.z)-modelDeck(boat,station.z))>.15){s.x=station.x;s.z=station.z;s.yaw=station.yaw??0;}
     s.position.set([s.x*boat.beam/3.6,modelDeck(boat,s.z)*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
-  }else if(s.role==='Helmsman'){
+  }else if(!isDown&&s.role==='Helmsman'){
     const grip=resolveShipNode(boat,'helm.grip');s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-HELM_TILLER_DISTANCE)/lengthScale;s.yaw=0;
     s.position.set([grip[0],hullDeck(s.z)*HULL_VERTICAL_SCALE+.028,grip[2]-HELM_TILLER_DISTANCE]);
-  }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
+  }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028+proneLift,s.z*lengthScale]);
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
@@ -403,16 +445,21 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           poseCrewWork(a,s,boat);
           const offset=i*CREW_ACTOR_FLOATS;
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
+          const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
+          const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
+          const bandageSeed=(s.casualtyState==='wounded'||s.casualtyState==='fallen')?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
           const shirt=s.casualtyState==='fallen'
             ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
             :s.casualtyState==='wounded'
               ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
-          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female');
+          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(s.sex==='female')+bandageSeed;
           // The tiller station is below the camera; all crew remain visible.
-          b.actors[offset+19]=Number(!s.visible);
-          b.actors[offset+23]=Number(boat.enabled===true);
+          // Fractional part of shirt.w (< 0.5) carries wound severity to the crew shader.
+          b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
+          // Integer part of trousers.w is boat.enabled; fractional part (< 0.45) carries soot/scorch.
+          b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
           b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4;
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);

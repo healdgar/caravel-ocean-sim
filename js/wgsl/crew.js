@@ -70,13 +70,19 @@ export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIG
 struct CrewVertex {
   @builtin(position) position:vec4f, @location(0) world:vec3f,
   @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
-  @location(4) wet:vec2f, @location(5) skin:f32
+  @location(4) wet:vec2f, @location(5) skin:f32,
+  @location(6) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f
 };
 @vertex fn vs(v:CrewInput)->CrewVertex {
   let skin=crewSkin(v);let surface=crewSurface(v);let p=rotateHull((skin*vec4f(surface.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull((skin*vec4f(surface.normal,0)).xyz));out.color=v.color;
-  let actor=actors[v.instance];out.helm=actor.trousers.w;
+  let actor=actors[v.instance];out.helm=floor(actor.trousers.w+0.01);
+  out.bodyPos=v.position;
+  let woundAmt=select(clamp(actor.shirt.w/0.45,0.0,1.0),0.0,actor.shirt.w>0.5);
+  let scorchAmt=clamp(fract(actor.trousers.w)/0.42,0.0,1.0);
+  let bandageSeed=fract(actor.skin.w);
+  out.damage=vec3f(woundAmt,scorchAmt,bandageSeed);
   let base=u32(actor.hair.w);let y=v.position.y;
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.5,y));
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.08,1.55,y));
@@ -96,6 +102,18 @@ struct CrewVertex {
   let pixel=vec2u(v.position.xy)%4u;
   let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
   if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
+  let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
+  let bp=v.bodyPos;
+  let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
+  let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
+  // Tattered cloth edges at cuffs and hems when heavily wounded or scorched
+  if(v.skin<0.5 && (woundAmt+scorchAmt)>0.45){
+    let isCuffOrHem=(bp.y>0.16 && bp.y<0.28) || (bp.y>0.68 && bp.y<0.80) || (abs(bp.x)>0.22 && bp.y>0.85 && bp.y<1.08);
+    if(isCuffOrHem){
+      let fray=sin(bp.x*95.0+bp.z*85.0+bSeed*50.0)*0.5+0.5;
+      if(fray*0.65+nHash*0.35 > 1.12-(woundAmt*0.32+scorchAmt*0.25)){discard;}
+    }
+  }
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
@@ -103,12 +121,37 @@ struct CrewVertex {
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS-1}.0).rgb;
   let ambient=vesselAmbient(n,sky,sea);
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
-  let albedo=v.color*mix(1.0,mix(.68,.92,v.skin),wet.x);
+  var baseColor=v.color;
+  var roughBias=0.0;
+  if(woundAmt>0.15 || scorchAmt>0.10){
+    // Linen bandages wrapped around brow/head or forearm/calf on wounded sailors
+    let hasHeadBand=bSeed>0.16 && bp.y>1.63 && bp.y<1.71 && bp.z>-0.10;
+    let hasArmBand=bSeed>0.05 && abs(bp.x)>0.16 && bp.y>0.92 && bp.y<1.12 && sign(bp.x)==select(-1.0,1.0,bSeed>0.22);
+    let hasLegBand=bSeed>0.11 && bp.y>0.24 && bp.y<0.42 && sign(bp.x)==select(1.0,-1.0,bSeed>0.20);
+    if(woundAmt>0.25 && (hasHeadBand || hasArmBand || hasLegBand)){
+      let wrapStripe=sin((bp.y*85.0+bp.x*32.0)*6.283)*0.04;
+      var linen=vec3f(0.84,0.80,0.72)+vec3f(wrapStripe);
+      let seep=smoothstep(0.58,0.82,nLow+0.25*woundAmt);
+      linen=mix(linen,vec3f(0.38,0.035,0.025),seep*0.78);
+      baseColor=linen;
+      roughBias=0.22;
+    }else if(woundAmt>0.15){
+      let stainZone=smoothstep(0.52,0.78,nLow+0.22*woundAmt)*smoothstep(0.35,1.45,bp.y);
+      let bloodCol=select(vec3f(0.24,0.025,0.018),vec3f(0.32,0.04,0.03),v.skin>0.5);
+      baseColor=mix(baseColor,bloodCol,stainZone*woundAmt*0.72);
+    }
+    if(scorchAmt>0.08){
+      let sootMask=smoothstep(0.38,0.76,nLow*0.7+nHash*0.3)*scorchAmt;
+      baseColor=mix(baseColor,vec3f(0.065,0.058,0.052),sootMask*0.78);
+      roughBias=max(roughBias,sootMask*0.25);
+    }
+  }
+  let albedo=baseColor*mix(1.0,mix(.68,.92,v.skin),wet.x);
   let view=normalize(F.camPos.xyz-v.world);
   // A little diffuse wrap softens facial terminators. Skin has a broad dry
   // highlight; absorbed water darkens linen, surface water strengthens glints.
   // Roughness values are authored material choices, not measured cloth/skin data.
-  let rough=mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y);
+  let rough=clamp(mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y)+roughBias,0.08,0.99);
   let wrap=.14*v.skin;
   let diffuse=max(0.0,(dot(n,sun)+wrap)/(1.0+wrap))/(1.0+wrap);
   let f0=vec3f(.04);
