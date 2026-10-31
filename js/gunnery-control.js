@@ -2270,6 +2270,9 @@ const TIMBER_BUILDING_PREFABS = new Set([
   'cooperage_barrel_yard',
   'indigenous_bohio_village_compound',
   'palisade_stockade_wall',
+  'english_triangular_palisade_fort',
+  'english_half_timber_hall',
+  'english_timber_cottage',
 ]);
 
 export function classifyBuildingMaterial(building) {
@@ -2302,6 +2305,7 @@ export function createBuildingMagazineState(building) {
   const prefabId = building.prefabId ?? '';
   const isFortress = prefabId === 'bastion_trace_fortress';
   const isBastion = prefabId === 'stone_sea_bastion';
+  const isTimberFort = prefabId === 'english_triangular_palisade_fort';
   const isArsenal = prefabId === 'royal_atarazanas_arsenal';
   const isArmedPier = Boolean(building.armed || building.hasMagazine);
   const barrelMassKg = 40.8;
@@ -2311,9 +2315,11 @@ export function createBuildingMagazineState(building) {
       ? 120
       : isArsenal
         ? 80
-        : isArmedPier
-          ? 24
-          : 0;
+        : isTimberFort
+          ? 48
+          : isArmedPier
+            ? 24
+            : 0;
   const initialPowderKg = +(barrelsTotal * barrelMassKg).toFixed(1);
   const initialRounds = barrelsTotal > 0
     ? {
@@ -2858,6 +2864,12 @@ export function createBuildingGunDefinitions(building) {
       const gx = i * (hw * 0.50);
       addEmbrasureGun('starboard', 1, gx, yTop + 0.25, hl + 0.15, [0, 0, 1], 24);
     }
+  } else if (prefabId === 'english_triangular_palisade_fort') {
+    const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.35;
+    addEmbrasureGun('port', -1, -hw * 0.84, yBulwark, -hl * 0.68 - 2.0, [0, 0, -1], 12);
+    addEmbrasureGun('port', -1, 0, yBulwark, -hl * 0.68 - 1.2, [0, 0, -1], 12);
+    addEmbrasureGun('port', -1, hw * 0.84, yBulwark, -hl * 0.68 - 2.0, [0, 0, -1], 12);
+    addEmbrasureGun('starboard', 1, 0, yBulwark, hl * 0.82 + 2.0, [0, 0, 1], 12);
   } else if (building.armed && (prefabId === 'stone_quay_seawall' || prefabId === 'timber_mole_pier')) {
     addEmbrasureGun('port', -1, -hw * 0.35, yTop + 0.35, -hl, [0, 0, -1], 12);
     addEmbrasureGun('starboard', 1, hw * 0.35, yTop + 0.35, hl, [0, 0, 1], 12);

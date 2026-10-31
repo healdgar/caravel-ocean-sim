@@ -940,11 +940,46 @@ async function main() {
   boat.heave=-boat.hydrodynamics.sinkage;
   if(BROADSIDE_SCENARIO)boat.surgeVelocity=boat.speed*KNOT_TO_MPS;
   if(terrain&&LAND_STAGE){
-    const start=terrain.safeStart({x:boat.x,z:boat.z},boat);boat.x=start.x;boat.z=start.z;
+    const start=terrain.safeStart({x:boat.x,z:boat.z,heading:boat.heading},boat);boat.x=start.x;boat.z=start.z;
+    if(!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')&&Number.isFinite(terrain.views?.[LAND_STAGE]?.heading)){
+      boat.heading=terrain.views[LAND_STAGE].heading;
+    }
     if(terrain.region&&!qs.has('astroLat')&&!qs.has('astroLon')){
       try{astronomy.set({latitude:terrain.region.latitude,longitude:terrain.region.longitude},boat);}catch{/* ignore */}
     }
   }
+  const placeCompanionVesselInWater=(esc,idx)=>{
+    if(!terrain||!LAND_STAGE||esc.dormantEncounter)return;
+    const L=Math.max(boat.length,esc.asset.model.runtime.length),formation=esc.formation;
+    const minSep=Math.max(38,(boat.length+esc.boat.length)*0.65);
+    const isSeparatedFromFleet=(px,pz)=>{
+      if(Math.hypot(px-boat.x,pz-boat.z)<minSep)return false;
+      for(let j=1;j<=idx;j++){
+        const prev=vessels[j];
+        if(!prev||prev===esc||prev.dormantEncounter||!prev.boat)continue;
+        if(Math.hypot(px-prev.boat.x,pz-prev.boat.z)<minSep*0.85)return false;
+      }
+      return true;
+    };
+    const baseHeading=Number.isFinite(boat.heading)?boat.heading:0;
+    for(const angOff of [0,-30,30,-65,65,-105,105,150,-150,180]){
+      const hRad=((baseHeading+angOff)*Math.PI)/180;
+      const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
+      const rightX=Math.cos(hRad),rightZ=Math.sin(hRad);
+      const cand={
+        x:boat.x-fwdX*(L*formation.trail)+rightX*(L*formation.side),
+        z:boat.z-fwdZ*(L*formation.trail)+rightZ*(L*formation.side),
+        heading:baseHeading,
+      };
+      const start=terrain.safeStart(cand,esc.boat);
+      if(isSeparatedFromFleet(start.x,start.z)){
+        esc.boat.x=start.x;esc.boat.z=start.z;esc.boat.heading=baseHeading;
+        return;
+      }
+    }
+    const fallback=terrain.safeStart({x:boat.x,z:boat.z,heading:baseHeading},esc.boat);
+    esc.boat.x=fallback.x;esc.boat.z=fallback.z;esc.boat.heading=baseHeading;
+  };
   let followerEnabled=vessels.slice(1).some(v=>!v.dormantEncounter);
   let squadronGunneryOrders=qs.get('squadronGuns')==='1'||vessels.slice(1).some(v=>!v.dormantEncounter&&v.faction==='enemy');
   const shouldSquadronObeyGunnery=()=>followerEnabled&&(squadronGunneryOrders||vessels.slice(1).some(v=>v.faction==='enemy'));
@@ -980,7 +1015,7 @@ async function main() {
       faction:v.faction,
       salvoDelay:BROADSIDE_SCENARIO&&v.faction==='enemy'?8.0:0,
     });
-    if(!v.dormantEncounter&&terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
+    if(!v.dormantEncounter&&terrain&&LAND_STAGE)placeCompanionVesselInWater(v,idx+1);
   }
   const makeGunneryOptions=(ownerBoat,prefix='')=>({
     deferSeaCollision:ownerBoat===boat,
@@ -2125,26 +2160,19 @@ async function main() {
   const seaSliders = new Map();
   let initial1550AutoRepositioned=false;
   terrain?.discovery?.subscribe?.(disc=>{
-    if(!initial1550AutoRepositioned&&disc.applied&&disc.isCurated1550&&LAND_STAGE&&!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')){
+    if(!initial1550AutoRepositioned&&disc.applied&&LAND_STAGE&&!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')){
       initial1550AutoRepositioned=true;
       const v=terrain.views?.[LAND_STAGE];
       if(v){
-        const safe=terrain.safeStart({x:v.x,z:v.z},boat);
+        const safe=terrain.safeStart({x:v.x,z:v.z,heading:v.heading},boat);
         boat.x=safe.x;boat.z=safe.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
+        boat.aground=false;
         if(boat.enabled){cam.x=boat.x;cam.z=boat.z;}
         else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw*D2R;cam.pitch=v.pitch*D2R;}
-        for(const esc of vessels.slice(1)){
+        for(const [idx,esc] of vessels.slice(1).entries()){
           if(esc.dormantEncounter)continue;
-          const L=Math.max(boat.length,esc.asset.model.runtime.length),formation=esc.formation;
-          const hRad=(boat.heading||0)*D2R;
-          const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
-          const rightX=Math.cos(hRad),rightZ=Math.sin(hRad);
-          const targetPos={
-            x:boat.x-fwdX*(L*formation.trail)+rightX*(L*formation.side),
-            z:boat.z-fwdZ*(L*formation.trail)+rightZ*(L*formation.side),
-          };
-          const start=terrain.safeStart(targetPos,esc.boat);
-          esc.boat.x=start.x;esc.boat.z=start.z;esc.boat.heading=boat.heading;
+          placeCompanionVesselInWater(esc,idx+1);
+          esc.boat.aground=false;
           esc.boat.showProw=true;
         }
       }

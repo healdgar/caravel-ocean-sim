@@ -114,6 +114,7 @@ export const LANDFALL_SCENARIOS = Object.freeze([
     label: '1492 Columbus Fleet · Santa María, Pinta & Niña at Guanahaní',
     latitude: 24.05,
     longitude: -74.53,
+    shoreBearing: 280,
     year: 1492,
     ship: 'santa-maria',
     colors: 'castile',
@@ -183,6 +184,17 @@ export const LANDFALL_SCENARIOS = Object.freeze([
     weather: 'clear',
   }),
   Object.freeze({
+    id: 'jamestown-1610',
+    label: '1610 Jamestown · James Fort Triangular Palisade on the James River',
+    region: 'jamestown',
+    year: 1610,
+    ship: 'pinta',
+    colors: 'england',
+    fleet: 'nina:friendly',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
     id: 'corsair-ambush-tortuga-1645',
     label: '1645 Brethren of the Coast · Corsair Ambush off Tortuga',
     region: 'tortuga',
@@ -226,6 +238,7 @@ export const LANDFALL_SCENARIOS = Object.freeze([
     label: '1615 Rogue Liberator · Defending Wabanaki Wigwam Village (Maine)',
     latitude: 43.68,
     longitude: -70.20,
+    shoreBearing: 305,
     year: 1615,
     ship: 'nina',
     colors: 'indigenous-confederacy',
@@ -239,6 +252,7 @@ export const LANDFALL_SCENARIOS = Object.freeze([
     label: '1650 Sovereign Wabanaki Confederacy · Fortified Native Harbor (Shawmut)',
     latitude: 42.3601,
     longitude: -71.0589,
+    shoreBearing: 275,
     year: 1650,
     ship: 'pinta',
     colors: 'indigenous-confederacy',
@@ -251,6 +265,7 @@ export const LANDFALL_SCENARIOS = Object.freeze([
     label: '1510 Rogue Liberator · Sovereign Taíno Cacicazgo of Hispaniola',
     latitude: 19.95,
     longitude: -75.85,
+    shoreBearing: 5,
     year: 1510,
     ship: 'nina',
     colors: 'indigenous-confederacy',
@@ -296,15 +311,15 @@ export const LANDFALL_SCENARIOS = Object.freeze([
 
 // Curated pre-colonial & Native American coastal village landfalls across all 9 culture regions.
 export const INDIGENOUS_VILLAGE_PRESETS = Object.freeze([
-  Object.freeze({ id: 'wabanaki-casco', label: 'Wabanaki / Abenaki Birchbark Wigwam Village · Casco Bay, Maine (1550)', latitude: 43.68, longitude: -70.20, year: 1550 }),
-  Object.freeze({ id: 'shawmut-1550', label: 'Massachusett / Algonquian Village · Shawmut / Boston Harbor (1550)', latitude: 42.3601, longitude: -71.0589, year: 1550 }),
-  Object.freeze({ id: 'lenape-mannahatta', label: 'Lenape / Algonquian Longhouse Village · Mannahatta / New York (1550)', latitude: 40.703, longitude: -74.014, year: 1550 }),
-  Object.freeze({ id: 'powhatan-chesapeake', label: 'Powhatan Tsenacommacah Longhouse Town · Chesapeake Bay (1550)', latitude: 37.208, longitude: -76.778, year: 1550 }),
-  Object.freeze({ id: 'taino-xaragua', label: 'Taíno Cacicazgo (Bohíos & Caney) · Tiburon / Hispaniola (1495)', latitude: 18.45, longitude: -72.85, year: 1495 }),
-  Object.freeze({ id: 'kalinago-dominica', label: 'Kalinago (Island Carib) Carbet Stronghold · Waitukubuli / Dominica (1550)', latitude: 15.30, longitude: -61.38, year: 1550 }),
-  Object.freeze({ id: 'maya-cozumel', label: 'Chontal Maya Coastal Trading Port · Cozumel, Yucatán (1518)', latitude: 20.51, longitude: -86.95, year: 1518 }),
-  Object.freeze({ id: 'wayuu-maracaibo', label: 'Añú / Wayuu Lagoon Palafito Stilt Village · Lake Maracaibo (1550)', latitude: 10.95, longitude: -71.60, year: 1550 }),
-  Object.freeze({ id: 'tupinamba-guanabara', label: 'Tupinambá Coastal Maloca Village · Guanabara Bay, Brazil (1545)', latitude: -22.906, longitude: -43.172, year: 1545 }),
+  Object.freeze({ id: 'wabanaki-casco', label: 'Wabanaki / Abenaki Birchbark Wigwam Village · Casco Bay, Maine (1550)', latitude: 43.68, longitude: -70.20, shoreBearing: 305, year: 1550 }),
+  Object.freeze({ id: 'shawmut-1550', label: 'Massachusett / Algonquian Village · Shawmut / Boston Harbor (1550)', latitude: 42.3601, longitude: -71.0589, shoreBearing: 275, year: 1550 }),
+  Object.freeze({ id: 'lenape-mannahatta', label: 'Lenape / Algonquian Longhouse Village · Mannahatta / New York (1550)', latitude: 40.703, longitude: -74.014, shoreBearing: 15, year: 1550 }),
+  Object.freeze({ id: 'powhatan-chesapeake', label: 'Powhatan Tsenacommacah Longhouse Town · Chesapeake Bay (1550)', latitude: 37.208, longitude: -76.778, shoreBearing: 30, year: 1550 }),
+  Object.freeze({ id: 'taino-xaragua', label: 'Taíno Cacicazgo (Bohíos & Caney) · Tiburon / Hispaniola (1495)', latitude: 18.45, longitude: -72.85, shoreBearing: 185, year: 1495 }),
+  Object.freeze({ id: 'kalinago-dominica', label: 'Kalinago (Island Carib) Carbet Stronghold · Waitukubuli / Dominica (1550)', latitude: 15.30, longitude: -61.38, shoreBearing: 75, year: 1550 }),
+  Object.freeze({ id: 'maya-cozumel', label: 'Chontal Maya Coastal Trading Port · Cozumel, Yucatán (1518)', latitude: 20.51, longitude: -86.95, shoreBearing: 105, year: 1518 }),
+  Object.freeze({ id: 'wayuu-maracaibo', label: 'Añú / Wayuu Lagoon Palafito Stilt Village · Lake Maracaibo (1550)', latitude: 10.95, longitude: -71.60, shoreBearing: 265, year: 1550 }),
+  Object.freeze({ id: 'tupinamba-guanabara', label: 'Tupinambá Coastal Maloca Village · Guanabara Bay, Brazil (1545)', latitude: -22.906, longitude: -43.172, shoreBearing: 340, year: 1545 }),
 ]);
 
 const SCENARIO_CLEANUP_KEYS = [
@@ -331,7 +346,7 @@ export function scenarioStageURL(href, scenarioOrId, fallbackStage = 'coast', fa
   } else {
     const regionSpec = sc.region
       ? sc.region
-      : { latitude: sc.latitude, longitude: sc.longitude, year: sc.year };
+      : { latitude: sc.latitude, longitude: sc.longitude, shoreBearing: sc.shoreBearing, year: sc.year };
     url = coastalRegionStageURL(href, regionSpec, stage, weather, sc.year);
     for (const k of SCENARIO_CLEANUP_KEYS) url.searchParams.delete(k);
   }
@@ -484,7 +499,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
       const ind=INDIGENOUS_VILLAGE_PRESETS.find(v=>v.id===val.slice(11));
       if(ind){
         const effectiveY=targetYear!==undefined?targetYear:ind.year;
-        const url=stripScenarioOverrides(coastalRegionStageURL(location.href,{latitude:ind.latitude,longitude:ind.longitude},stage==='dock'?'coast':(stage||'coast'),weather,effectiveY));
+        const url=stripScenarioOverrides(coastalRegionStageURL(location.href,{latitude:ind.latitude,longitude:ind.longitude,shoreBearing:ind.shoreBearing},stage==='dock'?'coast':(stage||'coast'),weather,effectiveY));
         location.assign(url.href);
         return;
       }

@@ -1595,6 +1595,142 @@ test('village and port buildings grade terrain pads, sync post-smoothing elevati
   assert.ok(pack.port.instances.every(i => Number.isFinite(i.y) && Number.isFinite(i.slopeX) && Number.isFinite(i.slopeZ)));
 });
 
+test('Jamestown (1610 & 1650) and Plymouth generate triangular timber palisade fort, half-timbered halls & cottages, temperate forest, and zero palm trees', async () => {
+  const jamestown1610 = generateProceduralCoastalPack({
+    id: 'jamestown',
+    year: 1610,
+    size: 65,
+    biomeSize: 32,
+    albedoSize: 32,
+    vegetationCandidates: 1800,
+  });
+
+  // 1. Climate & vegetation: Virginia (37.208°N) must be temperate broadleaf forest with zero palm trees
+  assert.equal(jamestown1610.region.climate, 'temperate');
+  assert.equal(jamestown1610.climateProfile.forestPackKind, 'temperate');
+  assert.equal(jamestown1610.vegetation.stats.palmCount, 0, 'Jamestown Virginia must have 0 palm trees');
+  assert.equal(jamestown1610.vegetation.palms.length, 0);
+
+  // 2. Architecture: James Fort triangular palisade, half-timbered church/storehouse, and clapboard cottages
+  const prefabs1610 = new Set(jamestown1610.port.instances.map((i) => i.prefabId));
+  assert.ok(prefabs1610.has('english_triangular_palisade_fort'), 'Jamestown has James Fort triangular timber palisade');
+  assert.ok(prefabs1610.has('english_half_timber_hall'), 'Jamestown has English half-timbered church & storehouse');
+  assert.ok(prefabs1610.has('english_timber_cottage'), 'Jamestown has English clapboard & wattle-and-daub cottages');
+
+  // Must NOT contain Spanish Caribbean stucco/terracotta buildings
+  for (const spanishId of [
+    'casa_de_contratacion',
+    'mission_chapel',
+    'modular_patio_cloister',
+    'thatched_bohio_palafito',
+    'stone_sea_bastion',
+    'bastion_trace_fortress',
+  ]) {
+    assert.equal(
+      prefabs1610.has(spanishId),
+      false,
+      `Jamestown must not place Spanish Caribbean prefab ${spanishId}`
+    );
+  }
+
+  // 3. Verify 3D geometry & garrison for James Fort
+  assert.ok(jamestown1610.portGeometry.vertices.length > 800);
+  assert.ok(jamestown1610.portGeometry.indices.length > 300);
+  const { createFortGarrison } = await import('../js/crew.js');
+  const garrison = createFortGarrison(jamestown1610.port);
+  assert.ok(
+    garrison.soldiers.some((s) => s.buildingPrefabId === 'english_triangular_palisade_fort'),
+    'James Fort bulwarks are manned by gunners & sentries'
+  );
+
+  // 4. Verify mature Jamestown (1650 New Towne) and Plymouth Colony (1625) also use English timber architecture & zero palms
+  const jamestown1650 = generateProceduralCoastalPack({
+    id: 'jamestown',
+    year: 1650,
+    size: 65,
+    biomeSize: 32,
+    albedoSize: 32,
+    vegetationCandidates: 1200,
+  });
+  const prefabs1650 = new Set(jamestown1650.port.instances.map((i) => i.prefabId));
+  assert.ok(prefabs1650.has('english_triangular_palisade_fort'));
+  assert.ok(prefabs1650.has('english_half_timber_hall'));
+  assert.ok(prefabs1650.has('english_timber_cottage'));
+  assert.equal(jamestown1650.vegetation.stats.palmCount, 0);
+});
+
+test('all LANDFALL_SCENARIOS, INDIGENOUS_VILLAGE_PRESETS, and post-smooth coastlines spawn ships in navigable water inside the resident grid', () => {
+  const vesselsToTest = [
+    { name: 'Caravel', length: 20, beam: 6, hydrodynamics: { draft: 2.1 } },
+    { name: 'HMS Victory', length: 68, beam: 15.8, hydrodynamics: { draft: 5.8 } },
+  ];
+
+  // Test representative scenarios including coordinate-based, river-mouth, island, and smoothed-coastline packs
+  const scenarioSpecs = [
+    { id: 'jamestown', year: 1610 },
+    { id: 'tortuga', year: 1645 },
+    { id: 'port-royal', year: 1670 },
+    { id: 'palos-huelva', year: 1492 },
+    { id: 'lisbon', year: 1550 },
+    { id: 'plymouth-colony', year: 1625 },
+    { id: 'new-amsterdam', year: 1640 },
+    { id: 'quebec', year: 1635 },
+    { latitude: 24.05, longitude: -74.53, shoreBearing: 280, year: 1492 }, // Guanahaní 1492
+    { latitude: 43.68, longitude: -70.20, shoreBearing: 305, year: 1615 }, // Wabanaki Maine
+    { latitude: 42.3601, longitude: -71.0589, shoreBearing: 275, year: 1650 }, // Sovereign Shawmut
+    { latitude: 19.95, longitude: -75.85, shoreBearing: 5, year: 1510 }, // Sovereign Taíno
+  ];
+
+  for (const spec of scenarioSpecs) {
+    const pack = generateProceduralCoastalPack({
+      ...spec,
+      size: 65,
+      biomeSize: 32,
+      albedoSize: 32,
+      vegetationCandidates: 300,
+    });
+    const halfSpan = pack.region.span * 0.46;
+
+    for (const stage of ['coast', 'harbor', 'dock']) {
+      const view = pack.views[stage];
+      assert.ok(
+        Math.abs(view.x - pack.region.x) <= halfSpan && Math.abs(view.z - pack.region.z) <= halfSpan,
+        `${pack.region.id} (${stage}) view (${view.x.toFixed(0)}, ${view.z.toFixed(0)}) stays inside resident grid (±${halfSpan.toFixed(0)}m)`
+      );
+      const hView = terrainSample(pack.heights, view.x, view.z, pack.region);
+      assert.ok(
+        hView <= -3.0,
+        `${pack.region.id} (${stage}) view must be in navigable water <= -3.0m, got ${hView.toFixed(2)}m`
+      );
+
+      for (const vessel of vesselsToTest) {
+        const start = safeLandfallStart(pack.heights, view, vessel, pack.region);
+        const hStart = terrainSample(pack.heights, start.x, start.z, pack.region);
+        assert.ok(
+          hStart <= -3.0,
+          `${pack.region.id} (${stage}, ${vessel.name}) safeLandfallStart must be in water <= -3.0m, got ${hStart.toFixed(2)}m`
+        );
+        const boat = {
+          ...vessel,
+          x: start.x,
+          z: start.z,
+          heading: view.heading ?? pack.region.shoreBearing ?? 0,
+          surgeVelocity: 2.0,
+          leewayVelocity: 0,
+        };
+        const groundedAtSpawn = constrainIslandMotion(pack.heights, boat, start.x, start.z, null, pack.region);
+        assert.equal(
+          groundedAtSpawn,
+          false,
+          `${pack.region.id} (${stage}, ${vessel.name}) must not be aground at spawn`
+        );
+        assert.equal(boat.aground, false);
+      }
+    }
+  }
+});
+
+
 
 
 

@@ -25256,6 +25256,7 @@ const FORTIFICATION_PREFAB_IDS = Object.freeze([
   'bastion_trace_fortress',
   'torreon_atalaya_farol',
   'curtain_wall_and_gate',
+  'english_triangular_palisade_fort',
 ]);
 
 const INDIGENOUS_VILLAGE_PREFAB_IDS = Object.freeze([
@@ -25649,6 +25650,19 @@ function createFortificationSoldiersForInstance(inst, startIndex = 0) {
         specs.push({ lx: sx * 2.2, ly: yPlinth, lz: -rBase - 0.38, routeZ: [-rBase - 0.38, -rBase - 0.38], localYaw: Math.PI, role: 'Alabardero de Torre', stationKind: 'plinth' });
       }
     }
+  } else if (inst.prefabId === 'english_triangular_palisade_fort') {
+    const yPlinth = yGround + 0.35;
+    const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
+    const yBulwarkDeck = yWallTop - 1.05;
+    const bSW = [-hw * 0.84, -hl * 0.68];
+    const bSE = [hw * 0.84, -hl * 0.68];
+    const bN = [0, hl * 0.82];
+    specs.push({ lx: bSW[0], ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.2, bSW[1] + 0.6], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
+    specs.push({ lx: 0, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 0.8, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
+    specs.push({ lx: bSE[0], ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.2, bSE[1] + 0.6], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
+    specs.push({ lx: bN[0], ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 0.8, bN[1] + 1.0], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
+    specs.push({ lx: -2.4, ly: yPlinth, lz: -1.8, routeZ: [-3.5, 1.5], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'parade' });
+    specs.push({ lx: 2.4, ly: yPlinth, lz: -1.8, routeZ: [-3.5, 1.5], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'parade' });
   } else if (inst.prefabId === 'curtain_wall_and_gate') {
     const wallHW = Math.min(3.4, hw);
     const yWalk = yTop - 0.90;
@@ -25688,8 +25702,10 @@ function createFortificationSoldiersForInstance(inst, startIndex = 0) {
           : 'Rampart Guardian'
       : spec.role;
     const s = createDeckhand();
+    const baseLy = spec.ly;
+    const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
-    const wy = spec.ly + 0.028;
+    const wy = effLy + 0.028;
     const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
     const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
     Object.assign(s, {
@@ -25704,7 +25720,8 @@ function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       buildingPrefabId: inst.prefabId,
       building: inst,
       lx: spec.lx,
-      ly: spec.ly,
+      baseLy,
+      ly: effLy,
       lz: spec.lz,
       routeZ: [...spec.routeZ],
       targetZ: spec.routeZ[1],
@@ -25750,34 +25767,34 @@ function createIndigenousVillagersForInstance(inst, startIndex = 0, cultureId = 
 
   if (inst.prefabId === 'abenaki_birchbark_wigwam' || inst.prefabId === 'taino_circular_bohio') {
     const rDoor = Math.min(hw, hl) + 1.15;
-    specs.push({ lx: -1.1, ly: yGround + 0.25, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: Math.PI, role: 'Villager' });
-    specs.push({ lx: 1.1, ly: yGround + 0.25, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: Math.PI, role: 'Artisan / Weaver' });
+    specs.push({ lx: -1.1, ly: yGround + 0.04, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: Math.PI, role: 'Villager' });
+    specs.push({ lx: 1.1, ly: yGround + 0.04, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: Math.PI, role: 'Artisan / Weaver' });
   } else if (inst.prefabId === 'algonquian_longhouse' || inst.prefabId === 'tupinamba_oca_longhouse' || inst.prefabId === 'kalinago_carbet_hall') {
     const zFront = -hl - 1.4;
     const zSide0 = -hl * 0.65;
     const zSide1 = hl * 0.65;
-    specs.push({ lx: -1.4, ly: yGround + 0.30, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: Math.PI, role: 'Sachem / Cacique' });
-    specs.push({ lx: 1.4, ly: yGround + 0.30, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: Math.PI, role: 'Elder / Speaker' });
-    specs.push({ lx: -(hw + 1.25), ly: yGround + 0.20, lz: 0, routeZ: [zSide0, zSide1], localYaw: -Math.PI / 2, role: 'Hunter / Bowyer' });
-    specs.push({ lx: hw + 1.25, ly: yGround + 0.20, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI / 2, role: 'Potter / Cultivator' });
+    specs.push({ lx: -1.4, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: Math.PI, role: 'Sachem / Cacique' });
+    specs.push({ lx: 1.4, ly: yGround + 0.05, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: Math.PI, role: 'Elder / Speaker' });
+    specs.push({ lx: -(hw + 1.25), ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: -Math.PI / 2, role: 'Hunter / Bowyer' });
+    specs.push({ lx: hw + 1.25, ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI / 2, role: 'Potter / Cultivator' });
   } else if (inst.prefabId === 'taino_cacique_caney' || inst.prefabId === 'maya_limestone_shrine_and_na') {
-    const yPlinth = yGround + (inst.prefabId === 'maya_limestone_shrine_and_na' ? 0.55 : 0.68);
+    const yPlinth = yGround + (inst.prefabId === 'maya_limestone_shrine_and_na' ? 0.55 : 0.12);
     const zFront = -hl - 1.3;
     specs.push({ lx: 0, ly: yPlinth, lz: -hl * 0.68, routeZ: [-hl * 0.75, -hl * 0.45], localYaw: Math.PI, role: 'Cacique / Halach Uinic' });
-    specs.push({ lx: -2.2, ly: yGround + 0.22, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Behique / Guardian' });
-    specs.push({ lx: 2.2, ly: yGround + 0.22, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Weaver / Noble' });
+    specs.push({ lx: -2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Behique / Guardian' });
+    specs.push({ lx: 2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Weaver / Noble' });
   } else if (inst.prefabId === 'taino_batey_court' || inst.prefabId === 'indigenous_palisade_ring') {
     const zSpan = Math.max(2.5, hl * 0.58);
     for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * (hw * 0.45), ly: yGround + 0.22, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
+      specs.push({ lx: sx * (hw * 0.45), ly: yGround + 0.05, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
     }
   } else if (inst.prefabId === 'palafito_estuary_village') {
     const yDeck = yGround + (inst.height ?? 6.8) * 0.36 + 0.16;
     specs.push({ lx: -1.8, ly: yDeck, lz: -1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Lagoon Fisher' });
     specs.push({ lx: 1.8, ly: yDeck, lz: 1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Net Maker' });
   } else if (inst.prefabId === 'indigenous_canoe_landing') {
-    specs.push({ lx: -hw * 0.32, ly: yGround + 0.22, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Canoe Builder' });
-    specs.push({ lx: hw * 0.32, ly: yGround + 0.22, lz: 0.4, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Shore Lookout' });
+    specs.push({ lx: -hw * 0.32, ly: yGround + 0.06, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Canoe Builder' });
+    specs.push({ lx: hw * 0.32, ly: yGround + 0.06, lz: 0.4, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Shore Lookout' });
   }
 
   return specs.map((spec, idx) => {
@@ -25787,8 +25804,10 @@ function createIndigenousVillagersForInstance(inst, startIndex = 0, cultureId = 
     const name = namePool[Math.floor(globalIdx / 2) % namePool.length];
     const look = INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length];
     const s = createDeckhand();
+    const baseLy = spec.ly;
+    const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
-    const wy = spec.ly + 0.028;
+    const wy = effLy + 0.028;
     const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
     const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
     Object.assign(s, {
@@ -25805,7 +25824,8 @@ function createIndigenousVillagersForInstance(inst, startIndex = 0, cultureId = 
       buildingPrefabId: inst.prefabId,
       building: inst,
       lx: spec.lx,
-      ly: spec.ly,
+      baseLy,
+      ly: effLy,
       lz: spec.lz,
       routeZ: [...spec.routeZ],
       targetZ: spec.routeZ[1],
@@ -25929,6 +25949,7 @@ function stepFortGarrison(garrison, dt = 0, wind = 0) {
 
     const cosY = Math.cos(inst?.yaw ?? 0);
     const sinY = Math.sin(inst?.yaw ?? 0);
+    s.ly = (s.baseLy ?? s.ly) + s.lx * (inst?.slopeX ?? 0) + s.lz * (inst?.slopeZ ?? 0);
     const wx = (inst?.x ?? 0) + s.lx * cosY + s.lz * sinY;
     const wy = s.ly + 0.028;
     const wz = (inst?.z ?? 0) - s.lx * sinY + s.lz * cosY;
@@ -27091,13 +27112,26 @@ function islandCoordinates(x,z,region=ISLAND){
   return {latitude:region.latitude-(z-region.z)/111195,
     longitude:region.longitude+(x-region.x)/(111195*Math.cos(region.latitude*Math.PI/180))};
 }
+function sampleCoastalClamped(heights,x,z,region=ISLAND){
+  if(region!==ISLAND){
+    const half=(region.span??8192)*0.5;
+    if(Math.abs(x-region.x)>half||Math.abs(z-region.z)>half){
+      const cx=Math.max(region.x-half+1,Math.min(region.x+half-1,x));
+      const cz=Math.max(region.z-half+1,Math.min(region.z+half-1,z));
+      const edgeH=terrainSample(heights,cx,cz,region);
+      if(edgeH>-1.5)return edgeH;
+    }
+  }
+  return terrainSample(heights,x,z,region);
+}
 // Conservative hull envelope against an elevation-derived coastal skirt for safe spawn placement.
 function islandHullClearance(heights,boat,x,z,region=ISLAND,sample=null){
   const radius=Math.hypot(boat.length,boat.beam)*.5+8;
   const threshold=-Math.max(3,(boat.hydrodynamics?.draft??2)+1);
   for(let k=0;k<9;k++){
     const a=k*Math.PI/4,r=k===8?0:radius;
-    if((sample?sample(x+Math.cos(a)*r,z+Math.sin(a)*r):terrainSample(heights,x+Math.cos(a)*r,z+Math.sin(a)*r,region))>threshold)return false;
+    const px=x+Math.cos(a)*r,pz=z+Math.sin(a)*r;
+    if((sample?sample(px,pz):sampleCoastalClamped(heights,px,pz,region))>threshold)return false;
   }
   return true;
 }
@@ -27391,32 +27425,76 @@ function hullWorstBedHeight(heights,boat,x,z,region=ISLAND,sample=null,options=n
 // The broad elevation-derived shelf can exceed 500m; search the entire resident
 // region, using the same footprint/depth margin as the movement constraint.
 function safeLandfallStart(heights,view,boat,region=ISLAND,sample=null){
-  const result=(x,z)=>({...view,x,z,moved:x!==view.x||z!==view.z,depth:-(sample?sample(x,z):terrainSample(heights,x,z,region))});
-  if(islandHullClearance(heights,boat,view.x,view.z,region,sample))return result(view.x,view.z);
+  const sampleFn=sample||((px,pz)=>sampleCoastalClamped(heights,px,pz,region));
+  const result=(x,z)=>({...view,x,z,moved:x!==view.x||z!==view.z,depth:-sampleFn(x,z)});
+  const span=region?.span??8192;
+  const stayInResident=region!==ISLAND&&Math.abs(view.x-region.x)<=span*0.52&&Math.abs(view.z-region.z)<=span*0.52;
+  const inResidentBounds=(x,z)=>!stayInResident||(Math.abs(x-region.x)<=span*0.45&&Math.abs(z-region.z)<=span*0.45);
+  if(inResidentBounds(view.x,view.z)&&islandHullClearance(heights,boat,view.x,view.z,region,sampleFn))return result(view.x,view.z);
   const dx=view.x-region.x,dz=view.z-region.z,distance=Math.hypot(dx,dz);
   const ux=distance?dx/distance:1,uz=distance?dz/distance:0;
-  const limit=region.span*2+Math.hypot(boat.length,boat.beam);
+  const limit=span*2+Math.hypot(boat.length,boat.beam);
   const hasCoastalBearing=Number.isFinite(region?.shoreBearing)&&region!==ISLAND;
   const hRad=((view.heading??region?.shoreBearing??0)*Math.PI)/180;
   const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
-  const hasForwardRoom=(x,z)=>!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,sample);
+  const hasForwardRoom=(x,z)=>!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,sampleFn);
   let firstValid=null;
+  if(hasCoastalBearing){
+    const rayAngles=[0,-20,20,-40,40,-65,65,-90,90,-125,125,-155,155,180];
+    for(const degOff of rayAngles){
+      const sbRad=((region.shoreBearing+degOff)*Math.PI)/180;
+      const offX=-Math.sin(sbRad),offZ=Math.cos(sbRad);
+      const stepD=degOff===0?16:24;
+      const maxD=stayInResident?Math.min(limit,span*0.95):limit;
+      for(let d=16;d<=maxD;d+=stepD){
+        const x=view.x+offX*d,z=view.z+offZ*d;
+        if(!inResidentBounds(x,z))continue;
+        if(islandHullClearance(heights,boat,x,z,region,sampleFn)){
+          if(!firstValid)firstValid={x,z};
+          if(hasForwardRoom(x,z))return result(x,z);
+        }
+      }
+    }
+  }
+  if(stayInResident&&heights?.length){
+    const n=region.size||Math.round(Math.sqrt(heights.length));
+    const stride=n>=257?4:2;
+    let bestFwd=null,bestFwdDist2=Infinity,bestAny=null,bestAnyDist2=Infinity;
+    for(let j=4;j<n-4;j+=stride){
+      const wz=region.z+(j/(n-1)-0.5)*span;
+      if(Math.abs(wz-region.z)>span*0.44)continue;
+      for(let i=4;i<n-4;i+=stride){
+        if(heights[j*n+i]>-3.0)continue;
+        const wx=region.x+(i/(n-1)-0.5)*span;
+        if(Math.abs(wx-region.x)>span*0.44)continue;
+        const d2=(wx-view.x)*(wx-view.x)+(wz-view.z)*(wz-view.z);
+        if(d2>=bestFwdDist2&&d2>=bestAnyDist2)continue;
+        if(islandHullClearance(heights,boat,wx,wz,region,sampleFn)){
+          if(d2<bestAnyDist2){bestAnyDist2=d2;bestAny={x:wx,z:wz};}
+          if(d2<bestFwdDist2&&hasForwardRoom(wx,wz)){bestFwdDist2=d2;bestFwd={x:wx,z:wz};}
+        }
+      }
+    }
+    if(bestFwd)return result(bestFwd.x,bestFwd.z);
+    if(bestAny)return result(bestAny.x,bestAny.z);
+  }
+  const rawSampleFn=sample||((px,pz)=>terrainSample(heights,px,pz,region));
   if(hasCoastalBearing){
     const sbRad=(region.shoreBearing*Math.PI)/180;
     const offX=-Math.sin(sbRad),offZ=Math.cos(sbRad);
     for(let d=16;d<=limit;d+=16){
       const x=view.x+offX*d,z=view.z+offZ*d;
-      if(islandHullClearance(heights,boat,x,z,region,sample)){
+      if(islandHullClearance(heights,boat,x,z,region,rawSampleFn)){
         if(!firstValid)firstValid={x,z};
-        if(hasForwardRoom(x,z))return result(x,z);
+        if(!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,rawSampleFn))return result(x,z);
       }
     }
   }
   for(let d=50;d<=limit;d+=50){
     const x=view.x+ux*d,z=view.z+uz*d;
-    if(islandHullClearance(heights,boat,x,z,region,sample)){
+    if(islandHullClearance(heights,boat,x,z,region,rawSampleFn)){
       if(!firstValid)firstValid={x,z};
-      if(hasForwardRoom(x,z))return result(x,z);
+      if(!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,rawSampleFn))return result(x,z);
     }
   }
   if(firstValid)return result(firstValid.x,firstValid.z);
@@ -28556,6 +28634,7 @@ function applyIndigenousSupportAction(
 
 
 
+export { terrainSurfaceSample };
 
 const COASTAL_DEG_TO_RAD = Math.PI / 180;
 const COASTAL_RAD_TO_DEG = 180 / Math.PI;
@@ -28988,30 +29067,30 @@ const HISTORICAL_1550_PORTS = Object.freeze([
 const HISTORICAL_COLONIAL_PORTS = Object.freeze([
   ...HISTORICAL_1550_PORTS,
   // Late 16th-century foundations (1551–1599)
-  Object.freeze({ id: 'st-augustine', name: 'San Agustín de La Florida (St. Augustine)', latitude: 29.894, longitude: -81.312, foundedYear: 1565, fortProgramYear: 1672, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'rio-de-janeiro', name: 'São Sebastião do Rio de Janeiro', latitude: -22.906, longitude: -43.172, foundedYear: 1565, fortProgramYear: 1618, crown: 'portugal', baseTier: 3 }),
-  Object.freeze({ id: 'manila', name: 'Intramuros de Manila · Cavite', latitude: 14.589, longitude: 120.974, foundedYear: 1571, fortProgramYear: 1593, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'portobelo', name: 'San Felipe de Portobelo', latitude: 9.555, longitude: -79.654, foundedYear: 1597, fortProgramYear: 1597, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'st-augustine', name: 'San Agustín de La Florida (St. Augustine)', latitude: 29.894, longitude: -81.312, shoreBearing: 265, coastalArchetype: 'estuary-bay', foundedYear: 1565, fortProgramYear: 1672, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'rio-de-janeiro', name: 'São Sebastião do Rio de Janeiro', latitude: -22.906, longitude: -43.172, shoreBearing: 340, coastalArchetype: 'sheltered-bay', foundedYear: 1565, fortProgramYear: 1618, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'manila', name: 'Intramuros de Manila · Cavite', latitude: 14.589, longitude: 120.974, shoreBearing: 85, coastalArchetype: 'sheltered-bay', foundedYear: 1571, fortProgramYear: 1593, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'portobelo', name: 'San Felipe de Portobelo', latitude: 9.555, longitude: -79.654, shoreBearing: 75, coastalArchetype: 'sheltered-bay', foundedYear: 1597, fortProgramYear: 1597, crown: 'spain', baseTier: 3 }),
   // Early 17th-century foundations (1600–1639)
-  Object.freeze({ id: 'jamestown', name: 'Jamestown · Virginia', latitude: 37.208, longitude: -76.778, foundedYear: 1607, fortProgramYear: 1665, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'quebec', name: 'Québec · Stadacona', latitude: 46.813, longitude: -71.202, foundedYear: 1608, fortProgramYear: 1660, crown: 'france', baseTier: 2 }),
-  Object.freeze({ id: 'bermuda', name: "St. George's · Bermuda", latitude: 32.381, longitude: -64.678, foundedYear: 1612, fortProgramYear: 1620, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'batavia', name: 'Batavia · Sunda Kelapa', latitude: -6.127, longitude: 106.812, foundedYear: 1619, fortProgramYear: 1627, crown: 'netherlands', baseTier: 3 }),
-  Object.freeze({ id: 'plymouth-colony', name: 'Plymouth Colony · New England', latitude: 41.958, longitude: -70.662, foundedYear: 1620, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'new-amsterdam', name: 'New Amsterdam · New York Harbor', latitude: 40.703, longitude: -74.014, foundedYear: 1624, fortProgramYear: 1664, crown: 'netherlands', baseTier: 3 }),
-  Object.freeze({ id: 'st-kitts', name: 'Basseterre · St. Christopher (St. Kitts)', latitude: 17.295, longitude: -62.725, foundedYear: 1624, fortProgramYear: 1666, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'tortuga', name: 'Cayona · Île de la Tortue (Tortuga)', latitude: 20.008, longitude: -72.792, foundedYear: 1625, fortProgramYear: 1640, crown: 'france', baseTier: 2 }),
-  Object.freeze({ id: 'bridgetown', name: 'Bridgetown · Carlisle Bay (Barbados)', latitude: 13.097, longitude: -59.618, foundedYear: 1628, fortProgramYear: 1656, crown: 'england', baseTier: 3 }),
-  Object.freeze({ id: 'boston', name: 'Boston · Massachusetts Bay', latitude: 42.360, longitude: -71.059, foundedYear: 1630, fortProgramYear: 1665, crown: 'england', baseTier: 3 }),
-  Object.freeze({ id: 'curacao', name: 'Willemstad · St. Anna Bay (Curaçao)', latitude: 12.108, longitude: -68.935, foundedYear: 1634, fortProgramYear: 1635, crown: 'netherlands', baseTier: 3 }),
-  Object.freeze({ id: 'fort-royal-martinique', name: 'Fort-Royal · Martinique', latitude: 14.602, longitude: -61.068, foundedYear: 1635, fortProgramYear: 1672, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'jamestown', name: 'Jamestown · Virginia', latitude: 37.208, longitude: -76.778, shoreBearing: 30, coastalArchetype: 'river-mouth', foundedYear: 1607, fortProgramYear: 1665, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'quebec', name: 'Québec · Stadacona', latitude: 46.813, longitude: -71.202, shoreBearing: 320, coastalArchetype: 'river-mouth', foundedYear: 1608, fortProgramYear: 1660, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'bermuda', name: "St. George's · Bermuda", latitude: 32.381, longitude: -64.678, shoreBearing: 310, coastalArchetype: 'harbor-channel', foundedYear: 1612, fortProgramYear: 1620, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'batavia', name: 'Batavia · Sunda Kelapa', latitude: -6.127, longitude: 106.812, shoreBearing: 185, coastalArchetype: 'estuary-bay', foundedYear: 1619, fortProgramYear: 1627, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'plymouth-colony', name: 'Plymouth Colony · New England', latitude: 41.958, longitude: -70.662, shoreBearing: 255, coastalArchetype: 'sheltered-bay', foundedYear: 1620, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'new-amsterdam', name: 'New Amsterdam · New York Harbor', latitude: 40.703, longitude: -74.014, shoreBearing: 15, coastalArchetype: 'harbor-channel', foundedYear: 1624, fortProgramYear: 1664, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'st-kitts', name: 'Basseterre · St. Christopher (St. Kitts)', latitude: 17.295, longitude: -62.725, shoreBearing: 45, coastalArchetype: 'headland-bay', foundedYear: 1624, fortProgramYear: 1666, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'tortuga', name: 'Cayona · Île de la Tortue (Tortuga)', latitude: 20.008, longitude: -72.792, shoreBearing: 15, coastalArchetype: 'harbor-channel', foundedYear: 1625, fortProgramYear: 1640, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'bridgetown', name: 'Bridgetown · Carlisle Bay (Barbados)', latitude: 13.097, longitude: -59.618, shoreBearing: 55, coastalArchetype: 'sheltered-bay', foundedYear: 1628, fortProgramYear: 1656, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'boston', name: 'Boston · Massachusetts Bay', latitude: 42.360, longitude: -71.059, shoreBearing: 275, coastalArchetype: 'harbor-channel', foundedYear: 1630, fortProgramYear: 1665, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'curacao', name: 'Willemstad · St. Anna Bay (Curaçao)', latitude: 12.108, longitude: -68.935, shoreBearing: 35, coastalArchetype: 'harbor-channel', foundedYear: 1634, fortProgramYear: 1635, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'fort-royal-martinique', name: 'Fort-Royal · Martinique', latitude: 14.602, longitude: -61.068, shoreBearing: 20, coastalArchetype: 'sheltered-bay', foundedYear: 1635, fortProgramYear: 1672, crown: 'france', baseTier: 2 }),
   // Mid-to-late 17th-century foundations up to the 1680s (1640–1689)
-  Object.freeze({ id: 'cape-town', name: 'Kaapstad · Table Bay (Cape Town)', latitude: -33.918, longitude: 18.423, foundedYear: 1652, fortProgramYear: 1666, crown: 'netherlands', baseTier: 3 }),
-  Object.freeze({ id: 'port-royal', name: 'Port Royal · Cagway Spit (Jamaica)', latitude: 17.937, longitude: -76.841, foundedYear: 1655, fortProgramYear: 1662, crown: 'england', baseTier: 3 }),
-  Object.freeze({ id: 'nassau', name: 'Charles Town · New Providence (Nassau)', latitude: 25.078, longitude: -77.343, foundedYear: 1666, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'cap-francois', name: 'Cap-François · Saint-Domingue', latitude: 19.759, longitude: -72.201, foundedYear: 1670, crown: 'france', baseTier: 2 }),
-  Object.freeze({ id: 'charleston', name: 'Charles Town · Carolina (Charleston)', latitude: 32.776, longitude: -79.928, foundedYear: 1670, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'philadelphia', name: 'Philadelphia · Delaware River', latitude: 39.947, longitude: -75.141, foundedYear: 1682, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'cape-town', name: 'Kaapstad · Table Bay (Cape Town)', latitude: -33.918, longitude: 18.423, shoreBearing: 215, coastalArchetype: 'headland-bay', foundedYear: 1652, fortProgramYear: 1666, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'port-royal', name: 'Port Royal · Cagway Spit (Jamaica)', latitude: 17.937, longitude: -76.841, shoreBearing: 350, coastalArchetype: 'harbor-channel', foundedYear: 1655, fortProgramYear: 1662, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'nassau', name: 'Charles Town · New Providence (Nassau)', latitude: 25.078, longitude: -77.343, shoreBearing: 195, coastalArchetype: 'harbor-channel', foundedYear: 1666, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'cap-francois', name: 'Cap-François · Saint-Domingue', latitude: 19.759, longitude: -72.201, shoreBearing: 205, coastalArchetype: 'sheltered-bay', foundedYear: 1670, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'charleston', name: 'Charles Town · Carolina (Charleston)', latitude: 32.776, longitude: -79.928, shoreBearing: 315, coastalArchetype: 'estuary-bay', foundedYear: 1670, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'philadelphia', name: 'Philadelphia · Delaware River', latitude: 39.947, longitude: -75.141, shoreBearing: 285, coastalArchetype: 'river-mouth', foundedYear: 1682, crown: 'england', baseTier: 2 }),
 ]);
 
 function findHistoricalColonialPort(latitude, longitude, regionId = null, year = 1550, maxDistDeg = 0.32) {
@@ -30139,7 +30218,187 @@ const PORT_PREFABS = Object.freeze({
     waterfront: true,
     indigenous: true,
   }),
+  // English / North American Colonial Timber & Palisade Architecture (Jamestown 1607 James Fort, Plymouth, New England)
+  english_triangular_palisade_fort: Object.freeze({
+    id: 'english_triangular_palisade_fort',
+    label: 'James Fort Triangular Timber Palisade & Bulwarks',
+    length: 36,
+    width: 38,
+    height: 6.8,
+    foundationDepth: 4.5,
+    materialKind: 10,
+    roofPitch: 0,
+    waterfront: false,
+  }),
+  english_half_timber_hall: Object.freeze({
+    id: 'english_half_timber_hall',
+    label: 'English Half-Timbered Church & Storehouse',
+    length: 22,
+    width: 10.5,
+    height: 7.4,
+    foundationDepth: 3.2,
+    materialKind: 10,
+    roofPitch: 3.8,
+    waterfront: false,
+  }),
+  english_timber_cottage: Object.freeze({
+    id: 'english_timber_cottage',
+    label: 'English Clapboard & Wattle-and-Daub Steep-Gable Cottage',
+    length: 15.5,
+    width: 8.2,
+    height: 5.8,
+    foundationDepth: 2.8,
+    materialKind: 10,
+    roofPitch: 3.2,
+    waterfront: false,
+  }),
 });
+
+const OVER_WATER_PREFAB_IDS = new Set([
+  'timber_mole_pier',
+  'stone_quay_seawall',
+  'palafito_estuary_village',
+  'stone_arch_bridge',
+]);
+
+function syncPortInstancesToTerrain(portOrInstances, heights, region, { gradePads = false } = {}) {
+  const instances = Array.isArray(portOrInstances) ? portOrInstances : portOrInstances?.instances;
+  if (!Array.isArray(instances) || !heights || !region) return instances;
+  const n = region.size;
+  const span = region.span;
+  const step = span / Math.max(1, n - 1);
+
+  if (gradePads) {
+    for (const inst of instances) {
+      if (
+        OVER_WATER_PREFAB_IDS.has(inst.prefabId) ||
+        inst.prefabId === 'indigenous_canoe_landing' ||
+        inst.prefabId === 'astillero_and_moored_hull'
+      ) {
+        continue;
+      }
+      const cosY = Math.cos(inst.yaw ?? 0);
+      const sinY = Math.sin(inst.yaw ?? 0);
+      const hw = (inst.width ?? 10) * 0.5;
+      const hl = (inst.length ?? 12) * 0.5;
+      const sampleLocal = (lx, lz) =>
+        terrainSurfaceSample(
+          heights,
+          inst.x + lx * cosY + lz * sinY,
+          inst.z - lx * sinY + lz * cosY,
+          region
+        );
+      const centerGroundY = sampleLocal(0, 0);
+      const probeX = Math.max(1.5, hw * 0.85);
+      const probeZ = Math.max(1.5, hl * 0.85);
+      const rawSlopeX = (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX);
+      const rawSlopeZ = (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ);
+      const isFort =
+        inst.prefabId === 'stone_sea_bastion' ||
+        inst.prefabId === 'bastion_trace_fortress' ||
+        inst.prefabId === 'torreon_atalaya_farol' ||
+        inst.prefabId === 'curtain_wall_and_gate' ||
+        inst.prefabId === 'english_triangular_palisade_fort';
+      const padSlopeX = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeX));
+      const padSlopeZ = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeZ));
+      const padY = inst.indigenous && !isFort
+        ? Math.max(0.95, centerGroundY)
+        : isFort
+          ? Math.max(inst.y ?? 3.2, centerGroundY)
+          : Math.max(1.6, centerGroundY);
+
+      const coreX = hw + step * 1.05;
+      const coreZ = hl + step * 1.05;
+      const feather = Math.max(step * 1.15, 8.0);
+      const outerX = coreX + feather;
+      const outerZ = coreZ + feather;
+      const rad = Math.hypot(outerX, outerZ);
+      const i0 = Math.max(0, Math.floor(((inst.x - rad - region.x) / span + 0.5) * (n - 1)));
+      const i1 = Math.min(n - 1, Math.ceil(((inst.x + rad - region.x) / span + 0.5) * (n - 1)));
+      const j0 = Math.max(0, Math.floor(((inst.z - rad - region.z) / span + 0.5) * (n - 1)));
+      const j1 = Math.min(n - 1, Math.ceil(((inst.z + rad - region.z) / span + 0.5) * (n - 1)));
+      for (let j = j0; j <= j1; j++) {
+        const wz = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = i0; i <= i1; i++) {
+          const k = j * n + i;
+          if (heights[k] <= -0.35) continue;
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const dx = wx - inst.x;
+          const dz = wz - inst.z;
+          const lxSigned = dx * cosY - dz * sinY;
+          const lzSigned = dx * sinY + dz * cosY;
+          const lx = Math.abs(lxSigned);
+          const lz = Math.abs(lzSigned);
+          if (lx > outerX || lz > outerZ) continue;
+          const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lx - coreX) / feather));
+          const tz = Math.max(0, Math.min(1, 1 - Math.max(0, lz - coreZ) / feather));
+          const sx = tx * tx * (3 - 2 * tx);
+          const sz = tz * tz * (3 - 2 * tz);
+          const wBlend = sx * sz;
+          const targetH = Math.max(0.45, padY + lxSigned * padSlopeX + lzSigned * padSlopeZ);
+          heights[k] = heights[k] * (1 - wBlend) + targetH * wBlend;
+        }
+      }
+    }
+  }
+
+  for (let idx = 0; idx < instances.length; idx++) {
+    const inst = instances[idx];
+    inst.id ??= `${inst.prefabId}_${idx}`;
+    inst.depth ??= inst.length ?? 16;
+    inst._cosNegYaw = Math.cos(inst.yaw ?? 0);
+    inst._sinNegYaw = Math.sin(inst.yaw ?? 0);
+    inst._boundR = Math.hypot(inst.width ?? 10, inst.length ?? 12) * 0.5;
+    if (OVER_WATER_PREFAB_IDS.has(inst.prefabId)) {
+      inst.slopeX = 0;
+      inst.slopeZ = 0;
+      inst.baseY = inst.y ?? 0;
+      continue;
+    }
+    const cosY = inst._cosNegYaw;
+    const sinY = inst._sinNegYaw;
+    const sampleLocal = (lx, lz) =>
+      terrainSurfaceSample(
+        heights,
+        inst.x + lx * cosY + lz * sinY,
+        inst.z - lx * sinY + lz * cosY,
+        region
+      );
+    const hCenter = sampleLocal(0, 0);
+    const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
+    const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
+    const hPosX = sampleLocal(probeX, 0);
+    const hNegX = sampleLocal(-probeX, 0);
+    const hPosZ = sampleLocal(0, probeZ);
+    const hNegZ = sampleLocal(0, -probeZ);
+    const rawSlopeX = (hPosX - hNegX) / (2 * probeX);
+    const rawSlopeZ = (hPosZ - hNegZ) / (2 * probeZ);
+    inst.slopeX = Math.max(-0.20, Math.min(0.20, rawSlopeX));
+    inst.slopeZ = Math.max(-0.20, Math.min(0.20, rawSlopeZ));
+
+    const isFort =
+      inst.prefabId === 'stone_sea_bastion' ||
+      inst.prefabId === 'bastion_trace_fortress' ||
+      inst.prefabId === 'torreon_atalaya_farol' ||
+      inst.prefabId === 'curtain_wall_and_gate' ||
+      inst.prefabId === 'english_triangular_palisade_fort';
+    if (isFort) {
+      inst.slopeX = 0;
+      inst.slopeZ = 0;
+      inst.y = Math.max(inst.y ?? 3.2, hCenter);
+    } else if (inst.prefabId === 'indigenous_canoe_landing') {
+      inst.slopeX = Math.max(-0.12, Math.min(0.12, inst.slopeX));
+      inst.slopeZ = Math.max(-0.12, Math.min(0.12, inst.slopeZ));
+      inst.y = Math.max(0.28, hCenter);
+    } else if (inst.indigenous) {
+      inst.y = Math.max(0.38, hCenter);
+    } else {
+      inst.y = Math.max(0.85, hCenter);
+    }
+    inst.baseY = inst.y;
+  }
+  return instances;
+}
 
 function coastalInferBearingFromRings(lat, lon, rings) {
   if (!Array.isArray(rings) || rings.length === 0) return null;
@@ -30268,8 +30527,14 @@ function classifyKoppenClimateFromNormals({
       koppenLabel = 'Tropical Wet-Dry Savanna & Gallery Forest';
     }
   } else if (
-    coldestMonthTempC >= 9.5 ||
-    (Math.abs(latitude) < 34.0 && warmestMonthTempC >= 21.5 && coldestMonthTempC > 5.0)
+    (Math.abs(latitude) < 33.2 &&
+      (coldestMonthTempC >= 9.5 ||
+        (warmestMonthTempC >= 21.5 && coldestMonthTempC > 5.0))) ||
+    (Math.abs(latitude) >= 27.5 &&
+      Math.abs(latitude) < 43.0 &&
+      coldestMonthTempC >= 7.5 &&
+      driestSummerMm < 40.0 &&
+      driestSummerMm < wettestWinterMm / 3.0)
   ) {
     if (
       Math.abs(latitude) >= 27.5 &&
@@ -30294,12 +30559,14 @@ function classifyKoppenClimateFromNormals({
     climateZone = 'temperate';
   }
 
-  // Use the tropical/subtropical plant mix (royal_palm, palm, ceiba, mangrove) for all tropical,
-  // subtropical, and warm semi-arid/arid coastal regions.
+  // Use the tropical/subtropical plant mix (royal_palm, palm, ceiba, mangrove) strictly for tropical,
+  // subtropical, and warm arid coasts equatorward of 33.2° latitude (so Virginia, New England, Europe,
+  // and Cape Town use temperate broadleaf oak/maple/birch/elm/chestnut forests with zero palm trees).
   const isTropicalOrSubtropical =
-    climateZone === 'tropical' ||
-    climateZone === 'subtropical' ||
-    (climateZone === 'arid' && (meanAnnualTempC >= 18.0 || Math.abs(latitude) < 33.5));
+    Math.abs(latitude) < 33.2 &&
+    (climateZone === 'tropical' ||
+      climateZone === 'subtropical' ||
+      (climateZone === 'arid' && meanAnnualTempC >= 18.0));
   const forestPackKind = isTropicalOrSubtropical ? 'subtropical' : 'temperate';
 
   const moistureNorm = Math.max(0, Math.min(1.5, annualPrecipMm / 1800));
@@ -30457,12 +30724,12 @@ function estimateLocalClimateProfile(latitude = 10.423, longitude = -75.548, reg
 
   // Base sea-level mean temperature and seasonal amplitude
   const baseMeanTemp = 28.4 - 22.5 * Math.pow(Math.sin(latRad), 1.35);
-  const seasonalAmp = Math.min(14.5, 1.1 + 11.8 * Math.pow(Math.sin(latRad), 1.25));
+  const seasonalAmp = Math.min(16.5, 1.1 + 13.8 * Math.pow(Math.sin(latRad), 1.22));
 
   // Regional trade-wind / monsoon / ocean-current moisture & temperature adjustments
   const isCaribbean = lat >= 7 && lat <= 25 && lon >= -92 && lon <= -58;
   const isPanamaIsthmus = lat >= 7 && lat <= 10.1 && lon >= -83 && lon <= -77;
-  const isSubtropicalWestAtlantic = lat > 25 && lat <= 34 && lon >= -85 && lon <= -74;
+  const isSubtropicalWestAtlantic = lat > 25 && lat < 33.2 && lon >= -85 && lon <= -74;
   const isMediterranean = lat >= 30 && lat <= 45 && lon >= -10 && lon <= 36;
   const isSubtropicalAridBelt =
     absLat >= 18 &&
@@ -30692,7 +30959,7 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
     }
   }
   const colPortById =
-    typeof spec.id === 'string' && (spec.latitude === undefined || spec.longitude === undefined)
+    typeof spec.id === 'string'
       ? HISTORICAL_COLONIAL_PORTS.find((p) => p.id === spec.id) ?? null
       : null;
   const latitude = Number(spec.latitude ?? colPortById?.latitude);
@@ -30710,13 +30977,14 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const absLat = Math.abs(latitude);
   const climate = spec.climate ?? (
     absLat < 20 ? 'tropical' :
-    absLat < 34 ? 'subtropical' :
+    absLat < 33.2 ? 'subtropical' :
     absLat < 58 ? 'temperate' : 'subpolar'
   );
   const archetypes = ['sheltered-bay', 'headland-bay', 'estuary-bay', 'river-mouth', 'harbor-channel', 'volcanic-island'];
   const portTypes = ['fortified-harbor', 'headland-fortress', 'silver-terminal', 'river-citadel', 'rendezvous-basin', 'careening-anchorage'];
   const idx = Math.floor(rand() * archetypes.length);
-  const coastalArchetype = spec.coastalArchetype ?? archetypes[idx];
+  const matchedHistoricalPort = findHistoricalColonialPort(latitude, longitude, spec.id, simYear, 0.32);
+  const coastalArchetype = spec.coastalArchetype ?? colPortById?.coastalArchetype ?? matchedHistoricalPort?.coastalArchetype ?? archetypes[idx];
   const indigenousCulture = resolveIndigenousCultureRegion(latitude, longitude);
   const sovRecord = indigenousCulture ? resolveRegionSovereigntyRecord(indigenousCulture.id, spec) : null;
   const indigenousRepelledColony = Boolean(
@@ -30735,7 +31003,6 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
     (spec.hasColonialPort === true ||
       spec.settlementKind === 'colonial-port' ||
       (!explicitNoPort && Boolean(spec.portType) && portTypes.includes(spec.portType)));
-  const matchedHistoricalPort = findHistoricalColonialPort(latitude, longitude, spec.id, simYear, 0.32);
   const hasColonialPort = explicitNoPort
     ? false
     : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id, 0.32, simYear);
@@ -30752,9 +31019,10 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
         : 'wilderness-anchorage'
   );
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
+  const presetBearing = colPortById?.shoreBearing ?? matchedHistoricalPort?.shoreBearing ?? null;
   const shoreBearing = Number.isFinite(spec.shoreBearing)
     ? ((spec.shoreBearing % 360) + 360) % 360
-    : ringBearing ?? Math.round(rand() * 359);
+    : ringBearing ?? presetBearing ?? Math.round(rand() * 359);
   const peakElevationMetres = Number.isFinite(spec.peakElevationMetres)
     ? Math.max(40, Math.min(900, spec.peakElevationMetres))
     : Math.round(95 + rand() * (coastalArchetype === 'volcanic-island' ? 680 : 320));
@@ -31734,16 +32002,16 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     if (
       h >= -1.2 &&
       h <= 2.8 &&
-      offshoreH <= -2.0 &&
-      offshoreMidH <= -2.5 &&
-      offshoreFarH <= -3.0 &&
-      inlandH >= 0.8 &&
+      offshoreH <= -0.55 &&
+      offshoreMidH <= -1.35 &&
+      offshoreFarH <= -2.1 &&
+      inlandH >= 0.45 &&
       inlandH <= 38
     ) {
       const clusterDistPenalty = clusterFrame
         ? Math.hypot(alongProbe - clusterFrame.along, inland - clusterFrame.inland) * 0.018
         : Math.abs(inland) * 0.001 + Math.abs(alongProbe) * 0.004;
-      const score = -Math.abs(h - 0.5) * 4 + Math.min(12, -offshoreH) - clusterDistPenalty;
+      const score = -Math.abs(h - 0.5) * 4 + Math.min(12, -offshoreFarH) - clusterDistPenalty;
       if (score > bestScore) {
         bestScore = score;
         bestShoreAlong = alongProbe;
@@ -31769,7 +32037,7 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   }
   // If real-world DEM shoreline lies outside the default synthetic bay window, scan wider coastal frame
   if (bestScore === -Infinity) {
-    const halfSpan = region.span * 0.45;
+    const halfSpan = region.span * 0.44;
     const stepScan = Math.max(12, Math.round(region.span / 96));
     for (let alongProbe = -halfSpan; alongProbe <= halfSpan; alongProbe += stepScan) {
       for (let inland = -halfSpan; inland <= halfSpan; inland += stepScan) {
@@ -31777,35 +32045,48 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       }
     }
   }
-  // Ultimate fallback: scan heightfield cells directly for any true coastline (never default to (0,0) inland!)
+  // Ultimate fallback: scan heightfield cells directly for any true coastline oriented with water in -shoreBearing
   if (bestScore === -Infinity) {
     const n = region.size;
     const span = region.span;
     const targetX = orthoFootprints ? orthoFootprints.clusterX : region.x;
     const targetZ = orthoFootprints ? orthoFootprints.clusterZ : region.z;
-    for (let j = 4; j < n - 4; j += 2) {
-      const wz = region.z + (j / (n - 1) - 0.5) * span;
-      for (let i = 4; i < n - 4; i += 2) {
-        const h = heights[j * n + i];
-        if (h < -0.8 || h > 2.2) continue;
-        const hN = heights[Math.max(0, j - 3) * n + i];
-        const hS = heights[Math.min(n - 1, j + 3) * n + i];
-        const hW = heights[j * n + Math.max(0, i - 3)];
-        const hE = heights[j * n + Math.min(n - 1, i + 3)];
-        const minNeighbor = Math.min(hN, hS, hW, hE);
-        const maxNeighbor = Math.max(hN, hS, hW, hE);
-        if (minNeighbor <= -1.5 && maxNeighbor >= 1.2) {
-          const wx = region.x + (i / (n - 1) - 0.5) * span;
-          const distPenalty = Math.hypot(wx - targetX, wz - targetZ) * 0.02;
-          const score = -minNeighbor - distPenalty;
-          if (score > bestScore) {
-            bestScore = score;
+    for (const requireBearingOrientation of [true, false]) {
+      for (let j = 4; j < n - 4; j += 2) {
+        const wz = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = 4; i < n - 4; i += 2) {
+          const h = heights[j * n + i];
+          if (h < -0.8 || h > 2.2) continue;
+          const hN = heights[Math.max(0, j - 3) * n + i];
+          const hS = heights[Math.min(n - 1, j + 3) * n + i];
+          const hW = heights[j * n + Math.max(0, i - 3)];
+          const hE = heights[j * n + Math.min(n - 1, i + 3)];
+          const minNeighbor = Math.min(hN, hS, hW, hE);
+          const maxNeighbor = Math.max(hN, hS, hW, hE);
+          if (minNeighbor <= -0.9 && maxNeighbor >= 0.8) {
+            const wx = region.x + (i / (n - 1) - 0.5) * span;
             const cf = coastalFrame(region, wx, wz);
-            bestShoreAlong = cf.along;
-            bestShoreInland = cf.inland;
+            if (requireBearingOrientation) {
+              const offP = worldFromCoastalFrame(region, cf.along, cf.inland - probeOffshoreM * 1.6);
+              const inP = worldFromCoastalFrame(region, cf.along, cf.inland + probeInlandM);
+              if (
+                terrainSample(heights, offP.x, offP.z, region) > -0.45 ||
+                terrainSample(heights, inP.x, inP.z, region) < 0.25
+              ) {
+                continue;
+              }
+            }
+            const distPenalty = Math.hypot(wx - targetX, wz - targetZ) * 0.02;
+            const score = -minNeighbor - distPenalty;
+            if (score > bestScore) {
+              bestScore = score;
+              bestShoreAlong = cf.along;
+              bestShoreInland = cf.inland;
+            }
           }
         }
       }
+      if (bestScore > -Infinity) break;
     }
   }
 
@@ -31817,6 +32098,12 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const plazaRadiusInland = preserveRealCoast && !isLisbonRoyalDock ? 105 : isLisbonRoyalDock ? 175 : 145;
   const berthHalfW = Math.max(18, (isLisbonRoyalDock ? 68 : 36) * scaleFactor);
   const berthMaxOffshore = Math.max(80, (isLisbonRoyalDock ? 235 : 190) * scaleFactor);
+  const preIndigenousVillage = !allowColonialPort
+    ? Boolean(
+        (region.indigenousSettlement ?? computeIndigenousSettlementProfile(region, region.year ?? region.era ?? 1550))
+          ?.hasIndigenousSettlement
+      )
+    : false;
   for (let j = 0; j < n; j++) {
     const z = region.z + (j / (n - 1) - 0.5) * span;
     for (let i = 0; i < n; i++) {
@@ -31846,7 +32133,7 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
         h = h * (1 - slipW) + Math.min(h, slipDepth) * slipW;
       }
 
-      if (allowColonialPort && !hasOrthoFootprints) {
+      if (allowColonialPort && !hasOrthoFootprints && h > -0.15) {
         // 2. Level Waterfront Quay & Plaza Mayor / Terreiro do Paço terrace (synthetic colonial ports without top-down footprints)
         if (relInland >= -2 && relInland <= plazaRadiusInland && Math.abs(relAlong) <= plazaRadiusAlong) {
           const alongW = coastalSmoothstep(plazaRadiusAlong, plazaRadiusAlong * 0.55, Math.abs(relAlong));
@@ -31866,6 +32153,17 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
           const bW = coastalSmoothstep(48, 22, dBastion);
           const targetBastionY = isLisbonRoyalDock ? 3.2 : 4.8;
           h = h * (1 - bW * 0.9) + targetBastionY * (bW * 0.9);
+        }
+      } else if (preIndigenousVillage && h > 0.20) {
+        // 2b. Natural coastal village terrace for Native American settlements (grades steep hills into a gentle 1.6m..2.8m bench)
+        if (relInland >= 2 && relInland <= 108 && Math.abs(relAlong) <= 84) {
+          const alongW = coastalSmoothstep(84, 46, Math.abs(relAlong));
+          const inlandW =
+            coastalSmoothstep(2, 18, relInland) *
+            coastalSmoothstep(108, 68, relInland);
+          const stampW = alongW * inlandW * 0.86;
+          const targetVillageY = 1.65 + Math.max(0, relInland - 10) * 0.014;
+          h = h * (1 - stampW) + targetVillageY * stampW;
         }
       }
 
@@ -31913,8 +32211,17 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const instances = [];
   const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
     const prefab = PORT_PREFABS[prefabId];
-    const pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset);
-    const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+    let adjInland = inlandOffset;
+    let pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
+    let groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+    if (!OVER_WATER_PREFAB_IDS.has(prefabId) && overrides?.exactY === undefined) {
+      const minGroundTarget = prefabId === 'indigenous_canoe_landing' ? 0.18 : 0.55;
+      for (let stepIn = 0; stepIn < 12 && groundY < minGroundTarget; stepIn++) {
+        adjInland += 4;
+        pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
+        groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+      }
+    }
     const y = overrides?.exactY !== undefined
       ? overrides.exactY
       : minElevation !== null
@@ -32292,6 +32599,131 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
         label: 'Forte de Santa Apolónia (Restoration Tagus Battery)',
       });
     }
+  } else if (
+    allowColonialPort &&
+    (region.id === 'jamestown' ||
+      region.id === 'plymouth-colony' ||
+      region.id === 'boston' ||
+      region.id === 'new-amsterdam' ||
+      region.id === 'quebec' ||
+      region.id === 'charleston' ||
+      region.id === 'philadelphia' ||
+      ((colonyGrowth.crown === 'england' ||
+        colonyGrowth.crown === 'netherlands' ||
+        colonyGrowth.crown === 'france') &&
+        Math.abs(region.latitude ?? 0) >= 31.5))
+  ) {
+    // Historically authentic 17th-century English / North American Timber & Palisade Settlement
+    // (1607 James Fort triangular palisade with corner bulwarks, half-timbered wattle-and-daub church & storehouses,
+    // riven-clapboard steep-gable cottages, boatyard, cooperage, and river watchtower — never Spanish Caribbean stucco!)
+    const isJamestown = region.id === 'jamestown';
+    const fortLabel = isJamestown
+      ? 'James Fort (1607 Triangular Timber Palisade & Bulwarks)'
+      : region.id === 'plymouth-colony'
+        ? 'Plymouth Fort & Timber Meetinghouse Mount (1621)'
+        : region.id === 'new-amsterdam'
+          ? 'Fort Amsterdam Timber & Earthwork Redoubt'
+          : region.id === 'quebec'
+            ? 'Habitation de Québec Timber Redoubt & Palisade'
+            : `${region.name} Timber Palisade Fort & Bulwarks`;
+    const hallLabel = isJamestown
+      ? '1608 Timber-Framed Church & Virginia Company Storehouse'
+      : 'Half-Timbered Meetinghouse & Company Magazine';
+
+    // Central Triangular Palisade Fort (James Fort) overlooking the river channel
+    addPrefab('english_triangular_palisade_fort', 0, 34, 0, 2.8, {
+      label: fortLabel,
+      armed: true,
+      hasMagazine: true,
+    });
+    // Half-timbered post-and-truss church / storehouse & riven-clapboard wattle-and-daub cottages
+    addPrefab('english_half_timber_hall', -34, 38, 0, 2.8, {
+      label: hallLabel,
+    });
+    addPrefab('english_timber_cottage', 34, 30, -8, 2.6, {
+      label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ Row' : 'Clapboard & Thatch Settler Cottage',
+    });
+    addPrefab('english_timber_cottage', -28, 62, 6, 3.0, {
+      label: isJamestown ? 'Governor’s Half-Timbered Tenement' : 'Half-Timbered Planter’s House',
+    });
+    addPrefab('english_timber_cottage', 28, 58, -6, 2.9, {
+      label: 'Artificers’ & Smiths’ Timber Forge Cottage',
+    });
+    addPrefab('careening_shed', -56, 14, 10, 2.0, {
+      label: 'Shallop & Pinnace Careening Shed',
+    });
+    addPrefab('astillero_and_moored_hull', -36, 11, 5, 1.8, {
+      label: 'River Shallop Slipway & Timber Stocks',
+    });
+    addPrefab('torreon_atalaya_farol', 64, 12, -10, 2.5, {
+      label: isJamestown ? 'Point Comfort / River Watch Beacon' : 'Harbor Look-Out Beacon Tower',
+      materialKind: 10,
+    });
+
+    if (colonyGrowth.colonyAge >= 5 || colonyGrowth.stage !== 'outpost') {
+      addPrefab('english_half_timber_hall', 4, 68, 90, 3.1, {
+        label: isJamestown ? '1617 Timber-Framed Choir Church (First Assembly)' : 'Colonial Assembly & Custom Hall',
+      });
+      addPrefab('walled_mule_corral', 54, 52, 0, 2.8, {
+        label: isJamestown ? 'Tobacco Hogshead Yard & Livestock Pales' : 'Colonial Commons & Stockade Yard',
+      });
+      addPrefab('english_timber_cottage', -52, 48, 12, 2.8, {
+        label: 'Outer Palisade Quarter & Cooperage Cottage',
+      });
+    }
+    if (colonyGrowth.stage !== 'outpost') {
+      // Expansion into "New Towne" /Growing Colonial Settlement along the riverfront (1620s–1680s)
+      addPrefab('careening_shed', -74, 32, 0, 2.4, {
+        label: 'Hemp, Pitch & Cordage Ropewalk Shed',
+      });
+      addPrefab('english_half_timber_hall', 46, 24, 0, 2.5, {
+        label: isJamestown ? 'New Towne Tobacco & Fur Magazine' : 'Merchant Company Waterfront Warehouse',
+      });
+      addPrefab('english_timber_cottage', -52, 74, 0, 3.2, {
+        label: 'New Towne Half-Timbered Burgess House',
+      });
+      addPrefab('english_timber_cottage', 48, 76, 0, 3.2, {
+        label: 'New Towne Brick-Nogged Merchant House',
+      });
+      addPrefab('english_timber_cottage', 0, 92, 0, 3.4, {
+        label: 'Country Road Planter’s Homestead',
+      });
+    }
+    if (colonyGrowth.stage === 'fortified-port' || colonyGrowth.stage === 'citadel-metropolis' || colonyGrowth.expansionTier >= 3) {
+      const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
+      if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
+        addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
+          label: isJamestown ? 'Tobacco Fleet Hogshead Wharf' : 'Merchant Brigantine Wharf',
+        });
+      }
+      addPrefab('english_half_timber_hall', -22, 96, 0, 3.5, {
+        label: isJamestown ? 'Statehouse & General Court Building' : 'Provincial Statehouse & Court',
+      });
+      addPrefab('english_timber_cottage', 28, 96, 0, 3.5, {
+        label: 'Tavern & Ordinary Inn',
+      });
+      addPrefab('english_timber_cottage', -68, 96, 8, 3.4, {
+        label: 'Coopers’ & Chandlers’ Row',
+      });
+      addPrefab('english_timber_cottage', 68, 96, -8, 3.4, {
+        label: 'Mariners’ Quarter Tenement',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 4) {
+      addPrefab('english_half_timber_hall', -36, 122, 0, 3.8, {
+        label: 'Company Customhouse & Guildhall',
+      });
+      addPrefab('english_timber_cottage', 36, 122, 0, 3.8, {
+        label: 'Upper Street Merchant Tenement',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 5) {
+      addPrefab('english_triangular_palisade_fort', 94, 18, -16, 3.2, {
+        label: isJamestown ? 'Turf & Timber River Battery' : 'Harbor Crossfire Timber Battery',
+        armed: true,
+        hasMagazine: true,
+      });
+    }
   } else if (allowColonialPort) {
     if (colonyGrowth.stage === 'outpost') {
       // Frontier Colonial Outpost (< 14 yrs old, or post-1597 decayed Nombre de Dios):
@@ -32423,18 +32855,18 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       // Slot 0 is the foreshore canoe beaching & tidal fish weir right at the water's edge;
       // Slots 1..11 arrange the council house / longhouse / batey plaza, palisade stockades, and family wigwams/bohíos on the coastal terrace.
       const villageSlots = [
-        [-14, 4, 0, 1.25],
-        [4, 34, 8, 2.3],
-        [-28, 28, -14, 2.2],
-        [32, 30, 16, 2.2],
-        [-6, 62, 0, 2.7],
-        [-48, 44, -22, 2.4],
-        [48, 48, 24, 2.5],
-        [-26, 56, 12, 2.6],
-        [26, 58, -12, 2.6],
-        [0, 82, 6, 2.9],
-        [-54, 72, -16, 2.8],
-        [54, 74, 16, 2.8],
+        [-14, 4, 0, 0.55],
+        [4, 34, 8, 0.75],
+        [-28, 28, -14, 0.75],
+        [32, 30, 16, 0.75],
+        [-6, 62, 0, 0.85],
+        [-48, 44, -22, 0.75],
+        [48, 48, 24, 0.75],
+        [-26, 56, 12, 0.80],
+        [26, 58, -12, 0.80],
+        [0, 82, 6, 0.85],
+        [-54, 72, -16, 0.85],
+        [54, 74, 16, 0.85],
       ];
       const count = Math.min(
         villageSlots.length,
@@ -32481,15 +32913,7 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     }
   }
 
-  for (let idx = 0; idx < instances.length; idx++) {
-    const inst = instances[idx];
-    inst.id ??= `${inst.prefabId}_${idx}`;
-    inst.baseY ??= inst.y ?? 0;
-    inst.depth ??= inst.length ?? 16;
-    inst._cosNegYaw = Math.cos(inst.yaw);
-    inst._sinNegYaw = Math.sin(inst.yaw);
-    inst._boundR = Math.hypot(inst.width, inst.length) * 0.5;
-  }
+  syncPortInstancesToTerrain(instances, heights, region, { gradePads: !hasOrthoFootprints });
 
   const indigenousSettlement =
     region.indigenousSettlement ??
@@ -32746,7 +33170,7 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
   };
 
   // Stamp a reconstructed 3D building mesh into world coordinates with zero per-vertex array allocations
-  const emitLRMMesh = (instX, instZ, tmpl, widthX, y0, y1, lengthZ, cosY, sinY) =>
+  const emitLRMMesh = (instX, instZ, tmpl, widthX, y0, y1, lengthZ, cosY, sinY, slopeX = 0, slopeZ = 0) =>
     withPartGroup('lrm_superstructure', () => {
       const baseVertex = verts.length / 8;
       const spanY = Math.max(1.0, y1 - y0);
@@ -32758,8 +33182,8 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       for (let v = 0; v < vCount; v++) {
         const off = v * 8;
         const lx = vArr[off] * widthX;
-        const py = y0 + vArr[off + 1] * spanY;
         const lz = vArr[off + 2] * lengthZ;
+        const py = y0 + vArr[off + 1] * spanY + lx * slopeX + lz * slopeZ;
         const px = instX + lx * cosY + lz * sinY;
         const pz = instZ - lx * sinY + lz * cosY;
         const lnx = vArr[off + 3] * invW;
@@ -33128,9 +33552,12 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     const yTop = inst.y + inst.height;
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
+    const isOverWater = OVER_WATER_PREFAB_IDS.has(inst.prefabId);
+    const slopeX = isOverWater ? 0 : (inst.slopeX ?? 0);
+    const slopeZ = isOverWater ? 0 : (inst.slopeZ ?? 0);
     const toWorld = (lx, ly, lz) => [
       inst.x + lx * cosY + lz * sinY,
-      ly,
+      ly + lx * slopeX + lz * slopeZ,
       inst.z - lx * sinY + lz * cosY,
     ];
 
@@ -33149,7 +33576,7 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       emitBox(toWorld, -hw - 0.55, hw + 0.55, yBase, yPlinth, -hl - 0.55, hl + 0.55, 11, 0.82);
       const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
-      emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY);
+      emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
       flushSection();
       continue;
     }
@@ -33882,9 +34309,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       // Bent-sapling frame sheathed in overlapping paper-birchbark sheets (kind 17) & rush mats (kind 15),
       // external sapling hoop binders (kind 10), bark-hooded doorway, apex smoke hole, stone hearth & fish-smoking rack.
       const rBase = Math.min(hw, hl) * 0.92;
-      const yPlinth = yGround + 0.28;
+      const yPlinth = yGround + 0.04;
       beginSection('foundation_plinth');
-      emitCylinder(toWorld, 0, 0, yBase, yPlinth, rBase + 0.35, rBase + 0.25, 10, 16, 0.80, true);
+      emitCylinder(toWorld, 0, 0, yGround - 1.2, yPlinth, rBase + 0.05, rBase, 10, 15, 0.78, true);
       // 4-tier hemispherical/ellipsoidal birchbark dome (lower tier woven cattail/rush mat skirt kind 15, upper 3 tiers paper birchbark kind 17)
       const domeH = Math.max(2.9, inst.height);
       const tiers = [
@@ -33921,26 +34348,26 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       emitCylinder(toWorld, 0.22, 0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
       // Low arched bark-hooded entrance tunnel on -Z with deerskin door flap (kind 13/14)
       beginSection('wigwam_doorway_hood');
-      emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
+      emitBox(toWorld, -0.78, 0.78, yGround - 0.35, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
       emitBox(toWorld, -0.56, 0.56, yPlinth, yPlinth + 1.38, -rBase - 0.58, -rBase - 0.35, 14, 0.28);
       // Forecourt stone hearth ring (kind 11) + glowing ember bed (kind 13) + timber fish-smoking rack (kind 10)
       beginSection('hearth_and_drying_rack');
       const hz = -rBase - 1.65;
-      emitCylinder(toWorld, 1.35, hz, yGround, yGround + 0.32, 0.68, 0.62, 8, 11, 0.82, true);
-      emitCylinder(toWorld, 1.35, hz, yGround + 0.32, yGround + 0.38, 0.44, 0.38, 8, 13, 0.92, true);
-      emitCylinder(toWorld, -1.55, hz - 0.4, yGround, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
-      emitCylinder(toWorld, -1.55, hz + 0.8, yGround, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
+      emitCylinder(toWorld, 1.35, hz, yGround - 0.35, yGround + 0.28, 0.68, 0.62, 8, 11, 0.82, true);
+      emitCylinder(toWorld, 1.35, hz, yGround + 0.28, yGround + 0.34, 0.44, 0.38, 8, 13, 0.92, true);
+      emitCylinder(toWorld, -1.55, hz - 0.4, yGround - 0.45, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
+      emitCylinder(toWorld, -1.55, hz + 0.8, yGround - 0.45, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
       emitBox(toWorld, -1.62, -1.48, yGround + 1.55, yGround + 1.68, hz - 0.55, hz + 0.95, 10, 0.80, true);
     } else if (inst.prefabId === 'algonquian_longhouse') {
       // Algonquian / Wabanaki / Powhatan / Haudenosaunee Barrel-Vaulted Bark Longhouse:
       // Bowed sapling rib frame sheathed in overlapping birch/elm/cedar bark sheets (kind 17),
       // external vertical lash-poles (kind 10), arched barrel roof with smoke holes, and hooded end portals.
       const lhHW = Math.min(4.2, hw);
-      const yPlinth = yGround + 0.32;
+      const yPlinth = yGround + 0.05;
       const yEave = yPlinth + Math.max(2.4, inst.height * 0.54);
       const vaultRise = Math.max(1.8, inst.height * 0.46);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -lhHW - 0.35, lhHW + 0.35, yBase, yPlinth, -hl - 0.35, hl + 0.35, 16, 0.80);
+      emitBox(toWorld, -lhHW - 0.06, lhHW + 0.06, yGround - 1.4, yPlinth, -hl - 0.06, hl + 0.06, 10, 0.74, false, 0.06);
       beginSection('longhouse_bark_walls');
       emitBox(toWorld, -lhHW, lhHW, yPlinth, yEave, -hl, hl, 17, 0.90);
       // Barrel-vaulted bark roof built from 3 stacked arched tiers (kind 17)
@@ -33954,8 +34381,8 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       for (let b = 0; b <= nBays; b++) {
         const bz = -hl + 0.8 + b * baySpan;
         beginSection('longhouse_sapling_ribs');
-        emitCylinder(toWorld, -lhHW - 0.08, bz, yPlinth, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
-        emitCylinder(toWorld, lhHW + 0.08, bz, yPlinth, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, -lhHW - 0.08, bz, yGround - 0.6, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, lhHW + 0.08, bz, yGround - 0.6, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
         emitBox(toWorld, -lhHW * 0.58, lhHW * 0.58, yEave + vaultRise - 0.05, yEave + vaultRise + 0.09, bz - 0.08, bz + 0.08, 10, 0.76, true);
         if (b > 0 && b < nBays && b % 2 === 1) {
           beginSection('roof_smoke_holes');
@@ -33975,9 +34402,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds
       const rRingX = hw * 0.90;
       const rRingZ = hl * 0.90;
-      const yPlinth = yGround + 0.22;
+      const yPlinth = yGround + 0.04;
       beginSection('plaza_earth_floor');
-      emitCylinder(toWorld, 0, 0, yBase, yPlinth, Math.min(rRingX, rRingZ), Math.min(rRingX, rRingZ), 12, 16, 0.82, true);
+      emitCylinder(toWorld, 0, 0, yGround - 0.8, yPlinth, 4.35, 4.10, 12, 16, 0.78, true);
       // 28 pointed vertical log stockade posts around the perimeter with a baffled entrance gap on -Z
       beginSection('palisade_stockade_posts');
       const nPosts = 28;
@@ -33989,21 +34416,21 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
         const px = Math.cos(angle) * rRingX;
         const pz = Math.sin(angle) * rRingZ;
         const hVar = ((p * 7) % 5) * 0.14;
-        emitCylinder(toWorld, px, pz, yBase + 0.4, yPlinth + postH + hVar, 0.34, 0.16, 6, 10, 0.74 + (p % 3) * 0.04, true);
+        emitCylinder(toWorld, px, pz, yGround - 1.5, yPlinth + postH + hVar, 0.34, 0.16, 6, 10, 0.74 + (p % 3) * 0.04, true);
       }
       // Central stone council hearth (kind 11 + 13) & 4 split-log council benches (kind 10)
       beginSection('council_firepit_and_benches');
-      emitCylinder(toWorld, 0, 0, yPlinth, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
+      emitCylinder(toWorld, 0, 0, yGround - 0.3, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
       emitCylinder(toWorld, 0, 0, yPlinth + 0.42, yPlinth + 0.52, 0.95, 0.78, 8, 13, 0.94, true);
-      emitBox(toWorld, -2.6, 2.6, yPlinth, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
-      emitBox(toWorld, -2.6, 2.6, yPlinth, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
-      emitBox(toWorld, -3.4, -2.75, yPlinth, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
-      emitBox(toWorld, 2.75, 3.4, yPlinth, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yGround - 0.25, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yGround - 0.25, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
+      emitBox(toWorld, -3.4, -2.75, yGround - 0.25, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, 2.75, 3.4, yGround - 0.25, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
       // Three Sisters (maize, climbing beans, winter squash) hillock mounds inside the stockade lee
       beginSection('three_sisters_crop_mounds');
       for (const mx of [-rRingX * 0.48, rRingX * 0.48]) {
         for (const mz of [-rRingZ * 0.36, 0, rRingZ * 0.36]) {
-          emitCylinder(toWorld, mx, mz, yPlinth, yPlinth + 0.38, 0.95, 0.55, 6, 16, 0.76, true);
+          emitCylinder(toWorld, mx, mz, yGround - 0.45, yPlinth + 0.38, 0.95, 0.55, 6, 16, 0.76, true);
           emitCylinder(toWorld, mx, mz, yPlinth + 0.32, yPlinth + 1.65, 0.32, 0.08, 5, 4, 0.84, true);
         }
       }
@@ -34011,18 +34438,18 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       // Taíno Cacique Royal Caney: Rectangular/polygonal royal palm-thatch council & chief's residence
       // facing the batey plaza with a carved hardwood front portico and high-pitched multi-tier guano thatch roof.
       const cHW = Math.min(5.8, hw);
-      const yPlinth = yGround + 0.52;
+      const yPlinth = yGround + 0.10;
       const yEave = yPlinth + Math.max(2.8, inst.height * 0.48);
       const yPeak = yEave + Math.max(3.2, inst.roofPitch || 3.6);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -cHW - 0.65, cHW + 0.65, yBase, yPlinth, -hl - 0.85, hl + 0.65, 16, 0.82);
+      emitBox(toWorld, -cHW - 0.25, cHW + 0.25, yGround - 1.4, yPlinth, -hl - 0.25, hl + 0.25, 10, 0.74, false, 0.20);
       // Cane-and-post bahareque walls (kind 12) recessed behind the front portico (-hl + 2.6 .. hl)
       beginSection('caney_cane_walls');
       emitBox(toWorld, -cHW, cHW, yPlinth, yEave, -hl + 2.6, hl, 12, 0.88);
       // Front ceremonial portico columns (kind 10) & shadowed doorway portal (kind 14)
       beginSection('caney_portico_posts');
       for (const px of [-cHW + 0.45, -cHW * 0.34, cHW * 0.34, cHW - 0.45]) {
-        emitCylinder(toWorld, px, -hl + 0.35, yPlinth, yEave, 0.24, 0.21, 6, 10, 0.76, true);
+        emitCylinder(toWorld, px, -hl + 0.35, yGround - 0.8, yEave, 0.24, 0.21, 6, 10, 0.76, true);
       }
       emitBox(toWorld, -1.15, 1.15, yPlinth, yEave - 0.45, -hl + 2.45, -hl + 2.75, 14, 0.28);
       // Multi-tiered royal palm-thatch hipped roof (kind 15) + carved ridge pole crest (kind 10)
@@ -34033,18 +34460,18 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       // Taíno / Arawak / Kalinago Circular Conical Guano-Thatch Bohío:
       // 10-sided circular cane wall with exterior hardwood posts + steep 3-tier conical palm-thatch roof & center pole finial.
       const rBohio = Math.min(hw, hl) * 0.88;
-      const yPlinth = yGround + 0.36;
+      const yPlinth = yGround + 0.05;
       const yEave = yPlinth + Math.max(2.1, inst.height * 0.42);
       const coneH = Math.max(3.0, inst.roofPitch || 3.2);
       beginSection('foundation_plinth');
-      emitCylinder(toWorld, 0, 0, yBase, yPlinth, rBohio + 0.45, rBohio + 0.35, 10, 16, 0.80, true);
+      emitCylinder(toWorld, 0, 0, yGround - 1.2, yPlinth, rBohio + 0.06, rBohio, 10, 12, 0.78, true);
       beginSection('bohio_circular_cane_wall');
       emitCylinder(toWorld, 0, 0, yPlinth, yEave, rBohio, rBohio, 10, 12, 0.86, false);
       // Exterior hardwood post ring (kind 10) & doorway opening on -Z (kind 14)
       beginSection('bohio_perimeter_posts');
       for (let p = 0; p < 10; p++) {
         const a = (p / 10) * Math.PI * 2;
-        emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yPlinth, yEave, 0.15, 0.13, 5, 10, 0.74, true);
+        emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yGround - 0.6, yEave, 0.15, 0.13, 5, 10, 0.74, true);
       }
       emitBox(toWorld, -0.68, 0.68, yPlinth, yEave - 0.35, -rBohio - 0.12, -rBohio + 0.18, 14, 0.28);
       // 3-tier overhanging conical palm-thatch roof (kind 15) + center pole finial (kind 10)
@@ -34056,9 +34483,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     } else if (inst.prefabId === 'taino_batey_court') {
       // Taíno Batey Ceremonial Ballcourt & Plaza:
       // Sunken/graded earthen court (kind 16) lined with upright carved petroglyph stone monoliths (kind 11) & central zemi altar.
-      const yCourt = yGround + 0.24;
+      const yCourt = yGround + 0.05;
       beginSection('batey_plaza_floor');
-      emitBox(toWorld, -hw, hw, yBase, yCourt, -hl, hl, 16, 0.84, true);
+      emitBox(toWorld, -hw, hw, yGround - 0.9, yCourt, -hl, hl, 16, 0.82, true, 0.12);
       // Flanking rows of upright carved stone monoliths & river boulders along -hw and +hw
       beginSection('batey_petroglyph_monoliths');
       const nStones = snapBays(inst.length - 2.0, 2.8, 5);
@@ -34066,30 +34493,30 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       for (let s = 0; s <= nStones; s++) {
         const sz = -hl + 1.0 + s * stoneSpan;
         const hMod = 1.15 + ((s * 5) % 4) * 0.22;
-        emitBox(toWorld, -hw - 0.15, -hw + 0.42, yCourt, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
-        emitBox(toWorld, hw - 0.42, hw + 0.15, yCourt, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
+        emitBox(toWorld, -hw - 0.15, -hw + 0.42, yGround - 0.6, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
+        emitBox(toWorld, hw - 0.42, hw + 0.15, yGround - 0.6, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
       }
       // Carved stone Zemi sanctuary plinth & cacique wooden duho ceremonial stool at the head of the court
       beginSection('zemi_altar_and_duho');
-      emitCylinder(toWorld, 0, hl * 0.58, yCourt, yCourt + 0.65, 1.35, 1.18, 8, 11, 0.88, true);
+      emitCylinder(toWorld, 0, hl * 0.58, yGround - 0.4, yCourt + 0.65, 1.35, 1.18, 8, 11, 0.88, true);
       emitCylinder(toWorld, 0, hl * 0.58, yCourt + 0.65, yCourt + 1.85, 0.48, 0.28, 6, 11, 0.94, true);
-      emitBox(toWorld, -0.85, 0.85, yCourt, yCourt + 0.48, -hl * 0.65 - 0.45, -hl * 0.65 + 0.45, 10, 0.78, true);
+      emitBox(toWorld, -0.85, 0.85, yGround - 0.25, yCourt + 0.48, -hl * 0.65 - 0.45, -hl * 0.65 + 0.45, 10, 0.78, true);
     } else if (inst.prefabId === 'kalinago_carbet_hall') {
       // Kalinago (Island Carib) Elliptical Taboui / Carbet Assembly Hall:
       // Soaring palm-thatch communal warrior hall with low open eaves, hardwood post colonnade & boucan roasting rack.
       const kHW = Math.min(5.2, hw);
-      const yPlinth = yGround + 0.32;
+      const yPlinth = yGround + 0.05;
       const yLowEave = yPlinth + 1.65;
       const yPeak = yPlinth + Math.max(5.6, inst.height);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -kHW - 0.5, kHW + 0.5, yBase, yPlinth, -hl - 0.5, hl + 0.5, 16, 0.80);
+      emitBox(toWorld, -kHW - 0.08, kHW + 0.08, yGround - 1.4, yPlinth, -hl - 0.08, hl + 0.08, 10, 0.74, false, 0.08);
       beginSection('carbet_timber_colonnade');
       const nPosts = snapBays(inst.length - 2.0, 3.2, 4);
       const pSpan = (inst.length - 2.0) / nPosts;
       for (let p = 0; p <= nPosts; p++) {
         const pz = -hl + 1.0 + p * pSpan;
-        emitCylinder(toWorld, -kHW + 0.45, pz, yPlinth, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
-        emitCylinder(toWorld, kHW - 0.45, pz, yPlinth, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
+        emitCylinder(toWorld, -kHW + 0.45, pz, yGround - 0.7, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
+        emitCylinder(toWorld, kHW - 0.45, pz, yGround - 0.7, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
       }
       // Low woven-reed windbreak skirt (kind 12) + sweeping two-stage steep palm-thatch roof (kind 15)
       beginSection('carbet_thatch_hall_roof');
@@ -34102,10 +34529,10 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       // Tupinambá / Lokono Monumental Arched Palm-Thatch Oca Longhouse (28m x 9.6m):
       // Continuous ground-to-ridge arched palm-thatch shell (kind 15) with 3 low side doorways & external sapling ribs.
       const oHW = Math.min(5.0, hw);
-      const yPlinth = yGround + 0.30;
+      const yPlinth = yGround + 0.05;
       const ocaH = Math.max(5.8, inst.height);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -oHW - 0.45, oHW + 0.45, yBase, yPlinth, -hl - 0.45, hl + 0.45, 16, 0.80);
+      emitBox(toWorld, -oHW - 0.06, oHW + 0.06, yGround - 1.4, yPlinth, -hl - 0.06, hl + 0.06, 15, 0.78, false, 0.06);
       beginSection('oca_arched_thatch_vault');
       emitBox(toWorld, -oHW, oHW, yPlinth, yPlinth + ocaH * 0.38, -hl, hl, 15, 0.86, false, oHW * 0.08);
       emitBox(toWorld, -oHW * 0.92, oHW * 0.92, yPlinth + ocaH * 0.38, yPlinth + ocaH * 0.72, -hl - 0.2, hl + 0.2, 15, 0.91, true, oHW * 0.18);
@@ -34172,19 +34599,19 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       const naW = Math.min(3.8, hw * 0.68);
       const naL = Math.min(3.6, hl * 0.36);
       beginSection('maya_apsidal_thatched_nah');
-      emitBox(toWorld, -naW, naW, yGround, yGround + 2.35, naZ - naL, naZ + naL, 12, 0.88);
+      emitBox(toWorld, -naW, naW, yGround - 0.6, yGround + 2.35, naZ - naL, naZ + naL, 12, 0.88);
       emitRoof(toWorld, -naW, naW, yGround + 2.35, yGround + 4.95, naZ - naL, naZ + naL, 0.72, 0.28, 10, 15);
     } else if (inst.prefabId === 'indigenous_canoe_landing') {
       // Indigenous Canoe Beaching, Log Rollers, Upturned Birchbark / Dugout Canoes & Tidal Brushwood Fish Weir
       const isBirchbark =
         inst.cultureId === 'abenaki-algonquian' || inst.cultureId === 'mid-atlantic-algonquian';
       const canoeKind = isBirchbark ? 17 : 10;
-      const yBeach = yGround + 0.18;
+      const yBeach = yGround + 0.06;
       beginSection('canoe_landing_rollers');
       for (let r = 0; r < 5; r++) {
         const rz = -hl + 1.8 + r * 2.6;
-        emitCylinder(toWorld, -hw * 0.55, rz, yBeach - 0.1, yBeach + 0.18, 0.16, 0.16, 6, 10, 0.72, true);
-        emitCylinder(toWorld, hw * 0.55, rz, yBeach - 0.1, yBeach + 0.18, 0.16, 0.16, 6, 10, 0.72, true);
+        emitCylinder(toWorld, -hw * 0.55, rz, yBeach - 0.14, yBeach + 0.14, 0.16, 0.16, 6, 10, 0.72, true);
+        emitCylinder(toWorld, hw * 0.55, rz, yBeach - 0.14, yBeach + 0.14, 0.16, 0.16, 6, 10, 0.72, true);
       }
       // 2 Beached 3D Canoes (Abenaki high-stem paper-birchbark canoes or Taíno/Kalinago carved mahogany cayucos/kanawas)
       beginSection('beached_indigenous_canoes');
@@ -34209,6 +34636,199 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       emitBox(toWorld, -hw * 0.7, hw * 0.7, yBeach + 1.05, yBeach + 1.20, hl - 2.2, hl - 1.9, 10, 0.78, true);
       emitCylinder(toWorld, -hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
       emitCylinder(toWorld, hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
+    } else if (inst.prefabId === 'english_triangular_palisade_fort') {
+      // 1607 James Fort Triangular Timber Palisade & Bulwarks:
+      // Triangular upright-log stockade enclosure with 3 circular/half-moon corner bulwark bastions,
+      // raised earthen/timber gun platforms, 4 mounted demi-culverin cannon barrels, riverward gatehouse,
+      // and interior mud-and-stud guardhouse / magazine.
+      const yPlinth = yGround + 0.35;
+      const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
+      const yBulwarkDeck = yWallTop - 1.05;
+      // 3 triangular apex coordinates: SW river bulwark (-hw*0.84, -hl*0.68), SE river bulwark (+hw*0.84, -hl*0.68), N landward bulwark (0, +hl*0.82)
+      const bSW = [-hw * 0.84, -hl * 0.68];
+      const bSE = [hw * 0.84, -hl * 0.68];
+      const bN = [0, hl * 0.82];
+      const rBulwark = Math.min(4.8, Math.min(hw, hl) * 0.28);
+
+      beginSection('fort_earthwork_plinth');
+      // Graded earthen court & firing bank under the triangle
+      emitBox(toWorld, bSW[0] * 0.9, bSE[0] * 0.9, yGround - 1.8, yPlinth, bSW[1] - 0.8, bN[1] * 0.35, 16, 0.80, true, 0.25);
+      emitBox(toWorld, bSW[0] * 0.52, bSE[0] * 0.52, yGround - 1.8, yPlinth, bN[1] * 0.15, bN[1] * 0.85, 16, 0.80, true, 0.25);
+
+      // 3 Circular Corner Bulwark Bastions (earthen drum + timber revetment + log parapet + gun deck)
+      beginSection('corner_bulwark_bastions');
+      for (const [bx, bz] of [bSW, bSE, bN]) {
+        emitCylinder(toWorld, bx, bz, yGround - 2.0, yBulwarkDeck, rBulwark + 0.35, rBulwark + 0.15, 10, 16, 0.78, true);
+        emitCylinder(toWorld, bx, bz, yBulwarkDeck - 0.25, yBulwarkDeck + 0.08, rBulwark + 0.12, rBulwark + 0.12, 10, 10, 0.82, true);
+        const nLogs = 16;
+        for (let p = 0; p < nLogs; p++) {
+          const a = (p / nLogs) * Math.PI * 2;
+          // Leave gun embrasure gaps facing outward
+          if (p % 4 === 0) continue;
+          const lx = bx + Math.cos(a) * rBulwark;
+          const lz = bz + Math.sin(a) * rBulwark;
+          emitCylinder(toWorld, lx, lz, yGround - 1.2, yWallTop + 0.45 + (p % 3) * 0.14, 0.28, 0.14, 6, 10, 0.72 + (p % 2) * 0.05, true);
+        }
+      }
+
+      // 3 Triangular Palisade Curtain Walls (Riverward curtain bSW->bSE with central gate gap; West curtain bSW->bN; East curtain bSE->bN)
+      beginSection('triangular_palisade_curtains');
+      const emitPalisadeLine = (x0, z0, x1, z1, leaveCenterGate) => {
+        const dist = Math.hypot(x1 - x0, z1 - z0);
+        const steps = Math.max(8, Math.round(dist / 0.78));
+        for (let s = 2; s <= steps - 2; s++) {
+          const u = s / steps;
+          if (leaveCenterGate && Math.abs(u - 0.5) < 0.09) continue;
+          const px = x0 + (x1 - x0) * u;
+          const pz = z0 + (z1 - z0) * u;
+          const hJit = ((s * 5) % 4) * 0.12;
+          emitCylinder(toWorld, px, pz, yGround - 1.4, yWallTop + hJit, 0.26, 0.13, 6, 10, 0.73 + (s % 3) * 0.04, true);
+        }
+      };
+      emitPalisadeLine(bSW[0], bSW[1], bSE[0], bSE[1], true);
+      emitPalisadeLine(bSW[0], bSW[1], bN[0], bN[1], false);
+      emitPalisadeLine(bSE[0], bSE[1], bN[0], bN[1], false);
+
+      // Riverward Timber Gatehouse & Watch-Bell Frame at (0, bSW[1])
+      beginSection('river_gatehouse_and_watchtower');
+      const gz = bSW[1];
+      emitBox(toWorld, -2.2, 2.2, yPlinth, yWallTop + 1.8, gz - 1.1, gz + 1.1, 10, 0.78, true);
+      emitBox(toWorld, -1.2, 1.2, yPlinth, yWallTop - 0.9, gz - 1.2, gz + 1.2, 14, 0.26);
+      emitRoof(toWorld, -2.5, 2.5, yWallTop + 1.8, yWallTop + 3.4, gz - 1.4, gz + 1.4, 0.45, 0.35, 10, 10);
+
+      // 4 Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages (SW, SE, N bulwarks + River Gate)
+      beginSection('bulwark_ordnance_guns');
+      for (const [gx, gz] of [
+        [bSW[0], bSW[1] - rBulwark * 0.55],
+        [bSE[0], bSE[1] - rBulwark * 0.55],
+        [-bSW[0] * 0.35, bSW[1] - 0.4],
+      ]) {
+        emitBox(toWorld, gx - 0.55, gx + 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, gz - 0.9, gz + 0.9, 10, 0.72, true);
+        emitBox(toWorld, gx - 0.22, gx + 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, gz - 1.75, gz + 0.45, 14, 0.36, true);
+      }
+      // North bulwark gun pointing landward (+Z)
+      emitBox(toWorld, -0.55, 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, bN[1] - 0.5, bN[1] + 1.1, 10, 0.72, true);
+      emitBox(toWorld, -0.22, 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, bN[1] - 0.1, bN[1] + 2.0, 14, 0.36, true);
+
+      // Interior Mud-and-Stud Guardhouse / Corpse de Garde & Powder Magazine inside the triangular court
+      beginSection('interior_guardhouse_and_magazine');
+      const ghW = Math.min(4.2, hw * 0.26);
+      const ghL = Math.min(5.8, hl * 0.28);
+      const yGhEave = yPlinth + 2.85;
+      const yGhPeak = yGhEave + 2.45;
+      emitBox(toWorld, -ghW, ghW, yPlinth, yGhEave, -ghL * 0.6, ghL * 1.4, 12, 0.86, true);
+      // Exposed dark oak post-and-stud timber framing on guardhouse walls
+      for (const sx of [-ghW - 0.06, 0, ghW + 0.06]) {
+        emitBox(toWorld, sx - 0.14, sx + 0.14, yPlinth, yGhEave, -ghL * 0.64, ghL * 1.44, 10, 0.70, true);
+      }
+      emitRoof(toWorld, -ghW - 0.25, ghW + 0.25, yGhEave, yGhPeak, -ghL * 0.65, ghL * 1.45, 0.55, 0.32, 10, 10);
+    } else if (inst.prefabId === 'english_half_timber_hall') {
+      // 17th-Century English Half-Timbered Church & Company Storehouse (Jamestown 1608/1617 Church & Magazine, Plymouth Meetinghouse):
+      // Fieldstone & Tudor brick plinth, buff wattle-and-daub infill walls with dark-oak box framing & Jacobean diagonal braces,
+      // projecting timber entry porch, massive end brick chimney stack, leaded casement windows, and steep 52° thatch/shingle gable roof.
+      const hHW = Math.min(5.4, hw);
+      const yPlinth = yGround + 0.52;
+      const yEave = yPlinth + Math.max(3.6, inst.height * 0.52);
+      const yPeak = yEave + Math.max(3.4, inst.roofPitch || 3.8);
+
+      beginSection('brick_and_cobble_plinth');
+      emitBox(toWorld, -hHW - 0.28, hHW + 0.28, yGround - 2.2, yPlinth, -hl - 0.28, hl + 0.28, 13, 0.82, false, 0.25);
+
+      beginSection('wattle_and_daub_infill_walls');
+      emitBox(toWorld, -hHW, hHW, yPlinth, yEave, -hl, hl, 12, 0.88);
+
+      // Exposed Dark-Oak Half-Timber Framing (vertical posts, horizontal wall-plates & mid-rails, windows)
+      beginSection('exposed_oak_timber_framing');
+      const nBays = snapBays(inst.length - 1.2, 3.2, 5);
+      const baySpan = (inst.length - 1.2) / nBays;
+      // Horizontal sill beam, mid-girt rail, and eave wall-plate along both long walls
+      for (const [y0, y1] of [
+        [yPlinth, yPlinth + 0.24],
+        [yPlinth + (yEave - yPlinth) * 0.48, yPlinth + (yEave - yPlinth) * 0.48 + 0.22],
+        [yEave - 0.26, yEave],
+      ]) {
+        emitBox(toWorld, -hHW - 0.09, hHW + 0.09, y0, y1, -hl - 0.09, hl + 0.09, 10, 0.68, true);
+      }
+      for (let b = 0; b <= nBays; b++) {
+        const bz = -hl + 0.6 + b * baySpan;
+        emitBox(toWorld, -hHW - 0.10, -hHW + 0.14, yPlinth, yEave, bz - 0.14, bz + 0.14, 10, 0.66, true);
+        emitBox(toWorld, hHW - 0.14, hHW + 0.10, yPlinth, yEave, bz - 0.14, bz + 0.14, 10, 0.66, true);
+        if (b < nBays) {
+          const cz = bz + baySpan * 0.5;
+          // Shuttered casement windows in each bay
+          emitBox(toWorld, -hHW - 0.08, hHW + 0.08, yPlinth + 1.15, yEave - 0.65, cz - 0.46, cz + 0.46, 14, 0.28);
+          emitBox(toWorld, -hHW - 0.12, hHW + 0.12, yPlinth + 1.05, yPlinth + 1.18, cz - 0.56, cz + 0.56, 10, 0.72, true);
+        }
+      }
+      // Gable-end oak king-post & collar-beam timber framing
+      for (const gz of [-hl - 0.08, hl + 0.08]) {
+        emitBox(toWorld, -0.16, 0.16, yPlinth, yPeak - 0.2, gz - 0.08, gz + 0.08, 10, 0.66, true);
+        emitBox(toWorld, -hHW * 0.55, -hHW * 0.55 + 0.22, yPlinth, yEave + (yPeak - yEave) * 0.45, gz - 0.08, gz + 0.08, 10, 0.66, true);
+        emitBox(toWorld, hHW * 0.55 - 0.22, hHW * 0.55, yPlinth, yEave + (yPeak - yEave) * 0.45, gz - 0.08, gz + 0.08, 10, 0.66, true);
+      }
+
+      // Projecting Timber Entry Porch / Belfry Vestibule on -Z gable front & Tudor Brick Chimney Stack on +Z gable
+      beginSection('porch_and_tudor_brick_chimney');
+      emitBox(toWorld, -1.65, 1.65, yGround - 1.2, yEave - 0.4, -hl - 2.1, -hl, 12, 0.86, true);
+      emitBox(toWorld, -1.72, 1.72, yPlinth, yEave - 0.4, -hl - 2.16, -hl - 1.92, 10, 0.68, true);
+      emitBox(toWorld, -0.85, 0.85, yPlinth, yPlinth + 2.15, -hl - 2.22, -hl - 1.85, 14, 0.26);
+      emitRoof(toWorld, -1.85, 1.85, yEave - 0.4, yEave + 1.35, -hl - 2.25, -hl + 0.1, 0.35, 0, 12, 10);
+      // Stepped Virginia red-brick chimney stack at +hl
+      emitBox(toWorld, -1.35, 1.35, yGround - 1.4, yEave + 0.6, hl - 0.2, hl + 1.35, 13, 0.86, true, 0.18);
+      emitBox(toWorld, -0.95, 0.95, yEave + 0.6, yPeak + 1.45, hl + 0.05, hl + 1.15, 13, 0.90, true);
+      emitCylinder(toWorld, -0.42, hl + 0.6, yPeak + 1.45, yPeak + 2.25, 0.28, 0.24, 6, 13, 0.94, true);
+      emitCylinder(toWorld, 0.42, hl + 0.6, yPeak + 1.45, yPeak + 2.25, 0.28, 0.24, 6, 13, 0.94, true);
+
+      // Steep 52° Reed-Thatch / Riven-Oak Shingle Gable Roof (kind 10) with gable end walls (kind 12)
+      beginSection('steep_english_gable_roof');
+      emitRoof(toWorld, -hHW, hHW, yEave, yPeak, -hl, hl, 0.68, 0, 12, 10);
+      emitBox(toWorld, -0.20, 0.20, yPeak - 0.12, yPeak + 0.26, -hl - 0.55, hl + 0.55, 10, 0.74, true);
+    } else if (inst.prefabId === 'english_timber_cottage') {
+      // 17th-Century English Colonial Clapboard & Wattle-and-Daub Steep-Gable Cottage (Jamestown Mud-and-Stud / Plymouth House):
+      // Fieldstone sill, riven oak weatherboard / wattle-and-daub lower story, jettied timber-framed gable,
+      // end cobble-and-brick chimney stack, shuttered casements, and steep thatch/wood-shingle gable roof.
+      const cHW = Math.min(4.3, hw);
+      const yPlinth = yGround + 0.42;
+      const yEave = yPlinth + Math.max(2.85, inst.height * 0.50);
+      const yPeak = yEave + Math.max(2.85, inst.roofPitch || 3.2);
+
+      beginSection('fieldstone_sill_plinth');
+      emitBox(toWorld, -cHW - 0.22, cHW + 0.22, yGround - 2.0, yPlinth, -hl - 0.22, hl + 0.22, 11, 0.80, false, 0.22);
+
+      beginSection('cottage_wattle_and_clapboard_walls');
+      emitBox(toWorld, -cHW, cHW, yPlinth, yEave, -hl, hl, 12, 0.86);
+
+      beginSection('cottage_oak_posts_and_openings');
+      emitBox(toWorld, -cHW - 0.14, cHW + 0.14, yEave - 0.24, yEave + 0.06, -hl - 0.24, hl + 0.24, 10, 0.68, true);
+      const nBays = snapBays(inst.length - 1.0, 3.0, 3);
+      const baySpan = (inst.length - 1.0) / nBays;
+      for (let b = 0; b <= nBays; b++) {
+        const bz = -hl + 0.5 + b * baySpan;
+        emitBox(toWorld, -cHW - 0.08, -cHW + 0.12, yPlinth, yEave, bz - 0.12, bz + 0.12, 10, 0.66, true);
+        emitBox(toWorld, cHW - 0.12, cHW + 0.08, yPlinth, yEave, bz - 0.12, bz + 0.12, 10, 0.66, true);
+        if (b < nBays) {
+          const cz = bz + baySpan * 0.5;
+          if (b === 1) {
+            // Plank batten doorway with timber hood on -X side
+            emitBox(toWorld, -cHW - 0.08, -cHW + 0.14, yPlinth, yPlinth + 2.05, cz - 0.62, cz + 0.62, 14, 0.28);
+            emitBox(toWorld, -cHW - 0.48, -cHW + 0.05, yPlinth + 2.02, yPlinth + 2.24, cz - 0.82, cz + 0.82, 10, 0.72, true);
+            emitBox(toWorld, cHW - 0.12, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.28);
+          } else {
+            emitBox(toWorld, -cHW - 0.08, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.28);
+            emitBox(toWorld, -cHW - 0.12, cHW + 0.12, yPlinth + 0.86, yPlinth + 0.98, cz - 0.50, cz + 0.50, 10, 0.72, true);
+          }
+        }
+      }
+
+      // End Cobble-and-Brick Hearth Chimney on +hl gable
+      beginSection('cottage_hearth_chimney');
+      emitBox(toWorld, -1.15, 1.15, yGround - 1.4, yEave + 0.35, hl - 0.15, hl + 1.15, 11, 0.82, true, 0.18);
+      emitBox(toWorld, -0.78, 0.78, yEave + 0.35, yPeak + 1.15, hl + 0.05, hl + 0.95, 13, 0.88, true);
+
+      // Steep Reed-Thatch / Riven-Clapboard Gable Roof (kind 10) with gable end walls (kind 12)
+      beginSection('cottage_steep_thatch_roof');
+      emitRoof(toWorld, -cHW, cHW, yEave, yPeak, -hl, hl, 0.58, 0, 12, 10);
+      emitBox(toWorld, -0.18, 0.18, yPeak - 0.10, yPeak + 0.22, -hl - 0.45, hl + 0.45, 10, 0.74, true);
     } else {
       // Bay-Iterated Spanish Colonial Residential & Civic Blocks:
       // Dispatches cleanly between:
@@ -34973,7 +35593,9 @@ function seedCoastalVegetation(
     const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
     const bIdx = bj * m + bi;
     const nearSandyShore = beachData.drySandMask[bIdx] >= 24 || beachData.swashMask[bIdx] >= 16 || inlandM <= 75;
-    const isPalmClimate = region.climate === 'tropical' || region.climate === 'subtropical';
+    const isPalmClimate =
+      (region.climate === 'tropical' || region.climate === 'subtropical') &&
+      Math.abs(region.latitude ?? 0) < 33.2;
     const isLowlandOrInlandPalm = isPalmClimate && h <= 110 && (nearSandyShore || shape < 0.48);
 
     if ((h < 10.5 && nearSandyShore) || isLowlandOrInlandPalm) {
@@ -35284,35 +35906,65 @@ function createCoastalViews(regionSpec, heights, portPlacement = null) {
   const shoreAlong = portPlacement?.center?.shoreAlong ?? 0;
   const shoreInland = portPlacement?.center?.shoreInland ?? -350;
   const viewScale = Math.min(1, region.span / 3200);
+  const clampResident = (pos, marginFrac = 0.43) => {
+    const maxOff = region.span * marginFrac;
+    return {
+      x: Math.max(region.x - maxOff, Math.min(region.x + maxOff, pos.x)),
+      z: Math.max(region.z - maxOff, Math.min(region.z + maxOff, pos.z)),
+    };
+  };
   const rawHorizon = worldFromCoastalFrame(
     region,
     shoreAlong - 300 * viewScale,
     shoreInland - Math.max(2200, 9500 * viewScale)
   );
-  const rawApproach = worldFromCoastalFrame(
-    region,
-    shoreAlong - 120 * viewScale,
-    shoreInland - Math.max(720, 2600 * viewScale)
+  const rawApproach = clampResident(
+    worldFromCoastalFrame(
+      region,
+      shoreAlong - 120 * viewScale,
+      shoreInland - Math.max(620, 2200 * viewScale)
+    ),
+    0.44
   );
-  const rawCoast = worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(240, 780 * viewScale));
-  const rawHarbor = worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(110, 260 * viewScale));
-  const rawDock = portPlacement?.dockBerth
-    ? { x: portPlacement.dockBerth.x, z: portPlacement.dockBerth.z }
-    : worldFromCoastalFrame(region, shoreAlong - 12 * viewScale, shoreInland - Math.max(82, 90 * viewScale));
+  const rawCoast = clampResident(
+    worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(240, 780 * viewScale)),
+    0.43
+  );
+  const rawHarbor = clampResident(
+    worldFromCoastalFrame(region, shoreAlong, shoreInland - Math.max(110, 260 * viewScale)),
+    0.43
+  );
+  const rawDock = clampResident(
+    portPlacement?.dockBerth
+      ? { x: portPlacement.dockBerth.x, z: portPlacement.dockBerth.z }
+      : worldFromCoastalFrame(region, shoreAlong - 12 * viewScale, shoreInland - Math.max(82, 90 * viewScale)),
+    0.43
+  );
   const dockHeading = portPlacement?.dockBerth?.heading ?? (((heading - 108) % 360 + 360) % 360);
 
   const snapToNavigableBay = (pos) => {
-    if (terrainSample(heights, pos.x, pos.z, region) <= -10.5) return pos;
     const n = region.size;
     const span = region.span;
-    for (const targetDepth of [-11.0, -4.5]) {
+    const inGrid =
+      Math.abs(pos.x - region.x) <= span * 0.43 &&
+      Math.abs(pos.z - region.z) <= span * 0.43;
+    const isClearAt = (wx, wz, minH) =>
+      terrainSample(heights, wx, wz, region) <= minH &&
+      terrainSample(heights, wx + 32, wz, region) <= minH &&
+      terrainSample(heights, wx - 32, wz, region) <= minH &&
+      terrainSample(heights, wx, wz + 32, region) <= minH &&
+      terrainSample(heights, wx, wz - 32, region) <= minH;
+    if (inGrid && isClearAt(pos.x, pos.z, -8.5)) return pos;
+    for (const targetDepth of [-10.0, -5.5, -3.6]) {
       let bestX = pos.x, bestZ = pos.z, bestDist2 = Infinity;
-      for (let j = 2; j < n - 2; j += 2) {
+      for (let j = 4; j < n - 4; j += 2) {
         const wz = region.z + (j / (n - 1) - 0.5) * span;
-        for (let i = 2; i < n - 2; i += 2) {
+        if (Math.abs(wz - region.z) > span * 0.43) continue;
+        for (let i = 4; i < n - 4; i += 2) {
           const wx = region.x + (i / (n - 1) - 0.5) * span;
+          if (Math.abs(wx - region.x) > span * 0.43) continue;
           const h = heights[j * n + i];
-          if (h <= targetDepth) {
+          if (h <= targetDepth && isClearAt(wx, wz, Math.min(-3.4, targetDepth + 1.5))) {
             const d2 = (wx - pos.x) * (wx - pos.x) + (wz - pos.z) * (wz - pos.z);
             if (d2 < bestDist2) {
               bestDist2 = d2;
@@ -35359,6 +36011,7 @@ function smoothCoastlineAndForeshoreBeaches(
   const span = region.span;
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
 
+  const protectMargin = Math.max(28, (span / Math.max(1, n - 1)) * 1.45);
   const isPortProtected = (i, j) => {
     if (
       connectedEdges &&
@@ -35372,7 +36025,7 @@ function smoothCoastlineAndForeshoreBeaches(
     if (!preservePortCore) return false;
     const x = region.x + (i / (n - 1) - 0.5) * span;
     const z = region.z + (j / (n - 1) - 0.5) * span;
-    if (!portClearanceEnvelope(preservePortCore, x, z, 18)) return true;
+    if (!portClearanceEnvelope(preservePortCore, x, z, protectMargin)) return true;
     const h = heights[j * n + i];
     if (h <= -0.5) {
       if (preservePortCore.berth && Math.hypot(x - preservePortCore.berth.x, z - preservePortCore.berth.z) <= 135) {
@@ -35621,6 +36274,7 @@ function finalizeProceduralCoastalPack(
       connectedEdges: pack.connectedEdges || null,
       taperOuterBorders: Boolean(pack.taperOuterBorders),
     });
+    syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
   }
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist);
@@ -35630,6 +36284,8 @@ function finalizeProceduralCoastalPack(
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = pack.skipPortPlacement ? null : createCoastalViews(region, heights, port);
+
+  const climateProfile = pack.climateProfile ?? estimateLocalClimateProfile(region.latitude, region.longitude, region);
 
   return Object.assign(pack, {
     region,
@@ -35643,6 +36299,7 @@ function finalizeProceduralCoastalPack(
     vegetation,
     views,
     elevationSource,
+    climateProfile,
   });
 }
 
@@ -42323,6 +42980,7 @@ const LANDFALL_SCENARIOS = Object.freeze([
     label: '1492 Columbus Fleet · Santa María, Pinta & Niña at Guanahaní',
     latitude: 24.05,
     longitude: -74.53,
+    shoreBearing: 280,
     year: 1492,
     ship: 'santa-maria',
     colors: 'castile',
@@ -42392,6 +43050,17 @@ const LANDFALL_SCENARIOS = Object.freeze([
     weather: 'clear',
   }),
   Object.freeze({
+    id: 'jamestown-1610',
+    label: '1610 Jamestown · James Fort Triangular Palisade on the James River',
+    region: 'jamestown',
+    year: 1610,
+    ship: 'pinta',
+    colors: 'england',
+    fleet: 'nina:friendly',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
     id: 'corsair-ambush-tortuga-1645',
     label: '1645 Brethren of the Coast · Corsair Ambush off Tortuga',
     region: 'tortuga',
@@ -42435,6 +43104,7 @@ const LANDFALL_SCENARIOS = Object.freeze([
     label: '1615 Rogue Liberator · Defending Wabanaki Wigwam Village (Maine)',
     latitude: 43.68,
     longitude: -70.20,
+    shoreBearing: 305,
     year: 1615,
     ship: 'nina',
     colors: 'indigenous-confederacy',
@@ -42448,6 +43118,7 @@ const LANDFALL_SCENARIOS = Object.freeze([
     label: '1650 Sovereign Wabanaki Confederacy · Fortified Native Harbor (Shawmut)',
     latitude: 42.3601,
     longitude: -71.0589,
+    shoreBearing: 275,
     year: 1650,
     ship: 'pinta',
     colors: 'indigenous-confederacy',
@@ -42460,6 +43131,7 @@ const LANDFALL_SCENARIOS = Object.freeze([
     label: '1510 Rogue Liberator · Sovereign Taíno Cacicazgo of Hispaniola',
     latitude: 19.95,
     longitude: -75.85,
+    shoreBearing: 5,
     year: 1510,
     ship: 'nina',
     colors: 'indigenous-confederacy',
@@ -42505,15 +43177,15 @@ const LANDFALL_SCENARIOS = Object.freeze([
 
 // Curated pre-colonial & Native American coastal village landfalls across all 9 culture regions.
 const INDIGENOUS_VILLAGE_PRESETS = Object.freeze([
-  Object.freeze({ id: 'wabanaki-casco', label: 'Wabanaki / Abenaki Birchbark Wigwam Village · Casco Bay, Maine (1550)', latitude: 43.68, longitude: -70.20, year: 1550 }),
-  Object.freeze({ id: 'shawmut-1550', label: 'Massachusett / Algonquian Village · Shawmut / Boston Harbor (1550)', latitude: 42.3601, longitude: -71.0589, year: 1550 }),
-  Object.freeze({ id: 'lenape-mannahatta', label: 'Lenape / Algonquian Longhouse Village · Mannahatta / New York (1550)', latitude: 40.703, longitude: -74.014, year: 1550 }),
-  Object.freeze({ id: 'powhatan-chesapeake', label: 'Powhatan Tsenacommacah Longhouse Town · Chesapeake Bay (1550)', latitude: 37.208, longitude: -76.778, year: 1550 }),
-  Object.freeze({ id: 'taino-xaragua', label: 'Taíno Cacicazgo (Bohíos & Caney) · Tiburon / Hispaniola (1495)', latitude: 18.45, longitude: -72.85, year: 1495 }),
-  Object.freeze({ id: 'kalinago-dominica', label: 'Kalinago (Island Carib) Carbet Stronghold · Waitukubuli / Dominica (1550)', latitude: 15.30, longitude: -61.38, year: 1550 }),
-  Object.freeze({ id: 'maya-cozumel', label: 'Chontal Maya Coastal Trading Port · Cozumel, Yucatán (1518)', latitude: 20.51, longitude: -86.95, year: 1518 }),
-  Object.freeze({ id: 'wayuu-maracaibo', label: 'Añú / Wayuu Lagoon Palafito Stilt Village · Lake Maracaibo (1550)', latitude: 10.95, longitude: -71.60, year: 1550 }),
-  Object.freeze({ id: 'tupinamba-guanabara', label: 'Tupinambá Coastal Maloca Village · Guanabara Bay, Brazil (1545)', latitude: -22.906, longitude: -43.172, year: 1545 }),
+  Object.freeze({ id: 'wabanaki-casco', label: 'Wabanaki / Abenaki Birchbark Wigwam Village · Casco Bay, Maine (1550)', latitude: 43.68, longitude: -70.20, shoreBearing: 305, year: 1550 }),
+  Object.freeze({ id: 'shawmut-1550', label: 'Massachusett / Algonquian Village · Shawmut / Boston Harbor (1550)', latitude: 42.3601, longitude: -71.0589, shoreBearing: 275, year: 1550 }),
+  Object.freeze({ id: 'lenape-mannahatta', label: 'Lenape / Algonquian Longhouse Village · Mannahatta / New York (1550)', latitude: 40.703, longitude: -74.014, shoreBearing: 15, year: 1550 }),
+  Object.freeze({ id: 'powhatan-chesapeake', label: 'Powhatan Tsenacommacah Longhouse Town · Chesapeake Bay (1550)', latitude: 37.208, longitude: -76.778, shoreBearing: 30, year: 1550 }),
+  Object.freeze({ id: 'taino-xaragua', label: 'Taíno Cacicazgo (Bohíos & Caney) · Tiburon / Hispaniola (1495)', latitude: 18.45, longitude: -72.85, shoreBearing: 185, year: 1495 }),
+  Object.freeze({ id: 'kalinago-dominica', label: 'Kalinago (Island Carib) Carbet Stronghold · Waitukubuli / Dominica (1550)', latitude: 15.30, longitude: -61.38, shoreBearing: 75, year: 1550 }),
+  Object.freeze({ id: 'maya-cozumel', label: 'Chontal Maya Coastal Trading Port · Cozumel, Yucatán (1518)', latitude: 20.51, longitude: -86.95, shoreBearing: 105, year: 1518 }),
+  Object.freeze({ id: 'wayuu-maracaibo', label: 'Añú / Wayuu Lagoon Palafito Stilt Village · Lake Maracaibo (1550)', latitude: 10.95, longitude: -71.60, shoreBearing: 265, year: 1550 }),
+  Object.freeze({ id: 'tupinamba-guanabara', label: 'Tupinambá Coastal Maloca Village · Guanabara Bay, Brazil (1545)', latitude: -22.906, longitude: -43.172, shoreBearing: 340, year: 1545 }),
 ]);
 
 const SCENARIO_CLEANUP_KEYS = [
@@ -42540,7 +43212,7 @@ function scenarioStageURL(href, scenarioOrId, fallbackStage = 'coast', fallbackW
   } else {
     const regionSpec = sc.region
       ? sc.region
-      : { latitude: sc.latitude, longitude: sc.longitude, year: sc.year };
+      : { latitude: sc.latitude, longitude: sc.longitude, shoreBearing: sc.shoreBearing, year: sc.year };
     url = coastalRegionStageURL(href, regionSpec, stage, weather, sc.year);
     for (const k of SCENARIO_CLEANUP_KEYS) url.searchParams.delete(k);
   }
@@ -42693,7 +43365,7 @@ function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=nul
       const ind=INDIGENOUS_VILLAGE_PRESETS.find(v=>v.id===val.slice(11));
       if(ind){
         const effectiveY=targetYear!==undefined?targetYear:ind.year;
-        const url=stripScenarioOverrides(coastalRegionStageURL(location.href,{latitude:ind.latitude,longitude:ind.longitude},stage==='dock'?'coast':(stage||'coast'),weather,effectiveY));
+        const url=stripScenarioOverrides(coastalRegionStageURL(location.href,{latitude:ind.latitude,longitude:ind.longitude,shoreBearing:ind.shoreBearing},stage==='dock'?'coast':(stage||'coast'),weather,effectiveY));
         location.assign(url.href);
         return;
       }
@@ -49298,6 +49970,9 @@ const TIMBER_BUILDING_PREFABS = new Set([
   'cooperage_barrel_yard',
   'indigenous_bohio_village_compound',
   'palisade_stockade_wall',
+  'english_triangular_palisade_fort',
+  'english_half_timber_hall',
+  'english_timber_cottage',
 ]);
 
 function classifyBuildingMaterial(building) {
@@ -49330,6 +50005,7 @@ function createBuildingMagazineState(building) {
   const prefabId = building.prefabId ?? '';
   const isFortress = prefabId === 'bastion_trace_fortress';
   const isBastion = prefabId === 'stone_sea_bastion';
+  const isTimberFort = prefabId === 'english_triangular_palisade_fort';
   const isArsenal = prefabId === 'royal_atarazanas_arsenal';
   const isArmedPier = Boolean(building.armed || building.hasMagazine);
   const barrelMassKg = 40.8;
@@ -49339,9 +50015,11 @@ function createBuildingMagazineState(building) {
       ? 120
       : isArsenal
         ? 80
-        : isArmedPier
-          ? 24
-          : 0;
+        : isTimberFort
+          ? 48
+          : isArmedPier
+            ? 24
+            : 0;
   const initialPowderKg = +(barrelsTotal * barrelMassKg).toFixed(1);
   const initialRounds = barrelsTotal > 0
     ? {
@@ -49886,6 +50564,12 @@ function createBuildingGunDefinitions(building) {
       const gx = i * (hw * 0.50);
       addEmbrasureGun('starboard', 1, gx, yTop + 0.25, hl + 0.15, [0, 0, 1], 24);
     }
+  } else if (prefabId === 'english_triangular_palisade_fort') {
+    const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.35;
+    addEmbrasureGun('port', -1, -hw * 0.84, yBulwark, -hl * 0.68 - 2.0, [0, 0, -1], 12);
+    addEmbrasureGun('port', -1, 0, yBulwark, -hl * 0.68 - 1.2, [0, 0, -1], 12);
+    addEmbrasureGun('port', -1, hw * 0.84, yBulwark, -hl * 0.68 - 2.0, [0, 0, -1], 12);
+    addEmbrasureGun('starboard', 1, 0, yBulwark, hl * 0.82 + 2.0, [0, 0, 1], 12);
   } else if (building.armed && (prefabId === 'stone_quay_seawall' || prefabId === 'timber_mole_pier')) {
     addEmbrasureGun('port', -1, -hw * 0.35, yTop + 0.35, -hl, [0, 0, -1], 12);
     addEmbrasureGun('starboard', 1, hw * 0.35, yTop + 0.35, hl, [0, 0, 1], 12);
@@ -57999,11 +58683,46 @@ async function main() {
   boat.heave=-boat.hydrodynamics.sinkage;
   if(BROADSIDE_SCENARIO)boat.surgeVelocity=boat.speed*KNOT_TO_MPS;
   if(terrain&&LAND_STAGE){
-    const start=terrain.safeStart({x:boat.x,z:boat.z},boat);boat.x=start.x;boat.z=start.z;
+    const start=terrain.safeStart({x:boat.x,z:boat.z,heading:boat.heading},boat);boat.x=start.x;boat.z=start.z;
+    if(!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')&&Number.isFinite(terrain.views?.[LAND_STAGE]?.heading)){
+      boat.heading=terrain.views[LAND_STAGE].heading;
+    }
     if(terrain.region&&!qs.has('astroLat')&&!qs.has('astroLon')){
       try{astronomy.set({latitude:terrain.region.latitude,longitude:terrain.region.longitude},boat);}catch{/* ignore */}
     }
   }
+  const placeCompanionVesselInWater=(esc,idx)=>{
+    if(!terrain||!LAND_STAGE||esc.dormantEncounter)return;
+    const L=Math.max(boat.length,esc.asset.model.runtime.length),formation=esc.formation;
+    const minSep=Math.max(38,(boat.length+esc.boat.length)*0.65);
+    const isSeparatedFromFleet=(px,pz)=>{
+      if(Math.hypot(px-boat.x,pz-boat.z)<minSep)return false;
+      for(let j=1;j<=idx;j++){
+        const prev=vessels[j];
+        if(!prev||prev===esc||prev.dormantEncounter||!prev.boat)continue;
+        if(Math.hypot(px-prev.boat.x,pz-prev.boat.z)<minSep*0.85)return false;
+      }
+      return true;
+    };
+    const baseHeading=Number.isFinite(boat.heading)?boat.heading:0;
+    for(const angOff of [0,-30,30,-65,65,-105,105,150,-150,180]){
+      const hRad=((baseHeading+angOff)*Math.PI)/180;
+      const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
+      const rightX=Math.cos(hRad),rightZ=Math.sin(hRad);
+      const cand={
+        x:boat.x-fwdX*(L*formation.trail)+rightX*(L*formation.side),
+        z:boat.z-fwdZ*(L*formation.trail)+rightZ*(L*formation.side),
+        heading:baseHeading,
+      };
+      const start=terrain.safeStart(cand,esc.boat);
+      if(isSeparatedFromFleet(start.x,start.z)){
+        esc.boat.x=start.x;esc.boat.z=start.z;esc.boat.heading=baseHeading;
+        return;
+      }
+    }
+    const fallback=terrain.safeStart({x:boat.x,z:boat.z,heading:baseHeading},esc.boat);
+    esc.boat.x=fallback.x;esc.boat.z=fallback.z;esc.boat.heading=baseHeading;
+  };
   let followerEnabled=vessels.slice(1).some(v=>!v.dormantEncounter);
   let squadronGunneryOrders=qs.get('squadronGuns')==='1'||vessels.slice(1).some(v=>!v.dormantEncounter&&v.faction==='enemy');
   const shouldSquadronObeyGunnery=()=>followerEnabled&&(squadronGunneryOrders||vessels.slice(1).some(v=>v.faction==='enemy'));
@@ -58039,7 +58758,7 @@ async function main() {
       faction:v.faction,
       salvoDelay:BROADSIDE_SCENARIO&&v.faction==='enemy'?8.0:0,
     });
-    if(!v.dormantEncounter&&terrain&&LAND_STAGE){const start=terrain.safeStart(v.boat,v.boat);v.boat.x=start.x;v.boat.z=start.z;}
+    if(!v.dormantEncounter&&terrain&&LAND_STAGE)placeCompanionVesselInWater(v,idx+1);
   }
   const makeGunneryOptions=(ownerBoat,prefix='')=>({
     deferSeaCollision:ownerBoat===boat,
@@ -59184,26 +59903,19 @@ async function main() {
   const seaSliders = new Map();
   let initial1550AutoRepositioned=false;
   terrain?.discovery?.subscribe?.(disc=>{
-    if(!initial1550AutoRepositioned&&disc.applied&&disc.isCurated1550&&LAND_STAGE&&!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')){
+    if(!initial1550AutoRepositioned&&disc.applied&&LAND_STAGE&&!qs.has('boatX')&&!qs.has('boatZ')&&!qs.has('cam')){
       initial1550AutoRepositioned=true;
       const v=terrain.views?.[LAND_STAGE];
       if(v){
-        const safe=terrain.safeStart({x:v.x,z:v.z},boat);
+        const safe=terrain.safeStart({x:v.x,z:v.z,heading:v.heading},boat);
         boat.x=safe.x;boat.z=safe.z;if(Number.isFinite(v.heading))boat.heading=v.heading;
+        boat.aground=false;
         if(boat.enabled){cam.x=boat.x;cam.z=boat.z;}
         else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw*D2R;cam.pitch=v.pitch*D2R;}
-        for(const esc of vessels.slice(1)){
+        for(const [idx,esc] of vessels.slice(1).entries()){
           if(esc.dormantEncounter)continue;
-          const L=Math.max(boat.length,esc.asset.model.runtime.length),formation=esc.formation;
-          const hRad=(boat.heading||0)*D2R;
-          const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
-          const rightX=Math.cos(hRad),rightZ=Math.sin(hRad);
-          const targetPos={
-            x:boat.x-fwdX*(L*formation.trail)+rightX*(L*formation.side),
-            z:boat.z-fwdZ*(L*formation.trail)+rightZ*(L*formation.side),
-          };
-          const start=terrain.safeStart(targetPos,esc.boat);
-          esc.boat.x=start.x;esc.boat.z=start.z;esc.boat.heading=boat.heading;
+          placeCompanionVesselInWater(esc,idx+1);
+          esc.boat.aground=false;
           esc.boat.showProw=true;
         }
       }

@@ -518,6 +518,7 @@ export const FORTIFICATION_PREFAB_IDS = Object.freeze([
   'bastion_trace_fortress',
   'torreon_atalaya_farol',
   'curtain_wall_and_gate',
+  'english_triangular_palisade_fort',
 ]);
 
 export const INDIGENOUS_VILLAGE_PREFAB_IDS = Object.freeze([
@@ -911,6 +912,19 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
         specs.push({ lx: sx * 2.2, ly: yPlinth, lz: -rBase - 0.38, routeZ: [-rBase - 0.38, -rBase - 0.38], localYaw: Math.PI, role: 'Alabardero de Torre', stationKind: 'plinth' });
       }
     }
+  } else if (inst.prefabId === 'english_triangular_palisade_fort') {
+    const yPlinth = yGround + 0.35;
+    const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
+    const yBulwarkDeck = yWallTop - 1.05;
+    const bSW = [-hw * 0.84, -hl * 0.68];
+    const bSE = [hw * 0.84, -hl * 0.68];
+    const bN = [0, hl * 0.82];
+    specs.push({ lx: bSW[0], ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.2, bSW[1] + 0.6], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
+    specs.push({ lx: 0, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 0.8, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
+    specs.push({ lx: bSE[0], ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.2, bSE[1] + 0.6], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
+    specs.push({ lx: bN[0], ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 0.8, bN[1] + 1.0], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
+    specs.push({ lx: -2.4, ly: yPlinth, lz: -1.8, routeZ: [-3.5, 1.5], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'parade' });
+    specs.push({ lx: 2.4, ly: yPlinth, lz: -1.8, routeZ: [-3.5, 1.5], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'parade' });
   } else if (inst.prefabId === 'curtain_wall_and_gate') {
     const wallHW = Math.min(3.4, hw);
     const yWalk = yTop - 0.90;

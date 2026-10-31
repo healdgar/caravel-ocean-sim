@@ -62,13 +62,26 @@ export function islandCoordinates(x,z,region=ISLAND){
   return {latitude:region.latitude-(z-region.z)/111195,
     longitude:region.longitude+(x-region.x)/(111195*Math.cos(region.latitude*Math.PI/180))};
 }
+function sampleCoastalClamped(heights,x,z,region=ISLAND){
+  if(region!==ISLAND){
+    const half=(region.span??8192)*0.5;
+    if(Math.abs(x-region.x)>half||Math.abs(z-region.z)>half){
+      const cx=Math.max(region.x-half+1,Math.min(region.x+half-1,x));
+      const cz=Math.max(region.z-half+1,Math.min(region.z+half-1,z));
+      const edgeH=terrainSample(heights,cx,cz,region);
+      if(edgeH>-1.5)return edgeH;
+    }
+  }
+  return terrainSample(heights,x,z,region);
+}
 // Conservative hull envelope against an elevation-derived coastal skirt for safe spawn placement.
 function islandHullClearance(heights,boat,x,z,region=ISLAND,sample=null){
   const radius=Math.hypot(boat.length,boat.beam)*.5+8;
   const threshold=-Math.max(3,(boat.hydrodynamics?.draft??2)+1);
   for(let k=0;k<9;k++){
     const a=k*Math.PI/4,r=k===8?0:radius;
-    if((sample?sample(x+Math.cos(a)*r,z+Math.sin(a)*r):terrainSample(heights,x+Math.cos(a)*r,z+Math.sin(a)*r,region))>threshold)return false;
+    const px=x+Math.cos(a)*r,pz=z+Math.sin(a)*r;
+    if((sample?sample(px,pz):sampleCoastalClamped(heights,px,pz,region))>threshold)return false;
   }
   return true;
 }
@@ -362,32 +375,76 @@ function hullWorstBedHeight(heights,boat,x,z,region=ISLAND,sample=null,options=n
 // The broad elevation-derived shelf can exceed 500m; search the entire resident
 // region, using the same footprint/depth margin as the movement constraint.
 export function safeLandfallStart(heights,view,boat,region=ISLAND,sample=null){
-  const result=(x,z)=>({...view,x,z,moved:x!==view.x||z!==view.z,depth:-(sample?sample(x,z):terrainSample(heights,x,z,region))});
-  if(islandHullClearance(heights,boat,view.x,view.z,region,sample))return result(view.x,view.z);
+  const sampleFn=sample||((px,pz)=>sampleCoastalClamped(heights,px,pz,region));
+  const result=(x,z)=>({...view,x,z,moved:x!==view.x||z!==view.z,depth:-sampleFn(x,z)});
+  const span=region?.span??8192;
+  const stayInResident=region!==ISLAND&&Math.abs(view.x-region.x)<=span*0.52&&Math.abs(view.z-region.z)<=span*0.52;
+  const inResidentBounds=(x,z)=>!stayInResident||(Math.abs(x-region.x)<=span*0.45&&Math.abs(z-region.z)<=span*0.45);
+  if(inResidentBounds(view.x,view.z)&&islandHullClearance(heights,boat,view.x,view.z,region,sampleFn))return result(view.x,view.z);
   const dx=view.x-region.x,dz=view.z-region.z,distance=Math.hypot(dx,dz);
   const ux=distance?dx/distance:1,uz=distance?dz/distance:0;
-  const limit=region.span*2+Math.hypot(boat.length,boat.beam);
+  const limit=span*2+Math.hypot(boat.length,boat.beam);
   const hasCoastalBearing=Number.isFinite(region?.shoreBearing)&&region!==ISLAND;
   const hRad=((view.heading??region?.shoreBearing??0)*Math.PI)/180;
   const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
-  const hasForwardRoom=(x,z)=>!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,sample);
+  const hasForwardRoom=(x,z)=>!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,sampleFn);
   let firstValid=null;
+  if(hasCoastalBearing){
+    const rayAngles=[0,-20,20,-40,40,-65,65,-90,90,-125,125,-155,155,180];
+    for(const degOff of rayAngles){
+      const sbRad=((region.shoreBearing+degOff)*Math.PI)/180;
+      const offX=-Math.sin(sbRad),offZ=Math.cos(sbRad);
+      const stepD=degOff===0?16:24;
+      const maxD=stayInResident?Math.min(limit,span*0.95):limit;
+      for(let d=16;d<=maxD;d+=stepD){
+        const x=view.x+offX*d,z=view.z+offZ*d;
+        if(!inResidentBounds(x,z))continue;
+        if(islandHullClearance(heights,boat,x,z,region,sampleFn)){
+          if(!firstValid)firstValid={x,z};
+          if(hasForwardRoom(x,z))return result(x,z);
+        }
+      }
+    }
+  }
+  if(stayInResident&&heights?.length){
+    const n=region.size||Math.round(Math.sqrt(heights.length));
+    const stride=n>=257?4:2;
+    let bestFwd=null,bestFwdDist2=Infinity,bestAny=null,bestAnyDist2=Infinity;
+    for(let j=4;j<n-4;j+=stride){
+      const wz=region.z+(j/(n-1)-0.5)*span;
+      if(Math.abs(wz-region.z)>span*0.44)continue;
+      for(let i=4;i<n-4;i+=stride){
+        if(heights[j*n+i]>-3.0)continue;
+        const wx=region.x+(i/(n-1)-0.5)*span;
+        if(Math.abs(wx-region.x)>span*0.44)continue;
+        const d2=(wx-view.x)*(wx-view.x)+(wz-view.z)*(wz-view.z);
+        if(d2>=bestFwdDist2&&d2>=bestAnyDist2)continue;
+        if(islandHullClearance(heights,boat,wx,wz,region,sampleFn)){
+          if(d2<bestAnyDist2){bestAnyDist2=d2;bestAny={x:wx,z:wz};}
+          if(d2<bestFwdDist2&&hasForwardRoom(wx,wz)){bestFwdDist2=d2;bestFwd={x:wx,z:wz};}
+        }
+      }
+    }
+    if(bestFwd)return result(bestFwd.x,bestFwd.z);
+    if(bestAny)return result(bestAny.x,bestAny.z);
+  }
+  const rawSampleFn=sample||((px,pz)=>terrainSample(heights,px,pz,region));
   if(hasCoastalBearing){
     const sbRad=(region.shoreBearing*Math.PI)/180;
     const offX=-Math.sin(sbRad),offZ=Math.cos(sbRad);
     for(let d=16;d<=limit;d+=16){
       const x=view.x+offX*d,z=view.z+offZ*d;
-      if(islandHullClearance(heights,boat,x,z,region,sample)){
+      if(islandHullClearance(heights,boat,x,z,region,rawSampleFn)){
         if(!firstValid)firstValid={x,z};
-        if(hasForwardRoom(x,z))return result(x,z);
+        if(!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,rawSampleFn))return result(x,z);
       }
     }
   }
   for(let d=50;d<=limit;d+=50){
     const x=view.x+ux*d,z=view.z+uz*d;
-    if(islandHullClearance(heights,boat,x,z,region,sample)){
+    if(islandHullClearance(heights,boat,x,z,region,rawSampleFn)){
       if(!firstValid)firstValid={x,z};
-      if(hasForwardRoom(x,z))return result(x,z);
+      if(!hasCoastalBearing||islandHullClearance(heights,boat,x+fwdX*60,z+fwdZ*60,region,rawSampleFn))return result(x,z);
     }
   }
   if(firstValid)return result(firstValid.x,firstValid.z);

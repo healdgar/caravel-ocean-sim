@@ -127,9 +127,9 @@ test('all 9 playable ship models expose hierarchical part-assembly catalogs and 
   }
 });
 
-test('all 31 colonial and Native American port building prefabs expose hierarchical part-assembly catalogs across structural layers', () => {
+test('all 34 colonial and Native American port building prefabs expose hierarchical part-assembly catalogs across structural layers', () => {
   const prefabIds = Object.keys(PORT_PREFABS);
-  assert.equal(prefabIds.length, 31);
+  assert.equal(prefabIds.length, 34);
   assert.equal(BUILDING_SUB_ASSEMBLIES.length, 6);
 
   const observedSubAssemblies = new Set();
