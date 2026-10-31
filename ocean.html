@@ -15811,8 +15811,14 @@ function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0,terrai
     const previousHeading=boat.heading*Math.PI/180,previousYaw=boat.yawRate;
     stepBoatSteering(boat,steering,dt);
     const heading=previousHeading+(previousYaw+boat.yawRate)*dt*.25;
-    boat.x+=Math.sin(heading)*distance+Math.cos(heading)*boat.leewayDistance;
-    boat.z-=Math.cos(heading)*distance-Math.sin(heading)*boat.leewayDistance;
+    const freeFactor=Math.max(0,1-(boat.mooringRestraint??0));
+    boat.x+=(Math.sin(heading)*distance+Math.cos(heading)*boat.leewayDistance)*freeFactor;
+    boat.z-=(Math.cos(heading)*distance-Math.sin(heading)*boat.leewayDistance)*freeFactor;
+    if(freeFactor<1){
+      boat.surgeVelocity=(boat.surgeVelocity??0)*(0.15+0.85*freeFactor);
+      boat.leewayVelocity=(boat.leewayVelocity??0)*freeFactor;
+      boat.yawRate=(boat.yawRate??0)*freeFactor;
+    }
     if(terrain)boat.coastBlocked=terrain.constrain(boat,previousX,previousZ);
   }
   boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage-extraSink,boat.hydrodynamics.heaveOmega,dt,fresh?(probe.rate.heave*waveDecay):0);
@@ -40184,25 +40190,18 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
 
     const db=battleContext?.getDockingBoarding?.()?.state??null;
     const vessels=battleContext?.getVessels?.()??[];
-    const nearbyShip=vessels.slice(1).find(v=>v?.boat&&!v.boat.damage?.sunk);
+    const nearbyShip=vessels.slice(1).find(v=>v&&!v.dormantEncounter&&v.boat?.showProw&&!v.boat.damage?.sunk);
     if(dockBtn){
       const phase=db?.mooringPhase??'clear';
       const isMoored=phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines';
-      const isCasting=phase==='casting-off';
       dockBtn.hidden=false;
-      if(isCasting){
-        dockBtn.textContent='🪢 Casting off…';
-        dockBtn.disabled=true;
-        dockBtn.setAttribute('aria-pressed','true');
-        dockBtn.title=db?.statusText??'Casting off mooring lines';
-      }else if(isMoored){
+      dockBtn.disabled=false;
+      if(isMoored){
         dockBtn.textContent='🪢 Cast off';
-        dockBtn.disabled=false;
         dockBtn.setAttribute('aria-pressed','true');
-        dockBtn.title=`${db?.statusText??'Moored'} · Click to cast off all lines`;
+        dockBtn.title=`${db?.statusText??'Hauling / moored'} · Click to cast off all lines immediately`;
       }else{
         dockBtn.textContent=nearbyShip?'🪢 Throw lines':'🪢 Dock';
-        dockBtn.disabled=false;
         dockBtn.setAttribute('aria-pressed','false');
         dockBtn.title=nearbyShip?'Throw mooring & grappling lines onto adjacent vessel':'Throw bow & stern mooring lines onto pier';
       }
@@ -41867,21 +41866,38 @@ function bdClamp(x, a, b) {
   return x < a ? a : x > b ? b : x;
 }
 
+// Basis vectors matching Waterworld's world coordinate convention (js/vessels.js & js/boat.js):
+// heading = 0 -> North (-Z), heading = 90 -> East (+X).
+// Forward (bow): (+sin(h), -cos(h))
+// Right (starboard): (+cos(h), +sin(h))
+function boatBasis(boat) {
+  const h = ((boat?.heading ?? 0) * Math.PI) / 180;
+  const ch = Math.cos(h), sh = Math.sin(h);
+  return {
+    h,
+    ch,
+    sh,
+    fwdX: sh,
+    fwdZ: -ch,
+    rightX: ch,
+    rightZ: sh,
+  };
+}
+
 function boatWorldPoint(boat, lx, ly, lz) {
   const hull = vesselHull(boat);
   const f = hull.frame;
   const sx = (boat.beam ?? f.beam) / f.beam;
   const sy = f.verticalScale ?? 1;
   const sz = (boat.length ?? f.length) / f.length;
-  const h = (boat.heading ?? 0) * Math.PI / 180;
-  const ch = Math.cos(h), sh = Math.sin(h);
+  const { rightX, rightZ, fwdX, fwdZ } = boatBasis(boat);
   const x = lx * sx;
   const y = ly * sy;
   const z = lz * sz;
   return [
-    (boat.x ?? 0) + x * ch + z * sh,
+    (boat.x ?? 0) + x * rightX + z * fwdX,
     (boat.heave ?? 0) + y,
-    (boat.z ?? 0) - x * sh + z * ch,
+    (boat.z ?? 0) + x * rightZ + z * fwdZ,
   ];
 }
 
@@ -42053,16 +42069,29 @@ function findNearestPier(boat, env = {}) {
     }
   }
 
-  if (bestPier && bestPier.distance <= 320) {
-    return bestPier;
+  if (bestPier && bestPier.distance <= 36) {
+    // Clamp effective bollard line-of-action to a clean lateral warping range (<= 9.5 m)
+    // so hauling never drags the vessel across shoals or far-off shore geometry.
+    const { rightX, rightZ } = boatBasis(boat);
+    const dx = bestPier.x - bx;
+    const dz = bestPier.z - bz;
+    const sideSign = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1;
+    const side = sideSign >= 0 ? 'starboard' : 'port';
+    const halfBeam = Math.max(2.0, (boat?.beam ?? 4.8) * 0.5);
+    const clampedDist = bdClamp(bestPier.distance, halfBeam + 3.2, halfBeam + 7.5);
+    return {
+      ...bestPier,
+      x: bx + rightX * sideSign * clampedDist,
+      z: bz + rightZ * sideSign * clampedDist,
+      distance: clampedDist,
+      side,
+    };
   }
 
-  // Fallback: create a berth alongside the ship's port or starboard beam
-  const h = (boat?.heading ?? 0) * Math.PI / 180;
-  const rightX = Math.cos(h);
-  const rightZ = -Math.sin(h);
-  const halfBeam = Math.max(2.4, (boat?.beam ?? 4.8) * 0.5);
-  const pierOffset = halfBeam + 2.6;
+  // Fallback: create a berth alongside the ship's port beam at a smooth warping distance
+  const { rightX, rightZ } = boatBasis(boat);
+  const halfBeam = Math.max(2.0, (boat?.beam ?? 4.8) * 0.5);
+  const pierOffset = halfBeam + 5.2;
   return {
     kind: 'pier',
     label: env?.portLabel || 'Harbor Landing Pier',
@@ -42077,14 +42106,10 @@ function findNearestPier(boat, env = {}) {
 
 function buildLineDescriptorsForPier(boat, pier, side = 'port') {
   const sideSign = side === 'port' ? -1 : 1;
-  const h = (boat.heading ?? 0) * Math.PI / 180;
-  const fwdX = Math.sin(h);
-  const fwdZ = Math.cos(h);
-  const rightX = Math.cos(h);
-  const rightZ = -Math.sin(h);
+  const { fwdX, fwdZ, rightX, rightZ } = boatBasis(boat);
   const pierSign = sideSign;
   const halfBeam = Math.max(1.8, (boat.beam ?? 3.6) * 0.5);
-  const pierDist = halfBeam + 2.4;
+  const pierDist = halfBeam + 5.2;
 
   // 4 classic mooring lines: Bow line, Forward spring, Aft spring, Stern line
   const specs = [
@@ -42117,9 +42142,7 @@ function buildLineDescriptorsForPier(boat, pier, side = 'port') {
 function buildLineDescriptorsForShip(boat, targetBoat, side = 'starboard') {
   const sideSign = side === 'port' ? -1 : 1;
   // Determine which side of targetBoat faces our boat
-  const th = (targetBoat.heading ?? 0) * Math.PI / 180;
-  const tRightX = Math.cos(th);
-  const tRightZ = -Math.sin(th);
+  const { rightX: tRightX, rightZ: tRightZ } = boatBasis(targetBoat);
   const toPlayerX = (boat.x ?? 0) - (targetBoat.x ?? 0);
   const toPlayerZ = (boat.z ?? 0) - (targetBoat.z ?? 0);
   const targetSideSign = (toPlayerX * tRightX + toPlayerZ * tRightZ) >= 0 ? 1 : -1;
@@ -42158,6 +42181,16 @@ function createDockingBoardingState(boat, options = {}) {
     mooringTargetKind: null, // 'pier' | 'vessel'
     mooringSide: 'port',
     pier: null,
+    berthX: null,
+    berthZ: null,
+    berthHeading: null,
+    pierNormalX: 0,
+    pierNormalZ: 0,
+    lateralGap: 0,
+    lateralSpeed: 0,
+    haulVx: 0,
+    haulVz: 0,
+    terrain: null,
     targetVessel: null,
     lineProgress: 0,    // 0 = coiled aboard, 1 = landed on bollard/rail
     lineTension: 0,     // 0 = slack/flying, 1 = taut made fast
@@ -42185,9 +42218,7 @@ function createDockingBoardingState(boat, options = {}) {
   }
 
   function determineSideToward(tx, tz) {
-    const h = (boat.heading ?? 0) * Math.PI / 180;
-    const rightX = Math.cos(h);
-    const rightZ = -Math.sin(h);
+    const { rightX, rightZ } = boatBasis(boat);
     const dx = tx - (boat.x ?? 0);
     const dz = tz - (boat.z ?? 0);
     return (dx * rightX + dz * rightZ) >= 0 ? 'starboard' : 'port';
@@ -42197,7 +42228,22 @@ function createDockingBoardingState(boat, options = {}) {
   function dockAtPier(env = {}, { immediate = false } = {}) {
     const pier = findNearestPier(boat, env);
     const side = pier.side ?? determineSideToward(pier.x, pier.z);
+    const sideSign = side === 'port' ? -1 : 1;
+    const { rightX, rightZ } = boatBasis(boat);
+    const halfBeam = Math.max(1.8, (boat.beam ?? 3.6) * 0.5);
+    const fenderGap = halfBeam + 1.6;
+
+    state.terrain = env?.terrain ?? state.terrain ?? null;
     state.pier = pier;
+    state.pierNormalX = rightX * sideSign;
+    state.pierNormalZ = rightZ * sideSign;
+    state.lateralGap = Math.max(0.6, (pier.distance ?? (fenderGap + 3.6)) - fenderGap);
+    state.lateralSpeed = 0;
+    state.berthX = (boat.x ?? 0) + state.pierNormalX * state.lateralGap;
+    state.berthZ = (boat.z ?? 0) + state.pierNormalZ * state.lateralGap;
+    state.berthHeading = boat.heading ?? 0;
+    state.haulVx = 0;
+    state.haulVz = 0;
     state.targetVessel = null;
     state.mooringTargetKind = 'pier';
     state.mooringSide = side;
@@ -42210,8 +42256,10 @@ function createDockingBoardingState(boat, options = {}) {
       state.mooringPhase = 'moored';
       state.lineProgress = 1.0;
       state.lineTension = 1.0;
+      state.lateralGap = 0;
       state.phaseTimer = 0;
       boat.mooringActive = false;
+      boat.mooringRestraint = 1.0;
       state.statusText = `Moored alongside ${pier.label} (${side} lines fast)`;
     } else {
       state.mooringPhase = 'throwing-lines';
@@ -42219,6 +42267,7 @@ function createDockingBoardingState(boat, options = {}) {
       state.lineTension = 0.0;
       state.phaseTimer = 0;
       boat.mooringActive = true;
+      boat.mooringRestraint = 0.05;
       assignCrewToRailAction(state.company, boat, 'mooring', side);
       state.statusText = `Throwing bow & stern lines to ${pier.label} (${side} side)…`;
     }
@@ -42234,26 +42283,38 @@ function createDockingBoardingState(boat, options = {}) {
     }
     const tb = targetVessel.boat;
     if (pullAlongside) {
-      // Bring vessels beam-to-beam at close grappling distance if within hailing/boarding reach
-      const h = (boat.heading ?? 0) * Math.PI / 180;
-      const rightX = Math.cos(h);
-      const rightZ = -Math.sin(h);
+      // If the vessel is far off, bring her within initial line-throwing distance (~desiredGap + 4.5 m)
+      // so the subsequent making-fast phase smoothly hauls the hulls beam-to-beam without snapping.
+      const { rightX, rightZ } = boatBasis(boat);
       const dx = (tb.x ?? 0) - (boat.x ?? 0);
       const dz = (tb.z ?? 0) - (boat.z ?? 0);
       const dist = Math.hypot(dx, dz);
       const sideSign = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1;
       const desiredGap = Math.max(6.2, ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.68);
-      if (dist > desiredGap * 1.35) {
-        tb.x = (boat.x ?? 0) + rightX * sideSign * desiredGap;
-        tb.z = (boat.z ?? 0) + rightZ * sideSign * desiredGap;
+      if (dist > desiredGap + 6.0) {
+        const stagingDist = desiredGap + 4.2;
+        tb.x = (boat.x ?? 0) + rightX * sideSign * stagingDist;
+        tb.z = (boat.z ?? 0) + rightZ * sideSign * stagingDist;
         tb.heading = boat.heading ?? 0;
-        tb.u = (boat.u ?? 0) * 0.25;
-        tb.v = 0;
+        tb.surgeVelocity = (boat.surgeVelocity ?? 0) * 0.35;
+        tb.leewayVelocity = 0;
       }
     }
 
     const side = determineSideToward(tb.x ?? 0, tb.z ?? 0);
+    const sideSign = side === 'port' ? -1 : 1;
+    const { rightX, rightZ } = boatBasis(boat);
+    const curDist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
+    const desiredGap = Math.max(5.8, ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.65);
     state.pier = null;
+    state.berthX = null;
+    state.berthZ = null;
+    state.pierNormalX = rightX * sideSign;
+    state.pierNormalZ = rightZ * sideSign;
+    state.lateralGap = Math.max(0, curDist - desiredGap);
+    state.lateralSpeed = 0;
+    state.haulVx = 0;
+    state.haulVz = 0;
     state.targetVessel = targetVessel;
     state.mooringTargetKind = 'vessel';
     state.mooringSide = side;
@@ -42536,25 +42597,36 @@ function createDockingBoardingState(boat, options = {}) {
     }
     const prevTarget = state.mooringTargetKind === 'pier'
       ? (state.pier?.label || 'pier')
-      : (state.targetVessel?.boat?.name || 'vessel');
+      : (state.targetVessel?.boat?.shipName || state.targetVessel?.boat?.name || 'vessel');
     state.mooringPhase = 'casting-off';
     state.boardingPhase = 'none';
     state.boardingMode = null;
     state.phaseTimer = 0;
+    // Immediately release line tension and mooring restraint so inward hauling stops on this exact frame!
+    state.lineTension = 0;
     boat.mooringForce = null;
+    boat.mooringRestraint = 0;
     boat.boardingActive = false;
     boat.mooringActive = true;
     assignCrewToRailAction(state.company, boat, 'mooring', state.mooringSide);
 
-    // Gentle shove-off impulse away from the pier/ship so she makes clean sea room
-    const h = (boat.heading ?? 0) * Math.PI / 180;
-    const rightX = Math.cos(h);
-    const rightZ = -Math.sin(h);
-    const awaySign = state.mooringSide === 'port' ? 1 : -1;
-    boat.u = Math.max(boat.u ?? 0, 0.65);
-    boat.v = (boat.v ?? 0) + awaySign * 0.28;
-    boat.x = (boat.x ?? 0) + rightX * awaySign * 0.35;
-    boat.z = (boat.z ?? 0) + rightZ * awaySign * 0.35;
+    // Cancel any inward hauling velocity and impart a smooth lateral shove-off velocity
+    // away from the pier/ship (negative lateralSpeed = moving away along -pierNormal).
+    const { rightX, rightZ } = boatBasis(boat);
+    const sideSign = state.mooringSide === 'port' ? -1 : 1;
+    const awaySign = -sideSign;
+    if (!state.pierNormalX && !state.pierNormalZ) {
+      state.pierNormalX = rightX * sideSign;
+      state.pierNormalZ = rightZ * sideSign;
+    }
+    const lateralShoveSpeed = 0.85;
+    state.lateralSpeed = -lateralShoveSpeed;
+    state.haulVx = -state.pierNormalX * lateralShoveSpeed;
+    state.haulVz = -state.pierNormalZ * lateralShoveSpeed;
+    boat.leewayVelocity = awaySign * 0.55;
+    boat.surgeVelocity = Math.max(boat.surgeVelocity ?? 0, 0.55);
+    boat.u = boat.surgeVelocity;
+    boat.v = boat.leewayVelocity;
 
     state.statusText = `Casting off bow & stern lines from ${prevTarget}…`;
     emit('cast-off-start', { target: prevTarget });
@@ -42576,53 +42648,126 @@ function createDockingBoardingState(boat, options = {}) {
     return best;
   }
 
+  function moveBoatSmooth(dx, dz) {
+    if (!Number.isFinite(dx) || !Number.isFinite(dz)) return;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dz) < 1e-6) return;
+    const prevX = boat.x ?? 0;
+    const prevZ = boat.z ?? 0;
+    boat.x = prevX + dx;
+    boat.z = prevZ + dz;
+    if (state.terrain && typeof state.terrain.constrain === 'function') {
+      const blocked = state.terrain.constrain(boat, prevX, prevZ);
+      if (blocked) {
+        state.lateralSpeed = 0;
+        state.lateralGap = 0;
+        state.haulVx = 0;
+        state.haulVz = 0;
+      }
+    }
+  }
+
   function applyMooringPhysics(dt) {
-    if (state.mooringPhase !== 'making-fast' && state.mooringPhase !== 'moored' && state.mooringPhase !== 'grappled') {
+    if (state.mooringPhase === 'casting-off') {
+      boat.mooringRestraint = 0;
+      boat.mooringForce = null;
+      // Smoothly glide away from the pier/ship along -pierNormal with exponential water drag
+      const drag = Math.exp(-dt * 1.65);
+      state.lateralSpeed = Math.min(0, (state.lateralSpeed ?? -0.85) * drag);
+      const stepAway = -state.lateralSpeed * dt; // > 0
+      state.lateralGap = (state.lateralGap ?? 0) + stepAway;
+      const awayX = -state.pierNormalX * stepAway;
+      const awayZ = -state.pierNormalZ * stepAway;
+      state.haulVx = -state.pierNormalX * Math.abs(state.lateralSpeed);
+      state.haulVz = -state.pierNormalZ * Math.abs(state.lateralSpeed);
+      moveBoatSmooth(awayX, awayZ);
+      // Prevent wind leeway from pushing the ship back toward the pier while casting off
+      const sideSign = state.mooringSide === 'port' ? -1 : 1;
+      if (Number.isFinite(boat.leewayVelocity) && boat.leewayVelocity * sideSign > 0) {
+        boat.leewayVelocity = 0;
+      }
+      return;
+    }
+
+    if (
+      state.mooringPhase !== 'throwing-lines' &&
+      state.mooringPhase !== 'making-fast' &&
+      state.mooringPhase !== 'moored' &&
+      state.mooringPhase !== 'grappled'
+    ) {
+      boat.mooringRestraint = 0;
+      state.lateralSpeed = 0;
+      state.haulVx = 0;
+      state.haulVz = 0;
       boat.mooringForce = null;
       return;
     }
-    const tension = bdClamp(state.lineTension, 0, 1);
-    if (tension <= 0.01) {
+
+    // Smoothly ramp mooring restraint so sail/wave drift checks gently without fighting the lines
+    const rawTension = bdClamp(state.lineTension, 0, 1);
+    const smoothTension = rawTension * rawTension * (3 - 2 * rawTension);
+    const restraint = state.mooringPhase === 'throwing-lines'
+      ? 0.35 * bdClamp(state.lineProgress, 0, 1)
+      : 0.35 + 0.65 * smoothTension;
+    boat.mooringRestraint = restraint;
+
+    const velDecay = Math.exp(-dt * 4.5 * restraint);
+    if (Number.isFinite(boat.surgeVelocity)) boat.surgeVelocity *= velDecay;
+    if (Number.isFinite(boat.leewayVelocity)) boat.leewayVelocity *= velDecay;
+    if (Number.isFinite(boat.yawRate)) boat.yawRate *= velDecay;
+    if (Number.isFinite(boat.u)) boat.u *= velDecay;
+    if (Number.isFinite(boat.v)) boat.v *= velDecay;
+
+    const haulEffort = state.mooringPhase === 'throwing-lines'
+      ? 0.0
+      : smoothTension;
+    if (haulEffort <= 0.005) {
+      state.lateralSpeed = 0;
       boat.mooringForce = null;
       return;
     }
 
     if (state.mooringTargetKind === 'pier' && state.pier) {
-      // Hold ship gently alongside the pier berth
-      const h = (boat.heading ?? 0) * Math.PI / 180;
-      const rightX = Math.cos(h);
-      const rightZ = -Math.sin(h);
-      const sideSign = state.mooringSide === 'port' ? -1 : 1;
-      const halfBeam = Math.max(1.8, (boat.beam ?? 3.6) * 0.5);
-      const desiredX = state.pier.x - rightX * sideSign * (halfBeam + 2.2);
-      const desiredZ = state.pier.z - rightZ * sideSign * (halfBeam + 2.2);
-      const dx = desiredX - (boat.x ?? 0);
-      const dz = desiredZ - (boat.z ?? 0);
-      const dist = Math.hypot(dx, dz);
-      if (dist < 45) {
-        const pull = Math.min(1, dt * 1.8 * tension);
-        boat.x = (boat.x ?? 0) + dx * pull * 0.25;
-        boat.z = (boat.z ?? 0) + dz * pull * 0.25;
+      const gap = Math.max(0, state.lateralGap ?? 0);
+      if (gap > 0.002) {
+        // First-order smoothed 1D lateral warping speed along locked pierNormal:
+        // accelerates smoothly from 0 up to ~1.05 m/s and eases smoothly to 0 at berth.
+        const targetSpeed = Math.min(1.05, gap * 0.85) * haulEffort;
+        state.lateralSpeed = Math.max(0, state.lateralSpeed ?? 0);
+        state.lateralSpeed += (targetSpeed - state.lateralSpeed) * Math.min(1, dt * 4.2);
+        const stepLat = Math.min(gap, state.lateralSpeed * dt);
+        state.lateralGap = Math.max(0, gap - stepLat);
+        state.haulVx = state.pierNormalX * state.lateralSpeed;
+        state.haulVz = state.pierNormalZ * state.lateralSpeed;
+        moveBoatSmooth(state.pierNormalX * stepLat, state.pierNormalZ * stepLat);
+      } else {
+        state.lateralSpeed = 0;
+        state.haulVx = 0;
+        state.haulVz = 0;
       }
-      boat.u = (boat.u ?? 0) * Math.max(0, 1 - dt * 3.5 * tension);
-      boat.v = (boat.v ?? 0) * Math.max(0, 1 - dt * 4.0 * tension);
-      boat.yawRate = (boat.yawRate ?? 0) * Math.max(0, 1 - dt * 4.0 * tension);
     } else if (state.mooringTargetKind === 'vessel' && state.targetVessel?.boat) {
       const tb = state.targetVessel.boat;
-      const h = (boat.heading ?? 0) * Math.PI / 180;
-      const rightX = Math.cos(h);
-      const rightZ = -Math.sin(h);
-      const sideSign = state.mooringSide === 'port' ? -1 : 1;
-      const desiredGap = Math.max(5.8, ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.65);
-      const targetX = (boat.x ?? 0) + rightX * sideSign * desiredGap;
-      const targetZ = (boat.z ?? 0) + rightZ * sideSign * desiredGap;
-      const pull = Math.min(1, dt * 2.6 * tension);
-      tb.x = (tb.x ?? 0) + (targetX - (tb.x ?? 0)) * pull;
-      tb.z = (tb.z ?? 0) + (targetZ - (tb.z ?? 0)) * pull;
-      tb.u = (tb.u ?? 0) * Math.max(0, 1 - dt * 3.0 * tension);
-      tb.v = (tb.v ?? 0) * Math.max(0, 1 - dt * 3.5 * tension);
-      boat.u = (boat.u ?? 0) * Math.max(0, 1 - dt * 2.5 * tension);
-      boat.v = (boat.v ?? 0) * Math.max(0, 1 - dt * 3.0 * tension);
+      const gap = Math.max(0, state.lateralGap ?? 0);
+      if (gap > 0.002) {
+        const targetSpeed = Math.min(1.25, gap * 0.9) * haulEffort;
+        state.lateralSpeed = Math.max(0, state.lateralSpeed ?? 0);
+        state.lateralSpeed += (targetSpeed - state.lateralSpeed) * Math.min(1, dt * 4.5);
+        const stepLat = Math.min(gap, state.lateralSpeed * dt);
+        state.lateralGap = Math.max(0, gap - stepLat);
+        state.haulVx = state.pierNormalX * state.lateralSpeed;
+        state.haulVz = state.pierNormalZ * state.lateralSpeed;
+        // Both hulls draw smoothly toward each other (35% player ship, 65% target ship)
+        moveBoatSmooth(state.pierNormalX * stepLat * 0.35, state.pierNormalZ * stepLat * 0.35);
+        tb.x = (tb.x ?? 0) - state.pierNormalX * stepLat * 0.65;
+        tb.z = (tb.z ?? 0) - state.pierNormalZ * stepLat * 0.65;
+      } else {
+        state.lateralSpeed = 0;
+        state.haulVx = 0;
+        state.haulVz = 0;
+      }
+      if (Number.isFinite(tb.surgeVelocity)) tb.surgeVelocity *= velDecay;
+      if (Number.isFinite(tb.leewayVelocity)) tb.leewayVelocity *= velDecay;
+      if (Number.isFinite(tb.u)) tb.u *= velDecay;
+      if (Number.isFinite(tb.v)) tb.v *= velDecay;
     }
   }
 
@@ -42666,13 +42811,17 @@ function createDockingBoardingState(boat, options = {}) {
         }
       }
     } else if (state.mooringPhase === 'casting-off') {
-      state.gangplankProgress = bdClamp(state.gangplankProgress - dt * 1.4, 0, 1);
-      state.lineTension = bdClamp(state.lineTension - dt * 1.2, 0, 1);
-      state.lineProgress = bdClamp(state.lineProgress - dt * 0.75, 0, 1);
+      state.gangplankProgress = bdClamp(state.gangplankProgress - dt * 1.6, 0, 1);
+      state.lineTension = 0;
+      state.lineProgress = bdClamp(state.lineProgress - dt * 1.15, 0, 1);
       if (state.lineProgress <= 0.01) {
         state.mooringPhase = 'clear';
         state.mooringTargetKind = null;
         state.pier = null;
+        state.berthX = null;
+        state.berthZ = null;
+        state.haulVx = 0;
+        state.haulVz = 0;
         state.targetVessel = null;
         state.lines = [];
         state.lineProgress = 0;
@@ -42829,9 +42978,15 @@ function buildMooringAndGangplankVertices(stateOrController, boatArg = null) {
     const stagger = i * 0.08;
     const lp = bdClamp((progress - stagger) / (1 - stagger * 0.5), 0.04, 1.0);
 
-    // When throwing (< 1), the rope end arcs upward through the air toward the bollard/rail;
+    // When throwing (< 1 in 'throwing-lines'), the rope end arcs upward through the air toward the bollard/rail;
+    // when casting off ('casting-off'), it drops slack off the bollard and coils back aboard;
     // when landed (== 1), it sags in a natural catenary that pulls taut as tension -> 1.
-    const throwArcLift = lp < 1.0 ? Math.sin(lp * Math.PI) * 1.65 : 0.0;
+    const isCastingOff = state.mooringPhase === 'casting-off';
+    const throwArcLift = (!isCastingOff && lp < 1.0)
+      ? Math.sin(lp * Math.PI) * 1.45
+      : isCastingOff
+      ? -0.45 * Math.sin(lp * Math.PI)
+      : 0.0;
     const curEndW = [
       startW[0] + (fullEndW[0] - startW[0]) * lp,
       startW[1] + (fullEndW[1] - startW[1]) * lp + throwArcLift,
@@ -42839,7 +42994,9 @@ function buildMooringAndGangplankVertices(stateOrController, boatArg = null) {
     ];
 
     const span = Math.hypot(curEndW[0] - startW[0], curEndW[2] - startW[2]);
-    const sag = lp >= 0.99
+    const sag = isCastingOff
+      ? bdClamp(span * 0.18, 0.16, 1.35)
+      : lp >= 0.99
       ? bdClamp(span * (0.14 - 0.095 * tension), 0.12, 1.45)
       : -0.35 * Math.sin(lp * Math.PI);
 
@@ -53971,7 +54128,7 @@ async function main() {
         castOffBtn.disabled=dbState.mooringPhase==='clear'||dbState.mooringPhase==='casting-off';
       }
       if(dockPierBtn){
-        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='throwing-lines';
+        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='making-fast'||dbState.mooringPhase==='throwing-lines';
       }
       const bTxt=`${dbState.statusText} · Boarding power: ${pStr.effectiveStrength.toFixed(1)} (${pStr.femaleHands}♀=${pStr.meanFemaleStrength.toFixed(1)}, ${pStr.maleHands}♂=${pStr.meanMaleStrength.toFixed(1)})`;
       if(boardingStatus.textContent!==bTxt)boardingStatus.textContent=bTxt;

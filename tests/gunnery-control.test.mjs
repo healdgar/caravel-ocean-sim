@@ -814,6 +814,32 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  assert.equal(playerBoat.mooringActive,true);
  let verts=db.buildVertices();
  assert.ok(verts.length>0,'generates 3D catenary mooring line vertices while throwing lines');
+
+ // Test changing your mind while hauling in and casting off:
+ // advance into making-fast (hauling in), record lateral progress toward pier, then castOff()
+ playerBoat.heading=255; // Lisbon departure heading
+ db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
+ const nx=db.state.pierNormalX,nz=db.state.pierNormalZ;
+ const projPier=()=>playerBoat.x*nx+playerBoat.z*nz;
+ for(let i=0;i<15;i++)db.step(0.12);
+ assert.equal(db.state.mooringPhase,'making-fast','entered making-fast (hauling in) phase');
+ const beforeHaulStep=projPier();
+ db.step(0.05);
+ const afterHaulStep=projPier();
+ assert.ok(afterHaulStep>beforeHaulStep,'ship moves smoothly toward pier while hauling in');
+ assert.ok((afterHaulStep-beforeHaulStep)<0.08,'single-frame lateral movement is smooth and non-jerky');
+ // Now change mind mid-haul and cast off!
+ const abortCast=db.castOff();
+ assert.equal(abortCast.ok,true);
+ assert.equal(db.state.lineTension,0,'line tension immediately zeroes on cast off');
+ assert.equal(playerBoat.mooringRestraint,0,'mooring restraint immediately zeroes on cast off');
+ const atCastMoment=projPier();
+ db.step(0.05);
+ const afterCastStep=projPier();
+ assert.ok(afterCastStep<atCastMoment,'ship immediately stops hauling in and glides away from pier on the very next frame after castOff()');
+
+ // Full dock -> moored -> cast off cycle
+ db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
  for(let i=0;i<30;i++)db.step(0.15);
  assert.equal(db.state.mooringPhase,'moored','transitions through making-fast to moored');
  const castRes=db.castOff();

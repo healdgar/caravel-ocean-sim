@@ -86,8 +86,14 @@ export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0
     const previousHeading=boat.heading*Math.PI/180,previousYaw=boat.yawRate;
     stepBoatSteering(boat,steering,dt);
     const heading=previousHeading+(previousYaw+boat.yawRate)*dt*.25;
-    boat.x+=Math.sin(heading)*distance+Math.cos(heading)*boat.leewayDistance;
-    boat.z-=Math.cos(heading)*distance-Math.sin(heading)*boat.leewayDistance;
+    const freeFactor=Math.max(0,1-(boat.mooringRestraint??0));
+    boat.x+=(Math.sin(heading)*distance+Math.cos(heading)*boat.leewayDistance)*freeFactor;
+    boat.z-=(Math.cos(heading)*distance-Math.sin(heading)*boat.leewayDistance)*freeFactor;
+    if(freeFactor<1){
+      boat.surgeVelocity=(boat.surgeVelocity??0)*(0.15+0.85*freeFactor);
+      boat.leewayVelocity=(boat.leewayVelocity??0)*freeFactor;
+      boat.yawRate=(boat.yawRate??0)*freeFactor;
+    }
     if(terrain)boat.coastBlocked=terrain.constrain(boat,previousX,previousZ);
   }
   boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage-extraSink,boat.hydrodynamics.heaveOmega,dt,fresh?(probe.rate.heave*waveDecay):0);

@@ -1799,7 +1799,7 @@ async function main() {
         castOffBtn.disabled=dbState.mooringPhase==='clear'||dbState.mooringPhase==='casting-off';
       }
       if(dockPierBtn){
-        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='throwing-lines';
+        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='making-fast'||dbState.mooringPhase==='throwing-lines';
       }
       const bTxt=`${dbState.statusText} · Boarding power: ${pStr.effectiveStrength.toFixed(1)} (${pStr.femaleHands}♀=${pStr.meanFemaleStrength.toFixed(1)}, ${pStr.maleHands}♂=${pStr.meanMaleStrength.toFixed(1)})`;
       if(boardingStatus.textContent!==bTxt)boardingStatus.textContent=bTxt;

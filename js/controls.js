@@ -412,25 +412,18 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
 
     const db=battleContext?.getDockingBoarding?.()?.state??null;
     const vessels=battleContext?.getVessels?.()??[];
-    const nearbyShip=vessels.slice(1).find(v=>v?.boat&&!v.boat.damage?.sunk);
+    const nearbyShip=vessels.slice(1).find(v=>v&&!v.dormantEncounter&&v.boat?.showProw&&!v.boat.damage?.sunk);
     if(dockBtn){
       const phase=db?.mooringPhase??'clear';
       const isMoored=phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines';
-      const isCasting=phase==='casting-off';
       dockBtn.hidden=false;
-      if(isCasting){
-        dockBtn.textContent='🪢 Casting off…';
-        dockBtn.disabled=true;
-        dockBtn.setAttribute('aria-pressed','true');
-        dockBtn.title=db?.statusText??'Casting off mooring lines';
-      }else if(isMoored){
+      dockBtn.disabled=false;
+      if(isMoored){
         dockBtn.textContent='🪢 Cast off';
-        dockBtn.disabled=false;
         dockBtn.setAttribute('aria-pressed','true');
-        dockBtn.title=`${db?.statusText??'Moored'} · Click to cast off all lines`;
+        dockBtn.title=`${db?.statusText??'Hauling / moored'} · Click to cast off all lines immediately`;
       }else{
         dockBtn.textContent=nearbyShip?'🪢 Throw lines':'🪢 Dock';
-        dockBtn.disabled=false;
         dockBtn.setAttribute('aria-pressed','false');
         dockBtn.title=nearbyShip?'Throw mooring & grappling lines onto adjacent vessel':'Throw bow & stern mooring lines onto pier';
       }
