@@ -49,8 +49,9 @@ fn crewSurface(v:CrewInput)->CrewSurface {
   let eye=ex0.x*ex1.x*ey.x*ez.x;
   let eyeD=vec3f((ex0.y*ex1.x+ex0.x*ex1.y)*sign(p.x)*ey.x*ez.x,
     ex0.x*ex1.x*ey.y*sign(p.y-eyeY)*ez.x,ex0.x*ex1.x*ey.x*ez.y);
-  let eyeShift=(p.y-eyeY)*(f.w-1.0);
-  let eyeGradient=eyeShift*eyeD+vec3f(0,(f.w-1.0)*eye,0);
+  let eyeOpen=select(f.w,f.w-2.0,f.w>1.5);
+  let eyeShift=(p.y-eyeY)*(eyeOpen-1.0);
+  let eyeGradient=eyeShift*eyeD+vec3f(0,(eyeOpen-1.0)*eye,0);
   // Columns of the deformation Jacobian; cofactor columns transform normals.
   let dx=vec3f(width,eyeGradient.x,f.z*noseD.x);
   let dy=vec3f(p.x*widthY,1.0+eyeGradient.y,f.z*noseD.y);
@@ -87,10 +88,13 @@ struct CrewVertex {
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.5,y));
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.08,1.55,y));
   out.wet=mix(lower,upper,smoothstep(.5,1.08,y));
-  out.skin=select(0.0,1.0,distance(v.color,vec3f(.36,.18,.10))<.001);
+  let isIndigenous=actor.face.w>1.5;
+  let isArmSkin=isIndigenous && distance(v.color,vec3f(.55,.47,.31))<.001 && abs(v.position.x)>0.155 && v.position.y>0.86 && v.position.y<1.48;
+  let isCalfSkin=isIndigenous && distance(v.color,vec3f(.095,.12,.15))<.001 && v.position.y>0.21 && v.position.y<0.62;
+  out.skin=select(0.0,1.0,distance(v.color,vec3f(.36,.18,.10))<.001 || isArmSkin || isCalfSkin);
   if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
-  if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=actor.shirt.rgb;}
-  if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=actor.trousers.rgb;}
+  if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=select(actor.shirt.rgb,actor.skin.rgb,isArmSkin);}
+  if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=select(actor.trousers.rgb,actor.skin.rgb,isCalfSkin);}
   if(distance(v.color,vec3f(.36,.18,.10))<.001){out.color=actor.skin.rgb;}
   if(distance(v.color,vec3f(.045,.019,.009))<.001){out.color=actor.hair.rgb;}
   return out;

@@ -665,6 +665,518 @@ export function computeColonyGrowthProfile(specOrPort = {}, year = 1550) {
   });
 }
 
+// Uninhabited mid-ocean & pelagic islands in 1492–1689 (no pre-contact indigenous population)
+export const UNINHABITED_PELAGIC_ISLANDS = Object.freeze([
+  Object.freeze({ id: 'bermuda', name: 'Bermuda', latMin: 31.8, latMax: 32.8, lonMin: -65.4, lonMax: -64.2 }),
+  Object.freeze({ id: 'cayman-islands', name: 'Cayman Islands', latMin: 19.0, latMax: 20.0, lonMin: -81.8, lonMax: -79.5 }),
+  Object.freeze({ id: 'fernando-de-noronha', name: 'Fernando de Noronha', latMin: -4.4, latMax: -3.3, lonMin: -33.0, lonMax: -31.8 }),
+  Object.freeze({ id: 'falkland-islands', name: 'Falkland Islands', latMin: -53.2, latMax: -50.8, lonMin: -61.8, lonMax: -57.2 }),
+  Object.freeze({ id: 'galapagos', name: 'Galápagos Islands', latMin: -1.8, latMax: 0.8, lonMin: -92.2, lonMax: -88.8 }),
+  Object.freeze({ id: 'azores-madeira-cape-verde', name: 'Macaronesia Pelagic Islands', latMin: 14.0, latMax: 40.2, lonMin: -31.8, lonMax: -15.5 }),
+]);
+
+// Historical Indigenous Coastal Culture Regions of the Americas (1492–1689)
+// Grounded in demographic & ethnohistorical scholarship (Denevan 1992; Snow & Lanphear 1988; Salisbury 1982; Rouse 1992; Cook 1998).
+export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
+  Object.freeze({
+    id: 'abenaki-algonquian',
+    name: 'Abenaki / Wabanaki & New England Algonquian',
+    peoples: 'Western & Eastern Abenaki, Massachusett, Wampanoag, Narragansett, Pennacook, Pawtucket & Mi’kmaq',
+    settlementStyle: 'Birchbark Wigwam & Elm-Bark Longhouse Village',
+    architectureLabel: 'Domed paper-birch wigwams (wetuomash), arched bark longhouses, palisaded Three Sisters maize-bean-squash fields & birchbark canoe beachings',
+    latMin: 40.2,
+    latMax: 50.2,
+    lonMin: -74.6,
+    lonMax: -52.0,
+    preContactPopEstimate: 128000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'algonquian_longhouse',
+      'abenaki_birchbark_wigwam',
+      'abenaki_birchbark_wigwam',
+      'indigenous_palisade_ring',
+      'abenaki_birchbark_wigwam',
+      'algonquian_longhouse',
+      'abenaki_birchbark_wigwam',
+      'abenaki_birchbark_wigwam',
+      'abenaki_birchbark_wigwam',
+    ]),
+  }),
+  Object.freeze({
+    id: 'mid-atlantic-algonquian',
+    name: 'Powhatan / Lenape & Carolina Sound Algonquian',
+    peoples: 'Powhatan (Tsenacommacah), Lenape, Nanticoke, Piscataway, Pamlico & Secotan',
+    settlementStyle: 'Arched Bark/Mat Longhouse & Palisaded Town',
+    architectureLabel: 'Barrel-vaulted bark and woven-rush mat longhouses (yehakins), circular split-log palisade rings, maize gardens & tidal fish weirs',
+    latMin: 31.5,
+    latMax: 40.2,
+    lonMin: -81.5,
+    lonMax: -72.0,
+    preContactPopEstimate: 96000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'algonquian_longhouse',
+      'indigenous_palisade_ring',
+      'algonquian_longhouse',
+      'abenaki_birchbark_wigwam',
+      'abenaki_birchbark_wigwam',
+      'algonquian_longhouse',
+      'abenaki_birchbark_wigwam',
+      'abenaki_birchbark_wigwam',
+    ]),
+  }),
+  Object.freeze({
+    id: 'florida-gulf-chiefdoms',
+    name: 'Calusa, Timucua, Guale & Apalachee Coastal Chiefdoms',
+    peoples: 'Calusa, Timucua, Guale, Ais, Tocobaga & Apalachee',
+    settlementStyle: 'Shell-Mound Council Rotunda & Palm-Thatch Chiefdom Town',
+    architectureLabel: 'Elevated shell-mound cacique halls, conical palm-thatch houses, ceremonial plazas, estuary stilt platforms & dugout canoe canals',
+    latMin: 24.4,
+    latMax: 31.5,
+    lonMin: -97.5,
+    lonMax: -79.5,
+    preContactPopEstimate: 185000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'taino_cacique_caney',
+      'taino_batey_court',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'palafito_estuary_village',
+      'indigenous_palisade_ring',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+    ]),
+  }),
+  Object.freeze({
+    id: 'taino-greater-antilles',
+    name: 'Taíno & Lucayan Cacicazgos (Greater Antilles & Bahamas)',
+    peoples: 'Classic, Western & Eastern Taíno and Lucayan Arawak',
+    settlementStyle: 'Yucayeque Town · Cacique Caney, Circular Bohíos & Batey Ballcourt',
+    architectureLabel: 'Royal palm-thatch cacique caney on the central batey ceremonial plaza, circular cane-and-guano bohíos & carved mahogany cayucos',
+    latMin: 17.4,
+    latMax: 27.2,
+    lonMin: -85.2,
+    lonMax: -64.5,
+    preContactPopEstimate: 600000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'taino_cacique_caney',
+      'taino_batey_court',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'taino_cacique_caney',
+      'taino_circular_bohio',
+    ]),
+  }),
+  Object.freeze({
+    id: 'kalinago-lesser-antilles',
+    name: 'Kalinago (Island Carib) Lesser Antilles Strongholds',
+    peoples: 'Kalinago / Callinago & Galibi Maritime Chiefdoms',
+    settlementStyle: 'Kalinago Taboui / Carbet Assembly Hall & Bohío Village',
+    architectureLabel: 'Large elliptical palm-thatch warrior assembly hall (taboui / carbet), family Mouina huts, manioc gardens & ocean-going kanawa war canoes',
+    latMin: 11.2,
+    latMax: 18.6,
+    lonMin: -64.5,
+    lonMax: -59.0,
+    preContactPopEstimate: 68000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'kalinago_carbet_hall',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'kalinago_carbet_hall',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+    ]),
+  }),
+  Object.freeze({
+    id: 'maya-mesoamerica-coast',
+    name: 'Postclassic Coastal Maya & Putún Chontal Maritime Provinces',
+    peoples: 'Yucatec Maya, Putún Chontal, Ecab, Cozumel & Chetumal',
+    settlementStyle: 'Stepped Limestone Coastal Shrine & Apsidal Thatched Nah Town',
+    architectureLabel: 'Whitewashed stepped limestone coastal trading shrine/beacon platform, apsidal thatched Maya nah houses, plazas & sea-trading cayucos',
+    latMin: 14.5,
+    latMax: 22.5,
+    lonMin: -97.5,
+    lonMax: -83.0,
+    preContactPopEstimate: 245000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'maya_limestone_shrine_and_na',
+      'taino_batey_court',
+      'taino_circular_bohio',
+      'maya_limestone_shrine_and_na',
+      'taino_circular_bohio',
+      'taino_cacique_caney',
+      'taino_circular_bohio',
+    ]),
+  }),
+  Object.freeze({
+    id: 'tierra-firme-carib-arawak',
+    name: 'Tierra Firme, Darién, Maracaibo & Orinoco Estuary Peoples',
+    peoples: 'Kuna (Guna / Cueva), Wayuu (Guajiro), Añú, Warao, Cumanagoto & Kali’na',
+    settlementStyle: 'Lagoon Stilt Palafito & Palm-Thatch Estuary Village',
+    architectureLabel: 'Over-water mangrove-piling stilt dwellings (palafitos) linked by timber catwalks, palm-thatch caneyes & dugout piraguas',
+    latMin: 7.0,
+    latMax: 14.5,
+    lonMin: -85.0,
+    lonMax: -59.5,
+    preContactPopEstimate: 225000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'palafito_estuary_village',
+      'palafito_estuary_village',
+      'taino_cacique_caney',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'palafito_estuary_village',
+      'taino_circular_bohio',
+    ]),
+  }),
+  Object.freeze({
+    id: 'tupinamba-brazil-guiana',
+    name: 'Tupinambá, Potiguara & Lokono Guiana-Brazil Coast',
+    peoples: 'Tupinambá, Tupiniquim, Potiguara, Caeté, Carijó & Lokono Arawak',
+    settlementStyle: 'Palisaded Aldeia & Monumental Thatched Oca Longhouses',
+    architectureLabel: 'Monumental arched palm-thatch communal oca longhouses arranged around a central terreiro plaza within a split-log stockade',
+    latMin: -34.5,
+    latMax: 7.0,
+    lonMin: -60.0,
+    lonMax: -34.0,
+    preContactPopEstimate: 340000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'tupinamba_oca_longhouse',
+      'indigenous_palisade_ring',
+      'tupinamba_oca_longhouse',
+      'tupinamba_oca_longhouse',
+      'taino_circular_bohio',
+      'taino_circular_bohio',
+      'tupinamba_oca_longhouse',
+    ]),
+  }),
+  Object.freeze({
+    id: 'pacific-indigenous-coast',
+    name: 'Pacific Littoral & Northwest / Andean Coastal Peoples',
+    peoples: 'Chumash, Coast Salish, Nuu-chah-nulth, Huancavilca, Chincha & Mapuche',
+    settlementStyle: 'Coastal Plank / Thatch Longhouse & Canoe Landing Village',
+    architectureLabel: 'Coastal timber and reed-thatch communal dwellings, foreshore dugout canoe landings & tidal fish weirs',
+    latMin: -46.0,
+    latMax: 58.0,
+    lonMin: -135.0,
+    lonMax: -70.0,
+    preContactPopEstimate: 210000,
+    prefabMix: Object.freeze([
+      'indigenous_canoe_landing',
+      'algonquian_longhouse',
+      'taino_cacique_caney',
+      'abenaki_birchbark_wigwam',
+      'abenaki_birchbark_wigwam',
+      'algonquian_longhouse',
+      'abenaki_birchbark_wigwam',
+    ]),
+  }),
+]);
+
+export function resolveIndigenousCultureRegion(latitude, longitude) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  // Exclude Old World (Europe, Africa, Asia, Oceania) and uninhabited pelagic islands
+  if (longitude > -31.5 || longitude < -168.0 || latitude < -55.0 || latitude > 66.0) {
+    return null;
+  }
+  for (const isl of UNINHABITED_PELAGIC_ISLANDS) {
+    if (
+      latitude >= isl.latMin &&
+      latitude <= isl.latMax &&
+      longitude >= isl.lonMin &&
+      longitude <= isl.lonMax
+    ) {
+      return null;
+    }
+  }
+  // Check specific regional cultures in priority order (Lesser Antilles before Greater Antilles/Tierra Firme overlap)
+  const priorityOrder = [
+    'abenaki-algonquian',
+    'mid-atlantic-algonquian',
+    'florida-gulf-chiefdoms',
+    'kalinago-lesser-antilles',
+    'taino-greater-antilles',
+    'maya-mesoamerica-coast',
+    'tierra-firme-carib-arawak',
+    'tupinamba-brazil-guiana',
+    'pacific-indigenous-coast',
+  ];
+  for (const id of priorityOrder) {
+    const c = INDIGENOUS_CULTURE_REGIONS.find((r) => r.id === id);
+    if (
+      c &&
+      latitude >= c.latMin &&
+      latitude <= c.latMax &&
+      longitude >= c.lonMin &&
+      longitude <= c.lonMax
+    ) {
+      return c;
+    }
+  }
+  return null;
+}
+
+// Compute historical Native American demographic & settlement profile for any coastal region and year (1492–1689).
+export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 1550) {
+  const rawYear = Number(year ?? specOrRegion?.year ?? specOrRegion?.era ?? 1550);
+  const simYear = Number.isFinite(rawYear) && rawYear >= 1490 && rawYear <= 1850
+    ? Math.max(1492, Math.min(1689, Math.round(rawYear)))
+    : 1550;
+  const lat = Number(specOrRegion?.latitude);
+  const lon = Number(specOrRegion?.longitude);
+
+  if (specOrRegion?.hasIndigenousSettlement === false) {
+    return Object.freeze({
+      year: simYear,
+      hasIndigenousSettlement: false,
+      cultureId: null,
+      cultureName: null,
+      peoples: null,
+      settlementStyle: null,
+      architectureLabel: null,
+      stage: 'uninhabited',
+      retention: 0,
+      estimatedRegionalPop: 0,
+      villageScale: 0,
+      targetStructureCount: 0,
+      villagerCount: 0,
+      prefabMix: Object.freeze([]),
+      historicalNote: 'Uninhabited coast',
+    });
+  }
+
+  const culture = resolveIndigenousCultureRegion(lat, lon);
+  if (!culture) {
+    return Object.freeze({
+      year: simYear,
+      hasIndigenousSettlement: false,
+      cultureId: null,
+      cultureName: null,
+      peoples: null,
+      settlementStyle: null,
+      architectureLabel: null,
+      stage: 'uninhabited',
+      retention: 0,
+      estimatedRegionalPop: 0,
+      villageScale: 0,
+      targetStructureCount: 0,
+      villagerCount: 0,
+      prefabMix: Object.freeze([]),
+      historicalNote: 'No pre-contact indigenous population on this pelagic island or Old World coast',
+    });
+  }
+
+  const colonyGrowth = specOrRegion?.colonyGrowth ?? computeColonyGrowthProfile(specOrRegion, simYear);
+  const isColonized = Boolean(specOrRegion?.hasColonialPort || colonyGrowth?.colonized);
+  const coastalArchetype = specOrRegion?.coastalArchetype ?? 'sheltered-bay';
+  // Sheltered bays, estuaries, river mouths, and harbor channels have ideal fresh water & fish-weir geography
+  const geoSuitability =
+    coastalArchetype === 'estuary-bay' || coastalArchetype === 'river-mouth'
+      ? 1.08
+      : coastalArchetype === 'sheltered-bay' || coastalArchetype === 'harbor-channel'
+        ? 1.0
+        : 0.88;
+
+  let retention = 1.0;
+  let stage = 'thriving-village';
+  let historicalNote = '';
+
+  if (culture.id === 'abenaki-algonquian') {
+    // New England & Maritimes (Abenaki / Wabanaki, Massachusett, Wampanoag):
+    // Thriving coastal villages from 1492 through 1615 (early seasonal Basque/French/English fishing & fur trade),
+    // devastated by the 1616–1619 Great New England coastal epidemic just before Plymouth (1620),
+    // followed by post-1620 English colonial planting & co-option, the 1633–1634 smallpox epidemic, and King Philip's War (1675–1676).
+    if (simYear <= 1615) {
+      retention = Number((1.0 - Math.max(0, simYear - 1530) * 0.0009).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Pre-epidemic ${culture.name} coastal homeland (${simYear}): thriving birchbark wigwam & longhouse villages prior to the 1616–1619 epidemic and post-1620 English colonization`;
+    } else if (simYear <= 1619) {
+      const t = (simYear - 1615) / 4;
+      retention = Number((0.92 - t * 0.66).toFixed(3));
+      stage = 'epidemic-impacted';
+      historicalNote = `Great New England Coastal Epidemic (${simYear}): virgin-soil epidemic sweeps Massachusett, Wampanoag, and southern Abenaki bays just prior to 1620`;
+    } else if (simYear <= 1632) {
+      retention = isColonized ? 0.14 : 0.34;
+      stage = isColonized ? 'colonial-coopted' : 'post-1620-homeland';
+      historicalNote = isColonized
+        ? `Post-1620 English planting & trade co-option (${simYear}): coastal Algonquian bands trade furs and maize alongside the new English palisade`
+        : `Post-1620 Wabanaki / Algonquian coast (${simYear}): surviving coastal wigwam villages navigate English planting and fur-trade networks`;
+    } else if (simYear <= 1674) {
+      // Northern New England / Maine / Acadia (lat >= 43.2°N) remained predominantly Abenaki/Wabanaki territory
+      const isNorthernWabanaki = lat >= 43.2;
+      retention = isColonized ? 0.08 : isNorthernWabanaki ? 0.42 : 0.22;
+      stage = isColonized ? 'colonial-coopted' : isNorthernWabanaki ? 'resilient-homeland' : 'contracted-village';
+      historicalNote = isNorthernWabanaki
+        ? `Abenaki / Wabanaki Dawnland coast (${simYear}): autonomous river-mouth wigwam & palisaded longhouse village`
+        : `Post-1633 smallpox & English expansion (${simYear}): contracted Algonquian coastal wetu settlement`;
+    } else {
+      const isNorthernWabanaki = lat >= 43.4;
+      retention = isColonized ? 0.04 : isNorthernWabanaki ? 0.34 : 0.12;
+      stage = isColonized ? 'displaced' : isNorthernWabanaki ? 'resilient-homeland' : 'remnant-refuge';
+      historicalNote = `King Philip's War & First Abenaki War era (${simYear}): southern New England villages displaced while northern Abenaki palisaded towns hold the Maine & Acadia coast`;
+    }
+  } else if (culture.id === 'mid-atlantic-algonquian') {
+    // Chesapeake / Powhatan, Lenape & Carolina Sounds (Roanoke 1585, Jamestown 1607, New Amsterdam 1624)
+    if (simYear <= 1606) {
+      retention = Number((1.0 - Math.max(0, simYear - 1560) * 0.0018).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Pre-Jamestown ${culture.name} coast (${simYear}): palisaded longhouse town, Three Sisters fields, and tidal fish weirs`;
+    } else if (simYear <= 1646) {
+      const t = (simYear - 1606) / 40;
+      retention = isColonized ? 0.12 : Number((0.88 - t * 0.48).toFixed(3));
+      stage = isColonized ? 'colonial-coopted' : 'contracted-village';
+      historicalNote = `Anglo-Powhatan & Dutch Kieft's War era (${simYear}): coastal Algonquian longhouse towns face epidemic loss and colonial tobacco/fur expansion`;
+    } else {
+      retention = isColonized ? 0.05 : 0.26;
+      stage = isColonized ? 'displaced' : 'remnant-refuge';
+      historicalNote = `Mid-17th-century Chesapeake & Delaware coast (${simYear}): surviving Algonquian estuary villages on uncolonized bays`;
+    }
+  } else if (culture.id === 'taino-greater-antilles') {
+    // Greater Antilles & Bahamas (Taíno & Lucayan):
+    // Dense cacicazgos in 1492 (~600,000), rapid catastrophic collapse after Columbus (encomienda + 1518–1519 smallpox epidemic).
+    if (simYear <= 1502) {
+      retention = Number((1.0 - (simYear - 1492) * 0.028).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Early Columbian Contact Taíno Cacicazgo (${simYear}): populous yucayeque with royal caney, batey ballcourt, and circular guano-thatch bohíos`;
+    } else if (simYear <= 1518) {
+      const t = (simYear - 1502) / 16;
+      retention = Number((0.72 - t * 0.48).toFixed(3));
+      stage = 'epidemic-impacted';
+      historicalNote = `Encomienda & early demographic collapse (${simYear}): Taíno yucayeques suffer severe depopulation across the Greater Antilles`;
+    } else if (simYear <= 1535) {
+      const t = (simYear - 1518) / 17;
+      retention = Number((0.24 - t * 0.18).toFixed(3));
+      stage = 'remnant-refuge';
+      historicalNote = `Post-1518 Royal Smallpox Epidemic (${simYear}): surviving Taíno cacicazgos reduced to isolated coastal and mountain refuges (Enriquillo's Bahoruco resistance)`;
+    } else {
+      retention = 0.03;
+      stage = 'collapsed';
+      historicalNote = `Post-collapse Greater Antilles (${simYear}): pre-contact Taíno yucayeques decimated by 1500–1530 epidemics and encomienda; uncolonized coves lie deserted`;
+    }
+  } else if (culture.id === 'kalinago-lesser-antilles') {
+    // Lesser Antilles (Kalinago / Island Caribs):
+    // Resisted Spanish colonization for over a century; high population through 1624, gradual island-by-island pressure 1625–1689.
+    if (simYear <= 1624) {
+      retention = Number((0.94 - Math.max(0, simYear - 1500) * 0.0012).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Autonomous Kalinago (Island Carib) stronghold (${simYear}): elliptical taboui/carbet warrior hall, mouina bohíos, and ocean-going kanawa canoes`;
+    } else if (simYear <= 1660) {
+      const t = (simYear - 1624) / 36;
+      retention = isColonized ? 0.08 : Number((0.78 - t * 0.30).toFixed(3));
+      stage = isColonized ? 'displaced' : 'resilient-homeland';
+      historicalNote = `Anglo-French Lesser Antilles planting era (${simYear}): Kalinago defend Dominica, St. Vincent, St. Lucia, and Grenada with carbet villages`;
+    } else {
+      retention = isColonized ? 0.04 : 0.42;
+      stage = isColonized ? 'displaced' : 'resilient-homeland';
+      historicalNote = `1660 Treaty of Basse-Terre era (${simYear}): Kalinago retain autonomous island strongholds in Dominica and St. Vincent`;
+    }
+  } else if (culture.id === 'florida-gulf-chiefdoms') {
+    // La Florida & Gulf Coast (Calusa, Timucua, Guale, Apalachee)
+    if (simYear <= 1538) {
+      retention = Number((0.96 - Math.max(0, simYear - 1513) * 0.003).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Pre-Soto Florida / Gulf Chiefdom (${simYear}): Calusa & Timucua shell-mound towns, palm-thatch council houses, and estuary fish weirs`;
+    } else if (simYear <= 1615) {
+      const t = (simYear - 1538) / 77;
+      retention = isColonized ? 0.14 : Number((0.86 - t * 0.36).toFixed(3));
+      stage = isColonized ? 'colonial-coopted' : 'resilient-homeland';
+      historicalNote = `Autonomous Calusa & Guale / Timucua coast (${simYear}): shell-mound chiefdoms and estuary canoe landings`;
+    } else {
+      retention = isColonized ? 0.08 : 0.34;
+      stage = isColonized ? 'colonial-coopted' : 'contracted-village';
+      historicalNote = `17th-century Florida & Gulf coast (${simYear}): southwest Florida Calusa shell-mound towns remain independent while mission epidemics reduce northern provinces`;
+    }
+  } else if (culture.id === 'maya-mesoamerica-coast') {
+    // Coastal Maya (Yucatán, Campeche, Cozumel, Belize, Honduras Bay)
+    if (simYear <= 1519) {
+      retention = 0.98;
+      stage = 'thriving-village';
+      historicalNote = `Postclassic Maritime Maya trading coast (${simYear}): stepped whitewashed limestone coastal shrine, apsidal thatched nah houses, and long-distance sea canoes`;
+    } else if (simYear <= 1548) {
+      const t = (simYear - 1519) / 29;
+      retention = isColonized ? 0.12 : Number((0.90 - t * 0.44).toFixed(3));
+      stage = isColonized ? 'colonial-coopted' : 'epidemic-impacted';
+      historicalNote = `Conquest of Yucatán & Cocoliztli epidemic era (${simYear}): coastal Maya shrine and fishing towns along uncolonized bays`;
+    } else {
+      retention = isColonized ? 0.08 : 0.36;
+      stage = isColonized ? 'colonial-coopted' : 'resilient-homeland';
+      historicalNote = `Uncolonized Caribbean Maya coast (${simYear}): independent thatched nah village and limestone watch-shrine`;
+    }
+  } else if (culture.id === 'tierra-firme-carib-arawak') {
+    // Darién (Kuna/Guna), Maracaibo / Guajira (Wayuu/Añú), Cumaná & Orinoco Delta (Warao / Kali'na)
+    if (simYear <= 1525) {
+      retention = Number((0.96 - Math.max(0, simYear - 1499) * 0.006).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Tierra Firme & Maracaibo Indigenous Coast (${simYear}): lagoon stilt palafitos, palm-thatch caneyes, and dugout piraguas`;
+    } else {
+      retention = isColonized ? 0.08 : Number(Math.max(0.38, 0.76 - (simYear - 1525) * 0.0022).toFixed(3));
+      stage = isColonized ? 'colonial-coopted' : 'resilient-homeland';
+      historicalNote = `Independent Kuna (Darién), Wayuu (Guajira) & Warao (Orinoco) coast (${simYear}): autonomous stilt palafitos and thatched bohíos`;
+    }
+  } else if (culture.id === 'tupinamba-brazil-guiana') {
+    // Brazil & Guiana Coast (Tupinambá, Potiguara, Lokono)
+    if (simYear <= 1555) {
+      retention = Number((0.96 - Math.max(0, simYear - 1500) * 0.002).toFixed(3));
+      stage = 'thriving-village';
+      historicalNote = `Tupinambá & Lokono Atlantic Coast (${simYear}): palisaded aldeia with monumental arched palm-thatch oca longhouses around the central terreiro`;
+    } else {
+      retention = isColonized ? 0.08 : Number(Math.max(0.32, 0.78 - (simYear - 1555) * 0.0034).toFixed(3));
+      stage = isColonized ? 'colonial-coopted' : 'resilient-homeland';
+      historicalNote = `Post-1562 Bahia epidemic Guiana & Brazil coast (${simYear}): uncolonized Tupinambá / Lokono aldeia with thatched oca longhouses`;
+    }
+  } else {
+    // Pacific Littoral
+    retention = isColonized ? 0.08 : simYear <= 1532 ? 0.96 : Math.max(0.34, Number((0.82 - (simYear - 1532) * 0.003).toFixed(3)));
+    stage = isColonized ? 'colonial-coopted' : simYear <= 1532 ? 'thriving-village' : 'resilient-homeland';
+    historicalNote = `${culture.name} (${simYear}): coastal longhouse and dugout canoe village`;
+  }
+
+  // European colonial ports replace the primary harbor waterfront with colonial architecture;
+  // uncolonized American coasts with retention >= 0.15 host an active Native American settlement!
+  const effectiveScale = Number((retention * geoSuitability).toFixed(3));
+  const hasIndigenousSettlement =
+    specOrRegion?.hasIndigenousSettlement === true ||
+    (!isColonized && retention >= 0.15 && effectiveScale >= 0.16);
+
+  const estimatedRegionalPop = Math.max(0, Math.round(culture.preContactPopEstimate * retention));
+  const targetStructureCount = !hasIndigenousSettlement
+    ? 0
+    : Math.max(4, Math.min(10, Math.round(4 + effectiveScale * 6)));
+  const villagerCount = !hasIndigenousSettlement
+    ? 0
+    : Math.max(6, Math.min(22, Math.round(targetStructureCount * 2.2)));
+
+  return Object.freeze({
+    year: simYear,
+    hasIndigenousSettlement,
+    cultureId: culture.id,
+    cultureName: culture.name,
+    peoples: culture.peoples,
+    settlementStyle: culture.settlementStyle,
+    architectureLabel: culture.architectureLabel,
+    stage,
+    retention,
+    estimatedRegionalPop,
+    estimatedVillagePopulation: hasIndigenousSettlement ? villagerCount * 12 : 0,
+    villageScale: hasIndigenousSettlement ? Math.max(0.35, Math.min(1.15, effectiveScale)) : 0,
+    targetStructureCount,
+    buildingCount: targetStructureCount,
+    villagerCount,
+    prefabMix: culture.prefabMix,
+    prefabs: culture.prefabMix,
+    historicalNote,
+  });
+}
+
 export const PORT_PREFABS = Object.freeze({
   timber_mole_pier: Object.freeze({
     id: 'timber_mole_pier',
@@ -885,6 +1397,138 @@ export const PORT_PREFABS = Object.freeze({
     materialKind: 10,
     roofPitch: 0,
     waterfront: true,
+  }),
+  abenaki_birchbark_wigwam: Object.freeze({
+    id: 'abenaki_birchbark_wigwam',
+    label: 'Abenaki / Algonquian Birchbark Wigwam (Wetu)',
+    length: 6.8,
+    width: 6.4,
+    height: 3.6,
+    foundationDepth: 2.2,
+    materialKind: 17,
+    roofPitch: 1.8,
+    waterfront: false,
+    indigenous: true,
+  }),
+  algonquian_longhouse: Object.freeze({
+    id: 'algonquian_longhouse',
+    label: 'Algonquian / Wabanaki Arched Bark Longhouse',
+    length: 22.0,
+    width: 7.2,
+    height: 5.2,
+    foundationDepth: 2.6,
+    materialKind: 17,
+    roofPitch: 2.4,
+    waterfront: false,
+    indigenous: true,
+  }),
+  indigenous_palisade_ring: Object.freeze({
+    id: 'indigenous_palisade_ring',
+    label: 'Woodland Split-Log Palisade Stockade & Three Sisters Mound Plaza',
+    length: 28.0,
+    width: 26.0,
+    height: 4.4,
+    foundationDepth: 2.8,
+    materialKind: 10,
+    roofPitch: 0,
+    waterfront: false,
+    indigenous: true,
+  }),
+  taino_cacique_caney: Object.freeze({
+    id: 'taino_cacique_caney',
+    label: 'Taíno Cacique Royal Caney & Portico',
+    length: 16.5,
+    width: 11.2,
+    height: 6.4,
+    foundationDepth: 2.8,
+    materialKind: 15,
+    roofPitch: 3.6,
+    waterfront: false,
+    indigenous: true,
+  }),
+  taino_circular_bohio: Object.freeze({
+    id: 'taino_circular_bohio',
+    label: 'Taíno / Arawak Circular Conical Guano-Thatch Bohío',
+    length: 8.6,
+    width: 8.6,
+    height: 5.4,
+    foundationDepth: 2.4,
+    materialKind: 15,
+    roofPitch: 3.2,
+    waterfront: false,
+    indigenous: true,
+  }),
+  taino_batey_court: Object.freeze({
+    id: 'taino_batey_court',
+    label: 'Taíno Batey Ceremonial Ballcourt & Petroglyph Monoliths',
+    length: 24.0,
+    width: 15.0,
+    height: 2.2,
+    foundationDepth: 2.2,
+    materialKind: 16,
+    roofPitch: 0,
+    waterfront: false,
+    indigenous: true,
+  }),
+  kalinago_carbet_hall: Object.freeze({
+    id: 'kalinago_carbet_hall',
+    label: 'Kalinago (Island Carib) Elliptical Taboui / Carbet Assembly Hall',
+    length: 21.0,
+    width: 9.8,
+    height: 6.2,
+    foundationDepth: 2.6,
+    materialKind: 15,
+    roofPitch: 3.8,
+    waterfront: false,
+    indigenous: true,
+  }),
+  tupinamba_oca_longhouse: Object.freeze({
+    id: 'tupinamba_oca_longhouse',
+    label: 'Tupinambá / Lokono Monumental Arched Palm-Thatch Oca Longhouse',
+    length: 28.0,
+    width: 9.6,
+    height: 6.6,
+    foundationDepth: 2.8,
+    materialKind: 15,
+    roofPitch: 3.8,
+    waterfront: false,
+    indigenous: true,
+  }),
+  palafito_estuary_village: Object.freeze({
+    id: 'palafito_estuary_village',
+    label: 'Tierra Firme / Maracaibo Lagoon Stilt Palafito Cluster',
+    length: 18.0,
+    width: 14.0,
+    height: 5.4,
+    foundationDepth: 5.5,
+    materialKind: 15,
+    roofPitch: 2.8,
+    waterfront: true,
+    indigenous: true,
+  }),
+  maya_limestone_shrine_and_na: Object.freeze({
+    id: 'maya_limestone_shrine_and_na',
+    label: 'Postclassic Coastal Maya Limestone Shrine & Apsidal Thatched Nah',
+    length: 18.5,
+    width: 11.5,
+    height: 7.4,
+    foundationDepth: 3.2,
+    materialKind: 11,
+    roofPitch: 2.8,
+    waterfront: true,
+    indigenous: true,
+  }),
+  indigenous_canoe_landing: Object.freeze({
+    id: 'indigenous_canoe_landing',
+    label: 'Indigenous Canoe Beaching & Tidal Fish Weir',
+    length: 16.0,
+    width: 8.5,
+    height: 2.2,
+    foundationDepth: 3.2,
+    materialKind: 10,
+    roofPitch: 0,
+    waterfront: true,
+    indigenous: true,
   }),
 });
 
@@ -1480,12 +2124,19 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     { ...spec, id, name, latitude, longitude, hasColonialPort, settlementKind },
     simYear
   );
+  const indigenousSettlement = spec.indigenousSettlement ?? computeIndigenousSettlementProfile(
+    { ...spec, id, name, latitude, longitude, coastalArchetype, hasColonialPort, colonyGrowth },
+    simYear
+  );
+  const hasIndigenousSettlement = Boolean(indigenousSettlement?.hasIndigenousSettlement);
   return Object.freeze({
     id,
     name,
     era: spec.era ?? simYear,
     ...(spec.year !== undefined || simYear !== 1550 ? { year: simYear } : {}),
     colonyGrowth,
+    indigenousSettlement,
+    hasIndigenousSettlement,
     regionGroup: spec.regionGroup ?? (
       latitude >= 7 && latitude <= 26 && longitude >= -90 && longitude <= -59
         ? 'Spanish Main'
@@ -2627,6 +3278,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       materialKind: overrides?.materialKind ?? prefab.materialKind,
       roofPitch: overrides?.roofPitch ?? prefab.roofPitch,
       waterfront: overrides?.waterfront ?? prefab.waterfront,
+      indigenous: overrides?.indigenous ?? Boolean(prefab.indigenous),
+      cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
     });
   };
 
@@ -3102,6 +3755,44 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         });
       }
     }
+  } else {
+    // Uncolonized coast: check historical Native American settlement profile for this region & year
+    const indigenousSettlement =
+      region.indigenousSettlement ??
+      computeIndigenousSettlementProfile(region, colonyGrowth.year);
+    if (indigenousSettlement?.hasIndigenousSettlement && Array.isArray(indigenousSettlement.prefabMix)) {
+      // Organic coastal village layout slots: (alongOffset, inlandOffset, yawOffsetDeg, minElev)
+      // Slot 0 is the foreshore canoe beaching & tidal fish weir right at the water's edge;
+      // Slots 1..9 arrange the council house / longhouse / batey plaza and family wigwams/bohíos on the coastal terrace.
+      const villageSlots = [
+        [-14, 4, 0, 1.25],
+        [4, 34, 8, 2.3],
+        [-28, 28, -14, 2.2],
+        [32, 30, 16, 2.2],
+        [-6, 62, 0, 2.7],
+        [-48, 44, -22, 2.4],
+        [48, 48, 24, 2.5],
+        [-26, 56, 12, 2.6],
+        [26, 58, -12, 2.6],
+        [0, 82, 6, 2.9],
+      ];
+      const count = Math.min(
+        villageSlots.length,
+        indigenousSettlement.targetStructureCount || 6,
+        indigenousSettlement.prefabMix.length
+      );
+      for (let s = 0; s < count; s++) {
+        const prefabId = indigenousSettlement.prefabMix[s];
+        const [alongOff, inlandOff, yawOff, minElev] = villageSlots[s];
+        // Palafito stilt villages sit right in the shallow estuary foreshore (inlandOffset ~ 6..18m)
+        const effInland = prefabId === 'palafito_estuary_village' ? Math.min(16, inlandOff * 0.42) : inlandOff;
+        const effMinElev = prefabId === 'palafito_estuary_village' ? 1.15 : minElev;
+        addPrefab(prefabId, alongOff, effInland, yawOff, effMinElev, {
+          indigenous: true,
+          cultureId: indigenousSettlement.cultureId,
+        });
+      }
+    }
   }
 
   for (let idx = 0; idx < instances.length; idx++) {
@@ -3113,6 +3804,12 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     inst._sinNegYaw = Math.sin(inst.yaw);
     inst._boundR = Math.hypot(inst.width, inst.length) * 0.5;
   }
+
+  const indigenousSettlement =
+    region.indigenousSettlement ??
+    computeIndigenousSettlementProfile(region, colonyGrowth.year);
+  const indigenousInstanceCount = instances.filter((i) => i.indigenous).length;
+  const colonialInstanceCount = instances.length - indigenousInstanceCount;
 
   const center = orthoFootprints
     ? { x: orthoFootprints.clusterX, z: orthoFootprints.clusterZ }
@@ -3142,6 +3839,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     portType: region.portType,
     settlementKind: region.settlementKind ?? (allowColonialPort ? 'colonial-port' : 'wilderness-anchorage'),
     hasColonialPort: allowColonialPort,
+    hasIndigenousSettlement: Boolean(indigenousSettlement?.hasIndigenousSettlement),
+    indigenousSettlement,
+    colonialInstanceCount,
+    indigenousInstanceCount,
     era: region.era,
     year: colonyGrowth.year,
     stage: allowColonialPort ? colonyGrowth.stage : 'wilderness',
@@ -4465,6 +5166,338 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         }
       }
       emitRoof(toWorld, -whHW, whHW, yTop, yTop + roofRise(whHW * 2), -hl, hl, 0.78, 0.15, 12);
+    } else if (inst.prefabId === 'abenaki_birchbark_wigwam') {
+      // Abenaki / Wabanaki & New England Algonquian Domed Birchbark Wigwam (Wetu):
+      // Bent-sapling frame sheathed in overlapping paper-birchbark sheets (kind 17) & rush mats (kind 15),
+      // external sapling hoop binders (kind 10), bark-hooded doorway, apex smoke hole, stone hearth & fish-smoking rack.
+      const rBase = Math.min(hw, hl) * 0.92;
+      const yPlinth = yGround + 0.28;
+      beginSection('foundation_plinth');
+      emitCylinder(toWorld, 0, 0, yBase, yPlinth, rBase + 0.35, rBase + 0.25, 10, 16, 0.80, true);
+      // 4-tier hemispherical/ellipsoidal birchbark dome (lower tier woven cattail/rush mat skirt kind 15, upper 3 tiers paper birchbark kind 17)
+      const domeH = Math.max(2.9, inst.height);
+      const tiers = [
+        [0.0, 0.32, 1.0, 0.92, 15, 0.86],
+        [0.32, 0.62, 0.92, 0.74, 17, 0.92],
+        [0.62, 0.86, 0.74, 0.44, 17, 0.95],
+        [0.86, 1.0, 0.44, 0.14, 17, 0.97],
+      ];
+      beginSection('wigwam_birchbark_dome');
+      for (const [t0, t1, s0, s1, mat, sh] of tiers) {
+        emitCylinder(
+          toWorld,
+          0,
+          0,
+          yPlinth + t0 * domeH,
+          yPlinth + t1 * domeH,
+          rBase * s0,
+          rBase * s1,
+          10,
+          mat,
+          sh,
+          t1 >= 0.99
+        );
+      }
+      // External bent-sapling hoop rings & vertical pole ribs (kind 10) holding the birchbark sheets against coastal gales
+      beginSection('wigwam_sapling_frame');
+      for (const [tRing, sRing] of [[0.32, 0.93], [0.62, 0.75], [0.85, 0.45]]) {
+        const ry = yPlinth + tRing * domeH;
+        emitCylinder(toWorld, 0, 0, ry - 0.06, ry + 0.06, rBase * sRing + 0.06, rBase * sRing + 0.06, 10, 10, 0.76, false);
+      }
+      // Apex smoke-hole collar (kind 14) & projecting smoke-flap poles (kind 10)
+      emitCylinder(toWorld, 0, 0, yPlinth + domeH - 0.08, yPlinth + domeH + 0.14, rBase * 0.18, rBase * 0.16, 8, 14, 0.32, true);
+      emitCylinder(toWorld, -0.22, -0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
+      emitCylinder(toWorld, 0.22, 0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
+      // Low arched bark-hooded entrance tunnel on -Z with deerskin door flap (kind 13/14)
+      beginSection('wigwam_doorway_hood');
+      emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
+      emitBox(toWorld, -0.56, 0.56, yPlinth, yPlinth + 1.38, -rBase - 0.58, -rBase - 0.35, 14, 0.28);
+      // Forecourt stone hearth ring (kind 11) + glowing ember bed (kind 13) + timber fish-smoking rack (kind 10)
+      beginSection('hearth_and_drying_rack');
+      const hz = -rBase - 1.65;
+      emitCylinder(toWorld, 1.35, hz, yGround, yGround + 0.32, 0.68, 0.62, 8, 11, 0.82, true);
+      emitCylinder(toWorld, 1.35, hz, yGround + 0.32, yGround + 0.38, 0.44, 0.38, 8, 13, 0.92, true);
+      emitCylinder(toWorld, -1.55, hz - 0.4, yGround, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
+      emitCylinder(toWorld, -1.55, hz + 0.8, yGround, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
+      emitBox(toWorld, -1.62, -1.48, yGround + 1.55, yGround + 1.68, hz - 0.55, hz + 0.95, 10, 0.80, true);
+    } else if (inst.prefabId === 'algonquian_longhouse') {
+      // Algonquian / Wabanaki / Powhatan / Haudenosaunee Barrel-Vaulted Bark Longhouse:
+      // Bowed sapling rib frame sheathed in overlapping birch/elm/cedar bark sheets (kind 17),
+      // external vertical lash-poles (kind 10), arched barrel roof with smoke holes, and hooded end portals.
+      const lhHW = Math.min(4.2, hw);
+      const yPlinth = yGround + 0.32;
+      const yEave = yPlinth + Math.max(2.4, inst.height * 0.54);
+      const vaultRise = Math.max(1.8, inst.height * 0.46);
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -lhHW - 0.35, lhHW + 0.35, yBase, yPlinth, -hl - 0.35, hl + 0.35, 16, 0.80);
+      beginSection('longhouse_bark_walls');
+      emitBox(toWorld, -lhHW, lhHW, yPlinth, yEave, -hl, hl, 17, 0.90);
+      // Barrel-vaulted bark roof built from 3 stacked arched tiers (kind 17)
+      beginSection('longhouse_barrel_vault_roof');
+      emitBox(toWorld, -lhHW * 0.92, lhHW * 0.92, yEave, yEave + vaultRise * 0.46, -hl - 0.15, hl + 0.15, 17, 0.93, true, lhHW * 0.14);
+      emitBox(toWorld, -lhHW * 0.76, lhHW * 0.76, yEave + vaultRise * 0.46, yEave + vaultRise * 0.82, -hl - 0.12, hl + 0.12, 17, 0.95, true, lhHW * 0.18);
+      emitBox(toWorld, -lhHW * 0.52, lhHW * 0.52, yEave + vaultRise * 0.82, yEave + vaultRise, -hl - 0.08, hl + 0.08, 17, 0.97, true, lhHW * 0.22);
+      // Iterated external vertical & arched sapling binder poles every 2.8m along Z + roof smoke holes
+      const nBays = snapBays(inst.length - 1.6, 2.8, 5);
+      const baySpan = (inst.length - 1.6) / nBays;
+      for (let b = 0; b <= nBays; b++) {
+        const bz = -hl + 0.8 + b * baySpan;
+        beginSection('longhouse_sapling_ribs');
+        emitCylinder(toWorld, -lhHW - 0.08, bz, yPlinth, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, lhHW + 0.08, bz, yPlinth, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitBox(toWorld, -lhHW * 0.58, lhHW * 0.58, yEave + vaultRise - 0.05, yEave + vaultRise + 0.09, bz - 0.08, bz + 0.08, 10, 0.76, true);
+        if (b > 0 && b < nBays && b % 2 === 1) {
+          beginSection('roof_smoke_holes');
+          emitBox(toWorld, -0.55, 0.55, yEave + vaultRise - 0.04, yEave + vaultRise + 0.12, bz - 0.55, bz + 0.55, 14, 0.28, true);
+        }
+      }
+      // End doorway portals on -hl and +hl with projecting bark rain-hoods & red-ochre clan lintel (kind 13)
+      beginSection('longhouse_end_portals');
+      for (const sideZ of [-1, 1]) {
+        const zFace = sideZ * hl;
+        const zOut = sideZ * (hl + 0.65);
+        const zMin = Math.min(zFace, zOut), zMax = Math.max(zFace, zOut);
+        emitBox(toWorld, -1.05, 1.05, yPlinth + 1.85, yPlinth + 2.25, zMin, zMax, 13, 0.88, true);
+        emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.85, zFace - 0.18, zFace + 0.18, 14, 0.26);
+      }
+    } else if (inst.prefabId === 'indigenous_palisade_ring') {
+      // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds
+      const rRingX = hw * 0.90;
+      const rRingZ = hl * 0.90;
+      const yPlinth = yGround + 0.22;
+      beginSection('plaza_earth_floor');
+      emitCylinder(toWorld, 0, 0, yBase, yPlinth, Math.min(rRingX, rRingZ), Math.min(rRingX, rRingZ), 12, 16, 0.82, true);
+      // 28 pointed vertical log stockade posts around the perimeter with a baffled entrance gap on -Z
+      beginSection('palisade_stockade_posts');
+      const nPosts = 28;
+      const postH = Math.max(3.6, inst.height);
+      for (let p = 0; p < nPosts; p++) {
+        const angle = (p / nPosts) * Math.PI * 2;
+        // Leave entrance gap near -Z (angle ~ -PI/2 = 3*PI/2)
+        if (Math.abs(Math.sin(angle) + 1) < 0.08 && Math.abs(Math.cos(angle)) < 0.35) continue;
+        const px = Math.cos(angle) * rRingX;
+        const pz = Math.sin(angle) * rRingZ;
+        const hVar = ((p * 7) % 5) * 0.14;
+        emitCylinder(toWorld, px, pz, yBase + 0.4, yPlinth + postH + hVar, 0.34, 0.16, 6, 10, 0.74 + (p % 3) * 0.04, true);
+      }
+      // Central stone council hearth (kind 11 + 13) & 4 split-log council benches (kind 10)
+      beginSection('council_firepit_and_benches');
+      emitCylinder(toWorld, 0, 0, yPlinth, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
+      emitCylinder(toWorld, 0, 0, yPlinth + 0.42, yPlinth + 0.52, 0.95, 0.78, 8, 13, 0.94, true);
+      emitBox(toWorld, -2.6, 2.6, yPlinth, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yPlinth, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
+      emitBox(toWorld, -3.4, -2.75, yPlinth, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, 2.75, 3.4, yPlinth, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      // Three Sisters (maize, climbing beans, winter squash) hillock mounds inside the stockade lee
+      beginSection('three_sisters_crop_mounds');
+      for (const mx of [-rRingX * 0.48, rRingX * 0.48]) {
+        for (const mz of [-rRingZ * 0.36, 0, rRingZ * 0.36]) {
+          emitCylinder(toWorld, mx, mz, yPlinth, yPlinth + 0.38, 0.95, 0.55, 6, 16, 0.76, true);
+          emitCylinder(toWorld, mx, mz, yPlinth + 0.32, yPlinth + 1.65, 0.32, 0.08, 5, 4, 0.84, true);
+        }
+      }
+    } else if (inst.prefabId === 'taino_cacique_caney') {
+      // Taíno Cacique Royal Caney: Rectangular/polygonal royal palm-thatch council & chief's residence
+      // facing the batey plaza with a carved hardwood front portico and high-pitched multi-tier guano thatch roof.
+      const cHW = Math.min(5.8, hw);
+      const yPlinth = yGround + 0.52;
+      const yEave = yPlinth + Math.max(2.8, inst.height * 0.48);
+      const yPeak = yEave + Math.max(3.2, inst.roofPitch || 3.6);
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -cHW - 0.65, cHW + 0.65, yBase, yPlinth, -hl - 0.85, hl + 0.65, 16, 0.82);
+      // Cane-and-post bahareque walls (kind 12) recessed behind the front portico (-hl + 2.6 .. hl)
+      beginSection('caney_cane_walls');
+      emitBox(toWorld, -cHW, cHW, yPlinth, yEave, -hl + 2.6, hl, 12, 0.88);
+      // Front ceremonial portico columns (kind 10) & shadowed doorway portal (kind 14)
+      beginSection('caney_portico_posts');
+      for (const px of [-cHW + 0.45, -cHW * 0.34, cHW * 0.34, cHW - 0.45]) {
+        emitCylinder(toWorld, px, -hl + 0.35, yPlinth, yEave, 0.24, 0.21, 6, 10, 0.76, true);
+      }
+      emitBox(toWorld, -1.15, 1.15, yPlinth, yEave - 0.45, -hl + 2.45, -hl + 2.75, 14, 0.28);
+      // Multi-tiered royal palm-thatch hipped roof (kind 15) + carved ridge pole crest (kind 10)
+      beginSection('caney_palm_thatch_roof');
+      emitRoof(toWorld, -cHW - 0.35, cHW + 0.35, yEave, yPeak, -hl - 0.35, hl + 0.35, 0.95, 0.36, 10, 15);
+      emitBox(toWorld, -0.22, 0.22, yPeak - 0.15, yPeak + 0.42, -hl * 0.55, hl * 0.55, 10, 0.80, true);
+    } else if (inst.prefabId === 'taino_circular_bohio') {
+      // Taíno / Arawak / Kalinago Circular Conical Guano-Thatch Bohío:
+      // 10-sided circular cane wall with exterior hardwood posts + steep 3-tier conical palm-thatch roof & center pole finial.
+      const rBohio = Math.min(hw, hl) * 0.88;
+      const yPlinth = yGround + 0.36;
+      const yEave = yPlinth + Math.max(2.1, inst.height * 0.42);
+      const coneH = Math.max(3.0, inst.roofPitch || 3.2);
+      beginSection('foundation_plinth');
+      emitCylinder(toWorld, 0, 0, yBase, yPlinth, rBohio + 0.45, rBohio + 0.35, 10, 16, 0.80, true);
+      beginSection('bohio_circular_cane_wall');
+      emitCylinder(toWorld, 0, 0, yPlinth, yEave, rBohio, rBohio, 10, 12, 0.86, false);
+      // Exterior hardwood post ring (kind 10) & doorway opening on -Z (kind 14)
+      beginSection('bohio_perimeter_posts');
+      for (let p = 0; p < 10; p++) {
+        const a = (p / 10) * Math.PI * 2;
+        emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yPlinth, yEave, 0.15, 0.13, 5, 10, 0.74, true);
+      }
+      emitBox(toWorld, -0.68, 0.68, yPlinth, yEave - 0.35, -rBohio - 0.12, -rBohio + 0.18, 14, 0.28);
+      // 3-tier overhanging conical palm-thatch roof (kind 15) + center pole finial (kind 10)
+      beginSection('bohio_conical_thatch_roof');
+      emitCylinder(toWorld, 0, 0, yEave - 0.25, yEave + coneH * 0.36, rBohio + 0.72, rBohio * 0.68, 10, 15, 0.88, false);
+      emitCylinder(toWorld, 0, 0, yEave + coneH * 0.34, yEave + coneH * 0.72, rBohio * 0.72, rBohio * 0.34, 10, 15, 0.92, false);
+      emitCylinder(toWorld, 0, 0, yEave + coneH * 0.70, yEave + coneH, rBohio * 0.38, 0.16, 10, 15, 0.96, true);
+      emitCylinder(toWorld, 0, 0, yEave + coneH - 0.2, yEave + coneH + 0.75, 0.14, 0.06, 6, 10, 0.80, true);
+    } else if (inst.prefabId === 'taino_batey_court') {
+      // Taíno Batey Ceremonial Ballcourt & Plaza:
+      // Sunken/graded earthen court (kind 16) lined with upright carved petroglyph stone monoliths (kind 11) & central zemi altar.
+      const yCourt = yGround + 0.24;
+      beginSection('batey_plaza_floor');
+      emitBox(toWorld, -hw, hw, yBase, yCourt, -hl, hl, 16, 0.84, true);
+      // Flanking rows of upright carved stone monoliths & river boulders along -hw and +hw
+      beginSection('batey_petroglyph_monoliths');
+      const nStones = snapBays(inst.length - 2.0, 2.8, 5);
+      const stoneSpan = (inst.length - 2.0) / nStones;
+      for (let s = 0; s <= nStones; s++) {
+        const sz = -hl + 1.0 + s * stoneSpan;
+        const hMod = 1.15 + ((s * 5) % 4) * 0.22;
+        emitBox(toWorld, -hw - 0.15, -hw + 0.42, yCourt, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
+        emitBox(toWorld, hw - 0.42, hw + 0.15, yCourt, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
+      }
+      // Carved stone Zemi sanctuary plinth & cacique wooden duho ceremonial stool at the head of the court
+      beginSection('zemi_altar_and_duho');
+      emitCylinder(toWorld, 0, hl * 0.58, yCourt, yCourt + 0.65, 1.35, 1.18, 8, 11, 0.88, true);
+      emitCylinder(toWorld, 0, hl * 0.58, yCourt + 0.65, yCourt + 1.85, 0.48, 0.28, 6, 11, 0.94, true);
+      emitBox(toWorld, -0.85, 0.85, yCourt, yCourt + 0.48, -hl * 0.65 - 0.45, -hl * 0.65 + 0.45, 10, 0.78, true);
+    } else if (inst.prefabId === 'kalinago_carbet_hall') {
+      // Kalinago (Island Carib) Elliptical Taboui / Carbet Assembly Hall:
+      // Soaring palm-thatch communal warrior hall with low open eaves, hardwood post colonnade & boucan roasting rack.
+      const kHW = Math.min(5.2, hw);
+      const yPlinth = yGround + 0.32;
+      const yLowEave = yPlinth + 1.65;
+      const yPeak = yPlinth + Math.max(5.6, inst.height);
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -kHW - 0.5, kHW + 0.5, yBase, yPlinth, -hl - 0.5, hl + 0.5, 16, 0.80);
+      beginSection('carbet_timber_colonnade');
+      const nPosts = snapBays(inst.length - 2.0, 3.2, 4);
+      const pSpan = (inst.length - 2.0) / nPosts;
+      for (let p = 0; p <= nPosts; p++) {
+        const pz = -hl + 1.0 + p * pSpan;
+        emitCylinder(toWorld, -kHW + 0.45, pz, yPlinth, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
+        emitCylinder(toWorld, kHW - 0.45, pz, yPlinth, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
+      }
+      // Low woven-reed windbreak skirt (kind 12) + sweeping two-stage steep palm-thatch roof (kind 15)
+      beginSection('carbet_thatch_hall_roof');
+      emitBox(toWorld, -kHW + 0.5, kHW - 0.5, yPlinth, yLowEave, -hl + 1.2, hl - 1.2, 12, 0.80);
+      emitRoof(toWorld, -kHW, kHW, yLowEave, yPeak, -hl, hl, 0.85, 0.35, 10, 15);
+      // Apsidal thatched ends on -hl and +hl
+      emitCylinder(toWorld, 0, -hl + 0.8, yLowEave, yPeak - 0.6, kHW * 0.92, 0.28, 8, 15, 0.90, true);
+      emitCylinder(toWorld, 0, hl - 0.8, yLowEave, yPeak - 0.6, kHW * 0.92, 0.28, 8, 15, 0.90, true);
+    } else if (inst.prefabId === 'tupinamba_oca_longhouse') {
+      // Tupinambá / Lokono Monumental Arched Palm-Thatch Oca Longhouse (28m x 9.6m):
+      // Continuous ground-to-ridge arched palm-thatch shell (kind 15) with 3 low side doorways & external sapling ribs.
+      const oHW = Math.min(5.0, hw);
+      const yPlinth = yGround + 0.30;
+      const ocaH = Math.max(5.8, inst.height);
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -oHW - 0.45, oHW + 0.45, yBase, yPlinth, -hl - 0.45, hl + 0.45, 16, 0.80);
+      beginSection('oca_arched_thatch_vault');
+      emitBox(toWorld, -oHW, oHW, yPlinth, yPlinth + ocaH * 0.38, -hl, hl, 15, 0.86, false, oHW * 0.08);
+      emitBox(toWorld, -oHW * 0.92, oHW * 0.92, yPlinth + ocaH * 0.38, yPlinth + ocaH * 0.72, -hl - 0.2, hl + 0.2, 15, 0.91, true, oHW * 0.18);
+      emitBox(toWorld, -oHW * 0.68, oHW * 0.68, yPlinth + ocaH * 0.72, yPlinth + ocaH, -hl - 0.15, hl + 0.15, 15, 0.95, true, oHW * 0.26);
+      // Ridge pole & 3 low arched side/end portals (kind 14)
+      beginSection('oca_ridge_and_portals');
+      emitBox(toWorld, -0.24, 0.24, yPlinth + ocaH - 0.1, yPlinth + ocaH + 0.28, -hl - 0.4, hl + 0.4, 10, 0.78, true);
+      for (const pz of [-hl * 0.55, 0, hl * 0.55]) {
+        emitBox(toWorld, -oHW - 0.08, oHW + 0.08, yPlinth, yPlinth + 1.65, pz - 0.72, pz + 0.72, 14, 0.28);
+      }
+    } else if (inst.prefabId === 'palafito_estuary_village') {
+      // Tierra Firme / Maracaibo / Warao Over-Water Lagoon Stilt Palafito Cluster:
+      // Twin elevated palm-thatch stilt dwellings connected by a timber catwalk over mangrove pilings + moored dugout piragua.
+      const yDeck = yGround + 1.35;
+      const hutW = Math.min(5.4, hw * 0.72);
+      const hutL = Math.min(7.2, hl * 0.42);
+      beginSection('palafito_stilt_pilings');
+      for (const sx of [-hutW * 0.8, 0, hutW * 0.8]) {
+        for (const sz of [-hl + 1.2, -hl * 0.35, 0, hl * 0.35, hl - 1.2]) {
+          emitCylinder(toWorld, sx, sz, yBase - 1.5, yDeck + 0.4, 0.20, 0.17, 6, 10, 0.68, true);
+        }
+      }
+      beginSection('palafito_platform_and_catwalk');
+      emitBox(toWorld, -hutW - 0.9, hutW + 0.9, yDeck - 0.26, yDeck, -hl, -hl + hutL * 2 + 0.8, 10, 0.80, true);
+      emitBox(toWorld, -hutW - 0.9, hutW + 0.9, yDeck - 0.26, yDeck, hl - hutL * 2 - 0.8, hl, 10, 0.80, true);
+      emitBox(toWorld, -1.25, 1.25, yDeck - 0.24, yDeck, -hl - 3.6, hl + 1.2, 10, 0.78, true);
+      // Twin palm-thatch huts on the stilt platforms
+      const yHutEave = yDeck + 2.45;
+      const yHutPeak = yHutEave + 2.35;
+      for (const zCenter of [-hl + hutL + 0.4, hl - hutL - 0.4]) {
+        beginSection('palafito_hut_walls_and_roof');
+        emitBox(toWorld, -hutW, hutW, yDeck, yHutEave, zCenter - hutL, zCenter + hutL, 12, 0.86);
+        emitBox(toWorld, -0.65, 0.65, yDeck, yHutEave - 0.45, zCenter - hutL - 0.08, zCenter + hutL + 0.08, 14, 0.28);
+        emitRoof(toWorld, -hutW, hutW, yHutEave, yHutPeak, zCenter - hutL, zCenter + hutL, 0.75, 0.28, 10, 15);
+      }
+    } else if (inst.prefabId === 'maya_limestone_shrine_and_na') {
+      // Postclassic Coastal Maya Stepped Whitewashed Limestone Shrine/Beacon Platform & Apsidal Thatched Nah
+      const pyrR = Math.min(hw * 0.78, 4.8);
+      const pyrZ = -hl * 0.36;
+      const yT1 = yGround + 1.45;
+      const yT2 = yT1 + 1.35;
+      const yT3 = yT2 + 1.25;
+      const ySanctTop = yT3 + 2.85;
+      beginSection('maya_stepped_pyramid_base');
+      emitBox(toWorld, -pyrR - 0.6, pyrR + 0.6, yBase, yT1, pyrZ - pyrR - 0.6, pyrZ + pyrR + 0.6, 11, 0.86, true, 0.35);
+      emitBox(toWorld, -pyrR * 0.78, pyrR * 0.78, yT1, yT2, pyrZ - pyrR * 0.78, pyrZ + pyrR * 0.78, 11, 0.90, true, 0.28);
+      emitBox(toWorld, -pyrR * 0.56, pyrR * 0.56, yT2, yT3, pyrZ - pyrR * 0.56, pyrZ + pyrR * 0.56, 12, 0.93, true, 0.20);
+      // Seaward stone balustrade stairway on -Z
+      beginSection('maya_shrine_stairway');
+      for (let st = 0; st < 6; st++) {
+        const sy0 = yGround + st * ((yT3 - yGround) / 6);
+        const sy1 = sy0 + (yT3 - yGround) / 6;
+        const sz0 = pyrZ - pyrR - 1.4 + st * 0.36;
+        emitBox(toWorld, -1.35, 1.35, sy0, sy1, sz0, pyrZ - pyrR * 0.4, 11, 0.88 + st * 0.01, true);
+      }
+      // Whitewashed flat-roofed masonry coastal shrine / navigation beacon temple at summit (Tulum / Cozumel style)
+      beginSection('maya_summit_sanctuary');
+      const sW = pyrR * 0.42;
+      emitBox(toWorld, -sW, sW, yT3, ySanctTop, pyrZ - sW * 0.85, pyrZ + sW * 0.85, 12, 0.95, true);
+      emitBox(toWorld, -sW - 0.18, sW + 0.18, ySanctTop - 0.38, ySanctTop + 0.12, pyrZ - sW, pyrZ + sW, 11, 0.92, true);
+      emitBox(toWorld, -0.68, 0.68, yT3, ySanctTop - 0.65, pyrZ - sW * 0.92, pyrZ - sW * 0.5, 14, 0.26);
+      // Apsidal palm-thatched Maya Nah house behind the shrine (+Z)
+      const naZ = hl * 0.44;
+      const naW = Math.min(3.8, hw * 0.68);
+      const naL = Math.min(3.6, hl * 0.36);
+      beginSection('maya_apsidal_thatched_nah');
+      emitBox(toWorld, -naW, naW, yGround, yGround + 2.35, naZ - naL, naZ + naL, 12, 0.88);
+      emitRoof(toWorld, -naW, naW, yGround + 2.35, yGround + 4.95, naZ - naL, naZ + naL, 0.72, 0.28, 10, 15);
+    } else if (inst.prefabId === 'indigenous_canoe_landing') {
+      // Indigenous Canoe Beaching, Log Rollers, Upturned Birchbark / Dugout Canoes & Tidal Brushwood Fish Weir
+      const isBirchbark =
+        inst.cultureId === 'abenaki-algonquian' || inst.cultureId === 'mid-atlantic-algonquian';
+      const canoeKind = isBirchbark ? 17 : 10;
+      const yBeach = yGround + 0.18;
+      beginSection('canoe_landing_rollers');
+      for (let r = 0; r < 5; r++) {
+        const rz = -hl + 1.8 + r * 2.6;
+        emitCylinder(toWorld, -hw * 0.55, rz, yBeach - 0.1, yBeach + 0.18, 0.16, 0.16, 6, 10, 0.72, true);
+        emitCylinder(toWorld, hw * 0.55, rz, yBeach - 0.1, yBeach + 0.18, 0.16, 0.16, 6, 10, 0.72, true);
+      }
+      // 2 Beached 3D Canoes (Abenaki high-stem paper-birchbark canoes or Taíno/Kalinago carved mahogany cayucos/kanawas)
+      beginSection('beached_indigenous_canoes');
+      for (const [cx, cz, cLen, cBeam] of [[-hw * 0.42, -1.2, 6.2, 0.92], [hw * 0.42, 1.4, 6.8, 0.98]]) {
+        const cHL = cLen * 0.5;
+        const cHW = cBeam * 0.5;
+        // Hull midbody, tapered bow/stern, and upturned birchbark/dugout stems
+        emitBox(toWorld, cx - cHW, cx + cHW, yBeach + 0.12, yBeach + 0.64, cz - cHL * 0.65, cz + cHL * 0.65, canoeKind, 0.90, true);
+        emitBox(toWorld, cx - cHW * 0.62, cx + cHW * 0.62, yBeach + 0.18, yBeach + 0.86, cz - cHL, cz - cHL * 0.62, canoeKind, 0.93, true, cHW * 0.22);
+        emitBox(toWorld, cx - cHW * 0.62, cx + cHW * 0.62, yBeach + 0.18, yBeach + 0.86, cz + cHL * 0.62, cz + cHL, canoeKind, 0.93, true, cHW * 0.22);
+        // Dark spruce-root / pitched gunwale wales & cross thwarts
+        emitBox(toWorld, cx - cHW - 0.04, cx + cHW + 0.04, yBeach + 0.58, yBeach + 0.68, cz - cHL * 0.65, cz + cHL * 0.65, 10, 0.68, true);
+      }
+      // Seaward V-shaped tidal brushwood fish weir stakes & net rack (-hl .. -hl - 3.5)
+      beginSection('tidal_fish_weir_and_rack');
+      for (let s = 0; s < 9; s++) {
+        const u = (s / 8) * 2 - 1;
+        const wx = u * hw * 0.85;
+        const wz = -hl - 0.5 - (1 - Math.abs(u)) * 2.8;
+        emitCylinder(toWorld, wx, wz, yBase, yBeach + 1.35, 0.09, 0.07, 5, 10, 0.70, true);
+      }
+      emitBox(toWorld, -hw * 0.7, hw * 0.7, yBeach + 1.05, yBeach + 1.20, hl - 2.2, hl - 1.9, 10, 0.78, true);
+      emitCylinder(toWorld, -hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
+      emitCylinder(toWorld, hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
     } else {
       // Bay-Iterated Spanish Colonial Residential & Civic Blocks:
       // Dispatches cleanly between:

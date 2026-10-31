@@ -696,7 +696,7 @@ fn landOpaque(in:LandVertex)->vec4f{
       let thatchCol=vec3f(0.36+bundleVar,0.27+bundleVar*0.7,0.145+bundleVar*0.4)*(0.86+0.16*tierStep);
       albedo=thatchCol*portShade*(1.0+detailA*0.14+straw*0.11+detailB*0.07);
       relief=(straw*0.036+(tierStep-0.5)*0.024+detailA*0.018)*detailFade;roughness=0.93;ambientVisibility=0.44+0.36*max(n.y,0.0);
-    }else{
+    }else if(in.kind.x<16.5){
       // Kind 16: River-cobble courtyard pavement & packed-earth bastion terreplein (empedrado / terraplén)
       let cobbleX=fract(world.x*2.4+sin(world.z*3.1)*0.25)-0.5;
       let cobbleZ=fract(world.z*2.4+cos(world.x*3.1)*0.25)-0.5;
@@ -704,6 +704,18 @@ fn landOpaque(in:LandVertex)->vec4f{
       let baseEarth=mix(vec3f(0.28,0.25,0.20),vec3f(0.40,0.36,0.30),cobble*detailFade);
       albedo=baseEarth*portShade*(1.0+detailA*0.15+detailB*0.09);
       relief=(detailA*0.032+(cobble-0.5)*0.022)*detailFade;roughness=0.91;ambientVisibility=0.48+0.36*max(n.y,0.0);
+    }else{
+      // Kind 17: Paper-birch & elm/cedar bark sheathing (Abenaki wigwams, Algonquian longhouses & birchbark canoes)
+      let sheetY=fract(world.y*1.35);
+      let sheetX=fract((world.x+world.z)*0.85+floor(world.y*1.35)*0.42);
+      let seam=smoothstep(0.0,0.09,sheetY)*(1.0-smoothstep(0.91,1.0,sheetY))*smoothstep(0.0,0.07,sheetX);
+      let lenticel=pow(clamp(0.5+0.5*sin(world.y*34.0+(world.x-world.z)*6.5+detailA*4.2),0.0,1.0),7.0)*detailFade;
+      let sheetVar=sin(floor(world.y*1.35)*5.7+floor((world.x+world.z)*0.85)*9.3)*0.055*detailFade;
+      let barkCream=vec3f(0.68+sheetVar,0.61+sheetVar*0.8,0.49+sheetVar*0.6);
+      let innerCambium=vec3f(0.42,0.26,0.14);
+      let baseBark=mix(innerCambium,barkCream,0.25+0.75*seam)*(1.0-lenticel*0.42);
+      albedo=baseBark*portShade*(0.92+detailA*0.12+detailB*0.06);
+      relief=((seam-0.5)*0.026-lenticel*0.018+detailA*0.016)*detailFade;roughness=0.82;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);

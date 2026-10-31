@@ -1,6 +1,6 @@
-import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, resolveGlobalCoastalRegion } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, resolveGlobalCoastalRegion } from './terrain-model.js';
 import { snapCoordinateToCoastlineRings } from './coastal-world.js';
-export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, resolveGlobalCoastalRegion } from './coastal-world.js';
+export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, resolveGlobalCoastalRegion } from './coastal-world.js';
 
 export const LANDFALL_WEATHER = Object.freeze({
   clear:{sunElev:32,sunAzim:225,haze:0.8,clouds:0.3,cloudBase:1.2,cloudDepth:1.8,cloudDensity:1,cloudAnvil:0.05},
@@ -104,13 +104,15 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
   const simYear=Number.isFinite(region?.year)?region.year:1550;
   const eraInfo=resolveColonialEra(simYear);
   const growth=region?.colonyGrowth||(isSaba?null:computeColonyGrowthProfile(region,simYear));
+  const indigenous=region?.indigenousSettlement||(isSaba?null:computeIndigenousSettlementProfile(region,simYear));
   const isWilderness=!isSaba&&region.hasColonialPort===false;
+  const hasIndigenousVillage=Boolean(isWilderness&&indigenous?.hasIndigenousSettlement);
   const stageBadge=growth?.stage?growth.stage.replace(/-/g,' '):(isWilderness?'wilderness':'settlement');
-  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name} (${simYear})${region.subtitle?' · '+region.subtitle:isWilderness?` · ${simYear} Wilderness Coast`:''}`;
+  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name} (${simYear})${region.subtitle?' · '+region.subtitle:hasIndigenousVillage?` · ${indigenous.cultureName}`:isWilderness?` · ${simYear} Wilderness Coast`:''}`;
   const introText=isSaba
     ?'Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.'
     :isWilderness
-      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label}) reconstructs an uncolonized wilderness coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no colonial settlement yet established.${growth?.historicalNote?' '+growth.historicalNote+'.':''}`
+      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label}) reconstructs an uncolonized coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no European colonial settlement yet established.${hasIndigenousVillage?` Inhabited by ${indigenous.cultureName} (${indigenous.settlementStyle}; est. ~${indigenous.estimatedVillagePopulation} residents). ${indigenous.historicalNote}`:''}${growth?.historicalNote?' '+growth.historicalNote+'.':''}`
       :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label} · ${stageBadge}) combines high-resolution SRTM elevation, co-registered satellite land-cover, and historical colony growth.${growth?.historicalNote?' '+growth.historicalNote+'.':''}`;
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">${titleText}</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">${introText}</p>

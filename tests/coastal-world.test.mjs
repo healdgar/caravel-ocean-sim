@@ -11,6 +11,10 @@ import {
   findHistoricalColonialPort,
   hasHistorical1550ColonialPort,
   computeColonyGrowthProfile,
+  INDIGENOUS_CULTURE_REGIONS,
+  UNINHABITED_PELAGIC_ISLANDS,
+  resolveIndigenousCultureRegion,
+  computeIndigenousSettlementProfile,
   PORT_PREFABS,
   COCONUT_PALM_GENOME_SPEC,
   coastalUberNoise2D,
@@ -988,12 +992,31 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   assert.equal(bostonPack.region.portType, 'wilderness-anchorage');
   assert.equal(bostonPack.port.hasColonialPort, false);
   assert.equal(bostonPack.port.settlementKind, 'wilderness-anchorage');
-  assert.equal(bostonPack.port.instances.length, 0, 'no Spanish bastions, piers, or colonial buildings placed in 1550 Boston');
-  assert.equal(bostonPack.port.clearRadius, 0, 'no circular cobblestone plaza or forest clearing around 1550 Boston');
-  assert.equal(bostonPack.portGeometry.instanceCount, 0);
-  assert.equal(bostonPack.portGeometry.triangleCount, 0);
+  assert.equal(bostonPack.port.colonialInstanceCount, 0, 'no Spanish bastions, piers, or colonial buildings placed in 1550 Boston');
+  assert.equal(bostonPack.port.hasIndigenousSettlement, true, '1550 Boston has a pre-epidemic New England Abenaki/Algonquian village');
+  assert.equal(bostonPack.port.indigenousSettlement.cultureId, 'abenaki-algonquian');
+  assert.ok(bostonPack.port.indigenousInstanceCount >= 5, '1550 Boston places birchbark wigwams, longhouses, and canoe landing');
+  assert.ok(bostonPack.port.instances.some(inst => inst.prefabId === 'abenaki_birchbark_wigwam'));
+  assert.equal(bostonPack.port.clearRadius, 0, 'no circular cobblestone plaza or colonial forest clearing around 1550 Boston');
+  assert.ok(bostonPack.portGeometry.instanceCount >= 5);
+  assert.ok(bostonPack.portGeometry.triangleCount > 100);
   assert.ok(bostonPack.port.berth.depth >= 4.5, 'wilderness coast still locates a safe natural anchorage berth');
   assert.ok(Number.isFinite(bostonPack.views.coast.x) && Number.isFinite(bostonPack.views.coast.z));
+
+  // Verify truly uninhabited pelagic islands (such as Bermuda in 1550) have neither colonial nor indigenous settlements
+  const bermudaPack = generateProceduralCoastalPack({
+    name: 'Bermuda',
+    latitude: 32.3078,
+    longitude: -64.7505,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 1200,
+  });
+  assert.equal(bermudaPack.port.hasColonialPort, false);
+  assert.equal(bermudaPack.port.hasIndigenousSettlement, false, 'Bermuda was uninhabited before 1609');
+  assert.equal(bermudaPack.port.instances.length, 0);
+  assert.equal(bermudaPack.portGeometry.instanceCount, 0);
 
   // Verify 1550 territory cache roundtrip preserves schemaVersion 2 & wilderness-anchorage metadata,
   // while legacy v1 cached payloads (from before wilderness gating) are rejected so flattened Plaza Mayor pads are not reused.
@@ -1001,12 +1024,14 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   assert.equal(upgradedBoston.territory1550.schemaVersion, 2);
   assert.equal(upgradedBoston.territory1550.hasColonialPort, false);
   assert.equal(upgradedBoston.territory1550.settlementKind, 'wilderness-anchorage');
-  assert.equal(upgradedBoston.port.instances.length, 0);
+  assert.equal(upgradedBoston.port.colonialInstanceCount, 0);
+  assert.equal(upgradedBoston.port.hasIndigenousSettlement, true);
 
   const v2Bytes = encode1550TerritoryCachePayload(upgradedBoston);
   const decodedV2 = apply1550TerritoryCachePayload(bostonPack, v2Bytes);
   assert.ok(decodedV2, 'schemaVersion 2 wilderness cache payload is accepted');
-  assert.equal(decodedV2.port.instances.length, 0);
+  assert.equal(decodedV2.port.colonialInstanceCount, 0);
+  assert.equal(decodedV2.port.hasIndigenousSettlement, true);
 
   const legacyPack = {
     ...upgradedBoston,
@@ -1073,7 +1098,8 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
   const boston1550 = generateProceduralCoastalPack({ ...bostonCoord, year: 1550, ...gridOpts });
   assert.equal(boston1550.region.hasColonialPort, false);
   assert.equal(boston1550.region.colonyGrowth.stage, 'wilderness');
-  assert.equal(boston1550.port.instances.length, 0);
+  assert.equal(boston1550.port.colonialInstanceCount, 0);
+  assert.equal(boston1550.port.hasIndigenousSettlement, true);
   assert.equal(boston1550.port.fortificationTier, 0);
 
   const boston1632 = generateProceduralCoastalPack({ ...bostonCoord, year: 1632, ...gridOpts });
@@ -1152,6 +1178,126 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
   }
   assert.equal(seen1550.has('buccaneer-sloop'), false, 'no 17th-century buccaneer sloops in 1550');
   assert.equal(seen1675.has('buccaneer-sloop'), true, 'buccaneer sloops appear in Caribbean by 1675');
+});
+
+test('Native American settlements, regional structures, demographic collapse timelines (1492–1689), and 3D male/female models', async () => {
+  const { getBuildingParts } = await import('../js/coastal-world.js');
+  const { loadCrewGLB } = await import('../js/gltf.js');
+  const {
+    INDIGENOUS_VILLAGE_PREFAB_IDS,
+    buildIndigenousCrewModel,
+    createIndigenousCrewModels,
+    createFortGarrison,
+    createCompany,
+  } = await import('../js/crew.js');
+
+  assert.equal(INDIGENOUS_CULTURE_REGIONS.length, 9, 'all 9 regional Native American culture zones defined');
+  assert.equal(INDIGENOUS_VILLAGE_PREFAB_IDS.length, 11, 'all 11 Native American architectural prefabs registered');
+
+  // 1. Verify all 11 Native American 3D architectural prefabs build non-empty geometry and part decompositions
+  for (const prefabId of INDIGENOUS_VILLAGE_PREFAB_IDS) {
+    assert.ok(PORT_PREFABS[prefabId], `PORT_PREFABS includes ${prefabId}`);
+    const bparts = getBuildingParts(prefabId);
+    assert.ok(bparts.groups.length >= 2, `${prefabId} decomposes into multiple structural parts`);
+    for (const part of bparts.partAssembly.parts) {
+      assert.ok(part.totalTriangleCount > 0, `${prefabId}/${part.id} has valid 3D mesh geometry`);
+    }
+  }
+
+  // 2. Taíno Greater Antilles demographic trajectory: dense cacicazgos in 1492 vs rapid post-conquest collapse by 1550
+  const xaragua1492 = computeIndigenousSettlementProfile({ latitude: 18.52, longitude: -72.34 }, 1492);
+  const xaragua1550 = computeIndigenousSettlementProfile({ latitude: 18.52, longitude: -72.34 }, 1550);
+  assert.equal(xaragua1492.cultureId, 'taino-greater-antilles');
+  assert.equal(xaragua1492.hasIndigenousSettlement, true);
+  assert.ok(xaragua1492.retention >= 0.90, 'Taíno population at peak in 1492');
+  assert.ok(xaragua1492.buildingCount >= 8, '1492 Taíno cacicazgo places full caney, bohíos, and batey court');
+  assert.ok(xaragua1492.prefabs.includes('taino_cacique_caney'));
+  assert.ok(xaragua1492.prefabs.includes('taino_circular_bohio'));
+  assert.ok(xaragua1492.prefabs.includes('taino_batey_court'));
+  assert.ok(xaragua1550.retention <= 0.12, 'Taíno population collapsed rapidly by 1550');
+
+  // 3. New England Abenaki / Massachusett / Wampanoag timeline:
+  // Dense pre-epidemic villages (1492–1615) -> 1616–1619 epidemic -> post-1620 colonial co-option in Massachusetts,
+  // while northern Abenaki homelands in Maine remain active Native American settlements into the mid-17th century.
+  const mass1550 = computeIndigenousSettlementProfile({ latitude: 42.3601, longitude: -71.0589 }, 1550);
+  const mass1614 = computeIndigenousSettlementProfile({ latitude: 42.3601, longitude: -71.0589 }, 1614);
+  const mass1619 = computeIndigenousSettlementProfile({ latitude: 42.3601, longitude: -71.0589 }, 1619);
+  const mass1635 = computeIndigenousSettlementProfile({ latitude: 42.3601, longitude: -71.0589 }, 1635);
+  assert.equal(mass1550.cultureId, 'abenaki-algonquian');
+  assert.equal(mass1550.hasIndigenousSettlement, true);
+  assert.ok(mass1550.retention >= 0.90 && mass1614.retention >= 0.85, 'New England Native American villages thrive prior to 1616');
+  assert.ok(mass1550.prefabs.includes('abenaki_birchbark_wigwam'));
+  assert.ok(mass1550.prefabs.includes('algonquian_longhouse'));
+  assert.ok(mass1619.retention < 0.45, '1616–1619 Great Dying epidemic sharply reduces coastal Massachusetts population');
+  assert.equal(mass1635.hasIndigenousSettlement, false, 'post-1620 colonial port co-opts Boston Harbor by 1635');
+
+  const maineAbenaki1645 = computeIndigenousSettlementProfile({ latitude: 43.92, longitude: -69.65 }, 1645);
+  assert.equal(maineAbenaki1645.cultureId, 'abenaki-algonquian');
+  assert.equal(maineAbenaki1645.hasIndigenousSettlement, true, 'northern Abenaki villages in Maine persist in 1645');
+  assert.ok(maineAbenaki1645.prefabs.includes('abenaki_birchbark_wigwam'));
+
+  // 4. Kalinago Lesser Antilles, Maya Yucatán, Tupinambá Brazil, and Maracaibo Palafitos
+  const dominica1620 = computeIndigenousSettlementProfile({ latitude: 15.41, longitude: -61.37 }, 1620);
+  assert.equal(dominica1620.cultureId, 'kalinago-lesser-antilles');
+  assert.equal(dominica1620.hasIndigenousSettlement, true);
+  assert.ok(dominica1620.retention >= 0.75, 'Kalinago stronghold islands retain strong population through 1620');
+  assert.ok(dominica1620.prefabs.includes('kalinago_carbet_hall'));
+
+  const tulum1518 = computeIndigenousSettlementProfile({ latitude: 20.21, longitude: -87.46 }, 1518);
+  assert.equal(tulum1518.cultureId, 'maya-mesoamerica-coast');
+  assert.equal(tulum1518.hasIndigenousSettlement, true);
+  assert.ok(tulum1518.prefabs.includes('maya_limestone_shrine_and_na'));
+
+  const bahia1510 = computeIndigenousSettlementProfile({ latitude: -16.40, longitude: -39.05 }, 1510);
+  assert.equal(bahia1510.cultureId, 'tupinamba-brazil-guiana');
+  assert.equal(bahia1510.hasIndigenousSettlement, true);
+  assert.ok(bahia1510.prefabs.includes('tupinamba_oca_longhouse'));
+
+  const maracaibo1505 = computeIndigenousSettlementProfile({ latitude: 10.65, longitude: -71.60 }, 1505);
+  assert.equal(maracaibo1505.cultureId, 'tierra-firme-carib-arawak');
+  assert.equal(maracaibo1505.hasIndigenousSettlement, true);
+  assert.ok(maracaibo1505.prefabs.includes('palafito_estuary_village'));
+
+  // 5. Native American male & female 3D character models and shore village garrison
+  const maleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor.glb').buffer);
+  const femaleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-female.glb').buffer);
+  const [indigMale, indigFemale] = createIndigenousCrewModels([maleBase, femaleBase]);
+
+  assert.equal(indigMale.sex, 'male');
+  assert.equal(indigMale.indigenous, true);
+  assert.equal(indigMale.modelVariant, 'indigenous-male');
+  assert.ok(indigMale.vertexCount > maleBase.vertices.byteLength / 60, 'indigenous male model appends 3D headband, feathers, braids, and pectoral collar');
+  assert.ok(indigMale.accessoryTriangleCount >= 80);
+  assert.equal(indigMale.lods.length, 3);
+
+  assert.equal(indigFemale.sex, 'female');
+  assert.equal(indigFemale.indigenous, true);
+  assert.equal(indigFemale.modelVariant, 'indigenous-female');
+  assert.ok(indigFemale.vertexCount > femaleBase.vertices.byteLength / 60, 'indigenous female model appends 3D headband, feathers, braids, and pectoral collar');
+  assert.ok(indigFemale.accessoryTriangleCount >= 80);
+  assert.equal(indigFemale.lods.length, 3);
+
+  // Verify shore villagers populate Native American settlements with both male and female models
+  const boston1550Pack = generateProceduralCoastalPack({
+    name: 'Shawmut Peninsula',
+    latitude: 42.3601,
+    longitude: -71.0589,
+    year: 1550,
+    size: 65,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 900,
+  });
+  const villageGarrison = createFortGarrison(boston1550Pack.port);
+  assert.ok(villageGarrison.soldiers.length >= 10, 'Native American village spawns shore villagers around wigwams and longhouses');
+  assert.ok(villageGarrison.soldiers.every(s => s.indigenous === true));
+  assert.ok(villageGarrison.soldiers.some(s => s.sex === 'male' && s.modelVariant === 'indigenous-male'));
+  assert.ok(villageGarrison.soldiers.some(s => s.sex === 'female' && s.modelVariant === 'indigenous-female'));
+
+  // Verify Taíno dugout canoe company uses indigenous crew appearance and equal strength
+  const canoeCompany = createCompany(undefined, 'taino-canoe');
+  assert.equal(canoeCompany.indigenousAttire, true);
+  assert.ok(canoeCompany.crew.every(s => s.indigenous === true && s.attireTheme === 'indigenous' && s.strength === 1.0));
 });
 
 
