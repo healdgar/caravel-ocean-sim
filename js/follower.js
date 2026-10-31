@@ -252,7 +252,9 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
     const mastCap=boat.damage?.sunk?0:mInt*(mState>=2?0:mState===1?0.42:1);
     let desired=0;
     if(activeKeys.includes(key)&&!orderFurl){
-      if(orderedSails&&(state.captainOrder==='weather'||state.captainOrder==='reduced')){
+      if(orderedSails&&state.captainOrder==='full'){
+        desired=separation<minCanvasDist?0.05:orderedSails[i];
+      }else if(orderedSails&&(state.captainOrder==='weather'||state.captainOrder==='reduced')){
         desired=orderedSails[i];
       }else{
         desired=!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas;
@@ -454,6 +456,7 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   }
 
   if(faction==='enemy'){
+    boat.aiGunneryAttended=true;
     if(boat.battleColors&&boat.colors!==boat.battleColors&&boat.colors!=='surrender'){
       boat.colors=boat.battleColors;
     }
@@ -476,8 +479,12 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
       return {action:'stand-down',reason:'no-target'};
     }
     const aim=selectBroadsideFacingTarget(boat,nearestTarget);
+    if(follower&&!follower.combatInitialized){
+      follower.combatInitialized=true;
+      gunnery.readyAtQuarters?.(aim.side);
+    }
     gunnery.setElevation?.(aimElevationForRange(boat,nearestTarget,aim.distance));
-    if(gunnery.isSwivelBattery)gunnery.trainOnTarget?.(aim.side);
+    gunnery.trainOnTarget?.(aim.side);
     const summary=gunnery.summary(aim.side);
     // Automatically prepare or reload the broadside bearing on the target.
     if(!gunnery.ordered&&!gunnery.state.queue.length){
@@ -485,7 +492,7 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
         gunnery.prepare(aim.side);
       }
     }
-    const maxForeRatio=gunnery.isSwivelBattery?0.98:0.58;
+    const maxForeRatio=gunnery.isSwivelBattery?0.98:0.78;
     const inArc=aim.distance<=maxRange&&aim.foreRatio<=maxForeRatio;
     const blockedByAlly=isFriendlyInLineOfFire(boat,aim.side,enemyAllies,aim.distance);
     const delayDone=!follower||!(follower.salvoDelay>0);
@@ -494,7 +501,7 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
         gunnery.fire(aim.side);
         return {action:'fire',side:aim.side,distance:aim.distance};
       }
-      if(gunnery.canFireLoaded(aim.side)&&summary.loading===0&&summary.ready>=Math.max(1,Math.ceil(summary.total*0.5))){
+      if(gunnery.canFireLoaded(aim.side)&&summary.ready>=Math.max(1,Math.ceil(summary.total*0.5))){
         gunnery.fireLoaded(aim.side);
         return {action:'fire-loaded',side:aim.side,distance:aim.distance};
       }
@@ -503,6 +510,7 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   }
 
   // Friendly vessel combat & queued captain gunnery orders
+  if(follower)boat.aiGunneryAttended=true;
   const friendlyAllies=[];
   let nearestEnemy=null,nearestEnemyDist=Infinity;
   for(const other of vessels){

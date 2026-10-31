@@ -69,7 +69,7 @@ import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
-import { cameraModeFromLink, propulsionFromLink, createShareLink, ROUGH_SEAS } from './sharing.js';
+import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
@@ -83,6 +83,26 @@ import { OCEAN_LIGHTING, withCachedOceanLighting } from './wgsl/ocean-lighting.j
 import { BLOOM_DOWN, BLOOM_UP, COMPOSITE, createUnderwaterPost } from './wgsl/post.js';
 
 const qs = new URLSearchParams(location.search);
+const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
+if (urlGameState) {
+  const backfill = (k, v) => { if (v !== undefined && v !== null && !qs.has(k)) qs.set(k, String(v)); };
+  const p = urlGameState.pos, s = urlGameState.ship, v = urlGameState.voyage;
+  if (p) {
+    backfill('lat', p.lat); backfill('lon', p.lon); backfill('drLat', p.drLat); backfill('drLon', p.drLon);
+    backfill('region', p.region); backfill('boatX', p.x); backfill('boatZ', p.z);
+    backfill('boatHeading', p.heading); backfill('boatSpeed', p.speed); backfill('boatRudder', p.rudder);
+  }
+  if (s) {
+    backfill('ship', s.id); backfill('colors', s.colors); backfill('station', s.station);
+    backfill('propulsion', s.propulsion); backfill('provisionDays', s.provisionDays); backfill('cargoTonnes', s.cargoTonnes);
+    if (Array.isArray(s.sails)) {
+      backfill('sailFore', s.sails[0]); backfill('sailMain', s.sails[1]); backfill('sailMizzen', s.sails[2]);
+    }
+  }
+  if (v) {
+    backfill('canvas', v.canvas); backfill('course', v.course); backfill('warp', v.warp);
+  }
+}
 const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
 const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
 const astronomy=createAstronomyClock(qs,{x:Number(qs.get('boatX'))||0,z:Number(qs.get('boatZ'))||0});
@@ -1708,15 +1728,112 @@ async function main() {
   closeShare.onclick = () => { setShareOpen(false); shareButton.focus(); };
   const shareStatus = document.createElement('span'); shareStatus.setAttribute('role', 'status');
   sharePanel.append(shareInput, closeShare, shareStatus);
+  const buildShareCameraPayload = () => {
+    const v = voyageCtl?.voyage;
+    const tRegion = terrain?.region;
+    const geo = tRegion ? islandCoordinates(boat.x, boat.z, tRegion) : null;
+    const lat = Number.isFinite(v?.truePos?.lat) ? v.truePos.lat : Number.isFinite(geo?.latitude) ? geo.latitude : astronomy.state?.observer?.latitude;
+    const lon = Number.isFinite(v?.truePos?.lon) ? v.truePos.lon : Number.isFinite(geo?.longitude) ? geo.longitude : astronomy.state?.observer?.longitude;
+    const drLat = Number.isFinite(v?.dr?.lat) ? v.dr.lat : lat;
+    const drLon = Number.isFinite(v?.dr?.lon) ? v.dr.lon : lon;
+    const num = (n, d = 4) => Number.isFinite(n) ? Number(n.toFixed(d)) : undefined;
+    const vInfo = {
+      lat: num(lat, 5),
+      lon: num(lon, 5),
+      drLat: num(drLat, 5),
+      drLon: num(drLon, 5),
+      region: tRegion?.id ?? (qs.get('region') || undefined),
+      canvas: v?.canvas,
+      course: num(v?.compassCourse, 1),
+      warp: v?.tier,
+      autopilot: Boolean(voyageCtl?.helmsman?.engaged),
+      day: v?.dayAtSea,
+    };
+    const dmg = boat.damage;
+    const encVessel = vessels[1];
+    const encActive = Boolean(encVessel && !encVessel.dormantEncounter && encVessel.boat?.showProw);
+    const gameState = {
+      v: 1,
+      pos: {
+        lat: num(lat, 5),
+        lon: num(lon, 5),
+        drLat: num(drLat, 5),
+        drLon: num(drLon, 5),
+        x: num(boat.x, 2),
+        z: num(boat.z, 2),
+        heading: num(boat.heading, 2),
+        speed: num(boatForwardSpeed(boat) / KNOT_TO_MPS, 2),
+        rudder: num(boat.rudderTarget, 1),
+        region: vInfo.region,
+      },
+      ship: {
+        id: boat.modelId ?? 'nina',
+        colors: boat.colors ?? DEFAULT_SHIP_COLORS,
+        station: boat.viewStation ?? 'deck',
+        propulsion: boat.propulsion ?? 'sail',
+        sails: SAIL_KEYS.map(k => num(boat[k], 2)),
+        set: (boat.sailState?.set ? Array.from(boat.sailState.set) : SAIL_KEYS.map(k => boat[k])).map(val => num(val, 2)),
+        provisionDays: num(boat.provisionDays, 1),
+        cargoTonnes: num(boat.cargoTonnes, 1),
+      },
+      voyage: v ? {
+        active: !v.passive,
+        day: v.dayAtSea,
+        dateMs: Math.round(v.dateMs),
+        canvas: v.canvas,
+        course: num(v.compassCourse, 1),
+        warp: v.tier,
+        autopilot: Boolean(voyageCtl?.helmsman?.engaged),
+        beat: Boolean(voyageCtl?.helmsman?.beatToWind),
+        waterDays: num(v.stores?.waterDays, 1),
+        foodDays: num(v.stores?.foodDays, 1),
+        hull: num(v.ship?.hull, 3),
+        morale: num(v.crew?.morale, 3),
+      } : undefined,
+      damage: dmg ? {
+        hullIntegrity: num(dmg.hullIntegrity, 3),
+        battleMorale: num(dmg.battleMorale, 3),
+        surrendered: Boolean(dmg.surrendered),
+        sunk: Boolean(dmg.sunk),
+        casualties: dmg.crewCasualties ? {
+          total: dmg.crewCasualties.total,
+          able: dmg.crewCasualties.able,
+          wounded: dmg.crewCasualties.wounded,
+          killed: dmg.crewCasualties.killed,
+        } : undefined,
+      } : undefined,
+      encounter: encActive ? {
+        name: encVessel.boat.shipName,
+        faction: encVessel.faction,
+        colors: encVessel.boat.colors,
+        x: num(encVessel.boat.x, 1),
+        z: num(encVessel.boat.z, 1),
+        heading: num(encVessel.boat.heading, 1),
+        surrendered: Boolean(encVessel.boat.damage?.surrendered),
+      } : undefined,
+    };
+    return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
+  };
+  let lastUrlSyncMs = 0;
+  const syncBrowserUrlState = (now = performance.now(), force = false) => {
+    if (IS_HEADLESS_TEST && !force) return;
+    if (!force && now - lastUrlSyncMs < 4000) return;
+    lastUrlSyncMs = now;
+    try {
+      const url = createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload());
+      history.replaceState(null, '', url);
+      if (!sharePanel.hidden) shareInput.value = url;
+    } catch { /* standalone file */ }
+  };
   shareButton.onclick = async () => {
-    const url = createShareLink(location.href, P, boat, cameraMode,{cam,orbit:shipOrbit,astronomy:astronomy.share()});
+    const url = createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload());
     setPanelOpen(false);setBoatOpen(false);setCaptainOpen(false);setCameraOpen(false);landfallUI.close();
     setShareOpen(true); shareInput.value = url;
     // Also leave a shareable address in the browser if clipboard access is unavailable.
-    try { history.replaceState(null, '', url); } catch { /* standalone file */ }
+    try { history.replaceState(null, '', url); lastUrlSyncMs = performance.now(); } catch { /* standalone file */ }
     try {
       await navigator.clipboard.writeText(url);
-      shareStatus.textContent = 'Link copied. It includes the sea, lighting, boat, and camera mode settings.';
+      shareStatus.textContent = 'Link copied. It includes position, ship, voyage state, sea, lighting, and camera settings.';
     } catch {
       shareInput.focus(); shareInput.select();
       shareStatus.textContent = 'Select and copy this link to share your settings.';
@@ -1784,15 +1901,20 @@ async function main() {
       target.faction=isHostile?'enemy':'friendly';
       if(target.follower){
         target.follower.faction=target.faction;
+        target.follower.combatInitialized=false;
         if(mode==='hail'){
           const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
           target.follower.formation={trail:0.12,side:sideSign*2.2};
           target.follower.status=`Hailed (${enc?.shipName||'Consort'})`;
+        }else if(mode==='engage'){
+          target.follower.salvoDelay=1.2;
+          target.follower.status=`Engaging (${enc?.shipName||'Corsair'})`;
         }
       }
       if(target.boat){
         target.boat.showProw=true;
         target.boat.faction=target.faction;
+        target.boat.aiGunneryAttended=true;
         target.boat.shipName=enc?.shipName??enc?.archetype?.title??'Strange Sail';
         target.boat.battleColors=enc?.battleColors??(enc?.actuallyHostile?'jolly-roger':(enc?.colors??'castile'));
         const chosenColors=mode==='engage'&&enc?.actuallyHostile
@@ -1809,13 +1931,24 @@ async function main() {
         const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
         const brgRad=mode==='hail'
           ?((boat.heading+sideSign*78)*Math.PI)/180
+          :mode==='engage'
+          ?((boat.heading+sideSign*68)*Math.PI)/180
           :((enc?.bearingDeg??(boat.heading+sideSign*30))*Math.PI)/180;
-        const distM=mode==='hail'?52:mode==='engage'?260:420;
+        const distM=mode==='hail'?52:mode==='engage'?165:420;
         target.boat.x=boat.x+Math.sin(brgRad)*distM;
         target.boat.z=boat.z-Math.cos(brgRad)*distM;
-        target.boat.heading=mode==='hail'?boat.heading:((boat.heading+160)%360+360)%360;
+        target.boat.heading=mode==='hail'
+          ?boat.heading
+          :mode==='engage'
+          ?((boat.heading-sideSign*22)%360+360)%360
+          :((boat.heading+160)%360+360)%360;
         target.boat.surgeVelocity=mode==='hail'?(boat.surgeVelocity??2.5):2.8;
         target.boat.revision=(target.boat.revision??0)+1;
+        if(mode==='engage'&&isHostile&&target.gunnery){
+          const initialSide=sideSign<0?'starboard':'port';
+          target.gunnery.readyAtQuarters?.(initialSide);
+          if(target.follower)target.follower.combatInitialized=true;
+        }
         if(mode==='hail'||mode==='engage'){
           const dx=target.boat.x-boat.x,dz=target.boat.z-boat.z;
           const worldAngle=Math.atan2(dx,-dz);
@@ -1834,6 +1967,28 @@ async function main() {
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
       onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail'}),
       onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage'}),
+      onCanvasOrder:id=>{
+        shipGuns.standDown();
+        const crewOrder=id==='full'?'full':id==='reefed'?'reduced':id==='storm'?'weather':id==='heave-to'?'furl':'watch';
+        const savedTargets=SAIL_KEYS.map(k=>boat[k]);
+        crew?.order(boat,crewOrder);
+        if(id==='working'||id==='heave-to'){
+          for(let i=0;i<SAIL_KEYS.length;i++)boat[SAIL_KEYS[i]]=savedTargets[i];
+        }
+        commandFriendlyFleet(vessels,{type:'crew',id:crewOrder},{anchorEnv:anchorEnvironment});
+        if(typeof propulsionInput!=='undefined'&&propulsionInput)propulsionInput.value=boat.propulsion;
+        if(typeof sailInputs!=='undefined'&&sailInputs.length){
+          for(const [i,key] of SAIL_KEYS.entries()){
+            if(sailInputs[i]){
+              sailInputs[i].input.value=boat[key]*100;
+              sailInputs[i].output.textContent=Math.round(boat[key]*100)+'%';
+            }
+          }
+        }
+        if(typeof showPropulsionControls==='function')showPropulsionControls();
+        updateCrewUI();
+        helm?.update?.(performance.now(),true);
+      },
       regionLatLon:(t,x,z)=>islandCoordinates(x,z,t.region),
       onSpectrum:()=>{needSpectrum=true;},
       onEnv:()=>{envFull=true;},
@@ -1864,6 +2019,76 @@ async function main() {
     if(qs.get('voyage')==='resume'||(qs.get('voyage')==='1'&&voyageCtl.hasSavedVoyage()&&qs.get('newVoyage')!=='1'))voyageCtl.resume()||voyageCtl.start();
     else if(qs.get('voyage')==='1')voyageCtl.start({difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     else voyageCtl.start({passive:true,showHud:qs.get('ui')!=='0',difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
+    // Restore URL-encoded position, ship colors, view station, voyage state, damage, and active encounter
+    if(qs.has('colors')&&SHIP_COLORS[qs.get('colors')]){
+      setVesselColors(boat,qs.get('colors'));
+      if(colorsSelect)colorsSelect.value=boat.colors;
+    }
+    if(qs.has('station')){
+      setBoatViewStation(boat,qs.get('station'));
+    }
+    if(voyageCtl.voyage){
+      const v=voyageCtl.voyage;
+      const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
+      if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
+        v.truePos.lat=qLat;v.truePos.lon=qLon;
+        v.dr.lat=qs.has('drLat')&&Number.isFinite(Number(qs.get('drLat')))?Number(qs.get('drLat')):qLat;
+        v.dr.lon=qs.has('drLon')&&Number.isFinite(Number(qs.get('drLon')))?Number(qs.get('drLon')):qLon;
+      }
+      if(urlGameState?.voyage){
+        const uv=urlGameState.voyage;
+        if(Number.isFinite(uv.day))v.dayAtSea=uv.day;
+        if(Number.isFinite(uv.dateMs))v.dateMs=uv.dateMs;
+        if(uv.stores||Number.isFinite(uv.waterDays)){
+          if(Number.isFinite(uv.waterDays))v.stores.waterDays=uv.waterDays;
+          if(Number.isFinite(uv.foodDays))v.stores.foodDays=uv.foodDays;
+        }
+        if(Number.isFinite(uv.hull))v.ship.hull=uv.hull;
+        if(Number.isFinite(uv.morale))v.crew.morale=uv.morale;
+      }
+      if(qs.has('canvas')&&['full','working','reefed','storm','heave-to'].includes(qs.get('canvas'))){
+        voyageCtl.orderCanvas(qs.get('canvas'));
+      }
+      if(qs.has('course')&&Number.isFinite(Number(qs.get('course')))){
+        if(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot){
+          voyageCtl.orderCompassCourse(Number(qs.get('course')));
+        }else{
+          v.compassCourse=((Number(qs.get('course'))%360)+360)%360;
+        }
+      }
+      if(qs.has('warp')&&['deck','watch','passage','crossing'].includes(qs.get('warp'))&&qs.get('warp')!=='deck'){
+        voyageCtl.setWarp(qs.get('warp'));
+      }
+    }
+    if(urlGameState?.ship?.set&&Array.isArray(urlGameState.ship.set)&&boat.sailState?.set){
+      for(let i=0;i<Math.min(3,urlGameState.ship.set.length);i++){
+        if(Number.isFinite(urlGameState.ship.set[i]))boat.sailState.set[i]=urlGameState.ship.set[i];
+      }
+    }
+    if(urlGameState?.damage&&boat.damage){
+      const ud=urlGameState.damage;
+      if(Number.isFinite(ud.hullIntegrity))boat.damage.hullIntegrity=ud.hullIntegrity;
+      if(Number.isFinite(ud.battleMorale))boat.damage.battleMorale=ud.battleMorale;
+      if(ud.surrendered)strikeVesselColors(boat,'Restored surrendered state');
+      if(ud.casualties&&boat.damage.crewCasualties){
+        Object.assign(boat.damage.crewCasualties,ud.casualties);
+      }
+    }
+    if(urlGameState?.encounter&&vessels[1]){
+      const ue=urlGameState.encounter;
+      activateEncounterVessel({
+        shipName:ue.name,
+        actuallyHostile:ue.faction==='enemy',
+        apparentHostile:ue.faction==='enemy',
+        colors:ue.colors,
+        battleColors:ue.colors,
+      },{mode:ue.faction==='enemy'?'engage':'hail'});
+      if(Number.isFinite(ue.x))vessels[1].boat.x=ue.x;
+      if(Number.isFinite(ue.z))vessels[1].boat.z=ue.z;
+      if(Number.isFinite(ue.heading))vessels[1].boat.heading=ue.heading;
+      if(ue.surrendered)strikeVesselColors(vessels[1].boat,'Surrendered');
+    }
+    updateCrewUI();
     window.oceanVoyage=voyageCtl;
   }
   performanceButton=document.createElement('button');performanceButton.id='performance-toggle';performanceButton.type='button';performanceButton.className='icon-button';
@@ -2025,11 +2250,21 @@ async function main() {
     const order=value===1?'full':value===0?'furl':'reduced';
     shipGuns.standDown();
     if(!crew?.order(boat,order)){boat.propulsion='sail';for(const key of SAIL_KEYS)boat[key]=value;}
+    if(voyageCtl?.voyage){
+      const vCanvas=value===1?'full':value===0?'heave-to':'reefed';
+      voyageCtl.voyage.canvas=vCanvas;
+      const vSel=voyageCtl.hud?.querySelector?.('select');
+      if(vSel)vSel.value=vCanvas;
+    }
     commandFriendlyFleet(vessels,{type:'crew',id:order},{anchorEnv:anchorEnvironment});
     sceneAudio.order(order,{boat});
     propulsionInput.value=boat.propulsion;
-    for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;
+    for(const [i,key] of SAIL_KEYS.entries()){
+      sailInputs[i].input.value=boat[key]*100;
+      sailInputs[i].output.textContent=Math.round(boat[key]*100)+'%';
+    }
     showPropulsionControls();updateCrewUI();
+    syncBrowserUrlState(performance.now(),true);
   },()=>{propulsionInput.value=boat.propulsion;showPropulsionControls();},{
     gunnery:shipGuns,
     anchor,
@@ -2855,6 +3090,7 @@ async function main() {
     },()=>{p.pending=false;});}}
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
+    syncBrowserUrlState(now);
     frameWorkMs=performance.now()-cpuFrameStart;
   }
 

@@ -454,7 +454,7 @@ function assignGunCrew(company,boat){
   for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side).slice(0,limit))selected.add(gun.id);
   for(const gun of weather)gun.visibleCrew=selected.has(gun.id);
   const targets=guns.filter(g=>selected.has(g.id)&&g.side===boat.gunnerySide);
-  const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery');
+  const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');
   for(const s of company.crew){
     const j=s.job;
     if(j?.kind==='gunnery'&&!['return','waiting-return'].includes(j.stage)&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
@@ -463,6 +463,7 @@ function assignGunCrew(company,boat){
     else if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&j.stage==='approach')startReturn(s,boat,company);
     else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat,company);
   }
+  company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery'&&!['return','waiting-return'].includes(s.job.stage));
   if(!active)return;
   const onDeck=s=>(s.job?.rung??0)<=0&&Math.abs(s.x)+.26/(boat.beam/3.6)<=modelDeckWidth(boat,s.z);
   const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&(!s.job||(onDeck(s)&&(['return','waiting-return'].includes(s.job.stage)||s.job.kind==='yield'))));
@@ -641,44 +642,83 @@ function crewProceduralTask(company,boat,s,job,target){
   retries.delete(key);
   s.home??=[s.x,s.z];s.job={...job,stage:'approach',elapsed:0,rung:0,revision:company.revision,path,cursor:0};s.intent='work';s.work=0;return true;
 }
+function effectiveSailTarget(boat,i){
+  const mGroup=['fore','main','mizzen'][i];
+  const mastInt=boat.damage?.sunk?0:workClamp(boat.damage?.mastIntegrity?.[mGroup]??1,0,1);
+  const mState=boat.damage?.mastState?.[mGroup]??0;
+  const stateCap=mState>=2?0:mState===1?.42:1;
+  const mastCap=mastInt*stateCap;
+  const requested=workClamp(boat[SAIL_KEYS[i]]??1,0,1);
+  return Math.min(requested,mastCap)*(0.25+0.75*mastCap);
+}
 function assignProceduralCrewWork(company,boat){
   const d=proceduralDesign(boat.modelId),context=crewExtendedContext(d.id),model=requirePlayableShipModel(d.id),sails=sailingState(boat),solo=company.crew.length===1;
   const controls=crewWorkControls.map((name,index)=>({name,index,surfaces:d.surfaces.filter(s=>s.controlGroup===name)})).filter(c=>c.surfaces.length);
   boat.crewSailRate??=new Float64Array(3);boat.crewRigRate??=new Float64Array(3);boat.crewSailRate.fill(0);boat.crewRigRate.fill(0);
+  for(const s of company.crew){
+    if(s.casualtyState==='fallen'){s.job=null;continue;}
+    const j=s.job;if(!j)continue;
+    if(j.kind==='rig'&&j.stage==='descending'&&Math.abs(effectiveSailTarget(boat,j.control)-sails.set[j.control])>1e-6){
+      j.stage='ascending';j.elapsed=0;
+    }else if((j.rung??0)<=0&&['return','waiting-return'].includes(j.stage)&&controls.some(c=>Math.abs(effectiveSailTarget(boat,c.index)-sails.set[c.index])>1e-6)){
+      s.job=null;
+    }
+  }
   // A helmsman stays with the steering blade on crewed craft. A solo sailor can
   // secure the tiller, do one deck job, then physically return to her helm.
-  const free=()=>company.crew.filter(s=>s.casualtyState!=='fallen'&&!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>Number(!!a.stationId)-Number(!!b.stationId));
+  const free=targetPoint=>{
+    const worldTarget=targetPoint?physical(targetPoint,boat):null;
+    return company.crew.filter(s=>s.casualtyState!=='fallen'&&!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>{
+      const stationDiff=Number(!!a.stationId)-Number(!!b.stationId);
+      if(stationDiff)return stationDiff;
+      if(!worldTarget)return 0;
+      return distance3(a.position,worldTarget)-distance3(b.position,worldTarget);
+    });
+  };
   if(company.order==='weather'&&(boat.hatchesClosed??0)<.999&&model.nodes['station.hatch']&&!company.crew.some(s=>s.job?.kind==='hatch')){
     const target=resolveShipNode(boat,'station.hatch',{space:'design'});
-    for(const s of free())if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
+    for(const s of free(target))if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
   }
-  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
   for(const control of controls){
-    if(Math.abs(Math.min(boat[SAIL_KEYS[control.index]]??1,mastCap(control.index))-sails.set[control.index])<=1e-6)continue;
+    const targetSet=effectiveSailTarget(boat,control.index);
+    if(Math.abs(targetSet-sails.set[control.index])<=1e-6)continue;
     const station=context.controlStations?.[control.name];if(!station)continue;
     const mast=station.mast??control.surfaces[0].mast,runner='mast.'+crewMastName(boat,mast)+'.runner';
     const climbing=!solo&&control.surfaces.some(s=>s.kind==='square')&&(model.nodes[runner]?.motion?.rungs??0)>0;
     for(const kind of climbing?['haul','rig']:['haul']){
       if(company.crew.some(s=>s.job?.control===control.index&&s.job.kind===kind))continue;
       const side=1,target=kind==='haul'?station.position:climbRoot(mast,side,0,boat);
-      for(const s of free())if(crewProceduralTask(company,boat,s,{kind,control:control.index,mast,side,controlGroup:control.name},target))break;
+      for(const s of free(target))if(crewProceduralTask(company,boat,s,{kind,control:control.index,mast,side,controlGroup:control.name},target))break;
     }
     const ready=company.crew.filter(s=>s.job?.control===control.index&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard);
-    const hauling=ready.some(s=>s.job.kind==='haul');boat.crewRigRate[control.index]=Number(hauling);boat.crewSailRate[control.index]=Number(hauling&&(!climbing||ready.some(s=>s.job.kind==='rig')));
+    const hauling=ready.some(s=>s.job.kind==='haul');
+    const raising=targetSet>sails.set[control.index]+1e-6;
+    boat.crewRigRate[control.index]=Number(hauling);
+    boat.crewSailRate[control.index]=Number(hauling&&(!climbing||raising||ready.some(s=>s.job.kind==='rig')));
   }
   updateCrewRowingAttendance(company,boat);
 }
 export function assignCrewWork(company,boat) {
   if(hasExtendedCrewModel(boat.modelId)){assignProceduralCrewWork(company,boat);return;}
-  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
-  const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs(Math.min(boat[key]??1,mastCap(i))-sails.set[i])>.008);
+  const sails=sailingState(boat),needs=SAIL_KEYS.map((_,i)=>Math.abs(effectiveSailTarget(boat,i)-sails.set[i])>.008);
   company.workTime??=0;
   assignGunCrew(company,boat);
   for(const s of company.crew){
     s.home??=[s.x,s.z];
     if(s.casualtyState==='fallen'){s.job=null;continue;}
-    if(s.job)continue;
     if(company.gunneryActive||boat.damage?.surrendered)continue;
+    if(s.job){
+      const j=s.job;
+      if(j.kind==='rig'&&j.stage==='descending'&&needs[j.mast]&&!sails.maneuver){
+        j.stage='ascending';j.elapsed=0;continue;
+      }
+      if((j.rung??0)<=0&&(['return','waiting-return'].includes(j.stage)||j.kind==='yield')){
+        const wantsClimb=CLIMBERS[s.id]&&needs[CLIMBERS[s.id][0]]&&!sails.maneuver;
+        const wantsHaul=HANDS[s.id]!==undefined&&(needs[HANDS[s.id]]||sails.maneuver);
+        const wantsHatch=s.id==='rui'&&company.order==='weather'&&(boat.hatchesClosed??0)<.999;
+        if(wantsClimb||wantsHaul||wantsHatch){s.job=null;}else continue;
+      }else continue;
+    }
     let job;
     if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
       const [mast]=CLIMBERS[s.id],side=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
@@ -699,6 +739,27 @@ export function assignCrewWork(company,boat) {
     if(!job.path){s.navigationRetryAt=company.workTime+1;continue;}
     job.cursor=0;s.job=job;s.intent='work';s.work=0;
   }
+  // Fallback assignment if a primary haul/rig sailor is fallen in action.
+  if(!company.gunneryActive&&!boat.damage?.surrendered){
+    for(let mast=0;mast<3;mast++){
+      if(!(needs[mast]||sails.maneuver))continue;
+      const surfaces=ADDITIONAL_DESIGNS[boat.modelId]?.surfaces.filter(s=>s.controlGroup===['fore','main','mizzen'][mast]);
+      if(surfaces&&!surfaces.length)continue;
+      if(!company.crew.some(s=>s.casualtyState!=='fallen'&&s.job?.kind==='haul'&&s.job.mast===mast)){
+        const primaryId=Object.keys(HANDS).find(k=>HANDS[k]===mast);
+        const primary=company.crew.find(s=>s.id===primaryId);
+        if(!primary||primary.casualtyState==='fallen'){
+          const target=haulStation(mast,boat);
+          const sub=company.crew.find(s=>s.casualtyState!=='fallen'&&!s.job&&!['ines','pedro'].includes(s.id)&&(s.navigationRetryAt??0)<=company.workTime);
+          if(sub){
+            const job={kind:'haul',mast,stage:'approach',elapsed:0,rung:0,revision:company.revision};
+            job.path=crewWorkNavigationRoute(sub,routeTo(sub,target,boat),boat,{exactTarget:false,job});
+            if(job.path){job.cursor=0;sub.job=job;sub.intent='work';sub.work=0;}
+          }
+        }
+      }
+    }
+  }
   // Crew attendance gates the actual canvas integrator, even when rendered crew
   // are hidden. Manual sliders still request jobs; no instant magical sail changes.
   boat.crewRigRate??=new Float64Array(3);boat.crewRigRate.fill(0);
@@ -708,9 +769,14 @@ export function assignCrewWork(company,boat) {
     const surfaces=ADDITIONAL_DESIGNS[boat.modelId]?.surfaces.filter(s=>s.controlGroup===['fore','main','mizzen'][mast]);
     if(surfaces&&!surfaces.length)continue;
     const ready=company.crew.filter(s=>s.job?.mast===mast && s.job.stage==='working' && !s.observation.hazard);
-    boat.crewRigRate[mast]=Number(!aloft && ready.some(s=>s.job.kind==='haul'));
-    boat.crewSailRate[mast]=mast===2?Number(ready.some(s=>s.job.kind==='haul'))
-      :Number(ready.some(s=>s.job.kind==='haul') && ready.some(s=>s.job.kind==='rig'));
+    const hauling=ready.some(s=>s.job.kind==='haul');
+    const targetSet=effectiveSailTarget(boat,mast);
+    const raising=targetSet>sails.set[mast]+1e-4;
+    const climberAssigned=company.crew.some(s=>CLIMBERS[s.id]?.[0]===mast&&s.casualtyState!=='fallen');
+    boat.crewRigRate[mast]=Number(!aloft && hauling);
+    boat.crewSailRate[mast]=(mast===2||raising||!climberAssigned)
+      ?Number(hauling)
+      :Number(hauling && ready.some(s=>s.job.kind==='rig'));
   }
 }
 export function stepCrewWork(s,company,boat,dt) {
@@ -792,9 +858,9 @@ export function stepCrewWork(s,company,boat,dt) {
       }else{
         j.blockedTime=(j.blockedTime??0)+dt;
         if(j.blockedTime>.5){
-          if(Object.hasOwn(ROWING_DESIGNS,boat.modelId)){
+          if(hasExtendedCrewModel(boat.modelId)){
             const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;}
-          }else if(!hasExtendedCrewModel(boat.modelId)){
+          }else{
             let repaired=false;
             if(!clear){const path=crewWorkNavigationRoute(s,j.path.slice(j.cursor),boat,{exactTarget:['rig','lookout','gunnery'].includes(j.kind)});if(path){j.path=path;j.cursor=0;repaired=true;}}
             if(!repaired&&!crewWorkPassingDetour(s,company,boat,p,target)&&!crewWorkYieldIdle(s,company,boat,p,next)&&ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery')crewAdditionalPassingDetour(s,company,boat,p,target);
@@ -831,15 +897,21 @@ export function stepCrewWork(s,company,boat,dt) {
       s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
-      const ctrlIdx=j.control??j.mast,mastCap=boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][ctrlIdx]]??1);
+      const ctrlIdx=j.control??j.mast,targetSet=effectiveSailTarget(boat,ctrlIdx);
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
-        :!sailingState(boat).maneuver && Math.abs(Math.min(boat[SAIL_KEYS[ctrlIdx]]??1,mastCap)-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
+        :!sailingState(boat).maneuver && Math.abs(targetSet-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
       if(done){if(j.kind==='rig'||j.kind==='lookout'){crewWorkDescend(s);s.nextWatch=company.workTime+45;}
         else startReturn(s,boat,company);}
     }else if(j.stage==='waiting-return'&&j.elapsed>.5){startReturn(s,boat,company);
     }
     // A replaced order never teleports an aloft sailor; they finish/descend safely.
     if(j.kind==='lookout'&&company.order!=='watch'&&j.stage==='ascending')crewWorkDescend(s);
+    if(j.kind==='rig'){
+      const ctrlIdx=j.control??j.mast,targetSet=effectiveSailTarget(boat,ctrlIdx);
+      const done=!sailingState(boat).maneuver && Math.abs(targetSet-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
+      if(done&&j.stage==='ascending')crewWorkDescend(s);
+      else if(done&&j.stage==='approach')startReturn(s,boat,company);
+    }
   }
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;
   s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
@@ -873,13 +945,13 @@ export function stepCrewWork(s,company,boat,dt) {
 function startReturn(s,boat,company=null){
   const j=s.job;delete j.trafficResume;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s,boat);
-  if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,Object.hasOwn(ROWING_DESIGNS,boat.modelId)?company:null);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
+  if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,company);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
   const path=ADDITIONAL_DESIGNS[boat.modelId]?additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :boat.modelId==='victory'?victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :j.kind==='gunnery'?crewNinaGunDeckRoute(s,home,boat)
     :s.id==='maria'?[deckPoint(s.x,-3.2,boat),deckPoint(home[0],-3.2,boat),home]
     :s.id==='duarte'?[deckPoint(home[0],s.z,boat),home]
-    :[...j.path.slice(0,-1).reverse(),home];
+    :j.path?.length>1?[...j.path.slice(0,-1).reverse(),home]:routeTo(s,home,boat);
   j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}
 }
 export function crewWorkLabel(s){

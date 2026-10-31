@@ -3477,7 +3477,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
   const damageLog=[];
   let pending=null,prepared=false,lastReady=false,flash=null,lastDamageReport=null,fireAtWillMode=false,showTrajectoryMode=true,lastAimSummary=null;
   let cachedAimArcs=null,cachedAimTime=-1,cachedAimSide=null,cachedAimAmmo=null,cachedAimElev=NaN,cachedAimTrav=NaN,cachedAimQuoin=NaN,cachedAimX=NaN,cachedAimZ=NaN,cachedAimHeading=NaN,cachedAimRoll=NaN;
-  const attended=gun=>!gun.visibleCrew||boat.gunneryAttendance?.has(gun.id)===true;
+  const attended=gun=>!gun.visibleCrew||boat.aiGunneryAttended===true||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
   const hasPowder=()=>!boat.magazine||(!boat.magazine.exploded&&boat.magazine.powderKg>0);
   function traceBallisticPreview(gun,windVec,{elevationDeg=0,traverseDeg=0,rollRad=0,alpha=0.72,isLiveRoll=false}={}){
@@ -3649,8 +3649,9 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     prepare(side){
       if(!sideValid(side))return false;
-      if(pending||state.queue.length||state.guns.some(g=>g.loading&&g.side!==side))return false;
+      if(pending||state.queue.length)return false;
       const changed=boat.gunnerySide!==side;
+      if(changed)for(const g of state.guns)if(g.side!==side){g.loading=false;g.queued=false;}
       boat.gunnerySide=side;prepared=true;lastReady=false;
       const count=prepareGunnery(state,side);if(count||changed)onOrder('prepare',boat);
       return count>0||changed;
@@ -3737,7 +3738,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
             const crossedZero=pending.prevError!==null&&pending.prevError*ePred<=0&&Math.abs(pending.prevError-ePred)<6;
             const withinWindow=Math.abs(ePred)<=0.45+0.35*waitTime;
             const goodRollDirection=pending.targetElevation<-1?(rollRateDeg<=0.2||waitTime>2.8):(rollRateDeg>=-0.2||waitTime>2.8);
-            const portsClear=pending.allowPartial?clearCount>0:(readyCount>0&&allReadyClear);
+            const portsClear=(pending.allowPartial||waitTime>=3.5)?clearCount>0:(readyCount>0&&allReadyClear);
             pending.prevError=ePred;
             if(isFlatCalm||(portsClear&&(((crossedZero||withinWindow)&&goodRollDirection)||waitTime>=5.2))){
               onEvent({

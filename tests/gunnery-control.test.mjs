@@ -663,3 +663,106 @@ test('ship colors, human crew casualties, battle morale, and surrender signallin
  assert.equal(hunterBoat.colors,'surrender');
  assert.equal(hunterBoat.damage.surrendered,true);
 });
+
+test('pirate AI prepares at quarters, fires broadsides at player ship, and switches sides cleanly when target crosses',async ()=>{
+ const {selectBroadsideFacingTarget}=await import('../js/follower.js');
+ const player={id:'player',modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:3,sailFore:1,sailMain:1,sailMizzen:1};
+ player.hydrodynamics=boatHydrodynamics(20,6);
+ createVesselDamageState(player);
+ const pirate={id:'pirate',modelId:'nina',length:20,beam:6,heading:90,x:135,z:-25,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:3,sailFore:1,sailMain:1,sailMizzen:1,colors:'jolly-roger',battleColors:'jolly-roger'};
+ pirate.hydrodynamics=boatHydrodynamics(20,6);
+ createVesselDamageState(pirate);
+ // Deliberately leave pirate.gunneryAttendance empty to verify AI vessels do not deadlock on visibleCrew attendance
+ pirate.gunneryAttendance=new Set();
+ const shots=[];
+ const pirateGuns=createShipGunnery(pirate,{
+  getVessels:()=>[player,pirate],
+  onEvent:e=>{if(e.type==='shot')shots.push(e);},
+ });
+ const pirateFollower=createFollower({trail:0,side:1.2},{faction:'enemy',salvoDelay:0.4});
+ const vessels=[{boat:player,faction:'friendly'},{boat:pirate,gunnery:pirateGuns,follower:pirateFollower,faction:'enemy'}];
+ const firedSides=new Set();
+ for(let t=0;t<500;t++){
+  steerFollower(pirateFollower,pirate,player,0.1,8,0);
+  // First 20s target is to port; next 30s target crosses to starboard
+  const bearingDeg=Math.atan2(player.x-pirate.x,-(player.z-pirate.z))*180/Math.PI;
+  pirate.heading=((bearingDeg+(t<200?90:-90))%360+360)%360;
+  const res=stepVesselCombatAI(vessels[1],{vessels,dt:0.1});
+  if(res?.action==='fire'||res?.action==='fire-loaded')firedSides.add(res.side);
+  pirateGuns.update(0.1,[5,0,0]);
+  selectBroadsideFacingTarget(pirate,player);
+ }
+ assert.ok(shots.length>=4,`expected pirate AI to fire multiple shots at player ship, got ${shots.length}`);
+ assert.ok(firedSides.has('port')&&firedSides.has('starboard'),`expected pirate AI to switch batteries and fire from both sides, got ${[...firedSides].join(',')}`);
+});
+
+test('full sail raises all canvas across procedural and multi-mast ships and URL encodes safe game state and position',async ()=>{
+ const {issueCaptainOrder}=await import('../js/crew.js');
+ const {sailingState}=await import('../js/sailing.js');
+ const {SHIP_MODELS}=await import('../js/ship-models.js');
+ const {createShareLink,encodeGameStateParam,decodeGameStateParam}=await import('../js/sharing.js');
+
+ // 1. Verify full sail on flying-cloud (procedural 3-mast clipper) and pinta (after partial furl with descending climber)
+ for(const id of ['flying-cloud','pinta']){
+  const m=SHIP_MODELS[id];
+  const b={modelId:id,...m.runtime,roll:0,rollVelocity:0,pitch:0,pitchVelocity:0,rudder:0,sailFore:1,sailMain:1,sailMizzen:1,hatchOpen:0,crew:false,propulsion:'sail'};
+  sailingState(b);
+  const c=createCompany(undefined,id);
+  stepCompany(c,b,0,6);
+  issueCaptainOrder(c,b,'furl');
+  for(let t=0;t<32;t++){advanceSails(b,0.25,6,0.8);stepCompany(c,b,0.25,6);}
+  issueCaptainOrder(c,b,'full');
+  for(let t=0;t<220;t++){advanceSails(b,0.25,6,0.8);stepCompany(c,b,0.25,6);}
+  const set=Array.from(sailingState(b).set).map(v=>Number(v.toFixed(2)));
+  assert.deepEqual(set,[1,1,1],`${id} raises all three mast groups to full sail after mid-furl reversal`);
+ }
+
+ // 2. Verify companion follower sets all sails to 1.0 under captain 'full' order
+ const leader={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,sailFore:0.5,sailMain:0.5,sailMizzen:0.5,surgeVelocity:2};
+ const companion={modelId:'nina',length:20,beam:6,heading:0,x:-40,z:40,sailFore:0.2,sailMain:0.2,sailMizzen:0.2,surgeVelocity:2};
+ const fol=createFollower({trail:2,side:-2},{faction:'friendly'});
+ fol.captainOrder='full';
+ steerFollower(fol,companion,leader,0.1,8,0);
+ assert.equal(companion.sailFore,1);
+ assert.equal(companion.sailMain,1);
+ assert.equal(companion.sailMizzen,1);
+
+ // 3. Verify URL encoding of safe game state + explicit position/voyage/ship attributes
+ const statePayload={
+  v:1,
+  pos:{lat:38.70715,lon:-9.13642,drLat:38.705,drLon:-9.14,x:-125.4,z:340.8,heading:215.5,speed:5.4,rudder:-3.5,region:'lisboa-ribeira-das-naus'},
+  ship:{id:'santa-maria',colors:'portugal',station:'crows-nest',propulsion:'sail',sails:[1,1,1],set:[1,1,1],provisionDays:45,cargoTonnes:12},
+  voyage:{active:true,day:3,canvas:'full',course:225,warp:'watch',autopilot:true,waterDays:42,foodDays:57},
+  damage:{hullIntegrity:0.92,battleMorale:0.88,surrendered:false,sunk:false},
+ };
+ const encoded=encodeGameStateParam(statePayload);
+ assert.ok(encoded.length>20,'encodes compact base64url state parameter');
+ const decoded=decodeGameStateParam(encoded);
+ assert.deepEqual(decoded,statePayload,'round-trips safe game state cleanly');
+
+ const boat={
+  modelId:'santa-maria',colors:'portugal',viewStation:'crows-nest',propulsion:'sail',
+  length:29,beam:8.5,heading:215.5,speed:5.4,eye:3.2,rudderTarget:-3.5,
+  sailFore:1,sailMain:1,sailMizzen:1,provisionDays:45,cargoTonnes:12,
+  x:-125.4,z:340.8,showProw:true,effects:true,crew:true,followingShip:true,
+ };
+ const href=createShareLink('https://sixcailloux.com/waterworld/',{windSpeed:8,windDir:45},boat,'boat',{
+  voyage:{lat:38.70715,lon:-9.13642,drLat:38.705,drLon:-9.14,region:'lisboa-ribeira-das-naus',canvas:'full',course:225,warp:'watch',autopilot:true,day:3},
+  gameState:statePayload,
+ });
+ const u=new URL(href);
+ assert.equal(u.searchParams.get('lat'),'38.70715');
+ assert.equal(u.searchParams.get('lon'),'-9.13642');
+ assert.equal(u.searchParams.get('drLat'),'38.705');
+ assert.equal(u.searchParams.get('drLon'),'-9.14');
+ assert.equal(u.searchParams.get('boatX'),'-125.4');
+ assert.equal(u.searchParams.get('boatZ'),'340.8');
+ assert.equal(u.searchParams.get('boatHeading'),'215.5');
+ assert.equal(u.searchParams.get('ship'),'santa-maria');
+ assert.equal(u.searchParams.get('colors'),'portugal');
+ assert.equal(u.searchParams.get('station'),'crows-nest');
+ assert.equal(u.searchParams.get('canvas'),'full');
+ assert.equal(u.searchParams.get('course'),'225');
+ assert.equal(u.searchParams.get('warp'),'watch');
+ assert.deepEqual(decodeGameStateParam(u.searchParams.get('state')),statePayload);
+});

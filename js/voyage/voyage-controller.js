@@ -306,6 +306,7 @@ export function createVoyageController(cfg) {
     applyCanvasOrder(boat, id);
     voyage.canvas = id;
     if (hud) hud.canvasSel.value = id;
+    cfg.onCanvasOrder?.(id);
     addLog(voyage, `Ordered: ${CANVAS_ORDERS[id]?.label ?? id}.`, 'order');
     emit('change');
   }

@@ -16072,7 +16072,9 @@ function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neighbors=nu
     const mastCap=boat.damage?.sunk?0:mInt*(mState>=2?0:mState===1?0.42:1);
     let desired=0;
     if(activeKeys.includes(key)&&!orderFurl){
-      if(orderedSails&&(state.captainOrder==='weather'||state.captainOrder==='reduced')){
+      if(orderedSails&&state.captainOrder==='full'){
+        desired=separation<minCanvasDist?0.05:orderedSails[i];
+      }else if(orderedSails&&(state.captainOrder==='weather'||state.captainOrder==='reduced')){
         desired=orderedSails[i];
       }else{
         desired=!leaderSailing&&leaderSpeed<.15&&forwardError<L*.5&&errorDistance<L*2?0:canvas;
@@ -16274,6 +16276,7 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   }
 
   if(faction==='enemy'){
+    boat.aiGunneryAttended=true;
     if(boat.battleColors&&boat.colors!==boat.battleColors&&boat.colors!=='surrender'){
       boat.colors=boat.battleColors;
     }
@@ -16296,8 +16299,12 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
       return {action:'stand-down',reason:'no-target'};
     }
     const aim=selectBroadsideFacingTarget(boat,nearestTarget);
+    if(follower&&!follower.combatInitialized){
+      follower.combatInitialized=true;
+      gunnery.readyAtQuarters?.(aim.side);
+    }
     gunnery.setElevation?.(aimElevationForRange(boat,nearestTarget,aim.distance));
-    if(gunnery.isSwivelBattery)gunnery.trainOnTarget?.(aim.side);
+    gunnery.trainOnTarget?.(aim.side);
     const summary=gunnery.summary(aim.side);
     // Automatically prepare or reload the broadside bearing on the target.
     if(!gunnery.ordered&&!gunnery.state.queue.length){
@@ -16305,7 +16312,7 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
         gunnery.prepare(aim.side);
       }
     }
-    const maxForeRatio=gunnery.isSwivelBattery?0.98:0.58;
+    const maxForeRatio=gunnery.isSwivelBattery?0.98:0.78;
     const inArc=aim.distance<=maxRange&&aim.foreRatio<=maxForeRatio;
     const blockedByAlly=isFriendlyInLineOfFire(boat,aim.side,enemyAllies,aim.distance);
     const delayDone=!follower||!(follower.salvoDelay>0);
@@ -16314,7 +16321,7 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
         gunnery.fire(aim.side);
         return {action:'fire',side:aim.side,distance:aim.distance};
       }
-      if(gunnery.canFireLoaded(aim.side)&&summary.loading===0&&summary.ready>=Math.max(1,Math.ceil(summary.total*0.5))){
+      if(gunnery.canFireLoaded(aim.side)&&summary.ready>=Math.max(1,Math.ceil(summary.total*0.5))){
         gunnery.fireLoaded(aim.side);
         return {action:'fire-loaded',side:aim.side,distance:aim.distance};
       }
@@ -16323,6 +16330,7 @@ function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
   }
 
   // Friendly vessel combat & queued captain gunnery orders
+  if(follower)boat.aiGunneryAttended=true;
   const friendlyAllies=[];
   let nearestEnemy=null,nearestEnemyDist=Infinity;
   for(const other of vessels){
@@ -23373,7 +23381,7 @@ function assignGunCrew(company,boat){
   for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side).slice(0,limit))selected.add(gun.id);
   for(const gun of weather)gun.visibleCrew=selected.has(gun.id);
   const targets=guns.filter(g=>selected.has(g.id)&&g.side===boat.gunnerySide);
-  const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery');
+  const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');
   for(const s of company.crew){
     const j=s.job;
     if(j?.kind==='gunnery'&&!['return','waiting-return'].includes(j.stage)&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
@@ -23382,6 +23390,7 @@ function assignGunCrew(company,boat){
     else if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&j.stage==='approach')startReturn(s,boat,company);
     else if(active&&j&&['haul','hatch'].includes(j.kind)&&j.stage!=='return')startReturn(s,boat,company);
   }
+  company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery'&&!['return','waiting-return'].includes(s.job.stage));
   if(!active)return;
   const onDeck=s=>(s.job?.rung??0)<=0&&Math.abs(s.x)+.26/(boat.beam/3.6)<=modelDeckWidth(boat,s.z);
   const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&(!s.job||(onDeck(s)&&(['return','waiting-return'].includes(s.job.stage)||s.job.kind==='yield'))));
@@ -23560,44 +23569,83 @@ function crewProceduralTask(company,boat,s,job,target){
   retries.delete(key);
   s.home??=[s.x,s.z];s.job={...job,stage:'approach',elapsed:0,rung:0,revision:company.revision,path,cursor:0};s.intent='work';s.work=0;return true;
 }
+function effectiveSailTarget(boat,i){
+  const mGroup=['fore','main','mizzen'][i];
+  const mastInt=boat.damage?.sunk?0:workClamp(boat.damage?.mastIntegrity?.[mGroup]??1,0,1);
+  const mState=boat.damage?.mastState?.[mGroup]??0;
+  const stateCap=mState>=2?0:mState===1?.42:1;
+  const mastCap=mastInt*stateCap;
+  const requested=workClamp(boat[SAIL_KEYS[i]]??1,0,1);
+  return Math.min(requested,mastCap)*(0.25+0.75*mastCap);
+}
 function assignProceduralCrewWork(company,boat){
   const d=proceduralDesign(boat.modelId),context=crewExtendedContext(d.id),model=requirePlayableShipModel(d.id),sails=sailingState(boat),solo=company.crew.length===1;
   const controls=crewWorkControls.map((name,index)=>({name,index,surfaces:d.surfaces.filter(s=>s.controlGroup===name)})).filter(c=>c.surfaces.length);
   boat.crewSailRate??=new Float64Array(3);boat.crewRigRate??=new Float64Array(3);boat.crewSailRate.fill(0);boat.crewRigRate.fill(0);
+  for(const s of company.crew){
+    if(s.casualtyState==='fallen'){s.job=null;continue;}
+    const j=s.job;if(!j)continue;
+    if(j.kind==='rig'&&j.stage==='descending'&&Math.abs(effectiveSailTarget(boat,j.control)-sails.set[j.control])>1e-6){
+      j.stage='ascending';j.elapsed=0;
+    }else if((j.rung??0)<=0&&['return','waiting-return'].includes(j.stage)&&controls.some(c=>Math.abs(effectiveSailTarget(boat,c.index)-sails.set[c.index])>1e-6)){
+      s.job=null;
+    }
+  }
   // A helmsman stays with the steering blade on crewed craft. A solo sailor can
   // secure the tiller, do one deck job, then physically return to her helm.
-  const free=()=>company.crew.filter(s=>s.casualtyState!=='fallen'&&!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>Number(!!a.stationId)-Number(!!b.stationId));
+  const free=targetPoint=>{
+    const worldTarget=targetPoint?physical(targetPoint,boat):null;
+    return company.crew.filter(s=>s.casualtyState!=='fallen'&&!s.job&&(solo||s.role!=='Helmsman')).sort((a,b)=>{
+      const stationDiff=Number(!!a.stationId)-Number(!!b.stationId);
+      if(stationDiff)return stationDiff;
+      if(!worldTarget)return 0;
+      return distance3(a.position,worldTarget)-distance3(b.position,worldTarget);
+    });
+  };
   if(company.order==='weather'&&(boat.hatchesClosed??0)<.999&&model.nodes['station.hatch']&&!company.crew.some(s=>s.job?.kind==='hatch')){
     const target=resolveShipNode(boat,'station.hatch',{space:'design'});
-    for(const s of free())if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
+    for(const s of free(target))if(crewProceduralTask(company,boat,s,{kind:'hatch'},target))break;
   }
-  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
   for(const control of controls){
-    if(Math.abs(Math.min(boat[SAIL_KEYS[control.index]]??1,mastCap(control.index))-sails.set[control.index])<=1e-6)continue;
+    const targetSet=effectiveSailTarget(boat,control.index);
+    if(Math.abs(targetSet-sails.set[control.index])<=1e-6)continue;
     const station=context.controlStations?.[control.name];if(!station)continue;
     const mast=station.mast??control.surfaces[0].mast,runner='mast.'+crewMastName(boat,mast)+'.runner';
     const climbing=!solo&&control.surfaces.some(s=>s.kind==='square')&&(model.nodes[runner]?.motion?.rungs??0)>0;
     for(const kind of climbing?['haul','rig']:['haul']){
       if(company.crew.some(s=>s.job?.control===control.index&&s.job.kind===kind))continue;
       const side=1,target=kind==='haul'?station.position:climbRoot(mast,side,0,boat);
-      for(const s of free())if(crewProceduralTask(company,boat,s,{kind,control:control.index,mast,side,controlGroup:control.name},target))break;
+      for(const s of free(target))if(crewProceduralTask(company,boat,s,{kind,control:control.index,mast,side,controlGroup:control.name},target))break;
     }
     const ready=company.crew.filter(s=>s.job?.control===control.index&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard);
-    const hauling=ready.some(s=>s.job.kind==='haul');boat.crewRigRate[control.index]=Number(hauling);boat.crewSailRate[control.index]=Number(hauling&&(!climbing||ready.some(s=>s.job.kind==='rig')));
+    const hauling=ready.some(s=>s.job.kind==='haul');
+    const raising=targetSet>sails.set[control.index]+1e-6;
+    boat.crewRigRate[control.index]=Number(hauling);
+    boat.crewSailRate[control.index]=Number(hauling&&(!climbing||raising||ready.some(s=>s.job.kind==='rig')));
   }
   updateCrewRowingAttendance(company,boat);
 }
 function assignCrewWork(company,boat) {
   if(hasExtendedCrewModel(boat.modelId)){assignProceduralCrewWork(company,boat);return;}
-  const mastCap=i=>boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][i]]??1);
-  const sails=sailingState(boat),needs=SAIL_KEYS.map((key,i)=>Math.abs(Math.min(boat[key]??1,mastCap(i))-sails.set[i])>.008);
+  const sails=sailingState(boat),needs=SAIL_KEYS.map((_,i)=>Math.abs(effectiveSailTarget(boat,i)-sails.set[i])>.008);
   company.workTime??=0;
   assignGunCrew(company,boat);
   for(const s of company.crew){
     s.home??=[s.x,s.z];
     if(s.casualtyState==='fallen'){s.job=null;continue;}
-    if(s.job)continue;
     if(company.gunneryActive||boat.damage?.surrendered)continue;
+    if(s.job){
+      const j=s.job;
+      if(j.kind==='rig'&&j.stage==='descending'&&needs[j.mast]&&!sails.maneuver){
+        j.stage='ascending';j.elapsed=0;continue;
+      }
+      if((j.rung??0)<=0&&(['return','waiting-return'].includes(j.stage)||j.kind==='yield')){
+        const wantsClimb=CLIMBERS[s.id]&&needs[CLIMBERS[s.id][0]]&&!sails.maneuver;
+        const wantsHaul=HANDS[s.id]!==undefined&&(needs[HANDS[s.id]]||sails.maneuver);
+        const wantsHatch=s.id==='rui'&&company.order==='weather'&&(boat.hatchesClosed??0)<.999;
+        if(wantsClimb||wantsHaul||wantsHatch){s.job=null;}else continue;
+      }else continue;
+    }
     let job;
     if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver){
       const [mast]=CLIMBERS[s.id],side=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
@@ -23618,6 +23666,27 @@ function assignCrewWork(company,boat) {
     if(!job.path){s.navigationRetryAt=company.workTime+1;continue;}
     job.cursor=0;s.job=job;s.intent='work';s.work=0;
   }
+  // Fallback assignment if a primary haul/rig sailor is fallen in action.
+  if(!company.gunneryActive&&!boat.damage?.surrendered){
+    for(let mast=0;mast<3;mast++){
+      if(!(needs[mast]||sails.maneuver))continue;
+      const surfaces=ADDITIONAL_DESIGNS[boat.modelId]?.surfaces.filter(s=>s.controlGroup===['fore','main','mizzen'][mast]);
+      if(surfaces&&!surfaces.length)continue;
+      if(!company.crew.some(s=>s.casualtyState!=='fallen'&&s.job?.kind==='haul'&&s.job.mast===mast)){
+        const primaryId=Object.keys(HANDS).find(k=>HANDS[k]===mast);
+        const primary=company.crew.find(s=>s.id===primaryId);
+        if(!primary||primary.casualtyState==='fallen'){
+          const target=haulStation(mast,boat);
+          const sub=company.crew.find(s=>s.casualtyState!=='fallen'&&!s.job&&!['ines','pedro'].includes(s.id)&&(s.navigationRetryAt??0)<=company.workTime);
+          if(sub){
+            const job={kind:'haul',mast,stage:'approach',elapsed:0,rung:0,revision:company.revision};
+            job.path=crewWorkNavigationRoute(sub,routeTo(sub,target,boat),boat,{exactTarget:false,job});
+            if(job.path){job.cursor=0;sub.job=job;sub.intent='work';sub.work=0;}
+          }
+        }
+      }
+    }
+  }
   // Crew attendance gates the actual canvas integrator, even when rendered crew
   // are hidden. Manual sliders still request jobs; no instant magical sail changes.
   boat.crewRigRate??=new Float64Array(3);boat.crewRigRate.fill(0);
@@ -23627,9 +23696,14 @@ function assignCrewWork(company,boat) {
     const surfaces=ADDITIONAL_DESIGNS[boat.modelId]?.surfaces.filter(s=>s.controlGroup===['fore','main','mizzen'][mast]);
     if(surfaces&&!surfaces.length)continue;
     const ready=company.crew.filter(s=>s.job?.mast===mast && s.job.stage==='working' && !s.observation.hazard);
-    boat.crewRigRate[mast]=Number(!aloft && ready.some(s=>s.job.kind==='haul'));
-    boat.crewSailRate[mast]=mast===2?Number(ready.some(s=>s.job.kind==='haul'))
-      :Number(ready.some(s=>s.job.kind==='haul') && ready.some(s=>s.job.kind==='rig'));
+    const hauling=ready.some(s=>s.job.kind==='haul');
+    const targetSet=effectiveSailTarget(boat,mast);
+    const raising=targetSet>sails.set[mast]+1e-4;
+    const climberAssigned=company.crew.some(s=>CLIMBERS[s.id]?.[0]===mast&&s.casualtyState!=='fallen');
+    boat.crewRigRate[mast]=Number(!aloft && hauling);
+    boat.crewSailRate[mast]=(mast===2||raising||!climberAssigned)
+      ?Number(hauling)
+      :Number(hauling && ready.some(s=>s.job.kind==='rig'));
   }
 }
 function stepCrewWork(s,company,boat,dt) {
@@ -23711,9 +23785,9 @@ function stepCrewWork(s,company,boat,dt) {
       }else{
         j.blockedTime=(j.blockedTime??0)+dt;
         if(j.blockedTime>.5){
-          if(Object.hasOwn(ROWING_DESIGNS,boat.modelId)){
+          if(hasExtendedCrewModel(boat.modelId)){
             const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;}
-          }else if(!hasExtendedCrewModel(boat.modelId)){
+          }else{
             let repaired=false;
             if(!clear){const path=crewWorkNavigationRoute(s,j.path.slice(j.cursor),boat,{exactTarget:['rig','lookout','gunnery'].includes(j.kind)});if(path){j.path=path;j.cursor=0;repaired=true;}}
             if(!repaired&&!crewWorkPassingDetour(s,company,boat,p,target)&&!crewWorkYieldIdle(s,company,boat,p,next)&&ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery')crewAdditionalPassingDetour(s,company,boat,p,target);
@@ -23750,15 +23824,21 @@ function stepCrewWork(s,company,boat,dt) {
       s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
-      const ctrlIdx=j.control??j.mast,mastCap=boat.damage?.sunk?0:(boat.damage?.mastIntegrity?.[['fore','main','mizzen'][ctrlIdx]]??1);
+      const ctrlIdx=j.control??j.mast,targetSet=effectiveSailTarget(boat,ctrlIdx);
       const done=j.kind==='hatch'?(boat.hatchesClosed??0)>=1:j.kind==='lookout'?j.elapsed>18||company.order!=='watch'
-        :!sailingState(boat).maneuver && Math.abs(Math.min(boat[SAIL_KEYS[ctrlIdx]]??1,mastCap)-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
+        :!sailingState(boat).maneuver && Math.abs(targetSet-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
       if(done){if(j.kind==='rig'||j.kind==='lookout'){crewWorkDescend(s);s.nextWatch=company.workTime+45;}
         else startReturn(s,boat,company);}
     }else if(j.stage==='waiting-return'&&j.elapsed>.5){startReturn(s,boat,company);
     }
     // A replaced order never teleports an aloft sailor; they finish/descend safely.
     if(j.kind==='lookout'&&company.order!=='watch'&&j.stage==='ascending')crewWorkDescend(s);
+    if(j.kind==='rig'){
+      const ctrlIdx=j.control??j.mast,targetSet=effectiveSailTarget(boat,ctrlIdx);
+      const done=!sailingState(boat).maneuver && Math.abs(targetSet-sailingState(boat).set[ctrlIdx])<(hasExtendedCrewModel(boat.modelId)?1e-6:.008);
+      if(done&&j.stage==='ascending')crewWorkDescend(s);
+      else if(done&&j.stage==='approach')startReturn(s,boat,company);
+    }
   }
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;
   s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
@@ -23792,13 +23872,13 @@ function stepCrewWork(s,company,boat,dt) {
 function startReturn(s,boat,company=null){
   const j=s.job;delete j.trafficResume;j.stage='return';j.elapsed=0;j.cursor=0;
   const home=homePoint(s,boat);
-  if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,Object.hasOwn(ROWING_DESIGNS,boat.modelId)?company:null);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
+  if(hasExtendedCrewModel(boat.modelId)){j.path=proceduralCrewRoute(s,home,boat,company);if(!j.path){j.path=[];j.stage='waiting-return';}return;}
   const path=ADDITIONAL_DESIGNS[boat.modelId]?additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :boat.modelId==='victory'?victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :j.kind==='gunnery'?crewNinaGunDeckRoute(s,home,boat)
     :s.id==='maria'?[deckPoint(s.x,-3.2,boat),deckPoint(home[0],-3.2,boat),home]
     :s.id==='duarte'?[deckPoint(home[0],s.z,boat),home]
-    :[...j.path.slice(0,-1).reverse(),home];
+    :j.path?.length>1?[...j.path.slice(0,-1).reverse(),home]:routeTo(s,home,boat);
   j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}
 }
 function crewWorkLabel(s){
@@ -25291,13 +25371,41 @@ function propulsionFromLink(search) {
   return 'sail'; // A speed parameter alone must never silently enable powered motion.
 }
 
+function encodeGameStateParam(stateObj) {
+  if (!stateObj || typeof stateObj !== 'object') return '';
+  try {
+    const json = JSON.stringify(stateObj);
+    const bytes = new TextEncoder().encode(json);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function decodeGameStateParam(encoded) {
+  if (!encoded || typeof encoded !== 'string' || encoded.length > 16384) return null;
+  try {
+    const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+    const bin = atob(b64 + pad);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function createShareLink(href, settings, boat, cameraMode, camera=null) {
   const url = new URL(href);
   url.search = ''; url.hash = '';
   const scene=new URL(href).searchParams;
   for(const key of ['landfall','weather','region','lat','lon','broadside','scenario','situation','broadsideSide','broadsideRange','gunsReady','ammo'])if(scene.has(key))url.searchParams.set(key,scene.get(key));
-  const setNumber = (key, value) => {
-    if (Number.isFinite(value)) url.searchParams.set(key, String(Number(value.toFixed(6))));
+  const setNumber = (key, value, digits = 6) => {
+    if (Number.isFinite(value)) url.searchParams.set(key, String(Number(value.toFixed(digits))));
   };
   if(camera?.astronomy)for(const [key,value] of Object.entries(camera.astronomy))url.searchParams.set(key,String(value));
   url.searchParams.set('boat', cameraMode === 'boat' ? '1' : '0');
@@ -25312,6 +25420,8 @@ function createShareLink(href, settings, boat, cameraMode, camera=null) {
     url.searchParams.set('cam',[c.x,c.y,c.z,c.yaw*180/Math.PI,c.pitch*180/Math.PI].map(n=>Number(n.toFixed(6))).join(','));
   }
   if(boat.modelId&&boat.modelId!=='nina')url.searchParams.set('ship',boat.modelId);
+  if(boat.colors)url.searchParams.set('colors',String(boat.colors));
+  if(boat.viewStation&&boat.viewStation!=='helm')url.searchParams.set('station',String(boat.viewStation));
   url.searchParams.set('propulsion', boat.propulsion === 'sail' ? 'sail' : 'manual');
   for (const [key, value] of Object.entries(settings)) setNumber(key, value);
   for (const [key, param] of Object.entries(BOAT_LINK_KEYS)) setNumber(param, boat[key]);
@@ -25321,6 +25431,23 @@ function createShareLink(href, settings, boat, cameraMode, camera=null) {
   url.searchParams.set('follower',boat.followingShip===false?'0':'1');
   if(Array.isArray(boat.fleet))url.searchParams.set('fleet',boat.fleet.map(entry=>(entry.enabled===false?'!':'')+entry.modelId).join(','));
   for(const key of ['speedHud','windHud','headingHud'])url.searchParams.set(key,boat[key]===false?'0':'1');
+  if(camera?.voyage){
+    const v=camera.voyage;
+    if(Number.isFinite(v.lat))setNumber('lat',v.lat,5);
+    if(Number.isFinite(v.lon))setNumber('lon',v.lon,5);
+    if(Number.isFinite(v.drLat))setNumber('drLat',v.drLat,5);
+    if(Number.isFinite(v.drLon))setNumber('drLon',v.drLon,5);
+    if(v.region)url.searchParams.set('region',String(v.region));
+    if(v.canvas)url.searchParams.set('canvas',String(v.canvas));
+    if(Number.isFinite(v.course))setNumber('course',v.course,1);
+    if(v.warp)url.searchParams.set('warp',String(v.warp));
+    if(v.autopilot!==undefined)url.searchParams.set('autopilot',v.autopilot?'1':'0');
+    if(Number.isFinite(v.day))setNumber('day',v.day,0);
+  }
+  if(camera?.gameState){
+    const encoded=typeof camera.gameState==='string'?camera.gameState:encodeGameStateParam(camera.gameState);
+    if(encoded)url.searchParams.set('state',encoded);
+  }
   return url.href;
 }
 
@@ -44996,7 +45123,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
   const damageLog=[];
   let pending=null,prepared=false,lastReady=false,flash=null,lastDamageReport=null,fireAtWillMode=false,showTrajectoryMode=true,lastAimSummary=null;
   let cachedAimArcs=null,cachedAimTime=-1,cachedAimSide=null,cachedAimAmmo=null,cachedAimElev=NaN,cachedAimTrav=NaN,cachedAimQuoin=NaN,cachedAimX=NaN,cachedAimZ=NaN,cachedAimHeading=NaN,cachedAimRoll=NaN;
-  const attended=gun=>!gun.visibleCrew||boat.gunneryAttendance?.has(gun.id)===true;
+  const attended=gun=>!gun.visibleCrew||boat.aiGunneryAttended===true||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
   const hasPowder=()=>!boat.magazine||(!boat.magazine.exploded&&boat.magazine.powderKg>0);
   function traceBallisticPreview(gun,windVec,{elevationDeg=0,traverseDeg=0,rollRad=0,alpha=0.72,isLiveRoll=false}={}){
@@ -45168,8 +45295,9 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
     },
     prepare(side){
       if(!sideValid(side))return false;
-      if(pending||state.queue.length||state.guns.some(g=>g.loading&&g.side!==side))return false;
+      if(pending||state.queue.length)return false;
       const changed=boat.gunnerySide!==side;
+      if(changed)for(const g of state.guns)if(g.side!==side){g.loading=false;g.queued=false;}
       boat.gunnerySide=side;prepared=true;lastReady=false;
       const count=prepareGunnery(state,side);if(count||changed)onOrder('prepare',boat);
       return count>0||changed;
@@ -45256,7 +45384,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
             const crossedZero=pending.prevError!==null&&pending.prevError*ePred<=0&&Math.abs(pending.prevError-ePred)<6;
             const withinWindow=Math.abs(ePred)<=0.45+0.35*waitTime;
             const goodRollDirection=pending.targetElevation<-1?(rollRateDeg<=0.2||waitTime>2.8):(rollRateDeg>=-0.2||waitTime>2.8);
-            const portsClear=pending.allowPartial?clearCount>0:(readyCount>0&&allReadyClear);
+            const portsClear=(pending.allowPartial||waitTime>=3.5)?clearCount>0:(readyCount>0&&allReadyClear);
             pending.prevError=ePred;
             if(isFlatCalm||(portsClear&&(((crossedZero||withinWindow)&&goodRollDirection)||waitTime>=5.2))){
               onEvent({
@@ -50076,6 +50204,7 @@ function createVoyageController(cfg) {
     applyCanvasOrder(boat, id);
     voyage.canvas = id;
     if (hud) hud.canvasSel.value = id;
+    cfg.onCanvasOrder?.(id);
     addLog(voyage, `Ordered: ${CANVAS_ORDERS[id]?.label ?? id}.`, 'order');
     emit('change');
   }
@@ -50870,6 +50999,26 @@ function createVoyageController(cfg) {
 
 
 const qs = new URLSearchParams(location.search);
+const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
+if (urlGameState) {
+  const backfill = (k, v) => { if (v !== undefined && v !== null && !qs.has(k)) qs.set(k, String(v)); };
+  const p = urlGameState.pos, s = urlGameState.ship, v = urlGameState.voyage;
+  if (p) {
+    backfill('lat', p.lat); backfill('lon', p.lon); backfill('drLat', p.drLat); backfill('drLon', p.drLon);
+    backfill('region', p.region); backfill('boatX', p.x); backfill('boatZ', p.z);
+    backfill('boatHeading', p.heading); backfill('boatSpeed', p.speed); backfill('boatRudder', p.rudder);
+  }
+  if (s) {
+    backfill('ship', s.id); backfill('colors', s.colors); backfill('station', s.station);
+    backfill('propulsion', s.propulsion); backfill('provisionDays', s.provisionDays); backfill('cargoTonnes', s.cargoTonnes);
+    if (Array.isArray(s.sails)) {
+      backfill('sailFore', s.sails[0]); backfill('sailMain', s.sails[1]); backfill('sailMizzen', s.sails[2]);
+    }
+  }
+  if (v) {
+    backfill('canvas', v.canvas); backfill('course', v.course); backfill('warp', v.warp);
+  }
+}
 const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
 const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
 const astronomy=createAstronomyClock(qs,{x:Number(qs.get('boatX'))||0,z:Number(qs.get('boatZ'))||0});
@@ -52495,15 +52644,112 @@ async function main() {
   closeShare.onclick = () => { setShareOpen(false); shareButton.focus(); };
   const shareStatus = document.createElement('span'); shareStatus.setAttribute('role', 'status');
   sharePanel.append(shareInput, closeShare, shareStatus);
+  const buildShareCameraPayload = () => {
+    const v = voyageCtl?.voyage;
+    const tRegion = terrain?.region;
+    const geo = tRegion ? islandCoordinates(boat.x, boat.z, tRegion) : null;
+    const lat = Number.isFinite(v?.truePos?.lat) ? v.truePos.lat : Number.isFinite(geo?.latitude) ? geo.latitude : astronomy.state?.observer?.latitude;
+    const lon = Number.isFinite(v?.truePos?.lon) ? v.truePos.lon : Number.isFinite(geo?.longitude) ? geo.longitude : astronomy.state?.observer?.longitude;
+    const drLat = Number.isFinite(v?.dr?.lat) ? v.dr.lat : lat;
+    const drLon = Number.isFinite(v?.dr?.lon) ? v.dr.lon : lon;
+    const num = (n, d = 4) => Number.isFinite(n) ? Number(n.toFixed(d)) : undefined;
+    const vInfo = {
+      lat: num(lat, 5),
+      lon: num(lon, 5),
+      drLat: num(drLat, 5),
+      drLon: num(drLon, 5),
+      region: tRegion?.id ?? (qs.get('region') || undefined),
+      canvas: v?.canvas,
+      course: num(v?.compassCourse, 1),
+      warp: v?.tier,
+      autopilot: Boolean(voyageCtl?.helmsman?.engaged),
+      day: v?.dayAtSea,
+    };
+    const dmg = boat.damage;
+    const encVessel = vessels[1];
+    const encActive = Boolean(encVessel && !encVessel.dormantEncounter && encVessel.boat?.showProw);
+    const gameState = {
+      v: 1,
+      pos: {
+        lat: num(lat, 5),
+        lon: num(lon, 5),
+        drLat: num(drLat, 5),
+        drLon: num(drLon, 5),
+        x: num(boat.x, 2),
+        z: num(boat.z, 2),
+        heading: num(boat.heading, 2),
+        speed: num(boatForwardSpeed(boat) / KNOT_TO_MPS, 2),
+        rudder: num(boat.rudderTarget, 1),
+        region: vInfo.region,
+      },
+      ship: {
+        id: boat.modelId ?? 'nina',
+        colors: boat.colors ?? DEFAULT_SHIP_COLORS,
+        station: boat.viewStation ?? 'deck',
+        propulsion: boat.propulsion ?? 'sail',
+        sails: SAIL_KEYS.map(k => num(boat[k], 2)),
+        set: (boat.sailState?.set ? Array.from(boat.sailState.set) : SAIL_KEYS.map(k => boat[k])).map(val => num(val, 2)),
+        provisionDays: num(boat.provisionDays, 1),
+        cargoTonnes: num(boat.cargoTonnes, 1),
+      },
+      voyage: v ? {
+        active: !v.passive,
+        day: v.dayAtSea,
+        dateMs: Math.round(v.dateMs),
+        canvas: v.canvas,
+        course: num(v.compassCourse, 1),
+        warp: v.tier,
+        autopilot: Boolean(voyageCtl?.helmsman?.engaged),
+        beat: Boolean(voyageCtl?.helmsman?.beatToWind),
+        waterDays: num(v.stores?.waterDays, 1),
+        foodDays: num(v.stores?.foodDays, 1),
+        hull: num(v.ship?.hull, 3),
+        morale: num(v.crew?.morale, 3),
+      } : undefined,
+      damage: dmg ? {
+        hullIntegrity: num(dmg.hullIntegrity, 3),
+        battleMorale: num(dmg.battleMorale, 3),
+        surrendered: Boolean(dmg.surrendered),
+        sunk: Boolean(dmg.sunk),
+        casualties: dmg.crewCasualties ? {
+          total: dmg.crewCasualties.total,
+          able: dmg.crewCasualties.able,
+          wounded: dmg.crewCasualties.wounded,
+          killed: dmg.crewCasualties.killed,
+        } : undefined,
+      } : undefined,
+      encounter: encActive ? {
+        name: encVessel.boat.shipName,
+        faction: encVessel.faction,
+        colors: encVessel.boat.colors,
+        x: num(encVessel.boat.x, 1),
+        z: num(encVessel.boat.z, 1),
+        heading: num(encVessel.boat.heading, 1),
+        surrendered: Boolean(encVessel.boat.damage?.surrendered),
+      } : undefined,
+    };
+    return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
+  };
+  let lastUrlSyncMs = 0;
+  const syncBrowserUrlState = (now = performance.now(), force = false) => {
+    if (IS_HEADLESS_TEST && !force) return;
+    if (!force && now - lastUrlSyncMs < 4000) return;
+    lastUrlSyncMs = now;
+    try {
+      const url = createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload());
+      history.replaceState(null, '', url);
+      if (!sharePanel.hidden) shareInput.value = url;
+    } catch { /* standalone file */ }
+  };
   shareButton.onclick = async () => {
-    const url = createShareLink(location.href, P, boat, cameraMode,{cam,orbit:shipOrbit,astronomy:astronomy.share()});
+    const url = createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload());
     setPanelOpen(false);setBoatOpen(false);setCaptainOpen(false);setCameraOpen(false);landfallUI.close();
     setShareOpen(true); shareInput.value = url;
     // Also leave a shareable address in the browser if clipboard access is unavailable.
-    try { history.replaceState(null, '', url); } catch { /* standalone file */ }
+    try { history.replaceState(null, '', url); lastUrlSyncMs = performance.now(); } catch { /* standalone file */ }
     try {
       await navigator.clipboard.writeText(url);
-      shareStatus.textContent = 'Link copied. It includes the sea, lighting, boat, and camera mode settings.';
+      shareStatus.textContent = 'Link copied. It includes position, ship, voyage state, sea, lighting, and camera settings.';
     } catch {
       shareInput.focus(); shareInput.select();
       shareStatus.textContent = 'Select and copy this link to share your settings.';
@@ -52571,15 +52817,20 @@ async function main() {
       target.faction=isHostile?'enemy':'friendly';
       if(target.follower){
         target.follower.faction=target.faction;
+        target.follower.combatInitialized=false;
         if(mode==='hail'){
           const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
           target.follower.formation={trail:0.12,side:sideSign*2.2};
           target.follower.status=`Hailed (${enc?.shipName||'Consort'})`;
+        }else if(mode==='engage'){
+          target.follower.salvoDelay=1.2;
+          target.follower.status=`Engaging (${enc?.shipName||'Corsair'})`;
         }
       }
       if(target.boat){
         target.boat.showProw=true;
         target.boat.faction=target.faction;
+        target.boat.aiGunneryAttended=true;
         target.boat.shipName=enc?.shipName??enc?.archetype?.title??'Strange Sail';
         target.boat.battleColors=enc?.battleColors??(enc?.actuallyHostile?'jolly-roger':(enc?.colors??'castile'));
         const chosenColors=mode==='engage'&&enc?.actuallyHostile
@@ -52596,13 +52847,24 @@ async function main() {
         const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
         const brgRad=mode==='hail'
           ?((boat.heading+sideSign*78)*Math.PI)/180
+          :mode==='engage'
+          ?((boat.heading+sideSign*68)*Math.PI)/180
           :((enc?.bearingDeg??(boat.heading+sideSign*30))*Math.PI)/180;
-        const distM=mode==='hail'?52:mode==='engage'?260:420;
+        const distM=mode==='hail'?52:mode==='engage'?165:420;
         target.boat.x=boat.x+Math.sin(brgRad)*distM;
         target.boat.z=boat.z-Math.cos(brgRad)*distM;
-        target.boat.heading=mode==='hail'?boat.heading:((boat.heading+160)%360+360)%360;
+        target.boat.heading=mode==='hail'
+          ?boat.heading
+          :mode==='engage'
+          ?((boat.heading-sideSign*22)%360+360)%360
+          :((boat.heading+160)%360+360)%360;
         target.boat.surgeVelocity=mode==='hail'?(boat.surgeVelocity??2.5):2.8;
         target.boat.revision=(target.boat.revision??0)+1;
+        if(mode==='engage'&&isHostile&&target.gunnery){
+          const initialSide=sideSign<0?'starboard':'port';
+          target.gunnery.readyAtQuarters?.(initialSide);
+          if(target.follower)target.follower.combatInitialized=true;
+        }
         if(mode==='hail'||mode==='engage'){
           const dx=target.boat.x-boat.x,dz=target.boat.z-boat.z;
           const worldAngle=Math.atan2(dx,-dz);
@@ -52621,6 +52883,28 @@ async function main() {
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
       onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail'}),
       onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage'}),
+      onCanvasOrder:id=>{
+        shipGuns.standDown();
+        const crewOrder=id==='full'?'full':id==='reefed'?'reduced':id==='storm'?'weather':id==='heave-to'?'furl':'watch';
+        const savedTargets=SAIL_KEYS.map(k=>boat[k]);
+        crew?.order(boat,crewOrder);
+        if(id==='working'||id==='heave-to'){
+          for(let i=0;i<SAIL_KEYS.length;i++)boat[SAIL_KEYS[i]]=savedTargets[i];
+        }
+        commandFriendlyFleet(vessels,{type:'crew',id:crewOrder},{anchorEnv:anchorEnvironment});
+        if(typeof propulsionInput!=='undefined'&&propulsionInput)propulsionInput.value=boat.propulsion;
+        if(typeof sailInputs!=='undefined'&&sailInputs.length){
+          for(const [i,key] of SAIL_KEYS.entries()){
+            if(sailInputs[i]){
+              sailInputs[i].input.value=boat[key]*100;
+              sailInputs[i].output.textContent=Math.round(boat[key]*100)+'%';
+            }
+          }
+        }
+        if(typeof showPropulsionControls==='function')showPropulsionControls();
+        updateCrewUI();
+        helm?.update?.(performance.now(),true);
+      },
       regionLatLon:(t,x,z)=>islandCoordinates(x,z,t.region),
       onSpectrum:()=>{needSpectrum=true;},
       onEnv:()=>{envFull=true;},
@@ -52651,6 +52935,76 @@ async function main() {
     if(qs.get('voyage')==='resume'||(qs.get('voyage')==='1'&&voyageCtl.hasSavedVoyage()&&qs.get('newVoyage')!=='1'))voyageCtl.resume()||voyageCtl.start();
     else if(qs.get('voyage')==='1')voyageCtl.start({difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     else voyageCtl.start({passive:true,showHud:qs.get('ui')!=='0',difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
+    // Restore URL-encoded position, ship colors, view station, voyage state, damage, and active encounter
+    if(qs.has('colors')&&SHIP_COLORS[qs.get('colors')]){
+      setVesselColors(boat,qs.get('colors'));
+      if(colorsSelect)colorsSelect.value=boat.colors;
+    }
+    if(qs.has('station')){
+      setBoatViewStation(boat,qs.get('station'));
+    }
+    if(voyageCtl.voyage){
+      const v=voyageCtl.voyage;
+      const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
+      if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
+        v.truePos.lat=qLat;v.truePos.lon=qLon;
+        v.dr.lat=qs.has('drLat')&&Number.isFinite(Number(qs.get('drLat')))?Number(qs.get('drLat')):qLat;
+        v.dr.lon=qs.has('drLon')&&Number.isFinite(Number(qs.get('drLon')))?Number(qs.get('drLon')):qLon;
+      }
+      if(urlGameState?.voyage){
+        const uv=urlGameState.voyage;
+        if(Number.isFinite(uv.day))v.dayAtSea=uv.day;
+        if(Number.isFinite(uv.dateMs))v.dateMs=uv.dateMs;
+        if(uv.stores||Number.isFinite(uv.waterDays)){
+          if(Number.isFinite(uv.waterDays))v.stores.waterDays=uv.waterDays;
+          if(Number.isFinite(uv.foodDays))v.stores.foodDays=uv.foodDays;
+        }
+        if(Number.isFinite(uv.hull))v.ship.hull=uv.hull;
+        if(Number.isFinite(uv.morale))v.crew.morale=uv.morale;
+      }
+      if(qs.has('canvas')&&['full','working','reefed','storm','heave-to'].includes(qs.get('canvas'))){
+        voyageCtl.orderCanvas(qs.get('canvas'));
+      }
+      if(qs.has('course')&&Number.isFinite(Number(qs.get('course')))){
+        if(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot){
+          voyageCtl.orderCompassCourse(Number(qs.get('course')));
+        }else{
+          v.compassCourse=((Number(qs.get('course'))%360)+360)%360;
+        }
+      }
+      if(qs.has('warp')&&['deck','watch','passage','crossing'].includes(qs.get('warp'))&&qs.get('warp')!=='deck'){
+        voyageCtl.setWarp(qs.get('warp'));
+      }
+    }
+    if(urlGameState?.ship?.set&&Array.isArray(urlGameState.ship.set)&&boat.sailState?.set){
+      for(let i=0;i<Math.min(3,urlGameState.ship.set.length);i++){
+        if(Number.isFinite(urlGameState.ship.set[i]))boat.sailState.set[i]=urlGameState.ship.set[i];
+      }
+    }
+    if(urlGameState?.damage&&boat.damage){
+      const ud=urlGameState.damage;
+      if(Number.isFinite(ud.hullIntegrity))boat.damage.hullIntegrity=ud.hullIntegrity;
+      if(Number.isFinite(ud.battleMorale))boat.damage.battleMorale=ud.battleMorale;
+      if(ud.surrendered)strikeVesselColors(boat,'Restored surrendered state');
+      if(ud.casualties&&boat.damage.crewCasualties){
+        Object.assign(boat.damage.crewCasualties,ud.casualties);
+      }
+    }
+    if(urlGameState?.encounter&&vessels[1]){
+      const ue=urlGameState.encounter;
+      activateEncounterVessel({
+        shipName:ue.name,
+        actuallyHostile:ue.faction==='enemy',
+        apparentHostile:ue.faction==='enemy',
+        colors:ue.colors,
+        battleColors:ue.colors,
+      },{mode:ue.faction==='enemy'?'engage':'hail'});
+      if(Number.isFinite(ue.x))vessels[1].boat.x=ue.x;
+      if(Number.isFinite(ue.z))vessels[1].boat.z=ue.z;
+      if(Number.isFinite(ue.heading))vessels[1].boat.heading=ue.heading;
+      if(ue.surrendered)strikeVesselColors(vessels[1].boat,'Surrendered');
+    }
+    updateCrewUI();
     window.oceanVoyage=voyageCtl;
   }
   performanceButton=document.createElement('button');performanceButton.id='performance-toggle';performanceButton.type='button';performanceButton.className='icon-button';
@@ -52812,11 +53166,21 @@ async function main() {
     const order=value===1?'full':value===0?'furl':'reduced';
     shipGuns.standDown();
     if(!crew?.order(boat,order)){boat.propulsion='sail';for(const key of SAIL_KEYS)boat[key]=value;}
+    if(voyageCtl?.voyage){
+      const vCanvas=value===1?'full':value===0?'heave-to':'reefed';
+      voyageCtl.voyage.canvas=vCanvas;
+      const vSel=voyageCtl.hud?.querySelector?.('select');
+      if(vSel)vSel.value=vCanvas;
+    }
     commandFriendlyFleet(vessels,{type:'crew',id:order},{anchorEnv:anchorEnvironment});
     sceneAudio.order(order,{boat});
     propulsionInput.value=boat.propulsion;
-    for(const [i,key] of SAIL_KEYS.entries())sailInputs[i].input.value=boat[key]*100;
+    for(const [i,key] of SAIL_KEYS.entries()){
+      sailInputs[i].input.value=boat[key]*100;
+      sailInputs[i].output.textContent=Math.round(boat[key]*100)+'%';
+    }
     showPropulsionControls();updateCrewUI();
+    syncBrowserUrlState(performance.now(),true);
   },()=>{propulsionInput.value=boat.propulsion;showPropulsionControls();},{
     gunnery:shipGuns,
     anchor,
@@ -53642,6 +54006,7 @@ async function main() {
     },()=>{p.pending=false;});}}
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
+    syncBrowserUrlState(now);
     frameWorkMs=performance.now()-cpuFrameStart;
   }
 
