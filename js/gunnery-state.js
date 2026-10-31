@@ -173,7 +173,8 @@ function gunneryFireQueued(state,environment,end){
     const speed=gun.muzzleSpeed*speedMul*(1+(gunneryRandom(state)*2-1)*gun.speedVariation),inherited=gunneryVector(muzzle.velocity);
     const velocity=aimed.map((x,i)=>x*speed+inherited[i]),shotId=++state.shotSequence;
     const subCount=ammo==='grape'&&state.queue.length<=8&&state.projectiles.length+3<=state.maxProjectiles?3:1;
-    const subMass=gun.mass/subCount;
+    const firepowerMul=Math.max(.25,Number(environment.boat?.plunderedFirepowerMultiplier)||1);
+    const subMass=(gun.mass*firepowerMul)/subCount;
     const subRadius=ammo==='grape'?(gun.diameter/2)*.55:gun.diameter/2;
     const sweepRadius=ammo==='chain'?gun.diameter*1.85:subRadius;
     for(let s=0;s<subCount;s++){

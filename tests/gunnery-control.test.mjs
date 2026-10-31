@@ -904,3 +904,74 @@ test('URL state restoration with follower=0&fleet= and lat/lon restores onto cre
  const allowRestoredEncounter=qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='');
  assert.equal(allowRestoredEncounter,false,'does not re-enable encounter ship when follower=0 and fleet is empty');
 });
+
+test('captured prize vessel supports ally consort, impress crew & plunder cannon/supplies, and scuttle for hull repair materials',async()=>{
+ const {createDockingBoardingState}=await import('../js/boarding-docking.js');
+ const {createFollower,steerFollower}=await import('../js/follower.js');
+
+ const playerBoat={id:'player',modelId:'nina',name:'Niña',length:20,beam:6,heading:90,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'portugal',sailFore:1,sailMain:1,sailMizzen:1,surgeVelocity:3.5};
+ playerBoat.hydrodynamics=boatHydrodynamics(20,6);
+ createVesselDamageState(playerBoat);
+ playerBoat.damage.hullIntegrity=0.55;
+ playerBoat.damage.rigIntegrity=0.60;
+ playerBoat.damage.mastIntegrity={fore:0.65,main:0.70,mizzen:0.80};
+ playerBoat.damage.crewCasualties.wounded=3;
+ playerBoat.damage.crewCasualties.able=playerBoat.damage.crewCasualties.total-3;
+ const playerCompany=createCompany(undefined,'nina',{boat:playerBoat});
+ const initialCrewCount=playerCompany.crew.length;
+
+ const makePrize=(name)=>{
+  const b={id:'prize-'+name,modelId:'nina',name,shipName:name,length:20,beam:6,heading:90,x:-40,z:25,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'surrender',sailFore:0,sailMain:0,sailMizzen:0};
+  b.hydrodynamics=boatHydrodynamics(20,6);
+  createVesselDamageState(b);
+  b.damage.surrendered=true;
+  const comp=createCompany(undefined,'nina',{boat:b,faction:'enemy'});
+  const fol=createFollower({trail:2.2,side:1.4},{faction:'enemy'});
+  return {boat:b,company:comp,follower:fol,faction:'enemy',isPirate:true};
+ };
+
+ const prize1=makePrize('Le Faucon');
+ const prize2=makePrize('La Salamandre');
+ const prize3=makePrize('La Reine');
+ const db=createDockingBoardingState(playerBoat,{
+  company:playerCompany,
+  getAdditionalVessels:()=>[prize1,prize2,prize3],
+ });
+ const voyage={provisions:{food:30,water:25},log:[]};
+
+ // 1. Capture prize1 and make her an Allied Consort in the fleet
+ db.capturePrizeVessel(prize1,'surrendered');
+ const allyRes=db.resolvePrizeDisposition(prize1,'ally',{voyage});
+ assert.equal(allyRes.ok,true);
+ assert.equal(prize1.faction,'friendly','prize1 becomes friendly ally');
+ assert.equal(prize1.boat.allyConsort,true,'marked as allyConsort');
+ assert.equal(prize1.boat.damage.surrendered,false,'surrendered flag cleared so she can set sail');
+ // Verify steerFollower sails her under player colors instead of resetting to surrender
+ steerFollower(prize1.follower,prize1.boat,playerBoat,0.1,8,Math.PI);
+ assert.equal(prize1.boat.colors,'portugal','allied prize keeps player colors while sailing in fleet');
+ assert.ok(prize1.boat.sailMain>0.2,'allied prize sets canvas to follow player');
+
+ // 2. Capture prize2 and Impress Crew & Plunder Cannon/Supplies
+ db.capturePrizeVessel(prize2,'boarded-and-fought');
+ const foodBefore=voyage.provisions.food;
+ const impressRes=db.resolvePrizeDisposition(prize2,'impress-plunder',{voyage});
+ assert.equal(impressRes.ok,true);
+ assert.ok(impressRes.impressedCount>=2,'impresses able hands from captured prize');
+ assert.equal(playerCompany.crew.length,initialCrewCount+impressRes.impressedCount,'adds impressed crew to player roster');
+ assert.ok(impressRes.plunderedCannons>=1,'plunders cannon from captured prize');
+ assert.ok(playerBoat.plunderedFirepowerMultiplier>1.0,'boosts player broadside firepower multiplier');
+ assert.ok(voyage.provisions.food>foodBefore,'adds plundered provisions to voyage stores');
+ assert.equal(prize2.boat.disarmedPrize,true,'marks prize2 as disarmed and adrift');
+
+ // 3. Capture prize3 and Scuttle for Hull & Rig Repair Timber
+ db.capturePrizeVessel(prize3,'boarded-and-fought');
+ const hullBefore=playerBoat.damage.hullIntegrity;
+ const rigBefore=playerBoat.damage.rigIntegrity;
+ const scuttleRes=db.resolvePrizeDisposition(prize3,'scuttle-repair',{voyage});
+ assert.equal(scuttleRes.ok,true);
+ assert.ok(playerBoat.damage.hullIntegrity>hullBefore+0.25,`repairs player hull using salvaged oak timber (${hullBefore} -> ${playerBoat.damage.hullIntegrity})`);
+ assert.ok(playerBoat.damage.rigIntegrity>rigBefore+0.2,`repairs player rig using salvaged spars & canvas (${rigBefore} -> ${playerBoat.damage.rigIntegrity})`);
+ assert.equal(prize3.boat.sunk,true,'scuttles prize3 after stripping repair materials');
+ assert.equal(prize3.boat.showProw,false,'hides scuttled prize hull');
+});
+

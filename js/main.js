@@ -210,7 +210,7 @@ async function main() {
     const faction=normalizeVesselFaction(entry,{broadside:BROADSIDE_SCENARIO,index});
     return [{...entry,faction,formation:BROADSIDE_SCENARIO?broadsideFormation(index,{side:BROADSIDE_SIDE,rangeLengths:broadsideRangeLengths}):fleetFormation(index)}];
   });
-  const standbyEncounterSpec=!IS_HEADLESS_TEST&&activeFleetSpecs.length===0&&qs.get('noEncounterShip')!=='1'&&qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='')
+  const standbyEncounterSpec=!IS_HEADLESS_TEST&&activeFleetSpecs.length===0&&qs.get('noEncounterShip')!=='1'
     ?[{id:'encounter-1',modelId:SHIP_ID,faction:'friendly',dormantEncounter:true,formation:fleetFormation(0)}]
     :[];
   const fleetSpecs=[{id:'player',modelId:SHIP_ID,faction:'friendly'},...activeFleetSpecs,...standbyEncounterSpec];
@@ -1061,13 +1061,15 @@ async function main() {
     company:crew?.state??null,
     getAdditionalVessels:()=>followerEnabled?vessels.slice(1).filter(v=>v?.boat?.showProw):[],
     onEvent:ev=>{
-      if(ev.type==='vessel-captured'&&voyageCtl?.voyage){
-        const p=ev.plunder;
-        if(voyageCtl.voyage.provisions){
+      if(ev.type==='vessel-captured'){
+        if(voyageCtl?.presentPrizeDisposition){
+          voyageCtl.presentPrizeDisposition(ev.vessel,ev.plunder);
+        }else if(voyageCtl?.voyage?.provisions){
+          const p=ev.plunder;
           voyageCtl.voyage.provisions.water=Math.min(90,(voyageCtl.voyage.provisions.water??30)+(p?.waterDays??10));
           voyageCtl.voyage.provisions.food=Math.min(120,(voyageCtl.voyage.provisions.food??40)+(p?.foodDays??14));
         }
-        voyageCtl.logExternal?.(`🏴 ${ev.state.statusText}`,'combat');
+        voyageCtl?.logExternal?.(`🏴 ${ev.state.statusText}`,'combat');
       }else if(ev.type==='boarding-repulsed'){
         voyageCtl?.logExternal?.(`⚔️ ${ev.state.statusText}`,'combat');
       }else if(ev.type==='dock-complete'||ev.type==='cast-off-complete'){
@@ -1089,6 +1091,124 @@ async function main() {
     fleet:qs.get('fleetView')==='1',wildlife:qs.get('dolphinView')==='1',fleetZoom:1,radius:32 };
   const eyePosition = new Float32Array(3);
   const boatForward = new Float32Array(3), boatRight = new Float32Array(3), boatUp = new Float32Array(3);
+
+  // Brass Spyglass optical zoom (4.4×) and Crow's Nest reticle overlay
+  const BASE_FOV_Y = cam.fovY;
+  const SPYGLASS_FOV_Y = 12.5 * D2R;
+  let spyglassActive = false;
+  let spyglassTracking = false;
+  let spyglassYawOffset = 0;
+  let spyglassPitchOffset = 0;
+  const spyglassStyle = document.createElement('style');
+  spyglassStyle.textContent = `
+    body.spyglass-active #voyage-hud {
+      left: 14px !important;
+      transform: none !important;
+      max-width: 390px !important;
+      z-index: 25 !important;
+    }
+    body.spyglass-active #voyage-hud > .voyage-row:not(.voyage-clock) {
+      display: none !important;
+    }
+  `;
+  document.head.append(spyglassStyle);
+  const spyglassOverlay = document.createElement('div');
+  spyglassOverlay.id = 'spyglass-overlay';
+  spyglassOverlay.hidden = true;
+  spyglassOverlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:18;display:flex;flex-direction:column;justify-content:space-between;align-items:center;background:radial-gradient(circle at 50% 50%, rgba(16,24,28,0) 34%, rgba(28,20,10,0.42) 41%, rgba(8,6,4,0.92) 49%, rgba(4,3,2,0.98) 100%);';
+  spyglassOverlay.innerHTML = `
+    <div style="margin-top:88px;padding:6px 14px;border-radius:999px;background:rgba(18,14,9,0.82);border:1px solid rgba(218,176,96,0.55);color:#f3dfb6;font:600 12px/1.3 system-ui,sans-serif;letter-spacing:0.06em;text-transform:uppercase;box-shadow:0 4px 16px rgba(0,0,0,0.5);">🔭 Crow’s Nest Spyglass · 4.4× Optical</div>
+    <div style="position:relative;width:min(72vmin,540px);height:min(72vmin,540px);border-radius:50%;border:3px solid rgba(214,168,82,0.72);box-shadow:inset 0 0 42px rgba(214,168,82,0.22), 0 0 0 2px rgba(40,28,12,0.9);">
+      <div style="position:absolute;left:50%;top:8%;bottom:8%;width:1px;background:rgba(235,204,138,0.36);"></div>
+      <div style="position:absolute;top:50%;left:8%;right:8%;height:1px;background:rgba(235,204,138,0.36);"></div>
+      <div style="position:absolute;left:50%;top:50%;width:18px;height:18px;transform:translate(-50%,-50%);border:1px solid rgba(245,215,148,0.65);border-radius:50%;"></div>
+    </div>
+    <div id="spyglass-telemetry" style="margin-bottom:112px;padding:8px 16px;border-radius:10px;background:rgba(16,13,9,0.88);border:1px solid rgba(214,168,82,0.55);color:#f5e6c4;font:500 13px/1.4 system-ui,sans-serif;display:flex;gap:12px;align-items:center;pointer-events:auto;box-shadow:0 6px 20px rgba(0,0,0,0.55);">
+      <span id="spyglass-readout">Scanning the horizon…</span>
+      <button type="button" id="spyglass-close-btn" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(214,168,82,0.6);background:rgba(214,168,82,0.18);color:#ffe9b8;cursor:pointer;font:600 12px system-ui,sans-serif;">Lower Glass (Z)</button>
+    </div>
+  `;
+  document.body.append(spyglassOverlay);
+  const spyglassReadoutEl = spyglassOverlay.querySelector('#spyglass-readout');
+  const spyglassCloseBtn = spyglassOverlay.querySelector('#spyglass-close-btn');
+
+  function updateSpyglassReadout() {
+    if (!spyglassActive || !spyglassReadoutEl) return;
+    const targetV = followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1] : null;
+    if (targetV?.boat) {
+      const tb = targetV.boat;
+      const dx = (tb.x ?? 0) - (boat.x ?? 0), dz = (tb.z ?? 0) - (boat.z ?? 0);
+      const distM = Math.round(Math.hypot(dx, dz));
+      const brgDeg = Math.round(((Math.atan2(dx, -dz) * 180) / Math.PI + 360) % 360);
+      const hullPct = Math.round(((tb.damage?.hullIntegrity ?? 1) || 1) * 100);
+      const colorsInfo = getShipColorsInfo(tb.colors);
+      spyglassReadoutEl.textContent = `${tb.shipName || 'Sighted Vessel'} · ${colorsInfo.shortLabel} · Range ${distM} m · Bearing ${brgDeg}° · Hull ${hullPct}%`;
+    } else {
+      const lookBrg = Math.round((((boat.heading || 0) + (cam.yaw / D2R)) % 360 + 360) % 360);
+      spyglassReadoutEl.textContent = `Horizon bearing ${lookBrg}° · Drag mouse or ↑↓←→ to sweep the horizon`;
+    }
+  }
+
+  function aimCameraAtVessel(targetBoat, yawOffset = 0, pitchOffset = 0) {
+    if (!targetBoat) return;
+    setBoatViewStation(boat, 'crows-nest');
+    if (typeof setCameraMode === 'function') setCameraMode('boat');
+    else { cameraMode = 'boat'; boat.enabled = true; }
+    stepBoatView(boat, 2.5);
+    boatEyePosition(eyePosition, boat);
+    cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+    const tx = targetBoat.x ?? 0;
+    const ty = (targetBoat.heave ?? 0) + 4.2;
+    const tz = targetBoat.z ?? 0;
+    const dx = tx - cam.x, dy = ty - cam.y, dz = tz - cam.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const wx = dx / len, wy = dy / len, wz = dz / len;
+    const h = (boat.heading || 0) * D2R, p = boat.pitch || 0, r = boat.roll || 0;
+    const ch = Math.cos(h), sh = Math.sin(h);
+    const cp = Math.cos(p), sp = Math.sin(p);
+    const cr = Math.cos(r), sr = Math.sin(r);
+    const xx = ch * wx + sh * wz;
+    const zp = -sh * wx + ch * wz;
+    const yp = wy;
+    const yy = cp * yp + sp * zp;
+    const fz = -sp * yp + cp * zp;
+    const fx = cr * xx + sr * yy;
+    const fy = -sr * xx + cr * yy;
+    const viewYaw = Math.atan2(fx, -fz);
+    const baseYaw = viewYaw - (boat.eyeSide ?? 1) * 15 * D2R;
+    const basePitch = Math.asin(Math.max(-1, Math.min(1, fy)));
+    cam.yaw = baseYaw + yawOffset;
+    cam.pitch = Math.max(-0.6, Math.min(0.45, basePitch + pitchOffset));
+  }
+
+  function setSpyglassActive(active, targetBoat = null) {
+    spyglassActive = Boolean(active);
+    spyglassOverlay.hidden = !spyglassActive;
+    spyglassOverlay.style.display = spyglassActive ? 'flex' : 'none';
+    document.body.classList.toggle('spyglass-active', spyglassActive);
+    if (spyglassActive) {
+      spyglassYawOffset = 0;
+      spyglassPitchOffset = 0;
+      const autoTarget = targetBoat ?? (followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1].boat : null);
+      if (autoTarget) {
+        spyglassTracking = true;
+        aimCameraAtVessel(autoTarget, 0, 0);
+      } else {
+        spyglassTracking = false;
+        setBoatViewStation(boat, 'crows-nest');
+        if (typeof setCameraMode === 'function') setCameraMode('boat');
+        else { cameraMode = 'boat'; boat.enabled = true; }
+        stepBoatView(boat, 2.5);
+      }
+      cam.fovY = SPYGLASS_FOV_Y;
+      updateSpyglassReadout();
+    } else {
+      spyglassTracking = false;
+      cam.fovY = BASE_FOV_Y;
+    }
+    helm?.update?.(performance.now(), true);
+  }
+  spyglassCloseBtn?.addEventListener('click', () => setSpyglassActive(false));
   const keys = Object.create(null);
   addEventListener('keydown', (e) => {
     if (/INPUT|SELECT/.test(e.target.tagName)) return;
@@ -1099,11 +1219,19 @@ async function main() {
     if (e.code === 'KeyH' && !e.repeat) togglePanel();
     if (e.code === 'KeyP' && !e.repeat) setSimPaused(!simPaused);
     if (e.code === 'KeyX') boat.rudderTarget = 0;
-    if (e.code === 'KeyB' && !e.repeat) setCameraMode(boat.enabled ? 'free' : 'boat');
+    if (e.code === 'KeyB' && !e.repeat) {
+      if (spyglassActive) setSpyglassActive(false);
+      setCameraMode(boat.enabled ? 'free' : 'boat');
+    }
     if (e.code === 'KeyV' && !e.repeat) {
-      setBoatViewStation(boat, boat.viewStation === 'crows-nest' ? 'deck' : 'crows-nest');
+      const nextSt = boat.viewStation === 'crows-nest' ? 'deck' : 'crows-nest';
+      if (nextSt !== 'crows-nest' && spyglassActive) setSpyglassActive(false);
+      setBoatViewStation(boat, nextSt);
       setCameraMode('boat');
       helm?.update?.(performance.now(), true);
+    }
+    if (e.code === 'KeyZ' && !e.repeat) {
+      setSpyglassActive(!spyglassActive);
     }
     if (e.code === 'KeyF' && !e.repeat && shipGuns.state.guns.length > 0) {
       const side = shipGuns.selectedSide || BROADSIDE_SIDE;
@@ -1132,6 +1260,9 @@ async function main() {
     if(cameraMode === 'ship') {
       shipOrbit.yaw -= dx * 0.005;
       shipOrbit.elevation = orbitElevation(shipOrbit.elevation+dy*0.004);
+    } else if (spyglassActive && spyglassTracking) {
+      spyglassYawOffset += dx * 0.00075;
+      spyglassPitchOffset = Math.max(-0.4, Math.min(0.35, spyglassPitchOffset - dy * 0.00075));
     } else {
       cam.yaw += dx * 0.0022;
       cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - dy * 0.0022));
@@ -1284,6 +1415,13 @@ async function main() {
       stepBoatView(boat,dt);
       boatEyePosition(eyePosition,boat);
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
+      if (spyglassActive) {
+        const trackBoat = followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1].boat : null;
+        if (trackBoat && spyglassTracking) {
+          aimCameraAtVessel(trackBoat, spyglassYawOffset, spyglassPitchOffset);
+        }
+        updateSpyglassReadout();
+      }
       return;
     }
     if (cameraMode === 'ship') {
@@ -1721,6 +1859,9 @@ async function main() {
   castOffBtn.textContent='🪢 Cast off lines';
   const boardShipBtn=document.createElement('button');boardShipBtn.type='button';boardShipBtn.id='board-ship-btn';
   boardShipBtn.textContent='⚔️ Grapple & board vessel';
+  const sightSailBtn=document.createElement('button');sightSailBtn.type='button';sightSailBtn.id='sight-sail-btn';
+  sightSailBtn.textContent='🔭 Sight Strange Sail';
+  sightSailBtn.title='Spot a strange sail on the horizon and issue lookout orders (Spyglass, Attack, Board, or Hail)';
   const boardingStatus=document.createElement('p');boardingStatus.id='boarding-docking-status';boardingStatus.setAttribute('role','status');
   boardingStatus.style.cssText='margin:0;font-size:.9em;opacity:.92';
   dockPierBtn.onclick=()=>{
@@ -1749,7 +1890,12 @@ async function main() {
     dockingBoarding.boardVessel(vessels[1]);
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
-  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn);
+  sightSailBtn.onclick=()=>{
+    setCaptainOpen(false);
+    voyageCtl?.triggerSailEncounter?.();
+    updateCrewUI();helm?.update?.(performance.now(),true);
+  };
+  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn,sightSailBtn);
   boardingSection.append(boardingActionsRow,boardingStatus);
   captainBody.append(boardingSection);
   function updateAnchorUI(){
@@ -1764,8 +1910,18 @@ async function main() {
   const companyRoster=crew?.state.crew??[],women=companyRoster.filter(person=>person.sex==='female').length,men=companyRoster.filter(person=>person.sex==='male').length;
   crewSummary.textContent='Ship’s company'+(companyRoster.length?' · '+women+' women · '+men+' men':' · unavailable');crewDetails.append(crewSummary);
   const crewList=document.createElement('ul');crewList.id='crew-roster';
-  const crewRows=crew?crew.state.crew.map(s=>{const row=document.createElement('li');row.textContent=`${s.name} · ${s.role}`;crewList.append(row);return row;}):[];
+  let crewRows=crew?crew.state.crew.map(s=>{const row=document.createElement('li');row.textContent=`${s.name} · ${s.role}`;crewList.append(row);return row;}):[];
   crewDetails.append(crewList);captainBody.append(crewDetails);
+  function refreshCrewRosterDOM(){
+    if(!crew?.state?.crew)return;
+    const roster=crew.state.crew;
+    const wCount=roster.filter(p=>p.sex==='female').length,mCount=roster.filter(p=>p.sex==='male').length;
+    crewSummary.textContent='Ship’s company · '+wCount+' women · '+mCount+' men';
+    if(crewRows.length!==roster.length){
+      crewList.replaceChildren();
+      crewRows=roster.map(s=>{const row=document.createElement('li');row.textContent=`${s.name} · ${s.role}`;crewList.append(row);return row;});
+    }
+  }
   function updateCrewUI(){
     if(colorsSelect&&document.activeElement!==colorsSelect)colorsSelect.value=boat.colors??DEFAULT_SHIP_COLORS;
     if(strikeBtn){
@@ -1996,23 +2152,32 @@ async function main() {
       const o=astronomy.state?.observer;
       return o?{latitude:o.latitude,longitude:o.longitude}:{latitude:astronomy.anchor.latitude,longitude:astronomy.anchor.longitude};
     };
-    const activateEncounterVessel=(enc,{mode='sight'}={})=>{
+    const activateEncounterVessel=(enc,{mode='sight',keepPosition=false}={})=>{
       if(vessels.length<=1)return;
       const target=vessels[1];
+      const wasDormant=Boolean(target.dormantEncounter||!target.boat?.showProw||target.boat?.sunk||target.boat?.captured);
       target.dormantEncounter=false;
       followerEnabled=true;
       boat.followingShip=true;
       if(fleetViewButton)fleetViewButton.disabled=false;
-      const isHostile=mode==='engage'?(enc?.actuallyHostile??true):mode==='sight'?Boolean(enc?.apparentHostile):false;
+      const isHostile=mode==='engage'?true:mode==='sight'?Boolean(enc?.apparentHostile):Boolean(enc?.actuallyHostile);
       target.faction=isHostile?'enemy':'friendly';
+      target.isPirate=Boolean(enc?.actuallyHostile);
       if(target.follower){
         target.follower.faction=target.faction;
         target.follower.combatInitialized=false;
-        if(mode==='hail'){
+        if(mode==='sight'){
           const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
+          target.follower.encounterMode='sighted';
+          target.follower.independentHeading=((enc?.bearingDeg??boat.heading)+sideSign*85+360)%360;
+          target.follower.status=`Sighted (${enc?.shipName||'Strange Sail'})`;
+        }else if(mode==='hail'){
+          const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
+          target.follower.encounterMode=null;
           target.follower.formation={trail:0.12,side:sideSign*2.2};
           target.follower.status=`Hailed (${enc?.shipName||'Consort'})`;
         }else if(mode==='engage'){
+          target.follower.encounterMode=null;
           target.follower.salvoDelay=1.2;
           target.follower.status=`Engaging (${enc?.shipName||'Corsair'})`;
         }
@@ -2027,29 +2192,57 @@ async function main() {
           ?(enc?.battleColors??'jolly-roger')
           :(enc?.colors??'castile');
         setVesselColors(target.boat,chosenColors);
-        if(target.boat.damage){
-          target.boat.damage.surrendered=false;
-          target.boat.damage.surrenderReason=null;
-          target.boat.damage.battleMorale=1.0;
-          target.boat.damage.moraleShock=0;
-          target.boat.damage.moraleState='steady';
+        if(wasDormant){
+          target.boat.captured=false;
+          target.boat.allyConsort=false;
+          target.boat.disarmedPrize=false;
+          target.boat.sunk=false;
+          target.boat.settledWreck=false;
+          if(target.boat.damage){
+            target.boat.damage.hullIntegrity=1.0;
+            target.boat.damage.rigIntegrity=1.0;
+            target.boat.damage.surrendered=false;
+            target.boat.damage.surrenderReason=null;
+            target.boat.damage.sunk=false;
+            target.boat.damage.settledWreck=false;
+            target.boat.damage.battleMorale=1.0;
+            target.boat.damage.moraleShock=0;
+            target.boat.damage.moraleState='steady';
+          }
         }
+        const curDist=Math.hypot((target.boat.x??0)-boat.x,(target.boat.z??0)-boat.z);
+        const shouldPlace=!keepPosition||wasDormant||!Number.isFinite(curDist)||curDist>1200;
         const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
-        const brgRad=mode==='hail'
-          ?((boat.heading+sideSign*78)*Math.PI)/180
-          :mode==='engage'
-          ?((boat.heading+sideSign*68)*Math.PI)/180
-          :((enc?.bearingDeg??(boat.heading+sideSign*30))*Math.PI)/180;
-        const distM=mode==='hail'?52:mode==='engage'?165:420;
-        target.boat.x=boat.x+Math.sin(brgRad)*distM;
-        target.boat.z=boat.z-Math.cos(brgRad)*distM;
-        target.boat.heading=mode==='hail'
-          ?boat.heading
-          :mode==='engage'
-          ?((boat.heading-sideSign*22)%360+360)%360
-          :((boat.heading+160)%360+360)%360;
-        target.boat.surgeVelocity=mode==='hail'?(boat.surgeVelocity??2.5):2.8;
-        target.boat.revision=(target.boat.revision??0)+1;
+        if(shouldPlace){
+          const brgRad=mode==='hail'
+            ?((boat.heading+sideSign*78)*Math.PI)/180
+            :mode==='engage'
+            ?((enc?.bearingDeg??(boat.heading+sideSign*38))*Math.PI)/180
+            :((enc?.bearingDeg??(boat.heading+sideSign*30))*Math.PI)/180;
+          const distM=mode==='hail'?64:mode==='engage'?380:520;
+          let nx=boat.x+Math.sin(brgRad)*distM;
+          let nz=boat.z-Math.cos(brgRad)*distM;
+          if(terrain?.height&&terrain.height(nx,nz)>-2.5){
+            const oppRad=(((boat.heading-sideSign*35)*Math.PI)/180);
+            const ox=boat.x+Math.sin(oppRad)*distM;
+            const oz=boat.z-Math.cos(oppRad)*distM;
+            if(terrain.height(ox,oz)<=-2.5){nx=ox;nz=oz;}
+            else if(typeof terrain.safeStart==='function'){
+              const safe=terrain.safeStart({x:nx,z:nz},target.boat);
+              nx=safe.x;nz=safe.z;
+            }
+          }
+          target.boat.x=nx;
+          target.boat.z=nz;
+          target.boat.heading=mode==='hail'
+            ?boat.heading
+            :mode==='engage'
+            ?((boat.heading-sideSign*22)%360+360)%360
+            :((enc?.bearingDeg??boat.heading)+sideSign*85+360)%360;
+          target.boat.surgeVelocity=mode==='hail'?(boat.surgeVelocity??2.5):2.8;
+          for(const k of SAIL_KEYS)target.boat[k]=0.68;
+          target.boat.revision=(target.boat.revision??0)+1;
+        }
         if(mode==='engage'&&isHostile&&target.gunnery){
           const initialSide=sideSign<0?'starboard':'port';
           target.gunnery.readyAtQuarters?.(initialSide);
@@ -2058,7 +2251,7 @@ async function main() {
         if(mode==='hail'||mode==='engage'){
           const dx=target.boat.x-boat.x,dz=target.boat.z-boat.z;
           const worldAngle=Math.atan2(dx,-dz);
-          cam.yaw=worldAngle-(boat.heading||0)*D2R;
+          cam.yaw=worldAngle-(boat.heading||0)*D2R-(boat.eyeSide??1)*15*D2R;
         }
       }
       updateCrewUI();
@@ -2071,13 +2264,63 @@ async function main() {
       getVessels:()=>vessels.map(v=>v.boat),
       getMarineLife:()=>{marineLife.load?.().catch(()=>{});return marineLife;},
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
-      onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail'}),
-      onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage'}),
+      onInspectEncounter:enc=>{
+        activateEncounterVessel(enc,{mode:'sight',keepPosition:true});
+        setSpyglassActive(true,vessels[1]?.boat??null);
+        return undefined;
+      },
+      onBeginPursuit:(enc,pursuitMode)=>{
+        if(spyglassActive)setSpyglassActive(false);
+        if(boat.enabled&&boat.viewStation==='crows-nest')setBoatViewStation(boat,'deck');
+        activateEncounterVessel(enc,{
+          mode:pursuitMode==='hail'&&!enc?.actuallyHostile?'hail':'engage',
+          keepPosition:true,
+        });
+        if(cameraMode==='ship'&&vessels[1]?.boat){
+          const dx=(vessels[1].boat.x??0)-boat.x,dz=(vessels[1].boat.z??0)-boat.z;
+          shipOrbit.yaw=Math.atan2(dx,-dz)+0.32;
+        }
+      },
+      onEnterBattleRange:(enc,pursuitMode)=>{
+        if(spyglassActive)setSpyglassActive(false);
+        const target=vessels[1];
+        if(target?.boat&&(pursuitMode==='fight'||pursuitMode==='board'||enc?.actuallyHostile)){
+          target.faction='enemy';
+          target.boat.faction='enemy';
+          if(target.follower){
+            target.follower.faction='enemy';
+            target.follower.encounterMode=null;
+          }
+          const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
+          const playerSide=sideSign<0?'port':'starboard';
+          shipGuns.readyAtQuarters?.(playerSide);
+          if(crew)manGunStationsImmediate(crew.state,boat);
+          target.gunnery?.readyAtQuarters?.(sideSign<0?'starboard':'port');
+          gunControls?.update?.();
+          helm?.update?.(performance.now(),true);
+        }
+      },
+      onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail',keepPosition:true}),
+      onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage',keepPosition:true}),
       onBoardVessel:enc=>{
-        activateEncounterVessel(enc,{mode:'engage'});
+        activateEncounterVessel(enc,{mode:'engage',keepPosition:true});
         if(vessels[1])dockingBoarding.boardVessel(vessels[1]);
         updateCrewUI();
         helm?.update?.(performance.now(),true);
+      },
+      onPrizeDisposition:(disposition,targetVessel)=>{
+        const res=dockingBoarding.resolvePrizeDisposition(targetVessel||vessels[1],disposition,{
+          voyage:voyageCtl?.voyage,
+          playerVessel:vessels[0],
+        });
+        if(res?.ok){
+          voyageCtl?.showToast?.(res.summary,8);
+          dockingBoarding.castOff();
+          refreshCrewRosterDOM();
+          updateCrewUI();
+          gunControls?.update?.();
+          helm?.update?.(performance.now(),true);
+        }
       },
       onCanvasOrder:id=>{
         shipGuns.standDown();
@@ -2428,11 +2671,14 @@ async function main() {
     },
     getCameraMode:()=>cameraMode,
     getShipOrbit:()=>shipOrbit,
+    getSpyglassActive:()=>spyglassActive,
+    onToggleSpyglass:()=>setSpyglassActive(!spyglassActive),
     onToggleView:()=>{
       shipOrbit.fleet=false;shipOrbit.wildlife=false;
       if(cameraMode==='boat'&&boat.viewStation!=='crows-nest'){
         setBoatViewStation(boat,'crows-nest');
       }else if(cameraMode==='boat'){
+        if(spyglassActive)setSpyglassActive(false);
         setBoatViewStation(boat,'deck');
         setCameraMode('ship');
       }else{

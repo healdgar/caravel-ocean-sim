@@ -43,7 +43,7 @@ import {
 } from './landfall-approach.js';
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
 import { formatJulianDate, localSolarHours, greatCircleKm, windDescription } from './ocean-climate.js';
-import { createEncounterDirector } from './encounters.js';
+import { createEncounterDirector, describeEncounterThroughSpyglass } from './encounters.js';
 
 const VOYAGE_STORAGE_KEY = 'waterworld.voyage.v1';
 const voyageWrap360 = (d) => ((d % 360) + 360) % 360;
@@ -108,6 +108,18 @@ export function createVoyageController(cfg) {
     committed: false,
     lastBoat: { x: boat.x, z: boat.z },
     scan: null,
+  };
+
+  // Active 3D ship pursuit / intercept state (steers toward target and stops time dilation at battle range)
+  const pursuit = {
+    active: false,
+    mode: null, // 'fight' | 'board' | 'hail'
+    encounter: null,
+    battleRangeM: 235,
+    boardRangeM: 46,
+    hailRangeM: 88,
+    battleRangeReached: false,
+    actionTriggered: false,
   };
 
   if (loadLandRings) {
@@ -198,9 +210,237 @@ export function createVoyageController(cfg) {
     actions.querySelector('button')?.focus({ preventScroll: true });
   }
 
+  function beginEncounterPursuit(enc, mode = 'fight') {
+    if (!enc || !voyage) return;
+    promoteActive();
+    pursuit.active = true;
+    pursuit.mode = mode;
+    pursuit.encounter = enc;
+    pursuit.battleRangeReached = false;
+    pursuit.actionTriggered = false;
+
+    // Ensure sails are set so the ship makes way toward the target
+    if (voyage.canvas === 'hove' || voyage.canvas === 'bare') {
+      orderCanvas('full');
+    }
+
+    // Prepare the 3D encounter vessel (sets faction/colors/AI without snapping alongside)
+    cfg.onBeginPursuit?.(enc, mode);
+
+    const vessels = cfg.getVessels?.() ?? [];
+    const targetV = vessels[1] ?? null;
+    const tb = targetV?.boat ?? targetV;
+    let dist = Infinity;
+    let brgTrue = enc.bearingDeg ?? boat.heading ?? 0;
+    if (tb && tb.showProw !== false) {
+      const dx = (tb.x ?? 0) - (boat.x ?? 0);
+      const dz = (tb.z ?? 0) - (boat.z ?? 0);
+      dist = Math.hypot(dx, dz);
+      if (dist > 1) {
+        brgTrue = voyageWrap360((Math.atan2(dx, -dz) * 180) / Math.PI);
+      }
+    }
+
+    // Engage helmsman to steer directly toward the target vessel
+    helmsman.engaged = true;
+    manualHelm = false;
+    const compassTarget = voyageWrap360(brgTrue - (voyage.variation ?? 0));
+    orderCourse(helmsman, compassTarget, { beat: true });
+    voyage.compassCourse = helmsman.compassCourse;
+
+    if (tb && tb.showProw !== false && dist > pursuit.battleRangeM) {
+      // Keep time dilation at Watch (60×) while steering to close the distance to battle range!
+      setWarpTier(voyage, 'watch');
+      voyage.rate = Math.min(warpTier('watch').rate, voyage.warpCap ?? 3600);
+      updateHud();
+    } else {
+      // Already within battle range (or headless test without 3D vessel): stop time dilation immediately
+      pursuit.battleRangeReached = true;
+      setWarp('deck');
+      cfg.onEnterBattleRange?.(enc, mode, targetV);
+      if (mode === 'board') {
+        pursuit.actionTriggered = true;
+        pursuit.active = false;
+        cfg.onBoardVessel?.(enc, targetV);
+      } else if (mode === 'hail') {
+        pursuit.actionTriggered = true;
+        pursuit.active = false;
+        cfg.onHailVessel?.(enc, targetV);
+      } else {
+        pursuit.actionTriggered = true;
+        pursuit.active = false;
+        cfg.onEngageVessel?.(enc, { mode: 'fight', targetVessel: targetV });
+      }
+    }
+  }
+
+  function stepEncounterPursuit(dt) {
+    if (!pursuit.active || !voyage) return;
+    const vessels = cfg.getVessels?.() ?? [];
+    const targetV = vessels[1] ?? null;
+    const tb = targetV?.boat ?? targetV;
+    if (!tb || tb.sunk || tb.showProw === false) {
+      pursuit.active = false;
+      return;
+    }
+
+    const dx = (tb.x ?? 0) - (boat.x ?? 0);
+    const dz = (tb.z ?? 0) - (boat.z ?? 0);
+    let dist = Math.hypot(dx, dz);
+    const dirX = dist > 1e-3 ? dx / dist : 0;
+    const dirZ = dist > 1e-3 ? dz / dist : -1;
+
+    // Continuously steer the helmsman toward the target ship's live 3D position
+    if (!manualHelm) {
+      helmsman.engaged = true;
+      const brgTrue = voyageWrap360((Math.atan2(dx, -dz) * 180) / Math.PI);
+      const compassTarget = voyageWrap360(brgTrue - (voyage.variation ?? 0));
+      orderCourse(helmsman, compassTarget, { beat: true });
+      voyage.compassCourse = helmsman.compassCourse;
+    }
+
+    // While outside battle range, close the 3D distance proportional to time dilation so the
+    // player visibly steers toward the distant ship and watches her grow larger on the horizon.
+    if (!pursuit.battleRangeReached) {
+      if (dist > pursuit.battleRangeM) {
+        const playerSpd = Math.max(2.6, Math.hypot(boat.surgeVelocity ?? 0, boat.leewayVelocity ?? 0));
+        const warpFactor = Math.max(1, Math.min(28, (voyage.rate ?? 1) * 0.42));
+        const closeStep = Math.min(dist - (pursuit.battleRangeM - 6), playerSpd * warpFactor * dt);
+        if (closeStep > 0) {
+          tb.x -= dirX * closeStep;
+          tb.z -= dirZ * closeStep;
+          dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
+        }
+      }
+
+      if (dist <= pursuit.battleRangeM) {
+        pursuit.battleRangeReached = true;
+        // Stop time dilation immediately upon entering battle range!
+        setWarpTier(voyage, 'deck');
+        voyage.rate = 1;
+        voyage.targetRate = 1;
+        voyage.warpCap = 1;
+        updateHud();
+
+        const enc = pursuit.encounter;
+        cfg.onEnterBattleRange?.(enc, pursuit.mode, targetV);
+        if (pursuit.mode === 'fight') {
+          cfg.onEngageVessel?.(enc, { mode: 'fight', targetVessel: targetV });
+          showToast(`Within cannon range (${Math.round(dist)} m) of ${enc.shipName} — time dilation stopped (1× On deck)! Run out the guns!`, 8);
+        } else if (pursuit.mode === 'board') {
+          showToast(`Within battle range (${Math.round(dist)} m) — time dilation stopped (1×)! Steering alongside ${enc.shipName} to grapple & board!`, 8);
+        } else if (pursuit.mode === 'hail') {
+          showToast(`Within hailing approach (${Math.round(dist)} m) — time dilation stopped (1×)! Closing to speaking-trumpet range…`, 7);
+        }
+      }
+      return;
+    }
+
+    // Inside battle range at 1× real time:
+    if (pursuit.mode === 'fight') {
+      // Close smoothly into prime broadside range (~135 m), then hand off to live broadside combat
+      if (dist > 140) {
+        const stepIn = Math.min(dist - 135, 9.5 * dt);
+        tb.x -= dirX * stepIn;
+        tb.z -= dirZ * stepIn;
+      } else {
+        pursuit.actionTriggered = true;
+        pursuit.active = false;
+      }
+    } else if (pursuit.mode === 'board') {
+      // Continue steering alongside at 1× real time until within grappling range (~46 m)
+      if (dist > pursuit.boardRangeM) {
+        const stepIn = Math.min(dist - (pursuit.boardRangeM - 4), 14.0 * dt);
+        tb.x -= dirX * stepIn;
+        tb.z -= dirZ * stepIn;
+        dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
+      }
+      if (dist <= pursuit.boardRangeM && !pursuit.actionTriggered) {
+        pursuit.actionTriggered = true;
+        pursuit.active = false;
+        cfg.onBoardVessel?.(pursuit.encounter, targetV);
+      }
+    } else if (pursuit.mode === 'hail') {
+      if (dist > pursuit.hailRangeM) {
+        const stepIn = Math.min(dist - (pursuit.hailRangeM - 4), 12.0 * dt);
+        tb.x -= dirX * stepIn;
+        tb.z -= dirZ * stepIn;
+        dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
+      }
+      if (dist <= pursuit.hailRangeM && !pursuit.actionTriggered) {
+        pursuit.actionTriggered = true;
+        pursuit.active = false;
+        cfg.onHailVessel?.(pursuit.encounter, targetV);
+      }
+    }
+  }
+
+  function presentPrizeDisposition(targetVessel, plunder = {}) {
+    if (!voyage || !targetVessel?.boat) return;
+    const tb = targetVessel.boat;
+    const shipName = tb.shipName || tb.name || 'Captured Prize';
+    const foodDays = plunder.foodDays ?? 12;
+    const waterDays = plunder.waterDays ?? 10;
+    const cannonCount = plunder.cannonCount ?? 2;
+    const ableCrew = plunder.ableCrewToImpress ?? 4;
+    const repairPct = Math.round((plunder.repairHullAmount ?? 0.35) * 100);
+    raiseInterrupt(
+      voyage,
+      {
+        type: 'prize-disposition',
+        title: `⚔️ Prize Taken · ${shipName}`,
+        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find +${foodDays} d food, +${waterDays} d water, ${cannonCount} serviceable cannon, ${ableCrew} able hands, and seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). What are your orders for the prize?`,
+        targetVessel,
+        plunder,
+        choices: [
+          { id: 'ally', label: '🏴 Add to Fleet as Allied Consort' },
+          { id: 'impress-plunder', label: `⚓ Impress Crew (+${ableCrew}) & Plunder Cannon (+${cannonCount})/Stores` },
+          { id: 'scuttle-repair', label: `🔨 Plunder & Scuttle for Hull Repair (+${repairPct}%)` },
+        ],
+        log: `Captured prize ${shipName}. Awaiting captain's disposition orders.`,
+      },
+      'deck'
+    );
+    showCallout(voyage.interrupt);
+    emit('change');
+  }
+
+  function triggerSailEncounter() {
+    promoteActive();
+    if (hud) hud.root.hidden = false;
+    return encounterDirector.spawnSailEncounter(voyage, boat, {
+      marineLife: cfg.getMarineLife?.() ?? null,
+      terrain: getTerrain(),
+      vessels: cfg.getVessels?.() ?? [],
+      onSightVessel: (enc) => cfg.onSightVessel?.(enc),
+      onToast: showToast,
+      onInterrupt: showCallout,
+    });
+  }
+
   function resolveInterrupt(choiceId) {
     const it = voyage?.interrupt;
     if (!it) return;
+    if (it.type === 'sail' && choiceId === 'spyglass') {
+      // Climb to the crow's nest and look at the distant ship through the spyglass without dismissing the tactical choices!
+      const enc = it.encounter;
+      const vessels = cfg.getVessels?.() ?? [];
+      const report = cfg.onInspectEncounter?.(enc, vessels[1] ?? null) ?? describeEncounterThroughSpyglass(enc, vessels[1] ?? null);
+      it.title = `🔭 Crow's Nest Spyglass · ${enc?.shipName ?? 'Strange Sail'}`;
+      it.text = `${report} What are your orders?`;
+      it.choices = [
+        { id: 'fight', label: '⚔️ Clear for action! (Attack)' },
+        { id: 'board', label: '🪝 Grapple & board her!' },
+        { id: 'hail', label: '🎺 Close to hail' },
+        { id: 'hold', label: 'Hold course' },
+        { id: 'avoid', label: 'Bear away to avoid' },
+        { id: 'spyglass', label: '🔭 Re-aim Spyglass' },
+      ];
+      addLog(voyage, report, 'encounter');
+      showCallout(it);
+      emit('change');
+      return;
+    }
     clearInterrupt(voyage);
     showCallout(null);
     if (it.type === 'storm') {
@@ -223,23 +463,17 @@ export function createVoyageController(cfg) {
         onOrderCompassCourse: (c) => orderCompassCourse(c),
         onToast: showToast,
         onHailVessel: (enc) => {
-          setWarp('deck');
-          cfg.onHailVessel?.(enc);
+          beginEncounterPursuit(enc, 'hail');
         },
         onEngageVessel: (enc, opts) => {
-          setWarp('deck');
-          manualHelm = true;
-          helmsman.engaged = false;
-          cfg.onEngageVessel?.(enc, opts);
+          beginEncounterPursuit(enc, opts?.board ? 'board' : 'fight');
         },
         onBoardVessel: (enc) => {
-          setWarp('deck');
-          manualHelm = true;
-          helmsman.engaged = false;
-          if (cfg.onBoardVessel) cfg.onBoardVessel(enc);
-          else cfg.onEngageVessel?.(enc, { board: true });
+          beginEncounterPursuit(enc, 'board');
         },
       });
+    } else if (it.type === 'prize-disposition') {
+      cfg.onPrizeDisposition?.(choiceId, it.targetVessel, it.plunder);
     } else if (it.type === 'arrival') {
       if (choiceId === 'chart') emit('open-chart');
     }
@@ -648,6 +882,9 @@ export function createVoyageController(cfg) {
       onInterrupt: showCallout,
     });
 
+    // Active 3D ship pursuit: steer toward target and stop time dilation at battle range
+    stepEncounterPursuit(dt);
+
     // Weather follows the voyage clock when the voyage is actively engaged.
     const w = voyage.passive
       ? { spectrum: false, env: false }
@@ -991,6 +1228,7 @@ export function createVoyageController(cfg) {
     get voyage() { return voyage; },
     get helmsman() { return helmsman; },
     get approach() { return approach; },
+    get pursuit() { return pursuit; },
     get rate() { return voyage?.rate ?? 1; },
     hud: hud?.root ?? null,
     start,
@@ -1009,6 +1247,9 @@ export function createVoyageController(cfg) {
     tack,
     orderCanvas,
     resolveInterrupt,
+    presentPrizeDisposition,
+    triggerSailEncounter,
+    showToast,
     onKey,
     snapshot() {
       if (!voyage) return null;

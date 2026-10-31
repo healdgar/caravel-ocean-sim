@@ -471,3 +471,93 @@ test('passive Lisbon departure engages helmsman on warp and keeps waves at 1x in
   assert.ok(ctrl.voyage.dateMs > startDate + 100000, 'voyage clock advances at warped rate');
   assert.ok(ctrl.voyage.distanceTrueNm > 0.1, 'geographic distance advances at warped rate');
 });
+
+test('sail encounter supports spyglass inspection, steers toward target ship, and stops time dilation at battle range', () => {
+  const boat = {
+    x: 0,
+    z: 0,
+    heading: 270,
+    length: 20,
+    surgeVelocity: 3.6,
+    leewayVelocity: 0,
+    modelId: 'nina',
+    sailFore: 1,
+    sailMain: 1,
+    sailMizzen: 1,
+  };
+  const targetBoat = {
+    x: -480,
+    z: -180,
+    heading: 180,
+    length: 20,
+    surgeVelocity: 2.8,
+    leewayVelocity: 0,
+    showProw: true,
+    damage: { hullIntegrity: 1.0 },
+  };
+  const P = { windSpeed: 8, windDir: 135, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1, cloudBase: 1.2, cloudDepth: 1.8, cloudDensity: 1, cloudAnvil: 0.05 };
+
+  let spyglassInspected = false;
+  let enteredBattleRange = false;
+  let boardedAtGrappleRange = false;
+
+  const ctrl = createVoyageController({
+    boat,
+    P,
+    getVessels: () => [boat, targetBoat],
+    onSightVessel: (enc) => {
+      const brgRad = (enc.bearingDeg * Math.PI) / 180;
+      targetBoat.x = boat.x + Math.sin(brgRad) * 520;
+      targetBoat.z = boat.z - Math.cos(brgRad) * 520;
+    },
+    onInspectEncounter: () => {
+      spyglassInspected = true;
+      return undefined;
+    },
+    onEnterBattleRange: () => {
+      enteredBattleRange = true;
+    },
+    onBoardVessel: () => {
+      boardedAtGrappleRange = true;
+    },
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+
+  ctrl.start({ lat: 32.0, lon: -24.0, compassCourse: 270 });
+  ctrl.setWarp('crossing');
+  const enc = ctrl.triggerSailEncounter();
+  assert.ok(enc && ctrl.voyage.interrupt?.type === 'sail', 'triggers sail encounter interrupt');
+
+  // 1. Inspect from Crow's Nest with Spyglass — interrupt remains open for tactical order
+  ctrl.resolveInterrupt('spyglass');
+  assert.equal(spyglassInspected, true, 'invokes Crow’s Nest spyglass inspection');
+  assert.equal(enc.spyglassInspected, true, 'marks encounter as inspected through spyglass');
+  assert.ok(ctrl.voyage.interrupt && ctrl.voyage.interrupt.type === 'sail', 'keeps tactical order choices open after spyglass');
+
+  // 2. Order Grapple & Board — ship steers toward target under Watch warp until reaching battle range (~235 m)
+  ctrl.resolveInterrupt('board');
+  assert.equal(ctrl.pursuit.active, true, 'starts active 3D pursuit toward target ship');
+  assert.equal(ctrl.helmsman.engaged, true, 'engages helmsman to steer toward target');
+  assert.equal(ctrl.voyage.tier, 'watch', 'maintains Watch time dilation while closing from horizon to battle range');
+  assert.equal(boardedAtGrappleRange, false, 'does not prematurely trigger boarding while 520 m away');
+
+  // Step until entering battle range (<= 235 m)
+  for (let i = 0; i < 60 && !enteredBattleRange; i++) {
+    ctrl.update(0.1, i * 100);
+  }
+  const distAtBattleRange = Math.hypot(targetBoat.x - boat.x, targetBoat.z - boat.z);
+  assert.equal(enteredBattleRange, true, 'fires onEnterBattleRange upon closing to battle range');
+  assert.ok(distAtBattleRange <= 235, `target closed inside battle range (${distAtBattleRange.toFixed(1)} m)`);
+  assert.equal(ctrl.voyage.tier, 'deck', 'automatically stops time dilation (drops to 1× On deck) at battle range');
+  assert.equal(ctrl.voyage.rate, 1, 'voyage rate is 1× real time inside battle range');
+
+  // Continue stepping at 1× real time until closing into grappling range (<= 46 m)
+  for (let i = 0; i < 160 && !boardedAtGrappleRange; i++) {
+    ctrl.update(0.1, 6000 + i * 100);
+  }
+  const finalDist = Math.hypot(targetBoat.x - boat.x, targetBoat.z - boat.z);
+  assert.equal(boardedAtGrappleRange, true, 'triggers boarding once ships close within grappling range');
+  assert.ok(finalDist <= 46.5, `ships closed alongside to grappling distance (${finalDist.toFixed(1)} m)`);
+});
+

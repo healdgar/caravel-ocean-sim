@@ -88,11 +88,35 @@ export function steerFollower(state,boat,leader,dt,windSpeed,windDirection,neigh
     state.status='Sunk (wreck)';
     return state;
   }
+  if(boat.boardingActive||(boat.mooringRestraint??0)>0.08){
+    boat.rudder=0;
+    boat.rudderTarget=0;
+    for(const key of SAIL_KEYS)boat[key]=0;
+    state.status='Grappled alongside';
+    return state;
+  }
+  if(boat.disarmedPrize){
+    boat.rudder=0;
+    boat.rudderTarget=0;
+    for(const key of SAIL_KEYS)boat[key]=0;
+    state.status='Plundered prize (adrift)';
+    return state;
+  }
   if(boat.damage?.surrendered){
     boat.colors='surrender';
     boat.rudder=0;
     for(const key of SAIL_KEYS)boat[key]=0;
     state.status='Struck colors (Surrendered 🏳️)';
+    return state;
+  }
+  if(state.encounterMode==='sighted'){
+    boat.propulsion='sail';
+    const targetHdg=Number.isFinite(state.independentHeading)?state.independentHeading:(boat.heading??0);
+    const err=wrap((targetHdg-(boat.heading??0))*RAD)/RAD;
+    boat.rudderTarget=clamp(err*0.9,-20,20);
+    for(const key of SAIL_KEYS)boat[key]=0.65;
+    state.course=((targetHdg%360)+360)%360;
+    state.status='Sighted on horizon';
     return state;
   }
   dt=Number.isFinite(dt)?clamp(dt,0,.25):0;

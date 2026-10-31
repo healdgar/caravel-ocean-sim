@@ -501,14 +501,26 @@ export function createDockingBoardingState(boat, options = {}) {
     tb.captured = true;
     tb.capturedBy = 'player';
     tb.captureMethod = captureMethod;
+    tb.allyConsort = true;
+    tb.disarmedPrize = false;
     if (tb.damage) {
-      tb.damage.surrendered = true;
+      tb.damage.surrendered = false;
+      tb.damage.surrenderReason = null;
+      tb.damage.battleMorale = Math.max(0.78, tb.damage.battleMorale ?? 0.78);
+      tb.damage.moraleState = 'steady';
+      tb.damage.floodingRate = 0;
+      tb.damage.floodingLevel = Math.min(0.15, tb.damage.floodingLevel ?? 0);
+      if (tb.damage.crewCasualties) {
+        tb.damage.crewCasualties.surrendered = false;
+        tb.damage.crewCasualties.battleMorale = tb.damage.battleMorale;
+      }
     }
     targetVessel.faction = 'friendly';
     targetVessel.isPirate = false;
     tb.faction = 'friendly';
     if (targetVessel.follower) {
       targetVessel.follower.faction = 'friendly';
+      targetVessel.follower.encounterMode = null;
       targetVessel.follower.status = `Captured Prize (${tb.shipName || tb.name || 'Prize'})`;
     }
     targetVessel.gunnery?.standDown?.();
@@ -529,17 +541,22 @@ export function createDockingBoardingState(boat, options = {}) {
     tb.boardingActive = false;
 
     const shipLabel = tb.shipName || tb.name || 'Captured Prize';
+    const targetPower = computeBoardingStrength(targetVessel, targetComp);
     const plunder = {
       vesselName: shipLabel,
       captureMethod,
       waterDays: 12,
       foodDays: 16,
+      cannons: 4,
+      survivingCrew: Math.max(2, targetPower.able || 6),
+      timberTonnes: 6,
       goldEscudos: captureMethod === 'boarded-and-fought' ? 280 : 180,
     };
 
     if (!state.capturedVessels.includes(targetVessel)) {
       state.capturedVessels.push(targetVessel);
     }
+    state.pendingPrizeVessel = targetVessel;
     state.boardingPhase = 'captured';
     state.lastOutcome = {
       outcome: 'captured',
@@ -553,6 +570,260 @@ export function createDockingBoardingState(boat, options = {}) {
     state.combatLog.unshift(state.statusText);
     emit('vessel-captured', { targetVessel, captureMethod, plunder });
     return state.lastOutcome;
+  }
+
+  // Resolve what to do with a captured prize vessel:
+  // - 'ally': Put a prize crew aboard and keep her in our fleet as an allied warship
+  // - 'impress-plunder': Impress her surviving crew and plunder her cannon & supplies
+  // - 'scuttle-repair': Plunder her supplies & raw materials (oak timber, spars, canvas) to repair our boat and scuttle the prize
+  function resolvePrizeDisposition(targetVessel = null, disposition = 'ally', { voyage = null, playerVessel = null } = {}) {
+    const vessel = targetVessel ?? state.pendingPrizeVessel ?? state.targetVessel ?? state.capturedVessels[state.capturedVessels.length - 1];
+    if (!vessel?.boat) {
+      return { ok: false, reason: 'No captured prize vessel to dispose of' };
+    }
+    const tb = vessel.boat;
+    const shipLabel = tb.shipName || tb.name || 'Captured Prize';
+    const playerColors = (!boat.colors || boat.colors === 'surrender') ? 'portugal' : boat.colors;
+    state.pendingPrizeVessel = null;
+
+    if (disposition === 'ally') {
+      tb.captured = true;
+      tb.allyConsort = true;
+      tb.disarmedPrize = false;
+      tb.scuttled = false;
+      tb.colors = playerColors;
+      tb.battleColors = playerColors;
+      tb.faction = 'friendly';
+      vessel.faction = 'friendly';
+      vessel.isPirate = false;
+      if (tb.damage) {
+        tb.damage.surrendered = false;
+        tb.damage.sunk = false;
+        tb.damage.settledWreck = false;
+        tb.damage.restingOnBottom = false;
+        tb.damage.hullIntegrity = Math.max(0.68, tb.damage.hullIntegrity ?? 0.68);
+        tb.damage.rigIntegrity = Math.max(0.75, tb.damage.rigIntegrity ?? 0.75);
+        tb.damage.floodingRate = 0;
+        tb.damage.floodingLevel = 0;
+        tb.damage.floodingSinkage = 0;
+        tb.damage.battleMorale = 0.88;
+        tb.damage.moraleState = 'steady';
+        if (tb.damage.crewCasualties) {
+          tb.damage.crewCasualties.surrendered = false;
+          tb.damage.crewCasualties.able = Math.max(6, tb.damage.crewCasualties.able || 8);
+          tb.damage.crewCasualties.battleMorale = 0.88;
+        }
+      }
+      if (vessel.follower) {
+        vessel.follower.faction = 'friendly';
+        vessel.follower.encounterMode = null;
+        vessel.follower.formation = { trail: 2.2, side: 1.6 };
+        vessel.follower.captainOrder = 'full';
+        vessel.follower.status = `Allied Prize (${shipLabel})`;
+      }
+      tb.sailFore = 1;
+      tb.sailMain = 1;
+      tb.sailMizzen = 1;
+      if (voyage?.provisions) {
+        voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + 8);
+        voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + 10);
+      }
+      if (state.mooringPhase !== 'clear') castOff();
+      const summary = `🏴 Prize crew placed aboard ${shipLabel}! She hoists ${playerColors} colors and joins our fleet as an allied consort (+8d water, +10d food).`;
+      state.statusText = summary;
+      state.combatLog.unshift(summary);
+      const res = { ok: true, disposition: 'ally', vessel, summary };
+      emit('prize-disposition', res);
+      return res;
+    }
+
+    if (disposition === 'impress-plunder') {
+      const targetComp = getVesselCompany(vessel);
+      const targetSailors = targetComp?.crew ?? targetComp?.sailors ?? [];
+      const targetAble = targetSailors.filter(s => s.casualtyState !== 'fallen' && s.wounded !== 'incapacitated').length;
+      const pressedCount = Math.max(3, Math.min(8, targetAble > 0 ? Math.ceil(targetAble * 0.5) : 4));
+
+      // Heal wounded/fallen in player's crew and add pressed hands to player's roster (women and men equally strong = 1.0)
+      const playerSailors = state.company?.crew ?? state.company?.sailors ?? [];
+      let healed = 0;
+      for (const s of playerSailors) {
+        if (healed < pressedCount && (s.wounded || s.casualtyState !== 'able' || (s.health ?? 1) < 1)) {
+          s.health = 1.0;
+          s.wounded = null;
+          s.casualtyState = 'able';
+          s.strength = 1.0;
+          healed++;
+        }
+      }
+      let addedToRoster = 0;
+      if (Array.isArray(state.company?.crew)) {
+        const candidates = targetSailors.filter(s => s.casualtyState !== 'fallen');
+        for (let i = 0; i < pressedCount; i++) {
+          const src = candidates[i];
+          const sex = src?.sex ?? (i % 2 === 0 ? 'female' : 'male');
+          state.company.crew.push({
+            id: `impressed-${Date.now()}-${i}`,
+            name: src?.name ?? (sex === 'female' ? `Catalina (${shipLabel})` : `Rodrigo (${shipLabel})`),
+            role: src?.role ?? 'Able seaman (impressed)',
+            sex,
+            strength: 1.0,
+            health: 1.0,
+            casualtyState: 'able',
+            wounded: null,
+            x: 0,
+            y: 0,
+            z: 0,
+          });
+          addedToRoster++;
+        }
+      }
+      const dmg = boat.damage;
+      if (dmg) {
+        dmg.battleMorale = bdClamp((dmg.battleMorale ?? 0.85) + 0.22, 0.2, 1.0);
+        dmg.moraleState = 'steady';
+        const cas = dmg.crewCasualties ?? dmg.crew;
+        if (cas) {
+          cas.total = (cas.total ?? 22) + Math.max(0, pressedCount - healed);
+          cas.able = Math.min(cas.total, (cas.able ?? 18) + pressedCount);
+          cas.wounded = Math.max(0, (cas.wounded ?? 0) - healed);
+          cas.battleMorale = dmg.battleMorale;
+        }
+      }
+      if (state.company) {
+        state.company.morale = bdClamp((state.company.morale ?? 0.85) + 0.20, 0.2, 1.0);
+      }
+
+      // Plunder her cannon, powder, shot, and provisions
+      const plunderedGuns = 4;
+      boat.plunderedCannons = (boat.plunderedCannons ?? 0) + plunderedGuns;
+      boat.plunderedFirepowerMultiplier = Math.min(2.0, +((boat.plunderedFirepowerMultiplier ?? 1.0) + 0.25).toFixed(2));
+      boat.provisionDays = Math.min(120, (boat.provisionDays ?? 60) + 18);
+      if (voyage) {
+        voyage.morale = Math.min(1.0, (voyage.morale ?? 0.85) + 0.12);
+        if (voyage.provisions) {
+          voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + 18);
+          voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + 24);
+        }
+      }
+
+      // Disarm the prize and leave her hove-to
+      tb.allyConsort = false;
+      tb.disarmedPrize = true;
+      tb.sailFore = 0;
+      tb.sailMain = 0;
+      tb.sailMizzen = 0;
+      if (vessel.follower) {
+        vessel.follower.faction = 'friendly';
+        vessel.follower.encounterMode = 'adrift';
+        vessel.follower.captainOrder = 'furl';
+        vessel.follower.status = `Plundered Hulk (${shipLabel})`;
+      }
+      vessel.gunnery?.standDown?.();
+      if (state.mooringPhase !== 'clear') castOff();
+
+      const summary = `⚓ Impressed ${pressedCount} able hands into our crew and plundered ${plunderedGuns} cannon (+25% broadside weight, +18d water, +24d food) from ${shipLabel}!`;
+      state.statusText = summary;
+      state.combatLog.unshift(summary);
+      const res = {
+        ok: true,
+        disposition: 'impress-plunder',
+        vessel,
+        impressedCount: addedToRoster || pressedCount,
+        pressedCrew: pressedCount,
+        plunderedCannons: plunderedGuns,
+        waterDays: 18,
+        foodDays: 24,
+        summary,
+      };
+      emit('prize-disposition', res);
+      return res;
+    }
+
+    if (disposition === 'scuttle-repair') {
+      // Salvage oak planking, spars, canvas, cordage, and stores to repair our hull & rigging
+      const prevHull = boat.damage?.hullIntegrity ?? 1.0;
+      const prevRig = boat.damage?.rigIntegrity ?? 1.0;
+      if (boat.damage) {
+        boat.damage.hullIntegrity = Math.min(1.0, +((boat.damage.hullIntegrity ?? 0.6) + 0.55).toFixed(3));
+        boat.damage.rigIntegrity = 1.0;
+        boat.damage.floodingRate = 0;
+        boat.damage.floodingLevel = 0;
+        boat.damage.floodingSinkage = 0;
+        boat.damage.floodingRoll = 0;
+        boat.damage.floodingPitch = 0;
+        boat.damage.battleMorale = Math.min(1.0, (boat.damage.battleMorale ?? 0.85) + 0.15);
+        if (boat.damage.mastIntegrity) {
+          boat.damage.mastIntegrity.fore = 1;
+          boat.damage.mastIntegrity.main = 1;
+          boat.damage.mastIntegrity.mizzen = 1;
+        }
+        if (boat.damage.mastState) {
+          boat.damage.mastState.fore = 0;
+          boat.damage.mastState.main = 0;
+          boat.damage.mastState.mizzen = 0;
+        }
+        if (Array.isArray(boat.damage.craters)) boat.damage.craters.length = 0;
+        if (boat.damage.partDamage) {
+          for (const k of Object.keys(boat.damage.partDamage)) boat.damage.partDamage[k] = 0;
+        }
+      }
+      boat.rawMaterialsTonnes = (boat.rawMaterialsTonnes ?? 0) + 6;
+      boat.provisionDays = Math.min(120, (boat.provisionDays ?? 60) + 14);
+      if (voyage) {
+        voyage.hull = boat.damage?.hullIntegrity ?? 1.0;
+        if (voyage.provisions) {
+          voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + 14);
+          voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + 18);
+        }
+      }
+      if (playerVessel) {
+        playerVessel.pose?.updateDamage?.(boat);
+        playerVessel.wetness?.updateDamage?.(boat.damage);
+      }
+
+      // Cast off and scuttle the prize so she floods and sinks into the sea
+      if (state.mooringPhase !== 'clear') castOff();
+      tb.allyConsort = false;
+      tb.scuttled = true;
+      tb.sunk = true;
+      tb.showProw = false;
+      tb.sailFore = 0;
+      tb.sailMain = 0;
+      tb.sailMizzen = 0;
+      if (tb.damage) {
+        tb.damage.sunk = true;
+        tb.damage.hullIntegrity = 0;
+        tb.damage.floodingRate = 0.38;
+        tb.damage.floodingLevel = 1.0;
+        tb.damage.sinkingDepth = Math.max(2.2, tb.damage.sinkingDepth ?? 2.2);
+        tb.damage.floodingSinkage = Math.max(1.8, tb.damage.floodingSinkage ?? 1.8);
+        tb.damage.floodingPitch = 0.14;
+        tb.damage.floodingRoll = 0.22;
+      }
+      if (vessel.follower) {
+        vessel.follower.status = `Scuttled (${shipLabel} sinking)`;
+      }
+      vessel.gunnery?.standDown?.();
+
+      const newHullPct = Math.round((boat.damage?.hullIntegrity ?? 1) * 100);
+      const summary = `🔨 Stripped ${shipLabel} of oak timber, spars, canvas & stores and scuttled her! Repaired our hull (${Math.round(prevHull * 100)}% → ${newHullPct}%) and rigging (${Math.round(prevRig * 100)}% → 100%), +14d water, +18d food.`;
+      state.statusText = summary;
+      state.combatLog.unshift(summary);
+      const res = {
+        ok: true,
+        disposition: 'scuttle-repair',
+        vessel,
+        hullIntegrityAfter: boat.damage?.hullIntegrity ?? 1.0,
+        rigIntegrityAfter: boat.damage?.rigIntegrity ?? 1.0,
+        rawMaterialsTonnes: boat.rawMaterialsTonnes,
+        scuttledSunk: true,
+        summary,
+      };
+      emit('prize-disposition', res);
+      return res;
+    }
+
+    return { ok: false, reason: `Unknown prize disposition: ${disposition}` };
   }
 
   // Board a target vessel:
@@ -765,6 +1036,11 @@ export function createDockingBoardingState(boat, options = {}) {
     boat.mooringRestraint = 0;
     boat.boardingActive = false;
     boat.mooringActive = true;
+    if (state.targetVessel?.boat) {
+      state.targetVessel.boat.mooringRestraint = 0;
+      state.targetVessel.boat.boardingActive = false;
+      state.targetVessel.boat.mooringActive = false;
+    }
     assignCrewToRailAction(state.company, boat, 'mooring', state.mooringSide);
 
     // Cancel any inward hauling velocity and impart a smooth lateral shove-off velocity
@@ -827,6 +1103,7 @@ export function createDockingBoardingState(boat, options = {}) {
     if (state.mooringPhase === 'casting-off') {
       boat.mooringRestraint = 0;
       boat.mooringForce = null;
+      if (state.targetVessel?.boat) state.targetVessel.boat.mooringRestraint = 0;
       // Smoothly glide away from the pier/ship along -pierNormal with exponential water drag
       const drag = Math.exp(-dt * 1.65);
       state.lateralSpeed = Math.min(0, (state.lateralSpeed ?? -0.85) * drag);
@@ -852,6 +1129,7 @@ export function createDockingBoardingState(boat, options = {}) {
       state.mooringPhase !== 'grappled'
     ) {
       boat.mooringRestraint = 0;
+      if (state.targetVessel?.boat) state.targetVessel.boat.mooringRestraint = 0;
       state.lateralSpeed = 0;
       state.haulVx = 0;
       state.haulVz = 0;
@@ -866,6 +1144,9 @@ export function createDockingBoardingState(boat, options = {}) {
       ? 0.35 * bdClamp(state.lineProgress, 0, 1)
       : 0.35 + 0.65 * smoothTension;
     boat.mooringRestraint = restraint;
+    if (state.mooringTargetKind === 'vessel' && state.targetVessel?.boat) {
+      state.targetVessel.boat.mooringRestraint = restraint;
+    }
 
     const velDecay = Math.exp(-dt * 4.5 * restraint);
     if (Number.isFinite(boat.surgeVelocity)) boat.surgeVelocity *= velDecay;
@@ -1012,6 +1293,7 @@ export function createDockingBoardingState(boat, options = {}) {
     grappleShip,
     boardVessel,
     capturePrizeVessel,
+    resolvePrizeDisposition,
     castOff,
     step,
     buildVertices,

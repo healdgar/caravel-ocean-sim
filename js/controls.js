@@ -107,7 +107,14 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
   viewResetBtn.type='button';viewResetBtn.id='helm-view-reset';viewResetBtn.className='helm-quarters-pill';
   viewResetBtn.hidden=true;
   viewResetBtn.onclick=()=>{battleContext?.onResetView?.();update(performance.now(),true);};
-  viewHost.append(viewResetBtn,viewToggleBtn);
+
+  const spyglassBtn=document.createElement('button');
+  spyglassBtn.type='button';spyglassBtn.id='helm-spyglass-btn';spyglassBtn.className='helm-quarters-pill helm-spyglass-pill';
+  spyglassBtn.textContent='🔭 Spyglass';
+  spyglassBtn.title="Climb to the Crow's Nest and look through the 4.5× brass spyglass at distant sails or horizons (Z key)";
+  spyglassBtn.setAttribute('aria-pressed','false');
+  spyglassBtn.onclick=()=>{battleContext?.onToggleSpyglass?.();update(performance.now(),true);};
+  viewHost.append(viewResetBtn,spyglassBtn,viewToggleBtn);
 
   let battleDeck=null,quartersBtn=null,battleBadge=null,battleTelemetry=null,vitalityPill=null,magazinePill=null;
   let trainTargetBtn=null,steerBearBtn=null,boardBattleBtn=null,aimArcsBtn=null,fireAtWillBtn=null,standDownBtn=null;
@@ -460,6 +467,12 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       const viewTxt=camMode==='boat'?`View: ${station}`:camMode==='ship'?'View: Ship':'View: Free';
       if(viewToggleBtn.textContent!==viewTxt)viewToggleBtn.textContent=viewTxt;
       viewToggleBtn.setAttribute('aria-pressed',String(camMode!=='boat'));
+      if(spyglassBtn){
+        const spyOn=Boolean(battleContext?.getSpyglassActive?.());
+        spyglassBtn.setAttribute('aria-pressed',String(spyOn));
+        const spyTxt=spyOn?'🔭 Lower Glass':'🔭 Spyglass';
+        if(spyglassBtn.textContent!==spyTxt)spyglassBtn.textContent=spyTxt;
+      }
       const walked=camMode==='boat'&&Math.hypot(boat.deckWalkX||0,boat.deckWalkZ||0)>0.25;
       const orbit=battleContext?.getShipOrbit?.();
       const panned=camMode==='ship'&&orbit&&Math.hypot(orbit.panX||0,orbit.panY||0,orbit.panZ||0)>0.5;

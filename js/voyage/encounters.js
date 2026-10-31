@@ -114,6 +114,28 @@ export function pickEncounterArchetype(lat, lon, rand = Math.random) {
   return ENCOUNTER_ARCHETYPES[0];
 }
 
+export function describeEncounterThroughSpyglass(enc, targetVessel = null) {
+  if (!enc) return 'Horizon clear through the glass.';
+  enc.spyglassInspected = true;
+  if (enc.disguised) {
+    enc.apparentHostile = enc.actuallyHostile;
+  }
+  const tb = targetVessel?.boat ?? targetVessel ?? null;
+  const crewCount = targetVessel?.company?.members?.length ?? tb?.crewCompany?.members?.length ?? (enc.actuallyHostile ? 24 : 18);
+  const hullPct = Math.round(((tb?.damage?.hullIntegrity ?? 1) || 1) * 100);
+  const gunCount = tb?.gunnery?.guns?.length ?? 4;
+  if (enc.disguised) {
+    return `Through the brass spyglass from the crow's nest: "${enc.shipName}" (${enc.archetype.rig}, bearing ${enc.bearingPoint}) is a disguised ${enc.archetype.title}! Beneath her worn merchant canvas you spot ${gunCount} run-out cannon and ~${crewCount} corsairs in brown & black jerkins crouched along the bulwarks (${hullPct}% hull, making ~${enc.speedKts} kts).`;
+  }
+  if (enc.actuallyHostile) {
+    return `Through the spyglass from the crow's nest: "${enc.shipName}" — ${enc.archetype.title} (${enc.archetype.rig}, bearing ${enc.bearingPoint}). Flying ${enc.flag}, ${gunCount} guns run out, ~${crewCount} hands in brown & black fighting gear on deck (${hullPct}% hull, ~${enc.speedKts} kts).`;
+  }
+  if (enc.distressed) {
+    return `Through the spyglass from the crow's nest: "${enc.shipName}" — ${enc.archetype.title} (${enc.archetype.rig}, bearing ${enc.bearingPoint}). Sprung fore-topmast, ~${crewCount} weary hands signalling from the quarterdeck (${hullPct}% hull, ~${enc.speedKts} kts).`;
+  }
+  return `Through the spyglass from the crow's nest: "${enc.shipName}" — ${enc.archetype.title} (${enc.archetype.rig}, bearing ${enc.bearingPoint}). Flying ${enc.flag}, ~${crewCount} hands at stations, ${gunCount} broadside pieces (${hullPct}% hull, ~${enc.speedKts} kts).`;
+}
+
 export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
   const rand = mulberry32(seed);
   const state = {
@@ -205,11 +227,12 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
         text: enc.text,
         encounter: enc,
         choices: [
-          { id: 'avoid', label: 'Bear away to avoid' },
+          { id: 'spyglass', label: "🔭 Crow's Nest & Spyglass" },
+          { id: 'fight', label: '⚔️ Clear for action!' },
+          { id: 'board', label: '🪝 Grapple & board her!' },
+          { id: 'hail', label: '🎺 Close to hail' },
           { id: 'hold', label: 'Hold course' },
-          { id: 'hail', label: 'Close to hail' },
-          { id: 'fight', label: 'Clear for action!' },
-          { id: 'board', label: 'Grapple & board her!' },
+          { id: 'avoid', label: 'Bear away to avoid' },
         ],
         log: `Sail sighted ${callout} (${arch.rig}, ${distNm} nm, bearing ${compassPointName(compassBrg)}).`,
       },
@@ -335,21 +358,23 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
     }
 
     if (choiceId === 'fight') {
-      outcome.summary = `Cleared for action against ${enc.shipName} (${enc.archetype.title})!`;
+      env.onOrderCompassCourse?.(enc.compassBearingDeg);
+      outcome.summary = `Beat to quarters! Steering ${enc.bearingPoint} to intercept ${enc.shipName} (${enc.archetype.title}) and close to cannon range!`;
       outcome.combatStarted = true;
       addLog(voyage, outcome.summary, 'combat');
-      env.onEngageVessel?.(enc);
+      env.onEngageVessel?.(enc, { mode: 'fight' });
       env.onToast?.(outcome.summary, 7);
       return outcome;
     }
 
     if (choiceId === 'board') {
-      outcome.summary = `Laid ${enc.shipName} (${enc.archetype.title}) aboard with grappling irons — boarding party away!`;
+      env.onOrderCompassCourse?.(enc.compassBearingDeg);
+      outcome.summary = `Grappling irons & boarding pikes ready! Steering ${enc.bearingPoint} to close and lay ${enc.shipName} (${enc.archetype.title}) aboard!`;
       outcome.combatStarted = true;
       outcome.boarded = true;
       addLog(voyage, outcome.summary, 'combat');
       if (env.onBoardVessel) env.onBoardVessel(enc);
-      else env.onEngageVessel?.(enc, { board: true });
+      else env.onEngageVessel?.(enc, { board: true, mode: 'board' });
       env.onToast?.(outcome.summary, 8);
       return outcome;
     }
