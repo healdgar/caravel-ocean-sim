@@ -606,10 +606,11 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   col+=lightningSurface(n,v,albedo,rough)+gunFlashSurface(in.world,n,v,albedo,rough);
   if(in.material==9u || in.material==13u){col+=lightningLight()*albedo*max(dot(-n,lightningDirection()),0.0)*.12;}
   // Captain's & Admiral's cabin candle lanterns glowing through stern and quarter-gallery windows
-  // in the evening, night, and early morning (when solar elevation is below ~16 degrees).
+  // in the evening, night, and early morning (compensated for night exposure so they never cause bloom glare).
   if(!vesselWaterCapture){
-    let candleSchedule=1.0-smoothstep(-0.02,0.28,F.sunDir.y);
+    let candleSchedule=1.0-smoothstep(-0.04,0.12,F.sunDir.y);
     if(candleSchedule>0.001){
+      let candleExposure=1.0/max(F.post.x,1.0);
       if(in.material==11u){
         let bayX=select(floor(p.z*5.2),floor((p.x+1.0)*4.5),abs(in.normalLocal.z)>0.45);
         let bayY=floor((p.y-0.80)/0.50);
@@ -628,16 +629,16 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
         let flameCore=exp(-dFlame*dFlame*18.0);
         let lanternHalo=exp(-dFlame*dFlame*3.4);
         let ceilingWarmth=smoothstep(-0.45,0.45,localV)*0.38+0.42;
-        let candleColor=vec3f(3.8,1.72,0.42)*flameCore+vec3f(1.55,0.68,0.16)*lanternHalo+vec3f(0.62,0.25,0.06)*ceilingWarmth;
+        let candleColor=vec3f(0.42,0.19,0.045)*flameCore+vec3f(0.18,0.078,0.018)*lanternHalo+vec3f(0.065,0.026,0.006)*ceilingWarmth;
         // Intact crown-glass panes attenuate and softly diffuse the candle; shattered holes expose the raw flame
         let transmission=mix(windowPaneMask*0.78,1.15,windowHoleMask)+windowShardRim*0.65;
-        col+=candleColor*(candleSchedule*flicker*transmission);
+        col+=candleColor*(candleSchedule*flicker*transmission*candleExposure);
       }else if(hull.rig.w>.5 && p.z>5.15 && p.y>0.78 && (in.material==25u || in.material==21u || in.material==20u)){
         // Warm candlelight spill onto the gilded stern mullions, balusters, and window frames
         let spillFlicker=0.88+0.08*sin(hull.origin.w*6.8+p.x*5.0+p.y*7.0);
-        let mullionWeight=select(0.14,0.34,in.material==25u);
+        let mullionWeight=select(0.025,0.055,in.material==25u);
         let facingUpOrIn=clamp(0.55-0.35*in.normalLocal.y,0.15,0.85);
-        col+=vec3f(1.15,0.48,0.11)*(candleSchedule*spillFlicker*mullionWeight*facingUpOrIn);
+        col+=vec3f(0.45,0.19,0.04)*(candleSchedule*spillFlicker*mullionWeight*facingUpOrIn*candleExposure);
       }
     }
   }
