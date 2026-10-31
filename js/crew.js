@@ -950,8 +950,10 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
           : 'Rampart Guardian'
       : spec.role;
     const s = createDeckhand();
+    const baseLy = spec.ly;
+    const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
-    const wy = spec.ly + 0.028;
+    const wy = effLy + 0.028;
     const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
     const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
     Object.assign(s, {
@@ -966,7 +968,8 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       buildingPrefabId: inst.prefabId,
       building: inst,
       lx: spec.lx,
-      ly: spec.ly,
+      baseLy,
+      ly: effLy,
       lz: spec.lz,
       routeZ: [...spec.routeZ],
       targetZ: spec.routeZ[1],
@@ -1012,34 +1015,34 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
 
   if (inst.prefabId === 'abenaki_birchbark_wigwam' || inst.prefabId === 'taino_circular_bohio') {
     const rDoor = Math.min(hw, hl) + 1.15;
-    specs.push({ lx: -1.1, ly: yGround + 0.25, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: Math.PI, role: 'Villager' });
-    specs.push({ lx: 1.1, ly: yGround + 0.25, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: Math.PI, role: 'Artisan / Weaver' });
+    specs.push({ lx: -1.1, ly: yGround + 0.04, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: Math.PI, role: 'Villager' });
+    specs.push({ lx: 1.1, ly: yGround + 0.04, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: Math.PI, role: 'Artisan / Weaver' });
   } else if (inst.prefabId === 'algonquian_longhouse' || inst.prefabId === 'tupinamba_oca_longhouse' || inst.prefabId === 'kalinago_carbet_hall') {
     const zFront = -hl - 1.4;
     const zSide0 = -hl * 0.65;
     const zSide1 = hl * 0.65;
-    specs.push({ lx: -1.4, ly: yGround + 0.30, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: Math.PI, role: 'Sachem / Cacique' });
-    specs.push({ lx: 1.4, ly: yGround + 0.30, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: Math.PI, role: 'Elder / Speaker' });
-    specs.push({ lx: -(hw + 1.25), ly: yGround + 0.20, lz: 0, routeZ: [zSide0, zSide1], localYaw: -Math.PI / 2, role: 'Hunter / Bowyer' });
-    specs.push({ lx: hw + 1.25, ly: yGround + 0.20, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI / 2, role: 'Potter / Cultivator' });
+    specs.push({ lx: -1.4, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: Math.PI, role: 'Sachem / Cacique' });
+    specs.push({ lx: 1.4, ly: yGround + 0.05, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: Math.PI, role: 'Elder / Speaker' });
+    specs.push({ lx: -(hw + 1.25), ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: -Math.PI / 2, role: 'Hunter / Bowyer' });
+    specs.push({ lx: hw + 1.25, ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI / 2, role: 'Potter / Cultivator' });
   } else if (inst.prefabId === 'taino_cacique_caney' || inst.prefabId === 'maya_limestone_shrine_and_na') {
-    const yPlinth = yGround + (inst.prefabId === 'maya_limestone_shrine_and_na' ? 0.55 : 0.68);
+    const yPlinth = yGround + (inst.prefabId === 'maya_limestone_shrine_and_na' ? 0.55 : 0.12);
     const zFront = -hl - 1.3;
     specs.push({ lx: 0, ly: yPlinth, lz: -hl * 0.68, routeZ: [-hl * 0.75, -hl * 0.45], localYaw: Math.PI, role: 'Cacique / Halach Uinic' });
-    specs.push({ lx: -2.2, ly: yGround + 0.22, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Behique / Guardian' });
-    specs.push({ lx: 2.2, ly: yGround + 0.22, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Weaver / Noble' });
+    specs.push({ lx: -2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Behique / Guardian' });
+    specs.push({ lx: 2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Weaver / Noble' });
   } else if (inst.prefabId === 'taino_batey_court' || inst.prefabId === 'indigenous_palisade_ring') {
     const zSpan = Math.max(2.5, hl * 0.58);
     for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * (hw * 0.45), ly: yGround + 0.22, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
+      specs.push({ lx: sx * (hw * 0.45), ly: yGround + 0.05, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
     }
   } else if (inst.prefabId === 'palafito_estuary_village') {
     const yDeck = yGround + (inst.height ?? 6.8) * 0.36 + 0.16;
     specs.push({ lx: -1.8, ly: yDeck, lz: -1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Lagoon Fisher' });
     specs.push({ lx: 1.8, ly: yDeck, lz: 1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Net Maker' });
   } else if (inst.prefabId === 'indigenous_canoe_landing') {
-    specs.push({ lx: -hw * 0.32, ly: yGround + 0.22, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Canoe Builder' });
-    specs.push({ lx: hw * 0.32, ly: yGround + 0.22, lz: 0.4, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Shore Lookout' });
+    specs.push({ lx: -hw * 0.32, ly: yGround + 0.06, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Canoe Builder' });
+    specs.push({ lx: hw * 0.32, ly: yGround + 0.06, lz: 0.4, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Shore Lookout' });
   }
 
   return specs.map((spec, idx) => {
@@ -1049,8 +1052,10 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
     const name = namePool[Math.floor(globalIdx / 2) % namePool.length];
     const look = INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length];
     const s = createDeckhand();
+    const baseLy = spec.ly;
+    const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
-    const wy = spec.ly + 0.028;
+    const wy = effLy + 0.028;
     const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
     const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
     Object.assign(s, {
@@ -1067,7 +1072,8 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
       buildingPrefabId: inst.prefabId,
       building: inst,
       lx: spec.lx,
-      ly: spec.ly,
+      baseLy,
+      ly: effLy,
       lz: spec.lz,
       routeZ: [...spec.routeZ],
       targetZ: spec.routeZ[1],
@@ -1191,6 +1197,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
 
     const cosY = Math.cos(inst?.yaw ?? 0);
     const sinY = Math.sin(inst?.yaw ?? 0);
+    s.ly = (s.baseLy ?? s.ly) + s.lx * (inst?.slopeX ?? 0) + s.lz * (inst?.slopeZ ?? 0);
     const wx = (inst?.x ?? 0) + s.lx * cosY + s.lz * sinY;
     const wy = s.ly + 0.028;
     const wz = (inst?.z ?? 0) - s.lx * sinY + s.lz * cosY;

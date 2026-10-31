@@ -1513,6 +1513,89 @@ test('Landfall dropdown exposes curated scenarios, Native American villages, and
   }
 });
 
+test('village and port buildings grade terrain pads, sync post-smoothing elevations, slant with the earth, and ground villagers', async () => {
+  const { terrainSurfaceSample, syncPortInstancesToTerrain } = await import('../js/coastal-world.js');
+  const { createFortGarrison } = await import('../js/crew.js');
+
+  // 1. Generate an Abenaki/Algonquian coastal village (Saco Bay / Shawmut Peninsula 1550)
+  const pack = generateProceduralCoastalPack({
+    name: 'Saco Bay Abenaki Village',
+    latitude: 43.48,
+    longitude: -70.38,
+    year: 1550,
+    size: 129,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 900,
+  });
+
+  assert.equal(pack.port.hasIndigenousSettlement, true);
+  assert.ok(pack.port.instances.length >= 6);
+
+  for (const inst of pack.port.instances) {
+    if (inst.prefabId === 'indigenous_canoe_landing') continue;
+    const groundY = terrainSurfaceSample(pack.heights, inst.x, inst.z, pack.region);
+    assert.ok(
+      Math.abs(inst.y - groundY) < 0.25,
+      `${inst.prefabId} center y (${inst.y.toFixed(2)}) matches post-smoothed terrain (${groundY.toFixed(2)})`
+    );
+    assert.ok(Number.isFinite(inst.slopeX) && Number.isFinite(inst.slopeZ), `${inst.prefabId} computes finite local terrain slope`);
+    assert.ok(Math.hypot(inst.slopeX, inst.slopeZ) <= 0.22, `${inst.prefabId} pad slope is bounded`);
+  }
+
+  // 2. Verify buildPortPrefabGeometry slants vertices with (slopeX, slopeZ) when placed on a sloped hillside
+  const slopedLonghouse = {
+    prefabId: 'algonquian_longhouse',
+    x: 0,
+    y: 4.0,
+    z: 0,
+    yaw: 0,
+    width: 6.2,
+    length: 18.5,
+    depth: 18.5,
+    height: 4.8,
+    baseY: 4.0,
+    slopeX: 0.08,
+    slopeZ: -0.12,
+  };
+  const flatLonghouse = { ...slopedLonghouse, slopeX: 0, slopeZ: 0 };
+  const geomSloped = buildPortPrefabGeometry({ instances: [slopedLonghouse] });
+  const geomFlat = buildPortPrefabGeometry({ instances: [flatLonghouse] });
+  assert.equal(geomSloped.vertices.length, geomFlat.vertices.length);
+
+  let verifiedSlantedVerts = 0;
+  for (let i = 0; i < geomSloped.vertices.length; i += 8) {
+    const wx = geomSloped.vertices[i];
+    const wySloped = geomSloped.vertices[i + 1];
+    const wz = geomSloped.vertices[i + 2];
+    const wyFlat = geomFlat.vertices[i + 1];
+    const expectedShear = wx * slopedLonghouse.slopeX + wz * slopedLonghouse.slopeZ;
+    assert.ok(
+      Math.abs((wySloped - wyFlat) - expectedShear) < 1e-4,
+      `Vertex at (${wx.toFixed(2)}, ${wz.toFixed(2)}) shears vertically by lx*slopeX + lz*slopeZ`
+    );
+    if (Math.abs(expectedShear) > 0.25) verifiedSlantedVerts++;
+  }
+  assert.ok(verifiedSlantedVerts > 20, 'Longhouse vertices follow the earth slope across its 18.5m length');
+
+  // 3. Verify shore villagers stand grounded on the sloped terrain
+  const garrison = createFortGarrison(pack.port);
+  assert.ok(garrison.soldiers.length >= 10);
+  for (const s of garrison.soldiers) {
+    const groundAtVillager = terrainSurfaceSample(pack.heights, s.position[0], s.position[2], pack.region);
+    const heightAboveEarth = s.position[1] - groundAtVillager;
+    assert.ok(
+      heightAboveEarth >= -0.35 && heightAboveEarth <= 0.65,
+      `Villager ${s.id} (${s.buildingPrefabId}) stands flush on earth (y=${s.position[1].toFixed(2)}, ground=${groundAtVillager.toFixed(2)})`
+    );
+  }
+
+  // 4. Verify syncPortInstancesToTerrain resamples and grades cleanly
+  syncPortInstancesToTerrain(pack.port, pack.heights, pack.region, { gradePads: false });
+  assert.ok(pack.port.instances.every(i => Number.isFinite(i.y) && Number.isFinite(i.slopeX) && Number.isFinite(i.slopeZ)));
+});
+
+
 
 
 

@@ -31,6 +31,7 @@ import {
   applyIndigenousSupportAction,
 } from './indigenous-sovereignty.js';
 
+export { terrainSurfaceSample };
 export {
   SOVEREIGN_INDIGENOUS_POLITIES,
   createIndigenousSovereigntyState,
@@ -1628,6 +1629,150 @@ export const PORT_PREFABS = Object.freeze({
     indigenous: true,
   }),
 });
+
+const OVER_WATER_PREFAB_IDS = new Set([
+  'timber_mole_pier',
+  'stone_quay_seawall',
+  'palafito_estuary_village',
+  'stone_arch_bridge',
+]);
+
+export function syncPortInstancesToTerrain(portOrInstances, heights, region, { gradePads = false } = {}) {
+  const instances = Array.isArray(portOrInstances) ? portOrInstances : portOrInstances?.instances;
+  if (!Array.isArray(instances) || !heights || !region) return instances;
+  const n = region.size;
+  const span = region.span;
+  const step = span / Math.max(1, n - 1);
+
+  if (gradePads) {
+    for (const inst of instances) {
+      if (
+        OVER_WATER_PREFAB_IDS.has(inst.prefabId) ||
+        inst.prefabId === 'indigenous_canoe_landing' ||
+        inst.prefabId === 'astillero_and_moored_hull'
+      ) {
+        continue;
+      }
+      const cosY = Math.cos(inst.yaw ?? 0);
+      const sinY = Math.sin(inst.yaw ?? 0);
+      const hw = (inst.width ?? 10) * 0.5;
+      const hl = (inst.length ?? 12) * 0.5;
+      const sampleLocal = (lx, lz) =>
+        terrainSurfaceSample(
+          heights,
+          inst.x + lx * cosY + lz * sinY,
+          inst.z - lx * sinY + lz * cosY,
+          region
+        );
+      const centerGroundY = sampleLocal(0, 0);
+      const probeX = Math.max(1.5, hw * 0.85);
+      const probeZ = Math.max(1.5, hl * 0.85);
+      const rawSlopeX = (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX);
+      const rawSlopeZ = (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ);
+      const isFort =
+        inst.prefabId === 'stone_sea_bastion' ||
+        inst.prefabId === 'bastion_trace_fortress' ||
+        inst.prefabId === 'torreon_atalaya_farol' ||
+        inst.prefabId === 'curtain_wall_and_gate';
+      const padSlopeX = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeX));
+      const padSlopeZ = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeZ));
+      const padY = inst.indigenous && !isFort
+        ? Math.max(0.95, centerGroundY)
+        : isFort
+          ? Math.max(inst.y ?? 3.2, centerGroundY)
+          : Math.max(1.6, centerGroundY);
+
+      const coreX = hw + step * 1.05;
+      const coreZ = hl + step * 1.05;
+      const feather = Math.max(step * 1.15, 8.0);
+      const outerX = coreX + feather;
+      const outerZ = coreZ + feather;
+      const rad = Math.hypot(outerX, outerZ);
+      const i0 = Math.max(0, Math.floor(((inst.x - rad - region.x) / span + 0.5) * (n - 1)));
+      const i1 = Math.min(n - 1, Math.ceil(((inst.x + rad - region.x) / span + 0.5) * (n - 1)));
+      const j0 = Math.max(0, Math.floor(((inst.z - rad - region.z) / span + 0.5) * (n - 1)));
+      const j1 = Math.min(n - 1, Math.ceil(((inst.z + rad - region.z) / span + 0.5) * (n - 1)));
+      for (let j = j0; j <= j1; j++) {
+        const wz = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = i0; i <= i1; i++) {
+          const k = j * n + i;
+          if (heights[k] <= -0.35) continue;
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const dx = wx - inst.x;
+          const dz = wz - inst.z;
+          const lxSigned = dx * cosY - dz * sinY;
+          const lzSigned = dx * sinY + dz * cosY;
+          const lx = Math.abs(lxSigned);
+          const lz = Math.abs(lzSigned);
+          if (lx > outerX || lz > outerZ) continue;
+          const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lx - coreX) / feather));
+          const tz = Math.max(0, Math.min(1, 1 - Math.max(0, lz - coreZ) / feather));
+          const sx = tx * tx * (3 - 2 * tx);
+          const sz = tz * tz * (3 - 2 * tz);
+          const wBlend = sx * sz;
+          const targetH = Math.max(0.45, padY + lxSigned * padSlopeX + lzSigned * padSlopeZ);
+          heights[k] = heights[k] * (1 - wBlend) + targetH * wBlend;
+        }
+      }
+    }
+  }
+
+  for (let idx = 0; idx < instances.length; idx++) {
+    const inst = instances[idx];
+    inst.id ??= `${inst.prefabId}_${idx}`;
+    inst.depth ??= inst.length ?? 16;
+    inst._cosNegYaw = Math.cos(inst.yaw ?? 0);
+    inst._sinNegYaw = Math.sin(inst.yaw ?? 0);
+    inst._boundR = Math.hypot(inst.width ?? 10, inst.length ?? 12) * 0.5;
+    if (OVER_WATER_PREFAB_IDS.has(inst.prefabId)) {
+      inst.slopeX = 0;
+      inst.slopeZ = 0;
+      inst.baseY = inst.y ?? 0;
+      continue;
+    }
+    const cosY = inst._cosNegYaw;
+    const sinY = inst._sinNegYaw;
+    const sampleLocal = (lx, lz) =>
+      terrainSurfaceSample(
+        heights,
+        inst.x + lx * cosY + lz * sinY,
+        inst.z - lx * sinY + lz * cosY,
+        region
+      );
+    const hCenter = sampleLocal(0, 0);
+    const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
+    const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
+    const hPosX = sampleLocal(probeX, 0);
+    const hNegX = sampleLocal(-probeX, 0);
+    const hPosZ = sampleLocal(0, probeZ);
+    const hNegZ = sampleLocal(0, -probeZ);
+    const rawSlopeX = (hPosX - hNegX) / (2 * probeX);
+    const rawSlopeZ = (hPosZ - hNegZ) / (2 * probeZ);
+    inst.slopeX = Math.max(-0.20, Math.min(0.20, rawSlopeX));
+    inst.slopeZ = Math.max(-0.20, Math.min(0.20, rawSlopeZ));
+
+    const isFort =
+      inst.prefabId === 'stone_sea_bastion' ||
+      inst.prefabId === 'bastion_trace_fortress' ||
+      inst.prefabId === 'torreon_atalaya_farol' ||
+      inst.prefabId === 'curtain_wall_and_gate';
+    if (isFort) {
+      inst.slopeX = 0;
+      inst.slopeZ = 0;
+      inst.y = Math.max(inst.y ?? 3.2, hCenter);
+    } else if (inst.prefabId === 'indigenous_canoe_landing') {
+      inst.slopeX = Math.max(-0.12, Math.min(0.12, inst.slopeX));
+      inst.slopeZ = Math.max(-0.12, Math.min(0.12, inst.slopeZ));
+      inst.y = Math.max(0.28, hCenter);
+    } else if (inst.indigenous) {
+      inst.y = Math.max(0.38, hCenter);
+    } else {
+      inst.y = Math.max(0.85, hCenter);
+    }
+    inst.baseY = inst.y;
+  }
+  return instances;
+}
 
 function coastalInferBearingFromRings(lat, lon, rings) {
   if (!Array.isArray(rings) || rings.length === 0) return null;
@@ -3305,6 +3450,12 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const plazaRadiusInland = preserveRealCoast && !isLisbonRoyalDock ? 105 : isLisbonRoyalDock ? 175 : 145;
   const berthHalfW = Math.max(18, (isLisbonRoyalDock ? 68 : 36) * scaleFactor);
   const berthMaxOffshore = Math.max(80, (isLisbonRoyalDock ? 235 : 190) * scaleFactor);
+  const preIndigenousVillage = !allowColonialPort
+    ? Boolean(
+        (region.indigenousSettlement ?? computeIndigenousSettlementProfile(region, region.year ?? region.era ?? 1550))
+          ?.hasIndigenousSettlement
+      )
+    : false;
   for (let j = 0; j < n; j++) {
     const z = region.z + (j / (n - 1) - 0.5) * span;
     for (let i = 0; i < n; i++) {
@@ -3355,6 +3506,17 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
           const targetBastionY = isLisbonRoyalDock ? 3.2 : 4.8;
           h = h * (1 - bW * 0.9) + targetBastionY * (bW * 0.9);
         }
+      } else if (preIndigenousVillage && h > 0.20) {
+        // 2b. Natural coastal village terrace for Native American settlements (grades steep hills into a gentle 1.6m..2.8m bench)
+        if (relInland >= 2 && relInland <= 108 && Math.abs(relAlong) <= 84) {
+          const alongW = coastalSmoothstep(84, 46, Math.abs(relAlong));
+          const inlandW =
+            coastalSmoothstep(2, 18, relInland) *
+            coastalSmoothstep(108, 68, relInland);
+          const stampW = alongW * inlandW * 0.86;
+          const targetVillageY = 1.65 + Math.max(0, relInland - 10) * 0.014;
+          h = h * (1 - stampW) + targetVillageY * stampW;
+        }
       }
 
       heights[k] = h;
@@ -3401,8 +3563,17 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const instances = [];
   const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
     const prefab = PORT_PREFABS[prefabId];
-    const pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset);
-    const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+    let adjInland = inlandOffset;
+    let pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
+    let groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+    if (!OVER_WATER_PREFAB_IDS.has(prefabId) && overrides?.exactY === undefined) {
+      const minGroundTarget = prefabId === 'indigenous_canoe_landing' ? 0.18 : 0.55;
+      for (let stepIn = 0; stepIn < 12 && groundY < minGroundTarget; stepIn++) {
+        adjInland += 4;
+        pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
+        groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+      }
+    }
     const y = overrides?.exactY !== undefined
       ? overrides.exactY
       : minElevation !== null
@@ -3911,18 +4082,18 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       // Slot 0 is the foreshore canoe beaching & tidal fish weir right at the water's edge;
       // Slots 1..11 arrange the council house / longhouse / batey plaza, palisade stockades, and family wigwams/bohíos on the coastal terrace.
       const villageSlots = [
-        [-14, 4, 0, 1.25],
-        [4, 34, 8, 2.3],
-        [-28, 28, -14, 2.2],
-        [32, 30, 16, 2.2],
-        [-6, 62, 0, 2.7],
-        [-48, 44, -22, 2.4],
-        [48, 48, 24, 2.5],
-        [-26, 56, 12, 2.6],
-        [26, 58, -12, 2.6],
-        [0, 82, 6, 2.9],
-        [-54, 72, -16, 2.8],
-        [54, 74, 16, 2.8],
+        [-14, 4, 0, 0.55],
+        [4, 34, 8, 0.75],
+        [-28, 28, -14, 0.75],
+        [32, 30, 16, 0.75],
+        [-6, 62, 0, 0.85],
+        [-48, 44, -22, 0.75],
+        [48, 48, 24, 0.75],
+        [-26, 56, 12, 0.80],
+        [26, 58, -12, 0.80],
+        [0, 82, 6, 0.85],
+        [-54, 72, -16, 0.85],
+        [54, 74, 16, 0.85],
       ];
       const count = Math.min(
         villageSlots.length,
@@ -3969,15 +4140,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   }
 
-  for (let idx = 0; idx < instances.length; idx++) {
-    const inst = instances[idx];
-    inst.id ??= `${inst.prefabId}_${idx}`;
-    inst.baseY ??= inst.y ?? 0;
-    inst.depth ??= inst.length ?? 16;
-    inst._cosNegYaw = Math.cos(inst.yaw);
-    inst._sinNegYaw = Math.sin(inst.yaw);
-    inst._boundR = Math.hypot(inst.width, inst.length) * 0.5;
-  }
+  syncPortInstancesToTerrain(instances, heights, region, { gradePads: !hasOrthoFootprints });
 
   const indigenousSettlement =
     region.indigenousSettlement ??
@@ -4234,7 +4397,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   };
 
   // Stamp a reconstructed 3D building mesh into world coordinates with zero per-vertex array allocations
-  const emitLRMMesh = (instX, instZ, tmpl, widthX, y0, y1, lengthZ, cosY, sinY) =>
+  const emitLRMMesh = (instX, instZ, tmpl, widthX, y0, y1, lengthZ, cosY, sinY, slopeX = 0, slopeZ = 0) =>
     withPartGroup('lrm_superstructure', () => {
       const baseVertex = verts.length / 8;
       const spanY = Math.max(1.0, y1 - y0);
@@ -4246,8 +4409,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       for (let v = 0; v < vCount; v++) {
         const off = v * 8;
         const lx = vArr[off] * widthX;
-        const py = y0 + vArr[off + 1] * spanY;
         const lz = vArr[off + 2] * lengthZ;
+        const py = y0 + vArr[off + 1] * spanY + lx * slopeX + lz * slopeZ;
         const px = instX + lx * cosY + lz * sinY;
         const pz = instZ - lx * sinY + lz * cosY;
         const lnx = vArr[off + 3] * invW;
@@ -4616,9 +4779,12 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const yTop = inst.y + inst.height;
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
+    const isOverWater = OVER_WATER_PREFAB_IDS.has(inst.prefabId);
+    const slopeX = isOverWater ? 0 : (inst.slopeX ?? 0);
+    const slopeZ = isOverWater ? 0 : (inst.slopeZ ?? 0);
     const toWorld = (lx, ly, lz) => [
       inst.x + lx * cosY + lz * sinY,
-      ly,
+      ly + lx * slopeX + lz * slopeZ,
       inst.z - lx * sinY + lz * cosY,
     ];
 
@@ -4637,7 +4803,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, -hw - 0.55, hw + 0.55, yBase, yPlinth, -hl - 0.55, hl + 0.55, 11, 0.82);
       const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
-      emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY);
+      emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
       flushSection();
       continue;
     }
@@ -5370,9 +5536,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Bent-sapling frame sheathed in overlapping paper-birchbark sheets (kind 17) & rush mats (kind 15),
       // external sapling hoop binders (kind 10), bark-hooded doorway, apex smoke hole, stone hearth & fish-smoking rack.
       const rBase = Math.min(hw, hl) * 0.92;
-      const yPlinth = yGround + 0.28;
+      const yPlinth = yGround + 0.04;
       beginSection('foundation_plinth');
-      emitCylinder(toWorld, 0, 0, yBase, yPlinth, rBase + 0.35, rBase + 0.25, 10, 16, 0.80, true);
+      emitCylinder(toWorld, 0, 0, yGround - 1.2, yPlinth, rBase + 0.05, rBase, 10, 15, 0.78, true);
       // 4-tier hemispherical/ellipsoidal birchbark dome (lower tier woven cattail/rush mat skirt kind 15, upper 3 tiers paper birchbark kind 17)
       const domeH = Math.max(2.9, inst.height);
       const tiers = [
@@ -5409,26 +5575,26 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitCylinder(toWorld, 0.22, 0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
       // Low arched bark-hooded entrance tunnel on -Z with deerskin door flap (kind 13/14)
       beginSection('wigwam_doorway_hood');
-      emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
+      emitBox(toWorld, -0.78, 0.78, yGround - 0.35, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
       emitBox(toWorld, -0.56, 0.56, yPlinth, yPlinth + 1.38, -rBase - 0.58, -rBase - 0.35, 14, 0.28);
       // Forecourt stone hearth ring (kind 11) + glowing ember bed (kind 13) + timber fish-smoking rack (kind 10)
       beginSection('hearth_and_drying_rack');
       const hz = -rBase - 1.65;
-      emitCylinder(toWorld, 1.35, hz, yGround, yGround + 0.32, 0.68, 0.62, 8, 11, 0.82, true);
-      emitCylinder(toWorld, 1.35, hz, yGround + 0.32, yGround + 0.38, 0.44, 0.38, 8, 13, 0.92, true);
-      emitCylinder(toWorld, -1.55, hz - 0.4, yGround, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
-      emitCylinder(toWorld, -1.55, hz + 0.8, yGround, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
+      emitCylinder(toWorld, 1.35, hz, yGround - 0.35, yGround + 0.28, 0.68, 0.62, 8, 11, 0.82, true);
+      emitCylinder(toWorld, 1.35, hz, yGround + 0.28, yGround + 0.34, 0.44, 0.38, 8, 13, 0.92, true);
+      emitCylinder(toWorld, -1.55, hz - 0.4, yGround - 0.45, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
+      emitCylinder(toWorld, -1.55, hz + 0.8, yGround - 0.45, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
       emitBox(toWorld, -1.62, -1.48, yGround + 1.55, yGround + 1.68, hz - 0.55, hz + 0.95, 10, 0.80, true);
     } else if (inst.prefabId === 'algonquian_longhouse') {
       // Algonquian / Wabanaki / Powhatan / Haudenosaunee Barrel-Vaulted Bark Longhouse:
       // Bowed sapling rib frame sheathed in overlapping birch/elm/cedar bark sheets (kind 17),
       // external vertical lash-poles (kind 10), arched barrel roof with smoke holes, and hooded end portals.
       const lhHW = Math.min(4.2, hw);
-      const yPlinth = yGround + 0.32;
+      const yPlinth = yGround + 0.05;
       const yEave = yPlinth + Math.max(2.4, inst.height * 0.54);
       const vaultRise = Math.max(1.8, inst.height * 0.46);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -lhHW - 0.35, lhHW + 0.35, yBase, yPlinth, -hl - 0.35, hl + 0.35, 16, 0.80);
+      emitBox(toWorld, -lhHW - 0.06, lhHW + 0.06, yGround - 1.4, yPlinth, -hl - 0.06, hl + 0.06, 10, 0.74, false, 0.06);
       beginSection('longhouse_bark_walls');
       emitBox(toWorld, -lhHW, lhHW, yPlinth, yEave, -hl, hl, 17, 0.90);
       // Barrel-vaulted bark roof built from 3 stacked arched tiers (kind 17)
@@ -5442,8 +5608,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       for (let b = 0; b <= nBays; b++) {
         const bz = -hl + 0.8 + b * baySpan;
         beginSection('longhouse_sapling_ribs');
-        emitCylinder(toWorld, -lhHW - 0.08, bz, yPlinth, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
-        emitCylinder(toWorld, lhHW + 0.08, bz, yPlinth, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, -lhHW - 0.08, bz, yGround - 0.6, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, lhHW + 0.08, bz, yGround - 0.6, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
         emitBox(toWorld, -lhHW * 0.58, lhHW * 0.58, yEave + vaultRise - 0.05, yEave + vaultRise + 0.09, bz - 0.08, bz + 0.08, 10, 0.76, true);
         if (b > 0 && b < nBays && b % 2 === 1) {
           beginSection('roof_smoke_holes');
@@ -5463,9 +5629,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds
       const rRingX = hw * 0.90;
       const rRingZ = hl * 0.90;
-      const yPlinth = yGround + 0.22;
+      const yPlinth = yGround + 0.04;
       beginSection('plaza_earth_floor');
-      emitCylinder(toWorld, 0, 0, yBase, yPlinth, Math.min(rRingX, rRingZ), Math.min(rRingX, rRingZ), 12, 16, 0.82, true);
+      emitCylinder(toWorld, 0, 0, yGround - 0.8, yPlinth, 4.35, 4.10, 12, 16, 0.78, true);
       // 28 pointed vertical log stockade posts around the perimeter with a baffled entrance gap on -Z
       beginSection('palisade_stockade_posts');
       const nPosts = 28;
@@ -5477,21 +5643,21 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const px = Math.cos(angle) * rRingX;
         const pz = Math.sin(angle) * rRingZ;
         const hVar = ((p * 7) % 5) * 0.14;
-        emitCylinder(toWorld, px, pz, yBase + 0.4, yPlinth + postH + hVar, 0.34, 0.16, 6, 10, 0.74 + (p % 3) * 0.04, true);
+        emitCylinder(toWorld, px, pz, yGround - 1.5, yPlinth + postH + hVar, 0.34, 0.16, 6, 10, 0.74 + (p % 3) * 0.04, true);
       }
       // Central stone council hearth (kind 11 + 13) & 4 split-log council benches (kind 10)
       beginSection('council_firepit_and_benches');
-      emitCylinder(toWorld, 0, 0, yPlinth, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
+      emitCylinder(toWorld, 0, 0, yGround - 0.3, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
       emitCylinder(toWorld, 0, 0, yPlinth + 0.42, yPlinth + 0.52, 0.95, 0.78, 8, 13, 0.94, true);
-      emitBox(toWorld, -2.6, 2.6, yPlinth, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
-      emitBox(toWorld, -2.6, 2.6, yPlinth, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
-      emitBox(toWorld, -3.4, -2.75, yPlinth, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
-      emitBox(toWorld, 2.75, 3.4, yPlinth, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yGround - 0.25, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yGround - 0.25, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
+      emitBox(toWorld, -3.4, -2.75, yGround - 0.25, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, 2.75, 3.4, yGround - 0.25, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
       // Three Sisters (maize, climbing beans, winter squash) hillock mounds inside the stockade lee
       beginSection('three_sisters_crop_mounds');
       for (const mx of [-rRingX * 0.48, rRingX * 0.48]) {
         for (const mz of [-rRingZ * 0.36, 0, rRingZ * 0.36]) {
-          emitCylinder(toWorld, mx, mz, yPlinth, yPlinth + 0.38, 0.95, 0.55, 6, 16, 0.76, true);
+          emitCylinder(toWorld, mx, mz, yGround - 0.45, yPlinth + 0.38, 0.95, 0.55, 6, 16, 0.76, true);
           emitCylinder(toWorld, mx, mz, yPlinth + 0.32, yPlinth + 1.65, 0.32, 0.08, 5, 4, 0.84, true);
         }
       }
@@ -5499,18 +5665,18 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Taíno Cacique Royal Caney: Rectangular/polygonal royal palm-thatch council & chief's residence
       // facing the batey plaza with a carved hardwood front portico and high-pitched multi-tier guano thatch roof.
       const cHW = Math.min(5.8, hw);
-      const yPlinth = yGround + 0.52;
+      const yPlinth = yGround + 0.10;
       const yEave = yPlinth + Math.max(2.8, inst.height * 0.48);
       const yPeak = yEave + Math.max(3.2, inst.roofPitch || 3.6);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -cHW - 0.65, cHW + 0.65, yBase, yPlinth, -hl - 0.85, hl + 0.65, 16, 0.82);
+      emitBox(toWorld, -cHW - 0.25, cHW + 0.25, yGround - 1.4, yPlinth, -hl - 0.25, hl + 0.25, 10, 0.74, false, 0.20);
       // Cane-and-post bahareque walls (kind 12) recessed behind the front portico (-hl + 2.6 .. hl)
       beginSection('caney_cane_walls');
       emitBox(toWorld, -cHW, cHW, yPlinth, yEave, -hl + 2.6, hl, 12, 0.88);
       // Front ceremonial portico columns (kind 10) & shadowed doorway portal (kind 14)
       beginSection('caney_portico_posts');
       for (const px of [-cHW + 0.45, -cHW * 0.34, cHW * 0.34, cHW - 0.45]) {
-        emitCylinder(toWorld, px, -hl + 0.35, yPlinth, yEave, 0.24, 0.21, 6, 10, 0.76, true);
+        emitCylinder(toWorld, px, -hl + 0.35, yGround - 0.8, yEave, 0.24, 0.21, 6, 10, 0.76, true);
       }
       emitBox(toWorld, -1.15, 1.15, yPlinth, yEave - 0.45, -hl + 2.45, -hl + 2.75, 14, 0.28);
       // Multi-tiered royal palm-thatch hipped roof (kind 15) + carved ridge pole crest (kind 10)
@@ -5521,18 +5687,18 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Taíno / Arawak / Kalinago Circular Conical Guano-Thatch Bohío:
       // 10-sided circular cane wall with exterior hardwood posts + steep 3-tier conical palm-thatch roof & center pole finial.
       const rBohio = Math.min(hw, hl) * 0.88;
-      const yPlinth = yGround + 0.36;
+      const yPlinth = yGround + 0.05;
       const yEave = yPlinth + Math.max(2.1, inst.height * 0.42);
       const coneH = Math.max(3.0, inst.roofPitch || 3.2);
       beginSection('foundation_plinth');
-      emitCylinder(toWorld, 0, 0, yBase, yPlinth, rBohio + 0.45, rBohio + 0.35, 10, 16, 0.80, true);
+      emitCylinder(toWorld, 0, 0, yGround - 1.2, yPlinth, rBohio + 0.06, rBohio, 10, 12, 0.78, true);
       beginSection('bohio_circular_cane_wall');
       emitCylinder(toWorld, 0, 0, yPlinth, yEave, rBohio, rBohio, 10, 12, 0.86, false);
       // Exterior hardwood post ring (kind 10) & doorway opening on -Z (kind 14)
       beginSection('bohio_perimeter_posts');
       for (let p = 0; p < 10; p++) {
         const a = (p / 10) * Math.PI * 2;
-        emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yPlinth, yEave, 0.15, 0.13, 5, 10, 0.74, true);
+        emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yGround - 0.6, yEave, 0.15, 0.13, 5, 10, 0.74, true);
       }
       emitBox(toWorld, -0.68, 0.68, yPlinth, yEave - 0.35, -rBohio - 0.12, -rBohio + 0.18, 14, 0.28);
       // 3-tier overhanging conical palm-thatch roof (kind 15) + center pole finial (kind 10)
@@ -5544,9 +5710,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     } else if (inst.prefabId === 'taino_batey_court') {
       // Taíno Batey Ceremonial Ballcourt & Plaza:
       // Sunken/graded earthen court (kind 16) lined with upright carved petroglyph stone monoliths (kind 11) & central zemi altar.
-      const yCourt = yGround + 0.24;
+      const yCourt = yGround + 0.05;
       beginSection('batey_plaza_floor');
-      emitBox(toWorld, -hw, hw, yBase, yCourt, -hl, hl, 16, 0.84, true);
+      emitBox(toWorld, -hw, hw, yGround - 0.9, yCourt, -hl, hl, 16, 0.82, true, 0.12);
       // Flanking rows of upright carved stone monoliths & river boulders along -hw and +hw
       beginSection('batey_petroglyph_monoliths');
       const nStones = snapBays(inst.length - 2.0, 2.8, 5);
@@ -5554,30 +5720,30 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       for (let s = 0; s <= nStones; s++) {
         const sz = -hl + 1.0 + s * stoneSpan;
         const hMod = 1.15 + ((s * 5) % 4) * 0.22;
-        emitBox(toWorld, -hw - 0.15, -hw + 0.42, yCourt, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
-        emitBox(toWorld, hw - 0.42, hw + 0.15, yCourt, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
+        emitBox(toWorld, -hw - 0.15, -hw + 0.42, yGround - 0.6, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
+        emitBox(toWorld, hw - 0.42, hw + 0.15, yGround - 0.6, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
       }
       // Carved stone Zemi sanctuary plinth & cacique wooden duho ceremonial stool at the head of the court
       beginSection('zemi_altar_and_duho');
-      emitCylinder(toWorld, 0, hl * 0.58, yCourt, yCourt + 0.65, 1.35, 1.18, 8, 11, 0.88, true);
+      emitCylinder(toWorld, 0, hl * 0.58, yGround - 0.4, yCourt + 0.65, 1.35, 1.18, 8, 11, 0.88, true);
       emitCylinder(toWorld, 0, hl * 0.58, yCourt + 0.65, yCourt + 1.85, 0.48, 0.28, 6, 11, 0.94, true);
-      emitBox(toWorld, -0.85, 0.85, yCourt, yCourt + 0.48, -hl * 0.65 - 0.45, -hl * 0.65 + 0.45, 10, 0.78, true);
+      emitBox(toWorld, -0.85, 0.85, yGround - 0.25, yCourt + 0.48, -hl * 0.65 - 0.45, -hl * 0.65 + 0.45, 10, 0.78, true);
     } else if (inst.prefabId === 'kalinago_carbet_hall') {
       // Kalinago (Island Carib) Elliptical Taboui / Carbet Assembly Hall:
       // Soaring palm-thatch communal warrior hall with low open eaves, hardwood post colonnade & boucan roasting rack.
       const kHW = Math.min(5.2, hw);
-      const yPlinth = yGround + 0.32;
+      const yPlinth = yGround + 0.05;
       const yLowEave = yPlinth + 1.65;
       const yPeak = yPlinth + Math.max(5.6, inst.height);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -kHW - 0.5, kHW + 0.5, yBase, yPlinth, -hl - 0.5, hl + 0.5, 16, 0.80);
+      emitBox(toWorld, -kHW - 0.08, kHW + 0.08, yGround - 1.4, yPlinth, -hl - 0.08, hl + 0.08, 10, 0.74, false, 0.08);
       beginSection('carbet_timber_colonnade');
       const nPosts = snapBays(inst.length - 2.0, 3.2, 4);
       const pSpan = (inst.length - 2.0) / nPosts;
       for (let p = 0; p <= nPosts; p++) {
         const pz = -hl + 1.0 + p * pSpan;
-        emitCylinder(toWorld, -kHW + 0.45, pz, yPlinth, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
-        emitCylinder(toWorld, kHW - 0.45, pz, yPlinth, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
+        emitCylinder(toWorld, -kHW + 0.45, pz, yGround - 0.7, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
+        emitCylinder(toWorld, kHW - 0.45, pz, yGround - 0.7, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
       }
       // Low woven-reed windbreak skirt (kind 12) + sweeping two-stage steep palm-thatch roof (kind 15)
       beginSection('carbet_thatch_hall_roof');
@@ -5590,10 +5756,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Tupinambá / Lokono Monumental Arched Palm-Thatch Oca Longhouse (28m x 9.6m):
       // Continuous ground-to-ridge arched palm-thatch shell (kind 15) with 3 low side doorways & external sapling ribs.
       const oHW = Math.min(5.0, hw);
-      const yPlinth = yGround + 0.30;
+      const yPlinth = yGround + 0.05;
       const ocaH = Math.max(5.8, inst.height);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -oHW - 0.45, oHW + 0.45, yBase, yPlinth, -hl - 0.45, hl + 0.45, 16, 0.80);
+      emitBox(toWorld, -oHW - 0.06, oHW + 0.06, yGround - 1.4, yPlinth, -hl - 0.06, hl + 0.06, 15, 0.78, false, 0.06);
       beginSection('oca_arched_thatch_vault');
       emitBox(toWorld, -oHW, oHW, yPlinth, yPlinth + ocaH * 0.38, -hl, hl, 15, 0.86, false, oHW * 0.08);
       emitBox(toWorld, -oHW * 0.92, oHW * 0.92, yPlinth + ocaH * 0.38, yPlinth + ocaH * 0.72, -hl - 0.2, hl + 0.2, 15, 0.91, true, oHW * 0.18);
@@ -5660,19 +5826,19 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const naW = Math.min(3.8, hw * 0.68);
       const naL = Math.min(3.6, hl * 0.36);
       beginSection('maya_apsidal_thatched_nah');
-      emitBox(toWorld, -naW, naW, yGround, yGround + 2.35, naZ - naL, naZ + naL, 12, 0.88);
+      emitBox(toWorld, -naW, naW, yGround - 0.6, yGround + 2.35, naZ - naL, naZ + naL, 12, 0.88);
       emitRoof(toWorld, -naW, naW, yGround + 2.35, yGround + 4.95, naZ - naL, naZ + naL, 0.72, 0.28, 10, 15);
     } else if (inst.prefabId === 'indigenous_canoe_landing') {
       // Indigenous Canoe Beaching, Log Rollers, Upturned Birchbark / Dugout Canoes & Tidal Brushwood Fish Weir
       const isBirchbark =
         inst.cultureId === 'abenaki-algonquian' || inst.cultureId === 'mid-atlantic-algonquian';
       const canoeKind = isBirchbark ? 17 : 10;
-      const yBeach = yGround + 0.18;
+      const yBeach = yGround + 0.06;
       beginSection('canoe_landing_rollers');
       for (let r = 0; r < 5; r++) {
         const rz = -hl + 1.8 + r * 2.6;
-        emitCylinder(toWorld, -hw * 0.55, rz, yBeach - 0.1, yBeach + 0.18, 0.16, 0.16, 6, 10, 0.72, true);
-        emitCylinder(toWorld, hw * 0.55, rz, yBeach - 0.1, yBeach + 0.18, 0.16, 0.16, 6, 10, 0.72, true);
+        emitCylinder(toWorld, -hw * 0.55, rz, yBeach - 0.14, yBeach + 0.14, 0.16, 0.16, 6, 10, 0.72, true);
+        emitCylinder(toWorld, hw * 0.55, rz, yBeach - 0.14, yBeach + 0.14, 0.16, 0.16, 6, 10, 0.72, true);
       }
       // 2 Beached 3D Canoes (Abenaki high-stem paper-birchbark canoes or Taíno/Kalinago carved mahogany cayucos/kanawas)
       beginSection('beached_indigenous_canoes');
@@ -6847,6 +7013,7 @@ export function smoothCoastlineAndForeshoreBeaches(
   const span = region.span;
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
 
+  const protectMargin = Math.max(28, (span / Math.max(1, n - 1)) * 1.45);
   const isPortProtected = (i, j) => {
     if (
       connectedEdges &&
@@ -6860,7 +7027,7 @@ export function smoothCoastlineAndForeshoreBeaches(
     if (!preservePortCore) return false;
     const x = region.x + (i / (n - 1) - 0.5) * span;
     const z = region.z + (j / (n - 1) - 0.5) * span;
-    if (!portClearanceEnvelope(preservePortCore, x, z, 18)) return true;
+    if (!portClearanceEnvelope(preservePortCore, x, z, protectMargin)) return true;
     const h = heights[j * n + i];
     if (h <= -0.5) {
       if (preservePortCore.berth && Math.hypot(x - preservePortCore.berth.x, z - preservePortCore.berth.z) <= 135) {
@@ -7109,6 +7276,7 @@ function finalizeProceduralCoastalPack(
       connectedEdges: pack.connectedEdges || null,
       taperOuterBorders: Boolean(pack.taperOuterBorders),
     });
+    syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
   }
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist);
