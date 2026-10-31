@@ -15,6 +15,11 @@
 
 import { modelDeck, modelDeckWidth, vesselHull } from './hull.js';
 import { applyPirateCrewAttire } from './crew.js';
+import { resolveIndigenousCultureRegion } from './coastal-world.js';
+import {
+  applyIndigenousSupportAction,
+  getActiveIndigenousSovereigntyState,
+} from './indigenous-sovereignty.js';
 
 export const FEMALE_BOARDING_STRENGTH = 1.0;
 export const MALE_BOARDING_STRENGTH = 1.0;
@@ -633,6 +638,57 @@ export function createDockingBoardingState(boat, options = {}) {
       state.statusText = summary;
       state.combatLog.unshift(summary);
       const res = { ok: true, disposition: 'ally', vessel, summary };
+      emit('prize-disposition', res);
+      return res;
+    }
+
+    if (disposition === 'gift-indigenous' || disposition === 'gift-prize') {
+      const lat = voyage?.true?.lat ?? state.terrain?.region?.latitude ?? 18.4;
+      const lon = voyage?.true?.lon ?? state.terrain?.region?.longitude ?? -69.9;
+      const culture =
+        resolveIndigenousCultureRegion(lat, lon) ||
+        { id: state.terrain?.region?.indigenousSettlement?.cultureId || 'taino-greater-antilles' };
+      const sovRes = applyIndigenousSupportAction(
+        culture.id,
+        'gift-prize',
+        getActiveIndigenousSovereigntyState(),
+        { boat, voyage, cannonCount: 6 }
+      );
+      boat.colors = 'indigenous-confederacy';
+      tb.colors = 'indigenous-confederacy';
+      tb.allyConsort = true;
+      tb.faction = 'friendly';
+      vessel.faction = 'friendly';
+      if (tb.damage) {
+        tb.damage.surrendered = false;
+        tb.damage.sunk = false;
+        tb.damage.hullIntegrity = Math.max(0.75, tb.damage.hullIntegrity ?? 0.75);
+        tb.damage.rigIntegrity = Math.max(0.80, tb.damage.rigIntegrity ?? 0.80);
+        tb.damage.floodingRate = 0;
+        tb.damage.floodingLevel = 0;
+        tb.damage.battleMorale = 0.94;
+      }
+      if (vessel.follower) {
+        vessel.follower.faction = 'friendly';
+        vessel.follower.encounterMode = null;
+        vessel.follower.formation = { trail: 2.0, side: -1.8 };
+        vessel.follower.captainOrder = 'full';
+        vessel.follower.status = `Sovereign Indigenous Consort (${shipLabel})`;
+      }
+      tb.sailFore = 1;
+      tb.sailMain = 1;
+      tb.sailMizzen = 1;
+      if (state.mooringPhase !== 'clear') castOff();
+      const summary = `🛡️ ${sovRes.message}`;
+      state.statusText = summary;
+      state.combatLog.unshift(summary);
+      const res = {
+        ok: true,
+        disposition: 'gift-indigenous',
+        vessel,
+        sovereigntyResult: sovRes,
+        summary,
+      };
       emit('prize-disposition', res);
       return res;
     }

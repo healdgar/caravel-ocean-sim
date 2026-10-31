@@ -3090,14 +3090,21 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
       }
       if (autoReturnFire && batteries.length > 0 && dt > 0) {
         const portAttacked = instances.some((inst) => (inst.damageState?.hits ?? 0) > 0);
+        const hasFriendlyIndigenousBattery = batteries.some((b) => b.building?.indigenous || b.building?.friendlyToPlayer);
         cooldown -= dt;
-        if (cooldown <= 0 && portAttacked) {
+        if (cooldown <= 0 && (portAttacked || hasFriendlyIndigenousBattery)) {
           const vessels = getVessels() ?? [];
           let nearestBoat = null;
           let nearestDist = Infinity;
-          for (const entry of vessels) {
+          for (let vIdx = 0; vIdx < vessels.length; vIdx++) {
+            const entry = vessels[vIdx];
             const boat = entry?.boat ?? entry;
-            if (!boat || boat.damage?.sunk) continue;
+            if (!boat || boat.damage?.sunk || boat.damage?.surrendered) continue;
+            const isHostileEnemy = entry?.faction === 'enemy' || boat?.faction === 'enemy';
+            // Allied Indigenous coastal batteries actively defend the harbor against hostile European vessels
+            // without firing on the allied player (vIdx === 0) unless the port was directly bombarded when no enemy is present.
+            if (hasFriendlyIndigenousBattery && !portAttacked && !isHostileEnemy) continue;
+            if (hasFriendlyIndigenousBattery && vIdx === 0 && vessels.some((v) => (v?.faction ?? v?.boat?.faction) === 'enemy')) continue;
             for (const b of batteries) {
               const d = Math.hypot((boat.x ?? 0) - (b.building.x ?? 0), (boat.z ?? 0) - (b.building.z ?? 0));
               if (d < nearestDist) {

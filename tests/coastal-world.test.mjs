@@ -15,6 +15,15 @@ import {
   UNINHABITED_PELAGIC_ISLANDS,
   resolveIndigenousCultureRegion,
   computeIndigenousSettlementProfile,
+  SOVEREIGN_INDIGENOUS_POLITIES,
+  createIndigenousSovereigntyState,
+  getActiveIndigenousSovereigntyState,
+  setActiveIndigenousSovereigntyState,
+  resetActiveIndigenousSovereigntyState,
+  serializeIndigenousSovereignty,
+  restoreIndigenousSovereignty,
+  resolveRegionSovereigntyRecord,
+  applyIndigenousSupportAction,
   PORT_PREFABS,
   COCONUT_PALM_GENOME_SPEC,
   coastalUberNoise2D,
@@ -1298,6 +1307,99 @@ test('Native American settlements, regional structures, demographic collapse tim
   const canoeCompany = createCompany(undefined, 'taino-canoe');
   assert.equal(canoeCompany.indigenousAttire, true);
   assert.ok(canoeCompany.crew.every(s => s.indigenous === true && s.attireTheme === 'indigenous' && s.strength === 1.0));
+});
+
+test('rogue liberator path strengthens Native American settlements through trade, medicine, arms & defense into Sovereign Indigenous Polities', async () => {
+  const { SHIP_COLORS } = await import('../js/ship-colors.js');
+  const { createFortGarrison } = await import('../js/crew.js');
+  assert.ok(SHIP_COLORS['indigenous-confederacy'], 'Expected indigenous-confederacy ship colors');
+  assert.equal(SHIP_COLORS['indigenous-confederacy'].code, 9);
+
+  resetActiveIndigenousSovereigntyState();
+  try {
+    // 1. Baseline 1650 Boston (Shawmut Peninsula) without player intervention is colonized by England
+    const baselineBoston1650 = resolveGlobalCoastalRegion({
+      id: 'boston',
+      name: 'Boston',
+      latitude: 42.3601,
+      longitude: -71.0589,
+      year: 1650,
+    });
+    assert.equal(baselineBoston1650.hasColonialPort, true);
+    assert.equal(baselineBoston1650.indigenousSettlement.hasIndigenousSettlement, false);
+
+    // 2. Player goes rogue, trades with the Wabanaki Confederacy, shares epidemic quarantine, arms the village, and defends against colonizers
+    const sovState = getActiveIndigenousSovereigntyState();
+    const r1 = applyIndigenousSupportAction('abenaki-algonquian', 'go-rogue', sovState);
+    assert.equal(r1.ok, true);
+    assert.equal(sovState.allegiance, 'rogue-liberator');
+
+    applyIndigenousSupportAction('abenaki-algonquian', 'trade', sovState);
+    applyIndigenousSupportAction('abenaki-algonquian', 'share-medicine', sovState);
+    const rArm = applyIndigenousSupportAction('abenaki-algonquian', 'arm-settlement', sovState, { cannonCount: 6 });
+    assert.equal(rArm.record.fortified, true);
+    assert.equal(rArm.record.resistsColonization, true);
+
+    const rDef = applyIndigenousSupportAction('abenaki-algonquian', 'defend-settlement', sovState);
+    assert.equal(rDef.record.isSovereignPolity, true);
+    assert.equal(rDef.record.polityTier, 'sovereign-polity');
+
+    // 3. Now 1650 Shawmut Peninsula (Boston) repels European colonization and stands as a Sovereign Indigenous Polity!
+    const sovereignShawmut1650 = resolveGlobalCoastalRegion({
+      id: 'boston',
+      latitude: 42.3601,
+      longitude: -71.0589,
+      year: 1650,
+    });
+    assert.equal(sovereignShawmut1650.hasColonialPort, false, 'Sovereign Wabanaki Confederacy prevents colonial port takeover in 1650');
+    assert.equal(sovereignShawmut1650.settlementKind, 'sovereign-indigenous-polity');
+    assert.equal(sovereignShawmut1650.sovereignPolity, true);
+    assert.equal(sovereignShawmut1650.indigenousSettlement.hasIndigenousSettlement, true);
+    assert.equal(sovereignShawmut1650.indigenousSettlement.isSovereignPolity, true);
+    assert.ok(sovereignShawmut1650.indigenousSettlement.retention >= 0.90, 'Quarantine + trade + defense preserves >90% population');
+
+    // 4. Generate the 3D coastal pack for the Sovereign Indigenous Polity and verify structures & Native American artillery garrison
+    const sovPack = generateProceduralCoastalPack({
+      id: 'boston',
+      latitude: 42.3601,
+      longitude: -71.0589,
+      year: 1650,
+      size: 65,
+      biomeSize: 64,
+      albedoSize: 64,
+      vegetationCandidates: 900,
+    });
+    assert.equal(sovPack.port.sovereignPolity, true);
+    assert.equal(sovPack.port.stage, 'sovereign-polity');
+    assert.ok(sovPack.port.indigenousInstanceCount >= 12, 'Sovereign Indigenous Polity places expanded village + coastal artillery redoubt');
+    const redoubt = sovPack.port.instances.find(i => i.prefabId === 'stone_sea_bastion' && i.indigenous === true);
+    assert.ok(redoubt, 'Expected Sovereign Coastal Artillery Redoubt placed on harbor headland');
+    assert.equal(redoubt.friendlyToPlayer, true);
+
+    const sovGarrison = createFortGarrison(sovPack.port);
+    const artillerists = sovGarrison.soldiers.filter(s => s.buildingPrefabId === 'stone_sea_bastion');
+    assert.ok(artillerists.length >= 6, 'Sovereign coastal battery is manned by Native American artillerists');
+    assert.ok(artillerists.every(s => s.indigenous === true && (s.modelVariant === 'indigenous-male' || s.modelVariant === 'indigenous-female')));
+
+    // 5. Verify Taíno Cacicazgo in Greater Antilles persists in 1550 when strengthened via quarantine & trade
+    applyIndigenousSupportAction('taino-greater-antilles', 'share-medicine', sovState);
+    applyIndigenousSupportAction('taino-greater-antilles', 'trade', sovState);
+    applyIndigenousSupportAction('taino-greater-antilles', 'gift-prize', sovState);
+    const taino1550 = computeIndigenousSettlementProfile({ latitude: 19.95, longitude: -75.85 }, 1550);
+    assert.equal(taino1550.hasIndigenousSettlement, true);
+    assert.equal(taino1550.resistsColonization, true);
+    assert.ok(taino1550.retention >= 0.85, `Expected strengthened Taíno Cacicazgo retention >= 0.85 in 1550, got ${taino1550.retention}`);
+
+    // 6. Verify compact URL state serialization & restoration
+    const serialized = serializeIndigenousSovereignty(sovState);
+    assert.ok(serialized && serialized.allegiance === 'rogue-liberator');
+    const restored = restoreIndigenousSovereignty(serialized);
+    assert.equal(restored.allegiance, 'rogue-liberator');
+    assert.equal(restored.regions['abenaki-algonquian'].isSovereignPolity, true);
+    assert.equal(restored.regions['taino-greater-antilles'].resistsColonization, true);
+  } finally {
+    resetActiveIndigenousSovereigntyState();
+  }
 });
 
 

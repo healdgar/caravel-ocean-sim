@@ -88,6 +88,16 @@ export const SHIP_COLORS = Object.freeze({
     isSurrender: true,
     description: 'Plain white flag hoisted after striking national colors to signal surrender and ask for quarter.',
   }),
+  'indigenous-confederacy': Object.freeze({
+    id: 'indigenous-confederacy',
+    code: 9,
+    name: 'Sovereign Indigenous Confederacy (Wampum & Sun Zemi Banner)',
+    shortLabel: 'Indigenous Confederacy ☀️',
+    faction: 'indigenous',
+    isHostile: false,
+    isSurrender: false,
+    description: 'Wampum-indigo and terracotta-ochre treaty banner bearing a golden Guanín sun disc and white shell-wampum belt.',
+  }),
 });
 
 export const DEFAULT_SHIP_COLORS = 'portugal';
@@ -263,6 +273,29 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     // White Flag of Surrender / Truce
     let truceSeam = 0.94 + 0.04 * smoothstep(0.01, 0.03, abs(v - 0.5));
     return vec3f(0.92, 0.91, 0.87) * weave * truceSeam * (0.92 + 0.08 * hem);
+  }
+  if (code == 9) {
+    // Sovereign Indigenous Confederacy Banner (Wampum indigo, terracotta-ochre border, white shell-wampum belt, golden Guanín sun disc)
+    var col = vec3f(0.11, 0.19, 0.36);
+    if (v < 0.20 || v > 0.80) {
+      col = vec3f(0.62, 0.16, 0.08);
+    }
+    // White shell-wampum stepped diamond treaty belt
+    let beltY = abs(v - 0.50);
+    let diamond = abs(fract(u * 7.0) - 0.5) * 0.12 + beltY;
+    if (beltY < 0.045 || (diamond < 0.095 && beltY < 0.11)) {
+      col = vec3f(0.88, 0.85, 0.77);
+    }
+    // Golden Guanín Sun Zemi disc at hoist center
+    let sx = (u - 0.44) * 1.38;
+    let sy = v - 0.50;
+    let r = length(vec2f(sx, sy));
+    let ang = atan2(sy, sx);
+    let ray = 0.035 * max(0.0, cos(ang * 8.0));
+    if (r < 0.145 + ray) {
+      col = vec3f(0.86, 0.64, 0.16);
+    }
+    return col * weave * (0.90 + 0.10 * hem);
   }
   if (code == 7) {
     // Blood Flag (Sans Quartier — solid crimson)

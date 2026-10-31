@@ -28,7 +28,7 @@ import { createVolumetricClouds } from './clouds.js';
 import { createTerrain, createDeepWaterGroup } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
 import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort } from './terrain-model.js';
-import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw } from './landfall.js';
+import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw, loadIndigenousSovereigntyFromStorage, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, serializeIndigenousSovereignty, restoreIndigenousSovereignty } from './landfall.js';
 import { createVoyageController } from './voyage/voyage-controller.js';
 import { createChartDrawer } from './voyage/chart-drawer.js';
 import { islandCoordinates } from './terrain-model.js';
@@ -84,8 +84,12 @@ import { OCEAN_LIGHTING, withCachedOceanLighting } from './wgsl/ocean-lighting.j
 import { BLOOM_DOWN, BLOOM_UP, COMPOSITE, createUnderwaterPost } from './wgsl/post.js';
 
 const qs = new URLSearchParams(location.search);
+loadIndigenousSovereigntyFromStorage();
 const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
 if (urlGameState) {
+  if (urlGameState.sovereignty) {
+    setActiveIndigenousSovereigntyState(restoreIndigenousSovereignty(urlGameState.sovereignty));
+  }
   const backfill = (k, v) => { if (v !== undefined && v !== null && !qs.has(k)) qs.set(k, String(v)); };
   const p = urlGameState.pos, s = urlGameState.ship, v = urlGameState.voyage;
   if (p) {
@@ -2078,6 +2082,7 @@ async function main() {
         heading: num(encVessel.boat.heading, 1),
         surrendered: Boolean(encVessel.boat.damage?.surrendered),
       } : undefined,
+      sovereignty: serializeIndigenousSovereignty(getActiveIndigenousSovereigntyState()),
     };
     return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
   };
@@ -2146,6 +2151,15 @@ async function main() {
   });
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
     discovery:terrain?.discovery??null,onUpgradeApplied:()=>{envFull=true;},
+    onIndigenousAction:res=>{
+      if(res?.state?.allegiance==='rogue-liberator'){
+        setVesselColors(boat,'indigenous-confederacy');
+        if(colorsSelect)colorsSelect.value='indigenous-confederacy';
+      }
+      if(res?.message)voyageCtl?.showToast?.(res.message,8);
+      updateCrewUI();
+      syncBrowserUrlState(performance.now(),true);
+    },
     onOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
     getPosition:()=>boat,onWeather:settings=>{Object.assign(P,settings);if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});for(const [key,{input,output}] of seaSliders){input.value=P[key];output.textContent=String(P[key]);}for(const k of ['sunElev','sunAzim']){const m=landfallMirrorSliders[k];if(m&&P[k]!==undefined){m.input.value=String(P[k]);m.output.textContent=String(P[k]);}}needSpectrum=true;envFull=true;}});
   controlIcon(cameraDock.querySelector('#landfall-button'),'map','Landfall');

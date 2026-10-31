@@ -394,6 +394,7 @@ export function createVoyageController(cfg) {
         plunder,
         choices: [
           { id: 'ally', label: '🏴 Add to Fleet as Allied Consort' },
+          { id: 'gift-indigenous', label: '🛡️ Gift Prize & Cannon to Indigenous Allies' },
           { id: 'impress-plunder', label: `⚓ Impress Crew (+${ableCrew}) & Plunder Cannon (+${cannonCount})/Stores` },
           { id: 'scuttle-repair', label: `🔨 Plunder & Scuttle for Hull Repair (+${repairPct}%)` },
         ],

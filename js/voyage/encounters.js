@@ -14,6 +14,11 @@
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
 import { addLog, addMark, raiseInterrupt } from './passage.js';
 import { mulberry32 } from './ocean-climate.js';
+import { resolveIndigenousCultureRegion } from '../coastal-world.js';
+import {
+  applyIndigenousSupportAction,
+  getActiveIndigenousSovereigntyState,
+} from '../indigenous-sovereignty.js';
 
 const encounterWrap360 = (d) => ((d % 360) + 360) % 360;
 
@@ -152,6 +157,38 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
       return 0.35;
     },
   },
+  {
+    id: 'colonial-raiding-armada',
+    title: 'Colonial Slaver & Encomienda Raiding Nao',
+    names: ['San Bartolomé de Indias', 'El Conquistador', 'Santiago de la Encomienda', 'Nuestra Señora de la Victoria'],
+    flag: 'Colonial Raiding Squadron (Encomienda / Slaver)',
+    colors: 'castile',
+    battleColors: 'castile',
+    rig: 'armed colonial raiding nao',
+    hostile: true,
+    colonialRaider: true,
+    speedKts: 5.9,
+    weight(lat, lon) {
+      if (lat >= -34 && lat <= 48 && lon >= -98 && lon <= -34) return 0.95;
+      return 0;
+    },
+  },
+  {
+    id: 'indigenous-war-canoe',
+    title: 'Sovereign Indigenous Sea Piragua / Kanawa',
+    names: ['Guarionex', 'Caonabo', 'Anacaona', 'Madockawando', 'Uanambé'],
+    flag: 'Sovereign Indigenous Confederacy (Wampum & Guanín Sun)',
+    colors: 'indigenous-confederacy',
+    battleColors: 'indigenous-confederacy',
+    rig: 'ocean-going carved cedar/mahogany piragua under cotton sail',
+    hostile: false,
+    indigenousAlly: true,
+    speedKts: 6.4,
+    weight(lat, lon) {
+      if (lat >= -34 && lat <= 48 && lon >= -98 && lon <= -34) return 0.75;
+      return 0;
+    },
+  },
 ]);
 
 export function pickEncounterArchetype(lat, lon, rand = Math.random, year = 1550) {
@@ -282,6 +319,21 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
     state.active = enc;
     env.onSightVessel?.(enc);
     addMark(voyage, { kind: 'sail', lat: voyage.dr.lat, lon: voyage.dr.lon, label: `Sail (${arch.title})` });
+    const nearbyIndigenousCulture = resolveIndigenousCultureRegion(lat, lon);
+    const choices = [
+      { id: 'spyglass', label: "🔭 Crow's Nest & Spyglass" },
+      ...(nearbyIndigenousCulture && !arch.indigenousAlly
+        ? [{ id: 'defend-indigenous', label: `🛡️ Go Rogue & Defend ${nearbyIndigenousCulture.name.split(' ')[0]} Coast!` }]
+        : []),
+      ...(arch.indigenousAlly
+        ? [{ id: 'trade-indigenous', label: '🤝 Barter & Ally with Indigenous Mariners' }]
+        : []),
+      { id: 'fight', label: '⚔️ Clear for action!' },
+      { id: 'board', label: '🪝 Grapple & board her!' },
+      { id: 'hail', label: '🎺 Close to hail' },
+      { id: 'hold', label: 'Hold course' },
+      { id: 'avoid', label: 'Bear away to avoid' },
+    ];
     raiseInterrupt(
       voyage,
       {
@@ -289,14 +341,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
         title: enc.title,
         text: enc.text,
         encounter: enc,
-        choices: [
-          { id: 'spyglass', label: "🔭 Crow's Nest & Spyglass" },
-          { id: 'fight', label: '⚔️ Clear for action!' },
-          { id: 'board', label: '🪝 Grapple & board her!' },
-          { id: 'hail', label: '🎺 Close to hail' },
-          { id: 'hold', label: 'Hold course' },
-          { id: 'avoid', label: 'Bear away to avoid' },
-        ],
+        choices,
         log: `Sail sighted ${callout} (${arch.rig}, ${distNm} nm, bearing ${compassPointName(compassBrg)}).`,
       },
       'watch'
@@ -376,6 +421,52 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
         addLog(voyage, outcome.summary, 'encounter');
       }
       env.onToast?.(outcome.summary, 6);
+      return outcome;
+    }
+
+    if (choiceId === 'defend-indigenous') {
+      const culture =
+        resolveIndigenousCultureRegion(voyage.true?.lat ?? 18.4, voyage.true?.lon ?? -69.9) ||
+        { id: 'taino-greater-antilles', name: 'Taíno Cacicazgos' };
+      const sovRes = applyIndigenousSupportAction(
+        culture.id,
+        'defend-settlement',
+        getActiveIndigenousSovereigntyState(),
+        { boat, voyage }
+      );
+      if (boat) boat.colors = 'indigenous-confederacy';
+      env.onOrderCompassCourse?.(enc.compassBearingDeg);
+      outcome.summary = `🛡️ Hoisted the Sovereign Indigenous Confederacy banner! Intercepting ${enc.shipName} (${enc.archetype.title}) to defend the ${culture.name} coast (${sovRes.record.polityTierLabel}, strength ${Math.round(sovRes.record.strengthScore * 100)}%)!`;
+      outcome.combatStarted = true;
+      outcome.wentRogue = true;
+      outcome.sovereigntyResult = sovRes;
+      addLog(voyage, outcome.summary, 'combat');
+      env.onEngageVessel?.(enc, { mode: 'fight', defendIndigenous: true });
+      env.onToast?.(outcome.summary, 8);
+      return outcome;
+    }
+
+    if (choiceId === 'trade-indigenous' || (choiceId === 'hail' && enc.archetype?.indigenousAlly)) {
+      const culture =
+        resolveIndigenousCultureRegion(voyage.true?.lat ?? 18.4, voyage.true?.lon ?? -69.9) ||
+        { id: 'taino-greater-antilles', name: 'Taíno Cacicazgos' };
+      const sovRes = applyIndigenousSupportAction(
+        culture.id,
+        'trade',
+        getActiveIndigenousSovereigntyState(),
+        { boat, voyage }
+      );
+      voyage.dr.lat = voyage.dr.lat * 0.25 + voyage.true.lat * 0.75;
+      voyage.dr.lon = voyage.dr.lon * 0.25 + voyage.true.lon * 0.75;
+      voyage.latUncNm = Math.max(1.5, voyage.latUncNm * 0.4);
+      voyage.lonUncNm = Math.max(3.5, voyage.lonUncNm * 0.35);
+      const posStr = `${formatLatitude(voyage.dr.lat)}, ${formatLongitude(voyage.dr.lon)}`;
+      outcome.summary = `🤝 Hailed & traded fairly with Indigenous mariners aboard ${enc.shipName}! Shared coastal pilotage (${posStr}) and strengthened ${sovRes.record.polityName} (${sovRes.record.polityTierLabel}, strength ${Math.round(sovRes.record.strengthScore * 100)}%).`;
+      outcome.hailed = true;
+      outcome.sovereigntyResult = sovRes;
+      addLog(voyage, outcome.summary, 'hail');
+      env.onHailVessel?.(enc);
+      env.onToast?.(outcome.summary, 8);
       return outcome;
     }
 

@@ -1,6 +1,6 @@
-import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, resolveGlobalCoastalRegion } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, resolveGlobalCoastalRegion } from './terrain-model.js';
 import { snapCoordinateToCoastlineRings } from './coastal-world.js';
-export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, resolveGlobalCoastalRegion } from './coastal-world.js';
+export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, resolveGlobalCoastalRegion } from './coastal-world.js';
 
 export const LANDFALL_WEATHER = Object.freeze({
   clear:{sunElev:32,sunAzim:225,haze:0.8,clouds:0.3,cloudBase:1.2,cloudDepth:1.8,cloudDensity:1,cloudAnvil:0.05},
@@ -95,7 +95,7 @@ const POST_1550_FEATURED_PORTS = Object.freeze([
   'charleston',
 ]);
 
-export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=null,onUpgradeApplied=null,onWeather,onOpen,getPosition}){
+export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=null,onUpgradeApplied=null,onIndigenousAction=null,onWeather,onOpen,getPosition}){
   const button=document.createElement('button');button.textContent='Landfall';button.id='landfall-button';
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
@@ -105,10 +105,11 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
   const eraInfo=resolveColonialEra(simYear);
   const growth=region?.colonyGrowth||(isSaba?null:computeColonyGrowthProfile(region,simYear));
   const indigenous=region?.indigenousSettlement||(isSaba?null:computeIndigenousSettlementProfile(region,simYear));
+  const indigenousCulture=resolveIndigenousCultureRegion(region?.latitude,region?.longitude);
   const isWilderness=!isSaba&&region.hasColonialPort===false;
   const hasIndigenousVillage=Boolean(isWilderness&&indigenous?.hasIndigenousSettlement);
   const stageBadge=growth?.stage?growth.stage.replace(/-/g,' '):(isWilderness?'wilderness':'settlement');
-  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name} (${simYear})${region.subtitle?' · '+region.subtitle:hasIndigenousVillage?` · ${indigenous.cultureName}`:isWilderness?` · ${simYear} Wilderness Coast`:''}`;
+  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name} (${simYear})${region.subtitle?' · '+region.subtitle:hasIndigenousVillage?` · ${indigenous.polityName||indigenous.cultureName}`:isWilderness?` · ${simYear} Wilderness Coast`:''}`;
   const introText=isSaba
     ?'Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.'
     :isWilderness
@@ -117,6 +118,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">${titleText}</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">${introText}</p>
     <div id="landfall-discovery-card" hidden></div>
+    <div id="landfall-indigenous-sovereignty" hidden></div>
     <div class="landfall-destinations" style="display:grid;gap:6px;margin:8px 0">
       <label style="display:grid;gap:4px"><span>Region / Colonial Port (1550–1689)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
       <div style="display:grid;grid-template-columns:1fr 92px;gap:6px;align-items:end">
@@ -261,6 +263,58 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     }catch{target.textContent='World map could not load. Close and reopen to retry.';chartLoaded=false;}
   });
   dock.append(button);document.body.append(panel);
+
+  const sovContainer=panel.querySelector('#landfall-indigenous-sovereignty');
+  let lastSovMessage='';
+  const renderIndigenousSovereigntyCard=()=>{
+    if(!sovContainer||!indigenousCulture){
+      if(sovContainer)sovContainer.hidden=true;
+      return;
+    }
+    sovContainer.hidden=false;
+    const sovState=getActiveIndigenousSovereigntyState();
+    const rec=resolveRegionSovereigntyRecord(indigenousCulture.id,region);
+    const liveProfile=computeIndigenousSettlementProfile({
+      ...region,
+      year:getSelectedYear(),
+      hasColonialPort:rec.resistsColonization?false:region.hasColonialPort,
+    },getSelectedYear());
+    const strengthPct=Math.round((rec.strengthScore??0)*100);
+    const retPct=Math.round((liveProfile.retention??0)*100);
+    const isRogue=sovState.allegiance==='rogue-liberator';
+    sovContainer.style.cssText='margin:8px 0;padding:10px;border-radius:8px;border:1px solid rgba(224,176,96,0.38);background:rgba(20,30,28,0.82);display:grid;gap:6px;font-size:12px';
+    sovContainer.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+        <strong style="color:#f5bf77">${rec.polityName}</strong>
+        <span style="padding:2px 6px;border-radius:4px;background:${rec.isSovereignPolity?'rgba(56,158,108,0.35)':rec.resistsColonization?'rgba(212,148,58,0.32)':'rgba(255,255,255,0.1)'};font-size:11px">${rec.polityTierLabel}</span>
+      </div>
+      <div style="opacity:0.9">
+        Allegiance: <strong>${isRogue?'🛡️ Rogue Indigenous Liberator':'👑 European Crown'}</strong> · Strength: <strong>${strengthPct}%</strong> · Pop. Persistence: <strong>${retPct}%</strong> (~${liveProfile.estimatedRegionalPop.toLocaleString()} in region)
+      </div>
+      <div style="opacity:0.82;font-size:11px">
+        Trades: ${rec.tradeCount} · Cannon Supplied: ${rec.suppliedCannon} · Quarantine: ${rec.medicalQuarantine?'Active':'None'} · Repelled Colonizers: ${rec.repelledExpeditions}
+      </div>
+      ${lastSovMessage?`<div style="color:#9fe6b8;font-size:11px">${lastSovMessage}</div>`:''}
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:2px">
+        <button type="button" data-sov-action="go-rogue">🛡️ Go Rogue &amp; Ally</button>
+        <button type="button" data-sov-action="trade">🤝 Trade Fairly</button>
+        <button type="button" data-sov-action="share-medicine">🌿 Quarantine &amp; Medicine</button>
+        <button type="button" data-sov-action="arm-settlement">💣 Arm &amp; Fortify</button>
+        <button type="button" data-sov-action="proclaim-sovereignty">👑 Proclaim Sovereign Polity</button>
+      </div>
+    `;
+    for(const btn of sovContainer.querySelectorAll('[data-sov-action]')){
+      btn.onclick=()=>{
+        const action=btn.getAttribute('data-sov-action');
+        const res=applyIndigenousSupportAction(indigenousCulture.id,action,sovState);
+        saveIndigenousSovereigntyToStorage(sovState);
+        lastSovMessage=res.message;
+        renderIndigenousSovereigntyCard();
+        onIndigenousAction?.(res);
+      };
+    }
+  };
+  renderIndigenousSovereigntyCard();
 
   const discoveryBanner=document.createElement('aside');
   discoveryBanner.id='landfall-discovery-banner';

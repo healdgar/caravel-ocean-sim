@@ -17,6 +17,33 @@ import {
   createPartAssemblyState,
   locatePartAtLocalPoint,
 } from './part-assembly.js';
+import {
+  SOVEREIGN_INDIGENOUS_POLITIES,
+  createIndigenousSovereigntyState,
+  getActiveIndigenousSovereigntyState,
+  setActiveIndigenousSovereigntyState,
+  resetActiveIndigenousSovereigntyState,
+  saveIndigenousSovereigntyToStorage,
+  loadIndigenousSovereigntyFromStorage,
+  serializeIndigenousSovereignty,
+  restoreIndigenousSovereignty,
+  resolveRegionSovereigntyRecord,
+  applyIndigenousSupportAction,
+} from './indigenous-sovereignty.js';
+
+export {
+  SOVEREIGN_INDIGENOUS_POLITIES,
+  createIndigenousSovereigntyState,
+  getActiveIndigenousSovereigntyState,
+  setActiveIndigenousSovereigntyState,
+  resetActiveIndigenousSovereigntyState,
+  saveIndigenousSovereigntyToStorage,
+  loadIndigenousSovereigntyFromStorage,
+  serializeIndigenousSovereignty,
+  restoreIndigenousSovereignty,
+  resolveRegionSovereigntyRecord,
+  applyIndigenousSupportAction,
+} from './indigenous-sovereignty.js';
 
 const COASTAL_DEG_TO_RAD = Math.PI / 180;
 const COASTAL_RAD_TO_DEG = 180 / Math.PI;
@@ -976,7 +1003,11 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
   }
 
   const colonyGrowth = specOrRegion?.colonyGrowth ?? computeColonyGrowthProfile(specOrRegion, simYear);
-  const isColonized = Boolean(specOrRegion?.hasColonialPort || colonyGrowth?.colonized);
+  const sov = resolveRegionSovereigntyRecord(culture.id, specOrRegion);
+  const resistsColonization = Boolean(sov?.resistsColonization || sov?.isSovereignPolity);
+  const isColonized = resistsColonization
+    ? false
+    : Boolean(specOrRegion?.hasColonialPort || colonyGrowth?.colonized);
   const coastalArchetype = specOrRegion?.coastalArchetype ?? 'sheltered-bay';
   // Sheltered bays, estuaries, river mouths, and harbor channels have ideal fresh water & fish-weir geography
   const geoSuitability =
@@ -1140,20 +1171,63 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
     historicalNote = `${culture.name} (${simYear}): coastal longhouse and dugout canoe village`;
   }
 
+  // Apply Rogue Liberator / Indigenous Sovereignty strengthening if the player has traded with,
+  // shared epidemic quarantine protocols with, armed, or defended this coastal nation:
+  if (sov && sov.strengthScore > 0) {
+    if (sov.medicalQuarantine) {
+      retention = Math.max(retention, 0.84);
+    }
+    retention = Number(Math.min(1.0, Math.max(retention, retention + sov.strengthScore * 0.72)).toFixed(3));
+    if (sov.isSovereignPolity) {
+      retention = Math.max(retention, 0.92);
+      stage = 'sovereign-polity';
+      historicalNote = `${sov.polityName} (${simYear}): Sovereign Indigenous Polity allied with Rogue Liberator fleet — fortified with captured artillery, trade wharves, and epidemic quarantine (repelled ${sov.repelledExpeditions} colonial expedition${sov.repelledExpeditions === 1 ? '' : 's'})`;
+    } else if (sov.resistsColonization) {
+      retention = Math.max(retention, 0.78);
+      stage = 'fortified-federation';
+      historicalNote = `${sov.polityName} (${simYear}): Fortified Indigenous Federation — strengthened by trade and arms, successfully resisting European colonial encroachment`;
+    } else if (sov.polityTier === 'trading-partner') {
+      retention = Math.max(retention, 0.56);
+      if (stage === 'collapsed' || stage === 'displaced' || stage === 'remnant-refuge' || stage === 'contracted-village') {
+        stage = 'trading-ally';
+      }
+      historicalNote = `${sov.polityName} (${simYear}): Strengthened by fair trade (${sov.tradeCount} exchange${sov.tradeCount === 1 ? '' : 's'}) and mutual defense`;
+    }
+  }
+
   // European colonial ports replace the primary harbor waterfront with colonial architecture;
-  // uncolonized American coasts with retention >= 0.15 host an active Native American settlement!
+  // uncolonized American coasts (or Sovereign Indigenous Polities that repelled colonization) with retention >= 0.15 host an active Native American settlement!
   const effectiveScale = Number((retention * geoSuitability).toFixed(3));
   const hasIndigenousSettlement =
     specOrRegion?.hasIndigenousSettlement === true ||
+    resistsColonization ||
     (!isColonized && retention >= 0.15 && effectiveScale >= 0.16);
 
   const estimatedRegionalPop = Math.max(0, Math.round(culture.preContactPopEstimate * retention));
   const targetStructureCount = !hasIndigenousSettlement
     ? 0
-    : Math.max(4, Math.min(10, Math.round(4 + effectiveScale * 6)));
+    : sov?.isSovereignPolity
+      ? 12
+      : sov?.resistsColonization || sov?.fortified
+        ? Math.max(9, Math.min(11, Math.round(5 + effectiveScale * 6)))
+        : Math.max(4, Math.min(10, Math.round(4 + effectiveScale * 6)));
   const villagerCount = !hasIndigenousSettlement
     ? 0
-    : Math.max(6, Math.min(22, Math.round(targetStructureCount * 2.2)));
+    : Math.max(6, Math.min(28, Math.round(targetStructureCount * 2.2)));
+
+  let effectivePrefabMix = culture.prefabMix;
+  if (sov && sov.strengthScore > 0 && effectivePrefabMix.length < 12) {
+    const extended = effectivePrefabMix.slice();
+    if (!extended.includes('indigenous_palisade_ring')) {
+      extended.push('indigenous_palisade_ring');
+    }
+    const primaryHall = extended[1] || 'algonquian_longhouse';
+    const familyDwelling = extended[2] || 'abenaki_birchbark_wigwam';
+    while (extended.length < 12) {
+      extended.push(extended.length % 2 === 0 ? primaryHall : familyDwelling);
+    }
+    effectivePrefabMix = Object.freeze(extended);
+  }
 
   return Object.freeze({
     year: simYear,
@@ -1163,16 +1237,33 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
     peoples: culture.peoples,
     settlementStyle: culture.settlementStyle,
     architectureLabel: culture.architectureLabel,
+    polityId: sov?.polityId ?? culture.id,
+    polityName: sov?.polityName ?? culture.name,
+    shortName: sov?.shortName ?? culture.name,
+    capitalName: sov?.capitalName ?? null,
+    flagColors: sov?.flagColors ?? 'indigenous-confederacy',
+    polityTier: sov?.polityTier ?? 'traditional',
+    polityTierLabel: sov?.polityTierLabel ?? 'Autonomous Traditional Homeland',
+    isSovereignPolity: Boolean(sov?.isSovereignPolity),
+    resistsColonization,
+    strengthScore: sov?.strengthScore ?? 0,
+    fortified: Boolean(sov?.fortified),
+    medicalQuarantine: Boolean(sov?.medicalQuarantine),
+    tradeCount: sov?.tradeCount ?? 0,
+    armsCount: sov?.armsCount ?? 0,
+    suppliedCannon: sov?.suppliedCannon ?? 0,
+    suppliedShips: sov?.suppliedShips ?? 0,
+    repelledExpeditions: sov?.repelledExpeditions ?? 0,
     stage,
     retention,
     estimatedRegionalPop,
     estimatedVillagePopulation: hasIndigenousSettlement ? villagerCount * 12 : 0,
-    villageScale: hasIndigenousSettlement ? Math.max(0.35, Math.min(1.15, effectiveScale)) : 0,
+    villageScale: hasIndigenousSettlement ? Math.max(0.35, Math.min(1.25, effectiveScale)) : 0,
     targetStructureCount,
     buildingCount: targetStructureCount,
     villagerCount,
-    prefabMix: culture.prefabMix,
-    prefabs: culture.prefabMix,
+    prefabMix: effectivePrefabMix,
+    prefabs: effectivePrefabMix,
     historicalNote,
   });
 }
@@ -2044,6 +2135,11 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
       }
       throw new RangeError(`Unknown Spanish Main coastal region: ${spec}`);
     }
+    const presetCulture = resolveIndigenousCultureRegion(preset.latitude, preset.longitude);
+    const presetSov = presetCulture ? resolveRegionSovereigntyRecord(presetCulture.id, preset) : null;
+    if (presetSov && presetSov.strengthScore > 0) {
+      return resolveGlobalCoastalRegion({ ...preset, id: spec });
+    }
     return preset;
   }
   if (!spec || typeof spec !== 'object') {
@@ -2051,19 +2147,30 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   }
   if (typeof spec.id === 'string' && SPANISH_MAIN_1550_REGIONS[spec.id]) {
     const preset = SPANISH_MAIN_1550_REGIONS[spec.id];
+    const presetCulture = resolveIndigenousCultureRegion(preset.latitude, preset.longitude);
+    const presetSov = presetCulture ? resolveRegionSovereigntyRecord(presetCulture.id, spec) : null;
+    const presetRepelledColony = Boolean(
+      presetSov?.resistsColonization && spec.hasColonialPort !== true && spec.settlementKind !== 'colonial-port'
+    );
     if (
-      spec.latitude === undefined ||
-      (Math.abs(Number(spec.latitude) - preset.latitude) < 0.05 &&
-        Math.abs(Number(spec.longitude) - preset.longitude) < 0.05)
+      !presetRepelledColony &&
+      (spec.latitude === undefined ||
+        (Math.abs(Number(spec.latitude) - preset.latitude) < 0.05 &&
+          Math.abs(Number(spec.longitude) - preset.longitude) < 0.05))
     ) {
       const rawYr = Number(spec.year ?? spec.era);
       const yr = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
       const merged = { ...preset, ...spec, era: spec.era ?? yr };
-      if (yr !== 1550 || spec.year !== undefined || spec.colonyGrowth !== undefined) {
+      if (yr !== 1550 || spec.year !== undefined || spec.colonyGrowth !== undefined || (presetSov && presetSov.strengthScore > 0)) {
         merged.year = yr;
         merged.colonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(merged, yr);
+        merged.indigenousSettlement = spec.indigenousSettlement ?? computeIndigenousSettlementProfile(merged, yr);
+        merged.hasIndigenousSettlement = Boolean(merged.indigenousSettlement?.hasIndigenousSettlement);
       }
       return Object.freeze(merged);
+    }
+    if (presetRepelledColony) {
+      spec = { ...preset, ...spec, portType: undefined };
     }
   }
   const colPortById =
@@ -2092,21 +2199,40 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const portTypes = ['fortified-harbor', 'headland-fortress', 'silver-terminal', 'river-citadel', 'rendezvous-basin', 'careening-anchorage'];
   const idx = Math.floor(rand() * archetypes.length);
   const coastalArchetype = spec.coastalArchetype ?? archetypes[idx];
+  const indigenousCulture = resolveIndigenousCultureRegion(latitude, longitude);
+  const sovRecord = indigenousCulture ? resolveRegionSovereigntyRecord(indigenousCulture.id, spec) : null;
+  const indigenousRepelledColony = Boolean(
+    sovRecord?.resistsColonization &&
+    spec.hasColonialPort !== true &&
+    spec.settlementKind !== 'colonial-port'
+  );
   const explicitNoPort =
+    indigenousRepelledColony ||
     spec.hasColonialPort === false ||
     spec.settlementKind === 'wilderness-anchorage' ||
     spec.portType === 'wilderness-anchorage' ||
     spec.portType === 'none';
   const explicitColonialPort =
-    spec.hasColonialPort === true ||
-    spec.settlementKind === 'colonial-port' ||
-    (!explicitNoPort && Boolean(spec.portType) && portTypes.includes(spec.portType));
+    !indigenousRepelledColony &&
+    (spec.hasColonialPort === true ||
+      spec.settlementKind === 'colonial-port' ||
+      (!explicitNoPort && Boolean(spec.portType) && portTypes.includes(spec.portType)));
   const matchedHistoricalPort = findHistoricalColonialPort(latitude, longitude, spec.id, simYear, 0.32);
   const hasColonialPort = explicitNoPort
     ? false
     : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id, 0.32, simYear);
-  const settlementKind = hasColonialPort ? 'colonial-port' : 'wilderness-anchorage';
-  const portType = spec.portType ?? (hasColonialPort ? portTypes[idx] : 'wilderness-anchorage');
+  const settlementKind = indigenousRepelledColony
+    ? (sovRecord.isSovereignPolity ? 'sovereign-indigenous-polity' : 'fortified-indigenous-federation')
+    : hasColonialPort
+      ? 'colonial-port'
+      : 'wilderness-anchorage';
+  const portType = spec.portType ?? (
+    indigenousRepelledColony
+      ? (sovRecord.isSovereignPolity ? 'sovereign-indigenous-harbor' : 'fortified-indigenous-anchorage')
+      : hasColonialPort
+        ? portTypes[idx]
+        : 'wilderness-anchorage'
+  );
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
   const shoreBearing = Number.isFinite(spec.shoreBearing)
     ? ((spec.shoreBearing % 360) + 360) % 360
@@ -2120,10 +2246,19 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const span = spec.span ?? 8192;
   const id = spec.id ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.id : `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`);
   const name = spec.name ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.name : `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`);
-  const colonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(
+  const rawColonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(
     { ...spec, id, name, latitude, longitude, hasColonialPort, settlementKind },
     simYear
   );
+  const colonyGrowth = indigenousRepelledColony
+    ? Object.freeze({
+        ...rawColonyGrowth,
+        colonized: false,
+        stage: sovRecord.isSovereignPolity ? 'sovereign-polity' : 'fortified-federation',
+        crown: sovRecord.polityName,
+        historicalNote: `${sovRecord.polityName} (${simYear}): European colonial planting repelled — governed as a ${sovRecord.polityTierLabel}`,
+      })
+    : rawColonyGrowth;
   const indigenousSettlement = spec.indigenousSettlement ?? computeIndigenousSettlementProfile(
     { ...spec, id, name, latitude, longitude, coastalArchetype, hasColonialPort, colonyGrowth },
     simYear
@@ -2131,12 +2266,16 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const hasIndigenousSettlement = Boolean(indigenousSettlement?.hasIndigenousSettlement);
   return Object.freeze({
     id,
-    name,
+    name: indigenousRepelledColony && sovRecord.isSovereignPolity && !spec.name
+      ? `${sovRecord.capitalName} (${sovRecord.shortName})`
+      : name,
     era: spec.era ?? simYear,
     ...(spec.year !== undefined || simYear !== 1550 ? { year: simYear } : {}),
     colonyGrowth,
     indigenousSettlement,
     hasIndigenousSettlement,
+    sovereignPolity: Boolean(indigenousSettlement?.isSovereignPolity),
+    crown: indigenousRepelledColony ? sovRecord.polityName : (colonyGrowth?.crown ?? null),
     regionGroup: spec.regionGroup ?? (
       latitude >= 7 && latitude <= 26 && longitude >= -90 && longitude <= -59
         ? 'Spanish Main'
@@ -3278,6 +3417,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       materialKind: overrides?.materialKind ?? prefab.materialKind,
       roofPitch: overrides?.roofPitch ?? prefab.roofPitch,
       waterfront: overrides?.waterfront ?? prefab.waterfront,
+      friendlyToPlayer: overrides?.friendlyToPlayer ?? false,
       indigenous: overrides?.indigenous ?? Boolean(prefab.indigenous),
       cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
     });
@@ -3756,14 +3896,14 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       }
     }
   } else {
-    // Uncolonized coast: check historical Native American settlement profile for this region & year
+    // Uncolonized coast or Sovereign Indigenous Polity: check Native American settlement profile for this region & year
     const indigenousSettlement =
       region.indigenousSettlement ??
       computeIndigenousSettlementProfile(region, colonyGrowth.year);
     if (indigenousSettlement?.hasIndigenousSettlement && Array.isArray(indigenousSettlement.prefabMix)) {
       // Organic coastal village layout slots: (alongOffset, inlandOffset, yawOffsetDeg, minElev)
       // Slot 0 is the foreshore canoe beaching & tidal fish weir right at the water's edge;
-      // Slots 1..9 arrange the council house / longhouse / batey plaza and family wigwams/bohíos on the coastal terrace.
+      // Slots 1..11 arrange the council house / longhouse / batey plaza, palisade stockades, and family wigwams/bohíos on the coastal terrace.
       const villageSlots = [
         [-14, 4, 0, 1.25],
         [4, 34, 8, 2.3],
@@ -3775,6 +3915,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         [-26, 56, 12, 2.6],
         [26, 58, -12, 2.6],
         [0, 82, 6, 2.9],
+        [-54, 72, -16, 2.8],
+        [54, 74, 16, 2.8],
       ];
       const count = Math.min(
         villageSlots.length,
@@ -3789,8 +3931,34 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         const effMinElev = prefabId === 'palafito_estuary_village' ? 1.15 : minElev;
         addPrefab(prefabId, alongOff, effInland, yawOff, effMinElev, {
           indigenous: true,
+          friendlyToPlayer: true,
           cultureId: indigenousSettlement.cultureId,
         });
+      }
+      // Fortified Federation / Sovereign Indigenous Polity: add captured coastal earthwork & timber artillery battery
+      // manned by Native American artillerists, plus a Sovereign Trade Wharf when proclaimed sovereign!
+      if (indigenousSettlement.fortified || indigenousSettlement.isSovereignPolity) {
+        addPrefab('stone_sea_bastion', 92, 8, -14, 3.4, {
+          label: `${indigenousSettlement.shortName || indigenousSettlement.cultureName} Sovereign Coastal Artillery Redoubt`,
+          indigenous: true,
+          friendlyToPlayer: true,
+          cultureId: indigenousSettlement.cultureId,
+          materialKind: 10,
+          width: 24,
+          length: 28,
+          height: 7.8,
+        });
+      }
+      if (indigenousSettlement.isSovereignPolity) {
+        const sovPierTip = worldFromCoastalFrame(region, bestShoreAlong + 16, bestShoreInland - 30);
+        if (terrainSample(heights, sovPierTip.x, sovPierTip.z, region) <= -0.4) {
+          addPrefab('timber_mole_pier', 16, -22, 0, 2.0, {
+            label: `${indigenousSettlement.shortName || indigenousSettlement.cultureName} Sovereign Trade Wharf`,
+            indigenous: true,
+            friendlyToPlayer: true,
+            cultureId: indigenousSettlement.cultureId,
+          });
+        }
       }
     }
   }
@@ -3845,8 +4013,21 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     indigenousInstanceCount,
     era: region.era,
     year: colonyGrowth.year,
-    stage: allowColonialPort ? colonyGrowth.stage : 'wilderness',
-    fortificationTier: allowColonialPort ? colonyGrowth.fortificationTier : 0,
+    stage: allowColonialPort
+      ? colonyGrowth.stage
+      : indigenousSettlement?.isSovereignPolity
+        ? 'sovereign-polity'
+        : indigenousSettlement?.resistsColonization
+          ? 'fortified-federation'
+          : 'wilderness',
+    fortificationTier: allowColonialPort
+      ? colonyGrowth.fortificationTier
+      : indigenousSettlement?.isSovereignPolity
+        ? 2
+        : indigenousSettlement?.fortified
+          ? 1
+          : 0,
+    sovereignPolity: Boolean(indigenousSettlement?.isSovereignPolity),
     foundedYear: colonyGrowth.foundedYear,
     colonyAge: allowColonialPort ? colonyGrowth.colonyAge : 0,
     colonyGrowth,

@@ -933,8 +933,22 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
 
   return specs.map((spec, idx) => {
     const globalIdx = startIndex + idx;
+    const isIndigenousFort = Boolean(inst.indigenous);
     const identity = crewStationIdentity(`fort_${inst.id ?? inst.prefabId}_${idx}`, globalIdx);
-    const look = CREW_APPEARANCES[identity.identityId ?? identity.id];
+    const sex = isIndigenousFort ? (globalIdx % 2 === 0 ? 'female' : 'male') : identity.sex;
+    const name = isIndigenousFort
+      ? INDIGENOUS_NAMES[sex][Math.floor(globalIdx / 2) % INDIGENOUS_NAMES[sex].length]
+      : identity.name;
+    const look = isIndigenousFort
+      ? INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length]
+      : CREW_APPEARANCES[identity.identityId ?? identity.id];
+    const role = isIndigenousFort
+      ? spec.stationKind === 'embrasure'
+        ? 'Sovereign Artillerist'
+        : spec.stationKind === 'citadel'
+          ? 'Wampum War Captain'
+          : 'Rampart Guardian'
+      : spec.role;
     const s = createDeckhand();
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
     const wy = spec.ly + 0.028;
@@ -942,10 +956,10 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
     Object.assign(s, {
       id: `${inst.id ?? inst.prefabId}_soldier_${idx + 1}`,
-      name: identity.name,
-      sex: identity.sex,
+      name,
+      sex,
       identityId: identity.identityId,
-      role: spec.role,
+      role,
       stationKind: spec.stationKind,
       gunIndex: spec.gunIndex ?? null,
       buildingId: inst.id ?? inst.prefabId,
@@ -963,11 +977,20 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       walkTime: globalIdx * 0.29,
       crewIndex: globalIdx,
       garrison: true,
-      shirt: GARRISON_SHIRTS[globalIdx % GARRISON_SHIRTS.length],
-      trousers: GARRISON_TROUSERS[globalIdx % GARRISON_TROUSERS.length],
+      indigenous: isIndigenousFort,
+      cultureId: inst.cultureId ?? null,
+      modelVariant: isIndigenousFort ? (sex === 'female' ? 'indigenous-female' : 'indigenous-male') : 'colonial',
+      shirt: isIndigenousFort
+        ? INDIGENOUS_SHIRTS[globalIdx % INDIGENOUS_SHIRTS.length]
+        : GARRISON_SHIRTS[globalIdx % GARRISON_SHIRTS.length],
+      trousers: isIndigenousFort
+        ? INDIGENOUS_TROUSERS[globalIdx % INDIGENOUS_TROUSERS.length]
+        : GARRISON_TROUSERS[globalIdx % GARRISON_TROUSERS.length],
       skin: crewLinearColour(look.skin),
       hair: crewLinearColour(look.hair),
-      face: [...look.face],
+      face: isIndigenousFort
+        ? [look.face[0], look.face[1], look.face[2], look.face[3] + 2.0]
+        : [...look.face],
     });
     s.scale.fill((s.sex === 'female' ? 0.99 : 0.97) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
