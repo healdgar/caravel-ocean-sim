@@ -1,4 +1,4 @@
-import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
+import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
 import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry, selectTreeLods, createForestPatches, visibleForestIds,
   GROUND_COVER,createGroundCoverPatches,groundCoverInstances,projectedGroundExtent,groundCoverError,groundCoverVisible,groundCoverGeometry } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
@@ -399,15 +399,29 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const rawLon=Number.isFinite(explicitObj?.longitude)?Number(explicitObj.longitude):search.has('lon')?Number(search.get('lon')):search.has('longitude')?Number(search.get('longitude')):NaN;
   const hasExplicitLatLon=(Number.isFinite(explicitObj?.latitude)&&Number.isFinite(explicitObj?.longitude))||(search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon'))));
   const hasCustomCoords=hasExplicitLatLon||(Number.isFinite(rawLat)&&Number.isFinite(rawLon)&&(Math.abs(rawLat-ISLAND.latitude)>0.12||Math.abs(rawLon-ISLAND.longitude)>0.12));
+  const rawYearParam=explicitObj?.year??explicitObj?.era??search.get('year')??(search.get('era')&&search.get('era')!=='2026'?search.get('era'):null);
+  let astroYear=null;
+  if(rawYearParam==null&&search.has('astroDate')){
+    const parsedAstroYear=new Date(search.get('astroDate')).getUTCFullYear();
+    if(Number.isFinite(parsedAstroYear)&&parsedAstroYear>=1492&&parsedAstroYear<=1689)astroYear=parsedAstroYear;
+  }
   const coordPresetMatch=hasCustomCoords
     ?Object.values(SPANISH_MAIN_1550_REGIONS).find(r=>Math.abs(rawLat-r.latitude)<0.05&&Math.abs(rawLon-r.longitude)<0.05)??null
     :null;
   const defaultLisbonDeparture=!explicitId&&!explicitObj&&!search.has('region')&&!hasCustomCoords&&!search.has('landfall')&&search.get('ocean')!=='1';
   const regionParam=explicitId||search.get('region')||(coordPresetMatch?coordPresetMatch.id:null)||(defaultLisbonDeparture?'lisbon':null);
-  const presetMatch=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
-  const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
+  const spanishMainPreset=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
+  const colonialPortPreset=!spanishMainPreset&&regionParam&&regionParam!=='saba'?HISTORICAL_COLONIAL_PORTS.find(p=>p.id===regionParam)??null:null;
+  const presetMatch=spanishMainPreset||colonialPortPreset;
+  const resolvedYear=rawYearParam!=null
+    ?resolveColonialEra(rawYearParam).year
+    :astroYear!=null
+      ?resolveColonialEra(astroYear).year
+      :(colonialPortPreset?.foundedYear>1550?Math.min(1685,colonialPortPreset.foundedYear+15):1550);
+  const isKnownSpanishMain=Boolean(spanishMainPreset&&(!hasCustomCoords||(Math.abs(rawLat-spanishMainPreset.latitude)<0.05&&Math.abs(rawLon-spanishMainPreset.longitude)<0.05)));
+  const isKnownColonialPreset=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
   const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05);
-  const useProcedural=isKnownSpanishMain||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
+  const useProcedural=isKnownColonialPreset||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
   const targetLat=presetMatch?presetMatch.latitude:(Number.isFinite(rawLat)?rawLat:ISLAND.latitude);
   const targetLon=presetMatch?presetMatch.longitude:(Number.isFinite(rawLon)?rawLon:ISLAND.longitude);
   let activeClimate=estimateLocalClimateProfile(targetLat,targetLon,presetMatch);
@@ -497,14 +511,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const placedX=Number.isFinite(placement?.x)?Number(placement.x):Number.isFinite(explicitObj?.x)?Number(explicitObj.x):undefined;
   const placedZ=Number.isFinite(placement?.z)?Number(placement.z):Number.isFinite(explicitObj?.z)?Number(explicitObj.z):undefined;
   const hasPlacementOverride=placedX!==undefined||placedZ!==undefined;
-  const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride
+  const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride&&resolvedYear===1550
     ?regionParam
     :{
-      ...(isKnownSpanishMain?SPANISH_MAIN_1550_REGIONS[regionParam]:{}),
+      ...(presetMatch||{}),
       id:regionParam||undefined,
-      name:explicitObj?.name||search.get('regionName')||undefined,
+      name:explicitObj?.name||search.get('regionName')||presetMatch?.name||undefined,
       latitude:targetLat,
       longitude:targetLon,
+      year:resolvedYear,
       ...(Number.isFinite(explicitObj?.shoreBearing)?{shoreBearing:Number(explicitObj.shoreBearing)}:{}),
       ...(placedX!==undefined?{x:placedX}:{}),
       ...(placedZ!==undefined?{z:placedZ}:{}),

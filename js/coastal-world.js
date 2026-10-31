@@ -334,59 +334,335 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   }),
 });
 
-// Gazetteer of actual c. 1550 colonial and Old World maritime ports.
-// Landfalls outside these historical ports default to uninhabited 1550 wilderness anchorages
-// rather than placing anachronistic Spanish colonial settlements (e.g. in Boston or uncolonized North America).
-export const HISTORICAL_1550_PORTS = Object.freeze([
-  { id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238 },
-  { id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548 },
-  { id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476 },
-  { id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883 },
-  { id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352 },
-  { id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118 },
-  { id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131 },
-  { id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537 },
-  { id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211 },
-  { id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177 },
-  { id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569 },
-  { id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485 },
-  { id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908 },
-  { id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829 },
-  { id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954 },
-  { id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148 },
-  { id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511 },
-  { id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388 },
-  { id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851 },
-  { id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32 },
-  { id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893 },
-  { id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136 },
-  { id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396 },
-  { id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43 },
-  { id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251 },
-  { id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908 },
-  { id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218 },
-  { id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605 },
-  { id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828 },
-  { id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249 },
-  { id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867 },
+// Historical Colonial Eras (1550–1689) for era-by-era and year-by-year colony growth.
+export const COLONIAL_ERAS = Object.freeze([
+  Object.freeze({
+    id: 'hapsburg-conquistador',
+    startYear: 1492,
+    endYear: 1579,
+    defaultYear: 1550,
+    label: '1550 · Hapsburg Conquistador & Flota Era',
+    shortLabel: '1550s Conquistador Era',
+    summary: 'Early Spanish Main ports, Casa de la Contratación silver fleets, and Portuguese Carreira da Índia trade.',
+    fortificationStyle: 'early-baluarte',
+  }),
+  Object.freeze({
+    id: 'iberian-union-antonelli',
+    startYear: 1580,
+    endYear: 1619,
+    defaultYear: 1598,
+    label: '1580–1619 · Iberian Union & Antonelli Fortresses',
+    shortLabel: '1580s–1610s Antonelli Era',
+    summary: 'Bautista Antonelli’s Caribbean star-fortress program, Drake’s raids, transfer from Nombre de Dios to Portobelo (1597), and first English/French/Dutch footholds.',
+    fortificationStyle: 'antonelli-trace',
+  }),
+  Object.freeze({
+    id: 'atlantic-planting',
+    startYear: 1620,
+    endYear: 1649,
+    defaultYear: 1635,
+    label: '1620–1649 · Seventeenth-Century Colonial Planting',
+    shortLabel: '1620s–1640s Colonial Planting',
+    summary: 'Founding of New Amsterdam (1624), Tortuga (1625), Barbados (1628), Boston (1630), Curaçao (1634), and Martinique (1635).',
+    fortificationStyle: 'bastion-curtain',
+  }),
+  Object.freeze({
+    id: 'buccaneer-commonwealth',
+    startYear: 1650,
+    endYear: 1674,
+    defaultYear: 1665,
+    label: '1650–1674 · Brethren of the Coast & Port Royal',
+    shortLabel: '1650s–1670s Buccaneer Era',
+    summary: 'Rise of Port Royal (1655), Cape Town (1652), Charles Town (1670), and Henry Morgan’s 1671 sack of Panamá Viejo.',
+    fortificationStyle: 'citadel-batteries',
+  }),
+  Object.freeze({
+    id: 'high-buccaneer-1680s',
+    startYear: 1675,
+    endYear: 1689,
+    defaultYear: 1680,
+    label: '1675–1689 · High Buccaneer Era & Vauban Citadels',
+    shortLabel: '1680s High Buccaneer Era',
+    summary: 'Peak of the 1680s Caribbean & Atlantic colonies, double-bastioned Vauban/Antonelli citadels, and full vice-regal harbor cities.',
+    fortificationStyle: 'vauban-double-citadel',
+  }),
 ]);
 
-export function hasHistorical1550ColonialPort(latitude, longitude, regionId = null, maxDistDeg = 0.32) {
-  if (typeof regionId === 'string' && Object.hasOwn(SPANISH_MAIN_1550_REGIONS, regionId)) {
-    return true;
+export function resolveColonialEra(yearOrId = 1550) {
+  if (typeof yearOrId === 'string') {
+    const byId = COLONIAL_ERAS.find((e) => e.id === yearOrId);
+    if (byId) return Object.freeze({ ...byId, year: byId.defaultYear });
+    const parsed = Number(yearOrId);
+    if (Number.isFinite(parsed)) return resolveColonialEra(parsed);
+  }
+  const y = Number.isFinite(Number(yearOrId)) ? Math.max(1492, Math.min(1689, Math.round(Number(yearOrId)))) : 1550;
+  for (const era of COLONIAL_ERAS) {
+    if (y >= era.startYear && y <= era.endYear) return Object.freeze({ ...era, year: y });
+  }
+  const fallback = y < COLONIAL_ERAS[0].startYear ? COLONIAL_ERAS[0] : COLONIAL_ERAS[COLONIAL_ERAS.length - 1];
+  return Object.freeze({ ...fallback, year: y });
+}
+
+// Gazetteer of c. 1550 colonial and Old World maritime ports.
+// Landfalls outside colonized ports at a given simulation year generate wilderness anchorages.
+export const HISTORICAL_1550_PORTS = Object.freeze([
+  Object.freeze({ id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238, foundedYear: 1540, crown: 'spain', baseTier: 1 }),
+  Object.freeze({ id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548, foundedYear: 1533, fortProgramYear: 1586, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476, foundedYear: 1510, declinedYear: 1597, supersededBy: 'portobelo', crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883, foundedYear: 1496, fortProgramYear: 1540, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352, foundedYear: 1519, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118, foundedYear: 1521, fortProgramYear: 1539, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131, foundedYear: 1519, fortProgramYear: 1590, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537, foundedYear: 1540, fortProgramYear: 1656, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211, foundedYear: 1525, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177, foundedYear: 1515, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569, foundedYear: 1527, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485, foundedYear: 1519, sackedYear: 1671, rebuiltYear: 1673, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908, foundedYear: 1550, fortProgramYear: 1615, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829, foundedYear: 1515, fortProgramYear: 1638, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954, foundedYear: 1524, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148, foundedYear: 1537, fortProgramYear: 1640, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511, foundedYear: 1549, fortProgramYear: 1598, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388, foundedYear: 1532, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851, foundedYear: 1535, fortProgramYear: 1630, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32, foundedYear: 1264, fortProgramYear: 1596, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893, foundedYear: 1322, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, foundedYear: 1147, fortProgramYear: 1515, crown: 'portugal', baseTier: 4 }),
+  Object.freeze({ id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396, foundedYear: 1208, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43, foundedYear: 1478, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251, foundedYear: 1494, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908, foundedYear: 1424, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218, foundedYear: 1450, fortProgramYear: 1582, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605, foundedYear: 1462, fortProgramYear: 1587, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828, foundedYear: 1510, fortProgramYear: 1595, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249, foundedYear: 1511, fortProgramYear: 1641, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867, foundedYear: 1543, fortProgramYear: 1571, crown: 'portugal', baseTier: 2 }),
+]);
+
+// Complete chronological gazetteer of colonial ports from 1492 through the 1680s (1550–1689).
+export const HISTORICAL_COLONIAL_PORTS = Object.freeze([
+  ...HISTORICAL_1550_PORTS,
+  // Late 16th-century foundations (1551–1599)
+  Object.freeze({ id: 'st-augustine', name: 'San Agustín de La Florida (St. Augustine)', latitude: 29.894, longitude: -81.312, foundedYear: 1565, fortProgramYear: 1672, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'rio-de-janeiro', name: 'São Sebastião do Rio de Janeiro', latitude: -22.906, longitude: -43.172, foundedYear: 1565, fortProgramYear: 1618, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'manila', name: 'Intramuros de Manila · Cavite', latitude: 14.589, longitude: 120.974, foundedYear: 1571, fortProgramYear: 1593, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'portobelo', name: 'San Felipe de Portobelo', latitude: 9.555, longitude: -79.654, foundedYear: 1597, fortProgramYear: 1597, crown: 'spain', baseTier: 3 }),
+  // Early 17th-century foundations (1600–1639)
+  Object.freeze({ id: 'jamestown', name: 'Jamestown · Virginia', latitude: 37.208, longitude: -76.778, foundedYear: 1607, fortProgramYear: 1665, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'quebec', name: 'Québec · Stadacona', latitude: 46.813, longitude: -71.202, foundedYear: 1608, fortProgramYear: 1660, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'bermuda', name: "St. George's · Bermuda", latitude: 32.381, longitude: -64.678, foundedYear: 1612, fortProgramYear: 1620, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'batavia', name: 'Batavia · Sunda Kelapa', latitude: -6.127, longitude: 106.812, foundedYear: 1619, fortProgramYear: 1627, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'plymouth-colony', name: 'Plymouth Colony · New England', latitude: 41.958, longitude: -70.662, foundedYear: 1620, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'new-amsterdam', name: 'New Amsterdam · New York Harbor', latitude: 40.703, longitude: -74.014, foundedYear: 1624, fortProgramYear: 1664, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'st-kitts', name: 'Basseterre · St. Christopher (St. Kitts)', latitude: 17.295, longitude: -62.725, foundedYear: 1624, fortProgramYear: 1666, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'tortuga', name: 'Cayona · Île de la Tortue (Tortuga)', latitude: 20.008, longitude: -72.792, foundedYear: 1625, fortProgramYear: 1640, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'bridgetown', name: 'Bridgetown · Carlisle Bay (Barbados)', latitude: 13.097, longitude: -59.618, foundedYear: 1628, fortProgramYear: 1656, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'boston', name: 'Boston · Massachusetts Bay', latitude: 42.360, longitude: -71.059, foundedYear: 1630, fortProgramYear: 1665, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'curacao', name: 'Willemstad · St. Anna Bay (Curaçao)', latitude: 12.108, longitude: -68.935, foundedYear: 1634, fortProgramYear: 1635, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'fort-royal-martinique', name: 'Fort-Royal · Martinique', latitude: 14.602, longitude: -61.068, foundedYear: 1635, fortProgramYear: 1672, crown: 'france', baseTier: 2 }),
+  // Mid-to-late 17th-century foundations up to the 1680s (1640–1689)
+  Object.freeze({ id: 'cape-town', name: 'Kaapstad · Table Bay (Cape Town)', latitude: -33.918, longitude: 18.423, foundedYear: 1652, fortProgramYear: 1666, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'port-royal', name: 'Port Royal · Cagway Spit (Jamaica)', latitude: 17.937, longitude: -76.841, foundedYear: 1655, fortProgramYear: 1662, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'nassau', name: 'Charles Town · New Providence (Nassau)', latitude: 25.078, longitude: -77.343, foundedYear: 1666, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'cap-francois', name: 'Cap-François · Saint-Domingue', latitude: 19.759, longitude: -72.201, foundedYear: 1670, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'charleston', name: 'Charles Town · Carolina (Charleston)', latitude: 32.776, longitude: -79.928, foundedYear: 1670, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'philadelphia', name: 'Philadelphia · Delaware River', latitude: 39.947, longitude: -75.141, foundedYear: 1682, crown: 'england', baseTier: 2 }),
+]);
+
+export function findHistoricalColonialPort(latitude, longitude, regionId = null, year = 1550, maxDistDeg = 0.32) {
+  const simYear = Number.isFinite(Number(year)) ? Math.round(Number(year)) : 1550;
+  if (typeof regionId === 'string') {
+    const byId = HISTORICAL_COLONIAL_PORTS.find((p) => p.id === regionId);
+    if (byId) return simYear >= byId.foundedYear ? byId : null;
   }
   const lat = Number(latitude);
   const lon = Number(longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const cosLat = Math.max(0.15, Math.cos(lat * COASTAL_DEG_TO_RAD));
-  for (const port of HISTORICAL_1550_PORTS) {
+  let nearestAnyYear = null;
+  let nearestAnyDist = maxDistDeg;
+  for (const port of HISTORICAL_COLONIAL_PORTS) {
     const dLat = lat - port.latitude;
     const dLon = (lon - port.longitude) * cosLat;
-    if (Math.hypot(dLat, dLon) <= maxDistDeg) {
-      return true;
+    const dist = Math.hypot(dLat, dLon);
+    if (dist <= nearestAnyDist) {
+      nearestAnyDist = dist;
+      nearestAnyYear = port;
     }
   }
-  return false;
+  if (!nearestAnyYear) return null;
+  return simYear >= nearestAnyYear.foundedYear ? nearestAnyYear : null;
+}
+
+export function hasHistorical1550ColonialPort(latitude, longitude, regionId = null, maxDistDeg = 0.32, year = 1550) {
+  const simYear = Number.isFinite(Number(year)) ? Math.round(Number(year)) : 1550;
+  if (typeof regionId === 'string' && Object.hasOwn(SPANISH_MAIN_1550_REGIONS, regionId) && simYear >= 1550) {
+    return true;
+  }
+  return Boolean(findHistoricalColonialPort(latitude, longitude, regionId, simYear, maxDistDeg));
+}
+
+// Compute year-by-year and era-by-era colony growth profile (1550–1689).
+export function computeColonyGrowthProfile(specOrPort = {}, year = 1550) {
+  const rawYear = Number(year ?? specOrPort?.year ?? specOrPort?.era ?? 1550);
+  const simYear = Number.isFinite(rawYear) && rawYear >= 1490 && rawYear <= 1850
+    ? Math.max(1492, Math.min(1689, Math.round(rawYear)))
+    : 1550;
+  const era = resolveColonialEra(simYear);
+
+  const lat = Number(specOrPort?.latitude);
+  const lon = Number(specOrPort?.longitude);
+  const regionId = typeof specOrPort === 'string' ? specOrPort : (specOrPort?.id ?? null);
+  const matchedAnyYear =
+    (typeof regionId === 'string' && HISTORICAL_COLONIAL_PORTS.find((p) => p.id === regionId)) ||
+    (Number.isFinite(lat) && Number.isFinite(lon)
+      ? findHistoricalColonialPort(lat, lon, regionId, 1689, 0.32)
+      : null);
+
+  const explicitNoPort =
+    specOrPort?.hasColonialPort === false ||
+    specOrPort?.settlementKind === 'wilderness-anchorage' ||
+    specOrPort?.portType === 'wilderness-anchorage' ||
+    specOrPort?.portType === 'none';
+
+  const foundedYear = Number.isFinite(specOrPort?.foundedYear)
+    ? Number(specOrPort.foundedYear)
+    : matchedAnyYear?.foundedYear ?? (specOrPort?.hasColonialPort === true ? 1535 : null);
+
+  const colonized = !explicitNoPort && foundedYear !== null && simYear >= foundedYear;
+  if (!colonized) {
+    return Object.freeze({
+      year: simYear,
+      eraId: era.id,
+      eraLabel: era.label,
+      eraShortLabel: era.shortLabel,
+      colonized: false,
+      portId: matchedAnyYear?.id ?? regionId ?? null,
+      portName: matchedAnyYear?.name ?? specOrPort?.name ?? null,
+      foundedYear,
+      colonyAge: 0,
+      crown: matchedAnyYear?.crown ?? null,
+      stage: 'wilderness',
+      growthFactor: 0,
+      fortificationTier: 0,
+      pierCount: 0,
+      targetBuildingCount: 0,
+      expansionTier: 0,
+      garrisonScale: 0,
+      historicalNote: foundedYear
+        ? `Uncolonized wilderness in ${simYear} (founded in ${foundedYear})`
+        : `Uncolonized wilderness anchorage (${simYear})`,
+    });
+  }
+
+  const colonyAge = Math.max(0, simYear - foundedYear);
+  const baseTier = matchedAnyYear?.baseTier ?? 2;
+  const fortYear = matchedAnyYear?.fortProgramYear ?? (foundedYear + 35);
+  const declinedYear = matchedAnyYear?.declinedYear ?? null;
+  const sackedYear = matchedAnyYear?.sackedYear ?? null;
+  const rebuiltYear = matchedAnyYear?.rebuiltYear ?? null;
+
+  // Continuous year-by-year logistic + linear urban growth from founding through 1689
+  let ageFactor = Math.min(1.0, 0.28 + 0.72 * (1 - Math.exp(-colonyAge / 28))) + Math.min(0.65, Math.max(0, simYear - 1550) * 0.0048);
+  let historicalNote = `Founded ${foundedYear} (${colonyAge} yrs old in ${simYear})`;
+
+  // Bautista Antonelli / Vauban fortification surge once `simYear >= fortYear`
+  if (simYear >= fortYear) {
+    const fortMaturity = Math.min(0.25, (simYear - fortYear) * 0.008);
+    ageFactor += 0.12 + fortMaturity;
+  }
+
+  // Historical decline of Nombre de Dios after Francis Drake's 1596 burning and the 1597 transfer to Portobelo
+  if (declinedYear && simYear >= declinedYear) {
+    ageFactor = Math.max(0.32, ageFactor * 0.45);
+    historicalNote = `Superseded after ${declinedYear} (${matchedAnyYear?.supersededBy || 'Portobelo'}); decayed timber outpost`;
+  }
+
+  // Henry Morgan's 1671 sack of Panamá Viejo and 1673 Casco Viejo fortified rebuild
+  if (sackedYear && simYear >= sackedYear && (!rebuiltYear || simYear < rebuiltYear)) {
+    ageFactor = Math.max(0.42, ageFactor * 0.58);
+    historicalNote = `Sacked by Henry Morgan (${sackedYear}); rebuilding fortified Casco Viejo`;
+  } else if (rebuiltYear && simYear >= rebuiltYear) {
+    ageFactor += 0.18;
+    historicalNote = `Rebuilt as walled Casco Viejo citadel (${rebuiltYear})`;
+  }
+
+  // Port Royal buccaneer boom (1655–1689: fastest-growing English port in the New World)
+  if (matchedAnyYear?.id === 'port-royal' && simYear >= 1655) {
+    ageFactor = Math.min(1.85, 0.55 + Math.min(1.25, (simYear - 1655) * 0.038));
+    historicalNote = simYear >= 1665
+      ? `Buccaneer metropolis & 5-fortress harbour on Cagway Spit (${simYear})`
+      : `English Cagway Point fort & buccaneer anchorage (${simYear})`;
+  }
+
+  const growthFactor = Number(Math.max(0.25, Math.min(1.85, ageFactor)).toFixed(3));
+
+  // Determine settlement stage & fortification tier
+  let stage = 'fortified-port';
+  let fortificationTier = 2;
+  let expansionTier = 0;
+
+  if (declinedYear && simYear >= declinedYear) {
+    stage = 'outpost';
+    fortificationTier = 1;
+    expansionTier = 0;
+  } else if (colonyAge < 14 && baseTier < 4 && !(matchedAnyYear?.id === 'port-royal' && simYear >= 1668)) {
+    stage = 'outpost';
+    fortificationTier = 1;
+    expansionTier = 0;
+  } else if (colonyAge < 32 && simYear < fortYear && (baseTier < 3 || foundedYear > 1550) && !(matchedAnyYear?.id === 'port-royal' && simYear >= 1668)) {
+    stage = 'settlement';
+    fortificationTier = 2;
+    expansionTier = 0;
+  } else if (simYear >= 1645 && (colonyAge >= 45 || (baseTier >= 3 && simYear >= fortYear) || growthFactor >= 1.22)) {
+    stage = 'citadel-metropolis';
+    fortificationTier = 4;
+    // Progressive 17th-century expansion tiers (1..8 extra urban & harbour battery structures from 1565 to 1685)
+    expansionTier = Math.max(1, Math.min(8, Math.floor((simYear - 1555) / 16) + (baseTier >= 3 ? 1 : 0)));
+  } else {
+    stage = 'fortified-port';
+    fortificationTier = simYear >= fortYear ? 3 : 2;
+    expansionTier = simYear > 1560 ? Math.max(1, Math.min(4, Math.floor((simYear - 1555) / 18) + (baseTier >= 3 ? 1 : 0))) : 0;
+  }
+
+  const pierCount =
+    matchedAnyYear?.id === 'lisbon'
+      ? 3 + (simYear >= 1620 ? 1 : 0)
+      : stage === 'outpost'
+        ? 1
+        : stage === 'citadel-metropolis' && simYear >= 1610
+          ? 2
+          : 1;
+
+  const targetBuildingCount =
+    stage === 'outpost'
+      ? 8 + Math.min(3, Math.floor(colonyAge / 4))
+      : stage === 'settlement'
+        ? 13 + Math.min(4, Math.floor((colonyAge - 14) / 5))
+        : 19 + expansionTier;
+
+  const garrisonScale = Number((0.45 + fortificationTier * 0.25 + expansionTier * 0.08).toFixed(2));
+
+  return Object.freeze({
+    year: simYear,
+    eraId: era.id,
+    eraLabel: era.label,
+    eraShortLabel: era.shortLabel,
+    colonized: true,
+    portId: matchedAnyYear?.id ?? regionId ?? null,
+    portName: matchedAnyYear?.name ?? specOrPort?.name ?? null,
+    foundedYear,
+    colonyAge,
+    crown: matchedAnyYear?.crown ?? 'spain',
+    stage,
+    growthFactor,
+    fortificationTier,
+    pierCount,
+    targetBuildingCount,
+    expansionTier,
+    garrisonScale,
+    historicalNote,
+  });
 }
 
 export const PORT_PREFABS = Object.freeze({
@@ -1111,7 +1387,19 @@ export async function fetchPublicClimateProfile(
 export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   if (typeof spec === 'string') {
     const preset = SPANISH_MAIN_1550_REGIONS[spec];
-    if (!preset) throw new RangeError(`Unknown Spanish Main coastal region: ${spec}`);
+    if (!preset) {
+      const colPort = HISTORICAL_COLONIAL_PORTS.find((p) => p.id === spec);
+      if (colPort) {
+        return resolveGlobalCoastalRegion({
+          id: colPort.id,
+          name: colPort.name,
+          latitude: colPort.latitude,
+          longitude: colPort.longitude,
+          year: Math.max(1550, colPort.foundedYear),
+        });
+      }
+      throw new RangeError(`Unknown Spanish Main coastal region: ${spec}`);
+    }
     return preset;
   }
   if (!spec || typeof spec !== 'object') {
@@ -1124,17 +1412,30 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
       (Math.abs(Number(spec.latitude) - preset.latitude) < 0.05 &&
         Math.abs(Number(spec.longitude) - preset.longitude) < 0.05)
     ) {
-      return Object.freeze({ ...preset, ...spec });
+      const rawYr = Number(spec.year ?? spec.era);
+      const yr = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
+      const merged = { ...preset, ...spec, era: spec.era ?? yr };
+      if (yr !== 1550 || spec.year !== undefined || spec.colonyGrowth !== undefined) {
+        merged.year = yr;
+        merged.colonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(merged, yr);
+      }
+      return Object.freeze(merged);
     }
   }
-  const latitude = Number(spec.latitude);
-  const longitude = Number(spec.longitude);
+  const colPortById =
+    typeof spec.id === 'string' && (spec.latitude === undefined || spec.longitude === undefined)
+      ? HISTORICAL_COLONIAL_PORTS.find((p) => p.id === spec.id) ?? null
+      : null;
+  const latitude = Number(spec.latitude ?? colPortById?.latitude);
+  const longitude = Number(spec.longitude ?? colPortById?.longitude);
   if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) {
     throw new RangeError('Coastal region latitude must be finite within [-85, 85]');
   }
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
     throw new RangeError('Coastal region longitude must be finite within [-180, 180]');
   }
+  const rawYr = Number(spec.year ?? spec.era);
+  const simYear = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
   const seed = (spec.vegetationSeed ?? coastalHashCoords(latitude, longitude)) >>> 0;
   const rand = coastalMulberry32(seed);
   const absLat = Math.abs(latitude);
@@ -1156,9 +1457,10 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     spec.hasColonialPort === true ||
     spec.settlementKind === 'colonial-port' ||
     (!explicitNoPort && Boolean(spec.portType) && portTypes.includes(spec.portType));
+  const matchedHistoricalPort = findHistoricalColonialPort(latitude, longitude, spec.id, simYear, 0.32);
   const hasColonialPort = explicitNoPort
     ? false
-    : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id);
+    : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id, 0.32, simYear);
   const settlementKind = hasColonialPort ? 'colonial-port' : 'wilderness-anchorage';
   const portType = spec.portType ?? (hasColonialPort ? portTypes[idx] : 'wilderness-anchorage');
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
@@ -1172,12 +1474,18 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const biomeSize = spec.biomeSize ?? (size - 1);
   const albedoSize = spec.albedoSize ?? (size - 1);
   const span = spec.span ?? 8192;
-  const id = spec.id ?? `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`;
-  const name = spec.name ?? `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`;
+  const id = spec.id ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.id : `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`);
+  const name = spec.name ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.name : `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`);
+  const colonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(
+    { ...spec, id, name, latitude, longitude, hasColonialPort, settlementKind },
+    simYear
+  );
   return Object.freeze({
     id,
     name,
-    era: spec.era ?? 1550,
+    era: spec.era ?? simYear,
+    ...(spec.year !== undefined || simYear !== 1550 ? { year: simYear } : {}),
+    colonyGrowth,
     regionGroup: spec.regionGroup ?? (
       latitude >= 7 && latitude <= 26 && longitude >= -90 && longitude <= -59
         ? 'Spanish Main'
@@ -2404,6 +2712,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   }
 
+  const colonyGrowth =
+    region.colonyGrowth ??
+    computeColonyGrowthProfile(region, region.year ?? region.era ?? 1550);
+
   if (allowColonialPort && hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
     const hasPreassigned = fps.some((f) => Boolean(f.prefabId));
@@ -2447,7 +2759,12 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     let arsenalAssigned = false;
     let lonjaAssigned = false;
     let corralAssigned = false;
-    const maxOrthoBuildings = 32;
+    const maxOrthoBuildings =
+      colonyGrowth.stage === 'outpost'
+        ? Math.max(6, Math.min(10, fps.length))
+        : colonyGrowth.stage === 'settlement'
+          ? Math.max(10, Math.min(16, fps.length))
+          : 32;
     for (let i = 0; i < fps.length && i < maxOrthoBuildings; i++) {
       const fp = fps[i];
       const aspect = fp.length / Math.max(1, fp.width);
@@ -2458,7 +2775,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
 
       if (!prefabId || (fps.length > 4 && prefabId === 'colonial_town_block')) {
         if (!fp.prefabId && i === bastionIdx) {
-          prefabId = rClass === 3 && fp.width >= 26 ? 'bastion_trace_fortress' : 'stone_sea_bastion';
+          prefabId =
+            (rClass === 3 && fp.width >= 26) || colonyGrowth.fortificationTier >= 3
+              ? 'bastion_trace_fortress'
+              : 'stone_sea_bastion';
         } else if (!fp.prefabId && i === casaIdx) {
           prefabId = 'casa_de_contratacion';
         } else if (!fp.prefabId && i === chapelIdx) {
@@ -2538,6 +2858,27 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         roofPitch: truePitch,
         waterfront: prefab.waterfront,
         fromOrthophotoFootprint: true,
+      });
+    }
+    // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
+    if (colonyGrowth.expansionTier >= 1) {
+      addPrefab('bastion_trace_fortress', -138, 16, 18, 4.4, {
+        label: 'Castillo de San Felipe · Antonelli Star Bastion',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 2) {
+      addPrefab('colonial_town_block', 68, 92, 0, 3.8, {
+        label: 'Barrio de los Mercaderes (17th-Century Expansion)',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 3) {
+      addPrefab('curtain_wall_and_gate', 48, 128, 0, 4.2, {
+        label: 'Muralla Real & Puerta de Tierra',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 4) {
+      addPrefab('stone_sea_bastion', -154, -10, 22, 4.2, {
+        label: 'Batería de la Media Luna (Harbor Crossfire Battery)',
       });
     }
   } else if (allowColonialPort && isLisbonRoyalDock) {
@@ -2627,35 +2968,140 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('stone_arch_bridge', -116, 32, 16, 2.2, {
       label: 'Ponte de Alcântara (Stone Cutwater Bridge)',
     });
+    if (colonyGrowth.year >= 1585) {
+      addPrefab('bastion_trace_fortress', -168, 18, 14, 4.4, {
+        label: 'Forte de São Julião da Barra (Philippine / Terzi Citadel)',
+      });
+      addPrefab('colonial_town_block', 64, 118, 0, 4.2, {
+        label: 'Bairro Alto (17th-Century Expansion)',
+      });
+    }
+    if (colonyGrowth.year >= 1640) {
+      addPrefab('stone_sea_bastion', 112, -8, -14, 3.6, {
+        label: 'Forte de Santa Apolónia (Restoration Tagus Battery)',
+      });
+    }
   } else if (allowColonialPort) {
-    // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
-    addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
-    // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
-    addPrefab('careening_shed', -75, 16, 12, 2.2);
-    addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
-    // 4. Sea bastion (Castillo) & Star-Bastioned Fort / Watchtower guarding the harbor entrance headlands
-    addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
-    addPrefab('bastion_trace_fortress', -112, 14, 14, 4.2);
-    addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
-    // 5. Casa de la Contratación (Customhouse) & Open Market Loggia (Lonja) facing the waterfront plaza
-    addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
-    addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
-    // 6. Almacén Real (Royal Warehouse) & Multi-Gable Reales Atarazanas Arsenal beside the customhouse
-    addPrefab('royal_warehouse', 46, 48, 0, 3.2);
-    addPrefab('royal_atarazanas_arsenal', 78, 36, 0, 3.0);
-    // 7. Mission Chapel & Bell Tower on the upper plaza
-    addPrefab('mission_chapel', -38, 82, 90, 3.8);
-    // 8. Bay-Iterated Courtyard Cloisters, L/U-Wing Solares, Single-Nave Row Houses & Walled Corral
-    addPrefab('colonial_town_block', 28, 88, 0, 3.8);
-    addPrefab('colonial_town_block', -44, 48, 0, 3.2);
-    addPrefab('modular_patio_cloister', -4, 88, 0, 3.8);
-    addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
-    addPrefab('single_nave_solar', -74, 52, 0, 3.2);
-    addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
-    // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge & Frontier Palm-Thatch Bohíos
-    addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
-    addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
-    addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+    if (colonyGrowth.stage === 'outpost') {
+      // Frontier Colonial Outpost (< 14 yrs old, or post-1597 decayed Nombre de Dios):
+      // Timber landing, careening shed, boatyard, coastal watchtower, single-nave hall, corral, and palm-thatch bohíos.
+      addPrefab('careening_shed', -54, 14, 10, 2.1);
+      addPrefab('astillero_and_moored_hull', -32, 11, 5, 1.8);
+      addPrefab('torreon_atalaya_farol', 82, -4, 0, 4.2, {
+        label: 'Atalaya de Madera y Piedra (Frontier Watchtower)',
+      });
+      addPrefab('single_nave_solar', -12, 38, 0, 2.9, {
+        label: 'Casa del Gobernador & Almacén (Frontier Hall)',
+      });
+      addPrefab('walled_mule_corral', 24, 58, 0, 3.2);
+      addPrefab('thatched_bohio_palafito', -68, 22, -10, 2.0);
+      addPrefab('thatched_bohio_palafito', 48, 26, 12, 2.1);
+      if (colonyGrowth.colonyAge >= 4) {
+        addPrefab('mission_chapel', -32, 66, 90, 3.4, {
+          label: 'Ermita de la Misión (Frontier Parish Chapel)',
+        });
+      }
+      if (colonyGrowth.colonyAge >= 8) {
+        addPrefab('open_lonja_loggia', 16, 26, 90, 2.6);
+        addPrefab('single_nave_solar', -48, 44, 0, 3.0);
+      }
+    } else if (colonyGrowth.stage === 'settlement') {
+      // Growing Colonial Settlement (14..31 yrs old):
+      // Stone quay, sea bastion, customhouse, lonja, royal warehouse, parish church, and early town blocks.
+      addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
+      addPrefab('careening_shed', -75, 16, 12, 2.2);
+      addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
+      addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
+      addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
+      addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
+      addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
+      addPrefab('royal_warehouse', 46, 48, 0, 3.2);
+      addPrefab('mission_chapel', -38, 82, 90, 3.8);
+      addPrefab('colonial_town_block', 28, 88, 0, 3.8);
+      addPrefab('single_nave_solar', -74, 52, 0, 3.2);
+      addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
+      addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+      if (colonyGrowth.colonyAge >= 22) {
+        addPrefab('colonial_town_block', -44, 48, 0, 3.2);
+        addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
+      }
+    } else {
+      // Mature Fortified Port & 17th-Century Citadel Metropolis (1550 baseline + progressive 1565–1689 expansions):
+      // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
+      addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
+      // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
+      addPrefab('careening_shed', -75, 16, 12, 2.2);
+      addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
+      // 4. Sea bastion (Castillo) & Star-Bastioned Fort / Watchtower guarding the harbor entrance headlands
+      addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
+      addPrefab('bastion_trace_fortress', -112, 14, 14, 4.2);
+      addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
+      // 5. Casa de la Contratación (Customhouse) & Open Market Loggia (Lonja) facing the waterfront plaza
+      addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
+      addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
+      // 6. Almacén Real (Royal Warehouse) & Multi-Gable Reales Atarazanas Arsenal beside the customhouse
+      addPrefab('royal_warehouse', 46, 48, 0, 3.2);
+      addPrefab('royal_atarazanas_arsenal', 78, 36, 0, 3.0);
+      // 7. Mission Chapel & Bell Tower on the upper plaza
+      addPrefab('mission_chapel', -38, 82, 90, 3.8);
+      // 8. Bay-Iterated Courtyard Cloisters, L/U-Wing Solares, Single-Nave Row Houses & Walled Corral
+      addPrefab('colonial_town_block', 28, 88, 0, 3.8);
+      addPrefab('colonial_town_block', -44, 48, 0, 3.2);
+      addPrefab('modular_patio_cloister', -4, 88, 0, 3.8);
+      addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
+      addPrefab('single_nave_solar', -74, 52, 0, 3.2);
+      addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
+      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge & Frontier Palm-Thatch Bohíos
+      addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
+      addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
+      addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+
+      // 10. Progressive year-by-year & era-by-era expansion (1565–1689: Antonelli, Colonial Planting & High Buccaneer Eras)
+      if (colonyGrowth.expansionTier >= 1) {
+        addPrefab('colonial_town_block', 64, 122, 0, 4.1, {
+          label: 'Barrio de los Mercaderes (Upper Town Quarter)',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 2) {
+        addPrefab('stone_sea_bastion', -144, -6, 18, 4.4, {
+          label: 'Batería de San Felipe (Harbor Crossfire Bastion)',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 3) {
+        const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
+        if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
+          addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
+            label: 'Muelle de Mercaderes (Merchant Fleet Wharf)',
+          });
+        }
+        addPrefab('royal_warehouse', -82, 86, 0, 3.6, {
+          label: 'Almacén de Flota y Azúcar (Fleet Storehouse)',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 4) {
+        addPrefab('modular_patio_cloister', -48, 148, 0, 4.4, {
+          label: 'Convento y Hospital de San Juan de Dios',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 5) {
+        addPrefab('curtain_wall_and_gate', 58, 152, 0, 4.5, {
+          label: 'Muralla Abaluartada y Puerta de Tierra',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 6) {
+        addPrefab('bastion_trace_fortress', 148, 46, -22, 5.0, {
+          label: 'Castillo Grande · Vauban Star Citadel',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 7) {
+        addPrefab('colonial_town_block', -8, 152, 0, 4.4, {
+          label: 'Plaza de Armas & Intendencia Quarter (1680s)',
+        });
+        addPrefab('l_wing_u_wing_solar', 98, 88, 90, 3.9, {
+          label: 'Palacio del Cabildo y Audiencia',
+        });
+      }
+    }
   }
 
   for (let idx = 0; idx < instances.length; idx++) {
@@ -2679,15 +3125,33 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
   const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 100 : 108)) % 360 + 360) % 360;
 
+  const clearRadius = !allowColonialPort
+    ? 0
+    : isLisbonRoyalDock
+      ? 185
+      : colonyGrowth.stage === 'outpost'
+        ? 96
+        : colonyGrowth.stage === 'settlement'
+          ? 128
+          : colonyGrowth.stage === 'citadel-metropolis' && colonyGrowth.year > 1560
+            ? 172
+            : 155;
+
   return {
     regionId: region.id,
     portType: region.portType,
     settlementKind: region.settlementKind ?? (allowColonialPort ? 'colonial-port' : 'wilderness-anchorage'),
     hasColonialPort: allowColonialPort,
     era: region.era,
+    year: colonyGrowth.year,
+    stage: allowColonialPort ? colonyGrowth.stage : 'wilderness',
+    fortificationTier: allowColonialPort ? colonyGrowth.fortificationTier : 0,
+    foundedYear: colonyGrowth.foundedYear,
+    colonyAge: allowColonialPort ? colonyGrowth.colonyAge : 0,
+    colonyGrowth,
     shoreBearing: region.shoreBearing ?? 112,
     center: { x: center.x, z: center.z, shoreAlong: bestShoreAlong, shoreInland: bestShoreInland },
-    clearRadius: allowColonialPort ? (isLisbonRoyalDock ? 185 : 155) : 0,
+    clearRadius,
     hasOrthophotoFootprints: hasOrthoFootprints,
     berth: {
       x: berthPos.x,
@@ -6250,8 +6714,11 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
     coordLabel: cellInfo.coordLabel,
     span: region.span,
     metersPerPixel: scaleInfo.metersPerPixel,
+    year: region.year ?? 1550,
+    eraId: region.eraId ?? 'conquistador-1550',
     settlementKind: region.settlementKind,
     hasColonialPort: Boolean(region.hasColonialPort),
+    colonyStage: region.colonyGrowth?.stage || (region.hasColonialPort ? 'settlement' : 'wilderness'),
     restoredEstuaryPct,
     reclaimedCellsCarved,
     palmCount: upgradedPack.vegetation?.stats?.palmCount ?? 0,
@@ -6358,6 +6825,11 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
     ...meta,
     span: built.region.span,
     metersPerPixel: built.territory1550.metersPerPixel,
+    year: built.region.year ?? 1550,
+    eraId: built.region.eraId ?? 'conquistador-1550',
+    settlementKind: built.region.settlementKind,
+    hasColonialPort: Boolean(built.region.hasColonialPort),
+    colonyStage: built.region.colonyGrowth?.stage || (built.region.hasColonialPort ? 'settlement' : 'wilderness'),
     footprints: precomputedFootprints?.footprints || built.territory1550.footprints,
   };
   return built;

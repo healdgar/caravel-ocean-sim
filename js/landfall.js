@@ -1,6 +1,6 @@
-import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, resolveGlobalCoastalRegion } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, resolveGlobalCoastalRegion } from './terrain-model.js';
 import { snapCoordinateToCoastlineRings } from './coastal-world.js';
-export { SPANISH_MAIN_1550_REGIONS, resolveGlobalCoastalRegion } from './coastal-world.js';
+export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, resolveGlobalCoastalRegion } from './coastal-world.js';
 
 export const LANDFALL_WEATHER = Object.freeze({
   clear:{sunElev:32,sunAzim:225,haze:0.8,clouds:0.3,cloudBase:1.2,cloudDepth:1.8,cloudDensity:1,cloudAnvil:0.05},
@@ -55,12 +55,25 @@ export function landfallStageURL(href,stage,weather='clear'){
   return url;
 }
 
-export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',weather='clear'){
-  const region=resolveGlobalCoastalRegion(regionSpec);
+export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',weather='clear',year=undefined){
   const url=landfallStageURL(href,stage,weather);
+  const effectiveYear=year!==undefined
+    ?year
+    :(typeof regionSpec==='object'&&regionSpec?.year!==undefined)
+      ?regionSpec.year
+      :(url.searchParams.has('year')?Number(url.searchParams.get('year')):undefined);
+  const specWithYear=effectiveYear!==undefined
+    ?(typeof regionSpec==='string'?{id:regionSpec,year:effectiveYear}:{...regionSpec,year:effectiveYear})
+    :regionSpec;
+  const region=resolveGlobalCoastalRegion(specWithYear);
   url.searchParams.set('region',region.id);
   url.searchParams.set('lat',String(region.latitude));
   url.searchParams.set('lon',String(region.longitude));
+  if(effectiveYear!==undefined&&Number(effectiveYear)!==1550){
+    url.searchParams.set('year',String(region.year));
+  }else if(effectiveYear===1550){
+    url.searchParams.delete('year');
+  }
   const dockTurn=region.id==='lisbon'||region.portType==='royal-arsenal-dock'?100:108;
   const heading=stage==='dock'?(((region.shoreBearing??112)-dockTurn)%360+360)%360:(region.shoreBearing??112);
   url.searchParams.set('boatHeading',String(heading));
@@ -69,24 +82,45 @@ export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',
   return url;
 }
 
+const POST_1550_FEATURED_PORTS = Object.freeze([
+  'st-augustine',
+  'portobelo',
+  'jamestown',
+  'new-amsterdam',
+  'tortuga',
+  'boston',
+  'willemstad',
+  'port-royal',
+  'nassau',
+  'charleston',
+]);
+
 export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=null,onUpgradeApplied=null,onWeather,onOpen,getPosition}){
   const button=document.createElement('button');button.textContent='Landfall';button.id='landfall-button';
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
   panel.setAttribute('aria-labelledby','landfall-title');
   const isSaba=!region||region.id==='saba';
+  const simYear=Number.isFinite(region?.year)?region.year:1550;
+  const eraInfo=resolveColonialEra(simYear);
+  const growth=region?.colonyGrowth||(isSaba?null:computeColonyGrowthProfile(region,simYear));
   const isWilderness=!isSaba&&region.hasColonialPort===false;
-  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name}${region.subtitle?' · '+region.subtitle:isWilderness?' · 1550 Wilderness Coast':''}`;
+  const stageBadge=growth?.stage?growth.stage.replace(/-/g,' '):(isWilderness?'wilderness':'settlement');
+  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name} (${simYear})${region.subtitle?' · '+region.subtitle:isWilderness?` · ${simYear} Wilderness Coast`:''}`;
   const introText=isSaba
     ?'Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.'
     :isWilderness
-      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) reconstructs an uncolonized 1550 wilderness coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no colonial settlement.`
-      :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) combines high-resolution SRTM elevation, co-registered satellite land-cover, and 1550 historical shoreline reconstruction.`;
+      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label}) reconstructs an uncolonized wilderness coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no colonial settlement yet established.${growth?.historicalNote?' '+growth.historicalNote+'.':''}`
+      :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label} · ${stageBadge}) combines high-resolution SRTM elevation, co-registered satellite land-cover, and historical colony growth.${growth?.historicalNote?' '+growth.historicalNote+'.':''}`;
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">${titleText}</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">${introText}</p>
     <div id="landfall-discovery-card" hidden></div>
     <div class="landfall-destinations" style="display:grid;gap:6px;margin:8px 0">
-      <label style="display:grid;gap:4px"><span>Region / Spanish Main (~1550)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
+      <label style="display:grid;gap:4px"><span>Region / Colonial Port (1550–1689)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
+      <div style="display:grid;grid-template-columns:1fr 92px;gap:6px;align-items:end">
+        <label style="display:grid;gap:2px"><span>Historical Era</span><select id="landfall-era" aria-label="Historical era"></select></label>
+        <label style="display:grid;gap:2px"><span>Year</span><input id="landfall-year" type="number" min="1492" max="1689" step="1" value="${simYear}"></label>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:end">
         <label style="display:grid;gap:2px"><span>Latitude (°N)</span><input id="landfall-lat" type="number" min="-85" max="85" step="0.001" value="${region.latitude.toFixed(3)}"></label>
         <label style="display:grid;gap:2px"><span>Longitude (°E)</span><input id="landfall-lon" type="number" min="-180" max="180" step="0.001" value="${region.longitude.toFixed(3)}"></label>
@@ -99,34 +133,71 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     <div id="landfall-sun-sliders" class="landfall-sun-sliders"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Click any coastline on the chart to set coordinates.</p>
-    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), AWS Terrarium SRTM Z13/Z14, and Esri World Imagery, downsampled, reprojected and modified for 1550 terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain).</p></details>
+    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), AWS Terrarium SRTM Z13/Z14, and Esri World Imagery, downsampled, reprojected and modified for 1550–1689 terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain).</p></details>
     <button id="landfall-ocean">Return to open ocean</button></div>`;
   const regionSelect=panel.querySelector('#landfall-region');
+  const eraSelect=panel.querySelector('#landfall-era');
+  const yearInput=panel.querySelector('#landfall-year');
   const latInput=panel.querySelector('#landfall-lat');
   const lonInput=panel.querySelector('#landfall-lon');
-  for(const [id,label] of [['saba','Saba · Lesser Antilles (LiDAR)'],...Object.values(SPANISH_MAIN_1550_REGIONS).map(r=>[r.id,`${r.name} · ${r.subtitle}`])]){
+  for(const era of Object.values(COLONIAL_ERAS)){
+    const opt=document.createElement('option');
+    opt.value=String(era.defaultYear);
+    opt.textContent=`${era.label} (${era.startYear}–${era.endYear})`;
+    if(era.id===eraInfo.id)opt.selected=true;
+    eraSelect.append(opt);
+  }
+  const post1550Entries=POST_1550_FEATURED_PORTS
+    .map(id=>HISTORICAL_COLONIAL_PORTS.find(p=>p.id===id))
+    .filter(Boolean)
+    .map(p=>[p.id,`${p.name} · Founded ${p.foundedYear} (${p.crown})`]);
+  const allPresetIds=new Set([...Object.keys(SPANISH_MAIN_1550_REGIONS),...POST_1550_FEATURED_PORTS]);
+  for(const [id,label] of [
+    ['saba','Saba · Lesser Antilles (LiDAR)'],
+    ...Object.values(SPANISH_MAIN_1550_REGIONS).map(r=>[r.id,`${r.name} · ${r.subtitle}`]),
+    ...post1550Entries,
+  ]){
     const opt=document.createElement('option');opt.value=id;opt.textContent=label;regionSelect.append(opt);
   }
-  if(!isSaba&&!Object.hasOwn(SPANISH_MAIN_1550_REGIONS,region.id)){
-    const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}° · ${isWilderness?'1550 Wilderness Coast':'1550 Port'})`;regionSelect.append(opt);
+  if(!isSaba&&!allPresetIds.has(region.id)){
+    const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}° · ${isWilderness?`${simYear} Wilderness Coast`:`${simYear} ${stageBadge}`})`;regionSelect.append(opt);
     regionSelect.value='custom';
   }else{
     regionSelect.value=isSaba?'saba':region.id;
   }
-  regionSelect.onchange=()=>{
+  const getSelectedYear=()=>{
+    const y=Number(yearInput.value);
+    return Number.isFinite(y)?Math.max(1492,Math.min(1689,Math.round(y))):simYear;
+  };
+  const navigateToSelected=(targetYear)=>{
     const val=regionSelect.value;
     if(val==='saba'){
       const url=landfallStageURL(location.href,stage||'coast',weather);
       url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
       location.assign(url.href);
-    }else if(Object.hasOwn(SPANISH_MAIN_1550_REGIONS,val)){
-      location.assign(coastalRegionStageURL(location.href,val,stage||'coast',weather).href);
+    }else if(allPresetIds.has(val)){
+      const portMeta=HISTORICAL_COLONIAL_PORTS.find(p=>p.id===val);
+      const effectiveY=targetYear!==undefined?targetYear:(portMeta&&portMeta.foundedYear>getSelectedYear()?Math.min(1685,portMeta.foundedYear+15):getSelectedYear());
+      location.assign(coastalRegionStageURL(location.href,val,stage||'coast',weather,effectiveY).href);
+    }else{
+      const lat=Number(latInput.value),lon=Number(lonInput.value);
+      if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
+      location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather,targetYear??getSelectedYear()).href);
     }
   };
+  regionSelect.onchange=()=>navigateToSelected(undefined);
+  eraSelect.onchange=()=>{
+    const y=Number(eraSelect.value);
+    if(Number.isFinite(y)){
+      yearInput.value=String(y);
+      navigateToSelected(y);
+    }
+  };
+  yearInput.onchange=()=>navigateToSelected(getSelectedYear());
   panel.querySelector('#landfall-goto').onclick=()=>{
     const lat=Number(latInput.value),lon=Number(lonInput.value);
     if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
-    location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather).href);
+    location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather,getSelectedYear()).href);
   };
   const setOpen=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open));document.body.classList.toggle('landfall-open',open);
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
@@ -145,10 +216,10 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
         const url=landfallStageURL(location.href,id,weather);
         url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
         location.assign(url.href);
-      }else if(Object.hasOwn(SPANISH_MAIN_1550_REGIONS,region.id)){
-        location.assign(coastalRegionStageURL(location.href,region.id,id,weather).href);
+      }else if(allPresetIds.has(region.id)){
+        location.assign(coastalRegionStageURL(location.href,region.id,id,weather,getSelectedYear()).href);
       }else{
-        location.assign(coastalRegionStageURL(location.href,{latitude:region.latitude,longitude:region.longitude},id,weather).href);
+        location.assign(coastalRegionStageURL(location.href,{latitude:region.latitude,longitude:region.longitude},id,weather,getSelectedYear()).href);
       }
     };
     panel.querySelector('.landfall-stages').append(b);

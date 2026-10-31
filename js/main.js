@@ -27,7 +27,7 @@ import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { createVolumetricClouds } from './clouds.js';
 import { createTerrain, createDeepWaterGroup } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
-import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw } from './landfall.js';
 import { createVoyageController } from './voyage/voyage-controller.js';
 import { createChartDrawer } from './voyage/chart-drawer.js';
@@ -617,10 +617,17 @@ async function main() {
   const deepWaterDepthGroup=OCEAN_DEPTH?createDeepWaterGroup(device,oceanDepthPipe):null;
   let coastalGroup=terrain?terrain.waterGroup(oceanPipe):deepWaterGroup;
   let coastalDepthGroup=OCEAN_DEPTH?(terrain?terrain.waterGroup(oceanDepthPipe):deepWaterDepthGroup):null;
-  async function spawnTerrainLate({region,placement,lat,lon,name}={}){
+  async function spawnTerrainLate({region,placement,lat,lon,name,year}={}){
+    const liveYear=Number.isFinite(year)
+      ?year
+      :Number.isFinite(region?.year)
+        ?region.year
+        :Number.isFinite(voyageCtl?.voyage?.dateMs)
+          ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
+          :(terrain?.region?.year??1550);
     const nextTerrain=await createTerrain({
       waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
-      region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude},
+      region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
       placement,
       options:{lateSpawn:true},
     });
@@ -2145,11 +2152,22 @@ async function main() {
   cameraDock.append(seaSettingsButton,shipSettingsButton,shareButton);
   // ---------------------------------------------------------------- Chart Course voyage
   {
-    const curatedNear=(lat,lon,maxKm=30)=>{
+    const curatedNear=(lat,lon,maxKm=30,year=null)=>{
+      const simYear=Number.isFinite(year)
+        ?year
+        :Number.isFinite(voyageCtl?.voyage?.dateMs)
+          ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
+          :(terrain?.region?.year??1550);
       let best=null,bestKm=maxKm;
       for(const r of Object.values(SPANISH_MAIN_1550_REGIONS)){
         const km=greatCircleKm(lat,lon,r.latitude,r.longitude);
-        if(km<bestKm){bestKm=km;best=r;}
+        if(km<bestKm){bestKm=km;best={...r,year:simYear};}
+      }
+      if(!best){
+        const port=findHistoricalColonialPort(lat,lon,null,simYear,maxKm/111.195);
+        if(port&&simYear>=(port.foundedYear??1500)){
+          best={id:port.id,name:port.name,latitude:port.latitude,longitude:port.longitude,year:simYear};
+        }
       }
       return best;
     };
@@ -2354,8 +2372,13 @@ async function main() {
       onSpectrum:()=>{needSpectrum=true;},
       onEnv:()=>{envFull=true;},
       resolveLandfallRegion:(lat,lon)=>{
-        const r=curatedNear(lat,lon);
-        return r?{id:r.id,name:r.name,latitude:r.latitude,longitude:r.longitude}:{latitude:lat,longitude:lon,name:'Uncharted coast'};
+        const liveYear=Number.isFinite(voyageCtl?.voyage?.dateMs)
+          ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
+          :(terrain?.region?.year??1550);
+        const r=curatedNear(lat,lon,30,liveYear);
+        return r
+          ?{id:r.id,name:r.name,latitude:r.latitude,longitude:r.longitude,year:liveYear}
+          :{latitude:lat,longitude:lon,name:'Uncharted coast',year:liveYear};
       },
       loadLandRings:()=>fetch('assets/world/land.json').then(r=>r.ok?r.json():null),
       spawnTerrain:typeof spawnTerrainLate==='function'?spawnTerrainLate:null,
@@ -2391,6 +2414,10 @@ async function main() {
       }
       if(voyageCtl.voyage){
         const v=voyageCtl.voyage;
+        if(terrain?.region?.year&&terrain.region.year!==1550&&!qs.has('astroDate')&&!urlGameState?.voyage?.dateMs){
+          v.dateMs=Date.UTC(terrain.region.year,2,24,12,0,0);
+          v.departureDateMs=v.dateMs;
+        }
         const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
         if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
           if(v.true){v.true.lat=qLat;v.true.lon=qLon;}

@@ -4,8 +4,13 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import {
   SPANISH_MAIN_1550_REGIONS,
+  COLONIAL_ERAS,
+  resolveColonialEra,
   HISTORICAL_1550_PORTS,
+  HISTORICAL_COLONIAL_PORTS,
+  findHistoricalColonialPort,
   hasHistorical1550ColonialPort,
+  computeColonyGrowthProfile,
   PORT_PREFABS,
   COCONUT_PALM_GENOME_SPEC,
   coastalUberNoise2D,
@@ -1047,6 +1052,108 @@ test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes
   assert.match(FOREST_VERTEX_WGSL, /frondCurve/);
   assert.match(FOREST_VERTEX_WGSL, /farNorm/);
 });
+
+test('colony growth year-by-year and era-by-era (1550–1689): founding dates, stage progression, fortifications, chart knowledge, and 17th-century encounters', async () => {
+  const { classify1550Knowledge } = await import('../js/voyage/chart-drawer.js');
+  const { pickEncounterArchetype } = await import('../js/voyage/encounters.js');
+
+  // 1. Colonial eras cover 1550 through 1689 and resolve by year or era ID
+  assert.equal(COLONIAL_ERAS.length, 5);
+  assert.equal(resolveColonialEra(1550).id, 'hapsburg-conquistador');
+  assert.equal(resolveColonialEra(1595).id, 'iberian-union-antonelli');
+  assert.equal(resolveColonialEra(1635).id, 'atlantic-planting');
+  assert.equal(resolveColonialEra(1660).id, 'buccaneer-commonwealth');
+  assert.equal(resolveColonialEra(1682).id, 'high-buccaneer-1680s');
+  assert.equal(resolveColonialEra('high-buccaneer-1680s').year, 1680);
+
+  // 2. Post-1550 colonial ports: Boston (founded 1630) grows from wilderness (1550..1625) -> outpost (1632) -> settlement (1655) -> citadel-metropolis (1680)
+  const bostonCoord = { name: 'Boston Harbor', latitude: 42.3601, longitude: -71.0589 };
+  const gridOpts = { size: 65, biomeSize: 64, albedoSize: 64, vegetationCandidates: 1200 };
+
+  const boston1550 = generateProceduralCoastalPack({ ...bostonCoord, year: 1550, ...gridOpts });
+  assert.equal(boston1550.region.hasColonialPort, false);
+  assert.equal(boston1550.region.colonyGrowth.stage, 'wilderness');
+  assert.equal(boston1550.port.instances.length, 0);
+  assert.equal(boston1550.port.fortificationTier, 0);
+
+  const boston1632 = generateProceduralCoastalPack({ ...bostonCoord, year: 1632, ...gridOpts });
+  assert.equal(boston1632.region.hasColonialPort, true);
+  assert.equal(boston1632.region.colonyGrowth.stage, 'outpost');
+  assert.equal(boston1632.port.fortificationTier, 1);
+  assert.ok(boston1632.port.instances.length >= 6 && boston1632.port.instances.length <= 12);
+
+  const boston1655 = generateProceduralCoastalPack({ ...bostonCoord, year: 1655, ...gridOpts });
+  assert.equal(boston1655.region.colonyGrowth.stage, 'settlement');
+  assert.equal(boston1655.port.fortificationTier, 2);
+  assert.ok(boston1655.port.instances.length > boston1632.port.instances.length);
+
+  const boston1680 = generateProceduralCoastalPack({ ...bostonCoord, year: 1680, ...gridOpts });
+  assert.equal(boston1680.region.colonyGrowth.stage, 'citadel-metropolis');
+  assert.equal(boston1680.port.fortificationTier, 4);
+  assert.ok(boston1680.port.instances.length > boston1655.port.instances.length);
+  assert.ok(boston1680.portGeometry.vertices.length > boston1632.portGeometry.vertices.length);
+
+  // 3. Port Royal, Jamaica (founded 1655) is wilderness in 1600, outpost in 1658, and buccaneer metropolis by 1680
+  const portRoyal1600 = resolveGlobalCoastalRegion({ id: 'port-royal', year: 1600 });
+  assert.equal(portRoyal1600.hasColonialPort, false);
+  assert.equal(portRoyal1600.colonyGrowth.stage, 'wilderness');
+
+  const portRoyal1658 = resolveGlobalCoastalRegion({ id: 'port-royal', year: 1658 });
+  assert.equal(portRoyal1658.hasColonialPort, true);
+  assert.equal(portRoyal1658.colonyGrowth.stage, 'outpost');
+
+  const portRoyal1680 = generateProceduralCoastalPack({ id: 'port-royal', year: 1680, ...gridOpts });
+  assert.equal(portRoyal1680.region.hasColonialPort, true);
+  assert.equal(portRoyal1680.region.colonyGrowth.stage, 'citadel-metropolis');
+  assert.equal(portRoyal1680.port.fortificationTier, 4);
+  assert.ok(portRoyal1680.port.instances.length >= 20);
+
+  // 4. Historical port supersession: Nombre de Dios (1510–1596) vs Portobelo (founded 1597)
+  const nombre1550 = resolveGlobalCoastalRegion({ latitude: 9.58, longitude: -79.47, year: 1550 });
+  const portobelo1550 = resolveGlobalCoastalRegion({ id: 'portobelo', year: 1550 });
+  assert.equal(nombre1550.hasColonialPort, true);
+  assert.equal(portobelo1550.hasColonialPort, false, 'Portobelo is uncolonized before 1597');
+
+  const nombre1615 = resolveGlobalCoastalRegion({ latitude: 9.58, longitude: -79.47, year: 1615 });
+  const portobelo1615 = resolveGlobalCoastalRegion({ id: 'portobelo', year: 1615 });
+  assert.equal(nombre1615.colonyGrowth.stage, 'outpost', 'Nombre de Dios decayed after 1596 Drake raid');
+  assert.equal(portobelo1615.hasColonialPort, true);
+  assert.equal(portobelo1615.colonyGrowth.stage, 'fortified-port');
+
+  // 5. Curated Spanish Main ports (Cartagena & Havana) expand year-by-year from 1550 to 1680
+  const cartagena1550 = generateProceduralCoastalPack({ id: 'cartagena', year: 1550, ...gridOpts });
+  const cartagena1605 = generateProceduralCoastalPack({ id: 'cartagena', year: 1605, ...gridOpts });
+  const cartagena1680 = generateProceduralCoastalPack({ id: 'cartagena', year: 1680, ...gridOpts });
+  assert.equal(cartagena1550.port.stage, 'fortified-port');
+  assert.equal(cartagena1550.port.fortificationTier, 2);
+  assert.equal(cartagena1605.port.stage, 'fortified-port');
+  assert.equal(cartagena1605.port.fortificationTier, 3);
+  assert.equal(cartagena1680.port.stage, 'citadel-metropolis');
+  assert.equal(cartagena1680.port.fortificationTier, 4);
+  assert.ok(cartagena1605.port.instances.length > cartagena1550.port.instances.length);
+  assert.ok(cartagena1680.port.instances.length > cartagena1605.port.instances.length);
+
+  // 6. Chart knowledge progresses from 1550 to 1680 (Manila 1565+, Cape Horn 1616+, New Holland 1644+)
+  assert.equal(classify1550Knowledge(14.6, 120.98, 1550), 'rumoured');
+  assert.equal(classify1550Knowledge(14.6, 120.98, 1580), 'known');
+  assert.equal(classify1550Knowledge(-55.98, -67.27, 1550), 'rumoured');
+  assert.equal(classify1550Knowledge(-55.98, -67.27, 1625), 'known');
+  assert.equal(classify1550Knowledge(-20.0, 118.0, 1550), 'unknown');
+  assert.equal(classify1550Knowledge(-20.0, 118.0, 1620), 'rumoured');
+  assert.equal(classify1550Knowledge(-20.0, 118.0, 1660), 'known');
+
+  // 7. Encounter archetypes include 17th-century buccaneers, Dutch fluyts, and English galleons in later eras
+  const seen1550 = new Set();
+  const seen1675 = new Set();
+  for (let i = 0; i < 40; i++) {
+    const r = () => ((i * 37 + 11) % 100) / 100;
+    seen1550.add(pickEncounterArchetype(18.0, -76.0, r, 1550).id);
+    seen1675.add(pickEncounterArchetype(18.0, -76.0, r, 1675).id);
+  }
+  assert.equal(seen1550.has('buccaneer-sloop'), false, 'no 17th-century buccaneer sloops in 1550');
+  assert.equal(seen1675.has('buccaneer-sloop'), true, 'buccaneer sloops appear in Caribbean by 1675');
+});
+
 
 
 

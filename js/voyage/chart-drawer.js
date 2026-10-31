@@ -176,10 +176,70 @@ export const KNOWLEDGE_1550_REGIONS = Object.freeze([
   ['Atlantic North America (Verrazzano, Gómez)', 'rumoured', 31, 46, -82, -60],
 ].map((r) => Object.freeze(r)));
 
-/** Classifies a coordinate as 'known', 'rumoured' or 'unknown' for a 1550 Castilian chart. */
-export function classify1550Knowledge(lat, lon) {
+/**
+ * Classifies a coordinate as 'known', 'rumoured' or 'unknown' for a historical chart from 1550 through the 1680s.
+ * Defaults to 1550 (Padrón Real of the Casa de la Contratación) when `year` is omitted.
+ */
+export function classify1550Knowledge(lat, lon, year = 1550) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 'unknown';
   const x = chartLonDelta(lon);
+  const y = Number.isFinite(Number(year)) ? Number(year) : 1550;
+
+  if (y > 1555) {
+    // Post-1550 chronological discoveries up to the 1680s:
+    // 1. Australia / New Holland (Janszoon 1606, Hartog 1616, Tasman 1642–1644)
+    if (lat >= -44.5 && lat <= -10.4 && x >= 112 && x <= 154) {
+      if (y >= 1644 && x <= 148) return 'known';
+      if (y >= 1606 && x <= 143 && lat >= -35) return 'rumoured';
+      if (y >= 1642) return 'rumoured';
+      return 'unknown';
+    }
+    // 2. New Zealand / Staten Landt (Abel Tasman 1642)
+    if (lat >= -48 && lat <= -34 && x >= 165 && x <= 179.5) {
+      return y >= 1642 ? 'rumoured' : 'unknown';
+    }
+    // 3. Davis Strait, West Greenland & Baffin (Frobisher 1576, Davis 1585, Baffin 1616)
+    if (lat >= 59 && lat <= 78 && x >= -75 && x <= -10) {
+      if (y >= 1616 && lat <= 74) return 'known';
+      if (y >= 1576 && lat <= 70) return 'rumoured';
+      return 'unknown';
+    }
+    // 4. Hudson Bay (Hudson 1610, James & Foxe 1631, HBC 1670)
+    if (lat >= 51 && lat <= 64 && x >= -95 && x <= -75) {
+      if (y >= 1632) return 'known';
+      if (y >= 1610) return 'rumoured';
+    }
+    // 5. Cape Horn & Le Maire Strait (Schouten & Le Maire 1616)
+    if (lat >= -57.5 && lat <= -52 && x >= -76 && x <= -62 && y >= 1616) {
+      return 'known';
+    }
+    // 6. Atlantic North America, Newfoundland & Guiana (settled & charted 1565–1630)
+    if (y >= 1585 && lat >= 31 && lat <= 59 && x >= -82 && x <= -52) {
+      return 'known';
+    }
+    if (y >= 1580 && lat >= 1 && lat <= 10 && x >= -62 && x <= -51) {
+      return 'known';
+    }
+    // 7. Philippines, East Indies, China coast & Japan (Legazpi/Urdaneta 1565, Macao 1557, VOC 1602+)
+    if (y >= 1565 && lat >= -11 && lat <= 41 && x >= 104 && x <= 135) {
+      return 'known';
+    }
+    if (y >= 1580 && lat >= 30 && lat <= 46 && x >= 128 && x <= 146) {
+      return y >= 1615 ? 'known' : 'rumoured';
+    }
+    // 8. California & Manila Galleon landfall coast (Vizcaíno 1602)
+    if (y >= 1602 && lat >= 23 && lat <= 43 && x >= -126 && x <= -105) {
+      return 'known';
+    }
+    // 9. Patagonia, Chile & Galápagos (Sarmiento 1580, buccaneer charts 1670+)
+    if (y >= 1585 && lat >= -56 && lat <= -36.8 && x >= -76 && x <= -55) {
+      return 'known';
+    }
+    if (y >= 1650 && lat >= -2 && lat <= 1 && x >= -92.5 && x <= -89) {
+      return 'known';
+    }
+  }
+
   for (const [, k, s, n, w, e] of KNOWLEDGE_1550_REGIONS) if (lat >= s && lat <= n && x >= w && x <= e) return k;
   return 'unknown';
 }
@@ -310,8 +370,8 @@ function chartCopies(v) {
   return [-360, 0, 360].filter((o) => hi >= -180 + o && lo <= 180 + o);
 }
 
-/** Splits land rings into runs of uniform 1550 knowledge, once at load. */
-function chartPrepareCoasts(rings) {
+/** Splits land rings into runs of uniform historical knowledge for `year` (1550..1689). */
+function chartPrepareCoasts(rings, year = 1550) {
   const out = [];
   for (const raw of Array.isArray(rings) ? rings : []) {
     const ring = raw.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
@@ -323,7 +383,7 @@ function chartPrepareCoasts(rings) {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i], b = ring[(i + 1) % ring.length];
       if (Math.abs(b[0] - a[0]) > 180) { cur = null; continue; } // seam at the antimeridian
-      const k = classify1550Knowledge((a[1] + b[1]) / 2, (a[0] + b[0]) / 2);
+      const k = classify1550Knowledge((a[1] + b[1]) / 2, (a[0] + b[0]) / 2, year);
       if (!cur || cur.k !== k) { cur = { k, pts: [a] }; runs.push(cur); }
       cur.pts.push(b);
     }
@@ -699,7 +759,7 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
   const view = { cx: -40, cy: 25, scale: 4, width: 0, height: 0 };
   let dpr = 1, viewReady = false, open = false;
   let snap = {}, canvasSig = null, sideSig = null, logSig = null, warpSig = null;
-  let coasts = null, coastVersion = 0, ringsState = 'idle';
+  let rawRings = null, coasts = null, coastYearBucket = 1550, coastVersion = 0, ringsState = 'idle';
   const base = document.createElement('canvas'), baseCtx = base.getContext('2d');
   let baseKey = '';
   let tool = 'pan', rule = null, dividers = null;
@@ -1062,10 +1122,23 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
     return [ll(s.drPos), arr(s.drTrack), s.revealTrue ? `T${ll(s.truePos)}${arr(s.trueTrack)}` : 'F', arr(s.fixes), num(s.uncertaintyNm),
       num(s.courseTrue), num(s.courseCompass), ll(s.destination), s.destination?.name ?? '', arr(s.marks), arr(s.discoveries), s.ship?.name ?? ''].join('|');
   }
+  function getSnapshotYearBucket(s) {
+    const ms = chartDateMs(s?.date);
+    if (!Number.isFinite(ms)) return 1550;
+    const y = new Date(ms).getUTCFullYear();
+    if (!Number.isFinite(y) || y < 1492 || y > 1750) return 1550;
+    return Math.floor(y / 5) * 5;
+  }
   function update(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return;
     snap = snapshot;
     if (!open) return; // stored for when the drawer opens; closed drawers do no work
+    const yBucket = getSnapshotYearBucket(snap);
+    if (rawRings && yBucket !== coastYearBucket) {
+      coastYearBucket = yBucket;
+      coasts = chartPrepareCoasts(rawRings, coastYearBucket);
+      coastVersion++;
+    }
     const sig = canvasSignature(snap);
     if (sig !== canvasSig) {
       canvasSig = sig;
@@ -1083,7 +1156,9 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
     try {
       const response = await fetch(landRingsUrl);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      coasts = chartPrepareCoasts(await response.json());
+      rawRings = await response.json();
+      coastYearBucket = getSnapshotYearBucket(snap);
+      coasts = chartPrepareCoasts(rawRings, coastYearBucket);
       coastVersion++; ringsState = 'ready'; requestDraw();
     } catch {
       ringsState = 'idle';

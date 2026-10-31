@@ -97,21 +97,83 @@ export const ENCOUNTER_ARCHETYPES = Object.freeze([
       return 0.35;
     },
   },
+  {
+    id: 'english-sea-dog',
+    title: 'English Race-Built Galleon / West Indiaman',
+    names: ['Golden Hind', 'Revenge', 'Swiftsure', 'Constant Warwick', 'Royal Sovereign'],
+    flag: 'Cross of St George / English Red Ensign',
+    colors: 'england',
+    battleColors: 'england',
+    rig: 'race-built English galleon',
+    hostile: false,
+    minYear: 1577,
+    speedKts: 6.8,
+    weight(lat, lon, year = 1550) {
+      if (year < 1577) return 0;
+      if (lat >= 10 && lat <= 55 && lon >= -85 && lon <= 2) return year >= 1625 ? 1.45 : 0.95;
+      return 0.35;
+    },
+  },
+  {
+    id: 'dutch-fluyt',
+    title: 'Dutch VOC / WIC Fluyt',
+    names: ['Duyfken', 'Halve Maen', 'Batavia', 'Zeven Provinciën', 'Gouden Leeuw'],
+    flag: 'Dutch Statenvertaling / Prinsenvlag',
+    colors: 'netherlands',
+    battleColors: 'netherlands',
+    rig: 'pear-hulled Dutch fluyt',
+    hostile: false,
+    minYear: 1595,
+    speedKts: 6.0,
+    weight(lat, lon, year = 1550) {
+      if (year < 1595) return 0;
+      if ((lat >= -36 && lat <= 56 && lon >= -76 && lon <= 25) || (lat >= -15 && lat <= 25 && lon >= 95 && lon <= 135)) {
+        return year >= 1620 ? 1.4 : 0.9;
+      }
+      return 0.4;
+    },
+  },
+  {
+    id: 'buccaneer-sloop',
+    title: 'Brethren of the Coast Buccaneer',
+    names: ['Satisfaction', 'La Trompeuse', 'Oxford', "Bachelor's Delight", 'Cinque Ports'],
+    flag: 'Brethren of the Coast / Bloody Flag',
+    colors: 'france',
+    battleColors: 'jolly-roger',
+    rig: 'raking Jamaica sloop-of-war',
+    hostile: true,
+    minYear: 1625,
+    disguisedChance: 0.5,
+    speedKts: 8.2,
+    weight(lat, lon, year = 1550) {
+      if (year < 1625) return 0;
+      if (lat >= 7 && lat <= 32 && lon >= -90 && lon <= -58) return year >= 1655 ? 2.1 : 1.35;
+      if (lat >= -15 && lat <= 25 && lon >= -110 && lon <= -75 && year >= 1668) return 1.4; // South Sea buccaneers
+      return 0.35;
+    },
+  },
 ]);
 
-export function pickEncounterArchetype(lat, lon, rand = Math.random) {
+export function pickEncounterArchetype(lat, lon, rand = Math.random, year = 1550) {
+  const simYear = Number.isFinite(Number(year)) ? Number(year) : 1550;
   let total = 0;
-  const weights = ENCOUNTER_ARCHETYPES.map((a) => {
-    const w = Math.max(0.05, a.weight(lat, lon));
+  const active = [];
+  const weights = [];
+  for (const a of ENCOUNTER_ARCHETYPES) {
+    if (a.minYear && simYear < a.minYear) continue;
+    const rawW = a.weight(lat, lon, simYear);
+    if (rawW <= 0) continue;
+    const w = Math.max(0.05, rawW);
+    active.push(a);
+    weights.push(w);
     total += w;
-    return w;
-  });
-  let r = rand() * total;
-  for (let i = 0; i < ENCOUNTER_ARCHETYPES.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return ENCOUNTER_ARCHETYPES[i];
   }
-  return ENCOUNTER_ARCHETYPES[0];
+  let r = rand() * total;
+  for (let i = 0; i < active.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return active[i];
+  }
+  return active[0] || ENCOUNTER_ARCHETYPES[0];
 }
 
 export function describeEncounterThroughSpyglass(enc, targetVessel = null) {
@@ -177,7 +239,8 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
   function spawnSailEncounter(voyage, boat, env = {}) {
     const { lat, lon } = voyage.true;
-    const arch = pickEncounterArchetype(lat, lon, rand);
+    const voyageYear = Number.isFinite(voyage?.dateMs) ? new Date(voyage.dateMs).getUTCFullYear() : 1550;
+    const arch = pickEncounterArchetype(lat, lon, rand, voyageYear);
     const shipName = arch.names[Math.floor(rand() * arch.names.length)];
     const relSide = rand() < 0.5 ? -1 : 1;
     const relDeg = relSide * (15 + rand() * 65);

@@ -27896,59 +27896,335 @@ const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   }),
 });
 
-// Gazetteer of actual c. 1550 colonial and Old World maritime ports.
-// Landfalls outside these historical ports default to uninhabited 1550 wilderness anchorages
-// rather than placing anachronistic Spanish colonial settlements (e.g. in Boston or uncolonized North America).
-const HISTORICAL_1550_PORTS = Object.freeze([
-  { id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238 },
-  { id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548 },
-  { id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476 },
-  { id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883 },
-  { id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352 },
-  { id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118 },
-  { id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131 },
-  { id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537 },
-  { id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211 },
-  { id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177 },
-  { id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569 },
-  { id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485 },
-  { id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908 },
-  { id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829 },
-  { id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954 },
-  { id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148 },
-  { id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511 },
-  { id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388 },
-  { id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851 },
-  { id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32 },
-  { id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893 },
-  { id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136 },
-  { id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396 },
-  { id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43 },
-  { id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251 },
-  { id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908 },
-  { id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218 },
-  { id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605 },
-  { id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828 },
-  { id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249 },
-  { id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867 },
+// Historical Colonial Eras (1550–1689) for era-by-era and year-by-year colony growth.
+const COLONIAL_ERAS = Object.freeze([
+  Object.freeze({
+    id: 'hapsburg-conquistador',
+    startYear: 1492,
+    endYear: 1579,
+    defaultYear: 1550,
+    label: '1550 · Hapsburg Conquistador & Flota Era',
+    shortLabel: '1550s Conquistador Era',
+    summary: 'Early Spanish Main ports, Casa de la Contratación silver fleets, and Portuguese Carreira da Índia trade.',
+    fortificationStyle: 'early-baluarte',
+  }),
+  Object.freeze({
+    id: 'iberian-union-antonelli',
+    startYear: 1580,
+    endYear: 1619,
+    defaultYear: 1598,
+    label: '1580–1619 · Iberian Union & Antonelli Fortresses',
+    shortLabel: '1580s–1610s Antonelli Era',
+    summary: 'Bautista Antonelli’s Caribbean star-fortress program, Drake’s raids, transfer from Nombre de Dios to Portobelo (1597), and first English/French/Dutch footholds.',
+    fortificationStyle: 'antonelli-trace',
+  }),
+  Object.freeze({
+    id: 'atlantic-planting',
+    startYear: 1620,
+    endYear: 1649,
+    defaultYear: 1635,
+    label: '1620–1649 · Seventeenth-Century Colonial Planting',
+    shortLabel: '1620s–1640s Colonial Planting',
+    summary: 'Founding of New Amsterdam (1624), Tortuga (1625), Barbados (1628), Boston (1630), Curaçao (1634), and Martinique (1635).',
+    fortificationStyle: 'bastion-curtain',
+  }),
+  Object.freeze({
+    id: 'buccaneer-commonwealth',
+    startYear: 1650,
+    endYear: 1674,
+    defaultYear: 1665,
+    label: '1650–1674 · Brethren of the Coast & Port Royal',
+    shortLabel: '1650s–1670s Buccaneer Era',
+    summary: 'Rise of Port Royal (1655), Cape Town (1652), Charles Town (1670), and Henry Morgan’s 1671 sack of Panamá Viejo.',
+    fortificationStyle: 'citadel-batteries',
+  }),
+  Object.freeze({
+    id: 'high-buccaneer-1680s',
+    startYear: 1675,
+    endYear: 1689,
+    defaultYear: 1680,
+    label: '1675–1689 · High Buccaneer Era & Vauban Citadels',
+    shortLabel: '1680s High Buccaneer Era',
+    summary: 'Peak of the 1680s Caribbean & Atlantic colonies, double-bastioned Vauban/Antonelli citadels, and full vice-regal harbor cities.',
+    fortificationStyle: 'vauban-double-citadel',
+  }),
 ]);
 
-function hasHistorical1550ColonialPort(latitude, longitude, regionId = null, maxDistDeg = 0.32) {
-  if (typeof regionId === 'string' && Object.hasOwn(SPANISH_MAIN_1550_REGIONS, regionId)) {
-    return true;
+function resolveColonialEra(yearOrId = 1550) {
+  if (typeof yearOrId === 'string') {
+    const byId = COLONIAL_ERAS.find((e) => e.id === yearOrId);
+    if (byId) return Object.freeze({ ...byId, year: byId.defaultYear });
+    const parsed = Number(yearOrId);
+    if (Number.isFinite(parsed)) return resolveColonialEra(parsed);
+  }
+  const y = Number.isFinite(Number(yearOrId)) ? Math.max(1492, Math.min(1689, Math.round(Number(yearOrId)))) : 1550;
+  for (const era of COLONIAL_ERAS) {
+    if (y >= era.startYear && y <= era.endYear) return Object.freeze({ ...era, year: y });
+  }
+  const fallback = y < COLONIAL_ERAS[0].startYear ? COLONIAL_ERAS[0] : COLONIAL_ERAS[COLONIAL_ERAS.length - 1];
+  return Object.freeze({ ...fallback, year: y });
+}
+
+// Gazetteer of c. 1550 colonial and Old World maritime ports.
+// Landfalls outside colonized ports at a given simulation year generate wilderness anchorages.
+const HISTORICAL_1550_PORTS = Object.freeze([
+  Object.freeze({ id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238, foundedYear: 1540, crown: 'spain', baseTier: 1 }),
+  Object.freeze({ id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548, foundedYear: 1533, fortProgramYear: 1586, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476, foundedYear: 1510, declinedYear: 1597, supersededBy: 'portobelo', crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883, foundedYear: 1496, fortProgramYear: 1540, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352, foundedYear: 1519, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118, foundedYear: 1521, fortProgramYear: 1539, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131, foundedYear: 1519, fortProgramYear: 1590, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537, foundedYear: 1540, fortProgramYear: 1656, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211, foundedYear: 1525, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177, foundedYear: 1515, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569, foundedYear: 1527, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485, foundedYear: 1519, sackedYear: 1671, rebuiltYear: 1673, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908, foundedYear: 1550, fortProgramYear: 1615, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829, foundedYear: 1515, fortProgramYear: 1638, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954, foundedYear: 1524, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148, foundedYear: 1537, fortProgramYear: 1640, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511, foundedYear: 1549, fortProgramYear: 1598, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388, foundedYear: 1532, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851, foundedYear: 1535, fortProgramYear: 1630, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32, foundedYear: 1264, fortProgramYear: 1596, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893, foundedYear: 1322, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, foundedYear: 1147, fortProgramYear: 1515, crown: 'portugal', baseTier: 4 }),
+  Object.freeze({ id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396, foundedYear: 1208, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43, foundedYear: 1478, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251, foundedYear: 1494, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908, foundedYear: 1424, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218, foundedYear: 1450, fortProgramYear: 1582, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605, foundedYear: 1462, fortProgramYear: 1587, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828, foundedYear: 1510, fortProgramYear: 1595, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249, foundedYear: 1511, fortProgramYear: 1641, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867, foundedYear: 1543, fortProgramYear: 1571, crown: 'portugal', baseTier: 2 }),
+]);
+
+// Complete chronological gazetteer of colonial ports from 1492 through the 1680s (1550–1689).
+const HISTORICAL_COLONIAL_PORTS = Object.freeze([
+  ...HISTORICAL_1550_PORTS,
+  // Late 16th-century foundations (1551–1599)
+  Object.freeze({ id: 'st-augustine', name: 'San Agustín de La Florida (St. Augustine)', latitude: 29.894, longitude: -81.312, foundedYear: 1565, fortProgramYear: 1672, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'rio-de-janeiro', name: 'São Sebastião do Rio de Janeiro', latitude: -22.906, longitude: -43.172, foundedYear: 1565, fortProgramYear: 1618, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'manila', name: 'Intramuros de Manila · Cavite', latitude: 14.589, longitude: 120.974, foundedYear: 1571, fortProgramYear: 1593, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'portobelo', name: 'San Felipe de Portobelo', latitude: 9.555, longitude: -79.654, foundedYear: 1597, fortProgramYear: 1597, crown: 'spain', baseTier: 3 }),
+  // Early 17th-century foundations (1600–1639)
+  Object.freeze({ id: 'jamestown', name: 'Jamestown · Virginia', latitude: 37.208, longitude: -76.778, foundedYear: 1607, fortProgramYear: 1665, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'quebec', name: 'Québec · Stadacona', latitude: 46.813, longitude: -71.202, foundedYear: 1608, fortProgramYear: 1660, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'bermuda', name: "St. George's · Bermuda", latitude: 32.381, longitude: -64.678, foundedYear: 1612, fortProgramYear: 1620, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'batavia', name: 'Batavia · Sunda Kelapa', latitude: -6.127, longitude: 106.812, foundedYear: 1619, fortProgramYear: 1627, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'plymouth-colony', name: 'Plymouth Colony · New England', latitude: 41.958, longitude: -70.662, foundedYear: 1620, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'new-amsterdam', name: 'New Amsterdam · New York Harbor', latitude: 40.703, longitude: -74.014, foundedYear: 1624, fortProgramYear: 1664, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'st-kitts', name: 'Basseterre · St. Christopher (St. Kitts)', latitude: 17.295, longitude: -62.725, foundedYear: 1624, fortProgramYear: 1666, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'tortuga', name: 'Cayona · Île de la Tortue (Tortuga)', latitude: 20.008, longitude: -72.792, foundedYear: 1625, fortProgramYear: 1640, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'bridgetown', name: 'Bridgetown · Carlisle Bay (Barbados)', latitude: 13.097, longitude: -59.618, foundedYear: 1628, fortProgramYear: 1656, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'boston', name: 'Boston · Massachusetts Bay', latitude: 42.360, longitude: -71.059, foundedYear: 1630, fortProgramYear: 1665, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'curacao', name: 'Willemstad · St. Anna Bay (Curaçao)', latitude: 12.108, longitude: -68.935, foundedYear: 1634, fortProgramYear: 1635, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'fort-royal-martinique', name: 'Fort-Royal · Martinique', latitude: 14.602, longitude: -61.068, foundedYear: 1635, fortProgramYear: 1672, crown: 'france', baseTier: 2 }),
+  // Mid-to-late 17th-century foundations up to the 1680s (1640–1689)
+  Object.freeze({ id: 'cape-town', name: 'Kaapstad · Table Bay (Cape Town)', latitude: -33.918, longitude: 18.423, foundedYear: 1652, fortProgramYear: 1666, crown: 'netherlands', baseTier: 3 }),
+  Object.freeze({ id: 'port-royal', name: 'Port Royal · Cagway Spit (Jamaica)', latitude: 17.937, longitude: -76.841, foundedYear: 1655, fortProgramYear: 1662, crown: 'england', baseTier: 3 }),
+  Object.freeze({ id: 'nassau', name: 'Charles Town · New Providence (Nassau)', latitude: 25.078, longitude: -77.343, foundedYear: 1666, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'cap-francois', name: 'Cap-François · Saint-Domingue', latitude: 19.759, longitude: -72.201, foundedYear: 1670, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'charleston', name: 'Charles Town · Carolina (Charleston)', latitude: 32.776, longitude: -79.928, foundedYear: 1670, fortProgramYear: 1680, crown: 'england', baseTier: 2 }),
+  Object.freeze({ id: 'philadelphia', name: 'Philadelphia · Delaware River', latitude: 39.947, longitude: -75.141, foundedYear: 1682, crown: 'england', baseTier: 2 }),
+]);
+
+function findHistoricalColonialPort(latitude, longitude, regionId = null, year = 1550, maxDistDeg = 0.32) {
+  const simYear = Number.isFinite(Number(year)) ? Math.round(Number(year)) : 1550;
+  if (typeof regionId === 'string') {
+    const byId = HISTORICAL_COLONIAL_PORTS.find((p) => p.id === regionId);
+    if (byId) return simYear >= byId.foundedYear ? byId : null;
   }
   const lat = Number(latitude);
   const lon = Number(longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const cosLat = Math.max(0.15, Math.cos(lat * COASTAL_DEG_TO_RAD));
-  for (const port of HISTORICAL_1550_PORTS) {
+  let nearestAnyYear = null;
+  let nearestAnyDist = maxDistDeg;
+  for (const port of HISTORICAL_COLONIAL_PORTS) {
     const dLat = lat - port.latitude;
     const dLon = (lon - port.longitude) * cosLat;
-    if (Math.hypot(dLat, dLon) <= maxDistDeg) {
-      return true;
+    const dist = Math.hypot(dLat, dLon);
+    if (dist <= nearestAnyDist) {
+      nearestAnyDist = dist;
+      nearestAnyYear = port;
     }
   }
-  return false;
+  if (!nearestAnyYear) return null;
+  return simYear >= nearestAnyYear.foundedYear ? nearestAnyYear : null;
+}
+
+function hasHistorical1550ColonialPort(latitude, longitude, regionId = null, maxDistDeg = 0.32, year = 1550) {
+  const simYear = Number.isFinite(Number(year)) ? Math.round(Number(year)) : 1550;
+  if (typeof regionId === 'string' && Object.hasOwn(SPANISH_MAIN_1550_REGIONS, regionId) && simYear >= 1550) {
+    return true;
+  }
+  return Boolean(findHistoricalColonialPort(latitude, longitude, regionId, simYear, maxDistDeg));
+}
+
+// Compute year-by-year and era-by-era colony growth profile (1550–1689).
+function computeColonyGrowthProfile(specOrPort = {}, year = 1550) {
+  const rawYear = Number(year ?? specOrPort?.year ?? specOrPort?.era ?? 1550);
+  const simYear = Number.isFinite(rawYear) && rawYear >= 1490 && rawYear <= 1850
+    ? Math.max(1492, Math.min(1689, Math.round(rawYear)))
+    : 1550;
+  const era = resolveColonialEra(simYear);
+
+  const lat = Number(specOrPort?.latitude);
+  const lon = Number(specOrPort?.longitude);
+  const regionId = typeof specOrPort === 'string' ? specOrPort : (specOrPort?.id ?? null);
+  const matchedAnyYear =
+    (typeof regionId === 'string' && HISTORICAL_COLONIAL_PORTS.find((p) => p.id === regionId)) ||
+    (Number.isFinite(lat) && Number.isFinite(lon)
+      ? findHistoricalColonialPort(lat, lon, regionId, 1689, 0.32)
+      : null);
+
+  const explicitNoPort =
+    specOrPort?.hasColonialPort === false ||
+    specOrPort?.settlementKind === 'wilderness-anchorage' ||
+    specOrPort?.portType === 'wilderness-anchorage' ||
+    specOrPort?.portType === 'none';
+
+  const foundedYear = Number.isFinite(specOrPort?.foundedYear)
+    ? Number(specOrPort.foundedYear)
+    : matchedAnyYear?.foundedYear ?? (specOrPort?.hasColonialPort === true ? 1535 : null);
+
+  const colonized = !explicitNoPort && foundedYear !== null && simYear >= foundedYear;
+  if (!colonized) {
+    return Object.freeze({
+      year: simYear,
+      eraId: era.id,
+      eraLabel: era.label,
+      eraShortLabel: era.shortLabel,
+      colonized: false,
+      portId: matchedAnyYear?.id ?? regionId ?? null,
+      portName: matchedAnyYear?.name ?? specOrPort?.name ?? null,
+      foundedYear,
+      colonyAge: 0,
+      crown: matchedAnyYear?.crown ?? null,
+      stage: 'wilderness',
+      growthFactor: 0,
+      fortificationTier: 0,
+      pierCount: 0,
+      targetBuildingCount: 0,
+      expansionTier: 0,
+      garrisonScale: 0,
+      historicalNote: foundedYear
+        ? `Uncolonized wilderness in ${simYear} (founded in ${foundedYear})`
+        : `Uncolonized wilderness anchorage (${simYear})`,
+    });
+  }
+
+  const colonyAge = Math.max(0, simYear - foundedYear);
+  const baseTier = matchedAnyYear?.baseTier ?? 2;
+  const fortYear = matchedAnyYear?.fortProgramYear ?? (foundedYear + 35);
+  const declinedYear = matchedAnyYear?.declinedYear ?? null;
+  const sackedYear = matchedAnyYear?.sackedYear ?? null;
+  const rebuiltYear = matchedAnyYear?.rebuiltYear ?? null;
+
+  // Continuous year-by-year logistic + linear urban growth from founding through 1689
+  let ageFactor = Math.min(1.0, 0.28 + 0.72 * (1 - Math.exp(-colonyAge / 28))) + Math.min(0.65, Math.max(0, simYear - 1550) * 0.0048);
+  let historicalNote = `Founded ${foundedYear} (${colonyAge} yrs old in ${simYear})`;
+
+  // Bautista Antonelli / Vauban fortification surge once `simYear >= fortYear`
+  if (simYear >= fortYear) {
+    const fortMaturity = Math.min(0.25, (simYear - fortYear) * 0.008);
+    ageFactor += 0.12 + fortMaturity;
+  }
+
+  // Historical decline of Nombre de Dios after Francis Drake's 1596 burning and the 1597 transfer to Portobelo
+  if (declinedYear && simYear >= declinedYear) {
+    ageFactor = Math.max(0.32, ageFactor * 0.45);
+    historicalNote = `Superseded after ${declinedYear} (${matchedAnyYear?.supersededBy || 'Portobelo'}); decayed timber outpost`;
+  }
+
+  // Henry Morgan's 1671 sack of Panamá Viejo and 1673 Casco Viejo fortified rebuild
+  if (sackedYear && simYear >= sackedYear && (!rebuiltYear || simYear < rebuiltYear)) {
+    ageFactor = Math.max(0.42, ageFactor * 0.58);
+    historicalNote = `Sacked by Henry Morgan (${sackedYear}); rebuilding fortified Casco Viejo`;
+  } else if (rebuiltYear && simYear >= rebuiltYear) {
+    ageFactor += 0.18;
+    historicalNote = `Rebuilt as walled Casco Viejo citadel (${rebuiltYear})`;
+  }
+
+  // Port Royal buccaneer boom (1655–1689: fastest-growing English port in the New World)
+  if (matchedAnyYear?.id === 'port-royal' && simYear >= 1655) {
+    ageFactor = Math.min(1.85, 0.55 + Math.min(1.25, (simYear - 1655) * 0.038));
+    historicalNote = simYear >= 1665
+      ? `Buccaneer metropolis & 5-fortress harbour on Cagway Spit (${simYear})`
+      : `English Cagway Point fort & buccaneer anchorage (${simYear})`;
+  }
+
+  const growthFactor = Number(Math.max(0.25, Math.min(1.85, ageFactor)).toFixed(3));
+
+  // Determine settlement stage & fortification tier
+  let stage = 'fortified-port';
+  let fortificationTier = 2;
+  let expansionTier = 0;
+
+  if (declinedYear && simYear >= declinedYear) {
+    stage = 'outpost';
+    fortificationTier = 1;
+    expansionTier = 0;
+  } else if (colonyAge < 14 && baseTier < 4 && !(matchedAnyYear?.id === 'port-royal' && simYear >= 1668)) {
+    stage = 'outpost';
+    fortificationTier = 1;
+    expansionTier = 0;
+  } else if (colonyAge < 32 && simYear < fortYear && (baseTier < 3 || foundedYear > 1550) && !(matchedAnyYear?.id === 'port-royal' && simYear >= 1668)) {
+    stage = 'settlement';
+    fortificationTier = 2;
+    expansionTier = 0;
+  } else if (simYear >= 1645 && (colonyAge >= 45 || (baseTier >= 3 && simYear >= fortYear) || growthFactor >= 1.22)) {
+    stage = 'citadel-metropolis';
+    fortificationTier = 4;
+    // Progressive 17th-century expansion tiers (1..8 extra urban & harbour battery structures from 1565 to 1685)
+    expansionTier = Math.max(1, Math.min(8, Math.floor((simYear - 1555) / 16) + (baseTier >= 3 ? 1 : 0)));
+  } else {
+    stage = 'fortified-port';
+    fortificationTier = simYear >= fortYear ? 3 : 2;
+    expansionTier = simYear > 1560 ? Math.max(1, Math.min(4, Math.floor((simYear - 1555) / 18) + (baseTier >= 3 ? 1 : 0))) : 0;
+  }
+
+  const pierCount =
+    matchedAnyYear?.id === 'lisbon'
+      ? 3 + (simYear >= 1620 ? 1 : 0)
+      : stage === 'outpost'
+        ? 1
+        : stage === 'citadel-metropolis' && simYear >= 1610
+          ? 2
+          : 1;
+
+  const targetBuildingCount =
+    stage === 'outpost'
+      ? 8 + Math.min(3, Math.floor(colonyAge / 4))
+      : stage === 'settlement'
+        ? 13 + Math.min(4, Math.floor((colonyAge - 14) / 5))
+        : 19 + expansionTier;
+
+  const garrisonScale = Number((0.45 + fortificationTier * 0.25 + expansionTier * 0.08).toFixed(2));
+
+  return Object.freeze({
+    year: simYear,
+    eraId: era.id,
+    eraLabel: era.label,
+    eraShortLabel: era.shortLabel,
+    colonized: true,
+    portId: matchedAnyYear?.id ?? regionId ?? null,
+    portName: matchedAnyYear?.name ?? specOrPort?.name ?? null,
+    foundedYear,
+    colonyAge,
+    crown: matchedAnyYear?.crown ?? 'spain',
+    stage,
+    growthFactor,
+    fortificationTier,
+    pierCount,
+    targetBuildingCount,
+    expansionTier,
+    garrisonScale,
+    historicalNote,
+  });
 }
 
 const PORT_PREFABS = Object.freeze({
@@ -28673,7 +28949,19 @@ async function fetchPublicClimateProfile(
 function resolveGlobalCoastalRegion(spec = 'cartagena') {
   if (typeof spec === 'string') {
     const preset = SPANISH_MAIN_1550_REGIONS[spec];
-    if (!preset) throw new RangeError(`Unknown Spanish Main coastal region: ${spec}`);
+    if (!preset) {
+      const colPort = HISTORICAL_COLONIAL_PORTS.find((p) => p.id === spec);
+      if (colPort) {
+        return resolveGlobalCoastalRegion({
+          id: colPort.id,
+          name: colPort.name,
+          latitude: colPort.latitude,
+          longitude: colPort.longitude,
+          year: Math.max(1550, colPort.foundedYear),
+        });
+      }
+      throw new RangeError(`Unknown Spanish Main coastal region: ${spec}`);
+    }
     return preset;
   }
   if (!spec || typeof spec !== 'object') {
@@ -28686,17 +28974,30 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
       (Math.abs(Number(spec.latitude) - preset.latitude) < 0.05 &&
         Math.abs(Number(spec.longitude) - preset.longitude) < 0.05)
     ) {
-      return Object.freeze({ ...preset, ...spec });
+      const rawYr = Number(spec.year ?? spec.era);
+      const yr = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
+      const merged = { ...preset, ...spec, era: spec.era ?? yr };
+      if (yr !== 1550 || spec.year !== undefined || spec.colonyGrowth !== undefined) {
+        merged.year = yr;
+        merged.colonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(merged, yr);
+      }
+      return Object.freeze(merged);
     }
   }
-  const latitude = Number(spec.latitude);
-  const longitude = Number(spec.longitude);
+  const colPortById =
+    typeof spec.id === 'string' && (spec.latitude === undefined || spec.longitude === undefined)
+      ? HISTORICAL_COLONIAL_PORTS.find((p) => p.id === spec.id) ?? null
+      : null;
+  const latitude = Number(spec.latitude ?? colPortById?.latitude);
+  const longitude = Number(spec.longitude ?? colPortById?.longitude);
   if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) {
     throw new RangeError('Coastal region latitude must be finite within [-85, 85]');
   }
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
     throw new RangeError('Coastal region longitude must be finite within [-180, 180]');
   }
+  const rawYr = Number(spec.year ?? spec.era);
+  const simYear = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
   const seed = (spec.vegetationSeed ?? coastalHashCoords(latitude, longitude)) >>> 0;
   const rand = coastalMulberry32(seed);
   const absLat = Math.abs(latitude);
@@ -28718,9 +29019,10 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
     spec.hasColonialPort === true ||
     spec.settlementKind === 'colonial-port' ||
     (!explicitNoPort && Boolean(spec.portType) && portTypes.includes(spec.portType));
+  const matchedHistoricalPort = findHistoricalColonialPort(latitude, longitude, spec.id, simYear, 0.32);
   const hasColonialPort = explicitNoPort
     ? false
-    : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id);
+    : explicitColonialPort || hasHistorical1550ColonialPort(latitude, longitude, spec.id, 0.32, simYear);
   const settlementKind = hasColonialPort ? 'colonial-port' : 'wilderness-anchorage';
   const portType = spec.portType ?? (hasColonialPort ? portTypes[idx] : 'wilderness-anchorage');
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
@@ -28734,12 +29036,18 @@ function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const biomeSize = spec.biomeSize ?? (size - 1);
   const albedoSize = spec.albedoSize ?? (size - 1);
   const span = spec.span ?? 8192;
-  const id = spec.id ?? `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`;
-  const name = spec.name ?? `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`;
+  const id = spec.id ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.id : `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`);
+  const name = spec.name ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.name : `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`);
+  const colonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(
+    { ...spec, id, name, latitude, longitude, hasColonialPort, settlementKind },
+    simYear
+  );
   return Object.freeze({
     id,
     name,
-    era: spec.era ?? 1550,
+    era: spec.era ?? simYear,
+    ...(spec.year !== undefined || simYear !== 1550 ? { year: simYear } : {}),
+    colonyGrowth,
     regionGroup: spec.regionGroup ?? (
       latitude >= 7 && latitude <= 26 && longitude >= -90 && longitude <= -59
         ? 'Spanish Main'
@@ -29966,6 +30274,10 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     }
   }
 
+  const colonyGrowth =
+    region.colonyGrowth ??
+    computeColonyGrowthProfile(region, region.year ?? region.era ?? 1550);
+
   if (allowColonialPort && hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
     const hasPreassigned = fps.some((f) => Boolean(f.prefabId));
@@ -30009,7 +30321,12 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     let arsenalAssigned = false;
     let lonjaAssigned = false;
     let corralAssigned = false;
-    const maxOrthoBuildings = 32;
+    const maxOrthoBuildings =
+      colonyGrowth.stage === 'outpost'
+        ? Math.max(6, Math.min(10, fps.length))
+        : colonyGrowth.stage === 'settlement'
+          ? Math.max(10, Math.min(16, fps.length))
+          : 32;
     for (let i = 0; i < fps.length && i < maxOrthoBuildings; i++) {
       const fp = fps[i];
       const aspect = fp.length / Math.max(1, fp.width);
@@ -30020,7 +30337,10 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
 
       if (!prefabId || (fps.length > 4 && prefabId === 'colonial_town_block')) {
         if (!fp.prefabId && i === bastionIdx) {
-          prefabId = rClass === 3 && fp.width >= 26 ? 'bastion_trace_fortress' : 'stone_sea_bastion';
+          prefabId =
+            (rClass === 3 && fp.width >= 26) || colonyGrowth.fortificationTier >= 3
+              ? 'bastion_trace_fortress'
+              : 'stone_sea_bastion';
         } else if (!fp.prefabId && i === casaIdx) {
           prefabId = 'casa_de_contratacion';
         } else if (!fp.prefabId && i === chapelIdx) {
@@ -30100,6 +30420,27 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
         roofPitch: truePitch,
         waterfront: prefab.waterfront,
         fromOrthophotoFootprint: true,
+      });
+    }
+    // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
+    if (colonyGrowth.expansionTier >= 1) {
+      addPrefab('bastion_trace_fortress', -138, 16, 18, 4.4, {
+        label: 'Castillo de San Felipe · Antonelli Star Bastion',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 2) {
+      addPrefab('colonial_town_block', 68, 92, 0, 3.8, {
+        label: 'Barrio de los Mercaderes (17th-Century Expansion)',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 3) {
+      addPrefab('curtain_wall_and_gate', 48, 128, 0, 4.2, {
+        label: 'Muralla Real & Puerta de Tierra',
+      });
+    }
+    if (colonyGrowth.expansionTier >= 4) {
+      addPrefab('stone_sea_bastion', -154, -10, 22, 4.2, {
+        label: 'Batería de la Media Luna (Harbor Crossfire Battery)',
       });
     }
   } else if (allowColonialPort && isLisbonRoyalDock) {
@@ -30189,35 +30530,140 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     addPrefab('stone_arch_bridge', -116, 32, 16, 2.2, {
       label: 'Ponte de Alcântara (Stone Cutwater Bridge)',
     });
+    if (colonyGrowth.year >= 1585) {
+      addPrefab('bastion_trace_fortress', -168, 18, 14, 4.4, {
+        label: 'Forte de São Julião da Barra (Philippine / Terzi Citadel)',
+      });
+      addPrefab('colonial_town_block', 64, 118, 0, 4.2, {
+        label: 'Bairro Alto (17th-Century Expansion)',
+      });
+    }
+    if (colonyGrowth.year >= 1640) {
+      addPrefab('stone_sea_bastion', 112, -8, -14, 3.6, {
+        label: 'Forte de Santa Apolónia (Restoration Tagus Battery)',
+      });
+    }
   } else if (allowColonialPort) {
-    // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
-    addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
-    // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
-    addPrefab('careening_shed', -75, 16, 12, 2.2);
-    addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
-    // 4. Sea bastion (Castillo) & Star-Bastioned Fort / Watchtower guarding the harbor entrance headlands
-    addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
-    addPrefab('bastion_trace_fortress', -112, 14, 14, 4.2);
-    addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
-    // 5. Casa de la Contratación (Customhouse) & Open Market Loggia (Lonja) facing the waterfront plaza
-    addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
-    addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
-    // 6. Almacén Real (Royal Warehouse) & Multi-Gable Reales Atarazanas Arsenal beside the customhouse
-    addPrefab('royal_warehouse', 46, 48, 0, 3.2);
-    addPrefab('royal_atarazanas_arsenal', 78, 36, 0, 3.0);
-    // 7. Mission Chapel & Bell Tower on the upper plaza
-    addPrefab('mission_chapel', -38, 82, 90, 3.8);
-    // 8. Bay-Iterated Courtyard Cloisters, L/U-Wing Solares, Single-Nave Row Houses & Walled Corral
-    addPrefab('colonial_town_block', 28, 88, 0, 3.8);
-    addPrefab('colonial_town_block', -44, 48, 0, 3.2);
-    addPrefab('modular_patio_cloister', -4, 88, 0, 3.8);
-    addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
-    addPrefab('single_nave_solar', -74, 52, 0, 3.2);
-    addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
-    // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge & Frontier Palm-Thatch Bohíos
-    addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
-    addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
-    addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+    if (colonyGrowth.stage === 'outpost') {
+      // Frontier Colonial Outpost (< 14 yrs old, or post-1597 decayed Nombre de Dios):
+      // Timber landing, careening shed, boatyard, coastal watchtower, single-nave hall, corral, and palm-thatch bohíos.
+      addPrefab('careening_shed', -54, 14, 10, 2.1);
+      addPrefab('astillero_and_moored_hull', -32, 11, 5, 1.8);
+      addPrefab('torreon_atalaya_farol', 82, -4, 0, 4.2, {
+        label: 'Atalaya de Madera y Piedra (Frontier Watchtower)',
+      });
+      addPrefab('single_nave_solar', -12, 38, 0, 2.9, {
+        label: 'Casa del Gobernador & Almacén (Frontier Hall)',
+      });
+      addPrefab('walled_mule_corral', 24, 58, 0, 3.2);
+      addPrefab('thatched_bohio_palafito', -68, 22, -10, 2.0);
+      addPrefab('thatched_bohio_palafito', 48, 26, 12, 2.1);
+      if (colonyGrowth.colonyAge >= 4) {
+        addPrefab('mission_chapel', -32, 66, 90, 3.4, {
+          label: 'Ermita de la Misión (Frontier Parish Chapel)',
+        });
+      }
+      if (colonyGrowth.colonyAge >= 8) {
+        addPrefab('open_lonja_loggia', 16, 26, 90, 2.6);
+        addPrefab('single_nave_solar', -48, 44, 0, 3.0);
+      }
+    } else if (colonyGrowth.stage === 'settlement') {
+      // Growing Colonial Settlement (14..31 yrs old):
+      // Stone quay, sea bastion, customhouse, lonja, royal warehouse, parish church, and early town blocks.
+      addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
+      addPrefab('careening_shed', -75, 16, 12, 2.2);
+      addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
+      addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
+      addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
+      addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
+      addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
+      addPrefab('royal_warehouse', 46, 48, 0, 3.2);
+      addPrefab('mission_chapel', -38, 82, 90, 3.8);
+      addPrefab('colonial_town_block', 28, 88, 0, 3.8);
+      addPrefab('single_nave_solar', -74, 52, 0, 3.2);
+      addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
+      addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+      if (colonyGrowth.colonyAge >= 22) {
+        addPrefab('colonial_town_block', -44, 48, 0, 3.2);
+        addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
+      }
+    } else {
+      // Mature Fortified Port & 17th-Century Citadel Metropolis (1550 baseline + progressive 1565–1689 expansions):
+      // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
+      addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
+      // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
+      addPrefab('careening_shed', -75, 16, 12, 2.2);
+      addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
+      // 4. Sea bastion (Castillo) & Star-Bastioned Fort / Watchtower guarding the harbor entrance headlands
+      addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
+      addPrefab('bastion_trace_fortress', -112, 14, 14, 4.2);
+      addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
+      // 5. Casa de la Contratación (Customhouse) & Open Market Loggia (Lonja) facing the waterfront plaza
+      addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
+      addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
+      // 6. Almacén Real (Royal Warehouse) & Multi-Gable Reales Atarazanas Arsenal beside the customhouse
+      addPrefab('royal_warehouse', 46, 48, 0, 3.2);
+      addPrefab('royal_atarazanas_arsenal', 78, 36, 0, 3.0);
+      // 7. Mission Chapel & Bell Tower on the upper plaza
+      addPrefab('mission_chapel', -38, 82, 90, 3.8);
+      // 8. Bay-Iterated Courtyard Cloisters, L/U-Wing Solares, Single-Nave Row Houses & Walled Corral
+      addPrefab('colonial_town_block', 28, 88, 0, 3.8);
+      addPrefab('colonial_town_block', -44, 48, 0, 3.2);
+      addPrefab('modular_patio_cloister', -4, 88, 0, 3.8);
+      addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
+      addPrefab('single_nave_solar', -74, 52, 0, 3.2);
+      addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
+      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge & Frontier Palm-Thatch Bohíos
+      addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
+      addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
+      addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+
+      // 10. Progressive year-by-year & era-by-era expansion (1565–1689: Antonelli, Colonial Planting & High Buccaneer Eras)
+      if (colonyGrowth.expansionTier >= 1) {
+        addPrefab('colonial_town_block', 64, 122, 0, 4.1, {
+          label: 'Barrio de los Mercaderes (Upper Town Quarter)',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 2) {
+        addPrefab('stone_sea_bastion', -144, -6, 18, 4.4, {
+          label: 'Batería de San Felipe (Harbor Crossfire Bastion)',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 3) {
+        const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
+        if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
+          addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
+            label: 'Muelle de Mercaderes (Merchant Fleet Wharf)',
+          });
+        }
+        addPrefab('royal_warehouse', -82, 86, 0, 3.6, {
+          label: 'Almacén de Flota y Azúcar (Fleet Storehouse)',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 4) {
+        addPrefab('modular_patio_cloister', -48, 148, 0, 4.4, {
+          label: 'Convento y Hospital de San Juan de Dios',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 5) {
+        addPrefab('curtain_wall_and_gate', 58, 152, 0, 4.5, {
+          label: 'Muralla Abaluartada y Puerta de Tierra',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 6) {
+        addPrefab('bastion_trace_fortress', 148, 46, -22, 5.0, {
+          label: 'Castillo Grande · Vauban Star Citadel',
+        });
+      }
+      if (colonyGrowth.expansionTier >= 7) {
+        addPrefab('colonial_town_block', -8, 152, 0, 4.4, {
+          label: 'Plaza de Armas & Intendencia Quarter (1680s)',
+        });
+        addPrefab('l_wing_u_wing_solar', 98, 88, 90, 3.9, {
+          label: 'Palacio del Cabildo y Audiencia',
+        });
+      }
+    }
   }
 
   for (let idx = 0; idx < instances.length; idx++) {
@@ -30241,15 +30687,33 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
   const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 100 : 108)) % 360 + 360) % 360;
 
+  const clearRadius = !allowColonialPort
+    ? 0
+    : isLisbonRoyalDock
+      ? 185
+      : colonyGrowth.stage === 'outpost'
+        ? 96
+        : colonyGrowth.stage === 'settlement'
+          ? 128
+          : colonyGrowth.stage === 'citadel-metropolis' && colonyGrowth.year > 1560
+            ? 172
+            : 155;
+
   return {
     regionId: region.id,
     portType: region.portType,
     settlementKind: region.settlementKind ?? (allowColonialPort ? 'colonial-port' : 'wilderness-anchorage'),
     hasColonialPort: allowColonialPort,
     era: region.era,
+    year: colonyGrowth.year,
+    stage: allowColonialPort ? colonyGrowth.stage : 'wilderness',
+    fortificationTier: allowColonialPort ? colonyGrowth.fortificationTier : 0,
+    foundedYear: colonyGrowth.foundedYear,
+    colonyAge: allowColonialPort ? colonyGrowth.colonyAge : 0,
+    colonyGrowth,
     shoreBearing: region.shoreBearing ?? 112,
     center: { x: center.x, z: center.z, shoreAlong: bestShoreAlong, shoreInland: bestShoreInland },
-    clearRadius: allowColonialPort ? (isLisbonRoyalDock ? 185 : 155) : 0,
+    clearRadius,
     hasOrthophotoFootprints: hasOrthoFootprints,
     berth: {
       x: berthPos.x,
@@ -33812,8 +34276,11 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
     coordLabel: cellInfo.coordLabel,
     span: region.span,
     metersPerPixel: scaleInfo.metersPerPixel,
+    year: region.year ?? 1550,
+    eraId: region.eraId ?? 'conquistador-1550',
     settlementKind: region.settlementKind,
     hasColonialPort: Boolean(region.hasColonialPort),
+    colonyStage: region.colonyGrowth?.stage || (region.hasColonialPort ? 'settlement' : 'wilderness'),
     restoredEstuaryPct,
     reclaimedCellsCarved,
     palmCount: upgradedPack.vegetation?.stats?.palmCount ?? 0,
@@ -33920,6 +34387,11 @@ function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophoto1550 =
     ...meta,
     span: built.region.span,
     metersPerPixel: built.territory1550.metersPerPixel,
+    year: built.region.year ?? 1550,
+    eraId: built.region.eraId ?? 'conquistador-1550',
+    settlementKind: built.region.settlementKind,
+    hasColonialPort: Boolean(built.region.hasColonialPort),
+    colonyStage: built.region.colonyGrowth?.stage || (built.region.hasColonialPort ? 'settlement' : 'wilderness'),
     footprints: precomputedFootprints?.footprints || built.territory1550.footprints,
   };
   return built;
@@ -38267,15 +38739,29 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const rawLon=Number.isFinite(explicitObj?.longitude)?Number(explicitObj.longitude):search.has('lon')?Number(search.get('lon')):search.has('longitude')?Number(search.get('longitude')):NaN;
   const hasExplicitLatLon=(Number.isFinite(explicitObj?.latitude)&&Number.isFinite(explicitObj?.longitude))||(search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon'))));
   const hasCustomCoords=hasExplicitLatLon||(Number.isFinite(rawLat)&&Number.isFinite(rawLon)&&(Math.abs(rawLat-ISLAND.latitude)>0.12||Math.abs(rawLon-ISLAND.longitude)>0.12));
+  const rawYearParam=explicitObj?.year??explicitObj?.era??search.get('year')??(search.get('era')&&search.get('era')!=='2026'?search.get('era'):null);
+  let astroYear=null;
+  if(rawYearParam==null&&search.has('astroDate')){
+    const parsedAstroYear=new Date(search.get('astroDate')).getUTCFullYear();
+    if(Number.isFinite(parsedAstroYear)&&parsedAstroYear>=1492&&parsedAstroYear<=1689)astroYear=parsedAstroYear;
+  }
   const coordPresetMatch=hasCustomCoords
     ?Object.values(SPANISH_MAIN_1550_REGIONS).find(r=>Math.abs(rawLat-r.latitude)<0.05&&Math.abs(rawLon-r.longitude)<0.05)??null
     :null;
   const defaultLisbonDeparture=!explicitId&&!explicitObj&&!search.has('region')&&!hasCustomCoords&&!search.has('landfall')&&search.get('ocean')!=='1';
   const regionParam=explicitId||search.get('region')||(coordPresetMatch?coordPresetMatch.id:null)||(defaultLisbonDeparture?'lisbon':null);
-  const presetMatch=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
-  const isKnownSpanishMain=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
+  const spanishMainPreset=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
+  const colonialPortPreset=!spanishMainPreset&&regionParam&&regionParam!=='saba'?HISTORICAL_COLONIAL_PORTS.find(p=>p.id===regionParam)??null:null;
+  const presetMatch=spanishMainPreset||colonialPortPreset;
+  const resolvedYear=rawYearParam!=null
+    ?resolveColonialEra(rawYearParam).year
+    :astroYear!=null
+      ?resolveColonialEra(astroYear).year
+      :(colonialPortPreset?.foundedYear>1550?Math.min(1685,colonialPortPreset.foundedYear+15):1550);
+  const isKnownSpanishMain=Boolean(spanishMainPreset&&(!hasCustomCoords||(Math.abs(rawLat-spanishMainPreset.latitude)<0.05&&Math.abs(rawLon-spanishMainPreset.longitude)<0.05)));
+  const isKnownColonialPreset=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
   const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05);
-  const useProcedural=isKnownSpanishMain||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
+  const useProcedural=isKnownColonialPreset||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
   const targetLat=presetMatch?presetMatch.latitude:(Number.isFinite(rawLat)?rawLat:ISLAND.latitude);
   const targetLon=presetMatch?presetMatch.longitude:(Number.isFinite(rawLon)?rawLon:ISLAND.longitude);
   let activeClimate=estimateLocalClimateProfile(targetLat,targetLon,presetMatch);
@@ -38365,14 +38851,15 @@ async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeV
   const placedX=Number.isFinite(placement?.x)?Number(placement.x):Number.isFinite(explicitObj?.x)?Number(explicitObj.x):undefined;
   const placedZ=Number.isFinite(placement?.z)?Number(placement.z):Number.isFinite(explicitObj?.z)?Number(explicitObj.z):undefined;
   const hasPlacementOverride=placedX!==undefined||placedZ!==undefined;
-  const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride
+  const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride&&resolvedYear===1550
     ?regionParam
     :{
-      ...(isKnownSpanishMain?SPANISH_MAIN_1550_REGIONS[regionParam]:{}),
+      ...(presetMatch||{}),
       id:regionParam||undefined,
-      name:explicitObj?.name||search.get('regionName')||undefined,
+      name:explicitObj?.name||search.get('regionName')||presetMatch?.name||undefined,
       latitude:targetLat,
       longitude:targetLon,
+      year:resolvedYear,
       ...(Number.isFinite(explicitObj?.shoreBearing)?{shoreBearing:Number(explicitObj.shoreBearing)}:{}),
       ...(placedX!==undefined?{x:placedX}:{}),
       ...(placedZ!==undefined?{z:placedZ}:{}),
@@ -39595,12 +40082,25 @@ function landfallStageURL(href,stage,weather='clear'){
   return url;
 }
 
-function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',weather='clear'){
-  const region=resolveGlobalCoastalRegion(regionSpec);
+function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',weather='clear',year=undefined){
   const url=landfallStageURL(href,stage,weather);
+  const effectiveYear=year!==undefined
+    ?year
+    :(typeof regionSpec==='object'&&regionSpec?.year!==undefined)
+      ?regionSpec.year
+      :(url.searchParams.has('year')?Number(url.searchParams.get('year')):undefined);
+  const specWithYear=effectiveYear!==undefined
+    ?(typeof regionSpec==='string'?{id:regionSpec,year:effectiveYear}:{...regionSpec,year:effectiveYear})
+    :regionSpec;
+  const region=resolveGlobalCoastalRegion(specWithYear);
   url.searchParams.set('region',region.id);
   url.searchParams.set('lat',String(region.latitude));
   url.searchParams.set('lon',String(region.longitude));
+  if(effectiveYear!==undefined&&Number(effectiveYear)!==1550){
+    url.searchParams.set('year',String(region.year));
+  }else if(effectiveYear===1550){
+    url.searchParams.delete('year');
+  }
   const dockTurn=region.id==='lisbon'||region.portType==='royal-arsenal-dock'?100:108;
   const heading=stage==='dock'?(((region.shoreBearing??112)-dockTurn)%360+360)%360:(region.shoreBearing??112);
   url.searchParams.set('boatHeading',String(heading));
@@ -39609,24 +40109,45 @@ function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',weather
   return url;
 }
 
+const POST_1550_FEATURED_PORTS = Object.freeze([
+  'st-augustine',
+  'portobelo',
+  'jamestown',
+  'new-amsterdam',
+  'tortuga',
+  'boston',
+  'willemstad',
+  'port-royal',
+  'nassau',
+  'charleston',
+]);
+
 function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=null,onUpgradeApplied=null,onWeather,onOpen,getPosition}){
   const button=document.createElement('button');button.textContent='Landfall';button.id='landfall-button';
   button.setAttribute('aria-controls','landfall-panel');button.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='landfall-panel';panel.hidden=true;
   panel.setAttribute('aria-labelledby','landfall-title');
   const isSaba=!region||region.id==='saba';
+  const simYear=Number.isFinite(region?.year)?region.year:1550;
+  const eraInfo=resolveColonialEra(simYear);
+  const growth=region?.colonyGrowth||(isSaba?null:computeColonyGrowthProfile(region,simYear));
   const isWilderness=!isSaba&&region.hasColonialPort===false;
-  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name}${region.subtitle?' · '+region.subtitle:isWilderness?' · 1550 Wilderness Coast':''}`;
+  const stageBadge=growth?.stage?growth.stage.replace(/-/g,' '):(isWilderness?'wilderness':'settlement');
+  const titleText=isSaba?'Saba · Lesser Antilles':`${region.name} (${simYear})${region.subtitle?' · '+region.subtitle:isWilderness?` · ${simYear} Wilderness Coast`:''}`;
   const introText=isSaba
     ?'Saba’s real relief and aerial colour seed a continuous island, with generated branches and foliage revealed on approach.'
     :isWilderness
-      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) reconstructs an uncolonized 1550 wilderness coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no colonial settlement.`
-      :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) combines high-resolution SRTM elevation, co-registered satellite land-cover, and 1550 historical shoreline reconstruction.`;
+      ?`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label}) reconstructs an uncolonized wilderness coastline from high-resolution SRTM elevation, co-registered satellite land-cover, and natural estuaries—with no colonial settlement yet established.${growth?.historicalNote?' '+growth.historicalNote+'.':''}`
+      :`${region.name} (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}°) in ${simYear} (${eraInfo.label} · ${stageBadge}) combines high-resolution SRTM elevation, co-registered satellite land-cover, and historical colony growth.${growth?.historicalNote?' '+growth.historicalNote+'.':''}`;
   panel.innerHTML=`<div class="panel-header"><strong id="landfall-title">${titleText}</strong><button class="icon-button" aria-label="Hide landfall" title="Hide landfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div class="panel-body"><p class="landfall-intro">${introText}</p>
     <div id="landfall-discovery-card" hidden></div>
     <div class="landfall-destinations" style="display:grid;gap:6px;margin:8px 0">
-      <label style="display:grid;gap:4px"><span>Region / Spanish Main (~1550)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
+      <label style="display:grid;gap:4px"><span>Region / Colonial Port (1550–1689)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
+      <div style="display:grid;grid-template-columns:1fr 92px;gap:6px;align-items:end">
+        <label style="display:grid;gap:2px"><span>Historical Era</span><select id="landfall-era" aria-label="Historical era"></select></label>
+        <label style="display:grid;gap:2px"><span>Year</span><input id="landfall-year" type="number" min="1492" max="1689" step="1" value="${simYear}"></label>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:end">
         <label style="display:grid;gap:2px"><span>Latitude (°N)</span><input id="landfall-lat" type="number" min="-85" max="85" step="0.001" value="${region.latitude.toFixed(3)}"></label>
         <label style="display:grid;gap:2px"><span>Longitude (°E)</span><input id="landfall-lon" type="number" min="-180" max="180" step="0.001" value="${region.longitude.toFixed(3)}"></label>
@@ -39639,34 +40160,71 @@ function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=nul
     <div id="landfall-sun-sliders" class="landfall-sun-sliders"></div>
     <p id="landfall-position"></p><details><summary>World map & sources</summary><div id="landfall-chart"></div>
     <p>World overview · Click any coastline on the chart to set coordinates.</p>
-    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), AWS Terrarium SRTM Z13/Z14, and Esri World Imagery, downsampled, reprojected and modified for 1550 terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain).</p></details>
+    <p class="landfall-credit">Relief and aerial imagery: Beeldmateriaal Nederland, Saba 2023 LiDAR / Saba RGB (CC BY 4.0), AWS Terrarium SRTM Z13/Z14, and Esri World Imagery, downsampled, reprojected and modified for 1550–1689 terrain, colour and vegetation seeds. Wells Bay shoreline: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>, ODbL1.0; modified coastal data and reconstruction recipe are in the public project repository. World outline: Natural Earth (public domain).</p></details>
     <button id="landfall-ocean">Return to open ocean</button></div>`;
   const regionSelect=panel.querySelector('#landfall-region');
+  const eraSelect=panel.querySelector('#landfall-era');
+  const yearInput=panel.querySelector('#landfall-year');
   const latInput=panel.querySelector('#landfall-lat');
   const lonInput=panel.querySelector('#landfall-lon');
-  for(const [id,label] of [['saba','Saba · Lesser Antilles (LiDAR)'],...Object.values(SPANISH_MAIN_1550_REGIONS).map(r=>[r.id,`${r.name} · ${r.subtitle}`])]){
+  for(const era of Object.values(COLONIAL_ERAS)){
+    const opt=document.createElement('option');
+    opt.value=String(era.defaultYear);
+    opt.textContent=`${era.label} (${era.startYear}–${era.endYear})`;
+    if(era.id===eraInfo.id)opt.selected=true;
+    eraSelect.append(opt);
+  }
+  const post1550Entries=POST_1550_FEATURED_PORTS
+    .map(id=>HISTORICAL_COLONIAL_PORTS.find(p=>p.id===id))
+    .filter(Boolean)
+    .map(p=>[p.id,`${p.name} · Founded ${p.foundedYear} (${p.crown})`]);
+  const allPresetIds=new Set([...Object.keys(SPANISH_MAIN_1550_REGIONS),...POST_1550_FEATURED_PORTS]);
+  for(const [id,label] of [
+    ['saba','Saba · Lesser Antilles (LiDAR)'],
+    ...Object.values(SPANISH_MAIN_1550_REGIONS).map(r=>[r.id,`${r.name} · ${r.subtitle}`]),
+    ...post1550Entries,
+  ]){
     const opt=document.createElement('option');opt.value=id;opt.textContent=label;regionSelect.append(opt);
   }
-  if(!isSaba&&!Object.hasOwn(SPANISH_MAIN_1550_REGIONS,region.id)){
-    const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}° · ${isWilderness?'1550 Wilderness Coast':'1550 Port'})`;regionSelect.append(opt);
+  if(!isSaba&&!allPresetIds.has(region.id)){
+    const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}° · ${isWilderness?`${simYear} Wilderness Coast`:`${simYear} ${stageBadge}`})`;regionSelect.append(opt);
     regionSelect.value='custom';
   }else{
     regionSelect.value=isSaba?'saba':region.id;
   }
-  regionSelect.onchange=()=>{
+  const getSelectedYear=()=>{
+    const y=Number(yearInput.value);
+    return Number.isFinite(y)?Math.max(1492,Math.min(1689,Math.round(y))):simYear;
+  };
+  const navigateToSelected=(targetYear)=>{
     const val=regionSelect.value;
     if(val==='saba'){
       const url=landfallStageURL(location.href,stage||'coast',weather);
       url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
       location.assign(url.href);
-    }else if(Object.hasOwn(SPANISH_MAIN_1550_REGIONS,val)){
-      location.assign(coastalRegionStageURL(location.href,val,stage||'coast',weather).href);
+    }else if(allPresetIds.has(val)){
+      const portMeta=HISTORICAL_COLONIAL_PORTS.find(p=>p.id===val);
+      const effectiveY=targetYear!==undefined?targetYear:(portMeta&&portMeta.foundedYear>getSelectedYear()?Math.min(1685,portMeta.foundedYear+15):getSelectedYear());
+      location.assign(coastalRegionStageURL(location.href,val,stage||'coast',weather,effectiveY).href);
+    }else{
+      const lat=Number(latInput.value),lon=Number(lonInput.value);
+      if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
+      location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather,targetYear??getSelectedYear()).href);
     }
   };
+  regionSelect.onchange=()=>navigateToSelected(undefined);
+  eraSelect.onchange=()=>{
+    const y=Number(eraSelect.value);
+    if(Number.isFinite(y)){
+      yearInput.value=String(y);
+      navigateToSelected(y);
+    }
+  };
+  yearInput.onchange=()=>navigateToSelected(getSelectedYear());
   panel.querySelector('#landfall-goto').onclick=()=>{
     const lat=Number(latInput.value),lon=Number(lonInput.value);
     if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
-    location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather).href);
+    location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather,getSelectedYear()).href);
   };
   const setOpen=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open));document.body.classList.toggle('landfall-open',open);
     if(open){onOpen();if(document.pointerLockElement)document.exitPointerLock();panel.querySelector('.panel-header button').focus({preventScroll:true});}};
@@ -39685,10 +40243,10 @@ function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=nul
         const url=landfallStageURL(location.href,id,weather);
         url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
         location.assign(url.href);
-      }else if(Object.hasOwn(SPANISH_MAIN_1550_REGIONS,region.id)){
-        location.assign(coastalRegionStageURL(location.href,region.id,id,weather).href);
+      }else if(allPresetIds.has(region.id)){
+        location.assign(coastalRegionStageURL(location.href,region.id,id,weather,getSelectedYear()).href);
       }else{
-        location.assign(coastalRegionStageURL(location.href,{latitude:region.latitude,longitude:region.longitude},id,weather).href);
+        location.assign(coastalRegionStageURL(location.href,{latitude:region.latitude,longitude:region.longitude},id,weather,getSelectedYear()).href);
       }
     };
     panel.querySelector('.landfall-stages').append(b);
@@ -50801,21 +51359,83 @@ const ENCOUNTER_ARCHETYPES = Object.freeze([
       return 0.35;
     },
   },
+  {
+    id: 'english-sea-dog',
+    title: 'English Race-Built Galleon / West Indiaman',
+    names: ['Golden Hind', 'Revenge', 'Swiftsure', 'Constant Warwick', 'Royal Sovereign'],
+    flag: 'Cross of St George / English Red Ensign',
+    colors: 'england',
+    battleColors: 'england',
+    rig: 'race-built English galleon',
+    hostile: false,
+    minYear: 1577,
+    speedKts: 6.8,
+    weight(lat, lon, year = 1550) {
+      if (year < 1577) return 0;
+      if (lat >= 10 && lat <= 55 && lon >= -85 && lon <= 2) return year >= 1625 ? 1.45 : 0.95;
+      return 0.35;
+    },
+  },
+  {
+    id: 'dutch-fluyt',
+    title: 'Dutch VOC / WIC Fluyt',
+    names: ['Duyfken', 'Halve Maen', 'Batavia', 'Zeven Provinciën', 'Gouden Leeuw'],
+    flag: 'Dutch Statenvertaling / Prinsenvlag',
+    colors: 'netherlands',
+    battleColors: 'netherlands',
+    rig: 'pear-hulled Dutch fluyt',
+    hostile: false,
+    minYear: 1595,
+    speedKts: 6.0,
+    weight(lat, lon, year = 1550) {
+      if (year < 1595) return 0;
+      if ((lat >= -36 && lat <= 56 && lon >= -76 && lon <= 25) || (lat >= -15 && lat <= 25 && lon >= 95 && lon <= 135)) {
+        return year >= 1620 ? 1.4 : 0.9;
+      }
+      return 0.4;
+    },
+  },
+  {
+    id: 'buccaneer-sloop',
+    title: 'Brethren of the Coast Buccaneer',
+    names: ['Satisfaction', 'La Trompeuse', 'Oxford', "Bachelor's Delight", 'Cinque Ports'],
+    flag: 'Brethren of the Coast / Bloody Flag',
+    colors: 'france',
+    battleColors: 'jolly-roger',
+    rig: 'raking Jamaica sloop-of-war',
+    hostile: true,
+    minYear: 1625,
+    disguisedChance: 0.5,
+    speedKts: 8.2,
+    weight(lat, lon, year = 1550) {
+      if (year < 1625) return 0;
+      if (lat >= 7 && lat <= 32 && lon >= -90 && lon <= -58) return year >= 1655 ? 2.1 : 1.35;
+      if (lat >= -15 && lat <= 25 && lon >= -110 && lon <= -75 && year >= 1668) return 1.4; // South Sea buccaneers
+      return 0.35;
+    },
+  },
 ]);
 
-function pickEncounterArchetype(lat, lon, rand = Math.random) {
+function pickEncounterArchetype(lat, lon, rand = Math.random, year = 1550) {
+  const simYear = Number.isFinite(Number(year)) ? Number(year) : 1550;
   let total = 0;
-  const weights = ENCOUNTER_ARCHETYPES.map((a) => {
-    const w = Math.max(0.05, a.weight(lat, lon));
+  const active = [];
+  const weights = [];
+  for (const a of ENCOUNTER_ARCHETYPES) {
+    if (a.minYear && simYear < a.minYear) continue;
+    const rawW = a.weight(lat, lon, simYear);
+    if (rawW <= 0) continue;
+    const w = Math.max(0.05, rawW);
+    active.push(a);
+    weights.push(w);
     total += w;
-    return w;
-  });
-  let r = rand() * total;
-  for (let i = 0; i < ENCOUNTER_ARCHETYPES.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return ENCOUNTER_ARCHETYPES[i];
   }
-  return ENCOUNTER_ARCHETYPES[0];
+  let r = rand() * total;
+  for (let i = 0; i < active.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return active[i];
+  }
+  return active[0] || ENCOUNTER_ARCHETYPES[0];
 }
 
 function describeEncounterThroughSpyglass(enc, targetVessel = null) {
@@ -50881,7 +51501,8 @@ function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
   function spawnSailEncounter(voyage, boat, env = {}) {
     const { lat, lon } = voyage.true;
-    const arch = pickEncounterArchetype(lat, lon, rand);
+    const voyageYear = Number.isFinite(voyage?.dateMs) ? new Date(voyage.dateMs).getUTCFullYear() : 1550;
+    const arch = pickEncounterArchetype(lat, lon, rand, voyageYear);
     const shipName = arch.names[Math.floor(rand() * arch.names.length)];
     const relSide = rand() < 0.5 ? -1 : 1;
     const relDeg = relSide * (15 + rand() * 65);
@@ -51273,10 +51894,70 @@ const KNOWLEDGE_1550_REGIONS = Object.freeze([
   ['Atlantic North America (Verrazzano, Gómez)', 'rumoured', 31, 46, -82, -60],
 ].map((r) => Object.freeze(r)));
 
-/** Classifies a coordinate as 'known', 'rumoured' or 'unknown' for a 1550 Castilian chart. */
-function classify1550Knowledge(lat, lon) {
+/**
+ * Classifies a coordinate as 'known', 'rumoured' or 'unknown' for a historical chart from 1550 through the 1680s.
+ * Defaults to 1550 (Padrón Real of the Casa de la Contratación) when `year` is omitted.
+ */
+function classify1550Knowledge(lat, lon, year = 1550) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 'unknown';
   const x = chartLonDelta(lon);
+  const y = Number.isFinite(Number(year)) ? Number(year) : 1550;
+
+  if (y > 1555) {
+    // Post-1550 chronological discoveries up to the 1680s:
+    // 1. Australia / New Holland (Janszoon 1606, Hartog 1616, Tasman 1642–1644)
+    if (lat >= -44.5 && lat <= -10.4 && x >= 112 && x <= 154) {
+      if (y >= 1644 && x <= 148) return 'known';
+      if (y >= 1606 && x <= 143 && lat >= -35) return 'rumoured';
+      if (y >= 1642) return 'rumoured';
+      return 'unknown';
+    }
+    // 2. New Zealand / Staten Landt (Abel Tasman 1642)
+    if (lat >= -48 && lat <= -34 && x >= 165 && x <= 179.5) {
+      return y >= 1642 ? 'rumoured' : 'unknown';
+    }
+    // 3. Davis Strait, West Greenland & Baffin (Frobisher 1576, Davis 1585, Baffin 1616)
+    if (lat >= 59 && lat <= 78 && x >= -75 && x <= -10) {
+      if (y >= 1616 && lat <= 74) return 'known';
+      if (y >= 1576 && lat <= 70) return 'rumoured';
+      return 'unknown';
+    }
+    // 4. Hudson Bay (Hudson 1610, James & Foxe 1631, HBC 1670)
+    if (lat >= 51 && lat <= 64 && x >= -95 && x <= -75) {
+      if (y >= 1632) return 'known';
+      if (y >= 1610) return 'rumoured';
+    }
+    // 5. Cape Horn & Le Maire Strait (Schouten & Le Maire 1616)
+    if (lat >= -57.5 && lat <= -52 && x >= -76 && x <= -62 && y >= 1616) {
+      return 'known';
+    }
+    // 6. Atlantic North America, Newfoundland & Guiana (settled & charted 1565–1630)
+    if (y >= 1585 && lat >= 31 && lat <= 59 && x >= -82 && x <= -52) {
+      return 'known';
+    }
+    if (y >= 1580 && lat >= 1 && lat <= 10 && x >= -62 && x <= -51) {
+      return 'known';
+    }
+    // 7. Philippines, East Indies, China coast & Japan (Legazpi/Urdaneta 1565, Macao 1557, VOC 1602+)
+    if (y >= 1565 && lat >= -11 && lat <= 41 && x >= 104 && x <= 135) {
+      return 'known';
+    }
+    if (y >= 1580 && lat >= 30 && lat <= 46 && x >= 128 && x <= 146) {
+      return y >= 1615 ? 'known' : 'rumoured';
+    }
+    // 8. California & Manila Galleon landfall coast (Vizcaíno 1602)
+    if (y >= 1602 && lat >= 23 && lat <= 43 && x >= -126 && x <= -105) {
+      return 'known';
+    }
+    // 9. Patagonia, Chile & Galápagos (Sarmiento 1580, buccaneer charts 1670+)
+    if (y >= 1585 && lat >= -56 && lat <= -36.8 && x >= -76 && x <= -55) {
+      return 'known';
+    }
+    if (y >= 1650 && lat >= -2 && lat <= 1 && x >= -92.5 && x <= -89) {
+      return 'known';
+    }
+  }
+
   for (const [, k, s, n, w, e] of KNOWLEDGE_1550_REGIONS) if (lat >= s && lat <= n && x >= w && x <= e) return k;
   return 'unknown';
 }
@@ -51407,8 +52088,8 @@ function chartCopies(v) {
   return [-360, 0, 360].filter((o) => hi >= -180 + o && lo <= 180 + o);
 }
 
-/** Splits land rings into runs of uniform 1550 knowledge, once at load. */
-function chartPrepareCoasts(rings) {
+/** Splits land rings into runs of uniform historical knowledge for `year` (1550..1689). */
+function chartPrepareCoasts(rings, year = 1550) {
   const out = [];
   for (const raw of Array.isArray(rings) ? rings : []) {
     const ring = raw.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
@@ -51420,7 +52101,7 @@ function chartPrepareCoasts(rings) {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i], b = ring[(i + 1) % ring.length];
       if (Math.abs(b[0] - a[0]) > 180) { cur = null; continue; } // seam at the antimeridian
-      const k = classify1550Knowledge((a[1] + b[1]) / 2, (a[0] + b[0]) / 2);
+      const k = classify1550Knowledge((a[1] + b[1]) / 2, (a[0] + b[0]) / 2, year);
       if (!cur || cur.k !== k) { cur = { k, pts: [a] }; runs.push(cur); }
       cur.pts.push(b);
     }
@@ -51796,7 +52477,7 @@ function createChartDrawer({ dock, landRingsUrl = "data:application/json;base64,
   const view = { cx: -40, cy: 25, scale: 4, width: 0, height: 0 };
   let dpr = 1, viewReady = false, open = false;
   let snap = {}, canvasSig = null, sideSig = null, logSig = null, warpSig = null;
-  let coasts = null, coastVersion = 0, ringsState = 'idle';
+  let rawRings = null, coasts = null, coastYearBucket = 1550, coastVersion = 0, ringsState = 'idle';
   const base = document.createElement('canvas'), baseCtx = base.getContext('2d');
   let baseKey = '';
   let tool = 'pan', rule = null, dividers = null;
@@ -52159,10 +52840,23 @@ function createChartDrawer({ dock, landRingsUrl = "data:application/json;base64,
     return [ll(s.drPos), arr(s.drTrack), s.revealTrue ? `T${ll(s.truePos)}${arr(s.trueTrack)}` : 'F', arr(s.fixes), num(s.uncertaintyNm),
       num(s.courseTrue), num(s.courseCompass), ll(s.destination), s.destination?.name ?? '', arr(s.marks), arr(s.discoveries), s.ship?.name ?? ''].join('|');
   }
+  function getSnapshotYearBucket(s) {
+    const ms = chartDateMs(s?.date);
+    if (!Number.isFinite(ms)) return 1550;
+    const y = new Date(ms).getUTCFullYear();
+    if (!Number.isFinite(y) || y < 1492 || y > 1750) return 1550;
+    return Math.floor(y / 5) * 5;
+  }
   function update(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return;
     snap = snapshot;
     if (!open) return; // stored for when the drawer opens; closed drawers do no work
+    const yBucket = getSnapshotYearBucket(snap);
+    if (rawRings && yBucket !== coastYearBucket) {
+      coastYearBucket = yBucket;
+      coasts = chartPrepareCoasts(rawRings, coastYearBucket);
+      coastVersion++;
+    }
     const sig = canvasSignature(snap);
     if (sig !== canvasSig) {
       canvasSig = sig;
@@ -52180,7 +52874,9 @@ function createChartDrawer({ dock, landRingsUrl = "data:application/json;base64,
     try {
       const response = await fetch(landRingsUrl);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      coasts = chartPrepareCoasts(await response.json());
+      rawRings = await response.json();
+      coastYearBucket = getSnapshotYearBucket(snap);
+      coasts = chartPrepareCoasts(rawRings, coastYearBucket);
       coastVersion++; ringsState = 'ready'; requestDraw();
     } catch {
       ringsState = 'idle';
@@ -54231,10 +54927,17 @@ async function main() {
   const deepWaterDepthGroup=OCEAN_DEPTH?createDeepWaterGroup(device,oceanDepthPipe):null;
   let coastalGroup=terrain?terrain.waterGroup(oceanPipe):deepWaterGroup;
   let coastalDepthGroup=OCEAN_DEPTH?(terrain?terrain.waterGroup(oceanDepthPipe):deepWaterDepthGroup):null;
-  async function spawnTerrainLate({region,placement,lat,lon,name}={}){
+  async function spawnTerrainLate({region,placement,lat,lon,name,year}={}){
+    const liveYear=Number.isFinite(year)
+      ?year
+      :Number.isFinite(region?.year)
+        ?region.year
+        :Number.isFinite(voyageCtl?.voyage?.dateMs)
+          ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
+          :(terrain?.region?.year??1550);
     const nextTerrain=await createTerrain({
       waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
-      region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude},
+      region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
       placement,
       options:{lateSpawn:true},
     });
@@ -55759,11 +56462,22 @@ async function main() {
   cameraDock.append(seaSettingsButton,shipSettingsButton,shareButton);
   // ---------------------------------------------------------------- Chart Course voyage
   {
-    const curatedNear=(lat,lon,maxKm=30)=>{
+    const curatedNear=(lat,lon,maxKm=30,year=null)=>{
+      const simYear=Number.isFinite(year)
+        ?year
+        :Number.isFinite(voyageCtl?.voyage?.dateMs)
+          ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
+          :(terrain?.region?.year??1550);
       let best=null,bestKm=maxKm;
       for(const r of Object.values(SPANISH_MAIN_1550_REGIONS)){
         const km=greatCircleKm(lat,lon,r.latitude,r.longitude);
-        if(km<bestKm){bestKm=km;best=r;}
+        if(km<bestKm){bestKm=km;best={...r,year:simYear};}
+      }
+      if(!best){
+        const port=findHistoricalColonialPort(lat,lon,null,simYear,maxKm/111.195);
+        if(port&&simYear>=(port.foundedYear??1500)){
+          best={id:port.id,name:port.name,latitude:port.latitude,longitude:port.longitude,year:simYear};
+        }
       }
       return best;
     };
@@ -55968,8 +56682,13 @@ async function main() {
       onSpectrum:()=>{needSpectrum=true;},
       onEnv:()=>{envFull=true;},
       resolveLandfallRegion:(lat,lon)=>{
-        const r=curatedNear(lat,lon);
-        return r?{id:r.id,name:r.name,latitude:r.latitude,longitude:r.longitude}:{latitude:lat,longitude:lon,name:'Uncharted coast'};
+        const liveYear=Number.isFinite(voyageCtl?.voyage?.dateMs)
+          ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
+          :(terrain?.region?.year??1550);
+        const r=curatedNear(lat,lon,30,liveYear);
+        return r
+          ?{id:r.id,name:r.name,latitude:r.latitude,longitude:r.longitude,year:liveYear}
+          :{latitude:lat,longitude:lon,name:'Uncharted coast',year:liveYear};
       },
       loadLandRings:()=>fetch("data:application/json;base64,W1tbLTU5LjU3MiwtODAuMDRdLFstNTkuODY2LC04MC41NV0sWy02MC4xNiwtODEuMF0sWy02Mi4yNTUsLTgwLjg2M10sWy02NC40ODgsLTgwLjkyMl0sWy02NS43NDIsLTgwLjU4OV0sWy02NS43NDIsLTgwLjU1XSxbLTY2LjI5LC04MC4yNTZdLFstNjQuMDM4LC04MC4yOTVdLFstNjEuODgzLC04MC4zOTNdLFstNjEuMTM5LC03OS45ODFdLFstNjAuNjEsLTc5LjYyOV0sWy01OS41NzIsLTgwLjA0XV0sW1stMTU5LjIwOCwtNzkuNDk3XSxbLTE2MS4xMjgsLTc5LjYzNF0sWy0xNjIuNDQsLTc5LjI4MV0sWy0xNjMuMDI3LC03OC45MjldLFstMTYzLjA2NywtNzguODddLFstMTYzLjcxMywtNzguNTk2XSxbLTE2My43MTMsLTc4LjU5Nl0sWy0xNjMuMTA2LC03OC4yMjNdLFstMTYxLjI0NSwtNzguMzhdLFstMTYwLjI0NiwtNzguNjk0XSxbLTE1OS40ODIsLTc5LjA0Nl0sWy0xNTkuMjA4LC03OS40OTddXSxbWy00NS4xNTUsLTc4LjA0N10sWy00My45MjEsLTc4LjQ3OF0sWy00My40OSwtNzkuMDg2XSxbLTQzLjM3MiwtNzkuNTE3XSxbLTQzLjMzMywtODAuMDI2XSxbLTQ0Ljg4MSwtODAuMzRdLFstNDYuNTA2LC04MC41OTRdLFstNDguMzg2LC04MC44MjldLFstNTAuNDgyLC04MS4wMjVdLFstNTIuODUyLC04MC45NjddLFstNTQuMTY0LC04MC42MzRdLFstNTMuOTg4LC04MC4yMjJdLFstNTEuODUzLC03OS45NDhdLFstNTAuOTkxLC03OS42MTVdLFstNTAuMzY1LC03OS4xODNdLFstNDkuOTE0LC03OC44MTFdLFstNDkuMzA3LC03OC40NTldLFstNDguNjYxLC03OC4wNDddLFstNDguNjYxLC03OC4wNDddLFstNDguMTUxLC03OC4wNDddLFstNDYuNjYzLC03Ny44MzFdLFstNDUuMTU1LC03OC4wNDddXSxbWy0xMjEuMjEyLC03My41MDFdLFstMTE5LjkxOSwtNzMuNjU4XSxbLTExOC43MjQsLTczLjQ4MV0sWy0xMTkuMjkyLC03My44MzRdLFstMTIwLjIzMiwtNzQuMDg5XSxbLTEyMS42MjMsLTc0LjAxXSxbLTEyMi42MjIsLTczLjY1OF0sWy0xMjIuNjIyLC03My42NThdLFstMTIyLjQwNiwtNzMuMzI1XSxbLTEyMS4yMTIsLTczLjUwMV1dLFtbLTEyNS41NiwtNzMuNDgxXSxbLTEyNC4wMzIsLTczLjg3M10sWy0xMjQuNjE5LC03My44MzRdLFstMTI1LjkxMiwtNzMuNzM2XSxbLTEyNy4yODMsLTczLjQ2Ml0sWy0xMjcuMjgzLC03My40NjJdLFstMTI2LjU1OCwtNzMuMjQ2XSxbLTEyNS41NiwtNzMuNDgxXV0sW1stOTguOTgyLC03MS45MzNdLFstOTcuODg1LC03Mi4wNzFdLFstOTYuNzg4LC03MS45NTNdLFstOTYuMiwtNzIuNTIxXSxbLTk2Ljk4NCwtNzIuNDQzXSxbLTk4LjE5OCwtNzIuNDgyXSxbLTk5LjQzMiwtNzIuNDQzXSxbLTEwMC43ODMsLTcyLjUwMl0sWy0xMDEuODAyLC03Mi4zMDZdLFstMTAyLjMzMSwtNzEuODk0XSxbLTEwMi4zMzEsLTcxLjg5NF0sWy0xMDEuNzA0LC03MS43MThdLFstMTAwLjQzMSwtNzEuODU1XSxbLTk4Ljk4MiwtNzEuOTMzXV0sW1stNjguNDUxLC03MC45NTZdLFstNjguMzM0LC03MS40MDZdLFstNjguNTEsLTcxLjc5OF0sWy02OC43ODQsLTcyLjE3MV0sWy02OS45NTksLTcyLjMwOF0sWy03MS4wNzYsLTcyLjUwNF0sWy03Mi4zODgsLTcyLjQ4NF0sWy03MS44OTgsLTcyLjA5Ml0sWy03My4wNzQsLTcyLjIyOV0sWy03NC4xOSwtNzIuMzY3XSxbLTc0Ljk1NCwtNzIuMDczXSxbLTc1LjAxMywtNzEuNjYxXSxbLTczLjkxNiwtNzEuMjY5XSxbLTczLjkxNiwtNzEuMjY5XSxbLTczLjIzLC03MS4xNTJdLFstNzIuMDc1LC03MS4xOTFdLFstNzEuNzgxLC03MC42ODFdLFstNzEuNzIyLC03MC4zMDldLFstNzEuNzQyLC02OS41MDZdLFstNzEuMTc0LC02OS4wMzVdLFstNzAuMjUzLC02OC44NzldLFstNjkuNzI0LC02OS4yNTFdLFstNjkuNDg5LC02OS42MjNdLFstNjkuMDU5LC03MC4wNzRdLFstNjguNzI2LC03MC41MDVdLFstNjguNDUxLC03MC45NTZdXSxbWy01OC42MTQsLTY0LjE1Ml0sWy01OS4wNDUsLTY0LjM2OF0sWy01OS43ODksLTY0LjIxMV0sWy02MC42MTIsLTY0LjMwOV0sWy02MS4yOTcsLTY0LjU0NF0sWy02Mi4wMjIsLTY0Ljc5OV0sWy02Mi41MTIsLTY1LjA5M10sWy02Mi42NDksLTY1LjQ4NV0sWy02Mi41OSwtNjUuODU3XSxbLTYyLjEyLC02Ni4xOV0sWy02Mi44MDYsLTY2LjQyNl0sWy02My43NDYsLTY2LjUwNF0sWy02NC4yOTQsLTY2LjgzN10sWy02NC44ODIsLTY3LjE1XSxbLTY1LjUwOCwtNjcuNTgyXSxbLTY1LjY2NSwtNjcuOTU0XSxbLTY1LjMxMywtNjguMzY1XSxbLTY0Ljc4NCwtNjguNjc5XSxbLTYzLjk2MSwtNjguOTE0XSxbLTYzLjE5NywtNjkuMjI4XSxbLTYyLjc4NiwtNjkuNjE5XSxbLTYyLjU3MSwtNjkuOTkyXSxbLTYyLjI3NywtNzAuMzg0XSxbLTYxLjgwNywtNzAuNzE3XSxbLTYxLjUxMywtNzEuMDg5XSxbLTYxLjM3NiwtNzIuMDFdLFstNjEuMDgyLC03Mi4zODJdLFstNjEuMDA0LC03Mi43NzRdLFstNjAuNjksLTczLjE2Nl0sWy02MC44MjcsLTczLjY5NV0sWy02MS4zNzYsLTc0LjEwN10sWy02MS45NjMsLTc0LjQ0XSxbLTYzLjI5NSwtNzQuNTc3XSxbLTYzLjc0NiwtNzQuOTNdLFstNjQuMzUzLC03NS4yNjNdLFstNjUuODYxLC03NS42MzVdLFstNjcuMTkzLC03NS43OTJdLFstNjguNDQ2LC03Ni4wMDddLFstNjkuNzk4LC03Ni4yMjNdLFstNzAuNjAxLC03Ni42MzRdLFstNzIuMjA3LC03Ni42NzRdLFstNzMuOTcsLTc2LjYzNF0sWy03NS41NTYsLTc2LjcxM10sWy03Ny4yNCwtNzYuNzEzXSxbLTc2LjkyNywtNzcuMTA1XSxbLTc1LjM5OSwtNzcuMjgxXSxbLTc0LjI4MywtNzcuNTU1XSxbLTczLjY1NiwtNzcuOTA4XSxbLTc0Ljc3MywtNzguMjIyXSxbLTc2LjQ5NiwtNzguMTI0XSxbLTc3LjkyNiwtNzguMzc4XSxbLTc3Ljk4NSwtNzguNzldLFstNzguMDI0LC03OS4xODJdLFstNzYuODQ5LC03OS41MTVdLFstNzYuNjMzLC03OS44ODddLFstNzUuMzYsLTgwLjI2XSxbLTczLjI0NSwtODAuNDE2XSxbLTcxLjQ0MywtODAuNjkxXSxbLTcwLjAxMywtODEuMDA0XSxbLTY4LjE5MiwtODEuMzE4XSxbLTY1LjcwNCwtODEuNDc0XSxbLTYzLjI1NiwtODEuNzQ5XSxbLTYxLjU1MiwtODIuMDQzXSxbLTU5LjY5MSwtODIuMzc2XSxbLTU4LjcxMiwtODIuODQ2XSxbLTU4LjIyMiwtODMuMjE4XSxbLTU3LjAwOCwtODIuODY2XSxbLTU1LjM2MywtODIuNTcyXSxbLTUzLjYyLC04Mi4yNThdLFstNTEuNTQ0LC04Mi4wMDRdLFstNDkuNzYxLC04MS43MjldLFstNDcuMjc0LC04MS43MV0sWy00NC44MjYsLTgxLjg0N10sWy00Mi44MDgsLTgyLjA4Ml0sWy00Mi4xNjIsLTgxLjY1MV0sWy00MC43NzEsLTgxLjM1N10sWy0zOC4yNDUsLTgxLjMzN10sWy0zNi4yNjcsLTgxLjEyMl0sWy0zNC4zODYsLTgwLjkwNl0sWy0zMi4zMSwtODAuNzY5XSxbLTMwLjA5NywtODAuNTkzXSxbLTI4LjU1LC04MC4zMzhdLFstMjkuMjU1LC03OS45ODVdLFstMjkuNjg2LC03OS42MzNdLFstMjkuNjg2LC03OS4yNl0sWy0zMS42MjUsLTc5LjI5OV0sWy0zMy42ODEsLTc5LjQ1Nl0sWy0zNS42NCwtNzkuNDU2XSxbLTM1LjkxNCwtNzkuMDg0XSxbLTM1Ljc3NywtNzguMzM5XSxbLTM1LjMyNywtNzguMTI0XSxbLTMzLjg5NywtNzcuODg5XSxbLTMyLjIxMiwtNzcuNjUzXSxbLTMwLjk5OCwtNzcuMzZdLFstMjkuNzg0LC03Ny4wNjZdLFstMjguODgzLC03Ni42NzRdLFstMjcuNTEyLC03Ni40OTddLFstMjYuMTYsLTc2LjM2XSxbLTI1LjQ3NSwtNzYuMjgyXSxbLTIzLjkyOCwtNzYuMjQzXSxbLTIyLjQ1OSwtNzYuMTA1XSxbLTIxLjIyNSwtNzUuOTA5XSxbLTIwLjAxLC03NS42NzRdLFstMTguOTE0LC03NS40MzldLFstMTcuNTIzLC03NS4xMjZdLFstMTYuNjQyLC03NC43OTNdLFstMTUuNzAxLC03NC40OTldLFstMTUuNDA4LC03NC4xMDddLFstMTYuNDY1LC03My44NzJdLFstMTYuMTEzLC03My40Nl0sWy0xNS40NDcsLTczLjE0N10sWy0xNC40MDksLTcyLjk1MV0sWy0xMy4zMTIsLTcyLjcxNV0sWy0xMi4yOTQsLTcyLjQwMl0sWy0xMS41MSwtNzIuMDFdLFstMTEuMDIsLTcxLjU0XSxbLTEwLjI5NiwtNzEuMjY1XSxbLTkuMTAxLC03MS4zMjRdLFstOC42MTEsLTcxLjY1N10sWy03LjQxNywtNzEuNjk3XSxbLTcuMzc3LC03MS4zMjRdLFstNi44NjgsLTcwLjkzMl0sWy01Ljc5MSwtNzEuMDNdLFstNS41MzYsLTcxLjQwM10sWy00LjM0MiwtNzEuNDYxXSxbLTMuMDQ5LC03MS4yODVdLFstMS43OTUsLTcxLjE2N10sWy0wLjY1OSwtNzEuMjI2XSxbLTAuMjI5LC03MS42MzhdLFswLjg2OCwtNzEuMzA1XSxbMS44ODcsLTcxLjEyOF0sWzMuMDIzLC03MC45OTFdLFs0LjEzOSwtNzAuODU0XSxbNS4xNTgsLTcwLjYxOV0sWzYuMjc0LC03MC40NjJdLFs3LjEzNiwtNzAuMjQ3XSxbNy43NDMsLTY5Ljg5NF0sWzguNDg3LC03MC4xNDldLFs5LjUyNSwtNzAuMDExXSxbMTAuMjUsLTcwLjQ4Ml0sWzEwLjgxOCwtNzAuODM0XSxbMTEuOTU0LC03MC42MzhdLFsxMi40MDQsLTcwLjI0N10sWzEzLjQyMywtNjkuOTcyXSxbMTQuNzM1LC03MC4wMzFdLFsxNS4xMjcsLTcwLjQwM10sWzE1Ljk0OSwtNzAuMDMxXSxbMTcuMDI3LC02OS45MTNdLFsxOC4yMDIsLTY5Ljg3NF0sWzE5LjI1OSwtNjkuODk0XSxbMjAuMzc2LC03MC4wMTFdLFsyMS40NTMsLTcwLjA3XSxbMjEuOTIzLC03MC40MDNdLFsyMi41NjksLTcwLjY5N10sWzIzLjY2NiwtNzAuNTIxXSxbMjQuODQxLC03MC40ODJdLFsyNS45NzcsLTcwLjQ4Ml0sWzI3LjA5NCwtNzAuNDYyXSxbMjguMDkzLC03MC4zMjVdLFsyOS4xNSwtNzAuMjA3XSxbMzAuMDMyLC02OS45MzNdLFszMC45NzIsLTY5Ljc1N10sWzMxLjk5LC02OS42NTldLFszMi43NTQsLTY5LjM4NF0sWzMzLjMwMiwtNjguODM2XSxbMzMuODcsLTY4LjUwM10sWzM0LjkwOCwtNjguNjU5XSxbMzUuMywtNjkuMDEyXSxbMzYuMTYyLC02OS4yNDddLFszNy4yLC02OS4xNjldLFszNy45MDUsLTY5LjUyMV0sWzM4LjY0OSwtNjkuNzc2XSxbMzkuNjY4LC02OS41NDFdLFs0MC4wMiwtNjkuMTFdLFs0MC45MjEsLTY4LjkzNF0sWzQxLjk1OSwtNjguNjAxXSxbNDIuOTM5LC02OC40NjNdLFs0NC4xMTQsLTY4LjI2N10sWzQ0Ljg5NywtNjguMDUyXSxbNDUuNzIsLTY3LjgxN10sWzQ2LjUwMywtNjcuNjAxXSxbNDcuNDQzLC02Ny43MTldLFs0OC4zNDQsLTY3LjM2Nl0sWzQ4Ljk5MSwtNjcuMDkyXSxbNDkuOTMxLC02Ny4xMTFdLFs1MC43NTMsLTY2Ljg3Nl0sWzUwLjk0OSwtNjYuNTIzXSxbNTEuNzkyLC02Ni4yNDldLFs1Mi42MTQsLTY2LjA1M10sWzUzLjYxMywtNjUuODk2XSxbNTQuNTM0LC02NS44MThdLFs1NS40MTUsLTY1Ljg3N10sWzU2LjM1NSwtNjUuOTc1XSxbNTcuMTU4LC02Ni4yNDldLFs1Ny4yNTYsLTY2LjY4XSxbNTguMTM3LC02Ny4wMTNdLFs1OC43NDUsLTY3LjI4OF0sWzU5LjkzOSwtNjcuNDA1XSxbNjAuNjA1LC02Ny42OF0sWzYxLjQyOCwtNjcuOTU0XSxbNjIuMzg3LC02OC4wMTNdLFs2My4xOSwtNjcuODE3XSxbNjQuMDUyLC02Ny40MDVdLFs2NC45OTIsLTY3LjYyMV0sWzY1Ljk3MiwtNjcuNzM4XSxbNjYuOTEyLC02Ny44NTZdLFs2Ny44OTEsLTY3LjkzNF0sWzY4Ljg5LC02Ny45MzRdLFs2OS43MTMsLTY4Ljk3M10sWzY5LjY3MywtNjkuMjI4XSxbNjkuNTU2LC02OS42NzhdLFs2OC41OTYsLTY5LjkzM10sWzY3LjgxMywtNzAuMzA1XSxbNjcuOTUsLTcwLjY5N10sWzY5LjA2NiwtNzAuNjc4XSxbNjguOTI5LC03MS4wNjldLFs2OC40MiwtNzEuNDQyXSxbNjcuOTUsLTcxLjg1M10sWzY4LjcxNCwtNzIuMTY3XSxbNjkuODY5LC03Mi4yNjVdLFs3MS4wMjUsLTcyLjA4OF0sWzcxLjU3MywtNzEuNjk3XSxbNzEuOTA2LC03MS4zMjRdLFs3Mi40NTUsLTcxLjAxMV0sWzczLjA4MSwtNzAuNzE3XSxbNzMuMzM2LC03MC4zNjRdLFs3My44NjUsLTY5Ljg3NF0sWzc0LjQ5MiwtNjkuNzc2XSxbNzUuNjI4LC02OS43MzddLFs3Ni42MjYsLTY5LjYxOV0sWzc3LjY0NSwtNjkuNDYzXSxbNzguMTM1LC02OS4wNzFdLFs3OC40MjgsLTY4LjY5OF0sWzc5LjExNCwtNjguMzI2XSxbODAuMDkzLC02OC4wNzJdLFs4MC45MzUsLTY3Ljg3Nl0sWzgxLjQ4NCwtNjcuNTQyXSxbODIuMDUyLC02Ny4zNjZdLFs4Mi43NzYsLTY3LjIwOV0sWzgzLjc3NSwtNjcuMzA3XSxbODQuNjc2LC02Ny4yMDldLFs4NS42NTYsLTY3LjA5Ml0sWzg2Ljc1MiwtNjcuMTVdLFs4Ny40NzcsLTY2Ljg3Nl0sWzg3Ljk4NiwtNjYuMjFdLFs4OC4zNTgsLTY2LjQ4NF0sWzg4LjgyOCwtNjYuOTU1XSxbODkuNjcxLC02Ny4xNV0sWzkwLjYzLC02Ny4yMjldLFs5MS41OSwtNjcuMTExXSxbOTIuNjA5LC02Ny4xOV0sWzkzLjU0OSwtNjcuMjA5XSxbOTQuMTc1LC02Ny4xMTFdLFs5NS4wMTgsLTY3LjE3XSxbOTUuNzgxLC02Ny4zODZdLFs5Ni42ODIsLTY3LjI0OV0sWzk3Ljc2LC02Ny4yNDldLFs5OC42OCwtNjcuMTExXSxbOTkuNzE4LC02Ny4yNDldLFsxMDAuMzg0LC02Ni45MTVdLFsxMDAuODkzLC02Ni41ODJdLFsxMDEuNTc5LC02Ni4zMDhdLFsxMDIuODMyLC02NS41NjNdLFsxMDMuNDc5LC02NS43XSxbMTA0LjI0MywtNjUuOTc1XSxbMTA0LjkwOCwtNjYuMzI4XSxbMTA2LjE4MiwtNjYuOTM1XSxbMTA3LjE2MSwtNjYuOTU1XSxbMTA4LjA4MSwtNjYuOTU1XSxbMTA5LjE1OSwtNjYuODM3XSxbMTEwLjIzNiwtNjYuN10sWzExMS4wNTgsLTY2LjQyNl0sWzExMS43NDQsLTY2LjEzMl0sWzExMi44NiwtNjYuMDkyXSxbMTEzLjYwNSwtNjUuODc3XSxbMTE0LjM4OCwtNjYuMDczXSxbMTE0Ljg5NywtNjYuMzg2XSxbMTE1LjYwMiwtNjYuN10sWzExNi42OTksLTY2LjY2MV0sWzExNy4zODUsLTY2LjkxNV0sWzExOC41NzksLTY3LjE3XSxbMTE5LjgzMywtNjcuMjY4XSxbMTIwLjg3MSwtNjcuMTldLFsxMjEuNjU0LC02Ni44NzZdLFsxMjIuMzIsLTY2LjU2M10sWzEyMy4yMjEsLTY2LjQ4NF0sWzEyNC4xMjIsLTY2LjYyMV0sWzEyNS4xNiwtNjYuNzE5XSxbMTI2LjEsLTY2LjU2M10sWzEyNy4wMDEsLTY2LjU2M10sWzEyNy44ODMsLTY2LjY2MV0sWzEyOC44MDMsLTY2Ljc1OV0sWzEyOS43MDQsLTY2LjU4Ml0sWzEzMC43ODEsLTY2LjQyNl0sWzEzMS44LC02Ni4zODZdLFsxMzIuOTM2LC02Ni4zODZdLFsxMzMuODU2LC02Ni4yODhdLFsxMzQuNzU3LC02Ni4yMV0sWzEzNS4wMzIsLTY1LjcyXSxbMTM1LjA3MSwtNjUuMzA5XSxbMTM1LjY5NywtNjUuNTgzXSxbMTM1Ljg3NCwtNjYuMDM0XSxbMTM2LjIwNywtNjYuNDQ1XSxbMTM2LjYxOCwtNjYuNzc4XSxbMTM3LjQ2LC02Ni45NTVdLFsxMzguNTk2LC02Ni44OTZdLFsxMzkuOTA4LC02Ni44NzZdLFsxNDAuODA5LC02Ni44MTddLFsxNDIuMTIyLC02Ni44MTddLFsxNDMuMDYyLC02Ni43OThdLFsxNDQuMzc0LC02Ni44MzddLFsxNDUuNDksLTY2LjkxNV0sWzE0Ni4xOTYsLTY3LjIyOV0sWzE0Ni4wLC02Ny42MDFdLFsxNDYuNjQ2LC02Ny44OTVdLFsxNDcuNzIzLC02OC4xM10sWzE0OC44NCwtNjguMzg1XSxbMTUwLjEzMiwtNjguNTYxXSxbMTUxLjQ4NCwtNjguNzE4XSxbMTUyLjUwMiwtNjguODc1XSxbMTUzLjYzOCwtNjguODk1XSxbMTU0LjI4NSwtNjguNTYxXSxbMTU1LjE2NiwtNjguODM2XSxbMTU1LjkzLC02OS4xNDldLFsxNTYuODExLC02OS4zODRdLFsxNTguMDI2LC02OS40ODJdLFsxNTkuMTgxLC02OS42XSxbMTU5LjY3MSwtNjkuOTkyXSxbMTYwLjgwNywtNzAuMjI3XSxbMTYxLjU3LC03MC41OF0sWzE2Mi42ODcsLTcwLjczNl0sWzE2My44NDIsLTcwLjcxN10sWzE2NC45MiwtNzAuNzc2XSxbMTY2LjExNCwtNzAuNzU2XSxbMTY3LjMwOSwtNzAuODM0XSxbMTY4LjQyNiwtNzAuOTcxXSxbMTY5LjQ2NCwtNzEuMjA3XSxbMTcwLjUwMiwtNzEuNDAzXSxbMTcxLjIwNywtNzEuNjk3XSxbMTcxLjA4OSwtNzIuMDg4XSxbMTcwLjU2LC03Mi40NDFdLFsxNzAuMTEsLTcyLjg5Ml0sWzE2OS43NTcsLTczLjI0NV0sWzE2OS4yODcsLTczLjY1Nl0sWzE2Ny45NzUsLTczLjgxM10sWzE2Ny4zODcsLTc0LjE2NV0sWzE2Ni4wOTUsLTc0LjM4MV0sWzE2NS42NDQsLTc0Ljc3M10sWzE2NC45NTksLTc1LjE0NV0sWzE2NC4yMzQsLTc1LjQ1OV0sWzE2My44MjMsLTc1Ljg3XSxbMTYzLjU2OCwtNzYuMjQzXSxbMTYzLjQ3LC03Ni42OTNdLFsxNjMuNDksLTc3LjA2Nl0sWzE2NC4wNTgsLTc3LjQ1N10sWzE2NC4yNzMsLTc3LjgzXSxbMTY0Ljc0MywtNzguMTgzXSxbMTY2LjYwNCwtNzguMzJdLFsxNjYuOTk2LC03OC43NTFdLFsxNjUuMTk0LC03OC45MDddLFsxNjMuNjY2LC03OS4xMjNdLFsxNjEuNzY2LC03OS4xNjJdLFsxNjAuOTI0LC03OS43M10sWzE2MC43NDgsLTgwLjIwMV0sWzE2MC4zMTcsLTgwLjU3M10sWzE1OS43ODgsLTgwLjk0NV0sWzE2MS4xMiwtODEuMjc5XSxbMTYxLjYyOSwtODEuNjldLFsxNjIuNDkxLC04Mi4wNjJdLFsxNjMuNzA1LC04Mi4zOTVdLFsxNjUuMDk2LC04Mi43MDldLFsxNjYuNjA0LC04My4wMjJdLFsxNjguODk2LC04My4zMzZdLFsxNjkuNDA1LC04My44MjZdLFsxNzIuMjg0LC04NC4wNDFdLFsxNzIuNDc3LC04NC4xMThdLFsxNzMuMjI0LC04NC40MTRdLFsxNzUuOTg2LC04NC4xNTldLFsxNzguMjc3LC04NC40NzNdLFsxODAsLTg0LjcxM10sWzE4MCwtOTBdLFstMTgwLC05MF0sWy0xODAsLTg0LjcxM10sWy0xNzkuOTQyLC04NC43MjFdLFstMTc5LjA1OSwtODQuMTM5XSxbLTE3Ny4yNTcsLTg0LjQ1M10sWy0xNzcuMTQxLC04NC40MThdLFstMTc2Ljg2MiwtODQuMzM0XSxbLTE3Ni41MjQsLTg0LjIzMl0sWy0xNzYuMjMsLTg0LjE0M10sWy0xNzYuMDg1LC04NC4wOTldLFstMTc1LjkzNCwtODQuMTAyXSxbLTE3NS44MywtODQuMTE4XSxbLTE3NC4zODMsLTg0LjUzNF0sWy0xNzMuMTE3LC04NC4xMThdLFstMTcyLjg4OSwtODQuMDYxXSxbLTE2OS45NTEsLTgzLjg4NV0sWy0xNjkuMCwtODQuMTE4XSxbLTE2OC41MywtODQuMjM3XSxbLTE2Ny4wMjIsLTg0LjU3XSxbLTE2NC4xODIsLTg0LjgyNV0sWy0xNjEuOTMsLTg1LjEzOV0sWy0xNTguMDcxLC04NS4zNzRdLFstMTU1LjE5MiwtODUuMV0sWy0xNTAuOTQyLC04NS4yOTZdLFstMTQ4LjUzMywtODUuNjA5XSxbLTE0NS44ODksLTg1LjMxNV0sWy0xNDMuMTA4LC04NS4wNDFdLFstMTQyLjg5MiwtODQuNTddLFstMTQ2LjgyOSwtODQuNTMxXSxbLTE1MC4wNjEsLTg0LjI5Nl0sWy0xNTAuOTAzLC04My45MDRdLFstMTUzLjU4NiwtODMuNjg5XSxbLTE1My40MSwtODMuMjM4XSxbLTE1My4wMzgsLTgyLjgyN10sWy0xNTIuNjY2LC04Mi40NTRdLFstMTUyLjg2MiwtODIuMDQzXSxbLTE1NC41MjYsLTgxLjc2OF0sWy0xNTUuMjksLTgxLjQxNl0sWy0xNTYuODM3LC04MS4xMDJdLFstMTU0LjQwOSwtODEuMTYxXSxbLTE1Mi4wOTgsLTgxLjAwNF0sWy0xNTAuNjQ4LC04MS4zMzddLFstMTQ4Ljg2NiwtODEuMDQzXSxbLTE0Ny4yMjEsLTgwLjY3MV0sWy0xNDYuNDE4LC04MC4zMzhdLFstMTQ2Ljc3LC03OS45MjZdLFstMTQ4LjA2MywtNzkuNjUyXSxbLTE0OS41MzIsLTc5LjM1OF0sWy0xNTEuNTg4LC03OS4yOTldLFstMTUzLjM5LC03OS4xNjJdLFstMTU1LjMyOSwtNzkuMDY0XSxbLTE1NS45NzYsLTc4LjY5Ml0sWy0xNTcuMjY4LC03OC4zNzhdLFstMTU4LjA1MiwtNzguMDI2XSxbLTE1OC4zNjUsLTc2Ljg4OV0sWy0xNTcuODc1LC03Ni45ODddLFstMTU2Ljk3NSwtNzcuMzAxXSxbLTE1NS4zMjksLTc3LjIwM10sWy0xNTMuNzQzLC03Ny4wNjZdLFstMTUyLjkyLC03Ny40OTddLFstMTUxLjMzNCwtNzcuMzk5XSxbLTE1MC4wMDIsLTc3LjE4M10sWy0xNDguNzQ4LC03Ni45MDldLFstMTQ3LjYxMiwtNzYuNTc2XSxbLTE0Ni4xMDQsLTc2LjQ3OF0sWy0xNDYuMTQ0LC03Ni4xMDVdLFstMTQ2LjQ5NiwtNzUuNzMzXSxbLTE0Ni4yMDIsLTc1LjM4XSxbLTE0NC45MSwtNzUuMjA0XSxbLTE0NC4zMjIsLTc1LjUzN10sWy0xNDIuNzk0LC03NS4zNDFdLFstMTQxLjYzOSwtNzUuMDg2XSxbLTE0MC4yMDksLTc1LjA2N10sWy0xMzguODU4LC03NC45NjldLFstMTM3LjUwNiwtNzQuNzM0XSxbLTEzNi40MjksLTc0LjUxOF0sWy0xMzUuMjE1LC03NC4zMDNdLFstMTM0LjQzMSwtNzQuMzYxXSxbLTEzMy43NDYsLTc0LjQ0XSxbLTEzMi4yNTcsLTc0LjMwM10sWy0xMzAuOTI1LC03NC40NzldLFstMTI5LjU1NCwtNzQuNDU5XSxbLTEyOC4yNDIsLTc0LjMyMl0sWy0xMjYuODkxLC03NC40Ml0sWy0xMjUuNDAyLC03NC41MThdLFstMTI0LjAxMSwtNzQuNDc5XSxbLTEyMi41NjIsLTc0LjQ5OV0sWy0xMjEuMDc0LC03NC41MThdLFstMTE5LjcwMywtNzQuNDc5XSxbLTExOC42ODQsLTc0LjE4NV0sWy0xMTcuNDcsLTc0LjAyOF0sWy0xMTYuMjE2LC03NC4yNDRdLFstMTE1LjAyMiwtNzQuMDY4XSxbLTExMy45NDQsLTczLjcxNV0sWy0xMTMuMjk4LC03NC4wMjhdLFstMTEyLjk0NSwtNzQuMzgxXSxbLTExMi4yOTksLTc0LjcxNF0sWy0xMTEuMjYxLC03NC40Ml0sWy0xMTAuMDY2LC03NC43OTNdLFstMTA4LjcxNSwtNzQuOTFdLFstMTA3LjU1OSwtNzUuMTg0XSxbLTEwNi4xNDksLTc1LjEyNl0sWy0xMDQuODc2LC03NC45NDldLFstMTAzLjM2OCwtNzQuOTg4XSxbLTEwMi4wMTcsLTc1LjEyNl0sWy0xMDAuNjQ2LC03NS4zMDJdLFstMTAwLjExNywtNzQuODcxXSxbLTEwMC43NjMsLTc0LjUzOF0sWy0xMDEuMjUzLC03NC4xODVdLFstMTAyLjU0NSwtNzQuMTA3XSxbLTEwMy4xMTMsLTczLjczNF0sWy0xMDMuMzI5LC03My4zNjJdLFstMTAzLjY4MSwtNzIuNjE4XSxbLTEwMi45MTcsLTcyLjc1NV0sWy0xMDEuNjA1LC03Mi44MTNdLFstMTAwLjMxMywtNzIuNzU1XSxbLTk5LjEzNywtNzIuOTExXSxbLTk4LjExOSwtNzMuMjA1XSxbLTk3LjY4OCwtNzMuNTU4XSxbLTk2LjMzNywtNzMuNjE3XSxbLTk1LjA0NCwtNzMuNDhdLFstOTMuNjczLC03My4yODRdLFstOTIuNDM5LC03My4xNjZdLFstOTEuNDIxLC03My40MDFdLFstOTAuMDg5LC03My4zMjNdLFstODkuMjI3LC03Mi41NTldLFstODguNDI0LC03My4wMDldLFstODcuMjY4LC03My4xODZdLFstODYuMDE1LC03My4wODhdLFstODUuMTkyLC03My40OF0sWy04My44OCwtNzMuNTE5XSxbLTgyLjY2NiwtNzMuNjM2XSxbLTgxLjQ3MSwtNzMuODUyXSxbLTgwLjY4NywtNzMuNDhdLFstODAuMjk2LC03My4xMjddLFstNzkuMjk3LC03My41MTldLFstNzcuOTI2LC03My40MjFdLFstNzYuOTA3LC03My42MzZdLFstNzYuMjIyLC03My45N10sWy03NC44OSwtNzMuODcyXSxbLTczLjg1MiwtNzMuNjU2XSxbLTcyLjgzNCwtNzMuNDAxXSxbLTcxLjYxOSwtNzMuMjY0XSxbLTcwLjIwOSwtNzMuMTQ3XSxbLTY4LjkzNiwtNzMuMDA5XSxbLTY3Ljk1NywtNzIuNzk0XSxbLTY3LjM2OSwtNzIuNDhdLFstNjcuMTM0LC03Mi4wNDldLFstNjcuMjUyLC03MS42MzhdLFstNjcuNTY1LC03MS4yNDZdLFstNjcuOTE3LC03MC44NTRdLFstNjguMjMxLC03MC40NjJdLFstNjguNDg1LC03MC4xMDldLFstNjguNTQ0LC02OS43MTddLFstNjguNDQ2LC02OS4zMjZdLFstNjcuOTc2LC02OC45NTNdLFstNjcuNTg1LC02OC41NDJdLFstNjcuNDI4LC02OC4xNV0sWy02Ny42MjQsLTY3LjcxOV0sWy02Ny43NDEsLTY3LjMyN10sWy02Ny4yNTIsLTY2Ljg3Nl0sWy02Ni43MDMsLTY2LjU4Ml0sWy02Ni4wNTcsLTY2LjIxXSxbLTY1LjM3MSwtNjUuODk2XSxbLTY0LjU2OCwtNjUuNjAzXSxbLTY0LjE3NywtNjUuMTcxXSxbLTYzLjYyOCwtNjQuODk3XSxbLTYzLjAwMSwtNjQuNjQyXSxbLTYyLjA0MiwtNjQuNTg0XSxbLTYxLjQxNSwtNjQuMjddLFstNjAuNzEsLTY0LjA3NF0sWy01OS44ODcsLTYzLjk1N10sWy01OS4xNjMsLTYzLjcwMl0sWy01OC41OTUsLTYzLjM4OF0sWy01Ny44MTEsLTYzLjI3MV0sWy01Ny4yMjQsLTYzLjUyNV0sWy01Ny41OTYsLTYzLjg1OV0sWy01OC42MTQsLTY0LjE1Ml1dLFtbLTY3Ljc1LC01My44NV0sWy02Ni40NSwtNTQuNDVdLFstNjUuMDUsLTU0LjddLFstNjUuNSwtNTUuMl0sWy02Ni40NSwtNTUuMjVdLFstNjYuOTYsLTU0Ljg5N10sWy02Ny4yOTEsLTU1LjMwMV0sWy02OC4xNDksLTU1LjYxMl0sWy02OS4yMzIsLTU1LjQ5OV0sWy02OS45NTgsLTU1LjE5OF0sWy03MS4wMDYsLTU1LjA1NF0sWy03Mi4yNjQsLTU0LjQ5NV0sWy03My4yODUsLTUzLjk1OF0sWy03NC42NjMsLTUyLjgzN10sWy03My44MzgsLTUzLjA0N10sWy03Mi40MzQsLTUzLjcxNV0sWy03MS4xMDgsLTU0LjA3NF0sWy03MC41OTIsLTUzLjYxNl0sWy03MC4yNjcsLTUyLjkzMV0sWy02OS4zNDYsLTUyLjUxOF0sWy02OC42MzQsLTUyLjYzNl0sWy02OC42MzQsLTUyLjYzNl0sWy02OC4yNSwtNTMuMV0sWy02Ny43NSwtNTMuODVdXSxbWy01OC41NSwtNTEuMV0sWy01Ny43NSwtNTEuNTVdLFstNTguMDUsLTUxLjldLFstNTkuNCwtNTIuMl0sWy01OS44NSwtNTEuODVdLFstNjAuNywtNTIuM10sWy02MS4yLC01MS44NV0sWy02MCwtNTEuMjVdLFstNTkuMTUsLTUxLjVdLFstNTguNTUsLTUxLjFdXSxbWzcwLjI4LC00OS43MV0sWzY4Ljc0NSwtNDkuNzc1XSxbNjguNzIsLTQ5LjI0Ml0sWzY4Ljg2OCwtNDguODNdLFs2OC45MzUsLTQ4LjYyNV0sWzY5LjU4LC00OC45NF0sWzcwLjUyNSwtNDkuMDY1XSxbNzAuNTYsLTQ5LjI1NV0sWzcwLjI4LC00OS43MV1dLFtbMTQ1LjM5OCwtNDAuNzkzXSxbMTQ2LjM2NCwtNDEuMTM4XSxbMTQ2LjkwOSwtNDEuMDAxXSxbMTQ3LjY4OSwtNDAuODA4XSxbMTQ4LjI4OSwtNDAuODc1XSxbMTQ4LjM2LC00Mi4wNjJdLFsxNDguMDE3LC00Mi40MDddLFsxNDcuOTE0LC00My4yMTJdLFsxNDcuNTY1LC00Mi45MzhdLFsxNDYuODcsLTQzLjYzNV0sWzE0Ni42NjMsLTQzLjU4MV0sWzE0Ni4wNDgsLTQzLjU1XSxbMTQ1LjQzMiwtNDIuNjk0XSxbMTQ1LjI5NSwtNDIuMDM0XSxbMTQ0LjcxOCwtNDEuMTYzXSxbMTQ0Ljc0NCwtNDAuNzA0XSxbMTQ1LjM5OCwtNDAuNzkzXV0sW1sxNzMuMDIsLTQwLjkxOV0sWzE3My4yNDcsLTQxLjMzMl0sWzE3My45NTgsLTQwLjkyN10sWzE3NC4yNDgsLTQxLjM0OV0sWzE3NC4yNDksLTQxLjc3XSxbMTczLjg3NiwtNDIuMjMzXSxbMTczLjIyMywtNDIuOTddLFsxNzIuNzExLC00My4zNzJdLFsxNzMuMDgsLTQzLjg1M10sWzE3Mi4zMDksLTQzLjg2Nl0sWzE3MS40NTMsLTQ0LjI0M10sWzE3MS4xODUsLTQ0Ljg5N10sWzE3MC42MTcsLTQ1LjkwOV0sWzE2OS44MzEsLTQ2LjM1Nl0sWzE2OS4zMzIsLTQ2LjY0MV0sWzE2OC40MTEsLTQ2LjYyXSxbMTY3Ljc2NCwtNDYuMjldLFsxNjYuNjc3LC00Ni4yMl0sWzE2Ni41MDksLTQ1Ljg1M10sWzE2Ny4wNDYsLTQ1LjExMV0sWzE2OC4zMDQsLTQ0LjEyNF0sWzE2OC45NDksLTQzLjkzNl0sWzE2OS42NjgsLTQzLjU1NV0sWzE3MC41MjUsLTQzLjAzMl0sWzE3MS4xMjUsLTQyLjUxM10sWzE3MS41NywtNDEuNzY3XSxbMTcxLjk0OSwtNDEuNTE0XSxbMTcyLjA5NywtNDAuOTU2XSxbMTcyLjc5OSwtNDAuNDk0XSxbMTczLjAyLC00MC45MTldXSxbWzE3NC42MTIsLTM2LjE1Nl0sWzE3NS4zMzcsLTM3LjIwOV0sWzE3NS4zNTgsLTM2LjUyNl0sWzE3NS44MDksLTM2Ljc5OV0sWzE3NS45NTgsLTM3LjU1NV0sWzE3Ni43NjMsLTM3Ljg4MV0sWzE3Ny40MzksLTM3Ljk2MV0sWzE3OC4wMSwtMzcuNThdLFsxNzguNTE3LC0zNy42OTVdLFsxNzguMjc1LC0zOC41ODNdLFsxNzcuOTcsLTM5LjE2Nl0sWzE3Ny4yMDcsLTM5LjE0Nl0sWzE3Ni45NCwtMzkuNDVdLFsxNzcuMDMzLC0zOS44OF0sWzE3Ni44ODYsLTQwLjA2Nl0sWzE3Ni41MDgsLTQwLjYwNV0sWzE3Ni4wMTIsLTQxLjI5XSxbMTc1LjI0LC00MS42ODhdLFsxNzUuMDY4LC00MS40MjZdLFsxNzQuNjUxLC00MS4yODJdLFsxNzUuMjI4LC00MC40NTldLFsxNzQuOSwtMzkuOTA5XSxbMTczLjgyNCwtMzkuNTA5XSxbMTczLjg1MiwtMzkuMTQ3XSxbMTc0LjU3NSwtMzguNzk4XSxbMTc0Ljc0MywtMzguMDI4XSxbMTc0LjY5NywtMzcuMzgxXSxbMTc0LjI5MiwtMzYuNzExXSxbMTc0LjMxOSwtMzYuNTM1XSxbMTczLjg0MSwtMzYuMTIyXSxbMTczLjA1NCwtMzUuMjM3XSxbMTcyLjYzNiwtMzQuNTI5XSxbMTczLjAwNywtMzQuNDUxXSxbMTczLjU1MSwtMzUuMDA2XSxbMTc0LjMyOSwtMzUuMjY1XSxbMTc0LjYxMiwtMzYuMTU2XV0sW1sxNjcuMTIsLTIyLjE2XSxbMTY2Ljc0LC0yMi40XSxbMTY2LjE5LC0yMi4xM10sWzE2NS40NzQsLTIxLjY4XSxbMTY0LjgzLC0yMS4xNV0sWzE2NC4xNjgsLTIwLjQ0NV0sWzE2NC4wMywtMjAuMTA2XSxbMTY0LjQ2LC0yMC4xMl0sWzE2NS4wMiwtMjAuNDZdLFsxNjUuNDYsLTIwLjhdLFsxNjUuNzgsLTIxLjA4XSxbMTY2LjYsLTIxLjddLFsxNjcuMTIsLTIyLjE2XV0sW1sxNzguMzc0LC0xNy4zNF0sWzE3OC43MTgsLTE3LjYyOF0sWzE3OC41NTMsLTE4LjE1MV0sWzE3Ny45MzMsLTE4LjI4OF0sWzE3Ny4zODEsLTE4LjE2NF0sWzE3Ny4yODUsLTE3LjcyNV0sWzE3Ny42NzEsLTE3LjM4MV0sWzE3OC4xMjYsLTE3LjUwNV0sWzE3OC4zNzQsLTE3LjM0XV0sW1sxNzkuMzY0LC0xNi44MDFdLFsxNzguNzI1LC0xNy4wMTJdLFsxNzguNTk3LC0xNi42MzldLFsxNzkuMDk3LC0xNi40MzRdLFsxNzkuNDE0LC0xNi4zNzldLFsxODAsLTE2LjA2N10sWzE4MCwtMTYuNTU1XSxbMTc5LjM2NCwtMTYuODAxXV0sW1stMTc5LjkxNywtMTYuNTAyXSxbLTE4MCwtMTYuNTU1XSxbLTE4MCwtMTYuMDY3XSxbLTE3OS43OTMsLTE2LjAyMV0sWy0xNzkuOTE3LC0xNi41MDJdXSxbWzE2Ny44NDUsLTE2LjQ2Nl0sWzE2Ny41MTUsLTE2LjU5OF0sWzE2Ny4xOCwtMTYuMTZdLFsxNjcuMjE3LC0xNS44OTJdLFsxNjcuODQ1LC0xNi40NjZdXSxbWzE2Ny4xMDgsLTE0LjkzNF0sWzE2Ny4yNywtMTUuNzRdLFsxNjcuMDAxLC0xNS42MTVdLFsxNjYuNzkzLC0xNS42NjldLFsxNjYuNjUsLTE1LjM5M10sWzE2Ni42MjksLTE0LjYyNl0sWzE2Ny4xMDgsLTE0LjkzNF1dLFtbNTAuMDU3LC0xMy41NTZdLFs1MC4yMTcsLTE0Ljc1OV0sWzUwLjQ3NywtMTUuMjI3XSxbNTAuMzc3LC0xNS43MDZdLFs1MC4yLC0xNi4wXSxbNDkuODYxLC0xNS40MTRdLFs0OS42NzMsLTE1LjcxXSxbNDkuODYzLC0xNi40NTFdLFs0OS43NzUsLTE2Ljg3NV0sWzQ5LjQ5OSwtMTcuMTA2XSxbNDkuNDM2LC0xNy45NTNdLFs0OS4wNDIsLTE5LjExOV0sWzQ4LjU0OSwtMjAuNDk3XSxbNDcuOTMxLC0yMi4zOTJdLFs0Ny41NDgsLTIzLjc4Ml0sWzQ3LjA5NiwtMjQuOTQyXSxbNDYuMjgyLC0yNS4xNzhdLFs0NS40MSwtMjUuNjAxXSxbNDQuODM0LC0yNS4zNDZdLFs0NC4wNCwtMjQuOTg4XSxbNDMuNzY0LC0yNC40NjFdLFs0My42OTgsLTIzLjU3NF0sWzQzLjM0NiwtMjIuNzc3XSxbNDMuMjU0LC0yMi4wNTddLFs0My40MzMsLTIxLjMzNl0sWzQzLjg5NCwtMjEuMTYzXSxbNDMuODk2LC0yMC44M10sWzQ0LjM3NCwtMjAuMDcyXSxbNDQuNDY0LC0xOS40MzVdLFs0NC4yMzIsLTE4Ljk2Ml0sWzQ0LjA0MywtMTguMzMxXSxbNDMuOTYzLC0xNy40MV0sWzQ0LjMxMiwtMTYuODVdLFs0NC40NDcsLTE2LjIxNl0sWzQ0Ljk0NSwtMTYuMTc5XSxbNDUuNTAzLC0xNS45NzRdLFs0NS44NzMsLTE1Ljc5M10sWzQ2LjMxMiwtMTUuNzhdLFs0Ni44ODIsLTE1LjIxXSxbNDcuNzA1LC0xNC41OTRdLFs0OC4wMDUsLTE0LjA5MV0sWzQ3Ljg2OSwtMTMuNjY0XSxbNDguMjk0LC0xMy43ODRdLFs0OC44NDUsLTEzLjA4OV0sWzQ4Ljg2NCwtMTIuNDg4XSxbNDkuMTk1LC0xMi4wNDFdLFs0OS41NDQsLTEyLjQ3XSxbNDkuODA5LC0xMi44OTVdLFs1MC4wNTcsLTEzLjU1Nl1dLFtbMTQzLjU2MiwtMTMuNzY0XSxbMTQzLjkyMiwtMTQuNTQ4XSxbMTQ0LjU2NCwtMTQuMTcxXSxbMTQ0Ljg5NSwtMTQuNTk0XSxbMTQ1LjM3NSwtMTQuOTg1XSxbMTQ1LjI3MiwtMTUuNDI4XSxbMTQ1LjQ4NSwtMTYuMjg2XSxbMTQ1LjYzNywtMTYuNzg1XSxbMTQ1Ljg4OSwtMTYuOTA3XSxbMTQ2LjE2LC0xNy43NjJdLFsxNDYuMDY0LC0xOC4yOF0sWzE0Ni4zODcsLTE4Ljk1OF0sWzE0Ny40NzEsLTE5LjQ4MV0sWzE0OC4xNzgsLTE5Ljk1Nl0sWzE0OC44NDgsLTIwLjM5MV0sWzE0OC43MTcsLTIwLjYzM10sWzE0OS4yODksLTIxLjI2MV0sWzE0OS42NzgsLTIyLjM0M10sWzE1MC4wNzcsLTIyLjEyM10sWzE1MC40ODMsLTIyLjU1Nl0sWzE1MC43MjcsLTIyLjQwMl0sWzE1MC45LC0yMy40NjJdLFsxNTEuNjA5LC0yNC4wNzZdLFsxNTIuMDc0LC0yNC40NThdLFsxNTIuODU1LC0yNS4yNjhdLFsxNTMuMTM2LC0yNi4wNzFdLFsxNTMuMTYyLC0yNi42NDFdLFsxNTMuMDkzLC0yNy4yNl0sWzE1My41NjksLTI4LjExXSxbMTUzLjUxMiwtMjguOTk1XSxbMTUzLjMzOSwtMjkuNDU4XSxbMTUzLjA2OSwtMzAuMzVdLFsxNTMuMDksLTMwLjkyNF0sWzE1Mi44OTIsLTMxLjY0XSxbMTUyLjQ1LC0zMi41NV0sWzE1MS43MDksLTMzLjA0MV0sWzE1MS4zNDQsLTMzLjgxNl0sWzE1MS4wMTEsLTM0LjMxXSxbMTUwLjcxNCwtMzUuMTczXSxbMTUwLjMyOCwtMzUuNjcyXSxbMTUwLjA3NSwtMzYuNDJdLFsxNDkuOTQ2LC0zNy4xMDldLFsxNDkuOTk3LC0zNy40MjVdLFsxNDkuNDI0LC0zNy43NzNdLFsxNDguMzA1LC0zNy44MDldLFsxNDcuMzgyLC0zOC4yMTldLFsxNDYuOTIyLC0zOC42MDddLFsxNDYuMzE4LC0zOS4wMzZdLFsxNDUuNDksLTM4LjU5NF0sWzE0NC44NzcsLTM4LjQxN10sWzE0NS4wMzIsLTM3Ljg5Nl0sWzE0NC40ODYsLTM4LjA4NV0sWzE0My42MSwtMzguODA5XSxbMTQyLjc0NSwtMzguNTM4XSxbMTQyLjE3OCwtMzguMzhdLFsxNDEuNjA3LC0zOC4zMDldLFsxNDAuNjM5LC0zOC4wMTldLFsxMzkuOTkyLC0zNy40MDNdLFsxMzkuODA3LC0zNi42NDRdLFsxMzkuNTc0LC0zNi4xMzhdLFsxMzkuMDgzLC0zNS43MzNdLFsxMzguMTIxLC0zNS42MTJdLFsxMzguNDQ5LC0zNS4xMjddLFsxMzguMjA4LC0zNC4zODVdLFsxMzcuNzE5LC0zNS4wNzddLFsxMzYuODI5LC0zNS4yNjFdLFsxMzcuMzUyLC0zNC43MDddLFsxMzcuNTA0LC0zNC4xM10sWzEzNy44OSwtMzMuNjRdLFsxMzcuODEsLTMyLjldLFsxMzYuOTk3LC0zMy43NTNdLFsxMzYuMzcyLC0zNC4wOTVdLFsxMzUuOTg5LC0zNC44OV0sWzEzNS4yMDgsLTM0LjQ3OV0sWzEzNS4yMzksLTMzLjk0OF0sWzEzNC42MTMsLTMzLjIyM10sWzEzNC4wODYsLTMyLjg0OF0sWzEzNC4yNzQsLTMyLjYxN10sWzEzMi45OTEsLTMyLjAxMV0sWzEzMi4yODgsLTMxLjk4M10sWzEzMS4zMjYsLTMxLjQ5Nl0sWzEyOS41MzYsLTMxLjU5XSxbMTI4LjI0MSwtMzEuOTQ4XSxbMTI3LjEwMywtMzIuMjgyXSxbMTI2LjE0OSwtMzIuMjE2XSxbMTI1LjA4OSwtMzIuNzI5XSxbMTI0LjIyMiwtMzIuOTU5XSxbMTI0LjAyOSwtMzMuNDg0XSxbMTIzLjY2LC0zMy44OV0sWzEyMi44MTEsLTMzLjkxNF0sWzEyMi4xODMsLTM0LjAwM10sWzEyMS4yOTksLTMzLjgyMV0sWzEyMC41OCwtMzMuOTNdLFsxMTkuODk0LC0zMy45NzZdLFsxMTkuMjk5LC0zNC41MDldLFsxMTkuMDA3LC0zNC40NjRdLFsxMTguNTA2LC0zNC43NDddLFsxMTguMDI1LC0zNS4wNjVdLFsxMTcuMjk2LC0zNS4wMjVdLFsxMTYuNjI1LC0zNS4wMjVdLFsxMTUuNTY0LC0zNC4zODZdLFsxMTUuMDI3LC0zNC4xOTddLFsxMTUuMDQ5LC0zMy42MjNdLFsxMTUuNTQ1LC0zMy40ODddLFsxMTUuNzE1LC0zMy4yNl0sWzExNS42NzksLTMyLjldLFsxMTUuODAyLC0zMi4yMDVdLFsxMTUuNjksLTMxLjYxMl0sWzExNS4xNjEsLTMwLjYwMl0sWzExNC45OTcsLTMwLjAzMV0sWzExNS4wNCwtMjkuNDYxXSxbMTE0LjY0MiwtMjguODFdLFsxMTQuNjE2LC0yOC41MTZdLFsxMTQuMTc0LC0yOC4xMThdLFsxMTQuMDQ5LC0yNy4zMzVdLFsxMTMuNDc3LC0yNi41NDNdLFsxMTMuMzM5LC0yNi4xMTddLFsxMTMuNzc4LC0yNi41NDldLFsxMTMuNDQxLC0yNS42MjFdLFsxMTMuOTM3LC0yNS45MTFdLFsxMTQuMjMzLC0yNi4yOThdLFsxMTQuMjE2LC0yNS43ODZdLFsxMTMuNzIxLC0yNC45OTldLFsxMTMuNjI1LC0yNC42ODRdLFsxMTMuMzk0LC0yNC4zODVdLFsxMTMuNTAyLC0yMy44MDZdLFsxMTMuNzA3LC0yMy41Nl0sWzExMy44NDMsLTIzLjA2XSxbMTEzLjczNywtMjIuNDc1XSxbMTE0LjE1LC0yMS43NTZdLFsxMTQuMjI1LC0yMi41MTddLFsxMTQuNjQ4LC0yMS44M10sWzExNS40NiwtMjEuNDk1XSxbMTE1Ljk0NywtMjEuMDY5XSxbMTE2LjcxMiwtMjAuNzAyXSxbMTE3LjE2NiwtMjAuNjI0XSxbMTE3LjQ0MiwtMjAuNzQ3XSxbMTE4LjIzLC0yMC4zNzRdLFsxMTguODM2LC0yMC4yNjNdLFsxMTguOTg4LC0yMC4wNDRdLFsxMTkuMjUyLC0xOS45NTNdLFsxMTkuODA1LC0xOS45NzddLFsxMjAuODU2LC0xOS42ODRdLFsxMjEuNCwtMTkuMjRdLFsxMjEuNjU1LC0xOC43MDVdLFsxMjIuMjQyLC0xOC4xOThdLFsxMjIuMjg3LC0xNy43OTldLFsxMjIuMzEzLC0xNy4yNTVdLFsxMjMuMDEzLC0xNi40MDVdLFsxMjMuNDM0LC0xNy4yNjldLFsxMjMuODU5LC0xNy4wNjldLFsxMjMuNTAzLC0xNi41OTddLFsxMjMuODE3LC0xNi4xMTFdLFsxMjQuMjU4LC0xNi4zMjhdLFsxMjQuMzgsLTE1LjU2N10sWzEyNC45MjYsLTE1LjA3NV0sWzEyNS4xNjcsLTE0LjY4XSxbMTI1LjY3LC0xNC41MV0sWzEyNS42ODYsLTE0LjIzMV0sWzEyNi4xMjUsLTE0LjM0N10sWzEyNi4xNDMsLTE0LjA5Nl0sWzEyNi41ODMsLTEzLjk1M10sWzEyNy4wNjYsLTEzLjgxOF0sWzEyNy44MDUsLTE0LjI3N10sWzEyOC4zNiwtMTQuODY5XSxbMTI4Ljk4NiwtMTQuODc2XSxbMTI5LjYyMSwtMTQuOTddLFsxMjkuNDEsLTE0LjQyMV0sWzEyOS44ODksLTEzLjYxOV0sWzEzMC4zMzksLTEzLjM1N10sWzEzMC4xODQsLTEzLjEwOF0sWzEzMC42MTgsLTEyLjUzNl0sWzEzMS4yMjMsLTEyLjE4NF0sWzEzMS43MzUsLTEyLjMwMl0sWzEzMi41NzUsLTEyLjExNF0sWzEzMi41NTcsLTExLjYwM10sWzEzMS44MjUsLTExLjI3NF0sWzEzMi4zNTcsLTExLjEyOV0sWzEzMy4wMiwtMTEuMzc2XSxbMTMzLjU1MSwtMTEuNzg3XSxbMTM0LjM5MywtMTIuMDQyXSxbMTM0LjY3OSwtMTEuOTQxXSxbMTM1LjI5OCwtMTIuMjQ5XSxbMTM1Ljg4MywtMTEuOTYyXSxbMTM2LjI1OCwtMTIuMDQ5XSxbMTM2LjQ5MiwtMTEuODU3XSxbMTM2Ljk1MiwtMTIuMzUyXSxbMTM2LjY4NSwtMTIuODg3XSxbMTM2LjMwNSwtMTMuMjkxXSxbMTM1Ljk2MiwtMTMuMzI1XSxbMTM2LjA3OCwtMTMuNzI0XSxbMTM1Ljc4NCwtMTQuMjI0XSxbMTM1LjQyOSwtMTQuNzE1XSxbMTM1LjUsLTE0Ljk5OF0sWzEzNi4yOTUsLTE1LjU1XSxbMTM3LjA2NSwtMTUuODcxXSxbMTM3LjU4LC0xNi4yMTVdLFsxMzguMzAzLC0xNi44MDhdLFsxMzguNTg1LC0xNi44MDddLFsxMzkuMTA5LC0xNy4wNjNdLFsxMzkuMjYxLC0xNy4zNzJdLFsxNDAuMjE1LC0xNy43MTFdLFsxNDAuODc1LC0xNy4zNjldLFsxNDEuMDcxLC0xNi44MzJdLFsxNDEuMjc0LC0xNi4zODldLFsxNDEuMzk4LC0xNS44NDFdLFsxNDEuNzAyLC0xNS4wNDVdLFsxNDEuNTYzLC0xNC41NjFdLFsxNDEuNjM2LC0xNC4yN10sWzE0MS41MiwtMTMuNjk4XSxbMTQxLjY1MSwtMTIuOTQ1XSxbMTQxLjg0MywtMTIuNzQyXSxbMTQxLjY4NywtMTIuNDA4XSxbMTQxLjkyOSwtMTEuODc3XSxbMTQyLjExOCwtMTEuMzI4XSxbMTQyLjE0NCwtMTEuMDQzXSxbMTQyLjUxNSwtMTAuNjY4XSxbMTQyLjc5NywtMTEuMTU3XSxbMTQyLjg2NywtMTEuNzg1XSxbMTQzLjExNiwtMTEuOTA2XSxbMTQzLjE1OSwtMTIuMzI2XSxbMTQzLjUyMiwtMTIuODM0XSxbMTQzLjU5NywtMTMuNF0sWzE0My41NjIsLTEzLjc2NF1dLFtbMTYyLjExOSwtMTAuNDgzXSxbMTYyLjM5OSwtMTAuODI2XSxbMTYxLjcsLTEwLjgyXSxbMTYxLjMyLC0xMC4yMDVdLFsxNjEuOTE3LC0xMC40NDddLFsxNjIuMTE5LC0xMC40ODNdXSxbWzEyMC43MTYsLTEwLjI0XSxbMTIwLjI5NSwtMTAuMjU5XSxbMTE4Ljk2OCwtOS41NThdLFsxMTkuOSwtOS4zNjFdLFsxMjAuNDI2LC05LjY2Nl0sWzEyMC43NzYsLTkuOTddLFsxMjAuNzE2LC0xMC4yNF1dLFtbMTYwLjg1MiwtOS44NzNdLFsxNjAuNDYzLC05Ljg5NV0sWzE1OS44NDksLTkuNzk0XSxbMTU5LjY0LC05LjY0XSxbMTU5LjcwMywtOS4yNDNdLFsxNjAuMzYzLC05LjRdLFsxNjAuNjg5LC05LjYxXSxbMTYwLjg1MiwtOS44NzNdXSxbWzE2MS42OCwtOS42XSxbMTYxLjUyOSwtOS43ODRdLFsxNjAuNzg4LC04LjkxOF0sWzE2MC41OCwtOC4zMl0sWzE2MC45MiwtOC4zMl0sWzE2MS4yOCwtOS4xMl0sWzE2MS42OCwtOS42XV0sW1sxMjQuNDM2LC0xMC4xNF0sWzEyMy41OCwtMTAuMzZdLFsxMjMuNDYsLTEwLjI0XSxbMTIzLjU1LC05LjldLFsxMjMuOTgsLTkuMjldLFsxMjQuOTY5LC04Ljg5M10sWzEyNS4wODYsLTguNjU3XSxbMTI1Ljk0NywtOC40MzJdLFsxMjYuNjQ1LC04LjM5OF0sWzEyNi45NTcsLTguMjczXSxbMTI3LjMzNiwtOC4zOTddLFsxMjYuOTY4LC04LjY2OF0sWzEyNS45MjYsLTkuMTA2XSxbMTI1LjA4OSwtOS4zOTNdLFsxMjQuNDM2LC0xMC4xNF1dLFtbMTE3LjksLTguMDk2XSxbMTE4LjI2MSwtOC4zNjJdLFsxMTguODc4LC04LjI4MV0sWzExOS4xMjcsLTguNzA2XSxbMTE3Ljk3LC04LjkwN10sWzExNy4yNzgsLTkuMDQxXSxbMTE2Ljc0LC05LjAzM10sWzExNy4wODQsLTguNDU3XSxbMTE3LjYzMiwtOC40NDldLFsxMTcuOSwtOC4wOTZdXSxbWzEyMi45MDQsLTguMDk0XSxbMTIyLjc1NywtOC42NV0sWzEyMS4yNTQsLTguOTM0XSxbMTE5LjkyNCwtOC44MV0sWzExOS45MjEsLTguNDQ1XSxbMTIwLjcxNSwtOC4yMzddLFsxMjEuMzQyLC04LjUzN10sWzEyMi4wMDcsLTguNDYxXSxbMTIyLjkwNCwtOC4wOTRdXSxbWzE1OS44NzUsLTguMzM3XSxbMTU5LjkxNywtOC41MzhdLFsxNTkuMTM0LC04LjExNF0sWzE1OC41ODYsLTcuNzU1XSxbMTU4LjIxMSwtNy40MjJdLFsxNTguMzYsLTcuMzJdLFsxNTguODIsLTcuNTZdLFsxNTkuNjQsLTguMDJdLFsxNTkuODc1LC04LjMzN11dLFtbMTU3LjUzOCwtNy4zNDhdLFsxNTcuMzM5LC03LjQwNV0sWzE1Ni45MDIsLTcuMTc3XSxbMTU2LjQ5MSwtNi43NjZdLFsxNTYuNTQzLC02LjU5OV0sWzE1Ny4xNCwtNy4wMjJdLFsxNTcuNTM4LC03LjM0OF1dLFtbMTA4LjYyMywtNi43NzhdLFsxMTAuNTM5LC02Ljg3N10sWzExMC43NiwtNi40NjVdLFsxMTIuNjE1LC02Ljk0Nl0sWzExMi45NzksLTcuNTk0XSxbMTE0LjQ3OSwtNy43NzddLFsxMTUuNzA2LC04LjM3MV0sWzExNC41NjUsLTguNzUyXSxbMTEzLjQ2NSwtOC4zNDldLFsxMTIuNTYsLTguMzc2XSxbMTExLjUyMiwtOC4zMDJdLFsxMTAuNTg2LC04LjEyM10sWzEwOS40MjgsLTcuNzQxXSxbMTA4LjY5NCwtNy42NDJdLFsxMDguMjc4LC03Ljc2N10sWzEwNi40NTQsLTcuMzU1XSxbMTA2LjI4MSwtNi45MjVdLFsxMDUuMzY1LC02Ljg1MV0sWzEwNi4wNTIsLTUuODk2XSxbMTA3LjI2NSwtNS45NTVdLFsxMDguMDcyLC02LjM0Nl0sWzEwOC40ODcsLTYuNDIyXSxbMTA4LjYyMywtNi43NzhdXSxbWzEzNC43MjUsLTYuMjE0XSxbMTM0LjIxLC02Ljg5NV0sWzEzNC4xMTMsLTYuMTQyXSxbMTM0LjI5LC01Ljc4M10sWzEzNC41LC01LjQ0NV0sWzEzNC43MjcsLTUuNzM4XSxbMTM0LjcyNSwtNi4yMTRdXSxbWzE1NS44OCwtNi44Ml0sWzE1NS42LC02LjkyXSxbMTU1LjE2NywtNi41MzZdLFsxNTQuNzI5LC01LjkwMV0sWzE1NC41MTQsLTUuMTM5XSxbMTU0LjY1MywtNS4wNDJdLFsxNTQuNzYsLTUuMzRdLFsxNTUuMDYzLC01LjU2N10sWzE1NS41NDgsLTYuMjAxXSxbMTU2LjAyLC02LjU0XSxbMTU1Ljg4LC02LjgyXV0sW1sxNTEuOTgzLC01LjQ3OF0sWzE1MS40NTksLTUuNTZdLFsxNTEuMzAxLC01Ljg0MV0sWzE1MC43NTQsLTYuMDg0XSxbMTUwLjI0MSwtNi4zMThdLFsxNDkuNzEsLTYuMzE3XSxbMTQ4Ljg5LC02LjAyNl0sWzE0OC4zMTksLTUuNzQ3XSxbMTQ4LjQwMiwtNS40MzhdLFsxNDkuMjk4LC01LjU4NF0sWzE0OS44NDYsLTUuNTA2XSxbMTQ5Ljk5NiwtNS4wMjZdLFsxNTAuMTQsLTUuMDAxXSxbMTUwLjIzNywtNS41MzJdLFsxNTAuODA3LC01LjQ1Nl0sWzE1MS4wOSwtNS4xMTRdLFsxNTEuNjQ4LC00Ljc1N10sWzE1MS41MzgsLTQuMTY4XSxbMTUyLjEzNywtNC4xNDldLFsxNTIuMzM5LC00LjMxM10sWzE1Mi4zMTksLTQuODY4XSxbMTUxLjk4MywtNS40NzhdXSxbWzEyNy4yNDksLTMuNDU5XSxbMTI2Ljg3NSwtMy43OTFdLFsxMjYuMTg0LC0zLjYwN10sWzEyNS45ODksLTMuMTc3XSxbMTI3LjAwMSwtMy4xMjldLFsxMjcuMjQ5LC0zLjQ1OV1dLFtbMTMwLjQ3MSwtMy4wOTRdLFsxMzAuODM1LC0zLjg1OF0sWzEyOS45OTEsLTMuNDQ2XSxbMTI5LjE1NSwtMy4zNjNdLFsxMjguNTkxLC0zLjQyOV0sWzEyNy44OTksLTMuMzkzXSxbMTI4LjEzNiwtMi44NDRdLFsxMjkuMzcxLC0yLjgwMl0sWzEzMC40NzEsLTMuMDk0XV0sW1sxNTMuMTQsLTQuNV0sWzE1Mi44MjcsLTQuNzY2XSxbMTUyLjYzOSwtNC4xNzZdLFsxNTIuNDA2LC0zLjc5XSxbMTUxLjk1MywtMy40NjJdLFsxNTEuMzg0LC0zLjAzNV0sWzE1MC42NjIsLTIuNzQxXSxbMTUwLjk0LC0yLjVdLFsxNTEuNDgsLTIuNzhdLFsxNTEuODIsLTMuMF0sWzE1Mi4yNCwtMy4yNF0sWzE1Mi42NCwtMy42Nl0sWzE1My4wMiwtMy45OF0sWzE1My4xNCwtNC41XV0sW1sxMzQuMTQzLC0xLjE1Ml0sWzEzNC40MjMsLTIuNzY5XSxbMTM1LjQ1OCwtMy4zNjhdLFsxMzYuMjkzLC0yLjMwN10sWzEzNy40NDEsLTEuNzA0XSxbMTM4LjMzLC0xLjcwM10sWzEzOS4xODUsLTIuMDUxXSxbMTM5LjkyNywtMi40MDldLFsxNDEuMCwtMi42XSxbMTQyLjczNSwtMy4yODldLFsxNDQuNTg0LC0zLjg2MV0sWzE0NS4yNzMsLTQuMzc0XSxbMTQ1LjgzLC00Ljg3Nl0sWzE0NS45ODIsLTUuNDY2XSxbMTQ3LjY0OCwtNi4wODRdLFsxNDcuODkxLC02LjYxNF0sWzE0Ni45NzEsLTYuNzIyXSxbMTQ3LjE5MiwtNy4zODhdLFsxNDguMDg1LC04LjA0NF0sWzE0OC43MzQsLTkuMTA1XSxbMTQ5LjMwNywtOS4wNzFdLFsxNDkuMjY3LC05LjUxNF0sWzE1MC4wMzksLTkuNjg0XSxbMTQ5LjczOSwtOS44NzNdLFsxNTAuODAyLC0xMC4yOTRdLFsxNTAuNjkxLC0xMC41ODNdLFsxNTAuMDI4LC0xMC42NTJdLFsxNDkuNzgyLC0xMC4zOTNdLFsxNDguOTIzLC0xMC4yODFdLFsxNDcuOTEzLC0xMC4xM10sWzE0Ny4xMzUsLTkuNDkyXSxbMTQ2LjU2OCwtOC45NDNdLFsxNDYuMDQ4LC04LjA2N10sWzE0NC43NDQsLTcuNjNdLFsxNDMuODk3LC03LjkxNV0sWzE0My4yODYsLTguMjQ1XSxbMTQzLjQxNCwtOC45ODNdLFsxNDIuNjI4LC05LjMyN10sWzE0Mi4wNjgsLTkuMTZdLFsxNDEuMDM0LC05LjExOF0sWzE0MC4xNDMsLTguMjk3XSxbMTM5LjEyOCwtOC4wOTZdLFsxMzguODgxLC04LjM4MV0sWzEzNy42MTQsLTguNDEyXSxbMTM4LjAzOSwtNy41OThdLFsxMzguNjY5LC03LjMyXSxbMTM4LjQwOCwtNi4yMzNdLFsxMzcuOTI4LC01LjM5M10sWzEzNS45ODksLTQuNTQ3XSxbMTM1LjE2NSwtNC40NjNdLFsxMzMuNjYzLC0zLjUzOV0sWzEzMy4zNjgsLTQuMDI1XSxbMTMyLjk4NCwtNC4xMTNdLFsxMzIuNzU3LC0zLjc0Nl0sWzEzMi43NTQsLTMuMzEyXSxbMTMxLjk5LC0yLjgyMV0sWzEzMy4wNjcsLTIuNDZdLFsxMzMuNzgsLTIuNDhdLFsxMzMuNjk2LC0yLjIxNV0sWzEzMi4yMzIsLTIuMjEzXSxbMTMxLjgzNiwtMS42MTddLFsxMzAuOTQzLC0xLjQzM10sWzEzMC41MiwtMC45MzhdLFsxMzEuODY4LC0wLjY5NV0sWzEzMi4zOCwtMC4zN10sWzEzMy45ODYsLTAuNzhdLFsxMzQuMTQzLC0xLjE1Ml1dLFtbMTI1LjI0MSwxLjQyXSxbMTI0LjQzNywwLjQyOF0sWzEyMy42ODYsMC4yMzZdLFsxMjIuNzIzLDAuNDMxXSxbMTIxLjA1NywwLjM4MV0sWzEyMC4xODMsMC4yMzddLFsxMjAuMDQxLC0wLjUyXSxbMTIwLjkzNiwtMS40MDldLFsxMjEuNDc2LC0wLjk1Nl0sWzEyMy4zNDEsLTAuNjE2XSxbMTIzLjI1OCwtMS4wNzZdLFsxMjIuODIzLC0wLjkzMV0sWzEyMi4zODksLTEuNTE3XSxbMTIxLjUwOCwtMS45MDRdLFsxMjIuNDU1LC0zLjE4Nl0sWzEyMi4yNzIsLTMuNTNdLFsxMjMuMTcxLC00LjY4NF0sWzEyMy4xNjIsLTUuMzQxXSxbMTIyLjYyOSwtNS42MzVdLFsxMjIuMjM2LC01LjI4M10sWzEyMi43MiwtNC40NjRdLFsxMjEuNzM4LC00Ljg1MV0sWzEyMS40ODksLTQuNTc1XSxbMTIxLjYxOSwtNC4xODhdLFsxMjAuODk4LC0zLjYwMl0sWzEyMC45NzIsLTIuNjI4XSxbMTIwLjMwNSwtMi45MzJdLFsxMjAuMzksLTQuMDk4XSxbMTIwLjQzMSwtNS41MjhdLFsxMTkuNzk3LC01LjY3M10sWzExOS4zNjcsLTUuMzhdLFsxMTkuNjU0LC00LjQ1OV0sWzExOS40OTksLTMuNDk0XSxbMTE5LjA3OCwtMy40ODddLFsxMTguNzY4LC0yLjgwMl0sWzExOS4xODEsLTIuMTQ3XSxbMTE5LjMyMywtMS4zNTNdLFsxMTkuODI2LDAuMTU0XSxbMTIwLjAzNiwwLjU2Nl0sWzEyMC44ODYsMS4zMDldLFsxMjEuNjY3LDEuMDE0XSxbMTIyLjkyOCwwLjg3NV0sWzEyNC4wNzgsMC45MTddLFsxMjUuMDY2LDEuNjQzXSxbMTI1LjI0MSwxLjQyXV0sW1sxMjguNjg4LDEuMTMyXSxbMTI4LjYzNiwwLjI1OF0sWzEyOC4xMiwwLjM1Nl0sWzEyNy45NjgsLTAuMjUyXSxbMTI4LjM4LC0wLjc4XSxbMTI4LjEsLTAuOV0sWzEyNy42OTYsLTAuMjY3XSxbMTI3LjM5OSwxLjAxMl0sWzEyNy42MDEsMS44MTFdLFsxMjcuOTMyLDIuMTc1XSxbMTI4LjAwNCwxLjYyOV0sWzEyOC41OTUsMS41NDFdLFsxMjguNjg4LDEuMTMyXV0sW1sxMDUuODE4LC01Ljg1Ml0sWzEwNC43MSwtNS44NzNdLFsxMDMuODY4LC01LjAzN10sWzEwMi41ODQsLTQuMjJdLFsxMDIuMTU2LC0zLjYxNF0sWzEwMS4zOTksLTIuOF0sWzEwMC45MDMsLTIuMDVdLFsxMDAuMTQyLC0wLjY1XSxbOTkuMjY0LDAuMTgzXSxbOTguOTcsMS4wNDNdLFs5OC42MDEsMS44MjRdLFs5Ny43LDIuNDUzXSxbOTcuMTc3LDMuMzA5XSxbOTYuNDI0LDMuODY5XSxbOTUuMzgxLDQuOTcxXSxbOTUuMjkzLDUuNDhdLFs5NS45MzcsNS40NF0sWzk3LjQ4NSw1LjI0Nl0sWzk4LjM2OSw0LjI2OF0sWzk5LjE0MywzLjU5XSxbOTkuNjk0LDMuMTc0XSxbMTAwLjY0MSwyLjA5OV0sWzEwMS42NTgsMi4wODRdLFsxMDIuNDk4LDEuMzk5XSxbMTAzLjA3NywwLjU2MV0sWzEwMy44MzgsMC4xMDVdLFsxMDMuNDM4LC0wLjcxMl0sWzEwNC4wMTEsLTEuMDU5XSxbMTA0LjM3LC0xLjA4NV0sWzEwNC41MzksLTEuNzgyXSxbMTA0Ljg4OCwtMi4zNF0sWzEwNS42MjIsLTIuNDI5XSxbMTA2LjEwOSwtMy4wNjJdLFsxMDUuODU3LC00LjMwNl0sWzEwNS44MTgsLTUuODUyXV0sW1sxMTcuODc2LDEuODI4XSxbMTE4Ljk5NywwLjkwMl0sWzExNy44MTIsMC43ODRdLFsxMTcuNDc4LDAuMTAyXSxbMTE3LjUyMiwtMC44MDRdLFsxMTYuNTYsLTEuNDg4XSxbMTE2LjUzNCwtMi40ODRdLFsxMTYuMTQ4LC00LjAxM10sWzExNi4wMDEsLTMuNjU3XSxbMTE0Ljg2NSwtNC4xMDddLFsxMTQuNDY5LC0zLjQ5Nl0sWzExMy43NTYsLTMuNDM5XSxbMTEzLjI1NywtMy4xMTldLFsxMTIuMDY4LC0zLjQ3OF0sWzExMS43MDMsLTIuOTk0XSxbMTExLjA0OCwtMy4wNDldLFsxMTAuMjI0LC0yLjkzNF0sWzExMC4wNzEsLTEuNTkzXSxbMTA5LjU3MiwtMS4zMTVdLFsxMDkuMDkyLC0wLjQ2XSxbMTA4Ljk1MywwLjQxNV0sWzEwOS4wNjksMS4zNDJdLFsxMDkuNjYzLDIuMDA2XSxbMTEwLjM5NiwxLjY2NF0sWzExMS4xNjksMS44NTFdLFsxMTEuMzcsMi42OTddLFsxMTEuNzk3LDIuODg2XSxbMTEyLjk5NiwzLjEwMl0sWzExMy43MTMsMy44OTRdLFsxMTQuMjA0LDQuNTI2XSxbMTE0LjYsNC45XSxbMTE1LjQ1MSw1LjQ0OF0sWzExNi4yMjEsNi4xNDNdLFsxMTYuNzI1LDYuOTI1XSxbMTE3LjEzLDYuOTI4XSxbMTE3LjY0Myw2LjQyMl0sWzExNy42ODksNS45ODddLFsxMTguMzQ4LDUuNzA5XSxbMTE5LjE4Miw1LjQwOF0sWzExOS4xMTEsNS4wMTZdLFsxMTguNDQsNC45NjddLFsxMTguNjE4LDQuNDc4XSxbMTE3Ljg4Miw0LjEzOF0sWzExNy4zMTMsMy4yMzRdLFsxMTguMDQ4LDIuMjg4XSxbMTE3Ljg3NiwxLjgyOF1dLFtbMTI2LjM3Nyw4LjQxNV0sWzEyNi40NzksNy43NV0sWzEyNi41MzcsNy4xODldLFsxMjYuMTk3LDYuMjc0XSxbMTI1LjgzMSw3LjI5NF0sWzEyNS4zNjQsNi43ODZdLFsxMjUuNjgzLDYuMDVdLFsxMjUuMzk3LDUuNTgxXSxbMTI0LjIyLDYuMTYxXSxbMTIzLjkzOSw2Ljg4NV0sWzEyNC4yNDQsNy4zNjFdLFsxMjMuNjEsNy44MzRdLFsxMjMuMjk2LDcuNDE5XSxbMTIyLjgyNiw3LjQ1N10sWzEyMi4wODUsNi44OTldLFsxMjEuOTIsNy4xOTJdLFsxMjIuMzEyLDguMDM1XSxbMTIyLjk0Miw4LjMxNl0sWzEyMy40ODgsOC42OTNdLFsxMjMuODQxLDguMjRdLFsxMjQuNjAxLDguNTE0XSxbMTI0Ljc2NSw4Ljk2XSxbMTI1LjQ3MSw4Ljk4N10sWzEyNS40MTIsOS43Nl0sWzEyNi4yMjMsOS4yODZdLFsxMjYuMzA3LDguNzgyXSxbMTI2LjM3Nyw4LjQxNV1dLFtbODEuMjE4LDYuMTk3XSxbODAuMzQ4LDUuOTY4XSxbNzkuODcyLDYuNzYzXSxbNzkuNjk1LDguMjAxXSxbODAuMTQ4LDkuODI0XSxbODAuODM5LDkuMjY4XSxbODEuMzA0LDguNTY0XSxbODEuNzg4LDcuNTIzXSxbODEuNjM3LDYuNDgyXSxbODEuMjE4LDYuMTk3XV0sW1stNjAuOTM1LDEwLjExXSxbLTYxLjc3LDEwXSxbLTYxLjk1LDEwLjA5XSxbLTYxLjY2LDEwLjM2NV0sWy02MS42OCwxMC43Nl0sWy02MS4xMDUsMTAuODldLFstNjAuODk1LDEwLjg1NV0sWy02MC45MzUsMTAuMTFdXSxbWzEyMy45ODIsMTAuMjc5XSxbMTIzLjYyMyw5Ljk1XSxbMTIzLjMxLDkuMzE4XSxbMTIyLjk5Niw5LjAyMl0sWzEyMi4zOCw5LjcxM10sWzEyMi41ODYsOS45ODFdLFsxMjIuODM3LDEwLjI2MV0sWzEyMi45NDcsMTAuODgyXSxbMTIzLjQ5OSwxMC45NDFdLFsxMjMuMzM4LDEwLjI2N10sWzEyNC4wNzgsMTEuMjMzXSxbMTIzLjk4MiwxMC4yNzldXSxbWzExOC41MDUsOS4zMTZdLFsxMTcuMTc0LDguMzY3XSxbMTE3LjY2NCw5LjA2N10sWzExOC4zODcsOS42ODRdLFsxMTguOTg3LDEwLjM3Nl0sWzExOS41MTEsMTEuMzddLFsxMTkuNjksMTAuNTU0XSxbMTE5LjAyOSwxMC4wMDRdLFsxMTguNTA1LDkuMzE2XV0sW1sxMjEuODg0LDExLjg5Ml0sWzEyMi40ODQsMTEuNTgyXSxbMTIzLjEyLDExLjU4NF0sWzEyMy4xMDEsMTEuMTY2XSxbMTIyLjYzOCwxMC43NDFdLFsxMjIuMDAzLDEwLjQ0MV0sWzEyMS45NjcsMTAuOTA2XSxbMTIyLjAzOCwxMS40MTZdLFsxMjEuODg0LDExLjg5Ml1dLFtbMTI1LjUwMywxMi4xNjNdLFsxMjUuNzgzLDExLjA0Nl0sWzEyNS4wMTIsMTEuMzExXSxbMTI1LjAzMywxMC45NzZdLFsxMjUuMjc3LDEwLjM1OV0sWzEyNC44MDIsMTAuMTM1XSxbMTI0Ljc2LDEwLjgzOF0sWzEyNC40NTksMTAuODldLFsxMjQuMzAzLDExLjQ5NV0sWzEyNC44OTEsMTEuNDE2XSxbMTI0Ljg3OCwxMS43OTRdLFsxMjQuMjY3LDEyLjU1OF0sWzEyNS4yMjcsMTIuNTM2XSxbMTI1LjUwMywxMi4xNjNdXSxbWzEyMS41MjcsMTMuMDddLFsxMjEuMjYyLDEyLjIwNl0sWzEyMC44MzQsMTIuNzA0XSxbMTIwLjMyMywxMy40NjZdLFsxMjEuMTgsMTMuNDNdLFsxMjEuNTI3LDEzLjA3XV0sW1sxMjEuMzIxLDE4LjUwNF0sWzEyMS45MzgsMTguMjE5XSxbMTIyLjI0NiwxOC40NzldLFsxMjIuMzM3LDE4LjIyNV0sWzEyMi4xNzQsMTcuODFdLFsxMjIuNTE2LDE3LjA5NF0sWzEyMi4yNTIsMTYuMjYyXSxbMTIxLjY2MywxNS45MzFdLFsxMjEuNTA1LDE1LjEyNV0sWzEyMS43MjksMTQuMzI4XSxbMTIyLjI1OSwxNC4yMThdLFsxMjIuNzAxLDE0LjMzN10sWzEyMy45NSwxMy43ODJdLFsxMjMuODU1LDEzLjIzOF0sWzEyNC4xODEsMTIuOTk4XSxbMTI0LjA3NywxMi41MzddLFsxMjMuMjk4LDEzLjAyOF0sWzEyMi45MjksMTMuNTUzXSxbMTIyLjY3MSwxMy4xODZdLFsxMjIuMDM1LDEzLjc4NF0sWzEyMS4xMjYsMTMuNjM3XSxbMTIwLjYyOSwxMy44NThdLFsxMjAuNjc5LDE0LjI3MV0sWzEyMC45OTIsMTQuNTI1XSxbMTIwLjY5MywxNC43NTddLFsxMjAuNTY0LDE0LjM5Nl0sWzEyMC4wNywxNC45NzFdLFsxMTkuOTIxLDE1LjQwNl0sWzExOS44ODQsMTYuMzY0XSxbMTIwLjI4NiwxNi4wMzVdLFsxMjAuMzksMTcuNTk5XSxbMTIwLjcxNiwxOC41MDVdLFsxMjEuMzIxLDE4LjUwNF1dLFtbLTY1LjU5MSwxOC4yMjhdLFstNjUuODQ3LDE3Ljk3Nl0sWy02Ni42LDE3Ljk4Ml0sWy02Ny4xODQsMTcuOTQ3XSxbLTY3LjI0MiwxOC4zNzRdLFstNjcuMTAxLDE4LjUyMV0sWy02Ni4yODIsMTguNTE1XSxbLTY1Ljc3MSwxOC40MjddLFstNjUuNTkxLDE4LjIyOF1dLFtbLTc2LjkwMywxNy44NjhdLFstNzcuMjA2LDE3LjcwMV0sWy03Ny43NjYsMTcuODYyXSxbLTc4LjMzOCwxOC4yMjZdLFstNzguMjE4LDE4LjQ1NV0sWy03Ny43OTcsMTguNTI0XSxbLTc3LjU3LDE4LjQ5MV0sWy03Ni44OTcsMTguNDAxXSxbLTc2LjM2NSwxOC4xNjFdLFstNzYuMiwxNy44ODddLFstNzYuOTAzLDE3Ljg2OF1dLFtbLTcyLjU4LDE5Ljg3Ml0sWy03MS43MTIsMTkuNzE0XSxbLTcxLjU4NywxOS44ODVdLFstNzAuODA3LDE5Ljg4XSxbLTcwLjIxNCwxOS42MjNdLFstNjkuOTUxLDE5LjY0OF0sWy02OS43NjksMTkuMjkzXSxbLTY5LjIyMiwxOS4zMTNdLFstNjkuMjU0LDE5LjAxNV0sWy02OC44MDksMTguOTc5XSxbLTY4LjMxOCwxOC42MTJdLFstNjguNjg5LDE4LjIwNV0sWy02OS4xNjUsMTguNDIzXSxbLTY5LjYyNCwxOC4zODFdLFstNjkuOTUzLDE4LjQyOF0sWy03MC4xMzMsMTguMjQ2XSxbLTcwLjUxNywxOC4xODRdLFstNzAuNjY5LDE4LjQyN10sWy03MS4wLDE4LjI4M10sWy03MS40LDE3LjU5OV0sWy03MS42NTgsMTcuNzU4XSxbLTcxLjcwOCwxOC4wNDVdLFstNzIuMzcyLDE4LjIxNV0sWy03Mi44NDQsMTguMTQ2XSxbLTczLjQ1NSwxOC4yMThdLFstNzMuOTIyLDE4LjAzMV0sWy03NC40NTgsMTguMzQzXSxbLTc0LjM3LDE4LjY2NV0sWy03My40NSwxOC41MjZdLFstNzIuNjk1LDE4LjQ0Nl0sWy03Mi4zMzUsMTguNjY4XSxbLTcyLjc5MiwxOS4xMDJdLFstNzIuNzg0LDE5LjQ4NF0sWy03My40MTUsMTkuNjRdLFstNzMuMTksMTkuOTE2XSxbLTcyLjU4LDE5Ljg3Ml1dLFtbMTEwLjMzOSwxOC42NzhdLFsxMDkuNDc1LDE4LjE5OF0sWzEwOC42NTUsMTguNTA4XSxbMTA4LjYyNiwxOS4zNjhdLFsxMDkuMTE5LDE5LjgyMV0sWzExMC4yMTIsMjAuMTAxXSxbMTEwLjc4NywyMC4wNzhdLFsxMTEuMDEsMTkuNjk2XSxbMTEwLjU3MSwxOS4yNTZdLFsxMTAuMzM5LDE4LjY3OF1dLFtbLTE1NS41NDIsMTkuMDgzXSxbLTE1NS42ODgsMTguOTE2XSxbLTE1NS45MzcsMTkuMDU5XSxbLTE1NS45MDgsMTkuMzM5XSxbLTE1Ni4wNzMsMTkuNzAzXSxbLTE1Ni4wMjQsMTkuODE0XSxbLTE1NS44NSwxOS45NzddLFstMTU1LjkxOSwyMC4xNzRdLFstMTU1Ljg2MSwyMC4yNjddLFstMTU1Ljc4NSwyMC4yNDldLFstMTU1LjQwMiwyMC4wOF0sWy0xNTUuMjI1LDE5Ljk5M10sWy0xNTUuMDYyLDE5Ljg1OV0sWy0xNTQuODA3LDE5LjUwOV0sWy0xNTQuODMxLDE5LjQ1M10sWy0xNTUuMjIyLDE5LjI0XSxbLTE1NS41NDIsMTkuMDgzXV0sW1stMTU2LjA3OSwyMC42NDRdLFstMTU2LjQxNCwyMC41NzJdLFstMTU2LjU4NywyMC43ODNdLFstMTU2LjcwMiwyMC44NjRdLFstMTU2LjcxMSwyMC45MjddLFstMTU2LjYxMywyMS4wMTJdLFstMTU2LjI1NywyMC45MTddLFstMTU1Ljk5NiwyMC43NjRdLFstMTU2LjA3OSwyMC42NDRdXSxbWy0xNTYuNzU4LDIxLjE3N10sWy0xNTYuNzg5LDIxLjA2OV0sWy0xNTcuMzI1LDIxLjA5OF0sWy0xNTcuMjUsMjEuMjJdLFstMTU2Ljc1OCwyMS4xNzddXSxbWy0xNTcuNjUzLDIxLjMyMl0sWy0xNTcuNzA3LDIxLjI2NF0sWy0xNTcuNzc5LDIxLjI3N10sWy0xNTguMTI3LDIxLjMxMl0sWy0xNTguMjU0LDIxLjUzOV0sWy0xNTguMjkzLDIxLjU3OV0sWy0xNTguMDI1LDIxLjcxN10sWy0xNTcuOTQyLDIxLjY1M10sWy0xNTcuNjUzLDIxLjMyMl1dLFtbLTE1OS4zNDUsMjEuOTgyXSxbLTE1OS40NjQsMjEuODgzXSxbLTE1OS44MDEsMjIuMDY1XSxbLTE1OS43NDksMjIuMTM4XSxbLTE1OS41OTYsMjIuMjM2XSxbLTE1OS4zNjYsMjIuMjE1XSxbLTE1OS4zNDUsMjEuOTgyXV0sW1stNzkuNjgsMjIuNzY1XSxbLTc5LjI4MSwyMi4zOTldLFstNzguMzQ3LDIyLjUxMl0sWy03Ny45OTMsMjIuMjc3XSxbLTc3LjE0NiwyMS42NThdLFstNzYuNTI0LDIxLjIwN10sWy03Ni4xOTUsMjEuMjIxXSxbLTc1LjU5OCwyMS4wMTddLFstNzUuNjcxLDIwLjczNV0sWy03NC45MzQsMjAuNjk0XSxbLTc0LjE3OCwyMC4yODVdLFstNzQuMjk3LDIwLjA1XSxbLTc0Ljk2MiwxOS45MjNdLFstNzUuNjM1LDE5Ljg3NF0sWy03Ni4zMjQsMTkuOTUzXSxbLTc3Ljc1NSwxOS44NTVdLFstNzcuMDg1LDIwLjQxM10sWy03Ny40OTMsMjAuNjczXSxbLTc4LjEzNywyMC43NF0sWy03OC40ODMsMjEuMDI5XSxbLTc4LjcyLDIxLjU5OF0sWy03OS4yODUsMjEuNTU5XSxbLTgwLjIxNywyMS44MjddLFstODAuNTE4LDIyLjAzN10sWy04MS44MjEsMjIuMTkyXSxbLTgyLjE3LDIyLjM4N10sWy04MS43OTUsMjIuNjM3XSxbLTgyLjc3NiwyMi42ODhdLFstODMuNDk0LDIyLjE2OV0sWy04My45MDksMjIuMTU1XSxbLTg0LjA1MiwyMS45MTFdLFstODQuNTQ3LDIxLjgwMV0sWy04NC45NzUsMjEuODk2XSxbLTg0LjQ0NywyMi4yMDVdLFstODQuMjMsMjIuNTY2XSxbLTgzLjc3OCwyMi43ODhdLFstODMuMjY4LDIyLjk4M10sWy04Mi41MSwyMy4wNzldLFstODIuMjY4LDIzLjE4OV0sWy04MS40MDQsMjMuMTE3XSxbLTgwLjYxOSwyMy4xMDZdLFstNzkuNjgsMjIuNzY1XV0sW1stNzcuNTM1LDIzLjc2XSxbLTc3Ljc4LDIzLjcxXSxbLTc4LjAzNCwyNC4yODZdLFstNzguNDA4LDI0LjU3Nl0sWy03OC4xOTEsMjUuMjFdLFstNzcuODksMjUuMTddLFstNzcuNTQsMjQuMzRdLFstNzcuNTM1LDIzLjc2XV0sW1sxMjEuMTc2LDIyLjc5MV0sWzEyMC43NDcsMjEuOTcxXSxbMTIwLjIyLDIyLjgxNV0sWzEyMC4xMDYsMjMuNTU2XSxbMTIwLjY5NSwyNC41MzhdLFsxMjEuNDk1LDI1LjI5NV0sWzEyMS45NTEsMjQuOTk4XSxbMTIxLjc3OCwyNC4zOTRdLFsxMjEuMTc2LDIyLjc5MV1dLFtbLTc3LjgyLDI2LjU4XSxbLTc4LjkxLDI2LjQyXSxbLTc4Ljk4LDI2Ljc5XSxbLTc4LjUxLDI2Ljg3XSxbLTc3Ljg1LDI2Ljg0XSxbLTc3LjgyLDI2LjU4XV0sW1stNzcsMjYuNTldLFstNzcuMTczLDI1Ljg3OV0sWy03Ny4zNTYsMjYuMDA3XSxbLTc3LjM0LDI2LjUzXSxbLTc3Ljc4OCwyNi45MjVdLFstNzcuNzksMjcuMDRdLFstNzcsMjYuNTldXSxbWzEzNC42MzgsMzQuMTQ5XSxbMTM0Ljc2NiwzMy44MDZdLFsxMzQuMjAzLDMzLjIwMV0sWzEzMy43OTMsMzMuNTIyXSxbMTMzLjI4LDMzLjI5XSxbMTMzLjAxNSwzMi43MDVdLFsxMzIuMzYzLDMyLjk4OV0sWzEzMi4zNzEsMzMuNDY0XSxbMTMyLjkyNCwzNC4wNl0sWzEzMy40OTMsMzMuOTQ1XSxbMTMzLjkwNCwzNC4zNjVdLFsxMzQuNjM4LDM0LjE0OV1dLFtbMzQuNTc2LDM1LjY3Ml0sWzMzLjkwMSwzNS4yNDZdLFszMy45NzQsMzUuMDU5XSxbMzQuMDA1LDM0Ljk3OF0sWzMyLjk4LDM0LjU3Ml0sWzMyLjQ5LDM0LjcwMl0sWzMyLjI1NywzNS4xMDNdLFszMi43MzIsMzUuMTRdLFszMi44MDIsMzUuMTQ2XSxbMzIuOTQ3LDM1LjM4N10sWzMzLjY2NywzNS4zNzNdLFszNC41NzYsMzUuNjcyXV0sW1syMy43LDM1LjcwNV0sWzI0LjI0NywzNS4zNjhdLFsyNS4wMjUsMzUuNDI1XSxbMjUuNzY5LDM1LjM1NF0sWzI1Ljc0NSwzNS4xOF0sWzI2LjI5LDM1LjNdLFsyNi4xNjUsMzUuMDA1XSxbMjQuNzI1LDM0LjkyXSxbMjQuNzM1LDM1LjA4NV0sWzIzLjUxNSwzNS4yOF0sWzIzLjcsMzUuNzA1XV0sW1sxNS41MiwzOC4yMzFdLFsxNS4xNiwzNy40NDRdLFsxNS4zMSwzNy4xMzRdLFsxNS4xLDM2LjYyXSxbMTQuMzM1LDM2Ljk5N10sWzEzLjgyNywzNy4xMDVdLFsxMi40MzEsMzcuNjEzXSxbMTIuNTcxLDM4LjEyNl0sWzEzLjc0MSwzOC4wMzVdLFsxNC43NjEsMzguMTQ0XSxbMTUuNTIsMzguMjMxXV0sW1s5LjIxLDQxLjIxXSxbOS44MSw0MC41XSxbOS42NywzOS4xNzddLFs5LjIxNSwzOS4yNF0sWzguODA3LDM4LjkwN10sWzguNDI4LDM5LjE3Ml0sWzguMzg4LDQwLjM3OF0sWzguMTYsNDAuOTVdLFs4LjcxLDQwLjldLFs5LjIxLDQxLjIxXV0sW1sxNDAuOTc2LDM3LjE0Ml0sWzE0MC42LDM2LjM0NF0sWzE0MC43NzQsMzUuODQzXSxbMTQwLjI1MywzNS4xMzhdLFsxMzguOTc2LDM0LjY2OF0sWzEzNy4yMTgsMzQuNjA2XSxbMTM1Ljc5MywzMy40NjVdLFsxMzUuMTIxLDMzLjg0OV0sWzEzNS4wNzksMzQuNTk3XSxbMTMzLjM0LDM0LjM3Nl0sWzEzMi4xNTcsMzMuOTA1XSxbMTMwLjk4NiwzMy44ODZdLFsxMzIuMCwzMy4xNV0sWzEzMS4zMzMsMzEuNDVdLFsxMzAuNjg2LDMxLjAzXSxbMTMwLjIwMiwzMS40MThdLFsxMzAuNDQ4LDMyLjMxOV0sWzEyOS44MTUsMzIuNjFdLFsxMjkuNDA4LDMzLjI5Nl0sWzEzMC4zNTQsMzMuNjA0XSxbMTMwLjg3OCwzNC4yMzNdLFsxMzEuODg0LDM0Ljc1XSxbMTMyLjYxOCwzNS40MzNdLFsxMzQuNjA4LDM1LjczMl0sWzEzNS42NzgsMzUuNTI3XSxbMTM2LjcyNCwzNy4zMDVdLFsxMzcuMzkxLDM2LjgyN10sWzEzOC44NTgsMzcuODI3XSxbMTM5LjQyNiwzOC4yMTZdLFsxNDAuMDU1LDM5LjQzOV0sWzEzOS44ODMsNDAuNTYzXSxbMTQwLjMwNiw0MS4xOTVdLFsxNDEuMzY5LDQxLjM3OV0sWzE0MS45MTQsMzkuOTkyXSxbMTQxLjg4NSwzOS4xODFdLFsxNDAuOTU5LDM4LjE3NF0sWzE0MC45NzYsMzcuMTQyXV0sW1s5LjU2LDQyLjE1Ml0sWzkuMjMsNDEuMzhdLFs4Ljc3Niw0MS41ODRdLFs4LjU0NCw0Mi4yNTddLFs4Ljc0Niw0Mi42MjhdLFs5LjM5LDQzLjAxXSxbOS41Niw0Mi4xNTJdXSxbWzE0My45MSw0NC4xNzRdLFsxNDQuNjEzLDQzLjk2MV0sWzE0NS4zMjEsNDQuMzg1XSxbMTQ1LjU0Myw0My4yNjJdLFsxNDQuMDYsNDIuOTg4XSxbMTQzLjE4NCw0MS45OTVdLFsxNDEuNjExLDQyLjY3OV0sWzE0MS4wNjcsNDEuNTg1XSxbMTM5Ljk1NSw0MS41N10sWzEzOS44MTgsNDIuNTY0XSxbMTQwLjMxMiw0My4zMzNdLFsxNDEuMzgxLDQzLjM4OV0sWzE0MS42NzIsNDQuNzcyXSxbMTQxLjk2OCw0NS41NTFdLFsxNDMuMTQzLDQ0LjUxXSxbMTQzLjkxLDQ0LjE3NF1dLFtbLTYzLjY2NCw0Ni41NV0sWy02Mi45MzksNDYuNDE2XSxbLTYyLjAxMiw0Ni40NDNdLFstNjIuNTA0LDQ2LjAzM10sWy02Mi44NzQsNDUuOTY4XSxbLTY0LjE0Myw0Ni4zOTNdLFstNjQuMzkzLDQ2LjcyN10sWy02NC4wMTUsNDcuMDM2XSxbLTYzLjY2NCw0Ni41NV1dLFtbLTYxLjgwNiw0OS4xMDVdLFstNjIuMjkzLDQ5LjA4N10sWy02My41ODksNDkuNDAxXSxbLTY0LjUxOSw0OS44NzNdLFstNjQuMTczLDQ5Ljk1N10sWy02Mi44NTgsNDkuNzA2XSxbLTYxLjgzNiw0OS4yODldLFstNjEuODA2LDQ5LjEwNV1dLFtbLTEyMy41MSw0OC41MV0sWy0xMjQuMDEzLDQ4LjM3MV0sWy0xMjUuNjU1LDQ4LjgyNV0sWy0xMjUuOTU1LDQ5LjE4XSxbLTEyNi44NSw0OS41M10sWy0xMjcuMDMsNDkuODE1XSxbLTEyOC4wNTksNDkuOTk1XSxbLTEyOC40NDUsNTAuNTM5XSxbLTEyOC4zNTgsNTAuNzcxXSxbLTEyNy4zMDksNTAuNTUzXSxbLTEyNi42OTUsNTAuNDAxXSxbLTEyNS43NTUsNTAuMjk1XSxbLTEyNS40MTUsNDkuOTVdLFstMTI0LjkyMSw0OS40NzVdLFstMTIzLjkyMyw0OS4wNjJdLFstMTIzLjUxLDQ4LjUxXV0sW1stNTYuMTM0LDUwLjY4N10sWy01Ni43OTYsNDkuODEyXSxbLTU2LjE0Myw1MC4xNV0sWy01NS40NzEsNDkuOTM2XSxbLTU1LjgyMiw0OS41ODddLFstNTQuOTM1LDQ5LjMxM10sWy01NC40NzQsNDkuNTU3XSxbLTUzLjQ3Nyw0OS4yNDldLFstNTMuNzg2LDQ4LjUxN10sWy01My4wODYsNDguNjg4XSxbLTUyLjk1OSw0OC4xNTddLFstNTIuNjQ4LDQ3LjUzNl0sWy01My4wNjksNDYuNjU1XSxbLTUzLjUyMSw0Ni42MThdLFstNTQuMTc5LDQ2LjgwN10sWy01My45NjIsNDcuNjI1XSxbLTU0LjI0LDQ3Ljc1Ml0sWy01NS40MDEsNDYuODg1XSxbLTU1Ljk5Nyw0Ni45Ml0sWy01NS4yOTEsNDcuMzldLFstNTYuMjUxLDQ3LjYzM10sWy01Ny4zMjUsNDcuNTczXSxbLTU5LjI2Niw0Ny42MDNdLFstNTkuNDE5LDQ3Ljg5OV0sWy01OC43OTcsNDguMjUyXSxbLTU5LjIzMiw0OC41MjNdLFstNTguMzkyLDQ5LjEyNl0sWy01Ny4zNTksNTAuNzE4XSxbLTU2LjczOSw1MS4yODddLFstNTUuODcxLDUxLjYzMl0sWy01NS40MDcsNTEuNTg4XSxbLTU1LjYsNTEuMzE3XSxbLTU2LjEzNCw1MC42ODddXSxbWy0xMzIuNzEsNTQuMDRdLFstMTMyLjcxLDU0LjA0XSxbLTEzMi43MSw1NC4wNF0sWy0xMzIuNzEsNTQuMDRdLFstMTMxLjc1LDU0LjEyXSxbLTEzMi4wNDksNTIuOTg1XSxbLTEzMS4xNzksNTIuMThdLFstMTMxLjU3OCw1Mi4xODJdLFstMTMyLjE4LDUyLjY0XSxbLTEzMi41NSw1My4xXSxbLTEzMy4wNTUsNTMuNDExXSxbLTEzMy4yNCw1My44NTFdLFstMTMzLjE4LDU0LjE3XSxbLTEzMi43MSw1NC4wNF1dLFtbMTQzLjY0OCw1MC43NDhdLFsxNDQuNjU0LDQ4Ljk3Nl0sWzE0My4xNzQsNDkuMzA3XSxbMTQyLjU1OSw0Ny44NjJdLFsxNDMuNTMzLDQ2LjgzN10sWzE0My41MDUsNDYuMTM4XSxbMTQyLjc0OCw0Ni43NDFdLFsxNDIuMDkyLDQ1Ljk2N10sWzE0MS45MDcsNDYuODA2XSxbMTQyLjAxOCw0Ny43OF0sWzE0MS45MDQsNDguODU5XSxbMTQyLjEzNiw0OS42MTVdLFsxNDIuMTgsNTAuOTUyXSxbMTQxLjU5NCw1MS45MzVdLFsxNDEuNjgzLDUzLjMwMl0sWzE0Mi42MDcsNTMuNzYyXSxbMTQyLjIxLDU0LjIyNV0sWzE0Mi42NTUsNTQuMzY2XSxbMTQyLjkxNSw1My43MDVdLFsxNDMuMjYxLDUyLjc0MV0sWzE0My4yMzUsNTEuNzU3XSxbMTQzLjY0OCw1MC43NDhdXSxbWy02Ljc4OSw1Mi4yNl0sWy04LjU2Miw1MS42NjldLFstOS45NzcsNTEuODJdLFstOS4xNjYsNTIuODY1XSxbLTkuNjg5LDUzLjg4MV0sWy04LjMyOCw1NC42NjVdLFstNy41NzIsNTUuMTMyXSxbLTYuNzM0LDU1LjE3M10sWy01LjY2Miw1NC41NTVdLFstNi4xOTgsNTMuODY4XSxbLTYuMDMzLDUzLjE1M10sWy02Ljc4OSw1Mi4yNl1dLFtbMTIuNjksNTUuNjFdLFsxMi4wOSw1NC44XSxbMTEuMDQ0LDU1LjM2NV0sWzEwLjkwNCw1NS43OF0sWzEyLjM3MSw1Ni4xMTFdLFsxMi42OSw1NS42MV1dLFtbLTE1My4wMDYsNTcuMTE2XSxbLTE1NC4wMDUsNTYuNzM1XSxbLTE1NC41MTYsNTYuOTkzXSxbLTE1NC42NzEsNTcuNDYxXSxbLTE1My43NjMsNTcuODE3XSxbLTE1My4yMjksNTcuOTY5XSxbLTE1Mi41NjUsNTcuOTAxXSxbLTE1Mi4xNDEsNTcuNTkxXSxbLTE1My4wMDYsNTcuMTE2XV0sW1stMy4wMDUsNTguNjM1XSxbLTQuMDc0LDU3LjU1M10sWy0zLjA1NSw1Ny42OV0sWy0xLjk1OSw1Ny42ODVdLFstMi4yMiw1Ni44N10sWy0zLjExOSw1NS45NzRdLFstMi4wODUsNTUuOTFdLFstMS4xMTUsNTQuNjI1XSxbLTAuNDMsNTQuNDY0XSxbMC4xODUsNTMuMzI1XSxbMC40Nyw1Mi45M10sWzEuNjgyLDUyLjc0XSxbMS41Niw1Mi4xXSxbMS4wNTEsNTEuODA3XSxbMS40NSw1MS4yODldLFswLjU1LDUwLjc2Nl0sWy0wLjc4OCw1MC43NzVdLFstMi40OSw1MC41XSxbLTIuOTU2LDUwLjY5N10sWy0zLjYxNyw1MC4yMjhdLFstNC41NDMsNTAuMzQyXSxbLTUuMjQ1LDQ5Ljk2XSxbLTUuNzc3LDUwLjE2XSxbLTQuMzEsNTEuMjFdLFstMy40MTUsNTEuNDI2XSxbLTQuOTg0LDUxLjU5M10sWy01LjI2Nyw1MS45OTFdLFstNC4yMjIsNTIuMzAxXSxbLTQuNzcsNTIuODRdLFstNC41OCw1My40OTVdLFstMy4wOTIsNTMuNDA0XSxbLTIuOTQ1LDUzLjk4NV0sWy0zLjYzLDU0LjYxNV0sWy00Ljg0NCw1NC43OTFdLFstNS4wODMsNTUuMDYyXSxbLTQuNzE5LDU1LjUwOF0sWy01LjA0OCw1NS43ODRdLFstNS41ODYsNTUuMzExXSxbLTUuNjQ1LDU2LjI3NV0sWy02LjE1LDU2Ljc4NV0sWy01Ljc4Nyw1Ny44MTldLFstNS4wMSw1OC42M10sWy00LjIxMSw1OC41NTFdLFstMy4wMDUsNTguNjM1XV0sW1stMTY1LjU3OSw1OS45MV0sWy0xNjYuMTkzLDU5Ljc1NF0sWy0xNjYuODQ4LDU5Ljk0MV0sWy0xNjcuNDU1LDYwLjIxM10sWy0xNjYuNDY4LDYwLjM4NF0sWy0xNjUuNjc0LDYwLjI5NF0sWy0xNjUuNTc5LDU5LjkxXV0sW1stNzkuMjY2LDYyLjE1OV0sWy03OS42NTgsNjEuNjMzXSxbLTgwLjEsNjEuNzE4XSxbLTgwLjM2Miw2Mi4wMTZdLFstODAuMzE1LDYyLjA4Nl0sWy03OS45MjksNjIuMzg2XSxbLTc5LjUyLDYyLjM2NF0sWy03OS4yNjYsNjIuMTU5XV0sW1stODEuODk4LDYyLjcxMV0sWy04My4wNjksNjIuMTU5XSxbLTgzLjc3NSw2Mi4xODJdLFstODMuOTk0LDYyLjQ1M10sWy04My4yNSw2Mi45MTRdLFstODEuODc3LDYyLjkwNV0sWy04MS44OTgsNjIuNzExXV0sW1stMTcxLjczMiw2My43ODNdLFstMTcxLjExNCw2My41OTJdLFstMTcwLjQ5MSw2My42OTVdLFstMTY5LjY4Myw2My40MzFdLFstMTY4LjY4OSw2My4yOThdLFstMTY4Ljc3Miw2My4xODldLFstMTY5LjUyOSw2Mi45NzddLFstMTcwLjI5MSw2My4xOTRdLFstMTcwLjY3MSw2My4zNzZdLFstMTcxLjU1Myw2My4zMThdLFstMTcxLjc5MSw2My40MDZdLFstMTcxLjczMiw2My43ODNdXSxbWy04NS4xNjEsNjUuNjU3XSxbLTg0Ljk3Niw2NS4yMThdLFstODQuNDY0LDY1LjM3Ml0sWy04My44ODMsNjUuMTFdLFstODIuNzg4LDY0Ljc2N10sWy04MS42NDIsNjQuNDU1XSxbLTgxLjU1Myw2My45OF0sWy04MC44MTcsNjQuMDU3XSxbLTgwLjEwMyw2My43MjZdLFstODAuOTkxLDYzLjQxMV0sWy04Mi41NDcsNjMuNjUyXSxbLTgzLjEwOSw2NC4xMDJdLFstODQuMSw2My41N10sWy04NS41MjMsNjMuMDUyXSxbLTg1Ljg2Nyw2My42MzddLFstODcuMjIyLDYzLjU0MV0sWy04Ni4zNTMsNjQuMDM2XSxbLTg2LjIyNSw2NC44MjNdLFstODUuODg0LDY1LjczOV0sWy04NS4xNjEsNjUuNjU3XV0sW1stMTQuNTA5LDY2LjQ1Nl0sWy0xNC43NCw2NS44MDldLFstMTMuNjEsNjUuMTI3XSxbLTE0LjkxLDY0LjM2NF0sWy0xNy43OTQsNjMuNjc5XSxbLTE4LjY1Niw2My40OTZdLFstMTkuOTczLDYzLjY0NF0sWy0yMi43NjMsNjMuOTZdLFstMjEuNzc4LDY0LjQwMl0sWy0yMy45NTUsNjQuODkxXSxbLTIyLjE4NCw2NS4wODVdLFstMjIuMjI3LDY1LjM3OV0sWy0yNC4zMjYsNjUuNjExXSxbLTIzLjY1MSw2Ni4yNjNdLFstMjIuMTM1LDY2LjQxXSxbLTIwLjU3Niw2NS43MzJdLFstMTkuMDU3LDY2LjI3N10sWy0xNy43OTksNjUuOTk0XSxbLTE2LjE2OCw2Ni41MjddLFstMTQuNTA5LDY2LjQ1Nl1dLFtbLTc1Ljg2Niw2Ny4xNDldLFstNzYuOTg3LDY3LjA5OV0sWy03Ny4yMzYsNjcuNTg4XSxbLTc2LjgxMiw2OC4xNDldLFstNzUuODk1LDY4LjI4N10sWy03NS4xMTUsNjguMDFdLFstNzUuMTAzLDY3LjU4Ml0sWy03NS4yMTYsNjcuNDQ0XSxbLTc1Ljg2Niw2Ny4xNDldXSxbWy0xNzUuMDE0LDY2LjU4NF0sWy0xNzQuMzQsNjYuMzM2XSxbLTE3NC41NzIsNjcuMDYyXSxbLTE3MS44NTcsNjYuOTEzXSxbLTE2OS45LDY1Ljk3N10sWy0xNzAuODkxLDY1LjU0MV0sWy0xNzIuNTMsNjUuNDM4XSxbLTE3Mi41NTUsNjQuNDYxXSxbLTE3Mi45NTUsNjQuMjUzXSxbLTE3My44OTIsNjQuMjgzXSxbLTE3NC42NTQsNjQuNjMxXSxbLTE3NS45ODQsNjQuOTIzXSxbLTE3Ni4yMDcsNjUuMzU3XSxbLTE3Ny4yMjMsNjUuNTJdLFstMTc4LjM2LDY1LjM5MV0sWy0xNzguOTAzLDY1Ljc0XSxbLTE3OC42ODYsNjYuMTEyXSxbLTE3OS44ODQsNjUuODc1XSxbLTE3OS40MzMsNjUuNDA0XSxbLTE4MCw2NC45OF0sWy0xODAsNjguOTY0XSxbLTE3Ny41NSw2OC4yXSxbLTE3NC45MjgsNjcuMjA2XSxbLTE3NS4wMTQsNjYuNTg0XV0sW1stOTUuNjQ4LDY5LjEwOF0sWy05Ni4yNyw2OC43NTddLFstOTcuNjE3LDY5LjA2XSxbLTk4LjQzMiw2OC45NTFdLFstOTkuNzk3LDY5LjRdLFstOTguOTE3LDY5LjcxXSxbLTk4LjIxOCw3MC4xNDRdLFstOTcuMTU3LDY5Ljg2XSxbLTk2LjU1Nyw2OS42OF0sWy05Ni4yNTcsNjkuNDldLFstOTUuNjQ4LDY5LjEwOF1dLFtbMTgwLDcwLjgzMl0sWzE3OC45MDMsNzAuNzgxXSxbMTc4LjcyNSw3MS4wOTldLFsxODAsNzEuNTE2XSxbMTgwLDcwLjgzMl1dLFtbLTE3OC42OTQsNzAuODkzXSxbLTE4MCw3MC44MzJdLFstMTgwLDcxLjUxNl0sWy0xNzkuODcyLDcxLjU1OF0sWy0xNzkuMDI0LDcxLjU1Nl0sWy0xNzcuNTc4LDcxLjI2OV0sWy0xNzcuNjY0LDcxLjEzM10sWy0xNzguNjk0LDcwLjg5M11dLFtbLTkwLjU0Nyw2OS40OThdLFstOTAuNTUyLDY4LjQ3NV0sWy04OS4yMTUsNjkuMjU5XSxbLTg4LjAyLDY4LjYxNV0sWy04OC4zMTgsNjcuODczXSxbLTg3LjM1LDY3LjE5OV0sWy04Ni4zMDYsNjcuOTIyXSxbLTg1LjU3Nyw2OC43ODRdLFstODUuNTIyLDY5Ljg4Ml0sWy04NC4xMDEsNjkuODA1XSxbLTgyLjYyMiw2OS42NThdLFstODEuMjgsNjkuMTYyXSxbLTgxLjIyLDY4LjY2Nl0sWy04MS45NjQsNjguMTMzXSxbLTgxLjI1OSw2Ny41OTddLFstODEuMzg2LDY3LjExMV0sWy04My4zNDQsNjYuNDEyXSxbLTg0LjczNSw2Ni4yNTddLFstODUuNzY5LDY2LjU1OF0sWy04Ni4wNjgsNjYuMDU2XSxbLTg3LjAzMSw2NS4yMTNdLFstODcuMzIzLDY0Ljc3Nl0sWy04OC40ODMsNjQuMDk5XSxbLTg5LjkxNCw2NC4wMzNdLFstOTAuNzA0LDYzLjYxXSxbLTkwLjc3LDYyLjk2XSxbLTkxLjkzMyw2Mi44MzVdLFstOTMuMTU3LDYyLjAyNV0sWy05NC4yNDIsNjAuODk5XSxbLTk0LjYyOSw2MC4xMV0sWy05NC42ODUsNTguOTQ5XSxbLTkzLjIxNSw1OC43ODJdLFstOTIuNzY1LDU3Ljg0Nl0sWy05Mi4yOTcsNTcuMDg3XSxbLTkwLjg5OCw1Ny4yODVdLFstODkuMDM5LDU2Ljg1Ml0sWy04OC4wNCw1Ni40NzJdLFstODcuMzI0LDU1Ljk5OV0sWy04Ni4wNzEsNTUuNzI0XSxbLTg1LjAxMiw1NS4zMDNdLFstODMuMzYsNTUuMjQ1XSxbLTgyLjI3Myw1NS4xNDhdLFstODIuNDM2LDU0LjI4Ml0sWy04Mi4xMjUsNTMuMjc3XSxbLTgxLjQwMSw1Mi4xNThdLFstNzkuOTEzLDUxLjIwOF0sWy03OS4xNDMsNTEuNTM0XSxbLTc4LjYwMiw1Mi41NjJdLFstNzkuMTI0LDU0LjE0MV0sWy03OS44Myw1NC42NjhdLFstNzguMjI5LDU1LjEzNl0sWy03Ny4wOTYsNTUuODM4XSxbLTc2LjU0MSw1Ni41MzRdLFstNzYuNjIzLDU3LjIwM10sWy03Ny4zMDIsNTguMDUyXSxbLTc4LjUxNyw1OC44MDVdLFstNzcuMzM3LDU5Ljg1M10sWy03Ny43NzMsNjAuNzU4XSxbLTc4LjEwNyw2Mi4zMl0sWy03Ny40MTEsNjIuNTVdLFstNzUuNjk2LDYyLjI3OV0sWy03NC42NjgsNjIuMTgxXSxbLTczLjg0LDYyLjQ0NF0sWy03Mi45MDksNjIuMTA1XSxbLTcxLjY3Nyw2MS41MjVdLFstNzEuMzc0LDYxLjEzN10sWy02OS41OSw2MS4wNjJdLFstNjkuNjIsNjAuMjIxXSxbLTY5LjI4OCw1OC45NTddLFstNjguMzc1LDU4LjgwMV0sWy02Ny42NSw1OC4yMTJdLFstNjYuMjAyLDU4Ljc2N10sWy02NS4yNDUsNTkuODcxXSxbLTY0LjU4Myw2MC4zMzZdLFstNjMuODA1LDU5LjQ0M10sWy02Mi41MDIsNTguMTY3XSxbLTYxLjM5Niw1Ni45NjhdLFstNjEuNzk5LDU2LjMzOV0sWy02MC40NjksNTUuNzc2XSxbLTU5LjU3LDU1LjIwNF0sWy01Ny45NzUsNTQuOTQ1XSxbLTU3LjMzMyw1NC42MjddLFstNTYuOTM3LDUzLjc4XSxbLTU2LjE1OCw1My42NDhdLFstNTUuNzU2LDUzLjI3MV0sWy01NS42ODMsNTIuMTQ3XSxbLTU2LjQwOSw1MS43NzFdLFstNTcuMTI3LDUxLjQyXSxbLTU4Ljc3NSw1MS4wNjRdLFstNjAuMDMzLDUwLjI0M10sWy02MS43MjQsNTAuMDgxXSxbLTYzLjg2Miw1MC4yOTFdLFstNjUuMzYzLDUwLjI5OF0sWy02Ni4zOTksNTAuMjI5XSxbLTY3LjIzNiw0OS41MTFdLFstNjguNTExLDQ5LjA2OF0sWy02OS45NTQsNDcuNzQ1XSxbLTcxLjEwNCw0Ni44MjJdLFstNzAuMjU1LDQ2Ljk4Nl0sWy02OC42NSw0OC4zXSxbLTY2LjU1Miw0OS4xMzNdLFstNjUuMDU2LDQ5LjIzM10sWy02NC4xNzEsNDguNzQyXSxbLTY1LjExNSw0OC4wNzFdLFstNjQuNzk5LDQ2Ljk5M10sWy02NC40NzIsNDYuMjM5XSxbLTYzLjE3Myw0NS43MzldLFstNjEuNTIxLDQ1Ljg4NF0sWy02MC41MTgsNDcuMDA4XSxbLTYwLjQ0OSw0Ni4yODNdLFstNTkuODAzLDQ1LjkyXSxbLTYxLjA0LDQ1LjI2NV0sWy02My4yNTUsNDQuNjddLFstNjQuMjQ3LDQ0LjI2Nl0sWy02NS4zNjQsNDMuNTQ1XSxbLTY2LjEyMyw0My42MTldLFstNjYuMTYyLDQ0LjQ2NV0sWy02NC40MjUsNDUuMjkyXSxbLTY2LjAyNiw0NS4yNTldLFstNjcuMTM3LDQ1LjEzOF0sWy02Ni45NjUsNDQuODFdLFstNjguMDMyLDQ0LjMyNV0sWy02OS4wNiw0My45OF0sWy03MC4xMTYsNDMuNjg0XSxbLTcwLjY5LDQzLjAzXSxbLTcwLjgxNSw0Mi44NjVdLFstNzAuODI1LDQyLjMzNV0sWy03MC40OTUsNDEuODA1XSxbLTcwLjA4LDQxLjc4XSxbLTcwLjE4NSw0Mi4xNDVdLFstNjkuODg1LDQxLjkyM10sWy02OS45NjUsNDEuNjM3XSxbLTcwLjY0LDQxLjQ3NV0sWy03MS4xMiw0MS40OTVdLFstNzEuODYsNDEuMzJdLFstNzIuMjk1LDQxLjI3XSxbLTcyLjg3Niw0MS4yMjFdLFstNzMuNzEsNDAuOTMxXSxbLTcyLjI0MSw0MS4xMl0sWy03MS45NDUsNDAuOTNdLFstNzMuMzQ1LDQwLjYzXSxbLTczLjk4Miw0MC42MjhdLFstNzMuOTUyLDQwLjc1MV0sWy03NC4yNTcsNDAuNDc0XSxbLTczLjk2Miw0MC40MjhdLFstNzQuMTc4LDM5LjcwOV0sWy03NC45MDYsMzguOTRdLFstNzQuOTgsMzkuMTk2XSxbLTc1LjIsMzkuMjQ4XSxbLTc1LjUyOCwzOS40OThdLFstNzUuMzIsMzguOTZdLFstNzUuMDgzLDM4Ljc4MV0sWy03NS4wNTcsMzguNDA0XSxbLTc1LjM3NywzOC4wMTZdLFstNzUuOTQsMzcuMjE3XSxbLTc2LjAzMSwzNy4yNTddLFstNzUuNzIyLDM3LjkzN10sWy03Ni4yMzMsMzguMzE5XSxbLTc2LjM1LDM5LjE1XSxbLTc2LjU0MywzOC43MThdLFstNzYuMzI5LDM4LjA4M10sWy03Ni45NiwzOC4yMzNdLFstNzYuMzAyLDM3LjkxOF0sWy03Ni4yNTksMzYuOTY2XSxbLTc1Ljk3MiwzNi44OTddLFstNzUuODY4LDM2LjU1MV0sWy03NS43MjcsMzUuNTUxXSxbLTc2LjM2MywzNC44MDhdLFstNzcuMzk4LDM0LjUxMl0sWy03OC4wNTUsMzMuOTI1XSxbLTc4LjU1NCwzMy44NjFdLFstNzkuMDYxLDMzLjQ5NF0sWy03OS4yMDMsMzMuMTU5XSxbLTgwLjMwMSwzMi41MDldLFstODAuODY1LDMyLjAzM10sWy04MS4zMzYsMzEuNDRdLFstODEuNDksMzAuNzNdLFstODEuMzE0LDMwLjAzNl0sWy04MC45OCwyOS4xOF0sWy04MC41MzYsMjguNDcyXSxbLTgwLjUzLDI4LjA0XSxbLTgwLjA1NywyNi44OF0sWy04MC4wODgsMjYuMjA2XSxbLTgwLjEzMSwyNS44MTddLFstODAuMzgxLDI1LjIwNl0sWy04MC42OCwyNS4wOF0sWy04MS4xNzIsMjUuMjAxXSxbLTgxLjMzLDI1LjY0XSxbLTgxLjcxLDI1Ljg3XSxbLTgyLjI0LDI2LjczXSxbLTgyLjcwNSwyNy40OTVdLFstODIuODU1LDI3Ljg4Nl0sWy04Mi42NSwyOC41NV0sWy04Mi45MywyOS4xXSxbLTgzLjcxLDI5LjkzN10sWy04NC4xLDMwLjA5XSxbLTg1LjEwOSwyOS42MzZdLFstODUuMjg4LDI5LjY4Nl0sWy04NS43NzMsMzAuMTUzXSxbLTg2LjQsMzAuNF0sWy04Ny41MywzMC4yNzRdLFstODguNDE4LDMwLjM4NV0sWy04OS4xOCwzMC4zMTZdLFstODkuNjA1LDMwLjE3Nl0sWy04OS40MTQsMjkuODk0XSxbLTg5LjQzLDI5LjQ4OV0sWy04OS4yMTgsMjkuMjkxXSxbLTg5LjQwOCwyOS4xNl0sWy04OS43NzksMjkuMzA3XSxbLTkwLjE1NSwyOS4xMTddLFstOTAuODgsMjkuMTQ5XSxbLTkxLjYyNywyOS42NzddLFstOTIuNDk5LDI5LjU1Ml0sWy05My4yMjYsMjkuNzg0XSxbLTkzLjg0OCwyOS43MTRdLFstOTQuNjksMjkuNDhdLFstOTUuNiwyOC43MzldLFstOTYuNTk0LDI4LjMwN10sWy05Ny4xNCwyNy44M10sWy05Ny4zNywyNy4zOF0sWy05Ny4zOCwyNi42OV0sWy05Ny4zMywyNi4yMV0sWy05Ny4xNCwyNS44N10sWy05Ny4xMzksMjUuODY4XSxbLTk3LjE0MiwyNS44NjZdLFstOTcuNTI4LDI0Ljk5Ml0sWy05Ny43MDMsMjQuMjcyXSxbLTk3Ljc3NiwyMi45MzNdLFstOTcuODcyLDIyLjQ0NF0sWy05Ny42OTksMjEuODk5XSxbLTk3LjM4OSwyMS40MTFdLFstOTcuMTg5LDIwLjYzNV0sWy05Ni41MjYsMTkuODkxXSxbLTk2LjI5MiwxOS4zMl0sWy05NS45MDEsMTguODI4XSxbLTk0LjgzOSwxOC41NjNdLFstOTQuNDI2LDE4LjE0NF0sWy05My41NDksMTguNDI0XSxbLTkyLjc4NiwxOC41MjVdLFstOTIuMDM3LDE4LjcwNV0sWy05MS40MDgsMTguODc2XSxbLTkwLjc3MiwxOS4yODRdLFstOTAuNTM0LDE5Ljg2N10sWy05MC40NTEsMjAuNzA4XSxbLTkwLjI3OSwyMS4wXSxbLTg5LjYwMSwyMS4yNjJdLFstODguNTQ0LDIxLjQ5NF0sWy04Ny42NTgsMjEuNDU5XSxbLTg3LjA1MiwyMS41NDRdLFstODYuODEyLDIxLjMzMV0sWy04Ni44NDYsMjAuODVdLFstODcuMzgzLDIwLjI1NV0sWy04Ny42MjEsMTkuNjQ2XSxbLTg3LjQzNywxOS40NzJdLFstODcuNTg2LDE5LjA0XSxbLTg3LjgzNywxOC4yNl0sWy04OC4wOTEsMTguNTE3XSxbLTg4LjMsMTguNV0sWy04OC4yOTYsMTguMzUzXSxbLTg4LjEwNywxOC4zNDldLFstODguMTIzLDE4LjA3N10sWy04OC4yODUsMTcuNjQ0XSxbLTg4LjE5OCwxNy40OV0sWy04OC4zMDMsMTcuMTMyXSxbLTg4LjI0LDE3LjAzNl0sWy04OC4zNTUsMTYuNTMxXSxbLTg4LjU1MiwxNi4yNjZdLFstODguNzMyLDE2LjIzNF0sWy04OC45MzEsMTUuODg3XSxbLTg4LjYwNSwxNS43MDZdLFstODguNTE4LDE1Ljg1Nl0sWy04OC4yMjUsMTUuNzI4XSxbLTg4LjEyMSwxNS42ODldLFstODcuOTAyLDE1Ljg2NV0sWy04Ny42MTYsMTUuODc5XSxbLTg3LjUyMywxNS43OTddLFstODcuMzY4LDE1Ljg0N10sWy04Ni45MDMsMTUuNzU3XSxbLTg2LjQ0MSwxNS43ODNdLFstODYuMTE5LDE1Ljg5M10sWy04Ni4wMDIsMTYuMDA1XSxbLTg1LjY4MywxNS45NTRdLFstODUuNDQ0LDE1Ljg4Nl0sWy04NS4xODIsMTUuOTA5XSxbLTg0Ljk4NCwxNS45OTZdLFstODQuNTI3LDE1Ljg1N10sWy04NC4zNjgsMTUuODM1XSxbLTg0LjA2MywxNS42NDhdLFstODMuNzc0LDE1LjQyNF0sWy04My40MSwxNS4yNzFdLFstODMuMTQ3LDE0Ljk5Nl0sWy04My4yMzMsMTQuOV0sWy04My4yODQsMTQuNjc3XSxbLTgzLjE4MiwxNC4zMTFdLFstODMuNDEyLDEzLjk3XSxbLTgzLjUyLDEzLjU2OF0sWy04My41NTIsMTMuMTI3XSxbLTgzLjQ5OCwxMi44NjldLFstODMuNDczLDEyLjQxOV0sWy04My42MjYsMTIuMzIxXSxbLTgzLjcyLDExLjg5M10sWy04My42NTEsMTEuNjI5XSxbLTgzLjg1NSwxMS4zNzNdLFstODMuODA5LDExLjEwM10sWy04My42NTYsMTAuOTM5XSxbLTgzLjQwMiwxMC4zOTZdLFstODMuMDE2LDkuOTkzXSxbLTgyLjU0Niw5LjU2Nl0sWy04Mi4xODcsOS4yMDhdLFstODIuMjA4LDguOTk2XSxbLTgxLjgwOSw4Ljk1MV0sWy04MS43MTQsOS4wMzJdLFstODEuNDM5LDguNzg2XSxbLTgwLjk0Nyw4Ljg1OV0sWy04MC41MjIsOS4xMTFdLFstNzkuOTE1LDkuMzEzXSxbLTc5LjU3Myw5LjYxMl0sWy03OS4wMjEsOS41NTNdLFstNzkuMDU4LDkuNDU1XSxbLTc4LjUwMSw5LjQyXSxbLTc4LjA1Niw5LjI0OF0sWy03Ny43MjksOC45NDddLFstNzcuMzUzLDguNjddLFstNzYuODM3LDguNjM5XSxbLTc2LjA4Niw5LjMzN10sWy03NS42NzUsOS40NDNdLFstNzUuNjY1LDkuNzc0XSxbLTc1LjQ4LDEwLjYxOV0sWy03NC45MDcsMTEuMDgzXSxbLTc0LjI3NywxMS4xMDJdLFstNzQuMTk3LDExLjMxXSxbLTczLjQxNSwxMS4yMjddLFstNzIuNjI4LDExLjczMl0sWy03Mi4yMzgsMTEuOTU2XSxbLTcxLjc1NCwxMi40MzddLFstNzEuNCwxMi4zNzZdLFstNzEuMTM3LDEyLjExM10sWy03MS4zMzIsMTEuNzc2XSxbLTcxLjM2LDExLjU0XSxbLTcxLjk0NywxMS40MjNdLFstNzEuNjIxLDEwLjk2OV0sWy03MS42MzMsMTAuNDQ2XSxbLTcyLjA3NCw5Ljg2Nl0sWy03MS42OTYsOS4wNzJdLFstNzEuMjY1LDkuMTM3XSxbLTcxLjA0LDkuODZdLFstNzEuMzUsMTAuMjEyXSxbLTcxLjQwMSwxMC45NjldLFstNzAuMTU1LDExLjM3NV0sWy03MC4yOTQsMTEuODQ3XSxbLTY5Ljk0MywxMi4xNjJdLFstNjkuNTg0LDExLjQ2XSxbLTY4Ljg4MywxMS40NDNdLFstNjguMjMzLDEwLjg4Nl0sWy02OC4xOTQsMTAuNTU1XSxbLTY3LjI5NiwxMC41NDZdLFstNjYuMjI4LDEwLjY0OV0sWy02NS42NTUsMTAuMjAxXSxbLTY0Ljg5LDEwLjA3N10sWy02NC4zMjksMTAuMzldLFstNjQuMzE4LDEwLjY0MV0sWy02My4wNzksMTAuNzAyXSxbLTYxLjg4MSwxMC43MTZdLFstNjIuNzMsMTAuNDJdLFstNjIuMzg4LDkuOTQ4XSxbLTYxLjU4OSw5Ljg3M10sWy02MC44MzEsOS4zODFdLFstNjAuNjcxLDguNThdLFstNjAuMTUsOC42MDNdLFstNTkuNzU4LDguMzY3XSxbLTU5LjEwMiw3Ljk5OV0sWy01OC40ODMsNy4zNDhdLFstNTguNDU1LDYuODMzXSxbLTU4LjA3OCw2LjgwOV0sWy01Ny41NDIsNi4zMjFdLFstNTcuMTQ3LDUuOTczXSxbLTU1Ljk0OSw1Ljc3M10sWy01NS44NDIsNS45NTNdLFstNTUuMDMzLDYuMDI1XSxbLTUzLjk1OCw1Ljc1N10sWy01My42MTgsNS42NDZdLFstNTIuODgyLDUuNDFdLFstNTEuODIzLDQuNTY2XSxbLTUxLjY1OCw0LjE1Nl0sWy01MS4zMTcsNC4yMDNdLFstNTEuMDcsMy42NTFdLFstNTAuNTA5LDEuOTAxXSxbLTQ5Ljk3NCwxLjczN10sWy00OS45NDcsMS4wNDZdLFstNTAuNjk5LDAuMjIzXSxbLTUwLjM4OCwtMC4wNzhdLFstNDguNjIsLTAuMjM1XSxbLTQ4LjU4NCwtMS4yMzhdLFstNDcuODI1LC0wLjU4Ml0sWy00Ni41NjcsLTAuOTQxXSxbLTQ0LjkwNiwtMS41NTJdLFstNDQuNDE4LC0yLjEzOF0sWy00NC41ODIsLTIuNjkxXSxbLTQzLjQxOSwtMi4zODNdLFstNDEuNDczLC0yLjkxMl0sWy0zOS45NzksLTIuODczXSxbLTM4LjUsLTMuNzAxXSxbLTM3LjIyMywtNC44MjFdLFstMzYuNDUzLC01LjEwOV0sWy0zNS41OTgsLTUuMTQ5XSxbLTM1LjIzNSwtNS40NjVdLFstMzQuODk2LC02LjczOF0sWy0zNC43MywtNy4zNDNdLFstMzUuMTI4LC04Ljk5Nl0sWy0zNS42MzcsLTkuNjQ5XSxbLTM3LjA0NywtMTEuMDQxXSxbLTM3LjY4NCwtMTIuMTcxXSxbLTM4LjQyNCwtMTMuMDM4XSxbLTM4LjY3NCwtMTMuMDU4XSxbLTM4Ljk1MywtMTMuNzkzXSxbLTM4Ljg4MiwtMTUuNjY3XSxbLTM5LjE2MSwtMTcuMjA4XSxbLTM5LjI2NywtMTcuODY4XSxbLTM5LjU4MywtMTguMjYyXSxbLTM5Ljc2MSwtMTkuNTk5XSxbLTQwLjc3NSwtMjAuOTA0XSxbLTQwLjk0NSwtMjEuOTM3XSxbLTQxLjc1NCwtMjIuMzcxXSxbLTQxLjk4OCwtMjIuOTddLFstNDMuMDc1LC0yMi45NjhdLFstNDQuNjQ4LC0yMy4zNTJdLFstNDUuMzUyLC0yMy43OTddLFstNDYuNDcyLC0yNC4wODldLFstNDcuNjQ5LC0yNC44ODVdLFstNDguNDk1LC0yNS44NzddLFstNDguNjQxLC0yNi42MjRdLFstNDguNDc1LC0yNy4xNzZdLFstNDguNjYxLC0yOC4xODZdLFstNDguODg4LC0yOC42NzRdLFstNDkuNTg3LC0yOS4yMjRdLFstNTAuNjk3LC0zMC45ODRdLFstNTEuNTc2LC0zMS43NzhdLFstNTIuMjU2LC0zMi4yNDVdLFstNTIuNzEyLC0zMy4xOTddLFstNTMuMzc0LC0zMy43NjhdLFstNTMuODA2LC0zNC4zOTddLFstNTQuOTM2LC0zNC45NTNdLFstNTUuNjc0LC0zNC43NTNdLFstNTYuMjE1LC0zNC44Nl0sWy01Ny4xNCwtMzQuNDNdLFstNTcuODE4LC0zNC40NjNdLFstNTguNDI3LC0zMy45MDldLFstNTguNDk1LC0zNC40MzJdLFstNTcuMjI2LC0zNS4yODhdLFstNTcuMzYyLC0zNS45NzddLFstNTYuNzM3LC0zNi40MTNdLFstNTYuNzg4LC0zNi45MDFdLFstNTcuNzQ5LC0zOC4xODRdLFstNTkuMjMyLC0zOC43Ml0sWy02MS4yMzcsLTM4LjkyOF0sWy02Mi4zMzYsLTM4LjgyOF0sWy02Mi4xMjYsLTM5LjQyNF0sWy02Mi4zMzEsLTQwLjE3M10sWy02Mi4xNDYsLTQwLjY3N10sWy02Mi43NDYsLTQxLjAyOV0sWy02My43NzEsLTQxLjE2N10sWy02NC43MzIsLTQwLjgwM10sWy02NS4xMTgsLTQxLjA2NF0sWy02NC45NzksLTQyLjA1OF0sWy02NC4zMDMsLTQyLjM1OV0sWy02My43NTYsLTQyLjA0NF0sWy02My40NTgsLTQyLjU2M10sWy02NC4zNzksLTQyLjg3M10sWy02NS4xODIsLTQzLjQ5NV0sWy02NS4zMjksLTQ0LjUwMV0sWy02NS41NjUsLTQ1LjAzN10sWy02Ni41MSwtNDUuMDRdLFstNjcuMjk0LC00NS41NTJdLFstNjcuNTgxLC00Ni4zMDJdLFstNjYuNTk3LC00Ny4wMzRdLFstNjUuNjQxLC00Ny4yMzZdLFstNjUuOTg1LC00OC4xMzNdLFstNjcuMTY2LC00OC42OTddLFstNjcuODE2LC00OS44N10sWy02OC43MjksLTUwLjI2NF0sWy02OS4xMzgsLTUwLjczMl0sWy02OC44MTUsLTUxLjc3MV0sWy02OC4xNSwtNTIuMzVdLFstNjguNTcxLC01Mi4yOTldLFstNjkuNDYxLC01Mi4yOTJdLFstNjkuOTQzLC01Mi41MzhdLFstNzAuODQ1LC01Mi44OTldLFstNzEuMDA2LC01My44MzNdLFstNzEuNDMsLTUzLjg1Nl0sWy03Mi41NTgsLTUzLjUzMV0sWy03My43MDMsLTUyLjgzNV0sWy03NC45NDcsLTUyLjI2M10sWy03NS4yNiwtNTEuNjI5XSxbLTc0Ljk3NywtNTEuMDQzXSxbLTc1LjQ4LC01MC4zNzhdLFstNzUuNjA4LC00OC42NzRdLFstNzUuMTgzLC00Ny43MTJdLFstNzQuMTI3LC00Ni45MzldLFstNzUuNjQ0LC00Ni42NDhdLFstNzQuNjkyLC00NS43NjRdLFstNzQuMzUyLC00NC4xMDNdLFstNzMuMjQsLTQ0LjQ1NV0sWy03Mi43MTgsLTQyLjM4M10sWy03My4zODksLTQyLjExN10sWy03My43MDEsLTQzLjM2Nl0sWy03NC4zMzIsLTQzLjIyNV0sWy03NC4wMTgsLTQxLjc5NV0sWy03My42NzcsLTM5Ljk0Ml0sWy03My4yMTgsLTM5LjI1OV0sWy03My41MDUsLTM4LjI4M10sWy03My41ODgsLTM3LjE1Nl0sWy03My4xNjcsLTM3LjEyNF0sWy03Mi41NTMsLTM1LjUwOV0sWy03MS44NjIsLTMzLjkwOV0sWy03MS40MzgsLTMyLjQxOV0sWy03MS42NjksLTMwLjkyMV0sWy03MS4zNywtMzAuMDk2XSxbLTcxLjQ5LC0yOC44NjFdLFstNzAuOTA1LC0yNy42NF0sWy03MC43MjUsLTI1LjcwNl0sWy03MC40MDQsLTIzLjYyOV0sWy03MC4wOTEsLTIxLjM5M10sWy03MC4xNjQsLTE5Ljc1Nl0sWy03MC4zNzIsLTE4LjM0OF0sWy03MS4zNzUsLTE3Ljc3NF0sWy03MS40NjIsLTE3LjM2M10sWy03My40NDUsLTE2LjM1OV0sWy03NS4yMzgsLTE1LjI2Nl0sWy03Ni4wMDksLTE0LjY0OV0sWy03Ni40MjMsLTEzLjgyM10sWy03Ni4yNTksLTEzLjUzNV0sWy03Ny4xMDYsLTEyLjIyM10sWy03OC4wOTIsLTEwLjM3OF0sWy03OS4wMzcsLTguMzg3XSxbLTc5LjQ0NiwtNy45MzFdLFstNzkuNzYsLTcuMTk0XSxbLTgwLjUzNywtNi41NDJdLFstODEuMjUsLTYuMTM3XSxbLTgwLjkyNiwtNS42OV0sWy04MS40MTEsLTQuNzM3XSxbLTgxLjEsLTQuMDM2XSxbLTgwLjMwMiwtMy40MDVdLFstNzkuNzcsLTIuNjU3XSxbLTc5Ljk4NywtMi4yMjFdLFstODAuMzY5LC0yLjY4NV0sWy04MC45NjgsLTIuMjQ3XSxbLTgwLjc2NSwtMS45NjVdLFstODAuOTM0LC0xLjA1N10sWy04MC41ODMsLTAuOTA3XSxbLTgwLjM5OSwtMC4yODRdLFstODAuMDIxLDAuMzZdLFstODAuMDkxLDAuNzY4XSxbLTc5LjU0MywwLjk4M10sWy03OC44NTUsMS4zODFdLFstNzguOTkxLDEuNjkxXSxbLTc4LjYxOCwxLjc2Nl0sWy03OC42NjIsMi4yNjddLFstNzguNDI4LDIuNjNdLFstNzcuOTMyLDIuNjk3XSxbLTc3LjUxLDMuMzI1XSxbLTc3LjEyOCwzLjg1XSxbLTc3LjQ5Niw0LjA4OF0sWy03Ny4zMDgsNC42NjhdLFstNzcuNTMzLDUuNTgzXSxbLTc3LjMxOSw1Ljg0NV0sWy03Ny40NzcsNi42OTFdLFstNzcuODgyLDcuMjI0XSxbLTc4LjIxNSw3LjUxMl0sWy03OC40MjksOC4wNTJdLFstNzguMTgyLDguMzE5XSxbLTc4LjQzNSw4LjM4OF0sWy03OC42MjIsOC43MThdLFstNzkuMTIsOC45OTZdLFstNzkuNTU4LDguOTMyXSxbLTc5Ljc2LDguNTg0XSxbLTgwLjE2NCw4LjMzM10sWy04MC4zODMsOC4yOTldLFstODAuNDgxLDguMDldLFstODAuMDA0LDcuNTQ3XSxbLTgwLjI3Nyw3LjQyXSxbLTgwLjQyMSw3LjI3MV0sWy04MC44ODYsNy4yMjFdLFstODEuMDYsNy44MThdLFstODEuMTksNy42NDhdLFstODEuNTE5LDcuNzA3XSxbLTgxLjcyMSw4LjEwOV0sWy04Mi4xMzEsOC4xNzVdLFstODIuMzkxLDguMjkyXSxbLTgyLjgyLDguMjkxXSxbLTgyLjg1MSw4LjA3NF0sWy04Mi45NjYsOC4yMjVdLFstODMuNTA4LDguNDQ3XSxbLTgzLjcxMSw4LjY1N10sWy04My41OTYsOC44MzFdLFstODMuNjMzLDkuMDUyXSxbLTgzLjkxLDkuMjkxXSxbLTg0LjMwMyw5LjQ4N10sWy04NC42NDgsOS42MTVdLFstODQuNzEzLDkuOTA4XSxbLTg0Ljk3NiwxMC4wODddLFstODQuOTExLDkuNzk2XSxbLTg1LjExMSw5LjU1N10sWy04NS4zMzksOS44MzRdLFstODUuNjYxLDkuOTMzXSxbLTg1Ljc5NywxMC4xMzVdLFstODUuNzkyLDEwLjQzOV0sWy04NS42NTksMTAuNzU0XSxbLTg1Ljk0MiwxMC44OTVdLFstODUuNzEzLDExLjA4OV0sWy04Ni4wNTgsMTEuNDA0XSxbLTg2LjUyNiwxMS44MDddLFstODYuNzQ2LDEyLjE0NF0sWy04Ny4xNjcsMTIuNDU4XSxbLTg3LjY2OSwxMi45MV0sWy04Ny41NTcsMTMuMDY1XSxbLTg3LjM5MiwxMi45MTRdLFstODcuMzE3LDEyLjk4NV0sWy04Ny40ODksMTMuMjk3XSxbLTg3Ljc5MywxMy4zODVdLFstODcuOTA0LDEzLjE0OV0sWy04OC40ODMsMTMuMTY0XSxbLTg4Ljg0MywxMy4yNl0sWy04OS4yNTcsMTMuNDU5XSxbLTg5LjgxMiwxMy41MjFdLFstOTAuMDk2LDEzLjczNV0sWy05MC42MDksMTMuOTFdLFstOTEuMjMyLDEzLjkyOF0sWy05MS42OSwxNC4xMjZdLFstOTIuMjI4LDE0LjUzOV0sWy05My4zNTksMTUuNjE1XSxbLTkzLjg3NSwxNS45NF0sWy05NC42OTIsMTYuMjAxXSxbLTk1LjI1LDE2LjEyOF0sWy05Ni4wNTMsMTUuNzUyXSxbLTk2LjU1NywxNS42NTRdLFstOTcuMjY0LDE1LjkxN10sWy05OC4wMTMsMTYuMTA3XSxbLTk4Ljk0OCwxNi41NjZdLFstOTkuNjk3LDE2LjcwNl0sWy0xMDAuODMsMTcuMTcxXSxbLTEwMS42NjYsMTcuNjQ5XSxbLTEwMS45MTksMTcuOTE2XSxbLTEwMi40NzgsMTcuOTc2XSxbLTEwMy41MDEsMTguMjkyXSxbLTEwMy45MTcsMTguNzQ5XSxbLTEwNC45OTIsMTkuMzE2XSxbLTEwNS40OTMsMTkuOTQ3XSxbLTEwNS43MzEsMjAuNDM0XSxbLTEwNS4zOTgsMjAuNTMyXSxbLTEwNS41MDEsMjAuODE3XSxbLTEwNS4yNzEsMjEuMDc2XSxbLTEwNS4yNjYsMjEuNDIyXSxbLTEwNS42MDMsMjEuODcxXSxbLTEwNS42OTMsMjIuMjY5XSxbLTEwNi4wMjksMjIuNzc0XSxbLTEwNi45MSwyMy43NjhdLFstMTA3LjkxNSwyNC41NDldLFstMTA4LjQwMiwyNS4xNzJdLFstMTA5LjI2LDI1LjU4MV0sWy0xMDkuNDQ0LDI1LjgyNV0sWy0xMDkuMjkyLDI2LjQ0M10sWy0xMDkuODAxLDI2LjY3Nl0sWy0xMTAuMzkyLDI3LjE2Ml0sWy0xMTAuNjQxLDI3Ljg2XSxbLTExMS4xNzksMjcuOTQxXSxbLTExMS43NiwyOC40NjhdLFstMTEyLjIyOCwyOC45NTVdLFstMTEyLjI3MiwyOS4yNjddLFstMTEyLjgxLDMwLjAyMV0sWy0xMTMuMTY0LDMwLjc4N10sWy0xMTMuMTQ5LDMxLjE3MV0sWy0xMTMuODcyLDMxLjU2OF0sWy0xMTQuMjA2LDMxLjUyNF0sWy0xMTQuNzc2LDMxLjhdLFstMTE0LjkzNywzMS4zOTNdLFstMTE0Ljc3MSwzMC45MTRdLFstMTE0LjY3NCwzMC4xNjNdLFstMTE0LjMzMSwyOS43NV0sWy0xMTMuNTg5LDI5LjA2Ml0sWy0xMTMuNDI0LDI4LjgyNl0sWy0xMTMuMjcyLDI4Ljc1NV0sWy0xMTMuMTQsMjguNDExXSxbLTExMi45NjIsMjguNDI1XSxbLTExMi43NjIsMjcuNzhdLFstMTEyLjQ1OCwyNy41MjZdLFstMTEyLjI0NSwyNy4xNzJdLFstMTExLjYxNywyNi42NjNdLFstMTExLjI4NSwyNS43MzNdLFstMTEwLjk4OCwyNS4yOTVdLFstMTEwLjcxLDI0LjgyNl0sWy0xMTAuNjU1LDI0LjI5OV0sWy0xMTAuMTczLDI0LjI2Nl0sWy0xMDkuNzcyLDIzLjgxMV0sWy0xMDkuNDA5LDIzLjM2NV0sWy0xMDkuNDMzLDIzLjE4Nl0sWy0xMDkuODU0LDIyLjgxOF0sWy0xMTAuMDMxLDIyLjgyM10sWy0xMTAuMjk1LDIzLjQzMV0sWy0xMTAuOTUsMjQuMDAxXSxbLTExMS42NzEsMjQuNDg0XSxbLTExMi4xODIsMjQuNzM5XSxbLTExMi4xNDksMjUuNDddLFstMTEyLjMwMSwyNi4wMTJdLFstMTEyLjc3NywyNi4zMjJdLFstMTEzLjQ2NSwyNi43NjhdLFstMTEzLjU5NywyNi42NF0sWy0xMTMuODQ5LDI2LjldLFstMTE0LjQ2NiwyNy4xNDJdLFstMTE1LjA1NSwyNy43MjNdLFstMTE0Ljk4MiwyNy43OThdLFstMTE0LjU3LDI3Ljc0Ml0sWy0xMTQuMTk5LDI4LjExNV0sWy0xMTQuMTYyLDI4LjU2Nl0sWy0xMTQuOTMyLDI5LjI3OV0sWy0xMTUuNTE5LDI5LjU1Nl0sWy0xMTUuODg3LDMwLjE4MV0sWy0xMTYuMjU4LDMwLjgzNl0sWy0xMTYuNzIxLDMxLjYzNl0sWy0xMTcuMTI4LDMyLjUzNV0sWy0xMTcuMjk2LDMzLjA0Nl0sWy0xMTcuOTQ0LDMzLjYyMV0sWy0xMTguNDExLDMzLjc0MV0sWy0xMTguNTIsMzQuMDI4XSxbLTExOS4wODEsMzQuMDc4XSxbLTExOS40MzksMzQuMzQ5XSxbLTEyMC4zNjgsMzQuNDQ3XSxbLTEyMC42MjMsMzQuNjA5XSxbLTEyMC43NDQsMzUuMTU3XSxbLTEyMS43MTUsMzYuMTYyXSxbLTEyMi41NDcsMzcuNTUyXSxbLTEyMi41MTIsMzcuNzg0XSxbLTEyMi45NTMsMzguMTE0XSxbLTEyMy43MjcsMzguOTUyXSxbLTEyMy44NjUsMzkuNzY3XSxbLTEyNC4zOTgsNDAuMzEzXSxbLTEyNC4xNzksNDEuMTQyXSxbLTEyNC4yMTQsNDIuMF0sWy0xMjQuNTMzLDQyLjc2Nl0sWy0xMjQuMTQyLDQzLjcwOF0sWy0xMjMuODk5LDQ1LjUyM10sWy0xMjQuMDgsNDYuODY1XSxbLTEyNC4zOTYsNDcuNzJdLFstMTI0LjY4Nyw0OC4xODVdLFstMTI0LjU2Niw0OC4zOF0sWy0xMjMuMTIsNDguMDRdLFstMTIyLjU4Nyw0Ny4wOTZdLFstMTIyLjM0LDQ3LjM2XSxbLTEyMi41LDQ4LjE4XSxbLTEyMi44NCw0OS4wXSxbLTEyMi45NzQsNDkuMDAzXSxbLTEyNC45MSw0OS45ODVdLFstMTI1LjYyNSw1MC40MTddLFstMTI3LjQzNiw1MC44MzFdLFstMTI3Ljk5Myw1MS43MTZdLFstMTI3Ljg1LDUyLjMzXSxbLTEyOS4xMyw1Mi43NTVdLFstMTI5LjMwNSw1My41NjJdLFstMTMwLjUxNSw1NC4yODhdLFstMTMwLjUzNiw1NC44MDNdLFstMTMxLjA4Niw1NS4xNzldLFstMTMxLjk2Nyw1NS40OThdLFstMTMyLjI1LDU2LjM3XSxbLTEzMy41MzksNTcuMTc5XSxbLTEzNC4wNzgsNTguMTIzXSxbLTEzNS4wMzgsNTguMTg4XSxbLTEzNi42MjgsNTguMjEyXSxbLTEzNy44LDU4LjVdLFstMTM5Ljg2OCw1OS41MzhdLFstMTQwLjgyNSw1OS43MjddLFstMTQyLjU3NCw2MC4wODRdLFstMTQzLjk1OSw1OS45OTldLFstMTQ1LjkyNSw2MC40NTldLFstMTQ3LjExNCw2MC44ODVdLFstMTQ4LjIyNCw2MC42NzNdLFstMTQ4LjAxOCw1OS45NzhdLFstMTQ4LjU3MSw1OS45MTRdLFstMTQ5LjcyOCw1OS43MDZdLFstMTUwLjYwOCw1OS4zNjhdLFstMTUxLjcxNiw1OS4xNTZdLFstMTUxLjg1OSw1OS43NDVdLFstMTUxLjQxLDYwLjcyNl0sWy0xNTAuMzQ3LDYxLjAzNF0sWy0xNTAuNjIxLDYxLjI4NF0sWy0xNTEuODk2LDYwLjcyN10sWy0xNTIuNTc4LDYwLjA2Ml0sWy0xNTQuMDE5LDU5LjM1XSxbLTE1My4yODcsNTguODY1XSxbLTE1NC4yMzIsNTguMTQ2XSxbLTE1NS4zMDcsNTcuNzI4XSxbLTE1Ni4zMDgsNTcuNDIzXSxbLTE1Ni41NTYsNTYuOThdLFstMTU4LjExNyw1Ni40NjRdLFstMTU4LjQzMyw1NS45OTRdLFstMTU5LjYwMyw1NS41NjddLFstMTYwLjI5LDU1LjY0NF0sWy0xNjEuMjIzLDU1LjM2NV0sWy0xNjIuMjM4LDU1LjAyNF0sWy0xNjMuMDY5LDU0LjY5XSxbLTE2NC43ODYsNTQuNDA0XSxbLTE2NC45NDIsNTQuNTcyXSxbLTE2My44NDgsNTUuMDM5XSxbLTE2Mi44Nyw1NS4zNDhdLFstMTYxLjgwNCw1NS44OTVdLFstMTYwLjU2NCw1Ni4wMDhdLFstMTYwLjA3LDU2LjQxOF0sWy0xNTguNjg0LDU3LjAxN10sWy0xNTguNDYxLDU3LjIxN10sWy0xNTcuNzIzLDU3LjU3XSxbLTE1Ny41NSw1OC4zMjhdLFstMTU3LjA0Miw1OC45MTldLFstMTU4LjE5NSw1OC42MTZdLFstMTU4LjUxNyw1OC43ODhdLFstMTU5LjA1OSw1OC40MjRdLFstMTU5LjcxMiw1OC45MzJdLFstMTU5Ljk4MSw1OC41NzNdLFstMTYwLjM1NSw1OS4wNzFdLFstMTYxLjM1NSw1OC42NzFdLFstMTYxLjk2OSw1OC42NzJdLFstMTYyLjA1NSw1OS4yNjddLFstMTYxLjg3NCw1OS42MzRdLFstMTYyLjUxOCw1OS45OV0sWy0xNjMuODE4LDU5Ljc5OF0sWy0xNjQuNjYyLDYwLjI2OF0sWy0xNjUuMzQ2LDYwLjUwOF0sWy0xNjUuMzUxLDYxLjA3NF0sWy0xNjYuMTIxLDYxLjVdLFstMTY1LjczNCw2Mi4wNzVdLFstMTY0LjkxOSw2Mi42MzNdLFstMTY0LjU2Miw2My4xNDZdLFstMTYzLjc1Myw2My4yMTldLFstMTYzLjA2Nyw2My4wNl0sWy0xNjIuMjYsNjMuNTQyXSxbLTE2MS41MzQsNjMuNDU2XSxbLTE2MC43NzMsNjMuNzY2XSxbLTE2MC45NTgsNjQuMjIzXSxbLTE2MS41MTgsNjQuNDAzXSxbLTE2MC43NzgsNjQuNzg5XSxbLTE2MS4zOTIsNjQuNzc3XSxbLTE2Mi40NTMsNjQuNTZdLFstMTYyLjc1OCw2NC4zMzldLFstMTYzLjU0Niw2NC41NTldLFstMTY0Ljk2MSw2NC40NDddLFstMTY2LjQyNSw2NC42ODddLFstMTY2Ljg0NSw2NS4wODldLFstMTY4LjExLDY1LjY3XSxbLTE2Ni43MDUsNjYuMDg4XSxbLTE2NC40NzUsNjYuNTc3XSxbLTE2My42NTMsNjYuNTc3XSxbLTE2My43ODksNjYuMDc3XSxbLTE2MS42NzgsNjYuMTE2XSxbLTE2Mi40OSw2Ni43MzVdLFstMTYzLjcyLDY3LjExN10sWy0xNjQuNDMxLDY3LjYxNl0sWy0xNjUuMzksNjguMDQzXSxbLTE2Ni43NjQsNjguMzU5XSxbLTE2Ni4yMDUsNjguODgzXSxbLTE2NC40MzEsNjguOTE2XSxbLTE2My4xNjksNjkuMzcxXSxbLTE2Mi45Myw2OS44NThdLFstMTYxLjkwOSw3MC4zMzNdLFstMTYwLjkzNSw3MC40NDhdLFstMTU5LjAzOSw3MC44OTJdLFstMTU4LjEyLDcwLjgyNV0sWy0xNTYuNTgxLDcxLjM1OF0sWy0xNTUuMDY4LDcxLjE0OF0sWy0xNTQuMzQ0LDcwLjY5Nl0sWy0xNTMuOSw3MC44OV0sWy0xNTIuMjEsNzAuODNdLFstMTUyLjI3LDcwLjZdLFstMTUwLjc0LDcwLjQzXSxbLTE0OS43Miw3MC41M10sWy0xNDcuNjEzLDcwLjIxNF0sWy0xNDUuNjksNzAuMTJdLFstMTQ0LjkyLDY5Ljk5XSxbLTE0My41ODksNzAuMTUzXSxbLTE0Mi4wNzMsNjkuODUyXSxbLTE0MC45ODYsNjkuNzEyXSxbLTEzOS4xMiw2OS40NzFdLFstMTM3LjU0Niw2OC45OV0sWy0xMzYuNTA0LDY4Ljg5OF0sWy0xMzUuNjI2LDY5LjMxNV0sWy0xMzQuNDE1LDY5LjYyOF0sWy0xMzIuOTI5LDY5LjUwNV0sWy0xMzEuNDMxLDY5Ljk0NV0sWy0xMjkuNzk1LDcwLjE5NF0sWy0xMjkuMTA4LDY5Ljc3OV0sWy0xMjguMzYyLDcwLjAxM10sWy0xMjguMTM4LDcwLjQ4NF0sWy0xMjcuNDQ3LDcwLjM3N10sWy0xMjUuNzU2LDY5LjQ4MV0sWy0xMjQuNDI1LDcwLjE1OV0sWy0xMjQuMjksNjkuNF0sWy0xMjMuMDYxLDY5LjU2NF0sWy0xMjIuNjgzLDY5Ljg1Nl0sWy0xMjEuNDcyLDY5Ljc5OF0sWy0xMTkuOTQzLDY5LjM3OF0sWy0xMTcuNjAzLDY5LjAxMV0sWy0xMTYuMjI2LDY4Ljg0MV0sWy0xMTUuMjQ3LDY4LjkwNl0sWy0xMTMuODk4LDY4LjM5OV0sWy0xMTUuMzA1LDY3LjkwM10sWy0xMTMuNDk3LDY3LjY4OF0sWy0xMTAuNzk4LDY3LjgwNl0sWy0xMDkuOTQ2LDY3Ljk4MV0sWy0xMDguODgsNjcuMzgyXSxbLTEwNy43OTIsNjcuODg4XSxbLTEwOC44MTMsNjguMzEyXSxbLTEwOC4xNjcsNjguNjU0XSxbLTEwNi45NSw2OC43XSxbLTEwNi4xNSw2OC44XSxbLTEwNS4zNDMsNjguNTYxXSxbLTEwNC4zMzgsNjguMDE4XSxbLTEwMy4yMjEsNjguMDk4XSxbLTEwMS40NTQsNjcuNjQ3XSxbLTk5LjkwMiw2Ny44MDZdLFstOTguNDQzLDY3Ljc4Ml0sWy05OC41NTksNjguNDA0XSxbLTk3LjY2OSw2OC41NzldLFstOTYuMTIsNjguMjRdLFstOTYuMTI2LDY3LjI5NF0sWy05NS40ODksNjguMDkxXSxbLTk0LjY4NSw2OC4wNjRdLFstOTQuMjMzLDY5LjA2OV0sWy05NS4zMDQsNjkuNjg2XSxbLTk2LjQ3MSw3MC4wOV0sWy05Ni4zOTEsNzEuMTk1XSxbLTk1LjIwOSw3MS45Ml0sWy05My44OSw3MS43Nl0sWy05Mi44NzgsNzEuMzE5XSxbLTkxLjUyLDcwLjE5MV0sWy05Mi40MDcsNjkuN10sWy05MC41NDcsNjkuNDk4XV0sW1stMTE0LjE2Nyw3My4xMjFdLFstMTE0LjY2Niw3Mi42NTNdLFstMTEyLjQ0MSw3Mi45NTVdLFstMTExLjA1LDcyLjQ1XSxbLTEwOS45Miw3Mi45NjFdLFstMTA5LjAwNyw3Mi42MzNdLFstMTA4LjE4OCw3MS42NTFdLFstMTA3LjY4Niw3Mi4wNjVdLFstMTA4LjM5Niw3My4wOV0sWy0xMDcuNTE2LDczLjIzNl0sWy0xMDYuNTIzLDczLjA3Nl0sWy0xMDUuNDAyLDcyLjY3M10sWy0xMDQuNzc1LDcxLjY5OF0sWy0xMDQuNDY1LDcwLjk5M10sWy0xMDIuNzg1LDcwLjQ5OF0sWy0xMDAuOTgxLDcwLjAyNF0sWy0xMDEuMDg5LDY5LjU4NF0sWy0xMDIuNzMxLDY5LjUwNF0sWy0xMDIuMDkzLDY5LjEyXSxbLTEwMi40Myw2OC43NTNdLFstMTA0LjI0LDY4LjkxXSxbLTEwNS45Niw2OS4xOF0sWy0xMDcuMTIzLDY5LjExOV0sWy0xMDksNjguNzhdLFstMTExLjk2Nyw2OC42MDRdLFstMTEzLjMxMyw2OC41MzZdLFstMTEzLjg1NSw2OS4wMDddLFstMTE1LjIyLDY5LjI4XSxbLTExNi4xMDgsNjkuMTY4XSxbLTExNy4zNCw2OS45Nl0sWy0xMTYuNjc1LDcwLjA2N10sWy0xMTUuMTMxLDcwLjIzN10sWy0xMTMuNzIxLDcwLjE5Ml0sWy0xMTIuNDE2LDcwLjM2Nl0sWy0xMTQuMzUsNzAuNl0sWy0xMTYuNDg3LDcwLjUyXSxbLTExNy45MDUsNzAuNTQxXSxbLTExOC40MzIsNzAuOTA5XSxbLTExNi4xMTMsNzEuMzA5XSxbLTExNy42NTYsNzEuMjk1XSxbLTExOS40MDIsNzEuNTU5XSxbLTExOC41NjMsNzIuMzA4XSxbLTExNy44NjYsNzIuNzA2XSxbLTExNS4xODksNzMuMzE1XSxbLTExNC4xNjcsNzMuMTIxXV0sW1stMTA0LjUsNzMuNDJdLFstMTA1LjM4LDcyLjc2XSxbLTEwNi45NCw3My40Nl0sWy0xMDYuNiw3My42XSxbLTEwNS4yNiw3My42NF0sWy0xMDQuNSw3My40Ml1dLFtbLTc2LjM0LDczLjEwM10sWy03Ni4yNTEsNzIuODI2XSxbLTc3LjMxNCw3Mi44NTZdLFstNzguMzkyLDcyLjg3N10sWy03OS40ODYsNzIuNzQyXSxbLTc5Ljc3Niw3Mi44MDNdLFstODAuODc2LDczLjMzM10sWy04MC44MzQsNzMuNjkzXSxbLTgwLjM1Myw3My43Nl0sWy03OC4wNjQsNzMuNjUyXSxbLTc2LjM0LDczLjEwM11dLFtbLTg2LjU2Miw3My4xNTddLFstODUuNzc0LDcyLjUzNF0sWy04NC44NSw3My4zNF0sWy04Mi4zMTYsNzMuNzUxXSxbLTgwLjYsNzIuNzE3XSxbLTgwLjc0OSw3Mi4wNjJdLFstNzguNzcxLDcyLjM1Ml0sWy03Ny44MjUsNzIuNzVdLFstNzUuNjA2LDcyLjI0NF0sWy03NC4yMjksNzEuNzY3XSxbLTc0LjA5OSw3MS4zMzFdLFstNzIuMjQyLDcxLjU1N10sWy03MS4yLDcwLjkyXSxbLTY4Ljc4Niw3MC41MjVdLFstNjcuOTE1LDcwLjEyMl0sWy02Ni45NjksNjkuMTg2XSxbLTY4LjgwNSw2OC43Ml0sWy02Ni40NSw2OC4wNjddLFstNjQuODYyLDY3Ljg0OF0sWy02My40MjUsNjYuOTI4XSxbLTYxLjg1Miw2Ni44NjJdLFstNjIuMTYzLDY2LjE2XSxbLTYzLjkxOCw2NC45OTldLFstNjUuMTQ5LDY1LjQyNl0sWy02Ni43MjEsNjYuMzg4XSxbLTY4LjAxNSw2Ni4yNjNdLFstNjguMTQxLDY1LjY5XSxbLTY3LjA5LDY1LjEwOF0sWy02NS43MzIsNjQuNjQ4XSxbLTY1LjMyLDY0LjM4M10sWy02NC42NjksNjMuMzkzXSxbLTY1LjAxNCw2Mi42NzRdLFstNjYuMjc1LDYyLjk0NV0sWy02OC43ODMsNjMuNzQ2XSxbLTY3LjM3LDYyLjg4NF0sWy02Ni4zMjgsNjIuMjhdLFstNjYuMTY2LDYxLjkzMV0sWy02OC44NzcsNjIuMzNdLFstNzEuMDIzLDYyLjkxMV0sWy03Mi4yMzUsNjMuMzk4XSxbLTcxLjg4Niw2My42OF0sWy03My4zNzgsNjQuMTk0XSxbLTc0LjgzNCw2NC42NzldLFstNzQuODE5LDY0LjM4OV0sWy03Ny43MSw2NC4yM10sWy03OC41NTYsNjQuNTczXSxbLTc3Ljg5Nyw2NS4zMDldLFstNzYuMDE4LDY1LjMyN10sWy03My45Niw2NS40NTVdLFstNzQuMjk0LDY1LjgxMl0sWy03My45NDUsNjYuMzExXSxbLTcyLjY1MSw2Ny4yODVdLFstNzIuOTI2LDY3LjcyN10sWy03My4zMTIsNjguMDY5XSxbLTc0Ljg0Myw2OC41NTVdLFstNzYuODY5LDY4Ljg5NV0sWy03Ni4yMjksNjkuMTQ4XSxbLTc3LjI4Nyw2OS43N10sWy03OC4xNjksNjkuODI2XSxbLTc4Ljk1Nyw3MC4xNjddLFstNzkuNDkyLDY5Ljg3Ml0sWy04MS4zMDUsNjkuNzQzXSxbLTg0Ljk0NSw2OS45NjddLFstODcuMDYsNzAuMjZdLFstODguNjgyLDcwLjQxMV0sWy04OS41MTMsNzAuNzYyXSxbLTg4LjQ2OCw3MS4yMThdLFstODkuODg4LDcxLjIyM10sWy05MC4yMDUsNzIuMjM1XSxbLTg5LjQzNyw3My4xMjldLFstODguNDA4LDczLjUzOF0sWy04NS44MjYsNzMuODA0XSxbLTg2LjU2Miw3My4xNTddXSxbWy0xMDAuMzU2LDczLjg0NF0sWy05OS4xNjQsNzMuNjMzXSxbLTk3LjM4LDczLjc2XSxbLTk3LjEyLDczLjQ3XSxbLTk4LjA1NCw3Mi45OTFdLFstOTYuNTQsNzIuNTZdLFstOTYuNzIsNzEuNjZdLFstOTguMzYsNzEuMjczXSxbLTk5LjMyMyw3MS4zNTZdLFstMTAwLjAxNSw3MS43MzhdLFstMTAyLjUsNzIuNTFdLFstMTAyLjQ4LDcyLjgzXSxbLTEwMC40MzgsNzIuNzA2XSxbLTEwMS41NCw3My4zNl0sWy0xMDAuMzU2LDczLjg0NF1dLFtbMTQzLjYwNCw3My4yMTJdLFsxNDIuMDg4LDczLjIwNV0sWzE0MC4wMzgsNzMuMzE3XSxbMTM5Ljg2Myw3My4zN10sWzE0MC44MTIsNzMuNzY1XSxbMTQyLjA2Miw3My44NThdLFsxNDMuNDgzLDczLjQ3NV0sWzE0My42MDQsNzMuMjEyXV0sW1stOTMuMTk2LDcyLjc3Ml0sWy05NC4yNjksNzIuMDI1XSxbLTk1LjQxLDcyLjA2Ml0sWy05Ni4wMzQsNzIuOTRdLFstOTYuMDE4LDczLjQzN10sWy05NS40OTYsNzMuODYyXSxbLTk0LjUwNCw3NC4xMzVdLFstOTIuNDIsNzQuMV0sWy05MC41MSw3My44NTddLFstOTIuMDA0LDcyLjk2Nl0sWy05My4xOTYsNzIuNzcyXV0sW1stMTIwLjQ2LDcxLjRdLFstMTIzLjA5Miw3MC45MDJdLFstMTIzLjYyLDcxLjM0XSxbLTEyNS45MjksNzEuODY5XSxbLTEyNS41OTMsNzIuMTk1XSxbLTEyNC44MDcsNzMuMDIzXSxbLTEyMy45NCw3My42OF0sWy0xMjQuOTE4LDc0LjI5M10sWy0xMjEuNTM4LDc0LjQ0OV0sWy0xMjAuMTEsNzQuMjQxXSxbLTExNy41NTYsNzQuMTg2XSxbLTExNi41ODQsNzMuODk2XSxbLTExNS41MTEsNzMuNDc1XSxbLTExNi43NjgsNzMuMjIzXSxbLTExOS4yMiw3Mi41Ml0sWy0xMjAuNDYsNzEuODJdLFstMTIwLjQ2LDcxLjRdXSxbWzE1MC43MzIsNzUuMDg0XSxbMTQ5LjU3Niw3NC42ODldLFsxNDcuOTc3LDc0Ljc3OF0sWzE0Ni4xMTksNzUuMTczXSxbMTQ2LjM1OCw3NS40OTddLFsxNDguMjIyLDc1LjM0Nl0sWzE1MC43MzIsNzUuMDg0XV0sW1stOTMuNjEzLDc0Ljk4XSxbLTk0LjE1Nyw3NC41OTJdLFstOTUuNjA5LDc0LjY2N10sWy05Ni44MjEsNzQuOTI4XSxbLTk2LjI4OSw3NS4zNzhdLFstOTQuODUxLDc1LjY0N10sWy05My45NzgsNzUuMjk2XSxbLTkzLjYxMyw3NC45OF1dLFtbMTQ1LjA4Niw3NS41NjNdLFsxNDQuMyw3NC44Ml0sWzE0MC42MTQsNzQuODQ4XSxbMTM4Ljk1NSw3NC42MTFdLFsxMzYuOTc0LDc1LjI2Ml0sWzEzNy41MTIsNzUuOTQ5XSxbMTM4LjgzMSw3Ni4xMzddLFsxNDEuNDcyLDc2LjA5M10sWzE0NS4wODYsNzUuNTYzXV0sW1stOTguNSw3Ni43Ml0sWy05Ny43MzYsNzYuMjU3XSxbLTk3LjcwNCw3NS43NDNdLFstOTguMTYsNzVdLFstOTkuODA5LDc0Ljg5N10sWy0xMDAuODg0LDc1LjA1N10sWy0xMDAuODYzLDc1LjY0MV0sWy0xMDIuNTAyLDc1LjU2NF0sWy0xMDIuNTY2LDc2LjMzN10sWy0xMDEuNDksNzYuMzA1XSxbLTk5Ljk4Myw3Ni42NDZdLFstOTguNTc3LDc2LjU4OV0sWy05OC41LDc2LjcyXV0sW1stMTA4LjIxMSw3Ni4yMDJdLFstMTA3LjgxOSw3NS44NDZdLFstMTA2LjkyOSw3Ni4wMTNdLFstMTA1Ljg4MSw3NS45NjldLFstMTA1LjcwNSw3NS40OF0sWy0xMDYuMzEzLDc1LjAwNV0sWy0xMDkuNyw3NC44NV0sWy0xMTIuMjIzLDc0LjQxN10sWy0xMTMuNzQ0LDc0LjM5NF0sWy0xMTMuODcxLDc0LjcyXSxbLTExMS43OTQsNzUuMTYyXSxbLTExNi4zMTIsNzUuMDQzXSxbLTExNy43MSw3NS4yMjJdLFstMTE2LjM0Niw3Ni4xOTldLFstMTE1LjQwNSw3Ni40NzldLFstMTEyLjU5MSw3Ni4xNDFdLFstMTEwLjgxNCw3NS41NDldLFstMTA5LjA2Nyw3NS40NzNdLFstMTEwLjQ5Nyw3Ni40M10sWy0xMDkuNTgxLDc2Ljc5NF0sWy0xMDguNTQ5LDc2LjY3OF0sWy0xMDguMjExLDc2LjIwMl1dLFtbNTcuNTM2LDcwLjcyXSxbNTYuOTQ1LDcwLjYzM10sWzUzLjY3Nyw3MC43NjNdLFs1My40MTIsNzEuMjA3XSxbNTEuNjAyLDcxLjQ3NV0sWzUxLjQ1Niw3Mi4wMTVdLFs1Mi40NzgsNzIuMjI5XSxbNTIuNDQ0LDcyLjc3NV0sWzU0LjQyOCw3My42MjhdLFs1My41MDgsNzMuNzVdLFs1NS45MDIsNzQuNjI3XSxbNTUuNjMyLDc1LjA4MV0sWzU3Ljg2OSw3NS42MDldLFs2MS4xNyw3Ni4yNTJdLFs2NC40OTgsNzYuNDM5XSxbNjYuMjExLDc2LjgxXSxbNjguMTU3LDc2Ljk0XSxbNjguODUyLDc2LjU0NV0sWzY4LjE4MSw3Ni4yMzRdLFs2NC42MzcsNzUuNzM4XSxbNjEuNTg0LDc1LjI2MV0sWzU4LjQ3Nyw3NC4zMDldLFs1Ni45ODcsNzMuMzMzXSxbNTUuNDE5LDcyLjM3MV0sWzU1LjYyMyw3MS41NDFdLFs1Ny41MzYsNzAuNzJdXSxbWy05NC42ODQsNzcuMDk4XSxbLTkzLjU3NCw3Ni43NzZdLFstOTEuNjA1LDc2Ljc3OV0sWy05MC43NDIsNzYuNDVdLFstOTAuOTcsNzYuMDc0XSxbLTg5LjgyMiw3NS44NDhdLFstODkuMTg3LDc1LjYxXSxbLTg3LjgzOCw3NS41NjZdLFstODYuMzc5LDc1LjQ4Ml0sWy04NC43OSw3NS42OTldLFstODIuNzUzLDc1Ljc4NF0sWy04MS4xMjksNzUuNzE0XSxbLTgwLjA1OCw3NS4zMzddLFstNzkuODM0LDc0LjkyM10sWy04MC40NTgsNzQuNjU3XSxbLTgxLjk0OSw3NC40NDJdLFstODMuMjI5LDc0LjU2NF0sWy04Ni4wOTcsNzQuNDFdLFstODguMTUsNzQuMzkyXSxbLTg5Ljc2NSw3NC41MTZdLFstOTIuNDIyLDc0LjgzOF0sWy05Mi43NjgsNzUuMzg3XSxbLTkyLjg5LDc1Ljg4M10sWy05My44OTQsNzYuMzE5XSxbLTk1Ljk2Miw3Ni40NDFdLFstOTcuMTIxLDc2Ljc1MV0sWy05Ni43NDUsNzcuMTYxXSxbLTk0LjY4NCw3Ny4wOThdXSxbWy0xMTYuMTk5LDc3LjY0NV0sWy0xMTYuMzM2LDc2Ljg3N10sWy0xMTcuMTA2LDc2LjUzXSxbLTExOC4wNCw3Ni40ODFdLFstMTE5Ljg5OSw3Ni4wNTNdLFstMTIxLjUsNzUuOV0sWy0xMjIuODU1LDc2LjExN10sWy0xMjIuODU1LDc2LjExN10sWy0xMjEuMTU4LDc2Ljg2NV0sWy0xMTkuMTA0LDc3LjUxMl0sWy0xMTcuNTcsNzcuNDk4XSxbLTExNi4xOTksNzcuNjQ1XV0sW1sxMDYuOTcsNzYuOTc0XSxbMTA3LjI0LDc2LjQ4XSxbMTA4LjE1NCw3Ni43MjNdLFsxMTEuMDc3LDc2LjcxXSxbMTEzLjMzMSw3Ni4yMjJdLFsxMTQuMTM0LDc1Ljg0OF0sWzExMy44ODUsNzUuMzI4XSxbMTEyLjc3OSw3NS4wMzJdLFsxMTAuMTUxLDc0LjQ3N10sWzEwOS40LDc0LjE4XSxbMTEwLjY0LDc0LjA0XSxbMTEyLjExOSw3My43ODhdLFsxMTMuMDE5LDczLjk3N10sWzExMy41Myw3My4zMzVdLFsxMTMuOTY5LDczLjU5NV0sWzExNS41NjgsNzMuNzUzXSxbMTE4Ljc3Niw3My41ODhdLFsxMTkuMDIsNzMuMTJdLFsxMjMuMjAxLDcyLjk3MV0sWzEyMy4yNTgsNzMuNzM1XSxbMTI1LjM4LDczLjU2XSxbMTI2Ljk3Nyw3My41NjVdLFsxMjguNTkxLDczLjAzOV0sWzEyOS4wNTIsNzIuMzk5XSxbMTI4LjQ2LDcxLjk4XSxbMTI5LjcxNiw3MS4xOTNdLFsxMzEuMjg5LDcwLjc4N10sWzEzMi4yNTMsNzEuODM2XSxbMTMzLjg1OCw3MS4zODZdLFsxMzUuNTYyLDcxLjY1NV0sWzEzNy40OTgsNzEuMzQ4XSxbMTM4LjIzNCw3MS42MjhdLFsxMzkuODcsNzEuNDg4XSxbMTM5LjE0OCw3Mi40MTZdLFsxNDAuNDY4LDcyLjg0OV0sWzE0OS41LDcyLjJdLFsxNTAuMzUxLDcxLjYwN10sWzE1Mi45NjksNzAuODQyXSxbMTU3LjAwNyw3MS4wMzFdLFsxNTguOTk4LDcwLjg2N10sWzE1OS44Myw3MC40NTNdLFsxNTkuNzA5LDY5LjcyMl0sWzE2MC45NDEsNjkuNDM3XSxbMTYyLjI3OSw2OS42NDJdLFsxNjQuMDUyLDY5LjY2OF0sWzE2NS45NCw2OS40NzJdLFsxNjcuODM2LDY5LjU4M10sWzE2OS41NzgsNjguNjk0XSxbMTcwLjgxNyw2OS4wMTRdLFsxNzAuMDA4LDY5LjY1M10sWzE3MC40NTMsNzAuMDk3XSxbMTczLjY0NCw2OS44MThdLFsxNzUuNzI0LDY5Ljg3N10sWzE3OC42LDY5LjRdLFsxODAsNjguOTY0XSxbMTgwLDY0Ljk4XSxbMTc5Ljk5Myw2NC45NzRdLFsxNzguNzA3LDY0LjUzNV0sWzE3Ny40MTEsNjQuNjA4XSxbMTc4LjMxMyw2NC4wNzZdLFsxNzguOTA4LDYzLjI1Ml0sWzE3OS4zNyw2Mi45ODNdLFsxNzkuNDg3LDYyLjU2OV0sWzE3OS4yMjgsNjIuMzA0XSxbMTc3LjM2NCw2Mi41MjJdLFsxNzQuNTY5LDYxLjc2OV0sWzE3My42OCw2MS42NTNdLFsxNzIuMTUsNjAuOTVdLFsxNzAuNjk4LDYwLjMzNl0sWzE3MC4zMzEsNTkuODgyXSxbMTY4LjkwMSw2MC41NzNdLFsxNjYuMjk1LDU5Ljc4OV0sWzE2NS44NCw2MC4xNl0sWzE2NC44NzcsNTkuNzMyXSxbMTYzLjUzOSw1OS44NjldLFsxNjMuMjE3LDU5LjIxMV0sWzE2Mi4wMTcsNTguMjQzXSxbMTYyLjA1Myw1Ny44MzldLFsxNjMuMTkyLDU3LjYxNV0sWzE2My4wNTgsNTYuMTU5XSxbMTYyLjEzLDU2LjEyMl0sWzE2MS43MDEsNTUuMjg2XSxbMTYyLjExNyw1NC44NTVdLFsxNjAuMzY5LDU0LjM0NF0sWzE2MC4wMjIsNTMuMjAzXSxbMTU4LjUzMSw1Mi45NTldLFsxNTguMjMxLDUxLjk0M10sWzE1Ni43OSw1MS4wMTFdLFsxNTYuNDIsNTEuN10sWzE1NS45OTIsNTMuMTU5XSxbMTU1LjQzNCw1NS4zODFdLFsxNTUuOTE0LDU2Ljc2OF0sWzE1Ni43NTgsNTcuMzY1XSxbMTU2LjgxLDU3LjgzMl0sWzE1OC4zNjQsNTguMDU2XSxbMTYwLjE1MSw1OS4zMTVdLFsxNjEuODcyLDYwLjM0M10sWzE2My42Nyw2MS4xNDFdLFsxNjQuNDc0LDYyLjU1MV0sWzE2My4yNTgsNjIuNDY2XSxbMTYyLjY1OCw2MS42NDNdLFsxNjAuMTIyLDYwLjU0NF0sWzE1OS4zMDIsNjEuNzc0XSxbMTU2LjcyMSw2MS40MzVdLFsxNTQuMjE4LDU5Ljc1OF0sWzE1NS4wNDQsNTkuMTQ1XSxbMTUyLjgxMiw1OC44ODRdLFsxNTEuMjY2LDU4Ljc4MV0sWzE1MS4zMzgsNTkuNTA0XSxbMTQ5Ljc4NCw1OS42NTZdLFsxNDguNTQ1LDU5LjE2NF0sWzE0NS40ODcsNTkuMzM2XSxbMTQyLjE5OCw1OS4wNF0sWzEzOC45NTgsNTcuMDg4XSxbMTM1LjEyNiw1NC43M10sWzEzNi43MDIsNTQuNjA0XSxbMTM3LjE5Myw1My45NzddLFsxMzguMTY1LDUzLjc1NV0sWzEzOC44MDUsNTQuMjU1XSxbMTM5LjkwMSw1NC4xOV0sWzE0MS4zNDUsNTMuMDldLFsxNDEuMzc5LDUyLjIzOV0sWzE0MC41OTcsNTEuMjRdLFsxNDAuNTEzLDUwLjA0NV0sWzE0MC4wNjIsNDguNDQ3XSxbMTM4LjU1NSw0Ny4wXSxbMTM4LjIyLDQ2LjMwOF0sWzEzNi44NjIsNDUuMTQzXSxbMTM1LjUxNSw0My45ODldLFsxMzQuODcsNDMuMzk4XSxbMTMzLjUzNyw0Mi44MTJdLFsxMzIuOTA2LDQyLjc5OV0sWzEzMi4yNzgsNDMuMjg0XSxbMTMwLjkzNiw0Mi41NTNdLFsxMzAuNzgsNDIuMjJdLFsxMzAuNCw0Mi4yOF0sWzEyOS45NjYsNDEuOTQxXSxbMTI5LjY2Nyw0MS42MDFdLFsxMjkuNzA1LDQwLjg4M10sWzEyOS4xODgsNDAuNjYyXSxbMTI5LjAxLDQwLjQ4NV0sWzEyOC42MzMsNDAuMTldLFsxMjcuOTY4LDQwLjAyNl0sWzEyNy41MzQsMzkuNzU3XSxbMTI3LjUwMiwzOS4zMjRdLFsxMjcuMzg1LDM5LjIxNF0sWzEyNy43ODMsMzkuMDUxXSxbMTI4LjM1LDM4LjYxMl0sWzEyOS4yMTMsMzcuNDMyXSxbMTI5LjQ2MSwzNi43ODRdLFsxMjkuNDY4LDM1LjYzMl0sWzEyOS4wOTEsMzUuMDgzXSxbMTI4LjE4NiwzNC44OTFdLFsxMjcuMzg2LDM0LjQ3Nl0sWzEyNi40ODYsMzQuMzldLFsxMjYuMzc0LDM0LjkzNV0sWzEyNi41NTksMzUuNjg1XSxbMTI2LjExNywzNi43MjZdLFsxMjYuODYsMzYuODk0XSxbMTI2LjE3NSwzNy43NV0sWzEyNS42ODksMzcuOTRdLFsxMjUuNTY4LDM3Ljc1Ml0sWzEyNS4yNzUsMzcuNjY5XSxbMTI1LjI0LDM3Ljg1N10sWzEyNC45ODEsMzcuOTQ5XSxbMTI0LjcxMiwzOC4xMDhdLFsxMjQuOTg2LDM4LjU0OV0sWzEyNS4yMjIsMzguNjY2XSxbMTI1LjEzMywzOC44NDldLFsxMjUuMzg3LDM5LjM4OF0sWzEyNS4zMjEsMzkuNTUyXSxbMTI0LjczNywzOS42Nl0sWzEyNC4yNjYsMzkuOTI5XSxbMTIyLjg2OCwzOS42MzhdLFsxMjIuMTMyLDM5LjE3XSxbMTIxLjA1NSwzOC44OThdLFsxMjEuNTg2LDM5LjM2MV0sWzEyMS4zNzcsMzkuNzVdLFsxMjIuMTY5LDQwLjQyMl0sWzEyMS42NDEsNDAuOTQ2XSxbMTIwLjc2OSw0MC41OTRdLFsxMTkuNjQsMzkuODk4XSxbMTE5LjAyMywzOS4yNTJdLFsxMTguMDQzLDM5LjIwNF0sWzExNy41MzMsMzguNzM4XSxbMTE4LjA2LDM4LjA2Ml0sWzExOC44NzgsMzcuODk3XSxbMTE4LjkxMiwzNy40NDhdLFsxMTkuNzAzLDM3LjE1Nl0sWzEyMC44MjMsMzcuODddLFsxMjEuNzExLDM3LjQ4MV0sWzEyMi4zNTgsMzcuNDU1XSxbMTIyLjUyLDM2LjkzMV0sWzEyMS4xMDQsMzYuNjUxXSxbMTIwLjYzNywzNi4xMTJdLFsxMTkuNjY1LDM1LjYxXSxbMTE5LjE1MSwzNC45MV0sWzEyMC4yMjcsMzQuMzZdLFsxMjAuNjIsMzMuMzc3XSxbMTIxLjIyOSwzMi40Nl0sWzEyMS45MDgsMzEuNjkyXSxbMTIxLjg5MiwzMC45NDldLFsxMjEuMjY0LDMwLjY3Nl0sWzEyMS41MDMsMzAuMTQzXSxbMTIyLjA5MiwyOS44MzNdLFsxMjEuOTM4LDI5LjAxOF0sWzEyMS42ODUsMjguMjI2XSxbMTIxLjEyNiwyOC4xMzZdLFsxMjAuMzk2LDI3LjA1M10sWzExOS41ODYsMjUuNzQxXSxbMTE4LjY1NywyNC41NDddLFsxMTcuMjgyLDIzLjYyNV0sWzExNS44OTEsMjIuNzgzXSxbMTE0Ljc2NCwyMi42NjhdLFsxMTQuMTUzLDIyLjIyNF0sWzExMy44MDcsMjIuNTQ4XSxbMTEzLjI0MSwyMi4wNTJdLFsxMTEuODQ0LDIxLjU1XSxbMTEwLjc4NiwyMS4zOTddLFsxMTAuNDQ0LDIwLjM0MV0sWzEwOS44OSwyMC4yODJdLFsxMDkuNjI4LDIxLjAwOF0sWzEwOS44NjUsMjEuMzk1XSxbMTA4LjUyMywyMS43MTVdLFsxMDguMDUsMjEuNTUyXSxbMTA2LjcxNSwyMC42OTddLFsxMDUuODgyLDE5Ljc1Ml0sWzEwNS42NjIsMTkuMDU4XSxbMTA2LjQyNywxOC4wMDRdLFsxMDcuMzYyLDE2LjY5OF0sWzEwOC4yNjksMTYuMDhdLFsxMDguODc3LDE1LjI3N10sWzEwOS4zMzUsMTMuNDI2XSxbMTA5LjIsMTEuNjY3XSxbMTA4LjM2NiwxMS4wMDhdLFsxMDcuMjIxLDEwLjM2NV0sWzEwNi40MDUsOS41MzFdLFsxMDUuMTU4LDguNl0sWzEwNC43OTUsOS4yNDFdLFsxMDUuMDc2LDkuOTE5XSxbMTA0LjMzNCwxMC40ODddLFsxMDMuNDk3LDEwLjYzM10sWzEwMy4wOTEsMTEuMTU0XSxbMTAyLjU4NSwxMi4xODddLFsxMDEuNjg3LDEyLjY0Nl0sWzEwMC44MzIsMTIuNjI3XSxbMTAwLjk3OSwxMy40MTNdLFsxMDAuMDk4LDEzLjQwN10sWzEwMC4wMTksMTIuMzA3XSxbOTkuNDc5LDEwLjg0Nl0sWzk5LjE1NCw5Ljk2M10sWzk5LjIyMiw5LjIzOV0sWzk5Ljg3NCw5LjIwOF0sWzEwMC4yOCw4LjI5NV0sWzEwMC40NTksNy40M10sWzEwMS4wMTcsNi44NTddLFsxMDEuNjIzLDYuNzQxXSxbMTAyLjE0MSw2LjIyMl0sWzEwMi4zNzEsNi4xMjhdLFsxMDIuOTYyLDUuNTI0XSxbMTAzLjM4MSw0Ljg1NV0sWzEwMy40MzksNC4xODJdLFsxMDMuMzMyLDMuNzI3XSxbMTAzLjQzLDMuMzgzXSxbMTAzLjUwMywyLjc5MV0sWzEwMy44NTUsMi41MTZdLFsxMDQuMjQ4LDEuNjMxXSxbMTA0LjIyOSwxLjI5M10sWzEwMy41MiwxLjIyNl0sWzEwMi41NzQsMS45NjddLFsxMDEuMzkxLDIuNzYxXSxbMTAxLjI3NCwzLjI3XSxbMTAwLjY5NSwzLjkzOV0sWzEwMC41NTcsNC43NjddLFsxMDAuMTk3LDUuMzEyXSxbMTAwLjMwNiw2LjA0MV0sWzEwMC4wODYsNi40NjRdLFs5OS42OTEsNi44NDhdLFs5OS41Miw3LjM0NF0sWzk4Ljk4OCw3LjkwOF0sWzk4LjUwNCw4LjM4Ml0sWzk4LjM0LDcuNzk0XSxbOTguMTUsOC4zNV0sWzk4LjI1OSw4Ljk3NF0sWzk4LjU1NCw5LjkzM10sWzk4LjQ1NywxMC42NzVdLFs5OC43NjUsMTEuNDQxXSxbOTguNDI4LDEyLjAzM10sWzk4LjUxLDEzLjEyMl0sWzk4LjEwNCwxMy42NDFdLFs5Ny43NzgsMTQuODM3XSxbOTcuNTk3LDE2LjEwMV0sWzk3LjE2NSwxNi45MjldLFs5Ni41MDYsMTYuNDI3XSxbOTUuMzY5LDE1LjcxNF0sWzk0LjgwOCwxNS44MDRdLFs5NC4xODksMTYuMDM4XSxbOTQuNTM0LDE3LjI3N10sWzk0LjMyNSwxOC4yMTRdLFs5My41NDEsMTkuMzY3XSxbOTMuNjYzLDE5LjcyN10sWzkzLjA3OCwxOS44NTVdLFs5Mi4zNjksMjAuNjcxXSxbOTIuMDgzLDIxLjE5Ml0sWzkyLjAyNSwyMS43MDJdLFs5MS44MzUsMjIuMTgzXSxbOTEuNDE3LDIyLjc2NV0sWzkwLjQ5NiwyMi44MDVdLFs5MC41ODcsMjIuMzkzXSxbOTAuMjczLDIxLjgzNl0sWzg5Ljg0NywyMi4wMzldLFs4OS43MDIsMjEuODU3XSxbODkuNDE5LDIxLjk2Nl0sWzg5LjAzMiwyMi4wNTZdLFs4OC44ODksMjEuNjkxXSxbODguMjA4LDIxLjcwM10sWzg2Ljk3NiwyMS40OTVdLFs4Ny4wMzMsMjAuNzQzXSxbODYuNDk5LDIwLjE1Ml0sWzg1LjA2LDE5LjQ3OV0sWzgzLjk0MSwxOC4zMDJdLFs4My4xODksMTcuNjcxXSxbODIuMTkzLDE3LjAxN10sWzgyLjE5MSwxNi41NTddLFs4MS42OTMsMTYuMzFdLFs4MC43OTIsMTUuOTUyXSxbODAuMzI1LDE1Ljg5OV0sWzgwLjAyNSwxNS4xMzZdLFs4MC4yMzMsMTMuODM2XSxbODAuMjg2LDEzLjAwNl0sWzc5Ljg2MiwxMi4wNTZdLFs3OS44NTgsMTAuMzU3XSxbNzkuMzQxLDEwLjMwOV0sWzc4Ljg4NSw5LjU0Nl0sWzc5LjE5LDkuMjE3XSxbNzguMjc4LDguOTMzXSxbNzcuOTQxLDguMjUzXSxbNzcuNTQsNy45NjZdLFs3Ni41OTMsOC44OTldLFs3Ni4xMywxMC4zXSxbNzUuNzQ3LDExLjMwOF0sWzc1LjM5NiwxMS43ODFdLFs3NC44NjUsMTIuNzQyXSxbNzQuNjE3LDEzLjk5M10sWzc0LjQ0NCwxNC42MTddLFs3My41MzQsMTUuOTkxXSxbNzMuMTIsMTcuOTI5XSxbNzIuODIxLDE5LjIwOF0sWzcyLjgyNSwyMC40MTldLFs3Mi42MzEsMjEuMzU2XSxbNzEuMTc1LDIwLjc1OF0sWzcwLjQ3MSwyMC44NzddLFs2OS4xNjQsMjIuMDg5XSxbNjkuNjQ1LDIyLjQ1MV0sWzY5LjM1LDIyLjg0M10sWzY4LjE3NywyMy42OTJdLFs2Ny40NDQsMjMuOTQ1XSxbNjcuMTQ2LDI0LjY2NF0sWzY2LjM3MywyNS40MjVdLFs2NC41MzEsMjUuMjM3XSxbNjIuOTA2LDI1LjIxOV0sWzYxLjQ5NywyNS4wNzhdLFs1OS42MTYsMjUuMzhdLFs1OC41MjYsMjUuNjFdLFs1Ny4zOTcsMjUuNzRdLFs1Ni45NzEsMjYuOTY2XSxbNTYuNDkyLDI3LjE0M10sWzU1LjcyNCwyNi45NjVdLFs1NC43MTUsMjYuNDgxXSxbNTMuNDkzLDI2LjgxMl0sWzUyLjQ4NCwyNy41ODFdLFs1MS41MjEsMjcuODY2XSxbNTAuODUzLDI4LjgxNV0sWzUwLjExNSwzMC4xNDhdLFs0OS41NzcsMjkuOTg2XSxbNDguOTQxLDMwLjMxN10sWzQ4LjU2OCwyOS45MjddLFs0Ny45NzQsMjkuOTc2XSxbNDguMTgzLDI5LjUzNF0sWzQ4LjA5NCwyOS4zMDZdLFs0OC40MTYsMjguNTUyXSxbNDguODA4LDI3LjY5XSxbNDkuMywyNy40NjFdLFs0OS40NzEsMjcuMTFdLFs1MC4xNTMsMjYuNjldLFs1MC4yMTMsMjYuMjc3XSxbNTAuMTEzLDI1Ljk0NF0sWzUwLjI0LDI1LjYwOF0sWzUwLjUyOCwyNS4zMjhdLFs1MC42NjEsMjUuMF0sWzUwLjgxLDI0Ljc1NV0sWzUwLjc0NCwyNS40ODJdLFs1MS4wMTMsMjYuMDA3XSxbNTEuMjg2LDI2LjExNV0sWzUxLjU4OSwyNS44MDFdLFs1MS42MDcsMjUuMjE2XSxbNTEuMzksMjQuNjI4XSxbNTEuNTgsMjQuMjQ1XSxbNTEuNzU4LDI0LjI5NF0sWzUxLjc5NCwyNC4wMl0sWzUyLjU3NywyNC4xNzddLFs1My40MDQsMjQuMTUxXSxbNTQuMDA4LDI0LjEyMl0sWzU0LjY5MywyNC43OThdLFs1NS40MzksMjUuNDM5XSxbNTYuMDcxLDI2LjA1NV0sWzU2LjM2MiwyNi4zOTZdLFs1Ni40ODYsMjYuMzA5XSxbNTYuMzkxLDI1Ljg5Nl0sWzU2LjI2MSwyNS43MTVdLFs1Ni4zOTcsMjQuOTI1XSxbNTYuODQ1LDI0LjI0Ml0sWzU3LjQwNCwyMy44NzldLFs1OC4xMzcsMjMuNzQ4XSxbNTguNzI5LDIzLjU2Nl0sWzU5LjE4LDIyLjk5Ml0sWzU5LjQ1LDIyLjY2XSxbNTkuODA4LDIyLjUzNF0sWzU5LjgwNiwyMi4zMV0sWzU5LjQ0MiwyMS43MTRdLFs1OS4yODIsMjEuNDM0XSxbNTguODYxLDIxLjExNF0sWzU4LjQ4OCwyMC40MjldLFs1OC4wMzQsMjAuNDgyXSxbNTcuODI2LDIwLjI0M10sWzU3LjY2NiwxOS43MzZdLFs1Ny43ODksMTkuMDY4XSxbNTcuNjk1LDE4Ljk0NV0sWzU3LjIzNCwxOC45NDhdLFs1Ni42MSwxOC41NzRdLFs1Ni41MTIsMTguMDg3XSxbNTYuMjg0LDE3Ljg3Nl0sWzU1LjY2MSwxNy44ODRdLFs1NS4yNywxNy42MzJdLFs1NS4yNzUsMTcuMjI4XSxbNTQuNzkxLDE2Ljk1MV0sWzU0LjIzOSwxNy4wNDVdLFs1My41NywxNi43MDhdLFs1My4xMDksMTYuNjUxXSxbNTIuMzg1LDE2LjM4M10sWzUyLjE5MiwxNS45MzhdLFs1Mi4xNjgsMTUuNTk3XSxbNTEuMTcyLDE1LjE3NV0sWzQ5LjU3NSwxNC43MDldLFs0OC42NzksMTQuMDAzXSxbNDguMjM5LDEzLjk0OF0sWzQ3LjkzOSwxNC4wMDddLFs0Ny4zNTQsMTMuNTkyXSxbNDYuNzE3LDEzLjRdLFs0NS44NzgsMTMuMzQ4XSxbNDUuNjI1LDEzLjI5MV0sWzQ1LjQwNiwxMy4wMjddLFs0NS4xNDQsMTIuOTU0XSxbNDQuOTksMTIuN10sWzQ0LjQ5NSwxMi43MjJdLFs0NC4xNzUsMTIuNTg2XSxbNDMuNDgzLDEyLjYzN10sWzQzLjIyMywxMy4yMjFdLFs0My4yNTIsMTMuNzY4XSxbNDMuMDg4LDE0LjA2M10sWzQyLjg5MiwxNC44MDJdLFs0Mi42MDUsMTUuMjEzXSxbNDIuODA1LDE1LjI2Ml0sWzQyLjcwMywxNS43MTldLFs0Mi44MjQsMTUuOTEyXSxbNDIuNzc5LDE2LjM0OF0sWzQyLjY1LDE2Ljc3NV0sWzQyLjM0OCwxNy4wNzZdLFs0Mi4yNzEsMTcuNDc1XSxbNDEuNzU1LDE3LjgzM10sWzQxLjIyMSwxOC42NzJdLFs0MC45MzksMTkuNDg3XSxbNDAuMjQ4LDIwLjE3NV0sWzM5LjgwMiwyMC4zMzldLFszOS4xNCwyMS4yOTJdLFszOS4wMjQsMjEuOTg3XSxbMzkuMDY2LDIyLjU4XSxbMzguNDkzLDIzLjY4OF0sWzM4LjAyNCwyNC4wNzldLFszNy40ODQsMjQuMjg2XSxbMzcuMTU1LDI0Ljg1OV0sWzM3LjIwOSwyNS4wODRdLFszNi45MzIsMjUuNjAzXSxbMzYuNjQsMjUuODI2XSxbMzYuMjQ5LDI2LjU3XSxbMzUuNjQsMjcuMzc3XSxbMzUuMTMsMjguMDYzXSxbMzQuNjMyLDI4LjA1OF0sWzM0Ljc4OCwyOC42MDddLFszNC44MzIsMjguOTU4XSxbMzQuOTU2LDI5LjM1N10sWzM0LjkyMywyOS41MDFdLFszNC42NDIsMjkuMDk5XSxbMzQuNDI3LDI4LjM0NF0sWzM0LjE1NCwyNy44MjNdLFszMy45MjIsMjcuNjQ5XSxbMzMuNTg4LDI3Ljk3MV0sWzMzLjEzNywyOC40MThdLFszMi40MjMsMjkuODUxXSxbMzIuMzIsMjkuNzZdLFszMi43MzUsMjguNzA1XSxbMzMuMzQ5LDI3LjddLFszNC4xMDUsMjYuMTQyXSxbMzQuNDc0LDI1LjU5OV0sWzM0Ljc5NSwyNS4wMzRdLFszNS42OTMsMjMuOTI3XSxbMzUuNDk0LDIzLjc1M10sWzM1LjUyNiwyMy4xMDJdLFszNi42OTEsMjIuMjA1XSxbMzYuODY2LDIyLjBdLFszNy4xODksMjEuMDE5XSxbMzYuOTY5LDIwLjgzOF0sWzM3LjExNSwxOS44MDhdLFszNy40ODIsMTguNjE0XSxbMzcuODYzLDE4LjM2OF0sWzM4LjQxLDE3Ljk5OF0sWzM4Ljk5MSwxNi44NDFdLFszOS4yNjYsMTUuOTIzXSxbMzkuODE0LDE1LjQzNl0sWzQxLjE3OSwxNC40OTFdLFs0MS43MzUsMTMuOTIxXSxbNDIuMjc3LDEzLjM0NF0sWzQyLjU5LDEzLjBdLFs0My4wODEsMTIuN10sWzQzLjMxOCwxMi4zOV0sWzQzLjI4NiwxMS45NzVdLFs0Mi43MTYsMTEuNzM2XSxbNDMuMTQ1LDExLjQ2Ml0sWzQzLjQ3MSwxMS4yNzhdLFs0My42NjcsMTAuODY0XSxbNDQuMTE4LDEwLjQ0Nl0sWzQ0LjYxNCwxMC40NDJdLFs0NS41NTcsMTAuNjk4XSxbNDYuNjQ2LDEwLjgxN10sWzQ3LjUyNiwxMS4xMjddLFs0OC4wMjIsMTEuMTkzXSxbNDguMzc5LDExLjM3NV0sWzQ4Ljk0OCwxMS40MTFdLFs0OS4yNjgsMTEuNDNdLFs0OS43MjksMTEuNTc5XSxbNTAuMjU5LDExLjY4XSxbNTAuNzMyLDEyLjAyMl0sWzUxLjExMSwxMi4wMjVdLFs1MS4xMzQsMTEuNzQ4XSxbNTEuMDQyLDExLjE2N10sWzUxLjA0NSwxMC42NDFdLFs1MC44MzQsMTAuMjhdLFs1MC41NTIsOS4xOTldLFs1MC4wNzEsOC4wODJdLFs0OS40NTMsNi44MDVdLFs0OC41OTQsNS4zMzldLFs0Ny43NDEsNC4yMTldLFs0Ni41NjUsMi44NTVdLFs0NS41NjQsMi4wNDZdLFs0NC4wNjgsMS4wNTNdLFs0My4xMzYsMC4yOTJdLFs0Mi4wNDIsLTAuOTE5XSxbNDEuODExLC0xLjQ0Nl0sWzQxLjU4NSwtMS42ODNdLFs0MC44ODUsLTIuMDgzXSxbNDAuNjM4LC0yLjVdLFs0MC4yNjMsLTIuNTczXSxbNDAuMTIxLC0zLjI3OF0sWzM5LjgsLTMuNjgxXSxbMzkuNjA1LC00LjM0Nl0sWzM5LjIwMiwtNC42NzddLFszOC43NCwtNS45MDldLFszOC44LC02LjQ3Nl0sWzM5LjQ0LC02Ljg0XSxbMzkuNDcsLTcuMV0sWzM5LjE5NSwtNy43MDRdLFszOS4yNTIsLTguMDA4XSxbMzkuMTg3LC04LjQ4NV0sWzM5LjUzNiwtOS4xMTJdLFszOS45NSwtMTAuMDk4XSxbNDAuMzE3LC0xMC4zMTddLFs0MC40NzksLTEwLjc2NV0sWzQwLjQzNywtMTEuNzYyXSxbNDAuNTYxLC0xMi42MzldLFs0MC42LC0xNC4yMDJdLFs0MC43NzYsLTE0LjY5Ml0sWzQwLjQ3NywtMTUuNDA2XSxbNDAuMDg5LC0xNi4xMDFdLFszOS40NTMsLTE2LjcyMV0sWzM4LjUzOCwtMTcuMTAxXSxbMzcuNDExLC0xNy41ODZdLFszNi4yODEsLTE4LjY2XSxbMzUuODk2LC0xOC44NDJdLFszNS4xOTgsLTE5LjU1M10sWzM0Ljc4NiwtMTkuNzg0XSxbMzQuNzAyLC0yMC40OTddLFszNS4xNzYsLTIxLjI1NF0sWzM1LjM3MywtMjEuODQxXSxbMzUuMzg2LC0yMi4xNF0sWzM1LjU2MywtMjIuMDldLFszNS41MzQsLTIzLjA3MV0sWzM1LjM3MiwtMjMuNTM1XSxbMzUuNjA3LC0yMy43MDZdLFszNS40NTksLTI0LjEyM10sWzM1LjA0MSwtMjQuNDc4XSxbMzQuMjE2LC0yNC44MTZdLFszMy4wMTMsLTI1LjM1N10sWzMyLjU3NSwtMjUuNzI3XSxbMzIuNjYsLTI2LjE0OF0sWzMyLjkxNiwtMjYuMjE2XSxbMzIuODMsLTI2Ljc0Ml0sWzMyLjU4LC0yNy40N10sWzMyLjQ2MiwtMjguMzAxXSxbMzIuMjAzLC0yOC43NTJdLFszMS41MjEsLTI5LjI1N10sWzMxLjMyNiwtMjkuNDAyXSxbMzAuOTAyLC0yOS45MV0sWzMwLjYyMywtMzAuNDI0XSxbMzAuMDU2LC0zMS4xNF0sWzI4LjkyNSwtMzIuMTcyXSxbMjguMjIsLTMyLjc3Ml0sWzI3LjQ2NSwtMzMuMjI3XSxbMjYuNDE5LC0zMy42MTVdLFsyNS45MSwtMzMuNjY3XSxbMjUuNzgxLC0zMy45NDVdLFsyNS4xNzMsLTMzLjc5N10sWzI0LjY3OCwtMzMuOTg3XSxbMjMuNTk0LC0zMy43OTRdLFsyMi45ODgsLTMzLjkxNl0sWzIyLjU3NCwtMzMuODY0XSxbMjEuNTQzLC0zNC4yNTldLFsyMC42ODksLTM0LjQxN10sWzIwLjA3MSwtMzQuNzk1XSxbMTkuNjE3LC0zNC44MTldLFsxOS4xOTMsLTM0LjQ2M10sWzE4Ljg1NSwtMzQuNDQ0XSxbMTguNDI1LC0zMy45OThdLFsxOC4zNzgsLTM0LjEzNl0sWzE4LjI0NSwtMzMuODY4XSxbMTguMjUsLTMzLjI4MV0sWzE3LjkyNSwtMzIuNjExXSxbMTguMjQ4LC0zMi40MjldLFsxOC4yMjIsLTMxLjY2Ml0sWzE3LjU2NywtMzAuNzI2XSxbMTcuMDY1LC0yOS44NzldLFsxNy4wNjMsLTI5Ljg3Nl0sWzE2LjM0NSwtMjguNTc3XSxbMTUuNjAyLC0yNy44MjFdLFsxNS4yMTEsLTI3LjA5MV0sWzE0Ljk5LC0yNi4xMTddLFsxNC43NDMsLTI1LjM5M10sWzE0LjQwOCwtMjMuODUzXSxbMTQuMzg2LC0yMi42NTddLFsxNC4yNTgsLTIyLjExMV0sWzEzLjg2OSwtMjEuNjk5XSxbMTMuMzUyLC0yMC44NzNdLFsxMi44MjcsLTE5LjY3M10sWzEyLjYwOSwtMTkuMDQ1XSxbMTEuNzk1LC0xOC4wNjldLFsxMS43MzQsLTE3LjMwMl0sWzExLjY0LC0xNi42NzNdLFsxMS43NzksLTE1Ljc5NF0sWzEyLjEyNCwtMTQuODc4XSxbMTIuMTc2LC0xNC40NDldLFsxMi41LC0xMy41NDhdLFsxMi43MzksLTEzLjEzOF0sWzEzLjMxMywtMTIuNDg0XSxbMTMuNjM0LC0xMi4wMzldLFsxMy43MzksLTExLjI5OF0sWzEzLjY4NywtMTAuNzMxXSxbMTMuMzg3LC0xMC4zNzRdLFsxMy4xMjEsLTkuNzY3XSxbMTIuODc1LC05LjE2N10sWzEyLjkyOSwtOC45NTldLFsxMy4yMzcsLTguNTYzXSxbMTIuOTMzLC03LjU5Nl0sWzEyLjcyOCwtNi45MjddLFsxMi4yMjcsLTYuMjk0XSxbMTIuMzIzLC02LjFdLFsxMi4xODIsLTUuNzldLFsxMS45MTUsLTUuMDM4XSxbMTEuMDk0LC0zLjk3OV0sWzEwLjA2NiwtMi45NjldLFs5LjQwNSwtMi4xNDRdLFs4Ljc5OCwtMS4xMTFdLFs4LjgzLC0wLjc3OV0sWzkuMDQ5LC0wLjQ1OV0sWzkuMjkxLDAuMjY5XSxbOS40OTMsMS4wMV0sWzkuMzA2LDEuMTYxXSxbOS42NDksMi4yODRdLFs5Ljc5NSwzLjA3M10sWzkuNDA0LDMuNzM0XSxbOC45NDgsMy45MDRdLFs4Ljc0NSw0LjM1Ml0sWzguNDg5LDQuNDk2XSxbOC41LDQuNzcyXSxbNy40NjIsNC40MTJdLFs3LjA4Myw0LjQ2NV0sWzYuNjk4LDQuMjQxXSxbNS44OTgsNC4yNjNdLFs1LjM2Myw0Ljg4OF0sWzUuMDM0LDUuNjEyXSxbNC4zMjYsNi4yNzFdLFszLjU3NCw2LjI1OF0sWzIuNjkyLDYuMjU5XSxbMS44NjUsNi4xNDJdLFsxLjA2LDUuOTI5XSxbLTAuNTA4LDUuMzQ0XSxbLTEuMDY0LDUuMF0sWy0xLjk2NSw0LjcxMV0sWy0yLjg1Niw0Ljk5NV0sWy0zLjMxMSw0Ljk4NF0sWy00LjAwOSw1LjE4XSxbLTQuNjUsNS4xNjhdLFstNS44MzQsNC45OTRdLFstNi41MjksNC43MDVdLFstNy41MTksNC4zMzhdLFstNy43MTIsNC4zNjVdLFstNy45NzQsNC4zNTZdLFstOS4wMDUsNC44MzNdLFstOS45MTMsNS41OTRdLFstMTAuNzY1LDYuMTQxXSxbLTExLjQzOSw2Ljc4Nl0sWy0xMS43MDgsNi44Nl0sWy0xMi40MjgsNy4yNjNdLFstMTIuOTQ5LDcuNzk5XSxbLTEzLjEyNCw4LjE2NF0sWy0xMy4yNDcsOC45MDNdLFstMTMuNjg1LDkuNDk1XSxbLTE0LjA3NCw5Ljg4Nl0sWy0xNC4zMywxMC4wMTZdLFstMTQuNTgsMTAuMjE0XSxbLTE0LjY5MywxMC42NTZdLFstMTQuODM5LDEwLjg3N10sWy0xNS4xMywxMS4wNDFdLFstMTUuNjY0LDExLjQ1OF0sWy0xNi4wODUsMTEuNTI1XSxbLTE2LjMxNSwxMS44MDddLFstMTYuMzA5LDExLjk1OV0sWy0xNi42MTQsMTIuMTcxXSxbLTE2LjY3NywxMi4zODVdLFstMTYuODQxLDEzLjE1MV0sWy0xNi43MTQsMTMuNTk1XSxbLTE3LjEyNiwxNC4zNzNdLFstMTcuNjI1LDE0LjczXSxbLTE3LjE4NSwxNC45MTldLFstMTYuNzAxLDE1LjYyMl0sWy0xNi40NjMsMTYuMTM1XSxbLTE2LjU1LDE2LjY3NF0sWy0xNi4yNzEsMTcuMTY3XSxbLTE2LjE0NiwxOC4xMDldLFstMTYuMjU3LDE5LjA5N10sWy0xNi4zNzgsMTkuNTk0XSxbLTE2LjI3OCwyMC4wOTNdLFstMTYuNTM2LDIwLjU2OF0sWy0xNy4wNjMsMjEuMF0sWy0xNy4wMiwyMS40MjJdLFstMTYuOTczLDIxLjg4Nl0sWy0xNi41ODksMjIuMTU4XSxbLTE2LjI2MiwyMi42NzldLFstMTYuMzI2LDIzLjAxOF0sWy0xNS45ODMsMjMuNzI0XSxbLTE1LjQyNiwyNC4zNTldLFstMTUuMDg5LDI0LjUyXSxbLTE0LjgyNSwyNS4xMDRdLFstMTQuODAxLDI1LjYzNl0sWy0xNC40NCwyNi4yNTVdLFstMTMuNzc0LDI2LjYxOV0sWy0xMy4xNCwyNy42NF0sWy0xMi42MTksMjguMDM4XSxbLTExLjY4OSwyOC4xNDldLFstMTAuOTAxLDI4LjgzMl0sWy0xMC40LDI5LjA5OV0sWy05LjU2NSwyOS45MzRdLFstOS44MTUsMzEuMTc4XSxbLTkuNDM1LDMyLjAzOF0sWy05LjMwMSwzMi41NjVdLFstOC42NTcsMzMuMjRdLFstNy42NTQsMzMuNjk3XSxbLTYuOTEyLDM0LjExXSxbLTYuMjQ0LDM1LjE0Nl0sWy01LjkzLDM1Ljc2XSxbLTUuMTk0LDM1Ljc1NV0sWy00LjU5MSwzNS4zMzFdLFstMy42NCwzNS40XSxbLTIuNjA0LDM1LjE3OV0sWy0yLjE3LDM1LjE2OV0sWy0xLjIwOSwzNS43MTVdLFstMC4xMjcsMzUuODg5XSxbMC41MDQsMzYuMzAxXSxbMS40NjcsMzYuNjA2XSxbMy4xNjIsMzYuNzg0XSxbNC44MTYsMzYuODY1XSxbNS4zMiwzNi43MTZdLFs2LjI2MiwzNy4xMTFdLFs3LjMzMSwzNy4xMTldLFs3LjczNywzNi44ODZdLFs4LjQyMSwzNi45NDZdLFs5LjUxLDM3LjM1XSxbMTAuMjEsMzcuMjNdLFsxMC4xODEsMzYuNzI0XSxbMTEuMDI5LDM3LjA5Ml0sWzExLjEsMzYuOV0sWzEwLjYsMzYuNDFdLFsxMC41OTMsMzUuOTQ4XSxbMTAuOTQsMzUuNjk5XSxbMTAuODA4LDM0LjgzM10sWzEwLjE1LDM0LjMzMV0sWzEwLjM0LDMzLjc4Nl0sWzEwLjg1NywzMy43NjldLFsxMS4xMDksMzMuMjkzXSxbMTEuNDg5LDMzLjEzN10sWzEyLjY2MywzMi43OTNdLFsxMy4wODMsMzIuODc5XSxbMTMuOTE5LDMyLjcxMl0sWzE1LjI0NiwzMi4yNjVdLFsxNS43MTQsMzEuMzc2XSxbMTYuNjEyLDMxLjE4Ml0sWzE4LjAyMSwzMC43NjNdLFsxOS4wODYsMzAuMjY2XSxbMTkuNTc0LDMwLjUyNl0sWzIwLjA1MywzMC45ODZdLFsxOS44MiwzMS43NTJdLFsyMC4xMzQsMzIuMjM4XSxbMjAuODU0LDMyLjcwN10sWzIxLjU0MywzMi44NDNdLFsyMi44OTYsMzIuNjM4XSxbMjMuMjM3LDMyLjE5Ml0sWzIzLjYwOSwzMi4xODddLFsyMy45MjcsMzIuMDE3XSxbMjQuOTIxLDMxLjg5OV0sWzI1LjE2NSwzMS41NjldLFsyNi40OTUsMzEuNTg2XSxbMjcuNDU4LDMxLjMyMV0sWzI4LjQ1MSwzMS4wMjZdLFsyOC45MTQsMzAuODddLFsyOS42ODMsMzEuMTg3XSxbMzAuMDk1LDMxLjQ3NF0sWzMwLjk3NywzMS41NTZdLFszMS42ODgsMzEuNDNdLFszMS45NjEsMzAuOTM0XSxbMzIuMTkzLDMxLjI2XSxbMzIuOTk0LDMxLjAyNF0sWzMzLjc3MywzMC45NjhdLFszNC4yNjYsMzEuMjE5XSxbMzQuNTU3LDMxLjU0OV0sWzM0LjQ4OCwzMS42MDZdLFszNC43NTMsMzIuMDczXSxbMzQuOTU2LDMyLjgyOF0sWzM1LjA5OSwzMy4wODFdLFszNS4xMjYsMzMuMDkxXSxbMzUuNDgyLDMzLjkwNl0sWzM1Ljk4LDM0LjYxXSxbMzUuOTk4LDM0LjY0NV0sWzM1LjkwNSwzNS40MV0sWzM2LjE1LDM1LjgyMV0sWzM1Ljc4MiwzNi4yNzVdLFszNi4xNjEsMzYuNjUxXSxbMzUuNTUxLDM2LjU2NV0sWzM0LjcxNCwzNi43OTVdLFszNC4wMjcsMzYuMjJdLFszMi41MDksMzYuMTA3XSxbMzEuNywzNi42NDRdLFszMC42MjIsMzYuNjc4XSxbMzAuMzkxLDM2LjI2M10sWzI5LjcsMzYuMTQ0XSxbMjguNzMzLDM2LjY3N10sWzI3LjY0MSwzNi42NTldLFsyNy4wNDksMzcuNjU0XSxbMjYuMzE4LDM4LjIwOF0sWzI2LjgwNSwzOC45ODZdLFsyNi4xNzEsMzkuNDY0XSxbMjcuMjgsNDAuNDJdLFsyOC44Miw0MC40Nl0sWzI5LjI0LDQxLjIyXSxbMzEuMTQ2LDQxLjA4OF0sWzMyLjM0OCw0MS43MzZdLFszMy41MTMsNDIuMDE5XSxbMzUuMTY4LDQyLjA0XSxbMzYuOTEzLDQxLjMzNl0sWzM4LjM0OCw0MC45NDldLFszOS41MTMsNDEuMTAzXSxbNDAuMzczLDQxLjAxNF0sWzQxLjU1NCw0MS41MzZdLFs0MS43MDMsNDEuOTYzXSxbNDEuNDUzLDQyLjY0NV0sWzQwLjg3NSw0My4wMTRdLFs0MC4zMjEsNDMuMTI5XSxbMzkuOTU1LDQzLjQzNV0sWzM4LjY4LDQ0LjI4XSxbMzcuNTM5LDQ0LjY1N10sWzM2LjY3NSw0NS4yNDVdLFszNy40MDMsNDUuNDA0XSxbMzguMjMzLDQ2LjI0MV0sWzM3LjY3NCw0Ni42MzddLFszOS4xNDgsNDcuMDQ1XSxbMzkuMTIxLDQ3LjI2M10sWzM4LjIyNCw0Ny4xMDJdLFszNy40MjUsNDcuMDIyXSxbMzYuNzYsNDYuNjk5XSxbMzUuODI0LDQ2LjY0Nl0sWzM0Ljk2Miw0Ni4yNzNdLFszNS4wMjEsNDUuNjUxXSxbMzUuNTEsNDUuNDFdLFszNi41Myw0NS40N10sWzM2LjMzNSw0NS4xMTNdLFszNS4yNCw0NC45NF0sWzMzLjg4Myw0NC4zNjJdLFszMy4zMjYsNDQuNTY1XSxbMzMuNTQ3LDQ1LjAzNV0sWzMyLjQ1NCw0NS4zMjhdLFszMi42MzEsNDUuNTE5XSxbMzMuNTg4LDQ1Ljg1Ml0sWzMzLjI5OSw0Ni4wODFdLFszMS43NDQsNDYuMzMzXSxbMzEuNjc1LDQ2LjcwNl0sWzMwLjc0OSw0Ni41ODNdLFszMC4zNzgsNDYuMDMyXSxbMjkuNjAzLDQ1LjI5M10sWzI5LjYyNyw0NS4wMzZdLFsyOS4xNDIsNDQuODJdLFsyOC44MzgsNDQuOTE0XSxbMjguNTU4LDQzLjcwOF0sWzI4LjAzOSw0My4yOTNdLFsyNy42NzQsNDIuNTc4XSxbMjcuOTk3LDQyLjAwOF0sWzI4LjExNSw0MS42MjNdLFsyOC45ODksNDEuM10sWzI4LjgwNyw0MS4wNTVdLFsyNy42MTksNDEuMF0sWzI3LjE5Myw0MC42OTFdLFsyNi4zNTgsNDAuMTUyXSxbMjYuMDQzLDQwLjYxOF0sWzI2LjA1Nyw0MC44MjRdLFsyNS40NDgsNDAuODUyXSxbMjQuOTI2LDQwLjk0N10sWzIzLjcxNSw0MC42ODddLFsyNC40MDgsNDAuMTI1XSxbMjMuOSwzOS45NjJdLFsyMy4zNDMsMzkuOTYxXSxbMjIuODE0LDQwLjQ3Nl0sWzIyLjYyNiw0MC4yNTddLFsyMi44NSwzOS42NTldLFsyMy4zNSwzOS4xOV0sWzIyLjk3MywzOC45NzFdLFsyMy41MywzOC41MV0sWzI0LjAyNSwzOC4yMl0sWzI0LjA0LDM3LjY1NV0sWzIzLjExNSwzNy45Ml0sWzIzLjQxLDM3LjQxXSxbMjIuNzc1LDM3LjMwNV0sWzIzLjE1NCwzNi40MjJdLFsyMi40OSwzNi40MV0sWzIxLjY3LDM2Ljg0NV0sWzIxLjI5NSwzNy42NDVdLFsyMS4xMiwzOC4zMV0sWzIwLjczLDM4Ljc3XSxbMjAuMjE4LDM5LjM0XSxbMjAuMTUsMzkuNjI1XSxbMTkuOTgsMzkuNjk1XSxbMTkuOTYsMzkuOTE1XSxbMTkuNDA2LDQwLjI1MV0sWzE5LjMxOSw0MC43MjddLFsxOS40MDQsNDEuNDA5XSxbMTkuNTQsNDEuNzJdLFsxOS4zNzIsNDEuODc4XSxbMTkuMTYyLDQxLjk1NV0sWzE4Ljg4Miw0Mi4yODFdLFsxOC40NSw0Mi40OF0sWzE3LjUxLDQyLjg1XSxbMTYuOTMsNDMuMjFdLFsxNi4wMTYsNDMuNTA3XSxbMTUuMTc1LDQ0LjI0M10sWzE1LjM3Niw0NC4zMThdLFsxNC45Miw0NC43MzldLFsxNC45MDIsNDUuMDc2XSxbMTQuMjU5LDQ1LjIzNF0sWzEzLjk1Miw0NC44MDJdLFsxMy42NTcsNDUuMTM3XSxbMTMuNjgsNDUuNDg0XSxbMTMuNzE1LDQ1LjVdLFsxMy45MzgsNDUuNTkxXSxbMTMuMTQyLDQ1LjczN10sWzEyLjMyOSw0NS4zODJdLFsxMi4zODQsNDQuODg1XSxbMTIuMjYxLDQ0LjYwMV0sWzEyLjU4OSw0NC4wOTFdLFsxMy41MjcsNDMuNTg4XSxbMTQuMDMsNDIuNzYxXSxbMTUuMTQzLDQxLjk1NV0sWzE1LjkyNiw0MS45NjFdLFsxNi4xNyw0MS43NF0sWzE1Ljg4OSw0MS41NDFdLFsxNi43ODUsNDEuMThdLFsxNy41MTksNDAuODc3XSxbMTguMzc3LDQwLjM1Nl0sWzE4LjQ4LDQwLjE2OV0sWzE4LjI5NCwzOS44MTFdLFsxNy43MzksNDAuMjc4XSxbMTYuODcsNDAuNDQyXSxbMTYuNDQ5LDM5Ljc5NV0sWzE3LjE3MiwzOS40MjVdLFsxNy4wNTMsMzguOTAzXSxbMTYuNjM1LDM4Ljg0NF0sWzE2LjEwMSwzNy45ODZdLFsxNS42ODQsMzcuOTA5XSxbMTUuNjg4LDM4LjIxNV0sWzE1Ljg5MiwzOC43NTFdLFsxNi4xMDksMzguOTY0XSxbMTUuNzE5LDM5LjU0NF0sWzE1LjQxNCw0MC4wNDhdLFsxNC45OTgsNDAuMTczXSxbMTQuNzAzLDQwLjYwNV0sWzE0LjA2MSw0MC43ODZdLFsxMy42MjgsNDEuMTg4XSxbMTIuODg4LDQxLjI1M10sWzEyLjEwNyw0MS43MDVdLFsxMS4xOTIsNDIuMzU2XSxbMTAuNTEyLDQyLjkzMl0sWzEwLjIsNDMuOTJdLFs5LjcwMyw0NC4wMzZdLFs4Ljg4OSw0NC4zNjZdLFs4LjQyOSw0NC4yMzFdLFs3Ljg1MSw0My43NjddLFs3LjQzNSw0My42OTRdLFs2LjUyOSw0My4xMjldLFs0LjU1Nyw0My40XSxbMy4xMDEsNDMuMDc1XSxbMi45ODYsNDIuNDczXSxbMy4wMzksNDEuODkyXSxbMi4wOTIsNDEuMjI2XSxbMC44MSw0MS4wMTVdLFswLjcyMSw0MC42NzhdLFswLjEwNyw0MC4xMjRdLFstMC4yNzksMzkuMzFdLFswLjExMSwzOC43MzldLFstMC40NjcsMzguMjkyXSxbLTAuNjgzLDM3LjY0Ml0sWy0xLjQzOCwzNy40NDNdLFstMi4xNDYsMzYuNjc0XSxbLTMuNDE2LDM2LjY1OV0sWy00LjM2OSwzNi42NzhdLFstNC45OTUsMzYuMzI1XSxbLTUuMzc3LDM1Ljk0N10sWy01Ljg2NiwzNi4wM10sWy02LjIzNywzNi4zNjhdLFstNi41MiwzNi45NDNdLFstNy40NTQsMzcuMDk4XSxbLTcuODU2LDM2LjgzOF0sWy04LjM4MywzNi45NzldLFstOC44OTksMzYuODY5XSxbLTguNzQ2LDM3LjY1MV0sWy04Ljg0LDM4LjI2Nl0sWy05LjI4NywzOC4zNTldLFstOS41MjYsMzguNzM3XSxbLTkuNDQ3LDM5LjM5Ml0sWy05LjA0OCwzOS43NTVdLFstOC45NzcsNDAuMTU5XSxbLTguNzY5LDQwLjc2MV0sWy04Ljc5MSw0MS4xODRdLFstOC45OTEsNDEuNTQ0XSxbLTkuMDM1LDQxLjg4MV0sWy04Ljk4NCw0Mi41OTNdLFstOS4zOTMsNDMuMDI3XSxbLTcuOTc4LDQzLjc0OF0sWy02Ljc1NSw0My41NjhdLFstNS40MTIsNDMuNTc0XSxbLTQuMzQ4LDQzLjQwNF0sWy0zLjUxOCw0My40NTZdLFstMS45MDEsNDMuNDIzXSxbLTEuMzg0LDQ0LjAyM10sWy0xLjE5NCw0Ni4wMTVdLFstMi4yMjYsNDcuMDY1XSxbLTIuOTYzLDQ3LjU3XSxbLTQuNDkyLDQ3Ljk1NV0sWy00LjU5Miw0OC42ODRdLFstMy4yOTYsNDguOTAyXSxbLTEuNjE3LDQ4LjY0NF0sWy0xLjkzMyw0OS43NzZdLFstMC45ODksNDkuMzQ3XSxbMS4zMzksNTAuMTI3XSxbMS42MzksNTAuOTQ3XSxbMi41MTMsNTEuMTQ4XSxbMy4zMTUsNTEuMzQ2XSxbMy44Myw1MS42Ml0sWzQuNzA2LDUzLjA5Ml0sWzYuMDc0LDUzLjUxXSxbNi45MDUsNTMuNDgyXSxbNy4xMDEsNTMuNjk0XSxbNy45MzYsNTMuNzQ4XSxbOC4xMjIsNTMuNTI4XSxbOC44MDEsNTQuMDIxXSxbOC41NzIsNTQuMzk2XSxbOC41MjYsNTQuOTYzXSxbOC4xMiw1NS41MThdLFs4LjA5LDU2LjU0XSxbOC4yNTcsNTYuODFdLFs4LjU0NCw1Ny4xMV0sWzkuNDI1LDU3LjE3Ml0sWzkuNzc2LDU3LjQ0OF0sWzEwLjU4LDU3LjczXSxbMTAuNTQ2LDU3LjIxNl0sWzEwLjI1LDU2Ljg5XSxbMTAuMzcsNTYuNjFdLFsxMC45MTIsNTYuNDU5XSxbMTAuNjY4LDU2LjA4MV0sWzEwLjM3LDU2LjE5XSxbOS42NSw1NS40N10sWzkuOTIyLDU0Ljk4M10sWzkuOTQsNTQuNTk3XSxbMTAuOTUsNTQuMzY0XSxbMTAuOTQsNTQuMDA5XSxbMTEuOTU2LDU0LjE5Nl0sWzEyLjUxOCw1NC40NzFdLFsxMy42NDgsNTQuMDc1XSxbMTQuMTIsNTMuNzU3XSxbMTQuODAzLDU0LjA1MV0sWzE2LjM2NCw1NC41MTNdLFsxNy42MjMsNTQuODUyXSxbMTguNjIxLDU0LjY4M10sWzE4LjY5Niw1NC40MzldLFsxOS42NjEsNTQuNDI2XSxbMTkuODg4LDU0Ljg2Nl0sWzIxLjI2OCw1NS4xOV0sWzIxLjA1Niw1Ni4wMzFdLFsyMS4wOTEsNTYuNzg0XSxbMjEuNTgyLDU3LjQxMl0sWzIyLjUyNCw1Ny43NTNdLFsyMy4zMTgsNTcuMDA2XSxbMjQuMTIxLDU3LjAyNl0sWzI0LjMxMyw1Ny43OTRdLFsyNC40MjksNTguMzgzXSxbMjQuMDYxLDU4LjI1OF0sWzIzLjQyNyw1OC42MTNdLFsyMy4zNCw1OS4xODddLFsyNC42MDQsNTkuNDY2XSxbMjUuODY0LDU5LjYxMV0sWzI2Ljk0OSw1OS40NDZdLFsyNy45ODEsNTkuNDc2XSxbMjkuMTE4LDYwLjAyOF0sWzI4LjA3LDYwLjUwM10sWzI2LjI1NSw2MC40MjRdLFsyNC40OTcsNjAuMDU3XSxbMjIuODcsNTkuODQ2XSxbMjIuMjkxLDYwLjM5Ml0sWzIxLjMyMiw2MC43Ml0sWzIxLjU0NSw2MS43MDVdLFsyMS4wNTksNjIuNjA3XSxbMjEuNTM2LDYzLjE5XSxbMjIuNDQzLDYzLjgxOF0sWzI0LjczMSw2NC45MDJdLFsyNS4zOTgsNjUuMTEyXSxbMjUuMjk0LDY1LjUzNF0sWzIzLjkwNCw2Ni4wMDddLFsyMi4xODMsNjUuNzI0XSxbMjEuMjE0LDY1LjAyNl0sWzIxLjM3LDY0LjQxNF0sWzE5Ljc3OSw2My42MV0sWzE3Ljg0OCw2Mi43NV0sWzE3LjEyLDYxLjM0MV0sWzE3LjgzMSw2MC42MzddLFsxOC43ODgsNjAuMDgyXSxbMTcuODY5LDU4Ljk1NF0sWzE2LjgyOSw1OC43Ml0sWzE2LjQ0OCw1Ny4wNDFdLFsxNS44OCw1Ni4xMDRdLFsxNC42NjcsNTYuMjAxXSxbMTQuMTAxLDU1LjQwOF0sWzEyLjk0Myw1NS4zNjJdLFsxMi42MjUsNTYuMzA3XSxbMTEuNzg4LDU3LjQ0Ml0sWzExLjAyNyw1OC44NTZdLFsxMC4zNTcsNTkuNDddLFs4LjM4Miw1OC4zMTNdLFs3LjA0OSw1OC4wNzldLFs1LjY2Niw1OC41ODhdLFs1LjMwOCw1OS42NjNdLFs0Ljk5Miw2MS45NzFdLFs1LjkxMyw2Mi42MTVdLFs4LjU1NCw2My40NTRdLFsxMC41MjgsNjQuNDg2XSxbMTIuMzU4LDY1Ljg4XSxbMTQuNzYxLDY3LjgxMV0sWzE2LjQzNiw2OC41NjNdLFsxOS4xODQsNjkuODE4XSxbMjEuMzc4LDcwLjI1NV0sWzIzLjAyNCw3MC4yMDJdLFsyNC41NDcsNzEuMDMxXSxbMjYuMzcsNzAuOTg2XSxbMjguMTY2LDcxLjE4NV0sWzMxLjI5NCw3MC40NTRdLFszMC4wMDUsNzAuMTg2XSxbMzEuMTAxLDY5LjU1OF0sWzMyLjEzMyw2OS45MDZdLFszMy43NzYsNjkuMzAyXSxbMzYuNTE0LDY5LjA2M10sWzQwLjI5Miw2Ny45MzJdLFs0MS4wNiw2Ny40NTddLFs0MS4xMjYsNjYuNzkyXSxbNDAuMDE2LDY2LjI2Nl0sWzM4LjM4Myw2Ni4wXSxbMzMuOTE5LDY2Ljc2XSxbMzMuMTg1LDY2LjYzM10sWzM0LjgxNSw2NS45XSxbMzQuOTQ0LDY0LjQxNF0sWzM2LjIzMSw2NC4xMDldLFszNy4wMTMsNjMuODVdLFszNy4xNDIsNjQuMzM1XSxbMzYuNTE4LDY0Ljc4XSxbMzcuMTc2LDY1LjE0M10sWzM5LjU5NCw2NC41MjFdLFs0MC40MzYsNjQuNzY1XSxbMzkuNzYzLDY1LjQ5N10sWzQyLjA5Myw2Ni40NzZdLFs0My4wMTYsNjYuNDE5XSxbNDMuOTUsNjYuMDY5XSxbNDQuNTMyLDY2Ljc1Nl0sWzQzLjY5OCw2Ny4zNTJdLFs0NC4xODgsNjcuOTUxXSxbNDMuNDUzLDY4LjU3MV0sWzQ2LjI1LDY4LjI1XSxbNDYuODIxLDY3LjY5XSxbNDUuNTU1LDY3LjU2N10sWzQ1LjU2Miw2Ny4wMV0sWzQ2LjM0OSw2Ni42NjhdLFs0Ny44OTQsNjYuODg1XSxbNDguMTM5LDY3LjUyM10sWzUwLjIyOCw2Ny45OTldLFs1My43MTgsNjguODU3XSxbNTQuNDcyLDY4LjgwOF0sWzUzLjQ4Niw2OC4yMDFdLFs1NC43MjYsNjguMDk3XSxbNTUuNDQzLDY4LjQzOV0sWzU3LjMxNyw2OC40NjZdLFs1OC44MDIsNjguODgxXSxbNTkuOTQyLDY4LjI3OV0sWzYxLjA3OCw2OC45NDFdLFs2MC4wMyw2OS41Ml0sWzYwLjU1LDY5Ljg1XSxbNjMuNTA0LDY5LjU0N10sWzY0Ljg4OCw2OS4yMzVdLFs2OC41MTIsNjguMDkyXSxbNjkuMTgxLDY4LjYxNl0sWzY4LjE2NCw2OS4xNDRdLFs2OC4xMzUsNjkuMzU3XSxbNjYuOTMsNjkuNDU1XSxbNjcuMjYsNjkuOTI5XSxbNjYuNzI1LDcwLjcwOV0sWzY2LjY5NSw3MS4wMjldLFs2OC41NCw3MS45MzVdLFs2OS4xOTYsNzIuODQ0XSxbNjkuOTQsNzMuMDRdLFs3Mi41ODgsNzIuNzc2XSxbNzIuNzk2LDcyLjIyXSxbNzEuODQ4LDcxLjQwOV0sWzcyLjQ3LDcxLjA5XSxbNzIuNzkyLDcwLjM5MV0sWzcyLjU2NSw2OS4wMjFdLFs3My42NjgsNjguNDA4XSxbNzMuMjM5LDY3Ljc0XSxbNzEuMjgsNjYuMzJdLFs3Mi40MjMsNjYuMTczXSxbNzIuODIxLDY2LjUzM10sWzczLjkyMSw2Ni43ODldLFs3NC4xODcsNjcuMjg0XSxbNzUuMDUyLDY3Ljc2XSxbNzQuNDY5LDY4LjMyOV0sWzc0LjkzNiw2OC45ODldLFs3My44NDIsNjkuMDcxXSxbNzMuNjAyLDY5LjYyOF0sWzc0LjQsNzAuNjMyXSxbNzMuMTAxLDcxLjQ0N10sWzc0Ljg5MSw3Mi4xMjFdLFs3NC42NTksNzIuODMyXSxbNzUuMTU4LDcyLjg1NV0sWzc1LjY4Myw3Mi4zXSxbNzUuMjg5LDcxLjMzNl0sWzc2LjM1OSw3MS4xNTNdLFs3NS45MDMsNzEuODc0XSxbNzcuNTc3LDcyLjI2N10sWzc5LjY1Miw3Mi4zMl0sWzgxLjUsNzEuNzVdLFs4MC42MTEsNzIuNTgzXSxbODAuNTExLDczLjY0OF0sWzgyLjI1LDczLjg1XSxbODQuNjU1LDczLjgwNl0sWzg2LjgyMiw3My45MzddLFs4Ni4wMSw3NC40Nl0sWzg3LjE2Nyw3NS4xMTddLFs4OC4zMTYsNzUuMTQ0XSxbOTAuMjYsNzUuNjRdLFs5Mi45MDEsNzUuNzczXSxbOTMuMjM0LDc2LjA0N10sWzk1Ljg2LDc2LjE0XSxbOTYuNjc4LDc1LjkxNl0sWzk4LjkyMiw3Ni40NDddLFsxMDAuNzYsNzYuNDNdLFsxMDEuMDM1LDc2Ljg2Ml0sWzEwMS45OTEsNzcuMjg3XSxbMTA0LjM1Miw3Ny42OThdLFsxMDYuMDY3LDc3LjM3NF0sWzEwNC43MDUsNzcuMTI4XSxbMTA2Ljk3LDc2Ljk3NF1dLFtbLTkzLjg0LDc3LjUyXSxbLTk0LjI5Niw3Ny40OTFdLFstOTYuMTcsNzcuNTU1XSxbLTk2LjQzNiw3Ny44MzVdLFstOTQuNDIzLDc3LjgyXSxbLTkzLjcyMSw3Ny42MzRdLFstOTMuODQsNzcuNTJdXSxbWy0xMTAuMTg3LDc3LjY5N10sWy0xMTIuMDUxLDc3LjQwOV0sWy0xMTMuNTM0LDc3LjczMl0sWy0xMTIuNzI1LDc4LjA1MV0sWy0xMTEuMjY0LDc4LjE1M10sWy0xMDkuODU0LDc3Ljk5Nl0sWy0xMTAuMTg3LDc3LjY5N11dLFtbMjQuNzI0LDc3Ljg1NF0sWzIyLjQ5LDc3LjQ0NV0sWzIwLjcyNiw3Ny42NzddLFsyMS40MTYsNzcuOTM1XSxbMjAuODEyLDc4LjI1NV0sWzIyLjg4NCw3OC40NTVdLFsyMy4yODEsNzguMDhdLFsyNC43MjQsNzcuODU0XV0sW1stMTA5LjY2Myw3OC42MDJdLFstMTEwLjg4MSw3OC40MDddLFstMTEyLjU0Miw3OC40MDhdLFstMTEyLjUyNiw3OC41NTFdLFstMTExLjUsNzguODVdLFstMTEwLjk2NCw3OC44MDRdLFstMTA5LjY2Myw3OC42MDJdXSxbWy05NS44Myw3OC4wNTddLFstOTcuMzEsNzcuODUxXSxbLTk4LjEyNCw3OC4wODNdLFstOTguNTUzLDc4LjQ1OF0sWy05OC42MzIsNzguODcyXSxbLTk3LjMzNyw3OC44MzJdLFstOTYuNzU0LDc4Ljc2Nl0sWy05NS41NTksNzguNDE4XSxbLTk1LjgzLDc4LjA1N11dLFtbLTEwMC4wNiw3OC4zMjVdLFstOTkuNjcxLDc3LjkwOF0sWy0xMDEuMzA0LDc4LjAxOV0sWy0xMDIuOTUsNzguMzQzXSxbLTEwNS4xNzYsNzguMzhdLFstMTA0LjIxLDc4LjY3N10sWy0xMDUuNDIsNzguOTE4XSxbLTEwNS40OTIsNzkuMzAyXSxbLTEwMy41MjksNzkuMTY1XSxbLTEwMC44MjUsNzguOF0sWy0xMDAuMDYsNzguMzI1XV0sW1sxMDUuMDc1LDc4LjMwN10sWzk5LjQzOCw3Ny45MjFdLFsxMDEuMjY1LDc5LjIzNF0sWzEwMi4wODYsNzkuMzQ2XSxbMTAyLjgzOCw3OS4yODFdLFsxMDUuMzcyLDc4LjcxM10sWzEwNS4wNzUsNzguMzA3XV0sW1sxOC4yNTIsNzkuNzAyXSxbMjEuNTQ0LDc4Ljk1Nl0sWzE5LjAyNyw3OC41NjNdLFsxOC40NzIsNzcuODI3XSxbMTcuNTk0LDc3LjYzOF0sWzE3LjExOCw3Ni44MDldLFsxNS45MTMsNzYuNzddLFsxMy43NjMsNzcuMzhdLFsxNC42Nyw3Ny43MzZdLFsxMy4xNzEsNzguMDI1XSxbMTEuMjIyLDc4Ljg2OV0sWzEwLjQ0NSw3OS42NTJdLFsxMy4xNzEsODAuMDFdLFsxMy43MTksNzkuNjZdLFsxNS4xNDMsNzkuNjc0XSxbMTUuNTIzLDgwLjAxNl0sWzE2Ljk5MSw4MC4wNTFdLFsxOC4yNTIsNzkuNzAyXV0sW1syNS40NDgsODAuNDA3XSxbMjcuNDA4LDgwLjA1Nl0sWzI1LjkyNSw3OS41MThdLFsyMy4wMjQsNzkuNF0sWzIwLjA3NSw3OS41NjddLFsxOS44OTcsNzkuODQyXSxbMTguNDYyLDc5Ljg2XSxbMTcuMzY4LDgwLjMxOV0sWzIwLjQ1Niw4MC41OThdLFsyMS45MDgsODAuMzU4XSxbMjIuOTE5LDgwLjY1N10sWzI1LjQ0OCw4MC40MDddXSxbWzUxLjEzNiw4MC41NDddLFs0OS43OTQsODAuNDE1XSxbNDguODk0LDgwLjM0XSxbNDguNzU1LDgwLjE3NV0sWzQ3LjU4Niw4MC4wMV0sWzQ2LjUwMyw4MC4yNDddLFs0Ny4wNzIsODAuNTU5XSxbNDQuODQ3LDgwLjU5XSxbNDYuNzk5LDgwLjc3Ml0sWzQ4LjMxOCw4MC43ODRdLFs0OC41MjMsODAuNTE1XSxbNDkuMDk3LDgwLjc1NF0sWzUwLjA0LDgwLjkxOV0sWzUxLjUyMyw4MC43XSxbNTEuMTM2LDgwLjU0N11dLFtbOTkuOTQsNzguODgxXSxbOTcuNzU4LDc4Ljc1Nl0sWzk0Ljk3Myw3OS4wNDVdLFs5My4zMTMsNzkuNDI3XSxbOTIuNTQ1LDgwLjE0NF0sWzkxLjE4MSw4MC4zNDFdLFs5My43NzgsODEuMDI1XSxbOTUuOTQxLDgxLjI1XSxbOTcuODg0LDgwLjc0N10sWzEwMC4xODcsNzkuNzhdLFs5OS45NCw3OC44ODFdXSxbWy04Ny4wMiw3OS42Nl0sWy04NS44MTQsNzkuMzM3XSxbLTg3LjE4OCw3OS4wMzldLFstODkuMDM1LDc4LjI4N10sWy05MC44MDQsNzguMjE1XSxbLTkyLjg3Nyw3OC4zNDNdLFstOTMuOTUxLDc4Ljc1MV0sWy05My45MzYsNzkuMTE0XSxbLTkzLjE0NSw3OS4zOF0sWy05NC45NzQsNzkuMzcyXSxbLTk2LjA3Niw3OS43MDVdLFstOTYuNzEsODAuMTU4XSxbLTk2LjAxNiw4MC42MDJdLFstOTUuMzIzLDgwLjkwN10sWy05NC4yOTgsODAuOTc3XSxbLTk0LjczNSw4MS4yMDZdLFstOTIuNDEsODEuMjU3XSxbLTkxLjEzMyw4MC43MjNdLFstODkuNDUsODAuNTA5XSxbLTg3LjgxLDgwLjMyXSxbLTg3LjAyLDc5LjY2XV0sW1stNjguNSw4My4xMDZdLFstNjUuODI3LDgzLjAyOF0sWy02My42OCw4Mi45XSxbLTYxLjg1LDgyLjYyOV0sWy02MS44OTQsODIuMzYyXSxbLTY0LjMzNCw4MS45MjhdLFstNjYuNzUzLDgxLjcyNV0sWy02Ny42NTgsODEuNTAxXSxbLTY1LjQ4LDgxLjUwN10sWy02Ny44NCw4MC45XSxbLTY5LjQ3LDgwLjYxN10sWy03MS4xOCw3OS44XSxbLTczLjI0Myw3OS42MzRdLFstNzMuODgsNzkuNDNdLFstNzYuOTA4LDc5LjMyM10sWy03NS41MjksNzkuMTk4XSxbLTc2LjIyLDc5LjAxOV0sWy03NS4zOTMsNzguNTI2XSxbLTc2LjM0NCw3OC4xODNdLFstNzcuODg5LDc3LjldLFstNzguMzYzLDc3LjUwOV0sWy03OS43Niw3Ny4yMV0sWy03OS42Miw3Ni45ODNdLFstNzcuOTExLDc3LjAyMl0sWy03Ny44ODksNzYuNzc4XSxbLTgwLjU2MSw3Ni4xNzhdLFstODMuMTc0LDc2LjQ1NF0sWy04Ni4xMTIsNzYuMjk5XSxbLTg3LjYsNzYuNDJdLFstODkuNDkxLDc2LjQ3Ml0sWy04OS42MTYsNzYuOTUyXSxbLTg3Ljc2Nyw3Ny4xNzhdLFstODguMjYsNzcuOV0sWy04Ny42NSw3Ny45N10sWy04NC45NzYsNzcuNTM5XSxbLTg2LjM0LDc4LjE4XSxbLTg3Ljk2Miw3OC4zNzJdLFstODcuMTUyLDc4Ljc1OV0sWy04NS4zNzksNzguOTk3XSxbLTg1LjA5NSw3OS4zNDVdLFstODYuNTA3LDc5LjczNl0sWy04Ni45MzIsODAuMjUxXSxbLTg0LjE5OCw4MC4yMDhdLFstODMuNDA5LDgwLjFdLFstODEuODQ4LDgwLjQ2NF0sWy04NC4xLDgwLjU4XSxbLTg3LjU5OSw4MC41MTZdLFstODkuMzY3LDgwLjg1Nl0sWy05MC4yLDgxLjI2XSxbLTkxLjM2OCw4MS41NTNdLFstOTEuNTg3LDgxLjg5NF0sWy05MC4xLDgyLjA4NV0sWy04OC45MzIsODIuMTE4XSxbLTg2Ljk3LDgyLjI4XSxbLTg1LjUsODIuNjUyXSxbLTg0LjI2LDgyLjZdLFstODMuMTgsODIuMzJdLFstODIuNDIsODIuODZdLFstODEuMSw4My4wMl0sWy03OS4zMDcsODMuMTMxXSxbLTc2LjI1LDgzLjE3Ml0sWy03NS43MTksODMuMDY0XSxbLTcyLjgzMiw4My4yMzNdLFstNzAuNjY2LDgzLjE3XSxbLTY4LjUsODMuMTA2XV0sW1stMjcuMSw4My41Ml0sWy0yMC44NDUsODIuNzI3XSxbLTIyLjY5Miw4Mi4zNDJdLFstMjYuNTE4LDgyLjI5OF0sWy0zMS45LDgyLjJdLFstMzEuMzk2LDgyLjAyMl0sWy0yNy44NTcsODIuMTMyXSxbLTI0Ljg0NCw4MS43ODddLFstMjIuOTAzLDgyLjA5M10sWy0yMi4wNzIsODEuNzM0XSxbLTIzLjE3LDgxLjE1M10sWy0yMC42MjQsODEuNTI1XSxbLTE1Ljc2OCw4MS45MTJdLFstMTIuNzcsODEuNzE5XSxbLTEyLjIwOSw4MS4yOTJdLFstMTYuMjg1LDgwLjU4XSxbLTE2Ljg1LDgwLjM1XSxbLTIwLjA0Niw4MC4xNzddLFstMTcuNzMsODAuMTI5XSxbLTE4LjksNzkuNF0sWy0xOS43MDUsNzguNzUxXSxbLTE5LjY3NCw3Ny42MzldLFstMTguNDczLDc2Ljk4Nl0sWy0yMC4wMzUsNzYuOTQ0XSxbLTIxLjY3OSw3Ni42MjhdLFstMTkuODM0LDc2LjA5OF0sWy0xOS41OTksNzUuMjQ4XSxbLTIwLjY2OCw3NS4xNTZdLFstMTkuMzczLDc0LjI5Nl0sWy0yMS41OTQsNzQuMjI0XSxbLTIwLjQzNSw3My44MTddLFstMjAuNzYyLDczLjQ2NF0sWy0yMi4xNzIsNzMuMzFdLFstMjMuNTY2LDczLjMwN10sWy0yMi4zMTMsNzIuNjI5XSxbLTIyLjMsNzIuMTg0XSxbLTI0LjI3OCw3Mi41OThdLFstMjQuNzkzLDcyLjMzXSxbLTIzLjQ0Myw3Mi4wOF0sWy0yMi4xMzMsNzEuNDY5XSxbLTIxLjc1NCw3MC42NjRdLFstMjMuNTM2LDcwLjQ3MV0sWy0yNC4zMDcsNzAuODU2XSxbLTI1LjU0Myw3MS40MzFdLFstMjUuMjAxLDcwLjc1Ml0sWy0yNi4zNjMsNzAuMjI2XSxbLTIzLjcyNyw3MC4xODRdLFstMjIuMzQ5LDcwLjEyOV0sWy0yNS4wMjksNjkuMjU5XSxbLTI3Ljc0Nyw2OC40N10sWy0zMC42NzQsNjguMTI1XSxbLTMxLjc3Nyw2OC4xMjFdLFstMzIuODExLDY3LjczNV0sWy0zNC4yMDIsNjYuNjhdLFstMzYuMzUzLDY1Ljk3OV0sWy0zNy4wNDQsNjUuOTM4XSxbLTM4LjM3NSw2NS42OTJdLFstMzkuODEyLDY1LjQ1OF0sWy00MC42NjksNjQuODRdLFstNDAuNjgzLDY0LjEzOV0sWy00MS4xODksNjMuNDgyXSxbLTQyLjgxOSw2Mi42ODJdLFstNDIuNDE3LDYxLjkwMV0sWy00Mi44NjYsNjEuMDc0XSxbLTQzLjM3OCw2MC4wOThdLFstNDQuNzg4LDYwLjAzN10sWy00Ni4yNjQsNjAuODUzXSxbLTQ4LjI2Myw2MC44NThdLFstNDkuMjMzLDYxLjQwN10sWy00OS45LDYyLjM4M10sWy01MS42MzMsNjMuNjI3XSxbLTUyLjE0LDY0LjI3OF0sWy01Mi4yNzcsNjUuMTc3XSxbLTUzLjY2Miw2Ni4xXSxbLTUzLjMwMiw2Ni44MzddLFstNTMuOTY5LDY3LjE4OV0sWy01Mi45OCw2OC4zNThdLFstNTEuNDc1LDY4LjczXSxbLTUxLjA4LDY5LjE0OF0sWy01MC44NzEsNjkuOTI5XSxbLTUyLjAxNCw2OS41NzVdLFstNTIuNTU4LDY5LjQyNl0sWy01My40NTYsNjkuMjg0XSxbLTU0LjY4Myw2OS42MV0sWy01NC43NSw3MC4yODldLFstNTQuMzU5LDcwLjgyMV0sWy01My40MzEsNzAuODM2XSxbLTUxLjM5LDcwLjU3XSxbLTUzLjEwOSw3MS4yMDVdLFstNTQuMDA0LDcxLjU0N10sWy01NSw3MS40MDddLFstNTUuODM1LDcxLjY1NF0sWy01NC43MTgsNzIuNTg2XSxbLTU1LjMyNiw3Mi45NTldLFstNTYuMTIsNzMuNjVdLFstNTcuMzI0LDc0LjcxXSxbLTU4LjU5Nyw3NS4wOTldLFstNTguNTg1LDc1LjUxN10sWy02MS4yNjksNzYuMTAyXSxbLTYzLjM5Miw3Ni4xNzVdLFstNjYuMDY0LDc2LjEzNV0sWy02OC41MDQsNzYuMDYxXSxbLTY5LjY2NSw3Ni4zOF0sWy03MS40MDMsNzcuMDA5XSxbLTY4Ljc3Nyw3Ny4zMjNdLFstNjYuNzY0LDc3LjM3Nl0sWy03MS4wNDMsNzcuNjM2XSxbLTczLjI5Nyw3OC4wNDRdLFstNzMuMTU5LDc4LjQzM10sWy02OS4zNzMsNzguOTE0XSxbLTY1LjcxMSw3OS4zOTRdLFstNjUuMzI0LDc5Ljc1OF0sWy02OC4wMjMsODAuMTE3XSxbLTY3LjE1MSw4MC41MTZdLFstNjMuNjg5LDgxLjIxNF0sWy02Mi4yMzQsODEuMzIxXSxbLTYyLjY1MSw4MS43N10sWy02MC4yODIsODIuMDM0XSxbLTU3LjIwNyw4Mi4xOTFdLFstNTQuMTM0LDgyLjJdLFstNTMuMDQzLDgxLjg4OF0sWy01MC4zOTEsODIuNDM5XSxbLTQ4LjAwNCw4Mi4wNjVdLFstNDYuNiw4MS45ODZdLFstNDQuNTIzLDgxLjY2MV0sWy00Ni45MDEsODIuMl0sWy00Ni43NjQsODIuNjI4XSxbLTQzLjQwNiw4My4yMjVdLFstMzkuODk4LDgzLjE4XSxbLTM4LjYyMiw4My41NDldLFstMzUuMDg4LDgzLjY0NV0sWy0yNy4xLDgzLjUyXV1dCg==").then(r=>r.ok?r.json():null),
       spawnTerrain:typeof spawnTerrainLate==='function'?spawnTerrainLate:null,
@@ -56005,6 +56724,10 @@ async function main() {
       }
       if(voyageCtl.voyage){
         const v=voyageCtl.voyage;
+        if(terrain?.region?.year&&terrain.region.year!==1550&&!qs.has('astroDate')&&!urlGameState?.voyage?.dateMs){
+          v.dateMs=Date.UTC(terrain.region.year,2,24,12,0,0);
+          v.departureDateMs=v.dateMs;
+        }
         const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
         if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
           if(v.true){v.true.lat=qLat;v.true.lon=qLon;}
