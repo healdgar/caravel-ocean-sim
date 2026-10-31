@@ -57,7 +57,7 @@ export function createShareLink(href, settings, boat, cameraMode, camera=null) {
   const url = new URL(href);
   url.search = ''; url.hash = '';
   const scene=new URL(href).searchParams;
-  for(const key of ['landfall','weather','region','lat','lon','broadside','scenario','situation','broadsideSide','broadsideRange','gunsReady','ammo'])if(scene.has(key))url.searchParams.set(key,scene.get(key));
+  for(const key of ['landfall','weather','region','lat','lon','year','broadside','scenario','scenarioPreset','sovereignPolity','situation','broadsideSide','broadsideRange','gunsReady','ammo'])if(scene.has(key))url.searchParams.set(key,scene.get(key));
   const setNumber = (key, value, digits = 6) => {
     if (Number.isFinite(value)) url.searchParams.set(key, String(Number(value.toFixed(digits))));
   };

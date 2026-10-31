@@ -193,6 +193,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   saba: Object.freeze({
     id: 'saba',
     name: 'Saba · Wells Bay',
+    subtitle: 'Lesser Antilles (Volcanic Island LiDAR)',
     era: 1550,
     regionGroup: 'Lesser Antilles',
     latitude: 17.635,
@@ -217,6 +218,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   cartagena: Object.freeze({
     id: 'cartagena',
     name: 'Cartagena de Indias',
+    subtitle: 'Tierra Firme · Fortified Harbor',
     era: 1550,
     regionGroup: 'Tierra Firme',
     latitude: 10.423,
@@ -241,6 +243,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   'nombre-de-dios': Object.freeze({
     id: 'nombre-de-dios',
     name: 'Nombre de Dios',
+    subtitle: 'Castilla del Oro · Silver Terminal',
     era: 1550,
     regionGroup: 'Castilla del Oro',
     latitude: 9.579,
@@ -265,6 +268,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   'santo-domingo': Object.freeze({
     id: 'santo-domingo',
     name: 'Santo Domingo · Río Ozama',
+    subtitle: 'Hispaniola · First Vice-Regal Citadel',
     era: 1550,
     regionGroup: 'Hispaniola',
     latitude: 18.472,
@@ -289,6 +293,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   havana: Object.freeze({
     id: 'havana',
     name: 'San Cristóbal de La Habana',
+    subtitle: 'Cuba · Flota Rendezvous Basin',
     era: 1550,
     regionGroup: 'Cuba',
     latitude: 23.141,
@@ -313,6 +318,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   'san-juan': Object.freeze({
     id: 'san-juan',
     name: 'San Juan de Puerto Rico',
+    subtitle: 'Borikén · El Morro Headland Fortress',
     era: 1550,
     regionGroup: 'Borikén',
     latitude: 18.468,
@@ -337,7 +343,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
   lisbon: Object.freeze({
     id: 'lisbon',
     name: 'Lisboa · Ribeira das Naus',
-    subtitle: 'Tagus Estuary',
+    subtitle: 'Tagus Estuary · Royal Arsenal Dock',
     era: 1550,
     regionGroup: 'Lusitania',
     latitude: 38.707,

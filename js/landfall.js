@@ -1,6 +1,6 @@
-import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, resolveGlobalCoastalRegion } from './terrain-model.js';
+import { ISLAND, LANDFALL_VIEWS, islandCoordinates, SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_1550_PORTS, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, resolveGlobalCoastalRegion } from './terrain-model.js';
 import { snapCoordinateToCoastlineRings } from './coastal-world.js';
-export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, resolveGlobalCoastalRegion } from './coastal-world.js';
+export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_1550_PORTS, HISTORICAL_COLONIAL_PORTS, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, resolveGlobalCoastalRegion } from './coastal-world.js';
 
 export const LANDFALL_WEATHER = Object.freeze({
   clear:{sunElev:32,sunAzim:225,haze:0.8,clouds:0.3,cloudBase:1.2,cloudDepth:1.8,cloudDensity:1,cloudAnvil:0.05},
@@ -84,16 +84,279 @@ export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',
 
 const POST_1550_FEATURED_PORTS = Object.freeze([
   'st-augustine',
+  'rio-de-janeiro',
+  'manila',
   'portobelo',
   'jamestown',
+  'quebec',
+  'bermuda',
+  'batavia',
+  'plymouth-colony',
   'new-amsterdam',
+  'st-kitts',
   'tortuga',
+  'bridgetown',
   'boston',
-  'willemstad',
+  'curacao',
+  'fort-royal-martinique',
+  'cape-town',
   'port-royal',
   'nassau',
+  'cap-francois',
   'charleston',
+  'philadelphia',
 ]);
+
+// Curated playable & debug scenarios in the Landfall / Region dropdown.
+export const LANDFALL_SCENARIOS = Object.freeze([
+  Object.freeze({
+    id: 'columbus-1492-fleet',
+    label: '1492 Columbus Fleet · Santa María, Pinta & Niña at Guanahaní',
+    latitude: 24.05,
+    longitude: -74.53,
+    year: 1492,
+    ship: 'santa-maria',
+    colors: 'castile',
+    fleet: 'pinta:friendly,nina:friendly',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'palos-1492-departure',
+    label: '1492 Palos de la Frontera · Columbus Expedition Departure',
+    region: 'palos-huelva',
+    year: 1492,
+    ship: 'santa-maria',
+    colors: 'castile',
+    fleet: 'pinta:friendly,nina:friendly',
+    stage: 'coast',
+    weather: 'sunset',
+  }),
+  Object.freeze({
+    id: 'lisbon-carreira-1550',
+    label: '1550 Carreira da Índia · Portuguese Armada at Lisbon Dock',
+    region: 'lisbon',
+    year: 1550,
+    ship: 'santa-maria',
+    colors: 'portugal',
+    fleet: 'pinta:friendly,nina:friendly',
+    stage: 'dock',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'cartagena-siege-1586',
+    label: '1586 Assault on Cartagena de Indias · Naval & Fort Bombardment',
+    region: 'cartagena',
+    year: 1586,
+    ship: 'victory',
+    colors: 'england',
+    fleet: 'santa-maria:enemy',
+    broadside: true,
+    gunsReady: true,
+    ammo: 'round',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'treasure-flota-havana-1565',
+    label: '1565 Spanish Treasure Flota · Havana Harbor Convoy',
+    region: 'havana',
+    year: 1565,
+    ship: 'santa-maria',
+    colors: 'castile',
+    fleet: 'pinta:friendly,nina:friendly',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'san-juan-el-morro-1595',
+    label: '1595 Defense of San Juan · El Morro Fortress vs Raiders',
+    region: 'san-juan',
+    year: 1595,
+    ship: 'santa-maria',
+    colors: 'castile',
+    fleet: 'victory:enemy',
+    broadside: true,
+    gunsReady: true,
+    ammo: 'round',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'corsair-ambush-tortuga-1645',
+    label: '1645 Brethren of the Coast · Corsair Ambush off Tortuga',
+    region: 'tortuga',
+    year: 1645,
+    ship: 'pinta',
+    colors: 'jolly-roger',
+    fleet: 'santa-maria:enemy',
+    broadside: true,
+    gunsReady: true,
+    ammo: 'chain',
+    stage: 'coast',
+    weather: 'sunset',
+  }),
+  Object.freeze({
+    id: 'port-royal-buccaneers-1670',
+    label: '1670 Port Royal · High Buccaneer Era Fleet & Citadel',
+    region: 'port-royal',
+    year: 1670,
+    ship: 'victory',
+    colors: 'england',
+    fleet: 'pinta:friendly,nina:friendly',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'panama-sack-1671',
+    label: '1671 Siege of Panamá Viejo · Hot-Shot Fort Bombardment',
+    region: 'panama-viejo',
+    year: 1671,
+    ship: 'victory',
+    colors: 'jolly-roger',
+    fleet: 'pinta:friendly',
+    broadside: true,
+    gunsReady: true,
+    ammo: 'hot',
+    stage: 'coast',
+    weather: 'sunset',
+  }),
+  Object.freeze({
+    id: 'rogue-liberator-wabanaki-1615',
+    label: '1615 Rogue Liberator · Defending Wabanaki Wigwam Village (Maine)',
+    latitude: 43.68,
+    longitude: -70.20,
+    year: 1615,
+    ship: 'nina',
+    colors: 'indigenous-confederacy',
+    fleet: 'pinta:enemy',
+    sovereignPolity: 'abenaki-algonquian',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'sovereign-shawmut-1650',
+    label: '1650 Sovereign Wabanaki Confederacy · Fortified Native Harbor (Shawmut)',
+    latitude: 42.3601,
+    longitude: -71.0589,
+    year: 1650,
+    ship: 'pinta',
+    colors: 'indigenous-confederacy',
+    sovereignPolity: 'abenaki-algonquian',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'rogue-liberator-taino-1510',
+    label: '1510 Rogue Liberator · Sovereign Taíno Cacicazgo of Hispaniola',
+    latitude: 19.95,
+    longitude: -75.85,
+    year: 1510,
+    ship: 'nina',
+    colors: 'indigenous-confederacy',
+    sovereignPolity: 'taino-greater-antilles',
+    stage: 'coast',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'broadside-line-of-battle',
+    label: 'Open-Ocean Line-of-Battle · HMS Victory Broadside Duel',
+    ocean: true,
+    year: 1680,
+    ship: 'victory',
+    colors: 'england',
+    broadside: true,
+    gunsReady: true,
+    ammo: 'round',
+    view: 'ship',
+    weather: 'clear',
+  }),
+  Object.freeze({
+    id: 'clipper-trade-winds',
+    label: 'Age of Clipper Ships · Flying Cloud Running the Trade Winds',
+    region: 'san-juan',
+    year: 1680,
+    ship: 'flying-cloud',
+    colors: 'england',
+    stage: 'approach',
+    weather: 'clear',
+    windSpeed: 11,
+  }),
+  Object.freeze({
+    id: 'viking-oseberg-mist',
+    label: 'Viking Longship · Oseberg Coastal Approach in Sea Mist',
+    region: 'la-coruna',
+    year: 1550,
+    ship: 'oseberg',
+    propulsion: 'oar',
+    stage: 'coast',
+    weather: 'mist',
+  }),
+]);
+
+// Curated pre-colonial & Native American coastal village landfalls across all 9 culture regions.
+export const INDIGENOUS_VILLAGE_PRESETS = Object.freeze([
+  Object.freeze({ id: 'wabanaki-casco', label: 'Wabanaki / Abenaki Birchbark Wigwam Village · Casco Bay, Maine (1550)', latitude: 43.68, longitude: -70.20, year: 1550 }),
+  Object.freeze({ id: 'shawmut-1550', label: 'Massachusett / Algonquian Village · Shawmut / Boston Harbor (1550)', latitude: 42.3601, longitude: -71.0589, year: 1550 }),
+  Object.freeze({ id: 'lenape-mannahatta', label: 'Lenape / Algonquian Longhouse Village · Mannahatta / New York (1550)', latitude: 40.703, longitude: -74.014, year: 1550 }),
+  Object.freeze({ id: 'powhatan-chesapeake', label: 'Powhatan Tsenacommacah Longhouse Town · Chesapeake Bay (1550)', latitude: 37.208, longitude: -76.778, year: 1550 }),
+  Object.freeze({ id: 'taino-xaragua', label: 'Taíno Cacicazgo (Bohíos & Caney) · Tiburon / Hispaniola (1495)', latitude: 18.45, longitude: -72.85, year: 1495 }),
+  Object.freeze({ id: 'kalinago-dominica', label: 'Kalinago (Island Carib) Carbet Stronghold · Waitukubuli / Dominica (1550)', latitude: 15.30, longitude: -61.38, year: 1550 }),
+  Object.freeze({ id: 'maya-cozumel', label: 'Chontal Maya Coastal Trading Port · Cozumel, Yucatán (1518)', latitude: 20.51, longitude: -86.95, year: 1518 }),
+  Object.freeze({ id: 'wayuu-maracaibo', label: 'Añú / Wayuu Lagoon Palafito Stilt Village · Lake Maracaibo (1550)', latitude: 10.95, longitude: -71.60, year: 1550 }),
+  Object.freeze({ id: 'tupinamba-guanabara', label: 'Tupinambá Coastal Maloca Village · Guanabara Bay, Brazil (1545)', latitude: -22.906, longitude: -43.172, year: 1545 }),
+]);
+
+const SCENARIO_CLEANUP_KEYS = [
+  'state', 'scenario', 'situation', 'broadside', 'broadsideSide', 'broadsideRange',
+  'gunsReady', 'ammo', 'fleet', 'follower', 'sovereignPolity', 'propulsion',
+  'cam', 'boatX', 'boatZ', 'boatRudder',
+];
+
+export function scenarioStageURL(href, scenarioOrId, fallbackStage = 'coast', fallbackWeather = 'clear') {
+  const sc = typeof scenarioOrId === 'string'
+    ? LANDFALL_SCENARIOS.find(s => s.id === scenarioOrId.replace(/^scenario:/, ''))
+    : scenarioOrId;
+  if (!sc) throw new RangeError(`Unknown landfall scenario: ${scenarioOrId}`);
+  const stage = sc.stage || fallbackStage || 'coast';
+  const weather = sc.weather || fallbackWeather || 'clear';
+  let url;
+  if (sc.ocean) {
+    url = new URL(href);
+    for (const k of [...SCENARIO_CLEANUP_KEYS, 'landfall', 'region', 'lat', 'lon', 'latitude', 'longitude']) {
+      url.searchParams.delete(k);
+    }
+    url.searchParams.set('ocean', '1');
+    url.searchParams.set('weather', weather);
+  } else {
+    const regionSpec = sc.region
+      ? sc.region
+      : { latitude: sc.latitude, longitude: sc.longitude, year: sc.year };
+    url = coastalRegionStageURL(href, regionSpec, stage, weather, sc.year);
+    for (const k of SCENARIO_CLEANUP_KEYS) url.searchParams.delete(k);
+  }
+  url.searchParams.set('scenarioPreset', sc.id);
+  if (sc.year !== undefined) url.searchParams.set('year', String(sc.year));
+  if (sc.ship) url.searchParams.set('ship', sc.ship);
+  if (sc.colors) url.searchParams.set('colors', sc.colors);
+  if (sc.propulsion) url.searchParams.set('propulsion', sc.propulsion);
+  if (sc.fleet) {
+    url.searchParams.set('fleet', sc.fleet);
+    url.searchParams.set('follower', '1');
+  } else if (!sc.broadside) {
+    url.searchParams.set('follower', '0');
+  }
+  if (sc.broadside) url.searchParams.set('broadside', '1');
+  if (sc.gunsReady) url.searchParams.set('gunsReady', '1');
+  if (sc.ammo) url.searchParams.set('ammo', sc.ammo);
+  if (sc.sovereignPolity) url.searchParams.set('sovereignPolity', sc.sovereignPolity);
+  if (sc.view) {
+    url.searchParams.set('view', sc.view);
+    url.searchParams.set('boat', sc.view === 'boat' ? '1' : '0');
+  }
+  if (sc.windSpeed !== undefined) url.searchParams.set('windSpeed', String(sc.windSpeed));
+  return url;
+}
 
 export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discovery=null,onUpgradeApplied=null,onIndigenousAction=null,onWeather,onOpen,getPosition}){
   const button=document.createElement('button');button.textContent='Landfall';button.id='landfall-button';
@@ -120,7 +383,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     <div id="landfall-discovery-card" hidden></div>
     <div id="landfall-indigenous-sovereignty" hidden></div>
     <div class="landfall-destinations" style="display:grid;gap:6px;margin:8px 0">
-      <label style="display:grid;gap:4px"><span>Region / Colonial Port (1550–1689)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
+      <label style="display:grid;gap:4px"><span>Scenario / Region / Colonial Port (1492–1689)</span><select id="landfall-region" aria-label="Coastal region"></select></label>
       <div style="display:grid;grid-template-columns:1fr 92px;gap:6px;align-items:end">
         <label style="display:grid;gap:2px"><span>Historical Era</span><select id="landfall-era" aria-label="Historical era"></select></label>
         <label style="display:grid;gap:2px"><span>Year</span><input id="landfall-year" type="number" min="1492" max="1689" step="1" value="${simYear}"></label>
@@ -151,19 +414,53 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     if(era.id===eraInfo.id)opt.selected=true;
     eraSelect.append(opt);
   }
+  const spanishMainIds=new Set(Object.keys(SPANISH_MAIN_1550_REGIONS));
+  const extra1550Ports=HISTORICAL_1550_PORTS
+    .filter(p=>!spanishMainIds.has(p.id))
+    .map(p=>[p.id,`${p.name} · Founded ${p.foundedYear} (${p.crown})`]);
   const post1550Entries=POST_1550_FEATURED_PORTS
     .map(id=>HISTORICAL_COLONIAL_PORTS.find(p=>p.id===id))
     .filter(Boolean)
     .map(p=>[p.id,`${p.name} · Founded ${p.foundedYear} (${p.crown})`]);
-  const allPresetIds=new Set([...Object.keys(SPANISH_MAIN_1550_REGIONS),...POST_1550_FEATURED_PORTS]);
-  for(const [id,label] of [
-    ['saba','Saba · Lesser Antilles (LiDAR)'],
-    ...Object.values(SPANISH_MAIN_1550_REGIONS).map(r=>[r.id,`${r.name} · ${r.subtitle}`]),
-    ...post1550Entries,
-  ]){
-    const opt=document.createElement('option');opt.value=id;opt.textContent=label;regionSelect.append(opt);
-  }
-  if(!isSaba&&!allPresetIds.has(region.id)){
+  const allPresetIds=new Set([
+    ...Object.keys(SPANISH_MAIN_1550_REGIONS),
+    ...HISTORICAL_1550_PORTS.map(p=>p.id),
+    ...POST_1550_FEATURED_PORTS,
+  ]);
+
+  const appendGroup=(groupLabel,entries)=>{
+    const group=document.createElement('optgroup');
+    group.label=groupLabel;
+    for(const [id,label] of entries){
+      const opt=document.createElement('option');
+      opt.value=id;
+      opt.textContent=label;
+      group.append(opt);
+    }
+    regionSelect.append(group);
+  };
+
+  appendGroup('⚔️ Featured Scenarios & Naval Actions',
+    LANDFALL_SCENARIOS.map(s=>[`scenario:${s.id}`,s.label])
+  );
+  appendGroup('🏰 1550 Spanish Main & Iberian Hub Ports',
+    Object.values(SPANISH_MAIN_1550_REGIONS).map(r=>[r.id,`${r.name} · ${r.subtitle||r.regionGroup||'1550 Port'}`])
+  );
+  appendGroup('🛶 Native American & Indigenous Villages (1492–1620)',
+    INDIGENOUS_VILLAGE_PRESETS.map(v=>[`indigenous:${v.id}`,v.label])
+  );
+  appendGroup('⚓ 1550 New World, Atlantic & East Indies Ports',extra1550Ports);
+  appendGroup('🏴‍☠️ 1565–1689 Colonial Foundations & Buccaneer Havens',post1550Entries);
+
+  const activeScenarioParam=typeof location!=='undefined'?new URLSearchParams(location.search).get('scenarioPreset'):null;
+  const matchedIndigenousPreset=INDIGENOUS_VILLAGE_PRESETS.find(
+    v=>Math.abs((region?.latitude??0)-v.latitude)<0.03&&Math.abs((region?.longitude??0)-v.longitude)<0.03&&simYear===v.year
+  );
+  if(activeScenarioParam&&LANDFALL_SCENARIOS.some(s=>s.id===activeScenarioParam)){
+    regionSelect.value=`scenario:${activeScenarioParam}`;
+  }else if(matchedIndigenousPreset){
+    regionSelect.value=`indigenous:${matchedIndigenousPreset.id}`;
+  }else if(!isSaba&&!allPresetIds.has(region.id)){
     const opt=document.createElement('option');opt.value='custom';opt.textContent=`Custom (${region.latitude.toFixed(3)}°, ${region.longitude.toFixed(3)}° · ${isWilderness?`${simYear} Wilderness Coast`:`${simYear} ${stageBadge}`})`;regionSelect.append(opt);
     regionSelect.value='custom';
   }else{
@@ -173,20 +470,39 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     const y=Number(yearInput.value);
     return Number.isFinite(y)?Math.max(1492,Math.min(1689,Math.round(y))):simYear;
   };
+  const stripScenarioOverrides=(url)=>{
+    for(const k of ['scenarioPreset',...SCENARIO_CLEANUP_KEYS])url.searchParams.delete(k);
+    return url;
+  };
   const navigateToSelected=(targetYear)=>{
     const val=regionSelect.value;
+    if(val.startsWith('scenario:')){
+      location.assign(scenarioStageURL(location.href,val.slice(9),stage||'coast',weather).href);
+      return;
+    }
+    if(val.startsWith('indigenous:')){
+      const ind=INDIGENOUS_VILLAGE_PRESETS.find(v=>v.id===val.slice(11));
+      if(ind){
+        const effectiveY=targetYear!==undefined?targetYear:ind.year;
+        const url=stripScenarioOverrides(coastalRegionStageURL(location.href,{latitude:ind.latitude,longitude:ind.longitude},stage==='dock'?'coast':(stage||'coast'),weather,effectiveY));
+        location.assign(url.href);
+        return;
+      }
+    }
     if(val==='saba'){
-      const url=landfallStageURL(location.href,stage||'coast',weather);
+      const url=stripScenarioOverrides(landfallStageURL(location.href,stage||'coast',weather));
       url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
       location.assign(url.href);
     }else if(allPresetIds.has(val)){
       const portMeta=HISTORICAL_COLONIAL_PORTS.find(p=>p.id===val);
       const effectiveY=targetYear!==undefined?targetYear:(portMeta&&portMeta.foundedYear>getSelectedYear()?Math.min(1685,portMeta.foundedYear+15):getSelectedYear());
-      location.assign(coastalRegionStageURL(location.href,val,stage||'coast',weather,effectiveY).href);
+      const url=stripScenarioOverrides(coastalRegionStageURL(location.href,val,stage||'coast',weather,effectiveY));
+      location.assign(url.href);
     }else{
       const lat=Number(latInput.value),lon=Number(lonInput.value);
       if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
-      location.assign(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather,targetYear??getSelectedYear()).href);
+      const url=stripScenarioOverrides(coastalRegionStageURL(location.href,{latitude:lat,longitude:lon},stage||'coast',weather,targetYear??getSelectedYear()));
+      location.assign(url.href);
     }
   };
   regionSelect.onchange=()=>navigateToSelected(undefined);

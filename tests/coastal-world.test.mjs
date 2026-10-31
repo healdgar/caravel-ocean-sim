@@ -1493,6 +1493,27 @@ test('Santa María stern colors clear rear mizzen-lateen sail across all wind an
   assert.equal(coplanarArchWallCount, 0, 'arch_vault (kind 14) faces are stepped proud of stucco walls (kind 12) with zero coplanar z-fighting');
 });
 
+test('Landfall dropdown exposes curated scenarios, Native American villages, and full 1492–1689 port gazetteer with valid URLs', async () => {
+  const { LANDFALL_SCENARIOS, INDIGENOUS_VILLAGE_PRESETS, scenarioStageURL } = await import('../js/landfall.js');
+  assert.ok(LANDFALL_SCENARIOS.length >= 14, 'Exposes at least 14 curated playable & viewing scenarios');
+  assert.ok(INDIGENOUS_VILLAGE_PRESETS.length >= 9, 'Exposes Native American village presets across all 9 culture regions');
+
+  for (const r of Object.values(SPANISH_MAIN_1550_REGIONS)) {
+    assert.ok(typeof r.subtitle === 'string' && r.subtitle.length > 3, `${r.id} has a descriptive subtitle`);
+  }
+
+  for (const sc of LANDFALL_SCENARIOS) {
+    const url = scenarioStageURL('https://sixcailloux.com/waterworld/?state=old&cam=1,2,3', sc.id);
+    assert.equal(url.searchParams.get('scenarioPreset'), sc.id);
+    assert.equal(url.searchParams.has('state'), false, 'scenarioStageURL strips stale state');
+    assert.equal(url.searchParams.has('cam'), false, 'scenarioStageURL strips stale camera override');
+    if (sc.ship) assert.equal(url.searchParams.get('ship'), sc.ship);
+    if (sc.broadside) assert.equal(url.searchParams.get('broadside'), '1');
+    if (sc.sovereignPolity) assert.equal(url.searchParams.get('sovereignPolity'), sc.sovereignPolity);
+  }
+});
+
+
 
 
 

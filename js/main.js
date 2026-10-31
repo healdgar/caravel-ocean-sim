@@ -28,7 +28,7 @@ import { createVolumetricClouds } from './clouds.js';
 import { createTerrain, createDeepWaterGroup } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
 import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort } from './terrain-model.js';
-import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw, loadIndigenousSovereigntyFromStorage, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, serializeIndigenousSovereignty, restoreIndigenousSovereignty } from './landfall.js';
+import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw, loadIndigenousSovereigntyFromStorage, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, serializeIndigenousSovereignty, restoreIndigenousSovereignty, applyIndigenousSupportAction } from './landfall.js';
 import { createVoyageController } from './voyage/voyage-controller.js';
 import { createChartDrawer } from './voyage/chart-drawer.js';
 import { islandCoordinates } from './terrain-model.js';
@@ -85,6 +85,15 @@ import { BLOOM_DOWN, BLOOM_UP, COMPOSITE, createUnderwaterPost } from './wgsl/po
 
 const qs = new URLSearchParams(location.search);
 loadIndigenousSovereigntyFromStorage();
+if (qs.has('sovereignPolity')) {
+  const polId = qs.get('sovereignPolity');
+  const sov = getActiveIndigenousSovereigntyState();
+  applyIndigenousSupportAction(polId, 'declare-rogue', sov);
+  applyIndigenousSupportAction(polId, 'share-medicine', sov);
+  applyIndigenousSupportAction(polId, 'supply-arms', sov);
+  applyIndigenousSupportAction(polId, 'defend-raid', sov);
+  applyIndigenousSupportAction(polId, 'proclaim-sovereignty', sov);
+}
 const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
 if (urlGameState) {
   if (urlGameState.sovereignty) {
