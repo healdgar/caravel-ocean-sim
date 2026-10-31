@@ -3,8 +3,9 @@ import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { VESSEL_LIGHTING } from './wgsl/vessel.js';
 import { SCENE_SHADOW_SAMPLE } from './wgsl/shadows.js';
-import { boatRotate, crowsNestDesignStation } from './boat.js';
+import { boatRotate, crowsNestDesignStation, sternEnsignDesignStation } from './boat.js';
 import { vesselHull, modelDeck } from './hull.js';
+export { sternEnsignDesignStation };
 
 // Historically grounded 16th-century & Age-of-Sail naval ensigns ("ship's colors").
 export const SHIP_COLORS = Object.freeze({
@@ -212,24 +213,35 @@ struct ColorsVertexOut {
     // mode 2 (stern ensign cloth) or mode 3 (masthead pennant)
     let isPennant = mode > 2.5;
     let base = select(P.ensignBase.xyz, P.crowsNest.xyz + vec3f(0.0, P.crowsNest.w, 0.0), isPennant);
-    let rake = select(0.42, 0.0, isPennant);
+    let rake = select(0.58, 0.0, isPennant);
     // When surrendered, hoist flag slightly lower on the staff (dipped in truce)
     let hoistDip = select(0.0, -0.32, surrendered && !isPennant);
     let hoistTopY = base.y + select(2.35, 1.15, isPennant) + hoistDip;
-    let hoistTopZ = base.z + select(0.88, 0.0, isPennant);
     let flagHeight = select(1.28, 0.24 * (1.0 - 0.72 * u), isPennant);
     let flagLength = select(2.25, 2.85, isPennant);
 
     let hoistY = hoistTopY - v * flagHeight;
-    let hoistZ = hoistTopZ - v * flagHeight * rake;
+    let hoistZ = select(base.z + (hoistY - base.y) * rake, base.z, isPennant);
     let anchorWorld = P.origin.xyz
       + P.right.xyz * (base.x * sx)
       + P.up.xyz * (hoistY * sy)
       + P.aft.xyz * (hoistZ * sz);
 
-    // Stream downwind in world XZ with travelling cloth wave
+    // Stream downwind in world XZ with travelling cloth wave; deflect stern ensign
+    // abaft the taffrail into the lee quarter when running downwind so it never clips the mizzen sail.
     let windDir2 = normalize(select(vec2f(0.7, 0.7), P.windAndState.xy, length(P.windAndState.xy) > 1e-3));
-    let streamDir = normalize(vec3f(windDir2.x, -0.06, windDir2.y));
+    let windWorld = vec3f(windDir2.x, 0.0, windDir2.y);
+    let windRight = dot(windWorld, P.right.xyz);
+    let windAft = dot(windWorld, P.aft.xyz);
+    let ensignAft = max(0.42, windAft);
+    let leeSign = select(-1.0, 1.0, windRight >= 0.0);
+    let ensignRight = select(windRight, leeSign * max(abs(windRight), 0.52), windAft < 0.42);
+    let rawStream = select(
+      P.aft.xyz * ensignAft + P.right.xyz * ensignRight - P.up.xyz * 0.06,
+      vec3f(windDir2.x, -0.06, windDir2.y),
+      isPennant
+    );
+    let streamDir = normalize(rawStream);
     let sideDir = normalize(vec3f(-streamDir.z, 0.0, streamDir.x));
     let phase = time * (3.2 + 0.38 * windSpeed) - u * 6.8 + v * 0.9;
     let flutter = (sin(phase) + 0.38 * sin(phase * 2.3 + 1.1)) * (0.06 + 0.16 * u * u);
@@ -521,10 +533,11 @@ export function buildShipColorsGeometry() {
     addTube([c0 * 0.14, -0.22, s0 * 0.14], [c0 * rBottom, 0, s0 * rBottom], 0.032, 0.028, 5, 0, 0);
   }
 
-  // 2. Mode 1: Angled Stern Flagstaff at the taffrail
-  addTube([0, 0, 0], [0, 2.45, 0.92], 0.036, 0.022, 8, 1, 0);
+  // 2. Mode 1: Outrigger taffrail bracket & Angled Stern Flagstaff (0.58 aft rake, matching ensign hoist)
+  addTube([0, -0.04, -0.34], [0, 0, 0], 0.038, 0.036, 8, 1, 0);
+  addTube([0, 0, 0], [0, 2.45, 1.42], 0.036, 0.022, 8, 1, 0);
   // Gilt truck ball at top of stern staff
-  addTube([0, 2.43, 0.91], [0, 2.52, 0.95], 0.048, 0.015, 8, 1, 1);
+  addTube([0, 2.43, 1.41], [0, 2.52, 1.46], 0.048, 0.015, 8, 1, 1);
 
   // 3. Mode 2: Two-sided subdivided Stern Ensign Cloth (14 x 8 grid)
   const nu = 14, nv = 8;
@@ -695,12 +708,11 @@ export async function createShipColorsRenderer({
       p[14] = boat.z ?? 0;
       p[15] = time ?? 0;
 
-      const sternZ = (hull.bounds?.[1] ?? 5.1) - 0.16;
-      const sternY = modelDeck(boat, sternZ) + 0.65;
+      const stern = sternEnsignDesignStation(boat);
       const colorsInfo = getShipColorsInfo(boat.damage?.surrendered ? 'surrender' : (boat.colors ?? DEFAULT_SHIP_COLORS));
-      p[16] = 0;
-      p[17] = sternY;
-      p[18] = sternZ - 0.08;
+      p[16] = stern.x;
+      p[17] = stern.y;
+      p[18] = stern.z;
       p[19] = colorsInfo.code;
 
       const cn = crowsNestDesignStation(boat);

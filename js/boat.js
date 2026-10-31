@@ -516,17 +516,34 @@ export function crowsNestDesignStation(boat = {}) {
   const additional = additionalHydroDesign(modelId);
   if (additional?.masts?.length) {
     let tallest = additional.masts[0];
-    for (const m of additional.masts) {
-      if ((m.height ?? 0) > (tallest.height ?? 0)) tallest = m;
+    let tallestIdx = 0;
+    for (let i = 0; i < additional.masts.length; i++) {
+      const m = additional.masts[i];
+      if ((m.height ?? 0) > (tallest.height ?? 0)) {
+        tallest = m;
+        tallestIdx = i;
+      }
     }
-    const y = (tallest.height ?? 7.5) * 0.86;
+    const mastSurfaces = (additional.surfaces ?? []).filter(
+      (s) => s.mast === tallestIdx && s.kind === 'square'
+    );
+    let y = (tallest.height ?? 7.5) * 0.86;
+    if (mastSurfaces.length >= 2) {
+      const sorted = [...mastSurfaces].sort((a, b) => a.corners[0][1] - b.corners[0][1]);
+      const lowerHeadY = sorted[0].corners[0][1];
+      const upperFootY = sorted[1].corners[2][1];
+      y = (lowerHeadY + upperFootY) * 0.5 - 0.28;
+    }
+    const deckY = proceduralDeck(modelId, tallest.z ?? 0);
+    const t = Math.max(0, Math.min(1, (y - deckY) / Math.max(0.5, (tallest.height ?? 7.5) - deckY)));
+    const z = (tallest.z ?? 0) + (tallest.rake ?? 0) * t;
     const sy = additional.frame?.verticalScale ?? 0.8;
     return {
       x: 0,
       y,
-      z: tallest.z ?? 0,
+      z,
       eyeHeight: (y + 0.95) * sy,
-      pennantLift: Math.max(0.9, (tallest.height ?? 7.5) - y + 0.15),
+      pennantLift: Math.max(0.95, (tallest.height ?? 7.5) - y - 0.18),
     };
   }
   const sy = vesselVerticalScale(boat);
@@ -539,6 +556,30 @@ export function crowsNestDesignStation(boat = {}) {
     eyeHeight: (y + 0.95) * sy * lengthScale,
     pennantLift: 1.35,
   };
+}
+
+export function sternEnsignDesignStation(boat = {}) {
+  const modelId = boat.modelId ?? 'nina';
+  const hull = vesselHull(boat);
+  const hullEndZ = hull.bounds?.[1] ?? 5.6;
+  const additional = additionalHydroDesign(modelId);
+  let aftSailZ = hullEndZ;
+  if (additional?.surfaces?.length) {
+    for (const s of additional.surfaces) {
+      for (const c of s.corners ?? []) {
+        if ((c[1] ?? 0) <= 6.5 && c[2] > aftSailZ) aftSailZ = c[2];
+      }
+    }
+  } else if (modelId === 'nina') {
+    aftSailZ = 6.24;
+  } else if (modelId === 'victory') {
+    aftSailZ = 6.45;
+  }
+  const z = Math.max(hullEndZ + 0.08, aftSailZ + 0.22);
+  const sternDeckZ = hullEndZ - 0.05;
+  const railLift = modelId === 'santa-maria' || modelId === 'pinta' ? 0.38 : 0.45;
+  const y = modelDeck(boat, sternDeckZ) + railLift;
+  return { x: 0, y, z, aftSailZ, hullEndZ };
 }
 
 export function setBoatViewStation(boat, station = 'deck') {

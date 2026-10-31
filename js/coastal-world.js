@@ -4252,13 +4252,22 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         let wz = -lnx * sinY + lnz * cosY;
         const nLen = Math.hypot(wx, wy, wz) || 1;
         wx /= nLen; wy /= nLen; wz /= nLen;
-        verts.push(px, py, pz, wx, wy, wz, vArr[off + 6], vArr[off + 7]);
-        if (px < bounds.min[0]) bounds.min[0] = px;
-        if (px > bounds.max[0]) bounds.max[0] = px;
-        if (py < bounds.min[1]) bounds.min[1] = py;
-        if (py > bounds.max[1]) bounds.max[1] = py;
-        if (pz < bounds.min[2]) bounds.min[2] = pz;
-        if (pz > bounds.max[2]) bounds.max[2] = pz;
+        const kind = vArr[off + 6];
+        const kindOffset =
+          kind >= 9.5 && kind < 10.5 ? 0.095 :
+          kind >= 13.5 && kind < 14.5 ? 0.065 :
+          kind >= 12.5 && kind < 13.5 ? 0.048 :
+          kind >= 10.5 && kind < 11.5 ? 0.032 : 0;
+        const ox = px + wx * kindOffset;
+        const oy = py + wy * kindOffset;
+        const oz = pz + wz * kindOffset;
+        verts.push(ox, oy, oz, wx, wy, wz, kind, vArr[off + 7]);
+        if (ox < bounds.min[0]) bounds.min[0] = ox;
+        if (ox > bounds.max[0]) bounds.max[0] = ox;
+        if (oy < bounds.min[1]) bounds.min[1] = oy;
+        if (oy > bounds.max[1]) bounds.max[1] = oy;
+        if (oz < bounds.min[2]) bounds.min[2] = oz;
+        if (oz > bounds.max[2]) bounds.max[2] = oz;
       }
       const iArr = tmpl.indices;
       for (let i = 0; i < iArr.length; i++) {
@@ -4367,14 +4376,15 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
   const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6) =>
     withPartGroup('stone_arch', () => {
-      const xOut = xFace + depthSign * 0.14;
+      const xVaultOut = xFace + depthSign * 0.07;
+      const xOut = xFace + depthSign * 0.16;
       const xIn = xFace - depthSign * 0.55;
-      // Recessed dark barrel-vaulted interior opening (kind 14)
+      // Dark barrel-vaulted interior opening (kind 14), stepped 7cm proud of outer wall and 9cm recessed inside stone arch ring
       withPartGroup('arch_vault', () => {
         emitBox(
           toWorld,
-          Math.min(xFace, xIn),
-          Math.max(xFace, xIn),
+          Math.min(xVaultOut, xIn),
+          Math.max(xVaultOut, xIn),
           yFloor,
           ySpring + radius * 0.86,
           zCenter - radius * 0.92,
@@ -4464,9 +4474,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const rx0 = x0 - overhang, rx1 = x1 + overhang;
       const rz0 = z0 - overhang, rz1 = z1 + overhang;
       const fasciaH = 0.24;
-      // Timber fascia / eaves skirt
+      // Timber fascia / eaves skirt (raised 4.5cm above wall top to prevent coplanar eave z-fighting)
       withPartGroup('roof_eaves_fascia', () => {
-        emitBox(toWorld, rx0, rx1, yEave - fasciaH, yEave, rz0, rz1, 10, 0.72, true);
+        emitBox(toWorld, rx0, rx1, yEave - fasciaH, yEave + 0.045, rz0, rz1, 10, 0.72, true);
       });
       // Projecting Spanish timber rafter tails (canecillos) under the eaves, iterated every 1.6m
       const rafterCount = Math.max(4, Math.round((z1 - z0) / 1.6));
@@ -4532,21 +4542,23 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   // Helper to emit a single iterated ~3.8m Spanish colonial window & upper balcony-door bay along a Z-running wall
   const emitFacadeBayZ = (toWorld, xWall, outSign, yPlinth, yMid, yTop, bz, hasUpper = true) =>
     withPartGroup('facade_bay', () => {
-      const xIn = Math.min(xWall - outSign * 0.08, xWall + outSign * 0.14);
-      const xOut = Math.max(xWall - outSign * 0.08, xWall + outSign * 0.14);
-      const xRejaMin = Math.min(xWall, xWall + outSign * 0.24);
-      const xRejaMax = Math.max(xWall, xWall + outSign * 0.24);
-      // Ground-floor recessed window opening (kind 14) + projecting wooden spindle grille (reja, kind 10) + stone sill
+      const xCasementMin = Math.min(xWall + outSign * 0.04, xWall + outSign * 0.11);
+      const xCasementMax = Math.max(xWall + outSign * 0.04, xWall + outSign * 0.11);
+      const xPaneMin = Math.min(xWall + outSign * 0.04, xWall + outSign * 0.17);
+      const xPaneMax = Math.max(xWall + outSign * 0.04, xWall + outSign * 0.17);
+      const xSillMin = Math.min(xWall + outSign * 0.03, xWall + outSign * 0.24);
+      const xSillMax = Math.max(xWall + outSign * 0.03, xWall + outSign * 0.24);
+      // Ground-floor window opening (kind 14) + wooden casement surround (kind 10) + projecting stone sill (kind 11)
       withPartGroup('facade_window_reja', () => {
-        emitBox(toWorld, xIn, xOut, yPlinth + 0.78, Math.min(yMid - 0.32, yPlinth + 2.45), bz - 0.56, bz + 0.56, 14, 0.34);
-        emitBox(toWorld, xRejaMin, xRejaMax, yPlinth + 0.68, Math.min(yMid - 0.22, yPlinth + 2.55), bz - 0.66, bz + 0.66, 10, 0.72, true);
-        emitBox(toWorld, xRejaMin - 0.04, xRejaMax + 0.04, yPlinth + 0.54, yPlinth + 0.68, bz - 0.74, bz + 0.74, 11, 0.86, true);
+        emitBox(toWorld, xPaneMin, xPaneMax, yPlinth + 0.78, Math.min(yMid - 0.32, yPlinth + 2.45), bz - 0.54, bz + 0.54, 14, 0.34);
+        emitBox(toWorld, xCasementMin, xCasementMax, yPlinth + 0.68, Math.min(yMid - 0.22, yPlinth + 2.55), bz - 0.66, bz + 0.66, 10, 0.72, true);
+        emitBox(toWorld, xSillMin, xSillMax, yPlinth + 0.52, yPlinth + 0.65, bz - 0.74, bz + 0.74, 11, 0.86, true);
       });
       if (hasUpper && yTop - yMid >= 2.2) {
         // Upper-story shuttered balcony window/door (kind 14) + molded stone lintel pediment (kind 11)
         withPartGroup('facade_upper_window', () => {
-          emitBox(toWorld, xIn, xOut, yMid + 0.24, yTop - 0.58, bz - 0.58, bz + 0.58, 14, 0.34);
-          emitBox(toWorld, xRejaMin, xRejaMax, yTop - 0.58, yTop - 0.36, bz - 0.74, bz + 0.74, 11, 0.88, true);
+          emitBox(toWorld, xPaneMin, xPaneMax, yMid + 0.24, yTop - 0.61, bz - 0.58, bz + 0.58, 14, 0.34);
+          emitBox(toWorld, xSillMin, xSillMax, yTop - 0.56, yTop - 0.36, bz - 0.74, bz + 0.74, 11, 0.88, true);
         });
       }
     });

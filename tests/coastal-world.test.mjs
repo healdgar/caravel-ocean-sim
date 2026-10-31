@@ -1402,6 +1402,98 @@ test('rogue liberator path strengthens Native American settlements through trade
   }
 });
 
+test('Santa María stern colors clear rear mizzen-lateen sail across all wind angles and port building geometry/shaders prevent interference stripes', async () => {
+  const { sternEnsignDesignStation, crowsNestDesignStation } = await import('../js/boat.js');
+  const { buildShipColorsGeometry } = await import('../js/ship-colors.js');
+  const { TERRAIN, TERRAIN_FILTERING } = await import('../js/wgsl/terrain.js');
+
+  // 1. Verify Santa María, Pinta, Niña, and Victory stern ensign stations sit abaft the aftmost sail clew
+  for (const modelId of ['santa-maria', 'pinta', 'nina', 'victory']) {
+    const stern = sternEnsignDesignStation({ modelId });
+    assert.ok(
+      stern.z >= stern.aftSailZ + 0.18,
+      `${modelId} stern ensign base (${stern.z.toFixed(2)}) must sit clear abaft aftmost sail (${stern.aftSailZ.toFixed(2)})`
+    );
+  }
+
+  // 2. Verify Santa María crow's nest sits at the mainmast top below the main-topsail (y ~ 8.02) rather than inside the topsail
+  const smNest = crowsNestDesignStation({ modelId: 'santa-maria' });
+  assert.ok(smNest.y >= 7.8 && smNest.y <= 8.2, `Santa María crow's nest (${smNest.y}) sits between main-course (8.0) and main-topsail (8.6)`);
+
+  // 3. Verify stern ensign cloth vertices (mode 2) stay strictly abaft Santa María's mizzen-lateen (z = 6.10) across 0..360° winds
+  const smStern = sternEnsignDesignStation({ modelId: 'santa-maria' });
+  const rake = 0.58;
+  for (let deg = 0; deg < 360; deg += 15) {
+    const rad = (deg * Math.PI) / 180;
+    const windRight = Math.sin(rad);
+    const windAft = Math.cos(rad);
+    const ensignAft = Math.max(0.42, windAft);
+    const ensignLateral = Math.abs(windRight) < 0.25 && windAft < 0.0 ? 0.38 : windRight;
+    const streamLen = Math.hypot(ensignLateral, ensignAft) || 1;
+    const streamZ = ensignAft / streamLen;
+    for (const u of [0, 0.5, 1.0]) {
+      for (const v of [0, 0.5, 1.0]) {
+        const hoistTop = smStern.y + 2.38;
+        const hoistBottom = hoistTop - 1.55;
+        const hoistY = hoistBottom + (hoistTop - hoistBottom) * v;
+        const hoistZ = smStern.z + (hoistY - smStern.y) * rake;
+        const clothZ = hoistZ + streamZ * (u * 2.25);
+        assert.ok(
+          clothZ > smStern.aftSailZ + 0.5,
+          `Santa María stern ensign z (${clothZ.toFixed(2)}) must remain well abaft mizzen-lateen (${smStern.aftSailZ}) at wind ${deg}°`
+        );
+      }
+    }
+  }
+
+  // 4. Verify stern flagstaff geometry (mode 1) has the matching 0.58 aft rake
+  const colorVerts = buildShipColorsGeometry();
+  let maxStaffZ = 0;
+  for (let i = 0; i < colorVerts.length; i += 10) {
+    if (Math.round(colorVerts[i + 8]) === 1) {
+      maxStaffZ = Math.max(maxStaffZ, colorVerts[i + 2]);
+    }
+  }
+  assert.ok(maxStaffZ >= 1.40, `Stern flagstaff top reaches z >= 1.40 aft of base (got ${maxStaffZ.toFixed(2)})`);
+
+  // 5. Verify TERRAIN_FILTERING and TERRAIN band-limit building materials with landFilteredWave, landFilteredCourse & landFilteredBump
+  assert.ok(TERRAIN_FILTERING.includes('fn landFilteredWave('), 'TERRAIN_FILTERING defines landFilteredWave');
+  assert.ok(TERRAIN_FILTERING.includes('fn landFilteredCourse('), 'TERRAIN_FILTERING defines landFilteredCourse');
+  assert.ok(TERRAIN.includes('let flute=landFilteredWave('), 'Kind 13 terracotta roof tiles use landFilteredWave');
+  assert.ok(TERRAIN.includes('let courseWave=landFilteredCourse('), 'Kind 13 terracotta roof courses use landFilteredCourse');
+  assert.ok(!TERRAIN.includes('if(in.kind.x<2.5){n=landFilteredBump'), 'All terrain and building kinds use landFilteredBump');
+
+  // 6. Verify buildPortPrefabGeometry separates arch_vault (kind 14) and roof_eaves_fascia (kind 10) from outer walls (kind 12)
+  const region = resolveGlobalCoastalRegion({ latitude: 10.423, longitude: -75.548, size: 65, biomeSize: 64, albedoSize: 64 });
+  const heights = synthesizeCoastalTerrain(region);
+  const port = placeCoastalPort(region, heights);
+  const geom = buildPortPrefabGeometry(port);
+  const v = geom.vertices;
+  const idx = geom.indices;
+  let coplanarArchWallCount = 0;
+  for (const part of geom.groups) {
+    if (!part.id.includes('arch_vault')) continue;
+    for (const wallPart of geom.groups) {
+      if (wallPart.instanceIndex !== part.instanceIndex || wallPart.id === part.id) continue;
+      const i0 = idx[part.firstIndex] * 8;
+      const k0 = Math.round(v[i0 + 6]);
+      const j0 = idx[wallPart.firstIndex] * 8;
+      const kw = Math.round(v[j0 + 6]);
+      if (k0 === 14 && kw === 12) {
+        const nx = v[i0 + 3], ny = v[i0 + 4], nz = v[i0 + 5];
+        const wnx = v[j0 + 3], wny = v[j0 + 4], wnz = v[j0 + 5];
+        if (nx * wnx + ny * wny + nz * wnz > 0.999) {
+          const dArch = nx * v[i0] + ny * v[i0 + 1] + nz * v[i0 + 2];
+          const dWall = wnx * v[j0] + wny * v[j0 + 1] + wnz * v[j0 + 2];
+          if (Math.abs(dArch - dWall) < 0.01) coplanarArchWallCount++;
+        }
+      }
+    }
+  }
+  assert.equal(coplanarArchWallCount, 0, 'arch_vault (kind 14) faces are stepped proud of stucco walls (kind 12) with zero coplanar z-fighting');
+});
+
+
 
 
 
