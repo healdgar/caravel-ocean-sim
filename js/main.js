@@ -197,6 +197,9 @@ function mat4Mul(out, a, b) {
 
 async function main() {
   const fleetConfig=fleetFromSearch(qs,SHIP_ID);
+  if(!IS_HEADLESS_TEST&&!BROADSIDE_SCENARIO&&!qs.has('fleet')&&qs.get('follower')!=='1'){
+    fleetConfig.length=0;
+  }
   if(BROADSIDE_SCENARIO&&fleetConfig.length){
     fleetConfig[0].enabled=true;
     fleetConfig[0].faction??='enemy';
@@ -207,8 +210,8 @@ async function main() {
     const faction=normalizeVesselFaction(entry,{broadside:BROADSIDE_SCENARIO,index});
     return [{...entry,faction,formation:BROADSIDE_SCENARIO?broadsideFormation(index,{side:BROADSIDE_SIDE,rangeLengths:broadsideRangeLengths}):fleetFormation(index)}];
   });
-  const standbyEncounterSpec=activeFleetSpecs.length===0&&qs.get('noEncounterShip')!=='1'&&fleetConfig[0]
-    ?[{...fleetConfig[0],modelId:SHIP_ID,faction:'friendly',dormantEncounter:true,formation:fleetFormation(0)}]
+  const standbyEncounterSpec=!IS_HEADLESS_TEST&&activeFleetSpecs.length===0&&qs.get('noEncounterShip')!=='1'&&qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='')
+    ?[{id:'encounter-1',modelId:SHIP_ID,faction:'friendly',dormantEncounter:true,formation:fleetFormation(0)}]
     :[];
   const fleetSpecs=[{id:'player',modelId:SHIP_ID,faction:'friendly'},...activeFleetSpecs,...standbyEncounterSpec];
   const fleetCount=fleetSpecs.length;
@@ -862,7 +865,7 @@ async function main() {
   const LOOP = 600.0;  // s, spectrum time loop (frequencies quantised to it)
   let needSpectrum = true, envFull = true;
   // Chart Course voyage (covert time warp); created once the dock/UI exists.
-  let voyageCtl = null, chartDrawer = null;
+  let voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
   let skySun = NaN, skyHaze = NaN, skyHeight = NaN;
 
   function writeSimStatic() {
@@ -1525,8 +1528,20 @@ async function main() {
   effectsLabel.append(effectsToggle); boatBody.append(effectsLabel);
   const fleetDraft=fleetConfig.map(entry=>({...entry}));
   const applyFleet=()=>{
-    const url=new URL(location.href);url.searchParams.set('fleet',fleetToSearch(fleetDraft));
-    url.searchParams.set('follower',fleetDraft.some(entry=>entry.enabled)?'1':'0');location.assign(url.href);
+    const hasActiveFollower=fleetDraft.some(entry=>entry.enabled);
+    const url=new URL(location.href);
+    url.searchParams.set('fleet',fleetToSearch(fleetDraft));
+    url.searchParams.set('follower',hasActiveFollower?'1':'0');
+    if(!hasActiveFollower&&url.searchParams.has('state')){
+      const st=decodeGameStateParam(url.searchParams.get('state'));
+      if(st&&st.encounter){
+        delete st.encounter;
+        const enc=encodeGameStateParam(st);
+        if(enc)url.searchParams.set('state',enc);
+        else url.searchParams.delete('state');
+      }
+    }
+    location.assign(url.href);
   };
   const followerLabel=document.createElement('label');followerLabel.textContent='Following ships';
   const followerToggle=document.createElement('input');followerToggle.id='follower-toggle';followerToggle.type='checkbox';followerToggle.checked=followerEnabled;
@@ -1815,8 +1830,8 @@ async function main() {
     const v = voyageCtl?.voyage;
     const tRegion = terrain?.region;
     const geo = tRegion ? islandCoordinates(boat.x, boat.z, tRegion) : null;
-    const lat = Number.isFinite(v?.truePos?.lat) ? v.truePos.lat : Number.isFinite(geo?.latitude) ? geo.latitude : astronomy.state?.observer?.latitude;
-    const lon = Number.isFinite(v?.truePos?.lon) ? v.truePos.lon : Number.isFinite(geo?.longitude) ? geo.longitude : astronomy.state?.observer?.longitude;
+    const lat = Number.isFinite(v?.true?.lat) ? v.true.lat : Number.isFinite(v?.truePos?.lat) ? v.truePos.lat : Number.isFinite(geo?.latitude) ? geo.latitude : astronomy.state?.observer?.latitude;
+    const lon = Number.isFinite(v?.true?.lon) ? v.true.lon : Number.isFinite(v?.truePos?.lon) ? v.truePos.lon : Number.isFinite(geo?.longitude) ? geo.longitude : astronomy.state?.observer?.longitude;
     const drLat = Number.isFinite(v?.dr?.lat) ? v.dr.lat : lat;
     const drLon = Number.isFinite(v?.dr?.lon) ? v.dr.lon : lon;
     const num = (n, d = 4) => Number.isFinite(n) ? Number(n.toFixed(d)) : undefined;
@@ -1834,7 +1849,7 @@ async function main() {
     };
     const dmg = boat.damage;
     const encVessel = vessels[1];
-    const encActive = Boolean(encVessel && !encVessel.dormantEncounter && encVessel.boat?.showProw);
+    const encActive = Boolean(followerEnabled && encVessel && !encVessel.dormantEncounter && encVessel.boat?.showProw);
     const gameState = {
       v: 1,
       pos: {
@@ -1868,10 +1883,10 @@ async function main() {
         warp: v.tier,
         autopilot: Boolean(voyageCtl?.helmsman?.engaged),
         beat: Boolean(voyageCtl?.helmsman?.beatToWind),
-        waterDays: num(v.stores?.waterDays, 1),
-        foodDays: num(v.stores?.foodDays, 1),
-        hull: num(v.ship?.hull, 3),
-        morale: num(v.crew?.morale, 3),
+        waterDays: num(v.provisions?.water ?? v.stores?.waterDays, 1),
+        foodDays: num(v.provisions?.food ?? v.stores?.foodDays, 1),
+        hull: num(boat.damage?.hullIntegrity ?? v.ship?.hull, 3),
+        morale: num(v.morale ?? v.crew?.morale, 3),
       } : undefined,
       damage: dmg ? {
         hullIntegrity: num(dmg.hullIntegrity, 3),
@@ -1936,10 +1951,18 @@ async function main() {
         if(boat.enabled){cam.x=boat.x;cam.z=boat.z;}
         else{cam.x=v.x;cam.y=v.y;cam.z=v.z;cam.yaw=v.yaw*D2R;cam.pitch=v.pitch*D2R;}
         for(const esc of vessels.slice(1)){
+          if(esc.dormantEncounter)continue;
           const L=Math.max(boat.length,esc.asset.model.runtime.length),formation=esc.formation;
-          esc.boat=copyVessel(boat,{id:esc.id,modelId:esc.modelId,distance:L*formation.trail,side:L*formation.side});
+          const hRad=(boat.heading||0)*D2R;
+          const fwdX=Math.sin(hRad),fwdZ=-Math.cos(hRad);
+          const rightX=Math.cos(hRad),rightZ=Math.sin(hRad);
+          const targetPos={
+            x:boat.x-fwdX*(L*formation.trail)+rightX*(L*formation.side),
+            z:boat.z-fwdZ*(L*formation.trail)+rightZ*(L*formation.side),
+          };
+          const start=terrain.safeStart(targetPos,esc.boat);
+          esc.boat.x=start.x;esc.boat.z=start.z;esc.boat.heading=boat.heading;
           esc.boat.showProw=true;
-          const start=terrain.safeStart(esc.boat,esc.boat);esc.boat.x=start.x;esc.boat.z=start.z;
         }
       }
       if(terrain.region&&terrain.region.id!=='saba'&&(!qs.has('swellDir')||Number(qs.get('swellDir'))===22)&&(!qs.has('windDir')||Number(qs.get('windDir'))===118)){
@@ -2109,73 +2132,79 @@ async function main() {
     else if(qs.get('voyage')==='1')voyageCtl.start({difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     else voyageCtl.start({passive:true,showHud:qs.get('ui')!=='0',difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     // Restore URL-encoded position, ship colors, view station, voyage state, damage, and active encounter
-    if(qs.has('colors')&&SHIP_COLORS[qs.get('colors')]){
-      setVesselColors(boat,qs.get('colors'));
-      if(colorsSelect)colorsSelect.value=boat.colors;
-    }
-    if(qs.has('station')){
-      setBoatViewStation(boat,qs.get('station'));
-    }
-    if(voyageCtl.voyage){
-      const v=voyageCtl.voyage;
-      const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
-      if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
-        v.truePos.lat=qLat;v.truePos.lon=qLon;
-        v.dr.lat=qs.has('drLat')&&Number.isFinite(Number(qs.get('drLat')))?Number(qs.get('drLat')):qLat;
-        v.dr.lon=qs.has('drLon')&&Number.isFinite(Number(qs.get('drLon')))?Number(qs.get('drLon')):qLon;
+    try{
+      if(qs.has('colors')&&SHIP_COLORS[qs.get('colors')]){
+        setVesselColors(boat,qs.get('colors'));
+        if(colorsSelect)colorsSelect.value=boat.colors;
       }
-      if(urlGameState?.voyage){
-        const uv=urlGameState.voyage;
-        if(Number.isFinite(uv.day))v.dayAtSea=uv.day;
-        if(Number.isFinite(uv.dateMs))v.dateMs=uv.dateMs;
-        if(uv.stores||Number.isFinite(uv.waterDays)){
-          if(Number.isFinite(uv.waterDays))v.stores.waterDays=uv.waterDays;
-          if(Number.isFinite(uv.foodDays))v.stores.foodDays=uv.foodDays;
+      if(qs.has('station')){
+        setBoatViewStation(boat,qs.get('station'));
+      }
+      if(voyageCtl.voyage){
+        const v=voyageCtl.voyage;
+        const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
+        if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
+          if(v.true){v.true.lat=qLat;v.true.lon=qLon;}
+          if(v.dr){
+            v.dr.lat=qs.has('drLat')&&Number.isFinite(Number(qs.get('drLat')))?Number(qs.get('drLat')):qLat;
+            v.dr.lon=qs.has('drLon')&&Number.isFinite(Number(qs.get('drLon')))?Number(qs.get('drLon')):qLon;
+          }
         }
-        if(Number.isFinite(uv.hull))v.ship.hull=uv.hull;
-        if(Number.isFinite(uv.morale))v.crew.morale=uv.morale;
-      }
-      if(qs.has('canvas')&&['full','working','reefed','storm','heave-to'].includes(qs.get('canvas'))){
-        voyageCtl.orderCanvas(qs.get('canvas'));
-      }
-      if(qs.has('course')&&Number.isFinite(Number(qs.get('course')))){
-        if(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot){
-          voyageCtl.orderCompassCourse(Number(qs.get('course')));
-        }else{
-          v.compassCourse=((Number(qs.get('course'))%360)+360)%360;
+        if(urlGameState?.voyage){
+          const uv=urlGameState.voyage;
+          if(Number.isFinite(uv.day))v.dayAtSea=uv.day;
+          if(Number.isFinite(uv.dateMs))v.dateMs=uv.dateMs;
+          if(v.provisions){
+            if(Number.isFinite(uv.waterDays))v.provisions.water=uv.waterDays;
+            if(Number.isFinite(uv.foodDays))v.provisions.food=uv.foodDays;
+          }
+          if(Number.isFinite(uv.morale))v.morale=uv.morale;
+        }
+        if(qs.has('canvas')&&['full','working','reefed','storm','heave-to'].includes(qs.get('canvas'))){
+          voyageCtl.orderCanvas(qs.get('canvas'));
+        }
+        if(qs.has('course')&&Number.isFinite(Number(qs.get('course')))){
+          if(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot){
+            voyageCtl.orderCompassCourse(Number(qs.get('course')));
+          }else{
+            v.compassCourse=((Number(qs.get('course'))%360)+360)%360;
+          }
+        }
+        if(qs.has('warp')&&['deck','watch','passage','crossing'].includes(qs.get('warp'))&&qs.get('warp')!=='deck'){
+          voyageCtl.setWarp(qs.get('warp'));
         }
       }
-      if(qs.has('warp')&&['deck','watch','passage','crossing'].includes(qs.get('warp'))&&qs.get('warp')!=='deck'){
-        voyageCtl.setWarp(qs.get('warp'));
+      if(urlGameState?.ship?.set&&Array.isArray(urlGameState.ship.set)&&boat.sailState?.set){
+        for(let i=0;i<Math.min(3,urlGameState.ship.set.length);i++){
+          if(Number.isFinite(urlGameState.ship.set[i]))boat.sailState.set[i]=urlGameState.ship.set[i];
+        }
       }
-    }
-    if(urlGameState?.ship?.set&&Array.isArray(urlGameState.ship.set)&&boat.sailState?.set){
-      for(let i=0;i<Math.min(3,urlGameState.ship.set.length);i++){
-        if(Number.isFinite(urlGameState.ship.set[i]))boat.sailState.set[i]=urlGameState.ship.set[i];
+      if(urlGameState?.damage&&boat.damage){
+        const ud=urlGameState.damage;
+        if(Number.isFinite(ud.hullIntegrity))boat.damage.hullIntegrity=ud.hullIntegrity;
+        if(Number.isFinite(ud.battleMorale))boat.damage.battleMorale=ud.battleMorale;
+        if(ud.surrendered)strikeVesselColors(boat,'Restored surrendered state');
+        if(ud.casualties&&boat.damage.crewCasualties){
+          Object.assign(boat.damage.crewCasualties,ud.casualties);
+        }
       }
-    }
-    if(urlGameState?.damage&&boat.damage){
-      const ud=urlGameState.damage;
-      if(Number.isFinite(ud.hullIntegrity))boat.damage.hullIntegrity=ud.hullIntegrity;
-      if(Number.isFinite(ud.battleMorale))boat.damage.battleMorale=ud.battleMorale;
-      if(ud.surrendered)strikeVesselColors(boat,'Restored surrendered state');
-      if(ud.casualties&&boat.damage.crewCasualties){
-        Object.assign(boat.damage.crewCasualties,ud.casualties);
+      const allowRestoredEncounter=qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='');
+      if(allowRestoredEncounter&&urlGameState?.encounter&&vessels[1]){
+        const ue=urlGameState.encounter;
+        activateEncounterVessel({
+          shipName:ue.name,
+          actuallyHostile:ue.faction==='enemy',
+          apparentHostile:ue.faction==='enemy',
+          colors:ue.colors,
+          battleColors:ue.colors,
+        },{mode:ue.faction==='enemy'?'engage':'hail'});
+        if(Number.isFinite(ue.x))vessels[1].boat.x=ue.x;
+        if(Number.isFinite(ue.z))vessels[1].boat.z=ue.z;
+        if(Number.isFinite(ue.heading))vessels[1].boat.heading=ue.heading;
+        if(ue.surrendered)strikeVesselColors(vessels[1].boat,'Surrendered');
       }
-    }
-    if(urlGameState?.encounter&&vessels[1]){
-      const ue=urlGameState.encounter;
-      activateEncounterVessel({
-        shipName:ue.name,
-        actuallyHostile:ue.faction==='enemy',
-        apparentHostile:ue.faction==='enemy',
-        colors:ue.colors,
-        battleColors:ue.colors,
-      },{mode:ue.faction==='enemy'?'engage':'hail'});
-      if(Number.isFinite(ue.x))vessels[1].boat.x=ue.x;
-      if(Number.isFinite(ue.z))vessels[1].boat.z=ue.z;
-      if(Number.isFinite(ue.heading))vessels[1].boat.heading=ue.heading;
-      if(ue.surrendered)strikeVesselColors(vessels[1].boat,'Surrendered');
+    }catch(restoreErr){
+      console.warn('URL state restore warning:',restoreErr);
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
@@ -2271,15 +2300,15 @@ async function main() {
     const model=getShipModel(SHIP_ID),parts=getShipParts(SHIP_ID),spec=document.createElement('p');
     spec.textContent=model.name+' · '+model.runtime.length.toFixed(2)+' m length · '+model.runtime.beam.toFixed(2)+' m beam · '+model.rig.sails.length+' sail surfaces. Authored reconstruction; '+parts.crew.representedCount+' visible hands'+(parts.crew.representedCount!==parts.loading.manifest.crew?' represent '+parts.loading.manifest.crew+' aboard.': ' aboard.');boatBody.append(spec);
   }
-  const propulsionInput=document.createElement('select');propulsionInput.id='boat-propulsion';
+  propulsionInput=document.createElement('select');propulsionInput.id='boat-propulsion';
   const rowingModel=Object.hasOwn(ROWING_DESIGNS,SHIP_ID),activeSailGroups=new Set(shipAsset.model.rig.sails.map(s=>s.controlGroup));
   for(const [value,label] of [['sail',rowingModel?(activeSailGroups.size?'Wind and rowing':'Paddling'):'Sailing'],['manual','Set speed']]){
     const option=document.createElement('option');option.value=value;option.textContent=label;propulsionInput.append(option);
   }
   propulsionInput.value=boat.propulsion;propulsionRow.append(propulsionInput);boatBody.append(propulsionRow);
   const boatMotion = document.createElement('p'); boatMotion.id='boat-motion'; boatBody.append(boatMotion);
-  const sailControls=document.createElement('div');sailControls.id='sail-controls';boatBody.append(sailControls);
-  const sailInputs=[];
+  sailControls=document.createElement('div');sailControls.id='sail-controls';boatBody.append(sailControls);
+  sailInputs=[];
   for(const [i,key] of SAIL_KEYS.entries()){
     const row=document.createElement('label'),name=document.createElement('span');name.textContent=(SHIP_ID==='gipsy-moth-iv'?['Headsails','Mainsail','Mizzen']:SHIP_ID!=='nina'?['Foremast canvas','Mainmast canvas','Mizzen canvas']:['Fore course','Main course','Mizzen sail'])[i];
     row.hidden=!activeSailGroups.has(['fore','main','mizzen'][i]);
@@ -2295,7 +2324,6 @@ async function main() {
     Object.assign(input,{type:'number',min:7.2,max:ROWING_DESIGNS[SHIP_ID].propulsion.maxCadence*60,step:.1,value:boat.rowingCadence*60,id:'boat-rowing-cadence'});input.setAttribute('aria-label',name.textContent);
     input.oninput=()=>{if(input.validity.valid&&input.value!=='')boat.rowingCadence=Number(input.value)/60;};row.append(name,input);boatBody.append(row);
   }
-  let speedRow;
   for (const [key, label, min, max, step] of [
     ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
@@ -2329,13 +2357,14 @@ async function main() {
   }
   const loadingStatus=document.createElement('p');loadingStatus.id='boat-loading-status';loadingPanel.append(loadingStatus);boatBody.append(loadingPanel);
   function showPropulsionControls(){
+    if(!speedRow||!sailControls||!note)return;
     speedRow.hidden=boat.propulsion==='sail';sailControls.hidden=boat.propulsion!=='sail'||activeSailGroups.size===0;
     note.textContent=boat.propulsion==='sail'
       ? rowingModel?'Choose Rest, Easy or Full effort at the helm. Blades act against the moving water; the steering oar and unequal strokes turn the hull.':getShipParts(SHIP_ID).rig.transferYards?'Sails trim automatically. In irons: wind can push the ship astern. The rudder steers that backward flow; centre it as the sails begin drawing again. Captain → Transfer yards is optional on the bad tack.':SHIP_ID==='gipsy-moth-iv'?'Headsails, main and mizzen trim independently to the apparent wind. The ketch has two physical masts and three sail controls.':'Square yards brace with the apparent wind. Furl, reef or set the three mast groups. Headway and heel follow forces on the actual canvas.'
       : 'Waves change speed and hull motion. Set the calm-water speed above.';
   }
   propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
-  const helm=createHelmControls(boat,value=>{
+  helm=createHelmControls(boat,value=>{
     const order=value===1?'full':value===0?'furl':'reduced';
     shipGuns.standDown();
     if(!crew?.order(boat,order)){boat.propulsion='sail';for(const key of SAIL_KEYS)boat[key]=value;}
@@ -2426,7 +2455,7 @@ async function main() {
   centerView.onclick = () => { resetDeckWalk(boat); setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; setCameraOpen(false); };
   cameraBody.append(centerView);
   const boatStatus = document.createElement('p'); boatStatus.setAttribute('aria-live', 'off'); boatBody.append(boatStatus);
-  const note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
+  note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
   if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],coastalSeaForRegion(terrain?.region,LAND_STAGE));
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   if(LAND_STAGE&&terrain?.region&&terrain.region.id!=='saba'&&Number(qs.get('swellDir'))===22&&Number(qs.get('windDir'))===118){
@@ -2734,13 +2763,13 @@ async function main() {
       cp.dispatchWorkgroups(Math.ceil(s / 8), Math.ceil(s / 8), C);
     }
     surfaceWaves.encode(cp);
-    for(const v of vessels)if(!v.bakedWreck)v.pose?.encode(cp,v.boat.showProw);
-    for(const v of vessels)if(!v.bakedWreck)v.interaction.encode(cp,wakePool.next);
+    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
+    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
     hullContactProbe.encode(cp);
     spindrift.encode(cp);
     marineLife.encode(cp);
-    for(const v of vessels)if(!v.bakedWreck){
+    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter){
       v.wetness.encode(cp,v.boat.showProw);
       if(v.bakingWreck){v.bakingWreck=false;v.bakedWreck=true;}
     }
@@ -2849,7 +2878,7 @@ async function main() {
     weatherRenderer.update(weather,P,dt);
     sceneAudio.update(dt,P,boat,frameF,weather);
     if (clouds.update(frameF,P,dt)) envFull = true;
-    for(const v of vessels.slice(1)){v.boat.showProw=true;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
+    for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
     for(const [index,v] of vessels.entries()){
       const ship=v.boat,data=v.hullData,dmg=ship.damage;
       if(v.bakedWreck&&(needSpectrum||(dmg?.pendingBakes?.length??0)>0))v.bakedWreck=false;
@@ -2900,7 +2929,7 @@ async function main() {
         const savedEffects=ship.effects;ship.effects=false;
         v.interaction.update(ship,0,simTime,frameIndex,0,0,true,0);
         ship.effects=savedEffects;
-      }else if(dt>0){
+      }else if(dt>0&&!v.dormantEncounter){
         v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
       }
     }
@@ -3034,7 +3063,7 @@ async function main() {
     // Resolve the ocean straight into the reflection pyramid. The ship pass
     // preserves MSAA color/depth and resolves the finished scene into hdrView.
     mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
-    for(const [i,v] of vessels.entries())if(!v.bakedWreck||skyChanged)v.shadows.encode(enc,profiler,v.boat.damage?.sunk?null:v.crew?.drawShadow,i?v.id+' ':'');
+    for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,v.boat.damage?.sunk?null:v.crew?.drawShadow,i?v.id+' ':'');
     const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
     terrain?.prepare(terrainCamera,frameF);
@@ -3124,7 +3153,7 @@ async function main() {
       }
       shipColorsRenderer?.draw(prowPass,vessels.length);
       fortSoldiers?.draw(prowPass);
-      for(const v of vessels)if(!v.bakedWreck)v.interaction.draw(prowPass);
+      for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(prowPass);
       dolphins.draw(prowPass);marineLife.draw(prowPass);gunEffects.drawProjectiles(prowPass);spindrift.draw(prowPass);if(!gunTransparent)weatherRenderer.draw(prowPass);prowPass.end();
     }
 

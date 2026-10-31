@@ -861,3 +861,20 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  assert.equal(pirateBoat.colors,'portugal','captured pirate vessel hoists player colors');
  assert.equal(pirateCompany.pirateAttire,false,'captured prize crew reverts from pirate attire');
 });
+
+test('URL state restoration with follower=0&fleet= and lat/lon restores onto createVoyage without crashing',async()=>{
+ const {decodeGameStateParam}=await import('../js/sharing.js');
+ const {createVoyage}=await import('../js/voyage/passage.js');
+ const userUrl='https://sixcailloux.com/waterworld/?region=lisbon&lat=38.70535&lon=-9.136&skyMode=manual&astroDate=2026-10-21T00%3A00%3A00.000Z&astroRate=1&latitude=38.70535256978593&longitude=-9.135995217559412&stars=1&constellations=0&boat=0&view=ship&orbitYaw=4.444442&orbitElevation=3.398583&orbitDistance=32&orbitPanX=0&orbitPanY=0&orbitPanZ=0&colors=portugal&propulsion=sail&windSpeed=5&windDir=132&fetchKm=90&swellHs=0.35&swellDir=162&swellLength=65&swellSpread=48&choppy=1.25&turbidity=1.6&foam=1&spindrift=1&sunElev=32&sunAzim=225&exposure=1.35&haze=0.8&clouds=0.3&cloudBase=1.2&cloudDepth=1.8&cloudDensity=1&cloudAnvil=0.05&cloudQuality=0.5&rain=0&precipitation=0&thunder=0&soundVolume=0.7&seabirds=0.25&bloom=0.1&boatLength=20&boatBeam=6&boatHeading=264.687913&boatSpeed=1.5&boatEye=5.433333&boatRudder=0&sailFore=1&sailMain=1&sailMizzen=1&provisionDays=60&cargoTonnes=0&boatX=-0.340862&boatZ=-5816.693855&rowingEffort=0&rowingTurn=0&rowingCadence=0.45&prow=1&effects=1&crew=1&follower=0&fleet=&speedHud=1&windHud=1&headingHud=1&drLat=38.70535&drLon=-9.136&canvas=full&course=247&warp=deck&autopilot=0&day=0&state=eyJ2IjoxLCJwb3MiOnsibGF0IjozOC43MDUzNSwibG9uIjotOS4xMzYsImRyTGF0IjozOC43MDUzNSwiZHJMb24iOi05LjEzNiwieCI6LTAuMzQsInoiOi01ODE2LjY5LCJoZWFkaW5nIjoyNjQuNjksInNwZWVkIjoyLjUxLCJydWRkZXIiOjAsInJlZ2lvbiI6Imxpc2JvbiJ9LCJzaGlwIjp7ImlkIjoibmluYSIsImNvbG9ycyI6InBvcnR1Z2FsIiwic3RhdGlvbiI6ImRlY2siLCJwcm9wdWxzaW9uIjoic2FpbCIsInNhaWxzIjpbMSwxLDFdLCJzZXQiOlsxLDEsMV0sInByb3Zpc2lvbkRheXMiOjYwLCJjYXJnb1Rvbm5lcyI6MH0sInZveWFnZSI6eyJhY3RpdmUiOmZhbHNlLCJkYXkiOjAsImRhdGVNcyI6LTEzMjQ2ODE5MTQ3MDkxLCJjYW52YXMiOiJmdWxsIiwiY291cnNlIjoyNDcsIndhcnAiOiJkZWNrIiwiYXV0b3BpbG90IjpmYWxzZSwiYmVhdCI6ZmFsc2V9LCJkYW1hZ2UiOnsiaHVsbEludGVncml0eSI6MSwiYmF0dGxlTW9yYWxlIjoxLCJzdXJyZW5kZXJlZCI6ZmFsc2UsInN1bmsiOmZhbHNlLCJjYXN1YWx0aWVzIjp7InRvdGFsIjoyMiwiYWJsZSI6MjIsIndvdW5kZWQiOjAsImtpbGxlZCI6MH19LCJlbmNvdW50ZXIiOnsiZmFjdGlvbiI6ImZyaWVuZGx5IiwiY29sb3JzIjoicG9ydHVnYWwiLCJ4IjoxNC40LCJ6IjotNTgzMS4xLCJoZWFkaW5nIjozMTEuNCwic3VycmVuZGVyZWQiOmZhbHNlfX0';
+ const qs=new URL(userUrl).searchParams;
+ const urlGameState=decodeGameStateParam(qs.get('state'));
+ assert.ok(urlGameState,'decodes state parameter');
+ const v=createVoyage({lat:38.707,lon:-9.136});
+ const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
+ if(v.true){v.true.lat=qLat;v.true.lon=qLon;}
+ if(v.dr){v.dr.lat=Number(qs.get('drLat'));v.dr.lon=Number(qs.get('drLon'));}
+ assert.equal(v.true.lat,38.70535);
+ assert.equal(v.true.lon,-9.136);
+ const allowRestoredEncounter=qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='');
+ assert.equal(allowRestoredEncounter,false,'does not re-enable encounter ship when follower=0 and fleet is empty');
+});
