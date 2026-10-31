@@ -78,6 +78,24 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
   anchorBtn.onclick=()=>{battleContext?.onAnchorToggle?.();update(performance.now(),true);};
   helmMeta.append(anchorBtn);
 
+  const dockBtn=document.createElement('button');
+  dockBtn.type='button';dockBtn.id='helm-dock-btn';dockBtn.className='helm-quarters-pill helm-dock-pill';
+  dockBtn.hidden=false;
+  dockBtn.textContent='🪢 Throw lines';
+  dockBtn.title='Throw mooring lines onto pier or adjacent ship, or cast off lines';
+  dockBtn.setAttribute('aria-pressed','false');
+  dockBtn.onclick=()=>{battleContext?.onDockToggle?.();update(performance.now(),true);};
+  helmMeta.append(dockBtn);
+
+  const boardBtn=document.createElement('button');
+  boardBtn.type='button';boardBtn.id='helm-board-btn';boardBtn.className='helm-quarters-pill helm-board-pill';
+  boardBtn.hidden=true;
+  boardBtn.textContent='⚔️ Board';
+  boardBtn.title='Grapple and board nearby vessel';
+  boardBtn.setAttribute('aria-pressed','false');
+  boardBtn.onclick=()=>{battleContext?.onBoardVessel?.();update(performance.now(),true);};
+  helmMeta.append(boardBtn);
+
   const viewHost=active.length?sailsMeta:helmMeta;
   const viewToggleBtn=document.createElement('button');
   viewToggleBtn.type='button';viewToggleBtn.id='helm-view-toggle';viewToggleBtn.className='helm-quarters-pill helm-view-pill';
@@ -92,7 +110,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
   viewHost.append(viewResetBtn,viewToggleBtn);
 
   let battleDeck=null,quartersBtn=null,battleBadge=null,battleTelemetry=null,vitalityPill=null,magazinePill=null;
-  let trainTargetBtn=null,steerBearBtn=null,aimArcsBtn=null,fireAtWillBtn=null,standDownBtn=null;
+  let trainTargetBtn=null,steerBearBtn=null,boardBattleBtn=null,aimArcsBtn=null,fireAtWillBtn=null,standDownBtn=null;
   let elevationInput=null,elevationOutput=null,traverseInput=null,traverseOutput=null;
   const batteryCards=[];
   const ammoButtons=[];
@@ -249,6 +267,12 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     steerBearBtn.title='Turn the helm to bring your broadside perpendicular to the nearest target';
     steerBearBtn.onclick=()=>steerBroadsideToBear();
 
+    boardBattleBtn=document.createElement('button');boardBattleBtn.type='button';boardBattleBtn.id='helm-battle-board';
+    boardBattleBtn.className='helm-chip-btn helm-chip-gold';
+    boardBattleBtn.textContent='Board';
+    boardBattleBtn.title='Throw grappling lines and board nearby vessel (take surrendered prize or fight crew-to-crew)';
+    boardBattleBtn.onclick=()=>{battleContext?.onBoardVessel?.();notifyGunnery();};
+
     aimArcsBtn=document.createElement('button');aimArcsBtn.type='button';aimArcsBtn.id='helm-aim-arcs';
     aimArcsBtn.className='helm-chip-btn';
     aimArcsBtn.textContent='Arcs';
@@ -275,7 +299,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       notifyGunnery();
     };
 
-    toggles.append(trainTargetBtn,steerBearBtn,aimArcsBtn,fireAtWillBtn,standDownBtn);
+    toggles.append(trainTargetBtn,steerBearBtn,boardBattleBtn,aimArcsBtn,fireAtWillBtn,standDownBtn);
     topBar.append(statusGroup,toggles);
 
     const ordnanceBar=document.createElement('div');ordnanceBar.className='helm-ordnance-bar';
@@ -383,6 +407,57 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
           anchorBtn.setAttribute('aria-pressed','false');
           anchorBtn.title=`${anchor.eligibility.reason}${fmTxt?` (${fm.toFixed(1)} fathoms)`:''} · Click to let go anchor`;
         }
+      }
+    }
+
+    const db=battleContext?.getDockingBoarding?.()?.state??null;
+    const vessels=battleContext?.getVessels?.()??[];
+    const nearbyShip=vessels.slice(1).find(v=>v?.boat&&!v.boat.damage?.sunk);
+    if(dockBtn){
+      const phase=db?.mooringPhase??'clear';
+      const isMoored=phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines';
+      const isCasting=phase==='casting-off';
+      dockBtn.hidden=false;
+      if(isCasting){
+        dockBtn.textContent='🪢 Casting off…';
+        dockBtn.disabled=true;
+        dockBtn.setAttribute('aria-pressed','true');
+        dockBtn.title=db?.statusText??'Casting off mooring lines';
+      }else if(isMoored){
+        dockBtn.textContent='🪢 Cast off';
+        dockBtn.disabled=false;
+        dockBtn.setAttribute('aria-pressed','true');
+        dockBtn.title=`${db?.statusText??'Moored'} · Click to cast off all lines`;
+      }else{
+        dockBtn.textContent=nearbyShip?'🪢 Throw lines':'🪢 Dock';
+        dockBtn.disabled=false;
+        dockBtn.setAttribute('aria-pressed','false');
+        dockBtn.title=nearbyShip?'Throw mooring & grappling lines onto adjacent vessel':'Throw bow & stern mooring lines onto pier';
+      }
+    }
+    if(boardBtn||boardBattleBtn){
+      const tb=nearbyShip?.boat;
+      const surrendered=Boolean(tb?.damage?.surrendered||tb?.colors==='surrender');
+      const captured=Boolean(tb?.captured);
+      const bPhase=db?.boardingPhase??'none';
+      const fighting=bPhase==='boarding-melee'||bPhase==='grappling'||bPhase==='capturing-surrendered';
+      const label=captured?'🏴 Prize Taken':fighting?'⚔️ Boarding…':surrendered?'⚔️ Take Prize':'⚔️ Board & Fight';
+      const tip=captured?`${tb?.name??'Prize'} captured and under our colors`:fighting?(db?.statusText??'Boarding action in progress'):surrendered?'Board surrendered vessel and take her as a prize':'Throw grappling hooks, board, and fight crew-to-crew';
+      if(boardBtn){
+        boardBtn.hidden=!nearbyShip;
+        if(nearbyShip){
+          if(boardBtn.textContent!==label)boardBtn.textContent=label;
+          boardBtn.disabled=captured||fighting;
+          boardBtn.setAttribute('aria-pressed',String(fighting||captured));
+          boardBtn.title=tip;
+        }
+      }
+      if(boardBattleBtn){
+        const bLabel=captured?'Prize Taken':fighting?'Boarding…':surrendered?'Take Prize':'Board';
+        if(boardBattleBtn.textContent!==bLabel)boardBattleBtn.textContent=bLabel;
+        boardBattleBtn.disabled=!nearbyShip||captured||fighting;
+        boardBattleBtn.setAttribute('aria-pressed',String(fighting||captured));
+        boardBattleBtn.title=tip;
       }
     }
 

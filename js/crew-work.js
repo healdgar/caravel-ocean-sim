@@ -889,6 +889,10 @@ export function stepCrewWork(s,company,boat,dt) {
         }
       }
       if(j.stage==='descending'&&j.rung<=0)startReturn(s,boat,company);
+    }else if(j.stage==='working'&&(j.kind==='boarding'||j.kind==='mooring')){
+      s.yaw=(j.sideSign??(j.side==='port'?-1:1))*Math.PI/2;
+      const done=j.kind==='boarding'?!boat.boardingActive:!boat.mooringActive;
+      if(done)startReturn(s,boat,company);
     }else if(j.stage==='working'&&j.kind==='gunnery'){
       s.yaw=(j.gun.sideSign??Math.sign(j.gun.directionDesign[0]))*Math.PI/2;
       const tool=crewGunneryTool(s,boat);
@@ -931,7 +935,10 @@ export function stepCrewWork(s,company,boat,dt) {
       const grip=resolveShipNode(boat,'hatch.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
     }
   }else if(j.stage==='working'&&j.kind!=='gunnery'&&j.kind!=='lookout'){
-    s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
+    s.yaw=(j.kind==='boarding'||j.kind==='mooring')?(j.sideSign??(j.side==='port'?-1:1))*Math.PI/2
+      :j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI)
+      :j.kind==='haul'?Math.sign(s.x)*Math.PI/2
+      :-j.side*Math.PI/2;
   }
   s.climbPitch=0;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId))&&j.rung>0&&!j.lookoutAtStation){
@@ -966,5 +973,5 @@ export function crewWorkLabel(s){
   if(j.kind==='yield')return woundPrefix+'Making room on deck';
   if(j.stage==='approach')return woundPrefix+'Going to work';if(j.stage==='return')return woundPrefix+'Returning to station';
   if(j.kind==='gunnery')return woundPrefix+({swab:'Sponging the bore',load:'Loading round shot',ram:'Ramming home',runout:'Hauling the gun out',prime:'Priming the gun',ready:'Standing clear · gun ready',recoil:'Standing clear of recoil',spent:'Awaiting reload'}[j.gun.stage]??'At the guns');
-  return woundPrefix+({rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft'}[j.kind]);
+  return woundPrefix+({rig:'Working the rigging',haul:'Hauling sail tackle',hatch:'Battening the hatch',lookout:'Keeping lookout aloft',boarding:'Fighting at the bulwarks',mooring:'Handling mooring lines'}[j.kind]??'At work');
 }

@@ -180,6 +180,16 @@ struct ColorsVertexOut {
   var localPos = pos;
   var localNorm = norm;
 
+  if (mode > 3.5) {
+    // mode 4 (world-space hemp mooring/grappling line) or mode 5 (world-space oak boarding gangplank)
+    var out: ColorsVertexOut;
+    out.position = F.viewProj * vec4f(earthCurve(pos - F.camPos.xyz, F.camPos.y), 1.0);
+    out.world = pos;
+    out.normal = normalize(norm);
+    out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
+    return out;
+  }
+
   if (mode < 0.5) {
     // mode 0: Crow's nest basket (cesto de gavia) centered on P.crowsNest.xyz
     let cn = P.crowsNest.xyz;
@@ -390,10 +400,23 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     color = select(vec3f(0.115, 0.078, 0.042) * grain, vec3f(0.038, 0.040, 0.044), isIronBand);
     rough = select(0.76, 0.42, isIronBand);
     f0 = select(vec3f(0.035), vec3f(0.12), isIronBand);
-  } else {
+  } else if (mode < 3.5) {
     // Woven bunting cloth (stern ensign or masthead pennant)
     color = evalEnsignColor(clamp(v.uvMode.x, 0.0, 1.0), clamp(v.uvMode.y, 0.0, 1.0), code, mode > 2.5);
     rough = 0.86;
+  } else if (mode < 4.5) {
+    // mode 4: Braided hemp mooring / grappling line with forged iron hook at tip (u > 0.94)
+    let isHook = v.uvMode.x > 0.94;
+    let twist = 0.88 + 0.12 * sin(v.uvMode.x * 120.0 + v.uvMode.y * 18.0);
+    color = select(vec3f(0.44, 0.34, 0.19) * twist, vec3f(0.055, 0.058, 0.062), isHook);
+    rough = select(0.84, 0.42, isHook);
+    f0 = select(vec3f(0.035), vec3f(0.14), isHook);
+  } else {
+    // mode 5: Weathered oak boarding gangplank with iron cleats
+    let plankGrain = 0.90 + 0.10 * sin(v.uvMode.x * 38.0 + v.uvMode.y * 12.0);
+    let cleat = step(0.86, fract(v.uvMode.x * 6.0));
+    color = mix(vec3f(0.24, 0.16, 0.088) * plankGrain, vec3f(0.14, 0.095, 0.052), cleat * 0.6);
+    rough = 0.78;
   }
 
   let shadowSample = vesselShadow(v.world, n);
@@ -553,6 +576,14 @@ export async function createShipColorsRenderer({
   });
   device.queue.writeBuffer(vertexBuffer, 0, vertices);
 
+  const maxMooringVerts = 4096;
+  const mooringVertexBuffer = device.createBuffer({
+    label: 'mooring lines & boarding gangplanks geometry',
+    size: maxMooringVerts * 40,
+    usage: B.VERTEX | B.COPY_DST,
+  });
+  let mooringVertexCount = 0;
+
   const layout = [{
     arrayStride: 40,
     attributes: [
@@ -652,6 +683,17 @@ export async function createShipColorsRenderer({
 
       device.queue.writeBuffer(slot.poseBuffer, 0, p);
     },
+    updateMooringVertices(verts) {
+      if (!verts || !verts.length) {
+        mooringVertexCount = 0;
+        return;
+      }
+      const count = Math.min(maxMooringVerts, Math.floor(verts.length / 10));
+      mooringVertexCount = count;
+      if (count > 0) {
+        device.queue.writeBuffer(mooringVertexBuffer, 0, verts.buffer, verts.byteOffset, count * 40);
+      }
+    },
     draw(pass, count = slots.length) {
       pass.setPipeline(pipeline);
       pass.setBindGroup(1, lighting);
@@ -662,9 +704,15 @@ export async function createShipColorsRenderer({
         pass.setBindGroup(0, slots[i].bindGroup);
         pass.draw(vertexCount);
       }
+      if (mooringVertexCount > 0 && slots[0]) {
+        pass.setBindGroup(0, slots[0].bindGroup);
+        pass.setVertexBuffer(0, mooringVertexBuffer);
+        pass.draw(mooringVertexCount);
+      }
     },
     destroy() {
       vertexBuffer.destroy();
+      mooringVertexBuffer.destroy();
       for (const s of slots) s.poseBuffer.destroy();
     },
   };

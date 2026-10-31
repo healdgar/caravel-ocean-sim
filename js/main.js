@@ -69,6 +69,7 @@ import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
+import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
 // WebGPU ocean — custom renderer.
@@ -1053,6 +1054,27 @@ async function main() {
   for(const v of vessels)if(v.rowingWater)v.boat.rowingWater=v.rowingWater;
   // Refresh the entry level from the latest local wave probe throughout the fall.
   const anchor=vessels[0].anchor,anchorEnvironment={terrain,settings:P,waterHeight:()=>boat.target.heave};
+  const dockingBoarding=createDockingBoardingState(boat,{
+    company:crew?.state??null,
+    getAdditionalVessels:()=>followerEnabled?vessels.slice(1).filter(v=>v?.boat?.showProw):[],
+    onEvent:ev=>{
+      if(ev.type==='vessel-captured'&&voyageCtl?.voyage){
+        const p=ev.plunder;
+        if(voyageCtl.voyage.provisions){
+          voyageCtl.voyage.provisions.water=Math.min(90,(voyageCtl.voyage.provisions.water??30)+(p?.waterDays??10));
+          voyageCtl.voyage.provisions.food=Math.min(120,(voyageCtl.voyage.provisions.food??40)+(p?.foodDays??14));
+        }
+        voyageCtl.logExternal?.(`🏴 ${ev.state.statusText}`,'combat');
+      }else if(ev.type==='boarding-repulsed'){
+        voyageCtl?.logExternal?.(`⚔️ ${ev.state.statusText}`,'combat');
+      }else if(ev.type==='dock-complete'||ev.type==='cast-off-complete'){
+        voyageCtl?.logExternal?.(`🪢 ${ev.state.statusText}`,'order');
+      }
+      if(typeof updateCrewUI==='function')updateCrewUI();
+      helm?.update?.(performance.now(),true);
+    },
+  });
+  window.oceanDockingBoarding=dockingBoarding;
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
 
@@ -1674,6 +1696,47 @@ async function main() {
   colorsRow.append(colorsLabel,colorsSelect,strikeBtn);
   colorsSection.append(colorsRow,moraleStatus);
   captainBody.append(colorsSection);
+
+  const boardingSection=document.createElement('section');boardingSection.className='captain-boarding-section';
+  boardingSection.style.cssText='margin:8px 0;padding:8px 0;border-top:1px solid rgba(255,255,255,.12);display:grid;gap:6px';
+  const boardingActionsRow=document.createElement('div');boardingActionsRow.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+  const dockPierBtn=document.createElement('button');dockPierBtn.type='button';dockPierBtn.id='dock-pier-btn';
+  dockPierBtn.textContent='🪢 Throw mooring lines (Dock)';
+  const castOffBtn=document.createElement('button');castOffBtn.type='button';castOffBtn.id='cast-off-btn';
+  castOffBtn.textContent='🪢 Cast off lines';
+  const boardShipBtn=document.createElement('button');boardShipBtn.type='button';boardShipBtn.id='board-ship-btn';
+  boardShipBtn.textContent='⚔️ Grapple & board vessel';
+  const boardingStatus=document.createElement('p');boardingStatus.id='boarding-docking-status';boardingStatus.setAttribute('role','status');
+  boardingStatus.style.cssText='margin:0;font-size:.9em;opacity:.92';
+  dockPierBtn.onclick=()=>{
+    const activeShip=followerEnabled&&vessels[1]?.boat?.showProw&&!vessels[1].boat.damage?.sunk?vessels[1]:null;
+    if(activeShip&&Math.hypot((activeShip.boat.x??0)-boat.x,(activeShip.boat.z??0)-boat.z)<140){
+      dockingBoarding.grappleShip(activeShip,{mode:'moor'});
+    }else{
+      dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name||'Harbor Pier'});
+    }
+    updateCrewUI();helm?.update?.(performance.now(),true);
+  };
+  castOffBtn.onclick=()=>{
+    dockingBoarding.castOff();
+    updateCrewUI();helm?.update?.(performance.now(),true);
+  };
+  boardShipBtn.onclick=()=>{
+    if(vessels.length>1&&(!followerEnabled||!vessels[1].boat?.showProw)){
+      vessels[1].dormantEncounter=false;
+      followerEnabled=true;
+      boat.followingShip=true;
+      vessels[1].boat.showProw=true;
+      vessels[1].faction=vessels[1].faction||'enemy';
+      vessels[1].boat.faction=vessels[1].faction;
+      vessels[1].boat.colors=vessels[1].faction==='enemy'?'jolly-roger':'castile';
+    }
+    dockingBoarding.boardVessel(vessels[1]);
+    updateCrewUI();helm?.update?.(performance.now(),true);
+  };
+  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn);
+  boardingSection.append(boardingActionsRow,boardingStatus);
+  captainBody.append(boardingSection);
   function updateAnchorUI(){
     anchorDrop.hidden=anchorWeigh.hidden=anchor.installed===false;
     anchorDrop.disabled=anchor.active||!anchor.eligibility.allowed;anchorDrop.title=anchor.active?'Anchor already deployed':anchor.eligibility.reason;
@@ -1705,6 +1768,26 @@ async function main() {
       const enemyMorale=enemyShip?.damage?` · Sighted ship: ${enemyShip.shipName||vessels[1].asset?.model?.name||'Vessel'} (${enemyColors.shortLabel}, Morale ${Math.round((enemyShip.damage.battleMorale??1)*100)}%${enemyShip.damage.surrendered?' · 🏳️ SURRENDERED':''})`:'';
       const mTxt=`Colors: ${colorsInfo.shortLabel} · Crew: ${cas?`${cas.able}/${cas.total} able (${cas.wounded} wounded, ${cas.killed} fallen)`:'full complement'} · Battle morale: ${moralePct}% (${dmg?.moraleState??'steady'})${enemyMorale}`;
       if(moraleStatus.textContent!==mTxt)moraleStatus.textContent=mTxt;
+    }
+    if(boardingStatus){
+      const dbState=dockingBoarding.state;
+      const pStr=dockingBoarding.computePlayerStrength();
+      const targetV=followerEnabled&&vessels[1]?.boat?.showProw?vessels[1]:null;
+      const tBoat=targetV?.boat;
+      const isSurr=Boolean(tBoat?.damage?.surrendered||tBoat?.colors==='surrender');
+      const isCap=Boolean(tBoat?.captured);
+      if(boardShipBtn){
+        boardShipBtn.textContent=isCap?'🏴 Prize Captured':isSurr?'⚔️ Board & take surrendered prize':'⚔️ Grapple, board & fight';
+        boardShipBtn.disabled=isCap||dbState.boardingPhase==='boarding-melee';
+      }
+      if(castOffBtn){
+        castOffBtn.disabled=dbState.mooringPhase==='clear'||dbState.mooringPhase==='casting-off';
+      }
+      if(dockPierBtn){
+        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='throwing-lines';
+      }
+      const bTxt=`${dbState.statusText} · Boarding power: ${pStr.effectiveStrength.toFixed(1)} (${pStr.femaleHands}♀=${pStr.meanFemaleStrength.toFixed(1)}, ${pStr.maleHands}♂=${pStr.meanMaleStrength.toFixed(1)})`;
+      if(boardingStatus.textContent!==bTxt)boardingStatus.textContent=bTxt;
     }
     if(!crew)return;
     const status=crew.status();if(crewStatus.textContent!==status)crewStatus.textContent=status;
@@ -1967,6 +2050,12 @@ async function main() {
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
       onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail'}),
       onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage'}),
+      onBoardVessel:enc=>{
+        activateEncounterVessel(enc,{mode:'engage'});
+        if(vessels[1])dockingBoarding.boardVessel(vessels[1]);
+        updateCrewUI();
+        helm?.update?.(performance.now(),true);
+      },
       onCanvasOrder:id=>{
         shipGuns.standDown();
         const crewOrder=id==='full'?'full':id==='reefed'?'reduced':id==='storm'?'weather':id==='heave-to'?'furl':'watch';
@@ -2272,7 +2361,35 @@ async function main() {
     broadsideSide:BROADSIDE_SIDE,
     getVessels:()=>vessels,
     getPortGunnery:()=>portGunnery,
+    getDockingBoarding:()=>dockingBoarding,
     onGunneryChange:()=>gunControls?.update?.(),
+    onDockToggle:()=>{
+      const phase=dockingBoarding.state.mooringPhase;
+      if(phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines'){
+        dockingBoarding.castOff();
+      }else{
+        const activeShip=followerEnabled&&vessels[1]?.boat?.showProw&&!vessels[1].boat.damage?.sunk?vessels[1]:null;
+        if(activeShip&&Math.hypot((activeShip.boat.x??0)-boat.x,(activeShip.boat.z??0)-boat.z)<140){
+          dockingBoarding.grappleShip(activeShip,{mode:'moor'});
+        }else{
+          dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name||'Harbor Pier'});
+        }
+      }
+      updateCrewUI();
+    },
+    onBoardVessel:()=>{
+      if(vessels.length>1&&(!followerEnabled||!vessels[1].boat?.showProw)){
+        vessels[1].dormantEncounter=false;
+        followerEnabled=true;
+        boat.followingShip=true;
+        vessels[1].boat.showProw=true;
+        vessels[1].faction=vessels[1].faction||'enemy';
+        vessels[1].boat.faction=vessels[1].faction;
+        vessels[1].boat.colors=vessels[1].faction==='enemy'?'jolly-roger':'castile';
+      }
+      if(vessels[1])dockingBoarding.boardVessel(vessels[1]);
+      updateCrewUI();
+    },
     onAnchorToggle:()=>{
       if(anchor.active){
         if(anchor.weigh()){commandFriendlyFleet(vessels,{type:'crew',id:'weigh-anchor'},{anchorEnv:anchorEnvironment});sceneAudio.order('weigh-anchor',{boat});updateAnchorUI();}
@@ -2709,6 +2826,7 @@ async function main() {
     if(dt>0||needSpectrum||frameIndex===0){
       boat.externalForce=anchor.step(dt,boat,anchorEnvironment);
       for(const event of anchor.events)sceneAudio.anchor(event,boat);
+      dockingBoarding.step(dt);
       updateBoat(dt,needSpectrum||elapsed>.5);
       dolphins.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);dolphinControls.update(now);
       marineLife.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);marineControls.update(now);
@@ -2996,6 +3114,7 @@ async function main() {
         const visible=Boolean(v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged)&&!v.boat.damage?.sunk);
         shipColorsRenderer?.updateVessel(i,visible?v.boat:null,simTime,Math.cos(P.windDir*D2R),Math.sin(P.windDir*D2R),P.windSpeed);
       }
+      shipColorsRenderer?.updateMooringVertices(dockingBoarding.buildVertices());
       for(const v of vessels){
         if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
         prowPass.setPipeline(v.render.pipeline);prowPass.setBindGroup(0,v.bindGroup);prowPass.setBindGroup(1,v.lighting);

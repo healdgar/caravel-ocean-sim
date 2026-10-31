@@ -766,3 +766,98 @@ test('full sail raises all canvas across procedural and multi-mast ships and URL
  assert.equal(u.searchParams.get('warp'),'watch');
  assert.deepEqual(decodeGameStateParam(u.searchParams.get('state')),statePayload);
 });
+
+test('pirates wear brown and black clothing, women and men have equal boarding strength, and ships can dock/cast off and board/capture surrendered or fighting vessels',async ()=>{
+ const {PIRATE_SHIRTS,PIRATE_TROUSERS,isPirateVessel,applyPirateCrewAttire}=await import('../js/crew.js');
+ const {createDockingBoardingState,computeBoardingStrength,FEMALE_BOARDING_STRENGTH,MALE_BOARDING_STRENGTH}=await import('../js/boarding-docking.js');
+
+ // 1. Women and men have identical strength (1.0)
+ assert.equal(FEMALE_BOARDING_STRENGTH,1.0);
+ assert.equal(MALE_BOARDING_STRENGTH,1.0);
+ const playerBoat={id:'player',modelId:'nina',name:'Santa Clara',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'portugal'};
+ playerBoat.hydrodynamics=boatHydrodynamics(20,6);
+ createVesselDamageState(playerBoat);
+ const playerCompany=createCompany(undefined,'nina',{boat:playerBoat});
+ const femaleSailors=playerCompany.crew.filter(s=>s.sex==='female');
+ const maleSailors=playerCompany.crew.filter(s=>s.sex==='male');
+ assert.ok(femaleSailors.length>0&&maleSailors.length>0,'crew has both women and men');
+ for(const s of playerCompany.crew){
+  assert.equal(s.strength,1.0,`${s.name} (${s.sex}) has strength 1.0`);
+ }
+ const playerPower=computeBoardingStrength({boat:playerBoat,company:playerCompany});
+ assert.equal(playerPower.meanFemaleStrength,playerPower.meanMaleStrength,'female and male boarding strength are equal');
+
+ // 2. Pirates wear brown and black clothing
+ const pirateBoat={id:'pirate',modelId:'nina',name:'Black Adder',length:20,beam:6,heading:0,x:14,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'jolly-roger',battleColors:'jolly-roger',faction:'enemy'};
+ pirateBoat.hydrodynamics=boatHydrodynamics(20,6);
+ createVesselDamageState(pirateBoat);
+ assert.equal(isPirateVessel(pirateBoat),true,'identifies jolly-roger enemy vessel as pirate');
+ const pirateCompany=createCompany(undefined,'nina',{boat:pirateBoat});
+ assert.equal(pirateCompany.pirateAttire,true,'pirate company wears pirate attire');
+ for(const s of pirateCompany.crew){
+  assert.ok(PIRATE_SHIRTS.includes(s.shirt),`pirate ${s.name} wears brown or black shirt`);
+  assert.ok(PIRATE_TROUSERS.includes(s.trousers),`pirate ${s.name} wears brown or black trousers`);
+  // Verify RGB channels are dark/brown (R >= G >= B, low luminance)
+  assert.ok(s.shirt[0]<=0.32&&s.shirt[1]<=0.22&&s.shirt[2]<=0.15,'pirate shirt is in brown/black palette');
+  assert.ok(s.trousers[0]<=0.25&&s.trousers[1]<=0.18&&s.trousers[2]<=0.12,'pirate trousers are in brown/black palette');
+ }
+
+ // 3. Pier docking sequence: throw lines -> make fast -> moored -> cast off
+ const pirateVessel={boat:pirateBoat,company:pirateCompany,faction:'enemy'};
+ const db=createDockingBoardingState(playerBoat,{
+  company:playerCompany,
+  getAdditionalVessels:()=>[pirateVessel],
+ });
+ const dockRes=db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
+ assert.equal(dockRes.ok,true);
+ assert.equal(db.state.mooringPhase,'throwing-lines');
+ assert.equal(playerBoat.mooringActive,true);
+ let verts=db.buildVertices();
+ assert.ok(verts.length>0,'generates 3D catenary mooring line vertices while throwing lines');
+ for(let i=0;i<30;i++)db.step(0.15);
+ assert.equal(db.state.mooringPhase,'moored','transitions through making-fast to moored');
+ const castRes=db.castOff();
+ assert.equal(castRes.ok,true);
+ assert.equal(db.state.mooringPhase,'casting-off');
+ for(let i=0;i<25;i++)db.step(0.15);
+ assert.equal(db.state.mooringPhase,'clear','lines coiled aboard after casting off');
+ assert.equal(db.buildVertices().length,0,'no mooring vertices when clear');
+
+ // 4. Board a surrendered vessel and take her as a prize
+ const surrBoat={id:'prize',modelId:'nina',name:'San Mateo',length:20,beam:6,heading:0,x:18,z:2,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'surrender'};
+ surrBoat.hydrodynamics=boatHydrodynamics(20,6);
+ createVesselDamageState(surrBoat);
+ surrBoat.damage.surrendered=true;
+ const surrCompany=createCompany(undefined,'nina',{boat:surrBoat});
+ const surrVessel={boat:surrBoat,company:surrCompany,faction:'enemy'};
+ const boardSurr=db.boardVessel(surrVessel);
+ assert.equal(boardSurr.ok,true);
+ assert.equal(boardSurr.mode,'surrendered');
+ for(let i=0;i<35;i++)db.step(0.15);
+ assert.equal(surrBoat.captured,true,'surrendered vessel is captured');
+ assert.equal(surrVessel.faction,'friendly','captured prize joins player squadron as friendly');
+ assert.equal(surrBoat.colors,'portugal','captured prize hoists player colors');
+
+ // 5. Board an active (unsurrendered) pirate vessel, fight crew-to-crew based on morale & strength, and capture her
+ pirateBoat.damage.battleMorale=0.62;
+ pirateCompany.morale=0.62;
+ playerBoat.damage.battleMorale=0.98;
+ playerCompany.morale=0.98;
+ const boardFight=db.boardVessel(pirateVessel);
+ assert.equal(boardFight.ok,true);
+ assert.equal(boardFight.mode,'fight');
+ assert.equal(playerBoat.boardingActive,true,'player crew stationed at bulwarks for boarding melee');
+ assert.equal(pirateBoat.boardingActive,true,'enemy crew stationed at bulwarks for boarding melee');
+ for(let i=0;i<80&&db.state.boardingPhase!=='captured';i++){
+  db.step(0.2);
+  if(i===15){
+   const gangplankVerts=db.buildVertices();
+   assert.ok(gangplankVerts.length>100,'renders 3D grappling lines and boarding gangplanks during melee');
+  }
+ }
+ assert.equal(db.state.boardingPhase,'captured','higher-morale/strength crew wins boarding combat and captures vessel');
+ assert.equal(pirateBoat.captured,true,'defeated enemy vessel is captured as a prize');
+ assert.equal(pirateVessel.faction,'friendly','captured pirate vessel becomes friendly prize');
+ assert.equal(pirateBoat.colors,'portugal','captured pirate vessel hoists player colors');
+ assert.equal(pirateCompany.pirateAttire,false,'captured prize crew reverts from pirate attire');
+});

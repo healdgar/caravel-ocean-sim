@@ -209,6 +209,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
           { id: 'hold', label: 'Hold course' },
           { id: 'hail', label: 'Close to hail' },
           { id: 'fight', label: 'Clear for action!' },
+          { id: 'board', label: 'Grapple & board her!' },
         ],
         log: `Sail sighted ${callout} (${arch.rig}, ${distNm} nm, bearing ${compassPointName(compassBrg)}).`,
       },
@@ -339,6 +340,17 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       addLog(voyage, outcome.summary, 'combat');
       env.onEngageVessel?.(enc);
       env.onToast?.(outcome.summary, 7);
+      return outcome;
+    }
+
+    if (choiceId === 'board') {
+      outcome.summary = `Laid ${enc.shipName} (${enc.archetype.title}) aboard with grappling irons — boarding party away!`;
+      outcome.combatStarted = true;
+      outcome.boarded = true;
+      addLog(voyage, outcome.summary, 'combat');
+      if (env.onBoardVessel) env.onBoardVessel(enc);
+      else env.onEngageVessel?.(enc, { board: true });
+      env.onToast?.(outcome.summary, 8);
       return outcome;
     }
 

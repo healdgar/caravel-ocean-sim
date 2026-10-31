@@ -43,6 +43,46 @@ export const CAPTAIN_ORDERS = [
   {id:'transfer',label:'Transfer yards',detail:'Move yards to leeward for this leg. Gathers canvas; takes about a minute.'},
 ];
 const CREW_SHIRTS=[[.55,.47,.31],[.23,.31,.36],[.38,.15,.10],[.30,.32,.18],[.48,.36,.22],[.38,.38,.35]];
+// Pirate / Sea-Rover brown and black attire (soot black, dark espresso leather, saddle brown, charcoal black, umber, walnut brown).
+export const PIRATE_SHIRTS=Object.freeze([
+  [.045,.042,.040],
+  [.19,.11,.058],
+  [.075,.070,.068],
+  [.27,.15,.078],
+  [.055,.052,.050],
+  [.23,.13,.068],
+]);
+export const PIRATE_TROUSERS=Object.freeze([
+  [.038,.036,.035],
+  [.13,.078,.044],
+  [.062,.058,.055],
+  [.17,.10,.056],
+]);
+export function isPirateVessel(boat){
+  if(!boat)return false;
+  if(boat.isPirate===true)return true;
+  if(boat.colors==='jolly-roger'||boat.colors==='blood-flag')return true;
+  if(boat.battleColors==='jolly-roger'||boat.battleColors==='blood-flag')return true;
+  if(boat.faction==='enemy'&&!boat.captured)return true;
+  return false;
+}
+export function applyPirateCrewAttire(company,pirate=true){
+  if(!company?.crew)return company;
+  company.pirateAttire=Boolean(pirate);
+  for(let i=0;i<company.crew.length;i++){
+    const s=company.crew[i];
+    if(pirate){
+      s.shirt=PIRATE_SHIRTS[i%PIRATE_SHIRTS.length];
+      s.trousers=PIRATE_TROUSERS[i%PIRATE_TROUSERS.length];
+      s.attireTheme='pirate-brown-black';
+    }else{
+      s.shirt=CREW_SHIRTS[i%6];
+      s.trousers=i%3?[.095,.12,.15]:[.16,.10,.065];
+      s.attireTheme='standard';
+    }
+  }
+  return company;
+}
 // Individual art direction, independent of role and policy. Colours are sRGB bytes;
 // face = head width, jaw width, nose projection (metres), eye opening.
 // The stylized company intentionally includes Black, white and East Asian
@@ -82,7 +122,8 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
   const activeControls=extended?['fore','main','mizzen'].map((name,index)=>model.rig.sails.some(s=>s.controlGroup===name)?index:-1).filter(i=>i>=0):[0,1,2];
   const stationBoat={modelId:model.id,model,length:model.runtime.length,beam:model.runtime.beam};
   const manifestCrew=model.id==='victory'?820:extended?proceduralDesign(model.id).loading.crew:(ADDITIONAL_DESIGNS[model.id]?.loading?.crew??12);
-  return {modelId:model.id,activeControls,representativeWatch:stations.length<manifestCrew,order:'watch',revision:0,pending:false,crew:stations.map(([key,station],i)=>{
+  const initialPirate=Boolean(options?.pirate||isPirateVessel(options?.boat));
+  return {modelId:model.id,activeControls,representativeWatch:stations.length<manifestCrew,order:'watch',revision:0,pending:false,pirateAttire:initialPirate,crew:stations.map(([key,station],i)=>{
     const identity=(extended||i>=CREW_ROSTER.length)?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
     person.route??=[person.z,person.z];person.roles??=[person.role.toLowerCase()];
     if(extended&&Object.hasOwn(ROWING_DESIGNS,model.id)&&person.role==='Passenger'&&!stations.slice(0,i).some(([,p])=>p.role==='Passenger')){person.role='Captain';person.roles=['captain'];}
@@ -101,11 +142,15 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
       const shift=post[2]-person.z;person.x=post[0];person.z=post[2];person.route=person.route.map(z=>z+shift);
     }
     const s=createDeckhand(policy);Object.assign(s,person,{crewIndex:i,route:[...person.route],target:person.route[1],wait:i*.37,
-      time:i*.43,walkTime:i*.27,patrolX:person.x,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true});
+      time:i*.43,walkTime:i*.27,patrolX:person.x,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true,strength:1.0});
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
     const look=CREW_APPEARANCES[s.identityId??s.id];
-    s.shirt=CREW_SHIRTS[i%6];s.skin=crewLinearColour(look.skin);s.trousers=i%3?[.095,.12,.15]:[.16,.10,.065];
+    const pirate=initialPirate;
+    s.shirt=pirate?PIRATE_SHIRTS[i%PIRATE_SHIRTS.length]:CREW_SHIRTS[i%6];
+    s.skin=crewLinearColour(look.skin);
+    s.trousers=pirate?PIRATE_TROUSERS[i%PIRATE_TROUSERS.length]:(i%3?[.095,.12,.15]:[.16,.10,.065]);
+    s.attireTheme=pirate?'pirate-brown-black':'standard';
     s.hair=crewLinearColour(look.hair);s.face=[...look.face];return s;
   })};
 }
@@ -121,6 +166,8 @@ export function issueCaptainOrder(company,boat,id) {
 }
 export function stepCompany(company,boat,dt,wind) {
   company.boat=boat;if(boat)boat.crewCompany=company;
+  const shouldBePirate=isPirateVessel(boat);
+  if(Boolean(company.pirateAttire)!==shouldBePirate)applyPirateCrewAttire(company,shouldBePirate);
   const order=CAPTAIN_ORDERS.find(o=>o.id===company.order),sails=sailingState(boat);
   // Manual sail settings supersede an outstanding broad order without stale reapplication.
   if(order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-boat[SAIL_KEYS[i]])>.001)){

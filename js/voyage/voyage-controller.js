@@ -226,11 +226,18 @@ export function createVoyageController(cfg) {
           setWarp('deck');
           cfg.onHailVessel?.(enc);
         },
-        onEngageVessel: (enc) => {
+        onEngageVessel: (enc, opts) => {
           setWarp('deck');
           manualHelm = true;
           helmsman.engaged = false;
-          cfg.onEngageVessel?.(enc);
+          cfg.onEngageVessel?.(enc, opts);
+        },
+        onBoardVessel: (enc) => {
+          setWarp('deck');
+          manualHelm = true;
+          helmsman.engaged = false;
+          if (cfg.onBoardVessel) cfg.onBoardVessel(enc);
+          else cfg.onEngageVessel?.(enc, { board: true });
         },
       });
     } else if (it.type === 'arrival') {

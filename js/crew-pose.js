@@ -267,6 +267,27 @@ export function poseCrewWork(a,s,boat){
     }
     return;
   }
+  if(j?.kind==='boarding'&&j.stage==='working'){
+    a.blend('Brace',s.time,0.55);
+    const phase=s.time*4.2+(s.crewIndex??0)*1.15;
+    const thrust=Math.sin(phase),slash=Math.cos(phase);
+    const handR=[-0.12+0.10*slash,1.26+0.15*thrust,0.44+0.22*Math.max(0,thrust)];
+    const handL=[0.20,1.16+0.05*slash,0.28+0.06*Math.max(0,-thrust)];
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],handR,[-0.6,1.0,0.2]);
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],handL,[0.6,1.0,0.2]);
+    s.grips={hand_r:handR,hand_l:handL};
+    return;
+  }
+  if(j?.kind==='mooring'&&j.stage==='working'){
+    a.blend('Brace',s.time,0.35);
+    const phase=s.time*3.2+(s.crewIndex??0)*0.8;
+    for(const [side,sign] of [['l',1],['r',-1]]){
+      const hand=[sign*0.16,0.96+0.14*Math.sin(phase+sign*0.5),0.38+0.12*Math.cos(phase)];
+      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],hand,[sign*0.6,1.0,0.15]);
+      (s.grips??={})[`hand_${side}`]=hand;
+    }
+    return;
+  }
   if(j?.stage==='working' && (j.kind==='haul'||j.kind==='hatch')){
     if(j.kind==='hatch')a.blend('Brace',s.time,.8);
     const phase=s.time*3.4;
