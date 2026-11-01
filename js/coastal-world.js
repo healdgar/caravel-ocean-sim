@@ -1632,10 +1632,10 @@ export const PORT_PREFABS = Object.freeze({
   english_triangular_palisade_fort: Object.freeze({
     id: 'english_triangular_palisade_fort',
     label: 'James Fort Triangular Timber Palisade & Bulwarks',
-    length: 36,
-    width: 38,
+    length: 90,
+    width: 118,
     height: 6.8,
-    foundationDepth: 4.5,
+    foundationDepth: 3.2,
     materialKind: 10,
     roofPitch: 0,
     waterfront: false,
@@ -1714,7 +1714,7 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
       const padY = inst.indigenous && !isFort
         ? Math.max(0.95, centerGroundY)
         : isFort
-          ? Math.max(inst.y ?? 3.2, centerGroundY)
+          ? Math.max(inst.y ?? 2.8, centerGroundY)
           : Math.max(1.6, centerGroundY);
 
       const coreX = hw + step * 1.05;
@@ -2713,6 +2713,20 @@ function coastalSampleClamped(heights, x, z, region) {
   return terrainSample(heights, cx, cz, region);
 }
 
+// Geomorphic pocket-beach factor in [0, 1]: alternates along the coastline between
+// depositional sandy pocket coves and non-beach grassy/forested banks,
+// marsh edges, or rocky headlands so not all coastline is beach.
+function coastalBeachPocketFactor(region, x, z) {
+  const seed = ((region?.vegetationSeed ?? 47231) ^ 0x6c8e9cf5) >>> 0;
+  const rx = x - (region?.x ?? 0);
+  const rz = z - (region?.z ?? 0);
+  const wave1 = Math.sin(rx * 0.018 + rz * 0.014 + (seed & 255) * 0.05);
+  const wave2 = Math.cos(rx * 0.039 - rz * 0.031 + ((seed >>> 8) & 255) * 0.05);
+  const nMeso = coastalFbm2D(rx * 0.0065 + 1.7, rz * 0.0065 - 2.3, seed, 2) - 0.5;
+  const raw = 0.5 + 0.34 * wave1 + 0.20 * wave2 + 0.32 * nMeso;
+  return coastalSmoothstep(0.46, 0.58, raw);
+}
+
 export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, shoreDist = null) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const m = region.biomeSize;
@@ -2743,28 +2757,34 @@ export function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = nu
       const slope = Math.hypot(sx, sz);
       const idx = j * m + i;
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
+      const pocket = coastalBeachPocketFactor(region, x, z);
       // When satellite imagery is present, suppress dry beach sand where coastal mangrove/forest
       // reaches the water's edge, and widen the beach berm where warm spectral sand is detected.
       const satBeachFactor = sat
         ? Math.max(0.22, Math.min(1.35, 0.65 + sat.sandChroma * 0.85 - sat.greenness * 0.62))
         : 1.0;
+      const minCoarsePocket = n <= 65 ? 0.75 : 0.0;
+      const pocketWeight = Math.max(minCoarsePocket, sat && sat.sandChroma > 0.35 ? Math.max(pocket, sat.sandChroma) : pocket);
+      if (pocketWeight <= 0.02) continue;
       const maxBeachInland = sat && sat.sandChroma > 0.35 ? satWideBeachInland : baseBeachInland;
 
-      // Intertidal wet-sand swash zone: [-1.2m, +1.4m] within foreshore distance of water
+      // Intertidal wet-sand swash zone: [-1.2m, +1.4m] within pocket-cove foreshore distance of water
       if (h >= -1.2 && h <= 1.4 && slope < 0.18 && inlandM <= maxSwashInland) {
         const swash = Math.round(
           255 *
+            pocketWeight *
             (1 - Math.abs(h - 0.1) / 1.4) *
             Math.max(0, 1 - slope / 0.18) *
             coastalSmoothstep(maxSwashInland, maxSwashInland * 0.33, inlandM)
         );
         swashMask[idx] = Math.max(0, Math.min(255, swash));
       }
-      // Dry-sand foreshore & berm: [0.4m, +6.5m] with gentle slope (< 0.20) adjacent to the coast
+      // Dry-sand pocket foreshore & berm: [0.4m, +6.5m] with gentle slope (< 0.20) in pocket coves
       if (h >= 0.4 && h <= 6.5 && slope < 0.20 && inlandM <= maxBeachInland) {
         const shoreFade = coastalSmoothstep(maxBeachInland, maxBeachInland * 0.38, inlandM);
         const sand = Math.round(
           255 *
+            pocketWeight *
             coastalSmoothstep(6.5, 1.2, h) *
             Math.max(0, 1 - slope / 0.20) *
             shoreFade *
@@ -4040,44 +4060,48 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ? '1608 Timber-Framed Church & Virginia Company Storehouse'
       : 'Half-Timbered Meetinghouse & Company Magazine';
 
-    // Central Triangular Palisade Fort (James Fort) overlooking the river channel
-    addPrefab('english_triangular_palisade_fort', 0, 34, 0, 2.8, {
+    // Enclosing Triangular Palisade Fort (James Fort, 118m x 90m) surrounding the core settlement buildings
+    addPrefab('english_triangular_palisade_fort', 0, 48, 0, 2.8, {
       label: fortLabel,
       armed: true,
       hasMagazine: true,
     });
-    // Half-timbered post-and-truss church / storehouse & riven-clapboard wattle-and-daub cottages
-    addPrefab('english_half_timber_hall', -34, 38, 0, 2.8, {
+    // Core church, company storehouse & flanked rows of half-timbered / mud-and-stud cottages INSIDE the triangular palisade fort
+    addPrefab('english_half_timber_hall', 0, 44, 0, 2.8, {
       label: hallLabel,
     });
-    addPrefab('english_timber_cottage', 34, 30, -8, 2.6, {
-      label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ Row' : 'Clapboard & Thatch Settler Cottage',
+    addPrefab('english_timber_cottage', -22, 32, 0, 2.7, {
+      label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ West Row' : 'Clapboard & Thatch Settler Cottage',
     });
-    addPrefab('english_timber_cottage', -28, 62, 6, 3.0, {
-      label: isJamestown ? 'Governor’s Half-Timbered Tenement' : 'Half-Timbered Planter’s House',
+    addPrefab('english_timber_cottage', 22, 32, 0, 2.7, {
+      label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ East Row' : 'Half-Timbered Planter’s House',
     });
-    addPrefab('english_timber_cottage', 28, 58, -6, 2.9, {
-      label: 'Artificers’ & Smiths’ Timber Forge Cottage',
+    addPrefab('english_timber_cottage', -11, 56, 0, 2.9, {
+      label: isJamestown ? 'Governor’s Half-Timbered Tenement (Inside Fort)' : 'Company Guard & Quartermaster House',
     });
-    addPrefab('careening_shed', -56, 14, 10, 2.0, {
+    addPrefab('english_timber_cottage', 11, 56, 0, 2.9, {
+      label: 'Artificers’ & Smiths’ Timber Forge Cottage (Inside Fort)',
+    });
+    // Waterfront shallop careening shed, slipway & river watch beacon outside the fort curtains
+    addPrefab('careening_shed', -68, 14, 10, 2.0, {
       label: 'Shallop & Pinnace Careening Shed',
     });
-    addPrefab('astillero_and_moored_hull', -36, 11, 5, 1.8, {
+    addPrefab('astillero_and_moored_hull', -44, 9, 5, 1.8, {
       label: 'River Shallop Slipway & Timber Stocks',
     });
-    addPrefab('torreon_atalaya_farol', 64, 12, -10, 2.5, {
+    addPrefab('torreon_atalaya_farol', 72, 12, -10, 2.5, {
       label: isJamestown ? 'Point Comfort / River Watch Beacon' : 'Harbor Look-Out Beacon Tower',
       materialKind: 10,
     });
 
     if (colonyGrowth.colonyAge >= 5 || colonyGrowth.stage !== 'outpost') {
-      addPrefab('english_half_timber_hall', 4, 68, 90, 3.1, {
+      addPrefab('english_half_timber_hall', -56, 42, 0, 2.8, {
         label: isJamestown ? '1617 Timber-Framed Choir Church (First Assembly)' : 'Colonial Assembly & Custom Hall',
       });
-      addPrefab('walled_mule_corral', 54, 52, 0, 2.8, {
+      addPrefab('walled_mule_corral', 62, 52, 0, 2.8, {
         label: isJamestown ? 'Tobacco Hogshead Yard & Livestock Pales' : 'Colonial Commons & Stockade Yard',
       });
-      addPrefab('english_timber_cottage', -52, 48, 12, 2.8, {
+      addPrefab('english_timber_cottage', -62, 64, 12, 2.9, {
         label: 'Outer Palisade Quarter & Cooperage Cottage',
       });
     }
@@ -5140,6 +5164,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const zIn = sideZ < 0 ? -hl + wallT : hl;
         beginSection('parapet_wall');
         emitBox(toWorld, -hw, hw, yTop - 0.85, yTop, zOut, zIn, 11, 0.86);
+        // Interior firing banquette step along the rampart walk so gunners and sentries stand above the parapet
+        const bZ0 = sideZ < 0 ? zIn : zOut - 1.35;
+        const bZ1 = sideZ < 0 ? zIn + 1.35 : zOut;
+        emitBox(toWorld, -hw + wallT, hw - wallT, yTop - 0.85, yTop - 0.14, bZ0, bZ1, 11, 0.82);
         for (let m = 0; m <= nBaysX; m++) {
           const mx = -hw + 1.6 + m * baySpanX;
           beginSection('parapet_merlons');
@@ -5771,28 +5799,34 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     } else if (inst.prefabId === 'algonquian_longhouse') {
       // Algonquian / Wabanaki / Powhatan / Haudenosaunee Barrel-Vaulted Bark Longhouse:
       // Bowed sapling rib frame sheathed in overlapping birch/elm/cedar bark sheets (kind 17),
-      // external vertical lash-poles (kind 10), arched barrel roof with smoke holes, and hooded end portals.
+      // dark cedar/elm horizontal bark trim bands & vertical lash-poles (kind 10), arched barrel roof with smoke holes, and hooded end portals.
       const lhHW = Math.min(4.2, hw);
-      const yPlinth = yGround + 0.05;
+      const yPlinth = yGround + 0.04;
       const yEave = yPlinth + Math.max(2.4, inst.height * 0.54);
       const vaultRise = Math.max(1.8, inst.height * 0.46);
       beginSection('foundation_plinth');
-      emitBox(toWorld, -lhHW - 0.06, lhHW + 0.06, yGround - 1.4, yPlinth, -hl - 0.06, hl + 0.06, 10, 0.74, false, 0.06);
+      // Shallow ground-hugging dark cedar sill (avoids deep exposed wedge on slopes)
+      emitBox(toWorld, -lhHW - 0.08, lhHW + 0.08, yGround - 0.28, yPlinth + 0.22, -hl - 0.08, hl + 0.08, 10, 0.72, false, 0.04);
       beginSection('longhouse_bark_walls');
-      emitBox(toWorld, -lhHW, lhHW, yPlinth, yEave, -hl, hl, 17, 0.90);
+      emitBox(toWorld, -lhHW, lhHW, yPlinth + 0.18, yEave, -hl, hl, 17, 0.88);
+      // Horizontal dark elm/cedar bark lashing bands along side walls to break up bark panels
+      for (const bandFrac of [0.38, 0.74, 0.96]) {
+        const by = yPlinth + (yEave - yPlinth) * bandFrac;
+        emitBox(toWorld, -lhHW - 0.05, lhHW + 0.05, by - 0.07, by + 0.07, -hl - 0.04, hl + 0.04, 10, 0.70, true);
+      }
       // Barrel-vaulted bark roof built from 3 stacked arched tiers (kind 17)
       beginSection('longhouse_barrel_vault_roof');
-      emitBox(toWorld, -lhHW * 0.92, lhHW * 0.92, yEave, yEave + vaultRise * 0.46, -hl - 0.15, hl + 0.15, 17, 0.93, true, lhHW * 0.14);
-      emitBox(toWorld, -lhHW * 0.76, lhHW * 0.76, yEave + vaultRise * 0.46, yEave + vaultRise * 0.82, -hl - 0.12, hl + 0.12, 17, 0.95, true, lhHW * 0.18);
-      emitBox(toWorld, -lhHW * 0.52, lhHW * 0.52, yEave + vaultRise * 0.82, yEave + vaultRise, -hl - 0.08, hl + 0.08, 17, 0.97, true, lhHW * 0.22);
+      emitBox(toWorld, -lhHW * 0.92, lhHW * 0.92, yEave, yEave + vaultRise * 0.46, -hl - 0.15, hl + 0.15, 17, 0.91, true, lhHW * 0.14);
+      emitBox(toWorld, -lhHW * 0.76, lhHW * 0.76, yEave + vaultRise * 0.46, yEave + vaultRise * 0.82, -hl - 0.12, hl + 0.12, 17, 0.94, true, lhHW * 0.18);
+      emitBox(toWorld, -lhHW * 0.52, lhHW * 0.52, yEave + vaultRise * 0.82, yEave + vaultRise, -hl - 0.08, hl + 0.08, 17, 0.96, true, lhHW * 0.22);
       // Iterated external vertical & arched sapling binder poles every 2.8m along Z + roof smoke holes
       const nBays = snapBays(inst.length - 1.6, 2.8, 5);
       const baySpan = (inst.length - 1.6) / nBays;
       for (let b = 0; b <= nBays; b++) {
         const bz = -hl + 0.8 + b * baySpan;
         beginSection('longhouse_sapling_ribs');
-        emitCylinder(toWorld, -lhHW - 0.08, bz, yGround - 0.6, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
-        emitCylinder(toWorld, lhHW + 0.08, bz, yGround - 0.6, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, -lhHW - 0.08, bz, yGround - 0.26, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
+        emitCylinder(toWorld, lhHW + 0.08, bz, yGround - 0.26, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
         emitBox(toWorld, -lhHW * 0.58, lhHW * 0.58, yEave + vaultRise - 0.05, yEave + vaultRise + 0.09, bz - 0.08, bz + 0.08, 10, 0.76, true);
         if (b > 0 && b < nBays && b % 2 === 1) {
           beginSection('roof_smoke_holes');
@@ -5809,39 +5843,69 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.85, zFace - 0.18, zFace + 0.18, 14, 0.26);
       }
     } else if (inst.prefabId === 'indigenous_palisade_ring') {
-      // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds
+      // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds:
+      // Solid continuous split-log & woven-sapling stockade curtain wall connecting all perimeter posts (no floating grey floor wedge!).
       const rRingX = hw * 0.90;
       const rRingZ = hl * 0.90;
-      const yPlinth = yGround + 0.04;
+      const yPlinth = yGround + 0.03;
+      const emitStockadeChord = (x0, z0, x1, z1, y0, y1, halfThick, kind, shade) => {
+        const dx = x1 - x0;
+        const dz = z1 - z0;
+        const segLen = Math.hypot(dx, dz) || 1;
+        const nx = (-dz / segLen) * halfThick;
+        const nz = (dx / segLen) * halfThick;
+        const b0L = toWorld(x0 + nx, y0, z0 + nz);
+        const b0R = toWorld(x0 - nx, y0, z0 - nz);
+        const b1L = toWorld(x1 + nx, y0, z1 + nz);
+        const b1R = toWorld(x1 - nx, y0, z1 - nz);
+        const t0L = toWorld(x0 + nx, y1, z0 + nz);
+        const t0R = toWorld(x0 - nx, y1, z0 - nz);
+        const t1L = toWorld(x1 + nx, y1, z1 + nz);
+        const t1R = toWorld(x1 - nx, y1, z1 - nz);
+        pushQuad(b0L, b1L, t1L, t0L, kind, shade);
+        pushQuad(b1R, b0R, t0R, t1R, kind, shade * 0.95);
+        pushQuad(t0L, t1L, t1R, t0R, kind, shade * 1.04);
+      };
       beginSection('plaza_earth_floor');
-      emitCylinder(toWorld, 0, 0, yGround - 0.8, yPlinth, 4.35, 4.10, 12, 16, 0.78, true);
-      // 28 pointed vertical log stockade posts around the perimeter with a baffled entrance gap on -Z
+      // Ground-flush central council hearth ring (replaces the deep grey stone cylinder that caused slope wedges)
+      emitCylinder(toWorld, 0, 0, yGround - 0.14, yPlinth + 0.04, 2.35, 2.20, 10, 10, 0.72, true);
+      // 28 pointed vertical log stockade posts connected by a continuous split-log stockade wall with a baffled entrance on -Z
       beginSection('palisade_stockade_posts');
       const nPosts = 28;
       const postH = Math.max(3.6, inst.height);
+      const isGateAngle = (a) => Math.abs(Math.sin(a) + 1) < 0.07 && Math.abs(Math.cos(a)) < 0.32;
       for (let p = 0; p < nPosts; p++) {
         const angle = (p / nPosts) * Math.PI * 2;
-        // Leave entrance gap near -Z (angle ~ -PI/2 = 3*PI/2)
-        if (Math.abs(Math.sin(angle) + 1) < 0.08 && Math.abs(Math.cos(angle)) < 0.35) continue;
+        if (isGateAngle(angle)) continue;
         const px = Math.cos(angle) * rRingX;
         const pz = Math.sin(angle) * rRingZ;
         const hVar = ((p * 7) % 5) * 0.14;
-        emitCylinder(toWorld, px, pz, yGround - 1.5, yPlinth + postH + hVar, 0.34, 0.16, 6, 10, 0.74 + (p % 3) * 0.04, true);
+        emitCylinder(toWorld, px, pz, yGround - 0.35, yPlinth + postH + hVar, 0.32, 0.15, 6, 10, 0.74 + (p % 3) * 0.04, true);
+        const nextAngle = (((p + 1) % nPosts) / nPosts) * Math.PI * 2;
+        if (!isGateAngle(nextAngle)) {
+          const nx = Math.cos(nextAngle) * rRingX;
+          const nz = Math.sin(nextAngle) * rRingZ;
+          // Continuous split-log & woven-sapling curtain wall between post p and post p+1
+          emitStockadeChord(px, pz, nx, nz, yGround - 0.28, yPlinth + postH - 0.28, 0.16, 10, 0.78);
+          // Upper and lower horizontal withe-lashed sapling binder rails
+          emitStockadeChord(px, pz, nx, nz, yPlinth + 1.05, yPlinth + 1.24, 0.22, 10, 0.68);
+          emitStockadeChord(px, pz, nx, nz, yPlinth + postH - 0.78, yPlinth + postH - 0.58, 0.22, 10, 0.68);
+        }
       }
       // Central stone council hearth (kind 11 + 13) & 4 split-log council benches (kind 10)
       beginSection('council_firepit_and_benches');
-      emitCylinder(toWorld, 0, 0, yGround - 0.3, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
+      emitCylinder(toWorld, 0, 0, yGround - 0.18, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
       emitCylinder(toWorld, 0, 0, yPlinth + 0.42, yPlinth + 0.52, 0.95, 0.78, 8, 13, 0.94, true);
-      emitBox(toWorld, -2.6, 2.6, yGround - 0.25, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
-      emitBox(toWorld, -2.6, 2.6, yGround - 0.25, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
-      emitBox(toWorld, -3.4, -2.75, yGround - 0.25, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
-      emitBox(toWorld, 2.75, 3.4, yGround - 0.25, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yGround - 0.16, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
+      emitBox(toWorld, -2.6, 2.6, yGround - 0.16, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
+      emitBox(toWorld, -3.4, -2.75, yGround - 0.16, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
+      emitBox(toWorld, 2.75, 3.4, yGround - 0.16, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
       // Three Sisters (maize, climbing beans, winter squash) hillock mounds inside the stockade lee
       beginSection('three_sisters_crop_mounds');
       for (const mx of [-rRingX * 0.48, rRingX * 0.48]) {
         for (const mz of [-rRingZ * 0.36, 0, rRingZ * 0.36]) {
-          emitCylinder(toWorld, mx, mz, yGround - 0.45, yPlinth + 0.38, 0.95, 0.55, 6, 16, 0.76, true);
-          emitCylinder(toWorld, mx, mz, yPlinth + 0.32, yPlinth + 1.65, 0.32, 0.08, 5, 4, 0.84, true);
+          emitCylinder(toWorld, mx, mz, yGround - 0.18, yPlinth + 0.36, 0.95, 0.55, 6, 10, 0.72, true);
+          emitCylinder(toWorld, mx, mz, yPlinth + 0.30, yPlinth + 1.65, 0.32, 0.08, 5, 4, 0.84, true);
         }
       }
     } else if (inst.prefabId === 'taino_cacique_caney') {
@@ -6047,52 +6111,111 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitCylinder(toWorld, -hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
       emitCylinder(toWorld, hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
     } else if (inst.prefabId === 'english_triangular_palisade_fort') {
-      // 1607 James Fort Triangular Timber Palisade & Bulwarks:
-      // Triangular upright-log stockade enclosure with 3 circular/half-moon corner bulwark bastions,
-      // raised earthen/timber gun platforms, 4 mounted demi-culverin cannon barrels, riverward gatehouse,
-      // and interior mud-and-stud guardhouse / magazine.
-      const yPlinth = yGround + 0.35;
+      // 1607 James Fort Enclosing Triangular Timber Palisade & Bulwarks:
+      // Large triangular split-oak stockade perimeter enclosing the core colonial settlement buildings,
+      // with 3 circular corner bulwark bastions, continuous solid timber curtain walls + closely spaced pointed palisade logs,
+      // interior raised timber firing banquettes & walers, 4 mounted demi-culverin cannon barrels, riverward gatehouse,
+      // and gate-flank guardhouse / magazine.
+      const yPlinth = yGround + 0.16;
       const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
       const yBulwarkDeck = yWallTop - 1.05;
-      // 3 triangular apex coordinates: SW river bulwark (-hw*0.84, -hl*0.68), SE river bulwark (+hw*0.84, -hl*0.68), N landward bulwark (0, +hl*0.82)
-      const bSW = [-hw * 0.84, -hl * 0.68];
-      const bSE = [hw * 0.84, -hl * 0.68];
-      const bN = [0, hl * 0.82];
-      const rBulwark = Math.min(4.8, Math.min(hw, hl) * 0.28);
+      // 3 triangular apex coordinates: SW river bulwark (-hw*0.86, -hl*0.72), SE river bulwark (+hw*0.86, -hl*0.72), N landward bulwark (0, +hl*0.86)
+      const bSW = [-hw * 0.86, -hl * 0.72];
+      const bSE = [hw * 0.86, -hl * 0.72];
+      const bN = [0, hl * 0.86];
+      const rBulwark = Math.min(6.4, Math.min(hw, hl) * 0.24);
+      const emitAngledWall = (x0, z0, x1, z1, y0, y1, halfThick, kind, shade) => {
+        const dx = x1 - x0;
+        const dz = z1 - z0;
+        const segLen = Math.hypot(dx, dz) || 1;
+        const nx = (-dz / segLen) * halfThick;
+        const nz = (dx / segLen) * halfThick;
+        const b0L = toWorld(x0 + nx, y0, z0 + nz);
+        const b0R = toWorld(x0 - nx, y0, z0 - nz);
+        const b1L = toWorld(x1 + nx, y0, z1 + nz);
+        const b1R = toWorld(x1 - nx, y0, z1 - nz);
+        const t0L = toWorld(x0 + nx, y1, z0 + nz);
+        const t0R = toWorld(x0 - nx, y1, z0 - nz);
+        const t1L = toWorld(x1 + nx, y1, z1 + nz);
+        const t1R = toWorld(x1 - nx, y1, z1 - nz);
+        pushQuad(b0L, b1L, t1L, t0L, kind, shade);
+        pushQuad(b1R, b0R, t0R, t1R, kind, shade * 0.95);
+        pushQuad(t0L, t1L, t1R, t0R, kind, shade * 1.04);
+        pushQuad(b0R, b0L, t0L, t0R, kind, shade * 0.92);
+        pushQuad(b1L, b1R, t1R, t1L, kind, shade * 0.92);
+      };
 
       beginSection('fort_earthwork_plinth');
-      // Graded earthen court & firing bank under the triangle
-      emitBox(toWorld, bSW[0] * 0.9, bSE[0] * 0.9, yGround - 1.8, yPlinth, bSW[1] - 0.8, bN[1] * 0.35, 16, 0.80, true, 0.25);
-      emitBox(toWorld, bSW[0] * 0.52, bSE[0] * 0.52, yGround - 1.8, yPlinth, bN[1] * 0.15, bN[1] * 0.85, 16, 0.80, true, 0.25);
+      // Perimeter earthen embankment berm along the 3 curtains (leaves the central parade/village ground open)
+      emitAngledWall(bSW[0], bSW[1], bSE[0], bSE[1], yGround - 0.45, yPlinth, 1.35, 10, 0.72);
+      emitAngledWall(bSW[0], bSW[1], bN[0], bN[1], yGround - 0.45, yPlinth, 1.35, 10, 0.72);
+      emitAngledWall(bSE[0], bSE[1], bN[0], bN[1], yGround - 0.45, yPlinth, 1.35, 10, 0.72);
 
-      // 3 Circular Corner Bulwark Bastions (earthen drum + timber revetment + log parapet + gun deck)
+      // 3 Circular Corner Bulwark Bastions (earthen drum + timber revetment + solid log parapet + gun deck)
       beginSection('corner_bulwark_bastions');
       for (const [bx, bz] of [bSW, bSE, bN]) {
-        emitCylinder(toWorld, bx, bz, yGround - 2.0, yBulwarkDeck, rBulwark + 0.35, rBulwark + 0.15, 10, 16, 0.78, true);
-        emitCylinder(toWorld, bx, bz, yBulwarkDeck - 0.25, yBulwarkDeck + 0.08, rBulwark + 0.12, rBulwark + 0.12, 10, 10, 0.82, true);
-        const nLogs = 16;
+        emitCylinder(toWorld, bx, bz, yGround - 1.2, yBulwarkDeck, rBulwark + 0.35, rBulwark + 0.15, 12, 16, 0.78, true);
+        emitCylinder(toWorld, bx, bz, yBulwarkDeck - 0.25, yBulwarkDeck + 0.08, rBulwark + 0.12, rBulwark + 0.12, 12, 10, 0.82, true);
+        const nLogs = 24;
         for (let p = 0; p < nLogs; p++) {
           const a = (p / nLogs) * Math.PI * 2;
-          // Leave gun embrasure gaps facing outward
-          if (p % 4 === 0) continue;
+          const aNext = (((p + 1) % nLogs) / nLogs) * Math.PI * 2;
           const lx = bx + Math.cos(a) * rBulwark;
           const lz = bz + Math.sin(a) * rBulwark;
-          emitCylinder(toWorld, lx, lz, yGround - 1.2, yWallTop + 0.45 + (p % 3) * 0.14, 0.28, 0.14, 6, 10, 0.72 + (p % 2) * 0.05, true);
+          const nx = bx + Math.cos(aNext) * rBulwark;
+          const nz = bz + Math.sin(aNext) * rBulwark;
+          // Continuous lower breastwork wall around the bulwark drum
+          emitAngledWall(lx, lz, nx, nz, yBulwarkDeck, yBulwarkDeck + 0.72, 0.18, 10, 0.76);
+          // Leave cannon embrasure openings on every 6th bay
+          if (p % 6 === 0) continue;
+          emitAngledWall(lx, lz, nx, nz, yBulwarkDeck + 0.70, yWallTop + 0.28, 0.16, 10, 0.78);
+          emitCylinder(toWorld, lx, lz, yGround - 0.8, yWallTop + 0.45 + (p % 3) * 0.14, 0.28, 0.14, 6, 10, 0.72 + (p % 2) * 0.05, true);
         }
       }
 
-      // 3 Triangular Palisade Curtain Walls (Riverward curtain bSW->bSE with central gate gap; West curtain bSW->bN; East curtain bSE->bN)
+      // 3 Triangular Palisade Curtain Walls (Riverward curtain bSW->bSE with central gate; West curtain bSW->bN; East curtain bSE->bN)
       beginSection('triangular_palisade_curtains');
       const emitPalisadeLine = (x0, z0, x1, z1, leaveCenterGate) => {
-        const dist = Math.hypot(x1 - x0, z1 - z0);
-        const steps = Math.max(8, Math.round(dist / 0.78));
-        for (let s = 2; s <= steps - 2; s++) {
+        const dx = x1 - x0;
+        const dz = z1 - z0;
+        const dist = Math.hypot(dx, dz) || 1;
+        // Solid continuous split-oak stockade curtain wall, interior horizontal waler beams, and raised firing banquette step
+        const emitCurtainSpan = (u0, u1) => {
+          const sx0 = x0 + dx * u0, sz0 = z0 + dz * u0;
+          const sx1 = x0 + dx * u1, sz1 = z0 + dz * u1;
+          // Continuous solid split-oak curtain wall connecting the posts and bulwarks
+          emitAngledWall(sx0, sz0, sx1, sz1, yGround - 0.38, yWallTop - 0.16, 0.24, 10, 0.77);
+          // Upper and lower horizontal oak waler binder beams
+          emitAngledWall(sx0, sz0, sx1, sz1, yPlinth + 1.35, yPlinth + 1.58, 0.31, 10, 0.68);
+          emitAngledWall(sx0, sz0, sx1, sz1, yWallTop - 0.82, yWallTop - 0.58, 0.31, 10, 0.68);
+          // Interior raised timber firing banquette along the inside of the curtain wall
+          const inX = (0 - (sx0 + sx1) * 0.5);
+          const inZ = (0 - (sz0 + sz1) * 0.5);
+          let perpX = -dz / dist, perpZ = dx / dist;
+          if (perpX * inX + perpZ * inZ < 0) {
+            perpX = -perpX;
+            perpZ = -perpZ;
+          }
+          const bx0 = sx0 + perpX * 0.72, bz0 = sz0 + perpZ * 0.72;
+          const bx1 = sx1 + perpX * 0.72, bz1 = sz1 + perpZ * 0.72;
+          emitAngledWall(bx0, bz0, bx1, bz1, yGround - 0.25, yPlinth + 1.05, 0.52, 10, 0.74);
+        };
+        const gateHalfU = Math.min(0.08, 2.2 / dist);
+        if (leaveCenterGate) {
+          emitCurtainSpan(0, 0.5 - gateHalfU);
+          emitCurtainSpan(0.5 + gateHalfU, 1);
+        } else {
+          emitCurtainSpan(0, 1);
+        }
+        // Closely spaced pointed vertical palisade logs along the entire curtain from bulwark to bulwark
+        const steps = Math.max(12, Math.round(dist / 0.64));
+        for (let s = 0; s <= steps; s++) {
           const u = s / steps;
-          if (leaveCenterGate && Math.abs(u - 0.5) < 0.09) continue;
-          const px = x0 + (x1 - x0) * u;
-          const pz = z0 + (z1 - z0) * u;
+          if (leaveCenterGate && Math.abs(u - 0.5) < gateHalfU) continue;
+          const px = x0 + dx * u;
+          const pz = z0 + dz * u;
           const hJit = ((s * 5) % 4) * 0.12;
-          emitCylinder(toWorld, px, pz, yGround - 1.4, yWallTop + hJit, 0.26, 0.13, 6, 10, 0.73 + (s % 3) * 0.04, true);
+          emitCylinder(toWorld, px, pz, yGround - 0.65, yWallTop + 0.18 + hJit, 0.26, 0.13, 6, 10, 0.73 + (s % 3) * 0.04, true);
         }
       };
       emitPalisadeLine(bSW[0], bSW[1], bSE[0], bSE[1], true);
@@ -6102,36 +6225,37 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Riverward Timber Gatehouse & Watch-Bell Frame at (0, bSW[1])
       beginSection('river_gatehouse_and_watchtower');
       const gz = bSW[1];
-      emitBox(toWorld, -2.2, 2.2, yPlinth, yWallTop + 1.8, gz - 1.1, gz + 1.1, 10, 0.78, true);
-      emitBox(toWorld, -1.2, 1.2, yPlinth, yWallTop - 0.9, gz - 1.2, gz + 1.2, 14, 0.26);
-      emitRoof(toWorld, -2.5, 2.5, yWallTop + 1.8, yWallTop + 3.4, gz - 1.4, gz + 1.4, 0.45, 0.35, 10, 10);
+      emitBox(toWorld, -2.4, 2.4, yPlinth, yWallTop + 1.8, gz - 1.2, gz + 1.2, 10, 0.78, true);
+      emitBox(toWorld, -1.25, 1.25, yPlinth, yWallTop - 0.9, gz - 1.3, gz + 1.3, 14, 0.26);
+      emitRoof(toWorld, -2.7, 2.7, yWallTop + 1.8, yWallTop + 3.4, gz - 1.5, gz + 1.5, 0.45, 0.35, 10, 10);
 
       // 4 Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages (SW, SE, N bulwarks + River Gate)
       beginSection('bulwark_ordnance_guns');
-      for (const [gx, gz] of [
+      for (const [gx, gzz] of [
         [bSW[0], bSW[1] - rBulwark * 0.55],
         [bSE[0], bSE[1] - rBulwark * 0.55],
-        [-bSW[0] * 0.35, bSW[1] - 0.4],
+        [-bSW[0] * 0.18, bSW[1] - 0.4],
       ]) {
-        emitBox(toWorld, gx - 0.55, gx + 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, gz - 0.9, gz + 0.9, 10, 0.72, true);
-        emitBox(toWorld, gx - 0.22, gx + 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, gz - 1.75, gz + 0.45, 14, 0.36, true);
+        emitBox(toWorld, gx - 0.55, gx + 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, gzz - 0.9, gzz + 0.9, 10, 0.72, true);
+        emitBox(toWorld, gx - 0.22, gx + 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, gzz - 1.75, gzz + 0.45, 14, 0.36, true);
       }
       // North bulwark gun pointing landward (+Z)
       emitBox(toWorld, -0.55, 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, bN[1] - 0.5, bN[1] + 1.1, 10, 0.72, true);
       emitBox(toWorld, -0.22, 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, bN[1] - 0.1, bN[1] + 2.0, 14, 0.36, true);
 
-      // Interior Mud-and-Stud Guardhouse / Corpse de Garde & Powder Magazine inside the triangular court
+      // Gate-Flank Mud-and-Stud Guardhouse / Corps de Garde & Powder Magazine just inside the river gatehouse
       beginSection('interior_guardhouse_and_magazine');
-      const ghW = Math.min(4.2, hw * 0.26);
-      const ghL = Math.min(5.8, hl * 0.28);
-      const yGhEave = yPlinth + 2.85;
-      const yGhPeak = yGhEave + 2.45;
-      emitBox(toWorld, -ghW, ghW, yPlinth, yGhEave, -ghL * 0.6, ghL * 1.4, 12, 0.86, true);
-      // Exposed dark oak post-and-stud timber framing on guardhouse walls
-      for (const sx of [-ghW - 0.06, 0, ghW + 0.06]) {
-        emitBox(toWorld, sx - 0.14, sx + 0.14, yPlinth, yGhEave, -ghL * 0.64, ghL * 1.44, 10, 0.70, true);
+      const ghX = -Math.min(8.5, hw * 0.22);
+      const ghZ = bSW[1] + Math.min(5.2, hl * 0.22);
+      const ghW = Math.min(3.4, hw * 0.18);
+      const ghL = Math.min(4.2, hl * 0.20);
+      const yGhEave = yPlinth + 2.75;
+      const yGhPeak = yGhEave + 2.25;
+      emitBox(toWorld, ghX - ghW, ghX + ghW, yPlinth, yGhEave, ghZ - ghL, ghZ + ghL, 12, 0.86, true);
+      for (const sx of [ghX - ghW - 0.06, ghX, ghX + ghW + 0.06]) {
+        emitBox(toWorld, sx - 0.14, sx + 0.14, yPlinth, yGhEave, ghZ - ghL - 0.04, ghZ + ghL + 0.04, 10, 0.70, true);
       }
-      emitRoof(toWorld, -ghW - 0.25, ghW + 0.25, yGhEave, yGhPeak, -ghL * 0.65, ghL * 1.45, 0.55, 0.32, 10, 10);
+      emitRoof(toWorld, ghX - ghW - 0.25, ghX + ghW + 0.25, yGhEave, yGhPeak, ghZ - ghL - 0.05, ghZ + ghL + 0.05, 0.55, 0.32, 10, 10);
     } else if (inst.prefabId === 'english_half_timber_hall') {
       // 17th-Century English Half-Timbered Church & Company Storehouse (Jamestown 1608/1617 Church & Magazine, Plymouth Meetinghouse):
       // Fieldstone & Tudor brick plinth, buff wattle-and-daub infill walls with dark-oak box framing & Jacobean diagonal braces,
@@ -6625,7 +6749,7 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
   const mask = new Uint8Array(m * m);
 
   const is1550Ortho = Boolean(satelliteData?.is1550Orthophoto);
-  const minTreeElev = is1550Ortho ? 1.2 : 1.5;
+  const minTreeElev = is1550Ortho ? 1.1 : 1.15;
 
   for (let j = 0; j < m; j++) {
     const v = (j + 0.5) / m;
@@ -6641,8 +6765,11 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
       }
       if (portPlacement) {
         const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
-        const clearEnvelope = !portClearanceEnvelope(portPlacement, x, z, is1550Ortho ? 8 : 12);
-        const clearCircle = !portPlacement.hasOrthophotoFootprints && distPort < portPlacement.clearRadius * 0.72;
+        const clearEnvelope = !portClearanceEnvelope(portPlacement, x, z, is1550Ortho ? 8 : 10);
+        const clearCircle =
+          !portPlacement.hasOrthophotoFootprints &&
+          !portPlacement.hasIndigenousSettlement &&
+          distPort < portPlacement.clearRadius * 0.68;
         if (clearEnvelope || clearCircle) {
           mask[idx] = 0;
           continue;
@@ -6656,8 +6783,8 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
         continue;
       }
       const patchNoise = coastalFbm2D(u * 6.5 + 1.9, v * 6.5 - 2.4, seed, 4);
-      const moisture = coastalSmoothstep(minTreeElev, 5.2, h) * coastalSmoothstep(1.12, 0.35, slope);
-      const proceduralVeg = Math.min(1, moisture * (0.76 + 0.38 * patchNoise));
+      const moisture = coastalSmoothstep(minTreeElev, 2.8, h) * coastalSmoothstep(1.12, 0.35, slope);
+      const proceduralVeg = Math.min(1, moisture * (0.84 + 0.32 * patchNoise));
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
       let vegProb = proceduralVeg;
       if (sat) {
@@ -6842,15 +6969,18 @@ export function synthesizeCoastalAlbedo(
         }
       }
 
-      // Foreshore-constrained dry coral/quartz beach berm & backshore dune sand with beach cusp undulations
-      const gentleSlope = coastalSmoothstep(0.28, 0.09, slope);
-      const shoreBand = coastalSmoothstep(95, 32, inlandM);
+      // Pocket-cove constrained dry coral/quartz beach berm & backshore sand (not all coastline is beach)
+      const pocketRaw = coastalBeachPocketFactor(region, x, z);
+      const pocketFactor = coastalSmoothstep(0.45, 0.85, pocketRaw);
+      const gentleSlope = coastalSmoothstep(0.22, 0.07, slope);
+      const shoreBand = coastalSmoothstep(46, 15, inlandM);
       const cuspWave = Math.sin(x * 0.042 - z * 0.031 + sandNoise * 1.6) * 0.24;
       const bermRipple = Math.sin(x * 0.22 + z * 0.18 + sandNoise * 2.1) * 3.5;
-      const bermTop = 5.4 + sandNoise * 1.1 + cuspWave * 0.6;
+      const bermTop = 3.0 + sandNoise * 0.55 + cuspWave * 0.35;
       const drySandWeight =
-        coastalSmoothstep(-0.3, 0.7, h) *
-        coastalSmoothstep(bermTop, 1.4, h) *
+        pocketFactor *
+        coastalSmoothstep(-0.2, 0.6, h) *
+        coastalSmoothstep(bermTop, 1.1, h) *
         gentleSlope *
         shoreBand;
       if (drySandWeight > 0) {
@@ -6862,13 +6992,14 @@ export function synthesizeCoastalAlbedo(
         b = b * (1 - drySandWeight) + dryB * drySandWeight;
       }
 
-      // Capillary damp sand transition & high-tide wrack/shell line above active swash
-      const swashCrest = 0.22 + sandNoise * 0.16 + cuspWave * 0.35;
+      // Capillary damp sand transition & high-tide wrack/shell line inside pocket beaches
+      const swashCrest = 0.20 + sandNoise * 0.14 + cuspWave * 0.30;
       const dampWeight =
-        coastalSmoothstep(-0.4, 0.15, h) *
-        coastalSmoothstep(swashCrest + 1.55, swashCrest + 0.35, h) *
-        coastalSmoothstep(0.27, 0.08, slope) *
-        coastalSmoothstep(58, 20, inlandM);
+        pocketFactor *
+        coastalSmoothstep(-0.35, 0.15, h) *
+        coastalSmoothstep(swashCrest + 1.35, swashCrest + 0.30, h) *
+        coastalSmoothstep(0.24, 0.08, slope) *
+        coastalSmoothstep(42, 14, inlandM);
       if (dampWeight > 0) {
         const wrackBand = Math.max(0, 1 - Math.abs(h - (swashCrest + 0.88)) / 0.24) * Math.max(0, sandNoise + 0.35);
         const dampR = 172 - wrackBand * 26 + fineGrain * 0.55;
@@ -6879,11 +7010,12 @@ export function synthesizeCoastalAlbedo(
         b = b * (1 - dampWeight * 0.75) + dampB * (dampWeight * 0.75);
       }
 
-      // Continuous wet intertidal swash sand & wave-washed film around the waterline [-1.1m, +1.3m]
+      // Intertidal wet swash sand in pocket beaches [-1.0m, +1.1m]
       const swashWeight =
-        Math.max(0, 1 - Math.abs(h - swashCrest * 0.55) / 1.18) *
-        coastalSmoothstep(0.26, 0.08, slope) *
-        coastalSmoothstep(48, 16, inlandM);
+        pocketFactor *
+        Math.max(0, 1 - Math.abs(h - swashCrest * 0.55) / 1.05) *
+        coastalSmoothstep(0.22, 0.07, slope) *
+        coastalSmoothstep(34, 12, inlandM);
       if (swashWeight > 0) {
         const wetR = 138 + fineGrain * 0.45;
         const wetG = 126 + fineGrain * 0.42;
@@ -6981,7 +7113,9 @@ export function seedCoastalVegetation(
       const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
       const hullMargin = portPlacement.hasOrthophotoFootprints ? 4 : 10;
       if (
-        (!portPlacement.hasOrthophotoFootprints && distPort < portPlacement.clearRadius * 0.72) ||
+        (!portPlacement.hasOrthophotoFootprints &&
+          !portPlacement.hasIndigenousSettlement &&
+          distPort < portPlacement.clearRadius * 0.68) ||
         !portClearanceEnvelope(portPlacement, x, z, hullMargin)
       ) {
         continue;
@@ -6994,7 +7128,7 @@ export function seedCoastalVegetation(
     if (slope > 1.12) continue;
 
     const prob = vegetationProbability(biomeMask, m, u, v);
-    if (prob <= 0 || density > prob * 0.92) continue;
+    if (prob <= 0 || density > prob * 0.98) continue;
 
     const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
     const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
@@ -7002,7 +7136,7 @@ export function seedCoastalVegetation(
     const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
     const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
     const bIdx = bj * m + bi;
-    const nearSandyShore = beachData.drySandMask[bIdx] >= 24 || beachData.swashMask[bIdx] >= 16 || inlandM <= 75;
+    const nearSandyShore = beachData.drySandMask[bIdx] >= 36 || beachData.swashMask[bIdx] >= 28 || (inlandM <= 55 && coastalBeachPocketFactor(region, x, z) > 0.35);
     const isPalmClimate =
       (region.climate === 'tropical' || region.climate === 'subtropical') &&
       Math.abs(region.latitude ?? 0) < 33.2;
@@ -7016,11 +7150,11 @@ export function seedCoastalVegetation(
       const r = isPalm
         ? COCONUT_PALM_GENOME_SPEC.plumeRadiusRangeMetres[0] +
           tNorm * (COCONUT_PALM_GENOME_SPEC.plumeRadiusRangeMetres[1] - COCONUT_PALM_GENOME_SPEC.plumeRadiusRangeMetres[0])
-        : baseRadius * 0.85;
+        : baseRadius * 0.96;
       const ht = isPalm
         ? COCONUT_PALM_GENOME_SPEC.matureHeightRangeMetres[0] +
           hNorm * (COCONUT_PALM_GENOME_SPEC.matureHeightRangeMetres[1] - COCONUT_PALM_GENOME_SPEC.matureHeightRangeMetres[0])
-        : baseHeight * 0.75;
+        : baseHeight * 0.94;
       const tuple = [x, h, z, r, ht, shape, sx, sz];
       allTrees.push(...tuple);
       if (isPalm) {
@@ -7152,17 +7286,19 @@ export function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist 
     const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
     const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
     const inlandM = distInfo.distWater[gj * n + gi];
+    const pocket = coastalBeachPocketFactor(region, x, z);
     let sandWeight =
-      coastalSmoothstep(-2.4, 0.2, h) *
-      coastalSmoothstep(6.2, 1.4, h) *
-      coastalSmoothstep(0.30, 0.08, slope) *
-      coastalSmoothstep(maxMeshBeachInland, maxMeshBeachInland * 0.35, inlandM);
+      pocket *
+      coastalSmoothstep(-1.8, 0.2, h) *
+      coastalSmoothstep(4.2, 1.1, h) *
+      coastalSmoothstep(0.24, 0.08, slope) *
+      coastalSmoothstep(maxMeshBeachInland * 0.65, maxMeshBeachInland * 0.22, inlandM);
     if (beaches?.drySandMask && beaches?.swashMask) {
       const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
       const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
       const bIdx = bj * m + bi;
       const maskSand = Math.max(beaches.drySandMask[bIdx], beaches.swashMask[bIdx]) / 255;
-      sandWeight = Math.max(sandWeight * 0.55, maskSand);
+      sandWeight = Math.max(sandWeight * 0.45, maskSand);
     }
     // Encode 0.02 + 0.98 * sandWeight in kind.y so the WGSL terrain shader recognizes
     // procedural coastal terrain (kind.y > 0.015) while keeping Saba (kind.y = 0) untouched.
@@ -8471,8 +8607,8 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
           rgba1550[idx + 1] = Math.round(48 + shoal * 78 + mottle * 10);
           rgba1550[idx + 2] = Math.round(68 + shoal * 74 + mottle * 10);
           rgba1550[idx + 3] = 255;
-        } else if (h <= 3.8 && inlandM <= 75) {
-          // Warm 1550 coral-sand beach berm
+        } else if (coastalBeachPocketFactor(region, x, z) > 0.38 && h <= 3.0 && inlandM <= 48) {
+          // Warm 1550 coral-sand pocket beach berm (only in pocket coves, not continuous along all coastline)
           rgba1550[idx] = Math.min(255, Math.round(224 + mottle * 18));
           rgba1550[idx + 1] = Math.min(255, Math.round(198 + mottle * 16));
           rgba1550[idx + 2] = Math.min(255, Math.round(150 + mottle * 14));

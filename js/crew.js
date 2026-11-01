@@ -838,39 +838,47 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
 
   if (inst.prefabId === 'stone_sea_bastion') {
     const yDeck = yTop - 0.85;
-    const zSea = -hl + wallT + 1.25;
-    const zLand = hl - wallT - 1.25;
+    const yBanquette = yTop - 0.16;
+    const zSea = -hl + wallT + 0.55;
+    const zLand = hl - wallT - 0.55;
     for (const [gIdx, k] of [-1, 0, 1].entries()) {
       const lx = k * (hw * 0.48);
-      specs.push({ lx, ly: yDeck, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
+      specs.push({ lx, ly: yBanquette, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
     }
     for (const [gIdx, k] of [-0.5, 0.5].entries()) {
       const lx = k * (hw * 0.50);
-      specs.push({ lx, ly: yDeck, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 3 + gIdx });
+      specs.push({ lx, ly: yBanquette, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 3 + gIdx });
     }
     const zSpan0 = Math.max(-hl + 3.2, -hl * 0.78);
     const zSpan1 = Math.min(-1.0, -hl * 0.18);
     const zSpan2 = Math.max(1.0, hl * 0.18);
     const zSpan3 = Math.min(hl - 3.2, hl * 0.78);
     for (const sideX of [-1, 1]) {
-      const lx = sideX * Math.max(2.2, hw - wallT - 0.85);
-      specs.push({ lx, ly: yDeck, lz: (zSpan0 + zSpan1) * 0.5, routeZ: [zSpan0, zSpan1], localYaw: sideX < 0 ? -Math.PI / 2 : Math.PI / 2, role: 'Centinela de Muralla', stationKind: 'rampart' });
-      specs.push({ lx, ly: yDeck, lz: (zSpan2 + zSpan3) * 0.5, routeZ: [zSpan2, zSpan3], localYaw: sideX < 0 ? -Math.PI / 2 : Math.PI / 2, role: 'Alabardero', stationKind: 'rampart' });
+      const lx = sideX * Math.max(2.2, hw - wallT - 0.55);
+      specs.push({ lx, ly: yBanquette, lz: (zSpan0 + zSpan1) * 0.5, routeZ: [zSpan0, zSpan1], localYaw: 0, role: 'Centinela de Muralla', stationKind: 'rampart' });
+      specs.push({ lx, ly: yBanquette, lz: (zSpan2 + zSpan3) * 0.5, routeZ: [zSpan2, zSpan3], localYaw: Math.PI, role: 'Alabardero', stationKind: 'rampart' });
+    }
+    // 2 Seaward corner Garita lookouts visible on the flanking sentry turrets
+    for (const sx of [-1, 1]) {
+      const gx = sx * (hw + 0.35);
+      const gz = -(hl + 0.35);
+      specs.push({ lx: gx, ly: yTop - 0.10, lz: gz, routeZ: [gz, gz], localYaw: Math.PI, role: 'Vigía de Garita', stationKind: 'garita' });
     }
     const kw = Math.min(6.4, hw * 0.46);
-    specs.push({ lx: -kw - 1.15, ly: yDeck, lz: 0, routeZ: [-1.2, 1.2], localYaw: -Math.PI / 2, role: 'Capitán de Presidio', stationKind: 'citadel' });
+    specs.push({ lx: -kw - 1.15, ly: yDeck, lz: 0, routeZ: [-1.8, 1.8], localYaw: 0, role: 'Capitán de Presidio', stationKind: 'citadel' });
   } else if (inst.prefabId === 'bastion_trace_fortress') {
     const yDeck = yTop - 0.85;
+    const yBanquette = yTop - 0.16;
     const bOut = 4.2;
-    const zSea = -hl + wallT + 1.25;
-    const zLand = hl - wallT - 1.25;
+    const zSea = -hl + wallT + 0.55;
+    const zLand = hl - wallT - 0.55;
     for (const [gIdx, k] of [-1.5, -0.5, 0.5, 1.5].entries()) {
       const lx = k * (hw * 0.34);
-      specs.push({ lx, ly: yDeck, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
+      specs.push({ lx, ly: yBanquette, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
     }
     for (const [gIdx, k] of [-0.5, 0.5].entries()) {
       const lx = k * (hw * 0.34);
-      specs.push({ lx, ly: yDeck, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 4 + gIdx });
+      specs.push({ lx, ly: yBanquette, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 4 + gIdx });
     }
     // 4 Corner diamond bastions (top surface at yTop + 0.65)
     const yBastion = yTop + 0.65;
@@ -882,14 +890,14 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       }
     }
     // 2 Seaward ravelin guards (top surface at yTop - 1.3)
-    const yRavelin = yTop - 1.3;
+    const yRavelin = yTop - 1.25;
     const zRavelin = -hl - bOut - 4.5;
     for (const sx of [-1, 1]) {
       specs.push({ lx: sx * 2.4, ly: yRavelin, lz: zRavelin, routeZ: [zRavelin - 1.1, zRavelin + 1.1], localYaw: Math.PI, role: 'Guardia de Revellín', stationKind: 'ravelin' });
     }
-    // 2 Parade / magazine sentries between the flank barracks
+    // 2 Flank rampart sentries patrolling the east and west curtain walls
     for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * 2.2, ly: yDeck, lz: -3.2, routeZ: [-6.0, -0.8], localYaw: Math.PI, role: 'Alabardero', stationKind: 'parade' });
+      specs.push({ lx: sx * (hw - wallT - 0.55), ly: yBanquette, lz: 0, routeZ: [-hl * 0.55, hl * 0.55], localYaw: sx < 0 ? 0 : Math.PI, role: 'Alabardero', stationKind: 'rampart' });
     }
   } else if (inst.prefabId === 'torreon_atalaya_farol') {
     const rBase = Math.min(hw, hl);
@@ -913,21 +921,24 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       }
     }
   } else if (inst.prefabId === 'english_triangular_palisade_fort') {
-    const yPlinth = yGround + 0.35;
-    const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
-    const yBulwarkDeck = yWallTop - 1.05;
-    const bSW = [-hw * 0.84, -hl * 0.68];
-    const bSE = [hw * 0.84, -hl * 0.68];
-    const bN = [0, hl * 0.82];
-    specs.push({ lx: bSW[0], ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.2, bSW[1] + 0.6], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
-    specs.push({ lx: 0, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 0.8, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
-    specs.push({ lx: bSE[0], ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.2, bSE[1] + 0.6], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
-    specs.push({ lx: bN[0], ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 0.8, bN[1] + 1.0], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
-    specs.push({ lx: -2.4, ly: yPlinth, lz: -1.8, routeZ: [-3.5, 1.5], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'parade' });
-    specs.push({ lx: 2.4, ly: yPlinth, lz: -1.8, routeZ: [-3.5, 1.5], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'parade' });
+    const yPlinth = yGround + 0.25;
+    const yWallTop = yPlinth + 4.4;
+    const yBulwarkDeck = yWallTop - 0.95;
+    const yBanquette = yWallTop - 1.10;
+    const bSW = [-hw * 0.86, -hl * 0.72];
+    const bSE = [hw * 0.86, -hl * 0.72];
+    const bN = [0, hl * 0.86];
+    specs.push({ lx: bSW[0], ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.4, bSW[1] + 0.8], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
+    specs.push({ lx: 0, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 1.0, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
+    specs.push({ lx: bSE[0], ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.4, bSE[1] + 0.8], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
+    specs.push({ lx: bN[0], ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 1.0, bN[1] + 1.2], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
+    specs.push({ lx: -hw * 0.38, ly: yBanquette, lz: bSW[1] + 1.2, routeZ: [bSW[1] + 0.6, bSW[1] + 2.4], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'rampart' });
+    specs.push({ lx: hw * 0.38, ly: yBanquette, lz: bSE[1] + 1.2, routeZ: [bSE[1] + 0.6, bSE[1] + 2.4], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'rampart' });
+    specs.push({ lx: -3.2, ly: yPlinth, lz: bSW[1] - 1.8, routeZ: [bSW[1] - 3.2, bSW[1] - 0.8], localYaw: Math.PI, role: 'River Gate Halberdier', stationKind: 'parade' });
+    specs.push({ lx: 3.2, ly: yPlinth, lz: bSE[1] - 1.8, routeZ: [bSE[1] - 3.2, bSE[1] - 0.8], localYaw: Math.PI, role: 'River Gate Musketeer', stationKind: 'parade' });
   } else if (inst.prefabId === 'curtain_wall_and_gate') {
     const wallHW = Math.min(3.4, hw);
-    const yWalk = yTop - 0.90;
+    const yWalk = yTop - 0.18;
     const yGateTop = yTop + 2.8;
     const gHW = wallHW + 1.15;
     const zWingMax = Math.max(6.2, hl - 2.0);
@@ -936,8 +947,8 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       const z0 = sideZ < 0 ? -zWingMax : zWingMin;
       const z1 = sideZ < 0 ? -zWingMin : zWingMax;
       const zMid = (z0 + z1) * 0.5;
-      specs.push({ lx: -wallHW + 1.25, ly: yWalk, lz: zMid - 0.8, routeZ: [z0, zMid], localYaw: -Math.PI / 2, role: 'Centinela de Muralla', stationKind: 'adarve' });
-      specs.push({ lx: wallHW - 1.25, ly: yWalk, lz: zMid + 0.8, routeZ: [zMid, z1], localYaw: Math.PI / 2, role: 'Arcabucero', stationKind: 'adarve' });
+      specs.push({ lx: -wallHW + 1.05, ly: yWalk, lz: zMid - 0.8, routeZ: [z0, zMid], localYaw: 0, role: 'Centinela de Muralla', stationKind: 'adarve' });
+      specs.push({ lx: wallHW - 1.05, ly: yWalk, lz: zMid + 0.8, routeZ: [zMid, z1], localYaw: Math.PI, role: 'Arcabucero', stationKind: 'adarve' });
     }
     for (const sz of [-1, 1]) {
       specs.push({ lx: -wallHW * 0.45, ly: yGateTop, lz: sz * 1.4, routeZ: [sz * 1.4, sz * 1.4], localYaw: -Math.PI / 2, role: 'Vigía de Puerta', stationKind: 'gate-roof' });
@@ -969,7 +980,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
     const wy = effLy + 0.028;
     const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
-    const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
+    const worldYaw = (spec.localYaw ?? 0) + (inst.yaw ?? 0);
     Object.assign(s, {
       id: `${inst.id ?? inst.prefabId}_soldier_${idx + 1}`,
       name,
@@ -1009,7 +1020,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
         ? [look.face[0], look.face[1], look.face[2], look.face[3] + 2.0]
         : [...look.face],
     });
-    s.scale.fill((s.sex === 'female' ? 0.99 : 0.97) * (1 + ((globalIdx % 3) - 1) * 0.02));
+    s.scale.fill((s.sex === 'female' ? 1.04 : 1.02) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
     const half = s.yaw * 0.5;
     s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
@@ -1029,33 +1040,33 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
 
   if (inst.prefabId === 'abenaki_birchbark_wigwam' || inst.prefabId === 'taino_circular_bohio') {
     const rDoor = Math.min(hw, hl) + 1.15;
-    specs.push({ lx: -1.1, ly: yGround + 0.04, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: Math.PI, role: 'Villager' });
-    specs.push({ lx: 1.1, ly: yGround + 0.04, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: Math.PI, role: 'Artisan / Weaver' });
+    specs.push({ lx: -1.1, ly: yGround + 0.04, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: 0, role: 'Villager' });
+    specs.push({ lx: 1.1, ly: yGround + 0.04, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: 0, role: 'Artisan / Weaver' });
   } else if (inst.prefabId === 'algonquian_longhouse' || inst.prefabId === 'tupinamba_oca_longhouse' || inst.prefabId === 'kalinago_carbet_hall') {
     const zFront = -hl - 1.4;
     const zSide0 = -hl * 0.65;
     const zSide1 = hl * 0.65;
-    specs.push({ lx: -1.4, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: Math.PI, role: 'Sachem / Cacique' });
-    specs.push({ lx: 1.4, ly: yGround + 0.05, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: Math.PI, role: 'Elder / Speaker' });
-    specs.push({ lx: -(hw + 1.25), ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: -Math.PI / 2, role: 'Hunter / Bowyer' });
-    specs.push({ lx: hw + 1.25, ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI / 2, role: 'Potter / Cultivator' });
+    specs.push({ lx: -1.4, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: 0, role: 'Sachem / Cacique' });
+    specs.push({ lx: 1.4, ly: yGround + 0.05, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: 0, role: 'Elder / Speaker' });
+    specs.push({ lx: -(hw + 1.45), ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: 0, role: 'Hunter / Bowyer' });
+    specs.push({ lx: hw + 1.45, ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI, role: 'Potter / Cultivator' });
   } else if (inst.prefabId === 'taino_cacique_caney' || inst.prefabId === 'maya_limestone_shrine_and_na') {
     const yPlinth = yGround + (inst.prefabId === 'maya_limestone_shrine_and_na' ? 0.55 : 0.12);
     const zFront = -hl - 1.3;
-    specs.push({ lx: 0, ly: yPlinth, lz: -hl * 0.68, routeZ: [-hl * 0.75, -hl * 0.45], localYaw: Math.PI, role: 'Cacique / Halach Uinic' });
-    specs.push({ lx: -2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Behique / Guardian' });
-    specs.push({ lx: 2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: Math.PI, role: 'Weaver / Noble' });
+    specs.push({ lx: 0, ly: yPlinth, lz: -hl * 0.68, routeZ: [-hl * 0.75, -hl * 0.45], localYaw: 0, role: 'Cacique / Halach Uinic' });
+    specs.push({ lx: -2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: 0, role: 'Behique / Guardian' });
+    specs.push({ lx: 2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: 0, role: 'Weaver / Noble' });
   } else if (inst.prefabId === 'taino_batey_court' || inst.prefabId === 'indigenous_palisade_ring') {
-    const zSpan = Math.max(2.5, hl * 0.58);
+    const zSpan = Math.max(2.2, hl * 0.48);
     for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * (hw * 0.45), ly: yGround + 0.05, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
+      specs.push({ lx: sx * (hw * 0.42), ly: yGround + 0.05, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
     }
   } else if (inst.prefabId === 'palafito_estuary_village') {
     const yDeck = yGround + (inst.height ?? 6.8) * 0.36 + 0.16;
-    specs.push({ lx: -1.8, ly: yDeck, lz: -1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Lagoon Fisher' });
-    specs.push({ lx: 1.8, ly: yDeck, lz: 1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Net Maker' });
+    specs.push({ lx: -1.8, ly: yDeck, lz: -1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Lagoon Fisher' });
+    specs.push({ lx: 1.8, ly: yDeck, lz: 1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Net Maker' });
   } else if (inst.prefabId === 'indigenous_canoe_landing') {
-    specs.push({ lx: -hw * 0.32, ly: yGround + 0.06, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Canoe Builder' });
+    specs.push({ lx: -hw * 0.32, ly: yGround + 0.06, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Canoe Builder' });
     specs.push({ lx: hw * 0.32, ly: yGround + 0.06, lz: 0.4, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Shore Lookout' });
   }
 
@@ -1071,7 +1082,7 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
     const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
     const wy = effLy + 0.028;
     const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
-    const worldYaw = (spec.localYaw ?? 0) - (inst.yaw ?? 0);
+    const worldYaw = (spec.localYaw ?? 0) + (inst.yaw ?? 0);
     Object.assign(s, {
       id: `${inst.id ?? inst.prefabId}_villager_${idx + 1}`,
       name,
@@ -1090,7 +1101,7 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
       ly: effLy,
       lz: spec.lz,
       routeZ: [...spec.routeZ],
-      targetZ: spec.routeZ[1],
+      targetZ: spec.localYaw === Math.PI ? spec.routeZ[0] : spec.routeZ[1],
       localYaw: spec.localYaw ?? 0,
       yaw: worldYaw,
       wait: (globalIdx % 6) * 0.42,
@@ -1179,35 +1190,40 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
       } else {
         const dz = s.targetZ - s.lz;
         const dist = Math.abs(dz);
-        const speed = 1.15;
+        const speed = 0.78;
         const step = Math.min(dist, speed * dt);
         if (dist > 1e-4) {
           s.lz += Math.sign(dz) * step;
           s.localYaw = dz >= 0 ? 0 : Math.PI;
           moving = step > 0;
-          crewAdvanceWalk(s, step, { strideMetres: 0.68 });
+          crewAdvanceWalk(s, step);
           s._poseReady = false;
         }
         if (dist - step <= 1e-4) {
           s.targetZ = Math.abs(s.targetZ - s.routeZ[1]) < 1e-3 ? s.routeZ[0] : s.routeZ[1];
-          s.wait = 2.2 + (s.crewIndex % 5) * 0.45;
-          s.localYaw = s.lx < 0 ? -Math.PI / 2 : Math.PI / 2;
+          s.wait = 2.4 + (s.crewIndex % 5) * 0.45;
           s._poseReady = false;
         }
       }
     }
 
-    if (!moving && !underFire && !working && s.walk < 1e-4 && s.brace < 1e-4 && s.work < 1e-4 && s._poseReady) {
+    const desiredYaw = (s.localYaw ?? 0) + (inst?.yaw ?? 0);
+    const yawDiff = Math.abs(Math.atan2(Math.sin(desiredYaw - s.yaw), Math.cos(desiredYaw - s.yaw)));
+
+    if (!moving && !underFire && !working && s.walk < 1e-4 && s.brace < 1e-4 && s.work < 1e-4 && yawDiff < 1e-3 && s._poseReady) {
       s.walk = 0;
       s.brace = 0;
       s.work = 0;
       continue;
     }
 
+    if (!moving && s.walk > 0.02) {
+      crewAdvanceWalk(s, s.walk * 0.45 * dt);
+    }
     s.walk += (Number(moving) - s.walk) * blend;
     s.brace += (Number(underFire) - s.brace) * blend;
     s.work += (Number(working) - s.work) * blend;
-    s.yaw = (s.localYaw ?? 0) - (inst?.yaw ?? 0);
+    s.yaw = crewTurnTowards(s.yaw, desiredYaw, dt, 4.2);
 
     const cosY = Math.cos(inst?.yaw ?? 0);
     const sinY = Math.sin(inst?.yaw ?? 0);
@@ -1219,12 +1235,12 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     const half = s.yaw * 0.5;
     s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
     gltfTRS(s.transform, [wx - ox, wy - oy, wz - oz], s.rotation, s.scale);
-    s._poseReady = !moving;
+    s._poseReady = !moving && s.walk < 1e-3 && yawDiff < 1e-3;
   }
   return garrison;
 }
 
-const MAX_FORT_SOLDIERS_PER_BATCH = 64;
+const MAX_FORT_SOLDIERS_PER_BATCH = 96;
 
 export async function createFortSoldiers({
   device,
@@ -1378,7 +1394,7 @@ export async function createFortSoldiers({
         return;
       }
       if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z)) {
-        const portCullRadius = Math.max(240, activePort?.clearRadius ?? 260) + 440;
+        const portCullRadius = Math.max(600, (activePort?.clearRadius ?? 260) + 1150);
         const dx = camera.x - garrison.origin[0], dz = camera.z - garrison.origin[2];
         if (dx * dx + dz * dz > portCullRadius * portCullRadius) {
           drawEnabled = false;
@@ -1399,9 +1415,9 @@ export async function createFortSoldiers({
         minDist = 0;
         anyVisible = garrison.soldiers.some(s => s.visible);
       }
-      const lod = selectCrewLOD({ x: 0, z: 0, heave: 0 }, { x: minDist, y: 0, z: 0 });
+      const lod = selectCrewLOD({ x: 0, z: 0, heave: 0 }, { x: Math.min(minDist, 380), y: 0, z: 0 });
       activeTier = lod.mainTier;
-      drawEnabled = !lod.culled && minDist <= 420 && anyVisible;
+      drawEnabled = minDist <= 1250 && anyVisible;
       if (!drawEnabled) return;
 
       const stride = activeTier === 0 ? 1 : activeTier === 1 ? 2 : 4;

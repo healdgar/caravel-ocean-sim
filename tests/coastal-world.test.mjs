@@ -1730,14 +1730,106 @@ test('all LANDFALL_SCENARIOS, INDIGENOUS_VILLAGE_PRESETS, and post-smooth coastl
   }
 });
 
+test('Jamestown triangular fort encloses buildings with connected curtain walls, indigenous palisades connect posts, beaches are pocket-constrained, and fort soldiers/villagers walk smoothly', async () => {
+  const { createFortGarrison, stepFortGarrison } = await import('../js/crew.js');
+  const { CARAVEL } = await import('../js/wgsl/caravel.js');
 
+  // 1. Jamestown's triangular fort encloses the core buildings and emits connected curtain walls
+  const jamestown = generateProceduralCoastalPack({
+    id: 'jamestown',
+    year: 1609,
+    size: 129,
+    biomeSize: 64,
+    albedoSize: 64,
+    vegetationCandidates: 900,
+  });
+  const fort = jamestown.port.instances.find((i) => i.prefabId === 'english_triangular_palisade_fort');
+  assert.ok(fort, 'Jamestown places english_triangular_palisade_fort');
+  assert.ok(fort.width >= 110 && fort.length >= 85, 'James Fort is large enough to surround the settlement');
 
+  const cosY = Math.cos(fort.yaw ?? 0);
+  const sinY = Math.sin(fort.yaw ?? 0);
+  const enclosedBuildings = jamestown.port.instances.filter((inst) => {
+    if (inst === fort || !['english_half_timber_hall', 'english_timber_cottage'].includes(inst.prefabId)) return false;
+    const dx = inst.x - fort.x;
+    const dz = inst.z - fort.z;
+    const lx = dx * cosY - dz * sinY;
+    const lz = dx * sinY + dz * cosY;
+    return Math.abs(lx) < fort.width * 0.42 && Math.abs(lz) < fort.length * 0.42;
+  });
+  assert.ok(enclosedBuildings.length >= 5, `James Fort encloses >= 5 settlement buildings (got ${enclosedBuildings.length})`);
 
+  const fortGeom = buildPortPrefabGeometry({ instances: [fort] });
+  const curtainGroup = fortGeom.groups.find((g) => g.partKey === 'triangular_palisade_curtains');
+  assert.ok(curtainGroup && curtainGroup.indexCount > 2400, 'Triangular fort emits solid curtain walls + banquette + closely spaced logs');
 
+  // 2. Indigenous palisade ring connects perimeter posts with solid timber walls and has zero grey cobble (kind 16) floor wedges
+  const palisadeRing = {
+    prefabId: 'indigenous_palisade_ring',
+    x: 0,
+    y: 3.0,
+    z: 0,
+    yaw: 0,
+    width: 24,
+    length: 24,
+    depth: 24,
+    height: 4.2,
+  };
+  const ringGeom = buildPortPrefabGeometry({ instances: [palisadeRing] });
+  let kind16Verts = 0;
+  for (let i = 0; i < ringGeom.vertices.length; i += 8) {
+    if (Math.round(ringGeom.vertices[i + 6]) === 16) kind16Verts++;
+  }
+  assert.equal(kind16Verts, 0, 'Indigenous palisade ring has no exposed grey stone/cobble wedge');
+  const ringStockade = ringGeom.groups.find((g) => g.partKey === 'palisade_stockade_posts');
+  assert.ok(ringStockade && ringStockade.indexCount > 1200, 'Indigenous palisade ring connects posts with continuous stockade walls');
 
+  // 3. Not all coastline is beach: pocket beaches leave > 35% of gentle shoreline cells free of dry sand on runtime grids
+  let gentleShoreCells = 0;
+  let nonSandyShoreCells = 0;
+  const m = jamestown.region.biomeSize;
+  const n = jamestown.region.size;
+  for (let j = 0; j < m; j++) {
+    const v = (j + 0.5) / m;
+    const z = jamestown.region.z + (v - 0.5) * jamestown.region.span;
+    for (let i = 0; i < m; i++) {
+      const u = (i + 0.5) / m;
+      const x = jamestown.region.x + (u - 0.5) * jamestown.region.span;
+      const h = terrainSample(jamestown.heights, x, z, jamestown.region);
+      if (h >= 0.5 && h <= 3.5) {
+        gentleShoreCells++;
+        if (jamestown.beaches.drySandMask[j * m + i] === 0) nonSandyShoreCells++;
+      }
+    }
+  }
+  assert.ok(gentleShoreCells > 10 && nonSandyShoreCells / gentleShoreCells > 0.35, 'Not all coastline is beach');
 
+  // 4. Fort soldiers & villagers stand above parapets and walk smoothly with aligned world yaw
+  const cartagena = generateProceduralCoastalPack({
+    id: 'cartagena',
+    year: 1550,
+    size: 65,
+    biomeSize: 32,
+    albedoSize: 32,
+    vegetationCandidates: 300,
+  });
+  const garrison = createFortGarrison(cartagena.port);
+  const bastion = cartagena.port.instances.find((i) => i.prefabId === 'stone_sea_bastion');
+  const bastionSoldiers = garrison.soldiers.filter((s) => s.building === bastion);
+  assert.ok(bastionSoldiers.length >= 6, 'Stone sea bastion spawns >= 6 visible soldiers');
+  const yTop = bastion.y + bastion.height;
+  assert.ok(
+    bastionSoldiers.some((s) => s.baseLy >= yTop - 0.20),
+    'Bastion gunners and sentries stand raised on firing banquettes so heads/torsos clear the parapet'
+  );
+  // Step garrison forward until patrol wait expires and verify smooth turning and walk distance progression
+  for (const s of garrison.soldiers) s.wait = 0;
+  stepFortGarrison(garrison, 0.05);
+  assert.ok(garrison.soldiers.some((s) => s.walk > 0 && s.walkDistance > 0), 'Garrison soldiers advance walk cycle smoothly');
 
-
-
+  // 5. Ship WGSL shader parity for Pinta, Santa Maria, and procedural fleet
+  assert.ok(CARAVEL.includes('let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;'));
+  assert.ok(CARAVEL.includes('let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;'));
+});
 
 

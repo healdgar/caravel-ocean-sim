@@ -111,7 +111,7 @@ export function retargetForestPackToProcedural(
     if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return;
 
     const secBuckets = Array.from({ length: protoCount }, () => []);
-    const crownSpacingFactor = isMobile ? 0.58 : 0.52;
+    const crownSpacingFactor = isMobile ? 0.44 : 0.35;
     const cellSize = 24;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -154,7 +154,7 @@ export function retargetForestPackToProcedural(
       return biome[idx];
     };
 
-    const tryPlaceTree = (x, z, key) => {
+    const tryPlaceTree = (x, z, key, isSatellite = false) => {
       if (totalPlaced >= effectiveSecMaxRoots) return -1;
       if (
         x <= x0 + borderMargin ||
@@ -166,13 +166,16 @@ export function retargetForestPackToProcedural(
       }
 
       const probByte = sampleBiomeByte(x, z);
-      if (probByte < 68) return -1;
-      if (probByte < 145 && (hash32Forest(key + 5) & 255) > probByte + 64) return -1;
+      if (probByte < 42) return -1;
+      if (probByte < 115 && (hash32Forest(key + 5) & 255) > probByte + 96) return -1;
 
       if (port && port.clearRadius > 0) {
-        const clearEnv = !portClearanceEnvelope(port, x, z, port.hasOrthophotoFootprints ? 8 : 10);
+        const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
+        const clearEnv = !portClearanceEnvelope(port, x, z, envPad);
         const clearRad =
-          !port.hasOrthophotoFootprints && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.72;
+          !port.hasOrthophotoFootprints &&
+          !port.hasIndigenousSettlement &&
+          Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38;
         if (clearEnv || clearRad) return -1;
       }
 
@@ -195,7 +198,7 @@ export function retargetForestPackToProcedural(
       const proto = forestPack.manifest.prototypes[protoId];
 
       const distPort = Math.hypot(x - portCx, z - portCz);
-      const inlandBlend = Math.max(0, Math.min(1, (distPort - 220) / 680));
+      const inlandBlend = Math.max(0, Math.min(1, (distPort - 120) / 520));
       let scaleMin = 1.12 + inlandBlend * 0.46;
       let scaleSpan = 0.44 + inlandBlend * 0.26;
       if (proto.species === 'ceiba') {
@@ -233,7 +236,7 @@ export function retargetForestPackToProcedural(
         }
       }
       if (collision) {
-        consecutiveCollisions++;
+        if (!isSatellite) consecutiveCollisions++;
         return -1;
       }
 
@@ -270,16 +273,16 @@ export function retargetForestPackToProcedural(
       return placedIdx;
     };
 
-    const maxCandidates = effectiveSecMaxRoots * 4;
+    const maxCandidates = effectiveSecMaxRoots * 6;
     const baseSeed = (seed ^ 0x9e3779b9) >>> 0;
-    for (let step = 0; step < maxCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 640; step++) {
+    for (let step = 0; step < maxCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 3600; step++) {
       const h1 = hash32Forest(baseSeed + Math.imul(step, 0x9e3779b1));
       const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0xc2b2ae35);
       const u = h1 / 4294967296;
       const v = h2 / 4294967296;
       const sx = x0 + u * span;
       const sz = z0 + v * span;
-      const rootIdx = tryPlaceTree(sx, sz, h2);
+      const rootIdx = tryPlaceTree(sx, sz, h2, false);
       if (rootIdx < 0) continue;
 
       const baseR = rr[rootIdx];
@@ -287,11 +290,11 @@ export function retargetForestPackToProcedural(
       for (let c = 0; c < 8 && totalPlaced < effectiveSecMaxRoots; c++) {
         const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
         const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.45;
-        const ringMul = c < 4 ? 0.96 : 1.68;
+        const ringMul = c < 4 ? 0.85 : 1.48;
         const dist = baseR * ringMul * (0.90 + ((cKey >>> 10) & 1023) / 1024 * 0.32);
         const nx = sx + Math.cos(angle) * dist;
         const nz = sz + Math.sin(angle) * dist;
-        tryPlaceTree(nx, nz, cKey);
+        tryPlaceTree(nx, nz, cKey, true);
       }
     }
     secPack._cachedForestBuckets = { key: cacheKey, buckets: secBuckets };
@@ -1271,6 +1274,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
     if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
     if(upgradedPack.beaches)proceduralPack.beaches=upgradedPack.beaches;
+    if(upgradedPack.vegetation){
+      proceduralPack.vegetation=upgradedPack.vegetation;
+      canopyTrees=upgradedPack.vegetation.trees||canopyTrees;
+      trees=forest?[]:canopyTrees;
+    }
     if(upgradedPack.rawHeights)proceduralPack.rawHeights=upgradedPack.rawHeights;
     heights.set(upgradedPack.heights);
     device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);

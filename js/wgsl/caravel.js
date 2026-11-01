@@ -149,8 +149,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let footprint = max(length(dpdx(grainUV)),length(dpdy(grainUV)));
   // Plank seams follow the hull's girth and the cabin's horizontal strakes.
   // Unlike a painted line, their recessed height also breaks the light response.
-  let paintedWood=hull.rig.w>.5 && (in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u);
-  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && p.z>=2.699 && p.y<2.23 && abs(in.normalLocal.y)<.3);
+  let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;
+  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && abs(in.normalLocal.y)<.35);
   let course=select(p.y/.16,in.uv.x*18.0,in.material==15u);
   let board=floor(course);
   let edge=min(fract(course),1.0-fract(course));
@@ -159,10 +159,24 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let buttCoord=(along+fract(sin(board*73.17)*4321.1)*2.6)/2.6;
   let butt=min(fract(buttCoord),1.0-fract(buttCoord));
   let buttSeam=1.0-smoothstep(.0008,.003+max(fwidth(buttCoord),.0003),butt);
-  let join=select(0.0,max(seam,buttSeam*.8),plankedWall);
+  let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;
+  let deckCourse=(p.x+1.8)/.145;
+  let deckPlankId=floor(deckCourse);
+  let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
+  let deckSeam=1.0-smoothstep(.014,.038+max(fwidth(deckCourse),.002),deckEdge);
+  let deckButtCoord=(p.z+fract(deckPlankId*0.413)*2.0)/2.3;
+  let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
+  let deckButtSeam=1.0-smoothstep(.001,.004+max(fwidth(deckButtCoord),.001),deckButtEdge);
+  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),isProceduralFleet && in.material==0u);
+  let isAdditionalIberian=isProceduralFleet && hull.size.y>20.5 && hull.size.y<30.0 && hull.size.x>5.0;
+  let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>1.18 || p.z< -2.55);
+  let castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
+  let castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && abs(in.normalLocal.x)>.42 && castleMoulding<.5);
+  let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
+  let join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
   var dmgBump=0.0;
   if(in.damage>0.05){dmgBump=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}
-  let bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + dmgBump;
+  let bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief + dmgBump;
   let dx = dpdx(in.world); let dy = dpdy(in.world);
   // Shadow depth rasterizes flat triangles, while cloth lighting uses smooth
   // analytic normals. Receiver-plane filtering must follow the actual triangle
@@ -199,18 +213,62 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let triangleEdge=min(min(in.uv.x,in.uv.y),(1.0-in.uv.x-in.uv.y)*0.70710678);
   let clothEdge=select(squareEdge,triangleEdge,in.material==13u);
   let edgeAA=max(fwidth(clothEdge),0.0005);
-  if(in.material==0u) { albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint)); }
-  if(in.material == 1u || in.material == 5u || in.material == 6u) { albedo *= .87; }
-  if(hull.rig.w>.5){
-    if(in.material==20u){albedo=vec3f(.009,.008,.006);rough=.88;}
-    if(in.material==21u){albedo=vec3f(.48,.265,.075);rough=.85;}
-    if(in.material==22u){albedo=vec3f(.29,.115,.055);rough=.53;metal=.65;}
-    if(in.material==23u){albedo=vec3f(.68,.65,.55);rough=.86;}
-    if(in.material==24u){albedo=vec3f(.26,.028,.018);rough=.83;}
-    if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.45;metal=.6;}
-    if(in.material==26u){albedo=vec3f(.015,.035,.09);rough=.88;}
-    if(paintedWood){albedo*=mix(.88,1.04,relief)*(1.0-join*.46);}
+  if(in.material==0u) {
+    albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
+    if(isProceduralFleet) {
+      albedo = mix(albedo, vec3f(0.015,0.011,0.008), deckCaulk * 0.86);
+      rough = mix(rough, 0.94, deckCaulk);
+    }
   }
+  if(in.material == 1u || in.material == 5u || in.material == 6u) {
+    albedo *= .87;
+    if(isProceduralFleet && in.material == 1u) {
+      let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
+      let isProudWale = isAdditionalIberian && abs(p.x) > 0.34 && p.y > -0.35 && p.y < 0.62 && p.z > -5.85 && p.z < 5.85 && (abs(in.normalLocal.x) > 0.48 || abs(in.normalLocal.y) > 0.78);
+      let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
+      if(isKeelOrPost || isProudWale) {
+        albedo = timber * vec3f(.20,.18,.15);
+        rough = .90;
+        if(abs(p.x) < 0.055 && p.z > 5.25 && abs(fract((p.y + 0.85) / 0.42) - 0.5) < 0.085) {
+          albedo = vec3f(0.045, 0.042, 0.040);
+          rough = 0.56;
+          metal = 0.62;
+        }
+      } else if(isCapRail) {
+        albedo = timber * vec3f(1.10,1.0,.80);
+        rough = clamp(rough - 0.04, 0.74, 0.92);
+      }
+    }
+  }
+  if(in.material==20u){
+    albedo=vec3f(.009,.008,.006);rough=.88;
+    if(isProceduralFleet) {
+      if(p.y < -0.05) {
+        let cuPlate = 1.0 - smoothstep(0.02, 0.06, min(fract(p.z * 3.8), fract(p.y * 14.0)));
+        albedo = vec3f(.29,.115,.055) * (1.0 - cuPlate * 0.22);
+        rough = .53; metal = .65;
+      } else if(abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35) {
+        albedo = vec3f(.48,.28,.055);
+        rough = .45; metal = .60;
+      }
+    }
+  }
+  if(in.material==21u){albedo=vec3f(.48,.265,.075);rough=.85;}
+  if(in.material==22u){albedo=vec3f(.29,.115,.055);rough=.53;metal=.65;}
+  if(in.material==23u){
+    albedo=vec3f(.68,.65,.55);rough=.86;
+    if(isProceduralFleet && hull.size.y < 20.0 && abs(in.normalLocal.x) > 0.25) {
+      if(p.y < -0.03) {
+        albedo = vec3f(.26,.028,.018); rough = .82;
+      } else if(abs(p.y - 0.34) < 0.018) {
+        albedo = vec3f(.015,.035,.09); rough = .84;
+      }
+    }
+  }
+  if(in.material==24u){albedo=vec3f(.26,.028,.018);rough=.83;}
+  if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.45;metal=.6;}
+  if(in.material==26u){albedo=vec3f(.015,.035,.09);rough=.88;}
+  if(paintedWood && metal < 0.1){albedo*=mix(.88,1.04,relief)*(1.0-join*.46);}
   let ropeAA=fwidth(p.x+p.y+p.z);
   if(in.material == 2u || in.material == 12u || in.material==19u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
@@ -293,6 +351,15 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   if(in.material == 15u) {
     albedo*=.93;
     let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.025,0.022,0.018),tar*0.9);
+    if(isAdditionalIberian) {
+      let frameWeight = clamp(castleMoulding + castleFuttock * 0.88, 0.0, 1.0);
+      if(frameWeight > 0.01) {
+        albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), frameWeight);
+        rough = mix(rough, 0.90, frameWeight);
+      } else if(p.z > 2.6 && p.y > 1.15 && p.y < 1.44 && abs(in.normalLocal.x) > 0.4) {
+        albedo = mix(albedo, vec3f(0.28, 0.055, 0.032) * (0.80 + 0.35 * relief), 0.58);
+      }
+    }
   }
   if(in.material == 16u) { albedo=timber*vec3f(.20,.18,.15); }
   if(in.material == 17u) { albedo=timber*vec3f(1.10,1.0,.80); }
