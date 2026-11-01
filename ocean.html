@@ -13079,7 +13079,7 @@ fn landOpaque(in:LandVertex)->vec4f{
       let gentle=smoothstep(0.32,0.08,1.0-n.y);
       let cuspWave=sin(world.x*0.042-world.z*0.031+blockNoise*1.5)*0.22;
       let swashRunup=0.26+0.28*sin(F.camPos.w*1.12+world.x*0.038+world.z*0.032+stoneRaw*1.2)+cuspWave;
-      let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(2.6,6.2+stoneRaw*1.2,world.y))*gentle*beachSand;
+      let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(1.85,3.25+stoneRaw*0.45,world.y))*gentle*beachSand;
       waterFilm=smoothstep(-0.95,-0.15,world.y)*(1.0-smoothstep(swashRunup-0.12,swashRunup+0.22,world.y))*gentle*beachSand;
       let capillaryZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(swashRunup+0.12,swashRunup+1.15+stoneRaw*0.22,world.y))*gentle*beachSand;
       let wrack=exp(-pow((world.y-(1.12+cuspWave*0.55+stoneRaw*0.20))/0.14,2.0))*gentle*beachSand;
@@ -31386,22 +31386,216 @@ function coastalSampleClamped(heights, x, z, region) {
   return terrainSample(heights, cx, cz, region);
 }
 
-// Geomorphic pocket-beach factor in [0, 1]: alternates along the coastline between
-// depositional sandy pocket coves and non-beach grassy/forested banks,
-// marsh edges, or rocky headlands so not all coastline is beach.
-function coastalBeachPocketFactor(region, x, z) {
+// Classify any world coordinate or region into its physical coastal geomorphic province
+// (following USGS / Global Coastal Morphodynamics & Luijendijk et al. 2018 Global Sandy Shores):
+// - 'barrier-strandplain': wave-dominated sandy barrier islands, spits & strandplains (e.g. Huelva/Arenas Gordas,
+//   Veracruz, Outer Banks/Carolina Capes, Florida Atlantic/Gulf barriers, Cape Cod & Saco Bay outwash spits)
+// - 'carbonate-strand': tropical carbonate platforms, keys & ooid shoals (e.g. Bahamas/Guanahaní, Yucatán, Port Royal spit)
+// - 'tropical-mixed': trade-wind mixed sandy bays, coral headlands & mangrove lagoons (e.g. Cartagena, Santo Domingo, Havana)
+// - 'estuarine-riverine': drowned-river estuaries, tidal rivers & mud-bank deltas (e.g. Jamestown/James River, Lisbon, Seville, Hudson)
+// - 'glaciated-rocky': glacially scoured crystalline/drumlin ledges & spruce shores (e.g. Gulf of Maine/Wabanaki, Boston, Quebec)
+// - 'volcanic-steep': steep volcanic island cones & talus cliffs (e.g. Saba, Lesser Antilles arc, Azores/Madeira)
+function resolveGeographicCoastalProvince(regionSpec = {}) {
+  const id = String(regionSpec?.id || '').toLowerCase();
+  const arch = String(regionSpec?.coastalArchetype || '').toLowerCase();
+  const lat = Number.isFinite(regionSpec?.latitude) ? regionSpec.latitude : 18.0;
+  const lon = Number.isFinite(regionSpec?.longitude) ? regionSpec.longitude : -70.0;
+
+  if (
+    id === 'saba' ||
+    arch === 'volcanic-headland' ||
+    (lat >= 12.0 && lat <= 18.2 && lon >= -63.6 && lon <= -60.8) ||
+    (lat >= 27.5 && lat <= 39.8 && lon >= -31.5 && lon <= -13.0)
+  ) {
+    return {
+      province: 'volcanic-steep',
+      sandSupply: 0.14,
+      maxBermElev: 1.65,
+      maxInlandM: 20,
+      maxSlope: 0.12,
+      prefersOpenWave: true,
+    };
+  }
+
+  if (
+    id === 'jamestown' ||
+    id === 'seville' ||
+    id === 'lisbon' ||
+    id === 'new-amsterdam' ||
+    id === 'maracaibo' ||
+    id === 'belen' ||
+    id === 'quebec' ||
+    arch === 'river-estuary' ||
+    arch === 'tidal-basin' ||
+    (lat >= 36.85 && lat <= 39.6 && lon >= -77.6 && lon <= -75.8) ||
+    (lat >= 38.8 && lat <= 41.15 && lon >= -75.6 && lon <= -73.7) ||
+    (lat >= 46.5 && lat <= 49.5 && lon >= -72.5 && lon <= -67.0) ||
+    (lat >= 0.0 && lat <= 10.2 && lon >= -62.5 && lon <= -50.0)
+  ) {
+    return {
+      province: 'estuarine-riverine',
+      sandSupply: 0.16,
+      maxBermElev: 1.45,
+      maxInlandM: 22,
+      maxSlope: 0.11,
+      prefersOpenWave: false,
+    };
+  }
+
+  // Glacial outwash barrier spits (Cape Cod / Nantucket Sound & Saco Bay / Old Orchard Beach)
+  const isGlacialOutwashSpit =
+    (lat >= 41.2 && lat <= 42.15 && lon >= -71.0 && lon <= -69.8) ||
+    (lat >= 43.42 && lat <= 43.58 && lon >= -70.45 && lon <= -70.30);
+
+  if (
+    !isGlacialOutwashSpit &&
+    (arch === 'fjord-cliff' ||
+      (lat >= 42.15 && lon >= -71.5 && lon <= -52.0) ||
+      Math.abs(lat) >= 48.0 ||
+      (lat >= 41.8 && lat <= 43.8 && lon >= -9.5 && lon <= -7.0))
+  ) {
+    return {
+      province: 'glaciated-rocky',
+      sandSupply: 0.20,
+      maxBermElev: 1.75,
+      maxInlandM: 24,
+      maxSlope: 0.12,
+      prefersOpenWave: true,
+    };
+  }
+
+  if (
+    id === 'palos-huelva' ||
+    id === 'veracruz' ||
+    arch === 'barrier-lagoon' ||
+    isGlacialOutwashSpit ||
+    (lat >= 36.4 && lat <= 37.5 && lon >= -7.6 && lon <= -5.8) ||
+    (lat >= 18.0 && lat <= 30.6 && lon >= -98.0 && lon <= -81.5) ||
+    (lat >= 25.8 && lat <= 36.85 && lon >= -81.8 && lon <= -75.0)
+  ) {
+    return {
+      province: 'barrier-strandplain',
+      sandSupply: 0.88,
+      maxBermElev: 3.1,
+      maxInlandM: 58,
+      maxSlope: 0.19,
+      prefersOpenWave: true,
+    };
+  }
+
+  if (
+    id === 'port-royal' ||
+    id === 'guanahani' ||
+    id === 'nassau' ||
+    arch === 'atoll-lagoon' ||
+    (lat >= 20.5 && lat <= 27.5 && lon >= -82.0 && lon <= -70.5) ||
+    (lat >= 19.5 && lat <= 21.8 && lon >= -91.0 && lon <= -86.4)
+  ) {
+    return {
+      province: 'carbonate-strand',
+      sandSupply: 0.85,
+      maxBermElev: 2.9,
+      maxInlandM: 52,
+      maxSlope: 0.19,
+      prefersOpenWave: true,
+    };
+  }
+
+  return {
+    province: 'tropical-mixed',
+    sandSupply: 0.64,
+    maxBermElev: 2.6,
+    maxInlandM: 44,
+    maxSlope: 0.17,
+    prefersOpenWave: true,
+  };
+}
+
+// Evaluates beach sand deposition factor in [0, 1] from:
+// 1) Real satellite Earth observation spectral sand vs. vegetation (`sat.sandChroma`, `sat.greenness`)
+// 2) Geographic coastal geomorphic province (`resolveGeographicCoastalProvince(region)`)
+// 3) Natural pre-pad DEM foreshore slope, backshore bluff rise, and offshore wave exposure (`heightsGrid`)
+// 4) Suppression of graded terrestrial building pads (`portPlacement`) so flattened structure pads never turn into sand circles
+function evaluateGeographicBeachFactor(
+  region,
+  heightsGrid,
+  x,
+  z,
+  h,
+  slope,
+  sx,
+  sz,
+  inlandM,
+  sat = null,
+  portPlacement = null,
+  gridStep = 12.5
+) {
+  if (portPlacement && h > 0.95 && !portClearanceEnvelope(portPlacement, x, z, 14)) {
+    return 0;
+  }
+  const prov = resolveGeographicCoastalProvince(region);
+  const effectiveMaxInland = Math.max(prov.maxInlandM * 1.65, gridStep * 2.25);
+  const effectiveMaxBerm = prov.maxBermElev + 1.2 + Math.max(0, (gridStep - 16) * 0.075);
+  if (inlandM > effectiveMaxInland || h > effectiveMaxBerm) {
+    return 0;
+  }
+
+  let seawardDepth = 3.5;
+  let backshoreRise = 1.5;
+  if (heightsGrid) {
+    const seaProbe1 = Math.max(65, gridStep * 1.4);
+    const seaProbe2 = Math.max(135, gridStep * 2.7);
+    if (slope > 1e-4) {
+      const ux = -sx / slope;
+      const uz = -sz / slope;
+      const hSea65 = coastalSampleClamped(heightsGrid, x + ux * seaProbe1, z + uz * seaProbe1, region);
+      const hSea135 = coastalSampleClamped(heightsGrid, x + ux * seaProbe2, z + uz * seaProbe2, region);
+      seawardDepth = Math.max(0, -Math.min(hSea65, hSea135));
+      const hBack28 = coastalSampleClamped(heightsGrid, x - ux * 28, z - uz * 28, region);
+      backshoreRise = Math.max(0, hBack28 - h);
+    } else {
+      const hE = coastalSampleClamped(heightsGrid, x + seaProbe1, z, region);
+      const hW = coastalSampleClamped(heightsGrid, x - seaProbe1, z, region);
+      const hN = coastalSampleClamped(heightsGrid, x, z + seaProbe1, region);
+      const hS = coastalSampleClamped(heightsGrid, x, z - seaProbe1, region);
+      seawardDepth = Math.max(0, -Math.min(hE, hW, hN, hS));
+      backshoreRise = Math.max(0, Math.max(hE, hW, hN, hS) - h);
+    }
+  }
+
+  const waveExposure = prov.prefersOpenWave
+    ? coastalSmoothstep(0.8, 5.5, seawardDepth)
+    : coastalSmoothstep(0.3, 3.2, seawardDepth) * 0.65;
+  const bluffSuppression = coastalSmoothstep(8.5, 2.6, backshoreRise);
   const seed = ((region?.vegetationSeed ?? 47231) ^ 0x6c8e9cf5) >>> 0;
   const rx = x - (region?.x ?? 0);
   const rz = z - (region?.z ?? 0);
-  const wave1 = Math.sin(rx * 0.018 + rz * 0.014 + (seed & 255) * 0.05);
-  const wave2 = Math.cos(rx * 0.039 - rz * 0.031 + ((seed >>> 8) & 255) * 0.05);
-  const nMeso = coastalFbm2D(rx * 0.0065 + 1.7, rz * 0.0065 - 2.3, seed, 2) - 0.5;
-  const raw = 0.5 + 0.34 * wave1 + 0.20 * wave2 + 0.32 * nMeso;
-  return coastalSmoothstep(0.46, 0.58, raw);
+  // Broad ~950m littoral drift sediment cell (rather than narrow cove pockets)
+  const littoralDrift = coastalFbm2D(rx * 0.00105 + 1.7, rz * 0.00105 - 2.3, seed, 2) - 0.48;
+  const rawGeo = prov.sandSupply * (0.50 + 0.50 * waveExposure) * bluffSuppression + littoralDrift * 0.34;
+  let beachFactor = coastalSmoothstep(0.36, 0.58, rawGeo);
+
+  if (sat) {
+    if (!sat.isUrban && sat.sandChroma > 0.30) {
+      beachFactor = Math.max(beachFactor, coastalSmoothstep(0.28, 0.68, sat.sandChroma));
+    }
+    if (sat.greenness > 0.24) {
+      beachFactor *= coastalSmoothstep(0.66, 0.18, sat.greenness);
+    }
+  }
+  return beachFactor;
 }
 
-function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, shoreDist = null) {
+function synthesizeCoastalBeaches(
+  regionSpec,
+  heights,
+  satelliteData = null,
+  shoreDist = null,
+  { rawHeights = null, portPlacement = null } = {}
+) {
   const region = resolveGlobalCoastalRegion(regionSpec);
+  const prov = resolveGeographicCoastalProvince(region);
+  const naturalHeights = rawHeights ?? heights;
   const m = region.biomeSize;
   const n = region.size;
   const span = region.span;
@@ -31411,9 +31605,10 @@ function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, sho
   const drySandMask = new Uint8Array(m * m);
   let beachCellCount = 0;
   const cells = [];
-  const baseBeachInland = Math.max(85, step * 2.2);
-  const satWideBeachInland = Math.max(115, step * 2.6);
-  const maxSwashInland = Math.max(42, step * 1.5);
+  const baseBeachInland = Math.max(prov.maxInlandM, step * 2.15);
+  const satWideBeachInland = Math.max(prov.maxInlandM * 1.45, step * 2.55);
+  const maxSwashInland = Math.max(36, step * 1.45);
+  const coarseBermBoost = Math.max(0, (step - 16) * 0.075);
 
   for (let j = 0; j < m; j++) {
     const v = (j + 0.5) / m;
@@ -31424,44 +31619,57 @@ function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, sho
       const x = region.x + (u - 0.5) * span;
       const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
       const inlandM = distWater[gj * n + gi];
-      const h = coastalSampleClamped(heights, x, z, region);
-      const sx = (coastalSampleClamped(heights, x + 8, z, region) - coastalSampleClamped(heights, x - 8, z, region)) / 16;
-      const sz = (coastalSampleClamped(heights, x, z + 8, region) - coastalSampleClamped(heights, x, z - 8, region)) / 16;
+      const h = coastalSampleClamped(naturalHeights, x, z, region);
+      const sx =
+        (coastalSampleClamped(naturalHeights, x + 8, z, region) -
+          coastalSampleClamped(naturalHeights, x - 8, z, region)) /
+        16;
+      const sz =
+        (coastalSampleClamped(naturalHeights, x, z + 8, region) -
+          coastalSampleClamped(naturalHeights, x, z - 8, region)) /
+        16;
       const slope = Math.hypot(sx, sz);
       const idx = j * m + i;
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
-      const pocket = coastalBeachPocketFactor(region, x, z);
-      // When satellite imagery is present, suppress dry beach sand where coastal mangrove/forest
-      // reaches the water's edge, and widen the beach berm where warm spectral sand is detected.
-      const satBeachFactor = sat
-        ? Math.max(0.22, Math.min(1.35, 0.65 + sat.sandChroma * 0.85 - sat.greenness * 0.62))
-        : 1.0;
-      const minCoarsePocket = n <= 65 ? 0.75 : 0.0;
-      const pocketWeight = Math.max(minCoarsePocket, sat && sat.sandChroma > 0.35 ? Math.max(pocket, sat.sandChroma) : pocket);
-      if (pocketWeight <= 0.02) continue;
-      const maxBeachInland = sat && sat.sandChroma > 0.35 ? satWideBeachInland : baseBeachInland;
+      const geoWeight = evaluateGeographicBeachFactor(
+        region,
+        naturalHeights,
+        x,
+        z,
+        h,
+        slope,
+        sx,
+        sz,
+        inlandM,
+        sat,
+        portPlacement,
+        step
+      );
+      if (geoWeight <= 0.02) continue;
+      const maxBeachInland = sat && !sat.isUrban && sat.sandChroma > 0.35 ? satWideBeachInland : baseBeachInland;
+      const maxBerm =
+        (sat && !sat.isUrban && sat.sandChroma > 0.35 ? prov.maxBermElev + 1.1 : prov.maxBermElev) + coarseBermBoost;
 
-      // Intertidal wet-sand swash zone: [-1.2m, +1.4m] within pocket-cove foreshore distance of water
-      if (h >= -1.2 && h <= 1.4 && slope < 0.18 && inlandM <= maxSwashInland) {
+      // Intertidal wet-sand swash zone: [-1.2m, +1.35m] along low-gradient foreshores
+      if (h >= -1.2 && h <= 1.35 && slope < prov.maxSlope + 0.02 && inlandM <= maxSwashInland) {
         const swash = Math.round(
           255 *
-            pocketWeight *
-            (1 - Math.abs(h - 0.1) / 1.4) *
-            Math.max(0, 1 - slope / 0.18) *
-            coastalSmoothstep(maxSwashInland, maxSwashInland * 0.33, inlandM)
+            geoWeight *
+            (1 - Math.abs(h - 0.1) / 1.35) *
+            Math.max(0, 1 - slope / (prov.maxSlope + 0.02)) *
+            coastalSmoothstep(maxSwashInland, maxSwashInland * 0.32, inlandM)
         );
         swashMask[idx] = Math.max(0, Math.min(255, swash));
       }
-      // Dry-sand pocket foreshore & berm: [0.4m, +6.5m] with gentle slope (< 0.20) in pocket coves
-      if (h >= 0.4 && h <= 6.5 && slope < 0.20 && inlandM <= maxBeachInland) {
-        const shoreFade = coastalSmoothstep(maxBeachInland, maxBeachInland * 0.38, inlandM);
+      // Dry-sand foreshore & berm: [0.4m, maxBerm] with natural gentle slope
+      if (h >= 0.4 && h <= maxBerm && slope < prov.maxSlope && inlandM <= maxBeachInland) {
+        const shoreFade = coastalSmoothstep(maxBeachInland, maxBeachInland * 0.34, inlandM);
         const sand = Math.round(
           255 *
-            pocketWeight *
-            coastalSmoothstep(6.5, 1.2, h) *
-            Math.max(0, 1 - slope / 0.20) *
-            shoreFade *
-            satBeachFactor
+            geoWeight *
+            coastalSmoothstep(maxBerm, Math.min(1.05, maxBerm * 0.45), h) *
+            Math.max(0, 1 - slope / prov.maxSlope) *
+            shoreFade
         );
         drySandMask[idx] = Math.max(0, Math.min(255, sand));
       }
@@ -31477,7 +31685,8 @@ function synthesizeCoastalBeaches(regionSpec, heights, satelliteData = null, sho
   return {
     swashMask,
     drySandMask,
-    bermElevation: 3.2,
+    bermElevation: prov.maxBermElev,
+    province: prov.province,
     beachCellCount,
     beachCoverageRatio: beachCellCount / (m * m),
     cells,
@@ -35642,18 +35851,24 @@ function synthesizeCoastalAlbedo(
         }
       }
 
-      // Pocket-cove constrained dry coral/quartz beach berm & backshore sand (not all coastline is beach)
-      const pocketRaw = coastalBeachPocketFactor(region, x, z);
-      const pocketFactor = coastalSmoothstep(0.45, 0.85, pocketRaw);
+      // Geographic & satellite data-driven beach berm, capillary damp sand & wet swash
+      const mBeach = region.biomeSize;
+      const bi = Math.min(mBeach - 1, Math.max(0, Math.floor(u * mBeach)));
+      const bj = Math.min(mBeach - 1, Math.max(0, Math.floor(v * mBeach)));
+      const bIdx = bj * mBeach + bi;
+      const maskDry = beachData?.drySandMask ? beachData.drySandMask[bIdx] / 255 : 0;
+      const maskSwash = beachData?.swashMask ? beachData.swashMask[bIdx] / 255 : 0;
+      const onBuildingPad = Boolean(portPlacement && h > 0.95 && !portClearanceEnvelope(portPlacement, x, z, 14));
+      const geoBeachWeight = onBuildingPad ? 0 : Math.max(maskDry, maskSwash * 0.85);
       const gentleSlope = coastalSmoothstep(0.22, 0.07, slope);
-      const shoreBand = coastalSmoothstep(46, 15, inlandM);
+      const shoreBand = coastalSmoothstep(54, 14, inlandM);
       const cuspWave = Math.sin(x * 0.042 - z * 0.031 + sandNoise * 1.6) * 0.24;
       const bermRipple = Math.sin(x * 0.22 + z * 0.18 + sandNoise * 2.1) * 3.5;
-      const bermTop = 3.0 + sandNoise * 0.55 + cuspWave * 0.35;
+      const bermTop = (beachData?.bermElevation ?? 2.6) + sandNoise * 0.35 + cuspWave * 0.25;
       const drySandWeight =
-        pocketFactor *
-        coastalSmoothstep(-0.2, 0.6, h) *
-        coastalSmoothstep(bermTop, 1.1, h) *
+        geoBeachWeight *
+        coastalSmoothstep(-0.2, 0.55, h) *
+        coastalSmoothstep(bermTop, 0.95, h) *
         gentleSlope *
         shoreBand;
       if (drySandWeight > 0) {
@@ -35665,12 +35880,12 @@ function synthesizeCoastalAlbedo(
         b = b * (1 - drySandWeight) + dryB * drySandWeight;
       }
 
-      // Capillary damp sand transition & high-tide wrack/shell line inside pocket beaches
+      // Capillary damp sand transition & high-tide wrack/shell line
       const swashCrest = 0.20 + sandNoise * 0.14 + cuspWave * 0.30;
       const dampWeight =
-        pocketFactor *
+        geoBeachWeight *
         coastalSmoothstep(-0.35, 0.15, h) *
-        coastalSmoothstep(swashCrest + 1.35, swashCrest + 0.30, h) *
+        coastalSmoothstep(swashCrest + 1.25, swashCrest + 0.28, h) *
         coastalSmoothstep(0.24, 0.08, slope) *
         coastalSmoothstep(42, 14, inlandM);
       if (dampWeight > 0) {
@@ -35683,9 +35898,9 @@ function synthesizeCoastalAlbedo(
         b = b * (1 - dampWeight * 0.75) + dampB * (dampWeight * 0.75);
       }
 
-      // Intertidal wet swash sand in pocket beaches [-1.0m, +1.1m]
+      // Intertidal wet swash sand [-1.0m, +1.1m]
       const swashWeight =
-        pocketFactor *
+        geoBeachWeight *
         Math.max(0, 1 - Math.abs(h - swashCrest * 0.55) / 1.05) *
         coastalSmoothstep(0.22, 0.07, slope) *
         coastalSmoothstep(34, 12, inlandM);
@@ -35809,7 +36024,10 @@ function seedCoastalVegetation(
     const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
     const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
     const bIdx = bj * m + bi;
-    const nearSandyShore = beachData.drySandMask[bIdx] >= 36 || beachData.swashMask[bIdx] >= 28 || (inlandM <= 55 && coastalBeachPocketFactor(region, x, z) > 0.35);
+    const nearSandyShore =
+      beachData.drySandMask[bIdx] >= 36 ||
+      beachData.swashMask[bIdx] >= 28 ||
+      (inlandM <= 55 && resolveGeographicCoastalProvince(region).sandSupply >= 0.5);
     const isPalmClimate =
       (region.climate === 'tropical' || region.climate === 'subtropical') &&
       Math.abs(region.latitude ?? 0) < 33.2;
@@ -35939,8 +36157,17 @@ function seedCoastalVegetation(
   };
 }
 
-function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null) {
+function buildCoastalMesh(
+  regionSpec,
+  heights,
+  beaches = null,
+  shoreDist = null,
+  portPlacement = null,
+  rawHeights = null
+) {
   const region = resolveGlobalCoastalRegion(regionSpec);
+  const prov = resolveGeographicCoastalProvince(region);
+  const naturalHeights = rawHeights ?? heights;
   const n = region.size;
   const m = region.biomeSize;
   const step = region.span / (n - 1);
@@ -35950,28 +36177,53 @@ function buildCoastalMesh(regionSpec, heights, beaches = null, shoreDist = null)
   const indices = [];
   const submergedIndices = [];
 
-  const maxMeshBeachInland = Math.max(92, step * 2.2);
+  const maxMeshBeachInland = Math.max(prov.maxInlandM * 1.35, step * 1.85);
   const computeVertexAttribs = (x, z, h, dx, dz) => {
     const length = Math.hypot(dx, 1, dz) || 1;
-    const slope = Math.hypot(dx, dz);
     const u = Math.max(0, Math.min(1, (x - region.x) / region.span + 0.5));
     const v = Math.max(0, Math.min(1, (z - region.z) / region.span + 0.5));
     const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
     const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
     const inlandM = distInfo.distWater[gj * n + gi];
-    const pocket = coastalBeachPocketFactor(region, x, z);
-    let sandWeight =
-      pocket *
-      coastalSmoothstep(-1.8, 0.2, h) *
-      coastalSmoothstep(4.2, 1.1, h) *
-      coastalSmoothstep(0.24, 0.08, slope) *
-      coastalSmoothstep(maxMeshBeachInland * 0.65, maxMeshBeachInland * 0.22, inlandM);
-    if (beaches?.drySandMask && beaches?.swashMask) {
-      const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
-      const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
-      const bIdx = bj * m + bi;
-      const maskSand = Math.max(beaches.drySandMask[bIdx], beaches.swashMask[bIdx]) / 255;
-      sandWeight = Math.max(sandWeight * 0.45, maskSand);
+    const hNat = coastalSampleClamped(naturalHeights, x, z, region);
+    const sxNat =
+      (coastalSampleClamped(naturalHeights, x + 8, z, region) -
+        coastalSampleClamped(naturalHeights, x - 8, z, region)) /
+      16;
+    const szNat =
+      (coastalSampleClamped(naturalHeights, x, z + 8, region) -
+        coastalSampleClamped(naturalHeights, x, z - 8, region)) /
+      16;
+    const slopeNat = Math.hypot(sxNat, szNat);
+    const onBuildingPad = Boolean(portPlacement && h > 0.95 && !portClearanceEnvelope(portPlacement, x, z, 14));
+    let sandWeight = 0;
+    if (!onBuildingPad) {
+      if (beaches?.drySandMask && beaches?.swashMask) {
+        const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
+        const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
+        const bIdx = bj * m + bi;
+        sandWeight = Math.max(beaches.drySandMask[bIdx], beaches.swashMask[bIdx]) / 255;
+      } else {
+        const geo = evaluateGeographicBeachFactor(
+          region,
+          naturalHeights,
+          x,
+          z,
+          hNat,
+          slopeNat,
+          sxNat,
+          szNat,
+          inlandM,
+          null,
+          portPlacement
+        );
+        sandWeight =
+          geo *
+          coastalSmoothstep(-1.8, 0.2, hNat) *
+          coastalSmoothstep(prov.maxBermElev + 0.4, 0.95, hNat) *
+          coastalSmoothstep(prov.maxSlope + 0.04, 0.06, slopeNat) *
+          coastalSmoothstep(maxMeshBeachInland, maxMeshBeachInland * 0.28, inlandM);
+      }
     }
     // Encode 0.02 + 0.98 * sandWeight in kind.y so the WGSL terrain shader recognizes
     // procedural coastal terrain (kind.y > 0.015) while keeping Saba (kind.y = 0) untouched.
@@ -36496,8 +36748,11 @@ function finalizeProceduralCoastalPack(
     syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
   }
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
-  const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist);
-  const mesh = buildCoastalMesh(region, heights, beaches, shoreDist);
+  const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {
+    rawHeights: pack.rawHeights,
+    portPlacement: port,
+  });
+  const mesh = buildCoastalMesh(region, heights, beaches, shoreDist, port, pack.rawHeights);
   const biome = synthesizeCoastalBiome(region, heights, beaches, port, satelliteData);
   const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome, satelliteData, shoreDist);
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
@@ -37273,6 +37528,13 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
         const idx = (j * sz + i) * 4;
         const r = satSource.rgba[idx], g = satSource.rgba[idx + 1], b = satSource.rgba[idx + 2];
         const mottle = coastalFbm2D(x * 0.009, z * 0.009, seed + 751, 3) - 0.5;
+        const isSpectralSand = r >= g * 0.88 && g > b * 1.04 && r > 110 && g <= r * 1.02;
+        const prov1550 = resolveGeographicCoastalProvince(region);
+        const geoBeach1550 =
+          isSpectralSand ||
+          (h <= prov1550.maxBermElev &&
+            inlandM <= prov1550.maxInlandM &&
+            evaluateGeographicBeachFactor(region, heights1550, x, z, h, 0.06, 0, 0, inlandM, null, null) > 0.55);
         if (h <= 0.25) {
           // 1550 turquoise estuary & coral shoal water
           const shoal = Math.max(0, Math.min(1, 1 - Math.abs(h) / 14));
@@ -37280,8 +37542,8 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
           rgba1550[idx + 1] = Math.round(48 + shoal * 78 + mottle * 10);
           rgba1550[idx + 2] = Math.round(68 + shoal * 74 + mottle * 10);
           rgba1550[idx + 3] = 255;
-        } else if (coastalBeachPocketFactor(region, x, z) > 0.38 && h <= 3.0 && inlandM <= 48) {
-          // Warm 1550 coral-sand pocket beach berm (only in pocket coves, not continuous along all coastline)
+        } else if (geoBeach1550 && h <= prov1550.maxBermElev && inlandM <= prov1550.maxInlandM) {
+          // Warm 1550 coral/quartz beach berm driven by real satellite sand or coastal geomorphic province
           rgba1550[idx] = Math.min(255, Math.round(224 + mottle * 18));
           rgba1550[idx + 1] = Math.min(255, Math.round(198 + mottle * 16));
           rgba1550[idx + 2] = Math.min(255, Math.round(150 + mottle * 14));
