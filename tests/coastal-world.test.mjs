@@ -28,6 +28,7 @@ import {
   COCONUT_PALM_GENOME_SPEC,
   coastalUberNoise2D,
   resolveGlobalCoastalRegion,
+  resolveGeographicCoastalProvince,
   synthesizeCoastalTerrain,
   synthesizeCoastalBeaches,
   synthesizeCoastalBiome,
@@ -1784,7 +1785,13 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
   const ringStockade = ringGeom.groups.find((g) => g.partKey === 'palisade_stockade_posts');
   assert.ok(ringStockade && ringStockade.indexCount > 1200, 'Indigenous palisade ring connects posts with continuous stockade walls');
 
-  // 3. Not all coastline is beach: pocket beaches leave > 35% of gentle shoreline cells free of dry sand on runtime grids
+  // 3. Geographic coastal province & DEM wave-exposure beach synthesis (plus zero fake sand circles under graded building pads)
+  assert.equal(resolveGeographicCoastalProvince({ id: 'palos-huelva', latitude: 37.23, longitude: -6.89 }).province, 'barrier-strandplain');
+  assert.equal(resolveGeographicCoastalProvince({ id: 'guanahani', latitude: 24.05, longitude: -74.53 }).province, 'carbonate-strand');
+  assert.equal(resolveGeographicCoastalProvince({ id: 'jamestown', latitude: 37.21, longitude: -76.78 }).province, 'estuarine-riverine');
+  assert.equal(resolveGeographicCoastalProvince({ id: 'wabanaki-penobscot', latitude: 44.39, longitude: -68.80 }).province, 'glaciated-rocky');
+  assert.equal(resolveGeographicCoastalProvince({ id: 'saba', latitude: 17.63, longitude: -63.24 }).province, 'volcanic-steep');
+
   let gentleShoreCells = 0;
   let nonSandyShoreCells = 0;
   const m = jamestown.region.biomeSize;
@@ -1802,7 +1809,21 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
       }
     }
   }
-  assert.ok(gentleShoreCells > 10 && nonSandyShoreCells / gentleShoreCells > 0.35, 'Not all coastline is beach');
+  assert.ok(
+    gentleShoreCells > 10 && nonSandyShoreCells / gentleShoreCells > 0.55,
+    'Estuarine/riverine Jamestown shoreline is predominantly vegetated bank/marsh rather than continuous beach'
+  );
+
+  // Verify graded building pads under terrestrial structures never receive fake beach sand in mesh vertices
+  for (const inst of jamestown.port.instances) {
+    if (inst.y <= 1.05 || inst.prefabId.includes('pier') || inst.prefabId.includes('landing')) continue;
+    const u = Math.max(0, Math.min(1, (inst.x - jamestown.region.x) / jamestown.region.span + 0.5));
+    const v = Math.max(0, Math.min(1, (inst.z - jamestown.region.z) / jamestown.region.span + 0.5));
+    const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
+    const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
+    const encodedSand = jamestown.mesh.vertices[(gj * n + gi) * 8 + 7];
+    assert.ok(encodedSand <= 0.05, `Building pad under ${inst.prefabId} must not turn into a circle of beach sand`);
+  }
 
   // 4. Fort soldiers & villagers stand above parapets and walk smoothly with aligned world yaw
   const cartagena = generateProceduralCoastalPack({

@@ -606,7 +606,7 @@ fn landOpaque(in:LandVertex)->vec4f{
       let gentle=smoothstep(0.32,0.08,1.0-n.y);
       let cuspWave=sin(world.x*0.042-world.z*0.031+blockNoise*1.5)*0.22;
       let swashRunup=0.26+0.28*sin(F.camPos.w*1.12+world.x*0.038+world.z*0.032+stoneRaw*1.2)+cuspWave;
-      let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(2.6,6.2+stoneRaw*1.2,world.y))*gentle*beachSand;
+      let dryZone=smoothstep(-0.35,0.65,world.y)*(1.0-smoothstep(1.85,3.25+stoneRaw*0.45,world.y))*gentle*beachSand;
       waterFilm=smoothstep(-0.95,-0.15,world.y)*(1.0-smoothstep(swashRunup-0.12,swashRunup+0.22,world.y))*gentle*beachSand;
       let capillaryZone=smoothstep(-0.85,-0.05,world.y)*(1.0-smoothstep(swashRunup+0.12,swashRunup+1.15+stoneRaw*0.22,world.y))*gentle*beachSand;
       let wrack=exp(-pow((world.y-(1.12+cuspWave*0.55+stoneRaw*0.20))/0.14,2.0))*gentle*beachSand;
