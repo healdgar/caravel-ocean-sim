@@ -1853,4 +1853,69 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
   assert.ok(CARAVEL.includes('let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;'));
 });
 
+test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear mizzen sail connect cleanly to masts and hulls across all ships', async () => {
+  const { crowsNestDesignStation, sternEnsignDesignStation } = await import('../js/boat.js');
+  const { buildVesselRigConnectors } = await import('../js/ship-colors.js');
+  const { RIG_MASTS, mastPoint } = await import('../js/rigging.js');
+  const { VICTORY_MASTS, victoryMastPoint } = await import('../js/models/victory.js');
+  const { proceduralRigContext } = await import('../js/additional-rig.js');
+
+  // 1. Niña crow's nest and masthead pennant align with the raked mainmast shaft (not floating at z = -0.76)
+  const ninaNest = crowsNestDesignStation({ modelId: 'nina' });
+  const ninaMastAtNest = mastPoint(0, ninaNest.y);
+  const ninaMastHead = mastPoint(0, RIG_MASTS[0].height);
+  assert.ok(Math.abs(ninaNest.z - ninaMastAtNest[2]) < 1e-4, `Niña crow's nest z (${ninaNest.z}) aligns with raked mainmast (${ninaMastAtNest[2]})`);
+  assert.ok(Math.abs((ninaNest.y + ninaNest.pennantLift) - ninaMastHead[1]) < 1e-4, 'Niña pennant hoist top matches mainmast head Y');
+  assert.ok(Math.abs(ninaNest.headZ - ninaMastHead[2]) < 1e-4, 'Niña pennant hoist Z matches mainmast head Z');
+
+  // 2. Victory crow's nest and pennant align with the raked mainmast shaft
+  const vicNest = crowsNestDesignStation({ modelId: 'victory' });
+  const vicMastAtNest = victoryMastPoint(1, vicNest.y);
+  const vicMastHead = victoryMastPoint(1, VICTORY_MASTS[1].height);
+  assert.ok(Math.abs(vicNest.z - vicMastAtNest[2]) < 1e-4, 'Victory lookout station Z aligns with raked mainmast');
+  assert.ok(Math.abs((vicNest.y + vicNest.pennantLift) - vicMastHead[1]) < 1e-4, 'Victory pennant hoist top matches mainmast head Y');
+  assert.ok(Math.abs(vicNest.headZ - vicMastHead[2]) < 1e-4, 'Victory pennant hoist Z matches mainmast head Z');
+
+  // 3. Pinta, Santa María, Flying Cloud, Gipsy Moth IV, Oseberg, and Lusoria align with their primary raked mast
+  for (const modelId of ['pinta', 'santa-maria', 'flying-cloud', 'gipsy-moth-iv', 'oseberg', 'lusoria']) {
+    const cn = crowsNestDesignStation({ modelId });
+    const rigCtx = proceduralRigContext(modelId);
+    const mast = rigCtx.masts.reduce((best, m) => (!best || m.height > best.height ? m : best), null);
+    const expectedPos = rigCtx.mastPoint
+      ? rigCtx.mastPoint(mast.index ?? 0, cn.y)
+      : [0, cn.y, mast.foot[2] + (mast.head[2] - mast.foot[2]) * ((cn.y - mast.foot[1]) / (mast.head[1] - mast.foot[1]))];
+    assert.ok(Math.abs(cn.z - expectedPos[2]) < 1e-4, `${modelId} station z (${cn.z}) matches raked mast (${expectedPos[2]})`);
+    assert.ok(Math.abs(cn.headZ - mast.head[2]) < 1e-4, `${modelId} headZ (${cn.headZ}) matches masthead z (${mast.head[2]})`);
+  }
+
+  // 4. Taíno canoe (no masts) suppresses basket, pennant, and stern flagstaff
+  const canoeNest = crowsNestDesignStation({ modelId: 'taino-canoe' });
+  const canoeStern = sternEnsignDesignStation({ modelId: 'taino-canoe' });
+  assert.equal(canoeNest.showBasket, 0);
+  assert.equal(canoeNest.showPennant, 0);
+  assert.equal(canoeStern.showEnsign, 0);
+
+  // 5. Niña, Pinta, and Santa María generate parrel/truss collars (modes 6 & 7) and stern outlicker + mizzen sheet connecting the rear sail to the hull transom
+  for (const [modelId, hullEndZ] of [['nina', 5.60], ['pinta', 6.0], ['santa-maria', 6.0]]) {
+    const stern = sternEnsignDesignStation({ modelId });
+    assert.ok(stern.z - stern.outlickerSpan <= hullEndZ - 0.15, `${modelId} stern outlicker bracket extends forward into hull transom (${hullEndZ})`);
+    const verts = buildVesselRigConnectors({ modelId, heading: 0, sailSet: 1 }, 0, 8);
+    assert.ok(verts.length >= 600, `${modelId} generates rig connector vertices (${verts.length / 10} verts)`);
+    let hasInboardSpar = false;
+    let hasAftOutlickerTip = false;
+    let hasAftMizzenSheet = false;
+    for (let i = 0; i < verts.length; i += 10) {
+      const z = verts[i + 2];
+      const mode = Math.round(verts[i + 8]);
+      if (mode === 6 && z <= hullEndZ - 0.15 && z >= hullEndZ - 0.6) hasInboardSpar = true;
+      if (mode === 6 && z >= stern.aftSailZ + 0.10) hasAftOutlickerTip = true;
+      if (mode === 7 && z >= stern.aftSailZ - 0.05) hasAftMizzenSheet = true;
+    }
+    assert.ok(hasInboardSpar, `${modelId} stern outlicker spar roots inside the hull transom (z <= ${hullEndZ})`);
+    assert.ok(hasAftOutlickerTip, `${modelId} stern outlicker spar reaches abaft the overhanging rear sail clew (${stern.aftSailZ})`);
+    assert.ok(hasAftMizzenSheet, `${modelId} mizzen outlicker sheet connects the overhanging rear sail clew to the stern outlicker & hull`);
+  }
+});
+
+
 

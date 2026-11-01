@@ -4,8 +4,19 @@ import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { VESSEL_LIGHTING } from './wgsl/vessel.js';
 import { SCENE_SHADOW_SAMPLE } from './wgsl/shadows.js';
 import { boatRotate, crowsNestDesignStation, sternEnsignDesignStation } from './boat.js';
-import { vesselHull, modelDeck } from './hull.js';
+import { vesselHull, modelDeck, modelDeckWidth } from './hull.js';
+import { RIG_MASTS, mastPoint } from './rigging.js';
+import { SAIL_PLAN, createLateenPoses, lateenYardPoint, lateenClothPoint } from './lateen.js';
+import { ADDITIONAL_DESIGNS } from './models/additional.js';
+import { ROWING_DESIGNS } from './models/rowing.js';
+import { LATER_SAIL_DESIGNS } from './models/later-sail.js';
+import { proceduralRigContext } from './additional-rig.js';
+import { rigSurfacePose, surfaceYardPoint, surfaceClothPoint } from './rig-surface.js';
 export { sternEnsignDesignStation };
+
+function getAdditionalRigDesign(modelId) {
+  return ADDITIONAL_DESIGNS[modelId] ?? ROWING_DESIGNS[modelId] ?? LATER_SAIL_DESIGNS[modelId] ?? null;
+}
 
 // Historically grounded 16th-century & Age-of-Sail naval ensigns ("ship's colors").
 export const SHIP_COLORS = Object.freeze({
@@ -163,6 +174,7 @@ struct ShipColorsPose {
   ensignBase: vec4f,
   crowsNest: vec4f,
   windAndState: vec4f,
+  rigExtra: vec4f,
 };
 @group(0) @binding(6) var<uniform> P: ShipColorsPose;
 
@@ -187,9 +199,34 @@ struct ColorsVertexOut {
   let time = P.origin.w;
   let windSpeed = clamp(P.windAndState.z, 1.5, 22.0);
   let surrendered = P.windAndState.w > 0.5;
+  let visMask = i32(round(P.rigExtra.z));
+
+  if ((mode < 0.5 && (visMask & 1) == 0)
+    || (mode > 0.5 && mode < 2.5 && (visMask & 4) == 0)
+    || (mode > 2.5 && mode < 3.5 && (visMask & 2) == 0)) {
+    var hidden: ColorsVertexOut;
+    hidden.position = vec4f(0.0, 0.0, -2.0, 1.0);
+    hidden.world = vec3f(0.0);
+    hidden.normal = vec3f(0.0, 1.0, 0.0);
+    hidden.uvMode = vec4f(0.0);
+    return hidden;
+  }
 
   var localPos = pos;
   var localNorm = norm;
+
+  if (mode > 5.5) {
+    // mode 6 (vessel-space oak/iron spar/parrel) or mode 7 (vessel-space braided hemp rig/sheet)
+    localPos = vec3f(pos.x * sx, pos.y * sy, pos.z * sz);
+    let world = P.origin.xyz + P.right.xyz * localPos.x + P.up.xyz * localPos.y + P.aft.xyz * localPos.z;
+    let nWorld = normalize(P.right.xyz * norm.x + P.up.xyz * norm.y + P.aft.xyz * norm.z);
+    var out: ColorsVertexOut;
+    out.position = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+    out.world = world;
+    out.normal = nWorld;
+    out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
+    return out;
+  }
 
   if (mode > 3.5) {
     // mode 4 (world-space hemp mooring/grappling line) or mode 5 (world-space oak boarding gangplank)
@@ -206,17 +243,20 @@ struct ColorsVertexOut {
     let cn = P.crowsNest.xyz;
     localPos = vec3f((cn.x + pos.x) * sx, (cn.y + pos.y) * sy, (cn.z + pos.z) * sz);
   } else if (mode < 1.5) {
-    // mode 1: Stern flagstaff pole anchored at P.ensignBase.xyz
+    // mode 1: Stern flagstaff pole & outlicker bracket anchored at P.ensignBase.xyz
     let base = P.ensignBase.xyz;
-    localPos = vec3f((base.x + pos.x) * sx, (base.y + pos.y) * sy, (base.z + pos.z) * sz);
+    let outSpan = max(0.38, P.rigExtra.y);
+    let zOff = select(pos.z, pos.z * outSpan, pos.z < 0.0);
+    localPos = vec3f((base.x + pos.x) * sx, (base.y + pos.y) * sy, (base.z + zOff) * sz);
   } else {
     // mode 2 (stern ensign cloth) or mode 3 (masthead pennant)
     let isPennant = mode > 2.5;
-    let base = select(P.ensignBase.xyz, P.crowsNest.xyz + vec3f(0.0, P.crowsNest.w, 0.0), isPennant);
+    let mastheadPos = vec3f(P.crowsNest.x, P.crowsNest.y + P.crowsNest.w, P.rigExtra.x);
+    let base = select(P.ensignBase.xyz, mastheadPos, isPennant);
     let rake = select(0.58, 0.0, isPennant);
     // When surrendered, hoist flag slightly lower on the staff (dipped in truce)
     let hoistDip = select(0.0, -0.32, surrendered && !isPennant);
-    let hoistTopY = base.y + select(2.35, 1.15, isPennant) + hoistDip;
+    let hoistTopY = base.y + select(2.35, -0.03, isPennant) + hoistDip;
     let flagHeight = select(1.28, 0.24 * (1.0 - 0.72 * u), isPennant);
     let flagLength = select(2.25, 2.85, isPennant);
 
@@ -438,8 +478,8 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
   var rough = 0.78;
   var f0 = vec3f(0.035);
 
-  if (mode < 1.5) {
-    // Wood & iron bands of the crow's nest basket (mode 0) and stern flagstaff (mode 1)
+  if (mode < 1.5 || (mode > 5.5 && mode < 6.5)) {
+    // Wood & iron bands of the crow's nest basket (mode 0), stern flagstaff (mode 1), and rig spars/parrels (mode 6)
     let isIronBand = v.uvMode.x > 0.5;
     let grain = 0.92 + 0.08 * sin(v.world.y * 95.0 + sin(v.world.x * 55.0) + v.world.z * 48.0);
     color = select(vec3f(0.115, 0.078, 0.042) * grain, vec3f(0.038, 0.040, 0.044), isIronBand);
@@ -449,8 +489,8 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     // Woven bunting cloth (stern ensign or masthead pennant)
     color = evalEnsignColor(clamp(v.uvMode.x, 0.0, 1.0), clamp(v.uvMode.y, 0.0, 1.0), code, mode > 2.5);
     rough = 0.86;
-  } else if (mode < 4.5) {
-    // mode 4: Braided hemp mooring / grappling line with forged iron hook at tip (u > 0.94)
+  } else if (mode < 4.5 || mode > 6.5) {
+    // mode 4 (world-space) or mode 7 (vessel-space): Braided hemp line / parrel truss / outlicker sheet
     let isHook = v.uvMode.x > 0.94;
     let twist = 0.88 + 0.12 * sin(v.uvMode.x * 120.0 + v.uvMode.y * 18.0);
     color = select(vec3f(0.44, 0.34, 0.19) * twist, vec3f(0.055, 0.058, 0.062), isHook);
@@ -470,7 +510,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
   let sea = textureSampleLevel(envCube, sampC, vec3f(0, -1, 0), 7).rgb;
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
   // Cloth translucency when backlit by the sun
-  let backlit = select(0.0, max(dot(-n, F.sunDir.xyz), 0.0) * 0.38, mode > 1.5);
+  let backlit = select(0.0, max(dot(-n, F.sunDir.xyz), 0.0) * 0.38, mode > 1.5 && mode < 3.5);
   var radiance = color * vesselAmbient(n, sky, sea)
     + sun * (color / PI * (nDotL + backlit) + vesselSpecular(n, eye, F.sunDir.xyz, rough, f0) * nDotL);
   radiance += lunarSurface(n, eye, color, rough, f0, sunVis[1] * lunarShadowVisibility(shadowSample))
@@ -514,27 +554,34 @@ export function buildShipColorsGeometry() {
     }
   };
 
-  // 1. Mode 0: 3D Crow's Nest Basket (cesto de gavia) centered at origin of lookout station
+  // 1. Mode 0: 3D Crow's Nest Basket (cesto de gavia) centered on the raked mast at the lookout station
   const ringSegs = 12;
-  const rBottom = 0.44;
-  const rTop = 0.56;
-  const hBasket = 0.78;
+  const rInner = 0.085;
+  const rBottom = 0.38;
+  const rMid = 0.43;
+  const rTop = 0.48;
+  const hBasket = 0.52;
   for (let i = 0; i < ringSegs; i++) {
     const a0 = (i / ringSegs) * Math.PI * 2;
     const a1 = ((i + 1) / ringSegs) * Math.PI * 2;
     const c0 = Math.cos(a0), s0 = Math.sin(a0);
     const c1 = Math.cos(a1), s1 = Math.sin(a1);
-    // Floor ring, mid iron hoop, and top breast-rail ring
-    addTube([c0 * rBottom, 0, s0 * rBottom], [c1 * rBottom, 0, s1 * rBottom], 0.042, 0.042, 6, 0, 0);
-    addTube([c0 * 0.50, hBasket * 0.52, s0 * 0.50], [c1 * 0.50, hBasket * 0.52, s1 * 0.50], 0.026, 0.026, 5, 0, 1);
-    addTube([c0 * rTop, hBasket, s0 * rTop], [c1 * rTop, hBasket, s1 * rTop], 0.046, 0.046, 6, 0, 0);
-    // Vertical oak staves + floor radial knees supporting the basket
-    addTube([c0 * rBottom, 0, s0 * rBottom], [c0 * rTop, hBasket, s0 * rTop], 0.028, 0.024, 5, 0, 0);
-    addTube([c0 * 0.14, -0.22, s0 * 0.14], [c0 * rBottom, 0, s0 * rBottom], 0.032, 0.028, 5, 0, 0);
+    // Inner iron mast-collar clasp ring, floor ring, mid iron hoop, and top breast-rail ring
+    addTube([c0 * rInner, -0.02, s0 * rInner], [c1 * rInner, -0.02, s1 * rInner], 0.032, 0.032, 5, 0, 1);
+    addTube([c0 * rBottom, 0, s0 * rBottom], [c1 * rBottom, 0, s1 * rBottom], 0.040, 0.040, 6, 0, 0);
+    addTube([c0 * rMid, hBasket * 0.52, s0 * rMid], [c1 * rMid, hBasket * 0.52, s1 * rMid], 0.025, 0.025, 5, 0, 1);
+    addTube([c0 * rTop, hBasket, s0 * rTop], [c1 * rTop, hBasket, s1 * rTop], 0.044, 0.044, 6, 0, 0);
+    // Vertical oak staves, floor radial planks into mast collar, and trestletree knees supporting the basket
+    addTube([c0 * rBottom, 0, s0 * rBottom], [c0 * rTop, hBasket, s0 * rTop], 0.026, 0.022, 5, 0, 0);
+    addTube([c0 * 0.065, 0, s0 * 0.065], [c0 * rBottom, 0, s0 * rBottom], 0.028, 0.026, 5, 0, 0);
+    addTube([c0 * 0.068, -0.22, s0 * 0.068], [c0 * rBottom, 0, s0 * rBottom], 0.032, 0.026, 5, 0, 0);
   }
 
-  // 2. Mode 1: Outrigger taffrail bracket & Angled Stern Flagstaff (0.58 aft rake, matching ensign hoist)
-  addTube([0, -0.04, -0.34], [0, 0, 0], 0.038, 0.036, 8, 1, 0);
+  // 2. Mode 1: Stern outlicker / bumkin bracket (pos.z < 0 scaled by P.rigExtra.y into transom) & Angled Stern Flagstaff
+  addTube([0, -0.02, -1.0], [0, 0, 0], 0.042, 0.038, 8, 1, 0);
+  addTube([0, -0.36, -0.78], [0, -0.02, -0.18], 0.034, 0.030, 6, 1, 0);
+  addTube([0, -0.02, -0.82], [0, -0.02, -0.76], 0.046, 0.046, 6, 1, 1);
+  addTube([0, 0, -0.06], [0, 0, 0.02], 0.044, 0.044, 6, 1, 1);
   addTube([0, 0, 0], [0, 2.45, 1.42], 0.036, 0.022, 8, 1, 0);
   // Gilt truck ball at top of stern staff
   addTube([0, 2.43, 1.41], [0, 2.52, 1.46], 0.048, 0.015, 8, 1, 1);
@@ -598,6 +645,175 @@ export function buildShipColorsGeometry() {
   return new Float32Array(values);
 }
 
+let _lateenPosesScratch = null;
+
+/**
+ * Builds vessel-design-space rig connectors (mode 6 oak/iron spars & parrel trucks, mode 7 hemp
+ * parrel trusses & stern outlicker sheets) so that:
+ *  - Every yard is physically bound to its mast by a parrel collar & truss yoke (racamento).
+ *  - Every overhanging rear sail (mizzen on Niña, Pinta, Santa María) is connected by a live
+ *    mizzen outlicker sheet (escota de mesana) to a stout stern outlicker / bumkin spar (botaló)
+ *    anchored into the stern transom and braced to the hull quarters.
+ */
+export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
+  const modelId = boat?.modelId ?? 'nina';
+  if (modelId === 'taino-canoe' || modelId === 'victory' || modelId === 'gipsy-moth-iv') {
+    return new Float32Array(0);
+  }
+  if (!_lateenPosesScratch) _lateenPosesScratch = createLateenPoses([1, 1, 1], -1);
+  const stern = sternEnsignDesignStation(boat);
+  const values = [];
+  const put = (p, n, u, v, mode) => {
+    values.push(p[0], p[1], p[2], n[0], n[1], n[2], u, v, mode, 1);
+  };
+  const addTube = (a, b, r0, r1, sides, mode, uFlag = 0) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-5) return;
+    const d = [dx / len, dy / len, dz / len];
+    const seed = Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const ux = d[1] * seed[2] - d[2] * seed[1];
+    const uy = d[2] * seed[0] - d[0] * seed[2];
+    const uz = d[0] * seed[1] - d[1] * seed[0];
+    const um = Math.hypot(ux, uy, uz) || 1;
+    const u = [ux / um, uy / um, uz / um];
+    const v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+    for (let i = 0; i < sides; i++) {
+      const t0 = (i / sides) * Math.PI * 2;
+      const t1 = ((i + 1) / sides) * Math.PI * 2;
+      const n0 = [u[0] * Math.cos(t0) + v[0] * Math.sin(t0), u[1] * Math.cos(t0) + v[1] * Math.sin(t0), u[2] * Math.cos(t0) + v[2] * Math.sin(t0)];
+      const n1 = [u[0] * Math.cos(t1) + v[0] * Math.sin(t1), u[1] * Math.cos(t1) + v[1] * Math.sin(t1), u[2] * Math.cos(t1) + v[2] * Math.sin(t1)];
+      const a0 = [a[0] + n0[0] * r0, a[1] + n0[1] * r0, a[2] + n0[2] * r0];
+      const a1 = [a[0] + n1[0] * r0, a[1] + n1[1] * r0, a[2] + n1[2] * r0];
+      const b0 = [b[0] + n0[0] * r1, b[1] + n0[1] * r1, b[2] + n0[2] * r1];
+      const b1 = [b[0] + n1[0] * r1, b[1] + n1[1] * r1, b[2] + n1[2] * r1];
+      put(a0, n0, uFlag, 0, mode);
+      put(a1, n1, uFlag, 0, mode);
+      put(b0, n0, uFlag, 1, mode);
+      put(b0, n0, uFlag, 1, mode);
+      put(a1, n1, uFlag, 0, mode);
+      put(b1, n1, uFlag, 1, mode);
+    }
+  };
+  const addCatenary = (a, b, sag, radius, segs, mode = 7, uFlag = 0.45) => {
+    let prev = a;
+    for (let i = 1; i <= segs; i++) {
+      const t = i / segs;
+      const dip = 4 * t * (1 - t) * sag;
+      const cur = [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t - dip,
+        a[2] + (b[2] - a[2]) * t,
+      ];
+      addTube(prev, cur, radius, radius, 5, mode, uFlag);
+      prev = cur;
+    }
+  };
+  const addParrelCollar = (mastPos, yardPos, mastRadius = 0.085) => {
+    const ringSegs = 8;
+    const rRing = mastRadius + 0.025;
+    for (let i = 0; i < ringSegs; i++) {
+      const a0 = (i / ringSegs) * Math.PI * 2;
+      const a1 = ((i + 1) / ringSegs) * Math.PI * 2;
+      const p0 = [mastPos[0] + Math.cos(a0) * rRing, mastPos[1] + 0.02, mastPos[2] + Math.sin(a0) * rRing];
+      const p1 = [mastPos[0] + Math.cos(a1) * rRing, mastPos[1] + 0.02, mastPos[2] + Math.sin(a1) * rRing];
+      addTube(p0, p1, 0.020, 0.020, 5, 7, 0.45);
+      if (i % 2 === 0) {
+        // Wooden parrel truck bead (vertello)
+        addTube(
+          [p0[0], p0[1] - 0.028, p0[2]],
+          [p0[0], p0[1] + 0.028, p0[2]],
+          0.026,
+          0.026,
+          5,
+          6,
+          0
+        );
+      }
+    }
+    // Iron-strapped yard sling band around the yard at the tie point
+    addTube(
+      [yardPos[0], yardPos[1] - 0.035, yardPos[2] - 0.035],
+      [yardPos[0], yardPos[1] + 0.035, yardPos[2] + 0.035],
+      0.034,
+      0.034,
+      6,
+      6,
+      1
+    );
+    // Upper and lower hemp truss yoke legs & halyard tie (racamento & ostaga) bridging mast to yard
+    addTube([mastPos[0], mastPos[1] + 0.14, mastPos[2]], yardPos, 0.022, 0.020, 5, 7, 0.5);
+    addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] - 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
+    addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] + 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
+  };
+  const addSternOutlickerAndSheet = (clewPos, hullEndZ, transomY, quarterHalfBeam, outlickerTipZ) => {
+    const rootZ = hullEndZ - 0.35;
+    const tipZ = Math.max(outlickerTipZ, clewPos[2] + 0.16);
+    const tipY = transomY + 0.02;
+    // Heavy oak stern outlicker / bumkin spar (botaló de mesana) rooted inside the stern transom
+    addTube([0, transomY - 0.03, rootZ], [0, tipY, tipZ], 0.046, 0.034, 8, 6, 0);
+    // Diagonal oak knee brace under the transom counter
+    addTube([0, transomY - 0.38, hullEndZ - 0.18], [0, transomY - 0.01, hullEndZ + 0.24], 0.036, 0.030, 6, 6, 0);
+    // Forged iron cranse bands at transom exit and outlicker tip sheave block
+    addTube([0, transomY - 0.02, hullEndZ - 0.03], [0, transomY - 0.02, hullEndZ + 0.04], 0.052, 0.052, 6, 6, 1);
+    addTube([0, tipY, tipZ - 0.08], [0, tipY, tipZ + 0.02], 0.046, 0.042, 6, 6, 1);
+    // Port and starboard quarter guy stays (vientos del botaló) anchoring the outlicker tip to the hull quarters
+    const guyZ = hullEndZ - 0.28;
+    addCatenary([-quarterHalfBeam, transomY - 0.04, guyZ], [0, tipY, tipZ - 0.04], 0.03, 0.016, 4, 7, 0.4);
+    addCatenary([quarterHalfBeam, transomY - 0.04, guyZ], [0, tipY, tipZ - 0.04], 0.03, 0.016, 4, 7, 0.4);
+    // Live mizzen outlicker sheet (escota de mesana) from the rear sail's aft clew to the outlicker block & forward to taffrail cleat
+    const blockPos = [0, tipY + 0.03, tipZ - 0.04];
+    addCatenary(clewPos, blockPos, 0.04, 0.020, 6, 7, 0.5);
+    addCatenary(blockPos, [quarterHalfBeam * 0.35, transomY + 0.05, hullEndZ - 0.22], 0.02, 0.016, 4, 7, 0.5);
+  };
+
+  const design = getAdditionalRigDesign(modelId);
+  if (modelId === 'nina' || !design) {
+    const poses = boat?.rig?.length === 3 ? boat.rig : _lateenPosesScratch;
+    for (let s = 0; s < SAIL_PLAN.length; s++) {
+      const sail = SAIL_PLAN[s];
+      const yardPos = lateenYardPoint(s, sail.pivot, poses[s]);
+      const mastPos = mastPoint(sail.mast, yardPos[1]);
+      addParrelCollar(mastPos, yardPos, RIG_MASTS[sail.mast]?.r ?? 0.085);
+    }
+    // Rear sail (mizzen, index 2) aft clew (u = 0, v = 1) connected to stern outlicker & transom
+    const clewPos = lateenClothPoint(2, 0, 1, poses[2], time, windSpeed, true, poses);
+    const hullEndZ = 5.60;
+    const transomY = modelDeck(boat ?? { modelId: 'nina' }, 5.55) + 0.14;
+    const quarterHalfBeam = Math.max(0.42, modelDeckWidth(boat ?? { modelId: 'nina' }, 5.55) * 0.72);
+    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12);
+    return new Float32Array(values);
+  }
+
+  const rigCtx = proceduralRigContext(modelId);
+  if (!design || !rigCtx || !rigCtx.surfaces?.length) {
+    return new Float32Array(values);
+  }
+  for (const surface of rigCtx.surfaces) {
+    if (surface.kind === 'headsail' || surface.name === 'spritsail') continue;
+    const mast = rigCtx.masts?.[surface.mast];
+    if (!mast) continue;
+    const pose = rigSurfacePose(surface, boat);
+    const yardPos = surfaceYardPoint(surface, surface.pivot, pose);
+    const mastPos = rigCtx.mastPoint
+      ? rigCtx.mastPoint(surface.mast, yardPos[1])
+      : [0, yardPos[1], mast.z ?? 0];
+    addParrelCollar(mastPos, yardPos, mast.radius ?? 0.08);
+  }
+  // Connect overhanging rear lateen sail (mizzen on Pinta & Santa María) to the stern outlicker & hull transom
+  const mizzenSurface = rigCtx.surfaces.find((s) => s.kind === 'lateen' && (s.corners?.[2]?.[2] ?? 0) >= 5.5);
+  if (mizzenSurface) {
+    const pose = rigSurfacePose(mizzenSurface, boat);
+    const clewPos = surfaceClothPoint(mizzenSurface, 0, 1, pose, rigCtx, time, windSpeed);
+    const hullEndZ = 6.0;
+    const transomY = modelDeck(boat ?? { modelId }, 5.95) + 0.14;
+    const quarterHalfBeam = Math.max(0.48, modelDeckWidth(boat ?? { modelId }, 5.95) * 0.72);
+    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12);
+  }
+
+  return new Float32Array(values);
+}
+
 export async function createShipColorsRenderer({
   device,
   frameUBO,
@@ -630,6 +846,8 @@ export async function createShipColorsRenderer({
   });
   let mooringVertexCount = 0;
 
+  const maxRigConnectorVerts = 4096;
+
   const layout = [{
     arrayStride: 40,
     attributes: [
@@ -655,11 +873,16 @@ export async function createShipColorsRenderer({
   const axis = [0, 0, 0];
 
   for (let i = 0; i < maxVessels; i++) {
-    const poseData = new Float32Array(28);
+    const poseData = new Float32Array(32);
     const poseBuffer = device.createBuffer({
       label: `ship colors pose ${i}`,
       size: poseData.byteLength,
       usage: B.UNIFORM | B.COPY_DST,
+    });
+    const rigVertexBuffer = device.createBuffer({
+      label: `ship rig connectors ${i}`,
+      size: maxRigConnectorVerts * 40,
+      usage: B.VERTEX | B.COPY_DST,
     });
     const resources = [
       { buffer: frameUBO },
@@ -674,7 +897,7 @@ export async function createShipColorsRenderer({
       layout: pipeline.getBindGroupLayout(0),
       entries: resources.map((resource, binding) => ({ binding, resource })),
     });
-    slots.push({ poseData, poseBuffer, bindGroup, active: false });
+    slots.push({ poseData, poseBuffer, rigVertexBuffer, rigVertexCount: 0, bindGroup, active: false });
   }
 
   return {
@@ -683,6 +906,7 @@ export async function createShipColorsRenderer({
       if (!slot) return;
       if (!boat) {
         slot.active = false;
+        slot.rigVertexCount = 0;
         return;
       }
       slot.active = true;
@@ -726,7 +950,22 @@ export async function createShipColorsRenderer({
       p[26] = windSpeed;
       p[27] = boat.damage?.surrendered ? 1.0 : 0.0;
 
+      const visMask = (cn.showBasket ?? 1 ? 1 : 0)
+        | (cn.showPennant ?? 1 ? 2 : 0)
+        | (stern.showEnsign ?? 1 ? 4 : 0);
+      p[28] = cn.headZ ?? cn.z;
+      p[29] = stern.outlickerSpan ?? 0.5;
+      p[30] = visMask;
+      p[31] = 0;
+
       device.queue.writeBuffer(slot.poseBuffer, 0, p);
+
+      const rigVerts = buildVesselRigConnectors(boat, time ?? 0, windSpeed);
+      const rigCount = Math.min(maxRigConnectorVerts, Math.floor(rigVerts.length / 10));
+      slot.rigVertexCount = rigCount;
+      if (rigCount > 0) {
+        device.queue.writeBuffer(slot.rigVertexBuffer, 0, rigVerts.buffer, rigVerts.byteOffset, rigCount * 40);
+      }
     },
     updateMooringVertices(verts) {
       if (!verts || !verts.length) {
@@ -742,12 +981,16 @@ export async function createShipColorsRenderer({
     draw(pass, count = slots.length) {
       pass.setPipeline(pipeline);
       pass.setBindGroup(1, lighting);
-      pass.setVertexBuffer(0, vertexBuffer);
       const n = Math.min(count, slots.length);
       for (let i = 0; i < n; i++) {
         if (!slots[i].active) continue;
         pass.setBindGroup(0, slots[i].bindGroup);
+        pass.setVertexBuffer(0, vertexBuffer);
         pass.draw(vertexCount);
+        if (slots[i].rigVertexCount > 0) {
+          pass.setVertexBuffer(0, slots[i].rigVertexBuffer);
+          pass.draw(slots[i].rigVertexCount);
+        }
       }
       if (mooringVertexCount > 0 && slots[0]) {
         pass.setBindGroup(0, slots[0].bindGroup);
@@ -758,7 +1001,10 @@ export async function createShipColorsRenderer({
     destroy() {
       vertexBuffer.destroy();
       mooringVertexBuffer.destroy();
-      for (const s of slots) s.poseBuffer.destroy();
+      for (const s of slots) {
+        s.poseBuffer.destroy();
+        s.rigVertexBuffer.destroy();
+      }
     },
   };
 }

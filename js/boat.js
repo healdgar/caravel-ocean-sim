@@ -1,5 +1,6 @@
 import { HELM_EYE_X, HELM_EYE_Z, HULL_DRAFT, HULL_VERTICAL_SCALE, hullDeck, hullHalfWidth, hullScale, vesselVerticalScale, vesselDraft, vesselHull, modelDeck, modelDeckWidth } from './hull.js';
-import {VICTORY_DESIGN,victoryHullHalfWidth,victoryHullDeck} from './models/victory.js';
+import {VICTORY_DESIGN,VICTORY_MASTS,victoryMastPoint,victoryHullHalfWidth,victoryHullDeck} from './models/victory.js';
+import {RIG_MASTS,mastPoint} from './rigging.js';
 import {PROCEDURAL_DESIGNS,proceduralHullWidth,proceduralHullDeck,proceduralDeck,proceduralKeelHalfWidth,proceduralProvisionDays} from './models/procedural.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {advanceRowing,rowingForces} from './rowing.js';
@@ -511,9 +512,38 @@ function helmDesignStation(boat){
 export function crowsNestDesignStation(boat = {}) {
   const modelId = boat.modelId ?? 'nina';
   if (modelId === 'victory') {
-    return { x: 0, y: 10.25, z: 0.12, eyeHeight: 11.2, pennantLift: 2.95 };
+    const mainMast = VICTORY_MASTS[1];
+    const y = 10.25;
+    const [, , z] = victoryMastPoint(1, y);
+    const [, headY, headZ] = victoryMastPoint(1, mainMast.height);
+    return {
+      x: 0,
+      y,
+      z,
+      headY,
+      headZ,
+      eyeHeight: 11.2,
+      pennantLift: headY - y,
+      showBasket: 0,
+      showPennant: 1,
+    };
   }
   const additional = additionalHydroDesign(modelId);
+  if (additional && !additional.masts?.length) {
+    const sy = additional.frame?.verticalScale ?? 1;
+    const deckY = proceduralDeck(modelId, 0);
+    return {
+      x: 0,
+      y: deckY + 1.0,
+      z: 0,
+      headY: deckY + 1.0,
+      headZ: 0,
+      eyeHeight: (deckY + 1.5) * sy,
+      pennantLift: 0,
+      showBasket: 0,
+      showPennant: 0,
+    };
+  }
   if (additional?.masts?.length) {
     let tallest = additional.masts[0];
     let tallestIdx = 0;
@@ -524,37 +554,52 @@ export function crowsNestDesignStation(boat = {}) {
         tallestIdx = i;
       }
     }
+    const deckY = proceduralDeck(modelId, tallest.z ?? 0);
+    const headY = tallest.height ?? 7.5;
     const mastSurfaces = (additional.surfaces ?? []).filter(
       (s) => s.mast === tallestIdx && s.kind === 'square'
     );
-    let y = (tallest.height ?? 7.5) * 0.86;
-    if (mastSurfaces.length >= 2) {
+    let y = headY * 0.86;
+    if (modelId === 'flying-cloud') {
+      y = deckY + (headY - deckY) * 0.47;
+    } else if (mastSurfaces.length >= 2) {
       const sorted = [...mastSurfaces].sort((a, b) => a.corners[0][1] - b.corners[0][1]);
       const lowerHeadY = sorted[0].corners[0][1];
       const upperFootY = sorted[1].corners[2][1];
       y = (lowerHeadY + upperFootY) * 0.5 - 0.28;
     }
-    const deckY = proceduralDeck(modelId, tallest.z ?? 0);
-    const t = Math.max(0, Math.min(1, (y - deckY) / Math.max(0.5, (tallest.height ?? 7.5) - deckY)));
+    const t = Math.max(0, Math.min(1, (y - deckY) / Math.max(0.5, headY - deckY)));
     const z = (tallest.z ?? 0) + (tallest.rake ?? 0) * t;
+    const headZ = (tallest.z ?? 0) + (tallest.rake ?? 0);
     const sy = additional.frame?.verticalScale ?? 0.8;
+    const showBasket = modelId === 'pinta' || modelId === 'santa-maria' ? 1 : 0;
     return {
       x: 0,
       y,
       z,
+      headY,
+      headZ,
       eyeHeight: (y + 0.95) * sy,
-      pennantLift: Math.max(0.95, (tallest.height ?? 7.5) - y - 0.18),
+      pennantLift: Math.max(0.45, headY - y),
+      showBasket,
+      showPennant: 1,
     };
   }
   const sy = vesselVerticalScale(boat);
   const lengthScale = Math.max(0.85, Math.min(1.45, (boat.length || 20) / 20));
   const y = 7.75;
+  const [, , z] = mastPoint(0, y);
+  const [, headY, headZ] = mastPoint(0, RIG_MASTS[0].height);
   return {
     x: 0,
     y,
-    z: -0.76,
+    z,
+    headY,
+    headZ,
     eyeHeight: (y + 0.95) * sy * lengthScale,
-    pennantLift: 1.35,
+    pennantLift: headY - y,
+    showBasket: 1,
+    showPennant: 1,
   };
 }
 
@@ -579,7 +624,9 @@ export function sternEnsignDesignStation(boat = {}) {
   const sternDeckZ = hullEndZ - 0.05;
   const railLift = modelId === 'santa-maria' || modelId === 'pinta' ? 0.38 : 0.45;
   const y = modelDeck(boat, sternDeckZ) + railLift;
-  return { x: 0, y, z, aftSailZ, hullEndZ };
+  const outlickerSpan = Math.max(0.38, z - hullEndZ + 0.28);
+  const showEnsign = modelId === 'taino-canoe' ? 0 : 1;
+  return { x: 0, y, z, aftSailZ, hullEndZ, outlickerSpan, showEnsign };
 }
 
 export function setBoatViewStation(boat, station = 'deck') {
