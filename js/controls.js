@@ -210,7 +210,9 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     prepBtn.onclick=()=>{gunnery.prepare(side);notifyGunnery();};
 
     const fireBtn=document.createElement('button');fireBtn.type='button';fireBtn.id=`helm-fire-${side}`;
-    fireBtn.className='helm-fire-btn';fireBtn.textContent=`Fire ${side}`;
+    fireBtn.className='helm-fire-btn';fireBtn.textContent='Fire';
+    fireBtn.title=`Fire ${side} broadside`;
+    fireBtn.setAttribute('aria-label',`Fire ${side}`);
     fireBtn.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);notifyGunnery();};
 
     const fireLoadedBtn=document.createElement('button');fireLoadedBtn.type='button';fireLoadedBtn.id=`helm-fire-loaded-${side}`;

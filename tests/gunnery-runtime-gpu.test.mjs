@@ -133,6 +133,9 @@ for(const model of ['nina','victory'])test(`${model}: captain UI, attended loadi
         elevOutRect:rect('#helm-elevation-value'),
         travInputRect:rect('#helm-traverse'),
         travOutRect:rect('#helm-traverse-value'),
+        prepStbdRect:rect('#helm-prepare-starboard'),
+        fireStbdRect:rect('#helm-fire-starboard'),
+        loadedStbdRect:rect('#helm-fire-loaded-starboard'),
       };
     });
     assert.equal(battleHud.battle,'true','lower helm dock transitions to battle mode');
@@ -148,6 +151,8 @@ for(const model of ['nina','victory'])test(`${model}: captain UI, attended loadi
     assert.ok(battleHud.elevInputRect.right<=battleHud.elevOutRect.left+1,'elevation slider does not overlap its readout');
     assert.ok(battleHud.travInputRect.right<=battleHud.travOutRect.left+1,'train slider does not overlap its readout');
     assert.ok(battleHud.elevOutRect.right<=battleHud.travInputRect.left,'elevation readout does not overlap train control');
+    assert.ok(battleHud.prepStbdRect.right<=battleHud.fireStbdRect.left+1,'prep button does not overlap fire button');
+    assert.ok(battleHud.fireStbdRect.right<=battleHud.loadedStbdRect.left+1,'fire button does not overlap loaded button');
     let maxSmoke=0,sawBall=false,sawFlash=false,sawCrown=false,sawProbe=false,sawResolve=false,sawRecoil=false,shotFrame=null,impactFrame=null,last=null;
     for(let i=0;i<180;i++){
       last=await gunneryRuntimeStep(page);maxSmoke=Math.max(maxSmoke,last.counts.volumes);sawBall||=!!last.render.gunneryBall;sawFlash||=last.counts.volumes>0;
