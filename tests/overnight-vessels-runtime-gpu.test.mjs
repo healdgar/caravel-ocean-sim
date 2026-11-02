@@ -86,7 +86,7 @@ async function snapshot(page){
     return {rows,errors:r.errors,lost:r.lost,startup:window.oceanStartup.state,image:await r.image()};
   });
 }
-const companies={oseberg:32,lusoria:26,'taino-canoe':30,'flying-cloud':12,'gipsy-moth-iv':1};
+const companies={oseberg:32,lusoria:26,'taino-canoe':30,'flying-cloud':42,'gipsy-moth-iv':1};
 
 for(const path of ['/', '/docs/index.html'])for(const [id,count]of Object.entries(companies))test(`${path} ${id}: actual mesh, company, uploaded poses and native draw startup`,{timeout:240000},async()=>{
   const {page,errors}=await openRuntime(path,{ship:id});

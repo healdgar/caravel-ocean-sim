@@ -232,14 +232,14 @@ test('readyAtQuarters and manGunStationsImmediate prepare two HMS Victories for 
  assert.ok(target.damage.hullIntegrity<1);
 });
 
-test('fireLoaded fires the 48 ready guns while weather-deck guns finish loading, fireAtWill auto-cycles, and fullWatch populates 24 Victory deckhands',async()=>{
+test('fireLoaded fires the 48 ready guns while weather-deck guns finish loading, fireAtWill auto-cycles, and fullWatch populates 64 Victory deckhands',async()=>{
  const {getShipModel}=await import('../js/ship-models.js');
  const {createCompany,stepCompany}=await import('../js/crew.js');
  const vModel=getShipModel('victory');
  const boat={id:'player',modelId:'victory',model:vModel,length:vModel.runtime.length,beam:vModel.runtime.beam,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,showProw:true,sailFore:1,sailMain:1,sailMizzen:1};
  boat.hydrodynamics=boatHydrodynamics(boat.length,boat.beam,30,0,'victory');
  const company=createCompany(undefined,'victory',{fullWatch:true});
- assert.equal(company.crew.length,24,'fullWatch populates 24 visible hands across Victory weather decks');
+ assert.equal(company.crew.length,64,'fullWatch populates 64 visible hands across Victory weather decks');
  const events=[];
  const guns=createShipGunnery(boat,{onEvent:e=>events.push(e)});
  stepCompany(company,boat,0,6);

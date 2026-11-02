@@ -1333,6 +1333,26 @@ const ADDITIONAL_DESIGNS=deepFreeze({
     bowsprit:{a:[0,1.02,-4.85],b:[0,1.55,-8.15],radius:.065},
     hatch:{centre:[0,.75,-1.8],size:[.85,.10,.95]},
     crewStations:additionalStationsForCrew(),
+    supplementalCrewStations:{
+      pinta_f1:{x:-.34,z:-4.45,route:[-4.52,-4.38],role:'Bow lookout'},
+      pinta_f2:{x:.34,z:-4.45,route:[-4.52,-4.38],role:'Anchor hand'},
+      pinta_w1:{x:-1.28,z:-2.75,route:[-2.82,-2.68],role:'Fore sheet hand'},
+      pinta_w2:{x:1.28,z:-2.75,route:[-2.82,-2.68],role:'Fore sheet hand'},
+      pinta_w3:{x:-1.36,z:-2.15,route:[-2.22,-2.08],role:'Waist deckhand'},
+      pinta_w4:{x:1.36,z:-2.15,route:[-2.22,-2.08],role:'Waist deckhand'},
+      pinta_w5:{x:-1.42,z:-1.55,route:[-1.62,-1.48],role:'Waist deckhand'},
+      pinta_w6:{x:1.42,z:-1.55,route:[-1.62,-1.48],role:'Waist deckhand'},
+      pinta_w7:{x:-1.42,z:-.20,route:[-.27,-.13],role:'Main tack hand'},
+      pinta_w8:{x:1.42,z:-.20,route:[-.27,-.13],role:'Main tack hand'},
+      pinta_w9:{x:-1.42,z:.50,route:[.43,.57],role:'Main brace hand'},
+      pinta_w10:{x:1.42,z:.50,route:[.43,.57],role:'Main brace hand'},
+      pinta_w11:{x:-1.38,z:1.85,route:[1.78,1.92],role:'Aft waist hand'},
+      pinta_w12:{x:1.38,z:1.85,route:[1.78,1.92],role:'Aft waist hand'},
+      pinta_q1:{x:-.28,z:3.10,route:[3.03,3.17],role:'Quarterdeck gunner'},
+      pinta_q2:{x:.28,z:3.10,route:[3.03,3.17],role:'Quarterdeck gunner'},
+      pinta_q3:{x:-.45,z:5.10,route:[5.03,5.17],yaw:Math.PI,role:'Stern watch'},
+      pinta_q4:{x:.45,z:5.10,route:[5.03,5.17],yaw:Math.PI,role:'Stern lantern hand'},
+    },
     loading:{crew:30,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:1800,sparesKg:2500,designIncludesManifest:true,gmBeamFraction:.20},
     equipment:{anchors:true,guns:[{side:-1,z:3.3},{side:-1,z:4.5},{side:1,z:3.3},{side:1,z:4.5}],gunProvenance:'Four small period swivel guns are an authored outfit, not a recovered Pinta inventory.'},
     references:[{subject:'modern-enlarged-replica',source:'https://www.ninapinta.org/index.html',
@@ -1811,6 +1831,38 @@ const laterSailCloud={
     sections:[{kind:'bowsprit',outboardFt:20,diameterIn:28.5},{kind:'jibboom',innerJibFt:16,outerJibFt:13,endFt:5,diameterIn:16.5}],source:laterSailCloudSource},
   hatch:{centre:[0,.55,.68],size:[.75,.04,.58]},
   crewStations:laterSailCloudCrew(),
+  supplementalCrewStations:{
+    cloud_f1:{x:-.25,z:-4.65,route:[-4.72,-4.58],role:'Forecastle lookout'},
+    cloud_f2:{x:.25,z:-4.65,route:[-4.72,-4.58],role:'Anchor hand'},
+    cloud_w1:{x:-.75,z:-3.75,route:[-3.82,-3.68],role:'Foremast hand'},
+    cloud_w2:{x:.75,z:-3.75,route:[-3.82,-3.68],role:'Foremast hand'},
+    cloud_w3:{x:-1.05,z:-2.65,route:[-2.72,-2.58],role:'Fore tack hand'},
+    cloud_w4:{x:1.05,z:-2.65,route:[-2.72,-2.58],role:'Fore sheet hand'},
+    cloud_w5:{x:-1.25,z:-2.15,route:[-2.22,-2.08],role:'Waist deckhand'},
+    cloud_w6:{x:1.25,z:-2.15,route:[-2.22,-2.08],role:'Waist deckhand'},
+    cloud_w7:{x:-1.35,z:-1.65,route:[-1.72,-1.58],role:'Deckhouse watch'},
+    cloud_w8:{x:1.35,z:-1.65,route:[-1.72,-1.58],role:'Deckhouse watch'},
+    cloud_w9:{x:-1.38,z:-1.15,route:[-1.22,-1.08],role:'Waist rigger'},
+    cloud_w10:{x:1.38,z:-1.15,route:[-1.22,-1.08],role:'Waist rigger'},
+    cloud_w11:{x:-1.42,z:.15,route:[.08,.22],role:'Main tack hand'},
+    cloud_w12:{x:1.42,z:.15,route:[.08,.22],role:'Main tack hand'},
+    cloud_w13:{x:-1.42,z:.60,route:[.53,.67],role:'Main sheet hand'},
+    cloud_w14:{x:1.42,z:.60,route:[.53,.67],role:'Main sheet hand'},
+    cloud_w15:{x:-1.38,z:1.45,route:[1.38,1.52],role:'Main brace hand'},
+    cloud_w16:{x:1.38,z:1.45,route:[1.38,1.52],role:'Main brace hand'},
+    cloud_w17:{x:-1.32,z:1.90,route:[1.83,1.97],role:'Aft waist hand'},
+    cloud_w18:{x:1.32,z:1.90,route:[1.83,1.97],role:'Aft waist hand'},
+    cloud_p1:{x:-1.18,z:2.65,route:[2.58,2.72],role:'Poop deckhand'},
+    cloud_p2:{x:1.18,z:2.65,route:[2.58,2.72],role:'Poop deckhand'},
+    cloud_p3:{x:.80,z:3.15,route:[3.08,3.22],role:'Mizzen hand'},
+    cloud_p4:{x:-1.05,z:3.65,route:[3.58,3.72],role:'Mizzen sheet hand'},
+    cloud_p5:{x:1.05,z:3.65,route:[3.58,3.72],role:'Mizzen brace hand'},
+    cloud_p6:{x:-.88,z:4.15,route:[4.08,4.22],role:'Spanker hand'},
+    cloud_p7:{x:.88,z:4.15,route:[4.08,4.22],role:'Spanker hand'},
+    cloud_p8:{x:0,z:2.75,route:[2.68,2.82],role:'Quartermaster'},
+    cloud_p9:{x:-.35,z:5.35,route:[5.28,5.42],yaw:Math.PI,role:'Stern watch'},
+    cloud_p10:{x:.35,z:5.35,route:[5.28,5.42],yaw:Math.PI,role:'Log-line hand'},
+  },
   loading:{crew:42,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:4500,sparesKg:20000,designIncludesManifest:true,gmBeamFraction:.15,
     ballastKg:null,permanentMassKg:null,referenceDisplacementKg:null,authoredDraftMetres:(.91+.045)*laterSailCloudFrame.verticalScale,
     interpretation:'Authored 42-person departure manifest and stores; hydrostatic mass/ballast must be calibrated. Register tonnage is never converted to mass.'},
@@ -2083,6 +2135,20 @@ const NINA_DESIGN = deepFreeze({
     isabel:{x:-.75,z:3.25,route:[3.25,3.25]},
     pedro:{x:0,z:3.95-.32/(20/12),route:[3.95-.32/(20/12),3.95-.32/(20/12)],yaw:0},
   },
+  supplementalCrewStations:{
+    nina_f1:{x:-.52,z:-4.15,route:[-4.20,-4.10],role:'Bow hand'},
+    nina_f2:{x:.52,z:-4.15,route:[-4.20,-4.10],role:'Anchor hand'},
+    nina_w1:{x:-1.12,z:-2.65,route:[-2.70,-2.60],role:'Fore tack hand'},
+    nina_w2:{x:1.12,z:-2.65,route:[-2.70,-2.60],role:'Fore sheet hand'},
+    nina_w3:{x:-1.18,z:-1.15,route:[-1.20,-1.10],role:'Waist deckhand'},
+    nina_w4:{x:1.18,z:-.65,route:[-.70,-.60],role:'Waist deckhand'},
+    nina_w5:{x:-1.18,z:.45,route:[.40,.50],role:'Main sheet hand'},
+    nina_w6:{x:1.18,z:.90,route:[.85,.95],role:'Main brace hand'},
+    nina_w7:{x:1.12,z:1.65,route:[1.60,1.70],role:'Aft waist hand'},
+    nina_w8:{x:-1.08,z:2.20,route:[2.15,2.25],role:'Mizzen tack hand'},
+    nina_q1:{x:.72,z:4.50,route:[4.45,4.55],yaw:Math.PI,role:'Quarterdeck hand'},
+    nina_q2:{x:0,z:5.20,route:[5.15,5.25],yaw:Math.PI,role:'Stern watch'},
+  },
 });
 
 const NINA_RIG_PLATE = deepFreeze({
@@ -2187,18 +2253,58 @@ const VICTORY_DESIGN=deepFreeze({
     pedro:{x:0,z:3.83,route:[3.83,3.83],yaw:Math.PI},
   },
   supplementalCrewStations:{
-    victory_w1:{x:-1.08,z:-3.05,route:[-3.20,-2.85],role:'Foretop hand'},
-    victory_w2:{x:1.08,z:-3.05,route:[-3.20,-2.85],role:'Foretop hand'},
-    victory_w3:{x:-1.08,z:-2.30,route:[-2.50,-2.10],role:'Waist gunner'},
-    victory_w4:{x:1.08,z:-2.30,route:[-2.50,-2.10],role:'Waist gunner'},
-    victory_w5:{x:-1.08,z:-1.55,route:[-1.75,-1.35],role:'Waist deckhand'},
-    victory_w6:{x:1.08,z:-1.55,route:[-1.75,-1.35],role:'Waist deckhand'},
-    victory_w7:{x:-1.08,z:.45,route:[.25,.65],role:'Maintop hand'},
-    victory_w8:{x:1.08,z:.45,route:[.25,.65],role:'Maintop hand'},
-    victory_w9:{x:-1.02,z:1.02,route:[.85,1.15],role:'Quarterdeck gunner'},
-    victory_w10:{x:1.02,z:1.02,route:[.85,1.15],role:'Quarterdeck gunner'},
-    victory_p1:{x:-.42,z:4.55,route:[4.45,4.70],yaw:Math.PI,role:'Royal Marine'},
-    victory_p2:{x:.42,z:4.55,route:[4.45,4.70],yaw:Math.PI,role:'Signal midshipman'},
+    victory_f1:{x:-.90,z:-5.05,route:[-5.10,-5.00],role:'Cathead hand'},
+    victory_f2:{x:.90,z:-5.05,route:[-5.10,-5.00],role:'Cathead hand'},
+    victory_f3:{x:-.92,z:-4.50,route:[-4.55,-4.45],role:'Forecastle gunner'},
+    victory_f4:{x:.92,z:-4.50,route:[-4.55,-4.45],role:'Forecastle gunner'},
+    victory_f5:{x:-.35,z:-4.00,route:[-4.05,-3.95],role:'Forecastle watch'},
+    victory_f6:{x:.35,z:-4.00,route:[-4.05,-3.95],role:'Forecastle watch'},
+    victory_w1:{x:-1.08,z:-3.05,route:[-3.08,-3.02],role:'Foretop hand'},
+    victory_w2:{x:.72,z:-3.05,route:[-3.08,-3.02],role:'Foretop hand'},
+    victory_w3:{x:-.45,z:-3.00,route:[-3.05,-2.95],role:'Fore sheet hand'},
+    victory_w4:{x:.45,z:-3.00,route:[-3.05,-2.95],role:'Fore sheet hand'},
+    victory_w5:{x:-1.12,z:-2.65,route:[-2.68,-2.62],role:'Waist gunner'},
+    victory_w6:{x:1.12,z:-2.65,route:[-2.68,-2.62],role:'Waist gunner'},
+    victory_w7:{x:-1.02,z:-2.30,route:[-2.33,-2.27],role:'Waist gunner'},
+    victory_w8:{x:1.02,z:-2.30,route:[-2.33,-2.27],role:'Waist gunner'},
+    victory_w9:{x:-1.12,z:-1.85,route:[-1.88,-1.82],role:'Waist deckhand'},
+    victory_w10:{x:1.12,z:-1.85,route:[-1.88,-1.82],role:'Waist deckhand'},
+    victory_w11:{x:-1.08,z:-1.60,route:[-1.63,-1.57],role:'Waist deckhand'},
+    victory_w12:{x:1.08,z:-1.60,route:[-1.63,-1.57],role:'Waist deckhand'},
+    victory_w13:{x:-1.12,z:-1.15,route:[-1.18,-1.12],role:'Main tack hand'},
+    victory_w14:{x:1.12,z:-1.15,route:[-1.18,-1.12],role:'Main tack hand'},
+    victory_w15:{x:-1.12,z:-.45,route:[-.48,-.42],role:'Main gun crew'},
+    victory_w16:{x:1.12,z:-.20,route:[-.23,-.17],role:'Main gun crew'},
+    victory_w17:{x:-1.12,z:.15,route:[.12,.18],role:'Maintop hand'},
+    victory_w18:{x:1.12,z:.15,route:[.12,.18],role:'Maintop hand'},
+    victory_w19:{x:-1.08,z:.35,route:[.32,.38],role:'Maintop hand'},
+    victory_w20:{x:1.08,z:.45,route:[.42,.48],role:'Maintop hand'},
+    victory_w21:{x:-1.02,z:1.02,route:[.99,1.05],role:'Main brace hand'},
+    victory_w22:{x:1.02,z:1.02,route:[.99,1.05],role:'Main brace hand'},
+    victory_w23:{x:-.45,z:1.05,route:[1.00,1.10],role:'Aft main deckhand'},
+    victory_w24:{x:.45,z:1.05,route:[1.00,1.10],role:'Aft main deckhand'},
+    victory_q1:{x:-.42,z:1.95,route:[1.90,2.00],role:'Quarterdeck gunner'},
+    victory_q2:{x:.42,z:1.95,route:[1.90,2.00],role:'Quarterdeck gunner'},
+    victory_q3:{x:-.58,z:2.30,route:[2.25,2.35],role:'Quarterdeck gunner'},
+    victory_q4:{x:.58,z:2.30,route:[2.25,2.35],role:'Quarterdeck gunner'},
+    victory_q5:{x:-.58,z:2.95,route:[2.90,3.00],role:'Quarterdeck rigger'},
+    victory_q6:{x:.58,z:2.95,route:[2.90,3.00],role:'Quarterdeck rigger'},
+    victory_q7:{x:-.52,z:3.30,route:[3.25,3.35],role:'Mizzen topman'},
+    victory_q8:{x:.52,z:3.30,route:[3.25,3.35],role:'Mizzen topman'},
+    victory_q9:{x:.62,z:4.02,route:[3.99,4.05],role:'Mizzen sheet hand'},
+    victory_q10:{x:-.52,z:3.70,route:[3.65,3.75],role:'Quartermaster mate'},
+    victory_q11:{x:.52,z:3.70,route:[3.65,3.75],role:'Signal midshipman'},
+    victory_q12:{x:-.62,z:4.02,route:[3.99,4.05],role:'Quarterdeck watch'},
+    victory_p1:{x:-.78,z:4.50,route:[4.45,4.55],yaw:Math.PI,role:'Royal Marine'},
+    victory_p2:{x:.78,z:4.50,route:[4.45,4.55],yaw:Math.PI,role:'Royal Marine'},
+    victory_p3:{x:-.44,z:4.55,route:[4.50,4.60],yaw:Math.PI,role:'Signal midshipman'},
+    victory_p4:{x:.44,z:4.55,route:[4.50,4.60],yaw:Math.PI,role:'Signal lieutenant'},
+    victory_p5:{x:-.78,z:5.10,route:[5.05,5.15],yaw:Math.PI,role:'Royal Marine'},
+    victory_p6:{x:.78,z:5.10,route:[5.05,5.15],yaw:Math.PI,role:'Royal Marine'},
+    victory_p7:{x:-.28,z:5.20,route:[5.17,5.25],yaw:Math.PI,role:'Master'},
+    victory_p8:{x:.28,z:5.20,route:[5.17,5.25],yaw:Math.PI,role:'First Lieutenant'},
+    victory_p9:{x:-.58,z:5.32,route:[5.28,5.36],yaw:Math.PI,role:'Poop lookout'},
+    victory_p10:{x:.58,z:5.32,route:[5.28,5.36],yaw:Math.PI,role:'Stern lantern hand'},
   },
   provenance:{interpretation:'Authored game reconstruction of the 1805 ship; not surveyed construction offsets.',
     dimensions:'https://www.gutenberg.org/files/40847/40847-h/40847-h.htm',
@@ -3602,6 +3708,7 @@ function createProceduralShipDefinition(id,{status='planned'}={}){
   for(const zone of d.deckZones??[])if(zone.id!=='main'){const z=(zone.bounds[0]+zone.bounds[1])/2;add('deck.'+zone.id,[0,deck(z),z],'frame');}
   if(d.cockpit){const z=(d.cockpit.bounds[0]+d.cockpit.bounds[1])/2;add('deck.cockpit',[0,deck(z),z],'frame');}
   for(const [name,station]of Object.entries(d.crewStations))add('station.crew.'+name,[station.x,station.y??deck(station.z,station.x),station.z],'station');
+  for(const [name,station]of Object.entries(d.supplementalCrewStations??{}))add('station.crew.'+name,[station.x,station.y??deck(station.z,station.x),station.z],'station');
   add('station.helm',[d.helm.x,deck(d.helm.z,d.helm.x),d.helm.z],'station');
   add('helm.camera',[d.helm.x,deck(d.helm.z,d.helm.x)+d.helm.eyeAboveDeck/d.frame.verticalScale,d.helm.z]);
   add('helm.rudder',d.steering.pivot,'part',{type:'procedural-helm',part:'rudder'});
@@ -3687,7 +3794,7 @@ function createProceduralShipDefinition(id,{status='planned'}={}){
   }
   const rig=defineRig({id:id+'-rig',backend:'surfaces-v1',masts,sails,fittings},nodes,{planned:status!=='ready'});
   return deepFreeze({id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status,development:true,hullFamily:d.family,
-    geometry:row?'rowing-procedural-v1':'later-sail-procedural-v1',designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,
+    geometry:row?'rowing-procedural-v1':'later-sail-procedural-v1',designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,supplementalCrewStations:d.supplementalCrewStations??null,
     capabilities:{...(d.capabilities??{}),sailing:d.surfaces.length>0,rowing:row,yardTransfer:d.surfaces.some(s=>s.kind==='lateen'),
       anchors:!!(row?d.equipment.anchor:d.equipment.anchors),gunnery:false},nodes,rig,referenceMeasurements:d.references??d.referenceMeasurements});
 }
@@ -3778,6 +3885,7 @@ function ninaNodes(){
     for(const key of ['root','tip','fairlead'])add(`anchor.${name}.${key}`,[...a[key]]);
   }
   for(const [id,p]of Object.entries(NINA_DESIGN.crewStations))add(`station.crew.${id}`,[p.x,vesselDeck(p.z),p.z],'hull','station');
+  for(const [id,p]of Object.entries(NINA_DESIGN.supplementalCrewStations??{}))add(`station.crew.${id}`,[p.x,vesselDeck(p.z),p.z],'hull','station');
   for(const [mast,name]of MAST_IDS.entries()){
     const m=RIG_MASTS[mast],foot=mastPoint(mast,vesselDeck(m.z)),head=mastPoint(mast,m.height),sail=SAIL_PLAN[mast];
     add(`mast.${name}`,foot,'hull','frame');
@@ -3840,6 +3948,7 @@ function victoryDefinition(){
   add('helm.camera',[VICTORY_DESIGN.helm.x,victoryVesselDeck(VICTORY_DESIGN.helm.z)+VICTORY_DESIGN.helm.eyeAboveDeck/VICTORY_DESIGN.frame.verticalScale,VICTORY_DESIGN.helm.z]);
   add('hatch.main',victoryHatchPivot(),'hull','part');add('station.hatch',[.45,victoryVesselDeck(-1.5),-1.5],'hull','station');
   for(const [id,p]of Object.entries(VICTORY_DESIGN.crewStations))add('station.crew.'+id,[p.x,victoryVesselDeck(p.z),p.z],'hull','station');
+  for(const [id,p]of Object.entries(VICTORY_DESIGN.supplementalCrewStations??{}))add('station.crew.'+id,[p.x,victoryVesselDeck(p.z),p.z],'hull','station');
   for(const side of [-1,1])for(const [key,p]of Object.entries(victoryAnchorCathead(side)))add(`anchor.${side<0?'port':'starboard'}.${key}`,p);
   for(const [i,m]of VICTORY_MASTS.entries()){
     add('mast.'+m.id,victoryMastPoint(i,victoryVesselDeck(m.z)),'hull','frame');
@@ -3912,7 +4021,7 @@ function shipAdditionalDefinition(id){
 const SHIP_MODELS=deepFreeze({
   victory:victoryDefinition(),
   nina:{id:'nina',modelCode:0,gpuPose:true,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
-    designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,nodes:ninaDefinitionNodes,
+    designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,supplementalCrewStations:NINA_DESIGN.supplementalCrewStations,nodes:ninaDefinitionNodes,
     rig:rigFor('nina',['lateen','lateen','lateen'],ninaDefinitionNodes),
     referenceMeasurements:[replicaReport('sanger-nina','Sanger Ships Niña',[
       {kind:'deck-length',value:65,unit:'ft',metres:19.812},{kind:'beam',value:18,unit:'ft',metres:5.4864},{kind:'draught',value:7,unit:'ft',metres:2.1336}],
@@ -25009,7 +25118,10 @@ const CREW_APPEARANCES={
 };
 const crewLinearColour=rgb=>rgb.map(byte=>{const v=byte/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
 const CREW_ACTOR_FLOATS=36;
-const crewAdditionalNames={female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid','Clara','Sofia','Teresa','Margarida','Guiomar','Constança','Violante','Branca'],male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif','Gonçalo','Fernão','Vasco','Diogo','Nuno','Álvaro','Cristóvão','Bartolomeu']};
+const crewAdditionalNames={
+  female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid','Clara','Sofia','Teresa','Margarida','Guiomar','Constança','Violante','Branca','Harriet','Charlotte','Eleanor','Frances','Hannah','Abigail','Matilda','Susannah','Lydia','Phoebe','Rosamund','Dorothea','Cordelia','Georgiana','Lavinia','Penelope'],
+  male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif','Gonçalo','Fernão','Vasco','Diogo','Nuno','Álvaro','Cristóvão','Bartolomeu','William','Jack','Samuel','Edward','Henry','George','Richard','Robert','Charles','Arthur','Benjamin','Nathaniel','Horatio','Cuthbert','Barnaby','Tobias'],
+};
 function crewStationIdentity(key,index){
   const named=CREW_IDENTITIES.find(s=>s.id===key);if(named)return {...named,identityId:named.id};
   const sex=index%2?'male':'female',n=Math.floor(index/2),pool=CREW_IDENTITIES.filter(s=>s.sex===sex),identity=pool[n%pool.length];
@@ -25019,10 +25131,10 @@ function createCompany(policy=deckhandDecision,modelId='nina',options={}) {
   const model=requirePlayableShipModel(modelId);
   // Twelve rendered workers are a representative watch on larger ships unless
   // fullWatch is enabled (default in WebGPU createCrew), which populates a
-  // vessel's supplemental weather-deck stations (up to full 40-person crew on Santa María).
+  // vessel's full weather-deck and gun-deck watch stations across all ships.
   const extended=hasExtendedCrewModel(model.id);
   const baseStations=extended?Object.entries(model.crewStations):CREW_ROSTER.map(identity=>[identity.id,model.crewStations[identity.id]]);
-  const extraStations=(!extended&&options?.fullWatch&&model.supplementalCrewStations)
+  const extraStations=(options?.fullWatch&&model.supplementalCrewStations)
     ?Object.entries(model.supplementalCrewStations):[];
   const stations=[...baseStations,...extraStations];
   const activeControls=extended?['fore','main','mizzen'].map((name,index)=>model.rig.sails.some(s=>s.controlGroup===name)?index:-1).filter(i=>i>=0):[0,1,2];
@@ -25030,7 +25142,7 @@ function createCompany(policy=deckhandDecision,modelId='nina',options={}) {
   const manifestCrew=model.id==='victory'?820:extended?proceduralDesign(model.id).loading.crew:(ADDITIONAL_DESIGNS[model.id]?.loading?.crew??12);
   const initialPirate=Boolean(options?.pirate||isPirateVessel(options?.boat));
   const initialIndigenous=Boolean(options?.indigenous||model.id==='taino-canoe');
-  return {modelId:model.id,activeControls,representativeWatch:stations.length<manifestCrew,order:'watch',revision:0,pending:false,pirateAttire:initialPirate,indigenousAttire:initialIndigenous,crew:stations.map(([key,station],i)=>{
+  return {modelId:model.id,activeControls,representativeWatch:options?.fullWatch?false:stations.length<manifestCrew,order:'watch',revision:0,pending:false,pirateAttire:initialPirate,indigenousAttire:initialIndigenous,crew:stations.map(([key,station],i)=>{
     const identity=(extended||i>=CREW_ROSTER.length)?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
     if(initialIndigenous){
       const sexPool=INDIGENOUS_NAMES[person.sex]??INDIGENOUS_NAMES.male;
@@ -25089,6 +25201,7 @@ function stepCompany(company,boat,dt,wind) {
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
+  for(const s of company.crew)s._cachedDeckY=s.job?.position?.[1]??s.navigationY??crewDeckHeight(boat,s.z,s.x);
   for(const s of company.crew){
     // Apply blast knockback velocity (from cannon impacts or magazine explosions) within deck bounds
     if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
@@ -25204,13 +25317,13 @@ function crewPatrolMotion(s,boat,dt,company){
   if(!travel||!crewRoutineSegmentClear(s,boat,from,next))return false;
   if(company?.crew.some(other=>{
     if(other===s)return false;
-    const y=(other.job?.position?.[1]??other.navigationY??crewDeckHeight(boat,other.z,other.x))*sy;
+    const y=(other.job?.position?.[1]??other.navigationY??other._cachedDeckY??crewDeckHeight(boat,other.z,other.x))*sy;
     if(Math.abs(next[1]*sy-y)>=1.7)return false;
     const gap=Math.hypot((next[0]-other.x)*sx,(next[2]-other.z)*sz),before=Math.hypot((from[0]-other.x)*sx,(from[2]-other.z)*sz);
     return gap<.60&&gap<before-1e-8;
   }))return false;
   const acceptedDistance=Math.hypot((next[0]-from[0])*sx,(next[1]-from[1])*sy,(next[2]-from[2])*sz);
-  s.x=next[0];s.z=next[2];s.navigationY=next[1];crewAdvanceWalk(s,acceptedDistance,{strideMetres:motion.strideMetres});
+  s.x=next[0];s.z=next[2];s.navigationY=next[1];s._cachedDeckY=next[1];crewAdvanceWalk(s,acceptedDistance,{strideMetres:motion.strideMetres});
   if(distance<=travel+1e-7&&++s.navigationCursor>=path.length)crewFinishPatrol(s);
   return true;
 }
@@ -27394,7 +27507,8 @@ function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, arg4 = n
         const hl = (inst.depth ?? inst.length ?? 20) * 0.5 + 1.2;
         const maxR = hw + hl;
         if (Math.abs(dx) > maxR || Math.abs(dz) > maxR) continue;
-        const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
+        const cosY = inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0);
+        const sinY = inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0);
         const lx = dx * cosY - dz * sinY;
         const lz = dx * sinY + dz * cosY;
         if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
@@ -27544,7 +27658,8 @@ function probeHullBottomContact(heights, boat, x, z, region = ISLAND, sample = n
           const hl = (inst.depth ?? inst.length ?? 20) * 0.5;
           const maxR = hw + hl;
           if (Math.abs(dx) > maxR || Math.abs(dz) > maxR) continue;
-          const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
+          const cosY = inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0);
+        const sinY = inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0);
           const lx = dx * cosY - dz * sinY;
           const lz = dx * sinY + dz * cosY;
           if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
@@ -33333,7 +33448,7 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
             ? 172
             : 155;
 
-  return {
+  const placedPort = {
     regionId: region.id,
     portType: region.portType,
     settlementKind: region.settlementKind ?? (allowColonialPort ? 'colonial-port' : 'wilderness-anchorage'),
@@ -33380,27 +33495,91 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     },
     instances,
   };
+  buildPostSettlementPortFlatIndex(placedPort);
+  return placedPort;
+}
+
+function buildPostSettlementPortFlatIndex(portPlacement) {
+  const instances = portPlacement?.instances;
+  if (!Array.isArray(instances)) return null;
+  const count = instances.length;
+  // Flat post-settlement OBB buffer (stride 7: [x, z, cosNegYaw, sinNegYaw, halfW, halfL, boundR])
+  const data = new Float64Array(count * 7);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const inst = instances[i];
+    const x = inst.x;
+    const z = inst.z;
+    const c = inst._cosNegYaw ?? Math.cos(inst.yaw);
+    const s = inst._sinNegYaw ?? Math.sin(inst.yaw);
+    const halfW = inst.width * 0.5;
+    const halfL = inst.length * 0.5;
+    const boundR = inst._boundR ?? Math.hypot(inst.width, inst.length) * 0.5;
+    const base = i * 7;
+    data[base] = x;
+    data[base + 1] = z;
+    data[base + 2] = c;
+    data[base + 3] = s;
+    data[base + 4] = halfW;
+    data[base + 5] = halfL;
+    data[base + 6] = boundR;
+    if (x - boundR < minX) minX = x - boundR;
+    if (x + boundR > maxX) maxX = x + boundR;
+    if (z - boundR < minZ) minZ = z - boundR;
+    if (z + boundR > maxZ) maxZ = z + boundR;
+  }
+  const index = {
+    count,
+    sourceRef: instances,
+    sourceLength: count,
+    data,
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+  };
+  portPlacement._flatIndex = index;
+  return index;
 }
 
 function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
-  if (!portPlacement?.instances) return true;
+  const instances = portPlacement?.instances;
+  if (!instances) return true;
   if (portPlacement.center) {
     const cdx = x - portPlacement.center.x;
     const cdz = z - portPlacement.center.z;
     const maxClusterR = 620 + hullRadius;
     if (cdx * cdx + cdz * cdz > maxClusterR * maxClusterR) return true;
   }
-  for (const inst of portPlacement.instances) {
-    const dx = x - inst.x;
-    const dz = z - inst.z;
-    const rBound = (inst._boundR ?? Math.hypot(inst.width, inst.length) * 0.5) + hullRadius;
+  let flat = portPlacement._flatIndex;
+  if (!flat || flat.sourceRef !== instances || flat.sourceLength !== instances.length) {
+    flat = buildPostSettlementPortFlatIndex(portPlacement);
+  }
+  if (!flat || flat.count === 0) return true;
+  if (
+    x < flat.minX - hullRadius ||
+    x > flat.maxX + hullRadius ||
+    z < flat.minZ - hullRadius ||
+    z > flat.maxZ + hullRadius
+  ) {
+    return true;
+  }
+  const data = flat.data;
+  const end = flat.count * 7;
+  for (let base = 0; base < end; base += 7) {
+    const dx = x - data[base];
+    const dz = z - data[base + 1];
+    const rBound = data[base + 6] + hullRadius;
     if (dx * dx + dz * dz > rBound * rBound) continue;
-    const c = inst._cosNegYaw ?? Math.cos(inst.yaw);
-    const s = inst._sinNegYaw ?? Math.sin(inst.yaw);
+    const c = data[base + 2];
+    const s = data[base + 3];
     const localX = dx * c - dz * s;
     const localZ = dx * s + dz * c;
-    const halfW = inst.width * 0.5 + hullRadius;
-    const halfL = inst.length * 0.5 + hullRadius;
+    const halfW = data[base + 4] + hullRadius;
+    const halfL = data[base + 5] + hullRadius;
     if (Math.abs(localX) <= halfW && Math.abs(localZ) <= halfL) {
       return false;
     }
@@ -37452,6 +37631,7 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
 
   let heights1550 = options.precomputedHeights1550 || null;
+  let cachedShoreDist1550 = null;
   let lowCoastalCells = 0;
   let reclaimedCellsCarved = 0;
 
@@ -37550,7 +37730,8 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
     }
 
     // Step 2: Recompute 1550 coastal bathymetry skirt + turquoise coral-reef shoal benches
-    const shoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
+    cachedShoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
+    const shoreDist1550 = cachedShoreDist1550;
     heights1550 = new Float32Array(n * n);
     for (let j = 0; j < n; j++) {
       const v = j / (n - 1);
@@ -37584,7 +37765,8 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
       ? { is1550Orthophoto: true, precomputedFootprints }
       : null;
   if (satSource && !hasDedicated1550Ortho) {
-    const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
+    const shoreDist1550 = cachedShoreDist1550 || computeCoastalShoreDistances(heights1550, n, span, 0.25);
+    const prov1550 = resolveGeographicCoastalProvince(region);
     const sz = satSource.size;
     const rgba1550 = new Uint8ClampedArray(satSource.rgba.length);
     for (let j = 0; j < sz; j++) {
@@ -37602,7 +37784,6 @@ function build1550HistoricalTerritoryPack(basePack, options = {}) {
         const r = satSource.rgba[idx], g = satSource.rgba[idx + 1], b = satSource.rgba[idx + 2];
         const mottle = coastalFbm2D(x * 0.009, z * 0.009, seed + 751, 3) - 0.5;
         const isSpectralSand = r >= g * 0.88 && g > b * 1.04 && r > 110 && g <= r * 1.02;
-        const prov1550 = resolveGeographicCoastalProvince(region);
         const geoBeach1550 =
           isSpectralSand ||
           (h <= prov1550.maxBermElev &&

@@ -151,3 +151,20 @@ test('Santa María fullWatch staffs the complete 40-person manifest crew across 
   assert.deepEqual([...climbed].sort(),[0,1]);assert.deepEqual([...hauled].sort(),[0,1,2]);assert.ok(secured);
   assert.equal(b.hatchesClosed,1);assert.ok(state.set.every((v,i)=>Math.abs(v-[.2,.2,0][i])<.011));assert.ok(c.crew.every(s=>!s.job));
 });
+
+test('Pinta, Niña and Flying Cloud fullWatch staff their full complements (30, 24, 42) with distinct names and safe separation',()=>{
+  for(const [id,expected]of [['pinta',30],['nina',24],['flying-cloud',42]]){
+    const m=requirePlayableShipModel(id),b={modelId:id,...m.runtime,roll:0,pitch:0,rudder:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1,crew:false,propulsion:'sail'};
+    const c=createCompany(undefined,id,{fullWatch:true});sailingState(b);stepCompany(c,b,0,6);
+    assert.equal(c.crew.length,expected,`${id} fullWatch crew count`);
+    assert.equal(c.representativeWatch,false,`${id} representativeWatch should be false under fullWatch`);
+    assert.equal(companyStatus(c),`Sea watch · ${expected} aboard`);
+    assert.equal(new Set(c.crew.map(s=>s.name)).size,expected,`${id} hands have distinct names`);
+    for(const [i,s]of c.crew.entries()){
+      assert.ok(s.position.every(Number.isFinite)&&s.transform.every(Number.isFinite));
+      for(let j=i+1;j<c.crew.length;j++){
+        assert.ok(distance(Array.from(s.position),Array.from(c.crew[j].position))>=.65,`${id} ${s.id} and ${c.crew[j].id} maintain initial station separation`);
+      }
+    }
+  }
+});

@@ -135,3 +135,21 @@ test('Victory captain camera clears every mast throughout the windward crossing 
     }
   }
 });
+test('Victory fullWatch staffs 64 crew across forecastle, waist, quarterdeck and poop with distinct names and safe separation',()=>{
+  const b=fixture(),c=createCompany(undefined,'victory',{fullWatch:true});
+  stepCompany(c,b,0,6);
+  assert.equal(c.crew.length,64);
+  assert.equal(c.representativeWatch,false);
+  assert.equal(companyStatus(c),'Sea watch · 64 aboard');
+  assert.equal(c.crew.filter(s=>s.sex==='female').length,32);
+  assert.equal(c.crew.filter(s=>s.sex==='male').length,32);
+  assert.equal(new Set(c.crew.map(s=>s.name)).size,64,'all 64 Victory hands have distinct names');
+  for(const [i,s]of c.crew.entries()){
+    assert.ok(s.visible&&s.transform.every(Number.isFinite));
+    assert.ok(Math.abs(s.position[1]-modelDeck(b,s.z)*vesselVerticalScale(b)-.028)<2e-6,s.id+' feet on Victory deck');
+    assert.ok(Math.abs(s.x)+.3/(b.beam/3.6)<modelDeckWidth(b,s.z),s.id+' inboard');
+    for(let j=i+1;j<c.crew.length;j++){
+      assert.ok(distance(s.position,c.crew[j].position)>=.65,`${s.id} and ${c.crew[j].id} maintain station separation`);
+    }
+  }
+});

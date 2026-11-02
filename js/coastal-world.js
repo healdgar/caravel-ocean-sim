@@ -4587,7 +4587,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
             ? 172
             : 155;
 
-  return {
+  const placedPort = {
     regionId: region.id,
     portType: region.portType,
     settlementKind: region.settlementKind ?? (allowColonialPort ? 'colonial-port' : 'wilderness-anchorage'),
@@ -4634,27 +4634,91 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     },
     instances,
   };
+  buildPostSettlementPortFlatIndex(placedPort);
+  return placedPort;
+}
+
+export function buildPostSettlementPortFlatIndex(portPlacement) {
+  const instances = portPlacement?.instances;
+  if (!Array.isArray(instances)) return null;
+  const count = instances.length;
+  // Flat post-settlement OBB buffer (stride 7: [x, z, cosNegYaw, sinNegYaw, halfW, halfL, boundR])
+  const data = new Float64Array(count * 7);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const inst = instances[i];
+    const x = inst.x;
+    const z = inst.z;
+    const c = inst._cosNegYaw ?? Math.cos(inst.yaw);
+    const s = inst._sinNegYaw ?? Math.sin(inst.yaw);
+    const halfW = inst.width * 0.5;
+    const halfL = inst.length * 0.5;
+    const boundR = inst._boundR ?? Math.hypot(inst.width, inst.length) * 0.5;
+    const base = i * 7;
+    data[base] = x;
+    data[base + 1] = z;
+    data[base + 2] = c;
+    data[base + 3] = s;
+    data[base + 4] = halfW;
+    data[base + 5] = halfL;
+    data[base + 6] = boundR;
+    if (x - boundR < minX) minX = x - boundR;
+    if (x + boundR > maxX) maxX = x + boundR;
+    if (z - boundR < minZ) minZ = z - boundR;
+    if (z + boundR > maxZ) maxZ = z + boundR;
+  }
+  const index = {
+    count,
+    sourceRef: instances,
+    sourceLength: count,
+    data,
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+  };
+  portPlacement._flatIndex = index;
+  return index;
 }
 
 export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
-  if (!portPlacement?.instances) return true;
+  const instances = portPlacement?.instances;
+  if (!instances) return true;
   if (portPlacement.center) {
     const cdx = x - portPlacement.center.x;
     const cdz = z - portPlacement.center.z;
     const maxClusterR = 620 + hullRadius;
     if (cdx * cdx + cdz * cdz > maxClusterR * maxClusterR) return true;
   }
-  for (const inst of portPlacement.instances) {
-    const dx = x - inst.x;
-    const dz = z - inst.z;
-    const rBound = (inst._boundR ?? Math.hypot(inst.width, inst.length) * 0.5) + hullRadius;
+  let flat = portPlacement._flatIndex;
+  if (!flat || flat.sourceRef !== instances || flat.sourceLength !== instances.length) {
+    flat = buildPostSettlementPortFlatIndex(portPlacement);
+  }
+  if (!flat || flat.count === 0) return true;
+  if (
+    x < flat.minX - hullRadius ||
+    x > flat.maxX + hullRadius ||
+    z < flat.minZ - hullRadius ||
+    z > flat.maxZ + hullRadius
+  ) {
+    return true;
+  }
+  const data = flat.data;
+  const end = flat.count * 7;
+  for (let base = 0; base < end; base += 7) {
+    const dx = x - data[base];
+    const dz = z - data[base + 1];
+    const rBound = data[base + 6] + hullRadius;
     if (dx * dx + dz * dz > rBound * rBound) continue;
-    const c = inst._cosNegYaw ?? Math.cos(inst.yaw);
-    const s = inst._sinNegYaw ?? Math.sin(inst.yaw);
+    const c = data[base + 2];
+    const s = data[base + 3];
     const localX = dx * c - dz * s;
     const localZ = dx * s + dz * c;
-    const halfW = inst.width * 0.5 + hullRadius;
-    const halfL = inst.length * 0.5 + hullRadius;
+    const halfW = data[base + 4] + hullRadius;
+    const halfL = data[base + 5] + hullRadius;
     if (Math.abs(localX) <= halfW && Math.abs(localZ) <= halfL) {
       return false;
     }
@@ -8706,6 +8770,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
 
   let heights1550 = options.precomputedHeights1550 || null;
+  let cachedShoreDist1550 = null;
   let lowCoastalCells = 0;
   let reclaimedCellsCarved = 0;
 
@@ -8804,7 +8869,8 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
     }
 
     // Step 2: Recompute 1550 coastal bathymetry skirt + turquoise coral-reef shoal benches
-    const shoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
+    cachedShoreDist1550 = computeCoastalShoreDistances(carvedDem, n, span, 0.25);
+    const shoreDist1550 = cachedShoreDist1550;
     heights1550 = new Float32Array(n * n);
     for (let j = 0; j < n; j++) {
       const v = j / (n - 1);
@@ -8838,7 +8904,8 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
       ? { is1550Orthophoto: true, precomputedFootprints }
       : null;
   if (satSource && !hasDedicated1550Ortho) {
-    const shoreDist1550 = computeCoastalShoreDistances(heights1550, n, span, 0.25);
+    const shoreDist1550 = cachedShoreDist1550 || computeCoastalShoreDistances(heights1550, n, span, 0.25);
+    const prov1550 = resolveGeographicCoastalProvince(region);
     const sz = satSource.size;
     const rgba1550 = new Uint8ClampedArray(satSource.rgba.length);
     for (let j = 0; j < sz; j++) {
@@ -8856,7 +8923,6 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
         const r = satSource.rgba[idx], g = satSource.rgba[idx + 1], b = satSource.rgba[idx + 2];
         const mottle = coastalFbm2D(x * 0.009, z * 0.009, seed + 751, 3) - 0.5;
         const isSpectralSand = r >= g * 0.88 && g > b * 1.04 && r > 110 && g <= r * 1.02;
-        const prov1550 = resolveGeographicCoastalProvince(region);
         const geoBeach1550 =
           isSpectralSand ||
           (h <= prov1550.maxBermElev &&

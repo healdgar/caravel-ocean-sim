@@ -131,7 +131,10 @@ const CREW_APPEARANCES={
 };
 const crewLinearColour=rgb=>rgb.map(byte=>{const v=byte/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
 export const CREW_ACTOR_FLOATS=36;
-const crewAdditionalNames={female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid','Clara','Sofia','Teresa','Margarida','Guiomar','Constança','Violante','Branca'],male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif','Gonçalo','Fernão','Vasco','Diogo','Nuno','Álvaro','Cristóvão','Bartolomeu']};
+const crewAdditionalNames={
+  female:['Inês','Beatriz','Catarina','Leonor','Maria','Isabel','Ama','Lin','Freydís','Lucía','Runa','Mei','Amina','Elena','Nia','Astrid','Clara','Sofia','Teresa','Margarida','Guiomar','Constança','Violante','Branca','Harriet','Charlotte','Eleanor','Frances','Hannah','Abigail','Matilda','Susannah','Lydia','Phoebe','Rosamund','Dorothea','Cordelia','Georgiana','Lavinia','Penelope'],
+  male:['Tomás','Duarte','João','Rui','Afonso','Pedro','Kofi','Li','Eirik','Mateo','Soren','Jin','Kwame','Diego','Tariq','Leif','Gonçalo','Fernão','Vasco','Diogo','Nuno','Álvaro','Cristóvão','Bartolomeu','William','Jack','Samuel','Edward','Henry','George','Richard','Robert','Charles','Arthur','Benjamin','Nathaniel','Horatio','Cuthbert','Barnaby','Tobias'],
+};
 function crewStationIdentity(key,index){
   const named=CREW_IDENTITIES.find(s=>s.id===key);if(named)return {...named,identityId:named.id};
   const sex=index%2?'male':'female',n=Math.floor(index/2),pool=CREW_IDENTITIES.filter(s=>s.sex===sex),identity=pool[n%pool.length];
@@ -141,10 +144,10 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
   const model=requirePlayableShipModel(modelId);
   // Twelve rendered workers are a representative watch on larger ships unless
   // fullWatch is enabled (default in WebGPU createCrew), which populates a
-  // vessel's supplemental weather-deck stations (up to full 40-person crew on Santa María).
+  // vessel's full weather-deck and gun-deck watch stations across all ships.
   const extended=hasExtendedCrewModel(model.id);
   const baseStations=extended?Object.entries(model.crewStations):CREW_ROSTER.map(identity=>[identity.id,model.crewStations[identity.id]]);
-  const extraStations=(!extended&&options?.fullWatch&&model.supplementalCrewStations)
+  const extraStations=(options?.fullWatch&&model.supplementalCrewStations)
     ?Object.entries(model.supplementalCrewStations):[];
   const stations=[...baseStations,...extraStations];
   const activeControls=extended?['fore','main','mizzen'].map((name,index)=>model.rig.sails.some(s=>s.controlGroup===name)?index:-1).filter(i=>i>=0):[0,1,2];
@@ -152,7 +155,7 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
   const manifestCrew=model.id==='victory'?820:extended?proceduralDesign(model.id).loading.crew:(ADDITIONAL_DESIGNS[model.id]?.loading?.crew??12);
   const initialPirate=Boolean(options?.pirate||isPirateVessel(options?.boat));
   const initialIndigenous=Boolean(options?.indigenous||model.id==='taino-canoe');
-  return {modelId:model.id,activeControls,representativeWatch:stations.length<manifestCrew,order:'watch',revision:0,pending:false,pirateAttire:initialPirate,indigenousAttire:initialIndigenous,crew:stations.map(([key,station],i)=>{
+  return {modelId:model.id,activeControls,representativeWatch:options?.fullWatch?false:stations.length<manifestCrew,order:'watch',revision:0,pending:false,pirateAttire:initialPirate,indigenousAttire:initialIndigenous,crew:stations.map(([key,station],i)=>{
     const identity=(extended||i>=CREW_ROSTER.length)?crewStationIdentity(key,i):CREW_ROSTER[i],person={...identity,...station,stationKey:key};
     if(initialIndigenous){
       const sexPool=INDIGENOUS_NAMES[person.sex]??INDIGENOUS_NAMES.male;
@@ -211,6 +214,7 @@ export function stepCompany(company,boat,dt,wind) {
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
+  for(const s of company.crew)s._cachedDeckY=s.job?.position?.[1]??s.navigationY??crewDeckHeight(boat,s.z,s.x);
   for(const s of company.crew){
     // Apply blast knockback velocity (from cannon impacts or magazine explosions) within deck bounds
     if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
@@ -326,13 +330,13 @@ function crewPatrolMotion(s,boat,dt,company){
   if(!travel||!crewRoutineSegmentClear(s,boat,from,next))return false;
   if(company?.crew.some(other=>{
     if(other===s)return false;
-    const y=(other.job?.position?.[1]??other.navigationY??crewDeckHeight(boat,other.z,other.x))*sy;
+    const y=(other.job?.position?.[1]??other.navigationY??other._cachedDeckY??crewDeckHeight(boat,other.z,other.x))*sy;
     if(Math.abs(next[1]*sy-y)>=1.7)return false;
     const gap=Math.hypot((next[0]-other.x)*sx,(next[2]-other.z)*sz),before=Math.hypot((from[0]-other.x)*sx,(from[2]-other.z)*sz);
     return gap<.60&&gap<before-1e-8;
   }))return false;
   const acceptedDistance=Math.hypot((next[0]-from[0])*sx,(next[1]-from[1])*sy,(next[2]-from[2])*sz);
-  s.x=next[0];s.z=next[2];s.navigationY=next[1];crewAdvanceWalk(s,acceptedDistance,{strideMetres:motion.strideMetres});
+  s.x=next[0];s.z=next[2];s.navigationY=next[1];s._cachedDeckY=next[1];crewAdvanceWalk(s,acceptedDistance,{strideMetres:motion.strideMetres});
   if(distance<=travel+1e-7&&++s.navigationCursor>=path.length)crewFinishPatrol(s);
   return true;
 }

@@ -28,6 +28,7 @@ function ninaNodes(){
     for(const key of ['root','tip','fairlead'])add(`anchor.${name}.${key}`,[...a[key]]);
   }
   for(const [id,p]of Object.entries(NINA_DESIGN.crewStations))add(`station.crew.${id}`,[p.x,vesselDeck(p.z),p.z],'hull','station');
+  for(const [id,p]of Object.entries(NINA_DESIGN.supplementalCrewStations??{}))add(`station.crew.${id}`,[p.x,vesselDeck(p.z),p.z],'hull','station');
   for(const [mast,name]of MAST_IDS.entries()){
     const m=RIG_MASTS[mast],foot=mastPoint(mast,vesselDeck(m.z)),head=mastPoint(mast,m.height),sail=SAIL_PLAN[mast];
     add(`mast.${name}`,foot,'hull','frame');
@@ -90,6 +91,7 @@ function victoryDefinition(){
   add('helm.camera',[VICTORY_DESIGN.helm.x,victoryVesselDeck(VICTORY_DESIGN.helm.z)+VICTORY_DESIGN.helm.eyeAboveDeck/VICTORY_DESIGN.frame.verticalScale,VICTORY_DESIGN.helm.z]);
   add('hatch.main',victoryHatchPivot(),'hull','part');add('station.hatch',[.45,victoryVesselDeck(-1.5),-1.5],'hull','station');
   for(const [id,p]of Object.entries(VICTORY_DESIGN.crewStations))add('station.crew.'+id,[p.x,victoryVesselDeck(p.z),p.z],'hull','station');
+  for(const [id,p]of Object.entries(VICTORY_DESIGN.supplementalCrewStations??{}))add('station.crew.'+id,[p.x,victoryVesselDeck(p.z),p.z],'hull','station');
   for(const side of [-1,1])for(const [key,p]of Object.entries(victoryAnchorCathead(side)))add(`anchor.${side<0?'port':'starboard'}.${key}`,p);
   for(const [i,m]of VICTORY_MASTS.entries()){
     add('mast.'+m.id,victoryMastPoint(i,victoryVesselDeck(m.z)),'hull','frame');
@@ -162,7 +164,7 @@ function shipAdditionalDefinition(id){
 export const SHIP_MODELS=deepFreeze({
   victory:victoryDefinition(),
   nina:{id:'nina',modelCode:0,gpuPose:true,name:'Niña',revision:1,status:'ready',hullFamily:'caravel',geometry:'nina-procedural-v1',
-    designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,nodes:ninaDefinitionNodes,
+    designFrame:NINA_DESIGN.frame,runtime:NINA_DESIGN.runtime,crewStations:NINA_DESIGN.crewStations,supplementalCrewStations:NINA_DESIGN.supplementalCrewStations,nodes:ninaDefinitionNodes,
     rig:rigFor('nina',['lateen','lateen','lateen'],ninaDefinitionNodes),
     referenceMeasurements:[replicaReport('sanger-nina','Sanger Ships Niña',[
       {kind:'deck-length',value:65,unit:'ft',metres:19.812},{kind:'beam',value:18,unit:'ft',metres:5.4864},{kind:'draught',value:7,unit:'ft',metres:2.1336}],

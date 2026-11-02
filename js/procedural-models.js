@@ -52,6 +52,7 @@ export function createProceduralShipDefinition(id,{status='planned'}={}){
   for(const zone of d.deckZones??[])if(zone.id!=='main'){const z=(zone.bounds[0]+zone.bounds[1])/2;add('deck.'+zone.id,[0,deck(z),z],'frame');}
   if(d.cockpit){const z=(d.cockpit.bounds[0]+d.cockpit.bounds[1])/2;add('deck.cockpit',[0,deck(z),z],'frame');}
   for(const [name,station]of Object.entries(d.crewStations))add('station.crew.'+name,[station.x,station.y??deck(station.z,station.x),station.z],'station');
+  for(const [name,station]of Object.entries(d.supplementalCrewStations??{}))add('station.crew.'+name,[station.x,station.y??deck(station.z,station.x),station.z],'station');
   add('station.helm',[d.helm.x,deck(d.helm.z,d.helm.x),d.helm.z],'station');
   add('helm.camera',[d.helm.x,deck(d.helm.z,d.helm.x)+d.helm.eyeAboveDeck/d.frame.verticalScale,d.helm.z]);
   add('helm.rudder',d.steering.pivot,'part',{type:'procedural-helm',part:'rudder'});
@@ -137,7 +138,7 @@ export function createProceduralShipDefinition(id,{status='planned'}={}){
   }
   const rig=defineRig({id:id+'-rig',backend:'surfaces-v1',masts,sails,fittings},nodes,{planned:status!=='ready'});
   return deepFreeze({id,modelCode:d.modelCode,gpuPose:true,name:d.name,revision:d.revision,status,development:true,hullFamily:d.family,
-    geometry:row?'rowing-procedural-v1':'later-sail-procedural-v1',designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,
+    geometry:row?'rowing-procedural-v1':'later-sail-procedural-v1',designFrame:d.frame,runtime:d.runtime,crewStations:d.crewStations,supplementalCrewStations:d.supplementalCrewStations??null,
     capabilities:{...(d.capabilities??{}),sailing:d.surfaces.length>0,rowing:row,yardTransfer:d.surfaces.some(s=>s.kind==='lateen'),
       anchors:!!(row?d.equipment.anchor:d.equipment.anchors),gunnery:false},nodes,rig,referenceMeasurements:d.references??d.referenceMeasurements});
 }

@@ -27,6 +27,20 @@ export const NINA_DESIGN = deepFreeze({
     isabel:{x:-.75,z:3.25,route:[3.25,3.25]},
     pedro:{x:0,z:3.95-.32/(20/12),route:[3.95-.32/(20/12),3.95-.32/(20/12)],yaw:0},
   },
+  supplementalCrewStations:{
+    nina_f1:{x:-.52,z:-4.15,route:[-4.20,-4.10],role:'Bow hand'},
+    nina_f2:{x:.52,z:-4.15,route:[-4.20,-4.10],role:'Anchor hand'},
+    nina_w1:{x:-1.12,z:-2.65,route:[-2.70,-2.60],role:'Fore tack hand'},
+    nina_w2:{x:1.12,z:-2.65,route:[-2.70,-2.60],role:'Fore sheet hand'},
+    nina_w3:{x:-1.18,z:-1.15,route:[-1.20,-1.10],role:'Waist deckhand'},
+    nina_w4:{x:1.18,z:-.65,route:[-.70,-.60],role:'Waist deckhand'},
+    nina_w5:{x:-1.18,z:.45,route:[.40,.50],role:'Main sheet hand'},
+    nina_w6:{x:1.18,z:.90,route:[.85,.95],role:'Main brace hand'},
+    nina_w7:{x:1.12,z:1.65,route:[1.60,1.70],role:'Aft waist hand'},
+    nina_w8:{x:-1.08,z:2.20,route:[2.15,2.25],role:'Mizzen tack hand'},
+    nina_q1:{x:.72,z:4.50,route:[4.45,4.55],yaw:Math.PI,role:'Quarterdeck hand'},
+    nina_q2:{x:0,z:5.20,route:[5.15,5.25],yaw:Math.PI,role:'Stern watch'},
+  },
 });
 
 export const NINA_RIG_PLATE = deepFreeze({

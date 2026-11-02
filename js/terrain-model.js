@@ -188,7 +188,8 @@ export function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, a
         const hl = (inst.depth ?? inst.length ?? 20) * 0.5 + 1.2;
         const maxR = hw + hl;
         if (Math.abs(dx) > maxR || Math.abs(dz) > maxR) continue;
-        const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
+        const cosY = inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0);
+        const sinY = inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0);
         const lx = dx * cosY - dz * sinY;
         const lz = dx * sinY + dz * cosY;
         if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
@@ -338,7 +339,8 @@ export function probeHullBottomContact(heights, boat, x, z, region = ISLAND, sam
           const hl = (inst.depth ?? inst.length ?? 20) * 0.5;
           const maxR = hw + hl;
           if (Math.abs(dx) > maxR || Math.abs(dz) > maxR) continue;
-          const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
+          const cosY = inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0);
+        const sinY = inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0);
           const lx = dx * cosY - dz * sinY;
           const lz = dx * sinY + dz * cosY;
           if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
