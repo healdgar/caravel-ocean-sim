@@ -2122,7 +2122,7 @@ const NINA_DESIGN = deepFreeze({
   anchor:{z:-4.8,rootInset:.15,tipOutset:.27,rootRise:.58,tipRise:.78,fairleadRise:.76},
   tackles:[{mast:0,x:1.05,z:-1.4},{mast:1,x:-1.1,z:-.45},{mast:2,x:-.4,z:4.55}],
   crewStations:{
-    ines:{x:-.8,z:4.5,route:[4.5,4.5],yaw:Math.PI},
+    ines:{x:-.68,z:4.15,route:[4.15,4.15],yaw:Math.PI},
     tomas:{x:.8,z:3.3,route:[3.3,3.3],yaw:Math.PI},
     beatriz:{x:-1.05,z:-2.1,route:[-2.1,-1.3]},
     duarte:{x:1.05,z:-1.4,route:[-2.1,-1.3]},
@@ -2143,11 +2143,11 @@ const NINA_DESIGN = deepFreeze({
     nina_w3:{x:-1.18,z:-1.15,route:[-1.20,-1.10],role:'Waist deckhand'},
     nina_w4:{x:1.18,z:-.65,route:[-.70,-.60],role:'Waist deckhand'},
     nina_w5:{x:-1.18,z:.45,route:[.40,.50],role:'Main sheet hand'},
-    nina_w6:{x:1.18,z:.90,route:[.85,.95],role:'Main brace hand'},
-    nina_w7:{x:1.12,z:1.65,route:[1.60,1.70],role:'Aft waist hand'},
+    nina_w6:{x:1.12,z:.55,route:[.50,.60],role:'Main brace hand'},
+    nina_w7:{x:-1.12,z:1.65,route:[1.60,1.70],role:'Aft waist hand'},
     nina_w8:{x:-1.08,z:2.20,route:[2.15,2.25],role:'Mizzen tack hand'},
-    nina_q1:{x:.72,z:4.50,route:[4.45,4.55],yaw:Math.PI,role:'Quarterdeck hand'},
-    nina_q2:{x:0,z:5.20,route:[5.15,5.25],yaw:Math.PI,role:'Stern watch'},
+    nina_q1:{x:.62,z:3.65,route:[3.60,3.70],yaw:Math.PI,role:'Quarterdeck hand'},
+    nina_q2:{x:-.62,z:3.65,route:[3.60,3.70],yaw:Math.PI,role:'Stern watch'},
   },
 });
 
@@ -2281,8 +2281,8 @@ const VICTORY_DESIGN=deepFreeze({
     victory_w20:{x:1.08,z:.45,route:[.42,.48],role:'Maintop hand'},
     victory_w21:{x:-1.02,z:1.02,route:[.99,1.05],role:'Main brace hand'},
     victory_w22:{x:1.02,z:1.02,route:[.99,1.05],role:'Main brace hand'},
-    victory_w23:{x:-.45,z:1.05,route:[1.00,1.10],role:'Aft main deckhand'},
-    victory_w24:{x:.45,z:1.05,route:[1.00,1.10],role:'Aft main deckhand'},
+    victory_w23:{x:-.78,z:.72,route:[.68,.76],role:'Aft main deckhand'},
+    victory_w24:{x:.78,z:.72,route:[.68,.76],role:'Aft main deckhand'},
     victory_q1:{x:-.42,z:1.95,route:[1.90,2.00],role:'Quarterdeck gunner'},
     victory_q2:{x:.42,z:1.95,route:[1.90,2.00],role:'Quarterdeck gunner'},
     victory_q3:{x:-.58,z:2.30,route:[2.25,2.35],role:'Quarterdeck gunner'},
@@ -23927,7 +23927,8 @@ function crewGunStation(gun,role,boat){
 }
 function crewNinaGunDeckRoute(s,target,boat){
   const path=[],add=p=>{if(!path.length||distance3(path.at(-1),p)>1e-8)path.push(p);};
-  const start=s.job?.position?.slice()??[s.x,(s.position[1]-.028)/vesselVerticalScale(boat),s.z],floor=modelDeck(boat,1.5),high=2.3,upperZ=2.74,
+  const startY=s.position?.[1]?(s.position[1]-.028)/vesselVerticalScale(boat):crewDeckHeight(boat,s.z,s.x);
+  const start=s.job?.position?.slice()??[s.x,startY,s.z],floor=modelDeck(boat,1.5),high=2.3,upperZ=2.74,
     stair=i=>[.96,floor+(high-floor)*i/8,1.5+1.14*i/8],endHigh=target[1]>1.5,onStairs=start[2]>=1.5&&start[2]<=2.64+.0001&&start[1]>modelDeck(boat,start[2])+.1;
   let isHigh=start[1]>1.5;add(start);
   if(onStairs){
@@ -23942,7 +23943,8 @@ function crewNinaGunDeckRoute(s,target,boat){
     add([0,high,start[2]]);add([0,high,upperZ]);add([.96,high,upperZ]);add(stair(8));
     for(let i=7;i>=0;i--)add(stair(i));add([target[0],modelDeck(boat,1.5),1.5]);
   }else if(endHigh){
-    add([0,high,path.at(-1)[2]]);add([0,high,target[2]]);
+    const laneX=Math.sign(target[0])===Math.sign(start[0])&&Math.abs(start[0])>.25?Math.sign(target[0])*.48:0;
+    add([laneX,high,path.at(-1)[2]]);add([laneX,high,target[2]]);
   }else add([target[0],modelDeck(boat,start[2]),start[2]]);
   add(target);return path;
 }
@@ -23988,6 +23990,11 @@ function assignGunCrew(company,boat){
       const aGun=a.job?.kind==='gunnery'?1:0;
       const bGun=b.job?.kind==='gunnery'?1:0;
       if(aGun!==bGun)return bGun-aGun;
+      const aDeck=Math.abs(crewDeckHeight(boat,a.z,a.x)-target[1])<.25?1:0;
+      const bDeck=Math.abs(crewDeckHeight(boat,b.z,b.x)-target[1])<.25?1:0;
+      if(aDeck!==bDeck)return bDeck-aDeck;
+      const aFit=a.casualtyState?0:1,bFit=b.casualtyState?0:1;
+      if(aFit!==bFit)return bFit-aFit;
       return distance3(a.position,point)-distance3(b.position,point);
     });
     let sailor,path;
@@ -24008,7 +24015,7 @@ function updateCrewGunneryAttendance(company,boat){
       const pos=[s.position[0],s.position[1]-.028,s.position[2]];
       if(!crewNavigationClear(pos,boat,s.navigationBody))return false;
       const d=distance3(physical(crewGunStation(gun,s.job.gunRole,boat),boat),pos);
-      return (s.job.stage==='working'&&d<.035)||(s.job.arrivedAtGun&&['reposition','waiting-gun'].includes(s.job.stage)&&d<1.15);
+      return (s.job.stage==='working'&&d<.08)||(s.job.arrivedAtGun&&['reposition','waiting-gun'].includes(s.job.stage)&&d<1.25)||d<.38;
     });
     if(hands.some(s=>s.job.gunRole==='loader')&&hands.some(s=>s.job.gunRole==='tackle'))boat.gunneryAttendance.add(gun.id);
   }
@@ -24322,11 +24329,11 @@ function stepCrewWork(s,company,boat,dt) {
         const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
         const maxStep=motion.speedMetresPerSecond*dt,travel=Math.min(d,maxStep),q=travel/d;
         const next=d<=maxStep+1e-6?goal:from.map((x,i)=>x+(goal[i]-x)*q),nextWorld=physical(next,boat);
-        const occupied=company.crew.some(other=>other!==s&&other.casualtyState!=='fallen'&&other.position&&Math.hypot(nextWorld[0]-other.position[0],nextWorld[1]+.028-other.position[1],nextWorld[2]-other.position[2])<.54);
+        const occupied=company.crew.some(other=>other!==s&&other.casualtyState!=='fallen'&&other.job?.gun?.id!==j.gun.id&&other.role!=='Helmsman'&&other.id!=='ines'&&other.position&&Math.hypot(nextWorld[0]-other.position[0],nextWorld[1]+.028-other.position[1],nextWorld[2]-other.position[2])<.38);
         if(!occupied&&crewWorkSegmentClear(s,boat,from,next)){
           j.position=next;s.x=next[0];s.z=next[2];
           if(travel>.002){moving=true;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});}
-        }else if(d>.025){
+        }else if(d>.025&&!crewWorkSegmentClear(s,boat,from,next)){
           const path=crewWorkNavigationRoute(s,[from,goal],boat,{exactTarget:true});
           j.path=path??[];j.cursor=0;j.stage=path?'reposition':'waiting-gun';j.elapsed=0;
         }
@@ -24353,10 +24360,13 @@ function stepCrewWork(s,company,boat,dt) {
       const travel=Math.min(d,motion.speedMetresPerSecond*dt),q=d>1e-6?travel/d:1;
       const next=p.map((x,i)=>x+(target[i]-x)*q),world=physical(next,boat);
       // Yield locally to another body rather than walking through it.
-      const occupied=company.crew.some(other=>{
+      const gunPass=j.kind==='gunnery'&&(j.totalBlockedTime??0)>.6;
+      const bodyRadius=j.kind==='gunnery'?.38:.54;
+      const occupied=!gunPass&&company.crew.some(other=>{
         if(other===s||other.casualtyState==='fallen'||!other.position)return false;
+        if(j.kind==='gunnery'&&(other.job?.kind==='gunnery'||other.role==='Helmsman'||other.id==='ines'))return false;
         const d1=Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2]);
-        if(d1>=.54)return false;
+        if(d1>=bodyRadius)return false;
         const d0=Math.hypot(a[0]-other.position[0],a[1]+.028-other.position[1],a[2]-other.position[2]);
         return d1<=d0+1e-6;
       });
@@ -24378,8 +24388,10 @@ function stepCrewWork(s,company,boat,dt) {
           j.elapsed=0;
         }}
         j.blockedTime=0;
+        j.totalBlockedTime=0;
       }else{
         j.blockedTime=(j.blockedTime??0)+dt;
+        j.totalBlockedTime=(j.totalBlockedTime??0)+dt;
         if(j.blockedTime>.5){
           if(hasExtendedCrewModel(boat.modelId)){
             const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;}
@@ -25166,6 +25178,8 @@ function createCompany(policy=deckhandDecision,modelId='nina',options={}) {
     }
     const s=createDeckhand(policy);Object.assign(s,person,{crewIndex:i,route:[...person.route],target:person.route[1],wait:i*.37,
       time:i*.43,walkTime:i*.27,patrolX:person.x,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true,strength:1.0,indigenous:initialIndigenous});
+    const sx0=stationBoat.beam/3.6,sy0=vesselVerticalScale(stationBoat),sz0=stationBoat.length/12,y0=crewDeckHeight(stationBoat,s.z,s.x);
+    s.navigationY=y0;s.position[0]=s.x*sx0;s.position[1]=y0*sy0+.028;s.position[2]=s.z*sz0;
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
     const look=initialIndigenous?INDIGENOUS_APPEARANCES[i%INDIGENOUS_APPEARANCES.length]:CREW_APPEARANCES[s.identityId??s.id];
@@ -44890,6 +44904,14 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
           if(d<bestDist){bestDist=d;best={x:f.x??0,z:f.z??0,name:f.name??'Shore battery',faction:'enemy',dist:d,hull:f.integrity??1};}
         }
       }
+      if(port?.batteries?.length){
+        for(const b of port.batteries){
+          const f=b.building;
+          if(!f||f.damageState?.state==='destroyed')continue;
+          const d=Math.hypot((f.x??0)-(boat.x??0),(f.z??0)-(boat.z??0));
+          if(d<bestDist){bestDist=d;best={x:f.x??0,z:f.z??0,name:f.label??f.prefabId??'Shore battery',faction:'enemy',dist:d,hull:f.damageState?.integrity??1};}
+        }
+      }
     }
     return best;
   }
@@ -44952,7 +44974,7 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
 
     const fireBtn=document.createElement('button');fireBtn.type='button';fireBtn.id=`helm-fire-${side}`;
     fireBtn.className='helm-fire-btn';fireBtn.textContent=`Fire ${side}`;
-    fireBtn.onclick=()=>{gunnery.fire(side);notifyGunnery();};
+    fireBtn.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);notifyGunnery();};
 
     const fireLoadedBtn=document.createElement('button');fireLoadedBtn.type='button';fireLoadedBtn.id=`helm-fire-loaded-${side}`;
     fireLoadedBtn.className='helm-fire-loaded-btn';fireLoadedBtn.textContent='Loaded';
@@ -44974,8 +44996,12 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
     quartersBtn.textContent='Quarters';
     quartersBtn.onclick=()=>{
       battleOverride=inBattleState?'closed':'open';
-      if(battleOverride==='open'&&!gunnery.selectedSide){
-        gunnery.prepare(battleContext?.broadsideSide??'starboard');
+      if(battleOverride==='open'){
+        const activeSide=gunnery.selectedSide||battleContext?.broadsideSide||'starboard';
+        const s=gunnery.summary(activeSide);
+        if(!gunnery.selectedSide||(s.ready===0&&s.loading===0&&!gunnery.ordered)){
+          gunnery.prepare(activeSide);
+        }
       }
       notifyGunnery();
     };
@@ -45258,11 +45284,11 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
         b.loadingFill.style.width=`${loadPct}%`;
         const canFull=gunnery.canFire(b.side);
         const canPart=gunnery.canFireLoaded?.(b.side)??canFull;
-        b.fireBtn.disabled=!canFull;
+        b.fireBtn.disabled=!(canFull||canPart);
         b.fireLoadedBtn.disabled=!canPart;
         const partialLabel=s.ready>0&&s.ready<s.total?`Loaded (${s.ready})`:'Loaded';
         if(b.fireLoadedBtn.textContent!==partialLabel)b.fireLoadedBtn.textContent=partialLabel;
-        b.prepBtn.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&gunnery.selectedSide===b.side)||['port','starboard'].some(other=>other!==b.side&&gunnery.summary(other).loading>0);
+        b.prepBtn.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&s.spent===0&&gunnery.selectedSide===b.side);
         const prepLabel=s.spent>0&&s.loading===0?'Reload':'Prep';
         if(b.prepBtn.textContent!==prepLabel)b.prepBtn.textContent=prepLabel;
         b.card.dataset.active=String(gunnery.selectedSide===b.side||ordered);
@@ -53423,7 +53449,7 @@ function createGunneryControls(parent,gunnery){
     const prepare=document.createElement('button');prepare.textContent='Prepare '+side;prepare.id='guns-prepare-'+side;
     prepare.onclick=()=>{gunnery.prepare(side);update();};
     const fire=document.createElement('button');fire.textContent='Fire '+side;fire.id='guns-fire-'+side;fire.className='gun-fire';
-    fire.onclick=()=>{gunnery.fire(side);update();};
+    fire.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);update();};
     const fireLoaded=document.createElement('button');fireLoaded.textContent='Fire loaded';fireLoaded.id='guns-fire-loaded-'+side;fireLoaded.className='gun-fire-loaded';
     fireLoaded.title='Fire all currently loaded guns on this side without waiting for the remaining guns to finish loading';
     fireLoaded.onclick=()=>{gunnery.fireLoaded?.(side);update();};
@@ -53560,12 +53586,13 @@ function createGunneryControls(parent,gunnery){
       const held=s.ready===s.total?gunnery.blockedReason(r.side):null;
       const text=ordered?orderText:s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
       if(r.status.textContent!==text)r.status.textContent=text;
-      r.fire.disabled=!gunnery.canFire(r.side);
-      const canPartial=gunnery.canFireLoaded?.(r.side)??gunnery.canFire(r.side);
+      const canFull=gunnery.canFire(r.side);
+      const canPartial=gunnery.canFireLoaded?.(r.side)??canFull;
+      r.fire.disabled=!(canFull||canPartial);
       r.fireLoaded.disabled=!canPartial;
       const loadedLabel=s.ready>0&&s.ready<s.total?`Fire loaded (${s.ready})`:'Fire loaded';
       if(r.fireLoaded.textContent!==loadedLabel)r.fireLoaded.textContent=loadedLabel;
-      r.prepare.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&gunnery.selectedSide===r.side)||['port','starboard'].some(side=>side!==r.side&&gunnery.summary(side).loading>0);
+      r.prepare.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&s.spent===0&&gunnery.selectedSide===r.side);
     }
     const faw=Boolean(gunnery.fireAtWill);
     fireAtWill.setAttribute('aria-pressed',String(faw));
@@ -60035,6 +60062,8 @@ async function main() {
         shipGuns.fire(side);
       } else if (shipGuns.canFire(side)) {
         shipGuns.fire(side);
+      } else if (shipGuns.canFireLoaded?.(side)) {
+        shipGuns.fireLoaded(side);
       } else if (!shipGuns.ordered) {
         shipGuns.prepare(side);
       }

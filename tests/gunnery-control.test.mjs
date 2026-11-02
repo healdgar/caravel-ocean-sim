@@ -1091,5 +1091,28 @@ test('player ships and friendly fleet companions automatically reload after firi
  assert.equal(escortReloaded,true,'friendly companion automatically reloads broadside after firing');
 });
 
+test('full-watch crew mans, loads, fires, and reloads all guns from Quarters/Prepare at launch (t=0) and during sea watch',async ()=>{
+ const {getShipModel}=await import('../js/ship-models.js');
+ for(const id of ['nina','pinta','santa-maria','victory','flying-cloud']){
+  for(const watchSec of [0,10]){
+   const model=getShipModel(id);
+   const boat={modelId:id,model,...model.runtime,x:19.48,z:-6029.81,heave:0,heading:255,pitch:0,roll:0,rollVelocity:0,sailFore:0.4,sailMain:0.4,sailMizzen:0.4,crew:true};
+   const company=createCompany(undefined,id,{fullWatch:true,boat});
+   const gunnery=createShipGunnery(boat,{autoReload:true});
+   for(let t=0;t<watchSec;t+=0.1)stepCompany(company,boat,0.1,6);
+   assert.equal(gunnery.prepare('starboard'),true,`${id} prepares starboard battery at watch=${watchSec}s`);
+   let ready=false;
+   for(let i=0;i<440;i++){
+    stepCompany(company,boat,0.1,6);
+    gunnery.update(0.1,[0,0,6]);
+    if(gunnery.canFire('starboard')){ready=true;break;}
+   }
+   assert.equal(ready,true,`${id} mans and loads 100% of starboard guns under fullWatch at watch=${watchSec}s`);
+   assert.equal(gunnery.fire('starboard'),true,`${id} fires starboard broadside at watch=${watchSec}s`);
+  }
+ }
+});
+
+
 
 

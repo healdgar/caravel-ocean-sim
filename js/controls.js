@@ -141,6 +141,14 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
           if(d<bestDist){bestDist=d;best={x:f.x??0,z:f.z??0,name:f.name??'Shore battery',faction:'enemy',dist:d,hull:f.integrity??1};}
         }
       }
+      if(port?.batteries?.length){
+        for(const b of port.batteries){
+          const f=b.building;
+          if(!f||f.damageState?.state==='destroyed')continue;
+          const d=Math.hypot((f.x??0)-(boat.x??0),(f.z??0)-(boat.z??0));
+          if(d<bestDist){bestDist=d;best={x:f.x??0,z:f.z??0,name:f.label??f.prefabId??'Shore battery',faction:'enemy',dist:d,hull:f.damageState?.integrity??1};}
+        }
+      }
     }
     return best;
   }
@@ -203,7 +211,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
 
     const fireBtn=document.createElement('button');fireBtn.type='button';fireBtn.id=`helm-fire-${side}`;
     fireBtn.className='helm-fire-btn';fireBtn.textContent=`Fire ${side}`;
-    fireBtn.onclick=()=>{gunnery.fire(side);notifyGunnery();};
+    fireBtn.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);notifyGunnery();};
 
     const fireLoadedBtn=document.createElement('button');fireLoadedBtn.type='button';fireLoadedBtn.id=`helm-fire-loaded-${side}`;
     fireLoadedBtn.className='helm-fire-loaded-btn';fireLoadedBtn.textContent='Loaded';
@@ -225,8 +233,12 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     quartersBtn.textContent='Quarters';
     quartersBtn.onclick=()=>{
       battleOverride=inBattleState?'closed':'open';
-      if(battleOverride==='open'&&!gunnery.selectedSide){
-        gunnery.prepare(battleContext?.broadsideSide??'starboard');
+      if(battleOverride==='open'){
+        const activeSide=gunnery.selectedSide||battleContext?.broadsideSide||'starboard';
+        const s=gunnery.summary(activeSide);
+        if(!gunnery.selectedSide||(s.ready===0&&s.loading===0&&!gunnery.ordered)){
+          gunnery.prepare(activeSide);
+        }
       }
       notifyGunnery();
     };
@@ -509,11 +521,11 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
         b.loadingFill.style.width=`${loadPct}%`;
         const canFull=gunnery.canFire(b.side);
         const canPart=gunnery.canFireLoaded?.(b.side)??canFull;
-        b.fireBtn.disabled=!canFull;
+        b.fireBtn.disabled=!(canFull||canPart);
         b.fireLoadedBtn.disabled=!canPart;
         const partialLabel=s.ready>0&&s.ready<s.total?`Loaded (${s.ready})`:'Loaded';
         if(b.fireLoadedBtn.textContent!==partialLabel)b.fireLoadedBtn.textContent=partialLabel;
-        b.prepBtn.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&gunnery.selectedSide===b.side)||['port','starboard'].some(other=>other!==b.side&&gunnery.summary(other).loading>0);
+        b.prepBtn.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&s.spent===0&&gunnery.selectedSide===b.side);
         const prepLabel=s.spent>0&&s.loading===0?'Reload':'Prep';
         if(b.prepBtn.textContent!==prepLabel)b.prepBtn.textContent=prepLabel;
         b.card.dataset.active=String(gunnery.selectedSide===b.side||ordered);

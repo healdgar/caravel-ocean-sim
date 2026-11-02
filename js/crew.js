@@ -179,6 +179,8 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
     }
     const s=createDeckhand(policy);Object.assign(s,person,{crewIndex:i,route:[...person.route],target:person.route[1],wait:i*.37,
       time:i*.43,walkTime:i*.27,patrolX:person.x,yaw:person.yaw??(i%2?Math.PI:0),decisionIn:i/24,company:true,strength:1.0,indigenous:initialIndigenous});
+    const sx0=stationBoat.beam/3.6,sy0=vesselVerticalScale(stationBoat),sz0=stationBoat.length/12,y0=crewDeckHeight(stationBoat,s.z,s.x);
+    s.navigationY=y0;s.position[0]=s.x*sx0;s.position[1]=y0*sy0+.028;s.position[2]=s.z*sz0;
     s.scale.fill((person.sex==='female'?.99:.96)*(1+(i%3-1)*.025));
     Object.assign(s.observation,{sailorId:s.id,role:s.role,captainOrder:'watch',orderRevision:0});
     const look=initialIndigenous?INDIGENOUS_APPEARANCES[i%INDIGENOUS_APPEARANCES.length]:CREW_APPEARANCES[s.identityId??s.id];

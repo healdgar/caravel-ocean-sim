@@ -12,7 +12,7 @@ export function createGunneryControls(parent,gunnery){
     const prepare=document.createElement('button');prepare.textContent='Prepare '+side;prepare.id='guns-prepare-'+side;
     prepare.onclick=()=>{gunnery.prepare(side);update();};
     const fire=document.createElement('button');fire.textContent='Fire '+side;fire.id='guns-fire-'+side;fire.className='gun-fire';
-    fire.onclick=()=>{gunnery.fire(side);update();};
+    fire.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);update();};
     const fireLoaded=document.createElement('button');fireLoaded.textContent='Fire loaded';fireLoaded.id='guns-fire-loaded-'+side;fireLoaded.className='gun-fire-loaded';
     fireLoaded.title='Fire all currently loaded guns on this side without waiting for the remaining guns to finish loading';
     fireLoaded.onclick=()=>{gunnery.fireLoaded?.(side);update();};
@@ -149,12 +149,13 @@ export function createGunneryControls(parent,gunnery){
       const held=s.ready===s.total?gunnery.blockedReason(r.side):null;
       const text=ordered?orderText:s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
       if(r.status.textContent!==text)r.status.textContent=text;
-      r.fire.disabled=!gunnery.canFire(r.side);
-      const canPartial=gunnery.canFireLoaded?.(r.side)??gunnery.canFire(r.side);
+      const canFull=gunnery.canFire(r.side);
+      const canPartial=gunnery.canFireLoaded?.(r.side)??canFull;
+      r.fire.disabled=!(canFull||canPartial);
       r.fireLoaded.disabled=!canPartial;
       const loadedLabel=s.ready>0&&s.ready<s.total?`Fire loaded (${s.ready})`:'Fire loaded';
       if(r.fireLoaded.textContent!==loadedLabel)r.fireLoaded.textContent=loadedLabel;
-      r.prepare.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&gunnery.selectedSide===r.side)||['port','starboard'].some(side=>side!==r.side&&gunnery.summary(side).loading>0);
+      r.prepare.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&s.spent===0&&gunnery.selectedSide===r.side);
     }
     const faw=Boolean(gunnery.fireAtWill);
     fireAtWill.setAttribute('aria-pressed',String(faw));

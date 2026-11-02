@@ -1300,6 +1300,8 @@ async function main() {
         shipGuns.fire(side);
       } else if (shipGuns.canFire(side)) {
         shipGuns.fire(side);
+      } else if (shipGuns.canFireLoaded?.(side)) {
+        shipGuns.fireLoaded(side);
       } else if (!shipGuns.ordered) {
         shipGuns.prepare(side);
       }
