@@ -309,7 +309,7 @@ function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
   return crewNavigationRoute(points,boat,options);
 }
 function crewWorkBodiesClear(s,company,boat,path){
-  const others=company.crew.filter(o=>o!==s&&o.position);
+  const others=company.crew.filter(o=>o!==s&&o.casualtyState!=='fallen'&&o.position);
   for(let i=1;i<path.length;i++){
     const a=physical(path[i-1],boat),b=physical(path[i],boat);a[1]+=.028;b[1]+=.028;
     const ray=b.map((v,k)=>v-a[k]),length2=ray.reduce((sum,v)=>sum+v*v,0);
@@ -323,7 +323,7 @@ function crewWorkPassingDetour(s,company,boat,p,target){
   // A detour is a horizontal deck walk. Never short-cut a stair or an aloft
   // transition to another floor. Retry only from the existing blocked timer.
   if(Math.abs(p[1]-crewDeckHeight(boat,p[2],p[0]))*sy>.06)return false;
-  const neighbours=company.crew.filter(o=>o!==s&&o.position&&Math.abs(o.position[1]-.028-from[1])<.85&&Math.hypot(o.position[0]-from[0],o.position[2]-from[2])<3.5)
+  const neighbours=company.crew.filter(o=>o!==s&&o.casualtyState!=='fallen'&&o.position&&Math.abs(o.position[1]-.028-from[1])<.85&&Math.hypot(o.position[0]-from[0],o.position[2]-from[2])<3.5)
     .sort((a,b)=>distance3(a.position,from)-distance3(b.position,from)).slice(0,6);
   if(!neighbours.length)return false;
   const goals=[];
@@ -373,14 +373,14 @@ function crewWorkYieldIdle(s,company,boat,p,next){
   if(hasExtendedCrewModel(boat.modelId))return false;
   const wanted=physical(next,boat);wanted[1]+=.028;
   const mayYield=o=>!o.job||(o.job.kind==='gunnery'&&o.job.stage==='working'&&(o.job.gun.stage==='ready'||(s.job?.kind==='gunnery'&&o.job.gunRole==='tackle'&&s.job.gunRole==='loader')));
-  const blocker=company.crew.filter(o=>o!==s&&mayYield(o)&&o.role!=='Helmsman'&&o.id!=='ines'&&o.position&&distance3(o.position,wanted)<.68).sort((a,b)=>distance3(a.position,wanted)-distance3(b.position,wanted))[0];
+  const blocker=company.crew.filter(o=>o!==s&&o.casualtyState!=='fallen'&&mayYield(o)&&o.role!=='Helmsman'&&o.id!=='ines'&&o.position&&distance3(o.position,wanted)<.68).sort((a,b)=>distance3(a.position,wanted)-distance3(b.position,wanted))[0];
   if(!blocker)return false;
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),start=[blocker.x,(blocker.position[1]-.028)/sy,blocker.z],choices=[];
   for(const radius of[.75,1.05])for(const [X,Z]of[[1,0],[-1,0],[0,1],[0,-1],[.707,.707],[-.707,.707],[.707,-.707],[-.707,-.707]]){
     const x=start[0]+X*radius/sx,z=start[2]+Z*radius/sz,target=[x,crewDeckHeight(boat,z,x),z];
     if(Math.abs(target[1]-start[1])*sy>.06||!crewRoutineSegmentClear(blocker,boat,target,target))continue;
     const physicalTarget=physical(target,boat);physicalTarget[1]+=.028;
-    if(company.crew.some(o=>o!==blocker&&o.position&&distance3(o.position,physicalTarget)<.70))continue;
+    if(company.crew.some(o=>o!==blocker&&o.casualtyState!=='fallen'&&o.position&&distance3(o.position,physicalTarget)<.70))continue;
     const path=crewWorkNavigationRoute(blocker,[target],boat,{exactTarget:true});if(!path||!crewWorkBodiesClear(blocker,company,boat,path))continue;
     choices.push({target,path,distance:distance3(physicalTarget,wanted)});
   }
@@ -449,15 +449,17 @@ function gunCrewRoute(s,target,boat){
 function assignGunCrew(company,boat){
   const guns=boat.gunnery?.guns;
   if(!guns)return;
-  const weather=guns.filter(g=>g.weatherDeck),limit=boat.modelId==='victory'?4:2;
+  const ableHands=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&s.casualtyState!=='fallen'&&!(s.knockdownTimer>0)).length;
+  const weather=guns.filter(g=>g.weatherDeck),baseLimit=boat.modelId==='victory'?4:2;
+  const limit=Math.max(0,Math.min(baseLimit,Math.floor(ableHands/2)));
   const selected=new Set();
   for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side).slice(0,limit))selected.add(gun.id);
   for(const gun of weather)gun.visibleCrew=selected.has(gun.id);
   const targets=guns.filter(g=>selected.has(g.id)&&g.side===boat.gunnerySide);
-  const active=targets.some(g=>g.loading||g.stage==='ready'||g.queued||g.stage==='recoil');
+  const active=targets.some(g=>g.loading||g.stage==='ready'||g.stage==='spent'||g.queued||g.stage==='recoil');
   for(const s of company.crew){
     const j=s.job;
-    if(j?.kind==='gunnery'&&!['return','waiting-return'].includes(j.stage)&&(!active||j.gun.side!==boat.gunnerySide))startReturn(s,boat,company);
+    if(j?.kind==='gunnery'&&!['return','waiting-return'].includes(j.stage)&&(!active||j.gun.side!==boat.gunnerySide||!selected.has(j.gun.id)))startReturn(s,boat,company);
     // An aloft worker climbs down normally; there is no cannon-station teleport.
     if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&['ascending','working','lookout-approach'].includes(j.stage))crewWorkDescend(s);
     else if(active&&j&&(j.kind==='rig'||j.kind==='lookout')&&j.stage==='approach')startReturn(s,boat,company);
@@ -466,15 +468,23 @@ function assignGunCrew(company,boat){
   company.gunneryActive=active||company.crew.some(s=>s.job?.kind==='gunnery'&&!['return','waiting-return'].includes(s.job.stage));
   if(!active)return;
   const onDeck=s=>(s.job?.rung??0)<=0&&Math.abs(s.x)+.26/(boat.beam/3.6)<=modelDeckWidth(boat,s.z);
-  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&(!s.job||(onDeck(s)&&(['return','waiting-return'].includes(s.job.stage)||s.job.kind==='yield'))));
+  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&s.casualtyState!=='fallen'&&!(s.knockdownTimer>0)&&(!s.job||(onDeck(s)&&(['return','waiting-return'].includes(s.job.stage)||s.job.kind==='yield'))));
   const routeKey=[boat.modelId,boat.length,boat.beam,company.revision,boat.gunnerySide].join('/');
   if(company.gunNavigationKey!==routeKey){company.gunNavigationKey=routeKey;company.gunNavigationRetry=new Map();}
   const ordered=boat.modelId==='victory'?[...targets].sort((a,b)=>b.station[2]-a.station[2]):targets;
   for(const gun of ordered)for(const role of['loader','tackle']){
-    if(company.crew.some(s=>s.job?.kind==='gunnery'&&s.job.stage!=='return'&&s.job.gun.id===gun.id&&s.job.gunRole===role))continue;
+    if(company.crew.some(s=>s.casualtyState!=='fallen'&&!(s.knockdownTimer>0)&&s.job?.kind==='gunnery'&&!['return','waiting-return'].includes(s.job.stage)&&s.job.gun.id===gun.id&&s.job.gunRole===role))continue;
     const key=gun.id+'/'+role;if((company.gunNavigationRetry.get(key)??0)>company.workTime)continue;
     const target=crewGunStation(gun,role,boat),point=physical(target,boat);
-    available.sort((a,b)=>distance3(a.position,point)-distance3(b.position,point));
+    available.sort((a,b)=>{
+      const aSame=a.job?.kind==='gunnery'&&a.job.gun?.id===gun.id?1:0;
+      const bSame=b.job?.kind==='gunnery'&&b.job.gun?.id===gun.id?1:0;
+      if(aSame!==bSame)return bSame-aSame;
+      const aGun=a.job?.kind==='gunnery'?1:0;
+      const bGun=b.job?.kind==='gunnery'?1:0;
+      if(aGun!==bGun)return bGun-aGun;
+      return distance3(a.position,point)-distance3(b.position,point);
+    });
     let sailor,path;
     for(const candidate of available){const route=crewWorkNavigationRoute(candidate,gunCrewRoute(candidate,target,boat),boat,{exactTarget:true});if(route){sailor=candidate;path=route;break;}}
     if(!sailor){company.gunNavigationRetry.set(key,company.workTime+1);continue;}
@@ -489,11 +499,11 @@ export function updateCrewGunneryAttendance(company,boat){
   if(!boat.gunnery)return;
   for(const gun of boat.gunnery.guns.filter(g=>g.visibleCrew&&g.side===boat.gunnerySide)){
     const hands=company.crew.filter(s=>{
-      if(s.job?.kind!=='gunnery'||s.job.gun.id!==gun.id||s.intent!=='work'||s.observation.hazard)return false;
+      if(s.casualtyState==='fallen'||(s.knockdownTimer??0)>0||s.job?.kind!=='gunnery'||s.job.gun.id!==gun.id||s.intent!=='work'||s.observation.hazard)return false;
       const pos=[s.position[0],s.position[1]-.028,s.position[2]];
       if(!crewNavigationClear(pos,boat,s.navigationBody))return false;
       const d=distance3(physical(crewGunStation(gun,s.job.gunRole,boat),boat),pos);
-      return (s.job.stage==='working'&&d<.035)||(s.job.arrivedAtGun&&['working','reposition','waiting-gun'].includes(s.job.stage)&&d<1.15);
+      return (s.job.stage==='working'&&d<.035)||(s.job.arrivedAtGun&&['reposition','waiting-gun'].includes(s.job.stage)&&d<1.15);
     });
     if(hands.some(s=>s.job.gunRole==='loader')&&hands.some(s=>s.job.gunRole==='tackle'))boat.gunneryAttendance.add(gun.id);
   }
@@ -501,22 +511,25 @@ export function updateCrewGunneryAttendance(company,boat){
 export function manGunStationsImmediate(company,boat){
   const guns=boat.gunnery?.guns;
   if(!guns||!company?.crew||!boat.gunnerySide)return false;
-  const weather=guns.filter(g=>g.weatherDeck),limit=boat.modelId==='victory'?4:2;
+  const ableHands=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&s.casualtyState!=='fallen'&&!(s.knockdownTimer>0)).length;
+  const weather=guns.filter(g=>g.weatherDeck),baseLimit=boat.modelId==='victory'?4:2;
+  const limit=Math.max(0,Math.min(baseLimit,Math.floor(ableHands/2)));
   const selected=new Set();
   for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side).slice(0,limit))selected.add(gun.id);
   for(const gun of weather)gun.visibleCrew=selected.has(gun.id);
   const targets=guns.filter(g=>selected.has(g.id)&&g.side===boat.gunnerySide);
   const ordered=boat.modelId==='victory'?[...targets].sort((a,b)=>b.station[2]-a.station[2]):targets;
-  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id));
+  const available=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&s.casualtyState!=='fallen'&&!(s.knockdownTimer>0));
   for(const s of available){s.job=null;s.navigationPath=null;s.navigationKey=null;}
   for(const gun of ordered)for(const role of['loader','tackle']){
-    const sailor=available.shift();if(!sailor)break;
     const station=crewGunStation(gun,role,boat),world=physical(station,boat);
+    available.sort((a,b)=>distance3(a.position,world)-distance3(b.position,world));
+    const sailor=available.shift();if(!sailor)break;
     sailor.home??=[sailor.x,sailor.z];
     sailor.x=station[0];sailor.z=station[2];
     sailor.position.set([world[0],world[1]+.028,world[2]]);
     sailor.yaw=(gun.sideSign??Math.sign(gun.directionDesign[0]))*Math.PI/2;
-    sailor.job={kind:'gunnery',gun,gunRole:role,stage:'working',elapsed:1,rung:0,revision:company.revision,path:[station],cursor:1,position:station};
+    sailor.job={kind:'gunnery',gun,gunRole:role,stage:'working',arrivedAtGun:true,elapsed:1,rung:0,revision:company.revision,path:[station],cursor:1,position:station};
     sailor.intent='work';sailor.work=1;sailor.walk=0;
   }
   company.gunneryActive=true;
@@ -555,7 +568,7 @@ export function crewGunneryTool(s,boat){
 // models use it; the qualified four-ship routes keep their original geometry.
 export function proceduralCrewRoute(s,target,boat,company=null){
   const d=proceduralDesign(boat.modelId),sx=boat.beam/d.frame.beam,sy=d.frame.verticalScale,sz=boat.length/d.frame.length,flights=crewExtendedFlights(d.id);
-  const rowingBody=Object.hasOwn(ROWING_DESIGNS,d.id),bodies=company?.crew.filter(other=>other!==s&&other.position)??[];
+  const rowingBody=Object.hasOwn(ROWING_DESIGNS,d.id),bodies=company?.crew.filter(other=>other!==s&&other.casualtyState!=='fallen'&&other.position)??[];
   const pitch=.32,margin=d.cockpit?.22:.27,lo=d.profile.stations[0]*sz+.28,hi=d.profile.stations.at(-1)*sz-.28,columns=Math.ceil(boat.beam/pitch);
   // Narrow yacht side decks may lie between regular grid columns. Include the
   // actual centre of each authored cabin/walkway gap, without shrinking people.
@@ -804,7 +817,7 @@ export function stepCrewWork(s,company,boat,dt) {
         const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
         const maxStep=motion.speedMetresPerSecond*dt,travel=Math.min(d,maxStep),q=travel/d;
         const next=d<=maxStep+1e-6?goal:from.map((x,i)=>x+(goal[i]-x)*q),nextWorld=physical(next,boat);
-        const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(nextWorld[0]-other.position[0],nextWorld[1]+.028-other.position[1],nextWorld[2]-other.position[2])<.54);
+        const occupied=company.crew.some(other=>other!==s&&other.casualtyState!=='fallen'&&other.position&&Math.hypot(nextWorld[0]-other.position[0],nextWorld[1]+.028-other.position[1],nextWorld[2]-other.position[2])<.54);
         if(!occupied&&crewWorkSegmentClear(s,boat,from,next)){
           j.position=next;s.x=next[0];s.z=next[2];
           if(travel>.002){moving=true;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});}
@@ -817,7 +830,6 @@ export function stepCrewWork(s,company,boat,dt) {
     if(j.stage==='waiting-gun'&&j.elapsed>.5){
       const goal=crewGunStation(j.gun,j.gunRole,boat),path=crewWorkNavigationRoute(s,[goal],boat,{exactTarget:true});j.elapsed=0;
       if(path){j.path=path;j.cursor=0;j.stage='reposition';}
-      else if(j.arrivedAtGun&&distance3(physical(goal,boat),[s.position[0],s.position[1]-.028,s.position[2]])<1.15){j.stage='working';}
     }
     if(j.stage==='traffic-hold'){
       const resume=j.trafficResume,requester=company.crew.find(o=>o.id===resume?.requester);
@@ -836,7 +848,13 @@ export function stepCrewWork(s,company,boat,dt) {
       const travel=Math.min(d,motion.speedMetresPerSecond*dt),q=d>1e-6?travel/d:1;
       const next=p.map((x,i)=>x+(target[i]-x)*q),world=physical(next,boat);
       // Yield locally to another body rather than walking through it.
-      const occupied=company.crew.some(other=>other!==s&&other.position&&Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2])<.54);
+      const occupied=company.crew.some(other=>{
+        if(other===s||other.casualtyState==='fallen'||!other.position)return false;
+        const d1=Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2]);
+        if(d1>=.54)return false;
+        const d0=Math.hypot(a[0]-other.position[0],a[1]+.028-other.position[1],a[2]-other.position[2]);
+        return d1<=d0+1e-6;
+      });
       const clear=crewWorkSegmentClear(s,boat,p,next);
       if(clear&&!occupied){
         const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));

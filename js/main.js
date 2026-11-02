@@ -1018,6 +1018,7 @@ async function main() {
     if(!v.dormantEncounter&&terrain&&LAND_STAGE)placeCompanionVesselInWater(v,idx+1);
   }
   const makeGunneryOptions=(ownerBoat,prefix='')=>({
+    autoReload:true,
     deferSeaCollision:ownerBoat===boat,
     waterHeight:()=>ownerBoat.target?.heave??0,
     muzzleBlock:ownerBoat===boat?(gun,pose)=>{

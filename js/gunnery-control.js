@@ -3564,7 +3564,7 @@ export function resolveSolidGunneryImpact(event, { getTerrain = () => null } = {
 
 // Explicit orders govern the drill. There is no automatic reload or repeated
 // firing. The captain's spoken order has the same duration with sound muted.
-export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null,getVessels=()=>[],getTerrain=()=>null,sweep=null,deferSeaCollision=true,waterHeight=0}={}){
+export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>null,getVessels=()=>[],getTerrain=()=>null,sweep=null,deferSeaCollision=true,waterHeight=0,autoReload=false}={}){
   const state=createGunneryState(createNavalBattleGunDefinitions(boat));boat.gunnery=state;
   createVesselDamageState(boat);
   const previousStages=new Array(state.guns.length);
@@ -3874,6 +3874,9 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       });
       for(const gun of state.guns)if(previousStages[gun.index]!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
         onEvent({type:gun.stage==='ram'?'load':'run-out',gun,position:gunMuzzlePose(gun,boat).position});
+      }
+      if((fireAtWillMode||autoReload)&&prepared&&sideValid(boat.gunnerySide)&&hasPowder()&&!boat.damage?.sunk&&!boat.damage?.surrendered&&!pending){
+        if(prepareGunnery(state,boat.gunnerySide)>0)lastReady=false;
       }
       const s=gunnerySummary(state,boat.gunnerySide);
       let allAttended=true;

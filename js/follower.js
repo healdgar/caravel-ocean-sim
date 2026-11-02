@@ -68,7 +68,8 @@ function followerRowing(state,boat,leader,{course,heading,speed,windFrom,windSpe
 // A helm policy: it writes only rudder, canvas and human rowing commands.
 // The hull receives every acceleration and turn from the ordinary sailing model.
 export function createFollower(formation={trail:2.8,side:1.5},options={}){
-  const faction=(options.faction??formation?.faction)==='enemy'?'enemy':'friendly';
+  const rawFaction=options.faction??formation?.faction;
+  const faction=(rawFaction==='enemy'||rawFaction==='pirate')?'enemy':'friendly';
   return {
     formation:{...formation},
     faction,
@@ -556,6 +557,12 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
       gunnery.setFireAtWill(true,aim.side);
     }
   }
+  if(gunnery.selectedSide&&!gunnery.ordered&&!gunnery.state.queue.length){
+    const summary=gunnery.summary(gunnery.selectedSide);
+    if(summary.loading===0&&summary.ready<summary.total){
+      gunnery.prepare(gunnery.selectedSide);
+    }
+  }
   if(follower?.pendingCaptainFire){
     const {side,allowPartial}=follower.pendingCaptainFire;
     if(isFriendlyInLineOfFire(boat,side,friendlyAllies,nearestEnemyDist)){
@@ -568,7 +575,8 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
       if(allowPartial)gunnery.fireLoaded(side);else gunnery.fire(side);
       return {action:allowPartial?'fire-loaded':'fire',side};
     }
-    if(gunnery.selectedSide!==side&&!gunnery.ordered&&!gunnery.state.queue.length){
+    const summary=gunnery.summary(side);
+    if(!gunnery.ordered&&!gunnery.state.queue.length&&(gunnery.selectedSide!==side||(summary.loading===0&&summary.ready<summary.total))){
       gunnery.prepare(side);
     }
   }

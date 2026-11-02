@@ -1025,4 +1025,71 @@ test('crew puppet damage, shipboard fire spread/scorch, and cannon impact audio 
  assert.ok(played.some(p=>p[0]==='thunder-near'),'magazine explosion plays deep thunder blast');
 });
 
+test('player ships and friendly fleet companions automatically reload after firing broadsides and recover from gunner casualties',async ()=>{
+ const {manGunStationsImmediate}=await import('../js/crew-work.js');
+ const {stepVesselCombatAI,commandFriendlyFleet}=await import('../js/follower.js');
+ const {getShipModel}=await import('../js/ship-models.js');
+
+ // 1. Player flagship (nina and victory) autoReloads after firing without manual prepare(), even after a gunner casualty
+ for(const id of ['nina','victory']){
+  const model=getShipModel(id);
+  const boat={modelId:id,model,...model.runtime,x:0,z:0,heave:0,heading:0,pitch:0,roll:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1,crew:true};
+  const company=createCompany(undefined,id);
+  const gunnery=createShipGunnery(boat,{autoReload:true});
+  stepCompany(company,boat,0,8);
+  gunnery.readyAtQuarters('port');
+  manGunStationsImmediate(company,boat);
+
+  const total=gunnery.summary('port').total;
+  assert.equal(gunnery.canFire('port'),true,`${id} ready to fire initial broadside`);
+  assert.equal(gunnery.fire('port'),true,`${id} fires initial broadside`);
+
+  for(let i=0;i<40;i++){
+   stepCompany(company,boat,0.1,8);
+   gunnery.update(0.1,8);
+  }
+  assert.ok(gunnery.summary('port').loading>0,`${id} automatically begins reloading spent guns after salvo`);
+
+  // Inflict a casualty on an active gunner mid-reload and ensure living crew complete the reload
+  const activeGunner=company.crew.find(s=>s.job?.kind==='gunnery');
+  assert.ok(activeGunner,`${id} has active gun crew during reload`);
+  activeGunner.casualtyState='fallen';
+
+  let reloaded=false;
+  for(let i=0;i<900;i++){
+   stepCompany(company,boat,0.1,8);
+   gunnery.update(0.1,8);
+   if(gunnery.summary('port').ready===total&&gunnery.canFire('port')){reloaded=true;break;}
+  }
+  assert.equal(reloaded,true,`${id} completes automatic post-salvo reload and recovers from gunner casualty`);
+  assert.equal(gunnery.fire('port'),true,`${id} can fire consecutive broadside after automatic reload`);
+ }
+
+ // 2. Friendly companion ship in player's squadron automatically reloads after discharging broadside
+ const playerModel=getShipModel('nina');
+ const playerBoat={id:'player',modelId:'nina',model:playerModel,...playerModel.runtime,x:0,z:0,heave:0,heading:0,pitch:0,roll:0,rollVelocity:0};
+ const friendlyBoat={id:'escort',modelId:'nina',model:playerModel,...playerModel.runtime,x:0,z:45,heave:0,heading:0,pitch:0,roll:0,rollVelocity:0,aiGunneryAttended:true};
+ const enemyBoat={id:'enemy',modelId:'nina',model:playerModel,...playerModel.runtime,x:-95,z:45,heave:0,heading:0,pitch:0,roll:0,rollVelocity:0,aiGunneryAttended:true};
+ const friendlyFollower=createFollower({trail:2,side:0},{faction:'friendly'});
+ const enemyFollower=createFollower({trail:4,side:-2},{faction:'enemy'});
+ const friendlyGunnery=createShipGunnery(friendlyBoat,{autoReload:true});
+ const enemyGunnery=createShipGunnery(enemyBoat,{autoReload:true});
+ friendlyGunnery.readyAtQuarters('port');
+ const vessels=[
+  {id:'player',boat:playerBoat,follower:null},
+  {id:'escort',boat:friendlyBoat,follower:friendlyFollower,gunnery:friendlyGunnery},
+  {id:'enemy',boat:enemyBoat,follower:enemyFollower,gunnery:enemyGunnery},
+ ];
+ const orderedCount=commandFriendlyFleet(vessels,{type:'fire'});
+ assert.equal(orderedCount,1,'captain fire order dispatches to friendly companion');
+ let escortReloaded=false;
+ for(let i=0;i<450;i++){
+  stepVesselCombatAI(vessels[1],{vessels,dt:0.1});
+  friendlyGunnery.update(0.1,8);
+  if(i>30&&friendlyGunnery.summary('port').ready===2&&friendlyGunnery.canFire('port')){escortReloaded=true;break;}
+ }
+ assert.equal(escortReloaded,true,'friendly companion automatically reloads broadside after firing');
+});
+
+
 

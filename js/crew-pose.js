@@ -168,7 +168,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
     // Only add bend when the actual unchanged hand workspace requires it.
     if(reachExcess>0)lean=Math.max(lean,Math.min(.65,Math.atan2(Math.max(0,centre[2]-base[2]),Math.max(.10,centre[1]-base[1]))));
     const shoulderY=(shoulders[0][1]+shoulders[1][1])*.5;
-    drop=Math.max(0,Math.min(.18,shoulderY-centre[1]-.22));
+    drop=Math.max(0,Math.min(.36,shoulderY-centre[1]-.16));
   }else if(requestedLean>0)drop=.12*Math.min(1,requestedLean/.45);
   const fraction=Math.max(0,Math.min(1,lean/.45));
   const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
@@ -188,7 +188,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
       const across=(target[0]-shoulder[0])**2+(target[1]-shoulder[1])**2;
       workspaceForward=Math.max(workspaceForward,target[2]-shoulder[2]-Math.sqrt(Math.max(0,reach*reach-across)));
     }
-    workspaceForward=Math.max(0,Math.min(.34-.08*fraction,workspaceForward));
+    workspaceForward=Math.max(0,Math.min(.46-.04*fraction,workspaceForward));
     if(workspaceForward){const p=posePosition(a.world[pelvis]);p[2]+=workspaceForward;poseMoveBone(a,pelvis,p);}
   }
   // As in the rowing stance, lower the pelvis only as much as the genuine leg
