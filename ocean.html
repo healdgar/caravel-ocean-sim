@@ -20150,10 +20150,11 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     const by = Number(bake.y) || 0;
     const bz = Number(bake.z) || 0;
 
-    if (bake.kind === 'building-explosion') {
-      const blastR = Math.max(8.5, (Number(bake.radius) || 6.5) * 1.5);
-      const stepDepth = Math.max(0.5, Number(bake.stepDepth) || 1.2);
-      const powFrac = Math.max(0.2, Math.min(1.0, Number(bake.powderFraction) || 0.85));
+    if (bake.kind === 'building-explosion' || bake.kind === 'building-collapse') {
+      const isExplosion = bake.kind === 'building-explosion';
+      const blastR = Math.max(12.0, (Number(bake.radius) || 9.5) * 1.65);
+      const stepDepth = Math.max(1.6, Number(bake.stepDepth) || 2.4);
+      const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
       for (let v = 0; v < vertexCount; v++) {
         const at = v * stride;
         const px = mesh[at];
@@ -20162,21 +20163,25 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         const dx = px - bx;
         const dy = py - by;
         const dz = pz - bz;
-        const dist = Math.hypot(dx, dy * 0.75, dz);
+        const dist = Math.hypot(dx, dy * 0.65, dz);
         if (dist >= blastR) continue;
         const t = 1 - dist / blastR;
         const core = t * t;
-        const jag = 0.65 + 0.55 * Math.sin(px * 13.0 + pz * 17.0) * Math.cos(py * 19.0 - px * 11.0);
+        const jag = 0.62 + 0.58 * Math.sin(px * 13.0 + pz * 17.0) * Math.cos(py * 19.0 - px * 11.0);
         const hDist = Math.hypot(dx, dz) || 1;
-        // Upper roof/vault blows outward & collapses into a smoking crater; lower walls blow outward.
-        const heaveY = dy > 0.35 ? -stepDepth * 0.65 * core * jag : stepDepth * 0.38 * core * jag;
-        mesh[at] = px + (dx / hDist) * stepDepth * 0.58 * core * jag;
-        mesh[at + 1] = Math.max(0.05, py + heaveY);
-        mesh[at + 2] = pz + (dz / hDist) * stepDepth * 0.58 * core * jag;
+        // Upper keep/dome/parapet collapses downward into a smoking ruin; walls splay outward into rubble.
+        const aboveBlast = Math.max(0, py - Math.max(1.5, by - 2.0));
+        const collapseDrop = aboveBlast > 0.2
+          ? -Math.min(aboveBlast * 0.72, stepDepth * (isExplosion ? 2.1 : 1.55) * (0.45 + 0.55 * t) * jag)
+          : stepDepth * 0.28 * core * jag;
+        const outPush = stepDepth * (isExplosion ? 1.15 : 0.65) * core * jag;
+        mesh[at] = px + (dx / hDist) * outPush;
+        mesh[at + 1] = Math.max(0.15, py + collapseDrop);
+        mesh[at + 2] = pz + (dz / hDist) * outPush;
         const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
         const curLen = Math.hypot(nx, ny, nz) || 1;
         const prevDmg = Math.max(0, curLen - 1.0);
-        const nextDmg = Math.min(1.45, prevDmg + (0.78 + 0.52 * powFrac) * core);
+        const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
         const scale = 1.0 + nextDmg;
         const ux = nx / curLen + (dx / blastR) * 0.45 * t;
         const uy = ny / curLen + 0.35 * t;
@@ -20186,7 +20191,7 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
         if (stride >= 8 && (mesh[at + 6] ?? 7) < 19.5) {
-          mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - (0.45 + 0.32 * powFrac) * core));
+          mesh[at + 7] = Math.max(0.18, mesh[at + 7] * (1 - (0.52 + 0.32 * powFrac) * (0.4 + 0.6 * t)));
         }
         if (v < minV) minV = v;
         if (v > maxV) maxV = v;
@@ -20269,9 +20274,9 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       continue;
     }
 
-    const r = Math.max(5.8, (Number(bake.radius) || 1.2) * 4.4);
-    const stepDepth = Math.max(0.14, Number(bake.stepDepth) || 0.34);
-    const severity = Math.max(0.35, Number(bake.severity) || 0.78);
+    const r = Math.max(7.2, (Number(bake.radius) || 1.4) * 5.2);
+    const stepDepth = Math.max(0.85, (Number(bake.stepDepth) || 0.45) * 3.1);
+    const severity = Math.max(0.55, Number(bake.severity) || 0.90);
     const wnx = Number(bake.nx) || 0;
     const wny = Number(bake.ny) || 0;
     const wnz = Number(bake.nz) || 1;
@@ -20290,30 +20295,33 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const dx = px - bx;
       const dy = py - by;
       const dz = pz - bz;
-      const dist = Math.hypot(dx, dy, dz);
+      // Weight vertical distance slightly softer when above the impact point so upper parapet merlons
+      // and crenellations collapse when the scarp wall beneath them is pounded by cannonfire.
+      const effDy = dy > 0 ? dy * 0.55 : dy * 0.9;
+      const dist = Math.hypot(dx, effDy, dz);
       if (dist >= r) continue;
       const rawKind = mesh[at + 6] ?? 7;
       const kind = Math.floor(rawKind);
-      if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.55) continue;
+      if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.68) continue;
 
       const t = 1 - dist / r;
-      const core = t * t;
+      const core = t * 0.45 + t * t * 0.55;
       const jag = isTimber
-        ? 0.65 + 0.62 * Math.sin(py * 31.0 + pz * 19.0) * Math.cos(px * 23.0)
-        : 0.78 + 0.36 * Math.sin(px * 17.0 + py * 23.0 + pz * 13.0);
+        ? 0.65 + 0.68 * Math.sin(py * 31.0 + pz * 19.0) * Math.cos(px * 23.0)
+        : 0.72 + 0.48 * Math.sin(px * 17.0 + py * 23.0 + pz * 13.0);
 
       if (isCannonDismount && (kind === 10 || kind === 14)) {
         const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-        mesh[at] = px + inX * stepDepth * 0.95 * t + inZ * slew * 0.16 * t;
-        mesh[at + 1] = py - 0.18 * t;
-        mesh[at + 2] = pz + inZ * stepDepth * 0.95 * t - inX * slew * 0.16 * t;
+        mesh[at] = px + inX * stepDepth * 1.25 * t + inZ * slew * 0.48 * t;
+        mesh[at + 1] = Math.max(0.2, py - 0.62 * t);
+        mesh[at + 2] = pz + inZ * stepDepth * 1.25 * t - inX * slew * 0.48 * t;
       } else {
         const disp = stepDepth * core * jag;
         const rim = t * (1 - t) * 4.0;
-        const splay = stepDepth * (isTimber ? 0.18 : 0.08) * rim * (jag - 0.75);
-        const topNotch = dy > 0 ? stepDepth * 0.34 * core * jag : 0;
+        const splay = stepDepth * (isTimber ? 0.26 : 0.14) * rim * (jag - 0.72);
+        const topCollapse = dy > -0.5 ? stepDepth * 0.68 * core * jag : stepDepth * 0.22 * core * jag;
         mesh[at] = px + inX * disp + (dist > 1e-4 ? (dx / dist) * splay : 0);
-        mesh[at + 1] = py + inY * disp - topNotch + (dist > 1e-4 ? (dy / dist) * splay : 0);
+        mesh[at + 1] = Math.max(0.12, py + inY * disp - topCollapse + (dist > 1e-4 ? (dy / dist) * splay : 0));
         mesh[at + 2] = pz + inZ * disp + (dist > 1e-4 ? (dz / dist) * splay : 0);
       }
 
@@ -35132,9 +35140,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 4.8 ? Math.min(6, Math.max(2, Math.round(spanX / 3.8))) : 1;
-    const ny = spanY >= 3.8 ? Math.min(3, Math.max(2, Math.round(spanY / 3.2))) : 1;
-    const nz = spanZ >= 4.8 ? Math.min(6, Math.max(2, Math.round(spanZ / 3.8))) : 1;
+    const nx = spanX >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanX / 3.2))) : 1;
+    const ny = spanY >= 3.2 ? Math.min(5, Math.max(2, Math.round(spanY / 2.6))) : 1;
+    const nz = spanZ >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanZ / 3.2))) : 1;
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
@@ -46618,8 +46626,14 @@ function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext
       }
       if(gunnery.lastDamageReport?.targetName&&gunnery.lastDamageReport?.energyKj){
         const r=gunnery.lastDamageReport;
-        const casHit=(r.casualtiesKilled||r.casualtiesWounded)?` (-${(r.casualtiesKilled||0)+(r.casualtiesWounded||0)} crew · ${Math.round((r.battleMorale??1)*100)}% morale)`:'';
-        telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Hit ${r.energyKj}kJ${casHit}`;
+        if(r.kind==='building'){
+          const gunTxt=r.totalGuns>0?` · ${r.activeGuns}/${r.totalGuns} guns`:'';
+          const bState=r.magazineExploded?' · 💥 MAGAZINE DETONATED!':r.silenced?' · SILENCED!':` · Fort ${Math.round((r.integrity??1)*100)}%${gunTxt}`;
+          telemTxt+=` · Hit ${r.energyKj}kJ${bState}`;
+        }else{
+          const casHit=(r.casualtiesKilled||r.casualtiesWounded)?` (-${(r.casualtiesKilled||0)+(r.casualtiesWounded||0)} crew · ${Math.round((r.battleMorale??1)*100)}% morale)`:'';
+          telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Hit ${r.energyKj}kJ${casHit}`;
+        }
       }
       if(battleTelemetry.textContent!==telemTxt)battleTelemetry.textContent=telemTxt;
     }
@@ -52343,17 +52357,17 @@ function createBuildingDamageState(building) {
   const prefabId = building.prefabId ?? '';
   const isBastionOrFort = prefabId === 'stone_sea_bastion' || prefabId === 'bastion_trace_fortress';
   const defaultMaxEnergy = isBastionOrFort
-    ? 25000000
+    ? 3200000
     : materialClass === 'fortified-stone'
-      ? 14000000
+      ? 2200000
       : materialClass === 'timber'
-        ? 2500000
-        : 8500000;
+        ? 950000
+        : 1600000;
   const defaultOuterPenJoules = materialClass === 'fortified-stone'
-    ? 420000
+    ? 155000
     : materialClass === 'masonry'
-      ? 165000
-      : 38000;
+      ? 85000
+      : 32000;
   if (!building.damageState) {
     building.damageState = {
       materialClass,
@@ -52448,20 +52462,17 @@ function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cause = 's
   d.integrity = Math.max(0, 1 - d.damageJoules / d.maxEnergy);
   d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
 
-  const dismountAdd = Math.max(1, Math.round(2 + 6 * powderFrac));
+  const dismountAdd = Math.max(2, Math.round(4 + 8 * powderFrac));
   d.dismountedGuns = (d.dismountedGuns ?? 0) + dismountAdd;
   const guns = building.gunnery?.state?.guns ?? building.gunnery?.guns;
   if (Array.isArray(guns)) {
-    let left = dismountAdd;
     for (const g of guns) {
-      if (left <= 0) break;
-      if (!g.dismounted) {
-        g.dismounted = true;
-        g.loading = false;
-        g.queued = false;
-        left--;
-      }
+      g.dismounted = true;
+      g.loading = false;
+      g.queued = false;
     }
+    d.dismountedGuns = guns.length;
+    d.silenced = true;
   }
 
   d.pendingBakes.push({
@@ -52469,9 +52480,9 @@ function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cause = 's
     x: +worldBlastPt[0].toFixed(3),
     y: +worldBlastPt[1].toFixed(3),
     z: +worldBlastPt[2].toFixed(3),
-    radius: +(Math.max(4.5, Math.min(building.width ?? 16, building.depth ?? 16) * (0.45 + 0.35 * powderFrac))).toFixed(3),
-    stepDepth: +(0.85 + 1.45 * powderFrac).toFixed(3),
-    severity: +(1.0 + 0.48 * powderFrac).toFixed(3),
+    radius: +(Math.max(8.5, Math.min(building.width ?? 24, building.depth ?? building.length ?? 24) * (0.55 + 0.35 * powderFrac))).toFixed(3),
+    stepDepth: +(1.85 + 1.85 * powderFrac).toFixed(3),
+    severity: +(1.25 + 0.48 * powderFrac).toFixed(3),
     powderFraction: +powderFrac.toFixed(3),
   });
 
@@ -52588,38 +52599,87 @@ function applyBuildingImpactDamage(building, event) {
     materialClass,
   });
 
-  // Check if the shot struck a shore-battery embrasure cannon and dismounted it.
+  // When a shot strikes the lower scarp/foundation wall, propagate shock & spalling up into the
+  // upper scarp and parapet crenellations directly above the impact bay so the battlements crumble visibly.
+  const bHeight = building.height ?? 8.0;
+  if ((localPos[1] ?? 0) < bHeight * 0.55 && effectiveEnergy >= 45000) {
+    const upperLocal = [
+      localPos[0] ?? 0,
+      Math.min(bHeight + 0.4, Math.max((localPos[1] ?? 0) + 4.5, bHeight * 0.78)),
+      localPos[2] ?? 0,
+    ];
+    const upperWorld = buildingLocalToWorld(building, upperLocal);
+    d.pendingBakes.push({
+      kind: materialClass === 'timber' ? 'timber-splinter' : 'stone-crater',
+      x: +upperWorld[0].toFixed(3),
+      y: +upperWorld[1].toFixed(3),
+      z: +upperWorld[2].toFixed(3),
+      nx: +worldNormal[0].toFixed(3),
+      ny: +worldNormal[1].toFixed(3),
+      nz: +worldNormal[2].toFixed(3),
+      radius: +(craterRadius * 1.15).toFixed(3),
+      stepDepth: +(stepDepth * 1.1).toFixed(3),
+      severity: +(siteSeverity * 0.95).toFixed(3),
+      materialClass,
+    });
+  }
+
+  // Check if the shot struck near a shore-battery embrasure cannon (or undermined its wall bay) and dismounted it.
   const bGuns = building.gunnery?.state?.guns ?? building.gunnery?.guns;
   let dismountedNow = false;
+  const dismountGunWithBake = (g) => {
+    g.dismounted = true;
+    g.loading = false;
+    g.queued = false;
+    d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
+    dismountedNow = true;
+    const gWorld = buildingLocalToWorld(building, g.localPosition ?? localPos);
+    d.pendingBakes.push({
+      kind: 'cannon-dismount',
+      x: +gWorld[0].toFixed(3),
+      y: +gWorld[1].toFixed(3),
+      z: +gWorld[2].toFixed(3),
+      nx: +worldNormal[0].toFixed(3),
+      ny: +worldNormal[1].toFixed(3),
+      nz: +worldNormal[2].toFixed(3),
+      radius: 1.65,
+      stepDepth: 0.65,
+      severity: 1.15,
+    });
+  };
   if (Array.isArray(bGuns) && bGuns.length > 0) {
     for (const g of bGuns) {
       if (g.dismounted) continue;
-      const distLocal = Math.hypot(
-        (g.localPosition?.[0] ?? 0) - (localPos[0] ?? 0),
-        (g.localPosition?.[1] ?? 0) - (localPos[1] ?? 0),
-        (g.localPosition?.[2] ?? 0) - (localPos[2] ?? 0),
-      );
-      if (distLocal < 1.85 || (isEmbrasure && distLocal < 3.2)) {
-        g.dismounted = true;
-        g.loading = false;
-        g.queued = false;
-        d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
-        dismountedNow = true;
-        const gWorld = buildingLocalToWorld(building, g.localPosition ?? localPos);
-        d.pendingBakes.push({
-          kind: 'cannon-dismount',
-          x: +gWorld[0].toFixed(3),
-          y: +gWorld[1].toFixed(3),
-          z: +gWorld[2].toFixed(3),
-          nx: +worldNormal[0].toFixed(3),
-          ny: +worldNormal[1].toFixed(3),
-          nz: +worldNormal[2].toFixed(3),
-          radius: 1.25,
-          stepDepth: 0.45,
-          severity: 1.05,
-        });
+      const dxL = (g.localPosition?.[0] ?? 0) - (localPos[0] ?? 0);
+      const dyL = (g.localPosition?.[1] ?? 0) - (localPos[1] ?? 0);
+      const dzL = (g.localPosition?.[2] ?? 0) - (localPos[2] ?? 0);
+      const distLocal = Math.hypot(dxL, dyL, dzL);
+      const hDistLocal = Math.hypot(dxL, dzL);
+      if (
+        distLocal < 2.8 ||
+        (isEmbrasure && hDistLocal < 4.5) ||
+        (penetratedOuter && hDistLocal < 4.2 && Math.abs(dyL) < 9.5)
+      ) {
+        dismountGunWithBake(g);
         break;
       }
+    }
+    // Progressive structural attrition also dismounts guns as the fort's ramparts are pounded down
+    const maxSurvivingGuns = d.state === 'ruined' ? 0 : Math.max(0, Math.ceil(bGuns.length * Math.pow(d.integrity, 0.85)));
+    let currentActiveGuns = bGuns.filter((g) => !g.dismounted).length;
+    if (currentActiveGuns > maxSurvivingGuns) {
+      // Dismount the active gun closest horizontally to the impact
+      let closestGun = null;
+      let closestDist = Infinity;
+      for (const g of bGuns) {
+        if (g.dismounted) continue;
+        const hd = Math.hypot((g.localPosition?.[0] ?? 0) - (localPos[0] ?? 0), (g.localPosition?.[2] ?? 0) - (localPos[2] ?? 0));
+        if (hd < closestDist) {
+          closestDist = hd;
+          closestGun = g;
+        }
+      }
+      if (closestGun) dismountGunWithBake(closestGun);
     }
   } else if (isEmbrasure && effectiveEnergy >= 85000) {
     d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
@@ -52632,37 +52692,45 @@ function applyBuildingImpactDamage(building, event) {
       nx: +worldNormal[0].toFixed(3),
       ny: +worldNormal[1].toFixed(3),
       nz: +worldNormal[2].toFixed(3),
-      radius: 1.25,
-      stepDepth: 0.45,
-      severity: 1.05,
+      radius: 1.65,
+      stepDepth: 0.65,
+      severity: 1.15,
     });
   }
 
-  // Hot shot fire ignition:
+  // Hot shot & heavy bombardment fire ignition:
   // - Timber buildings (piers, careening sheds, watchtowers) ignite rapidly with high intensity.
   // - Masonry buildings ignite roof rafters and interior timber floors.
-  // - Fortified stone resists exterior fire unless the hot shot penetrates an embrasure/breach or strikes the parapet/polvorín.
-  if (ammo === 'hot') {
+  // - Fortified stone ignites internal barracks/carriages/stores when penetrated, struck by hot shot, or heavily breached.
+  if (ammo === 'hot' || (penetratedOuter && d.breaches >= 3 && d.fires.length < 3)) {
     const canIgniteStone =
+      ammo === 'hot' ||
       materialClass !== 'fortified-stone' ||
       penetratedOuter ||
       isEmbrasure ||
       dismountedNow ||
       hitPartId?.includes('polvorin') ||
       hitPartId?.includes('citadel') ||
-      (localPos[1] ?? 0) >= (building.height ?? 5) * 0.62;
+      (localPos[1] ?? 0) >= (building.height ?? 5) * 0.45;
     if (canIgniteStone) {
       d.fireCount = (d.fireCount ?? 0) + 1;
-      const baseIgnite = materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.42 : 0.34;
+      const baseIgnite = ammo === 'hot'
+        ? (materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
+        : 0.28;
       const addIntensity = Math.min(1.45, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
+      const fireLocal = [
+        localPos[0] ?? 0,
+        Math.max(1.8, (localPos[1] ?? 0) > 1.0 ? localPos[1] : (building.height ?? 8) * 0.75),
+        localPos[2] ?? 0,
+      ];
       let merged = false;
       for (const f of d.fires) {
         const dist = Math.hypot(
-          (f.localPosition[0] ?? 0) - (localPos[0] ?? 0),
-          (f.localPosition[1] ?? 0) - (localPos[1] ?? 0),
-          (f.localPosition[2] ?? 0) - (localPos[2] ?? 0),
+          (f.localPosition[0] ?? 0) - fireLocal[0],
+          (f.localPosition[1] ?? 0) - fireLocal[1],
+          (f.localPosition[2] ?? 0) - fireLocal[2],
         );
-        if (dist < 4.0) {
+        if (dist < 4.5) {
           f.intensity = Math.min(1.65, +(f.intensity + addIntensity * 0.7).toFixed(3));
           merged = true;
           break;
@@ -52670,7 +52738,7 @@ function applyBuildingImpactDamage(building, event) {
       }
       if (!merged && d.fires.length < 10) {
         d.fires.push({
-          localPosition: [...localPos],
+          localPosition: fireLocal,
           intensity: +addIntensity.toFixed(3),
           age: 0,
           seed: ((d.hits * 0.6180339) % 1) || 0.39,
@@ -52692,12 +52760,15 @@ function applyBuildingImpactDamage(building, event) {
       hitPartId?.includes('polvorin') ||
       hitPartId?.includes('magazine') ||
       event.hitZone === 'magazine' ||
-      (hitPartId?.includes('citadel') && penetratedOuter);
+      (hitPartId?.includes('citadel') && penetratedOuter && (d.breaches >= 3 || ammo === 'hot'));
     const hl = (building.depth ?? building.length ?? 18) * 0.5;
+    const centralStrike = Math.abs(localPos[0] ?? 0) <= (building.width ?? 16) * 0.34;
     const nearPolvorinVault =
-      penetratedOuter &&
-      Math.abs(localPos[0] ?? 0) <= (building.width ?? 16) * 0.24 &&
-      Math.abs((localPos[2] ?? 0) - hl * 0.32) <= Math.max(2.6, hl * 0.28);
+      centralStrike &&
+      d.breaches >= 3 &&
+      ((penetratedOuter && Math.abs((localPos[2] ?? 0) - hl * 0.32) <= Math.max(3.5, hl * 0.35)) ||
+        (penetratedOuter && d.breaches >= 4 && (localPos[1] ?? 0) >= (building.height ?? 8) * 0.35) ||
+        (ammo === 'hot' && (localPos[1] ?? 0) >= (building.height ?? 8) * 0.30));
     if ((isPolvorinPart || nearPolvorinVault) && (penetratedOuter || ammo === 'hot' || event.hitZone === 'magazine')) {
       detonateBuildingMagazine(building, {
         localPos,
@@ -52706,11 +52777,63 @@ function applyBuildingImpactDamage(building, event) {
     }
   }
 
+  // Progressive structural collapse bakes when a fort or building becomes breached or ruined
+  if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
+    d.breachCollapseBaked = true;
+    const collapsePt = buildingLocalToWorld(building, [
+      (localPos[0] ?? 0) * 0.6,
+      (building.height ?? 8) * 0.82,
+      (localPos[2] ?? 0) * 0.6,
+    ]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +collapsePt[0].toFixed(3),
+      y: +collapsePt[1].toFixed(3),
+      z: +collapsePt[2].toFixed(3),
+      radius: +(Math.max(6.5, Math.min(building.width ?? 20, building.depth ?? building.length ?? 20) * 0.45)).toFixed(3),
+      stepDepth: 1.65,
+      severity: 1.15,
+      powderFraction: 0.55,
+    });
+  }
+  const activeGunsLeft = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
+  const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
+  if ((d.state === 'ruined' || (totalGunsCount > 0 && activeGunsLeft === 0 && d.integrity <= 0.45)) && !d.ruinCollapseBaked) {
+    d.ruinCollapseBaked = true;
+    d.silenced = true;
+    if (Array.isArray(bGuns)) {
+      for (const g of bGuns) {
+        g.dismounted = true;
+        g.loading = false;
+        g.queued = false;
+      }
+      d.dismountedGuns = bGuns.length;
+    }
+    const centerCollapsePt = buildingLocalToWorld(building, [0, (building.height ?? 8) * 0.85, 0]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +centerCollapsePt[0].toFixed(3),
+      y: +centerCollapsePt[1].toFixed(3),
+      z: +centerCollapsePt[2].toFixed(3),
+      radius: +(Math.max(10.0, Math.max(building.width ?? 24, building.depth ?? building.length ?? 24) * 0.65)).toFixed(3),
+      stepDepth: 2.35,
+      severity: 1.35,
+      powderFraction: 0.85,
+    });
+  }
+
+  const finalActiveGuns = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
+  if (totalGunsCount > 0 && finalActiveGuns === 0) {
+    d.silenced = true;
+  }
+
   d.revision = (d.revision ?? 0) + 1;
+  const bName = building.label ?? building.prefabId;
   const report = {
     kind: 'building',
     buildingId: building.id,
-    buildingName: building.label ?? building.prefabId,
+    buildingName: bName,
+    targetName: bName,
     prefabId: building.prefabId,
     materialClass,
     ammo,
@@ -52721,6 +52844,9 @@ function applyBuildingImpactDamage(building, event) {
     breaches: d.breaches ?? 0,
     throughBreaches: d.throughBreaches ?? 0,
     dismountedGuns: d.dismountedGuns ?? 0,
+    activeGuns: finalActiveGuns,
+    totalGuns: totalGunsCount,
+    silenced: Boolean(d.silenced || d.state === 'ruined' || d.magazineExploded),
     fires: d.fires.length,
     fireIntensity: +(d.fireIntensity ?? 0).toFixed(2),
     magazineHit: Boolean(d.magazineHit),
@@ -53963,13 +54089,24 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       }
       const terrain=getTerrain();
       const ports=terrain?.ports??(terrain?.port?[terrain.port]:[]);
+      let bestFortLocal=null,bestFortDist=Infinity;
       for(const port of ports){
         for(const inst of (port?.instances??[])){
-          const loc=vesselWorldToLocal(boat,[inst.x??0,(inst.baseY??0)+3.0,inst.z??0]);
+          const groundY=inst.baseY??inst.y??0;
+          const targetY=groundY+(inst.height??8.0)*0.72;
+          const loc=vesselWorldToLocal(boat,[inst.x??0,targetY,inst.z??0]);
           if(loc[0]*sideSign<=1.0)continue;
           const d=Math.hypot(loc[0],loc[2]);
+          const isFort=inst.prefabId==='stone_sea_bastion'||inst.prefabId==='bastion_trace_fortress'||inst.prefabId==='english_triangular_palisade_fort'||Boolean(inst.gunnery?.guns?.length);
+          if(isFort&&inst.damageState?.state!=='ruined'&&d<bestFortDist){
+            bestFortDist=d;bestFortLocal=loc;
+          }
           if(d<bestDist){bestDist=d;bestLocal=loc;}
         }
+      }
+      if(bestFortLocal&&(bestFortDist<=bestDist*1.8||bestFortDist<=520)){
+        bestLocal=bestFortLocal;
+        bestDist=bestFortDist;
       }
       if(!bestLocal)return null;
       // Positive traverse trains toward the bow (-Z in local ship coords)
@@ -53977,7 +54114,8 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       const clampedTrav=+(Math.max(tRange.min,Math.min(tRange.max,rawTravDeg))).toFixed(1);
       const gunSpeed=state.guns[0]?.muzzleSpeed??380;
       const grav=state.gravity??9.81;
-      const ballisticDeg=Math.max(0,(0.5*grav*bestDist/(gunSpeed*gunSpeed))*180/Math.PI*1.12);
+      const dragComp=1+0.0022*bestDist;
+      const ballisticDeg=Math.max(0,(0.5*grav*bestDist/(gunSpeed*gunSpeed))*180/Math.PI*1.12*dragComp);
       const heightDeg=Math.atan2(bestLocal[1]-1.6,bestDist)*180/Math.PI;
       const clampedElev=+(Math.max(eRange.min,Math.min(eRange.max,ballisticDeg+heightDeg))).toFixed(1);
       this.setTraverse(clampedTrav);
@@ -54845,7 +54983,14 @@ function createGunneryControls(parent,gunnery){
       return `Struck ${r.targetName} ${zone} · ${r.energyKj} kJ${extraText}`;
     }
     if(r.kind==='building'){
-      return `Struck ${r.buildingName} · ${Math.round(r.integrity*100)}% integrity (${r.state}) · ${r.energyKj} kJ`;
+      const extras=[];
+      if(r.magazineExploded)extras.push(`💥 POLVORÍN MAGAZINE DETONATED (${r.magazineExplosionYieldMj} MJ)`);
+      if(r.silenced)extras.push('BATTERY SILENCED');
+      else if(r.totalGuns>0)extras.push(`${r.activeGuns}/${r.totalGuns} guns active (${r.dismountedGuns} dismounted)`);
+      if(r.breaches)extras.push(`${r.breaches} breach${r.breaches>1?'es':''}`);
+      if(r.fires)extras.push(`${r.fires} fire${r.fires>1?'s':''} burning`);
+      const extraText=extras.length?` · ${extras.join(' · ')}`:'';
+      return `Struck ${r.buildingName} · ${Math.round(r.integrity*100)}% integrity (${r.state})${extraText} · ${r.energyKj} kJ`;
     }
     if(r.kind==='terrain'){
       return `Shore strike (${r.elevation} m elev) · ${r.craterRadius} m crater · ${r.energyKj} kJ`;
@@ -61114,8 +61259,15 @@ async function main() {
           radiusMetres:Math.max(.18,event.radius*2),closingSpeed:Math.max(0,-event.velocity[1]),velocity:event.velocity,massKg:event.mass,
           age:Math.max(0,ownerBoat.gunnery.time-event.time)});
       }else if(event.type==='impact'){
-        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
-        sceneAudio.impact({x:event.surfacePosition[0],z:event.surfacePosition[2],strength:Math.min(1,Math.cbrt(event.mass/12))});
+        const rep=event.damageReport;
+        const boostMass=rep?.magazineExploded?Math.max(120,event.mass*14):rep?.silenced?Math.max(45,event.mass*4):event.mass;
+        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:boostMass,kind:event.kind});
+        if(rep?.magazineExploded){
+          for(let k=1;k<=3;k++){
+            gunEffects.emitImpact({...event,id:`${shotKey}-mag-${k}`,position:[event.surfacePosition[0]+(k-2)*3.5,event.surfacePosition[1]+k*1.8,event.surfacePosition[2]+((k%2)?2.8:-2.8)],massKg:95,kind:'building'});
+          }
+        }
+        sceneAudio.impact({x:event.surfacePosition[0],z:event.surfacePosition[2],strength:rep?.magazineExploded?1:Math.min(1,Math.cbrt(event.mass/12))});
         gunControls?.update?.();helm?.update?.(performance.now(),true);
       }
     },

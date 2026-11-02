@@ -586,8 +586,14 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       }
       if(gunnery.lastDamageReport?.targetName&&gunnery.lastDamageReport?.energyKj){
         const r=gunnery.lastDamageReport;
-        const casHit=(r.casualtiesKilled||r.casualtiesWounded)?` (-${(r.casualtiesKilled||0)+(r.casualtiesWounded||0)} crew · ${Math.round((r.battleMorale??1)*100)}% morale)`:'';
-        telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Hit ${r.energyKj}kJ${casHit}`;
+        if(r.kind==='building'){
+          const gunTxt=r.totalGuns>0?` · ${r.activeGuns}/${r.totalGuns} guns`:'';
+          const bState=r.magazineExploded?' · 💥 MAGAZINE DETONATED!':r.silenced?' · SILENCED!':` · Fort ${Math.round((r.integrity??1)*100)}%${gunTxt}`;
+          telemTxt+=` · Hit ${r.energyKj}kJ${bState}`;
+        }else{
+          const casHit=(r.casualtiesKilled||r.casualtiesWounded)?` (-${(r.casualtiesKilled||0)+(r.casualtiesWounded||0)} crew · ${Math.round((r.battleMorale??1)*100)}% morale)`:'';
+          telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Hit ${r.energyKj}kJ${casHit}`;
+        }
       }
       if(battleTelemetry.textContent!==telemTxt)battleTelemetry.textContent=telemTxt;
     }

@@ -113,7 +113,14 @@ export function createGunneryControls(parent,gunnery){
       return `Struck ${r.targetName} ${zone} · ${r.energyKj} kJ${extraText}`;
     }
     if(r.kind==='building'){
-      return `Struck ${r.buildingName} · ${Math.round(r.integrity*100)}% integrity (${r.state}) · ${r.energyKj} kJ`;
+      const extras=[];
+      if(r.magazineExploded)extras.push(`💥 POLVORÍN MAGAZINE DETONATED (${r.magazineExplosionYieldMj} MJ)`);
+      if(r.silenced)extras.push('BATTERY SILENCED');
+      else if(r.totalGuns>0)extras.push(`${r.activeGuns}/${r.totalGuns} guns active (${r.dismountedGuns} dismounted)`);
+      if(r.breaches)extras.push(`${r.breaches} breach${r.breaches>1?'es':''}`);
+      if(r.fires)extras.push(`${r.fires} fire${r.fires>1?'s':''} burning`);
+      const extraText=extras.length?` · ${extras.join(' · ')}`:'';
+      return `Struck ${r.buildingName} · ${Math.round(r.integrity*100)}% integrity (${r.state})${extraText} · ${r.energyKj} kJ`;
     }
     if(r.kind==='terrain'){
       return `Shore strike (${r.elevation} m elev) · ${r.craterRadius} m crater · ${r.energyKj} kJ`;

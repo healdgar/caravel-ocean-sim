@@ -1850,10 +1850,11 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     const by = Number(bake.y) || 0;
     const bz = Number(bake.z) || 0;
 
-    if (bake.kind === 'building-explosion') {
-      const blastR = Math.max(8.5, (Number(bake.radius) || 6.5) * 1.5);
-      const stepDepth = Math.max(0.5, Number(bake.stepDepth) || 1.2);
-      const powFrac = Math.max(0.2, Math.min(1.0, Number(bake.powderFraction) || 0.85));
+    if (bake.kind === 'building-explosion' || bake.kind === 'building-collapse') {
+      const isExplosion = bake.kind === 'building-explosion';
+      const blastR = Math.max(12.0, (Number(bake.radius) || 9.5) * 1.65);
+      const stepDepth = Math.max(1.6, Number(bake.stepDepth) || 2.4);
+      const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
       for (let v = 0; v < vertexCount; v++) {
         const at = v * stride;
         const px = mesh[at];
@@ -1862,21 +1863,25 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         const dx = px - bx;
         const dy = py - by;
         const dz = pz - bz;
-        const dist = Math.hypot(dx, dy * 0.75, dz);
+        const dist = Math.hypot(dx, dy * 0.65, dz);
         if (dist >= blastR) continue;
         const t = 1 - dist / blastR;
         const core = t * t;
-        const jag = 0.65 + 0.55 * Math.sin(px * 13.0 + pz * 17.0) * Math.cos(py * 19.0 - px * 11.0);
+        const jag = 0.62 + 0.58 * Math.sin(px * 13.0 + pz * 17.0) * Math.cos(py * 19.0 - px * 11.0);
         const hDist = Math.hypot(dx, dz) || 1;
-        // Upper roof/vault blows outward & collapses into a smoking crater; lower walls blow outward.
-        const heaveY = dy > 0.35 ? -stepDepth * 0.65 * core * jag : stepDepth * 0.38 * core * jag;
-        mesh[at] = px + (dx / hDist) * stepDepth * 0.58 * core * jag;
-        mesh[at + 1] = Math.max(0.05, py + heaveY);
-        mesh[at + 2] = pz + (dz / hDist) * stepDepth * 0.58 * core * jag;
+        // Upper keep/dome/parapet collapses downward into a smoking ruin; walls splay outward into rubble.
+        const aboveBlast = Math.max(0, py - Math.max(1.5, by - 2.0));
+        const collapseDrop = aboveBlast > 0.2
+          ? -Math.min(aboveBlast * 0.72, stepDepth * (isExplosion ? 2.1 : 1.55) * (0.45 + 0.55 * t) * jag)
+          : stepDepth * 0.28 * core * jag;
+        const outPush = stepDepth * (isExplosion ? 1.15 : 0.65) * core * jag;
+        mesh[at] = px + (dx / hDist) * outPush;
+        mesh[at + 1] = Math.max(0.15, py + collapseDrop);
+        mesh[at + 2] = pz + (dz / hDist) * outPush;
         const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
         const curLen = Math.hypot(nx, ny, nz) || 1;
         const prevDmg = Math.max(0, curLen - 1.0);
-        const nextDmg = Math.min(1.45, prevDmg + (0.78 + 0.52 * powFrac) * core);
+        const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
         const scale = 1.0 + nextDmg;
         const ux = nx / curLen + (dx / blastR) * 0.45 * t;
         const uy = ny / curLen + 0.35 * t;
@@ -1886,7 +1891,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
         if (stride >= 8 && (mesh[at + 6] ?? 7) < 19.5) {
-          mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - (0.45 + 0.32 * powFrac) * core));
+          mesh[at + 7] = Math.max(0.18, mesh[at + 7] * (1 - (0.52 + 0.32 * powFrac) * (0.4 + 0.6 * t)));
         }
         if (v < minV) minV = v;
         if (v > maxV) maxV = v;
@@ -1969,9 +1974,9 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       continue;
     }
 
-    const r = Math.max(5.8, (Number(bake.radius) || 1.2) * 4.4);
-    const stepDepth = Math.max(0.14, Number(bake.stepDepth) || 0.34);
-    const severity = Math.max(0.35, Number(bake.severity) || 0.78);
+    const r = Math.max(7.2, (Number(bake.radius) || 1.4) * 5.2);
+    const stepDepth = Math.max(0.85, (Number(bake.stepDepth) || 0.45) * 3.1);
+    const severity = Math.max(0.55, Number(bake.severity) || 0.90);
     const wnx = Number(bake.nx) || 0;
     const wny = Number(bake.ny) || 0;
     const wnz = Number(bake.nz) || 1;
@@ -1990,30 +1995,33 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const dx = px - bx;
       const dy = py - by;
       const dz = pz - bz;
-      const dist = Math.hypot(dx, dy, dz);
+      // Weight vertical distance slightly softer when above the impact point so upper parapet merlons
+      // and crenellations collapse when the scarp wall beneath them is pounded by cannonfire.
+      const effDy = dy > 0 ? dy * 0.55 : dy * 0.9;
+      const dist = Math.hypot(dx, effDy, dz);
       if (dist >= r) continue;
       const rawKind = mesh[at + 6] ?? 7;
       const kind = Math.floor(rawKind);
-      if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.55) continue;
+      if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.68) continue;
 
       const t = 1 - dist / r;
-      const core = t * t;
+      const core = t * 0.45 + t * t * 0.55;
       const jag = isTimber
-        ? 0.65 + 0.62 * Math.sin(py * 31.0 + pz * 19.0) * Math.cos(px * 23.0)
-        : 0.78 + 0.36 * Math.sin(px * 17.0 + py * 23.0 + pz * 13.0);
+        ? 0.65 + 0.68 * Math.sin(py * 31.0 + pz * 19.0) * Math.cos(px * 23.0)
+        : 0.72 + 0.48 * Math.sin(px * 17.0 + py * 23.0 + pz * 13.0);
 
       if (isCannonDismount && (kind === 10 || kind === 14)) {
         const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-        mesh[at] = px + inX * stepDepth * 0.95 * t + inZ * slew * 0.16 * t;
-        mesh[at + 1] = py - 0.18 * t;
-        mesh[at + 2] = pz + inZ * stepDepth * 0.95 * t - inX * slew * 0.16 * t;
+        mesh[at] = px + inX * stepDepth * 1.25 * t + inZ * slew * 0.48 * t;
+        mesh[at + 1] = Math.max(0.2, py - 0.62 * t);
+        mesh[at + 2] = pz + inZ * stepDepth * 1.25 * t - inX * slew * 0.48 * t;
       } else {
         const disp = stepDepth * core * jag;
         const rim = t * (1 - t) * 4.0;
-        const splay = stepDepth * (isTimber ? 0.18 : 0.08) * rim * (jag - 0.75);
-        const topNotch = dy > 0 ? stepDepth * 0.34 * core * jag : 0;
+        const splay = stepDepth * (isTimber ? 0.26 : 0.14) * rim * (jag - 0.72);
+        const topCollapse = dy > -0.5 ? stepDepth * 0.68 * core * jag : stepDepth * 0.22 * core * jag;
         mesh[at] = px + inX * disp + (dist > 1e-4 ? (dx / dist) * splay : 0);
-        mesh[at + 1] = py + inY * disp - topNotch + (dist > 1e-4 ? (dy / dist) * splay : 0);
+        mesh[at + 1] = Math.max(0.12, py + inY * disp - topCollapse + (dist > 1e-4 ? (dy / dist) * splay : 0));
         mesh[at + 2] = pz + inZ * disp + (dist > 1e-4 ? (dz / dist) * splay : 0);
       }
 

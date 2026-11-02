@@ -1057,8 +1057,15 @@ async function main() {
           radiusMetres:Math.max(.18,event.radius*2),closingSpeed:Math.max(0,-event.velocity[1]),velocity:event.velocity,massKg:event.mass,
           age:Math.max(0,ownerBoat.gunnery.time-event.time)});
       }else if(event.type==='impact'){
-        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
-        sceneAudio.impact({x:event.surfacePosition[0],z:event.surfacePosition[2],strength:Math.min(1,Math.cbrt(event.mass/12))});
+        const rep=event.damageReport;
+        const boostMass=rep?.magazineExploded?Math.max(120,event.mass*14):rep?.silenced?Math.max(45,event.mass*4):event.mass;
+        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:boostMass,kind:event.kind});
+        if(rep?.magazineExploded){
+          for(let k=1;k<=3;k++){
+            gunEffects.emitImpact({...event,id:`${shotKey}-mag-${k}`,position:[event.surfacePosition[0]+(k-2)*3.5,event.surfacePosition[1]+k*1.8,event.surfacePosition[2]+((k%2)?2.8:-2.8)],massKg:95,kind:'building'});
+          }
+        }
+        sceneAudio.impact({x:event.surfacePosition[0],z:event.surfacePosition[2],strength:rep?.magazineExploded?1:Math.min(1,Math.cbrt(event.mass/12))});
         gunControls?.update?.();helm?.update?.(performance.now(),true);
       }
     },

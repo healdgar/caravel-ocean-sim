@@ -4988,9 +4988,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 4.8 ? Math.min(6, Math.max(2, Math.round(spanX / 3.8))) : 1;
-    const ny = spanY >= 3.8 ? Math.min(3, Math.max(2, Math.round(spanY / 3.2))) : 1;
-    const nz = spanZ >= 4.8 ? Math.min(6, Math.max(2, Math.round(spanZ / 3.8))) : 1;
+    const nx = spanX >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanX / 3.2))) : 1;
+    const ny = spanY >= 3.2 ? Math.min(5, Math.max(2, Math.round(spanY / 2.6))) : 1;
+    const nz = spanZ >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanZ / 3.2))) : 1;
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
