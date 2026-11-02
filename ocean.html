@@ -5021,7 +5021,1070 @@ function evaluateHullLateral(out,descriptor,state={}){
   return out;
 }
 
+// ---- js/ship-part-taxonomy.js ----
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// Universal Boat Part Taxonomy and Non-Rubberband Archetype Scaling.
+// Classifies every ship mesh group and structural node across all 9 playable
+// archetypes into canonical taxonomy categories and scaling modes:
+//   1. 'fixed-human'       - Ergonomic/human-scaled fittings (wheels, tillers,
+//                            cannons, anchors, hatches, waist boats, oars) that
+//                            preserve fixed physical size around their pivot.
+//   2. 'section-loft'      - Hull and deck structure where midships waist bays
+//                            expand/contract to absorb length changes while bow
+//                            entrance and stern run keep natural aspect ratios.
+//   3. 'proportional-spar' - Masts, yards, spars, and sails that scale height
+//                            from the weather deck while keeping spar sections.
+//   4. 'discrete-modular'  - Masts, sail tiers, gunports/batteries, and oar
+//                            stations that are added or removed in whole units.
+
+
+
+
+
+
+const PART_SCALING_MODES = Object.freeze({
+  'fixed-human': Object.freeze({
+    id: 'fixed-human',
+    code: 1,
+    label: 'Fixed Human / Ergonomic Size',
+    description: 'Remains essentially fixed physical size around its local pivot when the hull scales.',
+  }),
+  'section-loft': Object.freeze({
+    id: 'section-loft',
+    code: 2,
+    label: 'Section-Lofted Hull & Deck',
+    description: 'Midships waist bays expand or contract first while bow entrance and stern run preserve shape.',
+  }),
+  'proportional-spar': Object.freeze({
+    id: 'proportional-spar',
+    code: 3,
+    label: 'Proportional Rig & Spars',
+    description: 'Scales elevation above the weather deck proportionally and prunes discrete masts/tiers.',
+  }),
+  'discrete-modular': Object.freeze({
+    id: 'discrete-modular',
+    code: 4,
+    label: 'Discrete Modular Repeat',
+    description: 'Added or removed in discrete whole units (masts, sail tiers, gunports, oar stations).',
+  }),
+});
+
+const UNIVERSAL_PART_TAXONOMY = Object.freeze({
+  'hull.planking': Object.freeze({
+    id: 'hull.planking',
+    category: 'hull',
+    subAssembly: 'hull-shell',
+    layer: 1,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Outer hull planking, clinker strakes, or dugout shell.',
+  }),
+  'hull.keel': Object.freeze({
+    id: 'hull.keel',
+    category: 'hull',
+    subAssembly: 'keel-backbone',
+    layer: 0,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Longitudinal keel spine and ballast fin.',
+  }),
+  'hull.stem': Object.freeze({
+    id: 'hull.stem',
+    category: 'hull',
+    subAssembly: 'keel-backbone',
+    layer: 0,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Bow stempost, cutwater, knee of the head, and headrails.',
+  }),
+  'hull.sternpost': Object.freeze({
+    id: 'hull.sternpost',
+    category: 'hull',
+    subAssembly: 'keel-backbone',
+    layer: 0,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Aft sternpost and transom frame.',
+  }),
+  'hull.frames': Object.freeze({
+    id: 'hull.frames',
+    category: 'hull',
+    subAssembly: 'keel-backbone',
+    layer: 0,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Transverse hull ribs, futtocks, and deck support beams.',
+  }),
+  'hull.wales': Object.freeze({
+    id: 'hull.wales',
+    category: 'hull',
+    subAssembly: 'hull-shell',
+    layer: 1,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Thickened longitudinal hull wales, gunwales, and copper sheathing.',
+  }),
+  'hull.port-lid': Object.freeze({
+    id: 'hull.port-lid',
+    category: 'hull',
+    subAssembly: 'hull-shell',
+    layer: 1,
+    scalingMode: 'discrete-modular',
+    scalingModeCode: 4,
+    description: 'Hinged gunport lid that seals omitted gunports flush with the hull planking.',
+  }),
+  'deck.weather': Object.freeze({
+    id: 'deck.weather',
+    category: 'deck',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Main weather deck, forecastle, quarterdeck, poop deck, and waterways.',
+  }),
+  'deck.internal': Object.freeze({
+    id: 'deck.internal',
+    category: 'deck',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Internal lower, middle, upper gun decks and orlop platform.',
+  }),
+  'deck.bulkhead': Object.freeze({
+    id: 'deck.bulkhead',
+    category: 'deck',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Transverse cabin and raised-deck bulkheads.',
+  }),
+  'deck.stair': Object.freeze({
+    id: 'deck.stair',
+    category: 'deck',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Companionway ladders and deck stair flights.',
+  }),
+  'deck.hatch-coaming': Object.freeze({
+    id: 'deck.hatch-coaming',
+    category: 'deck',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Structural deck hatch coaming framed into the deck planking.',
+  }),
+  'deck.hatch-cover': Object.freeze({
+    id: 'deck.hatch-cover',
+    category: 'deck',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Hinged hatch cover and grating.',
+  }),
+  'deck.fittings': Object.freeze({
+    id: 'deck.fittings',
+    category: 'fitting',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Capstans, bitts, binnacles, and deck stores.',
+  }),
+  'superstructure.cabin': Object.freeze({
+    id: 'superstructure.cabin',
+    category: 'superstructure',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Deckhouse, coachroof, or quarterdeck cabin trunk.',
+  }),
+  'superstructure.gallery': Object.freeze({
+    id: 'superstructure.gallery',
+    category: 'superstructure',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Stern galleries, quarter badges, and transom windows.',
+  }),
+  'superstructure.bulwark': Object.freeze({
+    id: 'superstructure.bulwark',
+    category: 'superstructure',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Topside bulwark planking, rails, and stanchions.',
+  }),
+  'helm.rudder': Object.freeze({
+    id: 'helm.rudder',
+    category: 'helm',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Pintle-hung stern rudder blade and stock.',
+  }),
+  'helm.tiller': Object.freeze({
+    id: 'helm.tiller',
+    category: 'helm',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Human-gripped tiller spar or steering oar.',
+  }),
+  'helm.wheel': Object.freeze({
+    id: 'helm.wheel',
+    category: 'helm',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Human-scaled ship wheel, spokes, drum, and pedestal.',
+  }),
+  'ordnance.gunport': Object.freeze({
+    id: 'ordnance.gunport',
+    category: 'ordnance',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'discrete-modular',
+    scalingModeCode: 4,
+    description: 'Discrete gunport recess, sill/lintel reveals, and carriage.',
+  }),
+  'ordnance.recoil': Object.freeze({
+    id: 'ordnance.recoil',
+    category: 'ordnance',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Fixed-caliber cannon barrel and recoiling gun assembly.',
+  }),
+  'ground-tackle.anchor': Object.freeze({
+    id: 'ground-tackle.anchor',
+    category: 'ground-tackle',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Cathead and bower/spare anchors.',
+  }),
+  'fitting.boat': Object.freeze({
+    id: 'fitting.boat',
+    category: 'fitting',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Ship launch, cutter, or pinnace stowed on the waist skid beams.',
+  }),
+  'interior.magazine': Object.freeze({
+    id: 'interior.magazine',
+    category: 'interior',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Orlop powder magazines and shot lockers.',
+  }),
+  'propulsion.bench': Object.freeze({
+    id: 'propulsion.bench',
+    category: 'propulsion',
+    subAssembly: 'decks-bulkheads',
+    layer: 2,
+    scalingMode: 'section-loft',
+    scalingModeCode: 2,
+    description: 'Rowing thwarts and benches.',
+  }),
+  'propulsion.oar': Object.freeze({
+    id: 'propulsion.oar',
+    category: 'propulsion',
+    subAssembly: 'superstructure-ordnance',
+    layer: 3,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Discrete human-scaled oar,loom, blade, or paddle.',
+  }),
+  'rig.bowsprit': Object.freeze({
+    id: 'rig.bowsprit',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Bowsprit, jibboom, and flying jibboom.',
+  }),
+  'rig.mast': Object.freeze({
+    id: 'rig.mast',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Stepped vertical mast, topmast, topgallant mast, and fighting top.',
+  }),
+  'rig.lookout': Object.freeze({
+    id: 'rig.lookout',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'fixed-human',
+    scalingModeCode: 1,
+    description: 'Human-scaled crow\'s nest / lookout basket.',
+  }),
+  'rig.yard': Object.freeze({
+    id: 'rig.yard',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Square yard, lateen yard, boom, or gaff spar.',
+  }),
+  'rig.chainwale': Object.freeze({
+    id: 'rig.chainwale',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Channel / chainwale spreading standing shrouds.',
+  }),
+  'rig.standing': Object.freeze({
+    id: 'rig.standing',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Shrouds, ratlines, forestays, backstays, and stay fittings.',
+  }),
+  'rig.running': Object.freeze({
+    id: 'rig.running',
+    category: 'rig',
+    subAssembly: 'rig-masts-spars',
+    layer: 4,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Halyards, sheets, tacks, braces, lifts, and falls.',
+  }),
+  'rig.sail': Object.freeze({
+    id: 'rig.sail',
+    category: 'rig',
+    subAssembly: 'sails-canvas',
+    layer: 5,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Woven sail canvas and bolt-ropes.',
+  }),
+  'rig.flag': Object.freeze({
+    id: 'rig.flag',
+    category: 'rig',
+    subAssembly: 'sails-canvas',
+    layer: 5,
+    scalingMode: 'proportional-spar',
+    scalingModeCode: 3,
+    description: 'Ensign, pennant, or commission flag.',
+  }),
+});
+
+const MAST_INDEX_TO_ID = Object.freeze(['fore', 'main', 'mizzen']);
+
+function inferSailTierFromName(name = '') {
+  const s = String(name).toLowerCase();
+  if (s.includes('skysail')) return 5;
+  if (s.includes('royal') || s.includes('flying-jib')) return 4;
+  if (s.includes('topgallant') || s.includes('outer-jib')) return 3;
+  if (s.includes('topsail') || s.includes('topmast') || s.includes('spritsail')) return 2;
+  return 1;
+}
+
+function inferMastGroupFromName(modelId, rawId = '', nodeId = '') {
+  const combined = `${rawId} ${nodeId}`.toLowerCase();
+  if (combined.includes('fore') && !combined.includes('forecastle')) {
+    if (combined.includes('staysail') || combined.includes('jib') || combined.includes('spritsail')) {
+      return 'fore';
+    }
+    return 'fore';
+  }
+  if (combined.includes('mizzen') || combined.includes('spanker') || combined.includes('crossjack')) {
+    return 'mizzen';
+  }
+  if (combined.includes('main') && !combined.includes('deck.main') && !combined.includes('hatch.main')) {
+    return 'main';
+  }
+  if (combined.includes('jib') || combined.includes('staysail') || combined.includes('spritsail')) {
+    return modelId === 'gipsy-moth-iv' ? 'main' : 'fore';
+  }
+  if (modelId === 'nina') {
+    const m = /^rope\.(\d+)\./.exec(rawId);
+    if (m) {
+      const lineIdx = Number(m[1]);
+      const line = RIG_LINES[lineIdx];
+      if (line && Number.isInteger(line.mast)) {
+        return MAST_INDEX_TO_ID[line.mast] ?? 'main';
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Expand coarse mesh groups into fine-grained virtual child part ranges for
+ * `createPartAssemblyCatalog` without mutating `asset.groups` or `asset.vertices`.
+ * - Splits `victory` lower/middle/upper gunport lids into `gun.lid.<deck>.<side>.<index>`
+ * - Splits `rig.standing` and `rig.running` into per-mast / per-tier sub-parts
+ */
+function expandShipPartGroups(modelId, groups, vertices, indices) {
+  if (!Array.isArray(groups) || groups.length === 0) return groups;
+  const expanded = [...groups];
+
+  if (modelId === 'victory') {
+    // 1. Extract the 3-panel gunport lid (6 triangles = 18 indices) right after each recoil group
+    for (const g of groups) {
+      const m = /^gun\.(lower|middle|upper)\.(port|starboard)\.(\d+)$/.exec(g.id);
+      if (!m) continue;
+      const [, deck, sideName, idxStr] = m;
+      const portIdx = Number(idxStr);
+      const gunId = (sideName === 'port' ? 0 : 44) + portIdx;
+      const recoilGroup = groups.find((x) => x.id === `gunnery.recoil.${gunId}`);
+      if (!recoilGroup) continue;
+      const lidStart = recoilGroup.firstVertex + recoilGroup.vertexCount;
+      const lidCount = 18;
+      if (lidStart + lidCount <= g.firstVertex + g.vertexCount) {
+        expanded.push({
+          id: `gun.lid.${deck}.${sideName}.${portIdx}`,
+          nodeId: 'hull',
+          firstVertex: lidStart,
+          vertexCount: lidCount,
+        });
+      }
+    }
+
+    // 2. Partition `rig.running` by sail mast and tier using `VICTORY_RUNNING_LINES`
+    const runGroup = groups.find((g) => g.id === 'rig.running');
+    if (runGroup && vertices instanceof Float32Array && indices instanceof Uint32Array) {
+      const sailById = new Map(VICTORY_SAILS.map((s) => [s.id, s]));
+      let curKey = null;
+      let segStart = runGroup.firstVertex;
+      for (let i = runGroup.firstVertex; i < runGroup.firstVertex + runGroup.vertexCount; i += 3) {
+        const v0 = indices[i] * 9;
+        const u = vertices[v0 + 7];
+        const lineIdx = Math.max(0, Math.round(u - 100));
+        const line = VICTORY_RUNNING_LINES[lineIdx];
+        const sail = line ? sailById.get(line.sail) : null;
+        const mastId = sail ? (MAST_INDEX_TO_ID[sail.mast] ?? 'main') : 'main';
+        const tier = sail ? inferSailTierFromName(sail.name) : 1;
+        const key = `${mastId}.t${tier}.${lineIdx}`;
+        if (key !== curKey) {
+          if (curKey !== null && i > segStart) {
+            expanded.push({
+              id: `rig.running.${curKey}`,
+              nodeId: 'hull',
+              firstVertex: segStart,
+              vertexCount: i - segStart,
+            });
+          }
+          curKey = key;
+          segStart = i;
+        }
+      }
+      if (curKey !== null && runGroup.firstVertex + runGroup.vertexCount > segStart) {
+        expanded.push({
+          id: `rig.running.${curKey}`,
+          nodeId: 'hull',
+          firstVertex: segStart,
+          vertexCount: runGroup.firstVertex + runGroup.vertexCount - segStart,
+        });
+      }
+    }
+    return expanded;
+  }
+
+  if (modelId === 'pinta' || modelId === 'santa-maria' || modelId === 'flying-cloud' || modelId === 'gipsy-moth-iv') {
+    const ctx =
+      modelId === 'pinta' || modelId === 'santa-maria'
+        ? additionalRigContext(modelId)
+        : laterSailRigContext(modelId);
+    const surfById = new Map(ctx.surfaces.map((s) => [s.id, s]));
+    const mastIdOfLine = (line) => {
+      const surf = surfById.get(line.surface ?? line.a?.surface ?? line.b?.surface);
+      const mIdx = line.mast ?? surf?.mast ?? 0;
+      const mastObj = ctx.masts[mIdx];
+      return mastObj?.id ?? MAST_INDEX_TO_ID[mIdx] ?? 'main';
+    };
+    const tierOfLine = (line) => {
+      const surf = surfById.get(line.surface ?? line.a?.surface ?? line.b?.surface);
+      return surf ? inferSailTierFromName(surf.name) : 1;
+    };
+
+    // 1. Partition `rig.standing`: each static line emits 24 indices
+    const standGroup = groups.find((g) => g.id === 'rig.standing');
+    const staticLines = ctx.lines.filter((l) => l.static);
+    if (standGroup && staticLines.length * 24 === standGroup.vertexCount) {
+      let curMast = null;
+      let segStart = standGroup.firstVertex;
+      let runIdx = 0;
+      for (let l = 0; l < staticLines.length; l++) {
+        const mastId = mastIdOfLine(staticLines[l]);
+        const vAt = standGroup.firstVertex + l * 24;
+        if (mastId !== curMast) {
+          if (curMast !== null && vAt > segStart) {
+            expanded.push({
+              id: `rig.standing.${curMast}.${runIdx++}`,
+              nodeId: 'hull',
+              firstVertex: segStart,
+              vertexCount: vAt - segStart,
+            });
+          }
+          curMast = mastId;
+          segStart = vAt;
+        }
+      }
+      if (curMast !== null && standGroup.firstVertex + standGroup.vertexCount > segStart) {
+        expanded.push({
+          id: `rig.standing.${curMast}.${runIdx++}`,
+          nodeId: 'hull',
+          firstVertex: segStart,
+          vertexCount: standGroup.firstVertex + standGroup.vertexCount - segStart,
+        });
+      }
+    }
+
+    // 2. Partition `rig.running` via `uv.x = 100 + lineIndex`
+    const runGroup = groups.find((g) => g.id === 'rig.running');
+    if (runGroup && vertices instanceof Float32Array && indices instanceof Uint32Array) {
+      let curKey = null;
+      let segStart = runGroup.firstVertex;
+      let chunk = 0;
+      for (let i = runGroup.firstVertex; i < runGroup.firstVertex + runGroup.vertexCount; i += 3) {
+        const v0 = indices[i] * 9;
+        const lineIdx = Math.max(0, Math.round(vertices[v0 + 7] - 100));
+        const line = ctx.lines[lineIdx];
+        const mastId = line ? mastIdOfLine(line) : 'main';
+        const tier = line ? tierOfLine(line) : 1;
+        const key = `${mastId}.t${tier}`;
+        if (key !== curKey) {
+          if (curKey !== null && i > segStart) {
+            expanded.push({
+              id: `rig.running.${curKey}.${chunk++}`,
+              nodeId: 'hull',
+              firstVertex: segStart,
+              vertexCount: i - segStart,
+            });
+          }
+          curKey = key;
+          segStart = i;
+        }
+      }
+      if (curKey !== null && runGroup.firstVertex + runGroup.vertexCount > segStart) {
+        expanded.push({
+          id: `rig.running.${curKey}.${chunk++}`,
+          nodeId: 'hull',
+          firstVertex: segStart,
+          vertexCount: runGroup.firstVertex + runGroup.vertexCount - segStart,
+        });
+      }
+    }
+  }
+
+  return expanded;
+}
+
+/**
+ * Classify a mesh group or structural node into the Universal Boat Part Taxonomy.
+ */
+function classifyShipPartTaxonomy(modelId, groupOrPart) {
+  const id = String(groupOrPart?.id ?? '');
+  const nodeId = String(groupOrPart?.nodeId ?? '');
+  const low = id.toLowerCase();
+
+  let taxonomyKey = 'hull.planking';
+  let batteryDeck = null;
+  let gunId = null;
+  let portSlotKey = null;
+  let isPortLid = false;
+  let portSideSign = 0;
+  let oarStationIndex = null;
+
+  // 1. Gunport lids (Victory modular port sealing)
+  const lidMatch = /^gun\.lid\.(lower|middle|upper)\.(port|starboard)\.(\d+)$/.exec(id);
+  if (lidMatch) {
+    taxonomyKey = 'hull.port-lid';
+    batteryDeck = lidMatch[1];
+    const sideName = lidMatch[2];
+    const portIdx = Number(lidMatch[3]);
+    portSideSign = sideName === 'port' ? -1 : 1;
+    gunId = (sideName === 'port' ? 0 : 44) + portIdx;
+    portSlotKey = `${batteryDeck}:${portIdx}`;
+    isPortLid = true;
+  } else if (low.startsWith('gunnery.recoil.')) {
+    taxonomyKey = 'ordnance.recoil';
+    gunId = Number(id.slice('gunnery.recoil.'.length));
+    if (modelId === 'victory') {
+      if (gunId < 88) {
+        const portIdx = gunId % 44;
+        batteryDeck = portIdx < 15 ? 'lower' : portIdx < 29 ? 'middle' : 'upper';
+        portSlotKey = `${batteryDeck}:${portIdx}`;
+      } else if (gunId < 100) {
+        batteryDeck = 'quarter';
+        portSlotKey = `quarter:${(gunId - 88) % 6}`;
+      } else {
+        batteryDeck = 'forecastle';
+        portSlotKey = `forecastle:${(gunId - 100) % 2}`;
+      }
+    } else {
+      batteryDeck = 'weather';
+      portSlotKey = `weather:${gunId % 2}`;
+    }
+  } else if (low.startsWith('gun.') || low.startsWith('gun:')) {
+    taxonomyKey = 'ordnance.gunport';
+    const vicMatch = /^gun\.(lower|middle|upper|quarter|forecastle)\.(port|starboard)\.(\d+)$/.exec(id);
+    if (vicMatch) {
+      batteryDeck = vicMatch[1];
+      const sideName = vicMatch[2];
+      const idx = Number(vicMatch[3]);
+      portSideSign = sideName === 'port' ? -1 : 1;
+      portSlotKey = `${batteryDeck}:${idx}`;
+      if (batteryDeck === 'lower' || batteryDeck === 'middle' || batteryDeck === 'upper') {
+        gunId = (sideName === 'port' ? 0 : 44) + idx;
+      } else if (batteryDeck === 'quarter') {
+        gunId = 88 + (sideName === 'port' ? 0 : 6) + idx;
+      } else {
+        gunId = 100 + (sideName === 'port' ? 0 : 2) + idx;
+      }
+    } else if (/^gun\.(\d+)$/.test(id)) {
+      gunId = Number(id.slice(4));
+      batteryDeck = 'weather';
+      portSlotKey = `weather:${gunId % 2}`;
+    } else if (id.startsWith('gun:')) {
+      // Nina: gun:-1:3.25, gun:-1:4.9, gun:1:3.25, gun:1:4.9
+      const parts = id.split(':');
+      const side = Number(parts[1]);
+      const z = Number(parts[2]);
+      const slot = z > 4.0 ? 1 : 0;
+      gunId = (side < 0 ? 0 : 2) + slot;
+      batteryDeck = 'weather';
+      portSlotKey = `weather:${slot}`;
+    }
+  } else if (low.startsWith('rowing.propulsor.') || low.startsWith('rowing.station.') || low.startsWith('rowing.port.')) {
+    taxonomyKey = 'propulsion.oar';
+    const m = /\.(\d+)$/.exec(id);
+    if (m) oarStationIndex = Number(m[1]) - 1;
+  } else if (low.startsWith('rowing.benches')) {
+    taxonomyKey = 'propulsion.bench';
+  } else if (low.includes('keel')) {
+    taxonomyKey = 'hull.keel';
+  } else if (low.startsWith('bow.bowsprit')) {
+    taxonomyKey = 'rig.bowsprit';
+  } else if (low.startsWith('bow.')) {
+    taxonomyKey = 'hull.stem';
+  } else if (low.includes('sternpost') || low === 'transom') {
+    taxonomyKey = 'hull.sternpost';
+  } else if (low.includes('frames') || low.startsWith('frames.')) {
+    taxonomyKey = 'hull.frames';
+  } else if (low.includes('wale') && !low.startsWith('chainwale')) {
+    taxonomyKey = 'hull.wales';
+  } else if (low.includes('gunwales') || low.includes('copper') || low.includes('clinker')) {
+    taxonomyKey = 'hull.wales';
+  } else if (low.startsWith('hull')) {
+    taxonomyKey = 'hull.planking';
+  } else if (low.includes('orlop') || low.includes('internal')) {
+    taxonomyKey = 'deck.internal';
+  } else if (low.includes('magazine')) {
+    taxonomyKey = 'interior.magazine';
+  } else if (low.includes('bulkhead')) {
+    taxonomyKey = 'deck.bulkhead';
+  } else if (low.includes('stair')) {
+    taxonomyKey = 'deck.stair';
+  } else if (low.includes('hatch.coaming') || low.includes('hatch.frame')) {
+    taxonomyKey = 'deck.hatch-coaming';
+  } else if (low.startsWith('hatch.')) {
+    taxonomyKey = 'deck.hatch-cover';
+  } else if (low === 'deck.fittings' || low === 'deck.stores' || low === 'deck.fore.bitts') {
+    taxonomyKey = 'deck.fittings';
+  } else if (low.startsWith('deck.')) {
+    taxonomyKey = 'deck.weather';
+  } else if (low === 'cabin' || low.startsWith('structure.')) {
+    taxonomyKey = 'superstructure.cabin';
+  } else if (low.startsWith('stern.')) {
+    taxonomyKey = 'superstructure.gallery';
+  } else if (low.startsWith('bulwark') || low.startsWith('rail.')) {
+    taxonomyKey = 'superstructure.bulwark';
+  } else if (low === 'helm.rudder') {
+    taxonomyKey = 'helm.rudder';
+  } else if (low === 'helm.wheel' || low === 'helm.pedestal') {
+    taxonomyKey = 'helm.wheel';
+  } else if (low.startsWith('helm.')) {
+    taxonomyKey = 'helm.tiller';
+  } else if (low.startsWith('anchor')) {
+    taxonomyKey = 'ground-tackle.anchor';
+  } else if (low.startsWith('boat.waist')) {
+    taxonomyKey = 'fitting.boat';
+  } else if (low.startsWith('lookout.')) {
+    taxonomyKey = 'rig.lookout';
+  } else if (low.startsWith('mast.')) {
+    taxonomyKey = 'rig.mast';
+  } else if (low.startsWith('chainwale.')) {
+    taxonomyKey = 'rig.chainwale';
+  } else if (low.startsWith('yard.') || low.startsWith('spar.')) {
+    taxonomyKey = 'rig.yard';
+  } else if (low.startsWith('sail.')) {
+    taxonomyKey = 'rig.sail';
+  } else if (low.startsWith('flag.')) {
+    taxonomyKey = 'rig.flag';
+  } else if (
+    low.startsWith('rig.standing') ||
+    low.startsWith('fitting.') ||
+    low === 'rig.stay-attachments' ||
+    (low.startsWith('rope.') && (low.includes('shroud') || low.includes('runner') || low.includes('stay')))
+  ) {
+    taxonomyKey = 'rig.standing';
+  } else if (low.startsWith('rig.') || low.startsWith('tackle.') || low.startsWith('rope.')) {
+    taxonomyKey = 'rig.running';
+  }
+
+  const entry = UNIVERSAL_PART_TAXONOMY[taxonomyKey] ?? UNIVERSAL_PART_TAXONOMY['hull.planking'];
+  const mastGroup =
+    entry.category === 'rig' && taxonomyKey !== 'rig.bowsprit' && taxonomyKey !== 'rig.flag'
+      ? inferMastGroupFromName(modelId, id, nodeId)
+      : null;
+
+  let sailTier = null;
+  if (taxonomyKey === 'rig.sail' || taxonomyKey === 'rig.yard' || taxonomyKey === 'rig.running') {
+    const tierMatch = /\.t(\d+)(?:\.|$)/.exec(id);
+    sailTier = tierMatch ? Number(tierMatch[1]) : inferSailTierFromName(id);
+  }
+
+  const isDiscreteModular =
+    entry.scalingMode === 'discrete-modular' ||
+    mastGroup !== null ||
+    gunId !== null ||
+    oarStationIndex !== null;
+
+  return Object.freeze({
+    taxonomyId: entry.id,
+    category: entry.category,
+    scalingMode: entry.scalingMode,
+    scalingModeCode: entry.scalingModeCode,
+    isDiscreteModular,
+    mastGroup,
+    sailTier,
+    batteryDeck,
+    gunId,
+    portSlotKey,
+    isPortLid,
+    portSideSign,
+    oarStationIndex,
+  });
+}
+
+const ARCHETYPE_SCALE_PRESETS = Object.freeze([
+  Object.freeze({
+    id: 'compact',
+    label: 'Compact / Sloop Rate (0.52×)',
+    lengthFactor: 0.52,
+    beamFactor: 0.58,
+  }),
+  Object.freeze({
+    id: 'brig',
+    label: 'Brig / Corvette Rate (0.68×)',
+    lengthFactor: 0.68,
+    beamFactor: 0.74,
+  }),
+  Object.freeze({
+    id: 'frigate',
+    label: 'Frigate / Medium Rate (0.82×)',
+    lengthFactor: 0.82,
+    beamFactor: 0.86,
+  }),
+  Object.freeze({
+    id: 'standard',
+    label: 'Standard Archetype (1.00×)',
+    lengthFactor: 1.0,
+    beamFactor: 1.0,
+  }),
+  Object.freeze({
+    id: 'grand',
+    label: 'Grand Rate / Heavy (1.18×)',
+    lengthFactor: 1.18,
+    beamFactor: 1.12,
+  }),
+]);
+
+const MODEL_DEFAULT_MASTS = Object.freeze({
+  nina: Object.freeze(['fore', 'main', 'mizzen']),
+  pinta: Object.freeze(['fore', 'main', 'mizzen']),
+  'santa-maria': Object.freeze(['fore', 'main', 'mizzen']),
+  'flying-cloud': Object.freeze(['fore', 'main', 'mizzen']),
+  victory: Object.freeze(['fore', 'main', 'mizzen']),
+  'gipsy-moth-iv': Object.freeze(['main', 'mizzen']),
+  oseberg: Object.freeze(['main']),
+  lusoria: Object.freeze(['main']),
+  'taino-canoe': Object.freeze([]),
+});
+
+const MODEL_DECK_REF_Y = Object.freeze({
+  nina: 0.82,
+  pinta: 0.55,
+  'santa-maria': 0.62,
+  'flying-cloud': 0.55,
+  victory: 1.58,
+  'gipsy-moth-iv': 0.55,
+  oseberg: 0.25,
+  lusoria: 0.22,
+  'taino-canoe': 0.15,
+});
+
+const MODEL_DEFAULT_OAR_PAIRS = Object.freeze({
+  oseberg: 15,
+  lusoria: 12,
+  'taino-canoe': 12,
+});
+
+function selectEvenlySpacedIndices(totalCount, keepCount) {
+  if (keepCount <= 0) return [];
+  if (keepCount >= totalCount) return Array.from({ length: totalCount }, (_, i) => i);
+  if (keepCount === 1) return [Math.floor((totalCount - 1) / 2)];
+  const chosen = new Set();
+  for (let k = 0; k < keepCount; k++) {
+    const idx = Math.round((k * (totalCount - 1)) / (keepCount - 1));
+    chosen.add(idx);
+  }
+  return [...chosen].sort((a, b) => a - b);
+}
+
+/**
+ * Compute non-rubberband scaling rules for a given ship archetype and target
+ * dimensions `{ modelId, length, beam }`.
+ */
+function computeArchetypeScaleSpec(boatOrSpec = {}) {
+  const modelId = boatOrSpec?.modelId ?? 'nina';
+  const model = SHIP_MODELS[modelId] ?? SHIP_MODELS.nina;
+  const defaultLength = model.runtime?.length ?? 20;
+  const defaultBeam = model.runtime?.beam ?? 6;
+  const length = Number.isFinite(boatOrSpec?.length) && boatOrSpec.length > 0 ? Number(boatOrSpec.length) : defaultLength;
+  const beam = Number.isFinite(boatOrSpec?.beam) && boatOrSpec.beam > 0 ? Number(boatOrSpec.beam) : defaultBeam;
+
+  const lengthScale = length / defaultLength;
+  const beamScale = beam / defaultBeam;
+  const isDefaultScale = Math.abs(lengthScale - 1.0) < 1e-4 && Math.abs(beamScale - 1.0) < 1e-4;
+
+  // Midships waist absorbs more of the length change than the bow/stern ends
+  const waistWarpK = isDefaultScale
+    ? 0.0
+    : Math.max(-0.12, Math.min(0.14, (lengthScale - 1.0) * 0.18));
+
+  // Rig height above weather deck scales smoothly with hull scale so a short
+  // hull does not carry an impossibly tall full-rate rig
+  const rigHeightScale = isDefaultScale
+    ? 1.0
+    : Math.max(0.48, Math.min(1.42, Math.pow(Math.min(lengthScale, beamScale * 1.15), 0.72)));
+
+  const deckRefY = MODEL_DECK_REF_Y[modelId] ?? 0.65;
+  const defaultMasts = MODEL_DEFAULT_MASTS[modelId] ?? MODEL_DEFAULT_MASTS.nina;
+
+  // 1. Discrete Mast Pruning
+  let activeMasts;
+  if (defaultMasts.length === 3) {
+    if (lengthScale < 0.56) {
+      activeMasts = ['main'];
+    } else if (lengthScale < 0.78) {
+      activeMasts = ['fore', 'main'];
+    } else {
+      activeMasts = ['fore', 'main', 'mizzen'];
+    }
+  } else if (defaultMasts.length === 2) {
+    activeMasts = lengthScale < 0.72 ? ['main'] : ['main', 'mizzen'];
+  } else {
+    activeMasts = [...defaultMasts];
+  }
+  const activeMastSet = new Set(activeMasts);
+
+  // 2. Discrete Sail Tier Pruning
+  let maxSailTier = 5;
+  if (lengthScale < 0.58) maxSailTier = 2;
+  else if (lengthScale < 0.74) maxSailTier = 3;
+  else if (lengthScale < 0.88) maxSailTier = 4;
+
+  // 3. Discrete Gunport & Battery Deck Quantization
+  const activeBatteryDecks = [];
+  const activePortSlotKeys = new Set();
+  const activeGunIds = new Set();
+  let defaultGunCount = 0;
+
+  if (modelId === 'victory') {
+    defaultGunCount = 104;
+    // Battery deck retention by hull scale / rate
+    if (lengthScale >= 0.70) activeBatteryDecks.push('lower');
+    if (lengthScale >= 0.85) activeBatteryDecks.push('middle');
+    activeBatteryDecks.push('upper');
+    if (lengthScale >= 0.58) activeBatteryDecks.push('quarter');
+    if (lengthScale >= 0.64) activeBatteryDecks.push('forecastle');
+
+    const activeDeckSet = new Set(activeBatteryDecks);
+    const deckConfigs = [
+      { id: 'lower', perSide: 15, baseOffset: 0 },
+      { id: 'middle', perSide: 14, baseOffset: 15 },
+      { id: 'upper', perSide: 15, baseOffset: 29 },
+      { id: 'quarter', perSide: 6, baseOffset: 0 },
+      { id: 'forecastle', perSide: 2, baseOffset: 0 },
+    ];
+    for (const cfg of deckConfigs) {
+      if (!activeDeckSet.has(cfg.id)) continue;
+      const minPerSide = cfg.id === 'forecastle' ? 1 : cfg.id === 'quarter' ? 2 : 4;
+      const keepCount = isDefaultScale
+        ? cfg.perSide
+        : Math.max(minPerSide, Math.min(cfg.perSide, Math.round(cfg.perSide * lengthScale)));
+      const localIndices = selectEvenlySpacedIndices(cfg.perSide, keepCount);
+      for (const localIdx of localIndices) {
+        if (cfg.id === 'lower' || cfg.id === 'middle' || cfg.id === 'upper') {
+          const portIdx = cfg.baseOffset + localIdx;
+          activePortSlotKeys.add(`${cfg.id}:${portIdx}`);
+          activeGunIds.add(portIdx);
+          activeGunIds.add(44 + portIdx);
+        } else if (cfg.id === 'quarter') {
+          activePortSlotKeys.add(`quarter:${localIdx}`);
+          activeGunIds.add(88 + localIdx);
+          activeGunIds.add(88 + 6 + localIdx);
+        } else if (cfg.id === 'forecastle') {
+          activePortSlotKeys.add(`forecastle:${localIdx}`);
+          activeGunIds.add(100 + localIdx);
+          activeGunIds.add(100 + 2 + localIdx);
+        }
+      }
+    }
+  } else if (modelId === 'nina' || modelId === 'pinta' || modelId === 'santa-maria') {
+    defaultGunCount = 4;
+    activeBatteryDecks.push('weather');
+    const keepPerSide = lengthScale < 0.65 ? 1 : 2;
+    const slots = keepPerSide === 1 ? [0] : [0, 1];
+    for (const s of slots) {
+      activePortSlotKeys.add(`weather:${s}`);
+      activeGunIds.add(s);
+      activeGunIds.add(2 + s);
+    }
+  }
+
+  // 4. Discrete Oar / Paddle Station Quantization
+  const defaultOarPairs = MODEL_DEFAULT_OAR_PAIRS[modelId] ?? 0;
+  const activeOarPairs =
+    defaultOarPairs > 0
+      ? isDefaultScale
+        ? defaultOarPairs
+        : Math.max(3, Math.min(defaultOarPairs, Math.round(defaultOarPairs * lengthScale)))
+      : 0;
+  const activeOarIndices = new Set(selectEvenlySpacedIndices(defaultOarPairs, activeOarPairs));
+
+  // 5. Effective Sail Area & Propulsion Scaling Factor
+  const mastRatio = defaultMasts.length > 0 ? activeMasts.length / defaultMasts.length : 1;
+  const tierRatio = maxSailTier >= 4 ? 1.0 : maxSailTier === 3 ? 0.88 : 0.74;
+  const sailAreaFactor = isDefaultScale
+    ? 1.0
+    : Math.max(0.22, Math.min(1.65, mastRatio * tierRatio * rigHeightScale * Math.pow(lengthScale, 0.65)));
+
+  // 6. Rate / Variant Classification Label
+  const activeGunCount = activeGunIds.size;
+  let variantClass = model.name;
+  if (modelId === 'victory') {
+    if (activeMasts.length === 1) variantClass = `Sloop-of-War (${activeGunCount} guns)`;
+    else if (activeMasts.length === 2) variantClass = `Brig-Corvette (${activeGunCount} guns)`;
+    else if (activeBatteryDecks.length <= 3 && !activeBatteryDecks.includes('lower')) {
+      variantClass = `Fifth-Rate Frigate (${activeGunCount} guns)`;
+    } else if (!activeBatteryDecks.includes('middle')) {
+      variantClass = `Third-Rate Two-Decker (${activeGunCount} guns)`;
+    } else if (lengthScale > 1.08) {
+      variantClass = `Grand First-Rate (${activeGunCount} guns)`;
+    } else {
+      variantClass = `First-Rate (${activeGunCount} guns)`;
+    }
+  } else if (defaultMasts.length >= 2) {
+    if (activeMasts.length === 1) variantClass = `${model.name} Cutter/Sloop (1 mast)`;
+    else if (activeMasts.length === 2 && defaultMasts.length === 3) variantClass = `${model.name} Brigantine (2 masts)`;
+    else variantClass = `${model.name} (${activeMasts.length} masts)`;
+  } else if (defaultOarPairs > 0) {
+    variantClass = `${model.name} (${activeOarPairs * 2} oars)`;
+  }
+
+  const mastSummary = defaultMasts.length > 0 ? `${activeMasts.length}/${defaultMasts.length} masts` : 'unmasted';
+  const gunSummary = defaultGunCount > 0 ? `${activeGunCount}/${defaultGunCount} guns` : null;
+  const oarSummary = defaultOarPairs > 0 ? `${activeOarPairs * 2}/${defaultOarPairs * 2} oars` : null;
+  const summaryLabel = [variantClass, mastSummary, gunSummary, oarSummary].filter(Boolean).join(' · ');
+
+  return Object.freeze({
+    modelId,
+    defaultLength,
+    defaultBeam,
+    length,
+    beam,
+    lengthScale,
+    beamScale,
+    isDefaultScale,
+    waistWarpK,
+    rigHeightScale,
+    deckRefY,
+    defaultMasts,
+    activeMasts: Object.freeze(activeMasts),
+    activeMastSet,
+    maxSailTier,
+    activeBatteryDecks: Object.freeze(activeBatteryDecks),
+    activePortSlotKeys,
+    activeGunIds,
+    activeGunCount,
+    defaultGunCount,
+    defaultOarPairs,
+    activeOarPairs,
+    activeOarIndices,
+    sailAreaFactor,
+    variantClass,
+    summaryLabel,
+  });
+}
+
+/**
+ * Determine whether a taxonomy-classified part is active or sealed under a
+ * given `scaleSpec`.
+ * Returns `{ active: boolean, sealPortLid: boolean }`.
+ */
+function evaluatePartScaleActivity(partTaxonomy, scaleSpec) {
+  if (!partTaxonomy || !scaleSpec || scaleSpec.isDefaultScale) {
+    return { active: true, sealPortLid: false };
+  }
+  if (partTaxonomy.mastGroup && !scaleSpec.activeMastSet.has(partTaxonomy.mastGroup)) {
+    return { active: false, sealPortLid: false };
+  }
+  if (partTaxonomy.sailTier !== null && partTaxonomy.sailTier > scaleSpec.maxSailTier) {
+    return { active: false, sealPortLid: false };
+  }
+  if (partTaxonomy.isPortLid) {
+    const portActive = partTaxonomy.portSlotKey
+      ? scaleSpec.activePortSlotKeys.has(partTaxonomy.portSlotKey)
+      : true;
+    return { active: true, sealPortLid: !portActive };
+  }
+  if (partTaxonomy.portSlotKey !== null) {
+    const portActive = scaleSpec.activePortSlotKeys.has(partTaxonomy.portSlotKey);
+    return { active: portActive, sealPortLid: false };
+  }
+  if (partTaxonomy.gunId !== null && scaleSpec.defaultGunCount > 0) {
+    return { active: scaleSpec.activeGunIds.has(partTaxonomy.gunId), sealPortLid: false };
+  }
+  if (partTaxonomy.oarStationIndex !== null && scaleSpec.defaultOarPairs > 0) {
+    return { active: scaleSpec.activeOarIndices.has(partTaxonomy.oarStationIndex), sealPortLid: false };
+  }
+  return { active: true, sealPortLid: false };
+}
+
 // ---- js/boat.js ----
+
 
 
 
@@ -5413,7 +6476,9 @@ function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0) {
   const externalSide=externalX*Math.cos(heading)+externalZ*Math.sin(heading);
   const initial = boatForwardSpeed(boat);
   const attitude=boat.waveAttitude ?? boat.target ?? {roll:0,pitch:0};
-  const sailDriveScale=(modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor;
+  const scaleSpec=computeArchetypeScaleSpec(boat);
+  const archetypeSailScale=scaleSpec.isDefaultScale?1:scaleSpec.sailAreaFactor;
+  const sailDriveScale=(modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor*archetypeSailScale;
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
@@ -5534,18 +6599,25 @@ function helmDesignStation(boat){
 
 function crowsNestDesignStation(boat = {}) {
   const modelId = boat.modelId ?? 'nina';
+  const scaleSpec = computeArchetypeScaleSpec(boat);
+  const rigHeightScale = scaleSpec.isDefaultScale ? 1 : scaleSpec.rigHeightScale;
   if (modelId === 'victory') {
     const mainMast = VICTORY_MASTS[1];
     const y = 10.25;
     const [, , z] = victoryMastPoint(1, y);
     const [, headY, headZ] = victoryMastPoint(1, mainMast.height);
+    const sy = vesselVerticalScale(boat);
+    const eyeY = 12.62;
+    const [, , eyeMastZ] = victoryMastPoint(1, eyeY);
     return {
       x: 0,
       y,
       z,
       headY,
       headZ,
-      eyeHeight: 11.2,
+      eyeX: 0,
+      eyeZ: eyeMastZ - 0.32,
+      eyeHeight: eyeY * sy * rigHeightScale,
       pennantLift: headY - y,
       showBasket: 0,
       showPennant: 1,
@@ -5561,6 +6633,8 @@ function crowsNestDesignStation(boat = {}) {
       z: 0,
       headY: deckY + 1.0,
       headZ: 0,
+      eyeX: 0,
+      eyeZ: -0.35,
       eyeHeight: (deckY + 1.5) * sy,
       pennantLift: 0,
       showBasket: 0,
@@ -5584,7 +6658,7 @@ function crowsNestDesignStation(boat = {}) {
     );
     let y = headY * 0.86;
     if (modelId === 'flying-cloud') {
-      y = deckY + (headY - deckY) * 0.47;
+      y = 8.48;
     } else if (mastSurfaces.length >= 2) {
       const sorted = [...mastSurfaces].sort((a, b) => a.corners[0][1] - b.corners[0][1]);
       const lowerHeadY = sorted[0].corners[0][1];
@@ -5596,13 +6670,25 @@ function crowsNestDesignStation(boat = {}) {
     const headZ = (tallest.z ?? 0) + (tallest.rake ?? 0);
     const sy = additional.frame?.verticalScale ?? 0.8;
     const showBasket = modelId === 'pinta' || modelId === 'santa-maria' ? 1 : 0;
+    let eyeY = y + 0.88;
+    if (modelId === 'santa-maria') {
+      eyeY = 10.46;
+    } else if (modelId === 'flying-cloud') {
+      eyeY = 8.68;
+    } else if (modelId === 'gipsy-moth-iv') {
+      eyeY = 10.48;
+    }
+    const eyeT = Math.max(0, Math.min(1, (eyeY - deckY) / Math.max(0.5, headY - deckY)));
+    const eyeMastZ = (tallest.z ?? 0) + (tallest.rake ?? 0) * eyeT;
     return {
       x: 0,
       y,
       z,
       headY,
       headZ,
-      eyeHeight: (y + 0.95) * sy,
+      eyeX: 0,
+      eyeZ: eyeMastZ - 0.34,
+      eyeHeight: eyeY * sy * rigHeightScale,
       pennantLift: Math.max(0.45, headY - y),
       showBasket,
       showPennant: 1,
@@ -5610,18 +6696,23 @@ function crowsNestDesignStation(boat = {}) {
   }
   const sy = vesselVerticalScale(boat);
   const lengthScale = Math.max(0.85, Math.min(1.45, (boat.length || 20) / 20));
-  const y = 7.75;
-  const [, , z] = mastPoint(0, y);
-  const [, headY, headZ] = mastPoint(0, RIG_MASTS[0].height);
+  const mastIdx = !scaleSpec.isDefaultScale && !scaleSpec.activeMasts.includes('fore') ? 1 : 0;
+  const y = mastIdx === 1 ? 6.8 : 7.75;
+  const [, , z] = mastPoint(mastIdx, y);
+  const [, headY, headZ] = mastPoint(mastIdx, RIG_MASTS[mastIdx].height);
+  const eyeY = y + 0.88;
+  const [, , eyeMastZ] = mastPoint(mastIdx, eyeY);
   return {
     x: 0,
     y,
     z,
     headY,
     headZ,
-    eyeHeight: (y + 0.95) * sy * lengthScale,
+    eyeX: 0,
+    eyeZ: eyeMastZ - 0.34,
+    eyeHeight: eyeY * sy * lengthScale,
     pennantLift: headY - y,
-    showBasket: 1,
+    showBasket: mastIdx === 0 ? 1 : 0,
     showPennant: 1,
   };
 }
@@ -5734,9 +6825,9 @@ function boatEyePosition(out, boat) {
     const cn = crowsNestDesignStation(boat);
     boatRotate(
       out,
-      cn.x * (boat.beam || 3.6) / 3.6,
+      (cn.eyeX ?? cn.x) * (boat.beam || 3.6) / 3.6,
       cn.eyeHeight,
-      cn.z * (boat.length || 12) / 12,
+      (cn.eyeZ ?? cn.z) * (boat.length || 12) / 12,
       (boat.heading || 0) * Math.PI / 180,
       boat.pitch || 0,
       boat.roll || 0,
@@ -5843,7 +6934,7 @@ function prepareGunnery(state,side){
   side=gunnerySide(side);if(!side)return 0;
   let count=0;
   for(const gun of state.guns){
-    if(gun.side!==side||gun.loading||gun.stage==='ready'||gun.queued)continue;
+    if(gun.disabledByScale||gun.side!==side||gun.loading||gun.stage==='ready'||gun.queued)continue;
     gun.loading=true;gun.lastBlocked=null;count++;
     if(gun.stage!=='recoil'){gun.stage='swab';gun.elapsed=0;gun.progress=0;gun.offset=gun.recoilLength;gun.recoil=0;}
   }
@@ -5854,7 +6945,7 @@ function prepareGunnery(state,side){
 // is authored, representing independent gun captains firing a rolling broadside.
 function fireGunnery(state,side,{interval=.14,ammo=null}={}){
   side=gunnerySide(side);if(!side)return 0;
-  const ready=state.guns.filter(g=>g.side===side&&g.stage==='ready'&&!g.queued);
+  const ready=state.guns.filter(g=>!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued);
   interval=gunneryClamp(gunneryFinite(interval,.14),.04,.6);
   const shotAmmo=GUNNERY_AMMO_TYPES.includes(ammo)?ammo:(state.ammo??'round');
   ready.forEach((gun,i)=>{gun.queued=true;gun.lastBlocked=null;state.queue.push({gun,time:state.time+i*interval,ammo:shotAmmo});});
@@ -5865,7 +6956,7 @@ function gunnerySummary(state,side){
   const wanted=gunnerySide(side);
   let total=0,ready=0,queued=0,loading=0,spent=0;
   for(const g of state.guns){
-    if(wanted&&g.side!==wanted)continue;
+    if(g.disabledByScale||(wanted&&g.side!==wanted))continue;
     total++;
     if(g.stage==='ready'&&!g.queued)ready++;
     if(g.queued)queued++;
@@ -5881,6 +6972,7 @@ function gunneryEmit(state,environment,event){
   environment.onEvent?.(event);
 }
 function gunneryAdvanceGun(state,gun,dt,time,environment){
+  if(gun.disabledByScale)return;
   if(gun.stage==='recoil'){
     const previous=gun.elapsed;gun.elapsed=Math.min(gun.recoilDuration,gun.elapsed+dt);gun.progress=gun.elapsed/gun.recoilDuration;
     // Fast initial movement followed by arrest by the breeching. No repeated
@@ -5922,7 +7014,7 @@ function gunneryWaterHeight(environment,x,z,time){
 function gunneryFireQueued(state,environment,end){
   while(state.queue.length&&state.queue[0].time<=end+1e-10){
     const queued=state.queue.shift(),gun=queued.gun;gun.queued=false;
-    if(gun.stage!=='ready')continue;
+    if(gun.disabledByScale||gun.stage!=='ready')continue;
     let blocked=state.projectiles.length>=state.maxProjectiles?'capacity':null;
     const muzzle=environment.muzzle?.(gun,queued.time);
     const position=gunneryVector(muzzle?.position,[NaN,NaN,NaN]);
@@ -7546,13 +8638,16 @@ const VESSEL_SURFACE_POSE_UPDATE=GPU_RIG_SURFACES+/* wgsl */ `
 // ---- js/wgsl/part-assembly.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Shared GPU vertex/compute deformation and surface state for part-by-part
-// procedural assembly, exploded views, structural cutaways and per-part wear.
+// procedural assembly, exploded views, structural cutaways, per-part wear,
+// and non-rubberband universal boat part taxonomy scaling.
 
 const PART_ASSEMBLY_WGSL = /* wgsl */ `
 struct PartAssemblyUniform {
   control:vec4f,
   params:vec4f,
   impacts:array<vec4f,24>,
+  scale:vec4f,
+  section:vec4f,
 };
 struct PartEvaluatedVertex {
   position:vec3f,
@@ -7562,6 +8657,10 @@ struct PartEvaluatedVertex {
   cutawayAlpha:f32,
   visible:f32,
 };
+fn warpShipSectionZ(z:f32,kWaist:f32)->f32 {
+  let uZ=clamp(z/6.0,-1.0,1.0);
+  return z+kWaist*z*(1.0-uZ*uZ);
+}
 fn evaluatePartAssemblyVertex(
   position:vec3f,
   normal:vec3f,
@@ -7577,9 +8676,13 @@ fn evaluatePartAssemblyVertex(
   let appearStart=desc0.x;
   let appearEnd=max(appearStart+0.001,desc0.y);
   let layer=desc0.z;
+  let descFlags=u32(max(0.0,round(desc0.w)));
+  let scalingMode=(descFlags/16u)&7u;
   let cutawaySide=desc1.w;
+  let sealPortLid=state.x<-0.5;
+  let rawStateAppear=select(state.x,1.0,sealPortLid);
   let windowAppear=smoothstep(appearStart,appearEnd,clamp(u.control.x,0.0,1.0));
-  let appear=clamp(min(windowAppear,state.x),0.0,1.0);
+  let appear=clamp(min(windowAppear,rawStateAppear),0.0,1.0);
   let explode=max(0.0,u.control.y+state.y);
   let wearAndDamage=clamp(u.params.z+state.z,0.0,1.0);
   var cutawayVis=clamp(state.w,0.0,1.0);
@@ -7600,12 +8703,45 @@ fn evaluatePartAssemblyVertex(
   if(appear<=0.0001 || (cutawayVis<=0.0001 && u.params.w<=0.001)){
     return PartEvaluatedVertex(pivot,normal,0.0,wearAndDamage,0.0,0.0);
   }
+  var workPos=position;
+  var workNorm=normal;
+  var effPivot=pivot;
+  if(sealPortLid){
+    let sideSign=select(1.0,-1.0,pivot.x<0.0);
+    if(workPos.y>pivot.y){
+      workPos+=vec3f(-sideSign*0.18,-0.303,0.0);
+    }else{
+      workPos.x-=sideSign*0.004;
+    }
+    workNorm=vec3f(sideSign,0.0,0.0);
+  }
+  if(u.scale.w>0.5){
+    let kWaist=u.section.x;
+    let deckRefY=u.section.y;
+    let rigHScale=u.scale.y;
+    let invRelX=u.section.z;
+    let invRelZ=u.section.w;
+    effPivot.z=warpShipSectionZ(pivot.z,kWaist);
+    if(layer>=3.5 && workPos.y>deckRefY){
+      effPivot.y=deckRefY+(pivot.y-deckRefY)*rigHScale;
+    }
+    if(scalingMode==1u){
+      workPos.x=effPivot.x+(workPos.x-pivot.x)*invRelX;
+      workPos.y=effPivot.y+(workPos.y-pivot.y)*invRelX;
+      workPos.z=effPivot.z+(workPos.z-pivot.z)*invRelZ;
+    }else{
+      workPos.z=warpShipSectionZ(workPos.z,kWaist);
+      if(layer>=3.5 && workPos.y>deckRefY){
+        workPos.y=deckRefY+(workPos.y-deckRefY)*rigHScale;
+      }
+    }
+  }
   let flyIn=1.0-appear;
   let scaleIn=smoothstep(0.0,0.28,appear);
   let arcLift=sin(appear*3.14159265)*flyIn*u.params.y;
   let displacement=explodedOffset*(explode+flyIn*u.params.x)+vec3f(0.0,arcLift,0.0);
-  let posedPos=pivot+(position-pivot)*scaleIn+displacement;
-  return PartEvaluatedVertex(posedPos,normal,appear,wearAndDamage,cutawayVis,1.0);
+  let posedPos=effPivot+(workPos-effPivot)*scaleIn+displacement;
+  return PartEvaluatedVertex(posedPos,workNorm,appear,wearAndDamage,cutawayVis,1.0);
 }
 fn applyPartSurfaceState(albedo:vec3f,roughness:f32,wearAndDamage:f32,cutawayAlpha:f32)->vec4f {
   let w=clamp(wearAndDamage,0.0,1.0);
@@ -17181,6 +18317,8 @@ function anchorRodePoints(state,boat,segments=48) {
 
 
 
+
+
 const SHIP_SUB_ASSEMBLIES = Object.freeze([
   Object.freeze({ id: 'keel-and-frame', index: 0, layer: 0, label: 'Keel, Stem, Sternpost & Frames' }),
   Object.freeze({ id: 'decks-and-interior', index: 1, layer: 1, label: 'Decks, Bulkheads, Stairs & Hold' }),
@@ -17501,9 +18639,10 @@ function createPartAssemblyCatalog({
   const taxonomy = domain === 'building' ? BUILDING_SUB_ASSEMBLIES : SHIP_SUB_ASSEMBLIES;
 
   // Normalize group index ranges (groups in ships use firstVertex/vertexCount in raw stream = index offsets)
+  const sourceGroups = domain === 'ship' ? expandShipPartGroups(modelId, groups, vertices, indices) : groups;
   const rawRanges = [];
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
+  for (let i = 0; i < sourceGroups.length; i++) {
+    const g = sourceGroups[i];
     const firstIndex = Number.isInteger(g.firstIndex) ? g.firstIndex : (g.firstVertex ?? 0);
     const count = Number.isInteger(g.indexCount) ? g.indexCount : (g.vertexCount ?? 0);
     const clampedFirst = Math.max(0, Math.min(indexCount, firstIndex));
@@ -17663,6 +18802,7 @@ function createPartAssemblyCatalog({
       domain === 'building'
         ? partAssemblyClassifyBuilding(g, bounds)
         : partAssemblyClassifyShip(g, bounds);
+    const shipTaxonomy = domain === 'ship' ? classifyShipPartTaxonomy(modelId, g) : null;
     const explicitPivot = Array.isArray(g.pivot)
       ? g.pivot
       : Array.isArray(g.motion?.pivot)
@@ -17670,9 +18810,11 @@ function createPartAssemblyCatalog({
         : Array.isArray(g.motion?.point)
           ? g.motion.point
           : null;
-    const pivot = explicitPivot
-      ? [explicitPivot[0], explicitPivot[1], explicitPivot[2]]
-      : [centroid[0], classification.layer === 0 ? centroid[1] : min[1], centroid[2]];
+    const pivot = shipTaxonomy?.isPortLid
+      ? [centroid[0], centroid[1], centroid[2]]
+      : explicitPivot
+        ? [explicitPivot[0], explicitPivot[1], explicitPivot[2]]
+        : [centroid[0], classification.layer === 0 ? centroid[1] : min[1], centroid[2]];
     const explodedOffset = partAssemblyComputeExplodedOffset(
       domain,
       classification.subAssemblyIndex,
@@ -17696,6 +18838,9 @@ function createPartAssemblyCatalog({
       triangleCount: leafTriCounts[p],
       totalTriangleCount: Math.floor(r.span / 3),
       ...classification,
+      taxonomy: shipTaxonomy,
+      scalingMode: shipTaxonomy?.scalingMode ?? 'section-loft',
+      scalingModeCode: shipTaxonomy?.scalingModeCode ?? 2,
       variantMask: g.variantMask ?? variantMask,
       bounds: { min: Object.freeze(min), max: Object.freeze(max) },
       centroid: Object.freeze(centroid),
@@ -17756,16 +18901,17 @@ function createPartAssemblyCatalog({
   }
 
   // Build GPU-ready per-part descriptor table (2 vec4f = 8 floats per part)
-  // desc0: [appearStart, appearEnd, layer, subAssemblyIndex]
+  // desc0: [appearStart, appearEnd, layer, subAssemblyIndex + scalingModeCode*16 + isPortLid*128]
   // desc1: [pivot.x, pivot.y, pivot.z, cutawaySide]
   const partDescriptors = new Float32Array(partCount * 8);
   for (let p = 0; p < partCount; p++) {
     const part = parts[p];
     const base = p * 8;
+    const modeBits = (part.scalingModeCode ?? 2) * 16 + (part.taxonomy?.isPortLid ? 128 : 0);
     partDescriptors[base + 0] = part.assemblyWindow[0];
     partDescriptors[base + 1] = part.assemblyWindow[1];
     partDescriptors[base + 2] = part.layer;
-    partDescriptors[base + 3] = part.subAssemblyIndex;
+    partDescriptors[base + 3] = part.subAssemblyIndex + modeBits;
     partDescriptors[base + 4] = part.pivot[0];
     partDescriptors[base + 5] = part.pivot[1];
     partDescriptors[base + 6] = part.pivot[2];
@@ -17881,13 +19027,22 @@ function createPartAssemblyState(catalog, options = {}) {
   let revision = 0;
   let hasPartOverrides = false;
   let hasImpactSites = false;
+  let hasScaleOverrides = false;
+  let currentScaleSpec = null;
   const impactSites = new Float32Array(24 * 4);
+  // scale: [relX, rigHeightScale, relZ, scaleActive], section: [waistWarpK, deckRefY, invRelX, invRelZ]
+  const scaleUniform = new Float32Array([1, 1, 1, 0, 0, 0.65, 1, 1]);
+
+  const warpSectionZ = (z, kWaist) => {
+    const uZ = Math.max(-1, Math.min(1, z / 6.0));
+    return z + kWaist * z * (1.0 - uZ * uZ);
+  };
 
   const resolvePartIndex = (partIdOrNumber) => {
     if (typeof partIdOrNumber === 'number') {
       return partIdOrNumber >= 0 && partIdOrNumber < partCount ? partIdOrNumber : -1;
     }
-    const found = catalog.partsById[partIdOrNumber];
+    const found = catalog.partsById[partIdOrNumber] ?? catalog.parts.find((p) => p.nodeId === partIdOrNumber);
     return found ? found.partNumber : -1;
   };
 
@@ -17896,6 +19051,10 @@ function createPartAssemblyState(catalog, options = {}) {
     partState,
     uniform,
     impactSites,
+    scaleUniform,
+    get scaleSpec() {
+      return currentScaleSpec;
+    },
     get revision() {
       return revision;
     },
@@ -17903,6 +19062,7 @@ function createPartAssemblyState(catalog, options = {}) {
       return (
         !hasPartOverrides &&
         !hasImpactSites &&
+        !hasScaleOverrides &&
         Math.abs(uniform[0] - 1.0) < 1e-6 &&
         Math.abs(uniform[1]) < 1e-6 &&
         (Math.abs(uniform[2]) < 1e-6 || uniform[3] === 0) &&
@@ -18004,20 +19164,57 @@ function createPartAssemblyState(catalog, options = {}) {
         partState[p * 4 + 3] = 1.0;
       }
       impactSites.fill(0);
+      scaleUniform.set([1, 1, 1, 0, 0, 0.65, 1, 1]);
+      currentScaleSpec = null;
       hasPartOverrides = false;
       hasImpactSites = false;
+      hasScaleOverrides = false;
       revision++;
       return state;
     },
-    syncVesselDamage(damage) {
+    syncVesselScale(boatOrSpec) {
+      state.syncVesselDamage(boatOrSpec?.damage ?? null, boatOrSpec);
+      return currentScaleSpec;
+    },
+    syncVesselDamage(damage, boatOrSpec = null) {
       const partDamage = damage?.partDamage ?? null;
       const sites = Array.isArray(damage?.impactSites) ? damage.impactSites : null;
       const hasAnyPartDamage = partDamage && Object.keys(partDamage).length > 0;
       const hasAnySites = sites && sites.length > 0;
-      if (!hasAnyPartDamage && !hasAnySites && !hasPartOverrides && !hasImpactSites) {
+      const spec =
+        catalog.domain === 'ship' && boatOrSpec
+          ? computeArchetypeScaleSpec({
+              modelId: catalog.modelId,
+              length: boatOrSpec.length,
+              beam: boatOrSpec.beam,
+            })
+          : currentScaleSpec;
+      currentScaleSpec = spec;
+      const isScaled = Boolean(spec && !spec.isDefaultScale);
+      if (!hasAnyPartDamage && !hasAnySites && !isScaled && !hasPartOverrides && !hasImpactSites && !hasScaleOverrides) {
         return false;
       }
       let changed = false;
+      const nextScaleU = isScaled
+        ? [
+            spec.beamScale,
+            spec.rigHeightScale,
+            spec.lengthScale,
+            1.0,
+            spec.waistWarpK,
+            spec.deckRefY,
+            Math.max(0.62, Math.min(1.55, 1.0 / spec.beamScale)),
+            Math.max(0.62, Math.min(1.55, 1.0 / spec.lengthScale)),
+          ]
+        : [1, 1, 1, 0, 0, 0.65, 1, 1];
+      for (let i = 0; i < 8; i++) {
+        if (Math.abs(scaleUniform[i] - nextScaleU[i]) > 1e-5) {
+          scaleUniform[i] = nextScaleU[i];
+          changed = true;
+        }
+      }
+      hasScaleOverrides = isScaled;
+
       let anyOverrides = false;
       for (let p = 0; p < partCount; p++) {
         const part = catalog.parts[p];
@@ -18044,7 +19241,15 @@ function createPartAssemblyState(catalog, options = {}) {
           !part.id.startsWith('gun') &&
           !part.id.startsWith('helm') &&
           !part.id.startsWith('boat.');
-        const nextAppear = isBreakable && dmg >= 0.65 ? 0.0 : 1.0;
+        const scaleActivity = isScaled ? evaluatePartScaleActivity(part.taxonomy, spec) : { active: true, sealPortLid: false };
+        let nextAppear = 1.0;
+        if (!scaleActivity.active) {
+          nextAppear = 0.0;
+        } else if (scaleActivity.sealPortLid) {
+          nextAppear = -1.0;
+        } else if (isBreakable && dmg >= 0.65) {
+          nextAppear = 0.0;
+        }
         const nextExplode = 0.0;
         const nextWear = isContinuousSkin ? Math.min(0.28, dmg * 0.35) : dmg;
         const base = p * 4;
@@ -18058,7 +19263,7 @@ function createPartAssemblyState(catalog, options = {}) {
           partState[base + 2] = nextWear;
           changed = true;
         }
-        if (nextAppear < 0.999 || nextExplode > 1e-5 || nextWear > 1e-5 || partState[base + 3] < 0.999) {
+        if (Math.abs(nextAppear - 1.0) > 1e-3 || nextExplode > 1e-5 || nextWear > 1e-5 || partState[base + 3] < 0.999) {
           anyOverrides = true;
         }
       }
@@ -18097,7 +19302,9 @@ function createPartAssemblyState(catalog, options = {}) {
       const base = idx * 4;
       const [appearStart, appearEnd] = part.assemblyWindow;
       const windowAppear = partAssemblySmoothstep(appearStart, appearEnd, uniform[0]);
-      const appear = Math.max(0, Math.min(1, Math.min(windowAppear, partState[base + 0])));
+      const sealPortLid = partState[base + 0] < -0.5;
+      const rawAppear = sealPortLid ? 1.0 : partState[base + 0];
+      const appear = Math.max(0, Math.min(1, Math.min(windowAppear, rawAppear)));
       const explode = Math.max(0, uniform[1] + partState[base + 1]);
       const wearAndDamage = Math.max(0, Math.min(1, uniform[6] + partState[base + 2]));
       let cutawayVis = Math.max(0, Math.min(1, partState[base + 3]));
@@ -18129,6 +19336,9 @@ function createPartAssemblyState(catalog, options = {}) {
         id: part.id,
         subAssembly: part.subAssembly,
         layer: part.layer,
+        scalingMode: part.scalingMode,
+        scalingModeCode: part.scalingModeCode,
+        sealPortLid,
         appear,
         explode,
         wearAndDamage,
@@ -18142,6 +19352,12 @@ function createPartAssemblyState(catalog, options = {}) {
     applyToVertices(sourceVertices, targetVertices = new Float32Array(sourceVertices), stride = catalog.vertexStride ?? 9) {
       const vCount = Math.min(catalog.vertexCount, Math.floor(sourceVertices.length / stride));
       const poses = Array.from({ length: partCount }, (_, p) => state.evaluatePartPose(p));
+      const scaleActive = scaleUniform[3] > 0.5;
+      const kWaist = scaleUniform[4];
+      const deckRefY = scaleUniform[5];
+      const rigHScale = scaleUniform[1];
+      const invRelX = scaleUniform[6];
+      const invRelZ = scaleUniform[7];
       for (let v = 0; v < vCount; v++) {
         const pIdx = catalog.vertexPartIds[v];
         const pose = poses[pIdx];
@@ -18152,10 +19368,41 @@ function createPartAssemblyState(catalog, options = {}) {
           targetVertices[at + 2] = pose.pivot[2];
           continue;
         }
-        const px = sourceVertices[at + 0], py = sourceVertices[at + 1], pz = sourceVertices[at + 2];
-        targetVertices[at + 0] = pose.pivot[0] + (px - pose.pivot[0]) * pose.scale + pose.translation[0];
-        targetVertices[at + 1] = pose.pivot[1] + (py - pose.pivot[1]) * pose.scale + pose.translation[1];
-        targetVertices[at + 2] = pose.pivot[2] + (pz - pose.pivot[2]) * pose.scale + pose.translation[2];
+        let px = sourceVertices[at + 0], py = sourceVertices[at + 1], pz = sourceVertices[at + 2];
+        let pivX = pose.pivot[0], pivY = pose.pivot[1], pivZ = pose.pivot[2];
+        if (pose.sealPortLid) {
+          const sideSign = pivX < 0 ? -1 : 1;
+          if (py > pivY) {
+            px += -sideSign * 0.18;
+            py += -0.303;
+          } else {
+            px -= sideSign * 0.004;
+          }
+          if (stride >= 6) {
+            targetVertices[at + 3] = sideSign;
+            targetVertices[at + 4] = 0;
+            targetVertices[at + 5] = 0;
+          }
+        }
+        if (scaleActive) {
+          pivZ = warpSectionZ(pose.pivot[2], kWaist);
+          if (pose.layer >= 3.5 && py > deckRefY) {
+            pivY = deckRefY + (pose.pivot[1] - deckRefY) * rigHScale;
+          }
+          if (pose.scalingModeCode === 1) {
+            px = pivX + (px - pose.pivot[0]) * invRelX;
+            py = pivY + (py - pose.pivot[1]) * invRelX;
+            pz = pivZ + (pz - pose.pivot[2]) * invRelZ;
+          } else {
+            pz = warpSectionZ(pz, kWaist);
+            if (pose.layer >= 3.5 && py > deckRefY) {
+              py = deckRefY + (py - deckRefY) * rigHScale;
+            }
+          }
+        }
+        targetVertices[at + 0] = pivX + (px - pivX) * pose.scale + pose.translation[0];
+        targetVertices[at + 1] = pivY + (py - pivY) * pose.scale + pose.translation[1];
+        targetVertices[at + 2] = pivZ + (pz - pivZ) * pose.scale + pose.translation[2];
       }
       return targetVertices;
     },
@@ -18217,9 +19464,10 @@ async function createPartAssemblyGPU({ device, computePipe, posedBuffer, catalog
   });
   device.queue.writeBuffer(stateBuffer, 0, stateController.partState);
 
-  const uniformUpload = new Float32Array(8 + 24 * 4);
+  const uniformUpload = new Float32Array(8 + 24 * 4 + 8);
   uniformUpload.set(stateController.uniform, 0);
   uniformUpload.set(stateController.impactSites, 8);
+  uniformUpload.set(stateController.scaleUniform, 8 + 24 * 4);
   const uniformBuffer = device.createBuffer({
     label: `${catalog.modelId} part assembly uniform`,
     size: uniformUpload.byteLength,
@@ -18260,7 +19508,9 @@ async function createPartAssemblyGPU({ device, computePipe, posedBuffer, catalog
       if (nextState.revision === uploadedRevision) return false;
       uniformUpload.set(nextState.uniform, 0);
       if (nextState.impactSites) uniformUpload.set(nextState.impactSites, 8);
-      else uniformUpload.fill(0, 8);
+      else uniformUpload.fill(0, 8, 8 + 24 * 4);
+      if (nextState.scaleUniform) uniformUpload.set(nextState.scaleUniform, 8 + 24 * 4);
+      else uniformUpload.set([1, 1, 1, 0, 0, 0.65, 1, 1], 8 + 24 * 4);
       device.queue.writeBuffer(stateBuffer, 0, nextState.partState);
       device.queue.writeBuffer(uniformBuffer, 0, uniformUpload);
       uploadedRevision = nextState.revision;
@@ -19201,14 +20451,16 @@ function shipPartBuildAssemblyManifest(model,roles,guns=[]){
       c.layer===0?-1.2:c.layer*1.1+Math.max(0,pivot[1])*.2,
       pivot[2]*.15,
     ];
-    return {partNumber:idx,id,parent:node.parent??null,...c,cutawaySide:side,isMoving,pivot,explodedOffset};
+    const tax=classifyShipPartTaxonomy(model.id,{id,nodeId:id});
+    return {partNumber:idx,id,parent:node.parent??null,...c,cutawaySide:side,isMoving,pivot,explodedOffset,taxonomy:tax,scalingMode:tax.scalingMode,scalingModeCode:tax.scalingModeCode};
   });
   for(const g of guns){
     const id=g.meshGroup??('gun.'+g.id);
     if(roles[id])continue;
     const pivot=g.breechDesign?[...g.breechDesign]:[0,0,0];
     const side=g.sideSign??(g.side==='port'?-1:1);
-    rawNodes.push({partNumber:rawNodes.length,id,parent:'hull',subAssembly:'ordnance-and-helm',subAssemblyIndex:2,layer:2,cutawaySide:side,isMoving:true,pivot,explodedOffset:[side*2.2,pivot[1]*.2+0.6,pivot[2]*.15]});
+    const tax=classifyShipPartTaxonomy(model.id,{id,nodeId:'hull'});
+    rawNodes.push({partNumber:rawNodes.length,id,parent:'hull',subAssembly:'ordnance-and-helm',subAssemblyIndex:2,layer:2,cutawaySide:side,isMoving:true,pivot,explodedOffset:[side*2.2,pivot[1]*.2+0.6,pivot[2]*.15],taxonomy:tax,scalingMode:tax.scalingMode,scalingModeCode:tax.scalingModeCode});
   }
   const ordered=[...rawNodes].sort((a,b)=>a.layer-b.layer||a.pivot[1]-b.pivot[1]||a.pivot[2]-b.pivot[2]||a.partNumber-b.partNumber);
   const win=Math.min(.2,Math.max(.06,1.5/Math.max(1,ordered.length)));
@@ -19219,7 +20471,16 @@ function shipPartBuildAssemblyManifest(model,roles,guns=[]){
     windows[n.partNumber]=[+start.toFixed(5),+Math.min(1,start+win).toFixed(5)];
   }
   const nodes=rawNodes.map(n=>({...n,assemblyWindow:windows[n.partNumber]}));
-  return {version:1,subAssemblies:SHIP_SUB_ASSEMBLIES,cutawayModes:PART_CUTAWAY_MODES,partCount:nodes.length,nodes,nodesById:Object.fromEntries(nodes.map(n=>[n.id,n]))};
+  return {
+    version:1,
+    subAssemblies:SHIP_SUB_ASSEMBLIES,
+    cutawayModes:PART_CUTAWAY_MODES,
+    scalingModes:PART_SCALING_MODES,
+    universalTaxonomy:UNIVERSAL_PART_TAXONOMY,
+    partCount:nodes.length,
+    nodes,
+    nodesById:Object.fromEntries(nodes.map(n=>[n.id,n])),
+  };
 }
 
 // Contract shape for later craft. Empty rig arrays are valid for a sail-less
@@ -19229,7 +20490,7 @@ const SHIP_PART_CAPABILITIES=deepFreeze({version:1,
   propulsion:{sails:'posed-cloth forces',oars:'posed stroke and immersed blade forces',paddles:'posed stroke and immersed blade forces'},
   strokeRequirements:['pivot','grip','blade','station','evaluateTransform','waterContact','force'],
   steeringKinds:['rudder','steering-oar','steering-paddle','differential-oars','paddles'],
-  assembly:{subAssemblies:SHIP_SUB_ASSEMBLIES,cutawayModes:PART_CUTAWAY_MODES,perVertexAttributes:['partNumber','explodedOffset','pivot','layerAndFlags'],perPartState:['appear','explode','wearAndDamage','cutawayVisibility']},
+  assembly:{subAssemblies:SHIP_SUB_ASSEMBLIES,cutawayModes:PART_CUTAWAY_MODES,scalingModes:PART_SCALING_MODES,universalTaxonomy:UNIVERSAL_PART_TAXONOMY,perVertexAttributes:['partNumber','explodedOffset','pivot','layerAndFlags'],perPartState:['appear','explode','wearAndDamage','cutawayVisibility']},
   readiness:'Explicit ready model and part adapter required; no identity fallback.'});
 
 function getShipParts(modelId='nina'){
@@ -19290,6 +20551,7 @@ function getShipParts(modelId='nina'){
       note:'Authored loading and stability; reported capacity/tonnage is separate provenance, not displacement mass.'},
     crew:{representedCount:Object.keys(model.crewStations).length,loadedCount:manifest.crew,representativeWatch:victory,
       stations:Object.entries(model.crewStations).map(([id,p])=>({id,role:shipPartStationRoles[id],node:'station.crew.'+id,position:[p.x,weatherDeck(p.z),p.z],route:[...p.route]}))},
+    scaling:{modes:PART_SCALING_MODES,taxonomy:UNIVERSAL_PART_TAXONOMY,evaluate:spec=>computeArchetypeScaleSpec({...spec,modelId:model.id})},
     assembly:shipPartBuildAssemblyManifest(model,roles,createGunDefinitions(model.id)),
   };
   const frozen=deepFreeze(parts);shipPartAdapters.set(key,frozen);return frozen;
@@ -19316,6 +20578,7 @@ function shipPartAdditionalAdapter(model){
     loading:{manifest,provisionDays:DEFAULT_PROVISION_DAYS,policy:d.loading.designIncludesManifest?'default-manifest-in-design-waterline':'manifest-added-to-design-hull-mass',evaluate:boat=>boatHydrodynamics(boat.length,boat.beam,boat.provisionDays,boat.cargoTonnes,id),note:d.interpretation},
     crew:{representedCount:Object.keys(d.crewStations).length,loadedCount:d.loading.crew,representativeWatch:d.loading.crew>Object.keys(d.crewStations).length,
       stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:shipPartStationRoles[name],node:'station.crew.'+name,position:[p.x,weatherDeck(p.z),p.z],route:[...p.route]}))},
+    scaling:{modes:PART_SCALING_MODES,taxonomy:UNIVERSAL_PART_TAXONOMY,evaluate:spec=>computeArchetypeScaleSpec({...spec,modelId:id})},
     assembly:shipPartBuildAssemblyManifest(model,roles,guns)};
 }
 
@@ -19357,6 +20620,7 @@ function shipPartProceduralAdapter(model){
     crew:{representedCount:represented,loadedCount:d.loading.crew,representativeWatch:d.loading.crew>represented,
       stations:Object.entries(d.crewStations).map(([name,p])=>({id:name,role:p.role??p.roles?.[0]??shipPartStationRoles[name]??'sailor',node:'station.crew.'+name,
         position:[p.x,p.y??weatherDeck(p.z,p.x),p.z],route:p.route?[...p.route]:[p.z,p.z],...(p.stationId?{rowingStation:p.stationId}:{})}))},
+    scaling:{modes:PART_SCALING_MODES,taxonomy:UNIVERSAL_PART_TAXONOMY,evaluate:spec=>computeArchetypeScaleSpec({...spec,modelId:id})},
     assembly:shipPartBuildAssemblyManifest(model,roles,[])};
 }
 
@@ -26889,6 +28153,11 @@ async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,verte
     updateRecoil(guns,boat){return recoil?.update(guns,boat)??false;},
     updateDamage(boat){
       if(destroyed)return false;
+      let updated=false;
+      if(assembly){
+        assembly.state.syncVesselDamage(boat?.damage,boat);
+        if(assembly.update())updated=true;
+      }
       const pending=boat?.damage?.pendingBakes;
       if(mesh instanceof Float32Array&&Array.isArray(pending)&&pending.length>0){
         const batch=pending.splice(0,6);
@@ -26898,7 +28167,7 @@ async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,verte
           return true;
         }
       }
-      return false;
+      return updated;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;
@@ -52400,20 +53669,41 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       kindCode,
     };
   }
+  let cachedScaleLen=NaN,cachedScaleBeam=NaN,cachedScaleModelId=null;
+  function syncScaledGuns(){
+    const mId=boat?.model?.id??boat?.modelId??'nina';
+    const len=Number(boat?.length)||0,bm=Number(boat?.beam)||0;
+    if(mId===cachedScaleModelId&&Math.abs(len-cachedScaleLen)<1e-4&&Math.abs(bm-cachedScaleBeam)<1e-4)return;
+    cachedScaleModelId=mId;cachedScaleLen=len;cachedScaleBeam=bm;
+    const spec=computeArchetypeScaleSpec({modelId:mId,length:len||undefined,beam:bm||undefined});
+    boat.scaleSpec=spec;
+    for(const g of state.guns){
+      const disabled=!spec.isDefaultScale&&spec.defaultGunCount>0&&!spec.activeGunIds.has(g.id);
+      g.disabledByScale=disabled;
+      if(disabled){
+        g.loading=false;
+        g.queued=false;
+        if(g.stage==='ready')g.stage='secured';
+      }
+    }
+  }
+  syncScaledGuns();
   const canFire=side=>{
+    syncScaledGuns();
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     let count=0;
     for(const g of state.guns){
-      if(g.side!==side)continue;
+      if(g.disabledByScale||g.side!==side)continue;
       count++;
       if(g.stage!=='ready'||!attended(g)||muzzleBlock(g,gunMuzzlePose(g,boat)))return false;
     }
     return count>0;
   };
   const canFireLoaded=side=>{
+    syncScaledGuns();
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     for(const g of state.guns){
-      if(g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
+      if(!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
     }
     return false;
   };
@@ -52460,6 +53750,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       return fireAtWillMode;
     },
     prepare(side){
+      syncScaledGuns();
       if(!sideValid(side))return false;
       if(pending||state.queue.length)return false;
       const changed=boat.gunnerySide!==side;
@@ -52469,10 +53760,11 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       return count>0||changed;
     },
     readyAtQuarters(side){
+      syncScaledGuns();
       if(!sideValid(side))return false;
       pending=null;state.queue.length=0;
       boat.gunnerySide=side;prepared=true;lastReady=true;
-      for(const g of state.guns)if(g.side===side){
+      for(const g of state.guns)if(!g.disabledByScale&&g.side===side){
         g.stage='ready';g.loading=false;g.progress=1;g.offset=0;g.queued=false;
       }
       return true;
@@ -52494,6 +53786,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       for(const g of state.guns){g.queued=false;g.loading=false;}
     },
     update(dt,wind){
+      syncScaledGuns();
       if(boat.damage?.settledWreck&&state.projectiles.length===0)return [];
       stepVesselDamage(boat,dt,getTerrain?.());
       if(boat.damage?.sunk){
@@ -52605,7 +53898,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       lastReady=ready;return events;
     },
     impact(contact){return resolveGunneryImpact(state,contact.shotId??contact.id,contact);},
-    summary(side){return gunnerySummary(state,side);},
+    summary(side){syncScaledGuns();return gunnerySummary(state,side);},
     canFire,
     canFireLoaded,
     blockedReason(side){
@@ -58837,6 +60130,7 @@ function createVoyageController(cfg) {
 
 
 
+
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -59688,9 +60982,12 @@ async function main() {
   cam.yaw=landfallCameraYaw(LAND_STAGE,cameraMode,qs.has('cam'),cam.yaw);
   const propulsion = propulsionFromLink(qs);
   const defaultCanvas = BROADSIDE_SCENARIO ? 0.55 : 1;
+  const scalePresetParam = ARCHETYPE_SCALE_PRESETS.find(p => p.id === qs.get('shipScale'));
+  const baseBoatLength = SHIP_ID!=='nina'?shipAsset.model.runtime.length:DEFAULT_BOAT_LENGTH;
+  const baseBoatBeam = SHIP_ID!=='nina'?shipAsset.model.runtime.beam:DEFAULT_BOAT_BEAM;
   const boat = {
-    modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: SHIP_ID!=='nina'?shipAsset.model.runtime.length:param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
-    beam: SHIP_ID!=='nina'?shipAsset.model.runtime.beam:param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', LAND_STAGE?((activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE]).heading??0):BROADSIDE_SCENARIO?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', scalePresetParam?+(baseBoatLength*scalePresetParam.lengthFactor).toFixed(2):baseBoatLength, 3, 100),
+    beam: param('boatBeam', scalePresetParam?+(baseBoatBeam*scalePresetParam.beamFactor).toFixed(2):baseBoatBeam, 1, 24), heading: param('boatHeading', LAND_STAGE?((activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE]).heading??0):BROADSIDE_SCENARIO?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',defaultCanvas,0,1), sailMain:param('sailMain',defaultCanvas,0,1), sailMizzen:param('sailMizzen',defaultCanvas,0,1),
     speed: param('boatSpeed', LAND_STAGE === 'dock' ? 1.5 : BROADSIDE_SCENARIO ? 4.2 : 6, 0, 40), eye: param('boatEye',SHIP_ID!=='nina'?shipAsset.model.nodes['helm.camera'].position[1]*shipAsset.model.designFrame.verticalScale:HELM_EYE_HEIGHT,1,25),
     provisionDays:param('provisionDays',getShipParts(SHIP_ID).loading.provisionDays,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
@@ -59920,6 +61217,28 @@ async function main() {
   let spyglassTracking = false;
   let spyglassYawOffset = 0;
   let spyglassPitchOffset = 0;
+  let spyglassPrevCameraMode = null;
+  let spyglassPrevStation = null;
+  const boatViewYawOffset = () => (boat.enabled && boat.viewStation !== 'crows-nest') ? (boat.eyeSide ?? 1) * 15 * D2R : 0;
+
+  function findSpyglassTargetVessel() {
+    if (!followerEnabled) return null;
+    let best = null, bestScore = Infinity;
+    for (let i = 1; i < vessels.length; i++) {
+      const v = vessels[i];
+      if (!v || v.dormantEncounter || !v.boat?.showProw || v.boat?.damage?.sunk) continue;
+      const dx = (v.boat.x ?? 0) - (boat.x ?? 0);
+      const dz = (v.boat.z ?? 0) - (boat.z ?? 0);
+      const dist = Math.hypot(dx, dz);
+      const score = v.faction === 'enemy' ? dist : dist + 15000;
+      if (score < bestScore) {
+        bestScore = score;
+        best = v;
+      }
+    }
+    return best;
+  }
+
   const spyglassStyle = document.createElement('style');
   spyglassStyle.textContent = `
     body.spyglass-active #voyage-hud {
@@ -59955,7 +61274,7 @@ async function main() {
 
   function updateSpyglassReadout() {
     if (!spyglassActive || !spyglassReadoutEl) return;
-    const targetV = followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1] : null;
+    const targetV = findSpyglassTargetVessel();
     if (targetV?.boat) {
       const tb = targetV.boat;
       const dx = (tb.x ?? 0) - (boat.x ?? 0), dz = (tb.z ?? 0) - (boat.z ?? 0);
@@ -59965,7 +61284,7 @@ async function main() {
       const colorsInfo = getShipColorsInfo(tb.colors);
       spyglassReadoutEl.textContent = `${tb.shipName || 'Sighted Vessel'} · ${colorsInfo.shortLabel} · Range ${distM} m · Bearing ${brgDeg}° · Hull ${hullPct}%`;
     } else {
-      const lookBrg = Math.round((((boat.heading || 0) + (cam.yaw / D2R)) % 360 + 360) % 360);
+      const lookBrg = Math.round((((boat.heading || 0) + ((cam.yaw + boatViewYawOffset()) / D2R)) % 360 + 360) % 360);
       spyglassReadoutEl.textContent = `Horizon bearing ${lookBrg}° · Drag mouse or ↑↓←→ to sweep the horizon`;
     }
   }
@@ -59979,7 +61298,7 @@ async function main() {
     boatEyePosition(eyePosition, boat);
     cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
     const tx = targetBoat.x ?? 0;
-    const ty = (targetBoat.heave ?? 0) + 4.2;
+    const ty = (targetBoat.heave ?? 0) + Math.max(3.5, 2.2 * vesselVerticalScale(targetBoat));
     const tz = targetBoat.z ?? 0;
     const dx = tx - cam.x, dy = ty - cam.y, dz = tz - cam.z;
     const len = Math.hypot(dx, dy, dz) || 1;
@@ -59996,10 +61315,10 @@ async function main() {
     const fx = cr * xx + sr * yy;
     const fy = -sr * xx + cr * yy;
     const viewYaw = Math.atan2(fx, -fz);
-    const baseYaw = viewYaw - (boat.eyeSide ?? 1) * 15 * D2R;
+    const baseYaw = viewYaw - boatViewYawOffset();
     const basePitch = Math.asin(Math.max(-1, Math.min(1, fy)));
     cam.yaw = baseYaw + yawOffset;
-    cam.pitch = Math.max(-0.6, Math.min(0.45, basePitch + pitchOffset));
+    cam.pitch = Math.max(-1.25, Math.min(0.85, basePitch + pitchOffset));
   }
 
   function setSpyglassActive(active, targetBoat = null) {
@@ -60010,9 +61329,13 @@ async function main() {
     spyglassOverlay.style.display = spyglassActive ? 'flex' : 'none';
     document.body.classList.toggle('spyglass-active', spyglassActive);
     if (spyglassActive) {
+      if (!prev) {
+        spyglassPrevCameraMode = cameraMode;
+        spyglassPrevStation = boat.viewStation ?? 'deck';
+      }
       spyglassYawOffset = 0;
       spyglassPitchOffset = 0;
-      const autoTarget = targetBoat ?? (followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1].boat : null);
+      const autoTarget = targetBoat ?? findSpyglassTargetVessel()?.boat ?? null;
       if (autoTarget) {
         spyglassTracking = true;
         aimCameraAtVessel(autoTarget, 0, 0);
@@ -60022,13 +61345,32 @@ async function main() {
         if (typeof setCameraMode === 'function') setCameraMode('boat');
         else { cameraMode = 'boat'; boat.enabled = true; }
         stepBoatView(boat, 2.5);
+        boatEyePosition(eyePosition, boat);
+        cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+        cam.pitch = -2.5 * D2R;
       }
       cam.fovY = SPYGLASS_FOV_Y;
       updateSpyglassReadout();
     } else {
       spyglassTracking = false;
       cam.fovY = BASE_FOV_Y;
+      if (prev && spyglassPrevCameraMode) {
+        const restoreMode = spyglassPrevCameraMode;
+        const restoreStation = spyglassPrevStation ?? 'deck';
+        spyglassPrevCameraMode = null;
+        spyglassPrevStation = null;
+        if (cameraMode === 'boat' && boat.viewStation === 'crows-nest') {
+          setBoatViewStation(boat, restoreStation);
+          if (restoreMode !== 'boat' && typeof setCameraMode === 'function') {
+            setCameraMode(restoreMode);
+          } else {
+            boatEyePosition(eyePosition, boat);
+            cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+          }
+        }
+      }
     }
+    if (typeof updateHelp === 'function') updateHelp();
     helm?.update?.(performance.now(), true);
   }
   spyglassCloseBtn?.addEventListener('click', () => setSpyglassActive(false));
@@ -60043,14 +61385,27 @@ async function main() {
     if (e.code === 'KeyP' && !e.repeat) setSimPaused(!simPaused);
     if (e.code === 'KeyX') boat.rudderTarget = 0;
     if (e.code === 'KeyB' && !e.repeat) {
-      if (spyglassActive) setSpyglassActive(false);
+      if (spyglassActive) {
+        spyglassPrevCameraMode = null;
+        spyglassPrevStation = null;
+        setSpyglassActive(false);
+      }
       setCameraMode(boat.enabled ? 'free' : 'boat');
     }
     if (e.code === 'KeyV' && !e.repeat) {
-      const nextSt = boat.viewStation === 'crows-nest' ? 'deck' : 'crows-nest';
-      if (nextSt !== 'crows-nest' && spyglassActive) setSpyglassActive(false);
+      const nextSt = (cameraMode === 'boat' && boat.viewStation === 'crows-nest') ? 'deck' : 'crows-nest';
+      if (nextSt !== 'crows-nest' && spyglassActive) {
+        spyglassPrevCameraMode = null;
+        spyglassPrevStation = null;
+        setSpyglassActive(false);
+      }
       setBoatViewStation(boat, nextSt);
       setCameraMode('boat');
+      boatEyePosition(eyePosition, boat);
+      cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+      cam.yaw = 0;
+      cam.pitch = (nextSt === 'crows-nest' ? -3.5 : -5.5) * D2R;
+      updateHelp();
       helm?.update?.(performance.now(), true);
     }
     if (e.code === 'KeyZ' && !e.repeat) {
@@ -60236,12 +61591,12 @@ async function main() {
     if (boat.enabled) {
       const walkFwd=(keys.KeyW?1:0)-(keys.KeyS?1:0);
       const walkStrafe=(keys.KeyE?1:0)-(keys.KeyQ?1:0);
-      stepDeckWalk(boat,walkFwd,walkStrafe,cam.yaw+(boat.eyeSide??1)*15*D2R,dt);
+      stepDeckWalk(boat,walkFwd,walkStrafe,cam.yaw+boatViewYawOffset(),dt);
       stepBoatView(boat,dt);
       boatEyePosition(eyePosition,boat);
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
       if (spyglassActive) {
-        const trackBoat = followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1].boat : null;
+        const trackBoat = findSpyglassTargetVessel()?.boat ?? null;
         if (trackBoat && spyglassTracking) {
           aimCameraAtVessel(trackBoat, spyglassYawOffset, spyglassPitchOffset);
         }
@@ -60391,7 +61746,7 @@ async function main() {
     proj[0] = 1 / tanX; proj[5] = 1 / tanY; proj[11] = -1; proj[14] = near;
     // Look just outside the sail envelope; manual look remains relative to this
     // forward quarter, and the bias follows the captain's smooth tack crossing.
-    const viewYaw=cam.yaw+(boat.enabled?(boat.eyeSide??1)*15*D2R:0);
+    const viewYaw=cam.yaw+boatViewYawOffset();
     const cy = Math.cos(viewYaw), sy = Math.sin(viewYaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     let fx = cp * sy, fy = sp, fz = -cp * cy;            // forward
     let rx = cy, ry = 0, rz = sy;                          // right
@@ -60562,13 +61917,18 @@ async function main() {
     const button=document.createElement('button'); button.textContent=label;
     button.addEventListener('click',()=>{
       shipOrbit.fleet=false;shipOrbit.wildlife=false;
+      if(spyglassActive)setSpyglassActive(false);
       if(mode==='crows-nest'){
         setBoatViewStation(boat,'crows-nest');
         setCameraMode('boat');
+        boatEyePosition(eyePosition,boat);
+        cam.x=eyePosition[0];cam.y=eyePosition[1];cam.z=eyePosition[2];
+        cam.yaw=0;cam.pitch=-3.5*D2R;
       }else{
         if(mode==='boat')setBoatViewStation(boat,'deck');
         setCameraMode(mode);
       }
+      updateHelp();
       setCameraOpen(false);cameraButton.focus();helm?.update?.(performance.now(),true);
     });
     cameraBody.append(button); cameraButtons.set(mode,button);
@@ -61365,18 +62725,30 @@ async function main() {
       void lookHint.offsetWidth;
       lookHint.style.animation='';
     }
-    for(const [mode,button] of cameraButtons) button.setAttribute('aria-pressed',String(mode===cameraMode));
+    for(const [mode,button] of cameraButtons) {
+      const isPressed = mode === 'crows-nest'
+        ? (cameraMode === 'boat' && boat.viewStation === 'crows-nest')
+        : mode === 'boat'
+        ? (cameraMode === 'boat' && boat.viewStation !== 'crows-nest')
+        : mode === cameraMode;
+      button.setAttribute('aria-pressed', String(isPressed));
+    }
   };
   function setCameraMode(mode) {
     if(mode===cameraMode) return;
+    if(mode!=='boat'&&spyglassActive) {
+      spyglassPrevCameraMode=null;
+      spyglassPrevStation=null;
+      setSpyglassActive(false);
+    }
     if(boat.enabled) {
-      const viewYaw=cam.yaw+(boat.eyeSide??1)*15*D2R;
+      const viewYaw=cam.yaw+boatViewYawOffset();
       boatRotate(boatForward,Math.cos(cam.pitch)*Math.sin(viewYaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(viewYaw),boat.heading*D2R,boat.pitch,boat.roll);
       cam.yaw=Math.atan2(boatForward[0],-boatForward[2]);
       cam.pitch=Math.asin(Math.max(-1,Math.min(1,boatForward[1])));
     }
     cameraMode=mode; boat.enabled=mode==='boat';
-    if(boat.enabled) {cam.yaw=0;cam.pitch=-5.5*D2R;boat.eyeSide=boat.sailState?.tack??1;boat.eyeSideVelocity=0;boat.showProw=true;prowToggle.checked=true;}
+    if(boat.enabled) {cam.yaw=0;cam.pitch=(boat.viewStation==='crows-nest'?-3.5:-5.5)*D2R;boat.eyeSide=boat.sailState?.tack??1;boat.eyeSideVelocity=0;boat.showProw=true;prowToggle.checked=true;}
     if(mode==='ship') {shipOrbit.yaw=boat.heading*D2R+1.0;boat.showProw=true;prowToggle.checked=true;}
     if(document.pointerLockElement) document.exitPointerLock();
     for(const k in keys) keys[k]=false;
@@ -61387,8 +62759,39 @@ async function main() {
   const shipChoice=document.createElement('label');shipChoice.textContent='Vessel';
   const shipSelect=document.createElement('select');shipSelect.id='ship-model';shipSelect.setAttribute('aria-label','Vessel');
   for(const model of READY_SHIPS){const option=document.createElement('option');option.value=model.id;option.textContent=model.name;shipSelect.append(option);}
-  shipSelect.value=SHIP_ID;shipSelect.onchange=()=>{const url=new URL(location.href);url.searchParams.set('ship',shipSelect.value);for(const key of ['boatLength','boatBeam','boatEye','cam'])url.searchParams.delete(key);location.assign(url.href);};
+  shipSelect.value=SHIP_ID;shipSelect.onchange=()=>{const url=new URL(location.href);url.searchParams.set('ship',shipSelect.value);for(const key of ['boatLength','boatBeam','boatEye','cam','shipScale'])url.searchParams.delete(key);location.assign(url.href);};
   shipChoice.append(shipSelect);boatBody.append(shipChoice);
+  const scaleChoice=document.createElement('label');scaleChoice.textContent='Archetype scale / rate';
+  const scaleSelect=document.createElement('select');scaleSelect.id='ship-scale-preset';scaleSelect.setAttribute('aria-label','Archetype scale / rate');
+  for(const preset of ARCHETYPE_SCALE_PRESETS){const opt=document.createElement('option');opt.value=preset.id;opt.textContent=preset.label;scaleSelect.append(opt);}
+  const customOpt=document.createElement('option');customOpt.value='custom';customOpt.textContent='Custom dimensions';scaleSelect.append(customOpt);
+  scaleChoice.append(scaleSelect);boatBody.append(scaleChoice);
+  const scaleSummaryEl=document.createElement('p');scaleSummaryEl.id='ship-scale-summary';boatBody.append(scaleSummaryEl);
+  const boatDimensionInputs={};
+  const updateScaleSummary=()=>{
+    const spec=computeArchetypeScaleSpec(boat);
+    scaleSummaryEl.textContent=`${spec.summaryLabel} · ${boat.length.toFixed(1)} m × ${boat.beam.toFixed(1)} m (non-rubberband taxonomy scaling: fixed human fittings, modular masts/ports/oars)`;
+    const matchedPreset=ARCHETYPE_SCALE_PRESETS.find(p=>Math.abs(spec.lengthScale-p.lengthFactor)<0.02&&Math.abs(spec.beamScale-p.beamFactor)<0.03);
+    scaleSelect.value=matchedPreset?matchedPreset.id:'custom';
+    for(const [i,groupId] of ['fore','main','mizzen'].entries()){
+      const sailRow=sailInputs?.[i]?.input?.closest('label');
+      if(sailRow)sailRow.hidden=!activeSailGroups.has(groupId)||!spec.activeMastSet.has(groupId);
+    }
+  };
+  scaleSelect.onchange=()=>{
+    const preset=ARCHETYPE_SCALE_PRESETS.find(p=>p.id===scaleSelect.value);
+    if(!preset)return;
+    const defL=shipAsset.model.runtime.length,defB=shipAsset.model.runtime.beam;
+    boat.length=+(defL*preset.lengthFactor).toFixed(1);
+    boat.beam=+(defB*preset.beamFactor).toFixed(1);
+    if(boatDimensionInputs.length)boatDimensionInputs.length.value=String(boat.length);
+    if(boatDimensionInputs.beam)boatDimensionInputs.beam.value=String(boat.beam);
+    boat.revision++;
+    shipGuns?.syncScaledGuns?.();
+    gunControls?.update?.(true);
+    anchor.reset(boat);boat.externalForce=anchor.force;updateAnchorUI();
+    updateScaleSummary();
+  };
   if(SHIP_ID==='victory'){const spec=document.createElement('p');spec.textContent='1805 reconstruction · 56.69 m gun deck · 15.85 m beam · 104 guns. Twelve visible hands represent a working watch; the loading model accounts for 820 aboard.';boatBody.append(spec);}
   else if(SHIP_ID!=='nina'){
     const model=getShipModel(SHIP_ID),parts=getShipParts(SHIP_ID),spec=document.createElement('p');
@@ -61419,7 +62822,7 @@ async function main() {
     input.oninput=()=>{if(input.validity.valid&&input.value!=='')boat.rowingCadence=Number(input.value)/60;};row.append(name,input);boatBody.append(row);
   }
   for (const [key, label, min, max, step] of [
-    ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
+    ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 24, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
     ['eye', 'Camera height (m)', 1, 15, 0.1],
   ]) {
@@ -61427,12 +62830,17 @@ async function main() {
     const name = document.createElement('span'); name.textContent = label;
     const input = document.createElement('input');
     Object.assign(input, { type: 'number', min, max, step, value: boat[key], id: 'boat-' + key });
-    if(SHIP_ID!=='nina' && (key==='length'||key==='beam'))input.readOnly=true;
+    if(key==='length'||key==='beam')boatDimensionInputs[key]=input;
     input.addEventListener('input', () => {
       if (!input.validity.valid || input.value === '') return;
       boat[key] = Number(input.value);
       if (key === 'length' || key === 'beam' || key === 'heading') {
         boat.revision++;
+        if (key === 'length' || key === 'beam') {
+          shipGuns?.syncScaledGuns?.();
+          gunControls?.update?.(true);
+          updateScaleSummary();
+        }
         // Explicit hull edits rebuild its anchor attachment. Ordinary wave,
         // weather and sail revisions retain the deployed world-space anchor.
         anchor.reset(boat);boat.externalForce=anchor.force;updateAnchorUI();
@@ -61441,6 +62849,7 @@ async function main() {
     row.append(name, input); boatBody.append(row);
     if(key==='speed')speedRow=row;
   }
+  updateScaleSummary();
   const loadingPanel=document.createElement('details');loadingPanel.id='boat-loading';
   const loadingTitle=document.createElement('summary');loadingTitle.textContent='Supplies and cargo';loadingPanel.append(loadingTitle);
   for(const [key,label,max,step] of [['provisionDays','Provisions for '+getShipParts(SHIP_ID).loading.manifest.crew+' (days)',120,5],['cargoTonnes','Additional cargo (t)',40,.5]]){
@@ -61528,11 +62937,24 @@ async function main() {
       shipOrbit.fleet=false;shipOrbit.wildlife=false;
       if(cameraMode==='boat'&&boat.viewStation!=='crows-nest'){
         setBoatViewStation(boat,'crows-nest');
+        boatEyePosition(eyePosition,boat);
+        cam.x=eyePosition[0];cam.y=eyePosition[1];cam.z=eyePosition[2];
+        cam.yaw=0;cam.pitch=-3.5*D2R;
+        updateHelp();
       }else if(cameraMode==='boat'){
-        if(spyglassActive)setSpyglassActive(false);
+        if(spyglassActive){
+          spyglassPrevCameraMode=null;
+          spyglassPrevStation=null;
+          setSpyglassActive(false);
+        }
         setBoatViewStation(boat,'deck');
         setCameraMode('ship');
       }else{
+        if(spyglassActive){
+          spyglassPrevCameraMode=null;
+          spyglassPrevStation=null;
+          setSpyglassActive(false);
+        }
         setBoatViewStation(boat,'deck');
         setCameraMode('boat');
       }

@@ -58,6 +58,11 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
     updateRecoil(guns,boat){return recoil?.update(guns,boat)??false;},
     updateDamage(boat){
       if(destroyed)return false;
+      let updated=false;
+      if(assembly){
+        assembly.state.syncVesselDamage(boat?.damage,boat);
+        if(assembly.update())updated=true;
+      }
       const pending=boat?.damage?.pendingBakes;
       if(mesh instanceof Float32Array&&Array.isArray(pending)&&pending.length>0){
         const batch=pending.splice(0,6);
@@ -67,7 +72,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
           return true;
         }
       }
-      return false;
+      return updated;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;

@@ -7,7 +7,7 @@ import { SHIP_MODELS } from './ship-models.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
-import { locatePartAtLocalPoint, isSuperstructurePartId } from './part-assembly.js';
+import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -3683,20 +3683,41 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       kindCode,
     };
   }
+  let cachedScaleLen=NaN,cachedScaleBeam=NaN,cachedScaleModelId=null;
+  function syncScaledGuns(){
+    const mId=boat?.model?.id??boat?.modelId??'nina';
+    const len=Number(boat?.length)||0,bm=Number(boat?.beam)||0;
+    if(mId===cachedScaleModelId&&Math.abs(len-cachedScaleLen)<1e-4&&Math.abs(bm-cachedScaleBeam)<1e-4)return;
+    cachedScaleModelId=mId;cachedScaleLen=len;cachedScaleBeam=bm;
+    const spec=computeArchetypeScaleSpec({modelId:mId,length:len||undefined,beam:bm||undefined});
+    boat.scaleSpec=spec;
+    for(const g of state.guns){
+      const disabled=!spec.isDefaultScale&&spec.defaultGunCount>0&&!spec.activeGunIds.has(g.id);
+      g.disabledByScale=disabled;
+      if(disabled){
+        g.loading=false;
+        g.queued=false;
+        if(g.stage==='ready')g.stage='secured';
+      }
+    }
+  }
+  syncScaledGuns();
   const canFire=side=>{
+    syncScaledGuns();
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     let count=0;
     for(const g of state.guns){
-      if(g.side!==side)continue;
+      if(g.disabledByScale||g.side!==side)continue;
       count++;
       if(g.stage!=='ready'||!attended(g)||muzzleBlock(g,gunMuzzlePose(g,boat)))return false;
     }
     return count>0;
   };
   const canFireLoaded=side=>{
+    syncScaledGuns();
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     for(const g of state.guns){
-      if(g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
+      if(!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
     }
     return false;
   };
@@ -3743,6 +3764,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       return fireAtWillMode;
     },
     prepare(side){
+      syncScaledGuns();
       if(!sideValid(side))return false;
       if(pending||state.queue.length)return false;
       const changed=boat.gunnerySide!==side;
@@ -3752,10 +3774,11 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       return count>0||changed;
     },
     readyAtQuarters(side){
+      syncScaledGuns();
       if(!sideValid(side))return false;
       pending=null;state.queue.length=0;
       boat.gunnerySide=side;prepared=true;lastReady=true;
-      for(const g of state.guns)if(g.side===side){
+      for(const g of state.guns)if(!g.disabledByScale&&g.side===side){
         g.stage='ready';g.loading=false;g.progress=1;g.offset=0;g.queued=false;
       }
       return true;
@@ -3777,6 +3800,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       for(const g of state.guns){g.queued=false;g.loading=false;}
     },
     update(dt,wind){
+      syncScaledGuns();
       if(boat.damage?.settledWreck&&state.projectiles.length===0)return [];
       stepVesselDamage(boat,dt,getTerrain?.());
       if(boat.damage?.sunk){
@@ -3888,7 +3912,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       lastReady=ready;return events;
     },
     impact(contact){return resolveGunneryImpact(state,contact.shotId??contact.id,contact);},
-    summary(side){return gunnerySummary(state,side);},
+    summary(side){syncScaledGuns();return gunnerySummary(state,side);},
     canFire,
     canFireLoaded,
     blockedReason(side){

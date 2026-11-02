@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Shared GPU vertex/compute deformation and surface state for part-by-part
-// procedural assembly, exploded views, structural cutaways and per-part wear.
+// procedural assembly, exploded views, structural cutaways, per-part wear,
+// and non-rubberband universal boat part taxonomy scaling.
 
 export const PART_ASSEMBLY_WGSL = /* wgsl */ `
 struct PartAssemblyUniform {
   control:vec4f,
   params:vec4f,
   impacts:array<vec4f,24>,
+  scale:vec4f,
+  section:vec4f,
 };
 struct PartEvaluatedVertex {
   position:vec3f,
@@ -16,6 +19,10 @@ struct PartEvaluatedVertex {
   cutawayAlpha:f32,
   visible:f32,
 };
+fn warpShipSectionZ(z:f32,kWaist:f32)->f32 {
+  let uZ=clamp(z/6.0,-1.0,1.0);
+  return z+kWaist*z*(1.0-uZ*uZ);
+}
 fn evaluatePartAssemblyVertex(
   position:vec3f,
   normal:vec3f,
@@ -31,9 +38,13 @@ fn evaluatePartAssemblyVertex(
   let appearStart=desc0.x;
   let appearEnd=max(appearStart+0.001,desc0.y);
   let layer=desc0.z;
+  let descFlags=u32(max(0.0,round(desc0.w)));
+  let scalingMode=(descFlags/16u)&7u;
   let cutawaySide=desc1.w;
+  let sealPortLid=state.x<-0.5;
+  let rawStateAppear=select(state.x,1.0,sealPortLid);
   let windowAppear=smoothstep(appearStart,appearEnd,clamp(u.control.x,0.0,1.0));
-  let appear=clamp(min(windowAppear,state.x),0.0,1.0);
+  let appear=clamp(min(windowAppear,rawStateAppear),0.0,1.0);
   let explode=max(0.0,u.control.y+state.y);
   let wearAndDamage=clamp(u.params.z+state.z,0.0,1.0);
   var cutawayVis=clamp(state.w,0.0,1.0);
@@ -54,12 +65,45 @@ fn evaluatePartAssemblyVertex(
   if(appear<=0.0001 || (cutawayVis<=0.0001 && u.params.w<=0.001)){
     return PartEvaluatedVertex(pivot,normal,0.0,wearAndDamage,0.0,0.0);
   }
+  var workPos=position;
+  var workNorm=normal;
+  var effPivot=pivot;
+  if(sealPortLid){
+    let sideSign=select(1.0,-1.0,pivot.x<0.0);
+    if(workPos.y>pivot.y){
+      workPos+=vec3f(-sideSign*0.18,-0.303,0.0);
+    }else{
+      workPos.x-=sideSign*0.004;
+    }
+    workNorm=vec3f(sideSign,0.0,0.0);
+  }
+  if(u.scale.w>0.5){
+    let kWaist=u.section.x;
+    let deckRefY=u.section.y;
+    let rigHScale=u.scale.y;
+    let invRelX=u.section.z;
+    let invRelZ=u.section.w;
+    effPivot.z=warpShipSectionZ(pivot.z,kWaist);
+    if(layer>=3.5 && workPos.y>deckRefY){
+      effPivot.y=deckRefY+(pivot.y-deckRefY)*rigHScale;
+    }
+    if(scalingMode==1u){
+      workPos.x=effPivot.x+(workPos.x-pivot.x)*invRelX;
+      workPos.y=effPivot.y+(workPos.y-pivot.y)*invRelX;
+      workPos.z=effPivot.z+(workPos.z-pivot.z)*invRelZ;
+    }else{
+      workPos.z=warpShipSectionZ(workPos.z,kWaist);
+      if(layer>=3.5 && workPos.y>deckRefY){
+        workPos.y=deckRefY+(workPos.y-deckRefY)*rigHScale;
+      }
+    }
+  }
   let flyIn=1.0-appear;
   let scaleIn=smoothstep(0.0,0.28,appear);
   let arcLift=sin(appear*3.14159265)*flyIn*u.params.y;
   let displacement=explodedOffset*(explode+flyIn*u.params.x)+vec3f(0.0,arcLift,0.0);
-  let posedPos=pivot+(position-pivot)*scaleIn+displacement;
-  return PartEvaluatedVertex(posedPos,normal,appear,wearAndDamage,cutawayVis,1.0);
+  let posedPos=effPivot+(workPos-effPivot)*scaleIn+displacement;
+  return PartEvaluatedVertex(posedPos,workNorm,appear,wearAndDamage,cutawayVis,1.0);
 }
 fn applyPartSurfaceState(albedo:vec3f,roughness:f32,wearAndDamage:f32,cutawayAlpha:f32)->vec4f {
   let w=clamp(wearAndDamage,0.0,1.0);

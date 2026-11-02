@@ -7,6 +7,17 @@
 
 import { deepFreeze } from './rig-definition.js';
 import { PART_ASSEMBLY_POSE_UPDATE } from './wgsl/part-assembly.js';
+import {
+  PART_SCALING_MODES,
+  UNIVERSAL_PART_TAXONOMY,
+  expandShipPartGroups,
+  classifyShipPartTaxonomy,
+  computeArchetypeScaleSpec,
+  evaluatePartScaleActivity,
+  ARCHETYPE_SCALE_PRESETS,
+} from './ship-part-taxonomy.js';
+
+export { PART_SCALING_MODES, UNIVERSAL_PART_TAXONOMY, classifyShipPartTaxonomy, computeArchetypeScaleSpec, evaluatePartScaleActivity, ARCHETYPE_SCALE_PRESETS } from './ship-part-taxonomy.js';
 
 export const SHIP_SUB_ASSEMBLIES = Object.freeze([
   Object.freeze({ id: 'keel-and-frame', index: 0, layer: 0, label: 'Keel, Stem, Sternpost & Frames' }),
@@ -328,9 +339,10 @@ export function createPartAssemblyCatalog({
   const taxonomy = domain === 'building' ? BUILDING_SUB_ASSEMBLIES : SHIP_SUB_ASSEMBLIES;
 
   // Normalize group index ranges (groups in ships use firstVertex/vertexCount in raw stream = index offsets)
+  const sourceGroups = domain === 'ship' ? expandShipPartGroups(modelId, groups, vertices, indices) : groups;
   const rawRanges = [];
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
+  for (let i = 0; i < sourceGroups.length; i++) {
+    const g = sourceGroups[i];
     const firstIndex = Number.isInteger(g.firstIndex) ? g.firstIndex : (g.firstVertex ?? 0);
     const count = Number.isInteger(g.indexCount) ? g.indexCount : (g.vertexCount ?? 0);
     const clampedFirst = Math.max(0, Math.min(indexCount, firstIndex));
@@ -490,6 +502,7 @@ export function createPartAssemblyCatalog({
       domain === 'building'
         ? partAssemblyClassifyBuilding(g, bounds)
         : partAssemblyClassifyShip(g, bounds);
+    const shipTaxonomy = domain === 'ship' ? classifyShipPartTaxonomy(modelId, g) : null;
     const explicitPivot = Array.isArray(g.pivot)
       ? g.pivot
       : Array.isArray(g.motion?.pivot)
@@ -497,9 +510,11 @@ export function createPartAssemblyCatalog({
         : Array.isArray(g.motion?.point)
           ? g.motion.point
           : null;
-    const pivot = explicitPivot
-      ? [explicitPivot[0], explicitPivot[1], explicitPivot[2]]
-      : [centroid[0], classification.layer === 0 ? centroid[1] : min[1], centroid[2]];
+    const pivot = shipTaxonomy?.isPortLid
+      ? [centroid[0], centroid[1], centroid[2]]
+      : explicitPivot
+        ? [explicitPivot[0], explicitPivot[1], explicitPivot[2]]
+        : [centroid[0], classification.layer === 0 ? centroid[1] : min[1], centroid[2]];
     const explodedOffset = partAssemblyComputeExplodedOffset(
       domain,
       classification.subAssemblyIndex,
@@ -523,6 +538,9 @@ export function createPartAssemblyCatalog({
       triangleCount: leafTriCounts[p],
       totalTriangleCount: Math.floor(r.span / 3),
       ...classification,
+      taxonomy: shipTaxonomy,
+      scalingMode: shipTaxonomy?.scalingMode ?? 'section-loft',
+      scalingModeCode: shipTaxonomy?.scalingModeCode ?? 2,
       variantMask: g.variantMask ?? variantMask,
       bounds: { min: Object.freeze(min), max: Object.freeze(max) },
       centroid: Object.freeze(centroid),
@@ -583,16 +601,17 @@ export function createPartAssemblyCatalog({
   }
 
   // Build GPU-ready per-part descriptor table (2 vec4f = 8 floats per part)
-  // desc0: [appearStart, appearEnd, layer, subAssemblyIndex]
+  // desc0: [appearStart, appearEnd, layer, subAssemblyIndex + scalingModeCode*16 + isPortLid*128]
   // desc1: [pivot.x, pivot.y, pivot.z, cutawaySide]
   const partDescriptors = new Float32Array(partCount * 8);
   for (let p = 0; p < partCount; p++) {
     const part = parts[p];
     const base = p * 8;
+    const modeBits = (part.scalingModeCode ?? 2) * 16 + (part.taxonomy?.isPortLid ? 128 : 0);
     partDescriptors[base + 0] = part.assemblyWindow[0];
     partDescriptors[base + 1] = part.assemblyWindow[1];
     partDescriptors[base + 2] = part.layer;
-    partDescriptors[base + 3] = part.subAssemblyIndex;
+    partDescriptors[base + 3] = part.subAssemblyIndex + modeBits;
     partDescriptors[base + 4] = part.pivot[0];
     partDescriptors[base + 5] = part.pivot[1];
     partDescriptors[base + 6] = part.pivot[2];
@@ -708,13 +727,22 @@ export function createPartAssemblyState(catalog, options = {}) {
   let revision = 0;
   let hasPartOverrides = false;
   let hasImpactSites = false;
+  let hasScaleOverrides = false;
+  let currentScaleSpec = null;
   const impactSites = new Float32Array(24 * 4);
+  // scale: [relX, rigHeightScale, relZ, scaleActive], section: [waistWarpK, deckRefY, invRelX, invRelZ]
+  const scaleUniform = new Float32Array([1, 1, 1, 0, 0, 0.65, 1, 1]);
+
+  const warpSectionZ = (z, kWaist) => {
+    const uZ = Math.max(-1, Math.min(1, z / 6.0));
+    return z + kWaist * z * (1.0 - uZ * uZ);
+  };
 
   const resolvePartIndex = (partIdOrNumber) => {
     if (typeof partIdOrNumber === 'number') {
       return partIdOrNumber >= 0 && partIdOrNumber < partCount ? partIdOrNumber : -1;
     }
-    const found = catalog.partsById[partIdOrNumber];
+    const found = catalog.partsById[partIdOrNumber] ?? catalog.parts.find((p) => p.nodeId === partIdOrNumber);
     return found ? found.partNumber : -1;
   };
 
@@ -723,6 +751,10 @@ export function createPartAssemblyState(catalog, options = {}) {
     partState,
     uniform,
     impactSites,
+    scaleUniform,
+    get scaleSpec() {
+      return currentScaleSpec;
+    },
     get revision() {
       return revision;
     },
@@ -730,6 +762,7 @@ export function createPartAssemblyState(catalog, options = {}) {
       return (
         !hasPartOverrides &&
         !hasImpactSites &&
+        !hasScaleOverrides &&
         Math.abs(uniform[0] - 1.0) < 1e-6 &&
         Math.abs(uniform[1]) < 1e-6 &&
         (Math.abs(uniform[2]) < 1e-6 || uniform[3] === 0) &&
@@ -831,20 +864,57 @@ export function createPartAssemblyState(catalog, options = {}) {
         partState[p * 4 + 3] = 1.0;
       }
       impactSites.fill(0);
+      scaleUniform.set([1, 1, 1, 0, 0, 0.65, 1, 1]);
+      currentScaleSpec = null;
       hasPartOverrides = false;
       hasImpactSites = false;
+      hasScaleOverrides = false;
       revision++;
       return state;
     },
-    syncVesselDamage(damage) {
+    syncVesselScale(boatOrSpec) {
+      state.syncVesselDamage(boatOrSpec?.damage ?? null, boatOrSpec);
+      return currentScaleSpec;
+    },
+    syncVesselDamage(damage, boatOrSpec = null) {
       const partDamage = damage?.partDamage ?? null;
       const sites = Array.isArray(damage?.impactSites) ? damage.impactSites : null;
       const hasAnyPartDamage = partDamage && Object.keys(partDamage).length > 0;
       const hasAnySites = sites && sites.length > 0;
-      if (!hasAnyPartDamage && !hasAnySites && !hasPartOverrides && !hasImpactSites) {
+      const spec =
+        catalog.domain === 'ship' && boatOrSpec
+          ? computeArchetypeScaleSpec({
+              modelId: catalog.modelId,
+              length: boatOrSpec.length,
+              beam: boatOrSpec.beam,
+            })
+          : currentScaleSpec;
+      currentScaleSpec = spec;
+      const isScaled = Boolean(spec && !spec.isDefaultScale);
+      if (!hasAnyPartDamage && !hasAnySites && !isScaled && !hasPartOverrides && !hasImpactSites && !hasScaleOverrides) {
         return false;
       }
       let changed = false;
+      const nextScaleU = isScaled
+        ? [
+            spec.beamScale,
+            spec.rigHeightScale,
+            spec.lengthScale,
+            1.0,
+            spec.waistWarpK,
+            spec.deckRefY,
+            Math.max(0.62, Math.min(1.55, 1.0 / spec.beamScale)),
+            Math.max(0.62, Math.min(1.55, 1.0 / spec.lengthScale)),
+          ]
+        : [1, 1, 1, 0, 0, 0.65, 1, 1];
+      for (let i = 0; i < 8; i++) {
+        if (Math.abs(scaleUniform[i] - nextScaleU[i]) > 1e-5) {
+          scaleUniform[i] = nextScaleU[i];
+          changed = true;
+        }
+      }
+      hasScaleOverrides = isScaled;
+
       let anyOverrides = false;
       for (let p = 0; p < partCount; p++) {
         const part = catalog.parts[p];
@@ -871,7 +941,15 @@ export function createPartAssemblyState(catalog, options = {}) {
           !part.id.startsWith('gun') &&
           !part.id.startsWith('helm') &&
           !part.id.startsWith('boat.');
-        const nextAppear = isBreakable && dmg >= 0.65 ? 0.0 : 1.0;
+        const scaleActivity = isScaled ? evaluatePartScaleActivity(part.taxonomy, spec) : { active: true, sealPortLid: false };
+        let nextAppear = 1.0;
+        if (!scaleActivity.active) {
+          nextAppear = 0.0;
+        } else if (scaleActivity.sealPortLid) {
+          nextAppear = -1.0;
+        } else if (isBreakable && dmg >= 0.65) {
+          nextAppear = 0.0;
+        }
         const nextExplode = 0.0;
         const nextWear = isContinuousSkin ? Math.min(0.28, dmg * 0.35) : dmg;
         const base = p * 4;
@@ -885,7 +963,7 @@ export function createPartAssemblyState(catalog, options = {}) {
           partState[base + 2] = nextWear;
           changed = true;
         }
-        if (nextAppear < 0.999 || nextExplode > 1e-5 || nextWear > 1e-5 || partState[base + 3] < 0.999) {
+        if (Math.abs(nextAppear - 1.0) > 1e-3 || nextExplode > 1e-5 || nextWear > 1e-5 || partState[base + 3] < 0.999) {
           anyOverrides = true;
         }
       }
@@ -924,7 +1002,9 @@ export function createPartAssemblyState(catalog, options = {}) {
       const base = idx * 4;
       const [appearStart, appearEnd] = part.assemblyWindow;
       const windowAppear = partAssemblySmoothstep(appearStart, appearEnd, uniform[0]);
-      const appear = Math.max(0, Math.min(1, Math.min(windowAppear, partState[base + 0])));
+      const sealPortLid = partState[base + 0] < -0.5;
+      const rawAppear = sealPortLid ? 1.0 : partState[base + 0];
+      const appear = Math.max(0, Math.min(1, Math.min(windowAppear, rawAppear)));
       const explode = Math.max(0, uniform[1] + partState[base + 1]);
       const wearAndDamage = Math.max(0, Math.min(1, uniform[6] + partState[base + 2]));
       let cutawayVis = Math.max(0, Math.min(1, partState[base + 3]));
@@ -956,6 +1036,9 @@ export function createPartAssemblyState(catalog, options = {}) {
         id: part.id,
         subAssembly: part.subAssembly,
         layer: part.layer,
+        scalingMode: part.scalingMode,
+        scalingModeCode: part.scalingModeCode,
+        sealPortLid,
         appear,
         explode,
         wearAndDamage,
@@ -969,6 +1052,12 @@ export function createPartAssemblyState(catalog, options = {}) {
     applyToVertices(sourceVertices, targetVertices = new Float32Array(sourceVertices), stride = catalog.vertexStride ?? 9) {
       const vCount = Math.min(catalog.vertexCount, Math.floor(sourceVertices.length / stride));
       const poses = Array.from({ length: partCount }, (_, p) => state.evaluatePartPose(p));
+      const scaleActive = scaleUniform[3] > 0.5;
+      const kWaist = scaleUniform[4];
+      const deckRefY = scaleUniform[5];
+      const rigHScale = scaleUniform[1];
+      const invRelX = scaleUniform[6];
+      const invRelZ = scaleUniform[7];
       for (let v = 0; v < vCount; v++) {
         const pIdx = catalog.vertexPartIds[v];
         const pose = poses[pIdx];
@@ -979,10 +1068,41 @@ export function createPartAssemblyState(catalog, options = {}) {
           targetVertices[at + 2] = pose.pivot[2];
           continue;
         }
-        const px = sourceVertices[at + 0], py = sourceVertices[at + 1], pz = sourceVertices[at + 2];
-        targetVertices[at + 0] = pose.pivot[0] + (px - pose.pivot[0]) * pose.scale + pose.translation[0];
-        targetVertices[at + 1] = pose.pivot[1] + (py - pose.pivot[1]) * pose.scale + pose.translation[1];
-        targetVertices[at + 2] = pose.pivot[2] + (pz - pose.pivot[2]) * pose.scale + pose.translation[2];
+        let px = sourceVertices[at + 0], py = sourceVertices[at + 1], pz = sourceVertices[at + 2];
+        let pivX = pose.pivot[0], pivY = pose.pivot[1], pivZ = pose.pivot[2];
+        if (pose.sealPortLid) {
+          const sideSign = pivX < 0 ? -1 : 1;
+          if (py > pivY) {
+            px += -sideSign * 0.18;
+            py += -0.303;
+          } else {
+            px -= sideSign * 0.004;
+          }
+          if (stride >= 6) {
+            targetVertices[at + 3] = sideSign;
+            targetVertices[at + 4] = 0;
+            targetVertices[at + 5] = 0;
+          }
+        }
+        if (scaleActive) {
+          pivZ = warpSectionZ(pose.pivot[2], kWaist);
+          if (pose.layer >= 3.5 && py > deckRefY) {
+            pivY = deckRefY + (pose.pivot[1] - deckRefY) * rigHScale;
+          }
+          if (pose.scalingModeCode === 1) {
+            px = pivX + (px - pose.pivot[0]) * invRelX;
+            py = pivY + (py - pose.pivot[1]) * invRelX;
+            pz = pivZ + (pz - pose.pivot[2]) * invRelZ;
+          } else {
+            pz = warpSectionZ(pz, kWaist);
+            if (pose.layer >= 3.5 && py > deckRefY) {
+              py = deckRefY + (py - deckRefY) * rigHScale;
+            }
+          }
+        }
+        targetVertices[at + 0] = pivX + (px - pivX) * pose.scale + pose.translation[0];
+        targetVertices[at + 1] = pivY + (py - pivY) * pose.scale + pose.translation[1];
+        targetVertices[at + 2] = pivZ + (pz - pivZ) * pose.scale + pose.translation[2];
       }
       return targetVertices;
     },
@@ -1044,9 +1164,10 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
   });
   device.queue.writeBuffer(stateBuffer, 0, stateController.partState);
 
-  const uniformUpload = new Float32Array(8 + 24 * 4);
+  const uniformUpload = new Float32Array(8 + 24 * 4 + 8);
   uniformUpload.set(stateController.uniform, 0);
   uniformUpload.set(stateController.impactSites, 8);
+  uniformUpload.set(stateController.scaleUniform, 8 + 24 * 4);
   const uniformBuffer = device.createBuffer({
     label: `${catalog.modelId} part assembly uniform`,
     size: uniformUpload.byteLength,
@@ -1087,7 +1208,9 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
       if (nextState.revision === uploadedRevision) return false;
       uniformUpload.set(nextState.uniform, 0);
       if (nextState.impactSites) uniformUpload.set(nextState.impactSites, 8);
-      else uniformUpload.fill(0, 8);
+      else uniformUpload.fill(0, 8, 8 + 24 * 4);
+      if (nextState.scaleUniform) uniformUpload.set(nextState.scaleUniform, 8 + 24 * 4);
+      else uniformUpload.set([1, 1, 1, 0, 0, 0.65, 1, 1], 8 + 24 * 4);
       device.queue.writeBuffer(stateBuffer, 0, nextState.partState);
       device.queue.writeBuffer(uniformBuffer, 0, uniformUpload);
       uploadedRevision = nextState.revision;

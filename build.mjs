@@ -41,6 +41,7 @@ order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js'
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/part-assembly.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.js');
+order.splice(order.indexOf('js/boat.js'),0,'js/ship-part-taxonomy.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');

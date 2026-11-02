@@ -7,6 +7,7 @@ import {advanceRowing,rowingForces} from './rowing.js';
 import {hullLoftSheer,hullLoftPoint} from './hull-loft.js';
 import { advanceSails, sailForces } from './sailing.js';
 import {createHullLateralDescriptor,evaluateHullLateral} from './hull-lateral.js';
+import {computeArchetypeScaleSpec} from './ship-part-taxonomy.js';
 
 export const KNOT_TO_MPS = 0.514444;
 export const DEFAULT_PROVISION_DAYS = 60;
@@ -390,7 +391,9 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const externalSide=externalX*Math.cos(heading)+externalZ*Math.sin(heading);
   const initial = boatForwardSpeed(boat);
   const attitude=boat.waveAttitude ?? boat.target ?? {roll:0,pitch:0};
-  const sailDriveScale=(modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor;
+  const scaleSpec=computeArchetypeScaleSpec(boat);
+  const archetypeSailScale=scaleSpec.isDefaultScale?1:scaleSpec.sailAreaFactor;
+  const sailDriveScale=(modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor*archetypeSailScale;
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
@@ -511,6 +514,8 @@ function helmDesignStation(boat){
 
 export function crowsNestDesignStation(boat = {}) {
   const modelId = boat.modelId ?? 'nina';
+  const scaleSpec = computeArchetypeScaleSpec(boat);
+  const rigHeightScale = scaleSpec.isDefaultScale ? 1 : scaleSpec.rigHeightScale;
   if (modelId === 'victory') {
     const mainMast = VICTORY_MASTS[1];
     const y = 10.25;
@@ -527,7 +532,7 @@ export function crowsNestDesignStation(boat = {}) {
       headZ,
       eyeX: 0,
       eyeZ: eyeMastZ - 0.32,
-      eyeHeight: eyeY * sy,
+      eyeHeight: eyeY * sy * rigHeightScale,
       pennantLift: headY - y,
       showBasket: 0,
       showPennant: 1,
@@ -598,7 +603,7 @@ export function crowsNestDesignStation(boat = {}) {
       headZ,
       eyeX: 0,
       eyeZ: eyeMastZ - 0.34,
-      eyeHeight: eyeY * sy,
+      eyeHeight: eyeY * sy * rigHeightScale,
       pennantLift: Math.max(0.45, headY - y),
       showBasket,
       showPennant: 1,
@@ -606,11 +611,12 @@ export function crowsNestDesignStation(boat = {}) {
   }
   const sy = vesselVerticalScale(boat);
   const lengthScale = Math.max(0.85, Math.min(1.45, (boat.length || 20) / 20));
-  const y = 7.75;
-  const [, , z] = mastPoint(0, y);
-  const [, headY, headZ] = mastPoint(0, RIG_MASTS[0].height);
+  const mastIdx = !scaleSpec.isDefaultScale && !scaleSpec.activeMasts.includes('fore') ? 1 : 0;
+  const y = mastIdx === 1 ? 6.8 : 7.75;
+  const [, , z] = mastPoint(mastIdx, y);
+  const [, headY, headZ] = mastPoint(mastIdx, RIG_MASTS[mastIdx].height);
   const eyeY = y + 0.88;
-  const [, , eyeMastZ] = mastPoint(0, eyeY);
+  const [, , eyeMastZ] = mastPoint(mastIdx, eyeY);
   return {
     x: 0,
     y,
@@ -621,7 +627,7 @@ export function crowsNestDesignStation(boat = {}) {
     eyeZ: eyeMastZ - 0.34,
     eyeHeight: eyeY * sy * lengthScale,
     pennantLift: headY - y,
-    showBasket: 1,
+    showBasket: mastIdx === 0 ? 1 : 0,
     showPennant: 1,
   };
 }

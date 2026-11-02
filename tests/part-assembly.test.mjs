@@ -5,6 +5,12 @@ import {
   SHIP_SUB_ASSEMBLIES,
   BUILDING_SUB_ASSEMBLIES,
   PART_CUTAWAY_MODES,
+  PART_SCALING_MODES,
+  UNIVERSAL_PART_TAXONOMY,
+  ARCHETYPE_SCALE_PRESETS,
+  classifyShipPartTaxonomy,
+  computeArchetypeScaleSpec,
+  evaluatePartScaleActivity,
   createPartAssemblyCatalog,
   createPartAssemblyState,
   createPartAssemblyGPU,
@@ -179,6 +185,7 @@ test('part-by-part assembly, exploded view, cutaway modes, and per-part damage t
 
   assert.equal(state.partState.length, catalog.partCount * 4);
   assert.equal(state.uniform.length, 8);
+  assert.equal(state.scaleUniform.length, 8);
 
   // At assemblyProgress = 0, no parts have landed yet
   for (let i = 0; i < catalog.partCount; i++) {
@@ -1464,6 +1471,120 @@ test('all 9 ship models have complete part attribution, superstructure classific
   }
   assert.ok(deformedCenterVerts > 0, 'Centerline superstructure vertices (|x| < 0.22) deform on impact');
 });
+
+test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubberband archetype scaling (discrete masts, sail tiers, gunports, sealed port lids, and fixed-size human fittings)', () => {
+  const assetCache = createShipAssetCache();
+  const modelIds = Object.keys(SHIP_MODELS);
+  assert.equal(Object.keys(PART_SCALING_MODES).length, 4);
+  assert.ok(Object.keys(UNIVERSAL_PART_TAXONOMY).length >= 30);
+  assert.equal(ARCHETYPE_SCALE_PRESETS.length, 5);
+
+  // 1. Every ship exposes taxonomy & scaling metadata on both getShipParts and asset.partAssembly
+  for (const modelId of modelIds) {
+    const parts = getShipParts(modelId);
+    assert.ok(parts.scaling, `${modelId} should expose parts.scaling`);
+    assert.equal(parts.scaling.modes, PART_SCALING_MODES);
+    assert.equal(parts.scaling.taxonomy, UNIVERSAL_PART_TAXONOMY);
+
+    const catalog = assetCache.get(modelId).partAssembly;
+    const seenModes = new Set();
+    for (const part of catalog.parts) {
+      assert.ok(part.taxonomy, `${modelId}:${part.id} should have a taxonomy classification`);
+      assert.ok(UNIVERSAL_PART_TAXONOMY[part.taxonomy.taxonomyId], `unknown taxonomyId ${part.taxonomy.taxonomyId}`);
+      assert.ok(PART_SCALING_MODES[part.scalingMode], `unknown scalingMode ${part.scalingMode}`);
+      seenModes.add(part.scalingMode);
+    }
+    assert.ok(seenModes.has('fixed-human'), `${modelId} should have fixed-human ergonomic parts`);
+    assert.ok(seenModes.has('section-loft'), `${modelId} should have section-lofted hull/deck parts`);
+  }
+
+  // 2. HMS Victory non-rubberband scaling across rates:
+  //    - Standard (1.00x): 3 masts, 104 guns, 0 sealed port lids
+  //    - Frigate (0.82x):  3 masts, 62 guns (middle deck dropped), 28 middle-deck lids sealed flush
+  //    - Brig (0.68x):     2 masts (fore+main, mizzen pruned), 30 guns (lower+middle dropped), 68 lids sealed flush
+  //    - Sloop (0.52x):    1 mast (main only), 16 upper-deck guns, 72 lids sealed flush
+  const victoryAsset = assetCache.get('victory');
+  const victoryCatalog = victoryAsset.partAssembly;
+  const victoryState = victoryCatalog.createState();
+
+  const stdBoat = { modelId: 'victory', length: 56.69, beam: 15.85 };
+  const stdSpec = victoryState.syncVesselScale(stdBoat);
+  assert.equal(stdSpec.isDefaultScale, true);
+  assert.deepEqual(stdSpec.activeMasts, ['fore', 'main', 'mizzen']);
+  assert.equal(stdSpec.activeGunCount, 104);
+
+  const frigateBoat = { modelId: 'victory', length: 56.69 * 0.82, beam: 15.85 * 0.86 };
+  const frigateSpec = victoryState.syncVesselScale(frigateBoat);
+  assert.deepEqual(frigateSpec.activeMasts, ['fore', 'main', 'mizzen']);
+  assert.equal(frigateSpec.activeGunCount, 62);
+  assert.ok(!frigateSpec.activeBatteryDecks.includes('middle'), '0.82x Victory drops middle gun deck');
+
+  const brigBoat = { modelId: 'victory', length: 56.69 * 0.68, beam: 15.85 * 0.74 };
+  const brigSpec = victoryState.syncVesselScale(brigBoat);
+  assert.deepEqual(brigSpec.activeMasts, ['fore', 'main']);
+  assert.equal(brigSpec.activeGunCount, 30);
+  assert.equal(victoryState.evaluatePartPose('mast.mizzen').appear, 0, 'Mizzen mast is pruned on 0.68x Brig-Corvette');
+  assert.equal(victoryState.evaluatePartPose('mast.main').appear, 1, 'Main mast remains active on 0.68x Brig-Corvette');
+
+  const sloopBoat = { modelId: 'victory', length: 56.69 * 0.52, beam: 15.85 * 0.58 };
+  const sloopSpec = victoryState.syncVesselScale(sloopBoat);
+  assert.deepEqual(sloopSpec.activeMasts, ['main']);
+  assert.equal(sloopSpec.activeGunCount, 16);
+  assert.equal(victoryState.evaluatePartPose('mast.fore').appear, 0, 'Foremast is pruned on 0.52x Sloop-of-War');
+  assert.equal(victoryState.evaluatePartPose('mast.mizzen').appear, 0, 'Mizzen mast is pruned on 0.52x Sloop-of-War');
+  assert.equal(victoryState.evaluatePartPose('mast.main').appear, 1, 'Mainmast remains on 0.52x Sloop-of-War');
+
+  // Verify omitted gunports have appear = 0 for their cannon/recoil and state.x = -1.0 (sealed lid) for their port lid
+  let sealedLids = 0;
+  let openLids = 0;
+  for (const part of victoryCatalog.parts) {
+    if (part.taxonomy.isPortLid) {
+      const stateX = victoryState.partState[part.partNumber * 4];
+      if (stateX < -0.5) sealedLids++;
+      else openLids++;
+    }
+  }
+  assert.equal(openLids, 16, '16 active upper-deck gunports keep open port lids on 0.52x Sloop-of-War');
+  assert.equal(sealedLids, 88 - 16, '72 omitted gunports seal their port lids flush into the hull on 0.52x Sloop-of-War');
+
+  // Verify fixed-human counter-scaling keeps helm.wheel physical span constant in world space
+  const wheelPart = victoryCatalog.partsById['helm.wheel'];
+  assert.ok(wheelPart && wheelPart.scalingMode === 'fixed-human');
+  const scaledVerts = victoryState.applyToVertices(victoryAsset.vertices);
+  let origRadiusSum = 0;
+  let scaledRadiusSum = 0;
+  let wheelVertCount = 0;
+  const [px, py, pz] = wheelPart.pivot;
+  for (let i = 0; i < victoryAsset.indices.length; i++) {
+    const v = victoryAsset.indices[i];
+    if (victoryCatalog.vertexPartIds[v] !== wheelPart.partNumber) continue;
+    const off = v * 9;
+    const odx = victoryAsset.vertices[off] - px;
+    const ody = victoryAsset.vertices[off + 1] - py;
+    const sdx = scaledVerts[off] - px;
+    const sdy = scaledVerts[off + 1] - py;
+    origRadiusSum += Math.hypot(odx, ody);
+    scaledRadiusSum += Math.hypot(sdx, sdy);
+    wheelVertCount++;
+  }
+  assert.ok(wheelVertCount > 0);
+  // Because the hull scales down by ~0.58x in beam/vertical, fixed-human parts expand in local design space (> 1.35x)
+  // so that after hull transform they preserve human-sized ergonomics instead of shrinking like a toy wheel
+  assert.ok(scaledRadiusSum / origRadiusSum > 1.35, 'helm.wheel counter-scales in design space to preserve fixed human size in world space');
+
+  // Verify ShipGunnery syncs activeGunIds with vessel scale
+  const victoryGuns = createShipGunnery(sloopBoat);
+  const portSummary = victoryGuns.summary('port');
+  const stbdSummary = victoryGuns.summary('starboard');
+  assert.equal(portSummary.total, 8, '0.52x Victory Sloop-of-War has 8 active port guns');
+  assert.equal(stbdSummary.total, 8, '0.52x Victory Sloop-of-War has 8 active starboard guns');
+
+  // 3. Rowing vessel discrete oar station quantization (Oseberg 15 pairs -> 8 pairs at 0.52x)
+  const osebergSpec = computeArchetypeScaleSpec({ modelId: 'oseberg', length: 21.58 * 0.52, beam: 5.1 * 0.58 });
+  assert.equal(osebergSpec.defaultOarPairs, 15);
+  assert.equal(osebergSpec.activeOarPairs, 8);
+});
+
 
 
 

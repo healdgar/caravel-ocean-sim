@@ -61,6 +61,7 @@ import { createVesselPose, POSED_VERTEX_LAYOUT, withPosedVesselVertices } from '
 import { VESSEL_POSE_UPDATE, VESSEL_SURFACE_POSE_UPDATE } from './wgsl/vessel-pose.js';
 import {getShipModel} from './ship-models.js';
 import {getShipParts} from './ship-parts.js';
+import {ARCHETYPE_SCALE_PRESETS, computeArchetypeScaleSpec} from './ship-part-taxonomy.js';
 import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS } from './crew.js';
@@ -924,9 +925,12 @@ async function main() {
   cam.yaw=landfallCameraYaw(LAND_STAGE,cameraMode,qs.has('cam'),cam.yaw);
   const propulsion = propulsionFromLink(qs);
   const defaultCanvas = BROADSIDE_SCENARIO ? 0.55 : 1;
+  const scalePresetParam = ARCHETYPE_SCALE_PRESETS.find(p => p.id === qs.get('shipScale'));
+  const baseBoatLength = SHIP_ID!=='nina'?shipAsset.model.runtime.length:DEFAULT_BOAT_LENGTH;
+  const baseBoatBeam = SHIP_ID!=='nina'?shipAsset.model.runtime.beam:DEFAULT_BOAT_BEAM;
   const boat = {
-    modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: SHIP_ID!=='nina'?shipAsset.model.runtime.length:param('boatLength', DEFAULT_BOAT_LENGTH, 3, 100),
-    beam: SHIP_ID!=='nina'?shipAsset.model.runtime.beam:param('boatBeam', DEFAULT_BOAT_BEAM, 1, 20), heading: param('boatHeading', LAND_STAGE?((activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE]).heading??0):BROADSIDE_SCENARIO?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
+    modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', scalePresetParam?+(baseBoatLength*scalePresetParam.lengthFactor).toFixed(2):baseBoatLength, 3, 100),
+    beam: param('boatBeam', scalePresetParam?+(baseBoatBeam*scalePresetParam.beamFactor).toFixed(2):baseBoatBeam, 1, 24), heading: param('boatHeading', LAND_STAGE?((activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE]).heading??0):BROADSIDE_SCENARIO?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
     propulsion, sailFore:param('sailFore',defaultCanvas,0,1), sailMain:param('sailMain',defaultCanvas,0,1), sailMizzen:param('sailMizzen',defaultCanvas,0,1),
     speed: param('boatSpeed', LAND_STAGE === 'dock' ? 1.5 : BROADSIDE_SCENARIO ? 4.2 : 6, 0, 40), eye: param('boatEye',SHIP_ID!=='nina'?shipAsset.model.nodes['helm.camera'].position[1]*shipAsset.model.designFrame.verticalScale:HELM_EYE_HEIGHT,1,25),
     provisionDays:param('provisionDays',getShipParts(SHIP_ID).loading.provisionDays,0,120),cargoTonnes:param('cargoTonnes',0,0,40),
@@ -2698,8 +2702,39 @@ async function main() {
   const shipChoice=document.createElement('label');shipChoice.textContent='Vessel';
   const shipSelect=document.createElement('select');shipSelect.id='ship-model';shipSelect.setAttribute('aria-label','Vessel');
   for(const model of READY_SHIPS){const option=document.createElement('option');option.value=model.id;option.textContent=model.name;shipSelect.append(option);}
-  shipSelect.value=SHIP_ID;shipSelect.onchange=()=>{const url=new URL(location.href);url.searchParams.set('ship',shipSelect.value);for(const key of ['boatLength','boatBeam','boatEye','cam'])url.searchParams.delete(key);location.assign(url.href);};
+  shipSelect.value=SHIP_ID;shipSelect.onchange=()=>{const url=new URL(location.href);url.searchParams.set('ship',shipSelect.value);for(const key of ['boatLength','boatBeam','boatEye','cam','shipScale'])url.searchParams.delete(key);location.assign(url.href);};
   shipChoice.append(shipSelect);boatBody.append(shipChoice);
+  const scaleChoice=document.createElement('label');scaleChoice.textContent='Archetype scale / rate';
+  const scaleSelect=document.createElement('select');scaleSelect.id='ship-scale-preset';scaleSelect.setAttribute('aria-label','Archetype scale / rate');
+  for(const preset of ARCHETYPE_SCALE_PRESETS){const opt=document.createElement('option');opt.value=preset.id;opt.textContent=preset.label;scaleSelect.append(opt);}
+  const customOpt=document.createElement('option');customOpt.value='custom';customOpt.textContent='Custom dimensions';scaleSelect.append(customOpt);
+  scaleChoice.append(scaleSelect);boatBody.append(scaleChoice);
+  const scaleSummaryEl=document.createElement('p');scaleSummaryEl.id='ship-scale-summary';boatBody.append(scaleSummaryEl);
+  const boatDimensionInputs={};
+  const updateScaleSummary=()=>{
+    const spec=computeArchetypeScaleSpec(boat);
+    scaleSummaryEl.textContent=`${spec.summaryLabel} · ${boat.length.toFixed(1)} m × ${boat.beam.toFixed(1)} m (non-rubberband taxonomy scaling: fixed human fittings, modular masts/ports/oars)`;
+    const matchedPreset=ARCHETYPE_SCALE_PRESETS.find(p=>Math.abs(spec.lengthScale-p.lengthFactor)<0.02&&Math.abs(spec.beamScale-p.beamFactor)<0.03);
+    scaleSelect.value=matchedPreset?matchedPreset.id:'custom';
+    for(const [i,groupId] of ['fore','main','mizzen'].entries()){
+      const sailRow=sailInputs?.[i]?.input?.closest('label');
+      if(sailRow)sailRow.hidden=!activeSailGroups.has(groupId)||!spec.activeMastSet.has(groupId);
+    }
+  };
+  scaleSelect.onchange=()=>{
+    const preset=ARCHETYPE_SCALE_PRESETS.find(p=>p.id===scaleSelect.value);
+    if(!preset)return;
+    const defL=shipAsset.model.runtime.length,defB=shipAsset.model.runtime.beam;
+    boat.length=+(defL*preset.lengthFactor).toFixed(1);
+    boat.beam=+(defB*preset.beamFactor).toFixed(1);
+    if(boatDimensionInputs.length)boatDimensionInputs.length.value=String(boat.length);
+    if(boatDimensionInputs.beam)boatDimensionInputs.beam.value=String(boat.beam);
+    boat.revision++;
+    shipGuns?.syncScaledGuns?.();
+    gunControls?.update?.(true);
+    anchor.reset(boat);boat.externalForce=anchor.force;updateAnchorUI();
+    updateScaleSummary();
+  };
   if(SHIP_ID==='victory'){const spec=document.createElement('p');spec.textContent='1805 reconstruction · 56.69 m gun deck · 15.85 m beam · 104 guns. Twelve visible hands represent a working watch; the loading model accounts for 820 aboard.';boatBody.append(spec);}
   else if(SHIP_ID!=='nina'){
     const model=getShipModel(SHIP_ID),parts=getShipParts(SHIP_ID),spec=document.createElement('p');
@@ -2730,7 +2765,7 @@ async function main() {
     input.oninput=()=>{if(input.validity.valid&&input.value!=='')boat.rowingCadence=Number(input.value)/60;};row.append(name,input);boatBody.append(row);
   }
   for (const [key, label, min, max, step] of [
-    ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 20, 0.1],
+    ['length', 'Length (m)', 3, 100, 0.5], ['beam', 'Beam (m)', 1, 24, 0.1],
     ['heading', 'Heading (°)', 0, 360, 1], ['speed', 'Calm-water speed (kn)', 0, 40, 0.5],
     ['eye', 'Camera height (m)', 1, 15, 0.1],
   ]) {
@@ -2738,12 +2773,17 @@ async function main() {
     const name = document.createElement('span'); name.textContent = label;
     const input = document.createElement('input');
     Object.assign(input, { type: 'number', min, max, step, value: boat[key], id: 'boat-' + key });
-    if(SHIP_ID!=='nina' && (key==='length'||key==='beam'))input.readOnly=true;
+    if(key==='length'||key==='beam')boatDimensionInputs[key]=input;
     input.addEventListener('input', () => {
       if (!input.validity.valid || input.value === '') return;
       boat[key] = Number(input.value);
       if (key === 'length' || key === 'beam' || key === 'heading') {
         boat.revision++;
+        if (key === 'length' || key === 'beam') {
+          shipGuns?.syncScaledGuns?.();
+          gunControls?.update?.(true);
+          updateScaleSummary();
+        }
         // Explicit hull edits rebuild its anchor attachment. Ordinary wave,
         // weather and sail revisions retain the deployed world-space anchor.
         anchor.reset(boat);boat.externalForce=anchor.force;updateAnchorUI();
@@ -2752,6 +2792,7 @@ async function main() {
     row.append(name, input); boatBody.append(row);
     if(key==='speed')speedRow=row;
   }
+  updateScaleSummary();
   const loadingPanel=document.createElement('details');loadingPanel.id='boat-loading';
   const loadingTitle=document.createElement('summary');loadingTitle.textContent='Supplies and cargo';loadingPanel.append(loadingTitle);
   for(const [key,label,max,step] of [['provisionDays','Provisions for '+getShipParts(SHIP_ID).loading.manifest.crew+' (days)',120,5],['cargoTonnes','Additional cargo (t)',40,.5]]){
