@@ -1156,6 +1156,28 @@ async function main() {
   let spyglassTracking = false;
   let spyglassYawOffset = 0;
   let spyglassPitchOffset = 0;
+  let spyglassPrevCameraMode = null;
+  let spyglassPrevStation = null;
+  const boatViewYawOffset = () => (boat.enabled && boat.viewStation !== 'crows-nest') ? (boat.eyeSide ?? 1) * 15 * D2R : 0;
+
+  function findSpyglassTargetVessel() {
+    if (!followerEnabled) return null;
+    let best = null, bestScore = Infinity;
+    for (let i = 1; i < vessels.length; i++) {
+      const v = vessels[i];
+      if (!v || v.dormantEncounter || !v.boat?.showProw || v.boat?.damage?.sunk) continue;
+      const dx = (v.boat.x ?? 0) - (boat.x ?? 0);
+      const dz = (v.boat.z ?? 0) - (boat.z ?? 0);
+      const dist = Math.hypot(dx, dz);
+      const score = v.faction === 'enemy' ? dist : dist + 15000;
+      if (score < bestScore) {
+        bestScore = score;
+        best = v;
+      }
+    }
+    return best;
+  }
+
   const spyglassStyle = document.createElement('style');
   spyglassStyle.textContent = `
     body.spyglass-active #voyage-hud {
@@ -1191,7 +1213,7 @@ async function main() {
 
   function updateSpyglassReadout() {
     if (!spyglassActive || !spyglassReadoutEl) return;
-    const targetV = followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1] : null;
+    const targetV = findSpyglassTargetVessel();
     if (targetV?.boat) {
       const tb = targetV.boat;
       const dx = (tb.x ?? 0) - (boat.x ?? 0), dz = (tb.z ?? 0) - (boat.z ?? 0);
@@ -1201,7 +1223,7 @@ async function main() {
       const colorsInfo = getShipColorsInfo(tb.colors);
       spyglassReadoutEl.textContent = `${tb.shipName || 'Sighted Vessel'} · ${colorsInfo.shortLabel} · Range ${distM} m · Bearing ${brgDeg}° · Hull ${hullPct}%`;
     } else {
-      const lookBrg = Math.round((((boat.heading || 0) + (cam.yaw / D2R)) % 360 + 360) % 360);
+      const lookBrg = Math.round((((boat.heading || 0) + ((cam.yaw + boatViewYawOffset()) / D2R)) % 360 + 360) % 360);
       spyglassReadoutEl.textContent = `Horizon bearing ${lookBrg}° · Drag mouse or ↑↓←→ to sweep the horizon`;
     }
   }
@@ -1215,7 +1237,7 @@ async function main() {
     boatEyePosition(eyePosition, boat);
     cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
     const tx = targetBoat.x ?? 0;
-    const ty = (targetBoat.heave ?? 0) + 4.2;
+    const ty = (targetBoat.heave ?? 0) + Math.max(3.5, 2.2 * vesselVerticalScale(targetBoat));
     const tz = targetBoat.z ?? 0;
     const dx = tx - cam.x, dy = ty - cam.y, dz = tz - cam.z;
     const len = Math.hypot(dx, dy, dz) || 1;
@@ -1232,10 +1254,10 @@ async function main() {
     const fx = cr * xx + sr * yy;
     const fy = -sr * xx + cr * yy;
     const viewYaw = Math.atan2(fx, -fz);
-    const baseYaw = viewYaw - (boat.eyeSide ?? 1) * 15 * D2R;
+    const baseYaw = viewYaw - boatViewYawOffset();
     const basePitch = Math.asin(Math.max(-1, Math.min(1, fy)));
     cam.yaw = baseYaw + yawOffset;
-    cam.pitch = Math.max(-0.6, Math.min(0.45, basePitch + pitchOffset));
+    cam.pitch = Math.max(-1.25, Math.min(0.85, basePitch + pitchOffset));
   }
 
   function setSpyglassActive(active, targetBoat = null) {
@@ -1246,9 +1268,13 @@ async function main() {
     spyglassOverlay.style.display = spyglassActive ? 'flex' : 'none';
     document.body.classList.toggle('spyglass-active', spyglassActive);
     if (spyglassActive) {
+      if (!prev) {
+        spyglassPrevCameraMode = cameraMode;
+        spyglassPrevStation = boat.viewStation ?? 'deck';
+      }
       spyglassYawOffset = 0;
       spyglassPitchOffset = 0;
-      const autoTarget = targetBoat ?? (followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1].boat : null);
+      const autoTarget = targetBoat ?? findSpyglassTargetVessel()?.boat ?? null;
       if (autoTarget) {
         spyglassTracking = true;
         aimCameraAtVessel(autoTarget, 0, 0);
@@ -1258,13 +1284,32 @@ async function main() {
         if (typeof setCameraMode === 'function') setCameraMode('boat');
         else { cameraMode = 'boat'; boat.enabled = true; }
         stepBoatView(boat, 2.5);
+        boatEyePosition(eyePosition, boat);
+        cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+        cam.pitch = -2.5 * D2R;
       }
       cam.fovY = SPYGLASS_FOV_Y;
       updateSpyglassReadout();
     } else {
       spyglassTracking = false;
       cam.fovY = BASE_FOV_Y;
+      if (prev && spyglassPrevCameraMode) {
+        const restoreMode = spyglassPrevCameraMode;
+        const restoreStation = spyglassPrevStation ?? 'deck';
+        spyglassPrevCameraMode = null;
+        spyglassPrevStation = null;
+        if (cameraMode === 'boat' && boat.viewStation === 'crows-nest') {
+          setBoatViewStation(boat, restoreStation);
+          if (restoreMode !== 'boat' && typeof setCameraMode === 'function') {
+            setCameraMode(restoreMode);
+          } else {
+            boatEyePosition(eyePosition, boat);
+            cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+          }
+        }
+      }
     }
+    if (typeof updateHelp === 'function') updateHelp();
     helm?.update?.(performance.now(), true);
   }
   spyglassCloseBtn?.addEventListener('click', () => setSpyglassActive(false));
@@ -1279,14 +1324,27 @@ async function main() {
     if (e.code === 'KeyP' && !e.repeat) setSimPaused(!simPaused);
     if (e.code === 'KeyX') boat.rudderTarget = 0;
     if (e.code === 'KeyB' && !e.repeat) {
-      if (spyglassActive) setSpyglassActive(false);
+      if (spyglassActive) {
+        spyglassPrevCameraMode = null;
+        spyglassPrevStation = null;
+        setSpyglassActive(false);
+      }
       setCameraMode(boat.enabled ? 'free' : 'boat');
     }
     if (e.code === 'KeyV' && !e.repeat) {
-      const nextSt = boat.viewStation === 'crows-nest' ? 'deck' : 'crows-nest';
-      if (nextSt !== 'crows-nest' && spyglassActive) setSpyglassActive(false);
+      const nextSt = (cameraMode === 'boat' && boat.viewStation === 'crows-nest') ? 'deck' : 'crows-nest';
+      if (nextSt !== 'crows-nest' && spyglassActive) {
+        spyglassPrevCameraMode = null;
+        spyglassPrevStation = null;
+        setSpyglassActive(false);
+      }
       setBoatViewStation(boat, nextSt);
       setCameraMode('boat');
+      boatEyePosition(eyePosition, boat);
+      cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
+      cam.yaw = 0;
+      cam.pitch = (nextSt === 'crows-nest' ? -3.5 : -5.5) * D2R;
+      updateHelp();
       helm?.update?.(performance.now(), true);
     }
     if (e.code === 'KeyZ' && !e.repeat) {
@@ -1472,12 +1530,12 @@ async function main() {
     if (boat.enabled) {
       const walkFwd=(keys.KeyW?1:0)-(keys.KeyS?1:0);
       const walkStrafe=(keys.KeyE?1:0)-(keys.KeyQ?1:0);
-      stepDeckWalk(boat,walkFwd,walkStrafe,cam.yaw+(boat.eyeSide??1)*15*D2R,dt);
+      stepDeckWalk(boat,walkFwd,walkStrafe,cam.yaw+boatViewYawOffset(),dt);
       stepBoatView(boat,dt);
       boatEyePosition(eyePosition,boat);
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
       if (spyglassActive) {
-        const trackBoat = followerEnabled && vessels[1] && !vessels[1].dormantEncounter && vessels[1].boat?.showProw ? vessels[1].boat : null;
+        const trackBoat = findSpyglassTargetVessel()?.boat ?? null;
         if (trackBoat && spyglassTracking) {
           aimCameraAtVessel(trackBoat, spyglassYawOffset, spyglassPitchOffset);
         }
@@ -1627,7 +1685,7 @@ async function main() {
     proj[0] = 1 / tanX; proj[5] = 1 / tanY; proj[11] = -1; proj[14] = near;
     // Look just outside the sail envelope; manual look remains relative to this
     // forward quarter, and the bias follows the captain's smooth tack crossing.
-    const viewYaw=cam.yaw+(boat.enabled?(boat.eyeSide??1)*15*D2R:0);
+    const viewYaw=cam.yaw+boatViewYawOffset();
     const cy = Math.cos(viewYaw), sy = Math.sin(viewYaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     let fx = cp * sy, fy = sp, fz = -cp * cy;            // forward
     let rx = cy, ry = 0, rz = sy;                          // right
@@ -1798,13 +1856,18 @@ async function main() {
     const button=document.createElement('button'); button.textContent=label;
     button.addEventListener('click',()=>{
       shipOrbit.fleet=false;shipOrbit.wildlife=false;
+      if(spyglassActive)setSpyglassActive(false);
       if(mode==='crows-nest'){
         setBoatViewStation(boat,'crows-nest');
         setCameraMode('boat');
+        boatEyePosition(eyePosition,boat);
+        cam.x=eyePosition[0];cam.y=eyePosition[1];cam.z=eyePosition[2];
+        cam.yaw=0;cam.pitch=-3.5*D2R;
       }else{
         if(mode==='boat')setBoatViewStation(boat,'deck');
         setCameraMode(mode);
       }
+      updateHelp();
       setCameraOpen(false);cameraButton.focus();helm?.update?.(performance.now(),true);
     });
     cameraBody.append(button); cameraButtons.set(mode,button);
@@ -2601,18 +2664,30 @@ async function main() {
       void lookHint.offsetWidth;
       lookHint.style.animation='';
     }
-    for(const [mode,button] of cameraButtons) button.setAttribute('aria-pressed',String(mode===cameraMode));
+    for(const [mode,button] of cameraButtons) {
+      const isPressed = mode === 'crows-nest'
+        ? (cameraMode === 'boat' && boat.viewStation === 'crows-nest')
+        : mode === 'boat'
+        ? (cameraMode === 'boat' && boat.viewStation !== 'crows-nest')
+        : mode === cameraMode;
+      button.setAttribute('aria-pressed', String(isPressed));
+    }
   };
   function setCameraMode(mode) {
     if(mode===cameraMode) return;
+    if(mode!=='boat'&&spyglassActive) {
+      spyglassPrevCameraMode=null;
+      spyglassPrevStation=null;
+      setSpyglassActive(false);
+    }
     if(boat.enabled) {
-      const viewYaw=cam.yaw+(boat.eyeSide??1)*15*D2R;
+      const viewYaw=cam.yaw+boatViewYawOffset();
       boatRotate(boatForward,Math.cos(cam.pitch)*Math.sin(viewYaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(viewYaw),boat.heading*D2R,boat.pitch,boat.roll);
       cam.yaw=Math.atan2(boatForward[0],-boatForward[2]);
       cam.pitch=Math.asin(Math.max(-1,Math.min(1,boatForward[1])));
     }
     cameraMode=mode; boat.enabled=mode==='boat';
-    if(boat.enabled) {cam.yaw=0;cam.pitch=-5.5*D2R;boat.eyeSide=boat.sailState?.tack??1;boat.eyeSideVelocity=0;boat.showProw=true;prowToggle.checked=true;}
+    if(boat.enabled) {cam.yaw=0;cam.pitch=(boat.viewStation==='crows-nest'?-3.5:-5.5)*D2R;boat.eyeSide=boat.sailState?.tack??1;boat.eyeSideVelocity=0;boat.showProw=true;prowToggle.checked=true;}
     if(mode==='ship') {shipOrbit.yaw=boat.heading*D2R+1.0;boat.showProw=true;prowToggle.checked=true;}
     if(document.pointerLockElement) document.exitPointerLock();
     for(const k in keys) keys[k]=false;
@@ -2764,11 +2839,24 @@ async function main() {
       shipOrbit.fleet=false;shipOrbit.wildlife=false;
       if(cameraMode==='boat'&&boat.viewStation!=='crows-nest'){
         setBoatViewStation(boat,'crows-nest');
+        boatEyePosition(eyePosition,boat);
+        cam.x=eyePosition[0];cam.y=eyePosition[1];cam.z=eyePosition[2];
+        cam.yaw=0;cam.pitch=-3.5*D2R;
+        updateHelp();
       }else if(cameraMode==='boat'){
-        if(spyglassActive)setSpyglassActive(false);
+        if(spyglassActive){
+          spyglassPrevCameraMode=null;
+          spyglassPrevStation=null;
+          setSpyglassActive(false);
+        }
         setBoatViewStation(boat,'deck');
         setCameraMode('ship');
       }else{
+        if(spyglassActive){
+          spyglassPrevCameraMode=null;
+          spyglassPrevStation=null;
+          setSpyglassActive(false);
+        }
         setBoatViewStation(boat,'deck');
         setCameraMode('boat');
       }

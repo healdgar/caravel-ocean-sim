@@ -516,13 +516,18 @@ export function crowsNestDesignStation(boat = {}) {
     const y = 10.25;
     const [, , z] = victoryMastPoint(1, y);
     const [, headY, headZ] = victoryMastPoint(1, mainMast.height);
+    const sy = vesselVerticalScale(boat);
+    const eyeY = 12.62;
+    const [, , eyeMastZ] = victoryMastPoint(1, eyeY);
     return {
       x: 0,
       y,
       z,
       headY,
       headZ,
-      eyeHeight: 11.2,
+      eyeX: 0,
+      eyeZ: eyeMastZ - 0.32,
+      eyeHeight: eyeY * sy,
       pennantLift: headY - y,
       showBasket: 0,
       showPennant: 1,
@@ -538,6 +543,8 @@ export function crowsNestDesignStation(boat = {}) {
       z: 0,
       headY: deckY + 1.0,
       headZ: 0,
+      eyeX: 0,
+      eyeZ: -0.35,
       eyeHeight: (deckY + 1.5) * sy,
       pennantLift: 0,
       showBasket: 0,
@@ -561,7 +568,7 @@ export function crowsNestDesignStation(boat = {}) {
     );
     let y = headY * 0.86;
     if (modelId === 'flying-cloud') {
-      y = deckY + (headY - deckY) * 0.47;
+      y = 8.48;
     } else if (mastSurfaces.length >= 2) {
       const sorted = [...mastSurfaces].sort((a, b) => a.corners[0][1] - b.corners[0][1]);
       const lowerHeadY = sorted[0].corners[0][1];
@@ -573,13 +580,25 @@ export function crowsNestDesignStation(boat = {}) {
     const headZ = (tallest.z ?? 0) + (tallest.rake ?? 0);
     const sy = additional.frame?.verticalScale ?? 0.8;
     const showBasket = modelId === 'pinta' || modelId === 'santa-maria' ? 1 : 0;
+    let eyeY = y + 0.88;
+    if (modelId === 'santa-maria') {
+      eyeY = 10.46;
+    } else if (modelId === 'flying-cloud') {
+      eyeY = 8.68;
+    } else if (modelId === 'gipsy-moth-iv') {
+      eyeY = 10.48;
+    }
+    const eyeT = Math.max(0, Math.min(1, (eyeY - deckY) / Math.max(0.5, headY - deckY)));
+    const eyeMastZ = (tallest.z ?? 0) + (tallest.rake ?? 0) * eyeT;
     return {
       x: 0,
       y,
       z,
       headY,
       headZ,
-      eyeHeight: (y + 0.95) * sy,
+      eyeX: 0,
+      eyeZ: eyeMastZ - 0.34,
+      eyeHeight: eyeY * sy,
       pennantLift: Math.max(0.45, headY - y),
       showBasket,
       showPennant: 1,
@@ -590,13 +609,17 @@ export function crowsNestDesignStation(boat = {}) {
   const y = 7.75;
   const [, , z] = mastPoint(0, y);
   const [, headY, headZ] = mastPoint(0, RIG_MASTS[0].height);
+  const eyeY = y + 0.88;
+  const [, , eyeMastZ] = mastPoint(0, eyeY);
   return {
     x: 0,
     y,
     z,
     headY,
     headZ,
-    eyeHeight: (y + 0.95) * sy * lengthScale,
+    eyeX: 0,
+    eyeZ: eyeMastZ - 0.34,
+    eyeHeight: eyeY * sy * lengthScale,
     pennantLift: headY - y,
     showBasket: 1,
     showPennant: 1,
@@ -711,9 +734,9 @@ export function boatEyePosition(out, boat) {
     const cn = crowsNestDesignStation(boat);
     boatRotate(
       out,
-      cn.x * (boat.beam || 3.6) / 3.6,
+      (cn.eyeX ?? cn.x) * (boat.beam || 3.6) / 3.6,
       cn.eyeHeight,
-      cn.z * (boat.length || 12) / 12,
+      (cn.eyeZ ?? cn.z) * (boat.length || 12) / 12,
       (boat.heading || 0) * Math.PI / 180,
       boat.pitch || 0,
       boat.roll || 0,
