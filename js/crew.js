@@ -1199,11 +1199,44 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
       s.work = 0;
       continue;
     }
+    const impacts = dmg?.impacts;
+    const seenImpacts = s._seenImpacts ?? 0;
+    if (impacts && impacts.length > seenImpacts) {
+      for (let k = seenImpacts; k < impacts.length; k++) {
+        const imp = impacts[k];
+        const lp = imp.localPos;
+        if (!lp) continue;
+        const dx = s.lx - lp[0];
+        const dz = s.lz - lp[2];
+        const d = Math.hypot(dx, dz);
+        const blastR = Math.max(5.5, (imp.radius ?? 2.0) * 2.6);
+        if (d < blastR) {
+          const dirX = d > 1e-3 ? dx / d : 1;
+          const dirZ = d > 1e-3 ? dz / d : 0;
+          const cosB = Math.cos(inst?.yaw ?? 0), sinB = Math.sin(inst?.yaw ?? 0);
+          const impulse = (1 - d / blastR) * 3.2;
+          s.knockbackVx = (dirX * cosB + dirZ * sinB) * impulse;
+          s.knockbackVz = (-dirX * sinB + dirZ * cosB) * impulse;
+          if (d < 1.8 && (imp.strength ?? 0.5) > 0.65) {
+            s.casualtyState = 'fallen';
+          } else {
+            s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4 + (1 - d / blastR) * 1.4);
+          }
+          s._poseReady = false;
+        }
+      }
+      s._seenImpacts = impacts.length;
+    }
+    if ((s.knockdownTimer ?? 0) > 0) {
+      s.knockdownTimer = Math.max(0, s.knockdownTimer - dt);
+      s._poseReady = false;
+    }
+    const isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
     const underFire = (dmg?.fires?.length ?? 0) > 0 || (dmg?.state === 'burning');
     let moving = false;
     let working = false;
 
-    if (s.gunIndex !== null && inst?.gunnery?.guns?.[s.gunIndex]) {
+    if (!isDown && s.gunIndex !== null && inst?.gunnery?.guns?.[s.gunIndex]) {
       const gun = inst.gunnery.guns[s.gunIndex];
       if (gun.dismounted) {
         s.visible = false;
@@ -1212,7 +1245,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
       working = gun.loading || ['swab', 'load', 'ram', 'runout', 'prime', 'recoil'].includes(gun.stage);
     }
 
-    if (!underFire && !working && s.routeZ && Math.abs(s.routeZ[1] - s.routeZ[0]) > 0.05) {
+    if (!isDown && !underFire && !working && s.routeZ && Math.abs(s.routeZ[1] - s.routeZ[0]) > 0.05) {
       if (s.wait > 0) {
         s.wait = Math.max(0, s.wait - dt);
       } else {

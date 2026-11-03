@@ -234,6 +234,39 @@ export function poseCrewWork(a,s,boat){
   }
   if(!j&&poseSeatedCrew(a,s))return;
   if(j)poseRowingWalkingFeet(a,s,boat);
+  if(j?.kind==='lookout' && j.lookoutAtStation){
+    // Crouched inside the crow's nest basket: knees bent with boots planted on the platform,
+    // torso leaning into the forward rail, left hand gripping the basket rim, and right hand
+    // holding the brass spyglass up to the eye (or shading the brow) toward sightings/hazards.
+    poseNeutralSeatedBody(a);
+    const pelvis=poseNodeIndex(a,'pelvis');
+    if(pelvis>=0){
+      const p=posePosition(a.world[pelvis]);
+      poseMoveBone(a,pelvis,[p[0],p[1]-0.21,p[2]-0.03]);
+    }
+    for(const [name,angle] of [['pelvis',0.10],['spine_01',0.14],['spine_02',0.12]]){
+      const node=poseNodeIndex(a,name);
+      if(node>=0)turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);
+    }
+    const footL=[0.13,0.08,0.02],footR=[-0.13,0.08,-0.04];
+    solveCrewLimb(a,['thigh_l','calf_l','foot_l'],footL,[0.22,0.45,0.78]);
+    solveCrewLimb(a,['thigh_r','calf_r','foot_r'],footR,[-0.22,0.45,0.78]);
+    // Left hand grips the circular crow's nest basket rim (+0.30m above platform floor)
+    const rimHand=[0.17,0.58,0.28];
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],rimHand,[0.55,0.78,0.18]);
+    const headNode=poseNodeIndex(a,'Head');
+    const headPos=headNode>=0?posePosition(a.world[headNode]):[0,1.32,0.12];
+    const gazeYaw=s.phys?.gazeYaw??0,gazePitch=s.phys?.gazePitch??-0.05;
+    const useGlass=s.phys?.usingSpyglass??true;
+    const spyglassHand=useGlass
+      ?[-0.05+gazeYaw*0.12,headPos[1]-0.02+gazePitch*0.10,headPos[2]+0.19]
+      :[-0.08+gazeYaw*0.08,headPos[1]+0.06,headPos[2]+0.14];
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],spyglassHand,[-0.58,headPos[1]-0.18,0.26]);
+    const actualHandR=posePosition(a.world[poseNodeIndex(a,'hand_r')]);
+    const actualHandL=posePosition(a.world[poseNodeIndex(a,'hand_l')]);
+    s.grips={foot_l:footL,foot_r:footR,hand_l:actualHandL,hand_r:actualHandR};
+    return;
+  }
   if(j && !j.lookoutAtStation && ['ascending','descending','working'].includes(j.stage) && (j.kind==='rig'||j.kind==='lookout')){
     // Arrival timing must not move real runner holds through an inherited Walk
     // hip/spine sway. Limb phase below is driven only by actual rung travel.
@@ -245,11 +278,12 @@ export function poseCrewWork(a,s,boat){
     const smooth=(lo,hi)=>{const t=Math.max(0,Math.min(1,(u-lo)/(hi-lo)));return t*t*(3-2*t);};
     // Two-phase rope shimmy: hands climb hand-over-hand while boots clamp the
     // line together, then the pelvis/spine crunches to draw both feet up.
-    const crunch=Math.sin(Math.PI*smooth(.42,.96));
+    const isLookoutWatch=j.kind==='lookout'&&j.stage==='working';
+    const crunch=isLookoutWatch?0.65:Math.sin(Math.PI*smooth(.42,.96));
     const pelvis=poseNodeIndex(a,'pelvis');
     if(pelvis>=0){
       const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]+.04*crunch,p[2]+.03+.03*crunch]);
+      poseMoveBone(a,pelvis,[p[0],p[1]+(isLookoutWatch?-0.08:.04*crunch),p[2]+.03+.03*crunch]);
     }
     for(const [name,weight] of [['spine_01',.06],['spine_02',.05]]){
       const node=poseNodeIndex(a,name);
@@ -261,10 +295,20 @@ export function poseCrewWork(a,s,boat){
     for(const side of ['l','r']){
       const sign=side==='l'?1:-1;
       const point=(r,wrap)=>{const p=resolveShipNode(boat,`mast.${crewMastName(boat,j.mast)}.runner`,{space:'design',side:j.side,step:r/spacing});return actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat)+.08,p[2]*boat.length/12+sign*wrap],s);};
-      const ft=point(footSteps[side],.014),ht=point(handSteps[side],.018);
+      const ft=point(footSteps[side],.014);
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.12,.55,.78]);
-      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.55,.95,.18]);
-      targets[`foot_${side}`]=ft;targets[`hand_${side}`]=ht;
+      targets[`foot_${side}`]=ft;
+      if(isLookoutWatch&&side==='r'){
+        const headNode=poseNodeIndex(a,'Head');
+        const headPos=headNode>=0?posePosition(a.world[headNode]):[0,1.45,0.10];
+        const spyglassTarget=[-0.06,headPos[1]-0.02,headPos[2]+0.18];
+        solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],spyglassTarget,[-0.55,headPos[1]-0.15,0.24]);
+        targets.hand_r=posePosition(a.world[poseNodeIndex(a,'hand_r')]);
+      }else{
+        const ht=point(handSteps[side],.018);
+        solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.55,.95,.18]);
+        targets[`hand_${side}`]=ht;
+      }
     }
     s.grips=targets;return;
   }

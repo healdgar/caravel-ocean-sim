@@ -5,6 +5,7 @@
 import { gltfQuatMultiply, gltfSlerp } from './gltf.js';
 import { vesselVerticalScale, modelDeckWidth } from './hull.js';
 import { crewDeckHeight } from './crew-work.js';
+import { crewNavigationObstacles } from './crew-navigation.js';
 
 const crewPhysMixerMaskCache = new WeakMap();
 
@@ -188,8 +189,11 @@ function crewPhysResolveActionKey(s) {
     if (j.kind === 'gunnery' && j.stage === 'working') {
       return `gunnery:${j.gunRole ?? 'crew'}:${j.gun?.stage ?? 'ready'}`;
     }
+    if (j.kind === 'lookout' && j.lookoutAtStation) {
+      return 'lookout:crows-nest';
+    }
     if ((j.kind === 'rig' || j.kind === 'lookout') && ['ascending', 'descending', 'working'].includes(j.stage)) {
-      return `climb:${j.stage}`;
+      return `climb:${j.kind}:${j.stage}`;
     }
     return `job:${j.kind}:${j.stage ?? 'active'}`;
   }
@@ -326,14 +330,22 @@ export function stepArticulatedRagdoll(s, boat, dt) {
 
   const roll = boat?.roll ?? 0;
   const pitch = boat?.pitch ?? 0;
-  const gx = Math.sin(roll) * 9.81;
+  const rollRate = boat?.rollVelocity ?? 0;
+  const pitchRate = boat?.pitchVelocity ?? 0;
+  const gx = Math.sin(roll) * 9.81 - crewPhysClamp(rollRate * 0.8, -2.5, 2.5);
   const gy = -Math.cos(roll) * Math.cos(pitch) * 9.81;
-  const gz = -Math.sin(pitch) * 9.81;
+  const gz = -Math.sin(pitch) * 9.81 - crewPhysClamp(pitchRate * 0.8, -2.5, 2.5);
 
   const sx = (boat?.beam ?? 3.6) / 3.6;
+  const sz = (boat?.length ?? 12) / 12;
   const sy = boat ? vesselVerticalScale(boat) : 1;
-  const baseFloorY = (s.navigationY ?? (boat ? crewDeckHeight(boat, s.z ?? 0, s.x ?? 0) : 0)) * sy;
-  const halfHullW = boat ? Math.max(0.45, modelDeckWidth(boat, s.z ?? 0) * sx - 0.18) : 4.0;
+  const baseFloorY = (s.navigationY ?? (boat ? crewDeckHeight(boat, s.z ?? (pz / sz), s.x ?? (px / sx)) : (s.ly ?? py))) * (boat ? sy : 1);
+  const obstacles = boat ? crewNavigationObstacles(boat) : null;
+  const inst = s.building ?? null;
+  const instCosY = inst ? Math.cos(inst.yaw ?? 0) : 1;
+  const instSinY = inst ? Math.sin(inst.yaw ?? 0) : 0;
+  const instHW = inst ? (inst.width ?? 10) * 0.5 : 0;
+  const instHL = inst ? (inst.length ?? 12) * 0.5 : 0;
 
   const recoverWeight = (s.casualtyState !== 'fallen' && (s.knockdownTimer ?? 0) > 0 && s.knockdownTimer < 0.55)
     ? crewPhysClamp(1 - s.knockdownTimer / 0.55, 0, 1)
@@ -393,8 +405,8 @@ export function stepArticulatedRagdoll(s, boat, dt) {
       const dxP = rag.pos[0] - px;
       const dzP = rag.pos[2] - pz;
       const distP = Math.hypot(dxP, dzP);
-      if (distP > 0.36) {
-        const pullP = (distP - 0.36) / distP * 0.65;
+      if (distP > 0.42) {
+        const pullP = (distP - 0.42) / distP * 0.65;
         rag.pos[0] -= dxP * pullP;
         rag.pos[2] -= dzP * pullP;
       }
@@ -402,16 +414,85 @@ export function stepArticulatedRagdoll(s, boat, dt) {
 
     for (let i = 0; i < 11; i++) {
       const idx = i * 3;
-      const minY = baseFloorY + CREW_PHYS_RAGDOLL_RADII[i];
+      const r = CREW_PHYS_RAGDOLL_RADII[i];
+      let floorY = baseFloorY;
+
+      if (boat) {
+        const xDesign = rag.pos[idx] / sx;
+        const zDesign = rag.pos[idx + 2] / sz;
+        const sampledDeckY = crewDeckHeight(boat, zDesign, xDesign) * sy;
+        // If sampledDeckY is much higher than the particle's previous height, it hit a step riser wall (e.g. quarterdeck bulkhead)
+        if (sampledDeckY > rag.prev[idx + 1] + 0.32 && sampledDeckY > baseFloorY + 0.25) {
+          rag.pos[idx + 2] = rag.prev[idx + 2];
+          floorY = baseFloorY;
+        } else if (Number.isFinite(sampledDeckY)) {
+          floorY = sampledDeckY;
+        }
+        const halfHullW = Math.max(0.38, modelDeckWidth(boat, zDesign) * sx - 0.14 - r);
+        if (Math.abs(rag.pos[idx]) > halfHullW) {
+          rag.pos[idx] = Math.sign(rag.pos[idx]) * halfHullW;
+          rag.pos[idx + 2] -= (rag.pos[idx + 2] - rag.prev[idx + 2]) * 0.35;
+        }
+        // Collide against all 3D ship surface obstacles (cannons, hatches, masts, capstans, bitts, waist boats)
+        if (obstacles) {
+          const pxI = rag.pos[idx], pyI = rag.pos[idx + 1], pzI = rag.pos[idx + 2];
+          for (let oIdx = 0; oIdx < obstacles.length; oIdx++) {
+            const o = obstacles[oIdx];
+            const minX = o.min[0] - r, maxX = o.max[0] + r;
+            const minY = o.min[1] - r, maxY = o.max[1] + r;
+            const minZ = o.min[2] - r, maxZ = o.max[2] + r;
+            if (pxI > minX && pxI < maxX && pyI > minY && pyI < maxY && pzI > minZ && pzI < maxZ) {
+              if (rag.prev[idx + 1] >= o.max[1] - 0.08 && pyI < maxY) {
+                floorY = Math.max(floorY, o.max[1]);
+              } else {
+                const penL = pxI - minX, penR = maxX - pxI;
+                const penF = pzI - minZ, penB = maxZ - pzI;
+                const minHoriz = Math.min(penL, penR, penF, penB);
+                if (minHoriz === penL) rag.pos[idx] = minX;
+                else if (minHoriz === penR) rag.pos[idx] = maxX;
+                else if (minHoriz === penF) rag.pos[idx + 2] = minZ;
+                else rag.pos[idx + 2] = maxZ;
+              }
+            }
+          }
+        }
+      } else if (inst) {
+        // Building / fort / dock surface & parapet collision in local building coordinates
+        const relX = rag.pos[idx] - (inst.x ?? 0);
+        const relZ = rag.pos[idx + 2] - (inst.z ?? 0);
+        let lx = relX * instCosY - relZ * instSinY;
+        let lz = relX * instSinY + relZ * instCosY;
+        floorY = (s.baseLy ?? inst.y ?? baseFloorY) + lx * (inst.slopeX ?? 0) + lz * (inst.slopeZ ?? 0);
+        const impacts = inst.damageState?.impacts;
+        if (impacts?.length) {
+          for (let k = 0; k < impacts.length; k++) {
+            const imp = impacts[k];
+            const lp = imp.localPos;
+            if (!lp) continue;
+            const dImp = Math.hypot(lx - lp[0], lz - lp[2]);
+            const rad = imp.radius ?? 1.8;
+            if (dImp < rad) {
+              floorY -= (1 - dImp / rad) * Math.min(0.45, (imp.strength ?? 0.5) * 0.35);
+            }
+          }
+        }
+        const maxLX = instHW + 1.8 - r;
+        const maxLZ = instHL + 2.4 - r;
+        if (Math.abs(lx) > maxLX || Math.abs(lz) > maxLZ) {
+          lx = crewPhysClamp(lx, -maxLX, maxLX);
+          lz = crewPhysClamp(lz, -maxLZ, maxLZ);
+          rag.pos[idx] = (inst.x ?? 0) + lx * instCosY + lz * instSinY;
+          rag.pos[idx + 2] = (inst.z ?? 0) - lx * instSinY + lz * instCosY;
+        }
+      }
+
+      const minY = floorY + r;
       if (rag.pos[idx + 1] < minY) {
         const pen = minY - rag.pos[idx + 1];
         rag.pos[idx + 1] = minY;
-        const fric = crewPhysClamp(0.28 + pen * 1.5, 0.28, 0.72);
+        const fric = crewPhysClamp(0.28 + pen * 1.5, 0.28, 0.75);
         rag.pos[idx] -= (rag.pos[idx] - rag.prev[idx]) * fric;
         rag.pos[idx + 2] -= (rag.pos[idx + 2] - rag.prev[idx + 2]) * fric;
-      }
-      if (Math.abs(rag.pos[idx]) > halfHullW) {
-        rag.pos[idx] = Math.sign(rag.pos[idx]) * halfHullW;
       }
     }
   }
@@ -464,6 +545,53 @@ export function applyArticulatedRagdollPose(a, s, boat) {
   return true;
 }
 
+export function resolveLookoutTarget(s, boat) {
+  const time = s?.time ?? 0;
+  // 1. Deck fire hazard on own vessel
+  if (boat?.damage?.fires?.length) {
+    const f = boat.damage.fires[0];
+    const dx = (f.localPosition?.[0] ?? 0) - (s.position?.[0] ?? 0);
+    const dy = (f.localPosition?.[1] ?? 1) - ((s.position?.[1] ?? 8) + 1.1);
+    const dz = (f.localPosition?.[2] ?? 0) - (s.position?.[2] ?? 0);
+    const dist = Math.hypot(dx, dz) || 1;
+    return {
+      kind: 'danger',
+      worldYaw: Math.atan2(dx, dz),
+      pitch: crewPhysClamp(Math.atan2(dy, dist), -0.48, 0.35),
+      useSpyglass: false,
+    };
+  }
+  // 2. External sightings (whale/shark breach, enemy/friendly vessel, dolphin pod, or landfall)
+  const sighting = boat?.lookoutSighting;
+  if (sighting && Number.isFinite(sighting.x) && Number.isFinite(sighting.z)) {
+    const bx = boat.x ?? 0, bz = boat.z ?? 0, by = (boat.heave ?? 0) + (s.position?.[1] ?? 8) + 1.2;
+    const wx = sighting.x - bx;
+    const wz = sighting.z - bz;
+    const wy = (sighting.y ?? 0) - by;
+    const dist = Math.hypot(wx, wz) || 1;
+    const heading = ((boat.heading ?? 0) * Math.PI) / 180;
+    const ch = Math.cos(heading), sh = Math.sin(heading);
+    // Transform world delta into ship-local design frame (+X starboard, -Z bow)
+    const localX = ch * wx - sh * wz;
+    const localZ = -sh * wx - ch * wz;
+    return {
+      kind: sighting.kind ?? 'sighting',
+      worldYaw: Math.atan2(localX, localZ),
+      pitch: crewPhysClamp(Math.atan2(wy, dist), -0.45, 0.28),
+      useSpyglass: sighting.kind !== 'dolphin' || dist > 35,
+    };
+  }
+  // 3. Default crow's nest horizon watch: sweep across the forward bow sector (-Z => yaw = PI)
+  const sweep = 0.42 * Math.sin(time * 0.46 + (s?.crewIndex ?? 0) * 0.7);
+  const useSpyglass = Math.cos(time * 0.28) > -0.35;
+  return {
+    kind: 'horizon',
+    worldYaw: Math.PI + sweep,
+    pitch: -0.05 + 0.04 * Math.cos(time * 0.31),
+    useSpyglass,
+  };
+}
+
 export function stepCrewPhysicsState(s, boat, dt, company = null) {
   const safeDt = crewPhysClamp(Number.isFinite(dt) ? dt : 0, 0, 0.1);
   const phys = (s.phys ??= {
@@ -471,12 +599,17 @@ export function stepCrewPhysicsState(s, boat, dt, company = null) {
     comVelX: 0,
     comShiftZ: 0,
     comVelZ: 0,
+    comDropY: 0,
+    comVelY: 0,
     spineLeanX: 0,
     spineVelX: 0,
     spineLeanZ: 0,
     spineVelZ: 0,
     armSpread: 0,
     prevRollRate: 0,
+    prevPitchRate: 0,
+    prevHeaveVel: 0,
+    prevLeewayVel: 0,
     exertion: 0.18,
     breathPhase: ((s.crewIndex ?? 0) * 1.17) % (Math.PI * 2),
     gazeYaw: 0,
@@ -484,6 +617,8 @@ export function stepCrewPhysicsState(s, boat, dt, company = null) {
     gazeTimer: ((s.crewIndex ?? 0) * 0.63) % 2.5,
     targetGazeYaw: 0,
     targetGazePitch: 0,
+    lookoutKind: 'horizon',
+    usingSpyglass: true,
   });
 
   if (s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0) {
@@ -494,48 +629,81 @@ export function stepCrewPhysicsState(s, boat, dt, company = null) {
 
   if (safeDt <= 1e-6) return phys;
 
+  const invDt = 1 / Math.max(0.016, safeDt);
   const roll = boat?.roll ?? 0;
   const rollRate = boat?.rollVelocity ?? 0;
   const pitch = boat?.pitch ?? 0;
-  const rollAccel = crewPhysClamp((rollRate - phys.prevRollRate) / Math.max(0.016, safeDt), -12, 12);
-  phys.prevRollRate = rollRate;
+  const pitchRate = boat?.pitchVelocity ?? 0;
+  const yawRate = boat?.yawRate ?? 0;
+  const heaveVel = boat?.heaveVelocity ?? 0;
+  const leewayVel = boat?.leewayVelocity ?? 0;
+  const surgeAccel = crewPhysClamp(boat?.surgeAcceleration ?? 0, -6, 6);
 
-  const deckY = (s.position?.[1] ?? 1.5);
-  const shipLatTilt = Math.sin(roll) - crewPhysClamp(deckY * rollAccel * 0.045, -0.35, 0.35);
-  const shipForeTilt = -Math.sin(pitch);
+  const rollAccel = crewPhysClamp((rollRate - phys.prevRollRate) * invDt, -14, 14);
+  const pitchAccel = crewPhysClamp((pitchRate - phys.prevPitchRate) * invDt, -12, 12);
+  const heaveAccel = crewPhysClamp((heaveVel - phys.prevHeaveVel) * invDt, -9, 9);
+  const swayAccel = crewPhysClamp((leewayVel - phys.prevLeewayVel) * invDt, -6, 6);
+  phys.prevRollRate = rollRate;
+  phys.prevPitchRate = pitchRate;
+  phys.prevHeaveVel = heaveVel;
+  phys.prevLeewayVel = leewayVel;
+
+  // Exact 3D station coordinates on the moving hull: rx (beam), ry (height above waterline), rz (fore-aft)
+  const rx = s.position?.[0] ?? 0;
+  const ry = s.position?.[1] ?? 1.5;
+  const rz = s.position?.[2] ?? 0;
+
+  // Non-inertial apparent acceleration (divided by g=9.81) at the sailor's actual 3D station (rx, ry, rz):
+  // Includes gravity tilt + tangential whip (alpha x r) + centripetal (omega x (omega x r)) + linear hull surge/sway/heave
+  const tangLat = -ry * rollAccel + rx * (rollRate * rollRate + yawRate * yawRate) - swayAccel;
+  const tangFore = -ry * pitchAccel + rz * (pitchRate * pitchRate + yawRate * yawRate) + surgeAccel;
+  const vertGLoad = heaveAccel + rz * pitchAccel - rx * rollAccel;
+
+  const shipLatTilt = Math.sin(roll) + crewPhysClamp(tangLat / 9.81, -0.48, 0.48);
+  const shipForeTilt = -Math.sin(pitch) + crewPhysClamp(tangFore / 9.81, -0.42, 0.42);
 
   const c = Math.cos(s.yaw ?? 0), sn = Math.sin(s.yaw ?? 0);
   const localRightTilt = c * shipLatTilt - sn * shipForeTilt;
   const localFwdTilt = sn * shipLatTilt + c * shipForeTilt;
 
-  const climbing = s.job && (s.job.kind === 'rig' || s.job.kind === 'lookout') && (s.job.rung ?? 0) > 0;
-  const scaleFactor = climbing ? 0.2 : s.seatedPose ? 0.45 : 1.0;
-  const targetComX = crewPhysClamp(-localRightTilt * 0.11 * scaleFactor, -0.065, 0.065);
-  const targetComZ = crewPhysClamp(-localFwdTilt * 0.09 * scaleFactor, -0.055, 0.055);
-  const targetSpineX = crewPhysClamp(-localRightTilt * 0.58 * scaleFactor, -0.32, 0.32);
-  const targetSpineZ = crewPhysClamp(-localFwdTilt * 0.48 * scaleFactor + (s.walk ?? 0) * 0.08, -0.28, 0.28);
+  const climbing = s.job && (s.job.kind === 'rig' || s.job.kind === 'lookout') && (s.job.rung ?? 0) > 0 && !s.job.lookoutAtStation;
+  const scaleFactor = climbing ? 0.22 : s.job?.lookoutAtStation ? 0.55 : s.seatedPose ? 0.45 : 1.0;
+  const targetComX = crewPhysClamp(-localRightTilt * 0.12 * scaleFactor, -0.075, 0.075);
+  const targetComZ = crewPhysClamp(-localFwdTilt * 0.10 * scaleFactor, -0.065, 0.065);
+  const targetDropY = climbing || s.seatedPose
+    ? 0
+    : crewPhysClamp(Math.max(0, vertGLoad * 0.012) + (Math.abs(localRightTilt) + Math.abs(localFwdTilt)) * 0.045, 0, 0.085);
+  const targetSpineX = crewPhysClamp(-localRightTilt * 0.62 * scaleFactor, -0.35, 0.35);
+  const targetSpineZ = crewPhysClamp(-localFwdTilt * 0.52 * scaleFactor + (s.walk ?? 0) * 0.08, -0.30, 0.30);
 
   const omega = 14.0, damp = 2 * 0.72 * omega;
   const axCom = omega * omega * (targetComX - phys.comShiftX) - damp * phys.comVelX;
   const azCom = omega * omega * (targetComZ - phys.comShiftZ) - damp * phys.comVelZ;
+  const ayCom = omega * omega * (targetDropY - phys.comDropY) - damp * phys.comVelY;
   phys.comVelX += axCom * safeDt;
   phys.comVelZ += azCom * safeDt;
-  phys.comShiftX = crewPhysClamp(phys.comShiftX + phys.comVelX * safeDt, -0.075, 0.075);
-  phys.comShiftZ = crewPhysClamp(phys.comShiftZ + phys.comVelZ * safeDt, -0.065, 0.065);
+  phys.comVelY += ayCom * safeDt;
+  phys.comShiftX = crewPhysClamp(phys.comShiftX + phys.comVelX * safeDt, -0.085, 0.085);
+  phys.comShiftZ = crewPhysClamp(phys.comShiftZ + phys.comVelZ * safeDt, -0.075, 0.075);
+  phys.comDropY = crewPhysClamp(phys.comDropY + phys.comVelY * safeDt, 0, 0.095);
 
   const axSpine = omega * omega * (targetSpineX - phys.spineLeanX) - damp * phys.spineVelX;
   const azSpine = omega * omega * (targetSpineZ - phys.spineLeanZ) - damp * phys.spineVelZ;
   phys.spineVelX += axSpine * safeDt;
   phys.spineVelZ += azSpine * safeDt;
-  phys.spineLeanX = crewPhysClamp(phys.spineLeanX + phys.spineVelX * safeDt, -0.36, 0.36);
-  phys.spineLeanZ = crewPhysClamp(phys.spineLeanZ + phys.spineVelZ * safeDt, -0.32, 0.32);
+  phys.spineLeanX = crewPhysClamp(phys.spineLeanX + phys.spineVelX * safeDt, -0.38, 0.38);
+  phys.spineLeanZ = crewPhysClamp(phys.spineLeanZ + phys.spineVelZ * safeDt, -0.34, 0.34);
 
-  const lurch = crewPhysClamp(Math.abs(rollRate) * 0.65 + Math.abs(roll) * 0.35 + Math.abs(rollAccel) * 0.04, 0, 1);
+  const lurch = crewPhysClamp(
+    Math.abs(rollRate) * 0.65 + Math.abs(roll) * 0.35 + Math.abs(tangLat) * 0.08 + Math.abs(vertGLoad) * 0.05,
+    0,
+    1,
+  );
   phys.armSpread += (lurch - phys.armSpread) * (1 - Math.exp(-safeDt * 9));
 
   let targetExertion = 0.16 + (s.walk ?? 0) * 0.32 + (s.brace ?? 0) * 0.25;
   if (s.job?.stage === 'working' || s.job?.stage === 'ascending') {
-    targetExertion = s.job.kind === 'boarding' ? 0.95 : 0.78;
+    targetExertion = s.job.kind === 'boarding' ? 0.95 : s.job.lookoutAtStation ? 0.38 : 0.78;
   } else if (s.seatedPose) {
     targetExertion = 0.68;
   }
@@ -544,61 +712,79 @@ export function stepCrewPhysicsState(s, boat, dt, company = null) {
   const breathFreq = 1.65 + phys.exertion * 2.85;
   phys.breathPhase = (phys.breathPhase + safeDt * breathFreq) % (Math.PI * 2);
 
-  phys.gazeTimer -= safeDt;
-  if (phys.gazeTimer <= 0) {
-    phys.gazeTimer = 0.85 + (((s.crewIndex ?? 0) * 0.41 + (s.time ?? 0)) % 1.4);
-    let gx = 0, gy = 0;
-    const j = s.job;
-    if (j && (j.kind === 'rig' || j.kind === 'lookout') && ['ascending', 'working'].includes(j.stage)) {
-      gx = 0.08 * Math.sin(s.time ?? 0);
-      gy = 0.42;
-    } else if (j && j.kind === 'haul' && j.stage === 'working') {
-      gx = 0.05;
-      gy = 0.34;
-    } else if (j && j.kind === 'gunnery' && j.stage === 'working') {
-      gx = j.gunRole === 'loader' ? -0.18 : 0.14;
-      gy = -0.16;
-    } else if ((s.firePanic ?? 0) > 0.18 && boat?.damage?.fires?.length) {
-      const f = boat.damage.fires[0];
-      const fx = (f.localPosition?.[0] ?? 0) - (s.position?.[0] ?? 0);
-      const fz = (f.localPosition?.[2] ?? 0) - (s.position?.[2] ?? 0);
-      const worldYaw = Math.atan2(fx, fz);
-      const relYaw = Math.atan2(Math.sin(worldYaw - (s.yaw ?? 0)), Math.cos(worldYaw - (s.yaw ?? 0)));
-      gx = crewPhysClamp(relYaw * 0.7, -0.85, 0.85);
-      gy = -0.15;
-    } else {
-      const peers = company?.crew ?? company?.soldiers ?? null;
-      let nearest = null, bestD = 2.8;
-      if (peers && s.position) {
-        for (let k = 0; k < peers.length; k++) {
-          const other = peers[k];
-          if (other === s || !other.visible || other.casualtyState === 'fallen' || !other.position) continue;
-          const dy = Math.abs((other.position[1] ?? 0) - (s.position[1] ?? 0));
-          if (dy > 1.2) continue;
-          const d = Math.hypot((other.position[0] ?? 0) - s.position[0], (other.position[2] ?? 0) - s.position[2]);
-          if (d > 0.4 && d < bestD) {
-            bestD = d;
-            nearest = other;
-          }
-        }
-      }
-      if (nearest) {
-        const dx = nearest.position[0] - s.position[0];
-        const dz = nearest.position[2] - s.position[2];
-        const worldYaw = Math.atan2(dx, dz);
+  const j = s.job;
+  if (j && j.kind === 'lookout' && (j.lookoutAtStation || j.stage === 'working')) {
+    const tgt = resolveLookoutTarget(s, boat);
+    phys.lookoutKind = tgt.kind;
+    phys.usingSpyglass = tgt.useSpyglass;
+    const relYaw = Math.atan2(Math.sin(tgt.worldYaw - (s.yaw ?? 0)), Math.cos(tgt.worldYaw - (s.yaw ?? 0)));
+    phys.targetGazeYaw = crewPhysClamp(relYaw * 0.75, -0.88, 0.88);
+    phys.targetGazePitch = crewPhysClamp(tgt.pitch, -0.45, 0.35);
+    phys.gazeTimer = 0.25;
+  } else {
+    phys.gazeTimer -= safeDt;
+    if (phys.gazeTimer <= 0) {
+      phys.gazeTimer = 0.85 + (((s.crewIndex ?? 0) * 0.41 + (s.time ?? 0)) % 1.4);
+      let gx = 0, gy = 0;
+      if (j && (j.kind === 'rig' || j.kind === 'lookout') && ['ascending', 'working'].includes(j.stage)) {
+        gx = 0.08 * Math.sin(s.time ?? 0);
+        gy = 0.42;
+      } else if (j && j.kind === 'haul' && j.stage === 'working') {
+        gx = 0.05;
+        gy = 0.34;
+      } else if (j && j.kind === 'gunnery' && j.stage === 'working') {
+        gx = j.gunRole === 'loader' ? -0.18 : 0.14;
+        gy = -0.16;
+      } else if ((s.firePanic ?? 0) > 0.18 && boat?.damage?.fires?.length) {
+        const f = boat.damage.fires[0];
+        const fx = (f.localPosition?.[0] ?? 0) - (s.position?.[0] ?? 0);
+        const fz = (f.localPosition?.[2] ?? 0) - (s.position?.[2] ?? 0);
+        const worldYaw = Math.atan2(fx, fz);
         const relYaw = Math.atan2(Math.sin(worldYaw - (s.yaw ?? 0)), Math.cos(worldYaw - (s.yaw ?? 0)));
-        if (Math.abs(relYaw) < 1.35) {
-          gx = crewPhysClamp(relYaw * 0.68, -0.78, 0.78);
-          gy = crewPhysClamp(((nearest.scale?.[1] ?? 0.96) - (s.scale?.[1] ?? 0.96)) * 0.8, -0.12, 0.12);
+        gx = crewPhysClamp(relYaw * 0.7, -0.85, 0.85);
+        gy = -0.15;
+      } else if (boat?.lookoutSighting && Math.abs(s.x ?? 0) > 0.35) {
+        // Deckhands near the bulwark rail also glance out at sighted whales, dolphins, or ships
+        const tgt = resolveLookoutTarget(s, boat);
+        const relYaw = Math.atan2(Math.sin(tgt.worldYaw - (s.yaw ?? 0)), Math.cos(tgt.worldYaw - (s.yaw ?? 0)));
+        if (Math.abs(relYaw) < 1.45) {
+          gx = crewPhysClamp(relYaw * 0.72, -0.82, 0.82);
+          gy = crewPhysClamp(tgt.pitch, -0.32, 0.25);
         }
       } else {
-        const scan = Math.sin((s.time ?? 0) * 0.55 + (s.crewIndex ?? 0) * 1.9);
-        gx = scan * 0.28;
-        gy = Math.cos((s.time ?? 0) * 0.37 + (s.crewIndex ?? 0)) * 0.06;
+        const peers = company?.crew ?? company?.soldiers ?? null;
+        let nearest = null, bestD = 2.8;
+        if (peers && s.position) {
+          for (let k = 0; k < peers.length; k++) {
+            const other = peers[k];
+            if (other === s || !other.visible || other.casualtyState === 'fallen' || !other.position) continue;
+            const dy = Math.abs((other.position[1] ?? 0) - (s.position[1] ?? 0));
+            if (dy > 1.2) continue;
+            const d = Math.hypot((other.position[0] ?? 0) - s.position[0], (other.position[2] ?? 0) - s.position[2]);
+            if (d > 0.4 && d < bestD) {
+              bestD = d;
+              nearest = other;
+            }
+          }
+        }
+        if (nearest) {
+          const dx = nearest.position[0] - s.position[0];
+          const dz = nearest.position[2] - s.position[2];
+          const worldYaw = Math.atan2(dx, dz);
+          const relYaw = Math.atan2(Math.sin(worldYaw - (s.yaw ?? 0)), Math.cos(worldYaw - (s.yaw ?? 0)));
+          if (Math.abs(relYaw) < 1.35) {
+            gx = crewPhysClamp(relYaw * 0.68, -0.78, 0.78);
+            gy = crewPhysClamp(((nearest.scale?.[1] ?? 0.96) - (s.scale?.[1] ?? 0.96)) * 0.8, -0.12, 0.12);
+          }
+        } else {
+          const scan = Math.sin((s.time ?? 0) * 0.55 + (s.crewIndex ?? 0) * 1.9);
+          gx = scan * 0.28;
+          gy = Math.cos((s.time ?? 0) * 0.37 + (s.crewIndex ?? 0)) * 0.06;
+        }
       }
+      phys.targetGazeYaw = gx;
+      phys.targetGazePitch = gy;
     }
-    phys.targetGazeYaw = gx;
-    phys.targetGazePitch = gy;
   }
 
   const gazeLerp = 1 - Math.exp(-safeDt * 6.5);
@@ -616,6 +802,10 @@ export function poseCrewFingers(a, s, leftGrip = null, rightGrip = null) {
     if (s.seatedPose) {
       leftGrip = 0.84;
       rightGrip = 0.84;
+    } else if (j && j.kind === 'lookout' && (j.lookoutAtStation || j.stage === 'working')) {
+      // Left hand grips the crow's nest basket rim or shroud; right hand wraps around the brass spyglass
+      leftGrip = 0.90;
+      rightGrip = (s.phys?.usingSpyglass ?? true) ? 0.76 : 0.18;
     } else if (j && (j.kind === 'rig' || j.kind === 'lookout') && ['ascending', 'descending', 'working'].includes(j.stage)) {
       leftGrip = 0.88;
       rightGrip = 0.88;
@@ -706,11 +896,79 @@ export function poseCrewGaze(a, s) {
   else a.update();
 }
 
-export function applySeaLegsAndBreathing(a, s) {
+export function applySeaLegsAndBreathing(a, s, boat = null) {
   const phys = s.phys;
   if (!phys) return;
   const m = getCrewMixerMasks(a);
 
+  // 1. Grounded Pelvis CoM Shift & Surface-Planted Two-Bone Leg/Knee IK for standing/bracing deckhands & sentries
+  const hasExplicitFeet = Boolean(
+    s.seatedPose ||
+    s.walkContacts ||
+    s.gunContacts ||
+    s.grips?.foot_l ||
+    s.grips?.foot_r ||
+    (s.job?.rung ?? 0) > 0 ||
+    s.job?.lookoutAtStation,
+  );
+  if (!hasExplicitFeet && m.pelvis >= 0 && m.footL >= 0 && m.footR >= 0 && (s.walk ?? 0) < 0.65) {
+    const stanceWeight = crewPhysClamp(1 - (s.walk ?? 0) * 1.35, 0, 1);
+    const footPosL = crewPhysMatPos(a.world[m.footL]);
+    const footPosR = crewPhysMatPos(a.world[m.footR]);
+    const rotFootL = crewPhysMatRotQuat(a.world[m.footL]);
+    const rotFootR = crewPhysMatRotQuat(a.world[m.footR]);
+
+    let dhL = 0, dhR = 0;
+    const cYaw = Math.cos(s.yaw ?? 0), sYaw = Math.sin(s.yaw ?? 0);
+    const scaleX = s.scale?.[0] || 1, scaleY = s.scale?.[1] || 1, scaleZ = s.scale?.[2] || 1;
+    if (boat && s.position) {
+      const sx = (boat.beam ?? 3.6) / 3.6;
+      const sz = (boat.length ?? 12) / 12;
+      const sy = vesselVerticalScale(boat);
+      const rootFloor = crewDeckHeight(boat, s.position[2] / sz, s.position[0] / sx) * sy;
+      if (Number.isFinite(rootFloor)) {
+        const wxL = s.position[0] + cYaw * (footPosL[0] * scaleX) + sYaw * (footPosL[2] * scaleZ);
+        const wzL = s.position[2] - sYaw * (footPosL[0] * scaleX) + cYaw * (footPosL[2] * scaleZ);
+        const wxR = s.position[0] + cYaw * (footPosR[0] * scaleX) + sYaw * (footPosR[2] * scaleZ);
+        const wzR = s.position[2] - sYaw * (footPosR[0] * scaleX) + cYaw * (footPosR[2] * scaleZ);
+        const fL = crewDeckHeight(boat, wzL / sz, wxL / sx) * sy;
+        const fR = crewDeckHeight(boat, wzR / sz, wxR / sx) * sy;
+        if (Number.isFinite(fL) && Math.abs(fL - rootFloor) < 0.34) dhL = (fL - rootFloor) / scaleY;
+        if (Number.isFinite(fR) && Math.abs(fR - rootFloor) < 0.34) dhR = (fR - rootFloor) / scaleY;
+      }
+    } else if (s.building) {
+      const inst = s.building;
+      const cB = Math.cos((s.yaw ?? 0) - (inst.yaw ?? 0));
+      const sB = Math.sin((s.yaw ?? 0) - (inst.yaw ?? 0));
+      const slX = inst.slopeX ?? 0, slZ = inst.slopeZ ?? 0;
+      dhL = ((cB * footPosL[0] + sB * footPosL[2]) * slX + (-sB * footPosL[0] + cB * footPosL[2]) * slZ);
+      dhR = ((cB * footPosR[0] + sB * footPosR[2]) * slX + (-sB * footPosR[0] + cB * footPosR[2]) * slZ);
+    }
+
+    const comX = (phys.comShiftX ?? 0) * stanceWeight;
+    const comZ = (phys.comShiftZ ?? 0) * stanceWeight;
+    const comDrop = ((phys.comDropY ?? 0) + Math.max(0, -Math.min(dhL, dhR))) * stanceWeight;
+    if (Math.abs(comX) > 1e-3 || Math.abs(comZ) > 1e-3 || comDrop > 1e-3 || Math.abs(dhL) > 1e-3 || Math.abs(dhR) > 1e-3) {
+      const pCur = crewPhysMatPos(a.world[m.pelvis]);
+      crewPhysMoveBoneLocalTarget(a, m.pelvis, [pCur[0] + comX, pCur[1] - comDrop, pCur[2] + comZ]);
+      const tgtL = [footPosL[0], footPosL[1] + dhL * stanceWeight, footPosL[2]];
+      const tgtR = [footPosR[0], footPosR[1] + dhR * stanceWeight, footPosR[2]];
+      crewPhysSolveTwoBoneIK(a, m.thighL, m.calfL, m.footL, tgtL, [0.22, 0.42, 0.82]);
+      crewPhysSolveTwoBoneIK(a, m.thighR, m.calfR, m.footR, tgtR, [-0.22, 0.42, 0.82]);
+      // Restore flat boot sole orientation after leg IK knee bend
+      for (const [fNode, desiredQ] of [[m.footL, rotFootL], [m.footR, rotFootR]]) {
+        const parent = a.parent[fNode];
+        if (parent >= 0) {
+          const pQ = crewPhysMatRotQuat(a.world[parent]);
+          const invP = [-pQ[0], -pQ[1], -pQ[2], pQ[3]];
+          gltfQuatMultiply(a.pose[fNode].r, invP, desiredQ);
+          if (a.updateBranch) a.updateBranch(fNode);
+        }
+      }
+    }
+  }
+
+  // 2. Spine Sea-Legs Counter-Lean & Exertion-Scaled Thoracic Breathing
   const breath = Math.sin(phys.breathPhase ?? 0);
   const breathAmp = 0.012 + (phys.exertion ?? 0.2) * 0.028;
   const leanX = phys.spineLeanX ?? 0;
@@ -750,6 +1008,14 @@ export function applySeaLegsAndBreathing(a, s) {
   if (m.spine1 >= 0) {
     if (a.updateBranch) a.updateBranch(m.spine1);
     else a.update();
+  }
+
+  // 3. Closed-Chain Hand Re-Pinning: keep gripped hands locked to tillers, ropes, cannon tools, and basket rims while torso sways
+  if (s.grips?.hand_l && m.upperarmL >= 0) {
+    crewPhysSolveTwoBoneIK(a, m.upperarmL, m.lowerarmL, m.handL, s.grips.hand_l, [0.58, 0.95, 0.2]);
+  }
+  if (s.grips?.hand_r && m.upperarmR >= 0) {
+    crewPhysSolveTwoBoneIK(a, m.upperarmR, m.lowerarmR, m.handR, s.grips.hand_r, [-0.58, 0.95, 0.2]);
   }
 }
 
@@ -832,7 +1098,7 @@ export function applyCrewRealism(a, s, boat = null, dt = 1 / 60) {
     return;
   }
 
-  applySeaLegsAndBreathing(a, s);
+  applySeaLegsAndBreathing(a, s, boat);
   poseCrewGaze(a, s);
   poseCrewFingers(a, s);
   applyPoseInertializer(a, s, dt);

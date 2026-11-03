@@ -192,8 +192,9 @@ test('crew LODs build progressive index tiers over the shared skinned vertex buf
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:120,y:2,z:0}).mainTier,2);
 });
 test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze tracking, inertializer, and 11-body XPBD ragdoll operate smoothly',async ()=>{
-  const {applyCrewRealism,stepArticulatedRagdoll,poseCrewFingers}=await import('../js/crew-physics.js');
-  const rollingBoat={length:20,beam:6,roll:0.42,rollVelocity:0.75,pitch:0.08};
+  const {applyCrewRealism,stepArticulatedRagdoll,poseCrewFingers,resolveLookoutTarget}=await import('../js/crew-physics.js');
+  const {crewGunneryTool}=await import('../js/crew-work.js');
+  const rollingBoat={length:20,beam:6,roll:0.42,rollVelocity:0.75,pitch:0.08,pitchVelocity:0.25,heaveVelocity:0.6,surgeAcceleration:1.2,lookoutSighting:{kind:'whale',x:45,y:1.2,z:-85}};
   const company=createCompany();
   for(let i=0;i<15;i++)stepCompany(company,rollingBoat,1/30,8);
   const sailor=company.crew.find(s=>s.role!=='Helmsman');
@@ -208,6 +209,24 @@ test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze trackin
   applyCrewRealism(a,sailor,rollingBoat,1/60);
   const index2Node=a.nodeIndex('index_02_r');
   const idleFingerQ=a.pose[index2Node].r.slice();
+
+  // Verify crow's nest lookout crouches in basket, grips rim with left hand, raises spyglass with right hand, and tracks whale sighting
+  const lookout=company.crew.find(s=>s.role==='Lookout')??sailor;
+  a.sample('Idle',lookout.time);
+  const standingPelvisY=a.world[a.nodeIndex('pelvis')][13];
+  lookout.job={kind:'lookout',mast:0,side:1,stage:'working',rung:12,lookoutAtStation:true,elapsed:1.5};
+  lookout.intent='work';
+  for(let i=0;i<10;i++)stepCompany(company,rollingBoat,1/30,8);
+  a.sample('Idle',lookout.time);
+  poseCrewWork(a,lookout,rollingBoat);
+  applyCrewRealism(a,lookout,rollingBoat,1/30);
+  const crouchedPelvisY=a.world[a.nodeIndex('pelvis')][13];
+  assert.ok(crouchedPelvisY<standingPelvisY-0.12,`lookout crouches down inside crow's nest basket (standing=${standingPelvisY.toFixed(2)}, crouched=${crouchedPelvisY.toFixed(2)})`);
+  assert.ok(lookout.grips?.hand_l&&lookout.grips?.hand_r,'lookout has basket-rim and spyglass hand grips');
+  const spyglassTool=crewGunneryTool(lookout,rollingBoat);
+  assert.equal(spyglassTool?.kind,'spyglass','lookout in crow\'s nest emits 3D brass spyglass tool');
+  assert.equal(resolveLookoutTarget(lookout,rollingBoat).kind,'whale','lookout tracks active whale sighting');
+  lookout.job=null;
 
   // Transition to hauling job and verify inertializer + cylindrical rope grip curl
   sailor.job={kind:'haul',mast:1,stage:'working',rung:0,elapsed:0.2};
@@ -225,7 +244,7 @@ test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze trackin
   const qDiff=Math.hypot(...gripFingerQ.map((v,i)=>v-idleFingerQ[i]));
   assert.ok(qDiff>0.12,`finger joints articulate into grip curl (delta=${qDiff.toFixed(3)})`);
 
-  // Knockdown / fallen casualty triggers 11-body XPBD articulated ragdoll colliding with deck & bulwarks
+  // Knockdown / fallen casualty triggers 11-body XPBD articulated ragdoll colliding with deck, obstacles & bulwarks
   sailor.job=null;
   sailor.knockdownTimer=1.2;
   sailor.knockbackVx=1.8;

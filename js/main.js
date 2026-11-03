@@ -3328,6 +3328,16 @@ async function main() {
       updateBoat(dt,needSpectrum||elapsed>.5);
       dolphins.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);dolphinControls.update(now);
       marineLife.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);marineControls.update(now);
+      const activeWhale=marineLife.state?.active&&marineLife.state.count>0?marineLife.state.animals[0]:null;
+      const targetVessel=findSpyglassTargetVessel();
+      const activeDolphin=dolphins.state?.active&&dolphins.state.pods?.[0]?.animals?.[0]?dolphins.state.pods[0].animals[0]:null;
+      boat.lookoutSighting=activeWhale
+        ?{kind:activeWhale.type||'whale',x:activeWhale.x,y:activeWhale.depth??0,z:activeWhale.z}
+        :targetVessel?.boat
+          ?{kind:targetVessel.faction==='enemy'?'enemy-ship':'ship',x:targetVessel.boat.x,y:(targetVessel.boat.heave??0)+3,z:targetVessel.boat.z}
+          :activeDolphin
+            ?{kind:'dolphin',x:activeDolphin.x,y:activeDolphin.y??0,z:activeDolphin.z}
+            :null;
       rowingSurfaceEvents.flush({time:rowingSurfaceWrapped?rowingSurfaceTime-LOOP:rowingSurfaceTime,dt,
         hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
       surfaceWaves.update(boat,dt);

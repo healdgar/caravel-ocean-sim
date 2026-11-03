@@ -11,7 +11,7 @@ import {proceduralDesign,proceduralDeck,proceduralDeckWidth,proceduralHullWidth}
 import {laterSailRigContext} from './additional-rig.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear,crewNavigationObstacles} from './crew-navigation.js';
-import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk} from './crew-motion.js';
+import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk,crewTurnTowards} from './crew-motion.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
 export const CREW_CLIMB_SPEED=.65;
@@ -545,7 +545,21 @@ export function manGunStationsImmediate(company,boat){
 }
 // Boat-local metre targets shared by actual hand IK and the visible tool mesh.
 export function crewGunneryTool(s,boat){
-  const j=s.job;if(j?.kind!=='gunnery'||j.stage!=='working'||s.intent!=='work')return null;
+  const j=s.job;
+  if(j?.kind==='lookout'&&j.stage==='working'&&(s.intent==='work'||j.lookoutAtStation)&&s.position&&(s.phys?.usingSpyglass??true)){
+    const scaleY=s.scale?.[1]??1;
+    const eyeY=s.position[1]+(j.lookoutAtStation?1.24:1.42)*scaleY;
+    const lookYaw=(s.yaw??Math.PI)+(s.phys?.gazeYaw??0);
+    const lookPitch=s.phys?.gazePitch??-0.05;
+    const cp=Math.cos(lookPitch),sp=Math.sin(lookPitch);
+    const dir=[Math.sin(lookYaw)*cp,sp,Math.cos(lookYaw)*cp];
+    const sideOffset=[-Math.cos(lookYaw)*0.05,0,Math.sin(lookYaw)*0.05];
+    const base=[s.position[0]+sideOffset[0],eyeY,s.position[2]+sideOffset[2]];
+    const a=base.map((v,i)=>v+dir[i]*0.08);
+    const b=base.map((v,i)=>v+dir[i]*0.46);
+    return {kind:'spyglass',a,b};
+  }
+  if(j?.kind!=='gunnery'||j.stage!=='working'||s.intent!=='work')return null;
   const gun=j.gun,stage=gun.stage,scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12];
   const direction=gun.directionDesign.map((v,i)=>v*scale[i]),n=Math.hypot(...direction);for(let i=0;i<3;i++)direction[i]/=n;
   const muzzle=gun.muzzleDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);
@@ -928,7 +942,17 @@ export function stepCrewWork(s,company,boat,dt) {
       const tool=crewGunneryTool(s,boat);
       if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
     }else if(j.stage==='working'){
-      s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
+      if(j.kind==='lookout'&&j.lookoutAtStation){
+        let desiredYaw=Math.PI+0.28*Math.sin((s.time??0)*0.42);
+        if(boat.lookoutSighting&&Number.isFinite(boat.lookoutSighting.x)&&Number.isFinite(boat.lookoutSighting.z)){
+          const wx=boat.lookoutSighting.x-(boat.x??0),wz=boat.lookoutSighting.z-(boat.z??0);
+          const h=((boat.heading??0)*Math.PI)/180,ch=Math.cos(h),sh=Math.sin(h);
+          desiredYaw=Math.atan2(ch*wx-sh*wz,-sh*wx-ch*wz);
+        }
+        s.yaw=crewTurnTowards(s.yaw??Math.PI,desiredYaw,dt,2.8);
+      }else{
+        s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
+      }
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
       const ctrlIdx=j.control??j.mast,targetSet=effectiveSailTarget(boat,ctrlIdx);

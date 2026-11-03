@@ -63,6 +63,12 @@ export function writeGunneryToolInstances(company,boat,target){
     const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
     if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
     if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
+    if(tool.kind==='spyglass'){
+      tube(tool.a,tool.b,.014,1,6);
+      const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
+      tube(tool.b.map((x,i)=>x-d[i]/n*.14),tool.b,.022,0,8);
+      continue;
+    }
     tube(tool.a,tool.b,.021,1);
     const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
     tube(tool.b.map((x,i)=>x-d[i]/n*.12),tool.b,tool.kind==='sponge'?.065:.044,tool.kind==='sponge'?2:1);
@@ -93,6 +99,12 @@ export function buildGunneryToolVertices(company,boat,vertices){
     const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
     if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
     if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
+    if(tool.kind==='spyglass'){
+      tube(tool.a,tool.b,.014,1,6);
+      const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
+      tube(tool.b.map((x,i)=>x-d[i]/n*.14),tool.b,.022,0,8);
+      continue;
+    }
     tube(tool.a,tool.b,.021,1);
     const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d),head=tool.b.map((x,i)=>x-d[i]/n*.12);
     tube(head,tool.b,tool.kind==='sponge'?.065:.044,tool.kind==='sponge'?2:1);
