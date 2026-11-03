@@ -1680,7 +1680,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if(!isSectionVisible(sec.region,camera,viewProjection))continue;
         pass.setBindGroup(0,sec.terrainGroup);
         pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
-        if(sec.portMesh&&(!forest||!forestPack)&&isSectionVisible(sec.region,camera,viewProjection,1800)){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);}
+        if(sec.portMesh&&isSectionVisible(sec.region,camera,viewProjection,3400)){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);}
       }
       // Opaque ground props have no cutout/depth reconstruction and no cloud
       // ray march per blade. They remain in Apple's opaque visibility path.

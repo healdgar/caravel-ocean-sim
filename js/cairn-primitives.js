@@ -592,9 +592,15 @@ export function emitCairnScene(sceneSpec, helpers) {
         const sMid = span * 0.5;
         const yCrownTop = Math.max(ySpring + rOuter + 0.08, y0 + h - 0.18);
         const yArchTop = Math.max(yCrownTop + 0.18, y0 + h);
-        // Side piers
-        emitBox(archToWorld, 0, pierW, y0, yArchTop, -th * 0.5, th * 0.5, kind, shade);
-        emitBox(archToWorld, span - pierW, span, y0, yArchTop, -th * 0.5, th * 0.5, kind, shade);
+        const outerCheekW = Math.max(0.08, sMid - rOuter);
+        // Side piers up to the arch springline
+        emitBox(archToWorld, 0, pierW, y0, ySpring, -th * 0.5, th * 0.5, kind, shade);
+        emitBox(archToWorld, span - pierW, span, y0, ySpring, -th * 0.5, th * 0.5, kind, shade);
+        // Upper outer cheek piers outside the voussoir extrados (non-overlapping with spandrels)
+        if (outerCheekW > 0.06) {
+          emitBox(archToWorld, 0, outerCheekW, ySpring, yCrownTop, -th * 0.5, th * 0.5, kind, shade);
+          emitBox(archToWorld, span - outerCheekW, span, ySpring, yCrownTop, -th * 0.5, th * 0.5, kind, shade);
+        }
         // Top cornice lintel above the arch extrados
         emitBox(archToWorld, 0, span, yCrownTop, yArchTop, -th * 0.52, th * 0.52, kind, shade * 0.96);
         // Dark barrel-vaulted portal recess (kind 14) when arch is a doorway/window portal rather than an open-through arcade
@@ -693,8 +699,8 @@ export function emitCairnScene(sceneSpec, helpers) {
         const base = resolvePosition(prim.base ?? prim.position ?? prim.center, [0, 0, 0]);
         const r = Math.max(0.8, resolveNumeric(prim.radius, 3.0));
         const h = Math.max(0.8, resolveNumeric(prim.height, r * 0.95));
-        const rings = Math.max(3, Math.min(8, Math.round(resolveNumeric(prim.rings, 4))));
-        const segs = Math.max(6, Math.min(16, Math.round(resolveNumeric(prim.segments, 10))));
+        const rings = Math.max(4, Math.min(8, Math.round(resolveNumeric(prim.rings, 5))));
+        const segs = Math.max(8, Math.min(18, Math.round(resolveNumeric(prim.segments, 12))));
         // Octagonal / cylindrical drum plinth if drumHeight > 0
         const drumH = resolveNumeric(prim.drumHeight, 0);
         let yStart = base[1];
@@ -714,8 +720,8 @@ export function emitCairnScene(sceneSpec, helpers) {
         if (prim.lantern) {
           const lR = r * 0.24;
           const lH = h * 0.38;
-          emitCylinder(primToWorld, base[0], base[2], yStart + h - 0.1, yStart + h + lH, lR, lR * 0.92, 8, 11, 0.92, true);
-          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH, yStart + h + lH * 1.55, lR * 1.05, 0.06, 8, 13, 0.94, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + h - 0.1, yStart + h + lH, lR, lR * 0.92, Math.max(8, Math.min(12, segs)), 11, 0.92, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH, yStart + h + lH * 1.55, lR * 1.05, 0.06, Math.max(8, Math.min(12, segs)), 13, 0.94, true);
         }
         return;
       }
@@ -725,7 +731,7 @@ export function emitCairnScene(sceneSpec, helpers) {
         const h = Math.max(0.2, resolveNumeric(prim.height, 3.0));
         const rBottom = Math.max(0.08, resolveNumeric(prim.radiusBottom ?? prim.radius, 1.0));
         const rTop = pType === 'cone' ? Math.max(0.04, resolveNumeric(prim.radiusTop, 0.05)) : Math.max(0.04, resolveNumeric(prim.radiusTop ?? prim.radius, rBottom));
-        const segs = Math.max(5, Math.min(16, Math.round(resolveNumeric(prim.radialSegments ?? prim.segments, 8))));
+        const segs = Math.max(6, Math.min(18, Math.round(resolveNumeric(prim.radialSegments ?? prim.segments, 12))));
         emitCylinder(primToWorld, base[0], base[2], base[1], base[1] + h, rBottom, rTop, segs, kind, shade, prim.openEnded !== true);
         return;
       }
@@ -743,15 +749,17 @@ export function emitCairnScene(sceneSpec, helpers) {
         const stairToWorld = (sAlong, yLocal, nAcross) =>
           primToWorld(f[0] + ux * sAlong + nx * nAcross, yLocal, f[2] + uz * sAlong + nz * nAcross);
         const nSteps = Math.max(3, Math.min(18, Math.round((y1 - y0) / 0.28)));
+        const stepH = (y1 - y0) / nSteps;
         for (let s = 0; s < nSteps; s++) {
           const s0 = (s / nSteps) * runLen;
           const s1 = ((s + 1) / nSteps) * runLen;
-          const sy = y0 + ((s + 1) / nSteps) * (y1 - y0);
-          emitBox(stairToWorld, s0, s1, y0, sy, -w * 0.5, w * 0.5, kind, shade * (s % 2 === 0 ? 0.94 : 0.88));
+          const sy0 = s === 0 ? y0 : y0 + s * stepH - 0.04;
+          const sy1 = y0 + (s + 1) * stepH;
+          emitBox(stairToWorld, s0, s1, sy0, sy1, -w * 0.5 + 0.02, w * 0.5 - 0.02, kind, shade * (s % 2 === 0 ? 0.94 : 0.88));
         }
         if (prim.parapet !== false) {
-          emitBox(stairToWorld, 0, runLen, y0, y1 + 0.55, -w * 0.5 - 0.24, -w * 0.5, 11, 0.88);
-          emitBox(stairToWorld, 0, runLen, y0, y1 + 0.55, w * 0.5, w * 0.5 + 0.24, 11, 0.88);
+          emitBox(stairToWorld, 0, runLen, y0, y1 + 0.55, -w * 0.5 - 0.26, -w * 0.5 - 0.02, 11, 0.88);
+          emitBox(stairToWorld, 0, runLen, y0, y1 + 0.55, w * 0.5 + 0.02, w * 0.5 + 0.26, 11, 0.88);
         }
         return;
       }
@@ -947,8 +955,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'transept_arms',
-        from: [-12.4, 7.2, 1.2],
-        to: [12.4, 9.6, 7.6],
+        from: [-10.2, 7.2, 1.2],
+        to: [10.2, 9.6, 7.6],
         material: 'cream_stucco',
       },
       // Grand west facade portal with triple arches
@@ -1401,17 +1409,11 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         segments: 6,
         material: 'limestone',
       },
-      // Iterated Manueline buttresses & pinnacles along the south facade
-      {
-        primitive: 'repeat',
-        partGroup: 'south_facade_buttresses',
-        count: 4,
-        step: [5.4, 0, 0],
-        of: {
-          shape: 'manueline_buttress',
-          position: [-10.0, 0.75, -12.1],
-        },
-      },
+      // Iterated Manueline buttresses & pinnacles along the south facade (flanking Portal Sul cleanly)
+      { shape: 'manueline_buttress', partGroup: 'south_facade_buttresses', position: [-10.5, 0.75, -12.1] },
+      { shape: 'manueline_buttress', partGroup: 'south_facade_buttresses', position: [-6.2, 0.75, -12.1] },
+      { shape: 'manueline_buttress', partGroup: 'south_facade_buttresses', position: [4.2, 0.75, -12.1] },
+      { shape: 'manueline_buttress', partGroup: 'south_facade_buttresses', position: [7.8, 0.75, -12.1] },
       // Twin western bell towers with octagonal belfries & ribbed cupolas (flanking the west narthex)
       { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -9.8] },
       { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -0.2] },
@@ -1661,8 +1663,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'transept_arms',
-        from: [-11.8, 7.8, 1.5],
-        to: [11.8, 10.8, 7.8],
+        from: [-9.8, 7.8, 1.5],
+        to: [9.8, 10.8, 7.8],
         material: 'limestone',
       },
       {
@@ -1728,6 +1730,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         height: 2.6,
         style: 'gable',
         material: 'terracotta',
+        wallMaterial: 'limestone',
       },
       {
         primitive: 'roof',
@@ -1790,8 +1793,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'stairs',
         partGroup: 'royal_water_stairs',
-        from: [-10.8, -0.4, -4.5],
-        to: [-8.0, 1.4, -4.5],
+        from: [-11.2, -0.4, -4.5],
+        to: [-8.42, 1.4, -4.5],
         width: 3.6,
         material: 'limestone',
       },

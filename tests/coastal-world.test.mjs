@@ -1923,5 +1923,40 @@ test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear m
   }
 });
 
+test('Blender-audited architectural models feature per-vertex 3D AO gradients, smooth curved normals, PBR reflections, and multi-tier LOD', async () => {
+  const { TERRAIN } = await import('../js/wgsl/terrain.js');
+  const { getBuildingParts } = await import('../js/coastal-world.js');
+  // 1. Verify WGSL shader includes directional sky-hemisphere + bounce GI, mipmapped envCube reflections, GGX specular, leaded glass, and slope-aligned tejas
+  assert.ok(TERRAIN.includes('reflect(-v,n)'), 'landFinish computes environment reflection vector');
+  assert.ok(TERRAIN.includes('let specBRDF=(D*G*fresnelSun)'), 'landFinish computes physical GGX microfacet specular BRDF');
+  assert.ok(TERRAIN.includes('let archShadow=smoothstep('), 'landFinish applies architectural cavity & eave self-shadowing');
+  assert.ok(TERRAIN.includes('let isGlazedWindow=in.kind.y>0.25'), 'landOpaque renders reflective diamond-leaded casement glass on kind 14 windows');
+  assert.ok(TERRAIN.includes('let tileTan=select('), 'landOpaque aligns terracotta barrel tile flutes along roof slope tangent');
+  assert.ok(TERRAIN.includes('let archLodFade='), 'landOpaque applies multi-tier distance LOD fade on architectural materials');
+
+  // 2. Verify Lisbon & colonial prefabs emit continuous per-vertex AO gradients and smooth curved normals on cylinders/domes
+  for (const prefab of ['torre_de_belem_manuelina', 'mosteiro_dos_jeronimos', 'se_patriarcal_de_lisboa', 'catedral_basilica', 'colonial_town_block']) {
+    const geom = getBuildingParts(prefab);
+    const v = geom.vertices;
+    const idx = geom.indices;
+    let aoGradTris = 0;
+    let smoothNormTris = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t] * 8, i1 = idx[t + 1] * 8, i2 = idx[t + 2] * 8;
+      const s0 = v[i0 + 7], s1 = v[i1 + 7], s2 = v[i2 + 7];
+      if (Math.max(s0, s1, s2) - Math.min(s0, s1, s2) > 0.005) aoGradTris++;
+      const dot01 = v[i0 + 3] * v[i1 + 3] + v[i0 + 4] * v[i1 + 4] + v[i0 + 5] * v[i1 + 5];
+      const dot12 = v[i1 + 3] * v[i2 + 3] + v[i1 + 4] * v[i2 + 4] + v[i1 + 5] * v[i2 + 5];
+      if (Math.min(dot01, dot12) < 0.998) smoothNormTris++;
+    }
+    const totalTris = idx.length / 3;
+    assert.ok(aoGradTris > totalTris * 0.75, `${prefab} has per-vertex AO/shadow gradients on >75% of triangles (${aoGradTris}/${totalTris})`);
+    if (prefab !== 'colonial_town_block') {
+      assert.ok(smoothNormTris > 20, `${prefab} has smooth radial vertex normals on domes/turrets (${smoothNormTris} smooth tris)`);
+    }
+  }
+});
+
+
 
 

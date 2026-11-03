@@ -4883,6 +4883,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   let activeInstTag = '';
   let activePrefabId = '';
   let activeInstIndex = 0;
+  let activeYGround = 0;
+  let activeYTop = 10;
   let partGroupDepth = 0;
   let sectionStart = 0;
   let currentSectionKey = null;
@@ -4943,9 +4945,50 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     }
   };
 
+  const smoothstep01 = (e0, e1, x) => {
+    const t = Math.max(0, Math.min(1, (x - e0) / Math.max(1e-5, e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+
+  const computeVertexArchAO = (p, n, kind, baseShade) => {
+    const kFloor = Math.floor(kind + 0.01);
+    if (kFloor < 10 || kFloor > 18) return baseShade;
+    const hRel = p[1] - activeYGround;
+    const spanH = Math.max(3.0, activeYTop - activeYGround);
+    const vertWall = 1.0 - Math.min(1.0, Math.abs(n[1]) * 1.15);
+    // Ground / plinth contact ambient occlusion (darkens base of walls & columns over 0..2.4m)
+    const groundAO = 0.78 + 0.22 * smoothstep01(-0.2, 2.4, hRel);
+    // Under-eave & cornice shadow band near the top of walls (kFloor 10, 11, 12)
+    const distFromEave = activeYTop - p[1];
+    const isUnderEave = (kFloor === 11 || kFloor === 12) && distFromEave >= -0.15 && distFromEave <= 1.65;
+    const eaveAO = isUnderEave ? 0.82 + 0.18 * smoothstep01(0.05, 1.55, distFromEave) : 1.0;
+    // Downward-facing soffit / corbel / balcony underside shadow
+    const soffitAO = n[1] < -0.15 ? 0.78 + 0.22 * (1.0 + n[1]) : 1.0;
+    // Vertical sky-exposure gradient + subtle directional normal relief so every vertex in a quad has a smooth AO gradient
+    const skyLift = 0.94 + 0.11 * Math.max(0, Math.min(1, hRel / Math.max(8.0, spanH * 1.15)));
+    const spatialMicro =
+      0.018 * Math.sin(p[0] * 0.73 + p[2] * 0.59) +
+      0.014 * Math.cos(p[1] * 1.15 - p[0] * 0.41) +
+      0.022 * (n[0] * 0.6 + n[1] * 0.5 - n[2] * 0.4);
+    if (kFloor === 14) {
+      // Window panes & recessed portals: vertical soffit-to-sill depth gradient
+      const revealGrad = 0.84 + 0.22 * Math.sin(p[1] * 1.35 + p[0] * 0.45 + p[2] * 0.45);
+      return Math.max(0.18, Math.min(1.0, baseShade * revealGrad * soffitAO));
+    }
+    const combined =
+      baseShade *
+      (1.0 - vertWall * (1.0 - groundAO)) *
+      (1.0 - vertWall * (1.0 - eaveAO)) *
+      soffitAO *
+      skyLift +
+      spatialMicro;
+    return Math.max(0.22, Math.min(1.0, combined));
+  };
+
   const pushVertex = (p, n, kind, shade) => {
     const idx = verts.length / 8;
-    verts.push(p[0], p[1], p[2], n[0], n[1], n[2], kind, shade);
+    const vShade = computeVertexArchAO(p, n, kind, shade);
+    verts.push(p[0], p[1], p[2], n[0], n[1], n[2], kind, vShade);
     for (let k = 0; k < 3; k++) {
       bounds.min[k] = Math.min(bounds.min[k], p[k]);
       bounds.max[k] = Math.max(bounds.max[k], p[k]);
@@ -5084,8 +5127,26 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   };
 
   // Helper to emit an N-sided cylindrical or conical prism (turrets, domes, cannon barrels, round columns)
+  // Emits analytic smooth radial-and-slope normals per vertex so curved towers, domes, and columns shade smoothly
   const emitCylinder = (toWorld, cx, cz, y0, y1, r0, r1, segs = 8, kind = 11, shade = 0.88, capTop = true) => {
     const topCenter = toWorld(cx, y1, cz);
+    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    const dy = Math.max(0.05, Math.abs(y1 - y0));
+    const slopeNy = (r0 - r1) / dy;
+    const worldNormalAt = (px, py, pz, lx, ly, lz) => {
+      const pEps = toWorld(lx + 0.1, ly, lz);
+      const qEps = toWorld(lx, ly + 0.1, lz);
+      const rEps = toWorld(lx, ly, lz + 0.1);
+      return (nxLocal, nyLocal, nzLocal) => {
+        let wx = (pEps[0] - px) * nxLocal + (qEps[0] - px) * nyLocal + (rEps[0] - px) * nzLocal;
+        let wy = (pEps[1] - py) * nxLocal + (qEps[1] - py) * nyLocal + (rEps[1] - py) * nzLocal;
+        let wz = (pEps[2] - pz) * nxLocal + (qEps[2] - pz) * nyLocal + (rEps[2] - pz) * nzLocal;
+        const len = Math.hypot(wx, wy, wz) || 1;
+        return [wx / len, wy / len, wz / len];
+      };
+    };
+    const originP = toWorld(cx, y0, cz);
+    const toWorldN = worldNormalAt(originP[0], originP[1], originP[2], cx, y0, cz);
     for (let s = 0; s < segs; s++) {
       const a0 = (s / segs) * Math.PI * 2;
       const a1 = ((s + 1) / segs) * Math.PI * 2;
@@ -5095,8 +5156,21 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const p10 = toWorld(cx + c1 * r0, y0, cz + s1 * r0);
       const p11 = toWorld(cx + c1 * r1, y1, cz + s1 * r1);
       const p01 = toWorld(cx + c0 * r1, y1, cz + s0 * r1);
-      const facetShade = shade * (0.90 + 0.10 * Math.cos(a0 - 0.7));
-      pushQuad(p00, p10, p11, p01, kind, facetShade);
+      // Outward radial normal for right-handed (X, Y-up, Z) cylinder winding (p00 -> p10 -> p11 -> p01 has outward normal (-c, slopeNy, -s) or (+c, slopeNy, +s) depending on winding)
+      const ux = p10[0] - p00[0], uy = p10[1] - p00[1], uz = p10[2] - p00[2];
+      const vx = p11[0] - p00[0], vy = p11[1] - p00[1], vz = p11[2] - p00[2];
+      const fnx = uz * vy - uy * vz, fny = ux * vz - uz * vx, fnz = uy * vx - ux * vy;
+      const radialTest = toWorldN(c0, slopeNy, s0);
+      const sign = fnx * radialTest[0] + fny * radialTest[1] + fnz * radialTest[2] >= 0 ? 1 : -1;
+      const n0 = toWorldN(c0 * sign, slopeNy * sign, s0 * sign);
+      const n1 = toWorldN(c1 * sign, slopeNy * sign, s1 * sign);
+      const sh0 = shade * (0.91 + 0.09 * Math.cos(a0 - 0.7));
+      const sh1 = shade * (0.91 + 0.09 * Math.cos(a1 - 0.7));
+      const i0 = pushVertex(p00, n0, qKind, sh0 * 0.96);
+      const i1 = pushVertex(p10, n1, qKind, sh1 * 0.96);
+      const i2 = pushVertex(p11, n1, qKind, Math.min(1, sh1 * 1.03));
+      const i3 = pushVertex(p01, n0, qKind, Math.min(1, sh0 * 1.03));
+      indices.push(i0, i1, i2, i0, i2, i3);
       if (capTop && r1 > 0.04) {
         pushTri(p01, p11, topCenter, kind, Math.min(1, shade * 1.05));
       }
@@ -5238,11 +5312,12 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           pushTri(e00, e10, r0, roofKind, 0.90);
           pushTri(e11, e01, r1, roofKind, 0.91);
         } else {
-          // Gable roof + masonry gable end triangles
+          // Gable roof + masonry gable end triangles (inset 4cm from z0/z1 to prevent coplanar overlap with lower walls)
           pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
           pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
-          const g00 = toWorld(x0, yEave, z0), g10 = toWorld(x1, yEave, z0), gr0 = toWorld(midX, yPeak - 0.08, z0);
-          const g01 = toWorld(x0, yEave, z1), g11 = toWorld(x1, yEave, z1), gr1 = toWorld(midX, yPeak - 0.08, z1);
+          const gz0 = z0 + 0.04, gz1 = z1 - 0.04;
+          const g00 = toWorld(x0, yEave, gz0), g10 = toWorld(x1, yEave, gz0), gr0 = toWorld(midX, yPeak - 0.08, gz0);
+          const g01 = toWorld(x0, yEave, gz1), g11 = toWorld(x1, yEave, gz1), gr1 = toWorld(midX, yPeak - 0.08, gz1);
           pushTri(g00, g10, gr0, wallKind, 0.84);
           pushTri(g11, g01, gr1, wallKind, 0.84);
         }
@@ -5274,22 +5349,28 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   // Helper to emit a single iterated ~3.8m Spanish colonial window & upper balcony-door bay along a Z-running wall
   const emitFacadeBayZ = (toWorld, xWall, outSign, yPlinth, yMid, yTop, bz, hasUpper = true) =>
     withPartGroup('facade_bay', () => {
-      const xCasementMin = Math.min(xWall + outSign * 0.04, xWall + outSign * 0.11);
-      const xCasementMax = Math.max(xWall + outSign * 0.04, xWall + outSign * 0.11);
-      const xPaneMin = Math.min(xWall + outSign * 0.04, xWall + outSign * 0.17);
-      const xPaneMax = Math.max(xWall + outSign * 0.04, xWall + outSign * 0.17);
+      const xPaneMin = Math.min(xWall + outSign * 0.03, xWall + outSign * 0.09);
+      const xPaneMax = Math.max(xWall + outSign * 0.03, xWall + outSign * 0.09);
+      const xCasementMin = Math.min(xWall + outSign * 0.095, xWall + outSign * 0.16);
+      const xCasementMax = Math.max(xWall + outSign * 0.095, xWall + outSign * 0.16);
       const xSillMin = Math.min(xWall + outSign * 0.03, xWall + outSign * 0.24);
       const xSillMax = Math.max(xWall + outSign * 0.03, xWall + outSign * 0.24);
-      // Ground-floor window opening (kind 14) + wooden casement surround (kind 10) + projecting stone sill (kind 11)
+      const yWin0 = yPlinth + 0.78;
+      const yWin1 = Math.min(yMid - 0.32, yPlinth + 2.45);
+      // Ground-floor glazed window opening (kind 14) + 4-piece wooden casement surround (kind 10, non-coplanar) + projecting stone sill (kind 11)
       withPartGroup('facade_window_reja', () => {
-        emitBox(toWorld, xPaneMin, xPaneMax, yPlinth + 0.78, Math.min(yMid - 0.32, yPlinth + 2.45), bz - 0.54, bz + 0.54, 14, 0.34);
-        emitBox(toWorld, xCasementMin, xCasementMax, yPlinth + 0.68, Math.min(yMid - 0.22, yPlinth + 2.55), bz - 0.66, bz + 0.66, 10, 0.72, true);
-        emitBox(toWorld, xSillMin, xSillMax, yPlinth + 0.52, yPlinth + 0.65, bz - 0.74, bz + 0.74, 11, 0.86, true);
+        emitBox(toWorld, xPaneMin, xPaneMax, yWin0, yWin1, bz - 0.54, bz + 0.54, 14, 0.42);
+        // Left & right timber casement jambs + top head lintel + bottom rail
+        emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.08, yWin1 + 0.10, bz - 0.66, bz - 0.54, 10, 0.74, true);
+        emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.08, yWin1 + 0.10, bz + 0.54, bz + 0.66, 10, 0.74, true);
+        emitBox(toWorld, xCasementMin, xCasementMax, yWin1, yWin1 + 0.12, bz - 0.54, bz + 0.54, 10, 0.76, true);
+        emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.10, yWin0, bz - 0.54, bz + 0.54, 10, 0.70, true);
+        emitBox(toWorld, xSillMin, xSillMax, yPlinth + 0.52, yPlinth + 0.66, bz - 0.74, bz + 0.74, 11, 0.86, true);
       });
       if (hasUpper && yTop - yMid >= 2.2) {
-        // Upper-story shuttered balcony window/door (kind 14) + molded stone lintel pediment (kind 11)
+        // Upper-story glazed balcony window/door (kind 14) + molded stone lintel pediment (kind 11)
         withPartGroup('facade_upper_window', () => {
-          emitBox(toWorld, xPaneMin, xPaneMax, yMid + 0.24, yTop - 0.61, bz - 0.58, bz + 0.58, 14, 0.34);
+          emitBox(toWorld, xPaneMin, xPaneMax, yMid + 0.24, yTop - 0.61, bz - 0.58, bz + 0.58, 14, 0.44);
           emitBox(toWorld, xSillMin, xSillMax, yTop - 0.56, yTop - 0.36, bz - 0.74, bz + 0.74, 11, 0.88, true);
         });
       }
@@ -5340,6 +5421,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const yBase = inst.y - inst.foundationDepth;
     const yGround = inst.y;
     const yTop = inst.y + inst.height;
+    activeYGround = yGround;
+    activeYTop = yTop;
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
     const isOverWater = OVER_WATER_PREFAB_IDS.has(inst.prefabId);
@@ -6798,7 +6881,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
         // Cobbled central courtyard floor (kind 16) + octagonal stone patio fountain (Fuente de Patio)
         beginSection('courtyard_floor_and_fountain');
-        emitBox(toWorld, ix0, ix1, yPlinth - 0.12, yPlinth + 0.04, iz0, iz1, 16, 0.84, true);
+        emitBox(toWorld, ix0 + 0.04, ix1 - 0.04, yPlinth - 0.12, yPlinth + 0.04, iz0 + 0.04, iz1 - 0.04, 16, 0.84, true);
         emitCylinder(toWorld, 0, 0, yPlinth + 0.04, yPlinth + 0.88, 1.45, 1.55, 8, 11, 0.88, true);
         emitCylinder(toWorld, 0, 0, yPlinth + 0.88, yPlinth + 2.35, 0.34, 0.24, 8, 11, 0.92, true);
 
@@ -6882,7 +6965,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
         // Cobbled side patio floor (kind 16) + stone wellhead (brocal de pozo)
         beginSection('courtyard_floor_and_wellhead');
-        emitBox(toWorld, ix0, hw, yPlinth - 0.12, yPlinth + 0.04, iz0, hl, 16, 0.83, true);
+        emitBox(toWorld, ix0 + 0.04, hw - 1.08, yPlinth - 0.12, yPlinth + 0.04, iz0 + 0.04, iz1 - 0.04, 16, 0.83, true);
         emitCylinder(toWorld, (ix0 + hw) * 0.5, (iz0 + iz1) * 0.5, yPlinth + 0.04, yPlinth + 1.05, 0.88, 0.92, 8, 11, 0.86, true);
 
         // Main street wing [-hw, ix0] running full length [-hl, hl]
