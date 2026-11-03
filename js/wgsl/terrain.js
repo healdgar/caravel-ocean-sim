@@ -749,12 +749,33 @@ fn landOpaque(in:LandVertex)->vec4f{
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
     let charNoise=gnoise(world.xz*2.8+vec2f(world.y*2.1));
-    let rubbleTint=select(vec3f(0.11,0.085,0.065),vec3f(0.16,0.12,0.08),in.kind.x>=9.5);
-    let sootTint=vec3f(0.042,0.038,0.034);
-    let dmgAlbedo=mix(rubbleTint,sootTint,clamp(dmgW*0.65+charNoise*0.25,0.0,1.0));
-    albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
-    relief+=(charNoise*0.085-0.045)*dmgW*detailFade;
-    roughness=max(roughness,0.94);
+    let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&abs(in.kind.x-15.0)>0.4;
+    if(isStoneRubble){
+      let blkX=landFilteredCourse(world.x*1.45+charNoise*0.42,dx.x*1.45,dy.x*1.45,2.2);
+      let blkY=landFilteredCourse(world.y*1.95+charNoise*0.35,dx.y*1.95,dy.y*1.95,2.2);
+      let blkZ=landFilteredCourse(world.z*1.45-charNoise*0.42,dx.z*1.45,dy.z*1.45,2.2);
+      let blockCrevice=clamp(max(max(blkX,blkY),blkZ),0.0,1.0);
+      let cobbleNoise=gnoise(world.xz*6.2+vec2f(world.y*4.8,-world.y*3.4));
+      let gritNoise=gnoise(world.xz*14.5+vec2f(-world.y*10.5,world.y*8.2));
+      let spallStone=vec3f(0.52,0.47,0.38)*(0.78+0.42*clamp(in.kind.y,0.2,1.0));
+      let brickCore=vec3f(0.39,0.23,0.14);
+      let stoneBlockCol=mix(spallStone,brickCore,clamp(0.35*cobbleNoise+select(0.0,0.35,in.kind.x>=11.5&&in.kind.x<13.5),0.0,0.75));
+      let creviceSoot=vec3f(0.055,0.048,0.040);
+      let sootMix=clamp(blockCrevice*0.72+max(0.0,-cobbleNoise)*0.45+dmgW*0.18,0.0,0.92);
+      let rubbleAlbedo=mix(stoneBlockCol*(0.92+0.16*gritNoise),creviceSoot,sootMix);
+      albedo=mix(albedo,rubbleAlbedo,clamp(dmgW*0.88,0.0,0.94));
+      let blockFacet=(0.55*cobbleNoise+0.35*gritNoise)-0.70*blockCrevice;
+      relief+=blockFacet*0.145*dmgW*detailFade;
+      ambientVisibility*=mix(1.0,0.38+0.62*clamp(1.0-blockCrevice*0.75+cobbleNoise*0.25,0.0,1.0),dmgW);
+    }else{
+      let splinterNoise=gnoise(world.xz*7.5+vec2f(world.y*4.2,-world.y*5.1));
+      let rawWood=select(vec3f(0.11,0.085,0.065),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
+      let sootTint=vec3f(0.042,0.038,0.034);
+      let dmgAlbedo=mix(rawWood,sootTint,clamp(dmgW*0.58+charNoise*0.28-splinterNoise*0.20,0.0,1.0));
+      albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
+      relief+=(splinterNoise*0.095-0.045)*dmgW*detailFade;
+    }
+    roughness=max(roughness,0.95);
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);

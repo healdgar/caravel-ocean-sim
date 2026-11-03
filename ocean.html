@@ -14514,12 +14514,33 @@ fn landOpaque(in:LandVertex)->vec4f{
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
     let charNoise=gnoise(world.xz*2.8+vec2f(world.y*2.1));
-    let rubbleTint=select(vec3f(0.11,0.085,0.065),vec3f(0.16,0.12,0.08),in.kind.x>=9.5);
-    let sootTint=vec3f(0.042,0.038,0.034);
-    let dmgAlbedo=mix(rubbleTint,sootTint,clamp(dmgW*0.65+charNoise*0.25,0.0,1.0));
-    albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
-    relief+=(charNoise*0.085-0.045)*dmgW*detailFade;
-    roughness=max(roughness,0.94);
+    let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&abs(in.kind.x-15.0)>0.4;
+    if(isStoneRubble){
+      let blkX=landFilteredCourse(world.x*1.45+charNoise*0.42,dx.x*1.45,dy.x*1.45,2.2);
+      let blkY=landFilteredCourse(world.y*1.95+charNoise*0.35,dx.y*1.95,dy.y*1.95,2.2);
+      let blkZ=landFilteredCourse(world.z*1.45-charNoise*0.42,dx.z*1.45,dy.z*1.45,2.2);
+      let blockCrevice=clamp(max(max(blkX,blkY),blkZ),0.0,1.0);
+      let cobbleNoise=gnoise(world.xz*6.2+vec2f(world.y*4.8,-world.y*3.4));
+      let gritNoise=gnoise(world.xz*14.5+vec2f(-world.y*10.5,world.y*8.2));
+      let spallStone=vec3f(0.52,0.47,0.38)*(0.78+0.42*clamp(in.kind.y,0.2,1.0));
+      let brickCore=vec3f(0.39,0.23,0.14);
+      let stoneBlockCol=mix(spallStone,brickCore,clamp(0.35*cobbleNoise+select(0.0,0.35,in.kind.x>=11.5&&in.kind.x<13.5),0.0,0.75));
+      let creviceSoot=vec3f(0.055,0.048,0.040);
+      let sootMix=clamp(blockCrevice*0.72+max(0.0,-cobbleNoise)*0.45+dmgW*0.18,0.0,0.92);
+      let rubbleAlbedo=mix(stoneBlockCol*(0.92+0.16*gritNoise),creviceSoot,sootMix);
+      albedo=mix(albedo,rubbleAlbedo,clamp(dmgW*0.88,0.0,0.94));
+      let blockFacet=(0.55*cobbleNoise+0.35*gritNoise)-0.70*blockCrevice;
+      relief+=blockFacet*0.145*dmgW*detailFade;
+      ambientVisibility*=mix(1.0,0.38+0.62*clamp(1.0-blockCrevice*0.75+cobbleNoise*0.25,0.0,1.0),dmgW);
+    }else{
+      let splinterNoise=gnoise(world.xz*7.5+vec2f(world.y*4.2,-world.y*5.1));
+      let rawWood=select(vec3f(0.11,0.085,0.065),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
+      let sootTint=vec3f(0.042,0.038,0.034);
+      let dmgAlbedo=mix(rawWood,sootTint,clamp(dmgW*0.58+charNoise*0.28-splinterNoise*0.20,0.0,1.0));
+      albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
+      relief+=(splinterNoise*0.095-0.045)*dmgW*detailFade;
+    }
+    roughness=max(roughness,0.95);
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);
@@ -20153,7 +20174,7 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     if (bake.kind === 'building-explosion' || bake.kind === 'building-collapse') {
       const isExplosion = bake.kind === 'building-explosion';
       const blastR = Math.max(12.0, (Number(bake.radius) || 9.5) * 1.65);
-      const stepDepth = Math.max(1.6, Number(bake.stepDepth) || 2.4);
+      const stepDepth = Math.max(1.5, Number(bake.stepDepth) || 2.2);
       const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
       for (let v = 0; v < vertexCount; v++) {
         const at = v * stride;
@@ -20163,35 +20184,57 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         const dx = px - bx;
         const dy = py - by;
         const dz = pz - bz;
-        const dist = Math.hypot(dx, dy * 0.65, dz);
+        const dist = Math.hypot(dx, dy * 0.55, dz);
         if (dist >= blastR) continue;
-        const t = 1 - dist / blastR;
-        const core = t * t;
-        const jag = 0.62 + 0.58 * Math.sin(px * 13.0 + pz * 17.0) * Math.cos(py * 19.0 - px * 11.0);
-        const hDist = Math.hypot(dx, dz) || 1;
-        // Upper keep/dome/parapet collapses downward into a smoking ruin; walls splay outward into rubble.
-        const aboveBlast = Math.max(0, py - Math.max(1.5, by - 2.0));
-        const collapseDrop = aboveBlast > 0.2
-          ? -Math.min(aboveBlast * 0.72, stepDepth * (isExplosion ? 2.1 : 1.55) * (0.45 + 0.55 * t) * jag)
-          : stepDepth * 0.28 * core * jag;
-        const outPush = stepDepth * (isExplosion ? 1.15 : 0.65) * core * jag;
-        mesh[at] = px + (dx / hDist) * outPush;
-        mesh[at + 1] = Math.max(0.15, py + collapseDrop);
-        mesh[at + 2] = pz + (dz / hDist) * outPush;
         const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
         const curLen = Math.hypot(nx, ny, nz) || 1;
         const prevDmg = Math.max(0, curLen - 1.0);
+        const t = 1 - dist / blastR;
+        const core = t * t;
+        // Block-quantized cell hash so masonry courses slump in stepped ashlar blocks, never shearing into spiky shards
+        const cellX = Math.floor(px / 1.65);
+        const cellZ = Math.floor(pz / 1.65);
+        const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
+        const blockStep = Math.round(cellHash * 3.0) / 3.0;
+        const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.2 + pz * 1.1) * Math.cos(px * 0.8 - pz * 1.3);
+        const blockMod = 0.72 + 0.28 * (blockStep * 0.7 + smoothWave * 0.3);
+
+        // Strictly saturate horizontal displacement so overlapping bakes never stretch triangles into shards
+        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+        const hDist = Math.hypot(dx, dz) || 1;
+        const outPush = Math.min(0.45, stepDepth * (isExplosion ? 0.26 : 0.16) * core * blockMod) * horizRemain;
+
+        // Gravity slump: upper walls, roofs, and battlements crumble downward toward a stepped rubble mound
+        const rubbleBaseY = Math.max(0.35, Math.min(py, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
+        const aboveRubble = Math.max(0, py - rubbleBaseY);
+        const slumpFrac = Math.min(0.82, (isExplosion ? 0.68 : 0.52) * (0.38 + 0.62 * t) * blockMod);
+        let newPy = py - aboveRubble * slumpFrac;
         const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
+        const rawKind = mesh[at + 6] ?? 7;
+        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && Math.round(rawKind) !== 15;
+        if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
+          const courseH = 0.52;
+          const courseOff = blockStep * 0.26;
+          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const snapW = Math.min(0.62, (nextDmg - 0.45) * 0.65);
+          newPy = newPy * (1 - snapW) + steppedY * snapW;
+        }
+        mesh[at] = px + (dx / hDist) * outPush;
+        mesh[at + 1] = Math.max(0.18, newPy);
+        mesh[at + 2] = pz + (dz / hDist) * outPush;
+
         const scale = 1.0 + nextDmg;
-        const ux = nx / curLen + (dx / blastR) * 0.45 * t;
-        const uy = ny / curLen + 0.35 * t;
-        const uz = nz / curLen + (dz / blastR) * 0.45 * t;
+        const ux = nx / curLen + (dx / blastR) * 0.28 * t;
+        const uy = ny / curLen + 0.55 * t;
+        const uz = nz / curLen + (dz / blastR) * 0.28 * t;
         const uLen = Math.hypot(ux, uy, uz) || 1;
         mesh[at + 3] = (ux / uLen) * scale;
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
-        if (stride >= 8 && (mesh[at + 6] ?? 7) < 19.5) {
-          mesh[at + 7] = Math.max(0.18, mesh[at + 7] * (1 - (0.52 + 0.32 * powFrac) * (0.4 + 0.6 * t)));
+        if (stride >= 8 && rawKind < 19.5) {
+          const targetShade = 0.28 + 0.26 * blockStep;
+          const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
+          mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
         }
         if (v < minV) minV = v;
         if (v > maxV) maxV = v;
@@ -20306,40 +20349,66 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
 
       const t = 1 - dist / r;
       const core = t * 0.45 + t * t * 0.55;
-      const jag = isTimber
-        ? 0.65 + 0.68 * Math.sin(py * 31.0 + pz * 19.0) * Math.cos(px * 23.0)
-        : 0.72 + 0.48 * Math.sin(px * 17.0 + py * 23.0 + pz * 13.0);
-
-      if (isCannonDismount && (kind === 10 || kind === 14)) {
-        const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-        mesh[at] = px + inX * stepDepth * 1.25 * t + inZ * slew * 0.48 * t;
-        mesh[at + 1] = Math.max(0.2, py - 0.62 * t);
-        mesh[at + 2] = pz + inZ * stepDepth * 1.25 * t - inX * slew * 0.48 * t;
-      } else {
-        const disp = stepDepth * core * jag;
-        const rim = t * (1 - t) * 4.0;
-        const splay = stepDepth * (isTimber ? 0.26 : 0.14) * rim * (jag - 0.72);
-        const topCollapse = dy > -0.5 ? stepDepth * 0.68 * core * jag : stepDepth * 0.22 * core * jag;
-        mesh[at] = px + inX * disp + (dist > 1e-4 ? (dx / dist) * splay : 0);
-        mesh[at + 1] = Math.max(0.12, py + inY * disp - topCollapse + (dist > 1e-4 ? (dy / dist) * splay : 0));
-        mesh[at + 2] = pz + inZ * disp + (dist > 1e-4 ? (dz / dist) * splay : 0);
-      }
-
       const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
       const curLen = Math.hypot(nx, ny, nz) || 1;
       const prevDmg = Math.max(0, curLen - 1.0);
       const nextDmg = Math.min(1.45, prevDmg + Math.min(0.85, 0.58 * core * severity));
+      // Block-quantized ashlar course factor (1.5m x 1.5m cells) so stone crumbles in blocky steps,
+      // never shearing adjacent vertices with high-frequency sine spikes.
+      const cellX = Math.floor(px / 1.5);
+      const cellZ = Math.floor(pz / 1.5);
+      const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
+      const blockStep = Math.round(cellHash * 3.0) / 3.0;
+      const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.4 + pz * 1.2) * Math.cos(px * 0.9 - pz * 1.1);
+      const blockMod = isTimber
+        ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(px * 2.2 + pz * 1.8) * Math.cos(py * 2.5))
+        : 0.74 + 0.26 * (blockStep * 0.7 + smoothWave * 0.3);
+
+      // Strictly cap cumulative horizontal displacement via prevDmg so 52 overlapping hits from a
+      // broadside never push a wall face through its back face or create spiky horizontal shards.
+      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+
+      if (isCannonDismount && (kind === 10 || kind === 14)) {
+        const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
+        const hDisp = stepDepth * 0.65 * t * horizRemain;
+        mesh[at] = px + (inX * hDisp + inZ * slew * 0.24 * t * horizRemain);
+        mesh[at + 1] = Math.max(0.2, py - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
+        mesh[at + 2] = pz + (inZ * hDisp - inX * slew * 0.24 * t * horizRemain);
+      } else {
+        const hDisp = Math.min(0.32, stepDepth * 0.24 * core * blockMod) * horizRemain;
+        const rubbleFloorY = Math.max(0.25, Math.min(py, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
+        const aboveRubble = Math.max(0, py - rubbleFloorY);
+        const dropWeight = dy > -0.6 ? 0.42 : 0.18;
+        const rawDrop = Math.min(aboveRubble * 0.65, stepDepth * dropWeight * core * blockMod);
+        let newPy = Math.max(0.15, py - rawDrop + inY * hDisp * 0.35);
+
+        const isStoneKind = !isTimber && rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
+        if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
+          const courseH = 0.52;
+          const courseOff = blockStep * 0.26;
+          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const snapW = Math.min(0.58, (nextDmg - 0.45) * 0.60);
+          newPy = newPy * (1 - snapW) + steppedY * snapW;
+        }
+
+        mesh[at] = px + inX * hDisp;
+        mesh[at + 1] = newPy;
+        mesh[at + 2] = pz + inZ * hDisp;
+      }
+
       const scale = 1.0 + nextDmg;
-      const tilt = 0.58 * t;
-      const ux = nx / curLen - (dx / r) * tilt;
-      const uy = ny / curLen - (dy / r) * tilt;
-      const uz = nz / curLen - (dz / r) * tilt;
+      const tilt = 0.38 * t;
+      const ux = nx / curLen - (dx / r) * tilt * 0.65;
+      const uy = ny / curLen + 0.42 * core;
+      const uz = nz / curLen - (dz / r) * tilt * 0.65;
       const uLen = Math.hypot(ux, uy, uz) || 1;
       mesh[at + 3] = (ux / uLen) * scale;
       mesh[at + 4] = (uy / uLen) * scale;
       mesh[at + 5] = (uz / uLen) * scale;
       if (stride >= 8 && rawKind < 19.5) {
-        mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - Math.min(0.65, 0.45 * core * severity)));
+        const targetShade = 0.30 + 0.24 * blockStep;
+        const blend = Math.min(0.65, 0.42 * core * severity);
+        mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
       }
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;
@@ -35140,9 +35209,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanX / 3.2))) : 1;
-    const ny = spanY >= 3.2 ? Math.min(5, Math.max(2, Math.round(spanY / 2.6))) : 1;
-    const nz = spanZ >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanZ / 3.2))) : 1;
+    const nx = spanX >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanX / 2.2))) : 1;
+    const ny = spanY >= 2.6 ? Math.min(6, Math.max(2, Math.round(spanY / 2.0))) : 1;
+    const nz = spanZ >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanZ / 2.2))) : 1;
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
@@ -35299,17 +35368,19 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       const r0 = toWorld(midX, yPeak, zHip0);
       const r1 = toWorld(midX, yPeak, zHip1);
 
+      const nRoofZ = spanZ >= 3.2 ? Math.min(8, Math.max(2, Math.round(spanZ / 2.6))) : 1;
+      const nRoofSlope = Math.abs(x1 - x0) >= 4.0 ? 2 : 1;
       withPartGroup('roof_slopes', () => {
         if (hipRatio > 0.02) {
-          // Hipped roof: 2 side trapezoids + 2 end hip triangles
-          pushQuad(e01, e00, r0, r1, roofKind, 0.94);
-          pushQuad(e10, e11, r1, r0, roofKind, 0.88);
+          // Hipped roof: 2 subdivided side trapezoids + 2 end hip triangles
+          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
+          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
           pushTri(e00, e10, r0, roofKind, 0.90);
           pushTri(e11, e01, r1, roofKind, 0.91);
         } else {
           // Gable roof + masonry gable end triangles
-          pushQuad(e01, e00, r0, r1, roofKind, 0.94);
-          pushQuad(e10, e11, r1, r0, roofKind, 0.88);
+          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
+          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
           const g00 = toWorld(x0, yEave, z0), g10 = toWorld(x1, yEave, z0), gr0 = toWorld(midX, yPeak - 0.08, z0);
           const g01 = toWorld(x0, yEave, z1), g11 = toWorld(x1, yEave, z1), gr1 = toWorld(midX, yPeak - 0.08, z1);
           pushTri(g00, g10, gr0, wallKind, 0.84);
@@ -52359,10 +52430,10 @@ function createBuildingDamageState(building) {
   const defaultMaxEnergy = isBastionOrFort
     ? 3200000
     : materialClass === 'fortified-stone'
-      ? 2200000
+      ? 1450000
       : materialClass === 'timber'
-        ? 950000
-        : 1600000;
+        ? 860000
+        : 920000;
   const defaultOuterPenJoules = materialClass === 'fortified-stone'
     ? 155000
     : materialClass === 'masonry'
@@ -52702,7 +52773,7 @@ function applyBuildingImpactDamage(building, event) {
   // - Timber buildings (piers, careening sheds, watchtowers) ignite rapidly with high intensity.
   // - Masonry buildings ignite roof rafters and interior timber floors.
   // - Fortified stone ignites internal barracks/carriages/stores when penetrated, struck by hot shot, or heavily breached.
-  if (ammo === 'hot' || (penetratedOuter && d.breaches >= 3 && d.fires.length < 3)) {
+  if (ammo === 'hot' || (penetratedOuter && (d.breaches >= 3 || (materialClass !== 'fortified-stone' && d.breaches >= 2)) && d.fires.length < 3)) {
     const canIgniteStone =
       ammo === 'hot' ||
       materialClass !== 'fortified-stone' ||
@@ -52716,7 +52787,7 @@ function applyBuildingImpactDamage(building, event) {
       d.fireCount = (d.fireCount ?? 0) + 1;
       const baseIgnite = ammo === 'hot'
         ? (materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
-        : 0.28;
+        : (materialClass === 'timber' ? 0.36 : 0.28);
       const addIntensity = Math.min(1.45, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
       const fireLocal = [
         localPos[0] ?? 0,
@@ -52777,7 +52848,25 @@ function applyBuildingImpactDamage(building, event) {
     }
   }
 
-  // Progressive structural collapse bakes when a fort or building becomes breached or ruined
+  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined
+  if (d.state !== 'intact' && materialClass !== 'fortified-stone' && !d.damageCollapseBaked) {
+    d.damageCollapseBaked = true;
+    const roofCavePt = buildingLocalToWorld(building, [
+      (localPos[0] ?? 0) * 0.65,
+      (building.height ?? 7) * 0.90,
+      (localPos[2] ?? 0) * 0.65,
+    ]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +roofCavePt[0].toFixed(3),
+      y: +roofCavePt[1].toFixed(3),
+      z: +roofCavePt[2].toFixed(3),
+      radius: +(Math.max(5.5, Math.min(building.width ?? 16, building.depth ?? building.length ?? 16) * 0.42)).toFixed(3),
+      stepDepth: 1.35,
+      severity: 0.95,
+      powderFraction: 0.40,
+    });
+  }
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
     const collapsePt = buildingLocalToWorld(building, [
@@ -52896,6 +52985,34 @@ function stepBuildingDamage(building, dt) {
   d.integrity = Math.max(0, 1 - d.damageJoules / d.maxEnergy);
   d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
   d.fireIntensity = +totalIntensity.toFixed(3);
+  if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
+    d.breachCollapseBaked = true;
+    const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +collapsePt[0].toFixed(3),
+      y: +collapsePt[1].toFixed(3),
+      z: +collapsePt[2].toFixed(3),
+      radius: +(Math.max(6.5, Math.min(building.width ?? 18, building.depth ?? building.length ?? 18) * 0.48)).toFixed(3),
+      stepDepth: 1.65,
+      severity: 1.15,
+      powderFraction: 0.55,
+    });
+  }
+  if (d.state === 'ruined' && !d.ruinCollapseBaked) {
+    d.ruinCollapseBaked = true;
+    const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +ruinPt[0].toFixed(3),
+      y: +ruinPt[1].toFixed(3),
+      z: +ruinPt[2].toFixed(3),
+      radius: +(Math.max(9.0, Math.max(building.width ?? 20, building.depth ?? building.length ?? 20) * 0.62)).toFixed(3),
+      stepDepth: 2.25,
+      severity: 1.30,
+      powderFraction: 0.75,
+    });
+  }
 
   const mag = building.magazine ?? d.magazine;
   if (d.fireIntensity >= 1.85 && mag && !mag.exploded && !mag.deflagrated && mag.powderKg > 0) {
@@ -54090,6 +54207,7 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       const terrain=getTerrain();
       const ports=terrain?.ports??(terrain?.port?[terrain.port]:[]);
       let bestFortLocal=null,bestFortDist=Infinity;
+      let bestIntactBldgLocal=null,bestIntactBldgDist=Infinity;
       for(const port of ports){
         for(const inst of (port?.instances??[])){
           const groundY=inst.baseY??inst.y??0;
@@ -54097,9 +54215,13 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
           const loc=vesselWorldToLocal(boat,[inst.x??0,targetY,inst.z??0]);
           if(loc[0]*sideSign<=1.0)continue;
           const d=Math.hypot(loc[0],loc[2]);
+          const isRuined=inst.damageState?.state==='ruined';
           const isFort=inst.prefabId==='stone_sea_bastion'||inst.prefabId==='bastion_trace_fortress'||inst.prefabId==='english_triangular_palisade_fort'||Boolean(inst.gunnery?.guns?.length);
-          if(isFort&&inst.damageState?.state!=='ruined'&&d<bestFortDist){
+          if(isFort&&!isRuined&&d<bestFortDist){
             bestFortDist=d;bestFortLocal=loc;
+          }
+          if(!isRuined&&d<bestIntactBldgDist){
+            bestIntactBldgDist=d;bestIntactBldgLocal=loc;
           }
           if(d<bestDist){bestDist=d;bestLocal=loc;}
         }
@@ -54107,6 +54229,9 @@ function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBlock=()=>n
       if(bestFortLocal&&(bestFortDist<=bestDist*1.8||bestFortDist<=520)){
         bestLocal=bestFortLocal;
         bestDist=bestFortDist;
+      }else if(bestIntactBldgLocal&&bestIntactBldgDist<=bestDist*2.2){
+        bestLocal=bestIntactBldgLocal;
+        bestDist=bestIntactBldgDist;
       }
       if(!bestLocal)return null;
       // Positive traverse trains toward the bow (-Z in local ship coords)

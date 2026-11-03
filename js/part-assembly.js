@@ -1853,7 +1853,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     if (bake.kind === 'building-explosion' || bake.kind === 'building-collapse') {
       const isExplosion = bake.kind === 'building-explosion';
       const blastR = Math.max(12.0, (Number(bake.radius) || 9.5) * 1.65);
-      const stepDepth = Math.max(1.6, Number(bake.stepDepth) || 2.4);
+      const stepDepth = Math.max(1.5, Number(bake.stepDepth) || 2.2);
       const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
       for (let v = 0; v < vertexCount; v++) {
         const at = v * stride;
@@ -1863,35 +1863,57 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         const dx = px - bx;
         const dy = py - by;
         const dz = pz - bz;
-        const dist = Math.hypot(dx, dy * 0.65, dz);
+        const dist = Math.hypot(dx, dy * 0.55, dz);
         if (dist >= blastR) continue;
-        const t = 1 - dist / blastR;
-        const core = t * t;
-        const jag = 0.62 + 0.58 * Math.sin(px * 13.0 + pz * 17.0) * Math.cos(py * 19.0 - px * 11.0);
-        const hDist = Math.hypot(dx, dz) || 1;
-        // Upper keep/dome/parapet collapses downward into a smoking ruin; walls splay outward into rubble.
-        const aboveBlast = Math.max(0, py - Math.max(1.5, by - 2.0));
-        const collapseDrop = aboveBlast > 0.2
-          ? -Math.min(aboveBlast * 0.72, stepDepth * (isExplosion ? 2.1 : 1.55) * (0.45 + 0.55 * t) * jag)
-          : stepDepth * 0.28 * core * jag;
-        const outPush = stepDepth * (isExplosion ? 1.15 : 0.65) * core * jag;
-        mesh[at] = px + (dx / hDist) * outPush;
-        mesh[at + 1] = Math.max(0.15, py + collapseDrop);
-        mesh[at + 2] = pz + (dz / hDist) * outPush;
         const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
         const curLen = Math.hypot(nx, ny, nz) || 1;
         const prevDmg = Math.max(0, curLen - 1.0);
+        const t = 1 - dist / blastR;
+        const core = t * t;
+        // Block-quantized cell hash so masonry courses slump in stepped ashlar blocks, never shearing into spiky shards
+        const cellX = Math.floor(px / 1.65);
+        const cellZ = Math.floor(pz / 1.65);
+        const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
+        const blockStep = Math.round(cellHash * 3.0) / 3.0;
+        const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.2 + pz * 1.1) * Math.cos(px * 0.8 - pz * 1.3);
+        const blockMod = 0.72 + 0.28 * (blockStep * 0.7 + smoothWave * 0.3);
+
+        // Strictly saturate horizontal displacement so overlapping bakes never stretch triangles into shards
+        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+        const hDist = Math.hypot(dx, dz) || 1;
+        const outPush = Math.min(0.45, stepDepth * (isExplosion ? 0.26 : 0.16) * core * blockMod) * horizRemain;
+
+        // Gravity slump: upper walls, roofs, and battlements crumble downward toward a stepped rubble mound
+        const rubbleBaseY = Math.max(0.35, Math.min(py, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
+        const aboveRubble = Math.max(0, py - rubbleBaseY);
+        const slumpFrac = Math.min(0.82, (isExplosion ? 0.68 : 0.52) * (0.38 + 0.62 * t) * blockMod);
+        let newPy = py - aboveRubble * slumpFrac;
         const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
+        const rawKind = mesh[at + 6] ?? 7;
+        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && Math.round(rawKind) !== 15;
+        if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
+          const courseH = 0.52;
+          const courseOff = blockStep * 0.26;
+          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const snapW = Math.min(0.62, (nextDmg - 0.45) * 0.65);
+          newPy = newPy * (1 - snapW) + steppedY * snapW;
+        }
+        mesh[at] = px + (dx / hDist) * outPush;
+        mesh[at + 1] = Math.max(0.18, newPy);
+        mesh[at + 2] = pz + (dz / hDist) * outPush;
+
         const scale = 1.0 + nextDmg;
-        const ux = nx / curLen + (dx / blastR) * 0.45 * t;
-        const uy = ny / curLen + 0.35 * t;
-        const uz = nz / curLen + (dz / blastR) * 0.45 * t;
+        const ux = nx / curLen + (dx / blastR) * 0.28 * t;
+        const uy = ny / curLen + 0.55 * t;
+        const uz = nz / curLen + (dz / blastR) * 0.28 * t;
         const uLen = Math.hypot(ux, uy, uz) || 1;
         mesh[at + 3] = (ux / uLen) * scale;
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
-        if (stride >= 8 && (mesh[at + 6] ?? 7) < 19.5) {
-          mesh[at + 7] = Math.max(0.18, mesh[at + 7] * (1 - (0.52 + 0.32 * powFrac) * (0.4 + 0.6 * t)));
+        if (stride >= 8 && rawKind < 19.5) {
+          const targetShade = 0.28 + 0.26 * blockStep;
+          const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
+          mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
         }
         if (v < minV) minV = v;
         if (v > maxV) maxV = v;
@@ -2006,40 +2028,66 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
 
       const t = 1 - dist / r;
       const core = t * 0.45 + t * t * 0.55;
-      const jag = isTimber
-        ? 0.65 + 0.68 * Math.sin(py * 31.0 + pz * 19.0) * Math.cos(px * 23.0)
-        : 0.72 + 0.48 * Math.sin(px * 17.0 + py * 23.0 + pz * 13.0);
-
-      if (isCannonDismount && (kind === 10 || kind === 14)) {
-        const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-        mesh[at] = px + inX * stepDepth * 1.25 * t + inZ * slew * 0.48 * t;
-        mesh[at + 1] = Math.max(0.2, py - 0.62 * t);
-        mesh[at + 2] = pz + inZ * stepDepth * 1.25 * t - inX * slew * 0.48 * t;
-      } else {
-        const disp = stepDepth * core * jag;
-        const rim = t * (1 - t) * 4.0;
-        const splay = stepDepth * (isTimber ? 0.26 : 0.14) * rim * (jag - 0.72);
-        const topCollapse = dy > -0.5 ? stepDepth * 0.68 * core * jag : stepDepth * 0.22 * core * jag;
-        mesh[at] = px + inX * disp + (dist > 1e-4 ? (dx / dist) * splay : 0);
-        mesh[at + 1] = Math.max(0.12, py + inY * disp - topCollapse + (dist > 1e-4 ? (dy / dist) * splay : 0));
-        mesh[at + 2] = pz + inZ * disp + (dist > 1e-4 ? (dz / dist) * splay : 0);
-      }
-
       const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
       const curLen = Math.hypot(nx, ny, nz) || 1;
       const prevDmg = Math.max(0, curLen - 1.0);
       const nextDmg = Math.min(1.45, prevDmg + Math.min(0.85, 0.58 * core * severity));
+      // Block-quantized ashlar course factor (1.5m x 1.5m cells) so stone crumbles in blocky steps,
+      // never shearing adjacent vertices with high-frequency sine spikes.
+      const cellX = Math.floor(px / 1.5);
+      const cellZ = Math.floor(pz / 1.5);
+      const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
+      const blockStep = Math.round(cellHash * 3.0) / 3.0;
+      const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.4 + pz * 1.2) * Math.cos(px * 0.9 - pz * 1.1);
+      const blockMod = isTimber
+        ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(px * 2.2 + pz * 1.8) * Math.cos(py * 2.5))
+        : 0.74 + 0.26 * (blockStep * 0.7 + smoothWave * 0.3);
+
+      // Strictly cap cumulative horizontal displacement via prevDmg so 52 overlapping hits from a
+      // broadside never push a wall face through its back face or create spiky horizontal shards.
+      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+
+      if (isCannonDismount && (kind === 10 || kind === 14)) {
+        const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
+        const hDisp = stepDepth * 0.65 * t * horizRemain;
+        mesh[at] = px + (inX * hDisp + inZ * slew * 0.24 * t * horizRemain);
+        mesh[at + 1] = Math.max(0.2, py - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
+        mesh[at + 2] = pz + (inZ * hDisp - inX * slew * 0.24 * t * horizRemain);
+      } else {
+        const hDisp = Math.min(0.32, stepDepth * 0.24 * core * blockMod) * horizRemain;
+        const rubbleFloorY = Math.max(0.25, Math.min(py, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
+        const aboveRubble = Math.max(0, py - rubbleFloorY);
+        const dropWeight = dy > -0.6 ? 0.42 : 0.18;
+        const rawDrop = Math.min(aboveRubble * 0.65, stepDepth * dropWeight * core * blockMod);
+        let newPy = Math.max(0.15, py - rawDrop + inY * hDisp * 0.35);
+
+        const isStoneKind = !isTimber && rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
+        if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
+          const courseH = 0.52;
+          const courseOff = blockStep * 0.26;
+          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const snapW = Math.min(0.58, (nextDmg - 0.45) * 0.60);
+          newPy = newPy * (1 - snapW) + steppedY * snapW;
+        }
+
+        mesh[at] = px + inX * hDisp;
+        mesh[at + 1] = newPy;
+        mesh[at + 2] = pz + inZ * hDisp;
+      }
+
       const scale = 1.0 + nextDmg;
-      const tilt = 0.58 * t;
-      const ux = nx / curLen - (dx / r) * tilt;
-      const uy = ny / curLen - (dy / r) * tilt;
-      const uz = nz / curLen - (dz / r) * tilt;
+      const tilt = 0.38 * t;
+      const ux = nx / curLen - (dx / r) * tilt * 0.65;
+      const uy = ny / curLen + 0.42 * core;
+      const uz = nz / curLen - (dz / r) * tilt * 0.65;
       const uLen = Math.hypot(ux, uy, uz) || 1;
       mesh[at + 3] = (ux / uLen) * scale;
       mesh[at + 4] = (uy / uLen) * scale;
       mesh[at + 5] = (uz / uLen) * scale;
       if (stride >= 8 && rawKind < 19.5) {
-        mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - Math.min(0.65, 0.45 * core * severity)));
+        const targetShade = 0.30 + 0.24 * blockStep;
+        const blend = Math.min(0.65, 0.42 * core * severity);
+        mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
       }
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;

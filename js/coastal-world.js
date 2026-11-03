@@ -4988,9 +4988,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanX / 3.2))) : 1;
-    const ny = spanY >= 3.2 ? Math.min(5, Math.max(2, Math.round(spanY / 2.6))) : 1;
-    const nz = spanZ >= 4.2 ? Math.min(8, Math.max(2, Math.round(spanZ / 3.2))) : 1;
+    const nx = spanX >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanX / 2.2))) : 1;
+    const ny = spanY >= 2.6 ? Math.min(6, Math.max(2, Math.round(spanY / 2.0))) : 1;
+    const nz = spanZ >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanZ / 2.2))) : 1;
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
@@ -5147,17 +5147,19 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const r0 = toWorld(midX, yPeak, zHip0);
       const r1 = toWorld(midX, yPeak, zHip1);
 
+      const nRoofZ = spanZ >= 3.2 ? Math.min(8, Math.max(2, Math.round(spanZ / 2.6))) : 1;
+      const nRoofSlope = Math.abs(x1 - x0) >= 4.0 ? 2 : 1;
       withPartGroup('roof_slopes', () => {
         if (hipRatio > 0.02) {
-          // Hipped roof: 2 side trapezoids + 2 end hip triangles
-          pushQuad(e01, e00, r0, r1, roofKind, 0.94);
-          pushQuad(e10, e11, r1, r0, roofKind, 0.88);
+          // Hipped roof: 2 subdivided side trapezoids + 2 end hip triangles
+          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
+          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
           pushTri(e00, e10, r0, roofKind, 0.90);
           pushTri(e11, e01, r1, roofKind, 0.91);
         } else {
           // Gable roof + masonry gable end triangles
-          pushQuad(e01, e00, r0, r1, roofKind, 0.94);
-          pushQuad(e10, e11, r1, r0, roofKind, 0.88);
+          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
+          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
           const g00 = toWorld(x0, yEave, z0), g10 = toWorld(x1, yEave, z0), gr0 = toWorld(midX, yPeak - 0.08, z0);
           const g01 = toWorld(x0, yEave, z1), g11 = toWorld(x1, yEave, z1), gr1 = toWorld(midX, yPeak - 0.08, z1);
           pushTri(g00, g10, gr0, wallKind, 0.84);

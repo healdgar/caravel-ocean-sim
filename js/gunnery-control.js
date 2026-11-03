@@ -2359,10 +2359,10 @@ export function createBuildingDamageState(building) {
   const defaultMaxEnergy = isBastionOrFort
     ? 3200000
     : materialClass === 'fortified-stone'
-      ? 2200000
+      ? 1450000
       : materialClass === 'timber'
-        ? 950000
-        : 1600000;
+        ? 860000
+        : 920000;
   const defaultOuterPenJoules = materialClass === 'fortified-stone'
     ? 155000
     : materialClass === 'masonry'
@@ -2702,7 +2702,7 @@ export function applyBuildingImpactDamage(building, event) {
   // - Timber buildings (piers, careening sheds, watchtowers) ignite rapidly with high intensity.
   // - Masonry buildings ignite roof rafters and interior timber floors.
   // - Fortified stone ignites internal barracks/carriages/stores when penetrated, struck by hot shot, or heavily breached.
-  if (ammo === 'hot' || (penetratedOuter && d.breaches >= 3 && d.fires.length < 3)) {
+  if (ammo === 'hot' || (penetratedOuter && (d.breaches >= 3 || (materialClass !== 'fortified-stone' && d.breaches >= 2)) && d.fires.length < 3)) {
     const canIgniteStone =
       ammo === 'hot' ||
       materialClass !== 'fortified-stone' ||
@@ -2716,7 +2716,7 @@ export function applyBuildingImpactDamage(building, event) {
       d.fireCount = (d.fireCount ?? 0) + 1;
       const baseIgnite = ammo === 'hot'
         ? (materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
-        : 0.28;
+        : (materialClass === 'timber' ? 0.36 : 0.28);
       const addIntensity = Math.min(1.45, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
       const fireLocal = [
         localPos[0] ?? 0,
@@ -2777,7 +2777,25 @@ export function applyBuildingImpactDamage(building, event) {
     }
   }
 
-  // Progressive structural collapse bakes when a fort or building becomes breached or ruined
+  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined
+  if (d.state !== 'intact' && materialClass !== 'fortified-stone' && !d.damageCollapseBaked) {
+    d.damageCollapseBaked = true;
+    const roofCavePt = buildingLocalToWorld(building, [
+      (localPos[0] ?? 0) * 0.65,
+      (building.height ?? 7) * 0.90,
+      (localPos[2] ?? 0) * 0.65,
+    ]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +roofCavePt[0].toFixed(3),
+      y: +roofCavePt[1].toFixed(3),
+      z: +roofCavePt[2].toFixed(3),
+      radius: +(Math.max(5.5, Math.min(building.width ?? 16, building.depth ?? building.length ?? 16) * 0.42)).toFixed(3),
+      stepDepth: 1.35,
+      severity: 0.95,
+      powderFraction: 0.40,
+    });
+  }
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
     const collapsePt = buildingLocalToWorld(building, [
@@ -2896,6 +2914,34 @@ export function stepBuildingDamage(building, dt) {
   d.integrity = Math.max(0, 1 - d.damageJoules / d.maxEnergy);
   d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
   d.fireIntensity = +totalIntensity.toFixed(3);
+  if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
+    d.breachCollapseBaked = true;
+    const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +collapsePt[0].toFixed(3),
+      y: +collapsePt[1].toFixed(3),
+      z: +collapsePt[2].toFixed(3),
+      radius: +(Math.max(6.5, Math.min(building.width ?? 18, building.depth ?? building.length ?? 18) * 0.48)).toFixed(3),
+      stepDepth: 1.65,
+      severity: 1.15,
+      powderFraction: 0.55,
+    });
+  }
+  if (d.state === 'ruined' && !d.ruinCollapseBaked) {
+    d.ruinCollapseBaked = true;
+    const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.pendingBakes.push({
+      kind: 'building-collapse',
+      x: +ruinPt[0].toFixed(3),
+      y: +ruinPt[1].toFixed(3),
+      z: +ruinPt[2].toFixed(3),
+      radius: +(Math.max(9.0, Math.max(building.width ?? 20, building.depth ?? building.length ?? 20) * 0.62)).toFixed(3),
+      stepDepth: 2.25,
+      severity: 1.30,
+      powderFraction: 0.75,
+    });
+  }
 
   const mag = building.magazine ?? d.magazine;
   if (d.fireIntensity >= 1.85 && mag && !mag.exploded && !mag.deflagrated && mag.powderKg > 0) {
@@ -4090,6 +4136,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       const terrain=getTerrain();
       const ports=terrain?.ports??(terrain?.port?[terrain.port]:[]);
       let bestFortLocal=null,bestFortDist=Infinity;
+      let bestIntactBldgLocal=null,bestIntactBldgDist=Infinity;
       for(const port of ports){
         for(const inst of (port?.instances??[])){
           const groundY=inst.baseY??inst.y??0;
@@ -4097,9 +4144,13 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
           const loc=vesselWorldToLocal(boat,[inst.x??0,targetY,inst.z??0]);
           if(loc[0]*sideSign<=1.0)continue;
           const d=Math.hypot(loc[0],loc[2]);
+          const isRuined=inst.damageState?.state==='ruined';
           const isFort=inst.prefabId==='stone_sea_bastion'||inst.prefabId==='bastion_trace_fortress'||inst.prefabId==='english_triangular_palisade_fort'||Boolean(inst.gunnery?.guns?.length);
-          if(isFort&&inst.damageState?.state!=='ruined'&&d<bestFortDist){
+          if(isFort&&!isRuined&&d<bestFortDist){
             bestFortDist=d;bestFortLocal=loc;
+          }
+          if(!isRuined&&d<bestIntactBldgDist){
+            bestIntactBldgDist=d;bestIntactBldgLocal=loc;
           }
           if(d<bestDist){bestDist=d;bestLocal=loc;}
         }
@@ -4107,6 +4158,9 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       if(bestFortLocal&&(bestFortDist<=bestDist*1.8||bestFortDist<=520)){
         bestLocal=bestFortLocal;
         bestDist=bestFortDist;
+      }else if(bestIntactBldgLocal&&bestIntactBldgDist<=bestDist*2.2){
+        bestLocal=bestIntactBldgLocal;
+        bestDist=bestIntactBldgDist;
       }
       if(!bestLocal)return null;
       // Positive traverse trains toward the bow (-Z in local ship coords)

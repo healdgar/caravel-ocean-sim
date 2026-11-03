@@ -1349,6 +1349,59 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   assert.ok(shoreHitsOnShip.length >= 1, 'Shore battery return fire strikes the offshore warship');
   assert.ok((attackingShip.damage?.hits ?? 0) >= 1, 'Offshore warship receives hull/rig impact damage from shore battery');
   assert.ok((attackingShip.damage?.fires?.length ?? 0) >= 1, 'Shore battery hot shot ignites fire aboard the attacking ship');
+
+  // 6. 52-gun HMS Victory broadside against a stone bastion crumbles masonry downward without spiky horizontal shards
+  const volleyBastion = {
+    ...bastion,
+    id: 'victory-52-volley-bastion',
+    damageState: null,
+    magazine: null,
+    gunnery: null,
+  };
+  createBuildingGunnery(volleyBastion);
+  const origPortVerts = new Float32Array(portGeom.vertices);
+  const volleyPortVerts = new Float32Array(portGeom.vertices);
+  for (let i = 0; i < 52; i++) {
+    const spreadX = ((i % 9) - 4) * 1.4;
+    const spreadY = 2.0 + (i % 4) * 1.1;
+    applyBuildingImpactDamage(volleyBastion, {
+      ammo: 'round',
+      localPosition: [spreadX, spreadY, -volleyBastion.depth * 0.5],
+      position: [volleyBastion.x + spreadX, (volleyBastion.baseY ?? 0) + spreadY, volleyBastion.z - volleyBastion.depth * 0.5],
+      normal: [0, 0, -1],
+      velocity: [0, -12, 230],
+      mass: 10.8,
+      energy: 185000,
+    });
+  }
+  assert.equal(volleyBastion.damageState.state, 'ruined', '52-gun HMS Victory broadside reduces stone fort to ruined state');
+  assert.equal(volleyBastion.damageState.silenced, true, '52-gun broadside silences all fort guns');
+  bakeBuildingImpactDeformations(volleyPortVerts, volleyBastion.damageState.pendingBakes.splice(0), 8);
+  let maxHorizDisp = 0;
+  let maxVertDrop = 0;
+  for (let v = 0; v < volleyPortVerts.length; v += 8) {
+    const hDisp = Math.hypot(volleyPortVerts[v] - origPortVerts[v], volleyPortVerts[v + 2] - origPortVerts[v + 2]);
+    const vDrop = origPortVerts[v + 1] - volleyPortVerts[v + 1];
+    if (hDisp > maxHorizDisp) maxHorizDisp = hDisp;
+    if (vDrop > maxVertDrop) maxVertDrop = vDrop;
+  }
+  assert.ok(maxHorizDisp < 1.35, `52 overlapping broadside hits keep horizontal displacement bounded (<1.35m, got ${maxHorizDisp.toFixed(2)}m) with zero spiky shards`);
+  assert.ok(maxVertDrop > 1.8, `52-gun broadside slumps upper battlements downward (>1.8m drop, got ${maxVertDrop.toFixed(2)}m) into stepped masonry rubble`);
+
+  // 7. Non-fort port buildings (masonry warehouses, chapels, timber sheds) are fully destructible under cannonfire
+  for (let i = 0; i < 5; i++) {
+    applyBuildingImpactDamage(warehouse, {
+      ammo: 'round',
+      localPosition: [(i - 2) * 1.5, 3.2, -warehouse.depth * 0.5],
+      position: [warehouse.x + (i - 2) * 1.5, (warehouse.baseY ?? 0) + 3.2, warehouse.z - warehouse.depth * 0.5],
+      normal: [0, 0, -1],
+      velocity: [0, -10, 260],
+      mass: 10.8,
+      energy: 240000,
+    });
+  }
+  assert.equal(warehouse.damageState.state, 'ruined', 'Masonry port building (Casa de Contratación / Royal Warehouse) is destructible and collapses into ruined state');
+  assert.ok(warehouse.damageState.pendingBakes.some((b) => b.kind === 'building-collapse'), 'Destroying a non-fort building queues 3D building-collapse rubble bakes');
 });
 
 test('all 9 ship models have complete part attribution, superstructure classification, and model-accurate superstructure/mast damage', () => {
