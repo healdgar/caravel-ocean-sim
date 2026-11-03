@@ -85,10 +85,12 @@ export const CAIRN_MATERIAL_TO_KIND = Object.freeze({
   roof_tile: { kind: 13, shade: 0.91 },
   brick: { kind: 13, shade: 0.82 },
   red_brick: { kind: 13, shade: 0.80 },
-  recess: { kind: 14, shade: 0.55 },
-  opening: { kind: 14, shade: 0.50 },
-  iron: { kind: 14, shade: 0.62 },
-  bronze: { kind: 10, shade: 0.58 },
+  recess: { kind: 14, shade: 0.22 },
+  opening: { kind: 14, shade: 0.20 },
+  iron: { kind: 18, shade: 0.80 },
+  cast_iron: { kind: 18, shade: 0.80 },
+  ordnance: { kind: 18, shade: 0.80 },
+  bronze: { kind: 18, shade: 0.76 },
   thatch: { kind: 15, shade: 0.88 },
   reed: { kind: 15, shade: 0.90 },
   palm_thatch: { kind: 15, shade: 0.88 },
@@ -407,6 +409,7 @@ export function emitCairnScene(sceneSpec, helpers) {
     toWorld: rootToWorld,
     emitBox,
     emitCylinder,
+    emitFortCannon,
     emitRoof,
     pushQuad,
     pushTri,
@@ -733,6 +736,21 @@ export function emitCairnScene(sceneSpec, helpers) {
         const rTop = pType === 'cone' ? Math.max(0.04, resolveNumeric(prim.radiusTop, 0.05)) : Math.max(0.04, resolveNumeric(prim.radiusTop ?? prim.radius, rBottom));
         const segs = Math.max(6, Math.min(18, Math.round(resolveNumeric(prim.radialSegments ?? prim.segments, 12))));
         emitCylinder(primToWorld, base[0], base[2], base[1], base[1] + h, rBottom, rTop, segs, kind, shade, prim.openEnded !== true);
+        return;
+      }
+
+      if (pType === 'cannon') {
+        const pos = resolvePosition(prim.position ?? prim.base ?? [0, 0, 0], [0, 0, 0]);
+        const dir = Array.isArray(prim.direction) ? prim.direction : [0, -1];
+        const dirX = resolveNumeric(dir[0], 0);
+        const dirZ = resolveNumeric(dir.length >= 3 ? dir[2] : dir[1], -1);
+        const cScale = Math.max(0.4, resolveNumeric(prim.cannonScale ?? prim.scale, 1.0));
+        if (typeof emitFortCannon === 'function') {
+          emitFortCannon(localToWorld, pos[0], pos[1], pos[2], dirX, dirZ, cScale);
+        } else {
+          emitBox(primToWorld, pos[0] - 0.35 * cScale, pos[0] + 0.35 * cScale, pos[1], pos[1] + 0.65 * cScale, pos[2] - 0.65 * cScale, pos[2] + 0.65 * cScale, 10, 0.72, true);
+          emitCylinder(primToWorld, pos[0], pos[2], pos[1] + 0.55 * cScale, pos[1] + 0.95 * cScale, 0.22 * cScale, 0.18 * cScale, 8, 18, 0.80, true);
+        }
         return;
       }
 
@@ -1166,6 +1184,12 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
           { x: 7, y: 0, z: [-7, 1], step: 2 },
         ],
       },
+      // Lathe-turned cast-iron Manueline fortress culverins on stepped oak garrison carriages guarding the Tagus channel
+      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [-3.0, 5.8, -8.5], direction: [0, -1], cannonScale: 0.92 },
+      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [0.0, 5.8, -8.5], direction: [0, -1], cannonScale: 0.95 },
+      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [3.0, 5.8, -8.5], direction: [0, -1], cannonScale: 0.92 },
+      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [-6.1, 6.35, -4.0], direction: [-1, 0], cannonScale: 0.90 },
+      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [6.1, 6.35, -4.0], direction: [1, 0], cannonScale: 0.90 },
       // Six iconic cylindrical Manueline bartizan sentry turrets (Garitas) on the bastion corners
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, -9.4] },
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, -9.4] },

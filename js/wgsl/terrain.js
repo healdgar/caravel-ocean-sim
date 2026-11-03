@@ -513,15 +513,17 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let archShadow=smoothstep(0.14,0.58,ambientVisibility);
   let sunGroundBounce=direct*max(F.sunDir.y,0.0)*(1.0-max(n.y,0.0))*0.068*vec3f(0.84,0.74,0.58)*ambientVisibility;
   let diffuseTerm=direct*diffuse*(0.30+0.70*archShadow)/PI+ambient*ambientVisibility+sunGroundBounce;
-  var col=albedo*(1.0-wet*0.32)*diffuseTerm;
+  let isMetal=wet<-0.01;
+  let effWet=select(wet,0.0,isMetal);
+  var col=albedo*(1.0-effWet*0.32)*diffuseTerm;
   // Physical GGX microfacet specular + roughness-mipmapped envCube reflections
   let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
   let nDotV=max(dot(n,v),1e-4);
   let nDotL=max(dot(n,F.sunDir.xyz),0.0);
   let nDotH=max(dot(n,h),0.0);
   let vDotH=max(dot(v,h),0.0);
-  let effRough=clamp(mix(roughness,min(roughness,0.12),wet*0.80),0.06,0.98);
-  let f0=mix(0.038,0.058,wet);
+  let effRough=clamp(mix(roughness,min(roughness,0.12),effWet*0.80),0.06,0.98);
+  let f0=select(mix(0.038,0.058,effWet),clamp(-wet,0.18,0.56),isMetal);
   let fresnel=f0+(1.0-f0)*pow(1.0-nDotV,5.0);
   let fresnelSun=f0+(1.0-f0)*pow(1.0-vDotH,5.0);
   let a=effRough*effRough;
@@ -535,10 +537,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   reflDir.y=max(reflDir.y,-0.12);
   let envMip=clamp(effRough*7.0,0.4,7.0);
   let envSpec=textureSampleLevel(envCube,sampC,normalize(reflDir),envMip).rgb;
-  let reflStrength=fresnel*(1.0-effRough*0.78)*(0.26+0.74*ambientVisibility)*(1.0+wet*1.35);
+  let reflStrength=fresnel*(1.0-effRough*0.78)*(0.26+0.74*ambientVisibility)*(1.0+effWet*1.35);
   let skyRefl=envSpec*reflStrength;
   col+=direct*specBRDF*(0.25+0.75*archShadow)+skyRefl;
-  col+=lunarSurface(n,v,albedo*(1.0-wet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
+  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
   col+=lightningSurface(n,v,albedo,effRough);
   col=surfaceAir(col,world);
   // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
@@ -794,7 +796,7 @@ fn landOpaque(in:LandVertex)->vec4f{
       relief=(detailA*0.032+cobbleDetail*0.024-cobbleJoint*0.028)*archLodFade;
       roughness=clamp(0.80+cobbleJoint*0.12,0.70,0.92);
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis;
-    }else{
+    }else if(in.kind.x<17.5){
       // Kind 17: Paper-birch & elm/cedar bark sheathing (Abenaki wigwams, Algonquian longhouses & birchbark canoes)
       let seamY=landFilteredCourse(world.y*1.35,dx.y*1.35,dy.y*1.35,2.0);
       let seamX=landFilteredCourse((world.x+world.z)*0.85,(dx.x+dx.z)*0.85,(dy.x+dy.z)*0.85,2.0);
@@ -808,6 +810,18 @@ fn landOpaque(in:LandVertex)->vec4f{
       relief=(-seamWave*0.024-lenticel*0.015+detailA*0.018)*archLodFade;
       roughness=0.78;
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis;
+    }else{
+      // Kind 18: Dark sand-cast ordnance iron & forged harbor metal (cast-iron fortress cannons, trunnions, bollards, mooring rings, cauldrons)
+      let latheBand=landFilteredWave(world,dx,dy,vec3f(14.5,18.0,14.5),detailA*0.85)*microLodFade;
+      let bareIron=clamp(0.16+detailA*0.16+max(0.0,n.y)*0.08-max(0.0,-detailB)*0.10,0.05,0.36);
+      let oxideDark=vec3f(0.017,0.018,0.021)*(0.90+0.20*detailA);
+      let gunmetalSheen=vec3f(0.046,0.050,0.056)*(0.94+0.14*latheBand);
+      let warmPatina=vec3f(0.030,0.020,0.014)*clamp(-detailA*0.55+(1.0-max(n.y,0.0))*0.24,0.0,0.42);
+      albedo=(mix(oxideDark,gunmetalSheen,bareIron)+warmPatina*0.26)*(0.60+0.40*portShade);
+      relief=(detailA*0.016+detailB*0.022+latheBand*0.009)*archLodFade;
+      roughness=clamp(0.45-bareIron*0.30-detailB*0.07+(1.0-portShade)*0.10,0.28,0.64);
+      surfaceWet=-(0.24+bareIron*0.42);
+      ambientVisibility=(0.46+0.38*max(n.y,0.0))*aoVis;
     }
   }else if(crown){
     let exposure=clamp(in.kind.y,0.0,1.0);
@@ -832,12 +846,20 @@ fn landOpaque(in:LandVertex)->vec4f{
     let gritDetail=landOrientedDetail(world+vec3f(14.1,8.7,3.9),n,dx,dy,8.5);
     let fissure=landOrientedJoint(world+vec3f(11.3,4.7,6.9),n,dx,dy);
     let isAperture=abs(in.kind.x-14.0)<=0.4;
+    let isCastIron=in.kind.x>=17.5&&in.kind.x<18.5;
     let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&!isAperture&&abs(in.kind.x-15.0)>0.4;
     if(isAperture){
       let sootVoid=vec3f(0.024,0.020,0.018);
       albedo=mix(albedo,sootVoid,clamp(dmgW*0.58+fissure*0.25,0.0,0.78));
       surfaceWet*=(1.0-dmgW*0.85);
       ambientVisibility*=mix(1.0,0.55,dmgW);
+      roughness=max(roughness,0.93);
+    }else if(isCastIron){
+      let gougeSteel=vec3f(0.085,0.090,0.098)*clamp(0.5+spallDetail*0.8,0.2,1.2);
+      let powderSoot=vec3f(0.014,0.013,0.012);
+      albedo=mix(mix(albedo,gougeSteel,clamp(dmgW*0.28+max(0.0,spallDetail)*0.22,0.0,0.45)),powderSoot,clamp(fissure*0.52+dmgW*0.30,0.0,0.65));
+      relief+=(spallDetail*0.018-fissure*0.022)*dmgW*detailFade;
+      roughness=clamp(roughness+dmgW*0.18,0.32,0.76);
     }else if(isStoneRubble){
       let shadeKeep=clamp(in.kind.y,0.38,1.0);
       let exposedCore=select(vec3f(0.45,0.40,0.33),vec3f(0.40,0.25,0.16),in.kind.x>=11.5&&in.kind.x<13.5)*shadeKeep*(0.94+0.14*gritDetail);
@@ -849,6 +871,7 @@ fn landOpaque(in:LandVertex)->vec4f{
       let blockFacet=0.35*spallDetail+0.20*gritDetail-0.55*fissure;
       relief+=blockFacet*0.028*dmgW*detailFade;
       ambientVisibility*=mix(1.0,0.62+0.38*clamp(1.0-fissure*0.65+spallDetail*0.20,0.0,1.0),dmgW*0.75);
+      roughness=max(roughness,0.93);
     }else{
       let splinterNoise=landOrientedDetail(world+vec3f(3.3,7.9,12.1),n,dx,dy,5.5);
       let rawWood=select(vec3f(0.14,0.105,0.080),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
@@ -856,14 +879,14 @@ fn landOpaque(in:LandVertex)->vec4f{
       let dmgAlbedo=mix(albedo,rawWood,clamp(dmgW*0.45+splinterNoise*0.25,0.0,0.65));
       albedo=mix(dmgAlbedo,sootTint,clamp((fissure*0.48+dmgW*0.25-splinterNoise*0.18)*dmgW,0.0,0.58));
       relief+=(splinterNoise*0.024-fissure*0.020)*dmgW*detailFade;
+      roughness=max(roughness,0.93);
     }
-    roughness=max(roughness,0.93);
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);
   let tidePulse=0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02);
   let shoreWet=(1.0-smoothstep(0.35,2.2,world.y))*tidePulse*select(0.45,0.22,in.kind.x>=9.5);
-  let wet=clamp(max(shoreWet,surfaceWet),0.0,0.96);
+  let wet=select(clamp(max(shoreWet,surfaceWet),0.0,0.96),surfaceWet-shoreWet*0.14,surfaceWet<-0.01);
   roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
   let nDotL=dot(n,F.sunDir.xyz);
   let diffuse=max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter;

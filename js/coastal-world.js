@@ -5261,6 +5261,243 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     }
   };
 
+  // Helper to emit a multi-station horizontal/pitched 3D lathe or cylindrical tube along an arbitrary local 3D axis p0 -> p1
+  // with smooth analytic radial-and-taper normals per vertex and optional hollow recessed cannon bore at p1.
+  const emitLatheTube = (
+    toWorld,
+    p0,
+    p1,
+    profile,
+    segs = 8,
+    kind = 18,
+    shade = 0.82,
+    capStart = true,
+    hollowMuzzleBore = 0
+  ) => {
+    const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+    const len = Math.hypot(dx, dy, dz) || 1e-4;
+    const ax = dx / len, ay = dy / len, az = dz / len;
+    let rx = -az, ry = 0, rz = ax;
+    const rLen = Math.hypot(rx, ry, rz);
+    if (rLen > 0.08) {
+      rx /= rLen; ry /= rLen; rz /= rLen;
+    } else {
+      rx = 1; ry = 0; rz = 0;
+    }
+    let ux = ry * az - rz * ay;
+    let uy = rz * ax - rx * az;
+    let uz = rx * ay - ry * ax;
+    if (uy < 0) {
+      ux = -ux; uy = -uy; uz = -uz;
+    }
+    const uLen = Math.hypot(ux, uy, uz) || 1;
+    ux /= uLen; uy /= uLen; uz /= uLen;
+
+    const originP = toWorld(p0[0], p0[1], p0[2]);
+    const pEpsX = toWorld(p0[0] + 0.1, p0[1], p0[2]);
+    const pEpsY = toWorld(p0[0], p0[1] + 0.1, p0[2]);
+    const pEpsZ = toWorld(p0[0], p0[1], p0[2] + 0.1);
+    const toWorldN = (nxL, nyL, nzL) => {
+      const wx = (pEpsX[0] - originP[0]) * nxL + (pEpsY[0] - originP[0]) * nyL + (pEpsZ[0] - originP[0]) * nzL;
+      const wy = (pEpsX[1] - originP[1]) * nxL + (pEpsY[1] - originP[1]) * nyL + (pEpsZ[1] - originP[1]) * nzL;
+      const wz = (pEpsX[2] - originP[2]) * nxL + (pEpsY[2] - originP[2]) * nyL + (pEpsZ[2] - originP[2]) * nzL;
+      const nL = Math.hypot(wx, wy, wz) || 1;
+      return [wx / nL, wy / nL, wz / nL];
+    };
+
+    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    const stations = Array.isArray(profile) ? profile : [[0, 0.18, 1], [1, 0.18, 1]];
+
+    for (let k = 0; k < stations.length - 1; k++) {
+      const [t0, r0, sm0 = 1] = stations[k];
+      const [t1, r1, sm1 = 1] = stations[k + 1];
+      const ds = Math.max(0.012, Math.abs(t1 - t0) * len);
+      const slopeA = Math.max(-1.1, Math.min(1.1, (r0 - r1) / ds));
+      const c0x = p0[0] + dx * t0, c0y = p0[1] + dy * t0, c0z = p0[2] + dz * t0;
+      const c1x = p0[0] + dx * t1, c1y = p0[1] + dy * t1, c1z = p0[2] + dz * t1;
+      for (let s = 0; s < segs; s++) {
+        const a0 = (s / segs) * Math.PI * 2;
+        const a1 = ((s + 1) / segs) * Math.PI * 2;
+        const cs0 = Math.cos(a0), sn0 = Math.sin(a0);
+        const cs1 = Math.cos(a1), sn1 = Math.sin(a1);
+        const rd0x = rx * cs0 + ux * sn0, rd0y = ry * cs0 + uy * sn0, rd0z = rz * cs0 + uz * sn0;
+        const rd1x = rx * cs1 + ux * sn1, rd1y = ry * cs1 + uy * sn1, rd1z = rz * cs1 + uz * sn1;
+        const v00 = toWorld(c0x + rd0x * r0, c0y + rd0y * r0, c0z + rd0z * r0);
+        const v10 = toWorld(c0x + rd1x * r0, c0y + rd1y * r0, c0z + rd1z * r0);
+        const v11 = toWorld(c1x + rd1x * r1, c1y + rd1y * r1, c1z + rd1z * r1);
+        const v01 = toWorld(c1x + rd0x * r1, c1y + rd0y * r1, c1z + rd0z * r1);
+        const ex1 = v10[0] - v00[0], ey1 = v10[1] - v00[1], ez1 = v10[2] - v00[2];
+        const ex2 = v11[0] - v00[0], ey2 = v11[1] - v00[1], ez2 = v11[2] - v00[2];
+        const fnx = ez1 * ey2 - ey1 * ez2, fny = ex1 * ez2 - ez1 * ex2, fnz = ey1 * ex2 - ex1 * ey2;
+        const radTest = toWorldN(rd0x, rd0y, rd0z);
+        const flip = fnx * radTest[0] + fny * radTest[1] + fnz * radTest[2] < 0;
+        const n0 = toWorldN(rd0x + ax * slopeA, rd0y + ay * slopeA, rd0z + az * slopeA);
+        const n1 = toWorldN(rd1x + ax * slopeA, rd1y + ay * slopeA, rd1z + az * slopeA);
+        const sh0 = shade * (0.88 + 0.12 * sn0);
+        const sh1 = shade * (0.88 + 0.12 * sn1);
+        const i0 = pushVertex(v00, n0, qKind, sh0 * sm0);
+        const i1 = pushVertex(v10, n1, qKind, sh1 * sm0);
+        const i2 = pushVertex(v11, n1, qKind, sh1 * sm1);
+        const i3 = pushVertex(v01, n0, qKind, sh0 * sm1);
+        if (flip) {
+          indices.push(i0, i2, i1, i0, i3, i2);
+        } else {
+          indices.push(i0, i1, i2, i0, i2, i3);
+        }
+      }
+    }
+
+    if (capStart && stations[0][1] > 0.015) {
+      const rStart = stations[0][1];
+      const startCenter = toWorld(p0[0], p0[1], p0[2]);
+      for (let s = 0; s < segs; s++) {
+        const a0 = (s / segs) * Math.PI * 2;
+        const a1 = ((s + 1) / segs) * Math.PI * 2;
+        const rd0x = rx * Math.cos(a0) + ux * Math.sin(a0);
+        const rd0y = ry * Math.cos(a0) + uy * Math.sin(a0);
+        const rd0z = rz * Math.cos(a0) + uz * Math.sin(a0);
+        const rd1x = rx * Math.cos(a1) + ux * Math.sin(a1);
+        const rd1y = ry * Math.cos(a1) + uy * Math.sin(a1);
+        const rd1z = rz * Math.cos(a1) + uz * Math.sin(a1);
+        const v0 = toWorld(p0[0] + rd0x * rStart, p0[1] + rd0y * rStart, p0[2] + rd0z * rStart);
+        const v1 = toWorld(p0[0] + rd1x * rStart, p0[1] + rd1y * rStart, p0[2] + rd1z * rStart);
+        pushTri(startCenter, v1, v0, kind, shade * 0.84);
+      }
+    }
+
+    const rEnd = stations[stations.length - 1][1];
+    if (hollowMuzzleBore > 0.05 && rEnd > 0.04) {
+      const rBore = rEnd * hollowMuzzleBore;
+      const boreDepth = Math.min(len * 0.22, rEnd * 1.45);
+      const bx = p1[0] - ax * boreDepth, by = p1[1] - ay * boreDepth, bz = p1[2] - az * boreDepth;
+      const boreCenter = toWorld(bx, by, bz);
+      for (let s = 0; s < segs; s++) {
+        const a0 = (s / segs) * Math.PI * 2;
+        const a1 = ((s + 1) / segs) * Math.PI * 2;
+        const rd0x = rx * Math.cos(a0) + ux * Math.sin(a0);
+        const rd0y = ry * Math.cos(a0) + uy * Math.sin(a0);
+        const rd0z = rz * Math.cos(a0) + uz * Math.sin(a0);
+        const rd1x = rx * Math.cos(a1) + ux * Math.sin(a1);
+        const rd1y = ry * Math.cos(a1) + uy * Math.sin(a1);
+        const rd1z = rz * Math.cos(a1) + uz * Math.sin(a1);
+        const mOut0 = toWorld(p1[0] + rd0x * rEnd, p1[1] + rd0y * rEnd, p1[2] + rd0z * rEnd);
+        const mOut1 = toWorld(p1[0] + rd1x * rEnd, p1[1] + rd1y * rEnd, p1[2] + rd1z * rEnd);
+        const mIn0 = toWorld(p1[0] + rd0x * rBore, p1[1] + rd0y * rBore, p1[2] + rd0z * rBore);
+        const mIn1 = toWorld(p1[0] + rd1x * rBore, p1[1] + rd1y * rBore, p1[2] + rd1z * rBore);
+        const bIn0 = toWorld(bx + rd0x * rBore, by + rd0y * rBore, bz + rd0z * rBore);
+        const bIn1 = toWorld(bx + rd1x * rBore, by + rd1y * rBore, bz + rd1z * rBore);
+        // Cast-iron annular muzzle face lip
+        pushQuad(mOut0, mOut1, mIn1, mIn0, kind, shade * 0.92);
+        // Dark recessed bore tube & inner plug (kind 14 with shade <= 0.22 so it renders as deep shadow void)
+        pushQuad(mIn0, mIn1, bIn1, bIn0, 14, 0.16);
+        pushTri(boreCenter, bIn0, bIn1, 14, 0.14);
+      }
+    } else if (rEnd > 0.015) {
+      const endCenter = toWorld(p1[0], p1[1], p1[2]);
+      for (let s = 0; s < segs; s++) {
+        const a0 = (s / segs) * Math.PI * 2;
+        const a1 = ((s + 1) / segs) * Math.PI * 2;
+        const rd0x = rx * Math.cos(a0) + ux * Math.sin(a0);
+        const rd0y = ry * Math.cos(a0) + uy * Math.sin(a0);
+        const rd0z = rz * Math.cos(a0) + uz * Math.sin(a0);
+        const rd1x = rx * Math.cos(a1) + ux * Math.sin(a1);
+        const rd1y = ry * Math.cos(a1) + uy * Math.sin(a1);
+        const rd1z = rz * Math.cos(a1) + uz * Math.sin(a1);
+        const v0 = toWorld(p1[0] + rd0x * rEnd, p1[1] + rd0y * rEnd, p1[2] + rd0z * rEnd);
+        const v1 = toWorld(p1[0] + rd1x * rEnd, p1[1] + rd1y * rEnd, p1[2] + rd1z * rEnd);
+        pushTri(endCenter, v0, v1, kind, shade * 0.92);
+      }
+    }
+  };
+
+  // Emit an authentic 16th/17th-century Lathe-Turned Cast-Iron Fortress Cannon (24-pounder / Culverin)
+  // mounted on a stepped oak garrison carriage (Cureña de Plaza) with 4 cylindrical truck wheels,
+  // horizontal cylindrical trunnions, iron capsquare straps, cascabel button, reinforce rings,
+  // flared muzzle tulip swell, and recessed hollow bore.
+  const emitFortCannon = (toWorld, cx, yFloor, cz, dirX = 0, dirZ = -1, scale = 1.0) => {
+    const dLen = Math.hypot(dirX, dirZ) || 1;
+    const fx = dirX / dLen, fz = dirZ / dLen;
+    const rx = -fz, rz = fx;
+    const cToWorld = (lx, ly, lz) =>
+      toWorld(cx + (rx * lx + fx * lz) * scale, yFloor + ly * scale, cz + (rz * lx + fz * lz) * scale);
+
+    // 1. Stepped oak garrison carriage (Cureña de Plaza): twin stepped cheeks, transom bed, quoin wedge & axletrees
+    for (const side of [-1, 1]) {
+      const xIn = side * 0.20, xOut = side * 0.34;
+      const xMin = Math.min(xIn, xOut), xMax = Math.max(xIn, xOut);
+      // Lower cheek bed & trail step
+      emitBox(cToWorld, xMin, xMax, 0.16, 0.44, -0.74, 0.48, 10, 0.72, true);
+      // Middle carriage step
+      emitBox(cToWorld, xMin, xMax, 0.44, 0.60, -0.38, 0.46, 10, 0.75);
+      // Front trunnion cheek breast
+      emitBox(cToWorld, xMin, xMax, 0.60, 0.74, -0.06, 0.44, 10, 0.78);
+      // Dark cast-iron capsquare strap clamping the trunnion
+      emitBox(cToWorld, xMin - 0.01, xMax + 0.01, 0.72, 0.80, 0.03, 0.25, 18, 0.80, true);
+    }
+    // Carriage transom bed, elevating quoin wedge, and front/rear wooden axletree bolsters
+    emitBox(cToWorld, -0.20, 0.20, 0.22, 0.48, -0.56, 0.38, 10, 0.68, true);
+    emitBox(cToWorld, -0.44, 0.44, 0.12, 0.24, 0.24, 0.42, 10, 0.64, true);
+    emitBox(cToWorld, -0.44, 0.44, 0.10, 0.22, -0.60, -0.44, 10, 0.64, true);
+
+    // 2. Four cylindrical iron-shod truck wheels (8 facets each) on front & rear axles
+    for (const [az, rTruck] of [[0.33, 0.18], [-0.52, 0.155]]) {
+      for (const side of [-1, 1]) {
+        const wx0 = side * 0.34, wx1 = side * 0.47;
+        emitLatheTube(
+          cToWorld,
+          [wx0, rTruck, az],
+          [wx1, rTruck, az],
+          [[0, rTruck * scale, 0.92], [1, rTruck * scale, 0.92]],
+          8,
+          18,
+          0.76,
+          true,
+          0
+        );
+      }
+    }
+
+    // 3. Horizontal cylindrical cast-iron trunnions (muñones) resting across the carriage cheeks
+    emitLatheTube(
+      cToWorld,
+      [-0.40, 0.72, 0.14],
+      [0.40, 0.72, 0.14],
+      [[0, 0.072 * scale, 0.88], [1, 0.072 * scale, 0.88]],
+      8,
+      18,
+      0.80,
+      true,
+      0
+    );
+
+    // 4. 10-Faceted Multi-Station Lathe-Turned Cast-Iron Cannon Barrel (cascabel -> breech ring -> 1st/2nd reinforce -> chase -> flared muzzle tulip -> hollow bore)
+    const cannonProfile = [
+      [0.00, 0.055 * scale, 0.84], // Cascabel pommel button tip
+      [0.04, 0.115 * scale, 0.92], // Cascabel button equator
+      [0.08, 0.074 * scale, 0.78], // Cascabel neck fillet
+      [0.12, 0.260 * scale, 0.96], // Breech base ring (astragal)
+      [0.39, 0.240 * scale, 0.94], // First reinforce (heavy powder chamber)
+      [0.42, 0.258 * scale, 0.98], // Trunnion reinforce ring
+      [0.46, 0.218 * scale, 0.92], // Second reinforce start
+      [0.68, 0.192 * scale, 0.92], // Second reinforce to chase step
+      [0.88, 0.156 * scale, 0.90], // Chase taper neck
+      [0.91, 0.182 * scale, 0.96], // Muzzle astragal ring
+      [0.97, 0.220 * scale, 0.98], // Flared muzzle tulip swell
+      [1.00, 0.198 * scale, 0.94], // Muzzle face rim
+    ];
+    emitLatheTube(
+      cToWorld,
+      [0, 0.68, -0.82],
+      [0, 0.79, 1.44],
+      cannonProfile,
+      10,
+      18,
+      0.84,
+      true,
+      0.58
+    );
+  };
+
   // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
   const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6) =>
     withPartGroup('stone_arch', () => {
@@ -5530,6 +5767,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         toWorld: localToCairnWorld,
         emitBox,
         emitCylinder,
+        emitLatheTube,
+        emitFortCannon,
         emitRoof,
         pushQuad,
         pushTri,
@@ -5589,8 +5828,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, -hw + 0.6, hw - 0.6, deckBottom - 1.65, deckBottom - 1.32, z - 0.14, z + 0.14, 10, 0.56, true);
         if (b % 2 === 0) {
           beginSection('mooring_bollards');
-          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.28, yTop + 1.02, 0.24, 0.28, 6, 14, 0.45, true);
-          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.28, yTop + 1.02, 0.24, 0.28, 6, 14, 0.45, true);
+          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.28, yTop + 1.02, 0.24, 0.28, 8, 18, 0.78, true);
+          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.28, yTop + 1.02, 0.24, 0.28, 8, 18, 0.78, true);
         }
       }
       // Boatman's timber landing stage & water stairs descending into the water on the sheltered flank
@@ -5623,14 +5862,14 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, -1.2, 1.2, yTop + 0.85, yTop + 2.1, -hl + 0.8, -hl + 3.2, 11, 0.88);
       emitCylinder(toWorld, 0, -hl + 2.0, yTop + 2.1, yTop + 6.4, 0.28, 0.22, 8, 11, 0.86, true);
       emitBox(toWorld, -0.65, 0.65, yTop + 5.6, yTop + 5.9, -hl + 1.35, -hl + 2.65, 11, 0.90, true);
-      emitCylinder(toWorld, 0, -hl + 2.0, yTop + 6.4, yTop + 7.45, 0.58, 0.78, 8, 14, 0.52, true);
+      emitCylinder(toWorld, 0, -hl + 2.0, yTop + 6.4, yTop + 7.45, 0.58, 0.78, 8, 18, 0.80, true);
       // Twin-wheel timber harbor crane (Guindaste da Ribeira) with treadwheel housing, slewing jib boom & slung barrel
       const craneZ = -hl * 0.32;
       emitBox(toWorld, hw - 2.6, hw - 0.4, yTop, yTop + 2.8, craneZ - 1.4, craneZ + 1.4, 10, 0.74, true);
       emitCylinder(toWorld, hw - 1.35, craneZ, yTop, yTop + 6.2, 0.38, 0.30, 8, 10, 0.78, true);
       emitBox(toWorld, hw - 1.55, hw + 3.2, yTop + 4.9, yTop + 5.45, craneZ - 0.24, craneZ + 0.24, 10, 0.76, true);
       emitBox(toWorld, hw - 1.15, hw + 2.2, yTop + 3.4, yTop + 4.9, craneZ - 0.16, craneZ + 0.16, 10, 0.70, true);
-      emitCylinder(toWorld, hw + 2.75, craneZ, yTop + 2.2, yTop + 5.0, 0.08, 0.08, 6, 14, 0.48, true);
+      emitCylinder(toWorld, hw + 2.75, craneZ, yTop + 2.2, yTop + 5.0, 0.08, 0.08, 6, 18, 0.76, true);
       emitCylinder(toWorld, hw + 2.75, craneZ, yTop + 1.35, yTop + 2.25, 0.46, 0.42, 8, 10, 0.76, true);
     } else if (inst.prefabId === 'stone_quay_seawall') {
       // Continuous Colonial Stone Seawall & Wharf (Malecón y Muelle de Piedra)
@@ -5658,7 +5897,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const bStep = Math.max(6, 14 * qs);
       for (let bx = -hw + 4 * qs; bx <= hw - 4 * qs; bx += bStep) {
         if (Math.abs(bx) < 5 * qs || (Math.abs(bx) > 14 * qs && Math.abs(bx) < 23 * qs)) continue;
-        emitCylinder(toWorld, bx, -hl + 0.6, yTop + 0.65, yTop + 1.38, 0.34, 0.38, 6, 14, 0.42, true);
+        emitCylinder(toWorld, bx, -hl + 0.6, yTop + 0.65, yTop + 1.38, 0.34, 0.38, 8, 18, 0.78, true);
       }
     } else if (inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') {
       // 16th-Century Spanish Bastion & Star-Bastioned Trace-Italienne Fortress (Baluarte / Fuerte Abaluartado con Foso y Polvorín):
@@ -5719,21 +5958,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           if (m < nBaysX) {
             beginSection('cannon_embrasure');
             const ex = mx + baySpanX * 0.5;
-            const cZ = sideZ < 0 ? zIn + 0.4 : zOut - 0.4;
-            emitBox(toWorld, ex - 0.50, ex + 0.50, yTop - 0.82, yTop + 0.08, cZ - 0.72, cZ + 0.72, 10, 0.72);
-            emitBox(toWorld, ex - 0.54, ex + 0.54, yTop - 0.25, yTop + 0.35, zOut - 0.08, zIn + 0.08, 14, 0.35);
-            emitBox(
-              toWorld,
-              ex - 0.20,
-              ex + 0.20,
-              yTop + 0.06,
-              yTop + 0.46,
-              sideZ < 0 ? zOut - 0.95 : zIn - 0.2,
-              sideZ < 0 ? zIn + 0.2 : zIn + 0.95,
-              14,
-              0.28,
-              true
-            );
+            const cZ = sideZ < 0 ? zIn + 0.18 : zOut - 0.18;
+            // Beveled stone embrasure sill apron between parapet merlons
+            emitBox(toWorld, ex - 0.62, ex + 0.62, yTop - 0.08, yTop + 0.12, zOut + 0.06, zIn - 0.06, 11, 0.84, true);
+            // Lathe-turned cast-iron 24-pounder fortress cannon on stepped oak garrison carriage
+            emitFortCannon(toWorld, ex, yTop - 0.52, cZ, 0, sideZ, 1.0);
           }
         }
       }
@@ -5748,6 +5977,13 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           const mz = -hl + 1.6 + m * baySpanZ;
           beginSection('parapet_merlons');
           emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - 1.45, mz + 1.45, 11, 0.88, false, 0.12);
+          if (m < nBaysZ) {
+            beginSection('cannon_embrasure');
+            const ez = mz + baySpanZ * 0.5;
+            const cX = sideX < 0 ? xIn + 0.18 : xOut - 0.18;
+            emitBox(toWorld, xOut + 0.06, xIn - 0.06, yTop - 0.08, yTop + 0.12, ez - 0.62, ez + 0.62, 11, 0.84, true);
+            emitFortCannon(toWorld, cX, yTop - 0.52, ez, sideX, 0, 0.94);
+          }
         }
       }
       // 4 Corner Cylindrical Bartizan Sentry Turrets (Garitas) with inverted-cone corbels & stone cupolas
@@ -5885,8 +6121,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, tx0 + 0.12, tx1 - 0.12, yT2 - 0.32, yT2, tz0 + 0.12, tz1 - 0.12, 11, 0.91, true);
       beginSection('campanario_cupola_spire');
       emitCylinder(toWorld, tmx, tmz, yT2, yT3, 2.05, 0.22, 8, 13, 0.95, true);
-      emitBox(toWorld, tmx - 0.08, tmx + 0.08, yT3, yT3 + 1.35, tmz - 0.08, tmz + 0.08, 14, 0.42);
-      emitBox(toWorld, tmx - 0.48, tmx + 0.48, yT3 + 0.75, yT3 + 0.92, tmz - 0.08, tmz + 0.08, 14, 0.42);
+      emitBox(toWorld, tmx - 0.08, tmx + 0.08, yT3, yT3 + 1.35, tmz - 0.08, tmz + 0.08, 18, 0.78);
+      emitBox(toWorld, tmx - 0.48, tmx + 0.48, yT3 + 0.75, yT3 + 0.92, tmz - 0.08, tmz + 0.08, 18, 0.78);
     } else if (inst.prefabId === 'careening_shed') {
       // Open-sided timber boatyard pavilion on the beach (Atarazana / Carenero) iterating king-post roof trusses every 4.2m
       const yApron = yGround + 0.45;
@@ -6081,7 +6317,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitCylinder(toWorld, 0, 0, yBody2 + 0.65, yLantern, rBase * 0.44, rBase * 0.42, 8, 11, 0.92, true);
         beginSection('lantern_cupola_dome');
         emitCylinder(toWorld, 0, 0, yLantern, yLantern + 1.85, rBase * 0.46, 0.16, 8, 13, 0.96, true);
-        emitCylinder(toWorld, 0, 0, yLantern + 1.85, yLantern + 2.85, 0.14, 0.48, 6, 14, 0.45, true);
+        emitCylinder(toWorld, 0, 0, yLantern + 1.85, yLantern + 2.85, 0.14, 0.48, 6, 18, 0.80, true);
       }
     } else if (inst.prefabId === 'curtain_wall_and_gate') {
       // Primitive #9: Muralla Real / Muro de las Argollas y Puerta de la Ciudad (Bay-Iterated City Curtain Wall & Gatehouse)
@@ -6108,7 +6344,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         if (b % 2 === 0) {
           // Bronze/iron mooring ring bosses (Muro de las Argollas) on the outer scarp face
           beginSection('mooring_rings');
-          emitCylinder(toWorld, -wallHW - 0.25, bz, yGround + 1.4, yGround + 1.95, 0.32, 0.32, 6, 14, 0.38, true);
+          emitCylinder(toWorld, -wallHW - 0.25, bz, yGround + 1.4, yGround + 1.95, 0.32, 0.32, 6, 18, 0.78, true);
         }
       }
       // Central twin-turret arched city gatehouse (Puerta de la Mar / Puerta de Tierra)
@@ -6312,7 +6548,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       }
       // Continuous upper gunwale rail & pitch cauldron + stacked seasoning oak planks beside the slipway
       beginSection('sheerlegs_crane_and_pitch_cauldron');
-      emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip, ySlip + 1.15, 0.68, 0.78, 8, 14, 0.36, true);
+      emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip, ySlip + 1.15, 0.68, 0.78, 8, 18, 0.76, true);
       emitBox(toWorld, hw - 1.55, hw - 0.35, ySlip, ySlip + 0.75, -hl * 0.45, hl * 0.35, 10, 0.76, true);
     } else if (inst.prefabId === 'royal_warehouse') {
       // Royal Warehouse (Almacén Real): Bay-iterated buttressed masonry hall with radial stone voussoir cargo portals
@@ -6830,16 +7066,14 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // 4 Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages (SW, SE, N bulwarks + River Gate)
       beginSection('bulwark_ordnance_guns');
       for (const [gx, gzz] of [
-        [bSW[0], bSW[1] - rBulwark * 0.55],
-        [bSE[0], bSE[1] - rBulwark * 0.55],
-        [-bSW[0] * 0.18, bSW[1] - 0.4],
+        [bSW[0], bSW[1] - rBulwark * 0.38],
+        [bSE[0], bSE[1] - rBulwark * 0.38],
+        [-bSW[0] * 0.18, bSW[1] - 0.25],
       ]) {
-        emitBox(toWorld, gx - 0.55, gx + 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, gzz - 0.9, gzz + 0.9, 10, 0.72, true);
-        emitBox(toWorld, gx - 0.22, gx + 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, gzz - 1.75, gzz + 0.45, 14, 0.36, true);
+        emitFortCannon(toWorld, gx, yBulwarkDeck, gzz, 0, -1, 0.94);
       }
       // North bulwark gun pointing landward (+Z)
-      emitBox(toWorld, -0.55, 0.55, yBulwarkDeck, yBulwarkDeck + 0.62, bN[1] - 0.5, bN[1] + 1.1, 10, 0.72, true);
-      emitBox(toWorld, -0.22, 0.22, yBulwarkDeck + 0.58, yBulwarkDeck + 0.96, bN[1] - 0.1, bN[1] + 2.0, 14, 0.36, true);
+      emitFortCannon(toWorld, 0, yBulwarkDeck, bN[1] + 0.25, 0, 1, 0.94);
 
       // Gate-Flank Mud-and-Stud Guardhouse / Corps de Garde & Powder Magazine just inside the river gatehouse
       beginSection('interior_guardhouse_and_magazine');

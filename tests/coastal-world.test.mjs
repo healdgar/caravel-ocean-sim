@@ -1957,6 +1957,28 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
       assert.ok(smoothNormTris > 20, `${prefab} has smooth radial vertex normals on domes/turrets (${smoothNormTris} smooth tris)`);
     }
   }
+
+  // 3. Verify fort prefabs emit multi-faceted lathe-turned cast-iron cannons (kind 18) with smooth radial normals and dark hollow bores
+  assert.ok(TERRAIN.includes('let bareIron=clamp('), 'landOpaque shades kind 18 as dark sand-cast ordnance iron');
+  assert.ok(TERRAIN.includes('let isMetal=wet<-0.01;'), 'landFinish applies conductor Fresnel reflectance for cast-iron ordnance');
+  for (const fortPrefab of ['stone_sea_bastion', 'bastion_trace_fortress', 'english_triangular_palisade_fort', 'torre_de_belem_manuelina']) {
+    const geom = getBuildingParts(fortPrefab);
+    const v = geom.vertices;
+    const idx = geom.indices;
+    let castIronTris = 0;
+    let smoothCastIronTris = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t] * 8, i1 = idx[t + 1] * 8, i2 = idx[t + 2] * 8;
+      if (Math.floor(v[i0 + 6]) === 18) {
+        castIronTris++;
+        const dot01 = v[i0 + 3] * v[i1 + 3] + v[i0 + 4] * v[i1 + 4] + v[i0 + 5] * v[i1 + 5];
+        const dot12 = v[i1 + 3] * v[i2 + 3] + v[i1 + 4] * v[i2 + 4] + v[i1 + 5] * v[i2 + 5];
+        if (Math.min(dot01, dot12) < 0.995) smoothCastIronTris++;
+      }
+    }
+    assert.ok(castIronTris >= 400, `${fortPrefab} emits lathe-turned cast-iron cannon barrels, trunnions & truck wheels (${castIronTris} tris)`);
+    assert.ok(smoothCastIronTris >= 250, `${fortPrefab} cannon barrels use smooth radial lathe normals (${smoothCastIronTris} smooth tris)`);
+  }
 });
 
 

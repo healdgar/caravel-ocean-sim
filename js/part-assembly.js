@@ -2255,7 +2255,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const rawKind = mesh[v * stride + 6] ?? 7;
       const kind = Math.floor(rawKind);
       const isAperture = kind === 14;
-      if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.68) continue;
+      if (isCannonDismount && kind !== 10 && kind !== 14 && kind !== 18 && dist > r * 0.68) continue;
 
       const t = 1 - dist / r;
       const core = t * 0.45 + t * t * 0.55;
@@ -2273,7 +2273,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       let newFy = fy;
       let newFz = fz;
       if (!isSubmergedAnchored) {
-        if (isCannonDismount && (kind === 10 || kind === 14)) {
+        if (isCannonDismount && (kind === 10 || kind === 14 || kind === 18)) {
           const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
           const hDisp = stepDepth * 0.52 * t * horizRemain;
           newFx = fx + (inX * hDisp + inZ * slew * 0.20 * t * horizRemain);
