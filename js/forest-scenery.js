@@ -584,12 +584,11 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let baseInflate=select(select(.08,.22,tierId==3u),select(.44,.92,tierId==3u),isSubBroadleaf);
+  let baseInflate=select(select(.03,.08,tierId==3u),select(.18,.36,tierId==3u),isSubBroadleaf);
   let inflate=baseInflate/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
-  let domeCurve=select(0.28,0.48,tierId==3u);
+  let domeCurve=select(0.08,0.14,tierId==3u);
   normAdj=normalize(normAdj+(t1*uvOff.x+t2*uvOff.y)*domeCurve);
-  if(isSubBroadleaf&&tierId==3u&&uvOff.y<0.){posLocal.y+=uvOff.y*0.48;normAdj=normalize(normAdj+vec3f(0.,uvOff.y*0.55,0.));}
  }
  var local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
  if(kind.x>=3.5&&posLocal.y>2.0&&F.windP[0].z>0.05){
@@ -698,30 +697,24 @@ struct ForestNativeLeafOutput {@location(0)colour:vec4f,@builtin(sample_mask)mas
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
  if(in.world.y<in.nativeSoil){discard;}
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
- let tierId=forestBin.z>>16u;
+ var colour=pigment.rgb/max(pigment.a,1e-8)*in.colour;
  let uvOff=in.leafUV-vec2f(.5,.5);
- let uvR=length(uvOff*vec2f(1.85,1.55));
- let clusterPad=clamp(1.-uvR*uvR,0.,1.)*select(0.,select(.38,.66,tierId==3u),tierId>=2u);
- let effAlpha=max(pigment.a,clusterPad);
+ let frondCurve=vec3f(uvOff.x*0.06,uvOff.y*0.05,0.0);
  let mappedN=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
- let frondCurve=vec3f(uvOff.x*0.18,uvOff.y*0.16,0.0)*select(1.0,1.45,tierId>=2u);
  let n=normalize(mappedN+frondCurve);
- let padShade=0.84+0.24*(1.0-min(uvR,1.0)*0.65)+0.12*uvOff.y;
- let padColour=forestNativeLinear(material.underside.rgb)*(1.12*padShade)*in.colour;
- var colour=mix(padColour,pigment.rgb/max(pigment.a,1e-8)*in.colour,clamp(pigment.a*4.,0.,1.));
  if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
  let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);
  let backlit=max(-nDotL,0.)*material.optics.z;
  colour=colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.80),backlit*exposure);
  let diffuse=(max(nDotL,0.)+backlit)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
  let ambient=(.12+exposure*.56+abs(n.y)*.09)*in.canopyAO;
- let roughness=mix(.48,clamp(surface.detail.a/max(pigment.a,1e-8),0.,1.)*0.92,clamp(pigment.a*4.,0.,1.));
+ let roughness=clamp(max(0.88,surface.detail.a/max(pigment.a,1e-8)),0.86,0.96);
  let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
  // Independent native leaf footprints must not all select identical hardware
  // sample bits at small projected sizes. Stable per-primitive/root masks keep
  // expected filtered source coverage, including sub-sample fractions. This is
  // independent-footprint integration, not recovery of correlated source masks.
- var o:ForestNativeLeafOutput;o.colour=vec4f(lit.rgb,effAlpha);o.mask=forestLeafSampleMask(effAlpha,in.coverageSeed,in.pos.xy);return o;
+ var o:ForestNativeLeafOutput;o.colour=vec4f(lit.rgb,pigment.a);o.mask=forestLeafSampleMask(pigment.a,in.coverageSeed,in.pos.xy);return o;
 }
 `+FOREST_IMPOSTOR_WGSL+FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL;
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
@@ -824,7 +817,7 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let isCoastalRoot=r.identity.z<0.0;
  let isSubtropicalCoastal=r.identity.z<-1.5;
  var coastalStandSteps=0u;
- let inCanopy=select(clamp((F.camPos.y-18.0)/24.0,0.0,1.0),1.0,isCoastalRoot);
+ let inCanopy=clamp((F.camPos.y-18.0)/24.0,0.0,1.0);
  let crownFront=min(radius*0.22,8.5*r.rootScale.w);
  let midNear=max(select(near,dist-select(radius*0.45,crownFront,isCoastalRoot),inCanopy>0.0),1.5);
  let cosGaze=clamp(dot(relative/max(dist,.0001),forwardDir),0.0,1.0);
@@ -844,23 +837,23 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
  let nearLod=resident&&!farLod&&!midLod;
  if(!nearLod&&!farLod&&!midLod){return;}`,
- ` let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>radius&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
+ ` let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>max(radius,select(0.0,240.0,resident&&parameters.w==0.0))&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
  let coastalBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
  let coastalLodScale=coastalBudgetScale*coastalBudgetScale*mix(0.68,1.0,gazeAcuity);
  let coastalFarDist=select(1580.0,980.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
  let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
  let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);
- let mid2GeomError=max(bitcast<f32>(p.leaf.z),select(0.0,0.34,isCoastalRoot))*r.rootScale.w;
+ let mid2GeomError=bitcast<f32>(p.leaf.z)*r.rootScale.w;
  let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
- let stdMid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>mid2GeomError&&mid2Footprint<=mid2Threshold;
+ let stdMid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>max(mid2GeomError,180.0)&&mid2Footprint<=mid2Threshold;
  let coastalMid2Min=select(select(440.0,230.0,coastalStandSteps==1u),130.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMid2Lod=!farLod&&resident&&parameters.w==0.0&&p.leaf.w==1u&&dist>coastalMid2Min;
  let mid2Lod=select(stdMid2Lod,coastalMid2Lod,isSubtropicalCoastal);
- let midGeomError=max(bitcast<f32>(p.wood.z),select(0.0,0.065,isCoastalRoot))*r.rootScale.w;
+ let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
- let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>midGeomError&&midFootprint<=midThreshold;
+ let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>max(midGeomError,95.0)&&midFootprint<=midThreshold;
  let coastalMid1Min=select(160.0,82.0,coastalStandSteps>=1u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMidLod=!farLod&&!mid2Lod&&resident&&parameters.w==0.0&&p.wood.w==1u&&dist>coastalMid1Min;
  let midLod=select(stdMidLod,coastalMidLod,isSubtropicalCoastal);
@@ -1067,7 +1060,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       }catch(error){if(!surfaces&&surfacesPromise)surfaces=await surfacesPromise.catch(()=>null);surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
         if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas&&!(middle&&volume))throw error;return false;}
     }
-    const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,pack.deferNative?1500:0)).then(installNative):Promise.resolve(await installNative());
+    const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,pack.deferNative?80:0)).then(installNative):Promise.resolve(await installNative());
     const draw=(pass,pipeline,group,cloud,cutout)=>{
       if(!native)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
       for(const p of m.prototypes){

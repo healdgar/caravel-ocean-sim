@@ -523,9 +523,11 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let nDotH=max(dot(n,h),0.0);
   let vDotH=max(dot(v,h),0.0);
   let effRough=clamp(mix(roughness,min(roughness,0.12),effWet*0.80),0.06,0.98);
+  let smoothFilm=select(clamp((0.40-roughness)/0.32,0.0,1.0)*effWet,1.0,isMetal);
   let f0=select(mix(0.038,0.058,effWet),clamp(-wet,0.18,0.56),isMetal);
-  let fresnel=f0+(1.0-f0)*pow(1.0-nDotV,5.0);
-  let fresnelSun=f0+(1.0-f0)*pow(1.0-vDotH,5.0);
+  let maxF=select(mix(f0,0.75,smoothFilm),max(1.0-effRough*0.55,f0),isMetal);
+  let fresnel=f0+(maxF-f0)*pow(1.0-nDotV,5.0);
+  let fresnelSun=f0+(maxF-f0)*pow(1.0-vDotH,5.0);
   let a=effRough*effRough;
   let a2=max(a*a,1e-4);
   let denom=nDotH*nDotH*(a2-1.0)+1.0;
@@ -537,9 +539,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   reflDir.y=max(reflDir.y,-0.12);
   let envMip=clamp(effRough*7.0,0.4,7.0);
   let envSpec=textureSampleLevel(envCube,sampC,normalize(reflDir),envMip).rgb;
-  let reflStrength=fresnel*(1.0-effRough*0.78)*(0.26+0.74*ambientVisibility)*(1.0+effWet*1.35);
+  let reflStrength=fresnel*smoothFilm*(1.0-effRough*0.78)*(0.26+0.74*ambientVisibility);
   let skyRefl=envSpec*reflStrength;
-  col+=direct*specBRDF*(0.25+0.75*archShadow)+skyRefl;
+  let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
+  col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
   col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
   col+=lightningSurface(n,v,albedo,effRough);
   col=surfaceAir(col,world);
@@ -936,7 +939,7 @@ fn landOpaque(in:LandVertex)->vec4f{
   let diffuse=(max(nDotL,0.0)+backlit)*(0.22+0.78*exposure*exposure);
   let ambientVisibility=0.12+exposure*0.56+abs(n.y)*0.09;
   if(leaf.a<0.015){discard;}
-  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.78);
+  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.92);
   return vec4f(color.rgb,leaf.a);
 }
 // Imported canopy streams already contain absolute Y-up world positions and
@@ -975,7 +978,7 @@ struct CanopyVertex {
   let nDotL=dot(n,F.sunDir.xyz);
   let diffuse=max(nDotL,0.0)+select(0.0,max(-nDotL,0.0)*0.22*exposure,crown);
   let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.48+max(n.y,0)*.09,crown);
-  return landFinish(in.world,n,col,diffuse,ambient,0,select(0.92,0.86,crown));
+  return landFinish(in.world,n,col,diffuse,ambient,0,select(0.94,0.92,crown));
 }
 @fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let uvCentered=in.leafUV-vec2f(0.5,0.5);
@@ -989,7 +992,7 @@ struct CanopyVertex {
   let diffuse=(max(nDotL,0)+backlit)*(.22+.78*exposure*exposure);
   let ambient=.12+exposure*.56+abs(n.y)*.09;
   if(alpha<.015){discard;}
-  let color=landFinish(in.world,n,warmCol,diffuse,ambient,0,.78);
+  let color=landFinish(in.world,n,warmCol,diffuse,ambient,0,.92);
   return vec4f(color.rgb,alpha);
 }
 `;
