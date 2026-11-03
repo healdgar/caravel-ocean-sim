@@ -1907,6 +1907,61 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
       `Expected Round ${r} bombardment to further lower wall elevation (${roundDropY[r].toFixed(3)}m < ${roundDropY[r - 1].toFixed(3)}m)`
     );
   }
+
+  // 7. Verify dock pier pilings anchored on the seabed never pop upward above their original y,
+  // and building-scoped bakes never deform adjacent buildings outside the struck building's OBB
+  const pierInst = {
+    prefabId: 'timber_mole_pier',
+    role: 'pier',
+    x: 0,
+    y: 0,
+    z: 0,
+    yaw: 0,
+    width: 7.6,
+    length: 54.0,
+    depth: 54.0,
+    height: 3.1,
+  };
+  const pierMesh = getBuildingParts('timber_mole_pier');
+  const pierOrig = new Float32Array(pierMesh.vertices);
+  const pierHit = new Float32Array(pierMesh.vertices);
+  for (let hit = 0; hit < 10; hit++) {
+    applyBuildingImpactDamage(pierInst, {
+      ammo: 'round',
+      localPosition: [0, 2.2, 12.0],
+      position: [0, 2.2, 12.0],
+      surfacePosition: [0, 2.2, 12.0],
+      normal: [0, 0, 1],
+      velocity: [0, -5, -350],
+      mass: 10.8,
+      energy: 650000,
+    });
+  }
+  const pierBakes = pierInst.damageState.pendingBakes.splice(0);
+  assert.ok(pierBakes.length >= 4, 'Expected pier impacts to emit timber-splinter and building-collapse bakes');
+  bakeBuildingImpactDeformations(pierHit, pierBakes, 8);
+  let maxPierLift = 0;
+  for (let v = 0; v < pierOrig.length / 8; v++) {
+    const lift = pierHit[v * 8 + 1] - pierOrig[v * 8 + 1];
+    if (lift > maxPierLift) maxPierLift = lift;
+  }
+  assert.ok(
+    maxPierLift < 0.08,
+    `Expected underwater pier pilings to stay anchored and never spring upward (max lift ${maxPierLift.toFixed(3)}m)`
+  );
+
+  // Verify adjacent building vertices outside pier OBB are completely untouched by pier bakes
+  const adjVerts = new Float32Array(cathedral.vertices);
+  for (let v = 0; v < adjVerts.length / 8; v++) {
+    adjVerts[v * 8 + 2] -= 42.0; // Place cathedral shoreward at z = -42m (outside pierHalfL = 28.8m)
+  }
+  const adjBefore = new Float32Array(adjVerts);
+  bakeBuildingImpactDeformations(adjVerts, pierBakes, 8);
+  let adjMoved = 0;
+  for (let i = 0; i < adjVerts.length; i++) {
+    if (Math.abs(adjVerts[i] - adjBefore[i]) > 1e-5) adjMoved++;
+  }
+  assert.equal(adjMoved, 0, 'Building-scoped bakes must not deform any vertices of adjacent buildings outside the struck OBB');
 });
 
 

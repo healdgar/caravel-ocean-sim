@@ -1549,7 +1549,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           for(const inst of instances){
             const pending=inst?.damageState?.pendingBakes;
             if(Array.isArray(pending)&&pending.length){
-              bakes.push(...pending.splice(0,pending.length));
+              const spliced=pending.splice(0,pending.length);
+              const w=Math.max(4,Number(inst.width)||16);
+              const l=Math.max(4,Number(inst.depth??inst.length)||16);
+              const isPier=inst.prefabId==='timber_mole_pier'||inst.role==='pier';
+              for(const bk of spliced){
+                if(bk&&Number.isFinite(inst.x)&&Number.isFinite(inst.z)){
+                  bk.buildingCx??=inst.x;
+                  bk.buildingCz??=inst.z;
+                  bk.buildingYaw??=inst.yaw??0;
+                  bk.buildingHalfW??=(isPier?w*1.35:w*0.5)+1.8;
+                  bk.buildingHalfL??=l*0.5+1.8;
+                }
+              }
+              bakes.push(...spliced);
             }
           }
         }
