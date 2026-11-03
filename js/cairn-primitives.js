@@ -240,10 +240,11 @@ export function expandCairnVoxelPrimitive(prim) {
         const x0 = Math.floor(Math.min(rx[0], rx[1])), x1 = Math.floor(Math.max(rx[0], rx[1]));
         const y0 = Math.floor(Math.min(ry[0], ry[1])), y1 = Math.floor(Math.max(ry[0], ry[1]));
         const z0 = Math.floor(Math.min(rz[0], rz[1])), z1 = Math.floor(Math.max(rz[0], rz[1]));
+        const step = Math.max(1, Math.round(resolveNumeric(run.step, 1)));
         const rMat = run.material ?? mat;
-        for (let x = x0; x <= x1; x++) {
+        for (let x = x0; x <= x1; x += x1 > x0 ? step : 1) {
           for (let y = y0; y <= y1; y++) {
-            for (let z = z0; z <= z1; z++) {
+            for (let z = z0; z <= z1; z += z1 > z0 && x0 === x1 ? step : 1) {
               blocks.push({ pos: [x, y, z], material: rMat });
             }
           }
@@ -778,25 +779,31 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
           },
           {
             primitive: 'wall',
-            from: [-2.1, 0, -2.1],
-            to: [-2.1, 0, 2.1],
+            from: [-2.1, 0, -1.55],
+            to: [-2.1, 0, 1.55],
             height: 4.2,
             thickness: 0.55,
             material: 'limestone',
-            openings: [{ offset: 2.1, width: 1.1, height: 2.6, sillHeight: 0.65 }],
+            openings: [{ offset: 1.55, width: 1.0, height: 2.6, sillHeight: 0.65 }],
           },
           {
             primitive: 'wall',
-            from: [2.1, 0, -2.1],
-            to: [2.1, 0, 2.1],
+            from: [2.1, 0, -1.55],
+            to: [2.1, 0, 1.55],
             height: 4.2,
             thickness: 0.55,
             material: 'limestone',
-            openings: [{ offset: 2.1, width: 1.1, height: 2.6, sillHeight: 0.65 }],
+            openings: [{ offset: 1.55, width: 1.0, height: 2.6, sillHeight: 0.65 }],
+          },
+          {
+            primitive: 'box',
+            from: [-2.4, 4.2, -2.4],
+            to: [2.4, 4.55, 2.4],
+            material: 'limestone',
           },
           {
             primitive: 'dome',
-            base: [0, 4.2, 0],
+            base: [0, 4.55, 0],
             radius: 2.15,
             height: 2.4,
             segments: 8,
@@ -826,15 +833,15 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'stairs',
         partGroup: 'atrium_steps',
         from: [0, 0.0, -17.8],
-        to: [0, 0.65, -15.2],
+        to: [0, 0.65, -15.5],
         width: 8.5,
         material: 'limestone',
       },
-      // Three-aisle basilica body & clerestory nave
+      // Three-aisle basilica body & clerestory nave (non-overlapping tiers)
       {
         primitive: 'box',
         partGroup: 'side_aisles',
-        from: [-10.2, 0.65, -12.5],
+        from: [-10.2, 0.65, -9.8],
         to: [10.2, 7.2, 11.5],
         material: 'cream_stucco',
       },
@@ -842,14 +849,35 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'central_nave',
         from: [-5.6, 0.65, -13.2],
+        to: [5.6, 11.2, -9.8],
+        material: 'whitewash',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-5.6, 7.2, -9.8],
         to: [5.6, 11.2, 12.2],
         material: 'whitewash',
       },
-      // Transept arms
+      // Transept projecting wings
       {
         primitive: 'box',
         partGroup: 'transept_arms',
         from: [-12.4, 0.65, 1.2],
+        to: [-10.2, 9.6, 7.6],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [10.2, 0.65, 1.2],
+        to: [12.4, 9.6, 7.6],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-12.4, 7.2, 1.2],
         to: [12.4, 9.6, 7.6],
         material: 'cream_stucco',
       },
@@ -857,8 +885,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'arch',
         partGroup: 'west_portal_arch',
-        from: [-3.2, 0.65, -13.55],
-        to: [3.2, 0.65, -13.55],
+        from: [-3.2, 0.65, -13.7],
+        to: [3.2, 0.65, -13.7],
         height: 5.8,
         thickness: 0.95,
         voussoirs: 9,
@@ -868,9 +896,9 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'roof',
         partGroup: 'nave_roof',
-        from: [-5.8, 11.2, -13.2],
-        to: [5.8, 14.4, 12.2],
-        height: 3.2,
+        from: [-5.6, 11.2, -13.0],
+        to: [5.6, 14.2, 12.0],
+        height: 3.0,
         style: 'gable',
         material: 'terracotta',
         wallMaterial: 'whitewash',
@@ -879,8 +907,17 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'roof',
         partGroup: 'transept_roof',
         from: [-12.4, 9.6, 1.2],
-        to: [12.4, 12.2, 7.6],
-        height: 2.6,
+        to: [-5.6, 11.2, 7.6],
+        height: 1.6,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [5.6, 9.6, 1.2],
+        to: [12.4, 11.2, 7.6],
+        height: 1.6,
         hipRatio: 0.25,
         material: 'terracotta',
       },
@@ -888,20 +925,20 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'dome',
         partGroup: 'crossing_cupola_dome',
-        base: [0, 11.2, 4.4],
-        drumHeight: 3.2,
-        radius: 4.8,
-        height: 4.6,
+        base: [0, 12.6, 4.4],
+        drumHeight: 2.6,
+        radius: 4.6,
+        height: 4.2,
         segments: 12,
         rings: 5,
         lantern: true,
         material: 'terracotta',
       },
-      // Twin west facade bell towers using Cairn `stack` + `shapes` references
+      // Twin west facade bell towers flanking the west portal bay
       {
         primitive: 'stack',
         partGroup: 'north_bell_tower',
-        position: [-8.2, 0.65, -12.8],
+        position: [-8.2, 0.65, -12.4],
         children: [
           { shape: 'bell_tower_tier' },
           { shape: 'bell_tower_tier', scale: [0.92, 0.95, 0.92] },
@@ -911,7 +948,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'stack',
         partGroup: 'south_bell_tower',
-        position: [8.2, 0.65, -12.8],
+        position: [8.2, 0.65, -12.4],
         children: [
           { shape: 'bell_tower_tier' },
           { shape: 'bell_tower_tier', scale: [0.92, 0.95, 0.92] },
@@ -919,10 +956,10 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         ],
       },
       // Side ashlar buttresses along the nave
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -8.0] },
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -3.0] },
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -8.0] },
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -3.0] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.65, 0.65, -7.2] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.65, 0.65, -2.6] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.65, 0.65, -7.2] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.65, 0.65, -2.6] },
     ],
   },
 
@@ -1015,46 +1052,46 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'bastion_casemate_walls',
-        from: [-7.8, 0.85, -9.8],
-        to: [7.8, 6.2, 2.8],
-        topInset: 0.42,
-        material: 'limestone',
-      },
-      // Beveled seaward prow of the polygonal bastion
-      {
-        primitive: 'box',
-        partGroup: 'bastion_seaward_prow',
-        from: [-5.2, 0.85, -13.2],
-        to: [5.2, 6.2, -9.2],
+        from: [-7.8, 0.85, -9.6],
+        to: [7.8, 5.8, 2.0],
         topInset: 0.32,
         material: 'limestone',
       },
-      // Bastion upper esplanade deck & sunken courtyard opening frame
+      // Beveled seaward prow of the polygonal bastion (flush against z = -9.6)
+      {
+        primitive: 'box',
+        partGroup: 'bastion_seaward_prow',
+        from: [-5.2, 0.85, -13.0],
+        to: [5.2, 5.8, -9.6],
+        topInset: 0.24,
+        material: 'limestone',
+      },
+      // Bastion upper esplanade deck sitting flush on top of the casemate (y = 5.8..6.4)
       {
         primitive: 'box',
         partGroup: 'bastion_terreplein_deck',
-        from: [-7.4, 5.8, -12.6],
-        to: [7.4, 6.45, 2.6],
-        material: 'cobble_pad',
+        from: [-7.4, 5.8, -9.6],
+        to: [7.4, 6.4, 2.0],
+        material: 'cobble',
       },
-      // Voxel-crenellated bastion parapet merlons (Order of Christ shield battlements)
+      // Voxel-crenellated bastion parapet merlons (sitting flush at y = 6.0)
       {
         primitive: 'blocks',
         partGroup: 'bastion_parapet_merlons',
-        gridSize: 0.85,
+        gridSize: 1.0,
         material: 'limestone',
         runs: [
-          { x: [-8, 8], y: 8, z: -11, step: 2 },
-          { x: [-5, 5], y: 8, z: -15, step: 2 },
-          { x: -9, y: 8, z: [-11, 2], step: 2 },
-          { x: 9, y: 8, z: [-11, 2], step: 2 },
+          { x: [-6, 6], y: 6, z: -9, step: 2 },
+          { x: [-4, 4], y: 6, z: -12, step: 2 },
+          { x: -7, y: 6, z: [-8, 1], step: 2 },
+          { x: 7, y: 6, z: [-8, 1], step: 2 },
         ],
       },
       // Six iconic cylindrical Manueline bartizan sentry turrets (Garitas) on the bastion corners
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, -9.4] },
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, -9.4] },
-      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-4.9, 5.4, -12.9] },
-      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [4.9, 5.4, -12.9] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-4.9, 5.4, -12.7] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [4.9, 5.4, -12.7] },
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, 1.8] },
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, 1.8] },
       // 4-story square Torre de Menagem keep rising on the north end of the bastion
@@ -1070,7 +1107,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'keep_upper_tiers',
         from: [-5.1, 13.8, 2.3],
-        to: [5.1, 20.6, 11.1],
+        to: [5.1, 19.8, 11.1],
         material: 'whitewash',
       },
       // South-facing 2nd-story Manueline arched loggia (Varanda do Renascimento) overlooking the bastion
@@ -1078,14 +1115,14 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'manueline_loggia_deck',
         from: [-4.8, 7.2, 0.1],
-        to: [4.8, 7.85, 2.2],
+        to: [4.8, 7.85, 2.0],
         material: 'limestone',
       },
       {
         primitive: 'wall',
         partGroup: 'manueline_loggia_arcade',
-        from: [-4.6, 7.85, 0.25],
-        to: [4.6, 7.85, 0.25],
+        from: [-4.6, 7.85, 0.35],
+        to: [4.6, 7.85, 0.35],
         height: 3.3,
         thickness: 0.48,
         material: 'limestone',
@@ -1101,7 +1138,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'roof',
         partGroup: 'manueline_loggia_canopy',
         from: [-4.8, 11.15, 0.1],
-        to: [4.8, 12.15, 2.2],
+        to: [4.8, 12.15, 2.0],
         height: 1.0,
         hipRatio: 0.25,
         material: 'terracotta',
@@ -1110,20 +1147,20 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'keep_machicolation_cornice',
-        from: [-5.65, 19.8, 1.75],
-        to: [5.65, 21.4, 11.65],
+        from: [-5.55, 19.8, 1.85],
+        to: [5.55, 21.0, 11.55],
         material: 'limestone',
       },
       {
         primitive: 'blocks',
         partGroup: 'keep_crown_merlons',
-        gridSize: 0.8,
+        gridSize: 1.0,
         material: 'limestone',
         runs: [
-          { x: [-6, 6], y: 27, z: 3, step: 2 },
-          { x: [-6, 6], y: 27, z: 14, step: 2 },
-          { x: -6, y: 27, z: [3, 14], step: 2 },
-          { x: 6, y: 27, z: [3, 14], step: 2 },
+          { x: [-4, 4], y: 21, z: 2, step: 2 },
+          { x: [-4, 4], y: 21, z: 10, step: 2 },
+          { x: -5, y: 21, z: [3, 9], step: 2 },
+          { x: 5, y: 21, z: [3, 9], step: 2 },
         ],
       },
       // Four upper corner watch turrets crowning the Torre de Menagem
@@ -1215,16 +1252,24 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'stairs',
         partGroup: 'south_portal_steps',
         from: [0, 0.0, -16.8],
-        to: [0, 0.75, -14.2],
+        to: [0, 0.75, -14.5],
         width: 9.5,
         material: 'limestone',
       },
-      // Hall-church body (Igreja de Santa Maria de Belém)
+      // Hall-church body (spanning cleanly between the twin west bell towers at x=-12.4 and transept at x=8.5)
       {
         primitive: 'box',
         partGroup: 'church_hall_nave',
-        from: [-16.8, 0.75, -11.5],
-        to: [16.8, 12.6, 1.5],
+        from: [-12.4, 0.75, -11.5],
+        to: [8.5, 12.6, 1.5],
+        material: 'whitewash',
+      },
+      // Western narthex bay between the twin bell towers
+      {
+        primitive: 'box',
+        partGroup: 'church_hall_nave',
+        from: [-18.0, 0.75, -7.0],
+        to: [-12.4, 12.2, -3.0],
         material: 'whitewash',
       },
       // North transept & high altar chancel (Capela-Mor)
@@ -1240,16 +1285,16 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'portal_sul_frontispiece',
         from: [-3.8, 0.75, -12.55],
-        to: [3.8, 12.2, -11.2],
+        to: [3.8, 12.2, -11.5],
         material: 'limestone',
       },
       {
         primitive: 'arch',
         partGroup: 'portal_sul_arch',
-        from: [-2.4, 0.75, -12.75],
-        to: [2.4, 0.75, -12.75],
+        from: [-2.4, 0.75, -12.95],
+        to: [2.4, 0.75, -12.95],
         height: 5.4,
-        thickness: 0.95,
+        thickness: 0.85,
         voussoirs: 9,
         material: 'ashlar',
       },
@@ -1267,22 +1312,22 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'repeat',
         partGroup: 'south_facade_buttresses',
-        count: 6,
-        step: [5.6, 0, 0],
+        count: 4,
+        step: [5.4, 0, 0],
         of: {
           shape: 'manueline_buttress',
-          position: [-14.0, 0.75, -11.6],
+          position: [-10.0, 0.75, -12.1],
         },
       },
-      // Twin western bell towers with octagonal belfries & ribbed cupolas
+      // Twin western bell towers with octagonal belfries & ribbed cupolas (flanking the west narthex)
       { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -9.8] },
       { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -0.2] },
-      // Pitched terracotta roofs over the hall-church & transept
+      // Pitched terracotta roofs over the hall-church & transept (non-overlapping with towers)
       {
         primitive: 'roof',
         partGroup: 'church_nave_roof',
-        from: [-16.8, 12.6, -11.5],
-        to: [16.8, 16.0, 1.5],
+        from: [-12.4, 12.6, -11.5],
+        to: [8.5, 16.0, 1.5],
         height: 3.4,
         hipRatio: 0.18,
         material: 'terracotta',
@@ -1290,7 +1335,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'dome',
         partGroup: 'crossing_lantern_dome',
-        base: [12.5, 13.4, -4.2],
+        base: [13.2, 13.4, -4.2],
         drumHeight: 2.2,
         radius: 3.8,
         height: 3.4,
@@ -1302,26 +1347,26 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'cloister_courtyard_paving',
-        from: [-13.5, 0.75, 1.5],
-        to: [8.5, 0.95, 15.8],
-        material: 'cobble_pad',
+        from: [-11.6, 0.75, 1.5],
+        to: [6.6, 0.95, 12.2],
+        material: 'cobble',
       },
       // Octagonal renaissance fountain in the center of the Claustro Real
       {
         primitive: 'cylinder',
         partGroup: 'cloister_fountain',
-        base: [-2.5, 0.95, 8.6],
+        base: [-2.5, 0.95, 6.8],
         height: 1.65,
         radius: 1.55,
         segments: 8,
         material: 'limestone',
       },
-      // West, North, and East two-story cloister wings enclosing the courtyard
+      // West, North, and East two-story cloister wings enclosing the courtyard (non-overlapping corners)
       {
         primitive: 'box',
         partGroup: 'cloister_west_wing',
-        from: [-15.8, 0.75, 1.5],
-        to: [-11.6, 8.6, 15.8],
+        from: [-15.8, 0.75, 2.6],
+        to: [-11.6, 8.6, 12.2],
         material: 'cream_stucco',
       },
       {
@@ -1334,16 +1379,16 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'cloister_east_wing',
-        from: [6.6, 0.75, 1.5],
-        to: [10.8, 8.6, 15.8],
+        from: [6.6, 0.75, 4.2],
+        to: [10.8, 8.6, 12.2],
         material: 'cream_stucco',
       },
-      // Cloister inner arcaded walls with round-headed Manueline openings
+      // Cloister inner arcaded wall with round-headed Manueline openings
       {
         primitive: 'wall',
         partGroup: 'cloister_inner_arcade',
-        from: [-11.4, 0.95, 12.0],
-        to: [6.4, 0.95, 12.0],
+        from: [-11.4, 0.95, 11.8],
+        to: [6.4, 0.95, 11.8],
         height: 7.4,
         thickness: 0.55,
         material: 'limestone',
@@ -1354,12 +1399,12 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
           { offset: 14.4, width: 1.8, height: 3.2, sillHeight: 0.2 },
         ],
       },
-      // Terracotta hipped roofs over the three cloister ranges
+      // Terracotta hipped roofs over the three cloister ranges (cleanly abutted)
       {
         primitive: 'roof',
         partGroup: 'cloister_north_roof',
-        from: [-16.0, 8.6, 12.0],
-        to: [11.0, 10.8, 16.4],
+        from: [-15.8, 8.6, 12.2],
+        to: [10.8, 10.8, 16.2],
         height: 2.2,
         hipRatio: 0.22,
         material: 'terracotta',
@@ -1367,18 +1412,18 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'roof',
         partGroup: 'cloister_west_roof',
-        from: [-16.0, 8.6, 1.5],
-        to: [-11.4, 10.8, 16.0],
-        height: 2.2,
+        from: [-15.8, 8.6, 2.6],
+        to: [-11.6, 10.6, 12.0],
+        height: 2.0,
         hipRatio: 0.22,
         material: 'terracotta',
       },
       {
         primitive: 'roof',
         partGroup: 'cloister_east_roof',
-        from: [6.4, 8.6, 1.5],
-        to: [11.0, 10.8, 16.0],
-        height: 2.2,
+        from: [6.6, 8.6, 4.2],
+        to: [10.8, 10.6, 12.0],
+        height: 2.0,
         hipRatio: 0.22,
         material: 'terracotta',
       },
@@ -1415,7 +1460,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
           {
             primitive: 'box',
             from: [-2.95, 10.5, -2.95],
-            to: [2.95, 17.2, 2.95],
+            to: [2.95, 16.8, 2.95],
             material: 'limestone',
           },
           // Projecting corbel cornice
@@ -1425,16 +1470,16 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
             to: [3.25, 17.5, 3.25],
             material: 'ashlar',
           },
-          // Iconic flat crenellated fortress battlements (voxel merlons)
+          // Iconic flat crenellated fortress battlements (sitting flush at y = 17.5)
           {
             primitive: 'blocks',
-            gridSize: 0.85,
+            gridSize: 1.0,
             material: 'ashlar',
             runs: [
-              { x: [-3, 3], y: 21, z: -3, step: 2 },
-              { x: [-3, 3], y: 21, z: 3, step: 2 },
-              { x: -3, y: 21, z: [-3, 3], step: 2 },
-              { x: 3, y: 21, z: [-3, 3], step: 2 },
+              { x: [-3, 3], y: 17, z: -3, step: 2 },
+              { x: [-3, 3], y: 17, z: 2, step: 2 },
+              { x: -3, y: 17, z: [-2, 1], step: 2 },
+              { x: 2, y: 17, z: [-2, 1], step: 2 },
             ],
           },
         ],
@@ -1453,23 +1498,30 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'stairs',
         partGroup: 'west_parvis_steps',
         from: [0, 0.0, -18.5],
-        to: [0, 0.8, -15.8],
+        to: [0, 0.8, -16.2],
         width: 8.2,
         material: 'ashlar',
       },
-      // Fortress-like side aisles & central Romanesque clerestory nave
+      // Fortress-like side aisles & central Romanesque clerestory nave (non-overlapping with west towers)
       {
         primitive: 'box',
         partGroup: 'side_aisles',
-        from: [-9.8, 0.8, -11.8],
+        from: [-9.8, 0.8, -9.4],
         to: [9.8, 7.8, 10.5],
         material: 'limestone',
       },
       {
         primitive: 'box',
         partGroup: 'central_nave',
-        from: [-5.2, 0.8, -12.8],
-        to: [5.2, 12.2, 12.8],
+        from: [-4.4, 0.8, -13.0],
+        to: [4.4, 12.2, -9.4],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-5.2, 7.8, -9.4],
+        to: [5.2, 12.2, 10.5],
         material: 'limestone',
       },
       // Projecting Romanesque transept & Gothic ambulatory apse
@@ -1477,15 +1529,29 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'transept_arms',
         from: [-11.8, 0.8, 1.5],
+        to: [-9.8, 10.8, 7.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [9.8, 0.8, 1.5],
+        to: [11.8, 10.8, 7.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-11.8, 7.8, 1.5],
         to: [11.8, 10.8, 7.8],
         material: 'limestone',
       },
       {
         primitive: 'cylinder',
         partGroup: 'gothic_ambulatory_apse',
-        base: [0, 0.8, 12.2],
+        base: [0, 0.8, 11.8],
         height: 9.6,
-        radius: 5.4,
+        radius: 5.2,
         segments: 8,
         material: 'limestone',
       },
@@ -1496,7 +1562,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [-2.8, 0.8, -13.6],
         to: [2.8, 0.8, -13.6],
         height: 5.2,
-        thickness: 1.2,
+        thickness: 1.0,
         voussoirs: 9,
         material: 'ashlar',
       },
@@ -1518,18 +1584,18 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'cylinder',
         partGroup: 'crossing_zimborio_tower',
-        base: [0, 12.2, 4.6],
-        height: 4.2,
-        radius: 4.2,
+        base: [0, 14.8, 4.6],
+        height: 3.2,
+        radius: 4.0,
         segments: 8,
         material: 'ashlar',
       },
       {
         primitive: 'cone',
         partGroup: 'crossing_zimborio_roof',
-        base: [0, 16.4, 4.6],
-        height: 2.6,
-        radiusBottom: 4.35,
+        base: [0, 18.0, 4.6],
+        height: 2.4,
+        radiusBottom: 4.15,
         radiusTop: 0.25,
         segments: 8,
         material: 'terracotta',
@@ -1538,9 +1604,9 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'roof',
         partGroup: 'nave_roof',
-        from: [-5.4, 12.2, -10.2],
-        to: [5.4, 15.0, 12.6],
-        height: 2.8,
+        from: [-5.2, 12.2, -9.4],
+        to: [5.2, 14.8, 10.5],
+        height: 2.6,
         style: 'gable',
         material: 'terracotta',
       },
@@ -1548,8 +1614,17 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'roof',
         partGroup: 'transept_roof',
         from: [-11.8, 10.8, 1.5],
-        to: [11.8, 13.2, 7.8],
-        height: 2.4,
+        to: [-5.2, 12.4, 7.8],
+        height: 1.6,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [5.2, 10.8, 1.5],
+        to: [11.8, 12.4, 7.8],
+        height: 1.6,
         hipRatio: 0.22,
         material: 'terracotta',
       },
@@ -1596,8 +1671,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'stairs',
         partGroup: 'royal_water_stairs',
-        from: [-8.6, -0.4, -6.5],
-        to: [-5.2, 1.4, -6.5],
+        from: [-10.8, -0.4, -4.5],
+        to: [-8.0, 1.4, -4.5],
         width: 3.6,
         material: 'limestone',
       },
@@ -1606,7 +1681,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'torreao_lower_casemate',
         from: [-7.4, 1.4, -9.4],
-        to: [7.4, 7.2, 5.4],
+        to: [7.4, 6.9, 5.0],
         topInset: 0.22,
         material: 'ashlar',
       },
@@ -1614,8 +1689,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'box',
         partGroup: 'torreao_belt_cornice',
-        from: [-7.75, 6.9, -9.75],
-        to: [7.75, 7.55, 5.75],
+        from: [-7.65, 6.9, -9.65],
+        to: [7.65, 7.55, 5.2],
         material: 'limestone',
       },
       // Upper two noble stories (Sala da Índia & Royal Library / Map Room)
@@ -1623,7 +1698,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'torreao_noble_stories',
         from: [-7.0, 7.55, -9.0],
-        to: [7.0, 15.2, 5.0],
+        to: [7.0, 14.8, 5.0],
         material: 'whitewash',
       },
       // Seaward Tagus loggia arch & royal balcony on the south face
@@ -1631,16 +1706,16 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'seaward_royal_balcony',
         from: [-4.2, 7.3, -10.35],
-        to: [4.2, 7.9, -8.8],
+        to: [4.2, 7.9, -9.0],
         material: 'limestone',
       },
       {
         primitive: 'arch',
         partGroup: 'seaward_royal_portal',
-        from: [-2.4, 7.9, -9.15],
-        to: [2.4, 7.9, -9.15],
+        from: [-2.4, 7.9, -9.45],
+        to: [2.4, 7.9, -9.45],
         height: 4.4,
-        thickness: 0.75,
+        thickness: 0.65,
         voussoirs: 7,
         material: 'limestone',
       },
@@ -1669,30 +1744,30 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         lantern: true,
         material: 'terracotta',
       },
-      // Adjoining landward Galeria das Damas wing with ground-floor stone arch loggia
+      // Adjoining landward Galeria das Damas wing with ground-floor stone arch loggia (flush at z = 5.0)
       {
         primitive: 'box',
         partGroup: 'galeria_das_damas_wing',
         from: [-6.2, 1.4, 5.0],
-        to: [6.2, 12.2, 10.4],
+        to: [6.2, 12.2, 10.2],
         material: 'cream_stucco',
       },
       {
         primitive: 'arch',
         partGroup: 'galeria_arcade',
-        from: [-4.2, 1.4, 10.4],
-        to: [4.2, 1.4, 10.4],
+        from: [-4.2, 1.4, 10.55],
+        to: [4.2, 1.4, 10.55],
         height: 4.2,
-        thickness: 0.85,
+        thickness: 0.70,
         voussoirs: 7,
         material: 'limestone',
       },
       {
         primitive: 'roof',
         partGroup: 'galeria_roof',
-        from: [-6.4, 12.2, 4.8],
-        to: [6.4, 14.8, 10.6],
-        height: 2.6,
+        from: [-6.2, 12.2, 5.0],
+        to: [6.2, 14.6, 10.2],
+        height: 2.4,
         hipRatio: 0.25,
         material: 'terracotta',
       },
@@ -1716,8 +1791,8 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
     shapes: {
       arcade_arch_bay: {
         primitive: 'arch',
-        from: [-1.85, 0, 0],
-        to: [1.85, 0, 0],
+        from: [-1.65, 0, 0],
+        to: [1.65, 0, 0],
         height: 3.8,
         thickness: 0.68,
         voussoirs: 7,
@@ -1728,14 +1803,14 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         children: [
           {
             primitive: 'box',
-            from: [-2.8, 0, -2.8],
-            to: [2.8, 12.6, 2.8],
+            from: [-2.6, 0, -2.6],
+            to: [2.6, 12.6, 2.6],
             material: 'limestone',
           },
           {
             primitive: 'roof',
-            from: [-3.05, 12.6, -3.05],
-            to: [3.05, 14.8, 3.05],
+            from: [-2.75, 12.6, -2.75],
+            to: [2.75, 14.8, 2.75],
             height: 2.2,
             hipRatio: 0.48,
             material: 'terracotta',
@@ -1751,61 +1826,61 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         to: [13.8, 0.65, 9.8],
         material: 'ashlar',
       },
-      // Main two-story palace block set behind the ground-floor vaulted portico
+      // Main two-story palace block set behind the ground-floor vaulted portico (between the corner towers x=-8.4..8.4)
       {
         primitive: 'box',
         partGroup: 'palace_main_hall',
-        from: [-11.2, 0.65, -6.4],
-        to: [11.2, 9.8, 8.8],
+        from: [-8.4, 0.65, -6.2],
+        to: [8.4, 9.8, 8.8],
         material: 'whitewash',
       },
-      // Upper floor gallery projecting over the ground-floor arcade
+      // Upper floor gallery projecting over the ground-floor arcade (between the corner towers)
       {
         primitive: 'box',
         partGroup: 'upper_noble_gallery',
-        from: [-10.8, 5.1, -9.2],
-        to: [10.8, 9.8, -6.2],
+        from: [-8.4, 5.1, -9.0],
+        to: [8.4, 9.8, -6.2],
         material: 'cream_stucco',
       },
-      // 5-bay ground-floor stone arch soportal along the plaza facade
+      // 4-bay ground-floor stone arch soportal along the plaza facade
       {
         primitive: 'repeat',
         partGroup: 'plaza_soportal_arcade',
-        count: 5,
-        step: [4.2, 0, 0],
+        count: 4,
+        step: [3.8, 0, 0],
         of: {
           shape: 'arcade_arch_bay',
-          position: [-8.4, 0.65, -9.0],
+          position: [-5.7, 0.65, -8.8],
         },
       },
-      // Twin corner ashlar mirador towers (Torreones Esquineros)
-      { shape: 'corner_mirador_tower', partGroup: 'west_mirador_tower', position: [-11.2, 0.65, -6.6] },
-      { shape: 'corner_mirador_tower', partGroup: 'east_mirador_tower', position: [11.2, 0.65, -6.6] },
-      // Central royal heraldic frontispiece & domed clock/bell turret
+      // Twin corner ashlar mirador towers (Torreones Esquineros) flanking the main hall cleanly
+      { shape: 'corner_mirador_tower', partGroup: 'west_mirador_tower', position: [-11.0, 0.65, -6.4] },
+      { shape: 'corner_mirador_tower', partGroup: 'east_mirador_tower', position: [11.0, 0.65, -6.4] },
+      // Central royal heraldic frontispiece & domed clock/bell turret rising above the roof ridge
       {
         primitive: 'box',
         partGroup: 'central_heraldic_tower',
-        from: [-2.6, 9.8, -9.3],
-        to: [2.6, 13.4, -5.2],
+        from: [-2.4, 12.2, -5.8],
+        to: [2.4, 14.6, -1.8],
         material: 'limestone',
       },
       {
         primitive: 'dome',
         partGroup: 'central_turret_dome',
-        base: [0, 13.4, -7.25],
-        radius: 2.1,
-        height: 2.2,
+        base: [0, 14.6, -3.8],
+        radius: 2.0,
+        height: 2.1,
         segments: 8,
         lantern: true,
         material: 'terracotta',
       },
-      // Hipped terracotta roof over the main palace range
+      // Hipped terracotta roof over the main palace range (between the corner towers)
       {
         primitive: 'roof',
         partGroup: 'palace_main_roof',
-        from: [-11.4, 9.8, -9.4],
-        to: [11.4, 12.6, 9.0],
-        height: 2.8,
+        from: [-8.4, 9.8, -9.0],
+        to: [8.4, 12.4, 8.8],
+        height: 2.6,
         hipRatio: 0.24,
         material: 'terracotta',
       },
@@ -1857,15 +1932,15 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'blocks',
         partGroup: 'aqueduct_cutwater_piers',
-        gridSize: 1.1,
+        gridSize: 1.0,
         material: 'ashlar',
         runs: [
-          { x: -13, y: [1, 4], z: [-2, 2] },
-          { x: -8, y: [1, 4], z: [-2, 2] },
-          { x: -3, y: [1, 4], z: [-2, 2] },
-          { x: 3, y: [1, 4], z: [-2, 2] },
-          { x: 8, y: [1, 4], z: [-2, 2] },
-          { x: 13, y: [1, 4], z: [-2, 2] },
+          { x: -14, y: [1, 3], z: [-2, 1] },
+          { x: -9, y: [1, 3], z: [-2, 1] },
+          { x: -3, y: [1, 3], z: [-2, 1] },
+          { x: 2, y: [1, 3], z: [-2, 1] },
+          { x: 8, y: [1, 3], z: [-2, 1] },
+          { x: 13, y: [1, 3], z: [-2, 1] },
         ],
       },
       // 5 lower monumental stone arches

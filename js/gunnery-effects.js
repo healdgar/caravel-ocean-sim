@@ -223,16 +223,16 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.6),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
         const wind=gunneryFxVector(options.wind);
         const pulse=0.88+0.14*Math.sin(age*11.3+seed*19.0)+0.08*Math.cos(age*19.7-seed*7.3);
-        const rHoriz=(0.58+0.68*int)*pulse;
-        const rVert=(1.05+1.35*int)*pulse;
-        // 1. Primary roaring shipboard flame volume (direction=[0,1,0] -> radii[2] is vertical)
+        const rHoriz=(0.48+0.52*int)*pulse;
+        const rVert=(0.82+0.95*int)*pulse;
+        // 1. Primary roaring shipboard/structure flame volume (direction=[0,1,0] -> radii[2] is vertical)
         ordered.push({
-          centre:[pos[0]+wind[0]*0.04,pos[1]+0.55*rVert,pos[2]+wind[2]*0.04],
+          centre:[pos[0]+wind[0]*0.03,pos[1]+0.35*rVert,pos[2]+wind[2]*0.03],
           direction:[0,1,0],
           radii:[rHoriz,rHoriz,rVert],
           type:1,
           subtype:1.0,
-          extinction:0.95+0.85*int,
+          extinction:0.65+0.55*int,
           age,
           seed:seed*53,
         });
@@ -240,15 +240,15 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         const tongueFlicker=0.82+0.24*Math.sin(age*16.4+seed*31.0);
         ordered.push({
           centre:[
-            pos[0]+wind[0]*0.14+Math.sin(age*6.7+seed*13.0)*0.22*int,
-            pos[1]+1.15*rVert,
-            pos[2]+wind[2]*0.14+Math.cos(age*5.9+seed*17.0)*0.22*int,
+            pos[0]+wind[0]*0.10+Math.sin(age*6.7+seed*13.0)*0.18*int,
+            pos[1]+0.78*rVert,
+            pos[2]+wind[2]*0.10+Math.cos(age*5.9+seed*17.0)*0.18*int,
           ],
           direction:[0,1,0],
-          radii:[rHoriz*0.72*tongueFlicker,rHoriz*0.72*tongueFlicker,rVert*0.85*tongueFlicker],
+          radii:[rHoriz*0.68*tongueFlicker,rHoriz*0.68*tongueFlicker,rVert*0.76*tongueFlicker],
           type:1,
           subtype:1.25,
-          extinction:(0.68+0.62*int)*tongueFlicker,
+          extinction:(0.48+0.44*int)*tongueFlicker,
           age:age*1.35+1.7,
           seed:seed*71+13,
         });

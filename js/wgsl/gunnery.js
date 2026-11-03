@@ -176,7 +176,13 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let low=min(t0,t1);let high=max(t0,t1);
   let enter=max(0.0,max(low.x,max(low.y,low.z)));
   let scene=gunnerySceneDistance(v.position.xy,ray);
-  let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter){discard;}
+  let centreDist=dot(volume.centre.xyz-F.camPos.xyz,ray);
+  let minHorizR=min(volume.axisX.w,volume.axisZ.w);
+  // Prevent fires and smoke volumes centered inside or behind a building/hull wall from bleeding through the front face of that wall
+  if(volume.centre.w>.5 && scene<centreDist-min(0.35,minHorizR*0.28)){discard;}
+  if(volume.optical.w>=1.8 && scene<centreDist-minHorizR*0.32){discard;}
+  let wallFrontFade=select(1.0,smoothstep(centreDist-minHorizR*0.35,centreDist+0.15,scene),volume.centre.w>.5||volume.optical.w>=1.8);
+  let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter||wallFrontFade<=0.005){discard;}
   let steps=select(8u,6u,enter>45.0);
   let stepSize=(exit-enter)/f32(steps);var transmittance=1.0;var radiance=vec3f(0);
   let jitter=fract(sin(dot(v.position.xy,vec2f(12.9898,78.233))+volume.optical.z)*43758.5453);
@@ -198,7 +204,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
     let local=origin+direction*distance;
     let df=gunneryDensityAndFbm(local,age,volume.optical.z);
     // Soft intersection margin removes hard slices at timber and sea.
-    var density=df.x*smoothstep(0.0,.28,scene-distance);
+    var density=df.x*smoothstep(0.0,.28,scene-distance)*wallFrontFade;
     if(density<.0015){continue;}
     var emission=vec3f(0);var extinction=volume.optical.x*density;
     let subtype=volume.optical.w;
@@ -214,18 +220,18 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
         let vertEnv=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.58,1.0,h));
         let flameShape=tongueMask*vertEnv;
         if(flameShape<0.01){continue;}
-        let temp=clamp(flameShape*(1.12-0.48*h)+0.28*fTurb,0.0,1.0);
-        let colBase=mix(vec3f(2.2,0.18,0.02),vec3f(24.0,5.8,0.45),smoothstep(0.12,0.58,temp));
-        let colCore=mix(colBase,vec3f(54.0,36.0,12.5),smoothstep(0.58,0.92,temp));
+        let temp=clamp(flameShape*(1.05-0.48*h)+0.24*fTurb,0.0,1.0);
+        let colBase=mix(vec3f(0.85,0.04,0.005),vec3f(4.2,0.48,0.03),smoothstep(0.12,0.62,temp));
+        let colCore=mix(colBase,vec3f(8.5,1.45,0.12),smoothstep(0.62,0.95,temp));
         // Add rising glowing embers near the top of the upper flame tongue
         let sparkNoise=gunneryNoise3(advectPos*4.2+vec3f(0.0,0.0,-age*6.0));
-        let sparks=select(0.0,smoothstep(0.82,0.95,sparkNoise)*h*18.0,subtype>1.1);
-        emission=(colCore*flameShape+vec3f(36.0,12.0,1.8)*sparks)*volume.optical.x;
+        let sparks=select(0.0,smoothstep(0.84,0.96,sparkNoise)*h*4.8,subtype>1.1);
+        emission=(colCore*flameShape+vec3f(6.5,0.85,0.06)*sparks)*volume.optical.x;
         extinction=density*flameShape*5.2;
       }else{
         let flame=max(0.0,1.0-dot(local,local));
         let coreNoise=.65+.35*df.y;
-        emission=mix(vec3f(16.0,2.6,.18),vec3f(42.0,28.0,9.5),flame*flame*coreNoise)*volume.optical.x;
+        emission=mix(vec3f(6.5,0.65,.04),vec3f(16.0,4.8,0.65),flame*flame*coreNoise)*volume.optical.x;
         extinction=density*4.2;
       }
     }else{
@@ -264,7 +270,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
         (1.0-smoothstep(0.0,0.68,heightGrad))*max(0.0,1.0-length(local.xy)*0.95)*(0.65+0.35*df.y)*max(0.15,2.55-subtype),
         isFireSmoke
       );
-      let internalEmber=vec3f(14.0,3.8,.45)*(emberFactor*throatCore*throatCore*density)+vec3f(9.5,2.4,0.28)*(fireUnderGlow*density);
+      let internalEmber=vec3f(6.5,1.1,.08)*(emberFactor*throatCore*throatCore*density)+vec3f(2.4,0.28,0.02)*(fireUnderGlow*density);
       emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
     }
     let opacity=1.0-exp(-extinction*stepSize);

@@ -2200,7 +2200,9 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
       inst.prefabId === 'mission_chapel' ? 9.2 : inst.prefabId === 'timber_mole_pier' ? 6.2 : 1.5,
     );
     const instHeight = inst.height ?? 10;
-    if (segMaxY < baseY - foundDepth - radius || segMinY > baseY + instHeight + roofExtra + radius) continue;
+    const collapseDropFrac = Math.max(0, Math.min(0.65, inst.damageState?.collapseDropFrac ?? 0));
+    const effTopY = Math.max(3.2, (instHeight + roofExtra) * (1 - collapseDropFrac * 0.72));
+    if (segMaxY < baseY - foundDepth - radius || segMinY > baseY + effTopY + radius) continue;
     const depthZ = inst.depth ?? inst.length ?? 20;
     const widthX = inst.width ?? 12;
     const halfDiag = Math.hypot(widthX, depthZ) * 0.5 + radius;
@@ -2217,7 +2219,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
     const p1 = [dx1 * cosY - dz1 * sinY, dy1, dx1 * sinY + dz1 * cosY];
     const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
     const minB = [-widthX * 0.5 - radius, -foundDepth - radius, -depthZ * 0.5 - radius];
-    const maxB = [widthX * 0.5 + radius, instHeight + roofExtra + radius, depthZ * 0.5 + radius];
+    const maxB = [widthX * 0.5 + radius, effTopY + radius, depthZ * 0.5 + radius];
     let tMin = 0, tMax = 1, hitAxis = 0, hitSign = 1;
     let valid = true;
     for (let a = 0; a < 3; a++) {
@@ -2294,6 +2296,12 @@ function buildingLocalToWorld(building, localPt) {
     baseY + ly,
     (building?.z ?? 0) - lx * sinY + lz * cosY,
   ];
+}
+
+function buildingFireLocalToWorld(building, localPt) {
+  const dropFrac = Math.max(0, Math.min(0.72, building?.damageState?.collapseDropFrac ?? 0));
+  const ly = Math.max(0.65, (localPt?.[1] ?? 1.2) * (1 - dropFrac * 0.72));
+  return buildingLocalToWorld(building, [localPt?.[0] ?? 0, ly, localPt?.[2] ?? 0]);
 }
 
 export function createBuildingMagazineState(building) {
@@ -2475,6 +2483,7 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
     d.silenced = true;
   }
 
+  d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.32 * (0.4 + 0.6 * powderFrac));
   d.pendingBakes.push({
     kind: 'building-explosion',
     x: +worldBlastPt[0].toFixed(3),
@@ -2486,22 +2495,22 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
     powderFraction: +powderFrac.toFixed(3),
   });
 
-  const numFires = Math.min(6, Math.max(2, Math.round(2 + 4 * powderFrac)));
+  const numFires = Math.min(3, Math.max(1, Math.round(1 + 2 * powderFrac)));
   for (let i = 0; i < numFires; i++) {
-    if (d.fires.length >= 10) d.fires.shift();
-    const flx = ((i % 2 === 0 ? 1 : -1) * (building.width ?? 14) * 0.22);
-    const fly = Math.max(1.2, (building.height ?? 5) * 0.65);
-    const flz = ((i - (numFires - 1) * 0.5) * (building.depth ?? 14) * 0.16);
-    const fWorld = buildingLocalToWorld(building, [flx, fly, flz]);
+    if (d.fires.length >= 4) d.fires.shift();
+    const flx = ((i % 2 === 0 ? 1 : -1) * (building.width ?? 14) * 0.14);
+    const fly = Math.max(0.85, Math.min(2.6, (building.height ?? 5) * 0.34));
+    const flz = ((i - (numFires - 1) * 0.5) * (building.depth ?? 14) * 0.12);
+    const fWorld = buildingFireLocalToWorld(building, [flx, fly, flz]);
     d.fires.push({
       localPosition: [flx, fly, flz],
-      intensity: +(1.05 + 0.45 * powderFrac).toFixed(3),
+      intensity: +(0.88 + 0.35 * powderFrac).toFixed(3),
       age: 0,
       seed: ((d.hits * 0.618 + i * 0.27) % 1) || 0.43,
     });
     d.worldFires.push({
       position: fWorld,
-      intensity: +(1.05 + 0.45 * powderFrac).toFixed(3),
+      intensity: +(0.88 + 0.35 * powderFrac).toFixed(3),
       age: 0,
       seed: ((d.hits * 0.618 + i * 0.27) % 1) || 0.43,
     });
@@ -2717,11 +2726,13 @@ export function applyBuildingImpactDamage(building, event) {
       const baseIgnite = ammo === 'hot'
         ? (materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
         : (materialClass === 'timber' ? 0.36 : 0.28);
-      const addIntensity = Math.min(1.45, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
+      const addIntensity = Math.min(1.25, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
+      const bH = building.height ?? 8;
+      const rawFireY = (localPos[1] ?? 0) > 0.8 ? (localPos[1] ?? 1.5) * 0.58 : bH * 0.36;
       const fireLocal = [
-        localPos[0] ?? 0,
-        Math.max(1.8, (localPos[1] ?? 0) > 1.0 ? localPos[1] : (building.height ?? 8) * 0.75),
-        localPos[2] ?? 0,
+        (localPos[0] ?? 0) * 0.55,
+        Math.max(0.75, Math.min(rawFireY, bH * 0.44)),
+        (localPos[2] ?? 0) * 0.55,
       ];
       let merged = false;
       for (const f of d.fires) {
@@ -2730,13 +2741,13 @@ export function applyBuildingImpactDamage(building, event) {
           (f.localPosition[1] ?? 0) - fireLocal[1],
           (f.localPosition[2] ?? 0) - fireLocal[2],
         );
-        if (dist < 4.5) {
-          f.intensity = Math.min(1.65, +(f.intensity + addIntensity * 0.7).toFixed(3));
+        if (dist < 6.5) {
+          f.intensity = Math.min(1.45, +(f.intensity + addIntensity * 0.55).toFixed(3));
           merged = true;
           break;
         }
       }
-      if (!merged && d.fires.length < 10) {
+      if (!merged && d.fires.length < 4) {
         d.fires.push({
           localPosition: fireLocal,
           intensity: +addIntensity.toFixed(3),
@@ -2745,7 +2756,7 @@ export function applyBuildingImpactDamage(building, event) {
         });
       }
       d.worldFires = d.fires.map((f) => ({
-        position: buildingLocalToWorld(building, f.localPosition),
+        position: buildingFireLocalToWorld(building, f.localPosition),
         intensity: f.intensity,
         age: f.age,
         seed: f.seed,
@@ -2777,12 +2788,16 @@ export function applyBuildingImpactDamage(building, event) {
     }
   }
 
-  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined
+  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined,
+  // plus incremental multi-round collapse bakes so subsequent broadsides keep crumbling the remaining structure.
+  let emittedCollapseThisHit = false;
   if (d.state !== 'intact' && materialClass !== 'fortified-stone' && !d.damageCollapseBaked) {
     d.damageCollapseBaked = true;
+    emittedCollapseThisHit = true;
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.12);
     const roofCavePt = buildingLocalToWorld(building, [
       (localPos[0] ?? 0) * 0.65,
-      (building.height ?? 7) * 0.90,
+      (building.height ?? 7) * 0.85,
       (localPos[2] ?? 0) * 0.65,
     ]);
     d.pendingBakes.push({
@@ -2798,9 +2813,11 @@ export function applyBuildingImpactDamage(building, event) {
   }
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
+    emittedCollapseThisHit = true;
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
     const collapsePt = buildingLocalToWorld(building, [
       (localPos[0] ?? 0) * 0.6,
-      (building.height ?? 8) * 0.82,
+      (building.height ?? 8) * 0.72,
       (localPos[2] ?? 0) * 0.6,
     ]);
     d.pendingBakes.push({
@@ -2818,6 +2835,8 @@ export function applyBuildingImpactDamage(building, event) {
   const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
   if ((d.state === 'ruined' || (totalGunsCount > 0 && activeGunsLeft === 0 && d.integrity <= 0.45)) && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
+    emittedCollapseThisHit = true;
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
     d.silenced = true;
     if (Array.isArray(bGuns)) {
       for (const g of bGuns) {
@@ -2827,7 +2846,7 @@ export function applyBuildingImpactDamage(building, event) {
       }
       d.dismountedGuns = bGuns.length;
     }
-    const centerCollapsePt = buildingLocalToWorld(building, [0, (building.height ?? 8) * 0.85, 0]);
+    const centerCollapsePt = buildingLocalToWorld(building, [0, (building.height ?? 8) * 0.68, 0]);
     d.pendingBakes.push({
       kind: 'building-collapse',
       x: +centerCollapsePt[0].toFixed(3),
@@ -2838,6 +2857,18 @@ export function applyBuildingImpactDamage(building, event) {
       severity: 1.35,
       powderFraction: 0.85,
     });
+  }
+  // Multi-round bombardment progression: keep lowering collapseDropFrac on subsequent hits so fires and OBB top sink with the crumbling walls
+  if (!emittedCollapseThisHit && d.state !== 'intact' && effectiveEnergy >= 35000) {
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.018);
+  }
+  if (d.fires.length > 0) {
+    d.worldFires = d.fires.map((f) => ({
+      position: buildingFireLocalToWorld(building, f.localPosition),
+      intensity: f.intensity,
+      age: f.age,
+      seed: f.seed,
+    }));
   }
 
   const finalActiveGuns = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
@@ -2905,7 +2936,7 @@ export function stepBuildingDamage(building, dt) {
     totalIntensity += f.intensity;
     d.damageJoules += f.intensity * burnRateJoules * clampedDt;
     d.worldFires.push({
-      position: buildingLocalToWorld(building, f.localPosition),
+      position: buildingFireLocalToWorld(building, f.localPosition),
       intensity: f.intensity,
       age: f.age,
       seed: f.seed,
@@ -2916,7 +2947,8 @@ export function stepBuildingDamage(building, dt) {
   d.fireIntensity = +totalIntensity.toFixed(3);
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
-    const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
+    const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.72, 0]);
     d.pendingBakes.push({
       kind: 'building-collapse',
       x: +collapsePt[0].toFixed(3),
@@ -2930,7 +2962,8 @@ export function stepBuildingDamage(building, dt) {
   }
   if (d.state === 'ruined' && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
-    const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
+    const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.68, 0]);
     d.pendingBakes.push({
       kind: 'building-collapse',
       x: +ruinPt[0].toFixed(3),

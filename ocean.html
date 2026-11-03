@@ -14434,37 +14434,38 @@ fn landOpaque(in:LandVertex)->vec4f{
       relief=detailA*0.024+plank*0.014+grain*0.008;roughness=0.84;ambientVisibility=0.42+0.34*max(n.y,0.0);
     }else if(in.kind.x<11.5){
       // Kind 11: Coursed coral-limestone ashlar masonry (bastion walls, quoins, arches, buttresses)
+      let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let courseY=world.y*1.65;
-      let bedJoint=landFilteredCourse(courseY,dx.y*1.65,dy.y*1.65,2.2);
-      let blockCoord=(world.x+world.z)*0.72+sin(courseY*3.14159265)*0.25;
-      let headJoint=landFilteredCourse(blockCoord,(dx.x+dx.z)*0.72,(dy.x+dy.z)*0.72,2.0);
-      let jointWave=0.65*bedJoint+0.35*headJoint;
+      let bedJoint=max(0.0,landFilteredCourse(courseY,dx.y*1.65,dy.y*1.65,2.0)-0.25)*vertWall;
+      let blockCoord=(world.x+world.z)*0.68+sin(courseY*3.14159265)*0.18;
+      let headJoint=max(0.0,landFilteredCourse(blockCoord,(dx.x+dx.z)*0.68,(dy.x+dy.z)*0.68,1.8)-0.30)*vertWall;
+      let jointWave=0.68*bedJoint+0.32*headJoint;
       let damp=smoothstep(0.2,3.8,world.y);
-      let stoneBase=mix(vec3f(0.36,0.33,0.27),vec3f(0.48,0.44,0.37),damp)+vec3f(detailA*0.035);
-      albedo=stoneBase*portShade*(0.96-0.09*jointWave+detailA*0.12+detailB*0.07);
-      relief=detailA*0.042+detailB*0.018-jointWave*0.024;roughness=0.89;ambientVisibility=0.45+0.33*max(n.y,0.0);
+      let stoneBase=mix(vec3f(0.38,0.35,0.29),vec3f(0.50,0.46,0.39),damp)+vec3f(detailA*0.032);
+      albedo=stoneBase*portShade*(0.97-0.08*jointWave+detailA*0.10+detailB*0.05);
+      relief=detailA*0.028+detailB*0.012-jointWave*0.018;roughness=0.89;ambientVisibility=0.46+0.33*max(n.y,0.0);
     }else if(in.kind.x<12.5){
       // Kind 12: Warm Spanish colonial limewashed stucco (cream/ochre plaster with rising-damp patina)
       let damp=smoothstep(0.6,3.4,world.y);
-      let trowel=landFilteredWave(world,dx,dy,vec3f(2.4,0.0,2.1),detailA*2.2)*0.022;
-      let warmStucco=mix(vec3f(0.52,0.46,0.36),vec3f(0.76,0.69,0.56),damp)+vec3f(trowel);
-      albedo=warmStucco*portShade*(1.0+detailA*0.08+detailB*0.05);
-      relief=detailA*0.018+detailB*0.010+trowel*0.35;roughness=0.86;ambientVisibility=0.50+0.36*max(n.y,0.0);
+      let trowel=landFilteredWave(world,dx,dy,vec3f(2.4,0.0,2.1),detailA*2.2)*0.018;
+      let warmStucco=mix(vec3f(0.54,0.48,0.38),vec3f(0.76,0.69,0.56),damp)+vec3f(trowel);
+      albedo=warmStucco*portShade*(1.0+detailA*0.07+detailB*0.04);
+      relief=detailA*0.015+detailB*0.008+trowel*0.30;roughness=0.86;ambientVisibility=0.50+0.36*max(n.y,0.0);
     }else if(in.kind.x<13.5){
       // Kind 13: Spanish terracotta barrel roof tiles (tejas curvas with band-limited course steps & kiln variation)
-      let flute=landFilteredWave(world,dx,dy,vec3f(15.96,0.0,15.96),0.0);
-      let courseWave=landFilteredCourse(world.y*2.4,dx.y*2.4,dy.y*2.4,1.8);
-      let kilnVar=(detailA*0.6+detailB*0.4)*0.042;
-      let tileCol=vec3f(0.50+kilnVar,0.175+kilnVar*0.45,0.085+kilnVar*0.25)*(0.96-0.06*courseWave);
-      albedo=tileCol*portShade*(1.0+detailA*0.11+flute*0.09+detailB*0.06);
-      relief=flute*0.028-courseWave*0.014+detailA*0.014;roughness=0.80;ambientVisibility=0.48+0.36*max(n.y,0.0);
+      let flute=landFilteredWave(world,dx,dy,vec3f(14.0,0.0,14.0),0.0);
+      let courseWave=landFilteredCourse(world.y*2.4,dx.y*2.4,dy.y*2.4,1.8)*0.025;
+      let kilnVar=(detailA*0.6+detailB*0.4)*0.040;
+      let tileCol=vec3f(0.50+kilnVar,0.18+kilnVar*0.45,0.088+kilnVar*0.25);
+      albedo=tileCol*portShade*(1.0+detailA*0.10+flute*0.07+detailB*0.05+courseWave);
+      relief=flute*0.022+detailA*0.012+courseWave*0.25;roughness=0.80;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }else if(in.kind.x<14.5){
       // Kind 14: Deep recessed colonial openings, arched portals & wrought-iron reja bars
-      let rejaX=landFilteredCourse((world.x+world.z)*3.6,(dx.x+dx.z)*3.6,(dy.x+dy.z)*3.6,2.2);
-      let rejaY=landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,2.0);
+      let rejaX=max(0.0,landFilteredCourse((world.x+world.z)*3.2,(dx.x+dx.z)*3.2,(dy.x+dy.z)*3.2,2.0)-0.35);
+      let rejaY=max(0.0,landFilteredCourse(world.y*2.0,dx.y*2.0,dy.y*2.0,1.8)-0.35);
       let rejaWave=0.6*rejaX+0.4*rejaY;
-      albedo=vec3f(0.064,0.052,0.041)*(1.0-0.22*rejaWave)*portShade*(1.0+detailB*0.08);
-      relief=detailB*0.008+rejaWave*0.008;roughness=0.90;ambientVisibility=0.20+0.16*max(n.y,0.0);
+      albedo=vec3f(0.058,0.048,0.039)*(1.0-0.18*rejaWave)*portShade*(1.0+detailB*0.06);
+      relief=detailB*0.006+rejaWave*0.006;roughness=0.90;ambientVisibility=0.18+0.14*max(n.y,0.0);
     }else if(in.kind.x<15.5){
       // Kind 15: Layered palm-thatch & bundled reed roof (guano / palma real for bohíos, caneyes & palafitos)
       let straw=landFilteredWave(world,dx,dy,vec3f(23.92,0.0,23.92),detailA*1.8);
@@ -14475,12 +14476,10 @@ fn landOpaque(in:LandVertex)->vec4f{
       relief=straw*0.030-tierWave*0.018+detailA*0.016;roughness=0.93;ambientVisibility=0.44+0.36*max(n.y,0.0);
     }else if(in.kind.x<16.5){
       // Kind 16: River-cobble courtyard pavement & packed-earth bastion terreplein (empedrado / terraplén)
-      let cobbleX=landFilteredCourse(world.x*2.4,dx.x*2.4,dy.x*2.4,1.6);
-      let cobbleZ=landFilteredCourse(world.z*2.4,dx.z*2.4,dy.z*2.4,1.6);
-      let cobble=0.5*(cobbleX+cobbleZ);
-      let baseEarth=vec3f(0.34,0.305,0.25)*(1.0-0.12*cobble);
-      albedo=baseEarth*portShade*(1.0+detailA*0.15+detailB*0.09);
-      relief=detailA*0.028-cobble*0.016;roughness=0.91;ambientVisibility=0.48+0.36*max(n.y,0.0);
+      let cobbleDetail=landOrientedDetail(world,n,dx,dy,3.8);
+      let baseEarth=vec3f(0.35,0.31,0.255)*(1.0+cobbleDetail*0.10);
+      albedo=baseEarth*portShade*(1.0+detailA*0.14+detailB*0.08);
+      relief=detailA*0.022+cobbleDetail*0.014;roughness=0.91;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }else{
       // Kind 17: Paper-birch & elm/cedar bark sheathing (Abenaki wigwams, Algonquian longhouses & birchbark canoes)
       let seamY=landFilteredCourse(world.y*1.35,dx.y*1.35,dy.y*1.35,2.0);
@@ -14513,34 +14512,30 @@ fn landOpaque(in:LandVertex)->vec4f{
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
-    let charNoise=gnoise(world.xz*2.8+vec2f(world.y*2.1));
+    let spallDetail=landOrientedDetail(world+vec3f(5.7,2.3,9.1),n,dx,dy,3.2);
+    let gritDetail=landOrientedDetail(world+vec3f(14.1,8.7,3.9),n,dx,dy,8.5);
+    let fissure=landOrientedJoint(world+vec3f(11.3,4.7,6.9),n,dx,dy);
     let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&abs(in.kind.x-15.0)>0.4;
     if(isStoneRubble){
-      let blkX=landFilteredCourse(world.x*1.45+charNoise*0.42,dx.x*1.45,dy.x*1.45,2.2);
-      let blkY=landFilteredCourse(world.y*1.95+charNoise*0.35,dx.y*1.95,dy.y*1.95,2.2);
-      let blkZ=landFilteredCourse(world.z*1.45-charNoise*0.42,dx.z*1.45,dy.z*1.45,2.2);
-      let blockCrevice=clamp(max(max(blkX,blkY),blkZ),0.0,1.0);
-      let cobbleNoise=gnoise(world.xz*6.2+vec2f(world.y*4.8,-world.y*3.4));
-      let gritNoise=gnoise(world.xz*14.5+vec2f(-world.y*10.5,world.y*8.2));
-      let spallStone=vec3f(0.52,0.47,0.38)*(0.78+0.42*clamp(in.kind.y,0.2,1.0));
-      let brickCore=vec3f(0.39,0.23,0.14);
-      let stoneBlockCol=mix(spallStone,brickCore,clamp(0.35*cobbleNoise+select(0.0,0.35,in.kind.x>=11.5&&in.kind.x<13.5),0.0,0.75));
-      let creviceSoot=vec3f(0.055,0.048,0.040);
-      let sootMix=clamp(blockCrevice*0.72+max(0.0,-cobbleNoise)*0.45+dmgW*0.18,0.0,0.92);
-      let rubbleAlbedo=mix(stoneBlockCol*(0.92+0.16*gritNoise),creviceSoot,sootMix);
-      albedo=mix(albedo,rubbleAlbedo,clamp(dmgW*0.88,0.0,0.94));
-      let blockFacet=(0.55*cobbleNoise+0.35*gritNoise)-0.70*blockCrevice;
-      relief+=blockFacet*0.145*dmgW*detailFade;
-      ambientVisibility*=mix(1.0,0.38+0.62*clamp(1.0-blockCrevice*0.75+cobbleNoise*0.25,0.0,1.0),dmgW);
+      let shadeKeep=clamp(in.kind.y,0.38,1.0);
+      let exposedCore=select(vec3f(0.45,0.40,0.33),vec3f(0.40,0.25,0.16),in.kind.x>=11.5&&in.kind.x<13.5)*shadeKeep*(0.94+0.14*gritDetail);
+      let spallPatch=clamp(dmgW*0.48+spallDetail*0.32,0.0,0.68);
+      let spalledAlbedo=mix(albedo,exposedCore,spallPatch);
+      let creviceSoot=vec3f(0.085,0.074,0.064);
+      let sootMix=clamp(fissure*0.58+max(0.0,-spallDetail)*0.24+dmgW*0.18,0.0,0.62);
+      albedo=mix(spalledAlbedo,creviceSoot,sootMix*dmgW);
+      let blockFacet=0.35*spallDetail+0.20*gritDetail-0.55*fissure;
+      relief+=blockFacet*0.028*dmgW*detailFade;
+      ambientVisibility*=mix(1.0,0.62+0.38*clamp(1.0-fissure*0.65+spallDetail*0.20,0.0,1.0),dmgW*0.75);
     }else{
-      let splinterNoise=gnoise(world.xz*7.5+vec2f(world.y*4.2,-world.y*5.1));
-      let rawWood=select(vec3f(0.11,0.085,0.065),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
-      let sootTint=vec3f(0.042,0.038,0.034);
-      let dmgAlbedo=mix(rawWood,sootTint,clamp(dmgW*0.58+charNoise*0.28-splinterNoise*0.20,0.0,1.0));
-      albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
-      relief+=(splinterNoise*0.095-0.045)*dmgW*detailFade;
+      let splinterNoise=landOrientedDetail(world+vec3f(3.3,7.9,12.1),n,dx,dy,5.5);
+      let rawWood=select(vec3f(0.14,0.105,0.080),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
+      let sootTint=vec3f(0.065,0.056,0.048);
+      let dmgAlbedo=mix(albedo,rawWood,clamp(dmgW*0.45+splinterNoise*0.25,0.0,0.65));
+      albedo=mix(dmgAlbedo,sootTint,clamp((fissure*0.48+dmgW*0.25-splinterNoise*0.18)*dmgW,0.0,0.58));
+      relief+=(splinterNoise*0.024-fissure*0.020)*dmgW*detailFade;
     }
-    roughness=max(roughness,0.95);
+    roughness=max(roughness,0.93);
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);
@@ -15543,7 +15538,13 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let low=min(t0,t1);let high=max(t0,t1);
   let enter=max(0.0,max(low.x,max(low.y,low.z)));
   let scene=gunnerySceneDistance(v.position.xy,ray);
-  let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter){discard;}
+  let centreDist=dot(volume.centre.xyz-F.camPos.xyz,ray);
+  let minHorizR=min(volume.axisX.w,volume.axisZ.w);
+  // Prevent fires and smoke volumes centered inside or behind a building/hull wall from bleeding through the front face of that wall
+  if(volume.centre.w>.5 && scene<centreDist-min(0.35,minHorizR*0.28)){discard;}
+  if(volume.optical.w>=1.8 && scene<centreDist-minHorizR*0.32){discard;}
+  let wallFrontFade=select(1.0,smoothstep(centreDist-minHorizR*0.35,centreDist+0.15,scene),volume.centre.w>.5||volume.optical.w>=1.8);
+  let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter||wallFrontFade<=0.005){discard;}
   let steps=select(8u,6u,enter>45.0);
   let stepSize=(exit-enter)/f32(steps);var transmittance=1.0;var radiance=vec3f(0);
   let jitter=fract(sin(dot(v.position.xy,vec2f(12.9898,78.233))+volume.optical.z)*43758.5453);
@@ -15565,7 +15566,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
     let local=origin+direction*distance;
     let df=gunneryDensityAndFbm(local,age,volume.optical.z);
     // Soft intersection margin removes hard slices at timber and sea.
-    var density=df.x*smoothstep(0.0,.28,scene-distance);
+    var density=df.x*smoothstep(0.0,.28,scene-distance)*wallFrontFade;
     if(density<.0015){continue;}
     var emission=vec3f(0);var extinction=volume.optical.x*density;
     let subtype=volume.optical.w;
@@ -15581,18 +15582,18 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
         let vertEnv=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.58,1.0,h));
         let flameShape=tongueMask*vertEnv;
         if(flameShape<0.01){continue;}
-        let temp=clamp(flameShape*(1.12-0.48*h)+0.28*fTurb,0.0,1.0);
-        let colBase=mix(vec3f(2.2,0.18,0.02),vec3f(24.0,5.8,0.45),smoothstep(0.12,0.58,temp));
-        let colCore=mix(colBase,vec3f(54.0,36.0,12.5),smoothstep(0.58,0.92,temp));
+        let temp=clamp(flameShape*(1.05-0.48*h)+0.24*fTurb,0.0,1.0);
+        let colBase=mix(vec3f(0.85,0.04,0.005),vec3f(4.2,0.48,0.03),smoothstep(0.12,0.62,temp));
+        let colCore=mix(colBase,vec3f(8.5,1.45,0.12),smoothstep(0.62,0.95,temp));
         // Add rising glowing embers near the top of the upper flame tongue
         let sparkNoise=gunneryNoise3(advectPos*4.2+vec3f(0.0,0.0,-age*6.0));
-        let sparks=select(0.0,smoothstep(0.82,0.95,sparkNoise)*h*18.0,subtype>1.1);
-        emission=(colCore*flameShape+vec3f(36.0,12.0,1.8)*sparks)*volume.optical.x;
+        let sparks=select(0.0,smoothstep(0.84,0.96,sparkNoise)*h*4.8,subtype>1.1);
+        emission=(colCore*flameShape+vec3f(6.5,0.85,0.06)*sparks)*volume.optical.x;
         extinction=density*flameShape*5.2;
       }else{
         let flame=max(0.0,1.0-dot(local,local));
         let coreNoise=.65+.35*df.y;
-        emission=mix(vec3f(16.0,2.6,.18),vec3f(42.0,28.0,9.5),flame*flame*coreNoise)*volume.optical.x;
+        emission=mix(vec3f(6.5,0.65,.04),vec3f(16.0,4.8,0.65),flame*flame*coreNoise)*volume.optical.x;
         extinction=density*4.2;
       }
     }else{
@@ -15631,7 +15632,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
         (1.0-smoothstep(0.0,0.68,heightGrad))*max(0.0,1.0-length(local.xy)*0.95)*(0.65+0.35*df.y)*max(0.15,2.55-subtype),
         isFireSmoke
       );
-      let internalEmber=vec3f(14.0,3.8,.45)*(emberFactor*throatCore*throatCore*density)+vec3f(9.5,2.4,0.28)*(fireUnderGlow*density);
+      let internalEmber=vec3f(6.5,1.1,.08)*(emberFactor*throatCore*throatCore*density)+vec3f(2.4,0.28,0.02)*(fireUnderGlow*density);
       emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
     }
     let opacity=1.0-exp(-extinction*stepSize);
@@ -16881,16 +16882,16 @@ async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,e
         const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.6),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
         const wind=gunneryFxVector(options.wind);
         const pulse=0.88+0.14*Math.sin(age*11.3+seed*19.0)+0.08*Math.cos(age*19.7-seed*7.3);
-        const rHoriz=(0.58+0.68*int)*pulse;
-        const rVert=(1.05+1.35*int)*pulse;
-        // 1. Primary roaring shipboard flame volume (direction=[0,1,0] -> radii[2] is vertical)
+        const rHoriz=(0.48+0.52*int)*pulse;
+        const rVert=(0.82+0.95*int)*pulse;
+        // 1. Primary roaring shipboard/structure flame volume (direction=[0,1,0] -> radii[2] is vertical)
         ordered.push({
-          centre:[pos[0]+wind[0]*0.04,pos[1]+0.55*rVert,pos[2]+wind[2]*0.04],
+          centre:[pos[0]+wind[0]*0.03,pos[1]+0.35*rVert,pos[2]+wind[2]*0.03],
           direction:[0,1,0],
           radii:[rHoriz,rHoriz,rVert],
           type:1,
           subtype:1.0,
-          extinction:0.95+0.85*int,
+          extinction:0.65+0.55*int,
           age,
           seed:seed*53,
         });
@@ -16898,15 +16899,15 @@ async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,e
         const tongueFlicker=0.82+0.24*Math.sin(age*16.4+seed*31.0);
         ordered.push({
           centre:[
-            pos[0]+wind[0]*0.14+Math.sin(age*6.7+seed*13.0)*0.22*int,
-            pos[1]+1.15*rVert,
-            pos[2]+wind[2]*0.14+Math.cos(age*5.9+seed*17.0)*0.22*int,
+            pos[0]+wind[0]*0.10+Math.sin(age*6.7+seed*13.0)*0.18*int,
+            pos[1]+0.78*rVert,
+            pos[2]+wind[2]*0.10+Math.cos(age*5.9+seed*17.0)*0.18*int,
           ],
           direction:[0,1,0],
-          radii:[rHoriz*0.72*tongueFlicker,rHoriz*0.72*tongueFlicker,rVert*0.85*tongueFlicker],
+          radii:[rHoriz*0.68*tongueFlicker,rHoriz*0.68*tongueFlicker,rVert*0.76*tongueFlicker],
           type:1,
           subtype:1.25,
-          extinction:(0.68+0.62*int)*tongueFlicker,
+          extinction:(0.48+0.44*int)*tongueFlicker,
           age:age*1.35+1.7,
           seed:seed*71+13,
         });
@@ -20317,41 +20318,34 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         const t = 1 - dist / blastR;
         const core = t * t;
 
-        // Strictly saturate horizontal displacement so overlapping bakes never push blocks past the talus pile
+        // Smoothly cap horizontal displacement across rounds so multi-round bombardment crumbles vertically without exploding horizontally
         const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
         const hDist = Math.hypot(dx, dz) || 1;
-        const outPush = Math.min(0.36, stepDepth * (isExplosion ? 0.20 : 0.13) * core * blockMod) * horizRemain;
+        const outPush = Math.min(0.32, stepDepth * (isExplosion ? 0.18 : 0.12) * core * blockMod) * horizRemain;
 
-        // Gravity slump: Voronoi blocks detach and drop downward onto a stepped talus rubble mound
-        const rubbleBaseY = Math.max(0.35, Math.min(fy, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
+        // Gravity slump: Voronoi blocks detach and drop monotonically toward the ground rubble floor across multiple rounds
+        const rubbleBaseY = 0.28 + blockStep * 0.45;
         const aboveRubble = Math.max(0, fy - rubbleBaseY);
-        const slumpFrac = Math.min(0.82, (isExplosion ? 0.68 : 0.52) * (0.38 + 0.62 * t) * blockMod);
+        const slumpFrac = Math.min(0.58, (isExplosion ? 0.48 : 0.34) * (0.35 + 0.65 * t) * blockMod);
         let newFy = fy - aboveRubble * slumpFrac;
-        const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
-        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
-        if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
-          const courseH = 0.52;
-          const courseOff = blockStep * 0.26;
-          const steppedY = Math.round((newFy - courseOff) / courseH) * courseH + courseOff;
-          const snapW = Math.min(0.62, (nextDmg - 0.45) * 0.65);
-          newFy = newFy * (1 - snapW) + steppedY * snapW;
-        }
+        const nextDmg = Math.min(1.45, prevDmg + (0.48 + 0.38 * powFrac) * (0.35 + 0.65 * t));
         const newFx = fx + (dx / hDist) * outPush;
         const newFz = fz + (dz / hDist) * outPush;
 
-        // Rigid 3D Voronoi block detachment: bounded mortar joint gap inset + orthogonal 3D tumble rotation
+        // Rigid 3D Voronoi block detachment: uniform block contraction proportional to slump prevents vertical face overlap
         let faceRadius = 0;
         for (let k = 0; k < faceSpan; k++) {
           const at = (v + k) * stride;
           const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
           if (rad > faceRadius) faceRadius = rad;
         }
-        const gapScale =
-          faceSpan > 1 && faceRadius > 0.05 && prevDmg < 0.28 && nextDmg >= 0.28
-            ? 1.0 - Math.min(0.04, 0.035 / Math.max(0.65, faceRadius))
-            : 1.0;
-        const maxCornerTumble = (isExplosion ? 0.11 : 0.08) * core * horizRemain;
-        const tumbleMag = faceSpan > 1 ? Math.min(0.14, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
+        const gapShrink =
+          faceSpan > 1 && faceRadius > 0.15
+            ? Math.min(0.035, faceRadius * 0.04) * horizRemain
+            : 0;
+        const gapScale = faceRadius > 0.15 ? (faceRadius - gapShrink) / faceRadius : 1.0;
+        const maxCornerTumble = (isExplosion ? 0.09 : 0.065) * core * horizRemain;
+        const tumbleMag = faceSpan > 1 ? Math.min(0.12, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
         const dAx = voronoi.tumbleX * tumbleMag;
         const dAy = voronoi.tumbleY * tumbleMag * 0.75;
         const dAz = voronoi.tumbleZ * tumbleMag;
@@ -20361,7 +20355,7 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
           const at = (v + k) * stride;
           const rx = (mesh[at] - fx) * gapScale;
           const ry = (mesh[at + 1] - fy) * gapScale;
-          const rz = (mesh[at + 2] - fz) * gapScale;
+          const rz = (mesh[at] - fz + (mesh[at + 2] - mesh[at])) * gapScale;
           const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
           localRotX[k] = tx;
           localRotY[k] = ty;
@@ -20386,17 +20380,15 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
             tumbleMag > 1e-4
               ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
               : [nx / curLen, ny / curLen, nz / curLen];
-          const ux = rnx + (dx / blastR) * 0.28 * t;
-          const uy = rny + 0.55 * t;
-          const uz = rnz + (dz / blastR) * 0.28 * t;
+          const ux = rnx + (dx / blastR) * 0.22 * t;
+          const uy = rny + 0.42 * t;
+          const uz = rnz + (dz / blastR) * 0.22 * t;
           const uLen = Math.hypot(ux, uy, uz) || 1;
           mesh[at + 3] = (ux / uLen) * scale;
           mesh[at + 4] = (uy / uLen) * scale;
           mesh[at + 5] = (uz / uLen) * scale;
           if (stride >= 8 && rawKind < 19.5) {
-            const targetShade = 0.28 + 0.26 * blockStep;
-            const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
-            mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
+            mesh[at + 7] = Math.max(0.42, mesh[at + 7] * (1 - 0.10 * core * horizRemain));
           }
           if (idx < minV) minV = idx;
           if (idx > maxV) maxV = idx;
@@ -20528,13 +20520,13 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
       const { blockStep, blockMod } = voronoi;
 
-      // Strictly cap cumulative horizontal displacement via prevDmg so 52 overlapping hits from a
-      // broadside never push a wall face through its back face or create spiky horizontal shards.
+      // Smoothly cap horizontal displacement via prevDmg so multi-round broadsides progress vertically without pushing walls through back faces
       const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
 
       let newFx = fx;
       let newFy = fy;
       let newFz = fz;
+      let dropFrac = 0;
       if (isCannonDismount && (kind === 10 || kind === 14)) {
         const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
         const hDisp = stepDepth * 0.52 * t * horizRemain;
@@ -20542,39 +20534,32 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         newFy = Math.max(0.2, fy - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
         newFz = fz + (inZ * hDisp - inX * slew * 0.20 * t * horizRemain);
       } else {
-        const hDisp = Math.min(0.26, stepDepth * 0.19 * core * blockMod) * horizRemain;
-        const rubbleFloorY = Math.max(0.25, Math.min(fy, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
+        const hDisp = Math.min(0.22, stepDepth * 0.16 * core * blockMod) * horizRemain;
+        const rubbleFloorY = 0.25 + blockStep * 0.45;
         const aboveRubble = Math.max(0, fy - rubbleFloorY);
-        const dropWeight = dy > -0.6 ? 0.44 : 0.18;
-        const rawDrop = Math.min(aboveRubble * 0.68, stepDepth * dropWeight * core * blockMod);
-        newFy = Math.max(0.15, fy - rawDrop + inY * hDisp * 0.35);
-
-        const isStoneKind = !isTimber && rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
-        if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
-          const courseH = 0.52;
-          const courseOff = blockStep * 0.26;
-          const steppedY = Math.round((newFy - courseOff) / courseH) * courseH + courseOff;
-          const snapW = Math.min(0.58, (nextDmg - 0.45) * 0.60);
-          newFy = newFy * (1 - snapW) + steppedY * snapW;
-        }
+        const dropWeight = dy > -0.6 ? 0.38 : 0.16;
+        const rawDrop = Math.min(aboveRubble * 0.42, stepDepth * dropWeight * core * blockMod);
+        dropFrac = aboveRubble > 0.1 ? rawDrop / aboveRubble : 0;
+        newFy = Math.max(0.15, fy - rawDrop + inY * hDisp * 0.30);
 
         newFx = fx + inX * hDisp;
         newFz = fz + inZ * hDisp;
       }
 
-      // Rigid 3D Voronoi block detachment: bounded mortar joint gap inset + orthogonal 3D tumble rotation
+      // Rigid 3D Voronoi block detachment: uniform block contraction proportional to slump prevents vertical face overlap
       let faceRadius = 0;
       for (let k = 0; k < faceSpan; k++) {
         const at = (v + k) * stride;
         const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
         if (rad > faceRadius) faceRadius = rad;
       }
-      const gapScale =
-        faceSpan > 1 && faceRadius > 0.05 && prevDmg < 0.28 && nextDmg >= 0.28
-          ? 1.0 - Math.min(0.04, 0.035 / Math.max(0.65, faceRadius))
-          : 1.0;
-      const maxCornerTumble = 0.09 * core * severity * horizRemain;
-      const tumbleMag = faceSpan > 1 ? Math.min(0.13, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
+      const gapShrink =
+        faceSpan > 1 && faceRadius > 0.15
+          ? Math.min(0.032, faceRadius * 0.035) * horizRemain
+          : 0;
+      const gapScale = faceRadius > 0.15 ? (faceRadius - gapShrink) / faceRadius : 1.0;
+      const maxCornerTumble = 0.075 * core * severity * horizRemain;
+      const tumbleMag = faceSpan > 1 ? Math.min(0.11, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
       const dAx = voronoi.tumbleX * tumbleMag;
       const dAy = voronoi.tumbleY * tumbleMag * 0.75;
       const dAz = voronoi.tumbleZ * tumbleMag;
@@ -20596,7 +20581,7 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       }
 
       const scale = 1.0 + nextDmg;
-      const tilt = 0.38 * t;
+      const tilt = 0.30 * t;
       for (let k = 0; k < faceSpan; k++) {
         const idx = v + k;
         const at = idx * stride;
@@ -20610,17 +20595,15 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
           tumbleMag > 1e-4
             ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
             : [nx / curLen, ny / curLen, nz / curLen];
-        const ux = rnx - (dx / r) * tilt * 0.65;
-        const uy = rny + 0.42 * core;
-        const uz = rnz - (dz / r) * tilt * 0.65;
+        const ux = rnx - (dx / r) * tilt * 0.55;
+        const uy = rny + 0.35 * core;
+        const uz = rnz - (dz / r) * tilt * 0.55;
         const uLen = Math.hypot(ux, uy, uz) || 1;
         mesh[at + 3] = (ux / uLen) * scale;
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
         if (stride >= 8 && rawKind < 19.5) {
-          const targetShade = 0.30 + 0.24 * blockStep;
-          const blend = Math.min(0.65, 0.42 * core * severity);
-          mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
+          mesh[at + 7] = Math.max(0.42, mesh[at + 7] * (1 - 0.08 * core * severity * horizRemain));
         }
         if (idx < minV) minV = idx;
         if (idx > maxV) maxV = idx;
@@ -30710,10 +30693,11 @@ function expandCairnVoxelPrimitive(prim) {
         const x0 = Math.floor(Math.min(rx[0], rx[1])), x1 = Math.floor(Math.max(rx[0], rx[1]));
         const y0 = Math.floor(Math.min(ry[0], ry[1])), y1 = Math.floor(Math.max(ry[0], ry[1]));
         const z0 = Math.floor(Math.min(rz[0], rz[1])), z1 = Math.floor(Math.max(rz[0], rz[1]));
+        const step = Math.max(1, Math.round(resolveNumeric(run.step, 1)));
         const rMat = run.material ?? mat;
-        for (let x = x0; x <= x1; x++) {
+        for (let x = x0; x <= x1; x += x1 > x0 ? step : 1) {
           for (let y = y0; y <= y1; y++) {
-            for (let z = z0; z <= z1; z++) {
+            for (let z = z0; z <= z1; z += z1 > z0 && x0 === x1 ? step : 1) {
               blocks.push({ pos: [x, y, z], material: rMat });
             }
           }
@@ -31192,6 +31176,14 @@ function emitCairnScene(sceneSpec, helpers) {
 const CAIRN_ARCHITECTURAL_TEMPLATES = {
   catedral_basilica: {
     schemaVersion: '0.4',
+    name: 'Catedral Basílica Metropolitana',
+    width: 24,
+    length: 34,
+    height: 18,
+    foundationDepth: 4.0,
+    materialKind: 11,
+    roofPitch: 3.5,
+    waterfront: false,
     shapes: {
       bell_tower_tier: {
         primitive: 'group',
@@ -31240,25 +31232,31 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
           },
           {
             primitive: 'wall',
-            from: [-2.1, 0, -2.1],
-            to: [-2.1, 0, 2.1],
+            from: [-2.1, 0, -1.55],
+            to: [-2.1, 0, 1.55],
             height: 4.2,
             thickness: 0.55,
             material: 'limestone',
-            openings: [{ offset: 2.1, width: 1.1, height: 2.6, sillHeight: 0.65 }],
+            openings: [{ offset: 1.55, width: 1.0, height: 2.6, sillHeight: 0.65 }],
           },
           {
             primitive: 'wall',
-            from: [2.1, 0, -2.1],
-            to: [2.1, 0, 2.1],
+            from: [2.1, 0, -1.55],
+            to: [2.1, 0, 1.55],
             height: 4.2,
             thickness: 0.55,
             material: 'limestone',
-            openings: [{ offset: 2.1, width: 1.1, height: 2.6, sillHeight: 0.65 }],
+            openings: [{ offset: 1.55, width: 1.0, height: 2.6, sillHeight: 0.65 }],
+          },
+          {
+            primitive: 'box',
+            from: [-2.4, 4.2, -2.4],
+            to: [2.4, 4.55, 2.4],
+            material: 'limestone',
           },
           {
             primitive: 'dome',
-            base: [0, 4.2, 0],
+            base: [0, 4.55, 0],
             radius: 2.15,
             height: 2.4,
             segments: 8,
@@ -31288,15 +31286,15 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'stairs',
         partGroup: 'atrium_steps',
         from: [0, 0.0, -17.8],
-        to: [0, 0.65, -15.2],
+        to: [0, 0.65, -15.5],
         width: 8.5,
         material: 'limestone',
       },
-      // Three-aisle basilica body & clerestory nave
+      // Three-aisle basilica body & clerestory nave (non-overlapping tiers)
       {
         primitive: 'box',
         partGroup: 'side_aisles',
-        from: [-10.2, 0.65, -12.5],
+        from: [-10.2, 0.65, -9.8],
         to: [10.2, 7.2, 11.5],
         material: 'cream_stucco',
       },
@@ -31304,14 +31302,35 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'box',
         partGroup: 'central_nave',
         from: [-5.6, 0.65, -13.2],
+        to: [5.6, 11.2, -9.8],
+        material: 'whitewash',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-5.6, 7.2, -9.8],
         to: [5.6, 11.2, 12.2],
         material: 'whitewash',
       },
-      // Transept arms
+      // Transept projecting wings
       {
         primitive: 'box',
         partGroup: 'transept_arms',
         from: [-12.4, 0.65, 1.2],
+        to: [-10.2, 9.6, 7.6],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [10.2, 0.65, 1.2],
+        to: [12.4, 9.6, 7.6],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-12.4, 7.2, 1.2],
         to: [12.4, 9.6, 7.6],
         material: 'cream_stucco',
       },
@@ -31319,8 +31338,8 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'arch',
         partGroup: 'west_portal_arch',
-        from: [-3.2, 0.65, -13.55],
-        to: [3.2, 0.65, -13.55],
+        from: [-3.2, 0.65, -13.7],
+        to: [3.2, 0.65, -13.7],
         height: 5.8,
         thickness: 0.95,
         voussoirs: 9,
@@ -31330,9 +31349,9 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'roof',
         partGroup: 'nave_roof',
-        from: [-5.8, 11.2, -13.2],
-        to: [5.8, 14.4, 12.2],
-        height: 3.2,
+        from: [-5.6, 11.2, -13.0],
+        to: [5.6, 14.2, 12.0],
+        height: 3.0,
         style: 'gable',
         material: 'terracotta',
         wallMaterial: 'whitewash',
@@ -31341,8 +31360,17 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'roof',
         partGroup: 'transept_roof',
         from: [-12.4, 9.6, 1.2],
-        to: [12.4, 12.2, 7.6],
-        height: 2.6,
+        to: [-5.6, 11.2, 7.6],
+        height: 1.6,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [5.6, 9.6, 1.2],
+        to: [12.4, 11.2, 7.6],
+        height: 1.6,
         hipRatio: 0.25,
         material: 'terracotta',
       },
@@ -31350,20 +31378,20 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'dome',
         partGroup: 'crossing_cupola_dome',
-        base: [0, 11.2, 4.4],
-        drumHeight: 3.2,
-        radius: 4.8,
-        height: 4.6,
+        base: [0, 12.6, 4.4],
+        drumHeight: 2.6,
+        radius: 4.6,
+        height: 4.2,
         segments: 12,
         rings: 5,
         lantern: true,
         material: 'terracotta',
       },
-      // Twin west facade bell towers using Cairn `stack` + `shapes` references
+      // Twin west facade bell towers flanking the west portal bay
       {
         primitive: 'stack',
         partGroup: 'north_bell_tower',
-        position: [-8.2, 0.65, -12.8],
+        position: [-8.2, 0.65, -12.4],
         children: [
           { shape: 'bell_tower_tier' },
           { shape: 'bell_tower_tier', scale: [0.92, 0.95, 0.92] },
@@ -31373,7 +31401,7 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'stack',
         partGroup: 'south_bell_tower',
-        position: [8.2, 0.65, -12.8],
+        position: [8.2, 0.65, -12.4],
         children: [
           { shape: 'bell_tower_tier' },
           { shape: 'bell_tower_tier', scale: [0.92, 0.95, 0.92] },
@@ -31381,10 +31409,1031 @@ const CAIRN_ARCHITECTURAL_TEMPLATES = {
         ],
       },
       // Side ashlar buttresses along the nave
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -8.0] },
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -3.0] },
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -8.0] },
-      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -3.0] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.65, 0.65, -7.2] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.65, 0.65, -2.6] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.65, 0.65, -7.2] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.65, 0.65, -2.6] },
+    ],
+  },
+
+  // 1519 Lisboa · Torre de Belém (Baluarte de São Vicente a par de Belém)
+  // Designed by Francisco de Arruda in pedra lioz limestone: polygonal seaward casemate bastion
+  // with 6 cylindrical Manueline bartizan sentry turrets (garitas) topped by ribbed melon cupolas,
+  // voxel-crenellated Order of Christ shield merlons, and a 4-story square Torre de Menagem keep
+  // with south-facing 7-arch Renaissance loggia and overhanging machicolation gallery.
+  torre_de_belem_manuelina: {
+    schemaVersion: '0.4',
+    name: 'Torre de Belém · Baluarte de São Vicente',
+    width: 18,
+    length: 28,
+    height: 22.5,
+    foundationDepth: 9.5,
+    materialKind: 11,
+    roofPitch: 2.2,
+    waterfront: true,
+    shapes: {
+      manueline_garita: {
+        primitive: 'group',
+        children: [
+          // Tapered corbel base
+          {
+            primitive: 'cone',
+            base: [0, -1.35, 0],
+            height: 1.35,
+            radiusBottom: 0.22,
+            radiusTop: 1.05,
+            segments: 8,
+            material: 'limestone',
+          },
+          // Cylindrical watch turret body
+          {
+            primitive: 'cylinder',
+            base: [0, 0, 0],
+            height: 2.45,
+            radius: 0.98,
+            segments: 8,
+            material: 'limestone',
+          },
+          // Ribbed Moorish-Manueline melon cupola & finial
+          {
+            primitive: 'dome',
+            base: [0, 2.45, 0],
+            radius: 1.02,
+            height: 1.45,
+            segments: 8,
+            rings: 4,
+            lantern: true,
+            material: 'limestone',
+          },
+        ],
+      },
+      keep_corner_turret: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'cylinder',
+            base: [0, 0, 0],
+            height: 2.8,
+            radius: 0.78,
+            segments: 8,
+            material: 'limestone',
+          },
+          {
+            primitive: 'dome',
+            base: [0, 2.8, 0],
+            radius: 0.82,
+            height: 1.25,
+            segments: 8,
+            rings: 4,
+            lantern: true,
+            material: 'limestone',
+          },
+        ],
+      },
+    },
+    primitives: [
+      // Submerged & intertidal pedra lioz cutwater plinth in the Tagus shallows
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-8.6, -8.5, -13.8],
+        to: [8.6, 0.85, 12.2],
+        topInset: 0.35,
+        material: 'ashlar',
+      },
+      // Seaward polygonal casemate bastion (Baluarte) projecting into the Tagus
+      {
+        primitive: 'box',
+        partGroup: 'bastion_casemate_walls',
+        from: [-7.8, 0.85, -9.6],
+        to: [7.8, 5.8, 2.0],
+        topInset: 0.32,
+        material: 'limestone',
+      },
+      // Beveled seaward prow of the polygonal bastion (flush against z = -9.6)
+      {
+        primitive: 'box',
+        partGroup: 'bastion_seaward_prow',
+        from: [-5.2, 0.85, -13.0],
+        to: [5.2, 5.8, -9.6],
+        topInset: 0.24,
+        material: 'limestone',
+      },
+      // Bastion upper esplanade deck sitting flush on top of the casemate (y = 5.8..6.4)
+      {
+        primitive: 'box',
+        partGroup: 'bastion_terreplein_deck',
+        from: [-7.4, 5.8, -9.6],
+        to: [7.4, 6.4, 2.0],
+        material: 'cobble',
+      },
+      // Voxel-crenellated bastion parapet merlons (sitting flush at y = 6.0)
+      {
+        primitive: 'blocks',
+        partGroup: 'bastion_parapet_merlons',
+        gridSize: 1.0,
+        material: 'limestone',
+        runs: [
+          { x: [-6, 6], y: 6, z: -9, step: 2 },
+          { x: [-4, 4], y: 6, z: -12, step: 2 },
+          { x: -7, y: 6, z: [-8, 1], step: 2 },
+          { x: 7, y: 6, z: [-8, 1], step: 2 },
+        ],
+      },
+      // Six iconic cylindrical Manueline bartizan sentry turrets (Garitas) on the bastion corners
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, -9.4] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, -9.4] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-4.9, 5.4, -12.7] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [4.9, 5.4, -12.7] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, 1.8] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, 1.8] },
+      // 4-story square Torre de Menagem keep rising on the north end of the bastion
+      {
+        primitive: 'box',
+        partGroup: 'keep_lower_tiers',
+        from: [-5.4, 0.85, 2.0],
+        to: [5.4, 13.8, 11.4],
+        topInset: 0.18,
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'keep_upper_tiers',
+        from: [-5.1, 13.8, 2.3],
+        to: [5.1, 19.8, 11.1],
+        material: 'whitewash',
+      },
+      // South-facing 2nd-story Manueline arched loggia (Varanda do Renascimento) overlooking the bastion
+      {
+        primitive: 'box',
+        partGroup: 'manueline_loggia_deck',
+        from: [-4.8, 7.2, 0.1],
+        to: [4.8, 7.85, 2.0],
+        material: 'limestone',
+      },
+      {
+        primitive: 'wall',
+        partGroup: 'manueline_loggia_arcade',
+        from: [-4.6, 7.85, 0.35],
+        to: [4.6, 7.85, 0.35],
+        height: 3.3,
+        thickness: 0.48,
+        material: 'limestone',
+        openings: [
+          { offset: 1.15, width: 0.92, height: 2.3, sillHeight: 0.45 },
+          { offset: 2.75, width: 0.92, height: 2.3, sillHeight: 0.45 },
+          { offset: 4.6, width: 1.05, height: 2.4, sillHeight: 0.45 },
+          { offset: 6.45, width: 0.92, height: 2.3, sillHeight: 0.45 },
+          { offset: 8.05, width: 0.92, height: 2.3, sillHeight: 0.45 },
+        ],
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'manueline_loggia_canopy',
+        from: [-4.8, 11.15, 0.1],
+        to: [4.8, 12.15, 2.0],
+        height: 1.0,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+      // Overhanging corbeled machicolation gallery & rooftop battlement parapet on the Keep
+      {
+        primitive: 'box',
+        partGroup: 'keep_machicolation_cornice',
+        from: [-5.55, 19.8, 1.85],
+        to: [5.55, 21.0, 11.55],
+        material: 'limestone',
+      },
+      {
+        primitive: 'blocks',
+        partGroup: 'keep_crown_merlons',
+        gridSize: 1.0,
+        material: 'limestone',
+        runs: [
+          { x: [-4, 4], y: 21, z: 2, step: 2 },
+          { x: [-4, 4], y: 21, z: 10, step: 2 },
+          { x: -5, y: 21, z: [3, 9], step: 2 },
+          { x: 5, y: 21, z: [3, 9], step: 2 },
+        ],
+      },
+      // Four upper corner watch turrets crowning the Torre de Menagem
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [-5.3, 19.6, 2.0] },
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [5.3, 19.6, 2.0] },
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [-5.3, 19.6, 11.3] },
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [5.3, 19.6, 11.3] },
+    ],
+  },
+
+  // 1550 Lisboa · Mosteiro dos Jerónimos (Real Mosteiro de Santa Maria de Belém)
+  // Built in golden-white pedra lioz limestone by Diogo de Boitaca & João de Castilho:
+  // long hall-church nave with carved Manueline buttresses, ornate Portal Sul, twin octagonal
+  // western bell towers with ribbed cupolas, and an adjoining two-story arcaded royal cloister.
+  mosteiro_dos_jeronimos: {
+    schemaVersion: '0.4',
+    name: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
+    width: 38,
+    length: 34,
+    height: 19.5,
+    foundationDepth: 4.5,
+    materialKind: 12,
+    roofPitch: 3.4,
+    waterfront: false,
+    shapes: {
+      manueline_buttress: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-0.48, 0, -0.65],
+            to: [0.48, 12.2, 0.65],
+            topInset: 0.1,
+            material: 'limestone',
+          },
+          // Carved pinnacle finial above the cornice
+          {
+            primitive: 'cone',
+            base: [0, 12.2, 0],
+            height: 2.1,
+            radiusBottom: 0.42,
+            radiusTop: 0.05,
+            segments: 6,
+            material: 'limestone',
+          },
+        ],
+      },
+      jeronimos_bell_tower: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-2.8, 0, -2.8],
+            to: [2.8, 12.8, 2.8],
+            topInset: 0.12,
+            material: 'limestone',
+          },
+          {
+            primitive: 'cylinder',
+            base: [0, 12.8, 0],
+            height: 3.6,
+            radius: 2.35,
+            segments: 8,
+            material: 'limestone',
+          },
+          {
+            primitive: 'dome',
+            base: [0, 16.4, 0],
+            radius: 2.4,
+            height: 2.8,
+            segments: 8,
+            rings: 4,
+            lantern: true,
+            material: 'limestone',
+          },
+        ],
+      },
+    },
+    primitives: [
+      // Raised pedra lioz parvis terrace & steps facing the Tagus
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-18.5, -3.8, -14.5],
+        to: [18.5, 0.75, 16.5],
+        material: 'ashlar',
+      },
+      {
+        primitive: 'stairs',
+        partGroup: 'south_portal_steps',
+        from: [0, 0.0, -16.8],
+        to: [0, 0.75, -14.5],
+        width: 9.5,
+        material: 'limestone',
+      },
+      // Hall-church body (spanning cleanly between the twin west bell towers at x=-12.4 and transept at x=8.5)
+      {
+        primitive: 'box',
+        partGroup: 'church_hall_nave',
+        from: [-12.4, 0.75, -11.5],
+        to: [8.5, 12.6, 1.5],
+        material: 'whitewash',
+      },
+      // Western narthex bay between the twin bell towers
+      {
+        primitive: 'box',
+        partGroup: 'church_hall_nave',
+        from: [-18.0, 0.75, -7.0],
+        to: [-12.4, 12.2, -3.0],
+        material: 'whitewash',
+      },
+      // North transept & high altar chancel (Capela-Mor)
+      {
+        primitive: 'box',
+        partGroup: 'transept_and_chancel',
+        from: [8.5, 0.75, -12.8],
+        to: [18.2, 13.4, 4.2],
+        material: 'limestone',
+      },
+      // Ornate Portal Sul (South Portal by João de Castilho) with carved archivolts & gable tabernacle
+      {
+        primitive: 'box',
+        partGroup: 'portal_sul_frontispiece',
+        from: [-3.8, 0.75, -12.55],
+        to: [3.8, 12.2, -11.5],
+        material: 'limestone',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'portal_sul_arch',
+        from: [-2.4, 0.75, -12.95],
+        to: [2.4, 0.75, -12.95],
+        height: 5.4,
+        thickness: 0.85,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      {
+        primitive: 'cone',
+        partGroup: 'portal_sul_pinnacle',
+        base: [0, 12.2, -12.0],
+        height: 3.2,
+        radiusBottom: 0.85,
+        radiusTop: 0.06,
+        segments: 6,
+        material: 'limestone',
+      },
+      // Iterated Manueline buttresses & pinnacles along the south facade
+      {
+        primitive: 'repeat',
+        partGroup: 'south_facade_buttresses',
+        count: 4,
+        step: [5.4, 0, 0],
+        of: {
+          shape: 'manueline_buttress',
+          position: [-10.0, 0.75, -12.1],
+        },
+      },
+      // Twin western bell towers with octagonal belfries & ribbed cupolas (flanking the west narthex)
+      { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -9.8] },
+      { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -0.2] },
+      // Pitched terracotta roofs over the hall-church & transept (non-overlapping with towers)
+      {
+        primitive: 'roof',
+        partGroup: 'church_nave_roof',
+        from: [-12.4, 12.6, -11.5],
+        to: [8.5, 16.0, 1.5],
+        height: 3.4,
+        hipRatio: 0.18,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'dome',
+        partGroup: 'crossing_lantern_dome',
+        base: [13.2, 13.4, -4.2],
+        drumHeight: 2.2,
+        radius: 3.8,
+        height: 3.4,
+        segments: 8,
+        lantern: true,
+        material: 'limestone',
+      },
+      // Adjoining Two-Story Manueline Royal Cloister (Claustro Real) on the north side
+      {
+        primitive: 'box',
+        partGroup: 'cloister_courtyard_paving',
+        from: [-11.6, 0.75, 1.5],
+        to: [6.6, 0.95, 12.2],
+        material: 'cobble',
+      },
+      // Octagonal renaissance fountain in the center of the Claustro Real
+      {
+        primitive: 'cylinder',
+        partGroup: 'cloister_fountain',
+        base: [-2.5, 0.95, 6.8],
+        height: 1.65,
+        radius: 1.55,
+        segments: 8,
+        material: 'limestone',
+      },
+      // West, North, and East two-story cloister wings enclosing the courtyard (non-overlapping corners)
+      {
+        primitive: 'box',
+        partGroup: 'cloister_west_wing',
+        from: [-15.8, 0.75, 2.6],
+        to: [-11.6, 8.6, 12.2],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'cloister_north_wing',
+        from: [-15.8, 0.75, 12.2],
+        to: [10.8, 8.6, 16.2],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'cloister_east_wing',
+        from: [6.6, 0.75, 4.2],
+        to: [10.8, 8.6, 12.2],
+        material: 'cream_stucco',
+      },
+      // Cloister inner arcaded wall with round-headed Manueline openings
+      {
+        primitive: 'wall',
+        partGroup: 'cloister_inner_arcade',
+        from: [-11.4, 0.95, 11.8],
+        to: [6.4, 0.95, 11.8],
+        height: 7.4,
+        thickness: 0.55,
+        material: 'limestone',
+        openings: [
+          { offset: 3.0, width: 1.8, height: 3.2, sillHeight: 0.2 },
+          { offset: 6.8, width: 1.8, height: 3.2, sillHeight: 0.2 },
+          { offset: 10.6, width: 1.8, height: 3.2, sillHeight: 0.2 },
+          { offset: 14.4, width: 1.8, height: 3.2, sillHeight: 0.2 },
+        ],
+      },
+      // Terracotta hipped roofs over the three cloister ranges (cleanly abutted)
+      {
+        primitive: 'roof',
+        partGroup: 'cloister_north_roof',
+        from: [-15.8, 8.6, 12.2],
+        to: [10.8, 10.8, 16.2],
+        height: 2.2,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'cloister_west_roof',
+        from: [-15.8, 8.6, 2.6],
+        to: [-11.6, 10.6, 12.0],
+        height: 2.0,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'cloister_east_roof',
+        from: [6.6, 8.6, 4.2],
+        to: [10.8, 10.6, 12.0],
+        height: 2.0,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550 Lisboa · Sé Patriarcal de Lisboa (Santa Maria Maior)
+  // Romanesque-Gothic fortress-cathedral founded 1147 above Alfama: twin square crenellated
+  // western bell towers with voxel battlements, deep recessed Romanesque portal, rose oculus,
+  // battlemented nave aisles, and octagonal crossing lantern tower (zimbório).
+  se_patriarcal_de_lisboa: {
+    schemaVersion: '0.4',
+    name: 'Sé Patriarcal de Lisboa (Cathedral)',
+    width: 24,
+    length: 34,
+    height: 19.0,
+    foundationDepth: 5.5,
+    materialKind: 11,
+    roofPitch: 3.0,
+    waterfront: false,
+    shapes: {
+      romanesque_bell_tower: {
+        primitive: 'group',
+        children: [
+          // Lower Romanesque ashlar shaft
+          {
+            primitive: 'box',
+            from: [-3.1, 0, -3.1],
+            to: [3.1, 10.5, 3.1],
+            topInset: 0.14,
+            material: 'ashlar',
+          },
+          // Upper belfry stage with paired arched bell openings
+          {
+            primitive: 'box',
+            from: [-2.95, 10.5, -2.95],
+            to: [2.95, 16.8, 2.95],
+            material: 'limestone',
+          },
+          // Projecting corbel cornice
+          {
+            primitive: 'box',
+            from: [-3.25, 16.8, -3.25],
+            to: [3.25, 17.5, 3.25],
+            material: 'ashlar',
+          },
+          // Iconic flat crenellated fortress battlements (sitting flush at y = 17.5)
+          {
+            primitive: 'blocks',
+            gridSize: 1.0,
+            material: 'ashlar',
+            runs: [
+              { x: [-3, 3], y: 17, z: -3, step: 2 },
+              { x: [-3, 3], y: 17, z: 2, step: 2 },
+              { x: -3, y: 17, z: [-2, 1], step: 2 },
+              { x: 2, y: 17, z: [-2, 1], step: 2 },
+            ],
+          },
+        ],
+      },
+    },
+    primitives: [
+      // Stepped Alfama hillside stone terrace plinth
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-11.8, -5.0, -16.2],
+        to: [11.8, 0.8, 16.2],
+        material: 'ashlar',
+      },
+      {
+        primitive: 'stairs',
+        partGroup: 'west_parvis_steps',
+        from: [0, 0.0, -18.5],
+        to: [0, 0.8, -16.2],
+        width: 8.2,
+        material: 'ashlar',
+      },
+      // Fortress-like side aisles & central Romanesque clerestory nave (non-overlapping with west towers)
+      {
+        primitive: 'box',
+        partGroup: 'side_aisles',
+        from: [-9.8, 0.8, -9.4],
+        to: [9.8, 7.8, 10.5],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-4.4, 0.8, -13.0],
+        to: [4.4, 12.2, -9.4],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-5.2, 7.8, -9.4],
+        to: [5.2, 12.2, 10.5],
+        material: 'limestone',
+      },
+      // Projecting Romanesque transept & Gothic ambulatory apse
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-11.8, 0.8, 1.5],
+        to: [-9.8, 10.8, 7.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [9.8, 0.8, 1.5],
+        to: [11.8, 10.8, 7.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-11.8, 7.8, 1.5],
+        to: [11.8, 10.8, 7.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'cylinder',
+        partGroup: 'gothic_ambulatory_apse',
+        base: [0, 0.8, 11.8],
+        height: 9.6,
+        radius: 5.2,
+        segments: 8,
+        material: 'limestone',
+      },
+      // Deep stepped Romanesque West Portal & Rose Window frontispiece between the twin towers
+      {
+        primitive: 'arch',
+        partGroup: 'west_romanesque_portal',
+        from: [-2.8, 0.8, -13.6],
+        to: [2.8, 0.8, -13.6],
+        height: 5.2,
+        thickness: 1.0,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      // Recessed Rose Window (Rosácea) frame above the portal
+      {
+        primitive: 'arch',
+        partGroup: 'west_rose_window',
+        from: [-2.4, 7.2, -13.35],
+        to: [2.4, 7.2, -13.35],
+        height: 3.4,
+        thickness: 0.65,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      // Twin Crenellated Western Bell Towers
+      { shape: 'romanesque_bell_tower', partGroup: 'north_west_tower', position: [-7.6, 0.8, -12.6] },
+      { shape: 'romanesque_bell_tower', partGroup: 'south_west_tower', position: [7.6, 0.8, -12.6] },
+      // Octagonal crossing lantern tower (Zimbório) with crenellated parapet & pyramidal tile roof
+      {
+        primitive: 'cylinder',
+        partGroup: 'crossing_zimborio_tower',
+        base: [0, 14.8, 4.6],
+        height: 3.2,
+        radius: 4.0,
+        segments: 8,
+        material: 'ashlar',
+      },
+      {
+        primitive: 'cone',
+        partGroup: 'crossing_zimborio_roof',
+        base: [0, 18.0, 4.6],
+        height: 2.4,
+        radiusBottom: 4.15,
+        radiusTop: 0.25,
+        segments: 8,
+        material: 'terracotta',
+      },
+      // Pitched terracotta roofs over nave and transept
+      {
+        primitive: 'roof',
+        partGroup: 'nave_roof',
+        from: [-5.2, 12.2, -9.4],
+        to: [5.2, 14.8, 10.5],
+        height: 2.6,
+        style: 'gable',
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [-11.8, 10.8, 1.5],
+        to: [-5.2, 12.4, 7.8],
+        height: 1.6,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [5.2, 10.8, 1.5],
+        to: [11.8, 12.4, 7.8],
+        height: 1.6,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550–1585 Lisboa · Torreão do Paço da Ribeira & Galeria das Damas
+  // Royal waterfront palace turret jutting directly over the Tagus quay between Terreiro do Paço
+  // and Ribeira das Naus: battered river bastion plinth with water stairs, 3-story rusticated
+  // ashlar turret with artillery casemates & royal library windows, monumental octagonal dome
+  // with lantern, and adjoining two-story arcaded Galeria das Damas.
+  paco_da_ribeira_torreao: {
+    schemaVersion: '0.4',
+    name: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
+    width: 18,
+    length: 22,
+    height: 20.5,
+    foundationDepth: 9.5,
+    materialKind: 11,
+    roofPitch: 3.2,
+    waterfront: true,
+    shapes: {
+      corner_obelisk_finial: {
+        primitive: 'cone',
+        base: [0, 0, 0],
+        height: 2.1,
+        radiusBottom: 0.42,
+        radiusTop: 0.06,
+        segments: 6,
+        material: 'limestone',
+      },
+    },
+    primitives: [
+      // Battered stone river bastion plinth rising out of the Tagus channel
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-8.4, -8.5, -10.6],
+        to: [8.4, 1.4, 10.6],
+        topInset: 0.45,
+        material: 'ashlar',
+      },
+      // Royal river embarkation steps descending to the Tagus waterline
+      {
+        primitive: 'stairs',
+        partGroup: 'royal_water_stairs',
+        from: [-10.8, -0.4, -4.5],
+        to: [-8.0, 1.4, -4.5],
+        width: 3.6,
+        material: 'limestone',
+      },
+      // Lower rusticated artillery & treasury casemate tier
+      {
+        primitive: 'box',
+        partGroup: 'torreao_lower_casemate',
+        from: [-7.4, 1.4, -9.4],
+        to: [7.4, 6.9, 5.0],
+        topInset: 0.22,
+        material: 'ashlar',
+      },
+      // Projecting stone stringcourse belt
+      {
+        primitive: 'box',
+        partGroup: 'torreao_belt_cornice',
+        from: [-7.65, 6.9, -9.65],
+        to: [7.65, 7.55, 5.2],
+        material: 'limestone',
+      },
+      // Upper two noble stories (Sala da Índia & Royal Library / Map Room)
+      {
+        primitive: 'box',
+        partGroup: 'torreao_noble_stories',
+        from: [-7.0, 7.55, -9.0],
+        to: [7.0, 14.8, 5.0],
+        material: 'whitewash',
+      },
+      // Seaward Tagus loggia arch & royal balcony on the south face
+      {
+        primitive: 'box',
+        partGroup: 'seaward_royal_balcony',
+        from: [-4.2, 7.3, -10.35],
+        to: [4.2, 7.9, -9.0],
+        material: 'limestone',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'seaward_royal_portal',
+        from: [-2.4, 7.9, -9.45],
+        to: [2.4, 7.9, -9.45],
+        height: 4.4,
+        thickness: 0.65,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+      // Crowning balustrade cornice & 4 corner Herrerian/Manueline obelisk finials
+      {
+        primitive: 'box',
+        partGroup: 'torreao_crown_cornice',
+        from: [-7.45, 14.8, -9.45],
+        to: [7.45, 15.65, 5.45],
+        material: 'limestone',
+      },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [-6.9, 15.65, -8.9] },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [6.9, 15.65, -8.9] },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [-6.9, 15.65, 4.9] },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [6.9, 15.65, 4.9] },
+      // Monumental octagonal palace dome & lantern crowning the Torreão
+      {
+        primitive: 'dome',
+        partGroup: 'torreao_imperial_dome',
+        base: [0, 15.65, -2.0],
+        drumHeight: 2.2,
+        radius: 5.6,
+        height: 4.8,
+        segments: 8,
+        rings: 5,
+        lantern: true,
+        material: 'terracotta',
+      },
+      // Adjoining landward Galeria das Damas wing with ground-floor stone arch loggia (flush at z = 5.0)
+      {
+        primitive: 'box',
+        partGroup: 'galeria_das_damas_wing',
+        from: [-6.2, 1.4, 5.0],
+        to: [6.2, 12.2, 10.2],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'galeria_arcade',
+        from: [-4.2, 1.4, 10.55],
+        to: [4.2, 1.4, 10.55],
+        height: 4.2,
+        thickness: 0.70,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'galeria_roof',
+        from: [-6.2, 12.2, 5.0],
+        to: [6.2, 14.6, 10.2],
+        height: 2.4,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550–1650 Spanish Main & Iberian Viceregal Port Landmark · Palacio de los Capitanes Generales
+  // Two-story governor's palace facing the Plaza de Armas with 5-bay ground-floor radial stone
+  // voussoir arcade (soportal), upper noble gallery, corner ashlar mirador towers, and central
+  // royal coat-of-arms clock/bell turret.
+  palacio_del_gobernador: {
+    schemaVersion: '0.4',
+    name: 'Palacio de los Capitanes Generales (Governor Palace)',
+    width: 28,
+    length: 20,
+    height: 14.5,
+    foundationDepth: 3.8,
+    materialKind: 12,
+    roofPitch: 2.8,
+    waterfront: false,
+    shapes: {
+      arcade_arch_bay: {
+        primitive: 'arch',
+        from: [-1.65, 0, 0],
+        to: [1.65, 0, 0],
+        height: 3.8,
+        thickness: 0.68,
+        voussoirs: 7,
+        material: 'ashlar',
+      },
+      corner_mirador_tower: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-2.6, 0, -2.6],
+            to: [2.6, 12.6, 2.6],
+            material: 'limestone',
+          },
+          {
+            primitive: 'roof',
+            from: [-2.75, 12.6, -2.75],
+            to: [2.75, 14.8, 2.75],
+            height: 2.2,
+            hipRatio: 0.48,
+            material: 'terracotta',
+          },
+        ],
+      },
+    },
+    primitives: [
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-13.8, -3.5, -9.8],
+        to: [13.8, 0.65, 9.8],
+        material: 'ashlar',
+      },
+      // Main two-story palace block set behind the ground-floor vaulted portico (between the corner towers x=-8.4..8.4)
+      {
+        primitive: 'box',
+        partGroup: 'palace_main_hall',
+        from: [-8.4, 0.65, -6.2],
+        to: [8.4, 9.8, 8.8],
+        material: 'whitewash',
+      },
+      // Upper floor gallery projecting over the ground-floor arcade (between the corner towers)
+      {
+        primitive: 'box',
+        partGroup: 'upper_noble_gallery',
+        from: [-8.4, 5.1, -9.0],
+        to: [8.4, 9.8, -6.2],
+        material: 'cream_stucco',
+      },
+      // 4-bay ground-floor stone arch soportal along the plaza facade
+      {
+        primitive: 'repeat',
+        partGroup: 'plaza_soportal_arcade',
+        count: 4,
+        step: [3.8, 0, 0],
+        of: {
+          shape: 'arcade_arch_bay',
+          position: [-5.7, 0.65, -8.8],
+        },
+      },
+      // Twin corner ashlar mirador towers (Torreones Esquineros) flanking the main hall cleanly
+      { shape: 'corner_mirador_tower', partGroup: 'west_mirador_tower', position: [-11.0, 0.65, -6.4] },
+      { shape: 'corner_mirador_tower', partGroup: 'east_mirador_tower', position: [11.0, 0.65, -6.4] },
+      // Central royal heraldic frontispiece & domed clock/bell turret rising above the roof ridge
+      {
+        primitive: 'box',
+        partGroup: 'central_heraldic_tower',
+        from: [-2.4, 12.2, -5.8],
+        to: [2.4, 14.6, -1.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'dome',
+        partGroup: 'central_turret_dome',
+        base: [0, 14.6, -3.8],
+        radius: 2.0,
+        height: 2.1,
+        segments: 8,
+        lantern: true,
+        material: 'terracotta',
+      },
+      // Hipped terracotta roof over the main palace range (between the corner towers)
+      {
+        primitive: 'roof',
+        partGroup: 'palace_main_roof',
+        from: [-8.4, 9.8, -9.0],
+        to: [8.4, 12.4, 8.8],
+        height: 2.6,
+        hipRatio: 0.24,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550–1650 Acueducto Real de Sillería (Two-Tier Ashlar Stone Arch Aqueduct & Cistern Arcade)
+  // Combines voxel-built stepped cutwater piers with repeated lower & upper radial stone voussoir
+  // arches and a top stone water channel (specus).
+  acueducto_de_piedra: {
+    schemaVersion: '0.4',
+    name: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
+    width: 32,
+    length: 6.5,
+    height: 13.2,
+    foundationDepth: 4.5,
+    materialKind: 11,
+    roofPitch: 0.8,
+    waterfront: false,
+    shapes: {
+      lower_aqueduct_arch: {
+        primitive: 'arch',
+        from: [-2.8, 0, 0],
+        to: [2.8, 0, 0],
+        height: 6.8,
+        thickness: 1.65,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      upper_aqueduct_arch: {
+        primitive: 'arch',
+        from: [-2.6, 0, 0],
+        to: [2.6, 0, 0],
+        height: 4.2,
+        thickness: 1.35,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+    },
+    primitives: [
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-15.8, -4.0, -2.6],
+        to: [15.8, 0.5, 2.6],
+        material: 'ashlar',
+      },
+      // Voxel-built stepped cutwater buttresses at each pier base
+      {
+        primitive: 'blocks',
+        partGroup: 'aqueduct_cutwater_piers',
+        gridSize: 1.0,
+        material: 'ashlar',
+        runs: [
+          { x: -14, y: [1, 3], z: [-2, 1] },
+          { x: -9, y: [1, 3], z: [-2, 1] },
+          { x: -3, y: [1, 3], z: [-2, 1] },
+          { x: 2, y: [1, 3], z: [-2, 1] },
+          { x: 8, y: [1, 3], z: [-2, 1] },
+          { x: 13, y: [1, 3], z: [-2, 1] },
+        ],
+      },
+      // 5 lower monumental stone arches
+      {
+        primitive: 'repeat',
+        partGroup: 'lower_arch_tier',
+        count: 5,
+        step: [5.6, 0, 0],
+        of: {
+          shape: 'lower_aqueduct_arch',
+          position: [-11.2, 0.5, 0],
+        },
+      },
+      // Mid-tier stone stringcourse belt
+      {
+        primitive: 'box',
+        partGroup: 'mid_tier_cornice',
+        from: [-15.4, 7.3, -1.15],
+        to: [15.4, 7.95, 1.15],
+        material: 'limestone',
+      },
+      // 5 upper water-carrier arches
+      {
+        primitive: 'repeat',
+        partGroup: 'upper_arch_tier',
+        count: 5,
+        step: [5.6, 0, 0],
+        of: {
+          shape: 'upper_aqueduct_arch',
+          position: [-11.2, 7.95, 0],
+        },
+      },
+      // Top stone water specus channel & side parapets
+      {
+        primitive: 'box',
+        partGroup: 'aqueduct_water_channel',
+        from: [-15.6, 12.15, -1.25],
+        to: [15.6, 13.1, 1.25],
+        material: 'ashlar',
+      },
     ],
   },
 };
@@ -35207,7 +36256,8 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
   const bearingRad = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
   const instances = [];
   const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
-    const prefab = PORT_PREFABS[prefabId];
+    const cairnSpec = overrides?.cairnSpec ?? CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] ?? null;
+    const prefab = PORT_PREFABS[prefabId] ?? cairnSpec;
     let adjInland = inlandOffset;
     let pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
     let groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
@@ -35227,21 +36277,22 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     const yaw = bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
     instances.push({
       prefabId,
-      label: overrides?.label ?? prefab.label,
+      label: overrides?.label ?? prefab?.label ?? prefab?.name ?? prefabId,
       x: pos.x,
       y,
       z: pos.z,
       yaw,
-      length: overrides?.length ?? prefab.length,
-      width: overrides?.width ?? prefab.width,
-      height: overrides?.height ?? prefab.height,
-      foundationDepth: overrides?.foundationDepth ?? prefab.foundationDepth,
-      materialKind: overrides?.materialKind ?? prefab.materialKind,
-      roofPitch: overrides?.roofPitch ?? prefab.roofPitch,
-      waterfront: overrides?.waterfront ?? prefab.waterfront,
+      length: overrides?.length ?? prefab?.length ?? 24,
+      width: overrides?.width ?? prefab?.width ?? 18,
+      height: overrides?.height ?? prefab?.height ?? 12,
+      foundationDepth: overrides?.foundationDepth ?? prefab?.foundationDepth ?? 4.0,
+      materialKind: overrides?.materialKind ?? prefab?.materialKind ?? 11,
+      roofPitch: overrides?.roofPitch ?? prefab?.roofPitch ?? 2.8,
+      waterfront: overrides?.waterfront ?? prefab?.waterfront ?? false,
       friendlyToPlayer: overrides?.friendlyToPlayer ?? false,
-      indigenous: overrides?.indigenous ?? Boolean(prefab.indigenous),
+      indigenous: overrides?.indigenous ?? Boolean(prefab?.indigenous),
       cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
+      cairnSpec,
     });
   };
 
@@ -35475,6 +36526,26 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
         fromOrthophotoFootprint: true,
       });
     }
+    // Declarative Cairn JSON landmarks for orthophoto colonial ports (placed clear of existing orthophoto footprints)
+    const findClearPortOffset = (baseAlong, baseInland, minClearDist = 34) => {
+      let along = baseAlong;
+      const inland = baseInland;
+      for (let step = 0; step < 8; step++) {
+        const candPos = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + inland);
+        const overlaps = instances.some((inst) => Math.hypot(inst.x - candPos.x, inst.z - candPos.z) < minClearDist);
+        if (!overlaps) return [along, inland];
+        along += baseAlong >= 0 ? 28 : -28;
+      }
+      return [along, inland];
+    };
+    const [catAlong, catInland] = findClearPortOffset(82, 108, 36);
+    addPrefab('catedral_basilica', catAlong, catInland, 0, 4.0, {
+      label: 'Catedral Basílica Metropolitana',
+    });
+    const [palAlong, palInland] = findClearPortOffset(-82, 64, 34);
+    addPrefab('palacio_del_gobernador', palAlong, palInland, 0, 3.5, {
+      label: 'Palacio de los Capitanes Generales (Governor Palace)',
+    });
     // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
     if (colonyGrowth.expansionTier >= 1) {
       addPrefab('bastion_trace_fortress', -138, 16, 18, 4.4, {
@@ -35490,6 +36561,9 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       addPrefab('curtain_wall_and_gate', 48, 128, 0, 4.2, {
         label: 'Muralla Real & Puerta de Tierra',
       });
+      addPrefab('acueducto_de_piedra', -68, 118, 12, 4.0, {
+        label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
+      });
     }
     if (colonyGrowth.expansionTier >= 4) {
       addPrefab('stone_sea_bastion', -154, -10, 22, 4.2, {
@@ -35498,41 +36572,42 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     }
   } else if (allowColonialPort && isLisbonRoyalDock) {
     // 2. Continuous Stone Seawall & Royal Quays (Cais de Pedra do Terreiro do Paço & Ribeira das Naus)
-    addPrefab('stone_quay_seawall', 12, 8, 0, 2.5, {
+    addPrefab('stone_quay_seawall', -2, 8, 0, 2.5, {
       label: 'Cais de Pedra do Terreiro do Paço',
-      width: 72,
-      length: 15,
+      width: 52,
+      length: 14,
     });
-    addPrefab('stone_quay_seawall', -58, 8, 0, 2.4, {
+    addPrefab('stone_quay_seawall', -64, 8, 0, 2.4, {
       label: 'Muralha da Ribeira das Naus',
-      width: 66,
+      width: 58,
       length: 14,
     });
     // 3. Paço da Ribeira, Casa da Índia, Torreão do Paço & Arcaded Merchant Loggia on the Terreiro do Paço
-    addPrefab('torreon_atalaya_farol', 28, 2, 0, 2.8, {
+    addPrefab('torreon_atalaya_farol', 38, 4, 0, 2.8, {
       label: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
-      width: 15,
-      length: 15,
-      height: 14.5,
-      foundationDepth: 9.0,
+      width: 18,
+      length: 22,
+      height: 20.5,
+      foundationDepth: 9.5,
+      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao,
     });
-    addPrefab('casa_de_contratacion', 18, 36, 0, 3.0, {
+    addPrefab('casa_de_contratacion', 16, 40, 0, 3.0, {
       label: 'Paço da Ribeira & Casa da Índia (Royal Customhouse)',
     });
-    addPrefab('modular_patio_cloister', 48, 38, 0, 3.2, {
+    addPrefab('modular_patio_cloister', 52, 42, 0, 3.2, {
       label: 'Paços Reais da Ribeira (Royal Palace Cloister)',
     });
-    addPrefab('open_lonja_loggia', -12, 26, 0, 2.8, {
+    addPrefab('open_lonja_loggia', -14, 28, 0, 2.8, {
       label: 'Varanda da Casa da Índia (Spice & Charter Loggia)',
     });
     // 4. Ribeira das Naus Royal Shipyard, Multi-Gable Arsenal, Armazéns da Guiné e Índia & Caravels on the Ways
-    addPrefab('royal_atarazanas_arsenal', -46, 36, 0, 2.9, {
+    addPrefab('royal_atarazanas_arsenal', -50, 42, 0, 2.9, {
       label: 'Ribeira das Naus ·Tercenas Reais (Royal Shipyard Halls)',
       width: 34,
       length: 36,
       height: 9.2,
     });
-    addPrefab('royal_warehouse', -86, 38, 0, 2.9, {
+    addPrefab('royal_warehouse', -90, 44, 0, 2.9, {
       label: 'Armazéns da Guiné e Índia (Royal Naval Storehouses)',
       length: 34,
       width: 15,
@@ -35540,41 +36615,55 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
     addPrefab('astillero_and_moored_hull', -36, 12, 4, 1.9, {
       label: 'Carreira da Índia Nau on the Stocks (Ribeira das Naus)',
     });
-    addPrefab('astillero_and_moored_hull', -60, 12, -4, 1.9, {
+    addPrefab('astillero_and_moored_hull', -62, 12, -4, 1.9, {
       label: 'Royal Caravel on the Slipway (Ribeira das Naus)',
     });
-    addPrefab('careening_shed', -98, 16, 8, 2.2, {
+    addPrefab('careening_shed', -104, 16, 8, 2.2, {
       label: 'Casa do Breu (Careening & Pitch Works)',
     });
-    // 5. Manueline River Bastion & Watchtower (Baluarte da Ribeira / Torre de Belém on the Tagus approach)
-    addPrefab('stone_sea_bastion', -132, -14, 12, 3.2, {
+    // 5. Manueline River Bastion, Torre de Belém & Mosteiro dos Jerónimos on the Tagus approach
+    addPrefab('stone_sea_bastion', -124, -12, 12, 3.2, {
       label: 'Baluarte de São Vicente · Torre de Belém (Tagus Bastion)',
     });
-    addPrefab('torreon_atalaya_farol', -146, -24, 0, 3.6, {
+    addPrefab('torreon_atalaya_farol', -158, -22, 0, 3.4, {
       label: 'Torre de Belém Watchtower & River Beacon',
-      height: 15.2,
+      width: 18,
+      length: 28,
+      height: 22.5,
       foundationDepth: 9.5,
+      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.torre_de_belem_manuelina,
     });
-    // 6. Sé de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
-    addPrefab('mission_chapel', 58, 84, 90, 4.2, {
+    addPrefab('mosteiro_dos_jeronimos', -126, 86, 0, 3.8, {
+      label: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
+    });
+    // 6. Sé Patriarcal de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
+    addPrefab('mission_chapel', 64, 88, 0, 4.2, {
       label: 'Sé Patriarcal de Lisboa (Cathedral)',
+      width: 24,
+      length: 34,
+      height: 19.0,
+      foundationDepth: 5.5,
+      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa,
     });
-    addPrefab('bastion_trace_fortress', 108, 118, -10, 5.2, {
+    addPrefab('bastion_trace_fortress', 114, 122, -10, 5.2, {
       label: 'Castelo de São Jorge (Royal Citadel)',
     });
-    addPrefab('curtain_wall_and_gate', 22, 112, 0, 4.0, {
+    addPrefab('curtain_wall_and_gate', 22, 118, 0, 4.0, {
       label: 'Arco da Ribeira · Muralha Fernandina',
     });
-    addPrefab('colonial_town_block', -16, 78, 0, 3.6, {
+    addPrefab('acueducto_de_piedra', -52, 124, 8, 4.2, {
+      label: 'Aqueduto Real & Arcos da Água Livre',
+    });
+    addPrefab('colonial_town_block', -16, 82, 0, 3.6, {
       label: 'Rua Nova dos Mercadores (Merchant Quarter)',
     });
-    addPrefab('colonial_town_block', 24, 78, 0, 3.6, {
+    addPrefab('colonial_town_block', 24, 82, 0, 3.6, {
       label: 'Bairro da Ribeira Velha',
     });
-    addPrefab('l_wing_u_wing_solar', -56, 78, 90, 3.5, {
+    addPrefab('l_wing_u_wing_solar', -58, 84, 90, 3.5, {
       label: 'Paço dos Estaus & Noble Solar',
     });
-    addPrefab('single_nave_solar', 84, 54, 0, 3.6, {
+    addPrefab('single_nave_solar', 88, 56, 0, 3.6, {
       label: 'Casario de Alfama',
     });
     addPrefab('walled_mule_corral', -22, 116, 0, 4.0, {
@@ -35795,10 +36884,19 @@ function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, sate
       addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
       addPrefab('single_nave_solar', -74, 52, 0, 3.2);
       addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
-      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge & Frontier Palm-Thatch Bohíos
+      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge, Frontier Palm-Thatch Bohíos & Cairn Landmarks
       addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
       addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
       addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+      addPrefab('catedral_basilica', 8, 124, 0, 4.1, {
+        label: 'Catedral Basílica Metropolitana',
+      });
+      addPrefab('palacio_del_gobernador', 98, 52, 0, 3.5, {
+        label: 'Palacio de los Capitanes Generales (Governor Palace)',
+      });
+      addPrefab('acueducto_de_piedra', -74, 118, 12, 4.0, {
+        label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
+      });
 
       // 10. Progressive year-by-year & era-by-era expansion (1565–1689: Antonelli, Colonial Planting & High Buccaneer Eras)
       if (colonyGrowth.expansionTier >= 1) {
@@ -36632,6 +37730,27 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       inst.z - lx * sinY + lz * cosY,
     ];
 
+    const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
+    if (cairnSpec) {
+      const hasOwnPlinth = Array.isArray(cairnSpec.primitives) && cairnSpec.primitives.some((p) => p?.partGroup === 'foundation_plinth');
+      if (!hasOwnPlinth) {
+        beginSection('foundation_plinth');
+        emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
+      }
+      const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
+      emitCairnScene(cairnSpec, {
+        toWorld: localToCairnWorld,
+        emitBox,
+        emitCylinder,
+        emitRoof,
+        pushQuad,
+        pushTri,
+        withPartGroup,
+      });
+      flushSection();
+      continue;
+    }
+
     // Only use static LRM template mesh if the instance is at canonical unstretched prefab dimensions (never stretch footprints!)
     const basePrefab = PORT_PREFABS[inst.prefabId];
     const isUnstretchedCanonical =
@@ -36648,24 +37767,6 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
       emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
-      flushSection();
-      continue;
-    }
-
-    const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
-    if (cairnSpec) {
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
-      const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
-      emitCairnScene(cairnSpec, {
-        toWorld: localToCairnWorld,
-        emitBox,
-        emitCylinder,
-        emitRoof,
-        pushQuad,
-        pushTri,
-        withPartGroup,
-      });
       flushSection();
       continue;
     }
@@ -38326,13 +39427,13 @@ function getBuildingParts(prefabId, options = {}) {
     prefab = {
       id: prefabId,
       label: cairnTmpl.name || prefabId,
-      length: 34,
-      width: 22,
-      height: 18,
-      foundationDepth: 3.5,
-      materialKind: 11,
-      roofPitch: 3.5,
-      waterfront: false,
+      length: cairnTmpl.length ?? 34,
+      width: cairnTmpl.width ?? 22,
+      height: cairnTmpl.height ?? 18,
+      foundationDepth: cairnTmpl.foundationDepth ?? 3.5,
+      materialKind: cairnTmpl.materialKind ?? 11,
+      roofPitch: cairnTmpl.roofPitch ?? 3.5,
+      waterfront: cairnTmpl.waterfront ?? false,
       cairnSpec: cairnTmpl,
     };
   }
@@ -53447,7 +54548,9 @@ function sweepBuildingSegment(from, to, radius = 0.08, port, options = null) {
       inst.prefabId === 'mission_chapel' ? 9.2 : inst.prefabId === 'timber_mole_pier' ? 6.2 : 1.5,
     );
     const instHeight = inst.height ?? 10;
-    if (segMaxY < baseY - foundDepth - radius || segMinY > baseY + instHeight + roofExtra + radius) continue;
+    const collapseDropFrac = Math.max(0, Math.min(0.65, inst.damageState?.collapseDropFrac ?? 0));
+    const effTopY = Math.max(3.2, (instHeight + roofExtra) * (1 - collapseDropFrac * 0.72));
+    if (segMaxY < baseY - foundDepth - radius || segMinY > baseY + effTopY + radius) continue;
     const depthZ = inst.depth ?? inst.length ?? 20;
     const widthX = inst.width ?? 12;
     const halfDiag = Math.hypot(widthX, depthZ) * 0.5 + radius;
@@ -53464,7 +54567,7 @@ function sweepBuildingSegment(from, to, radius = 0.08, port, options = null) {
     const p1 = [dx1 * cosY - dz1 * sinY, dy1, dx1 * sinY + dz1 * cosY];
     const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
     const minB = [-widthX * 0.5 - radius, -foundDepth - radius, -depthZ * 0.5 - radius];
-    const maxB = [widthX * 0.5 + radius, instHeight + roofExtra + radius, depthZ * 0.5 + radius];
+    const maxB = [widthX * 0.5 + radius, effTopY + radius, depthZ * 0.5 + radius];
     let tMin = 0, tMax = 1, hitAxis = 0, hitSign = 1;
     let valid = true;
     for (let a = 0; a < 3; a++) {
@@ -53541,6 +54644,12 @@ function buildingLocalToWorld(building, localPt) {
     baseY + ly,
     (building?.z ?? 0) - lx * sinY + lz * cosY,
   ];
+}
+
+function buildingFireLocalToWorld(building, localPt) {
+  const dropFrac = Math.max(0, Math.min(0.72, building?.damageState?.collapseDropFrac ?? 0));
+  const ly = Math.max(0.65, (localPt?.[1] ?? 1.2) * (1 - dropFrac * 0.72));
+  return buildingLocalToWorld(building, [localPt?.[0] ?? 0, ly, localPt?.[2] ?? 0]);
 }
 
 function createBuildingMagazineState(building) {
@@ -53722,6 +54831,7 @@ function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cause = 's
     d.silenced = true;
   }
 
+  d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.32 * (0.4 + 0.6 * powderFrac));
   d.pendingBakes.push({
     kind: 'building-explosion',
     x: +worldBlastPt[0].toFixed(3),
@@ -53733,22 +54843,22 @@ function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cause = 's
     powderFraction: +powderFrac.toFixed(3),
   });
 
-  const numFires = Math.min(6, Math.max(2, Math.round(2 + 4 * powderFrac)));
+  const numFires = Math.min(3, Math.max(1, Math.round(1 + 2 * powderFrac)));
   for (let i = 0; i < numFires; i++) {
-    if (d.fires.length >= 10) d.fires.shift();
-    const flx = ((i % 2 === 0 ? 1 : -1) * (building.width ?? 14) * 0.22);
-    const fly = Math.max(1.2, (building.height ?? 5) * 0.65);
-    const flz = ((i - (numFires - 1) * 0.5) * (building.depth ?? 14) * 0.16);
-    const fWorld = buildingLocalToWorld(building, [flx, fly, flz]);
+    if (d.fires.length >= 4) d.fires.shift();
+    const flx = ((i % 2 === 0 ? 1 : -1) * (building.width ?? 14) * 0.14);
+    const fly = Math.max(0.85, Math.min(2.6, (building.height ?? 5) * 0.34));
+    const flz = ((i - (numFires - 1) * 0.5) * (building.depth ?? 14) * 0.12);
+    const fWorld = buildingFireLocalToWorld(building, [flx, fly, flz]);
     d.fires.push({
       localPosition: [flx, fly, flz],
-      intensity: +(1.05 + 0.45 * powderFrac).toFixed(3),
+      intensity: +(0.88 + 0.35 * powderFrac).toFixed(3),
       age: 0,
       seed: ((d.hits * 0.618 + i * 0.27) % 1) || 0.43,
     });
     d.worldFires.push({
       position: fWorld,
-      intensity: +(1.05 + 0.45 * powderFrac).toFixed(3),
+      intensity: +(0.88 + 0.35 * powderFrac).toFixed(3),
       age: 0,
       seed: ((d.hits * 0.618 + i * 0.27) % 1) || 0.43,
     });
@@ -53964,11 +55074,13 @@ function applyBuildingImpactDamage(building, event) {
       const baseIgnite = ammo === 'hot'
         ? (materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
         : (materialClass === 'timber' ? 0.36 : 0.28);
-      const addIntensity = Math.min(1.45, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
+      const addIntensity = Math.min(1.25, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
+      const bH = building.height ?? 8;
+      const rawFireY = (localPos[1] ?? 0) > 0.8 ? (localPos[1] ?? 1.5) * 0.58 : bH * 0.36;
       const fireLocal = [
-        localPos[0] ?? 0,
-        Math.max(1.8, (localPos[1] ?? 0) > 1.0 ? localPos[1] : (building.height ?? 8) * 0.75),
-        localPos[2] ?? 0,
+        (localPos[0] ?? 0) * 0.55,
+        Math.max(0.75, Math.min(rawFireY, bH * 0.44)),
+        (localPos[2] ?? 0) * 0.55,
       ];
       let merged = false;
       for (const f of d.fires) {
@@ -53977,13 +55089,13 @@ function applyBuildingImpactDamage(building, event) {
           (f.localPosition[1] ?? 0) - fireLocal[1],
           (f.localPosition[2] ?? 0) - fireLocal[2],
         );
-        if (dist < 4.5) {
-          f.intensity = Math.min(1.65, +(f.intensity + addIntensity * 0.7).toFixed(3));
+        if (dist < 6.5) {
+          f.intensity = Math.min(1.45, +(f.intensity + addIntensity * 0.55).toFixed(3));
           merged = true;
           break;
         }
       }
-      if (!merged && d.fires.length < 10) {
+      if (!merged && d.fires.length < 4) {
         d.fires.push({
           localPosition: fireLocal,
           intensity: +addIntensity.toFixed(3),
@@ -53992,7 +55104,7 @@ function applyBuildingImpactDamage(building, event) {
         });
       }
       d.worldFires = d.fires.map((f) => ({
-        position: buildingLocalToWorld(building, f.localPosition),
+        position: buildingFireLocalToWorld(building, f.localPosition),
         intensity: f.intensity,
         age: f.age,
         seed: f.seed,
@@ -54024,12 +55136,16 @@ function applyBuildingImpactDamage(building, event) {
     }
   }
 
-  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined
+  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined,
+  // plus incremental multi-round collapse bakes so subsequent broadsides keep crumbling the remaining structure.
+  let emittedCollapseThisHit = false;
   if (d.state !== 'intact' && materialClass !== 'fortified-stone' && !d.damageCollapseBaked) {
     d.damageCollapseBaked = true;
+    emittedCollapseThisHit = true;
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.12);
     const roofCavePt = buildingLocalToWorld(building, [
       (localPos[0] ?? 0) * 0.65,
-      (building.height ?? 7) * 0.90,
+      (building.height ?? 7) * 0.85,
       (localPos[2] ?? 0) * 0.65,
     ]);
     d.pendingBakes.push({
@@ -54045,9 +55161,11 @@ function applyBuildingImpactDamage(building, event) {
   }
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
+    emittedCollapseThisHit = true;
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
     const collapsePt = buildingLocalToWorld(building, [
       (localPos[0] ?? 0) * 0.6,
-      (building.height ?? 8) * 0.82,
+      (building.height ?? 8) * 0.72,
       (localPos[2] ?? 0) * 0.6,
     ]);
     d.pendingBakes.push({
@@ -54065,6 +55183,8 @@ function applyBuildingImpactDamage(building, event) {
   const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
   if ((d.state === 'ruined' || (totalGunsCount > 0 && activeGunsLeft === 0 && d.integrity <= 0.45)) && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
+    emittedCollapseThisHit = true;
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
     d.silenced = true;
     if (Array.isArray(bGuns)) {
       for (const g of bGuns) {
@@ -54074,7 +55194,7 @@ function applyBuildingImpactDamage(building, event) {
       }
       d.dismountedGuns = bGuns.length;
     }
-    const centerCollapsePt = buildingLocalToWorld(building, [0, (building.height ?? 8) * 0.85, 0]);
+    const centerCollapsePt = buildingLocalToWorld(building, [0, (building.height ?? 8) * 0.68, 0]);
     d.pendingBakes.push({
       kind: 'building-collapse',
       x: +centerCollapsePt[0].toFixed(3),
@@ -54085,6 +55205,18 @@ function applyBuildingImpactDamage(building, event) {
       severity: 1.35,
       powderFraction: 0.85,
     });
+  }
+  // Multi-round bombardment progression: keep lowering collapseDropFrac on subsequent hits so fires and OBB top sink with the crumbling walls
+  if (!emittedCollapseThisHit && d.state !== 'intact' && effectiveEnergy >= 35000) {
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.018);
+  }
+  if (d.fires.length > 0) {
+    d.worldFires = d.fires.map((f) => ({
+      position: buildingFireLocalToWorld(building, f.localPosition),
+      intensity: f.intensity,
+      age: f.age,
+      seed: f.seed,
+    }));
   }
 
   const finalActiveGuns = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
@@ -54152,7 +55284,7 @@ function stepBuildingDamage(building, dt) {
     totalIntensity += f.intensity;
     d.damageJoules += f.intensity * burnRateJoules * clampedDt;
     d.worldFires.push({
-      position: buildingLocalToWorld(building, f.localPosition),
+      position: buildingFireLocalToWorld(building, f.localPosition),
       intensity: f.intensity,
       age: f.age,
       seed: f.seed,
@@ -54163,7 +55295,8 @@ function stepBuildingDamage(building, dt) {
   d.fireIntensity = +totalIntensity.toFixed(3);
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
-    const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
+    const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.72, 0]);
     d.pendingBakes.push({
       kind: 'building-collapse',
       x: +collapsePt[0].toFixed(3),
@@ -54177,7 +55310,8 @@ function stepBuildingDamage(building, dt) {
   }
   if (d.state === 'ruined' && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
-    const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.85, 0]);
+    d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
+    const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.68, 0]);
     d.pendingBakes.push({
       kind: 'building-collapse',
       x: +ruinPt[0].toFixed(3),

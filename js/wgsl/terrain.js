@@ -669,37 +669,38 @@ fn landOpaque(in:LandVertex)->vec4f{
       relief=detailA*0.024+plank*0.014+grain*0.008;roughness=0.84;ambientVisibility=0.42+0.34*max(n.y,0.0);
     }else if(in.kind.x<11.5){
       // Kind 11: Coursed coral-limestone ashlar masonry (bastion walls, quoins, arches, buttresses)
+      let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let courseY=world.y*1.65;
-      let bedJoint=landFilteredCourse(courseY,dx.y*1.65,dy.y*1.65,2.2);
-      let blockCoord=(world.x+world.z)*0.72+sin(courseY*3.14159265)*0.25;
-      let headJoint=landFilteredCourse(blockCoord,(dx.x+dx.z)*0.72,(dy.x+dy.z)*0.72,2.0);
-      let jointWave=0.65*bedJoint+0.35*headJoint;
+      let bedJoint=max(0.0,landFilteredCourse(courseY,dx.y*1.65,dy.y*1.65,2.0)-0.25)*vertWall;
+      let blockCoord=(world.x+world.z)*0.68+sin(courseY*3.14159265)*0.18;
+      let headJoint=max(0.0,landFilteredCourse(blockCoord,(dx.x+dx.z)*0.68,(dy.x+dy.z)*0.68,1.8)-0.30)*vertWall;
+      let jointWave=0.68*bedJoint+0.32*headJoint;
       let damp=smoothstep(0.2,3.8,world.y);
-      let stoneBase=mix(vec3f(0.36,0.33,0.27),vec3f(0.48,0.44,0.37),damp)+vec3f(detailA*0.035);
-      albedo=stoneBase*portShade*(0.96-0.09*jointWave+detailA*0.12+detailB*0.07);
-      relief=detailA*0.042+detailB*0.018-jointWave*0.024;roughness=0.89;ambientVisibility=0.45+0.33*max(n.y,0.0);
+      let stoneBase=mix(vec3f(0.38,0.35,0.29),vec3f(0.50,0.46,0.39),damp)+vec3f(detailA*0.032);
+      albedo=stoneBase*portShade*(0.97-0.08*jointWave+detailA*0.10+detailB*0.05);
+      relief=detailA*0.028+detailB*0.012-jointWave*0.018;roughness=0.89;ambientVisibility=0.46+0.33*max(n.y,0.0);
     }else if(in.kind.x<12.5){
       // Kind 12: Warm Spanish colonial limewashed stucco (cream/ochre plaster with rising-damp patina)
       let damp=smoothstep(0.6,3.4,world.y);
-      let trowel=landFilteredWave(world,dx,dy,vec3f(2.4,0.0,2.1),detailA*2.2)*0.022;
-      let warmStucco=mix(vec3f(0.52,0.46,0.36),vec3f(0.76,0.69,0.56),damp)+vec3f(trowel);
-      albedo=warmStucco*portShade*(1.0+detailA*0.08+detailB*0.05);
-      relief=detailA*0.018+detailB*0.010+trowel*0.35;roughness=0.86;ambientVisibility=0.50+0.36*max(n.y,0.0);
+      let trowel=landFilteredWave(world,dx,dy,vec3f(2.4,0.0,2.1),detailA*2.2)*0.018;
+      let warmStucco=mix(vec3f(0.54,0.48,0.38),vec3f(0.76,0.69,0.56),damp)+vec3f(trowel);
+      albedo=warmStucco*portShade*(1.0+detailA*0.07+detailB*0.04);
+      relief=detailA*0.015+detailB*0.008+trowel*0.30;roughness=0.86;ambientVisibility=0.50+0.36*max(n.y,0.0);
     }else if(in.kind.x<13.5){
       // Kind 13: Spanish terracotta barrel roof tiles (tejas curvas with band-limited course steps & kiln variation)
-      let flute=landFilteredWave(world,dx,dy,vec3f(15.96,0.0,15.96),0.0);
-      let courseWave=landFilteredCourse(world.y*2.4,dx.y*2.4,dy.y*2.4,1.8);
-      let kilnVar=(detailA*0.6+detailB*0.4)*0.042;
-      let tileCol=vec3f(0.50+kilnVar,0.175+kilnVar*0.45,0.085+kilnVar*0.25)*(0.96-0.06*courseWave);
-      albedo=tileCol*portShade*(1.0+detailA*0.11+flute*0.09+detailB*0.06);
-      relief=flute*0.028-courseWave*0.014+detailA*0.014;roughness=0.80;ambientVisibility=0.48+0.36*max(n.y,0.0);
+      let flute=landFilteredWave(world,dx,dy,vec3f(14.0,0.0,14.0),0.0);
+      let courseWave=landFilteredCourse(world.y*2.4,dx.y*2.4,dy.y*2.4,1.8)*0.025;
+      let kilnVar=(detailA*0.6+detailB*0.4)*0.040;
+      let tileCol=vec3f(0.50+kilnVar,0.18+kilnVar*0.45,0.088+kilnVar*0.25);
+      albedo=tileCol*portShade*(1.0+detailA*0.10+flute*0.07+detailB*0.05+courseWave);
+      relief=flute*0.022+detailA*0.012+courseWave*0.25;roughness=0.80;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }else if(in.kind.x<14.5){
       // Kind 14: Deep recessed colonial openings, arched portals & wrought-iron reja bars
-      let rejaX=landFilteredCourse((world.x+world.z)*3.6,(dx.x+dx.z)*3.6,(dy.x+dy.z)*3.6,2.2);
-      let rejaY=landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,2.0);
+      let rejaX=max(0.0,landFilteredCourse((world.x+world.z)*3.2,(dx.x+dx.z)*3.2,(dy.x+dy.z)*3.2,2.0)-0.35);
+      let rejaY=max(0.0,landFilteredCourse(world.y*2.0,dx.y*2.0,dy.y*2.0,1.8)-0.35);
       let rejaWave=0.6*rejaX+0.4*rejaY;
-      albedo=vec3f(0.064,0.052,0.041)*(1.0-0.22*rejaWave)*portShade*(1.0+detailB*0.08);
-      relief=detailB*0.008+rejaWave*0.008;roughness=0.90;ambientVisibility=0.20+0.16*max(n.y,0.0);
+      albedo=vec3f(0.058,0.048,0.039)*(1.0-0.18*rejaWave)*portShade*(1.0+detailB*0.06);
+      relief=detailB*0.006+rejaWave*0.006;roughness=0.90;ambientVisibility=0.18+0.14*max(n.y,0.0);
     }else if(in.kind.x<15.5){
       // Kind 15: Layered palm-thatch & bundled reed roof (guano / palma real for bohíos, caneyes & palafitos)
       let straw=landFilteredWave(world,dx,dy,vec3f(23.92,0.0,23.92),detailA*1.8);
@@ -710,12 +711,10 @@ fn landOpaque(in:LandVertex)->vec4f{
       relief=straw*0.030-tierWave*0.018+detailA*0.016;roughness=0.93;ambientVisibility=0.44+0.36*max(n.y,0.0);
     }else if(in.kind.x<16.5){
       // Kind 16: River-cobble courtyard pavement & packed-earth bastion terreplein (empedrado / terraplén)
-      let cobbleX=landFilteredCourse(world.x*2.4,dx.x*2.4,dy.x*2.4,1.6);
-      let cobbleZ=landFilteredCourse(world.z*2.4,dx.z*2.4,dy.z*2.4,1.6);
-      let cobble=0.5*(cobbleX+cobbleZ);
-      let baseEarth=vec3f(0.34,0.305,0.25)*(1.0-0.12*cobble);
-      albedo=baseEarth*portShade*(1.0+detailA*0.15+detailB*0.09);
-      relief=detailA*0.028-cobble*0.016;roughness=0.91;ambientVisibility=0.48+0.36*max(n.y,0.0);
+      let cobbleDetail=landOrientedDetail(world,n,dx,dy,3.8);
+      let baseEarth=vec3f(0.35,0.31,0.255)*(1.0+cobbleDetail*0.10);
+      albedo=baseEarth*portShade*(1.0+detailA*0.14+detailB*0.08);
+      relief=detailA*0.022+cobbleDetail*0.014;roughness=0.91;ambientVisibility=0.48+0.36*max(n.y,0.0);
     }else{
       // Kind 17: Paper-birch & elm/cedar bark sheathing (Abenaki wigwams, Algonquian longhouses & birchbark canoes)
       let seamY=landFilteredCourse(world.y*1.35,dx.y*1.35,dy.y*1.35,2.0);
@@ -748,34 +747,30 @@ fn landOpaque(in:LandVertex)->vec4f{
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
-    let charNoise=gnoise(world.xz*2.8+vec2f(world.y*2.1));
+    let spallDetail=landOrientedDetail(world+vec3f(5.7,2.3,9.1),n,dx,dy,3.2);
+    let gritDetail=landOrientedDetail(world+vec3f(14.1,8.7,3.9),n,dx,dy,8.5);
+    let fissure=landOrientedJoint(world+vec3f(11.3,4.7,6.9),n,dx,dy);
     let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&abs(in.kind.x-15.0)>0.4;
     if(isStoneRubble){
-      let blkX=landFilteredCourse(world.x*1.45+charNoise*0.42,dx.x*1.45,dy.x*1.45,2.2);
-      let blkY=landFilteredCourse(world.y*1.95+charNoise*0.35,dx.y*1.95,dy.y*1.95,2.2);
-      let blkZ=landFilteredCourse(world.z*1.45-charNoise*0.42,dx.z*1.45,dy.z*1.45,2.2);
-      let blockCrevice=clamp(max(max(blkX,blkY),blkZ),0.0,1.0);
-      let cobbleNoise=gnoise(world.xz*6.2+vec2f(world.y*4.8,-world.y*3.4));
-      let gritNoise=gnoise(world.xz*14.5+vec2f(-world.y*10.5,world.y*8.2));
-      let spallStone=vec3f(0.52,0.47,0.38)*(0.78+0.42*clamp(in.kind.y,0.2,1.0));
-      let brickCore=vec3f(0.39,0.23,0.14);
-      let stoneBlockCol=mix(spallStone,brickCore,clamp(0.35*cobbleNoise+select(0.0,0.35,in.kind.x>=11.5&&in.kind.x<13.5),0.0,0.75));
-      let creviceSoot=vec3f(0.055,0.048,0.040);
-      let sootMix=clamp(blockCrevice*0.72+max(0.0,-cobbleNoise)*0.45+dmgW*0.18,0.0,0.92);
-      let rubbleAlbedo=mix(stoneBlockCol*(0.92+0.16*gritNoise),creviceSoot,sootMix);
-      albedo=mix(albedo,rubbleAlbedo,clamp(dmgW*0.88,0.0,0.94));
-      let blockFacet=(0.55*cobbleNoise+0.35*gritNoise)-0.70*blockCrevice;
-      relief+=blockFacet*0.145*dmgW*detailFade;
-      ambientVisibility*=mix(1.0,0.38+0.62*clamp(1.0-blockCrevice*0.75+cobbleNoise*0.25,0.0,1.0),dmgW);
+      let shadeKeep=clamp(in.kind.y,0.38,1.0);
+      let exposedCore=select(vec3f(0.45,0.40,0.33),vec3f(0.40,0.25,0.16),in.kind.x>=11.5&&in.kind.x<13.5)*shadeKeep*(0.94+0.14*gritDetail);
+      let spallPatch=clamp(dmgW*0.48+spallDetail*0.32,0.0,0.68);
+      let spalledAlbedo=mix(albedo,exposedCore,spallPatch);
+      let creviceSoot=vec3f(0.085,0.074,0.064);
+      let sootMix=clamp(fissure*0.58+max(0.0,-spallDetail)*0.24+dmgW*0.18,0.0,0.62);
+      albedo=mix(spalledAlbedo,creviceSoot,sootMix*dmgW);
+      let blockFacet=0.35*spallDetail+0.20*gritDetail-0.55*fissure;
+      relief+=blockFacet*0.028*dmgW*detailFade;
+      ambientVisibility*=mix(1.0,0.62+0.38*clamp(1.0-fissure*0.65+spallDetail*0.20,0.0,1.0),dmgW*0.75);
     }else{
-      let splinterNoise=gnoise(world.xz*7.5+vec2f(world.y*4.2,-world.y*5.1));
-      let rawWood=select(vec3f(0.11,0.085,0.065),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
-      let sootTint=vec3f(0.042,0.038,0.034);
-      let dmgAlbedo=mix(rawWood,sootTint,clamp(dmgW*0.58+charNoise*0.28-splinterNoise*0.20,0.0,1.0));
-      albedo=mix(albedo,dmgAlbedo,clamp(dmgW*0.84,0.0,0.92));
-      relief+=(splinterNoise*0.095-0.045)*dmgW*detailFade;
+      let splinterNoise=landOrientedDetail(world+vec3f(3.3,7.9,12.1),n,dx,dy,5.5);
+      let rawWood=select(vec3f(0.14,0.105,0.080),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
+      let sootTint=vec3f(0.065,0.056,0.048);
+      let dmgAlbedo=mix(albedo,rawWood,clamp(dmgW*0.45+splinterNoise*0.25,0.0,0.65));
+      albedo=mix(dmgAlbedo,sootTint,clamp((fissure*0.48+dmgW*0.25-splinterNoise*0.18)*dmgW,0.0,0.58));
+      relief+=(splinterNoise*0.024-fissure*0.020)*dmgW*detailFade;
     }
-    roughness=max(roughness,0.95);
+    roughness=max(roughness,0.93);
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);

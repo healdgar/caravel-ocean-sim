@@ -4147,11 +4147,24 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         fromOrthophotoFootprint: true,
       });
     }
-    // Declarative Cairn JSON landmarks for orthophoto colonial ports
-    addPrefab('catedral_basilica', 16, 108, 0, 4.0, {
+    // Declarative Cairn JSON landmarks for orthophoto colonial ports (placed clear of existing orthophoto footprints)
+    const findClearPortOffset = (baseAlong, baseInland, minClearDist = 34) => {
+      let along = baseAlong;
+      const inland = baseInland;
+      for (let step = 0; step < 8; step++) {
+        const candPos = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + inland);
+        const overlaps = instances.some((inst) => Math.hypot(inst.x - candPos.x, inst.z - candPos.z) < minClearDist);
+        if (!overlaps) return [along, inland];
+        along += baseAlong >= 0 ? 28 : -28;
+      }
+      return [along, inland];
+    };
+    const [catAlong, catInland] = findClearPortOffset(82, 108, 36);
+    addPrefab('catedral_basilica', catAlong, catInland, 0, 4.0, {
       label: 'Catedral Basílica Metropolitana',
     });
-    addPrefab('palacio_del_gobernador', 44, 56, 0, 3.5, {
+    const [palAlong, palInland] = findClearPortOffset(-82, 64, 34);
+    addPrefab('palacio_del_gobernador', palAlong, palInland, 0, 3.5, {
       label: 'Palacio de los Capitanes Generales (Governor Palace)',
     });
     // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
@@ -4180,18 +4193,18 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   } else if (allowColonialPort && isLisbonRoyalDock) {
     // 2. Continuous Stone Seawall & Royal Quays (Cais de Pedra do Terreiro do Paço & Ribeira das Naus)
-    addPrefab('stone_quay_seawall', 12, 8, 0, 2.5, {
+    addPrefab('stone_quay_seawall', -2, 8, 0, 2.5, {
       label: 'Cais de Pedra do Terreiro do Paço',
-      width: 72,
-      length: 15,
+      width: 52,
+      length: 14,
     });
-    addPrefab('stone_quay_seawall', -58, 8, 0, 2.4, {
+    addPrefab('stone_quay_seawall', -64, 8, 0, 2.4, {
       label: 'Muralha da Ribeira das Naus',
-      width: 66,
+      width: 58,
       length: 14,
     });
     // 3. Paço da Ribeira, Casa da Índia, Torreão do Paço & Arcaded Merchant Loggia on the Terreiro do Paço
-    addPrefab('torreon_atalaya_farol', 28, 2, 0, 2.8, {
+    addPrefab('torreon_atalaya_farol', 38, 4, 0, 2.8, {
       label: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
       width: 18,
       length: 22,
@@ -4199,23 +4212,23 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       foundationDepth: 9.5,
       cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao,
     });
-    addPrefab('casa_de_contratacion', 18, 36, 0, 3.0, {
+    addPrefab('casa_de_contratacion', 16, 40, 0, 3.0, {
       label: 'Paço da Ribeira & Casa da Índia (Royal Customhouse)',
     });
-    addPrefab('modular_patio_cloister', 48, 38, 0, 3.2, {
+    addPrefab('modular_patio_cloister', 52, 42, 0, 3.2, {
       label: 'Paços Reais da Ribeira (Royal Palace Cloister)',
     });
-    addPrefab('open_lonja_loggia', -12, 26, 0, 2.8, {
+    addPrefab('open_lonja_loggia', -14, 28, 0, 2.8, {
       label: 'Varanda da Casa da Índia (Spice & Charter Loggia)',
     });
     // 4. Ribeira das Naus Royal Shipyard, Multi-Gable Arsenal, Armazéns da Guiné e Índia & Caravels on the Ways
-    addPrefab('royal_atarazanas_arsenal', -46, 36, 0, 2.9, {
+    addPrefab('royal_atarazanas_arsenal', -50, 42, 0, 2.9, {
       label: 'Ribeira das Naus ·Tercenas Reais (Royal Shipyard Halls)',
       width: 34,
       length: 36,
       height: 9.2,
     });
-    addPrefab('royal_warehouse', -86, 38, 0, 2.9, {
+    addPrefab('royal_warehouse', -90, 44, 0, 2.9, {
       label: 'Armazéns da Guiné e Índia (Royal Naval Storehouses)',
       length: 34,
       width: 15,
@@ -4223,17 +4236,17 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('astillero_and_moored_hull', -36, 12, 4, 1.9, {
       label: 'Carreira da Índia Nau on the Stocks (Ribeira das Naus)',
     });
-    addPrefab('astillero_and_moored_hull', -60, 12, -4, 1.9, {
+    addPrefab('astillero_and_moored_hull', -62, 12, -4, 1.9, {
       label: 'Royal Caravel on the Slipway (Ribeira das Naus)',
     });
-    addPrefab('careening_shed', -98, 16, 8, 2.2, {
+    addPrefab('careening_shed', -104, 16, 8, 2.2, {
       label: 'Casa do Breu (Careening & Pitch Works)',
     });
     // 5. Manueline River Bastion, Torre de Belém & Mosteiro dos Jerónimos on the Tagus approach
-    addPrefab('stone_sea_bastion', -132, -14, 12, 3.2, {
+    addPrefab('stone_sea_bastion', -124, -12, 12, 3.2, {
       label: 'Baluarte de São Vicente · Torre de Belém (Tagus Bastion)',
     });
-    addPrefab('torreon_atalaya_farol', -148, -22, 0, 3.4, {
+    addPrefab('torreon_atalaya_farol', -158, -22, 0, 3.4, {
       label: 'Torre de Belém Watchtower & River Beacon',
       width: 18,
       length: 28,
@@ -4241,11 +4254,11 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       foundationDepth: 9.5,
       cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.torre_de_belem_manuelina,
     });
-    addPrefab('mosteiro_dos_jeronimos', -112, 72, 0, 3.8, {
+    addPrefab('mosteiro_dos_jeronimos', -126, 86, 0, 3.8, {
       label: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
     });
     // 6. Sé Patriarcal de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
-    addPrefab('mission_chapel', 58, 84, 0, 4.2, {
+    addPrefab('mission_chapel', 64, 88, 0, 4.2, {
       label: 'Sé Patriarcal de Lisboa (Cathedral)',
       width: 24,
       length: 34,
@@ -4253,25 +4266,25 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       foundationDepth: 5.5,
       cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa,
     });
-    addPrefab('bastion_trace_fortress', 108, 118, -10, 5.2, {
+    addPrefab('bastion_trace_fortress', 114, 122, -10, 5.2, {
       label: 'Castelo de São Jorge (Royal Citadel)',
     });
-    addPrefab('curtain_wall_and_gate', 22, 112, 0, 4.0, {
+    addPrefab('curtain_wall_and_gate', 22, 118, 0, 4.0, {
       label: 'Arco da Ribeira · Muralha Fernandina',
     });
-    addPrefab('acueducto_de_piedra', -52, 118, 8, 4.2, {
+    addPrefab('acueducto_de_piedra', -52, 124, 8, 4.2, {
       label: 'Aqueduto Real & Arcos da Água Livre',
     });
-    addPrefab('colonial_town_block', -16, 78, 0, 3.6, {
+    addPrefab('colonial_town_block', -16, 82, 0, 3.6, {
       label: 'Rua Nova dos Mercadores (Merchant Quarter)',
     });
-    addPrefab('colonial_town_block', 24, 78, 0, 3.6, {
+    addPrefab('colonial_town_block', 24, 82, 0, 3.6, {
       label: 'Bairro da Ribeira Velha',
     });
-    addPrefab('l_wing_u_wing_solar', -56, 78, 90, 3.5, {
+    addPrefab('l_wing_u_wing_solar', -58, 84, 90, 3.5, {
       label: 'Paço dos Estaus & Noble Solar',
     });
-    addPrefab('single_nave_solar', 84, 54, 0, 3.6, {
+    addPrefab('single_nave_solar', 88, 56, 0, 3.6, {
       label: 'Casario de Alfama',
     });
     addPrefab('walled_mule_corral', -22, 116, 0, 4.0, {
@@ -5340,8 +5353,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
     const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
     if (cairnSpec) {
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
+      const hasOwnPlinth = Array.isArray(cairnSpec.primitives) && cairnSpec.primitives.some((p) => p?.partGroup === 'foundation_plinth');
+      if (!hasOwnPlinth) {
+        beginSection('foundation_plinth');
+        emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
+      }
       const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
       emitCairnScene(cairnSpec, {
         toWorld: localToCairnWorld,

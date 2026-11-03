@@ -1836,6 +1836,58 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
     maxAspectStretchError < 1e-4,
     `Rigid 3D Voronoi block transformation preserves quad aspect ratios with zero shard stretching (max error ${maxAspectStretchError})`
   );
+
+  // 6. Verify multi-round bombardment continues dropping and crumbling walls across Rounds 1, 2, 3, and 4
+  const multiVerts = new Float32Array(cathedral.vertices);
+  const meanZoneY = () => {
+    let sumY = 0, count = 0;
+    for (let v = 0; v < origVerts.length / 8; v++) {
+      const at = v * 8;
+      if (Math.abs(origVerts[at]) < 6.0 && origVerts[at + 1] > 2.5 && Math.abs(origVerts[at + 2] + 12.0) < 4.5) {
+        sumY += multiVerts[at + 1];
+        count++;
+      }
+    }
+    return sumY / Math.max(1, count);
+  };
+  const y0 = meanZoneY();
+  const roundDropY = [y0];
+  for (let round = 1; round <= 4; round++) {
+    bakeBuildingImpactDeformations(
+      multiVerts,
+      [
+        {
+          kind: 'stone-crater',
+          x: 0,
+          y: 5.5,
+          z: -12.5,
+          nx: 0,
+          ny: 0,
+          nz: -1,
+          radius: 2.2,
+          stepDepth: 0.85,
+          severity: 0.95,
+        },
+        {
+          kind: 'building-collapse',
+          x: 0,
+          y: 5.5,
+          z: -12.5,
+          radius: 8.5,
+          stepDepth: 1.45,
+          powderFraction: 0.45,
+        },
+      ],
+      8
+    );
+    roundDropY.push(meanZoneY());
+  }
+  for (let r = 1; r <= 4; r++) {
+    assert.ok(
+      roundDropY[r] < roundDropY[r - 1] - 0.15,
+      `Expected Round ${r} bombardment to further lower wall elevation (${roundDropY[r].toFixed(3)}m < ${roundDropY[r - 1].toFixed(3)}m)`
+    );
+  }
 });
 
 
