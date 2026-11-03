@@ -118,6 +118,12 @@ test('1550 Lisbon departure dock (Ribeira das Naus & Cais da Índia) models L-he
   assert.ok(labels.some((l) => l.includes('Paço da Ribeira & Casa da Índia')), 'includes Casa da Índia');
   assert.ok(labels.some((l) => l.includes('Ribeira das Naus')), 'includes Ribeira das Naus Royal Shipyard');
   assert.ok(labels.some((l) => l.includes('Torre de Belém')), 'includes Torre de Belém / Baluarte river bastion');
+  assert.ok(labels.some((l) => l.includes('Mosteiro dos Jerónimos')), 'includes Mosteiro dos Jerónimos at Belém');
+  assert.ok(labels.some((l) => l.includes('Sé Patriarcal de Lisboa')), 'includes Sé Patriarcal de Lisboa');
+  assert.ok(labels.some((l) => l.includes('Torreão do Paço da Ribeira')), 'includes Torreão do Paço da Ribeira');
+  assert.ok(labels.some((l) => l.includes('Aqueduto Real')), 'includes Aqueduto Real & Arcos da Água Livre');
+  const cairnLandmarks = pack.port.instances.filter((i) => Boolean(i.cairnSpec));
+  assert.ok(cairnLandmarks.length >= 5, `Lisbon harbor places >= 5 Cairn declarative JSON landmarks (got ${cairnLandmarks.length})`);
 
   const piers = pack.port.instances.filter((i) => i.prefabId === 'timber_mole_pier');
   assert.equal(piers.length, 3, 'Lisbon harbor has main pier, L-head mole, and shipyard fitting-out pier');

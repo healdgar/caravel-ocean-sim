@@ -1745,6 +1745,23 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
   const customParts = getBuildingParts('custom_cairn_keep', { cairnSpec: customCairnSpec });
   assert.ok(customParts.vertexCount > 400, 'Custom Cairn scene with shapes, walls, arches, domes, stairs & voxels compiles cleanly');
 
+  // Verify all 7 Lisboa & Spanish Main Cairn landmark templates compile with valid part assemblies
+  const requiredTemplates = [
+    'catedral_basilica',
+    'torre_de_belem_manuelina',
+    'mosteiro_dos_jeronimos',
+    'se_patriarcal_de_lisboa',
+    'paco_da_ribeira_torreao',
+    'palacio_del_gobernador',
+    'acueducto_de_piedra',
+  ];
+  for (const tmplId of requiredTemplates) {
+    assert.ok(CAIRN_ARCHITECTURAL_TEMPLATES[tmplId], `CAIRN_ARCHITECTURAL_TEMPLATES defines ${tmplId}`);
+    const tmplParts = getBuildingParts(tmplId);
+    assert.ok(tmplParts.vertexCount > 300, `${tmplId} compiles >300 vertices (got ${tmplParts.vertexCount})`);
+    assert.ok(tmplParts.partAssembly.partCount >= 4, `${tmplId} exposes >=4 modular part groups (got ${tmplParts.partAssembly.partCount})`);
+  }
+
   // 5. Verify 3D Voronoi block-cell detachment keeps every quad face 100% rigid (zero edge stretching/shearing) under cannonfire
   const voronoiA = sampleVoronoiBlockCell(2.1, 3.4, -4.2, false);
   const voronoiB = sampleVoronoiBlockCell(2.15, 3.42, -4.18, false);

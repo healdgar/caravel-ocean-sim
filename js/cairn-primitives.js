@@ -722,6 +722,14 @@ export function emitCairnScene(sceneSpec, helpers) {
 export const CAIRN_ARCHITECTURAL_TEMPLATES = {
   catedral_basilica: {
     schemaVersion: '0.4',
+    name: 'Catedral Basílica Metropolitana',
+    width: 24,
+    length: 34,
+    height: 18,
+    foundationDepth: 4.0,
+    materialKind: 11,
+    roofPitch: 3.5,
+    waterfront: false,
     shapes: {
       bell_tower_tier: {
         primitive: 'group',
@@ -915,6 +923,989 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -3.0] },
       { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -8.0] },
       { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -3.0] },
+    ],
+  },
+
+  // 1519 Lisboa · Torre de Belém (Baluarte de São Vicente a par de Belém)
+  // Designed by Francisco de Arruda in pedra lioz limestone: polygonal seaward casemate bastion
+  // with 6 cylindrical Manueline bartizan sentry turrets (garitas) topped by ribbed melon cupolas,
+  // voxel-crenellated Order of Christ shield merlons, and a 4-story square Torre de Menagem keep
+  // with south-facing 7-arch Renaissance loggia and overhanging machicolation gallery.
+  torre_de_belem_manuelina: {
+    schemaVersion: '0.4',
+    name: 'Torre de Belém · Baluarte de São Vicente',
+    width: 18,
+    length: 28,
+    height: 22.5,
+    foundationDepth: 9.5,
+    materialKind: 11,
+    roofPitch: 2.2,
+    waterfront: true,
+    shapes: {
+      manueline_garita: {
+        primitive: 'group',
+        children: [
+          // Tapered corbel base
+          {
+            primitive: 'cone',
+            base: [0, -1.35, 0],
+            height: 1.35,
+            radiusBottom: 0.22,
+            radiusTop: 1.05,
+            segments: 8,
+            material: 'limestone',
+          },
+          // Cylindrical watch turret body
+          {
+            primitive: 'cylinder',
+            base: [0, 0, 0],
+            height: 2.45,
+            radius: 0.98,
+            segments: 8,
+            material: 'limestone',
+          },
+          // Ribbed Moorish-Manueline melon cupola & finial
+          {
+            primitive: 'dome',
+            base: [0, 2.45, 0],
+            radius: 1.02,
+            height: 1.45,
+            segments: 8,
+            rings: 4,
+            lantern: true,
+            material: 'limestone',
+          },
+        ],
+      },
+      keep_corner_turret: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'cylinder',
+            base: [0, 0, 0],
+            height: 2.8,
+            radius: 0.78,
+            segments: 8,
+            material: 'limestone',
+          },
+          {
+            primitive: 'dome',
+            base: [0, 2.8, 0],
+            radius: 0.82,
+            height: 1.25,
+            segments: 8,
+            rings: 4,
+            lantern: true,
+            material: 'limestone',
+          },
+        ],
+      },
+    },
+    primitives: [
+      // Submerged & intertidal pedra lioz cutwater plinth in the Tagus shallows
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-8.6, -8.5, -13.8],
+        to: [8.6, 0.85, 12.2],
+        topInset: 0.35,
+        material: 'ashlar',
+      },
+      // Seaward polygonal casemate bastion (Baluarte) projecting into the Tagus
+      {
+        primitive: 'box',
+        partGroup: 'bastion_casemate_walls',
+        from: [-7.8, 0.85, -9.8],
+        to: [7.8, 6.2, 2.8],
+        topInset: 0.42,
+        material: 'limestone',
+      },
+      // Beveled seaward prow of the polygonal bastion
+      {
+        primitive: 'box',
+        partGroup: 'bastion_seaward_prow',
+        from: [-5.2, 0.85, -13.2],
+        to: [5.2, 6.2, -9.2],
+        topInset: 0.32,
+        material: 'limestone',
+      },
+      // Bastion upper esplanade deck & sunken courtyard opening frame
+      {
+        primitive: 'box',
+        partGroup: 'bastion_terreplein_deck',
+        from: [-7.4, 5.8, -12.6],
+        to: [7.4, 6.45, 2.6],
+        material: 'cobble_pad',
+      },
+      // Voxel-crenellated bastion parapet merlons (Order of Christ shield battlements)
+      {
+        primitive: 'blocks',
+        partGroup: 'bastion_parapet_merlons',
+        gridSize: 0.85,
+        material: 'limestone',
+        runs: [
+          { x: [-8, 8], y: 8, z: -11, step: 2 },
+          { x: [-5, 5], y: 8, z: -15, step: 2 },
+          { x: -9, y: 8, z: [-11, 2], step: 2 },
+          { x: 9, y: 8, z: [-11, 2], step: 2 },
+        ],
+      },
+      // Six iconic cylindrical Manueline bartizan sentry turrets (Garitas) on the bastion corners
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, -9.4] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, -9.4] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-4.9, 5.4, -12.9] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [4.9, 5.4, -12.9] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, 1.8] },
+      { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, 1.8] },
+      // 4-story square Torre de Menagem keep rising on the north end of the bastion
+      {
+        primitive: 'box',
+        partGroup: 'keep_lower_tiers',
+        from: [-5.4, 0.85, 2.0],
+        to: [5.4, 13.8, 11.4],
+        topInset: 0.18,
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'keep_upper_tiers',
+        from: [-5.1, 13.8, 2.3],
+        to: [5.1, 20.6, 11.1],
+        material: 'whitewash',
+      },
+      // South-facing 2nd-story Manueline arched loggia (Varanda do Renascimento) overlooking the bastion
+      {
+        primitive: 'box',
+        partGroup: 'manueline_loggia_deck',
+        from: [-4.8, 7.2, 0.1],
+        to: [4.8, 7.85, 2.2],
+        material: 'limestone',
+      },
+      {
+        primitive: 'wall',
+        partGroup: 'manueline_loggia_arcade',
+        from: [-4.6, 7.85, 0.25],
+        to: [4.6, 7.85, 0.25],
+        height: 3.3,
+        thickness: 0.48,
+        material: 'limestone',
+        openings: [
+          { offset: 1.15, width: 0.92, height: 2.3, sillHeight: 0.45 },
+          { offset: 2.75, width: 0.92, height: 2.3, sillHeight: 0.45 },
+          { offset: 4.6, width: 1.05, height: 2.4, sillHeight: 0.45 },
+          { offset: 6.45, width: 0.92, height: 2.3, sillHeight: 0.45 },
+          { offset: 8.05, width: 0.92, height: 2.3, sillHeight: 0.45 },
+        ],
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'manueline_loggia_canopy',
+        from: [-4.8, 11.15, 0.1],
+        to: [4.8, 12.15, 2.2],
+        height: 1.0,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+      // Overhanging corbeled machicolation gallery & rooftop battlement parapet on the Keep
+      {
+        primitive: 'box',
+        partGroup: 'keep_machicolation_cornice',
+        from: [-5.65, 19.8, 1.75],
+        to: [5.65, 21.4, 11.65],
+        material: 'limestone',
+      },
+      {
+        primitive: 'blocks',
+        partGroup: 'keep_crown_merlons',
+        gridSize: 0.8,
+        material: 'limestone',
+        runs: [
+          { x: [-6, 6], y: 27, z: 3, step: 2 },
+          { x: [-6, 6], y: 27, z: 14, step: 2 },
+          { x: -6, y: 27, z: [3, 14], step: 2 },
+          { x: 6, y: 27, z: [3, 14], step: 2 },
+        ],
+      },
+      // Four upper corner watch turrets crowning the Torre de Menagem
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [-5.3, 19.6, 2.0] },
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [5.3, 19.6, 2.0] },
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [-5.3, 19.6, 11.3] },
+      { shape: 'keep_corner_turret', partGroup: 'keep_corner_turrets', position: [5.3, 19.6, 11.3] },
+    ],
+  },
+
+  // 1550 Lisboa · Mosteiro dos Jerónimos (Real Mosteiro de Santa Maria de Belém)
+  // Built in golden-white pedra lioz limestone by Diogo de Boitaca & João de Castilho:
+  // long hall-church nave with carved Manueline buttresses, ornate Portal Sul, twin octagonal
+  // western bell towers with ribbed cupolas, and an adjoining two-story arcaded royal cloister.
+  mosteiro_dos_jeronimos: {
+    schemaVersion: '0.4',
+    name: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
+    width: 38,
+    length: 34,
+    height: 19.5,
+    foundationDepth: 4.5,
+    materialKind: 12,
+    roofPitch: 3.4,
+    waterfront: false,
+    shapes: {
+      manueline_buttress: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-0.48, 0, -0.65],
+            to: [0.48, 12.2, 0.65],
+            topInset: 0.1,
+            material: 'limestone',
+          },
+          // Carved pinnacle finial above the cornice
+          {
+            primitive: 'cone',
+            base: [0, 12.2, 0],
+            height: 2.1,
+            radiusBottom: 0.42,
+            radiusTop: 0.05,
+            segments: 6,
+            material: 'limestone',
+          },
+        ],
+      },
+      jeronimos_bell_tower: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-2.8, 0, -2.8],
+            to: [2.8, 12.8, 2.8],
+            topInset: 0.12,
+            material: 'limestone',
+          },
+          {
+            primitive: 'cylinder',
+            base: [0, 12.8, 0],
+            height: 3.6,
+            radius: 2.35,
+            segments: 8,
+            material: 'limestone',
+          },
+          {
+            primitive: 'dome',
+            base: [0, 16.4, 0],
+            radius: 2.4,
+            height: 2.8,
+            segments: 8,
+            rings: 4,
+            lantern: true,
+            material: 'limestone',
+          },
+        ],
+      },
+    },
+    primitives: [
+      // Raised pedra lioz parvis terrace & steps facing the Tagus
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-18.5, -3.8, -14.5],
+        to: [18.5, 0.75, 16.5],
+        material: 'ashlar',
+      },
+      {
+        primitive: 'stairs',
+        partGroup: 'south_portal_steps',
+        from: [0, 0.0, -16.8],
+        to: [0, 0.75, -14.2],
+        width: 9.5,
+        material: 'limestone',
+      },
+      // Hall-church body (Igreja de Santa Maria de Belém)
+      {
+        primitive: 'box',
+        partGroup: 'church_hall_nave',
+        from: [-16.8, 0.75, -11.5],
+        to: [16.8, 12.6, 1.5],
+        material: 'whitewash',
+      },
+      // North transept & high altar chancel (Capela-Mor)
+      {
+        primitive: 'box',
+        partGroup: 'transept_and_chancel',
+        from: [8.5, 0.75, -12.8],
+        to: [18.2, 13.4, 4.2],
+        material: 'limestone',
+      },
+      // Ornate Portal Sul (South Portal by João de Castilho) with carved archivolts & gable tabernacle
+      {
+        primitive: 'box',
+        partGroup: 'portal_sul_frontispiece',
+        from: [-3.8, 0.75, -12.55],
+        to: [3.8, 12.2, -11.2],
+        material: 'limestone',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'portal_sul_arch',
+        from: [-2.4, 0.75, -12.75],
+        to: [2.4, 0.75, -12.75],
+        height: 5.4,
+        thickness: 0.95,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      {
+        primitive: 'cone',
+        partGroup: 'portal_sul_pinnacle',
+        base: [0, 12.2, -12.0],
+        height: 3.2,
+        radiusBottom: 0.85,
+        radiusTop: 0.06,
+        segments: 6,
+        material: 'limestone',
+      },
+      // Iterated Manueline buttresses & pinnacles along the south facade
+      {
+        primitive: 'repeat',
+        partGroup: 'south_facade_buttresses',
+        count: 6,
+        step: [5.6, 0, 0],
+        of: {
+          shape: 'manueline_buttress',
+          position: [-14.0, 0.75, -11.6],
+        },
+      },
+      // Twin western bell towers with octagonal belfries & ribbed cupolas
+      { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -9.8] },
+      { shape: 'jeronimos_bell_tower', partGroup: 'west_bell_towers', position: [-15.2, 0.75, -0.2] },
+      // Pitched terracotta roofs over the hall-church & transept
+      {
+        primitive: 'roof',
+        partGroup: 'church_nave_roof',
+        from: [-16.8, 12.6, -11.5],
+        to: [16.8, 16.0, 1.5],
+        height: 3.4,
+        hipRatio: 0.18,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'dome',
+        partGroup: 'crossing_lantern_dome',
+        base: [12.5, 13.4, -4.2],
+        drumHeight: 2.2,
+        radius: 3.8,
+        height: 3.4,
+        segments: 8,
+        lantern: true,
+        material: 'limestone',
+      },
+      // Adjoining Two-Story Manueline Royal Cloister (Claustro Real) on the north side
+      {
+        primitive: 'box',
+        partGroup: 'cloister_courtyard_paving',
+        from: [-13.5, 0.75, 1.5],
+        to: [8.5, 0.95, 15.8],
+        material: 'cobble_pad',
+      },
+      // Octagonal renaissance fountain in the center of the Claustro Real
+      {
+        primitive: 'cylinder',
+        partGroup: 'cloister_fountain',
+        base: [-2.5, 0.95, 8.6],
+        height: 1.65,
+        radius: 1.55,
+        segments: 8,
+        material: 'limestone',
+      },
+      // West, North, and East two-story cloister wings enclosing the courtyard
+      {
+        primitive: 'box',
+        partGroup: 'cloister_west_wing',
+        from: [-15.8, 0.75, 1.5],
+        to: [-11.6, 8.6, 15.8],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'cloister_north_wing',
+        from: [-15.8, 0.75, 12.2],
+        to: [10.8, 8.6, 16.2],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'cloister_east_wing',
+        from: [6.6, 0.75, 1.5],
+        to: [10.8, 8.6, 15.8],
+        material: 'cream_stucco',
+      },
+      // Cloister inner arcaded walls with round-headed Manueline openings
+      {
+        primitive: 'wall',
+        partGroup: 'cloister_inner_arcade',
+        from: [-11.4, 0.95, 12.0],
+        to: [6.4, 0.95, 12.0],
+        height: 7.4,
+        thickness: 0.55,
+        material: 'limestone',
+        openings: [
+          { offset: 3.0, width: 1.8, height: 3.2, sillHeight: 0.2 },
+          { offset: 6.8, width: 1.8, height: 3.2, sillHeight: 0.2 },
+          { offset: 10.6, width: 1.8, height: 3.2, sillHeight: 0.2 },
+          { offset: 14.4, width: 1.8, height: 3.2, sillHeight: 0.2 },
+        ],
+      },
+      // Terracotta hipped roofs over the three cloister ranges
+      {
+        primitive: 'roof',
+        partGroup: 'cloister_north_roof',
+        from: [-16.0, 8.6, 12.0],
+        to: [11.0, 10.8, 16.4],
+        height: 2.2,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'cloister_west_roof',
+        from: [-16.0, 8.6, 1.5],
+        to: [-11.4, 10.8, 16.0],
+        height: 2.2,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'cloister_east_roof',
+        from: [6.4, 8.6, 1.5],
+        to: [11.0, 10.8, 16.0],
+        height: 2.2,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550 Lisboa · Sé Patriarcal de Lisboa (Santa Maria Maior)
+  // Romanesque-Gothic fortress-cathedral founded 1147 above Alfama: twin square crenellated
+  // western bell towers with voxel battlements, deep recessed Romanesque portal, rose oculus,
+  // battlemented nave aisles, and octagonal crossing lantern tower (zimbório).
+  se_patriarcal_de_lisboa: {
+    schemaVersion: '0.4',
+    name: 'Sé Patriarcal de Lisboa (Cathedral)',
+    width: 24,
+    length: 34,
+    height: 19.0,
+    foundationDepth: 5.5,
+    materialKind: 11,
+    roofPitch: 3.0,
+    waterfront: false,
+    shapes: {
+      romanesque_bell_tower: {
+        primitive: 'group',
+        children: [
+          // Lower Romanesque ashlar shaft
+          {
+            primitive: 'box',
+            from: [-3.1, 0, -3.1],
+            to: [3.1, 10.5, 3.1],
+            topInset: 0.14,
+            material: 'ashlar',
+          },
+          // Upper belfry stage with paired arched bell openings
+          {
+            primitive: 'box',
+            from: [-2.95, 10.5, -2.95],
+            to: [2.95, 17.2, 2.95],
+            material: 'limestone',
+          },
+          // Projecting corbel cornice
+          {
+            primitive: 'box',
+            from: [-3.25, 16.8, -3.25],
+            to: [3.25, 17.5, 3.25],
+            material: 'ashlar',
+          },
+          // Iconic flat crenellated fortress battlements (voxel merlons)
+          {
+            primitive: 'blocks',
+            gridSize: 0.85,
+            material: 'ashlar',
+            runs: [
+              { x: [-3, 3], y: 21, z: -3, step: 2 },
+              { x: [-3, 3], y: 21, z: 3, step: 2 },
+              { x: -3, y: 21, z: [-3, 3], step: 2 },
+              { x: 3, y: 21, z: [-3, 3], step: 2 },
+            ],
+          },
+        ],
+      },
+    },
+    primitives: [
+      // Stepped Alfama hillside stone terrace plinth
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-11.8, -5.0, -16.2],
+        to: [11.8, 0.8, 16.2],
+        material: 'ashlar',
+      },
+      {
+        primitive: 'stairs',
+        partGroup: 'west_parvis_steps',
+        from: [0, 0.0, -18.5],
+        to: [0, 0.8, -15.8],
+        width: 8.2,
+        material: 'ashlar',
+      },
+      // Fortress-like side aisles & central Romanesque clerestory nave
+      {
+        primitive: 'box',
+        partGroup: 'side_aisles',
+        from: [-9.8, 0.8, -11.8],
+        to: [9.8, 7.8, 10.5],
+        material: 'limestone',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-5.2, 0.8, -12.8],
+        to: [5.2, 12.2, 12.8],
+        material: 'limestone',
+      },
+      // Projecting Romanesque transept & Gothic ambulatory apse
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-11.8, 0.8, 1.5],
+        to: [11.8, 10.8, 7.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'cylinder',
+        partGroup: 'gothic_ambulatory_apse',
+        base: [0, 0.8, 12.2],
+        height: 9.6,
+        radius: 5.4,
+        segments: 8,
+        material: 'limestone',
+      },
+      // Deep stepped Romanesque West Portal & Rose Window frontispiece between the twin towers
+      {
+        primitive: 'arch',
+        partGroup: 'west_romanesque_portal',
+        from: [-2.8, 0.8, -13.6],
+        to: [2.8, 0.8, -13.6],
+        height: 5.2,
+        thickness: 1.2,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      // Recessed Rose Window (Rosácea) frame above the portal
+      {
+        primitive: 'arch',
+        partGroup: 'west_rose_window',
+        from: [-2.4, 7.2, -13.35],
+        to: [2.4, 7.2, -13.35],
+        height: 3.4,
+        thickness: 0.65,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      // Twin Crenellated Western Bell Towers
+      { shape: 'romanesque_bell_tower', partGroup: 'north_west_tower', position: [-7.6, 0.8, -12.6] },
+      { shape: 'romanesque_bell_tower', partGroup: 'south_west_tower', position: [7.6, 0.8, -12.6] },
+      // Octagonal crossing lantern tower (Zimbório) with crenellated parapet & pyramidal tile roof
+      {
+        primitive: 'cylinder',
+        partGroup: 'crossing_zimborio_tower',
+        base: [0, 12.2, 4.6],
+        height: 4.2,
+        radius: 4.2,
+        segments: 8,
+        material: 'ashlar',
+      },
+      {
+        primitive: 'cone',
+        partGroup: 'crossing_zimborio_roof',
+        base: [0, 16.4, 4.6],
+        height: 2.6,
+        radiusBottom: 4.35,
+        radiusTop: 0.25,
+        segments: 8,
+        material: 'terracotta',
+      },
+      // Pitched terracotta roofs over nave and transept
+      {
+        primitive: 'roof',
+        partGroup: 'nave_roof',
+        from: [-5.4, 12.2, -10.2],
+        to: [5.4, 15.0, 12.6],
+        height: 2.8,
+        style: 'gable',
+        material: 'terracotta',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [-11.8, 10.8, 1.5],
+        to: [11.8, 13.2, 7.8],
+        height: 2.4,
+        hipRatio: 0.22,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550–1585 Lisboa · Torreão do Paço da Ribeira & Galeria das Damas
+  // Royal waterfront palace turret jutting directly over the Tagus quay between Terreiro do Paço
+  // and Ribeira das Naus: battered river bastion plinth with water stairs, 3-story rusticated
+  // ashlar turret with artillery casemates & royal library windows, monumental octagonal dome
+  // with lantern, and adjoining two-story arcaded Galeria das Damas.
+  paco_da_ribeira_torreao: {
+    schemaVersion: '0.4',
+    name: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
+    width: 18,
+    length: 22,
+    height: 20.5,
+    foundationDepth: 9.5,
+    materialKind: 11,
+    roofPitch: 3.2,
+    waterfront: true,
+    shapes: {
+      corner_obelisk_finial: {
+        primitive: 'cone',
+        base: [0, 0, 0],
+        height: 2.1,
+        radiusBottom: 0.42,
+        radiusTop: 0.06,
+        segments: 6,
+        material: 'limestone',
+      },
+    },
+    primitives: [
+      // Battered stone river bastion plinth rising out of the Tagus channel
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-8.4, -8.5, -10.6],
+        to: [8.4, 1.4, 10.6],
+        topInset: 0.45,
+        material: 'ashlar',
+      },
+      // Royal river embarkation steps descending to the Tagus waterline
+      {
+        primitive: 'stairs',
+        partGroup: 'royal_water_stairs',
+        from: [-8.6, -0.4, -6.5],
+        to: [-5.2, 1.4, -6.5],
+        width: 3.6,
+        material: 'limestone',
+      },
+      // Lower rusticated artillery & treasury casemate tier
+      {
+        primitive: 'box',
+        partGroup: 'torreao_lower_casemate',
+        from: [-7.4, 1.4, -9.4],
+        to: [7.4, 7.2, 5.4],
+        topInset: 0.22,
+        material: 'ashlar',
+      },
+      // Projecting stone stringcourse belt
+      {
+        primitive: 'box',
+        partGroup: 'torreao_belt_cornice',
+        from: [-7.75, 6.9, -9.75],
+        to: [7.75, 7.55, 5.75],
+        material: 'limestone',
+      },
+      // Upper two noble stories (Sala da Índia & Royal Library / Map Room)
+      {
+        primitive: 'box',
+        partGroup: 'torreao_noble_stories',
+        from: [-7.0, 7.55, -9.0],
+        to: [7.0, 15.2, 5.0],
+        material: 'whitewash',
+      },
+      // Seaward Tagus loggia arch & royal balcony on the south face
+      {
+        primitive: 'box',
+        partGroup: 'seaward_royal_balcony',
+        from: [-4.2, 7.3, -10.35],
+        to: [4.2, 7.9, -8.8],
+        material: 'limestone',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'seaward_royal_portal',
+        from: [-2.4, 7.9, -9.15],
+        to: [2.4, 7.9, -9.15],
+        height: 4.4,
+        thickness: 0.75,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+      // Crowning balustrade cornice & 4 corner Herrerian/Manueline obelisk finials
+      {
+        primitive: 'box',
+        partGroup: 'torreao_crown_cornice',
+        from: [-7.45, 14.8, -9.45],
+        to: [7.45, 15.65, 5.45],
+        material: 'limestone',
+      },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [-6.9, 15.65, -8.9] },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [6.9, 15.65, -8.9] },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [-6.9, 15.65, 4.9] },
+      { shape: 'corner_obelisk_finial', partGroup: 'corner_finials', position: [6.9, 15.65, 4.9] },
+      // Monumental octagonal palace dome & lantern crowning the Torreão
+      {
+        primitive: 'dome',
+        partGroup: 'torreao_imperial_dome',
+        base: [0, 15.65, -2.0],
+        drumHeight: 2.2,
+        radius: 5.6,
+        height: 4.8,
+        segments: 8,
+        rings: 5,
+        lantern: true,
+        material: 'terracotta',
+      },
+      // Adjoining landward Galeria das Damas wing with ground-floor stone arch loggia
+      {
+        primitive: 'box',
+        partGroup: 'galeria_das_damas_wing',
+        from: [-6.2, 1.4, 5.0],
+        to: [6.2, 12.2, 10.4],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'galeria_arcade',
+        from: [-4.2, 1.4, 10.4],
+        to: [4.2, 1.4, 10.4],
+        height: 4.2,
+        thickness: 0.85,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'galeria_roof',
+        from: [-6.4, 12.2, 4.8],
+        to: [6.4, 14.8, 10.6],
+        height: 2.6,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550–1650 Spanish Main & Iberian Viceregal Port Landmark · Palacio de los Capitanes Generales
+  // Two-story governor's palace facing the Plaza de Armas with 5-bay ground-floor radial stone
+  // voussoir arcade (soportal), upper noble gallery, corner ashlar mirador towers, and central
+  // royal coat-of-arms clock/bell turret.
+  palacio_del_gobernador: {
+    schemaVersion: '0.4',
+    name: 'Palacio de los Capitanes Generales (Governor Palace)',
+    width: 28,
+    length: 20,
+    height: 14.5,
+    foundationDepth: 3.8,
+    materialKind: 12,
+    roofPitch: 2.8,
+    waterfront: false,
+    shapes: {
+      arcade_arch_bay: {
+        primitive: 'arch',
+        from: [-1.85, 0, 0],
+        to: [1.85, 0, 0],
+        height: 3.8,
+        thickness: 0.68,
+        voussoirs: 7,
+        material: 'ashlar',
+      },
+      corner_mirador_tower: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-2.8, 0, -2.8],
+            to: [2.8, 12.6, 2.8],
+            material: 'limestone',
+          },
+          {
+            primitive: 'roof',
+            from: [-3.05, 12.6, -3.05],
+            to: [3.05, 14.8, 3.05],
+            height: 2.2,
+            hipRatio: 0.48,
+            material: 'terracotta',
+          },
+        ],
+      },
+    },
+    primitives: [
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-13.8, -3.5, -9.8],
+        to: [13.8, 0.65, 9.8],
+        material: 'ashlar',
+      },
+      // Main two-story palace block set behind the ground-floor vaulted portico
+      {
+        primitive: 'box',
+        partGroup: 'palace_main_hall',
+        from: [-11.2, 0.65, -6.4],
+        to: [11.2, 9.8, 8.8],
+        material: 'whitewash',
+      },
+      // Upper floor gallery projecting over the ground-floor arcade
+      {
+        primitive: 'box',
+        partGroup: 'upper_noble_gallery',
+        from: [-10.8, 5.1, -9.2],
+        to: [10.8, 9.8, -6.2],
+        material: 'cream_stucco',
+      },
+      // 5-bay ground-floor stone arch soportal along the plaza facade
+      {
+        primitive: 'repeat',
+        partGroup: 'plaza_soportal_arcade',
+        count: 5,
+        step: [4.2, 0, 0],
+        of: {
+          shape: 'arcade_arch_bay',
+          position: [-8.4, 0.65, -9.0],
+        },
+      },
+      // Twin corner ashlar mirador towers (Torreones Esquineros)
+      { shape: 'corner_mirador_tower', partGroup: 'west_mirador_tower', position: [-11.2, 0.65, -6.6] },
+      { shape: 'corner_mirador_tower', partGroup: 'east_mirador_tower', position: [11.2, 0.65, -6.6] },
+      // Central royal heraldic frontispiece & domed clock/bell turret
+      {
+        primitive: 'box',
+        partGroup: 'central_heraldic_tower',
+        from: [-2.6, 9.8, -9.3],
+        to: [2.6, 13.4, -5.2],
+        material: 'limestone',
+      },
+      {
+        primitive: 'dome',
+        partGroup: 'central_turret_dome',
+        base: [0, 13.4, -7.25],
+        radius: 2.1,
+        height: 2.2,
+        segments: 8,
+        lantern: true,
+        material: 'terracotta',
+      },
+      // Hipped terracotta roof over the main palace range
+      {
+        primitive: 'roof',
+        partGroup: 'palace_main_roof',
+        from: [-11.4, 9.8, -9.4],
+        to: [11.4, 12.6, 9.0],
+        height: 2.8,
+        hipRatio: 0.24,
+        material: 'terracotta',
+      },
+    ],
+  },
+
+  // 1550–1650 Acueducto Real de Sillería (Two-Tier Ashlar Stone Arch Aqueduct & Cistern Arcade)
+  // Combines voxel-built stepped cutwater piers with repeated lower & upper radial stone voussoir
+  // arches and a top stone water channel (specus).
+  acueducto_de_piedra: {
+    schemaVersion: '0.4',
+    name: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
+    width: 32,
+    length: 6.5,
+    height: 13.2,
+    foundationDepth: 4.5,
+    materialKind: 11,
+    roofPitch: 0.8,
+    waterfront: false,
+    shapes: {
+      lower_aqueduct_arch: {
+        primitive: 'arch',
+        from: [-2.8, 0, 0],
+        to: [2.8, 0, 0],
+        height: 6.8,
+        thickness: 1.65,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      upper_aqueduct_arch: {
+        primitive: 'arch',
+        from: [-2.6, 0, 0],
+        to: [2.6, 0, 0],
+        height: 4.2,
+        thickness: 1.35,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+    },
+    primitives: [
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-15.8, -4.0, -2.6],
+        to: [15.8, 0.5, 2.6],
+        material: 'ashlar',
+      },
+      // Voxel-built stepped cutwater buttresses at each pier base
+      {
+        primitive: 'blocks',
+        partGroup: 'aqueduct_cutwater_piers',
+        gridSize: 1.1,
+        material: 'ashlar',
+        runs: [
+          { x: -13, y: [1, 4], z: [-2, 2] },
+          { x: -8, y: [1, 4], z: [-2, 2] },
+          { x: -3, y: [1, 4], z: [-2, 2] },
+          { x: 3, y: [1, 4], z: [-2, 2] },
+          { x: 8, y: [1, 4], z: [-2, 2] },
+          { x: 13, y: [1, 4], z: [-2, 2] },
+        ],
+      },
+      // 5 lower monumental stone arches
+      {
+        primitive: 'repeat',
+        partGroup: 'lower_arch_tier',
+        count: 5,
+        step: [5.6, 0, 0],
+        of: {
+          shape: 'lower_aqueduct_arch',
+          position: [-11.2, 0.5, 0],
+        },
+      },
+      // Mid-tier stone stringcourse belt
+      {
+        primitive: 'box',
+        partGroup: 'mid_tier_cornice',
+        from: [-15.4, 7.3, -1.15],
+        to: [15.4, 7.95, 1.15],
+        material: 'limestone',
+      },
+      // 5 upper water-carrier arches
+      {
+        primitive: 'repeat',
+        partGroup: 'upper_arch_tier',
+        count: 5,
+        step: [5.6, 0, 0],
+        of: {
+          shape: 'upper_aqueduct_arch',
+          position: [-11.2, 7.95, 0],
+        },
+      },
+      // Top stone water specus channel & side parapets
+      {
+        primitive: 'box',
+        partGroup: 'aqueduct_water_channel',
+        from: [-15.6, 12.15, -1.25],
+        to: [15.6, 13.1, 1.25],
+        material: 'ashlar',
+      },
     ],
   },
 };

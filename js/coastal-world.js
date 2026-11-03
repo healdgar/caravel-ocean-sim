@@ -3877,7 +3877,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const bearingRad = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
   const instances = [];
   const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
-    const prefab = PORT_PREFABS[prefabId];
+    const cairnSpec = overrides?.cairnSpec ?? CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] ?? null;
+    const prefab = PORT_PREFABS[prefabId] ?? cairnSpec;
     let adjInland = inlandOffset;
     let pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
     let groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
@@ -3897,21 +3898,22 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     const yaw = bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
     instances.push({
       prefabId,
-      label: overrides?.label ?? prefab.label,
+      label: overrides?.label ?? prefab?.label ?? prefab?.name ?? prefabId,
       x: pos.x,
       y,
       z: pos.z,
       yaw,
-      length: overrides?.length ?? prefab.length,
-      width: overrides?.width ?? prefab.width,
-      height: overrides?.height ?? prefab.height,
-      foundationDepth: overrides?.foundationDepth ?? prefab.foundationDepth,
-      materialKind: overrides?.materialKind ?? prefab.materialKind,
-      roofPitch: overrides?.roofPitch ?? prefab.roofPitch,
-      waterfront: overrides?.waterfront ?? prefab.waterfront,
+      length: overrides?.length ?? prefab?.length ?? 24,
+      width: overrides?.width ?? prefab?.width ?? 18,
+      height: overrides?.height ?? prefab?.height ?? 12,
+      foundationDepth: overrides?.foundationDepth ?? prefab?.foundationDepth ?? 4.0,
+      materialKind: overrides?.materialKind ?? prefab?.materialKind ?? 11,
+      roofPitch: overrides?.roofPitch ?? prefab?.roofPitch ?? 2.8,
+      waterfront: overrides?.waterfront ?? prefab?.waterfront ?? false,
       friendlyToPlayer: overrides?.friendlyToPlayer ?? false,
-      indigenous: overrides?.indigenous ?? Boolean(prefab.indigenous),
+      indigenous: overrides?.indigenous ?? Boolean(prefab?.indigenous),
       cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
+      cairnSpec,
     });
   };
 
@@ -4145,6 +4147,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         fromOrthophotoFootprint: true,
       });
     }
+    // Declarative Cairn JSON landmarks for orthophoto colonial ports
+    addPrefab('catedral_basilica', 16, 108, 0, 4.0, {
+      label: 'Catedral Basílica Metropolitana',
+    });
+    addPrefab('palacio_del_gobernador', 44, 56, 0, 3.5, {
+      label: 'Palacio de los Capitanes Generales (Governor Palace)',
+    });
     // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
     if (colonyGrowth.expansionTier >= 1) {
       addPrefab('bastion_trace_fortress', -138, 16, 18, 4.4, {
@@ -4159,6 +4168,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     if (colonyGrowth.expansionTier >= 3) {
       addPrefab('curtain_wall_and_gate', 48, 128, 0, 4.2, {
         label: 'Muralla Real & Puerta de Tierra',
+      });
+      addPrefab('acueducto_de_piedra', -68, 118, 12, 4.0, {
+        label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
       });
     }
     if (colonyGrowth.expansionTier >= 4) {
@@ -4181,10 +4193,11 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     // 3. Paço da Ribeira, Casa da Índia, Torreão do Paço & Arcaded Merchant Loggia on the Terreiro do Paço
     addPrefab('torreon_atalaya_farol', 28, 2, 0, 2.8, {
       label: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
-      width: 15,
-      length: 15,
-      height: 14.5,
-      foundationDepth: 9.0,
+      width: 18,
+      length: 22,
+      height: 20.5,
+      foundationDepth: 9.5,
+      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao,
     });
     addPrefab('casa_de_contratacion', 18, 36, 0, 3.0, {
       label: 'Paço da Ribeira & Casa da Índia (Royal Customhouse)',
@@ -4216,24 +4229,38 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('careening_shed', -98, 16, 8, 2.2, {
       label: 'Casa do Breu (Careening & Pitch Works)',
     });
-    // 5. Manueline River Bastion & Watchtower (Baluarte da Ribeira / Torre de Belém on the Tagus approach)
+    // 5. Manueline River Bastion, Torre de Belém & Mosteiro dos Jerónimos on the Tagus approach
     addPrefab('stone_sea_bastion', -132, -14, 12, 3.2, {
       label: 'Baluarte de São Vicente · Torre de Belém (Tagus Bastion)',
     });
-    addPrefab('torreon_atalaya_farol', -146, -24, 0, 3.6, {
+    addPrefab('torreon_atalaya_farol', -148, -22, 0, 3.4, {
       label: 'Torre de Belém Watchtower & River Beacon',
-      height: 15.2,
+      width: 18,
+      length: 28,
+      height: 22.5,
       foundationDepth: 9.5,
+      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.torre_de_belem_manuelina,
     });
-    // 6. Sé de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
-    addPrefab('mission_chapel', 58, 84, 90, 4.2, {
+    addPrefab('mosteiro_dos_jeronimos', -112, 72, 0, 3.8, {
+      label: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
+    });
+    // 6. Sé Patriarcal de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
+    addPrefab('mission_chapel', 58, 84, 0, 4.2, {
       label: 'Sé Patriarcal de Lisboa (Cathedral)',
+      width: 24,
+      length: 34,
+      height: 19.0,
+      foundationDepth: 5.5,
+      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa,
     });
     addPrefab('bastion_trace_fortress', 108, 118, -10, 5.2, {
       label: 'Castelo de São Jorge (Royal Citadel)',
     });
     addPrefab('curtain_wall_and_gate', 22, 112, 0, 4.0, {
       label: 'Arco da Ribeira · Muralha Fernandina',
+    });
+    addPrefab('acueducto_de_piedra', -52, 118, 8, 4.2, {
+      label: 'Aqueduto Real & Arcos da Água Livre',
     });
     addPrefab('colonial_town_block', -16, 78, 0, 3.6, {
       label: 'Rua Nova dos Mercadores (Merchant Quarter)',
@@ -4465,10 +4492,19 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
       addPrefab('single_nave_solar', -74, 52, 0, 3.2);
       addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
-      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge & Frontier Palm-Thatch Bohíos
+      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge, Frontier Palm-Thatch Bohíos & Cairn Landmarks
       addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
       addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
       addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+      addPrefab('catedral_basilica', 8, 124, 0, 4.1, {
+        label: 'Catedral Basílica Metropolitana',
+      });
+      addPrefab('palacio_del_gobernador', 98, 52, 0, 3.5, {
+        label: 'Palacio de los Capitanes Generales (Governor Palace)',
+      });
+      addPrefab('acueducto_de_piedra', -74, 118, 12, 4.0, {
+        label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
+      });
 
       // 10. Progressive year-by-year & era-by-era expansion (1565–1689: Antonelli, Colonial Planting & High Buccaneer Eras)
       if (colonyGrowth.expansionTier >= 1) {
@@ -5302,6 +5338,24 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       inst.z - lx * sinY + lz * cosY,
     ];
 
+    const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
+    if (cairnSpec) {
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
+      const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
+      emitCairnScene(cairnSpec, {
+        toWorld: localToCairnWorld,
+        emitBox,
+        emitCylinder,
+        emitRoof,
+        pushQuad,
+        pushTri,
+        withPartGroup,
+      });
+      flushSection();
+      continue;
+    }
+
     // Only use static LRM template mesh if the instance is at canonical unstretched prefab dimensions (never stretch footprints!)
     const basePrefab = PORT_PREFABS[inst.prefabId];
     const isUnstretchedCanonical =
@@ -5318,24 +5372,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
       emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
-      flushSection();
-      continue;
-    }
-
-    const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
-    if (cairnSpec) {
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
-      const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
-      emitCairnScene(cairnSpec, {
-        toWorld: localToCairnWorld,
-        emitBox,
-        emitCylinder,
-        emitRoof,
-        pushQuad,
-        pushTri,
-        withPartGroup,
-      });
       flushSection();
       continue;
     }
@@ -6996,13 +7032,13 @@ export function getBuildingParts(prefabId, options = {}) {
     prefab = {
       id: prefabId,
       label: cairnTmpl.name || prefabId,
-      length: 34,
-      width: 22,
-      height: 18,
-      foundationDepth: 3.5,
-      materialKind: 11,
-      roofPitch: 3.5,
-      waterfront: false,
+      length: cairnTmpl.length ?? 34,
+      width: cairnTmpl.width ?? 22,
+      height: cairnTmpl.height ?? 18,
+      foundationDepth: cairnTmpl.foundationDepth ?? 3.5,
+      materialKind: cairnTmpl.materialKind ?? 11,
+      roofPitch: cairnTmpl.roofPitch ?? 3.5,
+      waterfront: cairnTmpl.waterfront ?? false,
       cairnSpec: cairnTmpl,
     };
   }
