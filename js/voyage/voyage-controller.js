@@ -644,8 +644,10 @@ export function createVoyageController(cfg) {
       voyage.dr.lon = geo.lon;
     }
     if (voyage.passive || voyage.distanceTrueNm < 0.05) {
+      const wasEngaged = helmsman.engaged;
       voyage.compassCourse = voyageWrap360(boat.heading - voyage.variation);
       orderCourse(helmsman, voyage.compassCourse, { beat: helmsman.beat });
+      if (voyage.passive) helmsman.engaged = wasEngaged;
     }
     attachExistingTerrain();
     syncAstronomy();

@@ -369,7 +369,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const driveFactor = isSunk
     ? Math.max(0, 1 - sinkProgress * 1.8) * 0.08
     : Math.max(0.04, (1 - Math.min(0.75, sinkRatio * 0.45)) * rigDrive * hullDrive);
-  const baseSailDragCoeff = 0.20 + 0.80 * (1 - rigInt);
+  const baseSailDragCoeff = 0.36 + 0.64 * (1 - rigInt);
   const sailing = boat.propulsion === 'sail';
   const rowing=Object.hasOwn(ROWING_DESIGNS,modelId),rowLoads=rowing?(boat.rowingLoads??={}):null;
   const external=boat.externalForce,heading=(boat.heading??0)*Math.PI/180;
@@ -383,7 +383,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.surgeVelocity=savedSurge;boat.leewayVelocity=savedLeeway;
   const target = boat.speed * KNOT_TO_MPS;
   const thrust = hydro.drag * target * Math.abs(target) * driveFactor;
-  const waveForce = -1025 * 9.81 * hydro.volume * slope * (1 - sinkProgress * 0.85);
+  const waveForce = -1025 * 9.81 * hydro.volume * slope * 0.35 * (1 - sinkProgress * 0.85);
   // Optional world-space loads (e.g. an anchor rode) pass through the same
   // inertial integrator as wind and wave pressure. Units: N, clockwise N m.
   const externalX=Number.isFinite(external?.x)?external.x:0,externalZ=Number.isFinite(external?.z)?external.z:0;
@@ -393,7 +393,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const attitude=boat.waveAttitude ?? boat.target ?? {roll:0,pitch:0};
   const scaleSpec=computeArchetypeScaleSpec(boat);
   const archetypeSailScale=scaleSpec.isDefaultScale?1:scaleSpec.sailAreaFactor;
-  const sailDriveScale=(modelId==='victory'?5.5:1.45*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor*archetypeSailScale;
+  const sailDriveScale=(modelId==='victory'?5.5:3.4*Math.sqrt(Math.max(1,boat.length/20)))*driveFactor*archetypeSailScale;
   let velocity = initial, distance = 0, sideways = boat.leewayVelocity ?? 0, sidewaysDistance = 0;
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
@@ -415,11 +415,12 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
     // diagonal resistance is implicit; this avoids explicit drag overshoot.
     stepBoatRotation(boat,'roll',attitude.roll??0,(loads?.rollMoment??0)+(blades?.rollMoment??0)+waterRollMom+water.rollDamping*boat.rollVelocity,h,water.rollDamping);
     stepBoatRotation(boat,'pitch',attitude.pitch??0,(loads?.pitchMoment??0)+(blades?.pitchMoment??0),h);
-    const sailForward=loads?(loads.forward>0?loads.forward*sailDriveScale:velocity>0?loads.forward*.15:loads.forward):thrust;
+    const lowSpeedDriveBoost=1+0.85*Math.max(0,1-Math.abs(velocity)/(3.0*KNOT_TO_MPS));
+    const sailForward=loads?(loads.forward>0?loads.forward*sailDriveScale*lowSpeedDriveBoost:velocity>0?loads.forward*.15:loads.forward):thrust;
     const force = sailForward + (blades?.forward??0)+waveForce + externalForward+water.forward;
     const free = velocity + force / inertia * h;
     const froude = Math.abs(velocity) / Math.sqrt(9.81 * boat.length);
-    const drag = hydro.drag * floodDragMul * (sailing && loads?.area > 0 ? baseSailDragCoeff + 80 * Math.max(0, froude - 0.30) ** 2 : 1);
+    const drag = hydro.drag * floodDragMul * (sailing && loads?.area > 0 ? baseSailDragCoeff + 120 * Math.max(0, froude - 0.28) ** 2 : 1);
     // Implicit signed quadratic drag: stable through zero and during reversals.
     const next = 2 * free / (1 + Math.sqrt(1 + 4 * drag / inertia * h * Math.abs(free)));
     distance += (velocity + next) * 0.5 * h;

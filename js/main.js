@@ -2138,7 +2138,7 @@ async function main() {
       canvas: v?.canvas,
       course: num(v?.compassCourse, 1),
       warp: v?.tier,
-      autopilot: Boolean(voyageCtl?.helmsman?.engaged),
+      autopilot: Boolean(!v?.passive && voyageCtl?.helmsman?.engaged),
       day: v?.dayAtSea,
     };
     const dmg = boat.damage;
@@ -2175,7 +2175,7 @@ async function main() {
         canvas: v.canvas,
         course: num(v.compassCourse, 1),
         warp: v.tier,
-        autopilot: Boolean(voyageCtl?.helmsman?.engaged),
+        autopilot: Boolean(!v.passive && voyageCtl?.helmsman?.engaged),
         beat: Boolean(voyageCtl?.helmsman?.beatToWind),
         waterDays: num(v.provisions?.water ?? v.stores?.waterDays, 1),
         foodDays: num(v.provisions?.food ?? v.stores?.foodDays, 1),
@@ -2568,7 +2568,8 @@ async function main() {
           voyageCtl.orderCanvas(qs.get('canvas'));
         }
         if(qs.has('course')&&Number.isFinite(Number(qs.get('course')))){
-          if(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot){
+          const voyageExplicitlyActive=qs.get('voyage')==='1'||qs.get('voyage')==='resume'||urlGameState?.voyage?.active===true;
+          if(voyageExplicitlyActive&&(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot)){
             voyageCtl.orderCompassCourse(Number(qs.get('course')));
           }else{
             v.compassCourse=((Number(qs.get('course'))%360)+360)%360;
@@ -2590,6 +2591,18 @@ async function main() {
         if(ud.surrendered)strikeVesselColors(boat,'Restored surrendered state');
         if(ud.casualties&&boat.damage.crewCasualties){
           Object.assign(boat.damage.crewCasualties,ud.casualties);
+        }
+      }
+      if(!BROADSIDE_SCENARIO&&boat.propulsion==='sail'&&LAND_STAGE!=='dock'&&!boat.damage?.sunk&&qs.get('canvas')!=='heave-to'){
+        const totalCanvas=(boat.sailFore??0)+(boat.sailMain??0)+(boat.sailMizzen??0);
+        if(totalCanvas>0.15&&P.windSpeed>0.5&&(!qs.has('boatSpeed')||Number(qs.get('boatSpeed'))>0)){
+          const savedR=boat.roll,savedP=boat.pitch;
+          for(let w=0;w<24;w++)stepBoatSurge(boat,0,1.0,P.windSpeed,P.windDir*D2R);
+          boat.roll=savedR;boat.pitch=savedP;boat.rollVelocity=0;boat.pitchVelocity=0;
+          boat.leewayVelocity=0;boat.leewayDistance=0;
+        }
+        if(Number.isFinite(urlGameState?.pos?.speed)&&urlGameState.pos.speed*KNOT_TO_MPS>(boat.surgeVelocity??0)){
+          boat.surgeVelocity=urlGameState.pos.speed*KNOT_TO_MPS;
         }
       }
       const allowRestoredEncounter=qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='');

@@ -263,3 +263,19 @@ test('straight rudder holds course at steerageway and full helm completes a tack
   assert.ok(turned>=135,`helm completes tack across the wind (turned ${turned.toFixed(1)} deg)`);
   assert.ok(minSpeed>2*KNOT_TO_MPS,'vessel retains headway through the eye of the wind');
 });
+
+test('loaded caravel on a reach in a 10-knot breeze accelerates briskly to realistic headway',()=>{
+  const loaded=vessel({
+    heading:268.24,
+    provisionDays:60,
+    cargoTonnes:40,
+    sailFore:1,
+    sailMain:1,
+    sailMizzen:1,
+  });
+  const windRad=251*Math.PI/180;
+  for(let i=0;i<24*30;i++)stepBoatSurge(loaded,0,1/30,5.5,windRad);
+  assert.ok(loaded.surgeVelocity>3.0*KNOT_TO_MPS,`24s reach speed (${(loaded.surgeVelocity/KNOT_TO_MPS).toFixed(2)} kn) exceeds 3.0 kn`);
+  for(let i=0;i<36*30;i++)stepBoatSurge(loaded,0,1/30,5.5,windRad);
+  assert.ok(loaded.surgeVelocity>4.5*KNOT_TO_MPS,`60s reach speed (${(loaded.surgeVelocity/KNOT_TO_MPS).toFixed(2)} kn) exceeds 4.5 kn`);
+});

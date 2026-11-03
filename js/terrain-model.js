@@ -456,12 +456,13 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
   const dx=boat.x-previousX,dz=boat.z-previousZ,distance=Math.hypot(dx,dz);
   const draft=boat.hydrodynamics?.draft??2;
   const groundingThreshold=-Math.min(2.4,Math.max(1.15,draft*0.34));
-  const shoalThreshold=-Math.max(2.6,draft*0.85);
+  const shoalThreshold=-Math.min(2.6,Math.max(1.55,draft*0.72));
   const prevBed=hullWorstBedHeight(heights,boat,previousX,previousZ,region,sample,options);
   const preSurge=Number.isFinite(boat.surgeVelocity)?boat.surgeVelocity:0;
   const preLeeway=Number.isFinite(boat.leewayVelocity)?boat.leewayVelocity:0;
   const stepImpactSpeed=distance>1e-4?Math.max(Math.hypot(preSurge,preLeeway),Math.min(12,distance*2)):Math.hypot(preSurge,preLeeway);
   const wasAground=Boolean(boat.aground);
+  const wasShoalScraping=Boolean(boat.shoalScraping);
   const steps=Math.max(1,Math.ceil(distance/6));
   for(let step=1;step<=steps;step++){
     const t=step/steps,x=previousX+dx*t,z=previousZ+dz*t;
@@ -538,8 +539,9 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
         hitStructure:probe.hitStructure,
       });
       const dragFactor=subInfo.friction??0.08;
-      if(typeof boat.surgeVelocity==='number')boat.surgeVelocity*=(1-scrape*dragFactor);
-      if(typeof boat.leewayVelocity==='number')boat.leewayVelocity*=(1-scrape*dragFactor);
+      const stepDist=Math.min(1,distance/Math.max(0.5,steps*2));
+      if(typeof boat.surgeVelocity==='number')boat.surgeVelocity*=(1-scrape*dragFactor*stepDist*0.25);
+      if(typeof boat.leewayVelocity==='number')boat.leewayVelocity*=(1-scrape*dragFactor*stepDist*0.25);
       boat.shoalScraping=scrape>0.05;
       if(boat.shoalScraping&&step===steps){
         const contact={
@@ -557,11 +559,11 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
           impactSpeed:stepImpactSpeed,
           preSurgeVelocity:preSurge,
           preLeewayVelocity:preLeeway,
-          freshImpact:true,
+          freshImpact:!wasShoalScraping&&scrape>0.35,
         };
         boat.groundingContact=contact;
         const handler=options?.onGroundingDamage??defaultGroundingDamageHandler;
-        if(typeof handler==='function'&&stepImpactSpeed>subInfo.safeTouchSpeed){
+        if(typeof handler==='function'&&contact.freshImpact&&stepImpactSpeed>Math.max(0.8,subInfo.safeTouchSpeed*1.5)){
           const rep=handler(boat,contact,options);
           if(rep&&typeof options?.onGrounding==='function'){
             options.onGrounding(boat,contact,rep);
