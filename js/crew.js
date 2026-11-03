@@ -908,7 +908,24 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
   } else if (inst.prefabId === 'torreon_atalaya_farol') {
     const rBase = Math.min(hw, hl);
     const yPlinth = yGround + 0.85;
-    if (inst.materialKind === 10) {
+    const cairnName = String(inst.cairnSpec?.name ?? inst.label ?? '');
+    if (cairnName.includes('Torre de Belém')) {
+      // Torre de Belém: 2 lookouts on the Keep crown (yGround + 21.0, z = 2..11) + 4 sentries on the seaward Bastion deck (yGround + 6.4, z = -9..1)
+      const yKeepRoof = yGround + 21.0;
+      const yBastionDeck = yGround + 6.4;
+      for (const sx of [-1, 1]) {
+        specs.push({ lx: sx * 2.8, ly: yKeepRoof, lz: 6.7, routeZ: [4.2, 9.2], localYaw: sx < 0 ? 0 : Math.PI, role: 'Vigía da Torre', stationKind: 'crown' });
+        specs.push({ lx: sx * 4.6, ly: yBastionDeck, lz: -6.2, routeZ: [-8.2, -3.2], localYaw: Math.PI, role: 'Bombardeiro do Baluarte', stationKind: 'rampart' });
+        specs.push({ lx: sx * 3.0, ly: yBastionDeck, lz: -10.8, routeZ: [-11.6, -9.8], localYaw: Math.PI, role: 'Alabardeiro Real', stationKind: 'plinth' });
+      }
+    } else if (cairnName.includes('Torreão do Paço')) {
+      // Torreão do Paço da Ribeira: 2 guards on the Seaward Royal Balcony (yGround + 7.9) + 2 sentries on the Crown Cornice (yGround + 15.65) + 2 at Water Stairs (yGround + 1.4)
+      for (const sx of [-1, 1]) {
+        specs.push({ lx: sx * 6.0, ly: yGround + 15.65, lz: -2.0, routeZ: [-6.5, 2.5], localYaw: Math.PI, role: 'Vigía do Torreão', stationKind: 'crown' });
+        specs.push({ lx: sx * 2.4, ly: yGround + 7.9, lz: -9.7, routeZ: [-9.7, -9.7], localYaw: Math.PI, role: 'Guarda Real da Varanda', stationKind: 'rampart' });
+        specs.push({ lx: sx * 3.2, ly: yGround + 1.4, lz: -9.8, routeZ: [-9.8, -9.8], localYaw: Math.PI, role: 'Alabardeiro do Cais', stationKind: 'plinth' });
+      }
+    } else if (inst.materialKind === 10) {
       for (const sx of [-1, 1]) {
         specs.push({ lx: sx * rBase * 0.35, ly: yTop, lz: -rBase * 0.35, routeZ: [-rBase * 0.35, -rBase * 0.35], localYaw: Math.PI, role: 'Vigía de Atalaya', stationKind: 'crown' });
         specs.push({ lx: sx * rBase * 0.68, ly: yPlinth, lz: -rBase - 0.35, routeZ: [-rBase - 0.35, -rBase + 0.45], localYaw: Math.PI, role: 'Centinela', stationKind: 'plinth' });

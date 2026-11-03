@@ -1762,6 +1762,25 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
     assert.ok(tmplParts.partAssembly.partCount >= 4, `${tmplId} exposes >=4 modular part groups (got ${tmplParts.partAssembly.partCount})`);
   }
 
+  // Verify Cairn `repeat`, `roof` material kind, and flush voxel battlements have zero missing sections or floating gaps
+  const aqueductParts = getBuildingParts('acueducto_de_piedra');
+  const aqueductGroupKeys = aqueductParts.partAssembly.parts.map((p) => p.partKey);
+  assert.ok(aqueductGroupKeys.includes('lower_arch_tier'), 'acueducto_de_piedra emits repeated lower_arch_tier arches');
+  assert.ok(aqueductGroupKeys.includes('upper_arch_tier'), 'acueducto_de_piedra emits repeated upper_arch_tier arches');
+  const palaceParts = getBuildingParts('palacio_del_gobernador');
+  assert.ok(
+    palaceParts.partAssembly.parts.some((p) => p.partKey === 'plaza_soportal_arcade'),
+    'palacio_del_gobernador emits repeated plaza_soportal_arcade arches'
+  );
+  const naveRoofSlopes = cathedral.partAssembly.parts.find((p) => p.partKey === 'roof_slopes');
+  assert.ok(naveRoofSlopes, 'catedral_basilica emits roof_slopes part');
+  const slopeVertIdx = cathedral.indices[naveRoofSlopes.firstIndex] * 8;
+  assert.equal(
+    Math.floor(cathedral.vertices[slopeVertIdx + 6]),
+    13,
+    'Cairn roof slopes use terracotta tile material kind 13 (not swapped with wallKind)'
+  );
+
   // 5. Verify 3D Voronoi block-cell detachment keeps every quad face 100% rigid (zero edge stretching/shearing) under cannonfire
   const voronoiA = sampleVoronoiBlockCell(2.1, 3.4, -4.2, false);
   const voronoiB = sampleVoronoiBlockCell(2.15, 3.42, -4.18, false);

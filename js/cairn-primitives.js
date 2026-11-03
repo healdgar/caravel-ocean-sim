@@ -241,10 +241,12 @@ export function expandCairnVoxelPrimitive(prim) {
         const y0 = Math.floor(Math.min(ry[0], ry[1])), y1 = Math.floor(Math.max(ry[0], ry[1]));
         const z0 = Math.floor(Math.min(rz[0], rz[1])), z1 = Math.floor(Math.max(rz[0], rz[1]));
         const step = Math.max(1, Math.round(resolveNumeric(run.step, 1)));
+        const stepX = x1 > x0 ? step : 1;
+        const stepZ = z1 > z0 ? step : 1;
         const rMat = run.material ?? mat;
-        for (let x = x0; x <= x1; x += x1 > x0 ? step : 1) {
+        for (let x = x0; x <= x1; x += stepX) {
           for (let y = y0; y <= y1; y++) {
-            for (let z = z0; z <= z1; z += z1 > z0 && x0 === x1 ? step : 1) {
+            for (let z = z0; z <= z1; z += stepZ) {
               blocks.push({ pos: [x, y, z], material: rMat });
             }
           }
@@ -305,10 +307,12 @@ export function expandCairnVoxelPrimitive(prim) {
 
 // Render a set of voxel blocks with interior hidden-face culling (SurfaceVoxel bitmask from Cairn damage.ts)
 // while emitting every exposed face as an unshared 4-vertex Voronoi-detachable quad.
-export function emitCairnVoxelGrid(blocks, { toWorld, pushQuad, damageRegions = [] }) {
+export function emitCairnVoxelGrid(blocks, { toWorld, pushQuad, damageRegions = [], gridSize = 1.0, origin = [0, 0, 0] }) {
   if (!Array.isArray(blocks) || blocks.length === 0) return 0;
   const grid = new Map();
   const keyOf = (x, y, z) => `${x},${y},${z}`;
+  const cellSize = Math.max(0.1, resolveNumeric(gridSize, 1.0));
+  const [ox, oy, oz] = resolvePosition(origin, [0, 0, 0]);
 
   for (const b of blocks) {
     if (!b?.pos) continue;
@@ -317,7 +321,7 @@ export function emitCairnVoxelGrid(blocks, { toWorld, pushQuad, damageRegions = 
     const z = Math.round(b.pos[2]);
     let carved = false;
     if (Array.isArray(damageRegions) && damageRegions.length > 0) {
-      const center = [x + 0.5, y + 0.5, z + 0.5];
+      const center = [ox + x * cellSize, oy + (y + 0.5) * cellSize, oz + z * cellSize];
       for (const reg of damageRegions) {
         if (pointInsideImpactor(center, reg?.impactor ?? reg?.brush ?? reg)) {
           carved = true;
@@ -334,9 +338,9 @@ export function emitCairnVoxelGrid(blocks, { toWorld, pushQuad, damageRegions = 
   for (const vox of grid.values()) {
     const { x, y, z, material } = vox;
     const { kind, shade } = resolveCairnMaterial(material);
-    const x0 = x, x1 = x + 1;
-    const y0 = y, y1 = y + 1;
-    const z0 = z, z1 = z + 1;
+    const x0 = ox + (x - 0.5) * cellSize, x1 = ox + (x + 0.5) * cellSize;
+    const y0 = oy + y * cellSize, y1 = oy + (y + 1) * cellSize;
+    const z0 = oz + (z - 0.5) * cellSize, z1 = oz + (z + 0.5) * cellSize;
     // -Z face
     if (!grid.has(keyOf(x, y, z - 1))) {
       pushQuad(toWorld(x0, y0, z0), toWorld(x1, y0, z0), toWorld(x1, y1, z0), toWorld(x0, y1, z0), kind, shade * 0.94);
@@ -362,6 +366,11 @@ export function emitCairnVoxelGrid(blocks, { toWorld, pushQuad, damageRegions = 
       pushQuad(toWorld(x0, y1, z0), toWorld(x1, y1, z0), toWorld(x1, y1, z1), toWorld(x0, y1, z1), kind, Math.min(1, shade * 1.06));
       emittedFaces++;
     }
+    // -Y bottom face
+    if (!grid.has(keyOf(x, y - 1, z))) {
+      pushQuad(toWorld(x0, y0, z1), toWorld(x1, y0, z1), toWorld(x1, y0, z0), toWorld(x0, y0, z0), kind, shade * 0.72);
+      emittedFaces++;
+    }
   }
   return emittedFaces;
 }
@@ -373,19 +382,20 @@ function computePrimitiveHeight(prim, shapes = {}) {
     const resolved = resolveShapeReference(prim, shapes);
     return computePrimitiveHeight(resolved, shapes);
   }
-  if (prim.height !== undefined) return resolveNumeric(prim.height, 0);
+  const sy = Array.isArray(prim.scale) ? resolveNumeric(prim.scale[1], 1) : resolveNumeric(prim.scale, 1);
+  if (prim.height !== undefined) return resolveNumeric(prim.height, 0) * sy;
   if (prim.from && prim.to) {
     const f = resolvePosition(prim.from);
     const t = resolvePosition(prim.to);
-    return Math.abs(t[1] - f[1]);
+    return Math.max(Math.abs(t[1] - f[1]), Math.max(f[1], t[1])) * sy;
   }
   if (prim.primitive === 'dome' || prim.primitive === 'sphere') {
-    return resolveNumeric(prim.height ?? prim.radius, 2);
+    return resolveNumeric(prim.height ?? prim.radius, 2) * sy;
   }
   if (prim.primitive === 'group' && Array.isArray(prim.children)) {
     let maxH = 0;
     for (const c of prim.children) maxH = Math.max(maxH, computePrimitiveHeight(c, shapes));
-    return maxH;
+    return maxH * sy;
   }
   return 0;
 }
@@ -458,9 +468,28 @@ export function emitCairnScene(sceneSpec, helpers) {
         return;
       }
 
+      if (pType === 'repeat') {
+        const count = Math.max(1, Math.min(64, Math.round(resolveNumeric(prim.count, 1))));
+        const step = resolvePosition(prim.step ?? [0, 0, 0], [0, 0, 0]);
+        const itemSpec = prim.of ?? prim.template ?? prim.child ?? prim.item;
+        if (itemSpec) {
+          for (let i = 0; i < count; i++) {
+            const stepToWorld = composeToWorld(primToWorld, [step[0] * i, step[1] * i, step[2] * i]);
+            emitSinglePrimitive(itemSpec, stepToWorld);
+          }
+        }
+        return;
+      }
+
       if (pType === 'block' || pType === 'blocks' || pType === 'voxel-line' || pType === 'voxel-column') {
         const vox = expandCairnVoxelPrimitive(prim);
-        emitCairnVoxelGrid(vox, { toWorld: primToWorld, pushQuad, damageRegions: prim.damage ?? damageRegions });
+        emitCairnVoxelGrid(vox, {
+          toWorld: primToWorld,
+          pushQuad,
+          damageRegions: prim.damage ?? damageRegions,
+          gridSize: prim.gridSize ?? prim.voxelSize ?? grid?.cellSize ?? 1.0,
+          origin: prim.origin ?? grid?.origin ?? [0, 0, 0],
+        });
         return;
       }
 
@@ -558,16 +587,32 @@ export function emitCairnScene(sceneSpec, helpers) {
 
         const pierW = Math.max(0.45, resolveNumeric(prim.pierWidth, span * 0.18));
         const radius = Math.max(0.4, (span - pierW * 2) * 0.5);
-        const ySpring = Math.max(y0 + 0.8, y0 + h - radius - 0.35);
-        // Side piers
-        emitBox(archToWorld, 0, pierW, y0, y0 + h, -th * 0.5, th * 0.5, kind, shade);
-        emitBox(archToWorld, span - pierW, span, y0, y0 + h, -th * 0.5, th * 0.5, kind, shade);
-        // Spandrel lintel above arch crown
-        emitBox(archToWorld, pierW, span - pierW, ySpring + radius * 0.82, y0 + h, -th * 0.5, th * 0.5, kind, shade * 0.95);
-        // Radial stone voussoirs
-        const segs = Math.max(5, Math.round(resolveNumeric(prim.voussoirs, 7)));
+        const rOuter = Math.max(radius + 0.14, Math.min(radius + 0.34, (span - 0.16) * 0.5));
+        const ySpring = Math.max(y0 + 0.65, Math.min(y0 + h - rOuter - 0.24, y0 + h - radius - 0.35));
         const sMid = span * 0.5;
-        const rOuter = radius + 0.32;
+        const yCrownTop = Math.max(ySpring + rOuter + 0.08, y0 + h - 0.18);
+        const yArchTop = Math.max(yCrownTop + 0.18, y0 + h);
+        // Side piers
+        emitBox(archToWorld, 0, pierW, y0, yArchTop, -th * 0.5, th * 0.5, kind, shade);
+        emitBox(archToWorld, span - pierW, span, y0, yArchTop, -th * 0.5, th * 0.5, kind, shade);
+        // Top cornice lintel above the arch extrados
+        emitBox(archToWorld, 0, span, yCrownTop, yArchTop, -th * 0.52, th * 0.52, kind, shade * 0.96);
+        // Dark barrel-vaulted portal recess (kind 14) when arch is a doorway/window portal rather than an open-through arcade
+        if (!prim.openThrough) {
+          emitBox(
+            archToWorld,
+            pierW * 0.85,
+            span - pierW * 0.85,
+            y0,
+            ySpring + radius * 0.92,
+            -th * 0.38,
+            th * 0.38,
+            14,
+            0.28
+          );
+        }
+        // Solid stone spandrels + radial stone voussoirs
+        const segs = Math.max(5, Math.round(resolveNumeric(prim.voussoirs, 7)));
         for (let i = 0; i < segs; i++) {
           const a0 = (i / segs) * Math.PI;
           const a1 = ((i + 1) / segs) * Math.PI;
@@ -576,7 +621,24 @@ export function emitCairnScene(sceneSpec, helpers) {
           const xOut0 = sMid - Math.cos(a0) * rOuter, yOut0 = ySpring + Math.sin(a0) * rOuter;
           const xOut1 = sMid - Math.cos(a1) * rOuter, yOut1 = ySpring + Math.sin(a1) * rOuter;
           const vShade = i === Math.floor(segs / 2) ? Math.min(1, shade * 1.05) : shade * (i % 2 === 0 ? 0.94 : 0.88);
-          // Front & back voussoir faces + intrados soffit
+          // Solid spandrel quad between outer voussoir curve and top lintel (eliminates triangular holes above arch curve)
+          pushQuad(
+            archToWorld(xOut0, yOut0, -th * 0.5),
+            archToWorld(xOut1, yOut1, -th * 0.5),
+            archToWorld(xOut1, yCrownTop, -th * 0.5),
+            archToWorld(xOut0, yCrownTop, -th * 0.5),
+            kind,
+            shade * 0.93
+          );
+          pushQuad(
+            archToWorld(xOut1, yOut1, th * 0.5),
+            archToWorld(xOut0, yOut0, th * 0.5),
+            archToWorld(xOut0, yCrownTop, th * 0.5),
+            archToWorld(xOut1, yCrownTop, th * 0.5),
+            kind,
+            shade * 0.93
+          );
+          // Front, back, soffit, and extrados voussoir faces
           pushQuad(
             archToWorld(xIn0, yIn0, -th * 0.54),
             archToWorld(xIn1, yIn1, -th * 0.54),
@@ -601,21 +663,29 @@ export function emitCairnScene(sceneSpec, helpers) {
             11,
             vShade * 0.78
           );
+          pushQuad(
+            archToWorld(xOut1, yOut1, th * 0.54),
+            archToWorld(xOut0, yOut0, th * 0.54),
+            archToWorld(xOut0, yOut0, -th * 0.54),
+            archToWorld(xOut1, yOut1, -th * 0.54),
+            11,
+            vShade * 0.98
+          );
         }
         return;
       }
 
-      if (pType === 'roof') {
+      if (pType === 'roof' || pType === 'pyramid') {
         const f = resolvePosition(prim.from);
         const t = resolvePosition(prim.to);
         const x0 = Math.min(f[0], t[0]), x1 = Math.max(f[0], t[0]);
         const z0 = Math.min(f[2], t[2]), z1 = Math.max(f[2], t[2]);
         const yEave = Math.min(f[1], t[1]);
         const h = Math.max(0.6, resolveNumeric(prim.height, Math.max(1.6, Math.abs(t[1] - f[1]))));
-        const overhang = resolveNumeric(prim.overhang, 0.38);
-        const hipRatio = prim.style === 'gable' ? 0 : resolveNumeric(prim.hipRatio, 0.25);
+        const overhang = resolveNumeric(prim.overhang, pType === 'pyramid' ? 0.18 : 0.38);
+        const hipRatio = pType === 'pyramid' ? 0.49 : prim.style === 'gable' ? 0 : resolveNumeric(prim.hipRatio, 0.25);
         const wallKind = resolveCairnMaterial(prim.wallMaterial ?? 'stucco', 12, 0.90).kind;
-        emitRoof(primToWorld, x0, x1, yEave, yEave + h, z0, z1, overhang, hipRatio, kind, wallKind);
+        emitRoof(primToWorld, x0, x1, yEave, yEave + h, z0, z1, overhang, hipRatio, wallKind, kind);
         return;
       }
 
@@ -1074,17 +1144,18 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         to: [7.4, 6.4, 2.0],
         material: 'cobble',
       },
-      // Voxel-crenellated bastion parapet merlons (sitting flush at y = 6.0)
+      // Voxel-crenellated bastion parapet merlons (sitting flush at y = 6.35)
       {
         primitive: 'blocks',
         partGroup: 'bastion_parapet_merlons',
         gridSize: 1.0,
+        origin: [0, 6.35, 0],
         material: 'limestone',
         runs: [
-          { x: [-6, 6], y: 6, z: -9, step: 2 },
-          { x: [-4, 4], y: 6, z: -12, step: 2 },
-          { x: -7, y: 6, z: [-8, 1], step: 2 },
-          { x: 7, y: 6, z: [-8, 1], step: 2 },
+          { x: [-6, 6], y: 0, z: -9, step: 2 },
+          { x: [-4, 4], y: 0, z: -12, step: 2 },
+          { x: -7, y: 0, z: [-7, 1], step: 2 },
+          { x: 7, y: 0, z: [-7, 1], step: 2 },
         ],
       },
       // Six iconic cylindrical Manueline bartizan sentry turrets (Garitas) on the bastion corners
@@ -1109,6 +1180,27 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [-5.1, 13.8, 2.3],
         to: [5.1, 19.8, 11.1],
         material: 'whitewash',
+      },
+      // Recessed Manueline royal windows & stone surrounds on the Keep upper stories
+      {
+        primitive: 'arch',
+        partGroup: 'keep_upper_tiers',
+        from: [-3.4, 14.8, 2.15],
+        to: [-0.8, 14.8, 2.15],
+        height: 3.2,
+        thickness: 0.45,
+        voussoirs: 7,
+        material: 'limestone',
+      },
+      {
+        primitive: 'arch',
+        partGroup: 'keep_upper_tiers',
+        from: [0.8, 14.8, 2.15],
+        to: [3.4, 14.8, 2.15],
+        height: 3.2,
+        thickness: 0.45,
+        voussoirs: 7,
+        material: 'limestone',
       },
       // South-facing 2nd-story Manueline arched loggia (Varanda do Renascimento) overlooking the bastion
       {
@@ -1155,12 +1247,13 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'blocks',
         partGroup: 'keep_crown_merlons',
         gridSize: 1.0,
+        origin: [0, 20.95, 0],
         material: 'limestone',
         runs: [
-          { x: [-4, 4], y: 21, z: 2, step: 2 },
-          { x: [-4, 4], y: 21, z: 10, step: 2 },
-          { x: -5, y: 21, z: [3, 9], step: 2 },
-          { x: 5, y: 21, z: [3, 9], step: 2 },
+          { x: [-4, 4], y: 0, z: 3, step: 2 },
+          { x: [-4, 4], y: 0, z: 11, step: 2 },
+          { x: -5, y: 0, z: [5, 9], step: 2 },
+          { x: 5, y: 0, z: [5, 9], step: 2 },
         ],
       },
       // Four upper corner watch turrets crowning the Torre de Menagem
@@ -1452,34 +1545,60 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
           {
             primitive: 'box',
             from: [-3.1, 0, -3.1],
-            to: [3.1, 10.5, 3.1],
+            to: [3.1, 10.4, 3.1],
             topInset: 0.14,
             material: 'ashlar',
+          },
+          // Mid-tower Romanesque stringcourse belt (covers the 10.4m transition cleanly)
+          {
+            primitive: 'box',
+            from: [-3.18, 10.35, -3.18],
+            to: [3.18, 10.8, 3.18],
+            material: 'limestone',
           },
           // Upper belfry stage with paired arched bell openings
           {
             primitive: 'box',
-            from: [-2.95, 10.5, -2.95],
+            from: [-2.95, 10.8, -2.95],
             to: [2.95, 16.8, 2.95],
             material: 'limestone',
+          },
+          {
+            primitive: 'arch',
+            from: [-2.1, 11.6, -2.85],
+            to: [2.1, 11.6, -2.85],
+            height: 4.2,
+            thickness: 0.55,
+            voussoirs: 7,
+            material: 'ashlar',
+          },
+          {
+            primitive: 'arch',
+            from: [-2.1, 11.6, 2.85],
+            to: [2.1, 11.6, 2.85],
+            height: 4.2,
+            thickness: 0.55,
+            voussoirs: 7,
+            material: 'ashlar',
           },
           // Projecting corbel cornice
           {
             primitive: 'box',
-            from: [-3.25, 16.8, -3.25],
-            to: [3.25, 17.5, 3.25],
+            from: [-3.35, 16.8, -3.35],
+            to: [3.35, 17.5, 3.35],
             material: 'ashlar',
           },
-          // Iconic flat crenellated fortress battlements (sitting flush at y = 17.5)
+          // Iconic flat crenellated fortress battlements (sitting flush at y = 17.45)
           {
             primitive: 'blocks',
-            gridSize: 1.0,
+            gridSize: 0.92,
+            origin: [0, 17.45, 0],
             material: 'ashlar',
             runs: [
-              { x: [-3, 3], y: 17, z: -3, step: 2 },
-              { x: [-3, 3], y: 17, z: 2, step: 2 },
-              { x: -3, y: 17, z: [-2, 1], step: 2 },
-              { x: 2, y: 17, z: [-2, 1], step: 2 },
+              { x: [-3, 3], y: 0, z: -3, step: 2 },
+              { x: [-3, 3], y: 0, z: 3, step: 2 },
+              { x: -3, y: 0, z: [-1, 1], step: 2 },
+              { x: 3, y: 0, z: [-1, 1], step: 2 },
             ],
           },
         ],
@@ -1793,9 +1912,10 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'arch',
         from: [-1.65, 0, 0],
         to: [1.65, 0, 0],
-        height: 3.8,
+        height: 4.45,
         thickness: 0.68,
         voussoirs: 7,
+        openThrough: true,
         material: 'ashlar',
       },
       corner_mirador_tower: {
@@ -1908,6 +2028,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         height: 6.8,
         thickness: 1.65,
         voussoirs: 9,
+        openThrough: true,
         material: 'ashlar',
       },
       upper_aqueduct_arch: {
@@ -1917,6 +2038,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         height: 4.2,
         thickness: 1.35,
         voussoirs: 7,
+        openThrough: true,
         material: 'limestone',
       },
     },
@@ -1933,14 +2055,15 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         primitive: 'blocks',
         partGroup: 'aqueduct_cutwater_piers',
         gridSize: 1.0,
+        origin: [0, 0.5, 0],
         material: 'ashlar',
         runs: [
-          { x: -14, y: [1, 3], z: [-2, 1] },
-          { x: -9, y: [1, 3], z: [-2, 1] },
-          { x: -3, y: [1, 3], z: [-2, 1] },
-          { x: 2, y: [1, 3], z: [-2, 1] },
-          { x: 8, y: [1, 3], z: [-2, 1] },
-          { x: 13, y: [1, 3], z: [-2, 1] },
+          { x: -14, y: [0, 2], z: [-2, 2] },
+          { x: -8, y: [0, 2], z: [-2, 2] },
+          { x: -3, y: [0, 2], z: [-2, 2] },
+          { x: 3, y: [0, 2], z: [-2, 2] },
+          { x: 8, y: [0, 2], z: [-2, 2] },
+          { x: 14, y: [0, 2], z: [-2, 2] },
         ],
       },
       // 5 lower monumental stone arches
