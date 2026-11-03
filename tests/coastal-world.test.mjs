@@ -1933,6 +1933,8 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   assert.ok(TERRAIN.includes('let isGlazedWindow=in.kind.y>0.25'), 'landOpaque renders reflective diamond-leaded casement glass on kind 14 windows');
   assert.ok(TERRAIN.includes('let tileTan=select('), 'landOpaque aligns terracotta barrel tile flutes along roof slope tangent');
   assert.ok(TERRAIN.includes('let archLodFade='), 'landOpaque applies multi-tier distance LOD fade on architectural materials');
+  const branchBlock = TERRAIN.slice(TERRAIN.indexOf('var canopyBackscatter=0.0;'), TERRAIN.indexOf('let reliefX=dpdx(relief);'));
+  assert.ok(!/dpdx|dpdy|fwidth/.test(branchBlock), 'No WGSL screen-space derivative calls inside non-uniform kind branches');
 
   // 2. Verify Lisbon & colonial prefabs emit continuous per-vertex AO gradients and smooth curved normals on cylinders/domes
   for (const prefab of ['torre_de_belem_manuelina', 'mosteiro_dos_jeronimos', 'se_patriarcal_de_lisboa', 'catedral_basilica', 'colonial_town_block']) {

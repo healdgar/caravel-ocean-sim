@@ -744,8 +744,12 @@ fn landOpaque(in:LandVertex)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*(1.0-courseStep*0.20);
     }else if(in.kind.x<14.5){
       // Kind 14: 16th-century leaded-glass casements (vidrieras emplomadas with sky reflections) & deep arched portals
-      let hCoord=world.x*abs(n.z)+world.z*abs(n.x)+(world.x+world.z)*0.7071*(1.0-clamp(abs(n.x)+abs(n.z),0.0,1.0));
-      let hDx=dpdx(hCoord);let hDy=dpdy(hCoord);
+      let hFlat=1.0-clamp(abs(n.x)+abs(n.z),0.0,1.0);
+      let hWx=abs(n.z)+0.7071*hFlat;
+      let hWz=abs(n.x)+0.7071*hFlat;
+      let hCoord=world.x*hWx+world.z*hWz;
+      let hDx=dx.x*hWx+dx.z*hWz;
+      let hDy=dy.x*hWx+dy.z*hWz;
       let rejaX=max(0.0,landFilteredCourse(hCoord*3.4,hDx*3.4,hDy*3.4,2.0)-0.34);
       let rejaY=max(0.0,landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,1.8)-0.34);
       let rejaWave=clamp(0.62*rejaX+0.48*rejaY,0.0,1.0)*archLodFade;
