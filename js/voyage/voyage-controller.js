@@ -44,6 +44,7 @@ import {
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
 import { formatJulianDate, localSolarHours, greatCircleKm, windDescription } from './ocean-climate.js';
 import { createEncounterDirector, describeEncounterThroughSpyglass } from './encounters.js';
+import { probeHullBottomContact } from '../terrain-model.js';
 
 const VOYAGE_STORAGE_KEY = 'waterworld.voyage.v1';
 const voyageWrap360 = (d) => ((d % 360) + 360) % 360;
@@ -94,6 +95,18 @@ export function createVoyageController(cfg) {
   let toastTimer = 0;
   let lastAdvice = null;
   let manualHelm = false;
+  let lastAstroRevision = astronomy?.revision ?? -1;
+  let respectManualSky = false;
+
+  function alignDateToDaylightIfNight(v, targetSolarHour = 9.8) {
+    if (!v || !Number.isFinite(v.dateMs)) return;
+    const lon = Number.isFinite(v.true?.lon) ? v.true.lon : DEFAULT_DEPARTURE.lon;
+    const solar = localSolarHours(v.dateMs, lon);
+    if (solar < 6.5 || solar > 17.8) {
+      const deltaHours = ((targetSolarHour - solar) % 24 + 24) % 24;
+      v.dateMs += Math.round(deltaHours * 3600000);
+    }
+  }
 
   // Approach / terrain slide state
   const approach = {
@@ -491,11 +504,22 @@ export function createVoyageController(cfg) {
       voyage.passive = false;
       helmsman.engaged = true;
       manualHelm = false;
+      if ((!astronomy || astronomy.mode === 'manual' || respectManualSky) && (P?.sunElev ?? 32) > 2) {
+        alignDateToDaylightIfNight(voyage, (P?.sunAzim ?? 135) > 180 ? 14.2 : 9.8);
+      }
       orderCourse(helmsman, voyage.compassCourse, { beat: helmsman.beat });
       beginScene({ showHud: true });
     }
   }
   function setWarp(id) {
+    const tierRate = warpTier(id).rate;
+    if (tierRate > 1) {
+      respectManualSky = false;
+      if (voyage && (!astronomy || astronomy.mode === 'manual') && (P?.sunElev ?? 32) > 2) {
+        alignDateToDaylightIfNight(voyage, (P?.sunAzim ?? 135) > 180 ? 14.2 : 9.8);
+      }
+      if (astronomy) astronomy.mode = 'astronomy';
+    }
     promoteActive();
     if (voyage.interrupt) {
       clearInterrupt(voyage);
@@ -504,7 +528,6 @@ export function createVoyageController(cfg) {
     }
     if (hud) hud.root.hidden = false;
     setWarpTier(voyage, id);
-    const tierRate = warpTier(id).rate;
     if (tierRate > 1 && (approach.suppressLandHo || approach.landHoCalled)) {
       voyage.warpCap = 3600;
     }
@@ -577,6 +600,9 @@ export function createVoyageController(cfg) {
       seed: opts.seed ?? Math.floor(Math.random() * 1e9),
       compassCourse: voyageWrap360(boat.heading - 0),
     });
+    if (opts.dateMs === undefined) {
+      alignDateToDaylightIfNight(voyage, (P?.sunAzim ?? 135) > 180 ? 14.2 : 9.8);
+    }
     voyage.passive = passive;
     voyage.compassCourse = voyageWrap360(boat.heading - voyage.variation);
     orderCourse(helmsman, voyage.compassCourse);
@@ -658,11 +684,12 @@ export function createVoyageController(cfg) {
     if (hud) hud.root.hidden = !showHud;
     if (hud) hud.canvasSel.value = voyage.canvas;
     weatherDriver.reset();
-    if (astronomy && !passive) {
+    if (astronomy && !passive && !respectManualSky) {
       astronomy.mode = 'astronomy';
       astronomy.rate = 0;
     }
     syncAstronomy();
+    if (astronomy) lastAstroRevision = astronomy.revision ?? -1;
     voyage.weather = null;
   }
 
@@ -674,14 +701,25 @@ export function createVoyageController(cfg) {
 
   function syncAstronomy() {
     if (!astronomy || !voyage) return;
+    if (astronomy.revision !== undefined && astronomy.revision !== lastAstroRevision) {
+      if (astronomy.mode === 'manual') {
+        respectManualSky = true;
+      } else {
+        respectManualSky = false;
+        const userTimeMs = astronomy.epochMs + (astronomy.elapsedSeconds || 0) * 1000;
+        if (Number.isFinite(userTimeMs)) voyage.dateMs = userTimeMs;
+      }
+      lastAstroRevision = astronomy.revision;
+    }
     // Always keep the geographic observer anchor synced to the ship's live lat/lon.
     astronomy.anchor = { latitude: voyage.true.lat, longitude: voyage.true.lon, x: boat.x, z: boat.z };
-    if (!voyage.passive) {
+    if (!voyage.passive && !respectManualSky) {
       // Sun, moon and stars follow the warped voyage clock and the ship's true position.
       astronomy.mode = 'astronomy';
       astronomy.rate = 0;
       astronomy.epochMs = voyage.dateMs;
       astronomy.elapsedSeconds = 0;
+      astronomy.update?.(0, boat);
     }
   }
 
@@ -736,6 +774,8 @@ export function createVoyageController(cfg) {
     const prevDr = { lat: voyage.dr.lat, lon: voyage.dr.lon };
     const prevDistTrue = voyage.distanceTrueNm;
     const prevDistLogged = voyage.distanceLoggedNm;
+    const prevDateMs = voyage.dateMs;
+    const prevRate = voyage.rate;
     const isConfirmedLand = (lat, lon) => {
       const elev = probe.elevation?.(lat, lon);
       if (elev !== undefined && elev > -900) return elev > 0.5;
@@ -751,7 +791,7 @@ export function createVoyageController(cfg) {
     const extraDist = Math.hypot(extraX, extraZ);
 
     // Prevent high warp in the open ocean from crossing onto continental land before coastal terrain has spawned.
-    if (!inCoastalPack && voyage.rate > 1.05 && extraDist > 1 && !wasOnCoarseLand && isConfirmedLand(voyage.true.lat, voyage.true.lon)) {
+    if (!inCoastalPack && prevRate > 1.05 && extraDist > 1 && !wasOnCoarseLand && isConfirmedLand(voyage.true.lat, voyage.true.lon)) {
       let lo = 0, hi = 1;
       for (let iter = 0; iter < 8; iter++) {
         const mid = (lo + hi) * 0.5;
@@ -767,6 +807,10 @@ export function createVoyageController(cfg) {
       voyage.dr.lon = prevDr.lon + (voyage.dr.lon - prevDr.lon) * safeFrac;
       voyage.distanceTrueNm = prevDistTrue + (voyage.distanceTrueNm - prevDistTrue) * safeFrac;
       voyage.distanceLoggedNm = prevDistLogged + (voyage.distanceLoggedNm - prevDistLogged) * safeFrac;
+      voyage.dateMs = Math.round(prevDateMs + (voyage.dateMs - prevDateMs) * safeFrac);
+      if (prevRate >= 60 && !respectManualSky && (P?.sunElev ?? 32) > -2) {
+        alignDateToDaylightIfNight(voyage, 8.2);
+      }
       voyage.tier = 'deck';
       voyage.rate = 1;
       voyage.targetRate = 1;
@@ -779,13 +823,15 @@ export function createVoyageController(cfg) {
     // stay locked to lat/lon and cannot be warped through. Outside the coastal pack (open ocean), waves act normal at 1x.
     if (inCoastalPack) {
       let safeFrac = 1;
-      let stepExtraX = extraX, stepExtraZ = extraZ;
+      const stepExtraX = extraX, stepExtraZ = extraZ;
       if (extraDist > 1e-4 && typeof terrain.height === 'function') {
         const draft = boat.hydrodynamics?.draft ?? 2.0;
         const minSafeBed = -Math.max(3.2, draft * 1.35);
         const startBed = terrain.height(boat.x, boat.z);
-        const bowLead = Math.max(18, (boat.length ?? 22) * 0.65);
-        const steps = Math.max(1, Math.min(2000, Math.ceil(extraDist / 8)));
+        const bowLead = Math.max(24, (boat.length ?? 22) * 1.1);
+        const standoffM = Math.max(42, (boat.length ?? 22) * 1.9);
+        const portsList = terrain.ports ?? (terrain.port ? [terrain.port] : null);
+        const steps = Math.max(1, Math.min(2000, Math.ceil(extraDist / 6)));
         const traceRay = (rx, rz) => {
           const rDist = Math.hypot(rx, rz) || 1;
           const dX = rx / rDist, dZ = rz / rDist;
@@ -795,29 +841,31 @@ export function createVoyageController(cfg) {
             terrain.ensureSectionAt?.(wx, wz);
             const hKeel = terrain.height(wx, wz);
             const hBow = terrain.height(wx + dX * bowLead, wz + dZ * bowLead);
-            const h = Math.max(hKeel, hBow);
-            if (h > minSafeBed && (startBed <= minSafeBed || h > startBed + 0.05)) {
-              return (k - 1) / steps;
+            let h = Math.max(hKeel, hBow);
+            let hitStructure = false;
+            if (terrain.region) {
+              const probeContact = probeHullBottomContact(
+                null,
+                boat,
+                wx,
+                wz,
+                terrain.region,
+                (px, pz) => terrain.height(px, pz),
+                { ports: portsList }
+              );
+              if (Number.isFinite(probeContact.worstBed)) {
+                h = Math.max(h, probeContact.worstBed);
+              }
+              hitStructure = Boolean(probeContact.hitStructure);
+            }
+            if (hitStructure || (h > minSafeBed && (startBed <= minSafeBed || h > startBed + 0.05))) {
+              const clearDist = Math.max(0, ((k - 1) / steps) * rDist - standoffM);
+              return clearDist / rDist;
             }
           }
           return 1;
         };
         safeFrac = traceRay(stepExtraX, stepExtraZ);
-        // If a channel bank is grazed during warp, let the pilot steer up to ±24° into the deep fairway if available.
-        if (safeFrac < 1 && voyage.rate > 1.05) {
-          for (const deg of [5, -5, 10, -10, 15, -15, 20, -20, 24, -24]) {
-            const rad = (deg * Math.PI) / 180;
-            const c = Math.cos(rad), s = Math.sin(rad);
-            const rx = extraX * c - extraZ * s;
-            const rz = extraX * s + extraZ * c;
-            if (traceRay(rx, rz) >= 1) {
-              stepExtraX = rx;
-              stepExtraZ = rz;
-              safeFrac = 1;
-              break;
-            }
-          }
-        }
         if (safeFrac < 1) {
           voyage.true.lat = prevTrue.lat + (voyage.true.lat - prevTrue.lat) * safeFrac;
           voyage.true.lon = prevTrue.lon + (voyage.true.lon - prevTrue.lon) * safeFrac;
@@ -825,7 +873,14 @@ export function createVoyageController(cfg) {
           voyage.dr.lon = prevDr.lon + (voyage.dr.lon - prevDr.lon) * safeFrac;
           voyage.distanceTrueNm = prevDistTrue + (voyage.distanceTrueNm - prevDistTrue) * safeFrac;
           voyage.distanceLoggedNm = prevDistLogged + (voyage.distanceLoggedNm - prevDistLogged) * safeFrac;
-          if (voyage.rate > 1.05) {
+          voyage.dateMs = Math.round(prevDateMs + (voyage.dateMs - prevDateMs) * safeFrac);
+          if (safeFrac < 0.08) {
+            boat.surgeVelocity = Math.min(boat.surgeVelocity ?? 0, 0.6);
+          }
+          if (prevRate > 1.05 || voyage.rate > 1.05) {
+            if (prevRate >= 60 && !respectManualSky && (P?.sunElev ?? 32) > -2) {
+              alignDateToDaylightIfNight(voyage, 8.2);
+            }
             voyage.tier = 'deck';
             voyage.rate = 1;
             voyage.targetRate = 1;
@@ -843,20 +898,32 @@ export function createVoyageController(cfg) {
       }
       if (!approach.committed && typeof terrain.commitWorldOffset === 'function' && Math.hypot(approach.offset.x, approach.offset.z) >= 0.05) {
         const preCommitX = boat.x, preCommitZ = boat.z;
+        const cam = cfg.getCamera?.() ?? null;
         terrain.commitWorldOffset({
           boat,
-          camera: cfg.getCamera?.() ?? null,
+          camera: cam,
           vessels: cfg.getVessels?.() ?? null,
         });
         approach.offset = { x: 0, z: 0 };
         approach.committed = true;
         if (tDist < span * 2.5 && typeof terrain.constrain === 'function') {
-          const cdx = boat.x - preCommitX, cdz = boat.z - preCommitZ;
-          const cDist = Math.hypot(cdx, cdz);
-          const clampDist = Math.min(cDist, Math.max(0.5, Math.hypot(boat.surgeVelocity ?? 0, boat.leewayVelocity ?? 0) * dt));
-          const cx = cDist > 1e-4 ? boat.x - (cdx / cDist) * clampDist : preCommitX;
-          const cz = cDist > 1e-4 ? boat.z - (cdz / cDist) * clampDist : preCommitZ;
-          terrain.constrain(boat, cx, cz);
+          const postCommitX = boat.x, postCommitZ = boat.z;
+          const constrained = terrain.constrain(boat, preCommitX, preCommitZ, { warpStep: true });
+          if (constrained || Math.hypot(boat.x - postCommitX, boat.z - postCommitZ) > 1e-3) {
+            if (cam) {
+              cam.x += boat.x - postCommitX;
+              cam.z += boat.z - postCommitZ;
+            }
+            if (prevRate > 1.05 || voyage.rate > 1.05) {
+              if (prevRate >= 60 && !respectManualSky && (P?.sunElev ?? 32) > -2) {
+                alignDateToDaylightIfNight(voyage, 8.2);
+              }
+              voyage.tier = 'deck';
+              voyage.rate = 1;
+              voyage.targetRate = 1;
+              voyage.warpCap = 1;
+            }
+          }
         }
       }
       // Keep lat/lon strictly locked to the 3D coastal terrain while inside the pack.
@@ -1034,17 +1101,37 @@ export function createVoyageController(cfg) {
       const draft = boat.hydrodynamics?.draft ?? 2.0;
       const minBed = -Math.max(2.2, draft * 1.15);
       const startBed = terrain.height(boat.x, boat.z);
+      const portsList = terrain.ports ?? (terrain.port ? [terrain.port] : null);
       for (const d of [35, 80, 160, 300, 600, 1200, 2200, 3500]) {
         let allBlocked = true;
+        let centerBlocked = false;
         for (const off of [0, 10, -10, 20, -20]) {
           const rad = ((courseDeg + off) * Math.PI) / 180;
-          const h = terrain.height(boat.x + Math.sin(rad) * d, boat.z - Math.cos(rad) * d);
-          if (!(h > minBed && (startBed <= minBed || h > startBed + 0.1))) {
+          const px = boat.x + Math.sin(rad) * d, pz = boat.z - Math.cos(rad) * d;
+          let h = terrain.height(px, pz);
+          let hitStructure = false;
+          if (off === 0 && d <= 600 && terrain.region) {
+            const probeContact = probeHullBottomContact(
+              null,
+              boat,
+              px,
+              pz,
+              terrain.region,
+              (qx, qz) => terrain.height(qx, qz),
+              { ports: portsList }
+            );
+            if (Number.isFinite(probeContact.worstBed)) {
+              h = Math.max(h, probeContact.worstBed);
+            }
+            hitStructure = Boolean(probeContact.hitStructure);
+          }
+          const blocked = hitStructure || (h > minBed && (startBed <= minBed || h > startBed + 0.1));
+          if (off === 0 && blocked) centerBlocked = true;
+          if (!blocked) {
             allBlocked = false;
-            break;
           }
         }
-        if (allBlocked) {
+        if (allBlocked || (centerBlocked && d <= 300)) {
           localWarpCap = d <= 200 ? 1 : Math.max(1, Math.min(240, (d - 160) / (Math.max(1, ground) * 5)));
           break;
         }

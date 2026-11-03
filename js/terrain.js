@@ -1507,7 +1507,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(camera&&Number.isFinite(camera.x)&&Number.isFinite(camera.z)){camera.x-=dx;camera.z-=dz;}
       if(Array.isArray(vessels)){
         for(const v of vessels){
-          if(v&&Number.isFinite(v.x)&&Number.isFinite(v.z)){v.x-=dx;v.z-=dz;}
+          const vb=v?.boat??v;
+          if(vb&&vb!==boat&&Number.isFinite(vb.x)&&Number.isFinite(vb.z)){vb.x-=dx;vb.z-=dz;}
         }
       }
       worldOffset.x=0;worldOffset.z=0;
@@ -1622,7 +1623,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get streamedSectionCount(){return loadedSections.size;},
     discovery,applyUpgradedPack,
     safeStart(view,boat){return safeLandfallStart(heights,view,boat,this.region,this.height);},
-    constrain(boat,x,z){return constrainIslandMotion(heights,boat,x,z,this.height,this.region,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding});},
+    constrain(boat,x,z,extraOptions=null){return constrainIslandMotion(heights,boat,x,z,this.height,this.region,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding,...(extraOptions||{})});},
     waveShelter(x,z,swellDirRad=0){
       const sx=-Math.cos(swellDirRad),sz=-Math.sin(swellDirRad);
       const px=-sz,pz=sx;

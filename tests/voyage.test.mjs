@@ -46,6 +46,8 @@ import {
 } from '../js/voyage/passage.js';
 import { createEncounterDirector } from '../js/voyage/encounters.js';
 import { createVoyageController } from '../js/voyage/voyage-controller.js';
+import { constrainIslandMotion } from '../js/terrain-model.js';
+import { createAstronomyClock } from '../js/astronomy.js';
 
 const MARCH_1550 = Date.UTC(1550, 2, 24, 12);
 const JULY_1550 = Date.UTC(1550, 6, 15, 12);
@@ -560,4 +562,131 @@ test('sail encounter supports spyglass inspection, steers toward target ship, an
   assert.equal(boardedAtGrappleRange, true, 'triggers boarding once ships close within grappling range');
   assert.ok(finalDist <= 46.5, `ships closed alongside to grappling distance (${finalDist.toFixed(1)} m)`);
 });
+
+test('warping toward land or a village with fleet vessels does not double-shift hull, stops safely offshore, and preserves daylight', () => {
+  const worldOffset = { x: 0, z: 0 };
+  const villagePort = {
+    center: { x: 0, z: -5920 },
+    clearRadius: 320,
+    instances: [
+      { x: 0, z: -5920, y: 1.8, baseY: 1.8, width: 28, depth: 60, yaw: 0, foundationDepth: 5.5 },
+    ],
+  };
+  const mockTerrain = {
+    region: { x: 0, z: -6000, span: 8192, latitude: 43.68, longitude: -70.18 },
+    port: villagePort,
+    ports: [villagePort],
+    height(x, z) {
+      const lz = z - worldOffset.z;
+      return lz >= -6000 ? -14 : Math.min(35, (-6000 - lz) * 0.35 - 1.5);
+    },
+    setWorldOffset(dx, dz) {
+      worldOffset.x = dx;
+      worldOffset.z = dz;
+    },
+    commitWorldOffset({ boat: b, camera: c, vessels }) {
+      const dx = worldOffset.x, dz = worldOffset.z;
+      if (b) { b.x -= dx; b.z -= dz; }
+      if (c) { c.x -= dx; c.z -= dz; }
+      if (Array.isArray(vessels)) {
+        for (const vb of vessels) {
+          if (vb && vb !== b) { vb.x -= dx; vb.z -= dz; }
+        }
+      }
+      worldOffset.x = 0;
+      worldOffset.z = 0;
+      return { dx, dz };
+    },
+    constrain(b, prevX, prevZ, extraOptions = null) {
+      return constrainIslandMotion(null, b, prevX, prevZ, (px, pz) => this.height(px, pz), this.region, {
+        ports: this.ports,
+        ...(extraOptions || {}),
+      });
+    },
+  };
+
+  const boat = {
+    x: 0,
+    z: -5650,
+    heading: 0, // Pointed straight North at the village pier and shoreline
+    length: 20,
+    beam: 6,
+    surgeVelocity: 4.2,
+    leewayVelocity: 0,
+    modelId: 'nina',
+    hydrodynamics: { draft: 2.0 },
+  };
+  const companion = { x: 40, z: -5660 };
+  const cam = { x: 0, z: -5640, y: 5.4 };
+  const P = {
+    sunElev: 32,
+    sunAzim: 225,
+    windSpeed: 5.5,
+    windDir: 251,
+    swellHs: 1.2,
+    swellDir: 215,
+    swellLength: 95,
+    clouds: 0.3,
+    rain: 0,
+    thunder: 0,
+    haze: 0.8,
+    cloudBase: 1.2,
+    cloudDepth: 1.8,
+    cloudDensity: 1,
+    cloudAnvil: 0.05,
+  };
+  const astronomy = createAstronomyClock(new URLSearchParams({
+    skyMode: 'manual',
+    astroDate: '2026-10-21T00:00:00.000Z', // 00:00 UTC is night in Maine (-70.18°), while manual sunElev is 32° daylight
+    latitude: '43.68',
+    longitude: '-70.18',
+  }));
+
+  const ctrl = createVoyageController({
+    boat,
+    P,
+    astronomy,
+    getTerrain: () => mockTerrain,
+    getCamera: () => cam,
+    getVessels: () => [boat, companion], // vessels[0] === boat just like main.js
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+
+  // Start in passive coastal mode with a saved UTC timestamp that corresponds to night at lon -70.18°
+  ctrl.start({
+    passive: true,
+    lat: 43.68,
+    lon: -70.18,
+    compassCourse: 0,
+    saved: {
+      v: 1,
+      active: false,
+      day: 0,
+      dateMs: Date.UTC(1550, 2, 24, 2, 0, 0), // 02:00 UTC = ~21:20 local night at -70.18°
+      canvas: 'full',
+      course: 0,
+      warp: 'deck',
+      autopilot: true,
+    },
+  });
+
+  // Player hits faster time warp (Crossing 3600×) while looking right at the village/land
+  ctrl.setWarp('crossing');
+  for (let i = 0; i < 30; i++) {
+    ctrl.update(0.05, i * 50);
+  }
+
+  assert.equal(ctrl.voyage.tier, 'deck', 'drops back to 1× real time before hitting the village or shore');
+  assert.ok(boat.z > -5900, `ship stopped clear of the village pier at z=-5920 and shore at z=-6000 (z=${boat.z.toFixed(1)})`);
+  assert.ok(mockTerrain.height(boat.x, boat.z) <= -3.2, `ship remains in deep navigable water (bed=${mockTerrain.height(boat.x, boat.z).toFixed(2)}m)`);
+  assert.equal(Boolean(boat.aground), false, 'ship is not wedged aground');
+  assert.ok(astronomy.state.sun.altitude > 5, `astronomy clock aligned to local daytime instead of going dark (sun altitude=${astronomy.state.sun.altitude.toFixed(1)}°)`);
+
+  // Verify user can manually adjust sky mode back to manual and syncAstronomy respects it
+  astronomy.set({ mode: 'manual' }, boat);
+  ctrl.update(0.05, 2000);
+  assert.equal(astronomy.mode, 'manual', 'manual sky adjustment is respected during active voyage');
+});
+
 

@@ -1545,6 +1545,7 @@ async function main() {
       stepBoatView(boat,dt);
       boatEyePosition(eyePosition,boat);
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
+      if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+1.2);
       if (spyglassActive) {
         const trackBoat = findSpyglassTargetVessel()?.boat ?? null;
         if (trackBoat && spyglassTracking) {
@@ -3038,13 +3039,15 @@ async function main() {
   timeOfDayInput.addEventListener('input',()=>{
     const hrs=Number(timeOfDayInput.value);
     const dec=getLocalAstroDecomp();
-    applyAstronomy({mode:'astronomy',date:buildUtcIsoFromLocal(dec.year,dec.dayOfYear,hrs,dec.tzMs)},true);
+    const yr=(voyageCtl?.voyage&&!voyageCtl.voyage.passive)?new Date(voyageCtl.voyage.dateMs).getUTCFullYear():dec.year;
+    applyAstronomy({mode:'astronomy',date:buildUtcIsoFromLocal(yr,dec.dayOfYear,hrs,dec.tzMs)},true);
   });
   dayOfYearInput.addEventListener('input',()=>{
     const doy=Number(dayOfYearInput.value);
     const dec=getLocalAstroDecomp();
+    const yr=(voyageCtl?.voyage&&!voyageCtl.voyage.passive)?new Date(voyageCtl.voyage.dateMs).getUTCFullYear():dec.year;
     const hrs=(astronomy.mode==='manual'&&(astronomy.state?.sun?.altitude??0)<=0&&P.sunElev>2)?14.5:dec.hours;
-    applyAstronomy({mode:'astronomy',date:buildUtcIsoFromLocal(dec.year,doy,hrs,dec.tzMs)},true);
+    applyAstronomy({mode:'astronomy',date:buildUtcIsoFromLocal(yr,doy,hrs,dec.tzMs)},true);
   });
   skyMode.onchange=()=>applyAstronomy({mode:skyMode.value},skyMode.value==='astronomy');
   skyDate.onchange=()=>applyAstronomy({mode:'astronomy',date:skyDate.value+'Z'},true);

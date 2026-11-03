@@ -460,7 +460,8 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
   const prevBed=hullWorstBedHeight(heights,boat,previousX,previousZ,region,sample,options);
   const preSurge=Number.isFinite(boat.surgeVelocity)?boat.surgeVelocity:0;
   const preLeeway=Number.isFinite(boat.leewayVelocity)?boat.leewayVelocity:0;
-  const stepImpactSpeed=distance>1e-4?Math.max(Math.hypot(preSurge,preLeeway),Math.min(12,distance*2)):Math.hypot(preSurge,preLeeway);
+  const hullSpeed=Math.hypot(preSurge,preLeeway);
+  const stepImpactSpeed=options?.warpStep?hullSpeed:(distance>1e-4?Math.max(hullSpeed,Math.min(12,distance*2)):hullSpeed);
   const wasAground=Boolean(boat.aground);
   const wasShoalScraping=Boolean(boat.shoalScraping);
   const steps=Math.max(1,Math.ceil(distance/6));
@@ -476,6 +477,25 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
       }
       const safe=(step-1)/steps;
       boat.x=previousX+dx*safe;boat.z=previousZ+dz*safe;
+      if(options?.warpStep){
+        let curBed=hullWorstBedHeight(heights,boat,boat.x,boat.z,region,sample,options);
+        if(curBed>groundingThreshold){
+          for(const r of [16,32,56,88,130,180]){
+            let found=false;
+            for(let a=0;a<16;a++){
+              const ang=(a*Math.PI)/8;
+              const rx=boat.x+Math.cos(ang)*r,rz=boat.z+Math.sin(ang)*r;
+              if(hullWorstBedHeight(heights,boat,rx,rz,region,sample,options)<=shoalThreshold){
+                boat.x=rx;boat.z=rz;curBed=shoalThreshold;found=true;break;
+              }
+            }
+            if(found)break;
+          }
+        }
+        boat.surgeVelocity=Math.min(preSurge,0.5);boat.leewayVelocity=0;boat.leewayDistance=0;
+        boat.aground=false;
+        return true;
+      }
       boat.surgeVelocity=0;boat.leewayVelocity=0;boat.leewayDistance=0;
       boat.aground=true;
       const evalH=sample?(px,pz)=>sample(px,pz):(px,pz)=>terrainSample(heights,px,pz,region);
