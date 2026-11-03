@@ -1835,6 +1835,113 @@ export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
   return { minVertex: minV, maxVertex: maxV, byteOffset, byteLength };
 }
 
+function fractHash(x) {
+  return x - Math.floor(x);
+}
+
+// 3D jittered Voronoi cell lookup for ashlar masonry blocks (1.45m x 0.90m x 1.45m) and timber beams
+export function sampleVoronoiBlockCell(fx, fy, fz, isTimber = false) {
+  const cw = isTimber ? 1.80 : 1.45;
+  const ch = isTimber ? 0.65 : 0.90;
+  const ux = fx / cw;
+  const uy = fy / ch;
+  const uz = fz / cw;
+  const bx = Math.floor(ux - 0.5);
+  const by = Math.floor(uy - 0.5);
+  const bz = Math.floor(uz - 0.5);
+
+  let bestDist2 = Infinity;
+  let bestSx = fx;
+  let bestSy = fy;
+  let bestSz = fz;
+  let bestJx = 0.5;
+  let bestJy = 0.5;
+  let bestJz = 0.5;
+
+  for (let dz = 0; dz <= 1; dz++) {
+    const nz = bz + dz;
+    for (let dy = 0; dy <= 1; dy++) {
+      const ny = by + dy;
+      for (let dx = 0; dx <= 1; dx++) {
+        const nx = bx + dx;
+        const jx = fractHash(Math.sin(nx * 127.1 + ny * 311.7 + nz * 74.7) * 43758.5453);
+        const jy = fractHash(Math.sin(nx * 269.5 + ny * 183.3 + nz * 246.1) * 43758.5453);
+        const jz = fractHash(Math.sin(nx * 419.2 + ny * 371.9 + nz * 128.5) * 43758.5453);
+        const sx = (nx + 0.20 + 0.60 * jx) * cw;
+        const sy = (ny + 0.22 + 0.56 * jy) * ch;
+        const sz = (nz + 0.20 + 0.60 * jz) * cw;
+        const ddx = fx - sx;
+        const ddy = fy - sy;
+        const ddz = fz - sz;
+        const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+        if (d2 < bestDist2) {
+          bestDist2 = d2;
+          bestSx = sx;
+          bestSy = sy;
+          bestSz = sz;
+          bestJx = jx;
+          bestJy = jy;
+          bestJz = jz;
+        }
+      }
+    }
+  }
+
+  const blockStep = Math.round(bestJx * 3.0) / 3.0;
+  const blockMod = 0.74 + 0.26 * (blockStep * 0.7 + bestJy * 0.3);
+  return {
+    sx: bestSx,
+    sy: bestSy,
+    sz: bestSz,
+    blockStep,
+    blockMod,
+    tumbleX: (bestJx - 0.5) * 2.0,
+    tumbleY: (bestJy - 0.5) * 2.0,
+    tumbleZ: (bestJz - 0.5) * 2.0,
+  };
+}
+
+function detectRigidFaceSpan(mesh, v, vertexCount, stride) {
+  const rawKind0 = mesh[v * stride + 6] ?? 7;
+  if (rawKind0 < 9.5 || rawKind0 >= 18.5) return 1;
+  const frac0 = rawKind0 - Math.floor(rawKind0);
+  if (frac0 > 0.06 && frac0 < 0.19 && v + 3 < vertexCount) {
+    for (let k = 1; k <= 3; k++) {
+      const rk = mesh[(v + k) * stride + 6] ?? 7;
+      const fk = rk - Math.floor(rk);
+      if (fk <= 0.06 || fk >= 0.19) return 1;
+    }
+    return 4;
+  }
+  if (frac0 >= 0.19 && frac0 < 0.32 && v + 2 < vertexCount) {
+    for (let k = 1; k <= 2; k++) {
+      const rk = mesh[(v + k) * stride + 6] ?? 7;
+      const fk = rk - Math.floor(rk);
+      if (fk < 0.19 || fk >= 0.32) return 1;
+    }
+    return 3;
+  }
+  return 1;
+}
+
+function rotateVec3Rigid(vx, vy, vz, ax, ay, az) {
+  // Exact 3D orthogonal rotation R_y(ay) * R_x(ax) * R_z(az) in SO(3) (preserves edge lengths 100%)
+  const cz = Math.cos(az), sz = Math.sin(az);
+  const x1 = vx * cz - vy * sz;
+  const y1 = vx * sz + vy * cz;
+  const z1 = vz;
+  const cx = Math.cos(ax), sx = Math.sin(ax);
+  const x2 = x1;
+  const y2 = y1 * cx - z1 * sx;
+  const z2 = y1 * sx + z1 * cx;
+  const cy = Math.cos(ay), sy = Math.sin(ay);
+  return [
+    x2 * cy + z2 * sy,
+    y2,
+    -x2 * sy + z2 * cy,
+  ];
+}
+
 export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
   if (!(mesh instanceof Float32Array) || !Array.isArray(bakes) || !bakes.length) {
     return null;
@@ -1842,6 +1949,9 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
   const vertexCount = Math.floor(mesh.length / stride);
   let minV = vertexCount;
   let maxV = -1;
+  const localRotX = new Float32Array(4);
+  const localRotY = new Float32Array(4);
+  const localRotZ = new Float32Array(4);
 
   for (let b = 0; b < bakes.length; b++) {
     const bake = bakes[b];
@@ -1855,68 +1965,121 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const blastR = Math.max(12.0, (Number(bake.radius) || 9.5) * 1.65);
       const stepDepth = Math.max(1.5, Number(bake.stepDepth) || 2.2);
       const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        const dx = px - bx;
-        const dy = py - by;
-        const dz = pz - bz;
+      let faceSpan = 1;
+      for (let v = 0; v < vertexCount; v += faceSpan) {
+        faceSpan = detectRigidFaceSpan(mesh, v, vertexCount, stride);
+        let fx = 0, fy = 0, fz = 0, prevDmgSum = 0;
+        for (let k = 0; k < faceSpan; k++) {
+          const at = (v + k) * stride;
+          fx += mesh[at];
+          fy += mesh[at + 1];
+          fz += mesh[at + 2];
+          const cLen = Math.hypot(mesh[at + 3], mesh[at + 4], mesh[at + 5]) || 1;
+          prevDmgSum += Math.max(0, cLen - 1.0);
+        }
+        fx /= faceSpan;
+        fy /= faceSpan;
+        fz /= faceSpan;
+        const prevDmg = prevDmgSum / faceSpan;
+
+        const dx = fx - bx;
+        const dy = fy - by;
+        const dz = fz - bz;
         const dist = Math.hypot(dx, dy * 0.55, dz);
         if (dist >= blastR) continue;
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const curLen = Math.hypot(nx, ny, nz) || 1;
-        const prevDmg = Math.max(0, curLen - 1.0);
+
+        const rawKind = mesh[v * stride + 6] ?? 7;
+        const kind = Math.floor(rawKind);
+        const isTimber = kind === 10 || kind === 15 || kind === 17;
+        const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
+        const { blockStep, blockMod } = voronoi;
         const t = 1 - dist / blastR;
         const core = t * t;
-        // Block-quantized cell hash so masonry courses slump in stepped ashlar blocks, never shearing into spiky shards
-        const cellX = Math.floor(px / 1.65);
-        const cellZ = Math.floor(pz / 1.65);
-        const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
-        const blockStep = Math.round(cellHash * 3.0) / 3.0;
-        const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.2 + pz * 1.1) * Math.cos(px * 0.8 - pz * 1.3);
-        const blockMod = 0.72 + 0.28 * (blockStep * 0.7 + smoothWave * 0.3);
 
-        // Strictly saturate horizontal displacement so overlapping bakes never stretch triangles into shards
-        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+        // Strictly saturate horizontal displacement so overlapping bakes never push blocks past the talus pile
+        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
         const hDist = Math.hypot(dx, dz) || 1;
-        const outPush = Math.min(0.45, stepDepth * (isExplosion ? 0.26 : 0.16) * core * blockMod) * horizRemain;
+        const outPush = Math.min(0.36, stepDepth * (isExplosion ? 0.20 : 0.13) * core * blockMod) * horizRemain;
 
-        // Gravity slump: upper walls, roofs, and battlements crumble downward toward a stepped rubble mound
-        const rubbleBaseY = Math.max(0.35, Math.min(py, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
-        const aboveRubble = Math.max(0, py - rubbleBaseY);
+        // Gravity slump: Voronoi blocks detach and drop downward onto a stepped talus rubble mound
+        const rubbleBaseY = Math.max(0.35, Math.min(fy, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
+        const aboveRubble = Math.max(0, fy - rubbleBaseY);
         const slumpFrac = Math.min(0.82, (isExplosion ? 0.68 : 0.52) * (0.38 + 0.62 * t) * blockMod);
-        let newPy = py - aboveRubble * slumpFrac;
+        let newFy = fy - aboveRubble * slumpFrac;
         const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
-        const rawKind = mesh[at + 6] ?? 7;
-        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && Math.round(rawKind) !== 15;
+        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
         if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
           const courseH = 0.52;
           const courseOff = blockStep * 0.26;
-          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const steppedY = Math.round((newFy - courseOff) / courseH) * courseH + courseOff;
           const snapW = Math.min(0.62, (nextDmg - 0.45) * 0.65);
-          newPy = newPy * (1 - snapW) + steppedY * snapW;
+          newFy = newFy * (1 - snapW) + steppedY * snapW;
         }
-        mesh[at] = px + (dx / hDist) * outPush;
-        mesh[at + 1] = Math.max(0.18, newPy);
-        mesh[at + 2] = pz + (dz / hDist) * outPush;
+        const newFx = fx + (dx / hDist) * outPush;
+        const newFz = fz + (dz / hDist) * outPush;
+
+        // Rigid 3D Voronoi block detachment: bounded mortar joint gap inset + orthogonal 3D tumble rotation
+        let faceRadius = 0;
+        for (let k = 0; k < faceSpan; k++) {
+          const at = (v + k) * stride;
+          const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
+          if (rad > faceRadius) faceRadius = rad;
+        }
+        const gapScale =
+          faceSpan > 1 && faceRadius > 0.05 && prevDmg < 0.28 && nextDmg >= 0.28
+            ? 1.0 - Math.min(0.04, 0.035 / Math.max(0.65, faceRadius))
+            : 1.0;
+        const maxCornerTumble = (isExplosion ? 0.11 : 0.08) * core * horizRemain;
+        const tumbleMag = faceSpan > 1 ? Math.min(0.14, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
+        const dAx = voronoi.tumbleX * tumbleMag;
+        const dAy = voronoi.tumbleY * tumbleMag * 0.75;
+        const dAz = voronoi.tumbleZ * tumbleMag;
+
+        let minLocalY = 0;
+        for (let k = 0; k < faceSpan; k++) {
+          const at = (v + k) * stride;
+          const rx = (mesh[at] - fx) * gapScale;
+          const ry = (mesh[at + 1] - fy) * gapScale;
+          const rz = (mesh[at + 2] - fz) * gapScale;
+          const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
+          localRotX[k] = tx;
+          localRotY[k] = ty;
+          localRotZ[k] = tz;
+          if (ty < minLocalY) minLocalY = ty;
+        }
+        if (newFy + minLocalY < 0.18) {
+          newFy = 0.18 - minLocalY;
+        }
 
         const scale = 1.0 + nextDmg;
-        const ux = nx / curLen + (dx / blastR) * 0.28 * t;
-        const uy = ny / curLen + 0.55 * t;
-        const uz = nz / curLen + (dz / blastR) * 0.28 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (stride >= 8 && rawKind < 19.5) {
-          const targetShade = 0.28 + 0.26 * blockStep;
-          const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
-          mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
+        for (let k = 0; k < faceSpan; k++) {
+          const idx = v + k;
+          const at = idx * stride;
+          mesh[at] = newFx + localRotX[k];
+          mesh[at + 1] = newFy + localRotY[k];
+          mesh[at + 2] = newFz + localRotZ[k];
+
+          const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+          const curLen = Math.hypot(nx, ny, nz) || 1;
+          const [rnx, rny, rnz] =
+            tumbleMag > 1e-4
+              ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
+              : [nx / curLen, ny / curLen, nz / curLen];
+          const ux = rnx + (dx / blastR) * 0.28 * t;
+          const uy = rny + 0.55 * t;
+          const uz = rnz + (dz / blastR) * 0.28 * t;
+          const uLen = Math.hypot(ux, uy, uz) || 1;
+          mesh[at + 3] = (ux / uLen) * scale;
+          mesh[at + 4] = (uy / uLen) * scale;
+          mesh[at + 5] = (uz / uLen) * scale;
+          if (stride >= 8 && rawKind < 19.5) {
+            const targetShade = 0.28 + 0.26 * blockStep;
+            const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
+            mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
+          }
+          if (idx < minV) minV = idx;
+          if (idx > maxV) maxV = idx;
         }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
       }
       continue;
     }
@@ -2009,88 +2172,138 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     const isTimber = bake.kind === 'timber-splinter' || bake.materialClass === 'timber';
     const isCannonDismount = bake.kind === 'cannon-dismount';
 
-    for (let v = 0; v < vertexCount; v++) {
-      const at = v * stride;
-      const px = mesh[at];
-      const py = mesh[at + 1];
-      const pz = mesh[at + 2];
-      const dx = px - bx;
-      const dy = py - by;
-      const dz = pz - bz;
+    let faceSpan = 1;
+    for (let v = 0; v < vertexCount; v += faceSpan) {
+      faceSpan = detectRigidFaceSpan(mesh, v, vertexCount, stride);
+      let fx = 0, fy = 0, fz = 0, prevDmgSum = 0;
+      for (let k = 0; k < faceSpan; k++) {
+        const at = (v + k) * stride;
+        fx += mesh[at];
+        fy += mesh[at + 1];
+        fz += mesh[at + 2];
+        const cLen = Math.hypot(mesh[at + 3], mesh[at + 4], mesh[at + 5]) || 1;
+        prevDmgSum += Math.max(0, cLen - 1.0);
+      }
+      fx /= faceSpan;
+      fy /= faceSpan;
+      fz /= faceSpan;
+      const prevDmg = prevDmgSum / faceSpan;
+
+      const dx = fx - bx;
+      const dy = fy - by;
+      const dz = fz - bz;
       // Weight vertical distance slightly softer when above the impact point so upper parapet merlons
       // and crenellations collapse when the scarp wall beneath them is pounded by cannonfire.
       const effDy = dy > 0 ? dy * 0.55 : dy * 0.9;
       const dist = Math.hypot(dx, effDy, dz);
       if (dist >= r) continue;
-      const rawKind = mesh[at + 6] ?? 7;
+      const rawKind = mesh[v * stride + 6] ?? 7;
       const kind = Math.floor(rawKind);
       if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.68) continue;
 
       const t = 1 - dist / r;
       const core = t * 0.45 + t * t * 0.55;
-      const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-      const curLen = Math.hypot(nx, ny, nz) || 1;
-      const prevDmg = Math.max(0, curLen - 1.0);
       const nextDmg = Math.min(1.45, prevDmg + Math.min(0.85, 0.58 * core * severity));
-      // Block-quantized ashlar course factor (1.5m x 1.5m cells) so stone crumbles in blocky steps,
-      // never shearing adjacent vertices with high-frequency sine spikes.
-      const cellX = Math.floor(px / 1.5);
-      const cellZ = Math.floor(pz / 1.5);
-      const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
-      const blockStep = Math.round(cellHash * 3.0) / 3.0;
-      const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.4 + pz * 1.2) * Math.cos(px * 0.9 - pz * 1.1);
-      const blockMod = isTimber
-        ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(px * 2.2 + pz * 1.8) * Math.cos(py * 2.5))
-        : 0.74 + 0.26 * (blockStep * 0.7 + smoothWave * 0.3);
+      const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
+      const { blockStep, blockMod } = voronoi;
 
       // Strictly cap cumulative horizontal displacement via prevDmg so 52 overlapping hits from a
       // broadside never push a wall face through its back face or create spiky horizontal shards.
-      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
 
+      let newFx = fx;
+      let newFy = fy;
+      let newFz = fz;
       if (isCannonDismount && (kind === 10 || kind === 14)) {
         const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-        const hDisp = stepDepth * 0.65 * t * horizRemain;
-        mesh[at] = px + (inX * hDisp + inZ * slew * 0.24 * t * horizRemain);
-        mesh[at + 1] = Math.max(0.2, py - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
-        mesh[at + 2] = pz + (inZ * hDisp - inX * slew * 0.24 * t * horizRemain);
+        const hDisp = stepDepth * 0.52 * t * horizRemain;
+        newFx = fx + (inX * hDisp + inZ * slew * 0.20 * t * horizRemain);
+        newFy = Math.max(0.2, fy - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
+        newFz = fz + (inZ * hDisp - inX * slew * 0.20 * t * horizRemain);
       } else {
-        const hDisp = Math.min(0.32, stepDepth * 0.24 * core * blockMod) * horizRemain;
-        const rubbleFloorY = Math.max(0.25, Math.min(py, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
-        const aboveRubble = Math.max(0, py - rubbleFloorY);
-        const dropWeight = dy > -0.6 ? 0.42 : 0.18;
-        const rawDrop = Math.min(aboveRubble * 0.65, stepDepth * dropWeight * core * blockMod);
-        let newPy = Math.max(0.15, py - rawDrop + inY * hDisp * 0.35);
+        const hDisp = Math.min(0.26, stepDepth * 0.19 * core * blockMod) * horizRemain;
+        const rubbleFloorY = Math.max(0.25, Math.min(fy, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
+        const aboveRubble = Math.max(0, fy - rubbleFloorY);
+        const dropWeight = dy > -0.6 ? 0.44 : 0.18;
+        const rawDrop = Math.min(aboveRubble * 0.68, stepDepth * dropWeight * core * blockMod);
+        newFy = Math.max(0.15, fy - rawDrop + inY * hDisp * 0.35);
 
         const isStoneKind = !isTimber && rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
         if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
           const courseH = 0.52;
           const courseOff = blockStep * 0.26;
-          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const steppedY = Math.round((newFy - courseOff) / courseH) * courseH + courseOff;
           const snapW = Math.min(0.58, (nextDmg - 0.45) * 0.60);
-          newPy = newPy * (1 - snapW) + steppedY * snapW;
+          newFy = newFy * (1 - snapW) + steppedY * snapW;
         }
 
-        mesh[at] = px + inX * hDisp;
-        mesh[at + 1] = newPy;
-        mesh[at + 2] = pz + inZ * hDisp;
+        newFx = fx + inX * hDisp;
+        newFz = fz + inZ * hDisp;
+      }
+
+      // Rigid 3D Voronoi block detachment: bounded mortar joint gap inset + orthogonal 3D tumble rotation
+      let faceRadius = 0;
+      for (let k = 0; k < faceSpan; k++) {
+        const at = (v + k) * stride;
+        const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
+        if (rad > faceRadius) faceRadius = rad;
+      }
+      const gapScale =
+        faceSpan > 1 && faceRadius > 0.05 && prevDmg < 0.28 && nextDmg >= 0.28
+          ? 1.0 - Math.min(0.04, 0.035 / Math.max(0.65, faceRadius))
+          : 1.0;
+      const maxCornerTumble = 0.09 * core * severity * horizRemain;
+      const tumbleMag = faceSpan > 1 ? Math.min(0.13, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
+      const dAx = voronoi.tumbleX * tumbleMag;
+      const dAy = voronoi.tumbleY * tumbleMag * 0.75;
+      const dAz = voronoi.tumbleZ * tumbleMag;
+
+      let minLocalY = 0;
+      for (let k = 0; k < faceSpan; k++) {
+        const at = (v + k) * stride;
+        const rx = (mesh[at] - fx) * gapScale;
+        const ry = (mesh[at + 1] - fy) * gapScale;
+        const rz = (mesh[at + 2] - fz) * gapScale;
+        const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
+        localRotX[k] = tx;
+        localRotY[k] = ty;
+        localRotZ[k] = tz;
+        if (ty < minLocalY) minLocalY = ty;
+      }
+      if (newFy + minLocalY < 0.15) {
+        newFy = 0.15 - minLocalY;
       }
 
       const scale = 1.0 + nextDmg;
       const tilt = 0.38 * t;
-      const ux = nx / curLen - (dx / r) * tilt * 0.65;
-      const uy = ny / curLen + 0.42 * core;
-      const uz = nz / curLen - (dz / r) * tilt * 0.65;
-      const uLen = Math.hypot(ux, uy, uz) || 1;
-      mesh[at + 3] = (ux / uLen) * scale;
-      mesh[at + 4] = (uy / uLen) * scale;
-      mesh[at + 5] = (uz / uLen) * scale;
-      if (stride >= 8 && rawKind < 19.5) {
-        const targetShade = 0.30 + 0.24 * blockStep;
-        const blend = Math.min(0.65, 0.42 * core * severity);
-        mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
+      for (let k = 0; k < faceSpan; k++) {
+        const idx = v + k;
+        const at = idx * stride;
+        mesh[at] = newFx + localRotX[k];
+        mesh[at + 1] = newFy + localRotY[k];
+        mesh[at + 2] = newFz + localRotZ[k];
+
+        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+        const curLen = Math.hypot(nx, ny, nz) || 1;
+        const [rnx, rny, rnz] =
+          tumbleMag > 1e-4
+            ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
+            : [nx / curLen, ny / curLen, nz / curLen];
+        const ux = rnx - (dx / r) * tilt * 0.65;
+        const uy = rny + 0.42 * core;
+        const uz = rnz - (dz / r) * tilt * 0.65;
+        const uLen = Math.hypot(ux, uy, uz) || 1;
+        mesh[at + 3] = (ux / uLen) * scale;
+        mesh[at + 4] = (uy / uLen) * scale;
+        mesh[at + 5] = (uz / uLen) * scale;
+        if (stride >= 8 && rawKind < 19.5) {
+          const targetShade = 0.30 + 0.24 * blockStep;
+          const blend = Math.min(0.65, 0.42 * core * severity);
+          mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
+        }
+        if (idx < minV) minV = idx;
+        if (idx > maxV) maxV = idx;
       }
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
     }
   }
 

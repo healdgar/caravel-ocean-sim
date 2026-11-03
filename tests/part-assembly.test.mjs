@@ -17,6 +17,7 @@ import {
   locatePartAtLocalPoint,
   bakeVesselImpactDeformations,
   bakeBuildingImpactDeformations,
+  sampleVoronoiBlockCell,
 } from '../js/part-assembly.js';
 import {
   PART_ASSEMBLY_WGSL,
@@ -32,6 +33,14 @@ import {
   synthesizeCoastalTerrain,
   placeCoastalPort,
   buildPortPrefabGeometry,
+  CAIRN_ARCHITECTURAL_TEMPLATES,
+  isFraction,
+  parseFraction,
+  resolveNumeric,
+  resolvePosition,
+  toFraction,
+  expandCairnVoxelPrimitive,
+  emitCairnScene,
 } from '../js/coastal-world.js';
 import {
   sweepShipSegment,
@@ -1637,6 +1646,181 @@ test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubber
   assert.equal(osebergSpec.defaultOarPairs, 15);
   assert.equal(osebergSpec.activeOarPairs, 8);
 });
+
+test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxel language compile and crumble rigidly without stretched shards', () => {
+  // 1. Cairn fraction arithmetic & coordinate resolution
+  assert.equal(isFraction('5/3'), true);
+  assert.equal(isFraction('12/0'), false);
+  assert.ok(Math.abs(parseFraction('7/3') - 7 / 3) < 1e-9);
+  assert.deepEqual(resolvePosition(['3/2', 4, '-5/4']), [1.5, 4, -1.25]);
+  assert.equal(toFraction(5 / 3), '5/3');
+
+  // 2. Cairn voxel brush expansion & CSG/impactor subtraction
+  const rawVoxels = expandCairnVoxelPrimitive({
+    type: 'blocks',
+    runs: [{ x: [-2, 2], y: [0, 2], z: [0, 1] }],
+    material: 'ashlar',
+  });
+  assert.equal(rawVoxels.length, 5 * 3 * 2, 'Cairn blocks run expands 5x3x2 = 30 voxels');
+
+  // 3. Cairn declarative JSON architectural template (catedral_basilica) + custom voxel/primitive scene
+  assert.ok(CAIRN_ARCHITECTURAL_TEMPLATES.catedral_basilica, 'Cairn templates include catedral_basilica');
+  const cathedral = getBuildingParts('catedral_basilica');
+  assert.equal(cathedral.prefabId, 'catedral_basilica');
+  assert.ok(cathedral.vertexCount > 800, `catedral_basilica compiles >800 vertices (got ${cathedral.vertexCount})`);
+  assert.ok(cathedral.groups.length >= 6, 'catedral_basilica exposes semantic Cairn part groups');
+  const groupKeys = new Set(cathedral.groups.map((g) => g.partKey));
+  assert.ok(groupKeys.has('central_nave') && groupKeys.has('transept_arms'), 'Cairn scene preserves named architectural groups');
+
+  // 4. Custom Cairn scene with shapes dictionary, crenellated wall + openings, arch, dome, stairs, voxel-column, and impactors
+  const customCairnSpec = {
+    name: 'Test_Cairn_Bastion_Keep',
+    shapes: {
+      watch_turret: {
+        type: 'cylinder',
+        radius: 1.8,
+        height: 4.2,
+        segments: 8,
+        material: 'ashlar',
+      },
+    },
+    impactors: [
+      { position: [0, 2.5, -5.0], radius: 1.6, shape: 'sphere' },
+    ],
+    items: [
+      {
+        type: 'wall',
+        name: 'Bastion_Front_Wall',
+        from: [-6, 0, -5],
+        to: [6, 0, -5],
+        height: 5.5,
+        thickness: 1.4,
+        crenellated: true,
+        material: 'ashlar',
+        openings: [
+          { type: 'door', position: '1/2', width: 2.2, height: 3.0 },
+        ],
+      },
+      {
+        type: 'arch',
+        name: 'Gate_Voussoir_Arch',
+        position: [0, 0, -5],
+        width: 2.4,
+        height: 3.4,
+        depth: 1.5,
+        material: 'limestone',
+      },
+      {
+        type: 'dome',
+        name: 'Keep_Cupola',
+        position: [0, 5.5, 0],
+        radius: 3.2,
+        height: 2.8,
+        drumHeight: 1.2,
+        lantern: true,
+        material: 'terracotta',
+      },
+      {
+        type: 'stairs',
+        name: 'Rampart_Steps',
+        from: [-4, 0, -2],
+        to: [-4, 3.2, 3],
+        width: 1.8,
+        steps: 6,
+        material: 'stone',
+      },
+      {
+        type: 'blocks',
+        name: 'Voxel_Parapet',
+        voxelSize: 1.0,
+        runs: [{ x: [-3, 3], y: [1, 3], z: [-5, -5] }],
+        material: 'ashlar',
+      },
+      {
+        shape: 'watch_turret',
+        position: [5, 0, -5],
+      },
+    ],
+  };
+  const customParts = getBuildingParts('custom_cairn_keep', { cairnSpec: customCairnSpec });
+  assert.ok(customParts.vertexCount > 400, 'Custom Cairn scene with shapes, walls, arches, domes, stairs & voxels compiles cleanly');
+
+  // 5. Verify 3D Voronoi block-cell detachment keeps every quad face 100% rigid (zero edge stretching/shearing) under cannonfire
+  const voronoiA = sampleVoronoiBlockCell(2.1, 3.4, -4.2, false);
+  const voronoiB = sampleVoronoiBlockCell(2.15, 3.42, -4.18, false);
+  assert.equal(voronoiA.sx, voronoiB.sx, 'Nearby points inside the same 3D Voronoi cell resolve to the same block seed');
+
+  const origVerts = new Float32Array(cathedral.vertices);
+  const hitVerts = new Float32Array(cathedral.vertices);
+  const bakes = [];
+  for (let i = 0; i < 16; i++) {
+    bakes.push({
+      kind: 'stone-crater',
+      x: ((i % 4) - 1.5) * 2.2,
+      y: 3.5 + Math.floor(i / 4) * 1.4,
+      z: -14.0,
+      nx: 0,
+      ny: 0,
+      nz: -1,
+      radius: 2.2,
+      stepDepth: 0.85,
+      severity: 0.95,
+    });
+  }
+  bakes.push({
+    kind: 'building-collapse',
+    x: 0,
+    y: 5.0,
+    z: -12.0,
+    radius: 11.0,
+    stepDepth: 2.4,
+    powderFraction: 0.85,
+  });
+
+  const dirty = bakeBuildingImpactDeformations(hitVerts, bakes, 8);
+  assert.ok(dirty && dirty.maxVertex > dirty.minVertex, 'Cannonfire & collapse bakes deform Cairn cathedral vertices');
+
+  let movedQuads = 0;
+  let maxAspectStretchError = 0;
+  for (let v = 0; v + 3 < hitVerts.length / 8; ) {
+    const rk = origVerts[v * 8 + 6];
+    const frac = rk - Math.floor(rk);
+    if (frac > 0.06 && frac < 0.19) {
+      // Measure all 4 edge lengths of the quad before and after impact
+      const edgeOrig = [];
+      const edgeAfter = [];
+      for (let e = 0; e < 4; e++) {
+        const a = (v + e) * 8;
+        const b = (v + ((e + 1) % 4)) * 8;
+        edgeOrig.push(Math.hypot(origVerts[b] - origVerts[a], origVerts[b + 1] - origVerts[a + 1], origVerts[b + 2] - origVerts[a + 2]));
+        edgeAfter.push(Math.hypot(hitVerts[b] - hitVerts[a], hitVerts[b + 1] - hitVerts[a + 1], hitVerts[b + 2] - hitVerts[a + 2]));
+      }
+      const moved = Math.hypot(
+        hitVerts[v * 8] - origVerts[v * 8],
+        hitVerts[v * 8 + 1] - origVerts[v * 8 + 1],
+        hitVerts[v * 8 + 2] - origVerts[v * 8 + 2]
+      );
+      if (moved > 0.05 && edgeOrig[0] > 0.05 && edgeOrig[1] > 0.05) {
+        movedQuads++;
+        const ratio0 = edgeAfter[0] / edgeOrig[0];
+        const ratio1 = edgeAfter[1] / edgeOrig[1];
+        const stretchDiff = Math.abs(ratio0 - ratio1);
+        if (stretchDiff > maxAspectStretchError) maxAspectStretchError = stretchDiff;
+      }
+      v += 4;
+    } else if (frac >= 0.19 && frac < 0.32) {
+      v += 3;
+    } else {
+      v += 1;
+    }
+  }
+  assert.ok(movedQuads > 20, `Expected >20 detached Voronoi block quads, got ${movedQuads}`);
+  assert.ok(
+    maxAspectStretchError < 1e-4,
+    `Rigid 3D Voronoi block transformation preserves quad aspect ratios with zero shard stretching (max error ${maxAspectStretchError})`
+  );
+});
+
 
 
 

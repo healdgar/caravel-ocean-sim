@@ -20156,6 +20156,113 @@ function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
   return { minVertex: minV, maxVertex: maxV, byteOffset, byteLength };
 }
 
+function fractHash(x) {
+  return x - Math.floor(x);
+}
+
+// 3D jittered Voronoi cell lookup for ashlar masonry blocks (1.45m x 0.90m x 1.45m) and timber beams
+function sampleVoronoiBlockCell(fx, fy, fz, isTimber = false) {
+  const cw = isTimber ? 1.80 : 1.45;
+  const ch = isTimber ? 0.65 : 0.90;
+  const ux = fx / cw;
+  const uy = fy / ch;
+  const uz = fz / cw;
+  const bx = Math.floor(ux - 0.5);
+  const by = Math.floor(uy - 0.5);
+  const bz = Math.floor(uz - 0.5);
+
+  let bestDist2 = Infinity;
+  let bestSx = fx;
+  let bestSy = fy;
+  let bestSz = fz;
+  let bestJx = 0.5;
+  let bestJy = 0.5;
+  let bestJz = 0.5;
+
+  for (let dz = 0; dz <= 1; dz++) {
+    const nz = bz + dz;
+    for (let dy = 0; dy <= 1; dy++) {
+      const ny = by + dy;
+      for (let dx = 0; dx <= 1; dx++) {
+        const nx = bx + dx;
+        const jx = fractHash(Math.sin(nx * 127.1 + ny * 311.7 + nz * 74.7) * 43758.5453);
+        const jy = fractHash(Math.sin(nx * 269.5 + ny * 183.3 + nz * 246.1) * 43758.5453);
+        const jz = fractHash(Math.sin(nx * 419.2 + ny * 371.9 + nz * 128.5) * 43758.5453);
+        const sx = (nx + 0.20 + 0.60 * jx) * cw;
+        const sy = (ny + 0.22 + 0.56 * jy) * ch;
+        const sz = (nz + 0.20 + 0.60 * jz) * cw;
+        const ddx = fx - sx;
+        const ddy = fy - sy;
+        const ddz = fz - sz;
+        const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+        if (d2 < bestDist2) {
+          bestDist2 = d2;
+          bestSx = sx;
+          bestSy = sy;
+          bestSz = sz;
+          bestJx = jx;
+          bestJy = jy;
+          bestJz = jz;
+        }
+      }
+    }
+  }
+
+  const blockStep = Math.round(bestJx * 3.0) / 3.0;
+  const blockMod = 0.74 + 0.26 * (blockStep * 0.7 + bestJy * 0.3);
+  return {
+    sx: bestSx,
+    sy: bestSy,
+    sz: bestSz,
+    blockStep,
+    blockMod,
+    tumbleX: (bestJx - 0.5) * 2.0,
+    tumbleY: (bestJy - 0.5) * 2.0,
+    tumbleZ: (bestJz - 0.5) * 2.0,
+  };
+}
+
+function detectRigidFaceSpan(mesh, v, vertexCount, stride) {
+  const rawKind0 = mesh[v * stride + 6] ?? 7;
+  if (rawKind0 < 9.5 || rawKind0 >= 18.5) return 1;
+  const frac0 = rawKind0 - Math.floor(rawKind0);
+  if (frac0 > 0.06 && frac0 < 0.19 && v + 3 < vertexCount) {
+    for (let k = 1; k <= 3; k++) {
+      const rk = mesh[(v + k) * stride + 6] ?? 7;
+      const fk = rk - Math.floor(rk);
+      if (fk <= 0.06 || fk >= 0.19) return 1;
+    }
+    return 4;
+  }
+  if (frac0 >= 0.19 && frac0 < 0.32 && v + 2 < vertexCount) {
+    for (let k = 1; k <= 2; k++) {
+      const rk = mesh[(v + k) * stride + 6] ?? 7;
+      const fk = rk - Math.floor(rk);
+      if (fk < 0.19 || fk >= 0.32) return 1;
+    }
+    return 3;
+  }
+  return 1;
+}
+
+function rotateVec3Rigid(vx, vy, vz, ax, ay, az) {
+  // Exact 3D orthogonal rotation R_y(ay) * R_x(ax) * R_z(az) in SO(3) (preserves edge lengths 100%)
+  const cz = Math.cos(az), sz = Math.sin(az);
+  const x1 = vx * cz - vy * sz;
+  const y1 = vx * sz + vy * cz;
+  const z1 = vz;
+  const cx = Math.cos(ax), sx = Math.sin(ax);
+  const x2 = x1;
+  const y2 = y1 * cx - z1 * sx;
+  const z2 = y1 * sx + z1 * cx;
+  const cy = Math.cos(ay), sy = Math.sin(ay);
+  return [
+    x2 * cy + z2 * sy,
+    y2,
+    -x2 * sy + z2 * cy,
+  ];
+}
+
 function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
   if (!(mesh instanceof Float32Array) || !Array.isArray(bakes) || !bakes.length) {
     return null;
@@ -20163,6 +20270,9 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
   const vertexCount = Math.floor(mesh.length / stride);
   let minV = vertexCount;
   let maxV = -1;
+  const localRotX = new Float32Array(4);
+  const localRotY = new Float32Array(4);
+  const localRotZ = new Float32Array(4);
 
   for (let b = 0; b < bakes.length; b++) {
     const bake = bakes[b];
@@ -20176,68 +20286,121 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const blastR = Math.max(12.0, (Number(bake.radius) || 9.5) * 1.65);
       const stepDepth = Math.max(1.5, Number(bake.stepDepth) || 2.2);
       const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        const dx = px - bx;
-        const dy = py - by;
-        const dz = pz - bz;
+      let faceSpan = 1;
+      for (let v = 0; v < vertexCount; v += faceSpan) {
+        faceSpan = detectRigidFaceSpan(mesh, v, vertexCount, stride);
+        let fx = 0, fy = 0, fz = 0, prevDmgSum = 0;
+        for (let k = 0; k < faceSpan; k++) {
+          const at = (v + k) * stride;
+          fx += mesh[at];
+          fy += mesh[at + 1];
+          fz += mesh[at + 2];
+          const cLen = Math.hypot(mesh[at + 3], mesh[at + 4], mesh[at + 5]) || 1;
+          prevDmgSum += Math.max(0, cLen - 1.0);
+        }
+        fx /= faceSpan;
+        fy /= faceSpan;
+        fz /= faceSpan;
+        const prevDmg = prevDmgSum / faceSpan;
+
+        const dx = fx - bx;
+        const dy = fy - by;
+        const dz = fz - bz;
         const dist = Math.hypot(dx, dy * 0.55, dz);
         if (dist >= blastR) continue;
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const curLen = Math.hypot(nx, ny, nz) || 1;
-        const prevDmg = Math.max(0, curLen - 1.0);
+
+        const rawKind = mesh[v * stride + 6] ?? 7;
+        const kind = Math.floor(rawKind);
+        const isTimber = kind === 10 || kind === 15 || kind === 17;
+        const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
+        const { blockStep, blockMod } = voronoi;
         const t = 1 - dist / blastR;
         const core = t * t;
-        // Block-quantized cell hash so masonry courses slump in stepped ashlar blocks, never shearing into spiky shards
-        const cellX = Math.floor(px / 1.65);
-        const cellZ = Math.floor(pz / 1.65);
-        const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
-        const blockStep = Math.round(cellHash * 3.0) / 3.0;
-        const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.2 + pz * 1.1) * Math.cos(px * 0.8 - pz * 1.3);
-        const blockMod = 0.72 + 0.28 * (blockStep * 0.7 + smoothWave * 0.3);
 
-        // Strictly saturate horizontal displacement so overlapping bakes never stretch triangles into shards
-        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+        // Strictly saturate horizontal displacement so overlapping bakes never push blocks past the talus pile
+        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
         const hDist = Math.hypot(dx, dz) || 1;
-        const outPush = Math.min(0.45, stepDepth * (isExplosion ? 0.26 : 0.16) * core * blockMod) * horizRemain;
+        const outPush = Math.min(0.36, stepDepth * (isExplosion ? 0.20 : 0.13) * core * blockMod) * horizRemain;
 
-        // Gravity slump: upper walls, roofs, and battlements crumble downward toward a stepped rubble mound
-        const rubbleBaseY = Math.max(0.35, Math.min(py, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
-        const aboveRubble = Math.max(0, py - rubbleBaseY);
+        // Gravity slump: Voronoi blocks detach and drop downward onto a stepped talus rubble mound
+        const rubbleBaseY = Math.max(0.35, Math.min(fy, Math.max(0.8, by - stepDepth * 1.9)) + blockStep * 0.85);
+        const aboveRubble = Math.max(0, fy - rubbleBaseY);
         const slumpFrac = Math.min(0.82, (isExplosion ? 0.68 : 0.52) * (0.38 + 0.62 * t) * blockMod);
-        let newPy = py - aboveRubble * slumpFrac;
+        let newFy = fy - aboveRubble * slumpFrac;
         const nextDmg = Math.min(1.45, prevDmg + (0.85 + 0.55 * powFrac) * (0.35 + 0.65 * t));
-        const rawKind = mesh[at + 6] ?? 7;
-        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && Math.round(rawKind) !== 15;
+        const isStoneKind = rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
         if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
           const courseH = 0.52;
           const courseOff = blockStep * 0.26;
-          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const steppedY = Math.round((newFy - courseOff) / courseH) * courseH + courseOff;
           const snapW = Math.min(0.62, (nextDmg - 0.45) * 0.65);
-          newPy = newPy * (1 - snapW) + steppedY * snapW;
+          newFy = newFy * (1 - snapW) + steppedY * snapW;
         }
-        mesh[at] = px + (dx / hDist) * outPush;
-        mesh[at + 1] = Math.max(0.18, newPy);
-        mesh[at + 2] = pz + (dz / hDist) * outPush;
+        const newFx = fx + (dx / hDist) * outPush;
+        const newFz = fz + (dz / hDist) * outPush;
+
+        // Rigid 3D Voronoi block detachment: bounded mortar joint gap inset + orthogonal 3D tumble rotation
+        let faceRadius = 0;
+        for (let k = 0; k < faceSpan; k++) {
+          const at = (v + k) * stride;
+          const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
+          if (rad > faceRadius) faceRadius = rad;
+        }
+        const gapScale =
+          faceSpan > 1 && faceRadius > 0.05 && prevDmg < 0.28 && nextDmg >= 0.28
+            ? 1.0 - Math.min(0.04, 0.035 / Math.max(0.65, faceRadius))
+            : 1.0;
+        const maxCornerTumble = (isExplosion ? 0.11 : 0.08) * core * horizRemain;
+        const tumbleMag = faceSpan > 1 ? Math.min(0.14, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
+        const dAx = voronoi.tumbleX * tumbleMag;
+        const dAy = voronoi.tumbleY * tumbleMag * 0.75;
+        const dAz = voronoi.tumbleZ * tumbleMag;
+
+        let minLocalY = 0;
+        for (let k = 0; k < faceSpan; k++) {
+          const at = (v + k) * stride;
+          const rx = (mesh[at] - fx) * gapScale;
+          const ry = (mesh[at + 1] - fy) * gapScale;
+          const rz = (mesh[at + 2] - fz) * gapScale;
+          const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
+          localRotX[k] = tx;
+          localRotY[k] = ty;
+          localRotZ[k] = tz;
+          if (ty < minLocalY) minLocalY = ty;
+        }
+        if (newFy + minLocalY < 0.18) {
+          newFy = 0.18 - minLocalY;
+        }
 
         const scale = 1.0 + nextDmg;
-        const ux = nx / curLen + (dx / blastR) * 0.28 * t;
-        const uy = ny / curLen + 0.55 * t;
-        const uz = nz / curLen + (dz / blastR) * 0.28 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (stride >= 8 && rawKind < 19.5) {
-          const targetShade = 0.28 + 0.26 * blockStep;
-          const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
-          mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
+        for (let k = 0; k < faceSpan; k++) {
+          const idx = v + k;
+          const at = idx * stride;
+          mesh[at] = newFx + localRotX[k];
+          mesh[at + 1] = newFy + localRotY[k];
+          mesh[at + 2] = newFz + localRotZ[k];
+
+          const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+          const curLen = Math.hypot(nx, ny, nz) || 1;
+          const [rnx, rny, rnz] =
+            tumbleMag > 1e-4
+              ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
+              : [nx / curLen, ny / curLen, nz / curLen];
+          const ux = rnx + (dx / blastR) * 0.28 * t;
+          const uy = rny + 0.55 * t;
+          const uz = rnz + (dz / blastR) * 0.28 * t;
+          const uLen = Math.hypot(ux, uy, uz) || 1;
+          mesh[at + 3] = (ux / uLen) * scale;
+          mesh[at + 4] = (uy / uLen) * scale;
+          mesh[at + 5] = (uz / uLen) * scale;
+          if (stride >= 8 && rawKind < 19.5) {
+            const targetShade = 0.28 + 0.26 * blockStep;
+            const blend = Math.min(0.75, (0.45 + 0.30 * powFrac) * (0.4 + 0.6 * t));
+            mesh[at + 7] = Math.max(0.20, mesh[at + 7] * (1 - blend) + targetShade * blend);
+          }
+          if (idx < minV) minV = idx;
+          if (idx > maxV) maxV = idx;
         }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
       }
       continue;
     }
@@ -20330,88 +20493,138 @@ function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     const isTimber = bake.kind === 'timber-splinter' || bake.materialClass === 'timber';
     const isCannonDismount = bake.kind === 'cannon-dismount';
 
-    for (let v = 0; v < vertexCount; v++) {
-      const at = v * stride;
-      const px = mesh[at];
-      const py = mesh[at + 1];
-      const pz = mesh[at + 2];
-      const dx = px - bx;
-      const dy = py - by;
-      const dz = pz - bz;
+    let faceSpan = 1;
+    for (let v = 0; v < vertexCount; v += faceSpan) {
+      faceSpan = detectRigidFaceSpan(mesh, v, vertexCount, stride);
+      let fx = 0, fy = 0, fz = 0, prevDmgSum = 0;
+      for (let k = 0; k < faceSpan; k++) {
+        const at = (v + k) * stride;
+        fx += mesh[at];
+        fy += mesh[at + 1];
+        fz += mesh[at + 2];
+        const cLen = Math.hypot(mesh[at + 3], mesh[at + 4], mesh[at + 5]) || 1;
+        prevDmgSum += Math.max(0, cLen - 1.0);
+      }
+      fx /= faceSpan;
+      fy /= faceSpan;
+      fz /= faceSpan;
+      const prevDmg = prevDmgSum / faceSpan;
+
+      const dx = fx - bx;
+      const dy = fy - by;
+      const dz = fz - bz;
       // Weight vertical distance slightly softer when above the impact point so upper parapet merlons
       // and crenellations collapse when the scarp wall beneath them is pounded by cannonfire.
       const effDy = dy > 0 ? dy * 0.55 : dy * 0.9;
       const dist = Math.hypot(dx, effDy, dz);
       if (dist >= r) continue;
-      const rawKind = mesh[at + 6] ?? 7;
+      const rawKind = mesh[v * stride + 6] ?? 7;
       const kind = Math.floor(rawKind);
       if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.68) continue;
 
       const t = 1 - dist / r;
       const core = t * 0.45 + t * t * 0.55;
-      const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-      const curLen = Math.hypot(nx, ny, nz) || 1;
-      const prevDmg = Math.max(0, curLen - 1.0);
       const nextDmg = Math.min(1.45, prevDmg + Math.min(0.85, 0.58 * core * severity));
-      // Block-quantized ashlar course factor (1.5m x 1.5m cells) so stone crumbles in blocky steps,
-      // never shearing adjacent vertices with high-frequency sine spikes.
-      const cellX = Math.floor(px / 1.5);
-      const cellZ = Math.floor(pz / 1.5);
-      const cellHash = 0.5 + 0.5 * Math.sin(cellX * 12.9898 + cellZ * 78.233);
-      const blockStep = Math.round(cellHash * 3.0) / 3.0;
-      const smoothWave = 0.5 + 0.5 * Math.sin(px * 1.4 + pz * 1.2) * Math.cos(px * 0.9 - pz * 1.1);
-      const blockMod = isTimber
-        ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(px * 2.2 + pz * 1.8) * Math.cos(py * 2.5))
-        : 0.74 + 0.26 * (blockStep * 0.7 + smoothWave * 0.3);
+      const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
+      const { blockStep, blockMod } = voronoi;
 
       // Strictly cap cumulative horizontal displacement via prevDmg so 52 overlapping hits from a
       // broadside never push a wall face through its back face or create spiky horizontal shards.
-      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.55) * Math.exp(-prevDmg * 2.2);
+      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
 
+      let newFx = fx;
+      let newFy = fy;
+      let newFz = fz;
       if (isCannonDismount && (kind === 10 || kind === 14)) {
         const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-        const hDisp = stepDepth * 0.65 * t * horizRemain;
-        mesh[at] = px + (inX * hDisp + inZ * slew * 0.24 * t * horizRemain);
-        mesh[at + 1] = Math.max(0.2, py - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
-        mesh[at + 2] = pz + (inZ * hDisp - inX * slew * 0.24 * t * horizRemain);
+        const hDisp = stepDepth * 0.52 * t * horizRemain;
+        newFx = fx + (inX * hDisp + inZ * slew * 0.20 * t * horizRemain);
+        newFy = Math.max(0.2, fy - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
+        newFz = fz + (inZ * hDisp - inX * slew * 0.20 * t * horizRemain);
       } else {
-        const hDisp = Math.min(0.32, stepDepth * 0.24 * core * blockMod) * horizRemain;
-        const rubbleFloorY = Math.max(0.25, Math.min(py, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
-        const aboveRubble = Math.max(0, py - rubbleFloorY);
-        const dropWeight = dy > -0.6 ? 0.42 : 0.18;
-        const rawDrop = Math.min(aboveRubble * 0.65, stepDepth * dropWeight * core * blockMod);
-        let newPy = Math.max(0.15, py - rawDrop + inY * hDisp * 0.35);
+        const hDisp = Math.min(0.26, stepDepth * 0.19 * core * blockMod) * horizRemain;
+        const rubbleFloorY = Math.max(0.25, Math.min(fy, Math.max(0.6, by - 1.6)) + blockStep * 0.75);
+        const aboveRubble = Math.max(0, fy - rubbleFloorY);
+        const dropWeight = dy > -0.6 ? 0.44 : 0.18;
+        const rawDrop = Math.min(aboveRubble * 0.68, stepDepth * dropWeight * core * blockMod);
+        newFy = Math.max(0.15, fy - rawDrop + inY * hDisp * 0.35);
 
         const isStoneKind = !isTimber && rawKind >= 10.5 && rawKind < 16.5 && kind !== 15;
         if (isStoneKind && nextDmg > 0.45 && aboveRubble > 0.25) {
           const courseH = 0.52;
           const courseOff = blockStep * 0.26;
-          const steppedY = Math.round((newPy - courseOff) / courseH) * courseH + courseOff;
+          const steppedY = Math.round((newFy - courseOff) / courseH) * courseH + courseOff;
           const snapW = Math.min(0.58, (nextDmg - 0.45) * 0.60);
-          newPy = newPy * (1 - snapW) + steppedY * snapW;
+          newFy = newFy * (1 - snapW) + steppedY * snapW;
         }
 
-        mesh[at] = px + inX * hDisp;
-        mesh[at + 1] = newPy;
-        mesh[at + 2] = pz + inZ * hDisp;
+        newFx = fx + inX * hDisp;
+        newFz = fz + inZ * hDisp;
+      }
+
+      // Rigid 3D Voronoi block detachment: bounded mortar joint gap inset + orthogonal 3D tumble rotation
+      let faceRadius = 0;
+      for (let k = 0; k < faceSpan; k++) {
+        const at = (v + k) * stride;
+        const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
+        if (rad > faceRadius) faceRadius = rad;
+      }
+      const gapScale =
+        faceSpan > 1 && faceRadius > 0.05 && prevDmg < 0.28 && nextDmg >= 0.28
+          ? 1.0 - Math.min(0.04, 0.035 / Math.max(0.65, faceRadius))
+          : 1.0;
+      const maxCornerTumble = 0.09 * core * severity * horizRemain;
+      const tumbleMag = faceSpan > 1 ? Math.min(0.13, maxCornerTumble / Math.max(0.65, faceRadius)) : 0;
+      const dAx = voronoi.tumbleX * tumbleMag;
+      const dAy = voronoi.tumbleY * tumbleMag * 0.75;
+      const dAz = voronoi.tumbleZ * tumbleMag;
+
+      let minLocalY = 0;
+      for (let k = 0; k < faceSpan; k++) {
+        const at = (v + k) * stride;
+        const rx = (mesh[at] - fx) * gapScale;
+        const ry = (mesh[at + 1] - fy) * gapScale;
+        const rz = (mesh[at + 2] - fz) * gapScale;
+        const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
+        localRotX[k] = tx;
+        localRotY[k] = ty;
+        localRotZ[k] = tz;
+        if (ty < minLocalY) minLocalY = ty;
+      }
+      if (newFy + minLocalY < 0.15) {
+        newFy = 0.15 - minLocalY;
       }
 
       const scale = 1.0 + nextDmg;
       const tilt = 0.38 * t;
-      const ux = nx / curLen - (dx / r) * tilt * 0.65;
-      const uy = ny / curLen + 0.42 * core;
-      const uz = nz / curLen - (dz / r) * tilt * 0.65;
-      const uLen = Math.hypot(ux, uy, uz) || 1;
-      mesh[at + 3] = (ux / uLen) * scale;
-      mesh[at + 4] = (uy / uLen) * scale;
-      mesh[at + 5] = (uz / uLen) * scale;
-      if (stride >= 8 && rawKind < 19.5) {
-        const targetShade = 0.30 + 0.24 * blockStep;
-        const blend = Math.min(0.65, 0.42 * core * severity);
-        mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
+      for (let k = 0; k < faceSpan; k++) {
+        const idx = v + k;
+        const at = idx * stride;
+        mesh[at] = newFx + localRotX[k];
+        mesh[at + 1] = newFy + localRotY[k];
+        mesh[at + 2] = newFz + localRotZ[k];
+
+        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+        const curLen = Math.hypot(nx, ny, nz) || 1;
+        const [rnx, rny, rnz] =
+          tumbleMag > 1e-4
+            ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
+            : [nx / curLen, ny / curLen, nz / curLen];
+        const ux = rnx - (dx / r) * tilt * 0.65;
+        const uy = rny + 0.42 * core;
+        const uz = rnz - (dz / r) * tilt * 0.65;
+        const uLen = Math.hypot(ux, uy, uz) || 1;
+        mesh[at + 3] = (ux / uLen) * scale;
+        mesh[at + 4] = (uy / uLen) * scale;
+        mesh[at + 5] = (uz / uLen) * scale;
+        if (stride >= 8 && rawKind < 19.5) {
+          const targetShade = 0.30 + 0.24 * blockStep;
+          const blend = Math.min(0.65, 0.42 * core * severity);
+          mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - blend) + targetShade * blend);
+        }
+        if (idx < minV) minV = idx;
+        if (idx > maxV) maxV = idx;
       }
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
     }
   }
 
@@ -30254,6 +30467,928 @@ function applyIndigenousSupportAction(
   };
 }
 
+// ---- js/cairn-primitives.js ----
+// Cairn Declarative JSON Primitive & Voxel Language for Waterworld
+// Ported from contextflow/src/lib/cairn (types.ts, brushes.ts, damage.ts, primitives-renderer.ts).
+// Compiles declarative Cairn JSON scenes (shapes dictionary, groups, stacks, walls with openings,
+// arches, domes, roofs, stairs, cylinders, voxel runs, and CSG/voxel damage impactors) directly
+// into Waterworld's 8-float unshared-face port vertex buffer for 3D Voronoi block-cell detachment.
+
+function isFraction(value) {
+  if (typeof value !== 'string') return false;
+  const match = value.match(/^(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)$/);
+  if (!match) return false;
+  return parseFloat(match[2]) !== 0;
+}
+
+function parseFraction(fraction) {
+  if (typeof fraction !== 'string') return NaN;
+  const match = fraction.match(/^(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)$/);
+  if (!match) return NaN;
+  const num = parseFloat(match[1]);
+  const den = parseFloat(match[2]);
+  return den === 0 ? NaN : num / den;
+}
+
+function resolveNumeric(value, fallback = 0) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'string') {
+    if (isFraction(value)) return parseFraction(value);
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
+}
+
+function resolvePosition(pos, fallback = [0, 0, 0]) {
+  if (!Array.isArray(pos) || pos.length < 3) return [...fallback];
+  return [
+    resolveNumeric(pos[0], fallback[0]),
+    resolveNumeric(pos[1], fallback[1]),
+    resolveNumeric(pos[2], fallback[2]),
+  ];
+}
+
+function toFraction(value, maxDenominator = 1000) {
+  const common = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16];
+  const tol = 1e-9;
+  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+  for (const d of common) {
+    const n = Math.round(value * d);
+    if (Math.abs(n / d - value) < tol) {
+      const div = gcd(Math.abs(n), d);
+      return `${n / div}/${d / div}`;
+    }
+  }
+  for (let d = 2; d <= maxDenominator; d++) {
+    const n = Math.round(value * d);
+    if (Math.abs(n / d - value) < tol) {
+      const div = gcd(Math.abs(n), d);
+      return `${n / div}/${d / div}`;
+    }
+  }
+  return undefined;
+}
+
+// Map Cairn material names (or numeric kind IDs) to Waterworld [kind, shade] pairs
+const CAIRN_MATERIAL_TO_KIND = Object.freeze({
+  timber: { kind: 10, shade: 0.78 },
+  wood: { kind: 10, shade: 0.80 },
+  oak: { kind: 10, shade: 0.74 },
+  dark_wood: { kind: 10, shade: 0.62 },
+  beam: { kind: 10, shade: 0.70 },
+  stone: { kind: 11, shade: 0.86 },
+  ashlar: { kind: 11, shade: 0.90 },
+  limestone: { kind: 11, shade: 0.92 },
+  gray_stone: { kind: 11, shade: 0.82 },
+  light_gray_stone: { kind: 11, shade: 0.91 },
+  dark_stone: { kind: 11, shade: 0.72 },
+  quoin: { kind: 11, shade: 0.85 },
+  stucco: { kind: 12, shade: 0.92 },
+  whitewash: { kind: 12, shade: 0.96 },
+  plaster: { kind: 12, shade: 0.90 },
+  cream_stucco: { kind: 12, shade: 0.94 },
+  ochre_stucco: { kind: 12, shade: 0.86 },
+  white_plastic: { kind: 12, shade: 0.95 },
+  terracotta: { kind: 13, shade: 0.90 },
+  tile: { kind: 13, shade: 0.92 },
+  roof_tile: { kind: 13, shade: 0.91 },
+  brick: { kind: 13, shade: 0.82 },
+  red_brick: { kind: 13, shade: 0.80 },
+  recess: { kind: 14, shade: 0.55 },
+  opening: { kind: 14, shade: 0.50 },
+  iron: { kind: 14, shade: 0.62 },
+  bronze: { kind: 10, shade: 0.58 },
+  thatch: { kind: 15, shade: 0.88 },
+  reed: { kind: 15, shade: 0.90 },
+  palm_thatch: { kind: 15, shade: 0.88 },
+  cobble: { kind: 16, shade: 0.84 },
+  pavement: { kind: 16, shade: 0.86 },
+  earth: { kind: 16, shade: 0.78 },
+  bark: { kind: 17, shade: 0.86 },
+  birchbark: { kind: 17, shade: 0.90 },
+});
+const CAIRN_MATERIAL_MAP = CAIRN_MATERIAL_TO_KIND;
+
+function resolveCairnMaterial(material, fallbackKind = 11, fallbackShade = 0.88) {
+  if (typeof material === 'number' && Number.isFinite(material)) {
+    return { kind: material, shade: fallbackShade };
+  }
+  if (typeof material === 'string') {
+    const key = material.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (CAIRN_MATERIAL_MAP[key]) {
+      return { ...CAIRN_MATERIAL_MAP[key] };
+    }
+  }
+  if (material && typeof material === 'object' && Number.isFinite(material.kind)) {
+    return {
+      kind: material.kind,
+      shade: Number.isFinite(material.shade) ? material.shade : fallbackShade,
+    };
+  }
+  return { kind: fallbackKind, shade: fallbackShade };
+}
+
+function isShapeReference(prim) {
+  return Boolean(prim && typeof prim === 'object' && typeof prim.shape === 'string' && !prim.primitive);
+}
+
+function clonePrimitive(prim) {
+  return JSON.parse(JSON.stringify(prim));
+}
+
+function applyMaterialToChildren(prim, material) {
+  if (!prim || typeof prim !== 'object') return;
+  if (!prim.material) prim.material = material;
+  if (Array.isArray(prim.children)) {
+    for (const child of prim.children) applyMaterialToChildren(child, material);
+  }
+}
+
+function resolveShapeReference(ref, shapes = {}, grid = null) {
+  if (!ref || !shapes || !shapes[ref.shape]) return null;
+  const resolved = clonePrimitive(shapes[ref.shape]);
+  if (ref.name) resolved.name = ref.name;
+  if (ref.partGroup) resolved.partGroup = ref.partGroup;
+  const mat = ref.material ?? resolved.material;
+  if (mat) applyMaterialToChildren(resolved, mat);
+
+  let offset = [0, 0, 0];
+  if (ref.position !== undefined) {
+    offset = resolvePosition(ref.position);
+  } else if (Array.isArray(ref.cell)) {
+    const cellSize = resolveNumeric(grid?.cellSize, 1);
+    const origin = resolvePosition(grid?.origin, [0, 0, 0]);
+    const c = resolvePosition(ref.cell);
+    offset = [origin[0] + c[0] * cellSize, origin[1] + c[1] * cellSize, origin[2] + c[2] * cellSize];
+  }
+
+  const pType = resolved.primitive ?? resolved.brush ?? resolved.type;
+  if (pType === 'group' || pType === 'stack') {
+    const basePos = resolvePosition(resolved.position, [0, 0, 0]);
+    resolved.position = [basePos[0] + offset[0], basePos[1] + offset[1], basePos[2] + offset[2]];
+  } else if (pType === 'cylinder' || pType === 'cone' || pType === 'dome' || pType === 'voxel-column') {
+    const base = resolvePosition(resolved.base ?? resolved.position, [0, 0, 0]);
+    resolved.base = [base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]];
+  } else if (pType === 'sphere') {
+    const center = resolvePosition(resolved.center ?? resolved.position, [0, 0, 0]);
+    resolved.center = [center[0] + offset[0], center[1] + offset[1], center[2] + offset[2]];
+  } else if (resolved.from !== undefined && resolved.to !== undefined) {
+    const f = resolvePosition(resolved.from);
+    const t = resolvePosition(resolved.to);
+    resolved.from = [f[0] + offset[0], f[1] + offset[1], f[2] + offset[2]];
+    resolved.to = [t[0] + offset[0], t[1] + offset[1], t[2] + offset[2]];
+  } else if (resolved.pos !== undefined) {
+    const p = resolvePosition(resolved.pos);
+    resolved.pos = [p[0] + offset[0], p[1] + offset[1], p[2] + offset[2]];
+  } else {
+    const p = resolvePosition(resolved.position, [0, 0, 0]);
+    resolved.position = [p[0] + offset[0], p[1] + offset[1], p[2] + offset[2]];
+  }
+
+  if (ref.rotation !== undefined) resolved.rotation = ref.rotation;
+  if (ref.scale !== undefined) resolved.scale = ref.scale;
+  return resolved;
+}
+
+// Test whether a 3D point [x, y, z] lies inside a Cairn CSG / Impactor brush
+function pointInsideImpactor(pt, impactor) {
+  if (!impactor || typeof impactor !== 'object') return false;
+  const [x, y, z] = pt;
+  const type = impactor.type ?? impactor.shape ?? 'sphere';
+  if (type === 'sphere') {
+    const c = resolvePosition(impactor.center ?? impactor.position, [0, 0, 0]);
+    const r = resolveNumeric(impactor.radius, 1);
+    const vel = impactor.velocity ? resolvePosition(impactor.velocity, [0, 0, 0]) : null;
+    if (vel && Math.hypot(vel[0], vel[1], vel[2]) > 1e-4) {
+      // Swept sphere (capsule wound channel)
+      const vx = vel[0], vy = vel[1], vz = vel[2];
+      const vLen2 = vx * vx + vy * vy + vz * vz;
+      const t = Math.max(-0.5, Math.min(1.0, ((x - c[0]) * vx + (y - c[1]) * vy + (z - c[2]) * vz) / vLen2));
+      const px = c[0] + vx * t, py = c[1] + vy * t, pz = c[2] + vz * t;
+      return (x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2 <= r * r;
+    }
+    return (x - c[0]) ** 2 + (y - c[1]) ** 2 + (z - c[2]) ** 2 <= r * r;
+  }
+  if (type === 'box') {
+    const mn = resolvePosition(impactor.min ?? impactor.from, [-1, -1, -1]);
+    const mx = resolvePosition(impactor.max ?? impactor.to, [1, 1, 1]);
+    return (
+      x >= Math.min(mn[0], mx[0]) && x <= Math.max(mn[0], mx[0]) &&
+      y >= Math.min(mn[1], mx[1]) && y <= Math.max(mn[1], mx[1]) &&
+      z >= Math.min(mn[2], mx[2]) && z <= Math.max(mn[2], mx[2])
+    );
+  }
+  if (type === 'cylinder') {
+    const base = resolvePosition(impactor.base ?? [0, 0, 0]);
+    const r = resolveNumeric(impactor.radius, 1);
+    const h = resolveNumeric(impactor.height, 2);
+    return y >= base[1] && y <= base[1] + h && (x - base[0]) ** 2 + (z - base[2]) ** 2 <= r * r;
+  }
+  return false;
+}
+
+// Expand a Cairn voxel primitive (block, blocks, box, wall, stairs, arch, dome, frame, voxel-column, voxel-line)
+// into an array of { pos: [x, y, z], size: [sx, sy, sz], material } blocks.
+function expandCairnVoxelPrimitive(prim) {
+  if (!prim || typeof prim !== 'object') return [];
+  const pType = prim.primitive ?? prim.brush ?? prim.type;
+  const mat = prim.material ?? 'stone';
+  const blocks = [];
+
+  if (pType === 'block') {
+    blocks.push({ pos: resolvePosition(prim.pos ?? prim.position), material: mat });
+    return blocks;
+  }
+
+  if (pType === 'blocks' || pType === 'box') {
+    if (Array.isArray(prim.runs)) {
+      for (const run of prim.runs) {
+        const rx = Array.isArray(run.x) ? [resolveNumeric(run.x[0], 0), resolveNumeric(run.x[1], 0)] : [resolveNumeric(run.x, 0), resolveNumeric(run.x, 0)];
+        const ry = Array.isArray(run.y) ? [resolveNumeric(run.y[0], 0), resolveNumeric(run.y[1], 0)] : [resolveNumeric(run.y, 0), resolveNumeric(run.y, 0)];
+        const rz = Array.isArray(run.z) ? [resolveNumeric(run.z[0], 0), resolveNumeric(run.z[1], 0)] : [resolveNumeric(run.z, 0), resolveNumeric(run.z, 0)];
+        const x0 = Math.floor(Math.min(rx[0], rx[1])), x1 = Math.floor(Math.max(rx[0], rx[1]));
+        const y0 = Math.floor(Math.min(ry[0], ry[1])), y1 = Math.floor(Math.max(ry[0], ry[1]));
+        const z0 = Math.floor(Math.min(rz[0], rz[1])), z1 = Math.floor(Math.max(rz[0], rz[1]));
+        const rMat = run.material ?? mat;
+        for (let x = x0; x <= x1; x++) {
+          for (let y = y0; y <= y1; y++) {
+            for (let z = z0; z <= z1; z++) {
+              blocks.push({ pos: [x, y, z], material: rMat });
+            }
+          }
+        }
+      }
+      return blocks;
+    }
+    const f = resolvePosition(prim.from);
+    const t = resolvePosition(prim.to);
+    const x0 = Math.floor(Math.min(f[0], t[0])), x1 = Math.ceil(Math.max(f[0], t[0]));
+    const y0 = Math.floor(Math.min(f[1], t[1])), y1 = Math.ceil(Math.max(f[1], t[1]));
+    const z0 = Math.floor(Math.min(f[2], t[2])), z1 = Math.ceil(Math.max(f[2], t[2]));
+    const hollow = Boolean(prim.hollow);
+    const thick = Math.max(1, Math.round(resolveNumeric(prim.thickness, 1)));
+    for (let x = x0; x < x1; x++) {
+      for (let y = y0; y < y1; y++) {
+        for (let z = z0; z < z1; z++) {
+          if (
+            hollow &&
+            x >= x0 + thick && x < x1 - thick &&
+            y >= y0 + thick && y < y1 - thick &&
+            z >= z0 + thick && z < z1 - thick
+          ) {
+            continue;
+          }
+          blocks.push({ pos: [x, y, z], material: mat });
+        }
+      }
+    }
+    return blocks;
+  }
+
+  if (pType === 'voxel-line' || pType === 'line') {
+    const f = resolvePosition(prim.from);
+    const t = resolvePosition(prim.to);
+    const steps = Math.max(1, Math.round(Math.max(Math.abs(t[0] - f[0]), Math.abs(t[1] - f[1]), Math.abs(t[2] - f[2]))));
+    for (let s = 0; s <= steps; s++) {
+      const u = s / steps;
+      blocks.push({
+        pos: [Math.round(f[0] + (t[0] - f[0]) * u), Math.round(f[1] + (t[1] - f[1]) * u), Math.round(f[2] + (t[2] - f[2]) * u)],
+        material: mat,
+      });
+    }
+    return blocks;
+  }
+
+  if (pType === 'voxel-column' || pType === 'column') {
+    const base = resolvePosition(prim.base ?? prim.from, [0, 0, 0]);
+    const h = Math.max(1, Math.round(resolveNumeric(prim.height, 4)));
+    for (let dy = 0; dy < h; dy++) {
+      blocks.push({ pos: [Math.round(base[0]), Math.round(base[1]) + dy, Math.round(base[2])], material: mat });
+    }
+    return blocks;
+  }
+
+  return blocks;
+}
+
+// Render a set of voxel blocks with interior hidden-face culling (SurfaceVoxel bitmask from Cairn damage.ts)
+// while emitting every exposed face as an unshared 4-vertex Voronoi-detachable quad.
+function emitCairnVoxelGrid(blocks, { toWorld, pushQuad, damageRegions = [] }) {
+  if (!Array.isArray(blocks) || blocks.length === 0) return 0;
+  const grid = new Map();
+  const keyOf = (x, y, z) => `${x},${y},${z}`;
+
+  for (const b of blocks) {
+    if (!b?.pos) continue;
+    const x = Math.round(b.pos[0]);
+    const y = Math.round(b.pos[1]);
+    const z = Math.round(b.pos[2]);
+    let carved = false;
+    if (Array.isArray(damageRegions) && damageRegions.length > 0) {
+      const center = [x + 0.5, y + 0.5, z + 0.5];
+      for (const reg of damageRegions) {
+        if (pointInsideImpactor(center, reg?.impactor ?? reg?.brush ?? reg)) {
+          carved = true;
+          break;
+        }
+      }
+    }
+    if (!carved) {
+      grid.set(keyOf(x, y, z), { x, y, z, material: b.material });
+    }
+  }
+
+  let emittedFaces = 0;
+  for (const vox of grid.values()) {
+    const { x, y, z, material } = vox;
+    const { kind, shade } = resolveCairnMaterial(material);
+    const x0 = x, x1 = x + 1;
+    const y0 = y, y1 = y + 1;
+    const z0 = z, z1 = z + 1;
+    // -Z face
+    if (!grid.has(keyOf(x, y, z - 1))) {
+      pushQuad(toWorld(x0, y0, z0), toWorld(x1, y0, z0), toWorld(x1, y1, z0), toWorld(x0, y1, z0), kind, shade * 0.94);
+      emittedFaces++;
+    }
+    // +Z face
+    if (!grid.has(keyOf(x, y, z + 1))) {
+      pushQuad(toWorld(x1, y0, z1), toWorld(x0, y0, z1), toWorld(x0, y1, z1), toWorld(x1, y1, z1), kind, shade * 0.96);
+      emittedFaces++;
+    }
+    // -X face
+    if (!grid.has(keyOf(x - 1, y, z))) {
+      pushQuad(toWorld(x0, y0, z1), toWorld(x0, y0, z0), toWorld(x0, y1, z0), toWorld(x0, y1, z1), kind, shade * 0.88);
+      emittedFaces++;
+    }
+    // +X face
+    if (!grid.has(keyOf(x + 1, y, z))) {
+      pushQuad(toWorld(x1, y0, z0), toWorld(x1, y0, z1), toWorld(x1, y1, z1), toWorld(x1, y1, z0), kind, shade);
+      emittedFaces++;
+    }
+    // +Y top face
+    if (!grid.has(keyOf(x, y + 1, z))) {
+      pushQuad(toWorld(x0, y1, z0), toWorld(x1, y1, z0), toWorld(x1, y1, z1), toWorld(x0, y1, z1), kind, Math.min(1, shade * 1.06));
+      emittedFaces++;
+    }
+  }
+  return emittedFaces;
+}
+
+// Compute the vertical span of a Cairn primitive (used by `stack` primitive)
+function computePrimitiveHeight(prim, shapes = {}) {
+  if (!prim) return 0;
+  if (isShapeReference(prim)) {
+    const resolved = resolveShapeReference(prim, shapes);
+    return computePrimitiveHeight(resolved, shapes);
+  }
+  if (prim.height !== undefined) return resolveNumeric(prim.height, 0);
+  if (prim.from && prim.to) {
+    const f = resolvePosition(prim.from);
+    const t = resolvePosition(prim.to);
+    return Math.abs(t[1] - f[1]);
+  }
+  if (prim.primitive === 'dome' || prim.primitive === 'sphere') {
+    return resolveNumeric(prim.height ?? prim.radius, 2);
+  }
+  if (prim.primitive === 'group' && Array.isArray(prim.children)) {
+    let maxH = 0;
+    for (const c of prim.children) maxH = Math.max(maxH, computePrimitiveHeight(c, shapes));
+    return maxH;
+  }
+  return 0;
+}
+
+// Compile & emit a Cairn JSON primitive list into Waterworld's port geometry builder
+function emitCairnScene(sceneSpec, helpers) {
+  if (!sceneSpec || !helpers) return;
+  const {
+    toWorld: rootToWorld,
+    emitBox,
+    emitCylinder,
+    emitRoof,
+    pushQuad,
+    pushTri,
+    withPartGroup = (_name, fn) => fn(),
+  } = helpers;
+
+  const shapes = sceneSpec.shapes ?? sceneSpec.world?.shapes ?? {};
+  const grid = sceneSpec.grid ?? sceneSpec.world?.grid ?? null;
+  const primitives = sceneSpec.primitives ?? sceneSpec.items ?? sceneSpec.world?.primitives ?? [];
+  const damageRegions = sceneSpec.damageRegions ?? sceneSpec.damage ?? sceneSpec.impactors ?? [];
+
+  const composeToWorld = (parentToWorld, pos = [0, 0, 0], rotDeg = [0, 0, 0], scale = [1, 1, 1]) => {
+    const [tx, ty, tz] = resolvePosition(pos, [0, 0, 0]);
+    const ry = ((Array.isArray(rotDeg) ? resolveNumeric(rotDeg[1], 0) : resolveNumeric(rotDeg, 0)) * Math.PI) / 180;
+    const cy = Math.cos(ry), sy = Math.sin(ry);
+    const sx = Array.isArray(scale) ? resolveNumeric(scale[0], 1) : resolveNumeric(scale, 1);
+    const syScale = Array.isArray(scale) ? resolveNumeric(scale[1], 1) : resolveNumeric(scale, 1);
+    const sz = Array.isArray(scale) ? resolveNumeric(scale[2], 1) : resolveNumeric(scale, 1);
+    return (lx, ly, lz) => {
+      const x1 = lx * sx;
+      const y1 = ly * syScale;
+      const z1 = lz * sz;
+      const rx = x1 * cy + z1 * sy + tx;
+      const ryWorld = y1 + ty;
+      const rz = -x1 * sy + z1 * cy + tz;
+      return parentToWorld(rx, ryWorld, rz);
+    };
+  };
+
+  const emitSinglePrimitive = (rawPrim, localToWorld) => {
+    if (!rawPrim) return;
+    const prim = isShapeReference(rawPrim) ? resolveShapeReference(rawPrim, shapes, grid) : rawPrim;
+    if (!prim) return;
+
+    const groupName = prim.partGroup ?? prim.name ? String(prim.partGroup ?? prim.name) : null;
+    const run = () => {
+      const pType = prim.primitive ?? prim.brush ?? prim.type;
+      const { kind, shade } = resolveCairnMaterial(prim.material, 11, 0.88);
+      const primToWorld = (prim.rotation || prim.scale)
+        ? composeToWorld(localToWorld, [0, 0, 0], prim.rotation ?? [0, 0, 0], prim.scale ?? [1, 1, 1])
+        : localToWorld;
+
+      if (pType === 'group') {
+        const gToWorld = composeToWorld(localToWorld, prim.position ?? [0, 0, 0], prim.rotation ?? [0, 0, 0], prim.scale ?? [1, 1, 1]);
+        for (const child of prim.children ?? prim.items ?? []) {
+          emitSinglePrimitive(child, gToWorld);
+        }
+        return;
+      }
+
+      if (pType === 'stack') {
+        const basePos = resolvePosition(prim.position, [0, 0, 0]);
+        let curY = basePos[1];
+        for (const level of prim.children ?? prim.levels ?? prim.items ?? []) {
+          const levelToWorld = composeToWorld(localToWorld, [basePos[0], curY, basePos[2]], prim.rotation ?? [0, 0, 0], prim.scale ?? [1, 1, 1]);
+          emitSinglePrimitive(level, levelToWorld);
+          curY += computePrimitiveHeight(level, shapes) + resolveNumeric(prim.gap, 0);
+        }
+        return;
+      }
+
+      if (pType === 'block' || pType === 'blocks' || pType === 'voxel-line' || pType === 'voxel-column') {
+        const vox = expandCairnVoxelPrimitive(prim);
+        emitCairnVoxelGrid(vox, { toWorld: primToWorld, pushQuad, damageRegions: prim.damage ?? damageRegions });
+        return;
+      }
+
+      if (pType === 'box') {
+        const f = resolvePosition(prim.from);
+        const t = resolvePosition(prim.to);
+        const x0 = Math.min(f[0], t[0]), x1 = Math.max(f[0], t[0]);
+        const y0 = Math.min(f[1], t[1]), y1 = Math.max(f[1], t[1]);
+        const z0 = Math.min(f[2], t[2]), z1 = Math.max(f[2], t[2]);
+        const topInset = resolveNumeric(prim.topInset, 0);
+        if (prim.hollow) {
+          const th = Math.max(0.25, resolveNumeric(prim.thickness, 0.6));
+          emitBox(primToWorld, x0, x1, y0, y1, z0, z0 + th, kind, shade);
+          emitBox(primToWorld, x0, x1, y0, y1, z1 - th, z1, kind, shade);
+          emitBox(primToWorld, x0, x0 + th, y0, y1, z0 + th, z1 - th, kind, shade * 0.94);
+          emitBox(primToWorld, x1 - th, x1, y0, y1, z0 + th, z1 - th, kind, shade * 0.94);
+        } else {
+          emitBox(primToWorld, x0, x1, y0, y1, z0, z1, kind, shade, Boolean(prim.includeBottom), topInset);
+        }
+        return;
+      }
+
+      if (pType === 'wall') {
+        const f = resolvePosition(prim.from);
+        const t = resolvePosition(prim.to);
+        const h = Math.max(0.5, resolveNumeric(prim.height, Math.max(2.5, Math.abs(t[1] - f[1]))));
+        const th = Math.max(0.25, resolveNumeric(prim.thickness, 0.65));
+        const y0 = Math.min(f[1], t[1]);
+        const y1 = y0 + h;
+        const dx = t[0] - f[0], dz = t[2] - f[2];
+        const len = Math.hypot(dx, dz) || 1;
+        const ux = dx / len, uz = dz / len;
+        const nx = -uz, nz = ux;
+        const wallToWorld = (sAlong, yLocal, nAcross) =>
+          primToWorld(f[0] + ux * sAlong + nx * nAcross, yLocal, f[2] + uz * sAlong + nz * nAcross);
+
+        const openings = Array.isArray(prim.openings) ? [...prim.openings] : [];
+        openings.sort((a, b) => resolveNumeric(a.offset ?? a.at, 0) - resolveNumeric(b.offset ?? b.at, 0));
+
+        let curS = 0;
+        for (const op of openings) {
+          const opCenter = resolveNumeric(op.offset ?? op.at, len * 0.5);
+          const opW = Math.max(0.5, resolveNumeric(op.width, 1.4));
+          const opH = Math.max(0.6, resolveNumeric(op.height, 2.2));
+          const sill = Math.max(0, resolveNumeric(op.sillHeight ?? op.sill, 0));
+          const s0 = Math.max(curS, opCenter - opW * 0.5);
+          const s1 = Math.min(len, opCenter + opW * 0.5);
+          if (s0 > curS + 0.08) {
+            emitBox(wallToWorld, curS, s0, y0, y1, -th * 0.5, th * 0.5, kind, shade);
+          }
+          if (s1 > s0 + 0.1) {
+            if (sill > 0.08) {
+              emitBox(wallToWorld, s0, s1, y0, y0 + sill, -th * 0.5, th * 0.5, kind, shade * 0.95);
+            }
+            const topOpenY = Math.min(y1 - 0.15, y0 + sill + opH);
+            if (y1 > topOpenY + 0.08) {
+              emitBox(wallToWorld, s0, s1, topOpenY, y1, -th * 0.5, th * 0.5, kind, shade * 0.96);
+            }
+            // Dark recessed interior opening & stone surround jambs
+            emitBox(wallToWorld, s0 + 0.06, s1 - 0.06, y0 + sill, topOpenY, -th * 0.36, th * 0.36, 14, 0.52);
+            emitBox(wallToWorld, s0 - 0.12, s0 + 0.08, y0 + sill, topOpenY, -th * 0.56, th * 0.56, 11, 0.88);
+            emitBox(wallToWorld, s1 - 0.08, s1 + 0.12, y0 + sill, topOpenY, -th * 0.56, th * 0.56, 11, 0.88);
+            emitBox(wallToWorld, s0 - 0.16, s1 + 0.16, topOpenY - 0.05, topOpenY + 0.22, -th * 0.58, th * 0.58, 11, 0.90);
+          }
+          curS = Math.max(curS, s1);
+        }
+        if (curS < len - 0.05) {
+          emitBox(wallToWorld, curS, len, y0, y1, -th * 0.5, th * 0.5, kind, shade);
+        }
+
+        if (prim.crenellated) {
+          const merlonW = resolveNumeric(prim.merlonWidth, 1.15);
+          const merlonGap = resolveNumeric(prim.merlonGap, 0.85);
+          const merlonH = resolveNumeric(prim.merlonHeight, 0.78);
+          const step = merlonW + merlonGap;
+          for (let s = 0; s + merlonW <= len + 0.05; s += step) {
+            emitBox(wallToWorld, s, Math.min(len, s + merlonW), y1, y1 + merlonH, -th * 0.52, th * 0.52, 11, shade * 0.96, false, 0.04);
+          }
+        }
+        return;
+      }
+
+      if (pType === 'arch') {
+        const f = resolvePosition(prim.from);
+        const t = resolvePosition(prim.to);
+        const h = Math.max(1.8, resolveNumeric(prim.height, 3.6));
+        const th = Math.max(0.35, resolveNumeric(prim.thickness, 0.75));
+        const y0 = Math.min(f[1], t[1]);
+        const dx = t[0] - f[0], dz = t[2] - f[2];
+        const span = Math.hypot(dx, dz) || 3.0;
+        const ux = dx / span, uz = dz / span;
+        const nx = -uz, nz = ux;
+        const archToWorld = (sAlong, yLocal, nAcross) =>
+          primToWorld(f[0] + ux * sAlong + nx * nAcross, yLocal, f[2] + uz * sAlong + nz * nAcross);
+
+        const pierW = Math.max(0.45, resolveNumeric(prim.pierWidth, span * 0.18));
+        const radius = Math.max(0.4, (span - pierW * 2) * 0.5);
+        const ySpring = Math.max(y0 + 0.8, y0 + h - radius - 0.35);
+        // Side piers
+        emitBox(archToWorld, 0, pierW, y0, y0 + h, -th * 0.5, th * 0.5, kind, shade);
+        emitBox(archToWorld, span - pierW, span, y0, y0 + h, -th * 0.5, th * 0.5, kind, shade);
+        // Spandrel lintel above arch crown
+        emitBox(archToWorld, pierW, span - pierW, ySpring + radius * 0.82, y0 + h, -th * 0.5, th * 0.5, kind, shade * 0.95);
+        // Radial stone voussoirs
+        const segs = Math.max(5, Math.round(resolveNumeric(prim.voussoirs, 7)));
+        const sMid = span * 0.5;
+        const rOuter = radius + 0.32;
+        for (let i = 0; i < segs; i++) {
+          const a0 = (i / segs) * Math.PI;
+          const a1 = ((i + 1) / segs) * Math.PI;
+          const xIn0 = sMid - Math.cos(a0) * radius, yIn0 = ySpring + Math.sin(a0) * radius;
+          const xIn1 = sMid - Math.cos(a1) * radius, yIn1 = ySpring + Math.sin(a1) * radius;
+          const xOut0 = sMid - Math.cos(a0) * rOuter, yOut0 = ySpring + Math.sin(a0) * rOuter;
+          const xOut1 = sMid - Math.cos(a1) * rOuter, yOut1 = ySpring + Math.sin(a1) * rOuter;
+          const vShade = i === Math.floor(segs / 2) ? Math.min(1, shade * 1.05) : shade * (i % 2 === 0 ? 0.94 : 0.88);
+          // Front & back voussoir faces + intrados soffit
+          pushQuad(
+            archToWorld(xIn0, yIn0, -th * 0.54),
+            archToWorld(xIn1, yIn1, -th * 0.54),
+            archToWorld(xOut1, yOut1, -th * 0.54),
+            archToWorld(xOut0, yOut0, -th * 0.54),
+            11,
+            vShade
+          );
+          pushQuad(
+            archToWorld(xIn1, yIn1, th * 0.54),
+            archToWorld(xIn0, yIn0, th * 0.54),
+            archToWorld(xOut0, yOut0, th * 0.54),
+            archToWorld(xOut1, yOut1, th * 0.54),
+            11,
+            vShade
+          );
+          pushQuad(
+            archToWorld(xIn0, yIn0, th * 0.54),
+            archToWorld(xIn1, yIn1, th * 0.54),
+            archToWorld(xIn1, yIn1, -th * 0.54),
+            archToWorld(xIn0, yIn0, -th * 0.54),
+            11,
+            vShade * 0.78
+          );
+        }
+        return;
+      }
+
+      if (pType === 'roof') {
+        const f = resolvePosition(prim.from);
+        const t = resolvePosition(prim.to);
+        const x0 = Math.min(f[0], t[0]), x1 = Math.max(f[0], t[0]);
+        const z0 = Math.min(f[2], t[2]), z1 = Math.max(f[2], t[2]);
+        const yEave = Math.min(f[1], t[1]);
+        const h = Math.max(0.6, resolveNumeric(prim.height, Math.max(1.6, Math.abs(t[1] - f[1]))));
+        const overhang = resolveNumeric(prim.overhang, 0.38);
+        const hipRatio = prim.style === 'gable' ? 0 : resolveNumeric(prim.hipRatio, 0.25);
+        const wallKind = resolveCairnMaterial(prim.wallMaterial ?? 'stucco', 12, 0.90).kind;
+        emitRoof(primToWorld, x0, x1, yEave, yEave + h, z0, z1, overhang, hipRatio, kind, wallKind);
+        return;
+      }
+
+      if (pType === 'dome') {
+        const base = resolvePosition(prim.base ?? prim.position ?? prim.center, [0, 0, 0]);
+        const r = Math.max(0.8, resolveNumeric(prim.radius, 3.0));
+        const h = Math.max(0.8, resolveNumeric(prim.height, r * 0.95));
+        const rings = Math.max(3, Math.min(8, Math.round(resolveNumeric(prim.rings, 4))));
+        const segs = Math.max(6, Math.min(16, Math.round(resolveNumeric(prim.segments, 10))));
+        // Octagonal / cylindrical drum plinth if drumHeight > 0
+        const drumH = resolveNumeric(prim.drumHeight, 0);
+        let yStart = base[1];
+        if (drumH > 0.1) {
+          emitCylinder(primToWorld, base[0], base[2], yStart, yStart + drumH, r * 1.02, r, segs, 11, 0.88, true);
+          yStart += drumH;
+        }
+        for (let ring = 0; ring < rings; ring++) {
+          const t0 = (ring / rings) * (Math.PI * 0.5);
+          const t1 = ((ring + 1) / rings) * (Math.PI * 0.5);
+          const r0 = Math.cos(t0) * r;
+          const r1 = Math.max(0.08, Math.cos(t1) * r);
+          const y0 = yStart + Math.sin(t0) * h;
+          const y1 = yStart + Math.sin(t1) * h;
+          emitCylinder(primToWorld, base[0], base[2], y0, y1, r0, r1, segs, kind, shade * (0.94 + 0.06 * (ring / rings)), ring === rings - 1);
+        }
+        if (prim.lantern) {
+          const lR = r * 0.24;
+          const lH = h * 0.38;
+          emitCylinder(primToWorld, base[0], base[2], yStart + h - 0.1, yStart + h + lH, lR, lR * 0.92, 8, 11, 0.92, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH, yStart + h + lH * 1.55, lR * 1.05, 0.06, 8, 13, 0.94, true);
+        }
+        return;
+      }
+
+      if (pType === 'cylinder' || pType === 'cone') {
+        const base = resolvePosition(prim.base ?? prim.position ?? prim.center, [0, 0, 0]);
+        const h = Math.max(0.2, resolveNumeric(prim.height, 3.0));
+        const rBottom = Math.max(0.08, resolveNumeric(prim.radiusBottom ?? prim.radius, 1.0));
+        const rTop = pType === 'cone' ? Math.max(0.04, resolveNumeric(prim.radiusTop, 0.05)) : Math.max(0.04, resolveNumeric(prim.radiusTop ?? prim.radius, rBottom));
+        const segs = Math.max(5, Math.min(16, Math.round(resolveNumeric(prim.radialSegments ?? prim.segments, 8))));
+        emitCylinder(primToWorld, base[0], base[2], base[1], base[1] + h, rBottom, rTop, segs, kind, shade, prim.openEnded !== true);
+        return;
+      }
+
+      if (pType === 'stairs' || pType === 'ramp') {
+        const f = resolvePosition(prim.from);
+        const t = resolvePosition(prim.to);
+        const w = Math.max(0.8, resolveNumeric(prim.width, 2.4));
+        const y0 = Math.min(f[1], t[1]);
+        const y1 = Math.max(f[1], t[1]);
+        const dx = t[0] - f[0], dz = t[2] - f[2];
+        const runLen = Math.hypot(dx, dz) || 2.0;
+        const ux = dx / runLen, uz = dz / runLen;
+        const nx = -uz, nz = ux;
+        const stairToWorld = (sAlong, yLocal, nAcross) =>
+          primToWorld(f[0] + ux * sAlong + nx * nAcross, yLocal, f[2] + uz * sAlong + nz * nAcross);
+        const nSteps = Math.max(3, Math.min(18, Math.round((y1 - y0) / 0.28)));
+        for (let s = 0; s < nSteps; s++) {
+          const s0 = (s / nSteps) * runLen;
+          const s1 = ((s + 1) / nSteps) * runLen;
+          const sy = y0 + ((s + 1) / nSteps) * (y1 - y0);
+          emitBox(stairToWorld, s0, s1, y0, sy, -w * 0.5, w * 0.5, kind, shade * (s % 2 === 0 ? 0.94 : 0.88));
+        }
+        if (prim.parapet !== false) {
+          emitBox(stairToWorld, 0, runLen, y0, y1 + 0.55, -w * 0.5 - 0.24, -w * 0.5, 11, 0.88);
+          emitBox(stairToWorld, 0, runLen, y0, y1 + 0.55, w * 0.5, w * 0.5 + 0.24, 11, 0.88);
+        }
+        return;
+      }
+
+      if (pType === 'frame') {
+        const f = resolvePosition(prim.from);
+        const t = resolvePosition(prim.to);
+        const x0 = Math.min(f[0], t[0]), x1 = Math.max(f[0], t[0]);
+        const y0 = Math.min(f[1], t[1]), y1 = Math.max(f[1], t[1]);
+        const z0 = Math.min(f[2], t[2]), z1 = Math.max(f[2], t[2]);
+        const th = Math.max(0.18, resolveNumeric(prim.thickness, 0.32));
+        // 4 corner posts + 4 top ring beams
+        emitBox(primToWorld, x0, x0 + th, y0, y1, z0, z0 + th, kind, shade);
+        emitBox(primToWorld, x1 - th, x1, y0, y1, z0, z0 + th, kind, shade);
+        emitBox(primToWorld, x0, x0 + th, y0, y1, z1 - th, z1, kind, shade);
+        emitBox(primToWorld, x1 - th, x1, y0, y1, z1 - th, z1, kind, shade);
+        emitBox(primToWorld, x0, x1, y1 - th, y1, z0, z0 + th, kind, shade * 0.95);
+        emitBox(primToWorld, x0, x1, y1 - th, y1, z1 - th, z1, kind, shade * 0.95);
+        emitBox(primToWorld, x0, x0 + th, y1 - th, y1, z0 + th, z1 - th, kind, shade * 0.92);
+        emitBox(primToWorld, x1 - th, x1, y1 - th, y1, z0 + th, z1 - th, kind, shade * 0.92);
+      }
+    };
+
+    if (groupName) {
+      withPartGroup(groupName, run);
+    } else {
+      run();
+    }
+  };
+
+  for (const prim of primitives) {
+    emitSinglePrimitive(prim, rootToWorld);
+  }
+}
+
+// Declarative Cairn JSON architectural templates for colonial & fortified port landmarks.
+// Demonstrates how complex multi-tower cathedrals, arched loggias, and stepped plazas
+// are authored in compact Cairn JSON (`shapes` + `primitives`) rather than hundreds of lines of imperative code.
+const CAIRN_ARCHITECTURAL_TEMPLATES = {
+  catedral_basilica: {
+    schemaVersion: '0.4',
+    shapes: {
+      bell_tower_tier: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'box',
+            from: [-2.4, 0, -2.4],
+            to: [2.4, 5.2, 2.4],
+            material: 'ashlar',
+            topInset: 0.08,
+          },
+          {
+            primitive: 'box',
+            from: [-2.65, 4.85, -2.65],
+            to: [2.65, 5.35, 2.65],
+            material: 'limestone',
+          },
+        ],
+      },
+      belfry_stage: {
+        primitive: 'group',
+        children: [
+          {
+            primitive: 'wall',
+            from: [-2.1, 0, -2.1],
+            to: [2.1, 0, -2.1],
+            height: 4.2,
+            thickness: 0.55,
+            material: 'limestone',
+            openings: [
+              { offset: '4/3', width: 0.95, height: 2.6, sillHeight: 0.65 },
+              { offset: '8/3', width: 0.95, height: 2.6, sillHeight: 0.65 },
+            ],
+          },
+          {
+            primitive: 'wall',
+            from: [-2.1, 0, 2.1],
+            to: [2.1, 0, 2.1],
+            height: 4.2,
+            thickness: 0.55,
+            material: 'limestone',
+            openings: [
+              { offset: '4/3', width: 0.95, height: 2.6, sillHeight: 0.65 },
+              { offset: '8/3', width: 0.95, height: 2.6, sillHeight: 0.65 },
+            ],
+          },
+          {
+            primitive: 'wall',
+            from: [-2.1, 0, -2.1],
+            to: [-2.1, 0, 2.1],
+            height: 4.2,
+            thickness: 0.55,
+            material: 'limestone',
+            openings: [{ offset: 2.1, width: 1.1, height: 2.6, sillHeight: 0.65 }],
+          },
+          {
+            primitive: 'wall',
+            from: [2.1, 0, -2.1],
+            to: [2.1, 0, 2.1],
+            height: 4.2,
+            thickness: 0.55,
+            material: 'limestone',
+            openings: [{ offset: 2.1, width: 1.1, height: 2.6, sillHeight: 0.65 }],
+          },
+          {
+            primitive: 'dome',
+            base: [0, 4.2, 0],
+            radius: 2.15,
+            height: 2.4,
+            segments: 8,
+            material: 'terracotta',
+            lantern: true,
+          },
+        ],
+      },
+      nave_buttress: {
+        primitive: 'box',
+        from: [-0.45, 0, -0.55],
+        to: [0.45, 8.8, 0.55],
+        topInset: 0.12,
+        material: 'ashlar',
+      },
+    },
+    primitives: [
+      // Stepped stone atrium parvis platform
+      {
+        primitive: 'box',
+        partGroup: 'foundation_plinth',
+        from: [-11.5, -3.5, -15.5],
+        to: [11.5, 0.65, 15.5],
+        material: 'ashlar',
+      },
+      {
+        primitive: 'stairs',
+        partGroup: 'atrium_steps',
+        from: [0, 0.0, -17.8],
+        to: [0, 0.65, -15.2],
+        width: 8.5,
+        material: 'limestone',
+      },
+      // Three-aisle basilica body & clerestory nave
+      {
+        primitive: 'box',
+        partGroup: 'side_aisles',
+        from: [-10.2, 0.65, -12.5],
+        to: [10.2, 7.2, 11.5],
+        material: 'cream_stucco',
+      },
+      {
+        primitive: 'box',
+        partGroup: 'central_nave',
+        from: [-5.6, 0.65, -13.2],
+        to: [5.6, 11.2, 12.2],
+        material: 'whitewash',
+      },
+      // Transept arms
+      {
+        primitive: 'box',
+        partGroup: 'transept_arms',
+        from: [-12.4, 0.65, 1.2],
+        to: [12.4, 9.6, 7.6],
+        material: 'cream_stucco',
+      },
+      // Grand west facade portal with triple arches
+      {
+        primitive: 'arch',
+        partGroup: 'west_portal_arch',
+        from: [-3.2, 0.65, -13.55],
+        to: [3.2, 0.65, -13.55],
+        height: 5.8,
+        thickness: 0.95,
+        voussoirs: 9,
+        material: 'ashlar',
+      },
+      // Nave & aisle pitched terracotta roofs
+      {
+        primitive: 'roof',
+        partGroup: 'nave_roof',
+        from: [-5.8, 11.2, -13.2],
+        to: [5.8, 14.4, 12.2],
+        height: 3.2,
+        style: 'gable',
+        material: 'terracotta',
+        wallMaterial: 'whitewash',
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_roof',
+        from: [-12.4, 9.6, 1.2],
+        to: [12.4, 12.2, 7.6],
+        height: 2.6,
+        hipRatio: 0.25,
+        material: 'terracotta',
+      },
+      // Crossing drum, ribbed cupola dome & lantern
+      {
+        primitive: 'dome',
+        partGroup: 'crossing_cupola_dome',
+        base: [0, 11.2, 4.4],
+        drumHeight: 3.2,
+        radius: 4.8,
+        height: 4.6,
+        segments: 12,
+        rings: 5,
+        lantern: true,
+        material: 'terracotta',
+      },
+      // Twin west facade bell towers using Cairn `stack` + `shapes` references
+      {
+        primitive: 'stack',
+        partGroup: 'north_bell_tower',
+        position: [-8.2, 0.65, -12.8],
+        children: [
+          { shape: 'bell_tower_tier' },
+          { shape: 'bell_tower_tier', scale: [0.92, 0.95, 0.92] },
+          { shape: 'belfry_stage' },
+        ],
+      },
+      {
+        primitive: 'stack',
+        partGroup: 'south_bell_tower',
+        position: [8.2, 0.65, -12.8],
+        children: [
+          { shape: 'bell_tower_tier' },
+          { shape: 'bell_tower_tier', scale: [0.92, 0.95, 0.92] },
+          { shape: 'belfry_stage' },
+        ],
+      },
+      // Side ashlar buttresses along the nave
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -8.0] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [-10.4, 0.65, -3.0] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -8.0] },
+      { shape: 'nave_buttress', partGroup: 'nave_buttresses', position: [10.4, 0.65, -3.0] },
+    ],
+  },
+};
+
 // ---- js/coastal-world.js ----
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Procedural Coastal World Generator (Spanish Main ~1550 -> Global Scale).
@@ -30265,7 +31400,9 @@ function applyIndigenousSupportAction(
 
 
 
+
 export { terrainSurfaceSample };
+
 
 const COASTAL_DEG_TO_RAD = Math.PI / 180;
 const COASTAL_RAD_TO_DEG = 180 / Math.PI;
@@ -35153,10 +36290,12 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    const i0 = pushVertex(a, [nx, ny, nz], kind, shade);
-    const i1 = pushVertex(b, [nx, ny, nz], kind, shade);
-    const i2 = pushVertex(c, [nx, ny, nz], kind, shade);
-    const i3 = pushVertex(d, [nx, ny, nz], kind, shade);
+    // Tag unshared 4-vertex architectural quads (+0.125) so Voronoi block detachment transforms each quad face rigidly
+    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    const i0 = pushVertex(a, [nx, ny, nz], qKind, shade);
+    const i1 = pushVertex(b, [nx, ny, nz], qKind, shade);
+    const i2 = pushVertex(c, [nx, ny, nz], qKind, shade);
+    const i3 = pushVertex(d, [nx, ny, nz], qKind, shade);
     indices.push(i0, i1, i2, i0, i2, i3);
   };
 
@@ -35168,9 +36307,11 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    const i0 = pushVertex(a, [nx, ny, nz], kind, shade);
-    const i1 = pushVertex(b, [nx, ny, nz], kind, shade);
-    const i2 = pushVertex(c, [nx, ny, nz], kind, shade);
+    // Tag unshared 3-vertex architectural triangles (+0.25) so Voronoi block detachment transforms each triangle face rigidly
+    const tKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.25 : kind;
+    const i0 = pushVertex(a, [nx, ny, nz], tKind, shade);
+    const i1 = pushVertex(b, [nx, ny, nz], tKind, shade);
+    const i2 = pushVertex(c, [nx, ny, nz], tKind, shade);
     indices.push(i0, i1, i2);
   };
 
@@ -35209,9 +36350,9 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanX / 2.2))) : 1;
-    const ny = spanY >= 2.6 ? Math.min(6, Math.max(2, Math.round(spanY / 2.0))) : 1;
-    const nz = spanZ >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanZ / 2.2))) : 1;
+    const nx = spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1;
+    const ny = spanY >= 1.8 ? Math.min(8, Math.max(2, Math.round(spanY / 1.45))) : 1;
+    const nz = spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1;
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
@@ -35507,6 +36648,24 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
       const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
       emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
+      flushSection();
+      continue;
+    }
+
+    const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
+    if (cairnSpec) {
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
+      const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
+      emitCairnScene(cairnSpec, {
+        toWorld: localToCairnWorld,
+        emitBox,
+        emitCylinder,
+        emitRoof,
+        pushQuad,
+        pushTri,
+        withPartGroup,
+      });
       flushSection();
       continue;
     }
@@ -37161,7 +38320,22 @@ function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cac
 const BUILDING_PARTS_CACHE = new Map();
 
 function getBuildingParts(prefabId, options = {}) {
-  const prefab = PORT_PREFABS[prefabId];
+  let prefab = PORT_PREFABS[prefabId];
+  const cairnTmpl = options?.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] || null;
+  if (!prefab && cairnTmpl) {
+    prefab = {
+      id: prefabId,
+      label: cairnTmpl.name || prefabId,
+      length: 34,
+      width: 22,
+      height: 18,
+      foundationDepth: 3.5,
+      materialKind: 11,
+      roofPitch: 3.5,
+      waterfront: false,
+      cairnSpec: cairnTmpl,
+    };
+  }
   if (!prefab) {
     throw new Error(`Unknown port building prefab: ${prefabId}`);
   }
@@ -37172,7 +38346,8 @@ function getBuildingParts(prefabId, options = {}) {
       options.height !== undefined ||
       options.foundationDepth !== undefined ||
       options.materialKind !== undefined ||
-      options.roofPitch !== undefined);
+      options.roofPitch !== undefined ||
+      options.cairnSpec !== undefined);
   if (!hasCustomOptions && BUILDING_PARTS_CACHE.has(prefab.id)) {
     return BUILDING_PARTS_CACHE.get(prefab.id);
   }
@@ -37191,6 +38366,7 @@ function getBuildingParts(prefabId, options = {}) {
     materialKind: options.materialKind ?? prefab.materialKind,
     roofPitch: options.roofPitch ?? prefab.roofPitch,
     waterfront: options.waterfront ?? prefab.waterfront,
+    cairnSpec: options.cairnSpec ?? prefab.cairnSpec ?? null,
     fromOrthophotoFootprint: true,
   };
   const geo = buildPortPrefabGeometry(

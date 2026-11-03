@@ -30,8 +30,36 @@ import {
   resolveRegionSovereigntyRecord,
   applyIndigenousSupportAction,
 } from './indigenous-sovereignty.js';
+import {
+  CAIRN_MATERIAL_TO_KIND,
+  CAIRN_ARCHITECTURAL_TEMPLATES,
+  isFraction,
+  parseFraction,
+  resolveNumeric,
+  resolvePosition,
+  toFraction,
+  resolveCairnMaterial,
+  resolveShapeReference,
+  expandCairnVoxelPrimitive,
+  emitCairnVoxelGrid,
+  emitCairnScene,
+} from './cairn-primitives.js';
 
 export { terrainSurfaceSample };
+export {
+  CAIRN_MATERIAL_TO_KIND,
+  CAIRN_ARCHITECTURAL_TEMPLATES,
+  isFraction,
+  parseFraction,
+  resolveNumeric,
+  resolvePosition,
+  toFraction,
+  resolveCairnMaterial,
+  resolveShapeReference,
+  expandCairnVoxelPrimitive,
+  emitCairnVoxelGrid,
+  emitCairnScene,
+} from './cairn-primitives.js';
 export {
   SOVEREIGN_INDIGENOUS_POLITIES,
   createIndigenousSovereigntyState,
@@ -4932,10 +4960,12 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    const i0 = pushVertex(a, [nx, ny, nz], kind, shade);
-    const i1 = pushVertex(b, [nx, ny, nz], kind, shade);
-    const i2 = pushVertex(c, [nx, ny, nz], kind, shade);
-    const i3 = pushVertex(d, [nx, ny, nz], kind, shade);
+    // Tag unshared 4-vertex architectural quads (+0.125) so Voronoi block detachment transforms each quad face rigidly
+    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    const i0 = pushVertex(a, [nx, ny, nz], qKind, shade);
+    const i1 = pushVertex(b, [nx, ny, nz], qKind, shade);
+    const i2 = pushVertex(c, [nx, ny, nz], qKind, shade);
+    const i3 = pushVertex(d, [nx, ny, nz], qKind, shade);
     indices.push(i0, i1, i2, i0, i2, i3);
   };
 
@@ -4947,9 +4977,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    const i0 = pushVertex(a, [nx, ny, nz], kind, shade);
-    const i1 = pushVertex(b, [nx, ny, nz], kind, shade);
-    const i2 = pushVertex(c, [nx, ny, nz], kind, shade);
+    // Tag unshared 3-vertex architectural triangles (+0.25) so Voronoi block detachment transforms each triangle face rigidly
+    const tKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.25 : kind;
+    const i0 = pushVertex(a, [nx, ny, nz], tKind, shade);
+    const i1 = pushVertex(b, [nx, ny, nz], tKind, shade);
+    const i2 = pushVertex(c, [nx, ny, nz], tKind, shade);
     indices.push(i0, i1, i2);
   };
 
@@ -4988,9 +5020,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanX / 2.2))) : 1;
-    const ny = spanY >= 2.6 ? Math.min(6, Math.max(2, Math.round(spanY / 2.0))) : 1;
-    const nz = spanZ >= 3.2 ? Math.min(10, Math.max(2, Math.round(spanZ / 2.2))) : 1;
+    const nx = spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1;
+    const ny = spanY >= 1.8 ? Math.min(8, Math.max(2, Math.round(spanY / 1.45))) : 1;
+    const nz = spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1;
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
@@ -5286,6 +5318,24 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
       const yPeak = yTop + peakExtra;
       emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
+      flushSection();
+      continue;
+    }
+
+    const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
+    if (cairnSpec) {
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yGround + 0.5, -hl - 0.65, hl + 0.65, 11, 0.82);
+      const localToCairnWorld = (lx, ly, lz) => toWorld(lx, yGround + ly, lz);
+      emitCairnScene(cairnSpec, {
+        toWorld: localToCairnWorld,
+        emitBox,
+        emitCylinder,
+        emitRoof,
+        pushQuad,
+        pushTri,
+        withPartGroup,
+      });
       flushSection();
       continue;
     }
@@ -6940,7 +6990,22 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 const BUILDING_PARTS_CACHE = new Map();
 
 export function getBuildingParts(prefabId, options = {}) {
-  const prefab = PORT_PREFABS[prefabId];
+  let prefab = PORT_PREFABS[prefabId];
+  const cairnTmpl = options?.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] || null;
+  if (!prefab && cairnTmpl) {
+    prefab = {
+      id: prefabId,
+      label: cairnTmpl.name || prefabId,
+      length: 34,
+      width: 22,
+      height: 18,
+      foundationDepth: 3.5,
+      materialKind: 11,
+      roofPitch: 3.5,
+      waterfront: false,
+      cairnSpec: cairnTmpl,
+    };
+  }
   if (!prefab) {
     throw new Error(`Unknown port building prefab: ${prefabId}`);
   }
@@ -6951,7 +7016,8 @@ export function getBuildingParts(prefabId, options = {}) {
       options.height !== undefined ||
       options.foundationDepth !== undefined ||
       options.materialKind !== undefined ||
-      options.roofPitch !== undefined);
+      options.roofPitch !== undefined ||
+      options.cairnSpec !== undefined);
   if (!hasCustomOptions && BUILDING_PARTS_CACHE.has(prefab.id)) {
     return BUILDING_PARTS_CACHE.get(prefab.id);
   }
@@ -6970,6 +7036,7 @@ export function getBuildingParts(prefabId, options = {}) {
     materialKind: options.materialKind ?? prefab.materialKind,
     roofPitch: options.roofPitch ?? prefab.roofPitch,
     waterfront: options.waterfront ?? prefab.waterfront,
+    cairnSpec: options.cairnSpec ?? prefab.cairnSpec ?? null,
     fromOrthophotoFootprint: true,
   };
   const geo = buildPortPrefabGeometry(
