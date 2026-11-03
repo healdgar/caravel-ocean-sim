@@ -1384,10 +1384,10 @@ export const PORT_PREFABS = Object.freeze({
   stone_quay_seawall: Object.freeze({
     id: 'stone_quay_seawall',
     label: 'Malecón y Muelle de Piedra (Stone Seawall & Wharf)',
-    length: 14,
-    width: 112,
-    height: 2.4,
-    foundationDepth: 5.5,
+    length: 12,
+    width: 84,
+    height: 1.85,
+    foundationDepth: 6.5,
     materialKind: 11,
     roofPitch: 0,
     waterfront: true,
@@ -1790,6 +1790,9 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
     if (OVER_WATER_PREFAB_IDS.has(inst.prefabId)) {
       inst.slopeX = 0;
       inst.slopeZ = 0;
+      if (inst.prefabId === 'stone_quay_seawall') {
+        inst.y = Math.min(0.45, inst.y ?? 0.40);
+      }
       inst.baseY = inst.y ?? 0;
       continue;
     }
@@ -3876,26 +3879,93 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
 
   const bearingRad = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
   const instances = [];
+  const ENCLOSING_RING_PREFABS = new Set(['english_triangular_palisade_fort', 'indigenous_palisade_ring']);
+  const obbOverlapsExisting = (cx, cz, cyaw, cw, cl, prefabId) => {
+    if (ENCLOSING_RING_PREFABS.has(prefabId) || prefabId === 'timber_mole_pier') return false;
+    const cA = Math.cos(cyaw), sA = Math.sin(cyaw);
+    const hwA = cw * 0.5 + 1.0, hlA = cl * 0.5 + 1.0;
+    const cornersA = [
+      [cx - hwA * cA - hlA * sA, cz + hwA * sA - hlA * cA],
+      [cx + hwA * cA - hlA * sA, cz - hwA * sA - hlA * cA],
+      [cx + hwA * cA + hlA * sA, cz - hwA * sA + hlA * cA],
+      [cx - hwA * cA + hlA * sA, cz + hwA * sA + hlA * cA],
+    ];
+    for (const other of instances) {
+      if (ENCLOSING_RING_PREFABS.has(other.prefabId)) continue;
+      if (other.prefabId === 'timber_mole_pier' && prefabId === 'stone_quay_seawall') continue;
+      const cB = Math.cos(other.yaw), sB = Math.sin(other.yaw);
+      const hwB = other.width * 0.5 + 1.0, hlB = other.length * 0.5 + 1.0;
+      if (Math.hypot(cx - other.x, cz - other.z) > Math.hypot(hwA, hlA) + Math.hypot(hwB, hlB)) continue;
+      const cornersB = [
+        [other.x - hwB * cB - hlB * sB, other.z + hwB * sB - hlB * cB],
+        [other.x + hwB * cB - hlB * sB, other.z - hwB * sB - hlB * cB],
+        [other.x + hwB * cB + hlB * sB, other.z - hwB * sB + hlB * cB],
+        [other.x - hwB * cB + hlB * sB, other.z + hwB * sB + hlB * cB],
+      ];
+      const axes = [[cA, -sA], [sA, cA], [cB, -sB], [sB, cB]];
+      let separated = false;
+      for (const [ax, az] of axes) {
+        let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+        for (const [x, z] of cornersA) { const p = x * ax + z * az; if (p < a0) a0 = p; if (p > a1) a1 = p; }
+        for (const [x, z] of cornersB) { const p = x * ax + z * az; if (p < b0) b0 = p; if (p > b1) b1 = p; }
+        if (Math.min(a1, b1) - Math.max(a0, b0) <= 0) {
+          separated = true;
+          break;
+        }
+      }
+      if (!separated) return true;
+    }
+    return false;
+  };
   const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
     const cairnSpec = overrides?.cairnSpec ?? CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] ?? null;
     const prefab = PORT_PREFABS[prefabId] ?? cairnSpec;
+    const instLength = overrides?.length ?? prefab?.length ?? 24;
+    const instWidth = overrides?.width ?? prefab?.width ?? 18;
+    const yaw = bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
+    let adjAlong = alongOffset;
     let adjInland = inlandOffset;
-    let pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
+    let pos = worldFromCoastalFrame(region, bestShoreAlong + adjAlong, bestShoreInland + adjInland);
     let groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
     if (!OVER_WATER_PREFAB_IDS.has(prefabId) && overrides?.exactY === undefined) {
       const minGroundTarget = prefabId === 'indigenous_canoe_landing' ? 0.18 : 0.55;
       for (let stepIn = 0; stepIn < 12 && groundY < minGroundTarget; stepIn++) {
         adjInland += 4;
-        pos = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + adjInland);
+        pos = worldFromCoastalFrame(region, bestShoreAlong + adjAlong, bestShoreInland + adjInland);
         groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+      }
+    }
+    if (prefabId !== 'stone_quay_seawall' && obbOverlapsExisting(pos.x, pos.z, yaw, instWidth, instLength, prefabId)) {
+      const alongDir = adjAlong < 0 ? -1 : 1;
+      for (let nudge = 1; nudge <= 14; nudge++) {
+        const candInland = adjInland + nudge * 5;
+        const candPos1 = worldFromCoastalFrame(region, bestShoreAlong + adjAlong, bestShoreInland + candInland);
+        if (!obbOverlapsExisting(candPos1.x, candPos1.z, yaw, instWidth, instLength, prefabId)) {
+          adjInland = candInland;
+          pos = candPos1;
+          groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+          break;
+        }
+        const candAlong = adjAlong + alongDir * nudge * 7;
+        const candPos2 = worldFromCoastalFrame(region, bestShoreAlong + candAlong, bestShoreInland + adjInland);
+        if (
+          terrainSurfaceSample(heights, candPos2.x, candPos2.z, region) >= 0.45 &&
+          !obbOverlapsExisting(candPos2.x, candPos2.z, yaw, instWidth, instLength, prefabId)
+        ) {
+          adjAlong = candAlong;
+          pos = candPos2;
+          groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
+          break;
+        }
       }
     }
     const y = overrides?.exactY !== undefined
       ? overrides.exactY
-      : minElevation !== null
-        ? Math.max(minElevation, groundY)
-        : Math.max(1.2, groundY);
-    const yaw = bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
+      : prefabId === 'stone_quay_seawall'
+        ? 0.35
+        : minElevation !== null
+          ? Math.max(minElevation, groundY)
+          : Math.max(1.2, groundY);
     instances.push({
       prefabId,
       label: overrides?.label ?? prefab?.label ?? prefab?.name ?? prefabId,
@@ -3903,8 +3973,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       y,
       z: pos.z,
       yaw,
-      length: overrides?.length ?? prefab?.length ?? 24,
-      width: overrides?.width ?? prefab?.width ?? 18,
+      length: instLength,
+      width: instWidth,
       height: overrides?.height ?? prefab?.height ?? 12,
       foundationDepth: overrides?.foundationDepth ?? prefab?.foundationDepth ?? 4.0,
       materialKind: overrides?.materialKind ?? prefab?.materialKind ?? 11,
@@ -4192,19 +4262,23 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       });
     }
   } else if (allowColonialPort && isLisbonRoyalDock) {
-    // 2. Continuous Stone Seawall & Royal Quays (Cais de Pedra do Terreiro do Paço & Ribeira das Naus)
-    addPrefab('stone_quay_seawall', -2, 8, 0, 2.5, {
+    // 2. Continuous Stone Seawall & Royal Quays (Cais de Pedra do Terreiro do Paço & Muralha da Ribeira das Naus)
+    addPrefab('stone_quay_seawall', 4, 2, 0, 2.3, {
       label: 'Cais de Pedra do Terreiro do Paço',
-      width: 52,
-      length: 14,
+      width: 50,
+      length: 12,
+      height: 1.95,
+      exactY: 0.35,
     });
-    addPrefab('stone_quay_seawall', -64, 8, 0, 2.4, {
+    addPrefab('stone_quay_seawall', -92, 2, 0, 2.2, {
       label: 'Muralha da Ribeira das Naus',
-      width: 58,
-      length: 14,
+      width: 32,
+      length: 12,
+      height: 1.85,
+      exactY: 0.35,
     });
     // 3. Paço da Ribeira, Casa da Índia, Torreão do Paço & Arcaded Merchant Loggia on the Terreiro do Paço
-    addPrefab('torreon_atalaya_farol', 38, 4, 0, 2.8, {
+    addPrefab('torreon_atalaya_farol', 42, 4, 0, 2.8, {
       label: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
       width: 18,
       length: 22,
@@ -4212,41 +4286,41 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       foundationDepth: 9.5,
       cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao,
     });
-    addPrefab('casa_de_contratacion', 16, 40, 0, 3.0, {
+    addPrefab('casa_de_contratacion', 16, 42, 0, 3.0, {
       label: 'Paço da Ribeira & Casa da Índia (Royal Customhouse)',
     });
-    addPrefab('modular_patio_cloister', 52, 42, 0, 3.2, {
+    addPrefab('modular_patio_cloister', 52, 44, 0, 3.2, {
       label: 'Paços Reais da Ribeira (Royal Palace Cloister)',
     });
-    addPrefab('open_lonja_loggia', -14, 28, 0, 2.8, {
+    addPrefab('open_lonja_loggia', -12, 30, 0, 2.8, {
       label: 'Varanda da Casa da Índia (Spice & Charter Loggia)',
     });
     // 4. Ribeira das Naus Royal Shipyard, Multi-Gable Arsenal, Armazéns da Guiné e Índia & Caravels on the Ways
-    addPrefab('royal_atarazanas_arsenal', -50, 42, 0, 2.9, {
+    addPrefab('royal_atarazanas_arsenal', -48, 48, 0, 2.9, {
       label: 'Ribeira das Naus ·Tercenas Reais (Royal Shipyard Halls)',
       width: 34,
       length: 36,
       height: 9.2,
     });
-    addPrefab('royal_warehouse', -90, 44, 0, 2.9, {
+    addPrefab('royal_warehouse', -90, 46, 0, 2.9, {
       label: 'Armazéns da Guiné e Índia (Royal Naval Storehouses)',
       length: 34,
       width: 15,
     });
-    addPrefab('astillero_and_moored_hull', -36, 12, 4, 1.9, {
+    addPrefab('astillero_and_moored_hull', -36, 15, 0, 1.5, {
       label: 'Carreira da Índia Nau on the Stocks (Ribeira das Naus)',
     });
-    addPrefab('astillero_and_moored_hull', -62, 12, -4, 1.9, {
+    addPrefab('astillero_and_moored_hull', -54, 15, 0, 1.5, {
       label: 'Royal Caravel on the Slipway (Ribeira das Naus)',
     });
-    addPrefab('careening_shed', -104, 16, 8, 2.2, {
+    addPrefab('careening_shed', -114, 20, 6, 2.2, {
       label: 'Casa do Breu (Careening & Pitch Works)',
     });
     // 5. Manueline River Bastion, Torre de Belém & Mosteiro dos Jerónimos on the Tagus approach
-    addPrefab('stone_sea_bastion', -124, -12, 12, 3.2, {
+    addPrefab('stone_sea_bastion', -126, -12, 12, 3.2, {
       label: 'Baluarte de São Vicente · Torre de Belém (Tagus Bastion)',
     });
-    addPrefab('torreon_atalaya_farol', -158, -22, 0, 3.4, {
+    addPrefab('torreon_atalaya_farol', -162, -22, 0, 3.4, {
       label: 'Torre de Belém Watchtower & River Beacon',
       width: 18,
       length: 28,
@@ -4254,7 +4328,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       foundationDepth: 9.5,
       cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.torre_de_belem_manuelina,
     });
-    addPrefab('mosteiro_dos_jeronimos', -126, 86, 0, 3.8, {
+    addPrefab('mosteiro_dos_jeronimos', -126, 88, 0, 3.8, {
       label: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
     });
     // 6. Sé Patriarcal de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
@@ -4272,7 +4346,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('curtain_wall_and_gate', 22, 118, 0, 4.0, {
       label: 'Arco da Ribeira · Muralha Fernandina',
     });
-    addPrefab('acueducto_de_piedra', -52, 124, 8, 4.2, {
+    addPrefab('acueducto_de_piedra', -56, 126, 8, 4.2, {
       label: 'Aqueduto Real & Arcos da Água Livre',
     });
     addPrefab('colonial_town_block', -16, 82, 0, 3.6, {
@@ -4281,16 +4355,16 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('colonial_town_block', 24, 82, 0, 3.6, {
       label: 'Bairro da Ribeira Velha',
     });
-    addPrefab('l_wing_u_wing_solar', -58, 84, 90, 3.5, {
+    addPrefab('l_wing_u_wing_solar', -58, 86, 90, 3.5, {
       label: 'Paço dos Estaus & Noble Solar',
     });
     addPrefab('single_nave_solar', 88, 56, 0, 3.6, {
       label: 'Casario de Alfama',
     });
-    addPrefab('walled_mule_corral', -22, 116, 0, 4.0, {
+    addPrefab('walled_mule_corral', -22, 118, 0, 4.0, {
       label: 'Pátio das tercenas & Pack Train Yard',
     });
-    addPrefab('stone_arch_bridge', -116, 32, 16, 2.2, {
+    addPrefab('stone_arch_bridge', -144, 42, 16, 2.2, {
       label: 'Ponte de Alcântara (Stone Cutwater Bridge)',
     });
     if (colonyGrowth.year >= 1585) {
@@ -4353,10 +4427,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     addPrefab('english_timber_cottage', 22, 32, 0, 2.7, {
       label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ East Row' : 'Half-Timbered Planter’s House',
     });
-    addPrefab('english_timber_cottage', -11, 56, 0, 2.9, {
+    addPrefab('english_timber_cottage', -14, 62, 0, 2.9, {
       label: isJamestown ? 'Governor’s Half-Timbered Tenement (Inside Fort)' : 'Company Guard & Quartermaster House',
     });
-    addPrefab('english_timber_cottage', 11, 56, 0, 2.9, {
+    addPrefab('english_timber_cottage', 14, 62, 0, 2.9, {
       label: 'Artificers’ & Smiths’ Timber Forge Cottage (Inside Fort)',
     });
     // Waterfront shallop careening shed, slipway & river watch beacon outside the fort curtains
@@ -4462,19 +4536,24 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     } else if (colonyGrowth.stage === 'settlement') {
       // Growing Colonial Settlement (14..31 yrs old):
       // Stone quay, sea bastion, customhouse, lonja, royal warehouse, parish church, and early town blocks.
-      addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
-      addPrefab('careening_shed', -75, 16, 12, 2.2);
-      addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
+      addPrefab('stone_quay_seawall', 10, 2, 0, 2.2, {
+        width: 80,
+        length: 12,
+        height: 1.9,
+        exactY: 0.35,
+      });
+      addPrefab('careening_shed', -76, 18, 12, 2.2);
+      addPrefab('astillero_and_moored_hull', -50, 15, 4, 1.6);
       addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
       addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
       addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
-      addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
+      addPrefab('open_lonja_loggia', -24, 28, 90, 2.8);
       addPrefab('royal_warehouse', 46, 48, 0, 3.2);
       addPrefab('mission_chapel', -38, 82, 90, 3.8);
       addPrefab('colonial_town_block', 28, 88, 0, 3.8);
       addPrefab('single_nave_solar', -74, 52, 0, 3.2);
-      addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
-      addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
+      addPrefab('walled_mule_corral', 38, 124, 0, 4.0);
+      addPrefab('thatched_bohio_palafito', -96, 20, -12, 2.0);
       if (colonyGrowth.colonyAge >= 22) {
         addPrefab('colonial_town_block', -44, 48, 0, 3.2);
         addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
@@ -4482,17 +4561,22 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     } else {
       // Mature Fortified Port & 17th-Century Citadel Metropolis (1550 baseline + progressive 1565–1689 expansions):
       // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
-      addPrefab('stone_quay_seawall', 4, 8, 0, 2.4);
+      addPrefab('stone_quay_seawall', 10, 2, 0, 2.2, {
+        width: 80,
+        length: 12,
+        height: 1.9,
+        exactY: 0.35,
+      });
       // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
-      addPrefab('careening_shed', -75, 16, 12, 2.2);
-      addPrefab('astillero_and_moored_hull', -52, 12, 6, 1.8);
+      addPrefab('careening_shed', -76, 18, 12, 2.2);
+      addPrefab('astillero_and_moored_hull', -50, 15, 4, 1.6);
       // 4. Sea bastion (Castillo) & Star-Bastioned Fort / Watchtower guarding the harbor entrance headlands
       addPrefab('stone_sea_bastion', 110, 10, -15, 4.6);
-      addPrefab('bastion_trace_fortress', -112, 14, 14, 4.2);
+      addPrefab('bastion_trace_fortress', -126, 12, 14, 4.2);
       addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
       // 5. Casa de la Contratación (Customhouse) & Open Market Loggia (Lonja) facing the waterfront plaza
       addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
-      addPrefab('open_lonja_loggia', -24, 24, 90, 2.8);
+      addPrefab('open_lonja_loggia', -24, 28, 90, 2.8);
       // 6. Almacén Real (Royal Warehouse) & Multi-Gable Reales Atarazanas Arsenal beside the customhouse
       addPrefab('royal_warehouse', 46, 48, 0, 3.2);
       addPrefab('royal_atarazanas_arsenal', 78, 36, 0, 3.0);
@@ -4504,15 +4588,15 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       addPrefab('modular_patio_cloister', -4, 88, 0, 3.8);
       addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
       addPrefab('single_nave_solar', -74, 52, 0, 3.2);
-      addPrefab('walled_mule_corral', 22, 122, 0, 4.0);
+      addPrefab('walled_mule_corral', 42, 124, 0, 4.0);
       // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge, Frontier Palm-Thatch Bohíos & Cairn Landmarks
       addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
-      addPrefab('stone_arch_bridge', -98, 38, 18, 2.2);
-      addPrefab('thatched_bohio_palafito', -94, 18, -12, 2.0);
-      addPrefab('catedral_basilica', 8, 124, 0, 4.1, {
+      addPrefab('stone_arch_bridge', -98, 48, 18, 2.2);
+      addPrefab('thatched_bohio_palafito', -96, 18, -12, 2.0);
+      addPrefab('catedral_basilica', 0, 128, 0, 4.1, {
         label: 'Catedral Basílica Metropolitana',
       });
-      addPrefab('palacio_del_gobernador', 98, 52, 0, 3.5, {
+      addPrefab('palacio_del_gobernador', 108, 56, 0, 3.5, {
         label: 'Palacio de los Capitanes Generales (Governor Palace)',
       });
       addPrefab('acueducto_de_piedra', -74, 118, 12, 4.0, {
@@ -5180,8 +5264,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
   const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6) =>
     withPartGroup('stone_arch', () => {
-      const xVaultOut = xFace + depthSign * 0.07;
-      const xOut = xFace + depthSign * 0.16;
+      const xVaultOut = xFace + depthSign * 0.14;
+      const xOut = xFace + depthSign * 0.24;
       const xIn = xFace - depthSign * 0.55;
       // Dark barrel-vaulted interior opening (kind 14), stepped 7cm proud of outer wall and 9cm recessed inside stone arch ring
       withPartGroup('arch_vault', () => {
@@ -6133,49 +6217,103 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const yPeak = yEave + roofRise(hutHW * 2, 0.68);
       emitRoof(toWorld, -hutHW, hutHW, yEave, yPeak, -hl, hl, 0.92, 0.32, 10, 15);
     } else if (inst.prefabId === 'astillero_and_moored_hull') {
-      // Primitive #12: Astillero con Carabela en Grada / Barco de Puerto (Foreshore Slipway & Skeletal Caravel Hull)
-      const hullHW = Math.min(3.6, hw * 0.78);
-      const hullHL = Math.min(11.5, hl * 0.85);
-      const ySlip = yGround + 0.35;
-      // Sloped timber slipway (varadero) iterating transverse oak sleepers every 2.0m
+      // Primitive #12: Astillero con Carabela en Grada / Barco de Puerto (Foreshore Slipway & Carvel-Planked 16th-Century Caravel/Nau on the Stocks)
+      const hullHW = Math.min(3.5, hw * 0.76);
+      const hullHL = Math.min(11.2, hl * 0.84);
+      const ySlip = yGround + 0.22;
+      // Sloped stone & timber slipway bed (varadero) with transverse oak ground ways (sleepers) & centerline keel blocks (picadeiros)
       const nSleepers = snapBays(inst.length - 1.6, 2.0, 6);
       const sleeperSpan = (inst.length - 1.6) / nSleepers;
       beginSection('foundation_slipway_apron');
-      emitBox(toWorld, -hullHW - 1.2, hullHW + 1.2, yBase, ySlip - 0.15, -hl, hl, 16, 0.76);
+      emitBox(toWorld, -hullHW - 1.15, hullHW + 1.15, yBase, ySlip - 0.12, -hl, hl, 16, 0.78);
       beginSection('foundation_sleepers');
       for (let s = 0; s <= nSleepers; s++) {
         const sz = -hl + 0.8 + s * sleeperSpan;
-        emitBox(toWorld, -hullHW - 0.95, hullHW + 0.95, ySlip - 0.15, ySlip + 0.16, sz - 0.22, sz + 0.22, 10, 0.70, true);
+        emitBox(toWorld, -hullHW - 0.90, hullHW + 0.90, ySlip - 0.12, ySlip + 0.14, sz - 0.20, sz + 0.20, 10, 0.68, true);
+        if (Math.abs(sz) <= hullHL * 0.92) {
+          // Centerline oak keel block (picadeiro) supporting the keel above the slipway
+          emitBox(toWorld, -0.46, 0.46, ySlip + 0.14, ySlip + 0.68, sz - 0.24, sz + 0.24, 10, 0.64, true);
+        }
       }
-      // Heavy oak keel, curved stempost (-hullHL), sternpost (+hullHL) & transom
-      const yKeel = ySlip + 0.75;
-      const yGunwale = yKeel + 3.2;
+      // Heavy oak keel, curved forward stempost (-hullHL) with bowsprit stub, raked sternpost (+hullHL) & tucked stern transom
+      const yKeel = ySlip + 0.68;
+      const yMidWaist = yKeel + 2.55;
       beginSection('caravel_keel_and_posts');
-      emitBox(toWorld, -0.28, 0.28, ySlip + 0.16, yKeel + 0.45, -hullHL, hullHL, 10, 0.66, true);
-      emitBox(toWorld, -0.26, 0.26, yKeel, yGunwale + 1.4, -hullHL - 1.2, -hullHL + 0.4, 10, 0.72, false, 0.18);
-      emitBox(toWorld, -hullHW * 0.68, hullHW * 0.68, yKeel + 0.4, yGunwale + 1.6, hullHL - 0.55, hullHL + 0.35, 10, 0.74);
+      emitBox(toWorld, -0.24, 0.24, ySlip + 0.52, yKeel + 0.36, -hullHL * 0.94, hullHL * 0.94, 10, 0.64, true);
+      // Curved stempost & rising bowsprit stub at bow (-Z)
+      emitBox(toWorld, -0.22, 0.22, yKeel + 0.15, yMidWaist + 1.25, -hullHL - 0.55, -hullHL + 0.45, 10, 0.72, false, 0.10);
+      emitBox(toWorld, -0.14, 0.14, yMidWaist + 0.85, yMidWaist + 1.65, -hullHL - 2.15, -hullHL - 0.15, 10, 0.76, true);
+      // Raked sternpost & tapered round-tuck upper stern transom at stern (+Z)
+      emitBox(toWorld, -0.22, 0.22, yKeel + 0.10, yMidWaist + 1.55, hullHL - 0.45, hullHL + 0.28, 10, 0.70, true);
+      emitBox(toWorld, -hullHW * 0.48, hullHW * 0.48, yKeel + 1.35, yMidWaist + 1.65, hullHL - 0.36, hullHL + 0.18, 10, 0.74, true, 0.14);
 
-      // Iterate 9 U-shaped oak hull rib frames (cuadernas) with longitudinal bilge & sheer strakes
-      const nFrames = 9;
-      for (let f = 0; f < nFrames; f++) {
-        beginSection('caravel_rib_frames');
-        const u = f / (nFrames - 1);
-        const fz = -hullHL + 1.2 + u * (hullHL * 2 - 2.4);
-        const beamProfile = Math.sin(Math.max(0.15, Math.min(0.92, u)) * Math.PI);
-        const curHW = hullHW * (0.48 + 0.52 * beamProfile);
-        // Bilge floor timber + port & starboard futtock ribs
-        emitBox(toWorld, -curHW * 0.78, curHW * 0.78, yKeel, yKeel + 0.42, fz - 0.16, fz + 0.16, 10, 0.74, true);
-        emitBox(toWorld, -curHW, -curHW + 0.32, yKeel + 0.32, yGunwale, fz - 0.16, fz + 0.16, 10, 0.78, true);
-        emitBox(toWorld, curHW - 0.32, curHW, yKeel + 0.32, yGunwale, fz - 0.16, fz + 0.16, 10, 0.78, true);
-        emitBox(toWorld, -curHW + 0.2, curHW - 0.2, yGunwale - 0.35, yGunwale - 0.08, fz - 0.14, fz + 0.14, 10, 0.76, true);
-      }
-      // Longitudinal sheer strake & wale planks + A-frame sheerlegs crane & smoking pitch cauldron beside the hull
+      // Continuous carvel-planked lower hull (garboard, bilge & lower wale strakes) + curved futtock ribs (cuadernas) & diagonal bilge shores
+      const nSec = 10;
+      const secProfile = (idx) => {
+        const u = idx / nSec; // 0 = bow (-hullHL), 1 = stern (+hullHL)
+        const z = -hullHL * 0.92 + u * (hullHL * 1.84);
+        // Full 16th-century Iberian nau/caravel beam curve (widest slightly forward of midships, tapered bow, tucked stern)
+        const bowTaper = Math.pow(Math.max(0.02, Math.min(1, u / 0.38)), 0.72);
+        const sternTaper = Math.pow(Math.max(0.18, Math.min(1, (1 - u) / 0.62)), 0.58);
+        const beamFrac = Math.max(0.14, Math.min(1.0, bowTaper * sternTaper * 1.18));
+        const bBilge = hullHW * 0.64 * beamFrac;
+        const bWale = hullHW * 1.00 * beamFrac;
+        const bGunwale = hullHW * 0.88 * beamFrac;
+        const sheerLift = (u < 0.35 ? Math.pow((0.35 - u) / 0.35, 1.6) * 0.95 : Math.pow((u - 0.35) / 0.65, 1.5) * 1.45);
+        const yB = yKeel + 0.72 + sheerLift * 0.22;
+        const yW = yKeel + 1.78 + sheerLift * 0.58;
+        const yG = yMidWaist + sheerLift;
+        return { u, z, bBilge, bWale, bGunwale, yB, yW, yG };
+      };
       beginSection('caravel_sheer_strakes');
-      emitBox(toWorld, -hullHW - 0.12, -hullHW + 0.18, yGunwale - 0.65, yGunwale, -hullHL * 0.78, hullHL * 0.85, 10, 0.82, true);
-      emitBox(toWorld, hullHW - 0.18, hullHW + 0.12, yGunwale - 0.65, yGunwale, -hullHL * 0.78, hullHL * 0.85, 10, 0.82, true);
+      for (let s = 0; s < nSec; s++) {
+        const p0 = secProfile(s);
+        const p1 = secProfile(s + 1);
+        const kC0 = [0, yKeel + 0.12, p0.z];
+        const kC1 = [0, yKeel + 0.12, p1.z];
+        for (const side of [-1, 1]) {
+          const b0 = toWorld(side * p0.bBilge, p0.yB, p0.z);
+          const b1 = toWorld(side * p1.bBilge, p1.yB, p1.z);
+          const w0 = toWorld(side * p0.bWale, p0.yW, p0.z);
+          const w1 = toWorld(side * p1.bWale, p1.yW, p1.z);
+          const g0 = toWorld(side * p0.bGunwale, p0.yG, p0.z);
+          const g1 = toWorld(side * p1.bGunwale, p1.yG, p1.z);
+          const k0 = toWorld(side * 0.20, kC0[1], kC0[2]);
+          const k1 = toWorld(side * 0.20, kC1[1], kC1[2]);
+          if (side > 0) {
+            pushQuad(k0, k1, b1, b0, 10, 0.68);
+            pushQuad(b0, b1, w1, w0, 10, 0.76);
+            // Plank bow & stern castle quarters up to the gunwale; leave midships upper futtocks open so ribs show Under-Construction character
+            if (s <= 2 || s >= nSec - 3) {
+              pushQuad(w0, w1, g1, g0, 10, 0.82);
+            }
+          } else {
+            pushQuad(k1, k0, b0, b1, 10, 0.68);
+            pushQuad(b1, b0, w0, w1, 10, 0.76);
+            if (s <= 2 || s >= nSec - 3) {
+              pushQuad(w1, w0, g0, g1, 10, 0.82);
+            }
+          }
+        }
+      }
+      // Curved oak futtock ribs (cuadernas), deck cross-beams (vaus) & diagonal timber bilge shores (escoras) along the hull
+      for (let s = 1; s < nSec; s++) {
+        const p = secProfile(s);
+        beginSection('caravel_rib_frames');
+        // Curved port & starboard futtock ribs & deck beam
+        emitBox(toWorld, -p.bWale - 0.04, -p.bGunwale + 0.24, p.yB, p.yG + 0.18, p.z - 0.13, p.z + 0.13, 10, 0.78, true);
+        emitBox(toWorld, p.bGunwale - 0.24, p.bWale + 0.04, p.yB, p.yG + 0.18, p.z - 0.13, p.z + 0.13, 10, 0.78, true);
+        emitBox(toWorld, -p.bGunwale + 0.12, p.bGunwale - 0.12, p.yW - 0.18, p.yW + 0.08, p.z - 0.12, p.z + 0.12, 10, 0.74, true);
+        if (s % 2 === 1) {
+          // Angled bilge shore props (escoras) wedged from slipway sleepers against the hull wales
+          emitBox(toWorld, -p.bWale - 0.75, -p.bWale + 0.05, ySlip + 0.12, p.yW - 0.10, p.z - 0.11, p.z + 0.11, 10, 0.70, true, 0.18);
+          emitBox(toWorld, p.bWale - 0.05, p.bWale + 0.75, ySlip + 0.12, p.yW - 0.10, p.z - 0.11, p.z + 0.11, 10, 0.70, true, 0.18);
+        }
+      }
+      // Continuous upper gunwale rail & pitch cauldron + stacked seasoning oak planks beside the slipway
       beginSection('sheerlegs_crane_and_pitch_cauldron');
-      emitCylinder(toWorld, hw - 0.8, 0, ySlip, yGunwale + 2.8, 0.26, 0.18, 6, 10, 0.74, true);
-      emitCylinder(toWorld, -hw + 1.1, hl * 0.55, ySlip, ySlip + 1.25, 0.75, 0.85, 8, 14, 0.36, true);
+      emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip, ySlip + 1.15, 0.68, 0.78, 8, 14, 0.36, true);
+      emitBox(toWorld, hw - 1.55, hw - 0.35, ySlip, ySlip + 0.75, -hl * 0.45, hl * 0.35, 10, 0.76, true);
     } else if (inst.prefabId === 'royal_warehouse') {
       // Royal Warehouse (Almacén Real): Bay-iterated buttressed masonry hall with radial stone voussoir cargo portals
       const yPlinth = yGround + 0.68;
@@ -8792,7 +8930,13 @@ export async function upgradeProceduralPackWithRealDEM(
     }
 
     // Infer true shoreBearing from the real DEM water-to-land center of mass for custom coordinates
-    if (!isNeighborSection && !Object.hasOwn(SPANISH_MAIN_1550_REGIONS, region.id) && waterCount > 50 && landCount > 50) {
+    if (
+      !isNeighborSection &&
+      !Object.hasOwn(SPANISH_MAIN_1550_REGIONS, region.id) &&
+      !HISTORICAL_COLONIAL_PORTS.some((p) => p.id === region.id && Number.isFinite(p.shoreBearing)) &&
+      waterCount > 50 &&
+      landCount > 50
+    ) {
       const dx = sumLandX / landCount - sumWaterX / waterCount;
       const dz = sumLandZ / landCount - sumWaterZ / waterCount;
       const demBearing = Math.round(((Math.atan2(dx, -dz) * COASTAL_RAD_TO_DEG) % 360 + 360) % 360);

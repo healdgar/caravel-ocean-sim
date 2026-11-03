@@ -831,8 +831,14 @@ fn landOpaque(in:LandVertex)->vec4f{
     let spallDetail=landOrientedDetail(world+vec3f(5.7,2.3,9.1),n,dx,dy,3.2);
     let gritDetail=landOrientedDetail(world+vec3f(14.1,8.7,3.9),n,dx,dy,8.5);
     let fissure=landOrientedJoint(world+vec3f(11.3,4.7,6.9),n,dx,dy);
-    let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&abs(in.kind.x-15.0)>0.4;
-    if(isStoneRubble){
+    let isAperture=abs(in.kind.x-14.0)<=0.4;
+    let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&!isAperture&&abs(in.kind.x-15.0)>0.4;
+    if(isAperture){
+      let sootVoid=vec3f(0.024,0.020,0.018);
+      albedo=mix(albedo,sootVoid,clamp(dmgW*0.58+fissure*0.25,0.0,0.78));
+      surfaceWet*=(1.0-dmgW*0.85);
+      ambientVisibility*=mix(1.0,0.55,dmgW);
+    }else if(isStoneRubble){
       let shadeKeep=clamp(in.kind.y,0.38,1.0);
       let exposedCore=select(vec3f(0.45,0.40,0.33),vec3f(0.40,0.25,0.16),in.kind.x>=11.5&&in.kind.x<13.5)*shadeKeep*(0.94+0.14*gritDetail);
       let spallPatch=clamp(dmgW*0.48+spallDetail*0.32,0.0,0.68);

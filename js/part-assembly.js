@@ -1974,6 +1974,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     const bx = Number(bake.x) || 0;
     const by = Number(bake.y) || 0;
     const bz = Number(bake.z) || 0;
+    const groundY = Number.isFinite(bake.buildingGroundY) ? Math.max(0, Number(bake.buildingGroundY)) : 0;
 
     if (bake.kind === 'building-explosion' || bake.kind === 'building-collapse') {
       const isExplosion = bake.kind === 'building-explosion';
@@ -2012,27 +2013,29 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         const rawKind = mesh[v * stride + 6] ?? 7;
         const kind = Math.floor(rawKind);
         const isTimber = kind === 10 || kind === 15 || kind === 17;
+        const isAperture = kind === 14;
         const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
         const { blockStep, blockMod } = voronoi;
         const t = 1 - dist / blastR;
         const core = t * t;
         const nextDmg = Math.min(1.45, prevDmg + (0.48 + 0.38 * powFrac) * (0.35 + 0.65 * t));
 
-        // Seabed-anchored pilings and subterranean foundation walls (origMinY < -0.25) stay rooted in the seabed/ground
+        // Seabed-anchored pilings and subterranean foundation walls (origMinY < groundY - 0.15) stay rooted in the seabed/ground
         // and never pop upward or detach out of their sockets.
-        const isSubmergedAnchored = origMinY < -0.25;
+        const isSubmergedAnchored = origMinY < groundY - 0.15 || origMinY < -0.25;
         const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
         const hDist = Math.hypot(dx, dz) || 1;
+        const effMod = isAperture ? Math.max(blockMod, 0.85) : blockMod;
         const outPush = isSubmergedAnchored
           ? 0
-          : Math.min(0.32, stepDepth * (isExplosion ? 0.18 : 0.12) * core * blockMod) * horizRemain;
+          : Math.min(0.32, stepDepth * (isExplosion ? 0.18 : 0.12) * core * effMod) * horizRemain;
 
-        // Gravity slump: Voronoi blocks detach and drop monotonically toward the ground rubble floor across multiple rounds
-        const rubbleBaseY = 0.28 + blockStep * 0.45;
+        // Gravity slump: Voronoi blocks detach and drop monotonically toward the building's ground rubble floor across multiple rounds
+        const rubbleBaseY = groundY + 0.28 + blockStep * 0.45;
         const aboveRubble = Math.max(0, fy - rubbleBaseY);
         const slumpFrac = isSubmergedAnchored
           ? 0
-          : Math.min(0.58, (isExplosion ? 0.48 : 0.34) * (0.35 + 0.65 * t) * blockMod);
+          : Math.min(0.58, (isExplosion ? 0.48 : 0.34) * (0.35 + 0.65 * t) * effMod);
         let newFy = fy - aboveRubble * slumpFrac;
         const newFx = fx + (dx / hDist) * outPush;
         const newFz = fz + (dz / hDist) * outPush;
@@ -2045,20 +2048,28 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
           if (rad > faceRadius) faceRadius = rad;
         }
         const gapShrink =
-          !isSubmergedAnchored && faceSpan > 1 && faceRadius > 0.15
+          !isSubmergedAnchored && !isAperture && faceSpan > 1 && faceRadius > 0.15
             ? Math.min(0.035, faceRadius * 0.04) * horizRemain
             : 0;
         const gapScale = faceRadius > 0.15 ? (faceRadius - gapShrink) / faceRadius : 1.0;
-        const groundRoom = Math.max(0, origMinY - 0.18);
+        const groundRoom = Math.max(0, origMinY - (groundY + 0.18));
         const groundTumbleScale = Math.min(1.0, groundRoom / 0.5);
         const maxCornerTumble = (isExplosion ? 0.09 : 0.065) * core * horizRemain * groundTumbleScale;
         const tumbleMag =
-          !isSubmergedAnchored && faceSpan > 1
+          !isSubmergedAnchored && !isAperture && faceSpan > 1
             ? Math.min(0.12, maxCornerTumble / Math.max(0.65, faceRadius))
             : 0;
-        const dAx = voronoi.tumbleX * tumbleMag;
-        const dAy = voronoi.tumbleY * tumbleMag * 0.75;
-        const dAz = voronoi.tumbleZ * tumbleMag;
+        const fNx0 = mesh[v * stride + 3], fNy0 = mesh[v * stride + 4], fNz0 = mesh[v * stride + 5];
+        const fNLen = Math.hypot(fNx0, fNy0, fNz0) || 1;
+        const fNx = fNx0 / fNLen, fNy = fNy0 / fNLen, fNz = fNz0 / fNLen;
+        const rawAx = voronoi.tumbleX * tumbleMag;
+        const rawAy = voronoi.tumbleY * tumbleMag * 0.75;
+        const rawAz = voronoi.tumbleZ * tumbleMag;
+        const inPlaneDot = rawAx * fNx + rawAy * fNy + rawAz * fNz;
+        const outScale = Math.abs(fNy) < 0.45 ? 0.18 : 1.0;
+        const dAx = fNx * inPlaneDot + (rawAx - fNx * inPlaneDot) * outScale;
+        const dAy = fNy * inPlaneDot + (rawAy - fNy * inPlaneDot) * outScale;
+        const dAz = fNz * inPlaneDot + (rawAz - fNz * inPlaneDot) * outScale;
 
         let minLocalY = 0;
         let maxLocalY = 0;
@@ -2077,7 +2088,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
           if (ty > maxLocalY) maxLocalY = ty;
         }
         if (!isSubmergedAnchored) {
-          const floorY = Math.min(origMinY, 0.18);
+          const floorY = Math.min(origMinY, groundY + 0.18);
           if (newFy + minLocalY < floorY) {
             newFy = floorY - minLocalY;
           }
@@ -2243,6 +2254,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       if (dist >= r) continue;
       const rawKind = mesh[v * stride + 6] ?? 7;
       const kind = Math.floor(rawKind);
+      const isAperture = kind === 14;
       if (isCannonDismount && kind !== 10 && kind !== 14 && dist > r * 0.68) continue;
 
       const t = 1 - dist / r;
@@ -2251,9 +2263,9 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
       const { blockStep, blockMod } = voronoi;
 
-      // Seabed-anchored pilings and subterranean foundation walls (origMinY < -0.25) stay rooted in the seabed/ground
+      // Seabed-anchored pilings and subterranean foundation walls (origMinY < groundY - 0.15) stay rooted in the seabed/ground
       // and never pop upward or detach out of their sockets.
-      const isSubmergedAnchored = origMinY < -0.25;
+      const isSubmergedAnchored = origMinY < groundY - 0.15 || origMinY < -0.25;
       // Smoothly cap horizontal displacement via prevDmg so multi-round broadsides progress vertically without pushing walls through back faces
       const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
 
@@ -2265,15 +2277,16 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
           const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
           const hDisp = stepDepth * 0.52 * t * horizRemain;
           newFx = fx + (inX * hDisp + inZ * slew * 0.20 * t * horizRemain);
-          newFy = Math.max(Math.min(origMinY, 0.2), fy - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
+          newFy = Math.max(Math.min(origMinY, groundY + 0.2), fy - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
           newFz = fz + (inZ * hDisp - inX * slew * 0.20 * t * horizRemain);
         } else {
-          const hDisp = Math.min(0.22, stepDepth * 0.16 * core * blockMod) * horizRemain;
-          const rubbleFloorY = 0.25 + blockStep * 0.45;
+          const hScale = isAperture ? 0.25 : 1.0;
+          const hDisp = Math.min(0.22, stepDepth * 0.16 * core * blockMod) * horizRemain * hScale;
+          const rubbleFloorY = groundY + 0.25 + blockStep * 0.45;
           const aboveRubble = Math.max(0, fy - rubbleFloorY);
-          const dropWeight = dy > -0.6 ? 0.38 : 0.16;
+          const dropWeight = isAperture ? 0.12 : dy > -0.6 ? 0.38 : 0.16;
           const rawDrop = Math.min(aboveRubble * 0.42, stepDepth * dropWeight * core * blockMod);
-          newFy = Math.min(fy, Math.max(Math.min(origMinY, 0.15), fy - rawDrop + inY * hDisp * 0.30));
+          newFy = Math.min(fy, Math.max(Math.min(origMinY, groundY + 0.15), fy - rawDrop + inY * hDisp * 0.30));
 
           newFx = fx + inX * hDisp;
           newFz = fz + inZ * hDisp;
@@ -2288,20 +2301,28 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         if (rad > faceRadius) faceRadius = rad;
       }
       const gapShrink =
-        !isSubmergedAnchored && faceSpan > 1 && faceRadius > 0.15
+        !isSubmergedAnchored && !isAperture && faceSpan > 1 && faceRadius > 0.15
           ? Math.min(0.032, faceRadius * 0.035) * horizRemain
           : 0;
       const gapScale = faceRadius > 0.15 ? (faceRadius - gapShrink) / faceRadius : 1.0;
-      const groundRoom = Math.max(0, origMinY - 0.15);
+      const groundRoom = Math.max(0, origMinY - (groundY + 0.15));
       const groundTumbleScale = Math.min(1.0, groundRoom / 0.5);
       const maxCornerTumble = 0.075 * core * severity * horizRemain * groundTumbleScale;
       const tumbleMag =
-        !isSubmergedAnchored && faceSpan > 1
+        !isSubmergedAnchored && !isAperture && faceSpan > 1
           ? Math.min(0.11, maxCornerTumble / Math.max(0.65, faceRadius))
           : 0;
-      const dAx = voronoi.tumbleX * tumbleMag;
-      const dAy = voronoi.tumbleY * tumbleMag * 0.75;
-      const dAz = voronoi.tumbleZ * tumbleMag;
+      const fNx0 = mesh[v * stride + 3], fNy0 = mesh[v * stride + 4], fNz0 = mesh[v * stride + 5];
+      const fNLen = Math.hypot(fNx0, fNy0, fNz0) || 1;
+      const fNx = fNx0 / fNLen, fNy = fNy0 / fNLen, fNz = fNz0 / fNLen;
+      const rawAx = voronoi.tumbleX * tumbleMag;
+      const rawAy = voronoi.tumbleY * tumbleMag * 0.75;
+      const rawAz = voronoi.tumbleZ * tumbleMag;
+      const inPlaneDot = rawAx * fNx + rawAy * fNy + rawAz * fNz;
+      const outScale = Math.abs(fNy) < 0.45 ? 0.18 : 1.0;
+      const dAx = fNx * inPlaneDot + (rawAx - fNx * inPlaneDot) * outScale;
+      const dAy = fNy * inPlaneDot + (rawAy - fNy * inPlaneDot) * outScale;
+      const dAz = fNz * inPlaneDot + (rawAz - fNz * inPlaneDot) * outScale;
 
       let minLocalY = 0;
       let maxLocalY = 0;
@@ -2320,7 +2341,7 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
         if (ty > maxLocalY) maxLocalY = ty;
       }
       if (!isSubmergedAnchored) {
-        const floorY = Math.min(origMinY, 0.15);
+        const floorY = Math.min(origMinY, groundY + 0.15);
         if (newFy + minLocalY < floorY) {
           newFy = floorY - minLocalY;
         }

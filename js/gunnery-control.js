@@ -2439,6 +2439,7 @@ function withBuildingBakeBounds(building, bake) {
   bake.buildingYaw = +(Number(building.yaw) || 0).toFixed(4);
   bake.buildingHalfW = +((isPier ? w * 1.35 : w * 0.5) + 1.8).toFixed(3);
   bake.buildingHalfL = +(l * 0.5 + 1.8).toFixed(3);
+  bake.buildingGroundY = +(Number(building.baseY ?? building.y) || 0).toFixed(3);
   return bake;
 }
 

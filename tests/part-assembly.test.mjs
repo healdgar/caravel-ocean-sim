@@ -32,6 +32,7 @@ import {
   resolveGlobalCoastalRegion,
   synthesizeCoastalTerrain,
   placeCoastalPort,
+  generateProceduralCoastalPack,
   buildPortPrefabGeometry,
   CAIRN_ARCHITECTURAL_TEMPLATES,
   isFraction,
@@ -1962,6 +1963,67 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
     if (Math.abs(adjVerts[i] - adjBefore[i]) > 1e-5) adjMoved++;
   }
   assert.equal(adjMoved, 0, 'Building-scoped bakes must not deform any vertices of adjacent buildings outside the struck OBB');
+
+  // 8. Verify elevated land buildings (e.g. Lisboa Ribeira das Naus at y = 2.8m) keep subterranean foundations
+  // anchored in the ground and bound rubble slump to buildingGroundY, never exposing buried foundations or overlapping slipways
+  const lisbonPack = generateProceduralCoastalPack('lisbon');
+  const lisbonInsts = lisbonPack.port.instances;
+  const lisbonSeawalls = lisbonInsts.filter((i) => i.prefabId === 'stone_quay_seawall');
+  const lisbonSlipways = lisbonInsts.filter((i) => i.prefabId === 'astillero_and_moored_hull');
+  assert.ok(lisbonSeawalls.length >= 2 && lisbonSlipways.length >= 2, 'Lisboa should include seawalls and Ribeira das Naus slipways');
+  for (const sw of lisbonSeawalls) {
+    assert.ok(sw.y + sw.height <= 2.5, `Stone seawall top (${(sw.y + sw.height).toFixed(2)}m) should sit at waterfront plaza elevation`);
+    for (const slip of lisbonSlipways) {
+      const dx = Math.abs(sw.x - slip.x);
+      const dz = Math.abs(sw.z - slip.z);
+      const sepX = dx - (sw.width + slip.width) * 0.5;
+      const sepZ = dz - (sw.length + slip.length) * 0.5;
+      assert.ok(sepX > 0 || sepZ > 0, `Slipway "${slip.label}" must never be embedded inside seawall "${sw.label}"`);
+    }
+  }
+
+  const arsenalInst = {
+    prefabId: 'royal_atarazanas_arsenal',
+    x: 0,
+    y: 2.8,
+    baseY: 2.8,
+    z: 0,
+    yaw: 0,
+    width: 26,
+    length: 36,
+    depth: 36,
+    height: 8.2,
+  };
+  const arsenalBase = getBuildingParts('royal_atarazanas_arsenal');
+  const arsenalOrig = new Float32Array(arsenalBase.vertices);
+  // Shift mesh up to elevated land pad y = 2.8m (so foundation plinth spans y = -1.7m..3.55m and walls span 3.55m..11.0m)
+  for (let v = 0; v < arsenalOrig.length / 8; v++) {
+    arsenalOrig[v * 8 + 1] += 2.8;
+  }
+  const arsenalHit = new Float32Array(arsenalOrig);
+  for (let hit = 0; hit < 8; hit++) {
+    applyBuildingImpactDamage(arsenalInst, {
+      ammo: 'round',
+      localPosition: [0, 4.5, -18.0],
+      position: [0, 4.5, -18.0],
+      surfacePosition: [0, 4.5, -18.0],
+      normal: [0, 0, -1],
+      velocity: [0, -4, 340],
+      mass: 10.8,
+      energy: 650000,
+    });
+  }
+  const arsenalBakes = arsenalInst.damageState.pendingBakes.splice(0);
+  assert.ok(arsenalBakes.every((b) => b.buildingGroundY === 2.8), 'Expected buildingGroundY = 2.8 on all bakes');
+  bakeBuildingImpactDeformations(arsenalHit, arsenalBakes, 8);
+  for (let v = 0; v < arsenalOrig.length / 8; v++) {
+    const origY = arsenalOrig[v * 8 + 1];
+    const newY = arsenalHit[v * 8 + 1];
+    if (origY >= 2.95) {
+      assert.ok(newY >= 2.8, `Above-ground wall vertex (${origY.toFixed(2)}m) must not slump below ground pad 2.8m (got ${newY.toFixed(2)}m)`);
+    }
+    assert.ok(newY <= origY + 0.05, `Elevated land building vertex must never pop upward (orig ${origY.toFixed(2)}m -> ${newY.toFixed(2)}m)`);
+  }
 });
 
 

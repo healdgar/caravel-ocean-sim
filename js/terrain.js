@@ -1560,6 +1560,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
                   bk.buildingYaw??=inst.yaw??0;
                   bk.buildingHalfW??=(isPier?w*1.35:w*0.5)+1.8;
                   bk.buildingHalfL??=l*0.5+1.8;
+                  bk.buildingGroundY??=Number(inst.baseY??inst.y)||0;
                 }
               }
               bakes.push(...spliced);
