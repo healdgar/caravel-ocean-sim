@@ -48,7 +48,7 @@ export function landfallStageURL(href,stage,weather='clear'){
   const view=LANDFALL_VIEWS[stage]||(stage==='dock'||stage==='harbor'?LANDFALL_VIEWS.coast:null);
   if(!view)throw new RangeError('Unknown landfall stage');
   const url=new URL(href);
-  for(const key of ['ocean','cam','boatX','boatZ','boatHeading','boatRudder','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
+  for(const key of ['ocean','cam','boatX','boatZ','boatHeading','boatRudder','boatLength','boatBeam','boatEye','shipScale','state','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
   url.searchParams.set('landfall',stage);url.searchParams.set('view','boat');url.searchParams.set('boat','1');
   url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed',stage==='dock'?'1.5':'4');url.searchParams.set('weather',weather);
   for(const [key,value]of Object.entries(LANDFALL_SEA[stage]||LANDFALL_SEA.coast))url.searchParams.set(key,String(value));
@@ -326,6 +326,8 @@ const SCENARIO_CLEANUP_KEYS = [
   'state', 'scenario', 'situation', 'broadside', 'broadsideSide', 'broadsideRange',
   'gunsReady', 'ammo', 'fleet', 'follower', 'sovereignPolity', 'propulsion',
   'cam', 'boatX', 'boatZ', 'boatRudder',
+  'boatLength', 'boatBeam', 'boatEye', 'shipScale', 'ship', 'colors',
+  'orbitDistance', 'orbitYaw', 'orbitElevation', 'orbitPanX', 'orbitPanY', 'orbitPanZ',
 ];
 
 export function scenarioStageURL(href, scenarioOrId, fallbackStage = 'coast', fallbackWeather = 'clear') {

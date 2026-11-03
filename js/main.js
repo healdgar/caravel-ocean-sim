@@ -95,6 +95,9 @@ if (qs.has('sovereignPolity')) {
   applyIndigenousSupportAction(polId, 'defend-raid', sov);
   applyIndigenousSupportAction(polId, 'proclaim-sovereignty', sov);
 }
+const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
+const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
+const READY_SHIPS=readyFleetModels();
 const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
 if (urlGameState) {
   if (urlGameState.sovereignty) {
@@ -107,8 +110,12 @@ if (urlGameState) {
     backfill('region', p.region); backfill('boatX', p.x); backfill('boatZ', p.z);
     backfill('boatHeading', p.heading); backfill('boatSpeed', p.speed); backfill('boatRudder', p.rudder);
   }
-  if (s) {
-    backfill('ship', s.id); backfill('colors', s.colors); backfill('station', s.station);
+  if (s && !BROADSIDE_SCENARIO) {
+    backfill('ship', s.id);
+  }
+  const targetShipId = READY_SHIPS.some(model=>model.id===qs.get('ship'))?qs.get('ship'):(BROADSIDE_SCENARIO?'victory':'nina');
+  if (s && (!s.id || s.id === targetShipId)) {
+    backfill('colors', s.colors); backfill('station', s.station);
     backfill('propulsion', s.propulsion); backfill('provisionDays', s.provisionDays); backfill('cargoTonnes', s.cargoTonnes);
     if (Array.isArray(s.sails)) {
       backfill('sailFore', s.sails[0]); backfill('sailMain', s.sails[1]); backfill('sailMizzen', s.sails[2]);
@@ -118,10 +125,7 @@ if (urlGameState) {
     backfill('canvas', v.canvas); backfill('course', v.course); backfill('warp', v.warp);
   }
 }
-const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
-const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
 const astronomy=createAstronomyClock(qs,{x:Number(qs.get('boatX'))||0,z:Number(qs.get('boatZ'))||0});
-const READY_SHIPS=readyFleetModels();
 const SHIP_ID=READY_SHIPS.some(model=>model.id===qs.get('ship'))?qs.get('ship'):(BROADSIDE_SCENARIO?'victory':'nina');
 const rawLat=qs.has('lat')?Number(qs.get('lat')):qs.has('latitude')?Number(qs.get('latitude')):NaN;
 const rawLon=qs.has('lon')?Number(qs.get('lon')):qs.has('longitude')?Number(qs.get('longitude')):NaN;
@@ -928,6 +932,21 @@ async function main() {
   const scalePresetParam = ARCHETYPE_SCALE_PRESETS.find(p => p.id === qs.get('shipScale'));
   const baseBoatLength = SHIP_ID!=='nina'?shipAsset.model.runtime.length:DEFAULT_BOAT_LENGTH;
   const baseBoatBeam = SHIP_ID!=='nina'?shipAsset.model.runtime.beam:DEFAULT_BOAT_BEAM;
+  const isStaleOtherShipDims = (() => {
+    if (urlGameState?.ship?.id && urlGameState.ship.id !== SHIP_ID) return true;
+    if (qs.has('shipScale')) return false;
+    const qL = Number(qs.get('boatLength')), qB = Number(qs.get('boatBeam'));
+    if (SHIP_ID !== 'nina' && ((Number.isFinite(qL) && Math.abs(qL - DEFAULT_BOAT_LENGTH) < 0.1) || (Number.isFinite(qB) && Math.abs(qB - DEFAULT_BOAT_BEAM) < 0.1))) return true;
+    if (Number.isFinite(qL) && (qL / baseBoatLength < 0.50 || qL / baseBoatLength > 1.35)) return true;
+    if (Number.isFinite(qB) && (qB / baseBoatBeam < 0.50 || qB / baseBoatBeam > 1.35)) return true;
+    if (Number.isFinite(qL) && Number.isFinite(qB) && READY_SHIPS.some(m => m.id !== SHIP_ID && Math.abs(qL - m.runtime.length) < 0.1 && Math.abs(qB - m.runtime.beam) < 0.1)) return true;
+    return false;
+  })();
+  if (isStaleOtherShipDims) {
+    qs.delete('boatLength');
+    qs.delete('boatBeam');
+    qs.delete('boatEye');
+  }
   const boat = {
     modelId:SHIP_ID,effects: qs.get('effects') !== '0', enabled: cameraMode === 'boat', showProw: qs.get('prow') !== '0', length: param('boatLength', scalePresetParam?+(baseBoatLength*scalePresetParam.lengthFactor).toFixed(2):baseBoatLength, 3, 100),
     beam: param('boatBeam', scalePresetParam?+(baseBoatBeam*scalePresetParam.beamFactor).toFixed(2):baseBoatBeam, 1, 24), heading: param('boatHeading', LAND_STAGE?((activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE]).heading??0):BROADSIDE_SCENARIO?0:propulsion === 'sail' ? param('windDir',P.windDir,0,360) : 0, 0, 360),
@@ -2723,7 +2742,7 @@ async function main() {
   const shipChoice=document.createElement('label');shipChoice.textContent='Vessel';
   const shipSelect=document.createElement('select');shipSelect.id='ship-model';shipSelect.setAttribute('aria-label','Vessel');
   for(const model of READY_SHIPS){const option=document.createElement('option');option.value=model.id;option.textContent=model.name;shipSelect.append(option);}
-  shipSelect.value=SHIP_ID;shipSelect.onchange=()=>{const url=new URL(location.href);url.searchParams.set('ship',shipSelect.value);for(const key of ['boatLength','boatBeam','boatEye','cam','shipScale'])url.searchParams.delete(key);location.assign(url.href);};
+  shipSelect.value=SHIP_ID;shipSelect.onchange=()=>{const url=new URL(location.href);url.searchParams.set('ship',shipSelect.value);for(const key of ['boatLength','boatBeam','boatEye','cam','shipScale','state','orbitDistance','provisionDays','cargoTonnes'])url.searchParams.delete(key);location.assign(url.href);};
   shipChoice.append(shipSelect);boatBody.append(shipChoice);
   const scaleChoice=document.createElement('label');scaleChoice.textContent='Archetype scale / rate';
   const scaleSelect=document.createElement('select');scaleSelect.id='ship-scale-preset';scaleSelect.setAttribute('aria-label','Archetype scale / rate');

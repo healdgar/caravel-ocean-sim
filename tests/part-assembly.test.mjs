@@ -1535,7 +1535,7 @@ test('all 9 ship models have complete part attribution, superstructure classific
   assert.ok(deformedCenterVerts > 0, 'Centerline superstructure vertices (|x| < 0.22) deform on impact');
 });
 
-test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubberband archetype scaling (discrete masts, sail tiers, gunports, sealed port lids, and fixed-size human fittings)', () => {
+test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubberband archetype scaling (discrete masts, sail tiers, gunports, sealed port lids, and fixed-size human fittings)', async () => {
   const assetCache = createShipAssetCache();
   const modelIds = Object.keys(SHIP_MODELS);
   assert.equal(Object.keys(PART_SCALING_MODES).length, 4);
@@ -1634,6 +1634,29 @@ test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubber
   // Because the hull scales down by ~0.58x in beam/vertical, fixed-human parts expand in local design space (> 1.35x)
   // so that after hull transform they preserve human-sized ergonomics instead of shrinking like a toy wheel
   assert.ok(scaledRadiusSum / origRadiusSum > 1.35, 'helm.wheel counter-scales in design space to preserve fixed human size in world space');
+
+  // Verify multi-station composite fittings (`deck.fittings`, spanZ > 2.2) stay anchored inside hull stations [-5.5, 5.5]
+  const fittingsPart = victoryCatalog.partsById['deck.fittings'];
+  assert.ok(fittingsPart, 'victory catalog includes deck.fittings');
+  for (let i = 0; i < victoryAsset.indices.length; i++) {
+    const v = victoryAsset.indices[i];
+    if (victoryCatalog.vertexPartIds[v] !== fittingsPart.partNumber) continue;
+    const sz = scaledVerts[v * 9 + 2];
+    assert.ok(sz >= -5.6 && sz <= 5.6, `deck.fittings vertex z=${sz.toFixed(2)} stays anchored inside the hull`);
+  }
+
+  // Verify scenarioStageURL strips stale nina dimensions (boatLength=20, boatBeam=6, boatEye, shipScale) when switching to HMS Victory
+  const { scenarioStageURL } = await import('../js/landfall.js');
+  const victoryUrl = scenarioStageURL(
+    'https://sixcailloux.com/waterworld/?region=lisbon&boatLength=20&boatBeam=6&boatEye=5.433333&shipScale=compact&state=abc',
+    'broadside-line-of-battle'
+  );
+  assert.equal(victoryUrl.searchParams.get('ship'), 'victory');
+  assert.equal(victoryUrl.searchParams.has('boatLength'), false);
+  assert.equal(victoryUrl.searchParams.has('boatBeam'), false);
+  assert.equal(victoryUrl.searchParams.has('boatEye'), false);
+  assert.equal(victoryUrl.searchParams.has('shipScale'), false);
+  assert.equal(victoryUrl.searchParams.has('state'), false);
 
   // Verify ShipGunnery syncs activeGunIds with vessel scale
   const victoryGuns = createShipGunnery(sloopBoat);

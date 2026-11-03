@@ -607,7 +607,10 @@ export function createPartAssemblyCatalog({
   for (let p = 0; p < partCount; p++) {
     const part = parts[p];
     const base = p * 8;
-    const modeBits = (part.scalingModeCode ?? 2) * 16 + (part.taxonomy?.isPortLid ? 128 : 0);
+    const spanZ = part.bounds ? part.bounds.max[2] - part.bounds.min[2] : 0;
+    const gpuScalingModeCode =
+      part.scalingModeCode === 1 && spanZ > 2.2 ? 2 : (part.scalingModeCode ?? 2);
+    const modeBits = gpuScalingModeCode * 16 + (part.taxonomy?.isPortLid ? 128 : 0);
     partDescriptors[base + 0] = part.assemblyWindow[0];
     partDescriptors[base + 1] = part.assemblyWindow[1];
     partDescriptors[base + 2] = part.layer;
@@ -1089,7 +1092,9 @@ export function createPartAssemblyState(catalog, options = {}) {
           if (pose.layer >= 3.5 && py > deckRefY) {
             pivY = deckRefY + (pose.pivot[1] - deckRefY) * rigHScale;
           }
-          if (pose.scalingModeCode === 1) {
+          const partBounds = catalog.parts[pIdx]?.bounds;
+          const partSpanZ = partBounds ? partBounds.max[2] - partBounds.min[2] : 0;
+          if (pose.scalingModeCode === 1 && partSpanZ <= 2.2) {
             px = pivX + (px - pose.pivot[0]) * invRelX;
             py = pivY + (py - pose.pivot[1]) * invRelX;
             pz = pivZ + (pz - pose.pivot[2]) * invRelZ;
