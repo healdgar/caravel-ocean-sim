@@ -26,6 +26,7 @@ order.splice(order.indexOf('js/vegetation.js')+1,0,'js/indigenous-sovereignty.js
 order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
 order.splice(order.indexOf('js/gltf.js'),0,'js/crew-lod.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
+order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/vendor/forest-meshopt.js','js/forest-mass.js');
