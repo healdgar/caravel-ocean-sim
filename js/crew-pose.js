@@ -2,6 +2,7 @@ import { gltfQuatMultiply } from './gltf.js';
 import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
 import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight } from './crew-work.js';
+import { applyArticulatedRagdollPose } from './crew-physics.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
 import {VICTORY_DESIGN} from './models/victory.js';
@@ -220,6 +221,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
 export function poseCrewWork(a,s,boat){
   const j=s.job;s.grips=null;s.walkContacts=null;s.gunContacts=null;
   if(s.casualtyState==='fallen'||(s.knockdownTimer??0)>0){
+    if(applyArticulatedRagdollPose(a,s,boat))return;
     const seed=(s.crewIndex??0)*1.37;
     const sideSign=((s.crewIndex??0)%2===0)?1:-1;
     const head=poseNodeIndex(a,'Head');

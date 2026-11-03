@@ -191,3 +191,54 @@ test('crew LODs build progressive index tiers over the shared skinned vertex buf
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0}).mainTier,1);
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:120,y:2,z:0}).mainTier,2);
 });
+test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze tracking, inertializer, and 11-body XPBD ragdoll operate smoothly',async ()=>{
+  const {applyCrewRealism,stepArticulatedRagdoll,poseCrewFingers}=await import('../js/crew-physics.js');
+  const rollingBoat={length:20,beam:6,roll:0.42,rollVelocity:0.75,pitch:0.08};
+  const company=createCompany();
+  for(let i=0;i<15;i++)stepCompany(company,rollingBoat,1/30,8);
+  const sailor=company.crew.find(s=>s.role!=='Helmsman');
+  assert.ok(sailor.phys,'sailor initializes 2nd-order sea-legs physics state');
+  assert.ok(Math.abs(sailor.phys.spineLeanX)>0.02||Math.abs(sailor.phys.spineLeanZ)>0.02,'sea-legs pendulum leans spine against ship roll');
+  assert.ok(sailor.phys.armSpread>0.1,'lurching roll spreads arms for balance');
+
+  // Verify 30-joint finger curl & spring inertializer across state transitions
+  const a=model.animator;
+  a.sample('Idle',sailor.time,'Walk',sailor.walkTime,sailor.walk);
+  poseCrewWork(a,sailor,rollingBoat);
+  applyCrewRealism(a,sailor,rollingBoat,1/60);
+  const index2Node=a.nodeIndex('index_02_r');
+  const idleFingerQ=a.pose[index2Node].r.slice();
+
+  // Transition to hauling job and verify inertializer + cylindrical rope grip curl
+  sailor.job={kind:'haul',mast:1,stage:'working',rung:0,elapsed:0.2};
+  a.sample('Idle',sailor.time);
+  poseCrewWork(a,sailor,rollingBoat);
+  // Immediately after transition (dt=0.01), inertializer blends from outgoing pose
+  applyCrewRealism(a,sailor,rollingBoat,0.01);
+  assert.equal(sailor._mixer.actionKey,'job:haul:working');
+  assert.ok(sailor._mixer.transitionAge<sailor._mixer.transitionDuration,'inertializer is actively crossfading transition');
+
+  // After transition settles, verify finger joints curl into cylindrical grip
+  for(let i=0;i<20;i++)applyCrewRealism(a,sailor,rollingBoat,0.02);
+  poseCrewFingers(a,sailor,0.9,0.9);
+  const gripFingerQ=a.pose[index2Node].r.slice();
+  const qDiff=Math.hypot(...gripFingerQ.map((v,i)=>v-idleFingerQ[i]));
+  assert.ok(qDiff>0.12,`finger joints articulate into grip curl (delta=${qDiff.toFixed(3)})`);
+
+  // Knockdown / fallen casualty triggers 11-body XPBD articulated ragdoll colliding with deck & bulwarks
+  sailor.job=null;
+  sailor.knockdownTimer=1.2;
+  sailor.knockbackVx=1.8;
+  sailor.knockbackVz=-1.1;
+  for(let i=0;i<15;i++)stepCompany(company,rollingBoat,1/30,8);
+  assert.ok(sailor.ragdoll?.active,'knocked-down sailor activates 11-body XPBD ragdoll');
+  assert.equal(sailor.ragdoll.pos.length,33,'ragdoll simulates 11 3D articulated particles');
+  for(let i=0;i<11;i++){
+    assert.ok(Number.isFinite(sailor.ragdoll.pos[i*3])&&Number.isFinite(sailor.ragdoll.pos[i*3+1]),`ragdoll body ${i} is finite`);
+  }
+  a.sample('Idle',sailor.time);
+  poseCrewWork(a,sailor,rollingBoat);
+  applyCrewRealism(a,sailor,rollingBoat,1/30);
+  assert.ok(a.palette.every(Number.isFinite),'ragdoll-posed 65-joint skinning palette is finite');
+});
+

@@ -4,6 +4,7 @@ import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
+import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
@@ -251,6 +252,7 @@ export function stepCompany(company,boat,dt,wind) {
       s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;s.brace=0;
       s.climbPitch=(s.fallDir??1)*Math.PI*0.47;s.yaw=s.collapseYaw??s.yaw??0;
       stepDeckhand(s,boat,0,wind,company);
+      stepCrewPhysicsState(s,boat,dt,company);
       continue;
     }
     if((s.knockdownTimer??0)>0){
@@ -259,6 +261,7 @@ export function stepCompany(company,boat,dt,wind) {
       s.job=null;s.observation.job=null;s.seatedPose=null;s.walk=0;
       s.climbPitch=(s.fallDir??1)*Math.PI*0.44*recover;
       stepDeckhand(s,boat,0,wind,company);
+      stepCrewPhysicsState(s,boat,dt,company);
       continue;
     }
     const sailorDt=s.casualtyState==='wounded'?dt*0.55:dt;
@@ -267,6 +270,7 @@ export function stepCompany(company,boat,dt,wind) {
     if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationKey=null;s.navigationY=null;}
     const hadJob=!!s.job;
     if(!stepCrewWork(s,company,boat,sailorDt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:sailorDt,wind,company);}
+    stepCrewPhysicsState(s,boat,sailorDt,company);
   }
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
@@ -484,6 +488,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           const s=b.people[i];a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
           if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
           poseCrewWork(a,s,boat);
+          applyCrewRealism(a,s,boat,dt);
           const offset=i*CREW_ACTOR_FLOATS;
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
           const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
@@ -1237,6 +1242,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
       s.walk = 0;
       s.brace = 0;
       s.work = 0;
+      stepCrewPhysicsState(s, null, dt, garrison);
       continue;
     }
 
@@ -1258,6 +1264,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     const half = s.yaw * 0.5;
     s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
     gltfTRS(s.transform, [wx - ox, wy - oy, wz - oz], s.rotation, s.scale);
+    stepCrewPhysicsState(s, null, dt, garrison);
     s._poseReady = !moving && s.walk < 1e-3 && yawDiff < 1e-3;
   }
   return garrison;
@@ -1457,6 +1464,7 @@ export async function createFortSoldiers({
           if (shouldSamplePoses) {
             a.sample('Idle', s.time, 'Walk', s.walkTime, s.walk);
             if (s.brace > 0.001) a.blend('Brace', s.time, s.brace);
+            applyCrewRealism(a, s, null, dt);
             b.poses.set(a.palette, i * 65 * 16);
           }
         }
