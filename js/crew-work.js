@@ -116,6 +116,37 @@ function crewWorkDescend(s){
   if(j.lookoutAtStation&&j.lookoutEntry){j.stage='lookout-return';j.path=[[...j.lookoutEntry]];j.cursor=0;j.lookoutAtStation=false;}
   else j.stage='descending';
 }
+function crewWorkFacingYaw(s,j,boat){
+  if(j.kind==='boarding'||j.kind==='mooring')return (j.sideSign??(j.side==='port'?-1:1))*Math.PI/2;
+  const sx=boat.beam/3.6,sz=boat.length/12;
+  if(j.kind==='haul'){
+    if(hasExtendedCrewModel(boat.modelId)){
+      const lead=crewExtendedContext(boat.modelId).controlStations?.[j.controlGroup]?.lead;
+      if(lead)return Math.atan2((lead[0]-s.x)*sx,(lead[2]-s.z)*sz);
+    }
+    const pull=boat.modelId==='victory'?1.10:1.04;
+    const height=(s.position[1]+pull)/vesselVerticalScale(boat);
+    const fall=resolveShipNode(boat,`rig.${j.controlGroup??crewMastName(boat,j.mast)}.fall`,{space:'design',height});
+    const dx=fall[0]*sx-s.position[0],dz=fall[2]*sz-s.position[2];
+    if(Math.hypot(dx,dz)>1e-4)return Math.atan2(dx,dz);
+    return Math.sign(s.x||1)*Math.PI/2;
+  }
+  if(j.kind==='hatch'){
+    if(hasExtendedCrewModel(boat.modelId)&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
+      const grip=resolveShipNode(boat,'hatch.grip');
+      return Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
+    }
+    if(ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId)){
+      const h=(ADDITIONAL_DESIGNS[boat.modelId]??proceduralDesign(boat.modelId)).hatch;
+      if(h){
+        const gx=(h.centre[0]+h.size[0]/2)*sx,gz=h.centre[2]*sz;
+        if(Math.hypot(gx-s.position[0],gz-s.position[2])>1e-4)return Math.atan2(gx-s.position[0],gz-s.position[2]);
+      }
+    }
+    return boat.modelId==='victory'?-Math.PI/2:Math.PI;
+  }
+  return -j.side*Math.PI/2;
+}
 function crewAdditionalPassingDetour(s,company,boat,p,target){
   const d=ADDITIONAL_DESIGNS[boat.modelId],j=s.job,direction=Math.abs(target[2]-p[2])>1e-7?Math.sign(target[2]-p[2]):j.passingDirection;
   if(!d||!direction)return false;
@@ -951,7 +982,7 @@ export function stepCrewWork(s,company,boat,dt) {
         }
         s.yaw=crewTurnTowards(s.yaw??Math.PI,desiredYaw,dt,2.8);
       }else{
-        s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
+        s.yaw=crewWorkFacingYaw(s,j,boat);
       }
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
@@ -978,26 +1009,15 @@ export function stepCrewWork(s,company,boat,dt) {
   if(j.kind==='gunnery'&&j.stage==='working'){
     const tool=crewGunneryTool(s,boat);
     if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
-  }
-  if(hasExtendedCrewModel(boat.modelId)&&j.stage==='working'){
+  }else if(j.stage==='working'&&j.kind!=='lookout'){
     // Approach can enter this stage in the current step. Face the real work
     // before composing its transform, rather than inheriting the last path edge.
-    if(j.kind==='haul'){
-      const lead=crewExtendedContext(boat.modelId).controlStations?.[j.controlGroup]?.lead;
-      if(lead)s.yaw=Math.atan2((lead[0]-s.x)*boat.beam/3.6,(lead[2]-s.z)*boat.length/12);
-    }else if(j.kind==='hatch'&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
-      const grip=resolveShipNode(boat,'hatch.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
-    }
-  }else if(j.stage==='working'&&j.kind!=='gunnery'&&j.kind!=='lookout'){
-    s.yaw=(j.kind==='boarding'||j.kind==='mooring')?(j.sideSign??(j.side==='port'?-1:1))*Math.PI/2
-      :j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI)
-      :j.kind==='haul'?Math.sign(s.x)*Math.PI/2
-      :-j.side*Math.PI/2;
+    s.yaw=crewWorkFacingYaw(s,j,boat);
   }
   s.climbPitch=0;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId))&&j.rung>0&&!j.lookoutAtStation){
     const runner=crewRunnerMetrics(boat,j.mast,j.side);s.climbPitch=runner.lean;s.yaw=runner.yaw;
-  }else if(boat.modelId==='victory'&&j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
+  }else if(j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
   else if(hasExtendedCrewModel(boat.modelId)&&proceduralDesign(boat.modelId).cockpit&&j.kind==='hatch'&&j.stage==='working'&&active)s.climbPitch=.36*(1-(boat.hatchesClosed??0));
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin(s.climbPitch/2),cx=Math.cos(s.climbPitch/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);

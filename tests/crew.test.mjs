@@ -261,3 +261,45 @@ test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze trackin
   assert.ok(a.palette.every(Number.isFinite),'ragdoll-posed 65-joint skinning palette is finite');
 });
 
+test('crew and soldiers working at mast halyard falls and hatches always face their work with forward arms and elbows',async ()=>{
+  const {applyCrewRealism}=await import('../js/crew-physics.js');
+  const {requirePlayableShipModel}=await import('../js/ship-models.js');
+  const a=model.animator;
+  for(const id of ['nina','pinta','santa-maria','victory']){
+    const m=requirePlayableShipModel(id);
+    const b={modelId:id,...m.runtime,roll:0,pitch:0,rudder:0,rollVelocity:0,sailFore:1,sailMain:1,sailMizzen:1,crew:true,propulsion:'sail'};
+    const c=createCompany(undefined,id);
+    sailingState(b);
+    stepCompany(c,b,0,8);
+    assert.equal(issueCaptainOrder(c,b,'weather'),true);
+    const checkedHaul=new Set();
+    let checkedHatch=false;
+    for(let tick=0;tick<1500;tick++){
+      advanceSails(b,.1,8,0);
+      stepCompany(c,b,.1,8);
+      for(const s of c.crew){
+        if(s.job?.stage==='working'&&s.job.elapsed>0.25&&(s.job.kind==='haul'||s.job.kind==='hatch')){
+          a.sample('Idle',s.time);
+          poseCrewWork(a,s,b);
+          applyCrewRealism(a,s,b,1/30);
+          const shL=a.world[a.nodeIndex('upperarm_l')].subarray(12,15);
+          const shR=a.world[a.nodeIndex('upperarm_r')].subarray(12,15);
+          const elL=a.world[a.nodeIndex('lowerarm_l')].subarray(12,15);
+          const elR=a.world[a.nodeIndex('lowerarm_r')].subarray(12,15);
+          const haL=a.world[a.nodeIndex('hand_l')].subarray(12,15);
+          const haR=a.world[a.nodeIndex('hand_r')].subarray(12,15);
+          assert.ok(s.grips?.hand_l?.[2]>0.08&&s.grips?.hand_r?.[2]>0.08,`${id} ${s.id} (${s.job.kind}) grips must be in front of chest: L=${s.grips?.hand_l?.[2]} R=${s.grips?.hand_r?.[2]}`);
+          assert.ok(haL[2]>0.08&&haR[2]>0.08&&haL[2]>shL[2]+0.12&&haR[2]>shR[2]+0.12,`${id} ${s.id} (${s.job.kind}) posed hands must be in front of torso: L=${haL[2]} R=${haR[2]}`);
+          assert.ok(elL[2]>shL[2]+0.05&&elR[2]>shR[2]+0.05,`${id} ${s.id} (${s.job.kind}) elbows must stay in front of shoulders: L=${elL[2]} (sh=${shL[2]}) R=${elR[2]} (sh=${shR[2]})`);
+          if(s.job.kind==='haul')checkedHaul.add(s.job.mast);
+          if(s.job.kind==='hatch')checkedHatch=true;
+        }
+      }
+      if(checkedHaul.size===3&&checkedHatch)break;
+    }
+    assert.deepEqual([...checkedHaul].sort(),[0,1,2],`${id} verified forward arm IK on all three mast halyards`);
+    assert.ok(checkedHatch,`${id} verified forward arm IK on hatch work`);
+  }
+});
+
+

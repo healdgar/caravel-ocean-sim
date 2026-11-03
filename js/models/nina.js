@@ -35,11 +35,11 @@ export const NINA_DESIGN = deepFreeze({
     nina_w3:{x:-1.18,z:-1.15,route:[-1.20,-1.10],role:'Waist deckhand'},
     nina_w4:{x:1.18,z:-.65,route:[-.70,-.60],role:'Waist deckhand'},
     nina_w5:{x:-1.18,z:.45,route:[.40,.50],role:'Main sheet hand'},
-    nina_w6:{x:1.12,z:.55,route:[.50,.60],role:'Main brace hand'},
-    nina_w7:{x:-1.12,z:1.65,route:[1.60,1.70],role:'Aft waist hand'},
+    nina_w6:{x:1.12,z:1.05,route:[1.00,1.10],role:'Main brace hand'},
+    nina_w7:{x:1.10,z:1.95,route:[1.90,2.00],role:'Aft waist hand'},
     nina_w8:{x:-1.08,z:2.20,route:[2.15,2.25],role:'Mizzen tack hand'},
-    nina_q1:{x:.62,z:3.65,route:[3.60,3.70],yaw:Math.PI,role:'Quarterdeck hand'},
-    nina_q2:{x:-.62,z:3.65,route:[3.60,3.70],yaw:Math.PI,role:'Stern watch'},
+    nina_q1:{x:.28,z:4.15,route:[4.10,4.20],yaw:Math.PI,role:'Quarterdeck hand'},
+    nina_q2:{x:-.62,z:3.70,route:[3.65,3.75],yaw:Math.PI,role:'Stern watch'},
   },
 });
 

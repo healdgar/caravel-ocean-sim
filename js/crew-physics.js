@@ -676,21 +676,17 @@ export function stepCrewPhysicsState(s, boat, dt, company = null) {
   const targetSpineX = crewPhysClamp(-localRightTilt * 0.62 * scaleFactor, -0.35, 0.35);
   const targetSpineZ = crewPhysClamp(-localFwdTilt * 0.52 * scaleFactor + (s.walk ?? 0) * 0.08, -0.30, 0.30);
 
-  const omega = 14.0, damp = 2 * 0.72 * omega;
-  const axCom = omega * omega * (targetComX - phys.comShiftX) - damp * phys.comVelX;
-  const azCom = omega * omega * (targetComZ - phys.comShiftZ) - damp * phys.comVelZ;
-  const ayCom = omega * omega * (targetDropY - phys.comDropY) - damp * phys.comVelY;
-  phys.comVelX += axCom * safeDt;
-  phys.comVelZ += azCom * safeDt;
-  phys.comVelY += ayCom * safeDt;
+  const omega = 14.0, omega2 = omega * omega, damp = 2 * 0.78 * omega;
+  const invDenom = 1 / (1 + damp * safeDt + omega2 * safeDt * safeDt);
+  phys.comVelX = (phys.comVelX + omega2 * (targetComX - phys.comShiftX) * safeDt) * invDenom;
+  phys.comVelZ = (phys.comVelZ + omega2 * (targetComZ - phys.comShiftZ) * safeDt) * invDenom;
+  phys.comVelY = (phys.comVelY + omega2 * (targetDropY - phys.comDropY) * safeDt) * invDenom;
   phys.comShiftX = crewPhysClamp(phys.comShiftX + phys.comVelX * safeDt, -0.085, 0.085);
   phys.comShiftZ = crewPhysClamp(phys.comShiftZ + phys.comVelZ * safeDt, -0.075, 0.075);
   phys.comDropY = crewPhysClamp(phys.comDropY + phys.comVelY * safeDt, 0, 0.095);
 
-  const axSpine = omega * omega * (targetSpineX - phys.spineLeanX) - damp * phys.spineVelX;
-  const azSpine = omega * omega * (targetSpineZ - phys.spineLeanZ) - damp * phys.spineVelZ;
-  phys.spineVelX += axSpine * safeDt;
-  phys.spineVelZ += azSpine * safeDt;
+  phys.spineVelX = (phys.spineVelX + omega2 * (targetSpineX - phys.spineLeanX) * safeDt) * invDenom;
+  phys.spineVelZ = (phys.spineVelZ + omega2 * (targetSpineZ - phys.spineLeanZ) * safeDt) * invDenom;
   phys.spineLeanX = crewPhysClamp(phys.spineLeanX + phys.spineVelX * safeDt, -0.38, 0.38);
   phys.spineLeanZ = crewPhysClamp(phys.spineLeanZ + phys.spineVelZ * safeDt, -0.34, 0.34);
 
@@ -1012,10 +1008,10 @@ export function applySeaLegsAndBreathing(a, s, boat = null) {
 
   // 3. Closed-Chain Hand Re-Pinning: keep gripped hands locked to tillers, ropes, cannon tools, and basket rims while torso sways
   if (s.grips?.hand_l && m.upperarmL >= 0) {
-    crewPhysSolveTwoBoneIK(a, m.upperarmL, m.lowerarmL, m.handL, s.grips.hand_l, [0.58, 0.95, 0.2]);
+    crewPhysSolveTwoBoneIK(a, m.upperarmL, m.lowerarmL, m.handL, s.grips.hand_l, [0.52, 0.92, 0.32]);
   }
   if (s.grips?.hand_r && m.upperarmR >= 0) {
-    crewPhysSolveTwoBoneIK(a, m.upperarmR, m.lowerarmR, m.handR, s.grips.hand_r, [-0.58, 0.95, 0.2]);
+    crewPhysSolveTwoBoneIK(a, m.upperarmR, m.lowerarmR, m.handR, s.grips.hand_r, [-0.52, 0.92, 0.32]);
   }
 }
 

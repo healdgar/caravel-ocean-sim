@@ -2143,11 +2143,11 @@ const NINA_DESIGN = deepFreeze({
     nina_w3:{x:-1.18,z:-1.15,route:[-1.20,-1.10],role:'Waist deckhand'},
     nina_w4:{x:1.18,z:-.65,route:[-.70,-.60],role:'Waist deckhand'},
     nina_w5:{x:-1.18,z:.45,route:[.40,.50],role:'Main sheet hand'},
-    nina_w6:{x:1.12,z:.55,route:[.50,.60],role:'Main brace hand'},
-    nina_w7:{x:-1.12,z:1.65,route:[1.60,1.70],role:'Aft waist hand'},
+    nina_w6:{x:1.12,z:1.05,route:[1.00,1.10],role:'Main brace hand'},
+    nina_w7:{x:1.10,z:1.95,route:[1.90,2.00],role:'Aft waist hand'},
     nina_w8:{x:-1.08,z:2.20,route:[2.15,2.25],role:'Mizzen tack hand'},
-    nina_q1:{x:.62,z:3.65,route:[3.60,3.70],yaw:Math.PI,role:'Quarterdeck hand'},
-    nina_q2:{x:-.62,z:3.65,route:[3.60,3.70],yaw:Math.PI,role:'Stern watch'},
+    nina_q1:{x:.28,z:4.15,route:[4.10,4.20],yaw:Math.PI,role:'Quarterdeck hand'},
+    nina_q2:{x:-.62,z:3.70,route:[3.65,3.75],yaw:Math.PI,role:'Stern watch'},
   },
 });
 
@@ -25368,6 +25368,37 @@ function crewWorkDescend(s){
   if(j.lookoutAtStation&&j.lookoutEntry){j.stage='lookout-return';j.path=[[...j.lookoutEntry]];j.cursor=0;j.lookoutAtStation=false;}
   else j.stage='descending';
 }
+function crewWorkFacingYaw(s,j,boat){
+  if(j.kind==='boarding'||j.kind==='mooring')return (j.sideSign??(j.side==='port'?-1:1))*Math.PI/2;
+  const sx=boat.beam/3.6,sz=boat.length/12;
+  if(j.kind==='haul'){
+    if(hasExtendedCrewModel(boat.modelId)){
+      const lead=crewExtendedContext(boat.modelId).controlStations?.[j.controlGroup]?.lead;
+      if(lead)return Math.atan2((lead[0]-s.x)*sx,(lead[2]-s.z)*sz);
+    }
+    const pull=boat.modelId==='victory'?1.10:1.04;
+    const height=(s.position[1]+pull)/vesselVerticalScale(boat);
+    const fall=resolveShipNode(boat,`rig.${j.controlGroup??crewMastName(boat,j.mast)}.fall`,{space:'design',height});
+    const dx=fall[0]*sx-s.position[0],dz=fall[2]*sz-s.position[2];
+    if(Math.hypot(dx,dz)>1e-4)return Math.atan2(dx,dz);
+    return Math.sign(s.x||1)*Math.PI/2;
+  }
+  if(j.kind==='hatch'){
+    if(hasExtendedCrewModel(boat.modelId)&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
+      const grip=resolveShipNode(boat,'hatch.grip');
+      return Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
+    }
+    if(ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId)){
+      const h=(ADDITIONAL_DESIGNS[boat.modelId]??proceduralDesign(boat.modelId)).hatch;
+      if(h){
+        const gx=(h.centre[0]+h.size[0]/2)*sx,gz=h.centre[2]*sz;
+        if(Math.hypot(gx-s.position[0],gz-s.position[2])>1e-4)return Math.atan2(gx-s.position[0],gz-s.position[2]);
+      }
+    }
+    return boat.modelId==='victory'?-Math.PI/2:Math.PI;
+  }
+  return -j.side*Math.PI/2;
+}
 function crewAdditionalPassingDetour(s,company,boat,p,target){
   const d=ADDITIONAL_DESIGNS[boat.modelId],j=s.job,direction=Math.abs(target[2]-p[2])>1e-7?Math.sign(target[2]-p[2]):j.passingDirection;
   if(!d||!direction)return false;
@@ -26203,7 +26234,7 @@ function stepCrewWork(s,company,boat,dt) {
         }
         s.yaw=crewTurnTowards(s.yaw??Math.PI,desiredYaw,dt,2.8);
       }else{
-        s.yaw=j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI):j.kind==='haul'?Math.sign(s.x)*Math.PI/2:-j.side*Math.PI/2;
+        s.yaw=crewWorkFacingYaw(s,j,boat);
       }
       if(j.kind==='hatch')boat.hatchesClosed=workClamp((boat.hatchesClosed??0)+dt/8,0,1);
       if(j.kind==='lookout'){company.lookoutHeight=s.position[1]+1.65;}
@@ -26230,26 +26261,15 @@ function stepCrewWork(s,company,boat,dt) {
   if(j.kind==='gunnery'&&j.stage==='working'){
     const tool=crewGunneryTool(s,boat);
     if(tool?.hands){const target=tool.hands[0].map((v,i)=>(v+tool.hands[1][i])*.5);s.yaw=Math.atan2(target[0]-s.position[0],target[2]-s.position[2]);}
-  }
-  if(hasExtendedCrewModel(boat.modelId)&&j.stage==='working'){
+  }else if(j.stage==='working'&&j.kind!=='lookout'){
     // Approach can enter this stage in the current step. Face the real work
     // before composing its transform, rather than inheriting the last path edge.
-    if(j.kind==='haul'){
-      const lead=crewExtendedContext(boat.modelId).controlStations?.[j.controlGroup]?.lead;
-      if(lead)s.yaw=Math.atan2((lead[0]-s.x)*boat.beam/3.6,(lead[2]-s.z)*boat.length/12);
-    }else if(j.kind==='hatch'&&requirePlayableShipModel(boat.modelId).nodes['hatch.grip']){
-      const grip=resolveShipNode(boat,'hatch.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);
-    }
-  }else if(j.stage==='working'&&j.kind!=='gunnery'&&j.kind!=='lookout'){
-    s.yaw=(j.kind==='boarding'||j.kind==='mooring')?(j.sideSign??(j.side==='port'?-1:1))*Math.PI/2
-      :j.kind==='hatch'?(boat.modelId==='victory'?-Math.PI/2:Math.PI)
-      :j.kind==='haul'?Math.sign(s.x)*Math.PI/2
-      :-j.side*Math.PI/2;
+    s.yaw=crewWorkFacingYaw(s,j,boat);
   }
   s.climbPitch=0;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]||hasExtendedCrewModel(boat.modelId))&&j.rung>0&&!j.lookoutAtStation){
     const runner=crewRunnerMetrics(boat,j.mast,j.side);s.climbPitch=runner.lean;s.yaw=runner.yaw;
-  }else if(boat.modelId==='victory'&&j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
+  }else if(j.kind==='haul'&&j.stage==='working')s.climbPitch=.16;
   else if(hasExtendedCrewModel(boat.modelId)&&proceduralDesign(boat.modelId).cockpit&&j.kind==='hatch'&&j.stage==='working'&&active)s.climbPitch=.36*(1-(boat.hatchesClosed??0));
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin(s.climbPitch/2),cx=Math.cos(s.climbPitch/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
@@ -27105,21 +27125,17 @@ function stepCrewPhysicsState(s, boat, dt, company = null) {
   const targetSpineX = crewPhysClamp(-localRightTilt * 0.62 * scaleFactor, -0.35, 0.35);
   const targetSpineZ = crewPhysClamp(-localFwdTilt * 0.52 * scaleFactor + (s.walk ?? 0) * 0.08, -0.30, 0.30);
 
-  const omega = 14.0, damp = 2 * 0.72 * omega;
-  const axCom = omega * omega * (targetComX - phys.comShiftX) - damp * phys.comVelX;
-  const azCom = omega * omega * (targetComZ - phys.comShiftZ) - damp * phys.comVelZ;
-  const ayCom = omega * omega * (targetDropY - phys.comDropY) - damp * phys.comVelY;
-  phys.comVelX += axCom * safeDt;
-  phys.comVelZ += azCom * safeDt;
-  phys.comVelY += ayCom * safeDt;
+  const omega = 14.0, omega2 = omega * omega, damp = 2 * 0.78 * omega;
+  const invDenom = 1 / (1 + damp * safeDt + omega2 * safeDt * safeDt);
+  phys.comVelX = (phys.comVelX + omega2 * (targetComX - phys.comShiftX) * safeDt) * invDenom;
+  phys.comVelZ = (phys.comVelZ + omega2 * (targetComZ - phys.comShiftZ) * safeDt) * invDenom;
+  phys.comVelY = (phys.comVelY + omega2 * (targetDropY - phys.comDropY) * safeDt) * invDenom;
   phys.comShiftX = crewPhysClamp(phys.comShiftX + phys.comVelX * safeDt, -0.085, 0.085);
   phys.comShiftZ = crewPhysClamp(phys.comShiftZ + phys.comVelZ * safeDt, -0.075, 0.075);
   phys.comDropY = crewPhysClamp(phys.comDropY + phys.comVelY * safeDt, 0, 0.095);
 
-  const axSpine = omega * omega * (targetSpineX - phys.spineLeanX) - damp * phys.spineVelX;
-  const azSpine = omega * omega * (targetSpineZ - phys.spineLeanZ) - damp * phys.spineVelZ;
-  phys.spineVelX += axSpine * safeDt;
-  phys.spineVelZ += azSpine * safeDt;
+  phys.spineVelX = (phys.spineVelX + omega2 * (targetSpineX - phys.spineLeanX) * safeDt) * invDenom;
+  phys.spineVelZ = (phys.spineVelZ + omega2 * (targetSpineZ - phys.spineLeanZ) * safeDt) * invDenom;
   phys.spineLeanX = crewPhysClamp(phys.spineLeanX + phys.spineVelX * safeDt, -0.38, 0.38);
   phys.spineLeanZ = crewPhysClamp(phys.spineLeanZ + phys.spineVelZ * safeDt, -0.34, 0.34);
 
@@ -27441,10 +27457,10 @@ function applySeaLegsAndBreathing(a, s, boat = null) {
 
   // 3. Closed-Chain Hand Re-Pinning: keep gripped hands locked to tillers, ropes, cannon tools, and basket rims while torso sways
   if (s.grips?.hand_l && m.upperarmL >= 0) {
-    crewPhysSolveTwoBoneIK(a, m.upperarmL, m.lowerarmL, m.handL, s.grips.hand_l, [0.58, 0.95, 0.2]);
+    crewPhysSolveTwoBoneIK(a, m.upperarmL, m.lowerarmL, m.handL, s.grips.hand_l, [0.52, 0.92, 0.32]);
   }
   if (s.grips?.hand_r && m.upperarmR >= 0) {
-    crewPhysSolveTwoBoneIK(a, m.upperarmR, m.lowerarmR, m.handR, s.grips.hand_r, [-0.58, 0.95, 0.2]);
+    crewPhysSolveTwoBoneIK(a, m.upperarmR, m.lowerarmR, m.handR, s.grips.hand_r, [-0.52, 0.92, 0.32]);
   }
 }
 
