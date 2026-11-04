@@ -92,6 +92,7 @@ export function createShareLink(href, settings, boat, cameraMode, camera=null) {
     if(Number.isFinite(v.drLat))setNumber('drLat',v.drLat,5);
     if(Number.isFinite(v.drLon))setNumber('drLon',v.drLon,5);
     if(v.region)url.searchParams.set('region',String(v.region));
+    else if('region' in v)url.searchParams.delete('region');
     if(v.canvas)url.searchParams.set('canvas',String(v.canvas));
     if(Number.isFinite(v.course))setNumber('course',v.course,1);
     if(v.warp)url.searchParams.set('warp',String(v.warp));

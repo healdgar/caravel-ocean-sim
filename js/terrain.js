@@ -398,9 +398,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const search=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
   const explicitObj=explicitRegion&&typeof explicitRegion==='object'?explicitRegion:null;
   const explicitId=typeof explicitRegion==='string'?explicitRegion:(explicitObj?.id??null);
-  const rawLat=Number.isFinite(explicitObj?.latitude)?Number(explicitObj.latitude):search.has('lat')?Number(search.get('lat')):search.has('latitude')?Number(search.get('latitude')):NaN;
-  const rawLon=Number.isFinite(explicitObj?.longitude)?Number(explicitObj.longitude):search.has('lon')?Number(search.get('lon')):search.has('longitude')?Number(search.get('longitude')):NaN;
-  const hasExplicitLatLon=(Number.isFinite(explicitObj?.latitude)&&Number.isFinite(explicitObj?.longitude))||(search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon'))));
+  const ignoreSearchLocation=Boolean(options?.lateSpawn||(explicitObj&&Number.isFinite(explicitObj.latitude)&&Number.isFinite(explicitObj.longitude)));
+  const rawLat=Number.isFinite(explicitObj?.latitude)?Number(explicitObj.latitude):!ignoreSearchLocation&&search.has('lat')?Number(search.get('lat')):!ignoreSearchLocation&&search.has('latitude')?Number(search.get('latitude')):NaN;
+  const rawLon=Number.isFinite(explicitObj?.longitude)?Number(explicitObj.longitude):!ignoreSearchLocation&&search.has('lon')?Number(search.get('lon')):!ignoreSearchLocation&&search.has('longitude')?Number(search.get('longitude')):NaN;
+  const hasExplicitLatLon=(Number.isFinite(explicitObj?.latitude)&&Number.isFinite(explicitObj?.longitude))||(!ignoreSearchLocation&&search.has('lat')&&search.has('lon')&&Number.isFinite(Number(search.get('lat')))&&Number.isFinite(Number(search.get('lon'))));
   const hasCustomCoords=hasExplicitLatLon||(Number.isFinite(rawLat)&&Number.isFinite(rawLon)&&(Math.abs(rawLat-ISLAND.latitude)>0.12||Math.abs(rawLon-ISLAND.longitude)>0.12));
   const rawYearParam=explicitObj?.year??explicitObj?.era??search.get('year')??(search.get('era')&&search.get('era')!=='2026'?search.get('era'):null);
   let astroYear=null;
@@ -411,8 +412,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const coordPresetMatch=hasCustomCoords
     ?Object.values(SPANISH_MAIN_1550_REGIONS).find(r=>Math.abs(rawLat-r.latitude)<0.05&&Math.abs(rawLon-r.longitude)<0.05)??null
     :null;
-  const defaultLisbonDeparture=!explicitId&&!explicitObj&&!search.has('region')&&!hasCustomCoords&&!search.has('landfall')&&search.get('ocean')!=='1';
-  const regionParam=explicitId||search.get('region')||(coordPresetMatch?coordPresetMatch.id:null)||(defaultLisbonDeparture?'lisbon':null);
+  const defaultLisbonDeparture=!ignoreSearchLocation&&!explicitId&&!explicitObj&&!search.has('region')&&!hasCustomCoords&&!search.has('landfall')&&search.get('ocean')!=='1';
+  const regionParam=explicitId||(!ignoreSearchLocation?search.get('region'):null)||(coordPresetMatch?coordPresetMatch.id:null)||(defaultLisbonDeparture?'lisbon':null);
   const spanishMainPreset=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
   const colonialPortPreset=!spanishMainPreset&&regionParam&&regionParam!=='saba'?HISTORICAL_COLONIAL_PORTS.find(p=>p.id===regionParam)??null:null;
   const presetMatch=spanishMainPreset||colonialPortPreset;
@@ -519,7 +520,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     :{
       ...(presetMatch||{}),
       id:regionParam||undefined,
-      name:explicitObj?.name||search.get('regionName')||presetMatch?.name||undefined,
+      name:explicitObj?.name||(!ignoreSearchLocation?search.get('regionName'):null)||presetMatch?.name||undefined,
       latitude:targetLat,
       longitude:targetLon,
       year:resolvedYear,
@@ -532,7 +533,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   if(proceduralPack){
     if(autoCurated1550){
       try{
-        const res=await runLandfallDiscoveryPipeline(proceduralPack);
+        const res=await runLandfallDiscoveryPipeline(proceduralPack,{snapToCoast:!options?.lateSpawn});
         if(res?.upgradedPack?.heights){
           preloaded1550=res;
           Object.assign(proceduralPack,res.upgradedPack);
@@ -541,7 +542,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     if(!proceduralPack.heights){
       if(useRealDEM){
-        await upgradeProceduralPackWithRealDEM(proceduralPack);
+        await upgradeProceduralPackWithRealDEM(proceduralPack,{snapToCoast:!options?.lateSpawn});
       }else{
         Object.assign(proceduralPack,generateProceduralCoastalPack(proceduralPack.region,{...proceduralGridOpts,deferSynthesis:false}));
       }
@@ -579,6 +580,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const half=activeRegion.span*0.5-1;
     const cx=Math.max(activeRegion.x-half,Math.min(activeRegion.x+half,x));
     const cz=Math.max(activeRegion.z-half,Math.min(activeRegion.z+half,z));
+    if(Math.hypot(x-cx,z-cz)>250)return h;
     const edgeH=sampleFn(heights,cx,cz,activeRegion);
     return edgeH>-1.5?edgeH:h;
   };
@@ -1389,6 +1391,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setTimeout(()=>{
       runLandfallDiscoveryPipeline({ ...proceduralPack, heights: baseSnapshot.heights },{
         forceFirstExplorer,
+        snapToCoast:!options?.lateSpawn,
         onFirstExplorer(info){
           discovery.status='charting';
           discovery.isFirstExplorer=true;

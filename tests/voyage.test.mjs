@@ -689,4 +689,132 @@ test('warping toward land or a village with fleet vessels does not double-shift 
   assert.equal(astronomy.mode, 'manual', 'manual sky adjustment is respected during active voyage');
 });
 
+test('warped approach from 80 km out preloads 3D terrain, slides it from >40 km into visual range, and only fires Land Ho when 3D land is visible ahead', async () => {
+  const islandLat = 20.0;
+  const islandLon = -60.0;
+  const loadTile = (z, x, y) => {
+    const data = new Float32Array(256 * 256).fill(-3000);
+    const n = 2 ** z;
+    for (let py = 0; py < 256; py++) {
+      for (let px = 0; px < 256; px++) {
+        const lon = ((x + (px + 0.5) / 256) / n) * 360 - 180;
+        const yy = y + (py + 0.5) / 256;
+        const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * yy) / n))) * 180) / Math.PI;
+        const d = greatCircleKm(lat, lon, islandLat, islandLon);
+        if (d < 10) data[py * 256 + px] = 420 * (1 - d / 10) + 5;
+      }
+    }
+    return data;
+  };
+
+  let activeTerrain = null;
+  let spawnCalls = 0;
+  let landHoDistM = Infinity;
+
+  const boat = {
+    x: 0,
+    z: 0,
+    heading: 270, // Sailing due West toward the island at (20.0, -60.0)
+    length: 20,
+    beam: 6,
+    surgeVelocity: 4.5,
+    leewayVelocity: 0,
+    modelId: 'nina',
+    hydrodynamics: { draft: 2.0 },
+  };
+  const cam = { x: 0, z: 20, y: 5.5 };
+  const P = {
+    sunElev: 35,
+    sunAzim: 180,
+    windSpeed: 8,
+    windDir: 90,
+    swellHs: 1.2,
+    swellDir: 90,
+    swellLength: 90,
+    clouds: 0.25,
+    rain: 0,
+    thunder: 0,
+    haze: 0.8,
+    cloudBase: 1.2,
+    cloudDepth: 1.8,
+    cloudDensity: 1,
+    cloudAnvil: 0.05,
+  };
+
+  const startPos = destinationPoint(islandLat, islandLon, 90, 82); // 82 km East of island center (~72 km from east shore)
+  const ctrl = createVoyageController({
+    boat,
+    P,
+    getTerrain: () => activeTerrain,
+    getCamera: () => cam,
+    demLoader: loadTile,
+    loadLandRings: () => Promise.resolve([]),
+    spawnTerrain: async ({ placement, lat, lon, name }) => {
+      spawnCalls++;
+      const worldOffset = { x: 0, z: 0 };
+      const baseRegion = {
+        x: placement.x,
+        z: placement.z,
+        span: 8192,
+        latitude: lat,
+        longitude: lon,
+        name: name || 'Sighted Island',
+      };
+      activeTerrain = {
+        get region() {
+          return worldOffset.x || worldOffset.z
+            ? { ...baseRegion, x: baseRegion.x + worldOffset.x, z: baseRegion.z + worldOffset.z }
+            : baseRegion;
+        },
+        get baseRegion() {
+          return baseRegion;
+        },
+        height(qx, qz) {
+          const lx = qx - worldOffset.x - baseRegion.x;
+          const lz = qz - worldOffset.z - baseRegion.z;
+          // West of the shoreline (lx < 0) rises onto land; East (lx > 0) is open ocean (-40 m)
+          if (Math.abs(lx) > 4096 || Math.abs(lz) > 4096) return -120;
+          return lx < 0 ? Math.min(80, -lx * 0.08 + 2) : -40;
+        },
+        setWorldOffset(dx, dz) {
+          worldOffset.x = dx;
+          worldOffset.z = dz;
+        },
+        commitWorldOffset({ boat: b, camera: c }) {
+          const dx = worldOffset.x, dz = worldOffset.z;
+          if (b) { b.x -= dx; b.z -= dz; }
+          if (c) { c.x -= dx; c.z -= dz; }
+          worldOffset.x = 0;
+          worldOffset.z = 0;
+          return { dx, dz };
+        },
+      };
+      return activeTerrain;
+    },
+  });
+
+  ctrl.subscribe((ev, payload) => {
+    if (ev === 'land-ho' && activeTerrain) {
+      landHoDistM = Math.hypot(boat.x - activeTerrain.region.x, boat.z - activeTerrain.region.z);
+      void payload;
+    }
+  });
+
+  ctrl.start({ lat: startPos.lat, lon: startPos.lon, compassCourse: 270 });
+  ctrl.setWarp('crossing');
+
+  for (let i = 0; i < 160; i++) {
+    ctrl.update(0.05, i * 50);
+    await new Promise((r) => setImmediate(r));
+    if (ctrl.voyage.interrupt?.type === 'land-ho') break;
+  }
+
+  assert.equal(spawnCalls, 1, 'spawnTerrain called once to preload the destination coast');
+  assert.ok(activeTerrain, '3D coastal terrain is active when Land Ho arrives');
+  assert.equal(ctrl.voyage.interrupt?.type, 'land-ho', 'Land Ho notification raised');
+  assert.ok(landHoDistM <= 18500, `3D terrain slid from ~60 km into visual range before Land Ho fired (dist=${landHoDistM.toFixed(0)} m)`);
+  assert.ok(activeTerrain.region.x < boat.x, `3D coast lies West ahead of the ship (region.x=${activeTerrain.region.x.toFixed(0)}, boat.x=${boat.x.toFixed(0)})`);
+});
+
+
 

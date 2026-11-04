@@ -2154,7 +2154,7 @@ async function main() {
       lon: num(lon, 5),
       drLat: num(drLat, 5),
       drLon: num(drLon, 5),
-      region: tRegion?.id ?? (qs.get('region') || undefined),
+      region: tRegion?.id ?? null,
       canvas: v?.canvas,
       course: num(v?.compassCourse, 1),
       warp: v?.tier,

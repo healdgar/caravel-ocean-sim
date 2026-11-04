@@ -68,8 +68,10 @@ function sampleCoastalClamped(heights,x,z,region=ISLAND){
     if(Math.abs(x-region.x)>half||Math.abs(z-region.z)>half){
       const cx=Math.max(region.x-half+1,Math.min(region.x+half-1,x));
       const cz=Math.max(region.z-half+1,Math.min(region.z+half-1,z));
-      const edgeH=terrainSample(heights,cx,cz,region);
-      if(edgeH>-1.5)return edgeH;
+      if(Math.hypot(x-cx,z-cz)<=250){
+        const edgeH=terrainSample(heights,cx,cz,region);
+        if(edgeH>-1.5)return edgeH;
+      }
     }
   }
   return terrainSample(heights,x,z,region);

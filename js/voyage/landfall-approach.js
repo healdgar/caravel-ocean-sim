@@ -319,12 +319,24 @@ export function scanForLand(probe, lat, lon, { eyeM = 20, maxKm = 160, ringStepK
 export function coastlineToward(probe, shipLat, shipLon, target, stepKm = 1.2) {
   const dist = greatCircleKm(shipLat, shipLon, target.lat, target.lon);
   const brg = initialBearing(shipLat, shipLon, target.lat, target.lon);
-  let last = { lat: shipLat, lon: shipLon };
+  let prevD = 0;
   for (let d = 0; d <= dist; d += stepKm) {
     const p = destinationPoint(shipLat, shipLon, brg, d);
     const h = probe.elevation(p.lat, p.lon);
-    if (h !== undefined && h > 0.5) return { lat: last.lat, lon: last.lon, distanceKm: Math.max(0, d - stepKm), bearing: brg };
-    last = p;
+    if (h !== undefined && h > 0.5) {
+      let lo = prevD, hi = d;
+      for (let i = 0; i < 6; i++) {
+        const mid = (lo + hi) * 0.5;
+        const mp = destinationPoint(shipLat, shipLon, brg, mid);
+        const mh = probe.elevation(mp.lat, mp.lon);
+        if (mh !== undefined && mh > 0.5) hi = mid;
+        else lo = mid;
+      }
+      const centerD = Math.min(dist, hi + 0.35);
+      const cp = destinationPoint(shipLat, shipLon, brg, centerD);
+      return { lat: cp.lat, lon: cp.lon, distanceKm: lo, bearing: brg };
+    }
+    prevD = d;
   }
   return { lat: target.lat, lon: target.lon, distanceKm: dist, bearing: brg };
 }
