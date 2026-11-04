@@ -14,6 +14,7 @@
 // ============================================================================
 
 import { modelDeck, modelDeckWidth, vesselHull } from './hull.js';
+import { remountVesselGuns } from './gunnery-state.js';
 import { applyPirateCrewAttire } from './crew.js';
 import { resolveIndigenousCultureRegion } from './coastal-world.js';
 import {
@@ -823,6 +824,7 @@ export function createDockingBoardingState(boat, options = {}) {
           for (const k of Object.keys(boat.damage.partDamage)) boat.damage.partDamage[k] = 0;
         }
       }
+      remountVesselGuns(boat);
       boat.rawMaterialsTonnes = (boat.rawMaterialsTonnes ?? 0) + 6;
       boat.provisionDays = Math.min(120, (boat.provisionDays ?? 60) + 14);
       if (voyage) {

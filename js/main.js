@@ -8,6 +8,7 @@ import { createSailingInstruments } from './instruments.js';
 import { controlIcon, createHelmControls } from './controls.js';
 import { createSceneAudio } from './audio.js';
 import { createShipGunnery, createPortGunnery, resolveVesselCollisions } from './gunnery-control.js';
+import { remountVesselGuns } from './gunnery-state.js';
 import { createGunneryControls } from './gunnery-ui.js';
 import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
@@ -1942,7 +1943,8 @@ async function main() {
     const name=document.createElement('strong'),detail=document.createElement('span');name.textContent=order.label;detail.textContent=order.detail;button.append(name,detail);
     button.onclick=()=>{
       if(crew?.order(boat,order.id)){
-        shipGuns.standDown();
+        // Sail hands leave the guns only while canvas needs them; the sea watch secures the battery.
+        if(order.id==='watch')shipGuns.standDown();
         commandFriendlyFleet(vessels,{type:'crew',id:order.id},{anchorEnv:anchorEnvironment});
         sceneAudio.order(order.id,{boat});
         if(['full','reduced','furl','transfer'].includes(order.id))sceneAudio.event?.({type:'sail-handling',order:order.id},boat);
@@ -2381,6 +2383,7 @@ async function main() {
             target.boat.damage.moraleShock=0;
             target.boat.damage.moraleState='steady';
           }
+          remountVesselGuns(target.boat);
         }
         const curDist=Math.hypot((target.boat.x??0)-boat.x,(target.boat.z??0)-boat.z);
         const shouldPlace=!keepPosition||wasDormant||!Number.isFinite(curDist)||curDist>1200;
@@ -2495,11 +2498,10 @@ async function main() {
         }
       },
       onCanvasOrder:id=>{
-        shipGuns.standDown();
-        const crewOrder=id==='full'?'full':id==='reefed'?'reduced':id==='storm'?'weather':id==='heave-to'?'furl':'watch';
+        const crewOrder=id==='full'?'full':id==='reduced'?'reduced':id==='storm'?'weather':id==='furl'?'furl':'watch';
         const savedTargets=SAIL_KEYS.map(k=>boat[k]);
         crew?.order(boat,crewOrder);
-        if(id==='working'||id==='heave-to'){
+        if(id==='hove'){
           for(let i=0;i<SAIL_KEYS.length;i++)boat[SAIL_KEYS[i]]=savedTargets[i];
         }
         commandFriendlyFleet(vessels,{type:'crew',id:crewOrder},{anchorEnv:anchorEnvironment});
@@ -2584,9 +2586,9 @@ async function main() {
           }
           if(Number.isFinite(uv.morale))v.morale=uv.morale;
         }
-        if(qs.has('canvas')&&['full','working','reefed','storm','heave-to'].includes(qs.get('canvas'))){
-          voyageCtl.orderCanvas(qs.get('canvas'));
-        }
+        // Older shared links carry the retired reefed/heave-to/working ids.
+        const canvasId={reefed:'reduced','heave-to':'hove',working:'reduced'}[qs.get('canvas')]??qs.get('canvas');
+        if(['full','reduced','storm','hove','furl'].includes(canvasId))voyageCtl.orderCanvas(canvasId);
         if(qs.has('course')&&Number.isFinite(Number(qs.get('course')))){
           const voyageExplicitlyActive=qs.get('voyage')==='1'||qs.get('voyage')==='resume'||urlGameState?.voyage?.active===true;
           if(voyageExplicitlyActive&&(qs.get('autopilot')==='1'||urlGameState?.voyage?.autopilot)){
@@ -2613,7 +2615,7 @@ async function main() {
           Object.assign(boat.damage.crewCasualties,ud.casualties);
         }
       }
-      if(!BROADSIDE_SCENARIO&&boat.propulsion==='sail'&&LAND_STAGE!=='dock'&&!boat.damage?.sunk&&qs.get('canvas')!=='heave-to'){
+      if(!BROADSIDE_SCENARIO&&boat.propulsion==='sail'&&LAND_STAGE!=='dock'&&!boat.damage?.sunk&&!['heave-to','hove'].includes(qs.get('canvas'))){
         const totalCanvas=(boat.sailFore??0)+(boat.sailMain??0)+(boat.sailMizzen??0);
         if(totalCanvas>0.15&&P.windSpeed>0.5&&(!qs.has('boatSpeed')||Number(qs.get('boatSpeed'))>0)){
           const savedR=boat.roll,savedP=boat.pitch;
@@ -2795,7 +2797,7 @@ async function main() {
     const input=document.createElement('input');Object.assign(input,{type:'range',min:0,max:100,step:5,value:boat[key]*100,id:'boat-'+key});
     input.setAttribute('aria-label',name.textContent);
     const output=document.createElement('output');output.textContent=Math.round(boat[key]*100)+'%';
-    input.addEventListener('input',()=>{shipGuns.standDown();boat[key]=Number(input.value)/100;});
+    input.addEventListener('input',()=>{boat[key]=Number(input.value)/100;});
     row.append(name,input,output);sailControls.append(row);sailInputs.push({input,output});
   }
   const sailStatus=document.createElement('p');sailStatus.id='sail-status';sailControls.append(sailStatus);
@@ -2852,10 +2854,9 @@ async function main() {
   propulsionInput.addEventListener('change',()=>{boat.propulsion=propulsionInput.value;showPropulsionControls();});
   helm=createHelmControls(boat,value=>{
     const order=value===1?'full':value===0?'furl':'reduced';
-    shipGuns.standDown();
     if(!crew?.order(boat,order)){boat.propulsion='sail';for(const key of SAIL_KEYS)boat[key]=value;}
     if(voyageCtl?.voyage){
-      const vCanvas=value===1?'full':value===0?'heave-to':'reefed';
+      const vCanvas=value===1?'full':value===0?'furl':'reduced';
       voyageCtl.voyage.canvas=vCanvas;
       const vSel=voyageCtl.hud?.querySelector?.('select');
       if(vSel)vSel.value=vCanvas;

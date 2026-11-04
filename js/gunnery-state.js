@@ -34,6 +34,19 @@ function gunneryRandom(state){
   return state.seed/4294967296;
 }
 function gunnerySide(side){return side==='port'||side===-1?'port':side==='starboard'||side===1?'starboard':null;}
+// A gun is offline when the vessel scale omits it or battle damage has dismounted
+// it (carriage smashed / breeching parted). Offline guns never load, queue or fire.
+export function gunneryOffline(gun){return Boolean(gun?.disabledByScale||gun?.dismounted);}
+// Shipwrights or a fresh vessel put every dismounted gun back on its carriage, run in and unloaded.
+export function remountVesselGuns(boat){
+  let count=0;
+  for(const gun of boat?.gunnery?.guns??[]){
+    if(!gun.dismounted)continue;
+    gun.dismounted=false;gun.loading=false;gun.queued=false;gun.stage='secured';gun.elapsed=0;gun.progress=0;gun.offset=gun.recoilLength;gun.recoil=0;count++;
+  }
+  if(boat?.damage){boat.damage.dismountedGuns=0;boat.damage.dismountedPorts?.clear?.();}
+  return count;
+}
 
 // gunDefs retain their metadata (including id, deck and attachment). A caller
 // supplies muzzle positions/directions after vessel scale and rigid rotation.
@@ -77,7 +90,7 @@ export function prepareGunnery(state,side){
   side=gunnerySide(side);if(!side)return 0;
   let count=0;
   for(const gun of state.guns){
-    if(gun.disabledByScale||gun.side!==side||gun.loading||gun.stage==='ready'||gun.queued)continue;
+    if(gunneryOffline(gun)||gun.side!==side||gun.loading||gun.stage==='ready'||gun.queued)continue;
     gun.loading=true;gun.lastBlocked=null;count++;
     if(gun.stage!=='recoil'){gun.stage='swab';gun.elapsed=0;gun.progress=0;gun.offset=gun.recoilLength;gun.recoil=0;}
   }
@@ -88,7 +101,7 @@ export function prepareGunnery(state,side){
 // is authored, representing independent gun captains firing a rolling broadside.
 export function fireGunnery(state,side,{interval=.14,ammo=null}={}){
   side=gunnerySide(side);if(!side)return 0;
-  const ready=state.guns.filter(g=>!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued);
+  const ready=state.guns.filter(g=>!gunneryOffline(g)&&g.side===side&&g.stage==='ready'&&!g.queued);
   interval=gunneryClamp(gunneryFinite(interval,.14),.04,.6);
   const shotAmmo=GUNNERY_AMMO_TYPES.includes(ammo)?ammo:(state.ammo??'round');
   ready.forEach((gun,i)=>{gun.queued=true;gun.lastBlocked=null;state.queue.push({gun,time:state.time+i*interval,ammo:shotAmmo});});
@@ -97,16 +110,17 @@ export function fireGunnery(state,side,{interval=.14,ammo=null}={}){
 
 export function gunnerySummary(state,side){
   const wanted=gunnerySide(side);
-  let total=0,ready=0,queued=0,loading=0,spent=0;
+  let total=0,ready=0,queued=0,loading=0,spent=0,dismounted=0;
   for(const g of state.guns){
     if(g.disabledByScale||(wanted&&g.side!==wanted))continue;
+    if(g.dismounted){dismounted++;continue;}
     total++;
     if(g.stage==='ready'&&!g.queued)ready++;
     if(g.queued)queued++;
     if(g.loading)loading++;
     if(g.stage==='spent'||g.stage==='recoil')spent++;
   }
-  return {total,ready,queued,loading,spent};
+  return {total,ready,queued,loading,spent,dismounted};
 }
 
 function gunneryEmit(state,environment,event){
@@ -115,7 +129,12 @@ function gunneryEmit(state,environment,event){
   environment.onEvent?.(event);
 }
 function gunneryAdvanceGun(state,gun,dt,time,environment){
-  if(gun.disabledByScale)return;
+  if(gunneryOffline(gun)){
+    gun.loading=false;gun.queued=false;
+    if(gun.dismounted)gun.stage='dismounted';
+    else if(gun.stage==='ready'||GUNNERY_DRILL.includes(gun.stage))gun.stage='secured';
+    return;
+  }
   if(gun.stage==='recoil'){
     const previous=gun.elapsed;gun.elapsed=Math.min(gun.recoilDuration,gun.elapsed+dt);gun.progress=gun.elapsed/gun.recoilDuration;
     // Fast initial movement followed by arrest by the breeching. No repeated
@@ -157,7 +176,7 @@ function gunneryWaterHeight(environment,x,z,time){
 function gunneryFireQueued(state,environment,end){
   while(state.queue.length&&state.queue[0].time<=end+1e-10){
     const queued=state.queue.shift(),gun=queued.gun;gun.queued=false;
-    if(gun.disabledByScale||gun.stage!=='ready')continue;
+    if(gunneryOffline(gun)||gun.stage!=='ready')continue;
     let blocked=state.projectiles.length>=state.maxProjectiles?'capacity':null;
     const muzzle=environment.muzzle?.(gun,queued.time);
     const position=gunneryVector(muzzle?.position,[NaN,NaN,NaN]);

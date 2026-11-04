@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-import { createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact, GUNNERY_AMMO_TYPES } from './gunnery-state.js';
+import { createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact, gunneryOffline, GUNNERY_AMMO_TYPES } from './gunnery-state.js';
 import { createGunDefinitions, createNavalBattleGunDefinitions, gunMuzzlePose, gunElevationRange, gunTraverseRange } from './gunnery-models.js';
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
 import { boatRotate, boatHydrodynamics, boatForwardSpeed } from './boat.js';
@@ -1368,7 +1368,8 @@ export function applyShipImpactDamage(targetBoat, event) {
 
     // Stage 2: Direct cannon hits & interior gun-deck penetration.
     // Check if the shot struck an entry-side cannon or, after penetrating, an opposite-side cannon.
-    const targetGuns = targetBoat.gunnery?.state?.guns;
+    // boat.gunnery is the gun state itself on live vessels.
+    const targetGuns = targetBoat.gunnery?.guns ?? targetBoat.gunnery?.state?.guns;
     if (Array.isArray(targetGuns) && targetGuns.length > 0) {
       for (const g of targetGuns) {
         if (g.dismounted) continue;
@@ -3921,7 +3922,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     let count=0;
     for(const g of state.guns){
-      if(g.disabledByScale||g.side!==side)continue;
+      if(gunneryOffline(g)||g.side!==side)continue;
       count++;
       if(g.stage!=='ready'||!attended(g)||muzzleBlock(g,gunMuzzlePose(g,boat)))return false;
     }
@@ -3931,7 +3932,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     syncScaledGuns();
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     for(const g of state.guns){
-      if(!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
+      if(!gunneryOffline(g)&&g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
     }
     return false;
   };
@@ -3992,7 +3993,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       if(!sideValid(side))return false;
       pending=null;state.queue.length=0;
       boat.gunnerySide=side;prepared=true;lastReady=true;
-      for(const g of state.guns)if(!g.disabledByScale&&g.side===side){
+      for(const g of state.guns)if(!gunneryOffline(g)&&g.side===side){
         g.stage='ready';g.loading=false;g.progress=1;g.offset=0;g.queued=false;
       }
       return true;
@@ -4052,10 +4053,13 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
             }
             pending.stage='steady';
           }
-          if(pending.stage==='steady'){
+          // Every gun in the order was lost after it was given: nothing can ever
+          // answer "give fire", and a held order would block all further orders.
+          if(pending.stage==='steady'&&gunnerySummary(state,pending.side).ready===0&&!state.queue.length)pending=null;
+          if(pending?.stage==='steady'){
             let readyCount=0,clearCount=0,allReadyClear=true;
             for(const g of state.guns){
-              if(g.side!==pending.side||g.stage!=='ready')continue;
+              if(g.side!==pending.side||g.stage!=='ready'||gunneryOffline(g))continue;
               if(!g.queued)readyCount++;
               if(attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))clearCount++;
               else allReadyClear=false;
@@ -4119,7 +4123,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       const s=gunnerySummary(state,boat.gunnerySide);
       let allAttended=true;
       if(prepared&&s.total>0&&s.ready===s.total){
-        for(const g of state.guns)if(g.side===boat.gunnerySide&&!attended(g)){allAttended=false;break;}
+        for(const g of state.guns)if(g.side===boat.gunnerySide&&!gunneryOffline(g)&&!attended(g)){allAttended=false;break;}
       }else allAttended=false;
       const ready=prepared&&s.total>0&&s.ready===s.total&&allAttended;
       if(ready&&!lastReady)onEvent({type:'ready',position:[boat.x,boat.heave+3,boat.z]});
@@ -4135,10 +4139,28 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       if(boat.magazine?.exploded)return 'Magazine exploded';
       if(boat.magazine&&boat.magazine.powderKg<=0)return 'Powder exhausted';
       for(const gun of state.guns){
-        if(gun.side!==side)continue;
+        if(gun.side!==side||gunneryOffline(gun))continue;
         if(!attended(gun))return 'Manning guns';
         const reason=muzzleBlock(gun,gunMuzzlePose(gun,boat));if(reason)return reason;
       }return null;
+    },
+    // Why a battery is not progressing through the loading drill (or cannot be
+    // loaded at all). Surfaced in the UI so stalls are never silent.
+    stallReason(side){
+      if(!sideValid(side))return null;
+      if(boat.damage?.sunk)return 'Foundering';
+      if(boat.damage?.surrendered)return 'Colors struck (surrendered)';
+      if(boat.magazine?.exploded)return 'Magazine exploded';
+      if(boat.magazine&&boat.magazine.powderKg<=0)return 'Powder exhausted';
+      const s=gunnerySummary(state,side);
+      if(s.total===0&&s.dismounted>0)return `All ${s.dismounted} guns dismounted`;
+      // Loaded guns the captain has stood down cannot fire until prepared again.
+      if(boat.gunnerySide!==side)return s.ready>0?'Stood down':null;
+      let unmanned=0;
+      for(const g of state.guns)if(g.side===side&&!gunneryOffline(g)&&(g.loading||g.stage==='ready')&&!attended(g))unmanned++;
+      if(unmanned)return boat.gunneryCrewNote??`${unmanned} gun${unmanned>1?'s':''} awaiting crew`;
+      if(s.spent>0&&s.loading===0&&!autoReload&&!fireAtWillMode)return 'Order reload';
+      return null;
     },
     get selectedSide(){return boat.gunnerySide??null;},
     get ordered(){return pending?.side??null;},

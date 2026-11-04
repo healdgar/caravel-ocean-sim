@@ -12,6 +12,14 @@ Victory’s stages are wet sponge, load, ram, run out, prime and ready. Niña’
 
 Victory's twelve visible sailors represent a watch, not her entire complement. A small selection of weather-deck teams demonstrate the drill; the interior batteries and remaining teams are abstracted. This release does not animate hundreds of gun-deck sailors or reproduce every officer, powder runner, vent thumbstall and safety step of the full historical drill. Reload durations (33 seconds of attended work) and the rolling broadside interval (0.14 seconds) are gameplay settings, not measured historical timings.
 
+### Stations under battle damage and sail work
+
+Sail hands with canvas to set or take in leave the guns for the sheets and return afterward; other hands fill their stations. Canvas lost to mast damage needs no hands and moves nobody. Lookout and hatch work wait while guns are manned. A sail order no longer stands the battery down; only the sea watch order, Stand down, surrender and similar orders do, and loaded guns then read "Stood down" until prepared again.
+
+A dismounted gun (`gun.dismounted`) stops loading and firing, cancels any queued shot, leaves the battery's `total` and is counted separately. Its team moves to the next mounted weather-deck gun. A broadside order whose guns are all lost stands down rather than blocking later orders. Full repair and recycling a dormant vessel remount guns through `remountVesselGuns`.
+
+A station no hand can reach passes to abstract crew after about five seconds of failed routes, or once a hand has spent `30 s + vessel length` walking to it. Changing battery or issuing a new captain's order retries the visible team. The helm and gunnery panels report what holds a battery (`stallReason`) or canvas (`boat.sailHoldReason`) in plain language.
+
 ## Flight, recoil and water contact
 
 Solid cast-iron round shot inherits the muzzle's full physical velocity, including forward motion, leeway, heave, yaw, pitch and roll. The muzzle follows the rendered barrel, and heel changes its actual firing direction. Flight integrates gravity and quadratic drag relative to ambient wind at 120 Hz. Dispersion is seeded and small. There are no glowing tracers, guided shots or explosive cannonballs.

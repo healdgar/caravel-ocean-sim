@@ -8,7 +8,7 @@ import {boatHydrodynamics} from '../js/boat.js';
 import {createFollower,steerFollower,stepVesselCombatAI} from '../js/follower.js';
 import {createCompany,stepCompany} from '../js/crew.js';
 import {SHIP_COLORS,setVesselColors,strikeVesselColors,buildShipColorsGeometry} from '../js/ship-colors.js';
-import {advanceSails} from '../js/sailing.js';
+import {advanceSails,sailingState,sailMastCap,sailCanvasTarget,sailLosingCanvas} from '../js/sailing.js';
 import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
 import {bakeBuildingImpactDeformations} from '../js/part-assembly.js';
 function fixture(options={}){
@@ -1113,6 +1113,68 @@ test('full-watch crew mans, loads, fires, and reloads all guns from Quarters/Pre
  }
 });
 
+test('a direct hit dismounts the struck gun on a live vessel and silences it',()=>{
+ const target={id:'target',modelId:'victory',length:69,beam:15.8,x:-55,z:0,heave:0,heading:0,roll:0,pitch:0,sailMain:1};
+ target.hydrodynamics=boatHydrodynamics(69,15.8);
+ const guns=createShipGunnery(target);target.gunneryAttendance=new Set(guns.state.guns.map(g=>g.id));
+ const source={id:'player',modelId:'victory',x:0,z:0,heave:0,heading:0,pitch:0,roll:0};
+ const hit=sweepShipSegment([-20,2.24,0],[-75,2.24,0],.08,target,source);assert.ok(hit,'shot meets the lower gun deck');
+ applyShipImpactDamage(target,{...hit,velocity:[-435,-6,0],mass:14.5,energy:.5*14.5*435*435});
+ const lost=guns.state.guns.filter(g=>g.dismounted);
+ assert.equal(lost.length,1,'one real gun is flagged, not merely counted');
+ assert.equal(target.damage.dismountedGuns,1);
+ const side=lost[0].side,before=guns.state.guns.filter(g=>g.side===side).length;
+ assert.deepEqual([guns.summary(side).total,guns.summary(side).dismounted],[before-1,1]);
+});
 
+test('an order whose whole battery is lost stands down and leaves later orders free',()=>{
+ const {boat,guns,orders}=fixture();
+ guns.readyAtQuarters('port');assert.equal(guns.fire('port'),true);assert.equal(guns.ordered,'port');
+ for(const g of guns.state.guns)if(g.side==='port')g.dismounted=true;
+ // A live sea never reaches the flat-calm shortcut that would otherwise clear the order.
+ boat.roll=.08;boat.rollVelocity=.1;
+ advance(guns,GUNNERY_ORDER_SECONDS['fire-port']+1);
+ assert.equal(guns.ordered,null,'no gun can answer, so no order remains');
+ assert.equal(guns.stallReason('port'),'All 2 guns dismounted');
+ assert.equal(guns.blockedReason('port'),null,'dismounted guns are not awaiting crew');
+ assert.equal(guns.canFire('port'),false);
+ assert.equal(guns.prepare('starboard'),true,'the other battery can still be ordered');
+ assert.equal(orders.at(-1),'prepare');
+});
 
+test('stall reasons name what actually holds the battery',()=>{
+ const {boat,guns}=fixture();
+ assert.equal(guns.stallReason('bow'),null);
+ guns.prepare('port');boat.gunneryAttendance.clear();
+ assert.equal(guns.stallReason('port'),'2 guns awaiting crew');
+ boat.gunneryCrewNote='Hands at the sheets · guns wait for crew';
+ assert.equal(guns.stallReason('port'),boat.gunneryCrewNote);
+ assert.equal(guns.stallReason('starboard'),null,'an unselected, unloaded battery is not stalled');
+ boat.gunneryCrewNote=null;boat.gunneryAttendance=new Set(guns.state.guns.map(g=>g.id));
+ advance(guns,40);assert.equal(guns.stallReason('port'),null,'ready and manned');
+ guns.standDown();assert.equal(guns.stallReason('port'),'Stood down','loaded but not fireable until prepared');
+ assert.equal(guns.canFire('port'),false);guns.prepare('port');assert.equal(guns.stallReason('port'),null);
+ guns.state.guns[0].dismounted=true;advance(guns,.1);
+ assert.equal(guns.summary('port').ready,1);assert.equal(guns.canFire('port'),true,'the mounted gun still fires a full order');
+ assert.equal(guns.fire('port'),true);advance(guns,GUNNERY_ORDER_SECONDS['fire-port']+1);
+ advance(guns,3);assert.equal(guns.stallReason('port'),'Order reload');
+ boat.magazine.powderKg=0;assert.equal(guns.stallReason('port'),'Powder exhausted');
+ boat.damage.surrendered=true;assert.equal(guns.stallReason('port'),'Colors struck (surrendered)');
+ boat.damage.sunk=true;assert.equal(guns.stallReason('port'),'Foundering');
+});
 
+test('the shared canvas limit matches where damaged rigs actually settle',()=>{
+ const boat={modelId:'nina',length:20,beam:6,heading:0,surgeVelocity:0,leewayVelocity:0,sailFore:1,sailMain:1,sailMizzen:1,
+  crewSailRate:new Float64Array([1,1,1]),damage:{mastIntegrity:{fore:1,main:.8,mizzen:.5},mastState:{fore:0,main:1,mizzen:2}}};
+ assert.deepEqual([0,1,2].map(i=>+sailMastCap(boat,i).toFixed(3)),[1,.336,0]);
+ assert.equal(sailCanvasTarget(boat,0),1);
+ assert.ok(Math.abs(sailCanvasTarget(boat,1)-.336*(.25+.75*.336))<1e-12,'max reported to the player includes the poor set of a damaged spar');
+ assert.equal(sailCanvasTarget(boat,2),0);
+ assert.ok(Math.abs(sailCanvasTarget(boat,1,.1)-.1*(.25+.75*.336))<1e-12,'a smaller order is honoured');
+ for(let i=0;i<4000;i++)advanceSails(boat,.05,8,90);
+ const set=sailingState(boat).set;
+ for(const i of[0,1,2])assert.ok(Math.abs(set[i]-sailCanvasTarget(boat,i))<1e-3,'mast '+i+' settles on its limit: '+set[i]);
+ assert.equal(sailLosingCanvas(boat,0,1),false,'a sound mast never sheds canvas');
+ assert.equal(sailLosingCanvas(boat,1,.5),true,'over-limit canvas on a damaged mast carries away');
+ assert.equal(sailLosingCanvas(boat,1,.01),false,'under-limit canvas still needs hands to set');
+});

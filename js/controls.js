@@ -1,4 +1,4 @@
-import { SAIL_KEYS, sailingState } from './sailing.js';
+import { SAIL_KEYS, sailingState, sailCanvasTarget } from './sailing.js';
 import {getShipModel} from './ship-models.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {deckStationLabel} from './boat.js';
@@ -398,8 +398,26 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     slider.setAttribute('aria-valuetext',angle.textContent);
     const rig=sailingState(boat).rig,deployed=active.length?active.reduce((sum,i)=>sum+rig[i].deployed,0)/active.length:0;
     const targetSail=boat[SAIL_KEYS[active[0]]]??0,uniform=active.every(i=>Math.abs(boat[SAIL_KEYS[i]]-targetSail)<.001);
-    const working=active.some(i=>Math.abs(boat[SAIL_KEYS[i]]-rig[i].deployed)>.015);
-    canvas.textContent=boat.propulsion!=='sail'?'Set-speed mode':working?`Setting · ${Math.round(deployed*100)}%`:uniform&&targetSail===1?'Full canvas':uniform&&targetSail===0?'Furled':inBattleState&&deployed>=0.45&&deployed<=0.6?`Battle · ${Math.round(deployed*100)}%`:`${Math.round(deployed*100)}% canvas`;
+    // Compare against the canvas the rig can actually carry: a damaged or sprung
+    // mast caps the setting, so "Setting…" must not spin forever in that case.
+    const working=active.some(i=>Math.abs(sailCanvasTarget(boat,i)-rig[i].deployed)>.015);
+    const canvasText=boat.propulsion!=='sail'?'Set-speed mode':working?`Setting · ${Math.round(deployed*100)}%`:uniform&&targetSail===1?'Full canvas':uniform&&targetSail===0?'Furled':inBattleState&&deployed>=0.45&&deployed<=0.6?`Battle · ${Math.round(deployed*100)}%`:`${Math.round(deployed*100)}% canvas`;
+    // Explain why canvas is not answering an order (crew busy/bracing, damaged masts).
+    const holdNotes=[];
+    if(boat.propulsion==='sail'){
+      const dmg=boat.damage,names=['Fore','Main','Mizzen'];
+      for(const i of active){
+        const g=['fore','main','mizzen'][i],state=dmg?.mastState?.[g]??0,integ=dmg?.mastIntegrity?.[g]??1,most=Math.round(sailCanvasTarget(boat,i,1)*100);
+        if(dmg?.sunk)break;
+        if(state>=2||most===0)holdNotes.push(`${names[i]}mast shot away`);
+        else if(state===1)holdNotes.push(`${names[i]}mast sprung · max ${most}%`);
+        else if(integ<.98)holdNotes.push(`${names[i]}mast damaged · max ${most}%`);
+      }
+      if(working&&boat.sailHoldReason)holdNotes.unshift(boat.sailHoldReason);
+    }
+    const canvasLine=holdNotes.length?`${canvasText} · ${holdNotes[0]}`:canvasText,holdText=holdNotes.join(' · ');
+    if(canvas.textContent!==canvasLine)canvas.textContent=canvasLine;
+    if(canvas.title!==holdText)canvas.title=holdText;
     for(const b of buttons)b.setAttribute('aria-pressed',String(boat.propulsion==='sail'&&uniform&&Math.abs(Number(b.dataset.sail)-targetSail)<.001));
     if(rowingOutput){const effort=boat.rowingEffort??0;rowingOutput.textContent=effort===0?'Rest':Math.round(effort*100)+'% effort';for(const b of rowButtons)b.setAttribute('aria-pressed',String(boat.propulsion==='sail'&&Math.abs(Number(b.dataset.rowing)-effort)<.001));}
 
@@ -508,14 +526,19 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
         const s=gunnery.summary(b.side),ordered=gunnery.ordered===b.side;
         const rs=ordered?gunnery.rollStatus?.(b.side):null;
         const held=s.ready===s.total?gunnery.blockedReason(b.side):null;
+        const stall=gunnery.stallReason?.(b.side)??null;
+        const lostTxt=s.dismounted?` · ${s.dismounted} dismounted`:'';
         const statusTxt=ordered
           ?(rs?.stage==='firing'?`Give fire!`:rs?.stage==='steady'?`Steady (${formatHelmElevation(rs.worldElevation)})`:`Laying (${formatHelmElevation(rs?.targetElevation??0)})`)
           :s.queued?`${s.queued} firing`
-          :s.loading?`${s.ready}/${s.total} · ${s.loading} load`
-          :s.ready?`${s.ready}/${s.total} ready${held?' · held':''}`
-          :s.spent?`${s.spent} spent`
-          :`${s.total} secured`;
+          :(s.total===0&&stall)?stall
+          :s.loading?`${s.ready}/${s.total} · ${s.loading} load${stall?` · ${stall}`:''}${lostTxt}`
+          :s.ready?`${s.ready}/${s.total} ready${held?' · held':stall?` · ${stall}`:''}${lostTxt}`
+          :s.spent?`${s.spent} spent${stall?` · ${stall}`:''}${lostTxt}`
+          :`${s.total} secured${lostTxt}`;
         if(b.status.textContent!==statusTxt)b.status.textContent=statusTxt;
+        const statusTitle=[held,stall,s.dismounted?`${s.dismounted} gun${s.dismounted>1?'s':''} dismounted by enemy fire`:null].filter(Boolean).join(' · ');
+        if(b.status.title!==statusTitle)b.status.title=statusTitle;
         const total=Math.max(1,s.total);
         const readyPct=Math.round((s.ready/total)*100);
         const loadPct=Math.round((s.loading/total)*100);

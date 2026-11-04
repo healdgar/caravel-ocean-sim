@@ -154,7 +154,9 @@ export function createGunneryControls(parent,gunnery){
         :rs?`Laying quoins (${fmtDeg(rs.targetElevation)}) · ready & steady`
         :'Captain’s order · stand clear';
       const held=s.ready===s.total?gunnery.blockedReason(r.side):null;
-      const text=ordered?orderText:s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
+      const stall=gunnery.stallReason?.(r.side)??null;
+      const lost=s.dismounted?` · ${s.dismounted} dismounted`:'';
+      const text=ordered?orderText:s.queued?`${s.queued} guns firing`:(s.total===0&&stall)?stall:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading${stall?' · '+stall:''}${lost}`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:stall?' · '+stall:''}${lost}`:s.spent?`${s.spent} discharged · ${stall??'prepare to reload'}${lost}`:`${s.total} guns secured${lost}`;
       if(r.status.textContent!==text)r.status.textContent=text;
       const canFull=gunnery.canFire(r.side);
       const canPartial=gunnery.canFireLoaded?.(r.side)??canFull;
