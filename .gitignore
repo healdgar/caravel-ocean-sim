@@ -1,4 +1,7 @@
 node_modules/
+# Single-file bundles are built locally and released through npm run deploy.
+ocean.html
+ocean.min.html
 # local screenshot captures written by server.mjs (/__shot) and test shots
 shots/
 # local tooling
